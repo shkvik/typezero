@@ -1,15 +1,14 @@
 // Integer arithmetic wraps around on overflow at run time (in constants it is
 // an error, see errors/constants.tz).
-let big: int = 2147483647
-// expect-warning: 'big + 1' may overflow int: it may reach 2147483648
+let big: int = 9223372036854775807
+// expect-warning: 'big + 1' may overflow int: it may reach 9223372036854775808
 console.log(big + 1)
-let small: int = -2147483648
-// expect-warning: 'small - 1' may overflow int
+let small: int = -9223372036854775808
 console.log(small - 1)
 
 // Integer division truncates; the remainder takes the sign of the dividend.
 console.log(7 / 2, -7 / 2, 7 % 3, -7 % 3)
-let min: int = -2147483648
+let min: int = -9223372036854775808
 let minusOne: int = -1
 // expect-warning: 'min / minusOne' may overflow int
 console.log(min / minusOne, min % minusOne)
@@ -17,12 +16,12 @@ console.log(min / minusOne, min % minusOne)
 // Literals take the type the context expects.
 let half: double = 1 / 2
 console.log(half)
-let wide: long = 2147483647 + 1
+let wide: int = 2147483647 + 1
 console.log(wide)
 
-// int widens to long and double on its own.
+// int is 64 bits; it widens to double on its own.
 let n: int = 10
-let l: long = 3000000000
+let l: int = 3000000000
 console.log(n + l)
 let x: double = n * 1.5
 console.log(x)

@@ -8,6 +8,7 @@
 #include "compiler/lower/function_frame/function_frame.h"
 #include "compiler/lower/module_builder/module_builder.h"
 #include "compiler/lower/types/union_member_lowerer/union_member_lowerer.h"
+#include "compiler/lower/values/number_lowerer/number_lowerer.h"
 #include "compiler/lower/values/string_lowerer/string_lowerer.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/IR/Intrinsics.h"
@@ -61,12 +62,6 @@ llvm::Value *BinaryLowerer::emitBinary(BinaryExpr *bin) {
   case BinaryOp::Gt:
   case BinaryOp::Ge:
     return emitComparison(bin->op, lhs, rhs, bin->lhs->type);
-  case BinaryOp::UShr:
-    if (bin->type != bin->lhs->type) {
-      return lowering_.builder_.CreateZExt(emitArithmetic(bin->op, lhs, rhs, bin->lhs->type),
-                                           lowering_.moduleBuilder().lower(bin->type));
-    }
-    return emitArithmetic(bin->op, lhs, rhs, bin->type);
   default:
     return emitArithmetic(bin->op, lhs, rhs, bin->type);
   }
@@ -77,16 +72,24 @@ llvm::Value *BinaryLowerer::emitArithmetic(BinaryOp op, llvm::Value *lhs, llvm::
   bool isFloat = type->isFloat();
   bool bitwise = op == BinaryOp::BitAnd || op == BinaryOp::BitOr || op == BinaryOp::BitXor ||
                  op == BinaryOp::Shl || op == BinaryOp::Shr || op == BinaryOp::UShr;
+  llvm::IRBuilder<> &b = lowering_.builder_;
   if (isFloat && bitwise) {
-    llvm::Value *result = emitArithmetic(
-        op, lowering_.builder_.CreateCall(lowering_.rt_.toInt32, {lhs}), rhs, Type::intTy());
-    return op == BinaryOp::UShr ? lowering_.builder_.CreateUIToFP(result, lhs->getType())
-                                : lowering_.builder_.CreateSIToFP(result, lhs->getType());
+    llvm::Value *whole = b.CreateSExt(b.CreateCall(lowering_.rt_.toInt32, {lhs}), b.getInt64Ty());
+    llvm::Value *result = emitArithmetic(op, whole, rhs, Type::intTy());
+    return b.CreateSIToFP(result, lhs->getType());
   }
-  if (bitwise && lhs->getType() != rhs->getType()) {
-    llvm::Value *result =
-        emitArithmetic(op, lowering_.builder_.CreateTrunc(lhs, rhs->getType()), rhs, Type::intTy());
-    return lowering_.builder_.CreateSExt(result, lhs->getType());
+  if (bitwise && type->isInt()) {
+    llvm::Type *i32 = b.getInt32Ty();
+    llvm::Value *l = b.CreateTrunc(lhs, i32), *r = b.CreateTrunc(rhs, i32);
+    llvm::Value *count = b.CreateAnd(r, b.getInt32(31));
+    llvm::Value *result = op == BinaryOp::BitAnd   ? b.CreateAnd(l, r)
+                          : op == BinaryOp::BitOr  ? b.CreateOr(l, r)
+                          : op == BinaryOp::BitXor ? b.CreateXor(l, r)
+                          : op == BinaryOp::Shl    ? b.CreateShl(l, count)
+                          : op == BinaryOp::Shr    ? b.CreateAShr(l, count)
+                                                   : b.CreateLShr(l, count);
+    return op == BinaryOp::UShr ? b.CreateZExt(result, lhs->getType())
+                                : b.CreateSExt(result, lhs->getType());
   }
   switch (op) {
   case BinaryOp::Add:
@@ -99,17 +102,16 @@ llvm::Value *BinaryLowerer::emitArithmetic(BinaryOp op, llvm::Value *lhs, llvm::
     return isFloat ? lowering_.builder_.CreateFMul(lhs, rhs)
                    : lowering_.builder_.CreateMul(lhs, rhs);
   case BinaryOp::Div:
-    return isFloat ? lowering_.builder_.CreateFDiv(lhs, rhs) : emitIntDivRem(op, lhs, rhs);
+    return isFloat ? lowering_.builder_.CreateFDiv(lhs, rhs) : emitIntDivRem(op, lhs, rhs, type);
   case BinaryOp::Rem:
-    return isFloat ? lowering_.builder_.CreateFRem(lhs, rhs) : emitIntDivRem(op, lhs, rhs);
+    return isFloat ? lowering_.builder_.CreateFRem(lhs, rhs) : emitIntDivRem(op, lhs, rhs, type);
   case BinaryOp::Pow: {
     if (isFloat) {
       return lowering_.builder_.CreateCall(lowering_.rt_.mathPow, {lhs, rhs});
     }
-    llvm::Type *i64 = lowering_.builder_.getInt64Ty();
     llvm::Value *result = lowering_.builder_.CreateCall(
         lowering_.rt_.mathPowLong,
-        {lowering_.builder_.CreateSExt(lhs, i64), lowering_.builder_.CreateSExt(rhs, i64)});
+        {lowering_.numberLowerer().toI64(lhs, type), lowering_.numberLowerer().toI64(rhs, type)});
     return lowering_.builder_.CreateTrunc(result, lhs->getType());
   }
   case BinaryOp::BitAnd:
@@ -126,7 +128,7 @@ llvm::Value *BinaryLowerer::emitArithmetic(BinaryOp op, llvm::Value *lhs, llvm::
     if (op == BinaryOp::Shl) {
       return lowering_.builder_.CreateShl(lhs, count);
     }
-    if (op == BinaryOp::Shr) {
+    if (op == BinaryOp::Shr && !type->isUnsigned()) {
       return lowering_.builder_.CreateAShr(lhs, count);
     }
     return lowering_.builder_.CreateLShr(lhs, count);
@@ -157,15 +159,20 @@ llvm::Value *BinaryLowerer::emitComparison(BinaryOp op, llvm::Value *lhs, llvm::
       break;
     }
   } else {
+    bool u = type->isInteger() && type->isUnsigned();
     switch (op) {
     case BinaryOp::Lt:
-      return lowering_.builder_.CreateICmpSLT(lhs, rhs);
+      return u ? lowering_.builder_.CreateICmpULT(lhs, rhs)
+               : lowering_.builder_.CreateICmpSLT(lhs, rhs);
     case BinaryOp::Le:
-      return lowering_.builder_.CreateICmpSLE(lhs, rhs);
+      return u ? lowering_.builder_.CreateICmpULE(lhs, rhs)
+               : lowering_.builder_.CreateICmpSLE(lhs, rhs);
     case BinaryOp::Gt:
-      return lowering_.builder_.CreateICmpSGT(lhs, rhs);
+      return u ? lowering_.builder_.CreateICmpUGT(lhs, rhs)
+               : lowering_.builder_.CreateICmpSGT(lhs, rhs);
     case BinaryOp::Ge:
-      return lowering_.builder_.CreateICmpSGE(lhs, rhs);
+      return u ? lowering_.builder_.CreateICmpUGE(lhs, rhs)
+               : lowering_.builder_.CreateICmpSGE(lhs, rhs);
     case BinaryOp::Eq:
       return lowering_.builder_.CreateICmpEQ(lhs, rhs);
     case BinaryOp::Ne:
@@ -177,16 +184,20 @@ llvm::Value *BinaryLowerer::emitComparison(BinaryOp op, llvm::Value *lhs, llvm::
   llvm_unreachable("not a comparison operator");
 }
 
-llvm::Value *BinaryLowerer::emitIntDivRem(BinaryOp op, llvm::Value *lhs, llvm::Value *rhs) {
+llvm::Value *BinaryLowerer::emitIntDivRem(BinaryOp op, llvm::Value *lhs, llvm::Value *rhs,
+                                          const Type *type) {
   bool isRem = op == BinaryOp::Rem;
+  bool u = type->isUnsigned();
   if (auto *divisor = dyn_cast<llvm::ConstantInt>(rhs);
-      divisor && !divisor->isZero() && !divisor->isMinusOne()) {
-    return isRem ? lowering_.builder_.CreateSRem(lhs, rhs)
-                 : lowering_.builder_.CreateSDiv(lhs, rhs);
+      divisor && !divisor->isZero() && (u || !divisor->isMinusOne())) {
+    return u       ? (isRem ? lowering_.builder_.CreateURem(lhs, rhs)
+                            : lowering_.builder_.CreateUDiv(lhs, rhs))
+           : isRem ? lowering_.builder_.CreateSRem(lhs, rhs)
+                   : lowering_.builder_.CreateSDiv(lhs, rhs);
   }
 
-  llvm::Type *type = lhs->getType();
-  llvm::Value *isZero = lowering_.builder_.CreateICmpEQ(rhs, llvm::ConstantInt::get(type, 0));
+  llvm::Type *width = lhs->getType();
+  llvm::Value *isZero = lowering_.builder_.CreateICmpEQ(rhs, llvm::ConstantInt::get(width, 0));
   llvm::BasicBlock *throwBlock = lowering_.functionFrame().newBlock("div.zero");
   llvm::BasicBlock *okBlock = lowering_.functionFrame().newBlock("div.ok");
   lowering_.builder_.CreateCondBr(isZero, throwBlock, okBlock,
@@ -195,10 +206,14 @@ llvm::Value *BinaryLowerer::emitIntDivRem(BinaryOp op, llvm::Value *lhs, llvm::V
   lowering_.processLowerer().emitPanic("Division by zero");
 
   lowering_.functionFrame().switchTo(okBlock);
+  if (u) {
+    return isRem ? lowering_.builder_.CreateURem(lhs, rhs)
+                 : lowering_.builder_.CreateUDiv(lhs, rhs);
+  }
   llvm::Value *isMinusOne =
-      lowering_.builder_.CreateICmpEQ(rhs, llvm::ConstantInt::getSigned(type, -1));
+      lowering_.builder_.CreateICmpEQ(rhs, llvm::ConstantInt::getSigned(width, -1));
   llvm::Value *divisor =
-      lowering_.builder_.CreateSelect(isMinusOne, llvm::ConstantInt::get(type, 1), rhs);
+      lowering_.builder_.CreateSelect(isMinusOne, llvm::ConstantInt::get(width, 1), rhs);
   if (isRem) {
     return lowering_.builder_.CreateSRem(lhs, divisor);
   }

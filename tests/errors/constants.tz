@@ -1,26 +1,26 @@
 // Integer constants that would wrap around, where JavaScript keeps the value.
-// expect-error: this constant is 1099511627776, which does not fit in 'int' and would wrap around to 0
-const a = 2 ** 40
+// expect-error: this constant is 18446744073709551616, which does not fit in 'int' and would wrap around to 0
+const a = 2 ** 64
 const MS_PER_DAY = 24 * 60 * 60 * 1000
-// expect-error: this constant is 2592000000, which does not fit in 'int' and would wrap around to -1702967296; compute it as a 'long' or a 'double'
-const month = MS_PER_DAY * 30
-// expect-error: this constant is 2147483648, which does not fit in 'int'
-const b = 2147483647 + 1
-const min = -2147483648
-// expect-error: this constant is 2147483648
+// expect-error: this constant is 31536000000000000000, which does not fit in 'int' and would wrap around to -5357488147419103232; compute it as a 'double'
+const ns = MS_PER_DAY * 365 * 1000000000
+// expect-error: this constant is 9223372036854775808, which does not fit in 'int'
+const b = 9223372036854775807 + 1
+const min = -9223372036854775808
+// expect-error: this constant is 9223372036854775808
 const c = -min
-// expect-error: this constant is 2147483648
+// expect-error: this constant is 9223372036854775808
 const d = min / -1
-// expect-error: this constant is -2147483649
+// expect-error: this constant is -9223372036854775809
 const e = min - 1
-// expect-error: this constant is 9223372036854775808, which does not fit in 'long' and would wrap around to -9223372036854775808; compute it as a 'double'
-const f: long = 9223372036854775807 + 1
-// expect-error: this constant is 9007199254740992, which does not fit in 'int'
-console.log(Number.isSafeInteger(2 ** 53))
+// A narrower type wraps sooner.
+const small: int16 = 30000
+// expect-error: this constant is 60000, which does not fit in 'int16' and would wrap around to -5536; compute it as an 'int'
+const f = small * 2
 enum Size {
-  Large = 1000000,
+  Large = 10000000000,
 }
-// expect-error: this constant is 1000000000000
+// expect-error: this constant is 100000000000000000000
 console.log(Size.Large * Size.Large)
 
 // Under `| 0` only the low bits count, but JavaScript rounds beyond 2^53.
@@ -28,8 +28,8 @@ console.log(Size.Large * Size.Large)
 const g = (2147483647 * 2147483647) | 0
 
 // One error for the first operation that overflows, not for each around it.
-// expect-error: this constant is 4294967296
-const h = (65536 * 65536 + 1) * 2
+// expect-error: this constant is 18446744073709551616
+const h = (4294967296 * 4294967296 + 1) * 2
 
 // Integer division by a constant zero always panics.
 let x = 5

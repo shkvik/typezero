@@ -405,7 +405,8 @@ llvm::Value *DateLowerer::emitDateCall(CallExpr *call) {
             lowering_.processLowerer().processFunction("tz_dtf_fractional", i32, {ptr}),
             {format.value});
         value = lowering_.optionalLowerer().makeOptional(
-            v, lowering_.builder_.CreateICmpSGT(v, lowering_.builder_.getInt32(0)), field.type);
+            lowering_.builder_.CreateSExt(v, lowering_.builder_.getInt64Ty()),
+            lowering_.builder_.CreateICmpSGT(v, lowering_.builder_.getInt32(0)), field.type);
       } else {
         auto at = llvm::find(kOptionNames, field.name);
         int which = at == std::end(kOptionNames) ? -1 : int(at - std::begin(kOptionNames));

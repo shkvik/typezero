@@ -95,9 +95,10 @@ int32_t tz_unknown_kind(const void *u) {
     }
     return layout->flags & TZ_LAYOUT_CLASS ? TZ_KIND_FUNCTION : TZ_KIND_OBJECT;
   }
+  if (tz_kind_integer(box->type->kind)) {
+    return TZ_KIND_NUMBER;
+  }
   switch (box->type->kind) {
-  case TZ_T_INT:
-  case TZ_T_LONG:
   case TZ_T_DOUBLE:
     return TZ_KIND_NUMBER;
   case TZ_T_STRING:
@@ -116,11 +117,10 @@ int32_t tz_unknown_kind(const void *u) {
 double tz_unknown_number(const void *u) {
   const TzBox *box = as_box(u);
   const char *value = TZ_BOX_VALUE(box);
+  if (tz_kind_integer(box->type->kind)) {
+    return tz_integer_double(box->type->kind, tz_load_integer(box->type->kind, value));
+  }
   switch (box->type->kind) {
-  case TZ_T_INT:
-    return *(const int32_t *)value;
-  case TZ_T_LONG:
-    return (double)*(const int64_t *)value;
   case TZ_T_DOUBLE:
     return *(const double *)value;
   default:
@@ -196,13 +196,11 @@ void *tz_unknown_array(const void *u, const TzType *array_type) {
 
 static int box_number(const TzBox *box, double *out) {
   const char *value = TZ_BOX_VALUE(box);
+  if (tz_kind_integer(box->type->kind)) {
+    *out = tz_integer_double(box->type->kind, tz_load_integer(box->type->kind, value));
+    return 1;
+  }
   switch (box->type->kind) {
-  case TZ_T_INT:
-    *out = *(const int32_t *)value;
-    return 1;
-  case TZ_T_LONG:
-    *out = (double)*(const int64_t *)value;
-    return 1;
   case TZ_T_DOUBLE:
     *out = *(const double *)value;
     return 1;

@@ -70,12 +70,9 @@ bool ReflectCallChecker::reflectAccepts(const Type *arg, const Type *param) {
   const Type *value = arg->isLiteral() ? arg->literalBase() : arg;
   switch (param->kind()) {
   case Type::Kind::Int:
-    return value->kind() == Type::Kind::Int;
-  case Type::Kind::Long:
-    return value->kind() == Type::Kind::Int || value->kind() == Type::Kind::Long;
+    return value->isInteger() && param->holds(value);
   case Type::Kind::Double:
-    return value->kind() == Type::Kind::Int || value->kind() == Type::Kind::Long ||
-           value->kind() == Type::Kind::Double;
+    return value->isInteger() || value->isFloat();
   case Type::Kind::Bool:
     return value->isBool();
   case Type::Kind::String:

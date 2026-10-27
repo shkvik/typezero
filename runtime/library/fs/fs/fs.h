@@ -19,7 +19,7 @@ typedef struct {
 
 typedef struct {
   TzStr name, parent_path;
-  int32_t kind;
+  int64_t kind;
 } TzDirentParts;
 #endif
 

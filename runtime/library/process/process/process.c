@@ -324,7 +324,7 @@ void tz_process_platform(TzStr *out) {
 #endif
 }
 
-TZ_NORETURN void tz_process_exit(int32_t code, int32_t has) { exit(has ? code : tz_exit_code); }
+TZ_NORETURN void tz_process_exit(int64_t code, int32_t has) { exit(has ? code : tz_exit_code); }
 
 int32_t tz_process_get_exit_code(int32_t *has) {
   *has = tz_has_exit_code;
@@ -332,7 +332,7 @@ int32_t tz_process_get_exit_code(int32_t *has) {
   return tz_exit_code;
 }
 
-void tz_process_set_exit_code(int32_t code, int32_t has) {
+void tz_process_set_exit_code(int64_t code, int32_t has) {
   tz_exit_code = has ? code : 0;
   tz_has_exit_code = has;
 }

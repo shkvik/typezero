@@ -13,9 +13,9 @@ namespace tz {
 
 namespace {
 
-constexpr int64_t kIntMin = std::numeric_limits<int32_t>::min();
+constexpr int64_t kIntMin = std::numeric_limits<int64_t>::min();
 
-constexpr int64_t kIntMax = std::numeric_limits<int32_t>::max();
+constexpr int64_t kIntMax = std::numeric_limits<int64_t>::max();
 
 constexpr uint64_t kMaxConstant = uint64_t(1) << 40;
 
@@ -59,7 +59,7 @@ std::optional<std::pair<int64_t, int64_t>> LoopBounds::syntacticIntRange(const E
   }
   if (auto *unary = dyn_cast<UnaryExpr>(expr)) {
     auto *lit = dyn_cast<IntLitExpr>(unary->operand);
-    if (unary->op != UnaryOp::Neg || !lit || lit->value > uint64_t(-kIntMin)) {
+    if (unary->op != UnaryOp::Neg || !lit || lit->value > uint64_t(kIntMax)) {
       return std::nullopt;
     }
     auto v = -static_cast<int64_t>(lit->value);
@@ -117,7 +117,7 @@ bool LoopBounds::boundedAbove(const Expr *expr, int64_t limit,
   const VarSymbol *var = name ? checker_.scopes().lookup(name->name).var : nullptr;
 
   return var && var->type->isInt() && !scan.changes.count(name->name) &&
-         checker_.flow_.facts.proves(Term::of(var), Term::zero(), limit + 1);
+         checker_.flow_.facts.proves(Term::of(var), Term::zero(), saturatingAdd(limit, 1));
 }
 
 bool LoopBounds::boundedBelow(const Expr *expr, int64_t limit,
@@ -131,7 +131,7 @@ bool LoopBounds::boundedBelow(const Expr *expr, int64_t limit,
   const VarSymbol *var = name ? checker_.scopes().lookup(name->name).var : nullptr;
 
   return var && var->type->isInt() && !scan.changes.count(name->name) &&
-         checker_.flow_.facts.proves(Term::zero(), Term::of(var), 1 - limit);
+         checker_.flow_.facts.proves(Term::zero(), Term::of(var), saturatingSub(1, limit));
 }
 
 std::optional<int64_t> LoopBounds::condBoundsAbove(const Expr *cond, const VarSymbol *var,
@@ -175,7 +175,7 @@ std::optional<int64_t> LoopBounds::condBoundsAbove(const Expr *cond, const VarSy
     return std::nullopt;
   }
   std::optional<int64_t> k = varPlus(small, var, lookupVar);
-  if (k && boundedAbove(large, strict ? kIntMax + 1 - step : kIntMax - step, scan)) {
+  if (k && boundedAbove(large, strict ? kIntMax - (step - 1) : kIntMax - step, scan)) {
     return k;
   }
 
@@ -226,7 +226,8 @@ Checker::Flow LoopBounds::loopHead(const Checker::LoopScan &scan, const Expr *co
         if (std::optional<int64_t> k = condBoundsAbove(cond, var, scan, change.delta)) {
           if (*k == 0) {
             keepLower = true;
-          } else if (checker_.flow_.facts.proves(Term::of(var), Term::zero(), kIntMax - *k + 1)) {
+          } else if (checker_.flow_.facts.proves(Term::of(var), Term::zero(),
+                                                 saturatingAdd(kIntMax - *k, 1))) {
             keepLower = true;
             invariant = *k;
           }
@@ -252,7 +253,7 @@ Checker::Flow LoopBounds::loopHead(const Checker::LoopScan &scan, const Expr *co
       return true;
     });
     if (invariant) {
-      head.facts.add(Term::of(var), Term::zero(), kIntMax - *invariant + 1);
+      head.facts.add(Term::of(var), Term::zero(), saturatingAdd(kIntMax - *invariant, 1));
     }
     for (const VarSymbol *defined : llvm::to_vector(head.defined)) {
       if (defined->name == name) {

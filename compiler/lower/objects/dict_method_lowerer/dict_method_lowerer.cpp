@@ -75,7 +75,7 @@ llvm::Value *DictMethodLowerer::emitDictCall(CallExpr *call) {
     llvm::Value *size = lowering_.builder_.CreateLoad(
         i32, lowering_.dictLowerer().dictField(map.value, kMapCount), "size");
     lowering_.refCounts().dropOperand(map);
-    return size;
+    return lowering_.builder_.CreateZExt(size, lowering_.builder_.getInt64Ty());
   }
   case Builtin::MapClear: {
     Lowering::Operand map = lowering_.refCounts().emitOperand(receiver, true);
@@ -327,13 +327,13 @@ llvm::Value *DictMethodLowerer::emitGroupBy(CallExpr *call) {
   lowering_.builder_.CreateStore(lowering_.exprLowerer().emitExpr(call->args[1]), callback);
   llvm::Value *map = lowering_.builder_.CreateCall(
       lowering_.dictLowerer().dictFunction("tz_map_new", ptr, {ptr}), {layout.descriptor}, "map");
-  llvm::Type *i32 = lowering_.builder_.getInt32Ty();
   if (type->isRecord()) {
     lowering_.builder_.CreateStore(lowering_.builder_.getInt32(4),
                                    lowering_.dictLowerer().dictField(map, kMapFlags));
   }
-  llvm::Value *counter = lowering_.functionFrame().createStackSlot(i32, "counter");
-  lowering_.builder_.CreateStore(lowering_.builder_.getInt32(0), counter);
+  llvm::Value *counter =
+      lowering_.functionFrame().createStackSlot(lowering_.builder_.getInt64Ty(), "counter");
+  lowering_.builder_.CreateStore(lowering_.builder_.getInt64(0), counter);
   size_t depth = lowering_.scopes_.size();
   llvm::BasicBlock *endBlock = lowering_.functionFrame().newBlock("group.done");
   Lowering::Consumer consumer;
@@ -342,9 +342,9 @@ llvm::Value *DictMethodLowerer::emitGroupBy(CallExpr *call) {
     lowering_.builder_.CreateBr(endBlock);
   };
   consumer.each = [&](llvm::Value *item) -> llvm::Value * {
-    llvm::Value *count = lowering_.builder_.CreateLoad(i32, counter);
+    llvm::Value *count = lowering_.builder_.CreateLoad(lowering_.builder_.getInt64Ty(), counter);
     lowering_.builder_.CreateStore(
-        lowering_.builder_.CreateAdd(count, lowering_.builder_.getInt32(1)), counter);
+        lowering_.builder_.CreateAdd(count, lowering_.builder_.getInt64(1)), counter);
     lowering_.refCounts().retainValue(item, element);
     llvm::Value *k = lowering_.lazyChainLowerer().callCallback(
         callback, callbackType, {item, count}, {element, Type::intTy()});

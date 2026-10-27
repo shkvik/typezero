@@ -158,8 +158,7 @@ void BytesChecker::checkBytesStore(IndexExpr *index, const Expr *value, std::opt
     return;
   }
   int64_t lo, hi;
-  if (!target->elementRange(lo, hi) || target->bytes() == Bytes::Uint8Clamped ||
-      target->bytes() == Bytes::Int32) {
+  if (!target->elementRange(lo, hi) || target->bytes() == Bytes::Uint8Clamped) {
     return;
   }
   Range result =

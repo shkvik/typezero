@@ -13,9 +13,13 @@ using Bytes = Type::Bytes;
 
 using Range = ValueRange;
 
-inline constexpr int64_t kIntMin = std::numeric_limits<int32_t>::min();
+inline constexpr int64_t kInt32Min = std::numeric_limits<int32_t>::min();
 
-inline constexpr int64_t kIntMax = std::numeric_limits<int32_t>::max();
+inline constexpr int64_t kInt32Max = std::numeric_limits<int32_t>::max();
+
+inline constexpr int64_t kIntMin = std::numeric_limits<int64_t>::min();
+
+inline constexpr int64_t kIntMax = std::numeric_limits<int64_t>::max();
 
 enum Encoding { Utf8, Utf16le, Latin1, Ascii, Base64, Base64url, Hex };
 

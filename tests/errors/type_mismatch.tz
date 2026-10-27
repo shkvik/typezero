@@ -1,8 +1,12 @@
 // expect-error: type 'double' is not assignable to type 'int'
 let x: int = 1.5
-let big: long = 5
-// A long becomes a double by itself, a double does not become a long.
-// expect-error: type 'double' is not assignable to type 'long'; round it with Math.round
-let y: long = big + 0.5
+let big: int = 5
+// An int becomes a double by itself, a double does not become an int.
+// expect-error: type 'double' is not assignable to type 'int'; drop the fraction
+let y: int = big + 0.5
 // expect-error: integer literal does not fit in type 'int'
-let z: int = 3000000000
+let z: int = 9223372036854775808
+// expect-error: integer literal does not fit in type 'uint8'
+let w: uint8 = 256
+// expect-error: integer literal does not fit in type 'uint32'
+let u: uint32 = -1

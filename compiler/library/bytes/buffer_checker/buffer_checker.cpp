@@ -279,7 +279,7 @@ Expr *BufferChecker::checkBufferMethod(CallExpr *call, MemberExpr *member) {
     std::vector<Expr *> args{boolLit(m.isSigned), boolLit(m.big)};
     size_t at = 0;
     if (m.write) {
-      Expr *value = checker_.argumentChecker().checkArg(call->args[0], Type::longTy());
+      Expr *value = checker_.argumentChecker().checkArg(call->args[0], Type::intTy());
       args.push_back(value);
       at = 1;
     }
@@ -307,8 +307,7 @@ Expr *BufferChecker::checkBufferMethod(CallExpr *call, MemberExpr *member) {
       }
     }
     call->args = std::move(args);
-    return made(m.write ? Builtin::BufferWriteVar : Builtin::BufferReadVar,
-                m.write ? Type::intTy() : Type::longTy());
+    return made(m.write ? Builtin::BufferWriteVar : Builtin::BufferReadVar, Type::intTy());
   }
   const Type *element = Type::bytesType(kind)->elementType();
   int64_t size = Type::bytesType(kind)->elementSize();

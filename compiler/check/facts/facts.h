@@ -10,6 +10,26 @@ namespace tz {
 
 constexpr int64_t kMaxLength = (int64_t(1) << 30) - 1;
 
+inline int64_t saturatingAdd(int64_t a, int64_t b) {
+  if (b > 0 && a > INT64_MAX - b) {
+    return INT64_MAX;
+  }
+  if (b < 0 && a < INT64_MIN - b) {
+    return INT64_MIN;
+  }
+  return a + b;
+}
+
+inline int64_t saturatingSub(int64_t a, int64_t b) {
+  if (b < 0 && a > INT64_MAX + b) {
+    return INT64_MAX;
+  }
+  if (b > 0 && a < INT64_MIN + b) {
+    return INT64_MIN;
+  }
+  return a - b;
+}
+
 struct Term {
   const VarSymbol *var = nullptr;
   bool length = false;

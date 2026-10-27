@@ -51,7 +51,7 @@ llvm::Value *TypedArrayCalls::emit() {
       }
     }
     lowering_.refCounts().dropOperand(self);
-    return lowering_.builder_.CreateTrunc(lowering_.builder_.CreateMul(length, size), i32);
+    return lowering_.builder_.CreateMul(length, size);
   }
   case Builtin::BytesByteOffset: {
     Lowering::Operand self = lowering_.refCounts().emitOperand(member->object, true);
@@ -61,7 +61,7 @@ llvm::Value *TypedArrayCalls::emit() {
     llvm::Value *offset = lowering_.builder_.CreateLoad(
         i32, lowering_.builder_.CreateStructGEP(lowering_.bytesTy_, self.value, kOffset), "offset");
     lowering_.refCounts().dropOperand(self);
-    return offset;
+    return lowering_.builder_.CreateZExt(offset, i64);
   }
   case Builtin::BytesBuffer: {
     Lowering::Operand self = lowering_.refCounts().emitOperand(member->object, true);
@@ -101,7 +101,7 @@ llvm::Value *TypedArrayCalls::emit() {
     lowering_.refCounts().dropOperand(self);
     return constantOf(call->args[0]) == 2
                ? lowering_.builder_.CreateICmpNE(found, lowering_.builder_.getInt32(0))
-               : found;
+               : lowering_.builder_.CreateSExt(found, i64);
   }
   case Builtin::BytesJoin: {
     Lowering::Operand self = receiver(0);

@@ -422,7 +422,7 @@ static void *segment_data(TzSegments *s, int32_t start, int32_t end, const TzInt
   char *base = (char *)data;
   *(TzStr *)(base + shape->offsets[TZ_IF_SEGMENT]) =
       tz_str_sub(s->input, (uint32_t)start, (uint32_t)end);
-  *(int32_t *)(base + shape->offsets[TZ_IF_INDEX]) = start;
+  *(int64_t *)(base + shape->offsets[TZ_IF_INDEX]) = start;
   tz_str_retain_value(s->input);
   *(TzStr *)(base + shape->offsets[TZ_IF_INPUT]) = s->input;
   if (s->type == UBRK_WORD && shape->offsets[TZ_IF_WORD_LIKE] >= 0) {

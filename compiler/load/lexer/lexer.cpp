@@ -308,7 +308,7 @@ Token Lexer::lexNumber(const char *start, bool newlineBefore) {
     diags_.error(llvm::SMLoc::getFromPointer(start),
                  "'" + tok.text +
                      "n' is a bigint, and there is no bigint: integers up to 9.2e18 "
-                     "fit in 'long', longer ones in 'decimal' (e.g. 'const n: decimal = " +
+                     "fit in 'int', longer ones in 'decimal' (e.g. 'const n: decimal = " +
                      tok.text + "')");
     ++cur_;
     return tok;

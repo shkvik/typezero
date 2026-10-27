@@ -1,6 +1,6 @@
 // There is no `as`; numbers convert the way JavaScript converts them.
 const d: double = 2.5
-const l: long = 5
+const l: int = 5
 const i: int = 3
 function find(flag: boolean): int | undefined {
   if (flag) return 1
@@ -9,11 +9,11 @@ const maybe = find(true)
 // expect-error: 'as' is not supported; drop the fraction with 'x | 0'
 const a = d as int
 // expect-error: 'as' is not supported; round with Math.round
-const b = d as long
+const b = d as uint8
 // expect-error: 'as' is not supported; the value converts to 'double' by itself
 const c = i as double
 // expect-error: 'as' is not supported; Math.trunc(x)
-const e = l as int
+const e = l as int16
 // expect-error: 'as' is not supported; the value may be undefined
 const f = maybe as int
 // expect-error: 'as' is not supported; declare the type of the variable instead
@@ -22,10 +22,8 @@ const g = [] as int[]
 const h = "7" as int
 // expect-error: type 'double' is not assignable to type 'int'; drop the fraction with 'x | 0'
 const j: int = d
-// expect-error: type 'long' is not assignable to type 'int'; Math.trunc(x)
-const k: int = l
-// expect-error: type 'long' is not assignable to type 'int'; '>>>' is unsigned in JavaScript
-const m: int = d >>> 0
+// expect-error: type 'int' is not assignable to type 'int16'; Math.trunc(x)
+const k: int16 = l
 // expect-error: expected 1 argument, but got 2
 const n = Math.floor(d, 2)
 // expect-error: property 'sqrtt' does not exist on 'Math'

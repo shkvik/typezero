@@ -101,7 +101,7 @@ llvm::Value *CallbackMethodLowerer::emitCallbackMethod(CallExpr *call) {
     llvm::Value *none = method == Builtin::ArrSome    ? lowering_.builder_.getFalse()
                         : method == Builtin::ArrEvery ? lowering_.builder_.getTrue()
                         : call->type->isInt()
-                            ? lowering_.builder_.getInt32(~0u)
+                            ? lowering_.builder_.getInt64(~uint64_t(0))
                             : lowering_.optionalLowerer().undefinedValue(call->type);
     lowering_.builder_.CreateStore(none, resultSlot);
   }
@@ -137,7 +137,7 @@ llvm::Value *CallbackMethodLowerer::emitCallbackMethod(CallExpr *call) {
         lowering_.builder_.CreateLoad(lowering_.moduleBuilder().lower(accType), accSlot));
   }
   args.push_back(value);
-  args.push_back(lowering_.builder_.CreateTrunc(i, lowering_.builder_.getInt32Ty()));
+  args.push_back(i);
   args.push_back(array);
   if (reduce && passes == 0) {
     lowering_.refCounts().releaseValue(args[0], accType);
@@ -214,8 +214,7 @@ llvm::Value *CallbackMethodLowerer::emitCallbackMethod(CallExpr *call) {
     test(result);
     lowering_.builder_.CreateBr(nextBlock);
     lowering_.functionFrame().switchTo(foundBlock);
-    lowering_.builder_.CreateStore(
-        lowering_.builder_.CreateTrunc(i, lowering_.builder_.getInt32Ty()), resultSlot);
+    lowering_.builder_.CreateStore(i, resultSlot);
     lowering_.builder_.CreateBr(endBlock);
     lowering_.functionFrame().switchTo(lowering_.functionFrame().newBlock("dead"));
     break;
@@ -356,8 +355,10 @@ llvm::Function *CallbackMethodLowerer::sortComparator(CallExpr *call) {
     negative = lowering_.builder_.CreateFCmpOLT(result, zero);
   } else {
     llvm::Value *zero = llvm::ConstantInt::get(result->getType(), 0);
-    positive = lowering_.builder_.CreateICmpSGT(result, zero);
-    negative = lowering_.builder_.CreateICmpSLT(result, zero);
+    positive = resultType->isUnsigned() ? lowering_.builder_.CreateICmpNE(result, zero)
+                                        : lowering_.builder_.CreateICmpSGT(result, zero);
+    negative = resultType->isUnsigned() ? lowering_.builder_.getFalse()
+                                        : lowering_.builder_.CreateICmpSLT(result, zero);
   }
   lowering_.builder_.CreateRet(lowering_.builder_.CreateSub(
       lowering_.builder_.CreateZExt(positive, lowering_.builder_.getInt32Ty()),

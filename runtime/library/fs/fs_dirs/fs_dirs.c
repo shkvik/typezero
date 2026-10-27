@@ -492,7 +492,7 @@ TzStr tz_fs_made_dir(const Raw *first) {
 #endif
 }
 
-int32_t tz_fs_mkdir(TzStr *out, void *path_obj, uint64_t path_meta, int32_t recursive, int32_t mode,
+int32_t tz_fs_mkdir(TzStr *out, void *path_obj, uint64_t path_meta, int32_t recursive, int64_t mode,
                     TzMaker make) {
   out->obj = NULL;
   out->meta = 0;

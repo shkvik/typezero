@@ -89,11 +89,6 @@ std::optional<Linear> IndexProofs::linear(const Expr *expr) const {
   }
   case Expr::Kind::Binary: {
     auto *bin = cast<BinaryExpr>(expr);
-    if (auto *zero = dyn_cast<IntLitExpr>(bin->rhs); bin->op == BinaryOp::BitOr && zero &&
-                                                     zero->value == 0 && bin->lhs->type &&
-                                                     bin->lhs->type->isInt()) {
-      return linear(bin->lhs);
-    }
     if ((bin->op != BinaryOp::Add && bin->op != BinaryOp::Sub) || !expr->type->isInteger()) {
       return std::nullopt;
     }
@@ -115,14 +110,12 @@ std::optional<Linear> IndexProofs::linear(const Expr *expr) const {
     if (result.offset > int64_t(kMaxConstant) || result.offset < -int64_t(kMaxConstant)) {
       return std::nullopt;
     }
-    if (expr->type->isInt()) {
+    if (expr->type->isInt() && !result.term.isZero()) {
       const Facts &facts = checker_.flow_.facts;
-      if (result.term.isZero()) {
-        if (result.offset < kIntMin || result.offset > kIntMax) {
-          return std::nullopt;
-        }
-      } else if (!facts.proves(result.term, Term::zero(), kIntMax - result.offset + 1) ||
-                 !facts.proves(Term::zero(), result.term, result.offset - kIntMin + 1)) {
+      if ((result.offset > 0 &&
+           !facts.proves(result.term, Term::zero(), kIntMax - (result.offset - 1))) ||
+          (result.offset < 0 &&
+           !facts.proves(Term::zero(), result.term, saturatingSub(result.offset + 1, kIntMin)))) {
         return std::nullopt;
       }
     }
@@ -545,8 +538,8 @@ void IndexProofs::addIndexCallbackFacts(const FunctionDecl *fn) {
     auto [param, lo, hi] = element->second;
     const VarSymbol *value = param < fn->params.size() ? fn->params[param].sym : nullptr;
     if (value && value->type->isInt()) {
-      checker_.flow_.facts.add(Term::zero(), Term::of(value), 1 - lo);
-      checker_.flow_.facts.add(Term::of(value), Term::zero(), hi + 1);
+      checker_.flow_.facts.add(Term::zero(), Term::of(value), saturatingSub(1, lo));
+      checker_.flow_.facts.add(Term::of(value), Term::zero(), saturatingAdd(hi, 1));
     }
   }
   auto it = checker_.indexCallbacks_.find(fn);

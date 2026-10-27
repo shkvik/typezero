@@ -1144,7 +1144,7 @@ static void text_init(Text *t, void *obj, uint64_t meta) {
 
 static void finish(TzStr *out, TzBuf *b) { *out = tz_buf_take(b); }
 
-void tz_path_join(TzStr *out, TzArray *parts, int32_t win32) {
+void tz_path_join(TzStr *out, TzArray *parts, int64_t win32) {
   TzBuf *bufs;
   Span *spans = spans_of(parts, &bufs);
   TzBuf b;
@@ -1158,7 +1158,7 @@ void tz_path_join(TzStr *out, TzArray *parts, int32_t win32) {
   finish(out, &b);
 }
 
-void tz_path_resolve(TzStr *out, TzArray *parts, int32_t win32) {
+void tz_path_resolve(TzStr *out, TzArray *parts, int64_t win32) {
   TzBuf *bufs;
   Span *spans = spans_of(parts, &bufs);
   TzBuf b;
@@ -1168,7 +1168,7 @@ void tz_path_resolve(TzStr *out, TzArray *parts, int32_t win32) {
   finish(out, &b);
 }
 
-void tz_path_normalize(TzStr *out, void *obj, uint64_t meta, int32_t win32) {
+void tz_path_normalize(TzStr *out, void *obj, uint64_t meta, int64_t win32) {
   Text t;
   text_init(&t, obj, meta);
   TzBuf b;
@@ -1178,7 +1178,7 @@ void tz_path_normalize(TzStr *out, void *obj, uint64_t meta, int32_t win32) {
   finish(out, &b);
 }
 
-int32_t tz_path_is_absolute(void *obj, uint64_t meta, int32_t win32) {
+int32_t tz_path_is_absolute(void *obj, uint64_t meta, int64_t win32) {
   Text t;
   text_init(&t, obj, meta);
   Span p = t.span;
@@ -1194,7 +1194,7 @@ int32_t tz_path_is_absolute(void *obj, uint64_t meta, int32_t win32) {
   return absolute;
 }
 
-void tz_path_dirname(TzStr *out, void *obj, uint64_t meta, int32_t win32) {
+void tz_path_dirname(TzStr *out, void *obj, uint64_t meta, int64_t win32) {
   Text t;
   text_init(&t, obj, meta);
   const char *literal;
@@ -1211,7 +1211,7 @@ void tz_path_dirname(TzStr *out, void *obj, uint64_t meta, int32_t win32) {
 }
 
 void tz_path_basename(TzStr *out, void *obj, uint64_t meta, void *suffix_obj, uint64_t suffix_meta,
-                      int32_t has_suffix, int32_t win32) {
+                      int32_t has_suffix, int64_t win32) {
   Text t, suffix;
   text_init(&t, obj, meta);
   text_init(&suffix, has_suffix ? suffix_obj : NULL, has_suffix ? suffix_meta : 0);
@@ -1223,7 +1223,7 @@ void tz_path_basename(TzStr *out, void *obj, uint64_t meta, void *suffix_obj, ui
   finish(out, &b);
 }
 
-void tz_path_extname(TzStr *out, void *obj, uint64_t meta, int32_t win32) {
+void tz_path_extname(TzStr *out, void *obj, uint64_t meta, int64_t win32) {
   Text t;
   text_init(&t, obj, meta);
   TzBuf b;
@@ -1234,7 +1234,7 @@ void tz_path_extname(TzStr *out, void *obj, uint64_t meta, int32_t win32) {
 }
 
 void tz_path_relative(TzStr *out, void *from_obj, uint64_t from_meta, void *to_obj,
-                      uint64_t to_meta, int32_t win32) {
+                      uint64_t to_meta, int64_t win32) {
   Text from, to;
   text_init(&from, from_obj, from_meta);
   text_init(&to, to_obj, to_meta);
@@ -1250,7 +1250,7 @@ void tz_path_relative(TzStr *out, void *from_obj, uint64_t from_meta, void *to_o
   finish(out, &b);
 }
 
-void *tz_path_parse(void *obj, uint64_t meta, int32_t win32, TzMaker make) {
+void *tz_path_parse(void *obj, uint64_t meta, int64_t win32, TzMaker make) {
   Text t;
   text_init(&t, obj, meta);
   Span path = t.span;
@@ -1334,7 +1334,7 @@ void *tz_path_parse(void *obj, uint64_t meta, int32_t win32, TzMaker make) {
   return make(&parts);
 }
 
-void tz_path_format(TzStr *out, const TzOptStr *parts, int32_t win32) {
+void tz_path_format(TzStr *out, const TzOptStr *parts, int64_t win32) {
   TzBuf f[5];
   for (int i = 0; i < 5; ++i) {
     tz_buf_init(&f[i]);
@@ -1396,7 +1396,7 @@ static void namespaced(TzBuf *out, Span path) {
   tz_buf_free(&resolved);
 }
 
-void tz_path_to_namespaced(TzStr *out, void *obj, uint64_t meta, int32_t win32) {
+void tz_path_to_namespaced(TzStr *out, void *obj, uint64_t meta, int64_t win32) {
   Text t;
   text_init(&t, obj, meta);
   TzBuf b;

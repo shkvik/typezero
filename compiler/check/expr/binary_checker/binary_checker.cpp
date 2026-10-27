@@ -27,6 +27,35 @@ using llvm::isa;
 
 namespace tz {
 
+namespace {
+
+bool onlyIntLiterals(const Expr *expr) {
+  if (isa<IntLitExpr>(expr)) {
+    return true;
+  }
+  if (auto *unary = dyn_cast<UnaryExpr>(expr)) {
+    return (unary->op == UnaryOp::Neg || unary->op == UnaryOp::Plus) &&
+           onlyIntLiterals(unary->operand);
+  }
+  if (auto *bin = dyn_cast<BinaryExpr>(expr)) {
+    return bin->op != BinaryOp::Div && DecimalChecker::isLiteralTree(bin) &&
+           onlyIntLiterals(bin->lhs) && onlyIntLiterals(bin->rhs);
+  }
+
+  return false;
+}
+
+const Type *integerHint(const Expr *literal, const Expr *other, const Type *hint) {
+  const Type *type = other->type ? other->type->nonOptional() : nullptr;
+  if (type && type->isInteger() && !type->isInt() && onlyIntLiterals(literal)) {
+    return type;
+  }
+
+  return hint;
+}
+
+}
+
 BinaryChecker::BinaryChecker(Checker &checker) : checker_(checker) {}
 
 void BinaryChecker::reportOperandTypes(llvm::SMLoc loc, const char *op, const Type *lhs,
@@ -130,16 +159,6 @@ Expr *BinaryChecker::checkBinary(BinaryExpr *bin, const Type *expected, bool wra
     }
     bin->rhs = checker_.typeRelations().convert(bin->rhs, l);
     bin->type = l;
-    if (bin->op == BinaryOp::UShr && l->isInt() && !wraps) {
-      std::optional<int64_t> count = checker_.constantFolder().intConstant(bin->rhs);
-      if (!count || (*count & 31) == 0) {
-        std::optional<int64_t> value = checker_.constantFolder().intConstant(bin->lhs);
-        if (!value ||
-            static_cast<uint32_t>(*value) > uint32_t(std::numeric_limits<int32_t>::max())) {
-          bin->type = Type::longTy();
-        }
-      }
-    }
     checker_.constantFolder().foldBinary(bin, wraps);
     return bin;
   }
@@ -163,14 +182,16 @@ Expr *BinaryChecker::checkBinary(BinaryExpr *bin, const Type *expected, bool wra
       checker_.concatChain_ = chain ? chain : bin;
     }
     bool literals = !bitwise && !pow;
-    if (literals && DecimalChecker::isLiteralTree(bin->lhs) &&
-        !DecimalChecker::isLiteralTree(bin->rhs)) {
+    if (DecimalChecker::isLiteralTree(bin->lhs) && !DecimalChecker::isLiteralTree(bin->rhs) &&
+        (literals || onlyIntLiterals(bin->lhs))) {
       BinaryExpr *pending = std::exchange(checker_.concatChain_, nullptr);
       bin->rhs = checker_.genericChecker().apparent(
           checker_.exprChecker().checkExpr(bin->rhs, rhsHint, operandsWrap));
       checker_.concatChain_ = pending;
-      bin->lhs = checker_.genericChecker().apparent(checker_.exprChecker().checkExpr(
-          bin->lhs, DecimalChecker::literalHint(bin->rhs, hint), operandsWrap));
+      const Type *lhsHint = integerHint(
+          bin->lhs, bin->rhs, literals ? DecimalChecker::literalHint(bin->rhs, hint) : hint);
+      bin->lhs = checker_.genericChecker().apparent(
+          checker_.exprChecker().checkExpr(bin->lhs, lhsHint, operandsWrap));
       checker_.concatChain_ = nullptr;
     } else {
       bin->lhs = checker_.genericChecker().apparent(
@@ -179,6 +200,7 @@ Expr *BinaryChecker::checkBinary(BinaryExpr *bin, const Type *expected, bool wra
       if (literals && DecimalChecker::isLiteralTree(bin->rhs)) {
         rhsHint = DecimalChecker::literalHint(bin->lhs, rhsHint);
       }
+      rhsHint = integerHint(bin->rhs, bin->lhs, rhsHint);
       bin->rhs = checker_.genericChecker().apparent(
           checker_.exprChecker().checkExpr(bin->rhs, rhsHint, operandsWrap));
     }

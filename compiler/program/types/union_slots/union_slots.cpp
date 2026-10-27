@@ -25,8 +25,6 @@ UnionSlot unionSlot(const Type *type) {
     return UnionSlot::String;
   case Type::Kind::Int:
     return UnionSlot::Int;
-  case Type::Kind::Long:
-    return UnionSlot::Long;
   case Type::Kind::Double:
     return UnionSlot::Double;
   case Type::Kind::Bool:
@@ -90,8 +88,10 @@ std::string unionProblem(const Type *type) {
     };
     std::string problem;
     UnionSlot slot = unionSlot(m);
-    if (slot == UnionSlot::Int || slot == UnionSlot::Long || slot == UnionSlot::Double) {
-      if (!number || unionSlot(number) != slot) {
+    if (slot == UnionSlot::Int || slot == UnionSlot::Double) {
+      const Type *base = m->isLiteral() ? m->literalBase() : m;
+      const Type *seen = number && number->isLiteral() ? number->literalBase() : number;
+      if (!number || seen != base) {
         problem = clash(number, "'typeof' gives \"number\" for both",
                         "use one number type, e.g. 'double'");
       }

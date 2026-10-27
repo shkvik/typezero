@@ -35,11 +35,8 @@ bool narrower(const Type *a, const Type *b) {
   if (a->isLiteral()) {
     return narrower(a->literalBase(), b);
   }
-  if (a->isInt()) {
-    return b->kind() == Type::Kind::Long || b->isFloat() || b->isDecimal();
-  }
-  if (a->kind() == Type::Kind::Long) {
-    return b->isFloat() || b->isDecimal();
+  if (a->isInteger()) {
+    return (b->isInteger() && b != a && b->holds(a)) || b->isFloat() || b->isDecimal();
   }
   if (a->isObject() && b->isObject()) {
     return b->isAnyObject() || a->isSubtypeOf(b);
@@ -220,8 +217,8 @@ void ReflectArgsLowerer::emitReflectFail(llvm::StringRef code, const std::string
                                                  lowering_.builder_.getVoidTy(),
                                                  {ptr, i32, ptr, lowering_.builder_.getInt64Ty()}),
       {lowering_.stringLowerer().utf8Constant(code),
-       lowering_.builder_.getInt32(uint32_t(code.size())), lowering_.stringLowerer().stringObj(text),
-       lowering_.stringLowerer().stringMeta(text)});
+       lowering_.builder_.getInt32(uint32_t(code.size())),
+       lowering_.stringLowerer().stringObj(text), lowering_.stringLowerer().stringMeta(text)});
 }
 
 void ReflectArgsLowerer::emitReflectArgs(

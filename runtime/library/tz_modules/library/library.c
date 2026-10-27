@@ -38,7 +38,7 @@ void tz_lib_class_name(TzStr *out, const void *o, TzMaker make) {
   *out = tz_buf_take(&b);
 }
 
-int32_t tz_lib_pid(TzMaker make) {
+int64_t tz_lib_pid(TzMaker make) {
   (void)make;
 #ifdef _WIN32
 

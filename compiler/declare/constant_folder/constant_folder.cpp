@@ -1,6 +1,8 @@
 #include "compiler/declare/constant_folder/constant_folder.h"
 #include "compiler/check/scopes/scopes.h"
 #include "compiler/declare/type_declarer/type_declarer.h"
+#include "llvm/ADT/APInt.h"
+#include "llvm/ADT/SmallString.h"
 #include "llvm/Support/CheckedArithmetic.h"
 #include "llvm/Support/ConvertUTF.h"
 #include <cmath>
@@ -47,11 +49,30 @@ std::string formatNumber(double value) {
 
 constexpr int64_t kMaxExact = int64_t(1) << 53;
 
-int64_t wrapTo(unsigned bits, int64_t value) {
-  return bits == 32 ? static_cast<int32_t>(static_cast<uint32_t>(value)) : value;
+int64_t wrapTo(const Type *type, int64_t value) {
+  unsigned bits = type->bitWidth();
+  if (bits == 64) {
+    return value;
+  }
+  uint64_t low = static_cast<uint64_t>(value) & ((uint64_t(1) << bits) - 1);
+  if (type->isUnsigned()) {
+    return static_cast<int64_t>(low);
+  }
+  uint64_t sign = uint64_t(1) << (bits - 1);
+
+  return static_cast<int64_t>((low ^ sign) - sign);
 }
 
-bool fitsIn(unsigned bits, int64_t value) { return wrapTo(bits, value) == value; }
+bool fitsIn(const Type *type, int64_t value) {
+  return value >= type->intMin() && (value < 0 || static_cast<uint64_t>(value) <= type->intMax());
+}
+
+const Type *bitType(const Type *type) { return type->isInt() ? Type::integer(32, false) : type; }
+
+bool exactEnough(const Type *type, int64_t value, bool wraps) {
+  return fitsIn(type, value) &&
+         (!wraps || !type->isInt() || (value >= -kMaxExact && value <= kMaxExact));
+}
 
 std::pair<int64_t, std::optional<int64_t>> intPower(int64_t base, int64_t exponent) {
   uint64_t wrapped = 1, factor = static_cast<uint64_t>(base);
@@ -68,6 +89,16 @@ std::pair<int64_t, std::optional<int64_t>> intPower(int64_t base, int64_t expone
   }
 
   return {static_cast<int64_t>(wrapped), exact};
+}
+
+std::string wideText(int64_t a, int64_t b, BinaryOp op) {
+  llvm::APInt x(128, static_cast<uint64_t>(a), true), y(128, static_cast<uint64_t>(b), true);
+  llvm::APInt r = op == BinaryOp::Add ? x + y : op == BinaryOp::Sub ? x - y : x * y;
+
+  llvm::SmallString<40> digits;
+  r.toString(digits, 10, true);
+
+  return std::string(digits);
 }
 
 std::string constantText(std::optional<int64_t> exact, double value) {
@@ -102,7 +133,9 @@ std::optional<Checker::Constant> ConstantFolder::evalConstant(const Expr *expr, 
 
     return c;
   };
-  auto member = [&](const EnumMember &m) { return m.isString ? string(m.text) : number(m.number); };
+  auto member = [&](const EnumMember &m) {
+    return m.isString ? string(m.text) : number(static_cast<double>(m.number));
+  };
 
   switch (expr->kind()) {
   case Expr::Kind::IntLit:
@@ -222,7 +255,7 @@ std::optional<int64_t> ConstantFolder::intConstant(const Expr *expr) const {
   case Expr::Kind::IntLit: {
     uint64_t value = cast<IntLitExpr>(expr)->value;
     if (value > uint64_t(std::numeric_limits<int64_t>::max()) ||
-        !fitsIn(expr->type->bitWidth(), static_cast<int64_t>(value))) {
+        !fitsIn(expr->type, static_cast<int64_t>(value))) {
       return std::nullopt;
     }
     return static_cast<int64_t>(value);
@@ -243,7 +276,7 @@ std::optional<int64_t> ConstantFolder::intConstant(const Expr *expr) const {
     if (!value) {
       return std::nullopt;
     }
-    return wrapTo(std::min(conv->operand->type->bitWidth(), conv->type->bitWidth()), *value);
+    return fitsIn(conv->type, *value) ? std::optional<int64_t>(*value) : std::nullopt;
   }
   default: {
     auto found = constants_.find(expr);
@@ -256,10 +289,10 @@ std::optional<int64_t> ConstantFolder::intConstant(const Expr *expr) const {
 }
 
 void ConstantFolder::foldUnary(UnaryExpr *unary, bool wraps) {
-  unsigned bits = unary->type->bitWidth();
+  const Type *type = unary->type;
   if (auto *lit = dyn_cast<IntLitExpr>(unary->operand); lit && unary->op == UnaryOp::Neg) {
     uint64_t magnitude = lit->value;
-    if (magnitude <= uint64_t(1) << (bits - 1)) {
+    if (magnitude <= uint64_t(1) << 63 && fitsIn(type, static_cast<int64_t>(0 - magnitude))) {
       constants_[unary] = static_cast<int64_t>(0 - magnitude);
     }
     return;
@@ -273,16 +306,17 @@ void ConstantFolder::foldUnary(UnaryExpr *unary, bool wraps) {
     constants_[unary] = *value;
     return;
   case UnaryOp::BitNot:
-    constants_[unary] = ~wrapTo(bits, *value);
+    constants_[unary] = wrapTo(bitType(type), ~wrapTo(bitType(type), *value));
     return;
   case UnaryOp::Neg: {
     std::optional<int64_t> exact = llvm::checkedSub(int64_t(0), *value);
-    if (exact && (fitsIn(bits, *exact) || (wraps && *exact >= -kMaxExact && *exact <= kMaxExact))) {
+    if (exact && exactEnough(type, *exact, wraps)) {
       constants_[unary] = *exact;
       return;
     }
-    reportOverflow(unary, unary->type, constantText(exact, -static_cast<double>(*value)),
-                   wrapTo(bits, static_cast<int64_t>(0 - static_cast<uint64_t>(*value))), wraps);
+    reportOverflow(unary, unary->type,
+                   exact ? constantText(exact, 0) : wideText(0, *value, BinaryOp::Sub),
+                   wrapTo(type, static_cast<int64_t>(0 - static_cast<uint64_t>(*value))), wraps);
     return;
   }
   default:
@@ -295,39 +329,61 @@ void ConstantFolder::foldBinary(BinaryExpr *bin, bool wraps) {
   if (!l || !r) {
     return;
   }
-  unsigned bits = bin->type->bitWidth();
+  const Type *type = bin->type;
   int64_t a = *l, b = *r;
   auto ua = static_cast<uint64_t>(a), ub = static_cast<uint64_t>(b);
+  if (type->isUnsigned() && type->bitWidth() == 64) {
+    std::optional<uint64_t> result;
+    switch (bin->op) {
+    case BinaryOp::Add:
+      result = llvm::checkedAddUnsigned(ua, ub);
+      break;
+    case BinaryOp::Sub:
+      result = ua >= ub ? std::optional<uint64_t>(ua - ub) : std::nullopt;
+      break;
+    case BinaryOp::Mul:
+      result = llvm::checkedMulUnsigned(ua, ub);
+      break;
+    default:
+      return;
+    }
+    if (!result) {
+      reportOverflow(bin, type, wideText(a, b, bin->op), 0, wraps);
+    } else if (*result <= uint64_t(std::numeric_limits<int64_t>::max())) {
+      constants_[bin] = static_cast<int64_t>(*result);
+    }
+    return;
+  }
   std::optional<int64_t> exact;
   int64_t wrapped = 0;
   double value = 0;
+  std::string text;
   switch (bin->op) {
   case BinaryOp::Add:
     exact = llvm::checkedAdd(a, b);
     wrapped = static_cast<int64_t>(ua + ub);
-    value = static_cast<double>(a) + static_cast<double>(b);
+    text = wideText(a, b, bin->op);
     break;
   case BinaryOp::Sub:
     exact = llvm::checkedSub(a, b);
     wrapped = static_cast<int64_t>(ua - ub);
-    value = static_cast<double>(a) - static_cast<double>(b);
+    text = wideText(a, b, bin->op);
     break;
   case BinaryOp::Mul:
     exact = llvm::checkedMul(a, b);
     wrapped = static_cast<int64_t>(ua * ub);
-    value = static_cast<double>(a) * static_cast<double>(b);
+    text = wideText(a, b, bin->op);
     break;
   case BinaryOp::Div:
   case BinaryOp::Rem: {
     if (b == 0) {
       return;
     }
-    int64_t min =
-        bits == 32 ? std::numeric_limits<int32_t>::min() : std::numeric_limits<int64_t>::min();
-    if (b == -1) {
+    int64_t min = type->intMin();
+    if (b == -1 && !type->isUnsigned()) {
       exact = bin->op == BinaryOp::Rem ? 0 : llvm::checkedSub(int64_t(0), a);
       wrapped = bin->op == BinaryOp::Rem ? 0 : (a == min ? min : -a);
-      value = -static_cast<double>(a);
+      text = wideText(0, a, BinaryOp::Sub);
     } else {
       exact = wrapped = bin->op == BinaryOp::Div ? a / b : a % b;
     }
@@ -344,38 +400,43 @@ void ConstantFolder::foldBinary(BinaryExpr *bin, bool wraps) {
     break;
   }
   case BinaryOp::BitAnd:
-    exact = wrapTo(bits, a) & wrapTo(bits, b);
+    exact = wrapTo(bitType(type), a) & wrapTo(bitType(type), b);
     break;
   case BinaryOp::BitOr:
-    exact = wrapTo(bits, a) | wrapTo(bits, b);
+    exact = wrapTo(bitType(type), a) | wrapTo(bitType(type), b);
     break;
   case BinaryOp::BitXor:
-    exact = wrapTo(bits, a) ^ wrapTo(bits, b);
+    exact = wrapTo(bitType(type), a) ^ wrapTo(bitType(type), b);
     break;
   case BinaryOp::Shl:
   case BinaryOp::Shr:
   case BinaryOp::UShr: {
-    unsigned width = bin->lhs->type->bitWidth();
+    const Type *shifted = bitType(bin->lhs->type);
+    unsigned width = shifted->bitWidth();
     unsigned count = static_cast<unsigned>(b) & (width - 1);
-    int64_t x = wrapTo(width, a);
-    uint64_t pattern = width == 32 ? static_cast<uint32_t>(x) : static_cast<uint64_t>(x);
+    int64_t x = wrapTo(shifted, a);
+    uint64_t pattern = width == 64 ? static_cast<uint64_t>(x)
+                                   : static_cast<uint64_t>(x) & ((uint64_t(1) << width) - 1);
     if (bin->op == BinaryOp::Shl) {
-      exact = wrapTo(bits, static_cast<int64_t>(pattern << count));
-    } else if (bin->op == BinaryOp::Shr) {
+      exact = wrapTo(shifted, static_cast<int64_t>(pattern << count));
+    } else if (bin->op == BinaryOp::Shr && !shifted->isUnsigned()) {
       exact = x >> count;
+    } else if ((pattern >> count) > uint64_t(std::numeric_limits<int64_t>::max())) {
+      return;
     } else {
-      exact = wrapTo(bits, static_cast<int64_t>(pattern >> count));
+      exact = static_cast<int64_t>(pattern >> count);
     }
     break;
   }
   default:
     return;
   }
-  if (exact && (fitsIn(bits, *exact) || (wraps && *exact >= -kMaxExact && *exact <= kMaxExact))) {
+  if (exact && exactEnough(type, *exact, wraps)) {
     constants_[bin] = *exact;
     return;
   }
-  reportOverflow(bin, bin->type, constantText(exact, value), wrapTo(bits, wrapped), wraps);
+  reportOverflow(bin, bin->type, text.empty() ? constantText(exact, value) : text,
+                 wrapTo(type, wrapped), wraps);
 }
 
 void ConstantFolder::checkDivisor(BinaryOp op, const Expr *divisor) {
@@ -394,12 +455,12 @@ void ConstantFolder::reportOverflow(const Expr *expr, const Type *type, const st
                               "low bits; for a 32-bit product use Math.imul");
     return;
   }
-  bool isInt = type->bitWidth() == 32;
-  checker_.diags_.error(expr->loc(), "this constant is " + value + ", which does not fit in '" +
-                                         type->name() + "' and would wrap around to " +
-                                         std::to_string(wrapped) + "; compute it as a " +
-                                         (isInt ? "'long' or a 'double', e.g. 'const x: long = ...'"
-                                                : "'double', e.g. 'const x: double = ...'"));
+  checker_.diags_.error(expr->loc(),
+                        "this constant is " + value + ", which does not fit in '" + type->name() +
+                            "' and would wrap around to " + std::to_string(wrapped) +
+                            "; compute it as " +
+                            (type->bitWidth() < 64 ? "an 'int', e.g. 'const x: int = ...'"
+                                                   : "a 'double', e.g. 'const x: double = ...'"));
 }
 
 Expr *ConstantFolder::globalConstant(llvm::StringRef object, llvm::StringRef name,

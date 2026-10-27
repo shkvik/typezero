@@ -10,6 +10,7 @@ public:
 
   static bool isLiteralTree(const Expr *expr);
   static const Type *literalHint(const Expr *other, const Type *hint);
+  static bool fitsLiteral(const Expr *expr, const Type *type);
   void checkComparisonOperands(BinaryExpr *bin);
   static std::optional<DecimalLiteral> decimalLiteral(const Expr *expr);
   void checkDecimalLiteralRange(const Expr *lit);

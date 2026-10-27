@@ -41,7 +41,7 @@ void RuntimeFunctions::declareRuntime() {
   lowering_.rt_.init = declare("tz_rt_init", voidTy, {});
   lowering_.rt_.shutdown = declare("tz_rt_shutdown", voidTy, {});
   lowering_.rt_.mainDone = declare("tz_rt_main_done", voidTy, {});
-  lowering_.rt_.printI32 = declare("tz_print_i32", voidTy, {i32});
+  lowering_.rt_.printU64 = declare("tz_print_u64", voidTy, {i64});
   lowering_.rt_.printI64 = declare("tz_print_i64", voidTy, {i64});
   lowering_.rt_.printF64 = declare("tz_print_f64", voidTy, {f64});
   lowering_.rt_.printBool = declare("tz_print_bool", voidTy, {i32});
@@ -55,9 +55,8 @@ void RuntimeFunctions::declareRuntime() {
   lowering_.rt_.mathPowLong = declare("tz_math_pow_long", i64, {i64, i64});
   lowering_.rt_.mathHypot = declare("tz_math_hypot", f64, {ptr, i64});
   lowering_.rt_.mathRandom = declare("tz_math_random", f64, {});
-  lowering_.rt_.checkedInt32OfLong = declare("tz_checked_int32_of_long", i32, {i64});
   lowering_.rt_.strToNumber = declare("tz_str_to_number", f64, {ptr, i64});
-  lowering_.rt_.parseInt = declare("tz_parse_int", f64, {ptr, i64, i32});
+  lowering_.rt_.parseInt = declare("tz_parse_int", f64, {ptr, i64, i64});
   lowering_.rt_.parseFloat = declare("tz_parse_float", f64, {ptr, i64});
   lowering_.rt_.numToFixed = declare("tz_num_to_fixed", voidTy, {ptr, f64, i64});
   lowering_.rt_.numToRadix = declare("tz_num_to_radix", voidTy, {ptr, f64, i64});
@@ -77,6 +76,7 @@ void RuntimeFunctions::declareRuntime() {
   lowering_.rt_.strEndsWith = declare("tz_str_ends_with", i32, {ptr, i64, ptr, i64, i64, i32});
   lowering_.rt_.strRepeat = declare("tz_str_repeat", voidTy, {ptr, ptr, i64, i64});
   lowering_.rt_.strFromI64 = declare("tz_str_from_i64", voidTy, {ptr, i64});
+  lowering_.rt_.strFromU64 = declare("tz_str_from_u64", voidTy, {ptr, i64});
   lowering_.rt_.strFromF64 = declare("tz_str_from_f64", voidTy, {ptr, f64});
   lowering_.rt_.valueToString = declare("tz_value_to_string", voidTy, {ptr, ptr, ptr});
   lowering_.rt_.strCharAtOrEmpty = declare("tz_str_char_at_or_empty", voidTy, {ptr, ptr, i64, i64});

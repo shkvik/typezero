@@ -78,7 +78,7 @@ static TzStr text_of(const Bytes *data, int32_t encoding) {
 }
 
 void tz_fs_read_file(TzStr *out, void *path_obj, uint64_t path_meta, void *flag_obj,
-                     uint64_t flag_meta, int32_t encoding, TzMaker make) {
+                     uint64_t flag_meta, int64_t encoding, TzMaker make) {
   out->obj = NULL;
   out->meta = 0;
   Bytes data;
@@ -89,7 +89,7 @@ void tz_fs_read_file(TzStr *out, void *path_obj, uint64_t path_meta, void *flag_
   tz_fs_bytes_free(&data);
 }
 
-void tz_fs_read_fd(TzStr *out, int32_t fd, int32_t encoding, TzMaker make) {
+void tz_fs_read_fd(TzStr *out, int64_t fd, int64_t encoding, TzMaker make) {
   out->obj = NULL;
   out->meta = 0;
   Bytes data;
@@ -113,7 +113,7 @@ TzBytes *tz_fs_read_file_bytes(void *path_obj, uint64_t path_meta, void *flag_ob
   return b;
 }
 
-TzBytes *tz_fs_read_fd_bytes(int32_t fd, TzMaker make) {
+TzBytes *tz_fs_read_fd_bytes(int64_t fd, TzMaker make) {
   Bytes data;
   tz_fs_bytes_init(&data);
   TzBytes *b = NULL;
@@ -157,7 +157,7 @@ static void write_fd(int32_t fd, const uint8_t *data, size_t length, TzMaker mak
 }
 
 void tz_fs_write_file(void *path_obj, uint64_t path_meta, void *data_obj, uint64_t data_meta,
-                      void *flag_obj, uint64_t flag_meta, int32_t mode, int32_t encoding,
+                      void *flag_obj, uint64_t flag_meta, int64_t mode, int64_t encoding,
                       TzMaker make) {
   if (encoding != 0) {
     TzBytes *b = tz_buffer_from_string(data_obj, data_meta, encoding);
@@ -172,7 +172,7 @@ void tz_fs_write_file(void *path_obj, uint64_t path_meta, void *data_obj, uint64
   tz_fs_bytes_free(&data);
 }
 
-void tz_fs_write_fd(int32_t fd, void *data_obj, uint64_t data_meta, int32_t encoding,
+void tz_fs_write_fd(int64_t fd, void *data_obj, uint64_t data_meta, int64_t encoding,
                     TzMaker make) {
   if (encoding != 0) {
     TzBytes *b = tz_buffer_from_string(data_obj, data_meta, encoding);
@@ -196,12 +196,12 @@ void tz_fs_write_fd(int32_t fd, void *data_obj, uint64_t data_meta, int32_t enco
 }
 
 void tz_fs_write_file_bytes(void *path_obj, uint64_t path_meta, const TzBytes *b, void *flag_obj,
-                            uint64_t flag_meta, int32_t mode, TzMaker make) {
+                            uint64_t flag_meta, int64_t mode, TzMaker make) {
   write_path(path_obj, path_meta, b->data, (size_t)tz_bytes_byte_length(b), flag_obj, flag_meta,
              mode, make);
 }
 
-void tz_fs_write_fd_bytes(int32_t fd, const TzBytes *b, TzMaker make) {
+void tz_fs_write_fd_bytes(int64_t fd, const TzBytes *b, TzMaker make) {
   write_fd(fd, b->data, (size_t)tz_bytes_byte_length(b), make);
 }
 
@@ -228,7 +228,7 @@ int32_t tz_fs_exists(void *path_obj, uint64_t path_meta) {
   return ok;
 }
 
-void tz_fs_access(void *path_obj, uint64_t path_meta, int32_t mode, TzMaker make) {
+void tz_fs_access(void *path_obj, uint64_t path_meta, int64_t mode, TzMaker make) {
   Path p;
   if (!tz_fs_path_init(&p, path_obj, path_meta, make, "access")) {
     return;
@@ -249,7 +249,7 @@ void tz_fs_access(void *path_obj, uint64_t path_meta, int32_t mode, TzMaker make
   tz_fs_path_free(&p);
 }
 
-void tz_fs_chmod(void *path_obj, uint64_t path_meta, int32_t mode, TzMaker make) {
+void tz_fs_chmod(void *path_obj, uint64_t path_meta, int64_t mode, TzMaker make) {
   Path p;
   if (!tz_fs_path_init(&p, path_obj, path_meta, make, "chmod")) {
     return;
@@ -447,7 +447,7 @@ void tz_fs_rename(void *from_obj, uint64_t from_meta, void *to_obj, uint64_t to_
 }
 
 void tz_fs_copy_file(void *from_obj, uint64_t from_meta, void *to_obj, uint64_t to_meta,
-                     int32_t mode, TzMaker make) {
+                     int64_t mode, TzMaker make) {
   Path from, to;
   if (!tz_fs_path_init(&from, from_obj, from_meta, make, "copyfile")) {
     return;

@@ -234,7 +234,7 @@ Num Evaluator::bitwise(BinaryOp op, const Num &l, const Num &r, const Type *type
   if (l.empty() || r.empty()) {
     return Num();
   }
-  Limits lim = limitsOf(type);
+  Limits lim = type && type->nonOptional()->isInt() ? Limits{kInt32Min, kInt32Max} : limitsOf(type);
   Num full = mixed(lim.lo, lim.hi, l, r);
   bool lPos = l.lo >= 0, rPos = r.lo >= 0;
   auto zero = Bound{0};
@@ -278,7 +278,7 @@ Num Evaluator::bitwise(BinaryOp op, const Num &l, const Num &r, const Type *type
     return full;
   case BinaryOp::Shr:
   case BinaryOp::UShr: {
-    unsigned mask = lim.hi > kIntMax ? 63 : 31;
+    unsigned mask = lim.hi > kInt32Max ? 63 : 31;
     if (op == BinaryOp::UShr && !lPos) {
       if (r.lo == r.hi && r.lo >= 1 && r.lo < 32) {
         return make(zero,
@@ -381,10 +381,10 @@ Num Evaluator::arithmetic(const Expr *site, BinaryOp op, const Num &l, const Num
     }
   };
   Num exact = apply(l, r);
-  if (exact.empty() || !type->nonOptional()->isInt()) {
+  if (exact.empty() || !type->nonOptional()->isInt() || op == BinaryOp::Rem) {
     return check_.overflowWarnings().fit(exact, type);
   }
-  if (exact.lo >= kIntMin && exact.hi <= kIntMax) {
+  if (exact.lo >= kIntMin && exact.hi < kIntMax) {
     return exact;
   }
   if (!wraps && !check_.quiet_) {
@@ -404,7 +404,7 @@ Num Evaluator::arithmetic(const Expr *site, BinaryOp op, const Num &l, const Num
     Num exceeding = apply(blamed(l), blamed(r));
     bool constant = (!lhs || check_.programScan().isConstantTree(lhs)) &&
                     (!rhs || check_.programScan().isConstantTree(rhs)) && (lhs || rhs);
-    if ((exceeding.lo < kIntMin || exceeding.hi > kIntMax) && !constant) {
+    if ((exceeding.lo < kIntMin || exceeding.hi >= kIntMax) && !constant) {
       check_.overflowWarnings().warn(site, l, r, lhs, rhs, exceeding, accum);
       return range(kIntMin, kIntMax, Origin::Trusted);
     }

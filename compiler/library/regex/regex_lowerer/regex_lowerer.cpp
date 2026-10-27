@@ -60,8 +60,7 @@ llvm::Constant *RegexLowerer::regexProgram(const RegexLitExpr *lit) {
 }
 
 llvm::Value *RegexLowerer::emitRegexLiteral(RegexLitExpr *lit) {
-  llvm::Type *ptr = lowering_.builder_.getPtrTy(), *i32 = lowering_.builder_.getInt32Ty(),
-             *i64 = lowering_.builder_.getInt64Ty();
+  llvm::Type *ptr = lowering_.builder_.getPtrTy(), *i64 = lowering_.builder_.getInt64Ty();
   llvm::Constant *program = regexProgram(lit);
   llvm::Constant *match = lowering_.regexNativeLowerer().regexMatcher(lit);
   if (tz_re_flags(lit->program.data()) & (TZ_RE_GLOBAL | TZ_RE_STICKY)) {
@@ -73,11 +72,10 @@ llvm::Value *RegexLowerer::emitRegexLiteral(RegexLitExpr *lit) {
     layout = new llvm::GlobalVariable(*lowering_.module_, lowering_.layoutDescTy_, true,
                                       llvm::GlobalValue::ExternalLinkage, nullptr, "tz_re_layout");
   }
-  auto *type = llvm::StructType::get(lowering_.ctx_, {i64, ptr, i32, i32, ptr, ptr, ptr});
+  auto *type = llvm::StructType::get(lowering_.ctx_, {i64, ptr, i64, ptr, ptr, ptr});
   auto *init = llvm::ConstantStruct::get(
-      type, {lowering_.builder_.getInt64(kConstantRefCount), layout, lowering_.builder_.getInt32(0),
-             lowering_.builder_.getInt32(0), program,
-             llvm::ConstantPointerNull::get(lowering_.builder_.getPtrTy()), match});
+      type, {lowering_.builder_.getInt64(kConstantRefCount), layout, lowering_.builder_.getInt64(0),
+             program, llvm::ConstantPointerNull::get(lowering_.builder_.getPtrTy()), match});
   auto *global = new llvm::GlobalVariable(*lowering_.module_, type, false,
                                           llvm::GlobalValue::PrivateLinkage, init, "tz.regex");
   global->setAlignment(llvm::Align(8));
@@ -272,7 +270,7 @@ llvm::Value *RegexLowerer::emitRegexCall(CallExpr *call) {
     llvm::Value *result;
     if (call->builtin == Builtin::RegExpFlag) {
       result = lowering_.builder_.CreateCall(
-          regexFunction("tz_re_flag", i32, {ptr, i32}),
+          regexFunction("tz_re_flag", i32, {ptr, i64}),
           {regex.value, lowering_.exprLowerer().emitExpr(call->args[0])});
       result = lowering_.builder_.CreateICmpNE(result, lowering_.builder_.getInt32(0));
     } else {
@@ -353,8 +351,10 @@ llvm::Value *RegexLowerer::emitRegexCall(CallExpr *call) {
         result, lowering_.builder_.CreateIsNotNull(result), call->type);
     break;
   case Builtin::StrSearch:
-    result = lowering_.builder_.CreateCall(regexFunction("tz_re_search", i32, {ptr, ptr, i64}),
-                                           {regex.value, obj, meta});
+    result = lowering_.builder_.CreateSExt(
+        lowering_.builder_.CreateCall(regexFunction("tz_re_search", i32, {ptr, ptr, i64}),
+                                      {regex.value, obj, meta}),
+        lowering_.builder_.getInt64Ty());
     break;
   case Builtin::StrReplaceRegex: {
     result = lowering_.stringLowerer().callReturningString(
@@ -436,7 +436,8 @@ llvm::Value *RegexLowerer::emitReplaceWith(CallExpr *call) {
                                param)
                          : value);
     } else if (k == groups + 1) {
-      args.push_back(lowering_.builder_.CreateLoad(i32, caps, "offset"));
+      args.push_back(
+          lowering_.builder_.CreateSExt(lowering_.builder_.CreateLoad(i32, caps, "offset"), i64));
     } else if (k == groups + 2) {
       lowering_.refCounts().retainValue(text, Type::string());
       args.push_back(text);

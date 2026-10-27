@@ -245,10 +245,11 @@ std::string OverflowWarnings::fixText(const Expr *site, const VarSymbol *accum) 
     if (decl && !decl->typeAnn && decl->init && !info->second.isConst) {
       std::string init =
           check_.programScan().isConstantTree(decl->init) ? exprText(decl->init) : "...";
-      return "declare it as 'let " + accum->name.str() + ": long = " + init + "', or as a double";
+      return "declare it as 'let " + accum->name.str() + ": decimal = " + init +
+             "', or as a double";
     }
     if (decl && decl->typeAnn) {
-      return "declare '" + accum->name.str() + "' as 'long' or 'double'";
+      return "declare '" + accum->name.str() + "' as 'decimal' or 'double'";
     }
   }
   const Expr *target = nullptr;
@@ -258,19 +259,17 @@ std::string OverflowWarnings::fixText(const Expr *site, const VarSymbol *accum) 
     target = update->target;
   }
   if (auto *member = dyn_cast_or_null<MemberExpr>(target)) {
-    return "make the field '" + member->name.str() + "' a 'long' or a 'double'";
+    return "make the field '" + member->name.str() + "' a 'decimal' or a 'double'";
   }
   auto init = check_.inits_.find(site);
   if (init != check_.inits_.end() && init->second.first && !init->second.first->typeAnn &&
       init->second.first->sym) {
     const VarDeclarator *decl = init->second.first;
-    return std::string("compute it as a long: '") + (init->second.second ? "const " : "let ") +
-           decl->name.str() + ": long = " + exprText(site) +
-           "', check the value before, or write '| 0' if wrapping is meant";
+    return std::string("compute it as a decimal: '") + (init->second.second ? "const " : "let ") +
+           decl->name.str() + ": decimal = " + exprText(site) + "', or check the value before";
   }
 
-  return "check the value before, compute it as a 'long' or a 'double', or write '| 0' if "
-         "wrapping is meant";
+  return "check the value before, or compute it as a 'decimal' or a 'double'";
 }
 
 void OverflowWarnings::warn(const Expr *site, const Num &l, const Num &r, const Expr *lhs,
@@ -278,7 +277,7 @@ void OverflowWarnings::warn(const Expr *site, const Num &l, const Num &r, const 
   if (!check_.reporting_ || check_.quiet_) {
     return;
   }
-  bool top = exceeding.hi > kIntMax, bottom = exceeding.lo < kIntMin;
+  bool top = exceeding.hi >= kIntMax, bottom = exceeding.lo < kIntMin;
   Bound culprit = top && bottom ? joint(0, exceeding.low(), exceeding.high())
                   : top         ? exceeding.high()
                                 : exceeding.low();

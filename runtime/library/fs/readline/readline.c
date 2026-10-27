@@ -344,7 +344,7 @@ static void readline_aborted(TzAbortListener *l) {
   readline_shut((Readline *)((char *)l - offsetof(Readline, listener)));
 }
 
-void *tz_readline_new(int32_t output, TzSignal *signal) {
+void *tz_readline_new(int64_t output, TzSignal *signal) {
   Readline *rl = (Readline *)tz_obj_alloc(sizeof(Readline));
   memset(rl, 0, sizeof *rl);
   rl->base.rc = 1;

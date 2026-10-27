@@ -1386,6 +1386,36 @@ void tz_str_from_i64(TzStr *out, int64_t value) {
   }
 }
 
+void tz_buf_integer(TzBuf *b, uint32_t kind, int64_t value) {
+  char text[24];
+  int negative = kind != TZ_T_UINT64 && value < 0;
+  uint64_t magnitude = negative ? 0 - (uint64_t)value : (uint64_t)value;
+  char *p = text + sizeof text;
+  do {
+    *--p = (char)('0' + magnitude % 10);
+    magnitude /= 10;
+  } while (magnitude != 0);
+  if (negative) {
+    *--p = '-';
+  }
+  tz_buf_ascii_n(b, p, (size_t)(text + sizeof text - p));
+}
+
+void tz_str_from_u64(TzStr *out, uint64_t value) {
+  char buf[24];
+  char *p = buf + sizeof buf;
+  do {
+    *--p = (char)('0' + value % 10);
+    value /= 10;
+  } while (value != 0);
+  size_t len = (size_t)(buf + sizeof buf - p);
+  if (len <= INLINE_MAX) {
+    *out = inline_str((const uint8_t *)p, (uint32_t)len);
+  } else {
+    *out = string_from_ascii(p, len);
+  }
+}
+
 void tz_str_from_f64(TzStr *out, double value) {
   char buf[64];
   *out = string_from_ascii(buf, tz_format_f64(value, buf));
@@ -2548,7 +2578,7 @@ static const char *leading_text(const TzStr *f, char *local, size_t size, size_t
   return ascii_text(f, start, end, local, size, n, owned);
 }
 
-double tz_parse_int(void *obj, uint64_t meta, int32_t radix) {
+double tz_parse_int(void *obj, uint64_t meta, int64_t radix) {
   TzStr f = flat(make_str(obj, meta));
   char local[64], *owned;
   size_t n;

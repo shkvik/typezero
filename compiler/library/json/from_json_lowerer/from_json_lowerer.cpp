@@ -7,6 +7,7 @@
 #include "compiler/lower/function_builder/function_builder.h"
 #include "compiler/lower/function_frame/function_frame.h"
 #include "compiler/lower/layouts/object_layouts/object_layouts.h"
+#include "compiler/lower/layouts/type_descriptors/type_descriptors.h"
 #include "compiler/lower/memory/group_lowerer/group_lowerer.h"
 #include "compiler/lower/memory/ref_counts/ref_counts.h"
 #include "compiler/lower/memory/store_lowerer/store_lowerer.h"
@@ -46,13 +47,12 @@ llvm::Value *FromJsonLowerer::emitFromJson(const Type *type, llvm::Value *json, 
   llvm::Type *voidTy = lowering_.builder_.getVoidTy();
   switch (type->kind()) {
   case Type::Kind::Int:
-    return lowering_.builder_.CreateCall(
-        lowering_.jsonLowerer().jsonFunction("tz_json_expect_int", i32, {ptr, ptr}), {json, path});
-  case Type::Kind::Long:
-    return lowering_.builder_.CreateCall(
-        lowering_.jsonLowerer().jsonFunction("tz_json_expect_long", lowering_.builder_.getInt64Ty(),
-                                             {ptr, ptr}),
-        {json, path});
+    return lowering_.builder_.CreateTrunc(
+        lowering_.builder_.CreateCall(
+            lowering_.jsonLowerer().jsonFunction("tz_json_expect_integer",
+                                                 lowering_.builder_.getInt64Ty(), {ptr, ptr, i32}),
+            {json, path, lowering_.builder_.getInt32(TypeDescriptors::descriptorKind(type))}),
+        lowering_.moduleBuilder().lower(type));
   case Type::Kind::Double:
     return lowering_.builder_.CreateCall(
         lowering_.jsonLowerer().jsonFunction("tz_json_expect_double",

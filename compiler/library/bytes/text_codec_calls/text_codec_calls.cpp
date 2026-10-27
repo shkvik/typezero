@@ -99,14 +99,14 @@ llvm::Value *TextCodecCalls::emit() {
     lowering_.refCounts().dropOperand(text);
     lowering_.refCounts().dropOperand(self);
     llvm::Value *object = lowering_.objectLayouts().allocObject(type, {0, 1});
-    lowering_.builder_.CreateStore(
-        lowering_.builder_.CreateLoad(
-            i32, lowering_.builder_.CreateConstInBoundsGEP2_32(pairTy, out, 0, 0)),
-        lowering_.objectLayouts().fieldAddress(object, type, "read"));
-    lowering_.builder_.CreateStore(
-        lowering_.builder_.CreateLoad(
-            i32, lowering_.builder_.CreateConstInBoundsGEP2_32(pairTy, out, 0, 1)),
-        lowering_.objectLayouts().fieldAddress(object, type, "written"));
+    for (unsigned k = 0; k < 2; ++k) {
+      lowering_.builder_.CreateStore(
+          lowering_.builder_.CreateSExt(
+              lowering_.builder_.CreateLoad(
+                  i32, lowering_.builder_.CreateConstInBoundsGEP2_32(pairTy, out, 0, k)),
+              i64),
+          lowering_.objectLayouts().fieldAddress(object, type, k == 0 ? "read" : "written"));
+    }
     return object;
   }
   case Builtin::TextDecoderNew:

@@ -16,9 +16,9 @@ namespace tz {
 
 namespace {
 
-constexpr int64_t kIntMin = std::numeric_limits<int32_t>::min();
+constexpr int64_t kIntMin = std::numeric_limits<int64_t>::min();
 
-constexpr int64_t kIntMax = std::numeric_limits<int32_t>::max();
+constexpr int64_t kIntMax = std::numeric_limits<int64_t>::max();
 
 void addLess(Facts &facts, const Linear &x, const Linear &y, bool orEqual) {
   facts.add(x.term, y.term, y.offset - x.offset + (orEqual ? 1 : 0));
@@ -170,10 +170,10 @@ void FlowChecker::assigned(const VarSymbol *var, const Expr *value) {
       checker_.flow_.facts.addEqual(Term::of(var), v->term, v->offset);
     }
     if (range.lo) {
-      checker_.flow_.facts.add(Term::zero(), Term::of(var), 1 - *range.lo);
+      checker_.flow_.facts.add(Term::zero(), Term::of(var), saturatingSub(1, *range.lo));
     }
     if (range.hi) {
-      checker_.flow_.facts.add(Term::of(var), Term::zero(), *range.hi + 1);
+      checker_.flow_.facts.add(Term::of(var), Term::zero(), saturatingAdd(*range.hi, 1));
     }
     if (auto *call = dyn_cast<CallExpr>(value);
         call && (call->builtin == Builtin::MathMin || call->builtin == Builtin::MathMax) &&
@@ -208,10 +208,10 @@ void FlowChecker::assigned(const VarSymbol *var, const Expr *value) {
   }
   ValueRange range = checker_.indexProofs().lengthRange(value);
   if (range.lo) {
-    checker_.flow_.facts.add(Term::zero(), Term::lengthOf(var), 1 - *range.lo);
+    checker_.flow_.facts.add(Term::zero(), Term::lengthOf(var), saturatingSub(1, *range.lo));
   }
   if (range.hi) {
-    checker_.flow_.facts.add(Term::lengthOf(var), Term::zero(), *range.hi + 1);
+    checker_.flow_.facts.add(Term::lengthOf(var), Term::zero(), saturatingAdd(*range.hi, 1));
   }
 }
 
@@ -220,8 +220,10 @@ void FlowChecker::incremented(const VarSymbol *var, int64_t delta) {
     return;
   }
   Term t = Term::of(var);
-  bool safe = delta >= 0 ? checker_.flow_.facts.proves(t, Term::zero(), kIntMax - delta + 1)
-                         : checker_.flow_.facts.proves(Term::zero(), t, delta - kIntMin + 1);
+  bool safe =
+      delta == 0 ||
+      (delta > 0 ? checker_.flow_.facts.proves(t, Term::zero(), kIntMax - (delta - 1))
+                 : checker_.flow_.facts.proves(Term::zero(), t, saturatingSub(delta + 1, kIntMin)));
   if (safe) {
     checker_.flow_.facts.shift(t, delta);
   } else {

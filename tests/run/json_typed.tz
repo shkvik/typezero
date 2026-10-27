@@ -3,7 +3,7 @@
 // skipped, null and a missing key give undefined to an optional field.
 type Item = { title: string; price: decimal; count: int }
 type Order = {
-  id: long
+  id: int
   items: Item[]
   address: { city: string; zip?: string }
   paid: boolean
@@ -28,6 +28,7 @@ const text = `{
 }`
 const order = must(JSON.parse<Order>(text))
 console.log(order)
+// expect-warning: 'order.id + 1' may overflow int: 'order.id' comes from JSON
 console.log(order.id + 1, order.items.length, order.address.zip ?? "no zip", order.note == undefined)
 let total: decimal = 0
 for (const item of order.items) total += item.price * item.count

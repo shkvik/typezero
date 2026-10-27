@@ -80,7 +80,9 @@ llvm::Value *StringMethodLowerer::emitStringMethod(CallExpr *call) {
   case Builtin::StrCharCodeAt: {
     llvm::Value *position = numbers[0];
     if (!call->mayBeOutOfRange) {
-      result = lowering_.builder_.CreateCall(lowering_.rt_.strCharCodeAt, {obj, meta, position});
+      result = lowering_.builder_.CreateSExt(
+          lowering_.builder_.CreateCall(lowering_.rt_.strCharCodeAt, {obj, meta, position}),
+          lowering_.builder_.getInt64Ty());
       break;
     }
     llvm::Value *inRange = lowering_.builder_.CreateICmpULT(
@@ -141,9 +143,9 @@ llvm::Value *StringMethodLowerer::emitStringMethod(CallExpr *call) {
     result = lowering_.builder_.CreateCall(
         fn, {obj, meta, lowering_.stringLowerer().stringObj(search),
              lowering_.stringLowerer().stringMeta(search), position, hasPosition});
-    if (call->builtin != Builtin::StrIndexOf) {
-      result = lowering_.builder_.CreateICmpNE(result, lowering_.builder_.getInt32(0));
-    }
+    result = call->builtin != Builtin::StrIndexOf
+                 ? lowering_.builder_.CreateICmpNE(result, lowering_.builder_.getInt32(0))
+                 : lowering_.builder_.CreateSExt(result, lowering_.builder_.getInt64Ty());
     break;
   }
   case Builtin::StrRepeat:
@@ -159,7 +161,9 @@ llvm::Value *StringMethodLowerer::emitStringMethod(CallExpr *call) {
   case Builtin::StrCodePointAt: {
     llvm::Value *position = numbers[0];
     auto read = [&]() -> llvm::Value * {
-      return lowering_.builder_.CreateCall(lowering_.rt_.strCodePoint, {obj, meta, position});
+      return lowering_.builder_.CreateSExt(
+          lowering_.builder_.CreateCall(lowering_.rt_.strCodePoint, {obj, meta, position}),
+          lowering_.builder_.getInt64Ty());
     };
     result = call->mayBeOutOfRange
                  ? lowering_.arrayLowerer().emitCheckedRead(
@@ -176,6 +180,7 @@ llvm::Value *StringMethodLowerer::emitStringMethod(CallExpr *call) {
                                            {obj, meta, lowering_.stringLowerer().stringObj(search),
                                             lowering_.stringLowerer().stringMeta(search), position,
                                             hasPosition});
+    result = lowering_.builder_.CreateSExt(result, lowering_.builder_.getInt64Ty());
     break;
   }
   case Builtin::StrSplit: {

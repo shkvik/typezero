@@ -38,7 +38,7 @@ console.log(ratio, power, n / 4)
 
 // int and long next to decimals
 const count: int = 3
-const units: long = 9007199254740993
+const units: int = 9007199254740993
 console.log(price * count, price + units, units * big, big - units)
 console.log(count < price, units > price, price == 19.99)
 

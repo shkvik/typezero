@@ -46,7 +46,6 @@ std::string objectTypeSpelling(llvm::ArrayRef<Field> fields) {
 const char *typeOfName(const Type *type) {
   switch (type->kind()) {
   case Type::Kind::Int:
-  case Type::Kind::Long:
   case Type::Kind::Double:
     return "number";
   case Type::Kind::String:

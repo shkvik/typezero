@@ -13,7 +13,7 @@ const done = !stack.length
 let ratio = 0.5
 // expect-error: 0 and NaN would count as false; compare it as you mean: 'ratio != 0', 'ratio > 0' or '!Number.isNaN(ratio)'
 const half = ratio ? ratio / 2 : 0
-const big: long = 5
+const big: int = 5
 // expect-error: a number cannot be a condition
 do count++; while (big)
 // expect-error: a number cannot be a condition

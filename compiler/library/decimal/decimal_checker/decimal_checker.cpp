@@ -76,8 +76,7 @@ const Replacement kReplacements[] = {
 };
 
 std::string exponentMessage(const Type *found) {
-  std::string message = "the exponent of a decimal power must be an integer ('int' or 'long'), "
-                        "found '" +
+  std::string message = "the exponent of a decimal power must be an integer ('int'), found '" +
                         found->name().str() + "'";
   if (found->isFloat() || found->isDecimal()) {
     message += "; for a square root, use 'x.sqrt()'";
@@ -128,6 +127,24 @@ bool DecimalChecker::isLiteralTree(const Expr *expr) {
   }
 }
 
+bool DecimalChecker::fitsLiteral(const Expr *expr, const Type *type) {
+  bool negated = false;
+  if (auto *unary = dyn_cast<UnaryExpr>(expr); unary && unary->op == UnaryOp::Neg) {
+    expr = unary->operand;
+    negated = true;
+  }
+  auto *lit = dyn_cast<IntLitExpr>(expr);
+  if (!lit) {
+    return false;
+  }
+  if (negated) {
+    return lit->value == 0 ||
+           (!type->isUnsigned() && lit->value <= uint64_t(0) - uint64_t(type->intMin()));
+  }
+
+  return lit->value <= type->intMax();
+}
+
 const Type *DecimalChecker::literalHint(const Expr *other, const Type *hint) {
   return other->type && other->type->nonOptional()->isDecimal() ? Type::decimalTy() : hint;
 }
@@ -140,22 +157,25 @@ void DecimalChecker::checkComparisonOperands(BinaryExpr *bin) {
 
     return isLiteralTree(e) || isa<StringLitExpr>(e) || isa<BoolLitExpr>(e);
   };
-  auto hint = [&](const Expr *other) {
+  auto hint = [&](const Expr *other, const Expr *self) {
     const Type *type = other->type ? other->type->nonOptional() : nullptr;
     if (type && (type->isLiteral() || type->isUnion())) {
       return other->type;
+    }
+    if (type && type->isInteger() && !type->isInt() && fitsLiteral(self, type)) {
+      return type;
     }
 
     return literalHint(other, nullptr);
   };
   if (literal(bin->lhs) && !literal(bin->rhs)) {
     bin->rhs = checker_.exprChecker().checkExpr(bin->rhs);
-    bin->lhs = checker_.exprChecker().checkExpr(bin->lhs, hint(bin->rhs));
+    bin->lhs = checker_.exprChecker().checkExpr(bin->lhs, hint(bin->rhs, bin->lhs));
     return;
   }
   bin->lhs = checker_.exprChecker().checkExpr(bin->lhs);
-  bin->rhs =
-      checker_.exprChecker().checkExpr(bin->rhs, literal(bin->rhs) ? hint(bin->lhs) : nullptr);
+  bin->rhs = checker_.exprChecker().checkExpr(bin->rhs, literal(bin->rhs) ? hint(bin->lhs, bin->rhs)
+                                                                          : nullptr);
 }
 
 std::optional<DecimalLiteral> DecimalChecker::decimalLiteral(const Expr *expr) {
@@ -222,7 +242,7 @@ Expr *DecimalChecker::checkDecimalArithmetic(BinaryExpr *bin) {
       checker_.diags_.error(bin->rhs->loc(), exponentMessage(r));
       return bin;
     }
-    bin->rhs = checker_.typeRelations().convert(bin->rhs, Type::longTy());
+    bin->rhs = checker_.typeRelations().convert(bin->rhs, Type::intTy());
     bin->type = decimal;
     return bin;
   }
@@ -267,7 +287,7 @@ void DecimalChecker::checkDecimalAssign(AssignExpr *assign, BinaryOp op) {
       checker_.diags_.error(assign->value->loc(), exponentMessage(valueType));
       return;
     }
-    assign->value = checker_.typeRelations().convert(assign->value, Type::longTy());
+    assign->value = checker_.typeRelations().convert(assign->value, Type::intTy());
     return;
   }
   bool arithmetic = op == BinaryOp::Add || op == BinaryOp::Sub || op == BinaryOp::Mul ||
@@ -438,14 +458,14 @@ Expr *DecimalChecker::checkRoundingMode(Expr *arg) {
 }
 
 Expr *DecimalChecker::checkDecimalCount(Expr *arg, const char *what, int64_t lo, int64_t hi) {
-  arg = checker_.exprChecker().checkExpr(arg, Type::longTy());
+  arg = checker_.exprChecker().checkExpr(arg, Type::intTy());
   const Type *type = arg->type;
   if (type->isError()) {
     return arg;
   }
   if (!type->isInteger()) {
-    std::string message = std::string(what) + " must be an integer ('int' or 'long'), found '" +
-                          type->name().str() + "'";
+    std::string message =
+        std::string(what) + " must be an integer ('int'), found '" + type->name().str() + "'";
     if (type->isOptional()) {
       message += "; the value may be undefined: check it first or give a default with '??'";
     }
@@ -454,7 +474,7 @@ Expr *DecimalChecker::checkDecimalCount(Expr *arg, const char *what, int64_t lo,
   }
   checker_.indexProofs().requireBetween(arg, lo, hi, what);
 
-  return checker_.typeRelations().convert(arg, Type::longTy());
+  return checker_.typeRelations().convert(arg, Type::intTy());
 }
 
 Expr *DecimalChecker::checkDecimalMethod(CallExpr *call, MemberExpr *member) {
@@ -524,8 +544,8 @@ Expr *DecimalChecker::checkDecimalMethod(CallExpr *call, MemberExpr *member) {
       arg = checker_.argumentChecker().checkArg(arg, decimal);
       break;
     case 'p': {
-      bool positive = method->builtin == Builtin::DecDiv ||
-                      method->builtin == Builtin::DecToExponential;
+      bool positive =
+          method->builtin == Builtin::DecDiv || method->builtin == Builtin::DecToExponential;
       arg = checkDecimalCount(arg, "the number of decimal places", positive ? 0 : -1000000000,
                               1000000000);
       break;
@@ -556,7 +576,7 @@ Expr *DecimalChecker::checkDecimalMethod(CallExpr *call, MemberExpr *member) {
 void DecimalChecker::reportBigInt(llvm::SMLoc loc, llvm::StringRef what) {
   checker_.diags_.error(
       loc, what + " is not supported, as there is no bigint: integers up to 9.2e18 fit in "
-                  "'long', longer ones in 'decimal' (e.g. 'decimal(2) ** 100')");
+                  "'int', longer ones in 'decimal' (e.g. 'decimal(2) ** 100')");
 }
 
 }

@@ -191,9 +191,7 @@ const Type *literalType(const Expr *value) {
     value = unary->operand;
   }
   if (auto *lit = dyn_cast<IntLitExpr>(value)) {
-    return lit->value < (uint64_t(1) << 31)   ? Type::intTy()
-           : lit->value < (uint64_t(1) << 63) ? Type::longTy()
-                                              : Type::doubleTy();
+    return lit->value < (uint64_t(1) << 63) ? Type::intTy() : Type::doubleTy();
   }
   if (isa<FloatLitExpr>(value)) {
     return Type::doubleTy();

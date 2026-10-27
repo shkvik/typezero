@@ -8,7 +8,7 @@ import { join } from "node:path"
 import { tmpdir } from "node:os"
 
 function digest(text: string) {
-  let h: long = 7
+  let h: double = 7
   for (let round = 0; round < 20; round++)
     for (let i = 0; i < text.length; i++) h = (h * 31 + text.charCodeAt(i) + round) % 1000003
   return h

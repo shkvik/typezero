@@ -49,7 +49,7 @@ llvm::Value *MemberLowerer::emitMember(MemberExpr *member) {
                             : lowering_.stringLowerer().stringLength(object.value);
   lowering_.refCounts().dropOperand(object);
 
-  return lowering_.builder_.CreateTrunc(length, lowering_.builder_.getInt32Ty(), "length");
+  return length;
 }
 
 }

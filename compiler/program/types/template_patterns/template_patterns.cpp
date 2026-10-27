@@ -148,11 +148,8 @@ bool holeAccepts(const Type *hole, const std::u16string &part) {
   case Type::Kind::Double:
     return numberString(part, value);
   case Type::Kind::Int:
-    return numberString(part, value) && value == std::trunc(value) && value >= -2147483648.0 &&
-           value <= 2147483647.0;
-  case Type::Kind::Long:
     return numberString(part, value) && value == std::trunc(value) &&
-           std::fabs(value) <= 9223372036854775807.0;
+           value >= double(hole->intMin()) && value <= double(hole->intMax());
   case Type::Kind::Literal:
     return hole->isStringLiteral() ? part == hole->literalText() : utf8Text(part) == hole->name();
   case Type::Kind::Union:

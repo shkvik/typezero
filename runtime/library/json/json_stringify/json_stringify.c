@@ -269,11 +269,15 @@ static int write_value(Writer *w, const TzType *type, const void *value) {
   }
   type = tz_resolve(type, &value);
   switch (type->kind) {
-  case TZ_T_INT:
-    write_number(out, *(const int32_t *)value);
-    return 1;
-  case TZ_T_LONG:
-    write_number(out, (double)*(const int64_t *)value);
+  case TZ_T_INT8:
+  case TZ_T_INT16:
+  case TZ_T_INT32:
+  case TZ_T_INT64:
+  case TZ_T_UINT8:
+  case TZ_T_UINT16:
+  case TZ_T_UINT32:
+  case TZ_T_UINT64:
+    tz_buf_integer(out, type->kind, tz_load_integer(type->kind, value));
     return 1;
   case TZ_T_DOUBLE:
     write_number(out, *(const double *)value);

@@ -276,11 +276,8 @@ Limits limitsOf(const Type *type) {
     return {-kInf, kInf};
   }
   type = type->nonOptional();
-  if (type->isInt()) {
-    return {kIntMin, kIntMax};
-  }
   if (type->isInteger()) {
-    return {kLongMin, kLongMax};
+    return {double(type->intMin()), double(type->intMax())};
   }
   if (type->isLiteral() && type->literalBase()->isNumeric()) {
     return {type->literalNumber(), type->literalNumber()};

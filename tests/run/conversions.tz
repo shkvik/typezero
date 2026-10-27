@@ -28,17 +28,17 @@ for (const v of values)
   console.log(v, Math.floor(v), Math.ceil(v), Math.round(v), Math.trunc(v))
 console.log(Math.round(zero / zero), Math.floor(1 / zero), Math.ceil(-1 / zero))
 const rounded: int = Math.round(1234.5)
-const floored: long = Math.floor(-1e15 - 0.5)
+const floored: int = Math.floor(-1e15 - 0.5)
 const cents: int = Math.round(19.99 * 100)
 console.log(rounded, floored, cents, rounded + 1)
 const count: int = 7
 console.log(Math.floor(count), Math.round(count))
-const big: long = 5000000000
+const big: int = 5000000000
 const small: int = Math.trunc(big - 4000000000)
 console.log(small)
 
 // A long becomes a double by itself, as in C#; beyond 2^53 it rounds, as every
 // number does in JavaScript.
-const huge: long = 9007199254740993
+const huge: int = 9007199254740993
 const asDouble: double = huge
 console.log(asDouble, huge + 0.5, huge * 2.0 > 1e16)

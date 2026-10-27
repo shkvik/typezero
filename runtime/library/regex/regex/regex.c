@@ -896,7 +896,6 @@ TzRegex *tz_re_new(const uint32_t *program, TzReMatch match) {
   re->rc = 1;
   re->layout = &tz_re_layout;
   re->last_index = 0;
-  re->reserved = 0;
   re->program = program;
   re->owned = NULL;
   re->match = match;
@@ -1037,7 +1036,7 @@ void tz_re_to_string(TzStr *out, TzRegex *re) {
   *out = tz_buf_take(&b);
 }
 
-int32_t tz_re_flag(TzRegex *re, int32_t flag) {
+int32_t tz_re_flag(TzRegex *re, int64_t flag) {
   return (tz_re_flags(re->program) & (uint32_t)flag) != 0;
 }
 
@@ -1238,7 +1237,7 @@ static void *build_match(const TzMatchShape *shape, const uint32_t *program, TzS
     item[has] = 1;
   }
   *(TzArray **)(match + shape->items) = items;
-  *(int32_t *)(match + shape->index) = caps[0];
+  *(int64_t *)(match + shape->index) = caps[0];
   tz_str_retain_value(input);
   *(TzStr *)(match + shape->input) = input;
   if (shape->groups_layout) {
@@ -1251,8 +1250,8 @@ static void *build_match(const TzMatchShape *shape, const uint32_t *program, TzS
       char *pair = NULL;
       if (caps[2 * k] >= 0) {
         pair = (char *)new_instance(shape->pair_layout, shape->pair_size);
-        *(int32_t *)(pair + shape->pair_layout->fields[0].offset) = caps[2 * k];
-        *(int32_t *)(pair + shape->pair_layout->fields[1].offset) = caps[2 * k + 1];
+        *(int64_t *)(pair + shape->pair_layout->fields[0].offset) = caps[2 * k];
+        *(int64_t *)(pair + shape->pair_layout->fields[1].offset) = caps[2 * k + 1];
       }
       tz_arr_push_value(indices, &pair);
     }
@@ -1319,7 +1318,7 @@ TzArray *tz_re_match_global(TzRegex *re, void *s_obj, uint64_t s_meta, const TzT
 
 void tz_re_check_match_all(const TzRegex *re) { (void)re; }
 
-int32_t tz_re_match_all_begin(TzRegex *re) { return re->last_index; }
+int32_t tz_re_match_all_begin(TzRegex *re) { return (int32_t)re->last_index; }
 
 void *tz_re_match_next(TzRegex *re, int32_t *last_index, void *s_obj, uint64_t s_meta,
                        const TzMatchShape *shape) {
@@ -1331,9 +1330,8 @@ void *tz_re_match_next(TzRegex *re, int32_t *last_index, void *s_obj, uint64_t s
   void *match = NULL;
   int64_t last = *last_index > 0 ? *last_index : 0;
   int32_t next = 0;
-  if (last <= (int64_t)t.length &&
-      re->match(re->program, t.units, t.two, (int32_t)t.length, (int32_t)last, caps,
-                (flags & TZ_RE_STICKY) != 0, 1)) {
+  if (last <= (int64_t)t.length && re->match(re->program, t.units, t.two, (int32_t)t.length,
+                                             (int32_t)last, caps, (flags & TZ_RE_STICKY) != 0, 1)) {
     match = build_match(shape, re->program, t.original, caps);
     next = caps[1];
     if (caps[0] == caps[1]) {

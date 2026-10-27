@@ -20,10 +20,13 @@ namespace tz {
 LiteralChecker::LiteralChecker(Checker &checker) : checker_(checker) {}
 
 Expr *LiteralChecker::checkIntLit(IntLitExpr *lit, const Type *expected, bool negated) {
-  auto fits = [&](unsigned bits) {
-    uint64_t limit = uint64_t(1) << (bits - 1);
+  auto fits = [&](const Type *type) {
+    if (negated) {
+      return lit->value == 0 ||
+             (!type->isUnsigned() && lit->value <= uint64_t(0) - uint64_t(type->intMin()));
+    }
 
-    return negated ? lit->value <= limit : lit->value < limit;
+    return lit->value <= type->intMax();
   };
 
   if (expected) {
@@ -40,14 +43,12 @@ Expr *LiteralChecker::checkIntLit(IntLitExpr *lit, const Type *expected, bool ne
   }
   if (expected && (expected->isNumeric() || expected->isDecimal())) {
     lit->type = expected;
-    if (expected->isInteger() && !fits(expected->bitWidth())) {
+    if (expected->isInteger() && !fits(expected)) {
       checker_.diags_.error(lit->loc(),
                             "integer literal does not fit in type '" + expected->name() + "'");
     }
-  } else if (fits(32)) {
+  } else if (fits(Type::intTy())) {
     lit->type = Type::intTy();
-  } else if (fits(64)) {
-    lit->type = Type::longTy();
   } else {
     lit->type = Type::doubleTy();
   }

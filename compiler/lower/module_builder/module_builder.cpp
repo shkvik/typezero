@@ -153,9 +153,7 @@ llvm::Type *ModuleBuilder::lower(const Type *type) {
   case Type::Kind::Bool:
     return lowering_.builder_.getInt1Ty();
   case Type::Kind::Int:
-    return lowering_.builder_.getInt32Ty();
-  case Type::Kind::Long:
-    return lowering_.builder_.getInt64Ty();
+    return lowering_.builder_.getIntNTy(type->bitWidth());
   case Type::Kind::Double:
     return lowering_.builder_.getDoubleTy();
   case Type::Kind::Decimal:

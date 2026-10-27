@@ -1,0 +1,58 @@
+// The integer types of docs/numbers.md: int is 64 bits, and int8 ... uint64
+// hold exactly their range. For now they convert to wider types by themselves
+// and wrap around at their width; explicit conversions and overflow errors
+// come with the next steps of the numbers.
+const big: int = 9007199254740993
+console.log(big, big + 1, String(big), `${big * 2}`)
+const b: uint8 = 200
+const s: int16 = -300
+const w: uint32 = 4000000000
+const u: uint64 = 18446744073709551615
+const i32: int32 = -2147483648
+console.log(b, s, w, u, i32)
+console.log(b + 55, s * 100, w + 1, u - 1, i32 + 1)
+console.log(String(u), `${w}`, [b, b], [u])
+
+// Each type wraps at its own width.
+let x: uint8 = 250
+for (let k = 0; k < 10; k++) x++
+let y: int8 = 120
+y += 10
+console.log(x, y)
+
+// Unsigned division, remainder and comparison.
+const top: uint64 = 18446744073709551600
+console.log(top / 3, top % 7, top > 1, (top / 2) < top)
+const half: uint32 = 3000000000
+console.log(half / 2, half > 2000000000, Math.max(half, 100), Math.min(half, 100))
+
+// Narrower types widen to wider ones and to double by themselves.
+const sum: int = b + s
+const d: double = w
+console.log(sum, d, b * 1.5, Math.abs(s), Math.sign(s))
+
+// Bits work at the width of the type.
+const m: uint8 = 0b1010_1100
+console.log(m & 0x0f, m | 1, m ^ 0xff, m >> 2, m << 1)
+const wide: uint64 = 1
+console.log(wide << 63, (wide << 63) >> 62)
+
+// In objects, arrays, optionals, unions and JSON.
+type Pixel = { r: uint8; g: uint8; b: uint8; alpha: int16 }
+const px: Pixel = { r: 255, g: 128, b: 0, alpha: -1 }
+const row: uint8[] = [1, 2, 3, 255]
+let maybe: int16 | undefined = undefined
+maybe = 7
+const either: uint32 | string = 4294967295
+console.log(px, row, maybe, either)
+console.log(JSON.stringify(px), JSON.stringify({ u, big }))
+const parsed = JSON.parse<Pixel>('{"r": 1, "g": 2, "b": 3, "alpha": -5}')
+if (parsed.isOk()) console.log(parsed.value)
+const bad = JSON.parse<Pixel>('{"r": 300, "g": 2, "b": 3, "alpha": -5}')
+if (bad.isErr()) console.log(bad.error.message)
+const counts = new Map<uint8, string>()
+counts.set(1, "one")
+counts.set(255, "max")
+console.log(counts.get(255), counts.size)
+const anything: unknown = px.r
+console.log(anything, typeof anything)

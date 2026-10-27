@@ -7,7 +7,7 @@ export class Money {
     Money.created++
   }
   // Whole cents of euros: `new Money(250)` is 2.50 EUR.
-  constructor(cents: long) {
+  constructor(cents: int) {
     this.amount = decimal(cents).shiftedBy(-2)
     this.currency = "EUR"
     Money.created++

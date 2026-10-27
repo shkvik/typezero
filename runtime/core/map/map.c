@@ -150,10 +150,15 @@ static uint32_t json_hash(const TzJson *j) {
 
 static uint32_t value_hash(const TzType *type, const void *key, int fold) {
   switch (type->kind) {
-  case TZ_T_INT:
-    return finish(mix_word(TZ_T_INT, (uint64_t)(uint32_t)*(const int32_t *)key));
-  case TZ_T_LONG:
-    return finish(mix_word(TZ_T_LONG, (uint64_t)*(const int64_t *)key));
+  case TZ_T_INT8:
+  case TZ_T_INT16:
+  case TZ_T_INT32:
+  case TZ_T_INT64:
+  case TZ_T_UINT8:
+  case TZ_T_UINT16:
+  case TZ_T_UINT32:
+  case TZ_T_UINT64:
+    return finish(mix_word(TZ_T_INT64, (uint64_t)tz_load_integer(type->kind, key)));
   case TZ_T_DOUBLE:
     return finish(mix_word(TZ_T_DOUBLE, double_bits(*(const double *)key)));
   case TZ_T_BOOL:
@@ -196,10 +201,15 @@ static uint32_t value_hash(const TzType *type, const void *key, int fold) {
 
 static int values_equal(const TzType *type, const void *a, const void *b, int fold) {
   switch (type->kind) {
-  case TZ_T_INT:
-    return *(const int32_t *)a == *(const int32_t *)b;
-  case TZ_T_LONG:
-    return *(const int64_t *)a == *(const int64_t *)b;
+  case TZ_T_INT8:
+  case TZ_T_INT16:
+  case TZ_T_INT32:
+  case TZ_T_INT64:
+  case TZ_T_UINT8:
+  case TZ_T_UINT16:
+  case TZ_T_UINT32:
+  case TZ_T_UINT64:
+    return tz_load_integer(type->kind, a) == tz_load_integer(type->kind, b);
   case TZ_T_DOUBLE: {
     double x = *(const double *)a, y = *(const double *)b;
     return x == y || (isnan(x) && isnan(y));

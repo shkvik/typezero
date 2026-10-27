@@ -613,10 +613,15 @@ static int values_equal(const TzType *type, const void *a, const void *b, int sa
     type = tz_resolve(type, &x);
     return values_equal(type, x, y, same_value_zero);
   }
-  case TZ_T_INT:
-    return *(const int32_t *)a == *(const int32_t *)b;
-  case TZ_T_LONG:
-    return *(const int64_t *)a == *(const int64_t *)b;
+  case TZ_T_INT8:
+  case TZ_T_INT16:
+  case TZ_T_INT32:
+  case TZ_T_INT64:
+  case TZ_T_UINT8:
+  case TZ_T_UINT16:
+  case TZ_T_UINT32:
+  case TZ_T_UINT64:
+    return tz_load_integer(type->kind, a) == tz_load_integer(type->kind, b);
   case TZ_T_DOUBLE: {
     double x = *(const double *)a, y = *(const double *)b;
     return x == y || (same_value_zero && isnan(x) && isnan(y));
@@ -681,21 +686,16 @@ void tz_buf_value(TzBuf *out, const TzType *type, const void *value, int in_join
   char text[64];
   type = tz_resolve(type, &value);
   switch (type->kind) {
-  case TZ_T_INT:
-  case TZ_T_LONG: {
-    int64_t v = type->kind == TZ_T_INT ? *(const int32_t *)value : *(const int64_t *)value;
-    uint64_t magnitude = v < 0 ? 0 - (uint64_t)v : (uint64_t)v;
-    char *p = text + sizeof text;
-    do {
-      *--p = (char)('0' + magnitude % 10);
-      magnitude /= 10;
-    } while (magnitude != 0);
-    if (v < 0) {
-      *--p = '-';
-    }
-    tz_buf_ascii_n(out, p, (size_t)(text + sizeof text - p));
+  case TZ_T_INT8:
+  case TZ_T_INT16:
+  case TZ_T_INT32:
+  case TZ_T_INT64:
+  case TZ_T_UINT8:
+  case TZ_T_UINT16:
+  case TZ_T_UINT32:
+  case TZ_T_UINT64:
+    tz_buf_integer(out, type->kind, tz_load_integer(type->kind, value));
     break;
-  }
   case TZ_T_DOUBLE:
     tz_buf_ascii_n(out, text, tz_format_f64(*(const double *)value, text));
     break;

@@ -44,7 +44,7 @@ function whileLoop(a: int[]): int {
   return s
 }
 function powers(n: int): int {
-  if (n < 0) return 0
+  if (n < 0 || n > 62) return 0
   const f = new Array<int>(n + 1)
   f[0] = 1
   for (let i = 1; i <= n; i++) f[i] = f[i - 1] * 2

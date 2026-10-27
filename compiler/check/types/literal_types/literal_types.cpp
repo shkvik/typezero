@@ -188,8 +188,8 @@ const Type *LiteralTypes::numberMemberOf(const Type *expected, bool fraction) {
   if (!type->isUnion()) {
     return nullptr;
   }
-  for (const Type *t : {Type::intTy(), Type::longTy(), Type::doubleTy(), Type::decimalTy()}) {
-    if ((!fraction || !t->isInteger()) && llvm::is_contained(type->members(), t)) {
+  for (const Type *t : type->members()) {
+    if ((t->isInteger() || t->isFloat() || t->isDecimal()) && (!fraction || !t->isInteger())) {
       return t;
     }
   }

@@ -29,8 +29,8 @@
 #endif
 
 enum {
-  TZ_T_INT = 1,
-  TZ_T_LONG = 2,
+  TZ_T_INT32 = 1,
+  TZ_T_INT64 = 2,
   TZ_T_DOUBLE = 3,
   TZ_T_BOOL = 4,
   TZ_T_STRING = 5,
@@ -46,7 +46,110 @@ enum {
   TZ_T_ATOM = 15,
   TZ_T_UNKNOWN = 16,
   TZ_T_GETTER = 17,
+  TZ_T_INT8 = 18,
+  TZ_T_INT16 = 19,
+  TZ_T_UINT8 = 20,
+  TZ_T_UINT16 = 21,
+  TZ_T_UINT32 = 22,
+  TZ_T_UINT64 = 23,
 };
+
+static inline int tz_kind_integer(uint32_t kind) {
+  return kind == TZ_T_INT32 || kind == TZ_T_INT64 || (kind >= TZ_T_INT8 && kind <= TZ_T_UINT64);
+}
+
+static inline int tz_kind_unsigned(uint32_t kind) {
+  return kind >= TZ_T_UINT8 && kind <= TZ_T_UINT64;
+}
+
+static inline int64_t tz_load_integer(uint32_t kind, const void *p) {
+  switch (kind) {
+  case TZ_T_INT8:
+    return *(const int8_t *)p;
+  case TZ_T_INT16:
+    return *(const int16_t *)p;
+  case TZ_T_INT32:
+    return *(const int32_t *)p;
+  case TZ_T_UINT8:
+    return *(const uint8_t *)p;
+  case TZ_T_UINT16:
+    return *(const uint16_t *)p;
+  case TZ_T_UINT32:
+    return *(const uint32_t *)p;
+  default:
+    return *(const int64_t *)p;
+  }
+}
+
+static inline void tz_store_integer(uint32_t kind, void *p, int64_t v) {
+  switch (kind) {
+  case TZ_T_INT8:
+  case TZ_T_UINT8:
+    *(uint8_t *)p = (uint8_t)v;
+    break;
+  case TZ_T_INT16:
+  case TZ_T_UINT16:
+    *(uint16_t *)p = (uint16_t)v;
+    break;
+  case TZ_T_INT32:
+  case TZ_T_UINT32:
+    *(uint32_t *)p = (uint32_t)v;
+    break;
+  default:
+    *(int64_t *)p = v;
+    break;
+  }
+}
+
+static inline double tz_integer_double(uint32_t kind, int64_t v) {
+  return kind == TZ_T_UINT64 ? (double)(uint64_t)v : (double)v;
+}
+
+static inline int tz_integer_fits(uint32_t kind, int64_t v, int is_unsigned) {
+  if (is_unsigned && v < 0) {
+    return kind == TZ_T_UINT64;
+  }
+  if (kind == TZ_T_UINT64) {
+    return is_unsigned || v >= 0;
+  }
+  switch (kind) {
+  case TZ_T_INT8:
+    return v >= -128 && v <= 127;
+  case TZ_T_INT16:
+    return v >= -32768 && v <= 32767;
+  case TZ_T_INT32:
+    return v >= -2147483647 - 1 && v <= 2147483647;
+  case TZ_T_UINT8:
+    return v >= 0 && v <= 255;
+  case TZ_T_UINT16:
+    return v >= 0 && v <= 65535;
+  case TZ_T_UINT32:
+    return v >= 0 && v <= 4294967295LL;
+  default:
+    return 1;
+  }
+}
+
+static inline const char *tz_integer_name(uint32_t kind) {
+  switch (kind) {
+  case TZ_T_INT8:
+    return "int8";
+  case TZ_T_INT16:
+    return "int16";
+  case TZ_T_INT32:
+    return "int32";
+  case TZ_T_UINT8:
+    return "uint8";
+  case TZ_T_UINT16:
+    return "uint16";
+  case TZ_T_UINT32:
+    return "uint32";
+  case TZ_T_UINT64:
+    return "uint64";
+  default:
+    return "int";
+  }
+}
 
 typedef struct TzType {
   uint32_t kind;

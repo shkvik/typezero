@@ -44,8 +44,7 @@ TZ_COLD void tz_reflect_mismatch(const char *what, uint32_t what_length, int32_t
                                  const char *expected, uint32_t expected_length, const void *got);
 TZ_COLD void tz_reflect_arity(const char *what, uint32_t what_length, int32_t min, int32_t max,
                               uint32_t count);
-int32_t tz_unknown_to_int(const void *u, int32_t *out);
-int32_t tz_unknown_to_long(const void *u, int64_t *out);
+int32_t tz_unknown_to_integer(const void *u, int64_t *out, int32_t kind);
 int32_t tz_unknown_to_double(const void *u, double *out);
 int32_t tz_unknown_to_bool(const void *u, int32_t *out);
 int32_t tz_unknown_to_string(const void *u, TzStr *out);

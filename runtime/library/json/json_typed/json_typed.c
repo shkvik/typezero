@@ -124,23 +124,11 @@ double tz_json_expect_double(const TzJson *j, const TzJsonPath *path) {
   return j->u.number.value;
 }
 
-int32_t tz_json_expect_int(const TzJson *j, const TzJsonPath *path) {
+int64_t tz_json_expect_integer(const TzJson *j, const TzJsonPath *path, int32_t kind) {
+  const char *name = tz_integer_name((uint32_t)kind);
+  int64_t name_length = (int64_t)strlen(name);
   if (!j || j->kind != TZ_JSON_NUMBER) {
-    convert_error(path, "int", 3, j, 0);
-    return 0;
-  }
-  double d = j->u.number.value;
-  if (!(d == floor(d) && d >= -2147483648.0 && d <= 2147483647.0)) {
-    convert_error(path, "int", 3, j, 1);
-    return 0;
-  }
-
-  return (int32_t)d;
-}
-
-int64_t tz_json_expect_long(const TzJson *j, const TzJsonPath *path) {
-  if (!j || j->kind != TZ_JSON_NUMBER) {
-    convert_error(path, "long", 4, j, 0);
+    convert_error(path, name, name_length, j, 0);
     return 0;
   }
   if (j->flags & F_TEXT) {
@@ -152,20 +140,38 @@ int64_t tz_json_expect_long(const TzJson *j, const TzJsonPath *path) {
     int ok = i < v.length;
     for (; i < v.length && ok; ++i) {
       uint16_t c = tz_json_view_at(&v, i);
-      ok = c >= '0' && c <= '9' && magnitude <= (UINT64_C(9223372036854775808) - (c - '0')) / 10;
+      ok = c >= '0' && c <= '9' && magnitude <= (UINT64_MAX - (c - '0')) / 10;
       magnitude = magnitude * 10 + (c - '0');
     }
-    if (ok && magnitude <= UINT64_C(9223372036854775807) + (uint64_t)negative) {
-      return negative ? (int64_t)(0 - magnitude) : (int64_t)magnitude;
+    if (ok && !negative && magnitude > UINT64_C(9223372036854775807)) {
+      if (kind == TZ_T_UINT64) {
+        return (int64_t)magnitude;
+      }
+      ok = 0;
+    }
+    if (ok && negative && magnitude > UINT64_C(9223372036854775808)) {
+      ok = 0;
+    }
+    if (ok) {
+      int64_t value = negative ? (int64_t)(0 - magnitude) : (int64_t)magnitude;
+      if (tz_integer_fits((uint32_t)kind, value, 0)) {
+        return value;
+      }
+      convert_error(path, name, name_length, j, 1);
+      return 0;
     }
   }
   double d = j->u.number.value;
-  if (!(d == floor(d) && d >= -9223372036854775808.0 && d < 9223372036854775808.0)) {
-    convert_error(path, "long", 4, j, 1);
-    return 0;
+  double above = kind == TZ_T_UINT64 ? 18446744073709551616.0 : 9223372036854775808.0;
+  if (d == floor(d) && d >= -9223372036854775808.0 && d < above) {
+    int64_t value = d >= 9223372036854775808.0 ? (int64_t)(uint64_t)d : (int64_t)d;
+    if (tz_integer_fits((uint32_t)kind, value, d >= 9223372036854775808.0)) {
+      return value;
+    }
   }
+  convert_error(path, name, name_length, j, 1);
 
-  return (int64_t)d;
+  return 0;
 }
 
 int32_t tz_json_expect_bool(const TzJson *j, const TzJsonPath *path) {

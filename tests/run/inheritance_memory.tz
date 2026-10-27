@@ -19,7 +19,7 @@ for (let i = 0; i < 300000; i++) {
   n.next = head
   head = n
 }
-let sum: long = 0
+let sum: int = 0
 let tagged = 0
 for (let cur = head; cur != undefined; cur = cur.next) {
   sum += cur.value

@@ -2,14 +2,14 @@
 // a 32-bit count and a double, little-endian, then the name as bytes.
 
 export class Record {
-  constructor(id: int, count: long, price: number, name: string) {
+  constructor(id: int, count: int, price: number, name: string) {
     this.id = id
     this.count = count
     this.price = price
     this.name = name
   }
   id: int
-  count: long
+  count: int
   price: number
   name: string
 }

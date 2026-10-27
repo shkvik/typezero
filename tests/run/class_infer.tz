@@ -24,7 +24,7 @@ class Parity {
   isOdd(n: int) {
     return n == 0 ? false : this.isEven(n - 1)
   }
-  fact(n: long) {
+  fact(n: int) {
     return n <= 1 ? 1 : n * this.fact(n - 1)
   }
   static fib(n: int) {

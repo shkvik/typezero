@@ -38,14 +38,17 @@ llvm::Value *OsLowerer::emitOsCall(CallExpr *call) {
   llvm::Value *result = nullptr;
   switch (call->builtin) {
   case Builtin::OsString:
-    result = lowering_.stringLowerer().callReturningString(fn("tz_os_string", voidTy, {ptr, i32}),
-                                                           {values[0]});
+    result = lowering_.stringLowerer().callReturningString(
+        fn("tz_os_string", voidTy, {ptr, lowering_.builder_.getInt64Ty()}), {values[0]});
     break;
   case Builtin::OsNumber:
-    result = lowering_.builder_.CreateCall(fn("tz_os_number", f64, {i32}), {values[0]});
+    result = lowering_.builder_.CreateCall(
+        fn("tz_os_number", f64, {lowering_.builder_.getInt64Ty()}), {values[0]});
     break;
   case Builtin::OsAvailableParallelism:
-    result = lowering_.builder_.CreateCall(fn("tz_os_available_parallelism", i32, {}));
+    result = lowering_.builder_.CreateSExt(
+        lowering_.builder_.CreateCall(fn("tz_os_available_parallelism", i32, {})),
+        lowering_.builder_.getInt64Ty());
     break;
   case Builtin::OsCpus: {
     const Type *element = call->type->inner();

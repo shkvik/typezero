@@ -69,8 +69,7 @@ Expr *TypedArrayChecker::checkTypedArrayMethod(CallExpr *call, MemberExpr *membe
     Expr *result = checker_.callbackChecker().checkCallbackMethod(call, member, expected);
     int64_t lo, hi;
     if (name == "map" && !call->args.empty() && !arrow && call->args[0]->type->isFunction() &&
-        type->elementRange(lo, hi) && type->bytes() != Bytes::Uint8Clamped &&
-        type->bytes() != Bytes::Int32) {
+        type->elementRange(lo, hi) && type->bytes() != Bytes::Uint8Clamped) {
       checker_.diags_.error(
           call->args[0]->loc(),
           "cannot prove that what the function returns fits in " + what + " (" + rangeText(lo, hi) +

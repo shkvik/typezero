@@ -9,6 +9,7 @@
 #include "runtime/core/tzrt/tzrt.h"
 #include "runtime/core/unknown/unknown.h"
 #include "runtime/library/json/json/json.h"
+#include <math.h>
 #include <stdarg.h>
 #include <stdio.h>
 #include <string.h>
@@ -239,8 +240,8 @@ void *tz_reflect_new(const TzClass *cls, void *const *args, uint32_t count) {
     return NULL;
   }
   if (!cls->info->construct) {
-    reflect_fail("abstract", "class %.*s is abstract and cannot be made",
-                 (int)layout->name_length, layout->name);
+    reflect_fail("abstract", "class %.*s is abstract and cannot be made", (int)layout->name_length,
+                 layout->name);
     return NULL;
   }
 
@@ -393,13 +394,11 @@ static int box_number(const void *u, double *out) {
     return 0;
   }
   const char *value = TZ_BOX_VALUE(box);
+  if (tz_kind_integer(box->type->kind)) {
+    *out = tz_integer_double(box->type->kind, tz_load_integer(box->type->kind, value));
+    return 1;
+  }
   switch (box->type->kind) {
-  case TZ_T_INT:
-    *out = *(const int32_t *)value;
-    return 1;
-  case TZ_T_LONG:
-    *out = (double)*(const int64_t *)value;
-    return 1;
   case TZ_T_DOUBLE:
     *out = *(const double *)value;
     return 1;
@@ -416,28 +415,26 @@ static int box_number(const void *u, double *out) {
 
 int32_t tz_unknown_to_double(const void *u, double *out) { return box_number(u, out); }
 
-int32_t tz_unknown_to_int(const void *u, int32_t *out) {
-  double n;
-  if (!box_number(u, &n) || n != (double)(int32_t)n || (n == 0 && 1 / n < 0)) {
-    return 0;
-  }
-  *out = (int32_t)n;
-
-  return 1;
-}
-
-int32_t tz_unknown_to_long(const void *u, int64_t *out) {
+int32_t tz_unknown_to_integer(const void *u, int64_t *out, int32_t kind) {
   const TzBox *box = as_box(u);
-  if (box && box->type->kind == TZ_T_LONG) {
-    *out = *(const int64_t *)TZ_BOX_VALUE(box);
+  if (box && tz_kind_integer(box->type->kind)) {
+    int64_t v = tz_load_integer(box->type->kind, TZ_BOX_VALUE(box));
+    if (!tz_integer_fits((uint32_t)kind, v, box->type->kind == TZ_T_UINT64)) {
+      return 0;
+    }
+    *out = v;
     return 1;
   }
   double n;
-  if (!box_number(u, &n) || n < -9223372036854775808.0 || n >= 9223372036854775808.0 ||
-      n != (double)(int64_t)n) {
+  if (!box_number(u, &n) || n != floor(n) || (n == 0 && 1 / n < 0) || n < -9223372036854775808.0 ||
+      n >= (kind == TZ_T_UINT64 ? 18446744073709551616.0 : 9223372036854775808.0)) {
     return 0;
   }
-  *out = (int64_t)n;
+  int64_t v = n >= 9223372036854775808.0 ? (int64_t)(uint64_t)n : (int64_t)n;
+  if (!tz_integer_fits((uint32_t)kind, v, n >= 9223372036854775808.0)) {
+    return 0;
+  }
+  *out = v;
 
   return 1;
 }

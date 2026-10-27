@@ -58,6 +58,7 @@ void tz_buf_free(TzBuf *b);
 void tz_buf_push(TzBuf *b, uint16_t unit);
 void tz_buf_ascii(TzBuf *b, const char *text);
 void tz_buf_ascii_n(TzBuf *b, const char *text, size_t length);
+void tz_buf_integer(TzBuf *b, uint32_t kind, int64_t value);
 void tz_buf_units(TzBuf *b, const uint16_t *units, size_t length);
 void tz_buf_bytes(TzBuf *b, const uint8_t *units, size_t length);
 void tz_buf_utf8(TzBuf *b, const char *text, size_t length);

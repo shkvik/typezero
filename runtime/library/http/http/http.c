@@ -144,7 +144,7 @@ static void settle_value(NetConn *c, const void *value, size_t size) {
   }
 }
 
-static void settle_int(NetConn *c, int32_t value) { settle_value(c, &value, sizeof value); }
+static void settle_int(NetConn *c, int64_t value) { settle_value(c, &value, sizeof value); }
 
 static void settle_error(NetConn *c, void *error) {
   HttpState *h = &c->http;
@@ -805,7 +805,7 @@ static const char *reason_of(int status) {
   }
 }
 
-void tz_http_reason(TzStr *out, int32_t status, TzMaker make) {
+void tz_http_reason(TzStr *out, int64_t status, TzMaker make) {
   (void)make;
   *out = ascii(reason_of(status));
 }
@@ -1591,8 +1591,8 @@ enum {
 static void respond(NetConn *c, int32_t status, void *text_obj, uint64_t text_meta, void *headers,
                     void *body_obj, uint64_t body_meta, void *bytes, int32_t flags);
 
-void tz_http_respond(void *conn, int32_t status, void *text_obj, uint64_t text_meta, void *headers,
-                     void *body_obj, uint64_t body_meta, void *bytes, int32_t flags, TzMaker make) {
+void tz_http_respond(void *conn, int64_t status, void *text_obj, uint64_t text_meta, void *headers,
+                     void *body_obj, uint64_t body_meta, void *bytes, int64_t flags, TzMaker make) {
   (void)make;
   NetConn *c = (NetConn *)conn;
   conn_lock(c);
@@ -1691,7 +1691,7 @@ static void request(NetConn *c, void *method_obj, uint64_t method_meta, void *ta
 
 void tz_http_request(void *conn, void *method_obj, uint64_t method_meta, void *target_obj,
                      uint64_t target_meta, void *headers, void *body_obj, uint64_t body_meta,
-                     void *bytes, int32_t flags, TzMaker make) {
+                     void *bytes, int64_t flags, TzMaker make) {
   TZ_ORDERED();
   (void)make;
   NetConn *c = (NetConn *)conn;

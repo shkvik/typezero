@@ -172,7 +172,7 @@ void tz_fs_stdin_serve_chunks(void) {
   }
 }
 
-void tz_stdin_chunk(TzPromise *p, int32_t max) {
+void tz_stdin_chunk(TzPromise *p, int64_t max) {
   ChunkWaiter *w = (ChunkWaiter *)calloc(1, sizeof(ChunkWaiter));
   if (!w) {
     abort();

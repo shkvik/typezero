@@ -186,12 +186,16 @@ llvm::Function *ChildLowerer::spawnMaker(const Type *type) {
   auto flag = [&](unsigned f) {
     return lowering_.builder_.CreateICmpNE(load(f), lowering_.builder_.getInt32(0));
   };
+  auto number = [&](unsigned f) {
+    return lowering_.builder_.CreateSExt(load(f), lowering_.builder_.getInt64Ty());
+  };
   for (const Field &f : type->fields()) {
     llvm::StringRef name = f.name;
     const Type *t = f.type;
     auto maybe = [&](unsigned part, unsigned has) {
-      return t->isOptional() ? lowering_.optionalLowerer().makeOptional(load(part), flag(has), t)
-                             : load(part);
+      llvm::Value *raw = t->nonOptional()->isInteger() ? number(part) : load(part);
+
+      return t->isOptional() ? lowering_.optionalLowerer().makeOptional(raw, flag(has), t) : raw;
     };
     llvm::Value *value;
     if (name == "message") {
@@ -211,7 +215,7 @@ llvm::Function *ChildLowerer::spawnMaker(const Type *type) {
     } else if (name == "signal") {
       value = maybe(PtSignal, PtHasSignal);
     } else if (name == "pid") {
-      value = load(PtPid);
+      value = number(PtPid);
     } else if (name == "stdout" || name == "stderr") {
       value = spawnStream(parts, name == "stdout" ? 1 : 2, t, false);
     } else if (name == "output") {

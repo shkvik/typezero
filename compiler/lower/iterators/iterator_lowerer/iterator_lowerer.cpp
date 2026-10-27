@@ -129,13 +129,13 @@ llvm::Value *IteratorLowerer::emitIteratorSink(CallExpr *call) {
     callback = lowering_.functionFrame().createManagedSlot(callbackType, "callback");
     lowering_.builder_.CreateStore(lowering_.exprLowerer().emitExpr(callbackExpr), callback);
   }
-  llvm::Type *i32 = lowering_.builder_.getInt32Ty();
-  llvm::Value *counter = lowering_.functionFrame().createStackSlot(i32, "counter");
-  lowering_.builder_.CreateStore(lowering_.builder_.getInt32(0), counter);
-  auto nextCount = [this, counter, i32] {
-    llvm::Value *count = lowering_.builder_.CreateLoad(i32, counter, "count");
+  llvm::Type *i64 = lowering_.builder_.getInt64Ty();
+  llvm::Value *counter = lowering_.functionFrame().createStackSlot(i64, "counter");
+  lowering_.builder_.CreateStore(lowering_.builder_.getInt64(0), counter);
+  auto nextCount = [this, counter, i64] {
+    llvm::Value *count = lowering_.builder_.CreateLoad(i64, counter, "count");
     lowering_.builder_.CreateStore(
-        lowering_.builder_.CreateAdd(count, lowering_.builder_.getInt32(1)), counter);
+        lowering_.builder_.CreateAdd(count, lowering_.builder_.getInt64(1)), counter);
 
     return count;
   };

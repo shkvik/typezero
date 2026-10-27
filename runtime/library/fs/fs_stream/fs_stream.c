@@ -135,7 +135,7 @@ static void fd_open_work(TzWork *w) {
 }
 
 void tz_fss_open(TzPromise *p, void *path_obj, uint64_t path_meta, void *flag_obj,
-                 uint64_t flag_meta, int32_t mode, TzMaker make) {
+                 uint64_t flag_meta, int64_t mode, TzMaker make) {
   FdRequest *r = fd_new(p, make);
   if (!tz_fs_flags_of(flag_obj, flag_meta, &r->flags, make) ||
       !tz_fs_path_init(&r->path, path_obj, path_meta, make, "open")) {
@@ -238,12 +238,12 @@ static void fd_transfer(TzPromise *p, int32_t fd, TzBytes *b, int32_t offset, in
   fd_queue(r, writing ? fd_write_work : fd_read_work, fd_done_int);
 }
 
-void tz_fss_read(TzPromise *p, int32_t fd, TzBytes *b, int32_t offset, int32_t length,
+void tz_fss_read(TzPromise *p, int64_t fd, TzBytes *b, int64_t offset, int64_t length,
                  double position, TzMaker make) {
   fd_transfer(p, fd, b, offset, length, position, make, 0);
 }
 
-void tz_fss_write(TzPromise *p, int32_t fd, TzBytes *b, int32_t offset, int32_t length,
+void tz_fss_write(TzPromise *p, int64_t fd, TzBytes *b, int64_t offset, int64_t length,
                   double position, TzMaker make) {
   fd_transfer(p, fd, b, offset, length, position, make, 1);
 }
@@ -275,7 +275,7 @@ static void fd_fsync_work(TzWork *w) {
 #endif
 }
 
-void tz_fss_close(TzPromise *p, int32_t fd, int32_t sync, TzMaker make) {
+void tz_fss_close(TzPromise *p, int64_t fd, int32_t sync, TzMaker make) {
   FdRequest *r = fd_new(p, make);
   r->fd = fd;
   fd_queue(r, sync ? fd_fsync_work : fd_close_work, fd_done_int);

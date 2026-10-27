@@ -91,9 +91,22 @@ std::string wrapHint(Bytes kind, const std::string &value) {
   }
 }
 
+Range operateWide(BinaryOp op, const Range &a, const Range &b, bool isInt);
+
 Range operate(BinaryOp op, const Range &a, const Range &b, bool isInt) {
-  int64_t min = isInt ? kIntMin : std::numeric_limits<int64_t>::min();
-  int64_t max = isInt ? kIntMax : std::numeric_limits<int64_t>::max();
+  Range r = operateWide(op, a, b, isInt);
+  bool bitwise = op == BinaryOp::BitAnd || op == BinaryOp::BitOr || op == BinaryOp::BitXor ||
+                 op == BinaryOp::Shl || op == BinaryOp::Shr;
+  if (isInt && bitwise && !known(r)) {
+    return {kInt32Min, kInt32Max};
+  }
+
+  return r;
+}
+
+Range operateWide(BinaryOp op, const Range &a, const Range &b, bool isInt) {
+  int64_t min = isInt ? kInt32Min : kIntMin;
+  int64_t max = isInt ? kInt32Max : kIntMax;
   auto within = [&](Range r) -> Range {
     if (!known(r) || *r.lo < min || *r.hi > max) {
       return {};
@@ -139,7 +152,7 @@ Range operate(BinaryOp op, const Range &a, const Range &b, bool isInt) {
       return {floorShift(*a.lo, n), floorShift(*a.hi, n)};
     }
     if (isInt) {
-      return {floorShift(kIntMin, n), floorShift(kIntMax, n)};
+      return {floorShift(kInt32Min, n), floorShift(kInt32Max, n)};
     }
     return {};
   }
@@ -198,7 +211,7 @@ Range operate(BinaryOp op, const Range &a, const Range &b, bool isInt) {
         hi = std::max(hi, v);
       }
     }
-    return within({lo, hi});
+    return Range{lo, hi};
   }
   default:
     return {};

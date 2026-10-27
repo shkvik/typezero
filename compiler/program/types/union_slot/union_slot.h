@@ -13,7 +13,6 @@ enum class UnionSlot : uint8_t {
   String,
   Atom,
   Int,
-  Long,
   Double,
   Bool,
   Decimal,

@@ -61,7 +61,7 @@ Lowering::Producer LazyChainLowerer::arrayProducer(llvm::Value *slot, const Type
         lowering_.builder_.CreateAdd(index, lowering_.builder_.getInt64(1)), indexSlot);
     llvm::Value *value;
     if (mode == Builtin::ArrKeys) {
-      value = lowering_.builder_.CreateTrunc(index, lowering_.builder_.getInt32Ty());
+      value = index;
     } else {
       value = lowering_.builder_.CreateLoad(
           lowering_.moduleBuilder().lower(element),
@@ -72,9 +72,8 @@ Lowering::Producer LazyChainLowerer::arrayProducer(llvm::Value *slot, const Type
       if (mode == Builtin::ArrEntries) {
         const Type *tuple = Type::tuple({Type::intTy(), element});
         llvm::Value *entry = lowering_.objectLayouts().allocObject(tuple, {0, 1});
-        lowering_.builder_.CreateStore(
-            lowering_.builder_.CreateTrunc(index, lowering_.builder_.getInt32Ty()),
-            lowering_.objectLayouts().fieldAddress(entry, tuple, "0"));
+        lowering_.builder_.CreateStore(index,
+                                       lowering_.objectLayouts().fieldAddress(entry, tuple, "0"));
         lowering_.builder_.CreateStore(value,
                                        lowering_.objectLayouts().fieldAddress(entry, tuple, "1"));
         lowering_.groupLowerer().adoptFields(entry, tuple);
@@ -188,7 +187,7 @@ Lowering::Consumer LazyChainLowerer::stageConsumer(Builtin stage, const Type *ca
                                                    const Type *element, const Type *result,
                                                    llvm::Value *operand,
                                                    const Lowering::Consumer &down) {
-  llvm::Type *i32 = lowering_.builder_.getInt32Ty(), *i64 = lowering_.builder_.getInt64Ty();
+  llvm::Type *i64 = lowering_.builder_.getInt64Ty();
   Lowering::Consumer stageOut;
   stageOut.stop = down.stop;
   auto give = [this, down](llvm::Value *value) {
@@ -198,13 +197,14 @@ Lowering::Consumer LazyChainLowerer::stageConsumer(Builtin stage, const Type *ca
   };
   llvm::Value *counter = nullptr;
   if (callbackType) {
-    counter = lowering_.functionFrame().createStackSlot(i32, "counter");
-    lowering_.builder_.CreateStore(lowering_.builder_.getInt32(0), counter);
+    counter = lowering_.functionFrame().createStackSlot(lowering_.builder_.getInt64Ty(), "counter");
+    lowering_.builder_.CreateStore(lowering_.builder_.getInt64(0), counter);
   }
-  auto nextCount = [this, counter, i32] {
-    llvm::Value *count = lowering_.builder_.CreateLoad(i32, counter, "count");
+  auto nextCount = [this, counter] {
+    llvm::Value *count =
+        lowering_.builder_.CreateLoad(lowering_.builder_.getInt64Ty(), counter, "count");
     lowering_.builder_.CreateStore(
-        lowering_.builder_.CreateAdd(count, lowering_.builder_.getInt32(1)), counter);
+        lowering_.builder_.CreateAdd(count, lowering_.builder_.getInt64(1)), counter);
 
     return count;
   };

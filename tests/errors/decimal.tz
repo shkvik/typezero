@@ -50,7 +50,7 @@ const s = price.isNaN()
 const t = price.decimalPlaces(2)
 // expect-error: unknown rounding mode 'nearest'
 const u = price.round(2, "nearest")
-// expect-error: the number of decimal places must be an integer ('int' or 'long'), found 'double'
+// expect-error: the number of decimal places must be an integer ('int'), found 'double'
 const v = price.toFixed(1.5)
 // expect-error: decimal() takes a string, a number or a decimal, found 'boolean'
 const w = decimal(true)

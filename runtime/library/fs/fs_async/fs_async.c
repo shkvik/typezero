@@ -322,7 +322,7 @@ static void read_file_done(TzWork *w) {
 }
 
 void tz_fsp_read_file(TzPromise *p, void *path_obj, uint64_t path_meta, void *flag_obj,
-                      uint64_t flag_meta, void *signal, int32_t encoding, TzMaker make) {
+                      uint64_t flag_meta, void *signal, int64_t encoding, TzMaker make) {
   FsRequest *r = tz_fs_fsp_new(p, make);
   r->encoding = encoding;
   if (!fsp_signal(r, signal)) {
@@ -377,8 +377,8 @@ static FsRequest *write_request(TzPromise *p, void *path_obj, uint64_t path_meta
 }
 
 void tz_fsp_write_file(TzPromise *p, void *path_obj, uint64_t path_meta, void *data_obj,
-                       uint64_t data_meta, void *flag_obj, uint64_t flag_meta, int32_t mode,
-                       void *signal, int32_t encoding, TzMaker make) {
+                       uint64_t data_meta, void *flag_obj, uint64_t flag_meta, int64_t mode,
+                       void *signal, int64_t encoding, TzMaker make) {
   FsRequest *r = write_request(p, path_obj, path_meta, flag_obj, flag_meta, mode, signal, make);
   if (!r) {
     return;
@@ -403,7 +403,7 @@ void tz_fsp_write_file(TzPromise *p, void *path_obj, uint64_t path_meta, void *d
 }
 
 void tz_fsp_write_file_bytes(TzPromise *p, void *path_obj, uint64_t path_meta, const TzBytes *b,
-                             void *flag_obj, uint64_t flag_meta, int32_t mode, void *signal,
+                             void *flag_obj, uint64_t flag_meta, int64_t mode, void *signal,
                              TzMaker make) {
   FsRequest *r = write_request(p, path_obj, path_meta, flag_obj, flag_meta, mode, signal, make);
   if (!r) {
@@ -433,7 +433,7 @@ static void access_work(TzWork *w) {
 #endif
 }
 
-void tz_fsp_access(TzPromise *p, void *path_obj, uint64_t path_meta, int32_t mode, TzMaker make) {
+void tz_fsp_access(TzPromise *p, void *path_obj, uint64_t path_meta, int64_t mode, TzMaker make) {
   FsRequest *r = tz_fs_fsp_new(p, make);
   if (!tz_fs_fsp_path(r, path_obj, path_meta, "access")) {
     return;
@@ -462,7 +462,7 @@ static void chmod_work(TzWork *w) {
 #endif
 }
 
-void tz_fsp_chmod(TzPromise *p, void *path_obj, uint64_t path_meta, int32_t mode, TzMaker make) {
+void tz_fsp_chmod(TzPromise *p, void *path_obj, uint64_t path_meta, int64_t mode, TzMaker make) {
   FsRequest *r = tz_fs_fsp_new(p, make);
   if (!tz_fs_fsp_path(r, path_obj, path_meta, "chmod")) {
     return;

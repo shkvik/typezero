@@ -57,7 +57,7 @@ for (const text of ["2026-10-27T00:00Z", "2026-10-25T21:00Z", "someday"]) {
 const log: string[] = []
 function* days(from: Date, count: int): Generator<Date> {
   // A day in milliseconds is a long: 25 of them no longer fit in an int.
-  for (let i: long = 0; i < count; i++) yield new Date(from.getTime() + i * 86400000)
+  for (let i: int = 0; i < count; i++) yield new Date(from.getTime() + i * 86400000)
   log.push("days done")
 }
 for (const d of days(new Date(base), 30)) {

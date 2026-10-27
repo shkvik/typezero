@@ -35,14 +35,11 @@ console.log(v, w, new Vec())
 console.log(v.add(w), v.add(2), v.add(0.5))
 console.log(Vec.of(3), Vec.of(1, 2))
 
-// The best variant: the same type is better than a conversion, and int to
-// long better than int to double.
+// The best variant: the same type is better than a conversion, and int32 to
+// int better than int32 to double.
 class Printer {
   show(n: int) {
     return `int ${n}`
-  }
-  show(n: long) {
-    return `long ${n}`
   }
   show(n: double) {
     return `double ${n}`
@@ -66,8 +63,8 @@ class Printer {
   }
 }
 const pr = new Printer()
-const big: long = 5000000000
-const small: int = 7
+const big: int = 5000000000
+const small: int32 = 7
 console.log(pr.show(1), pr.show(big), pr.show(1.5), pr.show("x"), pr.show(small))
 console.log(pr.pair(1, 2), pr.pair(1.5, 2))
 console.log(pr.list(1, 2), pr.list(1, 2, 3), pr.list())

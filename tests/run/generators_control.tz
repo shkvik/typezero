@@ -61,8 +61,8 @@ function* flags() {
   yield 1 > 0
 }
 console.log([...flags()], flags().filter(b => b).toArray().length)
-function* longs(): Generator<long> {
-  let x: long = 1
+function* longs(): Generator<double> {
+  let x: double = 1
   for (let i = 0; i < 4; i++) {
     yield x
     x *= 1000000

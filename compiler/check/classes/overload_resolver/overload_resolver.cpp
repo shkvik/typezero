@@ -48,14 +48,11 @@ int conversionRank(const Type *from, const Type *to) {
   if (from->isNever()) {
     return 1;
   }
-  if (from->isInt() && to == Type::longTy()) {
+  if (from->isInteger() && to->isInteger() && to->holds(from)) {
     return 1;
   }
-  if (from->isInt() && (to->isFloat() || to->isDecimal())) {
+  if (from->isInteger() && (to->isFloat() || to->isDecimal())) {
     return 2;
-  }
-  if (from == Type::longTy() && (to->isFloat() || to->isDecimal())) {
-    return 1;
   }
   if (to->isJson()) {
     return from->isString() || from->isNumeric() || from->isBool() ||

@@ -37,10 +37,6 @@ using llvm::isa;
 
 namespace tz {
 
-static const char kUnsignedShift[] =
-    "'>>>' is unsigned in JavaScript, and with a count of 0 a negative int becomes a number above "
-    "int: keep the result in a long";
-
 namespace {
 
 std::pair<llvm::StringRef, llvm::StringRef> operandTexts(llvm::StringRef source, llvm::SMLoc op,
@@ -271,18 +267,6 @@ Expr *AssignChecker::checkAssign(AssignExpr *assign) {
                                 : checker_.typeRelations().coerce(assign->value, type);
           if (type->isInteger()) {
             checker_.constantFolder().checkDivisor(op, assign->value);
-          }
-          if (op == BinaryOp::UShr && type->isInt()) {
-            std::optional<int64_t> count = checker_.constantFolder().intConstant(assign->value);
-            if (!count || (*count & 31) == 0) {
-              auto [target, value] = operandTexts(assign->source, assign->loc(), 4);
-              std::string message =
-                  std::string("the result of '>>>=' may not fit in 'int'; ") + kUnsignedShift;
-              if (!target.empty()) {
-                message += (", e.g. 'const u = " + target + " >>> " + value + "'").str();
-              }
-              checker_.diags_.error(assign->loc(), message + ", or shift by 1 to 31 bits");
-            }
           }
         }
       }

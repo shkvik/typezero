@@ -18,12 +18,12 @@ function traps(a: int[], n: int, s: string): void {
   // expect-error: type 'int | undefined' is not assignable to type 'int'
   for (let i = 0; i < n; i++) x = a[i]
   // expect-error: type 'int | undefined' is not assignable to type 'int'
-  for (let i = 2147483640; i + 10 < a.length; i++) x = a[i]
+  for (let i = 9223372036854775800; i + 10 < a.length; i++) x = a[i]
   // expect-error: type 'int | undefined' is not assignable to type 'int'
   for (let i = 0; i <= a.length; i += 2) x = a[i]
   // A step that could wrap around past INT_MAX.
   // expect-error: type 'int | undefined' is not assignable to type 'int'
-  for (let i = 2147483000; i < 2147483647; i += 1000) x = a[i]
+  for (let i = 9223372036854775000; i < 9223372036854775807; i += 1000) x = a[i]
   let t = "abc"
   // expect-error: type 'string | undefined' is not assignable to type 'string'
   for (let i = 0; i < t.length; i++) { t = t.slice(1); let c: string = t[i] }

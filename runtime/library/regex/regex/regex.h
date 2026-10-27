@@ -144,8 +144,7 @@ typedef int32_t (*TzReMatch)(const uint32_t *program, const void *units, int32_t
 typedef struct TzRegex {
   int64_t rc;
   const TzLayout *layout;
-  int32_t last_index;
-  uint32_t reserved;
+  int64_t last_index;
   const uint32_t *program;
   uint32_t *owned;
   TzReMatch match;

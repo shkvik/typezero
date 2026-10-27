@@ -627,8 +627,8 @@ static void fail_openssl(TzMaker make, const char *code, const char *otherwise) 
   tz_set_failed(make(&parts));
 }
 
-static SSL_CTX *server_context(void *cert_obj, uint64_t cert_meta, void *key_obj,
-                               uint64_t key_meta, TzMaker make) {
+static SSL_CTX *server_context(void *cert_obj, uint64_t cert_meta, void *key_obj, uint64_t key_meta,
+                               TzMaker make) {
   SSL_CTX *ctx = SSL_CTX_new(TLS_server_method());
   configure(ctx);
   SSL_CTX_set_alpn_select_cb(ctx, select_alpn, NULL);
@@ -1009,7 +1009,7 @@ static void accept_tls(NetListener *l, NetConn *c) {
 
 static void release_context(void *tls) { SSL_CTX_free((SSL_CTX *)tls); }
 
-void *tz_tls_listen(void *host_obj, uint64_t host_meta, int32_t port, double max_body,
+void *tz_tls_listen(void *host_obj, uint64_t host_meta, int64_t port, double max_body,
                     void *cert_obj, uint64_t cert_meta, void *key_obj, uint64_t key_meta,
                     TzMaker make) {
   SSL_CTX *ctx = server_context(cert_obj, cert_meta, key_obj, key_meta, make);

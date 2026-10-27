@@ -15,6 +15,7 @@
 #include "compiler/lower/types/optional_lowerer/optional_lowerer.h"
 #include "compiler/lower/types/union_layout/union_layout.h"
 #include "compiler/lower/values/array_lowerer/array_lowerer.h"
+#include "compiler/lower/values/number_lowerer/number_lowerer.h"
 #include "compiler/lower/values/string_lowerer/string_lowerer.h"
 #include "runtime/library/intl/intl/intl.h"
 #include "llvm/ADT/STLExtras.h"
@@ -177,7 +178,6 @@ Lowering::IntlNumber IntlLowerer::emitIntlNumber(Expr *arg) {
   n.operand = lowering_.refCounts().emitOperand(arg, true);
   llvm::Value *value = n.operand.value;
   const Type *type = n.operand.type;
-  llvm::Type *i64 = lowering_.builder_.getInt64Ty();
   n.d = llvm::ConstantFP::get(lowering_.builder_.getDoubleTy(), 0.0);
   n.integer = n.meta = lowering_.builder_.getInt64(0);
   if (type->isDecimal()) {
@@ -186,7 +186,7 @@ Lowering::IntlNumber IntlLowerer::emitIntlNumber(Expr *arg) {
     n.meta = lowering_.decimalLowerer().decimalMeta(value);
   } else if (type->isInteger()) {
     n.kind = TZ_IN_INTEGER;
-    n.integer = type->isInt() ? lowering_.builder_.CreateSExt(value, i64) : value;
+    n.integer = lowering_.numberLowerer().toI64(value, type);
   } else {
     n.kind = TZ_IN_DOUBLE;
     n.d = value;
@@ -262,9 +262,8 @@ llvm::Constant *IntlLowerer::intlBoundInfo(IntlKind kind, const Type *fnType) {
          lowering_.stringLowerer().stringObj(b), lowering_.stringLowerer().stringMeta(b)});
     lowering_.refCounts().releaseValue(a, Type::string());
     lowering_.refCounts().releaseValue(b, Type::string());
-    if (fnType->ret()->isFloat()) {
-      result = lowering_.builder_.CreateSIToFP(result, f64);
-    }
+    result = fnType->ret()->isFloat() ? lowering_.builder_.CreateSIToFP(result, f64)
+                                      : lowering_.builder_.CreateSExt(result, i64);
   } else if (kind == IntlKind::DateTimeFormat) {
     llvm::Value *date = code->getArg(1);
     llvm::Value *time;
@@ -287,8 +286,7 @@ llvm::Constant *IntlLowerer::intlBoundInfo(IntlKind kind, const Type *fnType) {
                                           : TZ_IN_DOUBLE;
     llvm::Value *d = numberKind == TZ_IN_DOUBLE ? x : llvm::ConstantFP::get(f64, 0.0);
     llvm::Value *integer = numberKind == TZ_IN_DECIMAL   ? lowering_.decimalLowerer().decimalCoef(x)
-                           : param->isInt()              ? lowering_.builder_.CreateSExt(x, i64)
-                           : numberKind == TZ_IN_INTEGER ? x
+                           : numberKind == TZ_IN_INTEGER ? lowering_.numberLowerer().toI64(x, param)
                                                          : lowering_.builder_.getInt64(0);
     llvm::Value *meta = numberKind == TZ_IN_DECIMAL ? lowering_.decimalLowerer().decimalMeta(x)
                                                     : lowering_.builder_.getInt64(0);

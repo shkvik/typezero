@@ -224,7 +224,7 @@ Expr *MemberChecker::checkMember(MemberExpr *member, const Type *expected) {
 }
 
 Expr *MemberChecker::checkPosition(Expr *expr) {
-  expr = checker_.genericChecker().apparent(checker_.exprChecker().checkExpr(expr, Type::longTy()));
+  expr = checker_.genericChecker().apparent(checker_.exprChecker().checkExpr(expr, Type::intTy()));
   const Type *type = expr->type;
   if (type->isError()) {
     return expr;
@@ -241,7 +241,7 @@ Expr *MemberChecker::checkPosition(Expr *expr) {
     return expr;
   }
 
-  return checker_.typeRelations().convert(expr, Type::longTy());
+  return checker_.typeRelations().convert(expr, Type::intTy());
 }
 
 Expr *MemberChecker::checkIndex(IndexExpr *index) {

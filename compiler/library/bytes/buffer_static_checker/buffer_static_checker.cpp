@@ -185,8 +185,7 @@ Expr *BufferStaticChecker::checkBytesFromWith(CallExpr *call, const Type *type,
     return call;
   }
   int64_t lo, hi;
-  if (!arrow && type->elementRange(lo, hi) && type->bytes() != Bytes::Uint8Clamped &&
-      type->bytes() != Bytes::Int32) {
+  if (!arrow && type->elementRange(lo, hi) && type->bytes() != Bytes::Uint8Clamped) {
     checker_.diags_.error(
         call->args[1]->loc(),
         "cannot prove that what the function returns fits in an element of '" + type->name() +

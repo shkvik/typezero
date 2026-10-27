@@ -60,9 +60,10 @@ llvm::Value *BufferCalls::emit() {
           fn("tz_buffer_fill_string", voidTy, {ptr, ptr, i64, i64, i64, i32, i32}),
           {made, lowering_.stringLowerer().stringObj(fill.value),
            lowering_.stringLowerer().stringMeta(fill.value), zero, zero, none, enc});
-    } else if (fillExpr->type->isInt()) {
-      lowering_.builder_.CreateCall(fn("tz_buffer_fill_byte", voidTy, {ptr, i32, i64, i64, i32}),
-                                    {made, fill.value, zero, zero, none});
+    } else if (fillExpr->type->isInteger()) {
+      lowering_.builder_.CreateCall(
+          fn("tz_buffer_fill_byte", voidTy, {ptr, i32, i64, i64, i32}),
+          {made, lowering_.builder_.CreateTrunc(fill.value, i32), zero, zero, none});
     } else {
       lowering_.builder_.CreateCall(fn("tz_buffer_fill_bytes", voidTy, {ptr, ptr, i64, i64, i32}),
                                     {made, fill.value, zero, zero, none});
@@ -93,14 +94,13 @@ llvm::Value *BufferCalls::emit() {
                                         {lowering_.stringLowerer().stringObj(text.value),
                                          lowering_.stringLowerer().stringMeta(text.value), enc});
       lowering_.refCounts().dropOperand(text);
-      return length;
+      return lowering_.builder_.CreateSExt(length, i64);
     }
     Lowering::Operand bytes = lowering_.refCounts().emitOperand(source, true);
     llvm::Value *length = lowering_.bytesLowerer().bytesLength(bytes.value);
     lowering_.refCounts().dropOperand(bytes);
     unsigned size = source->type->isTypedArray() ? source->type->elementSize() : 1;
-    return lowering_.builder_.CreateTrunc(
-        lowering_.builder_.CreateMul(length, lowering_.builder_.getInt64(size)), i32);
+    return lowering_.builder_.CreateMul(length, lowering_.builder_.getInt64(size));
   }
   case Builtin::BufferCompare:
   case Builtin::BufferEquals: {
@@ -109,13 +109,16 @@ llvm::Value *BufferCalls::emit() {
     Lowering::Operand a =
         lowering_.refCounts().emitOperand(first, AssignLowerer::cannotAssign(second));
     Lowering::Operand b = lowering_.refCounts().emitOperand(second, true);
-    llvm::Value *result = call->builtin == Builtin::BufferCompare
-                              ? lowering_.builder_.CreateCall(
-                                    fn("tz_bytes_compare", i32, {ptr, ptr}), {a.value, b.value})
-                              : lowering_.builder_.CreateICmpNE(
-                                    lowering_.builder_.CreateCall(
-                                        fn("tz_bytes_equal", i32, {ptr, ptr}), {a.value, b.value}),
-                                    lowering_.builder_.getInt32(0));
+    llvm::Value *result =
+        call->builtin == Builtin::BufferCompare
+            ? lowering_.builder_.CreateSExt(
+                  lowering_.builder_.CreateCall(fn("tz_bytes_compare", i32, {ptr, ptr}),
+                                                {a.value, b.value}),
+                  i64)
+            : lowering_.builder_.CreateICmpNE(
+                  lowering_.builder_.CreateCall(fn("tz_bytes_equal", i32, {ptr, ptr}),
+                                                {a.value, b.value}),
+                  lowering_.builder_.getInt32(0));
     lowering_.refCounts().dropOperand(b);
     lowering_.refCounts().dropOperand(a);
     return result;
@@ -132,7 +135,7 @@ llvm::Value *BufferCalls::emit() {
         {self.value, target.value, values[0], values[1], values[2], values[3], has});
     lowering_.refCounts().dropOperand(target);
     lowering_.refCounts().dropOperand(self);
-    return result;
+    return lowering_.builder_.CreateSExt(result, i64);
   }
   case Builtin::BufferIsBuffer: {
     const Type *t = call->args[0]->type;
@@ -181,7 +184,7 @@ llvm::Value *BufferCalls::emit() {
          lowering_.stringLowerer().stringMeta(text.value), values[0], values[1], has, enc});
     lowering_.refCounts().dropOperand(text);
     lowering_.refCounts().dropOperand(self);
-    return written;
+    return lowering_.builder_.CreateSExt(written, i64);
   }
   case Builtin::BufferIndexOf:
   case Builtin::BufferFill: {
@@ -202,9 +205,10 @@ llvm::Value *BufferCalls::emit() {
             fn("tz_buffer_fill_string", voidTy, {ptr, ptr, i64, i64, i64, i32, i32}),
             {self.value, lowering_.stringLowerer().stringObj(value.value),
              lowering_.stringLowerer().stringMeta(value.value), values[0], values[1], has, enc});
-      } else if (valueExpr->type->isInt()) {
+      } else if (valueExpr->type->isInteger()) {
         lowering_.builder_.CreateCall(fn("tz_buffer_fill_byte", voidTy, {ptr, i32, i64, i64, i32}),
-                                      {self.value, value.value, values[0], values[1], has});
+                                      {self.value, lowering_.builder_.CreateTrunc(value.value, i32),
+                                       values[0], values[1], has});
       } else {
         lowering_.builder_.CreateCall(fn("tz_buffer_fill_bytes", voidTy, {ptr, ptr, i64, i64, i32}),
                                       {self.value, value.value, values[0], values[1], has});
@@ -218,10 +222,10 @@ llvm::Value *BufferCalls::emit() {
           fn("tz_buffer_index_of_string", i32, {ptr, ptr, i64, i64, i32, i32, i32}),
           {self.value, lowering_.stringLowerer().stringObj(value.value),
            lowering_.stringLowerer().stringMeta(value.value), values[0], has, enc, mode});
-    } else if (valueExpr->type->isInt()) {
+    } else if (valueExpr->type->isInteger()) {
       result = lowering_.builder_.CreateCall(
           fn("tz_buffer_index_of_byte", i32, {ptr, i32, i64, i32, i32}),
-          {self.value, value.value, values[0], has, mode});
+          {self.value, lowering_.builder_.CreateTrunc(value.value, i32), values[0], has, mode});
     } else {
       result = lowering_.builder_.CreateCall(
           fn("tz_buffer_index_of_bytes", i32, {ptr, ptr, i64, i32, i32}),
@@ -231,7 +235,7 @@ llvm::Value *BufferCalls::emit() {
     lowering_.refCounts().dropOperand(self);
     return constantOf(call->args[0]) == 2
                ? lowering_.builder_.CreateICmpNE(result, lowering_.builder_.getInt32(0))
-               : result;
+               : lowering_.builder_.CreateSExt(result, i64);
   }
   case Builtin::BufferCopy: {
     Lowering::Operand self = receiver(0);
@@ -245,7 +249,7 @@ llvm::Value *BufferCalls::emit() {
         {self.value, target.value, values[0], values[1], values[2], has});
     lowering_.refCounts().dropOperand(target);
     lowering_.refCounts().dropOperand(self);
-    return copied;
+    return lowering_.builder_.CreateSExt(copied, i64);
   }
   case Builtin::BufferSwap: {
     Lowering::Operand self = receiver(0);

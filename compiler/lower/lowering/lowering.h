@@ -121,6 +121,7 @@ class Lowering {
 public:
   Lowering(llvm::LLVMContext &ctx, llvm::StringRef moduleName, const llvm::DataLayout &layout);
   void setSourceMgr(const llvm::SourceMgr *sourceMgr) { sourceMgr_ = sourceMgr; }
+  const std::string &mismatch() const { return mismatch_; }
   void setFeatures(const FeatureRegistry *features) { features_ = features; }
   void setParallelPlan(const ParallelPlan *plan);
   void setMemoryPlan(const MemoryPlan *memory) { memory_ = memory; }
@@ -345,7 +346,7 @@ private:
     llvm::FunctionCallee init;
     llvm::FunctionCallee shutdown;
     llvm::FunctionCallee mainDone;
-    llvm::FunctionCallee printI32;
+    llvm::FunctionCallee printU64;
     llvm::FunctionCallee printI64;
     llvm::FunctionCallee printF64;
     llvm::FunctionCallee printBool;
@@ -368,6 +369,7 @@ private:
     llvm::FunctionCallee strEndsWith;
     llvm::FunctionCallee strRepeat;
     llvm::FunctionCallee strFromI64;
+    llvm::FunctionCallee strFromU64;
     llvm::FunctionCallee strFromF64;
     llvm::FunctionCallee strCharAtOrEmpty;
     llvm::FunctionCallee strCodePoint;
@@ -391,7 +393,6 @@ private:
     llvm::FunctionCallee mathPowLong;
     llvm::FunctionCallee mathHypot;
     llvm::FunctionCallee mathRandom;
-    llvm::FunctionCallee checkedInt32OfLong;
     llvm::FunctionCallee valueToString;
     llvm::FunctionCallee arrNew;
     llvm::FunctionCallee arrNewLength;
@@ -443,6 +444,7 @@ private:
   std::vector<TryContext> tries_;
   llvm::SMLoc loc_;
   const llvm::SourceMgr *sourceMgr_ = nullptr;
+  std::string mismatch_;
 
 public:
   ~Lowering();

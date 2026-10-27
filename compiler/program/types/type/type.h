@@ -23,7 +23,6 @@ public:
     Undefined,
     Bool,
     Int,
-    Long,
     Double,
     Decimal,
     String,
@@ -50,9 +49,21 @@ public:
   bool isVoid() const { return kind_ == Kind::Void; }
   bool isUndefined() const { return kind_ == Kind::Undefined; }
   bool isBool() const { return kind_ == Kind::Bool; }
-  bool isInt() const { return kind_ == Kind::Int; }
+  bool isInt() const { return kind_ == Kind::Int && bits_ == 64 && !unsigned_; }
   bool isString() const { return kind_ == Kind::String; }
-  bool isInteger() const { return kind_ == Kind::Int || kind_ == Kind::Long; }
+  bool isInteger() const { return kind_ == Kind::Int; }
+  bool isUnsigned() const { return unsigned_; }
+  int64_t intMin() const {
+    return unsigned_ ? 0 : bits_ == 64 ? INT64_MIN : -(int64_t(1) << (bits_ - 1));
+  }
+  uint64_t intMax() const {
+    return bits_ == 64 ? (unsigned_ ? UINT64_MAX : uint64_t(INT64_MAX))
+                       : (uint64_t(1) << (unsigned_ ? bits_ : bits_ - 1)) - 1;
+  }
+  bool holds(const Type *other) const {
+    return other->isInteger() && isInteger() && other->intMin() >= intMin() &&
+           other->intMax() <= intMax();
+  }
   bool isFloat() const { return kind_ == Kind::Double; }
   bool isNumeric() const { return isInteger() || isFloat(); }
   bool isDecimal() const { return kind_ == Kind::Decimal; }
@@ -204,7 +215,8 @@ public:
   static const Type *undefinedTy();
   static const Type *boolTy();
   static const Type *intTy();
-  static const Type *longTy();
+  static const Type *integer(unsigned bits, bool isUnsigned);
+  static llvm::ArrayRef<const Type *> integers();
   static const Type *doubleTy();
   static const Type *decimalTy();
   static const Type *string();
@@ -321,6 +333,8 @@ private:
   std::vector<std::u16string> texts_;
   double number_ = 0;
   unsigned atom_ = 0;
+  unsigned bits_ = 0;
+  bool unsigned_ = false;
   std::vector<UnionSlot> slots_;
   std::vector<const Type *> typeArgs_;
   const Type *iterated_ = nullptr;

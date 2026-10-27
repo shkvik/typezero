@@ -917,7 +917,7 @@ static void listener_drop(void *object) {
   }
 }
 
-void *tz_net_listen(void *host_obj, uint64_t host_meta, int32_t port, double max_body,
+void *tz_net_listen(void *host_obj, uint64_t host_meta, int64_t port, double max_body,
                     TzMaker make) {
   start();
   tz_net_make = make;
@@ -961,7 +961,7 @@ void *tz_net_listen(void *host_obj, uint64_t host_meta, int32_t port, double max
   char where[300];
   char text[64];
   address_text((SOCKADDR *)&address, text, sizeof text);
-  snprintf(where, sizeof where, "%s:%d", text, port);
+  snprintf(where, sizeof where, "%s:%lld", text, (long long)port);
   int family = address.ss_family;
   SOCKET s = WSASocketW(family, SOCK_STREAM, IPPROTO_TCP, NULL, 0,
                         WSA_FLAG_OVERLAPPED | WSA_FLAG_NO_HANDLE_INHERIT);
@@ -999,7 +999,7 @@ void *tz_net_listen(void *host_obj, uint64_t host_meta, int32_t port, double max
   return l;
 }
 
-int32_t tz_net_listener_port(void *listener, TzMaker make) {
+int64_t tz_net_listener_port(void *listener, TzMaker make) {
   TZ_ORDERED();
   (void)make;
 
@@ -1130,7 +1130,7 @@ void tz_net_close_listener(void *listener, TzMaker make) {
   }
 }
 
-int32_t tz_net_sweep(void *listener, double idle, TzMaker make) {
+int64_t tz_net_sweep(void *listener, double idle, TzMaker make) {
   TZ_ORDERED();
   (void)make;
   NetListener *l = (NetListener *)listener;
@@ -1373,7 +1373,7 @@ static void abort_connect(TzAbortListener *l) {
   }
 }
 
-void tz_net_connect(TzPromise *p, void *host_obj, uint64_t host_meta, int32_t port, void *signal,
+void tz_net_connect(TzPromise *p, void *host_obj, uint64_t host_meta, int64_t port, void *signal,
                     TzMaker make) {
   TZ_ORDERED();
   start();
@@ -1478,7 +1478,7 @@ void tz_net_close(void *conn, TzMaker make) {
   (void)conn;
   (void)make;
 }
-void *tz_net_listen(void *host_obj, uint64_t host_meta, int32_t port, double max_body,
+void *tz_net_listen(void *host_obj, uint64_t host_meta, int64_t port, double max_body,
                     TzMaker make) {
   (void)host_obj;
   (void)host_meta;
@@ -1489,7 +1489,7 @@ void *tz_net_listen(void *host_obj, uint64_t host_meta, int32_t port, double max
 
   return NULL;
 }
-int32_t tz_net_listener_port(void *listener, TzMaker make) {
+int64_t tz_net_listener_port(void *listener, TzMaker make) {
   TZ_ORDERED();
   (void)listener;
   (void)make;
@@ -1507,7 +1507,7 @@ void tz_net_close_listener(void *listener, TzMaker make) {
   (void)listener;
   (void)make;
 }
-int32_t tz_net_sweep(void *listener, double idle, TzMaker make) {
+int64_t tz_net_sweep(void *listener, double idle, TzMaker make) {
   TZ_ORDERED();
   (void)listener;
   (void)idle;
@@ -1515,7 +1515,7 @@ int32_t tz_net_sweep(void *listener, double idle, TzMaker make) {
 
   return 0;
 }
-void tz_net_connect(TzPromise *p, void *host_obj, uint64_t host_meta, int32_t port, void *signal,
+void tz_net_connect(TzPromise *p, void *host_obj, uint64_t host_meta, int64_t port, void *signal,
                     TzMaker make) {
   TZ_ORDERED();
   (void)host_obj;

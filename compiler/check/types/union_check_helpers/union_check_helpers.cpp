@@ -1,5 +1,6 @@
 #include "compiler/check/types/union_check_helpers/union_check_helpers.h"
 #include "llvm/Support/ConvertUTF.h"
+#include <cmath>
 
 using llvm::cast;
 using llvm::dyn_cast;
@@ -28,7 +29,7 @@ const Type *writtenLiteral(const Expr *expr) {
   }
   if (auto *lit = dyn_cast<IntLitExpr>(expr)) {
     double value = negated ? -double(lit->value) : double(lit->value);
-    bool fits = value >= -2147483648.0 && value <= 2147483647.0 && !(negated && lit->value == 0);
+    bool fits = std::fabs(value) <= 9007199254740992.0 && !(negated && lit->value == 0);
     return Type::numberLiteral(value, fits ? Type::intTy() : Type::doubleTy());
   }
   if (auto *lit = dyn_cast<FloatLitExpr>(expr)) {

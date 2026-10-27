@@ -21,9 +21,14 @@ Result<Lowered, Errors> LowerPass::run(Program &program, const ParallelPlan &pla
   lowering.setMemoryPlan(&memory);
   lowering.setFeatures(&features_);
   std::unique_ptr<llvm::Module> module = lowering.moduleBuilder().generate(program.file);
-  std::string problems;
+  std::string problems = lowering.mismatch();
   llvm::raw_string_ostream out(problems);
-  if (llvm::verifyModule(*module, &out)) {
+  if (!problems.empty() || llvm::verifyModule(*module, &out)) {
+    for (llvm::Function &function : *module) {
+      if (!function.isDeclaration() && llvm::verifyFunction(function)) {
+        out << "in " << function.getName() << "\n";
+      }
+    }
     Errors errors;
     errors.raw(problems);
     errors.tool("internal error: the generated LLVM IR is invalid");

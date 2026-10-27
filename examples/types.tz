@@ -7,7 +7,7 @@ console.log("яблок на коробку:", apples / boxes) // деление
 console.log("остаток:", apples % boxes)
 
 // long — 64-битное целое для больших чисел.
-let population: long = 8100000000
+let population: int = 8100000000
 console.log("население Земли:", population)
 
 // double (он же number) — дробное число. int сам превращается в double.
@@ -28,7 +28,7 @@ console.log("без дробной части:", whole, "десятков:", rou
 let expensive: boolean = total > 50
 console.log("дорого?", expensive)
 
-// Переполнение int заворачивается, как в Go.
-let max: int = 2147483647
+// int — 64 бита; переполнение пока заворачивается, как в Go.
+let max: int = 9223372036854775807
 // expect-warning: 'max + 1' may overflow int
 console.log("max + 1 =", max + 1)

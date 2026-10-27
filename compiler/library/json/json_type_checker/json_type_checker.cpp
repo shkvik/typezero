@@ -21,7 +21,6 @@ std::string fromJsonProblem(const Type *type, llvm::SmallPtrSetImpl<const Type *
                             ClassProblem classProblem = nullptr) {
   switch (type->kind()) {
   case Type::Kind::Int:
-  case Type::Kind::Long:
   case Type::Kind::Double:
   case Type::Kind::Decimal:
   case Type::Kind::Bool:

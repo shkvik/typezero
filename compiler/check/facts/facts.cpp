@@ -1,4 +1,5 @@
 #include "compiler/check/facts/facts.h"
+#include "compiler/program/types/types.h"
 #include <algorithm>
 #include <limits>
 
@@ -6,11 +7,41 @@ namespace tz {
 
 namespace {
 
-constexpr int64_t kMaxOffset = int64_t(1) << 40;
 constexpr size_t kMaxFacts = 64;
 
-constexpr int64_t kIntMin = std::numeric_limits<int32_t>::min();
-constexpr int64_t kIntMax = std::numeric_limits<int32_t>::max();
+constexpr int64_t kInf = std::numeric_limits<int64_t>::max();
+
+std::optional<int64_t> upper(Term t) {
+  if (t.length) {
+    return kMaxLength;
+  }
+  const Type *type = t.var && t.var->type ? t.var->type->nonOptional() : nullptr;
+  if (type && type->isInteger() && type->intMax() <= uint64_t(kInf)) {
+    return int64_t(type->intMax());
+  }
+
+  return std::nullopt;
+}
+
+std::optional<int64_t> lower(Term t) {
+  if (t.length) {
+    return 0;
+  }
+  const Type *type = t.var && t.var->type ? t.var->type->nonOptional() : nullptr;
+  if (type && type->isInteger() && type->intMin() > std::numeric_limits<int64_t>::min()) {
+    return type->intMin();
+  }
+
+  return std::nullopt;
+}
+
+std::optional<int64_t> plus(std::optional<int64_t> a, std::optional<int64_t> b) {
+  if (!a || !b || (*b > 0 && *a > kInf - 1 - *b) || (*b < 0 && *a < -kInf + 1 - *b)) {
+    return std::nullopt;
+  }
+
+  return *a + *b;
+}
 
 }
 
@@ -27,7 +58,7 @@ std::optional<Term> Term::sum(Term a, Term b) {
 }
 
 void Facts::add(Term lhs, Term rhs, int64_t offset) {
-  if (lhs == rhs || offset > kMaxOffset || offset < -kMaxOffset) {
+  if (lhs == rhs || offset <= std::numeric_limits<int64_t>::min() + 1) {
     return;
   }
   for (Fact &fact : facts_) {
@@ -43,8 +74,8 @@ void Facts::add(Term lhs, Term rhs, int64_t offset) {
 }
 
 void Facts::addEqual(Term a, Term b, int64_t offset) {
-  add(a, b, offset + 1);
-  add(b, a, 1 - offset);
+  add(a, b, saturatingAdd(offset, 1));
+  add(b, a, saturatingSub(1, offset));
 }
 
 bool Facts::proves(Term lhs, Term rhs, int64_t offset) const {
@@ -91,34 +122,40 @@ std::optional<int64_t> Facts::bound(Term lhs, Term rhs, bool sums) const {
     for (int k = 0; k < 2; ++k) {
       Term other = parts[1 - k];
       size_t self = node(parts[k]);
-      int64_t hi = other.length ? kMaxLength : kIntMax, lo = other.length ? 0 : kIntMin;
+      std::optional<int64_t> hi = upper(other), lo = lower(other);
       if (sums) {
         if (std::optional<int64_t> above = bound(other, Term::zero(), false)) {
-          hi = std::min(hi, *above - 1);
+          hi = hi ? std::min(*hi, *above - 1) : *above - 1;
         }
         if (std::optional<int64_t> below = bound(Term::zero(), other, false)) {
-          lo = std::max(lo, 1 - *below);
+          lo = lo ? std::max(*lo, 1 - *below) : 1 - *below;
         }
       }
-      edges.push_back({i, self, hi});
-      edges.push_back({self, i, -lo});
+      if (hi) {
+        edges.push_back({i, self, *hi});
+      }
+      if (lo && *lo > -kInf) {
+        edges.push_back({self, i, -*lo});
+      }
     }
   }
   for (size_t i = 1; i < nodes.size(); ++i) {
+    std::optional<int64_t> hi, lo;
     if (nodes[i].isSum()) {
-      bool lengths = nodes[i].length && nodes[i].length2;
-      edges.push_back({i, 0, lengths ? 2 * kMaxLength : 2 * kIntMax});
-      edges.push_back({0, i, lengths ? 0 : -2 * kIntMin});
-    } else if (nodes[i].length) {
-      edges.push_back({i, 0, kMaxLength});
-      edges.push_back({0, i, 0});
+      hi = plus(upper(nodes[i].first()), upper(nodes[i].second()));
+      lo = plus(lower(nodes[i].first()), lower(nodes[i].second()));
     } else {
-      edges.push_back({i, 0, kIntMax});
-      edges.push_back({0, i, -kIntMin});
+      hi = upper(nodes[i]);
+      lo = lower(nodes[i]);
+    }
+    if (hi) {
+      edges.push_back({i, 0, *hi});
+    }
+    if (lo && *lo > -kInf) {
+      edges.push_back({0, i, -*lo});
     }
   }
 
-  constexpr int64_t kInf = std::numeric_limits<int64_t>::max();
   std::vector<int64_t> dist(nodes.size(), kInf);
   dist[source] = 0;
   for (size_t round = 0; round + 1 < nodes.size(); ++round) {
@@ -127,7 +164,11 @@ std::optional<int64_t> Facts::bound(Term lhs, Term rhs, bool sums) const {
       if (dist[e.from] == kInf) {
         continue;
       }
-      int64_t d = dist[e.from] + e.weight;
+      std::optional<int64_t> sum = plus(dist[e.from], e.weight);
+      if (!sum) {
+        continue;
+      }
+      int64_t d = *sum;
       if (d < dist[e.to]) {
         dist[e.to] = d;
         changed = true;
@@ -156,12 +197,12 @@ void Facts::shift(Term term, int64_t delta) {
   for (Fact &fact : facts_) {
     bool lhs = fact.lhs.contains(term), rhs = fact.rhs.contains(term);
     if (lhs && !rhs) {
-      fact.offset += delta;
+      fact.offset = saturatingAdd(fact.offset, delta);
     } else if (rhs && !lhs) {
-      fact.offset -= delta;
+      fact.offset = saturatingSub(fact.offset, delta);
     }
   }
-  forgetIf([](const Fact &f) { return f.offset > kMaxOffset || f.offset < -kMaxOffset; });
+  forgetIf([](const Fact &f) { return f.offset <= std::numeric_limits<int64_t>::min() + 1; });
 }
 
 Facts Facts::meet(const Facts &a, const Facts &b) {

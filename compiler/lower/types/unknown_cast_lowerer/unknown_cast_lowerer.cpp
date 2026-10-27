@@ -25,7 +25,7 @@ constexpr uint32_t kLayoutClass = 2097152;
 
 constexpr uint32_t kLayoutDate = 1024;
 
-enum : uint32_t { kBoxInt = 1, kBoxLong = 2, kBoxDouble = 3 };
+enum : uint32_t { kBoxDouble = 3 };
 
 enum : uint32_t { kKindString = 2, kKindBoolean = 3 };
 
@@ -118,10 +118,17 @@ llvm::Value *UnknownCastLowerer::emitUnknownAs(llvm::Value *u, const Type *to,
     return phi;
   }
   switch (to->kind()) {
-  case Type::Kind::Int:
-    return through("tz_unknown_to_int", i32);
-  case Type::Kind::Long:
-    return through("tz_unknown_to_long", lowering_.builder_.getInt64Ty());
+  case Type::Kind::Int: {
+    llvm::Value *slot =
+        lowering_.functionFrame().createStackSlot(lowering_.builder_.getInt64Ty(), "reflect.value");
+    llvm::Value *ok = lowering_.builder_.CreateCall(
+        lowering_.unknownLowerer().unknownFunction("tz_unknown_to_integer", i32, {ptr, ptr, i32}),
+        {u, slot, lowering_.builder_.getInt32(TypeDescriptors::descriptorKind(to))});
+    test(lowering_.builder_.CreateICmpNE(ok, lowering_.builder_.getInt32(0)));
+    return lowering_.builder_.CreateTrunc(
+        lowering_.builder_.CreateLoad(lowering_.builder_.getInt64Ty(), slot),
+        lowering_.moduleBuilder().lower(to));
+  }
   case Type::Kind::Double:
     return through("tz_unknown_to_double", lowering_.builder_.getDoubleTy());
   case Type::Kind::Bool:
@@ -241,21 +248,22 @@ llvm::Value *UnknownCastLowerer::emitUnknownFit(llvm::Value *u, const Type *to) 
   switch (to->kind()) {
   case Type::Kind::Int: {
     llvm::Value *box = boxKind();
-    return pick(lowering_.builder_.CreateICmpEQ(box, level(kBoxInt)), 3,
-                pick(takes("tz_unknown_to_int", i32), 1, level(0)));
-  }
-  case Type::Kind::Long: {
-    llvm::Value *box = boxKind();
-    return pick(
-        lowering_.builder_.CreateICmpEQ(box, level(kBoxLong)), 3,
-        pick(lowering_.builder_.CreateICmpEQ(box, level(kBoxInt)), 2,
-             pick(takes("tz_unknown_to_long", lowering_.builder_.getInt64Ty()), 1, level(0))));
+    llvm::Value *slot =
+        lowering_.functionFrame().createStackSlot(lowering_.builder_.getInt64Ty(), "fit.value");
+    llvm::Value *fits = lowering_.builder_.CreateICmpNE(
+        lowering_.builder_.CreateCall(lowering_.unknownLowerer().unknownFunction(
+                                          "tz_unknown_to_integer", i32, {ptr, ptr, i32}),
+                                      {u, slot, level(TypeDescriptors::descriptorKind(to))}),
+        level(0));
+    return pick(lowering_.builder_.CreateICmpEQ(box, level(TypeDescriptors::descriptorKind(to))), 3,
+                pick(fits, 1, level(0)));
   }
   case Type::Kind::Double: {
     llvm::Value *box = boxKind();
-    llvm::Value *integer =
-        lowering_.builder_.CreateOr(lowering_.builder_.CreateICmpEQ(box, level(kBoxInt)),
-                                    lowering_.builder_.CreateICmpEQ(box, level(kBoxLong)));
+    llvm::Value *integer = lowering_.builder_.CreateOr(
+        lowering_.builder_.CreateOr(lowering_.builder_.CreateICmpEQ(box, level(1)),
+                                    lowering_.builder_.CreateICmpEQ(box, level(2))),
+        lowering_.builder_.CreateICmpULE(lowering_.builder_.CreateSub(box, level(18)), level(5)));
     return pick(
         lowering_.builder_.CreateICmpEQ(box, level(kBoxDouble)), 3,
         pick(integer, 2,

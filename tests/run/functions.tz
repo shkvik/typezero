@@ -4,9 +4,9 @@ function fib(n: int): int {
   return fib(n - 1) + fib(n - 2)
 }
 
-function factorial(n: long): long {
-  let result: long = 1
-  for (let i: long = 2; i <= n; i++) result *= i
+function factorial(n: int): double {
+  let result: double = 1
+  for (let i: int = 2; i <= n; i++) result *= i
   return result
 }
 

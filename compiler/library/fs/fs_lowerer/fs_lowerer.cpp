@@ -75,14 +75,14 @@ llvm::Value *FsLowerer::emitFsCall(CallExpr *call) {
     bool stats = type->field("mode") != nullptr;
     llvm::StringRef field = stats ? "mode" : "#type";
     llvm::Value *bits = lowering_.builder_.CreateLoad(
-        stats ? f64 : i32, lowering_.objectLayouts().fieldAddress(object.value, type, field));
+        stats ? f64 : i64, lowering_.objectLayouts().fieldAddress(object.value, type, field));
     if (stats) {
-      bits = lowering_.builder_.CreateFPToSI(bits, i32);
+      bits = lowering_.builder_.CreateFPToSI(bits, i64);
     }
     lowering_.refCounts().dropOperand(object);
     llvm::Value *kind = lowering_.exprLowerer().emitExpr(call->args[0]);
     return lowering_.builder_.CreateICmpEQ(
-        lowering_.builder_.CreateAnd(bits, lowering_.builder_.getInt32(0170000)), kind);
+        lowering_.builder_.CreateAnd(bits, lowering_.builder_.getInt64(0170000)), kind);
   }
 
   const Type *valueType = call->type->isResult() ? call->type->okType() : call->type;
@@ -137,30 +137,30 @@ llvm::Value *FsLowerer::emitFsCall(CallExpr *call) {
   }
   case Builtin::FsReadFile:
     if (valueType->isBytes()) {
-      if (call->args[0]->type->isInt()) {
-        return fsCall("tz_fs_read_fd_bytes", ptr, {i32}, {values[0]});
+      if (call->args[0]->type->isInteger()) {
+        return fsCall("tz_fs_read_fd_bytes", ptr, {i64}, {values[0]});
       }
       return fsCall("tz_fs_read_file_bytes", ptr, {ptr, i64, ptr, i64},
                     {obj(0), meta(0), obj(1), meta(1)});
     }
-    if (call->args[0]->type->isInt()) {
-      return fsString("tz_fs_read_fd", {i32, i32}, {values[0], values[2]});
+    if (call->args[0]->type->isInteger()) {
+      return fsString("tz_fs_read_fd", {i64, i64}, {values[0], values[2]});
     }
-    return fsString("tz_fs_read_file", {ptr, i64, ptr, i64, i32},
+    return fsString("tz_fs_read_file", {ptr, i64, ptr, i64, i64},
                     {obj(0), meta(0), obj(1), meta(1), values[2]});
   case Builtin::FsWriteFile:
     if (!call->args[1]->type->isString()) {
-      if (call->args[0]->type->isInt()) {
-        fsCall("tz_fs_write_fd_bytes", voidTy, {i32, ptr}, {values[0], values[1]});
+      if (call->args[0]->type->isInteger()) {
+        fsCall("tz_fs_write_fd_bytes", voidTy, {i64, ptr}, {values[0], values[1]});
       } else {
-        fsCall("tz_fs_write_file_bytes", voidTy, {ptr, i64, ptr, ptr, i64, i32},
+        fsCall("tz_fs_write_file_bytes", voidTy, {ptr, i64, ptr, ptr, i64, i64},
                {obj(0), meta(0), values[1], obj(2), meta(2), values[3]});
       }
-    } else if (call->args[0]->type->isInt()) {
-      fsCall("tz_fs_write_fd", voidTy, {i32, ptr, i64, i32},
+    } else if (call->args[0]->type->isInteger()) {
+      fsCall("tz_fs_write_fd", voidTy, {i64, ptr, i64, i64},
              {values[0], obj(1), meta(1), values[4]});
     } else {
-      fsCall("tz_fs_write_file", voidTy, {ptr, i64, ptr, i64, ptr, i64, i32, i32},
+      fsCall("tz_fs_write_file", voidTy, {ptr, i64, ptr, i64, ptr, i64, i64, i64},
              {obj(0), meta(0), obj(1), meta(1), obj(2), meta(2), values[3], values[4]});
     }
     return nullptr;
@@ -172,7 +172,7 @@ llvm::Value *FsLowerer::emitFsCall(CallExpr *call) {
   case Builtin::FsAccess:
   case Builtin::FsChmod:
     fsCall(call->builtin == Builtin::FsAccess ? "tz_fs_access" : "tz_fs_chmod", voidTy,
-           {ptr, i64, i32}, {obj(0), meta(0), values[1]});
+           {ptr, i64, i64}, {obj(0), meta(0), values[1]});
     return nullptr;
   case Builtin::FsTruncate:
     fsCall("tz_fs_truncate", voidTy, {ptr, i64, i64}, {obj(0), meta(0), values[1]});
@@ -192,7 +192,7 @@ llvm::Value *FsLowerer::emitFsCall(CallExpr *call) {
   case Builtin::FsMkdir: {
     llvm::AllocaInst *out =
         lowering_.functionFrame().createStackSlot(lowering_.strTy_, "mkdir.first");
-    llvm::Value *made = fsCall("tz_fs_mkdir", i32, {ptr, ptr, i64, i32, i32},
+    llvm::Value *made = fsCall("tz_fs_mkdir", i32, {ptr, ptr, i64, i32, i64},
                                {out, obj(0), meta(0), flag(1), values[2]});
     return optionalString(out, made);
   }
@@ -212,7 +212,7 @@ llvm::Value *FsLowerer::emitFsCall(CallExpr *call) {
     fsCall("tz_fs_rename", voidTy, {ptr, i64, ptr, i64}, {obj(0), meta(0), obj(1), meta(1)});
     return nullptr;
   case Builtin::FsCopyFile:
-    fsCall("tz_fs_copy_file", voidTy, {ptr, i64, ptr, i64, i32},
+    fsCall("tz_fs_copy_file", voidTy, {ptr, i64, ptr, i64, i64},
            {obj(0), meta(0), obj(1), meta(1), values[2]});
     return nullptr;
   default:

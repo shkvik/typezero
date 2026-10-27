@@ -110,7 +110,7 @@ llvm::Value *CryptoLowerer::emitCryptoCall(CallExpr *call) {
       break;
     case 'i':
       params.push_back(i32);
-      args.push_back(v);
+      args.push_back(v->getType() == i32 ? v : lowering_.builder_.CreateTrunc(v, i32));
       break;
     case 'b':
       params.push_back(i32);
@@ -194,8 +194,9 @@ llvm::Value *CryptoLowerer::emitCryptoCall(CallExpr *call) {
       return nullptr;
     case 'S':
       return self;
-    case 'o':
     case 'i':
+      return lowering_.builder_.CreateSExt(result, lowering_.builder_.getInt64Ty());
+    case 'o':
     case 'f':
       return result;
     case 'p':
@@ -205,8 +206,8 @@ llvm::Value *CryptoLowerer::emitCryptoCall(CallExpr *call) {
       return lowering_.builder_.CreateICmpNE(result, lowering_.builder_.getInt32(0));
     case 'j':
       return lowering_.optionalLowerer().makeOptional(
-          result, lowering_.builder_.CreateICmpSGE(result, lowering_.builder_.getInt32(0)),
-          valueType);
+          lowering_.builder_.CreateSExt(result, lowering_.builder_.getInt64Ty()),
+          lowering_.builder_.CreateICmpSGE(result, lowering_.builder_.getInt32(0)), valueType);
     case 's':
       return lowering_.builder_.CreateLoad(lowering_.strTy_, out);
     case 'q':
@@ -299,7 +300,8 @@ llvm::Value *CryptoLowerer::emitCryptoKeyPair(CallExpr *call) {
     if (format < 0) {
       continue;
     }
-    llvm::Value *has = lowering_.exprLowerer().emitExpr(part[1]);
+    llvm::Value *has = lowering_.builder_.CreateTrunc(lowering_.exprLowerer().emitExpr(part[1]),
+                                                      lowering_.builder_.getInt32Ty());
     llvm::Value *keyTypeName = lowering_.exprLowerer().emitExpr(part[2]),
                 *cipher = lowering_.exprLowerer().emitExpr(part[3]);
     llvm::Value *passType = null, *passValue = null;

@@ -25,13 +25,13 @@ namespace tz {
 
 constexpr double kInf = std::numeric_limits<double>::infinity();
 
-constexpr double kIntMin = -2147483648.0;
+constexpr double kInt32Min = -2147483648.0;
 
-constexpr double kIntMax = 2147483647.0;
+constexpr double kInt32Max = 2147483647.0;
 
-constexpr double kLongMin = -9223372036854775808.0;
+constexpr double kIntMin = -9223372036854775808.0;
 
-constexpr double kLongMax = 9223372036854775807.0;
+constexpr double kIntMax = 9223372036854775808.0;
 
 constexpr double kLengthMax = double(kMaxLength);
 

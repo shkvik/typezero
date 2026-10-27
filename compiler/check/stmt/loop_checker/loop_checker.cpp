@@ -242,8 +242,8 @@ void LoopChecker::checkForOf(ForOfStmt *stmt) {
       hi = hi ? std::max(*hi, *c) : *c;
     }
     if (lo) {
-      checker_.flow_.facts.add(Term::zero(), Term::of(stmt->binding.sym), 1 - *lo);
-      checker_.flow_.facts.add(Term::of(stmt->binding.sym), Term::zero(), *hi + 1);
+      checker_.flow_.facts.add(Term::zero(), Term::of(stmt->binding.sym), saturatingSub(1, *lo));
+      checker_.flow_.facts.add(Term::of(stmt->binding.sym), Term::zero(), saturatingAdd(*hi, 1));
     }
   }
   checkLoopBody(stmt->body);

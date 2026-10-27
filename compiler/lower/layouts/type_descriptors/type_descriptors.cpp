@@ -12,14 +12,19 @@ using llvm::Value;
 
 namespace tz {
 
-namespace {
-
-uint32_t descriptorKind(const Type *type) {
+uint32_t TypeDescriptors::descriptorKind(const Type *type) {
   switch (type->kind()) {
   case Type::Kind::Int:
-    return 1;
-  case Type::Kind::Long:
-    return 2;
+    switch (type->bitWidth()) {
+    case 8:
+      return type->isUnsigned() ? 20 : 18;
+    case 16:
+      return type->isUnsigned() ? 21 : 19;
+    case 32:
+      return type->isUnsigned() ? 22 : 1;
+    default:
+      return type->isUnsigned() ? 23 : 2;
+    }
   case Type::Kind::Double:
     return 3;
   case Type::Kind::Bool:
@@ -53,8 +58,6 @@ uint32_t descriptorKind(const Type *type) {
   default:
     llvm_unreachable("no runtime descriptor for this type");
   }
-}
-
 }
 
 TypeDescriptors::TypeDescriptors(Lowering &lowering) : lowering_(lowering) {}

@@ -1,10 +1,10 @@
-#include "compiler/declare/prelude/prelude.h"
 #include "compiler/library/fs/fs_checker/fs_checker.h"
 #include "compiler/check/errors/throw_checker/throw_checker.h"
 #include "compiler/check/expr/argument_checker/argument_checker.h"
 #include "compiler/check/expr/call_checker/call_checker.h"
 #include "compiler/check/expr/expr_checker/expr_checker.h"
 #include "compiler/check/types/type_relations/type_relations.h"
+#include "compiler/declare/prelude/prelude.h"
 #include "compiler/library/builtin_modules/builtin_module_checker/builtin_module_checker.h"
 #include "compiler/library/builtin_modules/runtime_object_checker/runtime_object_checker.h"
 #include "compiler/library/bytes/bytes_checker/bytes_checker.h"
@@ -80,9 +80,7 @@ bool FsChecker::nodeOptions(CallExpr *call, size_t index, llvm::StringRef fn,
   return true;
 }
 
-const Type *FsChecker::systemError() const {
-  return checker_.prelude().builtinType("SystemError");
-}
+const Type *FsChecker::systemError() const { return checker_.prelude().builtinType("SystemError"); }
 
 Expr *FsChecker::checkEncoding(Expr *encoding, llvm::StringRef fn, bool any) {
   auto *lit = dyn_cast<StringLitExpr>(encoding);
@@ -172,8 +170,8 @@ Expr *FsChecker::checkFsCall(CallExpr *call, llvm::StringRef fn, llvm::SMLoc loc
       return stringLit(fallback);
     }
     static constexpr llvm::StringLiteral flags[] = {
-        "r",  "rs",  "sr",  "r+", "rs+", "sr+", "w",  "wx",  "xw",  "w+",  "wx+",
-        "xw+", "a",  "ax",  "xa", "as",  "sa",  "a+", "ax+", "xa+", "as+", "sa+"};
+        "r",   "rs", "sr", "r+", "rs+", "sr+", "w",  "wx",  "xw",  "w+",  "wx+",
+        "xw+", "a",  "ax", "xa", "as",  "sa",  "a+", "ax+", "xa+", "as+", "sa+"};
     auto *lit = dyn_cast<StringLitExpr>(flag);
     if (lit && llvm::is_contained(flags, llvm::StringRef(utf8(lit->value)))) {
       lit->type = string;
@@ -335,11 +333,11 @@ Expr *FsChecker::checkFsCall(CallExpr *call, llvm::StringRef fn, llvm::SMLoc loc
     Expr *value;
     if (op == "truncateSync") {
       value = call->args.size() > 1
-                  ? checker_.argumentChecker().checkArg(call->args[1], Type::longTy())
+                  ? checker_.argumentChecker().checkArg(call->args[1], Type::intTy())
                   : nullptr;
       if (!value) {
         auto *zero = checker_.ctx_.make<IntLitExpr>(loc, 0);
-        zero->type = Type::longTy();
+        zero->type = Type::intTy();
         value = zero;
       }
     } else if (op == "chmodSync" && isa<StringLitExpr>(call->args[1])) {

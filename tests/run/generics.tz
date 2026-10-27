@@ -142,7 +142,7 @@ function average<T extends number>(xs: T[]) {
 function maxOf<T extends number>(a: T, b: T): T { return a > b ? a : b }
 function half<T extends number>(x: T) { return x / 2 }
 function total<T extends number>(xs: T[]) { return xs.reduce((s, x) => s + x, 0) }
-const big: long = 3000000000
+const big: int = 3000000000
 console.log(average([1, 2, 4]), average([1.5, 2.5]), maxOf(3, 7), maxOf(2.5, 1.5), maxOf(big, 1))
 console.log(half(7), half(7.5), total([1, 2, 3]), total([0.5, 0.25]))
 

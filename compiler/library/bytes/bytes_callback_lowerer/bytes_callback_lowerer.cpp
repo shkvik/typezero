@@ -109,7 +109,7 @@ llvm::Value *BytesCallbackLowerer::emitBytesCallbackMethod(CallExpr *call) {
     llvm::Value *none = method == Builtin::ArrSome    ? lowering_.builder_.getFalse()
                         : method == Builtin::ArrEvery ? lowering_.builder_.getTrue()
                         : call->type->isInt()
-                            ? lowering_.builder_.getInt32(~0u)
+                            ? lowering_.builder_.getInt64(~uint64_t(0))
                             : lowering_.optionalLowerer().undefinedValue(call->type);
     lowering_.builder_.CreateStore(none, resultSlot);
   }
@@ -133,7 +133,7 @@ llvm::Value *BytesCallbackLowerer::emitBytesCallbackMethod(CallExpr *call) {
         lowering_.builder_.CreateLoad(lowering_.moduleBuilder().lower(accType), accSlot));
   }
   args.push_back(value);
-  args.push_back(lowering_.builder_.CreateTrunc(i, lowering_.builder_.getInt32Ty()));
+  args.push_back(i);
   args.push_back(array);
   if (reduce && passes == 0) {
     lowering_.refCounts().releaseValue(args[0], accType);
@@ -189,8 +189,7 @@ llvm::Value *BytesCallbackLowerer::emitBytesCallbackMethod(CallExpr *call) {
     test(result);
     lowering_.builder_.CreateBr(nextBlock);
     lowering_.functionFrame().switchTo(foundBlock);
-    lowering_.builder_.CreateStore(
-        lowering_.builder_.CreateTrunc(i, lowering_.builder_.getInt32Ty()), resultSlot);
+    lowering_.builder_.CreateStore(i, resultSlot);
     lowering_.builder_.CreateBr(endBlock);
     lowering_.functionFrame().switchTo(lowering_.functionFrame().newBlock("dead"));
     break;

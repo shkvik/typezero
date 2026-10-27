@@ -2019,6 +2019,18 @@ void tz_dec_from_f64(TzDec *out, double v) {
   dec_store_free(out, &x);
 }
 
+void tz_dec_from_u64(TzDec *out, uint64_t v) {
+  if (v <= (uint64_t)INT64_MAX) {
+    out->coef = (int64_t)v;
+    out->meta = 0;
+    return;
+  }
+  Dec x;
+  dec_init(&x);
+  dec_set_u64(&x, v, 0, 0);
+  dec_store_free(out, &x);
+}
+
 double tz_dec_to_f64(int64_t a, uint64_t am) {
   if (is_short(am) && scale_of(am) <= 22 && magnitude(a) <= (UINT64_C(1) << 53)) {
     static const double powers[23] = {1e0,  1e1,  1e2,  1e3,  1e4,  1e5,  1e6,  1e7,

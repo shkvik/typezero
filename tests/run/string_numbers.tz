@@ -2,7 +2,7 @@
 // Numbers in templates are written straight into the result; each way the
 // result can be built must give the same text.
 const n = 42
-const big: long = 1234567890123
+const big: int = 1234567890123
 const half = -0.5
 const negZero = -0.0
 console.log(String(n), `${n}`, String(n), `n=${n}`, `n=${n}!`)

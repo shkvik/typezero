@@ -43,22 +43,22 @@ llvm::Value *FsPromisesLowerer::emitFsPromise(CallExpr *call) {
   };
   switch (call->builtin) {
   case Builtin::FspReadFile:
-    run("tz_fsp_read_file", {ptr, i64, ptr, i64, ptr, i32},
+    run("tz_fsp_read_file", {ptr, i64, ptr, i64, ptr, i64},
         {obj(0), meta(0), obj(1), meta(1), values[2],
-         value->isBytes() ? llvm::ConstantInt::getSigned(i32, -1) : values[3]});
+         value->isBytes() ? llvm::ConstantInt::getSigned(i64, -1) : values[3]});
     break;
   case Builtin::FspWriteFile:
     if (!call->args[1]->type->isString()) {
-      run("tz_fsp_write_file_bytes", {ptr, i64, ptr, ptr, i64, i32, ptr},
+      run("tz_fsp_write_file_bytes", {ptr, i64, ptr, ptr, i64, i64, ptr},
           {obj(0), meta(0), values[1], obj(2), meta(2), values[3], values[4]});
     } else {
-      run("tz_fsp_write_file", {ptr, i64, ptr, i64, ptr, i64, i32, ptr, i32},
+      run("tz_fsp_write_file", {ptr, i64, ptr, i64, ptr, i64, i64, ptr, i64},
           {obj(0), meta(0), obj(1), meta(1), obj(2), meta(2), values[3], values[5], values[4]});
     }
     break;
   case Builtin::FspAccess:
   case Builtin::FspChmod:
-    run(call->builtin == Builtin::FspAccess ? "tz_fsp_access" : "tz_fsp_chmod", {ptr, i64, i32},
+    run(call->builtin == Builtin::FspAccess ? "tz_fsp_access" : "tz_fsp_chmod", {ptr, i64, i64},
         {obj(0), meta(0), values[1]});
     break;
   case Builtin::FspTruncate:
@@ -78,7 +78,7 @@ llvm::Value *FsPromisesLowerer::emitFsPromise(CallExpr *call) {
     break;
   }
   case Builtin::FspMkdir:
-    run("tz_fsp_mkdir", {ptr, i64, i32, i32}, {obj(0), meta(0), flag(1), values[2]});
+    run("tz_fsp_mkdir", {ptr, i64, i32, i64}, {obj(0), meta(0), flag(1), values[2]});
     break;
   case Builtin::FspMkdtemp:
     run("tz_fsp_mkdtemp", {ptr, i64}, {obj(0), meta(0)});
@@ -95,7 +95,7 @@ llvm::Value *FsPromisesLowerer::emitFsPromise(CallExpr *call) {
     run("tz_fsp_rename", {ptr, i64, ptr, i64}, {obj(0), meta(0), obj(1), meta(1)});
     break;
   case Builtin::FspCopyFile:
-    run("tz_fsp_copy_file", {ptr, i64, ptr, i64, i32},
+    run("tz_fsp_copy_file", {ptr, i64, ptr, i64, i64},
         {obj(0), meta(0), obj(1), meta(1), values[2]});
     break;
   case Builtin::FspRealpath:
@@ -112,12 +112,12 @@ llvm::Value *FsPromisesLowerer::emitFsPromise(CallExpr *call) {
 }
 
 llvm::Value *FsPromisesLowerer::emitReadlineBuiltin(CallExpr *call) {
-  llvm::Type *voidTy = lowering_.builder_.getVoidTy(), *i32 = lowering_.builder_.getInt32Ty();
+  llvm::Type *voidTy = lowering_.builder_.getVoidTy();
   llvm::Type *i64 = lowering_.builder_.getInt64Ty(), *ptr = lowering_.builder_.getPtrTy();
   if (call->builtin == Builtin::RlCreate) {
     std::vector<llvm::Value *> values = lowering_.exprLowerer().emitExprs(call->args);
     llvm::Value *rl = lowering_.builder_.CreateCall(
-        lowering_.processLowerer().processFunction("tz_readline_new", ptr, {i32, ptr}),
+        lowering_.processLowerer().processFunction("tz_readline_new", ptr, {i64, ptr}),
         {values[0], values[1]}, "readline");
     lowering_.refCounts().releaseValue(values[1], call->args[1]->type);
     return rl;

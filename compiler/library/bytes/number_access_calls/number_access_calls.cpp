@@ -106,15 +106,9 @@ llvm::Value *NumberAccessCalls::emit() {
         result = lowering_.builder_.CreateCall(fn("tz_f16_to_f64", f64, {i32}),
                                                {lowering_.builder_.CreateZExt(v, i32)});
         break;
-      case Bytes::Uint32:
-        result = lowering_.builder_.CreateZExt(v, i64);
-        break;
-      case Bytes::Int32:
-        result = v;
-        break;
       default:
-        result = isSignedKind(kind) ? lowering_.builder_.CreateSExt(v, i32)
-                                    : lowering_.builder_.CreateZExt(v, i32);
+        result = isSignedKind(kind) ? lowering_.builder_.CreateSExt(v, i64)
+                                    : lowering_.builder_.CreateZExt(v, i64);
         break;
       }
     } else {
@@ -138,11 +132,8 @@ llvm::Value *NumberAccessCalls::emit() {
       llvm::StoreInst *store =
           lowering_.builder_.CreateAlignedStore(swapped(v), address, llvm::Align(1));
       store->setMetadata(llvm::LLVMContext::MD_tbaa, lowering_.bytesLowerer().bytesTbaa(false));
-      result =
-          dataView
-              ? nullptr
-              : lowering_.builder_.CreateTrunc(
-                    lowering_.builder_.CreateAdd(offset, lowering_.builder_.getInt64(size)), i32);
+      result = dataView ? nullptr
+                        : lowering_.builder_.CreateAdd(offset, lowering_.builder_.getInt64(size));
     }
     lowering_.refCounts().dropOperand(self);
     return result;
@@ -162,7 +153,6 @@ llvm::Value *NumberAccessCalls::emit() {
       result = lowering_.builder_.CreateCall(
           fn("tz_buffer_write_var", i64, {ptr, i64, i64, i64, i32}),
           {self.value, values[0], values[1], values[2], lowering_.builder_.getInt32(flags)});
-      result = lowering_.builder_.CreateTrunc(result, i32);
     } else {
       result = lowering_.builder_.CreateCall(
           fn("tz_buffer_read_var", i64, {ptr, i64, i64, i32}),

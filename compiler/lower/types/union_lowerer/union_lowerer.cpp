@@ -37,14 +37,11 @@ static UnionSlot targetSlot(UnionSlot slot, const Type *to) {
     return UnionSlot::String;
   }
   if (slot == UnionSlot::Int) {
-    for (UnionSlot s : {UnionSlot::Long, UnionSlot::Double, UnionSlot::Decimal}) {
+    for (UnionSlot s : {UnionSlot::Double, UnionSlot::Decimal}) {
       if (has(s)) {
         return s;
       }
     }
-  }
-  if (slot == UnionSlot::Long && has(UnionSlot::Double)) {
-    return UnionSlot::Double;
   }
 
   return UnionSlot::None;
@@ -82,15 +79,15 @@ llvm::Value *UnionLowerer::emitUnionConversion(llvm::Value *value, const Type *f
   }
   if (from->isString() && UnionLayout::isAtomType(to)) {
     std::vector<const Type *> literals =
-        to->isStringLiteral() ? std::vector<const Type *>{to}
-                              : std::vector<const Type *>(to->members().begin(),
-                                                          to->members().end());
+        to->isStringLiteral()
+            ? std::vector<const Type *>{to}
+            : std::vector<const Type *>(to->members().begin(), to->members().end());
     llvm::Value *atom = lowering_.builder_.getInt32(literals.front()->atom());
     for (const Type *literal : llvm::ArrayRef<const Type *>(literals).drop_front()) {
       llvm::Value *same = lowering_.equalityLowerer().emitValuesEqual(
           value, lowering_.stringLowerer().stringLiteral(literal->literalText()), Type::string());
-      atom = lowering_.builder_.CreateSelect(same, lowering_.builder_.getInt32(literal->atom()),
-                                             atom);
+      atom =
+          lowering_.builder_.CreateSelect(same, lowering_.builder_.getInt32(literal->atom()), atom);
     }
     lowering_.refCounts().releaseString(value);
     return atom;

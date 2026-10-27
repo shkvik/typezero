@@ -141,7 +141,7 @@ llvm::Value *StreamLowerer::emitStreamBuiltin(CallExpr *call) {
     };
     switch (call->builtin) {
     case Builtin::LibFsOpen:
-      run("tz_fss_open", {ptr, i64, ptr, i64, i32},
+      run("tz_fss_open", {ptr, i64, ptr, i64, i64},
           {lowering_.stringLowerer().stringObj(values[0]),
            lowering_.stringLowerer().stringMeta(values[0]),
            lowering_.stringLowerer().stringObj(values[1]),
@@ -151,14 +151,14 @@ llvm::Value *StreamLowerer::emitStreamBuiltin(CallExpr *call) {
     case Builtin::LibFsRead:
     case Builtin::LibFsWrite:
       run(call->builtin == Builtin::LibFsRead ? "tz_fss_read" : "tz_fss_write",
-          {i32, ptr, i32, i32, f64}, {values[0], values[1], values[2], values[3], values[4]}, true);
+          {i64, ptr, i64, i64, f64}, {values[0], values[1], values[2], values[3], values[4]}, true);
       break;
     case Builtin::LibFsClose:
-      run("tz_fss_close", {i32, i32}, {values[0], lowering_.builder_.CreateZExt(values[1], i32)},
+      run("tz_fss_close", {i64, i32}, {values[0], lowering_.builder_.CreateZExt(values[1], i32)},
           true);
       break;
     default:
-      run("tz_stdin_chunk", {i32}, {values[0]}, false);
+      run("tz_stdin_chunk", {i64}, {values[0]}, false);
       break;
     }
     for (size_t i = 0; i < values.size(); ++i) {
@@ -168,10 +168,10 @@ llvm::Value *StreamLowerer::emitStreamBuiltin(CallExpr *call) {
   }
   case Builtin::LibStdWrite: {
     std::vector<llvm::Value *> values = lowering_.exprLowerer().emitExprs(call->args);
-    lowering_.builder_.CreateCall(
-        lowering_.processLowerer().processFunction("tz_lib_std_write",
-                                                   lowering_.builder_.getVoidTy(), {i32, ptr}),
-        {values[0], values[1]});
+    lowering_.builder_.CreateCall(lowering_.processLowerer().processFunction(
+                                      "tz_lib_std_write", lowering_.builder_.getVoidTy(),
+                                      {lowering_.builder_.getInt64Ty(), ptr}),
+                                  {values[0], values[1]});
     lowering_.refCounts().releaseValue(values[1], call->args[1]->type);
     return nullptr;
   }

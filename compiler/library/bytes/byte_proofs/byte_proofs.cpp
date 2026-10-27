@@ -87,8 +87,9 @@ ValueRange ByteProofs::valueRange(const Expr *e) const {
       return {};
     }
     Range r = valueRange(conv->operand);
-    if (isInt && conv->operand->type->kind() == Type::Kind::Long &&
-        !(known(r) && *r.lo >= kIntMin && *r.hi <= kIntMax)) {
+    const Type *to = conv->type->nonOptional();
+    if (!to->holds(conv->operand->type->nonOptional()) &&
+        !(known(r) && *r.lo >= to->intMin() && (*r.hi < 0 || uint64_t(*r.hi) <= to->intMax()))) {
       return {};
     }
     return r;
@@ -222,7 +223,7 @@ void ByteProofs::checkFits(const Expr *value, const Type *target, llvm::StringRe
     return;
   }
   Bytes kind = target->bytes();
-  if (kind == Bytes::Uint8Clamped || kind == Bytes::Int32 || provesFits(value, lo, hi)) {
+  if (kind == Bytes::Uint8Clamped || provesFits(value, lo, hi)) {
     return;
   }
   std::string text = valueText(value);
@@ -372,8 +373,8 @@ void ByteProofs::addByteCallbackFacts(const FunctionDecl *fn) {
   if (!var || !var->type->isInt() || (info.lo <= kIntMin && info.hi >= kIntMax)) {
     return;
   }
-  checker_.flow_.facts.add(Term::zero(), Term::of(var), 1 - info.lo);
-  checker_.flow_.facts.add(Term::of(var), Term::zero(), info.hi + 1);
+  checker_.flow_.facts.add(Term::zero(), Term::of(var), saturatingSub(1, info.lo));
+  checker_.flow_.facts.add(Term::of(var), Term::zero(), saturatingAdd(info.hi, 1));
 }
 
 void ByteProofs::checkByteCallbackResult(const FunctionDecl *fn, const Expr *value) {

@@ -2,8 +2,8 @@
 // Integer constants are computed at compile time, where an overflow is an
 // error (see errors/constants.tz). These fit, or are meant to wrap around.
 const MS_PER_DAY = 24 * 60 * 60 * 1000
-const month: long = MS_PER_DAY * 30
-const big: long = 2 ** 40
+const month: int = MS_PER_DAY * 30
+const big: int = 2 ** 40
 const huge: double = 2 ** 70
 console.log(MS_PER_DAY, month, big, huge)
 
@@ -24,7 +24,7 @@ enum Size {
   Small = 1000,
   Large = 1000000,
 }
-const area: long = Size.Large * Size.Large
+const area: int = Size.Large * Size.Large
 console.log(area, Size.Small * Size.Large)
 
 // Only `const` is constant: `let` may change, so its arithmetic wraps at

@@ -615,8 +615,7 @@ static size_t subtag(const char *tag, size_t at, size_t *length) {
   return tag[end] ? end + 1 : end;
 }
 
-void tz_intl_locale_part(TzStr *out, void *tag_obj, uint64_t tag_meta, int32_t part,
-                         TzMaker make) {
+void tz_intl_locale_part(TzStr *out, void *tag_obj, uint64_t tag_meta, int64_t part, TzMaker make) {
   (void)make;
   const TzIcu *icu = tz_icu();
   *out = tz_str_from_ascii("", 0);

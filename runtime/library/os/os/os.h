@@ -11,7 +11,7 @@ typedef struct {
 } TzCpuParts;
 
 typedef struct {
-  int32_t uid, gid;
+  int64_t uid, gid;
   TzStr username, homedir;
   TzOptStr shell;
 } TzUserInfoParts;

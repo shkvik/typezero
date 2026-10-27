@@ -10,6 +10,7 @@
 #include "compiler/lower/objects/object_maker/object_maker.h"
 #include "compiler/lower/runtime_functions/runtime_functions.h"
 #include "compiler/lower/types/optional_lowerer/optional_lowerer.h"
+#include "compiler/lower/values/number_lowerer/number_lowerer.h"
 #include "compiler/lower/values/string_lowerer/string_lowerer.h"
 #include "llvm/ADT/STLExtras.h"
 
@@ -172,8 +173,11 @@ llvm::Constant *DecimalLowerer::emitDecimalLiteral(const Expr *expr) {
                                                       lowering_.builder_.getInt64(kDecLong)});
 }
 
-llvm::Value *DecimalLowerer::decimalFromInteger(llvm::Value *value) {
-  llvm::Value *coef = lowering_.builder_.CreateSExt(value, lowering_.builder_.getInt64Ty());
+llvm::Value *DecimalLowerer::decimalFromInteger(llvm::Value *value, const Type *from) {
+  if (from->isUnsigned() && from->bitWidth() == 64) {
+    return callReturningDecimal("tz_dec_from_u64", {value});
+  }
+  llvm::Value *coef = lowering_.numberLowerer().toI64(value, from);
   llvm::Value *result =
       lowering_.builder_.CreateInsertValue(llvm::UndefValue::get(lowering_.decTy_), coef, 0);
 
@@ -439,8 +443,10 @@ llvm::Value *DecimalLowerer::emitDecimalCall(CallExpr *call) {
         lowering_.builder_.getInt32(0));
     break;
   case Builtin::DecDecimalPlaces:
-    result = lowering_.builder_.CreateCall(
-        decimalFunction("tz_dec_decimal_places", i32, {i64, i64}), {a, am});
+    result = lowering_.builder_.CreateSExt(
+        lowering_.builder_.CreateCall(decimalFunction("tz_dec_decimal_places", i32, {i64, i64}),
+                                      {a, am}),
+        i64);
     break;
   case Builtin::DecShiftedBy:
     result = callReturningDecimal("tz_dec_shifted_by",

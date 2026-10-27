@@ -70,7 +70,8 @@ llvm::Value *toStorage(Lowering &, llvm::IRBuilder<> &b, Bytes kind, llvm::Value
   llvm::Type *storage = storageType(b, kind);
   switch (kind) {
   case Bytes::Uint8Clamped: {
-    llvm::Value *zero = b.getInt32(0), *max = b.getInt32(255);
+    llvm::Value *zero = llvm::ConstantInt::get(value->getType(), 0);
+    llvm::Value *max = llvm::ConstantInt::get(value->getType(), 255);
     llvm::Value *low = b.CreateSelect(b.CreateICmpSLT(value, zero), zero, value);
     return b.CreateTrunc(b.CreateSelect(b.CreateICmpSGT(low, max), max, low), storage);
   }
@@ -134,9 +135,6 @@ llvm::Value *BytesLowerer::loadElement(llvm::Value *data, const Type *type, llvm
       llvm::Align(type->elementSize()), "element");
   raw->setMetadata(llvm::LLVMContext::MD_tbaa, bytesTbaa(false));
   switch (kind) {
-  case Bytes::Uint32:
-    return lowering_.builder_.CreateZExt(raw, lowering_.builder_.getInt64Ty());
-  case Bytes::Int32:
   case Bytes::Float64:
     return raw;
   case Bytes::Float32:
@@ -147,8 +145,8 @@ llvm::Value *BytesLowerer::loadElement(llvm::Value *data, const Type *type, llvm
             "tz_f16_to_f64", lowering_.builder_.getDoubleTy(), {lowering_.builder_.getInt32Ty()}),
         {lowering_.builder_.CreateZExt(raw, lowering_.builder_.getInt32Ty())});
   default:
-    return isSignedKind(kind) ? lowering_.builder_.CreateSExt(raw, lowering_.builder_.getInt32Ty())
-                              : lowering_.builder_.CreateZExt(raw, lowering_.builder_.getInt32Ty());
+    return isSignedKind(kind) ? lowering_.builder_.CreateSExt(raw, lowering_.builder_.getInt64Ty())
+                              : lowering_.builder_.CreateZExt(raw, lowering_.builder_.getInt64Ty());
   }
 }
 
@@ -236,7 +234,7 @@ llvm::Value *BytesLowerer::emitBytesMember(MemberExpr *member) {
   llvm::Value *length = bytesLength(object.value);
   lowering_.refCounts().dropOperand(object);
 
-  return lowering_.builder_.CreateTrunc(length, lowering_.builder_.getInt32Ty(), "length");
+  return length;
 }
 
 Lowering::Producer BytesLowerer::bytesProducer(llvm::Value *slot, const Type *type) {

@@ -52,7 +52,7 @@ std::vector<Stmt *> TypeDeclarer::declareTypes(llvm::ArrayRef<Stmt *> stmts, boo
     if (auto *alias = dyn_cast<TypeAliasDecl>(stmt)) {
       name = alias->name;
       if (Type::fromName(name) || name == "Array") {
-        bool integer = name == "int" || name == "long" || name == "double";
+        bool integer = Type::fromName(name)->isNumeric();
         bool forTsc =
             integer && alias->type.kind == TypeRef::Kind::Name && alias->type.name == "number";
         forTsc |= name == "Json" && alias->type.kind == TypeRef::Kind::Union;
@@ -245,16 +245,15 @@ void TypeDeclarer::resolveEnum(EnumDecl *decl) {
                                 "' needs a value, since the member before it is not a number");
       continue;
     }
-    if (value != std::trunc(value) || value < std::numeric_limits<int32_t>::min() ||
-        value > std::numeric_limits<int32_t>::max()) {
-      checker_.diags_.error(m.init ? m.init->loc() : m.loc, "the value of enum member '" + m.name +
-                                                                "' must be an integer that fits in "
-                                                                "'int', found " +
-                                                                formatNumber(value));
+    if (value != std::trunc(value) || std::fabs(value) > 9007199254740992.0) {
+      checker_.diags_.error(m.init ? m.init->loc() : m.loc,
+                            "the value of enum member '" + m.name +
+                                "' must be a whole number from -2^53 to 2^53, found " +
+                                formatNumber(value));
       counting = false;
       continue;
     }
-    m.number = static_cast<int32_t>(value);
+    m.number = static_cast<int64_t>(value);
     numbers = true;
     next = value + 1;
     counting = true;
@@ -294,7 +293,7 @@ Expr *TypeDeclarer::checkEnumMember(EnumDecl *decl, MemberExpr *member, const Ty
 Expr *TypeDeclarer::checkEnumIndex(EnumDecl *decl, IndexExpr *index) {
   resolveEnum(decl);
   index->type = Type::error();
-  index->index = checker_.exprChecker().checkExpr(index->index, Type::longTy());
+  index->index = checker_.exprChecker().checkExpr(index->index, Type::intTy());
   const Type *type = index->index->type;
   if (type->isError()) {
     return index;
@@ -311,7 +310,7 @@ Expr *TypeDeclarer::checkEnumIndex(EnumDecl *decl, IndexExpr *index) {
                               "'");
     return index;
   }
-  index->index = checker_.typeRelations().convert(index->index, Type::longTy());
+  index->index = checker_.typeRelations().convert(index->index, Type::intTy());
   if (std::optional<Linear> value = checker_.indexProofs().linear(index->index);
       value && value->term.isZero()) {
     const EnumMember *found = nullptr;

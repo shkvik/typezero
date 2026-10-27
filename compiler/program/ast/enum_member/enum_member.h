@@ -9,7 +9,7 @@ struct EnumMember {
   llvm::SMLoc loc;
   Expr *init = nullptr;
   bool isString = false;
-  int32_t number = 0;
+  int64_t number = 0;
   std::u16string text;
 };
 

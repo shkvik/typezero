@@ -10,16 +10,22 @@
 // tests/cli/types.cmake checks these declarations on .ts copies of programs.
 //
 // Where tz knows more than a declaration can say, the declaration is looser
-// than tz, so that the editor does not underline what tz accepts: int, long
+// than tz, so that the editor does not underline what tz accepts: integers
 // and decimal are number here, and the value of metadata is any. Where
 // TypeScript itself is stricter than tz (Json without a check, overloads with
 // a body each), the editor underlines code that builds; tz's own language
 // server will not.
 
-// Numbers (docs/small.md, docs/decimal.md). For tsc all are number; tz tells
+// Numbers (docs/numbers.md, docs/decimal.md). For tsc all are number; tz tells
 // them apart and checks what mixes them.
 type int = number
-type long = number
+type int8 = number
+type int16 = number
+type int32 = number
+type uint8 = number
+type uint16 = number
+type uint32 = number
+type uint64 = number
 type double = number
 type decimal = number
 

@@ -90,8 +90,8 @@ bool mayBeFatal(const Expr *options) {
 BytesNewChecker::BytesNewChecker(Checker &checker) : checker_(checker) {}
 
 Expr *BytesNewChecker::checkTextDecoderParse(CallExpr *call, MemberExpr *member) {
-  auto *expr = checker_.ctx_.make<NewExpr>(call->loc(), "TextDecoder", std::vector<TypeRef>{},
-                                           call->args);
+  auto *expr =
+      checker_.ctx_.make<NewExpr>(call->loc(), "TextDecoder", std::vector<TypeRef>{}, call->args);
   parsing_ = true;
   Expr *made = checkBytesNew(expr, Type::bytesType(Bytes::TextDecoder));
   parsing_ = false;
@@ -259,7 +259,7 @@ Expr *BytesNewChecker::checkBytesNew(NewExpr *expr, const Type *type) {
 
   if (args.empty()) {
     auto *zero = checker_.ctx_.make<IntLitExpr>(loc, 0);
-    zero->type = Type::longTy();
+    zero->type = Type::intTy();
     call->args = {zero};
     return made(Builtin::BytesNew, type);
   }
@@ -294,7 +294,7 @@ Expr *BytesNewChecker::checkBytesNew(NewExpr *expr, const Type *type) {
     return call;
   }
   if (from->isInteger()) {
-    source = checker_.typeRelations().convert(source, Type::longTy());
+    source = checker_.typeRelations().convert(source, Type::intTy());
     checker_.indexProofs().requireBetween(source, 0, std::nullopt,
                                           "the length of a " + type->name().str());
     auto *zeroed = checker_.ctx_.make<BoolLitExpr>(loc, true);
@@ -409,7 +409,7 @@ bool BytesNewChecker::checkBytesSource(Expr *source, const Type *target) {
                               target->name() + ".from(" + text + ", x => Math.round(x) & 0xff)'");
     return false;
   }
-  if (kind == Bytes::Uint8Clamped || (kind == Bytes::Int32 && element->isInt())) {
+  if (kind == Bytes::Uint8Clamped) {
     return true;
   }
   int64_t slo, shi;

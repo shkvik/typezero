@@ -43,7 +43,7 @@ function* gen() {
   yield 1
   yield 2
 }
-console.log(new Int32Array(gen()), Uint8Array.from(gen(), x => (x * 3) & 0xff))
+console.log(Int32Array.from(gen(), x => x | 0), Uint8Array.from(gen(), x => (x * 3) & 0xff))
 const big = bytes.find(x => x > 15)
 if (big != undefined) console.log(`too big: ${big}`)
 const n = -1

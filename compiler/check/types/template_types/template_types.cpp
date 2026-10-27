@@ -194,7 +194,7 @@ bool TemplateTypes::matchTemplate(const std::u16string &text, llvm::ArrayRef<con
         if (!numberString(pieces[k], value)) {
           return false;
         }
-        bool whole = value == std::trunc(value) && value >= -2147483648.0 && value <= 2147483647.0;
+        bool whole = value == std::trunc(value) && std::fabs(value) <= 9007199254740992.0;
         const Type *number = Type::numberLiteral(value, whole ? Type::intTy() : Type::doubleTy());
         piece = number->name() == utf8(pieces[k]) ? number : constraint->nonOptional();
       }

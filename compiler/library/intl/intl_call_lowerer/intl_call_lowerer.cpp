@@ -224,7 +224,7 @@ llvm::Value *IntlCallLowerer::emitIntlCall(CallExpr *call) {
     lowering_.refCounts().dropOperand(b);
     lowering_.refCounts().dropOperand(a);
     lowering_.refCounts().dropOperand(self);
-    return result;
+    return lowering_.builder_.CreateSExt(result, lowering_.builder_.getInt64Ty());
   }
   case Builtin::StrLocaleCompare: {
     Lowering::Operand self = receiver(0);
@@ -244,7 +244,7 @@ llvm::Value *IntlCallLowerer::emitIntlCall(CallExpr *call) {
     dropAll(held);
     lowering_.refCounts().dropOperand(that);
     lowering_.refCounts().dropOperand(self);
-    return result;
+    return lowering_.builder_.CreateSExt(result, lowering_.builder_.getInt64Ty());
   }
   case Builtin::StrNormalize: {
     Lowering::Operand self = receiver(0);

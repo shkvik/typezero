@@ -55,7 +55,7 @@ w.items.push(new Money(1, "USD"))
 console.log(w.total("EUR").mapErr(e => `total: ${e}`))
 
 // int, an exact decimal literal, a long.
-const thousand: long = 1000
+const thousand: int = 1000
 console.log(price.times(3), price.times(1.5), price.times(thousand).toString())
 
 console.log(Money.parse("4.50 EUR").andThen(m => m.plus(price)), Money.parse("x"))

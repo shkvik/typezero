@@ -14,7 +14,7 @@ public:
   llvm::Value *decimalMeta(llvm::Value *value);
   llvm::Value *callReturningDecimal(llvm::StringRef name, llvm::ArrayRef<llvm::Value *> args);
   llvm::Constant *emitDecimalLiteral(const Expr *lit);
-  llvm::Value *decimalFromInteger(llvm::Value *value);
+  llvm::Value *decimalFromInteger(llvm::Value *value, const Type *from);
   llvm::Value *emitDecimalArithmetic(BinaryOp op, llvm::Value *lhs, llvm::Value *rhs);
   llvm::Value *emitDecimalBinary(BinaryExpr *bin);
   llvm::Value *emitDecimalCompound(BinaryOp op, llvm::Value *old, Expr *value);

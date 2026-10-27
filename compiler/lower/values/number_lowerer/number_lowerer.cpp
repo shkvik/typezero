@@ -24,11 +24,75 @@ namespace tz {
 
 NumberLowerer::NumberLowerer(Lowering &lowering) : lowering_(lowering) {}
 
-llvm::Value *NumberLowerer::emitCheckedInteger(llvm::Value *value, const Type *to) {
-  bool isInt = to->isInt();
+llvm::Value *NumberLowerer::toI64(llvm::Value *value, const Type *type) {
+  llvm::Type *i64 = lowering_.builder_.getInt64Ty();
+
+  return type->isUnsigned() ? lowering_.builder_.CreateZExtOrTrunc(value, i64)
+                            : lowering_.builder_.CreateSExtOrTrunc(value, i64);
+}
+
+llvm::Value *NumberLowerer::emitCheckedIntCast(llvm::Value *value, const Type *from,
+                                               const Type *to) {
+  if (to->holds(from)) {
+    return intCast(value, from, to);
+  }
+  llvm::IRBuilder<> &b = lowering_.builder_;
+  llvm::Type *i64 = b.getInt64Ty();
+  llvm::Value *wide = toI64(value, from);
+  llvm::Value *fits = b.getTrue();
+  if (from->isUnsigned()) {
+    fits = b.CreateICmpULE(wide, b.getInt64(to->intMax()));
+  } else {
+    if (to->intMin() > from->intMin()) {
+      fits = b.CreateICmpSGE(wide, llvm::ConstantInt::getSigned(i64, to->intMin()));
+    }
+    if (to->intMax() < from->intMax()) {
+      fits = b.CreateAnd(fits, b.CreateICmpSLE(wide, b.getInt64(to->intMax())));
+    }
+  }
+  llvm::BasicBlock *badBlock = lowering_.functionFrame().newBlock("int.does.not.fit");
+  llvm::BasicBlock *okBlock = lowering_.functionFrame().newBlock("int.fits");
+  b.CreateCondBr(fits, okBlock, badBlock,
+                 llvm::MDBuilder(lowering_.ctx_).createLikelyBranchWeights());
+  lowering_.functionFrame().switchTo(badBlock);
+  b.CreateCall(lowering_.processLowerer().processFunction(
+                   "tz_panic_int_does_not_fit", b.getVoidTy(), {i64, b.getInt32Ty(), b.getPtrTy()}),
+               {wide, b.getInt32(from->isUnsigned() ? 1 : 0), b.CreateGlobalString(to->name())});
+  b.CreateUnreachable();
+  lowering_.functionFrame().switchTo(okBlock);
+
+  return intCast(value, from, to);
+}
+
+llvm::Value *NumberLowerer::intCast(llvm::Value *value, const Type *from, const Type *to) {
+  llvm::Type *target = lowering_.moduleBuilder().lower(to);
+
+  return from->isUnsigned() ? lowering_.builder_.CreateZExtOrTrunc(value, target)
+                            : lowering_.builder_.CreateSExtOrTrunc(value, target);
+}
+
+llvm::Value *NumberLowerer::toDouble(llvm::Value *value, const Type *from) {
   llvm::Type *f64 = lowering_.builder_.getDoubleTy();
-  llvm::Value *low = llvm::ConstantFP::get(f64, isInt ? -2147483648.0 : -9223372036854775808.0);
-  llvm::Value *high = llvm::ConstantFP::get(f64, isInt ? 2147483648.0 : 9223372036854775808.0);
+
+  return from->isUnsigned() ? lowering_.builder_.CreateUIToFP(value, f64)
+                            : lowering_.builder_.CreateSIToFP(value, f64);
+}
+
+llvm::Value *NumberLowerer::fromDouble(llvm::Value *value, const Type *to) {
+  llvm::Type *target = lowering_.moduleBuilder().lower(to);
+
+  return to->isUnsigned() ? lowering_.builder_.CreateFPToUI(value, target)
+                          : lowering_.builder_.CreateFPToSI(value, target);
+}
+
+llvm::Value *NumberLowerer::emitCheckedInteger(llvm::Value *value, const Type *to) {
+  llvm::Type *f64 = lowering_.builder_.getDoubleTy();
+  double lowest = double(to->intMin());
+  double above = to->bitWidth() == 64
+                     ? (to->isUnsigned() ? 18446744073709551616.0 : 9223372036854775808.0)
+                     : double(to->intMax()) + 1;
+  llvm::Value *low = llvm::ConstantFP::get(f64, lowest);
+  llvm::Value *high = llvm::ConstantFP::get(f64, above);
   llvm::Value *fits = lowering_.builder_.CreateAnd(lowering_.builder_.CreateFCmpOGE(value, low),
                                                    lowering_.builder_.CreateFCmpOLT(value, high));
   llvm::BasicBlock *badBlock = lowering_.functionFrame().newBlock("int.does.not.fit");
@@ -38,12 +102,12 @@ llvm::Value *NumberLowerer::emitCheckedInteger(llvm::Value *value, const Type *t
   lowering_.functionFrame().switchTo(badBlock);
   lowering_.builder_.CreateCall(lowering_.processLowerer().processFunction(
                                     "tz_panic_does_not_fit", lowering_.builder_.getVoidTy(),
-                                    {f64, lowering_.builder_.getInt32Ty()}),
-                                {value, lowering_.builder_.getInt32(isInt ? 32 : 64)});
+                                    {f64, lowering_.builder_.getPtrTy()}),
+                                {value, lowering_.builder_.CreateGlobalString(to->name())});
   lowering_.builder_.CreateUnreachable();
   lowering_.functionFrame().switchTo(okBlock);
 
-  return lowering_.builder_.CreateFPToSI(value, lowering_.moduleBuilder().lower(to));
+  return fromDouble(value, to);
 }
 
 llvm::Value *NumberLowerer::emitStringToNumber(llvm::Value *str) {
@@ -80,7 +144,8 @@ llvm::Value *NumberLowerer::emitNumberBuiltin(CallExpr *call) {
                   lowering_.decimalLowerer().decimalFunction("tz_dec_to_f64", f64, {i64, i64}),
                   {lowering_.decimalLowerer().decimalCoef(v),
                    lowering_.decimalLowerer().decimalMeta(v)})
-            : v;
+        : base->isInteger() ? toDouble(v, base)
+                            : v;
     if (argType->isOptional()) {
       number = lowering_.builder_.CreateSelect(
           lowering_.builder_.CreateExtractValue(value.value, 1), number, nan);
@@ -96,7 +161,7 @@ llvm::Value *NumberLowerer::emitNumberBuiltin(CallExpr *call) {
     llvm::Value *result;
     if (isInt) {
       llvm::Value *radix = call->args.size() > 1 ? lowering_.exprLowerer().emitExpr(call->args[1])
-                                                 : lowering_.builder_.getInt32(0);
+                                                 : lowering_.builder_.getInt64(0);
       result = lowering_.builder_.CreateCall(
           lowering_.rt_.parseInt, {lowering_.stringLowerer().stringObj(str.value),
                                    lowering_.stringLowerer().stringMeta(str.value), radix});
@@ -113,7 +178,7 @@ llvm::Value *NumberLowerer::emitNumberBuiltin(CallExpr *call) {
   case Builtin::IsInteger:
   case Builtin::IsSafeInteger: {
     llvm::Value *x = lowering_.exprLowerer().emitExpr(call->args[0]);
-    if (argType->isInt()) {
+    if (argType->isInteger() && argType->bitWidth() < 64) {
       return call->builtin == Builtin::IsNaN ? lowering_.builder_.getFalse()
                                              : lowering_.builder_.getTrue();
     }
@@ -125,6 +190,9 @@ llvm::Value *NumberLowerer::emitNumberBuiltin(CallExpr *call) {
         return lowering_.builder_.getTrue();
       }
       llvm::Value *limit = lowering_.builder_.getInt64((int64_t(1) << 53) - 1);
+      if (argType->isUnsigned()) {
+        return lowering_.builder_.CreateICmpULE(x, limit);
+      }
       return lowering_.builder_.CreateICmpULE(lowering_.builder_.CreateAdd(x, limit),
                                               lowering_.builder_.CreateAdd(limit, limit));
     }
@@ -155,7 +223,9 @@ llvm::Value *NumberLowerer::emitNumberBuiltin(CallExpr *call) {
     bool units = call->builtin == Builtin::FromCharCode;
     std::vector<llvm::Value *> values;
     for (Expr *arg : call->args) {
-      values.push_back(lowering_.exprLowerer().emitExpr(arg));
+      llvm::Value *value = lowering_.exprLowerer().emitExpr(arg);
+      values.push_back(
+          units ? lowering_.builder_.CreateTrunc(value, lowering_.builder_.getInt32Ty()) : value);
     }
     llvm::Value *array =
         lowering_.mathLowerer().spillArray(values, units ? lowering_.builder_.getInt32Ty() : f64);

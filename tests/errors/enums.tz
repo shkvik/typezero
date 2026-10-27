@@ -13,8 +13,8 @@ let notConstant = 5
 enum Computed {
   // expect-error: the value of an enum member must be a constant
   A = notConstant,
-  // expect-error: the value of enum member 'B' must be an integer that fits in 'int', found 2147483648
-  B = 2 ** 31,
+  // expect-error: the value of enum member 'B' must be a whole number from -2^53 to 2^53, found 1.8014398509482e+16
+  B = 2 ** 54,
   // expect-error: found 0.5
   C = 1 / 2,
 }
@@ -38,8 +38,8 @@ type Broken = Missing[]
 type Loop = Loop[]
 // expect-error: 'string' is a built-in type and cannot be redefined
 type string = int
-// expect-error: only 'type long = number', for tsc, may declare it
-type long = string
+// expect-error: only 'type int8 = number', for tsc, may declare it
+type int8 = string
 type int = number
 // expect-error: duplicate declaration of type 'Id'
 type Id = string

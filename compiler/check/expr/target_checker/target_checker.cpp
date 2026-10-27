@@ -160,7 +160,7 @@ const Type *TargetChecker::checkAssignTarget(Expr *&target, bool compound) {
         return Type::error();
       }
       member->type = Type::intTy();
-      return Type::longTy();
+      return Type::intTy();
     }
     if (type->isString() && member->name == "length") {
       checker_.diags_.error(member->loc(), "the length of a string cannot be changed");

@@ -8,6 +8,7 @@
 #include "compiler/lower/module_builder/module_builder.h"
 #include "compiler/lower/stmt/stmt_lowerer/stmt_lowerer.h"
 #include "compiler/lower/values/array_lowerer/array_lowerer.h"
+#include "compiler/lower/values/number_lowerer/number_lowerer.h"
 #include "compiler/lower/values/string_lowerer/string_lowerer.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/IR/Intrinsics.h"
@@ -63,10 +64,10 @@ void ConsoleLowerer::emitConsoleLog(CallExpr *call) {
                                      lowering_.stringLowerer().stringMeta(value)});
       break;
     case Type::Kind::Int:
-      lowering_.builder_.CreateCall(lowering_.rt_.printI32, {value});
-      break;
-    case Type::Kind::Long:
-      lowering_.builder_.CreateCall(lowering_.rt_.printI64, {value});
+      lowering_.builder_.CreateCall(type->isUnsigned() && type->bitWidth() == 64
+                                        ? lowering_.rt_.printU64
+                                        : lowering_.rt_.printI64,
+                                    {lowering_.numberLowerer().toI64(value, type)});
       break;
     case Type::Kind::Double:
       lowering_.builder_.CreateCall(lowering_.rt_.printF64, {value});

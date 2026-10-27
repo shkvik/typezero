@@ -27,10 +27,6 @@ using llvm::isa;
 
 namespace tz {
 
-static const char kUnsignedShift[] =
-    "'>>>' is unsigned in JavaScript, and with a count of 0 a negative int becomes a number above "
-    "int: keep the result in a long";
-
 TypeRelations::TypeRelations(Checker &checker) : checker_(checker) {}
 
 bool TypeRelations::isImplicitlyConvertible(const Type *from, const Type *to) {
@@ -40,10 +36,10 @@ bool TypeRelations::isImplicitlyConvertible(const Type *from, const Type *to) {
   if (from->isNever()) {
     return true;
   }
-  if (from == Type::intTy() && (to == Type::longTy() || to == Type::doubleTy())) {
+  if (from->isInteger() && to->isInteger() && to->holds(from)) {
     return true;
   }
-  if (from == Type::longTy() && to == Type::doubleTy()) {
+  if (from->isInteger() && to->isFloat()) {
     return true;
   }
   if (from->isInteger() && to->isDecimal()) {
@@ -441,10 +437,6 @@ Expr *TypeRelations::coerce(Expr *expr, const Type *to, llvm::StringRef what) {
                "Math.ceil or Math.trunc";
   } else if (from->isFloat() && to->isInteger()) {
     message += "; round it with Math.round, Math.floor, Math.ceil or Math.trunc";
-  } else if (auto *bin = dyn_cast<BinaryExpr>(expr);
-             bin && bin->op == BinaryOp::UShr && bin->lhs->type->isInt() && to->isInt()) {
-    message += "; " + std::string(kUnsignedShift) +
-               (bin->source.empty() ? "" : ", e.g. 'const u = " + bin->source.str() + "'");
   } else if (from->isInteger() && to->isInteger()) {
     message += "; Math.trunc(x) converts it and checks that it fits";
   }

@@ -391,7 +391,7 @@ Expr *GeneratorChecker::destructuredIterator(Expr *init, const VarDeclarator &d)
   if (!d.patternRest) {
     auto *member = checker_.ctx_.make<MemberExpr>(init->loc(), init, "take");
     auto *n = checker_.ctx_.make<IntLitExpr>(init->loc(), d.patternLength);
-    n->type = Type::longTy();
+    n->type = Type::intTy();
     auto *take = checker_.ctx_.make<CallExpr>(init->loc(), member, std::vector<Expr *>{n});
     take->builtin = Builtin::IterTake;
     take->fused = true;

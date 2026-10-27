@@ -373,7 +373,7 @@ Val BuiltinEvaluator::evalMath(const CallExpr *call, State &st) {
   case Builtin::MathClz32:
     return numVal(range(0, 32));
   case Builtin::MathImul:
-    return numVal(range(kIntMin, kIntMax));
+    return numVal(range(kInt32Min, kInt32Max));
   case Builtin::MathFround:
     return numVal(x);
   default:

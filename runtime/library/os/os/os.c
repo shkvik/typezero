@@ -186,7 +186,7 @@ static void windows_version(OSVERSIONINFOW *info) {
 }
 #endif
 
-void tz_os_string(TzStr *out, int32_t which) {
+void tz_os_string(TzStr *out, int64_t which) {
   char text[256];
   text[0] = 0;
   switch (which) {
@@ -311,7 +311,7 @@ void tz_os_string(TzStr *out, int32_t which) {
   *out = tz_str_from_ascii(text, strlen(text));
 }
 
-double tz_os_number(int32_t which) {
+double tz_os_number(int64_t which) {
 #ifdef _WIN32
   if (which == 2) {
     return (double)GetTickCount64() / 1000;

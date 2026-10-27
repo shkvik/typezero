@@ -153,6 +153,8 @@ const Type *TypeResolver::resolveTypeInner(const TypeRef &ref) {
       checker_.decimalChecker().reportBigInt(ref.loc, "the type 'bigint'");
     } else if (ref.name == "BigInt64Array" || ref.name == "BigUint64Array") {
       checker_.decimalChecker().reportBigInt(ref.loc, "'" + ref.name.str() + "'");
+    } else if (ref.name == "long") {
+      checker_.diags_.error(ref.loc, "there is no 'long': 'int' is 64 bits");
     } else if (ref.name == "SharedArrayBuffer") {
       checker_.diags_.error(ref.loc,
                             "'SharedArrayBuffer' is not supported yet: it comes with the shared "
@@ -320,8 +322,9 @@ const Type *TypeResolver::resolveTypeInner(const TypeRef &ref) {
     if (ref.name == "boolean") {
       return Type::boolLiteral(ref.number != 0);
     }
-    bool whole = ref.number == std::trunc(ref.number) && ref.number >= -2147483648.0 &&
-                 ref.number <= 2147483647.0 && !(ref.number == 0 && std::signbit(ref.number));
+    bool whole = ref.number == std::trunc(ref.number) &&
+                 std::fabs(ref.number) <= 9007199254740992.0 &&
+                 !(ref.number == 0 && std::signbit(ref.number));
     return Type::numberLiteral(ref.number, whole ? Type::intTy() : Type::doubleTy());
   }
   case TypeRef::Kind::Predicate:

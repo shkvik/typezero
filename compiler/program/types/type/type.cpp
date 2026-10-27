@@ -56,8 +56,7 @@ bool Type::hasZeroValue() const {
 unsigned Type::bitWidth() const {
   switch (kind_) {
   case Kind::Int:
-    return 32;
-  case Kind::Long:
+    return bits_;
   case Kind::Double:
     return 64;
   default:
@@ -89,16 +88,35 @@ const Type *Type::boolTy() {
   return &t;
 }
 
-const Type *Type::intTy() {
-  static const Type t(Kind::Int, "int");
+const Type *Type::intTy() { return integer(64, false); }
 
-  return &t;
+const Type *Type::integer(unsigned bits, bool isUnsigned) {
+  llvm::ArrayRef<const Type *> all = integers();
+  unsigned row = bits == 8 ? 0 : bits == 16 ? 1 : bits == 32 ? 2 : 3;
+
+  return all[row * 2 + (isUnsigned ? 1 : 0)];
 }
 
-const Type *Type::longTy() {
-  static const Type t(Kind::Long, "long");
+llvm::ArrayRef<const Type *> Type::integers() {
+  static std::vector<std::unique_ptr<Type>> owned;
+  static const std::vector<const Type *> types = [] {
+    std::vector<const Type *> made;
+    for (unsigned bits : {8u, 16u, 32u, 64u}) {
+      for (bool isUnsigned : {false, true}) {
+        std::string name = bits == 64 && !isUnsigned
+                               ? std::string("int")
+                               : (isUnsigned ? "uint" : "int") + std::to_string(bits);
+        Type *t = owned.emplace_back(new Type(Kind::Int, name)).get();
+        t->bits_ = bits;
+        t->unsigned_ = isUnsigned;
+        made.push_back(t);
+      }
+    }
 
-  return &t;
+    return made;
+  }();
+
+  return types;
 }
 
 const Type *Type::doubleTy() {
@@ -608,8 +626,8 @@ const Type *Type::unionOf(llvm::ArrayRef<const Type *> types) {
       return false;
     }
     const Type *base = m->literalBase();
-    if (base->isInt()) {
-      return has(intTy()) || has(longTy()) || has(doubleTy());
+    if (base->isInteger()) {
+      return has(base) || has(doubleTy());
     }
 
     return has(base);
@@ -626,7 +644,7 @@ const Type *Type::unionOf(llvm::ArrayRef<const Type *> types) {
       members, [](const Type *m) { return m->isLiteral() && m->literalBase()->isFloat(); });
   if (fractions) {
     for (const Type *&m : members) {
-      if (m->isLiteral() && m->literalBase()->isInt()) {
+      if (m->isLiteral() && m->literalBase()->isInteger()) {
         m = numberLiteral(m->literalNumber(), doubleTy());
       }
     }
@@ -1052,8 +1070,6 @@ const Type *Type::runtimeObject(Runtime kind) {
 
 const Type *Type::elementType() const {
   switch (bytes_) {
-  case Bytes::Uint32:
-    return longTy();
   case Bytes::Float16:
   case Bytes::Float32:
   case Bytes::Float64:
@@ -1174,7 +1190,13 @@ const Type *Type::fromName(llvm::StringRef name) {
       .Case("undefined", undefinedTy())
       .Case("boolean", boolTy())
       .Case("int", intTy())
-      .Case("long", longTy())
+      .Case("int8", integer(8, false))
+      .Case("int16", integer(16, false))
+      .Case("int32", integer(32, false))
+      .Case("uint8", integer(8, true))
+      .Case("uint16", integer(16, true))
+      .Case("uint32", integer(32, true))
+      .Case("uint64", integer(64, true))
       .Cases({"double", "number"}, doubleTy())
       .Case("decimal", decimalTy())
       .Case("string", string())

@@ -9,7 +9,7 @@ p **= 3
 let q = 1.5
 q **= 2
 console.log(p, q, -(2 ** 2), 2 * 3 ** 2)
-const big: long = 3
+const big: int = 3
 console.log(big ** 30)
 
 // typeof follows from the type, and narrows `T | undefined`.

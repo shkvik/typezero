@@ -80,8 +80,7 @@ llvm::Value *ArrayMethodLowerer::emitArrayMethod(CallExpr *call) {
     if (!run.empty()) {
       lowering_.arrayLowerer().emitPush(array.value, run, element);
     }
-    result = lowering_.builder_.CreateTrunc(lowering_.arrayLowerer().arrayLength(array.value),
-                                            lowering_.builder_.getInt32Ty());
+    result = lowering_.arrayLowerer().arrayLength(array.value);
     break;
   }
   case Builtin::ArrUnshift: {
@@ -96,8 +95,7 @@ llvm::Value *ArrayMethodLowerer::emitArrayMethod(CallExpr *call) {
         lowering_.storeLowerer().groupStore(array.value, values[i], element);
       }
     }
-    result = lowering_.builder_.CreateTrunc(lowering_.arrayLowerer().arrayLength(array.value),
-                                            lowering_.builder_.getInt32Ty());
+    result = lowering_.arrayLowerer().arrayLength(array.value);
     break;
   }
   case Builtin::ArrPop: {
@@ -213,9 +211,8 @@ llvm::Value *ArrayMethodLowerer::emitArrayMethod(CallExpr *call) {
                                             lowering_.functionFrame().spill(values[0], "search"),
                                             from, hasFrom, lowering_.builder_.getInt32(mode)});
     lowering_.refCounts().releaseValue(values[0], element);
-    if (mode == 2) {
-      result = lowering_.builder_.CreateICmpNE(result, lowering_.builder_.getInt32(0));
-    }
+    result = mode == 2 ? lowering_.builder_.CreateICmpNE(result, lowering_.builder_.getInt32(0))
+                       : lowering_.builder_.CreateSExt(result, lowering_.builder_.getInt64Ty());
     break;
   }
   case Builtin::ArrJoin:

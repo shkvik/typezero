@@ -32,7 +32,7 @@ import { serve } from "tz:http"
 
 // Numbers.
 const n: int = 3
-const big: long = 1 << 20
+const big: int = 1 << 20
 const price: decimal = 19.99
 const total = price * n + 0.01
 console.log(total, total.toFixed(1), total.round(0, "half-even"), decimal("0.1") + decimal("0.2"))

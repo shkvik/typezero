@@ -31,6 +31,7 @@
 #include "compiler/lower/types/unknown_lowerer/unknown_lowerer.h"
 #include "compiler/lower/values/array_lowerer/array_lowerer.h"
 #include "compiler/lower/values/array_method_lowerer/array_method_lowerer.h"
+#include "compiler/lower/values/number_lowerer/number_lowerer.h"
 #include "compiler/lower/values/string_lowerer/string_lowerer.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/IR/Intrinsics.h"
@@ -63,6 +64,25 @@ llvm::Value *ExprLowerer::emitExpr(Expr *expr) {
   llvm::SMLoc outer = std::exchange(lowering_.loc_, expr->loc());
   lowering_.orderAt(expr->loc());
   llvm::Value *value = emitExprKind(expr);
+  if (value && lowering_.mismatch_.empty() && !expr->type->isVoid() && !expr->type->isError() &&
+      !expr->type->isNever() && lowering_.builder_.GetInsertBlock()) {
+    llvm::Type *want = lowering_.moduleBuilder().lower(expr->type);
+    if (value->getType() != want) {
+      llvm::raw_string_ostream out(lowering_.mismatch_);
+      if (lowering_.sourceMgr_) {
+        auto [line, column] = lowering_.sourceMgr_->getLineAndColumn(expr->loc());
+        out << lowering_.sourceMgr_
+                   ->getMemoryBuffer(lowering_.sourceMgr_->FindBufferContainingLoc(expr->loc()))
+                   ->getBufferIdentifier()
+            << ":" << line << ":" << column << ": ";
+      }
+      out << "a value of type '" << expr->type->name() << "' is lowered as ";
+      value->getType()->print(out);
+      out << " instead of ";
+      want->print(out);
+      out << "\n";
+    }
+  }
   lowering_.loc_ = outer;
 
   return value;
@@ -365,8 +385,9 @@ llvm::Value *ExprLowerer::emitConversion(llvm::Value *value, const Type *from, c
     }
     if (from->isInteger()) {
       return lowering_.stringLowerer().callReturningString(
-          lowering_.rt_.strFromI64,
-          {lowering_.builder_.CreateSExt(value, lowering_.builder_.getInt64Ty())});
+          from->isUnsigned() && from->bitWidth() == 64 ? lowering_.rt_.strFromU64
+                                                       : lowering_.rt_.strFromI64,
+          {lowering_.numberLowerer().toI64(value, from)});
     }
     if (from->isFloat()) {
       return lowering_.stringLowerer().callReturningString(lowering_.rt_.strFromF64, {value});
@@ -410,19 +431,19 @@ llvm::Value *ExprLowerer::emitConversion(llvm::Value *value, const Type *from, c
     return value;
   }
   if (from->isInteger() && to->isDecimal()) {
-    return lowering_.decimalLowerer().decimalFromInteger(value);
+    return lowering_.decimalLowerer().decimalFromInteger(value, from);
   }
 
-  llvm::Type *target = lowering_.moduleBuilder().lower(to);
   if (from->isInteger() && to->isInteger()) {
-    return from->bitWidth() < to->bitWidth() ? lowering_.builder_.CreateSExt(value, target)
-                                             : lowering_.builder_.CreateTrunc(value, target);
+    return lowering_.numberLowerer().intCast(value, from, to);
   }
   if (from->isInteger() && to->isFloat()) {
-    return lowering_.builder_.CreateSIToFP(value, target);
+    return lowering_.numberLowerer().toDouble(value, from);
   }
-  if (from->isFloat() && to->isInt()) {
-    return lowering_.builder_.CreateCall(lowering_.rt_.toInt32, {value});
+  if (from->isFloat() && to->isInteger()) {
+    return lowering_.numberLowerer().intCast(
+        lowering_.builder_.CreateCall(lowering_.rt_.toInt32, {value}), Type::integer(32, false),
+        to);
   }
   llvm_unreachable("Checker rejects this conversion");
 }

@@ -295,7 +295,7 @@ int32_t tz_stderr_write(void *obj, uint64_t meta) {
   return 1;
 }
 
-int32_t tz_is_tty(int32_t fd) { return (fd == 2 ? &tz_err_stream : &tz_out_stream)->isConsole; }
+int32_t tz_is_tty(int64_t fd) { return (fd == 2 ? &tz_err_stream : &tz_out_stream)->isConsole; }
 
 static void print_u64(uint64_t value, int negative) {
   char buf[24];
@@ -318,7 +318,7 @@ void tz_print_i64(int64_t value) {
   }
 }
 
-void tz_print_i32(int32_t value) { tz_print_i64(value); }
+void tz_print_u64(uint64_t value) { print_u64(value, 0); }
 
 void tz_print_bool(int32_t value) {
   if (value) {
@@ -435,14 +435,18 @@ TZ_HOT int32_t tz_to_int32(double x) {
   return tz_to_int32_slow(x);
 }
 
-TZ_COLD TZ_NORETURN void tz_panic_does_not_fit(double x, int32_t bits) {
+TZ_COLD TZ_NORETURN void tz_panic_does_not_fit(double x, const char *type) {
   char text[32];
   text[tz_format_f64(x, text)] = 0;
-  tz_panicf("%s does not fit in %s", text, bits == 32 ? "int" : "long");
+  tz_panicf("%s does not fit in %s", text, type);
 }
 
-TZ_COLD int32_t tz_checked_int32_of_long(int64_t x) {
-  tz_panicf("%lld does not fit in int", (long long)x);
+TZ_COLD TZ_NORETURN void tz_panic_int_does_not_fit(int64_t x, int32_t is_unsigned,
+                                                   const char *type) {
+  if (is_unsigned) {
+    tz_panicf("%llu does not fit in %s", (unsigned long long)x, type);
+  }
+  tz_panicf("%lld does not fit in %s", (long long)x, type);
 }
 
 void tz_debugger(void) {

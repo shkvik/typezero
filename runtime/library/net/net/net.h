@@ -191,7 +191,7 @@ TzBytes *net_bytes(const uint8_t *data, size_t length);
 
 extern TzMaker tz_net_make;
 
-void *tz_net_listen(void *host_obj, uint64_t host_meta, int32_t port, double max_body,
+void *tz_net_listen(void *host_obj, uint64_t host_meta, int64_t port, double max_body,
                     TzMaker make);
 
 #endif

@@ -1,10 +1,10 @@
 // expect-exit: 2
-// expect-stderr: panic: 1500000000000 does not fit in int
+// expect-stderr: panic: 1.5e+21 does not fit in int
 // Where an int is expected, Math.round gives an int, and a number that does
 // not fit is fatal for now: JavaScript would go on with one an int cannot
 // hold. Explicit conversions come with the numbers (docs/numbers.md).
 let x = 1.5
-for (let i = 0; i < 5; i++) {
+for (let i = 0; i < 7; i++) {
   x *= 1000
   const n: int = Math.round(x)
   console.log(n)

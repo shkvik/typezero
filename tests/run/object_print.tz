@@ -3,7 +3,7 @@
 // the order the literal gives them, strings quoted, one line while it fits
 // in 80 columns, [Object] beyond two levels of nesting.
 console.log({ a: 1, b: "two", c: true, d: 4.5, e: -0.0, f: NaN, g: -Infinity })
-const big: long = 9007199254740991
+const big: int = 9007199254740991
 console.log({ big, small: -7 }, [{ x: 1 }], "text", { y: "it's" })
 
 // Around the line length: the entries and their count decide.

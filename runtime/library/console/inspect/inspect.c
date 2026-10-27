@@ -268,8 +268,7 @@ static int is_number_element(const TzType *type, const void *value) {
     return j && j->kind == TZ_JSON_NUMBER;
   }
 
-  return type->kind == TZ_T_INT || type->kind == TZ_T_LONG || type->kind == TZ_T_DOUBLE ||
-         type->kind == TZ_T_DECIMAL;
+  return tz_kind_integer(type->kind) || type->kind == TZ_T_DOUBLE || type->kind == TZ_T_DECIMAL;
 }
 
 static void pad(TzBuf *out, const TzBuf *text, const char *suffix, long target, int at_start) {
@@ -905,7 +904,7 @@ static void format_bytes(Ctx *ctx, TzBuf *out, const TzInstance *object, int rec
     tz_buf_ascii_n(entries_add(&output), text, (size_t)n);
   }
   --ctx->seen_count;
-  static const TzType number_type = {TZ_T_INT, 0, NULL};
+  static const TzType number_type = {TZ_T_INT32, 0, NULL};
   TzArray numbers = {0, &number_type, (char *)b->data, (uint32_t)b->length, 0, NULL};
   char base[32];
   circular_base(ctx, object, base);

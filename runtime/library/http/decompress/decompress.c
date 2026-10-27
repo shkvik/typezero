@@ -60,7 +60,7 @@ static void br_free(void *opaque, void *address) {
   tz_free(address);
 }
 
-void *tz_zlib_new(int32_t kind, TzMaker make) {
+void *tz_zlib_new(int64_t kind, TzMaker make) {
   (void)make;
   Decoder *d = (Decoder *)tz_obj_alloc(sizeof(Decoder));
   memset(d, 0, sizeof *d);

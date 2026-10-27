@@ -49,7 +49,7 @@ llvm::Value *ProcessLowerer::emitProcessBuiltin(CallExpr *call) {
   };
   auto exitCode = [&]() -> std::pair<llvm::Value *, llvm::Value *> {
     if (call->args.empty()) {
-      return {zero, zero};
+      return {lowering_.builder_.getInt64(0), zero};
     }
     llvm::Value *code = lowering_.exprLowerer().emitExpr(call->args[0]);
 
@@ -77,7 +77,7 @@ llvm::Value *ProcessLowerer::emitProcessBuiltin(CallExpr *call) {
   }
   case Builtin::ProcessExit: {
     auto [code, has] = exitCode();
-    llvm::FunctionCallee exit = processFunction("tz_process_exit", voidTy, {i32, i32});
+    llvm::FunctionCallee exit = processFunction("tz_process_exit", voidTy, {i64, i32});
     cast<llvm::Function>(exit.getCallee())->addFnAttr(llvm::Attribute::NoReturn);
     lowering_.builder_.CreateCall(exit, {code, has})->setDoesNotReturn();
     lowering_.builder_.CreateUnreachable();
@@ -86,15 +86,17 @@ llvm::Value *ProcessLowerer::emitProcessBuiltin(CallExpr *call) {
   }
   case Builtin::ProcessExitCode: {
     llvm::AllocaInst *has = lowering_.functionFrame().createStackSlot(i32, "exit.has");
-    llvm::Value *code = lowering_.builder_.CreateCall(
-        processFunction("tz_process_get_exit_code", i32, {ptr}), {has});
+    llvm::Value *code = lowering_.builder_.CreateSExt(
+        lowering_.builder_.CreateCall(processFunction("tz_process_get_exit_code", i32, {ptr}),
+                                      {has}),
+        lowering_.builder_.getInt64Ty());
     return lowering_.optionalLowerer().makeOptional(
         code, lowering_.builder_.CreateICmpNE(lowering_.builder_.CreateLoad(i32, has), zero),
         call->type);
   }
   case Builtin::ProcessSetExitCode: {
     auto [code, has] = exitCode();
-    lowering_.builder_.CreateCall(processFunction("tz_process_set_exit_code", voidTy, {i32, i32}),
+    lowering_.builder_.CreateCall(processFunction("tz_process_set_exit_code", voidTy, {i64, i32}),
                                   {code, has});
     return nullptr;
   }
@@ -109,10 +111,10 @@ llvm::Value *ProcessLowerer::emitProcessBuiltin(CallExpr *call) {
     bool toStdout = call->builtin == Builtin::ProcessStdoutWrite;
     if (const Type *type = call->args[0]->type; type->isBuffer() || type->isBytes()) {
       Lowering::Operand bytes = lowering_.refCounts().emitOperand(call->args[0], true);
-      lowering_.builder_.CreateCall(processFunction("tz_lib_std_write",
-                                                    lowering_.builder_.getVoidTy(),
-                                                    {i32, lowering_.builder_.getPtrTy()}),
-                                    {lowering_.builder_.getInt32(toStdout ? 1 : 2), bytes.value});
+      lowering_.builder_.CreateCall(
+          processFunction("tz_lib_std_write", lowering_.builder_.getVoidTy(),
+                          {lowering_.builder_.getInt64Ty(), lowering_.builder_.getPtrTy()}),
+          {lowering_.builder_.getInt64(toStdout ? 1 : 2), bytes.value});
       lowering_.refCounts().dropOperand(bytes);
       return lowering_.builder_.getTrue();
     }
@@ -126,8 +128,9 @@ llvm::Value *ProcessLowerer::emitProcessBuiltin(CallExpr *call) {
   }
   case Builtin::ProcessIsTTY:
     return lowering_.builder_.CreateICmpNE(
-        lowering_.builder_.CreateCall(processFunction("tz_is_tty", i32, {i32}),
-                                      {lowering_.exprLowerer().emitExpr(call->args[0])}),
+        lowering_.builder_.CreateCall(
+            processFunction("tz_is_tty", i32, {lowering_.builder_.getInt64Ty()}),
+            {lowering_.exprLowerer().emitExpr(call->args[0])}),
         zero);
   case Builtin::DateNow:
     return lowering_.builder_.CreateCall(processFunction("tz_date_now", f64, {}));

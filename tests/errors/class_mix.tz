@@ -40,10 +40,10 @@ if (store.save("e")) console.log("saved")
 // expect-error: an object is always truthy, so the condition is always true
 if (store) console.log("store")
 
-// An int or a long fits a double and a decimal equally well, as in C#.
+// An integer fits a double and a decimal equally well, as in C#.
 // expect-error: the call fits several variants of 'scale' equally well: scale(k: double) and scale(k: decimal)
 console.log(store.scale(2))
-const big: long = 2
+const big: int32 = 2
 // expect-error: the call fits several variants of 'scale' equally well
 console.log(store.scale(big))
 

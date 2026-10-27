@@ -43,7 +43,7 @@ llvm::Value *PathLowerer::emitPathCall(CallExpr *call) {
   case Builtin::PathResolve:
     result = lowering_.stringLowerer().callReturningString(
         fn(call->builtin == Builtin::PathJoin ? "tz_path_join" : "tz_path_resolve", voidTy,
-           {ptr, ptr, i32}),
+           {ptr, ptr, i64}),
         {values[1], values[0]});
     break;
   case Builtin::PathNormalize:
@@ -54,13 +54,13 @@ llvm::Value *PathLowerer::emitPathCall(CallExpr *call) {
                        : call->builtin == Builtin::PathDirname ? "tz_path_dirname"
                        : call->builtin == Builtin::PathExtname ? "tz_path_extname"
                                                                : "tz_path_to_namespaced";
-    result = lowering_.stringLowerer().callReturningString(fn(name, voidTy, {ptr, ptr, i64, i32}),
+    result = lowering_.stringLowerer().callReturningString(fn(name, voidTy, {ptr, ptr, i64, i64}),
                                                            {obj(1), meta(1), values[0]});
     break;
   }
   case Builtin::PathIsAbsolute:
     result = lowering_.builder_.CreateICmpNE(
-        lowering_.builder_.CreateCall(fn("tz_path_is_absolute", i32, {ptr, i64, i32}),
+        lowering_.builder_.CreateCall(fn("tz_path_is_absolute", i32, {ptr, i64, i64}),
                                       {obj(1), meta(1), values[0]}),
         lowering_.builder_.getInt32(0));
     break;
@@ -68,19 +68,19 @@ llvm::Value *PathLowerer::emitPathCall(CallExpr *call) {
     bool suffix = values.size() > 2;
     llvm::Value *null = llvm::ConstantPointerNull::get(lowering_.builder_.getPtrTy());
     result = lowering_.stringLowerer().callReturningString(
-        fn("tz_path_basename", voidTy, {ptr, ptr, i64, ptr, i64, i32, i32}),
+        fn("tz_path_basename", voidTy, {ptr, ptr, i64, ptr, i64, i32, i64}),
         {obj(1), meta(1), suffix ? obj(2) : null, suffix ? meta(2) : lowering_.builder_.getInt64(0),
          lowering_.builder_.getInt32(suffix ? 1 : 0), values[0]});
     break;
   }
   case Builtin::PathRelative:
     result = lowering_.stringLowerer().callReturningString(
-        fn("tz_path_relative", voidTy, {ptr, ptr, i64, ptr, i64, i32}),
+        fn("tz_path_relative", voidTy, {ptr, ptr, i64, ptr, i64, i64}),
         {obj(1), meta(1), obj(2), meta(2), values[0]});
     break;
   case Builtin::PathParse:
     result = lowering_.builder_.CreateCall(
-        fn("tz_path_parse", ptr, {ptr, i64, i32, ptr}),
+        fn("tz_path_parse", ptr, {ptr, i64, i64, ptr}),
         {obj(1), meta(1), values[0], lowering_.objectMaker().maker(call->type, pathObjects())});
     break;
   case Builtin::PathFormat: {
@@ -108,7 +108,7 @@ llvm::Value *PathLowerer::emitPathCall(CallExpr *call) {
           value, lowering_.builder_.CreateConstInBoundsGEP2_32(partsType, parts, 0, i));
     }
     result = lowering_.stringLowerer().callReturningString(
-        fn("tz_path_format", voidTy, {ptr, ptr, i32}), {parts, values[0]});
+        fn("tz_path_format", voidTy, {ptr, ptr, i64}), {parts, values[0]});
     break;
   }
   default:

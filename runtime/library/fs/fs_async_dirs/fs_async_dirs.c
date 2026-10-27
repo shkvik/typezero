@@ -414,7 +414,7 @@ static void mkdir_done(TzWork *w) {
   tz_fs_fsp_fulfill(r, &first, sizeof first);
 }
 
-void tz_fsp_mkdir(TzPromise *p, void *path_obj, uint64_t path_meta, int32_t recursive, int32_t mode,
+void tz_fsp_mkdir(TzPromise *p, void *path_obj, uint64_t path_meta, int32_t recursive, int64_t mode,
                   TzMaker make) {
   FsRequest *r = tz_fs_fsp_new(p, make);
   if (!tz_fs_fsp_path(r, path_obj, path_meta, "mkdir")) {
@@ -583,7 +583,8 @@ static void rename_work(TzWork *w) {
 void tz_fsp_rename(TzPromise *p, void *from_obj, uint64_t from_meta, void *to_obj, uint64_t to_meta,
                    TzMaker make) {
   FsRequest *r = tz_fs_fsp_new(p, make);
-  if (!tz_fs_fsp_path(r, from_obj, from_meta, "rename") || !tz_fs_fsp_path(r, to_obj, to_meta, "rename")) {
+  if (!tz_fs_fsp_path(r, from_obj, from_meta, "rename") ||
+      !tz_fs_fsp_path(r, to_obj, to_meta, "rename")) {
     return;
   }
   tz_fs_fsp_queue(r, rename_work, tz_fs_fsp_done_void);
@@ -635,9 +636,10 @@ static void copy_file_work(TzWork *w) {
 }
 
 void tz_fsp_copy_file(TzPromise *p, void *from_obj, uint64_t from_meta, void *to_obj,
-                      uint64_t to_meta, int32_t mode, TzMaker make) {
+                      uint64_t to_meta, int64_t mode, TzMaker make) {
   FsRequest *r = tz_fs_fsp_new(p, make);
-  if (!tz_fs_fsp_path(r, from_obj, from_meta, "copyfile") || !tz_fs_fsp_path(r, to_obj, to_meta, "copyfile")) {
+  if (!tz_fs_fsp_path(r, from_obj, from_meta, "copyfile") ||
+      !tz_fs_fsp_path(r, to_obj, to_meta, "copyfile")) {
     return;
   }
   r->mode = mode;

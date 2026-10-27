@@ -17,7 +17,7 @@ TZ_COLD void tz_set_failed(void *error);
 
 typedef struct {
   TzStr message;
-  int32_t errno_value;
+  int64_t errno_value;
   TzStr code, syscall;
   TzOptStr path, dest;
 } TzSystemErrorParts;

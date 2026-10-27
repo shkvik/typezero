@@ -309,14 +309,18 @@ TzBytes *tz_bytes_from_array(int32_t kind, const TzArray *a) {
   TzBytes *b = bytes_alloc(kind, a->length, 0);
   uint32_t n = a->length;
   switch (a->type->kind) {
-  case TZ_T_INT:
+  case TZ_T_INT8:
+  case TZ_T_INT16:
+  case TZ_T_INT32:
+  case TZ_T_INT64:
+  case TZ_T_UINT8:
+  case TZ_T_UINT16:
+  case TZ_T_UINT32:
+  case TZ_T_UINT64:
     for (uint32_t i = 0; i < n; ++i) {
-      put(b->data, kind, i, ((const int32_t *)a->data)[i]);
-    }
-    break;
-  case TZ_T_LONG:
-    for (uint32_t i = 0; i < n; ++i) {
-      put(b->data, kind, i, (double)((const int64_t *)a->data)[i]);
+      put(b->data, kind, i,
+          tz_integer_double(a->type->kind,
+                            tz_load_integer(a->type->kind, a->data + (size_t)i * a->type->size)));
     }
     break;
   default:
@@ -348,10 +352,9 @@ TzArray *tz_bytes_to_array(const TzBytes *b, const TzType *element) {
   TzArray *a = tz_arr_new(element, b->length, b->length);
   for (int32_t i = 0; i < b->length; ++i) {
     double v = get(b->data, kind, i);
-    if (element->kind == TZ_T_INT) {
-      ((int32_t *)a->data)[i] = (int32_t)v;
-    } else if (element->kind == TZ_T_LONG) {
-      ((int64_t *)a->data)[i] = (int64_t)v;
+    if (tz_kind_integer(element->kind)) {
+      tz_store_integer(element->kind, a->data + (size_t)i * element->size,
+                       element->kind == TZ_T_UINT64 ? (int64_t)(uint64_t)v : (int64_t)v);
     } else {
       ((double *)a->data)[i] = v;
     }
@@ -444,9 +447,11 @@ void tz_bytes_set_array(TzBytes *dst, const TzArray *src, int64_t offset) {
   }
   int32_t kind = tz_bytes_kind(dst);
   for (uint32_t i = 0; i < src->length; ++i) {
-    double v = src->type->kind == TZ_T_INT    ? ((const int32_t *)src->data)[i]
-               : src->type->kind == TZ_T_LONG ? (double)((const int64_t *)src->data)[i]
-                                              : ((const double *)src->data)[i];
+    uint32_t from = src->type->kind;
+    double v = tz_kind_integer(from)
+                   ? tz_integer_double(
+                         from, tz_load_integer(from, src->data + (size_t)i * src->type->size))
+                   : ((const double *)src->data)[i];
     put(dst->data, kind, offset + i, v);
   }
 }
@@ -645,15 +650,12 @@ void tz_bytes_sort_with(TzBytes *b, TzCompare compare, void *ctx) {
   if (n < 2) {
     return;
   }
-  size_t size = is_float(kind) ? sizeof(double) : kind == TZ_BYTES_U32 ? sizeof(int64_t) : 4;
+  size_t size = 8;
   char *items = (char *)tz_alloc(n * size);
   char *tmp = (char *)tz_alloc(n * size);
   for (size_t i = 0; i < n; ++i) {
     double v = get(b->data, kind, (int64_t)i);
-    if (size == 4) {
-      int32_t x = (int32_t)v;
-      memcpy(items + i * 4, &x, 4);
-    } else if (!is_float(kind)) {
+    if (!is_float(kind)) {
       int64_t x = (int64_t)v;
       memcpy(items + i * 8, &x, 8);
     } else {
@@ -663,11 +665,7 @@ void tz_bytes_sort_with(TzBytes *b, TzCompare compare, void *ctx) {
   merge_sort_with(items, tmp, n, size, compare, ctx);
   for (size_t i = 0; i < n; ++i) {
     double v;
-    if (size == 4) {
-      int32_t x;
-      memcpy(&x, items + i * 4, 4);
-      v = x;
-    } else if (!is_float(kind)) {
+    if (!is_float(kind)) {
       int64_t x;
       memcpy(&x, items + i * 8, 8);
       v = (double)x;

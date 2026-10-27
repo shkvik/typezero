@@ -39,7 +39,7 @@ const inputs: (Uint8Array | string | ArrayBuffer)[] = ["hi", new Uint8Array([1, 
 for (const input of inputs)
   console.log(describe(input), bytesOf(input))
 console.log(describe(new Float64Array([1.5, 2])))
-const shift: long = -1 >>> 0
+const shift: int = -1 >>> 0
 console.log(shift, -1 >>> 0, (-1 >>> 0) == shift)
 
 // 4. By reference in a Map and a Set; in generic functions.
