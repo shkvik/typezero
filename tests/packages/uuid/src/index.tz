@@ -4,6 +4,8 @@
 // - v1, v3, v4, v5, v6, v7, v1ToV6 and v6ToV1 have one signature with unions: plain functions
 //   have no overloads (docs/overloads.md), so v4() is string | Uint8Array (UUIDTypes), as
 //   ms("1h") is number | string; a buffer to write into is a Uint8Array, not a generic TBuf;
+// - what uuid throws is an Err: parse, stringify, version, v1, v3, v4, v5, v6, v7, v1ToV6 and
+//   v6ToV1 give a Result, whose error is a UuidError named as the error uuid throws;
 // - v3.DNS and v5.DNS (properties of functions, which tz has not) are DNS and URL of this file;
 // - NonSharedArrayBuffer is Uint8Array (no ReturnType<typeof Uint8Array.of>);
 // - v4 calls crypto.randomUUID() without asking whether it is there;

@@ -150,10 +150,9 @@ void ClassInfoLowerer::emitConstructThunk(const ClassDecl *cls, llvm::Function *
           fail();
         });
     llvm::Value *object = lowering_.classLowerer().allocInstance(cls);
-    Lowering::Held held = lowering_.throwLowerer().hold(
-        object, cls->type, lowering_.classLowerer().constructionThrows(cls, sym));
+    llvm::Value *held = object;
     lowering_.classLowerer().emitConstruct(object, cls, sym, values);
-    llvm::Value *made = lowering_.throwLowerer().take(held);
+    llvm::Value *made = held;
     lowering_.functionFrame().emitCleanups(0);
     lowering_.builder_.CreateRet(made);
   }

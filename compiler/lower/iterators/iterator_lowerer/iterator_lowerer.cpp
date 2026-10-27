@@ -150,14 +150,14 @@ llvm::Value *IteratorLowerer::emitIteratorSink(CallExpr *call) {
 
   llvm::Value *array = nullptr, *resultSlot = nullptr, *hasAcc = nullptr;
   const Type *resultType = call->type, *accType = call->type;
-  Lowering::Held heldArray{nullptr, nullptr, nullptr};
+  llvm::Value *heldArray{nullptr, nullptr, nullptr};
   switch (method) {
   case Builtin::ArrayFrom:
   case Builtin::IterToArray: {
     const Type *stored = resultType->inner();
     array = lowering_.groupLowerer().newArray(Type::array(stored), lowering_.builder_.getInt64(0),
                                               lowering_.builder_.getInt64(0));
-    heldArray = lowering_.throwLowerer().hold(array, resultType, true);
+    heldArray = array;
     consumer.each = [=, this](llvm::Value *value) -> llvm::Value * {
       if (callback) {
         value = lowering_.lazyChainLowerer().callCallback(
@@ -268,7 +268,7 @@ llvm::Value *IteratorLowerer::emitIteratorSink(CallExpr *call) {
   lowering_.functionFrame().emitBlock(endBlock);
   llvm::Value *result = nullptr;
   if (array) {
-    result = lowering_.throwLowerer().take(heldArray);
+    result = heldArray;
   } else if (resultSlot) {
     result = lowering_.builder_.CreateLoad(lowering_.moduleBuilder().lower(accType), resultSlot);
     if (hasAcc) {
@@ -289,7 +289,7 @@ llvm::Value *IteratorLowerer::emitNext(CallExpr *call) {
   const Type *type = member->object->type;
   const Type *element = type->yielded(), *returned = type->returned(), *sent = type->sent();
   llvm::Value *it = lowering_.exprLowerer().emitExpr(member->object);
-  Lowering::Held heldIt = lowering_.throwLowerer().hold(it, type, true);
+  llvm::Value *heldIt = it;
   llvm::Value *sentValue = nullptr, *in = nullptr;
   if (!call->args.empty()) {
     sentValue = lowering_.exprLowerer().emitExpr(call->args[0]);
@@ -341,7 +341,7 @@ llvm::Value *IteratorLowerer::emitNext(CallExpr *call) {
       lowering_.builder_.CreateNot(has),
       lowering_.objectLayouts().fieldAddress(result, resultType, "done"));
   lowering_.groupLowerer().adoptFields(result, resultType);
-  lowering_.refCounts().releaseValue(lowering_.throwLowerer().take(heldIt), type);
+  lowering_.refCounts().releaseValue(heldIt, type);
 
   return result;
 }

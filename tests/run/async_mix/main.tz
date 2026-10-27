@@ -68,18 +68,14 @@ async function greeting(who: string) {
 }
 console.log(await greeting("tz"), process.env.NO_SUCH_VARIABLE ?? "unset")
 
-// 5. node:fs inside async functions, and the SystemError of a rejection.
+// 5. node:fs inside async functions, and its SystemError in a Result.
 const dir = must(mkdtempSync(join(tmpdir(), "tz-async-mix-")))
 const folder = new Folder(dir)
 folder.write("a.txt", "alpha")
 const sources: Source[] = [folder, new Memory()]
-console.log(await folder.read("a.txt"))
-try {
-  await folder.read("missing.txt")
-} catch (e) {
-  if (e instanceof SystemError)
-    console.log("caught", e.code, e.syscall, e.path?.endsWith("missing.txt"))
-}
+console.log((await folder.read("a.txt")).unwrapOr("?"))
+const missing = await folder.read("missing.txt")
+if (missing.isErr()) console.log("failed", missing.error)
 for (const s of sources)
   console.log(await readText(s, "a.txt"))
 console.log((await readText(folder, "a.txt")).map(t => t.length).match(n => `${n} letters`, e => e))

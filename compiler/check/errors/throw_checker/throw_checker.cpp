@@ -9,8 +9,8 @@
 #include "compiler/check/stmt/stmt_checker/stmt_checker.h"
 #include "compiler/check/types/type_resolver/type_resolver.h"
 #include "compiler/library/process/process_checker/process_checker.h"
+#include "compiler/library/tz_modules/library_calls/library_calls.h"
 #include "compiler/whole_program/flows/flows.h"
-#include "llvm/Support/ConvertUTF.h"
 
 using llvm::cast;
 using llvm::dyn_cast;
@@ -18,19 +18,6 @@ using llvm::dyn_cast_or_null;
 using llvm::isa;
 
 namespace tz {
-
-namespace {
-
-std::string utf8(const std::u16string &text) {
-  std::string out;
-  llvm::convertUTF16ToUTF8String(
-      llvm::ArrayRef<llvm::UTF16>(reinterpret_cast<const llvm::UTF16 *>(text.data()), text.size()),
-      out);
-
-  return out;
-}
-
-}
 
 ThrowChecker::ThrowChecker(Checker &checker) : checker_(checker) {}
 
@@ -112,29 +99,9 @@ bool ThrowChecker::isErrorType(const Type *type) const {
 }
 
 void ThrowChecker::checkThrow(ThrowStmt *stmt) {
-  stmt->value = checker_.exprChecker().checkExpr(stmt->value, checker_.errorClass_->type);
-  const Type *type = stmt->value->type;
-  if (type->isError() || isErrorType(type) || type->isUnknown()) {
-    return;
-  }
-  if (type->isOptional() && isErrorType(type->inner())) {
-    checker_.diags_.error(stmt->value->loc(),
-                          "the error may be undefined; check it before throwing it");
-    return;
-  }
-  std::string text = "...";
-  if (auto *lit = dyn_cast<StringLitExpr>(stmt->value)) {
-    text = "\"" + utf8(lit->value) + "\"";
-  } else if (auto *name = dyn_cast<NameExpr>(stmt->value); name && type->isString()) {
-    text = name->name.str();
-  } else if (!type->isString()) {
-    text = "`...`";
-  }
-  checker_.diags_.error(stmt->value->loc(),
-                        "only an Error can be thrown, found '" + type->name() +
-                            "'; throw one with the text as its message, e.g. 'throw "
-                            "new Error(" +
-                            text + ")'");
+  checker_.diags_.error(stmt->loc(), "there is no 'throw' in tz: an error is a value; return it, "
+                                     "'return err(...)', and give the function a 'Result'");
+  stmt->value = checker_.exprChecker().checkExpr(stmt->value);
 }
 
 Checker::Flow ThrowChecker::withoutChanges(const Checker::Flow &flow,
@@ -149,6 +116,10 @@ Checker::Flow ThrowChecker::withoutChanges(const Checker::Flow &flow,
 }
 
 void ThrowChecker::checkTry(TryStmt *stmt) {
+  if (stmt->handler || !checker_.libraryCalls().inLibrary(stmt->loc())) {
+    checker_.diags_.error(stmt->loc(), "there is no 'try' in tz: an error is a value; a function "
+                                       "that can fail gives a 'Result', checked with 'if'");
+  }
   Checker::LoopScan blockScan = checker_.loopScanner().scanLoop({stmt->block}, {});
   Checker::Flow inBlock = withoutChanges(checker_.flow_, blockScan);
   std::vector<const Stmt *> guarded{stmt->block};

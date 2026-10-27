@@ -35,19 +35,16 @@ let box: Box = { inner: {} }
 for (let i = 0; i < 300000; i++) box = { inner: { [String(i)]: [box] } }
 console.log(Object.keys(box.inner))
 
-// An iterator dropped half way, and an error thrown in the middle of an
+// An iterator dropped half way, and a return in the middle of an
 // iteration, end their iterations.
 const m = new Map([["a", 1], ["b", 2], ["c", 3]])
 const it = m.entries()
 console.log(it.next().value)
 function walk() {
-  for (const [k] of m) if (k == "b") throw new Error("stop at " + k)
+  for (const [k] of m) if (k == "b") return "stop at " + k
+  return "all"
 }
-try {
-  walk()
-} catch (e) {
-  console.log(e.message)
-}
+console.log(walk())
 for (let i = 0; i < 100; i++) {
   m.delete("x")
   m.set("x", i)

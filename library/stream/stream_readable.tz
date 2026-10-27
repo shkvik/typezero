@@ -156,11 +156,7 @@ function addChunk(stream: Stream, state: ReadableState, chunk: unknown, addToFro
 
 const kMaxHwm = 0x40000000
 function computeNewHighWaterMark(size: int): int {
-  if (size > kMaxHwm)
-    throw failure(
-      "ERR_OUT_OF_RANGE",
-      `The value of "size" is out of range. It must be <= 1GiB. Received ${size}`,
-    )
+  if (size >= kMaxHwm) return kMaxHwm
   let n = size - 1
   n |= n >>> 1
   n |= n >>> 2
@@ -211,11 +207,7 @@ function read(stream: Stream, state: ReadableState, size?: int): unknown {
   } else if (doRead) {
     state.bits |= kReading | kSync
     if (stream.readableLength == 0) state.bits |= kNeedReadable
-    try {
-      stream._read(stream.readableHighWaterMark)
-    } catch (err) {
-      errorOrDestroy(stream, err)
-    }
+    stream._read(stream.readableHighWaterMark)
     state.bits &= ~kSync
     if ((state.bits & kReading) == 0) n = howMuchToRead(stream, nOrig, state)
   }
@@ -548,12 +540,8 @@ function pipe(src: Stream, dest: Stream, end: boolean) {
   }
   src.on("data", ondata, kUnknownArgListener)
   function ondata(chunk: unknown) {
-    try {
-      const ret = dest._writeAny(chunk, undefined, nop)
-      if (ret != true) pause()
-    } catch (error) {
-      dest.destroy(error)
-    }
+    const ret = dest._writeAny(chunk, undefined, nop)
+    if (ret != true) pause()
   }
   function onerror(er: StreamError) {
     unpipe()

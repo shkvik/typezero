@@ -1,6 +1,5 @@
 #include "compiler/declare/type_declarer/type_declarer.h"
 #include "compiler/check/classes/class_bases/class_bases.h"
-#include "compiler/check/errors/throw_checker/throw_checker.h"
 #include "compiler/check/expr/expr_checker/expr_checker.h"
 #include "compiler/check/flow/index_proofs/index_proofs.h"
 #include "compiler/check/generics/alias_instantiator/alias_instantiator.h"
@@ -120,11 +119,7 @@ Stmt *TypeDeclarer::lookupType(llvm::StringRef name) const {
       return found->second;
     }
   }
-  if (TypeAliasDecl *alias = checker_.builtinAliases_.lookup(name)) {
-    return alias;
-  }
-
-  return checker_.throwChecker().errorKindClass(name);
+  return checker_.builtinAliases_.lookup(name);
 }
 
 const Type *TypeDeclarer::resolveAlias(TypeAliasDecl *alias) {

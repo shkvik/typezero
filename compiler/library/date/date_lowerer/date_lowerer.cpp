@@ -118,8 +118,6 @@ llvm::Value *DateLowerer::emitDateOptions(llvm::ArrayRef<Expr *> args,
     } else {
       Lowering::Operand locale = lowering_.refCounts().emitOperand(
           args[0], args.size() < 2 || AssignLowerer::cannotAssign(args[1]));
-      lowering_.throwLowerer().holdOperand(locale, args.size() > 1 &&
-                                                       lowering_.mayThrow().exprThrows(args[1]));
       held.push_back(locale);
       auto [value, has] = split(locale.value, locale.type);
       lowering_.builder_.CreateStore(value,
@@ -163,7 +161,6 @@ llvm::Value *DateLowerer::emitDateOptions(llvm::ArrayRef<Expr *> args,
     }
   }
   for (Lowering::Operand &operand : held) {
-    lowering_.throwLowerer().takeOperand(operand);
   }
   lowering_.builder_.CreateStore(present,
                                  lowering_.builder_.CreateStructGEP(optionsTy, options, 2));
@@ -225,8 +222,6 @@ llvm::Value *DateLowerer::emitDateCall(CallExpr *call) {
     auto rest = llvm::ArrayRef<Expr *>(call->args).drop_front(std::min(from, call->args.size()));
     Lowering::Operand self = lowering_.refCounts().emitOperand(
         member->object, llvm::all_of(rest, AssignLowerer::cannotAssign));
-    lowering_.throwLowerer().holdOperand(
-        self, llvm::any_of(rest, [&](Expr *arg) { return lowering_.mayThrow().exprThrows(arg); }));
 
     return self;
   };
@@ -316,7 +311,6 @@ llvm::Value *DateLowerer::emitDateCall(CallExpr *call) {
     for (size_t i = setTime ? 0 : 1; i < call->args.size(); ++i) {
       values.push_back(lowering_.exprLowerer().emitExpr(call->args[i]));
     }
-    lowering_.throwLowerer().takeOperand(date);
     llvm::Value *address = dateTimeAddress(date.value);
     llvm::Value *time;
     if (setTime) {
@@ -346,12 +340,10 @@ llvm::Value *DateLowerer::emitDateCall(CallExpr *call) {
     if (call->builtin == Builtin::DateToJSON && !call->args.empty()) {
       lowering_.stmtLowerer().emitDiscarded(call->args[0]);
     }
-    lowering_.throwLowerer().takeOperand(date);
     llvm::Value *time = timeOf(date.value);
     lowering_.refCounts().dropOperand(date);
     if (call->builtin == Builtin::DateToISOString) {
       llvm::Value *text = stringOf("tz_date_iso", {time}, {f64});
-      lowering_.throwLowerer().emitThrowCheck();
       return text;
     }
     if (call->builtin == Builtin::DateToUTCString) {
@@ -372,14 +364,12 @@ llvm::Value *DateLowerer::emitDateCall(CallExpr *call) {
     std::vector<Lowering::Operand> held;
     llvm::ArrayRef<Expr *> args = llvm::ArrayRef<Expr *>(call->args).drop_front();
     llvm::Value *options = emitDateOptions(args, held);
-    lowering_.throwLowerer().takeOperand(date);
     llvm::Value *time = timeOf(date.value);
     llvm::Value *text = stringOf("tz_date_locale", {time, constant(0), options}, {f64, i32, ptr});
     for (const Lowering::Operand &operand : held) {
       lowering_.refCounts().dropOperand(operand);
     }
     lowering_.refCounts().dropOperand(date);
-    lowering_.emitThrowCheckIf(dateOptionsMayThrow(args));
     return text;
   }
   case Builtin::DtfNew: {
@@ -390,7 +380,6 @@ llvm::Value *DateLowerer::emitDateCall(CallExpr *call) {
     for (const Lowering::Operand &operand : held) {
       lowering_.refCounts().dropOperand(operand);
     }
-    lowering_.emitThrowCheckIf(dateOptionsMayThrow(call->args));
     return format;
   }
   case Builtin::DtfFormat:
@@ -409,7 +398,6 @@ llvm::Value *DateLowerer::emitDateCall(CallExpr *call) {
           lowering_.processLowerer().processFunction("tz_date_clip", f64, {f64}),
           {lowering_.exprLowerer().emitExpr(call->args[0])});
     }
-    lowering_.throwLowerer().takeOperand(format);
     llvm::Value *result;
     if (call->builtin == Builtin::DtfFormat) {
       result = stringOf("tz_dtf_format", {format.value, time}, {ptr, f64});
@@ -433,7 +421,6 @@ llvm::Value *DateLowerer::emitDateCall(CallExpr *call) {
           "parts");
     }
     lowering_.refCounts().dropOperand(format);
-    lowering_.emitThrowCheckIf(!call->args.empty());
     return result;
   }
   case Builtin::DtfResolvedOptions: {

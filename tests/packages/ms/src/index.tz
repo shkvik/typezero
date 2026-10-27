@@ -55,7 +55,6 @@ interface Options {
  *
  * @param value - The string or number to convert
  * @param options - Options for the conversion
- * @throws Error if `value` is not a non-empty string or a number
  */
 export function ms(
   value: StringValue | number,
@@ -63,12 +62,8 @@ export function ms(
 ): number | string {
   if (typeof value == 'string') {
     return parse(value);
-  } else if (typeof value == 'number') {
-    return format(value, options);
   }
-  throw new Error(
-    `Value provided to ms() must be a string or number. value=${JSON.stringify(value)}`,
-  );
+  return format(value, options);
 }
 
 /**
@@ -76,13 +71,11 @@ export function ms(
  *
  * @param str - A string to parse to milliseconds
  * @returns The parsed value in milliseconds, or `NaN` if the string can't be
- * parsed
+ * parsed, is empty or is longer than 100
  */
 export function parse(str: string): number {
-  if (typeof str != 'string' || str.length == 0 || str.length > 100) {
-    throw new Error(
-      `Value provided to ms.parse() must be a string with length between 1 and 99. value=${JSON.stringify(str)}`,
-    );
+  if (str.length == 0 || str.length > 100) {
+    return NaN;
   }
   const match =
     /^(?<value>-?\d*\.?\d+) *(?<unit>milliseconds?|msecs?|ms|seconds?|secs?|s|minutes?|mins?|m|hours?|hrs?|h|days?|d|weeks?|w|months?|mo|years?|yrs?|y)?$/i.exec(
@@ -145,9 +138,7 @@ export function parse(str: string): number {
     case 'ms':
       return n;
     default:
-      throw new Error(
-        `Unknown unit "${matchUnit}" provided to ms.parse(). value=${JSON.stringify(str)}`,
-      );
+      return NaN;
   }
 }
 
@@ -228,8 +219,8 @@ function fmtLong(ms: number): StringValue {
  * @returns The formatted string
  */
 export function format(ms: number, options?: Options): string {
-  if (typeof ms != 'number' || !Number.isFinite(ms)) {
-    throw new Error('Value provided to ms.format() must be of type number.');
+  if (!Number.isFinite(ms)) {
+    return String(ms);
   }
 
   return options?.long ? fmtLong(ms) : fmtShort(ms);

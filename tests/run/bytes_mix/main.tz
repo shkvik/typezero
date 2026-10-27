@@ -16,14 +16,11 @@ const packed = encode(records)
 store.save("records.bin", packed)
 const loaded = store.load("records.bin")
 console.log(loaded.length, loaded.subarray(0, 8), fnv1a(loaded) == fnv1a(packed))
-for (const r of decode(loaded))
+for (const r of decode(loaded).unwrapOr([]))
   console.log(r.id, r.count, r.price, r.name)
-try {
-  decode(Buffer.from("nope, not records"))
-} catch (e) {
-  if (e instanceof Error)
-    console.log("error:", e.message)
-}
+const notRecords = decode(Buffer.from("nope, not records"))
+if (notRecords.isErr())
+  console.log("error:", notRecords.error)
 
 // 2. Text in other encodings, and bytes appended.
 store.saveText("latin.txt", "café", "latin1")

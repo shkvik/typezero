@@ -1,14 +1,14 @@
-import { NonSharedArrayBuffer } from './types.tz';
+import { NonSharedArrayBuffer, UuidError } from './types.tz';
 import { validate } from './validate.tz';
 
-function parse(uuid: string): NonSharedArrayBuffer {
+function parse(uuid: string): Result<NonSharedArrayBuffer, UuidError> {
   if (!validate(uuid)) {
-    throw TypeError('Invalid UUID');
+    return err({ name: 'TypeError', message: 'Invalid UUID' });
   }
 
   // tz: `>>>` takes an int, so each double is cut to its 32 bits first, as `>>>` does it.
   let v: number;
-  return Uint8Array.of(
+  return ok(Uint8Array.of(
     ((v = parseInt(uuid.slice(0, 8), 16)) | 0) >>> 24,
     ((v | 0) >>> 16) & 0xff,
     ((v | 0) >>> 8) & 0xff,
@@ -34,7 +34,7 @@ function parse(uuid: string): NonSharedArrayBuffer {
     ((v | 0) >>> 16) & 0xff,
     ((v | 0) >>> 8) & 0xff,
     v & 0xff,
-  );
+  ));
 }
 
 export { parse };

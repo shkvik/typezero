@@ -1,10 +1,3 @@
-class UnknownEncodingError extends TypeError {
-  code = "ERR_UNKNOWN_ENCODING"
-  constructor(encoding: string) {
-    super(`Unknown encoding: ${encoding}`)
-  }
-}
-
 export function normalizeEncoding(encoding: string | undefined): string {
   if (encoding == undefined || encoding == "") return "utf8"
   const lower = encoding.toLowerCase()
@@ -37,10 +30,8 @@ export class StringDecoder {
   lastTotal: int = 0
   @__tz_hidden buffered: int = 0
 
-  constructor(encoding?: string) {
-    const normalized = normalizeEncoding(encoding)
-    if (normalized == "") throw new UnknownEncodingError(encoding ?? "")
-    this.encoding = normalized
+  constructor(encoding?: BufferEncoding) {
+    this.encoding = normalizeEncoding(encoding)
   }
 
   write(buf: Buffer | Uint8Array | string): string {

@@ -58,8 +58,6 @@ pinged 3
 1
 [ 'a1', 'b1', 'b2' ] 1
 [ 'x second', 'x first' ] [ 'removeListener' ]
-caught bad
-TypeError no listener
 handled now handled
 true
 listening on 8080
@@ -76,7 +74,6 @@ Server {
   Symbol(kCapture): false
 } 1 true
 3 [ 'listening' ] 10
-RangeError The value of "setMaxListeners" is out of range. It must be >= 0. Received -1
 sport about sport
 true
 news about news

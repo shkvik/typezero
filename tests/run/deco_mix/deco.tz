@@ -13,18 +13,16 @@ export function Log<A extends unknown[], R>(_cls: object, name: string, method: 
   }
 }
 
-// Tries an async method again, three times in all.
-export function Retry<A extends unknown[], R>(_cls: object, name: string, method: MethodDescriptor<A, Promise<R>>) {
+// Tries an async method that gives a Result again, three times in all.
+export function Retry<A extends unknown[], R>(_cls: object, name: string,
+                                               method: MethodDescriptor<A, Promise<Result<R, string>>>) {
   const original = method.value
-  method.value = async function (this: unknown, ...args: A): Promise<R> {
+  method.value = async function (this: unknown, ...args: A): Promise<Result<R, string>> {
     for (let attempt = 1; ; attempt++) {
-      try {
-        return await original.apply(this, args)
-      } catch (e: unknown) {
-        if (!(e instanceof Error) || attempt >= 3)
-          throw e
-        console.log(`${name}: ${e.message}, try ${attempt + 1}`)
-      }
+      const result = await original.apply(this, args)
+      if (result.isOk() || attempt >= 3)
+        return result
+      console.log(`${name}: ${result.error}, try ${attempt + 1}`)
     }
   }
 }

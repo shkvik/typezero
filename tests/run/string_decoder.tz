@@ -22,7 +22,7 @@ for (let k = 0; k < 20; k++) {
   }
   samples.push(bytes)
 }
-const encodings = ["utf8", "utf16le", "base64", "hex", "latin1"]
+const encodings: BufferEncoding[] = ["utf8", "utf16le", "base64", "hex", "latin1"]
 for (const enc of encodings) {
   for (const sample of samples) {
     const results: string[] = []

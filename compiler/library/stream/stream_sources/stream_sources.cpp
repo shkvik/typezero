@@ -4,6 +4,7 @@
 #include "compiler/check/expr/expr_checker/expr_checker.h"
 #include "compiler/check/iterators/iterable_checker/iterable_checker.h"
 #include "compiler/check/types/type_relations/type_relations.h"
+#include "compiler/declare/prelude/prelude.h"
 #include "compiler/declare/type_declarer/type_declarer.h"
 #include "compiler/library/events/event_target_checker/event_target_checker.h"
 #include "compiler/library/stream/set_encoding_checker/set_encoding_checker.h"
@@ -41,7 +42,7 @@ Expr *StreamSources::checkFsStreamFunction(CallExpr *call, FunctionDecl *decl, l
     return call;
   }
   const Type *options = Type::optional(checker_.typeDeclarer().resolveAlias(alias));
-  const Type *encodingType = Type::optional(Type::string());
+  const Type *encodingType = Type::optional(checker_.prelude().builtinType("BufferEncoding"));
   auto undefinedOf = [&](const Type *type) {
     return checker_.typeRelations().convert(
         checker_.exprChecker().checkExpr(checker_.ctx_.make<UndefinedExpr>(loc)), type);
@@ -60,9 +61,12 @@ Expr *StreamSources::checkFsStreamFunction(CallExpr *call, FunctionDecl *decl, l
         }
       }
       opts = checker_.argumentChecker().checkArg(arg, options);
+    } else if (isa<StringLitExpr>(arg)) {
+      encoding = checker_.argumentChecker().checkArg(arg, encodingType);
+      text = true;
     } else {
       arg = checker_.exprChecker().checkExpr(arg);
-      if (arg->type->isString() || arg->type->isStringLiteral()) {
+      if (arg->type->isSubtypeOf(Type::string())) {
         encoding = checker_.typeRelations().coerce(arg, encodingType);
         text = true;
       } else {

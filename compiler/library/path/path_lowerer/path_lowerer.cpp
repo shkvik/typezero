@@ -30,7 +30,7 @@ PathLowerer::PathLowerer(Lowering &lowering) : lowering_(lowering) {}
 llvm::Value *PathLowerer::emitPathCall(CallExpr *call) {
   llvm::Type *voidTy = lowering_.builder_.getVoidTy(), *i32 = lowering_.builder_.getInt32Ty();
   llvm::Type *i64 = lowering_.builder_.getInt64Ty(), *ptr = lowering_.builder_.getPtrTy();
-  std::vector<llvm::Value *> values = lowering_.throwLowerer().emitHeldValues(call->args);
+  std::vector<llvm::Value *> values = lowering_.exprLowerer().emitExprs(call->args);
   auto obj = [&](size_t i) { return lowering_.stringLowerer().stringObj(values[i]); };
   auto meta = [&](size_t i) { return lowering_.stringLowerer().stringMeta(values[i]); };
   auto fn = [&](llvm::StringRef name, llvm::Type *ret, llvm::ArrayRef<llvm::Type *> params) {

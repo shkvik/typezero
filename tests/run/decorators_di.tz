@@ -12,18 +12,31 @@ function Injectable(cls: Constructor) {
 
 class Container {
   private instances = new Map<Constructor, object>()
-  resolve<T extends object>(cls: Constructor<T>): T {
+  resolve<T extends object>(cls: Constructor<T>): Result<T, string> {
     const found = this.instances.get(cls)
     if (found instanceof cls)
-      return found
+      return ok(found)
     if (!injectable.includes(cls))
-      throw new Error(`${cls.name} is not injectable`)
-    const deps = Reflect.getMetadata("design:paramtypes", cls) ?? []
-    const made = Reflect.construct(cls, deps.map(dep => this.resolve(dep)))
-    if (made.isErr()) throw new Error(made.error.message)
+      return err(`${cls.name} is not injectable`)
+    const args: object[] = []
+    for (const dep of Reflect.getMetadata("design:paramtypes", cls) ?? []) {
+      const arg = this.resolve(dep)
+      if (arg.isErr()) return err(arg.error)
+      args.push(arg.value)
+    }
+    const made = Reflect.construct(cls, args)
+    if (made.isErr()) return err(made.error.message)
     this.instances.set(cls, made.value)
-    return made.value
+    return ok(made.value)
   }
+}
+
+function must<T>(r: Result<T, string>): T {
+  if (r.isErr()) {
+    console.log(r.error)
+    process.exit(1)
+  }
+  return r.value
 }
 
 @Injectable
@@ -55,15 +68,12 @@ class UserService {
 class Unknown {}
 
 const container = new Container()
-const service = container.resolve(UserService)
+const service = must(container.resolve(UserService))
 console.log(service.greet(7))
-console.log(container.resolve(UserService) == service, container.resolve(UserRepo) instanceof UserRepo)
-console.log(container.resolve(Logger).lines)
-try {
-  container.resolve(Unknown)
-} catch (e) {
-  console.log(String(e))
-}
+console.log(must(container.resolve(UserService)) == service, must(container.resolve(UserRepo)) instanceof UserRepo)
+console.log(must(container.resolve(Logger)).lines)
+const unknown = container.resolve(Unknown)
+if (unknown.isErr()) console.log(unknown.error)
 
 // The router of section 6: a method decorator records its class and name;
 // a request makes a controller of a class known only when the program runs,

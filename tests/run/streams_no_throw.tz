@@ -1,0 +1,46 @@
+// Where node throws from a stream or an emitter, tz gives the error to the
+// stream (its 'error' event, the Err of for await) or goes on (docs/errors.md,
+// step 5): undefined written to a stream of objects, undefined from the
+// iterator of Readable.from(), a start after the end of a file stream, an
+// 'error' emitted with no listener left, and setMaxListeners() below zero.
+import { EventEmitter } from "node:events"
+import { createReadStream } from "node:fs"
+import { Readable, Writable } from "node:stream"
+
+const log = (s: string) => console.log(s)
+
+const sink = new Writable({
+  objectMode: true,
+  write(chunk: string | undefined, encoding, callback) {
+    log(`wrote ${chunk}`)
+    callback()
+  },
+})
+sink.on("error", (e) => log(`sink error ${e.code}`))
+sink.write("a")
+sink.write(undefined, (e) => log(`write callback ${e?.code}`))
+await new Promise<void>((resolve) => setTimeout(resolve, 5))
+log(`sink destroyed ${sink.destroyed}`)
+
+function* withHole() {
+  yield "x"
+  yield undefined
+  yield "y"
+}
+for await (const item of Readable.from(withHole())) {
+  if (item.isErr()) log(`from error ${item.error.code}`)
+  else log(`from ${item.value}`)
+}
+
+for await (const chunk of createReadStream("never-opened.txt", { start: 10, end: 2 })) {
+  if (chunk.isErr()) log(`file error ${chunk.error.code}`)
+  else log(`file read ${chunk.value.length}`)
+}
+
+const bus = new EventEmitter<{ error: [e: { code: string; message: string }] }>()
+const listener = (e: { code: string; message: string }) => log(`heard ${e.code}`)
+bus.on("error", listener)
+log(`${bus.emit("error", { code: "E_ONE", message: "one" })}`)
+bus.off("error", listener)
+log(`${bus.emit("error", { code: "E_TWO", message: "two" })}`)
+log(`${bus.setMaxListeners(-1).getMaxListeners()}`)

@@ -1,33 +1,25 @@
 // same-as-node
 // `await` anywhere in the code: in arguments (what they computed before is
-// released when the Promise is rejected), conditions, loops with labels,
+// released when the Result is an Err), conditions, loops with labels,
 // switch, a loop over a generator; deep chains of awaits; many tasks.
 async function value<T>(x: T): Promise<T> {
   await undefined
   return x
 }
-async function fail(msg: string): Promise<string> {
+async function fail(msg: string): Promise<Result<string, string>> {
   await undefined
-  throw new Error(msg)
+  return err(msg)
 }
 function* naturals() {
   let n = 0
   while (true) yield n++
 }
 async function main() {
-  // Temporaries held across an await that throws are released.
+  // Temporaries held across an await that gives an Err are released.
   const s = "held"
-  try {
-    console.log(`${s}-${s}`, await fail("in args"))
-  } catch (e) {
-    console.log("caught", e.message)
-  }
-  try {
-    const parts = [s + "!", await fail("in array")]
-    console.log(parts)
-  } catch (e) {
-    console.log("caught", e.message)
-  }
+  console.log(`${s}-${s}`, (await fail("in args")).isErr())
+  const parts = [s + "!", (await fail("in array")).unwrapOr("none")]
+  console.log(parts)
   // await in conditions, logical operators and loops.
   let count = 0
   while ((await value(count)) < 3) count++

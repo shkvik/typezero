@@ -163,7 +163,6 @@ llvm::Value *NumberLowerer::emitNumberBuiltin(CallExpr *call) {
     llvm::Value *text = lowering_.stringLowerer().callReturningString(
         units ? lowering_.rt_.strFromCharCodes : lowering_.rt_.strFromCodePoints,
         {array, lowering_.builder_.getInt64(values.size())});
-    lowering_.emitThrowCheckIf(!units);
     return text;
   }
   case Builtin::UriEncodeComponent:
@@ -194,7 +193,6 @@ llvm::Value *NumberLowerer::emitNumberBuiltin(CallExpr *call) {
         {lowering_.stringLowerer().stringObj(text.value),
          lowering_.stringLowerer().stringMeta(text.value)});
     lowering_.refCounts().dropOperand(text);
-    lowering_.throwLowerer().emitThrowCheck();
     return result;
   }
   case Builtin::NumToFixed: {
@@ -203,7 +201,6 @@ llvm::Value *NumberLowerer::emitNumberBuiltin(CallExpr *call) {
         hasArg ? lowering_.exprLowerer().emitExpr(call->args[0]) : lowering_.builder_.getInt64(0);
     llvm::Value *text =
         lowering_.stringLowerer().callReturningString(lowering_.rt_.numToFixed, {x, digits});
-    lowering_.emitThrowCheckIf(hasArg);
     return text;
   }
   case Builtin::NumToRadix: {
@@ -211,7 +208,6 @@ llvm::Value *NumberLowerer::emitNumberBuiltin(CallExpr *call) {
     llvm::Value *radix = lowering_.exprLowerer().emitExpr(call->args[0]);
     llvm::Value *text =
         lowering_.stringLowerer().callReturningString(lowering_.rt_.numToRadix, {x, radix});
-    lowering_.throwLowerer().emitThrowCheck();
     return text;
   }
   default:

@@ -84,7 +84,7 @@ llvm::Value *ClassLowerer::emitNew(NewExpr *expr) {
     return lowering_.errorLowerer().emitNewError(expr);
   }
   const CallExpr *ctor = expr->ctor;
-  std::vector<llvm::Value *> args = lowering_.throwLowerer().emitHeldValues(ctor->args);
+  std::vector<llvm::Value *> args = lowering_.exprLowerer().emitExprs(ctor->args);
   const FuncSymbol *sym = ctor->func;
   if (sym) {
     for (size_t i = args.size(); i < sym->params.size(); ++i) {
@@ -93,21 +93,21 @@ llvm::Value *ClassLowerer::emitNew(NewExpr *expr) {
   }
   llvm::Value *object = allocInstance(cls, lowering_.makesMember(expr, cls->type));
   lowering_.groupLowerer().noteUnstored(object, expr);
-  Lowering::Held held =
-      lowering_.throwLowerer().hold(object, cls->type, constructionThrows(cls, sym));
+  llvm::Value *held =
+      object;
   emitConstruct(object, cls, sym, args);
 
-  return lowering_.throwLowerer().take(held);
+  return held;
 }
 
 bool ClassLowerer::constructionThrows(const ClassDecl *cls, const FuncSymbol *ctor) const {
   if (ctor && ctor->decl->cls == cls) {
-    return (!cls->parent && cls->init && lowering_.mayThrow(cls->init)) ||
-           lowering_.mayThrow(ctor->decl);
+    return (!cls->parent && cls->init && false) ||
+           false;
   }
 
   return (cls->parent && constructionThrows(cls->parent, ctor)) ||
-         (cls->init && lowering_.mayThrow(cls->init));
+         (cls->init && false);
 }
 
 void ClassLowerer::emitConstruct(llvm::Value *object, const ClassDecl *cls, const FuncSymbol *ctor,
@@ -115,21 +115,19 @@ void ClassLowerer::emitConstruct(llvm::Value *object, const ClassDecl *cls, cons
   if (ctor && ctor->decl->cls == cls) {
     std::vector<llvm::Value *> all{object};
     if (!cls->parent && cls->init) {
-      bool initThrows = lowering_.mayThrow(cls->init);
-      std::vector<Lowering::Held> waiting;
+      bool initThrows = false;
+      std::vector<llvm::Value *> waiting;
       for (size_t i = 0; i < args.size(); ++i) {
-        waiting.push_back(lowering_.throwLowerer().hold(args[i], ctor->params[i], initThrows));
+        waiting.push_back(args[i]);
       }
       lowering_.builder_.CreateCall(lowering_.classDescriptors().methodCode(cls->init), {object});
-      lowering_.emitThrowCheckIf(initThrows);
-      for (Lowering::Held &w : waiting) {
-        all.push_back(lowering_.throwLowerer().take(w));
+      for (llvm::Value *&w : waiting) {
+        all.push_back(w);
       }
     } else {
       all.insert(all.end(), args.begin(), args.end());
     }
     lowering_.builder_.CreateCall(lowering_.classDescriptors().methodCode(ctor->decl), all);
-    lowering_.emitThrowCheckIf(lowering_.mayThrow(ctor->decl));
     return;
   }
   if (cls->parent) {
@@ -142,13 +140,12 @@ void ClassLowerer::emitConstruct(llvm::Value *object, const ClassDecl *cls, cons
   }
   if (cls->init) {
     lowering_.builder_.CreateCall(lowering_.classDescriptors().methodCode(cls->init), {object});
-    lowering_.emitThrowCheckIf(lowering_.mayThrow(cls->init));
   }
 }
 
 llvm::Value *ClassLowerer::emitSuperCall(CallExpr *call) {
   const ClassDecl *cls = lowering_.currentFn_->cls;
-  std::vector<llvm::Value *> args = lowering_.throwLowerer().emitHeldValues(call->args);
+  std::vector<llvm::Value *> args = lowering_.exprLowerer().emitExprs(call->args);
   if (const FuncSymbol *sym = call->method) {
     for (size_t i = args.size(); i < sym->params.size(); ++i) {
       args.push_back(lowering_.optionalLowerer().undefinedValue(sym->params[i]));
@@ -158,7 +155,6 @@ llvm::Value *ClassLowerer::emitSuperCall(CallExpr *call) {
   if (cls->init) {
     lowering_.builder_.CreateCall(lowering_.classDescriptors().methodCode(cls->init),
                                   {lowering_.envParam_});
-    lowering_.emitThrowCheckIf(lowering_.mayThrow(cls->init));
   }
 
   return nullptr;
@@ -170,11 +166,7 @@ llvm::Value *ClassLowerer::emitMethodCall(CallExpr *call) {
   bool borrow =
       staysDuringCall(member->object) && llvm::all_of(call->args, AssignLowerer::cannotAssign);
   Lowering::Operand self = lowering_.refCounts().emitOperand(member->object, borrow);
-  lowering_.throwLowerer().holdOperand(self, llvm::any_of(call->args, [&](Expr *arg) {
-                                         return lowering_.mayThrow().exprThrows(arg);
-                                       }));
-  std::vector<llvm::Value *> values = lowering_.throwLowerer().emitHeldValues(call->args);
-  lowering_.throwLowerer().takeOperand(self);
+  std::vector<llvm::Value *> values = lowering_.exprLowerer().emitExprs(call->args);
   std::vector<llvm::Value *> args{self.value};
   args.insert(args.end(), values.begin(), values.end());
   for (size_t i = call->args.size(); i < method->params.size(); ++i) {
@@ -188,8 +180,6 @@ llvm::Value *ClassLowerer::emitMethodCall(CallExpr *call) {
           : lowering_.builder_.CreateCall(lowering_.classDescriptors().methodCode(method->decl),
                                           args);
   lowering_.refCounts().dropOperand(self);
-  lowering_.emitThrowCheckIf(lowering_.mayThrow().callMayThrow(method->decl, call->virtualCall) &&
-                             call != lowering_.returnCall_);
 
   return result->getType()->isVoidTy() ? nullptr : result;
 }

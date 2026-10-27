@@ -211,9 +211,7 @@ llvm::Value *RegexLowerer::emitRegexCall(CallExpr *call) {
         lowering_.refCounts().emitOperand(call->args[0], laterCannotAssign(0));
     llvm::Value *regex;
     if (call->args.size() > 1) {
-      lowering_.throwLowerer().holdOperand(pattern, lowering_.mayThrow().exprThrows(call->args[1]));
       Lowering::Operand flags = lowering_.refCounts().emitOperand(call->args[1], true);
-      lowering_.throwLowerer().takeOperand(pattern);
       regex = lowering_.builder_.CreateCall(
           regexFunction("tz_re_from_string", ptr, {ptr, i64, ptr, i64, i32}),
           {lowering_.stringLowerer().stringObj(pattern.value),
@@ -232,7 +230,6 @@ llvm::Value *RegexLowerer::emitRegexCall(CallExpr *call) {
           "regex");
     }
     lowering_.refCounts().dropOperand(pattern);
-    lowering_.throwLowerer().emitThrowCheck();
     return regex;
   }
   case Builtin::RegExpParse: {
@@ -294,9 +291,7 @@ llvm::Value *RegexLowerer::emitRegexCall(CallExpr *call) {
   case Builtin::RegExpExec: {
     Lowering::Operand regex =
         lowering_.refCounts().emitOperand(member->object, laterCannotAssign(-1));
-    lowering_.throwLowerer().holdOperand(regex, lowering_.mayThrow().exprThrows(call->args[0]));
     Lowering::Operand text = lowering_.refCounts().emitOperand(call->args[0], true);
-    lowering_.throwLowerer().takeOperand(regex);
     llvm::Value *result;
     if (call->builtin == Builtin::RegExpTest) {
       result = lowering_.builder_.CreateCall(regexFunction("tz_re_test", i32, {ptr, ptr, i64}),
@@ -319,14 +314,10 @@ llvm::Value *RegexLowerer::emitRegexCall(CallExpr *call) {
     return emitReplaceWith(call);
   case Builtin::StrMatchAll: {
     std::vector<llvm::Value *> operands =
-        lowering_.throwLowerer().emitHeldValues({member->object, call->args[0]});
+        lowering_.exprLowerer().emitExprs({member->object, call->args[0]});
     llvm::Value *text = operands[0], *regex = operands[1];
     if (!call->regex) {
       lowering_.builder_.CreateCall(regexFunction("tz_re_check_match_all", voidTy, {ptr}), {regex});
-      lowering_.throwLowerer().emitThrowCheckWith([&] {
-        lowering_.refCounts().releaseString(text);
-        lowering_.refCounts().releaseValue(regex, call->args[0]->type);
-      });
     }
     llvm::Function *fn = lowering_.generatorLowerer().iteratorFunction(
         Builtin::StrMatchAll, Type::string(), call->args[0]->type, call->type);
@@ -337,12 +328,9 @@ llvm::Value *RegexLowerer::emitRegexCall(CallExpr *call) {
     break;
   }
 
-  bool restThrows = call->args.size() > 1 && lowering_.mayThrow().exprThrows(call->args[1]);
+  bool restThrows = call->args.size() > 1 && false;
   Lowering::Operand text = lowering_.refCounts().emitOperand(member->object, laterCannotAssign(-1));
-  lowering_.throwLowerer().holdOperand(text, lowering_.mayThrow().exprThrows(call->args[0]) ||
-                                                 restThrows);
   Lowering::Operand regex = lowering_.refCounts().emitOperand(call->args[0], laterCannotAssign(0));
-  lowering_.throwLowerer().holdOperand(regex, restThrows);
   Lowering::Operand replacement{nullptr, false, Type::string()};
   llvm::Value *limit = lowering_.builder_.getInt64(0), *hasLimit = lowering_.builder_.getInt32(0);
   if (call->builtin == Builtin::StrReplaceRegex) {
@@ -351,8 +339,6 @@ llvm::Value *RegexLowerer::emitRegexCall(CallExpr *call) {
     limit = lowering_.builder_.CreateSExt(lowering_.exprLowerer().emitExpr(call->args[1]), i64);
     hasLimit = lowering_.builder_.getInt32(1);
   }
-  lowering_.throwLowerer().takeOperand(text);
-  lowering_.throwLowerer().takeOperand(regex);
   llvm::Value *obj = lowering_.stringLowerer().stringObj(text.value),
               *meta = lowering_.stringLowerer().stringMeta(text.value);
   bool throws = false;
@@ -397,7 +383,6 @@ llvm::Value *RegexLowerer::emitRegexCall(CallExpr *call) {
   }
   lowering_.refCounts().dropOperand(regex);
   lowering_.refCounts().dropOperand(text);
-  lowering_.emitThrowCheckIf(throws);
 
   return result;
 }
@@ -408,7 +393,7 @@ llvm::Value *RegexLowerer::emitReplaceWith(CallExpr *call) {
   llvm::Type *voidTy = lowering_.builder_.getVoidTy();
   auto *member = cast<MemberExpr>(call->callee);
   std::vector<llvm::Value *> operands =
-      lowering_.throwLowerer().emitHeldValues({member->object, call->args[0], call->args[1]});
+      lowering_.exprLowerer().emitExprs({member->object, call->args[0], call->args[1]});
   llvm::Value *text = operands[0], *regex = operands[1], *function = operands[2];
   const Type *functionType = call->args[1]->type;
   const Type *regexType = call->args[0]->type;
@@ -427,7 +412,6 @@ llvm::Value *RegexLowerer::emitReplaceWith(CallExpr *call) {
        lowering_.stringLowerer().stringMeta(text),
        lowering_.builder_.getInt32(member->name == "replaceAll")});
   if (!call->regex && member->name == "replaceAll") {
-    lowering_.throwLowerer().emitThrowCheckWith(dropAll);
   }
   llvm::FunctionCallee next = regexFunction("tz_re_replacer_next", ptr, {ptr});
   llvm::FunctionCallee capture = regexFunction("tz_re_replacer_capture", i32, {ptr, ptr, ptr, i32});
@@ -470,8 +454,7 @@ llvm::Value *RegexLowerer::emitReplaceWith(CallExpr *call) {
     }
   }
   llvm::Value *result = lowering_.closureLowerer().callFunctionValue(function, functionType, args);
-  if (lowering_.typeThrows(functionType)) {
-    lowering_.throwLowerer().emitThrowCheckWith(dropAll);
+  if (false) {
   }
   lowering_.builder_.CreateCall(regexFunction("tz_re_replacer_put", voidTy, {ptr, ptr, ptr, i64}),
                                 {replacer, caps, lowering_.stringLowerer().stringObj(result),

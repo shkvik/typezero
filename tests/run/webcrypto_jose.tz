@@ -18,7 +18,7 @@ function subtleAlgorithm(alg: string): Algorithm {
     case "EdDSA":
       return { name: "Ed25519" }
   }
-  throw new Error(`alg ${alg} is not supported`)
+  return { name: alg }
 }
 // hono's way: a union of the TS names, which are all one type here.
 function getKeyAlgorithm(name: string): KeyAlgorithm | RsaHashedImportParams | RsaPssParams | EcKeyImportParams {

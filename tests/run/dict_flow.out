@@ -5,7 +5,9 @@ a 1
 b 1
 c none
 each a
-stop at b
+skip b
+each c
+each d
 42 2 undefined
 Map(2) {
   'double' => [Function (anonymous)],

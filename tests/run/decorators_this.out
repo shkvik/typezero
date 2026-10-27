@@ -1,6 +1,5 @@
-RangeError get0 needs arguments
-TypeError negative
-21
-TypeError Other.m was called with a 'this' that is not an instance of Other
+times with 1 argument(s)
+Err { error: 'negative' } at Box.times (decorators_this.tz:19)
+times with 1 argument(s)
+Ok { value: 21 }
 before
-decorating [class Late]

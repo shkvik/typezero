@@ -207,14 +207,9 @@ llvm::Value *ClosureLowerer::emitValueCall(CallExpr *call) {
   Lowering::Operand callee = lowering_.refCounts().emitOperand(
       call->callee,
       isa<NameExpr>(call->callee) && llvm::all_of(call->args, AssignLowerer::cannotAssign));
-  lowering_.throwLowerer().holdOperand(callee, llvm::any_of(call->args, [&](Expr *arg) {
-                                         return lowering_.mayThrow().exprThrows(arg);
-                                       }));
-  std::vector<llvm::Value *> args = lowering_.throwLowerer().emitHeldValues(call->args);
-  lowering_.throwLowerer().takeOperand(callee);
+  std::vector<llvm::Value *> args = lowering_.exprLowerer().emitExprs(call->args);
   llvm::Value *result = callFunctionValue(callee.value, type, args);
   lowering_.refCounts().dropOperand(callee);
-  lowering_.emitThrowCheckIf(lowering_.typeThrows(type));
 
   return result;
 }

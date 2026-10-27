@@ -25,7 +25,7 @@ FsPromisesLowerer::FsPromisesLowerer(Lowering &lowering) : lowering_(lowering) {
 llvm::Value *FsPromisesLowerer::emitFsPromise(CallExpr *call) {
   llvm::Type *voidTy = lowering_.builder_.getVoidTy(), *i32 = lowering_.builder_.getInt32Ty();
   llvm::Type *i64 = lowering_.builder_.getInt64Ty(), *ptr = lowering_.builder_.getPtrTy();
-  std::vector<llvm::Value *> values = lowering_.throwLowerer().emitHeldValues(call->args);
+  std::vector<llvm::Value *> values = lowering_.exprLowerer().emitExprs(call->args);
   const Type *settled = call->type->promised();
   const Type *value = settled->isResult() ? settled->okType() : settled;
   llvm::Value *promise = lowering_.promiseLowerer().newPromise(settled);
@@ -115,7 +115,7 @@ llvm::Value *FsPromisesLowerer::emitReadlineBuiltin(CallExpr *call) {
   llvm::Type *voidTy = lowering_.builder_.getVoidTy(), *i32 = lowering_.builder_.getInt32Ty();
   llvm::Type *i64 = lowering_.builder_.getInt64Ty(), *ptr = lowering_.builder_.getPtrTy();
   if (call->builtin == Builtin::RlCreate) {
-    std::vector<llvm::Value *> values = lowering_.throwLowerer().emitHeldValues(call->args);
+    std::vector<llvm::Value *> values = lowering_.exprLowerer().emitExprs(call->args);
     llvm::Value *rl = lowering_.builder_.CreateCall(
         lowering_.processLowerer().processFunction("tz_readline_new", ptr, {i32, ptr}),
         {values[0], values[1]}, "readline");
@@ -127,7 +127,7 @@ llvm::Value *FsPromisesLowerer::emitReadlineBuiltin(CallExpr *call) {
   llvm::Value *result = nullptr;
   switch (call->builtin) {
   case Builtin::RlQuestion: {
-    std::vector<llvm::Value *> values = lowering_.throwLowerer().emitHeldValues(call->args);
+    std::vector<llvm::Value *> values = lowering_.exprLowerer().emitExprs(call->args);
     result = lowering_.promiseLowerer().newPromise(call->type->promised());
     lowering_.builder_.CreateCall(
         lowering_.processLowerer().processFunction("tz_readline_question", voidTy,
@@ -141,7 +141,7 @@ llvm::Value *FsPromisesLowerer::emitReadlineBuiltin(CallExpr *call) {
     break;
   }
   case Builtin::RlQuestionCallback: {
-    std::vector<llvm::Value *> values = lowering_.throwLowerer().emitHeldValues(call->args);
+    std::vector<llvm::Value *> values = lowering_.exprLowerer().emitExprs(call->args);
     llvm::Value *answer = lowering_.promiseLowerer().newPromise(Type::string());
     lowering_.builder_.CreateCall(
         lowering_.processLowerer().processFunction("tz_readline_question", voidTy,
@@ -181,7 +181,7 @@ llvm::Value *FsPromisesLowerer::emitAsyncIoBuiltin(CallExpr *call) {
   case Builtin::TimersSetTimeout:
   case Builtin::TimersSetImmediate:
   case Builtin::TimersSetInterval: {
-    std::vector<llvm::Value *> values = lowering_.throwLowerer().emitHeldValues(call->args);
+    std::vector<llvm::Value *> values = lowering_.exprLowerer().emitExprs(call->args);
     bool immediate = call->builtin == Builtin::TimersSetImmediate;
     llvm::Value *delay = immediate ? llvm::ConstantFP::get(f64, 0.0) : values[0];
     size_t at = immediate ? 0 : 1;

@@ -1,6 +1,6 @@
 import { FinishedOptions, Stream, finishedPromise } from "node:stream"
 
-export function finished(stream: Stream, options?: FinishedOptions): Promise<Result<void, Error>> {
+export function finished(stream: Stream, options?: FinishedOptions): Promise<Result<void, StreamError>> {
   return finishedPromise(stream, options)
 }
 

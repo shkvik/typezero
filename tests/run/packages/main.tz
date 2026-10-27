@@ -9,13 +9,6 @@ console.log(ms(60000, { long: true }), ms(2 * 60000, { long: true }), ms(-3 * 60
 console.log(ms(ms("10 hours"), { long: true }))
 console.log(parse("1.5 Minutes"), parseStrict("3 weeks"), format(90000), format(90000, { long: true }))
 console.log(ms("nonsense"), ms("1 fortnight"))
-try {
-  parse("")
-} catch (e) {
-  console.log(e.message)
-}
-try {
-  format(Infinity)
-} catch (e) {
-  console.log(e.message)
-}
+// Where ms throws, the tz version gives NaN for a text it cannot read, and
+// the number itself for one it cannot format.
+console.log(parse(""), format(Infinity))

@@ -64,9 +64,6 @@ Lowering::Operand BytesCallSite::receiver(size_t from) {
   auto rest = llvm::ArrayRef<Expr *>(call->args).drop_front(std::min(from, call->args.size()));
   Lowering::Operand self = lowering_.refCounts().emitOperand(
       member->object, llvm::all_of(rest, AssignLowerer::cannotAssign));
-  lowering_.throwLowerer().holdOperand(self, throws || llvm::any_of(rest, [&](Expr *arg) {
-                                               return lowering_.mayThrow().exprThrows(arg);
-                                             }));
 
   return self;
 }
@@ -105,7 +102,6 @@ llvm::Value *BytesCallSite::encoding(Expr *arg) {
                                     {lowering_.stringLowerer().stringObj(name.value),
                                      lowering_.stringLowerer().stringMeta(name.value)});
   lowering_.refCounts().dropOperand(name);
-  lowering_.throwLowerer().emitThrowCheck();
 
   return value;
 }

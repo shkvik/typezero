@@ -59,7 +59,7 @@ strings.push("x")
 // A method the stream calls, with other parameters: another variant of the
 // name, which the stream would never call.
 class WrongChunks extends Writable {
-  // expect-error: '_write' is what node:stream calls, as '_write(chunk: Buffer, encoding: string, callback: (Error?) => void)'
+  // expect-error: '_write' is what node:stream calls, as '_write(chunk: Buffer, encoding: string, callback: (StreamError?) => void)'
   _write(chunk: string, encoding: string, callback: () => void) {}
 }
 class WrongSize extends Readable {

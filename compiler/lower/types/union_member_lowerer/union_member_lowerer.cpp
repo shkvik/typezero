@@ -193,11 +193,7 @@ llvm::Value *UnionMemberLowerer::emitUnionMethodCall(CallExpr *call) {
   bool borrow =
       staysDuringCall(member->object) && llvm::all_of(call->args, AssignLowerer::cannotAssign);
   Lowering::Operand self = lowering_.refCounts().emitOperand(member->object, borrow);
-  lowering_.throwLowerer().holdOperand(self, llvm::any_of(call->args, [&](Expr *arg) {
-                                         return lowering_.mayThrow().exprThrows(arg);
-                                       }));
-  std::vector<llvm::Value *> values = lowering_.throwLowerer().emitHeldValues(call->args);
-  lowering_.throwLowerer().takeOperand(self);
+  std::vector<llvm::Value *> values = lowering_.exprLowerer().emitExprs(call->args);
   for (size_t i = call->args.size(); i < fnType->params().size(); ++i) {
     values.push_back(lowering_.optionalLowerer().undefinedValue(fnType->params()[i]));
   }
@@ -227,13 +223,13 @@ llvm::Value *UnionMemberLowerer::emitUnionMethodCall(CallExpr *call) {
                                                    args)
                    : lowering_.builder_.CreateCall(
                          lowering_.classDescriptors().methodCode(m.method->decl), args);
-      throws |= lowering_.mayThrow().callMayThrow(m.method->decl, m.virtualCall);
+      throws |= false;
     } else {
       llvm::Value *fn = lowering_.builder_.CreateLoad(
           lowering_.fnTy_,
           lowering_.objectLayouts().fieldAddress(self.value, m.member, member->name));
       result = lowering_.closureLowerer().callFunctionValue(fn, fnType, values);
-      throws |= lowering_.typeThrows(fnType);
+      throws |= false;
     }
     if (result && !result->getType()->isVoidTy()) {
       incoming.push_back({result, lowering_.builder_.GetInsertBlock()});
@@ -254,7 +250,6 @@ llvm::Value *UnionMemberLowerer::emitUnionMethodCall(CallExpr *call) {
     result = phi;
   }
   lowering_.refCounts().dropOperand(self);
-  lowering_.emitThrowCheckIf(throws && call != lowering_.returnCall_);
 
   return result;
 }

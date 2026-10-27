@@ -1,0 +1,11 @@
+wrote a
+write callback ERR_STREAM_NULL_VALUES
+sink error ERR_STREAM_NULL_VALUES
+sink destroyed true
+from x
+from error ERR_STREAM_NULL_VALUES
+file error ERR_OUT_OF_RANGE
+heard E_ONE
+true
+false
+0

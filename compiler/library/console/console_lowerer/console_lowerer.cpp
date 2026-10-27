@@ -37,7 +37,7 @@ void ConsoleLowerer::emitConsoleLog(CallExpr *call) {
   }
   std::vector<bool> laterThrows(count, false);
   for (size_t i = count; i > 1; --i) {
-    laterThrows[i - 2] = laterThrows[i - 1] || lowering_.mayThrow().exprThrows(call->args[i - 1]);
+    laterThrows[i - 2] = laterThrows[i - 1] || false;
   }
   std::vector<Lowering::Operand> values;
   for (size_t i = 0; i < count; ++i) {
@@ -46,11 +46,9 @@ void ConsoleLowerer::emitConsoleLog(CallExpr *call) {
       values.push_back({nullptr, false, call->args[i]->type});
     } else {
       values.push_back(lowering_.refCounts().emitOperand(call->args[i], laterCannotAssign[i]));
-      lowering_.throwLowerer().holdOperand(values.back(), laterThrows[i]);
     }
   }
   for (Lowering::Operand &value : values) {
-    lowering_.throwLowerer().takeOperand(value);
   }
 
   bool toStderr = call->builtin == Builtin::ConsoleError;

@@ -87,7 +87,7 @@ llvm::Value *FsLowerer::emitFsCall(CallExpr *call) {
   }
 
   const Type *valueType = call->type->isResult() ? call->type->okType() : call->type;
-  std::vector<llvm::Value *> values = lowering_.throwLowerer().emitHeldValues(call->args);
+  std::vector<llvm::Value *> values = lowering_.exprLowerer().emitExprs(call->args);
   auto release = [&] {
     for (size_t i = 0; i < values.size(); ++i) {
       lowering_.refCounts().releaseValue(values[i], call->args[i]->type);
@@ -105,7 +105,6 @@ llvm::Value *FsLowerer::emitFsCall(CallExpr *call) {
     args.push_back(systemErrorMaker());
     llvm::Value *result = lowering_.builder_.CreateCall(fn(name, ret, params), args);
     release();
-    lowering_.throwLowerer().emitThrowCheck();
 
     return result;
   };

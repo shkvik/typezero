@@ -236,9 +236,9 @@ llvm::Value *PromiseLowerer::emitPromiseNew(CallExpr *call) {
   }
   args.resize(takes);
   lowering_.closureLowerer().callFunctionValue(executor, fnType, args);
-  bool throws = lowering_.typeThrows(fnType);
+  bool throws = false;
   if (auto *fe = dyn_cast<FunctionExpr>(executorExpr)) {
-    throws = lowering_.mayThrow(fe->fn);
+    throws = false;
   }
   if (throws) {
     llvm::Value *error = lowering_.builder_.CreateLoad(

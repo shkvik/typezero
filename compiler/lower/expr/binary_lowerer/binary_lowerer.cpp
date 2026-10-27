@@ -110,7 +110,6 @@ llvm::Value *BinaryLowerer::emitArithmetic(BinaryOp op, llvm::Value *lhs, llvm::
     llvm::Value *result = lowering_.builder_.CreateCall(
         lowering_.rt_.mathPowLong,
         {lowering_.builder_.CreateSExt(lhs, i64), lowering_.builder_.CreateSExt(rhs, i64)});
-    lowering_.throwLowerer().emitThrowCheck();
     return lowering_.builder_.CreateTrunc(result, lhs->getType());
   }
   case BinaryOp::BitAnd:

@@ -45,12 +45,10 @@ EOL = "\n"
 argv = []
 // expect-error: 'new Stats' is not possible: only the functions of node:fs make Stats
 const s = new Stats()
-// expect-error: 'new SystemError' is not possible: only the functions of node:fs make SystemError; throw an Error, or an object of a class of your own that extends Error
-throw new SystemError("x")
 // expect-error: expected 0-1 arguments, but got 2
 readLine("a", "b")
 // expect-error: 'mkdirSync' of 'node:fs' can only be called
 mkdirSync.call(1)
 
-// expect-error: class 'MyError' cannot extend 'SystemError': only the functions of node:fs make its objects; extend Error
+// expect-error: 'SystemError' is not a class, and a class can extend only a class
 class MyError extends SystemError {}

@@ -422,13 +422,7 @@ static void readline_close_step(void *object, TzPromise *p) {
 void tz_readline_close(void *object) { readline_shut((Readline *)object); }
 
 static void question_failed(TzPromise *p, TzMaker make, TzSignal *signal) {
-  if (!make && signal) {
-    tz_promise_reject(p, tz_abort_error(signal));
-    return;
-  }
   if (!make) {
-    TzStr message = tz_fs_ascii("readline was closed");
-    tz_promise_reject(p, tz_error_info.make(TZ_ERROR, message.obj, message.meta));
     return;
   }
   if (signal) {

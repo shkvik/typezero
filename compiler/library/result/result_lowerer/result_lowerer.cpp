@@ -155,7 +155,6 @@ llvm::Value *ResultLowerer::callWithHalf(llvm::Value *fn, const Type *fnType, ll
                                   : lowering_.exprLowerer().emitConversion(arg, given, param));
   }
   llvm::Value *result = lowering_.closureLowerer().callFunctionValue(fn, fnType, args);
-  lowering_.emitThrowCheckIf(lowering_.typeThrows(fnType));
 
   return result;
 }
@@ -247,11 +246,11 @@ llvm::Value *ResultLowerer::emitResultMethod(CallExpr *call) {
   }
   auto fnType = [&](size_t i) { return call->args[i]->type; };
   bool throws = method != Builtin::ResultUnwrapOr && llvm::any_of(call->args, [&](Expr *arg) {
-                  return lowering_.typeThrows(arg->type);
+                  return false;
                 });
-  std::vector<Lowering::Held> held;
+  std::vector<llvm::Value *> held;
   for (size_t i = 0; i < args.size(); ++i) {
-    held.push_back(lowering_.throwLowerer().hold(args[i], fnType(i), throws));
+    held.push_back(args[i]);
   }
   llvm::Value *value = resultHalf(result, type, false);
   llvm::Value *error = resultHalf(result, type, true);
@@ -428,8 +427,8 @@ llvm::Value *ResultLowerer::emitResultMethod(CallExpr *call) {
       returned = phi;
     }
   }
-  for (Lowering::Held &h : held) {
-    lowering_.throwLowerer().take(h);
+  for (llvm::Value *&h : held) {
+    h;
   }
   if (method != Builtin::ResultUnwrapOr) {
     for (size_t i = 0; i < args.size(); ++i) {

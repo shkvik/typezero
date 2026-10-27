@@ -111,7 +111,10 @@ console.log(getters.getId(), getters.getName(), getters.getEmail(), rest, k1)
 type IsNever<T> = [T] extends [never] ? true : false
 const n1: IsNever<never> = true
 const n2: IsNever<Exclude<"a", "a">> = true
-function fail(message: string): never { throw new Error(message) }
+function fail(message: string): never {
+  console.log(message)
+  process.exit(1)
+}
 function area(s: Shape): double {
   switch (s.kind) {
     case "circle":

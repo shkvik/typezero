@@ -5,5 +5,4 @@
 10 hours
 90000 1814400000 2m 2 minutes
 NaN NaN
-Value provided to ms.parse() must be a string with length between 1 and 99. value=""
-Value provided to ms.format() must be of type number.
+NaN Infinity

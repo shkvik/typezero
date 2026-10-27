@@ -93,9 +93,7 @@ llvm::Value *DictMethodLowerer::emitDictCall(CallExpr *call) {
     Expr *keyExpr = call->args[0];
     Lowering::Operand map =
         lowering_.refCounts().emitOperand(receiver, AssignLowerer::cannotAssign(keyExpr));
-    lowering_.throwLowerer().holdOperand(map, lowering_.mayThrow().exprThrows(keyExpr));
     Lowering::Operand k = lowering_.refCounts().emitOperand(keyExpr, true);
-    lowering_.throwLowerer().takeOperand(map);
     llvm::Value *result;
     if (call->builtin == Builtin::MapDelete) {
       llvm::Value *removed;
@@ -138,15 +136,8 @@ llvm::Value *DictMethodLowerer::emitDictCall(CallExpr *call) {
     bool later = valueExpr && !AssignLowerer::cannotAssign(valueExpr);
     Lowering::Operand map =
         lowering_.refCounts().emitOperand(receiver, AssignLowerer::cannotAssign(keyExpr) && !later);
-    lowering_.throwLowerer().holdOperand(
-        map, lowering_.mayThrow().exprThrows(keyExpr) ||
-                 (valueExpr && lowering_.mayThrow().exprThrows(valueExpr)));
     Lowering::Operand k = lowering_.refCounts().emitOperand(keyExpr, !later);
-    lowering_.throwLowerer().holdOperand(k,
-                                         valueExpr && lowering_.mayThrow().exprThrows(valueExpr));
     llvm::Value *v = valueExpr ? lowering_.exprLowerer().emitExpr(valueExpr) : nullptr;
-    lowering_.throwLowerer().takeOperand(k);
-    lowering_.throwLowerer().takeOperand(map);
     llvm::Value *entry = lowering_.dictLowerer().emitDictAdd(map.value, k.value, key);
     if (v) {
       lowering_.storeLowerer().storeIn(map.value, type,
@@ -170,12 +161,10 @@ llvm::Value *DictMethodLowerer::emitDictCall(CallExpr *call) {
     Expr *keyExpr = call->args[0], *valueExpr = call->args[1];
     const Type *resultType = call->type;
     llvm::Value *m = lowering_.exprLowerer().emitExpr(receiver);
-    Lowering::Held heldMap = lowering_.throwLowerer().hold(
-        m, type,
-        lowering_.mayThrow().exprThrows(keyExpr) || lowering_.mayThrow().exprThrows(valueExpr));
+    llvm::Value *heldMap = m;
     llvm::Value *kv = lowering_.exprLowerer().emitExpr(keyExpr);
-    Lowering::Held heldKey =
-        lowering_.throwLowerer().hold(kv, key, lowering_.mayThrow().exprThrows(valueExpr));
+    llvm::Value *heldKey =
+        kv;
     llvm::Value *entry = lowering_.dictLowerer().emitDictFind(m, kv, key);
     llvm::BasicBlock *lookBlock = lowering_.functionFrame().newBlock("nullish.look");
     llvm::BasicBlock *keepBlock = lowering_.functionFrame().newBlock("nullish.keep");
@@ -210,17 +199,15 @@ llvm::Value *DictMethodLowerer::emitDictCall(CallExpr *call) {
         lowering_.builder_.CreatePHI(lowering_.moduleBuilder().lower(resultType), 2);
     result->addIncoming(kept, keepEnd);
     result->addIncoming(assigned, assignEnd);
-    lowering_.refCounts().releaseValue(lowering_.throwLowerer().take(heldKey), key);
-    lowering_.refCounts().releaseValue(lowering_.throwLowerer().take(heldMap), type);
+    lowering_.refCounts().releaseValue(heldKey, key);
+    lowering_.refCounts().releaseValue(heldMap, type);
     return result;
   }
   default: {
     Expr *other = call->args[0];
     Lowering::Operand a =
         lowering_.refCounts().emitOperand(receiver, AssignLowerer::cannotAssign(other));
-    lowering_.throwLowerer().holdOperand(a, lowering_.mayThrow().exprThrows(other));
     Lowering::Operand b = lowering_.refCounts().emitOperand(other, true);
-    lowering_.throwLowerer().takeOperand(a);
     llvm::Value *result;
     switch (call->builtin) {
     case Builtin::SetUnion:
@@ -287,7 +274,7 @@ llvm::Value *DictMethodLowerer::emitDictNew(CallExpr *call) {
   Lowering::Producer producer = lowering_.inlineGeneratorLowerer().prepare(source);
   llvm::Value *map = lowering_.builder_.CreateCall(create, {descriptor}, "map");
   lowering_.groupLowerer().noteUnstored(map, call);
-  Lowering::Held held = lowering_.throwLowerer().hold(map, type, true);
+  llvm::Value *held = map;
   size_t depth = lowering_.scopes_.size();
   llvm::BasicBlock *endBlock = lowering_.functionFrame().newBlock("dict.filled");
   const Type *key = type->keyType(), *value = type->valueType();
@@ -324,7 +311,7 @@ llvm::Value *DictMethodLowerer::emitDictNew(CallExpr *call) {
   };
   producer.run(consumer);
   lowering_.functionFrame().emitBlock(endBlock);
-  llvm::Value *result = lowering_.throwLowerer().take(held);
+  llvm::Value *result = held;
   lowering_.functionFrame().popScope();
 
   return result;
@@ -346,7 +333,7 @@ llvm::Value *DictMethodLowerer::emitGroupBy(CallExpr *call) {
   lowering_.builder_.CreateStore(lowering_.exprLowerer().emitExpr(call->args[1]), callback);
   llvm::Value *map = lowering_.builder_.CreateCall(
       lowering_.dictLowerer().dictFunction("tz_map_new", ptr, {ptr}), {layout.descriptor}, "map");
-  Lowering::Held held = lowering_.throwLowerer().hold(map, type, true);
+  llvm::Value *held = map;
   llvm::Type *i32 = lowering_.builder_.getInt32Ty();
   if (type->isRecord()) {
     lowering_.builder_.CreateStore(lowering_.builder_.getInt32(4),
@@ -366,11 +353,11 @@ llvm::Value *DictMethodLowerer::emitGroupBy(CallExpr *call) {
     lowering_.builder_.CreateStore(
         lowering_.builder_.CreateAdd(count, lowering_.builder_.getInt32(1)), counter);
     lowering_.refCounts().retainValue(item, element);
-    Lowering::Held heldItem =
-        lowering_.throwLowerer().hold(item, element, lowering_.typeThrows(callbackType));
+    llvm::Value *heldItem =
+        item;
     llvm::Value *k = lowering_.lazyChainLowerer().callCallback(
         callback, callbackType, {item, count}, {element, Type::intTy()});
-    item = lowering_.throwLowerer().take(heldItem);
+    item = heldItem;
     llvm::Value *added;
     llvm::Value *entry = lowering_.dictLowerer().emitDictAdd(map, k, key, &added);
     lowering_.refCounts().releaseValue(k, key);
@@ -394,7 +381,7 @@ llvm::Value *DictMethodLowerer::emitGroupBy(CallExpr *call) {
   };
   producer.run(consumer);
   lowering_.functionFrame().emitBlock(endBlock);
-  llvm::Value *result = lowering_.throwLowerer().take(held);
+  llvm::Value *result = held;
   lowering_.functionFrame().popScope();
 
   return result;

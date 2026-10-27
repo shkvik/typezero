@@ -69,20 +69,19 @@ console.log([1, undefined, 3].filter(x => x != undefined).map(x => x * 2))
 const words = ["a", undefined, "bc"]
 console.log(words.filter(w => w != undefined && w.length > 1))
 
-// asserts: from the call on, as when the function returns.
+// asserts: from the call on, as when the function returns; when it does
+// not hold, the function ends the program.
 function assertCircle(s: Shape): asserts s is Circle {
-  if (s.kind != "circle") throw new Error(`not a circle: ${s.kind}`)
+  if (s.kind != "circle") {
+    console.log(`not a circle: ${s.kind}`)
+    process.exit(1)
+  }
 }
 function diameter(s: Shape) {
   assertCircle(s)
   return 2 * s.r
 }
 console.log(diameter({ kind: "circle", r: 5 }))
-try {
-  diameter({ kind: "square", side: 1 })
-} catch (e) {
-  console.log(e.message)
-}
 
 // this is T, of a method.
 class Node2 {

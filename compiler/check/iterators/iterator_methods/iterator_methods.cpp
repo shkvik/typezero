@@ -200,11 +200,15 @@ Expr *IteratorMethods::checkIteratorMethod(CallExpr *call, MemberExpr *member) {
     checker_.flowChecker().calledFunction();
     return call;
   }
-  if (name == "return" || name == "throw") {
-    checker_.diags_.error(member->loc(),
-                          "'" + name +
-                              "()' of an iterator is not supported yet: it comes with "
-                              "exceptions");
+  if (name == "throw") {
+    checker_.diags_.error(member->loc(), "an iterator has no 'throw()' in tz: an error is a value, "
+                                         "not something thrown into a generator");
+    checkArgsLoosely();
+    return call;
+  }
+  if (name == "return") {
+    checker_.diags_.error(member->loc(), "'return()' of an iterator is not supported yet; stop "
+                                         "with 'break' in 'for of'");
     checkArgsLoosely();
     return call;
   }

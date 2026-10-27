@@ -1,6 +1,6 @@
 import { parse } from './parse.tz';
 import { unsafeStringify } from './stringify.tz';
-import { UUIDTypes } from './types.tz';
+import { UUIDTypes, UuidError } from './types.tz';
 
 export function stringToBytes(str: string) {
   // tz: the UTF-8 of TextEncoder, as the TODO of uuid has it; tz has no
@@ -20,16 +20,23 @@ export function v35<TBuf extends Uint8Array = never>(
   namespace: UUIDTypes<Uint8Array>,
   buf?: TBuf,
   offset?: number,
-): UUIDTypes<TBuf> {
+): Result<UUIDTypes<TBuf>, UuidError> {
   const valueBytes: Uint8Array =
     typeof value == 'string' ? stringToBytes(value) : value;
-  const namespaceBytes: Uint8Array =
-    typeof namespace == 'string' ? parse(namespace) : namespace;
+  let namespaceBytes: Uint8Array;
+  if (typeof namespace == 'string') {
+    const parsed = parse(namespace);
+    if (parsed.isErr()) return err(parsed.error);
+    namespaceBytes = parsed.value;
+  } else {
+    namespaceBytes = namespace;
+  }
 
   if (namespaceBytes.length != 16) {
-    throw TypeError(
-      'Namespace must be array-like (16 iterable integer values, 0-255)',
-    );
+    return err({
+      name: 'TypeError',
+      message: 'Namespace must be array-like (16 iterable integer values, 0-255)',
+    });
   }
 
   // Compute hash of namespace and value, Per 4.3
@@ -49,15 +56,16 @@ export function v35<TBuf extends Uint8Array = never>(
     // tz: the check is on the int offset, in a form the compiler reads.
     const at = (offset ?? 0) | 0;
     if (at < 0 || at > buf.length - 16) {
-      throw new RangeError(
-        `UUID byte range ${at}:${at + 15} is out of buffer bounds`,
-      );
+      return err({
+        name: 'RangeError',
+        message: `UUID byte range ${at}:${at + 15} is out of buffer bounds`,
+      });
     }
 
     buf.set(bytes, at);
 
-    return buf;
+    return ok(buf);
   }
 
-  return unsafeStringify(bytes);
+  return ok(unsafeStringify(bytes));
 }

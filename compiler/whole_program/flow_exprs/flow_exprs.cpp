@@ -207,9 +207,16 @@ Refs FlowExprs::exprRefs(Expr *e) {
     flows_.flowStmts().function(llvm::cast<FunctionExpr>(e)->fn);
     flows_.flowCalls().functionValue(llvm::cast<FunctionExpr>(e)->fn);
     return {};
-  case Expr::Kind::Yield:
-    flows_.escape(expr(llvm::cast<YieldExpr>(e)->value));
+  case Expr::Kind::Yield: {
+    auto *y = llvm::cast<YieldExpr>(e);
+    Refs value = expr(y->value);
+    if (flows_.functions_.empty()) {
+      flows_.escape(value);
+    } else {
+      flows_.flow(y->delegate ? value : holding(value), flows_.returned(flows_.functions_.back()));
+    }
     return {};
+  }
   case Expr::Kind::Await: {
     Expr *value = llvm::cast<AwaitExpr>(e)->value;
     Refs out = expr(value);

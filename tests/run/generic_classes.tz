@@ -126,15 +126,15 @@ w2.add(3)
 w1.merge(w2)
 console.log(w1.count(), w1)
 
-// Errors, abstract generic classes, trees of a generic class, JSON.
-class Failure<T> extends Error {
-  constructor(public detail: T, message: string) { super(message) }
+// Errors in a Result, abstract generic classes, trees of a generic class, JSON.
+class Failure<T> {
+  constructor(public detail: T, public message: string) {}
 }
-try {
-  throw new Failure(42, "bad")
-} catch (e) {
-  if (e instanceof Error) console.log(e.message)
+function failing(): Result<int, Failure<int>> {
+  return err(new Failure(42, "bad"))
 }
+const failed = failing()
+if (failed.isErr()) console.log(failed.error.message)
 abstract class Shape<T> {
   constructor(public tag: T) {}
   abstract area(): double

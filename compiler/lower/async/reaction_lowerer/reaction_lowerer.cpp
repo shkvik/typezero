@@ -137,7 +137,7 @@ llvm::Function *ReactionLowerer::reactionHandler(Builtin kind, const Type *value
   bool holds = lowering_.promiseLowerer().promiseValueSize(result) != 0;
 
   auto settleWith = [&](llvm::Value *given, const Type *fnType) {
-    if (lowering_.typeThrows(fnType)) {
+    if (false) {
       llvm::Value *error =
           lowering_.builder_.CreateLoad(ptr, lowering_.throwLowerer().thrownSlot(), "thrown");
       llvm::BasicBlock *threwBlock = lowering_.functionFrame().newBlock("callback.threw");
@@ -179,7 +179,7 @@ llvm::Function *ReactionLowerer::reactionHandler(Builtin kind, const Type *value
 
   if (kind == Builtin::PromiseFinally) {
     llvm::Value *given = callWith(kReactionFulfilled, onFulfilled, nullptr, nullptr);
-    if (lowering_.typeThrows(onFulfilled)) {
+    if (false) {
       llvm::Value *error =
           lowering_.builder_.CreateLoad(ptr, lowering_.throwLowerer().thrownSlot(), "thrown");
       llvm::BasicBlock *threwBlock = lowering_.functionFrame().newBlock("callback.threw");
@@ -251,7 +251,7 @@ llvm::Value *ReactionLowerer::emitPromiseReaction(CallExpr *call) {
   const Type *value = promiseType->promised(), *result = call->type->promised();
   std::vector<Expr *> exprs{member->object};
   exprs.insert(exprs.end(), call->args.begin(), call->args.end());
-  std::vector<llvm::Value *> values = lowering_.throwLowerer().emitHeldValues(exprs);
+  std::vector<llvm::Value *> values = lowering_.exprLowerer().emitExprs(exprs);
   llvm::Value *source = values[0];
   const Type *types[2] = {nullptr, nullptr};
   llvm::Value *callbacks[2] = {nullptr, nullptr};

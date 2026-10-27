@@ -32,7 +32,7 @@ class Upper extends Transform {
 
 class Collect extends Writable {
   parts: string[] = []
-  _write(chunk: Buffer, encoding: string, callback: (error?: Error) => void) {
+  _write(chunk: Buffer, encoding: string, callback: (error?: StreamError) => void) {
     this.parts.push(chunk.toString())
     callback()
   }

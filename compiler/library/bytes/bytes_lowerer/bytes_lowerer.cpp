@@ -173,9 +173,7 @@ llvm::Value *BytesLowerer::emitBytesIndex(IndexExpr *index) {
   const Type *type = index->object->type;
   Lowering::Operand bytes =
       lowering_.refCounts().emitOperand(index->object, AssignLowerer::cannotAssign(index->index));
-  lowering_.throwLowerer().holdOperand(bytes, lowering_.mayThrow().exprThrows(index->index));
   llvm::Value *position = lowering_.exprLowerer().emitExpr(index->index);
-  lowering_.throwLowerer().takeOperand(bytes);
   auto read = [&] { return loadElement(bytesData(bytes.value), type, position); };
   llvm::Value *result;
   if (!index->mayBeOutOfRange) {
@@ -196,8 +194,6 @@ llvm::Value *BytesLowerer::emitBytesElementAssign(AssignExpr *assign, bool needR
   Lowering::Operand bytes = lowering_.refCounts().emitOperand(
       index->object,
       AssignLowerer::cannotAssign(index->index) && AssignLowerer::cannotAssign(assign->value));
-  lowering_.throwLowerer().holdOperand(bytes, lowering_.mayThrow().exprThrows(index->index) ||
-                                                  lowering_.mayThrow().exprThrows(assign->value));
   llvm::Value *position = lowering_.exprLowerer().emitExpr(index->index);
   llvm::Value *value;
   if (!assign->op) {
@@ -207,7 +203,6 @@ llvm::Value *BytesLowerer::emitBytesElementAssign(AssignExpr *assign, bool needR
     value = lowering_.binaryLowerer().emitArithmetic(
         *assign->op, old, lowering_.exprLowerer().emitExpr(assign->value), element);
   }
-  lowering_.throwLowerer().takeOperand(bytes);
   storeElement(bytesData(bytes.value), type, position, value);
   lowering_.refCounts().dropOperand(bytes);
 
@@ -219,9 +214,7 @@ llvm::Value *BytesLowerer::emitBytesUpdate(UpdateExpr *update) {
   const Type *type = index->object->type;
   Lowering::Operand bytes =
       lowering_.refCounts().emitOperand(index->object, AssignLowerer::cannotAssign(index->index));
-  lowering_.throwLowerer().holdOperand(bytes, lowering_.mayThrow().exprThrows(index->index));
   llvm::Value *position = lowering_.exprLowerer().emitExpr(index->index);
-  lowering_.throwLowerer().takeOperand(bytes);
   llvm::Value *data = bytesData(bytes.value);
   llvm::Value *old = loadElement(data, type, position);
   llvm::Value *updated;

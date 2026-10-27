@@ -1,51 +1,33 @@
-line -> {"name":"rent","amount":"12.5","tags":["home","monthly"]}
-no match !> parse error at 2 [400]: ParseError 400: line 2: cannot read '???' (line 2)
-bad amount !> parse error at 3 [400]: ParseError 400: line 3: bad amount '1.2.3' (line 3)
-  caused by syntax: Cannot convert 1.2.3 to a decimal
-bad separator !> syntax: Invalid regular expression: /^(\w+)(\s*(\S+)(.*)$/: Unterminated group
-no g !> type: String.prototype.matchAll called with a non-global RegExp argument
-config -> {"limit":"100","rules":["positive"]}
-config type !> app error [500]: AppError 500: bad config
-  caused by type: limit: expected decimal, got string
-config text !> app error [500]: AppError 500: bad config
-  caused by syntax: Expected double-quoted property name in JSON at position 12 (line 1 column 13)
-owner -> Ann
-no owner !> type: Cannot read properties of null (reading 'name')
-check 5 -> 5
-check -1 !> app error [422]: AppError 422: negative amount -1
-check 250 !> limit 100: RangeError: over the limit of 100
+entry {"name":"rent","amount":"12.5","tags":["home","monthly"]}
+parse: line 1: cannot read '???'
+parse: line 1: bad amount '1.2.3'
+regex: Invalid regular expression: /^(\w+)(\s*(\S+)(.*)$/: Unterminated group
+config 100 [ 'positive' ]
+config: bad config bad_field limit
+config: bad config bad_json 
+Ann ?
+check 5: 5
+check -1: negative -1
+check 250: limit 100: over the limit of 100
 positive,rule
-validate abc -> abc
-validate a b !> app error [422]: AppError 422: 'a b' does not match
-validate abc !> syntax: Invalid regular expression: /[a-/: Unterminated character class
-validate a b !> syntax: Invalid regular expression: /[a-/: Unterminated character class
-first -> bb
-first none !> app error [404]: AppError 404: none of 3
-first throws !> app error [422]: AppError 422: negative amount -2
-retry -> 3
-retry fails !> app error [503]: AppError 503: failed 2 times
-  caused by limit 100: RangeError: over the limit of 100
-total -> 3.5
-total bad !> parse error at 2 [400]: ParseError 400: line 2: bad amount 'x' (line 2)
-  caused by syntax: Cannot convert x to a decimal
-total rule !> limit 100: RangeError: over the limit of 100
-helpers !> app error [422]: AppError 422: negative amount -4
-generator done; summed 3.5; generator done; summed 1; generator done; summed 1
-limit 7
-err 500 true
-true true
-load tried; load tried
-[ParseError: line 7: made here] {
-  code: 400,
-  line: 7,
-  [cause]: [RangeError: over the limit of 10] { limit: 10 }
-}
-ParseError: line 7: made here ParseError 400 7
-{"code":1,"name":"AppError"} {"limit":"3"}
-AppError: negative amount -3
-    at Positive.check (errors.tz:39:26)
-    at checkAll (main.tz:52:42)
-    at main.tz:150:3
-ParseError: line 10: cannot read 'bad'
-    at parseLine (parse.tz:23:29)
-    at main.tz:155:18
+validate abc: abc
+validate a b: no match for 'a b'
+validate abc: bad pattern: Invalid regular expression: /[a-/: Unterminated character class
+validate a b: bad pattern: Invalid regular expression: /[a-/: Unterminated character class
+Ok { value: 'bb' }
+Err { error: 'none of 3' } at firstThat (main.tz:55)
+retry 3
+[
+  'limit 100: over the limit of 100',
+  'limit 100: over the limit of 100'
+]
+3.5
+Err { error: "line 2: bad amount 'x'" } at total (main.tz:83)
+Err { error: 'limit 100: over the limit of 100' } at total (main.tz:86)
+Err {
+  error: { code: 'negative', message: 'negative amount -3', amount: -3 }
+} at Positive.check (errors.tz:24)
+Err {
+  error: { code: 'unreadable', message: "cannot read 'bad'", line: 10 }
+} at parseLine (parse.tz:17)
+{"code":"limit","message":"over the limit of 100","limit":"100"}

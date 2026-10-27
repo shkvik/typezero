@@ -91,8 +91,6 @@ llvm::Value *IntlLowerer::emitIntlOptions(Expr *locale, Expr *options,
     } else {
       Lowering::Operand operand = lowering_.refCounts().emitOperand(
           locale, !options || AssignLowerer::cannotAssign(options));
-      lowering_.throwLowerer().holdOperand(operand,
-                                           options && lowering_.mayThrow().exprThrows(options));
       held.push_back(operand);
       auto [value, has] = split(operand.value, operand.type);
       lowering_.builder_.CreateStore(value, lowering_.builder_.CreateStructGEP(optionsTy, slot, 0));
@@ -171,7 +169,6 @@ llvm::Value *IntlLowerer::emitIntlOptions(Expr *locale, Expr *options,
     }
   }
   for (Lowering::Operand &operand : held) {
-    lowering_.throwLowerer().takeOperand(operand);
   }
   lowering_.builder_.CreateStore(hasText, lowering_.builder_.CreateStructGEP(optionsTy, slot, 3));
   lowering_.builder_.CreateStore(hasNumber, lowering_.builder_.CreateStructGEP(optionsTy, slot, 4));

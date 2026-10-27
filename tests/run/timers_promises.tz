@@ -38,7 +38,7 @@ done.abort()
 const before = await wait(10, 1, { signal: done.signal })
 log(before.isErr() ? `${before.error.code}: ${before.error.message}` : `${before.value}`)
 const later = new AbortController()
-void wait(10).then(() => later.abort(new Error("enough")))
+void wait(10).then(() => later.abort("enough"))
 const first = await soon(undefined, { signal: later.signal })
 if (first.isOk()) {
   const waited = await wait(1000, 0, { signal: later.signal })

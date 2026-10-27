@@ -43,9 +43,6 @@ llvm::Value *StringMethodLowerer::emitStringMethod(CallExpr *call) {
 
   Lowering::Operand receiver = lowering_.refCounts().emitOperand(
       member->object, llvm::all_of(call->args, AssignLowerer::cannotAssign));
-  lowering_.throwLowerer().holdOperand(receiver, llvm::any_of(call->args, [&](Expr *arg) {
-                                         return lowering_.mayThrow().exprThrows(arg);
-                                       }));
   std::vector<Lowering::Operand> strings;
   std::vector<llvm::Value *> numbers;
   for (size_t i = 0; i < call->args.size(); ++i) {
@@ -54,18 +51,12 @@ llvm::Value *StringMethodLowerer::emitStringMethod(CallExpr *call) {
       bool later =
           std::all_of(call->args.begin() + i + 1, call->args.end(), AssignLowerer::cannotAssign);
       strings.push_back(lowering_.refCounts().emitOperand(arg, later));
-      lowering_.throwLowerer().holdOperand(
-          strings.back(),
-          std::any_of(call->args.begin() + i + 1, call->args.end(),
-                      [&](Expr *next) { return lowering_.mayThrow().exprThrows(next); }));
     } else {
       numbers.push_back(lowering_.builder_.CreateSExt(lowering_.exprLowerer().emitExpr(arg),
                                                       lowering_.builder_.getInt64Ty()));
     }
   }
-  lowering_.throwLowerer().takeOperand(receiver);
   for (Lowering::Operand &str : strings) {
-    lowering_.throwLowerer().takeOperand(str);
   }
   auto optional = [&](size_t i) -> std::pair<llvm::Value *, llvm::Value *> {
     if (i < numbers.size()) {
@@ -247,7 +238,6 @@ llvm::Value *StringMethodLowerer::emitStringMethod(CallExpr *call) {
   for (const Lowering::Operand &str : strings) {
     lowering_.refCounts().dropOperand(str);
   }
-  lowering_.emitThrowCheckIf(failable);
 
   return result;
 }

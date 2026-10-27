@@ -93,8 +93,7 @@ static int job_take(KeyJob *j, const TzType *dt, const void *dv, const TzType *x
   TzCryptoData d, x = {NULL, 0, NULL};
   if (!tz_crypto_data(&d, dt, dv, TZ_ENC_UTF8, "data") ||
       (xt && !tz_crypto_data(&x, xt, xv, TZ_ENC_UTF8, "data"))) {
-    void *error = tz_error_take();
-    tz_promise_reject(j->promise, error);
+    tz_panicf("internal error: crypto data of a wrong type");
     job_free(j);
     return 0;
   }

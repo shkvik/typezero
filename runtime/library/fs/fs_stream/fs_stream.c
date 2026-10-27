@@ -99,11 +99,10 @@ static void fd_done_int(TzWork *w) {
     tz_fs_throw_failure(r->make, r->failure, r->syscall, r->has_path ? &r->path.shown : NULL, NULL);
     void *error = tz_failed;
     tz_failed = NULL;
-    tz_promise_reject(r->promise, error);
+    tz_promise_fail(r->promise, error);
   } else {
     int32_t value = (int32_t)r->done;
-    memcpy((char *)r->promise + TZ_PROMISE_VALUE, &value, sizeof value);
-    tz_promise_fulfill(r->promise);
+    tz_promise_succeed(r->promise, &value, sizeof value);
   }
   fd_free(r);
 }
@@ -140,10 +139,9 @@ void tz_fss_open(TzPromise *p, void *path_obj, uint64_t path_meta, void *flag_ob
   FdRequest *r = fd_new(p, make);
   if (!tz_fs_flags_of(flag_obj, flag_meta, &r->flags, make) ||
       !tz_fs_path_init(&r->path, path_obj, path_meta, make, "open")) {
-    void *error = tz_failed ? tz_failed : tz_thrown;
+    void *error = tz_failed;
     tz_failed = NULL;
-    tz_thrown = NULL;
-    tz_promise_reject(r->promise, error);
+    tz_promise_fail(r->promise, error);
     fd_free(r);
     return;
   }

@@ -36,27 +36,27 @@ export function encode(records: Record[]): Uint8Array {
 
 // Reads at offsets known only from the data: one check per record shows the
 // compiler that the reads stay within the bytes.
-export function decode(bytes: Uint8Array): Record[] {
+export function decode(bytes: Uint8Array): Result<Record[], string> {
   const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength)
   if (view.byteLength < 8)
-    throw new Error("not a TZB1 file")
+    return err("not a TZB1 file")
   for (let i = 0; i < MAGIC.length; i++)
     if (view.getUint8(i) != MAGIC[i])
-      throw new Error("not a TZB1 file")
+      return err("not a TZB1 file")
   const count = view.getUint32(4, true)
   const records: Record[] = []
   const decoder = new TextDecoder()
   let at = 8
   for (let i = 0; i < count; i++) {
     if (at < 0 || at > view.byteLength - 15)
-      throw new Error("the records are cut short")
+      return err("the records are cut short")
     const length = view.getUint8(at + 14)
     const name = decoder.decode(bytes.subarray(at + 15, at + 15 + length))
     records.push(new Record(view.getUint16(at, true), view.getUint32(at + 2, true),
                             view.getFloat64(at + 6, true), name))
     at += 15 + length
   }
-  return records
+  return ok(records)
 }
 
 // The bytes of text or of bytes, as one kind.

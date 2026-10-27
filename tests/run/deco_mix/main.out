@@ -50,7 +50,4 @@ undefined
   undefined
 ]
 string true
-syntax error: SyntaxError
-RangeError far
-TypeError only an Error can be thrown, and this is a number
 [class Admin extends User] function [ [class User], [class Admin extends User] ] true admins

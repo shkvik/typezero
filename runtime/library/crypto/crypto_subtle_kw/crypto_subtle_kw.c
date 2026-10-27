@@ -121,8 +121,7 @@ void tz_crypto_subtle_aes_kw(TzPromise *p, const TzType *kt, const void *kv, int
   TzCryptoData key, data;
   if (!tz_crypto_data(&key, kt, kv, TZ_ENC_UTF8, "key") ||
       !tz_crypto_data(&data, dt, dv, TZ_ENC_UTF8, "data")) {
-    void *error = tz_error_take();
-    tz_promise_reject(p, error);
+    tz_panicf("internal error: crypto data of a wrong type");
     return;
   }
   KwJob *j = (KwJob *)tz_alloc(sizeof(KwJob));
@@ -137,11 +136,6 @@ void tz_crypto_subtle_aes_kw(TzPromise *p, const TzType *kt, const void *kv, int
   tz_crypto_data_done(&data);
   tz_crypto_data_done(&key);
   j->out = tz_abuf_new((int64_t)j->length + 8);
-  if (!j->out) {
-    tz_instance_release((TzInstance *)tz_error_take());
-    j->failed = 1;
-    j->out = tz_abuf_new(0);
-  }
   j->work.work = kw_work;
   j->work.done = kw_done;
   j->work.turns = 1;

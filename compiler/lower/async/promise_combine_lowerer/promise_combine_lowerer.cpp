@@ -83,7 +83,7 @@ llvm::Value *PromiseCombineLowerer::emitPromiseCombine(CallExpr *call) {
     if (argType->isTuple()) {
       given = types;
     }
-    promises = arrayOf(lowering_.throwLowerer().emitHeldValues(exprs), types);
+    promises = arrayOf(lowering_.exprLowerer().emitExprs(exprs), types);
   } else if (argType->isTuple()) {
     llvm::Value *tuple = lowering_.exprLowerer().emitExpr(arg);
     std::vector<llvm::Value *> values;

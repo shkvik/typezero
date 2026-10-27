@@ -143,7 +143,7 @@ llvm::Value *CallLowerer::emitCall(CallExpr *call) {
     return lowering_.closureLowerer().emitValueCall(call);
   }
   const FuncSymbol *func = call->func;
-  std::vector<llvm::Value *> args = lowering_.throwLowerer().emitHeldValues(call->args);
+  std::vector<llvm::Value *> args = lowering_.exprLowerer().emitExprs(call->args);
   for (size_t i = args.size(); i < func->params.size(); ++i) {
     args.push_back(lowering_.optionalLowerer().undefinedValue(func->params[i]));
   }
@@ -155,7 +155,6 @@ llvm::Value *CallLowerer::emitCall(CallExpr *call) {
   } else {
     result = lowering_.builder_.CreateCall(lowering_.functions_.lookup(func), args);
   }
-  lowering_.emitThrowCheckIf(lowering_.mayThrow(func->decl) && call != lowering_.returnCall_);
 
   return result->getType()->isVoidTy() ? nullptr : result;
 }

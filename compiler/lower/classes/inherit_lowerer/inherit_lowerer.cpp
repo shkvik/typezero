@@ -398,11 +398,7 @@ llvm::Value *InheritLowerer::emitInterfaceCall(CallExpr *call) {
   bool borrow =
       staysDuringCall(member->object) && llvm::all_of(call->args, AssignLowerer::cannotAssign);
   Lowering::Operand self = lowering_.refCounts().emitOperand(member->object, borrow);
-  lowering_.throwLowerer().holdOperand(self, llvm::any_of(call->args, [&](Expr *arg) {
-                                         return lowering_.mayThrow().exprThrows(arg);
-                                       }));
-  std::vector<llvm::Value *> values = lowering_.throwLowerer().emitHeldValues(call->args);
-  lowering_.throwLowerer().takeOperand(self);
+  std::vector<llvm::Value *> values = lowering_.exprLowerer().emitExprs(call->args);
   std::vector<llvm::Value *> args{self.value};
   args.insert(args.end(), values.begin(), values.end());
   for (size_t i = call->args.size(); i < fnType->params().size(); ++i) {
@@ -414,7 +410,6 @@ llvm::Value *InheritLowerer::emitInterfaceCall(CallExpr *call) {
   llvm::CallInst *result =
       lowering_.builder_.CreateCall(lowering_.closureLowerer().closureFnType(fnType), code, args);
   lowering_.refCounts().dropOperand(self);
-  lowering_.emitThrowCheckIf(lowering_.typeThrows(fnType));
 
   return result->getType()->isVoidTy() ? nullptr : result;
 }

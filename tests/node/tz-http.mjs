@@ -29,13 +29,7 @@ export function serve(options, handler) {
       body: hasBody ? Readable.toWeb(req) : undefined,
       duplex: "half",
     });
-    let response;
-    try {
-      response = await handler(request);
-    } catch (e) {
-      console.error(e);
-      response = new Response("Internal Server Error", { status: 500 });
-    }
+    const response = await handler(request);
     const out = {};
     for (const [name, value] of response.headers) {
       if (name === "set-cookie") continue;
@@ -46,7 +40,10 @@ export function serve(options, handler) {
     if (stopping) out.connection = "close";
     res.writeHead(response.status, response.statusText || undefined, out);
     if (response.body && req.method !== "HEAD") {
-      for await (const chunk of response.body) res.write(chunk);
+      for await (const chunk of response.body) {
+        if (chunk.isErr()) break;
+        res.write(chunk.value);
+      }
     }
     res.end();
   };

@@ -10,10 +10,11 @@ function writeImpl(stream: Stream, chunk: unknown, encoding: string | undefined,
   const state = writableStateOf(stream)
   let value = chunk
   let enc = encoding ?? ""
-  if (chunk == undefined) throw nullValues()
-  if ((state.bits & kObjectMode) == 0) {
-    if (enc == "") enc = state.defaultEncoding
-    else if (enc != "buffer" && !Buffer.isEncoding(enc)) throw unknownEncoding(enc)
+  let err: StreamError | undefined = undefined
+  if (chunk == undefined) {
+    err = nullValues()
+  } else if ((state.bits & kObjectMode) == 0) {
+    if (enc == "" || (enc != "buffer" && !Buffer.isEncoding(enc))) enc = state.defaultEncoding
     if (typeof chunk == "string") {
       if ((state.bits & kDecodeStrings) != 0) {
         value = Buffer.from(chunk, enc)
@@ -25,13 +26,12 @@ function writeImpl(stream: Stream, chunk: unknown, encoding: string | undefined,
       value = Buffer.from(chunk.buffer, chunk.byteOffset, chunk.length)
       enc = "buffer"
     } else {
-      throw invalidChunk(chunk)
+      err = invalidChunk(chunk)
     }
   }
-  let err: StreamError | undefined = undefined
-  if ((state.bits & kEnding) != 0)
+  if (err == undefined && (state.bits & kEnding) != 0)
     err = failure("ERR_STREAM_WRITE_AFTER_END", "write after end")
-  else if ((state.bits & kDestroyed) != 0) err = streamDestroyed("write")
+  else if (err == undefined && (state.bits & kDestroyed) != 0) err = streamDestroyed("write")
   if (err != undefined) {
     const failed = err
     process.nextTick(() => cb(failed))
@@ -271,11 +271,7 @@ function prefinish(stream: Stream, state: WritableState) {
   if (stream._hasFinal && (state.bits & kDestroyed) == 0) {
     state.bits |= kFinalCalled | kWSync
     state.pendingcb++
-    try {
-      stream._final((err?: StreamError) => onFinish(stream, state, err))
-    } catch (err) {
-      onFinish(stream, state, err)
-    }
+    stream._final((err?: StreamError) => onFinish(stream, state, err))
     state.bits &= ~kWSync
   } else {
     state.bits |= kFinalCalled | kPrefinished
@@ -383,11 +379,7 @@ function destroyNow(self: Stream, err: StreamError | undefined, cb: StreamCallba
       process.nextTick(() => emitCloseNT(self))
     }
   }
-  try {
-    self._destroy(err, onDestroy)
-  } catch (error) {
-    onDestroy(error)
-  }
+  self._destroy(err, onDestroy)
 }
 
 function emitCloseNT(self: Stream) {
@@ -473,19 +465,15 @@ function constructNT(stream: Stream) {
     }
     sync(stream)
   }
-  try {
-    stream._construct((err?: StreamError) => {
-      process.nextTick(() => onConstruct(err))
-    })
-  } catch (err) {
+  stream._construct((err?: StreamError) => {
     process.nextTick(() => onConstruct(err))
-  }
+  })
 }
 
 function destroyer(stream: Stream, err: StreamError | undefined) {
   if (isDestroyed(stream)) return
   let error = err
-  if (error == undefined && !isFinished(stream)) error = new AbortError()
+  if (error == undefined && !isFinished(stream)) error = abortError()
   stream.destroy(error)
 }
 
@@ -700,7 +688,7 @@ function eos(stream: Stream, options: FinishedOptions | undefined,
     const abort = () => {
       const endCallback = e.callback
       cleanup()
-      endCallback(new AbortError(undefined, errorOf(signal.reason)))
+      endCallback(abortError())
     }
     if (signal.aborted) {
       process.nextTick(abort)
@@ -736,7 +724,7 @@ export function finishedPromise(stream: Stream, options?: FinishedOptions):
 
 function addAbortSignalNoValidate(signal: AbortSignal, stream: Stream) {
   const onAbort = () => {
-    stream.destroy(new AbortError(undefined, errorOf(signal.reason)))
+    stream.destroy(abortError())
   }
   if (signal.aborted) {
     onAbort()

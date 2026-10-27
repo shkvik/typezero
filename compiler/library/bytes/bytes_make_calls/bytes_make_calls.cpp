@@ -48,7 +48,6 @@ llvm::Value *BytesMakeCalls::emit() {
       made = lowering_.builder_.CreateCall(fn("tz_bytes_new", ptr, {i32, i64}),
                                            {kindOf(type), length}, "bytes");
     }
-    lowering_.emitThrowCheckIf(throws);
     return made;
   }
   case Builtin::BytesFromArray: {
@@ -61,9 +60,9 @@ llvm::Value *BytesMakeCalls::emit() {
           {lowering_.typeDescriptors().typeDescriptor(element), lowering_.builder_.getInt64(0),
            lowering_.builder_.getInt64(0)},
           "values");
-      Lowering::Held held = lowering_.throwLowerer().hold(values, Type::array(element), true);
+      llvm::Value *held = values;
       lowering_.iteratorLowerer().emitIteratorSpread(values, source, element);
-      values = lowering_.throwLowerer().take(held);
+      values = held;
       made = lowering_.builder_.CreateCall(fn("tz_bytes_from_array", ptr, {i32, ptr}),
                                            {kindOf(type), values}, "bytes");
       lowering_.refCounts().releaseValue(values, Type::array(element));
@@ -89,27 +88,21 @@ llvm::Value *BytesMakeCalls::emit() {
     if (call->args.empty()) {
       return made;
     }
-    Lowering::Held held = lowering_.throwLowerer().hold(
-        made, type,
-        llvm::any_of(call->args, [&](Expr *e) { return lowering_.mayThrow().exprThrows(e); }));
+    llvm::Value *held = made;
     for (size_t i = 0; i < call->args.size(); ++i) {
       lowering_.bytesLowerer().storeElement(lowering_.bytesLowerer().bytesData(made), type,
                                             lowering_.builder_.getInt64(i),
                                             lowering_.exprLowerer().emitExpr(call->args[i]));
     }
-    return lowering_.throwLowerer().take(held);
+    return held;
   }
   case Builtin::BytesView:
   case Builtin::DataViewNew: {
     Lowering::Operand buffer = lowering_.refCounts().emitOperand(
         call->args[0],
         llvm::all_of(llvm::ArrayRef<Expr *>(call->args).drop_front(), AssignLowerer::cannotAssign));
-    lowering_.throwLowerer().holdOperand(
-        buffer, llvm::any_of(llvm::ArrayRef<Expr *>(call->args).drop_front(),
-                             [&](Expr *e) { return lowering_.mayThrow().exprThrows(e); }));
     std::vector<llvm::Value *> values;
     llvm::Value *has = positions(1, 2, values);
-    lowering_.throwLowerer().takeOperand(buffer);
     llvm::Value *made;
     if (call->builtin == Builtin::DataViewNew) {
       made = lowering_.builder_.CreateCall(fn("tz_dataview_new", ptr, {ptr, i64, i64, i32}),
@@ -123,7 +116,6 @@ llvm::Value *BytesMakeCalls::emit() {
                                            "view");
     }
     lowering_.refCounts().dropOperand(buffer);
-    lowering_.throwLowerer().emitThrowCheck();
     return made;
   }
   default:

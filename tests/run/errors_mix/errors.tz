@@ -1,43 +1,28 @@
-// The errors of the program: classes that extend Error and its kinds, with
-// fields of their own and a cause, and rules whose overriding methods throw.
-export class AppError extends Error {
-  constructor(message: string, public code: int, options?: { cause?: Error }) {
-    super(message, options)
-    this.name = "AppError"
-  }
-  describe(): string {
-    return `${this.name} ${this.code}: ${this.message}`
-  }
-}
+// The errors of the program: types of objects with a tag, unions of them, and
+// rules whose overriding methods give a Result.
+export type AppError =
+  | { code: "negative"; message: string; amount: decimal }
+  | { code: "limit"; message: string; limit: decimal }
+  | { code: "no_match"; message: string; text: string }
+  | { code: "bad_pattern"; message: string }
 
-export class ParseError extends AppError {
-  constructor(public line: int, message: string, cause?: Error) {
-    super(`line ${line}: ${message}`, 400, { cause })
-    this.name = "ParseError"
-  }
-  describe(): string {
-    return `${super.describe()} (line ${this.line})`
-  }
-}
+export type ParseError =
+  | { code: "unreadable"; message: string; line: int }
+  | { code: "bad_amount"; message: string; line: int; text: string }
 
-// A kind of its own of RangeError: its name stays "RangeError".
-export class LimitError extends RangeError {
-  constructor(public limit: decimal) {
-    super(`over the limit of ${limit}`)
-  }
-}
+export type ConfigError = { code: "bad_config"; message: string; cause: JsonError }
 
 export abstract class Rule {
-  abstract check(value: decimal): decimal
+  abstract check(value: decimal): Result<decimal, AppError>
   label(): string {
     return "rule"
   }
 }
 
 export class Positive extends Rule {
-  check(value: decimal): decimal {
-    if (value < 0) throw new AppError(`negative amount ${value}`, 422)
-    return value
+  check(value: decimal): Result<decimal, AppError> {
+    if (value < 0) return err({ code: "negative", message: `negative amount ${value}`, amount: value })
+    return ok(value)
   }
   label(): string {
     return "positive"
@@ -48,23 +33,42 @@ export class AtMost extends Rule {
   constructor(public max: decimal) {
     super()
   }
-  check(value: decimal): decimal {
-    if (value > this.max) throw new LimitError(this.max)
-    return value
+  check(value: decimal): Result<decimal, AppError> {
+    if (value > this.max)
+      return err({ code: "limit", message: `over the limit of ${this.max}`, limit: this.max })
+    return ok(value)
   }
 }
 
 // Through an interface: a regex made from its fields when the method runs.
 export interface Validator {
-  validate(text: string): string
+  validate(text: string): Result<string, AppError>
 }
 
 export class Pattern implements Validator {
   constructor(public source: string, public flags: string) {}
-  validate(text: string): string {
+  validate(text: string): Result<string, AppError> {
     const re = RegExp.parse(this.source, this.flags)
-    if (re.isErr()) throw new SyntaxError(re.error.message)
-    if (!re.value.test(text)) throw new AppError(`'${text}' does not match`, 422)
-    return text
+    if (re.isErr()) return err({ code: "bad_pattern", message: re.error.message })
+    if (!re.value.test(text)) return err({ code: "no_match", message: `'${text}' does not match`, text })
+    return ok(text)
+  }
+}
+
+// What an error says, told apart by its tag.
+export function describe(e: AppError | ParseError): string {
+  switch (e.code) {
+    case "negative":
+      return `negative ${e.amount}`
+    case "limit":
+      return `limit ${e.limit}: ${e.message}`
+    case "no_match":
+      return `no match for '${e.text}'`
+    case "bad_pattern":
+      return `bad pattern: ${e.message}`
+    case "unreadable":
+      return `line ${e.line}: ${e.message}`
+    case "bad_amount":
+      return `line ${e.line}: bad amount '${e.text}'`
   }
 }

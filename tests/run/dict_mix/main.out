@@ -1,8 +1,8 @@
 14 Map(2) { 'pen' => 4, 'ink' => 2 } { office: [ 'pen', 'ink' ], cheap: [ 'pen' ] }
 4 pen,ink
 2,0
-true no price for 'pad'
-RangeError: only 2 of 'ink'
+no price for 'pad'
+only 2 of 'ink'
 0 false Shop {
   counts: Map(2) { 'pen' => 4, 'ink' => 2 },
   tags: { office: [ 'pen', 'ink' ], cheap: [ 'pen' ] },
@@ -24,6 +24,7 @@ Ledger {
 }
 Map(3) { 'a' => 10, 'b' => 20, 'c' => 30 } Set(2) { 'b', 'c' } 60
 name too long: abcd
+1
 { a: 1, b: 2 } 3
 bad_field b expected int, got string
 bad_field  expected Record<string, int>, got array

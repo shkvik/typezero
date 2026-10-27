@@ -63,7 +63,8 @@ console.log(same(1, 1), same(1, "1"), same("1", "1"), same("1", 1))
 // never: every member ruled out.
 type Shape = { kind: "circle"; r: double } | { kind: "square"; side: double }
 function assertNever(x: never): never {
-  throw new Error(`unexpected ${JSON.stringify(x)}`)
+  console.log(`unexpected ${JSON.stringify(x)}`)
+  process.exit(1)
 }
 function area(s: Shape) {
   switch (s.kind) {

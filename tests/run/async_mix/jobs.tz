@@ -9,7 +9,7 @@ export function later<T>(value: T, ms: number): Promise<T> {
 }
 
 export interface Source {
-  read(key: string): Promise<string>
+  read(key: string): Promise<Result<string, string>>
 }
 
 export class Job {
@@ -47,12 +47,12 @@ export class Twice extends Upper {
 // Files in a directory, read by sync calls inside async code.
 export class Folder implements Source {
   constructor(public dir: string) {}
-  async read(key: string) {
+  async read(key: string): Promise<Result<string, string>> {
     await undefined
     const text = readFileSync(join(this.dir, key), "utf8")
     if (text.isErr())
-      throw text.error
-    return text.value
+      return err(`${text.error.code} ${text.error.syscall} ${text.error.path?.endsWith(key)}`)
+    return ok(text.value)
   }
   write(key: string, text: string) {
     must(writeFileSync(join(this.dir, key), text))
@@ -61,10 +61,10 @@ export class Folder implements Source {
 
 export class Memory implements Source {
   data = new Map<string, string>()
-  async read(key: string): Promise<string> {
+  async read(key: string): Promise<Result<string, string>> {
     const found = this.data.get(key)
-    if (found == undefined) throw new Error(`no ${key}`)
-    return later(found, 1)
+    if (found == undefined) return err(`no ${key}`)
+    return ok(await later(found, 1))
   }
 }
 
@@ -102,12 +102,8 @@ export function quick(n: int): int | Promise<int> {
   return n % 2 == 0 ? n * 10 : later(n * 100, 1)
 }
 
-export async function readText(source: Source, key: string): Promise<Result<string, string>> {
-  try {
-    return ok(await source.read(key))
-  } catch (e) {
-    return err(e instanceof SystemError ? `${e.code} ${e.syscall}` : e.message)
-  }
+export function readText(source: Source, key: string): Promise<Result<string, string>> {
+  return source.read(key)
 }
 
 function must<T, E>(r: Result<T, E>): T {

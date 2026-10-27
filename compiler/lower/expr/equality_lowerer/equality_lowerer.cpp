@@ -177,9 +177,7 @@ llvm::Value *EqualityLowerer::emitEquality(BinaryExpr *bin) {
   }
 
   Lowering::Operand a = lowering_.refCounts().emitOperand(lhs, AssignLowerer::cannotAssign(rhs));
-  lowering_.throwLowerer().holdOperand(a, lowering_.mayThrow().exprThrows(rhs));
   Lowering::Operand b = lowering_.refCounts().emitOperand(rhs, true);
-  lowering_.throwLowerer().takeOperand(a);
   llvm::Value *equal = emitValuesEqual(a.value, b.value, lhs->type);
   lowering_.refCounts().dropOperand(a);
   lowering_.refCounts().dropOperand(b);

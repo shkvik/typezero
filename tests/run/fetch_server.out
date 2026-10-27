@@ -1,6 +1,6 @@
 200 true OK text/plain;charset=UTF-8 hello tz
 201 Ok { value: { id: 1, user: { name: 'Ann' }, method: 'POST' } }
-500 Internal Server Error
+500 boom
 404 Nope false not found
 200 one two 
 11 bytes

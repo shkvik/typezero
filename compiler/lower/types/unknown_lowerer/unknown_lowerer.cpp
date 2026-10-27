@@ -279,13 +279,10 @@ llvm::Value *UnknownLowerer::emitTupleJoin(CallExpr *call) {
   bool hasSeparator = !call->args.empty();
   Lowering::Operand object = lowering_.refCounts().emitOperand(
       member->object, !hasSeparator || AssignLowerer::cannotAssign(call->args[0]));
-  lowering_.throwLowerer().holdOperand(object, hasSeparator &&
-                                                   lowering_.mayThrow().exprThrows(call->args[0]));
   Lowering::Operand separator =
       hasSeparator
           ? lowering_.refCounts().emitOperand(call->args[0], true)
           : Lowering::Operand{lowering_.stringLowerer().stringLiteral(u","), false, Type::string()};
-  lowering_.throwLowerer().takeOperand(object);
   std::vector<Lowering::Operand> parts;
   for (size_t i = 0; i < tuple->fields().size(); ++i) {
     if (i > 0) {

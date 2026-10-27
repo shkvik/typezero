@@ -124,7 +124,6 @@ llvm::Value *JsonLowerer::emitJsonMember(MemberExpr *member) {
        lowering_.stringLowerer().stringMeta(key)},
       member->name);
   lowering_.refCounts().dropOperand(object);
-  lowering_.emitThrowCheckIf(jsonReadMayThrow(member->object));
 
   return result;
 }
@@ -133,11 +132,9 @@ llvm::Value *JsonLowerer::emitJsonIndex(IndexExpr *index) {
   llvm::Type *ptr = lowering_.builder_.getPtrTy();
   Lowering::Operand object =
       lowering_.refCounts().emitOperand(index->object, AssignLowerer::cannotAssign(index->index));
-  lowering_.throwLowerer().holdOperand(object, lowering_.mayThrow().exprThrows(index->index));
   llvm::Value *result;
   if (index->index->type->isString()) {
     Lowering::Operand key = lowering_.refCounts().emitOperand(index->index, true);
-    lowering_.throwLowerer().takeOperand(object);
     result = lowering_.builder_.CreateCall(
         jsonFunction("tz_json_get", ptr, {ptr, ptr, lowering_.builder_.getInt64Ty()}),
         {object.value, lowering_.stringLowerer().stringObj(key.value),
@@ -145,13 +142,11 @@ llvm::Value *JsonLowerer::emitJsonIndex(IndexExpr *index) {
     lowering_.refCounts().dropOperand(key);
   } else {
     llvm::Value *position = lowering_.exprLowerer().emitExpr(index->index);
-    lowering_.throwLowerer().takeOperand(object);
     result = lowering_.builder_.CreateCall(
         jsonFunction("tz_json_get_index", ptr, {ptr, lowering_.builder_.getDoubleTy()}),
         {object.value, position});
   }
   lowering_.refCounts().dropOperand(object);
-  lowering_.emitThrowCheckIf(jsonReadMayThrow(index->object));
 
   return result;
 }
@@ -164,9 +159,6 @@ llvm::Value *JsonLowerer::emitJsonAssign(AssignExpr *assign, bool needResult) {
   bool later = AssignLowerer::cannotAssign(assign->value) &&
                (!index || AssignLowerer::cannotAssign(index->index));
   Lowering::Operand object = lowering_.refCounts().emitOperand(objectExpr, later);
-  lowering_.throwLowerer().holdOperand(object,
-                                       (index && lowering_.mayThrow().exprThrows(index->index)) ||
-                                           lowering_.mayThrow().exprThrows(assign->value));
   Lowering::Operand key{nullptr, false, Type::string()};
   llvm::Value *position = nullptr;
   if (member) {
@@ -177,10 +169,7 @@ llvm::Value *JsonLowerer::emitJsonAssign(AssignExpr *assign, bool needResult) {
   } else {
     position = lowering_.exprLowerer().emitExpr(index->index);
   }
-  lowering_.throwLowerer().holdOperand(key, lowering_.mayThrow().exprThrows(assign->value));
   llvm::Value *value = lowering_.exprLowerer().emitExpr(assign->value);
-  lowering_.throwLowerer().takeOperand(object);
-  lowering_.throwLowerer().takeOperand(key);
   if (needResult) {
     lowering_.refCounts().retainValue(value, assign->type);
   }
@@ -196,11 +185,6 @@ llvm::Value *JsonLowerer::emitJsonAssign(AssignExpr *assign, bool needResult) {
   }
   lowering_.refCounts().dropOperand(key);
   lowering_.refCounts().dropOperand(object);
-  lowering_.throwLowerer().emitThrowCheckWith([&] {
-    if (needResult) {
-      lowering_.refCounts().releaseValue(value, assign->type);
-    }
-  });
 
   return needResult ? value : nullptr;
 }
@@ -439,7 +423,6 @@ llvm::Value *JsonLowerer::emitJsonObjectCall(CallExpr *call) {
         "entries");
   }
   lowering_.refCounts().dropOperand(object);
-  lowering_.emitThrowCheckIf(!call->forIn);
 
   return result;
 }
@@ -511,8 +494,6 @@ llvm::Value *JsonLowerer::emitJsonCall(CallExpr *call) {
     bool hasSpace = call->args.size() == 2;
     Lowering::Operand operand = lowering_.refCounts().emitOperand(
         value, !hasSpace || AssignLowerer::cannotAssign(call->args[1]));
-    lowering_.throwLowerer().holdOperand(
-        operand, hasSpace && lowering_.mayThrow().exprThrows(call->args[1]));
     Lowering::Operand space{nullptr, false, Type::string()};
     llvm::Value *spaceKind = lowering_.builder_.getInt32(0);
     llvm::Value *spaceNumber = llvm::ConstantFP::get(lowering_.builder_.getDoubleTy(), 0.0);
@@ -526,7 +507,6 @@ llvm::Value *JsonLowerer::emitJsonCall(CallExpr *call) {
       spaceKind = lowering_.builder_.getInt32(1);
       spaceNumber = lowering_.exprLowerer().emitExpr(call->args[1]);
     }
-    lowering_.throwLowerer().takeOperand(operand);
     llvm::Value *out = lowering_.functionFrame().createStackSlot(lowering_.strTy_, "json.text");
     llvm::Value *defined = lowering_.builder_.CreateCall(
         jsonFunction("tz_json_stringify", i32,

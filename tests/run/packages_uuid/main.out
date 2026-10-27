@@ -51,6 +51,7 @@ true 6 true
 true 7 true
 true true
 TypeError Invalid UUID
+ffffffff-ffff-ffff-ffff-ffffffffffff
 TypeError Invalid UUID
 Error Random bytes length must be >= 16
 RangeError UUID byte range 0:15 is out of buffer bounds

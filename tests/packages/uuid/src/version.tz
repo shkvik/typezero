@@ -1,11 +1,12 @@
+import { UuidError } from './types.tz';
 import { validate } from './validate.tz';
 
-function version(uuid: string) {
+function version(uuid: string): Result<number, UuidError> {
   if (!validate(uuid)) {
-    throw TypeError('Invalid UUID');
+    return err({ name: 'TypeError', message: 'Invalid UUID' });
   }
 
-  return parseInt(uuid.slice(14, 15), 16);
+  return ok(parseInt(uuid.slice(14, 15), 16));
 }
 
 export { version };

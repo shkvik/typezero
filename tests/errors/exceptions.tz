@@ -1,44 +1,35 @@
-// Only an Error can be thrown (docs/errors.md), and a caught value is always
-// one.
-function f(): int {
-  // expect-error: only an Error can be thrown, found 'string'; throw one with the text as its message, e.g. 'throw new Error("no file")'
-  throw "no file"
+// There are no exceptions in tz (docs/errors.md, section 11): an error is a
+// value that a function returns in a Result, so throw, try, catch, finally,
+// the class Error and its kinds, and throw() of a generator are gone.
+function find(id: int): Result<string, string> {
+  // expect-error: there is no 'throw' in tz: an error is a value; return it, 'return err(...)', and give the function a 'Result'
+  if (id < 0) throw "bad id"
+  return ok("x")
 }
-const code = 42
-// expect-error: only an Error can be thrown, found 'int'
-throw code
-const text = "x"
-// expect-error: e.g. 'throw new Error(text)'
-throw text
-let maybe: Error | undefined
-// expect-error: the error may be undefined; check it before throwing it
-throw maybe
-
+// expect-error: there is no 'try' in tz: an error is a value; a function that can fail gives a 'Result', checked with 'if'
 try {
-  f()
-  // expect-error: the caught value is always an Error; leave out the type, 'catch (e)'
-} catch (e: string) {
+  console.log(find(1))
+} catch (e) {
   console.log(e)
 }
+// expect-error: there is no 'try' in tz
 try {
-  f()
-} catch (e) {
-  // expect-error: 'stack' cannot be assigned: it is made from the places the error passed
-  e.stack = "none"
-  // expect-error: property 'code' does not exist on type 'Error'
-  console.log(e.code)
-  // expect-error: '#frames' is private in class 'Error'
-  console.log(e.#frames)
+  console.log(find(2))
+} finally {
+  console.log("done")
 }
 
-// Error takes a message and options with a cause, which is an Error.
-// expect-error: type 'int' is not assignable to type 'string | undefined'
-const a = new Error(5)
-// expect-error: field 'cause'
-const b = new Error("x", { cause: "y" })
+// expect-error: cannot find class 'Error'
+const e = new Error("x")
+// expect-error: cannot find
+const isError = e instanceof TypeError
+// expect-error: there is no 'Error' in tz: an error is a value; make 'NotFound' a type of object with a tag, e.g. 'type NotFound = { code: "NotFound"; message: string }'
+class NotFound extends Error {}
+// expect-error: there is no 'RangeError' in tz
+class TooBig extends RangeError {}
 
-// The kinds are Error too, and instanceof tells them apart.
-const t: TypeError = new RangeError("r")
-// expect-error: 'instanceof' tests an object, found 'string'
-const s = "x" instanceof TypeError
-
+function* numbers() {
+  yield 1
+}
+// expect-error: an iterator has no 'throw()' in tz: an error is a value, not something thrown into a generator
+numbers().throw(5)

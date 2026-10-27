@@ -63,6 +63,3 @@ const part = "prefix that is long enough: a%20b%20c".slice(28)
 console.log(component(part), encodeURIComponent(part))
 console.log(["a b", "c/d", "é"].map(encodeURIComponent), ["a%20b"].map(component))
 
-// URIError is an Error like the others.
-const made = new URIError("made")
-console.log(made.name, made.message, made instanceof Error, `${made}`)

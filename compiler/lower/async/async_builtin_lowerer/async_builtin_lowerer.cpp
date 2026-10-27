@@ -36,7 +36,7 @@ llvm::Value *AsyncBuiltinLowerer::emitAsyncBuiltin(CallExpr *call) {
     return lowering_.reactionLowerer().emitPromiseReaction(call);
   case Builtin::SetTimeout:
   case Builtin::SetInterval: {
-    std::vector<llvm::Value *> args = lowering_.throwLowerer().emitHeldValues(call->args);
+    std::vector<llvm::Value *> args = lowering_.exprLowerer().emitExprs(call->args);
     llvm::Value *delay = args.size() > 1 ? args[1] : llvm::ConstantFP::get(f64, 1.0);
     auto *fn = cast<llvm::Function>(lowering_.asyncLowerer()
                                         .asyncFunction("tz_timer_new", ptr, {ptr, ptr, f64, i32})

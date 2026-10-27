@@ -65,7 +65,7 @@ llvm::Value *CryptoLowerer::emitCryptoCall(CallExpr *call) {
       evaluated.push_back(exprs[i]);
     }
   }
-  std::vector<llvm::Value *> owned = lowering_.throwLowerer().emitHeldValues(evaluated);
+  std::vector<llvm::Value *> owned = lowering_.exprLowerer().emitExprs(evaluated);
   std::vector<llvm::Value *> values(exprs.size(), nullptr);
   for (size_t i = 0, k = 0; i < exprs.size(); ++i) {
     if (k < evaluated.size() && evaluated[k] == exprs[i]) {
@@ -186,10 +186,7 @@ llvm::Value *CryptoLowerer::emitCryptoCall(CallExpr *call) {
     }
   }
   if (self && !values[0]) {
-    lowering_.throwLowerer().emitThrowCheckWith(
-        [&] { lowering_.refCounts().releaseValue(self, exprs[0]->type); });
   } else {
-    lowering_.throwLowerer().emitThrowCheck();
   }
 
   auto plain = [&]() -> llvm::Value * {
@@ -250,11 +247,11 @@ llvm::Value *CryptoLowerer::emitCryptoKeyPair(CallExpr *call) {
              *i64 = lowering_.builder_.getInt64Ty();
   llvm::Value *null = llvm::ConstantPointerNull::get(lowering_.builder_.getPtrTy());
 
-  Lowering::Held passphrases[2] = {{nullptr, nullptr, nullptr}, {nullptr, nullptr, nullptr}};
+  llvm::Value *passphrases[2] = {{nullptr, nullptr, nullptr}, {nullptr, nullptr, nullptr}};
   for (int k = 0; k < 2; ++k) {
     if (Expr *p = call->args[1 + 5 * k + 4]; !p->type->isUndefined()) {
       passphrases[k] =
-          lowering_.throwLowerer().hold(lowering_.exprLowerer().emitExpr(p), p->type, true);
+          lowering_.exprLowerer().emitExpr(p);
     }
   }
   const Type *resultType = call->type;
@@ -268,7 +265,7 @@ llvm::Value *CryptoLowerer::emitCryptoKeyPair(CallExpr *call) {
     llvm::BasicBlock *good = lowering_.functionFrame().newBlock("keypair.good");
     lowering_.builder_.CreateCondBr(lowering_.builder_.CreateIsNotNull(failure), bad, good);
     lowering_.functionFrame().switchTo(bad);
-    for (Lowering::Held &held : passphrases) {
+    for (llvm::Value *&held : passphrases) {
       if (held.slot) {
         llvm::Type *lowered = lowering_.moduleBuilder().lower(held.type);
         llvm::Value *value = lowering_.builder_.CreateLoad(lowered, held.slot);
@@ -303,7 +300,7 @@ llvm::Value *CryptoLowerer::emitCryptoKeyPair(CallExpr *call) {
     llvm::Value *passType = null, *passValue = null;
     if (passphrases[k].type) {
       passType = lowering_.typeDescriptors().typeDescriptor(passphrases[k].type);
-      passValue = lowering_.functionFrame().spill(lowering_.throwLowerer().take(passphrases[k]),
+      passValue = lowering_.functionFrame().spill(passphrases[k],
                                                   "passphrase");
     }
     std::vector<llvm::Value *> rest = {has,
@@ -351,9 +348,9 @@ llvm::Value *CryptoLowerer::emitCryptoKeyPair(CallExpr *call) {
       }
     });
   }
-  for (Lowering::Held &held : passphrases) {
+  for (llvm::Value *&held : passphrases) {
     if (held.slot) {
-      lowering_.refCounts().releaseValue(lowering_.throwLowerer().take(held), held.type);
+      lowering_.refCounts().releaseValue(held, held.type);
     }
   }
   useErrors(nullptr);

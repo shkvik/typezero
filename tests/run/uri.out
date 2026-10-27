@@ -67,4 +67,3 @@ reserved then bad bad_uri: URI malformed
 901 true
 a b c a%2520b%2520c
 [ 'a%20b', 'c%2Fd', '%C3%A9' ] [ 'a b' ]
-URIError made true URIError: made

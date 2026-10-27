@@ -251,7 +251,7 @@ llvm::Value *ChildLowerer::emitChildBuiltin(CallExpr *call) {
   fields.push_back(i32);
   llvm::StructType *requestType = llvm::StructType::get(lowering_.ctx_, fields);
 
-  std::vector<llvm::Value *> values = lowering_.throwLowerer().emitHeldValues(call->args);
+  std::vector<llvm::Value *> values = lowering_.exprLowerer().emitExprs(call->args);
   llvm::AllocaInst *request =
       lowering_.functionFrame().createStackSlot(requestType, "spawn.request");
   lowering_.builder_.CreateStore(llvm::Constant::getNullValue(requestType), request);

@@ -1,6 +1,6 @@
 import { rng } from './rng.tz';
 import { unsafeStringify } from './stringify.tz';
-import { UUIDTypes, Version7Options } from './types.tz';
+import { UUIDTypes, UuidError, Version7Options } from './types.tz';
 
 type V7State = {
   msecs?: number; // time, milliseconds
@@ -13,18 +13,20 @@ function v7<TBuf extends Uint8Array = never>(
   options?: Version7Options,
   buf?: TBuf,
   offset?: number,
-): UUIDTypes<TBuf> {
+): Result<UUIDTypes<TBuf>, UuidError> {
   let bytes: Uint8Array;
 
   if (options) {
     // With options: Make UUID independent of internal state
-    bytes = v7Bytes(
+    const made = v7Bytes(
       options.random ?? options.rng?.() ?? rng(),
       options.msecs,
       options.seq,
       buf,
       offset,
     );
+    if (made.isErr()) return err(made.error);
+    bytes = made.value;
   } else {
     // No options: Use internal state
     const now = Date.now();
@@ -32,10 +34,12 @@ function v7<TBuf extends Uint8Array = never>(
 
     updateV7State(_state, now, rnds);
 
-    bytes = v7Bytes(rnds, _state.msecs, _state.seq, buf, offset);
+    const made = v7Bytes(rnds, _state.msecs, _state.seq, buf, offset);
+    if (made.isErr()) return err(made.error);
+    bytes = made.value;
   }
 
-  return buf ?? unsafeStringify(bytes);
+  return ok(buf ?? unsafeStringify(bytes));
 }
 
 // (Private!)  Do not use.  This method is only exported for testing purposes
@@ -71,16 +75,17 @@ function v7Bytes(
   seq?: number,
   buf?: Uint8Array,
   offset: number = 0,
-) {
+): Result<Uint8Array, UuidError> {
   if (rnds.length < 16) {
-    throw new Error('Random bytes length must be >= 16');
+    return err({ name: 'Error', message: 'Random bytes length must be >= 16' });
   }
 
   if (buf) {
     if (offset < 0 || offset + 16 > buf.length) {
-      throw new RangeError(
-        `UUID byte range ${offset}:${offset + 15} is out of buffer bounds`,
-      );
+      return err({
+        name: 'RangeError',
+        message: `UUID byte range ${offset}:${offset + 15} is out of buffer bounds`,
+      });
     }
   }
 
@@ -123,12 +128,12 @@ function v7Bytes(
   b[14] = rnds[14];
   b[15] = rnds[15];
 
-  if (!buf) return b;
+  if (!buf) return ok(b);
   // tz: the offset is checked again where the bytes go in, as an int, so that
-  // the compiler sees them fit; the check above has thrown already otherwise.
+  // the compiler sees them fit; the check above has returned already otherwise.
   const at = offset | 0;
   if (at >= 0 && at <= buf.length - 16) buf.set(b, at);
-  return buf;
+  return ok(buf);
 }
 
 function v7Sequence(rnds: Uint8Array) {

@@ -61,7 +61,6 @@ llvm::Value *NumberAccessCalls::emit() {
       offset = call->args.size() > at ? lowering_.exprLowerer().emitExpr(call->args[at])
                                       : lowering_.builder_.getInt64(0);
     }
-    lowering_.throwLowerer().takeOperand(self);
     if (call->mayBeOutOfRange) {
       llvm::Value *length = lowering_.bytesLowerer().bytesLength(self.value);
       llvm::Value *ok = lowering_.builder_.CreateAnd(
@@ -158,7 +157,6 @@ llvm::Value *NumberAccessCalls::emit() {
     for (size_t i = 2; i < call->args.size(); ++i) {
       values.push_back(lowering_.exprLowerer().emitExpr(call->args[i]));
     }
-    lowering_.throwLowerer().takeOperand(self);
     uint32_t flags = uint32_t(cast<BoolLitExpr>(call->args[0])->value) |
                      uint32_t(cast<BoolLitExpr>(call->args[1])->value) << 1;
     llvm::Value *result;

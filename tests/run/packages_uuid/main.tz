@@ -1,9 +1,16 @@
 // A package from a directory: uuid, adapted for tz (tests/packages/uuid), with what is
 // deterministic: v3 and v5 of fixed names, v1, v4, v6 and v7 of fixed options (time, random
-// bytes), parse and stringify, validate and version, the conversions and the errors.
+// bytes), parse and stringify, validate and version, the conversions and the errors, which
+// come in a Result where uuid throws them.
 import {
   v1, v3, v4, v5, v6, v7, NIL, MAX, DNS, URL, parse, stringify, validate, version, v1ToV6, v6ToV1,
+  UuidError,
 } from "uuid"
+
+// The value, or the error as uuid would print it.
+function shown<T>(r: Result<T, UuidError>): T | string {
+  return r.isOk() ? r.value : `${r.error.name} ${r.error.message}`
+}
 
 const random = new Uint8Array([
   0x10, 0x91, 0x56, 0xbe, 0xc4, 0xfb, 0xc1, 0xea, 0x71, 0xb4, 0xef, 0xe1, 0x67, 0x1c, 0x58, 0x36,
@@ -11,52 +18,50 @@ const random = new Uint8Array([
 console.log(NIL, MAX, DNS, URL)
 
 // Names in namespaces: the same every time, as RFC 9562 has them.
-console.log(v3("hello.example.com", DNS), v3("http://example.com/hello", URL))
-console.log(v5("hello.example.com", DNS), v5("http://example.com/hello", URL))
-console.log(v5("hello", "1b671a64-40d5-491e-99b0-da01ff1f3341"), v3("", DNS), v5("Привет", URL))
+console.log(shown(v3("hello.example.com", DNS)), shown(v3("http://example.com/hello", URL)))
+console.log(shown(v5("hello.example.com", DNS)), shown(v5("http://example.com/hello", URL)))
+console.log(shown(v5("hello", "1b671a64-40d5-491e-99b0-da01ff1f3341")), shown(v3("", DNS)), shown(v5("Привет", URL)))
 const buf = new Uint8Array(20)
-console.log(v5(new Uint8Array([1, 2, 3]), DNS, buf, 2), version(stringify(buf, 2)))
+console.log(shown(v5(new Uint8Array([1, 2, 3]), DNS, buf, 2)), shown(version(shown(stringify(buf, 2)))))
 
 // Time and randomness given: v1, v4, v6, v7 are fixed.
 const time = { msecs: 1321651533573, nsecs: 5432, clockseq: 0x385c, node: new Uint8Array([0x61, 0xcd, 0x3c, 0xbb, 0x32, 0x10]) }
-console.log(v1(time), v1({ msecs: 0, random }), v1({ random, msecs: 1700000000000, nsecs: 9999 }))
-console.log(v4({ random: random.slice() }), v4({ rng: () => random.slice() }))
-console.log(v6(time), v6({ msecs: 1700000000000, random }))
-console.log(v7({ msecs: 1700000000000, seq: 0x12345678, random }), v7({ msecs: 0, random }), v7({ msecs: 0xffffffffffff, seq: 0xffffffff, random }))
+console.log(shown(v1(time)), shown(v1({ msecs: 0, random })), shown(v1({ random, msecs: 1700000000000, nsecs: 9999 })))
+console.log(shown(v4({ random: random.slice() })), shown(v4({ rng: () => random.slice() })))
+console.log(shown(v6(time)), shown(v6({ msecs: 1700000000000, random })))
+console.log(shown(v7({ msecs: 1700000000000, seq: 0x12345678, random })), shown(v7({ msecs: 0, random })), shown(v7({ msecs: 0xffffffffffff, seq: 0xffffffff, random })))
 const out = new Uint8Array(16)
-console.log(v7({ msecs: 1, random }, out), v4({ random: random.slice() }, out))
+console.log(shown(v7({ msecs: 1, random }, out)), shown(v4({ random: random.slice() }, out)))
 
 // parse and stringify, validate and version.
 const id = "6ec0bd7f-11c0-43da-975e-2a8ad9ebae0b"
-const bytes = parse(id)
-console.log(bytes, stringify(bytes) == id, validate(id), validate("6ec0bd7f-11c0-43da-975e-2a8ad9ebae0"), validate(NIL), validate(MAX))
+const bytes = shown(parse(id))
+console.log(bytes, typeof bytes != "string" && shown(stringify(bytes)) == id, validate(id), validate("6ec0bd7f-11c0-43da-975e-2a8ad9ebae0"), validate(NIL), validate(MAX))
 console.log(validate("6EC0BD7F-11C0-43DA-975E-2A8AD9EBAE0B"), validate("6ec0bd7f-11c0-03da-975e-2a8ad9ebae0b"), validate(42))
-for (const u of [id, v1(time), v3("x", DNS), v5("x", URL), v6(time), v7({ msecs: 5, random })]) console.log(version(u))
+for (const u of [id, shown(v1(time)), shown(v3("x", DNS)), shown(v5("x", URL)), shown(v6(time)), shown(v7({ msecs: 5, random }))])
+  console.log(typeof u == "string" ? shown(version(u)) : "?")
 
 // v1 and v6 into each other.
-const one = v1(time)
-const six = v1ToV6(one)
-console.log(six, v6ToV1(six), v6ToV1(six) == one)
-console.log(v1ToV6(parse(one)), v6ToV1(parse(v6(time))))
+const one = shown(v1(time))
+const six = shown(v1ToV6(one))
+console.log(six, shown(v6ToV1(six)), shown(v6ToV1(six)) == one)
+const v6Text = shown(v6(time))
+console.log(shown(v1ToV6(shown(parse(one)))), typeof v6Text == "string" ? shown(v6ToV1(shown(parse(v6Text)))) : "?")
 
 // The defaults: the time of now and random bytes.
-const fresh = [v1(), v4(), v6(), v7()]
-for (const u of fresh) console.log(validate(u), version(u), stringify(parse(u)) == u)
-const a = v7(), b = v7()
-console.log(a < b, v1() != v1())
-
-// Errors, as uuid throws them.
-function attempt(run: () => void) {
-  try {
-    run()
-  } catch (e) {
-    console.log(e.name, e.message)
-  }
+const fresh = [shown(v1()), shown(v4()), shown(v6()), shown(v7())]
+for (const u of fresh) {
+  const parsed = typeof u == "string" ? parse(u) : err<Uint8Array, UuidError>({ name: "Error", message: "bytes" })
+  if (typeof u == "string" && parsed.isOk()) console.log(validate(u), shown(version(u)), shown(stringify(parsed.value)) == u)
 }
-attempt(() => { parse("not a uuid") })
-attempt(() => { stringify(new Uint8Array(16).fill(0xff)) })
-attempt(() => { version("x") })
-attempt(() => { v4({ random: new Uint8Array(8) }) })
-attempt(() => { v4({}, new Uint8Array(8), 0) })
-attempt(() => { v5("x", DNS, new Uint8Array(16), 4) })
-attempt(() => { v3("x", new Uint8Array(4)) })
+const a = shown(v7()), b = shown(v7())
+console.log(typeof a == "string" && typeof b == "string" && a < b, shown(v1()) != shown(v1()))
+
+// Errors, where uuid throws them.
+console.log(shown(parse("not a uuid")))
+console.log(shown(stringify(new Uint8Array(16).fill(0xff))))
+console.log(shown(version("x")))
+console.log(shown(v4({ random: new Uint8Array(8) })))
+console.log(shown(v4({}, new Uint8Array(8), 0)))
+console.log(shown(v5("x", DNS, new Uint8Array(16), 4)))
+console.log(shown(v3("x", new Uint8Array(4))))

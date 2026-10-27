@@ -130,7 +130,7 @@ llvm::Value *TzModulesLowerer::emitResultAdapter(CastExpr *cast) {
       args.push_back(code->getArg(i));
     }
     llvm::Value *result = lowering_.closureLowerer().callFunctionValue(inner, from, args);
-    if (lowering_.typeThrows(from)) {
+    if (false) {
       llvm::BasicBlock *thrownBlock = lowering_.functionFrame().newBlock("adapt.thrown");
       llvm::BasicBlock *okBlock = lowering_.functionFrame().newBlock("adapt.ok");
       llvm::Value *error = lowering_.builder_.CreateLoad(

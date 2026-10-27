@@ -750,6 +750,16 @@ void FilePort::manual() {
       }
       continue;
     }
+    if (isName(i, "throw") && !inList) {
+      note(i, "'throw' is not supported (docs/errors.md): return the error, 'return err(...)', "
+              "and give the function a 'Result'");
+      continue;
+    }
+    if (isName(i, "try") && is(i + 1, Tok::LBrace)) {
+      note(i, "'try' is not supported (docs/errors.md): a function that can fail gives a "
+              "'Result', checked with 'if'");
+      continue;
+    }
     if (t.is(Tok::KwNew) && isName(i + 1, "Function") && is(i + 2, Tok::LParen)) {
       note(i, "code made at run time ('new Function', 'eval') is not supported");
       continue;

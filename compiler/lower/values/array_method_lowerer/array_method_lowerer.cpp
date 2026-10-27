@@ -40,12 +40,8 @@ llvm::Value *ArrayMethodLowerer::emitArrayMethod(CallExpr *call) {
       member->object, llvm::all_of(call->args, AssignLowerer::cannotAssign));
 
   auto ownedArgs = [&](size_t from) {
-    lowering_.throwLowerer().holdOperand(array, llvm::any_of(call->args, [&](Expr *arg) {
-                                           return lowering_.mayThrow().exprThrows(arg);
-                                         }));
-    std::vector<llvm::Value *> values = lowering_.throwLowerer().emitHeldValues(
+    std::vector<llvm::Value *> values = lowering_.exprLowerer().emitExprs(
         llvm::ArrayRef<Expr *>(call->args).drop_front(from));
-    lowering_.throwLowerer().takeOperand(array);
 
     return values;
   };

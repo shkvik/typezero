@@ -70,7 +70,6 @@ llvm::Value *TextCodecCalls::emit() {
     Lowering::Operand self = receiver(0);
     if (call->args.empty()) {
       llvm::Value *empty = lowering_.stringLowerer().stringLiteral(u"");
-      lowering_.throwLowerer().takeOperand(self);
       lowering_.refCounts().dropOperand(self);
       return lowering_.builder_.CreateCall(
           fn("tz_text_encode", ptr, {ptr, i64}),
@@ -78,7 +77,6 @@ llvm::Value *TextCodecCalls::emit() {
           "bytes");
     }
     Lowering::Operand text = lowering_.refCounts().emitOperand(call->args[0], true);
-    lowering_.throwLowerer().takeOperand(self);
     llvm::Value *made =
         lowering_.builder_.CreateCall(fn("tz_text_encode", ptr, {ptr, i64}),
                                       {lowering_.stringLowerer().stringObj(text.value),
@@ -92,11 +90,7 @@ llvm::Value *TextCodecCalls::emit() {
     Lowering::Operand self = receiver(0);
     Lowering::Operand text = lowering_.refCounts().emitOperand(
         call->args[0], AssignLowerer::cannotAssign(call->args[1]));
-    lowering_.throwLowerer().holdOperand(text,
-                                         throws || lowering_.mayThrow().exprThrows(call->args[1]));
     Lowering::Operand target = lowering_.refCounts().emitOperand(call->args[1], true);
-    lowering_.throwLowerer().takeOperand(self);
-    lowering_.throwLowerer().takeOperand(text);
     auto *pairTy = llvm::ArrayType::get(i32, 2);
     llvm::AllocaInst *out = lowering_.functionFrame().createStackSlot(pairTy, "encoded");
     lowering_.builder_.CreateCall(fn("tz_text_encode_into", voidTy, {ptr, i64, ptr, ptr}),
@@ -125,8 +119,6 @@ llvm::Value *TextCodecCalls::emit() {
     if (!resolved) {
       label = lowering_.refCounts().emitOperand(
           call->args[1], call->args.size() < 3 || AssignLowerer::cannotAssign(call->args[2]));
-      lowering_.throwLowerer().holdOperand(
-          label, call->args.size() > 2 && lowering_.mayThrow().exprThrows(call->args[2]));
     }
     llvm::Value *fatal = lowering_.builder_.getInt32(0), *ignore = lowering_.builder_.getInt32(0);
     if (call->args.size() > 2) {
@@ -185,7 +177,6 @@ llvm::Value *TextCodecCalls::emit() {
                                       llvm::ConstantArray::get(type, items), name);
     };
     llvm::Value *all = list(tables, "tz.encodings"), *allCjk = list(cjk, "tz.encodings.cjk");
-    lowering_.throwLowerer().takeOperand(label);
     llvm::Value *maker = parsing ? static_cast<llvm::Value *>(lowering_.resultLowerer().failureMaker(
                                        call->type->errType()))
                                  : llvm::ConstantPointerNull::get(lowering_.builder_.getPtrTy());
@@ -226,7 +217,6 @@ llvm::Value *TextCodecCalls::emit() {
       stream = lowering_.builder_.CreateZExt(given, i32);
       lowering_.refCounts().dropOperand(options);
     }
-    lowering_.throwLowerer().takeOperand(self);
     bool checked = call->type->isResult();
     llvm::Value *make = llvm::ConstantPointerNull::get(ptr);
     if (checked) {
@@ -244,7 +234,6 @@ llvm::Value *TextCodecCalls::emit() {
   }
   case Builtin::TextDecoderInfo: {
     Lowering::Operand self = receiver(0);
-    lowering_.throwLowerer().takeOperand(self);
     int64_t which = constantOf(call->args[0]);
     llvm::Value *result;
     if (which == 0) {

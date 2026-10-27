@@ -3,7 +3,7 @@
 // day and the days it was closed in a Set.
 export interface Priced {
   prices: Record<string, decimal>
-  price(name: string): decimal
+  price(name: string): Result<decimal, string>
 }
 
 export class Inventory {
@@ -13,26 +13,30 @@ export class Inventory {
     this.counts.set(name, (this.counts.get(name) ?? 0) + n)
     for (const t of tags) (this.tags[t] ??= []).push(name)
   }
-  take(name: string, n: int): int {
+  take(name: string, n: int): Result<int, string> {
     const have = this.counts.get(name) ?? 0
-    if (n > have) throw new RangeError(`only ${have} of '${name}'`)
+    if (n > have) return err(`only ${have} of '${name}'`)
     if (have == n) this.counts.delete(name)
     else this.counts.set(name, have - n)
-    return have - n
+    return ok(have - n)
   }
 }
 
 export class Shop extends Inventory implements Priced {
   prices: Record<string, decimal> = {}
-  price(name: string): decimal {
+  price(name: string): Result<decimal, string> {
     const p = this.prices[name]
-    if (p == undefined) throw new TypeError(`no price for '${name}'`)
-    return p
+    if (p == undefined) return err(`no price for '${name}'`)
+    return ok(p)
   }
-  value(): decimal {
+  value(): Result<decimal, string> {
     let total: decimal = 0
-    for (const [name, n] of this.counts) total += this.price(name) * n
-    return total
+    for (const [name, n] of this.counts) {
+      const p = this.price(name)
+      if (p.isErr()) return err(p.error)
+      total += p.value * n
+    }
+    return ok(total)
   }
 }
 

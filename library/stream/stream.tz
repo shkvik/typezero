@@ -249,7 +249,7 @@ export class Stream extends EventEmitterBase {
     const defaultEncoding = options.defaultEncoding
     if (defaultEncoding != undefined) state.defaultEncoding = normalizeEncoding(defaultEncoding)
     const encoding = options.encoding
-    if (encoding != undefined && encoding != "") {
+    if (encoding != undefined) {
       state.decoder = new StringDecoder(encoding)
       state.bits |= kDecoder
       state.encoding = state.decoder.encoding

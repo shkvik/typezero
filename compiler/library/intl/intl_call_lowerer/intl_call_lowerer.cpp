@@ -147,8 +147,6 @@ llvm::Value *IntlCallLowerer::emitIntlCall(CallExpr *call) {
     auto rest = llvm::ArrayRef<Expr *>(call->args).drop_front(std::min(from, call->args.size()));
     Lowering::Operand self = lowering_.refCounts().emitOperand(
         member->object, llvm::all_of(rest, AssignLowerer::cannotAssign));
-    lowering_.throwLowerer().holdOperand(
-        self, llvm::any_of(rest, [&](Expr *arg) { return lowering_.mayThrow().exprThrows(arg); }));
 
     return self;
   };
@@ -175,7 +173,6 @@ llvm::Value *IntlCallLowerer::emitIntlCall(CallExpr *call) {
         lowering_.processLowerer().processFunction("tz_intl_new", ptr, {i32, ptr}),
         {lowering_.builder_.getInt32(uint32_t(kind)), options}, "intl");
     dropAll(held);
-    lowering_.emitThrowCheckIf(throws);
     return object;
   }
   case Builtin::IntlSupportedLocales:
@@ -184,11 +181,10 @@ llvm::Value *IntlCallLowerer::emitIntlCall(CallExpr *call) {
     llvm::Value *locales = lowering_.intlLowerer().emitLocaleArray(at(supported ? 1 : 0));
     llvm::Value *result;
     if (supported) {
-      Lowering::Held heldLocales = lowering_.throwLowerer().hold(
-          locales, Type::array(Type::string()), at(2) && lowering_.mayThrow().exprThrows(at(2)));
+      llvm::Value *heldLocales = locales;
       std::vector<Lowering::Operand> held;
       llvm::Value *options = lowering_.intlLowerer().emitIntlOptions(nullptr, at(2), held);
-      locales = lowering_.throwLowerer().take(heldLocales);
+      locales = heldLocales;
       const std::u16string &text = cast<StringLitExpr>(call->args[0])->value;
       std::string name;
       llvm::convertUTF16ToUTF8String(
@@ -206,7 +202,6 @@ llvm::Value *IntlCallLowerer::emitIntlCall(CallExpr *call) {
           {locales}, "canonical");
     }
     lowering_.refCounts().releaseValue(locales, Type::array(Type::string()));
-    lowering_.emitThrowCheckIf(throws);
     return result;
   }
   case Builtin::IntlResolvedOptions: {
@@ -276,18 +271,13 @@ llvm::Value *IntlCallLowerer::emitIntlCall(CallExpr *call) {
   }
   case Builtin::NumToLocale: {
     Lowering::IntlNumber n = lowering_.intlLowerer().emitIntlNumber(member->object);
-    lowering_.throwLowerer().holdOperand(n.operand,
-                                         (at(0) && lowering_.mayThrow().exprThrows(at(0))) ||
-                                             (at(1) && lowering_.mayThrow().exprThrows(at(1))));
     std::vector<Lowering::Operand> held;
     llvm::Value *options = lowering_.intlLowerer().emitIntlOptions(at(0), at(1), held);
-    lowering_.throwLowerer().takeOperand(n.operand);
     std::vector<llvm::Value *> args = lowering_.intlLowerer().intlNumberArgs(n);
     args.push_back(options);
     llvm::Value *text = stringOf("tz_num_locale", args, {i32, f64, i64, i64, ptr});
     dropAll(held);
     lowering_.refCounts().dropOperand(n.operand);
-    lowering_.emitThrowCheckIf(throws);
     return text;
   }
   case Builtin::NfFormat:
@@ -295,7 +285,6 @@ llvm::Value *IntlCallLowerer::emitIntlCall(CallExpr *call) {
   case Builtin::PrSelect: {
     Lowering::Operand self = receiver(0);
     Lowering::IntlNumber n = lowering_.intlLowerer().emitIntlNumber(call->args[0]);
-    lowering_.throwLowerer().takeOperand(self);
     std::vector<llvm::Value *> args{self.value};
     for (llvm::Value *v : lowering_.intlLowerer().intlNumberArgs(n)) {
       args.push_back(v);
@@ -319,10 +308,7 @@ llvm::Value *IntlCallLowerer::emitIntlCall(CallExpr *call) {
     Lowering::Operand self = receiver(0);
     Lowering::Operand a = lowering_.refCounts().emitOperand(
         call->args[0], AssignLowerer::cannotAssign(call->args[1]));
-    lowering_.throwLowerer().holdOperand(a, lowering_.mayThrow().exprThrows(call->args[1]));
     Lowering::Operand b = lowering_.refCounts().emitOperand(call->args[1], true);
-    lowering_.throwLowerer().takeOperand(a);
-    lowering_.throwLowerer().takeOperand(self);
     llvm::Value *result =
         lowering_.builder_.CreateCall(lowering_.processLowerer().processFunction(
                                           "tz_collator_compare", i32, {ptr, ptr, i64, ptr, i64}),
@@ -341,13 +327,8 @@ llvm::Value *IntlCallLowerer::emitIntlCall(CallExpr *call) {
     Lowering::Operand that = lowering_.refCounts().emitOperand(
         call->args[0],
         llvm::all_of(llvm::ArrayRef<Expr *>(call->args).drop_front(), AssignLowerer::cannotAssign));
-    lowering_.throwLowerer().holdOperand(that,
-                                         (at(1) && lowering_.mayThrow().exprThrows(at(1))) ||
-                                             (at(2) && lowering_.mayThrow().exprThrows(at(2))));
     std::vector<Lowering::Operand> held;
     llvm::Value *options = lowering_.intlLowerer().emitIntlOptions(at(1), at(2), held);
-    lowering_.throwLowerer().takeOperand(that);
-    lowering_.throwLowerer().takeOperand(self);
     llvm::Value *result =
         lowering_.builder_.CreateCall(lowering_.processLowerer().processFunction(
                                           "tz_str_locale_compare", i32, {ptr, i64, ptr, i64, ptr}),
@@ -359,7 +340,6 @@ llvm::Value *IntlCallLowerer::emitIntlCall(CallExpr *call) {
     dropAll(held);
     lowering_.refCounts().dropOperand(that);
     lowering_.refCounts().dropOperand(self);
-    lowering_.emitThrowCheckIf(throws);
     return result;
   }
   case Builtin::StrNormalize: {
@@ -374,7 +354,6 @@ llvm::Value *IntlCallLowerer::emitIntlCall(CallExpr *call) {
       formObj = lowering_.stringLowerer().stringObj(form->value);
       formMeta = lowering_.stringLowerer().stringMeta(form->value);
     }
-    lowering_.throwLowerer().takeOperand(self);
     llvm::Value *text =
         stringOf("tz_str_normalize",
                  {lowering_.stringLowerer().stringObj(self.value),
@@ -384,7 +363,6 @@ llvm::Value *IntlCallLowerer::emitIntlCall(CallExpr *call) {
       lowering_.refCounts().dropOperand(*form);
     }
     lowering_.refCounts().dropOperand(self);
-    lowering_.emitThrowCheckIf(throws);
     return text;
   }
   case Builtin::RtfFormat:
@@ -392,7 +370,6 @@ llvm::Value *IntlCallLowerer::emitIntlCall(CallExpr *call) {
     Lowering::Operand self = receiver(0);
     llvm::Value *value = lowering_.exprLowerer().emitExpr(call->args[0]);
     Lowering::Operand unit = lowering_.refCounts().emitOperand(call->args[1], true);
-    lowering_.throwLowerer().takeOperand(self);
     llvm::Value *result;
     if (call->builtin == Builtin::RtfFormat) {
       result = stringOf("tz_rtf_format",
@@ -410,14 +387,12 @@ llvm::Value *IntlCallLowerer::emitIntlCall(CallExpr *call) {
     }
     lowering_.refCounts().dropOperand(unit);
     lowering_.refCounts().dropOperand(self);
-    lowering_.emitThrowCheckIf(throws);
     return result;
   }
   case Builtin::LfFormat:
   case Builtin::LfFormatToParts: {
     Lowering::Operand self = receiver(0);
     Lowering::Operand list = lowering_.refCounts().emitOperand(call->args[0], true);
-    lowering_.throwLowerer().takeOperand(self);
     llvm::Value *result =
         call->builtin == Builtin::LfFormat
             ? stringOf("tz_lf_format", {self.value, list.value}, {ptr, ptr})
@@ -433,7 +408,6 @@ llvm::Value *IntlCallLowerer::emitIntlCall(CallExpr *call) {
   case Builtin::DnOf: {
     Lowering::Operand self = receiver(0);
     Lowering::Operand code = lowering_.refCounts().emitOperand(call->args[0], true);
-    lowering_.throwLowerer().takeOperand(self);
     llvm::AllocaInst *out = lowering_.functionFrame().createStackSlot(lowering_.strTy_, "name.out");
     llvm::Value *has = lowering_.builder_.CreateCall(
         lowering_.processLowerer().processFunction("tz_dn_of", i32, {ptr, ptr, ptr, i64}),
@@ -441,7 +415,6 @@ llvm::Value *IntlCallLowerer::emitIntlCall(CallExpr *call) {
          lowering_.stringLowerer().stringMeta(code.value)});
     lowering_.refCounts().dropOperand(code);
     lowering_.refCounts().dropOperand(self);
-    lowering_.emitThrowCheckIf(throws);
     return lowering_.optionalLowerer().makeOptional(
         lowering_.builder_.CreateLoad(lowering_.strTy_, out),
         lowering_.builder_.CreateICmpNE(has, lowering_.builder_.getInt32(0)), call->type);
@@ -449,7 +422,6 @@ llvm::Value *IntlCallLowerer::emitIntlCall(CallExpr *call) {
   case Builtin::SegSegment: {
     Lowering::Operand self = receiver(0);
     Lowering::Operand text = lowering_.refCounts().emitOperand(call->args[0], true);
-    lowering_.throwLowerer().takeOperand(self);
     llvm::Value *segments = lowering_.builder_.CreateCall(
         lowering_.processLowerer().processFunction("tz_seg_segment", ptr, {ptr, ptr, i64}),
         {self.value, lowering_.stringLowerer().stringObj(text.value),
@@ -464,14 +436,12 @@ llvm::Value *IntlCallLowerer::emitIntlCall(CallExpr *call) {
     Lowering::Operand self = receiver(0);
     llvm::Value *result;
     if (call->builtin == Builtin::SegmentsArray) {
-      lowering_.throwLowerer().takeOperand(self);
       result = lowering_.builder_.CreateCall(
           lowering_.processLowerer().processFunction("tz_segments_array", ptr, {ptr, ptr}),
           {self.value, lowering_.intlLowerer().intlShape(call->type->inner())}, "segments");
     } else {
       llvm::Value *index = call->args.empty() ? llvm::ConstantFP::get(f64, 0.0)
                                               : lowering_.exprLowerer().emitExpr(call->args[0]);
-      lowering_.throwLowerer().takeOperand(self);
       result = lowering_.builder_.CreateCall(
           lowering_.processLowerer().processFunction("tz_segments_containing", ptr,
                                                      {ptr, f64, ptr}),

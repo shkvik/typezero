@@ -129,7 +129,7 @@ const back: Dog = someone
 interface Named { name: string }
 // expect-error: 'Named' is not a class, and a class can extend only a class; to say that 'Wrong' has what an interface lists, write 'implements Named'
 class Wrong extends Named {}
-// expect-error: 'ReferenceError' is not built in; extend Error, or one of its kinds that are: TypeError, RangeError, SyntaxError
+// expect-error: there is no 'ReferenceError' in tz: an error is a value
 class MyError extends ReferenceError {}
 // expect-error: cannot find class 'Missing'
 class Orphan extends Missing {}

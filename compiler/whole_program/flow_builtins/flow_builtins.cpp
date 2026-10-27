@@ -121,7 +121,24 @@ Refs FlowBuiltins::builtin(CallExpr *c, MemberExpr *member, const Refs &receiver
   case Builtin::MapDelete:
   case Builtin::MapClear:
   case Builtin::MapSize:
+  case Builtin::ResultIsOk:
+  case Builtin::ResultIsErr:
     return {};
+  case Builtin::ResultOk:
+  case Builtin::ResultErr: {
+    Refs out;
+    for (const Refs &a : args) {
+      append(out, holding(a));
+    }
+    return out;
+  }
+  case Builtin::ResultUnwrapOr: {
+    Refs out = parts;
+    for (const Refs &a : args) {
+      append(out, a);
+    }
+    return out;
+  }
   case Builtin::ArrPush:
   case Builtin::ArrUnshift:
     insert(0);

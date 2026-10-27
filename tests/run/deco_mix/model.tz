@@ -26,13 +26,13 @@ export class User {
   }
 
   @Retry
-  async load(id: int): Promise<string> {
+  async load(id: int): Promise<Result<string, string>> {
     await later(0, 1)
     if (this.failures > 0) {
       this.failures--
-      throw new Error(`busy ${id}`)
+      return err(`busy ${id}`)
     }
-    return `${this.name}#${id}`
+    return ok(`${this.name}#${id}`)
   }
 }
 

@@ -13,6 +13,7 @@
 #include "runtime/core/closure/closure.h"
 #include "runtime/core/group/group.h"
 #include "runtime/core/io/io.h"
+#include "runtime/core/output/output.h"
 #include "runtime/core/parallel/parallel.h"
 #include "runtime/core/string/string.h"
 #include "runtime/core/tzrt/tzrt.h"
@@ -93,14 +94,11 @@ static void fsp_free(FsRequest *r) {
 
 void tz_fs_fsp_reject_thrown(FsRequest *r) {
   void *failure = tz_failed;
-  if (failure) {
-    tz_failed = NULL;
-    tz_promise_fail(r->promise, failure);
-  } else {
-    void *error = tz_thrown;
-    tz_thrown = NULL;
-    tz_promise_reject(r->promise, error);
+  if (!failure) {
+    tz_panicf("internal error: a file request failed without an error");
   }
+  tz_failed = NULL;
+  tz_promise_fail(r->promise, failure);
   fsp_free(r);
 }
 

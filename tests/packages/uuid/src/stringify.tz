@@ -1,3 +1,4 @@
+import { UuidError } from './types.tz';
 import { validate } from './validate.tz';
 
 /**
@@ -44,7 +45,7 @@ export function unsafeStringify(arr: Uint8Array, offset = 0): string {
   ).toLowerCase();
 }
 
-function stringify(arr: Uint8Array, offset = 0) {
+function stringify(arr: Uint8Array, offset = 0): Result<string, UuidError> {
   const uuid = unsafeStringify(arr, offset);
 
   // Consistency check for valid UUID.  If this throws, it's likely due to one
@@ -53,10 +54,10 @@ function stringify(arr: Uint8Array, offset = 0) {
   // "undefined" in the uuid)
   // - Invalid input values for the RFC `version` or `variant` fields
   if (!validate(uuid)) {
-    throw TypeError('Stringified UUID is invalid');
+    return err({ name: 'TypeError', message: 'Stringified UUID is invalid' });
   }
 
-  return uuid;
+  return ok(uuid);
 }
 
 export { stringify };

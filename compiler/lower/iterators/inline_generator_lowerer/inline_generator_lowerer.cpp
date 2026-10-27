@@ -91,7 +91,6 @@ Lowering::Producer InlineGeneratorLowerer::prepare(Expr *source, llvm::Value *re
                                                    lowering_.builder_.getVoidTy(),
                                                    {lowering_.builder_.getPtrTy()}),
             {lowering_.builder_.CreateLoad(lowering_.builder_.getPtrTy(), regex, "regex")});
-        lowering_.throwLowerer().emitThrowCheck();
       }
       llvm::Value *lastSlot =
           lowering_.functionFrame().createStackSlot(lowering_.builder_.getInt32Ty(), "lastIndex");

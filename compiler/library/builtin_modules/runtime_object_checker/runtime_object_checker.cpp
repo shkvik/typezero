@@ -166,7 +166,12 @@ Expr *RuntimeObjectChecker::checkRuntimeMethod(CallExpr *call, MemberExpr *membe
     break;
   }
   case Type::Runtime::AsyncIterator:
-    if (name == "next" || name == "return" || name == "throw") {
+    if (name == "throw") {
+      checker_.diags_.error(member->loc(), "an iterator has no 'throw()' in tz: an error is a "
+                                           "value, not something thrown into a generator");
+      return loosely();
+    }
+    if (name == "next" || name == "return") {
       checker_.diags_.error(member->loc(), "'" + name +
                                                "()' of an async iterator is not supported yet; "
                                                "iterate it with 'for await'");

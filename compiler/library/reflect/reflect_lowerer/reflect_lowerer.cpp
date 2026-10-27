@@ -130,9 +130,9 @@ void ReflectLowerer::emitClassFromJson(const ClassDecl *cls, llvm::Function *fn)
     });
   }
   llvm::Value *object = lowering_.classLowerer().allocInstance(cls);
-  Lowering::Held held = lowering_.throwLowerer().hold(object, cls->type, true);
+  llvm::Value *held = object;
   lowering_.classLowerer().emitConstruct(object, cls, sym, values);
-  object = lowering_.throwLowerer().take(held);
+  object = held;
   for (const Field &f : cls->type->fields()) {
     if (given.contains(f.name) || !llvm::is_contained(cls->jsonFields, f.name)) {
       continue;
@@ -326,7 +326,7 @@ llvm::Value *ReflectLowerer::emitReflectNew(NewExpr *expr) {
   llvm::Type *ptr = lowering_.builder_.getPtrTy(), *i32 = lowering_.builder_.getInt32Ty();
   lowering_.reflectsNew_ = true;
   llvm::Value *cls = lowering_.exprLowerer().emitExpr(expr->callee);
-  std::vector<llvm::Value *> values = lowering_.throwLowerer().emitHeldValues(expr->args);
+  std::vector<llvm::Value *> values = lowering_.exprLowerer().emitExprs(expr->args);
   auto *arrayType = llvm::ArrayType::get(ptr, std::max<size_t>(values.size(), 1));
   llvm::Value *args = lowering_.functionFrame().createStackSlot(arrayType, "reflect.args");
   for (size_t i = 0; i < values.size(); ++i) {
@@ -339,7 +339,6 @@ llvm::Value *ReflectLowerer::emitReflectNew(NewExpr *expr) {
   for (llvm::Value *value : values) {
     lowering_.refCounts().releaseValue(value, Type::unknown());
   }
-  lowering_.throwLowerer().emitThrowCheck();
 
   return object;
 }
@@ -363,7 +362,7 @@ llvm::Value *ReflectLowerer::emitReflectCall(CallExpr *call) {
   }
   case Builtin::ReflectGet: {
     lowering_.reflectsGet_ = true;
-    std::vector<llvm::Value *> values = lowering_.throwLowerer().emitHeldValues(call->args);
+    std::vector<llvm::Value *> values = lowering_.exprLowerer().emitExprs(call->args);
     llvm::Value *result = lowering_.builder_.CreateCall(
         lowering_.unknownLowerer().unknownFunction("tz_reflect_get", ptr, {ptr, ptr, i64}),
         {values[0], lowering_.stringLowerer().stringObj(values[1]),
@@ -371,12 +370,11 @@ llvm::Value *ReflectLowerer::emitReflectCall(CallExpr *call) {
         "got");
     lowering_.refCounts().releaseValue(values[0], call->args[0]->type);
     lowering_.refCounts().releaseValue(values[1], Type::string());
-    lowering_.throwLowerer().emitThrowCheck();
     return result;
   }
   case Builtin::ReflectApply: {
     usesApply_ = true;
-    std::vector<llvm::Value *> values = lowering_.throwLowerer().emitHeldValues(call->args);
+    std::vector<llvm::Value *> values = lowering_.exprLowerer().emitExprs(call->args);
     useErrors(call->type->errType());
     llvm::Value *result = lowering_.builder_.CreateCall(
         lowering_.unknownLowerer().unknownFunction("tz_reflect_apply", ptr, {ptr, ptr, ptr}),
@@ -384,11 +382,10 @@ llvm::Value *ReflectLowerer::emitReflectCall(CallExpr *call) {
     for (size_t i = 0; i < values.size(); ++i) {
       lowering_.refCounts().releaseValue(values[i], call->args[i]->type);
     }
-    lowering_.throwLowerer().emitThrowCheck();
     return lowering_.resultLowerer().catchFailure(result, call->type, call->loc());
   }
   case Builtin::ReflectConstruct: {
-    std::vector<llvm::Value *> values = lowering_.throwLowerer().emitHeldValues(call->args);
+    std::vector<llvm::Value *> values = lowering_.exprLowerer().emitExprs(call->args);
     useErrors(call->type->errType());
     llvm::Value *object;
     if (const ClassDecl *known = call->args[0]->type->classRef()) {
@@ -402,7 +399,6 @@ llvm::Value *ReflectLowerer::emitReflectCall(CallExpr *call) {
           {values[0], values[1]}, "object");
     }
     lowering_.refCounts().releaseValue(values[1], call->args[1]->type);
-    lowering_.throwLowerer().emitThrowCheck();
     return lowering_.resultLowerer().catchFailure(object, call->type, call->loc());
   }
   case Builtin::FromJsonClass: {
@@ -421,7 +417,6 @@ llvm::Value *ReflectLowerer::emitReflectCall(CallExpr *call) {
           {cls, json.value}, "object");
     }
     lowering_.refCounts().dropOperand(json);
-    lowering_.throwLowerer().emitThrowCheck();
     return lowering_.resultLowerer().catchFailure(object, call->type, call->loc());
   }
   case Builtin::ReflectMethod: {

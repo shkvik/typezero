@@ -65,7 +65,7 @@ function more() {
     write(chunk, enc, cb) {
       void chunk
       void enc
-      cb(new Error("boom"))
+      cb({ code: "E_BOOM", message: "boom" })
     },
   })
   e.on("error", (err) => log(`error ${err.message}`))

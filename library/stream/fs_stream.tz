@@ -1,29 +1,26 @@
 import { AbortSignal } from "tz:web"
 import { Readable, Stream, StreamCallback, Writable, WriteChunk, streamFinished } from "node:stream"
 
-class FsRangeError extends RangeError {
-  code = "ERR_OUT_OF_RANGE"
+function failure(code: string, message: string): StreamError {
+  return { code, message }
 }
 
-class FsStreamError extends StreamError {
-  code: string
-  constructor(code: string, message: string) {
-    super(message)
-    this.code = code
-  }
+function streamFailure(e: SystemError): StreamError {
+  return { code: e.code, message: e.message, errno: e.errno, syscall: e.syscall, path: e.path }
 }
 
-function validateInteger(value: double, name: string) {
-  if (!Number.isInteger(value) || value < 0 || value > Number.MAX_SAFE_INTEGER)
-    throw new FsRangeError(
-      `The value of "${name}" is out of range. It must be >= 0 && <= 9007199254740991. ` +
-        `Received ${value}`,
-    )
+function invalidInteger(value: double, name: string): StreamError | undefined {
+  if (Number.isInteger(value) && value >= 0 && value <= Number.MAX_SAFE_INTEGER) return undefined
+  return failure(
+    "ERR_OUT_OF_RANGE",
+    `The value of "${name}" is out of range. It must be >= 0 && <= 9007199254740991. ` +
+      `Received ${value}`,
+  )
 }
 
 export interface ReadStreamOptions {
   flags?: string
-  encoding?: string
+  encoding?: BufferEncoding
   fd?: int
   mode?: int
   autoClose?: boolean
@@ -36,7 +33,7 @@ export interface ReadStreamOptions {
 
 export interface WriteStreamOptions {
   flags?: string
-  encoding?: string
+  encoding?: BufferEncoding
   fd?: int
   mode?: int
   autoClose?: boolean
@@ -55,16 +52,16 @@ function closeFd(fd: int | undefined, flush: boolean, err: StreamError | undefin
   }
   const open = fd
   const closeIt = (error: StreamError | undefined) => {
-    __tz_fsClose(open, false).then(
-      () => cb(error),
-      (er: StreamError) => cb(er),
-    )
+    void __tz_fsClose(open, false).then((closed) => {
+      if (closed.isErr()) cb(streamFailure(closed.error))
+      else cb(error)
+    })
   }
   if (flush)
-    __tz_fsClose(open, true).then(
-      () => closeIt(err),
-      (er: StreamError) => closeIt(err ?? er),
-    )
+    void __tz_fsClose(open, true).then((synced) => {
+      if (synced.isErr()) closeIt(err ?? streamFailure(synced.error))
+      else closeIt(err)
+    })
   else closeIt(err)
 }
 
@@ -81,6 +78,7 @@ export class ReadStream<T = Buffer> extends Readable<T> {
   @__tz_hidden autoClose: boolean
   @__tz_hidden _performingIO = false
   @__tz_hidden _ioDone: ((error: StreamError | undefined) => void) | undefined = undefined
+  @__tz_hidden _invalid: StreamError | undefined = undefined
 
   constructor(path: string, options?: ReadStreamOptions) {
     super({
@@ -98,13 +96,14 @@ export class ReadStream<T = Buffer> extends Readable<T> {
     const start = options?.start
     this.start = start
     this.pos = start
-    if (start != undefined) validateInteger(start, "start")
+    if (start != undefined) this._invalid = invalidInteger(start, "start")
     const end = options?.end ?? Infinity
     this.end = end
-    if (end != Infinity) {
-      validateInteger(end, "end")
-      if (start != undefined && start > end)
-        throw new FsRangeError(
+    if (end != Infinity && this._invalid == undefined) {
+      this._invalid = invalidInteger(end, "end")
+      if (start != undefined && start > end && this._invalid == undefined)
+        this._invalid = failure(
+          "ERR_OUT_OF_RANGE",
           `The value of "start" is out of range. It must be <= "end" (here: ${end}). ` +
             `Received ${start}`,
         )
@@ -113,20 +112,26 @@ export class ReadStream<T = Buffer> extends Readable<T> {
   }
 
   _construct(callback: StreamCallback): void {
+    if (this._invalid != undefined) {
+      callback(this._invalid)
+      return
+    }
     if (this.fd != undefined) {
       callback()
       return
     }
-    __tz_fsOpen(this.path, this.flags, this.mode).then(
-      (fd: int) => {
-        this.fd = fd
-        this.pending = false
-        callback()
-        this.emit("open", fd)
-        this.emit("ready")
-      },
-      (er: StreamError) => callback(er),
-    )
+    void __tz_fsOpen(this.path, this.flags, this.mode).then((opened) => {
+      if (opened.isErr()) {
+        callback(streamFailure(opened.error))
+        return
+      }
+      const fd = opened.value
+      this.fd = fd
+      this.pending = false
+      callback()
+      this.emit("open", fd)
+      this.emit("ready")
+    })
   }
 
   _read(size: int): void {
@@ -140,10 +145,10 @@ export class ReadStream<T = Buffer> extends Readable<T> {
     }
     const buf = Buffer.allocUnsafeSlow(n)
     this._performingIO = true
-    __tz_fsRead(fd, buf, 0, n, pos ?? -1).then(
-      (bytesRead: int) => this.#afterRead(undefined, bytesRead, buf),
-      (er: StreamError) => this.#afterRead(er, 0, buf),
-    )
+    void __tz_fsRead(fd, buf, 0, n, pos ?? -1).then((read) => {
+      if (read.isErr()) this.#afterRead(streamFailure(read.error), 0, buf)
+      else this.#afterRead(undefined, read.value, buf)
+    })
   }
 
   #afterRead(er: StreamError | undefined, bytesRead: int, buf: Buffer) {
@@ -201,6 +206,7 @@ export class WriteStream extends Writable<Buffer> {
   @__tz_hidden autoClose: boolean
   @__tz_hidden _performingIO = false
   @__tz_hidden _ioDone: ((error: StreamError | undefined) => void) | undefined = undefined
+  @__tz_hidden _invalid: StreamError | undefined = undefined
 
   constructor(path: string, options?: WriteStreamOptions) {
     super({
@@ -220,52 +226,59 @@ export class WriteStream extends Writable<Buffer> {
     const start = options?.start
     this.start = start
     this.pos = start
-    if (start != undefined) validateInteger(start, "start")
+    if (start != undefined) this._invalid = invalidInteger(start, "start")
     this.pending = this.fd == undefined
   }
 
   _construct(callback: StreamCallback): void {
+    if (this._invalid != undefined) {
+      callback(this._invalid)
+      return
+    }
     if (this.fd != undefined) {
       callback()
       return
     }
-    __tz_fsOpen(this.path, this.flags, this.mode).then(
-      (fd: int) => {
-        this.fd = fd
-        this.pending = false
-        callback()
-        this.emit("open", fd)
-        this.emit("ready")
-      },
-      (er: StreamError) => callback(er),
-    )
+    void __tz_fsOpen(this.path, this.flags, this.mode).then((opened) => {
+      if (opened.isErr()) {
+        callback(streamFailure(opened.error))
+        return
+      }
+      const fd = opened.value
+      this.fd = fd
+      this.pending = false
+      callback()
+      this.emit("open", fd)
+      this.emit("ready")
+    })
   }
 
   #writeAll(data: Buffer, offset: int, size: int, pos: double | undefined, cb: StreamCallback,
             retries: int) {
     const fd = this.fd
     if (fd == undefined) {
-      cb(new FsStreamError("ERR_STREAM_DESTROYED", "Cannot call write after a stream was destroyed"))
+      cb(failure("ERR_STREAM_DESTROYED", "Cannot call write after a stream was destroyed"))
       return
     }
-    __tz_fsWrite(fd, data, offset, size, pos ?? -1).then(
-      (bytesWritten: int) => {
-        if (this.destroyed) {
-          cb(new FsStreamError("ERR_STREAM_DESTROYED",
-                               "Cannot call write after a stream was destroyed"))
-          return
-        }
-        this.bytesWritten += bytesWritten
-        const tries = bytesWritten != 0 ? 0 : retries + 1
-        const left = size - bytesWritten
-        if (tries > 5) cb(new FsStreamError("ERR_SYSTEM_ERROR", "write failed"))
-        else if (left != 0)
-          this.#writeAll(data, offset + bytesWritten, left,
-                         pos != undefined ? pos + bytesWritten : undefined, cb, tries)
-        else cb()
-      },
-      (er: StreamError) => cb(er),
-    )
+    void __tz_fsWrite(fd, data, offset, size, pos ?? -1).then((written) => {
+      if (written.isErr()) {
+        cb(streamFailure(written.error))
+        return
+      }
+      const bytesWritten = written.value
+      if (this.destroyed) {
+        cb(failure("ERR_STREAM_DESTROYED", "Cannot call write after a stream was destroyed"))
+        return
+      }
+      this.bytesWritten += bytesWritten
+      const tries = bytesWritten != 0 ? 0 : retries + 1
+      const left = size - bytesWritten
+      if (tries > 5) cb(failure("ERR_SYSTEM_ERROR", "write failed"))
+      else if (left != 0)
+        this.#writeAll(data, offset + bytesWritten, left,
+                       pos != undefined ? pos + bytesWritten : undefined, cb, tries)
+      else cb()
+    })
   }
 
   _write(chunk: Buffer, encoding: string, callback: StreamCallback): void {
@@ -320,7 +333,7 @@ export function createReadStream() {}
 export function createWriteStream() {}
 
 export function streamReadFile<T>(path: string, options: ReadStreamOptions | undefined,
-                                  encoding: string | undefined): ReadStream<T> {
+                                  encoding: BufferEncoding | undefined): ReadStream<T> {
   if (encoding == undefined) return new ReadStream<T>(path, options)
   return new ReadStream<T>(path, {
     flags: options?.flags,
@@ -337,7 +350,7 @@ export function streamReadFile<T>(path: string, options: ReadStreamOptions | und
 }
 
 export function streamWriteFile(path: string, options: WriteStreamOptions | undefined,
-                                encoding: string | undefined): WriteStream {
+                                encoding: BufferEncoding | undefined): WriteStream {
   if (encoding == undefined) return new WriteStream(path, options)
   return new WriteStream(path, {
     flags: options?.flags,

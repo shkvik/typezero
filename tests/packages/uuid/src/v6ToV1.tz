@@ -1,6 +1,6 @@
 import { parse } from './parse.tz';
 import { unsafeStringify } from './stringify.tz';
-import { UUIDTypes } from './types.tz';
+import { UUIDTypes, UuidError } from './types.tz';
 
 /**
  * Convert a v6 UUID to a v1 UUID
@@ -9,12 +9,12 @@ import { UUIDTypes } from './types.tz';
  * @returns {string|Uint8Array} The v1 UUID as the same type as the `uuid` arg
  * (string or Uint8Array)
  */
-export function v6ToV1(uuid: UUIDTypes): UUIDTypes {
-  const v6Bytes = typeof uuid == 'string' ? parse(uuid) : uuid;
+export function v6ToV1(uuid: UUIDTypes): Result<UUIDTypes, UuidError> {
+  if (typeof uuid != 'string') return ok(_v6ToV1(uuid));
+  const v6Bytes = parse(uuid);
+  if (v6Bytes.isErr()) return err(v6Bytes.error);
 
-  const v1Bytes = _v6ToV1(v6Bytes);
-
-  return typeof uuid == 'string' ? unsafeStringify(v1Bytes) : v1Bytes;
+  return ok(unsafeStringify(_v6ToV1(v6Bytes.value)));
 }
 
 // Do the field transformation needed for v6 -> v1

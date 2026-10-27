@@ -26,11 +26,8 @@ const twice: (x: int) => double = (x: int): int => x * 2
 console.log(twice(21) / 4)
 const extra = (n: int, label?: string): Item => new Item(label == undefined ? n : -1)
 await run(extra)
-async function fails(n: int): Promise<Item> {
-  throw new Error(`no item ${n}`)
+async function later(n: int): Promise<Item> {
+  await undefined
+  return new Item(n * 100)
 }
-try {
-  await run(fails)
-} catch (e) {
-  console.log(e.message)
-}
+await run(later)

@@ -90,25 +90,10 @@ r.on("x", first).on("x", second)
 r.removeAllListeners("x")
 console.log(removed, r.eventNames())
 
-// A listener that throws: the error leaves emit.
-const h = new EventEmitter<{ boom: [msg: string]; error: [err: Error] }>()
-h.on("boom", (msg) => {
-  throw new Error(msg)
-})
-try {
-  h.emit("boom", "bad")
-} catch (err) {
-  console.log("caught", err.message)
-}
-// emit('error') without a listener throws the error; with one, the
-// listener gets it; an error that is no Error is ERR_UNHANDLED_ERROR.
-try {
-  h.emit("error", new TypeError("no listener"))
-} catch (err) {
-  console.log(err.name, err.message)
-}
+// emit('error') with a listener: the listener gets it.
+const h = new EventEmitter<{ error: [err: { code: string; message: string }] }>()
 h.once("error", (err) => console.log("handled", err.message))
-console.log(h.emit("error", new Error("now handled")))
+console.log(h.emit("error", { code: "E_NOW", message: "now handled" }))
 
 // A class of its own, whose methods emit; on() gives the object back as
 // what it is, so calls chain.
@@ -126,11 +111,6 @@ s.listen(8080).emit("close")
 console.log(s, s.listenerCount("close"), s instanceof EventEmitter)
 s.setMaxListeners(3).removeAllListeners("close")
 console.log(s.getMaxListeners(), s.eventNames(), EventEmitter.defaultMaxListeners)
-try {
-  s.setMaxListeners(-1)
-} catch (err) {
-  console.log(err.name, err.message)
-}
 
 // Names known only when the program runs: a map that takes any name.
 interface Message {

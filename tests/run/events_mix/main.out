@@ -7,9 +7,9 @@ done ccc 12
 total 24, started 3, listening 1
 failed slow: ABORT_ERR
 3
-collect: AbortError stop
+collect: ABORT_ERR
 first start z
 start listeners 0
-once: AbortError TimeoutError
+once: ABORT_ERR
 once: 0
 end

@@ -3,7 +3,7 @@
 // overridden methods, read back by a third; design:* records of members of
 // union, literal, Promise and byte types; unknown holding promises,
 // dictionaries, dates, bytes and regexes, narrowed by typeof and instanceof;
-// unions in unknown; and `catch (e: unknown)`.
+// and unions in unknown.
 import { calls, columnsOf, designOf, tableOf } from "./deco.tz"
 import { Admin, User } from "./model.tz"
 
@@ -12,7 +12,7 @@ const ann = new User("Ann", 30)
 const bob = new Admin("Bob", "forty")
 console.log(ann.greet("hi"))
 console.log(bob.greet("hello"))
-console.log(await ann.load(1), await bob.load(2))
+console.log((await ann.load(1)).unwrapOr("-"), (await bob.load(2)).unwrapOr("-"))
 console.log(calls)
 
 // 2. Metadata of classes of another file, read by functions of a third.
@@ -50,32 +50,7 @@ console.log(things)
 const widened: unknown | int | string = choice
 console.log(typeof widened, widened == "picked")
 
-// 4. `catch (e: unknown)`: an Error, shown by instanceof.
-function failing() {
-  throw new SyntaxError("Unexpected end of JSON input")
-}
-try {
-  failing()
-} catch (e: unknown) {
-  if (e instanceof SyntaxError)
-    console.log("syntax error:", e.name)
-  else if (e instanceof Error)
-    console.log("error:", e.message)
-}
-// Thrown again, what an unknown holds must be an Error: anything else is a
-// TypeError.
-function rethrow(u: unknown) {
-  throw u
-}
-for (const thrown of [new RangeError("far"), 5])
-  try {
-    rethrow(thrown)
-  } catch (e: unknown) {
-    if (e instanceof Error)
-      console.log(e.name, e.message)
-  }
-
-// 5. Classes as values, alone and in unions.
+// 4. Classes as values, alone and in unions.
 const kind = process.argv.length > 99 ? "none" : Admin
 const classes = [User, Admin]
 console.log(kind, typeof kind, classes, kind == Admin, tableOf(Admin))

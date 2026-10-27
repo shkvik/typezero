@@ -1,0 +1,9 @@
+// throw and catch where the parser finds them, in forms that are not
+// JavaScript either: still no exceptions in tz (docs/errors.md, section 11).
+function lost() {
+  // expect-error: there is no 'throw' in tz: an error is a value; return it, 'return err(...)'
+  throw
+}
+// expect-error: there is no 'catch' in tz: an error is a value
+catch (e) {
+}

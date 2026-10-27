@@ -39,7 +39,7 @@ const one = Readable.from("whole string")
 one.on("error", (e) => log(`one error ${e.message}`))
 one.on("data", (s) => log(`one ${s} ${typeof s}`))
 const bad = new PassThrough()
-setTimeout(() => bad.destroy(new Error("broken")), 1)
+setTimeout(() => bad.destroy({ code: "E_BROKEN", message: "broken" }), 1)
 for await (const c of bad) {
   if (c.isErr()) log(`error ${c.error.message}`)
   else log(`never ${c.value.length}`)

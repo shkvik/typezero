@@ -4,8 +4,4 @@ shop: apple, pear
 5050
 [ 1, 2, 3 ]
 via promise
-finally runs
-1
-finally before follow
-2
 20

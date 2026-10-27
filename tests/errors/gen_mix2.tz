@@ -1,7 +1,7 @@
 // Writes through a wider type that pass through the built-in modules and
 // through errors (tests/run/gen_mix2.tz has the reads that are allowed): a
 // listener of an emitter that puts another Animal into the array it gets,
-// and an error whose narrowed field a `catch` changes after it was thrown.
+// and an error whose narrowed field is changed after it went out in a Result.
 import { EventEmitter } from "node:events"
 
 class Animal {
@@ -21,23 +21,18 @@ zoo.on("show", (all) => all.push(new Cat("Tom")))
 // expect-error: 'Dog[]' cannot go where 'Animal[]' is expected here: line 20 puts a 'Cat' into it
 zoo.show(dogs)
 
-class PetError extends Error {
-  constructor(public pet: Animal) {
-    super("pet")
-  }
+class PetError {
+  constructor(public pet: Animal) {}
 }
 class DogError extends PetError {
   constructor(public pet: Dog) {
     super(pet)
   }
 }
-function fail(e: PetError) {
-  throw e
+function fail(e: PetError): Result<void, PetError> {
+  return err(e)
 }
-try {
-  // expect-error: writes a 'Cat' to its field 'pet', which is a 'Dog' in 'DogError'
-  fail(new DogError(new Dog("Ace")))
-} catch (e) {
-  if (e instanceof PetError) e.pet = new Cat("Tim")
-}
+// expect-error: writes a 'Cat' to its field 'pet', which is a 'Dog' in 'DogError'
+const failed = fail(new DogError(new Dog("Ace")))
+if (failed.isErr()) failed.error.pet = new Cat("Tim")
 

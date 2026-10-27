@@ -6,7 +6,8 @@
 // listenerCount() of the module, and the same functions on EventEmitter.
 import { EventEmitter, once, getEventListeners, listenerCount } from "node:events"
 
-const server = new EventEmitter<{ listening: [port: double, host: string]; error: [err: Error]; done: [] }>()
+type Failure = { code: string; message: string }
+const server = new EventEmitter<{ listening: [port: double, host: string]; error: [err: Failure]; done: [] }>()
 setTimeout(() => server.emit("listening", 8080, "localhost"), 1)
 const listening = await once(server, "listening")
 if (listening.isOk()) {
@@ -15,7 +16,7 @@ if (listening.isOk()) {
 }
 
 const failing = once(server, "done")
-server.emit("error", new Error("broken"))
+server.emit("error", { code: "E_BROKEN", message: "broken" })
 const failed = await failing
 if (failed.isErr()) console.log("error first:", failed.error.message)
 setTimeout(() => server.emit("done"), 1)
@@ -26,7 +27,7 @@ const ac = new AbortController()
 const waiting = once(server, "done", { signal: ac.signal })
 ac.abort()
 const aborted = await waiting
-if (aborted.isErr()) console.log(aborted.error.name, aborted.error.message, server.listenerCount("done"))
+if (aborted.isErr()) console.log(aborted.error.code, aborted.error.message, server.listenerCount("done"))
 const signalled = new AbortController()
 const fired = once(server, "done", { signal: signalled.signal })
 server.emit("done")

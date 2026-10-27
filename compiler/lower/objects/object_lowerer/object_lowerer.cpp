@@ -66,8 +66,8 @@ llvm::Value *ObjectLowerer::emitObjectLiteral(ObjectLitExpr *lit) {
     exprs.push_back(prop.value);
   }
   std::vector<llvm::Value *> values;
-  if (llvm::any_of(exprs, [&](Expr *e) { return lowering_.mayThrow().exprThrows(e); })) {
-    values = lowering_.throwLowerer().emitHeldValues(exprs);
+  if (llvm::any_of(exprs, [&](Expr *e) { return false; })) {
+    values = lowering_.exprLowerer().emitExprs(exprs);
   }
   bool member = lowering_.makesMember(lit, type);
   llvm::Value *object = lowering_.objectLayouts().allocObject(type, keys, member);
@@ -123,10 +123,7 @@ llvm::Value *ObjectLowerer::emitSpreadLiteral(ObjectLitExpr *lit) {
         llvm::Constant::getNullValue(lowering_.moduleBuilder().lower(f.type)),
         lowering_.objectLayouts().fieldAddress(object, type, f.name, true));
   }
-  Lowering::Held held = lowering_.throwLowerer().hold(
-      object, type, llvm::any_of(lit->props, [&](const ObjectLitExpr::Property &p) {
-        return lowering_.mayThrow().exprThrows(p.value);
-      }));
+  llvm::Value *held = object;
   for (const ObjectLitExpr::Property &prop : lit->props) {
     if (!prop.spread) {
       if (prop.replaced) {
@@ -185,7 +182,7 @@ llvm::Value *ObjectLowerer::emitSpreadLiteral(ObjectLitExpr *lit) {
     lowering_.refCounts().dropOperand(from);
   }
 
-  return lowering_.throwLowerer().take(held);
+  return held;
 }
 
 llvm::Value *ObjectLowerer::emitTupleLiteral(ArrayLitExpr *lit) {
@@ -197,8 +194,8 @@ llvm::Value *ObjectLowerer::emitTupleLiteral(ArrayLitExpr *lit) {
     exprs.push_back(e.expr);
   }
   std::vector<llvm::Value *> values;
-  if (llvm::any_of(exprs, [&](Expr *e) { return lowering_.mayThrow().exprThrows(e); })) {
-    values = lowering_.throwLowerer().emitHeldValues(exprs);
+  if (llvm::any_of(exprs, [&](Expr *e) { return false; })) {
+    values = lowering_.exprLowerer().emitExprs(exprs);
   }
   bool member = lowering_.makesMember(lit, type);
   llvm::Value *object = lowering_.objectLayouts().allocObject(type, keys, member);

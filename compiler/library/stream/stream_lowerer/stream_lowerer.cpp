@@ -126,7 +126,7 @@ llvm::Value *StreamLowerer::emitStreamBuiltin(CallExpr *call) {
   case Builtin::LibStdinChunk: {
     llvm::Type *voidTy = lowering_.builder_.getVoidTy(), *i64 = lowering_.builder_.getInt64Ty();
     llvm::Type *f64 = lowering_.builder_.getDoubleTy();
-    std::vector<llvm::Value *> values = lowering_.throwLowerer().emitHeldValues(call->args);
+    std::vector<llvm::Value *> values = lowering_.exprLowerer().emitExprs(call->args);
     llvm::Value *promise = lowering_.promiseLowerer().newPromise(call->type->promised());
     auto run = [&](llvm::StringRef name, std::vector<llvm::Type *> params,
                    std::vector<llvm::Value *> args, bool maker) {
@@ -167,7 +167,7 @@ llvm::Value *StreamLowerer::emitStreamBuiltin(CallExpr *call) {
     return promise;
   }
   case Builtin::LibStdWrite: {
-    std::vector<llvm::Value *> values = lowering_.throwLowerer().emitHeldValues(call->args);
+    std::vector<llvm::Value *> values = lowering_.exprLowerer().emitExprs(call->args);
     lowering_.builder_.CreateCall(
         lowering_.processLowerer().processFunction("tz_lib_std_write",
                                                    lowering_.builder_.getVoidTy(), {i32, ptr}),

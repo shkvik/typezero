@@ -1,9 +1,8 @@
 // same-as-node
-// expect-stderr: Error: boom
 // A server of tz:http and fetch in one program, on a free port: text and
-// JSON both ways, status and headers, a body that streams each way, an
-// exception of the handler (500), redirects, HEAD, requests at the same
-// time, a request cancelled by a signal, and stop().
+// JSON both ways, status and headers, a body that streams each way, a 500
+// given by the handler, redirects, HEAD, requests at the same time, a
+// request cancelled by a signal, and stop().
 import { serve } from "tz:http"
 
 const enc = new TextEncoder()
@@ -17,7 +16,7 @@ const started = serve({ port: 0, hostname: "127.0.0.1" }, async req => {
       return Response.json({ id: 1, user, method: req.method }, { status: 201 })
     }
     case "/boom":
-      throw new Error("boom")
+      return new Response("boom", { status: 500 })
     case "/stream":
       return new Response(new ReadableStream({
         start: c => {

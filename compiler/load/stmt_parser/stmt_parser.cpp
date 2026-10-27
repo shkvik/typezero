@@ -134,8 +134,9 @@ Stmt *StmtParser::parseStatement(bool topLevel) {
     }
     if ((parser_.tok_.text == "catch" || parser_.tok_.text == "finally") &&
         (parser_.cursor().peek().is(Tok::LBrace) || parser_.cursor().peek().is(Tok::LParen))) {
-      parser_.cursor().report(loc, "'" + parser_.tok_.text +
-                                       "' without 'try': it goes right after the block of a 'try'");
+      parser_.cursor().report(loc, "there is no '" + parser_.tok_.text +
+                                       "' in tz: an error is a value; a function that can fail "
+                                       "gives a 'Result', checked with 'if'");
       parser_.cursor().advance();
       if (parser_.cursor().accept(Tok::LParen)) {
         while (!parser_.tok_.is(Tok::Eof) && !parser_.cursor().accept(Tok::RParen)) {
@@ -438,8 +439,8 @@ Stmt *StmtParser::parseThrow() {
   parser_.cursor().advance();
   if (parser_.tok_.newlineBefore || parser_.tok_.is(Tok::Semi) || parser_.tok_.is(Tok::RBrace) ||
       parser_.tok_.is(Tok::Eof)) {
-    parser_.cursor().error(
-        loc, "'throw' needs a value on the same line, e.g. 'throw new Error(\"...\")'");
+    parser_.cursor().error(loc, "there is no 'throw' in tz: an error is a value; return it, "
+                                "'return err(...)', and give the function a 'Result'");
     return parser_.ctx_.make<EmptyStmt>(loc);
   }
   Expr *value = parser_.exprs().parseSequence();
@@ -456,10 +457,6 @@ Stmt *StmtParser::parseTry() {
     parser_.cursor().advance();
     if (parser_.cursor().accept(Tok::LParen)) {
       if (parser_.tok_.is(Tok::LBrace) || parser_.tok_.is(Tok::LBracket)) {
-        parser_.cursor().report(
-            parser_.tok_.loc(),
-            "destructuring the caught error is not supported; write 'catch (e)' and "
-            "read its fields, e.g. 'e.message'");
         while (!parser_.tok_.is(Tok::RParen) && !parser_.tok_.is(Tok::Eof)) {
           parser_.cursor().advance();
         }
@@ -474,10 +471,6 @@ Stmt *StmtParser::parseTry() {
     parser_.cursor().advance();
     stmt->finalizer = parseBlock();
   }
-  if (!stmt->handler && !stmt->finalizer) {
-    parser_.cursor().report(stmt->loc(), "'try' needs 'catch' or 'finally' after its block");
-  }
-
   return stmt;
 }
 

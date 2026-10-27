@@ -1,5 +1,4 @@
 #include "compiler/check/scopes/scopes.h"
-#include "compiler/check/errors/throw_checker/throw_checker.h"
 #include "compiler/infer/return_inferrer/return_inferrer.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/StringSet.h"
@@ -45,10 +44,6 @@ Checker::ScopeEntry Scopes::lookup(llvm::StringRef name) const {
       return found->second;
     }
   }
-  if (ClassDecl *kind = checker_.throwChecker().errorKindClass(name)) {
-    return {nullptr, nullptr, nullptr, kind};
-  }
-
   return {};
 }
 

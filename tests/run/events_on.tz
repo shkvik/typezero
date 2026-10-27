@@ -5,7 +5,8 @@
 // the listeners. once() with a timeout.
 import { EventEmitter, on, once } from "node:events"
 const log = (s: string) => console.log(s)
-const bus = new EventEmitter<{ data: [n: int, label: string]; end: []; error: [err: Error] }>()
+type Failure = { code: string; message: string }
+const bus = new EventEmitter<{ data: [n: int, label: string]; end: []; error: [err: Failure] }>()
 const it = on(bus, "data", { close: ["end"] })
 bus.emit("data", 1, "one")
 bus.emit("data", 2, "two")
@@ -24,7 +25,7 @@ log(`listeners after: ${bus.listenerCount("data")} ${bus.listenerCount("end")}`)
 const errs = on(bus, "data")
 setTimeout(() => {
   bus.emit("data", 4, "four")
-  bus.emit("error", new Error("boom"))
+  bus.emit("error", { code: "E_BOOM", message: "boom" })
 }, 5)
 for await (const event of errs) {
   if (event.isErr()) log(`error ${event.error.message}`)
@@ -40,18 +41,15 @@ for await (const event of on(bus, "data")) {
 }
 log(`listeners after break: ${bus.listenerCount("data")}`)
 
-// a signal ends it with an AbortError
+// a signal ends it with an error whose code is ABORT_ERR
 const ac = new AbortController()
 setTimeout(() => ac.abort(), 5)
 for await (const event of on(bus, "data", { signal: ac.signal })) {
-  if (event.isErr()) log(`aborted: ${event.error.name}`)
+  if (event.isErr()) log(`aborted: ${event.error.code}`)
   else log(`never ${event.value[0]}`)
 }
 // once with a timeout signal
 const alive = setTimeout(() => log("kept alive"), 50)
 const ended = await once(bus, "end", { signal: AbortSignal.timeout(5) })
-if (ended.isErr()) {
-  const cause = ended.error.cause
-  log(`once: ${ended.error.name} ${cause instanceof Error ? cause.name : "-"}`)
-}
+if (ended.isErr()) log(`once: ${ended.error.code}`)
 clearTimeout(alive)

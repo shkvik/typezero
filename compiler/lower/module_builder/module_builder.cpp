@@ -126,7 +126,7 @@ std::unique_ptr<llvm::Module> ModuleBuilder::generate(SourceFile &file) {
     lowering_.classDescriptors().declareMethods(cls);
   }
   lowering_.tailCallLowerer().findTailGroups(functions);
-  lowering_.mayThrow().analyzeThrows(file);
+  false.analyzeThrows(file);
   declareGlobals(file);
   for (FunctionDecl *fn : functions) {
     lowering_.functionBuilder().emitFunction(fn);

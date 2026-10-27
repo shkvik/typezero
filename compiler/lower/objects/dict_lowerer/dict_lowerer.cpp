@@ -335,10 +335,10 @@ llvm::Value *DictLowerer::emitRecordLiteral(ObjectLitExpr *lit) {
       dictFunction("tz_map_new", ptr, {ptr}),
       {lowering_.makesMember(lit, type) ? layout.descriptor : layout.plainDescriptor}, "record");
   bool throws = llvm::any_of(lit->props, [&](const ObjectLitExpr::Property &p) {
-    return lowering_.mayThrow().exprThrows(p.value) ||
-           (p.key && lowering_.mayThrow().exprThrows(p.key));
+    return false ||
+           (p.key && false);
   });
-  Lowering::Held held = lowering_.throwLowerer().hold(map, type, throws);
+  llvm::Value *held = map;
   auto put = [&](llvm::Value *k, llvm::Value *v, const Type *from) {
     llvm::Value *entry = emitDictAdd(map, k, string);
     lowering_.storeLowerer().storeIn(map, type, entryValue(entry, type),
@@ -349,10 +349,8 @@ llvm::Value *DictLowerer::emitRecordLiteral(ObjectLitExpr *lit) {
       Lowering::Operand k{lowering_.stringLowerer().stringLiteral(utf16(prop.name)), false, string};
       if (prop.key) {
         k = lowering_.refCounts().emitOperand(prop.key, AssignLowerer::cannotAssign(prop.value));
-        lowering_.throwLowerer().holdOperand(k, lowering_.mayThrow().exprThrows(prop.value));
       }
       llvm::Value *v = lowering_.exprLowerer().emitExpr(prop.value);
-      lowering_.throwLowerer().takeOperand(k);
       put(k.value, v, prop.value->type);
       lowering_.refCounts().dropOperand(k);
       continue;
@@ -415,7 +413,7 @@ llvm::Value *DictLowerer::emitRecordLiteral(ObjectLitExpr *lit) {
     lowering_.refCounts().dropOperand(from);
   }
 
-  return lowering_.throwLowerer().take(held);
+  return held;
 }
 
 }

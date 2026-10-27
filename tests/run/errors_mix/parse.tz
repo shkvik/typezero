@@ -1,46 +1,35 @@
 // Reading the input: regexes made when the program runs, decimal(s) and
-// JSON.parse<T>, whose errors become errors of the program with a cause.
-import { AppError, ParseError } from "./errors.tz"
+// JSON.parse<T>, whose errors become errors of the program in a Result.
+import { ConfigError, ParseError } from "./errors.tz"
 
 export type Entry = { name: string; amount: decimal; tags: string[] }
 
-export function lineRegex(separator: string): RegExp {
-  const re = RegExp.parse(`^(\\w+)${separator}\\s*(\\S+)(.*)$`)
-  if (re.isErr()) throw new SyntaxError(re.error.message)
-  return re.value
-}
-
-export function tagsOf(text: string, flags: string): string[] {
+export function tagsOf(text: string): string[] {
   const tags: string[] = []
-  const re = RegExp.parse("#(\\w+)", flags)
-  if (re.isErr()) throw new SyntaxError(re.error.message)
-  for (const m of text.matchAll(re.value)) tags.push(m[1] ?? "")
+  for (const m of text.matchAll(/#(\w+)/g)) tags.push(m[1] ?? "")
   return tags
 }
 
-export function parseLine(line: string, n: int, separator: string, flags: string): Entry {
-  const m = lineRegex(separator).exec(line)
-  if (m == undefined) throw new ParseError(n, `cannot read '${line}'`)
-  const amount = decimal(m[2] ?? "")
-  if (amount.isErr()) throw new ParseError(n, `bad amount '${m[2]}'`, new SyntaxError(amount.error.message))
-  return { name: m[1] ?? "", amount: amount.value, tags: tagsOf(m[3] ?? "", flags) }
+export function parseLine(line: string, n: int, separator: string): Result<Entry, ParseError | RegexError> {
+  const re = RegExp.parse(`^(\\w+)${separator}\\s*(\\S+)(.*)$`)
+  if (re.isErr()) return err(re.error)
+  const m = re.value.exec(line)
+  if (m == undefined) return err({ code: "unreadable", message: `cannot read '${line}'`, line: n })
+  const text = m[2] ?? ""
+  const amount = decimal(text)
+  if (amount.isErr()) return err({ code: "bad_amount", message: amount.error.message, line: n, text })
+  return ok({ name: m[1] ?? "", amount: amount.value, tags: tagsOf(m[3] ?? "") })
 }
 
 export type Config = { limit: decimal; rules: string[]; owner?: { name: string } }
 
-export function loadConfig(text: string): Config {
+export function loadConfig(text: string): Result<Config, ConfigError> {
   const config = JSON.parse<Config>(text)
-  if (config.isErr()) {
-    const e = config.error
-    const text = e.path == "" ? e.message : `${e.path}: ${e.message}`
-    throw new AppError("bad config", 500, {
-      cause: e.code == "bad_json" ? new SyntaxError(text) : new TypeError(text),
-    })
-  }
-  return config.value
+  if (config.isErr()) return err({ code: "bad_config", message: "bad config", cause: config.error })
+  return ok(config.value)
 }
 
-// Reading a Json by hand: a key of null throws a TypeError.
+// Reading a Json by hand: a key of null is undefined.
 export function ownerName(text: string): string {
   const j = JSON.parse(text).unwrapOr(null)
   const name = j.owner.name

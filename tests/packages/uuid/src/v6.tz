@@ -1,46 +1,53 @@
 import { parse } from './parse.tz';
 import { unsafeStringify } from './stringify.tz';
-import { UUIDTypes, Version6Options } from './types.tz';
+import { UUIDTypes, UuidError, Version6Options } from './types.tz';
 import { v1 } from './v1.tz';
 import { v1ToV6 } from './v1ToV6.tz';
 
 // tz: v1() and v1ToV6() give a string or bytes (UUIDTypes), as plain functions have one
 // signature; bytes in, bytes out, which a string would only be after parse().
-function bytesOf(uuid: UUIDTypes): Uint8Array {
-  return typeof uuid == 'string' ? parse(uuid) : uuid;
+function bytesOf(uuid: Result<UUIDTypes, UuidError>): Result<Uint8Array, UuidError> {
+  if (uuid.isErr()) return err(uuid.error);
+  const value = uuid.value;
+  if (typeof value == 'string') return parse(value);
+  return ok(value);
 }
 
 function v6<TBuf extends Uint8Array = never>(
   options?: Version6Options,
   buf?: TBuf,
   offset?: number,
-): UUIDTypes<TBuf> {
+): Result<UUIDTypes<TBuf>, UuidError> {
   options ??= {};
   offset ??= 0;
 
   // v6 is v1 with different field layout, so we start with a v1 UUID, albeit
   // with slightly different behavior around how the clock_seq and node fields
   // are randomized, which is why we call v1 with _v6: true.
-  let bytes = bytesOf(v1({ ...options, _v6: true }, new Uint8Array(16)));
+  const v1Bytes = bytesOf(v1({ ...options, _v6: true }, new Uint8Array(16)));
+  if (v1Bytes.isErr()) return err(v1Bytes.error);
 
   // Reorder the fields to v6 layout.
-  bytes = bytesOf(v1ToV6(bytes));
+  const v6Bytes = bytesOf(v1ToV6(v1Bytes.value));
+  if (v6Bytes.isErr()) return err(v6Bytes.error);
+  const bytes = v6Bytes.value;
 
   // Return as a byte array if requested
   if (buf) {
     // tz: the check is on the int offset, in a form the compiler reads.
     const at = offset | 0;
     if (at < 0 || at > buf.length - 16) {
-      throw new RangeError(
-        `UUID byte range ${offset}:${offset + 15} is out of buffer bounds`,
-      );
+      return err({
+        name: 'RangeError',
+        message: `UUID byte range ${offset}:${offset + 15} is out of buffer bounds`,
+      });
     }
 
     buf.set(bytes.subarray(0, 16), at);
-    return buf;
+    return ok(buf);
   }
 
-  return unsafeStringify(bytes);
+  return ok(unsafeStringify(bytes));
 }
 
 export { v6 };

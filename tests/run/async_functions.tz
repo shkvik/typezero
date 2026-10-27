@@ -1,6 +1,6 @@
 // same-as-node --experimental-transform-types
 // Async functions of every kind: methods that use `this`, closures, generic
-// functions, arrows given to map, `return` of a Promise, `finally`.
+// functions, arrows given to map, `return` of a Promise.
 class Store {
   items: string[] = []
   constructor(public name: string) {}
@@ -52,23 +52,6 @@ async function retPromise(): Promise<string> {
 }
 console.log(await retPromise())
 
-async function withFinally(): Promise<int> {
-  try {
-    return await identity(1)
-  } finally {
-    console.log("finally runs")
-  }
-}
-console.log(await withFinally())
-
-async function finallyPromise(): Promise<int> {
-  try {
-    return identity(2)
-  } finally {
-    console.log("finally before follow")
-  }
-}
-console.log(await finallyPromise())
 
 const obj = {
   n: 10,

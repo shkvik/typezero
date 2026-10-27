@@ -57,7 +57,7 @@ interface Number {
 
 // JSON (docs/modules.md, section 5; docs/narrowing.md, section 3).
 type Json = null | boolean | number | string | Json[] | { [key: string]: Json }
-type JsonError = { code: "bad_json" | "bad_field"; message: string; path: string }
+type JsonError = { code: "bad_json" | "bad_field" | "bad_class" | "circular"; message: string; path: string }
 type UriError = { code: "bad_uri"; message: string }
 type RegexError = { code: "bad_regex"; message: string }
 type UrlError = { code: "bad_url"; message: string; input: string }
@@ -142,15 +142,31 @@ type HkdfParams = import("node:crypto").webcrypto.HkdfParams
 type Timeout = NodeJS.Timeout
 type Immediate = NodeJS.Immediate
 
-// An error of the system: a file that is not there, no access (docs/io.md,
-// section 5). Node has no such global; tz does.
-declare class SystemError extends Error {
+// An error of the system: a file that is not there, no access, a port that
+// is taken (docs/io.md, section 5). Node has no such global; tz does.
+type SystemError = {
   code: string
+  message: string
   errno: int
   syscall: string
   path?: string
   dest?: string
 }
+
+// The error of a stream: what destroy(e) is given, the Err of for await,
+// pipeline, finished and end() (docs/streams.md).
+type StreamError = {
+  code: string
+  message: string
+  errno?: int
+  syscall?: string
+  path?: string
+  cause?: string
+}
+
+// The error of once(), on() and the timers of node:timers/promises that a
+// signal ends.
+type AbortError = { code: "ABORT_ERR"; message: string }
 
 // The error of execSync, execFileSync and spawnSync of node:child_process
 // (docs/process.md): the program could not start, ran too long or printed

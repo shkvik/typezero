@@ -10,13 +10,13 @@ ac.signal.addEventListener("abort", (ev) => console.log("listener", ev.type, ev.
 ac.abort()
 ac.abort() // once only
 const reason = ac.signal.reason
-if (reason instanceof DOMException) console.log(reason.name, reason.message, reason.code, reason instanceof Error)
+if (reason instanceof DOMException) console.log(reason.name, reason.message, reason.code)
 console.log([ac], ac.signal)
 
 const own = new AbortController()
-own.abort(new RangeError("stop"))
+own.abort("stop")
 const stop = own.signal.reason
-if (stop instanceof Error) console.log("aborted", stop.name, stop.message)
+if (typeof stop == "string") console.log("aborted", stop)
 const given = AbortSignal.abort()
 const why = given.reason
 console.log(given.aborted, why instanceof DOMException ? why.name : "?")
@@ -28,10 +28,10 @@ const two = new AbortController()
 const either = AbortSignal.any([one.signal, two.signal])
 either.addEventListener("abort", () => {
   const r = either.reason
-  console.log("either", r instanceof Error ? r.message : "?")
+  console.log("either", typeof r == "string" ? r : "?")
 })
-two.abort(new Error("second"))
-one.abort(new Error("first"))
+two.abort("second")
+one.abort("first")
 console.log(AbortSignal.any([given]).aborted)
 
 // timeout(): a TimeoutError, after the delay; its timer does not keep the

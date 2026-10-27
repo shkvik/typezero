@@ -15,9 +15,9 @@ b2 a1 c3
 { ann: 6, bob: 10 }
 hello, tz unset
 alpha
-caught ENOENT open true
+failed ENOENT open true
 Ok { value: 'alpha' }
-Err { error: 'no a.txt' } at readText (jobs.tz:109)
+Err { error: 'no a.txt' } at Memory.read (jobs.tz:66)
 5 letters
 Dear Ann, you owe 12.50.
 PLAIN never ran

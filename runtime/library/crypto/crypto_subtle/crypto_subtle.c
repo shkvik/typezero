@@ -45,8 +45,7 @@ static void job_free(SubtleJob *j);
 static int job_copy(SubtleJob *j, int part, const TzType *type, const void *value) {
   TzCryptoData d;
   if (!tz_crypto_data(&d, type, value, TZ_ENC_UTF8, "data")) {
-    void *error = tz_error_take();
-    tz_promise_reject(j->promise, error);
+    tz_panicf("internal error: crypto data of a wrong type");
     job_free(j);
     return 0;
   }
@@ -108,11 +107,6 @@ static void job_done(TzWork *w) {
 static void job_queue(SubtleJob *j, void (*run)(SubtleJob *), int64_t size) {
   if (size >= 0) {
     j->out = tz_abuf_new(size);
-    if (!j->out) {
-      tz_instance_release((TzInstance *)tz_error_take());
-      j->failed = 1;
-      j->out = tz_abuf_new(0);
-    }
   }
   j->run = run;
   j->work.work = job_work;

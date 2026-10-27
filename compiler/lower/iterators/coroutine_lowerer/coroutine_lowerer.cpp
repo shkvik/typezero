@@ -296,7 +296,6 @@ llvm::Value *CoroutineLowerer::emitResume(llvm::Value *it, llvm::Value *out, llv
   lowering_.builder_.CreateStore(lowering_.builder_.getInt32(1), running);
   lowering_.builder_.CreateCall(coroIntrinsic(llvm::Intrinsic::coro_resume), {frame});
   lowering_.builder_.CreateStore(lowering_.builder_.getInt32(0), running);
-  lowering_.throwLowerer().emitThrowCheck();
   llvm::Value *gave = lowering_.builder_.CreateNot(
       lowering_.builder_.CreateCall(coroIntrinsic(llvm::Intrinsic::coro_done), {frame}));
   llvm::BasicBlock *resumeEnd = lowering_.builder_.GetInsertBlock();

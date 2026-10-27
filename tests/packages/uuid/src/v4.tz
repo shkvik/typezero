@@ -1,14 +1,14 @@
 import { rng } from './rng.tz';
 import { unsafeStringify } from './stringify.tz';
-import { UUIDTypes, Version4Options } from './types.tz';
+import { UUIDTypes, UuidError, Version4Options } from './types.tz';
 
 function v4<TBuf extends Uint8Array = never>(
   options?: Version4Options,
   buf?: TBuf,
   offset?: number,
-): UUIDTypes<TBuf> {
+): Result<UUIDTypes<TBuf>, UuidError> {
   if (!buf && !options) {
-    return crypto.randomUUID();
+    return ok(crypto.randomUUID());
   }
 
   // Putting tail-code that could just go inline here in a separate function to
@@ -22,12 +22,12 @@ function _v4<TBuf extends Uint8Array = never>(
   options?: Version4Options,
   buf?: TBuf,
   offset?: number,
-): UUIDTypes<TBuf> {
+): Result<UUIDTypes<TBuf>, UuidError> {
   options = options || {};
 
   const rnds = options.random ?? options.rng?.() ?? rng();
   if (rnds.length < 16) {
-    throw new Error('Random bytes length must be >= 16');
+    return err({ name: 'Error', message: 'Random bytes length must be >= 16' });
   }
 
   // Per 4.4, set bits for version and `clock_seq_hi_and_reserved`
@@ -39,16 +39,17 @@ function _v4<TBuf extends Uint8Array = never>(
     // tz: the check is on the int offset, in a form the compiler reads.
     const at = (offset ?? 0) | 0;
     if (at < 0 || at > buf.length - 16) {
-      throw new RangeError(
-        `UUID byte range ${at}:${at + 15} is out of buffer bounds`,
-      );
+      return err({
+        name: 'RangeError',
+        message: `UUID byte range ${at}:${at + 15} is out of buffer bounds`,
+      });
     }
 
     buf.set(rnds.subarray(0, 16), at);
 
-    return buf;
+    return ok(buf);
   }
 
-  return unsafeStringify(rnds);
+  return ok(unsafeStringify(rnds));
 }
 export { v4 };

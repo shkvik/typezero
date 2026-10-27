@@ -35,7 +35,7 @@ log(`composed done ${bothDone.isOk()} ${(await bothEnded).isOk()}`)
 const ac = new AbortController()
 const slow = new Readable({ read() {} })
 addAbortSignal(ac.signal, slow)
-slow.on("error", (e) => log(`slow error ${e.name}`))
+slow.on("error", (e) => log(`slow error ${e.code}`))
 slow.on("close", () => log("slow close"))
 ac.abort()
 

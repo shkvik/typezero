@@ -9,6 +9,7 @@
 #include "compiler/library/result/result_checker/result_checker.h"
 #include "compiler/library/stream/chunk_types/chunk_types.h"
 #include "compiler/declare/prelude/prelude.h"
+#include "compiler/library/fs/fs_checker/fs_checker.h"
 #include "compiler/library/stream/set_encoding_checker/set_encoding_checker.h"
 #include "compiler/library/tz_modules/library_calls/library_calls.h"
 #include "llvm/ADT/STLExtras.h"
@@ -92,7 +93,8 @@ Expr *StreamChecker::checkStreamIntrinsic(CallExpr *call, NameExpr *name, const 
   case Builtin::LibStdWrite: {
     const Type *buffer = Type::bytesType(Type::Bytes::Buffer);
     std::vector<const Type *> params;
-    const Type *result = Type::promise(Type::intTy());
+    const Type *result =
+        Type::promise(Type::result(Type::intTy(), checker_.fsChecker().systemError()));
     switch (call->builtin) {
     case Builtin::LibFsOpen:
       params = {Type::string(), Type::string(), Type::intTy()};
@@ -235,6 +237,9 @@ Expr *StreamChecker::checkStreamCall(CallExpr *call, MemberExpr *member, ClassDe
   auto isCallback = [&](Expr *&arg) {
     if (isa<FunctionExpr>(arg)) {
       return true;
+    }
+    if (isa<StringLitExpr>(arg)) {
+      return false;
     }
     arg = checker_.exprChecker().checkExpr(arg);
     checked.insert(arg);

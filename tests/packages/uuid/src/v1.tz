@@ -1,6 +1,6 @@
 import { rng } from './rng.tz';
 import { unsafeStringify } from './stringify.tz';
-import { UUIDTypes, Version1Options } from './types.tz';
+import { UUIDTypes, UuidError, Version1Options } from './types.tz';
 
 // **`v1()` - Generate time-based UUID**
 //
@@ -28,7 +28,7 @@ function v1<TBuf extends Uint8Array = never>(
   options?: Version1Options,
   buf?: TBuf,
   offset?: number,
-): UUIDTypes<TBuf> {
+): Result<UUIDTypes<TBuf>, UuidError> {
   let bytes: Uint8Array;
 
   // Extract _v6 flag from options, clearing options if appropriate
@@ -42,7 +42,7 @@ function v1<TBuf extends Uint8Array = never>(
 
   if (options) {
     // With options: Make UUID independent of internal state
-    bytes = v1Bytes(
+    const made = v1Bytes(
       options.random ?? options.rng?.() ?? rng(),
       options.msecs,
       options.nsecs,
@@ -51,6 +51,8 @@ function v1<TBuf extends Uint8Array = never>(
       buf,
       offset,
     );
+    if (made.isErr()) return err(made.error);
+    bytes = made.value;
   } else {
     // Without options: Make UUID from internal state
     const now = Date.now();
@@ -62,7 +64,7 @@ function v1<TBuf extends Uint8Array = never>(
     // `node`.
     //
     // https://www.rfc-editor.org/rfc/rfc9562.html#section-5.6-4
-    bytes = v1Bytes(
+    const made = v1Bytes(
       rnds,
       _state.msecs,
       _state.nsecs,
@@ -73,9 +75,11 @@ function v1<TBuf extends Uint8Array = never>(
       buf,
       offset,
     );
+    if (made.isErr()) return err(made.error);
+    bytes = made.value;
   }
 
-  return buf ?? unsafeStringify(bytes);
+  return ok(buf ?? unsafeStringify(bytes));
 }
 
 // (Private!)  Do not use.  This method is only exported for testing purposes
@@ -142,17 +146,18 @@ function v1Bytes(
   node?: Uint8Array,
   buf?: Uint8Array,
   offset: number = 0,
-) {
+): Result<Uint8Array, UuidError> {
   if (rnds.length < 16) {
-    throw new Error('Random bytes length must be >= 16');
+    return err({ name: 'Error', message: 'Random bytes length must be >= 16' });
   }
 
   // Defaults
   if (buf) {
     if (offset < 0 || offset + 16 > buf.length) {
-      throw new RangeError(
-        `UUID byte range ${offset}:${offset + 15} is out of buffer bounds`,
-      );
+      return err({
+        name: 'RangeError',
+        message: `UUID byte range ${offset}:${offset + 15} is out of buffer bounds`,
+      });
     }
   }
 
@@ -216,12 +221,12 @@ function v1Bytes(
     b[10 + n] = id[n] ?? 0;
   }
 
-  if (!buf) return b;
+  if (!buf) return ok(b);
   // tz: the offset is checked again where the bytes go in, as an int, so that
-  // the compiler sees them fit; the check above has thrown already otherwise.
+  // the compiler sees them fit; the check above has returned already otherwise.
   const at = offset | 0;
   if (at >= 0 && at <= buf.length - 16) buf.set(b, at);
-  return buf;
+  return ok(buf);
 }
 
 export { v1 };

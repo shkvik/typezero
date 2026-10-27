@@ -1,6 +1,6 @@
 // same-as-node
 // Typed arrays in fields, arrays, optionals and generic code, iterated,
-// with callbacks that throw, and lengths and offsets checked before use.
+// with callbacks, and lengths and offsets checked before use.
 class Image {
   pixels: Uint8ClampedArray
   width: int
@@ -44,13 +44,8 @@ function* gen() {
   yield 2
 }
 console.log(new Int32Array(gen()), Uint8Array.from(gen(), x => (x * 3) & 0xff))
-try {
-  bytes.forEach(x => {
-    if (x > 15) throw new Error(`too big: ${x}`)
-  })
-} catch (e) {
-  console.log(e.message)
-}
+const big = bytes.find(x => x > 15)
+if (big != undefined) console.log(`too big: ${big}`)
 const n = -1
 const size = n + bytes.length - 4
 if (size >= 0) console.log(new Uint8Array(size))

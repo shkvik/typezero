@@ -210,9 +210,7 @@ llvm::Value *DecimalLowerer::emitDecimalArithmetic(BinaryOp op, llvm::Value *lhs
 llvm::Value *DecimalLowerer::emitDecimalBinary(BinaryExpr *bin) {
   Lowering::Operand a =
       lowering_.refCounts().emitOperand(bin->lhs, AssignLowerer::cannotAssign(bin->rhs));
-  lowering_.throwLowerer().holdOperand(a, lowering_.mayThrow().exprThrows(bin->rhs));
   Lowering::Operand b = lowering_.refCounts().emitOperand(bin->rhs, true);
-  lowering_.throwLowerer().takeOperand(a);
   bool arithmetic = false;
   llvm::Value *result;
   switch (bin->op) {
@@ -235,7 +233,6 @@ llvm::Value *DecimalLowerer::emitDecimalBinary(BinaryExpr *bin) {
   }
   lowering_.refCounts().dropOperand(a);
   lowering_.refCounts().dropOperand(b);
-  lowering_.emitThrowCheckIf(arithmetic);
 
   return result;
 }
@@ -244,7 +241,6 @@ llvm::Value *DecimalLowerer::emitDecimalCompound(BinaryOp op, llvm::Value *old, 
   Lowering::Operand rhs = lowering_.refCounts().emitOperand(value, true);
   llvm::Value *result = emitDecimalArithmetic(op, old, rhs.value);
   lowering_.refCounts().dropOperand(rhs);
-  lowering_.throwLowerer().emitThrowCheck();
 
   return result;
 }
@@ -255,7 +251,6 @@ llvm::Value *DecimalLowerer::emitDecimalUpdate(UpdateExpr *update, llvm::Value *
       lowering_.decTy_, {lowering_.builder_.getInt64(1), lowering_.builder_.getInt64(0)});
   llvm::Value *updated =
       emitDecimalArithmetic(update->increment ? BinaryOp::Add : BinaryOp::Sub, old, one);
-  lowering_.throwLowerer().emitThrowCheck();
   lowering_.builder_.CreateStore(updated, address);
   if (!update->prefix) {
     return old;
@@ -289,7 +284,6 @@ llvm::Value *DecimalLowerer::emitRoundingMode(CallExpr *call, size_t index) {
       {lowering_.stringLowerer().stringObj(mode.value),
        lowering_.stringLowerer().stringMeta(mode.value)});
   lowering_.refCounts().dropOperand(mode);
-  lowering_.throwLowerer().emitThrowCheck();
 
   return result;
 }
@@ -298,7 +292,7 @@ llvm::Value *DecimalLowerer::emitDecimalFold(CallExpr *call) {
   int32_t op = call->builtin == Builtin::DecSum   ? kFoldSum
                : call->builtin == Builtin::DecMax ? kFoldMax
                                                   : kFoldMin;
-  std::vector<llvm::Value *> values = lowering_.throwLowerer().emitHeldValues(call->args);
+  std::vector<llvm::Value *> values = lowering_.exprLowerer().emitExprs(call->args);
   std::vector<Lowering::Operand> args;
   for (size_t i = 0; i < values.size(); ++i) {
     args.push_back({values[i], true, call->args[i]->type});
@@ -325,7 +319,6 @@ llvm::Value *DecimalLowerer::emitDecimalFold(CallExpr *call) {
   for (const Lowering::Operand &arg : args) {
     lowering_.refCounts().dropOperand(arg);
   }
-  lowering_.emitThrowCheckIf(op == kFoldSum);
   llvm::Value *result = lowering_.builder_.CreateLoad(lowering_.decTy_, acc);
   if (!call->type->isOptional()) {
     return result;
@@ -351,7 +344,6 @@ llvm::Value *DecimalLowerer::emitDecimalCall(CallExpr *call) {
     if (arg->type->isFloat()) {
       llvm::Value *result =
           callReturningDecimal("tz_dec_from_f64", {lowering_.exprLowerer().emitExpr(arg)});
-      lowering_.throwLowerer().emitThrowCheck();
       return result;
     }
     static const std::vector<MakerFields> orders = {{nullptr, {"code", "message", "text"}}};
@@ -368,7 +360,6 @@ llvm::Value *DecimalLowerer::emitDecimalCall(CallExpr *call) {
     if (checked) {
       return lowering_.resultLowerer().catchFailure(result, call->type, call->loc());
     }
-    lowering_.throwLowerer().emitThrowCheck();
     return result;
   }
   case Builtin::DecMax:
@@ -382,9 +373,6 @@ llvm::Value *DecimalLowerer::emitDecimalCall(CallExpr *call) {
   auto *member = cast<MemberExpr>(call->callee);
   Lowering::Operand self = lowering_.refCounts().emitOperand(
       member->object, llvm::all_of(call->args, AssignLowerer::cannotAssign));
-  lowering_.throwLowerer().holdOperand(self, llvm::any_of(call->args, [&](Expr *arg) {
-                                         return lowering_.mayThrow().exprThrows(arg);
-                                       }));
   llvm::Value *a = decimalCoef(self.value), *am = decimalMeta(self.value);
   auto count = [&](size_t i, int64_t absent) -> std::pair<llvm::Value *, llvm::Value *> {
     if (i < call->args.size()) {
@@ -482,12 +470,7 @@ llvm::Value *DecimalLowerer::emitDecimalCall(CallExpr *call) {
   default:
     llvm_unreachable("not a method of decimals");
   }
-  lowering_.throwLowerer().takeOperand(self);
   lowering_.refCounts().dropOperand(self);
-  lowering_.emitThrowCheckIf(call->builtin != Builtin::DecIsInteger &&
-                             call->builtin != Builtin::DecDecimalPlaces &&
-                             call->builtin != Builtin::DecAbs &&
-                             !(call->builtin == Builtin::DecToString && call->args.empty()));
 
   return result;
 }

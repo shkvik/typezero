@@ -1,5 +1,5 @@
 import { md5 } from './md5.tz';
-import { UUIDTypes } from './types.tz';
+import { UUIDTypes, UuidError } from './types.tz';
 import { v35 } from './v35.tz';
 
 export { DNS, URL } from './v35.tz';
@@ -9,7 +9,7 @@ function v3<TBuf extends Uint8Array = never>(
   namespace: UUIDTypes,
   buf?: TBuf,
   offset?: number,
-): UUIDTypes<TBuf> {
+): Result<UUIDTypes<TBuf>, UuidError> {
   return v35(0x30, md5, value, namespace, buf, offset);
 }
 

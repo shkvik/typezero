@@ -174,8 +174,7 @@ Expr *NewChecker::checkNew(NewExpr *expr, const Type *expected) {
     return expr;
   }
   if (expr->name != "Array") {
-    checker_.diags_.error(expr->loc(), "'new " + expr->name +
-                                           "' is not supported; only 'new Array<T>(length)' is");
+    checker_.diags_.error(expr->loc(), "cannot find class '" + expr->name + "'");
     checkArgsLoosely();
     return expr;
   }

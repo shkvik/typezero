@@ -421,7 +421,7 @@ void TailCallLowerer::emitTailReturn(Expr *value) {
 void TailCallLowerer::emitTailJump(CallExpr *call) {
   size_t k = size_t(llvm::find(lowering_.tailGroup_->members, call->func->decl) -
                     lowering_.tailGroup_->members.begin());
-  std::vector<llvm::Value *> args = lowering_.throwLowerer().emitHeldValues(call->args);
+  std::vector<llvm::Value *> args = lowering_.exprLowerer().emitExprs(call->args);
   const FuncSymbol *func = call->func;
   for (size_t i = args.size(); i < func->params.size(); ++i) {
     args.push_back(lowering_.optionalLowerer().undefinedValue(func->params[i]));

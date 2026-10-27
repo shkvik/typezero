@@ -34,7 +34,6 @@ llvm::Value *LazyChainLowerer::callCallback(llvm::Value *slot, const Type *fnTyp
   args.resize(passes);
   llvm::Value *fn = lowering_.builder_.CreateLoad(lowering_.fnTy_, slot, "callback");
   llvm::Value *result = lowering_.closureLowerer().callFunctionValue(fn, fnType, args);
-  lowering_.emitThrowCheckIf(lowering_.typeThrows(fnType));
 
   return result;
 }

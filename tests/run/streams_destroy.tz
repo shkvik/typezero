@@ -13,9 +13,9 @@ const r = new Readable({
 })
 r.on("error", (e) => log(`r error ${e.message} errored=${r.errored?.message}`))
 r.on("close", () => log(`r close closed=${r.closed} destroyed=${r.destroyed}`))
-r.destroy(new Error("oops"))
+r.destroy({ code: "E_OOPS", message: "oops" })
 log(`destroyed now ${r.destroyed}`)
-r.destroy(new Error("again"))
+r.destroy({ code: "E_AGAIN", message: "again" })
 
 const w = new Writable({ write(c, e, cb) { cb() } })
 w.on("close", () => log("w close"))

@@ -1,6 +1,6 @@
 import { parse } from './parse.tz';
 import { unsafeStringify } from './stringify.tz';
-import { NonSharedArrayBuffer, UUIDTypes } from './types.tz';
+import { NonSharedArrayBuffer, UUIDTypes, UuidError } from './types.tz';
 
 /**
  * Convert a v1 UUID to a v6 UUID
@@ -11,12 +11,12 @@ import { NonSharedArrayBuffer, UUIDTypes } from './types.tz';
  */
 export function v1ToV6(
   uuid: string | Uint8Array,
-): UUIDTypes<NonSharedArrayBuffer> {
-  const v1Bytes = typeof uuid == 'string' ? parse(uuid) : uuid;
+): Result<UUIDTypes<NonSharedArrayBuffer>, UuidError> {
+  if (typeof uuid != 'string') return ok(_v1ToV6(uuid));
+  const v1Bytes = parse(uuid);
+  if (v1Bytes.isErr()) return err(v1Bytes.error);
 
-  const v6Bytes = _v1ToV6(v1Bytes);
-
-  return typeof uuid == 'string' ? unsafeStringify(v6Bytes) : v6Bytes;
+  return ok(unsafeStringify(_v1ToV6(v1Bytes.value)));
 }
 
 // Do the field transformation needed for v1 -> v6

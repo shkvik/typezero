@@ -119,15 +119,13 @@ llvm::Value *StringLowerer::emitConcat(BinaryExpr *bin) {
 
   std::vector<bool> laterThrows(parts.size(), false);
   for (size_t i = parts.size() - 1; i > 0; --i) {
-    laterThrows[i - 1] = laterThrows[i] || lowering_.mayThrow().exprThrows(parts[i]);
+    laterThrows[i - 1] = laterThrows[i] || false;
   }
   std::vector<Lowering::Operand> operands;
   for (size_t i = 0; i < parts.size(); ++i) {
     operands.push_back(emitConcatPart(parts[i], laterCannotAssign[i]));
-    lowering_.throwLowerer().holdOperand(operands.back(), laterThrows[i]);
   }
   for (Lowering::Operand &operand : operands) {
-    lowering_.throwLowerer().takeOperand(operand);
   }
 
   return concatOperands(operands);
@@ -166,7 +164,7 @@ llvm::Value *StringLowerer::emitTemplate(TemplateExpr *tmpl) {
   }
   std::vector<bool> laterThrows(count, false);
   for (size_t i = count; i > 1; --i) {
-    laterThrows[i - 2] = laterThrows[i - 1] || lowering_.mayThrow().exprThrows(tmpl->exprs[i - 1]);
+    laterThrows[i - 2] = laterThrows[i - 1] || false;
   }
   std::vector<Lowering::Operand> operands;
   for (size_t i = 0; i <= count; ++i) {
@@ -175,11 +173,9 @@ llvm::Value *StringLowerer::emitTemplate(TemplateExpr *tmpl) {
     }
     if (i < count) {
       operands.push_back(emitConcatPart(tmpl->exprs[i], laterCannotAssign[i]));
-      lowering_.throwLowerer().holdOperand(operands.back(), laterThrows[i]);
     }
   }
   for (Lowering::Operand &operand : operands) {
-    lowering_.throwLowerer().takeOperand(operand);
   }
   if (operands.empty()) {
     return stringLiteral(u"");
@@ -194,9 +190,7 @@ llvm::Value *StringLowerer::emitTemplate(TemplateExpr *tmpl) {
 llvm::Value *StringLowerer::emitStringComparison(BinaryExpr *bin) {
   Lowering::Operand lhs =
       lowering_.refCounts().emitOperand(bin->lhs, AssignLowerer::cannotAssign(bin->rhs));
-  lowering_.throwLowerer().holdOperand(lhs, lowering_.mayThrow().exprThrows(bin->rhs));
   Lowering::Operand rhs = lowering_.refCounts().emitOperand(bin->rhs, true);
-  lowering_.throwLowerer().takeOperand(lhs);
   llvm::Value *args[] = {stringObj(lhs.value), stringMeta(lhs.value), stringObj(rhs.value),
                          stringMeta(rhs.value)};
   llvm::Value *zero = lowering_.builder_.getInt32(0);
@@ -237,9 +231,7 @@ llvm::Value *StringLowerer::emitStringComparison(BinaryExpr *bin) {
 llvm::Value *StringLowerer::emitStringIndex(IndexExpr *index) {
   Lowering::Operand object =
       lowering_.refCounts().emitOperand(index->object, AssignLowerer::cannotAssign(index->index));
-  lowering_.throwLowerer().holdOperand(object, lowering_.mayThrow().exprThrows(index->index));
   llvm::Value *position = lowering_.exprLowerer().emitExpr(index->index);
-  lowering_.throwLowerer().takeOperand(object);
   auto read = [&] {
     return callReturningString(lowering_.rt_.strCharAt,
                                {stringObj(object.value), stringMeta(object.value), position});

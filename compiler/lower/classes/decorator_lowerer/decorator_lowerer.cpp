@@ -197,7 +197,7 @@ llvm::Value *DecoratorLowerer::emitMetaCall(CallExpr *call) {
   llvm::Type *ptr = lowering_.builder_.getPtrTy(), *i32 = lowering_.builder_.getInt32Ty(),
              *i64 = lowering_.builder_.getInt64Ty();
   bool define = call->builtin == Builtin::MetaDefine;
-  std::vector<llvm::Value *> values = lowering_.throwLowerer().emitHeldValues(call->args);
+  std::vector<llvm::Value *> values = lowering_.exprLowerer().emitExprs(call->args);
   llvm::Value *key = values[0];
   llvm::Value *target = values[define ? 2 : 1];
   llvm::Value *property = values[define ? 3 : 2];
@@ -283,7 +283,6 @@ llvm::Value *DecoratorLowerer::emitMetaCall(CallExpr *call) {
   lowering_.refCounts().releaseValue(target, Type::anyObject());
   lowering_.refCounts().releaseValue(property, propertyType);
   if (define && !call->metaKey && !call->designRecord && !isa<StringLitExpr>(call->args[0])) {
-    lowering_.throwLowerer().emitThrowCheck();
   }
 
   return result;

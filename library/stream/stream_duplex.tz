@@ -23,7 +23,7 @@ const kStringChunks = 1
 
 export interface ReadableOptions<T> {
   highWaterMark?: double
-  encoding?: string
+  encoding?: BufferEncoding
   objectMode?: boolean
   emitClose?: boolean
   autoDestroy?: boolean
@@ -33,7 +33,8 @@ export interface ReadableOptions<T> {
   construct?: (this: Readable<T>, callback: StreamCallback) => void
 }
 
-function chunkEncoding(kind: int, objectMode: boolean, encoding: string | undefined) {
+function chunkEncoding(kind: int, objectMode: boolean,
+                       encoding: BufferEncoding | undefined): BufferEncoding | undefined {
   if (objectMode || kind != kStringChunks) return encoding
   return encoding ?? "utf8"
 }
@@ -68,8 +69,8 @@ export class Readable<T = Buffer> extends StreamEmitter<StreamEvents<T>> {
 
   _read(size: int): void {
     const read = this.#readOption
-    if (read == undefined) throw methodNotImplemented("_read()")
-    read.call(this, size)
+    if (read == undefined) errorOrDestroy(this, methodNotImplemented("_read()"))
+    else read.call(this, size)
   }
 
   _destroy(error: StreamError | undefined, callback: StreamCallback): void {
@@ -98,23 +99,11 @@ export class Readable<T = Buffer> extends StreamEmitter<StreamEvents<T>> {
   }
 
   [Symbol.asyncIterator](): AsyncGenerator<Result<T, StreamError>> {
-    return resultChunks<T>(createAsyncIterator<T>(this, true))
+    return createAsyncIterator<T>(this, true)
   }
 
   iterator(options?: { destroyOnReturn?: boolean }): AsyncGenerator<Result<T, StreamError>> {
-    return resultChunks<T>(createAsyncIterator<T>(this, options?.destroyOnReturn ?? true))
-  }
-}
-
-async function* resultChunks<T>(source: AsyncGenerator<T>): AsyncGenerator<Result<T, StreamError>> {
-  try {
-    for await (const chunk of source) {
-      const item: Result<T, StreamError> = ok(chunk)
-      yield item
-    }
-  } catch (e) {
-    const item: Result<T, StreamError> = err(e)
-    yield item
+    return createAsyncIterator<T>(this, options?.destroyOnReturn ?? true)
   }
 }
 
@@ -133,7 +122,7 @@ class IteratorWait {
 function noWait() {}
 
 async function* createAsyncIterator<T>(stream: Stream, destroyOnReturn: boolean):
-    AsyncGenerator<T> {
+    AsyncGenerator<Result<T, StreamError>> {
   const wait = new IteratorWait()
   const next = function (this: Stream) {
     void this
@@ -150,21 +139,22 @@ async function* createAsyncIterator<T>(stream: Stream, destroyOnReturn: boolean)
     while (true) {
       const chunk = stream.destroyed ? undefined : stream._readChunk()
       if (chunk != undefined) {
-        yield __tz_chunk<T>(chunk)
+        const item: Result<T, StreamError> = ok(__tz_chunk<T>(chunk))
+        yield item
       } else {
         const error = wait.error
-        if (error != undefined) throw error
+        if (error != undefined) {
+          failed = true
+          const item: Result<T, StreamError> = err(error)
+          yield item
+          return
+        }
         if (wait.ended) return
         await new Promise<void>((resolve) => {
           wait.callback = resolve
         })
       }
     }
-  } catch (err) {
-    failed = true
-    const error = aggregateTwoErrors(wait.error, err) ?? err
-    wait.error = error
-    throw error
   } finally {
     const r = stream._readableState
     if ((failed || destroyOnReturn) &&
@@ -185,7 +175,7 @@ export interface WriteChunk<T> {
 export interface WritableOptions<T> {
   highWaterMark?: double
   decodeStrings?: boolean
-  defaultEncoding?: string
+  defaultEncoding?: BufferEncoding
   objectMode?: boolean
   emitClose?: boolean
   autoDestroy?: boolean
@@ -256,13 +246,13 @@ export class Writable<T = Buffer> extends StreamEmitter<StreamEvents<T>> {
     const write = this.#writeOption
     if (write != undefined) write.call(this, chunk, encoding, callback)
     else if (this._hasWritev) this._writev([{ chunk, encoding }], callback)
-    else throw methodNotImplemented("_write()")
+    else callback(methodNotImplemented("_write()"))
   }
 
   _writev(chunks: WriteChunk<T>[], callback: StreamCallback): void {
     const writev = this.#writevOption
-    if (writev == undefined) throw methodNotImplemented("_writev()")
-    writev.call(this, chunks, callback)
+    if (writev == undefined) callback(methodNotImplemented("_writev()"))
+    else writev.call(this, chunks, callback)
   }
 
   _final(callback: StreamCallback): void {
@@ -294,9 +284,9 @@ export interface DuplexOptions<W, R> {
   objectMode?: boolean
   readableObjectMode?: boolean
   writableObjectMode?: boolean
-  encoding?: string
+  encoding?: BufferEncoding
   decodeStrings?: boolean
-  defaultEncoding?: string
+  defaultEncoding?: BufferEncoding
   emitClose?: boolean
   autoDestroy?: boolean
   signal?: AbortSignal
@@ -318,9 +308,9 @@ class DuplexSides {
   objectMode: boolean | undefined = undefined
   readableObjectMode: boolean | undefined = undefined
   writableObjectMode: boolean | undefined = undefined
-  encoding: string | undefined = undefined
+  encoding: BufferEncoding | undefined = undefined
   decodeStrings: boolean | undefined = undefined
-  defaultEncoding: string | undefined = undefined
+  defaultEncoding: BufferEncoding | undefined = undefined
   emitClose: boolean | undefined = undefined
   autoDestroy: boolean | undefined = undefined
   signal: AbortSignal | undefined = undefined
@@ -433,8 +423,8 @@ export class Duplex<W = Buffer, R = W> extends Readable<R> {
 
   _read(size: int): void {
     const read = this._duplexRead
-    if (read == undefined) throw methodNotImplemented("_read()")
-    read.call(this, size)
+    if (read == undefined) errorOrDestroy(this, methodNotImplemented("_read()"))
+    else read.call(this, size)
   }
 
   _writeChunk(chunk: unknown, encoding: string, callback: StreamCallback): void {
@@ -449,13 +439,13 @@ export class Duplex<W = Buffer, R = W> extends Readable<R> {
     const write = this._duplexWrite
     if (write != undefined) write.call(this, chunk, encoding, callback)
     else if (this._hasWritev) this._writev([{ chunk, encoding }], callback)
-    else throw methodNotImplemented("_write()")
+    else callback(methodNotImplemented("_write()"))
   }
 
   _writev(chunks: WriteChunk<W>[], callback: StreamCallback): void {
     const writev = this._duplexWritev
-    if (writev == undefined) throw methodNotImplemented("_writev()")
-    writev.call(this, chunks, callback)
+    if (writev == undefined) callback(methodNotImplemented("_writev()"))
+    else writev.call(this, chunks, callback)
   }
 
   _final(callback: StreamCallback): void {
@@ -487,9 +477,9 @@ export interface TransformOptions<W, R> {
   objectMode?: boolean
   readableObjectMode?: boolean
   writableObjectMode?: boolean
-  encoding?: string
+  encoding?: BufferEncoding
   decodeStrings?: boolean
-  defaultEncoding?: string
+  defaultEncoding?: BufferEncoding
   emitClose?: boolean
   autoDestroy?: boolean
   signal?: AbortSignal
@@ -600,8 +590,8 @@ export class Transform<W = Buffer, R = W> extends Duplex<W, R> {
 
   _writev(chunks: WriteChunk<W>[], callback: StreamCallback): void {
     const writev = this._transformWritev
-    if (writev == undefined) throw methodNotImplemented("_writev()")
-    writev.call(this, chunks, callback)
+    if (writev == undefined) callback(methodNotImplemented("_writev()"))
+    else writev.call(this, chunks, callback)
   }
 
   _final(callback: StreamCallback): void {
@@ -627,8 +617,8 @@ export class Transform<W = Buffer, R = W> extends Duplex<W, R> {
 
   _transform(chunk: W, encoding: string, callback: TransformCallback): void {
     const transform = this._transformOption
-    if (transform == undefined) throw methodNotImplemented("_transform()")
-    transform.call(this, chunk, encoding, callback)
+    if (transform == undefined) callback(methodNotImplemented("_transform()"))
+    else transform.call(this, chunk, encoding, callback)
   }
 
   _flush(callback: TransformCallback): void {
@@ -701,7 +691,7 @@ export class PassThrough<W = Buffer, R = W> extends Transform<W, R> {
 export interface ReadableFromOptions {
   objectMode?: boolean
   highWaterMark?: double
-  encoding?: string
+  encoding?: BufferEncoding
   emitClose?: boolean
   autoDestroy?: boolean
   signal?: AbortSignal
@@ -762,23 +752,20 @@ class FromIterator<U> extends Readable<U> {
 
   #next() {
     for (;;) {
-      try {
-        const result = this.#iterator.next()
-        if (result.done) {
-          this._pushChunk(undefined)
-          return
-        }
-        const value: unknown = result.value
-        if (value == undefined) {
-          this.#reading = false
-          throw nullValues()
-        }
-        if (this._pushChunk(value)) continue
-        this.#reading = false
-      } catch (err) {
-        this.destroy(err)
+      const result = this.#iterator.next()
+      if (result.done) {
+        this._pushChunk(undefined)
+        return
       }
-      break
+      const value: unknown = result.value
+      if (value == undefined) {
+        this.#reading = false
+        this.destroy(nullValues())
+        return
+      }
+      if (this._pushChunk(value)) continue
+      this.#reading = false
+      return
     }
   }
 }
@@ -814,20 +801,19 @@ class FromAsyncIterator<U> extends Readable<U> {
   }
 
   async #run() {
-    try {
-      for await (const value of this.#iterator) {
-        const chunk: unknown = value
-        if (chunk == undefined) throw nullValues()
-        if (!this._pushChunk(chunk))
-          await new Promise<void>((resolve) => {
-            this.#wake = resolve
-          })
-        if (this.destroyed) return
+    for await (const value of this.#iterator) {
+      const chunk: unknown = value
+      if (chunk == undefined) {
+        this.destroy(nullValues())
+        return
       }
-      this._pushChunk(undefined)
-    } catch (err) {
-      this.destroy(err)
+      if (!this._pushChunk(chunk))
+        await new Promise<void>((resolve) => {
+          this.#wake = resolve
+        })
+      if (this.destroyed) return
     }
+    this._pushChunk(undefined)
   }
 
   _destroy(error: StreamError | undefined, callback: StreamCallback): void {

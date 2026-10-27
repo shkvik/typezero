@@ -3,7 +3,7 @@
 // chain and through an interface, as T of generic functions, inside
 // Result, with dates as keys (by reference) and values, filled from
 // generators, walked by iterator helpers, as JSON, and with what node:fs and
-// node:path give; and the errors thrown on the way, with nothing left.
+// node:path give; and the errors on the way, in Results, with nothing left.
 import { mkdtempSync, readdirSync, rmSync, writeFileSync } from "node:fs"
 import { extname, join } from "node:path"
 import { tmpdir } from "node:os"
@@ -16,23 +16,17 @@ shop.add("ink", 2, "office")
 shop.add("pen", 1)
 shop.prices.pen = 1.5
 shop.prices["ink"] = 4
-console.log(shop.value(), shop.counts, shop.tags)
+console.log(shop.value().unwrapOr(-1), shop.counts, shop.tags)
 const priced: Priced = shop
-console.log(priced.price("ink"), Object.keys(priced.prices).join())
+console.log(priced.price("ink").unwrapOr(-1), Object.keys(priced.prices).join())
 const inventories: Inventory[] = [shop, new Inventory()]
 console.log(inventories.map((i) => i.counts.size).join())
-try {
-  shop.add("pad", 1)
-  console.log(shop.value())
-} catch (e) {
-  console.log(e instanceof TypeError, e.message)
-}
-try {
-  shop.take("ink", 5)
-} catch (e) {
-  console.log(`${e}`)
-}
-console.log(shop.take("pad", 1), shop.counts.has("pad"), shop)
+shop.add("pad", 1)
+const value = shop.value()
+if (value.isErr()) console.log(value.error)
+const taken = shop.take("ink", 5)
+if (taken.isErr()) console.log(taken.error)
+console.log(shop.take("pad", 1).unwrapOr(-1), shop.counts.has("pad"), shop)
 
 // 2. Generic code: dictionaries as T, and keys and values of any type.
 function tally<T>(items: T[]): Map<T, int> {
@@ -98,15 +92,14 @@ const big = new Set(
 console.log(stock, big, [...stock.values()].reduce((a, b) => a + b, 0))
 function* checked(names: string[]): Generator<[string, int]> {
   for (const n of names) {
-    if (n.length > 3) throw new RangeError(`name too long: ${n}`)
+    if (n.length > 3) {
+      console.log(`name too long: ${n}`)
+      return
+    }
     yield [n, n.length]
   }
 }
-try {
-  console.log(new Map(checked(["ab", "abcd"])).size)
-} catch (e) {
-  console.log(e.message)
-}
+console.log(new Map(checked(["ab", "abcd"])).size)
 
 // 6. JSON.parse into a Record: checked, and the errors as Results.
 for (const text of ['{"a": 1, "b": 2}', '{"a": 1, "b": "two"}', "[1]"]) {

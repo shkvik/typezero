@@ -35,10 +35,7 @@ llvm::Value *BufferCalls::emit() {
   case Builtin::BufferFromString: {
     Lowering::Operand text = lowering_.refCounts().emitOperand(
         call->args[0], AssignLowerer::cannotAssign(call->args[1]));
-    lowering_.throwLowerer().holdOperand(text,
-                                         throws || lowering_.mayThrow().exprThrows(call->args[1]));
     llvm::Value *enc = encoding(call->args[1]);
-    lowering_.throwLowerer().takeOperand(text);
     llvm::Value *made =
         lowering_.builder_.CreateCall(fn("tz_buffer_from_string", ptr, {ptr, i64, i32}),
                                       {lowering_.stringLowerer().stringObj(text.value),
@@ -52,10 +49,7 @@ llvm::Value *BufferCalls::emit() {
     Expr *fillExpr = call->args[1];
     Lowering::Operand fill =
         lowering_.refCounts().emitOperand(fillExpr, AssignLowerer::cannotAssign(call->args[2]));
-    lowering_.throwLowerer().holdOperand(fill,
-                                         throws || lowering_.mayThrow().exprThrows(call->args[2]));
     llvm::Value *enc = encoding(call->args[2]);
-    lowering_.throwLowerer().takeOperand(fill);
     llvm::Value *made = lowering_.builder_.CreateCall(
         fn("tz_buffer_alloc", ptr, {i64, i32}), {size, lowering_.builder_.getInt32(1)}, "buffer");
     llvm::Value *zero = lowering_.builder_.getInt64(0), *none = lowering_.builder_.getInt32(0);
@@ -78,22 +72,17 @@ llvm::Value *BufferCalls::emit() {
     lowering_.builder_.CreateBr(endBlock);
     lowering_.functionFrame().switchTo(endBlock);
     lowering_.refCounts().dropOperand(fill);
-    Lowering::Held held = lowering_.throwLowerer().hold(made, type, true);
-    lowering_.throwLowerer().emitThrowCheck();
-    return lowering_.throwLowerer().take(held);
+    llvm::Value *held = made;
+    return held;
   }
   case Builtin::BufferConcat: {
     Lowering::Operand list = lowering_.refCounts().emitOperand(
         call->args[0], call->args.size() < 2 || AssignLowerer::cannotAssign(call->args[1]));
-    lowering_.throwLowerer().holdOperand(list, call->args.size() > 1 &&
-                                                   lowering_.mayThrow().exprThrows(call->args[1]));
     std::vector<llvm::Value *> values;
     llvm::Value *has = positions(1, 1, values);
-    lowering_.throwLowerer().takeOperand(list);
     llvm::Value *made = lowering_.builder_.CreateCall(fn("tz_buffer_concat", ptr, {ptr, i64, i32}),
                                                       {list.value, values[0], has}, "buffer");
     lowering_.refCounts().dropOperand(list);
-    lowering_.throwLowerer().emitThrowCheck();
     return made;
   }
   case Builtin::BufferByteLength: {
@@ -101,10 +90,7 @@ llvm::Value *BufferCalls::emit() {
     if (source->type->isString()) {
       Lowering::Operand text =
           lowering_.refCounts().emitOperand(source, AssignLowerer::cannotAssign(call->args[1]));
-      lowering_.throwLowerer().holdOperand(
-          text, throws || lowering_.mayThrow().exprThrows(call->args[1]));
       llvm::Value *enc = encoding(call->args[1]);
-      lowering_.throwLowerer().takeOperand(text);
       llvm::Value *length =
           lowering_.builder_.CreateCall(fn("tz_buffer_byte_length", i32, {ptr, i64, i32}),
                                         {lowering_.stringLowerer().stringObj(text.value),
@@ -125,9 +111,7 @@ llvm::Value *BufferCalls::emit() {
     Expr *second = call->builtin == Builtin::BufferCompare ? call->args[1] : call->args[0];
     Lowering::Operand a =
         lowering_.refCounts().emitOperand(first, AssignLowerer::cannotAssign(second));
-    lowering_.throwLowerer().holdOperand(a, lowering_.mayThrow().exprThrows(second));
     Lowering::Operand b = lowering_.refCounts().emitOperand(second, true);
-    lowering_.throwLowerer().takeOperand(a);
     llvm::Value *result = call->builtin == Builtin::BufferCompare
                               ? lowering_.builder_.CreateCall(
                                     fn("tz_bytes_compare", i32, {ptr, ptr}), {a.value, b.value})
@@ -144,19 +128,13 @@ llvm::Value *BufferCalls::emit() {
     Lowering::Operand target = lowering_.refCounts().emitOperand(
         call->args[0],
         llvm::all_of(llvm::ArrayRef<Expr *>(call->args).drop_front(), AssignLowerer::cannotAssign));
-    lowering_.throwLowerer().holdOperand(
-        target, llvm::any_of(llvm::ArrayRef<Expr *>(call->args).drop_front(),
-                             [&](Expr *e) { return lowering_.mayThrow().exprThrows(e); }));
     std::vector<llvm::Value *> values;
     llvm::Value *has = positions(1, 4, values);
-    lowering_.throwLowerer().takeOperand(self);
-    lowering_.throwLowerer().takeOperand(target);
     llvm::Value *result = lowering_.builder_.CreateCall(
         fn("tz_buffer_compare_range", i32, {ptr, ptr, i64, i64, i64, i64, i32}),
         {self.value, target.value, values[0], values[1], values[2], values[3], has});
     lowering_.refCounts().dropOperand(target);
     lowering_.refCounts().dropOperand(self);
-    lowering_.throwLowerer().emitThrowCheck();
     return result;
   }
   case Builtin::BufferIsBuffer: {
@@ -186,7 +164,6 @@ llvm::Value *BufferCalls::emit() {
     llvm::Value *enc = encoding(call->args[0]);
     std::vector<llvm::Value *> values;
     llvm::Value *has = positions(1, 2, values);
-    lowering_.throwLowerer().takeOperand(self);
     llvm::Value *text = lowering_.stringLowerer().callReturningString(
         fn("tz_buffer_to_string", voidTy, {ptr, ptr, i32, i64, i64, i32}),
         {self.value, enc, values[0], values[1], has});
@@ -198,21 +175,15 @@ llvm::Value *BufferCalls::emit() {
     Lowering::Operand text = lowering_.refCounts().emitOperand(
         call->args[0],
         llvm::all_of(llvm::ArrayRef<Expr *>(call->args).drop_front(), AssignLowerer::cannotAssign));
-    lowering_.throwLowerer().holdOperand(
-        text, throws || llvm::any_of(llvm::ArrayRef<Expr *>(call->args).drop_front(),
-                                     [&](Expr *e) { return lowering_.mayThrow().exprThrows(e); }));
     llvm::Value *enc = encoding(call->args[1]);
     std::vector<llvm::Value *> values;
     llvm::Value *has = positions(2, 2, values);
-    lowering_.throwLowerer().takeOperand(self);
-    lowering_.throwLowerer().takeOperand(text);
     llvm::Value *written = lowering_.builder_.CreateCall(
         fn("tz_buffer_write_string", i32, {ptr, ptr, i64, i64, i64, i32, i32}),
         {self.value, lowering_.stringLowerer().stringObj(text.value),
          lowering_.stringLowerer().stringMeta(text.value), values[0], values[1], has, enc});
     lowering_.refCounts().dropOperand(text);
     lowering_.refCounts().dropOperand(self);
-    lowering_.throwLowerer().emitThrowCheck();
     return written;
   }
   case Builtin::BufferIndexOf:
@@ -224,14 +195,9 @@ llvm::Value *BufferCalls::emit() {
     Lowering::Operand value = lowering_.refCounts().emitOperand(
         valueExpr, llvm::all_of(llvm::ArrayRef<Expr *>(call->args).drop_front(valueAt + 1),
                                 AssignLowerer::cannotAssign));
-    lowering_.throwLowerer().holdOperand(
-        value, throws || llvm::any_of(llvm::ArrayRef<Expr *>(call->args).drop_front(valueAt + 1),
-                                      [&](Expr *e) { return lowering_.mayThrow().exprThrows(e); }));
     llvm::Value *enc = encoding(call->args[valueAt + 1]);
     std::vector<llvm::Value *> values;
     llvm::Value *has = positions(valueAt + 2, fill ? 2 : 1, values);
-    lowering_.throwLowerer().takeOperand(self);
-    lowering_.throwLowerer().takeOperand(value);
     llvm::Value *result = nullptr;
     if (fill) {
       if (valueExpr->type->isString()) {
@@ -247,9 +213,8 @@ llvm::Value *BufferCalls::emit() {
                                       {self.value, value.value, values[0], values[1], has});
       }
       lowering_.refCounts().dropOperand(value);
-      Lowering::Held held = lowering_.throwLowerer().hold(returnSelf(self), self.type, true);
-      lowering_.throwLowerer().emitThrowCheck();
-      return lowering_.throwLowerer().take(held);
+      llvm::Value *held = returnSelf(self);
+      return held;
     }
     llvm::Value *mode = lowering_.builder_.getInt32(uint32_t(constantOf(call->args[0])));
     if (valueExpr->type->isString()) {
@@ -277,34 +242,25 @@ llvm::Value *BufferCalls::emit() {
     Lowering::Operand target = lowering_.refCounts().emitOperand(
         call->args[0],
         llvm::all_of(llvm::ArrayRef<Expr *>(call->args).drop_front(), AssignLowerer::cannotAssign));
-    lowering_.throwLowerer().holdOperand(
-        target, llvm::any_of(llvm::ArrayRef<Expr *>(call->args).drop_front(),
-                             [&](Expr *e) { return lowering_.mayThrow().exprThrows(e); }));
     std::vector<llvm::Value *> values;
     llvm::Value *has = positions(1, 3, values);
-    lowering_.throwLowerer().takeOperand(self);
-    lowering_.throwLowerer().takeOperand(target);
     llvm::Value *copied = lowering_.builder_.CreateCall(
         fn("tz_buffer_copy", i32, {ptr, ptr, i64, i64, i64, i32}),
         {self.value, target.value, values[0], values[1], values[2], has});
     lowering_.refCounts().dropOperand(target);
     lowering_.refCounts().dropOperand(self);
-    lowering_.throwLowerer().emitThrowCheck();
     return copied;
   }
   case Builtin::BufferSwap: {
     Lowering::Operand self = receiver(0);
-    lowering_.throwLowerer().takeOperand(self);
     lowering_.builder_.CreateCall(
         fn("tz_buffer_swap", voidTy, {ptr, i32}),
         {self.value, lowering_.builder_.getInt32(uint32_t(constantOf(call->args[0])))});
-    Lowering::Held held = lowering_.throwLowerer().hold(returnSelf(self), self.type, true);
-    lowering_.throwLowerer().emitThrowCheck();
-    return lowering_.throwLowerer().take(held);
+    llvm::Value *held = returnSelf(self);
+    return held;
   }
   case Builtin::BufferToJSON: {
     Lowering::Operand self = receiver(0);
-    lowering_.throwLowerer().takeOperand(self);
     llvm::Value *object = lowering_.objectLayouts().allocObject(type, {0, 1});
     lowering_.builder_.CreateStore(lowering_.stringLowerer().stringLiteral(u"Buffer"),
                                    lowering_.objectLayouts().fieldAddress(object, type, "type"));

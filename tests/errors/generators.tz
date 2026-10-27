@@ -43,7 +43,7 @@ function* withReturn() {
 // expect-error: next() of 'Generator<int[], string[]>' gives 'int[]', or 'string[]' when it is done, and no union holds both
 const r = withReturn().next()
 const it = numbers()
-// expect-error: 'return()' of an iterator is not supported yet: it comes with exceptions
+// expect-error: 'return()' of an iterator is not supported yet; stop with 'break' in 'for of'
 it.return()
 // expect-error: property 'length' does not exist on type 'Generator<int>'; an iterator does not know how many values it gives
 it.length()

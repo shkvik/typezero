@@ -24,14 +24,10 @@ function find(target: int) {
   return "none"
 }
 console.log(find(3), find(9))
-try {
-  m.forEach((v, k) => {
-    if (v == 2) throw new Error(`stop at ${k}`)
-    console.log("each", k)
-  })
-} catch (e) {
-  console.log(e.message)
-}
+m.forEach((v, k) => {
+  if (v == 2) console.log(`skip ${k}`)
+  else console.log("each", k)
+})
 const handlers = new Map<string, (x: int) => int>()
 let calls = 0
 handlers.set("double", x => x * 2).set("count", x => { calls++; return x + calls })

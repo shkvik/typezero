@@ -141,9 +141,7 @@ llvm::Value *ArrayLowerer::emitArrayLiteral(ArrayLitExpr *lit) {
     for (const ArrayLitExpr::Element &e : lit->elements) {
       exprs.push_back(e.expr);
     }
-    Lowering::Held held = lowering_.throwLowerer().hold(
-        array, lit->type,
-        llvm::any_of(exprs, [&](Expr *e) { return lowering_.mayThrow().exprThrows(e); }));
+    llvm::Value *held = array;
     llvm::Value *data = arrayData(array);
     for (size_t i = 0; i < lit->elements.size(); ++i) {
       llvm::Value *value = lowering_.exprLowerer().emitExpr(lit->elements[i].expr);
@@ -153,7 +151,7 @@ llvm::Value *ArrayLowerer::emitArrayLiteral(ArrayLitExpr *lit) {
         lowering_.storeLowerer().groupStore(array, value, element);
       }
     }
-    return lowering_.throwLowerer().take(held);
+    return held;
   }
 
   size_t plain =
@@ -163,10 +161,7 @@ llvm::Value *ArrayLowerer::emitArrayLiteral(ArrayLitExpr *lit) {
       lit->type, lowering_.builder_.getInt64(0), lowering_.builder_.getInt64(plain),
       lowering_.makesMember(lit, lit->type), "array");
   lowering_.groupLowerer().noteUnstored(array, lit);
-  Lowering::Held held = lowering_.throwLowerer().hold(
-      array, lit->type, llvm::any_of(lit->elements, [&](const ArrayLitExpr::Element &e) {
-        return lowering_.mayThrow().exprThrows(e.expr);
-      }));
+  llvm::Value *held = array;
   for (const ArrayLitExpr::Element &e : lit->elements) {
     if (e.spread && (e.expr->type->isIterator() || e.expr->type->isTypedArray())) {
       lowering_.iteratorLowerer().emitIteratorSpread(array, e.expr, element);
@@ -189,7 +184,7 @@ llvm::Value *ArrayLowerer::emitArrayLiteral(ArrayLitExpr *lit) {
     }
   }
 
-  return lowering_.throwLowerer().take(held);
+  return held;
 }
 
 llvm::Value *
@@ -234,7 +229,6 @@ llvm::Value *ArrayLowerer::emitNewArray(NewExpr *expr) {
   }
   llvm::Value *array = lowering_.builder_.CreateCall(
       create, {descriptor, lowering_.exprLowerer().emitExpr(expr->args[0])}, "array");
-  lowering_.emitThrowCheckIf(lowering_.mayThrow().exprThrows(expr));
 
   return array;
 }
@@ -243,9 +237,7 @@ llvm::Value *ArrayLowerer::emitArrayIndex(IndexExpr *index) {
   const Type *element = index->object->type->inner();
   Lowering::Operand array =
       lowering_.refCounts().emitOperand(index->object, AssignLowerer::cannotAssign(index->index));
-  lowering_.throwLowerer().holdOperand(array, lowering_.mayThrow().exprThrows(index->index));
   llvm::Value *position = lowering_.exprLowerer().emitExpr(index->index);
-  lowering_.throwLowerer().takeOperand(array);
   auto read = [&] {
     llvm::Value *value =
         lowering_.builder_.CreateLoad(lowering_.moduleBuilder().lower(element),
@@ -272,8 +264,6 @@ llvm::Value *ArrayLowerer::emitElementAssign(AssignExpr *assign, bool needResult
   Lowering::Operand array = lowering_.refCounts().emitOperand(
       index->object,
       AssignLowerer::cannotAssign(index->index) && AssignLowerer::cannotAssign(assign->value));
-  lowering_.throwLowerer().holdOperand(array, lowering_.mayThrow().exprThrows(index->index) ||
-                                                  lowering_.mayThrow().exprThrows(assign->value));
   llvm::Value *position = lowering_.exprLowerer().emitExpr(index->index);
 
   llvm::Value *value;
@@ -297,7 +287,6 @@ llvm::Value *ArrayLowerer::emitElementAssign(AssignExpr *assign, bool needResult
     }
   }
 
-  lowering_.throwLowerer().takeOperand(array);
   auto replace = [&] {
     lowering_.storeField_ = "[i]";
     lowering_.storeLoc_ = assign->loc();
@@ -337,12 +326,9 @@ llvm::Value *ArrayLowerer::emitLengthAssign(AssignExpr *assign, bool needResult)
   auto *member = cast<MemberExpr>(assign->target);
   Lowering::Operand array =
       lowering_.refCounts().emitOperand(member->object, AssignLowerer::cannotAssign(assign->value));
-  lowering_.throwLowerer().holdOperand(array, lowering_.mayThrow().exprThrows(assign->value));
   llvm::Value *length = lowering_.exprLowerer().emitExpr(assign->value);
-  lowering_.throwLowerer().takeOperand(array);
   lowering_.builder_.CreateCall(lowering_.rt_.arrSetLength, {array.value, length});
   lowering_.refCounts().dropOperand(array);
-  lowering_.throwLowerer().emitThrowCheck();
 
   return needResult ? length : nullptr;
 }

@@ -26,3 +26,6 @@ export type Version7Options = {
 
 // Workaround for different versions of TypeScript definitions
 export type NonSharedArrayBuffer = Uint8Array;
+
+// tz: what uuid throws is an Err of this, named as the error uuid throws.
+export type UuidError = { name: 'TypeError' | 'RangeError' | 'Error'; message: string };

@@ -15,9 +15,9 @@ import {
 } from "node:crypto"
 
 // expect-error: 'randomBytes' with a callback is not supported: tz has no callback forms of node:crypto (docs/crypto.md, section 5); call it without one and use what it returns: 'const bytes = randomBytes(n)'
-randomBytes(16, (err: Error | undefined, bytes: Buffer) => console.log(bytes))
+randomBytes(16, (err: CryptoError | undefined, bytes: Buffer) => console.log(bytes))
 // expect-error: 'randomInt' with a callback is not supported
-randomInt(10, (err: Error | undefined, n: int) => console.log(n))
+randomInt(10, (err: CryptoError | undefined, n: int) => console.log(n))
 const options = { outputLength: 16 }
 // expect-error: the options of 'createHash' are written in the call, as an object literal, e.g. '{ outputLength: ... }'
 createHash("shake128", options)
