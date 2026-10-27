@@ -83,8 +83,7 @@ Expr *NewChecker::checkNew(NewExpr *expr, const Type *expected) {
   }
   if (!expr->member.empty()) {
     Checker::ScopeEntry intl = checker_.scopes().lookup("Intl");
-    if (expr->name == "Intl" && !intl.var && !intl.func && !intl.cls &&
-        expr->member == "Locale") {
+    if (expr->name == "Intl" && !intl.var && !intl.func && !intl.cls && expr->member == "Locale") {
       return checker_.intlChecker().checkLocaleNew(expr, expected);
     }
     if (expr->name == "Intl" && !intl.var && !intl.func && !intl.cls) {
@@ -207,10 +206,7 @@ Expr *NewChecker::checkNew(NewExpr *expr, const Type *expected) {
                             "'new Array<T>(n)' fills the array with a default value, and '" +
                                 element->name() + "' has none; start from '[]' and use push()");
     }
-    if (std::optional<Linear> length = checker_.indexProofs().linear(expr->args[0]);
-        length && length->term.isZero() && length->offset < 0) {
-      checker_.diags_.error(expr->args[0]->loc(), "an array length cannot be negative");
-    }
+    checker_.indexProofs().requireBetween(expr->args[0], 0, std::nullopt, "an array length");
   }
   if (!element->isError()) {
     expr->type = Type::array(element);

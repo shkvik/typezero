@@ -2,6 +2,7 @@
 #include "compiler/check/expr/argument_checker/argument_checker.h"
 #include "compiler/check/expr/expr_checker/expr_checker.h"
 #include "compiler/check/expr/member_checker/member_checker.h"
+#include "compiler/check/flow/index_proofs/index_proofs.h"
 #include "compiler/check/types/type_relations/type_relations.h"
 #include "compiler/declare/constant_folder/constant_folder.h"
 #include "compiler/declare/prelude/prelude.h"
@@ -140,6 +141,16 @@ Expr *BufferChecker::checkBufferMethod(CallExpr *call, MemberExpr *member) {
     for (size_t i = 1; i < call->args.size(); ++i) {
       call->args[i] = checker_.memberChecker().checkPosition(call->args[i]);
     }
+    IndexProofs &proofs = checker_.indexProofs();
+    static const char *const names[] = {"", "targetStart", "targetEnd", "sourceStart", "sourceEnd"};
+    for (size_t i = 1; i < call->args.size(); ++i) {
+      std::string what = std::string("'") + names[i] + "'";
+      if (i == 2 || i == 4) {
+        proofs.requireUpTo(call->args[i], i == 2 ? call->args[0] : member->object, 0, what);
+      } else {
+        proofs.requireBetween(call->args[i], 0, std::nullopt, what);
+      }
+    }
     return made(Builtin::BufferCompareTo, Type::intTy());
   }
   if (name == "copy") {
@@ -149,6 +160,16 @@ Expr *BufferChecker::checkBufferMethod(CallExpr *call, MemberExpr *member) {
     call->args[0] = bytesArg(call->args[0]);
     for (size_t i = 1; i < call->args.size(); ++i) {
       call->args[i] = checker_.memberChecker().checkPosition(call->args[i]);
+    }
+    IndexProofs &proofs = checker_.indexProofs();
+    static const char *const names[] = {"", "targetStart", "sourceStart", "sourceEnd"};
+    for (size_t i = 1; i < call->args.size(); ++i) {
+      std::string what = std::string("'") + names[i] + "'";
+      if (i == 2) {
+        proofs.requireUpTo(call->args[i], member->object, 0, what);
+      } else {
+        proofs.requireBetween(call->args[i], 0, std::nullopt, what);
+      }
     }
     return made(Builtin::BufferCopy, Type::intTy());
   }
@@ -174,6 +195,11 @@ Expr *BufferChecker::checkBufferMethod(CallExpr *call, MemberExpr *member) {
         continue;
       }
       positions.push_back(checker_.memberChecker().checkPosition(arg));
+    }
+    if (!positions.empty() &&
+        checker_.indexProofs().requireUpTo(positions[0], member->object, 0, "the offset") &&
+        positions.size() > 1) {
+      checkWriteLength(member->object, positions[0], positions[1]);
     }
     std::vector<Expr *> args{text, encoding ? encoding : utf8Lit()};
     args.insert(args.end(), positions.begin(), positions.end());
@@ -208,6 +234,12 @@ Expr *BufferChecker::checkBufferMethod(CallExpr *call, MemberExpr *member) {
     }
     if (encoding && !value->type->isString()) {
       checker_.diags_.error(encoding->loc(), "an encoding goes only with a string value");
+    }
+    if (fill) {
+      for (size_t i = 0; i < positions.size(); ++i) {
+        checker_.indexProofs().requireUpTo(positions[i], member->object, 0,
+                                           i == 0 ? "the offset" : "the end");
+      }
     }
     std::vector<Expr *> args;
     if (!fill) {
@@ -255,15 +287,15 @@ Expr *BufferChecker::checkBufferMethod(CallExpr *call, MemberExpr *member) {
     Expr *count = checker_.memberChecker().checkPosition(call->args[at + 1]);
     args.push_back(offset);
     args.push_back(count);
+    std::optional<int64_t> n = checker_.constantFolder().intConstant(count);
+    if (!n || *n < 1 || *n > 6) {
+      checker_.diags_.error(count->loc(), "the byte count of '" + name +
+                                              "' must be written as a number from 1 to 6");
+      return call;
+    }
+    call->mayBeOutOfRange = !checker_.indexProofs().requireUpTo(
+        offset, member->object, *n, "the offset of '" + name.str() + "'");
     if (m.write) {
-      std::optional<int64_t> n = checker_.constantFolder().intConstant(count);
-      if (!n || *n < 1 || *n > 6) {
-        checker_.diags_.error(count->loc(),
-                              "the byte count of '" + name +
-                                  "' must be written as a number from 1 to 6, so that the "
-                                  "value can be shown to fit");
-        return call;
-      }
       int64_t bits = *n * 8;
       int64_t lo = m.isSigned ? -(int64_t(1) << (bits - 1)) : 0;
       int64_t hi = m.isSigned ? (int64_t(1) << (bits - 1)) - 1 : (int64_t(1) << bits) - 1;
@@ -275,7 +307,6 @@ Expr *BufferChecker::checkBufferMethod(CallExpr *call, MemberExpr *member) {
       }
     }
     call->args = std::move(args);
-    call->mayBeOutOfRange = true;
     return made(m.write ? Builtin::BufferWriteVar : Builtin::BufferReadVar,
                 m.write ? Type::intTy() : Type::longTy());
   }
@@ -298,7 +329,8 @@ Expr *BufferChecker::checkBufferMethod(CallExpr *call, MemberExpr *member) {
   if (offset) {
     args.push_back(offset);
   }
-  call->mayBeOutOfRange = !checker_.byteProofs().provesWithin(member->object, offset, size);
+  call->mayBeOutOfRange = !checker_.indexProofs().requireUpTo(offset, member->object, size,
+                                                              "the offset of '" + name.str() + "'");
   call->args = std::move(args);
 
   return made(m.write ? Builtin::BufferWriteNumber : Builtin::BufferRead,
@@ -365,6 +397,21 @@ Expr *BufferChecker::checkTextMethod(CallExpr *call, MemberExpr *member) {
                         "property '" + name + "' does not exist on type '" + type->name() + "'");
 
   return call;
+}
+
+void BufferChecker::checkWriteLength(const Expr *object, const Expr *offset, const Expr *length) {
+  IndexProofs &proofs = checker_.indexProofs();
+  if (!proofs.requireBetween(length, 0, std::nullopt, "the length") ||
+      checker_.indexProofs().exempt(length->loc(), object)) {
+    return;
+  }
+  if (!proofs.provesSumUpTo(proofs.linear(offset), proofs.linear(length), object)) {
+    checker_.diags_.error(length->loc(), "cannot prove that '" + valueText(offset) + " + " +
+                                             valueText(length) + " <= " + valueText(object) +
+                                             ".length', and node would throw a RangeError; check "
+                                             "it first, with the offset or the length written as "
+                                             "a number");
+  }
 }
 
 }

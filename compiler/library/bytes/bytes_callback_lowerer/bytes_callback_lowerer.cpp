@@ -37,17 +37,15 @@ llvm::Value *BytesCallbackLowerer::emitBytesCallbackMethod(CallExpr *call) {
   Builtin method = call->builtin;
   bool throws = lowering_.typeThrows(callbackType);
   bool reduce = method == Builtin::ArrReduce || method == Builtin::ArrReduceRight;
-  bool emptyThrows = reduce && call->args.size() < 2;
   llvm::Value *array = lowering_.exprLowerer().emitExpr(member->object);
   Lowering::Held heldArray = lowering_.throwLowerer().hold(
-      array, arrayType, throws || emptyThrows || llvm::any_of(call->args, [&](Expr *arg) {
+      array, arrayType, throws || llvm::any_of(call->args, [&](Expr *arg) {
                           return lowering_.mayThrow().exprThrows(arg);
                         }));
   llvm::Value *callback = lowering_.exprLowerer().emitExpr(call->args[0]);
   Lowering::Held heldCallback = lowering_.throwLowerer().hold(
       callback, callbackType,
-      throws || emptyThrows ||
-          (call->args.size() > 1 && lowering_.mayThrow().exprThrows(call->args[1])));
+      throws || (call->args.size() > 1 && lowering_.mayThrow().exprThrows(call->args[1])));
   llvm::Value *init =
       call->args.size() > 1 ? lowering_.exprLowerer().emitExpr(call->args[1]) : nullptr;
 
@@ -89,25 +87,18 @@ llvm::Value *BytesCallbackLowerer::emitBytesCallbackMethod(CallExpr *call) {
   llvm::Value *step = lowering_.builder_.getInt64(backward ? -1 : 1);
 
   llvm::Value *accSlot = nullptr;
+  const Type *accType = reduce && !init ? element : call->type;
   if (reduce) {
-    accSlot = lowering_.functionFrame().createStackSlot(lowering_.moduleBuilder().lower(call->type),
-                                                        "acc");
+    accSlot =
+        lowering_.functionFrame().createStackSlot(lowering_.moduleBuilder().lower(accType), "acc");
     if (init) {
       lowering_.builder_.CreateStore(init, accSlot);
     } else {
-      llvm::BasicBlock *emptyBlock = lowering_.functionFrame().newBlock("reduce.empty");
-      llvm::BasicBlock *firstBlock = lowering_.functionFrame().newBlock("reduce.first");
-      lowering_.builder_.CreateCondBr(
-          lowering_.builder_.CreateICmpEQ(length, lowering_.builder_.getInt64(0)), emptyBlock,
-          firstBlock, llvm::MDBuilder(lowering_.ctx_).createUnlikelyBranchWeights());
-      lowering_.functionFrame().switchTo(emptyBlock);
-      lowering_.throwLowerer().emitThrowNew(1, "Reduce of empty array with no initial value");
-      lowering_.functionFrame().switchTo(firstBlock);
-      lowering_.builder_.CreateStore(
-          lowering_.bytesLowerer().loadElement(lowering_.bytesLowerer().bytesData(array), arrayType,
-                                               start),
-          accSlot);
-      start = lowering_.builder_.CreateAdd(start, step);
+      start = lowering_.callbackMethodLowerer().firstOfReduce(
+          call, length, start, step, accSlot, accType, [&](llvm::Value *at) {
+            return lowering_.bytesLowerer().loadElement(lowering_.bytesLowerer().bytesData(array),
+                                                        arrayType, at);
+          });
     }
   }
   llvm::Value *out = nullptr;
@@ -154,13 +145,13 @@ llvm::Value *BytesCallbackLowerer::emitBytesCallbackMethod(CallExpr *call) {
   std::vector<llvm::Value *> args;
   if (reduce) {
     args.push_back(
-        lowering_.builder_.CreateLoad(lowering_.moduleBuilder().lower(call->type), accSlot));
+        lowering_.builder_.CreateLoad(lowering_.moduleBuilder().lower(accType), accSlot));
   }
   args.push_back(value);
   args.push_back(lowering_.builder_.CreateTrunc(i, lowering_.builder_.getInt32Ty()));
   args.push_back(array);
   if (reduce && passes == 0) {
-    lowering_.refCounts().releaseValue(args[0], call->type);
+    lowering_.refCounts().releaseValue(args[0], accType);
   }
   args.resize(passes);
   if (passes == valueArgs + 2) {
@@ -255,7 +246,7 @@ llvm::Value *BytesCallbackLowerer::emitBytesCallbackMethod(CallExpr *call) {
     return made;
   }
   if (reduce) {
-    return lowering_.builder_.CreateLoad(lowering_.moduleBuilder().lower(call->type), accSlot);
+    return lowering_.callbackMethodLowerer().reduceResult(call, length, accSlot, accType);
   }
   if (resultSlot) {
     return lowering_.builder_.CreateLoad(lowering_.moduleBuilder().lower(call->type), resultSlot);

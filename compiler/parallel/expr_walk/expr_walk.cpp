@@ -105,13 +105,7 @@ void ExprWalk::expr(const Expr *e, const Use &use) {
     if (u->op == UnaryOp::Void) {
       inner.voided = true;
     }
-    if (u->op == UnaryOp::NonNull) {
-      inner = use;
-    }
     expr(u->operand, inner);
-    if (u->op == UnaryOp::NonNull) {
-      analysis_.codeWalk().throwPoint();
-    }
     return;
   }
   case Expr::Kind::Binary: {

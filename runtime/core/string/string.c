@@ -1333,9 +1333,7 @@ TZ_HOT void tz_str_substring(TzStr *out, void *obj, uint64_t meta, int64_t start
 
 void tz_str_repeat(TzStr *out, void *obj, uint64_t meta, int64_t count) {
   if (count < 0) {
-    tz_throw(TZ_RANGE_ERROR, "Invalid count value: %lld", (long long)count);
-    *out = kEmpty;
-    return;
+    tz_panicf("internal error: repeat() with the count %lld", (long long)count);
   }
   uint32_t len = str_len(meta);
   if (count == 0 || len == 0) {
@@ -1344,9 +1342,8 @@ void tz_str_repeat(TzStr *out, void *obj, uint64_t meta, int64_t count) {
   }
   uint64_t total = (uint64_t)len * (uint64_t)count;
   if (count > (int64_t)MAX_LENGTH || total > MAX_LENGTH) {
-    tz_throw(TZ_RANGE_ERROR, "Invalid string length");
-    *out = kEmpty;
-    return;
+    tz_panicf("string length %llu exceeds the maximum of %llu", (unsigned long long)total,
+              (unsigned long long)MAX_LENGTH);
   }
   if (count == 1) {
     TzStr s = make_str(obj, meta);
@@ -1894,9 +1891,8 @@ void tz_str_pad(TzStr *out, void *obj, uint64_t meta, int64_t length, void *fill
     return;
   }
   if (length > (int64_t)MAX_LENGTH) {
-    tz_throw(TZ_RANGE_ERROR, "Invalid string length");
-    *out = kEmpty;
-    return;
+    tz_panicf("string length %lld exceeds the maximum of %llu", (long long)length,
+              (unsigned long long)MAX_LENGTH);
   }
   TzStr f = flat(s);
   uint32_t total = (uint32_t)length, gap = total - len;
@@ -2162,12 +2158,7 @@ void tz_str_from_code_points(TzStr *out, const double *code_points, int64_t n) {
   for (int64_t i = 0; i < n; ++i) {
     double cp = code_points[i];
     if (!(cp >= 0 && cp <= 0x10FFFF && cp == (double)(uint32_t)cp)) {
-      char text[32];
-      text[tz_format_f64(cp, text)] = 0;
-      tz_throw(TZ_RANGE_ERROR, "Invalid code point %s", text);
-      tz_buf_free(&b);
-      *out = tz_str_from_ascii("", 0);
-      return;
+      tz_panicf("internal error: fromCodePoint() with the code point %g", cp);
     }
     buf_code_point(&b, (uint32_t)cp);
   }
@@ -2245,19 +2236,13 @@ static void uri_encode(TzStr *out, void *obj, uint64_t meta, const uint8_t *leng
         total += 12;
         ++i;
       } else {
-        uri_malformed(out);
-        return;
+        total += 9;
       }
     }
   }
   if (total == len) {
     retain(s);
     *out = s;
-    return;
-  }
-  if (total > MAX_LENGTH) {
-    tz_throw(TZ_RANGE_ERROR, "Invalid string length");
-    *out = kEmpty;
     return;
   }
   char local[INLINE_MAX];
@@ -2296,8 +2281,10 @@ static void uri_encode(TzStr *out, void *obj, uint64_t meta, const uint8_t *leng
       break;
     }
     uint32_t c = wide[i++];
-    if (c >= 0xD800 && c <= 0xDBFF) {
+    if (c >= 0xD800 && c <= 0xDBFF && i < len && wide[i] >= 0xDC00 && wide[i] <= 0xDFFF) {
       c = 0x10000 + ((c - 0xD800) << 10) + (uint32_t)(wide[i++] - 0xDC00);
+    } else if (c >= 0xD800 && c <= 0xDFFF) {
+      c = 0xFFFD;
     }
     uint8_t utf8[4];
     int n;

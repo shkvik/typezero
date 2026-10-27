@@ -213,31 +213,7 @@ ValueRange ByteProofs::valueRange(const Expr *e) const {
 }
 
 bool ByteProofs::provesFits(const Expr *expr, int64_t lo, int64_t hi) const {
-  while (auto *conv = dyn_cast<CastExpr>(expr)) {
-    if (!conv->isImplicit() || !conv->operand->type || !conv->operand->type->isInt() ||
-        !conv->type->isInteger()) {
-      break;
-    }
-    expr = conv->operand;
-  }
-  if (auto *cond = dyn_cast<ConditionalExpr>(expr)) {
-    return provesFits(cond->thenExpr, lo, hi) && provesFits(cond->elseExpr, lo, hi);
-  }
-  bool lower = false, upper = false;
-  if (std::optional<Linear> l = checker_.indexProofs().linear(expr)) {
-    if (l->term.isZero()) {
-      lower = l->offset >= lo;
-      upper = l->offset <= hi;
-    } else {
-      lower = checker_.flow_.facts.proves(Term::zero(), l->term, l->offset - lo + 1);
-      upper = checker_.flow_.facts.proves(l->term, Term::zero(), hi - l->offset + 1);
-    }
-  }
-  Range r = valueRange(expr);
-  lower |= r.lo && *r.lo >= lo;
-  upper |= r.hi && *r.hi <= hi;
-
-  return lower && upper;
+  return checker_.indexProofs().provesBetween(expr, lo, hi);
 }
 
 void ByteProofs::checkFits(const Expr *value, const Type *target, llvm::StringRef what) {
@@ -265,6 +241,112 @@ void ByteProofs::checkFits(const Expr *value, const Type *target, llvm::StringRe
           "), and JavaScript would cut it without a word; check it first, e.g. 'if (" + text +
           " >= " + std::to_string(lo) + " && " + text + " <= " + std::to_string(hi) +
           ")', or cut it explicitly: '" + wrapHint(kind, text) + "'");
+}
+
+static const VarSymbol *viewOwner(const Expr *expr, llvm::StringRef field,
+                                  const Type **type = nullptr) {
+  if (auto *call = dyn_cast<CallExpr>(expr);
+      call && (call->builtin == Builtin::BytesBuffer || call->builtin == Builtin::BytesByteOffset ||
+               call->builtin == Builtin::BytesByteLength)) {
+    expr = call->callee;
+  }
+  auto *member = dyn_cast<MemberExpr>(expr);
+  if (!member || member->name != field || !member->object->type ||
+      !member->object->type->isByteView()) {
+    return nullptr;
+  }
+  const Expr *object = member->object;
+  while (auto *conv = dyn_cast<CastExpr>(object)) {
+    if (!conv->isImplicit()) {
+      return nullptr;
+    }
+    object = conv->operand;
+  }
+  auto *name = dyn_cast<NameExpr>(object);
+  if (type) {
+    *type = member->object->type;
+  }
+
+  return name ? name->var : nullptr;
+}
+
+static const Expr *withoutCasts(const Expr *expr) {
+  while (auto *conv = dyn_cast<CastExpr>(expr)) {
+    if (!conv->isImplicit()) {
+      break;
+    }
+    expr = conv->operand;
+  }
+
+  return expr;
+}
+
+static bool sameView(const Expr *buffer, const Expr *offset, const Expr *length, int64_t size) {
+  const Type *ownerType = nullptr;
+  const VarSymbol *owner = viewOwner(buffer, "buffer", &ownerType);
+  if (!owner || !offset || viewOwner(withoutCasts(offset), "byteOffset") != owner) {
+    return false;
+  }
+  if (!length) {
+    return size == 1;
+  }
+  length = withoutCasts(length);
+  if (viewOwner(length, "byteLength") == owner) {
+    return size == 1;
+  }
+
+  return viewOwner(length, "length") == owner && ownerType->elementSize() == uint64_t(size);
+}
+
+void ByteProofs::checkView(const Expr *buffer, const Expr *offset, const Expr *length, int64_t size,
+                           llvm::StringRef what) {
+  if (sameView(buffer, offset, length, size) ||
+      checker_.indexProofs().exempt(buffer->loc(), buffer)) {
+    return;
+  }
+  IndexProofs &proofs = checker_.indexProofs();
+  if (offset && !proofs.requireUpTo(offset, buffer, 0, "the offset of " + what.str())) {
+    return;
+  }
+  std::optional<int64_t> start =
+      offset ? checker_.constantFolder().intConstant(offset) : std::optional<int64_t>(0);
+  if (size > 1 && (!start || *start % size != 0)) {
+    checker_.diags_.error(offset->loc(), "the offset of " + what.str() + " must be a multiple of " +
+                                             std::to_string(size) +
+                                             ", written as a number; JavaScript throws a "
+                                             "RangeError otherwise");
+    return;
+  }
+  if (!length) {
+    std::optional<int64_t> whole = proofs.exactLength(buffer);
+    if (size > 1 && (!whole || *whole % size != 0)) {
+      checker_.diags_.error(buffer->loc(),
+                            "cannot prove that the size of the buffer is a multiple of " +
+                                std::to_string(size) + " for " + what.str() +
+                                ", and JavaScript would throw a RangeError; give the length: "
+                                "'new X(buffer, offset, length)'");
+    }
+    return;
+  }
+  if (!proofs.requireBetween(length, 0, std::nullopt, "the length of " + what.str())) {
+    return;
+  }
+  std::optional<Linear> count = proofs.linear(length);
+  std::optional<Linear> from = offset ? proofs.linear(offset) : Linear{Term::zero(), 0};
+  if (count && size > 1) {
+    Linear known = proofs.settled(*count);
+    count = known.term.isZero() ? std::optional<Linear>(Linear{Term::zero(), known.offset * size})
+                                : std::nullopt;
+  }
+  if (!proofs.provesSumUpTo(from, count, buffer)) {
+    std::string end = (offset ? valueText(offset) + " + " : std::string()) + valueText(length) +
+                      (size > 1 ? " * " + std::to_string(size) : "");
+    checker_.diags_.error(length->loc(),
+                          "cannot prove that " + what.str() + " fits in the buffer, '" + end +
+                              " <= " + valueText(buffer) +
+                              ".byteLength', and JavaScript would throw a RangeError; check it "
+                              "first, with the offset or the length written as a number");
+  }
 }
 
 bool ByteProofs::provesWithin(const Expr *object, const Expr *offset, int64_t size) const {

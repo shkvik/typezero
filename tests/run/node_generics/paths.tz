@@ -16,7 +16,8 @@ export function extensions<T>(items: T[], path: (x: T) => string): string[] {
 
 // A generic that calls one of the entry file, which imports this one.
 export function firstName<T>(items: T[], path: (x: T) => string): string {
-  return posix.basename(path(pick(items)))
+  const last = pick(items)
+  return last == undefined ? "" : posix.basename(path(last))
 }
 
 // A function a generic gives back, which runs later, in another file.

@@ -6,6 +6,7 @@
 #include "compiler/check/expr/expr_checker/expr_checker.h"
 #include "compiler/check/expr/literal_checker/literal_checker.h"
 #include "compiler/check/expr/member_checker/member_checker.h"
+#include "compiler/check/flow/index_proofs/index_proofs.h"
 #include "compiler/check/types/type_relations/type_relations.h"
 #include "compiler/check/values/global_function_checker/global_function_checker.h"
 #include "compiler/library/math/math_checker/math_checker.h"
@@ -46,6 +47,9 @@ Expr *NumberMethods::checkStaticCall(CallExpr *call, MemberExpr *member, const T
     bool codeUnits = fn == "fromCharCode";
     for (Expr *&arg : call->args) {
       arg = checker_.mathChecker().numericArg(arg);
+      if (!codeUnits && arg->type->isNumeric()) {
+        checker_.indexProofs().requireBetween(arg, 0, 0x10FFFF, "a code point");
+      }
       arg = codeUnits ? checker_.binaryChecker().toInt32(arg)
                       : checker_.typeRelations().convert(arg, Type::doubleTy());
     }
@@ -87,13 +91,9 @@ Expr *NumberMethods::checkStaticCall(CallExpr *call, MemberExpr *member, const T
 
 Expr *NumberMethods::checkNumberMethod(CallExpr *call, MemberExpr *member) {
   if (member->name == "toString" && call->args.size() == 1) {
-    if (auto *lit = dyn_cast<IntLitExpr>(call->args[0]);
-        lit && (lit->value < 2 || lit->value > 36)) {
-      checker_.diags_.error(lit->loc(), "toString() takes a radix from 2 to 36, found " +
-                                            std::to_string(lit->value));
-    }
     member->object = checker_.typeRelations().convert(member->object, Type::doubleTy());
     call->args[0] = checker_.memberChecker().checkPosition(call->args[0]);
+    checker_.indexProofs().requireBetween(call->args[0], 2, 36, "the radix of 'toString'");
     call->builtin = Builtin::NumToRadix;
     call->type = Type::string();
     return call;
@@ -114,6 +114,8 @@ Expr *NumberMethods::checkNumberMethod(CallExpr *call, MemberExpr *member) {
     member->object = checker_.typeRelations().convert(member->object, Type::doubleTy());
     if (!call->args.empty()) {
       call->args[0] = checker_.memberChecker().checkPosition(call->args[0]);
+      checker_.indexProofs().requireBetween(call->args[0], 0, 100,
+                                            "the number of digits of 'toFixed'");
     }
     call->builtin = Builtin::NumToFixed;
     call->type = Type::string();

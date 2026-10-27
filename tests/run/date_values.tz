@@ -31,7 +31,8 @@ console.log(latest(days, d => d.getTime()), latest<Date>([], d => d.getTime()))
 function pair<T>(a: T, b: T): T[] {
   return [a, b]
 }
-console.log(pair(days[0]!, days[1]!))
+const [day0, day1] = days
+if (day0 != undefined && day1 != undefined) console.log(pair(day0, day1))
 
 // `Date | undefined`.
 interface Task {
@@ -43,13 +44,13 @@ for (const task of tasks) {
   console.log(task, task.due?.getUTCDate(), task.due == undefined)
   if (task.due) task.due.setUTCDate(task.due.getUTCDate() + 1)
 }
-console.log(tasks[0]!.due)
+console.log(tasks[0].due)
 
 // A date is shared: what one holder changes, the others see.
 const shared = new Date(0)
 const holders = [{ at: shared }, { at: shared }]
-holders[0]!.at.setUTCFullYear(2000)
-console.log(holders[1]!.at, holders[0]!.at == holders[1]!.at)
+holders[0].at.setUTCFullYear(2000)
+console.log(holders[1].at, holders[0].at == holders[1].at)
 const bump = () => shared.setUTCHours(shared.getUTCHours() + 1)
 bump()
 bump()

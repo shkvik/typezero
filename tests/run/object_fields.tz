@@ -45,7 +45,7 @@ console.log(last(chain), secondOr(chain, 0), secondOr({ value: 5 }, -1))
 if (chain.next != undefined && chain.next.next != undefined) console.log(chain.next.next.value)
 if (chain.next) {
   const n = chain.next.value
-  console.log(n, chain.next!.value)
+  console.log(n, chain.next.value)
 }
 
 // `??=`, `||=` and `&&=` on fields.

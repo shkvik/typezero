@@ -1,14 +1,7 @@
 // same-as-node
-// encodeURIComponent, encodeURI with their URIErrors, and decodeURIComponent
-// and decodeURI, which give a Result (docs/errors.md, section 7).
-
-function attempt(what: string, f: () => string) {
-  try {
-    console.log(what, JSON.stringify(f()))
-  } catch (e) {
-    console.log(what, `${e}`, e instanceof URIError, e.name)
-  }
-}
+// encodeURIComponent and encodeURI, and decodeURIComponent and decodeURI,
+// which give a Result (docs/errors.md, section 7). A lone surrogate, where
+// JavaScript throws, is encoded as U+FFFD (tests/run/proofs_values.tz).
 
 // What each keeps: the unreserved characters, and encodeURI the reserved ones.
 let ascii = ""
@@ -25,13 +18,6 @@ console.log(encodeURIComponent("é ÿ \u0080  "), encodeURIComponent("прив�
 console.log(encodeURIComponent("भारत €"), encodeURIComponent("😀 𝄞"), encodeURI("😀"))
 console.log(encodeURIComponent(""), encodeURIComponent("plain"), encodeURIComponent("%"))
 console.log(encodeURIComponent(42), encodeURIComponent(1.5), encodeURIComponent(true))
-
-// A lone surrogate has no UTF-8.
-attempt("lone high", () => encodeURIComponent("a\uD800b"))
-attempt("lone low", () => encodeURIComponent("\uDC00"))
-attempt("high at the end", () => encodeURI("abc\uD83D"))
-attempt("two highs", () => encodeURIComponent("\uD83D😀"))
-attempt("reversed pair", () => encodeURIComponent("\uDE00\uD83D"))
 
 // Decoding: mixed case hex, all lengths, and what decodeURI keeps.
 function component(text: string) {

@@ -33,7 +33,7 @@ console.log(firstTwo, log.join(", "))
 // drop, flatMap, reduce, forEach, some, every, find.
 console.log(naturals().drop(5).take(3).toArray())
 console.log(["a b", "c", "d e f"].values().flatMap(s => s.split(" ")).toArray())
-console.log([1, 2, 3].values().flatMap(n => naturals().take(n)).toArray())
+console.log([1, 2, 3].values().flatMap(n => naturals().take(Math.max(n, 0))).toArray())
 console.log(naturals().take(5).reduce((acc, n) => acc + n))
 console.log(naturals().take(5).reduce((acc, n) => acc + n, 100))
 console.log(numbers.values().reduce((acc, n, i) => acc + n * i, 0))

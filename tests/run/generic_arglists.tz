@@ -13,7 +13,7 @@ function add(a: int, b: int) {
   return a + b
 }
 function greet(who: string, times: int, loud: boolean) {
-  const text = `hi ${who} `.repeat(times)
+  const text = `hi ${who} `.repeat(Math.max(times, 0))
   return loud ? text.toUpperCase() : text
 }
 

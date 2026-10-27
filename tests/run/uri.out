@@ -7,11 +7,6 @@ a%20b%26c%3Dd%2Fe%3Ff%23g http://x.org/a%20b?q=1&r=%C3%A9#top
 %E0%A4%AD%E0%A4%BE%E0%A4%B0%E0%A4%A4%20%E2%82%AC %F0%9F%98%80%20%F0%9D%84%9E %F0%9F%98%80
  plain %25
 42 1.5 true
-lone high URIError: URI malformed true URIError
-lone low URIError: URI malformed true URIError
-high at the end URIError: URI malformed true URIError
-two highs URIError: URI malformed true URIError
-reversed pair URIError: URI malformed true URIError
 éé при
 भ€ 😀!
 ABc d no escapes 

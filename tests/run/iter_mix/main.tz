@@ -6,7 +6,7 @@
 import { Cart, Item, parseLines } from "./shop"
 
 function firstN<T>(xs: T[], n: int) {
-  return xs.values().take(n).toArray()
+  return xs.values().take(Math.max(n, 0)).toArray()
 }
 
 function countWhere<T>(it: Generator<T>, keep: (x: T) => boolean) {

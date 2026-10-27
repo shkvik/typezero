@@ -7,7 +7,7 @@ function makeAccount(start: int) {
   return [deposit, withdraw]
 }
 const [dep, wd] = makeAccount(100)
-console.log(dep!(50), wd!(30), dep!(5))
+if (dep != undefined && wd != undefined) console.log(dep(50), wd(30), dep(5))
 
 // Each iteration of `for (let ...)` has its own variable.
 const later: (() => int)[] = []

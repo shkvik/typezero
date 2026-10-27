@@ -19,7 +19,7 @@ console.log(st.mtime.toISOString().length, typeof st.mtime.getFullYear())
 const json = JSON.stringify(st)
 console.log(json.includes("mtimeMs"), json.includes('"mtime"'), Object.keys(st).includes("mtime"))
 const sorted = [st.birthtime, st.mtime].sort((a, b) => a.getTime() - b.getTime())
-console.log(sorted.length, sorted[0]!.getTime() <= sorted[1]!.getTime())
+console.log(sorted.length, (sorted[0]?.getTime() ?? 0) <= (sorted[1]?.getTime() ?? 0))
 must(rmSync(dir, { recursive: true }))
 
 function must<T, E>(r: Result<T, E>): T {

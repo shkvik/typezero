@@ -4,6 +4,7 @@
 #include "compiler/lower/function_frame/function_frame.h"
 #include "compiler/lower/memory/ref_counts/ref_counts.h"
 #include "compiler/lower/module_builder/module_builder.h"
+#include "compiler/lower/types/optional_lowerer/optional_lowerer.h"
 #include "compiler/lower/values/array_lowerer/array_lowerer.h"
 #include "compiler/lower/values/number_lowerer/number_lowerer.h"
 #include "llvm/IR/Intrinsics.h"
@@ -114,9 +115,8 @@ llvm::Value *MathLowerer::emitMathCall(CallExpr *call) {
   case Builtin::MathMin:
   case Builtin::MathMax: {
     bool isMin = call->builtin == Builtin::MathMin;
-    if (args.empty()) {
-      return llvm::ConstantFP::getInfinity(f64, !isMin);
-    }
+    const Type *optional = type->isOptional() ? type : nullptr;
+    type = type->nonOptional();
     llvm::Intrinsic::ID id = type->isFloat()
                                  ? (isMin ? llvm::Intrinsic::minimum : llvm::Intrinsic::maximum)
                                  : (isMin ? llvm::Intrinsic::smin : llvm::Intrinsic::smax);
@@ -127,7 +127,7 @@ llvm::Value *MathLowerer::emitMathCall(CallExpr *call) {
       }
       return result;
     }
-    llvm::Value *result;
+    llvm::Value *result, *has = lowering_.builder_.getFalse();
     if (type->isFloat()) {
       result = llvm::ConstantFP::getInfinity(f64, !isMin);
     } else {
@@ -142,12 +142,18 @@ llvm::Value *MathLowerer::emitMathCall(CallExpr *call) {
         continue;
       }
       const Type *arrayType = call->args[i]->type, *element = arrayType->inner();
+      has = lowering_.builder_.CreateOr(
+          has, lowering_.builder_.CreateICmpNE(lowering_.arrayLowerer().arrayLength(args[i]),
+                                               lowering_.builder_.getInt64(0)));
       result = lowering_.arrayLowerer().emitArrayFold(
           args[i], element, result, [&](llvm::Value *acc, llvm::Value *value) {
             return lowering_.builder_.CreateBinaryIntrinsic(
                 id, acc, lowering_.exprLowerer().emitConversion(value, element, type));
           });
       lowering_.refCounts().releaseValue(args[i], arrayType);
+    }
+    if (optional) {
+      return lowering_.optionalLowerer().makeOptional(result, has, optional);
     }
     return result;
   }

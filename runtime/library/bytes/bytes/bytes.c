@@ -243,9 +243,12 @@ void tz_abuf_drop(void *object) { tz_obj_free(object); }
 void tz_bytes_object_drop(void *object) { tz_obj_free(object); }
 
 TzBytes *tz_bytes_new(int32_t kind, int64_t length) {
-  if (length < 0 || length > MAX_LENGTH / tz_bytes_element_size(kind)) {
-    tz_throw(TZ_RANGE_ERROR, "Invalid typed array length: %lld", (long long)length);
-    return NULL;
+  if (length < 0) {
+    tz_panicf("internal error: a typed array of %lld elements", (long long)length);
+  }
+  if (length > MAX_LENGTH / tz_bytes_element_size(kind)) {
+    tz_panicf("a typed array of %lld elements exceeds the maximum of %lld bytes", (long long)length,
+              (long long)MAX_LENGTH);
   }
 
   return bytes_alloc(kind, length, 1);
@@ -254,9 +257,12 @@ TzBytes *tz_bytes_new(int32_t kind, int64_t length) {
 TzBytes *tz_bytes_new_unset(int32_t kind, int64_t length) { return bytes_alloc(kind, length, 0); }
 
 TzArrayBuffer *tz_abuf_new(int64_t length) {
-  if (length < 0 || length > MAX_LENGTH) {
-    tz_throw(TZ_RANGE_ERROR, "Invalid array buffer length");
-    return NULL;
+  if (length < 0) {
+    tz_panicf("internal error: an ArrayBuffer of %lld bytes", (long long)length);
+  }
+  if (length > MAX_LENGTH) {
+    tz_panicf("an ArrayBuffer of %lld bytes exceeds the maximum of %lld", (long long)length,
+              (long long)MAX_LENGTH);
   }
 
   return abuf_alloc(length, 1);
@@ -270,33 +276,13 @@ TzBytes *tz_bytes_view(int32_t kind, TzArrayBuffer *buffer, int64_t offset, int6
   if (!(has & 1)) {
     offset = 0;
   }
-  if (offset < 0 || offset % size != 0) {
-    if (offset < 0) {
-      tz_throw(TZ_RANGE_ERROR, "Start offset %lld is outside the bounds of the buffer",
-               (long long)offset);
-    } else {
-      tz_throw(TZ_RANGE_ERROR, "start offset of %s should be a multiple of %lld", kind_name(kind),
-               (long long)size);
-    }
-    return NULL;
-  }
-  if (has & 2) {
-    if (length < 0 || offset + length * size > buffer->length) {
-      tz_throw(TZ_RANGE_ERROR, "Invalid typed array length: %lld", (long long)length);
-      return NULL;
-    }
-  } else {
-    if (buffer->length % size != 0) {
-      tz_throw(TZ_RANGE_ERROR, "byte length of %s should be a multiple of %lld", kind_name(kind),
-               (long long)size);
-      return NULL;
-    }
-    if (offset > buffer->length) {
-      tz_throw(TZ_RANGE_ERROR, "Start offset %lld is outside the bounds of the buffer",
-               (long long)offset);
-      return NULL;
-    }
+  if (!(has & 2)) {
     length = (buffer->length - offset) / size;
+  }
+  if (offset < 0 || offset % size != 0 || offset > buffer->length || length < 0 ||
+      offset + length * size > buffer->length || (!(has & 2) && buffer->length % size != 0)) {
+    tz_panicf("internal error: a %s view at %lld of %lld elements", kind_name(kind),
+              (long long)offset, (long long)length);
   }
   tz_rc_inc(&buffer->rc);
 
@@ -307,26 +293,16 @@ TzBytes *tz_dataview_new(TzArrayBuffer *buffer, int64_t offset, int64_t length, 
   if (!(has & 1)) {
     offset = 0;
   }
-  if (offset < 0 || offset > buffer->length) {
-    tz_throw(TZ_RANGE_ERROR, "Start offset %lld is outside the bounds of the buffer",
-             (long long)offset);
-    return NULL;
-  }
-  if (has & 2) {
-    if (length < 0 || offset + length > buffer->length) {
-      tz_throw(TZ_RANGE_ERROR, "Invalid DataView length %lld", (long long)length);
-      return NULL;
-    }
-  } else {
+  if (!(has & 2)) {
     length = buffer->length - offset;
+  }
+  if (offset < 0 || offset > buffer->length || length < 0 || offset + length > buffer->length) {
+    tz_panicf("internal error: a DataView at %lld of %lld bytes", (long long)offset,
+              (long long)length);
   }
   tz_rc_inc(&buffer->rc);
 
   return view_of(TZ_BYTES_DATA_VIEW, buffer, offset, length);
-}
-
-TZ_COLD void tz_dataview_range_error(void) {
-  tz_throw(TZ_RANGE_ERROR, "Offset is outside the bounds of the DataView");
 }
 
 TzBytes *tz_bytes_from_array(int32_t kind, const TzArray *a) {
@@ -457,10 +433,8 @@ void tz_bytes_fill(TzBytes *b, double value, int64_t start, int64_t end, int32_t
   }
 }
 
-TZ_COLD static int set_out_of_bounds(void) {
-  tz_throw(TZ_RANGE_ERROR, "offset is out of bounds");
-
-  return 0;
+TZ_COLD TZ_NORETURN static void set_out_of_bounds(void) {
+  tz_panicf("internal error: set() past the end");
 }
 
 void tz_bytes_set_array(TzBytes *dst, const TzArray *src, int64_t offset) {
@@ -738,8 +712,7 @@ TzBytes *tz_bytes_to_sorted(TzBytes *b) {
 TzBytes *tz_bytes_with(TzBytes *b, int64_t index, double value) {
   int64_t at = index < 0 ? index + b->length : index;
   if (at < 0 || at >= b->length) {
-    tz_throw(TZ_RANGE_ERROR, "Invalid typed array index");
-    return NULL;
+    tz_panicf("internal error: with() at %lld of %lld", (long long)index, (long long)b->length);
   }
   TzBytes *copy = tz_bytes_slice(b, 0, 0, 0);
   put(copy->data, tz_bytes_kind(b), at, value);

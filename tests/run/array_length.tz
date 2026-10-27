@@ -1,7 +1,7 @@
-// expect-exit: 1
-// expect-stderr: RangeError: Invalid array length
-// A negative length is a RangeError, as in JavaScript; nobody catches it here.
+// A length is shown not negative before an array is made of it (JavaScript
+// throws a RangeError at a negative one).
 function make(n: int): int[] {
+  if (n < 0) return []
   return new Array<int>(n)
 }
 console.log(make(2))

@@ -180,6 +180,7 @@ Expr *TypedArrayChecker::checkTypedArrayMethod(CallExpr *call, MemberExpr *membe
       }
     }
     positions(1);
+    checkSetRange(member->object, source, call->args.size() > 1 ? call->args[1] : nullptr);
     return made(Builtin::BytesSet, Type::voidTy());
   }
   if (name == "subarray" || name == "slice") {
@@ -201,6 +202,14 @@ Expr *TypedArrayChecker::checkTypedArrayMethod(CallExpr *call, MemberExpr *membe
       return call;
     }
     call->args[0] = checker_.memberChecker().checkPosition(call->args[0]);
+    if (!call->args[0]->type->isError() &&
+        !checker_.indexProofs().provesAtInBounds(member->object, call->args[0]) &&
+        !checker_.indexProofs().exempt(call->args[0]->loc(), member->object)) {
+      checker_.diags_.error(call->args[0]->loc(),
+                            "cannot prove that the index is within the array, and JavaScript "
+                            "would throw a RangeError; check it first, e.g. 'if (i >= 0 && i < " +
+                                valueText(member->object) + ".length)'");
+    }
     call->args[1] = checker_.argumentChecker().checkArg(call->args[1], element);
     checker_.byteProofs().checkFits(call->args[1], type, what);
     call->args[1] = checker_.typeRelations().convert(call->args[1], Type::doubleTy());
@@ -272,12 +281,30 @@ Expr *TypedArrayChecker::checkDataViewMethod(CallExpr *call, MemberExpr *member)
     args.push_back(checker_.argumentChecker().checkArg(call->args[min], Type::boolTy()));
   }
   call->mayBeOutOfRange =
-      !checker_.byteProofs().provesWithin(member->object, args[1], kindType->elementSize());
+      !checker_.indexProofs().requireUpTo(args[1], member->object, kindType->elementSize(),
+                                          "the offset of '" + member->name.str() + "'");
   call->args = std::move(args);
   call->builtin = m.write ? Builtin::DataViewSet : Builtin::DataViewGet;
   call->type = m.write ? Type::voidTy() : element;
 
   return call;
+}
+
+void TypedArrayChecker::checkSetRange(const Expr *target, const Expr *source, const Expr *offset) {
+  IndexProofs &proofs = checker_.indexProofs();
+  if ((offset && !proofs.requireBetween(offset, 0, std::nullopt, "the offset of 'set'")) ||
+      checker_.indexProofs().exempt(source->loc(), target)) {
+    return;
+  }
+  std::optional<Linear> at = offset ? proofs.linear(offset) : Linear{Term::zero(), 0};
+  if (!proofs.provesSumUpTo(at, proofs.lengthAtMost(source), target)) {
+    std::string end =
+        (offset ? valueText(offset) + " + " : std::string()) + valueText(source) + ".length";
+    checker_.diags_.error(source->loc(), "cannot prove that the values fit, '" + end +
+                                             " <= " + valueText(target) +
+                                             ".length', and JavaScript would throw a RangeError; "
+                                             "check it first, with the offset written as a number");
+  }
 }
 
 }

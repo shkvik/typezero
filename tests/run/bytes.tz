@@ -13,11 +13,6 @@ const t = new Uint8Array([1, 2, 3, 4, 5])
 t.set([9, 8])
 t.set(new Uint8Array([7]), 4)
 console.log(t)
-try {
-  u.with(5, 1)
-} catch (e) {
-  console.log(e.name, e.message)
-}
 console.log(u.with(-1, 9), u.toReversed(), u.toSorted(), u.toSorted((a, b) => b - a), u)
 console.log(new Float16Array([1.0009765625, 65520, 0.1, 70000]), new Float32Array([16777217]), new Int8Array([127]).fill(-128))
 console.log(new Uint8ClampedArray([1, 2, -3, 300]))

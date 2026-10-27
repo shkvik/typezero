@@ -114,6 +114,13 @@ Expr *MathChecker::checkMathCall(CallExpr *call, MemberExpr *member, const Type 
   if (!checker_.argumentChecker().checkArity(call, member->loc(), fn->minArgs, fn->maxArgs)) {
     return call;
   }
+  if (fn->kind == MinMax && call->args.empty()) {
+    checker_.diags_.error(call->loc(), "'Math." + member->name + "()' without values gives " +
+                                           (member->name == "max" ? "-" : "") +
+                                           "Infinity; pass the values, e.g. 'Math." + member->name +
+                                           "(...xs)'");
+    return call;
+  }
 
   if (fn->kind == Pow) {
     auto *pow =
@@ -211,25 +218,13 @@ Expr *MathChecker::checkMinMaxSpread(CallExpr *call, const Type *hint) {
   if (!ok) {
     return call;
   }
-  if (common->isInteger() && !someValue) {
-    if (hint && hint->isInteger()) {
-      auto *member = cast<MemberExpr>(call->callee);
-      checker_.diags_.error(call->loc(),
-                            "Math." + member->name + " of an array that may be empty is " +
-                                (member->name == "max" ? "-" : "") +
-                                "Infinity, which only a double holds; check that the array "
-                                "is not empty, or pass a first value: 'Math." +
-                                member->name + "(0, ...a)'");
-      return call;
-    }
-    common = Type::doubleTy();
-  }
   for (size_t i = 0; i < call->args.size(); ++i) {
     if (!call->spreads(i)) {
       call->args[i] = checker_.typeRelations().convert(call->args[i], common);
     }
   }
-  call->type = common;
+  call->type = someValue ? common : Type::optional(common);
+  call->mayBeOutOfRange = !someValue;
 
   return call;
 }

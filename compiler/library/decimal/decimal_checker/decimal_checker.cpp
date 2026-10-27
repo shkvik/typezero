@@ -394,21 +394,12 @@ Expr *DecimalChecker::checkDecimalStatic(CallExpr *call, MemberExpr *member) {
   if (!ok) {
     return call;
   }
-  if (!someValue && builtin != Builtin::DecSum) {
-    if (call->args.empty()) {
-      checker_.diags_.error(member->loc(), "decimal." + name + "() needs at least one value");
-    } else {
-      checker_.diags_.error(call->loc(),
-                            "decimal." + name +
-                                " of an array that may be empty has no value; "
-                                "check that the array is not empty, or pass a first value: "
-                                "'decimal." +
-                                name + "(0, ...a)'");
-    }
+  if (call->args.empty() && builtin != Builtin::DecSum) {
+    checker_.diags_.error(member->loc(), "decimal." + name + "() needs at least one value");
     return call;
   }
   call->builtin = builtin;
-  call->type = decimal;
+  call->type = someValue || builtin == Builtin::DecSum ? decimal : Type::optional(decimal);
 
   return call;
 }

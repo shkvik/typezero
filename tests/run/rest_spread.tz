@@ -13,12 +13,11 @@ function label(prefix: string, sep = ", ", ...parts: string[]): string {
 }
 console.log(label("none"), label("list", " | ", "a", "b"), label("words", undefined, ..."hi"))
 
-// Math.max and Math.min take the elements of arrays. Of an empty one they
-// give -Infinity and Infinity.
+// Math.max and Math.min take the elements of arrays (of one that may be
+// empty they give undefined: tests/run/proofs_values.tz).
 const values = [3, -1, 7.5, 2]
-const none: int[] = []
 console.log(Math.max(...values), Math.min(...values), Math.max(0, ...nums), Math.min(...nums, 5))
-console.log(Math.max(...none), Math.min(...none), Math.max(...[0.5, NaN]))
+console.log(Math.max(...[0.5, NaN]))
 
 // push appends the elements of arrays.
 const out = [1]

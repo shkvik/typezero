@@ -1,0 +1,55 @@
+// Where JavaScript throws at a value out of range, tz shows it in the type or
+// asks for a check (docs/errors.md, section 7): reduce without a first value
+// and Math.min of an array that may be empty give undefined; lengths, counts
+// and offsets are checked before use, and the check is what the compiler
+// reads.
+const empty: int[] = []
+const some = [3, 1, 2]
+console.log(empty.reduce((a, b) => a + b), some.reduce((a, b) => a + b))
+const total = empty.reduceRight((a, b) => a + b)
+console.log(total ?? 0, typeof total)
+console.log(Math.min(...empty), Math.max(...some), Math.min(0, ...empty))
+const doubles: double[] = []
+console.log(Math.max(...doubles), new Uint8Array(0).reduce((a, b) => a + b))
+console.log(empty.values().reduce((a, b) => a + b), some.values().reduce((a, b) => a * 10 + b))
+const prices: decimal[] = []
+const two: decimal[] = [1, 2]
+console.log(decimal.max(...prices), decimal.min(...two))
+
+// A length or a count from the data, checked first.
+function pad(text: string, width: int): string {
+  const room = width - text.length
+  if (room <= 0) return text
+  return " ".repeat(room) + text
+}
+console.log(`[${pad("ab", 5)}] [${pad("abcdef", 3)}]`)
+console.log(["a", "b", "c"].map((s, i) => s.repeat(i + 1)).join(" "))
+function zeros(n: int): int[] {
+  if (n < 0) return []
+  return new Array<int>(n)
+}
+console.log(zeros(3), zeros(-1))
+
+// Offsets of bytes from the data, checked first.
+function word(b: Buffer, at: int) {
+  if (at < 0 || at > b.length - 4) return undefined
+  return b.readUInt32LE(at)
+}
+const b = Buffer.from([1, 0, 0, 0, 2, 0, 0, 0])
+console.log(word(b, 0), word(b, 4), word(b, 5), word(b, -1))
+function put(out: Uint8Array, at: int, part: Uint8Array): boolean {
+  if (at < 0 || at > out.length || at + part.length > out.length) return false
+  out.set(part, at)
+  return true
+}
+const out = new Uint8Array(4)
+console.log(put(out, 1, new Uint8Array([7, 8])), put(out, 3, new Uint8Array([9, 9])), out)
+const view = new DataView(new ArrayBuffer(8))
+view.setUint16(0, 0x1234)
+console.log(view.getUint16(0), new Uint8Array(view.buffer, 0, 2))
+
+// Where tz does not throw: swap16 of an odd length leaves the last byte, and
+// a lone surrogate is encoded as U+FFFD.
+console.log(Buffer.from([1, 2, 3]).swap16(), encodeURIComponent("a\uD800b"))
+console.log(encodeURIComponent("\uDC00"), encodeURI("abc\uD83D"), encodeURIComponent("\uD83D😀"),
+  encodeURIComponent("\uDE00\uD83D"))

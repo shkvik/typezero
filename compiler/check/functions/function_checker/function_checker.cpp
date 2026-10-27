@@ -3,6 +3,7 @@
 #include "compiler/check/classes/class_checker/class_checker.h"
 #include "compiler/check/expr/expr_checker/expr_checker.h"
 #include "compiler/check/flow/flow_checker/flow_checker.h"
+#include "compiler/check/flow/index_proofs/index_proofs.h"
 #include "compiler/check/flow/predicate_checker/predicate_checker.h"
 #include "compiler/check/functions/closure_checker/closure_checker.h"
 #include "compiler/check/generics/arg_list_checker/arg_list_checker.h"
@@ -267,6 +268,7 @@ void FunctionChecker::checkFunctionBody(FunctionDecl *fn) {
     }
   }
   checker_.byteProofs().addByteCallbackFacts(fn);
+  checker_.indexProofs().addIndexCallbackFacts(fn);
   checker_.argListChecker().declareArgumentList(fn);
   checker_.predicateChecker().beginPredicate(fn);
   auto outerListened = std::move(checker_.flow_.errorListened);

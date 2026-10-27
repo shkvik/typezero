@@ -13,6 +13,8 @@ public:
 
 private:
   Checker &checker_;
+
+  void checkWriteLength(const Expr *object, const Expr *offset, const Expr *length);
 };
 
 }

@@ -32,7 +32,7 @@ function sum(...xs: int[]) {
 }
 const loggedSum = logged("sum", sum)
 console.log(loggedSum(), loggedSum(1, 2, 3))
-const loggedArrow = logged("arrow", (s: string, n: int) => s.repeat(n))
+const loggedArrow = logged("arrow", (s: string, n: int) => s.repeat(Math.max(n, 0)))
 console.log(loggedArrow("ab", 2))
 
 // Taking a part off the list, or adding one.

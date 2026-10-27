@@ -1,6 +1,6 @@
 #include "runtime/core/number/number.h"
 #include "runtime/core/alloc/alloc.h"
-#include "runtime/core/error/error.h"
+#include "runtime/core/output/output.h"
 #include "runtime/core/string/string.h"
 #include <stddef.h>
 #include <stdint.h>
@@ -328,9 +328,7 @@ static void big_add_power_of_two(Big *b, int k) {
 
 void tz_num_to_fixed(TzStr *out, double x, int64_t digits) {
   if (digits < 0 || digits > 100) {
-    tz_throw(TZ_RANGE_ERROR, "toFixed() digits argument must be between 0 and 100");
-    *out = tz_str_from_ascii("", 0);
-    return;
+    tz_panicf("internal error: toFixed() with %lld digits", (long long)digits);
   }
   if (isnan(x)) {
     *out = tz_str_from_ascii("NaN", 3);
@@ -405,9 +403,7 @@ static double next_up(double value) {
 
 void tz_num_to_radix(TzStr *out, double x, int64_t radix) {
   if (radix < 2 || radix > 36) {
-    tz_throw(TZ_RANGE_ERROR, "toString() radix argument must be between 2 and 36");
-    *out = tz_str_from_ascii("", 0);
-    return;
+    tz_panicf("internal error: toString() with the radix %lld", (long long)radix);
   }
   if (radix == 10 || isnan(x) || isinf(x)) {
     tz_str_from_f64(out, x);

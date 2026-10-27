@@ -67,10 +67,11 @@ const people = [
 ]
 people.sort((a, b) => a.age - b.age)
 console.log(people.map(q => q.name).join(" < "), people.reduce((sum, q) => sum + q.age, 0))
-console.log(people.indexOf(people[1]!), people.includes({ name: "Ann", age: 31 }))
+const second = people[1]
+if (second != undefined) console.log(people.indexOf(second), people.includes({ name: "Ann", age: 31 }))
 
 // Objects are references: `==` compares them.
-const first = people[0]!
+const first = people[0] ?? { name: "", age: 0 }
 const same = first
 const copy = { name: first.name, age: first.age }
 console.log(first == same, first == copy, first != copy)

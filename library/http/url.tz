@@ -8,9 +8,13 @@ function at(cps: int[], i: int): int {
   return i >= 0 && i < cps.length ? cps[i] : -1
 }
 
+function cpText(c: int): string {
+  return c >= 0 && c <= 0x10ffff ? String.fromCodePoint(c) : ""
+}
+
 function fromCodePoints(cps: int[], from: int, to: int): string {
   let s = ""
-  for (let i = from; i < to && i < cps.length; i++) s += String.fromCodePoint(at(cps, i))
+  for (let i = from; i < to && i < cps.length; i++) s += cpText(at(cps, i))
   return s
 }
 
@@ -81,7 +85,7 @@ function utf8Bytes(c: int): int[] {
 
 function percentEncode(c: int, set: int, spaceAsPlus = false): string {
   if (spaceAsPlus && c == 0x20) return "+"
-  if (!inSet(c, set)) return String.fromCodePoint(c)
+  if (!inSet(c, set)) return cpText(c)
   let s = ""
   for (const b of utf8Bytes(c)) s += hexByte(b)
   return s
@@ -318,11 +322,11 @@ function punycode(label: string): string {
   let delta = 0
   let bias = 72
   let output = ""
-  for (const c of input) if (c < 0x80) output += String.fromCodePoint(c)
+  for (const c of input) if (c < 0x80) output += cpText(c)
   const basic = output.length
   let handled = basic
   if (basic > 0) output += "-"
-  const digit = (d: int) => String.fromCodePoint(d < 26 ? d + 0x61 : d - 26 + 0x30)
+  const digit = (d: int) => cpText(d < 26 ? d + 0x61 : d - 26 + 0x30)
   const adapt = (d: int, points: int, first: boolean): int => {
     let k = 0
     let dd = first ? Math.floor(d / 700) : d >> 1
@@ -365,7 +369,7 @@ function domainToAscii(domain: string): string | undefined {
   for (const ch of domain) if ((ch.codePointAt(0) ?? 0) >= 0x80) ascii = false
   if (ascii) {
     let lowered = ""
-    for (const ch of domain) lowered += String.fromCodePoint(lowerAscii(ch.codePointAt(0) ?? 0))
+    for (const ch of domain) lowered += cpText(lowerAscii(ch.codePointAt(0) ?? 0))
     return lowered
   }
   const mapped = domain.normalize("NFKC").toLowerCase()
@@ -560,7 +564,7 @@ function basicParse(input0: string, base: UrlRecord | undefined, url: UrlRecord,
     switch (state) {
       case SCHEME_START:
         if (isAsciiAlpha(c)) {
-          buffer += String.fromCodePoint(lowerAscii(c))
+          buffer += cpText(lowerAscii(c))
           state = SCHEME
         } else if (stateOverride == 0) {
           state = NO_SCHEME
@@ -571,7 +575,7 @@ function basicParse(input0: string, base: UrlRecord | undefined, url: UrlRecord,
         break
       case SCHEME:
         if (isAsciiAlphanumeric(c) || c == 0x2b || c == 0x2d || c == 0x2e) {
-          buffer += String.fromCodePoint(lowerAscii(c))
+          buffer += cpText(lowerAscii(c))
         } else if (c == 0x3a) {
           if (stateOverride != 0) {
             if (isSpecial(url.scheme) != isSpecial(buffer)) return false
@@ -720,7 +724,7 @@ function basicParse(input0: string, base: UrlRecord | undefined, url: UrlRecord,
           buffer = ""
           state = HOST
         } else {
-          buffer += String.fromCodePoint(c)
+          buffer += cpText(c)
         }
         break
       case HOST:
@@ -752,12 +756,12 @@ function basicParse(input0: string, base: UrlRecord | undefined, url: UrlRecord,
         } else {
           if (c == 0x5b) insideBrackets = true
           if (c == 0x5d) insideBrackets = false
-          buffer += String.fromCodePoint(c)
+          buffer += cpText(c)
         }
         break
       case PORT:
         if (isAsciiDigit(c)) {
-          buffer += String.fromCodePoint(c)
+          buffer += cpText(c)
         } else if (c == -1 || c == 0x2f || c == 0x3f || c == 0x23 ||
                    (isSpecial(url.scheme) && c == 0x5c) || stateOverride != 0) {
           if (buffer != "") {
@@ -835,7 +839,7 @@ function basicParse(input0: string, base: UrlRecord | undefined, url: UrlRecord,
             state = PATH_START
           }
         } else {
-          buffer += String.fromCodePoint(c)
+          buffer += cpText(c)
         }
         break
       case PATH_START:
@@ -907,7 +911,7 @@ function basicParse(input0: string, base: UrlRecord | undefined, url: UrlRecord,
             state = FRAGMENT
           }
         } else {
-          buffer += String.fromCodePoint(c)
+          buffer += cpText(c)
         }
         break
       case FRAGMENT:

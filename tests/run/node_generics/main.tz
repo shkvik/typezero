@@ -7,12 +7,13 @@ import { posix } from "node:path"
 import { early } from "./early.tz"
 import { extensions, firstName, joiner, kinds, label, lines } from "./paths.tz"
 
-export function pick<T>(items: T[]): T {
-  return items[items.length - 1]!
+export function pick<T>(items: T[]): T | undefined {
+  return items.at(-1)
 }
 
 export function pickName<T>(items: T[], path: (x: T) => string): string {
-  return posix.basename(path(pick(items)))
+  const last = pick(items)
+  return last == undefined ? "" : posix.basename(path(last))
 }
 
 console.log(label(1, "a/b", "c.txt"), label("x", "/tmp", "d.md"))

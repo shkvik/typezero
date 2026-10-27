@@ -597,11 +597,12 @@ void tz_buffer_to_string(TzStr *out, const TzBytes *b, int32_t encoding, int64_t
 }
 
 TzBytes *tz_buffer_alloc(int64_t size, int32_t zero) {
-  if (size < 0 || size > MAX_LENGTH) {
-    tz_throw(TZ_RANGE_ERROR,
-             "The value of \"size\" is out of range. It must be >= 0 && <= %lld. Received %lld",
-             (long long)MAX_LENGTH, (long long)size);
-    return NULL;
+  if (size < 0) {
+    tz_panicf("internal error: a Buffer of %lld bytes", (long long)size);
+  }
+  if (size > MAX_LENGTH) {
+    tz_panicf("a Buffer of %lld bytes exceeds the maximum of %lld", (long long)size,
+              (long long)MAX_LENGTH);
   }
 
   return zero ? tz_bytes_new(TZ_BYTES_BUFFER, size) : buffer_of(size);
@@ -611,21 +612,14 @@ TzBytes *tz_buffer_view(TzArrayBuffer *buffer, int64_t offset, int64_t length, i
   if (!(has & 1)) {
     offset = 0;
   }
-  if (offset < 0) {
-    tz_throw(TZ_RANGE_ERROR, "Start offset %lld is outside the bounds of the buffer",
-             (long long)offset);
-    return NULL;
-  }
-  if (offset > buffer->length) {
-    tz_throw(TZ_RANGE_ERROR, "\"offset\" is outside of buffer bounds");
-    return NULL;
+  if (offset < 0 || offset > buffer->length) {
+    tz_panicf("internal error: a Buffer view at %lld", (long long)offset);
   }
   int64_t max = buffer->length - offset;
   if (!(has & 2)) {
     length = max;
   } else if (length > max) {
-    tz_throw(TZ_RANGE_ERROR, "\"length\" is outside of buffer bounds");
-    return NULL;
+    tz_panicf("internal error: a Buffer view of %lld bytes", (long long)length);
   } else if (length < 0) {
     length = 0;
   }
@@ -688,15 +682,9 @@ int32_t tz_bytes_equal(const TzBytes *a, const TzBytes *b) {
          (a->length == 0 || memcmp(a->data, b->data, (size_t)a->length) == 0);
 }
 
-TZ_COLD static void out_of_range(const char *name, int64_t value, int64_t max) {
-  if (max < 0) {
-    tz_throw(TZ_RANGE_ERROR, "The value of \"%s\" is out of range. It must be >= 0. Received %lld",
-             name, (long long)value);
-  } else {
-    tz_throw(TZ_RANGE_ERROR,
-             "The value of \"%s\" is out of range. It must be >= 0 && <= %lld. Received %lld", name,
-             (long long)max, (long long)value);
-  }
+TZ_COLD TZ_NORETURN static void out_of_range(const char *name, int64_t value, int64_t max) {
+  tz_panicf("internal error: \"%s\" is %lld, out of 0 to %lld", name, (long long)value,
+            (long long)max);
 }
 
 int32_t tz_buffer_compare_range(const TzBytes *source, const TzBytes *target, int64_t tstart,
@@ -915,26 +903,15 @@ void tz_buffer_fill_byte(TzBytes *b, int32_t value, int64_t offset, int64_t end,
   fill_with(b, &byte, 1, offset, end, has);
 }
 
-TZ_COLD void tz_buffer_bounds_error(int64_t offset, int64_t size, int64_t length) {
-  if (length - size < 0) {
-    tz_throw(TZ_RANGE_ERROR, "Attempt to access memory outside buffer bounds");
-  } else {
-    tz_throw(TZ_RANGE_ERROR,
-             "The value of \"offset\" is out of range. It must be >= 0 and <= %lld. Received %lld",
-             (long long)(length - size), (long long)offset);
-  }
+TZ_COLD TZ_NORETURN void tz_bytes_out_of_range(int64_t offset, int64_t size, int64_t length) {
+  tz_panicf("internal error: %lld bytes at %lld of %lld", (long long)size, (long long)offset,
+            (long long)length);
 }
 
 static int check_var(const TzBytes *b, int64_t offset, int64_t size) {
-  if (size < 1 || size > 6) {
-    tz_throw(TZ_RANGE_ERROR,
-             "The value of \"byteLength\" is out of range. It must be >= 1 and <= 6. Received %lld",
-             (long long)size);
-    return 0;
-  }
-  if (offset < 0 || offset + size > b->length) {
-    tz_buffer_bounds_error(offset, size, b->length);
-    return 0;
+  if (size < 1 || size > 6 || offset < 0 || offset + size > b->length) {
+    tz_panicf("internal error: %lld bytes at %lld of %lld", (long long)size, (long long)offset,
+              (long long)b->length);
   }
 
   return 1;
@@ -972,11 +949,7 @@ int64_t tz_buffer_write_var(TzBytes *b, int64_t value, int64_t offset, int64_t s
 }
 
 void tz_buffer_swap(TzBytes *b, int32_t size) {
-  if (b->length % size != 0) {
-    tz_throw(TZ_RANGE_ERROR, "Buffer size must be a multiple of %d-bits", size * 8);
-    return;
-  }
-  for (int64_t i = 0; i < b->length; i += size) {
+  for (int64_t i = 0; i + size <= b->length; i += size) {
     for (int32_t j = 0; j < size / 2; ++j) {
       uint8_t t = b->data[i + j];
       b->data[i + j] = b->data[i + size - 1 - j];

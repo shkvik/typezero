@@ -1,12 +1,12 @@
 // same-as-node
 // Typed arrays in fields, arrays, optionals and generic code, iterated,
-// with callbacks that throw, and the RangeErrors of JavaScript.
+// with callbacks that throw, and lengths and offsets checked before use.
 class Image {
   pixels: Uint8ClampedArray
   width: int
   constructor(width: int, height: int) {
     this.width = width
-    this.pixels = new Uint8ClampedArray(width * height)
+    this.pixels = new Uint8ClampedArray(Math.max(width * height, 0))
   }
   brighten(by: int) {
     const p = this.pixels
@@ -26,7 +26,7 @@ let maybe: Uint8Array | undefined = undefined
 console.log(maybe?.length, maybe)
 maybe = list[1]
 if (maybe) console.log(maybe.length, maybe[0] ?? -1)
-const make = (n: int) => new Float32Array(n).fill(0.5)
+const make = (n: int) => new Float32Array(Math.max(n, 0)).fill(0.5)
 console.log(make(3))
 const bytes = new Uint8Array([10, 20, 30])
 for (const [i, b] of bytes.entries()) console.log(i, b)
@@ -52,24 +52,15 @@ try {
   console.log(e.message)
 }
 const n = -1
-try {
-  const bad = new Uint8Array(n + bytes.length - 4)
-  console.log(bad)
-} catch (e) {
-  console.log(e.name, e.message)
-}
+const size = n + bytes.length - 4
+if (size >= 0) console.log(new Uint8Array(size))
+else console.log("negative size", size)
 const view = new DataView(bytes.buffer)
-try {
-  console.log(view.getUint16(2))
-} catch (e) {
-  console.log(e.name, e.message)
-}
+if (view.byteLength >= 4) console.log(view.getUint16(2))
+else console.log("too short for 16 bits at 2", view.byteLength)
 const buf = Buffer.from("abc")
-try {
-  console.log(buf.readUInt32LE(0))
-} catch (e) {
-  console.log(e.name, e.message)
-}
+if (buf.length >= 4) console.log(buf.readUInt32LE(0))
+else console.log("too short for 32 bits", buf.length)
 console.log(buf.length, buf.byteLength, buf.byteOffset >= 0, buf.buffer.byteLength >= 3)
 const sorted = new Int32Array([3, -1, 2]).sort((a, b) => a - b)
 console.log(sorted, new Float64Array([0.5, -2]).reduce((a, b) => a + b, 10))

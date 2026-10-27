@@ -19,9 +19,9 @@ names = ["y"]
 console.log(names?.push("x"), names)
 console.log(names?.at(names?.length ?? 0), names?.indexOf(names?.[1] ?? ""))
 
-// After `x!` the variable is known to hold a value.
+// After a check the variable is known to hold a value.
 let pick: string | undefined = names?.[0]
-const upper = pick!.toUpperCase()
+const upper = pick == undefined ? "" : pick.toUpperCase()
 console.log(upper, pick.length)
 
 // Destructured globals are visible in functions.

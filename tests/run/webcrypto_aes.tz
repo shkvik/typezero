@@ -6,8 +6,8 @@ const enc = new TextEncoder()
 const dec = new TextDecoder()
 const hex = (b: ArrayBuffer) => Buffer.from(b).toString("hex")
 const bytes = (n: int, start: int) => {
-  const out = new Uint8Array(n)
-  for (let i = 0; i < n; i++) out[i] = (start + i) & 0xff
+  const out = new Uint8Array(Math.max(n, 0))
+  for (let i = 0; i < out.length; i++) out[i] = (start + i) & 0xff
   return out
 }
 const key = must(await subtle.importKey("raw", bytes(32, 0), "AES-GCM", true, ["encrypt", "decrypt"]))

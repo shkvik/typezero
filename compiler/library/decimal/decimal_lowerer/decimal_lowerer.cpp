@@ -11,9 +11,9 @@
 #include "compiler/lower/memory/ref_counts/ref_counts.h"
 #include "compiler/lower/objects/object_maker/object_maker.h"
 #include "compiler/lower/runtime_functions/runtime_functions.h"
+#include "compiler/lower/types/optional_lowerer/optional_lowerer.h"
 #include "compiler/lower/values/string_lowerer/string_lowerer.h"
 #include "llvm/ADT/STLExtras.h"
-#include "llvm/IR/MDBuilder.h"
 
 using llvm::BasicBlock;
 using llvm::cast;
@@ -326,22 +326,16 @@ llvm::Value *DecimalLowerer::emitDecimalFold(CallExpr *call) {
     lowering_.refCounts().dropOperand(arg);
   }
   lowering_.emitThrowCheckIf(op == kFoldSum);
-  if (op != kFoldSum) {
-    llvm::BasicBlock *emptyBlock = lowering_.functionFrame().newBlock("fold.empty");
-    llvm::BasicBlock *doneBlock = lowering_.functionFrame().newBlock("fold.done");
-    lowering_.builder_.CreateCondBr(
-        lowering_.builder_.CreateICmpEQ(lowering_.builder_.CreateLoad(i32, has),
-                                        lowering_.builder_.getInt32(0)),
-        emptyBlock, doneBlock, llvm::MDBuilder(lowering_.ctx_).createUnlikelyBranchWeights());
-    lowering_.functionFrame().switchTo(emptyBlock);
-    lowering_.builder_.CreateCall(
-        decimalFunction("tz_dec_no_values", lowering_.builder_.getVoidTy(), {i32}),
-        {lowering_.builder_.getInt32(op)});
-    lowering_.throwLowerer().emitRuntimeThrow();
-    lowering_.functionFrame().switchTo(doneBlock);
+  llvm::Value *result = lowering_.builder_.CreateLoad(lowering_.decTy_, acc);
+  if (!call->type->isOptional()) {
+    return result;
   }
 
-  return lowering_.builder_.CreateLoad(lowering_.decTy_, acc);
+  return lowering_.optionalLowerer().makeOptional(
+      result,
+      lowering_.builder_.CreateICmpNE(lowering_.builder_.CreateLoad(i32, has),
+                                      lowering_.builder_.getInt32(0)),
+      call->type);
 }
 
 llvm::Value *DecimalLowerer::emitDecimalCall(CallExpr *call) {

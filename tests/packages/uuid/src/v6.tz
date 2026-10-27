@@ -28,13 +28,15 @@ function v6<TBuf extends Uint8Array = never>(
 
   // Return as a byte array if requested
   if (buf) {
-    if (offset < 0 || offset + 16 > buf.length) {
+    // tz: the check is on the int offset, in a form the compiler reads.
+    const at = offset | 0;
+    if (at < 0 || at > buf.length - 16) {
       throw new RangeError(
         `UUID byte range ${offset}:${offset + 15} is out of buffer bounds`,
       );
     }
 
-    buf.set(bytes.subarray(0, 16), offset | 0);
+    buf.set(bytes.subarray(0, 16), at);
     return buf;
   }
 

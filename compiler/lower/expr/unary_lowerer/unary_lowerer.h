@@ -9,7 +9,6 @@ public:
   explicit UnaryLowerer(Lowering &lowering);
 
   llvm::Value *emitUnary(UnaryExpr *unary);
-  llvm::Value *emitNonNull(UnaryExpr *unary);
   llvm::Value *emitTypeOf(Expr *operand);
   llvm::Value *emitEnumName(IndexExpr *index);
 

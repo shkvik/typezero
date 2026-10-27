@@ -2,6 +2,7 @@
 #include "compiler/check/async/timer_checker/timer_checker.h"
 #include "compiler/check/expr/expr_checker/expr_checker.h"
 #include "compiler/check/flow/flow_checker/flow_checker.h"
+#include "compiler/check/flow/index_proofs/index_proofs.h"
 #include "compiler/check/functions/closure_checker/closure_checker.h"
 #include "compiler/check/functions/function_checker/function_checker.h"
 #include "compiler/check/generics/generic_checker/generic_checker.h"
@@ -212,6 +213,14 @@ void VarChecker::checkVarDecl(VarDeclStmt *decl) {
     }
     if (value) {
       checker_.flowChecker().assigned(d.sym, value);
+    }
+    if (const Type *base = type->nonOptional();
+        decl->isConst && value && !d.destructured &&
+        (base->isByteView() || base->bytes() == Type::Bytes::ArrayBuffer)) {
+      if (std::optional<Linear> length = checker_.indexProofs().knownLength(value);
+          length && length->term.isZero()) {
+        checker_.fixedLengths_[d.sym] = length->offset;
+      }
     }
     if (decl->isConst && d.init && type->isInteger()) {
       if (std::optional<int64_t> constant = checker_.constantFolder().intConstant(d.init)) {

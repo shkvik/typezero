@@ -38,33 +38,9 @@ namespace tz {
 
 bool bytesMayThrow(const CallExpr *call) {
   switch (call->builtin) {
-  case Builtin::BytesNew:
-  case Builtin::ArrayBufferNew: {
-    const Expr *length = call->args[0];
-    if (auto *conv = dyn_cast<CastExpr>(length); conv && conv->isImplicit()) {
-      length = conv->operand;
-    }
-    return !isa<IntLitExpr>(length);
-  }
-  case Builtin::BytesView:
-  case Builtin::BytesSet:
-  case Builtin::BytesWith:
-  case Builtin::DataViewNew:
   case Builtin::BufferAllocFill:
-  case Builtin::BufferConcat:
-  case Builtin::BufferCompareTo:
-  case Builtin::BufferWrite:
-  case Builtin::BufferCopy:
   case Builtin::BufferFill:
-  case Builtin::BufferReadVar:
-  case Builtin::BufferWriteVar:
-  case Builtin::BufferSwap:
     return true;
-  case Builtin::DataViewGet:
-  case Builtin::DataViewSet:
-  case Builtin::BufferRead:
-  case Builtin::BufferWriteNumber:
-    return call->mayBeOutOfRange;
   case Builtin::TextDecoderNew:
     return constantOf(call->args[0]) == 0;
   case Builtin::BufferFromString:

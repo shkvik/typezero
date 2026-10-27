@@ -3,7 +3,6 @@
 #include "compiler/check/expr/expr_checker/expr_checker.h"
 #include "compiler/check/expr/literal_checker/literal_checker.h"
 #include "compiler/check/expr/truth_checker/truth_checker.h"
-#include "compiler/check/flow/field_facts/field_facts.h"
 #include "compiler/check/flow/flow_checker/flow_checker.h"
 #include "compiler/check/generics/generic_checker/generic_checker.h"
 #include "compiler/check/objects/dict_checker/dict_checker.h"
@@ -36,6 +35,35 @@ static std::optional<std::string> simpleText(const Expr *expr) {
   }
 
   return std::nullopt;
+}
+
+static std::optional<std::string> assertedText(const Expr *expr) {
+  while (auto *conv = dyn_cast<CastExpr>(expr)) {
+    if (!conv->isImplicit()) {
+      return std::nullopt;
+    }
+    expr = conv->operand;
+  }
+  if (auto *member = dyn_cast<MemberExpr>(expr)) {
+    std::optional<std::string> object = assertedText(member->object);
+    if (!object) {
+      return std::nullopt;
+    }
+    return *object + (member->optional ? "?." : ".") + member->name.str();
+  }
+  if (auto *index = dyn_cast<IndexExpr>(expr)) {
+    std::optional<std::string> object = assertedText(index->object),
+                               position = assertedText(index->index);
+    if (!object || !position) {
+      return std::nullopt;
+    }
+    return *object + "[" + *position + "]";
+  }
+  if (auto *name = dyn_cast<NameExpr>(expr); name && name->name.starts_with("%")) {
+    return std::nullopt;
+  }
+
+  return simpleText(expr);
 }
 
 UnaryChecker::UnaryChecker(Checker &checker) : checker_(checker) {}
@@ -151,19 +179,30 @@ Expr *UnaryChecker::checkUnary(UnaryExpr *unary, const Type *expected, bool wrap
   case UnaryOp::NonNull: {
     unary->operand = checker_.exprChecker().checkExpr(unary->operand, expected);
     const Type *type = unary->operand->type;
+    std::string text = assertedText(unary->operand).value_or("x");
+    unary->type = type->isUndefined() ? Type::error() : type->nonOptional();
+    if (type->isError()) {
+      return unary;
+    }
     if (type->isUndefined()) {
-      checker_.diags_.error(unary->loc(), "the value is always undefined");
-      type = Type::error();
+      checker_.diags_.error(unary->loc(),
+                            "'!' is not supported, and the value is always undefined");
+      return unary;
     }
-    unary->type = type->nonOptional();
-    if (auto *name = dyn_cast<NameExpr>(unary->operand); name && name->var && type->isOptional()) {
+    if (!type->isOptional()) {
+      checker_.diags_.error(unary->loc(), "'!' is not supported, and '" + text +
+                                              "' is never undefined here; drop the '!'");
+      return unary;
+    }
+    checker_.diags_.error(unary->loc(), "'!' is not supported: check the value first, e.g. 'if (" +
+                                            text +
+                                            " == undefined) return ...', or give a "
+                                            "default with '" +
+                                            text + " ?? ...'");
+    if (auto *name = dyn_cast<NameExpr>(unary->operand); name && name->var) {
       checker_.flowChecker().setDefined(name->var, true);
-    } else if (std::optional<Checker::FieldPath> path =
-                   checker_.fieldFacts().fieldPath(unary->operand);
-               path && type->isOptional()) {
-      FieldFacts::defineField(checker_.flow_, *path);
     }
-    break;
+    return unary;
   }
   }
   if (unary->type && unary->type->isInteger()) {

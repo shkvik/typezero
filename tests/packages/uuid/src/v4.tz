@@ -36,14 +36,15 @@ function _v4<TBuf extends Uint8Array = never>(
 
   // Copy bytes to buffer, if provided
   if (buf) {
-    const at = offset ?? 0;
-    if (at < 0 || at + 16 > buf.length) {
+    // tz: the check is on the int offset, in a form the compiler reads.
+    const at = (offset ?? 0) | 0;
+    if (at < 0 || at > buf.length - 16) {
       throw new RangeError(
         `UUID byte range ${at}:${at + 15} is out of buffer bounds`,
       );
     }
 
-    buf.set(rnds.subarray(0, 16), at | 0);
+    buf.set(rnds.subarray(0, 16), at);
 
     return buf;
   }

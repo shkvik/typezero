@@ -112,8 +112,9 @@ tz run                   # без файла — "main" из tz.json
 - Все функции и константы `Math`; `Number(x)`, `+s`, `parseInt`, `parseFloat`, `isNaN`,
   `isFinite`, `Number.isInteger` и остальные функции и константы `Number`, `NaN`, `Infinity`,
   `x.toFixed(n)`, `x.toString(radix)` с основанием от 2 до 36 (цифры и дробь — как пишет V8:
-  `(255).toString(16)` — `"ff"`, `(0.5).toString(2)` — `"0.1"`; основание-литерал вне 2…36 —
-  ошибка компиляции, иначе `RangeError` node).
+  `(255).toString(16)` — `"ff"`, `(0.5).toString(2)` — `"0.1"`); основание вне 2…36 и число
+  цифр `toFixed` вне 0…100 — ошибка компиляции, если не доказано, что они в пределах (см.
+  «Доказательства вместо падений»).
 - `decimal` — точные десятичные числа любой длины, как в BigNumber.js, но с обычными операторами
   ([decimal.md](docs/decimal.md)): `const price: decimal = 19.99`, `price * 3 + 0.01`,
   `0.1 + 0.2 == 0.3`. Литерал там, где ждут `decimal`, и рядом с `decimal` читается из текста
@@ -170,9 +171,10 @@ tz run                   # без файла — "main" из tz.json
   проверяются как аргументы обычного вызова (например, rest-параметром `...values: int[]`).
   `` String.raw`C:\dir\${name}` `` оставляет escape-последовательности как написаны.
 - `undefined` и тип `T | undefined`: сравнения `== undefined`, `??`, `??=`, `?.`
-  (`a?.length`, `a?.[i]`, `s?.trim()`), `x!`, сужение типа после проверки
+  (`a?.length`, `a?.[i]`, `s?.trim()`), сужение типа после проверки
   (`if (x != undefined) x + 1`, `if (s) s.length`, после `if (!s) return`). Функция с типом
-  `T | undefined` может просто закончиться — она вернёт `undefined`.
+  `T | undefined` может просто закончиться — она вернёт `undefined`. `x!` нет: вместо него
+  проверка (`if (x == undefined) return …`) или значение по умолчанию (`x ?? 0`).
 - Объединения и литеральные типы (см. «Объединения»): `string | int`, `Circle | Square`,
   `type Dir = "up" | "down"`, `0 | 1`, `true`; сужение по метке (`s.kind == "circle"`, `switch`),
   `typeof`, `in`, `instanceof`, `Array.isArray`, `== "up"`, по присваиванию; `switch` по
@@ -182,12 +184,14 @@ tz run                   # без файла — "main" из tz.json
   как условие из её тела (`if (isCircle(s)) s.r`, `if (validIndex(a, i)) a[i] += 1`), `x is T`,
   `asserts x is T` и `this is T` проверяются по телу, `filter(isCircle)` даёт `Circle[]`.
 - Массивы `T[]` (или `Array<T>`) любых из этих типов, вложенные: литералы `[1, 2]` и
-  `[...a, x]`, `a[i]`, `a[i] = x`, `.length` (чтение и запись), `new Array<T>(n)`, `push`, `pop`,
+  `[...a, x]`, `a[i]`, `a[i] = x`, `.length` (чтение и запись), `new Array<T>(n)` (длина
+  доказана не отрицательной), `push`, `pop`,
   `shift`, `unshift`, `splice`, `at`, `slice`, `concat`, `indexOf`, `lastIndexOf`, `includes`,
   `join`, `reverse`, `fill`, `sort(compare)` и `sort()` (у массива чисел — ошибка, см. ниже),
   `toString`; с колбэком — `forEach`,
   `map`, `filter`, `flatMap`, `reduce`, `reduceRight`, `find`, `findIndex`, `findLast`,
-  `findLastIndex`, `some`, `every`.
+  `findLastIndex`, `some`, `every`. `reduce` без начального значения даёт `T | undefined`, пока
+  не доказано, что массив не пуст (в JS — `TypeError` у пустого).
 - Объекты (см. «Объекты»): типы `interface Point { x: double; y: double }`,
   `type Size = { width: int; height?: int }` и прямо в аннотации, литералы `{ x: 1, y }` (короткая
   запись, ключи-строки вроде `"content-type"`, ключи в скобках `{ [key]: v }`, spread
@@ -246,8 +250,8 @@ tz run                   # без файла — "main" из tz.json
   `Error`, `TypeError`, `RangeError`, `SyntaxError`, `URIError`, `new Error(message, { cause })`,
   `e.message`, `e.name`, `e.cause`, `e.stack`, `e.toString()` и `` `${e}` ``, `instanceof` для
   видов; свои классы ошибок (`class HttpError extends Error`) с полями. Бывшие паники — деление
-  целого на ноль, `x!` на `undefined`, `Math.round` за пределами `int`, `new Array(-1)`, ошибки
-  `decimal`, регулярок и `Json`, переполнение стека — исключения, которые можно поймать.
+  целого на ноль, `Math.round` за пределами `int`, ошибки `decimal`, регулярок и `Json`,
+  переполнение стека — исключения, которые можно поймать.
 - Async (см. «Async»): куски, которые трогают только свои данные, идут на всех ядрах, а результат —
   такой, какой мог бы выдать node; `async` функции, стрелки и методы,
   `await` (и на верхнем уровне файла), `Promise<T>` с `then`, `new Promise((resolve) => ...)`,
@@ -462,10 +466,8 @@ try {
 - **Не пойманное исключение** — как в node: напечатанное до него дописывается, в stderr уходят
   ошибка и её стек, код выхода 1.
 - Бывшие паники — исключения с именами и текстами JS: `RangeError: Division by zero` (деление
-  `int` и `long` на ноль, `0 ** -1`, `decimal`), `TypeError: x is undefined` (`x!`),
-  `TypeError: Reduce of empty array with no initial value`,
+  `int` и `long` на ноль, `0 ** -1`, `decimal`),
   `RangeError: 3000000000 does not fit in int` (`Math.round` и `parseInt` там, где ждут целое),
-  `RangeError: Invalid array length`, `RangeError: Invalid count value: -1` (`repeat`),
   `RangeError: Maximum call stack size exceeded`; у регулярок, `Json` и дат — их ошибки с текстами
   node: `TypeError` у `matchAll` и `replaceAll` без `g`, `TypeError` у чтения ключа `null` или
   `undefined` и у значения, которое содержит себя, в `JSON.stringify`, `RangeError: Invalid time value` у `toISOString()` неправильной даты. Рантайм
@@ -518,6 +520,52 @@ total += a[n] ?? 0
 **Запись** `a[i] = x` разрешена, если доказано `i <= a.length` (`a[a.length] = x` добавляет
 элемент, как в JS); дальше в JS остались бы дыры, поэтому без доказательства — ошибка
 компиляции с подсказкой проверить индекс или использовать `push()`.
+
+### Доказательства вместо падений
+
+Где JS бросает `RangeError` или `TypeError` от значения вне границ, tz требует, чтобы значение
+было доказано в границах при сборке ([errors.md](docs/errors.md), раздел 7). Доказательство —
+по тем же фактам, что у индексов: константы, проверки в `if`, длины, маски, `Math.min` /
+`Math.max`, индекс колбэка `map` и других (не меньше 0). Ошибка называет проверку, которой
+хватит:
+
+```ts
+function pad(text: string, width: int) {
+  const room = width - text.length
+  if (room <= 0) return text
+  return " ".repeat(room) + text          // без проверки — ошибка: room может быть < 0
+}
+function word(b: Buffer, at: int) {
+  if (at < 0 || at > b.length - 4) return undefined
+  return b.readUInt32LE(at)               // без проверки — ошибка
+}
+```
+
+- **Не меньше нуля**: длина `new Array<T>(n)`, `a.length = n`, `new Uint8Array(n)`,
+  `new ArrayBuffer(n)`, `Buffer.alloc(n)`, `allocUnsafe(n)`, `Buffer.concat(list, n)`; счёт
+  `repeat(n)`, `take(n)`, `drop(n)`. У массива массивов, функций и объектов `a.length = n` ещё и
+  не больше прежней длины (новым элементам нечего взять).
+- **В границах**: `toFixed(n)` — 0…100, `toString(radix)` — 2…36, `String.fromCodePoint(x)` —
+  целое 0…0x10FFFF.
+- **Байты** ([bytes.md](docs/bytes.md)): смещения `read…` / `write…` у `Buffer` и `get…` /
+  `set…` у `DataView` (`0 <= at <= b.length - 4` для 32 бит), `readUIntLE(at, n)` с `n`
+  числом 1…6, `set(src, at)` (`at + src.length <= u.length`), `with(i, x)`, `copy`, `compare`,
+  `write`, `fill`, виды `new Uint32Array(buffer, offset, length)` (смещение — число, кратное
+  размеру элемента), `new DataView(buffer, offset, length)`, `Buffer.from(buffer, offset,
+  length)`. `new Uint8Array(x.buffer, x.byteOffset, x.byteLength)` всегда в границах.
+  Длина `const`-массива байтов известна везде, где он виден; сумма двух слагаемых
+  (`at + src.length <= u.length`) — тоже факт.
+- **Пустое — `undefined`**: `reduce` и `reduceRight` без начального значения (у массивов,
+  типизированных массивов и итераторов), `Math.min(...xs)` / `Math.max(...xs)` и
+  `decimal.min(...xs)` / `decimal.max(...xs)` дают `T | undefined`, пока не доказано, что массив
+  не пуст. `Math.min()` и `Math.max()` без аргументов — ошибка.
+- **`x!` нет** — проверка `if (x == undefined) return …` или `x ?? значение`.
+- Код библиотеки tz (`library/*.tz`) повторяет алгоритмы node, где границы следуют из логики, а не
+  из проверок; там недоказанное проверяется при выполнении, и выход за границы — внутренняя
+  ошибка tz: сообщение и код 2.
+- Где tz не бросает вовсе: `swap16` / `swap32` / `swap64` у буфера некратной длины переставляют
+  целые группы и оставляют хвост, `encodeURIComponent` и `encodeURI` пишут одиночный суррогат
+  как U+FFFD (`%EF%BF%BD`).
 
 ## Объекты
 
@@ -585,7 +633,7 @@ const r = { x: 1, y: 2 }          // { x: int; y: int }: никуда с тип�
 кортеж (в том числе в переменной, которая потом идёт туда).
 
 **Сужение полей.** Поле типа `T | undefined` после проверки (`if (q.limit != undefined)`,
-`if (node.next)`, `while (cur.next) cur = cur.next`, `x!`) имеет тип `T`, как переменная.
+`if (node.next)`, `while (cur.next) cur = cur.next`) имеет тип `T`, как переменная.
 Компилятор забывает это, когда поле могло измениться: при присваивании полю с тем же именем у
 любого объекта, при присваивании переменной, от которой идёт цепочка полей, и при вызове функции,
 если где-то в программе есть присваивание полю с этим именем. Поэтому в коде, который только
@@ -1563,8 +1611,8 @@ out[2] = text[0] ?? 0                               // можно: элемен�
   копирования и заполнения становятся векторными (`<16 x i8>`).
 - **Индексы** — как у массивов: доказанный индекс даёт `T`, иначе `T | undefined`, а запись по
   недоказанному индексу — ошибка (в JS она молча пропала бы: длина не растёт) с подсказкой
-  проверки. У `DataView` и `Buffer` доказанное смещение `getUint32(off)` / `readUInt32LE(off)`
-  читается без проверки, иначе — проверка и `RangeError` с текстом node.
+  проверки. Смещение `getUint32(off)` / `readUInt32LE(off)` у `DataView` и `Buffer` должно
+  быть доказано (см. «Доказательства вместо падений»), и чтение идёт без проверки.
 - **Значение должно влезать** при любой записи: `u[i] = x`, `u[i] += x`, `fill`, `set`, `with`,
   `new Uint8Array([…])`, `of`, `from`, `map`, `setUint8` / `setInt16` / …, `writeUInt8` / … и
   `buffer.fill(x)`. Влезает литерал из диапазона, маска (`x & 0xff`), сдвиг, остаток, элемент
@@ -1622,10 +1670,10 @@ out[2] = text[0] ?? 0                               // можно: элемен�
   кодировок, и у UTF-8 и UTF-16 тоже. node 24 у `gbk` и `gb18030` бросает `TypeError` и без
   `fatal`, если неправильная четырёхбайтовая последовательность разрезана между кусками; tz
   даёт «�».
-- **Ошибки при выполнении** — те же исключения, что в node, с его текстом:
-  `new Uint8Array(-1)` — `RangeError: Invalid typed array length: -1`, неверное смещение вида —
-  `RangeError: start offset of Int32Array should be a multiple of 4`, `Buffer.from(s, enc)` с
-  кодировкой из переменной — `TypeError: Unknown encoding: x`.
+- **Длины и смещения** доказываются при сборке (см. «Доказательства вместо падений»):
+  `new Uint8Array(-1)` и смещение вида не кратное размеру элемента — ошибки компиляции.
+  **Ошибки при выполнении** пока остались у кодировки из переменной: `Buffer.from(s, enc)` —
+  `TypeError: Unknown encoding: x`, как в node.
 - **Вывод**: `console.log` печатает как node: `Uint8Array(3) [ 1, 2, 3 ]` (с колонками у длинных),
   `<Buffer 68 65 6c 6c 6f>`, `ArrayBuffer { [Uint8Contents]: <00 00>, [byteLength]: 2 }`,
   `DataView`, `TextEncoder`, `TextDecoder`; `JSON.stringify` — `{"0":1,"1":2}` и
@@ -3339,15 +3387,14 @@ powershell -ExecutionPolicy Bypass -File editors\vscode\install.ps1
 - В массивах нет дыр: `new Array<int>(3)` — это `[0, 0, 0]`, а не три пустых места; увеличение
   `length` дописывает нули, `false`, `""` или `undefined`. Такой `new Array(n)` есть только для
   этих типов элементов; у массива массивов, функций или объектов `length` можно только уменьшить,
-  увеличение — исключение `RangeError`.
-- `x!` проверяется при выполнении: если там `undefined`, это исключение
-  `TypeError: x is undefined` (TS ничего не проверяет, и `undefined` идёт дальше).
+  и это должно быть доказано.
+- `x!` нет: TS его не проверяет, и `undefined` идёт дальше; в tz — проверка или `??`.
 - Деструктуризация итератора даёт `T | undefined`, как деструктуризация массива: генератор мог
   кончиться раньше (`const [a, b] = naturals()` — две `int | undefined`).
 - `next()` в конце печатается как `{ done: true }` (node: `{ value: undefined, done: true }`):
   `value` — необязательное поле (см. «Объекты»).
-- `take(n)` и `drop(n)` берут целое число (JS берёт любое и `Infinity`); отрицательное —
-  исключение `RangeError`, как в JS. `flatMap` с колбэком, который возвращает строку, —
+- `take(n)` и `drop(n)` берут целое число (JS берёт любое и `Infinity`), доказанно не
+  отрицательное (в JS отрицательное — `RangeError`). `flatMap` с колбэком, который возвращает строку, —
   ошибка компиляции (JS бросает `TypeError`), итератор нельзя превратить в строку (в JS —
   `"[object Generator]"`).
 - Деструктуризация массива подчиняется тем же правилам, что `a[i]`: элемент, существование
@@ -3355,8 +3402,8 @@ powershell -ExecutionPolicy Bypass -File editors\vscode\install.ps1
   `string | undefined`; после `if (parts.length >= 2)` — просто строки). Присваивание с
   деструктуризацией — только отдельной инструкцией (`({ a, b } = o)`), не внутри выражения.
 - Spread в вызове — только в rest-параметр, `Math.min` / `Math.max` и `push`. `Math.max(...a)`
-  от массива `int` даёт `int`, только если доказано, что массив не пуст: от пустого JS вернёт
-  `-Infinity`, а это `double`.
+  даёт `T`, только если доказано, что массив не пуст, иначе `T | undefined` (от пустого JS
+  вернёт `-Infinity`).
 - `||=` и `&&=` проверяют цель по тем же правилам, что условие: `name ||= "аноним"` у строки
   можно, у числа — ошибка с подсказкой (`??=` или `if (n == 0) n = ...`). Цель — переменная
   или элемент массива с простым индексом.
@@ -3389,7 +3436,8 @@ powershell -ExecutionPolicy Bypass -File editors\vscode\install.ps1
   у `spawnSync` нет поля `error` — таймаут, переполнение и незапуск у него тоже `Err`. `status` — `int`:
   код больше 2^31 (падение программы в Windows, `0xC0000005`) отрицателен. Предупреждение node
   DEP0190 об аргументах с `shell: true` tz не печатает; в `stdio` — только три потока.
-- `new Array(-1)` и отрицательная длина — исключение `RangeError: Invalid array length`, как в JS.
+- `new Array(n)` и `a.length = n` — с доказательством, что `n` не меньше нуля (в JS —
+  `RangeError: Invalid array length`).
 - Бросать можно только `Error` (`TypeError`, `RangeError`, `SyntaxError`, `URIError`), и
   `catch (e)` без типа получает `Error` (в TS — `unknown`), в том числе свой класс-наследник.
   `e.stack` собирается по пути исключения наверх, поэтому в нём нет функций выше той, что его

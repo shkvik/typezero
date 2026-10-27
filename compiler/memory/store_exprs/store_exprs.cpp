@@ -108,10 +108,7 @@ StoreScanner::Sources StoreExprs::expr(const Expr *e) {
     break;
   case Expr::Kind::Unary: {
     auto *unary = llvm::cast<UnaryExpr>(e);
-    StoreScanner::Sources operand = expr(unary->operand);
-    if (unary->op == UnaryOp::NonNull) {
-      out.insert(out.end(), operand.begin(), operand.end());
-    }
+    expr(unary->operand);
     break;
   }
   case Expr::Kind::Binary: {

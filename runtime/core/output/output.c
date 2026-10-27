@@ -456,10 +456,6 @@ TZ_COLD int32_t tz_checked_int32_of_long(int64_t x) {
   return 0;
 }
 
-TZ_COLD void tz_iter_bad_count(int64_t count) {
-  tz_throw(TZ_RANGE_ERROR, "%lld must be positive", (long long)count);
-}
-
 void tz_debugger(void) {
 #ifdef _WIN32
   if (IsDebuggerPresent()) {

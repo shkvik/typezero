@@ -26,10 +26,6 @@ const Expr *bare(const Expr *e) {
       e = conv->operand;
       continue;
     }
-    if (auto *unary = dyn_cast<UnaryExpr>(e); unary && unary->op == UnaryOp::NonNull) {
-      e = unary->operand;
-      continue;
-    }
     return e;
   }
 }
@@ -193,7 +189,7 @@ void OwnerScanner::expr(const Expr *e, Use use) {
     return;
   case Expr::Kind::Unary: {
     auto *unary = llvm::cast<UnaryExpr>(e);
-    expr(unary->operand, unary->op == UnaryOp::NonNull ? use : Use::Value);
+    expr(unary->operand, Use::Value);
     return;
   }
   case Expr::Kind::OptionalChain:

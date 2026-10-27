@@ -59,8 +59,9 @@ decimal.config(20)
 // expect-error: decimal.max() needs at least one value
 const x = decimal.max()
 function highest(prices: decimal[]) {
-  // expect-error: decimal.max of an array that may be empty has no value
-  return decimal.max(...prices)
+  // expect-error: type 'decimal | undefined' is not assignable to type 'decimal'
+  const top: decimal = decimal.max(...prices)
+  return top
 }
 // expect-error: 'decimal.sum' can only be called
 const y = decimal.sum

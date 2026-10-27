@@ -258,6 +258,9 @@ Expr *BufferStaticChecker::checkBufferStatic(CallExpr *call, MemberExpr *member)
       for (size_t i = 1; i < call->args.size(); ++i) {
         call->args[i] = checker_.memberChecker().checkPosition(call->args[i]);
       }
+      checker_.byteProofs().checkView(
+          call->args[0], call->args.size() > 1 ? call->args[1] : nullptr,
+          call->args.size() > 2 ? call->args[2] : nullptr, 1, "the Buffer");
       return made(Builtin::BytesView, buffer);
     }
     if (call->args.size() > 1) {
@@ -277,10 +280,7 @@ Expr *BufferStaticChecker::checkBufferStatic(CallExpr *call, MemberExpr *member)
       return call;
     }
     call->args[0] = checker_.memberChecker().checkPosition(call->args[0]);
-    if (std::optional<Linear> n = checker_.indexProofs().linear(call->args[0]);
-        n && n->term.isZero() && n->offset < 0) {
-      checker_.diags_.error(call->args[0]->loc(), "the size of a Buffer cannot be negative");
-    }
+    checker_.indexProofs().requireBetween(call->args[0], 0, std::nullopt, "the size of a Buffer");
     if (call->args.size() == 1) {
       call->args.push_back(boolLit(true));
       return made(Builtin::BytesNew, buffer);
@@ -317,6 +317,7 @@ Expr *BufferStaticChecker::checkBufferStatic(CallExpr *call, MemberExpr *member)
       return call;
     }
     call->args[0] = checker_.memberChecker().checkPosition(call->args[0]);
+    checker_.indexProofs().requireBetween(call->args[0], 0, std::nullopt, "the size of a Buffer");
     call->args.push_back(boolLit(false));
     return made(Builtin::BytesNew, buffer);
   }
@@ -339,6 +340,7 @@ Expr *BufferStaticChecker::checkBufferStatic(CallExpr *call, MemberExpr *member)
     }
     if (call->args.size() == 2) {
       call->args[1] = checker_.memberChecker().checkPosition(call->args[1]);
+      checker_.indexProofs().requireBetween(call->args[1], 0, std::nullopt, "the total length");
     }
     return made(Builtin::BufferConcat, buffer);
   }

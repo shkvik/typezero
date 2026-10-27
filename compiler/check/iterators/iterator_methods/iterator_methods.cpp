@@ -4,6 +4,7 @@
 #include "compiler/check/expr/expr_checker/expr_checker.h"
 #include "compiler/check/expr/member_checker/member_checker.h"
 #include "compiler/check/flow/flow_checker/flow_checker.h"
+#include "compiler/check/flow/index_proofs/index_proofs.h"
 #include "compiler/check/flow/predicate_checker/predicate_checker.h"
 #include "compiler/check/functions/callback_checker/callback_checker.h"
 #include "compiler/check/generics/generic_checker/generic_checker.h"
@@ -249,6 +250,8 @@ Expr *IteratorMethods::checkIteratorMethod(CallExpr *call, MemberExpr *member) {
       return call;
     }
     call->args[0] = checker_.memberChecker().checkPosition(call->args[0]);
+    checker_.indexProofs().requireBetween(call->args[0], 0, std::nullopt,
+                                          "the count of '" + name.str() + "'");
     call->builtin = builtin;
     call->type = Type::iterator(element);
     return call;
@@ -319,6 +322,9 @@ Expr *IteratorMethods::checkIteratorMethod(CallExpr *call, MemberExpr *member) {
   sig.params = reduce ? std::vector<const Type *>{accumulator, element, Type::intTy()}
                       : std::vector<const Type *>{element, Type::intTy()};
   bool isBoolean = checker_.callChecker().isGlobalName(call->args[0], "Boolean");
+  if (auto *fe = dyn_cast<FunctionExpr>(call->args[0])) {
+    checker_.indexCallbacks_[fe->fn] = reduce ? 2 : 1;
+  }
   call->args[0] = checker_.callbackChecker().checkFunctionArg(call->args[0], sig, primary, name);
   if (isIteratorStage(builtin)) {
     if (auto *fe = dyn_cast<FunctionExpr>(call->args[0])) {
@@ -373,7 +379,7 @@ Expr *IteratorMethods::checkIteratorMethod(CallExpr *call, MemberExpr *member) {
     call->type = Type::voidTy();
     break;
   case Builtin::IterReduce:
-    call->type = accumulator;
+    call->type = count == 2 ? accumulator : Type::optional(accumulator);
     if (count == 2 && call->args.size() == 2) {
       call->args[1] = checker_.typeRelations().coerce(call->args[1], accumulator);
     }

@@ -18,6 +18,7 @@
 #include "compiler/declare/class_declarer/class_declarer.h"
 #include "compiler/declare/constant_folder/constant_folder.h"
 #include "compiler/library/builtin_modules/builtin_module_checker/builtin_module_checker.h"
+#include "compiler/library/bytes/bytes_check_helpers/bytes_check_helpers.h"
 #include "compiler/library/bytes/bytes_checker/bytes_checker.h"
 #include "compiler/library/decimal/decimal_checker/decimal_checker.h"
 #include "compiler/library/events/event_target_checker/event_target_checker.h"
@@ -319,10 +320,19 @@ Expr *AssignChecker::checkAssign(AssignExpr *assign) {
       checker_.flowChecker().arrayResized(index->object->type, true, false);
     }
   }
-  if (member && member->object->type->isArray()) {
-    if (std::optional<Linear> length = checker_.indexProofs().linear(assign->value);
-        length && length->term.isZero() && length->offset < 0) {
-      checker_.diags_.error(assign->value->loc(), "an array length cannot be negative");
+  if (member && member->object->type->isArray() && !assign->value->type->isError()) {
+    const Type *element = member->object->type->inner();
+    if (element->hasZeroValue()) {
+      checker_.indexProofs().requireBetween(assign->value, 0, std::nullopt, "an array length");
+    } else if (!checker_.indexProofs().provesInBounds(member->object, assign->value, true) &&
+               !checker_.indexProofs().exempt(assign->value->loc(), member->object)) {
+      checker_.diags_.error(assign->value->loc(),
+                            "cannot prove that the new length is from 0 to the old one: an array "
+                            "of '" +
+                                element->name() +
+                                "' cannot grow by setting its length, which would leave elements "
+                                "without a value; check it first, e.g. 'if (n >= 0 && n <= " +
+                                valueText(member->object) + ".length)', or use push()");
     }
     checker_.flowChecker().arrayResized(member->object->type, true, true);
     if (std::optional<Linear> self = checker_.indexProofs().lengthOf(member->object);

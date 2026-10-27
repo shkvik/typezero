@@ -21,8 +21,9 @@ const dogs: Dog[] = [new Dog("Rex", "lab"), new Dog("Fido", "pug")]
 const animals: Animal[] = [...dogs, new Animal("Generic")]
 const speakers = animals.map(a => a.speak)
 console.log(speakers.map(f => f()).join("; "))
-console.log(Object.keys(animals[0]!), Object.keys(animals[2]!))
-for (const key in animals[1]!) console.log(key)
+const [cat, dog, bird] = animals
+if (cat != undefined && bird != undefined) console.log(Object.keys(cat), Object.keys(bird))
+if (dog != undefined) for (const key in dog) console.log(key)
 
 interface Greeter {
   name: string

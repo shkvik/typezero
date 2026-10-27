@@ -3,6 +3,7 @@
 #include "compiler/check/expr/expr_checker/expr_checker.h"
 #include "compiler/check/flow/condition_facts/condition_facts.h"
 #include "compiler/check/flow/flow_checker/flow_checker.h"
+#include "compiler/check/flow/index_proofs/index_proofs.h"
 #include "compiler/check/flow/predicate_checker/predicate_checker.h"
 #include "compiler/check/functions/closure_checker/closure_checker.h"
 #include "compiler/check/functions/function_value_checker/function_value_checker.h"
@@ -255,6 +256,8 @@ Expr *CallbackChecker::checkCallbackMethod(CallExpr *call, MemberExpr *member,
   sig.pad = false;
   unsigned primary = 1;
   const Type *accumulator = element;
+  bool someValue =
+      kind != Reduce || count == 2 || checker_.indexProofs().provesNotEmpty(member->object);
   switch (kind) {
   case ForEach:
     sig.voidResult = true;
@@ -315,6 +318,9 @@ Expr *CallbackChecker::checkCallbackMethod(CallExpr *call, MemberExpr *member,
   }
 
   bool isBoolean = checker_.callChecker().isGlobalName(call->args[0], "Boolean");
+  if (auto *fe = dyn_cast<FunctionExpr>(call->args[0]); fe && kind != Sort) {
+    checker_.indexCallbacks_[fe->fn] = kind == Reduce ? 2 : 1;
+  }
   if (auto *fe = dyn_cast<FunctionExpr>(call->args[0]); fe && typed) {
     Checker::ByteCallback info;
     info.param = kind == Reduce ? 1 : 0;
@@ -359,7 +365,8 @@ Expr *CallbackChecker::checkCallbackMethod(CallExpr *call, MemberExpr *member,
     }
     break;
   case Reduce:
-    call->type = accumulator;
+    call->type = someValue ? accumulator : Type::optional(accumulator);
+    call->mayBeOutOfRange = !someValue;
     if (count == 2 && call->args.size() == 2) {
       call->args[1] = checker_.typeRelations().coerce(call->args[1], accumulator);
     }

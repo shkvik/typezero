@@ -126,11 +126,8 @@ Expr *BytesNewChecker::checkBytesNew(NewExpr *expr, const Type *type) {
       return call;
     }
     call->args[0] = checker_.memberChecker().checkPosition(call->args[0]);
-    if (std::optional<Linear> n = checker_.indexProofs().linear(call->args[0]);
-        n && n->term.isZero() && n->offset < 0) {
-      checker_.diags_.error(call->args[0]->loc(),
-                            "the length of an ArrayBuffer cannot be negative");
-    }
+    checker_.indexProofs().requireBetween(call->args[0], 0, std::nullopt,
+                                          "the length of an ArrayBuffer");
     return made(Builtin::ArrayBufferNew, type);
   case Bytes::DataView: {
     if (!checker_.argumentChecker().checkArity(call, loc, 1, 3)) {
@@ -150,6 +147,9 @@ Expr *BytesNewChecker::checkBytesNew(NewExpr *expr, const Type *type) {
     for (size_t i = 1; i < call->args.size(); ++i) {
       call->args[i] = checker_.memberChecker().checkPosition(call->args[i]);
     }
+    checker_.byteProofs().checkView(call->args[0], call->args.size() > 1 ? call->args[1] : nullptr,
+                                    call->args.size() > 2 ? call->args[2] : nullptr, 1,
+                                    "the DataView");
     return made(Builtin::DataViewNew, type);
   }
   case Bytes::TextEncoder:
@@ -237,6 +237,9 @@ Expr *BytesNewChecker::checkBytesNew(NewExpr *expr, const Type *type) {
     for (size_t i = 1; i < call->args.size(); ++i) {
       call->args[i] = checker_.memberChecker().checkPosition(call->args[i]);
     }
+    checker_.byteProofs().checkView(source, call->args.size() > 1 ? call->args[1] : nullptr,
+                                    call->args.size() > 2 ? call->args[2] : nullptr,
+                                    type->elementSize(), "the " + type->name().str());
     return made(Builtin::BytesView, type);
   }
   if (call->args.size() > 1) {
@@ -248,10 +251,8 @@ Expr *BytesNewChecker::checkBytesNew(NewExpr *expr, const Type *type) {
   }
   if (from->isInteger()) {
     source = checker_.typeRelations().convert(source, Type::longTy());
-    if (std::optional<Linear> n = checker_.indexProofs().linear(source);
-        n && n->term.isZero() && n->offset < 0) {
-      checker_.diags_.error(source->loc(), "the length of a typed array cannot be negative");
-    }
+    checker_.indexProofs().requireBetween(source, 0, std::nullopt,
+                                          "the length of a " + type->name().str());
     auto *zeroed = checker_.ctx_.make<BoolLitExpr>(loc, true);
     zeroed->type = Type::boolTy();
     call->args.push_back(zeroed);

@@ -1,9 +1,7 @@
 #include "compiler/lower/expr/unary_lowerer/unary_lowerer.h"
 #include "compiler/library/decimal/decimal_lowerer/decimal_lowerer.h"
 #include "compiler/library/json/json_lowerer/json_lowerer.h"
-#include "compiler/lower/errors/throw_lowerer/throw_lowerer.h"
 #include "compiler/lower/expr/expr_lowerer/expr_lowerer.h"
-#include "compiler/lower/function_frame/function_frame.h"
 #include "compiler/lower/memory/ref_counts/ref_counts.h"
 #include "compiler/lower/stmt/stmt_lowerer/stmt_lowerer.h"
 #include "compiler/lower/types/optional_lowerer/optional_lowerer.h"
@@ -14,7 +12,6 @@
 #include "compiler/lower/values/string_lowerer/string_lowerer.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/IR/Intrinsics.h"
-#include "llvm/IR/MDBuilder.h"
 #include "llvm/Support/ConvertUTF.h"
 #include "llvm/Support/ErrorHandling.h"
 #include <array>
@@ -27,31 +24,6 @@ using llvm::Value;
 
 namespace tz {
 
-static std::string valueText(const Expr *expr) {
-  while (auto *conv = dyn_cast<CastExpr>(expr)) {
-    if (!conv->isImplicit()) {
-      return "";
-    }
-    expr = conv->operand;
-  }
-  if (auto *name = dyn_cast<NameExpr>(expr)) {
-    return name->name.str();
-  }
-  if (auto *member = dyn_cast<MemberExpr>(expr)) {
-    std::string object = valueText(member->object);
-    return object.empty() ? "" : object + (member->optional ? "?." : ".") + member->name.str();
-  }
-  if (auto *index = dyn_cast<IndexExpr>(expr)) {
-    std::string object = valueText(index->object), position = valueText(index->index);
-    if (auto *lit = dyn_cast<IntLitExpr>(index->index)) {
-      position = std::to_string(lit->value);
-    }
-    return object.empty() || position.empty() ? "" : object + "[" + position + "]";
-  }
-
-  return "";
-}
-
 static std::u16string ascii16(llvm::StringRef text) {
   return std::u16string(text.begin(), text.end());
 }
@@ -61,9 +33,6 @@ UnaryLowerer::UnaryLowerer(Lowering &lowering) : lowering_(lowering) {}
 llvm::Value *UnaryLowerer::emitUnary(UnaryExpr *unary) {
   if (unary->op == UnaryOp::TypeOf) {
     return emitTypeOf(unary->operand);
-  }
-  if (unary->op == UnaryOp::NonNull) {
-    return emitNonNull(unary);
   }
   if (unary->op == UnaryOp::Void) {
     lowering_.stmtLowerer().emitDiscarded(unary->operand);
@@ -113,25 +82,6 @@ llvm::Value *UnaryLowerer::emitUnary(UnaryExpr *unary) {
     break;
   }
   llvm_unreachable("unknown unary operator");
-}
-
-llvm::Value *UnaryLowerer::emitNonNull(UnaryExpr *unary) {
-  const Type *type = unary->operand->type;
-  llvm::Value *value = lowering_.exprLowerer().emitExpr(unary->operand);
-  if (!type->isOptional()) {
-    return value;
-  }
-  llvm::BasicBlock *throwBlock = lowering_.functionFrame().newBlock("nonnull.undefined");
-  llvm::BasicBlock *okBlock = lowering_.functionFrame().newBlock("nonnull.ok");
-  lowering_.builder_.CreateCondBr(
-      lowering_.builder_.CreateNot(lowering_.optionalLowerer().optionalHas(value, type)),
-      throwBlock, okBlock, llvm::MDBuilder(lowering_.ctx_).createUnlikelyBranchWeights());
-  lowering_.functionFrame().switchTo(throwBlock);
-  std::string text = valueText(unary->operand);
-  lowering_.throwLowerer().emitThrowNew(1, (text.empty() ? "the value" : text) + " is undefined");
-  lowering_.functionFrame().switchTo(okBlock);
-
-  return lowering_.optionalLowerer().optionalValue(value, type);
 }
 
 llvm::Value *UnaryLowerer::emitTypeOf(Expr *operand) {

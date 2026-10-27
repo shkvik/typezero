@@ -240,10 +240,6 @@ void ThrowScanner::expr(const Expr *expr, bool caught) {
   case Expr::Kind::Unary: {
     auto *unary = llvm::cast<UnaryExpr>(expr);
     this->expr(unary->operand, caught);
-    if (unary->op == UnaryOp::NonNull && unary->operand->type &&
-        unary->operand->type->isOptional()) {
-      throwCalls().intrinsic(caught);
-    }
     break;
   }
   case Expr::Kind::Binary: {

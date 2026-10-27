@@ -250,9 +250,9 @@ async function firstLine(path: string) {
 | `x!` | убран: сужение через `if (x == undefined) ...` |
 | `xs[i]` | как сейчас: доказан индекс — `T`, иначе `T \| undefined` |
 | `reduce` без начального значения | `T \| undefined`, пока не доказано, что массив не пуст |
-| `Math.min(...xs)`, `Math.max(...xs)` | то же; без аргументов — ошибка |
-| `new Array(n)`, `a.length = n`, `repeat(n)` | `n ≥ 0` |
-| `String.fromCodePoint(x)`, `toFixed(n)`, `buf.readUInt32LE(offset)` | диапазон доказан или проверен |
+| `Math.min(...xs)`, `Math.max(...xs)`, `decimal.min/max(...xs)` | то же; без аргументов — ошибка |
+| `new Array(n)`, `a.length = n`, `repeat(n)`, `take(n)`, `drop(n)`, `new Uint8Array(n)`, `Buffer.alloc(n)` | `n ≥ 0` |
+| `String.fromCodePoint(x)`, `toFixed(n)`, `toString(radix)`, `buf.readUInt32LE(offset)`, `dv.getUint16(offset)`, `u.set(src, offset)`, `u.with(i, x)`, `copy`, `fill`, `write`, виды на `ArrayBuffer` | диапазон доказан или проверен |
 | запись в `Buffer` за пределы | как сейчас: ошибка, если не доказано |
 | арифметика целых | результат влезает в тип ([numbers.md](numbers.md), раздел 2) |
 | арифметика дробных | не получается `NaN` или `Infinity` ([numbers.md](numbers.md), раздел 10) |
@@ -394,8 +394,19 @@ class Port {
    `allSettled`, `any`. Правило подписки на `'error'`; `for await`, `pipeline`, `finished`,
    `once`, `end` — `Result`; `pipe()` и `uncaughtException` — ошибки. `Result` не приводится
    к `void`: `void` над `Promise<Result>` и колбэк с `Result` там, где ждут `void`, — ошибки.
-4. **Доказательства вместо падений** (раздел 7, кроме чисел): `x!`, `reduce`, `new Array(n)`,
-   `repeat`, `fromCodePoint`, `toFixed`, чтение `Buffer`.
+4. **Доказательства вместо падений** (сделано 27 октября; раздел 7, кроме чисел): `x!` —
+   ошибка с подсказкой; `reduce`, `reduceRight` (и у итераторов), `Math.min/max(...xs)`,
+   `decimal.min/max(...xs)` — `T | undefined`, пока не доказано, что массив не пуст;
+   `new Array(n)`, `a.length = n`, `repeat`, `take`, `drop`, длины байтовых массивов — `n ≥ 0`;
+   `fromCodePoint`, `toFixed`, `toString(radix)` — в границах; у байтов — смещения `read…` /
+   `write…` / `get…` / `set…`, `set`, `with`, `copy`, `compare`, `write`, `fill`, виды на
+   `ArrayBuffer`. Доказательства научились: сумме двух слагаемых (`at + src.length <= u.length`),
+   длине `const`-массива байтов в любой функции, индексу колбэка (`0 <= i`), диапазону
+   значения при объявлении (`const n = c ? 24 : 16`), идиоме `new Uint8Array(x.buffer,
+   x.byteOffset, x.byteLength)`, сравнению констант (ветка, которой не бывает, ничего не
+   доказывает). Код `library/*.tz` проверяется при выполнении, выход за границы там —
+   внутренняя ошибка (код 2). `swap16/32/64` у некратной длины оставляют хвост,
+   `encodeURIComponent` пишет одиночный суррогат как U+FFFD.
 5. **Без исключений.** Убрать `throw`, `try`, `catch`, `finally`, `Error` и наследников,
    `.throw()` у генераторов, анализ «может бросить» (`compiler/lower/errors/may_throw`) и
    ячейку `tz_thrown`, проверки стека в начале функций. Стек 1 ГБ на поток

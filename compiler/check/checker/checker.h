@@ -570,6 +570,7 @@ private:
   };
   std::vector<Untyped> untyped_;
   llvm::DenseMap<const VarSymbol *, int64_t> constVars_;
+  llvm::DenseMap<const VarSymbol *, int64_t> fixedLengths_;
   std::vector<FunctionDecl *> functions_;
   std::vector<NestedGroup *> groups_;
   unsigned seq_ = 0;
@@ -650,6 +651,7 @@ private:
   std::vector<const FuncSymbol *> inferring_;
   llvm::SmallPtrSet<const FuncSymbol *, 4> suspended_;
   llvm::DenseMap<const FunctionDecl *, ByteCallback> byteCallbacks_;
+  llvm::DenseMap<const FunctionDecl *, unsigned> indexCallbacks_;
   ClassDecl *errorClass_ = nullptr;
   std::vector<ClassDecl *> errorKinds_;
   ClassDecl *systemErrorClass_ = nullptr;

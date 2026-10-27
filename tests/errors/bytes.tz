@@ -79,7 +79,7 @@ function traps(u: Uint8Array, b: Buffer, buffer: ArrayBuffer, x: int) {
   console.log(b.readBigUInt64LE(0))
   // expect-error: the length of 'Uint8Array' cannot change
   u.length = 3
-  // expect-error: the length of a typed array cannot be negative
+  // expect-error: the length of a Uint8Array cannot be negative, found -1
   console.log(new Uint8Array(-1))
   // expect-error: the length of a typed array must be an integer, found 'double'
   console.log(new Uint8Array(x / 2.5))

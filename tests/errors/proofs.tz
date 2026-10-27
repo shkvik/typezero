@@ -1,0 +1,103 @@
+// Operations where JavaScript throws at a value out of range need it shown
+// in range when the program is built (docs/errors.md, section 7): lengths and
+// counts not negative, digits, radixes and code points within their bounds,
+// offsets of byte reads and writes within the bytes. `x!` is gone: a check
+// or a default shows the value is there. A length set shows the new length is
+// not negative from there on.
+function counts(n: int, s: string, xs: int[], it: Iterator<int>) {
+  // expect-error: cannot prove that the count of 'repeat' is not negative
+  console.log(s.repeat(n))
+  console.log(s.repeat(Math.max(n, 0)))
+  // expect-error: cannot prove that the count of 'take' is not negative
+  console.log(it.take(n).toArray())
+  // expect-error: cannot prove that an array length is not negative, and JavaScript would throw a RangeError; check it first, e.g. 'if (n >= 0)'
+  console.log(new Array<int>(n))
+  if (n >= 0) console.log(new Array<int>(n))
+  // expect-error: an array length cannot be negative, found -1
+  console.log(new Array<int>(-1))
+  // expect-error: cannot prove that an array length is not negative
+  xs.length = n
+  if (n >= 0) xs.length = n
+  const nested: int[][] = [[1]]
+  // expect-error: an array of 'int[]' cannot grow by setting its length
+  nested.length = 3
+  if (n >= 0 && n <= nested.length) nested.length = n
+  // expect-error: the count of 'drop' cannot be negative, found -2
+  console.log([1].values().drop(-2).toArray())
+}
+
+function ranges(d: int, x: double, cp: int) {
+  // expect-error: cannot prove that the number of digits of 'toFixed' is from 0 to 100
+  console.log(x.toFixed(d))
+  if (d >= 0 && d <= 100) console.log(x.toFixed(d))
+  // expect-error: the number of digits of 'toFixed' must be from 0 to 100, found 101
+  console.log(x.toFixed(101))
+  // expect-error: the radix of 'toString' must be from 2 to 36, found 37
+  console.log(x.toString(37))
+  // expect-error: cannot prove that the radix of 'toString' is from 2 to 36
+  console.log(x.toString(d))
+  // expect-error: cannot prove that a code point is from 0 to 1114111
+  console.log(String.fromCodePoint(cp))
+  console.log(String.fromCodePoint(cp & 0xffff), String.fromCodePoint(0x1f600))
+  // expect-error: a code point must be a whole number from 0 to 1114111, found 'double'
+  console.log(String.fromCodePoint(x))
+  // expect-error: 'Math.min()' without values gives Infinity; pass the values
+  console.log(Math.min())
+  // expect-error: 'Math.max()' without values gives -Infinity
+  console.log(Math.max())
+}
+
+function bytes(n: int, at: int, buf: Buffer, u: Uint8Array, dv: DataView, src: Uint8Array) {
+  // expect-error: cannot prove that the length of a Uint8Array is not negative
+  console.log(new Uint8Array(n))
+  // expect-error: cannot prove that the size of a Buffer is not negative
+  console.log(Buffer.alloc(n))
+  // expect-error: cannot prove that the length of an ArrayBuffer is not negative
+  console.log(new ArrayBuffer(n))
+  // expect-error: cannot prove that the offset of 'readUInt32LE' 'at' is from 0 to buf.length - 4, and JavaScript would throw a RangeError; check it first, e.g. 'if (at >= 0 && at <= buf.length - 4)'
+  console.log(buf.readUInt32LE(at))
+  if (at >= 0 && at <= buf.length - 4) console.log(buf.readUInt32LE(at))
+  // expect-error: cannot prove that the offset of 'readUInt16LE' 0 is from 0 to buf.length - 2
+  console.log(buf.readUInt16LE())
+  // expect-error: cannot prove that the offset of 'getUint16'
+  console.log(dv.getUint16(at))
+  if (at >= 0 && at <= dv.byteLength - 2) console.log(dv.getUint16(at))
+  // expect-error: cannot prove that the offset of 'writeUInt8'
+  buf.writeUInt8(1, at)
+  // expect-error: the byte count of 'readUIntLE' must be written as a number from 1 to 6
+  console.log(buf.readUIntLE(0, n))
+  // expect-error: cannot prove that the values fit, 'src.length <= u.length'
+  u.set(src)
+  if (src.length <= u.length) u.set(src)
+  // expect-error: cannot prove that the values fit, 'at + src.length <= u.length'
+  if (at >= 0) u.set(src, at)
+  if (at >= 0 && at <= u.length && at + src.length <= u.length) u.set(src, at)
+  // expect-error: cannot prove that the index is within the array, and JavaScript would throw a RangeError
+  console.log(u.with(at, 1))
+  // expect-error: cannot prove that 'targetStart' is not negative
+  buf.copy(u, at)
+  // expect-error: cannot prove that the offset 'at' is from 0 to buf.length
+  buf.fill(0, at)
+  const b = new ArrayBuffer(16)
+  // expect-error: cannot prove that the offset of the Uint32Array 'at' is from 0 to b.byteLength
+  console.log(new Uint32Array(b, at))
+  // expect-error: the offset of the Uint32Array must be a multiple of 4
+  console.log(new Uint32Array(b, 2))
+  console.log(new Uint32Array(b, 4), new Uint8Array(u.buffer, u.byteOffset, u.byteLength))
+  // expect-error: cannot prove that the size of the buffer is a multiple of 2 for the Uint16Array
+  console.log(new Uint16Array(u.buffer))
+  // expect-error: cannot prove that the length of the DataView is not negative
+  console.log(new DataView(b, 8, n))
+  // expect-error: cannot prove that the DataView fits in the buffer, '8 + 9 <= b.byteLength'
+  console.log(new DataView(b, 8, 9))
+}
+
+function assertions(maybe: string | undefined, xs: string[]) {
+  // expect-error: '!' is not supported: check the value first, e.g. 'if (maybe == undefined) return ...', or give a default with 'maybe ?? ...'
+  console.log(maybe!.length)
+  // expect-error: '!' is not supported: check the value first, e.g. 'if (xs[0] == undefined) return ...'
+  console.log(xs[0]!.length)
+  const s = "x"
+  // expect-error: '!' is not supported, and 's' is never undefined here; drop the '!'
+  console.log(s!.length)
+}

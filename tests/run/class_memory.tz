@@ -56,7 +56,7 @@ for (let i = 0; i < 100000; i++) new Holder().swap()
 
 // A bound method keeps its object alive.
 const items = [new Item("a"), new Item("b")]
-const rename = items[0]!.rename
+const rename = items[0].rename
 items.length = 0
 console.log(rename("kept").label(), items.length)
 

@@ -149,7 +149,7 @@ llvm::Value *IteratorLowerer::emitIteratorSink(CallExpr *call) {
   };
 
   llvm::Value *array = nullptr, *resultSlot = nullptr, *hasAcc = nullptr;
-  const Type *resultType = call->type;
+  const Type *resultType = call->type, *accType = call->type;
   Lowering::Held heldArray{nullptr, nullptr, nullptr};
   switch (method) {
   case Builtin::ArrayFrom:
@@ -182,11 +182,14 @@ llvm::Value *IteratorLowerer::emitIteratorSink(CallExpr *call) {
     };
     break;
   case Builtin::IterReduce: {
-    resultSlot = lowering_.functionFrame().createStackSlot(
-        lowering_.moduleBuilder().lower(resultType), "acc");
+    accType = call->args.size() > 1 ? resultType : element;
+    resultSlot =
+        lowering_.functionFrame().createStackSlot(lowering_.moduleBuilder().lower(accType), "acc");
     if (call->args.size() > 1) {
       lowering_.builder_.CreateStore(lowering_.exprLowerer().emitExpr(call->args[1]), resultSlot);
     } else {
+      lowering_.builder_.CreateStore(
+          llvm::Constant::getNullValue(lowering_.moduleBuilder().lower(accType)), resultSlot);
       hasAcc = lowering_.functionFrame().createStackSlot(lowering_.builder_.getInt1Ty(), "has.acc");
       lowering_.builder_.CreateStore(lowering_.builder_.getFalse(), hasAcc);
     }
@@ -207,11 +210,11 @@ llvm::Value *IteratorLowerer::emitIteratorSink(CallExpr *call) {
         lowering_.functionFrame().switchTo(combineBlock);
       }
       llvm::Value *acc =
-          lowering_.builder_.CreateLoad(lowering_.moduleBuilder().lower(resultType), resultSlot);
-      lowering_.builder_.CreateStore(lowering_.lazyChainLowerer().callCallback(
-                                         callback, callbackType, {acc, value, nextCount()},
-                                         {resultType, element, Type::intTy()}),
-                                     resultSlot);
+          lowering_.builder_.CreateLoad(lowering_.moduleBuilder().lower(accType), resultSlot);
+      lowering_.builder_.CreateStore(
+          lowering_.lazyChainLowerer().callCallback(
+              callback, callbackType, {acc, value, nextCount()}, {accType, element, Type::intTy()}),
+          resultSlot);
       if (nextBlock) {
         lowering_.functionFrame().emitBlock(nextBlock);
       }
@@ -267,17 +270,14 @@ llvm::Value *IteratorLowerer::emitIteratorSink(CallExpr *call) {
   if (array) {
     result = lowering_.throwLowerer().take(heldArray);
   } else if (resultSlot) {
+    result = lowering_.builder_.CreateLoad(lowering_.moduleBuilder().lower(accType), resultSlot);
     if (hasAcc) {
-      llvm::BasicBlock *emptyBlock = lowering_.functionFrame().newBlock("reduce.empty");
-      llvm::BasicBlock *okBlock = lowering_.functionFrame().newBlock("reduce.ok");
-      lowering_.builder_.CreateCondBr(
-          lowering_.builder_.CreateLoad(lowering_.builder_.getInt1Ty(), hasAcc), okBlock,
-          emptyBlock);
-      lowering_.functionFrame().switchTo(emptyBlock);
-      lowering_.throwLowerer().emitThrowNew(1, "Reduce of a done iterator with no initial value");
-      lowering_.functionFrame().switchTo(okBlock);
+      llvm::Value *has = lowering_.builder_.CreateLoad(lowering_.builder_.getInt1Ty(), hasAcc);
+      result = accType == resultType
+                   ? lowering_.builder_.CreateSelect(
+                         has, result, lowering_.optionalLowerer().undefinedValue(resultType))
+                   : lowering_.optionalLowerer().makeOptional(result, has, resultType);
     }
-    result = lowering_.builder_.CreateLoad(lowering_.moduleBuilder().lower(resultType), resultSlot);
   }
   lowering_.functionFrame().popScope();
 

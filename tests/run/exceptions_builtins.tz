@@ -11,7 +11,6 @@ function attempt(what: string, f: () => void) {
 }
 
 let zero = 0
-let none: int | undefined = undefined
 const empty: int[] = []
 let big = 3e9
 let minus = -1
@@ -23,7 +22,6 @@ attempt("long /", () => {
   const x: long = 7
   console.log(x / zero)
 })
-attempt("x!", () => console.log(none! + 1))
 attempt("reduce", () => console.log(empty.reduce((a, b) => a + b)))
 attempt("Math.round", () => {
   const n: int = Math.round(big)
@@ -37,18 +35,6 @@ attempt("parseInt", () => {
   const n: int = parseInt("abc")
   console.log(n)
 })
-attempt("new Array", () => console.log(new Array<int>(minus).length))
-attempt("length", () => {
-  const a = [1, 2, 3]
-  a.length = minus
-})
-attempt("grow by length", () => {
-  const a: int[][] = [[1]]
-  a.length = 3
-})
-attempt("repeat", () => console.log("ab".repeat(minus)))
-attempt("fromCodePoint", () => console.log(String.fromCodePoint(minus)))
-attempt("toFixed", () => console.log((1.5).toFixed(minus * 200)))
 
 // decimal (docs/decimal.md).
 const one: decimal = 1
@@ -70,7 +56,6 @@ attempt("decimal mode", () => {
 function* nothing(): Generator<int> {
   return
 }
-attempt("take", () => console.log([1, 2].values().take(minus).toArray()))
 attempt("iterator reduce", () => console.log(nothing().reduce((a, b) => a + b)))
 
 // Running out of stack is a RangeError too, after which the program goes on.

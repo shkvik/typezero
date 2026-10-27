@@ -32,7 +32,7 @@ Math.sqrt(...nums)
 nums.unshift(...nums)
 // expect-error: only an array of numbers can be spread here, found 'string[]'
 Math.max(..."ab".split(""))
-// expect-error: Math.max of an array that may be empty is -Infinity, which only a double holds; check that the array is not empty, or pass a first value: 'Math.max(0, ...a)'
+// expect-error: type 'int | undefined' is not assignable to type 'int'
 const best: int = Math.max(...nums.slice(1))
 const fine: int = Math.max(...nums) // nums is not empty
 

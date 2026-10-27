@@ -200,6 +200,17 @@ void ConditionFacts::addConditionFacts(const Expr *cond, Checker::Flow &whenTrue
     return;
   }
   Facts &t = whenTrue.facts, &f = whenFalse.facts;
+  if (l->term.isZero() && r->term.isZero()) {
+    int64_t a = l->offset, b = r->offset;
+    bool holds = op == BinaryOp::Lt   ? a < b
+                 : op == BinaryOp::Le ? a <= b
+                 : op == BinaryOp::Gt ? a > b
+                 : op == BinaryOp::Ge ? a >= b
+                 : op == BinaryOp::Eq ? a == b
+                                      : a != b;
+    (holds ? whenFalse : whenTrue).unreachable = true;
+    return;
+  }
 
   if ((op == BinaryOp::Ne || op == BinaryOp::Eq) && (l->term.isZero() || r->term.isZero())) {
     const Linear &x = l->term.isZero() ? *r : *l, &c = l->term.isZero() ? *l : *r;

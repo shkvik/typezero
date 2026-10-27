@@ -46,14 +46,15 @@ export function v35<TBuf extends Uint8Array = never>(
   bytes[8] = (bytes[8] & 0x3f) | 0x80;
 
   if (buf) {
-    const at = offset ?? 0;
-    if (at < 0 || at + 16 > buf.length) {
+    // tz: the check is on the int offset, in a form the compiler reads.
+    const at = (offset ?? 0) | 0;
+    if (at < 0 || at > buf.length - 16) {
       throw new RangeError(
         `UUID byte range ${at}:${at + 15} is out of buffer bounds`,
       );
     }
 
-    buf.set(bytes, at | 0);
+    buf.set(bytes, at);
 
     return buf;
   }

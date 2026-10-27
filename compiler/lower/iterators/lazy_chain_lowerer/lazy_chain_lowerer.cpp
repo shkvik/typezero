@@ -1,8 +1,6 @@
 #include "compiler/lower/iterators/lazy_chain_lowerer/lazy_chain_lowerer.h"
 #include "compiler/check/checker/checker.h"
 #include "compiler/library/bytes/bytes_lowerer/bytes_lowerer.h"
-#include "compiler/library/process/process_lowerer/process_lowerer.h"
-#include "compiler/lower/errors/throw_lowerer/throw_lowerer.h"
 #include "compiler/lower/expr/expr_lowerer/expr_lowerer.h"
 #include "compiler/lower/function_frame/function_frame.h"
 #include "compiler/lower/functions/closure_lowerer/closure_lowerer.h"
@@ -14,7 +12,6 @@
 #include "compiler/lower/values/array_lowerer/array_lowerer.h"
 #include "compiler/lower/values/string_lowerer/string_lowerer.h"
 #include "llvm/ADT/STLExtras.h"
-#include "llvm/IR/MDBuilder.h"
 #include "llvm/Support/ErrorHandling.h"
 
 using llvm::BasicBlock;
@@ -245,17 +242,6 @@ Lowering::Consumer LazyChainLowerer::stageConsumer(Builtin stage, const Type *ca
   case Builtin::IterDrop: {
     llvm::Value *left = lowering_.functionFrame().createStackSlot(i64, "left");
     llvm::Value *count = lowering_.builder_.CreateLoad(i64, operand, "limit");
-    llvm::BasicBlock *badBlock = lowering_.functionFrame().newBlock("limit.negative");
-    llvm::BasicBlock *okBlock = lowering_.functionFrame().newBlock("limit.ok");
-    lowering_.builder_.CreateCondBr(
-        lowering_.builder_.CreateICmpSLT(count, lowering_.builder_.getInt64(0)), badBlock, okBlock,
-        llvm::MDBuilder(lowering_.ctx_).createUnlikelyBranchWeights());
-    lowering_.functionFrame().switchTo(badBlock);
-    lowering_.builder_.CreateCall(lowering_.processLowerer().processFunction(
-                                      "tz_iter_bad_count", lowering_.builder_.getVoidTy(), {i64}),
-                                  {count});
-    lowering_.throwLowerer().emitRuntimeThrow();
-    lowering_.functionFrame().switchTo(okBlock);
     lowering_.builder_.CreateStore(count, left);
     if (stage == Builtin::IterTake) {
       llvm::BasicBlock *zeroBlock = lowering_.functionFrame().newBlock("take.none");

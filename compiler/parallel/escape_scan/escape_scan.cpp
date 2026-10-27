@@ -221,8 +221,7 @@ void EscapeScan::scanUses(const Expr *e, bool safe, Analysis::Escapes &out, bool
     return;
   case Expr::Kind::Unary: {
     auto *u = cast<UnaryExpr>(e);
-    bool reads = u->op != UnaryOp::NonNull;
-    scanUses(u->operand, reads || safe, out, discarded && !reads);
+    scanUses(u->operand, true, out, false);
     return;
   }
   case Expr::Kind::Binary: {

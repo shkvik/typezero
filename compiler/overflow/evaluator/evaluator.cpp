@@ -224,8 +224,6 @@ Val Evaluator::evalUnary(const UnaryExpr *unary, State &st, bool wraps) {
     Num r = make({-a.hi - 1, a.hiOrigin, a.hiWhy}, {-a.lo - 1, a.loOrigin, a.loWhy});
     return numVal(check_.overflowWarnings().fit(r, type));
   }
-  case UnaryOp::NonNull:
-    return eval(unary->operand, st, wraps);
   default:
     eval(unary->operand, st);
     return Val();

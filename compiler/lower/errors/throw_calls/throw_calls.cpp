@@ -154,21 +154,6 @@ void ThrowCalls::call(const CallExpr *c, bool caught) {
     }
   }
   switch (builtin) {
-  case Builtin::ArrReduce:
-  case Builtin::ArrReduceRight:
-  case Builtin::IterReduce:
-    if (c->args.size() < 2) {
-      intrinsic(caught);
-    }
-    break;
-  case Builtin::IterTake:
-  case Builtin::IterDrop: {
-    std::optional<int64_t> count = c->args.empty() ? std::nullopt : constantInt(c->args[0]);
-    if (!count || *count < 0) {
-      intrinsic(caught);
-    }
-    break;
-  }
   case Builtin::IterNext:
     resumes(caught);
     break;
@@ -178,20 +163,8 @@ void ThrowCalls::call(const CallExpr *c, bool caught) {
       intrinsic(caught);
     }
     break;
-  case Builtin::StrRepeat:
-  case Builtin::StrPadStart:
-  case Builtin::StrPadEnd:
-  case Builtin::FromCodePoint:
   case Builtin::UriEncodeComponent:
   case Builtin::UriEncode:
-    intrinsic(caught);
-    break;
-  case Builtin::NumToFixed:
-    if (!c->args.empty()) {
-      intrinsic(caught);
-    }
-    break;
-  case Builtin::NumToRadix:
     intrinsic(caught);
     break;
   case Builtin::RegExpNew:

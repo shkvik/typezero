@@ -133,6 +133,8 @@ u[3] = 1.7                    // ошибка: double в uint8 (как везд�
 4. **Замеры** (сделано) в `bench`: циклы по байтам рядом с Go.
 5. **Поправки 26 октября** (вместе с [numbers.md](numbers.md), шаг 1, и
    [errors.md](errors.md), шаг 2): типы элементов `uint8` … `uint32`, явные приведения при
-   записи; `new Uint8Array(n)` — доказательство `n ≥ 0` вместо `RangeError`; `Result` у
+   записи; `new Uint8Array(n)` — доказательство `n ≥ 0` вместо `RangeError` (сделано 27
+   октября вместе со смещениями чтения и записи, `set`, `with`, видов и методов `Buffer`,
+   [errors.md](errors.md), шаг 4); `Result` у
    `TextDecoder` с `fatal` и у чтения дробных из байтов. `Result` у `TextDecoder` с `fatal` сделан 27 октября:
    его тип — `FatalTextDecoder`, `decode` — `Result<string, DecodeError>`.

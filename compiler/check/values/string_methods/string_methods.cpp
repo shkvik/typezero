@@ -93,7 +93,9 @@ Expr *StringMethods::checkStringMethod(CallExpr *call, MemberExpr *member) {
   call->builtin = method->builtin;
   call->type = method->ret;
 
-  if (method->builtin == Builtin::StrCharCodeAt) {
+  if (method->builtin == Builtin::StrRepeat) {
+    checker_.indexProofs().requireBetween(call->args[0], 0, std::nullopt, "the count of 'repeat'");
+  } else if (method->builtin == Builtin::StrCharCodeAt) {
     call->mayBeOutOfRange =
         !checker_.indexProofs().provesInBounds(member->object, call->args[0], false);
     call->type = call->mayBeOutOfRange ? Type::doubleTy() : Type::intTy();

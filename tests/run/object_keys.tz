@@ -28,7 +28,8 @@ console.log(sum, Object.entries({ "ключ": "значение", "a b": "c" }))
 // The values are shared with the object, as in JavaScript.
 const owners = { first: { id: 1 }, second: { id: 2 } }
 const list = Object.values(owners)
-list[0]!.id = 10
+const firstOwner = list[0]
+if (firstOwner != undefined) firstOwner.id = 10
 console.log(owners, Object.entries(owners)[1])
 const optional: { a?: string; b?: string; c: string } = { b: "two", c: "three" }
 console.log(Object.keys(optional), Object.values(optional), Object.entries(optional))

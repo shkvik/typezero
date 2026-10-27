@@ -217,7 +217,10 @@ function v1Bytes(
   }
 
   if (!buf) return b;
-  buf.set(b, offset | 0);
+  // tz: the offset is checked again where the bytes go in, as an int, so that
+  // the compiler sees them fit; the check above has thrown already otherwise.
+  const at = offset | 0;
+  if (at >= 0 && at <= buf.length - 16) buf.set(b, at);
   return buf;
 }
 

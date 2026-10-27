@@ -235,8 +235,10 @@ Checker::Flow LoopBounds::loopHead(const Checker::LoopScan &scan, const Expr *co
       keepUpper = change.delta < 0 && condBoundsBelow(cond, var, scan, -change.delta);
     }
     head.facts.forgetIf([&](const Facts::Fact &f) {
-      bool lhsHit = f.lhs.var && f.lhs.var->name == name;
-      bool rhsHit = f.rhs.var && f.rhs.var->name == name;
+      auto hits = [&](const Term &t) {
+        return (t.var && t.var->name == name) || (t.var2 && t.var2->name == name);
+      };
+      bool lhsHit = hits(f.lhs), rhsHit = hits(f.rhs);
       if (!lhsHit && !rhsHit) {
         return false;
       }
@@ -280,9 +282,11 @@ Checker::Flow LoopBounds::loopHead(const Checker::LoopScan &scan, const Expr *co
   if (scan.callsFunctions) {
     checker_.flowChecker().forgetCallEffects(head);
   }
+  auto arrayPart = [](const Term &t) {
+    return (t.length && isArrayLength(t.first())) || (t.length2 && isArrayLength(t.second()));
+  };
   head.facts.forgetIf([&](const Facts::Fact &f) {
-    return (scan.growsArrays && f.lhs.length && isArrayLength(f.lhs)) ||
-           (scan.shrinksArrays && f.rhs.length && isArrayLength(f.rhs));
+    return (scan.growsArrays && arrayPart(f.lhs)) || (scan.shrinksArrays && arrayPart(f.rhs));
   });
 
   return head;

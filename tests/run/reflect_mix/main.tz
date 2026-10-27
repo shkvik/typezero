@@ -21,7 +21,7 @@ class Note {
   tags: string[] = []
   constructor(public text: string) {}
   shout(times: int) {
-    return this.text.toUpperCase().repeat(times)
+    return this.text.toUpperCase().repeat(Math.max(times, 0))
   }
 }
 

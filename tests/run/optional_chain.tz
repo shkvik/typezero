@@ -27,7 +27,7 @@ let row = 1
 row += 0
 console.log(grid[row]?.[0], grid[row]?.[5], grid[row + 8]?.[0], grid[row]?.[0]?.toFixed(1))
 
-// `x!` asserts that x is not undefined; here it is not.
+// A value that may be missing gets a default with `??`.
 const position = words.indexOf("beta")
-const word = words[position]!
-console.log(word.toUpperCase(), words.at(-1)!.length)
+const word = words[position] ?? ""
+console.log(word.toUpperCase(), (words.at(-1) ?? "").length)

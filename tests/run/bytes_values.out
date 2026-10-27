@@ -11,9 +11,9 @@ Float32Array(3) [ 0.5, 0.5, 0.5 ]
 [ 10, 20, 30, 4, -1 ]
 Int32Array(2) [ 1, 2 ] Uint8Array(2) [ 3, 6 ]
 too big: 20
-RangeError Invalid typed array length: -2
-RangeError Offset is outside the bounds of the DataView
-RangeError Attempt to access memory outside buffer bounds
+negative size -2
+too short for 16 bits at 2 3
+too short for 32 bits 3
 3 3 true true
 Int32Array(3) [ -1, 2, 3 ] 8.5
 true false object

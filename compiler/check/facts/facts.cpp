@@ -14,6 +14,18 @@ constexpr int64_t kIntMax = std::numeric_limits<int32_t>::max();
 
 }
 
+std::optional<Term> Term::sum(Term a, Term b) {
+  if (a.isZero() || b.isZero() || a.isSum() || b.isSum()) {
+    return std::nullopt;
+  }
+  auto key = [](Term t) { return std::pair(reinterpret_cast<uintptr_t>(t.var), t.length); };
+  if (key(b) < key(a)) {
+    std::swap(a, b);
+  }
+
+  return Term{a.var, a.length, b.var, b.length};
+}
+
 void Facts::add(Term lhs, Term rhs, int64_t offset) {
   if (lhs == rhs || offset > kMaxOffset || offset < -kMaxOffset) {
     return;
@@ -44,7 +56,9 @@ bool Facts::proves(Term lhs, Term rhs, int64_t offset) const {
   return least && *least <= offset;
 }
 
-std::optional<int64_t> Facts::bound(Term lhs, Term rhs) const {
+std::optional<int64_t> Facts::bound(Term lhs, Term rhs) const { return bound(lhs, rhs, true); }
+
+std::optional<int64_t> Facts::bound(Term lhs, Term rhs, bool sums) const {
   if (lhs == rhs) {
     return 1;
   }
@@ -70,7 +84,32 @@ std::optional<int64_t> Facts::bound(Term lhs, Term rhs) const {
   }
   size_t source = node(lhs), target = node(rhs);
   for (size_t i = 1; i < nodes.size(); ++i) {
-    if (nodes[i].length) {
+    if (!nodes[i].isSum()) {
+      continue;
+    }
+    Term parts[2] = {nodes[i].first(), nodes[i].second()};
+    for (int k = 0; k < 2; ++k) {
+      Term other = parts[1 - k];
+      size_t self = node(parts[k]);
+      int64_t hi = other.length ? kMaxLength : kIntMax, lo = other.length ? 0 : kIntMin;
+      if (sums) {
+        if (std::optional<int64_t> above = bound(other, Term::zero(), false)) {
+          hi = std::min(hi, *above - 1);
+        }
+        if (std::optional<int64_t> below = bound(Term::zero(), other, false)) {
+          lo = std::max(lo, 1 - *below);
+        }
+      }
+      edges.push_back({i, self, hi});
+      edges.push_back({self, i, -lo});
+    }
+  }
+  for (size_t i = 1; i < nodes.size(); ++i) {
+    if (nodes[i].isSum()) {
+      bool lengths = nodes[i].length && nodes[i].length2;
+      edges.push_back({i, 0, lengths ? 2 * kMaxLength : 2 * kIntMax});
+      edges.push_back({0, i, lengths ? 0 : -2 * kIntMin});
+    } else if (nodes[i].length) {
       edges.push_back({i, 0, kMaxLength});
       edges.push_back({0, i, 0});
     } else {
@@ -110,14 +149,15 @@ void Facts::forgetIf(llvm::function_ref<bool(const Fact &)> pred) {
 }
 
 void Facts::forget(const VarSymbol *var) {
-  forgetIf([&](const Fact &f) { return f.lhs.var == var || f.rhs.var == var; });
+  forgetIf([&](const Fact &f) { return f.lhs.mentions(var) || f.rhs.mentions(var); });
 }
 
 void Facts::shift(Term term, int64_t delta) {
   for (Fact &fact : facts_) {
-    if (fact.lhs == term && fact.rhs != term) {
+    bool lhs = fact.lhs.contains(term), rhs = fact.rhs.contains(term);
+    if (lhs && !rhs) {
       fact.offset += delta;
-    } else if (fact.rhs == term && fact.lhs != term) {
+    } else if (rhs && !lhs) {
       fact.offset -= delta;
     }
   }

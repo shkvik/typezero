@@ -1162,10 +1162,6 @@ void tz_dec_fold_array(TzDec *acc, int32_t *has, const TzArray *array, int32_t o
   tz_dec_fold(acc, has, (const TzDec *)array->data, array->length, op);
 }
 
-TZ_COLD void tz_dec_no_values(int32_t op) {
-  tz_throw(TZ_RANGE_ERROR, "decimal.%s() of no values", op == FOLD_MAX ? "max" : "min");
-}
-
 typedef struct {
   char *p;
   size_t n, cap;

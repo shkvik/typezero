@@ -61,7 +61,7 @@ static inline char *storage(TzArray *a) { return a->alloc ? a->alloc : inline_st
 
 TZ_NORETURN static void invalid_length(int64_t length) {
   if (length < 0) {
-    tz_panicf("RangeError: Invalid array length %lld", (long long)length);
+    tz_panicf("internal error: the array length %lld", (long long)length);
   }
   tz_panicf("array length %lld exceeds the maximum of %u", (long long)length, MAX_LENGTH);
 }
@@ -358,11 +358,7 @@ static TzArray *new_like(const TzArray *a, int64_t length) {
 }
 
 TzArray *tz_arr_new_length(const TzType *type, int64_t length) {
-  if (length < 0) {
-    tz_throw(TZ_RANGE_ERROR, "Invalid array length");
-    return NULL;
-  }
-  if (length > MAX_LENGTH) {
+  if (length < 0 || length > MAX_LENGTH) {
     invalid_length(length);
   }
 
@@ -370,11 +366,7 @@ TzArray *tz_arr_new_length(const TzType *type, int64_t length) {
 }
 
 TzArray *tz_arr_new_length_group(const TzType *type, int64_t length) {
-  if (length < 0) {
-    tz_throw(TZ_RANGE_ERROR, "Invalid array length");
-    return NULL;
-  }
-  if (length > MAX_LENGTH) {
+  if (length < 0 || length > MAX_LENGTH) {
     invalid_length(length);
   }
 
@@ -476,11 +468,7 @@ void *tz_arr_unshift_slots(TzArray *a, int64_t n) {
 }
 
 void tz_arr_set_length(TzArray *a, int64_t n) {
-  if (n < 0) {
-    tz_throw(TZ_RANGE_ERROR, "Invalid array length");
-    return;
-  }
-  if (n > MAX_LENGTH) {
+  if (n < 0 || n > MAX_LENGTH) {
     invalid_length(n);
   }
   size_t size = a->type->size;
@@ -488,14 +476,11 @@ void tz_arr_set_length(TzArray *a, int64_t n) {
   uint32_t kind = a->type->kind;
   if ((uint64_t)n > old &&
       (kind == TZ_T_ARRAY || kind == TZ_T_FUNCTION || kind == TZ_T_OBJECT || kind == TZ_T_JSON)) {
-    tz_throw(TZ_RANGE_ERROR,
-             "an array of %s cannot grow by setting its length, which would leave elements "
-             "without a value; use push()",
-             kind == TZ_T_ARRAY      ? "arrays"
-             : kind == TZ_T_FUNCTION ? "functions"
-             : kind == TZ_T_JSON     ? "Json values"
-                                     : "objects");
-    return;
+    tz_panicf("internal error: an array of %s grows by setting its length",
+              kind == TZ_T_ARRAY      ? "arrays"
+              : kind == TZ_T_FUNCTION ? "functions"
+              : kind == TZ_T_JSON     ? "Json values"
+                                      : "objects");
   }
   if ((uint64_t)n < old) {
     a->length = (uint32_t)n;

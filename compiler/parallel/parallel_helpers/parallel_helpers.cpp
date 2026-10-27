@@ -30,10 +30,6 @@ const Expr *strip(const Expr *e) {
       e = c->operand;
       continue;
     }
-    if (auto *u = dyn_cast<UnaryExpr>(e); u && u->op == UnaryOp::NonNull) {
-      e = u->operand;
-      continue;
-    }
     break;
   }
 

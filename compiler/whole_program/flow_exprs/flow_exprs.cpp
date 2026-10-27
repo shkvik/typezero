@@ -122,8 +122,8 @@ Refs FlowExprs::exprRefs(Expr *e) {
   }
   case Expr::Kind::Unary: {
     auto *u = llvm::cast<UnaryExpr>(e);
-    Refs operand = expr(u->operand);
-    return u->op == UnaryOp::NonNull ? operand : Refs();
+    expr(u->operand);
+    return Refs();
   }
   case Expr::Kind::Binary: {
     auto *b = llvm::cast<BinaryExpr>(e);

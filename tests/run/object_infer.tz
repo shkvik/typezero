@@ -53,7 +53,7 @@ const pts = [
   { x: 1, y: 2 },
   { x: 3, y: 4 },
 ]
-console.log(total(pts), pts[0]!.x / 2)
+console.log(total(pts), (pts[0]?.x ?? 0) / 2)
 const moved: Point[] = pts.map(pt => ({ x: pt.x + 1, y: 0 }))
 const xs = [1, 2, 3]
 const made = xs.map(x => ({ x, y: x / 2 }))
@@ -62,7 +62,7 @@ const flag = xs.length > 2
 const pick = flag ? { x: 7, y: 8 } : p
 const other = flag ? p : { x: 9, y: 10 }
 const mixed = [p, { x: 5, y: 6 }]
-console.log(pick, pick.x / 2, other, mixed[1]!.x / 4)
+console.log(pick, pick.x / 2, other, mixed[1].x / 4)
 function choose(left: boolean) {
   if (left) return p
   return { x: -1, y: -1 }

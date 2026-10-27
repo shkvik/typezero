@@ -1,6 +1,5 @@
-// expect-exit: 1
-// expect-stderr: TypeError: Reduce of a done iterator with no initial value
-// reduce() without an initial value over an iterator that gives nothing.
+// reduce() without an initial value over an iterator that gives nothing is
+// undefined (in JavaScript a TypeError).
 function* none(): Generator<int> {
   return
 }

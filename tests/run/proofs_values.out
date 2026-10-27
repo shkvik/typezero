@@ -1,0 +1,14 @@
+undefined 6
+0 undefined
+undefined 3 0
+undefined undefined
+undefined 312
+undefined 1
+[   ab] [abcdef]
+a bb ccc
+[ 0, 0, 0 ] []
+1 2 undefined undefined
+true false Uint8Array(4) [ 0, 7, 8, 0 ]
+4660 Uint8Array(2) [ 18, 52 ]
+<Buffer 02 01 03> a%EF%BF%BDb
+%EF%BF%BD abc%EF%BF%BD %EF%BF%BD%F0%9F%98%80 %EF%BF%BD%EF%BF%BD

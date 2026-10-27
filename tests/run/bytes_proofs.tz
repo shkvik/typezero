@@ -10,7 +10,7 @@ function checksum(data: Uint8Array): int {
 }
 
 function noise(seed: int, n: int): Uint8Array {
-  const out = new Uint8Array(n)
+  const out = new Uint8Array(Math.max(n, 0))
   let x = seed
   for (let i = 0; i < out.length; i++) {
     x = (Math.imul(x, 1103515245) + 12345) | 0

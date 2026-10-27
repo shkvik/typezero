@@ -13,12 +13,25 @@ constexpr int64_t kMaxLength = (int64_t(1) << 30) - 1;
 struct Term {
   const VarSymbol *var = nullptr;
   bool length = false;
+  const VarSymbol *var2 = nullptr;
+  bool length2 = false;
 
   static Term zero() { return {}; }
   static Term of(const VarSymbol *var) { return {var, false}; }
   static Term lengthOf(const VarSymbol *var) { return {var, true}; }
+  static std::optional<Term> sum(Term a, Term b);
   bool isZero() const { return var == nullptr; }
-  bool operator==(const Term &other) const { return var == other.var && length == other.length; }
+  bool isSum() const { return var2 != nullptr; }
+  Term first() const { return {var, length}; }
+  Term second() const { return {var2, length2}; }
+  bool mentions(const VarSymbol *v) const { return var == v || var2 == v; }
+  bool contains(Term part) const {
+    return *this == part || (isSum() && (first() == part || second() == part));
+  }
+  bool operator==(const Term &other) const {
+    return var == other.var && length == other.length && var2 == other.var2 &&
+           length2 == other.length2;
+  }
   bool operator!=(const Term &other) const { return !(*this == other); }
 };
 
@@ -49,6 +62,8 @@ public:
 
 private:
   std::vector<Fact> facts_;
+
+  std::optional<int64_t> bound(Term lhs, Term rhs, bool sums) const;
 };
 
 }

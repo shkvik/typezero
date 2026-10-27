@@ -16,30 +16,30 @@ export class Record {
 
 const MAGIC = new Uint8Array([0x54, 0x5a, 0x42, 0x31]) // "TZB1"
 
+// Each part is written at offsets known when the program is built, and the
+// parts are joined at the end: the compiler sees every write fit.
 export function encode(records: Record[]): Uint8Array {
-  const names = records.map(r => new TextEncoder().encode(r.name))
-  let size = 8
-  for (const n of names)
-    size += 15 + n.length
-  const out = new Uint8Array(size)
-  out.set(MAGIC, 0)
-  const view = new DataView(out.buffer)
-  view.setUint32(4, records.length, true)
-  let at = 8
-  records.forEach((r, i) => {
-    const name = names[i] ?? new Uint8Array(0)
-    view.setUint16(at, r.id & 0xffff, true)
-    view.setUint32(at + 2, Math.min(Math.max(r.count, 0), 4294967295), true)
-    view.setFloat64(at + 6, r.price, true)
-    view.setUint8(at + 14, name.length & 0xff)
-    out.set(name, at + 15)
-    at += 15 + name.length
-  })
-  return out
+  const header = new DataView(new ArrayBuffer(4))
+  header.setUint32(0, records.length, true)
+  const parts: Uint8Array[] = [MAGIC, new Uint8Array(header.buffer)]
+  for (const r of records) {
+    const name = new TextEncoder().encode(r.name)
+    const head = new DataView(new ArrayBuffer(15))
+    head.setUint16(0, r.id & 0xffff, true)
+    head.setUint32(2, Math.min(Math.max(r.count, 0), 4294967295), true)
+    head.setFloat64(6, r.price, true)
+    head.setUint8(14, name.length & 0xff)
+    parts.push(new Uint8Array(head.buffer), name)
+  }
+  return new Uint8Array(Buffer.concat(parts))
 }
 
+// Reads at offsets known only from the data: one check per record shows the
+// compiler that the reads stay within the bytes.
 export function decode(bytes: Uint8Array): Record[] {
   const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength)
+  if (view.byteLength < 8)
+    throw new Error("not a TZB1 file")
   for (let i = 0; i < MAGIC.length; i++)
     if (view.getUint8(i) != MAGIC[i])
       throw new Error("not a TZB1 file")
@@ -48,6 +48,8 @@ export function decode(bytes: Uint8Array): Record[] {
   const decoder = new TextDecoder()
   let at = 8
   for (let i = 0; i < count; i++) {
+    if (at < 0 || at > view.byteLength - 15)
+      throw new Error("the records are cut short")
     const length = view.getUint8(at + 14)
     const name = decoder.decode(bytes.subarray(at + 15, at + 15 + length))
     records.push(new Record(view.getUint16(at, true), view.getUint32(at + 2, true),

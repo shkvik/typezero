@@ -13,6 +13,8 @@ public:
 
 private:
   Checker &checker_;
+
+  void checkSetRange(const Expr *target, const Expr *source, const Expr *offset);
 };
 
 }

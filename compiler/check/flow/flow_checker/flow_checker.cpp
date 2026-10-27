@@ -3,6 +3,7 @@
 #include "compiler/check/flow/index_proofs/index_proofs.h"
 #include "compiler/check/flow/union_narrowing/union_narrowing.h"
 #include "compiler/check/types/type_relations/type_relations.h"
+#include "compiler/library/bytes/byte_proofs/byte_proofs.h"
 #include "llvm/ADT/STLExtras.h"
 #include <limits>
 
@@ -163,9 +164,16 @@ void FlowChecker::assigned(const VarSymbol *var, const Expr *value) {
       incremented(var, v->offset);
       return;
     }
+    ValueRange range = v ? ValueRange{} : checker_.byteProofs().valueRange(value);
     checker_.flow_.facts.forget(var);
     if (v) {
       checker_.flow_.facts.addEqual(Term::of(var), v->term, v->offset);
+    }
+    if (range.lo) {
+      checker_.flow_.facts.add(Term::zero(), Term::of(var), 1 - *range.lo);
+    }
+    if (range.hi) {
+      checker_.flow_.facts.add(Term::of(var), Term::zero(), *range.hi + 1);
     }
     if (auto *call = dyn_cast<CallExpr>(value);
         call && (call->builtin == Builtin::MathMin || call->builtin == Builtin::MathMax) &&
@@ -196,6 +204,14 @@ void FlowChecker::assigned(const VarSymbol *var, const Expr *value) {
     if (length->term != Term::lengthOf(var)) {
       checker_.flow_.facts.addEqual(Term::lengthOf(var), length->term, length->offset);
     }
+    return;
+  }
+  ValueRange range = checker_.indexProofs().lengthRange(value);
+  if (range.lo) {
+    checker_.flow_.facts.add(Term::zero(), Term::lengthOf(var), 1 - *range.lo);
+  }
+  if (range.hi) {
+    checker_.flow_.facts.add(Term::lengthOf(var), Term::zero(), *range.hi + 1);
   }
 }
 
@@ -214,9 +230,8 @@ void FlowChecker::incremented(const VarSymbol *var, int64_t delta) {
 }
 
 void FlowChecker::forgetCallEffects(Checker::Flow &flow) const {
-  auto changed = [&](const Term &t) {
-    return t.var && (isArrayLength(t) || changedByCalls(t.var));
-  };
+  auto part = [&](const Term &t) { return t.var && (isArrayLength(t) || changedByCalls(t.var)); };
+  auto changed = [&](const Term &t) { return part(t.first()) || part(t.second()); };
   flow.facts.forgetIf([&](const Facts::Fact &f) { return changed(f.lhs) || changed(f.rhs); });
   for (const VarSymbol *var : llvm::to_vector(flow.defined)) {
     if (changedByCalls(var)) {
@@ -245,9 +260,10 @@ void FlowChecker::calledFunction() { forgetCallEffects(checker_.flow_); }
 
 void FlowChecker::arrayResized(const Type *type, bool grew, bool shrank, const VarSymbol *except) {
   type = type->nonOptional();
-  auto affected = [&](const Term &t) {
+  auto part = [&](const Term &t) {
     return t.length && t.var != except && t.var->type->nonOptional() == type;
   };
+  auto affected = [&](const Term &t) { return part(t.first()) || part(t.second()); };
   checker_.flow_.facts.forgetIf([&](const Facts::Fact &f) {
     return (grew && affected(f.lhs)) || (shrank && affected(f.rhs));
   });

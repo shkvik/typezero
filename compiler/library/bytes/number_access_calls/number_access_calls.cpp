@@ -62,8 +62,8 @@ llvm::Value *NumberAccessCalls::emit() {
                                       : lowering_.builder_.getInt64(0);
     }
     lowering_.throwLowerer().takeOperand(self);
-    llvm::Value *length = lowering_.bytesLowerer().bytesLength(self.value);
     if (call->mayBeOutOfRange) {
+      llvm::Value *length = lowering_.bytesLowerer().bytesLength(self.value);
       llvm::Value *ok = lowering_.builder_.CreateAnd(
           lowering_.builder_.CreateICmpULT(offset, length),
           lowering_.builder_.CreateICmpULE(lowering_.builder_.getInt64(size),
@@ -73,15 +73,9 @@ llvm::Value *NumberAccessCalls::emit() {
       lowering_.builder_.CreateCondBr(ok, okBlock, badBlock,
                                       llvm::MDBuilder(lowering_.ctx_).createLikelyBranchWeights());
       lowering_.functionFrame().switchTo(badBlock);
-      if (dataView) {
-        lowering_.builder_.CreateCall(fn("tz_dataview_range_error", voidTy, {}));
-      } else {
-        lowering_.builder_.CreateCall(fn("tz_buffer_bounds_error", voidTy, {i64, i64, i64}),
-                                      {offset, lowering_.builder_.getInt64(size), length});
-      }
-      Lowering::Operand released = self;
-      lowering_.refCounts().dropOperand(released);
-      lowering_.throwLowerer().emitRuntimeThrow();
+      lowering_.builder_.CreateCall(fn("tz_bytes_out_of_range", voidTy, {i64, i64, i64}),
+                                    {offset, lowering_.builder_.getInt64(size), length});
+      lowering_.builder_.CreateUnreachable();
       lowering_.functionFrame().switchTo(okBlock);
     }
     llvm::Value *address = lowering_.builder_.CreateInBoundsGEP(
@@ -179,7 +173,6 @@ llvm::Value *NumberAccessCalls::emit() {
           {self.value, values[0], values[1], lowering_.builder_.getInt32(flags)});
     }
     lowering_.refCounts().dropOperand(self);
-    lowering_.throwLowerer().emitThrowCheck();
     return result;
   }
   default:

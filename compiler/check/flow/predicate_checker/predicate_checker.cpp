@@ -210,7 +210,9 @@ void PredicateChecker::endPredicate(FunctionDecl *fn) {
       }
     }
     for (const Facts::Fact &fact : flow.facts.all()) {
-      auto param = [&](const Term &t) { return t.isZero() || position(t.var) != -2; };
+      auto param = [&](const Term &t) {
+        return t.isZero() || (!t.isSum() && position(t.var) != -2);
+      };
       if (param(fact.lhs) && param(fact.rhs)) {
         side.facts.push_back(fact);
       }

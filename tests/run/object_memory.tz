@@ -71,7 +71,7 @@ const tail = objects.slice(1)
 const more = objects.concat([{ id: 8 }])
 objects.fill({ id: 9 }, 2)
 console.log(objects, tail, more.length, more.map(o => o.id))
-objects.length = 1
+if (objects.length >= 1) objects.length = 1
 console.log(objects, objects.filter(o => o.id > 5))
 
 // Objects kept by closures, also when the variable changes.
