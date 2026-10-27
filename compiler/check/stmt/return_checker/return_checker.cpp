@@ -223,9 +223,6 @@ void ReturnChecker::checkReturn(ReturnStmt *ret) {
     return;
   }
   if (!ret->value) {
-    if (fn->asserts) {
-      checker_.predicateChecker().notePredicateExit(checker_.flow_, Checker::Flow(), ret->loc());
-    }
     if (!returned->isVoid() && !returned->isError() && !returned->isOptional()) {
       checker_.diags_.error(ret->loc(), functionLabel(fn->name) + " must return a value of type '" +
                                             returned->name() + "'");

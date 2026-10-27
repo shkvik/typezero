@@ -328,7 +328,6 @@ FunctionDecl *GenericInstantiator::instanceDecl(FuncSymbol *generic,
   sym->hasRest = generic->hasRest;
   sym->ret = generic->ret ? checker_.typeParams().substitute(generic->ret, params, args) : nullptr;
   sym->predicateParam = generic->predicateParam;
-  sym->asserts = generic->asserts;
   if (generic->predicateType) {
     sym->predicateType = checker_.typeParams().substitute(generic->predicateType, params, args);
   }

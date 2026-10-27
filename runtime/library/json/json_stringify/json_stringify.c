@@ -355,12 +355,9 @@ static int write_value(Writer *w, const TzType *type, const void *value) {
     }
     if (layout->flags & TZ_LAYOUT_DATE) {
       TzStr text;
-      if (tz_date_json(&text, ((const TzDate *)object)->time)) {
-        tz_json_quote(out, text);
-        tz_str_release_value(text);
-      } else {
-        tz_buf_ascii(out, "null");
-      }
+      tz_date_iso(&text, ((const TzDate *)object)->time);
+      tz_json_quote(out, text);
+      tz_str_release_value(text);
       return 1;
     }
     if ((layout->flags & TZ_LAYOUT_BYTES) && tz_bytes_kind(object) <= TZ_BYTES_BUFFER) {

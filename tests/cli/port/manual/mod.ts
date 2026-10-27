@@ -41,3 +41,5 @@ export function load() {
 export function where(dir: string) {
   return join(dir, "x") + parse("a: 1") + z + config.debug
 }
+
+export function ensure(p: unknown): asserts p is Point {}

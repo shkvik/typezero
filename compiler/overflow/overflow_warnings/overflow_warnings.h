@@ -4,6 +4,12 @@
 
 namespace tz {
 
+struct DatePart {
+  const Expr *expr = nullptr;
+  Num num;
+  double lo = 0, hi = 0;
+};
+
 class OverflowWarnings {
 public:
   explicit OverflowWarnings(OverflowCheck &check);
@@ -30,6 +36,7 @@ public:
   void overflowCall(const CallExpr *call, const Num &x, const Num &exceeding);
   void checkWithin(const Expr *value, const Num &x, double lo, double hi, llvm::StringRef what,
                    llvm::StringRef limits);
+  void checkDate(const Num &time, double limit, llvm::ArrayRef<DatePart> parts);
 
 private:
   OverflowCheck &check_;

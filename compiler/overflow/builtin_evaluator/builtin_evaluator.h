@@ -12,6 +12,7 @@ public:
   Val evalMath(const CallExpr *call, State &st);
   void jsonValues(const Type *type, const Reason *why, llvm::SmallPtrSetImpl<const Type *> &seen);
   Val jsonVal(const Type *type, const Reason *why);
+  void checkDateParts(const CallExpr *call, const std::vector<Val> &args);
 
 private:
   OverflowCheck &check_;

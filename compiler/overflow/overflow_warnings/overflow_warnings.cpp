@@ -471,6 +471,53 @@ void OverflowWarnings::checkWithin(const Expr *value, const Num &x, double lo, d
                 " <= " + numberText(hi) + ")'"});
 }
 
+void OverflowWarnings::checkDate(const Num &time, double limit, llvm::ArrayRef<DatePart> parts) {
+  if (time.empty() || (time.lo >= -limit && time.hi <= limit)) {
+    return;
+  }
+  bool low = time.lo < -limit && time.loOrigin != Origin::Trusted;
+  bool high = time.hi > limit && time.hiOrigin != Origin::Trusted;
+  if ((!low && !high) || !check_.reporting_ || check_.quiet_) {
+    return;
+  }
+  auto above = [&](const DatePart &part) {
+    return high && part.num.hi > part.hi && part.num.hiOrigin != Origin::Trusted;
+  };
+  auto below = [&](const DatePart &part) {
+    return low && part.num.lo < part.lo && part.num.loOrigin != Origin::Trusted;
+  };
+  std::vector<const DatePart *> blamed;
+  for (const DatePart &part : parts) {
+    if ((above(part) && dangerous(part.num.hiOrigin)) ||
+        (below(part) && dangerous(part.num.loOrigin))) {
+      blamed.push_back(&part);
+    }
+  }
+  for (const DatePart &part : parts) {
+    if (blamed.empty() && (above(part) || below(part))) {
+      blamed.push_back(&part);
+    }
+  }
+  for (const DatePart *part : blamed) {
+    Bound culprit = above(*part) ? part->num.high() : part->num.low();
+    llvm::SMLoc loc = part->expr->loc();
+    std::string why = subject(part->expr);
+    if (culprit.origin == Origin::Input) {
+      why += " comes from " + inputText(culprit.why, loc);
+    } else if (culprit.origin == Origin::Loop) {
+      why += " grows with every pass of a loop";
+    } else {
+      why += " may be " + numberText(culprit.v);
+    }
+    std::string text = exprText(part->expr);
+    check_.warnings_.push_back(
+        {loc, "cannot prove that the date is within the dates JavaScript has (100 million days "
+              "around 1970), and outside JavaScript would make an Invalid Date: " +
+                  why + "; check it first, e.g. 'if (" + text + " >= " + numberText(part->lo) +
+                  " && " + text + " <= " + numberText(part->hi) + ")'"});
+  }
+}
+
 bool OverflowWarnings::checkConversion(const CallExpr *call, const Expr *value, const Num &x,
                                        const Type *to) {
   bool toDouble = to->isFloat();

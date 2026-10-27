@@ -57,13 +57,6 @@ void StmtChecker::checkStmt(Stmt *stmt) {
     }
     s->expr = checker_.exprChecker().checkExpr(s->expr);
     checker_.resultChecker().checkDiscarded(s->expr, false, s->loc());
-    if (auto *call = dyn_cast<CallExpr>(s->expr)) {
-      const FuncSymbol *callee = call->func ? call->func : call->method;
-      if (callee && callee->asserts) {
-        Checker::Flow ignored;
-        checker_.predicateChecker().applyPredicate(call, checker_.flow_, ignored);
-      }
-    }
     if (ReturnChecker::isExit(s)) {
       checker_.flow_.unreachable = true;
     }

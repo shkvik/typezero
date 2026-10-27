@@ -2,6 +2,7 @@
 #include "compiler/check/async/async_checker/async_checker.h"
 #include "compiler/check/classes/class_value_checker/class_value_checker.h"
 #include "compiler/check/classes/decorator_checker/decorator_checker.h"
+#include "compiler/check/flow/predicate_checker/predicate_checker.h"
 #include "compiler/check/generics/alias_instantiator/alias_instantiator.h"
 #include "compiler/check/generics/generic_class_instantiator/generic_class_instantiator.h"
 #include "compiler/check/iterators/generator_checker/generator_checker.h"
@@ -386,9 +387,14 @@ const Type *TypeResolver::resolveTypeInner(const TypeRef &ref) {
       params.push_back(type);
     }
     const TypeRef &returned = ref.args.back();
-    const Type *ret = returned.kind != TypeRef::Kind::Predicate ? resolveType(returned, true)
-                      : returned.asserts                        ? Type::voidTy()
-                                                                : Type::boolTy();
+    const Type *ret =
+        returned.kind != TypeRef::Kind::Predicate ? resolveType(returned, true) : Type::boolTy();
+    if (returned.kind == TypeRef::Kind::Predicate && returned.asserts) {
+      const Type *type = returned.args.empty() ? nullptr : resolveType(returned.args[0], false);
+      std::string shown = returned.name.str() + (type ? " is " + type->name().str() : "");
+      checker_.diags_.error(returned.loc, PredicateChecker::assertsError(shown, type, ""));
+      ret = Type::error();
+    }
     if (!ok || ret->isError()) {
       return Type::error();
     }

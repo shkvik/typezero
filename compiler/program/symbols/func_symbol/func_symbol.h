@@ -38,7 +38,6 @@ struct FuncSymbol {
   bool isGeneric() const { return !typeParams.empty(); }
   int predicateParam = -2;
   const Type *predicateType = nullptr;
-  bool asserts = false;
 };
 
 }

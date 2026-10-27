@@ -1,0 +1,30 @@
+// The numbers of a date must keep it within the dates JavaScript has
+// (docs/date.md, section 4): 100 million days around 1970. A number from
+// the input is checked first; the fields of a date that exists are trusted.
+const n = Number.parseInt(process.argv[2] ?? "1")
+const d = new Date(0)
+if (n.isOk()) {
+  const v = n.value
+  // expect-error: cannot prove that the date is within the dates JavaScript has (100 million days around 1970), and outside JavaScript would make an Invalid Date: 'v' comes from parseInt on line 4; check it first, e.g. 'if (v >= 1 && v <= 31)'
+  d.setUTCDate(v)
+  // expect-error: 'v' comes from parseInt on line 4; check it first, e.g. 'if (v >= 0 && v <= 59)'
+  d.setMinutes(30, v)
+  // expect-error: 'v' comes from parseInt on line 4; check it first, e.g. 'if (v >= 0 && v <= 11)'
+  const month = new Date(2026, v, 1)
+  // expect-error: 'v' comes from parseInt on line 4; check it first, e.g. 'if (v >= -271820 && v <= 275759)'
+  const year = Date.UTC(v, 0)
+  if (v >= 0 && v <= 1000) {
+    // expect-error: 'v' may be 1000; check it first, e.g. 'if (v >= 0 && v <= 11)'
+    const far = new Date(275759, v, 1)
+    const near = new Date(2026, v, 1)
+    d.setUTCHours(v)
+  }
+  // The fields of a date are trusted: they move a date that exists.
+  const next = new Date(d.getFullYear(), d.getMonth() + 1, 1)
+  d.setUTCDate(d.getUTCDate() + 1)
+}
+const f = Number.parseFloat(process.argv[3] ?? "0")
+if (f.isOk()) {
+  // expect-error: cannot prove that the time of a date is within ±8640000000000000 ms, 100 million days around 1970, and outside JavaScript would make an Invalid Date: 'f.value' comes from parseFloat on line 26
+  console.log(new Intl.DateTimeFormat("en").format(f.value))
+}

@@ -834,10 +834,6 @@ void tz_date_format_shutdown(void) {
 }
 
 void tz_date_locale(TzStr *out, double t, int32_t kind, const TzDateOptions *o) {
-  if (isnan(t)) {
-    *out = tz_str_from_ascii("Invalid Date", 12);
-    return;
-  }
   Resolved *r = cached(kind, o);
   *out = r ? format_string(r, t) : tz_str_from_ascii("", 0);
 }
@@ -861,16 +857,7 @@ void tz_dtf_drop(void *object) {
   tz_obj_free(f);
 }
 
-TZ_COLD TZ_NORETURN static void invalid_time(void) { tz_panicf("Invalid time value"); }
-
-void tz_dtf_format(TzStr *out, TzDateFormat *f, double t) {
-  if (isnan(t)) {
-    invalid_time();
-    *out = tz_str_from_ascii("", 0);
-    return;
-  }
-  *out = format_string(f->resolved, t);
-}
+void tz_dtf_format(TzStr *out, TzDateFormat *f, double t) { *out = format_string(f->resolved, t); }
 
 static const char *part_type(int32_t field) {
   switch (field) {
@@ -923,10 +910,6 @@ static const char *part_type(int32_t field) {
 TzArray *tz_dtf_format_to_parts(TzDateFormat *f, double t, const TzType *part_type_desc,
                                 const TzLayout *layout, int64_t size, uint32_t type_offset,
                                 uint32_t value_offset) {
-  if (isnan(t)) {
-    invalid_time();
-    return NULL;
-  }
   const TzIcu *icu = tz_icu();
   TzUErrorCode status = 0;
   void *iterator = icu->ufieldpositer_open(&status);

@@ -226,7 +226,6 @@ void GenericClassInstantiator::declareInstanceMember(ClassDecl *inst, FunctionDe
   sym->ret = sub2(of->ret);
   sym->discardsResult = of->discardsResult;
   sym->predicateParam = of->predicateParam;
-  sym->asserts = of->asserts;
   sym->predicateType = sub2(of->predicateType);
   if (Module *home = checker_.declModules_.lookup(generic)) {
     checker_.declModules_[fn] = home;

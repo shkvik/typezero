@@ -280,9 +280,6 @@ void FunctionChecker::checkFunctionBody(FunctionDecl *fn) {
   }
   checker_.flow_.errorListened = std::move(outerListened);
   checker_.flow_.errorPending = std::move(outerPending);
-  if (!checker_.flow_.unreachable && sym->asserts) {
-    checker_.predicateChecker().notePredicateExit(checker_.flow_, Checker::Flow(), fn->body->loc());
-  }
   checker_.predicateChecker().endPredicate(fn);
   if (fn->isConstructor && checker_.initFn_ == fn && !checker_.flow_.beforeSuper) {
     checker_.classChecker().checkFieldsSet(fn->loc());

@@ -83,7 +83,7 @@ typedef struct TzDate {
 } TzDate;
 
 void tz_buf_date(TzBuf *out, double t);
-int32_t tz_date_json(TzStr *out, double t);
+void tz_date_iso(TzStr *out, double t);
 void tz_date_local_string(TzStr *out, double t, int32_t mode);
 
 double tz_date_equivalent_time(double t);

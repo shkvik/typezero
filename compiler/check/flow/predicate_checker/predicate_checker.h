@@ -9,6 +9,7 @@ public:
   explicit PredicateChecker(Checker &checker);
 
   const Type *resolveReturnType(FunctionDecl *fn, FuncSymbol *sym);
+  static std::string assertsError(const std::string &shown, bool typed, const std::string &call);
   static bool looksBoolean(const Expr *expr);
   void beginPredicate(FunctionDecl *fn);
   void notePredicateExit(const Checker::Flow &whenTrue, const Checker::Flow &whenFalse,

@@ -12,6 +12,7 @@
 #include "compiler/overflow/slots/slots.h"
 #include "compiler/overflow/value_range/value_range.h"
 #include "compiler/program/types/types.h"
+#include "runtime/library/date/date/date.h"
 #include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/DenseSet.h"
 #include "llvm/ADT/STLExtras.h"
@@ -40,6 +41,75 @@ namespace {
 
 constexpr double kMaxTime = 8.64e15;
 
+constexpr double kDay = 86400000;
+
+const double kPartLimits[7][2] = {{-271820, 275759}, {0, 11}, {1, 31}, {0, 23},
+                                  {0, 59},           {0, 59}, {0, 999}};
+
+double monthStart(double months) {
+  if (!(std::fabs(months) < 1e9)) {
+    return months * 30.436875;
+  }
+  auto m = int64_t(months);
+  int64_t y = (m >= 0 ? m : m - 11) / 12;
+  int64_t month = m - y * 12;
+  y -= month <= 1;
+  int64_t era = (y >= 0 ? y : y - 399) / 400;
+  int64_t yoe = y - era * 400;
+  int64_t doy = (153 * ((month + 10) % 12) + 2) / 5;
+
+  return double(era * 146097 + yoe * 365 + yoe / 4 - yoe / 100 + doy - 719468);
+}
+
+Num dateTime(const std::array<Num, 7> &parts) {
+  Num months = add(multiply(parts[0], exactly(12)), parts[1]);
+  Num days = make({monthStart(months.lo), months.loOrigin, months.loWhy},
+                  {monthStart(months.hi), months.hiOrigin, months.hiWhy});
+  Num time = multiply(add(days, subtract(parts[2], exactly(1))), exactly(kDay));
+  const double scale[] = {3600000, 60000, 1000, 1};
+  for (size_t i = 3; i < 7; ++i) {
+    time = add(time, multiply(parts[i], exactly(scale[i - 3])));
+  }
+
+  return time;
+}
+
+}
+
+void BuiltinEvaluator::checkDateParts(const CallExpr *call, const std::vector<Val> &args) {
+  bool setter = call->builtin == Builtin::DateSetUTC || call->builtin == Builtin::DateSetLocal;
+  bool local = call->builtin == Builtin::DateFromFields || call->builtin == Builtin::DateSetLocal;
+  std::array<Num, 7> nums = {exactly(1970), exactly(0), exactly(1), exactly(0),
+                             exactly(0),    exactly(0), exactly(0)};
+  size_t first = 0, from = 0;
+  if (setter) {
+    auto *field = call->args.empty() ? nullptr : dyn_cast<IntLitExpr>(call->args[0]);
+    if (!field) {
+      return;
+    }
+    nums = {range(-271821, 275760, Origin::Trusted),
+            range(0, 11),
+            range(1, 31),
+            range(0, 23),
+            range(0, 59),
+            range(0, 59),
+            range(0, 999)};
+    first = field->value <= TZ_DATE_DATE ? size_t(field->value) : size_t(field->value) - 1;
+    from = 1;
+  }
+  std::vector<DatePart> parts;
+  for (size_t i = from; i < call->args.size() && i < args.size() && first + i - from < 7; ++i) {
+    size_t k = first + i - from;
+    if (args[i].num.empty()) {
+      return;
+    }
+    nums[k] = args[i].num;
+    parts.push_back({call->args[i], args[i].num, kPartLimits[k][0], kPartLimits[k][1]});
+  }
+  if (!setter && nums[0].lo <= 99 && nums[0].hi >= 0) {
+    nums[0] = join(nums[0], range(1900, 1999));
+  }
+  check_.overflowWarnings().checkDate(dateTime(nums), local ? kMaxTime - kDay : kMaxTime, parts);
 }
 
 BuiltinEvaluator::BuiltinEvaluator(OverflowCheck &check) : check_(check) {}
@@ -303,12 +373,22 @@ Val BuiltinEvaluator::evalBuiltin(const CallExpr *call, State &st) {
     return numVal(range(-kMaxTime, kMaxTime, Origin::Trusted));
   case Builtin::DateFromFields:
   case Builtin::DateUTC:
-    if (!call->args.empty() && call->args[0]->type && call->args[0]->type->isInteger()) {
-      check_.overflowWarnings().checkWithin(call->args[0], arg(0).num, -271820, 275759,
-                                            "the year of a date", "-271820 to 275759");
-    }
+    checkDateParts(call, args);
     return call->builtin == Builtin::DateUTC ? numVal(range(-kMaxTime, kMaxTime, Origin::Trusted))
                                              : check_.overflowWarnings().trusted(type);
+  case Builtin::DateSetUTC:
+  case Builtin::DateSetLocal:
+    checkDateParts(call, args);
+    return numVal(range(-kMaxTime, kMaxTime, Origin::Trusted));
+  case Builtin::DtfFormat:
+  case Builtin::DtfFormatToParts:
+    if (!call->args.empty() && call->args[0]->type && call->args[0]->type->isNumeric()) {
+      check_.overflowWarnings().checkWithin(call->args[0], arg(0).num, -kMaxTime, kMaxTime,
+                                            "the time of a date",
+                                            "±8640000000000000 ms, 100 million days around "
+                                            "1970");
+    }
+    break;
   case Builtin::DateNow:
   case Builtin::PerformanceNow:
     return numVal(range(0, kMaxTime, Origin::Trusted));
@@ -320,8 +400,28 @@ Val BuiltinEvaluator::evalBuiltin(const CallExpr *call, State &st) {
     return result;
   }
   case Builtin::DateGetUTC:
-  case Builtin::DateGetLocal:
-    return numVal(range(-300000, 300000));
+  case Builtin::DateGetLocal: {
+    auto *field = call->args.empty() ? nullptr : dyn_cast<IntLitExpr>(call->args[0]);
+    switch (field ? int(field->value) : -1) {
+    case TZ_DATE_YEAR:
+      return numVal(range(-271821, 275760, Origin::Trusted));
+    case TZ_DATE_MONTH:
+      return numVal(range(0, 11));
+    case TZ_DATE_DATE:
+      return numVal(range(1, 31));
+    case TZ_DATE_DAY:
+      return numVal(range(0, 6));
+    case TZ_DATE_HOURS:
+      return numVal(range(0, 23));
+    case TZ_DATE_MINUTES:
+    case TZ_DATE_SECONDS:
+      return numVal(range(0, 59));
+    case TZ_DATE_MS:
+      return numVal(range(0, 999));
+    default:
+      return numVal(range(-1440, 1440));
+    }
+  }
   case Builtin::ProcessArgv:
   case Builtin::ObjectKeys:
   case Builtin::ObjectValues:

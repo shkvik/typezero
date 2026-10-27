@@ -803,6 +803,13 @@ void FilePort::manual() {
     if (name == "satisfies" && i > 0 && isOperandEnd(toks_[i - 1])) {
       note(i, "'satisfies' is not supported: declare the type of the variable instead, or "
               "remove it");
+    } else if (name == "asserts" && i > 0 && is(i - 1, Tok::Colon) && is(i + 1, Tok::Identifier) &&
+               !t.newlineBefore) {
+      note(i, "'asserts' is not supported (docs/narrowing.md): there are no exceptions, so a "
+              "function cannot stop its caller; write '" +
+                  toks_[i + 1].text.str() +
+                  " is T' and return whether it holds, then check it at the call: 'if "
+                  "(!isT(x)) return err(...)'");
     } else if ((name == "get" || name == "set") &&
                (is(i + 1, Tok::Identifier) || is(i + 1, Tok::StringLiteral) ||
                 is(i + 1, Tok::LBracket)) &&

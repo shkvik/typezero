@@ -58,6 +58,18 @@ double tz_date_equivalent_time(double t) {
   return days * MS_PER_DAY + (double)f.time_in_day;
 }
 
+TZ_COLD TZ_NORETURN static void out_of_range(void) {
+  tz_panicf("a date went outside the dates JavaScript has, 100 million days around 1970");
+}
+
+static double checked(double t) {
+  if (isnan(t)) {
+    out_of_range();
+  }
+
+  return t;
+}
+
 static double to_local(double t) { return t + tz_date_offset(t); }
 
 static double from_local(double local) {
@@ -70,20 +82,18 @@ static double from_local(double local) {
 
 double tz_date_from_fields(double year, double month, double date, double hours, double minutes,
                            double seconds, double ms, int32_t local) {
-  if (!isnan(year)) {
-    double y = trunc(year);
-    if (y >= 0 && y <= 99) {
-      year = 1900 + y;
-    }
+  double y = trunc(year);
+  if (y >= 0 && y <= 99) {
+    year = 1900 + y;
   }
   double day = tz_date_make_day(year, month, date);
   double time = tz_date_make_time(hours, minutes, seconds, ms);
   double value = tz_date_make_date(day, time);
 
-  return local ? from_local(value) : tz_date_time_clip(value);
+  return checked(local ? from_local(value) : tz_date_time_clip(value));
 }
 
-double tz_date_clip(double t) { return tz_date_time_clip(t); }
+double tz_date_clip(double t) { return checked(tz_date_time_clip(t)); }
 
 double tz_date_parse(void *obj, uint64_t meta) {
   TzStr s = {obj, meta};
@@ -144,9 +154,6 @@ static double field_of(const Fields *f, int32_t field) {
 }
 
 double tz_date_utc_field(double t, int32_t field) {
-  if (isnan(t)) {
-    return NAN;
-  }
   Fields f;
   break_down(t, &f);
 
@@ -154,9 +161,6 @@ double tz_date_utc_field(double t, int32_t field) {
 }
 
 double tz_date_local_field(double t, int32_t field) {
-  if (isnan(t)) {
-    return NAN;
-  }
   double local = to_local(t);
   if (field == TZ_DATE_OFFSET) {
     return (double)(((int64_t)t - (int64_t)local) / 60000);
@@ -170,12 +174,7 @@ double tz_date_local_field(double t, int32_t field) {
 double tz_date_set(double t, int32_t field, int32_t local, int32_t count, double a, double b,
                    double c, double d) {
   double args[4] = {a, b, c, d};
-  if (isnan(t)) {
-    if (field != TZ_DATE_YEAR) {
-      return NAN;
-    }
-    t = 0;
-  } else if (local) {
+  if (local) {
     t = to_local(t);
   }
   Fields f;
@@ -241,7 +240,7 @@ double tz_date_set(double t, int32_t field, int32_t local, int32_t count, double
   }
   double value = tz_date_make_date(day, time);
 
-  return local ? from_local(value) : tz_date_time_clip(value);
+  return checked(local ? from_local(value) : tz_date_time_clip(value));
 }
 
 static TzStr ascii(const char *text, int length) {
@@ -262,40 +261,17 @@ static int iso_text(char *out, size_t size, double t) {
 }
 
 void tz_date_iso(TzStr *out, double t) {
-  if (isnan(t)) {
-    tz_panicf("Invalid time value");
-  }
   char text[40];
   *out = ascii(text, iso_text(text, sizeof text, t));
-}
-
-int32_t tz_date_json(TzStr *out, double t) {
-  if (isnan(t)) {
-    out->obj = NULL;
-    out->meta = 0;
-    return 0;
-  }
-  char text[40];
-  *out = ascii(text, iso_text(text, sizeof text, t));
-
-  return 1;
 }
 
 void tz_buf_date(TzBuf *out, double t) {
-  if (isnan(t)) {
-    tz_buf_ascii(out, "Invalid Date");
-    return;
-  }
   char text[40];
   int n = iso_text(text, sizeof text, t);
   tz_buf_ascii_n(out, text, n > 0 ? (size_t)n : 0);
 }
 
 void tz_date_utc_string(TzStr *out, double t) {
-  if (isnan(t)) {
-    *out = ascii("Invalid Date", 12);
-    return;
-  }
   Fields f;
   break_down(t, &f);
   char text[48];
@@ -307,10 +283,6 @@ void tz_date_utc_string(TzStr *out, double t) {
 }
 
 void tz_date_local_string(TzStr *out, double t, int32_t mode) {
-  if (isnan(t)) {
-    *out = ascii("Invalid Date", 12);
-    return;
-  }
   double local = to_local(t);
   Fields f;
   break_down(local, &f);

@@ -237,7 +237,8 @@ llvm::Value *DateLowerer::emitDateCall(CallExpr *call) {
       return result;
     }
     lowering_.refCounts().dropOperand(text);
-    return newDate(time);
+    return newDate(lowering_.builder_.CreateCall(
+        lowering_.processLowerer().processFunction("tz_date_clip", f64, {f64}), {time}));
   }
   case Builtin::DateFromFields:
   case Builtin::DateUTC: {
@@ -316,22 +317,13 @@ llvm::Value *DateLowerer::emitDateCall(CallExpr *call) {
     }
     llvm::Value *time = timeOf(date.value);
     lowering_.refCounts().dropOperand(date);
-    if (call->builtin == Builtin::DateToISOString) {
-      llvm::Value *text = stringOf("tz_date_iso", {time}, {f64});
-      return text;
-    }
     if (call->builtin == Builtin::DateToUTCString) {
       return stringOf("tz_date_utc_string", {time}, {f64});
     }
     if (call->builtin == Builtin::DateToLocalString) {
       return stringOf("tz_date_local_string", {time, constant(0)}, {f64, i32});
     }
-    llvm::AllocaInst *out = lowering_.functionFrame().createStackSlot(lowering_.strTy_, "json.out");
-    llvm::Value *has = lowering_.builder_.CreateCall(
-        lowering_.processLowerer().processFunction("tz_date_json", i32, {ptr, f64}), {out, time});
-    return lowering_.optionalLowerer().makeOptional(
-        lowering_.builder_.CreateLoad(lowering_.strTy_, out),
-        lowering_.builder_.CreateICmpNE(has, lowering_.builder_.getInt32(0)), call->type);
+    return stringOf("tz_date_iso", {time}, {f64});
   }
   case Builtin::DateToLocale: {
     Lowering::Operand date = receiver(1);

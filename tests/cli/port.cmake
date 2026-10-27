@@ -123,7 +123,7 @@ changed:
     1  'import * as' became named imports
     1  'jsr:' imports became package names in tz.json
     2  imports of .ts and .js files name the .tz files of the copy
-to change by hand (13):
+to change by hand (14):
   manual/mod.tz:3:23: npm packages are not supported (docs/packages.md): take the package from JSR or git, adapted for tz, or do without it
   manual/mod.tz:4:19: 'zod' is another package: add it to tz.json once it is adapted for tz (docs/packages.md), or do without it
   manual/mod.tz:5:1: an import for side effects is not supported: import what the file uses by name
@@ -137,6 +137,7 @@ to change by hand (13):
   manual/mod.tz:34:10: 'arguments' is not supported: declare a rest parameter, e.g. '...args: string[]'
   manual/mod.tz:34:39: prototypes are not supported (docs/objects.md): declare the methods in a class
   manual/mod.tz:38:10: 'require' is not supported: import by name, e.g. 'import { x } from "./x"'
+  manual/mod.tz:45:37: 'asserts' is not supported (docs/narrowing.md): there are no exceptions, so a function cannot stop its caller; write 'p is T' and return whether it holds, then check it at the call: 'if (!isT(x)) return err(...)'
 then 'tz build manual/mod.tz' reports what else tz does not accept
 ]])
 # jsr: imports become dependencies; the anonymous class gets the file's name.

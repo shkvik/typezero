@@ -1,0 +1,14 @@
+// A date never becomes an Invalid Date (docs/date.md, section 4). The
+// compiler proves the numbers that make a date; the time of a date that
+// exists is trusted, and if moving it still leaves the dates JavaScript has
+// (100 million days around 1970), the program stops, as an int that
+// overflows does.
+// expect-exit: 2
+// expect-stderr: panic: a date went outside the dates JavaScript has, 100 million days around 1970
+const last = new Date(8640000000000000)
+console.log(last, last.toJSON(), JSON.stringify([last]))
+const first = new Date(Date.UTC(2026, 0, 31))
+const next = new Date(Date.UTC(first.getUTCFullYear(), first.getUTCMonth() + 1, 1))
+console.log(next.toISOString())
+last.setUTCDate(last.getUTCDate() + 1)
+console.log("not reached")

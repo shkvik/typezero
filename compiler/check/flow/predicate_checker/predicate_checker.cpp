@@ -7,6 +7,7 @@
 #include "compiler/check/types/type_relations/type_relations.h"
 #include "compiler/check/types/type_resolver/type_resolver.h"
 #include "compiler/infer/return_inferrer/return_inferrer.h"
+#include "llvm/ADT/StringExtras.h"
 
 using llvm::cast;
 using llvm::dyn_cast;
@@ -60,6 +61,25 @@ const Type *PredicateChecker::resolveReturnType(FunctionDecl *fn, FuncSymbol *sy
   if (ref.kind != TypeRef::Kind::Predicate) {
     return checker_.typeResolver().resolveType(ref, true);
   }
+  if (ref.asserts) {
+    if (sym) {
+      const Type *type =
+          ref.args.empty() ? nullptr : checker_.typeResolver().resolveType(ref.args[0], false);
+      std::string args;
+      for (const Param &p : fn->params) {
+        args += (args.empty() ? "" : ", ") + p.name.str();
+      }
+      std::string call = fn->name.str() + "(" + args + ")";
+      if (fn->takesThis()) {
+        std::string object = fn->cls->name.str();
+        object[0] = llvm::toLower(object[0]);
+        call = object + "." + call;
+      }
+      std::string shown = ref.name.str() + (type ? " is " + type->name().str() : "");
+      checker_.diags_.error(ref.loc, assertsError(shown, type, call));
+    }
+    return Type::voidTy();
+  }
   int param = -2;
   if (ref.name == "this") {
     if (fn->cls && !fn->isStatic && !fn->isConstructor) {
@@ -83,10 +103,22 @@ const Type *PredicateChecker::resolveReturnType(FunctionDecl *fn, FuncSymbol *sy
   if (sym && param != -2 && (!type || !type->isError())) {
     sym->predicateParam = param;
     sym->predicateType = type;
-    sym->asserts = ref.asserts;
   }
 
-  return ref.asserts ? Type::voidTy() : Type::boolTy();
+  return Type::boolTy();
+}
+
+std::string PredicateChecker::assertsError(const std::string &shown, bool typed,
+                                           const std::string &call) {
+  std::string message = "'asserts " + shown +
+                        "' is not supported (docs/narrowing.md): there are no exceptions, so a "
+                        "function cannot stop its caller; write '" +
+                        (typed ? shown : std::string("boolean")) + "' and return whether it holds";
+  if (!call.empty()) {
+    message += ", then check it at the call: 'if (!" + call + ") return err(...)'";
+  }
+
+  return message;
 }
 
 bool PredicateChecker::looksBoolean(const Expr *expr) {
@@ -120,7 +152,7 @@ bool PredicateChecker::looksBoolean(const Expr *expr) {
 
 void PredicateChecker::beginPredicate(FunctionDecl *fn) {
   const FuncSymbol *sym = fn->sym;
-  bool boolean = !sym->ret || sym->ret->isBool() || sym->asserts;
+  bool boolean = !sym->ret || sym->ret->isBool();
   if (!boolean || fn->isGenerator || fn->isConstructor) {
     checker_.predicateBuilds_.push_back({nullptr, fn, Checker::Flow(), Checker::Flow()});
     return;
@@ -156,11 +188,9 @@ void PredicateChecker::notePredicateExit(const Checker::Flow &whenTrue,
       TypeRelations::isImplicitlyConvertible(shown, sym->predicateType)) {
     return;
   }
-  std::string what = sym->asserts ? "'asserts " : "'";
   checker_.diags_.error(
-      loc, functionLabel(sym->name) + " says " + what + var->name.str() + " is " +
-               sym->predicateType->name().str() + "', but " +
-               (sym->asserts ? "it may end here" : "this may give true") + " while '" +
+      loc, functionLabel(sym->name) + " says '" + var->name.str() + " is " +
+               sym->predicateType->name().str() + "', but this may give true while '" +
                var->name.str() + "' is only known to be '" + shown->name().str() +
                "'; show it with what narrows types: a union's tag, 'typeof', "
                "'instanceof', '!= undefined', 'Array.isArray' or a function that tests "
@@ -233,7 +263,7 @@ const Checker::Predicate *PredicateChecker::predicateOf(const FuncSymbol *fn) co
   }
   FunctionDecl *decl = fn->decl;
   if (!decl || decl->checked || !decl->body || decl->isGenerator || decl->isInstance ||
-      (fn->ret && !fn->ret->isBool() && !fn->asserts) || !summarizing_.insert(fn).second) {
+      (fn->ret && !fn->ret->isBool()) || !summarizing_.insert(fn).second) {
     return nullptr;
   }
   Checker::BodyState saved = checker_.returnInferrer().enterBody(decl);
@@ -370,7 +400,7 @@ const Type *PredicateChecker::filteredType(const Expr *callback, const Type *ele
     return nullptr;
   }
   const Type *kept = nullptr;
-  if (fn->predicateParam == 0 && fn->predicateType && !fn->asserts) {
+  if (fn->predicateParam == 0 && fn->predicateType) {
     kept = fn->predicateType;
   }
   if (const Checker::Predicate *summary = predicateOf(fn); summary && !kept) {

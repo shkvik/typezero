@@ -473,7 +473,7 @@ Expr *DateChecker::checkDateMethod(CallExpr *call, MemberExpr *member) {
     if (!call->args.empty()) {
       call->args[0] = checker_.argumentChecker().checkArg(call->args[0], Type::string());
     }
-    call->type = Type::optional(Type::string());
+    call->type = Type::string();
     break;
   case Builtin::DateToLocalString:
     call->args.push_back(field(method->field));

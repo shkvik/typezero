@@ -1,6 +1,6 @@
 // Dates as values in what tz has beyond JavaScript: Result, generic functions,
-// `Date | undefined`; and toJSON() of an invalid date, which is null in
-// JavaScript and undefined here.
+// `Date | undefined`; and toJSON(), a string: there are no invalid dates,
+// whose toJSON() is null in JavaScript.
 function parseDate(text: string): Result<Date, string> {
   const ms = Date.parse(text)
   return ms.isErr() ? err(`not a date: ${text}`) : ok(new Date(ms.value))
@@ -56,4 +56,5 @@ bump()
 bump()
 console.log(shared)
 
-console.log(new Date(0).toJSON(), new Date(0).toJSON("key"))
+const json: string = new Date(0).toJSON()
+console.log(json, new Date(0).toJSON("key"))
