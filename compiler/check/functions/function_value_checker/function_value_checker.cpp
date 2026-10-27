@@ -79,7 +79,6 @@ FunctionExpr *FunctionValueChecker::builtinFunctionValue(Expr *arg,
     static const std::pair<llvm::StringLiteral, unsigned> globals[] = {
         {"String", 1},    {"Number", 1},
         {"parseInt", 2},  {"parseFloat", 1},
-        {"isNaN", 1},     {"isFinite", 1},
         {"Boolean", 1},   {"encodeURIComponent", 1},
         {"encodeURI", 1}, {"decodeURIComponent", 1},
         {"decodeURI", 1}};
@@ -103,7 +102,9 @@ FunctionExpr *FunctionValueChecker::builtinFunctionValue(Expr *arg,
           "floor", "ceil",  "round", "trunc", "abs",   "sign",  "sqrt",   "cbrt", "exp",  "expm1",
           "log",   "log1p", "log2",  "log10", "sin",   "cos",   "tan",    "asin", "acos", "atan",
           "sinh",  "cosh",  "tanh",  "asinh", "acosh", "atanh", "fround", "clz32"};
-      if (llvm::is_contained(two, name)) {
+      if (name == "clamp") {
+        maxArgs = 3;
+      } else if (llvm::is_contained(two, name)) {
         maxArgs = 2;
       } else if (llvm::is_contained(any, name)) {
         maxArgs = kAny;
@@ -115,8 +116,7 @@ FunctionExpr *FunctionValueChecker::builtinFunctionValue(Expr *arg,
     } else if (checker_.callChecker().isGlobalName(m->object, "Number")) {
       if (name == "parseInt") {
         maxArgs = 2;
-      } else if (name == "parseFloat" || name == "isNaN" || name == "isFinite" ||
-                 name == "isInteger" || name == "isSafeInteger") {
+      } else if (name == "parseFloat" || name == "isInteger" || name == "isSafeInteger") {
         maxArgs = 1;
       } else {
         name = {};

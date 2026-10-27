@@ -119,6 +119,27 @@ llvm::ArrayRef<const Type *> Type::integers() {
   return types;
 }
 
+const Type *Type::wrapping(unsigned bits) {
+  static const Type *types[2] = {[] {
+                                   static Type t(Kind::Int, "Bit.Wrap32");
+                                   t.bits_ = 32;
+                                   t.unsigned_ = true;
+                                   t.wrapping_ = true;
+
+                                   return &t;
+                                 }(),
+                                 [] {
+                                   static Type t(Kind::Int, "Bit.Wrap64");
+                                   t.bits_ = 64;
+                                   t.unsigned_ = true;
+                                   t.wrapping_ = true;
+
+                                   return &t;
+                                 }()};
+
+  return types[bits == 64 ? 1 : 0];
+}
+
 const Type *Type::doubleTy() {
   static const Type t(Kind::Double, "double");
 
@@ -1074,10 +1095,22 @@ const Type *Type::elementType() const {
   case Bytes::Float32:
   case Bytes::Float64:
     return doubleTy();
+  case Bytes::Int8:
+    return integer(8, false);
+  case Bytes::Int16:
+    return integer(16, false);
+  case Bytes::Uint16:
+    return integer(16, true);
+  case Bytes::Int32:
+    return integer(32, false);
+  case Bytes::Uint32:
+    return integer(32, true);
   default:
-    return intTy();
+    return integer(8, true);
   }
 }
+
+const Type *Type::accessType() const { return elementType()->isFloat() ? doubleTy() : intTy(); }
 
 unsigned Type::elementSize() const {
   switch (bytes_) {
@@ -1197,6 +1230,8 @@ const Type *Type::fromName(llvm::StringRef name) {
       .Case("uint16", integer(16, true))
       .Case("uint32", integer(32, true))
       .Case("uint64", integer(64, true))
+      .Case("Bit.Wrap32", wrapping(32))
+      .Case("Bit.Wrap64", wrapping(64))
       .Cases({"double", "number"}, doubleTy())
       .Case("decimal", decimalTy())
       .Case("string", string())

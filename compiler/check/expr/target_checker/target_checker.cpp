@@ -50,7 +50,8 @@ const Type *TargetChecker::checkAssignTarget(Expr *&target, bool compound) {
     }
     if (type->isTypedArray()) {
       index->index = checker_.memberChecker().checkPosition(index->index);
-      index->type = type->elementType();
+      index->type =
+          type->bytes() == Type::Bytes::Uint8Clamped ? Type::intTy() : type->elementType();
       return index->type;
     }
     if (type->isBytes()) {

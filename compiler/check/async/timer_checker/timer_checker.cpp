@@ -85,7 +85,7 @@ Expr *TimerChecker::checkAsyncGlobal(CallExpr *call, NameExpr *name) {
     call->builtin = fn == "setTimeout" ? Builtin::SetTimeout : Builtin::SetInterval;
     call->args[0] = checkTaskCallback(call->args[0], fn);
     if (call->args.size() > 1) {
-      call->args[1] = checker_.argumentChecker().checkArg(call->args[1], Type::doubleTy());
+      call->args[1] = checker_.argumentChecker().checkAnyNumber(call->args[1]);
     }
     call->type = Type::timeout();
     return call;
@@ -233,7 +233,7 @@ Expr *TimerChecker::checkTimersPromisesCall(CallExpr *call, llvm::StringRef fn, 
       one->type = Type::doubleTy();
       args.push_back(one);
     } else {
-      args.push_back(checker_.argumentChecker().checkArg(call->args[0], Type::doubleTy()));
+      args.push_back(checker_.argumentChecker().checkAnyNumber(call->args[0]));
     }
   }
   const Type *value = Type::voidTy();

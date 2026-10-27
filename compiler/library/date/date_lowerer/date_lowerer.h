@@ -9,6 +9,7 @@ public:
   explicit DateLowerer(Lowering &lowering);
 
   llvm::Value *emitDateCall(CallExpr *call);
+  llvm::Value *wholeTime(llvm::Value *time);
   llvm::Value *parseResult(llvm::Value *time, llvm::Value *text, CallExpr *call);
   llvm::Value *newDate(llvm::Value *time);
   llvm::Value *dateTimeAddress(llvm::Value *date);

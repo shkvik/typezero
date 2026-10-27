@@ -45,7 +45,7 @@ pets.delete("rex")
 console.log(pets.size)
 const memo = new Map<int, double>()
 function fib(n: int): double {
-  if (n < 2) return n
+  if (n < 2) return n.toDouble()
   const known = memo.get(n)
   if (known != undefined) return known
   const value = fib(n - 1) + fib(n - 2)

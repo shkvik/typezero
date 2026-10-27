@@ -80,7 +80,7 @@ class ObjectLayouts;
 class ObjectLowerer;
 class TailCallLowerer;
 class PlaceLowerer;
-class TryLowerer;
+class ExitLowerer;
 class UnionLayout;
 class UnionLowerer;
 class UnionMemberLowerer;
@@ -133,7 +133,6 @@ private:
   struct TailGroup;
   struct Scope {
     std::vector<std::pair<llvm::Value *, const Type *>> slots;
-    std::vector<llvm::Value *> iterators;
     std::vector<llvm::Value *> dicts;
     std::vector<llvm::Value *> asyncIterators;
   };
@@ -214,7 +213,6 @@ private:
     llvm::Value *id, *handle, *object;
     llvm::BasicBlock *finalBlock, *freeBlock, *returnBlock;
     const Type *sent;
-    bool closes = false;
     const Type *yielded = nullptr;
     uint64_t header = 16;
   };
@@ -224,7 +222,6 @@ private:
     llvm::Constant *descriptor = nullptr;
     llvm::Constant *plainDescriptor = nullptr;
   };
-  struct TryContext;
   struct AsyncState {
     llvm::Value *object = nullptr;
     llvm::Value *reactor = nullptr;
@@ -426,22 +423,6 @@ private:
   llvm::Function *objReleaseFn_ = nullptr;
   llvm::Function *instanceReleaseFn_ = nullptr;
   llvm::DenseSet<const CallExpr *> tailJumps_;
-  struct TryContext {
-    TryStmt *stmt;
-    size_t scopeDepth;
-    size_t targetsDepth;
-    bool inFinally = false;
-    llvm::BasicBlock *finally = nullptr;
-    llvm::Value *completion = nullptr;
-    llvm::Value *pendingValue = nullptr;
-    bool returns = false;
-    struct Exit {
-      size_t target;
-      bool isBreak;
-    };
-    std::vector<Exit> exits;
-  };
-  std::vector<TryContext> tries_;
   llvm::SMLoc loc_;
   const llvm::SourceMgr *sourceMgr_ = nullptr;
   std::string mismatch_;
@@ -503,7 +484,7 @@ public:
   ObjectLowerer &objectLowerer() const { return *objectLowererPart_; }
   TailCallLowerer &tailCallLowerer() const { return *tailCallLowererPart_; }
   PlaceLowerer &placeLowerer() const { return *placeLowererPart_; }
-  TryLowerer &tryLowerer() const { return *tryLowererPart_; }
+  ExitLowerer &exitLowerer() const { return *exitLowererPart_; }
   UnionLayout &unionLayout() const { return *unionLayoutPart_; }
   UnionLowerer &unionLowerer() const { return *unionLowererPart_; }
   UnionMemberLowerer &unionMemberLowerer() const { return *unionMemberLowererPart_; }
@@ -594,7 +575,7 @@ private:
   friend class ObjectLowerer;
   friend class TailCallLowerer;
   friend class PlaceLowerer;
-  friend class TryLowerer;
+  friend class ExitLowerer;
   friend class UnionLayout;
   friend class UnionLowerer;
   friend class UnionMemberLowerer;
@@ -689,7 +670,7 @@ private:
   std::unique_ptr<ObjectLowerer> objectLowererPart_;
   std::unique_ptr<TailCallLowerer> tailCallLowererPart_;
   std::unique_ptr<PlaceLowerer> placeLowererPart_;
-  std::unique_ptr<TryLowerer> tryLowererPart_;
+  std::unique_ptr<ExitLowerer> exitLowererPart_;
   std::unique_ptr<UnionLayout> unionLayoutPart_;
   std::unique_ptr<UnionLowerer> unionLowererPart_;
   std::unique_ptr<UnionMemberLowerer> unionMemberLowererPart_;

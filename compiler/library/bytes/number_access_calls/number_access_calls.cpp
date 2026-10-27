@@ -2,6 +2,7 @@
 #include "compiler/library/bytes/bytes_lower_helpers/bytes_lower_helpers.h"
 #include "compiler/library/bytes/bytes_lowerer/bytes_lowerer.h"
 #include "compiler/library/process/process_lowerer/process_lowerer.h"
+#include "compiler/library/result/result_lowerer/result_lowerer.h"
 #include "compiler/lower/expr/assign_lowerer/assign_lowerer.h"
 #include "compiler/lower/expr/expr_lowerer/expr_lowerer.h"
 #include "compiler/lower/function_frame/function_frame.h"
@@ -27,6 +28,12 @@ using llvm::isa;
 using llvm::Value;
 
 namespace tz {
+
+namespace {
+
+constexpr double kFloatTop = 3.4028234663852886e38;
+
+}
 
 llvm::Value *NumberAccessCalls::emit() {
   switch (call->builtin) {
@@ -114,10 +121,17 @@ llvm::Value *NumberAccessCalls::emit() {
     } else {
       llvm::Value *v;
       switch (kind) {
-      case Bytes::Float32:
+      case Bytes::Float32: {
+        llvm::Value *top = llvm::ConstantFP::get(f64, kFloatTop);
+        llvm::Value *within = lowering_.builder_.CreateBinaryIntrinsic(
+            llvm::Intrinsic::minnum,
+            lowering_.builder_.CreateBinaryIntrinsic(llvm::Intrinsic::maxnum, value,
+                                                     llvm::ConstantFP::get(f64, -kFloatTop)),
+            top);
         v = lowering_.builder_.CreateBitCast(
-            lowering_.builder_.CreateFPTrunc(value, lowering_.builder_.getFloatTy()), bits);
+            lowering_.builder_.CreateFPTrunc(within, lowering_.builder_.getFloatTy()), bits);
         break;
+      }
       case Bytes::Float64:
         v = lowering_.builder_.CreateBitCast(value, bits);
         break;
@@ -136,6 +150,12 @@ llvm::Value *NumberAccessCalls::emit() {
                         : lowering_.builder_.CreateAdd(offset, lowering_.builder_.getInt64(size));
     }
     lowering_.refCounts().dropOperand(self);
+    if (!write && call->type->isResult()) {
+      llvm::Value *checked = lowering_.builder_.CreateCall(
+          fn("tz_finite_r", f64, {f64, lowering_.builder_.getPtrTy()}),
+          {result, lowering_.resultLowerer().failureMaker(call->type->errType())});
+      return lowering_.resultLowerer().catchFailure(checked, call->type, call->loc());
+    }
     return result;
   }
   case Builtin::BufferReadVar:

@@ -1,5 +1,4 @@
 #include "compiler/check/expr/concat_checker/concat_checker.h"
-#include "compiler/check/errors/throw_checker/throw_checker.h"
 #include "compiler/check/generics/generic_checker/generic_checker.h"
 #include "compiler/check/shared_helpers/shared_helpers.h"
 #include "compiler/check/types/type_relations/type_relations.h"

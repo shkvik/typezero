@@ -67,7 +67,7 @@ bool fitsIn(const Type *type, int64_t value) {
   return value >= type->intMin() && (value < 0 || static_cast<uint64_t>(value) <= type->intMax());
 }
 
-const Type *bitType(const Type *type) { return type->isInt() ? Type::integer(32, false) : type; }
+const Type *bitType(const Type *type) { return type; }
 
 bool exactEnough(const Type *type, int64_t value, bool wraps) {
   return fitsIn(type, value) &&
@@ -288,8 +288,42 @@ std::optional<int64_t> ConstantFolder::intConstant(const Expr *expr) const {
   }
 }
 
+std::optional<uint64_t> ConstantFolder::unsignedConstant(const Expr *expr) const {
+  if (!expr->type || !expr->type->isUnsigned() || expr->type->bitWidth() != 64) {
+    std::optional<int64_t> value = intConstant(expr);
+    return value && *value >= 0 ? std::optional<uint64_t>(uint64_t(*value)) : std::nullopt;
+  }
+  if (auto *lit = dyn_cast<IntLitExpr>(expr)) {
+    return lit->value;
+  }
+  if (auto *name = dyn_cast<NameExpr>(expr)) {
+    if (auto found = bigUnsignedVars_.find(name->var); found != bigUnsignedVars_.end()) {
+      return found->second;
+    }
+  }
+  if (auto found = bigUnsigned_.find(expr); found != bigUnsigned_.end()) {
+    return found->second;
+  }
+  std::optional<int64_t> value = intConstant(expr);
+
+  return value && *value >= 0 ? std::optional<uint64_t>(uint64_t(*value)) : std::nullopt;
+}
+
+void ConstantFolder::noteUnsignedVar(const VarSymbol *var, const Expr *init) {
+  if (!var->type || !var->type->isUnsigned() || var->type->bitWidth() != 64) {
+    return;
+  }
+  if (std::optional<uint64_t> value = unsignedConstant(init);
+      value && *value > uint64_t(std::numeric_limits<int64_t>::max())) {
+    bigUnsignedVars_[var] = *value;
+  }
+}
+
 void ConstantFolder::foldUnary(UnaryExpr *unary, bool wraps) {
   const Type *type = unary->type;
+  if (type->isWrapping()) {
+    return;
+  }
   if (auto *lit = dyn_cast<IntLitExpr>(unary->operand); lit && unary->op == UnaryOp::Neg) {
     uint64_t magnitude = lit->value;
     if (magnitude <= uint64_t(1) << 63 && fitsIn(type, static_cast<int64_t>(0 - magnitude))) {
@@ -325,14 +359,16 @@ void ConstantFolder::foldUnary(UnaryExpr *unary, bool wraps) {
 }
 
 void ConstantFolder::foldBinary(BinaryExpr *bin, bool wraps) {
-  std::optional<int64_t> l = intConstant(bin->lhs), r = intConstant(bin->rhs);
-  if (!l || !r) {
+  const Type *type = bin->type;
+  if (type->isWrapping() || bin->lhs->type->isWrapping()) {
     return;
   }
-  const Type *type = bin->type;
-  int64_t a = *l, b = *r;
-  auto ua = static_cast<uint64_t>(a), ub = static_cast<uint64_t>(b);
   if (type->isUnsigned() && type->bitWidth() == 64) {
+    std::optional<uint64_t> l = unsignedConstant(bin->lhs), r = unsignedConstant(bin->rhs);
+    if (!l || !r) {
+      return;
+    }
+    uint64_t ua = *l, ub = *r;
     std::optional<uint64_t> result;
     switch (bin->op) {
     case BinaryOp::Add:
@@ -348,12 +384,26 @@ void ConstantFolder::foldBinary(BinaryExpr *bin, bool wraps) {
       return;
     }
     if (!result) {
-      reportOverflow(bin, type, wideText(a, b, bin->op), 0, wraps);
+      llvm::APInt x(128, ua), y(128, ub);
+      llvm::APInt wide = bin->op == BinaryOp::Add   ? x + y
+                         : bin->op == BinaryOp::Sub ? x - y
+                                                    : x * y;
+      llvm::SmallString<48> digits;
+      wide.toString(digits, 10, true);
+      reportOverflow(bin, type, std::string(digits), 0, wraps);
     } else if (*result <= uint64_t(std::numeric_limits<int64_t>::max())) {
       constants_[bin] = static_cast<int64_t>(*result);
+    } else {
+      bigUnsigned_[bin] = *result;
     }
     return;
   }
+  std::optional<int64_t> l = intConstant(bin->lhs), r = intConstant(bin->rhs);
+  if (!l || !r) {
+    return;
+  }
+  int64_t a = *l, b = *r;
+  auto ua = static_cast<uint64_t>(a), ub = static_cast<uint64_t>(b);
   std::optional<int64_t> exact;
   int64_t wrapped = 0;
   double value = 0;
@@ -413,11 +463,28 @@ void ConstantFolder::foldBinary(BinaryExpr *bin, bool wraps) {
   case BinaryOp::UShr: {
     const Type *shifted = bitType(bin->lhs->type);
     unsigned width = shifted->bitWidth();
-    unsigned count = static_cast<unsigned>(b) & (width - 1);
+    if (b < 0 || b >= int64_t(width)) {
+      if (!shifted->isWrapping()) {
+        checker_.diags_.error(bin->rhs->loc(), "the shift count " + std::to_string(b) +
+                                                   " is outside 0 to " + std::to_string(width - 1) +
+                                                   ", the bits of '" + shifted->name().str() + "'");
+      }
+      return;
+    }
+    unsigned count = static_cast<unsigned>(b);
     int64_t x = wrapTo(shifted, a);
     uint64_t pattern = width == 64 ? static_cast<uint64_t>(x)
                                    : static_cast<uint64_t>(x) & ((uint64_t(1) << width) - 1);
     if (bin->op == BinaryOp::Shl) {
+      llvm::APInt wide = llvm::APInt(128, uint64_t(a), !shifted->isUnsigned()).shl(count);
+      bool fits = shifted->isUnsigned() ? wide.getActiveBits() <= width
+                                        : wide.getSignificantBits() <= width;
+      if (!fits && !shifted->isWrapping()) {
+        llvm::SmallString<48> digits;
+        wide.toString(digits, 10, true);
+        reportOverflow(bin, bin->type, std::string(digits), 0, false);
+        return;
+      }
       exact = wrapTo(shifted, static_cast<int64_t>(pattern << count));
     } else if (bin->op == BinaryOp::Shr && !shifted->isUnsigned()) {
       exact = x >> count;
@@ -441,8 +508,7 @@ void ConstantFolder::foldBinary(BinaryExpr *bin, bool wraps) {
 
 void ConstantFolder::checkDivisor(BinaryOp op, const Expr *divisor) {
   if ((op == BinaryOp::Div || op == BinaryOp::Rem) && intConstant(divisor) == 0) {
-    checker_.diags_.error(divisor->loc(), "integer division by zero; to get Infinity or NaN as in "
-                                          "JavaScript, divide doubles, e.g. '1.0 / 0'");
+    checker_.diags_.error(divisor->loc(), "division by zero");
   }
 }
 
@@ -465,14 +531,11 @@ void ConstantFolder::reportOverflow(const Expr *expr, const Type *type, const st
 
 Expr *ConstantFolder::globalConstant(llvm::StringRef object, llvm::StringRef name,
                                      llvm::SMLoc loc) {
-  constexpr double kInfinity = std::numeric_limits<double>::infinity();
   struct Entry {
     llvm::StringLiteral object, name;
     double value;
   };
   static const Entry constants[] = {
-      {"", "NaN", std::numeric_limits<double>::quiet_NaN()},
-      {"", "Infinity", kInfinity},
       {"Math", "E", 2.718281828459045},
       {"Math", "LN10", 2.302585092994046},
       {"Math", "LN2", 0.6931471805599453},
@@ -486,9 +549,6 @@ Expr *ConstantFolder::globalConstant(llvm::StringRef object, llvm::StringRef nam
       {"Number", "EPSILON", 2.220446049250313e-16},
       {"Number", "MAX_VALUE", std::numeric_limits<double>::max()},
       {"Number", "MIN_VALUE", std::numeric_limits<double>::denorm_min()},
-      {"Number", "POSITIVE_INFINITY", kInfinity},
-      {"Number", "NEGATIVE_INFINITY", -kInfinity},
-      {"Number", "NaN", std::numeric_limits<double>::quiet_NaN()},
   };
   for (const Entry &entry : constants) {
     if (entry.object == object && entry.name == name) {

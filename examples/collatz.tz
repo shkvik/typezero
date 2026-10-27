@@ -5,8 +5,10 @@ function collatzLength(start: int): int {
   let steps = 1;
   while (n != 1) {
     if (n % 2 == 0) n = n / 2;
-    // expect-warning: '3 * n' may overflow int
-    else n = 3 * n + 1;
+    // Компилятор не знает, как далеко уходит последовательность, и требует
+    // проверки перед умножением: без неё это ошибка.
+    else if (n < 1000000000000000000) n = 3 * n + 1;
+    else return -1;
     steps++;
   }
   return steps;

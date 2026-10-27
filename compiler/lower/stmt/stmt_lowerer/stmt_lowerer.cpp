@@ -11,9 +11,9 @@
 #include "compiler/lower/memory/ref_counts/ref_counts.h"
 #include "compiler/lower/memory/store_lowerer/store_lowerer.h"
 #include "compiler/lower/module_builder/module_builder.h"
+#include "compiler/lower/stmt/exit_lowerer/exit_lowerer.h"
 #include "compiler/lower/stmt/loop_lowerer/loop_lowerer.h"
 #include "compiler/lower/stmt/switch_lowerer/switch_lowerer.h"
-#include "compiler/lower/stmt/try_lowerer/try_lowerer.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/IR/Intrinsics.h"
 #include "llvm/IR/MDBuilder.h"
@@ -82,7 +82,6 @@ void StmtLowerer::emitStmt(Stmt *stmt) {
   case Stmt::Kind::Empty:
   case Stmt::Kind::TypeAlias:
   case Stmt::Kind::Enum:
-  case Stmt::Kind::Throw:
     break;
   case Stmt::Kind::Class:
     if (!cast<ClassDecl>(stmt)->expression) {
@@ -91,9 +90,6 @@ void StmtLowerer::emitStmt(Stmt *stmt) {
     break;
   case Stmt::Kind::Debugger:
     lowering_.builder_.CreateCall(lowering_.rt_.debugger);
-    break;
-  case Stmt::Kind::Try:
-    lowering_.tryLowerer().emitTry(cast<TryStmt>(stmt));
     break;
   }
 }
@@ -180,16 +176,15 @@ void StmtLowerer::emitReturn(ReturnStmt *stmt) {
     return;
   }
   if (lowering_.coro_ && lowering_.currentFn_ && lowering_.currentFn_->isGenerator) {
-    lowering_.tryLowerer().emitReturnOf(stmt->value ? lowering_.exprLowerer().emitExpr(stmt->value)
-                                                    : nullptr);
+    lowering_.exitLowerer().emitReturnOf(stmt->value ? lowering_.exprLowerer().emitExpr(stmt->value)
+                                                     : nullptr);
     return;
   }
   if (lowering_.async_) {
     lowering_.asyncLowerer().emitAsyncReturnStmt(stmt);
     return;
   }
-  if (stmt->value && lowering_.tailGroup_ && lowering_.tailCallLowerer().hasTailCall(stmt->value) &&
-      !lowering_.tryLowerer().finallyBetween(~size_t(0))) {
+  if (stmt->value && lowering_.tailGroup_ && lowering_.tailCallLowerer().hasTailCall(stmt->value)) {
     lowering_.tailCallLowerer().emitTailReturn(stmt->value);
     return;
   }
@@ -202,7 +197,7 @@ void StmtLowerer::emitReturnValue(Expr *expr) {
     lowering_.refCounts().releaseValue(value, expr->type);
     value = nullptr;
   }
-  lowering_.tryLowerer().emitReturnOf(value && !expr->type->isVoid() ? value : nullptr);
+  lowering_.exitLowerer().emitReturnOf(value && !expr->type->isVoid() ? value : nullptr);
 }
 
 void StmtLowerer::emitDiscarded(Expr *expr) {

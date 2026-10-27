@@ -15,6 +15,7 @@
 #include "compiler/lower/values/string_lowerer/string_lowerer.h"
 #include "runtime/library/date/date/date.h"
 #include "llvm/ADT/STLExtras.h"
+#include "llvm/IR/Intrinsics.h"
 #include "llvm/Support/ErrorHandling.h"
 #include <cmath>
 #include <numeric>
@@ -157,8 +158,8 @@ llvm::Value *DateLowerer::parseResult(llvm::Value *time, llvm::Value *text, Call
   llvm::BasicBlock *badEnd = lowering_.builder_.GetInsertBlock();
   lowering_.builder_.CreateBr(endBlock);
   lowering_.functionFrame().switchTo(goodBlock);
-  llvm::Value *good =
-      lowering_.resultLowerer().makeResult(type, lowering_.builder_.getTrue(), time, nullptr);
+  llvm::Value *good = lowering_.resultLowerer().makeResult(type, lowering_.builder_.getTrue(),
+                                                           wholeTime(time), nullptr);
   lowering_.builder_.CreateBr(endBlock);
   lowering_.functionFrame().switchTo(endBlock);
   llvm::PHINode *phi = lowering_.builder_.CreatePHI(good->getType(), 2, "date.result");
@@ -166,6 +167,13 @@ llvm::Value *DateLowerer::parseResult(llvm::Value *time, llvm::Value *text, Call
   phi->addIncoming(good, goodBlock);
 
   return phi;
+}
+
+llvm::Value *DateLowerer::wholeTime(llvm::Value *time) {
+  llvm::Type *i64 = lowering_.builder_.getInt64Ty();
+
+  return lowering_.builder_.CreateIntrinsic(llvm::Intrinsic::fptosi_sat, {i64, time->getType()},
+                                            {time});
 }
 
 llvm::Value *DateLowerer::emitDateCall(CallExpr *call) {
@@ -193,6 +201,11 @@ llvm::Value *DateLowerer::emitDateCall(CallExpr *call) {
     return lowering_.stringLowerer().callReturningString(
         lowering_.processLowerer().processFunction(name, voidTy, params), args);
   };
+  auto number = [&](Expr *arg) {
+    llvm::Value *value = lowering_.exprLowerer().emitExpr(arg);
+
+    return arg->type->isFloat() ? value : lowering_.builder_.CreateSIToFP(value, f64);
+  };
 
   switch (call->builtin) {
   case Builtin::DateNew: {
@@ -202,7 +215,7 @@ llvm::Value *DateLowerer::emitDateCall(CallExpr *call) {
                   lowering_.processLowerer().processFunction("tz_date_now", f64, {}))
             : lowering_.builder_.CreateCall(
                   lowering_.processLowerer().processFunction("tz_date_clip", f64, {f64}),
-                  {lowering_.exprLowerer().emitExpr(call->args[0])});
+                  {number(call->args[0])});
     return newDate(time);
   }
   case Builtin::DateCopy: {
@@ -230,7 +243,7 @@ llvm::Value *DateLowerer::emitDateCall(CallExpr *call) {
   case Builtin::DateUTC: {
     std::vector<llvm::Value *> values;
     for (Expr *arg : call->args) {
-      values.push_back(lowering_.exprLowerer().emitExpr(arg));
+      values.push_back(number(arg));
     }
     for (size_t i = values.size(); i < 7; ++i) {
       values.push_back(llvm::ConstantFP::get(f64, i == 2 ? 1.0 : 0.0));
@@ -240,7 +253,7 @@ llvm::Value *DateLowerer::emitDateCall(CallExpr *call) {
         lowering_.processLowerer().processFunction("tz_date_from_fields", f64,
                                                    {f64, f64, f64, f64, f64, f64, f64, i32}),
         values);
-    return call->builtin == Builtin::DateUTC ? time : newDate(time);
+    return call->builtin == Builtin::DateUTC ? wholeTime(time) : newDate(time);
   }
   case Builtin::DateText: {
     llvm::Value *now = lowering_.builder_.CreateCall(
@@ -255,13 +268,13 @@ llvm::Value *DateLowerer::emitDateCall(CallExpr *call) {
     llvm::Value *time = timeOf(date.value);
     lowering_.refCounts().dropOperand(date);
     if (call->builtin == Builtin::DateGetTime) {
-      return time;
+      return wholeTime(time);
     }
     bool utc = call->builtin == Builtin::DateGetUTC;
-    return lowering_.builder_.CreateCall(
+    return wholeTime(lowering_.builder_.CreateCall(
         lowering_.processLowerer().processFunction(
             utc ? "tz_date_utc_field" : "tz_date_local_field", f64, {f64, i32}),
-        {time, constant(0)});
+        {time, constant(0)}));
   }
   case Builtin::DateSetTime:
   case Builtin::DateSetUTC:
@@ -270,7 +283,7 @@ llvm::Value *DateLowerer::emitDateCall(CallExpr *call) {
     bool setTime = call->builtin == Builtin::DateSetTime;
     std::vector<llvm::Value *> values;
     for (size_t i = setTime ? 0 : 1; i < call->args.size(); ++i) {
-      values.push_back(lowering_.exprLowerer().emitExpr(call->args[i]));
+      values.push_back(number(call->args[i]));
     }
     llvm::Value *address = dateTimeAddress(date.value);
     llvm::Value *time;
@@ -291,7 +304,7 @@ llvm::Value *DateLowerer::emitDateCall(CallExpr *call) {
     }
     lowering_.builder_.CreateStore(time, address);
     lowering_.refCounts().dropOperand(date);
-    return time;
+    return wholeTime(time);
   }
   case Builtin::DateToISOString:
   case Builtin::DateToUTCString:

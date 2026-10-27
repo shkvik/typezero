@@ -121,13 +121,6 @@ bool containsLoop(const Stmt *stmt) {
       }
     }
     break;
-  case Stmt::Kind::Try: {
-    auto *s = cast<TryStmt>(stmt);
-    if (containsLoop(s->block) || containsLoop(s->handler) || containsLoop(s->finalizer)) {
-      return true;
-    }
-    break;
-  }
   default:
     break;
   }

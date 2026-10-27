@@ -72,10 +72,10 @@
 #include "compiler/lower/objects/object_maker/object_maker.h"
 #include "compiler/lower/places/place_lowerer/place_lowerer.h"
 #include "compiler/lower/runtime_functions/runtime_functions.h"
+#include "compiler/lower/stmt/exit_lowerer/exit_lowerer.h"
 #include "compiler/lower/stmt/loop_lowerer/loop_lowerer.h"
 #include "compiler/lower/stmt/stmt_lowerer/stmt_lowerer.h"
 #include "compiler/lower/stmt/switch_lowerer/switch_lowerer.h"
-#include "compiler/lower/stmt/try_lowerer/try_lowerer.h"
 #include "compiler/lower/types/optional_lowerer/optional_lowerer.h"
 #include "compiler/lower/types/union_layout/union_layout.h"
 #include "compiler/lower/types/union_lowerer/union_lowerer.h"
@@ -161,7 +161,7 @@ Lowering::Lowering(llvm::LLVMContext &ctx, llvm::StringRef moduleName,
   objectLowererPart_ = std::make_unique<ObjectLowerer>(*this);
   tailCallLowererPart_ = std::make_unique<TailCallLowerer>(*this);
   placeLowererPart_ = std::make_unique<PlaceLowerer>(*this);
-  tryLowererPart_ = std::make_unique<TryLowerer>(*this);
+  exitLowererPart_ = std::make_unique<ExitLowerer>(*this);
   unionLayoutPart_ = std::make_unique<UnionLayout>(*this);
   unionLowererPart_ = std::make_unique<UnionLowerer>(*this);
   unionMemberLowererPart_ = std::make_unique<UnionMemberLowerer>(*this);

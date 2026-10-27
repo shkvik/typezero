@@ -8,7 +8,9 @@
 // - no 'as': the regex literal types its groups, and toLowerCase() is a
 //   string;
 // - no 'satisfies never': a string can be any unit;
-// - `!match?.groups` is `!match`: a match of the literal always has its groups.
+// - `!match?.groups` is `!match`: a match of the literal always has its groups;
+// - NaN is undefined: tz has no NaN (docs/numbers.md, section 10), and
+//   format() has no Infinity to print.
 // Files end in .tz, and imports name them so.
 
 const s = 1000;
@@ -59,7 +61,7 @@ interface Options {
 export function ms(
   value: StringValue | number,
   options?: Options,
-): number | string {
+): number | string | undefined {
   if (typeof value == 'string') {
     return parse(value);
   }
@@ -70,12 +72,12 @@ export function ms(
  * Parse the given string and return milliseconds.
  *
  * @param str - A string to parse to milliseconds
- * @returns The parsed value in milliseconds, or `NaN` if the string can't be
+ * @returns The parsed value in milliseconds, or `undefined` if the string can't be
  * parsed, is empty or is longer than 100
  */
-export function parse(str: string): number {
+export function parse(str: string): number | undefined {
   if (str.length == 0 || str.length > 100) {
-    return NaN;
+    return undefined;
   }
   const match =
     /^(?<value>-?\d*\.?\d+) *(?<unit>milliseconds?|msecs?|ms|seconds?|secs?|s|minutes?|mins?|m|hours?|hrs?|h|days?|d|weeks?|w|months?|mo|years?|yrs?|y)?$/i.exec(
@@ -83,13 +85,23 @@ export function parse(str: string): number {
     );
 
   if (!match) {
-    return NaN;
+    return undefined;
   }
 
   // The named groups have the types the regex gives them.
   const { value, unit = 'ms' } = match.groups;
 
-  const n = parseFloat(value);
+  // tz: parseFloat gives a Result: an Err where JavaScript gives NaN.
+  const parsed = parseFloat(value);
+  if (parsed.isErr()) {
+    return undefined;
+  }
+  const n = parsed.value;
+  // tz: 100 characters hold a number up to 1e100, and the compiler wants to
+  // know that a year of it is not beyond a double.
+  if (Math.abs(n) > 1e100) {
+    return undefined;
+  }
 
   const matchUnit = unit.toLowerCase();
 
@@ -138,7 +150,7 @@ export function parse(str: string): number {
     case 'ms':
       return n;
     default:
-      return NaN;
+      return undefined;
   }
 }
 
@@ -146,10 +158,10 @@ export function parse(str: string): number {
  * Parse the given StringValue and return milliseconds.
  *
  * @param value - A typesafe StringValue to parse to milliseconds
- * @returns The parsed value in milliseconds, or `NaN` if the string can't be
+ * @returns The parsed value in milliseconds, or `undefined` if the string can't be
  * parsed
  */
-export function parseStrict(value: StringValue): number {
+export function parseStrict(value: StringValue): number | undefined {
   return parse(value);
 }
 
@@ -219,10 +231,6 @@ function fmtLong(ms: number): StringValue {
  * @returns The formatted string
  */
 export function format(ms: number, options?: Options): string {
-  if (!Number.isFinite(ms)) {
-    return String(ms);
-  }
-
   return options?.long ? fmtLong(ms) : fmtShort(ms);
 }
 

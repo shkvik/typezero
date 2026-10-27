@@ -35,6 +35,10 @@ constexpr double kIntMax = 9223372036854775808.0;
 
 constexpr double kLengthMax = double(kMaxLength);
 
+constexpr double kDoubleMax = std::numeric_limits<double>::max();
+
+constexpr double kFloatMax = double(std::numeric_limits<float>::max());
+
 enum class Origin : uint8_t {
   Proven,
   Trusted,
@@ -67,6 +71,7 @@ struct Num {
   const Reason *loWhy = nullptr, *hiWhy = nullptr;
   uint64_t base = 0;
   double offLo = 0, offHi = 0;
+  double away = 0;
 
   bool empty() const { return !(lo <= hi); }
   Bound low() const { return {lo, loOrigin, loWhy}; }
@@ -124,9 +129,17 @@ Num mixed(double lo, double hi, const Num &a, const Num &b);
 
 Num divide(const Num &a, const Num &b, bool integer);
 
-Num remainder(const Num &a, const Num &b);
+Num remainder(const Num &a, const Num &b, bool integer = true);
 
 Num power(const Num &a, const Num &b);
+
+Num powerFloat(const Num &a, const Num &b);
+
+Num squared(const Num &a);
+
+double awayOf(const Num &n);
+
+bool provenFinite(const Num &n);
 
 double ones(double x);
 
@@ -136,9 +149,17 @@ struct Limits {
 
 Limits limitsOf(const Type *type);
 
+bool fits(const Num &n, const Type *type);
+
+bool fitsLow(double lo, const Type *type);
+
+bool fitsHigh(double hi, const Type *type);
+
 bool isNumberType(const Type *type);
 
 bool isIntegerType(const Type *type);
+
+bool isFloatType(const Type *type);
 
 bool hasLength(const Type *type);
 

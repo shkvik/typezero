@@ -1,7 +1,0 @@
-// expect-exit: 2
-// expect-stderr: panic: Invalid time value
-// toISOString() of an invalid date (one made from NaN) is fatal for now:
-// JavaScript throws a RangeError, and tz has no exceptions. Once numbers are
-// proven (docs/numbers.md), a date from numbers is proven valid instead.
-const texts = ["2026-10-23T10:00Z", "not a date"]
-for (const text of texts) console.log(new Date(Date.parse(text).unwrapOr(NaN)).toISOString())

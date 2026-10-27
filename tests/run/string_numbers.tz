@@ -13,7 +13,7 @@ let s = ""
 for (let i = 0; i < 20; i++) s += String(i)
 console.log(s, s.length)
 let t = "values:"
-for (let i = -3; i <= 3; i++) t = `${t} ${i * 1.5}`
+for (let i = -3; i <= 3; i++) t = `${t} ${i.toDouble() * 1.5}`
 console.log(t)
 const parts = [1, 2, 3]
 let u = ""

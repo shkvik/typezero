@@ -140,7 +140,7 @@ decimal("0.30") == decimal("0.3")                   // true
    `toExponential`, `toPrecision`, `sqrt`, `abs`, `isInteger`, `decimalPlaces()`, `shiftedBy`,
    `toFraction`, `decimal.max` / `min` / `sum`; `JSON.stringify` строкой.
 3. **Поправки 26 октября** (с [numbers.md](numbers.md), шаг 2, и [errors.md](errors.md),
-   шаг 2): целое в `decimal` только явно (`toDecimal()`), `decimal(text)` — `Result`, деление
+   шаг 2): целое в `decimal` только явно (`toDecimal()`, сделано 27 октября), `decimal(text)` — `Result`, деление
    и `sqrt` — с доказательством вместо `RangeError`. `decimal(text)` сделан 27 октября: строка, известная при
    сборке (литерал, константа, выбор из литералов), проверяется сразу и даёт `decimal`; иначе —
    `Result<decimal, DecimalError>` (`code: "bad_decimal"`, `message`, `text`).

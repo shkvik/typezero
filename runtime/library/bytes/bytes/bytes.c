@@ -88,7 +88,7 @@ TZ_HOT uint32_t tz_f16_from_f64(double d) {
   }
   double a = fabs(d);
   if (a >= 65520.0) {
-    return sign | 0x7c00u;
+    return sign | 0x7bffu;
   }
   int exponent;
   frexp(a, &exponent);
@@ -157,7 +157,7 @@ static void put(uint8_t *data, int32_t kind, int64_t i, double v) {
     ((uint16_t *)data)[i] = (uint16_t)tz_f16_from_f64(v);
     break;
   case TZ_BYTES_F32:
-    ((float *)data)[i] = (float)v;
+    ((float *)data)[i] = (float)fmin(fmax(v, -3.4028234663852886e38), 3.4028234663852886e38);
     break;
   case TZ_BYTES_F64:
     ((double *)data)[i] = v;

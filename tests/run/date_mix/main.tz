@@ -72,21 +72,19 @@ const weekdays = days(new Date(base), 7)
   .toArray()
 console.log(weekdays.join(), log.join(", "))
 
-// 6. JSON: a date is its ISO text, an invalid one null; in an object, an
-// array, a class and a subclass.
+// 6. JSON: a date is its ISO text; in an object, an array, a class and a
+// subclass.
 console.log(JSON.stringify(events[0]), JSON.stringify(events[1]))
-console.log(JSON.stringify({ when: new Date(base), never: new Date(NaN), list: moments.slice(0, 1) }))
+console.log(JSON.stringify({ when: new Date(base), list: moments.slice(0, 1) }))
 const saved = JSON.stringify({ title: "x", at: new Date(base) })
 const back = must(JSON.parse<{ title: string; at: string }>(saved))
 console.log(back.title, Date.parse(back.at).unwrapOr(0) == base)
 
-// 7. What JavaScript throws for: an invalid date prints as one, lateness is
-// an Err with the dates, a zone nobody knows is left out.
-const bad = parseWhenLoosely("nope")
-function parseWhenLoosely(text: string): Date {
-  return new Date(Date.parse(text).unwrapOr(NaN))
-}
-console.log(bad.toJSON() ?? "null", `${bad}`)
+// 7. What JavaScript throws for: a text that is not a date is an Err, lateness
+// is an Err with the dates, a zone nobody knows is left out.
+const words = ["nope"]
+const bad = Date.parse(words[0] ?? "")
+console.log(bad.isErr() ? bad.error.code : "a date")
 const late = checkDue(new Date(base), new Date(base + 5400000))
 if (late.isErr()) console.log(late.error.code, late.error.message, late.error.now.getTime() - late.error.due.getTime())
 const zones = ["Asia/Tokyo", "Nowhere/Land"]

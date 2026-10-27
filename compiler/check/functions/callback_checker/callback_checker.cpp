@@ -289,8 +289,9 @@ Expr *CallbackChecker::checkCallbackMethod(CallExpr *call, MemberExpr *member,
                      (unary && unary->op == UnaryOp::Neg && isa<IntLitExpr>(unary->operand));
       const Type *elementType = GenericChecker::apparentType(element);
       bool decimalStart = elementType->isDecimal() && DecimalChecker::isLiteralTree(init);
-      init = checker_.exprChecker().checkExpr(
-          init, decimalStart || (literal && elementType->isNumeric()) ? elementType : nullptr);
+      bool wide = elementType->isInt() || elementType->isFloat();
+      init = checker_.exprChecker().checkExpr(init, decimalStart || (literal && wide) ? elementType
+                                                                                      : nullptr);
       accumulator = init->type;
       if (accumulator->isUndefined() || accumulator->isVoid()) {
         checker_.diags_.error(

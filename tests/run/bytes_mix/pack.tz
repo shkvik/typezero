@@ -52,8 +52,11 @@ export function decode(bytes: Uint8Array): Result<Record[], string> {
       return err("the records are cut short")
     const length = view.getUint8(at + 14)
     const name = decoder.decode(bytes.subarray(at + 15, at + 15 + length))
-    records.push(new Record(view.getUint16(at, true), view.getUint32(at + 2, true),
-                            view.getFloat64(at + 6, true), name))
+    // tz: the bytes of a double may hold NaN, and getFloat64 gives a Result.
+    const price = view.getFloat64(at + 6, true)
+    if (price.isErr())
+      return err("a price is not a number")
+    records.push(new Record(view.getUint16(at, true), view.getUint32(at + 2, true), price.value, name))
     at += 15 + length
   }
   return ok(records)
@@ -82,8 +85,7 @@ export function describe(data: Uint8Array | string | ArrayBuffer | Float64Array)
 
 // A 32-bit FNV-1a hash, as unsigned.
 export function fnv1a(bytes: Uint8Array) {
-  let h = 0x811c9dc5 | 0
-  for (const b of bytes)
-    h = Math.imul(h ^ b, 0x01000193)
-  return h >>> 0
+  let h: Bit.Wrap32 = 0x811c9dc5
+  for (const b of bytes) h = (h ^ b) * 0x01000193
+  return h.value
 }

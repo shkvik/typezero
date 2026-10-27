@@ -16,9 +16,6 @@ public:
   void iterate(const Expr *iterable, const Node *site);
   void loop(llvm::StringRef label, llvm::function_ref<void()> head, llvm::function_ref<void()> body,
             llvm::function_ref<void()> step, bool headFirst);
-  void throwPoint();
-  void throughFinally();
-  bool caught() const;
   void joinPoint();
   void moveTo(unsigned seg);
   unsigned segment(const Node *at, SegKind kind, llvm::SMLoc loc);

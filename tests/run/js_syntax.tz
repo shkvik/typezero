@@ -45,6 +45,3 @@ for (let i = 0; i < 2; i++) debugger
 const five = 5.
 console.log(five, 5..toString(), 2..toFixed(1), 5.e1, 1.5.toFixed(2), 0x10.toString())
 
-// `-s` is -Number(s), as `+s` is Number(s).
-const text = "3"
-console.log(-"3", -text, -" 12 ", -"1e3", -"abc", -"", -true, -false, +text)

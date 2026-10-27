@@ -8,6 +8,7 @@
 #include "compiler/check/types/conditional_types/conditional_types.h"
 #include "compiler/check/types/literal_types/literal_types.h"
 #include "compiler/check/types/unknown_checker/unknown_checker.h"
+#include "compiler/declare/constant_folder/constant_folder.h"
 #include "compiler/library/bytes/byte_proofs/byte_proofs.h"
 #include "compiler/library/reflect/reflect_checker/reflect_checker.h"
 #include "compiler/library/result/result_types/result_types.h"
@@ -17,6 +18,7 @@
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/StringSet.h"
 #include "llvm/Support/ErrorHandling.h"
+#include <cctype>
 #include <cmath>
 #include <functional>
 
@@ -34,15 +36,6 @@ bool TypeRelations::isImplicitlyConvertible(const Type *from, const Type *to) {
     return true;
   }
   if (from->isNever()) {
-    return true;
-  }
-  if (from->isInteger() && to->isInteger() && to->holds(from)) {
-    return true;
-  }
-  if (from->isInteger() && to->isFloat()) {
-    return true;
-  }
-  if (from->isInteger() && to->isDecimal()) {
     return true;
   }
   if (to->isUnknown()) {
@@ -148,6 +141,143 @@ const Type *TypeRelations::commonNumericType(const Type *a, const Type *b) {
   return nullptr;
 }
 
+bool TypeRelations::isIntLiteralTree(const Expr *expr) {
+  if (isa<IntLitExpr>(expr)) {
+    return true;
+  }
+  if (auto *name = dyn_cast<NameExpr>(expr)) {
+    return name->var && name->var->literalConst;
+  }
+  if (auto *unary = dyn_cast<UnaryExpr>(expr)) {
+    return (unary->op == UnaryOp::Neg || unary->op == UnaryOp::Plus) &&
+           isIntLiteralTree(unary->operand);
+  }
+  if (auto *bin = dyn_cast<BinaryExpr>(expr)) {
+    return (bin->op == BinaryOp::Add || bin->op == BinaryOp::Sub || bin->op == BinaryOp::Mul ||
+            bin->op == BinaryOp::Rem || bin->op == BinaryOp::Pow) &&
+           isIntLiteralTree(bin->lhs) && isIntLiteralTree(bin->rhs);
+  }
+
+  return false;
+}
+
+const Type *TypeRelations::literalTarget(const Expr *expr, const Type *to) {
+  const Type *target = to->nonOptional();
+  if (target->isUnion()) {
+    target = LiteralTypes::numberMemberOf(target, false);
+  }
+  if (!target || !expr->type || !expr->type->isInteger() || expr->type == target ||
+      !isIntLiteralTree(expr)) {
+    return nullptr;
+  }
+  if (target->isFloat() || target->isDecimal()) {
+    return target;
+  }
+  if (!target->isInteger()) {
+    return nullptr;
+  }
+  std::optional<int64_t> value = checker_.constantFolder().intConstant(expr);
+  if (!value) {
+    return nullptr;
+  }
+  if (*value < 0 && !expr->type->isUnsigned()) {
+    return !target->isUnsigned() && *value >= target->intMin() ? target : nullptr;
+  }
+
+  return uint64_t(*value) <= target->intMax() ? target : nullptr;
+}
+
+bool TypeRelations::literalAdapts(const Expr *expr, const Type *to) {
+  return literalTarget(expr, to) != nullptr;
+}
+
+Expr *TypeRelations::adaptLiteral(Expr *expr, const Type *to) {
+  const Type *target = literalTarget(expr, to);
+  if (!target) {
+    return expr;
+  }
+  Expr *adapted = convert(expr, target);
+
+  return target == to ? adapted : convert(adapted, to);
+}
+
+std::string TypeRelations::operandText(llvm::StringRef text) {
+  int depth = 0;
+  bool plain = !text.empty() && text.front() != '-' && text.front() != '+';
+  for (char c : text) {
+    if (c == '(' || c == '[') {
+      ++depth;
+    } else if (c == ')' || c == ']') {
+      --depth;
+    } else if (depth == 0 && !std::isalnum(static_cast<unsigned char>(c)) && c != '_' && c != '.' &&
+               c != '#' && c != '$' && c != '"' && c != '\'') {
+      plain = false;
+    }
+  }
+  if (text.size() >= 2 && text.front() == '(' && text.back() == ')') {
+    int level = 0;
+    bool outer = true;
+    for (size_t i = 0; i < text.size(); ++i) {
+      level += text[i] == '(' ? 1 : text[i] == ')' ? -1 : 0;
+      if (level == 0 && i + 1 < text.size()) {
+        outer = false;
+      }
+    }
+    plain |= outer;
+  }
+  bool literal = !text.empty() && std::isdigit(static_cast<unsigned char>(text.front()));
+
+  return plain && !literal ? text.str() : "(" + text.str() + ")";
+}
+
+std::string TypeRelations::conversionHint(const Expr *expr, const Type *to) {
+  const Type *from = expr->type ? expr->type->nonOptional() : nullptr;
+  const Type *target = to->nonOptional();
+  if (!from || !(from->isNumeric() || from->isDecimal()) ||
+      !(target->isNumeric() || target->isDecimal())) {
+    return "";
+  }
+  std::string text = "x";
+  if (auto *name = dyn_cast<NameExpr>(expr); name && !name->name.starts_with("%")) {
+    text = name->name.str();
+  } else if (auto *member = dyn_cast<MemberExpr>(expr);
+             member && isa<NameExpr>(member->object) &&
+             !cast<NameExpr>(member->object)->name.starts_with("%")) {
+    text = cast<NameExpr>(member->object)->name.str() + "." + member->name.str();
+  }
+  if (from->isInteger() && target->isInteger()) {
+    return "; convert it explicitly: '" + text + "." + conversionMethod(target) + "()'";
+  }
+  if (from->isInteger() && target->isFloat()) {
+    return "; convert it explicitly: '" + text + ".toDouble()'";
+  }
+  if (from->isInteger() && target->isDecimal()) {
+    return "; convert it explicitly: '" + text + ".toDecimal()'";
+  }
+  if (from->isFloat() && target->isInteger()) {
+    return "; round it first, then convert: 'Math.trunc(" + text + ")." + conversionMethod(target) +
+           "()' (or Math.round, Math.floor, Math.ceil)";
+  }
+
+  return "";
+}
+
+std::string TypeRelations::conversionMethod(const Type *to) {
+  if (to->isFloat()) {
+    return "toDouble";
+  }
+  if (to->isDecimal()) {
+    return "toDecimal";
+  }
+  if (to->isInt()) {
+    return "toInt";
+  }
+  std::string name = to->name().str();
+  name[0] = char(std::toupper(name[0]));
+
+  return "to" + name;
+}
+
 const Type *TypeRelations::unify(const Type *a, const Type *b) {
   if (a == b) {
     return a;
@@ -237,8 +367,7 @@ Expr *TypeRelations::convert(Expr *expr, const Type *to) {
   if (expr->type->isParam() && !mentionsParam(to)) {
     checker_.genericChecker().noteForced(expr, to);
   }
-  if ((to->isNumeric() || to->isDecimal()) && expr->type->isInteger() &&
-      isImplicitlyConvertible(expr->type, to)) {
+  if ((to->isNumeric() || to->isDecimal()) && expr->type->isInteger()) {
     auto *unary = dyn_cast<UnaryExpr>(expr);
     auto *lit = dyn_cast<IntLitExpr>(unary && unary->op == UnaryOp::Neg ? unary->operand : expr);
     if (lit) {
@@ -281,6 +410,9 @@ Expr *TypeRelations::coerce(Expr *expr, const Type *to, llvm::StringRef what) {
   }
   if (isImplicitlyConvertible(from, to)) {
     return convert(expr, to);
+  }
+  if (literalAdapts(expr, to)) {
+    return adaptLiteral(expr, to);
   }
   if (checker_.conditionalTypes().fitsConditional(from, to)) {
     return convert(expr, to);
@@ -432,13 +564,8 @@ Expr *TypeRelations::coerce(Expr *expr, const Type *to, llvm::StringRef what) {
                "'decimal(x)'";
   } else if (from->isDecimal() && (to->isNumeric() || to->nonOptional()->isNumeric())) {
     message += "; a decimal becomes a number only explicitly: 'Number(x)' gives the nearest double";
-  } else if (from->isFloat() && to->isInt()) {
-    message += "; drop the fraction with 'x | 0', or round with Math.round, Math.floor, "
-               "Math.ceil or Math.trunc";
-  } else if (from->isFloat() && to->isInteger()) {
-    message += "; round it with Math.round, Math.floor, Math.ceil or Math.trunc";
-  } else if (from->isInteger() && to->isInteger()) {
-    message += "; Math.trunc(x) converts it and checks that it fits";
+  } else {
+    message += conversionHint(expr, to);
   }
   checker_.diags_.error(expr->loc(), message);
   if (otherPlace) {

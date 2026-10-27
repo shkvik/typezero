@@ -9,6 +9,7 @@
 #include "runtime/core/tzrt/tzrt.h"
 #include "runtime/core/unicode/unicode.h"
 #include "runtime/library/decimal/decimal_text/decimal_text.h"
+#include <float.h>
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -2054,6 +2055,9 @@ double tz_dec_to_f64(int64_t a, uint64_t am) {
   double v = strtod(t.p, NULL);
   tz_free(t.p);
   dec_free(&x);
+  if (isinf(v)) {
+    v = v > 0 ? DBL_MAX : -DBL_MAX;
+  }
 
   return v;
 }

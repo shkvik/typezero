@@ -22,7 +22,7 @@ if (users != undefined && Array.isArray(users))
 
 // JSON.parse<T> and fromJson<T> into a declared type, as a Result.
 const settings = readSettings('{"name": "shop", "limit": 3, "price": 19.99, "tags": ["a", "b"]}')
-console.log(settings, settings.map(s => s.price * s.limit))
+console.log(settings, settings.map(s => s.price * s.limit.toDecimal()))
 console.log(readSettings("[1, 2]"), JSON.stringify(settings))
 
 // A Json as a generic value, in a Result and in an array.

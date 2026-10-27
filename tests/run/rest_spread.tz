@@ -17,7 +17,7 @@ console.log(label("none"), label("list", " | ", "a", "b"), label("words", undefi
 // empty they give undefined: tests/run/proofs_values.tz).
 const values = [3, -1, 7.5, 2]
 console.log(Math.max(...values), Math.min(...values), Math.max(0, ...nums), Math.min(...nums, 5))
-console.log(Math.max(...[0.5, NaN]))
+console.log(Math.max(...[0.5, 2]))
 
 // push appends the elements of arrays.
 const out = [1]

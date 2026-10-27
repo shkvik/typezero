@@ -8,7 +8,7 @@ function parseHex(text: string): Result<Buffer, string> {
   return /^([0-9a-f]{2})*$/.test(text) ? ok(Buffer.from(text, "hex")) : err(`not hex: ${text}`)
 }
 console.log(parseHex("cafe"), parseHex("xyz"))
-const sum = parseHex("010203").map(b => b.reduce((a, x) => a + x, 0))
+const sum = parseHex("010203").map(b => b.reduce((a, x) => a + x.toInt(), 0))
 console.log(sum)
 
 const dir = must(mkdtempSync(join(tmpdir(), "tz-bytes-result-")))

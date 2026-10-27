@@ -1,0 +1,38 @@
+// same-as-node
+// A number changes its type only explicitly (docs/numbers.md, section 3):
+// both operands of an operator have one type, and so does the result.
+const a: int32 = 7
+const b: int = 5
+console.log(a.toInt() * b, a + a, typeof (a + a))
+const small: uint8 = 200
+const wide = small.toInt() + 100
+console.log(wide, small.toUint16() * 2, small.toDouble() / 3)
+
+// Narrowing checks that the value fits; a double is rounded first.
+const big: int = 70000
+console.log(big.toInt32(), (big / 1000).toUint8(), Math.round(2.6).toInt(), Math.trunc(-2.5).toInt32())
+console.log(Math.floor(1e15 + 0.5).toInt(), Math.ceil(0.1).toUint8())
+
+// An integer becomes a double explicitly.
+console.log(b.toDouble() * 1.5, b.toDouble() / 2)
+
+// Literals take the type of the other operand and of the place they go to,
+// and so do constants written without a type, as in Go.
+const k = 1000
+const d = 0.5
+console.log(d * 2, d * k, [1, 2.5], k > 0.5 ? 1 : 0.5)
+function choose(flag: boolean) {
+  if (flag) return 1
+  return 0.5
+}
+console.log(choose(true), choose(false), Math.max(d, 1), Math.min(3, 4))
+
+// Integers of different types compare as numbers: -1 < 18000000000000000000.
+const huge: uint64 = 18000000000000000000
+const neg: int = -1
+console.log(neg < huge, huge > b, a == 7, a < b, small >= 200)
+
+// Dates count whole milliseconds as int.
+const t = new Date(Date.UTC(2026, 9, 27, 12))
+const ms: int = t.getTime() - Date.UTC(2026, 9, 27)
+console.log(ms, ms / 3600000, t.getUTCHours() + 1, Date.now() > 0)

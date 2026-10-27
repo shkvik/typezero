@@ -8,6 +8,7 @@
 #include "runtime/core/output/output.h"
 #include "runtime/core/parallel/parallel.h"
 #include "runtime/core/tzrt/tzrt.h"
+#include <math.h>
 #include "runtime/core/unicode/unicode.h"
 #include <stdlib.h>
 #include <string.h>
@@ -2587,6 +2588,71 @@ double tz_parse_int(void *obj, uint64_t meta, int64_t radix) {
   tz_free(owned);
 
   return value;
+}
+
+double tz_parse_float(void *obj, uint64_t meta);
+
+static void number_fail(TzMaker fail, const char *what, void *obj, uint64_t meta) {
+  TzStr given = make_str(obj, meta);
+  TzBuf text;
+  tz_buf_init(&text);
+  tz_buf_utf8(&text, what, strlen(what));
+  tz_buf_utf8(&text, ": '", 3);
+  tz_buf_str(&text, given);
+  tz_buf_utf8(&text, "'", 1);
+  tz_fail(fail, "bad_number", tz_buf_take(&text));
+}
+
+int64_t tz_parse_int_r(void *obj, uint64_t meta, int64_t radix, TzMaker fail) {
+  TzStr f = flat(make_str(obj, meta));
+  char local[64], *owned;
+  size_t n;
+  const char *text = leading_text(&f, local, sizeof local, &n, &owned);
+  int64_t value = 0;
+  int status = tz_parse_int64_ascii(text, n, (int32_t)radix, &value);
+  tz_free(owned);
+  if (status != 0) {
+    number_fail(fail,
+                status == 2 ? "the number does not fit in an int (64 bits); read it as a decimal"
+                            : "not a number",
+                obj, meta);
+  }
+
+  return value;
+}
+
+static double finite_or_fail(double value, TzMaker fail, void *obj, uint64_t meta) {
+  if (value != value) {
+    number_fail(fail, "not a number", obj, meta);
+    return 0;
+  }
+  if (value == INFINITY || value == -INFINITY) {
+    number_fail(fail, "the number is beyond 1.8e308, the range of a double", obj, meta);
+    return 0;
+  }
+
+  return value;
+}
+
+double tz_finite_r(double value, TzMaker fail) {
+  const char *what = value != value ? "the bytes hold NaN, which a tz double cannot be"
+                     : value == INFINITY || value == -INFINITY
+                         ? "the bytes hold an infinity, which a tz double cannot be"
+                         : NULL;
+  if (what) {
+    tz_fail(fail, "bad_number", tz_str_from_ascii(what, strlen(what)));
+    return 0;
+  }
+
+  return value;
+}
+
+double tz_parse_float_r(void *obj, uint64_t meta, TzMaker fail) {
+  return finite_or_fail(tz_parse_float(obj, meta), fail, obj, meta);
+}
+
+double tz_str_to_number_r(void *obj, uint64_t meta, TzMaker fail) {
+  return finite_or_fail(tz_str_to_number(obj, meta), fail, obj, meta);
 }
 
 double tz_parse_float(void *obj, uint64_t meta) {

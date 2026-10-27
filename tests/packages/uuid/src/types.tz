@@ -2,11 +2,11 @@ export type UUIDTypes<TBuf extends Uint8Array = Uint8Array> = string | TBuf;
 
 export type Version1Options = {
   node?: Uint8Array;
-  clockseq?: number;
+  clockseq?: int;
   random?: Uint8Array;
   rng?: () => Uint8Array;
-  msecs?: number;
-  nsecs?: number;
+  msecs?: int;
+  nsecs?: int;
   _v6?: boolean; // Internal use only!
 };
 
@@ -19,8 +19,8 @@ export type Version6Options = Version1Options;
 
 export type Version7Options = {
   random?: Uint8Array;
-  msecs?: number;
-  seq?: number;
+  msecs?: int;
+  seq?: int;
   rng?: () => Uint8Array;
 };
 

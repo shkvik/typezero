@@ -6,7 +6,7 @@ function fib(n: int): int {
 
 function factorial(n: int): double {
   let result: double = 1
-  for (let i: int = 2; i <= n; i++) result *= i
+  for (let i: int = 2; i <= n; i++) result *= i.toDouble()
   return result
 }
 

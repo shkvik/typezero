@@ -41,7 +41,7 @@ constexpr uint64_t kHeaderSize = 16;
 
 constexpr uint32_t kFrameAlign = 8;
 
-enum PromiseField : unsigned { kOut, kIn, kRet, kRunning, kClose };
+enum PromiseField : unsigned { kOut, kIn, kRet, kRunning };
 
 }
 
@@ -59,7 +59,6 @@ llvm::Constant *GeneratorLowerer::iteratorLayout(unsigned flags) {
                                          "tz.iter.destroy", lowering_.module_.get());
     iterDropFn_->addFnAttr(llvm::Attribute::NoUnwind);
     llvm::IRBuilder<> b(llvm::BasicBlock::Create(lowering_.ctx_, "entry", iterDropFn_));
-    b.CreateCall(iterCloseFunction(), {iterDropFn_->getArg(0)});
     llvm::Value *frame =
         b.CreateConstInBoundsGEP1_64(b.getInt8Ty(), iterDropFn_->getArg(0), kHeaderSize, "frame");
     b.CreateCall(lowering_.coroutineLowerer().coroIntrinsic(llvm::Intrinsic::coro_destroy),
@@ -81,51 +80,6 @@ llvm::Constant *GeneratorLowerer::iteratorLayout(unsigned flags) {
   return layout;
 }
 
-llvm::Function *GeneratorLowerer::iterCloseFunction() {
-  if (iterCloseFn_) {
-    return iterCloseFn_;
-  }
-  auto *type = llvm::FunctionType::get(lowering_.builder_.getVoidTy(),
-                                       {lowering_.builder_.getPtrTy()}, false);
-  iterCloseFn_ = llvm::Function::Create(type, llvm::GlobalValue::InternalLinkage, "tz.iter.close",
-                                        lowering_.module_.get());
-  iterCloseFn_->addFnAttr(llvm::Attribute::NoUnwind);
-  llvm::BasicBlock *entry = llvm::BasicBlock::Create(lowering_.ctx_, "entry", iterCloseFn_);
-  llvm::BasicBlock *checkBlock = llvm::BasicBlock::Create(lowering_.ctx_, "waits", iterCloseFn_);
-  llvm::BasicBlock *closeBlock = llvm::BasicBlock::Create(lowering_.ctx_, "close", iterCloseFn_);
-  llvm::BasicBlock *endBlock = llvm::BasicBlock::Create(lowering_.ctx_, "end", iterCloseFn_);
-  llvm::IRBuilder<> b(entry);
-  llvm::Type *i32 = b.getInt32Ty();
-  llvm::Value *frame =
-      b.CreateConstInBoundsGEP1_64(b.getInt8Ty(), iterCloseFn_->getArg(0), kHeaderSize, "frame");
-  b.CreateCondBr(
-      b.CreateCall(lowering_.coroutineLowerer().coroIntrinsic(llvm::Intrinsic::coro_done), {frame},
-                   "done"),
-      endBlock, checkBlock);
-  b.SetInsertPoint(checkBlock);
-  llvm::Value *promise =
-      b.CreateCall(lowering_.coroutineLowerer().coroIntrinsic(llvm::Intrinsic::coro_promise),
-                   {frame, b.getInt32(kFrameAlign), b.getFalse()}, "promise");
-  llvm::Value *close = b.CreateStructGEP(lowering_.promiseTy_, promise, kClose);
-  b.CreateCondBr(b.CreateICmpEQ(b.CreateLoad(i32, close), b.getInt32(1)), closeBlock, endBlock);
-  b.SetInsertPoint(closeBlock);
-  llvm::Value *null = llvm::ConstantPointerNull::get(b.getPtrTy());
-  b.CreateStore(b.getInt32(2), close);
-  for (unsigned field : {kOut, kIn, kRet}) {
-    b.CreateStore(null, b.CreateStructGEP(lowering_.promiseTy_, promise, field));
-  }
-  llvm::Value *running = b.CreateStructGEP(lowering_.promiseTy_, promise, kRunning);
-  b.CreateStore(b.getInt32(1), running);
-  b.CreateCall(lowering_.coroutineLowerer().coroIntrinsic(llvm::Intrinsic::coro_resume), {frame});
-  b.CreateStore(b.getInt32(0), running);
-  b.CreateStore(b.getInt32(0), close);
-  b.CreateBr(endBlock);
-  b.SetInsertPoint(endBlock);
-  b.CreateRetVoid();
-
-  return iterCloseFn_;
-}
-
 void GeneratorLowerer::emitGenerator(FunctionDecl *fn, llvm::Function *function) {
   if (fn->isAsync) {
     lowering_.asyncGeneratorLowerer().emitAsyncGenerator(fn, function);
@@ -137,7 +91,6 @@ void GeneratorLowerer::emitGenerator(FunctionDecl *fn, llvm::Function *function)
   const Type *type = fn->sym->ret;
   lowering_.coroutineLowerer().beginCoroutine(
       kLayoutGenerator, type->isIterator() && !type->sent()->isVoid() ? type->sent() : nullptr);
-  coroutine.closes = hasTry(fn->body);
   coroutine.yielded = type->isIterator() ? type->yielded() : nullptr;
   lowering_.functionFrame().pushScope();
   std::vector<llvm::Value *> args;

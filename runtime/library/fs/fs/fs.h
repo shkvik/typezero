@@ -13,7 +13,7 @@
 #include <windows.h>
 
 typedef struct {
-  double dev, mode, nlink, uid, gid, rdev, blksize, ino, size, blocks;
+  int64_t dev, mode, nlink, uid, gid, rdev, blksize, ino, size, blocks;
   double atime_ms, mtime_ms, ctime_ms, birthtime_ms;
 } TzStatsParts;
 

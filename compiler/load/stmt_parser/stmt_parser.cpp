@@ -436,42 +436,40 @@ Stmt *StmtParser::parseReturn() {
 
 Stmt *StmtParser::parseThrow() {
   llvm::SMLoc loc = parser_.tok_.loc();
+  parser_.cursor().report(loc, "there is no 'throw' in tz: an error is a value; return it, "
+                               "'return err(...)', and give the function a 'Result'");
   parser_.cursor().advance();
-  if (parser_.tok_.newlineBefore || parser_.tok_.is(Tok::Semi) || parser_.tok_.is(Tok::RBrace) ||
-      parser_.tok_.is(Tok::Eof)) {
-    parser_.cursor().error(loc, "there is no 'throw' in tz: an error is a value; return it, "
-                                "'return err(...)', and give the function a 'Result'");
-    return parser_.ctx_.make<EmptyStmt>(loc);
+  if (!parser_.tok_.newlineBefore && !parser_.tok_.is(Tok::Semi) && !parser_.tok_.is(Tok::RBrace) &&
+      !parser_.tok_.is(Tok::Eof)) {
+    parser_.exprs().parseSequence();
+    parser_.cursor().expectSemicolon();
   }
-  Expr *value = parser_.exprs().parseSequence();
-  parser_.cursor().expectSemicolon();
 
-  return parser_.ctx_.make<ThrowStmt>(loc, value);
+  return parser_.ctx_.make<EmptyStmt>(loc);
 }
 
 Stmt *StmtParser::parseTry() {
-  auto *stmt = parser_.ctx_.make<TryStmt>(parser_.tok_.loc());
+  parser_.cursor().report(parser_.tok_.loc(),
+                          "there is no 'try' in tz: an error is a value; a function that can "
+                          "fail gives a 'Result', checked with 'if'");
   parser_.cursor().advance();
-  stmt->block = parseBlock();
+  BlockStmt *block = parseBlock();
   if (parser_.tok_.is(Tok::Identifier) && parser_.tok_.text == "catch") {
     parser_.cursor().advance();
     if (parser_.cursor().accept(Tok::LParen)) {
-      if (parser_.tok_.is(Tok::LBrace) || parser_.tok_.is(Tok::LBracket)) {
-        while (!parser_.tok_.is(Tok::RParen) && !parser_.tok_.is(Tok::Eof)) {
-          parser_.cursor().advance();
-        }
-      } else {
-        parser_.vars().parseBinding(stmt->param);
+      while (!parser_.tok_.is(Tok::RParen) && !parser_.tok_.is(Tok::Eof)) {
+        parser_.cursor().advance();
       }
       parser_.cursor().expect(Tok::RParen, "after the variable of 'catch'");
     }
-    stmt->handler = parseBlock();
+    parseBlock();
   }
   if (parser_.tok_.is(Tok::Identifier) && parser_.tok_.text == "finally") {
     parser_.cursor().advance();
-    stmt->finalizer = parseBlock();
+    parseBlock();
   }
-  return stmt;
+
+  return block;
 }
 
 }

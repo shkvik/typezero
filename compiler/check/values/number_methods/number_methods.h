@@ -8,8 +8,9 @@ class NumberMethods {
 public:
   explicit NumberMethods(Checker &checker);
 
-  Expr *checkStaticCall(CallExpr *call, MemberExpr *member, const Type *expected);
+  Expr *checkStaticCall(CallExpr *call, MemberExpr *member);
   Expr *checkNumberMethod(CallExpr *call, MemberExpr *member);
+  Expr *checkConversion(CallExpr *call, MemberExpr *member);
 
 private:
   Checker &checker_;

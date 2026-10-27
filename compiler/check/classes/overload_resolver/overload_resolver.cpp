@@ -6,6 +6,7 @@
 #include "compiler/check/generics/generic_instantiator/generic_instantiator.h"
 #include "compiler/check/generics/type_arg_inferrer/type_arg_inferrer.h"
 #include "compiler/check/generics/type_params/type_params.h"
+#include "compiler/check/types/type_relations/type_relations.h"
 #include "compiler/infer/return_inferrer/return_inferrer.h"
 #include "compiler/library/decimal/decimal_checker/decimal_checker.h"
 #include "compiler/whole_program/flows/flows.h"
@@ -47,12 +48,6 @@ int conversionRank(const Type *from, const Type *to) {
   }
   if (from->isNever()) {
     return 1;
-  }
-  if (from->isInteger() && to->isInteger() && to->holds(from)) {
-    return 1;
-  }
-  if (from->isInteger() && (to->isFloat() || to->isDecimal())) {
-    return 2;
   }
   if (to->isJson()) {
     return from->isString() || from->isNumeric() || from->isBool() ||
@@ -218,9 +213,10 @@ FuncSymbol *OverloadResolver::chooseVariant(llvm::ArrayRef<FunctionDecl *> varia
     std::vector<int> ranks;
     bool leavesOut;
     std::vector<const Type *> typeArgs;
+    bool adapted = false;
   };
   std::vector<Candidate> applicable;
-  std::string why;
+  std::string why, numberHint;
   for (FunctionDecl *v : fit) {
     Candidate c{v, {}, v->sym->hasRest || count < v->sym->params.size(), {}};
     if (v->sym->isGeneric() &&
@@ -235,9 +231,16 @@ FuncSymbol *OverloadResolver::chooseVariant(llvm::ArrayRef<FunctionDecl *> varia
         param = checker_.typeParams().substitute(param, v->sym->typeParams, c.typeArgs);
       }
       int rank = conversionRank(args[i]->type, param);
+      if (rank < 0 && checker_.typeRelations().literalAdapts(args[i], param)) {
+        rank = 1;
+        c.adapted = true;
+      }
       if (rank < 0) {
         mismatch = variantText(v) + " takes '" + param->name().str() + "' as argument " +
                    std::to_string(i + 1) + ", which is '" + args[i]->type->name().str() + "'";
+        if (numberHint.empty()) {
+          numberHint = TypeRelations::conversionHint(args[i], param);
+        }
       }
       c.ranks.push_back(rank);
     }
@@ -248,7 +251,8 @@ FuncSymbol *OverloadResolver::chooseVariant(llvm::ArrayRef<FunctionDecl *> varia
     }
   }
   if (applicable.empty()) {
-    checker_.diags_.error(loc, "no variant of " + what + " fits these arguments" + why);
+    checker_.diags_.error(loc,
+                          "no variant of " + what + " fits these arguments" + why + numberHint);
     return nullptr;
   }
   auto better = [&](const Candidate &a, const Candidate &b) {
@@ -281,8 +285,14 @@ FuncSymbol *OverloadResolver::chooseVariant(llvm::ArrayRef<FunctionDecl *> varia
   for (const Candidate &c : applicable) {
     tied.push_back(c.fn);
   }
-  checker_.diags_.error(loc, "the call fits several variants of " + what + " equally well: " +
-                                 variantList(tied) + "; convert an argument to choose one");
+  bool literals = llvm::all_of(applicable, [](const Candidate &c) { return c.adapted; });
+  checker_.diags_.error(loc, "the call fits several variants of " + what +
+                                 " equally well: " + variantList(tied) +
+                                 (literals ? "; a number literal fits each of them: write it so "
+                                             "that it has the type of one, e.g. '2.0' for a "
+                                             "double, or give it a type through a constant, "
+                                             "'const k: int32 = 2'"
+                                           : "; convert an argument to choose one"));
 
   return nullptr;
 }

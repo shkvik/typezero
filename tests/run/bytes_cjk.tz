@@ -64,7 +64,7 @@ const broken: { name: Label; bad: int }[] = [
 ]
 for (const { name, bad } of broken) {
   const decoder = new TextDecoder(name, { fatal: true })
-  const text = decoder.decode(new Uint8Array([0x41, bad & 0xff]))
+  const text = decoder.decode(new Uint8Array([0x41, (bad & 0xff).toUint8()]))
   console.log(decoder.fatal, text.isOk() ? text.value : `${text.error.code}: ${text.error.message}`)
   console.log(decoder.decode(new Uint8Array([0x42])).unwrapOr("?"))
 }
@@ -73,7 +73,7 @@ for (const { name, bad } of broken) {
 function chunks(name: Label, parts: int[][]) {
   const decoder = new TextDecoder(name)
   const out: string[] = []
-  for (const part of parts) out.push(decoder.decode(Uint8Array.from(part, x => x & 0xff), { stream: true }))
+  for (const part of parts) out.push(decoder.decode(Uint8Array.from(part, x => (x & 0xff).toUint8()), { stream: true }))
   out.push(decoder.decode())
   console.log(name, JSON.stringify(out))
 }

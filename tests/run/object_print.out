@@ -1,4 +1,4 @@
-{ a: 1, b: 'two', c: true, d: 4.5, e: -0, f: NaN, g: -Infinity }
+{ a: 1, b: 'two', c: true, d: 4.5, e: -0, f: 1e+21, g: -1e-7 }
 { big: 9007199254740991, small: -7 } [ { x: 1 } ] text { y: "it's" }
 {
   first: 'aaaaaaaaaaaaaaaa',

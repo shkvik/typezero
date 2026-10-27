@@ -24,9 +24,9 @@ function mapAll<T, U>(xs: T[], f: (x: T) => U): U[] {
 }
 console.log(mapAll([1, 2, 3], x => x * 2), mapAll(users, u => u.name), mapAll(["a", "bb"], s => s.length))
 function double(x: int) { return x * 2 }
-console.log(mapAll([1, 2], double), mapAll(["1.5"], parseFloat), mapAll([4, 9], Math.sqrt))
+console.log(mapAll([1, 2], double), mapAll(["1.5"], s => parseFloat(s).unwrapOr(0)), mapAll([4.0, 9], Math.sqrt))
 function apply<T, U>(x: T, f: (x: T) => U) { return f(x) }
-console.log(apply(3, n => n + 0.5), apply([1, 2], a => a.length > 1))
+console.log(apply(3.0, n => n + 0.5), apply([1, 2], a => a.length > 1))
 function compose<A, B, C>(f: (a: A) => B, g: (b: B) => C) { return (x: A) => g(f(x)) }
 const show = compose((x: int) => x + 1, y => `<${y}>`)
 console.log(show(41))
@@ -129,22 +129,22 @@ console.log(held.get(), holder(3).get())
 // Turning a value into a string is up to its type.
 function label<T>(name: string, x: T) { return name + ": " + x }
 console.log(label("n", 5), label("b", true), label("s", "text"), `${identity(2.5)}`)
-function tagged<T extends string | number | boolean>(name: string, x: T) { return `${name}=${x}` }
+function tagged<T extends string | int | double | boolean>(name: string, x: T) { return `${name}=${x}` }
 console.log(tagged("n", 5), tagged("d", 0.5), tagged("b", false), tagged("s", "t"))
 
-// `T extends number`: arithmetic gives a double, as in TypeScript; a value
-// of T itself keeps its type.
+// `T extends number` is a double (docs/numbers.md): a function for several
+// types of numbers is written as overloads or one per type.
 function average<T extends number>(xs: T[]) {
   let s = 0.0
   for (const x of xs) s += x
-  return s / xs.length
+  return s / xs.length.toDouble()
 }
 function maxOf<T extends number>(a: T, b: T): T { return a > b ? a : b }
 function half<T extends number>(x: T) { return x / 2 }
 function total<T extends number>(xs: T[]) { return xs.reduce((s, x) => s + x, 0) }
 const big: int = 3000000000
-console.log(average([1, 2, 4]), average([1.5, 2.5]), maxOf(3, 7), maxOf(2.5, 1.5), maxOf(big, 1))
-console.log(half(7), half(7.5), total([1, 2, 3]), total([0.5, 0.25]))
+console.log(average([1.0, 2, 4]), average([1.5, 2.5]), maxOf(3, 7), maxOf(2.5, 1.5), maxOf(big.toDouble(), 1))
+console.log(half(7), half(7.5), total([1.0, 2, 3]), total([0.5, 0.25]))
 
 // `typeof` narrows; each copy knows the answer when compiled.
 function describe<T>(x: T) {
@@ -190,4 +190,4 @@ function sumTo<T extends number>(xs: T[], i: int, acc: double): double {
   if (i < 0 || i >= xs.length) return acc
   return sumTo(xs, i + 1, acc + xs[i])
 }
-console.log(sumTo([1, 2, 3], 0, 0))
+console.log(sumTo([1.0, 2, 3], 0, 0))

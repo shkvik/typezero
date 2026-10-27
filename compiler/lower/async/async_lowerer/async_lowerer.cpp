@@ -14,8 +14,8 @@
 #include "compiler/lower/memory/store_lowerer/store_lowerer.h"
 #include "compiler/lower/module_builder/module_builder.h"
 #include "compiler/lower/places/place_lowerer/place_lowerer.h"
+#include "compiler/lower/stmt/exit_lowerer/exit_lowerer.h"
 #include "compiler/lower/stmt/stmt_lowerer/stmt_lowerer.h"
-#include "compiler/lower/stmt/try_lowerer/try_lowerer.h"
 #include "compiler/lower/types/optional_lowerer/optional_lowerer.h"
 #include "compiler/lower/types/union_layout/union_layout.h"
 #include "compiler/lower/types/union_lowerer/union_lowerer.h"
@@ -255,22 +255,15 @@ void AsyncLowerer::emitAsyncReturn(llvm::Value *value) {
 void AsyncLowerer::emitAsyncReturnStmt(ReturnStmt *stmt) {
   Expr *value = stmt->value;
   if (!value) {
-    lowering_.tryLowerer().emitReturnOf(nullptr);
+    lowering_.exitLowerer().emitReturnOf(nullptr);
     return;
   }
   if (value->type->isPromise()) {
-    if (!lowering_.tryLowerer().finallyBetween(~size_t(0))) {
-      llvm::Value *other = lowering_.exprLowerer().emitExpr(value);
-      lowering_.functionFrame().emitCleanups(0);
-      lowering_.promiseLowerer().followPromise(lowering_.async_->object, other);
-      lowering_.builder_.CreateBr(lowering_.coro_->finalBlock);
-      lowering_.functionFrame().startDeadBlock();
-      return;
-    }
-    llvm::Value *result =
-        awaitPromise(lowering_.exprLowerer().emitExpr(value), value->type, stmt->loc());
-    lowering_.tryLowerer().emitReturnOf(
-        lowering_.promiseLowerer().promiseValueSize(lowering_.async_->value) ? result : nullptr);
+    llvm::Value *other = lowering_.exprLowerer().emitExpr(value);
+    lowering_.functionFrame().emitCleanups(0);
+    lowering_.promiseLowerer().followPromise(lowering_.async_->object, other);
+    lowering_.builder_.CreateBr(lowering_.coro_->finalBlock);
+    lowering_.functionFrame().startDeadBlock();
     return;
   }
   llvm::Value *result = lowering_.exprLowerer().emitExpr(value);
@@ -279,7 +272,7 @@ void AsyncLowerer::emitAsyncReturnStmt(ReturnStmt *stmt) {
     lowering_.refCounts().releaseValue(result, value->type);
     result = nullptr;
   }
-  lowering_.tryLowerer().emitReturnOf(value->type->isVoid() ? nullptr : result);
+  lowering_.exitLowerer().emitReturnOf(value->type->isVoid() ? nullptr : result);
 }
 
 void AsyncLowerer::suspendAsync(llvm::Value *promise, llvm::SMLoc loc) {

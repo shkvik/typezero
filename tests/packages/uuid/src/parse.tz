@@ -6,35 +6,48 @@ function parse(uuid: string): Result<NonSharedArrayBuffer, UuidError> {
     return err({ name: 'TypeError', message: 'Invalid UUID' });
   }
 
-  // tz: `>>>` takes an int, so each double is cut to its 32 bits first, as `>>>` does it.
-  let v: number;
+  // tz: each group of hex digits is read into an int (at most 48 bits), and each byte is
+  // taken by division, which works on all 64 bits, and converted explicitly.
+  const a = hex(uuid.slice(0, 8));
+  const b = hex(uuid.slice(9, 13));
+  const c = hex(uuid.slice(14, 18));
+  const d = hex(uuid.slice(19, 23));
+  const e = hex(uuid.slice(24, 36));
   return ok(Uint8Array.of(
-    ((v = parseInt(uuid.slice(0, 8), 16)) | 0) >>> 24,
-    ((v | 0) >>> 16) & 0xff,
-    ((v | 0) >>> 8) & 0xff,
-    v & 0xff,
+    byte(a, 0x1000000),
+    byte(a, 0x10000),
+    byte(a, 0x100),
+    byte(a, 1),
 
     // Parse ........-####-....-....-............
-    (((v = parseInt(uuid.slice(9, 13), 16)) | 0) >>> 8) & 0xff,
-    v & 0xff,
+    byte(b, 0x100),
+    byte(b, 1),
 
     // Parse ........-....-####-....-............
-    (((v = parseInt(uuid.slice(14, 18), 16)) | 0) >>> 8) & 0xff,
-    v & 0xff,
+    byte(c, 0x100),
+    byte(c, 1),
 
     // Parse ........-....-....-####-............
-    (((v = parseInt(uuid.slice(19, 23), 16)) | 0) >>> 8) & 0xff,
-    v & 0xff,
+    byte(d, 0x100),
+    byte(d, 1),
 
     // Parse ........-....-....-....-############
-    // (Use "/" to avoid 32-bit truncation when bit-shifting high-order bytes)
-    ((v = parseInt(uuid.slice(24, 36), 16)) / 0x10000000000) & 0xff,
-    (v / 0x100000000) & 0xff,
-    ((v | 0) >>> 24) & 0xff,
-    ((v | 0) >>> 16) & 0xff,
-    ((v | 0) >>> 8) & 0xff,
-    v & 0xff,
+    byte(e, 0x10000000000),
+    byte(e, 0x100000000),
+    byte(e, 0x1000000),
+    byte(e, 0x10000),
+    byte(e, 0x100),
+    byte(e, 1),
   ));
+}
+
+function hex(text: string): int {
+  const v = parseInt(text, 16).unwrapOr(0);
+  return v >= 0 && v <= 281474976710655 ? v : 0;
+}
+
+function byte(v: int, unit: int): uint8 {
+  return ((v / unit) % 256).toUint8();
 }
 
 export { parse };

@@ -340,14 +340,14 @@ DWORD tz_fs_stat_of(const wchar_t *path, int follow, TzStatsParts *st) {
   CloseHandle(h);
   uint32_t mode = info.dwFileAttributes & FILE_ATTRIBUTE_READONLY ? 0444 : 0666;
   mode |= link ? S_LNK : info.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY ? S_DIR : S_REG;
-  st->dev = (double)info.dwVolumeSerialNumber;
-  st->mode = (double)mode;
-  st->nlink = (double)standard.NumberOfLinks;
+  st->dev = (int64_t)info.dwVolumeSerialNumber;
+  st->mode = (int64_t)mode;
+  st->nlink = (int64_t)standard.NumberOfLinks;
   st->uid = st->gid = st->rdev = 0;
   st->blksize = 4096;
-  st->ino = (double)(((uint64_t)info.nFileIndexHigh << 32) | info.nFileIndexLow);
-  st->size = (double)standard.EndOfFile.QuadPart;
-  st->blocks = (double)((uint64_t)standard.AllocationSize.QuadPart >> 9);
+  st->ino = (int64_t)(((uint64_t)info.nFileIndexHigh << 32) | info.nFileIndexLow);
+  st->size = (int64_t)standard.EndOfFile.QuadPart;
+  st->blocks = (int64_t)((uint64_t)standard.AllocationSize.QuadPart >> 9);
   st->atime_ms = ms_of(basic.LastAccessTime);
   st->mtime_ms = ms_of(basic.LastWriteTime);
   st->ctime_ms = ms_of(basic.ChangeTime);
@@ -363,16 +363,16 @@ int tz_fs_stat_of(const char *path, int follow, TzStatsParts *st) {
   if ((follow ? stat(path, &s) : lstat(path, &s)) != 0) {
     return errno;
   }
-  st->dev = (double)s.st_dev;
-  st->mode = (double)s.st_mode;
-  st->nlink = (double)s.st_nlink;
-  st->uid = (double)s.st_uid;
-  st->gid = (double)s.st_gid;
-  st->rdev = (double)s.st_rdev;
-  st->blksize = (double)s.st_blksize;
-  st->ino = (double)s.st_ino;
-  st->size = (double)s.st_size;
-  st->blocks = (double)s.st_blocks;
+  st->dev = (int64_t)s.st_dev;
+  st->mode = (int64_t)s.st_mode;
+  st->nlink = (int64_t)s.st_nlink;
+  st->uid = (int64_t)s.st_uid;
+  st->gid = (int64_t)s.st_gid;
+  st->rdev = (int64_t)s.st_rdev;
+  st->blksize = (int64_t)s.st_blksize;
+  st->ino = (int64_t)s.st_ino;
+  st->size = (int64_t)s.st_size;
+  st->blocks = (int64_t)s.st_blocks;
 #ifdef __APPLE__
   st->atime_ms = ms_of(s.st_atimespec);
   st->mtime_ms = ms_of(s.st_mtimespec);

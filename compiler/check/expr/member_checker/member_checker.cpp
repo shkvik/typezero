@@ -105,6 +105,13 @@ Expr *MemberChecker::checkMember(MemberExpr *member, const Type *expected) {
               checker_.constantFolder().globalConstant(global, member->name, member->loc())) {
         return constant;
       }
+      static const llvm::StringLiteral numberFunctions[] = {"parseInt", "parseFloat", "isInteger",
+                                                            "isSafeInteger"};
+      if (global == "Number" && !llvm::is_contained(numberFunctions, member->name)) {
+        checker_.diags_.error(member->loc(),
+                              "property '" + member->name + "' does not exist on 'Number'");
+        return member;
+      }
       checker_.diags_.error(member->loc(),
                             "'" + global + "." + member->name +
                                 "' can be used as a value only where a function type is "
@@ -202,6 +209,9 @@ Expr *MemberChecker::checkMember(MemberExpr *member, const Type *expected) {
   if ((type->isString() || type->isArray() || type->isListParam()) && member->name == "length") {
     member->type = Type::intTy();
     return member;
+  }
+  if (type->isInteger() && type->isWrapping() && member->name == "value") {
+    return checker_.typeRelations().convert(member->object, Type::integer(type->bitWidth(), true));
   }
   if (type->isOptional()) {
     checker_.diags_.error(member->object->loc(),

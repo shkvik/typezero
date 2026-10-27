@@ -28,6 +28,7 @@ struct VarSymbol {
   bool isConst = false;
   bool isGlobal = false;
   bool usedInFunction = false;
+  bool literalConst = false;
 
   FunctionDecl *owner = nullptr;
   unsigned declSeq = 0;

@@ -7,7 +7,7 @@
 #include "compiler/lower/iterators/generator_lowerer/generator_lowerer.h"
 #include "compiler/lower/memory/ref_counts/ref_counts.h"
 #include "compiler/lower/module_builder/module_builder.h"
-#include "compiler/lower/stmt/try_lowerer/try_lowerer.h"
+#include "compiler/lower/stmt/exit_lowerer/exit_lowerer.h"
 #include "compiler/lower/types/optional_lowerer/optional_lowerer.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/IR/MDBuilder.h"
@@ -27,7 +27,7 @@ constexpr uint64_t kHeaderSize = 16;
 
 constexpr uint32_t kFrameAlign = 8;
 
-enum PromiseField : unsigned { kOut, kIn, kRet, kRunning, kClose };
+enum PromiseField : unsigned { kOut, kIn, kRet, kRunning };
 
 }
 
@@ -107,52 +107,11 @@ void CoroutineLowerer::emitSuspend() {
 
 llvm::Value *CoroutineLowerer::emitCoroutineYield(llvm::Value *value, const Type *resultType) {
   Lowering::Coroutine &c = *lowering_.coro_;
-  if (!c.closes) {
-    llvm::Value *out = lowering_.builder_.CreateLoad(
-        lowering_.builder_.getPtrTy(),
-        lowering_.builder_.CreateStructGEP(lowering_.promiseTy_, c.promise, kOut), "out");
-    lowering_.builder_.CreateStore(value, out);
-    emitSuspend();
-  } else {
-    bool closable = lowering_.tryLowerer().finallyBetween(~size_t(0)) != nullptr;
-    llvm::Value *close =
-        lowering_.builder_.CreateStructGEP(lowering_.promiseTy_, c.promise, kClose);
-    llvm::BasicBlock *giveBlock = lowering_.functionFrame().newBlock("yield.give");
-    llvm::BasicBlock *dropBlock = lowering_.functionFrame().newBlock("yield.closing");
-    llvm::BasicBlock *suspendBlock = lowering_.functionFrame().newBlock("yield.suspend");
-    lowering_.builder_.CreateCondBr(
-        lowering_.builder_.CreateICmpEQ(
-            lowering_.builder_.CreateLoad(lowering_.builder_.getInt32Ty(), close),
-            lowering_.builder_.getInt32(2)),
-        dropBlock, giveBlock);
-    lowering_.functionFrame().switchTo(giveBlock);
-    llvm::Value *out = lowering_.builder_.CreateLoad(
-        lowering_.builder_.getPtrTy(),
-        lowering_.builder_.CreateStructGEP(lowering_.promiseTy_, c.promise, kOut), "out");
-    lowering_.builder_.CreateStore(value, out);
-    lowering_.builder_.CreateStore(lowering_.builder_.getInt32(closable ? 1 : 0), close);
-    lowering_.builder_.CreateBr(suspendBlock);
-    lowering_.functionFrame().switchTo(dropBlock);
-    lowering_.refCounts().releaseValue(value, c.yielded);
-    lowering_.builder_.CreateBr(suspendBlock);
-    lowering_.functionFrame().switchTo(suspendBlock);
-    emitSuspend();
-    if (closable) {
-      llvm::BasicBlock *closeBlock = lowering_.functionFrame().newBlock("yield.close");
-      llvm::BasicBlock *goBlock = lowering_.functionFrame().newBlock("yield.resumed");
-      lowering_.builder_.CreateCondBr(
-          lowering_.builder_.CreateICmpEQ(
-              lowering_.builder_.CreateLoad(lowering_.builder_.getInt32Ty(), close),
-              lowering_.builder_.getInt32(2)),
-          closeBlock, goBlock, llvm::MDBuilder(lowering_.ctx_).createUnlikelyBranchWeights());
-      lowering_.functionFrame().switchTo(closeBlock);
-      lowering_.tryLowerer().emitReturnOf(nullptr);
-      if (lowering_.functionFrame().blockIsOpen()) {
-        lowering_.builder_.CreateUnreachable();
-      }
-      lowering_.functionFrame().switchTo(goBlock);
-    }
-  }
+  llvm::Value *out = lowering_.builder_.CreateLoad(
+      lowering_.builder_.getPtrTy(),
+      lowering_.builder_.CreateStructGEP(lowering_.promiseTy_, c.promise, kOut), "out");
+  lowering_.builder_.CreateStore(value, out);
+  emitSuspend();
   if (!resultType) {
     return nullptr;
   }

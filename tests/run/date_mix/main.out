@@ -16,9 +16,9 @@ err not_a_date: not a date: 'someday'
 first sunday 2026-11-01
 Mon,Tue,Wed,Thu,Fri days done
 {"title":"standup","at":"2026-10-26T09:00:00.000Z","minutes":15} {"title":"release","at":"2026-10-29T09:00:00.000Z"}
-{"when":"2026-10-26T09:00:00.000Z","never":null,"list":["2026-10-29T09:00:00.000Z"]}
+{"when":"2026-10-26T09:00:00.000Z","list":["2026-10-29T09:00:00.000Z"]}
 x true
-null Invalid Date
+bad_date
 late late by 1.5 h 5400000
 6 PM
 9 AM

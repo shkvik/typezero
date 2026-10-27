@@ -127,12 +127,28 @@ Expr *ArrayLiteralChecker::checkArrayLit(ArrayLitExpr *lit, const Type *expected
     types[i] = type->isError() ? type : type->inner();
     someDecimal |= types[i]->nonOptional()->isDecimal();
   }
+  const Type *literalHint = someDecimal ? Type::decimalTy() : nullptr;
+  if (!literalHint && seen && seen->isNumeric()) {
+    literalHint = seen;
+  }
+  for (size_t i = 0; i < lit->elements.size() && !literalHint; ++i) {
+    if (lit->elements[i].spread && types[i] && types[i]->isNumeric()) {
+      literalHint = types[i];
+    }
+  }
+  if (!literalHint) {
+    for (size_t i = 0; i < lit->elements.size(); ++i) {
+      if (!types[i] && !TypeRelations::isIntLiteralTree(lit->elements[i].expr)) {
+        literalHint = Type::doubleTy();
+      }
+    }
+  }
   for (size_t i = 0; i < lit->elements.size(); ++i) {
     ArrayLitExpr::Element &e = lit->elements[i];
     if (types[i]) {
       continue;
     }
-    e.expr = checker_.exprChecker().checkExpr(e.expr, someDecimal ? Type::decimalTy() : nullptr);
+    e.expr = checker_.exprChecker().checkExpr(e.expr, literalHint);
     types[i] = e.expr->type;
   }
 

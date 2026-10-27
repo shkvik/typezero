@@ -74,15 +74,47 @@ Val BuiltinEvaluator::evalBuiltin(const CallExpr *call, State &st) {
     }
   };
   switch (call->builtin) {
+  case Builtin::DataViewGet:
+  case Builtin::BufferRead: {
+    if (type->isResult()) {
+      Val result;
+      result.elem =
+          share(numVal(check_.overflowWarnings().input(type->okType(), call->loc(), "the bytes")));
+      return result;
+    }
+    int64_t lo, hi;
+    if (!call->args.empty() && llvm::isa<IntLitExpr>(call->args[0]) &&
+        Type::bytesType(Type::Bytes(llvm::cast<IntLitExpr>(call->args[0])->value))
+            ->elementRange(lo, hi)) {
+      return numVal(range(double(lo), double(hi)));
+    }
+    return check_.overflowWarnings().trusted(type);
+  }
+  case Builtin::ResultUnwrapOr:
+    if (receiver.elem && receiverType && receiverType->isResult()) {
+      return join(*receiver.elem, arg(0));
+    }
+    return check_.overflowWarnings().trusted(type);
   case Builtin::ParseInt:
-    return numVal(check_.overflowWarnings().input(type, call->loc(), "parseInt"));
-  case Builtin::ParseFloat:
-    return numVal(check_.overflowWarnings().input(type, call->loc(), "parseFloat"));
+  case Builtin::ParseFloat: {
+    Val result;
+    result.elem = share(numVal(check_.overflowWarnings().input(
+        type->isResult() ? type->okType() : type, call->loc(),
+        call->builtin == Builtin::ParseInt ? "parseInt" : "parseFloat")));
+    return result;
+  }
   case Builtin::NumberOf: {
     const Type *from =
         call->args.empty() || !call->args[0]->type ? nullptr : call->args[0]->type->nonOptional();
     if (from && from->isString()) {
-      return numVal(check_.overflowWarnings().input(type, call->loc(), "Number()"));
+      Val result;
+      result.elem = share(numVal(check_.overflowWarnings().input(
+          type->isResult() ? type->okType() : type, call->loc(), "Number()")));
+      return result;
+    }
+    if (from && from->isInteger()) {
+      check_.overflowWarnings().checkConversion(call, call->args[0], arg(0).num, type);
+      return numVal(arg(0).num);
     }
     if (from && isNumberType(from)) {
       return numVal(arg(0).num);
@@ -91,6 +123,20 @@ Val BuiltinEvaluator::evalBuiltin(const CallExpr *call, State &st) {
       return numVal(range(0, 1));
     }
     return check_.overflowWarnings().trusted(type);
+  }
+  case Builtin::NumConvert: {
+    if (!receiverType || !isNumberType(receiverType) || type->isDecimal()) {
+      return check_.overflowWarnings().trusted(type);
+    }
+    Num x = receiver.num;
+    if (x.empty()) {
+      return Val();
+    }
+    if (!check_.overflowWarnings().checkConversion(call, receiverExpr, x, type)) {
+      Limits l = limitsOf(type);
+      return numVal(range(l.lo, l.hi, Origin::Trusted));
+    }
+    return numVal(type->isInteger() ? narrowTo(x, limitsOf(type).lo, limitsOf(type).hi) : x);
   }
   case Builtin::JsonParseAs:
   case Builtin::FromJson: {
@@ -239,15 +285,38 @@ Val BuiltinEvaluator::evalBuiltin(const CallExpr *call, State &st) {
                         check_.overflowWarnings().trusted(type->valueType()));
     }
     return Val();
+  case Builtin::DateNew:
+    if (!call->args.empty() && call->args[0]->type && call->args[0]->type->isInteger()) {
+      check_.overflowWarnings().checkWithin(call->args[0], arg(0).num, -kMaxTime, kMaxTime,
+                                            "the time of a date",
+                                            "±8640000000000000 ms, 100 million days around "
+                                            "1970");
+    }
+    return check_.overflowWarnings().trusted(type);
+  case Builtin::DateSetTime:
+    if (!call->args.empty() && call->args[0]->type && call->args[0]->type->isInteger()) {
+      check_.overflowWarnings().checkWithin(call->args[0], arg(0).num, -kMaxTime, kMaxTime,
+                                            "the time of a date",
+                                            "±8640000000000000 ms, 100 million days around "
+                                            "1970");
+    }
+    return numVal(range(-kMaxTime, kMaxTime, Origin::Trusted));
+  case Builtin::DateFromFields:
+  case Builtin::DateUTC:
+    if (!call->args.empty() && call->args[0]->type && call->args[0]->type->isInteger()) {
+      check_.overflowWarnings().checkWithin(call->args[0], arg(0).num, -271820, 275759,
+                                            "the year of a date", "-271820 to 275759");
+    }
+    return call->builtin == Builtin::DateUTC ? numVal(range(-kMaxTime, kMaxTime, Origin::Trusted))
+                                             : check_.overflowWarnings().trusted(type);
   case Builtin::DateNow:
   case Builtin::PerformanceNow:
-    return numVal(range(0, kMaxTime));
+    return numVal(range(0, kMaxTime, Origin::Trusted));
   case Builtin::DateGetTime:
-  case Builtin::DateUTC:
-    return numVal(range(-kMaxTime, kMaxTime));
+    return numVal(range(-kMaxTime, kMaxTime, Origin::Trusted));
   case Builtin::DateParse: {
     Val result;
-    result.elem = share(numVal(range(-kMaxTime, kMaxTime)));
+    result.elem = share(numVal(range(-kMaxTime, kMaxTime, Origin::Trusted)));
     return result;
   }
   case Builtin::DateGetUTC:
@@ -269,10 +338,6 @@ Val BuiltinEvaluator::evalBuiltin(const CallExpr *call, State &st) {
   if (call->builtin >= Builtin::RegExpNew && call->builtin <= Builtin::StrSplitRegex) {
     check_.callRanges().calledUserCode(st);
   }
-  if (isFsBuiltin(call->builtin) || isChildBuiltin(call->builtin)) {
-    check_.mayThrow(st);
-  }
-
   return check_.overflowWarnings().trusted(type);
 }
 
@@ -289,17 +354,57 @@ Val BuiltinEvaluator::evalMath(const CallExpr *call, State &st) {
   const Type *type = call->type;
   auto arg = [&](size_t i) { return i < args.size() ? args[i] : Num(); };
   Num x = arg(0);
-  auto monotone = [&](double (*f)(double), double lo, double hi) {
-    if (x.empty()) {
+  OverflowWarnings &warnings = check_.overflowWarnings();
+  auto monotoneOn = [&](double (*f)(double), double lo, double hi, const Num &v) {
+    if (v.empty()) {
       return Num();
     }
-    double a = f(std::clamp(x.lo, lo, hi)), b = f(std::clamp(x.hi, lo, hi));
+    double a = f(std::clamp(v.lo, lo, hi)), b = f(std::clamp(v.hi, lo, hi));
     if (std::isnan(a) || std::isnan(b)) {
       return range(-kInf, kInf);
     }
 
-    return make({a, x.loOrigin, x.loWhy}, {b, x.hiOrigin, x.hiWhy});
+    return make({a, v.loOrigin, v.loWhy}, {b, v.hiOrigin, v.hiWhy});
   };
+  auto monotone = [&](double (*f)(double), double lo, double hi) {
+    return monotoneOn(f, lo, hi, x);
+  };
+  auto even = [&](double (*f)(double), const Num &v) {
+    if (v.empty()) {
+      return Num();
+    }
+    Bound big = std::fabs(v.lo) > std::fabs(v.hi) ? v.low() : v.high();
+    double small = v.lo <= 0 && v.hi >= 0 ? 0 : std::min(std::fabs(v.lo), std::fabs(v.hi));
+
+    return make({f(small)}, {f(std::fabs(big.v)), big.origin, big.why});
+  };
+  auto suspect = [](Num n) {
+    if (n.loOrigin == Origin::Trusted) {
+      n.setLow({std::clamp(n.lo, -1.0, 1.0)});
+    }
+    if (n.hiOrigin == Origin::Trusted) {
+      n.setHigh({std::clamp(n.hi, -1.0, 1.0)});
+    }
+
+    return n;
+  };
+  auto finish = [&](const Num &exact, const Num &exceeding) {
+    if (exact.empty() || fits(exact, type)) {
+      return numVal(exact);
+    }
+    if (!check_.quiet_) {
+      warnings.overflowCall(call, x, exceeding);
+    }
+
+    return numVal(warnings.fit(exact, type));
+  };
+  auto domain = [&](double lo, double hi, bool loOpen, bool hiOpen, llvm::StringRef what,
+                    llvm::StringRef condition, llvm::StringRef extra = "") {
+    return warnings.checkDomain(call, call->args.empty() ? nullptr : call->args[0], x, lo, hi,
+                                loOpen, hiOpen, what, condition, extra);
+  };
+  constexpr double kHalfPi = 1.5707963267948968, kPi = 3.1415926535897936;
+  const double tiny = std::numeric_limits<double>::denorm_min();
   Num r;
   switch (call->builtin) {
   case Builtin::MathFloor:
@@ -334,7 +439,7 @@ Val BuiltinEvaluator::evalMath(const CallExpr *call, State &st) {
   case Builtin::MathMax: {
     bool isMin = call->builtin == Builtin::MathMin;
     if (args.empty()) {
-      return numVal(exactly(isMin ? kInf : -kInf));
+      return Val();
     }
     Num best = args[0];
     for (size_t i = 1; i < args.size(); ++i) {
@@ -348,34 +453,118 @@ Val BuiltinEvaluator::evalMath(const CallExpr *call, State &st) {
     }
     return numVal(check_.overflowWarnings().fit(best, type));
   }
+  case Builtin::MathClamp: {
+    Num lo = arg(1), hi = arg(2);
+    warnings.checkClamp(call, lo, hi);
+    if (lo.empty() || hi.empty()) {
+      return warnings.trusted(type);
+    }
+    if (x.empty()) {
+      return numVal(make(lo.low(), hi.high()));
+    }
+    Bound low = x.lo >= lo.lo ? x.low() : lo.low();
+    Bound high = x.hi <= hi.hi ? x.high() : hi.high();
+    if (low.v > hi.hi) {
+      low = hi.high();
+    }
+    if (high.v < lo.lo) {
+      high = lo.low();
+    }
+    return numVal(make(low, high));
+  }
   case Builtin::MathSqrt:
-    return numVal(monotone([](double v) { return std::sqrt(v); }, 0, kInf));
+    domain(0, kDoubleMax, false, false, "not negative", "x >= 0");
+    return numVal(monotone([](double v) { return std::sqrt(v); }, 0, kDoubleMax));
   case Builtin::MathCbrt:
     return numVal(monotone([](double v) { return std::cbrt(v); }, -kInf, kInf));
   case Builtin::MathLog:
+    domain(0, kDoubleMax, true, false, "above 0", "x > 0");
+    return numVal(monotone([](double v) { return std::log(v); }, tiny, kDoubleMax));
   case Builtin::MathLog2:
+    domain(0, kDoubleMax, true, false, "above 0", "x > 0");
+    return numVal(monotone([](double v) { return std::log2(v); }, tiny, kDoubleMax));
   case Builtin::MathLog10:
+    domain(0, kDoubleMax, true, false, "above 0", "x > 0");
+    return numVal(monotone([](double v) { return std::log10(v); }, tiny, kDoubleMax));
   case Builtin::MathLog1p:
+    domain(-1, kDoubleMax, true, false, "above -1", "x > -1");
     return numVal(
-        make({-kInf}, {x.empty() || x.hi == kInf ? kInf : std::log2(std::max(x.hi, 1.0)) + 1,
-                       x.hiOrigin, x.hiWhy}));
+        monotone([](double v) { return std::log1p(v); }, std::nextafter(-1.0, 0.0), kDoubleMax));
+  case Builtin::MathExp: {
+    auto f = [](double v) { return std::exp(v); };
+    return finish(monotone(f, -kInf, kInf), monotoneOn(f, -kInf, kInf, suspect(x)));
+  }
+  case Builtin::MathExpm1: {
+    auto f = [](double v) { return std::expm1(v); };
+    return finish(monotone(f, -kInf, kInf), monotoneOn(f, -kInf, kInf, suspect(x)));
+  }
+  case Builtin::MathSinh: {
+    auto f = [](double v) { return std::sinh(v); };
+    return finish(monotone(f, -kInf, kInf), monotoneOn(f, -kInf, kInf, suspect(x)));
+  }
+  case Builtin::MathCosh: {
+    auto f = [](double v) { return std::cosh(v); };
+    return finish(even(f, x), even(f, suspect(x)));
+  }
+  case Builtin::MathHypot: {
+    if (args.empty()) {
+      return numVal(exactly(0));
+    }
+    auto top = [&](bool suspected) {
+      Bound big{0};
+      for (const Num &a : args) {
+        if (a.empty()) {
+          return Num();
+        }
+        Num v = suspected ? suspect(a) : a;
+        for (const Bound &b : {v.low(), v.high()}) {
+          if (std::fabs(b.v) > big.v) {
+            big = {std::fabs(b.v), b.origin, b.why};
+          }
+        }
+      }
+      big.v *= std::sqrt(double(args.size()));
+      return make({0}, big);
+    };
+    return finish(top(false), top(true));
+  }
+  case Builtin::MathFround:
+    domain(-kFloatMax, kFloatMax, false, false, "within ±3.4e38, the range of a float32",
+           "x >= -3.4e38 && x <= 3.4e38");
+    return numVal(x);
   case Builtin::MathSin:
   case Builtin::MathCos:
   case Builtin::MathTanh:
     return numVal(range(-1, 1));
+  case Builtin::MathTan:
+    return numVal(range(-1e17, 1e17));
   case Builtin::MathAtan:
+    return numVal(range(-kHalfPi, kHalfPi));
   case Builtin::MathAtan2:
+    return numVal(range(-kPi, kPi));
   case Builtin::MathAsin:
+    domain(-1, 1, false, false, "from -1 to 1", "x >= -1 && x <= 1",
+           ", or use 'Math.clamp(x, -1, 1)'");
+    return numVal(range(-kHalfPi, kHalfPi));
   case Builtin::MathAcos:
-    return numVal(range(-3.15, 3.15));
+    domain(-1, 1, false, false, "from -1 to 1", "x >= -1 && x <= 1",
+           ", or use 'Math.clamp(x, -1, 1)'");
+    return numVal(range(0, kPi));
+  case Builtin::MathAsinh:
+    return numVal(monotone([](double v) { return std::asinh(v); }, -kInf, kInf));
+  case Builtin::MathAcosh:
+    domain(1, kDoubleMax, false, false, "at least 1", "x >= 1");
+    return numVal(monotone([](double v) { return std::acosh(v); }, 1, kDoubleMax));
+  case Builtin::MathAtanh:
+    domain(-1, 1, true, true, "between -1 and 1", "x > -1 && x < 1");
+    return numVal(monotone([](double v) { return std::atanh(v); }, std::nextafter(-1.0, 0.0),
+                           std::nextafter(1.0, 0.0)));
   case Builtin::MathRandom:
     return numVal(range(0, 0.9999999999999999));
   case Builtin::MathClz32:
     return numVal(range(0, 32));
   case Builtin::MathImul:
     return numVal(range(kInt32Min, kInt32Max));
-  case Builtin::MathFround:
-    return numVal(x);
   default:
     return check_.overflowWarnings().trusted(type);
   }

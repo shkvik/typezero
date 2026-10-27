@@ -65,6 +65,7 @@ type LocaleError = { code: "bad_locale"; message: string; tag: string }
 type DecodeError = { code: "ERR_ENCODING_INVALID_ENCODED_DATA"; message: string }
 type EncodingError = { code: "ERR_ENCODING_NOT_SUPPORTED"; message: string }
 type DecimalError = { code: "bad_decimal"; message: string; text: string }
+type NumberError = { code: "bad_number"; message: string }
 type AbortError = { code: "ABORT_ERR"; message: string }
 type CryptoError = { code: string; message: string }
 type RedirectStatus = 301 | 302 | 303 | 307 | 308

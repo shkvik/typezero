@@ -13,7 +13,7 @@ must(writeFileSync(file, "hello"))
 const st = must(statSync(file))
 const dates = [st.atime, st.mtime, st.ctime, st.birthtime]
 const ms = [st.atimeMs, st.mtimeMs, st.ctimeMs, st.birthtimeMs]
-console.log(dates.map((d, i) => d.getTime() == Math.round(ms[i] ?? 0)).join())
+console.log(dates.map((d, i) => d.getTime() == Math.round(ms[i] ?? 0).toInt()).join())
 console.log(st.mtime.getTime() >= before - 2000, st.mtime.getTime() <= Date.now() + 2000)
 console.log(st.mtime.toISOString().length, typeof st.mtime.getFullYear())
 const json = JSON.stringify(st)

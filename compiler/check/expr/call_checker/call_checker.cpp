@@ -5,7 +5,6 @@
 #include "compiler/check/classes/inherit_checker/inherit_checker.h"
 #include "compiler/check/classes/method_call_checker/method_call_checker.h"
 #include "compiler/check/classes/static_checker/static_checker.h"
-#include "compiler/check/errors/throw_checker/throw_checker.h"
 #include "compiler/check/expr/argument_checker/argument_checker.h"
 #include "compiler/check/expr/concat_checker/concat_checker.h"
 #include "compiler/check/expr/expr_checker/expr_checker.h"
@@ -139,7 +138,7 @@ Expr *CallChecker::checkCall(CallExpr *call, const Type *expected) {
       if (rejectSpread(call)) {
         return call;
       }
-      return checker_.numberMethods().checkStaticCall(call, member, expected);
+      return checker_.numberMethods().checkStaticCall(call, member);
     }
     if (isGlobalName(member->object, "Object")) {
       return checker_.objectChecker().checkObjectCall(call, member, expected);
@@ -296,7 +295,7 @@ Expr *CallChecker::checkCall(CallExpr *call, const Type *expected) {
     if (Expr *task = checker_.timerChecker().checkAsyncGlobal(call, name)) {
       return task;
     }
-    if (Expr *builtin = checker_.globalFunctionChecker().checkGlobalCall(call, name, expected)) {
+    if (Expr *builtin = checker_.globalFunctionChecker().checkGlobalCall(call, name)) {
       return builtin;
     }
     Checker::ScopeEntry entry = checker_.topLevelChecker().lookupValue(name->name);

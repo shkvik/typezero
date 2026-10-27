@@ -1,24 +1,7 @@
 // There are no exceptions in tz (docs/errors.md, section 11): an error is a
-// value that a function returns in a Result, so throw, try, catch, finally,
-// the class Error and its kinds, and throw() of a generator are gone.
-function find(id: int): Result<string, string> {
-  // expect-error: there is no 'throw' in tz: an error is a value; return it, 'return err(...)', and give the function a 'Result'
-  if (id < 0) throw "bad id"
-  return ok("x")
-}
-// expect-error: there is no 'try' in tz: an error is a value; a function that can fail gives a 'Result', checked with 'if'
-try {
-  console.log(find(1))
-} catch (e) {
-  console.log(e)
-}
-// expect-error: there is no 'try' in tz
-try {
-  console.log(find(2))
-} finally {
-  console.log("done")
-}
-
+// value that a function returns in a Result, so the class Error and its kinds,
+// and throw() of a generator are gone; throw, try, catch and finally are not
+// even syntax (exceptions_syntax.tz).
 // expect-error: cannot find class 'Error'
 const e = new Error("x")
 // expect-error: cannot find

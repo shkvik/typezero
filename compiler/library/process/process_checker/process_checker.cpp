@@ -82,7 +82,7 @@ Expr *ProcessChecker::checkProcessCall(CallExpr *call, MemberExpr *member) {
       return call;
     }
     call->builtin = isDate ? Builtin::DateNow : Builtin::PerformanceNow;
-    call->type = Type::doubleTy();
+    call->type = isDate ? Type::intTy() : Type::doubleTy();
     return call;
   }
 

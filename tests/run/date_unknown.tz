@@ -33,4 +33,3 @@ for (const tag of ["de-DE", "en_US"]) {
   const locale = Intl.Locale.parse(tag)
   console.log(tag, locale.isOk() ? new Date(0).toLocaleDateString(locale.value, { timeZone: "UTC" }) : locale.error.message)
 }
-console.log(new Date(NaN).toLocaleString(), String(new Date(NaN)), JSON.stringify([new Date(NaN)]))

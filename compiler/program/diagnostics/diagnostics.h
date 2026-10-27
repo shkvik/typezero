@@ -39,6 +39,7 @@ public:
 
   Errors take();
   void quietRange(const char *begin, const char *end) { quiet_.push_back({begin, end}); }
+  bool isQuiet(llvm::SMLoc loc) const;
 
   llvm::SourceMgr &sourceMgr() const { return sourceMgr_; }
 

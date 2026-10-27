@@ -45,8 +45,21 @@ declare namespace decimal {
 }
 
 // The methods of a decimal. Since decimal is number here, numbers get them in
-// the editor too; tz rejects them on a double.
+// the editor too; tz rejects them on a double. The conversions of numbers
+// (docs/numbers.md, section 3) come first.
 interface Number {
+  toInt(): int
+  toInt8(): int8
+  toInt16(): int16
+  toInt32(): int32
+  toUint8(): uint8
+  toUint16(): uint16
+  toUint32(): uint32
+  toUint64(): uint64
+  toDouble(): double
+  toDecimal(): decimal
+  // The bits of a Bit.Wrap32 or Bit.Wrap64.
+  readonly value: number
   div(divisor: decimal, places?: int, mode?: DecimalRoundingMode): decimal
   round(places?: int, mode?: DecimalRoundingMode): decimal
   toFixed(places?: int, mode?: DecimalRoundingMode): string
@@ -59,6 +72,57 @@ interface Number {
   decimalPlaces(): int
   shiftedBy(power: int): decimal
   toFraction(maxDenominator?: decimal): decimal[]
+}
+
+// Numbers from strings give a Result (docs/numbers.md, section 9). tsc keeps its
+// own global parseInt and parseFloat, which come first.
+type NumberError = { code: "bad_number"; message: string }
+interface NumberConstructor {
+  (value: string): Result<number, NumberError>
+  parseInt(text: string, radix?: number): Result<int, NumberError>
+  parseFloat(text: string): Result<number, NumberError>
+}
+
+// No NaN and no Infinity (docs/numbers.md, section 10): Math.clamp, and a double
+// read from bytes gives a Result. tsc keeps its own NaN, Infinity, isNaN and
+// isFinite, which tz does not have.
+interface Math {
+  clamp(x: number, lo: number, hi: number): number
+}
+interface DataView {
+  getFloat16(byteOffset: number, littleEndian?: boolean): Result<number, NumberError>
+  getFloat32(byteOffset: number, littleEndian?: boolean): Result<number, NumberError>
+  getFloat64(byteOffset: number, littleEndian?: boolean): Result<number, NumberError>
+}
+interface Buffer {
+  readFloatLE(offset?: number): Result<number, NumberError>
+  readFloatBE(offset?: number): Result<number, NumberError>
+  readDoubleLE(offset?: number): Result<number, NumberError>
+  readDoubleBE(offset?: number): Result<number, NumberError>
+}
+
+// Counting modulo 2^32 and 2^64, and what is one instruction of the processor
+// (docs/numbers.md, sections 7 and 8).
+declare namespace Bit {
+  type Wrap32 = number
+  type Wrap64 = number
+  const Wrap32: { from(x: number): Wrap32 }
+  const Wrap64: { from(x: number): Wrap64 }
+  function rotateLeft32(x: number, n: number): number
+  function rotateLeft64(x: number, n: number): number
+  function rotateRight32(x: number, n: number): number
+  function rotateRight64(x: number, n: number): number
+  function leadingZeros32(x: number): int
+  function leadingZeros64(x: number): int
+  function trailingZeros32(x: number): int
+  function trailingZeros64(x: number): int
+  function onesCount32(x: number): int
+  function onesCount64(x: number): int
+  function reverseBytes32(x: number): number
+  function reverseBytes64(x: number): number
+  function mul64(a: uint64, b: uint64): { hi: uint64; lo: uint64 }
+  function add64(a: uint64, b: uint64, carry: uint64): { sum: uint64; carry: uint64 }
+  function sub64(a: uint64, b: uint64, borrow: uint64): { diff: uint64; borrow: uint64 }
 }
 
 // JSON (docs/modules.md, section 5; docs/narrowing.md, section 3).

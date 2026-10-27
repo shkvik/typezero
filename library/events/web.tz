@@ -237,7 +237,7 @@ export class EventTarget {
       handler.callback(event)
       handler = next
     }
-    this.runtimeListeners(event.type, Infinity)
+    this.runtimeListeners(event.type, Number.MAX_VALUE)
     event.endDispatch()
     return !event.defaultPrevented
   }

@@ -15,14 +15,19 @@ void Diagnostics::error(llvm::SMLoc loc, const llvm::Twine &message) {
   errors_.add({llvm::SourceMgr::DK_Error, Diagnostic::Form::Located, loc, message.str()});
 }
 
-void Diagnostics::warning(llvm::SMLoc loc, const llvm::Twine &message) {
-  if (muted_ || capture_) {
-    return;
-  }
+bool Diagnostics::isQuiet(llvm::SMLoc loc) const {
   for (const auto &[begin, end] : quiet_) {
     if (loc.getPointer() >= begin && loc.getPointer() < end) {
-      return;
+      return true;
     }
+  }
+
+  return false;
+}
+
+void Diagnostics::warning(llvm::SMLoc loc, const llvm::Twine &message) {
+  if (muted_ || capture_ || isQuiet(loc)) {
+    return;
   }
   errors_.add({llvm::SourceMgr::DK_Warning, Diagnostic::Form::Located, loc, message.str()});
 }

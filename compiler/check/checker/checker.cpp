@@ -15,7 +15,6 @@
 #include "compiler/check/classes/method_literal_checker/method_literal_checker.h"
 #include "compiler/check/classes/overload_resolver/overload_resolver.h"
 #include "compiler/check/classes/static_checker/static_checker.h"
-#include "compiler/check/errors/throw_checker/throw_checker.h"
 #include "compiler/check/expr/argument_checker/argument_checker.h"
 #include "compiler/check/expr/assign_checker/assign_checker.h"
 #include "compiler/check/expr/binary_checker/binary_checker.h"
@@ -270,7 +269,6 @@ Checker::Checker(AstContext &ctx, Diagnostics &diags) : ctx_(ctx), diags_(diags)
   dictMethodsPart_ = std::make_unique<DictMethods>(*this);
   dictNewCheckerPart_ = std::make_unique<DictNewChecker>(*this);
   recordLiteralCheckerPart_ = std::make_unique<RecordLiteralChecker>(*this);
-  throwCheckerPart_ = std::make_unique<ThrowChecker>(*this);
   flowCheckerPart_ = std::make_unique<FlowChecker>(*this);
   indexProofsPart_ = std::make_unique<IndexProofs>(*this);
   conditionFactsPart_ = std::make_unique<ConditionFacts>(*this);

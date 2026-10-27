@@ -22,7 +22,7 @@ namespace tz {
 
 NumberMethods::NumberMethods(Checker &checker) : checker_(checker) {}
 
-Expr *NumberMethods::checkStaticCall(CallExpr *call, MemberExpr *member, const Type *expected) {
+Expr *NumberMethods::checkStaticCall(CallExpr *call, MemberExpr *member) {
   bool isString = checker_.callChecker().isGlobalName(member->object, "String");
   llvm::StringRef fn = member->name;
   call->type = Type::error();
@@ -58,11 +58,9 @@ Expr *NumberMethods::checkStaticCall(CallExpr *call, MemberExpr *member, const T
     return call;
   }
   if (!isString && (fn == "parseInt" || fn == "parseFloat")) {
-    return checker_.globalFunctionChecker().checkGlobalFunction(call, fn, member->loc(), expected);
+    return checker_.globalFunctionChecker().checkGlobalFunction(call, fn, member->loc());
   }
   static const std::pair<llvm::StringLiteral, Builtin> predicates[] = {
-      {"isNaN", Builtin::IsNaN},
-      {"isFinite", Builtin::IsFinite},
       {"isInteger", Builtin::IsInteger},
       {"isSafeInteger", Builtin::IsSafeInteger},
   };
@@ -89,7 +87,59 @@ Expr *NumberMethods::checkStaticCall(CallExpr *call, MemberExpr *member, const T
   return call;
 }
 
+Expr *NumberMethods::checkConversion(CallExpr *call, MemberExpr *member) {
+  static const std::pair<llvm::StringLiteral, llvm::StringLiteral> conversions[] = {
+      {"toInt", "int"},         {"toInt8", "int8"},     {"toInt16", "int16"},
+      {"toInt32", "int32"},     {"toUint8", "uint8"},   {"toUint16", "uint16"},
+      {"toUint32", "uint32"},   {"toUint64", "uint64"}, {"toDouble", "double"},
+      {"toDecimal", "decimal"},
+  };
+  const Type *to = nullptr;
+  for (const auto &[method, type] : conversions) {
+    if (member->name == method) {
+      to = Type::fromName(type);
+    }
+  }
+  if (!to) {
+    return nullptr;
+  }
+  call->type = Type::error();
+  if (!checker_.argumentChecker().checkArity(call, member->loc(), 0, 0)) {
+    return call;
+  }
+  const Type *from = member->object->type;
+  std::string text = "x";
+  if (auto *name = dyn_cast<NameExpr>(member->object)) {
+    text = name->name.str();
+  }
+  if (from->isFloat() && to->isDecimal()) {
+    checker_.diags_.error(member->loc(),
+                          "a double is inexact already, so it becomes a decimal through "
+                          "'decimal(" +
+                              text + ")', which says so");
+    return call;
+  }
+  if (from->isFloat() && to->isInteger()) {
+    auto *rounding = dyn_cast<CallExpr>(member->object);
+    if (!rounding || !isRoundingBuiltin(rounding->builtin)) {
+      checker_.diags_.error(member->loc(),
+                            "a double becomes an integer only after rounding, which says what "
+                            "happens to the fraction: 'Math.trunc(" +
+                                text + ")." + member->name +
+                                "()' (or Math.round, Math.floor, Math.ceil)");
+      return call;
+    }
+  }
+  call->builtin = Builtin::NumConvert;
+  call->type = to;
+
+  return call;
+}
+
 Expr *NumberMethods::checkNumberMethod(CallExpr *call, MemberExpr *member) {
+  if (Expr *converted = checkConversion(call, member)) {
+    return converted;
+  }
   if (member->name == "toString" && call->args.size() == 1) {
     member->object = checker_.typeRelations().convert(member->object, Type::doubleTy());
     call->args[0] = checker_.memberChecker().checkPosition(call->args[0]);

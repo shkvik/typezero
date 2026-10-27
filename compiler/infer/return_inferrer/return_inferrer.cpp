@@ -53,10 +53,6 @@ bool ReturnInferrer::returnsValue(const Stmt *stmt) {
                         [](const SwitchCase &c) { return llvm::any_of(c.body, returnsValue); });
   case Stmt::Kind::Labeled:
     return returnsValue(cast<LabeledStmt>(stmt)->body);
-  case Stmt::Kind::Try: {
-    auto *s = cast<TryStmt>(stmt);
-    return returnsValue(s->block) || returnsValue(s->handler) || returnsValue(s->finalizer);
-  }
   default:
     return false;
   }
@@ -340,7 +336,14 @@ const Type *ReturnInferrer::unifyReturns(const FuncSymbol *fn, llvm::ArrayRef<Re
                                          bool fallsOff, bool report) {
   const Type *type = nullptr;
   bool undefined = fallsOff;
+  std::vector<ReturnStmt *> ordered, literals;
   for (ReturnStmt *ret : returns) {
+    bool literal = ret->value && ret->value->type && ret->value->type->isInteger() &&
+                   TypeRelations::isIntLiteralTree(ret->value);
+    (literal ? literals : ordered).push_back(ret);
+  }
+  ordered.insert(ordered.end(), literals.begin(), literals.end());
+  for (ReturnStmt *ret : ordered) {
     if (!ret->value) {
       undefined = true;
       continue;
@@ -355,6 +358,9 @@ const Type *ReturnInferrer::unifyReturns(const FuncSymbol *fn, llvm::ArrayRef<Re
     }
     if (!type) {
       type = t;
+      continue;
+    }
+    if (type != t && checker_.typeRelations().literalAdapts(ret->value, type)) {
       continue;
     }
     const Type *common = LiteralTypes::unionUnify(type, t);

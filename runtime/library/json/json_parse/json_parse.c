@@ -361,7 +361,14 @@ static TzJson *parse_number(Parser *p) {
   }
   text[length] = 0;
   double value = strtod(text, NULL);
-  int keep = digits > 15 || isinf(value) || (value == 0 && nonzero);
+  if (isinf(value)) {
+    if (text != local) {
+      tz_free(text);
+    }
+    p->pos = start;
+    unexpected(p, T_ILLEGAL, "Number out of range in JSON");
+  }
+  int keep = digits > 15 || (value == 0 && nonzero);
   TzJson *j;
   if (keep) {
     j = tz_json_node_new(TZ_JSON_NUMBER, sizeof(j->u.number));

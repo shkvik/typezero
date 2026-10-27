@@ -11,7 +11,7 @@ while (stack.length) stack.pop()
 // expect-error: compare it: 'stack.length == 0'
 const done = !stack.length
 let ratio = 0.5
-// expect-error: 0 and NaN would count as false; compare it as you mean: 'ratio != 0', 'ratio > 0' or '!Number.isNaN(ratio)'
+// expect-error: 0 would count as false; compare it as you mean: 'ratio != 0' or 'ratio > 0'
 const half = ratio ? ratio / 2 : 0
 const big: int = 5
 // expect-error: a number cannot be a condition

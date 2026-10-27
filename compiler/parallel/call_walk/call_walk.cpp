@@ -87,26 +87,6 @@ bool callsOnce(Builtin builtin) {
   }
 }
 
-bool mayThrow(Builtin builtin) {
-  if (isPromiseBuiltin(builtin)) {
-    return false;
-  }
-  switch (builtin) {
-  case Builtin::ConsoleLog:
-  case Builtin::ConsoleError:
-  case Builtin::SetTimeout:
-  case Builtin::SetInterval:
-  case Builtin::SetImmediate:
-  case Builtin::QueueMicrotask:
-  case Builtin::NextTick:
-  case Builtin::ClearTimeout:
-  case Builtin::ClearImmediate:
-    return false;
-  default:
-    return true;
-  }
-}
-
 }
 
 CallWalk::CallWalk(Analysis &analysis) : analysis_(analysis) {}
@@ -274,10 +254,6 @@ void CallWalk::call(const CallExpr *c, const Use &use) {
   for (const Expr *arg : c->args) {
     analysis_.exprWalk().expr(arg);
   }
-  const FunctionDecl *direct = c->func ? c->func->decl : c->method ? c->method->decl : nullptr;
-  if (!direct || !direct->isAsync || c->virtualCall || superCtor) {
-    analysis_.codeWalk().throwPoint();
-  }
   CallRec &rec = analysis_.codeWalk().record(c, CallKind::Call, use, c->loc());
   rec.call = c;
   if (superCtor) {
@@ -360,9 +336,6 @@ void CallWalk::builtinCall(const CallExpr *c, const Use &use) {
       continue;
     }
     analysis_.exprWalk().expr(arg, i == 0 ? inner : Use());
-  }
-  if (mayThrow(b)) {
-    analysis_.codeWalk().throwPoint();
   }
   analysis_.builtinCalls().builtinEffects(c, recv);
 }
@@ -454,7 +427,6 @@ void CallWalk::newExpr(const NewExpr *n) {
   for (const Expr *arg : n->ctor ? n->ctor->args : n->args) {
     analysis_.exprWalk().expr(arg);
   }
-  analysis_.codeWalk().throwPoint();
   CallRec &rec = analysis_.codeWalk().record(n, CallKind::Call, {}, n->loc());
   std::optional<Ref> self = analysis_.escapeScan().constructorLeaks(n->cls)
                                 ? Ref{RefKind::Site, n}

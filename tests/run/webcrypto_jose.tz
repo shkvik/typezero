@@ -12,7 +12,7 @@ function subtleAlgorithm(alg: string): Algorithm {
     case "PS256":
     case "PS384":
     case "PS512":
-      return { hash, name: "RSA-PSS", saltLength: parseInt(alg.slice(-3), 10) >> 3 }
+      return { hash, name: "RSA-PSS", saltLength: parseFloat(alg.slice(-3)).unwrapOr(256) / 8 }
     case "ES256":
       return { hash, name: "ECDSA", namedCurve: "P-256" }
     case "EdDSA":

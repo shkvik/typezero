@@ -1,0 +1,35 @@
+// What a number operation needs, the compiler proves, or it is an error
+// (docs/numbers.md, sections 3 and 5): a divisor that is not 0, a value that
+// fits the type it is converted to, an integer a double holds exactly.
+import { readLine } from "tz:io"
+
+function divide(a: int, b: int): int {
+  // expect-error: cannot prove that the divisor 'b' is not 0: it may be 0; check it first, e.g. 'if (b != 0)'
+  return a / b
+}
+for (let i = 3; i >= 0; i--) console.log("10 /", i, "=", divide(10, i))
+function share(total: int, people: int[]) {
+  // expect-error: cannot prove that the divisor 'people.length' is not 0
+  return total / people.length
+}
+console.log(share(10, []))
+const zero: int = 0
+let e = -1
+// expect-error: cannot prove that 'zero ** e' does not raise 0 to a negative power
+console.log(zero ** e)
+
+// A double rounded to an integer must fit it.
+let x = 1.5
+for (let i = 0; i < 7; i++) {
+  x *= 1000
+  // expect-error: cannot prove that the result of 'Math.round(...)' fits in 'int' (-9223372036854775808 to 9223372036854775807): it may be 1.5e+24
+  const n: int = Math.round(x).toInt()
+  console.log(n)
+}
+
+// Narrowing a value from outside needs a check.
+const n: int = parseInt(readLine() ?? "7").unwrapOr(0)
+// expect-error: cannot prove that 'n' fits in 'int32' (-2147483648 to 2147483647): 'n' comes from parseInt on line 31; check it first, e.g. 'if (n >= -2147483648 && n <= 2147483647)'
+console.log(n.toInt32())
+// expect-error: cannot prove that 'n' is within ±9007199254740992 (2^53), where a double holds every integer exactly
+console.log(n.toDouble(), Number(n) > 0)

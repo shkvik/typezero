@@ -10,6 +10,7 @@
 #include "compiler/check/generics/inference/inference.h"
 #include "compiler/check/generics/type_params/type_params.h"
 #include "compiler/check/iterators/iterable_checker/iterable_checker.h"
+#include "compiler/check/types/literal_types/literal_types.h"
 #include "compiler/check/types/type_relations/type_relations.h"
 #include "compiler/check/types/type_resolver/type_resolver.h"
 #include "compiler/check/types/utility_types/utility_types.h"
@@ -66,11 +67,11 @@ bool isContextSensitive(const Expr *arg) {
   }
   if (auto *name = dyn_cast<NameExpr>(arg)) {
     return name->typeArgs.empty() &&
-           llvm::is_contained(
-               llvm::ArrayRef<llvm::StringRef>{"String", "Number", "parseInt", "parseFloat",
-                                               "isNaN", "isFinite", "Boolean", "encodeURIComponent",
-                                               "encodeURI", "decodeURIComponent", "decodeURI"},
-               name->name);
+           llvm::is_contained(llvm::ArrayRef<llvm::StringRef>{"String", "Number", "parseInt",
+                                                              "parseFloat", "Boolean",
+                                                              "encodeURIComponent", "encodeURI",
+                                                              "decodeURIComponent", "decodeURI"},
+                              name->name);
   }
   if (auto *member = dyn_cast<MemberExpr>(arg)) {
     if (auto *object = dyn_cast<NameExpr>(member->object)) {
@@ -248,8 +249,13 @@ bool TypeArgInferrer::bindGenericCall(CallExpr *call, FuncSymbol *generic, llvm:
       const Type *type = nullptr;
       bool strong = !inference.candidates[k].empty();
       for (const std::vector<const Type *> *list :
-           {&inference.candidates[k], &inference.weakCandidates[k]}) {
+           {&inference.candidates[k], &inference.weakCandidates[k],
+            &inference.literalCandidates[k]}) {
         for (const Type *c : *list) {
+          if (type && list == &inference.literalCandidates[k] && type != c &&
+              (type->isNumeric() || type->isDecimal())) {
+            continue;
+          }
           const Type *next = type ? TypeRelations::unify(type, c) : c;
           if (!next && strong && list == &inference.weakCandidates[k]) {
             continue;
@@ -266,6 +272,15 @@ bool TypeArgInferrer::bindGenericCall(CallExpr *call, FuncSymbol *generic, llvm:
           }
           type = next;
         }
+      }
+      const Type *constraint = typeParams[k]->constraint();
+      if (constraint && constraint->isUnion()) {
+        constraint = LiteralTypes::numberMemberOf(constraint, false);
+      }
+      if (type && type->isInteger() && inference.candidates[k].empty() &&
+          inference.weakCandidates[k].empty() && constraint &&
+          (constraint->isFloat() || constraint->isDecimal())) {
+        type = constraint;
       }
       if (type && inference.undefinedSeen[k]) {
         type = Type::optional(type);
@@ -307,14 +322,18 @@ bool TypeArgInferrer::bindGenericCall(CallExpr *call, FuncSymbol *generic, llvm:
       } else if (const Type *shape = GenericChecker::literalShape(arg)) {
         literals.push_back(i);
         inference.weak = true;
+        inference.intLiteral = shape->isInteger() && TypeRelations::isIntLiteralTree(arg);
         inference.from(pattern, shape);
         inference.weak = false;
+        inference.intLiteral = false;
       } else if (isa<ArrayLitExpr>(arg) || isa<ObjectLitExpr>(arg)) {
         sensitive.push_back(i);
       } else {
         arg = checker_.exprChecker().checkExpr(arg);
         checked[i] = true;
+        inference.intLiteral = arg->type->isInteger() && TypeRelations::isIntLiteralTree(arg);
         inference.from(pattern, arg->type);
+        inference.intLiteral = false;
       }
     }
     if (listRest) {
@@ -432,6 +451,7 @@ bool TypeArgInferrer::bindGenericCall(CallExpr *call, FuncSymbol *generic, llvm:
         if (!bound[k]) {
           inference.candidates[k] = more.candidates[k];
           inference.weakCandidates[k].clear();
+          inference.literalCandidates[k].clear();
           inference.undefinedSeen[k] = more.undefinedSeen[k];
           settle(k);
         }

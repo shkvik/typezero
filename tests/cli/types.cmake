@@ -34,7 +34,7 @@ import { serve } from "tz:http"
 const n: int = 3
 const big: int = 1 << 20
 const price: decimal = 19.99
-const total = price * n + 0.01
+const total = price * n.toDecimal() + 0.01
 console.log(total, total.toFixed(1), total.round(0, "half-even"), decimal("0.1") + decimal("0.2"))
 console.log(decimal.max(price, total), big)
 
@@ -47,7 +47,7 @@ if (config.isOk()) console.log(config.value.port, config.value.tags, loose[1], f
 
 // Results.
 function half(x: int): Result<int, string> {
-  return x % 2 == 0 ? ok(x / 2 | 0) : err(`${x} is odd`)
+  return x % 2 == 0 ? ok(x / 2) : err(`${x} is odd`)
 }
 console.log(half(4).match(v => `half ${v}`, e => e), half(3).isErr())
 function quarter(x: int) {

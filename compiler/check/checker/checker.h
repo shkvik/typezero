@@ -154,7 +154,7 @@ class DictChecker;
 class DictMethods;
 class DictNewChecker;
 class RecordLiteralChecker;
-class ThrowChecker;
+
 class FlowChecker;
 class IndexProofs;
 class ConditionFacts;
@@ -535,7 +535,6 @@ private:
   std::vector<llvm::StringMap<ScopeEntry>> scopes_;
   std::vector<llvm::StringMap<Stmt *>> typeScopes_;
   FuncSymbol *currentFunction_ = nullptr;
-  unsigned tryDepth_ = 0;
   std::vector<JumpTarget> targets_;
   llvm::SmallVector<llvm::StringRef, 1> pendingLabels_;
   llvm::SmallPtrSet<const VarSymbol *, 4> otherCaseVars_;
@@ -724,7 +723,6 @@ public:
   DictMethods &dictMethods() const { return *dictMethodsPart_; }
   DictNewChecker &dictNewChecker() const { return *dictNewCheckerPart_; }
   RecordLiteralChecker &recordLiteralChecker() const { return *recordLiteralCheckerPart_; }
-  ThrowChecker &throwChecker() const { return *throwCheckerPart_; }
   FlowChecker &flowChecker() const { return *flowCheckerPart_; }
   IndexProofs &indexProofs() const { return *indexProofsPart_; }
   ConditionFacts &conditionFacts() const { return *conditionFactsPart_; }
@@ -892,7 +890,6 @@ private:
   friend class DictMethods;
   friend class DictNewChecker;
   friend class RecordLiteralChecker;
-  friend class ThrowChecker;
   friend class FlowChecker;
   friend class IndexProofs;
   friend class ConditionFacts;
@@ -1051,7 +1048,6 @@ private:
   std::unique_ptr<DictMethods> dictMethodsPart_;
   std::unique_ptr<DictNewChecker> dictNewCheckerPart_;
   std::unique_ptr<RecordLiteralChecker> recordLiteralCheckerPart_;
-  std::unique_ptr<ThrowChecker> throwCheckerPart_;
   std::unique_ptr<FlowChecker> flowCheckerPart_;
   std::unique_ptr<IndexProofs> indexProofsPart_;
   std::unique_ptr<ConditionFacts> conditionFactsPart_;

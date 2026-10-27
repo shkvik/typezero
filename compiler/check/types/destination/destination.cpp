@@ -57,13 +57,6 @@ static void forEachReturn(const Stmt *stmt, llvm::function_ref<void(const Expr *
   case Stmt::Kind::Labeled:
     forEachReturn(cast<LabeledStmt>(stmt)->body, each);
     break;
-  case Stmt::Kind::Try: {
-    auto *s = cast<TryStmt>(stmt);
-    forEachReturn(s->block, each);
-    forEachReturn(s->handler, each);
-    forEachReturn(s->finalizer, each);
-    break;
-  }
   default:
     break;
   }

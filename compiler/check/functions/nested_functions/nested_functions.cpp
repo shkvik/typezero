@@ -191,16 +191,6 @@ void visitExprs(const Stmt *stmt, llvm::function_ref<void(const Expr *)> visit,
   case Stmt::Kind::Return:
     expr(cast<ReturnStmt>(stmt)->value);
     break;
-  case Stmt::Kind::Throw:
-    expr(cast<ThrowStmt>(stmt)->value);
-    break;
-  case Stmt::Kind::Try: {
-    auto *s = cast<TryStmt>(stmt);
-    sub(s->block);
-    sub(s->handler);
-    sub(s->finalizer);
-    break;
-  }
   case Stmt::Kind::Class: {
     auto *cls = cast<ClassDecl>(stmt);
     expr(cls->baseExpr);

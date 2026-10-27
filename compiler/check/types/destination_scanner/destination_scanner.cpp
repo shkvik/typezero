@@ -171,21 +171,6 @@ void DestinationScanner::scanDestinations(const Stmt *stmt, Checker::Destination
                        scan);
     }
     break;
-  case Stmt::Kind::Throw:
-    expr(cast<ThrowStmt>(stmt)->value);
-    break;
-  case Stmt::Kind::Try: {
-    auto *s = cast<TryStmt>(stmt);
-    scanDestinations(s->block, scan);
-    if (s->handler && s->param.name != scan.name) {
-      scan.locals.emplace_back();
-      scan.declare(s->param.name, nullptr);
-      scanDestinations(s->handler, scan);
-      scan.locals.pop_back();
-    }
-    scanDestinations(s->finalizer, scan);
-    break;
-  }
   default:
     break;
   }

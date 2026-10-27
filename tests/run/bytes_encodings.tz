@@ -3,7 +3,7 @@
 // the tables of those named in the code are built into the program, and a
 // label known only when it runs (TextDecoder.parse) brings all of them.
 const high = new Uint8Array(128)
-for (let i = 0; i < high.length; i++) high[i] = 0x80 + i
+for (let i = 0; i < 128; i++) high[i] = (0x80 + i).toUint8()
 const labels = ["windows-1251", "koi8-r", "ibm866", "iso-8859-2", "macintosh", "x-mac-cyrillic",
                 "windows-1253", "iso-8859-8-i", "windows-874", "x-user-defined", "latin1"]
 for (const label of labels) {

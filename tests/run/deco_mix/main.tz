@@ -28,7 +28,7 @@ function describe(u: unknown): string {
   if (u instanceof Buffer)
     return `a Buffer of ${u.length}: ${u.toString("hex")}`
   if (u instanceof Uint8Array)
-    return `bytes, first ${u[0] ?? -1}`
+    return `bytes, first ${u[0]?.toInt() ?? -1}`
   if (u instanceof User)
     return `user ${u.name}`
   if (typeof u == "object")

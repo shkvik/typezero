@@ -275,6 +275,15 @@ static void fd_fsync_work(TzWork *w) {
 #endif
 }
 
+int32_t tz_lib_close_fd(int64_t fd, TzMaker make) {
+  (void)make;
+#ifdef _WIN32
+  return tz_fs_fd_file((int32_t)fd) != NO_FILE && _close((int)fd) == 0;
+#else
+  return close((int)fd) == 0;
+#endif
+}
+
 void tz_fss_close(TzPromise *p, int64_t fd, int32_t sync, TzMaker make) {
   FdRequest *r = fd_new(p, make);
   r->fd = fd;

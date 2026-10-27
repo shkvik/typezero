@@ -41,6 +41,7 @@ public:
   llvm::SMLoc loc() const { return loc_; }
 
   const Type *type = nullptr;
+  mutable bool rangeProven = false;
 
 protected:
   Expr(Kind kind, llvm::SMLoc loc) : kind_(kind), loc_(loc) {}

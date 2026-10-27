@@ -2,7 +2,7 @@
 rect: tl, rect: tr, rect: br, rect: bl
 circle: no corners
 rect: tl, rect: tr, rect: br, rect: bl
-Err { error: 'no shapes' } at largest (shapes.tz:59) Ok { value: 20 } Err { error: "not a size: '4 by 5'" } at Rect.parse (shapes.tz:41)
+Err { error: 'no shapes' } at largest (shapes.tz:63) Ok { value: 20 } Err { error: "not a size: '4 by 5'" } at Rect.parse (shapes.tz:41)
 { value: Circle { name: 'circle', id: 0, r: 1 } } true false
 rect 64 4
 [ 6, 1 ]

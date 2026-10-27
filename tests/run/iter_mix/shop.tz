@@ -9,7 +9,7 @@ export function* parseLines(lines: string[]) {
     const [name, price, qty] = line.split(";")
     const cost = decimal(price ?? "")
     if (name == undefined || qty == undefined || cost.isErr()) yield err(`bad line '${line}'`)
-    else yield ok(new Item(name, cost.value, parseInt(qty) | 0))
+    else yield ok(new Item(name, cost.value, parseInt(qty).unwrapOr(0)))
   }
 }
 
@@ -23,7 +23,7 @@ export class Cart {
     for (const item of this.items) yield `${item.qty} x ${item.name}`
   }
   *totals() {
-    for (const item of this.items) yield item.price * item.qty
+    for (const item of this.items) yield item.price * item.qty.toDecimal()
   }
   static *sizes(max: int) {
     for (let n = 1; n <= max; n *= 2) yield n

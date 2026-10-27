@@ -56,7 +56,7 @@ function average<T extends number>(xs: T[]) { return xs.length }
 // expect-error: type 'string' does not satisfy the constraint 'number' of 'T' in 'average'
 average(["a"])
 function pair<T>(a: T, b: T) { return [a, b] }
-// expect-error: type parameter 'T' of 'pair' gets 'int' from one argument and 'string' from another
+// expect-error: type parameter 'T' of 'pair' gets 'string' from one argument and 'int' from another
 pair(1, "a")
 function key<T extends string | int>(x: T) { return x }
 // expect-error: type 'boolean' does not satisfy the constraint 'string | int' of 'T' in 'key'

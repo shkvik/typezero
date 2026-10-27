@@ -82,9 +82,6 @@ void LibraryEffects::libraryCall(const CallExpr *c, const FunctionDecl *decl, co
   for (const Expr *arg : c->args) {
     libraryArg(c, cls, name, arg, at);
   }
-  if (!decl->isAsync) {
-    analysis_.codeWalk().throwPoint();
-  }
   CallRec &rec = analysis_.codeWalk().record(c, CallKind::Call, use, at);
   rec.call = c;
   if (superCtor) {
@@ -117,7 +114,6 @@ void LibraryEffects::libraryNew(const NewExpr *n) {
   for (const Expr *arg : n->ctor ? n->ctor->args : n->args) {
     libraryArg(n->ctor, libraryClassName(n->cls), "constructor", arg, at);
   }
-  analysis_.codeWalk().throwPoint();
 }
 
 void LibraryEffects::libraryArg(const CallExpr *c, llvm::StringRef cls, llvm::StringRef name,

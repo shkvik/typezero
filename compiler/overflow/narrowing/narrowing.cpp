@@ -146,6 +146,16 @@ std::optional<OverflowCheck::Narrowable> Narrowing::narrowable(const Expr *expr,
     n->integer = n->integer && *c == std::trunc(*c);
     return n;
   }
+  if (auto *call = dyn_cast<CallExpr>(expr);
+      call && call->builtin == Builtin::MathAbs && call->args.size() == 1) {
+    std::optional<OverflowCheck::Narrowable> inner = narrowable(call->args[0], st);
+    if (!inner || inner->length || inner->square || inner->abs || inner->scale != 1 ||
+        inner->offset != 0) {
+      return std::nullopt;
+    }
+    inner->abs = true;
+    return inner;
+  }
   OverflowCheck::Narrowable n;
   const NameExpr *name = nullptr;
   if (auto *update = dyn_cast<UpdateExpr>(expr)) {
@@ -198,7 +208,31 @@ void Narrowing::constrain(State &s, const OverflowCheck::Narrowable &target, con
   }
   auto down = [&](double v) { return target.integer ? std::floor(v) : v; };
   auto up = [&](double v) { return target.integer ? std::ceil(v) : v; };
-  if (target.square) {
+  if (target.abs) {
+    if (upper.v < 0) {
+      s.dead = true;
+      return;
+    }
+    if (upper.v != kInf) {
+      double r = down(upper.v);
+      n = narrowTo(n, Bound{-r, upper.origin, upper.why}, Bound{r, upper.origin, upper.why});
+    }
+    double gap = up(lower.v);
+    if (gap > 0 && !n.empty()) {
+      if (n.lo >= 0) {
+        n = narrowTo(n, Bound{gap, lower.origin, lower.why}, n.high());
+      } else if (n.hi <= 0) {
+        n = narrowTo(n, n.low(), Bound{-gap, lower.origin, lower.why});
+      } else {
+        n.away = std::max(n.away, gap);
+        if (-gap < n.lo && n.lo < gap) {
+          n.setLow({gap, lower.origin, lower.why});
+        } else if (-gap < n.hi && n.hi < gap) {
+          n.setHigh({-gap, lower.origin, lower.why});
+        }
+      }
+    }
+  } else if (target.square) {
     if (upper.v == kInf) {
       return;
     }
@@ -240,14 +274,17 @@ void Narrowing::narrowComparison(const BinaryExpr *bin, const Val &l, const Val 
     bool integer =
         target->integer && target->scale == 1 && target->offset == std::trunc(target->offset);
     auto below = [&](const Bound &b) {
-      return Bound{integer ? std::ceil(b.v) - 1 : b.v, b.origin, b.why};
+      return Bound{integer ? std::ceil(b.v) - 1 : std::nextafter(b.v, -kInf), b.origin, b.why};
     };
     auto above = [&](const Bound &b) {
-      return Bound{integer ? std::floor(b.v) + 1 : b.v, b.origin, b.why};
+      return Bound{integer ? std::floor(b.v) + 1 : std::nextafter(b.v, kInf), b.origin, b.why};
     };
     Bound none{-kInf}, top{kInf};
     auto exclude = [&](State &s) {
-      if (s.dead || other.lo != other.hi || !integer || target->square) {
+      if (s.dead || other.lo != other.hi || target->square || (target->abs && other.lo != 0)) {
+        return;
+      }
+      if (!integer && !(other.lo == 0 && target->scale == 1 && target->offset == 0)) {
         return;
       }
       auto found = s.vars.find(target->var);
@@ -259,10 +296,14 @@ void Narrowing::narrowComparison(const BinaryExpr *bin, const Val &l, const Val 
       if (n.empty()) {
         return;
       }
+      double step = integer ? 1 : std::numeric_limits<double>::denorm_min();
+      if (c == 0 && target->scale == 1 && n.lo < 0 && n.hi > 0) {
+        n.away = std::max(n.away, step);
+      }
       if (n.lo == c) {
-        n.lo += 1;
+        n.lo += step;
       } else if (n.hi == c) {
-        n.hi -= 1;
+        n.hi -= step;
       }
       if (n.empty()) {
         s.dead = true;

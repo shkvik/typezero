@@ -45,5 +45,3 @@ console.log(Intl.DateTimeFormat("de", utc).format(d), new Intl.DateTimeFormat("d
 console.log(new Intl.DateTimeFormat("ja-JP-u-ca-japanese", { year: "numeric", timeZone: "UTC" }).format(d))
 console.log(new Intl.DateTimeFormat("en", { fractionalSecondDigits: 3, second: "numeric", timeZone: "UTC" }).format(d))
 
-// An invalid date writes as Invalid Date.
-console.log(new Date(NaN).toLocaleString("ru"), new Date(NaN).toLocaleDateString("en-US", { month: "long" }))

@@ -5,7 +5,7 @@
 function parseIntSafe(s: string): Result<int, string> {
   if (s.length == 0) return err("пусто")
   const n = parseInt(s)
-  return isNaN(n) ? err("не число") : ok(n | 0)
+  return n.isErr() ? err("не число") : ok(n.value)
 }
 
 console.log(parseIntSafe("42"), parseIntSafe(""), parseIntSafe("x"))

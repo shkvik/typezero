@@ -36,11 +36,11 @@ const ratio: decimal = n / 4
 const power: decimal = 2 ** 70
 console.log(ratio, power, n / 4)
 
-// int and long next to decimals
+// An int next to a decimal is converted explicitly, exactly
 const count: int = 3
 const units: int = 9007199254740993
-console.log(price * count, price + units, units * big, big - units)
-console.log(count < price, units > price, price == 19.99)
+console.log(price * count.toDecimal(), price + units.toDecimal(), units.toDecimal() * big, big - units.toDecimal())
+console.log(count.toDecimal() < price, units.toDecimal() > price, price == 19.99)
 
 // Variables, compound assignment, ++ and --
 let acc: decimal = 0
@@ -91,7 +91,7 @@ interface Line {
 }
 const order: Line[] = [{ name: "tea", price: 4.5, qty: 2 }, { name: "cake", price: 3.25, qty: 1 }]
 let subtotal: decimal = 0
-for (const line of order) subtotal += line.price * line.qty
+for (const line of order) subtotal += line.price * line.qty.toDecimal()
 console.log(order, subtotal)
 order[0].price *= 2
 order[1].price += 123456789012345678901234567890
@@ -136,7 +136,7 @@ console.log(size(price), size(0.25))
 if (price != 0 && total >= price) console.log("ok")
 
 // Text
-console.log(String(price), `${price} x ${count} = ${price * count}`, price.toString())
+console.log(String(price), `${price} x ${count} = ${price * count.toDecimal()}`, price.toString())
 console.log(`${big}`.length, String(decimal("-0.000001")), decimal("1e-7"), decimal("1e21"))
 const [num, den] = decimal("0.75").toFraction()
 console.log(num, den, decimal("3.14159").toFraction(100))

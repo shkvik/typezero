@@ -13,7 +13,7 @@ class Box<T> {
 const b = new Box(1)
 const s = new Box("hi")
 console.log(b, s, b.get() + 1, s.get().toUpperCase())
-console.log(b.map(x => x * 2.5), b.map(x => `#${x}`).get().length, s.set("yo").value)
+console.log(b.map(x => x.toDouble() * 2.5), b.map(x => `#${x}`).get().length, s.set("yo").value)
 const d: Box<double> = new Box(3)
 console.log(d.value / 2, new Box<string[]>([]).value.length)
 const nested = new Box(new Box([1, 2]))

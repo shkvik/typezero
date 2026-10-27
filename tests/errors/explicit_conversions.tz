@@ -1,0 +1,46 @@
+// A number changes its type only explicitly (docs/numbers.md, section 3).
+const a: int32 = 7
+const n: int = 5
+const d: double = 0.5
+const price: decimal = 19.99
+// expect-error: operator '+' cannot be applied to types 'int32' and 'int': a number changes its type only explicitly, e.g. 'a.toInt() + n'
+console.log(a + n)
+// expect-error: operator '*' cannot be applied to types 'int' and 'double': a number changes its type only explicitly, e.g. 'n.toDouble() * d'
+console.log(n * d)
+// expect-error: operator '*' cannot be applied to types 'int' and 'double': a number changes its type only explicitly, e.g. 'n.toDouble() * 1.5'
+console.log(n * 1.5)
+// expect-error: operator '<' cannot be applied to types 'double' and 'int': a number changes its type only explicitly, e.g. 'd < n.toDouble()'
+console.log(d < n)
+// expect-error: type 'int' is not assignable to type 'double'; convert it explicitly: 'n.toDouble()'
+const x: double = n
+// expect-error: type 'int' is not assignable to type 'int32'; convert it explicitly: 'n.toInt32()'
+const y: int32 = n
+// expect-error: type 'int32' is not assignable to type 'int'; convert it explicitly: 'a.toInt()'
+const z: int = a
+// expect-error: type 'int' is not assignable to type 'double'; convert it explicitly: 'n.toDouble()'
+console.log(Math.sqrt(n))
+// expect-error: 'Math.floor' rounds a double, and this is 'int', which has no fraction
+console.log(Math.floor(n / 2))
+// expect-error: a double becomes an integer only after rounding, which says what happens to the fraction: 'Math.trunc(d).toInt()'
+console.log(d.toInt())
+// expect-error: a double is inexact already, so it becomes a decimal through 'decimal(d)'
+console.log(d.toDecimal())
+// expect-error: operator '*' cannot be applied to types 'decimal' and 'int': a number changes its type only explicitly, e.g. 'price * n.toDecimal()'
+console.log(price * n)
+// expect-error: the values of 'Math.min', 'Math.max' and 'Math.clamp' must have one type; found 'int' and 'double'
+console.log(Math.max(n, d))
+// expect-error: the branches of '?:' have incompatible types 'int' and 'double'
+console.log(n > 0 ? n : d)
+function half<T extends number>(x: T) { return x / 2 }
+// expect-error: type 'int' does not satisfy the constraint 'number' of 'T' in 'half'
+console.log(half(n))
+class Vec {
+  add(k: int) { return k }
+  add(k: double) { return k }
+}
+// expect-error: no variant of 'add' fits these arguments; add(k: int) takes 'int' as argument 1, which is 'int32'; add(k: double) takes 'double' as argument 1, which is 'int32'; convert it explicitly: 'a.toInt()'
+console.log(new Vec().add(a))
+// expect-error: integer literal does not fit in type 'uint8'
+const b: uint8 = 300
+// expect-error: type 'double' is not assignable to type 'int'; round it first, then convert: 'Math.trunc(x).toInt()'
+const t: int = Date.now().toDouble() / 2.0

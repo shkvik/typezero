@@ -31,7 +31,7 @@ console.log(byKind.get(true)?.map((e) => e.name).join(), byKind.has(false))
 const stats = new Map<string, Stats>()
 for (const f of must(readdirSync(dir))) stats.set(f, must(statSync(join(dir, f))))
 console.log([...stats].map(([f, s]) => `${f}:${s.size}`).join())
-const sizes = Object.fromEntries([...stats].map(([f, s]): [string, number] => [f, s.size]))
+const sizes = Object.fromEntries([...stats].map(([f, s]): [string, int] => [f, s.size]))
 console.log(sizes, Object.keys(sizes).length)
 must(rmSync(dir, { recursive: true }))
 

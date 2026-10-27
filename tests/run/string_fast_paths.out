@@ -214,23 +214,23 @@ cde 13
 0.07 -0.07 0.07
 [12] 12 12 12 18
 [  42  ] 42 42 42 66
-[-0] -0 -0 -0 -0
+[-0] 0 0 0 0
 [+7] 7 7 7 7
-[.5] 0.5 NaN 0.5 NaN
+[.5] 0.5 Err 0.5 Err
 [5.] 5 5 5 5
 [1e3] 1000 1 1000 483
 [1E-2] 0.01 1 0.01 30
 [0x1F] 31 31 0 31
-[1_000] NaN 1 1 1
-[] 0 NaN NaN NaN
-[ ] 0 NaN NaN NaN
-[12é] NaN 12 12 18
-[١٢] NaN NaN NaN NaN
+[1_000] Err 1 1 1
+[] 0 Err Err Err
+[ ] 0 Err Err Err
+[12é] Err 12 12 18
+[١٢] Err Err Err Err
 [ 12 ] 12 12 12 18
-[123456789012345678901234567890] 1.2345678901234568e+29 1.2345678901234568e+29 1.2345678901234568e+29 9.452287968736547e+34
-[1.7976931348623159e308] Infinity 1 Infinity 1
+[123456789012345678901234567890] 1.2345678901234568e+29 Err 1.2345678901234568e+29 Err
+[1.7976931348623159e308] Err 1 Err 1
 [2e-324] 0 2 0 46
-[Infinity] Infinity NaN Infinity NaN
-[-Infinity] -Infinity NaN -Infinity NaN
+[Infinity] Err Err Err Err
+[-Infinity] Err Err Err Err
 [0.1e1] 1 0 1 0
 1 5 a key longer than eight

@@ -22,7 +22,7 @@ async function named(n: int) {
 await run(named)
 const asValue: (n: int) => Item | Promise<Item> = async n => new Item(-n)
 await run(asValue)
-const twice: (x: int) => double = (x: int): int => x * 2
+const twice: (x: int) => double = (x: int): double => (x * 2).toDouble()
 console.log(twice(21) / 4)
 const extra = (n: int, label?: string): Item => new Item(label == undefined ? n : -1)
 await run(extra)

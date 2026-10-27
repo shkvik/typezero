@@ -1,8 +1,8 @@
 // expect-error: type 'double' is not assignable to type 'int'
 let x: int = 1.5
 let big: int = 5
-// An int becomes a double by itself, a double does not become an int.
-// expect-error: type 'double' is not assignable to type 'int'; drop the fraction
+// A number changes its type only explicitly.
+// expect-error: operator '+' cannot be applied to types 'int' and 'double': a number changes its type only explicitly, e.g. 'big.toDouble() + 0.5'
 let y: int = big + 0.5
 // expect-error: integer literal does not fit in type 'int'
 let z: int = 9223372036854775808

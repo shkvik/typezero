@@ -64,4 +64,4 @@ class Total<T extends number> {
   sum = 0.0
   add(x: T) { this.sum += x; return this }
 }
-console.log(new Total<int>().add(1).add(2).sum, new Total<double>().add(0.5).sum)
+console.log(new Total<double>().add(1).add(2).sum, new Total<double>().add(0.5).sum)

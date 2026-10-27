@@ -54,8 +54,6 @@
 #include "compiler/program/ast/switch_case/switch_case.h"
 #include "compiler/program/ast/switch_stmt/switch_stmt.h"
 #include "compiler/program/ast/template_expr/template_expr.h"
-#include "compiler/program/ast/throw_stmt/throw_stmt.h"
-#include "compiler/program/ast/try_stmt/try_stmt.h"
 #include "compiler/program/ast/type_alias_decl/type_alias_decl.h"
 #include "compiler/program/ast/type_param_decl/type_param_decl.h"
 #include "compiler/program/ast/type_ref/type_ref.h"

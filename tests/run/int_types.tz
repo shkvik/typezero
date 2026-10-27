@@ -13,10 +13,10 @@ console.log(b, s, w, u, i32)
 console.log(b + 55, s * 100, w + 1, u - 1, i32 + 1)
 console.log(String(u), `${w}`, [b, b], [u])
 
-// Each type wraps at its own width.
-let x: uint8 = 250
+// Each type has its own limits (errors/overflow_input.tz).
+let x: uint8 = 240
 for (let k = 0; k < 10; k++) x++
-let y: int8 = 120
+let y: int8 = 110
 y += 10
 console.log(x, y)
 
@@ -26,14 +26,14 @@ console.log(top / 3, top % 7, top > 1, (top / 2) < top)
 const half: uint32 = 3000000000
 console.log(half / 2, half > 2000000000, Math.max(half, 100), Math.min(half, 100))
 
-// Narrower types widen to wider ones and to double by themselves.
-const sum: int = b + s
-const d: double = w
-console.log(sum, d, b * 1.5, Math.abs(s), Math.sign(s))
+// A type changes only explicitly, to a wider type or to double.
+const sum: int = b.toInt() + s.toInt()
+const d: double = w.toDouble()
+console.log(sum, d, b.toDouble() * 1.5, Math.abs(s), Math.sign(s))
 
 // Bits work at the width of the type.
 const m: uint8 = 0b1010_1100
-console.log(m & 0x0f, m | 1, m ^ 0xff, m >> 2, m << 1)
+console.log(m & 0x0f, m | 1, m ^ 0xff, m >> 2, (m & 0x7f) << 1)
 const wide: uint64 = 1
 console.log(wide << 63, (wide << 63) >> 62)
 

@@ -3,7 +3,6 @@
 #include "compiler/check/classes/class_checker/class_checker.h"
 #include "compiler/check/classes/class_links/class_links.h"
 #include "compiler/check/classes/overload_resolver/overload_resolver.h"
-#include "compiler/check/errors/throw_checker/throw_checker.h"
 #include "compiler/check/flow/field_facts/field_facts.h"
 #include "compiler/check/objects/object_checker/object_checker.h"
 #include "compiler/check/types/type_relations/type_relations.h"

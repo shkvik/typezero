@@ -14,7 +14,7 @@ class Point {
   scale(...factors: double[]) {
     let k = 1.0
     for (const f of factors) k *= f
-    return `${this.x * k}, ${this.y * k}`
+    return `${this.x.toDouble() * k}, ${this.y.toDouble() * k}`
   }
 }
 class Label {

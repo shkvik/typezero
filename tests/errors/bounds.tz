@@ -39,8 +39,8 @@ function traps(a: int[], n: int, s: string): void {
   for (let i = a.length; i >= 0; i--) x = a[i]
   // expect-error: type 'int | undefined' is not assignable to type 'int'
   for (let i = 0; i < a.length; i++) { i = i * 2; x = a[i] }
-  // A position that may be out of range gives NaN, which needs a double.
-  // expect-error: type 'double' is not assignable to type 'int'
+  // A position that may be out of range gives undefined.
+  // expect-error: type 'int | undefined' is not assignable to type 'int'
   x = s.charCodeAt(0)
   // expect-error: type 'int | undefined' is not assignable to type 'int'
   x = a.pop()

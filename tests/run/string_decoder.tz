@@ -18,7 +18,7 @@ for (let k = 0; k < 20; k++) {
   const bytes = Buffer.alloc(12)
   for (let i = 0; i < bytes.length; i++) {
     const r = rand(10)
-    bytes[i] = (r < 3 ? 0x41 + rand(26) : r < 5 ? 0x80 + rand(64) : r < 7 ? 0xc0 + rand(32) : r < 9 ? 0xe0 + rand(16) : 0xf0 + rand(8)) & 0xff
+    bytes[i] = ((r < 3 ? 0x41 + rand(26) : r < 5 ? 0x80 + rand(64) : r < 7 ? 0xc0 + rand(32) : r < 9 ? 0xe0 + rand(16) : 0xf0 + rand(8)) & 0xff).toUint8()
   }
   samples.push(bytes)
 }

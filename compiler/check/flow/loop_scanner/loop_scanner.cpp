@@ -14,10 +14,11 @@ namespace tz {
 
 namespace {
 
-const llvm::StringRef kGlobalFunctions[] = {
-    "String",   "Number",  "parseInt",           "parseFloat", "isNaN",
-    "isFinite", "Boolean", "encodeURIComponent", "encodeURI",  "decodeURIComponent",
-    "decodeURI"};
+const llvm::StringRef kGlobalFunctions[] = {"String",    "Number",
+                                            "parseInt",  "parseFloat",
+                                            "Boolean",   "encodeURIComponent",
+                                            "encodeURI", "decodeURIComponent",
+                                            "decodeURI"};
 
 }
 
@@ -147,20 +148,6 @@ void LoopScanner::scanStmt(const Stmt *stmt, Checker::LoopScan &scan, unsigned d
       scanExpr(value, scan, depth);
     }
     break;
-  case Stmt::Kind::Throw:
-    scanExpr(cast<ThrowStmt>(stmt)->value, scan, depth);
-    break;
-  case Stmt::Kind::Try: {
-    auto *s = cast<TryStmt>(stmt);
-    scanStmt(s->block, scan, depth);
-    if (s->handler) {
-      scanStmt(s->handler, scan, depth);
-    }
-    if (s->finalizer) {
-      scanStmt(s->finalizer, scan, depth);
-    }
-    break;
-  }
   case Stmt::Kind::Break: {
     llvm::StringRef label = cast<BreakStmt>(stmt)->label;
     if (label.empty() ? depth == 0 && scan.switches == 0

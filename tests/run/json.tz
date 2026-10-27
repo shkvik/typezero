@@ -28,7 +28,7 @@ console.log(flags[0] == true, flags[1] == false, flags[2] == 0, flags[3] == null
 function describe(x: Json | undefined): string {
   if (x == undefined) return "nothing"
   if (typeof x == "string") return `the string ${x.toUpperCase()}`
-  if (typeof x == "number") return `the number ${x * 2}`
+  if (typeof x == "number") return `the number ${-x}`
   if (typeof x == "boolean") return `the boolean ${!x}`
   if (Array.isArray(x)) return `an array of ${x.length}`
   if (x == null) return "null"
@@ -95,7 +95,7 @@ console.log(array)
 // JSON.stringify of a Json.
 console.log(JSON.stringify(user).unwrapOr(""))
 console.log(JSON.stringify(patch, null, 2).unwrapOr(""))
-console.log(JSON.stringify(parse('[-0, 1e400, 0.1, 1e21, "\\u00e9\\ud800", "tab\\tq\\""]')).unwrapOr(""))
+console.log(JSON.stringify(parse('[-0, 1e300, 0.1, 1e21, "\\u00e9\\ud800", "tab\\tq\\""]')).unwrapOr(""))
 
 // Destructuring reads keys and elements.
 const { name: who, address: { city }, nothing } = user

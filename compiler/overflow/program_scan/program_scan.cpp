@@ -259,17 +259,6 @@ void ProgramScan::scanStmt(const Stmt *stmt) {
   case Stmt::Kind::Return:
     scanExpr(cast<ReturnStmt>(stmt)->value, false);
     break;
-  case Stmt::Kind::Throw:
-    scanExpr(cast<ThrowStmt>(stmt)->value, false);
-    break;
-  case Stmt::Kind::Try: {
-    auto *s = cast<TryStmt>(stmt);
-    scanStmt(s->block);
-    declareVar(s->param.sym, &s->param);
-    scanStmt(s->handler);
-    scanStmt(s->finalizer);
-    break;
-  }
   case Stmt::Kind::Class:
     scanClass(cast<ClassDecl>(stmt));
     break;

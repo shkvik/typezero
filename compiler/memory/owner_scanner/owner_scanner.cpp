@@ -153,14 +153,6 @@ void OwnerScanner::stmt(const Stmt *stmt) {
   case Stmt::Kind::Return:
     expr(llvm::cast<ReturnStmt>(stmt)->value, Use::Value);
     break;
-  case Stmt::Kind::Throw:
-    expr(llvm::cast<ThrowStmt>(stmt)->value, Use::Value);
-    break;
-  case Stmt::Kind::Try:
-    this->stmt(llvm::cast<TryStmt>(stmt)->block);
-    this->stmt(llvm::cast<TryStmt>(stmt)->handler);
-    this->stmt(llvm::cast<TryStmt>(stmt)->finalizer);
-    break;
   case Stmt::Kind::Class: {
     auto *cls = llvm::cast<ClassDecl>(stmt);
     for (const ClassField &f : cls->fields) {

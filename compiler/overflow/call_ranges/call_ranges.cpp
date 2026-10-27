@@ -122,7 +122,6 @@ void CallRanges::analyzeAll() {
   check_.owner_ = nullptr;
   check_.frames_.assign(1, OverflowCheck::Frame());
   check_.targets_.clear();
-  check_.tries_.clear();
   State st;
   for (const Stmt *item : check_.program_.items) {
     if (isa<FunctionDecl>(item)) {
@@ -160,7 +159,6 @@ void CallRanges::analyzeFunction(const FunctionDecl *fn) {
   check_.frames_.assign(1, OverflowCheck::Frame());
   check_.frames_.back().fn = fn;
   check_.targets_.clear();
-  check_.tries_.clear();
   State st;
   for (size_t i = 0; i < fn->params.size(); ++i) {
     const Param &p = fn->params[i];
@@ -228,7 +226,6 @@ void CallRanges::calledUserCode(State &st) {
       entry.second.len = someLength();
     }
   }
-  check_.mayThrow(st);
 }
 
 Val CallRanges::evalCall(const CallExpr *call, State &st) {

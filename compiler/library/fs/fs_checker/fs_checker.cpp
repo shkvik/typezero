@@ -1,5 +1,4 @@
 #include "compiler/library/fs/fs_checker/fs_checker.h"
-#include "compiler/check/errors/throw_checker/throw_checker.h"
 #include "compiler/check/expr/argument_checker/argument_checker.h"
 #include "compiler/check/expr/call_checker/call_checker.h"
 #include "compiler/check/expr/expr_checker/expr_checker.h"

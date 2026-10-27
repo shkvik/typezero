@@ -11,8 +11,7 @@ public:
   static const Type *bytesTypeNamed(llvm::StringRef name);
   Expr *checkBufferEncoding(Expr *arg);
   Expr *checkBytesIndex(IndexExpr *index);
-  void checkBytesStore(IndexExpr *index, const Expr *value, std::optional<BinaryOp> op,
-                       llvm::SMLoc loc);
+  void checkBytesStore(IndexExpr *index, const Expr *value);
   Expr *checkBytesMember(MemberExpr *member);
   Expr *checkBytesUnionMember(MemberExpr *member);
   Expr *checkBytesMethod(CallExpr *call, MemberExpr *member, const Type *expected);

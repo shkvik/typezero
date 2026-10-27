@@ -1,4 +1,5 @@
 #include "runtime/library/tz_modules/library/library.h"
+#include "runtime/core/closure/closure.h"
 #include "runtime/core/group/group.h"
 #include "runtime/core/map/map.h"
 #include "runtime/core/string/string.h"
@@ -36,6 +37,32 @@ void tz_lib_class_name(TzStr *out, const void *o, TzMaker make) {
     tz_buf_push(&b, (uint8_t)layout->name[i]);
   }
   *out = tz_buf_take(&b);
+}
+
+typedef struct TzDefer {
+  int64_t rc;
+  const TzLayout *layout;
+  TzFunction run;
+} TzDefer;
+
+static void defer_drop(void *object) {
+  TzDefer *d = (TzDefer *)object;
+  TzFunction run = d->run;
+  ((void (*)(TzObject *))run.info->code)(run.env);
+  tz_obj_release(run.env);
+  tz_obj_free(d);
+}
+
+static const TzLayout defer_layout = {defer_drop, NULL, 0, 0, "Defer", 5, 0};
+
+void *tz_defer_new(const void *info, void *env) {
+  TzDefer *d = (TzDefer *)tz_obj_alloc(sizeof(TzDefer));
+  d->rc = 1;
+  d->layout = &defer_layout;
+  d->run.info = (const TzFunctionInfo *)info;
+  d->run.env = (TzObject *)env;
+
+  return d;
 }
 
 int64_t tz_lib_pid(TzMaker make) {

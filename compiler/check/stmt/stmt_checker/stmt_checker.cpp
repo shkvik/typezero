@@ -1,6 +1,5 @@
 #include "compiler/check/stmt/stmt_checker/stmt_checker.h"
 #include "compiler/check/classes/class_checker/class_checker.h"
-#include "compiler/check/errors/throw_checker/throw_checker.h"
 #include "compiler/check/expr/expr_checker/expr_checker.h"
 #include "compiler/check/expr/truth_checker/truth_checker.h"
 #include "compiler/check/flow/flow_checker/flow_checker.h"
@@ -111,15 +110,6 @@ void StmtChecker::checkStmt(Stmt *stmt) {
   case Stmt::Kind::Continue:
     checker_.jumpChecker().checkJump(stmt);
     checker_.flow_.unreachable = true;
-    break;
-  case Stmt::Kind::Throw:
-    checker_.throwChecker().checkThrow(cast<ThrowStmt>(stmt));
-    checker_.flow_.unreachable = true;
-    break;
-  case Stmt::Kind::Try:
-    ++checker_.branchDepth_;
-    checker_.throwChecker().checkTry(cast<TryStmt>(stmt));
-    --checker_.branchDepth_;
     break;
   case Stmt::Kind::Empty:
   case Stmt::Kind::Debugger:

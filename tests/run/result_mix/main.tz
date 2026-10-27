@@ -62,7 +62,7 @@ const orders = mapAll(lines, parseOrder)
 for (const r of orders) console.log(r)
 
 let total = decimal(0)
-for (const r of orders) total += r.map(o => o.price * o.qty).unwrapOr(0)
+for (const r of orders) total += r.map(o => o.price * o.qty.toDecimal()).unwrapOr(0)
 console.log(`total ${total}`)
 console.log(checkBudget(total, 50), checkBudget(total, 30).mapErr(over => `over by ${over}`))
 

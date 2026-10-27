@@ -316,7 +316,8 @@ Expr *BytesNewChecker::checkBytesNew(NewExpr *expr, const Type *type) {
 }
 
 Expr *BytesNewChecker::checkBytesValues(CallExpr *call, ArrayLitExpr *lit, const Type *type) {
-  const Type *element = type->elementType();
+  const Type *element =
+      type->bytes() == Type::Bytes::Uint8Clamped ? Type::intTy() : type->elementType();
   std::string what = "an element of '" + type->name().str() + "'";
   call->type = Type::error();
   bool spreads =

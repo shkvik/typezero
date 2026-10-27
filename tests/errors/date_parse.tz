@@ -4,7 +4,7 @@ function make(text: string) {
   // expect-error: 'new Date' of a text known only when the program runs may fail, and 'new' gives no Result; write 'Date.parse(text)'
   const d = new Date(text)
   const ms = Date.parse(text)
-  // expect-error: property 'getTime' does not exist on type 'Result<double, DateError>'
+  // expect-error: property 'getTime' does not exist on type 'Result<int, DateError>'
   console.log(d, ms.getTime(), new Date("2026-10-23T10:00Z"))
 }
 make("x")

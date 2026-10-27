@@ -5,7 +5,7 @@ const b = x ** -1
 // expect-error: property 'toFixd' does not exist on type 'double'
 const c = (1.5).toFixd(2)
 // expect-error: argument of type 'string' is not assignable to parameter of type 'double'
-const d = isNaN("x")
+const d = Math.sqrt("x")
 // expect-error: type 'int' is not assignable to type 'string'
 const e = parseInt(5)
 // expect-error: Number() takes a number, a boolean, a string or a decimal, found 'int[]'

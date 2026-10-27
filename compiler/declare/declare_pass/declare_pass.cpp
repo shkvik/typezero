@@ -1,6 +1,5 @@
 #include "compiler/declare/declare_pass/declare_pass.h"
 #include "compiler/check/checker/checker.h"
-#include "compiler/check/errors/throw_checker/throw_checker.h"
 #include "compiler/check/objects/keyed_field_checker/keyed_field_checker.h"
 #include "compiler/declare/module_declarer/module_declarer.h"
 #include "compiler/declare/prelude/prelude.h"

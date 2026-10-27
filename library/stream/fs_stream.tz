@@ -44,6 +44,22 @@ export interface WriteStreamOptions {
   signal?: AbortSignal
 }
 
+function __tz_lib_close_fd(fd: int): boolean
+
+class OpenFile {
+  fd: int | undefined = undefined
+}
+
+function closeOnDrop(file: OpenFile) {
+  return __tz_defer(() => {
+    const fd = file.fd
+    if (fd == undefined) return
+    file.fd = undefined
+    if (!__tz_lib_close_fd(fd))
+      console.error(`closing file descriptor ${fd} on its last reference failed`)
+  })
+}
+
 function closeFd(fd: int | undefined, flush: boolean, err: StreamError | undefined,
                  cb: StreamCallback) {
   if (fd == undefined) {
@@ -71,7 +87,7 @@ export class ReadStream<T = Buffer> extends Readable<T> {
   flags: string
   mode: int
   start: double | undefined
-  end: double
+  end: double | undefined
   pos: double | undefined
   bytesRead = 0
   @__tz_hidden pending: boolean
@@ -79,6 +95,8 @@ export class ReadStream<T = Buffer> extends Readable<T> {
   @__tz_hidden _performingIO = false
   @__tz_hidden _ioDone: ((error: StreamError | undefined) => void) | undefined = undefined
   @__tz_hidden _invalid: StreamError | undefined = undefined
+  @__tz_hidden _file = new OpenFile()
+  @__tz_hidden _closer: object
 
   constructor(path: string, options?: ReadStreamOptions) {
     super({
@@ -93,13 +111,15 @@ export class ReadStream<T = Buffer> extends Readable<T> {
     this.flags = options?.flags ?? "r"
     this.mode = options?.mode ?? 0o666
     this.autoClose = options?.autoClose ?? true
+    if (this.autoClose) this._file.fd = this.fd
+    this._closer = closeOnDrop(this._file)
     const start = options?.start
     this.start = start
     this.pos = start
     if (start != undefined) this._invalid = invalidInteger(start, "start")
-    const end = options?.end ?? Infinity
+    const end = options?.end
     this.end = end
-    if (end != Infinity && this._invalid == undefined) {
+    if (end != undefined && this._invalid == undefined) {
       this._invalid = invalidInteger(end, "end")
       if (start != undefined && start > end && this._invalid == undefined)
         this._invalid = failure(
@@ -127,6 +147,7 @@ export class ReadStream<T = Buffer> extends Readable<T> {
       }
       const fd = opened.value
       this.fd = fd
+      if (this.autoClose) this._file.fd = fd
       this.pending = false
       callback()
       this.emit("open", fd)
@@ -136,8 +157,12 @@ export class ReadStream<T = Buffer> extends Readable<T> {
 
   _read(size: int): void {
     const pos = this.pos
-    const left = pos != undefined ? this.end - pos + 1 : this.end - this.bytesRead + 1
-    const n = left < size ? Math.floor(left) | 0 : size
+    const end = this.end
+    const left =
+      end == undefined ? size.toDouble()
+      : pos != undefined ? end - pos + 1
+      : end - this.bytesRead.toDouble() + 1
+    const n = left < size.toDouble() ? Math.floor(left).toInt() : size
     const fd = this.fd
     if (n <= 0 || fd == undefined) {
       this._pushChunk(undefined)
@@ -163,7 +188,7 @@ export class ReadStream<T = Buffer> extends Readable<T> {
       this.destroy(er)
     } else if (bytesRead > 0) {
       const pos = this.pos
-      if (pos != undefined) this.pos = pos + bytesRead
+      if (pos != undefined) this.pos = pos + bytesRead.toDouble()
       this.bytesRead += bytesRead
       let chunk = buf
       if (bytesRead != buf.length) {
@@ -181,6 +206,7 @@ export class ReadStream<T = Buffer> extends Readable<T> {
     const finish = (er: StreamError | undefined) => {
       const fd = this.fd
       this.fd = undefined
+      this._file.fd = undefined
       closeFd(fd, false, er, callback)
     }
     if (this._performingIO) this._ioDone = (er: StreamError | undefined) => finish(error ?? er)
@@ -207,6 +233,8 @@ export class WriteStream extends Writable<Buffer> {
   @__tz_hidden _performingIO = false
   @__tz_hidden _ioDone: ((error: StreamError | undefined) => void) | undefined = undefined
   @__tz_hidden _invalid: StreamError | undefined = undefined
+  @__tz_hidden _file = new OpenFile()
+  @__tz_hidden _closer: object
 
   constructor(path: string, options?: WriteStreamOptions) {
     super({
@@ -222,6 +250,8 @@ export class WriteStream extends Writable<Buffer> {
     this.flags = options?.flags ?? "w"
     this.mode = options?.mode ?? 0o666
     this.autoClose = options?.autoClose ?? true
+    if (this.autoClose) this._file.fd = this.fd
+    this._closer = closeOnDrop(this._file)
     this.flush = options?.flush ?? false
     const start = options?.start
     this.start = start
@@ -246,6 +276,7 @@ export class WriteStream extends Writable<Buffer> {
       }
       const fd = opened.value
       this.fd = fd
+      if (this.autoClose) this._file.fd = fd
       this.pending = false
       callback()
       this.emit("open", fd)
@@ -276,7 +307,7 @@ export class WriteStream extends Writable<Buffer> {
       if (tries > 5) cb(failure("ERR_SYSTEM_ERROR", "write failed"))
       else if (left != 0)
         this.#writeAll(data, offset + bytesWritten, left,
-                       pos != undefined ? pos + bytesWritten : undefined, cb, tries)
+                       pos != undefined ? pos + bytesWritten.toDouble() : undefined, cb, tries)
       else cb()
     })
   }
@@ -296,7 +327,7 @@ export class WriteStream extends Writable<Buffer> {
       callback(er)
     }, 0)
     const pos = this.pos
-    if (pos != undefined) this.pos = pos + chunk.length
+    if (pos != undefined) this.pos = pos + chunk.length.toDouble()
   }
 
   _writev(chunks: WriteChunk<Buffer>[], callback: StreamCallback): void {
@@ -309,6 +340,7 @@ export class WriteStream extends Writable<Buffer> {
     const finish = (er: StreamError | undefined) => {
       const fd = this.fd
       this.fd = undefined
+      this._file.fd = undefined
       closeFd(fd, this.flush, er, callback)
     }
     if (this._performingIO) this._ioDone = (er: StreamError | undefined) => finish(error ?? er)

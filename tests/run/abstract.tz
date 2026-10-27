@@ -33,10 +33,10 @@ class Rect extends Shape {
     super("rect")
   }
   area() {
-    return this.w * this.h
+    return (this.w * this.h).toDouble()
   }
   perimeter() {
-    return 2.0 * (this.w + this.h)
+    return 2.0 * (this.w + this.h).toDouble()
   }
 }
 

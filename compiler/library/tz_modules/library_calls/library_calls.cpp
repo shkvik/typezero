@@ -111,7 +111,8 @@ Expr *LibraryCalls::checkLibCall(CallExpr *call, NameExpr *name) {
                                          {"__tz_stdWrite", Builtin::LibStdWrite, 2, 0},
                                          {"__tz_ahead", Builtin::LibAhead, 1, 0},
                                          {"__tz_order", Builtin::LibOrder, 0, 0},
-                                         {"__tz_panic", Builtin::LibPanic, 1, 0}};
+                                         {"__tz_panic", Builtin::LibPanic, 1, 0},
+                                         {"__tz_defer", Builtin::LibDefer, 1, 0}};
   const Intrinsic *intrinsic =
       llvm::find_if(intrinsics, [&](const Intrinsic &i) { return i.name == name->name; });
   if (intrinsic == std::end(intrinsics) || call->args.size() != intrinsic->args ||
@@ -163,6 +164,11 @@ Expr *LibraryCalls::checkLibCall(CallExpr *call, NameExpr *name) {
   case Builtin::LibPanic:
     call->args[0] = checker_.argumentChecker().checkArg(call->args[0], Type::string());
     call->type = Type::voidTy();
+    break;
+  case Builtin::LibDefer:
+    call->args[0] = checker_.argumentChecker().checkArg(
+        call->args[0], Type::function({}, 0, false, Type::voidTy(), false));
+    call->type = Type::anyObject();
     break;
   case Builtin::LibChunk:
   case Builtin::LibIsChunk:

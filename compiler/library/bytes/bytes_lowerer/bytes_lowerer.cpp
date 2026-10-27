@@ -77,8 +77,16 @@ llvm::Value *toStorage(Lowering &, llvm::IRBuilder<> &b, Bytes kind, llvm::Value
   }
   case Bytes::Float64:
     return value;
-  case Bytes::Float32:
-    return b.CreateFPTrunc(value, storage);
+  case Bytes::Float32: {
+    llvm::Type *f64 = value->getType();
+    llvm::Value *top = llvm::ConstantFP::get(f64, 3.4028234663852886e38);
+    llvm::Value *within = b.CreateBinaryIntrinsic(
+        llvm::Intrinsic::minnum,
+        b.CreateBinaryIntrinsic(llvm::Intrinsic::maxnum, value,
+                                llvm::ConstantFP::get(f64, -3.4028234663852886e38)),
+        top);
+    return b.CreateFPTrunc(within, storage);
+  }
   case Bytes::Float16:
     return b.CreateTrunc(b.CreateCall(f16, {value}), storage);
   default:
@@ -145,8 +153,7 @@ llvm::Value *BytesLowerer::loadElement(llvm::Value *data, const Type *type, llvm
             "tz_f16_to_f64", lowering_.builder_.getDoubleTy(), {lowering_.builder_.getInt32Ty()}),
         {lowering_.builder_.CreateZExt(raw, lowering_.builder_.getInt32Ty())});
   default:
-    return isSignedKind(kind) ? lowering_.builder_.CreateSExt(raw, lowering_.builder_.getInt64Ty())
-                              : lowering_.builder_.CreateZExt(raw, lowering_.builder_.getInt64Ty());
+    return raw;
   }
 }
 
@@ -197,7 +204,8 @@ llvm::Value *BytesLowerer::emitBytesElementAssign(AssignExpr *assign, bool needR
   } else {
     llvm::Value *old = loadElement(bytesData(bytes.value), type, position);
     value = lowering_.binaryLowerer().emitArithmetic(
-        *assign->op, old, lowering_.exprLowerer().emitExpr(assign->value), element);
+        *assign->op, old, lowering_.exprLowerer().emitExpr(assign->value), element,
+        assign->rangeProven);
   }
   storeElement(bytesData(bytes.value), type, position, value);
   lowering_.refCounts().dropOperand(bytes);

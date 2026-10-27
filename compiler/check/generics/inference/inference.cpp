@@ -49,7 +49,8 @@ const Type *listSlice(const Type *list, size_t begin, size_t end, bool last) {
 Inference::Inference(llvm::ArrayRef<const Type *> params, const Origins &origins,
                      std::function<const Type *(const Type *)> elementOf)
     : params(params), candidates(params.size()), weakCandidates(params.size()),
-      undefinedSeen(params.size(), false), origins(origins), elementOf(std::move(elementOf)) {}
+      literalCandidates(params.size()), undefinedSeen(params.size(), false), origins(origins),
+      elementOf(std::move(elementOf)) {}
 
 void Inference::from(const Type *pattern, const Type *actual) {
   if (actual->isError() || actual->isVoid()) {
@@ -66,7 +67,7 @@ void Inference::from(const Type *pattern, const Type *actual) {
     if (element && weak && actual->isArray() && !mentionsParam(element)) {
       candidate = Type::array(element);
     }
-    (weak ? weakCandidates : candidates)[k].push_back(candidate);
+    (intLiteral ? literalCandidates : weak ? weakCandidates : candidates)[k].push_back(candidate);
     if (element && elementOf) {
       if (const Type *given = elementOf(candidate)) {
         from(element, given);

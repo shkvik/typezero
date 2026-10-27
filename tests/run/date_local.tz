@@ -41,14 +41,8 @@ for (const y of shortYears) console.log(new Date(y, 0).getFullYear(), Date.UTC(y
 // Before standard time, the offset of the zone had seconds.
 const old = new Date(1880, 0, 1)
 console.log(text(old), old.getTimezoneOffset(), old.getTime())
-console.log(text(new Date(-1e14)), text(new Date(0)))
+console.log(text(new Date(-100000000000000)), text(new Date(0)))
 
-// A setter of a date without a time: setFullYear starts from midnight.
-const bad = new Date(NaN)
-bad.setHours(1)
-console.log(bad.getTime())
-bad.setFullYear(2020)
-console.log(text(bad))
 
 // Local and UTC fields of the same moment.
 const moment = new Date(Date.UTC(2026, 0, 1, 3))

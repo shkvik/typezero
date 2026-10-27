@@ -49,9 +49,6 @@ bool InlineGeneratorLowerer::isInlinable(const FunctionDecl *decl) const {
       !decl->sym->ret->isIterator()) {
     return false;
   }
-  if (hasTry(decl->body)) {
-    return false;
-  }
   unsigned depth = 0;
   for (const Lowering::InlineGenerator *frame = lowering_.inline_; frame;
        frame = frame->consumerContext.inlined) {
@@ -169,9 +166,6 @@ Lowering::Producer InlineGeneratorLowerer::prepare(Expr *source, llvm::Value *re
   assert((type->isArray() || type->isString() || type->isIterator() || type->isTypedArray()) &&
          "Checker checks what is iterated");
   llvm::Value *slot = hold(source);
-  if (type->isIterator()) {
-    lowering_.scopes_.back().iterators.push_back(slot);
-  }
 
   return lowering_.lazyChainLowerer().valueProducer(slot, type, returnSlot);
 }

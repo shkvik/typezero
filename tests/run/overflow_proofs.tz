@@ -1,0 +1,73 @@
+// Every operation of integers must fit its type (docs/numbers.md, section 2):
+// the compiler knows the ranges of values over the whole program, and where
+// a value from outside may make an integer too large, or a counter grows in
+// a loop without a bound, it is an error (errors/overflow_input.tz). Here are
+// the operations it proves: checks, masks, Math.min and Math.max, `%`, the
+// calls of a function, loops with bounds.
+import { readLine } from "tz:io"
+
+const text = readLine() ?? "[1, 2, 3]"
+const parsed = JSON.parse<int[]>(text)
+if (parsed.isErr()) process.exit(1)
+const prices = parsed.value
+let sum = 0
+for (const p of prices) if (p >= 0 && p < 1000000) sum += p
+console.log(sum)
+
+const seconds: int = parseInt(readLine() ?? "90").unwrapOr(0)
+// A check before the operation keeps it within int.
+if (seconds >= 0 && seconds < 86400) console.log(seconds * 1000)
+// So does a function that checks (docs/narrowing.md, section 1).
+function isSmall(x: int) {
+  return x >= 0 && x < 1000
+}
+if (isSmall(seconds)) console.log(seconds * 1000)
+// Bounds from Math.min and Math.max, `%`, masks and charCodeAt.
+console.log(Math.max(0, Math.min(seconds, 1000)) * 1000, (seconds % 100) * 1000)
+console.log((seconds & 0xff) * 1000, (text.charCodeAt(0) ?? 0) * 1000)
+
+// All the calls of a function count.
+function triple(n: int): int {
+  return n * 3
+}
+console.log(triple(5), triple(700000000))
+
+// A hash counts modulo 2^32 in a Bit.Wrap32: nothing to prove there.
+let h: Bit.Wrap32 = 0
+for (let i = 0; i < text.length; i++) h = h * 31 + text.charCodeAt(i)
+console.log(h.value, (h * 7).value, ((h << 5) ^ h).value)
+
+// Loops: what a loop adds up is bounded by its passes.
+let small = 0
+for (let i = 0; i < 1000; i++) small += i
+let large = 0
+for (let i = 0; i < 100000; i++) large += i
+let squares = 0
+for (let i = 0; i < 100000; i++) squares = i * i
+console.log(small, large > 0, squares > 0)
+// A counter of a loop that only the input ends: 64 bits are enough for it.
+let lines = 0
+while (readLine() != undefined) lines++
+let count: int = 0
+while (readLine() != undefined) count++
+console.log(lines, count)
+// A loop that its checks end.
+let k = 0
+while (true) {
+  k++
+  if (k * k > 50) break
+}
+console.log(k)
+console.log([1, 2, 3].map((x) => x * 1000))
+
+// A divisor checked not to be 0.
+function divide(a: int, b: int): int {
+  if (b == 0) return 0
+  return a / b
+}
+function average(xs: int[]) {
+  let sum = 0
+  for (const x of xs) if (x >= 0 && x < 1000000) sum += x
+  return xs.length > 0 ? sum / xs.length : 0
+}
+for (let i = 2; i >= 0; i--) console.log(divide(10, i), average([2, 4, 6]), average([]))

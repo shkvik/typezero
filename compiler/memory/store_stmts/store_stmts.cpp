@@ -105,19 +105,6 @@ void StoreStmts::stmt(const Stmt *stmt) {
     }
     break;
   }
-  case Stmt::Kind::Throw:
-    scanner_.store(scanner_.storeExprs().expr(llvm::cast<ThrowStmt>(stmt)->value));
-    break;
-  case Stmt::Kind::Try: {
-    auto *s = llvm::cast<TryStmt>(stmt);
-    this->stmt(s->block);
-    if (s->param.sym) {
-      scanner_.var(s->param.sym);
-    }
-    this->stmt(s->handler);
-    this->stmt(s->finalizer);
-    break;
-  }
   case Stmt::Kind::Class: {
     auto *cls = llvm::cast<ClassDecl>(stmt);
     for (const ClassField &f : cls->fields) {

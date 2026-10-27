@@ -291,10 +291,6 @@ function required(dictionary: string, member: string): SubtleError {
 
 function integer(value: double, member: string, dictionary: string,
                  max: double): Result<double, SubtleError> {
-  if (!Number.isFinite(value))
-    return err(typeError(
-      `${kPrefix}: '${member}' of '${dictionary}' (passed algorithm) is not a finite number.`,
-    ))
   const x = Math.trunc(value)
   if (x < 0 || x > max)
     return err(typeError(
@@ -306,7 +302,7 @@ function integer(value: double, member: string, dictionary: string,
 const kUnsignedLong = 4294967295
 
 function unsignedLong(value: double): double {
-  if (!Number.isFinite(value) || value == 0) return 0
+  if (value == 0) return 0
   const x = Math.trunc(value)
   if (x >= 0 && x <= kUnsignedLong) return x
   return x % 4294967296
@@ -843,10 +839,10 @@ function importHmac(
   }
   const length = bytes.length * 8
   if (length == 0) return err(dataError("Zero-length key is not supported"))
-  if (algorithm.length != undefined && algorithm.length != length)
+  if (algorithm.length != undefined && algorithm.length != length.toDouble())
     return err(dataError("Invalid key length"))
   const handle = new HmacHandle(createSecretKey(bytes), usages, hash)
-  return ok(new CryptoKey(handle, { name: "HMAC", length, hash: { name: hash } }, extractable))
+  return ok(new CryptoKey(handle, { name: "HMAC", length: length.toDouble(), hash: { name: hash } }, extractable))
 }
 
 class AesHandle extends KeyHandle {
@@ -859,9 +855,9 @@ class AesHandle extends KeyHandle {
     let result: ArrayBuffer | undefined = undefined
     if (this.name == "AES-GCM") {
       const tag = (algorithm.tagLength ?? 128) / 8
-      if (decrypt && tag > bytesOf(data).length)
+      if (decrypt && tag > bytesOf(data).length.toDouble())
         return err(operationError("The provided data is too small."))
-      result = await this.#gcm(algorithm, data, decrypt, tag | 0)
+      result = await this.#gcm(algorithm, data, decrypt, Math.trunc(tag).toInt())
     } else if (this.name == "AES-CBC") {
       result = await this.#cbc(algorithm, data, decrypt)
     } else {
@@ -890,7 +886,7 @@ class AesHandle extends KeyHandle {
 
   #ctr(algorithm: Algorithm, data: BufferSource, decrypt: boolean) {
     const counter = algorithm.counter ?? kNoBytes
-    const bits = (algorithm.length ?? 128) | 0
+    const bits = Math.trunc(algorithm.length ?? 128).toInt()
     if (this.bits == 128)
       return __tz_subtle_aes("aes-128-ctr", this.key, decrypt, counter, kNoBytes, 0, bits, data)
     if (this.bits == 192)
@@ -974,8 +970,8 @@ function importAes(
     return ok(undefined)
   }
   const length = bytes.length * 8
-  const handle = new AesHandle(createSecretKey(bytes), name, usages, length)
-  return ok(new CryptoKey(handle, { name, length }, extractable))
+  const handle = new AesHandle(createSecretKey(bytes), name, usages, length.toDouble())
+  return ok(new CryptoKey(handle, { name, length: length.toDouble() }, extractable))
 }
 
 function pbkdf2Of(hash: string, key: KeyObject, salt: BufferSource, iterations: double,
@@ -1059,13 +1055,13 @@ function keyType(key: KeyObject): KeyType {
 }
 
 function derLength(n: int): Uint8Array {
-  if (n < 128) return new Uint8Array([n & 0x7f])
-  if (n < 256) return new Uint8Array([0x81, n & 0xff])
-  return new Uint8Array([0x82, (n >> 8) & 0xff, n & 0xff])
+  if (n < 128) return new Uint8Array([(n & 0x7f).toUint8()])
+  if (n < 256) return new Uint8Array([0x81, (n & 0xff).toUint8()])
+  return new Uint8Array([0x82, ((n >> 8) & 0xff).toUint8(), (n & 0xff).toUint8()])
 }
 
 function der(tag: int, content: Uint8Array): Uint8Array {
-  return concat([new Uint8Array([tag & 0xff]), derLength(content.length), content])
+  return concat([new Uint8Array([(tag & 0xff).toUint8()]), derLength(content.length), content])
 }
 
 class EcHandle extends KeyHandle {
@@ -1247,14 +1243,14 @@ async function ecdhDeriveBits(
   const bits = await __tz_subtle_derive(handle.key, theirs.key)
   if (bits == undefined) return err(failed())
   if (length == undefined) return ok(bits)
-  const bytes = Math.ceil(length / 8) | 0
+  const bytes = Math.ceil(length / 8).toInt()
   if (bits.byteLength < bytes) return err(operationError("derived bit length is too small"))
   const cut = new Uint8Array(bits.slice(0, bytes))
   const rest = length % 8
   if (rest != 0) {
-    const masks = [0, 0x80, 0xc0, 0xe0, 0xf0, 0xf8, 0xfc, 0xfe]
+    const masks: uint8[] = [0, 0x80, 0xc0, 0xe0, 0xf0, 0xf8, 0xfc, 0xfe]
     const last = cut.length - 1
-    if (last >= 0) cut[last] = cut[last] & (masks[rest | 0] ?? 0)
+    if (last >= 0) cut[last] = cut[last] & (masks[Math.trunc(rest).toInt()] ?? 0)
   }
   return ok(arrayBufferOf(cut))
 }
@@ -1294,9 +1290,9 @@ class RsaHandle extends KeyHandle {
 
   #saltLength(algorithm: Algorithm): int {
     const salt = algorithm.saltLength ?? 0
-    const most = Math.ceil((this.modulusLength - 1) / 8) - digestBytes(this.hash) - 2
+    const most = Math.ceil((this.modulusLength - 1) / 8) - digestBytes(this.hash).toDouble() - 2
     if (salt > most) return -1
-    return salt | 0
+    return Math.trunc(salt).toInt()
   }
 
   async cipher(algorithm: Algorithm, data: BufferSource,
@@ -1351,8 +1347,8 @@ function rsaDetails(key: KeyObject): Result<Algorithm, SubtleError> {
   const n = base64url(jwk.n ?? "")
   let bits = n.length * 8
   const first = n[0] ?? 0
-  for (let bit = 0x80; bit > 0 && (first & bit) == 0; bit = bit >> 1) bits -= 1
-  return ok({ name: "", modulusLength: bits, publicExponent: base64url(jwk.e ?? "") })
+  for (let bit = 0x80; bit > 0 && (first.toInt() & bit) == 0; bit = bit >> 1) bits -= 1
+  return ok({ name: "", modulusLength: bits.toDouble(), publicExponent: base64url(jwk.e ?? "") })
 }
 
 async function generateRsa(
@@ -1368,12 +1364,12 @@ async function generateRsa(
     const byte = exponent[i] ?? 0
     if (shift >= 4 && byte != 0)
       return err(operationError("The publicExponent must be equivalent to an unsigned 32-bit value"))
-    if (shift < 4) value = value + byte * Math.pow(256, shift)
+    if (shift < 4) value = value + byte.toInt() * Math.pow(256, shift)
   }
   if (anyNotIn(usages, name == "RSA-OAEP" ? ["encrypt", "decrypt", "wrapKey", "unwrapKey"] : ["sign", "verify"]))
     return err(syntaxError("Unsupported key usage for a RSA key"))
   const modulusLength = algorithm.modulusLength ?? 0
-  const privateKey = await __tz_subtle_generate(0, modulusLength, value, "")
+  const privateKey = await __tz_subtle_generate(0, modulusLength, value.toDouble(), "")
   if (privateKey == undefined) return err(failed())
   const publicKey = madeKey(createPublicKey(privateKey))
   if (publicKey.isErr()) return err(publicKey.error)

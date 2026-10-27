@@ -97,8 +97,8 @@ Expr *NameChecker::checkName(NameExpr *name) {
       return checker_.classValueChecker().checkClassValue(name, cls);
     }
   }
-  static const llvm::StringLiteral builtins[] = {"String", "Number",   "parseInt", "parseFloat",
-                                                 "isNaN",  "isFinite", "Boolean"};
+  static const llvm::StringLiteral builtins[] = {"String", "Number", "parseInt", "parseFloat",
+                                                 "Boolean"};
   static const llvm::StringLiteral uris[] = {"encodeURIComponent", "encodeURI",
                                              "decodeURIComponent", "decodeURI"};
   static const std::pair<llvm::StringLiteral, llvm::StringLiteral> objects[] = {

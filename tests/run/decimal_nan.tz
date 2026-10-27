@@ -1,7 +1,0 @@
-// A double that is NaN or infinite has no decimal: decimal(x) of one is fatal
-// for now (JavaScript throws a RangeError for BigInt(NaN)); doubles without
-// NaN come with the numbers (docs/numbers.md).
-// expect-exit: 2
-// expect-stderr: panic: The number NaN cannot be converted to a decimal because
-const values: double[] = [0.5, 1e300, Number("x")]
-for (const v of values) console.log(decimal(v))

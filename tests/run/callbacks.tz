@@ -23,7 +23,10 @@ nums.pop()
 
 // sort with a comparison function: stable, numbers, strings, doubles.
 const people = [["ann", "30"], ["bob", "25"], ["cid", "30"], ["dan", "25"]]
-people.sort((a, b) => parseInt(a[1] ?? "0") - parseInt(b[1] ?? "0"))
+// tz: an age from parseInt may be any int, whose difference could overflow, so
+// the ages are compared.
+const age = (p: string[]) => parseInt(p[1] ?? "0").unwrapOr(0)
+people.sort((a, b) => (age(a) < age(b) ? -1 : age(a) > age(b) ? 1 : 0))
 console.log(people.map(p => p[0]).join(" "))
 const values = [3.5, -1, 2.25, 10]
 values.sort((a, b) => b - a)
@@ -35,11 +38,11 @@ maybe.sort((a, b) => (a ?? 0) - (b ?? 0))
 console.log(maybe)
 
 // Built-in functions where a callback is expected.
-console.log(["1.5", "2", "x"].map(parseFloat), [4, 9, 16].map(Math.sqrt))
+console.log(["1.5", "2", "x"].map(s => parseFloat(s).unwrapOr(-1)), [4.0, 9, 16].map(Math.sqrt))
 console.log([-1.5, 2.5].map(Math.round), ["a", "b"].map(String))
-console.log([1, NaN, 3].filter(isNaN).length)
+console.log([1, 2.5, 3].filter(Number.isInteger).length)
 const strs = ["10", "20"]
-console.log(strs.map(s => parseInt(s)))
+console.log(strs.map(s => parseInt(s).unwrapOr(-1)))
 
 // Named functions as callbacks.
 function isEven(x: int) { return x % 2 == 0 }

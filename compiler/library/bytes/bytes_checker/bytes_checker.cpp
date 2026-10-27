@@ -134,8 +134,7 @@ Expr *BytesChecker::checkBytesIndex(IndexExpr *index) {
   return index;
 }
 
-void BytesChecker::checkBytesStore(IndexExpr *index, const Expr *value, std::optional<BinaryOp> op,
-                                   llvm::SMLoc loc) {
+void BytesChecker::checkBytesStore(IndexExpr *index, const Expr *value) {
   const Type *target = index->object->type;
   if (index->index->type->isError() || (value && value->type->isError())) {
     return;
@@ -152,28 +151,6 @@ void BytesChecker::checkBytesStore(IndexExpr *index, const Expr *value, std::opt
                               check + ")'");
     return;
   }
-  std::string what = "an element of '" + target->name().str() + "'";
-  if (!op) {
-    checker_.byteProofs().checkFits(value, target, what);
-    return;
-  }
-  int64_t lo, hi;
-  if (!target->elementRange(lo, hi) || target->bytes() == Bytes::Uint8Clamped) {
-    return;
-  }
-  Range result =
-      operate(*op, Range{lo, hi}, value ? checker_.byteProofs().valueRange(value) : exact(1),
-              target->elementType()->isInt());
-  if (result.lo && result.hi && *result.lo >= lo && *result.hi <= hi) {
-    return;
-  }
-  std::string element = object + "[" + position + "]";
-  std::string written = value ? element + " " + opSpelling(*op) + " " + valueText(value)
-                              : element + (*op == BinaryOp::Add ? " + 1" : " - 1");
-  checker_.diags_.error(loc,
-                        "cannot prove that the result fits in " + what + " (" + rangeText(lo, hi) +
-                            "), and JavaScript would cut it without a word; cut it explicitly: '" +
-                            element + " = " + wrapHint(target->bytes(), "(" + written + ")") + "'");
 }
 
 Expr *BytesChecker::checkBytesMember(MemberExpr *member) {

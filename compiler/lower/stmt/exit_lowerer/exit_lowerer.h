@@ -4,14 +4,12 @@
 
 namespace tz {
 
-class TryLowerer {
+class ExitLowerer {
 public:
-  explicit TryLowerer(Lowering &lowering);
+  explicit ExitLowerer(Lowering &lowering);
 
-  void emitTry(TryStmt *stmt);
   void emitReturnOf(llvm::Value *value);
   void emitJumpTo(size_t target, bool isBreak);
-  Lowering::TryContext *finallyBetween(size_t target);
 
 private:
   Lowering &lowering_;

@@ -1,0 +1,46 @@
+// A double is never NaN or Infinity (docs/numbers.md, section 10): what could
+// make them is checked, and what comes from outside gives a Result.
+
+// Math.clamp, and Math.abs in a condition that bounds a value.
+console.log(Math.clamp(5, 0, 3), Math.clamp(-2.5, -1, 1), Math.clamp(0.5, 0, 1))
+function inverse(x: double): double | undefined {
+  if (Math.abs(x) < 0.001) return undefined
+  return 1 / x
+}
+console.log(inverse(4), inverse(-0.5), inverse(0.0001))
+function safeSqrt(x: double): double {
+  return Math.sqrt(Math.max(x, 0))
+}
+console.log(safeSqrt(16), safeSqrt(-1))
+
+// Math.min and Math.max of a spread that may be empty may be undefined.
+const none: double[] = []
+console.log(Math.max(...none), Math.min(...[3.5, 1.5]))
+
+// The bytes of a double may hold NaN or Infinity: reading one gives a Result.
+const bytes = new DataView(new ArrayBuffer(8))
+bytes.setFloat64(0, 1.25)
+const fine = bytes.getFloat64(0)
+console.log(fine.isOk() ? fine.value : "Err")
+bytes.setUint32(0, 0x7ff80000)
+const nan = bytes.getFloat64(0)
+console.log(nan.isErr() ? nan.error.message : "Ok")
+bytes.setUint32(0, 0x7ff00000)
+const inf = bytes.getFloat64(0)
+console.log(inf.isErr() ? inf.error.code : "Ok")
+
+// A number of JSON beyond a double is an error of JSON.
+const big = JSON.parse<double[]>("[1, 1e400]")
+console.log(big.isErr() ? big.error.message : "Ok")
+const near = JSON.parse<double[]>("[1, 1e300]")
+console.log(near.isOk() ? near.value : "Err")
+
+// A float32 holds up to 3.4e38: a larger value is stored as the largest.
+const floats = new Float32Array(2)
+floats[0] = 1e39
+floats[1] = -1e300
+console.log(floats[0], floats[1])
+
+// A decimal beyond a double becomes the largest double.
+const huge: decimal = 10
+console.log(Number(huge ** 400), Number(-(huge ** 400)))

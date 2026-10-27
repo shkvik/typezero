@@ -22,7 +22,7 @@ const d = new Date(5)
 const held: Value = values[0] ?? d
 console.log(held == values[0], held == d)
 
-function size(x: Record<string, number> | number[]): number {
+function size(x: Record<string, number> | number[]): int {
   if (Array.isArray(x)) return x.length
   return Object.keys(x).length
 }

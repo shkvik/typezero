@@ -4,5 +4,5 @@
 1 minute 2 minutes -3 minutes
 10 hours
 90000 1814400000 2m 2 minutes
-NaN NaN
-NaN Infinity
+undefined undefined
+undefined -0.5ms

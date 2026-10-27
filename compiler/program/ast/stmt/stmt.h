@@ -27,8 +27,6 @@ public:
     Enum,
     Debugger,
     Class,
-    Throw,
-    Try,
   };
 
   Kind kind() const { return kind_; }

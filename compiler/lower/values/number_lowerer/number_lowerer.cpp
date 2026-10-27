@@ -118,7 +118,6 @@ llvm::Value *NumberLowerer::emitStringToNumber(llvm::Value *str) {
 
 llvm::Value *NumberLowerer::emitNumberBuiltin(CallExpr *call) {
   llvm::Type *f64 = lowering_.builder_.getDoubleTy();
-  llvm::Value *nan = llvm::ConstantFP::getNaN(f64);
   bool hasArg = !call->args.empty();
   const Type *argType = hasArg ? call->args[0]->type : nullptr;
 
@@ -127,15 +126,20 @@ llvm::Value *NumberLowerer::emitNumberBuiltin(CallExpr *call) {
     if (!hasArg) {
       return llvm::ConstantFP::get(f64, 0.0);
     }
-    if (argType->isUndefined()) {
-      lowering_.stmtLowerer().emitDiscarded(call->args[0]);
-      return nan;
-    }
     Lowering::Operand value = lowering_.refCounts().emitOperand(call->args[0], true);
-    const Type *base = argType->nonOptional();
-    llvm::Value *v =
-        argType->isOptional() ? lowering_.builder_.CreateExtractValue(value.value, 0) : value.value;
+    const Type *base = argType;
+    llvm::Value *v = value.value;
     llvm::Type *i64 = lowering_.builder_.getInt64Ty();
+    if (base->isString() && call->type->isResult()) {
+      llvm::Value *parsed = lowering_.builder_.CreateCall(
+          lowering_.processLowerer().processFunction(
+              "tz_str_to_number_r", f64,
+              {lowering_.builder_.getPtrTy(), i64, lowering_.builder_.getPtrTy()}),
+          {lowering_.stringLowerer().stringObj(v), lowering_.stringLowerer().stringMeta(v),
+           lowering_.resultLowerer().failureMaker(call->type->errType())});
+      lowering_.refCounts().dropOperand(value);
+      return lowering_.resultLowerer().catchFailure(parsed, call->type, call->loc());
+    }
     llvm::Value *number =
         base->isString() ? emitStringToNumber(v)
         : base->isBool() ? lowering_.builder_.CreateUIToFP(v, f64)
@@ -146,10 +150,6 @@ llvm::Value *NumberLowerer::emitNumberBuiltin(CallExpr *call) {
                    lowering_.decimalLowerer().decimalMeta(v)})
         : base->isInteger() ? toDouble(v, base)
                             : v;
-    if (argType->isOptional()) {
-      number = lowering_.builder_.CreateSelect(
-          lowering_.builder_.CreateExtractValue(value.value, 1), number, nan);
-    }
     lowering_.refCounts().dropOperand(value);
     return number;
   }
@@ -158,34 +158,32 @@ llvm::Value *NumberLowerer::emitNumberBuiltin(CallExpr *call) {
     bool isInt = call->builtin == Builtin::ParseInt;
     Lowering::Operand str = lowering_.refCounts().emitOperand(
         call->args[0], call->args.size() == 1 || AssignLowerer::cannotAssign(call->args[1]));
+    llvm::Type *ptr = lowering_.builder_.getPtrTy(), *i64 = lowering_.builder_.getInt64Ty();
+    llvm::Value *maker = lowering_.resultLowerer().failureMaker(call->type->errType());
     llvm::Value *result;
     if (isInt) {
       llvm::Value *radix = call->args.size() > 1 ? lowering_.exprLowerer().emitExpr(call->args[1])
                                                  : lowering_.builder_.getInt64(0);
       result = lowering_.builder_.CreateCall(
-          lowering_.rt_.parseInt, {lowering_.stringLowerer().stringObj(str.value),
-                                   lowering_.stringLowerer().stringMeta(str.value), radix});
+          lowering_.processLowerer().processFunction("tz_parse_int_r", i64, {ptr, i64, i64, ptr}),
+          {lowering_.stringLowerer().stringObj(str.value),
+           lowering_.stringLowerer().stringMeta(str.value), radix, maker});
     } else {
-      result = lowering_.builder_.CreateCall(lowering_.rt_.parseFloat,
-                                             {lowering_.stringLowerer().stringObj(str.value),
-                                              lowering_.stringLowerer().stringMeta(str.value)});
+      result = lowering_.builder_.CreateCall(
+          lowering_.processLowerer().processFunction("tz_parse_float_r", f64, {ptr, i64, ptr}),
+          {lowering_.stringLowerer().stringObj(str.value),
+           lowering_.stringLowerer().stringMeta(str.value), maker});
     }
     lowering_.refCounts().dropOperand(str);
-    return call->type->isInteger() ? emitCheckedInteger(result, call->type) : result;
+    return lowering_.resultLowerer().catchFailure(result, call->type, call->loc());
   }
-  case Builtin::IsNaN:
-  case Builtin::IsFinite:
   case Builtin::IsInteger:
   case Builtin::IsSafeInteger: {
     llvm::Value *x = lowering_.exprLowerer().emitExpr(call->args[0]);
     if (argType->isInteger() && argType->bitWidth() < 64) {
-      return call->builtin == Builtin::IsNaN ? lowering_.builder_.getFalse()
-                                             : lowering_.builder_.getTrue();
+      return lowering_.builder_.getTrue();
     }
     if (argType->isInteger()) {
-      if (call->builtin == Builtin::IsNaN) {
-        return lowering_.builder_.getFalse();
-      }
       if (call->builtin != Builtin::IsSafeInteger) {
         return lowering_.builder_.getTrue();
       }
@@ -196,15 +194,9 @@ llvm::Value *NumberLowerer::emitNumberBuiltin(CallExpr *call) {
       return lowering_.builder_.CreateICmpULE(lowering_.builder_.CreateAdd(x, limit),
                                               lowering_.builder_.CreateAdd(limit, limit));
     }
-    if (call->builtin == Builtin::IsNaN) {
-      return lowering_.builder_.CreateFCmpUNO(x, x);
-    }
     llvm::Value *magnitude = lowering_.builder_.CreateUnaryIntrinsic(llvm::Intrinsic::fabs, x);
     llvm::Value *finite =
         lowering_.builder_.CreateFCmpOLT(magnitude, llvm::ConstantFP::getInfinity(f64));
-    if (call->builtin == Builtin::IsFinite) {
-      return finite;
-    }
     llvm::Value *whole = lowering_.builder_.CreateFCmpOEQ(
         lowering_.builder_.CreateUnaryIntrinsic(llvm::Intrinsic::trunc, x), x);
     llvm::Value *integer = lowering_.builder_.CreateAnd(finite, whole);
@@ -278,6 +270,24 @@ llvm::Value *NumberLowerer::emitNumberBuiltin(CallExpr *call) {
     llvm::Value *text =
         lowering_.stringLowerer().callReturningString(lowering_.rt_.numToRadix, {x, radix});
     return text;
+  }
+  case Builtin::NumConvert: {
+    Expr *object = cast<MemberExpr>(call->callee)->object;
+    llvm::Value *x = lowering_.exprLowerer().emitExpr(object);
+    const Type *from = object->type, *to = call->type;
+    if (from == to) {
+      return x;
+    }
+    if (to->isDecimal()) {
+      return lowering_.decimalLowerer().decimalFromInteger(x, from);
+    }
+    if (to->isFloat()) {
+      return toDouble(x, from);
+    }
+    if (from->isFloat()) {
+      return call->rangeProven ? fromDouble(x, to) : emitCheckedInteger(x, to);
+    }
+    return call->rangeProven ? intCast(x, from, to) : emitCheckedIntCast(x, from, to);
   }
   default:
     llvm_unreachable("not a function of Number");

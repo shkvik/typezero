@@ -74,7 +74,7 @@ function show<A extends unknown[]>(...args: A) {
   for (const x of args) parts.push(`${x}`)
   return parts.join("|")
 }
-console.log(show(1, "a", 2.5, true))
+console.log(show(1.0, "a", 2.5, true))
 function keep<A extends unknown[]>(...args: A) { return args }
 const kept = keep(1, "b")
 console.log(kept, kept[1].length)

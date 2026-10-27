@@ -37,7 +37,7 @@ const choice = pair.length > 1 ? 1 : "one"
 function parse(text: string) {
   if (text == "") return undefined
   const n = Number(text)
-  return Number.isNaN(n) ? text : n
+  return n.isErr() ? text : n.value
 }
 console.log(pair, choice, parse(""), parse("12"), parse("twelve"))
 console.log(Object.values({ name: "Ann", age: 30, admin: false }))

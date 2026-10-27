@@ -412,7 +412,7 @@ bool TruthChecker::checkTruthy(const Expr *expr, Checker::TruthUse use, const Ex
     std::string what = type->isOptional() ? noun + " that may be undefined" : noun;
     message =
         op ? "'" + std::string(op) + "' cannot test " + what : what + " cannot be a condition";
-    message += base->isFloat() ? ": 0 and NaN would count as false" : ": 0 would count as false";
+    message += ": 0 would count as false";
     if (type->isOptional()) {
       message += " too; ";
       if (isLength(expr) && (use == Checker::TruthUse::Condition || use == Checker::TruthUse::Not ||
@@ -426,8 +426,8 @@ bool TruthChecker::checkTruthy(const Expr *expr, Checker::TruthUse use, const Ex
         message += "check for undefined: '" + x + (negated ? " == " : " != ") + "undefined'";
       }
     } else if (base->isFloat()) {
-      message += "; compare it as you mean: '" + x + (negated ? " == 0', '" : " != 0', '") + x +
-                 (negated ? " <= 0' or 'Number.isNaN(" : " > 0' or '!Number.isNaN(") + x + ")'";
+      message += "; compare it as you mean: '" + x + (negated ? " == 0' or '" : " != 0' or '") + x +
+                 (negated ? " <= 0'" : " > 0'");
     } else {
       std::string test = negated ? x + " == 0" : isLength(expr) ? x + " > 0" : x + " != 0";
       if (use == Checker::TruthUse::Or) {

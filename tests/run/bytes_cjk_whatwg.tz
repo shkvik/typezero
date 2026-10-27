@@ -21,7 +21,7 @@ function hex(s: string): string {
   return out.join(" ")
 }
 function show(name: Label, bytes: int[], node: string) {
-  const text = new TextDecoder(name).decode(Uint8Array.from(bytes, x => x & 0xff))
+  const text = new TextDecoder(name).decode(Uint8Array.from(bytes, x => (x & 0xff).toUint8()))
   console.log(name, hex(text), `(node: ${node})`)
 }
 

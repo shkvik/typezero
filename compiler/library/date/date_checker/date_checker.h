@@ -9,6 +9,7 @@ public:
   explicit DateChecker(Checker &checker);
 
   Expr *checkDateNew(llvm::SMLoc loc, std::vector<Expr *> &args);
+  Expr *timeArg(Expr *arg);
   Expr *checkDateFunction(CallExpr *call, NameExpr *name);
   Expr *checkDateStatic(CallExpr *call, MemberExpr *member);
   Expr *checkDateStaticMember(MemberExpr *member);

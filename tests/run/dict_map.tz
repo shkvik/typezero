@@ -25,8 +25,8 @@ console.log(squares.get(2), squares.get(3) ?? -1)
 
 // Keys of any type: numbers as SameValueZero, objects by reference.
 const byNumber = new Map<double, string>()
-byNumber.set(NaN, "nan").set(-0, "zero").set(1.5, "one and a half")
-console.log(byNumber.get(NaN), byNumber.get(0), byNumber.has(-0), byNumber)
+byNumber.set(-0, "zero").set(1.5, "one and a half")
+console.log(byNumber.get(0), byNumber.has(-0), byNumber)
 interface Point { x: int; y: int }
 const p: Point = { x: 1, y: 2 }
 const q: Point = { x: 1, y: 2 }

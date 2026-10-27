@@ -1,37 +1,38 @@
-// Binary data (docs/bytes.md): a value that may not fit in an element, an
-// index that may be out of range, and the traps of JavaScript and node.
+// Binary data (docs/bytes.md): an element has the type of its kind (`uint8` in
+// a Uint8Array, docs/numbers.md, section 9), an int goes in explicitly, an
+// index may be out of range, and the traps of JavaScript and node.
 function stores(x: int, i: int, d: double, other: Uint8Array, a: int[], w: Int16Array) {
   const u = new Uint8Array(4)
-  // expect-error: 300 does not fit in an element of 'Uint8Array' (0 to 255): JavaScript would store 44
+  // expect-error: integer literal does not fit in type 'uint8'
   u[0] = 300
-  // expect-error: cannot prove that the value fits in an element of 'Uint8Array' (0 to 255)
+  // expect-error: type 'int' is not assignable to type 'uint8'; convert it explicitly: 'x.toUint8()'
   u[1] = x
-  u[1] = x & 0xff
-  if (x >= 0 && x <= 255) u[1] = x
+  u[1] = (x & 0xff).toUint8()
+  if (x >= 0 && x <= 255) u[1] = x.toUint8()
   u[2] = other[0] ?? 0
-  // expect-error: type 'double' is not assignable to type 'int'
+  // expect-error: type 'double' is not assignable to type 'uint8'; round it first, then convert
   u[3] = 1.7
-  // expect-error: type 'double' is not assignable to type 'int'
+  // expect-error: type 'double' is not assignable to type 'uint8'; round it first, then convert: 'Math.trunc(d).toUint8()'
   u[3] = d
   // expect-error: cannot prove that the index is within the Uint8Array
   u[i] = 1
   // expect-error: check the index first, e.g. 'if (i >= 0 && i < u.length)'
   if (i < u.length) u[i] = 1
   if (i >= 0 && i < u.length) u[i] = 2
-  // expect-error: cut it explicitly: 'u[0] = (u[0] + 1) & 0xff'
+  // expect-error: 'u[...]++' may overflow uint8: it may reach 256
   u[0]++
-  // expect-error: cannot prove that the result fits in an element of 'Uint8Array'
+  // expect-error: 'u[0] += 1' may overflow uint8: it may reach 256
   u[0] += 1
   u[0] ^= 0x0f
-  u[0] = Math.min(Math.max(x, 0), 255)
-  u[0] = x >>> 24
-  // expect-error: 256 does not fit in an element of 'Uint8Array' (0 to 255): JavaScript would store 0
+  u[0] = Math.min(Math.max(x, 0), 255).toUint8()
+  u[0] = (x >>> 24).toUint8()
+  // expect-error: integer literal does not fit in type 'uint8'
   u.fill(256)
   // expect-error: cannot prove that the elements of 'int[]' fit in an element of 'Uint8Array'
   u.set(a)
-  // expect-error: 999 does not fit in an element of 'Uint8Array'
+  // expect-error: integer literal does not fit in type 'uint8'
   u.set([1, 2, 999])
-  // expect-error: 300 does not fit in an element of 'Uint8Array'
+  // expect-error: integer literal does not fit in type 'uint8'
   console.log(new Uint8Array([1, 2, 300]))
   // expect-error: convert them explicitly, e.g. 'Uint8Array.from(a, x => x & 0xff)'
   console.log(new Uint8Array(a))
@@ -41,11 +42,11 @@ function stores(x: int, i: int, d: double, other: Uint8Array, a: int[], w: Int16
   console.log(new Uint8Array(new Float32Array(2)))
   // expect-error: the elements of 'Uint32Array' (0 to 4294967295) may not fit in an element of 'Int32Array'
   console.log(new Int32Array(new Uint32Array(2)))
-  // expect-error: cannot prove that the value fits in an element of 'Uint8Array'
+  // expect-error: type 'int' is not assignable to type 'uint8'; convert it explicitly
   console.log(Uint8Array.from(a, n => n * 2))
-  // expect-error: cannot prove that the value fits in an element of 'Uint8Array'
+  // expect-error: 'n * 2' may overflow uint8: it may reach 510
   console.log(u.map(n => n * 2))
-  console.log(u.map(n => 255 - n), Int8Array.from(u, n => n - 128))
+  console.log(u.map(n => 255 - n), Int8Array.from(u, n => (n.toInt() - 128).toInt8()))
   // expect-error: cannot prove that what the function returns fits
   console.log(u.map(Math.abs))
   const dv = new DataView(u.buffer)
@@ -82,7 +83,7 @@ function traps(u: Uint8Array, b: Buffer, buffer: ArrayBuffer, x: int) {
   // expect-error: the length of a Uint8Array cannot be negative, found -1
   console.log(new Uint8Array(-1))
   // expect-error: the length of a typed array must be an integer, found 'double'
-  console.log(new Uint8Array(x / 2.5))
+  console.log(new Uint8Array(x.toDouble() / 2.5))
   // expect-error: unknown encoding 'utf9' (node throws a TypeError)
   console.log(Buffer.from("x", "utf9"))
   // expect-error: 'utf-17' is not an encoding TextDecoder knows

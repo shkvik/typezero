@@ -1,0 +1,57 @@
+// tz has no NaN and no Infinity (docs/numbers.md, section 10): what would make
+// them is an error unless the compiler proves it does not happen.
+import { readLine } from "tz:io"
+
+const text = readLine() ?? "2.5"
+const parsed = parseFloat(text)
+const x = parsed.isOk() ? parsed.value : 0
+
+// expect-error: cannot find name 'NaN'
+const a = NaN
+// expect-error: cannot find name 'Infinity'
+const b = -Infinity
+// expect-error: cannot find name 'isNaN'
+const c = isNaN(x)
+// expect-error: property 'isFinite' does not exist on 'Number'
+const d = Number.isFinite(x)
+// expect-error: property 'POSITIVE_INFINITY' does not exist on 'Number'
+const e = Number.POSITIVE_INFINITY
+
+// A double from outside may be up to 1.8e308, and doubling it is Infinity.
+// expect-error: 'x * 2' may overflow double: 'x' comes from parseFloat on line 6; check the values before, or compute it as a 'decimal'
+console.log(x * 2)
+if (x >= -1e6 && x <= 1e6) console.log(x * 2)
+
+// A divisor that may be 0, or so close to 0 that the quotient is beyond a double.
+// expect-error: cannot prove that the divisor 'x' is not 0: 'x' comes from parseFloat on line 6; check it first, e.g. 'if (x != 0)'
+console.log(1 / x)
+// expect-error: may overflow double: it may go beyond ±1.8e308, where a double becomes Infinity, as the divisor 'x' may be close to 0; check it first, e.g. 'if (Math.abs(x) >= 0.000001)'
+if (x != 0) console.log(1 / x)
+if (Math.abs(x) >= 0.000001) console.log(1 / x)
+// expect-error: division by zero
+console.log(x / 0)
+
+// The domains of Math.
+// expect-error: cannot prove that the argument of 'Math.sqrt' is not negative: 'x' comes from parseFloat on line 6; check it first, e.g. 'if (x >= 0)'
+console.log(Math.sqrt(x))
+if (x >= 0) console.log(Math.sqrt(x))
+// expect-error: cannot prove that the argument of 'Math.log' is above 0
+console.log(Math.log(x))
+const cos = Math.cos(x) * 1.0000001
+// expect-error: cannot prove that the argument of 'Math.acos' is from -1 to 1: it may be -1.0000001; check it first, e.g. 'if (cos >= -1 && cos <= 1)', or use 'Math.clamp(cos, -1, 1)'
+console.log(Math.acos(cos))
+console.log(Math.acos(Math.clamp(cos, -1, 1)))
+// expect-error: 'Math.exp(...)' may overflow double
+console.log(Math.exp(x))
+// expect-error: cannot prove that the base of '(x - 10) ** 0.5' is not negative, which a fractional power needs (JavaScript gives NaN)
+console.log((x - 10) ** 0.5)
+console.log(Math.abs(x - 10) ** 0.5)
+
+// expect-error: cannot prove that the low bound of 'Math.clamp' is not above the high one
+console.log(Math.clamp(x, 10, 1))
+
+// Number() of a value that may be undefined would be NaN.
+const maybe: double | undefined = parsed.isOk() ? 1.5 : undefined
+// expect-error: Number() of a value that may be undefined would be NaN, and tz has no NaN; check it first or give a default with '??'
+console.log(Number(maybe))
+console.log(Number(maybe ?? 0))

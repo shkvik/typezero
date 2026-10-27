@@ -223,8 +223,10 @@ void VarChecker::checkVarDecl(VarDeclStmt *decl) {
       }
     }
     if (decl->isConst && d.init && type->isInteger()) {
+      checker_.constantFolder().noteUnsignedVar(d.sym, d.init);
       if (std::optional<int64_t> constant = checker_.constantFolder().intConstant(d.init)) {
         checker_.constVars_[d.sym] = *constant;
+        d.sym->literalConst = !declared && type->isInt() && TypeRelations::isIntLiteralTree(d.init);
       }
     }
     if (decl->isConst && d.init && type->isString()) {
@@ -259,6 +261,9 @@ void VarChecker::reportUntyped() {
     const Type *type = u.initUndefined ? Type::undefinedTy() : nullptr;
     for (const Type *t : u.assigned) {
       const Type *common = type ? TypeRelations::unify(type, t) : t;
+      if (!common && type && type->nonOptional()->isNumeric() && t->isNumeric()) {
+        common = type->nonOptional()->isFloat() ? type : t->isFloat() ? t : nullptr;
+      }
       type = common ? common : Type::error();
     }
     std::string name = u.var->name.str();

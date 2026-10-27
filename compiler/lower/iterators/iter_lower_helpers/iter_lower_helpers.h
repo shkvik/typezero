@@ -5,8 +5,4 @@
 #include "llvm/IR/MDBuilder.h"
 #include "llvm/Support/ErrorHandling.h"
 
-namespace tz {
-
-bool hasTry(const Stmt *stmt);
-
-}
+namespace tz {}

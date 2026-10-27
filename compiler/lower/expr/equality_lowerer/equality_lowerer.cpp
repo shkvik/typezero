@@ -174,6 +174,12 @@ llvm::Value *EqualityLowerer::emitEquality(BinaryExpr *bin) {
     return lowering_.stringLowerer().emitStringComparison(bin);
   }
 
+  if (lhs->type->isInteger() && rhs->type->isInteger() && lhs->type != rhs->type) {
+    llvm::Value *a = lowering_.exprLowerer().emitExpr(lhs);
+    llvm::Value *b = lowering_.exprLowerer().emitExpr(rhs);
+
+    return lowering_.binaryLowerer().emitMixedComparison(bin->op, a, b, lhs->type, rhs->type);
+  }
   Lowering::Operand a = lowering_.refCounts().emitOperand(lhs, AssignLowerer::cannotAssign(rhs));
   Lowering::Operand b = lowering_.refCounts().emitOperand(rhs, true);
   llvm::Value *equal = emitValuesEqual(a.value, b.value, lhs->type);

@@ -10,7 +10,7 @@ const total = empty.reduceRight((a, b) => a + b)
 console.log(total ?? 0, typeof total)
 console.log(Math.min(...empty), Math.max(...some), Math.min(0, ...empty))
 const doubles: double[] = []
-console.log(Math.max(...doubles), new Uint8Array(0).reduce((a, b) => a + b))
+console.log(Math.max(...doubles), new Uint8Array(0).reduce((a, b) => (a.toInt() + b.toInt()).toUint8()))
 console.log(empty.values().reduce((a, b) => a + b), some.values().reduce((a, b) => a * 10 + b))
 const prices: decimal[] = []
 const two: decimal[] = [1, 2]

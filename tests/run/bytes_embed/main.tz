@@ -4,7 +4,7 @@
 import { checksum } from "./sum.tz"
 
 const table = embedBytes("./table.bin")
-console.log(table.length, table[0] ?? -1, table.subarray(250))
+console.log(table.length, table[0]?.toInt() ?? -1, table.subarray(250))
 console.log(embedBytes("./table.bin") == table, checksum(table))
 table[0] = 7
 console.log(embedBytes("./table.bin")[0], table.buffer.byteLength, new Uint16Array(table.buffer, 0, 2))

@@ -60,7 +60,7 @@ console.log(mac.digest("base64"))
 
 // 5. Bytes from numbers, compared in constant time.
 const bytes = new Uint8Array(4)
-for (let i = 0; i < bytes.length; i++) bytes[i] = (i * 60) & 0xff
+for (let i = 0; i < bytes.length; i++) bytes[i] = ((i * 60) & 0xff).toUint8()
 const same = Uint8Array.from(bytes)
 console.log(timingSafeEqual(bytes, same), Buffer.from(bytes).toString("hex"))
 const roll = randomInt(1, 7)

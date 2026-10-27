@@ -1,5 +1,23 @@
-// throw and catch where the parser finds them, in forms that are not
-// JavaScript either: still no exceptions in tz (docs/errors.md, section 11).
+// throw, try, catch and finally are no syntax of tz: the parser names them
+// and goes on (docs/errors.md, section 11).
+function find(id: int): Result<string, string> {
+  // expect-error: there is no 'throw' in tz: an error is a value; return it, 'return err(...)', and give the function a 'Result'
+  if (id < 0) throw "bad id"
+  return ok("x")
+}
+// expect-error: there is no 'try' in tz: an error is a value; a function that can fail gives a 'Result', checked with 'if'
+try {
+  console.log(find(1))
+} catch (e) {
+  console.log(e)
+}
+// expect-error: there is no 'try' in tz
+try {
+  console.log(find(2))
+} finally {
+  console.log("done")
+}
+// In forms that are not JavaScript either.
 function lost() {
   // expect-error: there is no 'throw' in tz: an error is a value; return it, 'return err(...)'
   throw

@@ -1,5 +1,4 @@
 #include "compiler/library/events/event_map_inference/event_map_inference.h"
-#include "compiler/check/errors/throw_checker/throw_checker.h"
 #include "compiler/check/generics/generic_class_instantiator/generic_class_instantiator.h"
 #include "compiler/whole_program/flows/flows.h"
 #include "llvm/ADT/STLExtras.h"

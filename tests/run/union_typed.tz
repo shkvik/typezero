@@ -6,7 +6,7 @@ type ParseError = "empty" | "not a number"
 function parseCount(s: string): Result<int, ParseError> {
   if (s.length == 0) return err("empty")
   const n = parseInt(s)
-  return isNaN(n) ? err("not a number") : ok(n | 0)
+  return n.isErr() ? err("not a number") : ok(n.value)
 }
 function checkRange(n: int): Result<int, string> {
   return n > 100 ? err(`too big: ${n}`) : ok(n)

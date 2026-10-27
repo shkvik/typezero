@@ -4,7 +4,7 @@ function area(w: int, h: int) {
   return w * h
 }
 function half(x: int) {
-  return x / 2.0
+  return x.toDouble() / 2.0
 }
 function describe(n: int) {
   if (n < 0) return "negative"
@@ -37,7 +37,7 @@ function fact(n: int) {
   return n * fact(n - 1)
 }
 function power(x: double, n: int) {
-  if (n == 0) return 1
+  if (n == 0) return 1.0
   return x * power(x, n - 1)
 }
 function repeat(s: string, n: int) {

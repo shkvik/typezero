@@ -5,7 +5,7 @@
 // bytes that are not UTF-8 become U+FFFD.
 import { createInterface } from "node:readline"
 
-const rl = createInterface({ input: process.stdin, crlfDelay: Infinity })
+const rl = createInterface({ input: process.stdin, crlfDelay: Number.MAX_VALUE })
 let n = 0
 for await (const line of rl) {
   n++

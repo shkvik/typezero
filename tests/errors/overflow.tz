@@ -1,7 +1,7 @@
-// Warnings about int overflow (docs/small.md, section 6) come next to the
-// errors, and do not count as errors themselves.
-const seconds: int = parseInt("90")
-// expect-warning: 'seconds * 1000' may overflow int: 'seconds' comes from parseInt on line 3
+// An int that may overflow is an error (docs/numbers.md, section 2), next to
+// the other errors.
+const seconds: int = parseInt("90").unwrapOr(0)
+// expect-error: 'seconds * 1000' may overflow int: 'seconds' comes from parseInt on line 3
 const ms = seconds * 1000
 // expect-error: a number cannot be a condition
 if (ms) console.log(ms)

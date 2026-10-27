@@ -53,6 +53,7 @@ public:
   bool isString() const { return kind_ == Kind::String; }
   bool isInteger() const { return kind_ == Kind::Int; }
   bool isUnsigned() const { return unsigned_; }
+  bool isWrapping() const { return wrapping_; }
   int64_t intMin() const {
     return unsigned_ ? 0 : bits_ == 64 ? INT64_MIN : -(int64_t(1) << (bits_ - 1));
   }
@@ -174,6 +175,7 @@ public:
   bool isByteView() const { return isTypedArray() || bytes_ == Bytes::DataView; }
   const Type *elementType() const;
   unsigned elementSize() const;
+  const Type *accessType() const;
   bool elementRange(int64_t &lo, int64_t &hi) const;
   int matchGroups() const { return matchGroups_; }
   bool captureMandatory(unsigned k) const {
@@ -216,6 +218,7 @@ public:
   static const Type *boolTy();
   static const Type *intTy();
   static const Type *integer(unsigned bits, bool isUnsigned);
+  static const Type *wrapping(unsigned bits);
   static llvm::ArrayRef<const Type *> integers();
   static const Type *doubleTy();
   static const Type *decimalTy();
@@ -335,6 +338,7 @@ private:
   unsigned atom_ = 0;
   unsigned bits_ = 0;
   bool unsigned_ = false;
+  bool wrapping_ = false;
   std::vector<UnionSlot> slots_;
   std::vector<const Type *> typeArgs_;
   const Type *iterated_ = nullptr;

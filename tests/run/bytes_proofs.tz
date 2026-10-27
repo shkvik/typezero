@@ -1,28 +1,28 @@
-// same-as-node
-// What proves that a value fits in an element (docs/bytes.md, section 3):
-// literals, masks, checks above, elements of a narrower kind, Math.min and
+// An element has the type of its kind (`uint8` in a Uint8Array, docs/numbers.md,
+// section 9), and an int goes into it explicitly, with a proof that it fits
+// (docs/bytes.md, section 3): literals, masks, checks above, Math.min and
 // Math.max, the element a callback gets; and the proofs of indices, which
 // outlive calls since a typed array keeps its length.
 function checksum(data: Uint8Array): int {
   let sum = 0
-  for (let i = 0; i < data.length; i++) sum = (sum + data[i]) & 0xffff
+  for (let i = 0; i < data.length; i++) sum = (sum + data[i].toInt()) & 0xffff
   return sum
 }
 
 function noise(seed: int, n: int): Uint8Array {
   const out = new Uint8Array(Math.max(n, 0))
-  let x = seed
+  let x = Bit.Wrap32.from(seed)
   for (let i = 0; i < out.length; i++) {
-    x = (Math.imul(x, 1103515245) + 12345) | 0
-    out[i] = x >>> 24
+    x = x * 1103515245 + 12345
+    out[i] = (x >> 24).value.toUint8()
   }
   return out
 }
 
 function clampTo(x: int, out: Uint8Array) {
   if (out.length > 0) {
-    if (x >= 0 && x <= 255) out[0] = x
-    else out[0] = Math.min(Math.max(x, 0), 255)
+    if (x >= 0 && x <= 255) out[0] = x.toUint8()
+    else out[0] = Math.min(Math.max(x, 0), 255).toUint8()
   }
 }
 
@@ -51,18 +51,18 @@ console.log(flags)
 // Elements of narrower kinds, and the range a callback's element has.
 const wide = new Int16Array(4)
 const signed = new Int8Array([-128, -1, 0, 127])
-for (let i = 0; i < signed.length && i < wide.length; i++) wide[i] = signed[i]
+for (let i = 0; i < signed.length && i < wide.length; i++) wide[i] = signed[i].toInt16()
 console.log(wide, signed.map(x => -1 - x), bytes.map(x => 255 - x).subarray(0, 4))
 const halves = new Uint16Array(bytes.length)
-for (let i = 0; i < bytes.length; i++) halves[i] = (bytes[i] << 8) | bytes[i]
-console.log(halves.subarray(0, 4), Uint8Array.from(halves, h => h >> 8).subarray(0, 4))
+for (let i = 0; i < bytes.length; i++) halves[i] = (bytes[i].toUint16() << 8) | bytes[i].toUint16()
+console.log(halves.subarray(0, 4), Uint8Array.from(halves, h => (h >> 8).toUint8()).subarray(0, 4))
 
-// Uint32 elements are longs; `>>> 0` fits them.
+// Uint32 elements are uint32; `>>> 0` gives the bits, which toUint32() checks.
 const words = new Uint32Array(2)
-const all = -1 >>> 0
+const all: uint32 = 4294967295
 words[0] = all
 words[1] = (words[0] & 0xffff) * 2
-console.log(words, words[0] + words[1])
+console.log(words, words[0].toInt() + words[1].toInt())
 
 // A loop to Math.min of two lengths.
 function same(a: Uint8Array, b: Uint8Array): boolean {

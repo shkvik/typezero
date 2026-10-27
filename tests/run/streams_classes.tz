@@ -8,8 +8,8 @@ import { finished, pipeline } from "node:stream/promises"
 
 class Counter extends Readable {
   #n = 0
-  limit: number
-  constructor(limit: number) {
+  limit: int
+  constructor(limit: int) {
     super()
     this.limit = limit
   }

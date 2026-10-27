@@ -9,7 +9,7 @@
 {"price":"19.99","total":"59.97"}
 {"value":1} {"error":"bad"} [{}]
 ["Ann",30]
-[null,null,0,1e+21,9007199254740992]
+[0,1e+21,9007199254740992]
 {"n":1} [null]
 undefined "x" 5 true
 28 {

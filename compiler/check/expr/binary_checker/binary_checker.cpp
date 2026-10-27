@@ -45,9 +45,10 @@ bool onlyIntLiterals(const Expr *expr) {
   return false;
 }
 
-const Type *integerHint(const Expr *literal, const Expr *other, const Type *hint) {
+const Type *integerHint(const Expr *literal, const Expr *other, const Type *hint, bool bitwise) {
   const Type *type = other->type ? other->type->nonOptional() : nullptr;
-  if (type && type->isInteger() && !type->isInt() && onlyIntLiterals(literal)) {
+  if (type && (type->isInteger() || (type->isFloat() && !bitwise)) && onlyIntLiterals(literal) &&
+      !TypeRelations::isIntLiteralTree(other)) {
     return type;
   }
 
@@ -124,11 +125,14 @@ Expr *BinaryChecker::checkBinary(BinaryExpr *bin, const Type *expected, bool wra
       return checker_.decimalChecker().checkDecimalComparison(bin);
     }
     if (l->isNumeric() && r->isNumeric()) {
-      if (const Type *common = TypeRelations::commonNumericType(l, r)) {
-        bin->lhs = checker_.typeRelations().convert(bin->lhs, common);
-        bin->rhs = checker_.typeRelations().convert(bin->rhs, common);
+      adaptLiterals(bin);
+      l = bin->lhs->type;
+      r = bin->rhs->type;
+      if (l == r || (l->isInteger() && r->isInteger())) {
         return bin;
       }
+      reportMixedNumbers(bin);
+      return bin;
     }
     reportOperandTypes(bin->loc(), op, l, r);
     return bin;
@@ -137,30 +141,12 @@ Expr *BinaryChecker::checkBinary(BinaryExpr *bin, const Type *expected, bool wra
   case BinaryOp::Shl:
   case BinaryOp::Shr:
   case BinaryOp::UShr: {
+    const Type *hint =
+        expected && expected->nonOptional()->isInteger() ? expected->nonOptional() : nullptr;
     bin->lhs = checker_.genericChecker().apparent(
-        checker_.exprChecker().checkExpr(bin->lhs, nullptr, true));
-    bin->rhs = checker_.genericChecker().apparent(
-        checker_.exprChecker().checkExpr(bin->rhs, nullptr, true));
-    const Type *l = bin->lhs->type, *r = bin->rhs->type;
-    bin->type = Type::error();
-    if (l->isError() || r->isError()) {
-      return bin;
-    }
-    if (!l->isNumeric() || !r->isNumeric()) {
-      reportOperandTypes(bin->loc(), op, l, r);
-      return bin;
-    }
-    if (l->isFloat()) {
-      bin->lhs = toInt32(bin->lhs);
-      l = Type::intTy();
-    }
-    if (r->isFloat()) {
-      bin->rhs = toInt32(bin->rhs);
-    }
-    bin->rhs = checker_.typeRelations().convert(bin->rhs, l);
-    bin->type = l;
-    checker_.constantFolder().foldBinary(bin, wraps);
-    return bin;
+        checker_.exprChecker().checkExpr(bin->lhs, onlyIntLiterals(bin->lhs) ? hint : nullptr));
+    bin->rhs = checker_.genericChecker().apparent(checker_.exprChecker().checkExpr(bin->rhs));
+    return checkBits(bin);
   }
 
   default: {
@@ -172,7 +158,7 @@ Expr *BinaryChecker::checkBinary(BinaryExpr *bin, const Type *expected, bool wra
     }
     bool pow = bin->op == BinaryOp::Pow;
     const Type *rhsHint = pow && hint && hint->isDecimal() ? nullptr : hint;
-    bool operandsWrap = bitwise || (wraps && bin->op != BinaryOp::Div && bin->op != BinaryOp::Rem);
+    bool operandsWrap = false;
     BinaryExpr *chain = std::exchange(checker_.concatChain_, nullptr);
     bool chainEnd = bin->op == BinaryOp::Add && !chain;
     const BinaryExpr *outerMixed =
@@ -188,8 +174,9 @@ Expr *BinaryChecker::checkBinary(BinaryExpr *bin, const Type *expected, bool wra
       bin->rhs = checker_.genericChecker().apparent(
           checker_.exprChecker().checkExpr(bin->rhs, rhsHint, operandsWrap));
       checker_.concatChain_ = pending;
-      const Type *lhsHint = integerHint(
-          bin->lhs, bin->rhs, literals ? DecimalChecker::literalHint(bin->rhs, hint) : hint);
+      const Type *lhsHint =
+          integerHint(bin->lhs, bin->rhs,
+                      literals ? DecimalChecker::literalHint(bin->rhs, hint) : hint, bitwise);
       bin->lhs = checker_.genericChecker().apparent(
           checker_.exprChecker().checkExpr(bin->lhs, lhsHint, operandsWrap));
       checker_.concatChain_ = nullptr;
@@ -200,11 +187,12 @@ Expr *BinaryChecker::checkBinary(BinaryExpr *bin, const Type *expected, bool wra
       if (literals && DecimalChecker::isLiteralTree(bin->rhs)) {
         rhsHint = DecimalChecker::literalHint(bin->lhs, rhsHint);
       }
-      rhsHint = integerHint(bin->rhs, bin->lhs, rhsHint);
+      rhsHint = integerHint(bin->rhs, bin->lhs, rhsHint, bitwise);
       bin->rhs = checker_.genericChecker().apparent(
           checker_.exprChecker().checkExpr(bin->rhs, rhsHint, operandsWrap));
     }
     checker_.resultTypes().neverOperands(bin);
+    adaptLiterals(bin);
     const Type *l = bin->lhs->type, *r = bin->rhs->type;
     if (bin->op == BinaryOp::Add) {
       auto joinsAsText = [](const Type *type) {
@@ -236,18 +224,25 @@ Expr *BinaryChecker::checkBinary(BinaryExpr *bin, const Type *expected, bool wra
     if (Expr *dates = checker_.dateChecker().checkDateOperands(bin)) {
       return dates;
     }
-    if (!bitwise && (l->isDecimal() || r->isDecimal())) {
+    if (bitwise) {
+      return checkBits(bin);
+    }
+    if (l->isDecimal() || r->isDecimal()) {
       return checker_.decimalChecker().checkDecimalArithmetic(bin);
     }
-    if (bitwise && l->isNumeric() && r->isNumeric() && (l->isFloat() || r->isFloat() || l != r)) {
-      bin->lhs = toInt32(bin->lhs);
-      bin->rhs = toInt32(bin->rhs);
-      bin->type = Type::intTy();
-      checker_.constantFolder().foldBinary(bin, wraps);
-      return bin;
+    if ((l->isWrapping() || r->isWrapping()) && l->isInteger() && r->isInteger()) {
+      return checkWrapping(bin);
+    }
+    if (bin->op == BinaryOp::Pow && l->isFloat() && r->isInteger()) {
+      bin->rhs = checker_.typeRelations().convert(bin->rhs, l);
+      r = l;
     }
     bool operandsOk = bitwise ? l->isInteger() && r->isInteger() : l->isNumeric() && r->isNumeric();
     const Type *common = operandsOk ? TypeRelations::commonNumericType(l, r) : nullptr;
+    if (!common && operandsOk) {
+      reportMixedNumbers(bin);
+      return bin;
+    }
     if (!common) {
       reportOperandTypes(bin->loc(), op, l, r);
       return bin;
@@ -273,6 +268,155 @@ Expr *BinaryChecker::checkBinary(BinaryExpr *bin, const Type *expected, bool wra
     return bin;
   }
   }
+}
+
+Expr *BinaryChecker::checkWrapping(BinaryExpr *bin) {
+  const Type *l = bin->lhs->type, *r = bin->rhs->type;
+  if (l->isWrapping() && r->isWrapping() && l != r) {
+    reportMixedNumbers(bin);
+    return bin;
+  }
+  const Type *wrap = l->isWrapping() ? l : r;
+  bin->lhs = checker_.typeRelations().convert(bin->lhs, wrap);
+  bin->rhs = checker_.typeRelations().convert(bin->rhs, wrap);
+  bin->type = wrap;
+  checker_.constantFolder().checkDivisor(bin->op, bin->rhs);
+
+  return bin;
+}
+
+Expr *BinaryChecker::checkBits(BinaryExpr *bin) {
+  const char *op = opSpelling(bin->op);
+  bool shift = bin->op == BinaryOp::Shl || bin->op == BinaryOp::Shr || bin->op == BinaryOp::UShr;
+  adaptLiterals(bin);
+  const Type *l = bin->lhs->type, *r = bin->rhs->type;
+  bin->type = Type::error();
+  if (l->isError() || r->isError()) {
+    return bin;
+  }
+  auto zero = [](const Expr *e) {
+    auto *lit = dyn_cast<IntLitExpr>(e);
+
+    return lit && lit->value == 0;
+  };
+  auto [lhsText, rhsText] = DecimalChecker::sidesOf(bin);
+  std::string text = lhsText.empty() ? "x" : TypeRelations::operandText(lhsText);
+  if (l->isNumeric() && !l->isWrapping() && zero(bin->rhs) &&
+      (bin->op == BinaryOp::BitOr || bin->op == BinaryOp::UShr)) {
+    std::string message =
+        "'" + std::string(lhsText.empty() ? "x" : lhsText.str()) + " " + op +
+        " 0' changes nothing in tz: integers are exact, and nothing wraps around here";
+    auto *rounded = dyn_cast<CallExpr>(bin->lhs);
+    if (l->isFloat() && rounded && isRoundingBuiltin(rounded->builtin)) {
+      message += "; to make it an int, write '" + std::string(lhsText.str()) + ".toInt()'";
+    } else if (l->isFloat()) {
+      message +=
+          "; to drop the fraction, write 'Math.trunc(" + std::string(lhsText.str()) + ").toInt()'";
+    } else {
+      message += "; to make it an int32, write '" + text + ".toInt32()'" +
+                 (bin->op == BinaryOp::UShr ? ", a uint32 '" + text + ".toUint32()'" : "") +
+                 ", and to count modulo 2^32, use 'Bit.Wrap32'";
+    }
+    checker_.diags_.error(bin->loc(), message);
+    return bin;
+  }
+  if (l->isFloat() || r->isFloat()) {
+    std::string side = l->isFloat()      ? text
+                       : rhsText.empty() ? "x"
+                                         : TypeRelations::operandText(rhsText);
+    checker_.diags_.error(bin->loc(),
+                          llvm::Twine("operator '") + op +
+                              "' works on the bits of integers, and this is a double; drop the "
+                              "fraction first, e.g. 'Math.trunc(" +
+                              side + ").toInt()'");
+    return bin;
+  }
+  if (!l->isInteger() || !r->isInteger()) {
+    reportOperandTypes(bin->loc(), op, l, r);
+    return bin;
+  }
+  if (shift) {
+    if (bin->op == BinaryOp::UShr && !l->isUnsigned()) {
+      std::string count = rhsText.empty() ? "n" : rhsText.str();
+      checker_.diags_.error(
+          bin->loc(), "'>>>' shifts in zeros, as a shift of an unsigned type does; '" + l->name() +
+                          "' is signed: use '>>', or convert it, e.g. '" + text + "." +
+                          TypeRelations::conversionMethod(Type::integer(l->bitWidth(), true)) +
+                          "() >>> " + count + "'");
+      return bin;
+    }
+    bin->rhs = checker_.typeRelations().convert(bin->rhs, l);
+    bin->type = l;
+    checker_.constantFolder().foldBinary(bin, false);
+    return bin;
+  }
+  if (l->isWrapping() || r->isWrapping()) {
+    return checkWrapping(bin);
+  }
+  if (l != r) {
+    reportMixedNumbers(bin);
+    return bin;
+  }
+  bin->type = l;
+  checker_.constantFolder().foldBinary(bin, false);
+
+  return bin;
+}
+
+void BinaryChecker::adaptLiterals(BinaryExpr *bin) {
+  const Type *l = bin->lhs->type, *r = bin->rhs->type;
+  if (!l || !r || l == r || l->isError() || r->isError()) {
+    return;
+  }
+  auto number = [](const Type *t) { return t->isNumeric() || t->isDecimal(); };
+  bool bitwise = bin->op == BinaryOp::BitAnd || bin->op == BinaryOp::BitOr ||
+                 bin->op == BinaryOp::BitXor || bin->op == BinaryOp::Shl ||
+                 bin->op == BinaryOp::Shr || bin->op == BinaryOp::UShr;
+  if (!number(l) || !number(r) || (bitwise && (!l->isInteger() || !r->isInteger()))) {
+    return;
+  }
+  if (checker_.typeRelations().literalAdapts(bin->lhs, r) &&
+      !(bin->op == BinaryOp::Pow && r->isDecimal())) {
+    bin->lhs = checker_.typeRelations().adaptLiteral(bin->lhs, r);
+  } else if (checker_.typeRelations().literalAdapts(bin->rhs, l) &&
+             !(bin->op == BinaryOp::Pow && (l->isDecimal() || l->isFloat()))) {
+    bin->rhs = checker_.typeRelations().adaptLiteral(bin->rhs, l);
+  }
+}
+
+void BinaryChecker::reportMixedNumbers(const BinaryExpr *bin) {
+  const Type *l = bin->lhs->type, *r = bin->rhs->type;
+  const char *op = opSpelling(bin->op);
+  std::string message = (llvm::Twine("operator '") + op + "' cannot be applied to types '" +
+                         l->name() + "' and '" + r->name() + "'")
+                            .str();
+  const Type *target = nullptr;
+  bool convertLeft = false;
+  if (l->isFloat() || r->isFloat()) {
+    target = Type::doubleTy();
+    convertLeft = !l->isFloat();
+  } else if (l->holds(r)) {
+    target = l;
+  } else if (r->holds(l)) {
+    target = r;
+    convertLeft = true;
+  } else {
+    target = Type::intTy();
+    convertLeft = !l->isInt();
+  }
+  message += ": a number changes its type only explicitly";
+  auto [lhs, rhs] = DecimalChecker::sidesOf(bin);
+  std::string method = TypeRelations::conversionMethod(target);
+  if (!lhs.empty() && !rhs.empty()) {
+    std::string left =
+        convertLeft ? TypeRelations::operandText(lhs) + "." + method + "()" : lhs.str();
+    std::string right =
+        convertLeft ? rhs.str() : TypeRelations::operandText(rhs) + "." + method + "()";
+    message += ", e.g. '" + left + " " + op + " " + right + "'";
+  } else {
+    message += " with '." + method + "()'";
+  }
+  checker_.diags_.error(bin->loc(), message);
 }
 
 Expr *BinaryChecker::checkEquality(BinaryExpr *bin) {
@@ -314,10 +458,19 @@ Expr *BinaryChecker::checkEquality(BinaryExpr *bin) {
     return bin;
   }
 
+  adaptLiterals(bin);
+  l = bin->lhs->type;
+  r = bin->rhs->type;
+  if (l->isInteger() && r->isInteger()) {
+    return bin;
+  }
   const Type *common = TypeRelations::comparisonType(l, r);
   if (!common) {
     if (l->nonOptional()->isDecimal() || r->nonOptional()->isDecimal()) {
       checker_.decimalChecker().reportDecimalMix(bin);
+    } else if (l->nonOptional()->isNumeric() && r->nonOptional()->isNumeric() && !l->isOptional() &&
+               !r->isOptional()) {
+      reportMixedNumbers(bin);
     } else {
       reportOperandTypes(bin->loc(), opSpelling(bin->op), l, r);
     }

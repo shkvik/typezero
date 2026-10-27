@@ -237,7 +237,7 @@ bool Pieces::fnOnce(unsigned fi, unsigned rootFn, unsigned depth) {
 
 bool Pieces::rejectionEnds(const AwaitExpr *a, unsigned depth) {
   auto found = analysis_.awaits_.find(a);
-  if (found == analysis_.awaits_.end() || found->second.caught) {
+  if (found == analysis_.awaits_.end()) {
     return false;
   }
 

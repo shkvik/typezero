@@ -22,7 +22,7 @@ type Handlers = { [K in EventName as `on${Capitalize<K>}`]: (id: First<ArgsOf<K>
 class Jobs extends EventEmitter<Events> {
   run(id: int) {
     this.emit("start", id)
-    this.emit("done", id, id * 1.5)
+    this.emit("done", id, id.toDouble() * 1.5)
   }
 }
 

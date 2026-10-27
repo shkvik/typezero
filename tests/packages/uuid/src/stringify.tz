@@ -20,7 +20,7 @@ export function unsafeStringify(arr: Uint8Array, offset = 0): string {
   //
   // tz: a byte past the end of `arr` is no index of byteToHex; it gives '' where JavaScript
   // writes "undefined", and stringify() rejects both.
-  const hex = (i: int) => byteToHex[arr[offset + i] ?? 256] ?? '';
+  const hex = (i: int) => byteToHex[arr[offset + i]?.toInt() ?? 256] ?? '';
   return (
     hex(0) +
     hex(1) +

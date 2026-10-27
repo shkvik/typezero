@@ -83,17 +83,6 @@ void FunctionFrame::emitScopeCleanup(const Lowering::Scope &scope) {
   for (llvm::Value *slot : llvm::reverse(scope.asyncIterators)) {
     lowering_.asyncGeneratorLowerer().closeAsyncIterator(slot);
   }
-  for (llvm::Value *slot : llvm::reverse(scope.iterators)) {
-    llvm::Value *it =
-        lowering_.builder_.CreateLoad(lowering_.builder_.getPtrTy(), slot, "iterator");
-    llvm::BasicBlock *closeBlock = newBlock("iter.close");
-    llvm::BasicBlock *nextBlock = newBlock("iter.closed");
-    lowering_.builder_.CreateCondBr(lowering_.builder_.CreateIsNotNull(it), closeBlock, nextBlock);
-    switchTo(closeBlock);
-    lowering_.builder_.CreateCall(lowering_.generatorLowerer().iterCloseFunction(), {it});
-    lowering_.builder_.CreateBr(nextBlock);
-    switchTo(nextBlock);
-  }
   for (const auto &[slot, type] : llvm::reverse(scope.slots)) {
     if (!type) {
       llvm::Value *object = lowering_.builder_.CreateLoad(lowering_.builder_.getPtrTy(), slot);

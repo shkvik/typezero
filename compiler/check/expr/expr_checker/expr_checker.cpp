@@ -267,6 +267,13 @@ Expr *ExprChecker::checkConditional(ConditionalExpr *cond, const Type *expected)
     cond->type = a;
     return cond;
   }
+  if (a != b && checker_.typeRelations().literalAdapts(cond->thenExpr, b)) {
+    cond->thenExpr = checker_.typeRelations().adaptLiteral(cond->thenExpr, b);
+    a = b;
+  } else if (a != b && checker_.typeRelations().literalAdapts(cond->elseExpr, a)) {
+    cond->elseExpr = checker_.typeRelations().adaptLiteral(cond->elseExpr, a);
+    b = a;
+  }
   const Type *common = LiteralTypes::unionUnify(a, b);
   if (!common) {
     checker_.diags_.error(cond->loc(), "the branches of '?:' have incompatible types '" +
@@ -297,14 +304,8 @@ Expr *ExprChecker::checkCast(CastExpr *cast) {
   } else if (from->isOptional() && TypeRelations::isImplicitlyConvertible(from->inner(), to)) {
     message += "; the value may be undefined: check it first (e.g. 'x != undefined') or give a "
                "default with '??'";
-  } else if (from->isFloat() && to->isInt()) {
-    message += "; drop the fraction with 'x | 0', or round with Math.round, Math.floor, Math.ceil "
-               "or Math.trunc";
-  } else if (from->isFloat() && to->isInteger()) {
-    message += "; round with Math.round, Math.floor, Math.ceil or Math.trunc where a '" +
-               to->name().str() + "' is expected";
-  } else if (from->isInteger() && to->isInteger()) {
-    message += "; Math.trunc(x) where an 'int' is expected converts it and checks that it fits";
+  } else if (std::string hint = TypeRelations::conversionHint(cast->operand, to); !hint.empty()) {
+    message += hint;
   } else if (from->isFloat() && to->isDecimal()) {
     message += "; convert the double with 'decimal(x)'";
   } else if (from->isDecimal() && to->isNumeric()) {

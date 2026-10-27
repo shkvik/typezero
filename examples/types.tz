@@ -1,34 +1,36 @@
-// Числовые типы и преобразования между ними.
+// Числовые типы и преобразования между ними (docs/numbers.md).
 
-// int — 32-битное целое. Литерал без подсказки тоже получает тип int.
+// int — 64-битное целое на любом процессоре. Литерал без подсказки тоже
+// получает тип int.
 let apples: int = 7
 let boxes = 2
 console.log("яблок на коробку:", apples / boxes) // деление целых: 3
 console.log("остаток:", apples % boxes)
 
-// long — 64-битное целое для больших чисел.
+// Точные типы, когда важна ширина: int8, int16, int32, uint8 … uint64.
 let population: int = 8100000000
-console.log("население Земли:", population)
+let age: uint8 = 42
+console.log("население Земли:", population, "возраст:", age)
 
-// double (он же number) — дробное число. int сам превращается в double.
+// double (он же number) — дробное число. Тип числа меняется только явно.
 let price: double = 12.5
-let total: number = price * apples
+let total: number = price * apples.toDouble()
 console.log("итого:", total)
 
 // Литерал берёт тип из контекста: здесь 7 / 2 делится как double.
 let half: double = 7 / 2
 console.log("7 / 2 в double:", half)
 
-// Дробное в целое — как в JavaScript: `| 0` отбрасывает дробную часть, а
-// Math.round / floor / ceil / trunc там, где ждут int, дают int.
-let whole = total | 0
-let rounded: int = Math.round(total / 10)
+// Дробное в целое — сначала округление, которое говорит, что делать с дробью,
+// потом приведение.
+let whole = Math.trunc(total).toInt()
+let rounded: int = Math.round(total / 10).toInt()
 console.log("без дробной части:", whole, "десятков:", rounded)
 
 let expensive: boolean = total > 50
 console.log("дорого?", expensive)
 
-// int — 64 бита; переполнение пока заворачивается, как в Go.
+// int — 64 бита; действие, которое может не поместиться в тип, — ошибка
+// компиляции: здесь компилятор знает, что max / 2 + 1 помещается.
 let max: int = 9223372036854775807
-// expect-warning: 'max + 1' may overflow int
-console.log("max + 1 =", max + 1)
+console.log("max / 2 + 1 =", max / 2 + 1)

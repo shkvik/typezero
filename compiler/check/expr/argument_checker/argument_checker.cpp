@@ -146,4 +146,13 @@ Expr *ArgumentChecker::checkArg(Expr *arg, const Type *to) {
       checker_.exprChecker().checkExpr(arg, to->isError() ? nullptr : to), to);
 }
 
+Expr *ArgumentChecker::checkAnyNumber(Expr *arg) {
+  arg = checker_.exprChecker().checkExpr(arg);
+  if (arg->type->isInteger()) {
+    return checker_.typeRelations().convert(arg, Type::doubleTy());
+  }
+
+  return checker_.typeRelations().coerce(arg, Type::doubleTy());
+}
+
 }

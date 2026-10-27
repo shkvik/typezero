@@ -246,22 +246,49 @@ Expr *AssignChecker::checkAssign(AssignExpr *assign) {
       bool bitwise = op == BinaryOp::BitAnd || op == BinaryOp::BitOr || op == BinaryOp::BitXor;
       bool integerOnly = shift || bitwise;
       bool decimalPow = type->isDecimal() && op == BinaryOp::Pow;
+      const Type *valueHint = decimalPow ? nullptr : type;
+      if (integerOnly && !type->isInteger()) {
+        valueHint = nullptr;
+      }
       assign->value = checker_.exprChecker().checkExpr(
-          assign->value, integerOnly || decimalPow ? nullptr : type, integerOnly);
+          assign->value,
+          shift && !TypeRelations::isIntLiteralTree(assign->value) ? nullptr : valueHint);
       const Type *valueType = assign->value->type;
+      auto *zero = dyn_cast<IntLitExpr>(assign->value);
       if (type->isDecimal() && !integerOnly && !valueType->isError()) {
         checker_.decimalChecker().checkDecimalAssign(assign, op);
       } else if (!type->isError() && !valueType->isError()) {
-        if (integerOnly && valueType->isFloat()) {
-          assign->value = checker_.binaryChecker().toInt32(assign->value);
-        }
-        if (integerOnly && type->isFloat() && valueType->isNumeric()) {
-          assign->value = checker_.binaryChecker().toInt32(assign->value);
+        if (integerOnly && (type->isFloat() || valueType->isFloat())) {
+          checker_.diags_.error(assign->loc(),
+                                "operator '" + spelling +
+                                    "' works on the bits of integers, and this is a double; "
+                                    "drop the fraction first, e.g. 'Math.trunc(x).toInt()'");
         } else if (integerOnly ? !type->isInteger() : !type->isNumeric()) {
           checker_.binaryChecker().reportOperandTypes(assign->loc(), spelling.c_str(), type,
                                                       valueType);
-        } else if (bitwise && assign->value->type->isInteger() && assign->value->type != type) {
-          assign->value = checker_.binaryChecker().toInt32(assign->value);
+        } else if ((op == BinaryOp::BitOr || op == BinaryOp::UShr) && zero && zero->value == 0 &&
+                   !type->isWrapping()) {
+          checker_.diags_.error(assign->loc(), "'" + spelling +
+                                                   " 0' changes nothing in tz: integers are "
+                                                   "exact, and nothing wraps around here; to "
+                                                   "count modulo 2^32, use 'Bit.Wrap32'");
+        } else if (op == BinaryOp::UShr && !type->isUnsigned()) {
+          checker_.diags_.error(assign->loc(), "'>>>=' shifts in zeros, as a shift of an unsigned "
+                                               "type does; '" +
+                                                   type->name().str() + "' is signed: use '>>='");
+        } else if (!shift && valueType->isInteger() && valueType != type &&
+                   checker_.typeRelations().literalAdapts(assign->value, type)) {
+          assign->value = checker_.typeRelations().adaptLiteral(assign->value, type);
+        } else if (!shift && type->isWrapping() && valueType->isInteger() &&
+                   (!valueType->isWrapping() || valueType == type)) {
+          assign->value = checker_.typeRelations().convert(assign->value, type);
+          checker_.constantFolder().checkDivisor(op, assign->value);
+        } else if (bitwise && valueType->isInteger() && valueType != type) {
+          checker_.diags_.error(assign->loc(),
+                                "operator '" + spelling + "' cannot be applied to types '" +
+                                    type->name().str() + "' and '" + valueType->name().str() +
+                                    "': a number changes its type only explicitly" +
+                                    TypeRelations::conversionHint(assign->value, type));
         } else {
           assign->value = shift ? checker_.typeRelations().convert(assign->value, type)
                                 : checker_.typeRelations().coerce(assign->value, type);
@@ -286,7 +313,7 @@ Expr *AssignChecker::checkAssign(AssignExpr *assign) {
     return set;
   }
   if (index && index->object->type->isTypedArray()) {
-    checker_.bytesChecker().checkBytesStore(index, assign->value, assign->op, assign->loc());
+    checker_.bytesChecker().checkBytesStore(index, assign->value);
   }
   if (member && !type->isError()) {
     if (Expr *set = checker_.eventTargetChecker().onabortAssign(assign, member, logical)) {
@@ -430,8 +457,7 @@ Expr *AssignChecker::checkUpdate(UpdateExpr *update) {
     }
   } else if (auto *index = dyn_cast<IndexExpr>(update->target); index && !index->keyed) {
     if (index->object->type->isTypedArray()) {
-      checker_.bytesChecker().checkBytesStore(
-          index, nullptr, update->increment ? BinaryOp::Add : BinaryOp::Sub, update->loc());
+      checker_.bytesChecker().checkBytesStore(index, nullptr);
     } else if (!checker_.indexProofs().provesInBounds(index->object, index->index, false)) {
       checker_.diags_.error(index->loc(),
                             "cannot prove that the index is within the array; check it "

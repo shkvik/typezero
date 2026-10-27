@@ -108,7 +108,12 @@ Expr *UnaryChecker::checkUnary(UnaryExpr *unary, const Type *expected, bool wrap
       type = Type::doubleTy();
     }
     if (type->isString() || type->isBool()) {
-      unary->type = Type::doubleTy();
+      checker_.diags_.error(
+          unary->loc(),
+          llvm::Twine("unary '") + op + "' does not turn a " +
+              (type->isString() ? "string" : "boolean") + " into a number in tz; write " +
+              (type->isString() ? "'Number(s)', which gives a Result" : "'Number(b)'"));
+      unary->type = Type::error();
       break;
     }
     if (type->isDate() && unary->op == UnaryOp::Plus) {
@@ -137,12 +142,14 @@ Expr *UnaryChecker::checkUnary(UnaryExpr *unary, const Type *expected, bool wrap
   case UnaryOp::BitNot: {
     const Type *hint =
         expected && expected->nonOptional()->isInteger() ? expected->nonOptional() : nullptr;
-    unary->operand = checker_.genericChecker().apparent(
-        checker_.exprChecker().checkExpr(unary->operand, hint, true));
+    unary->operand =
+        checker_.genericChecker().apparent(checker_.exprChecker().checkExpr(unary->operand, hint));
     const Type *type = unary->operand->type;
     if (type->isFloat()) {
-      unary->operand = checker_.binaryChecker().toInt32(unary->operand);
-      type = Type::intTy();
+      checker_.diags_.error(unary->loc(), "operator '~' works on the bits of integers, and this "
+                                          "is a double; drop the fraction first, e.g. "
+                                          "'Math.trunc(x).toInt()'");
+      type = Type::error();
     } else if (!type->isInteger() && !type->isError()) {
       checker_.diags_.error(unary->loc(),
                             "operator '~' cannot be applied to type '" + type->name() + "'");

@@ -79,29 +79,17 @@ llvm::Value *StringMethodLowerer::emitStringMethod(CallExpr *call) {
   switch (call->builtin) {
   case Builtin::StrCharCodeAt: {
     llvm::Value *position = numbers[0];
-    if (!call->mayBeOutOfRange) {
-      result = lowering_.builder_.CreateSExt(
+    auto read = [&]() -> llvm::Value * {
+      return lowering_.builder_.CreateSExt(
           lowering_.builder_.CreateCall(lowering_.rt_.strCharCodeAt, {obj, meta, position}),
           lowering_.builder_.getInt64Ty());
-      break;
-    }
-    llvm::Value *inRange = lowering_.builder_.CreateICmpULT(
-        position, lowering_.stringLowerer().stringLength(receiver.value));
-    llvm::BasicBlock *readBlock = lowering_.functionFrame().newBlock("code.read");
-    llvm::BasicBlock *endBlock = lowering_.functionFrame().newBlock("code.end");
-    llvm::BasicBlock *before = lowering_.builder_.GetInsertBlock();
-    lowering_.builder_.CreateCondBr(inRange, readBlock, endBlock);
-    lowering_.functionFrame().switchTo(readBlock);
-    llvm::Value *code = lowering_.builder_.CreateSIToFP(
-        lowering_.builder_.CreateCall(lowering_.rt_.strCharCodeAt, {obj, meta, position}),
-        lowering_.builder_.getDoubleTy());
-    llvm::BasicBlock *readEnd = lowering_.builder_.GetInsertBlock();
-    lowering_.builder_.CreateBr(endBlock);
-    lowering_.functionFrame().switchTo(endBlock);
-    llvm::PHINode *phi = lowering_.builder_.CreatePHI(lowering_.builder_.getDoubleTy(), 2);
-    phi->addIncoming(llvm::ConstantFP::getNaN(lowering_.builder_.getDoubleTy()), before);
-    phi->addIncoming(code, readEnd);
-    result = phi;
+    };
+    result = call->mayBeOutOfRange
+                 ? lowering_.arrayLowerer().emitCheckedRead(
+                       lowering_.builder_.CreateICmpULT(
+                           position, lowering_.stringLowerer().stringLength(receiver.value)),
+                       call->type, read)
+                 : read();
     break;
   }
   case Builtin::StrAt: {

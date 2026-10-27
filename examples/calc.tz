@@ -29,14 +29,24 @@ function parseOp(token: string): Op {
   }
 }
 
+// Числа калькулятора — до 10^100 по модулю. Тогда ни одно действие не уйдёт за
+// пределы double, где получилась бы Infinity, и компилятор это видит: без
+// проверок ниже он не соберёт программу.
+const limit = 1e100
+
 // Значение выражения, или undefined с объяснением, если оно неверное.
 function evaluate(expression: string): double | undefined {
   const stack: double[] = []
   for (const token of expression.split(" ")) {
     if (token == "") continue
     const value = Number(token)
-    if (!isNaN(value)) {
-      stack.push(value)
+    if (value.isOk()) {
+      const x = value.value
+      if (Math.abs(x) > limit) {
+        console.log(`  число ${token} слишком большое`)
+        return undefined
+      }
+      stack.push(x)
       continue
     }
     const op = parseOp(token)
@@ -50,6 +60,10 @@ function evaluate(expression: string): double | undefined {
       return undefined
     }
     if (op == Op.Sqrt) {
+      if (b < 0) {
+        console.log(`  корня из ${b} нет`)
+        return undefined
+      }
       stack.push(Math.sqrt(b))
       continue
     }
@@ -58,22 +72,36 @@ function evaluate(expression: string): double | undefined {
       console.log(`  для "${token}" не хватает чисел`)
       return undefined
     }
+    let result: double
     switch (op) {
       case Op.Add:
-        stack.push(a + b)
+        result = a + b
         break
       case Op.Sub:
-        stack.push(a - b)
+        result = a - b
         break
       case Op.Mul:
-        stack.push(a * b)
+        result = a * b
         break
       case Op.Div:
-        stack.push(a / b)
+        if (Math.abs(b) < 1 / limit) {
+          console.log(`  делить на ${b} нельзя`)
+          return undefined
+        }
+        result = a / b
         break
-      default: // Op.Pow
-        stack.push(a ** b)
+      default: // Op.Pow: показатель — целый, от 0 до 10, основание — до 10^10.
+        if (b < 0 || b > 10 || Math.abs(a) > 1e10) {
+          console.log(`  ${a} в степени ${b} не считаю`)
+          return undefined
+        }
+        result = a ** Math.trunc(b).toInt()
     }
+    if (Math.abs(result) > limit) {
+      console.log(`  результат больше 10^100`)
+      return undefined
+    }
+    stack.push(result)
   }
   if (stack.length != 1) {
     console.log(`  в конце осталось чисел: ${stack.length}, а нужно одно`)

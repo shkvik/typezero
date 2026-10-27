@@ -20,7 +20,7 @@ export class Money {
   }
 
   times(k: int) {
-    return new Money(this.amount * k, this.currency)
+    return new Money(this.amount * k.toDecimal(), this.currency)
   }
   times(k: decimal) {
     return new Money((this.amount * k).round(2), this.currency)

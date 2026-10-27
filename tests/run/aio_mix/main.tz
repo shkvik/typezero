@@ -72,14 +72,14 @@ async function* mixed(): AsyncGenerator<unknown> {
 for await (const v of mixed())
   console.log(typeof v, v instanceof Buffer ? v.length : v)
 
-// 5. A number read from a file stays a value from outside across awaits.
+// 5. A number read from a file stays a value from outside across awaits: it
+// is checked before it is added.
 must(await writeFile(lines, "12\n30\n"))
 let sum = 0
 for await (const line of new LineFeed(lines)) {
-  const n: int = parseInt(line)
+  const n: int = parseInt(line).unwrapOr(0)
   await setTimeout(1)
-  // expect-warning: 'sum += n' may overflow int: 'n' comes from parseInt
-  sum += n
+  if (n >= 0 && n < 1000000) sum += n
 }
 console.log(sum)
 must(await rm(dir, { recursive: true }))

@@ -85,10 +85,6 @@ public:
       inner_.pop_back();
       return found;
     }
-    case Stmt::Kind::Try: {
-      auto *s = cast<TryStmt>(stmt);
-      return in(s->block) || (s->handler && in(s->handler)) || (s->finalizer && in(s->finalizer));
-    }
     default:
       return false;
     }
@@ -139,11 +135,6 @@ bool breaksTo(const Stmt *stmt, llvm::ArrayRef<llvm::StringRef> labels) {
     });
   case Stmt::Kind::Labeled:
     return breaksTo(cast<LabeledStmt>(stmt)->body, labels);
-  case Stmt::Kind::Try: {
-    auto *s = cast<TryStmt>(stmt);
-    return breaksTo(s->block, labels) || (s->handler && breaksTo(s->handler, labels)) ||
-           (s->finalizer && breaksTo(s->finalizer, labels));
-  }
   default:
     return false;
   }
@@ -200,7 +191,7 @@ void ReturnChecker::checkReturn(ReturnStmt *ret) {
     return;
   }
   if (fn->decl && fn->decl->isAsync && !fn->decl->isGenerator && ret->value &&
-      isa<AwaitExpr>(ret->value) && checker_.tryDepth_ == 0) {
+      isa<AwaitExpr>(ret->value)) {
     checker_.diags_.error(ret->value->loc(),
                           fn->decl->concise
                               ? "'await' here changes nothing: an async function waits for the "
@@ -299,20 +290,9 @@ bool ReturnChecker::alwaysReturns(const Stmt *stmt, llvm::ArrayRef<llvm::StringR
   auto returns = [](const Stmt *s) { return alwaysReturns(s); };
   switch (stmt->kind()) {
   case Stmt::Kind::Return:
-  case Stmt::Kind::Throw:
     return true;
   case Stmt::Kind::Expr:
     return isExit(stmt);
-  case Stmt::Kind::Try: {
-    auto *s = cast<TryStmt>(stmt);
-    if (breaksTo(stmt, labels)) {
-      return false;
-    }
-    if (s->finalizer && alwaysReturns(s->finalizer)) {
-      return true;
-    }
-    return alwaysReturns(s->block) && (!s->handler || alwaysReturns(s->handler));
-  }
   case Stmt::Kind::Block:
     return llvm::any_of(cast<BlockStmt>(stmt)->body, returns) && !breaksTo(stmt, labels);
   case Stmt::Kind::If: {

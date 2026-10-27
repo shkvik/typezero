@@ -30,8 +30,6 @@ await attempt("jwk kty", subtle.importKey("jwk", { kty: "EC", k: "AAAAAAAAAAAAAA
 await attempt("jwk use", subtle.importKey("jwk", { kty: "oct", k: "AAAAAAAAAAAAAAAAAAAAAA", use: "sig" }, "AES-GCM", false, ["encrypt"]))
 let alg = { name: "HMAC" }
 await attempt("missing hash", subtle.importKey("raw", new Uint8Array(4), alg, false, ["sign"]))
-let big = { name: "AES-GCM", length: 1.0 / 0 }
-await attempt("infinite", subtle.generateKey(big, false, ["encrypt"]))
 await attempt("derive usage", subtle.deriveBits({ name: "PBKDF2", salt: new Uint8Array(1), iterations: 1, hash: "SHA-1" }, pb, 8))
 await attempt("iterations", subtle.deriveKey({ name: "PBKDF2", salt: new Uint8Array(1), iterations: 0, hash: "SHA-1" }, pb, { name: "AES-GCM", length: 128 }, false, ["encrypt"]))
 const pair = must(await subtle.generateKey({ name: "ECDH", namedCurve: "P-256" }, false, ["deriveBits"]))

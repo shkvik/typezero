@@ -282,7 +282,9 @@ void LoopRanges::runLoop(const OverflowCheck::LoopSpec &spec, State &st) {
   State head = entry;
   State lastHead, lastEnd = deadState();
   bool comesBack = false;
-  for (int k = 0; k < (check_.overBudget() ? 2 : 6); ++k) {
+  int rounds = check_.overBudget() ? 2 : 8;
+  for (int k = 0; k < rounds; ++k) {
+    bool last = k + 1 == rounds;
     State from = rebased(head, bases);
     State exits = deadState();
     State end = onePass(spec, from, exits);
@@ -312,12 +314,38 @@ void LoopRanges::runLoop(const OverflowCheck::LoopSpec &spec, State &st) {
         if (to.empty() || got.empty()) {
           return;
         }
+        static constexpr double kSteps[] = {
+            0.0, 255.0, 65535.0, 16777215.0, 2147483647.0, 4294967295.0, 9007199254740992.0};
+        auto up = [&](double v, double limit) {
+          if (!last) {
+            for (double t : kSteps) {
+              double at = t == 0 ? -1 : t;
+              if (v <= at && at < limit) {
+                return at;
+              }
+            }
+          }
+
+          return limit;
+        };
+        auto down = [&](double v, double limit) {
+          if (!last) {
+            for (double t : kSteps) {
+              double at = t == 0 ? 0 : -t - 1;
+              if (v >= at && at > limit) {
+                return at;
+              }
+            }
+          }
+
+          return limit;
+        };
         if (got.lo < to.lo && to.lo > l.lo) {
-          to.setLow({l.lo, got.loOrigin, got.loWhy});
+          to.setLow({std::max(down(got.lo, l.lo), l.lo), got.loOrigin, got.loWhy});
           moved = true;
         }
         if (got.hi > to.hi && to.hi < l.hi) {
-          to.setHigh({l.hi, got.hiOrigin, got.hiWhy});
+          to.setHigh({std::min(up(got.hi, l.hi), l.hi), got.hiOrigin, got.hiWhy});
           moved = true;
         }
         to.base = 0;
@@ -411,14 +439,18 @@ void LoopRanges::runLoop(const OverflowCheck::LoopSpec &spec, State &st) {
       }
     }
   }
+  State unrolledExits = deadState();
+  bool unrolled = false;
   if (!passes.empty() && passes.hi <= kUnrollPasses && spec.simple && !check_.overBudget()) {
     State at = entry;
     State all = entry;
     for (double k = 0; k <= passes.hi && !at.dead; ++k) {
       State exits = deadState();
       at = onePass(spec, at, exits);
+      unrolledExits = join(unrolledExits, exits);
       all = join(all, at);
     }
+    unrolled = at.dead;
     for (auto &headVar : head.vars) {
       auto found = all.vars.find(headVar.first);
       if (found == all.vars.end()) {
@@ -447,6 +479,7 @@ void LoopRanges::runLoop(const OverflowCheck::LoopSpec &spec, State &st) {
       }
       Val &h = headVar.second;
       const Val &start = entry.vars.lookup(var);
+      bool floating = isFloatType(var->type);
       auto grow = [&](Num &n, const Num &startNum, const Num &endNum,
                       std::optional<std::pair<double, double>> step, Limits l) {
         if (n.empty() || startNum.empty() || endNum.empty()) {
@@ -460,7 +493,9 @@ void LoopRanges::runLoop(const OverflowCheck::LoopSpec &spec, State &st) {
             } else {
               n.setHigh(limit(joint(hi, endNum.high(), passes.high()), l.hi, false));
             }
-          } else if (step && step->second > 0 && step->second <= 1 && l.hi >= kIntMax) {
+          } else if (step && step->second > 0 &&
+                     ((step->second <= 1 && l.hi >= kIntMax) ||
+                      (floating && step->second <= kIntMax))) {
             n.setHigh(Bound{l.hi, Origin::Trusted, nullptr});
           } else {
             n.setHigh(limit(endNum.high(), l.hi, passes.empty(), step && step->second > 0));
@@ -474,7 +509,9 @@ void LoopRanges::runLoop(const OverflowCheck::LoopSpec &spec, State &st) {
             } else {
               n.setLow(limit(joint(lo, endNum.low(), passes.high()), l.lo, false));
             }
-          } else if (step && step->first < 0 && step->first >= -1 && l.lo <= kIntMin) {
+          } else if (step && step->first < 0 &&
+                     ((step->first >= -1 && l.lo <= kIntMin) ||
+                      (floating && step->first >= -kIntMax))) {
             n.setLow(Bound{l.lo, Origin::Trusted, nullptr});
           } else {
             n.setLow(limit(endNum.low(), l.lo, passes.empty(), step && step->first < 0));
@@ -526,7 +563,7 @@ void LoopRanges::runLoop(const OverflowCheck::LoopSpec &spec, State &st) {
 
   State exits = deadState();
   onePass(spec, head, exits);
-  st = exits;
+  st = unrolled ? unrolledExits : exits;
 }
 
 }

@@ -10,7 +10,7 @@ class Stats {
   origin = { x: 0, y: 0 }
   label = `stats of ${this.values.length}`
   ready = this.count > 0
-  scale(by: double = this.values.length) {
+  scale(by: double = this.values.length.toDouble()) {
     return this.values.map(v => v * by)
   }
 }

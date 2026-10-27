@@ -27,5 +27,5 @@ export function parsePrice(s: string): Parsed<decimal> {
 
 export function parseQty(s: string): Parsed<int> {
   const n = parseInt(s)
-  return isNaN(n) || n <= 0 ? err(`bad quantity '${s}'`) : ok(n | 0)
+  return n.isErr() || n.value <= 0 ? err(`bad quantity '${s}'`) : ok(n.value)
 }

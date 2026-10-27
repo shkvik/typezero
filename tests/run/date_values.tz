@@ -14,12 +14,12 @@ const parsed = Result.combine(texts.slice(0, 1).map(parseDate))
 console.log(parsed)
 
 // Generic functions see a date as any object.
-function latest<T>(items: T[], time: (item: T) => double): T | undefined {
+function latest<T>(items: T[], time: (item: T) => int): T | undefined {
   let best: T | undefined = undefined
-  let bestTime = -Infinity
+  let bestTime: int | undefined = undefined
   for (const item of items) {
     const t = time(item)
-    if (t > bestTime) {
+    if (bestTime == undefined || t > bestTime) {
       best = item
       bestTime = t
     }
@@ -56,4 +56,4 @@ bump()
 bump()
 console.log(shared)
 
-console.log(new Date(NaN).toJSON(), new Date(0).toJSON(), new Date(0).toJSON("key"))
+console.log(new Date(0).toJSON(), new Date(0).toJSON("key"))

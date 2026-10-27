@@ -4,7 +4,7 @@
 import { readFileSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
 
-export function later<T>(value: T, ms: number): Promise<T> {
+export function later<T>(value: T, ms: int): Promise<T> {
   return new Promise(resolve => setTimeout(() => resolve(value), ms))
 }
 

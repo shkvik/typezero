@@ -132,8 +132,9 @@ doubles.push(1.2e-7, 123456789012345680000, 9007199254740993, 18014398509481990,
 for (const x of [...doubles, 0.07]) console.log(`${x}`, String(-x), x.toFixed(2))
 const texts = ["12", "  42  ", "-0", "+7", ".5", "5.", "1e3", "1E-2", "0x1F", "1_000", "", " ", "12é", "١٢"]
 texts.push("\u00a012\u2028", "123456789012345678901234567890", "1.7976931348623159e308", "2e-324")
+const shown = <T>(r: Result<T, NumberError>) => (r.isOk() ? `${r.value}` : "Err")
 for (const s of [...texts, "Infinity", "-Infinity", "0.1e1"]) {
-  console.log(`[${s}]`, Number(s), parseInt(s), parseFloat(s), parseInt(s, 16))
+  console.log(`[${s}]`, shown(Number(s)), shown(parseInt(s)), shown(parseFloat(s)), shown(parseInt(s, 16)))
 }
 
 // Long keys of a Map, from strings of every form with the same text

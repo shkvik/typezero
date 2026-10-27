@@ -10,6 +10,7 @@
 #include "runtime/library/decimal/decimal_text/decimal_text.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/Support/ConvertUTF.h"
+#include <cctype>
 #include <cstring>
 
 using llvm::cast;
@@ -20,18 +21,6 @@ using llvm::isa;
 namespace tz {
 
 namespace {
-
-std::pair<llvm::StringRef, llvm::StringRef> sidesOf(const BinaryExpr *bin) {
-  llvm::StringRef source = bin->source;
-  const char *at = bin->loc().getPointer();
-  size_t length = std::strlen(opSpelling(bin->op));
-  if (source.empty() || at < source.begin() || at + length > source.end()) {
-    return {};
-  }
-
-  return {llvm::StringRef(source.begin(), static_cast<size_t>(at - source.begin())).trim(),
-          llvm::StringRef(at + length, static_cast<size_t>(source.end() - at - length)).trim()};
-}
 
 struct Replacement {
   llvm::StringLiteral name, use;
@@ -98,6 +87,18 @@ std::string utf8(const std::u16string &text) {
 
 DecimalChecker::DecimalChecker(Checker &checker) : checker_(checker) {}
 
+std::pair<llvm::StringRef, llvm::StringRef> DecimalChecker::sidesOf(const BinaryExpr *bin) {
+  llvm::StringRef source = bin->source;
+  const char *at = bin->loc().getPointer();
+  size_t length = std::strlen(opSpelling(bin->op));
+  if (source.empty() || at < source.begin() || at + length > source.end()) {
+    return {};
+  }
+
+  return {llvm::StringRef(source.begin(), static_cast<size_t>(at - source.begin())).trim(),
+          llvm::StringRef(at + length, static_cast<size_t>(source.end() - at - length)).trim()};
+}
+
 bool DecimalChecker::isLiteralTree(const Expr *expr) {
   switch (expr->kind()) {
   case Expr::Kind::IntLit:
@@ -162,7 +163,7 @@ void DecimalChecker::checkComparisonOperands(BinaryExpr *bin) {
     if (type && (type->isLiteral() || type->isUnion())) {
       return other->type;
     }
-    if (type && type->isInteger() && !type->isInt() && fitsLiteral(self, type)) {
+    if (type && type->isNumeric() && (type->isFloat() || fitsLiteral(self, type))) {
       return type;
     }
 
@@ -209,6 +210,26 @@ void DecimalChecker::reportDecimalMix(const BinaryExpr *bin) {
   const Type *l = bin->lhs->type, *r = bin->rhs->type;
   bool leftDecimal = l->nonOptional()->isDecimal();
   const Type *other = leftDecimal ? r : l;
+  if (other->isInteger()) {
+    std::string message =
+        (llvm::Twine("operator '") + opSpelling(bin->op) + "' cannot be applied to types '" +
+         l->name() + "' and '" + r->name() + "': a number changes its type only explicitly")
+            .str();
+    auto [lhs, rhs] = sidesOf(bin);
+    auto wrap = [](llvm::StringRef text) { return TypeRelations::operandText(text); };
+    if (!lhs.empty() && !rhs.empty()) {
+      message +=
+          leftDecimal
+              ? (", e.g. '" + lhs + " " + opSpelling(bin->op) + " " + wrap(rhs) + ".toDecimal()'")
+                    .str()
+              : (", e.g. '" + wrap(lhs) + ".toDecimal() " + opSpelling(bin->op) + " " + rhs + "'")
+                    .str();
+    } else {
+      message += " with '.toDecimal()'";
+    }
+    checker_.diags_.error(bin->loc(), message);
+    return;
+  }
   if (!other->nonOptional()->isFloat()) {
     checker_.binaryChecker().reportOperandTypes(bin->loc(), opSpelling(bin->op), l, r);
     return;
@@ -251,7 +272,7 @@ Expr *DecimalChecker::checkDecimalArithmetic(BinaryExpr *bin) {
     if (type->isDecimal()) {
       continue;
     }
-    if (!type->isInteger()) {
+    if (!type->isInteger() || !TypeRelations::isIntLiteralTree(*side)) {
       reportDecimalMix(bin);
       return bin;
     }
@@ -270,7 +291,7 @@ Expr *DecimalChecker::checkDecimalComparison(BinaryExpr *bin) {
     if (type->isDecimal()) {
       continue;
     }
-    if (!type->isInteger()) {
+    if (!type->isInteger() || !TypeRelations::isIntLiteralTree(*side)) {
       reportDecimalMix(bin);
       return bin;
     }

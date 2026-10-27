@@ -65,7 +65,7 @@ class Printer {
 const pr = new Printer()
 const big: int = 5000000000
 const small: int32 = 7
-console.log(pr.show(1), pr.show(big), pr.show(1.5), pr.show("x"), pr.show(small))
+console.log(pr.show(1), pr.show(big), pr.show(1.5), pr.show("x"), pr.show(small.toInt()))
 console.log(pr.pair(1, 2), pr.pair(1.5, 2))
 console.log(pr.list(1, 2), pr.list(1, 2, 3), pr.list())
 

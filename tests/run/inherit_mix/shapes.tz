@@ -30,7 +30,7 @@ export class Rect extends Shape {
     for (const c of ["tl", "tr", "br", "bl"]) yield `${this.name}: ${c}`
   }
   scale(k: int) {
-    return new Rect(this.w * k, this.h * k)
+    return new Rect(this.w * k.toDouble(), this.h * k.toDouble())
   }
   scale(k: decimal) {
     return new Rect(this.w * Number(k), this.h * Number(k))
@@ -41,7 +41,11 @@ export class Rect extends Shape {
     if (m == undefined) return err(`not a size: '${text}'`)
     // A regex in a field is known only when the program runs: its groups may be
     // undefined.
-    return ok(new Rect(parseInt(m[1] ?? "0"), parseInt(m[2] ?? "0")))
+    const w = parseInt(m[1] ?? "0"), h = parseInt(m[2] ?? "0")
+    if (w.isErr() || h.isErr()) return err(`not a size: '${text}'`)
+    const width = w.value, height = h.value
+    if (width < 0 || width > 100000 || height < 0 || height > 100000) return err(`too big: '${text}'`)
+    return ok(new Rect(width.toDouble(), height.toDouble()))
   }
 }
 

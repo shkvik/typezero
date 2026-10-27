@@ -73,7 +73,6 @@ void CodeWalk::walk(unsigned fi) {
   analysis_.fn_ = &analysis_.fns_[fi];
   analysis_.cur_ = {0};
   analysis_.targets_.clear();
-  analysis_.tries_.clear();
   analysis_.openJoins_.clear();
   analysis_.loops_ = 0;
   analysis_.label_ = {};
@@ -149,41 +148,6 @@ void CodeWalk::var(const VarSymbol *v, bool write, llvm::SMLoc at) {
   }
 }
 
-void CodeWalk::throwPoint() {
-  for (auto it = analysis_.tries_.rbegin(); it != analysis_.tries_.rend(); ++it) {
-    if (it->phase == Analysis::Phase::Block) {
-      merge(it->entry, analysis_.cur_);
-      merge(it->finallyEntry, analysis_.cur_);
-      if (it->handler) {
-        return;
-      }
-    } else if (it->phase == Analysis::Phase::Handler) {
-      merge(it->finallyEntry, analysis_.cur_);
-    }
-  }
-}
-
-void CodeWalk::throughFinally() {
-  for (Analysis::TryState &t : analysis_.tries_) {
-    if (t.finalizer && t.phase != Analysis::Phase::Finalizer) {
-      merge(t.finallyEntry, analysis_.cur_);
-    }
-  }
-}
-
-bool CodeWalk::caught() const {
-  for (auto it = analysis_.tries_.rbegin(); it != analysis_.tries_.rend(); ++it) {
-    if (it->phase == Analysis::Phase::Block && (it->handler || it->finalizer)) {
-      return true;
-    }
-    if (it->phase == Analysis::Phase::Handler && it->finalizer) {
-      return true;
-    }
-  }
-
-  return false;
-}
-
 void CodeWalk::joinPoint() {
   for (Analysis::OpenJoin &j : analysis_.openJoins_) {
     merge(j.active, analysis_.cur_);
@@ -196,7 +160,6 @@ void CodeWalk::moveTo(unsigned seg) {
   }
   analysis_.cur_ = {seg};
   joinPoint();
-  throwPoint();
 }
 
 void CodeWalk::loop(llvm::StringRef label, llvm::function_ref<void()> head,
@@ -342,7 +305,6 @@ void CodeWalk::stmt(const Stmt *s) {
       use.join = analysis_.joinReturns_.lookup(analysis_.fn_->decl);
     }
     analysis_.exprWalk().expr(r->value, use);
-    throughFinally();
     analysis_.cur_.clear();
     return;
   }
@@ -355,40 +317,10 @@ void CodeWalk::stmt(const Stmt *s) {
       if (!matches) {
         continue;
       }
-      throughFinally();
       merge(isBreak ? it->breaks : it->continues, analysis_.cur_);
       break;
     }
     analysis_.cur_.clear();
-    return;
-  }
-  case Stmt::Kind::Throw:
-    analysis_.exprWalk().expr(cast<ThrowStmt>(s)->value);
-    throwPoint();
-    analysis_.cur_.clear();
-    return;
-  case Stmt::Kind::Try: {
-    auto *t = cast<TryStmt>(s);
-    analysis_.tries_.push_back(
-        {Analysis::Phase::Block, t->handler != nullptr, t->finalizer != nullptr, {}, {}});
-    stmt(t->block);
-    merge(analysis_.tries_.back().finallyEntry, analysis_.cur_);
-    Active normal = analysis_.cur_;
-    if (t->handler) {
-      analysis_.tries_.back().phase = Analysis::Phase::Handler;
-      analysis_.cur_ = analysis_.tries_.back().entry;
-      stmt(t->handler);
-      merge(analysis_.tries_.back().finallyEntry, analysis_.cur_);
-      merge(normal, analysis_.cur_);
-    }
-    Analysis::TryState done = std::move(analysis_.tries_.back());
-    analysis_.tries_.pop_back();
-    if (t->finalizer) {
-      analysis_.cur_ = std::move(done.finallyEntry);
-      stmt(t->finalizer);
-    } else {
-      analysis_.cur_ = std::move(normal);
-    }
     return;
   }
   case Stmt::Kind::Class: {
@@ -459,7 +391,6 @@ void CodeWalk::iterate(const Expr *iterable, const Node *site) {
     return;
   }
   if (type->isAsyncIterator() || type->isIterator()) {
-    throwPoint();
     bool asyncIter = type->isAsyncIterator();
     CallRec &rec = record(site, asyncIter ? CallKind::IterAsync : CallKind::IterSync, {}, at);
     auto *c = dyn_cast<CallExpr>(source);

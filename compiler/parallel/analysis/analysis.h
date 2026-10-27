@@ -90,7 +90,6 @@ private:
   llvm::DenseMap<const FunctionDecl *, const AwaitExpr *> joinReturns_;
   struct AwaitInfo {
     unsigned fn = 0;
-    bool caught = false;
   };
   llvm::DenseMap<const AwaitExpr *, AwaitInfo> awaits_;
   struct JoinInfo {
@@ -117,13 +116,6 @@ private:
     Active breaks, continues;
   };
   std::vector<Target> targets_;
-  enum class Phase { Block, Handler, Finalizer };
-  struct TryState {
-    Phase phase = Phase::Block;
-    bool handler = false, finalizer = false;
-    Active entry, finallyEntry;
-  };
-  std::vector<TryState> tries_;
   unsigned loops_ = 0;
   llvm::StringRef label_;
   struct OpenJoin {

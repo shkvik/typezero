@@ -12,8 +12,8 @@
 #include "compiler/lower/layouts/type_descriptors/type_descriptors.h"
 #include "compiler/lower/memory/ref_counts/ref_counts.h"
 #include "compiler/lower/module_builder/module_builder.h"
+#include "compiler/lower/stmt/exit_lowerer/exit_lowerer.h"
 #include "compiler/lower/stmt/stmt_lowerer/stmt_lowerer.h"
-#include "compiler/lower/stmt/try_lowerer/try_lowerer.h"
 #include "compiler/lower/types/optional_lowerer/optional_lowerer.h"
 #include "llvm/IR/MDBuilder.h"
 
@@ -174,7 +174,7 @@ void AsyncGeneratorLowerer::emitAsyncGeneratorReturn(ReturnStmt *stmt) {
       lowering_.refCounts().releaseValue(value, given);
     }
   }
-  lowering_.tryLowerer().emitReturnOf(nullptr);
+  lowering_.exitLowerer().emitReturnOf(nullptr);
 }
 
 llvm::Value *AsyncGeneratorLowerer::awaitValueOf(llvm::Value *value, const Type *type,
@@ -229,7 +229,7 @@ void AsyncGeneratorLowerer::agenYield(llvm::Value *value, const Type *type, llvm
       llvm::MDBuilder(lowering_.ctx_).createUnlikelyBranchWeights());
   lowering_.functionFrame().switchTo(closeBlock);
   lowering_.asyncLowerer().suspendAsync(nullptr, loc);
-  lowering_.tryLowerer().emitReturnOf(nullptr);
+  lowering_.exitLowerer().emitReturnOf(nullptr);
   if (lowering_.functionFrame().blockIsOpen()) {
     lowering_.builder_.CreateUnreachable();
   }

@@ -40,12 +40,6 @@ const all = [...words, "delta", ...words.slice(1)]
 console.log(all, all.length)
 const opt: (int | undefined)[] = [1, undefined, 3]
 console.log(opt, opt.join("-"), String(opt), opt.includes(undefined), opt.indexOf(3))
-// indexOf uses ==, where NaN equals nothing; includes finds NaN.
-function notANumber(): double {
-  return 0.0 / 0.0
-}
-const nan = [notANumber(), 1]
-console.log(nan.indexOf(notANumber()), nan.includes(notANumber()))
 const empty: string[] = []
 console.log(empty.pop(), empty.shift(), empty.join(), empty)
 const m = [[1, 2], [3, 4]]

@@ -6,6 +6,7 @@
 #include "compiler/check/functions/callback_checker/callback_checker.h"
 #include "compiler/check/iterators/iterator_methods/iterator_methods.h"
 #include "compiler/check/types/type_relations/type_relations.h"
+#include "compiler/declare/prelude/prelude.h"
 #include "compiler/library/bytes/byte_proofs/byte_proofs.h"
 #include "compiler/library/bytes/bytes_check_helpers/bytes_check_helpers.h"
 #include "compiler/library/bytes/bytes_new_checker/bytes_new_checker.h"
@@ -262,7 +263,7 @@ Expr *TypedArrayChecker::checkDataViewMethod(CallExpr *call, MemberExpr *member)
     return call;
   }
   const Type *kindType = Type::bytesType(m.kind);
-  const Type *element = kindType->elementType();
+  const Type *element = kindType->accessType();
   bool oneByte = kindType->elementSize() == 1;
   unsigned min = m.write ? 2 : 1, max = min + (oneByte ? 0 : 1);
   if (!checker_.argumentChecker().checkArity(call, member->loc(), min, max)) {
@@ -284,7 +285,10 @@ Expr *TypedArrayChecker::checkDataViewMethod(CallExpr *call, MemberExpr *member)
                                           "the offset of '" + member->name.str() + "'");
   call->args = std::move(args);
   call->builtin = m.write ? Builtin::DataViewSet : Builtin::DataViewGet;
-  call->type = m.write ? Type::voidTy() : element;
+  call->type = m.write ? Type::voidTy()
+               : element->isFloat()
+                   ? Type::result(Type::doubleTy(), checker_.prelude().builtinType("NumberError"))
+                   : element;
 
   return call;
 }

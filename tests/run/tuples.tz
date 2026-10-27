@@ -19,7 +19,7 @@ console.log(t, same == t)
 // Copied into an array with a spread, when the elements have one type.
 const pair = splitName("A B")
 const widened: [int, double] = [1, 2.5]
-console.log([...pair, "C"], [...widened, 3])
+console.log([...pair, "C"], [widened[0].toDouble(), widened[1], 3])
 
 // Tuples in arrays, objects and optionals, and of objects.
 const grid: [int, int][] = []

@@ -97,10 +97,13 @@ void OverflowCheck::run() {
 
     return a.loc.getPointer() < b.loc.getPointer();
   });
+  for (auto [expr, proven] : proofs_) {
+    expr->rangeProven = proven;
+  }
   std::set<const char *> shown;
   for (const Warning &w : warnings_) {
-    if (shown.insert(w.loc.getPointer()).second) {
-      diags_.warning(w.loc, w.message);
+    if (shown.insert(w.loc.getPointer()).second && !diags_.isQuiet(w.loc)) {
+      diags_.error(w.loc, w.message);
     }
   }
 }

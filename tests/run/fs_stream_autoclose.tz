@@ -1,0 +1,54 @@
+// A file that a stream opened closes itself when nothing refers to the stream
+// any more (docs/errors.md, section 6), without close() or destroy(). The
+// system gives a new file the lowest free descriptor, so a stream opened after
+// the first one is gone gets the same descriptor again.
+import { createReadStream, createWriteStream, mkdtempSync, rmSync, writeFileSync } from "node:fs"
+import { join } from "node:path"
+import { tmpdir } from "node:os"
+import { setTimeout as sleep } from "node:timers/promises"
+
+const dir = must(mkdtempSync(join(tmpdir(), "tz-autoclose-")))
+const path = join(dir, "data.txt")
+must(writeFileSync(path, "hello"))
+const fds: int[] = []
+
+function openReader(file: string) {
+  const stream = createReadStream(file)
+  stream.on("error", (e) => console.log("error", e.message))
+  stream.on("open", (fd) => fds.push(fd))
+}
+function openWriter(file: string) {
+  const stream = createWriteStream(file)
+  stream.on("error", (e) => console.log("error", e.message))
+  stream.on("open", (fd) => fds.push(fd))
+}
+
+async function opened(count: int) {
+  for (let i = 0; i < 1000 && fds.length < count; i++) await sleep(5)
+}
+
+openReader(path)
+await opened(1)
+openReader(path)
+await opened(2)
+openWriter(join(dir, "out.txt"))
+await opened(3)
+console.log("each stream got the same descriptor:", fds.length == 3 && fds[0] == fds[1] && fds[1] == fds[2])
+
+// One that is kept stays open.
+const kept = createReadStream(path)
+kept.on("error", (e) => console.log("error", e.message))
+for (let i = 0; i < 1000 && kept.fd == undefined; i++) await sleep(5)
+openReader(path)
+await opened(4)
+console.log("a kept stream holds its descriptor:", kept.fd != undefined && fds[3] != kept.fd)
+
+must(rmSync(dir, { recursive: true }))
+
+function must<T, E>(r: Result<T, E>): T {
+  if (r.isErr()) {
+    console.log(r.error)
+    process.exit(1)
+  }
+  return r.value
+}

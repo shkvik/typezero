@@ -104,9 +104,9 @@ function run(steps: int): double {
       let w = 0
       for (const b of bases) w += total(b, 5) + b.kids.length + b.score()
       for (const b of boxes) w += (b.get ? b.get() : 0) + Object.keys(b.rec).length
-      check = (check * 31 + w) % 1000003
+      check = (check * 31 + w.toDouble()) % 1000003
     }
   }
-  return check + next
+  return check + next.toDouble()
 }
 console.log(run(10000), run(3000))

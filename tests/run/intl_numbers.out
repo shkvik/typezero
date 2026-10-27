@@ -4,7 +4,6 @@
 123,456,789,012 9 007 199 254 740 992
 0.30000000000000004
 1,000,000,000,000,000,000,000 0.00000015
-не число ∞ -∞
 25.6%
 1.2 million
 1.2K 12K
@@ -38,7 +37,6 @@ EUR 9.99
   { type: 'decimal', value: '.' },
   { type: 'fraction', value: '50' }
 ]
-[ { type: 'nan', value: 'NaN' } ] [ { type: 'minusSign', value: '-' }, { type: 'infinity', value: '∞' } ]
 [
   { type: 'minusSign', value: '-' },
   { type: 'integer', value: '1' },

@@ -16,7 +16,10 @@ public:
   Val evalBinary(const BinaryExpr *bin, State &st, bool wraps);
   Val evalCast(const CastExpr *conv, State &st, bool wraps);
   Num arithmetic(const Expr *site, BinaryOp op, const Num &l, const Num &r, const Type *type,
-                 bool wraps, const Expr *lhs, const Expr *rhs, const VarSymbol *accum);
+                 bool wraps, const Expr *lhs, const Expr *rhs, const VarSymbol *accum,
+                 bool square = false);
+  Num floatArithmetic(const Expr *site, BinaryOp op, const Num &l, const Num &r, const Type *type,
+                      const Expr *lhs, const Expr *rhs, const VarSymbol *accum, bool square);
   Num bitwise(BinaryOp op, const Num &l, const Num &r, const Type *type) const;
 
 private:

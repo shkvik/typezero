@@ -3,8 +3,8 @@ import { unsafeStringify } from './stringify.tz';
 import { UUIDTypes, UuidError, Version7Options } from './types.tz';
 
 type V7State = {
-  msecs?: number; // time, milliseconds
-  seq?: number; // sequence number (32-bits)
+  msecs?: int; // time, milliseconds
+  seq?: int; // sequence number (32-bits)
 };
 
 const _state: V7State = {};
@@ -12,7 +12,7 @@ const _state: V7State = {};
 function v7<TBuf extends Uint8Array = never>(
   options?: Version7Options,
   buf?: TBuf,
-  offset?: number,
+  offset?: int,
 ): Result<UUIDTypes<TBuf>, UuidError> {
   let bytes: Uint8Array;
 
@@ -44,17 +44,19 @@ function v7<TBuf extends Uint8Array = never>(
 
 // (Private!)  Do not use.  This method is only exported for testing purposes
 // and may change without notice.
-export function updateV7State(state: V7State, now: number, rnds: Uint8Array) {
-  let msecs = state.msecs ?? -Infinity;
+export function updateV7State(state: V7State, now: int, rnds: Uint8Array) {
+  // tz: no time yet is undefined, where JavaScript starts from -Infinity.
+  const last = state.msecs;
+  let msecs = now;
   let seq = state.seq ?? 0;
 
-  if (now > msecs) {
+  if (last == undefined || now > last) {
     // Time has moved on! Pick a new random sequence number
     seq = v7Sequence(rnds);
-    msecs = now;
   } else {
+    msecs = last;
     // Bump sequence counter w/ 32-bit rollover
-    seq = (seq + 1) | 0;
+    seq = (seq + 1) & 0xffffffff;
 
     // In case of rollover, bump timestamp to preserve monotonicity. This is
     // allowed by the RFC and should self-correct as the system clock catches
@@ -71,10 +73,10 @@ export function updateV7State(state: V7State, now: number, rnds: Uint8Array) {
 
 function v7Bytes(
   rnds: Uint8Array,
-  msecs?: number,
-  seq?: number,
+  msecs?: int,
+  seq?: int,
   buf?: Uint8Array,
-  offset: number = 0,
+  offset: int = 0,
 ): Result<Uint8Array, UuidError> {
   if (rnds.length < 16) {
     return err({ name: 'Error', message: 'Random bytes length must be >= 16' });
@@ -96,30 +98,30 @@ function v7Bytes(
   // tz: the 16 bytes go into an array of their own, whose indices need no checks, and then
   // into `buf` at `offset`, which was checked above; `>>>` takes the int of `seq`.
   const b = new Uint8Array(16);
-  const s = seq | 0;
+  const s = seq & 0xffffffff;
 
   // byte 0-5: timestamp (48 bits)
-  b[0] = (msecs / 0x10000000000) & 0xff;
-  b[1] = (msecs / 0x100000000) & 0xff;
-  b[2] = (msecs / 0x1000000) & 0xff;
-  b[3] = (msecs / 0x10000) & 0xff;
-  b[4] = (msecs / 0x100) & 0xff;
-  b[5] = msecs & 0xff;
+  b[0] = ((msecs / 0x10000000000) & 0xff).toUint8();
+  b[1] = ((msecs / 0x100000000) & 0xff).toUint8();
+  b[2] = ((msecs / 0x1000000) & 0xff).toUint8();
+  b[3] = ((msecs / 0x10000) & 0xff).toUint8();
+  b[4] = ((msecs / 0x100) & 0xff).toUint8();
+  b[5] = (msecs & 0xff).toUint8();
 
   // byte 6: `version` (4 bits) | sequence bits 28-31 (4 bits)
-  b[6] = 0x70 | ((s >>> 28) & 0x0f);
+  b[6] = (0x70 | ((s >> 28) & 0x0f)).toUint8();
 
   // byte 7: sequence bits 20-27 (8 bits)
-  b[7] = (s >>> 20) & 0xff;
+  b[7] = ((s >> 20) & 0xff).toUint8();
 
   // byte 8: `variant` (2 bits) | sequence bits 14-19 (6 bits)
-  b[8] = 0x80 | ((s >>> 14) & 0x3f);
+  b[8] = (0x80 | ((s >> 14) & 0x3f)).toUint8();
 
   // byte 9: sequence bits 6-13 (8 bits)
-  b[9] = (s >>> 6) & 0xff;
+  b[9] = ((s >> 6) & 0xff).toUint8();
 
   // byte 10: sequence bits 0-5 (6 bits) | random (2 bits)
-  b[10] = ((s << 2) & 0xff) | (rnds[10] & 0x03);
+  b[10] = ((s << 2) & 0xff).toUint8() | (rnds[10] & 0x03);
 
   // bytes 11-15: random (40 bits)
   b[11] = rnds[11];
@@ -131,17 +133,17 @@ function v7Bytes(
   if (!buf) return ok(b);
   // tz: the offset is checked again where the bytes go in, as an int, so that
   // the compiler sees them fit; the check above has returned already otherwise.
-  const at = offset | 0;
+  const at = offset;
   if (at >= 0 && at <= buf.length - 16) buf.set(b, at);
   return ok(buf);
 }
 
 function v7Sequence(rnds: Uint8Array) {
   return (
-    (((rnds[6] ?? 0) & 0x7f) << 24) |
-    ((rnds[7] ?? 0) << 16) |
-    ((rnds[8] ?? 0) << 8) |
-    (rnds[9] ?? 0)
+    (((rnds[6] ?? 0).toInt() & 0x7f) << 24) |
+    ((rnds[7] ?? 0).toInt() << 16) |
+    ((rnds[8] ?? 0).toInt() << 8) |
+    (rnds[9] ?? 0).toInt()
   );
 }
 

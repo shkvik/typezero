@@ -1,9 +1,6 @@
 // env: TZ=UTC
-// expect-exit: 2
-// expect-stderr: panic: Invalid time value
-// format() of an invalid date is fatal for now, as toISOString() is
-// (date_invalid.tz); a time zone ICU does not know is left out instead.
+// A time zone ICU does not know is left out. (An invalid time, NaN, is no
+// more: tz has no NaN.)
 const zones = ["Asia/Bishkek", "Mars/Base"]
 for (const timeZone of zones)
   console.log(new Intl.DateTimeFormat("en-US", { timeZone, hour: "numeric" }).format(0))
-console.log(new Intl.DateTimeFormat("en-US").format(NaN))

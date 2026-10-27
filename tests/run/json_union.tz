@@ -7,7 +7,13 @@ type Circle = { kind: "circle"; r: double }
 type Square = { kind: "square"; side: double }
 type Shape = Circle | Square
 function area(s: Shape): double {
-  return s.kind == "circle" ? 3 * s.r * s.r : s.side * s.side
+  // tz: a number from JSON may be up to 1.8e308, and its square Infinity, so it is clamped.
+  if (s.kind == "circle") {
+    const r = Math.clamp(s.r, 0, 1e6)
+    return 3 * r * r
+  }
+  const side = Math.clamp(s.side, 0, 1e6)
+  return side * side
 }
 const shapes = must(JSON.parse<Shape[]>('[{"kind": "circle", "r": 1}, {"side": 2, "kind": "square"}]'))
 console.log(shapes, shapes.map(area))

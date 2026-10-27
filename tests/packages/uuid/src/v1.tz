@@ -9,7 +9,7 @@ import { UUIDTypes, UuidError, Version1Options } from './types.tz';
 
 type V1State = {
   node?: Uint8Array; // node id (47-bit random)
-  clockseq?: number; // sequence number (14-bit)
+  clockseq?: int; // sequence number (14-bit)
 
   // v1 & v6 timestamps are a pain to deal with.  They specify time from the
   // Gregorian epoch in 100ns intervals, which requires values with 57+ bits of
@@ -18,8 +18,8 @@ type V1State = {
   // (milliseconds since unix epoch) and 'nsecs' (100-nanoseconds offset from
   // `msecs`).
 
-  msecs?: number; // timestamp (milliseconds, unix epoch)
-  nsecs?: number; // timestamp (100-nanoseconds offset from 'msecs')
+  msecs?: int; // timestamp (milliseconds, unix epoch)
+  nsecs?: int; // timestamp (100-nanoseconds offset from 'msecs')
 };
 
 const _state: V1State = {};
@@ -27,7 +27,7 @@ const _state: V1State = {};
 function v1<TBuf extends Uint8Array = never>(
   options?: Version1Options,
   buf?: TBuf,
-  offset?: number,
+  offset?: int,
 ): Result<UUIDTypes<TBuf>, UuidError> {
   let bytes: Uint8Array;
 
@@ -84,12 +84,13 @@ function v1<TBuf extends Uint8Array = never>(
 
 // (Private!)  Do not use.  This method is only exported for testing purposes
 // and may change without notice.
-export function updateV1State(state: V1State, now: number, rnds: Uint8Array) {
-  state.msecs ??= -Infinity;
+export function updateV1State(state: V1State, now: int, rnds: Uint8Array) {
+  // tz: no time yet is undefined, where JavaScript starts from -Infinity.
+  const last = state.msecs;
   let nsecs = state.nsecs ?? 0;
 
   // Update timestamp
-  if (now == state.msecs) {
+  if (last != undefined && now == last) {
     // Same msec-interval = simulate higher clock resolution by bumping `nsecs`
     // https://www.rfc-editor.org/rfc/rfc9562.html#section-6.1-2.6
     nsecs++;
@@ -103,10 +104,10 @@ export function updateV1State(state: V1State, now: number, rnds: Uint8Array) {
       state.node = undefined;
       nsecs = 0;
     }
-  } else if (now > state.msecs) {
+  } else if (last == undefined || now > last) {
     // Reset nsec counter when clock advances to a new msec interval
     nsecs = 0;
-  } else if (now < state.msecs) {
+  } else if (now < last) {
     // Handle clock regression
     // https://www.rfc-editor.org/rfc/rfc9562.html#section-6.1-2.7
     //
@@ -130,7 +131,7 @@ export function updateV1State(state: V1State, now: number, rnds: Uint8Array) {
 
     // Clock sequence must be randomized
     // https://www.rfc-editor.org/rfc/rfc9562.html#section-5.1-8
-    state.clockseq = (((rnds[8] ?? 0) << 8) | (rnds[9] ?? 0)) & 0x3fff;
+    state.clockseq = (((rnds[8] ?? 0).toInt() << 8) | (rnds[9] ?? 0).toInt()) & 0x3fff;
   }
 
   state.msecs = now;
@@ -140,12 +141,12 @@ export function updateV1State(state: V1State, now: number, rnds: Uint8Array) {
 
 function v1Bytes(
   rnds: Uint8Array,
-  msecs?: number,
-  nsecs?: number,
-  clockseq?: number,
+  msecs?: int,
+  nsecs?: int,
+  clockseq?: int,
   node?: Uint8Array,
   buf?: Uint8Array,
-  offset: number = 0,
+  offset: int = 0,
 ): Result<Uint8Array, UuidError> {
   if (rnds.length < 16) {
     return err({ name: 'Error', message: 'Random bytes length must be >= 16' });
@@ -164,7 +165,7 @@ function v1Bytes(
   // tz: the defaults go into variables of their own, which are not undefined.
   let ms = msecs ?? Date.now();
   const ns = nsecs ?? 0;
-  const seq = clockseq ?? (((rnds[8] << 8) | rnds[9]) & 0x3fff);
+  const seq = clockseq ?? ((rnds[8].toInt() << 8) | rnds[9].toInt()) & 0x3fff;
   let id = node;
   if (id == undefined) {
     id = rnds.slice(10, 16);
@@ -179,42 +180,33 @@ function v1Bytes(
   ms += 12219292800000;
 
   // The timestamp is `msecs * 10000 + nsecs`, which needs more precision than a
-  // JS number has, so it is computed as a 32-bit low half and a 28-bit high
-  // half.  `msecs` is split at bit 28, because `0x10000000 * 10000` is exactly
-  // `625 * 0x100000000`: its high bits then contribute only to the high half of
-  // the timestamp, and its low bits only to the low half.
-  // tz: the low bits of msecs are a number, as in JavaScript, whose product does not wrap
-  // around as an int would.
-  const low: number = ms & 0xfffffff;
-  const t = low * 10000 + ns;
+  // JS number has.
+  // tz: an int holds it: 60 bits of 64.
+  const t = ms * 10000 + ns;
 
   // tz: the 16 bytes go into an array of their own, whose indices need no checks, and then
   // into `buf` at `offset`, which was checked above.
   const b = new Uint8Array(16);
 
   // `time_low`
-  const tl = t | 0;
-  b[0] = (tl >>> 24) & 0xff;
-  b[1] = (tl >>> 16) & 0xff;
-  b[2] = (tl >>> 8) & 0xff;
-  b[3] = tl & 0xff;
+  b[0] = ((t >> 24) & 0xff).toUint8();
+  b[1] = ((t >> 16) & 0xff).toUint8();
+  b[2] = ((t >> 8) & 0xff).toUint8();
+  b[3] = (t & 0xff).toUint8();
 
-  // `time_mid`.  Note that adding `nsecs`, above, may have carried out of
-  // `time_low`, so `t`'s own high bits have to be folded in here.
-  const tmh =
-    (((ms / 0x10000000) | 0) * 625 + ((t / 0x100000000) | 0)) & 0xfffffff;
-  b[4] = (tmh >>> 8) & 0xff;
-  b[5] = tmh & 0xff;
+  // `time_mid`
+  b[4] = ((t >> 40) & 0xff).toUint8();
+  b[5] = ((t >> 32) & 0xff).toUint8();
 
   // `time_high_and_version`
-  b[6] = ((tmh >>> 24) & 0xf) | 0x10; // include version
-  b[7] = (tmh >>> 16) & 0xff;
+  b[6] = (((t >> 56) & 0xf) | 0x10).toUint8(); // include version
+  b[7] = ((t >> 48) & 0xff).toUint8();
 
   // `clock_seq_hi_and_reserved` | variant
-  b[8] = (((seq | 0) >>> 8) | 0x80) & 0xff;
+  b[8] = (((seq >> 8) | 0x80) & 0xff).toUint8();
 
   // `clock_seq_low`
-  b[9] = seq & 0xff;
+  b[9] = (seq & 0xff).toUint8();
 
   // `node`
   for (let n = 0; n < 6; ++n) {
@@ -224,7 +216,7 @@ function v1Bytes(
   if (!buf) return ok(b);
   // tz: the offset is checked again where the bytes go in, as an int, so that
   // the compiler sees them fit; the check above has returned already otherwise.
-  const at = offset | 0;
+  const at = offset;
   if (at >= 0 && at <= buf.length - 16) buf.set(b, at);
   return ok(buf);
 }

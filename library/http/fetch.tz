@@ -297,7 +297,7 @@ function errorStream<R>(s: StreamState<R>, e: StreamError) {
 }
 
 function desiredSize<R>(s: StreamState<R>): double {
-  return s.highWaterMark - s.queue.length
+  return s.highWaterMark - s.queue.length.toDouble()
 }
 
 function pullIfNeeded<R>(s: StreamState<R>) {
@@ -471,26 +471,28 @@ export class ReadableStream<R = Uint8Array> {
   async *values(): AsyncGenerator<Result<R, StreamError>, void, void> {
     const reader = this.getReader()
     let finished = false
-    try {
-      for (;;) {
-        const r = await reader.read()
-        if (r.isErr()) {
-          finished = true
-          const failed: Result<R, StreamError> = err(r.error)
-          yield failed
-          return
-        }
-        const step = r.value
-        if (step.done) {
-          finished = true
-          return
-        }
-        const item: Result<R, StreamError> = ok(step.value)
-        yield item
+    const release = __tz_defer(() => {
+      if (finished) {
+        reader.releaseLock()
+        return
       }
-    } finally {
-      if (!finished) await reader.cancel()
-      reader.releaseLock()
+      void reader.cancel().then(() => reader.releaseLock())
+    })
+    for (;;) {
+      const r = await reader.read()
+      if (r.isErr()) {
+        finished = true
+        const failed: Result<R, StreamError> = err(r.error)
+        yield failed
+        return
+      }
+      const step = r.value
+      if (step.done) {
+        finished = true
+        return
+      }
+      const item: Result<R, StreamError> = ok(step.value)
+      yield item
     }
   }
 
@@ -1394,8 +1396,8 @@ export class Response {
 
 class Idle {
   conn: object
-  since: double
-  constructor(conn: object, since: double) {
+  since: int
+  constructor(conn: object, since: int) {
     this.conn = conn
     this.since = since
   }
@@ -1500,7 +1502,7 @@ async function send(url: URL, method: string, headers: Headers, body: Body,
   const hostname = url.hostname
   const host = hostname.startsWith("[") ? hostname.slice(1, hostname.length - 1) : hostname
   const https = url.protocol == "https:"
-  const port = url.port == "" ? (https ? 443 : 80) : parseInt(url.port) | 0
+  const port = url.port == "" ? (https ? 443 : 80) : parseInt(url.port).unwrapOr(0)
   const origin = url.protocol + host + ":" + String(port)
   const target = (url.pathname == "" ? "/" : url.pathname) + url.search
   const flat = requestHeaders(url, headers, body)
@@ -1622,7 +1624,7 @@ async function fetchRequest(request: Request): Promise<Result<Response, FetchErr
     if (url.protocol == "data:") return dataResponse(url)
     if (url.protocol != "http:" && url.protocol != "https:")
       return err(failed("not implemented... yet..."))
-    if (url.port != "" && BAD_PORTS.has(parseInt(url.port) | 0)) return err(failed("bad port"))
+    if (url.port != "" && BAD_PORTS.has(parseInt(url.port).unwrapOr(0))) return err(failed("bad port"))
     const sent = await send(url, method, headers, body, signal, redirects > 0)
     if (sent.isErr()) return sent
     const response = sent.value

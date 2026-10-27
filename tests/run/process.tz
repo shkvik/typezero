@@ -18,7 +18,7 @@ console.log(process.env.TZ_TEST_SURELY_MISSING)
 console.log(process.env.TZ_TEST_SURELY_MISSING ?? "default")
 const name = "TZ_TEST_" + "NUMBER"
 const value = process.env[name]
-if (value != undefined) console.log(Number(value) + 1)
+if (value != undefined) console.log(Number(value).unwrapOr(0) + 1)
 const home = process.env.TZ_TEST_SURELY_MISSING || "no home"
 console.log(home)
 
@@ -31,5 +31,5 @@ for (let i = 0; i < 1000; i++) sum += i
 const elapsed = performance.now() - start
 console.log(sum, elapsed >= 0, elapsed < 60000)
 const now = Date.now()
-console.log(now > 1.7e12, Number.isInteger(now), Date.now() >= now)
+console.log(now > 1700000000000, Number.isInteger(now), Date.now() >= now)
 console.log(process.exitCode)

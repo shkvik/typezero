@@ -44,8 +44,8 @@ class Vec {
     this.y = p.y
   }
   constructor(k: int) {
-    this.x = k
-    this.y = -k
+    this.x = k.toDouble()
+    this.y = -k.toDouble()
   }
   add(v: Vec) {
     return new Vec(this.x + v.x, this.y + v.y)
@@ -55,7 +55,7 @@ class Vec {
     return new Vec(this.x + k, this.y + k)
   }
   add(k: int) {
-    return new Vec(this.x + k * 10, this.y + k * 10)
+    return new Vec(this.x + (k * 10).toDouble(), this.y + (k * 10).toDouble())
   }
   label(a: int, b: double) {
     return `int, double: ${a} ${b}`
@@ -136,7 +136,7 @@ attempt("construct Vec", Reflect.construct(Vec, fromArgs))
 // A class that adds a variant: its objects have both.
 class Vec3 extends Vec {
   add(s: string) {
-    return new Vec(this.x + s.length, this.y)
+    return new Vec(this.x + s.length.toDouble(), this.y)
   }
 }
 const w: object = new Vec3(1, 2)

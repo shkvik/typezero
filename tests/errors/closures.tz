@@ -10,6 +10,7 @@ nums.forEach(console.log)
 // expect-error: 'Math.max' would also get the index as its second argument
 const maxes = nums.map(Math.max)
 function format(n: int, digits?: int): string {
+  // expect-error: cannot prove that the number of digits of 'toFixed' is from 0 to 100
   return n.toFixed(digits ?? 2)
 }
 // expect-error: 'format' would also get the index in its optional parameter 'digits'
@@ -20,7 +21,7 @@ function triple(n: int, i: int, all: int[], extra: int): int {
 // expect-error: 'map' passes 3 arguments, but 'triple' needs 4
 const tripled = nums.map(triple)
 function half(n: int) {
-  return n / 2.0
+  return n.toDouble() / 2.0
 }
 // expect-error: 'filter' needs a function that returns 'boolean', but 'half' returns 'double'
 const halves = nums.filter(half)

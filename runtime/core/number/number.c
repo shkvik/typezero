@@ -206,6 +206,49 @@ double tz_parse_int_ascii(const char *text, size_t n, int32_t radix) {
   return negative ? -value : value;
 }
 
+int tz_parse_int64_ascii(const char *text, size_t n, int32_t radix, int64_t *out) {
+  size_t i = 0;
+  int negative = 0;
+  if (i < n && (text[i] == '+' || text[i] == '-')) {
+    negative = text[i++] == '-';
+  }
+  int strip_prefix = 1;
+  if (radix != 0) {
+    if (radix < 2 || radix > 36) {
+      return 1;
+    }
+    strip_prefix = radix == 16;
+  } else {
+    radix = 10;
+  }
+  if (strip_prefix && n - i >= 2 && text[i] == '0' && (text[i + 1] | 0x20) == 'x') {
+    i += 2;
+    radix = 16;
+  }
+  size_t start = i;
+  uint64_t value = 0;
+  int overflow = 0;
+  while (i < n && digit_value(text[i]) < radix) {
+    uint64_t digit = (uint64_t)digit_value(text[i]);
+    if (value > (UINT64_MAX - digit) / (uint64_t)radix) {
+      overflow = 1;
+    } else {
+      value = value * (uint64_t)radix + digit;
+    }
+    ++i;
+  }
+  if (i == start) {
+    return 1;
+  }
+  uint64_t limit = negative ? (uint64_t)1 << 63 : ((uint64_t)1 << 63) - 1;
+  if (overflow || value > limit) {
+    return 2;
+  }
+  *out = negative ? (int64_t)(0 - value) : (int64_t)value;
+
+  return 0;
+}
+
 double tz_parse_float_ascii(const char *text, size_t n) {
   size_t i = n > 0 && (text[0] == '+' || text[0] == '-') ? 1 : 0;
   if (n - i >= 8 && memcmp(text + i, "Infinity", 8) == 0) {

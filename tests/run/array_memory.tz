@@ -83,7 +83,7 @@ for (let i = 0; i < 200000; i++) big += "ab"
 console.log(big.length, big.slice(-3))
 
 const huge: double[] = []
-for (let i = 0; i < 3000000; i++) huge.push(i / 2)
+for (let i = 0; i < 3000000; i++) huge.push(i.toDouble() / 2)
 console.log(huge.length, huge[huge.length - 1] ?? 0)
 while (huge.length > 10) huge.pop()
 huge.length = 2

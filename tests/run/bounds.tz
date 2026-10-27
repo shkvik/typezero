@@ -83,7 +83,7 @@ const a = [1, 2, 3, 4]
 console.log(sum(a), rev(a), pairs(a), strided([1, 2, 3, 4, 5, 6, 7]), guarded(a, 2), guarded(a, 9), lastPlusFirst(a), whileLoop(a))
 console.log(powers(10), squares(5), drain([1, 2, 3]), constLength(), nested([[1, 2], [3]]), codes("banana"))
 
-// Not proven: the result may be undefined (NaN for charCodeAt).
+// Not proven: the result may be undefined.
 function at(xs: string[], i: int): string {
   return xs[i] ?? "-"
 }

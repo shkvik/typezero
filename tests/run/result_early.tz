@@ -4,7 +4,7 @@
 function parse(s: string): Result<int, string> {
   if (s.length == 0) return err("empty")
   const n = parseInt(s)
-  return isNaN(n) ? err(`not a number: ${s}`) : ok(n | 0)
+  return n.isErr() ? err(`not a number: ${s}`) : ok(n.value)
 }
 
 function sum(a: string, b: string): Result<int, string> {

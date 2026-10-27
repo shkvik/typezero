@@ -40,7 +40,7 @@ for (const entry of entries.slice(0, 1))
 // What statSync tells.
 const stats: Stats = must(statSync(join(dir, "b", "y.txt")))
 console.log(stats.isFile(), stats.isDirectory(), stats.isSymbolicLink(), stats.isFIFO(), stats.size,
-            stats.mtimeMs > 0, stats.mtimeMs <= Date.now() + 1000, stats.nlink)
+            stats.mtimeMs > 0, stats.mtimeMs <= (Date.now() + 1000).toDouble(), stats.nlink)
 console.log(Object.keys(stats))
 console.log(must(lstatSync(dir)).isDirectory(), must(statSync(join(dir, "nope"), { throwIfNoEntry: false })))
 console.log((must(statSync(dir)).mode & 0o170000) == 0o040000, (stats.mode & 0o170000) == 0o100000)

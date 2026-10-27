@@ -4,11 +4,10 @@ import { ms, parse, format, parseStrict } from "ms"
 
 console.log(ms("2 days"), ms("1d"), ms("10h"), ms("2.5 hrs"), ms("2h"), ms("1m"), ms("5s"))
 console.log(ms("1y"), ms("100"), ms("-3 days"), ms("-1h"), ms("-200"))
-console.log(ms(60000), ms(2 * 60000), ms(-3 * 60000), ms(ms("10 hours")))
+console.log(ms(60000), ms(2 * 60000), ms(-3 * 60000), ms(ms("10 hours") ?? 0))
 console.log(ms(60000, { long: true }), ms(2 * 60000, { long: true }), ms(-3 * 60000, { long: true }))
-console.log(ms(ms("10 hours"), { long: true }))
+console.log(ms(ms("10 hours") ?? 0, { long: true }))
 console.log(parse("1.5 Minutes"), parseStrict("3 weeks"), format(90000), format(90000, { long: true }))
 console.log(ms("nonsense"), ms("1 fortnight"))
-// Where ms throws, the tz version gives NaN for a text it cannot read, and
-// the number itself for one it cannot format.
-console.log(parse(""), format(Infinity))
+// Where ms gives NaN, the tz version gives undefined: tz has no NaN.
+console.log(parse(""), format(-0.5))

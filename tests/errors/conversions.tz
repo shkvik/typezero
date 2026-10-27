@@ -6,13 +6,13 @@ function find(flag: boolean): int | undefined {
   if (flag) return 1
 }
 const maybe = find(true)
-// expect-error: 'as' is not supported; drop the fraction with 'x | 0'
+// expect-error: 'as' is not supported; round it first, then convert: 'Math.trunc(d).toInt()'
 const a = d as int
-// expect-error: 'as' is not supported; round with Math.round
+// expect-error: 'as' is not supported; round it first, then convert: 'Math.trunc(d).toUint8()'
 const b = d as uint8
-// expect-error: 'as' is not supported; the value converts to 'double' by itself
+// expect-error: 'as' is not supported; convert it explicitly: 'i.toDouble()'
 const c = i as double
-// expect-error: 'as' is not supported; Math.trunc(x)
+// expect-error: 'as' is not supported; convert it explicitly: 'l.toInt16()'
 const e = l as int16
 // expect-error: 'as' is not supported; the value may be undefined
 const f = maybe as int
@@ -20,9 +20,9 @@ const f = maybe as int
 const g = [] as int[]
 // expect-error: 'as' is not supported, and type 'string' cannot become 'int'
 const h = "7" as int
-// expect-error: type 'double' is not assignable to type 'int'; drop the fraction with 'x | 0'
+// expect-error: type 'double' is not assignable to type 'int'; round it first, then convert: 'Math.trunc(d).toInt()'
 const j: int = d
-// expect-error: type 'int' is not assignable to type 'int16'; Math.trunc(x)
+// expect-error: type 'int' is not assignable to type 'int16'; convert it explicitly: 'l.toInt16()'
 const k: int16 = l
 // expect-error: expected 1 argument, but got 2
 const n = Math.floor(d, 2)

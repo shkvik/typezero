@@ -36,7 +36,7 @@ console.log(maybeFns.map(m => m?.(1)))
 
 // A callback that calls back into a function of the block.
 function sortByKey(words: string[]) {
-  function key(w: string) { return w.length * 100 + (w.charCodeAt(0) | 0) }
+  function key(w: string) { return w.length * 100 + (w.charCodeAt(0) ?? 0) }
   return words.sort((a, b) => key(a) - key(b))
 }
 console.log(sortByKey(["bb", "a", "ccc", "ab"]))

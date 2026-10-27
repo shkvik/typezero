@@ -46,7 +46,7 @@ class Twice {
 }
 
 const s = new Shapes(1)
-// expect-error: the call fits several variants of 'm' equally well: m(a: int, b: double) and m(a: double, b: int); convert an argument to choose one
+// expect-error: the call fits several variants of 'm' equally well: m(a: int, b: double) and m(a: double, b: int); a number literal fits each of them
 s.m(1, 1)
 // expect-error: no variant of 'm' fits these arguments; m(a: int, b: double) takes 'int' as argument 1, which is 'string'; m(a: double, b: int) takes 'double' as argument 1, which is 'string'
 s.m("x", 1)

@@ -309,7 +309,7 @@ Expr *BufferChecker::checkBufferMethod(CallExpr *call, MemberExpr *member) {
     call->args = std::move(args);
     return made(m.write ? Builtin::BufferWriteVar : Builtin::BufferReadVar, Type::intTy());
   }
-  const Type *element = Type::bytesType(kind)->elementType();
+  const Type *element = Type::bytesType(kind)->accessType();
   int64_t size = Type::bytesType(kind)->elementSize();
   if (!checker_.argumentChecker().checkArity(call, member->loc(), m.write ? 1 : 0,
                                              m.write ? 2 : 1)) {
@@ -332,8 +332,13 @@ Expr *BufferChecker::checkBufferMethod(CallExpr *call, MemberExpr *member) {
                                                               "the offset of '" + name.str() + "'");
   call->args = std::move(args);
 
+  const Type *read =
+      element->isFloat()
+          ? Type::result(Type::doubleTy(), checker_.prelude().builtinType("NumberError"))
+          : element;
+
   return made(m.write ? Builtin::BufferWriteNumber : Builtin::BufferRead,
-              m.write ? Type::intTy() : element);
+              m.write ? Type::intTy() : read);
 }
 
 Expr *BufferChecker::checkTextMethod(CallExpr *call, MemberExpr *member) {

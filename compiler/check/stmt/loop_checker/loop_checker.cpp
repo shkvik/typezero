@@ -60,10 +60,6 @@ static bool continuesTo(const Stmt *stmt, llvm::ArrayRef<llvm::StringRef> labels
                         [&](const SwitchCase &c) { return llvm::any_of(c.body, inside); });
   case Stmt::Kind::Labeled:
     return inside(cast<LabeledStmt>(stmt)->body);
-  case Stmt::Kind::Try: {
-    auto *s = cast<TryStmt>(stmt);
-    return inside(s->block) || inside(s->handler) || inside(s->finalizer);
-  }
   default:
     return false;
   }
@@ -145,15 +141,9 @@ void LoopChecker::checkForOf(ForOfStmt *stmt) {
                 });
     if (list) {
       auto *elements = checker_.ctx_.make<ArrayLitExpr>(name->loc());
-      const Type *number = nullptr;
       std::vector<const Type *> kinds;
       for (const Field &f : name->type->fields()) {
-        if (f.type->isNumeric()) {
-          number = number ? TypeRelations::commonNumericType(number, f.type) : f.type;
-        }
-      }
-      for (const Field &f : name->type->fields()) {
-        kinds.push_back(f.type->isNumeric() ? number : f.type);
+        kinds.push_back(f.type);
       }
       for (size_t k = 0; k < name->type->fields().size(); ++k) {
         elements->elements.push_back(

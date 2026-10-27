@@ -184,17 +184,6 @@ void CycleScanner::stmt(const Stmt *stmt) {
   case Stmt::Kind::Return:
     cycleExprs().expr(llvm::cast<ReturnStmt>(stmt)->value);
     break;
-  case Stmt::Kind::Throw:
-    cycleExprs().expr(llvm::cast<ThrowStmt>(stmt)->value);
-    break;
-  case Stmt::Kind::Try: {
-    auto *s = llvm::cast<TryStmt>(stmt);
-    this->stmt(s->block);
-    addVar(s->param.sym);
-    this->stmt(s->handler);
-    this->stmt(s->finalizer);
-    break;
-  }
   case Stmt::Kind::Class:
     classDecl(llvm::cast<ClassDecl>(stmt));
     break;

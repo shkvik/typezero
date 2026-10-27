@@ -44,7 +44,7 @@ if (store) console.log("store")
 // expect-error: the call fits several variants of 'scale' equally well: scale(k: double) and scale(k: decimal)
 console.log(store.scale(2))
 const big: int32 = 2
-// expect-error: the call fits several variants of 'scale' equally well
+// expect-error: no variant of 'scale' fits these arguments; scale(k: double) takes 'double' as argument 1, which is 'int32'
 console.log(store.scale(big))
 
 // Each copy of a generic function would make its own class for the literal.

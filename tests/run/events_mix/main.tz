@@ -31,9 +31,8 @@ for (const name of files) await jobs.read(name, join(dir, name + ".txt"))
 jobs.emit("finished")
 let total = 0
 for await (const [name, size] of done) {
-  const weight: int = parseInt(String(size))
-  // expect-warning: 'total += weight' may overflow int: 'weight' comes from parseInt
-  total += weight
+  const weight: int = parseInt(String(size)).unwrapOr(0)
+  if (weight >= 0 && weight < 1000000) total += weight
   log(`done ${name} ${size}`)
 }
 log(`total ${total}, started ${jobs.started}, listening ${jobs.listenerCount("done")}`)

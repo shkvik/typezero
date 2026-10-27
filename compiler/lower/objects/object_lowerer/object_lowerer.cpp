@@ -323,7 +323,8 @@ llvm::Value *ObjectLowerer::emitFieldAssign(AssignExpr *assign, bool needResult)
     llvm::Value *old =
         lowering_.builder_.CreateLoad(lowering_.moduleBuilder().lower(type), address);
     value = lowering_.binaryLowerer().emitArithmetic(
-        *assign->op, old, lowering_.exprLowerer().emitExpr(assign->value), type);
+        *assign->op, old, lowering_.exprLowerer().emitExpr(assign->value), type,
+        assign->rangeProven);
   }
   lowering_.storeField_ = index ? index->field.str() : member->name.str();
   lowering_.storeLoc_ = assign->loc();

@@ -25,7 +25,7 @@ bus.on("chained", (text) => console.log("chained", text))
 
 function checkout(items: string[]) {
   bus.emit("order", { id: 7, items, note: items.length > 1 ? "many" : undefined })
-  bus.emit("total", items.length * 2.5, "EUR")
+  bus.emit("total", items.length.toDouble() * 2.5, "EUR")
 }
 // The emitter as a parameter: the type of the variable.
 function welcome(target: typeof bus, name: string) {
@@ -35,8 +35,8 @@ function welcome(target: typeof bus, name: string) {
 bus.emit("user", new User("ann"))
 welcome(bus, "bob")
 checkout(["tea", "cake"])
-// An int and a double: the event passes doubles.
-bus.emit("count", 21, "x")
+// The event passes doubles: each emit gives one.
+bus.emit("count", 21.0, "x")
 bus.emit("count", 2.5, "y")
 bus.emit("chain", 3)
 console.log(bus.eventNames())

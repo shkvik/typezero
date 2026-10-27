@@ -4,7 +4,6 @@
 #include "compiler/check/classes/class_links/class_links.h"
 #include "compiler/check/classes/class_member_checker/class_member_checker.h"
 #include "compiler/check/classes/overload_resolver/overload_resolver.h"
-#include "compiler/check/errors/throw_checker/throw_checker.h"
 #include "compiler/check/expr/argument_checker/argument_checker.h"
 #include "compiler/check/expr/call_checker/call_checker.h"
 #include "compiler/check/expr/expr_checker/expr_checker.h"

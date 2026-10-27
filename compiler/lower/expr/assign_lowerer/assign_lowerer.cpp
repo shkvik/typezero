@@ -88,7 +88,8 @@ llvm::Value *AssignLowerer::emitAssign(AssignExpr *assign, bool needResult) {
     llvm::Value *old =
         lowering_.builder_.CreateLoad(lowering_.moduleBuilder().lower(type), address);
     llvm::Value *rhs = lowering_.exprLowerer().emitExpr(assign->value);
-    value = lowering_.binaryLowerer().emitArithmetic(*assign->op, old, rhs, type);
+    value =
+        lowering_.binaryLowerer().emitArithmetic(*assign->op, old, rhs, type, assign->rangeProven);
   }
   lowering_.storeLowerer().storeVar(var, address, value, true);
   if (!needResult) {

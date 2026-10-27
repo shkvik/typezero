@@ -16,7 +16,7 @@ true false true false true
 true true true true false
 name the string ANN
 phone nothing
-age the number 60
+age the number -30
 tags an array of 2
 address an object with 1 keys
 email nothing
@@ -60,5 +60,5 @@ a 3
   ],
   "nested": {}
 }
-[0,null,0.1,1e+21,"é\ud800","tab\tq\""]
+[0,1e+300,0.1,1e+21,"é\ud800","tab\tq\""]
 Ann Riga undefined a b undefined

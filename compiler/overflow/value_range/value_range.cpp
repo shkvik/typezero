@@ -80,6 +80,7 @@ Num join(const Num &a, const Num &b) {
     return a;
   }
   Num r = make(lower(a.low(), b.low()), higher(a.high(), b.high()));
+  r.away = std::min(awayOf(a), awayOf(b));
   if (a.base && a.base == b.base) {
     r.base = a.base;
     r.offLo = std::min(a.offLo, b.offLo);
@@ -115,8 +116,10 @@ Num meet(const Num &a, const Num &b) {
   if (a.empty() || b.empty()) {
     return Num();
   }
+  Num r = narrowTo(b, a.low(), a.high());
+  r.away = std::max(a.away, b.away);
 
-  return narrowTo(b, a.low(), a.high());
+  return r;
 }
 
 bool sameNum(const Num &a, const Num &b) {
@@ -124,7 +127,8 @@ bool sameNum(const Num &a, const Num &b) {
     return a.empty() == b.empty();
   }
 
-  return a.lo == b.lo && a.hi == b.hi && a.loOrigin == b.loOrigin && a.hiOrigin == b.hiOrigin;
+  return a.lo == b.lo && a.hi == b.hi && a.loOrigin == b.loOrigin && a.hiOrigin == b.hiOrigin &&
+         a.away == b.away;
 }
 
 double plus(double a, double b, double ifUndefined) {
@@ -216,6 +220,9 @@ Num divide(const Num &a, const Num &b, bool integer) {
     part(std::max(b.lo, 1.0), b.hi);
   } else if (b.lo > 0 || b.hi < 0) {
     part(b.lo, b.hi);
+  } else if (double gap = awayOf(b); gap > 0) {
+    part(b.lo, -gap);
+    part(gap, b.hi);
   } else {
     lo = -kInf;
     hi = kInf;
@@ -234,13 +241,13 @@ Num divide(const Num &a, const Num &b, bool integer) {
   return r;
 }
 
-Num remainder(const Num &a, const Num &b) {
+Num remainder(const Num &a, const Num &b, bool integer) {
   if (a.empty() || b.empty()) {
     return Num();
   }
   Bound m = std::fabs(b.lo) > std::fabs(b.hi) ? Bound{std::fabs(b.lo), b.loOrigin, b.loWhy}
                                               : Bound{std::fabs(b.hi), b.hiOrigin, b.hiWhy};
-  double below = m.v == kInf ? kInf : std::max(m.v - 1, 0.0);
+  double below = m.v == kInf ? kInf : integer ? std::max(m.v - 1, 0.0) : m.v;
   Bound lo = a.lo >= 0 ? Bound{0} : a.lo >= -below ? a.low() : Bound{-below, m.origin, m.why};
   Bound hi = a.hi <= 0 ? Bound{0} : a.hi <= below ? a.high() : Bound{below, m.origin, m.why};
 
@@ -262,6 +269,66 @@ Num power(const Num &a, const Num &b) {
   return mixed(std::min(lo, 1.0), top, a, b);
 }
 
+Num powerFloat(const Num &a, const Num &b) {
+  if (a.empty() || b.empty()) {
+    return Num();
+  }
+  bool straddles = a.lo <= 0 && a.hi >= 0;
+  double small = straddles ? awayOf(a) : std::min(std::fabs(a.lo), std::fabs(a.hi));
+  double big = std::max(std::fabs(a.lo), std::fabs(a.hi));
+  double lo = kInf, hi = 0;
+  for (double m : {small, big}) {
+    for (double e : {b.lo, b.hi}) {
+      double p = std::pow(m, e);
+      if (std::isnan(p)) {
+        p = kInf;
+      }
+      lo = std::min(lo, p);
+      hi = std::max(hi, p);
+    }
+  }
+  bool even = b.lo == b.hi && std::fmod(b.lo, 2.0) == 0;
+  if (a.lo < 0 && !even) {
+    return mixed(-hi, hi, a, b);
+  }
+
+  return mixed(lo, hi, a, b);
+}
+
+Num squared(const Num &a) {
+  if (a.empty()) {
+    return Num();
+  }
+  if (a.lo >= 0) {
+    return make({a.lo * a.lo, a.loOrigin, a.loWhy}, {a.hi * a.hi, a.hiOrigin, a.hiWhy});
+  }
+  if (a.hi <= 0) {
+    return make({a.hi * a.hi, a.hiOrigin, a.hiWhy}, {a.lo * a.lo, a.loOrigin, a.loWhy});
+  }
+  Bound big = std::fabs(a.lo) > std::fabs(a.hi) ? a.low() : a.high();
+  double gap = awayOf(a);
+
+  return make({gap * gap}, {big.v * big.v, big.origin, big.why});
+}
+
+double awayOf(const Num &n) {
+  if (n.empty()) {
+    return 0;
+  }
+  if (n.lo > 0) {
+    return n.lo;
+  }
+  if (n.hi < 0) {
+    return -n.hi;
+  }
+
+  return n.away;
+}
+
+bool provenFinite(const Num &n) {
+  return !n.empty() && n.loOrigin != Origin::Trusted && n.hiOrigin != Origin::Trusted;
+}
+
 double ones(double x) {
   double r = 1;
   while (r - 1 < x && r < 1e19) {
@@ -279,6 +346,9 @@ Limits limitsOf(const Type *type) {
   if (type->isInteger()) {
     return {double(type->intMin()), double(type->intMax())};
   }
+  if (type->isFloat()) {
+    return {-kDoubleMax, kDoubleMax};
+  }
   if (type->isLiteral() && type->literalBase()->isNumeric()) {
     return {type->literalNumber(), type->literalNumber()};
   }
@@ -293,6 +363,18 @@ Limits limitsOf(const Type *type) {
 
   return {-kInf, kInf};
 }
+
+bool fitsLow(double lo, const Type *type) { return lo >= limitsOf(type).lo; }
+
+bool fitsHigh(double hi, const Type *type) {
+  Limits l = limitsOf(type);
+  type = type->nonOptional();
+  bool rounded = type->isInteger() && type->bitWidth() == 64;
+
+  return rounded ? hi < l.hi : hi <= l.hi;
+}
+
+bool fits(const Num &n, const Type *type) { return fitsLow(n.lo, type) && fitsHigh(n.hi, type); }
 
 bool isNumberType(const Type *type) {
   if (!type) {
@@ -321,6 +403,15 @@ bool isIntegerType(const Type *type) {
   type = type->nonOptional();
 
   return type->isInteger() || (type->isLiteral() && type->literalBase()->isInteger());
+}
+
+bool isFloatType(const Type *type) {
+  if (!type) {
+    return false;
+  }
+  type = type->nonOptional();
+
+  return type->isFloat() || (type->isLiteral() && type->literalBase()->isFloat());
 }
 
 bool hasLength(const Type *type) {

@@ -8,8 +8,8 @@
 #include "compiler/lower/memory/ref_counts/ref_counts.h"
 #include "compiler/lower/memory/store_lowerer/store_lowerer.h"
 #include "compiler/lower/module_builder/module_builder.h"
+#include "compiler/lower/stmt/exit_lowerer/exit_lowerer.h"
 #include "compiler/lower/stmt/stmt_lowerer/stmt_lowerer.h"
-#include "compiler/lower/stmt/try_lowerer/try_lowerer.h"
 #include "compiler/lower/values/array_lowerer/array_lowerer.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/IR/Intrinsics.h"
@@ -44,7 +44,7 @@ void LoopLowerer::emitJump(Stmt *stmt) {
                    : isBreak      ? t.isLoop || t.isSwitch
                                   : t.isLoop;
     if (matches) {
-      lowering_.tryLowerer().emitJumpTo(i - 1, isBreak);
+      lowering_.exitLowerer().emitJumpTo(i - 1, isBreak);
       return;
     }
   }

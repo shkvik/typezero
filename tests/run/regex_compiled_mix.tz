@@ -29,7 +29,7 @@ const log: string[] = []
 function* numbers(text: string): Generator<number> {
   for (const m of text.matchAll(/\d+/g)) {
     log.push(m[0])
-    yield Number(m[0])
+    yield Number(m[0]).unwrapOr(0)
   }
 }
 let sum: number = 0
@@ -55,7 +55,7 @@ for (const [key, n] of counts) if (/^error\b/.test(key)) errors += n
 console.log(errors, [...counts.keys()].map((k) => k.replace(/:.*/, "")).join())
 
 // 6. A regex or a string, as a union.
-function find(text: string, pattern: RegExp | string): number {
+function find(text: string, pattern: RegExp | string): int {
   return typeof pattern == "string" ? text.indexOf(pattern) : text.search(pattern)
 }
 console.log(find("hello world", "world"), find("hello world", /o\s/), find("hello", /z/))

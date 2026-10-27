@@ -78,7 +78,7 @@ const inputs: string[] = [
 ]
 for (const s of inputs) {
   const t = Date.parse(s)
-  console.log(quoted(s), t.isOk() ? t.value : NaN, t.isOk() ? new Date(t.value) : "Invalid Date")
+  console.log(quoted(s), t.isOk() ? `${t.value}` : "NaN", t.isOk() ? new Date(t.value) : "Invalid Date")
 }
 
 function quoted(s: string): string {

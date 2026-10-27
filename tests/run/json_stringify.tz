@@ -5,7 +5,7 @@
 class Point {
   #secret = 1
   constructor(public x: double, public y: double) {}
-  length() { return Math.hypot(this.x, this.y) + this.#secret }
+  length() { return Math.hypot(this.x, this.y) + this.#secret.toDouble() }
 }
 type Item = { name: string; price?: double; tags: string[] }
 const items: Item[] = [{ name: "a", tags: [] }, { name: "b", price: 2.5, tags: ["x"] }]
@@ -17,7 +17,7 @@ console.log(JSON.stringify({ price, total: price * 3 }))
 console.log(JSON.stringify(ok(1)), JSON.stringify(err("bad")), JSON.stringify([ok()]))
 const pair: [string, int] = ["Ann", 30]
 console.log(JSON.stringify(pair))
-console.log(JSON.stringify([NaN, Infinity, -0, 1e21, 2.0 ** 53]))
+console.log(JSON.stringify([-0, 1e21, 2.0 ** 53]))
 console.log(JSON.stringify({ f: (x: int) => x, n: 1 }), JSON.stringify([(x: int) => x]))
 const maybe: string | undefined = undefined
 const nothing = JSON.stringify(maybe)

@@ -112,11 +112,12 @@ function percentDecode(s: string): Uint8Array {
     const h1 = input[i + 1] ?? 0
     const h2 = input[i + 2] ?? 0
     let value = b
-    if (b == 0x25 && i + 2 < input.length && isAsciiHexDigit(h1) && isAsciiHexDigit(h2)) {
-      value = ((hexValue(h1) << 4) | hexValue(h2)) & 0xff
+    if (b == 0x25 && i + 2 < input.length && isAsciiHexDigit(h1.toInt()) &&
+        isAsciiHexDigit(h2.toInt())) {
+      value = (((hexValue(h1.toInt()) << 4) | hexValue(h2.toInt())) & 0xff).toUint8()
       i += 2
     }
-    if (n >= 0 && n < out.length) out[n] = value & 0xff
+    if (n >= 0 && n < out.length) out[n] = value
     n++
   }
   return out.slice(0, n)
@@ -273,7 +274,8 @@ function parseIPv4Number(s: string): double {
              : c >= 0x30 && c <= 0x37
     if (!ok) return -1
   }
-  return parseInt(text, radix)
+  const parsed = parseInt(text, radix)
+  return parsed.isOk() ? parsed.value.toDouble() : 18446744073709551616
 }
 
 function endsInNumber(domain: string): boolean {
@@ -299,9 +301,9 @@ function parseIPv4(domain: string): double {
   }
   for (let i = 0; i + 1 < numbers.length; i++) if (numbers[i] > 255) return -1
   const last = numbers[numbers.length - 1] ?? 0
-  if (last >= 256 ** (5 - numbers.length)) return -1
+  if (last >= 256.0 ** (5 - numbers.length)) return -1
   let ipv4 = last
-  for (let i = 0; i + 1 < numbers.length; i++) ipv4 += numbers[i] * 256 ** (3 - i)
+  for (let i = 0; i + 1 < numbers.length; i++) ipv4 += numbers[i] * 256.0 ** (3 - i)
   return ipv4
 }
 
@@ -329,13 +331,13 @@ function punycode(label: string): string {
   const digit = (d: int) => cpText(d < 26 ? d + 0x61 : d - 26 + 0x30)
   const adapt = (d: int, points: int, first: boolean): int => {
     let k = 0
-    let dd = first ? Math.floor(d / 700) : d >> 1
-    dd += Math.floor(dd / points)
+    let dd = first ? (d / 700) : d >> 1
+    dd += (dd / points)
     while (dd > ((base - 1) * 26) >> 1) {
-      dd = Math.floor(dd / (base - 1))
+      dd = (dd / (base - 1))
       k += base
     }
-    return k + Math.floor(((base - 1 + 1) * dd) / (dd + 38))
+    return k + (((base - 1 + 1) * dd) / (dd + 38))
   }
   while (handled < input.length) {
     let m = 0x10ffff
@@ -350,7 +352,7 @@ function punycode(label: string): string {
           const t = k <= bias ? 1 : k >= bias + 26 ? 26 : k - bias
           if (q < t) break
           output += digit(t + ((q - t) % (base - t)))
-          q = Math.floor((q - t) / (base - t))
+          q = ((q - t) / (base - t))
         }
         output += digit(q)
         bias = adapt(delta, handled + 1, handled == basic)
@@ -765,9 +767,9 @@ function basicParse(input0: string, base: UrlRecord | undefined, url: UrlRecord,
         } else if (c == -1 || c == 0x2f || c == 0x3f || c == 0x23 ||
                    (isSpecial(url.scheme) && c == 0x5c) || stateOverride != 0) {
           if (buffer != "") {
-            const port = parseInt(buffer, 10)
+            const port = parseInt(buffer, 10).unwrapOr(65536)
             if (port > 65535) return false
-            url.port = port == defaultPort(url.scheme) ? -1 : port | 0
+            url.port = port == defaultPort(url.scheme) ? -1 : port
             buffer = ""
             if (stateOverride != 0) return true
           }

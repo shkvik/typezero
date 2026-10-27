@@ -28,7 +28,7 @@ if (at >= 0) {
     process.stdout.write(must(readFileSync(0, "utf8")).toUpperCase())
   } else if (what == "later") {
     // A child that waits itself before it prints and sets its code.
-    const ms = Number(args[1] ?? "0") | 0
+    const ms = parseInt(args[1] ?? "0").unwrapOr(0)
     await sleep(ms)
     console.log(`slept ${ms}`)
     process.exitCode = 7

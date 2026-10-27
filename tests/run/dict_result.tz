@@ -5,7 +5,7 @@ function parse(text: string): Result<Map<string, int>, string> {
   for (const part of text.split(",")) {
     const [k, v] = part.split("=")
     if (k == undefined || v == undefined) return err(`bad part '${part}'`)
-    m.set(k, Number(v) | 0)
+    m.set(k, parseInt(v).unwrapOr(0))
   }
   return ok(m)
 }

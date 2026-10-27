@@ -179,7 +179,7 @@ export function setDefaultHighWaterMark(objectMode: boolean, value: int) {
 
 function getHighWaterMark(hwm: double | undefined, name: string, objectMode: boolean): int {
   void name
-  if (hwm != undefined) return hwm > 0 ? Math.floor(hwm) | 0 : 0
+  if (hwm != undefined) return hwm > 0 && hwm < 9007199254740992 ? Math.floor(hwm).toInt() : 0
   return getDefaultHighWaterMark(objectMode)
 }
 

@@ -19,7 +19,7 @@ export function v35<TBuf extends Uint8Array = never>(
   value: string | Uint8Array,
   namespace: UUIDTypes<Uint8Array>,
   buf?: TBuf,
-  offset?: number,
+  offset?: int,
 ): Result<UUIDTypes<TBuf>, UuidError> {
   const valueBytes: Uint8Array =
     typeof value == 'string' ? stringToBytes(value) : value;
@@ -49,12 +49,12 @@ export function v35<TBuf extends Uint8Array = never>(
   const bytes = new Uint8Array(16);
   bytes.set(hash(input).subarray(0, 16));
 
-  bytes[6] = ((bytes[6] & 0x0f) | version) & 0xff;
+  bytes[6] = (((bytes[6].toInt() & 0x0f) | version) & 0xff).toUint8();
   bytes[8] = (bytes[8] & 0x3f) | 0x80;
 
   if (buf) {
     // tz: the check is on the int offset, in a form the compiler reads.
-    const at = (offset ?? 0) | 0;
+    const at = offset ?? 0;
     if (at < 0 || at > buf.length - 16) {
       return err({
         name: 'RangeError',

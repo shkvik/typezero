@@ -9,6 +9,11 @@ namespace tz {
 
 Expr *MathFeature::checkStaticCall(Checker &checker, CallExpr *call, MemberExpr *member,
                                    const Type *expected) const {
+  auto *inner = llvm::dyn_cast<MemberExpr>(member->object);
+  if (checker.callChecker().isGlobalName(member->object, "Bit") ||
+      (inner && checker.callChecker().isGlobalName(inner->object, "Bit"))) {
+    return checker.mathChecker().checkBitCall(call, member);
+  }
   if (!checker.callChecker().isGlobalName(member->object, "Math")) {
     return nullptr;
   }
@@ -17,7 +22,7 @@ Expr *MathFeature::checkStaticCall(Checker &checker, CallExpr *call, MemberExpr 
 }
 
 llvm::ArrayRef<llvm::StringLiteral> MathFeature::typeArgFreeGlobals() const {
-  static const llvm::StringLiteral globals[] = {"Math"};
+  static const llvm::StringLiteral globals[] = {"Math", "Bit"};
 
   return globals;
 }

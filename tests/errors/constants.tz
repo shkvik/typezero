@@ -23,22 +23,25 @@ enum Size {
 // expect-error: this constant is 100000000000000000000
 console.log(Size.Large * Size.Large)
 
-// Under `| 0` only the low bits count, but JavaScript rounds beyond 2^53.
-// expect-error: beyond 2^53, where JavaScript rounds it before taking its low bits; for a 32-bit product use Math.imul
+// `| 0` wraps nothing in tz: counting modulo 2^32 is Bit.Wrap32.
+// expect-error: '(2147483647 * 2147483647) | 0' changes nothing in tz: integers are exact, and nothing wraps around here
 const g = (2147483647 * 2147483647) | 0
 
 // One error for the first operation that overflows, not for each around it.
 // expect-error: this constant is 18446744073709551616
 const h = (4294967296 * 4294967296 + 1) * 2
 
-// Integer division by a constant zero always panics.
+// Division by a constant zero is an error, of doubles too: tz has no Infinity.
 let x = 5
-// expect-error: integer division by zero; to get Infinity or NaN as in JavaScript, divide doubles
+// expect-error: division by zero
 console.log(x / 0)
-// expect-error: integer division by zero
+// expect-error: division by zero
 console.log(x % (1 - 1))
-// expect-error: integer division by zero
+// expect-error: division by zero
 x /= 0
+let y = 5.5
+// expect-error: division by zero
+console.log(y / 0)
 
 // A negative constant exponent, not only a literal one.
 const NEG = -1

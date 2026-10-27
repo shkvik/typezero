@@ -10,7 +10,6 @@ console.log((1234567.891).toLocaleString("en-US"), (1234567.891).toLocaleString(
 console.log((123456789012).toLocaleString("en-US"), (9007199254740992).toLocaleString("ru"))
 console.log((0.1 + 0.2).toLocaleString("en", { maximumFractionDigits: 20 }))
 console.log((1e21).toLocaleString("en"), (1.5e-7).toLocaleString("en", { maximumSignificantDigits: 3 }))
-console.log(NaN.toLocaleString("ru"), Infinity.toLocaleString("en"), (-Infinity).toLocaleString("de"))
 console.log((0.256).toLocaleString("en", { style: "percent", minimumFractionDigits: 1 }))
 
 // Styles, units and notations.
@@ -43,7 +42,6 @@ console.log(new Intl.NumberFormat("en-u-nu-thai").format(12), new Intl.NumberFor
 // formatToParts and resolvedOptions.
 const usd = new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" })
 console.log(usd.formatToParts(-1234.5))
-console.log(new Intl.NumberFormat("en").formatToParts(NaN), new Intl.NumberFormat("en").formatToParts(-Infinity))
 console.log(new Intl.NumberFormat("en", { notation: "scientific" }).formatToParts(-0.000123))
 console.log(new Intl.NumberFormat("en", { notation: "compact" }).formatToParts(12345))
 console.log(new Intl.NumberFormat("en", { style: "unit", unit: "kilometer-per-hour" }).formatToParts(50))

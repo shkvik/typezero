@@ -11,7 +11,7 @@ console.log(process.pid)
 process.argv = ["a"]
 // expect-error: only '=' can set 'process.exitCode'
 process.exitCode += 1
-// expect-error: type 'double' is not assignable to type 'int'; drop the fraction
+// expect-error: type 'double' is not assignable to type 'int'; round it first, then convert
 process.exit(1.5)
 // expect-error: type 'string' is not assignable to type 'int'
 process.exitCode = "1"
@@ -43,7 +43,7 @@ Date.parse("2026-10-24")
 const now = Date.now
 // expect-error: 'performance.mark' is not supported yet; only 'performance.now()' is
 performance.mark("x")
-// expect-error: type 'double' is not assignable to type 'int'
-const ms: int = Date.now()
+// expect-error: type 'int' is not assignable to type 'double'; convert it explicitly: 'x.toDouble()'
+const ms: double = Date.now()
 // expect-error: the value may be undefined; check it before reading 'length'
 console.log(process.env.HOME.length)

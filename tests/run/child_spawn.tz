@@ -14,7 +14,7 @@ if (at >= 0) {
   if (what == "print") {
     process.stdout.write(args[1] ?? "")
     process.stderr.write(args[2] ?? "")
-    process.exitCode = Number(args[3] ?? "0") | 0
+    process.exitCode = parseInt(args[3] ?? "0").unwrapOr(0)
   } else if (what == "echo") {
     process.stdout.write(must(readFileSync(0, "utf8")).toUpperCase())
   } else if (what == "env") {

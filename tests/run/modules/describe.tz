@@ -2,5 +2,5 @@ import { add } from "./math.tz"
 import { unit } from "./geometry/index.tz"
 console.log("describe loads")
 export function describe(n: int) {
-  return `${add(n, n)} ${unit}`
+  return `${add(n.toDouble(), n.toDouble())} ${unit}`
 }

@@ -59,8 +59,6 @@ llvm::Value *CallLowerer::emitCall(CallExpr *call) {
   case Builtin::NumberOf:
   case Builtin::ParseInt:
   case Builtin::ParseFloat:
-  case Builtin::IsNaN:
-  case Builtin::IsFinite:
   case Builtin::IsInteger:
   case Builtin::IsSafeInteger:
   case Builtin::FromCharCode:
@@ -71,6 +69,7 @@ llvm::Value *CallLowerer::emitCall(CallExpr *call) {
   case Builtin::UriDecode:
   case Builtin::NumToFixed:
   case Builtin::NumToRadix:
+  case Builtin::NumConvert:
     return lowering_.numberLowerer().emitNumberBuiltin(call);
   case Builtin::None:
     break;

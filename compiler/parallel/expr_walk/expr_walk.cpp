@@ -119,10 +119,6 @@ void ExprWalk::expr(const Expr *e, const Use &use) {
     }
     expr(b->lhs);
     expr(b->rhs);
-    if (b->op == BinaryOp::Div || b->op == BinaryOp::Rem ||
-        (b->lhs->type && b->lhs->type->nonOptional()->isDecimal())) {
-      analysis_.codeWalk().throwPoint();
-    }
     return;
   }
   case Expr::Kind::Assign:
@@ -415,7 +411,7 @@ void ExprWalk::awaitExpr(const AwaitExpr *a) {
   Use use;
   use.awaited = a;
   expr(a->value, use);
-  analysis_.awaits_[a] = {analysis_.fi_, analysis_.codeWalk().caught()};
+  analysis_.awaits_[a] = {analysis_.fi_};
   if (join) {
     Analysis::OpenJoin open = std::move(analysis_.openJoins_.back());
     analysis_.openJoins_.pop_back();

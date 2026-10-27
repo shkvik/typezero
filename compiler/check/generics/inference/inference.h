@@ -30,10 +30,11 @@ struct Inference {
   void retry(const std::vector<const Type *> &bound);
 
   llvm::ArrayRef<const Type *> params;
-  std::vector<std::vector<const Type *>> candidates, weakCandidates;
+  std::vector<std::vector<const Type *>> candidates, weakCandidates, literalCandidates;
   std::vector<bool> undefinedSeen;
   std::set<std::pair<const Type *, const Type *>> visited;
   bool weak = false;
+  bool intLiteral = false;
   const Origins &origins;
   std::function<const Type *(const Type *)> elementOf;
   std::function<const Type *(const Type *)> asyncOf;

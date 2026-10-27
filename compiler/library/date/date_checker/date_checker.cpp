@@ -139,7 +139,7 @@ Expr *DateChecker::dateTime(Expr *date) {
   auto *callee = checker_.ctx_.make<MemberExpr>(date->loc(), date, "getTime");
 
   return checker_.processChecker().builtinCall(date->loc(), callee, Builtin::DateGetTime, {},
-                                               Type::doubleTy());
+                                               Type::intTy());
 }
 
 Expr *DateChecker::dateToString(Expr *date) {
@@ -201,12 +201,9 @@ void DateChecker::checkDateLiteral(const Expr *arg) {
 void DateChecker::checkDateFields(std::vector<Expr *> &args) {
   std::optional<int64_t> constant[7];
   for (size_t i = 0; i < args.size(); ++i) {
-    args[i] = checker_.mathChecker().numericArg(args[i]);
+    args[i] = timeArg(args[i]);
     if (args[i]->type->isInteger()) {
       constant[i] = checker_.constantFolder().intConstant(args[i]);
-    }
-    if (args[i]->type->isNumeric()) {
-      args[i] = checker_.typeRelations().convert(args[i], Type::doubleTy());
     }
   }
   auto report = [&](size_t i, const std::string &message) {
@@ -265,6 +262,18 @@ void DateChecker::checkDateFields(std::vector<Expr *> &args) {
   }
 }
 
+Expr *DateChecker::timeArg(Expr *arg) {
+  if (!arg->type) {
+    arg = checker_.exprChecker().checkExpr(arg, Type::intTy());
+  }
+  arg = checker_.genericChecker().apparent(arg);
+  if (arg->type->isInteger()) {
+    return arg->type->isInt() ? arg : checker_.typeRelations().convert(arg, Type::intTy());
+  }
+
+  return checker_.typeRelations().coerce(arg, Type::intTy());
+}
+
 Expr *DateChecker::checkDateNew(llvm::SMLoc loc, std::vector<Expr *> &args) {
   auto *callee = checker_.ctx_.make<NameExpr>(loc, "Date");
   auto failed = [&] {
@@ -307,9 +316,8 @@ Expr *DateChecker::checkDateNew(llvm::SMLoc loc, std::vector<Expr *> &args) {
                                                    Type::date());
     }
     if (type->isNumeric()) {
-      return checker_.processChecker().builtinCall(
-          loc, callee, Builtin::DateNew, {checker_.typeRelations().convert(arg, Type::doubleTy())},
-          Type::date());
+      return checker_.processChecker().builtinCall(loc, callee, Builtin::DateNew, {timeArg(arg)},
+                                                   Type::date());
     }
     std::string message = "'new Date' takes a time in milliseconds, a string or a date, found '" +
                           type->name().str() + "'";
@@ -359,7 +367,7 @@ Expr *DateChecker::checkDateStatic(CallExpr *call, MemberExpr *member) {
     }
     checkDateFields(call->args);
     call->builtin = Builtin::DateUTC;
-    call->type = Type::doubleTy();
+    call->type = Type::intTy();
     return call;
   }
   if (name == "parse") {
@@ -369,7 +377,7 @@ Expr *DateChecker::checkDateStatic(CallExpr *call, MemberExpr *member) {
     checkDateLiteral(call->args[0]);
     call->args[0] = checker_.argumentChecker().checkArg(call->args[0], Type::string());
     call->builtin = Builtin::DateParse;
-    call->type = Type::result(Type::doubleTy(), checker_.prelude().builtinType("DateError"));
+    call->type = Type::result(Type::intTy(), checker_.prelude().builtinType("DateError"));
     return call;
   }
   checkDateStaticMember(member);
@@ -443,26 +451,23 @@ Expr *DateChecker::checkDateMethod(CallExpr *call, MemberExpr *member) {
   call->builtin = method->builtin;
   switch (method->builtin) {
   case Builtin::DateGetTime:
-    call->type = Type::doubleTy();
+    call->type = Type::intTy();
     break;
   case Builtin::DateGetUTC:
   case Builtin::DateGetLocal:
     call->args.push_back(field(method->field));
-    call->type = Type::doubleTy();
+    call->type = Type::intTy();
     break;
   case Builtin::DateSetTime:
   case Builtin::DateSetUTC:
   case Builtin::DateSetLocal:
     for (Expr *&arg : call->args) {
-      arg = checker_.mathChecker().numericArg(arg);
-      if (arg->type->isNumeric()) {
-        arg = checker_.typeRelations().convert(arg, Type::doubleTy());
-      }
+      arg = timeArg(checker_.exprChecker().checkExpr(arg, Type::intTy()));
     }
     if (method->builtin != Builtin::DateSetTime) {
       call->args.insert(call->args.begin(), field(method->field));
     }
-    call->type = Type::doubleTy();
+    call->type = Type::intTy();
     break;
   case Builtin::DateToJSON:
     if (!call->args.empty()) {
@@ -516,7 +521,7 @@ Expr *DateChecker::checkDateOperands(BinaryExpr *bin) {
   if (l->isDate() && r->isDate() && (compare || bin->op == BinaryOp::Sub)) {
     bin->lhs = dateTime(bin->lhs);
     bin->rhs = dateTime(bin->rhs);
-    bin->type = compare ? Type::boolTy() : Type::doubleTy();
+    bin->type = compare ? Type::boolTy() : Type::intTy();
     return bin;
   }
   const char *op = opSpelling(bin->op);

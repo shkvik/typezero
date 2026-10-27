@@ -16,7 +16,7 @@ function bytesOf(uuid: Result<UUIDTypes, UuidError>): Result<Uint8Array, UuidErr
 function v6<TBuf extends Uint8Array = never>(
   options?: Version6Options,
   buf?: TBuf,
-  offset?: number,
+  offset?: int,
 ): Result<UUIDTypes<TBuf>, UuidError> {
   options ??= {};
   offset ??= 0;
@@ -35,7 +35,7 @@ function v6<TBuf extends Uint8Array = never>(
   // Return as a byte array if requested
   if (buf) {
     // tz: the check is on the int offset, in a form the compiler reads.
-    const at = offset | 0;
+    const at = offset;
     if (at < 0 || at > buf.length - 16) {
       return err({
         name: 'RangeError',

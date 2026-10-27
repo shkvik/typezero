@@ -1,6 +1,7 @@
 #include "compiler/library/math/math_lowerer/math_lowerer.h"
 #include "compiler/lower/expr/expr_lowerer/expr_lowerer.h"
 #include "compiler/lower/function_frame/function_frame.h"
+#include "compiler/lower/layouts/object_layouts/object_layouts.h"
 #include "compiler/lower/memory/ref_counts/ref_counts.h"
 #include "compiler/lower/module_builder/module_builder.h"
 #include "compiler/lower/types/optional_lowerer/optional_lowerer.h"
@@ -106,6 +107,16 @@ llvm::Value *MathLowerer::emitMathCall(CallExpr *call) {
     return lowering_.builder_.CreateSelect(lowering_.builder_.CreateICmpSGT(x, zero),
                                            llvm::ConstantInt::get(t, 1), sign);
   }
+  case Builtin::MathClamp: {
+    llvm::Intrinsic::ID up = type->isFloat()      ? llvm::Intrinsic::maxnum
+                             : type->isUnsigned() ? llvm::Intrinsic::umax
+                                                  : llvm::Intrinsic::smax;
+    llvm::Intrinsic::ID down = type->isFloat()      ? llvm::Intrinsic::minnum
+                               : type->isUnsigned() ? llvm::Intrinsic::umin
+                                                    : llvm::Intrinsic::smin;
+    return lowering_.builder_.CreateBinaryIntrinsic(
+        down, lowering_.builder_.CreateBinaryIntrinsic(up, args[0], args[1]), args[2]);
+  }
   case Builtin::MathMin:
   case Builtin::MathMax: {
     bool isMin = call->builtin == Builtin::MathMin;
@@ -160,19 +171,56 @@ llvm::Value *MathLowerer::emitMathCall(CallExpr *call) {
     return lowering_.builder_.CreateFPExt(
         lowering_.builder_.CreateFPTrunc(x, lowering_.builder_.getFloatTy()), f64);
   case Builtin::MathClz32:
-    return lowering_.builder_.CreateZExt(
-        lowering_.builder_.CreateBinaryIntrinsic(
-            llvm::Intrinsic::ctlz,
-            lowering_.builder_.CreateTrunc(x, lowering_.builder_.getInt32Ty()),
-            lowering_.builder_.getFalse()),
-        x->getType());
-  case Builtin::MathImul: {
-    llvm::Type *i32 = lowering_.builder_.getInt32Ty();
-    return lowering_.builder_.CreateSExt(
-        lowering_.builder_.CreateMul(lowering_.builder_.CreateTrunc(args[0], i32),
-                                     lowering_.builder_.CreateTrunc(args[1], i32)),
-        args[0]->getType());
+  case Builtin::BitLeadingZeros:
+    return lowering_.builder_.CreateZExtOrTrunc(
+        lowering_.builder_.CreateBinaryIntrinsic(llvm::Intrinsic::ctlz, x,
+                                                 lowering_.builder_.getFalse()),
+        lowering_.builder_.getInt64Ty());
+  case Builtin::BitTrailingZeros:
+    return lowering_.builder_.CreateZExtOrTrunc(
+        lowering_.builder_.CreateBinaryIntrinsic(llvm::Intrinsic::cttz, x,
+                                                 lowering_.builder_.getFalse()),
+        lowering_.builder_.getInt64Ty());
+  case Builtin::BitOnesCount:
+    return lowering_.builder_.CreateZExtOrTrunc(
+        lowering_.builder_.CreateUnaryIntrinsic(llvm::Intrinsic::ctpop, x),
+        lowering_.builder_.getInt64Ty());
+  case Builtin::BitReverseBytes:
+    return lowering_.builder_.CreateUnaryIntrinsic(llvm::Intrinsic::bswap, x);
+  case Builtin::BitRotateLeft:
+  case Builtin::BitRotateRight:
+    return lowering_.builder_.CreateIntrinsic(
+        call->builtin == Builtin::BitRotateLeft ? llvm::Intrinsic::fshl : llvm::Intrinsic::fshr,
+        {x->getType()}, {x, x, args[1]});
+  case Builtin::BitWrapFrom:
+    return lowering_.numberLowerer().intCast(x, call->args[0]->type, type);
+  case Builtin::BitMul64:
+  case Builtin::BitAdd64:
+  case Builtin::BitSub64: {
+    llvm::IRBuilder<> &b = lowering_.builder_;
+    llvm::Type *i128 = b.getInt128Ty(), *i64 = b.getInt64Ty();
+    llvm::Value *a = b.CreateZExt(args[0], i128), *c = b.CreateZExt(args[1], i128);
+    llvm::Value *first, *second;
+    if (call->builtin == Builtin::BitMul64) {
+      llvm::Value *product = b.CreateMul(a, c);
+      first = b.CreateTrunc(b.CreateLShr(product, 64), i64);
+      second = b.CreateTrunc(product, i64);
+    } else {
+      llvm::Value *in = b.CreateZExt(b.CreateAnd(args[2], b.getInt64(1)), i128);
+      llvm::Value *wide = call->builtin == Builtin::BitAdd64 ? b.CreateAdd(b.CreateAdd(a, c), in)
+                                                             : b.CreateSub(b.CreateSub(a, c), in);
+      first = b.CreateTrunc(wide, i64);
+      second = b.CreateAnd(b.CreateTrunc(b.CreateLShr(wide, 64), i64), b.getInt64(1));
+    }
+    llvm::Value *object = lowering_.objectLayouts().allocObject(type, {0, 1});
+    b.CreateStore(first,
+                  lowering_.objectLayouts().fieldAddress(object, type, type->fields()[0].name));
+    b.CreateStore(second,
+                  lowering_.objectLayouts().fieldAddress(object, type, type->fields()[1].name));
+    return object;
   }
+  case Builtin::MathImul:
+    return lowering_.builder_.CreateMul(args[0], args[1]);
   case Builtin::MathRandom:
     return lowering_.builder_.CreateCall(lowering_.rt_.mathRandom, {});
   case Builtin::MathHypot:

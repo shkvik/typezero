@@ -16,6 +16,7 @@
 #include "llvm/Support/ConvertUTF.h"
 #include "llvm/Support/ErrorHandling.h"
 #include <array>
+#include <optional>
 
 using llvm::BasicBlock;
 using llvm::cast;
@@ -61,35 +62,38 @@ llvm::Value *BinaryLowerer::emitBinary(BinaryExpr *bin) {
   case BinaryOp::Le:
   case BinaryOp::Gt:
   case BinaryOp::Ge:
+    if (bin->lhs->type != bin->rhs->type && bin->lhs->type->isInteger() &&
+        bin->rhs->type->isInteger()) {
+      return emitMixedComparison(bin->op, lhs, rhs, bin->lhs->type, bin->rhs->type);
+    }
     return emitComparison(bin->op, lhs, rhs, bin->lhs->type);
   default:
-    return emitArithmetic(bin->op, lhs, rhs, bin->type);
+    return emitArithmetic(bin->op, lhs, rhs, bin->type, bin->rangeProven);
   }
 }
 
 llvm::Value *BinaryLowerer::emitArithmetic(BinaryOp op, llvm::Value *lhs, llvm::Value *rhs,
-                                           const Type *type) {
+                                           const Type *type, bool proven) {
   bool isFloat = type->isFloat();
   bool bitwise = op == BinaryOp::BitAnd || op == BinaryOp::BitOr || op == BinaryOp::BitXor ||
                  op == BinaryOp::Shl || op == BinaryOp::Shr || op == BinaryOp::UShr;
   llvm::IRBuilder<> &b = lowering_.builder_;
-  if (isFloat && bitwise) {
-    llvm::Value *whole = b.CreateSExt(b.CreateCall(lowering_.rt_.toInt32, {lhs}), b.getInt64Ty());
-    llvm::Value *result = emitArithmetic(op, whole, rhs, Type::intTy());
-    return b.CreateSIToFP(result, lhs->getType());
+  std::optional<llvm::IRBuilder<>::FastMathFlagGuard> finite;
+  if (isFloat && proven) {
+    finite.emplace(b);
+    llvm::FastMathFlags flags;
+    flags.setNoNaNs();
+    flags.setNoInfs();
+    b.setFastMathFlags(flags);
   }
-  if (bitwise && type->isInt()) {
-    llvm::Type *i32 = b.getInt32Ty();
-    llvm::Value *l = b.CreateTrunc(lhs, i32), *r = b.CreateTrunc(rhs, i32);
-    llvm::Value *count = b.CreateAnd(r, b.getInt32(31));
-    llvm::Value *result = op == BinaryOp::BitAnd   ? b.CreateAnd(l, r)
-                          : op == BinaryOp::BitOr  ? b.CreateOr(l, r)
-                          : op == BinaryOp::BitXor ? b.CreateXor(l, r)
-                          : op == BinaryOp::Shl    ? b.CreateShl(l, count)
-                          : op == BinaryOp::Shr    ? b.CreateAShr(l, count)
-                                                   : b.CreateLShr(l, count);
-    return op == BinaryOp::UShr ? b.CreateZExt(result, lhs->getType())
-                                : b.CreateSExt(result, lhs->getType());
+  if (bitwise && type->isWrapping() &&
+      (op == BinaryOp::Shl || op == BinaryOp::Shr || op == BinaryOp::UShr)) {
+    llvm::Value *width = llvm::ConstantInt::get(lhs->getType(), type->bitWidth());
+    llvm::Value *count =
+        b.CreateAnd(rhs, llvm::ConstantInt::get(lhs->getType(), type->bitWidth() - 1));
+    llvm::Value *shifted = op == BinaryOp::Shl ? b.CreateShl(lhs, count) : b.CreateLShr(lhs, count);
+    return b.CreateSelect(b.CreateICmpUGE(rhs, width), llvm::ConstantInt::get(lhs->getType(), 0),
+                          shifted);
   }
   switch (op) {
   case BinaryOp::Add:
@@ -102,9 +106,11 @@ llvm::Value *BinaryLowerer::emitArithmetic(BinaryOp op, llvm::Value *lhs, llvm::
     return isFloat ? lowering_.builder_.CreateFMul(lhs, rhs)
                    : lowering_.builder_.CreateMul(lhs, rhs);
   case BinaryOp::Div:
-    return isFloat ? lowering_.builder_.CreateFDiv(lhs, rhs) : emitIntDivRem(op, lhs, rhs, type);
+    return isFloat ? lowering_.builder_.CreateFDiv(lhs, rhs)
+                   : emitIntDivRem(op, lhs, rhs, type, proven);
   case BinaryOp::Rem:
-    return isFloat ? lowering_.builder_.CreateFRem(lhs, rhs) : emitIntDivRem(op, lhs, rhs, type);
+    return isFloat ? lowering_.builder_.CreateFRem(lhs, rhs)
+                   : emitIntDivRem(op, lhs, rhs, type, proven);
   case BinaryOp::Pow: {
     if (isFloat) {
       return lowering_.builder_.CreateCall(lowering_.rt_.mathPow, {lhs, rhs});
@@ -184,12 +190,22 @@ llvm::Value *BinaryLowerer::emitComparison(BinaryOp op, llvm::Value *lhs, llvm::
   llvm_unreachable("not a comparison operator");
 }
 
+llvm::Value *BinaryLowerer::emitMixedComparison(BinaryOp op, llvm::Value *lhs, llvm::Value *rhs,
+                                                const Type *l, const Type *r) {
+  llvm::IRBuilder<> &b = lowering_.builder_;
+  llvm::Type *wide = b.getIntNTy(65);
+  lhs = l->isUnsigned() ? b.CreateZExt(lhs, wide) : b.CreateSExt(lhs, wide);
+  rhs = r->isUnsigned() ? b.CreateZExt(rhs, wide) : b.CreateSExt(rhs, wide);
+
+  return emitComparison(op, lhs, rhs, Type::intTy());
+}
+
 llvm::Value *BinaryLowerer::emitIntDivRem(BinaryOp op, llvm::Value *lhs, llvm::Value *rhs,
-                                          const Type *type) {
+                                          const Type *type, bool proven) {
   bool isRem = op == BinaryOp::Rem;
   bool u = type->isUnsigned();
-  if (auto *divisor = dyn_cast<llvm::ConstantInt>(rhs);
-      divisor && !divisor->isZero() && (u || !divisor->isMinusOne())) {
+  auto *known = dyn_cast<llvm::ConstantInt>(rhs);
+  if (proven || (known && !known->isZero() && (u || !known->isMinusOne()))) {
     return u       ? (isRem ? lowering_.builder_.CreateURem(lhs, rhs)
                             : lowering_.builder_.CreateUDiv(lhs, rhs))
            : isRem ? lowering_.builder_.CreateSRem(lhs, rhs)

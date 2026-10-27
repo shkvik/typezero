@@ -69,17 +69,17 @@ void FsDeclarer::declareFsClasses() {
 
     return cls;
   };
-  const Type *d = Type::doubleTy();
-  checker_.statsClass_ = declare("Stats", {{"dev", d},
-                                           {"mode", d},
-                                           {"nlink", d},
-                                           {"uid", d},
-                                           {"gid", d},
-                                           {"rdev", d},
-                                           {"blksize", d},
-                                           {"ino", d},
-                                           {"size", d},
-                                           {"blocks", d},
+  const Type *d = Type::doubleTy(), *i = Type::intTy();
+  checker_.statsClass_ = declare("Stats", {{"dev", i},
+                                           {"mode", i},
+                                           {"nlink", i},
+                                           {"uid", i},
+                                           {"gid", i},
+                                           {"rdev", i},
+                                           {"blksize", i},
+                                           {"ino", i},
+                                           {"size", i},
+                                           {"blocks", i},
                                            {"atimeMs", d},
                                            {"mtimeMs", d},
                                            {"ctimeMs", d},

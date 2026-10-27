@@ -29,14 +29,22 @@ for (const raw of input.split("\n")) {
     continue
   }
   // После проверки длины parts[0], parts[1] и parts[2] — просто строки.
+  // Number(s) даёт Result: Err, если в строке не число.
   const amount = Number(parts[1].trim())
   const price = Number(parts[2].trim())
-  if (isNaN(amount) || isNaN(price)) {
+  if (amount.isErr() || price.isErr()) {
     console.log(`пропускаю "${parts[0].trim()}": количество "${parts[1].trim()}" — не число`)
     continue
   }
+  // Число из строки может быть любым, до 1.8·10^308, а произведение таких — уже
+  // Infinity. Компилятор требует проверить, что они разумные.
+  const count = amount.value, cost = price.value
+  if (count < 0 || count > 1000000 || cost < 0 || cost > 1000000000) {
+    console.log(`пропускаю "${parts[0].trim()}": странное количество или цена`)
+    continue
+  }
   names.push(parts[0].trim())
-  sums.push(amount * price)
+  sums.push(count * cost)
 }
 
 const width = 40

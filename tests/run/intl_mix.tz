@@ -36,4 +36,4 @@ async function fmt(n: number) {
   await 0
   return n.toLocaleString("ru-RU")
 }
-console.log(await fmt(1234567.5), await Promise.all([1, 2].map(async x => new Intl.NumberFormat("en", { style: "percent" }).format(x / 4.0))))
+console.log(await fmt(1234567.5), await Promise.all([1, 2].map(async x => new Intl.NumberFormat("en", { style: "percent" }).format(x.toDouble() / 4.0))))

@@ -135,27 +135,7 @@ async function* createAsyncIterator<T>(stream: Stream, destroyOnReturn: boolean)
     wait.wake()
   })
   let failed = false
-  try {
-    while (true) {
-      const chunk = stream.destroyed ? undefined : stream._readChunk()
-      if (chunk != undefined) {
-        const item: Result<T, StreamError> = ok(__tz_chunk<T>(chunk))
-        yield item
-      } else {
-        const error = wait.error
-        if (error != undefined) {
-          failed = true
-          const item: Result<T, StreamError> = err(error)
-          yield item
-          return
-        }
-        if (wait.ended) return
-        await new Promise<void>((resolve) => {
-          wait.callback = resolve
-        })
-      }
-    }
-  } finally {
+  const finish = __tz_defer(() => {
     const r = stream._readableState
     if ((failed || destroyOnReturn) &&
         ((!failed && !wait.ended) || (r != undefined && (r.bits & kAutoDestroy) != 0))) {
@@ -163,6 +143,25 @@ async function* createAsyncIterator<T>(stream: Stream, destroyOnReturn: boolean)
     } else {
       stream.removeListener("readable", next)
       cleanup()
+    }
+  })
+  while (true) {
+    const chunk = stream.destroyed ? undefined : stream._readChunk()
+    if (chunk != undefined) {
+      const item: Result<T, StreamError> = ok(__tz_chunk<T>(chunk))
+      yield item
+    } else {
+      const error = wait.error
+      if (error != undefined) {
+        failed = true
+        const item: Result<T, StreamError> = err(error)
+        yield item
+        return
+      }
+      if (wait.ended) return
+      await new Promise<void>((resolve) => {
+        wait.callback = resolve
+      })
     }
   }
 }

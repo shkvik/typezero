@@ -25,6 +25,18 @@
 //   "node:stream/promises" (tz-stream-consumers.mjs, tz-stream-promises.mjs).
 // - end() of writable streams and `for await` over readable ones, which give
 //   Results in tz.
+// - The conversions of numbers (docs/numbers.md, section 3): x.toInt(),
+//   x.toInt32(), x.toDouble() and the others give the same number, as in tz
+//   when the value fits, which the tests compared with node keep to.
+// - parseInt, parseFloat and Number of a string give a Result (docs/numbers.md,
+//   section 9): an Err where JavaScript gives NaN, an infinity, or for
+//   parseInt a number beyond 64 bits. Only for the test's own code: node's
+//   own code, and the files next to this one, still get plain numbers.
+// - charCodeAt past the end gives undefined, where JavaScript gives NaN, also
+//   only for the test's own code.
+// - Doubles read from bytes (getFloat64, readDoubleLE and the others) give a
+//   Result, and Math.min() and Math.max() of an empty spread give undefined
+//   (docs/numbers.md, section 10); Math.clamp, which node does not have yet.
 // - The module "tz:io", with readLine (tz-io.mjs next to this file).
 // - The module "tz:http", with serve over node:http (tz-http.mjs).
 // - NODE_OPTIONS with this file, for the tests that run themselves again as
@@ -93,6 +105,110 @@ class Err {
 }
 
 globalThis.ok = (value) => new Ok(value);
+
+const testsNode = __dirname.toLowerCase();
+function fromNode() {
+  const saved = Error.prepareStackTrace;
+  Error.prepareStackTrace = (_, frames) => frames;
+  const holder = {};
+  Error.captureStackTrace(holder, fromNode);
+  const frames = holder.stack;
+  Error.prepareStackTrace = saved;
+  const caller = (Array.isArray(frames) && frames[1] && frames[1].getFileName()) || "";
+  if (caller.startsWith("node:")) return true;
+  const path = caller.startsWith("file:") ? require("node:url").fileURLToPath(caller) : caller;
+  return path.toLowerCase().startsWith(testsNode);
+}
+
+{
+  const finite = (value) =>
+    Number.isFinite(value)
+      ? new Ok(value)
+      : new Err({
+          code: "bad_number",
+          message: value !== value ? "the bytes hold NaN, which a tz double cannot be"
+                                   : "the bytes hold an infinity, which a tz double cannot be",
+        });
+  const wrap = (proto, names) => {
+    for (const name of names) {
+      const plain = proto[name];
+      if (typeof plain !== "function") continue;
+      Object.defineProperty(proto, name, {
+        value(...args) {
+          const value = plain.apply(this, args);
+          return fromNode() ? value : finite(value);
+        },
+        configurable: true,
+        writable: true,
+      });
+    }
+  };
+  wrap(DataView.prototype, ["getFloat16", "getFloat32", "getFloat64"]);
+  wrap(require("node:buffer").Buffer.prototype,
+       ["readFloatLE", "readFloatBE", "readDoubleLE", "readDoubleBE"]);
+  Math.clamp = (x, lo, hi) => Math.min(Math.max(x, lo), hi);
+  for (const name of ["min", "max"]) {
+    const plain = Math[name];
+    Math[name] = function (...args) {
+      return args.length === 0 && !fromNode() ? undefined : plain.apply(Math, args);
+    };
+  }
+}
+
+{
+  const plainCharCodeAt = String.prototype.charCodeAt;
+  Object.defineProperty(String.prototype, "charCodeAt", {
+    value(index) {
+      const code = plainCharCodeAt.call(this, index);
+      return code === code || fromNode() ? code : undefined;
+    },
+    configurable: true,
+    writable: true,
+  });
+}
+
+{
+  const plainNumber = Number;
+  const plainParseInt = parseInt;
+  const plainParseFloat = parseFloat;
+  const numberResult = (value, text, integer) => {
+    if (Number.isNaN(value)) return new Err({ code: "bad_number", message: `not a number: '${text}'` });
+    if (!Number.isFinite(value) || (integer && Math.abs(value) >= 2 ** 63)) {
+      return new Err({ code: "bad_number", message: `the number is out of range: '${text}'` });
+    }
+    return new Ok(value);
+  };
+  function parsingInt(text, radix) {
+    if (fromNode()) return plainParseInt(text, radix);
+    return numberResult(plainParseInt(text, radix), text, true);
+  }
+  function parsingFloat(text) {
+    if (fromNode()) return plainParseFloat(text);
+    return numberResult(plainParseFloat(text), text, false);
+  }
+  function TzNumber(...args) {
+    if (args.length > 0 && typeof args[0] === "string" && !fromNode()) {
+      return numberResult(plainNumber(args[0]), args[0], false);
+    }
+    return plainNumber(...args);
+  }
+  for (const key of Object.getOwnPropertyNames(plainNumber)) {
+    if (!(key in TzNumber)) TzNumber[key] = plainNumber[key];
+  }
+  TzNumber.parseInt = parsingInt;
+  TzNumber.parseFloat = parsingFloat;
+  globalThis.Number = TzNumber;
+  globalThis.parseInt = parsingInt;
+  globalThis.parseFloat = parsingFloat;
+}
+
+for (const name of ["toInt", "toInt8", "toInt16", "toInt32", "toUint8", "toUint16", "toUint32",
+                    "toUint64", "toDouble"]) {
+  Object.defineProperty(Object.getPrototypeOf(0), name, {
+    value() { return Number(this); },
+    configurable: true,
+  });
+}
 
 // JSON.stringify of a value whose type may hold itself (Json, a tree of
 // classes) gives a Result in tz (docs/errors.md, section 7); a string here

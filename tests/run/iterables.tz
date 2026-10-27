@@ -81,11 +81,11 @@ console.log(sum([1, 2, 3]), sum(new Set([4, 5])), sum(r), sum(new Countdown(4)),
 function collect<T>(xs: Iterable<T>): T[] { return [...xs] }
 console.log(collect("héllo"), collect(new Map([["k", true]])), collect(reg), collect(new Countdown(2)))
 function largest<T extends number>(xs: Iterable<T>) {
-  let best = -Infinity
-  for (const x of xs) if (x > best) best = x
+  let best: double | undefined = undefined
+  for (const x of xs) if (best == undefined || x > best) best = x
   return best
 }
-console.log(largest([1.5, 0.5]), largest(new Range(3, 9)))
+console.log(largest([1.5, 0.5]), largest([...new Range(3, 9)].map(x => x.toDouble())))
 class Bag<T> {
   items: T[] = []
   addAll(xs: Iterable<T>) {

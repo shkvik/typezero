@@ -279,7 +279,8 @@ llvm::Value *ArrayLowerer::emitElementAssign(AssignExpr *assign, bool needResult
       lowering_.refCounts().releaseValue(old, element);
     } else {
       value = lowering_.binaryLowerer().emitArithmetic(
-          *assign->op, old, lowering_.exprLowerer().emitExpr(assign->value), element);
+          *assign->op, old, lowering_.exprLowerer().emitExpr(assign->value), element,
+          assign->rangeProven);
     }
   }
 

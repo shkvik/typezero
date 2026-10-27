@@ -8,7 +8,7 @@ function v5<TBuf extends Uint8Array = never>(
   value: string | Uint8Array,
   namespace: UUIDTypes,
   buf?: TBuf,
-  offset?: number,
+  offset?: int,
 ): Result<UUIDTypes<TBuf>, UuidError> {
   return v35(0x50, sha1, value, namespace, buf, offset);
 }

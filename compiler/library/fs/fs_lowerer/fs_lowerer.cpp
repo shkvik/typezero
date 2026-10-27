@@ -75,10 +75,7 @@ llvm::Value *FsLowerer::emitFsCall(CallExpr *call) {
     bool stats = type->field("mode") != nullptr;
     llvm::StringRef field = stats ? "mode" : "#type";
     llvm::Value *bits = lowering_.builder_.CreateLoad(
-        stats ? f64 : i64, lowering_.objectLayouts().fieldAddress(object.value, type, field));
-    if (stats) {
-      bits = lowering_.builder_.CreateFPToSI(bits, i64);
-    }
+        i64, lowering_.objectLayouts().fieldAddress(object.value, type, field));
     lowering_.refCounts().dropOperand(object);
     llvm::Value *kind = lowering_.exprLowerer().emitExpr(call->args[0]);
     return lowering_.builder_.CreateICmpEQ(

@@ -184,14 +184,6 @@ void EscapeScan::scanStmt(const Stmt *s, Analysis::Escapes &out) {
   case Stmt::Kind::Return:
     scanUses(cast<ReturnStmt>(s)->value, false, out);
     return;
-  case Stmt::Kind::Throw:
-    scanUses(cast<ThrowStmt>(s)->value, false, out);
-    return;
-  case Stmt::Kind::Try:
-    scanStmt(cast<TryStmt>(s)->block, out);
-    scanStmt(cast<TryStmt>(s)->handler, out);
-    scanStmt(cast<TryStmt>(s)->finalizer, out);
-    return;
   default:
     return;
   }

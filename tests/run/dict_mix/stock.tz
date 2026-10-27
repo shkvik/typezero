@@ -34,7 +34,7 @@ export class Shop extends Inventory implements Priced {
     for (const [name, n] of this.counts) {
       const p = this.price(name)
       if (p.isErr()) return err(p.error)
-      total += p.value * n
+      total += p.value * n.toDecimal()
     }
     return ok(total)
   }

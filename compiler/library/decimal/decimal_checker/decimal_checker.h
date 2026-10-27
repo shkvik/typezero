@@ -9,6 +9,7 @@ public:
   explicit DecimalChecker(Checker &checker);
 
   static bool isLiteralTree(const Expr *expr);
+  static std::pair<llvm::StringRef, llvm::StringRef> sidesOf(const BinaryExpr *bin);
   static const Type *literalHint(const Expr *other, const Type *hint);
   static bool fitsLiteral(const Expr *expr, const Type *type);
   void checkComparisonOperands(BinaryExpr *bin);

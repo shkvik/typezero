@@ -22,25 +22,18 @@ using llvm::isa;
 
 namespace tz {
 
-namespace {
-
-const Type *wholeNumberType(const Type *type, const Type *expected) {
-  const Type *wanted = expected ? expected->nonOptional() : nullptr;
-  bool narrows =
-      wanted && wanted->isInteger() && (type->isFloat() || type->bitWidth() > wanted->bitWidth());
-
-  return narrows ? wanted : type;
-}
-
-}
+namespace {}
 
 GlobalFunctionChecker::GlobalFunctionChecker(Checker &checker) : checker_(checker) {}
 
-Expr *GlobalFunctionChecker::checkGlobalCall(CallExpr *call, NameExpr *name, const Type *expected) {
-  static const llvm::StringLiteral names[] = {
-      "String",    "Number",  "parseInt", "parseFloat",         "isNaN",     "isFinite",
-      "Boolean",   "decimal", "BigInt",   "encodeURIComponent", "encodeURI", "decodeURIComponent",
-      "decodeURI", "escape",  "unescape"};
+Expr *GlobalFunctionChecker::checkGlobalCall(CallExpr *call, NameExpr *name) {
+  static const llvm::StringLiteral names[] = {"String",    "Number",
+                                              "parseInt",  "parseFloat",
+                                              "Boolean",   "decimal",
+                                              "BigInt",    "encodeURIComponent",
+                                              "encodeURI", "decodeURIComponent",
+                                              "decodeURI", "escape",
+                                              "unescape"};
   if (checker_.callChecker().isGlobalName(name, "RegExp")) {
     return checker_.callChecker().rejectSpread(call)
                ? call
@@ -54,11 +47,11 @@ Expr *GlobalFunctionChecker::checkGlobalCall(CallExpr *call, NameExpr *name, con
     return nullptr;
   }
 
-  return checkGlobalFunction(call, name->name, name->loc(), expected);
+  return checkGlobalFunction(call, name->name, name->loc());
 }
 
 Expr *GlobalFunctionChecker::checkGlobalFunction(CallExpr *call, llvm::StringRef fn,
-                                                 llvm::SMLoc loc, const Type *expected) {
+                                                 llvm::SMLoc loc) {
   call->type = Type::error();
   if (checker_.callChecker().rejectSpread(call)) {
     return call;
@@ -148,11 +141,15 @@ Expr *GlobalFunctionChecker::checkGlobalFunction(CallExpr *call, llvm::StringRef
       if (type->isDate()) {
         return checker_.dateChecker().dateTime(arg);
       }
+      if (type->isOptional() || type->isUndefined()) {
+        checker_.diags_.error(arg->loc(), "Number() of a value that may be undefined would be NaN, "
+                                          "and tz has no NaN; check it first or give a default "
+                                          "with '??'");
+        return call;
+      }
       if (base->isNumeric()) {
-        arg = checker_.typeRelations().convert(
-            arg, type->isOptional() ? Type::optional(Type::doubleTy()) : Type::doubleTy());
-      } else if (!base->isBool() && !base->isString() && !base->isDecimal() &&
-                 !type->isUndefined()) {
+        arg = checker_.typeRelations().convert(arg, Type::doubleTy());
+      } else if (!base->isBool() && !base->isString() && !base->isDecimal()) {
         checker_.diags_.error(arg->loc(),
                               "Number() takes a number, a boolean, a string or a decimal, "
                               "found '" +
@@ -161,7 +158,9 @@ Expr *GlobalFunctionChecker::checkGlobalFunction(CallExpr *call, llvm::StringRef
       }
     }
     call->builtin = Builtin::NumberOf;
-    call->type = Type::doubleTy();
+    call->type = !call->args.empty() && call->args[0]->type->isString()
+                     ? Type::result(Type::doubleTy(), checker_.prelude().builtinType("NumberError"))
+                     : Type::doubleTy();
     return call;
   }
 
@@ -176,16 +175,10 @@ Expr *GlobalFunctionChecker::checkGlobalFunction(CallExpr *call, llvm::StringRef
           checker_.binaryChecker().toInt32(checker_.mathChecker().numericArg(call->args[1]));
     }
     call->builtin = isInt ? Builtin::ParseInt : Builtin::ParseFloat;
-    call->type = isInt ? wholeNumberType(Type::doubleTy(), expected) : Type::doubleTy();
+    call->type = Type::result(isInt ? Type::intTy() : Type::doubleTy(),
+                              checker_.prelude().builtinType("NumberError"));
     return call;
   }
-
-  if (!checker_.argumentChecker().checkArity(call, loc, 1, 1)) {
-    return call;
-  }
-  call->args[0] = checker_.mathChecker().numericArg(call->args[0]);
-  call->builtin = fn == "isNaN" ? Builtin::IsNaN : Builtin::IsFinite;
-  call->type = Type::boolTy();
 
   return call;
 }

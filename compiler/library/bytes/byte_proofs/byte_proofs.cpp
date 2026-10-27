@@ -79,7 +79,6 @@ ValueRange ByteProofs::valueRange(const Expr *e) const {
   if (std::optional<int64_t> c = checker_.constantFolder().intConstant(e)) {
     return exact(*c);
   }
-  bool isInt = e->type->nonOptional()->isInt();
   switch (e->kind()) {
   case Expr::Kind::Cast: {
     auto *conv = cast<CastExpr>(e);
@@ -186,7 +185,7 @@ ValueRange ByteProofs::valueRange(const Expr *e) const {
       return {};
     }
     if (unary->op == UnaryOp::Neg) {
-      return operate(BinaryOp::Sub, exact(0), r, isInt);
+      return operate(BinaryOp::Sub, exact(0), r, false);
     }
     if (unary->op == UnaryOp::BitNot) {
       return {-*r.hi - 1, -*r.lo - 1};
@@ -198,9 +197,7 @@ ValueRange ByteProofs::valueRange(const Expr *e) const {
     if (bin->op == BinaryOp::Nullish) {
       return unite(valueRange(bin->lhs), valueRange(bin->rhs));
     }
-    bool shift = bin->op == BinaryOp::Shl || bin->op == BinaryOp::Shr || bin->op == BinaryOp::UShr;
-    return operate(bin->op, valueRange(bin->lhs), valueRange(bin->rhs),
-                   shift ? bin->lhs->type->isInt() : isInt);
+    return operate(bin->op, valueRange(bin->lhs), valueRange(bin->rhs), false);
   }
   case Expr::Kind::Conditional: {
     auto *cond = cast<ConditionalExpr>(e);
@@ -223,7 +220,8 @@ void ByteProofs::checkFits(const Expr *value, const Type *target, llvm::StringRe
     return;
   }
   Bytes kind = target->bytes();
-  if (kind == Bytes::Uint8Clamped || provesFits(value, lo, hi)) {
+  if (kind == Bytes::Uint8Clamped || provesFits(value, lo, hi) ||
+      (lo >= value->type->intMin() && uint64_t(hi) >= value->type->intMax())) {
     return;
   }
   std::string text = valueText(value);

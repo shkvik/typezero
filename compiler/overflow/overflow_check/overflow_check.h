@@ -103,15 +103,6 @@ private:
     State breaks = deadState(), conts = deadState();
     unsigned quiet = 0;
   };
-  struct Try {
-    State *thrown;
-    unsigned quiet;
-  };
-  void mayThrow(const State &st) {
-    if (!tries_.empty() && tries_.back().quiet == quiet_) {
-      *tries_.back().thrown = join(*tries_.back().thrown, st);
-    }
-  }
   struct LoopSpec {
     llvm::SMLoc loc;
     llvm::SmallVector<llvm::StringRef, 1> labels;
@@ -138,6 +129,7 @@ private:
     bool integer = false;
     double scale = 1, offset = 0;
     bool square = false;
+    bool abs = false;
   };
   unsigned quiet_ = 0;
   uint64_t work_ = 0;
@@ -145,7 +137,6 @@ private:
   const FunctionDecl *owner_ = nullptr;
   std::vector<Frame> frames_;
   std::vector<Target> targets_;
-  std::vector<Try> tries_;
   uint64_t bases_ = 0;
   std::deque<Reason> reasons_;
   std::map<std::pair<const char *, std::string>, const Reason *> reasonIndex_;
@@ -154,6 +145,7 @@ private:
     std::string message;
   };
   std::vector<Warning> warnings_;
+  llvm::DenseMap<const Expr *, bool> proofs_;
 
 public:
   ~OverflowCheck();

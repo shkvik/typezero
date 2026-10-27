@@ -27,9 +27,6 @@ void CycleEscapes::ordered(const Stmt *stmt, const VarSymbol *self, bool &escape
   case Stmt::Kind::Return:
     expr(llvm::cast<ReturnStmt>(stmt)->value);
     break;
-  case Stmt::Kind::Throw:
-    expr(llvm::cast<ThrowStmt>(stmt)->value);
-    break;
   case Stmt::Kind::If: {
     auto *s = llvm::cast<IfStmt>(stmt);
     expr(s->cond);
@@ -271,14 +268,6 @@ void CycleEscapes::walkStmt(const Stmt *stmt, const std::function<void(const Exp
     break;
   case Stmt::Kind::Return:
     visit(llvm::cast<ReturnStmt>(stmt)->value);
-    break;
-  case Stmt::Kind::Throw:
-    visit(llvm::cast<ThrowStmt>(stmt)->value);
-    break;
-  case Stmt::Kind::Try:
-    walkStmt(llvm::cast<TryStmt>(stmt)->block, visit);
-    walkStmt(llvm::cast<TryStmt>(stmt)->handler, visit);
-    walkStmt(llvm::cast<TryStmt>(stmt)->finalizer, visit);
     break;
   case Stmt::Kind::Function: {
     auto *fn = llvm::cast<FunctionDecl>(stmt);

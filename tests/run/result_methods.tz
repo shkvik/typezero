@@ -3,7 +3,7 @@
 function parse(s: string): Result<int, string> {
   if (s.length == 0) return err("empty")
   const n = parseInt(s)
-  return isNaN(n) ? err(`not a number: ${s}`) : ok(n | 0)
+  return n.isErr() ? err(`not a number: ${s}`) : ok(n.value)
 }
 
 for (const s of ["42", "", "7"]) {
@@ -19,10 +19,10 @@ for (const s of ["42", "", "7"]) {
   console.log(r.andThrough(n => (n == 7 ? err("seven") : ok(true))))
 }
 
-// The halves meet: an int and a double give a double, an Err of the
+// The halves meet: a literal takes the type of the other half, an Err of the
 // function joins the errors of the Result.
-console.log(ok(3).match(n => n, e => 1.5))
-console.log(parse("1").andThen(n => ok(n + 0.5)))
+console.log(ok(3.0).match(n => n, e => 1.5))
+console.log(parse("1").andThen(n => ok(n.toDouble() + 0.5)))
 console.log(parse("x").orElse(e => ok(e.length)).map(n => n * 2))
 
 // A Result without a value, as `ok()` makes.

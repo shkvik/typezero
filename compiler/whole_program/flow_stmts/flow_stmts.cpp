@@ -162,16 +162,6 @@ void FlowStmts::stmt(Stmt *s) {
       }
     }
     break;
-  case Stmt::Kind::Throw:
-    flows_.flowExprs().expr(llvm::cast<ThrowStmt>(s)->value);
-    break;
-  case Stmt::Kind::Try: {
-    auto *t = llvm::cast<TryStmt>(s);
-    stmt(t->block);
-    stmt(t->handler);
-    stmt(t->finalizer);
-    break;
-  }
   case Stmt::Kind::Class:
     classDecl(llvm::cast<ClassDecl>(s));
     break;

@@ -13,7 +13,6 @@ jwk ops DataError Key operations and usage mismatch
 jwk kty DataError Invalid JWK "kty" Parameter
 jwk use DataError Invalid JWK "use" Parameter
 missing hash TypeError Failed to normalize algorithm: passed algorithm can not be converted to 'HmacImportParams' because 'hash' is required in 'HmacImportParams'.
-infinite TypeError Failed to normalize algorithm: 'length' of 'AesKeyGenParams' (passed algorithm) is not a finite number.
 derive usage InvalidAccessError baseKey does not have deriveBits usage
 iterations OperationError iterations cannot be zero
 public of ecdh InvalidAccessError algorithm.public must be a public key

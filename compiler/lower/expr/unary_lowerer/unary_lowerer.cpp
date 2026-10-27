@@ -75,12 +75,6 @@ llvm::Value *UnaryLowerer::emitUnary(UnaryExpr *unary) {
   case UnaryOp::Not:
     return lowering_.builder_.CreateNot(operand);
   case UnaryOp::BitNot:
-    if (unary->type->isInt()) {
-      return lowering_.builder_.CreateSExt(
-          lowering_.builder_.CreateNot(
-              lowering_.builder_.CreateTrunc(operand, lowering_.builder_.getInt32Ty())),
-          operand->getType());
-    }
     return lowering_.builder_.CreateNot(operand);
   case UnaryOp::TypeOf:
   case UnaryOp::NonNull:

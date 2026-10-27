@@ -1,23 +1,14 @@
-// expect-exit: 2
-// expect-stderr: panic: Division by zero
-// `**` of integers stays an integer, like `*`: it wraps around on overflow,
-// and a negative power loses its fraction, like `/` (JavaScript would give
-// 9223372036854775808 and 0.5).
+// `**` of integers stays an integer, like `*`, and must fit its type
+// (errors/overflow_input.tz); a negative power loses its fraction, like `/`
+// (JavaScript would give 0.5).
 let two: int = 2
-let sixtyThree: int = 63
 let minusOne: int = -1
-// expect-warning: 'two ** sixtyThree' may overflow int
-console.log(two ** sixtyThree, two ** 30, two ** minusOne, (-two) ** minusOne, 1 ** minusOne)
+console.log(two ** 30, two ** minusOne, (-two) ** minusOne, 1 ** minusOne)
 let base: int = 2
-// expect-warning: 'base ** 63' may overflow int
-// expect-warning: 'base ** 64' may overflow int
-console.log(base ** 62, base ** 63, base ** 64, (-base) ** 3)
+console.log(base ** 62, (-base) ** 3)
 let x: int = 5
 x **= 2
 console.log(x)
 // Where the context wants a double, the literals are doubles.
 const half: double = 2 ** -1
 console.log(half)
-// 0 to a negative power divides by zero, as `1 / 0` does for integers.
-let zero: int = 0
-for (let e = 1; e >= -1; e--) console.log(zero ** e)

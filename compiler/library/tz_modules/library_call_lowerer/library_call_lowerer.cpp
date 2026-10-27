@@ -92,6 +92,14 @@ llvm::Value *LibraryCallLowerer::emitLibBuiltin(CallExpr *call) {
     lowering_.functionFrame().startDeadBlock();
     return nullptr;
   }
+  case Builtin::LibDefer: {
+    llvm::Value *run = lowering_.exprLowerer().emitExpr(call->args[0]);
+    return lowering_.builder_.CreateCall(
+        lowering_.processLowerer().processFunction("tz_defer_new", ptr, {ptr, ptr}),
+        {lowering_.builder_.CreateExtractValue(run, 0),
+         lowering_.builder_.CreateExtractValue(run, 1)},
+        "defer");
+  }
   case Builtin::LibOrder:
     if (lowering_.parallel_) {
       lowering_.builder_.CreateCall(lowering_.processLowerer().processFunction(

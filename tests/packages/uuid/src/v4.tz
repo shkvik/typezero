@@ -5,7 +5,7 @@ import { UUIDTypes, UuidError, Version4Options } from './types.tz';
 function v4<TBuf extends Uint8Array = never>(
   options?: Version4Options,
   buf?: TBuf,
-  offset?: number,
+  offset?: int,
 ): Result<UUIDTypes<TBuf>, UuidError> {
   if (!buf && !options) {
     return ok(crypto.randomUUID());
@@ -21,7 +21,7 @@ function v4<TBuf extends Uint8Array = never>(
 function _v4<TBuf extends Uint8Array = never>(
   options?: Version4Options,
   buf?: TBuf,
-  offset?: number,
+  offset?: int,
 ): Result<UUIDTypes<TBuf>, UuidError> {
   options = options || {};
 
@@ -37,7 +37,7 @@ function _v4<TBuf extends Uint8Array = never>(
   // Copy bytes to buffer, if provided
   if (buf) {
     // tz: the check is on the int offset, in a form the compiler reads.
-    const at = (offset ?? 0) | 0;
+    const at = offset ?? 0;
     if (at < 0 || at > buf.length - 16) {
       return err({
         name: 'RangeError',

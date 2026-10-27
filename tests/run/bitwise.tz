@@ -1,35 +1,52 @@
-// same-as-node
-// `>>>` and `| 0` give what JavaScript gives. An int's `x >>> n` is unsigned:
-// shifted by 1 to 31 bits it stays an int, otherwise it is a long; where only
-// the low 32 bits matter (under `|`, `&`, `^`) it stays an int.
+// Bitwise operators work on the bits of the type (docs/numbers.md, section 6):
+// `int` has 64 of them, `uint8` 8; `>>` of a signed type copies the sign, of
+// an unsigned one shifts in zeros, and `>>>` is only for unsigned types.
 const neg = -5
-let zero = 0
-console.log(-1 >>> 0, neg >>> 0, neg >>> zero, neg >>> 1, neg >>> 32, (neg >>> 0) | 0, 5 >>> 0)
-let x = 7
-for (let i = 0; i < 3; i++) console.log(x >>> i, -x >>> i)
-const u = neg >>> 0
-console.log(u + 1, u % 7, u > 2147483647, u & 0xff, u ^ 3, [10, 20, 30, 40][neg >>> 30])
-let y = -8
-y >>>= 1
+const big = 9007199254740993
+console.log(neg >> 1, big >> 1, big & 0xff, big | 1, big ^ big, ~neg, 1 << 62)
+const u: uint32 = 4294967291
+console.log(u >> 1, u >>> 1, u & 0xff, u ^ 3, ~u, u >>> 30)
+const m: uint8 = 0xf0
+console.log(m & 0x0f, m | 1, m ^ 0xff, m >> 2, ~m)
+const s: int8 = -128
+console.log(s >> 7, s & 0x7f, s | 1)
+let y: uint16 = 0x8000
+y >>>= 15
+y <<= 3
 console.log(y)
 
-// FNV-1a, the way hash functions are written in JavaScript.
-function fnv1a(s: string) {
-  let h = 2166136261 | 0
-  for (let i = 0; i < s.length; i++) {
-    h ^= s.charCodeAt(i)
-    h = Math.imul(h, 16777619)
-  }
-  return h >>> 0
+// A mask proves the range: no check where the value goes.
+function lowByte(x: int): uint8 {
+  return (x & 0xff).toUint8()
 }
-console.log(fnv1a(""), fnv1a("hello"), fnv1a("typezero") % 1000)
+function u32be(b0: uint8, b1: uint8, b2: uint8, b3: uint8) {
+  return (b0.toUint32() << 24) | (b1.toUint32() << 16) | (b2.toUint32() << 8) | b3.toUint32()
+}
+console.log(lowByte(-1), lowByte(0x1234), u32be(0xde, 0xad, 0xbe, 0xef))
 
-// `| 0` is ToInt32 for a long too: it keeps the low 32 bits, wherever it is.
-// So does any `&`, `|` or `^` between a long and an int.
-const big = 2166136261
-let wide = 4294967296 * 3 + 7
-wide |= 0
-let mask = 4294967295
-mask ^= 1
-const typed: int = 2166136261 | 0
-console.log(big | 0, 2166136261 | 0, typed, wide, mask, 0xdeadbeef & 0xffff, 0xdeadbeef ^ 1, 0x80000000 | 0)
+// FNV-1a: counting modulo 2^32 is Bit.Wrap32, and .value gives the bits.
+function fnv1a32(text: string) {
+  let h: Bit.Wrap32 = 0x811c9dc5
+  for (let i = 0; i < text.length; i++) h = (h ^ text.charCodeAt(i)) * 0x01000193
+  return h.value
+}
+function fnv1a64(text: string) {
+  let h: Bit.Wrap64 = 0xcbf29ce484222325
+  for (let i = 0; i < text.length; i++) h = (h ^ text.charCodeAt(i)) * 0x100000001b3
+  return h.value
+}
+console.log(fnv1a32(""), fnv1a32("hello"), fnv1a32("typezero") % 1000, fnv1a64("hello"))
+let w = Bit.Wrap32.from(-1)
+w += 2
+w <<= 31
+console.log(w.value, (w >> 31).value, Bit.Wrap32.from(4294967297).value, (w << 40).value)
+
+// The object Bit: what is one instruction of the processor.
+console.log(Bit.rotateLeft32(u, 4), Bit.rotateRight32(u, 4), Bit.rotateLeft64(big, 1))
+console.log(Bit.leadingZeros32(1), Bit.leadingZeros64(1), Bit.trailingZeros32(8), Bit.onesCount64(big))
+console.log(Bit.reverseBytes32(0x11223344), Bit.reverseBytes64(1))
+const product = Bit.mul64(0xffffffffffffffff, 0xffffffffffffffff)
+const sum = Bit.add64(0xffffffffffffffff, 2, 0)
+const diff = Bit.sub64(1, 2, 0)
+console.log(product.hi, product.lo, sum.sum, sum.carry, diff.diff, diff.borrow)
+console.log(Math.imul(0x7fffffff, 2), Math.clz32(1))

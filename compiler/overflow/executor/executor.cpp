@@ -99,14 +99,6 @@ void Executor::exec(const Stmt *stmt, State &st) {
   case Stmt::Kind::Continue:
     jump(stmt, cast<ContinueStmt>(stmt)->label, false, st);
     break;
-  case Stmt::Kind::Throw:
-    check_.evaluator().eval(cast<ThrowStmt>(stmt)->value, st);
-    check_.mayThrow(st);
-    st.dead = true;
-    break;
-  case Stmt::Kind::Try:
-    execTry(cast<TryStmt>(stmt), st);
-    break;
   case Stmt::Kind::Class: {
     auto *cls = cast<ClassDecl>(stmt);
     if (cls->builtin) {
@@ -197,29 +189,6 @@ void Executor::execSwitch(const SwitchStmt *stmt, State &st) {
   State out = join(fall, breaks);
   if (!hasDefault && !stmt->exhaustive) {
     out = join(out, st);
-  }
-  st = out;
-}
-
-void Executor::execTry(const TryStmt *stmt, State &st) {
-  State entry = st;
-  State thrown = deadState();
-  check_.tries_.push_back({&thrown, check_.quiet_});
-  exec(stmt->block, st);
-  check_.tries_.pop_back();
-  State out = st;
-  if (stmt->handler) {
-    State handler = join(join(entry, st), thrown);
-    exec(stmt->handler, handler);
-    out = join(st, handler);
-  }
-  if (stmt->finalizer) {
-    if (out.dead) {
-      State fin = join(entry, thrown);
-      exec(stmt->finalizer, fin);
-    } else {
-      exec(stmt->finalizer, out);
-    }
   }
   st = out;
 }

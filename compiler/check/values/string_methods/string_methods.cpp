@@ -98,7 +98,7 @@ Expr *StringMethods::checkStringMethod(CallExpr *call, MemberExpr *member) {
   } else if (method->builtin == Builtin::StrCharCodeAt) {
     call->mayBeOutOfRange =
         !checker_.indexProofs().provesInBounds(member->object, call->args[0], false);
-    call->type = call->mayBeOutOfRange ? Type::doubleTy() : Type::intTy();
+    call->type = call->mayBeOutOfRange ? Type::optional(Type::intTy()) : Type::intTy();
   } else if (method->builtin == Builtin::StrCodePointAt) {
     call->mayBeOutOfRange =
         !checker_.indexProofs().provesInBounds(member->object, call->args[0], false);
