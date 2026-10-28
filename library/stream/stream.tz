@@ -515,6 +515,10 @@ export class Stream extends EventEmitterBase {
   private transformsWrites = false;
   private transformsFinal = false;
   private transformCallback?: StreamCallback;
+  private transformWritten?: StreamCallback;
+  private transformLength = 0;
+  private transformCount = 0;
+  private weakSelf?: WeakRef<Stream>;
 
   constructor() {
     super();
@@ -1054,31 +1058,53 @@ export class Stream extends EventEmitterBase {
     encoding: string,
     callback: StreamCallback,
   ) {
-    const rState = Stream.readableStateOf(stream);
-    const wState = Stream.writableStateOf(stream);
-    const length = stream.readableLength;
+    const count = stream.transformCount + 1;
+    stream.transformCount = count;
+    stream.transformWritten = callback;
+    stream.transformLength = stream.readableLength;
+    const self = stream.weakSelf ?? new WeakRef(stream);
+    stream.weakSelf = self;
     stream.transformChunk(
       chunk,
       encoding,
       (err?: StreamError, val?: unknown) => {
-        if (err != undefined) {
-          callback(err);
-          return;
-        }
-        if (val != undefined) stream.pushChunk(val);
-        if ((rState.bits & kEnded) != 0) {
-          process.nextTick(() => callback());
-        } else if (
-          (wState.bits & kWEnded) != 0 ||
-          length == stream.readableLength ||
-          stream.readableLength < stream.readableHighWaterMark
-        ) {
-          callback();
-        } else {
-          stream.transformCallback = callback;
-        }
+        const target = self.deref();
+        if (target != undefined) Stream.transformed(target, count, err, val);
       },
     );
+  }
+
+  private static transformed(
+    stream: Stream,
+    count: int,
+    err?: StreamError,
+    val?: unknown,
+  ) {
+    const written = stream.transformWritten;
+    if (written == undefined || count != stream.transformCount) {
+      Stream.errorOrDestroy(stream, multipleCallback());
+      return;
+    }
+    const callback = written;
+    stream.transformWritten = undefined;
+    if (err != undefined) {
+      callback(err);
+      return;
+    }
+    if (val != undefined) stream.pushChunk(val);
+    const rState = Stream.readableStateOf(stream);
+    const wState = Stream.writableStateOf(stream);
+    if ((rState.bits & kEnded) != 0) {
+      process.nextTick(() => callback());
+    } else if (
+      (wState.bits & kWEnded) != 0 ||
+      stream.transformLength == stream.readableLength ||
+      stream.readableLength < stream.readableHighWaterMark
+    ) {
+      callback();
+    } else {
+      stream.transformCallback = callback;
+    }
   }
 
   private static transformFinal(

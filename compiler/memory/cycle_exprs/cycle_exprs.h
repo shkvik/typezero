@@ -14,6 +14,8 @@ public:
   bool constructionWrite(const AssignExpr *assign);
 
 private:
+  void closure(const FunctionExpr *expr, bool held);
+
   CycleScanner &scanner_;
 };
 

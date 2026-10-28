@@ -14,3 +14,5 @@ pt data abc
 close
 pt end
 ended true true true
+twice data 2
+twice error ERR_MULTIPLE_CALLBACK

@@ -17,6 +17,8 @@ struct TzReactor {
   uintptr_t ahead;
 };
 
+#define TZ_REACTION_WITHIN ((TzPromise *)(uintptr_t)1)
+
 struct TzPromise {
   int64_t rc;
   const TzLayout *layout;

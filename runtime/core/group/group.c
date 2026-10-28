@@ -387,6 +387,25 @@ TZ_HOT void tz_group_unstore(void *owner, void *ref) {
   }
 }
 
+int32_t tz_group_store_within(void *owner, void *ref) {
+  if (!ref || !tz_rc_is_member(((TzObject *)owner)->rc) ||
+      !tz_rc_is_member(((TzObject *)ref)->rc)) {
+    return 0;
+  }
+  int locked = lock_for(owner, ref);
+  TzObject *lr = leader_of(ref);
+  int within = leader_of(owner) == lr;
+  if (within) {
+    --lr->rc;
+    if (tz_group_listing) {
+      --listed(ref)->outside;
+    }
+  }
+  unlock_for(locked);
+
+  return within;
+}
+
 void tz_group_take(void *owner, void *ref) {
   if (!tz_rc_is_member(((TzObject *)owner)->rc) || !tz_rc_is_member(((TzObject *)ref)->rc)) {
     return;

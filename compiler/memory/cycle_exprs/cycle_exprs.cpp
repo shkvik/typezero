@@ -4,7 +4,48 @@
 
 namespace tz {
 
+namespace {
+
+bool runsAndDrops(Builtin builtin) {
+  switch (builtin) {
+  case Builtin::PromiseNew:
+  case Builtin::PromiseThen:
+  case Builtin::SetTimeout:
+  case Builtin::SetInterval:
+  case Builtin::SetImmediate:
+  case Builtin::QueueMicrotask:
+  case Builtin::NextTick:
+    return true;
+  default:
+    return false;
+  }
+}
+
+const FunctionExpr *closureLiteral(const Expr *arg) {
+  auto *fn = llvm::dyn_cast<FunctionExpr>(arg);
+
+  return fn && !fn->fn->group ? fn : nullptr;
+}
+
+}
+
 CycleExprs::CycleExprs(CycleScanner &scanner) : scanner_(scanner) {}
+
+void CycleExprs::closure(const FunctionExpr *expr, bool held) {
+  const FunctionDecl *fn = expr->fn;
+  if (!fn->nonEscaping) {
+    const void *key = fn->group ? static_cast<const void *>(fn->group) : fn;
+    const std::vector<VarSymbol *> &captures = fn->group ? fn->group->captures : fn->captures;
+    scanner_.envs[key].assign(captures.begin(), captures.end());
+    if (held && expr->type) {
+      scanner_.closuresOf[expr->type->nonOptional()].insert(key);
+    }
+    if (held && fn->sym) {
+      scanner_.closuresOf[CycleScanner::functionType(fn)].insert(key);
+    }
+  }
+  scanner_.function(fn);
+}
 
 void CycleExprs::expr(const Expr *expr) {
   if (!expr) {
@@ -93,11 +134,20 @@ void CycleExprs::expr(const Expr *expr) {
     auto *call = llvm::cast<CallExpr>(expr);
     scanner_.callee_.insert(call->callee);
     this->expr(call->callee);
+    bool drops = runsAndDrops(call->builtin);
     for (const Expr *arg : call->args) {
-      this->expr(arg);
+      if (const FunctionExpr *fn = drops ? closureLiteral(arg) : nullptr) {
+        scanner_.addType(arg->type);
+        closure(fn, false);
+      } else {
+        this->expr(arg);
+      }
     }
     if (isPromiseBuiltin(call->builtin)) {
       for (const Expr *arg : call->args) {
+        if (drops && closureLiteral(arg)) {
+          continue;
+        }
         if (arg->type && arg->type->nonOptional()->isFunction()) {
           scanner_.reactionCallbacks.insert(arg->type->nonOptional());
         }
@@ -156,22 +206,9 @@ void CycleExprs::expr(const Expr *expr) {
   case Expr::Kind::OptionalChain:
     this->expr(llvm::cast<OptionalChainExpr>(expr)->chain);
     break;
-  case Expr::Kind::Function: {
-    const FunctionDecl *fn = llvm::cast<FunctionExpr>(expr)->fn;
-    if (!fn->nonEscaping) {
-      const void *key = fn->group ? static_cast<const void *>(fn->group) : fn;
-      const std::vector<VarSymbol *> &captures = fn->group ? fn->group->captures : fn->captures;
-      scanner_.envs[key].assign(captures.begin(), captures.end());
-      if (expr->type) {
-        scanner_.closuresOf[expr->type->nonOptional()].insert(key);
-      }
-      if (fn->sym) {
-        scanner_.closuresOf[CycleScanner::functionType(fn)].insert(key);
-      }
-    }
-    scanner_.function(fn);
+  case Expr::Kind::Function:
+    closure(llvm::cast<FunctionExpr>(expr), true);
     break;
-  }
   case Expr::Kind::Yield:
     this->expr(llvm::cast<YieldExpr>(expr)->value);
     break;

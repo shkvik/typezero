@@ -603,10 +603,10 @@ int32_t tz_ahead_here(TzPromise *p) {
   }
   p->head = p->tail = NULL;
   r->next = NULL;
-  r->source = NULL;
-  if (tz_rc_is_member(p->rc)) {
+  if (r->source == TZ_REACTION_WITHIN) {
     tz_group_take(p, r->owner);
   }
+  r->source = NULL;
   job->reactor = r;
   job->source = p;
   job->state = JOB_RUNNING;
@@ -659,11 +659,11 @@ int32_t tz_ahead_defer(TzPromise *p) {
   }
   p->head = p->tail = NULL;
   r->next = NULL;
-  r->source = NULL;
-  tz_obj_retain((TzObject *)p);
-  if (tz_rc_is_member(p->rc)) {
+  if (r->source == TZ_REACTION_WITHIN) {
     tz_group_take(p, r->owner);
   }
+  r->source = NULL;
+  tz_obj_retain((TzObject *)p);
   job->reactor = r;
   job->source = p;
   job->state = JOB_QUEUED;

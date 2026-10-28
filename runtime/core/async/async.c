@@ -132,7 +132,9 @@ void tz_promise_drop(void *object) {
   }
   for (TzReactor *r = p->head; r;) {
     TzReactor *next = r->next;
-    if (member && r->owner->rc < 0) {
+    if (r->source == TZ_REACTION_WITHIN) {
+      r->source = NULL;
+    } else if (member && r->owner->rc < 0) {
       tz_group_unstore(p, r->owner);
     } else {
       tz_obj_release(r->owner);
@@ -210,9 +212,10 @@ static void trigger(TzPromise *p) {
     p->head = p->tail = NULL;
     for (TzReactor *r = head; r;) {
       TzReactor *next = r->next;
+      int within = r->source == TZ_REACTION_WITHIN;
       r->source = p;
       retain(p);
-      if (p->rc < 0 && r->owner->rc < 0) {
+      if (within) {
         tz_group_take(p, r->owner);
       }
       if (!tz_ahead_local(r)) {
@@ -224,9 +227,10 @@ static void trigger(TzPromise *p) {
   }
 #endif
   for (TzReactor *r = head; r; r = r->next) {
+    int within = r->source == TZ_REACTION_WITHIN;
     r->source = p;
     retain(p);
-    if (p->rc < 0 && r->owner->rc < 0) {
+    if (within) {
       tz_group_take(p, r->owner);
     }
   }
@@ -323,8 +327,8 @@ void tz_promise_react(TzPromise *p, TzReactor *r) {
       p->head = r;
     }
     p->tail = r;
-    if (p->rc < 0) {
-      tz_group_store(p, r->owner);
+    if (p->rc < 0 && tz_group_store_within(p, r->owner)) {
+      r->source = TZ_REACTION_WITHIN;
     }
     return;
   }
@@ -369,8 +373,8 @@ static int await_ahead(TzReactor *r, TzPromise *p, int32_t ahead) {
       p->head = r;
     }
     p->tail = r;
-    if (p->rc < 0) {
-      tz_group_store(p, r->owner);
+    if (p->rc < 0 && tz_group_store_within(p, r->owner)) {
+      r->source = TZ_REACTION_WITHIN;
     }
     await_unlock();
     return 1;

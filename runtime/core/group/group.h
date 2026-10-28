@@ -67,6 +67,7 @@ void tz_group_free(TzObject *leader);
 void tz_group_store(void *owner, void *ref);
 void tz_group_unstore(void *owner, void *ref);
 void tz_group_take(void *owner, void *ref);
+int32_t tz_group_store_within(void *owner, void *ref);
 void tz_group_obj_free(void *object);
 void tz_group_publish(void *member, void (*each)(void *member, int32_t array));
 int32_t tz_group_published(const void *member);

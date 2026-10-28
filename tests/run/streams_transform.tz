@@ -50,3 +50,16 @@ pt.on("end", () => {
   pt.removeAllListeners()
 })
 log(`ended ${(await upperEnded).isOk()} ${(await splitEnded).isOk()} ${(await ptEnded).isOk()}`)
+
+// A transform that calls its callback twice is an error, as in node; each
+// write keeps its own callback, so a late second call is caught too.
+const twice = new Transform({
+  transform(chunk: Buffer, encoding, callback) {
+    callback(undefined, chunk)
+    callback()
+  },
+})
+twice.on("error", (e) => log(`twice error ${e.code}`))
+twice.on("data", (c) => log(`twice data ${c.length}`))
+twice.write("ab")
+twice.write("cde")
