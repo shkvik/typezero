@@ -37,6 +37,12 @@ patch_types(${types_undici}/fetch.d.ts [[  readonly text: () => Promise<string>]
             [[  readonly text: () => Promise<Result<string, BodyError>>]])
 patch_types(${types_undici}/fetch.d.ts [[  readonly status?: number]] [[  readonly status?: HttpStatus]])
 
+# tz has no AbortSignal: a fetch is limited in time by its timeout, in
+# milliseconds.
+patch_types(${types_undici}/fetch.d.ts [[  signal?: AbortSignal | null]] [[  timeout?: number]])
+patch_types(${types_undici}/fetch.d.ts [[  readonly signal: AbortSignal]]
+            [[  readonly timeout?: number]])
+
 # URL.parse gives a Result.
 patch_types(${types_node}/url.d.ts [[static parse(input: string, base?: string): URL | null;]]
             [[static parse(input: string, base?: string | URL): Result<URL, UrlError>;]])
@@ -56,8 +62,8 @@ patch_types(${types_node}/stream/web.d.ts [[interface ReadableStreamDefaultContr
 
 # A value that the object changes itself is read through a method
 # (docs/objects.md, section 6): the parts of a URL, the size of its
-# parameters, the state of a signal, of an event and of a stream, the body of
-# a request or a response.
+# parameters, the state of an event and of a stream, the body of a request or
+# a response.
 patch_types(${types_node}/url.d.ts [[`TypeError` will be thrown.
          */
         href: string;]] [[`TypeError` will be thrown.
@@ -68,10 +74,6 @@ foreach(part hash host hostname password pathname port protocol search username)
 endforeach()
 patch_types(${types_node}/url.d.ts [[        readonly origin: string;]] [[        origin(): string;]])
 patch_types(${types_node}/url.d.ts [[        readonly size: number;]] [[        size(): number;]])
-patch_types(${types_node}/web-globals/abortcontroller.d.ts [[    readonly aborted: boolean;]]
-            [[    aborted(): boolean;]])
-patch_types(${types_node}/web-globals/abortcontroller.d.ts [[    readonly reason: any;]]
-            [[    reason(): any;]])
 foreach(field "currentTarget: EventTarget | null" "defaultPrevented: boolean" "eventPhase: 0 | 2"
               "isTrusted: boolean" "srcElement: EventTarget | null" "target: EventTarget | null")
   string(REPLACE ":" "():" method "${field}")

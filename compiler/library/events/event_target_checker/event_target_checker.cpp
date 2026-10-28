@@ -28,33 +28,6 @@ namespace tz {
 
 EventTargetChecker::EventTargetChecker(Checker &checker) : checker_(checker) {}
 
-Expr *EventTargetChecker::onabortAssign(AssignExpr *assign, MemberExpr *member, bool logical) {
-  ClassDecl *signal = checker_.libraryClass("AbortSignal");
-  if (!signal || checker_.libraryCalls().inLibrary(assign->loc())) {
-    return nullptr;
-  }
-  ClassDecl *cls = ClassDeclarer::classOf(member->object->type);
-  if (!cls || !cls->derivesFrom(signal) || member->object->type->isOptional()) {
-    return nullptr;
-  }
-  if (member->name != "onabort") {
-    return nullptr;
-  }
-  if (assign->op || logical) {
-    checker_.diags_.error(assign->loc(), "only '=' can set 'onabort'");
-    assign->type = Type::error();
-    return assign;
-  }
-  auto *callee = checker_.ctx_.make<MemberExpr>(member->loc(), member->object, "setOnabort");
-  auto *call =
-      checker_.ctx_.make<CallExpr>(assign->loc(), callee, std::vector<Expr *>{assign->value});
-  call->type = Type::error();
-  std::vector<bool> given{true};
-
-  return checker_.emitterChecker().callLibraryMethod(call, callee, cls, "setOnabort", {}, &given,
-                                                     false);
-}
-
 Expr *EventTargetChecker::checkEventTargetCall(CallExpr *call, MemberExpr *member, ClassDecl *cls) {
   bool add = member->name == "addEventListener";
   if (!add && member->name != "removeEventListener") {
@@ -242,8 +215,9 @@ Expr *EventTargetChecker::checkEventsFunction(CallExpr *call, llvm::StringRef fn
   if (fn != "once" && fn != "on") {
     return nullptr;
   }
+  unsigned most = fn == "on" ? 3 : 2;
   if (checker_.callChecker().rejectSpread(call) ||
-      !checker_.argumentChecker().checkArity(call, loc, 2, 3)) {
+      !checker_.argumentChecker().checkArity(call, loc, 2, most)) {
     return call;
   }
   call->args[0] = checker_.exprChecker().checkExpr(call->args[0]);
@@ -254,16 +228,6 @@ Expr *EventTargetChecker::checkEventsFunction(CallExpr *call, llvm::StringRef fn
   }
   std::vector<bool> given(call->args.size(), false);
   given[0] = given[1] = true;
-  bool abortable = false;
-  if (call->args.size() > 2) {
-    if (auto *options = dyn_cast<ObjectLitExpr>(call->args[2])) {
-      abortable = llvm::any_of(options->props, [](const ObjectLitExpr::Property &p) {
-        return p.spread || p.name == "signal";
-      });
-    } else {
-      abortable = !isa<UndefinedExpr>(call->args[2]);
-    }
-  }
   if (ClassDecl *target = checker_.libraryClass("EventTarget");
       target && ClassDeclarer::classOf(type) && ClassDeclarer::classOf(type)->derivesFrom(target)) {
     if (fn == "on") {
@@ -277,7 +241,7 @@ Expr *EventTargetChecker::checkEventsFunction(CallExpr *call, llvm::StringRef fn
     }
     call->args[1] = checker_.argumentChecker().checkArg(call->args[1], Type::string());
 
-    return callLibraryFunction(call, abortable ? "onceTargetResult" : "onceTarget", {}, given, loc);
+    return callLibraryFunction(call, "onceTarget", {}, given, loc);
   }
   const Type *events = checker_.eventMaps().eventMapOf(type);
   if (!events) {
@@ -296,35 +260,28 @@ Expr *EventTargetChecker::checkEventsFunction(CallExpr *call, llvm::StringRef fn
   const Type *errors = events->isRecord()       ? events->valueType()
                        : events->field("error") ? events->field("error")->type
                                                 : nullptr;
-  while (call->args.size() < 3) {
+  while (call->args.size() < most) {
     call->args.push_back(checker_.ctx_.make<UndefinedExpr>(call->loc()));
   }
   call->args.push_back(checker_.exprChecker().checkExpr(
       checker_.ctx_.make<BoolLitExpr>(call->loc(), errors != nullptr)));
   given.resize(call->args.size(), false);
   given.back() = true;
-  if (errors) {
-    checker_.errorListenedMaps_.insert(events);
+  if (!errors) {
+    return callLibraryFunction(call, fn, {args, Type::tuple({})}, given, loc);
   }
-  std::string variant = errors || abortable ? fn.str() + "Result" : fn.str();
-  const Type *abortError = checker_.prelude().builtinType("AbortError");
-  const Type *errorValue = abortError;
-  if (errors) {
-    if (!errors->isTuple() || errors->fields().size() != 1) {
-      checker_.diags_.error(call->args[1]->loc(),
-                            "'" + fn.str() +
-                                "' gives the error of the emitter as the Err, so its 'error' "
-                                "event carries one value; this one carries '" +
-                                errors->name().str() + "'");
-      return call;
-    }
-    errorValue = errors->fields().front().type;
+  checker_.errorListenedMaps_.insert(events);
+  if (!errors->isTuple() || errors->fields().size() != 1) {
+    checker_.diags_.error(call->args[1]->loc(),
+                          "'" + fn.str() +
+                              "' gives the error of the emitter as the Err, so its 'error' "
+                              "event carries one value; this one carries '" +
+                              errors->name().str() + "'");
+    return call;
   }
-  if (variant == "on" || variant == "once") {
-    return callLibraryFunction(call, variant, {args, Type::tuple({})}, given, loc);
-  }
+  std::string variant = fn.str() + "Result";
 
-  return callLibraryFunction(call, variant, {args, errorValue}, given, loc);
+  return callLibraryFunction(call, variant, {args, errors->fields().front().type}, given, loc);
 }
 
 Expr *EventTargetChecker::checkLibraryCall(CallExpr *call, NameExpr *name, FuncSymbol *func) {

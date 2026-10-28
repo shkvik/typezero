@@ -120,8 +120,10 @@ child.stdout.on("data", s => s.length)          // s: string
   `r.readableFlowing()`, `r.destroyed()`, `w.writableEnded()`, `w.writableNeedDrain()`…, у
   файлового потока — `fd()`, `pending()`, `bytesRead()`, `bytesWritten()`. Методы читают
   состояние прямо, копии в полях нет.
-- `isReadable`, `isWritable`, `isDestroyed`, `isErrored`, `isDisturbed`, `addAbortSignal` —
-  функции `node:stream` и статические методы `Stream`, как в node (`Stream.isErrored(s)`).
+- `isReadable`, `isWritable`, `isDestroyed`, `isErrored`, `isDisturbed` — функции
+  `node:stream` и статические методы `Stream`, как в node (`Stream.isErrored(s)`).
+  `addAbortSignal`, опции `signal` у потоков и у `pipeline` нет, и функции в `pipeline` не
+  получают `{ signal }`: `AbortSignal` убран 28 октября ([async.md](async.md), раздел 7).
 - Свой класс заменяет методы, которые зовёт поток: `onRead`, `onWrite`, `onWritev`,
   `onTransform`, `onFlush`, `onFinal`, `onDestroy`, `onConstruct` (в node — `_read`, `_write`…;
   `tz port` переименовывает их сам). Это `protected`-методы `Stream` и его наследников: их зовёт

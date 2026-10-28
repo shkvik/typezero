@@ -176,10 +176,10 @@ void saveOrLog("Ann")                // ок: Promise<void>
 - `await` на верхнем уровне модуля — как в ES-модулях. Программа завершается, когда не осталось
   задач, таймеров и ожидающего ввода-вывода.
 - Не пойманных ошибок в задачах нет: `Result` нельзя выбросить (раздел 6).
-- Отмена — `AbortController` / `AbortSignal`: сигнал передают явно (`timers/promises`,
-  `fs/promises`, сеть). Операция с сигналом отдаёт `Err` с `{ code: "ABORT_ERR" }`; задача
-  проверяет `signal.aborted()`, `signal.throwIfAborted()` нет — вместо него
-  `if (signal.aborted()) return err(signal.reason())`. `Promise.race` не отменяет проигравших.
+- Отмены нет: `AbortController` и `AbortSignal` убраны 28 октября — громоздкий костыль, который в
+  сообществе не любят. Ожидание идёт до конца; время запроса `fetch` ограничивает опция `timeout`
+  в миллисекундах (`Err` с кодом `"TIMEOUT_ERR"`, [net.md](net.md)), сервер останавливает
+  `listening.stop()`. `Promise.race` не отменяет проигравших.
 - `node:worker_threads` нет: параллельность и так есть.
 
 ## 8. Рантайм
@@ -257,7 +257,7 @@ async-программ без зависимости от времени сра�
    уровне, не пойманная ошибка в задаче, ошибка на забытый `Promise`, `void`. После исключений
    ([errors.md](errors.md), шаг 2): на них держится `reject`.
 2. **Ожидание ввода-вывода** (сделано): IOCP / epoll, `node:fs/promises`, `node:timers/promises`,
-   `node:readline`, `AbortController` ([io.md](io.md), шаг 4).
+   `node:readline` ([io.md](io.md), шаг 4); `AbortController` был и убран 28 октября.
 3. **Анализ данных кусков** (сделано): что каждый кусок читает и пишет (поля, объекты, глобальные
    переменные, вывод), решения «параллельно / по очереди» в структурированном виде,
    `--explain-parallel`. Выполнение пока в одном потоке — проверяется по выводу пояснений.
@@ -275,10 +275,12 @@ async-программ без зависимости от времени сра�
 7. **Без отказов** (сделано 27 октября; [errors.md](errors.md), шаг 3): убрать `reject`, `.catch`, `.finally`,
    `Promise.reject`, `allSettled`, `any`, путь «не пойманная ошибка в задаче», `ResultAsync` и
    методы `Result` у `Promise`; ошибка на `void` над `Promise<Result>` и на колбэк с `Result`
-   там, где ждут `void`; ошибка на лишний `return await`; `Result` у операций с `AbortSignal`. Сделано 27 октября в коде программы: ошибки с подсказками на `reject`, `.catch`,
+   там, где ждут `void`; ошибка на лишний `return await`; `Result` у операций с `AbortSignal`
+   (сигналы убраны 28 октября). Сделано 27 октября в коде программы: ошибки с подсказками на `reject`, `.catch`,
    `.finally`, второй аргумент `then`, `Promise.reject`, `allSettled`, `any`, `void` над
    `Promise<Result>` и `process.on("uncaughtException")`; `withResolvers` без `reject`; ожидания
-   с `signal` (`node:timers/promises`, `node:fs/promises`, `question`) отдают `Result`. С шагом 5
+   с `signal` (`node:timers/promises`, `node:fs/promises`, `question`) отдавали `Result`, пока
+   сигналы не убрали. С шагом 5
    [errors.md](errors.md) (27 октября) отказов нет и внутри библиотеки на tz, а у `Promise` в
    рантайме нет состояния «отклонён»: ни поля ошибки, ни списка не обработанных отказов, ни пути
    «не пойманная ошибка в задаче».

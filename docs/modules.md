@@ -178,7 +178,7 @@ type Json = null | boolean | number | string | Json[] | { [key: string]: Json }
   `@types/node` ([patch.cmake](../editors/types/patch.cmake)): `fetch`, тела, `bodyUsed()`,
   статус `HttpStatus`, `URL.parse`, `read()` и `for await` web-потоков, `desiredSize()`. Пока
   без `Result` в объявлениях: `node:crypto` и `crypto.subtle`, `Reflect.apply` / `construct`,
-  `once()` / `on()`, `node:timers/promises` и `question` с `signal`, потоки node (`for await`,
+  `once()` / `on()`, `question`, потоки node (`for await`,
   `pipeline`, `finished`), `TextDecoder` с `fatal`. Тест `tests/cli/types.cmake` проверяет
   объявления TypeScript'ом из VS Code на копиях программ с расширением `.ts`.
 - **Настройки tsc.** Каждый файл — модуль (`moduleDetection: "force"`), импорты как в tz, DOM
@@ -189,7 +189,7 @@ type Json = null | boolean | number | string | Json[] | { [key: string]: Json }
   настройками по умолчанию ошибки были в 302 программах, всего 3813; с настройками и
   объявлениями tz — в 69 программах, 299 ошибок. Остались места, где tsc строже tz: перегрузки с
   телом у каждого варианта ([overloads.md](overloads.md)), чтение полей `Json` без проверки,
-  `onabort = undefined` (в tz нет `null`), члены, добавленные подменой класса, вычитание дат.
+  члены, добавленные подменой класса, вычитание дат.
 
 ## 7. Объявления `.d.tz`
 

@@ -1,6 +1,5 @@
 import { Connection, Request, Response } from "tz:fetch";
 import { URL } from "tz:url";
-import { AbortSignal, Event } from "tz:web";
 import { ahead, order } from "tz:intrinsics";
 
 declare function netListen(
@@ -40,7 +39,6 @@ export type Client = {
 export type ServeOptions = {
   port?: int;
   hostname?: string;
-  signal?: AbortSignal;
   maxBodySize?: double;
   keepAliveTimeout?: int;
   headersTimeout?: int;
@@ -122,7 +120,6 @@ export class Server {
   private readonly keepAlive: int;
   private readonly headersTimeout: int;
   private readonly transport: ServeTransport;
-  private readonly signal?: AbortSignal;
   private readonly handler: Handler;
 
   public constructor(options: ServeOptions, handler: Handler) {
@@ -132,7 +129,6 @@ export class Server {
     this.keepAlive = options.keepAliveTimeout ?? 5000;
     this.headersTimeout = options.headersTimeout ?? 60000;
     this.transport = options.transport ?? { secure: false };
-    this.signal = options.signal;
     this.handler = handler;
   }
 
@@ -154,12 +150,7 @@ export class Server {
     }
 
     const listener = new Listener(opened.value);
-    const listening = new Listening(
-      listener,
-      this.hostname,
-      this.handler,
-      this.signal,
-    );
+    const listening = new Listening(listener, this.hostname, this.handler);
 
     return ok(listening);
   }
@@ -200,12 +191,7 @@ export class Listening {
   private readonly accepting: Promise<void>;
   private stopping: boolean;
 
-  public constructor(
-    listener: Listener,
-    hostname: string,
-    handler: Handler,
-    signal?: AbortSignal,
-  ) {
+  public constructor(listener: Listener, hostname: string, handler: Handler) {
     this.listener = listener;
     this.stopping = false;
     const href = netListenerUrl(listener.native);
@@ -213,7 +199,6 @@ export class Listening {
     this.hostname = hostname;
     this.port = netListenerPort(listener.native);
     this.accepting = Listening.acceptAll(listener, handler);
-    this.stopOnSignal(signal);
   }
 
   public async stop(): Promise<void> {
@@ -222,23 +207,6 @@ export class Listening {
       netCloseListener(this.listener.native);
     }
     await this.accepting;
-  }
-
-  private stopOnSignal(signal?: AbortSignal): void {
-    if (signal == undefined) {
-      return;
-    }
-    if (signal.aborted()) {
-      void this.stop();
-      return;
-    }
-    signal.addEventListener(
-      "abort",
-      (event: Event) => {
-        void this.stop();
-      },
-      { once: true },
-    );
   }
 
   private static async acceptAll(

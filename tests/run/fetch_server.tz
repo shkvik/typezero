@@ -1,8 +1,8 @@
 // same-as-node
 // A server of tz:http and fetch in one program, on a free port: text and
 // JSON both ways, status and headers, a body that streams each way, a 500
-// given by the handler, redirects, HEAD, requests at the same time, a
-// request cancelled by a signal, and stop().
+// given by the handler, redirects, HEAD, requests at the same time, the
+// timeout of a fetch whose response or body comes late, and stop().
 import { Server } from "tz:http"
 
 const enc = new TextEncoder()
@@ -48,6 +48,17 @@ const server = new Server({ port: 0, hostname: "127.0.0.1" }, async req => {
     case "/slow":
       await new Promise<void>(resolve => setTimeout(resolve, 300))
       return new Response("slow")
+    case "/trickle":
+      return new Response(new ReadableStream({
+        start: c => {
+          c.enqueue(enc.encode("first "))
+        },
+        pull: async c => {
+          await new Promise<void>(resolve => setTimeout(resolve, 300))
+          c.enqueue(enc.encode("late"))
+          c.close()
+        },
+      }))
   }
   return new Response("not found", { status: 404, statusText: "Nope" })
 })
@@ -110,12 +121,13 @@ console.log(r.status, JSON.stringify(must(await r.text())))
 const names = ["a", "b", "c", "d", "e", "f"]
 console.log(await Promise.all(names.map(async n => must(await must(await fetch(`${base}/hello?name=${n}`)).text()))))
 
-const controller = new AbortController()
-setTimeout(() => controller.abort(), 50)
-const aborted = await fetch(`${base}/slow`, { signal: controller.signal })
-if (aborted.isErr()) console.log(aborted.error.code, aborted.error.message)
-const late = await fetch(`${base}/slow`, { signal: AbortSignal.timeout(50) })
+const quick = must(await fetch(`${base}/hello?name=quick`, { timeout: 5000 }))
+console.log(must(await quick.text()))
+const late = await fetch(`${base}/slow`, { timeout: 50 })
 if (late.isErr()) console.log(late.error.code, late.error.message)
+const trickle = must(await fetch(`${base}/trickle`, { timeout: 100 }))
+const lateBody = await trickle.text()
+if (lateBody.isErr()) console.log(trickle.status, lateBody.error.code, lateBody.error.message)
 
 await listening.stop()
 const refused = await fetch(`http://127.0.0.1:${listening.port}/hello`)

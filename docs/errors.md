@@ -152,9 +152,10 @@ async function getUser(id: int) {
 - **Лишний `return await x` — ошибка**, и `async () => await x` тоже: без `try` и без отказов
   `await` там ничего не меняет, `async`-функция и так дождётся `Promise`. `return (await x).value`
   — нормально.
-- **Отмена:** `signal.throwIfAborted()` уходит, вместо него
-  `if (signal.aborted()) return err(signal.reason())`. `setTimeout(100, undefined, { signal })` из
-  `"node:timers/promises"` отдаёт `Result<void, AbortError>`.
+- **Отмены нет:** `AbortController` и `AbortSignal` убраны 28 октября
+  ([async.md](async.md), раздел 7). `setTimeout(100)` из `"node:timers/promises"` отдаёт
+  `Promise<void>`; время запроса `fetch` ограничивает опция `timeout` — `Err` с кодом
+  `"TIMEOUT_ERR"`.
 - **`process.on("uncaughtException")` и `process.on("unhandledRejection")`** — ошибка:
   ловить нечего.
 - **Задача, которую не ждут, разбирает ошибки сама.** `void` над `Promise<Result<...>>` —

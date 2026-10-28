@@ -604,9 +604,9 @@ library/
 | `path` | `PathFeature`, `PathChecker`, `PathLowerer`, `path_exports` | `path` | | `sema_node.cpp` (часть) |
 | `os` | `OsFeature`, `OsChecker`, `OsLowerer`, `os_exports` | `os` | | `sema_node.cpp` (часть) |
 | `child_process` | `ChildProcessFeature`, `ChildChecker`, `ChildLowerer` | `child` | | `sema_child.cpp`, `codegen_child.cpp` |
-| `events` | `EventsFeature`, `EventMapInference`, `EmitterChecker`, `EventTargetChecker`, `EventsLowerer` | `signal` | `events.tz`, `web.tz` | `sema_events.cpp` (1362), `codegen_events.cpp` |
+| `events` | `EventsFeature`, `EventMapInference`, `EmitterChecker`, `EventTargetChecker`, `EventsLowerer` | | `events.tz`, `web.tz` | `sema_events.cpp` (1362), `codegen_events.cpp` |
 | `stream` | `StreamFeature`, `StreamChecker`, `ChunkTypes`, `StreamLowerer` | `stream` | `stream.tz` (3989 → `readable`, `writable`, `duplex`, `pipeline`), `stream_consumers.tz`, `stream_promises.tz`, `string_decoder.tz`, `fs_stream.tz` | `sema_stream.cpp` (1453), `codegen_stream.cpp` |
-| `net` | `NetFeature` | `net` | | — |
+| `net` | `NetFeature` | `net`, `deadline` | | — |
 | `http` | `HttpFeature`, `FetchChecker`, `ServeChecker` | `http`, `decompress` | `http.tz`, `fetch.tz`, `url.tz` | части `sema_library.cpp` |
 | `tls` | `TlsFeature`, `TlsLinker` | `tls` (с `tls_roots.h`) | | — |
 | `crypto` | `CryptoFeature`, `CryptoDeclarer`, `HashChecker`, `KeyChecker`, `CipherChecker`, `X509Checker`, `WebCryptoChecker`, `CryptoLowerer`, `CryptoLinker` | по модулю на `crypto*.c` | `webcrypto.tz` | `sema_crypto.cpp` (1689), `sema_webcrypto.cpp`, `codegen_crypto.cpp`, `crypto_api/` |

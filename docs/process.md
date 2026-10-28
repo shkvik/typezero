@@ -42,8 +42,8 @@ const r = spawnSync("git", ["status"], { encoding: "utf8" })        // { status,
 ## 2. Асинхронные функции
 
 `spawn`, `exec`, `execFile` — как в node: `ChildProcess` с событиями (`child.on("close", …)`),
-потоки `stdin` / `stdout` / `stderr`, колбэки у `exec` и `execFile`, `kill()`, `signal`
-(`AbortSignal`).
+потоки `stdin` / `stdout` / `stderr`, колбэки у `exec` и `execFile`, `kill()`. Опции `signal`
+нет: `AbortSignal` убран 28 октября ([async.md](async.md), раздел 7).
 
 ```ts
 const child = spawn("ffmpeg", ["-i", "in.mp4", "out.webm"], { stdio: "inherit" })

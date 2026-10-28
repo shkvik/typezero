@@ -6,7 +6,6 @@
 #include "compiler/check/functions/function_value_checker/function_value_checker.h"
 #include "compiler/check/types/type_relations/type_relations.h"
 #include "compiler/declare/prelude/prelude.h"
-#include "compiler/library/builtin_modules/runtime_object_checker/runtime_object_checker.h"
 #include "compiler/library/fs/fs_checker/fs_checker.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/Support/SaveAndRestore.h"
@@ -268,12 +267,9 @@ Expr *TimerChecker::checkTimersPromisesCall(CallExpr *call, llvm::StringRef fn, 
     checker_.exprChecker().checkExpr(given);
   }
   llvm::StringMap<Expr *> options;
-  if (!checker_.fsChecker().nodeOptions(call, valueAt + 1, fn, {"signal", "ref"}, options)) {
+  if (!checker_.fsChecker().nodeOptions(call, valueAt + 1, fn, {"ref"}, options)) {
     return call;
   }
-  Expr *signal = options.lookup("signal");
-  bool abortable = signal && !isa<UndefinedExpr>(signal);
-  args.push_back(checker_.runtimeObjectChecker().signalOption(signal, loc));
   if (Expr *ref = options.lookup("ref")) {
     args.push_back(checker_.argumentChecker().checkArg(ref, Type::boolTy()));
   } else {
@@ -289,8 +285,7 @@ Expr *TimerChecker::checkTimersPromisesCall(CallExpr *call, llvm::StringRef fn, 
     return call;
   }
   call->builtin = immediate ? Builtin::TimersSetImmediate : Builtin::TimersSetTimeout;
-  call->type = Type::promise(
-      abortable ? Type::result(value, checker_.prelude().builtinType("AbortError")) : value);
+  call->type = Type::promise(value);
 
   return call;
 }

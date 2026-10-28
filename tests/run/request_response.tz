@@ -13,7 +13,7 @@ console.log(r.status, r.statusText, r.headers, r.body() != undefined, r.bodyUsed
 const q = new Request("http://example.com/x", { method: "POST", body: "hi" })
 console.log(q.method, q.url, q.headers, q.destination, q.referrer, q.referrerPolicy, q.mode,
             q.credentials, q.cache, q.redirect, q.integrity, q.keepalive, q.isReloadNavigation,
-            q.isHistoryNavigation, q.signal.aborted(), q.body() != undefined)
+            q.isHistoryNavigation, q.timeout, q.body() != undefined)
 console.log(new ReadableStream().locked())
 console.log(must(await q.text()), q.bodyUsed())
 const again = await q.text()

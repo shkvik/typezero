@@ -1,5 +1,4 @@
-// Misuses of node:fs/promises, node:timers/promises, node:readline,
-// AbortController and AbortSignal.
+// Misuses of node:fs/promises, node:timers/promises and node:readline.
 import { readFile, stat, open, writeFile } from "node:fs/promises"
 import { setTimeout as wait } from "node:timers/promises"
 import { createInterface } from "node:readline/promises"
@@ -17,26 +16,14 @@ await readFile("a.txt", options)
 await open("a.txt")
 // expect-error: 'writeFile' writes a string or bytes (a Uint8Array or a Buffer); found 'int'
 await writeFile("a.txt", 5)
-// expect-error: 'setTimeout' has no option 'repeat'; it takes signal and ref
+// expect-error: 'setTimeout' has no option 'repeat'; it takes ref
 await wait(10, undefined, { repeat: true })
+// expect-error: 'setTimeout' has no option 'signal'; it takes ref
+await wait(10, undefined, { signal: undefined })
+// expect-error: 'readFile' has no option 'signal'; it takes encoding and flag
+await readFile("a.txt", { signal: undefined })
 // expect-error: the Promise is not awaited
 wait(10)
-
-// expect-error: 'constructor' is private in class 'AbortSignal'
-const made = new AbortSignal()
-const controller = new AbortController()
-// expect-error: 'aborted' is a method of 'AbortSignal' and cannot be assigned: the object changes what it gives itself
-controller.signal.aborted = true
-// expect-error: 'reason' is a method of 'AbortSignal' and cannot be assigned
-controller.signal.reason = "why"
-// expect-error: only '=' can set 'onabort'
-controller.signal.onabort ??= () => console.log("aborted")
-// expect-error: class 'AbortSignal' has no static member 'never'
-AbortSignal.never()
-// expect-error: property 'reset' does not exist on type 'AbortController'
-controller.reset()
-// expect-error: 'AbortController' is not assignable
-await wait(10, undefined, { signal: controller })
 
 // expect-error: readline reads only stdin yet: the input is 'process.stdin'
 const other = createInterface({ input: process.stdout })

@@ -9,7 +9,7 @@
 #include "runtime/core/string/string.h"
 #include "runtime/core/tzrt/tzrt.h"
 #include "runtime/library/bytes/bytes/bytes.h"
-#include "runtime/library/events/signal/signal.h"
+#include "runtime/library/net/deadline/deadline.h"
 #include <stdio.h>
 #include <string.h>
 #include <time.h>
@@ -115,10 +115,10 @@ static void clear_head(HttpState *h) {
 }
 
 static void stop_listening(HttpState *h) {
-  if (h->signal) {
-    tz_signal_unlisten(&h->abort);
-    tz_instance_release((TzInstance *)h->signal);
-    h->signal = NULL;
+  if (h->deadline) {
+    tz_deadline_unlisten(&h->abort);
+    tz_instance_release((TzInstance *)h->deadline);
+    h->deadline = NULL;
   }
 }
 
@@ -170,14 +170,14 @@ static void *broken_error(NetConn *c) {
 
 static void input(NetConn *c);
 
-static void abort_wait(TzAbortListener *l) {
+static void abort_wait(TzDeadlineListener *l) {
   HttpState *h = CONTAINING_RECORD(l, HttpState, abort);
   NetConn *c = CONTAINING_RECORD(h, NetConn, http);
   conn_lock(c);
-  TzSignal *signal = h->signal;
-  h->signal = NULL;
-  void *reason = net_aborted();
-  tz_instance_release((TzInstance *)signal);
+  TzDeadline *deadline = h->deadline;
+  h->deadline = NULL;
+  void *reason = net_timed_out();
+  tz_instance_release((TzInstance *)deadline);
   h->wait_kind = WAIT_NONE;
   if (h->waiting) {
     net_reject(&h->waiting, reason);
@@ -189,25 +189,25 @@ static void abort_wait(TzAbortListener *l) {
   conn_unlock(c);
 }
 
-static int begin_wait(NetConn *c, TzPromise *p, int kind, void *signal, TzMaker make) {
+static int begin_wait(NetConn *c, TzPromise *p, int kind, void *deadline, TzMaker make) {
   HttpState *h = &c->http;
   tz_ref_retain(p);
   h->waiting = p;
   h->wait_kind = kind;
   h->make = make;
   tz_net_make = make;
-  if (signal) {
-    if (tz_signal_aborted(signal)) {
+  if (deadline) {
+    if (tz_deadline_is_passed(deadline)) {
       h->wait_kind = WAIT_NONE;
-      net_reject(&h->waiting, net_aborted());
+      net_reject(&h->waiting, net_timed_out());
       h->keep_alive = 0;
       net_abort(c);
       return 0;
     }
-    tz_ref_retain(signal);
-    h->signal = (TzSignal *)signal;
+    tz_ref_retain(deadline);
+    h->deadline = (TzDeadline *)deadline;
     h->abort.run = abort_wait;
-    tz_signal_listen(h->signal, &h->abort);
+    tz_deadline_listen(h->deadline, &h->abort);
   }
   c->on_input = input;
 
@@ -1374,32 +1374,32 @@ void tz_http_next(TzPromise *p, void *conn, TzMaker make) {
 #endif
 }
 
-void tz_http_response(TzPromise *p, void *conn, void *signal, TzMaker make) {
+void tz_http_response(TzPromise *p, void *conn, void *deadline, TzMaker make) {
   TZ_ORDERED();
   NetConn *c = (NetConn *)conn;
   conn_lock(c);
-  if (begin_wait(c, p, WAIT_RESPONSE, signal, make)) {
+  if (begin_wait(c, p, WAIT_RESPONSE, deadline, make)) {
     input(c);
   }
   conn_unlock(c);
 }
 
-void tz_http_read(TzPromise *p, void *conn, void *signal, TzMaker make) {
+void tz_http_read(TzPromise *p, void *conn, void *deadline, TzMaker make) {
   TZ_ORDERED();
   NetConn *c = (NetConn *)conn;
   conn_lock(c);
-  if (begin_wait(c, p, WAIT_CHUNK, signal, make)) {
+  if (begin_wait(c, p, WAIT_CHUNK, deadline, make)) {
     send_continue(c);
     input(c);
   }
   conn_unlock(c);
 }
 
-void tz_http_read_all(TzPromise *p, void *conn, void *signal, TzMaker make) {
+void tz_http_read_all(TzPromise *p, void *conn, void *deadline, TzMaker make) {
   TZ_ORDERED();
   NetConn *c = (NetConn *)conn;
   conn_lock(c);
-  if (begin_wait(c, p, WAIT_ALL, signal, make)) {
+  if (begin_wait(c, p, WAIT_ALL, deadline, make)) {
     send_continue(c);
     input(c);
   }

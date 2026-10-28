@@ -54,8 +54,7 @@ const listening = new Server({ port: 3000 }, app.fetch).listen()
   `listen()` можно звать снова: это ещё один сокет с теми же настройками (на том же порту —
   `EADDRINUSE` от системы, на порту 0 — второй сервер). Короткого `serve(...)` нет: путь один.
 - **Настройки** (`ServeOptions`, все необязательные): `port` (8000; 0 — любой свободный),
-  `hostname` (`0.0.0.0`), `signal` (его отмена останавливает сервер, как `stop()`),
-  `maxBodySize` (128 МБ, как в Bun; больше — 413), `keepAliveTimeout` (5000 мс, как в node:
+  `hostname` (`0.0.0.0`), `maxBodySize` (128 МБ, как в Bun; больше — 413), `keepAliveTimeout` (5000 мс, как в node:
   столько соединение ждёт следующего запроса), `headersTimeout` (60 000 мс, как в node: столько
   может идти голова запроса, потом 408 и обрыв — защита от клиента, который шлёт по байту),
   `transport` — `{ secure: false }` (http, по умолчанию) или `{ secure: true, cert, key }`
@@ -67,8 +66,9 @@ const listening = new Server({ port: 3000 }, app.fetch).listen()
   `EAFNOSUPPORT`, `UNKNOWN`), поэтому `switch` по нему проверяется; `message`, `errno`,
   `syscall`, а `address` и `port` — где сервер пытался слушать.
 - **`listening.stop()`** — перестать принимать соединения, закрыть те, что ждут запроса, и
-  дождаться ответов на запросы, которые уже идут. Второй вызов и вызов после `signal` ничего не
-  закрывают, только ждут того же: так ждут конца сервера.
+  дождаться ответов на запросы, которые уже идут. Это единственный способ остановить сервер
+  (опции `signal` нет: `AbortSignal` убран 28 октября, [async.md](async.md), раздел 7). Второй
+  вызов ничего не закрывает, только ждёт того же: так ждут конца сервера.
 - **Кто прислал запрос** — второй аргумент обработчика: `client: { address, port }` (за
   прокси — адрес прокси). Не поле `Request`: `Request` — класс web, его делает и сама
   программа для `fetch`. Так же у Deno, и hono это ждёт: `app.fetch(request, env?)` получает
@@ -100,7 +100,7 @@ const listening = new Server({ port: 3000 }, app.fetch).listen()
 ```ts
 async function repo(name: string) {
   const r = await fetch(`https://api.github.com/repos/${name}`, {
-    signal: AbortSignal.timeout(5000),
+    timeout: 5000,
   })                                                   // Result<Response, FetchError>
   if (r.isErr()) return r
   if (!r.value.ok) return err({ code: "http_status", status: r.value.status })
@@ -108,13 +108,22 @@ async function repo(name: string) {
 }
 ```
 
-- `Request`, `Response`, `Headers`, `URL`, `URLSearchParams`, `FormData`, `AbortController`,
-  `AbortSignal.timeout` — как в JS. `json()` возвращает `Json` ([modules.md](modules.md)).
+- `Request`, `Response`, `Headers`, `URL`, `URLSearchParams`, `FormData` — как в JS. `json()`
+  возвращает `Json` ([modules.md](modules.md)).
+- **`timeout`** вместо `AbortSignal` (решено 28 октября): опция `fetch` и `new Request` в
+  миллисекундах, и `request.timeout` — её значение. Время идёт на весь запрос: соединение, TLS,
+  отправку тела, голову ответа, редиректы и чтение тела. Не успел — `Err` с кодом
+  `"TIMEOUT_ERR"` и текстом node «The operation was aborted due to timeout»: у `fetch`, если
+  не пришла голова, у `text()` / `json()` / `bytes()`, если не дочиталось тело. Таймер не
+  держит программу. Отменить запрос по своему решению нельзя: `AbortController` убран
+  ([async.md](async.md), раздел 7). У запроса сервера `timeout` нет, и сигнала тоже — каждый
+  запрос раньше делал свой `AbortSignal`, и его освобождение по очереди стоило серверу втрое
+  меньше запросов в секунду (102k вместо 312k).
 - Распаковка gzip, deflate и brotli, переходы по редиректам (до 20), соединения с keep-alive
   держатся в пуле — как в node.
 - **Ошибки — `Result`:** `fetch` отдаёт `Promise<Result<Response, FetchError>>`. `FetchError` —
   объект с меткой `code`: `ECONNREFUSED`, `ENOTFOUND`, `ETIMEDOUT` ([io.md](io.md)), ошибка
-  сертификата, `ABORT_ERR` при отмене; `message` — как в node. Чтение тела (`text()`, `json()`,
+  сертификата, `TIMEOUT_ERR`, когда вышло время `timeout`; `message` — как в node. Чтение тела (`text()`, `json()`,
   `bytes()`) — тоже `Promise<Result>`: обрыв связи, тело уже прочитано, плохой JSON.
 
 ## 3. Тела запросов и ответов
@@ -184,8 +193,8 @@ tz должен быть не ниже Go: параллельные обрабо
    ([objects.md](objects.md), шаг 3), байты ([bytes.md](bytes.md)), `for await`
    ([iterators.md](iterators.md), шаг 4), `Json`. Параллельные обработчики — с параллельным
    рантаймом ([async.md](async.md), шаг 4; сделано 25 октября). Замеры против Go, Bun и node.
-3. **`fetch`** (сделано) — пул соединений, редиректы, gzip / deflate / brotli, `AbortSignal`, ошибки как
-   в node.
+3. **`fetch`** (сделано) — пул соединений, редиректы, gzip / deflate / brotli, ошибки как в node;
+   `AbortSignal` заменён опцией `timeout` 28 октября.
 4. **TLS** (сделано) — OpenSSL в рантайме (в exe — только при https, [crypto.md](crypto.md)), корневые
    сертификаты, `NODE_EXTRA_CA_CERTS`, сервер с `tls`; замер размера.
 5. **Позже** — раздел 7.

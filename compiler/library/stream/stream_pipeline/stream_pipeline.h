@@ -10,7 +10,6 @@ public:
 
   Expr *checkStreamFunction(CallExpr *call, FunctionDecl *decl, llvm::SMLoc loc);
   Expr *checkLibraryCall(CallExpr *call, NameExpr *name, FuncSymbol *func);
-  const Type *streamSignalOptionsType();
   Expr *streamStage(Expr *&arg, const Type *&chunk, bool first, bool last, bool &stream,
                     const Type **sinkValue);
   bool streamTakes(const Type *writable, const Type *chunk);

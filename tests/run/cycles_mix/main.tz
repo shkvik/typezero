@@ -2,7 +2,7 @@
 // outside holds it, as TZ_CHECK_LEAKS checks at the end (docs/objects.md,
 // section 11): an emitter of node:events whose listeners capture it; a
 // server-like graph whose connections refer back to their server, through
-// the listener of an AbortSignal, the resolve of a Promise, closures and a
+// the listener of an EventTarget, the resolve of a Promise, closures and a
 // generator; decorated handler classes made by reflection; and weak
 // references, which become undefined the moment their objects die.
 import { Conn, Handler, Room, Route, Server } from "./graph.tz"
@@ -40,7 +40,7 @@ const roomRef = chat()
 console.log("room freed:", roomRef.deref() == undefined)
 
 // 2. A server and its connections: peers, a closure that sends on, the
-// handlers, an abort that closes them all, the promises of their ends, and
+// handlers, a shutdown that closes them all, the promises of their ends, and
 // generators that walk the server while it lives.
 function* ids(server: Server) {
   for (const id of server.byId.keys()) yield id
@@ -66,8 +66,8 @@ async function session(): Promise<[WeakRef<Server>, WeakRef<Conn>]> {
   console.log([...ids(server)].join(","), server.route("/none", a, "x"))
   for await (const line of logged(server)) console.log(line)
   const ends = Promise.all([a.done, b.done])
-  server.controller.abort()
-  console.log((await ends).join(", "), server.conns.size, server.controller.signal.aborted())
+  server.shutdown.dispatchEvent(new Event("shutdown"))
+  console.log((await ends).join(", "), server.conns.size, server.down)
   console.log(a.hash.digest("hex").slice(0, 12), b.hash.digest("hex").slice(0, 12))
   let handled = 0
   for (const h of server.handlers.values()) handled += h.handled

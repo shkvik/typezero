@@ -2,8 +2,6 @@ pt into a duplex
 pt finished true true true true
 composed HEY!
 composed done true true
-slow error ABORT_ERR
-slow close
 construct
 write after construct true x
 c finished true

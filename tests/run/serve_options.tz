@@ -1,16 +1,14 @@
 // same-as-node
-// The options of a server: where it listens, a signal that stops it, and
-// what listen gives: its port, hostname and url; stop() lets the requests
-// being handled finish, and waits for them.
+// The options of a server: where it listens; and what listen gives: its
+// port, hostname and url; stop() lets the requests being handled finish,
+// and waits for them.
 import { Server } from "tz:http"
 
-const controller = new AbortController()
 const started = Promise.withResolvers<void>()
 const server = new Server(
   {
     port: 0,
     hostname: "127.0.0.1",
-    signal: controller.signal,
   },
   async (req) => {
     if (new URL(req.url).pathname() == "/slow") {
@@ -30,10 +28,10 @@ console.log(listening.hostname, listening.port > 0)
 console.log(listening.url.href().replaceAll(String(listening.port), "PORT"))
 const slow = fetch(`http://127.0.0.1:${listening.port}/slow`)
 await started.promise
-controller.abort()
+const stopped = listening.stop()
 const r = must(await slow)
 console.log(r.status, must(await r.text()))
-await listening.stop()
+await stopped
 console.log("finished")
 const after = await fetch(`http://127.0.0.1:${listening.port}/`)
 if (after.isErr()) console.log(after.error.message)

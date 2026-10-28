@@ -5,7 +5,6 @@
 #include "compiler/check/types/type_relations/type_relations.h"
 #include "compiler/declare/prelude/prelude.h"
 #include "compiler/library/builtin_modules/builtin_module_checker/builtin_module_checker.h"
-#include "compiler/library/builtin_modules/runtime_object_checker/runtime_object_checker.h"
 #include "compiler/library/bytes/bytes_checker/bytes_checker.h"
 #include "compiler/library/fs/fs_exports/fs_exports.h"
 #include "llvm/ADT/STLExtras.h"
@@ -220,9 +219,7 @@ Expr *FsChecker::checkFsCall(CallExpr *call, llvm::StringRef fn, llvm::SMLoc loc
       return call;
     }
     Expr *file = path(call->args[0], true);
-    using Names = llvm::ArrayRef<llvm::StringRef>;
-    if (!encodingOrOptions(1, checker_.fsAsync_ ? Names{"encoding", "flag", "signal"}
-                                                : Names{"encoding", "flag"})) {
+    if (!encodingOrOptions(1, {"encoding", "flag"})) {
       return call;
     }
     Expr *encoding = options.lookup("encoding");
@@ -236,10 +233,6 @@ Expr *FsChecker::checkFsCall(CallExpr *call, llvm::StringRef fn, llvm::SMLoc loc
       return call;
     }
     call->args = {file, flag};
-    if (checker_.fsAsync_) {
-      call->args.push_back(
-          checker_.runtimeObjectChecker().signalOption(options.lookup("signal"), loc));
-    }
     call->builtin = Builtin::FsReadFile;
     call->type = number ? string : Type::bytesType(Type::Bytes::Buffer);
     if (number) {
@@ -267,9 +260,7 @@ Expr *FsChecker::checkFsCall(CallExpr *call, llvm::StringRef fn, llvm::SMLoc loc
                                              data->type->name() + "'" + hint);
       return loosely();
     }
-    using Names = llvm::ArrayRef<llvm::StringRef>;
-    if (!encodingOrOptions(2, checker_.fsAsync_ ? Names{"encoding", "flag", "mode", "signal"}
-                                                : Names{"encoding", "flag", "mode"})) {
+    if (!encodingOrOptions(2, {"encoding", "flag", "mode"})) {
       return call;
     }
     Expr *number = nullptr;
@@ -293,10 +284,6 @@ Expr *FsChecker::checkFsCall(CallExpr *call, llvm::StringRef fn, llvm::SMLoc loc
                   mode ? checker_.argumentChecker().checkArg(mode, Type::intTy()) : intLit(0666)};
     if (!bytes) {
       call->args.push_back(number ? number : intLit(0));
-    }
-    if (checker_.fsAsync_) {
-      call->args.push_back(
-          checker_.runtimeObjectChecker().signalOption(options.lookup("signal"), loc));
     }
     call->builtin = Builtin::FsWriteFile;
     call->type = Type::voidTy();

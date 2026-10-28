@@ -7,5 +7,3 @@ error boom
 listeners after error: 0 0
 first 5
 listeners after break: 0
-aborted: ABORT_ERR
-once: ABORT_ERR

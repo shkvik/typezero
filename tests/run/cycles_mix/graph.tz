@@ -1,6 +1,6 @@
 // What main.tz builds its cycles from: an emitter whose events are those its
 // code and main.tz emit; a server whose connections refer back to it, with
-// the signal of its AbortController, the promises of their ends and a hash
+// an EventTarget that shuts it down, the promises of their ends and a hash
 // of what each reads; and handlers that a class decorator registers by path,
 // which reflection makes for each server.
 import { EventEmitter } from "node:events"
@@ -60,10 +60,12 @@ export class Server {
   readonly byId = new Map<int, Conn>()
   readonly handlers = new Map<string, Handler>()
   readonly log: string[] = []
-  readonly controller = new AbortController()
+  readonly shutdown = new EventTarget()
+  down = false
   constructor(readonly name: string) {
-    // The signal's listener holds the server, which holds the signal.
-    this.controller.signal.addEventListener("abort", () => {
+    // The target's listener holds the server, which holds the target.
+    this.shutdown.addEventListener("shutdown", () => {
+      this.down = true
       for (const c of [...this.conns]) c.close("shutdown")
     })
     for (const [path, cls] of routes) this.handlers.set(path, new cls(this))

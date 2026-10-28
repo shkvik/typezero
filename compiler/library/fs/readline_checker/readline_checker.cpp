@@ -2,7 +2,6 @@
 #include "compiler/check/expr/argument_checker/argument_checker.h"
 #include "compiler/check/expr/call_checker/call_checker.h"
 #include "compiler/check/expr/expr_checker/expr_checker.h"
-#include "compiler/library/builtin_modules/runtime_object_checker/runtime_object_checker.h"
 #include "compiler/library/fs/fs_checker/fs_checker.h"
 #include "compiler/library/process/process_checker/process_checker.h"
 #include "llvm/ADT/STLExtras.h"
@@ -42,11 +41,11 @@ Expr *ReadlineChecker::checkReadlineCall(CallExpr *call, NodeModule module, llvm
       !checker_.argumentChecker().checkArity(call, loc, 1, 2)) {
     return call;
   }
-  Expr *input = nullptr, *output = nullptr, *signal = nullptr;
+  Expr *input = nullptr, *output = nullptr;
   if (isa<ObjectLitExpr>(call->args[0])) {
     llvm::StringMap<Expr *> options;
     if (!checker_.fsChecker().nodeOptions(call, 0, fn,
-                                          {"input", "output", "terminal", "crlfDelay", "signal",
+                                          {"input", "output", "terminal", "crlfDelay",
                                            "historySize", "removeHistoryDuplicates", "prompt",
                                            "tabSize", "completer", "escapeCodeTimeout", "history"},
                                           options)) {
@@ -54,7 +53,6 @@ Expr *ReadlineChecker::checkReadlineCall(CallExpr *call, NodeModule module, llvm
     }
     input = options.lookup("input");
     output = options.lookup("output");
-    signal = options.lookup("signal");
     for (llvm::StringRef ignored : {"terminal", "crlfDelay", "historySize",
                                     "removeHistoryDuplicates", "tabSize", "escapeCodeTimeout"}) {
       if (Expr *value = options.lookup(ignored)) {
@@ -97,7 +95,7 @@ Expr *ReadlineChecker::checkReadlineCall(CallExpr *call, NodeModule module, llvm
   }
   auto *where = checker_.ctx_.make<IntLitExpr>(loc, uint64_t(written));
   where->type = Type::intTy();
-  call->args = {where, checker_.runtimeObjectChecker().signalOption(signal, loc)};
+  call->args = {where};
   call->builtin = Builtin::RlCreate;
   call->type = Type::runtimeObject(
       module == NodeModule::Readline ? Type::Runtime::Readline : Type::Runtime::ReadlinePromises);

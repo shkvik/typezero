@@ -54,12 +54,6 @@ Request {
   keepalive: false,
   isReloadNavigation: false,
   isHistoryNavigation: false,
-  signal: AbortSignal {
-    isAborted: false,
-    abortReason: undefined,
-    native: AbortSignal {},
-    onabortListens: false
-  },
   data: Body {
     kind: 1,
     text: 'hi',
@@ -68,21 +62,6 @@ Request {
   }
 }
 ReadableStream {} Headers { 'x-a': '1' } URLSearchParams { 'a' => '1', 'b' => '2' }
-AbortController {
-  signal: AbortSignal {
-    isAborted: false,
-    abortReason: undefined,
-    native: AbortSignal {},
-    onabortListens: false
-  },
-  cancel: [Function: abort]
-}
-AbortSignal {
-  isAborted: true,
-  abortReason: 'stop',
-  native: AbortSignal {},
-  onabortListens: false
-}
 EventTarget {}
 EventEmitter {
   events: [Object: null prototype] {},

@@ -8,7 +8,6 @@ class EventTargetChecker {
 public:
   explicit EventTargetChecker(Checker &checker);
 
-  Expr *onabortAssign(AssignExpr *assign, MemberExpr *member, bool logical);
   Expr *checkEventTargetCall(CallExpr *call, MemberExpr *member, ClassDecl *cls);
   Expr *checkEventsFunction(CallExpr *call, llvm::StringRef fn, llvm::SMLoc loc);
   Expr *checkLibraryCall(CallExpr *call, NameExpr *name, FuncSymbol *func);

@@ -33,8 +33,6 @@ constexpr LibraryGlobal kLibraryGlobals[] = {
     {"EventTarget", "web.tz", "tz:web"},
     {"Event", "web.tz", "tz:web"},
     {"CustomEvent", "web.tz", "tz:web"},
-    {"AbortController", "web.tz", "tz:web"},
-    {"AbortSignal", "web.tz", "tz:web"},
     {"DOMException", "web.tz", "tz:web"},
     {"EventListenerObject", "web.tz", "tz:web"},
     {"URL", "url.tz", "tz:url"},

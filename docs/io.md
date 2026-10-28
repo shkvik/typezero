@@ -204,5 +204,6 @@ function readConfig() {
    исключения»; ресурсы (`FileHandle`) закрываются сами ([errors.md](errors.md), раздел 6).
    Сделано 26 октября: `node:fs` и `node:fs/promises` (путь с нулевым символом — тоже `Err`, с
    кодом node `ERR_INVALID_ARG_VALUE`; неверный `flag` — ошибка компиляции), объявления для
-   редактора. 27 октября, с шагом 3 errors.md: `node:readline` и отмена через `signal` (`question` с
-   `signal` отдаёт `Result`); `SystemError` — тип объекта, а не класс.
+   редактора. 27 октября, с шагом 3 errors.md: `node:readline` (`question` отдаёт `Result`: `Err`,
+   если `Interface` закрыт); `SystemError` — тип объекта, а не класс. Отмена через `signal` была и
+   ушла 28 октября вместе с `AbortSignal` ([async.md](async.md), раздел 7).

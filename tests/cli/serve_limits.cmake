@@ -11,20 +11,21 @@ endif()
 string(RANDOM LENGTH 4 ALPHABET 0123456789 suffix)
 math(EXPR port "20000 + ${suffix}")
 write(server.tz "import { Server } from \"tz:http\"
-const stop = new AbortController()
+const stopAsked = Promise.withResolvers<void>()
 const options = {
   port: ${port},
   hostname: \"127.0.0.1\",
-  signal: stop.signal,
   keepAliveTimeout: 300,
   headersTimeout: 400,
 }
 const server = new Server(options, (req, client) => {
-  if (new URL(req.url).pathname() == \"/stop\") stop.abort()
+  if (new URL(req.url).pathname() == \"/stop\") stopAsked.resolve()
   return new Response(`\${client.address} \${client.port > 0}`)
 })
 const started = server.listen()
 if (started.isErr()) process.exit(1)
+await stopAsked.promise
+await started.value.stop()
 ")
 write(client.mjs [[
 import net from "node:net";

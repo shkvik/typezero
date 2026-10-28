@@ -18,7 +18,6 @@
 #include "runtime/core/parallel/parallel.h"
 #include "runtime/core/string/string.h"
 #include "runtime/core/tzrt/tzrt.h"
-#include "runtime/library/events/signal/signal.h"
 #include <stdlib.h>
 #include <string.h>
 
@@ -50,10 +49,7 @@ typedef struct Asker {
   struct Asker *next;
   TzPromise *promise;
   int32_t step;
-  TzAbortListener listener;
-  TzSignal *signal;
   TzMaker make;
-  struct Readline *readline;
 } Asker;
 
 typedef struct Readline {
@@ -61,8 +57,6 @@ typedef struct Readline {
   int32_t output;
   int32_t closed;
   int32_t skip_lf;
-  TzSignal *signal;
-  TzAbortListener listener;
   Asker *head, *tail;
 } Readline;
 
@@ -239,29 +233,8 @@ static int take_line(Readline *rl, TzStr *line) {
 }
 
 static void asker_free(Asker *a) {
-  tz_signal_unlisten(&a->listener);
-  if (a->signal) {
-    tz_instance_release((TzInstance *)a->signal);
-  }
   tz_obj_release((TzObject *)a->promise);
   tz_free(a);
-}
-
-static void readline_unlink(Readline *rl, Asker *a) {
-  Asker **link = &rl->head;
-  Asker *prev = NULL;
-  while (*link && *link != a) {
-    prev = *link;
-    link = &(*link)->next;
-  }
-  if (!*link) {
-    return;
-  }
-  *link = a->next;
-  if (rl->tail == a) {
-    rl->tail = prev;
-  }
-  a->next = NULL;
 }
 
 static void readline_shut(Readline *rl) {
@@ -269,7 +242,6 @@ static void readline_shut(Readline *rl) {
     return;
   }
   rl->closed = 1;
-  tz_signal_unlisten(&rl->listener);
   Asker **link = &rl->head;
   while (*link) {
     Asker *a = *link;
@@ -329,7 +301,6 @@ static Asker *readline_ask(Readline *rl, TzPromise *p, int32_t step) {
   a->promise = p;
   tz_ref_retain(p);
   a->step = step;
-  a->readline = rl;
   if (rl->tail) {
     rl->tail->next = a;
   } else {
@@ -340,11 +311,7 @@ static Asker *readline_ask(Readline *rl, TzPromise *p, int32_t step) {
   return a;
 }
 
-static void readline_aborted(TzAbortListener *l) {
-  readline_shut((Readline *)((char *)l - offsetof(Readline, listener)));
-}
-
-void *tz_readline_new(int64_t output, TzSignal *signal) {
+void *tz_readline_new(int64_t output) {
   Readline *rl = (Readline *)tz_obj_alloc(sizeof(Readline));
   memset(rl, 0, sizeof *rl);
   rl->base.rc = 1;
@@ -361,16 +328,6 @@ void *tz_readline_new(int64_t output, TzSignal *signal) {
     tz_readline_capacity = capacity;
   }
   tz_readlines[tz_readline_count++] = rl;
-  if (signal) {
-    if (signal->aborted) {
-      rl->closed = 1;
-    } else {
-      rl->signal = signal;
-      tz_ref_retain(signal);
-      rl->listener.run = readline_aborted;
-      tz_signal_listen(signal, &rl->listener);
-    }
-  }
 
   return rl;
 }
@@ -395,9 +352,6 @@ static void readline_drop(void *object) {
     rl->head = a->next;
     asker_free(a);
   }
-  if (rl->signal) {
-    tz_instance_release((TzInstance *)rl->signal);
-  }
   tz_obj_free(rl);
 }
 
@@ -419,42 +373,26 @@ static void readline_close_step(void *object, TzPromise *p) {
 
 void tz_readline_close(void *object) { readline_shut((Readline *)object); }
 
-static void question_failed(TzPromise *p, TzMaker make, TzSignal *signal) {
+static void question_failed(TzPromise *p, TzMaker make) {
   if (!make) {
     return;
   }
-  if (signal) {
-    tz_fs_abort_failure(make);
-  } else {
-    TzSystemErrorParts parts;
-    memset(&parts, 0, sizeof parts);
-    parts.message = tz_fs_ascii("readline was closed");
-    parts.code = tz_fs_ascii("ERR_USE_AFTER_CLOSE");
-    parts.syscall = tz_fs_ascii("");
-    tz_fs_throw_parts(make, &parts);
-  }
+  TzSystemErrorParts parts;
+  memset(&parts, 0, sizeof parts);
+  parts.message = tz_fs_ascii("readline was closed");
+  parts.code = tz_fs_ascii("ERR_USE_AFTER_CLOSE");
+  parts.syscall = tz_fs_ascii("");
+  tz_fs_throw_parts(make, &parts);
   void *error = tz_failed;
   tz_failed = NULL;
   tz_promise_fail(p, error);
 }
 
-static void question_aborted(TzAbortListener *l) {
-  Asker *a = (Asker *)((char *)l - offsetof(Asker, listener));
-  Readline *rl = a->readline;
-  readline_unlink(rl, a);
-  question_failed(a->promise, a->make, a->signal);
-  asker_free(a);
-}
-
 void tz_readline_question(void *object, TzPromise *p, void *query_obj, uint64_t query_meta,
-                          TzSignal *signal, TzMaker make) {
+                          TzMaker make) {
   Readline *rl = (Readline *)object;
   if (rl->closed) {
-    question_failed(p, make, NULL);
-    return;
-  }
-  if (signal && signal->aborted) {
-    question_failed(p, make, signal);
+    question_failed(p, make);
     return;
   }
   if (rl->output == 1) {
@@ -464,12 +402,6 @@ void tz_readline_question(void *object, TzPromise *p, void *query_obj, uint64_t 
   }
   Asker *a = readline_ask(rl, p, 0);
   a->make = make;
-  if (signal) {
-    a->signal = signal;
-    tz_ref_retain(signal);
-    a->listener.run = question_aborted;
-    tz_signal_listen(signal, &a->listener);
-  }
   readline_serve(rl);
 }
 

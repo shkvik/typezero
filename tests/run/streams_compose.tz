@@ -1,8 +1,8 @@
 // same-as-node
 // A PassThrough where a Writable is expected (a Duplex is one), compose()
 // of two Transforms, finished() of node:stream/promises and with a callback,
-// addAbortSignal() and construct(), which the writes wait for.
-import { PassThrough, Readable, Transform, Writable, compose, finished as finishedCb, addAbortSignal } from "node:stream"
+// and construct(), which the writes wait for.
+import { PassThrough, Transform, Writable, compose, finished as finishedCb } from "node:stream"
 import { finished } from "node:stream/promises"
 const log = (s: string) => console.log(s)
 function sinkInto(w: Writable, text: string) {
@@ -31,13 +31,6 @@ both.write("hey")
 const bothEnded = both.end()
 const bothDone = await finished(both)
 log(`composed done ${bothDone.isOk()} ${(await bothEnded).isOk()}`)
-
-const ac = new AbortController()
-const slow = new Readable({ read() {} })
-addAbortSignal(ac.signal, slow)
-slow.on("error", (e) => log(`slow error ${e.code}`))
-slow.on("close", () => log("slow close"))
-ac.abort()
 
 let constructed = false
 const c = new Writable({

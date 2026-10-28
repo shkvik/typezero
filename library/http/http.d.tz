@@ -1,6 +1,5 @@
 import { Request, Response } from "tz:fetch";
 import { URL } from "tz:url";
-import { AbortSignal } from "tz:web";
 
 /**
  * What a server answers each request with: a request in, a response out, at
@@ -64,8 +63,6 @@ export type ServeOptions = {
   port?: int;
   /** The address; "0.0.0.0", every network. "127.0.0.1" is this machine only. */
   hostname?: string;
-  /** Aborting it stops the server, as `stop()` does. */
-  signal?: AbortSignal;
   /** A request with a larger body is answered with 413; 128 MB. */
   maxBodySize?: double;
   /**
@@ -258,9 +255,8 @@ export declare class Server {
 
 /**
  * A server that listens: what `listen` gives. It answers requests on its
- * socket until `stop()`, or until the `signal` of the server's options is
- * aborted; either way `stop()` is how to wait for its end. A program does not
- * make one itself; `listen` does.
+ * socket until `stop()`, which is also how to wait for its end. A program
+ * does not make one itself; `listen` does.
  *
  * @example
  * const listening = server.listen();
@@ -287,29 +283,15 @@ export declare class Listening {
 
   /**
    * Stops taking connections, closes those that wait for a request, and
-   * resolves once the requests being handled are answered. A second call,
-   * and a call after the `signal` stopped it, closes nothing and waits for
-   * the same: this is how to wait for the end of a server.
+   * resolves once the requests being handled are answered. A second call
+   * closes nothing and waits for the same: this is how to wait for the end
+   * of a server.
    *
    * @example
    * process.on("SIGINT", async () => {
    *   await listening.stop();
    *   console.log("stopped");
    * });
-   *
-   * @example
-   * // Stopped by a signal, waited for with stop():
-   * const abort = new AbortController();
-   * const server = new Server({ port: 3000, signal: abort.signal }, handler);
-   * const listening = server.listen();
-   *
-   * if (listening.isErr()) {
-   *   console.error(listening.error.message);
-   *   process.exit(1);
-   * }
-   *
-   * abort.abort();
-   * await listening.value.stop();
    */
   public stop(): Promise<void>;
 }

@@ -5,11 +5,9 @@ done a 4
 done bb 8
 done ccc 12
 total 24, started 3, listening 1
-failed slow: ABORT_ERR
-3
-collect: ABORT_ERR
+failed missing: ENOENT
+2 x,y
 first start z
 start listeners 0
-once: ABORT_ERR
 once: 0
 end

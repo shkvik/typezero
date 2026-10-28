@@ -12,12 +12,8 @@ promise 20
 x1
 x2
 x3
-with signal
-without
-ABORT_ERR: The operation was aborted
-ABORT_ERR: The operation was aborted
+later
 tick 1
 tick 2
 tick 3
-stopped after true
 end

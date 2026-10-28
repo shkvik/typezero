@@ -15,14 +15,6 @@ event.target = new EventTarget()
 // expect-error: property 'beginDispatch' does not exist on type 'Event'
 event.beginDispatch(new EventTarget())
 
-// expect-error: 'constructor' is private in class 'AbortSignal'
-const made = new AbortSignal()
-const controller = new AbortController()
-// expect-error: 'abort' is private in class 'AbortSignal'
-controller.signal.abort("x")
-// expect-error: property 'abortWith' does not exist on type 'AbortSignal'
-controller.signal.abortWith("x")
-
 class Sneaky extends Event {
   static trust(other: Event) {
     // expect-error: 'markTrusted' is protected in class 'Event'; 'Sneaky' may use it only on its own objects, and this one is of class 'Event'

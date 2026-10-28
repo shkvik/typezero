@@ -36,7 +36,6 @@ typedef struct FsRequest {
   TzMaker make;
   TzMaker make_item;
   const TzType *element;
-  void *signal;
   Path path, dest;
   int paths;
   OpenFlags flags;

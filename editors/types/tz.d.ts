@@ -216,9 +216,7 @@ declare module "url" {
 // them what changed and are set from a text with replace; an event is sent
 // out through dispatchOn and tells whether stopImmediatePropagation() was
 // called; a stream tells whether it was read; a key does its own operations,
-// which crypto.subtle calls. AbortSignal.withAbort(), which gives a signal
-// together with the function that aborts it, cannot be added here to the
-// AbortSignal of @types/node, which is a var.
+// which crypto.subtle calls.
 interface Event {
   immediateStopped(): boolean
   dispatchOn(target: EventTarget, run: () => void): boolean
@@ -357,10 +355,6 @@ type StreamError = {
   path?: string
   cause?: string
 }
-
-// The error of once(), on() and the timers of node:timers/promises that a
-// signal ends.
-type AbortError = { code: "ABORT_ERR"; message: string }
 
 // The error of execSync, execFileSync and spawnSync of node:child_process
 // (docs/process.md): the program could not start, ran too long or printed
@@ -509,9 +503,9 @@ declare module "node:fs/promises" {
     | "w" | "wx" | "xw" | "w+" | "wx+" | "xw+"
     | "a" | "ax" | "xa" | "as" | "sa" | "a+" | "ax+" | "xa+" | "as+" | "sa+"
   type Done<T> = Promise<Result<T, SystemError>>
-  export function readFile(path: Path, options?: { encoding?: undefined; flag?: Flag; signal?: AbortSignal }): Done<Buffer>
-  export function readFile(path: Path, options: BufferEncoding | { encoding: BufferEncoding; flag?: Flag; signal?: AbortSignal }): Done<string>
-  export function writeFile(file: Path, data: Data, options?: BufferEncoding | { encoding?: BufferEncoding; flag?: Flag; mode?: number; signal?: AbortSignal }): Done<void>
+  export function readFile(path: Path, options?: { encoding?: undefined; flag?: Flag }): Done<Buffer>
+  export function readFile(path: Path, options: BufferEncoding | { encoding: BufferEncoding; flag?: Flag }): Done<string>
+  export function writeFile(file: Path, data: Data, options?: BufferEncoding | { encoding?: BufferEncoding; flag?: Flag; mode?: number }): Done<void>
   export function appendFile(file: Path, data: Data, options?: BufferEncoding | { encoding?: BufferEncoding; flag?: Flag; mode?: number }): Done<void>
   export function access(path: Path, mode?: number): Done<void>
   export function chmod(path: Path, mode: number | string): Done<void>

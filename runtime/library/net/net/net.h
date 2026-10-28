@@ -8,7 +8,7 @@
 #include "runtime/core/string/string.h"
 #include "runtime/core/tzrt/tzrt.h"
 #include "runtime/library/bytes/bytes/bytes.h"
-#include "runtime/library/events/signal/signal.h"
+#include "runtime/library/net/deadline/deadline.h"
 
 #ifdef _WIN32
 #define WIN32_LEAN_AND_MEAN
@@ -70,8 +70,8 @@ typedef struct HttpState {
   TzPromise *waiting;
   int32_t wait_kind;
   TzMaker make;
-  TzSignal *signal;
-  TzAbortListener abort;
+  TzDeadline *deadline;
+  TzDeadlineListener abort;
   uint8_t *all;
   size_t all_length, all_capacity;
   double head_since;
@@ -189,7 +189,7 @@ const NetError *net_error_of(int32_t error);
 void *net_system_error(TzMaker make, int32_t error, const char *syscall, const char *where,
                        int with_text);
 void *net_failure(const char *code, const char *message);
-void *net_aborted(void);
+void *net_timed_out(void);
 TzStr net_utf8(const char *text);
 
 void net_fulfill(TzPromise **p, const void *value, size_t size);

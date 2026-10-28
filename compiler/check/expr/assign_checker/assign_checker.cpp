@@ -21,7 +21,6 @@
 #include "compiler/library/bytes/bytes_check_helpers/bytes_check_helpers.h"
 #include "compiler/library/bytes/bytes_checker/bytes_checker.h"
 #include "compiler/library/decimal/decimal_checker/decimal_checker.h"
-#include "compiler/library/events/event_target_checker/event_target_checker.h"
 #include "compiler/library/process/process_checker/process_checker.h"
 #include "compiler/library/tz_modules/tz_modules_checker/tz_modules_checker.h"
 #include "llvm/ADT/STLExtras.h"
@@ -311,11 +310,6 @@ Expr *AssignChecker::checkAssign(AssignExpr *assign) {
   }
   if (index && index->object->type->isTypedArray()) {
     checker_.bytesChecker().checkBytesStore(index, assign->value);
-  }
-  if (member && !type->isError()) {
-    if (Expr *set = checker_.eventTargetChecker().onabortAssign(assign, member, logical)) {
-      return set;
-    }
   }
   if (index && index->object->type->isArray()) {
     bool inRange = checker_.indexProofs().provesInBounds(index->object, index->index, false);

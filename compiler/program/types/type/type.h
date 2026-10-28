@@ -113,7 +113,6 @@ public:
   bool isImmediate() const { return timer_ == 2; }
   enum class Runtime : uint8_t {
     None,
-    AbortSignal,
     FileHandle,
     Readline,
     ReadlinePromises,

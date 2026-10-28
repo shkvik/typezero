@@ -27,7 +27,7 @@
 #include "runtime/core/tzrt/tzrt.h"
 #include "runtime/library/bytes/buffer/buffer.h"
 #include "runtime/library/bytes/bytes/bytes.h"
-#include "runtime/library/events/signal/signal.h"
+#include "runtime/library/net/deadline/deadline.h"
 
 static const char kSuites[] =
     "TLS_AES_256_GCM_SHA384:TLS_CHACHA20_POLY1305_SHA256:TLS_AES_128_GCM_SHA256";
@@ -52,8 +52,8 @@ typedef struct Tls {
   unsigned long failure;
   TzPromise *promise;
   TzMaker make;
-  TzSignal *signal;
-  TzAbortListener abort;
+  TzDeadline *deadline;
+  TzDeadlineListener abort;
   char host[256];
 } Tls;
 
@@ -381,10 +381,10 @@ static void *tls_failure(NetConn *c, TzMaker make) {
 }
 
 static void stop_waiting(Tls *t) {
-  if (t->signal) {
-    tz_signal_unlisten(&t->abort);
-    tz_instance_release((TzInstance *)t->signal);
-    t->signal = NULL;
+  if (t->deadline) {
+    tz_deadline_unlisten(&t->abort);
+    tz_instance_release((TzInstance *)t->deadline);
+    t->deadline = NULL;
   }
 }
 
@@ -954,12 +954,12 @@ static void handshake_input(NetConn *c) {
   }
 }
 
-static void abort_handshake(TzAbortListener *l) {
+static void abort_handshake(TzDeadlineListener *l) {
   Tls *t = CONTAINING_RECORD(l, Tls, abort);
-  TzSignal *signal = t->signal;
-  t->signal = NULL;
-  void *reason = net_aborted();
-  tz_instance_release((TzInstance *)signal);
+  TzDeadline *deadline = t->deadline;
+  t->deadline = NULL;
+  void *reason = net_timed_out();
+  tz_instance_release((TzInstance *)deadline);
   if (t->promise) {
     net_reject(&t->promise, reason);
   } else {
@@ -968,7 +968,7 @@ static void abort_handshake(TzAbortListener *l) {
   net_abort(t->conn);
 }
 
-void tz_tls_connect(TzPromise *p, void *conn, void *host_obj, uint64_t host_meta, void *signal,
+void tz_tls_connect(TzPromise *p, void *conn, void *host_obj, uint64_t host_meta, void *deadline,
                     TzMaker make) {
   NetConn *c = (NetConn *)conn;
   tz_net_make = make;
@@ -987,16 +987,16 @@ void tz_tls_connect(TzPromise *p, void *conn, void *host_obj, uint64_t host_meta
   }
   SSL_set_connect_state(t->ssl);
   c->on_input = handshake_input;
-  if (signal) {
-    if (tz_signal_aborted(signal)) {
-      net_reject(&t->promise, net_aborted());
+  if (deadline) {
+    if (tz_deadline_is_passed(deadline)) {
+      net_reject(&t->promise, net_timed_out());
       net_abort(c);
       return;
     }
-    tz_ref_retain(signal);
-    t->signal = (TzSignal *)signal;
+    tz_ref_retain(deadline);
+    t->deadline = (TzDeadline *)deadline;
     t->abort.run = abort_handshake;
-    tz_signal_listen(t->signal, &t->abort);
+    tz_deadline_listen(t->deadline, &t->abort);
   }
   net_read(c);
 }

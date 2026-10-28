@@ -1,5 +1,4 @@
 import { EventEmitterBase } from "node:events";
-import { AbortController, AbortSignal, Event } from "tz:web";
 import { StringDecoder, normalizeEncoding } from "node:string_decoder";
 import {
   chunkKind,
@@ -235,14 +234,12 @@ class StreamSetup {
   transform = false;
   transformsWrites = false;
   transformsFinal = false;
-  signal?: AbortSignal;
 }
 
 export interface FinishedOptions {
   error?: boolean;
   readable?: boolean;
   writable?: boolean;
-  signal?: AbortSignal;
   cleanup?: boolean;
 }
 
@@ -683,7 +680,7 @@ export class Stream extends EventEmitterBase {
     this.transforming = setup.transform;
     this.transformsWrites = setup.transformsWrites;
     this.transformsFinal = setup.transformsFinal;
-    this.initEnd(setup.signal);
+    this.initEnd();
   }
 
   private initReadable(options: SideOptions, isDuplex: boolean) {
@@ -738,8 +735,7 @@ export class Stream extends EventEmitterBase {
     this.writeObjects = objectMode;
   }
 
-  private initEnd(signal: AbortSignal | undefined) {
-    if (signal != undefined) Stream.addAbortSignalNoValidate(signal, this);
+  private initEnd() {
     if (this.hasConstruct) {
       const self = this;
       Stream.construct(this, () => {
@@ -2495,26 +2491,6 @@ export class Stream extends EventEmitterBase {
       stream.removeListener("error", onerror);
       stream.removeListener("close", onclose);
     };
-    const optionSignal = options?.signal;
-    if (optionSignal != undefined && !e.closed) {
-      const signal = optionSignal;
-      const abort = () => {
-        const endCallback = e.callback;
-        cleanup();
-        endCallback(abortError());
-      };
-      if (signal.aborted()) {
-        process.nextTick(abort);
-      } else {
-        const onAbort = (event: Event) => abort();
-        signal.addEventListener("abort", onAbort, { once: true });
-        const originalCallback = e.callback;
-        e.callback = (err?: StreamError) => {
-          signal.removeEventListener("abort", onAbort);
-          originalCallback(err);
-        };
-      }
-    }
     return cleanup;
   }
 
@@ -2578,26 +2554,6 @@ export class Stream extends EventEmitterBase {
         else resolve(ok());
       });
     });
-  }
-
-  private static addAbortSignalNoValidate(signal: AbortSignal, stream: Stream) {
-    const onAbort = () => {
-      stream.destroy(abortError());
-    };
-    if (signal.aborted()) {
-      onAbort();
-    } else {
-      const listener = (event: Event) => onAbort();
-      signal.addEventListener("abort", listener, { once: true });
-      Stream.eos(stream, undefined, () =>
-        signal.removeEventListener("abort", listener),
-      );
-    }
-  }
-
-  static addAbortSignal<S extends Stream>(signal: AbortSignal, stream: S): S {
-    Stream.addAbortSignalNoValidate(signal, stream);
-    return stream;
   }
 
   private static pipelineDestroyer(
@@ -2748,21 +2704,9 @@ export class Stream extends EventEmitterBase {
     stages: (Stream | PipelineStage)[],
     ps: PipelineState,
     end: boolean,
-    outerSignal: AbortSignal | undefined,
   ): Stream | undefined {
     if (stages.length < 2)
       panic("internal error: pipeline() takes two streams or more");
-    const signal = ps.ac.signal;
-    const abort = () => finishImpl(ps, abortError(), false);
-    let onOuterAbort: ((event: Event) => void) | undefined = undefined;
-    if (outerSignal != undefined) {
-      const listener = (event: Event) => abort();
-      const outer = outerSignal;
-      onOuterAbort = listener;
-      outer.addEventListener("abort", listener, { once: true });
-      ps.destroys.push(() => outer.removeEventListener("abort", listener));
-    }
-    void onOuterAbort;
     let retStream: Stream | undefined = undefined;
     let retIterable: AsyncGenerator<unknown> | undefined = undefined;
     for (let i = 0; i < stages.length; i++) {
@@ -2839,7 +2783,7 @@ export class Stream extends EventEmitterBase {
         const source = stage.source;
         if (source == undefined)
           panic("internal error: the first stage is no source");
-        retIterable = source(signal);
+        retIterable = source();
         continue;
       }
       const input =
@@ -2852,14 +2796,14 @@ export class Stream extends EventEmitterBase {
       retStream = undefined;
       const transform = stage.transform;
       if (transform != undefined && reading) {
-        retIterable = transform(input, signal);
+        retIterable = transform(input);
         continue;
       }
       const pt = new PassThrough<unknown>({ objectMode: true });
       const sink = stage.sink;
       if (sink != undefined) {
         ps.finishCount++;
-        void sink(input, signal).then((val: unknown) => {
+        void sink(input).then((val: unknown) => {
           ps.value = val;
           if (val != undefined) pt.writeAny(val, undefined, nop);
           if (stageEnd) pt.endWith(false, undefined, undefined, undefined);
@@ -2867,15 +2811,13 @@ export class Stream extends EventEmitterBase {
         });
       } else if (transform != undefined) {
         ps.finishCount++;
-        void Stream.pumpToNode(transform(input, signal), pt, ps, stageEnd);
+        void Stream.pumpToNode(transform(input), pt, ps, stageEnd);
       }
       retIterable = undefined;
       retStream = pt;
       const cleanup = Stream.pipelineDestroyer(pt, false, true, ps);
       if (isLastStream) ps.lastStreamCleanup.push(cleanup);
     }
-    if (signal.aborted() || (outerSignal != undefined && outerSignal.aborted()))
-      process.nextTick(abort);
     return retStream;
   }
 
@@ -2892,7 +2834,7 @@ export class Stream extends EventEmitterBase {
     );
     const lastStream: Stream = last;
     stages.push(lastStream);
-    Stream.pipelineImpl(stages, ps, true, undefined);
+    Stream.pipelineImpl(stages, ps, true);
     return last;
   }
 
@@ -2906,14 +2848,14 @@ export class Stream extends EventEmitterBase {
         callback(err);
       },
     );
-    const last = Stream.pipelineImpl(stages, ps, true, undefined);
+    const last = Stream.pipelineImpl(stages, ps, true);
     if (last == undefined) panic("internal error: the pipeline has no stream");
     return last;
   }
 
   private static pipelineResult(
     stages: (Stream | PipelineStage)[],
-    options?: { signal?: AbortSignal; end?: boolean },
+    options?: { end?: boolean },
   ): Promise<Result<void, StreamError>> {
     return new Promise<Result<void, StreamError>>((resolve) => {
       const ps = new PipelineState(
@@ -2923,13 +2865,13 @@ export class Stream extends EventEmitterBase {
           else resolve(ok());
         },
       );
-      Stream.pipelineImpl(stages, ps, options?.end ?? true, options?.signal);
+      Stream.pipelineImpl(stages, ps, options?.end ?? true);
     });
   }
 
   private static pipelineValue<V>(
     stages: (Stream | PipelineStage)[],
-    options?: { signal?: AbortSignal; end?: boolean },
+    options?: { end?: boolean },
   ): Promise<Result<V, StreamError>> {
     return new Promise<Result<V, StreamError>>((resolve) => {
       const ps = new PipelineState(
@@ -2938,7 +2880,7 @@ export class Stream extends EventEmitterBase {
           else resolve(ok(chunkOf<V>(value)));
         },
       );
-      Stream.pipelineImpl(stages, ps, options?.end ?? true, options?.signal);
+      Stream.pipelineImpl(stages, ps, options?.end ?? true);
     });
   }
 
@@ -3028,7 +2970,7 @@ export class Stream extends EventEmitterBase {
           onfinished(err);
         },
       );
-      Stream.pipelineImpl(stages, ps, true, undefined);
+      Stream.pipelineImpl(stages, ps, true);
     }
     if (writable) {
       const ondrain = function (this: Stream) {
@@ -3115,13 +3057,6 @@ export function isErrored(stream: Stream): boolean {
 
 export function isDisturbed(stream: Stream): boolean {
   return Stream.isDisturbed(stream);
-}
-
-export function addAbortSignal<S extends Stream>(
-  signal: AbortSignal,
-  stream: S,
-): S {
-  return Stream.addAbortSignal(signal, stream);
 }
 
 export function pipeline() {}

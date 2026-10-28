@@ -61,12 +61,7 @@ public listen(): Result<Listening, ListenError> {
     });
   }
 
-  const listening = new Listening(
-    opened.value,
-    this.hostname,
-    this.handler,
-    this.signal,
-  );
+  const listening = new Listening(opened.value, this.hostname, this.handler);
 
   return ok(listening);
 }
@@ -171,7 +166,7 @@ private static async answer(
 const response = await ahead(handler(request, client));
 response.writeTo(exchange, request.method == "HEAD");
 this.url = new URL(netListenerUrl(listener));
-return ok(new Listening(opened.value, this.hostname, this.handler, this.signal));
+return ok(new Listening(opened.value, this.hostname, this.handler));
 ```
 
 ## 3. Поля задаёт конструктор
@@ -184,7 +179,6 @@ export class Server {
   private readonly keepAlive: int;
   private readonly headersTimeout: int;
   private readonly transport: ServeTransport;
-  private readonly signal?: AbortSignal;
   private readonly handler: Handler;
 
   public constructor(options: ServeOptions, handler: Handler) {
@@ -194,7 +188,6 @@ export class Server {
     this.keepAlive = options.keepAliveTimeout ?? 5000;
     this.headersTimeout = options.headersTimeout ?? 60000;
     this.transport = options.transport ?? { secure: false };
-    this.signal = options.signal;
     this.handler = handler;
   }
 }
@@ -204,9 +197,8 @@ export class Server {
 - **Все значения задаёт конструктор**, и значения по умолчанию тоже (`options.port ?? 8000`).
   Начальное состояние объекта видно в одном месте.
 - **Сначала поля, потом вызовы.** Пока заданы не все поля, `this` можно только писать
-  ([objects.md](objects.md), раздел 6, «Инициализация»). Поэтому свой метод конструктор зовёт
-  после всех полей (`this.stopOnSignal(signal)` в конце у `Listening`), а то, что нужно для
-  самого поля, — закрытый статический метод:
+  ([objects.md](objects.md), раздел 6, «Инициализация»). Поэтому свой метод конструктор может
+  звать только после всех полей, а то, что нужно для самого поля, — закрытый статический метод:
   `this.accepting = Listening.acceptAll(listener, handler);`.
 
 Не так (так сейчас в `library/http`):
@@ -228,9 +220,8 @@ export class Listening {
   private readonly accepting: Promise<void>;
   private stopping: boolean;
 
-  public constructor(listener: Listener, hostname: string, handler: Handler, signal?: AbortSignal) { … }
+  public constructor(listener: Listener, hostname: string, handler: Handler) { … }
   public async stop(): Promise<void> { … }
-  private stopOnSignal(signal?: AbortSignal): void { … }
   private static async acceptAll(listener: Listener, handler: Handler): Promise<void> { … }
   private static async answer(exchange: Exchange, handler: Handler): Promise<void> { … }
 }
@@ -251,7 +242,6 @@ export class Listening {
 export type ServeOptions = {
   port?: int;
   hostname?: string;
-  signal?: AbortSignal;
   maxBodySize?: double;
   keepAliveTimeout?: int;
   headersTimeout?: int;
@@ -334,9 +324,8 @@ export class Server {
 - **`readonly` задаёт только конструктор**, как в TypeScript: в своих методах класс тоже не
   пишет в `readonly`-поле.
 - **То, что объект меняет сам, закрыто и читается методом**, названным как значение. Поле и
-  метод с одним именем быть не могут, поэтому поле называется иначе (`count` у `size()`,
-  `isAborted` у `aborted()`), а когда таких значений много — они лежат в одной закрытой записи
-  `state`, как части адреса:
+  метод с одним именем быть не могут, поэтому поле называется иначе (`count` у `size()`), а
+  когда таких значений много — они лежат в одной закрытой записи `state`, как части адреса:
 
   ```ts
   type UrlParts = {
@@ -365,8 +354,7 @@ export class Server {
   ```
 
   Программа: `url.pathname()` читает, `url.setPathname("/x")` меняет, `url.pathname = "/x"` —
-  ошибка. Так же будут `params.size()`, `signal.aborted()`, `stream.locked()` — как уже сейчас
-  `bodyUsed()` и `desiredSize()`.
+  ошибка. Так же `params.size()` и `stream.locked()`, как `bodyUsed()` и `desiredSize()`.
 - **Неизменная ссылка остаётся полем:** `url.searchParams` — всегда один и тот же объект, это
   `public readonly`-поле.
 - **Своё рабочее состояние** (`private stopping: boolean;` у `Listening`) — просто закрытое поле
@@ -381,8 +369,7 @@ export class Server {
 - **Объекты библиотеки говорят друг с другом только через открытое**, и каждый открытый метод
   держит объект в порядке, кто бы его ни вызвал. Пометок «только для библиотеки» нет. Приёмы:
   объект сам читает и пишет себя (`Request.readFrom(exchange)`,
-  `response.writeTo(exchange, headOnly)`), фабрика отдаёт право менять
-  (`AbortSignal.withAbort()`), наблюдатель (`URL` и его `searchParams`).
+  `response.writeTo(exchange, headOnly)`), наблюдатель (`URL` и его `searchParams`).
 - **Мосты в рантайм** — `declare function` с телом на C (`netListen` → `tz_net_listen`). Их
   место — внутренние модули `tz:internal/…`. Ручки рантайма — свои типы (`Listener`,
   `Exchange`), а не `object`: одну нельзя отдать вместо другой.
@@ -408,7 +395,6 @@ export class Server {
 ```ts
 import { Request, Response } from "tz:fetch";
 import { URL } from "tz:url";
-import { AbortSignal, Event } from "tz:web";
 import { ahead } from "tz:intrinsics";
 import {
   Exchange,
@@ -430,12 +416,7 @@ export class Listening {
   private readonly accepting: Promise<void>;
   private stopping: boolean;
 
-  public constructor(
-    listener: Listener,
-    hostname: string,
-    handler: Handler,
-    signal?: AbortSignal,
-  ) {
+  public constructor(listener: Listener, hostname: string, handler: Handler) {
     this.listener = listener;
     this.stopping = false;
     const href = netListenerUrl(listener);
@@ -443,7 +424,6 @@ export class Listening {
     this.hostname = hostname;
     this.port = netListenerPort(listener);
     this.accepting = Listening.acceptAll(listener, handler);
-    this.stopOnSignal(signal);
   }
 
   public async stop(): Promise<void> {
@@ -452,23 +432,6 @@ export class Listening {
       netCloseListener(this.listener);
     }
     await this.accepting;
-  }
-
-  private stopOnSignal(signal?: AbortSignal): void {
-    if (signal == undefined) {
-      return;
-    }
-    if (signal.aborted()) {
-      void this.stop();
-      return;
-    }
-    signal.addEventListener(
-      "abort",
-      (event: Event) => {
-        void this.stop();
-      },
-      { once: true },
-    );
   }
 
   private static async acceptAll(

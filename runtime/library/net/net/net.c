@@ -10,7 +10,7 @@
 #include "runtime/core/string/string.h"
 #include "runtime/core/tzrt/tzrt.h"
 #include "runtime/library/bytes/bytes/bytes.h"
-#include "runtime/library/events/signal/signal.h"
+#include "runtime/library/net/deadline/deadline.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -195,7 +195,9 @@ void *net_failure(const char *code, const char *message) {
   return tz_net_make(&parts);
 }
 
-void *net_aborted(void) { return net_failure("ABORT_ERR", "This operation was aborted"); }
+void *net_timed_out(void) {
+  return net_failure("TIMEOUT_ERR", "The operation was aborted due to timeout");
+}
 
 TzStr net_utf8(const char *message) {
   TzBuf b;
@@ -1267,8 +1269,8 @@ typedef struct Connect {
   NetConn *conn;
   int32_t error;
   int failed_at;
-  TzSignal *signal;
-  TzAbortListener abort;
+  TzDeadline *deadline;
+  TzDeadlineListener abort;
   ADDRINFOEXW *found;
   HANDLE cancel;
   int looking;
@@ -1276,9 +1278,9 @@ typedef struct Connect {
 } Connect;
 
 static void connect_free(Connect *r) {
-  if (r->signal) {
-    tz_signal_unlisten(&r->abort);
-    tz_instance_release((TzInstance *)r->signal);
+  if (r->deadline) {
+    tz_deadline_unlisten(&r->abort);
+    tz_instance_release((TzInstance *)r->deadline);
   }
   if (r->conn) {
     r->conn->orphan = 1;
@@ -1462,9 +1464,9 @@ static void CALLBACK found_names(DWORD error, DWORD bytes, LPWSAOVERLAPPED overl
   PostQueuedCompletionStatus((HANDLE)tz_io_port_handle(), 0, (ULONG_PTR)names_posted, overlapped);
 }
 
-static void abort_connect(TzAbortListener *l) {
+static void abort_connect(TzDeadlineListener *l) {
   Connect *r = CONTAINING_RECORD(l, Connect, abort);
-  net_reject(&r->promise, net_aborted());
+  net_reject(&r->promise, net_timed_out());
   r->done = 1;
   if (r->looking && r->cancel) {
     GetAddrInfoExCancel(&r->cancel);
@@ -1474,7 +1476,7 @@ static void abort_connect(TzAbortListener *l) {
   }
 }
 
-void tz_net_connect(TzPromise *p, void *host_obj, uint64_t host_meta, int64_t port, void *signal,
+void tz_net_connect(TzPromise *p, void *host_obj, uint64_t host_meta, int64_t port, void *deadline,
                     TzMaker make) {
   TZ_ORDERED();
   start();
@@ -1490,16 +1492,16 @@ void tz_net_connect(TzPromise *p, void *host_obj, uint64_t host_meta, int64_t po
     connect_free(r);
     return;
   }
-  if (signal) {
-    if (tz_signal_aborted(signal)) {
-      net_reject(&r->promise, net_aborted());
+  if (deadline) {
+    if (tz_deadline_is_passed(deadline)) {
+      net_reject(&r->promise, net_timed_out());
       connect_free(r);
       return;
     }
-    tz_ref_retain(signal);
-    r->signal = (TzSignal *)signal;
+    tz_ref_retain(deadline);
+    r->deadline = (TzDeadline *)deadline;
     r->abort.run = abort_connect;
-    tz_signal_listen(r->signal, &r->abort);
+    tz_deadline_listen(r->deadline, &r->abort);
   }
   int length;
   if (parse_literal(r->host, port, &r->addresses[0], &length)) {
@@ -1635,13 +1637,13 @@ void tz_net_drained(TzPromise *p, void *listener, TzMaker make) {
   (void)make;
   unsupported();
 }
-void tz_net_connect(TzPromise *p, void *host_obj, uint64_t host_meta, int64_t port, void *signal,
+void tz_net_connect(TzPromise *p, void *host_obj, uint64_t host_meta, int64_t port, void *deadline,
                     TzMaker make) {
   TZ_ORDERED();
   (void)host_obj;
   (void)host_meta;
   (void)port;
-  (void)signal;
+  (void)deadline;
   (void)make;
   unsupported();
 }

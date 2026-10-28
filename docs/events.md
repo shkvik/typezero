@@ -112,14 +112,16 @@ bus.on("user", async user => {
 
 - Всё API: `on` / `addListener`, `once`, `off` / `removeListener`, `removeAllListeners`, `emit`,
   `prependListener`, `prependOnceListener`, `listenerCount`, `listeners`, `rawListeners`,
-  `eventNames`, `setMaxListeners`; `once(emitter, name)` — `Promise<Result>` (с `signal`);
-  `on(emitter, name)` — для `for await`. Кроме того, что про ошибки (раздел 4).
+  `eventNames`, `setMaxListeners`; `once(emitter, name)` — `Promise<Result>`, если у эмиттера есть
+  событие `error`; `on(emitter, name, { close })` — для `for await`. Опции `signal` нет:
+  `AbortSignal` убран 28 октября ([async.md](async.md), раздел 7). Кроме того, что про ошибки
+  (раздел 4).
 - Больше 10 слушателей одного события — предупреждение о возможной утечке памяти в stderr, как в
   node; `setMaxListeners` меняет предел.
 - `this` в слушателе-функции — сам объект; у стрелки — как обычно.
 - Имена событий — только строки: своих `Symbol` в tz нет ([iterators.md](iterators.md)).
-- `EventTarget`, `Event`, `CustomEvent<T>` (у `detail` — тип `T`) — как в браузере; на
-  `EventTarget` держится `AbortSignal` ([net.md](net.md)).
+- `EventTarget`, `Event`, `CustomEvent<T>` (у `detail` — тип `T`) — как в браузере, без опции
+  `signal` у `addEventListener`.
 
 ## План реализации
 
@@ -133,12 +135,13 @@ README.
    разные типы одного события.
 3. **`once()` и `on()`** (сделано) — после async ([async.md](async.md), шаг 1) и `for await`
    ([iterators.md](iterators.md), шаг 4); async-слушатели.
-4. **`EventTarget`, `Event`, `CustomEvent`**, `AbortController` / `AbortSignal` на них (сделано).
+4. **`EventTarget`, `Event`, `CustomEvent`** (сделано); `AbortController` / `AbortSignal` на них
+   были и убраны 28 октября.
 5. Дальше на этом — потоки node, асинхронные функции `node:child_process`
    ([process.md](process.md)), `node:http` ([net.md](net.md)).
 6. **`error` без исключений** (сделано 27 октября; раздел 4; [errors.md](errors.md), шаг 3): правило подписки на
    `error` по путям, ошибка на `error` без слушателя у своего объекта, ошибка на слушатель с
    `Result`, `Result` у `once()` и `on()`, убрать `captureRejections`, `uncaughtException` и
    `unhandledRejection`. Переписать `library/events/*.tz`. Сделано 27 октября; тип ошибки у
-   `once()` и `on()` — тип ошибки события `error` и `AbortError`, объекты с меткой (шаг 5
-   errors.md).
+   `once()` и `on()` — тип ошибки события `error`, объекты с меткой (шаг 5 errors.md);
+   `AbortError` ушёл вместе с сигналами 28 октября.

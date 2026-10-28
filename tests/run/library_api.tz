@@ -4,14 +4,6 @@
 import { Server } from "tz:http"
 import { Readable, Stream, isErrored, isReadable } from "node:stream"
 
-// A signal with the function that aborts it, as Promise.withResolvers gives a
-// promise with its resolve; the controller makes its signal so.
-const { signal, abort } = AbortSignal.withAbort()
-signal.addEventListener("abort", (event) => console.log("aborted:", signal.reason(), event.isTrusted()))
-console.log(signal.aborted())
-abort("enough")
-console.log(signal.aborted())
-
 // An event goes through dispatchOn: once at a time, and the listeners see it
 // at the target.
 const target = new EventTarget()

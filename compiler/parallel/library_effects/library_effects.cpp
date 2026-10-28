@@ -36,9 +36,7 @@ bool isEmitterClass(llvm::StringRef cls) {
   return cls == "EventEmitter" || cls == "EventEmitterBase";
 }
 
-bool isTargetClass(llvm::StringRef cls) { return cls == "EventTarget" || cls == "AbortSignal"; }
-
-bool isSignalClass(llvm::StringRef cls) { return cls == "AbortSignal" || cls == "AbortController"; }
+bool isTargetClass(llvm::StringRef cls) { return cls == "EventTarget"; }
 
 bool readOnlyExpr(const Expr *e) {
   if (!e) {
@@ -160,11 +158,8 @@ void LibraryEffects::libraryCall(const CallExpr *c, const FunctionDecl *decl, co
   }
   if (isEmitterClass(cls) && name == "emit") {
     dispatch(c, CallKind::Inline, EmitterListeners, use);
-  } else if ((isTargetClass(cls) && name == "dispatchEvent") ||
-             (cls == "AbortController" && name == "abort")) {
+  } else if (isTargetClass(cls) && name == "dispatchEvent") {
     dispatch(c, CallKind::Inline, TargetListeners, use);
-  } else if (cls == "AbortSignal" && (name == "timeout" || name == "withAbort")) {
-    dispatch(c, CallKind::Later, TargetListeners, use);
   }
 }
 
@@ -187,8 +182,8 @@ void LibraryEffects::libraryArg(const CallExpr *c, llvm::StringRef cls, llvm::St
     if (isEmitterClass(cls) && (name == "on" || name == "addListener" || name == "once" ||
                                 name == "prependListener" || name == "prependOnceListener")) {
       listen(f, EmitterListeners);
-    } else if (isTargetClass(cls) && (name == "addEventListener" || name == "addFunctionListener" ||
-                                      name == "setOnabort")) {
+    } else if (isTargetClass(cls) &&
+               (name == "addEventListener" || name == "addFunctionListener")) {
       listen(f, TargetListeners);
     } else if (cls == "Server" && name == "constructor") {
       libraryCallback(c, f, CallKind::Later, true, true);
@@ -293,10 +288,6 @@ bool LibraryEffects::readsOnly(const FunctionDecl *decl) {
 
 void LibraryEffects::libraryState(llvm::StringRef cls, llvm::StringRef name,
                                   std::optional<Ref> self, bool write, llvm::SMLoc at) {
-  if (isSignalClass(cls)) {
-    analysis_.resource(Res::Signals, write, at);
-    return;
-  }
   if (!self) {
     return;
   }

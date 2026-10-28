@@ -53,7 +53,6 @@ enum class Res : uint8_t {
   Stdin,
   Files,
   Process,
-  Signals,
   Metadata,
   Runtime,
 };

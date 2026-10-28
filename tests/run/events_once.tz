@@ -1,8 +1,8 @@
 // same-as-node
 // once(emitter, name) of node:events (docs/events.md, section 4): a Promise
 // of a Result with the arguments of the next event, an Err when an 'error'
-// event comes first or its signal aborts; also of an EventTarget, where
-// without a signal it is the arguments alone. getEventListeners() and
+// event comes first; also of an EventTarget, where it is the arguments
+// alone. getEventListeners() and
 // listenerCount() of the module, and the same functions on EventEmitter.
 import { EventEmitter, once, getEventListeners, listenerCount } from "node:events"
 
@@ -23,13 +23,7 @@ setTimeout(() => server.emit("done"), 1)
 const done = await once(server, "done")
 console.log(done.isOk() ? done.value : "?")
 
-const ac = new AbortController()
-const waiting = once(server, "done", { signal: ac.signal })
-ac.abort()
-const aborted = await waiting
-if (aborted.isErr()) console.log(aborted.error.code, aborted.error.message, server.listenerCount("done"))
-const signalled = new AbortController()
-const fired = once(server, "done", { signal: signalled.signal })
+const fired = once(server, "done")
 server.emit("done")
 const firedNow = await fired
 console.log(firedNow.isOk() ? firedNow.value : "?", server.listenerCount("done"))

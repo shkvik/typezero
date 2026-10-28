@@ -67,7 +67,6 @@ Refs FlowBuiltins::builtin(CallExpr *c, MemberExpr *member, const Refs &receiver
   case Builtin::LibStdinChunk:
   case Builtin::LibStdWrite:
   case Builtin::LibOrder:
-  case Builtin::LibNativeSignal:
     return {};
   case Builtin::LibAhead:
     return args.empty() ? Refs() : args[0];

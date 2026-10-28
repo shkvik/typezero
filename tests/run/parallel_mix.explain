@@ -1,69 +1,70 @@
 top-level code
   start
     writes the listeners of stats (line 38)
-    reads  the abort signals (line 44)
-    writes the state of server (line 52)
-    writes stdout (lines 54, 55)
-    reads  message of any ListenError (line 54)
-    writes stderr (line 55)
-    writes the exit code and environment (line 55)
-    reads  the state of any Listening (line 65 in get)
-    in order with the arrow at line 44 after await at line 46: the listeners of stats
+    writes the state of server (line 51)
+    writes stdout (lines 53, 54)
+    reads  message of any ListenError (line 53)
+    writes stderr (line 54)
+    writes the exit code and environment (line 54)
+    reads  the state of any Listening (line 64 in get)
+    in order with the arrow at line 43 after await at line 45: the listeners of stats
     in order: line 38
-  after await at line 65
-    writes stdout (line 66)
-    reads  everything in any string[] (line 66)
-    reads  the state of any Listening (line 67 in get)
+  after await at line 64
+    writes stdout (line 65)
+    reads  everything in any string[] (line 65)
+    reads  the state of any Listening (line 66 in get)
     parallel
-  after await at line 67
-    writes stdout (lines 67, 69)
-    reads  entries of counts (lines 68, 68 in the arrow at line 68)
-    reads  elements of any string[] (line 68)
-    reads  everything in seen (line 69)
-    reads  stats.served (line 69)
-    reads  registry.sessions (line 69)
-    reads  entries of any Map<string, Session> (line 69)
-    writes the abort signals (line 70)
-    in order with the arrow at line 44 after await at line 46: entries of any Map<string, Session>, entries of counts, stats.served
-    in order: lines 68-69
+  after await at line 66
+    writes stdout (lines 66, 68)
+    reads  entries of counts (lines 67, 67 in the arrow at line 67)
+    reads  elements of any string[] (line 67)
+    reads  everything in seen (line 68)
+    reads  stats.served (line 68)
+    reads  registry.sessions (line 68)
+    reads  entries of any Map<string, Session> (line 68)
+    writes the state of any Listening (line 69)
+    in order with the arrow at line 43 after await at line 45: entries of any Map<string, Session>, entries of counts, stats.served
+    in order: lines 67-68
+  after await at line 69
+    parallel
 
-async arrow, line 44
-  start (in the callbacks at line 44)
-    reads  the state of any Request (line 45)
-    reads  the state of the URL made at line 45 (line 45)
+async arrow, line 43
+  start (in the callbacks at line 43)
+    reads  the state of any Request (line 44)
+    reads  the state of the URL made at line 44 (line 44)
     parallel
-  after await at line 46 (in the callbacks at line 44)
-    reads  entries of counts (line 47)
-    writes entries of counts (line 47)
-    reads  stats.served (line 48 in Stats.hit)
-    writes stats.served (line 48 in Stats.hit)
-    reads  the listeners of stats (line 48 in Stats.hit)
-    reads  entries of any Map<string, Session> (line 49 in Registry.open)
-    writes entries of any Map<string, Session> (line 49 in Registry.open)
-    reads  peer of any Session (line 50)
-    writes peer of any Session (line 49 in Registry.open)
-    reads  registry.sessions (line 49 in Registry.open)
-    writes session.peer (line 49 in Registry.open)
+  after await at line 45 (in the callbacks at line 43)
+    reads  entries of counts (line 46)
+    writes entries of counts (line 46)
+    reads  stats.served (line 47 in Stats.hit)
+    writes stats.served (line 47 in Stats.hit)
+    reads  the listeners of stats (line 47 in Stats.hit)
+    reads  entries of any Map<string, Session> (line 48 in Registry.open)
+    writes entries of any Map<string, Session> (line 48 in Registry.open)
+    reads  peer of any Session (line 49)
+    writes peer of any Session (line 48 in Registry.open)
+    reads  registry.sessions (line 48 in Registry.open)
+    writes session.peer (line 48 in Registry.open)
     in order with the same piece in other tasks: entries of any Map<string, Session>, entries of counts, peer of any Session, session.peer, stats.served
     in order with the start of the top-level code: the listeners of stats
-    in order with the top-level code after await at line 67: entries of any Map<string, Session>, entries of counts, stats.served
-    in order: lines 47-50
+    in order with the top-level code after await at line 66: entries of any Map<string, Session>, entries of counts, stats.served
+    in order: lines 46-49
 
-async function get, line 59
+async function get, line 58
   start: runs inside its caller
-    reads  the state of any Listening (line 60)
-  after await at line 60
-    reads  message of any FetchError (line 61)
-    writes the state of any Response (line 62)
-    in the tasks of get at line 65:
-      in order with get after await at line 60 in the top-level code: the state of any Response
+    reads  the state of any Listening (line 59)
+  after await at line 59
+    reads  message of any FetchError (line 60)
+    writes the state of any Response (line 61)
+    in the tasks of get at line 64:
+      in order with get after await at line 59 in the top-level code: the state of any Response
       in order with the same piece in other tasks: the state of any Response
-      in order: line 62
+      in order: line 61
     in the top-level code:
-      in order with get after await at line 60 in the tasks of get at line 65: the state of any Response
-      in order: line 62
-  after await at line 62
-    in the tasks of get at line 65:
+      in order with get after await at line 59 in the tasks of get at line 64: the state of any Response
+      in order: line 61
+  after await at line 61
+    in the tasks of get at line 64:
       parallel
     in the top-level code:
       parallel

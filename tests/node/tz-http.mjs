@@ -82,11 +82,6 @@ export class Server {
     const shown = hostname === "0.0.0.0" || hostname === "::" ? "localhost" : hostname;
     listening.url = new URL(`${scheme}://${shown.includes(":") ? `[${shown}]` : shown}:${listening.port}/`);
     listening.finished = new Promise(resolve => (listening.resolve = resolve));
-    const signal = options.signal;
-    if (signal) {
-      if (signal.aborted) void listening.stop();
-      else signal.addEventListener("abort", () => void listening.stop(), { once: true });
-    }
     return ok(listening);
   }
 }

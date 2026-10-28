@@ -66,9 +66,6 @@ void TzModulesLowerer::emitExternal(FunctionDecl *fn) {
     } else if (type->isBool()) {
       params.push_back(i32);
       args.push_back(lowering_.builder_.CreateZExt(value, i32));
-    } else if (LibraryCallLowerer::isAbortSignal(type)) {
-      params.push_back(ptr);
-      args.push_back(lowering_.libraryCallLowerer().nativeSignal(value, type));
     } else {
       params.push_back(value->getType());
       args.push_back(value);

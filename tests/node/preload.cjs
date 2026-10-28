@@ -18,10 +18,9 @@
 //   (tz-fs.mjs, tz-fs-promises.mjs), and "node:child_process" whose
 //   execSync, execFileSync and spawnSync give one (tz-child-process.mjs), and
 //   "node:crypto" with a Result where the data may be wrong (tz-crypto.mjs),
-//   "node:timers/promises" whose waits with a signal give one
-//   (tz-timers-promises.mjs), "node:readline/promises" whose question()
-//   gives one (tz-readline-promises.mjs), "node:events" whose once() and
-//   on() give one (tz-events.mjs), and "node:stream/consumers" and
+//   "node:readline/promises" whose question() gives one
+//   (tz-readline-promises.mjs), "node:events" whose once() and on() give one
+//   (tz-events.mjs), and "node:stream/consumers" and
 //   "node:stream/promises" (tz-stream-consumers.mjs, tz-stream-promises.mjs).
 // - end() of writable streams and `for await` over readable ones, which give
 //   Results in tz.
@@ -375,16 +374,16 @@ for (const name of ["digest", "generateKey", "importKey", "exportKey", "sign", "
 }
 
 // fetch and the bodies of Request and Response give a Result in tz
-// (docs/net.md, section 2).
-function abortCode(e) {
-  return e.name === "TimeoutError" ? "TIMEOUT_ERR" : "ABORT_ERR";
-}
+// (docs/net.md, section 2), and the timeout of a fetch is the signal of
+// AbortSignal.timeout() in node.
 const originalFetch = globalThis.fetch;
-globalThis.fetch = async (...args) => {
+globalThis.fetch = async (input, init) => {
+  const timeout = init?.timeout;
+  const given = timeout === undefined ? init : { ...init, signal: AbortSignal.timeout(timeout) };
   try {
-    return new Ok(await originalFetch(...args));
+    return new Ok(await originalFetch(input, given));
   } catch (e) {
-    if (e instanceof DOMException) return new Err({ code: abortCode(e), message: e.message });
+    if (e instanceof DOMException) return new Err({ code: "TIMEOUT_ERR", message: e.message });
     const cause = e.cause;
     if (e.message !== "fetch failed")
       return new Err(cause === undefined ? { code: "bad_request", message: e.message }
@@ -396,7 +395,7 @@ globalThis.fetch = async (...args) => {
   }
 };
 function bodyError(e) {
-  if (e instanceof DOMException) return { code: abortCode(e), message: e.message };
+  if (e instanceof DOMException) return { code: "TIMEOUT_ERR", message: e.message };
   const message = e.message;
   if (message.startsWith("Body is unusable")) return { code: "body_used", message };
   if (message === "terminated")
@@ -459,8 +458,6 @@ for (const name of ["href", "origin", "protocol", "username", "password", "host"
                     "port", "pathname", "search", "hash"])
   asMethod(URL.prototype, name);
 asMethod(URLSearchParams.prototype, "size");
-asMethod(AbortSignal.prototype, "aborted");
-asMethod(AbortSignal.prototype, "reason");
 for (const name of ["target", "currentTarget", "srcElement", "eventPhase", "defaultPrevented"])
   asMethod(Event.prototype, name);
 // The parts of a URL change through its methods in tz; the ones that can
@@ -491,7 +488,6 @@ const tzFs = pathToFileURL(join(__dirname, "tz-fs.mjs")).href;
 const tzFsPromises = pathToFileURL(join(__dirname, "tz-fs-promises.mjs")).href;
 const tzChildProcess = pathToFileURL(join(__dirname, "tz-child-process.mjs")).href;
 const tzCrypto = pathToFileURL(join(__dirname, "tz-crypto.mjs")).href;
-const tzTimers = pathToFileURL(join(__dirname, "tz-timers-promises.mjs")).href;
 const tzReadline = pathToFileURL(join(__dirname, "tz-readline-promises.mjs")).href;
 const tzEvents = pathToFileURL(join(__dirname, "tz-events.mjs")).href;
 const tzConsumers = pathToFileURL(join(__dirname, "tz-stream-consumers.mjs")).href;
@@ -528,8 +524,6 @@ registerHooks({
       return { url: tzChildProcess, shortCircuit: true };
     if (!own && (specifier === "node:crypto" || specifier === "crypto"))
       return { url: tzCrypto, shortCircuit: true };
-    if (!own && (specifier === "node:timers/promises" || specifier === "timers/promises"))
-      return { url: tzTimers, shortCircuit: true };
     if (!own && (specifier === "node:readline/promises" || specifier === "readline/promises"))
       return { url: tzReadline, shortCircuit: true };
     if (!own && (specifier === "node:events" || specifier === "events"))

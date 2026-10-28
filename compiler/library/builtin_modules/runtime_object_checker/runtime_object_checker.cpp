@@ -4,7 +4,6 @@
 #include "compiler/check/expr/expr_checker/expr_checker.h"
 #include "compiler/check/functions/callback_checker/callback_checker.h"
 #include "compiler/library/fs/fs_checker/fs_checker.h"
-#include "compiler/library/process/process_checker/process_checker.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/Support/SaveAndRestore.h"
 
@@ -15,34 +14,7 @@ using llvm::isa;
 
 namespace tz {
 
-namespace {
-
-const Type *signalType() { return Type::runtimeObject(Type::Runtime::AbortSignal); }
-
-}
-
 RuntimeObjectChecker::RuntimeObjectChecker(Checker &checker) : checker_(checker) {}
-
-Expr *RuntimeObjectChecker::signalOption(Expr *value, llvm::SMLoc loc) {
-  const Type *optional = Type::optional(signalType());
-  if (!value) {
-    auto *none = checker_.ctx_.make<UndefinedExpr>(loc);
-    return checker_.argumentChecker().checkArg(none, optional);
-  }
-  ClassDecl *cls = checker_.libraryClass("AbortSignal");
-  if (!cls) {
-    return checker_.argumentChecker().checkArg(value, optional);
-  }
-  Expr *signal = checker_.argumentChecker().checkArg(value, Type::optional(cls->type));
-  if (signal->type->isError()) {
-    return signal;
-  }
-  auto *callee = checker_.ctx_.make<UndefinedExpr>(loc);
-  callee->type = Type::undefinedTy();
-
-  return checker_.processChecker().builtinCall(loc, callee, Builtin::LibNativeSignal, {signal},
-                                               optional);
-}
 
 Expr *RuntimeObjectChecker::checkRuntimeMember(MemberExpr *member) {
   const Type *type = member->object->type;
@@ -109,16 +81,12 @@ Expr *RuntimeObjectChecker::checkRuntimeMethod(CallExpr *call, MemberExpr *membe
       return call;
     }
     if (name == "question") {
-      if (!checker_.argumentChecker().checkArity(call, member->loc(), 1, promises ? 2 : 3)) {
+      if (!checker_.argumentChecker().checkArity(call, member->loc(), 1, promises ? 1 : 3)) {
         return call;
       }
       Expr *query = checker_.argumentChecker().checkArg(call->args[0], Type::string());
       if (promises) {
-        llvm::StringMap<Expr *> options;
-        if (!checker_.fsChecker().nodeOptions(call, 1, "question", {"signal"}, options)) {
-          return call;
-        }
-        call->args = {query, signalOption(options.lookup("signal"), member->loc())};
+        call->args = {query};
         call->builtin = Builtin::RlQuestion;
         call->type =
             Type::promise(Type::result(Type::string(), checker_.fsChecker().systemError()));

@@ -10,10 +10,6 @@ console.log(new Response("hello", { status: 201, headers: { "x-y": "z" } }))
 console.log(new Request("http://example.com/x", { method: "POST", body: "hi" }))
 console.log(new ReadableStream(), new Headers({ "x-a": "1" }), new URLSearchParams("a=1&b=2"))
 
-const controller = new AbortController()
-console.log(controller)
-controller.abort("stop")
-console.log(controller.signal)
 console.log(new EventTarget())
 
 const bus = new EventEmitter<{ user: [name: string]; count: [n: int] }>()

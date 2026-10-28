@@ -1,4 +1,3 @@
-import { AbortSignal } from "tz:web"
 import { Readable, StreamCallback, Writable, WriteChunk, finished } from "node:stream"
 import { defer, fsClose, fsOpen, fsRead, fsWrite, stdWrite, stdinChunk } from "tz:intrinsics"
 
@@ -29,7 +28,6 @@ export interface ReadStreamOptions {
   start?: double
   end?: double
   highWaterMark?: double
-  signal?: AbortSignal
 }
 
 export interface WriteStreamOptions {
@@ -42,7 +40,6 @@ export interface WriteStreamOptions {
   start?: double
   flush?: boolean
   highWaterMark?: double
-  signal?: AbortSignal
 }
 
 declare function libCloseFd(fd: int): boolean
@@ -105,7 +102,6 @@ export class ReadStream<T = Buffer> extends Readable<T> {
       encoding: options?.encoding,
       emitClose: options?.emitClose,
       autoDestroy: options?.autoClose ?? true,
-      signal: options?.signal,
     })
     this.fileFd = options?.fd
     this.path = path
@@ -259,7 +255,6 @@ export class WriteStream extends Writable<Buffer> {
       decodeStrings: true,
       emitClose: options?.emitClose,
       autoDestroy: options?.autoClose ?? true,
-      signal: options?.signal,
       defaultEncoding: options?.encoding,
     })
     this.fileFd = options?.fd
@@ -410,7 +405,6 @@ export function streamReadFile<T>(path: string, options: ReadStreamOptions | und
     start: options?.start,
     end: options?.end,
     highWaterMark: options?.highWaterMark,
-    signal: options?.signal,
   })
 }
 
@@ -427,7 +421,6 @@ export function streamWriteFile(path: string, options: WriteStreamOptions | unde
     start: options?.start,
     flush: options?.flush,
     highWaterMark: options?.highWaterMark,
-    signal: options?.signal,
   })
 }
 

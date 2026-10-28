@@ -266,14 +266,13 @@ tz run                   # без файла — "main" из tz.json
   `ref()` / `unref()` / `hasRef()` / `refresh()`. Порядок вывода — как у node; `Promise`, которого
   никто не ждёт, — ошибка компиляции, `void p` отпускает его явно. Ввод-вывод ждёт пул потоков:
   `node:fs/promises`, `node:readline`. `node:timers/promises` (`await setTimeout(ms, value)`,
-  `setImmediate`, `setInterval` как async-итератор, `scheduler.wait` / `yield`), отмена —
-  `AbortController` и `AbortSignal` на `EventTarget` (см. «События»), которые эти функции
-  принимают в опции `signal`.
+  `setImmediate`, `setInterval` как async-итератор, `scheduler.wait` / `yield`). Отмены нет:
+  `AbortController` и `AbortSignal` убраны, время `fetch` ограничивает его опция `timeout`.
 - Сеть (см. «Сеть»): сервер `new Server(options, handler)` из `"tz:http"` (`server.listen()`
   открывает сокет и отдаёт `Listening`), где обработчик получает
   `Request` и того, кто его прислал, и отдаёт `Response`, как в Deno и Bun (и `app.fetch` из
   hono), и клиент `fetch`, как в
-  node: keep-alive и пул соединений, редиректы, gzip / deflate / br, `AbortSignal`, ошибки —
+  node: keep-alive и пул соединений, редиректы, gzip / deflate / br, `timeout`, ошибки —
   `Err` с `FetchError` (`fetch failed` и причина). `URL` и `URLSearchParams` по стандарту WHATWG, `Headers`,
   `Request`, `Response`, `ReadableStream`, `FormData` — глобальные, как в node; https — на OpenSSL.
 - Ошибки как значения: встроенный `Result<T, E>` (см. «Result»): `ok(v)`, `err(e)`,
@@ -312,8 +311,7 @@ tz run                   # без файла — "main" из tz.json
   async-слушатели, `once(emitter, name)` — `Promise` (с `Result`, если эмиттер может испустить
   `error`), `on(emitter, name)` — async-итератор для `for await`; событие `error` без
   исключений: кто подписан на эмиттер с `error`, подписан и на `error`. Глобальные, как в node:
-  `EventTarget`, `Event`, `CustomEvent<T>`, `AbortController`, `AbortSignal` (`timeout`, `any`),
-  `DOMException`.
+  `EventTarget`, `Event`, `CustomEvent<T>`, `DOMException`.
 - Потоки (см. «Потоки»): `node:stream` — `Readable`, `Writable`, `Duplex`, `Transform`,
   `PassThrough`, `pipeline`, `finished`, `compose`, `Readable.from`, `for await`, тот же
   порядок событий, что в node; ошибки — `Result` (каждый кусок `for await`, `pipeline`,
@@ -840,7 +838,7 @@ function grow() {
   кого не держит ни один член (локальный массив узлов), остаётся обычным объектом, и группы
   остаются размером с сами циклы. В программе с циклами членами бывают и `Promise` (с кадром
   async-функции и тем, чем он разрешён), реакции `then`, коробки `unknown` и обёртки функций,
-  которые меняют тип результата, и сторона рантайма у `AbortSignal`.
+  которые меняют тип результата.
 - **Что группы не сливает.** Ожидание: кадр, который ждёт `Promise`, не сливается с его группой
   (реакция держит кадр счётчиком, если они ещё не в одной группе), — иначе каждый `Promise`,
   которого дождался долгий цикл `await`, жил бы, пока жив цикл. Замыкание, которое сразу отдано
@@ -1881,9 +1879,8 @@ for (const entry of readdirSync(".", { withFileTypes: true }).unwrapOr([]))
 - **`node:fs/promises`** (и `import { promises } from "node:fs"`) — `readFile`, `writeFile`,
   `appendFile`, `access`, `chmod`, `truncate`, `stat`, `lstat`, `readdir`, `mkdir`, `mkdtemp`,
   `rmdir`, `unlink`, `rm`, `rename`, `copyFile`, `realpath`, `constants`: те же аргументы и опции,
-  что у функций `...Sync` (у `readFile`, `writeFile` и `appendFile` ещё `signal`), а результат —
-  `Promise<Result>` того же: ошибка ОС и ноль в пути — `Err` с тем же `SystemError`, `Promise` не
-  отклоняется. Отмена через `signal` — `Err` с кодом `"ABORT_ERR"`. Различия с `...Sync` — как
+  что у функций `...Sync`, а результат — `Promise<Result>` того же: ошибка ОС и ноль в пути —
+  `Err` с тем же `SystemError`, `Promise` не отклоняется. Различия с `...Sync` — как
   в node: `readdir` с `recursive` идёт, как его async-версия, — каталог, встреченный в списке,
   читается сразу, а обходится последним (стек, а не уровни); `realpath` — путь, который даёт
   система (`GetFinalPathNameByHandle`), с буквами, как на диске; ошибка `mkdir` с `recursive`
@@ -1903,7 +1900,7 @@ for (const entry of readdirSync(".", { withFileTypes: true }).unwrapOr([]))
   output: process.stdout })` (или `(process.stdin, process.stdout)`): `for await (const line of rl)`
   даёт строки stdin без конца строки (`\n`, `\r\n`, одиночный `\r`, U+2028 и U+2029, как у node;
   последняя может кончиться вместе с вводом), `rl.question(q)` пишет вопрос в `output` и даёт
-  `Promise` следующей строки (с `{ signal }` — отменяемый), в `node:readline` —
+  `Promise` следующей строки (`Err`, если интерфейс закрыт), в `node:readline` —
   `rl.question(q, answer => ...)`, `rl.close()`. Выход из `for await` (`break`) закрывает
   интерфейс, как в node. Строки берутся из того же буфера stdin, что у `readLine`, и только когда
   их просят, поэтому строка не теряется: в node строки файла, пришедшие между двумя `question`,
@@ -2035,45 +2032,34 @@ const [user] = await once(bus, "user")
   эмиттера — в той же функции, на каждом пути (проверка по путям, как у полей конструктора);
   иначе ошибка с подсказкой. Это же делают `pipeline`, `finished`, `once()`, `on()` и
   `for await` над потоком: они ошибку забирают сами.
-- **`once(emitter, name, { signal })`** — `Promise` кортежа аргументов следующего события; если
-  эмиттер может испустить `error` или дан `signal` — `Promise<Result<[...], E | AbortError>>`, где
-  `E` — тип ошибки события `error`: `Err`, если раньше пришло `error` или отмена. У `EventTarget` — `[event]` (с `signal` — в
-  `Result`). Есть `EventEmitter.once`, `getEventListeners`, `listenerCount`, `getMaxListeners`,
+- **`once(emitter, name)`** — `Promise` кортежа аргументов следующего события; если эмиттер может
+  испустить `error` — `Promise<Result<[...], E>>`, где `E` — тип ошибки события `error`: `Err`,
+  если раньше пришло `error`. У `EventTarget` — `[event]`. Опции `signal` нет: `AbortSignal` в tz
+  убран. Есть `EventEmitter.once`, `getEventListeners`, `listenerCount`, `getMaxListeners`,
   `setMaxListeners`, `EventEmitter.defaultMaxListeners`.
-- **`for await (const event of on(emitter, "data", { signal, close }))`** — события по одному,
-  каждое — кортеж аргументов его слушателей (у эмиттера с `error` или с `signal` — в `Result`), как
-  `on()` node: слушает с вызова, а события, которых ещё никто не ждёт, ждут в очереди; событие
-  `error` и `signal` дают `Err` после событий до них и кончают цикл, событие из `close` — просто
-  кончает его; когда цикл кончается (и `break`), слушатели снимаются. `on()` у `EventTarget` —
-  ошибка «пока нет».
+- **`for await (const event of on(emitter, "data", { close }))`** — события по одному, каждое —
+  кортеж аргументов его слушателей (у эмиттера с `error` — в `Result`), как `on()` node: слушает с
+  вызова, а события, которых ещё никто не ждёт, ждут в очереди; событие `error` даёт `Err` после
+  событий до него и кончает цикл, событие из `close` — просто кончает его; когда цикл кончается (и
+  `break`), слушатели снимаются. `on()` у `EventTarget` — ошибка «пока нет».
 - **`EventTarget`, `Event`, `CustomEvent<T>`, `DOMException`** ([library/events/web.tz](library/events/web.tz))
   — глобальные, и тоже как в node: порядок слушателей (и добавленных во время `dispatchEvent`),
-  `once`, `signal`, `capture`, объект с `handleEvent()`, один слушатель — один раз,
+  `once`, `capture`, объект с `handleEvent()`, один слушатель — один раз,
   `preventDefault()`, `stopImmediatePropagation()`; ошибка слушателя — на следующем ходу.
   Слушатель, который берёт `(e: CustomEvent<int>) => ...`, получает только такие события (другое —
   `TypeError`), и `e.detail` у него — `int`; без аннотации — `Event`.
-- **`AbortController` и `AbortSignal`** — на `EventTarget`: `abort(reason?)` (по умолчанию
-  `DOMException` `AbortError`), `aborted()`, `reason()` (`unknown`, как любое значение в JS;
-  в node — свойства, а в tz то, что объект меняет сам, читается методом),
-  `onabort` (`throwIfAborted()` — ошибка с подсказкой `if (signal.aborted())`: бросать нечего),
-  `AbortSignal.abort()`, `timeout(ms)` (его таймер не держит
-  программу) и `any(signals)`; печать — `AbortController { signal: AbortSignal { isAborted: false,
-  ... } }`. Порядок — как в node: `onabort` слушает с того места, где его задали впервые (заданный
-  `undefined`, он остаётся там и ничего не делает); сигналы `any()` помечаются отменёнными раньше,
-  чем выполнятся слушатели их источника. `new AbortSignal()` (конструктор закрыт) и присваивание
-  `aborted` и `reason` — ошибки (в node это `TypeError` и геттеры). Сверх node:
-  `AbortSignal.withAbort()` отдаёт сигнал вместе с функцией отмены — `const { signal, abort } =
-  AbortSignal.withAbort()`, как `Promise.withResolvers()`; так сигнал берёт и контроллер.
-  То, что событие меняет само (`target()`, `currentTarget()`, `eventPhase()`, `isTrusted()`,
+- **`AbortController` и `AbortSignal` нет** (убраны 28 октября, [async.md](docs/async.md),
+  раздел 7): громоздкий костыль ради отмены, который в сообществе не любят, а сервер платил за
+  сигнал каждого запроса втрое меньшей скоростью. Ожидания идут до конца; время `fetch`
+  ограничивает его опция `timeout` (см. «Сеть»), сервер останавливает `listening.stop()`. Имена
+  `AbortController` и `AbortSignal` — просто неизвестные. `DOMException` остался.
+- То, что событие меняет само (`target()`, `currentTarget()`, `eventPhase()`, `isTrusted()`,
   `defaultPrevented()`, `srcElement()`), — методы (в node — свойства); `event.immediateStopped()`
   говорит, был ли
   `stopImmediatePropagation()`, а `event.dispatchOn(target, run)` — то, через что
-  `dispatchEvent` рассылает событие (одно событие — одна рассылка за раз). Тот же сигнал отменяет ожидания рантайма
-  (`node:timers/promises`, `node:fs/promises`, `node:readline`): у каждого сигнала есть сторона
-  рантайма (`runtime/library/events/signal/signal.c`), которую компилятор передаёт туда, где вызов берёт `signal`, а
-  слушатели рантайма выполняются среди слушателей программы на своих местах, как слушатели node.
+  `dispatchEvent` рассылает событие (одно событие — одна рассылка за раз).
 - **Память.** Эмиттер и его слушатели сами цикла ссылок не образуют (обёртка `once()` не держит
-  эмиттер, сигнал `any()` — свои источники, хотя они держат его), но слушатель, который захватывает свой эмиттер
+  эмиттер), но слушатель, который захватывает свой эмиттер
   (`this.on("x", () => this.y())` в его классе), — цикл, а циклы пока не освобождаются (см.
   «Строки и память»).
 
@@ -2104,13 +2090,14 @@ const users = Readable.from([ann, bob])                         // Readable<User
   `unshift`, событие `readable`), `Writable` (`cork` / `uncork`, `writev`, `final`), `Duplex`,
   `Transform`, `PassThrough`, `pipeline` и
   `finished` (с колбэком и из `node:stream/promises`, где `pipeline` берёт и async-генераторы),
-  `compose`, `addAbortSignal`, `Readable.from` (массив, итератор, async-итератор, строка),
+  `compose`, `Readable.from` (массив, итератор, async-итератор, строка),
   `for await` (выход из цикла уничтожает поток), `destroy` с ошибкой, `construct`. «Не успеваю» —
   как в node: `highWaterMark` (16 КБ в Windows, 16 кусков в `objectMode`), `write()` даёт `false`,
   потом `drain`, `pipeline` ставит источник на паузу. Порядок событий и вызовов `read` и
   `write` — тот же: тесты сверены с node строка в строку. Функции `isReadable`, `isWritable`,
-  `isDestroyed`, `isErrored`, `isDisturbed` и `addAbortSignal` есть и статическими методами
-  `Stream`, как в node (`Stream.isErrored(s)`).
+  `isDestroyed`, `isErrored` и `isDisturbed` есть и статическими методами `Stream`, как в node
+  (`Stream.isErrored(s)`). `addAbortSignal` и опции `signal` нет, функции в `pipeline` получают
+  только источник, без `{ signal }`.
 - **Состояние потока закрыто** ([streams.md](docs/streams.md), раздел 6): у node оно открыто под
   именами на `_` (`_readableState`, `_writableState`), и программа, которая его меняет, ломает
   поток. В tz его нет снаружи: `r.readableState` — ошибка (`private`), а то, что поток меняет
@@ -2149,7 +2136,7 @@ const users = Readable.from([ann, bob])                         // Readable<User
   даёт `undefined`.
 - **Файлы**: `createReadStream(path, options)` и `createWriteStream(path, options)` из `node:fs` —
   `ReadStream` и `WriteStream` с опциями node (`encoding`, `start` и `end`, `highWaterMark` —
-  64 КБ, `flags`, `mode`, `fd`, `autoClose`, `emitClose`, `flush`, `signal`), событиями `open`,
+  64 КБ, `flags`, `mode`, `fd`, `autoClose`, `emitClose`, `flush`), событиями `open`,
   `ready` и `close`, полем `path` и методами `fd()`, `bytesRead()`, `bytesWritten()`,
   `pending()` (в node — свойства). Чтение и запись — в
   пуле потоков рантайма (`runtime/library/fs/fs_async/fs_async.c`), как у node через libuv.
@@ -2775,17 +2762,12 @@ async-функции и из колбэка `then`, `Promise.all` / `race`,
 быть async: их `Promise` отпускается, как с `void`, а ошибка в нём завершит программу, как
 необработанная.
 
-**`node:timers/promises` и отмена.** `await setTimeout(ms, value)` и `await setImmediate(value)` —
-таймеры тех же списков, что у `setTimeout`, которые выполняют `Promise` значением;
+**`node:timers/promises`.** `await setTimeout(ms, value)` и `await setImmediate(value)` —
+таймеры тех же списков, что у `setTimeout`, которые выполняют `Promise<T>` значением;
 `for await (const v of setInterval(ms, value))` — интервал, который начинается с первого шага и
-останавливается `break`; `scheduler.wait(ms)` и `scheduler.yield()`. Опции — `signal` и `ref`
-(`ref: false` не держит программу). Отменяют их `AbortController` и `AbortSignal` (см.
-«События»). Ожидание с `signal` отдаёт `Result`: таймер — `Promise<Result<T, AbortError>>`
-(`AbortError` — `{ code: "ABORT_ERR"; message }`), `readFile` и другие функции
-`node:fs/promises` — `Err` своего `SystemError` с кодом `"ABORT_ERR"`, `question` — тоже;
-`setInterval` с сигналом при отмене просто кончает `for await`. Без `signal` таймер отдаёт
-просто `Promise<T>`. Слушатель рантайма стоит среди слушателей программы там, где его добавил
-вызов, поэтому отмена приходит в тот же оборот очереди, что отказ в node.
+останавливается `break`; `scheduler.wait(ms)` и `scheduler.yield()`. Опция одна — `ref`
+(`ref: false` не держит программу). Отмены нет: `AbortController` и `AbortSignal` убраны (см.
+«События»).
 
 **Что пойдёт параллельно** (шаг 3). Компилятор делит async-код на куски: от `await` до `await`,
 от начала функции до первого `await`, код верхнего уровня и каждый колбэк (`then`, таймеры,
@@ -2803,13 +2785,12 @@ async-функции и из колбэка `then`, `Promise.all` / `race`,
 методы классов, которые его реализуют. Объекты, которые функция создаёт и никому не отдаёт, и
 элемент массива по своему индексу в колбэке `map` (`results[i] = ...`) — не общие данные.
 
-Встроенные модули на tz (`node:events`, `tz:http`, `fetch`, потоки, `URL`, `EventTarget`,
-`AbortController`) анализ не обходит, а знает, что они делают. Вызов читает то, что ему дали, и
+Встроенные модули на tz (`node:events`, `tz:http`, `fetch`, потоки, `URL`, `EventTarget`)
+анализ не обходит, а знает, что они делают. Вызов читает то, что ему дали, и
 меняет состояние объекта, на котором вызван; чтение поля такого объекта читает это состояние.
 Обработчик сервера идёт позже,
 на каждый запрос, во многих копиях сразу. Слушателей `on`, `once` и `addListener` эмиттера
-запускает `emit` прямо там, слушателей `addEventListener` и `onabort` — `dispatchEvent` и `abort()`
-(состояние всех сигналов — одни данные), `AbortSignal.timeout()` — позже. `start` источника
+запускает `emit` прямо там, слушателей `addEventListener` — `dispatchEvent`. `start` источника
 `ReadableStream` идёт сразу, `pull` и `cancel` — позже. Ответ `fetch`, результат async-метода и
 то, что даёт функция модуля, — новые объекты. Объекты `node:crypto` меняются, когда ими пользуются
 (`update`, `digest`), `randomFill` пишет байты. `Reflect.apply` запускает метод одного из классов
@@ -2914,7 +2895,7 @@ if (listened.isErr()) {
 }
 const listening = listened.value
 
-const r = await fetch(`http://localhost:${listening.port}/?name=tz`, { signal: AbortSignal.timeout(5000) })
+const r = await fetch(`http://localhost:${listening.port}/?name=tz`, { timeout: 5000 })
 if (r.isOk()) console.log(r.value.status, await r.value.text())   // 200 Ok { value: 'привет, tz' }
 await listening.stop()
 ```
@@ -2926,7 +2907,7 @@ await listening.stop()
   message, errno, syscall, address, port }`, `code` — `"EADDRINUSE"`, `"EACCES"`,
   `"ENOTFOUND"`, `"ERR_TLS_CERT"` и другие из `ListenErrorCode`. Каждый `listen()` — ещё
   один сокет с теми же настройками. Настройки: `port` (8000, `0` — любой свободный),
-  `hostname` (`"0.0.0.0"`), `signal` (отмена останавливает сервер), `maxBodySize` (128 МБ,
+  `hostname` (`"0.0.0.0"`), `maxBodySize` (128 МБ,
   больше — ответ 413), `keepAliveTimeout` (5000 мс простоя соединения, как в node),
   `headersTimeout` (60 000 мс на голову запроса, потом 408 — защита от клиента, который шлёт по
   байту), `transport` — `{ secure: false }` или `{ secure: true, cert, key }`. Обработчик —
@@ -2934,7 +2915,7 @@ await listening.stop()
   port }` того, кто прислал запрос: подходят и обычная, и async-функция, и `app.fetch` из hono
   (стрелка в поле, у которой второй параметр — `unknown`, а третий необязательный).
   `stop()` перестаёт принимать соединения, закрывает те, что ждут запроса, и ждёт ответов на
-  те, что уже идут; второй вызов ждёт того же. Ошибки обработчик отдаёт ответом сам: у него нет
+  те, что уже идут; второй вызов ждёт того же; другого способа остановить сервер нет. Ошибки обработчик отдаёт ответом сам: у него нет
   исключений, которые сервер мог бы превратить в `500`. Полный адрес запроса (`req.url`) и
   адрес сервера строит рантайм из соединения сразу.
 - **Запросы одного соединения** идут по очереди (keep-alive, до `keepAliveTimeout` простоя, и
@@ -2954,7 +2935,9 @@ await listening.stop()
 - **`fetch`** ([net.md](docs/net.md), раздел 2) — как в node: `fetch(url | URL | Request, init)`,
   `method`, `headers`, `body` (строка, `Uint8Array`, `ArrayBuffer`, `URLSearchParams`, `FormData`,
   `ReadableStream` с `duplex: "half"`), `redirect` (`"follow"` до 20 переходов, `"manual"`,
-  `"error"`), `signal`. Соединения с keep-alive ждут в пуле по 4 с, как в undici, а запрос по
+  `"error"`), `timeout` — время на весь запрос в миллисекундах вместо `AbortSignal` (соединение,
+  отправка, голова ответа, редиректы и чтение тела; не успел — `"TIMEOUT_ERR"`, таймер не держит
+  программу). Соединения с keep-alive ждут в пуле по 4 с, как в undici, а запрос по
   соединению, которое сервер успел закрыть, уходит снова по новому. Ответ сжатый gzip, deflate (и
   без обёртки zlib) и br распаковывается по мере чтения; `data:` URL — без сети. Имена хостов
   ищутся асинхронно (`GetAddrInfoExW`), `localhost` — без поиска, сначала IPv4.
@@ -2962,13 +2945,13 @@ await listening.stop()
   `FetchError = { code: string; message: string; cause?: string }`. `code` — код причины
   (`"ECONNREFUSED"`, `"ENOTFOUND"`, коды сертификата вроде `"CERT_HAS_EXPIRED"`), `"fetch_failed"`
   для причины без кода (`redirect count exceeded`, `unexpected redirect`, `bad port`),
-  `"bad_request"` для запроса, который нельзя сделать (плохой адрес, тело у GET), `"ABORT_ERR"` и
-  `"TIMEOUT_ERR"` для отмены; `message` и `cause` — тексты node (`fetch failed`, `connect
+  `"bad_request"` для запроса, который нельзя сделать (плохой адрес, тело у GET), `"TIMEOUT_ERR"`,
+  когда вышло время `timeout`; `message` и `cause` — тексты node (`fetch failed`, `connect
   ECONNREFUSED 127.0.0.1:3000`).
 - **`Request` и `Response`** — как в node: `text()`,
   `json()`, `bytes()`, `arrayBuffer()`, `formData()` дают `Promise<Result<T, BodyError>>` (`json()` —
   `BodyError | JsonError`): тело уже прочитано (`"body_used"`), связь оборвалась или сжатие
-  испорчено (`"terminated"`), отмена; читаются один раз, тело как поток — `body()`
+  испорчено (`"terminated"`), вышло время `timeout` (`"TIMEOUT_ERR"`); читаются один раз, тело как поток — `body()`
   (`for await (const chunk of req.body())`), `bodyUsed()`, `clone()`, `Response.json`, `redirect`,
   `error`; `status`, `statusText`, `ok`, `headers`, `redirected`, `url`, `type` — поля.
   `body()` и `bodyUsed()` — методы (в node — свойства): тело меняет сам объект (после `clone()`
@@ -3023,17 +3006,17 @@ await listening.stop()
 - **Геттеров и сеттеров нет и у встроенных модулей** ([objects.md](docs/objects.md), раздел 6):
   значение, которое не меняется, — `readonly`-поле, его задаёт только конструктор (`res.status`,
   `req.url`, `server.port`); которое объект меняет сам, — закрытое поле и метод с именем
-  значения (`url.pathname()`, `stream.locked()`, `params.size()`, `signal.aborted()`,
-  `res.body()`, `res.bodyUsed()`).
+  значения (`url.pathname()`, `stream.locked()`, `params.size()`, `res.body()`,
+  `res.bodyUsed()`).
 - Печать: `Headers { 'content-type': '...' }` и `URLSearchParams { 'a' => '1' }` — как в node, а
-  `URL`, `Response`, `Request`, сигналы, потоки и эмиттеры печатают все свои поля, и внутренние
+  `URL`, `Response`, `Request`, потоки и эмиттеры печатают все свои поля, и внутренние
   (`URL { state: { href: ... }, record: UrlRecord {...} }`): печать — для отладки, а отладке нужно всё
   состояние (в node часть их скрыта).
 - **Отличия:** `headers.get(name)`, `params.get(name)` и `form.get(name)` без значения — `undefined`
   (в JS `null`); `null` как тело — `undefined`: `new Response(undefined, { status: 204 })`;
   источник `ReadableStream` пишется
-  полями-функциями: `{ start: c => { ... } }`, а не методами литерала; `req.signal` сервера не
-  отменяется, когда клиент уходит.
+  полями-функциями: `{ start: c => { ... } }`, а не методами литерала; у `Request` вместо
+  `signal` — `timeout`.
 - **https** ([net.md](docs/net.md), раздел 4) — OpenSSL 3.5 с настройками node 24: TLS 1.2 и
   1.3, те же шифры, SNI, ALPN `http/1.1`. `fetch("https://...")` проверяет сертификат сервера,
   как node: цепочку до корневых сертификатов Mozilla (встроены, как в node), с теми, что в файле
@@ -3739,8 +3722,7 @@ powershell -ExecutionPolicy Bypass -File editors\vscode\install.ps1
   строки, поэтому нет `errorMonitor` и `captureRejectionSymbol`; нет `captureRejections`,
   `addAbortListener` и
   `EventEmitterAsyncResource`; `Object.values` и `Object.entries` эмиттера — ошибки; третий аргумент
-  `addEventListener` — только объект опций (не `true`); у `AbortError` ожиданий рантайма нет `cause`:
-  `reason` сигнала в ошибку не попадает.
+  `addEventListener` — только объект опций (не `true`); `AbortController` и `AbortSignal` нет.
 - Регулярные выражения (см. «Регулярные выражения»): нет совпадения — `undefined`, а не `null`;
   `match` с `g` — `string[] | undefined`, без `g` — совпадение, где `m[1]` группы, которой может не
   быть, — `string | undefined` (в TS — `string`), а `m.groups` — объект с полем на каждое имя (в
@@ -3872,8 +3854,8 @@ CRT, без RTTI и исключений, поэтому `tz` собираетс
 | `compiler/packages` | проекты и пакеты, по классу на папку: `tz.json` (`manifest/`), `tz.lock` (`lock/`), выбор версий и граф пакетов (`resolver/`, `package_graph/`), semver (`version/`, `range/`), кэш, JSR и git (`jsr_client/`, `git_client/`, `package_cache/`), HTTP через WinHTTP (`http_client/`), JSON с позициями для ошибок и правок (`json_parser/`), импорты файла без парсера (`scanner/`), `tz port` (`port/`) |
 | `compiler/library` | C++-часть тем библиотеки: крючки темы (`feature/`), список тем (`feature_registry/`), и по папке на тему, в каждой `<тема>_feature/` и классы проверки и IR. `bytes`: байтовые массивы, `Buffer`, `TextEncoder` / `TextDecoder`, `embedBytes` и доказательства, что значение влезает в элемент; вызовы по группам (`*_calls/`). `child_process`: `spawnSync`, `execFileSync` и `execSync`. `crypto`: `node:crypto`, имена алгоритмов и выбор слоя OpenSSL, `crypto.subtle`. `date`: даты и `Intl.DateTimeFormat`; разборщик дат рантайма, собранный и в `tz` (`date_syntax/`). `decimal`: литералы, операторы и методы. `events`: карты событий, эмиттеры и `EventTarget`, `once()`. `builtin_modules`: имена модулей `node:*` и `tz:io`, привязка импортов, `node:timers/promises` и объекты, которые делает рантайм; что делает модуль, решает его тема через крючки `exportProblem`, `checkModuleCall`, `checkModuleValue` и `checkModuleMember`. `fs`: `node:fs`, `node:fs/promises`, `node:readline` и `tz:io`. `path`: `node:path`. `os`: `node:os`. `intl`: `Intl`, `toLocaleString`, `localeCompare` и `normalize`. `json`: `Json`, `JSON`, `embedJson`, `fromJson`, `JSON.parse<T>`. `console`, `math`, `process`. `reflect`: отражение и метаданные. `regex`: литералы, методы, машинный код литералов (`regex_native_lowerer/`, `matcher_*/`), компилятор регулярок рантайма, собранный и в `tz` (`regex_syntax/`). `result`: `Result` и место создания `Err` (`err_sites/`). `stream`: типы кусков `Readable<T>` и остальных классов `node:stream`. `tz_modules`: встроенные модули на tz, их `declare function` и `tz:intrinsics`. `weakref`: `WeakRef` |
 | `runtime/core` | рантайм языка, у каждого модуля свой заголовок: общее — `TZ_HOT`, дескрипторы типов, раскладки (`tzrt`); вывод в stdout и stderr, форматирование чисел, граница стека, сбой рантайма (`output`); аллокатор, куча на каждый поток (`alloc`); потоки программы, пул, очередь node и куски, которые идут заранее (`parallel`); общие объекты и атомарные счётчики (`publish`); исключение в полёте, места стека ошибки, текст `e.stack` (`error`); строки (`string`); массивы (`array`); разбор чисел и `toFixed` (`number`); окружения замыканий (`closure`); `Object.keys` / `values` / `entries` (`object`); регистр букв по таблицам Unicode, которые [gen_unicode_tables.mjs](runtime/core/unicode/gen_unicode_tables.mjs) берёт из самого Node.js (`unicode`); `Promise`, очередь микрозадач, таймеры и цикл событий, как в node (`async`); пул потоков и ожидание ввода-вывода — IOCP в Windows (`io`); хеш-таблица словарей (`map`); коробки `unknown` (`unknown`); группы объектов в циклах, `WeakRef` и отладочный режим памяти (`group`) |
-| `runtime/library` | C-часть тем, по папке на модуль. `console`: `console.log` для массивов, объектов, `Result`, итераторов, `Json` и объединений как в Node (`inspect`). `math`: `Math`. `decimal`: точные десятичные числа. `json`: значения `Json` (`json`, `json_values`), `JSON.parse` как в V8 (`json_parse`), `JSON.stringify` любого значения (`json_stringify`) и проверки `JSON.parse<T>` (`json_typed`). `regex`: разбор и компиляция в программу (`regex_compile`, общий с `tz`) с таблицами Unicode от [gen_regex_tables.mjs](runtime/library/regex/regex_compile/gen_regex_tables.mjs), интерпретатор, методы и то, что зовёт машинный код регулярок (`regex`). `date`: поля, установка полей и строки (`date`), разбор строк, как в V8 (`date_parse`, общий с `tz`), местный пояс (`date_zone`) и языки (`date_format`). `intl`: ICU системы, которую `icu` загружает при первом обращении; языки, опции и части `formatToParts` (`intl`), числа и `PluralRules` (`intl_number`), `Collator`, `normalize` и `Segmenter` (`intl_text`), `RelativeTimeFormat`, `ListFormat` и `DisplayNames` (`intl_names`). `process`: аргументы, переменные окружения, код выхода и часы. `path`: `node:path` в обоих стилях. `fs`: общее функций файлов (`fs`), ошибки ОС `SystemError` как в libuv (`fs_errors`), синхронные функции файлов и папок (`fs_sync`, `fs_dirs`), `node:fs/promises` (`fs_async`, `fs_async_dirs`), stdin и `readLine` (`stdin`), `node:readline` (`readline`), чтение и запись кусками для потоков файлов (`fs_stream`). `os`: `node:os`. `events`: сторона рантайма у `AbortSignal`: отменённые ожидания на своих местах среди слушателей (`signal`). `stream`: что просит `node:stream`: проверка куска, байты в stdout и stderr. `child_process`: подготовка вызова как в node, запуск как в libuv (кавычки аргументов, поиск в `PATH`, окружение, каналы с overlapped I/O, таймаут), в Linux — `posix_spawn` (`child`). `bytes`: `ArrayBuffer`, типизированные массивы и их методы (`bytes`); `Buffer`, кодировки node, `TextEncoder` / `TextDecoder` (`buffer`) с таблицами однобайтовых кодировок, которые [gen_encodings.mjs](runtime/library/bytes/encodings/gen_encodings.mjs) берёт у node (`encodings`), и многобайтовые кодировки (`cjk`). `reflect`: записи метаданных (`meta`); `Reflect.get`, `apply`, `construct`, `new` класса, известного при выполнении, и проверки `unknown` (`reflect`). `net`: сокеты TCP на порту завершения цикла (AcceptEx, ConnectEx, WSARecv, WSASend) и поиск имён. `http`: HTTP/1.1: разбор голов и тел, ответы и запросы одной записью (`http`); распаковка тел `fetch` — inflate из zlib и декодер brotli из `third_party` (`decompress`). `tz_modules`: что просят встроенные модули на tz через `declare function` (`library`). Отдельно, в `tzcrypto.lib`: `crypto` — `node:crypto` поверх OpenSSL: общее без OpenSSL — объекты, HMAC, PBKDF2, HKDF, случайные числа, секретные ключи (`crypto`), хеши (`crypto_md`), AES (`crypto_aes`) и ChaCha20-Poly1305 (`crypto_chacha`), scrypt (`crypto_scrypt`) и Argon2 (`crypto_argon2`) прямого слоя, по объекту на алгоритм, и полный слой: имена из переменных и списки (`crypto_evp`), ключи, подписи и обмен ключами (`crypto_keys`), сертификаты (`crypto_x509`); Web Crypto (`crypto_subtle*`); `tls` — TLS соединений `net` для https: OpenSSL в памяти между сокетом и HTTP, проверка сервера как в node и корневые сертификаты Mozilla, которые [gen_tls_roots.mjs](runtime/library/tls/tls/gen_tls_roots.mjs) берёт у node |
-| `library` | встроенные модули, написанные на tz, которые лежат рядом с `tz.exe` в `lib`. `events`: `node:events` (`events.tz`) и глобальные `EventTarget`, `Event`, `CustomEvent`, `AbortController`, `AbortSignal`, `DOMException` (`web.tz`). `http`: `tz:http` (`http.tz`), глобальные `URL` и `URLSearchParams` (`url.tz`), `fetch`, `Headers`, `Request`, `Response`, `ReadableStream`, `FormData` (`fetch.tz`). `stream`: `node:stream` (`stream.tz` — класс `Stream` со всей работой потока в закрытых методах, и его части `stream_duplex.tz` — `Readable`, `Writable`, `Duplex`, `Transform`, и `stream_pipeline.tz`, которые загрузчик читает как один модуль), `node:stream/promises` (`stream_promises.tz`), `node:stream/consumers` (`stream_consumers.tz`), `node:string_decoder` (`string_decoder.tz`), потоки файлов `createReadStream` / `createWriteStream` и `process.stdin` / `stdout` / `stderr` (`fs_stream.tz`). `crypto`: Web Crypto (`webcrypto.tz`). `core`: встроенные функции компилятора (`intrinsics.tz`, модуль `tz:intrinsics`: `panic`, `defer`, `asListener<F>`, `asClass<C>`, `chunkOf<T>` и другие), которые модули библиотеки импортируют по имени, а программа не видит. Глобальные получает сам файл, который их называет. Их код проверяется и компилируется вместе с программой; `declare function` в библиотеке — функция рантайма на C, имя которой выводится из имени: `netClose` — `tz_net_close` |
+| `runtime/library` | C-часть тем, по папке на модуль. `console`: `console.log` для массивов, объектов, `Result`, итераторов, `Json` и объединений как в Node (`inspect`). `math`: `Math`. `decimal`: точные десятичные числа. `json`: значения `Json` (`json`, `json_values`), `JSON.parse` как в V8 (`json_parse`), `JSON.stringify` любого значения (`json_stringify`) и проверки `JSON.parse<T>` (`json_typed`). `regex`: разбор и компиляция в программу (`regex_compile`, общий с `tz`) с таблицами Unicode от [gen_regex_tables.mjs](runtime/library/regex/regex_compile/gen_regex_tables.mjs), интерпретатор, методы и то, что зовёт машинный код регулярок (`regex`). `date`: поля, установка полей и строки (`date`), разбор строк, как в V8 (`date_parse`, общий с `tz`), местный пояс (`date_zone`) и языки (`date_format`). `intl`: ICU системы, которую `icu` загружает при первом обращении; языки, опции и части `formatToParts` (`intl`), числа и `PluralRules` (`intl_number`), `Collator`, `normalize` и `Segmenter` (`intl_text`), `RelativeTimeFormat`, `ListFormat` и `DisplayNames` (`intl_names`). `process`: аргументы, переменные окружения, код выхода и часы. `path`: `node:path` в обоих стилях. `fs`: общее функций файлов (`fs`), ошибки ОС `SystemError` как в libuv (`fs_errors`), синхронные функции файлов и папок (`fs_sync`, `fs_dirs`), `node:fs/promises` (`fs_async`, `fs_async_dirs`), stdin и `readLine` (`stdin`), `node:readline` (`readline`), чтение и запись кусками для потоков файлов (`fs_stream`). `os`: `node:os`. `stream`: что просит `node:stream`: проверка куска, байты в stdout и stderr. `child_process`: подготовка вызова как в node, запуск как в libuv (кавычки аргументов, поиск в `PATH`, окружение, каналы с overlapped I/O, таймаут), в Linux — `posix_spawn` (`child`). `bytes`: `ArrayBuffer`, типизированные массивы и их методы (`bytes`); `Buffer`, кодировки node, `TextEncoder` / `TextDecoder` (`buffer`) с таблицами однобайтовых кодировок, которые [gen_encodings.mjs](runtime/library/bytes/encodings/gen_encodings.mjs) берёт у node (`encodings`), и многобайтовые кодировки (`cjk`). `reflect`: записи метаданных (`meta`); `Reflect.get`, `apply`, `construct`, `new` класса, известного при выполнении, и проверки `unknown` (`reflect`). `net`: сокеты TCP на порту завершения цикла (AcceptEx, ConnectEx, WSARecv, WSASend) и поиск имён (`net`), срок `timeout` у `fetch`, который обрывает ожидания соединения (`deadline`). `http`: HTTP/1.1: разбор голов и тел, ответы и запросы одной записью (`http`); распаковка тел `fetch` — inflate из zlib и декодер brotli из `third_party` (`decompress`). `tz_modules`: что просят встроенные модули на tz через `declare function` (`library`). Отдельно, в `tzcrypto.lib`: `crypto` — `node:crypto` поверх OpenSSL: общее без OpenSSL — объекты, HMAC, PBKDF2, HKDF, случайные числа, секретные ключи (`crypto`), хеши (`crypto_md`), AES (`crypto_aes`) и ChaCha20-Poly1305 (`crypto_chacha`), scrypt (`crypto_scrypt`) и Argon2 (`crypto_argon2`) прямого слоя, по объекту на алгоритм, и полный слой: имена из переменных и списки (`crypto_evp`), ключи, подписи и обмен ключами (`crypto_keys`), сертификаты (`crypto_x509`); Web Crypto (`crypto_subtle*`); `tls` — TLS соединений `net` для https: OpenSSL в памяти между сокетом и HTTP, проверка сервера как в node и корневые сертификаты Mozilla, которые [gen_tls_roots.mjs](runtime/library/tls/tls/gen_tls_roots.mjs) берёт у node |
+| `library` | встроенные модули, написанные на tz, которые лежат рядом с `tz.exe` в `lib`. `events`: `node:events` (`events.tz`) и глобальные `EventTarget`, `Event`, `CustomEvent`, `DOMException` (`web.tz`). `http`: `tz:http` (`http.tz`), глобальные `URL` и `URLSearchParams` (`url.tz`), `fetch`, `Headers`, `Request`, `Response`, `ReadableStream`, `FormData` (`fetch.tz`). `stream`: `node:stream` (`stream.tz` — класс `Stream` со всей работой потока в закрытых методах, и его части `stream_duplex.tz` — `Readable`, `Writable`, `Duplex`, `Transform`, и `stream_pipeline.tz`, которые загрузчик читает как один модуль), `node:stream/promises` (`stream_promises.tz`), `node:stream/consumers` (`stream_consumers.tz`), `node:string_decoder` (`string_decoder.tz`), потоки файлов `createReadStream` / `createWriteStream` и `process.stdin` / `stdout` / `stderr` (`fs_stream.tz`). `crypto`: Web Crypto (`webcrypto.tz`). `core`: встроенные функции компилятора (`intrinsics.tz`, модуль `tz:intrinsics`: `panic`, `defer`, `asListener<F>`, `asClass<C>`, `chunkOf<T>` и другие), которые модули библиотеки импортируют по имени, а программа не видит. Глобальные получает сам файл, который их называет. Их код проверяется и компилируется вместе с программой; `declare function` в библиотеке — функция рантайма на C, имя которой выводится из имени: `netClose` — `tz_net_close` |
 | `editors/types` | встроенные имена tz для TypeScript (`tz.d.ts`) и настройки tsc для программ tz (`tsconfig.json`) — для будущего плагина tsserver; лежат рядом с `tz.exe` в `types` |
 | `editors/vscode` | расширение VS Code: подсветка и форматирование файлов `.tz` ([README](editors/vscode/README.md)) |
 | `third_party` | рецепт сборки OpenSSL ([openssl](third_party/openssl)) и тексты лицензий, которые печатает `tz licenses` ([licenses](third_party/licenses)); inflate из zlib и декодер brotli как есть, для `fetch` (лицензии — рядом с ними); `@types/node` и undici-types для редактора ([types](third_party/types/README.md)); Prettier — форматтер расширения VS Code ([prettier](third_party/prettier/README.md)) |
@@ -3912,8 +3894,8 @@ CRT, без RTTI и исключений, поэтому `tz` собираетс
 `node:child_process` с `Result` ([tz-fs.mjs](tests/node/tz-fs.mjs),
 [tz-fs-promises.mjs](tests/node/tz-fs-promises.mjs),
 [tz-child-process.mjs](tests/node/tz-child-process.mjs)) и модули `"tz:io"` с `readLine` и
-`"tz:http"`. То, что в tz читается методом (`url.pathname()`, `signal.aborted()`,
-`res.body()`), у web-классов node — геттер, который коду теста отдаёт функцию, а коду node —
+`"tz:http"`; `timeout` у `fetch` она передаёт node как `AbortSignal.timeout()`. То, что в tz
+читается методом (`url.pathname()`, `res.body()`), у web-классов node — геттер, который коду теста отдаёт функцию, а коду node —
 значение; состояние потоков node и `isTrusted` так не заменить, и заглушка убирает `()` после
 них в тексте самого теста.
 Дочерние процессы node получают её через `NODE_OPTIONS`.

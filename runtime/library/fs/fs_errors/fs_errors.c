@@ -326,15 +326,6 @@ void tz_fs_throw_parts(TzMaker make, TzSystemErrorParts *parts) {
   tz_failed = error;
 }
 
-void tz_fs_abort_failure(TzMaker make) {
-  TzSystemErrorParts parts;
-  memset(&parts, 0, sizeof parts);
-  parts.message = tz_fs_ascii("The operation was aborted");
-  parts.code = tz_fs_ascii("ABORT_ERR");
-  parts.syscall = tz_fs_ascii("");
-  tz_fs_throw_parts(make, &parts);
-}
-
 void tz_fs_throw_failure(TzMaker make, Failure f, const char *syscall, const TzBuf *path,
                          const TzBuf *dest) {
   const SysError *e = &tz_fs_errors[f.index];

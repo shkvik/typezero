@@ -4,7 +4,7 @@
 // in a generic class; decorated async methods and async generators; a mixin
 // over an EventEmitter subclass whose event map comes from the emits, and
 // decorated methods of one; and classes of the library (EventTarget,
-// AbortController) as values.
+// Headers) as values.
 import { EventEmitter, on } from "node:events"
 import { Bus, Counting, Entity, Logged, Names, Store, calls, registered } from "./registry.tz"
 
@@ -81,13 +81,13 @@ for await (const [n] of on(bus, "data")) {
 }
 
 // 5. Classes of the library as values.
-const kinds: Constructor[] = [EventTarget, AbortController, User]
+const kinds: Constructor[] = [EventTarget, Headers, User]
 console.log(kinds.map((k) => k.name).join(" "))
-const made = Reflect.construct(AbortController, [])
+const made = Reflect.construct(Headers, [])
 if (made.isOk()) {
-  const controller = made.value
-  controller.signal.addEventListener("abort", () => console.log("aborted", controller.signal.aborted()))
-  controller.abort()
+  const headers = made.value
+  headers.append("x-made", "by reflection")
+  console.log("made", headers.get("x-made"))
 }
 const TargetKind = kinds[0]
 if (TargetKind != undefined) {

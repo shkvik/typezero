@@ -1,9 +1,9 @@
 // same-as-node
 // on() of node:events in 'for await': the events that come before the loop waits
 // wait in a queue, each in a Result; an event named in 'close' ends it, an
-// 'error' event and an abort end it after an Err, and 'break' too; each removes
-// the listeners. once() with a timeout.
-import { EventEmitter, on, once } from "node:events"
+// 'error' event ends it after an Err, and 'break' too; each removes the
+// listeners.
+import { EventEmitter, on } from "node:events"
 const log = (s: string) => console.log(s)
 type Failure = { code: string; message: string }
 const bus = new EventEmitter<{ data: [n: int, label: string]; end: []; error: [err: Failure] }>()
@@ -40,16 +40,3 @@ for await (const event of on(bus, "data")) {
   break
 }
 log(`listeners after break: ${bus.listenerCount("data")}`)
-
-// a signal ends it with an error whose code is ABORT_ERR
-const ac = new AbortController()
-setTimeout(() => ac.abort(), 5)
-for await (const event of on(bus, "data", { signal: ac.signal })) {
-  if (event.isErr()) log(`aborted: ${event.error.code}`)
-  else log(`never ${event.value[0]}`)
-}
-// once with a timeout signal
-const alive = setTimeout(() => log("kept alive"), 50)
-const ended = await once(bus, "end", { signal: AbortSignal.timeout(5) })
-if (ended.isErr()) log(`once: ${ended.error.code}`)
-clearTimeout(alive)

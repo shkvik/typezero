@@ -106,48 +106,9 @@ llvm::Value *LibraryCallLowerer::emitLibBuiltin(CallExpr *call) {
           "tz_order_enter", lowering_.builder_.getVoidTy(), {}));
     }
     return nullptr;
-  case Builtin::LibNativeSignal: {
-    const Type *type = call->args[0]->type;
-    Lowering::Operand signal = lowering_.refCounts().emitOperand(call->args[0], true);
-    llvm::Value *native = nativeSignal(signal.value, type, true);
-    lowering_.refCounts().dropOperand(signal);
-    return native;
-  }
   default:
     return nullptr;
   }
-}
-
-bool LibraryCallLowerer::isAbortSignal(const Type *type) {
-  const ClassDecl *cls = type->nonOptional()->classDecl();
-
-  return cls && cls->library && cls->name == "AbortSignal";
-}
-
-llvm::Value *LibraryCallLowerer::nativeSignal(llvm::Value *signal, const Type *type, bool retain) {
-  llvm::Type *ptr = lowering_.builder_.getPtrTy();
-  llvm::Constant *null = llvm::ConstantPointerNull::get(llvm::cast<llvm::PointerType>(ptr));
-  if (!isAbortSignal(type)) {
-    return null;
-  }
-  llvm::BasicBlock *entry = lowering_.builder_.GetInsertBlock();
-  llvm::BasicBlock *loadBlock = lowering_.functionFrame().newBlock("signal.native");
-  llvm::BasicBlock *endBlock = lowering_.functionFrame().newBlock("signal.end");
-  lowering_.builder_.CreateCondBr(lowering_.builder_.CreateIsNotNull(signal), loadBlock, endBlock);
-  lowering_.functionFrame().switchTo(loadBlock);
-  llvm::Value *native = lowering_.builder_.CreateLoad(
-      ptr, lowering_.objectLayouts().fieldAddress(signal, type->nonOptional(), "native"), "native");
-  if (retain) {
-    lowering_.refCounts().retainValue(native, Type::runtimeObject(Type::Runtime::AbortSignal));
-  }
-  llvm::BasicBlock *loaded = lowering_.builder_.GetInsertBlock();
-  lowering_.builder_.CreateBr(endBlock);
-  lowering_.functionFrame().switchTo(endBlock);
-  llvm::PHINode *phi = lowering_.builder_.CreatePHI(ptr, 2, "native");
-  phi->addIncoming(null, entry);
-  phi->addIncoming(native, loaded);
-
-  return phi;
 }
 
 }

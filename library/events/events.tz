@@ -1,4 +1,4 @@
-import { AbortSignal, Event, EventTarget } from "tz:web"
+import { Event, EventTarget } from "tz:web"
 import { asListener, defer } from "tz:intrinsics"
 
 declare function libBare(map: Record<string, unknown>): Record<string, unknown>
@@ -52,10 +52,6 @@ class ListenerList {
     }
     return this.items
   }
-}
-
-function aborted(): AbortError {
-  return { code: "ABORT_ERR", message: "The operation was aborted" }
 }
 
 export class EventEmitterBase {
@@ -307,10 +303,8 @@ export class EventEmitter<Events> extends EventEmitterBase {
 export function once<A extends unknown[], R extends unknown[]>(
   emitter: EventEmitterBase,
   name: string,
-  options?: { signal?: AbortSignal },
   errors = false,
 ): Promise<A> {
-  void options
   void errors
   return new Promise<A>((resolve) => {
     function resolver(...args: A) {
@@ -323,45 +317,30 @@ export function once<A extends unknown[], R extends unknown[]>(
 function onceResult<A extends unknown[], E>(
   emitter: EventEmitterBase,
   name: string,
-  options?: { signal?: AbortSignal },
   errors = false,
-): Promise<Result<A, E | AbortError>> {
-  const signal = options?.signal
-  if (signal != undefined && signal.aborted()) {
-    const failed: Result<A, E | AbortError> = err(aborted())
-    return Promise.resolve(failed)
-  }
-  return new Promise<Result<A, E | AbortError>>((resolve) => {
+): Promise<Result<A, E>> {
+  return new Promise<Result<A, E>>((resolve) => {
     function errorListener(error: E) {
       emitter.removeListener(name, resolver)
-      if (signal != undefined) signal.removeEventListener("abort", abortListener)
       resolve(err(error))
     }
     function resolver(...args: A) {
       if (errors) emitter.removeListener("error", errorListener)
-      if (signal != undefined) signal.removeEventListener("abort", abortListener)
       resolve(ok(args))
-    }
-    function abortListener(_event: Event) {
-      emitter.removeListener(name, resolver)
-      emitter.removeListener("error", errorListener)
-      resolve(err(aborted()))
     }
     emitter.once(name, resolver)
     if (errors && name != "error") emitter.once("error", errorListener)
-    if (signal != undefined)
-      signal.addEventListener("abort", abortListener, { once: true })
   })
 }
 
 export function on<A extends unknown[], R extends unknown[]>(
   emitter: EventEmitterBase,
   name: string,
-  options?: { signal?: AbortSignal; close?: string[] },
+  options?: { close?: string[] },
   errors = false,
 ) {
   void errors
-  const queue = new EventQueue<A, AbortError>()
+  const queue = new EventQueue<A, never>()
   const close = options?.close ?? []
   function eventHandler(...args: A) {
     queue.push(args)
@@ -380,11 +359,10 @@ export function on<A extends unknown[], R extends unknown[]>(
 function onResult<A extends unknown[], E>(
   emitter: EventEmitterBase,
   name: string,
-  options?: { signal?: AbortSignal; close?: string[] },
+  options?: { close?: string[] },
   errors = false,
 ) {
-  const signal = options?.signal
-  const queue = new EventQueue<A, E | AbortError>()
+  const queue = new EventQueue<A, E>()
   const close = options?.close ?? []
   function eventHandler(...args: A) {
     queue.push(args)
@@ -395,20 +373,13 @@ function onResult<A extends unknown[], E>(
   function closeHandler() {
     queue.finish()
   }
-  function abortListener(_event: Event) {
-    queue.fail(aborted())
-  }
-  if (signal != undefined && signal.aborted()) queue.fail(aborted())
   emitter.on(name, eventHandler)
   if (errors && name != "error") emitter.on("error", errorHandler)
   for (const closeName of close) emitter.on(closeName, closeHandler)
-  if (signal != undefined)
-    signal.addEventListener("abort", abortListener, { once: true })
   return queue.results(() => {
     emitter.removeListener(name, eventHandler)
     emitter.removeListener("error", errorHandler)
     for (const closeName of close) emitter.removeListener(closeName, closeHandler)
-    if (signal != undefined) signal.removeEventListener("abort", abortListener)
   })
 }
 
@@ -548,42 +519,12 @@ function emitWarning(name: string, message: string) {
   process.nextTick(() => console.error(`(node:${libPid()}) ${name}: ${message}`))
 }
 
-function onceTarget(
-  target: EventTarget,
-  name: string,
-  options?: { signal?: AbortSignal },
-): Promise<[Event]> {
-  void options
+function onceTarget(target: EventTarget, name: string): Promise<[Event]> {
   return new Promise<[Event]>((resolve) => {
     function resolver(event: Event) {
       resolve([event])
     }
     target.addEventListener(name, resolver, { once: true })
-  })
-}
-
-function onceTargetResult(
-  target: EventTarget,
-  name: string,
-  options?: { signal?: AbortSignal },
-): Promise<Result<[Event], AbortError>> {
-  const signal = options?.signal
-  if (signal != undefined && signal.aborted()) {
-    const failed: Result<[Event], AbortError> = err(aborted())
-    return Promise.resolve(failed)
-  }
-  return new Promise<Result<[Event], AbortError>>((resolve) => {
-    function resolver(event: Event) {
-      if (signal != undefined) signal.removeEventListener("abort", abortListener)
-      resolve(ok([event]))
-    }
-    function abortListener(_event: Event) {
-      target.removeEventListener(name, resolver)
-      resolve(err(aborted()))
-    }
-    target.addEventListener(name, resolver, { once: true })
-    if (signal != undefined)
-      signal.addEventListener("abort", abortListener, { once: true })
   })
 }
 

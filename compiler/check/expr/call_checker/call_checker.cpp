@@ -217,16 +217,6 @@ Expr *CallChecker::checkCall(CallExpr *call, const Type *expected) {
       }
     }
     if (receiver->isClass()) {
-      if (ClassDecl *cls = ClassDeclarer::classOf(receiver);
-          cls && cls->library && cls->name == "AbortSignal" && member->name == "throwIfAborted" &&
-          !checker_.libraryCalls().inLibrary(member->loc())) {
-        checker_.diags_.error(member->loc(),
-                              "'throwIfAborted' is not supported: nothing is thrown in tz; check "
-                              "the signal and return an Err, e.g. 'if (signal.aborted()) return "
-                              "err({ code: \"ABORT_ERR\", message: \"aborted\" })'");
-        call->type = Type::error();
-        return call;
-      }
       bool proven = checker_.urlChecker().checkUrlSetter(member, call);
       Expr *checked = checker_.methodCallChecker().checkMethodCall(call, member, expected);
       checker_.httpChecker().checkHeadersCall(call, member);

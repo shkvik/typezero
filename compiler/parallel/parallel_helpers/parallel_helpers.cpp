@@ -231,7 +231,6 @@ bool knownBuiltin(Builtin b) {
   case Builtin::CryptoKeyPair:
   case Builtin::LibListener:
   case Builtin::LibAs:
-  case Builtin::LibNativeSignal:
   case Builtin::ClassName:
   case Builtin::ReflectGet:
   case Builtin::ReflectApply:

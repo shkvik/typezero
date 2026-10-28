@@ -238,8 +238,6 @@ std::string ExplainNames::locName(const Loc &loc) const {
       return "the files";
     case Res::Process:
       return "the exit code and environment";
-    case Res::Signals:
-      return "the abort signals";
     case Res::Metadata:
       return "the metadata";
     case Res::Runtime:

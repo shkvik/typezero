@@ -20,8 +20,8 @@ data 6
 data 7
 for await 6
 for await 7
-EventTarget AbortController User
-aborted true
+EventTarget Headers User
+made by reflection
 ping ping true
 tick with 3 classes
 port 80

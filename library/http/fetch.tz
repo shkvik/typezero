@@ -1,22 +1,21 @@
 import { URL, URLSearchParams, percentDecode } from "tz:url"
-import { AbortController, AbortSignal, DOMException } from "tz:web"
 import { defer } from "tz:intrinsics"
 
 declare function netConnect(host: string, port: int,
-                            signal: AbortSignal | undefined): Promise<Result<object, SystemError>>
+                            deadline: object | undefined): Promise<Result<object, SystemError>>
 declare function netClose(conn: object): void
 declare function tlsConnect(conn: object, host: string,
-                            signal: AbortSignal | undefined): Promise<Result<void, SystemError>>
+                            deadline: object | undefined): Promise<Result<void, SystemError>>
 declare function httpRequest(conn: object, method: string, target: string, headers: string[],
                              text: string, bytes: Uint8Array | undefined, flags: int): void
 declare function httpResponse(conn: object,
-                              signal: AbortSignal | undefined): Promise<Result<int, SystemError>>
+                              deadline: object | undefined): Promise<Result<int, SystemError>>
 declare function httpStatusText(conn: object): string
 declare function httpHeaders(conn: object): string[]
 declare function httpHasBody(conn: object): boolean
-declare function httpRead(conn: object, signal: AbortSignal | undefined):
+declare function httpRead(conn: object, deadline: object | undefined):
   Promise<Result<Uint8Array | undefined, SystemError>>
-declare function httpReadAll(conn: object, signal: AbortSignal | undefined):
+declare function httpReadAll(conn: object, deadline: object | undefined):
   Promise<Result<Uint8Array, SystemError>>
 declare function httpReusable(conn: object): boolean
 declare function httpWrite(conn: object, chunk: Uint8Array): Promise<Result<void, SystemError>>
@@ -31,6 +30,9 @@ declare function httpRespond(conn: object, status: int, statusText: string, head
 declare function zlibNew(kind: int): object
 declare function zlibPush(decoder: object, chunk: Uint8Array): Result<Uint8Array, SystemError>
 declare function zlibEnd(decoder: object): Result<Uint8Array, SystemError>
+declare function deadlineNew(): object
+declare function deadlinePass(deadline: object): void
+declare function deadlinePassed(deadline: object): boolean
 
 const SEND_STREAM = 1
 const SEND_NO_BODY = 4
@@ -52,12 +54,12 @@ export class Connection {
   }
 
   static async open(host: string, port: int, secure: boolean,
-                    signal: AbortSignal): Promise<Result<Connection, SystemError>> {
-    const connected = await netConnect(host, port, signal)
+                    deadline?: object): Promise<Result<Connection, SystemError>> {
+    const connected = await netConnect(host, port, deadline)
     if (connected.isErr()) return err(connected.error)
     const socket = connected.value
     if (secure) {
-      const secured = await tlsConnect(socket, host, signal)
+      const secured = await tlsConnect(socket, host, deadline)
       if (secured.isErr()) {
         netClose(socket)
         return err(secured.error)
@@ -101,8 +103,8 @@ export class Connection {
     httpRespond(this.socket, status, statusText, this.head, text, bytes, flags)
   }
 
-  async response(signal: AbortSignal): Promise<Result<void, SystemError>> {
-    const status = await httpResponse(this.socket, signal)
+  async response(deadline?: object): Promise<Result<void, SystemError>> {
+    const status = await httpResponse(this.socket, deadline)
     if (status.isErr()) return err(status.error)
     this.status = status.value
     return ok(undefined)
@@ -116,12 +118,12 @@ export class Connection {
     return httpHasBody(this.socket)
   }
 
-  read(signal: AbortSignal | undefined): Promise<Result<Uint8Array | undefined, SystemError>> {
-    return httpRead(this.socket, signal)
+  read(deadline?: object): Promise<Result<Uint8Array | undefined, SystemError>> {
+    return httpRead(this.socket, deadline)
   }
 
-  readAll(signal: AbortSignal | undefined): Promise<Result<Uint8Array, SystemError>> {
-    return httpReadAll(this.socket, signal)
+  readAll(deadline?: object): Promise<Result<Uint8Array, SystemError>> {
+    return httpReadAll(this.socket, deadline)
   }
 
   write(chunk: Uint8Array): Promise<Result<void, SystemError>> {
@@ -683,28 +685,25 @@ export type BodyInit = string | Uint8Array | ArrayBuffer | ReadableStream<Uint8A
 
 type Decode = (chunk: Uint8Array, last: boolean) => Result<Uint8Array, SystemError>
 
-function abortedReason(signal: AbortSignal): { timeout: boolean; message: string } {
-  const reason = signal.reason()
-  if (reason instanceof DOMException)
-    return { timeout: reason.name == "TimeoutError", message: reason.message }
-  return { timeout: false, message: "This operation was aborted" }
-}
+const TIMED_OUT = "The operation was aborted due to timeout"
 
-function abortedBody(signal: AbortSignal): BodyError {
-  const why = abortedReason(signal)
-  return why.timeout ? { code: "TIMEOUT_ERR", message: why.message }
-                     : { code: "ABORT_ERR", message: why.message }
+function passed(deadline?: object): boolean {
+  if (deadline == undefined) {
+    return false
+  }
+
+  return deadlinePassed(deadline)
 }
 
 class Wire {
   conn: Connection
-  signal?: AbortSignal
+  deadline?: object
   decode?: Decode
   finished = false
 
-  constructor(conn: Connection, signal?: AbortSignal) {
+  constructor(conn: Connection, deadline?: object) {
     this.conn = conn
-    this.signal = signal
+    this.deadline = deadline
   }
 
   private decodeChunk(decode: Decode, chunk: Uint8Array, last: boolean): Result<Uint8Array, BodyError> {
@@ -719,8 +718,10 @@ class Wire {
 
   private failed(e: SystemError): BodyError {
     this.finished = true
-    const signal = this.signal
-    if (signal != undefined && signal.aborted()) return abortedBody(signal)
+    if (passed(this.deadline)) {
+      return { code: "TIMEOUT_ERR", message: TIMED_OUT }
+    }
+
     return { code: "terminated", message: "terminated", cause: e.message }
   }
 
@@ -731,7 +732,7 @@ class Wire {
 
   async next(): Promise<Result<Uint8Array | undefined, BodyError>> {
     while (!this.finished) {
-      const read = await this.conn.read(this.signal)
+      const read = await this.conn.read(this.deadline)
       if (read.isErr()) return err(this.failed(read.error))
       const chunk = read.value
       const decode = this.decode
@@ -757,7 +758,7 @@ class Wire {
   }
 
   async all(): Promise<Result<Uint8Array, BodyError>> {
-    const bytes = await this.conn.readAll(this.signal)
+    const bytes = await this.conn.readAll(this.deadline)
     if (bytes.isErr()) return err(this.failed(bytes.error))
     const decode = this.decode
     let data = bytes.value
@@ -828,7 +829,6 @@ function bodyFailed(e: StreamError): BodyError {
   if (e.code == "terminated")
     return cause == undefined ? { code: "terminated", message: e.message }
                               : { code: "terminated", message: e.message, cause }
-  if (e.code == "ABORT_ERR") return { code: "ABORT_ERR", message: e.message }
   if (e.code == "TIMEOUT_ERR") return { code: "TIMEOUT_ERR", message: e.message }
   return cause == undefined ? { code: "body_failed", message: e.message }
                             : { code: "body_failed", message: e.message, cause }
@@ -1207,7 +1207,7 @@ export interface RequestInit {
   headers?: HeadersInit
   body?: BodyInit
   redirect?: RequestRedirect
-  signal?: AbortSignal
+  timeout?: int
   keepalive?: boolean
   cache?: string
   credentials?: string
@@ -1254,7 +1254,7 @@ export class Request {
   readonly isReloadNavigation = false
   readonly isHistoryNavigation = false
   readonly duplex?: "half"
-  readonly signal: AbortSignal
+  readonly timeout?: int
   private bodyStream?: ReadableStream<Uint8Array>
   private data: Body
 
@@ -1279,18 +1279,18 @@ export class Request {
       this.headers = new Headers()
       this.data = Body.of(undefined)
     }
-    let signal = input instanceof Request ? input.signal : undefined
+    let timeout = input instanceof Request ? input.timeout : undefined
     if (init != undefined) {
       const method = init.method
       if (method != undefined) this.method = normalizeMethod(method)
       if (init.headers != undefined) this.headers = new Headers(init.headers)
       if (init.redirect != undefined) this.redirect = init.redirect
-      if (init.signal != undefined) signal = init.signal
+      if (init.timeout != undefined) timeout = init.timeout
       if (init.keepalive != undefined) this.keepalive = init.keepalive
       if (init.duplex != undefined) this.duplex = init.duplex
       if (init.body != undefined) this.data = Body.of(init.body)
     }
-    this.signal = signal ?? AbortSignal.withAbort().signal
+    this.timeout = timeout
     const type = this.data.type
     if (type != undefined && !this.headers.has("content-type"))
       this.headers.append("content-type", type)
@@ -1300,7 +1300,6 @@ export class Request {
     this.method = conn.method()
     this.headers = Headers.readFrom(conn)
     this.url = conn.target()
-    this.signal = AbortSignal.withAbort().signal
     if (conn.hasBody()) {
       this.data = Body.ofWire(new Wire(conn))
       this.duplex = "half"
@@ -1313,7 +1312,7 @@ export class Request {
     return new Request(conn)
   }
 
-  async writeTo(conn: Connection, url: URL): Promise<Result<void, FetchError>> {
+  async writeTo(conn: Connection, url: URL, deadline?: object): Promise<Result<void, FetchError>> {
     const body = this.data
     let text = ""
     let bytes: Uint8Array | undefined = undefined
@@ -1334,7 +1333,7 @@ export class Request {
       body.used = true
       const stream = body.view()
       if (stream != undefined) {
-        const problem = await sendBody(conn, stream, this.signal)
+        const problem = await sendBody(conn, stream, deadline)
         if (problem != undefined) return err(problem)
       }
       conn.end()
@@ -1359,7 +1358,7 @@ export class Request {
 
   clone(): Request {
     const init: RequestInit = { method: this.method, headers: this.headers, redirect: this.redirect,
-                                signal: this.signal, duplex: this.duplex }
+                                timeout: this.timeout, duplex: this.duplex }
     const r = new Request(this.url, init)
     r.data = this.data.copy()
     this.bodyStream = undefined
@@ -1451,11 +1450,11 @@ export class Response {
   }
 
   static readFrom(conn: Connection, url: string, redirected: boolean,
-                  signal: AbortSignal): Response {
+                  deadline?: object): Response {
     const headers = Headers.readFrom(conn)
     let body: Body
     if (conn.hasBody()) {
-      const wire = new Wire(conn, signal)
+      const wire = new Wire(conn, deadline)
       wire.decode = decoding(headers.get("content-encoding"))
       body = Body.ofWire(wire)
     } else {
@@ -1639,24 +1638,29 @@ function failed(cause: string): FetchError {
   return { code: "fetch_failed", message: "fetch failed", cause }
 }
 
-function abortedFetch(signal: AbortSignal): FetchError {
-  const why = abortedReason(signal)
-  return { code: why.timeout ? "TIMEOUT_ERR" : "ABORT_ERR", message: why.message }
+function timedOut(): FetchError {
+  return { code: "TIMEOUT_ERR", message: TIMED_OUT }
 }
 
-function fetchFailed(e: SystemError, signal: AbortSignal | undefined): FetchError {
-  if (signal != undefined && signal.aborted()) return abortedFetch(signal)
+function fetchFailed(e: SystemError, deadline?: object): FetchError {
+  if (passed(deadline)) {
+    return timedOut()
+  }
+
   return { code: e.errno == -1 ? "fetch_failed" : e.code, message: "fetch failed", cause: e.message }
 }
 
 async function sendBody(conn: Connection, stream: ReadableStream<Uint8Array>,
-                        signal: AbortSignal): Promise<FetchError | undefined> {
+                        deadline?: object): Promise<FetchError | undefined> {
   const reader = stream.getReader()
   for (;;) {
     const r = await reader.read()
     if (r.isErr()) {
       reader.releaseLock()
-      if (signal.aborted()) return abortedFetch(signal)
+      if (passed(deadline)) {
+        return timedOut()
+      }
+
       return failed(r.error.message)
     }
     const step = r.value
@@ -1664,16 +1668,15 @@ async function sendBody(conn: Connection, stream: ReadableStream<Uint8Array>,
     const wrote = await conn.write(step.value)
     if (wrote.isErr()) {
       reader.releaseLock()
-      return fetchFailed(wrote.error, signal)
+      return fetchFailed(wrote.error, deadline)
     }
   }
   reader.releaseLock()
   return undefined
 }
 
-async function send(request: Request, url: URL,
-                    redirected: boolean): Promise<Result<Response, FetchError>> {
-  const signal = request.signal
+async function send(request: Request, url: URL, redirected: boolean,
+                    deadline?: object): Promise<Result<Response, FetchError>> {
   const hostname = url.hostname()
   const host = hostname.startsWith("[") ? hostname.slice(1, hostname.length - 1) : hostname
   const https = url.protocol() == "https:"
@@ -1686,31 +1689,34 @@ async function send(request: Request, url: URL,
     if (idle != undefined) {
       conn = idle
     } else {
-      const opened = await Connection.open(host, port, https, signal)
-      if (opened.isErr()) return err(fetchFailed(opened.error, signal))
+      const opened = await Connection.open(host, port, https, deadline)
+      if (opened.isErr()) return err(fetchFailed(opened.error, deadline))
       conn = opened.value
     }
     conn.origin = origin
-    const wrote = await request.writeTo(conn, url)
+    const wrote = await request.writeTo(conn, url, deadline)
     if (wrote.isErr()) {
       conn.close()
       return wrote
     }
-    const status = await conn.response(signal)
+    const status = await conn.response(deadline)
     if (status.isErr()) {
       conn.close()
-      if (signal.aborted()) return err(abortedFetch(signal))
+      if (passed(deadline)) {
+        return err(timedOut())
+      }
+
       if (reused && !request.bodyUsed()) {
         idle = undefined
         reused = false
         continue
       }
-      return err(fetchFailed(status.error, signal))
+      return err(fetchFailed(status.error, deadline))
     }
     let shown = url.href()
     const hash = shown.indexOf("#")
     if (hash >= 0) shown = shown.slice(0, hash)
-    return ok(Response.readFrom(conn, shown, redirected, signal))
+    return ok(Response.readFrom(conn, shown, redirected, deadline))
   }
 }
 
@@ -1750,6 +1756,18 @@ function requestProblem(request: Request, url: Result<URL, UrlError>): FetchErro
   return undefined
 }
 
+function startDeadline(timeout?: int): object | undefined {
+  if (timeout == undefined) {
+    return undefined
+  }
+
+  const deadline = deadlineNew()
+  const timer = setTimeout(() => deadlinePass(deadline), timeout)
+  timer.unref()
+
+  return deadline
+}
+
 export async function fetch(input: string | URL | Request,
                             init?: RequestInit): Promise<Result<Response, FetchError>> {
   if (input instanceof Request && init?.body == undefined && input.bodyUsed())
@@ -1759,10 +1777,9 @@ export async function fetch(input: string | URL | Request,
   const first = URL.parse(request.url)
   const problem = requestProblem(request, first)
   if (problem != undefined) return err(problem)
-  const signal = request.signal
-  if (signal.aborted()) return err(abortedFetch(signal))
   if (first.isErr()) return err(failed(first.error.message))
   let url = first.value
+  const deadline = startDeadline(request.timeout)
   let current = request
   let redirects = 0
   for (;;) {
@@ -1770,7 +1787,7 @@ export async function fetch(input: string | URL | Request,
     if (url.protocol() != "http:" && url.protocol() != "https:")
       return err(failed("not implemented... yet..."))
     if (url.port() != "" && BAD_PORTS.has(parseInt(url.port()).unwrapOr(0))) return err(failed("bad port"))
-    const sent = await send(current, url, redirects > 0)
+    const sent = await send(current, url, redirects > 0, deadline)
     if (sent.isErr()) return sent
     const response = sent.value
     const status = response.status
@@ -1791,8 +1808,7 @@ export async function fetch(input: string | URL | Request,
       for (const name of ["content-encoding", "content-language", "content-location",
                           "content-type", "content-length"])
         headers.delete(name)
-      current = new Request(next.value, { method: "GET", headers, signal,
-                                          redirect: request.redirect })
+      current = new Request(next.value, { method: "GET", headers, redirect: request.redirect })
     } else if (current.bodyUsed()) {
       return err(failed("cannot follow a redirect with a body that streams"))
     }

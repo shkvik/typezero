@@ -1,5 +1,5 @@
 201  Headers { 'x-y': 'z', 'content-type': 'text/plain;charset=UTF-8' } true false true false default 
-POST http://example.com/x Headers { 'content-type': 'text/plain;charset=UTF-8' }  about:client  cors same-origin default follow  false false false false true
+POST http://example.com/x Headers { 'content-type': 'text/plain;charset=UTF-8' }  about:client  cors same-origin default follow  false false false undefined true
 false
 hi true
 body_used Body is unusable: Body has already been read

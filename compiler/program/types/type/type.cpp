@@ -1079,7 +1079,7 @@ const Type *Type::bytesType(Bytes kind) {
 
 const Type *Type::runtimeObject(Runtime kind) {
   static Type *types[size_t(Runtime::AsyncIterator)];
-  static const char *const names[] = {"", "AbortSignal", "FileHandle", "Interface", "Interface"};
+  static const char *const names[] = {"", "FileHandle", "Interface", "Interface"};
   Type *&type = types[size_t(kind)];
   if (!type) {
     type = interned().objects.emplace_back(new Type(Kind::Object, names[size_t(kind)])).get();

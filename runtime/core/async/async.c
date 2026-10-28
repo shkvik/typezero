@@ -11,7 +11,6 @@
 #include "runtime/core/publish/publish.h"
 #include "runtime/core/string/string.h"
 #include "runtime/core/tzrt/tzrt.h"
-#include "runtime/library/events/signal/signal.h"
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -490,20 +489,6 @@ void tz_promise_follow(TzPromise *p, TzPromise *q) {
 }
 
 const TzLayout tz_promise_void_layout = {tz_promise_drop, NULL, 0, TZ_LAYOUT_PROMISE, NULL, 0, 0};
-
-static void settle_after_turn(TzPromise *derived, TzPromise *original) {
-  TZ_ORDERED();
-  TzPromise *awaited = tz_promise_new(&tz_promise_void_layout);
-  awaited->state = TZ_PROMISE_FULFILLED;
-  TzPromise *next = tz_promise_new(original->layout);
-  retain(next);
-  retain(original);
-  Follow *f = new_follow(next, original);
-  f->first = awaited;
-  f->reactor.run = follow_settle;
-  tz_promise_react(awaited, &f->reactor);
-  tz_promise_follow(derived, next);
-}
 
 TzArray *tz_promise_resolve_all(const TzArray *values, const TzLayout *layout,
                                 const TzType *promises) {
@@ -1229,30 +1214,9 @@ void tz_async_run(int32_t es_module) {
 
 typedef struct Wait {
   TzObject base;
-  TzReactor reactor;
-  TzAbortListener listener;
   TzPromise *promise;
-  TzPromise *inner;
-  TzTimer *timer;
-  TzSignal *signal;
-  TzMaker make;
-  int32_t immediate, done;
-  struct Wait *prev, *next;
+  int32_t done;
 } Wait;
-
-struct Wait *tz_waits;
-
-static void unlist_wait(Wait *w) {
-  if (w->prev) {
-    w->prev->next = w->next;
-  } else if (tz_waits == w) {
-    tz_waits = w->next;
-  }
-  if (w->next) {
-    w->next->prev = w->prev;
-  }
-  w->prev = w->next = NULL;
-}
 
 static void drop_pending_value(TzPromise *p) {
   const TzType *type = value_type(p);
@@ -1263,28 +1227,11 @@ static void drop_pending_value(TzPromise *p) {
   memset(value_of(p), 0, type->size);
 }
 
-static void settle_aborted(TzPromise *p, TzMaker make) {
-  drop_pending_value(p);
-  TzFailParts parts;
-  parts.code = "ABORT_ERR";
-  parts.message = tz_str_from_ascii("The operation was aborted", 25);
-  tz_promise_fail(p, make(&parts));
-}
-
 static void wait_drop(void *object) {
   TZ_ORDERED();
   Wait *w = (Wait *)object;
-  unlist_wait(w);
-  tz_signal_unlisten(&w->listener);
-  if (w->inner) {
-    drop_pending_value(w->inner);
-    release(w->inner);
-  }
   drop_pending_value(w->promise);
   release(w->promise);
-  if (w->signal) {
-    release(w->signal);
-  }
   tz_obj_free(w);
 }
 
@@ -1296,89 +1243,25 @@ static void wait_fired(TzObject *env) {
     return;
   }
   w->done = 1;
-  tz_promise_fulfill(w->inner ? w->inner : w->promise);
+  tz_promise_fulfill(w->promise);
 }
 
 static const TzFunctionInfo wait_info = {(void *)wait_fired, {NULL, 0}};
 
-static void wait_aborted(TzAbortListener *l) {
-  Wait *w = (Wait *)((char *)l - offsetof(Wait, listener));
-  if (w->done) {
-    return;
-  }
-  w->done = 1;
-  ++w->base.rc;
-  if (w->immediate) {
-    tz_immediate_clear(w->timer);
-  } else {
-    tz_timer_clear(w->timer);
-  }
-  settle_aborted(w->inner, w->make);
-  tz_obj_release(&w->base);
-}
-
-static void wait_finally(TzReactor *r, TzPromise *source) {
-  Wait *w = (Wait *)((char *)r - offsetof(Wait, reactor));
-  unlist_wait(w);
-  tz_signal_unlisten(&w->listener);
-  settle_after_turn(w->promise, source);
-}
-
-void tz_timers_wait(TzPromise *p, double delay, int32_t immediate, TzSignal *signal, int32_t ref,
-                    TzMaker make) {
+void tz_timers_wait(TzPromise *p, double delay, int32_t immediate, int32_t ref) {
   TZ_ORDERED();
-  if (signal && signal->aborted) {
-    settle_aborted(p, make);
-    return;
-  }
   Wait *w = (Wait *)tz_obj_alloc(sizeof(Wait));
   memset(w, 0, sizeof *w);
   w->base.rc = 1;
   w->base.desc = &wait_desc;
   w->promise = p;
   retain(p);
-  w->make = make;
-  w->immediate = immediate;
-  if (signal) {
-    w->inner = tz_promise_new(p->layout);
-    const TzType *type = value_type(p);
-    if (type) {
-      memcpy(value_of(w->inner), value_of(p), type->size);
-      memset(value_of(p), 0, type->size);
-    }
-    w->signal = signal;
-    retain(signal);
-    w->listener.run = wait_aborted;
-    tz_signal_listen(signal, &w->listener);
-    w->reactor.run = wait_finally;
-    w->reactor.owner = &w->base;
-    w->reactor.ahead = 0;
-    ++w->base.rc;
-    tz_promise_react(w->inner, &w->reactor);
-    w->next = tz_waits;
-    if (tz_waits) {
-      tz_waits->prev = w;
-    }
-    tz_waits = w;
-  }
-  ++w->base.rc;
   TzTimer *timer = immediate ? tz_immediate_new(&wait_info, &w->base)
                              : tz_timer_new(&wait_info, &w->base, delay, 0);
-  w->timer = timer;
   if (!ref) {
     tz_timer_ref(timer, 0);
   }
   release(timer);
-  release(w);
-}
-
-static void drop_waits(void) {
-  while (tz_waits) {
-    Wait *w = tz_waits;
-    unlist_wait(w);
-    w->inner->head = w->inner->tail = NULL;
-    tz_obj_release(&w->base);
-  }
 }
 
 void tz_async_iter_next(void *it, TzPromise *p) {
@@ -1606,8 +1489,6 @@ void tz_agen_drop_steps(TzAsyncGen *g) {
 typedef struct {
   TzInstance base;
   TzTimer *timer;
-  TzSignal *signal;
-  TzAbortListener listener;
   TzPromise *waiting;
   const TzType *type;
   double delay;
@@ -1637,7 +1518,6 @@ static void interval_give(Interval *it, TzPromise *p, int32_t turns) {
 
 static void interval_stop(Interval *it) {
   it->done = 1;
-  tz_signal_unlisten(&it->listener);
   if (it->timer) {
     tz_timer_clear(it->timer);
     release(it->timer);
@@ -1655,9 +1535,6 @@ static void interval_drop(void *object) {
   TZ_ORDERED();
   Interval *it = (Interval *)object;
   interval_stop(it);
-  if (it->signal) {
-    release(it->signal);
-  }
   if (it->type) {
     tz_value_release(it->type, it->value);
   }
@@ -1690,20 +1567,8 @@ static void interval_fired(TzObject *env) {
 
 static const TzFunctionInfo interval_info = {(void *)interval_fired, {NULL, 0}};
 
-static void interval_aborted(TzAbortListener *l) {
-  Interval *it = (Interval *)((char *)l - offsetof(Interval, listener));
-  if (it->done) {
-    return;
-  }
-  interval_stop(it);
-}
-
 static void interval_start(Interval *it) {
   it->started = 1;
-  if (it->signal && it->signal->aborted) {
-    it->done = 1;
-    return;
-  }
   IntervalTick *tick = (IntervalTick *)tz_obj_alloc(sizeof(IntervalTick));
   tick->base.rc = 1;
   tick->base.desc = &interval_tick_desc;
@@ -1711,10 +1576,6 @@ static void interval_start(Interval *it) {
   it->timer = tz_timer_new(&interval_info, &tick->base, it->delay, 1);
   if (!it->ref) {
     tz_timer_ref(it->timer, 0);
-  }
-  if (it->signal) {
-    it->listener.run = interval_aborted;
-    tz_signal_listen(it->signal, &it->listener);
   }
 }
 
@@ -1747,8 +1608,7 @@ static void interval_close(void *object, TzPromise *p) {
   fulfill_after(p, 1);
 }
 
-void *tz_timers_interval(double delay, const void *value, const TzType *type, TzSignal *signal,
-                         int32_t ref) {
+void *tz_timers_interval(double delay, const void *value, const TzType *type, int32_t ref) {
   size_t size = type ? type->size : 0;
   Interval *it = (Interval *)tz_obj_alloc((int64_t)(sizeof(Interval) + size));
   memset(it, 0, sizeof(Interval));
@@ -1760,10 +1620,6 @@ void *tz_timers_interval(double delay, const void *value, const TzType *type, Tz
   }
   it->delay = delay;
   it->ref = ref;
-  if (signal) {
-    it->signal = signal;
-    retain(signal);
-  }
 
   return it;
 }
@@ -1789,7 +1645,6 @@ void tz_async_main(TzPromise *main) {
 }
 
 void tz_async_shutdown(void) {
-  drop_waits();
   while (tz_immediate_head) {
     TzTimer *t = tz_immediate_head;
     tz_immediate_head = t->next;

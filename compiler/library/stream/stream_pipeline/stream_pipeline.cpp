@@ -38,18 +38,11 @@ bool inModule(const std::string &place, llvm::StringRef module) {
 
 StreamPipeline::StreamPipeline(Checker &checker) : checker_(checker) {}
 
-const Type *StreamPipeline::streamSignalOptionsType() {
-  ClassDecl *signal = checker_.libraryClass("AbortSignal");
-
-  return Type::object({Field{"signal", signal ? signal->type : Type::error(), false}});
-}
-
 Expr *StreamPipeline::streamStage(Expr *&arg, const Type *&chunk, bool first, bool last,
                                   bool &stream, const Type **sinkValue) {
   llvm::SMLoc loc = arg->loc();
   ClassDecl *stageClass = checker_.libraryClass("PipelineStage");
   const Type *stageType = stageClass ? stageClass->type : Type::error();
-  const Type *options = streamSignalOptionsType();
   stream = false;
   auto stageCall = [&](llvm::StringRef fn, std::vector<const Type *> bound, Expr *value) -> Expr * {
     auto *callee = checker_.ctx_.make<NameExpr>(loc, fn);
@@ -63,11 +56,11 @@ Expr *StreamPipeline::streamStage(Expr *&arg, const Type *&chunk, bool first, bo
   if (auto *fe = dyn_cast<FunctionExpr>(arg)) {
     Checker::Signature sig;
     if (first) {
-      sig.params = {options};
-      sig.minArgs = 1;
+      sig.params = {};
+      sig.minArgs = 0;
     } else {
-      sig.params = {Type::asyncIterator(chunk), options};
-      sig.minArgs = 2;
+      sig.params = {Type::asyncIterator(chunk)};
+      sig.minArgs = 1;
     }
     arg = checker_.closureChecker().checkFunctionExpr(fe, &sig);
   } else {
@@ -121,7 +114,7 @@ Expr *StreamPipeline::streamStage(Expr *&arg, const Type *&chunk, bool first, bo
       chunk = ret->yielded();
       Expr *stage =
           stageCall("streamSourceStage", {chunk},
-                    checker_.typeRelations().coerce(arg, Type::function({options}, 1, false, ret)));
+                    checker_.typeRelations().coerce(arg, Type::function({}, 0, false, ret)));
       return stage->type->isError()
                  ? stage
                  : checker_.typeRelations().convert(
@@ -129,7 +122,7 @@ Expr *StreamPipeline::streamStage(Expr *&arg, const Type *&chunk, bool first, bo
     }
     const Type *source = Type::asyncIterator(chunk);
     if (ret->isAsyncIterator()) {
-      const Type *fn = Type::function({source, options}, 2, false, ret);
+      const Type *fn = Type::function({source}, 1, false, ret);
       Expr *stage = stageCall("streamTransformStage", {chunk, ret->yielded()},
                               checker_.typeRelations().coerce(arg, fn));
       chunk = ret->yielded();
@@ -139,7 +132,7 @@ Expr *StreamPipeline::streamStage(Expr *&arg, const Type *&chunk, bool first, bo
                        stage, Type::unionOf({checker_.libraryClass("Stream")->type, stageType}));
     }
     if (ret->isPromise() && last) {
-      const Type *fn = Type::function({source, options}, 2, false, ret);
+      const Type *fn = Type::function({source}, 1, false, ret);
       const Type *value = ret->promised();
       if (sinkValue) {
         *sinkValue = value;
@@ -395,9 +388,8 @@ Expr *StreamPipeline::checkStreamFunction(CallExpr *call, FunctionDecl *decl, ll
     return checker_.eventTargetChecker().callLibraryStatic(call, streamClass, "pipelineOut", {},
                                                            given, loc);
   }
-  const Type *optionsType = Type::optional(Type::object(
-      {Field{"signal", Type::optional(checker_.libraryClass("AbortSignal")->type), false},
-       Field{"end", Type::optional(Type::boolTy()), false}}));
+  const Type *optionsType =
+      Type::optional(Type::object({Field{"end", Type::optional(Type::boolTy()), false}}));
   Expr *options = optionsArg ? checker_.argumentChecker().checkArg(optionsArg, optionsType)
                              : undefinedOf(optionsType);
   if (options->type->isError()) {

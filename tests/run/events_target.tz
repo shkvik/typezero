@@ -2,8 +2,9 @@
 // EventTarget, Event and CustomEvent, globals as in node (docs/events.md,
 // section 4): the order of listeners, those added while an event is
 // dispatched, once, objects with handleEvent(), the same listener added
-// twice, preventDefault(), stopImmediatePropagation(), removal by a signal;
-// a listener that takes a CustomEvent<T> gets its detail as a T.
+// twice, preventDefault(), stopImmediatePropagation(), removeEventListener;
+// a listener that takes a CustomEvent<T> gets its detail as a T; the name
+// and the legacy code of a DOMException.
 const t = new EventTarget()
 const log: string[] = []
 const late = () => log.push("late")
@@ -44,13 +45,14 @@ t.addEventListener("z", () => console.log("second"))
 t.dispatchEvent(e2)
 console.log(Event.NONE, Event.AT_TARGET, new Event("q").cancelable, new Event("q").bubbles)
 
-// Removed when the signal aborts.
-const ac = new AbortController()
-t.addEventListener("w", () => console.log("w"), { signal: ac.signal })
+const onW = () => console.log("w")
+t.addEventListener("w", onW)
 t.dispatchEvent(new Event("w"))
-ac.abort()
+t.removeEventListener("w", onW)
 t.dispatchEvent(new Event("w"))
 console.log("done w")
+console.log(new DOMException("m").name, new DOMException("m", "TimeoutError").code,
+            new DOMException("m", "Nope").code)
 
 const ce = new CustomEvent("c", { detail: { n: 1 } })
 console.log(ce.detail, ce.type, ce.bubbles, ce.cancelable, ce.composed, ce.isTrusted(), ce.eventPhase())

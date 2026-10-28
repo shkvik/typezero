@@ -19,7 +19,6 @@
 #include "runtime/core/tzrt/tzrt.h"
 #include "runtime/library/bytes/buffer/buffer.h"
 #include "runtime/library/bytes/bytes/bytes.h"
-#include "runtime/library/events/signal/signal.h"
 #include <stdlib.h>
 #include <string.h>
 
@@ -85,9 +84,6 @@ static void fsp_free(FsRequest *r) {
   tz_fs_raw_free(&r->at);
   tz_fs_listed_free(&r->entries);
   free(r->dirs);
-  if (r->signal) {
-    tz_instance_release((TzInstance *)r->signal);
-  }
   tz_obj_release((TzObject *)r->promise);
   tz_free(r);
 }
@@ -111,21 +107,6 @@ int tz_fs_fsp_path(FsRequest *r, void *obj, uint64_t meta, const char *syscall) 
   ++r->paths;
 
   return 1;
-}
-
-static int fsp_signal(FsRequest *r, void *signal) {
-  if (!signal) {
-    return 1;
-  }
-  tz_ref_retain(signal);
-  r->signal = signal;
-  if (!tz_signal_aborted(signal)) {
-    return 1;
-  }
-  tz_fs_abort_failure(r->make);
-  tz_fs_fsp_settle_failed(r);
-
-  return 0;
 }
 
 void tz_fs_fsp_queue(FsRequest *r, void (*work)(TzWork *), void (*done)(TzWork *)) {
@@ -153,11 +134,6 @@ void tz_fs_fsp_fail_system(FsRequest *r, int error, const char *syscall, int sho
 #endif
 
 int tz_fs_fsp_succeeded(FsRequest *r) {
-  if (r->signal && tz_signal_aborted(r->signal)) {
-    tz_fs_abort_failure(r->make);
-    tz_fs_fsp_settle_failed(r);
-    return 0;
-  }
   if (!r->failed) {
     return 1;
   }
@@ -322,12 +298,9 @@ static void read_file_done(TzWork *w) {
 }
 
 void tz_fsp_read_file(TzPromise *p, void *path_obj, uint64_t path_meta, void *flag_obj,
-                      uint64_t flag_meta, void *signal, int64_t encoding, TzMaker make) {
+                      uint64_t flag_meta, int64_t encoding, TzMaker make) {
   FsRequest *r = tz_fs_fsp_new(p, make);
   r->encoding = encoding;
-  if (!fsp_signal(r, signal)) {
-    return;
-  }
   if (!tz_fs_flags_of(flag_obj, flag_meta, &r->flags, make)) {
     tz_fs_fsp_settle_failed(r);
     return;
@@ -359,11 +332,8 @@ static void write_file_work(TzWork *w) {
 }
 
 static FsRequest *write_request(TzPromise *p, void *path_obj, uint64_t path_meta, void *flag_obj,
-                                uint64_t flag_meta, int32_t mode, void *signal, TzMaker make) {
+                                uint64_t flag_meta, int32_t mode, TzMaker make) {
   FsRequest *r = tz_fs_fsp_new(p, make);
-  if (!fsp_signal(r, signal)) {
-    return NULL;
-  }
   if (!tz_fs_flags_of(flag_obj, flag_meta, &r->flags, make)) {
     tz_fs_fsp_settle_failed(r);
     return NULL;
@@ -378,8 +348,8 @@ static FsRequest *write_request(TzPromise *p, void *path_obj, uint64_t path_meta
 
 void tz_fsp_write_file(TzPromise *p, void *path_obj, uint64_t path_meta, void *data_obj,
                        uint64_t data_meta, void *flag_obj, uint64_t flag_meta, int64_t mode,
-                       void *signal, int64_t encoding, TzMaker make) {
-  FsRequest *r = write_request(p, path_obj, path_meta, flag_obj, flag_meta, mode, signal, make);
+                       int64_t encoding, TzMaker make) {
+  FsRequest *r = write_request(p, path_obj, path_meta, flag_obj, flag_meta, mode, make);
   if (!r) {
     return;
   }
@@ -403,9 +373,8 @@ void tz_fsp_write_file(TzPromise *p, void *path_obj, uint64_t path_meta, void *d
 }
 
 void tz_fsp_write_file_bytes(TzPromise *p, void *path_obj, uint64_t path_meta, const TzBytes *b,
-                             void *flag_obj, uint64_t flag_meta, int64_t mode, void *signal,
-                             TzMaker make) {
-  FsRequest *r = write_request(p, path_obj, path_meta, flag_obj, flag_meta, mode, signal, make);
+                             void *flag_obj, uint64_t flag_meta, int64_t mode, TzMaker make) {
+  FsRequest *r = write_request(p, path_obj, path_meta, flag_obj, flag_meta, mode, make);
   if (!r) {
     return;
   }

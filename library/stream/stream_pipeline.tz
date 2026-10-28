@@ -5,12 +5,9 @@ const kSinkStage = 2
 export class PipelineStage {
   constructor(
     readonly kind: int,
-    readonly source: ((signal: AbortSignal) => AsyncGenerator<unknown>) | undefined,
-    readonly transform:
-      | ((source: AsyncGenerator<unknown>, signal: AbortSignal) => AsyncGenerator<unknown>)
-      | undefined,
-    readonly sink: ((source: AsyncGenerator<unknown>, signal: AbortSignal) => Promise<unknown>) |
-      undefined,
+    readonly source: (() => AsyncGenerator<unknown>) | undefined,
+    readonly transform: ((source: AsyncGenerator<unknown>) => AsyncGenerator<unknown>) | undefined,
+    readonly sink: ((source: AsyncGenerator<unknown>) => Promise<unknown>) | undefined,
   ) {}
 }
 
@@ -38,52 +35,44 @@ async function* asyncChunks(source: Generator<unknown>): AsyncGenerator<unknown>
   for (const chunk of source) yield chunk
 }
 
-export function streamSourceStage<B>(fn: (options: { signal: AbortSignal }) => AsyncGenerator<B>):
-    PipelineStage {
-  return new PipelineStage(kSourceStage, (signal) => chunksOf<B>(fn({ signal })), undefined,
-                           undefined)
+export function streamSourceStage<B>(fn: () => AsyncGenerator<B>): PipelineStage {
+  return new PipelineStage(kSourceStage, () => chunksOf<B>(fn()), undefined, undefined)
 }
 
 export function streamIterableStage<B>(iterator: Iterator<B>): PipelineStage {
   const chunks = syncChunks<B>(iterator)
-  return new PipelineStage(kSourceStage, (signal) => {
-    void signal
-    return asyncChunks(chunks)
-  }, undefined, undefined)
+  return new PipelineStage(kSourceStage, () => asyncChunks(chunks), undefined, undefined)
 }
 
 export function streamAsyncIterableStage<B>(iterator: AsyncIterator<B>): PipelineStage {
-  return new PipelineStage(kSourceStage, (signal) => {
-    void signal
-    return iteratorChunks<B>(iterator)
-  }, undefined, undefined)
+  return new PipelineStage(kSourceStage, () => iteratorChunks<B>(iterator), undefined, undefined)
 }
 
 export function streamTransformStage<A, B>(
-  fn: (source: AsyncGenerator<A>, options: { signal: AbortSignal }) => AsyncGenerator<B>,
+  fn: (source: AsyncGenerator<A>) => AsyncGenerator<B>,
 ): PipelineStage {
   return new PipelineStage(
     kTransformStage,
     undefined,
-    (source, signal) => chunksOf<B>(fn(chunksAs<A>(source), { signal })),
+    (source) => chunksOf<B>(fn(chunksAs<A>(source))),
     undefined,
   )
 }
 
 export function streamSinkStage<A, V>(
-  fn: (source: AsyncGenerator<A>, options: { signal: AbortSignal }) => Promise<V>,
+  fn: (source: AsyncGenerator<A>) => Promise<V>,
 ): PipelineStage {
-  return new PipelineStage(kSinkStage, undefined, undefined, async (source, signal) => {
-    const value: unknown = await fn(chunksAs<A>(source), { signal })
+  return new PipelineStage(kSinkStage, undefined, undefined, async (source) => {
+    const value: unknown = await fn(chunksAs<A>(source))
     return value
   })
 }
 
 export function streamVoidSinkStage<A>(
-  fn: (source: AsyncGenerator<A>, options: { signal: AbortSignal }) => Promise<void>,
+  fn: (source: AsyncGenerator<A>) => Promise<void>,
 ): PipelineStage {
-  return new PipelineStage(kSinkStage, undefined, undefined, async (source, signal) => {
-    await fn(chunksAs<A>(source), { signal })
+  return new PipelineStage(kSinkStage, undefined, undefined, async (source) => {
+    await fn(chunksAs<A>(source))
     const value: unknown = undefined
     return value
   })
@@ -95,7 +84,6 @@ class PipelineState {
   destroys: ((err: StreamError | undefined) => void)[] = []
   lastStreamCleanup: (() => void)[] = []
   finishCount: int = 0
-  readonly ac = new AbortController()
   constructor(public callback: ((err: StreamError | undefined, value: unknown) => void) | undefined) {}
 }
 
@@ -111,7 +99,6 @@ function finishImpl(ps: PipelineState, err: StreamError | undefined, final: bool
     const destroy = ps.destroys.shift()
     if (destroy != undefined) destroy(ps.error)
   }
-  ps.ac.abort()
   if (final) {
     if (ps.error == undefined) for (const fn of ps.lastStreamCleanup) fn()
     ps.lastStreamCleanup = []
