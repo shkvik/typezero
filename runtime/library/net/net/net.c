@@ -366,14 +366,18 @@ static NetConn *conn_new(SOCKET s) {
 }
 
 static void conn_free(NetConn *c) {
-  if (c->listener) {
+  NetListener *l = c->listener;
+  if (l) {
     if (c->prev) {
       c->prev->next = c->next;
     } else {
-      c->listener->conns = c->next;
+      l->conns = c->next;
     }
     if (c->next) {
       c->next->prev = c->prev;
+    }
+    if (l->closed && !l->conns && l->drained) {
+      net_fulfill(&l->drained, NULL, 0);
     }
   }
   if (c->tls) {
@@ -895,6 +899,11 @@ static void listener_close(NetListener *l) {
     return;
   }
   l->closed = 1;
+  if (l->sweep) {
+    tz_timer_clear(l->sweep);
+    tz_obj_release((TzObject *)l->sweep);
+    l->sweep = NULL;
+  }
   closesocket(l->s);
   if (l->accepting != INVALID_SOCKET && !l->ops) {
     closesocket(l->accepting);
@@ -911,14 +920,71 @@ static void listener_drop(void *object) {
     l->pending = NULL;
     tz_obj_release((TzObject *)p);
   }
+  if (l->drained) {
+    TzPromise *p = l->drained;
+    l->drained = NULL;
+    tz_obj_release((TzObject *)p);
+  }
   l->orphan = 1;
   if (!l->ops) {
     listener_free(l);
   }
 }
 
+typedef struct Sweep {
+  TzObject base;
+  NetListener *l;
+} Sweep;
+
+static void sweep_drop(void *object) { tz_obj_free(object); }
+
+static const TzObjectDesc sweep_desc = {sweep_drop};
+
+static void sweep_fired(TzObject *env) {
+  NetListener *l = ((Sweep *)env)->l;
+  double now = net_now();
+  for (NetConn *c = l->conns; c; c = c->next) {
+    conn_lock(c);
+    if (!c->closed && !c->busy && !c->writing) {
+      if (c->http.head_since > 0) {
+        if (l->headers_timeout > 0 && now - c->http.head_since >= l->headers_timeout) {
+          tz_http_too_slow(c);
+        }
+      } else if (l->keep_alive > 0 && now - c->last_active >= l->keep_alive) {
+        net_abort(c);
+      }
+    }
+    conn_unlock(c);
+  }
+}
+
+static const TzFunctionInfo sweep_info = {(void *)sweep_fired, {NULL, 0}};
+
+static void start_sweep(NetListener *l) {
+  double every = 1000;
+  if (l->keep_alive > 0 && l->keep_alive < every) {
+    every = l->keep_alive;
+  }
+  if (l->headers_timeout > 0 && l->headers_timeout < every) {
+    every = l->headers_timeout;
+  }
+  if (every < 10) {
+    every = 10;
+  }
+  if (l->keep_alive <= 0 && l->headers_timeout <= 0) {
+    return;
+  }
+  Sweep *sweep = (Sweep *)tz_obj_alloc(sizeof(Sweep));
+  sweep->base.rc = 1;
+  sweep->base.desc = &sweep_desc;
+  sweep->l = l;
+  l->sweep = tz_timer_new(&sweep_info, &sweep->base, every, 1);
+  tz_timer_ref(l->sweep, 0);
+}
+
 void *tz_net_listen(void *host_obj, uint64_t host_meta, int64_t port, double max_body,
-                    TzMaker make) {
+                    int64_t keep_alive, int64_t headers_timeout, TzMaker make) {
+  TZ_ORDERED();
   start();
   tz_net_make = make;
   char host[256];
@@ -991,12 +1057,43 @@ void *tz_net_listen(void *host_obj, uint64_t host_meta, int64_t port, double max
   l->accepting = INVALID_SOCKET;
   l->family = family;
   l->max_body = max_body;
+  l->keep_alive = (double)keep_alive;
+  l->headers_timeout = (double)headers_timeout;
+  memcpy(l->host, host, strlen(host) + 1);
   SOCKADDR_STORAGE bound;
   int bound_length = sizeof bound;
   getsockname(s, (SOCKADDR *)&bound, &bound_length);
   l->port = address_port((SOCKADDR *)&bound);
+  start_sweep(l);
 
   return l;
+}
+
+void tz_net_listener_url(TzStr *out, void *listener, TzMaker make) {
+  TZ_ORDERED();
+  (void)make;
+  NetListener *l = (NetListener *)listener;
+  const char *host = l->host;
+  if (strcmp(host, "0.0.0.0") == 0 || strcmp(host, "::") == 0) {
+    host = "localhost";
+  }
+  int bracket = strchr(host, ':') != NULL;
+  char text[320];
+  int n = snprintf(text, sizeof text, "%s://%s%s%s:%d/", l->tls ? "https" : "http",
+                   bracket ? "[" : "", host, bracket ? "]" : "", (int)l->port);
+  *out = tz_str_from_ascii(text, (size_t)n);
+}
+
+void tz_net_client_address(TzStr *out, void *conn, TzMaker make) {
+  (void)make;
+  NetConn *c = (NetConn *)conn;
+  *out = tz_str_from_ascii(c->peer, strlen(c->peer));
+}
+
+int64_t tz_net_client_port(void *conn, TzMaker make) {
+  (void)make;
+
+  return ((NetConn *)conn)->peer_port;
 }
 
 int64_t tz_net_listener_port(void *listener, TzMaker make) {
@@ -1093,6 +1190,15 @@ static void accepted(NetListener *l, int32_t error) {
     return;
   }
   NetConn *c = conn_new(s);
+  SOCKADDR *local = NULL, *remote = NULL;
+  int local_length = 0, remote_length = 0;
+  tz_net_accept_addresses(l->addresses, 0, sizeof(SOCKADDR_STORAGE) + 16,
+                          sizeof(SOCKADDR_STORAGE) + 16, &local, &local_length, &remote,
+                          &remote_length);
+  if (remote) {
+    address_text(remote, c->peer, sizeof c->peer);
+    c->peer_port = address_port(remote);
+  }
   c->pooled = pool != NULL;
   c->server = 1;
   c->listener = l;
@@ -1117,6 +1223,22 @@ void tz_net_accept(TzPromise *p, void *listener, TzMaker make) {
   accept_next(l);
 }
 
+void tz_net_drained(TzPromise *p, void *listener, TzMaker make) {
+  TZ_ORDERED();
+  NetListener *l = (NetListener *)listener;
+  tz_net_make = make;
+  tz_ref_retain(p);
+  if (l->drained) {
+    TzPromise *old = l->drained;
+    l->drained = NULL;
+    net_fulfill(&old, NULL, 0);
+  }
+  l->drained = p;
+  if (l->closed && !l->conns) {
+    net_fulfill(&l->drained, NULL, 0);
+  }
+}
+
 void tz_net_close_listener(void *listener, TzMaker make) {
   TZ_ORDERED();
   (void)make;
@@ -1126,32 +1248,11 @@ void tz_net_close_listener(void *listener, TzMaker make) {
     conn_lock(c);
     c->http.ending = 1;
     c->http.keep_alive = 0;
-    conn_unlock(c);
-  }
-}
-
-int64_t tz_net_sweep(void *listener, double idle, TzMaker make) {
-  TZ_ORDERED();
-  (void)make;
-  NetListener *l = (NetListener *)listener;
-  double now = net_now();
-  int32_t left = 0;
-  for (NetConn *c = l->conns; c; c = c->next) {
-    conn_lock(c);
-    if (c->closed) {
-      conn_unlock(c);
-      continue;
-    }
-    if (!c->busy && !c->writing && (idle == 0 || now - c->last_active >= idle)) {
+    if (!c->closed && !c->busy && !c->writing) {
       net_abort(c);
-      conn_unlock(c);
-      continue;
     }
     conn_unlock(c);
-    ++left;
   }
-
-  return left;
 }
 
 typedef struct Connect {
@@ -1479,15 +1580,35 @@ void tz_net_close(void *conn, TzMaker make) {
   (void)make;
 }
 void *tz_net_listen(void *host_obj, uint64_t host_meta, int64_t port, double max_body,
-                    TzMaker make) {
+                    int64_t keep_alive, int64_t headers_timeout, TzMaker make) {
   (void)host_obj;
   (void)host_meta;
   (void)port;
   (void)max_body;
+  (void)keep_alive;
+  (void)headers_timeout;
   (void)make;
   unsupported();
 
   return NULL;
+}
+void tz_net_listener_url(TzStr *out, void *listener, TzMaker make) {
+  (void)out;
+  (void)listener;
+  (void)make;
+  unsupported();
+}
+void tz_net_client_address(TzStr *out, void *conn, TzMaker make) {
+  (void)out;
+  (void)conn;
+  (void)make;
+  unsupported();
+}
+int64_t tz_net_client_port(void *conn, TzMaker make) {
+  (void)conn;
+  (void)make;
+
+  return 0;
 }
 int64_t tz_net_listener_port(void *listener, TzMaker make) {
   TZ_ORDERED();
@@ -1507,13 +1628,12 @@ void tz_net_close_listener(void *listener, TzMaker make) {
   (void)listener;
   (void)make;
 }
-int64_t tz_net_sweep(void *listener, double idle, TzMaker make) {
+void tz_net_drained(TzPromise *p, void *listener, TzMaker make) {
   TZ_ORDERED();
+  (void)p;
   (void)listener;
-  (void)idle;
   (void)make;
-
-  return 0;
+  unsupported();
 }
 void tz_net_connect(TzPromise *p, void *host_obj, uint64_t host_meta, int64_t port, void *signal,
                     TzMaker make) {

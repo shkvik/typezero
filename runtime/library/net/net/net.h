@@ -74,6 +74,7 @@ typedef struct HttpState {
   TzAbortListener abort;
   uint8_t *all;
   size_t all_length, all_capacity;
+  double head_since;
 } HttpState;
 
 struct NetConn {
@@ -115,6 +116,8 @@ struct NetConn {
   uint8_t raw_full;
   uint8_t *sealed;
   uint32_t sealed_len, sealed_cap;
+  char peer[64];
+  int32_t peer_port;
 };
 
 static inline void conn_lock(NetConn *c) {
@@ -154,7 +157,12 @@ struct NetListener {
   NetOp aop;
   TzPromise *pending;
   NetConn *conns;
+  TzPromise *drained;
   double max_body;
+  double keep_alive;
+  double headers_timeout;
+  struct TzTimer *sweep;
+  char host[256];
   void *tls;
   void (*tls_accept)(NetListener *l, NetConn *c);
   void (*tls_release)(void *tls);
@@ -192,6 +200,7 @@ TzBytes *net_bytes(const uint8_t *data, size_t length);
 extern TzMaker tz_net_make;
 
 void *tz_net_listen(void *host_obj, uint64_t host_meta, int64_t port, double max_body,
-                    TzMaker make);
+                    int64_t keep_alive, int64_t headers_timeout, TzMaker make);
+void tz_http_too_slow(NetConn *c);
 
 #endif

@@ -50,6 +50,6 @@ const ending = a.end("y")
 
 const e1 = new PassThrough()
 const e2 = new PassThrough()
-pipeline(e1, e2, (err) => log(`pipeline error ${err?.message} e1=${e1.destroyed} e2=${e2.destroyed}`))
+pipeline(e1, e2, (err) => log(`pipeline error ${err?.message} e1=${e1.destroyed()} e2=${e2.destroyed()}`))
 e1.destroy({ code: "E_BAD", message: "bad" })
 log(`a ended ${(await ending).isOk()}`)

@@ -824,6 +824,7 @@ private:
   friend class DeclarePass;
   friend class InferPass;
   friend class CheckPass;
+  friend class DeclarationChecker;
   friend class InstancesPass;
   friend class WholeProgramPass;
   friend class Scopes;

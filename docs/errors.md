@@ -153,7 +153,7 @@ async function getUser(id: int) {
   `await` там ничего не меняет, `async`-функция и так дождётся `Promise`. `return (await x).value`
   — нормально.
 - **Отмена:** `signal.throwIfAborted()` уходит, вместо него
-  `if (signal.aborted) return err(signal.reason)`. `setTimeout(100, undefined, { signal })` из
+  `if (signal.aborted()) return err(signal.reason())`. `setTimeout(100, undefined, { signal })` из
   `"node:timers/promises"` отдаёт `Result<void, AbortError>`.
 - **`process.on("uncaughtException")` и `process.on("unhandledRejection")`** — ошибка:
   ловить нечего.

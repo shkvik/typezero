@@ -132,8 +132,12 @@ Expr *LibraryCalls::checkLibCall(CallExpr *call, NameExpr *name) {
   case Builtin::LibAhead:
     call->args[0] = checker_.exprChecker().checkExpr(call->args[0]);
     call->type = call->args[0]->type;
-    if (!call->type->isPromise() && !call->type->isError()) {
-      checker_.diags_.error(name->loc(), "'ahead' takes the promise an await waits for");
+    if (!call->type->isError() && !call->type->isPromise() &&
+        !(call->type->isUnion() &&
+          llvm::any_of(call->type->members(), [](const Type *m) { return m->isPromise(); }))) {
+      checker_.diags_.error(name->loc(),
+                            "'ahead' takes what an await waits for: a promise, or a value or a "
+                            "promise");
     }
     if (checker_.currentFunction_ && checker_.currentFunction_->decl) {
       checker_.currentFunction_->decl->awaitsAhead = true;

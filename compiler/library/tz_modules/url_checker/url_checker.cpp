@@ -128,9 +128,11 @@ bool UrlChecker::knownAbsolute(const Expr *expr) const {
     return true;
   }
   if (auto *member = dyn_cast<MemberExpr>(expr)) {
-    const Type *object = member->object->type;
-    return (member->name == "url" && isLibraryClass(object, "Request")) ||
-           (member->name == "href" && isLibraryClass(object, "URL"));
+    return member->name == "url" && isLibraryClass(member->object->type, "Request");
+  }
+  if (auto *call = dyn_cast<CallExpr>(expr); call && call->args.empty()) {
+    auto *member = dyn_cast<MemberExpr>(call->callee);
+    return member && member->name == "href" && isLibraryClass(member->object->type, "URL");
   }
 
   return false;

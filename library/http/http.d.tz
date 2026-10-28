@@ -1,0 +1,315 @@
+import { Request, Response } from "tz:fetch";
+import { URL } from "tz:url";
+import { AbortSignal } from "tz:web";
+
+/**
+ * What a server answers each request with: a request in, a response out, at
+ * once or later. A function, an async function, or `app.fetch` of hono (it
+ * gets `client` as its second argument, as under Deno).
+ *
+ * The handler answers its own errors with a status: 400 for bad JSON, 500 for
+ * a database that is down. There are no exceptions for the server to turn
+ * into a 500.
+ *
+ * @example
+ * const handler: Handler = async (req, client) => {
+ *   console.log(`${client.address} ${req.method} ${req.url}`);
+ *   const body = await req.json();
+ *
+ *   if (body.isErr()) {
+ *     return new Response(`bad JSON: ${body.error.message}`, { status: 400 });
+ *   }
+ *
+ *   return Response.json({ got: body.value });
+ * };
+ */
+export type Handler = (
+  request: Request,
+  client: Client,
+) => Response | Promise<Response>;
+
+/**
+ * Who sent the request: the address and the port of the other end of its
+ * connection. Behind a proxy it is the proxy; the address of the user is then
+ * in a header the proxy adds, such as `x-forwarded-for`.
+ *
+ * @example
+ * const handler: Handler = (req, client) => {
+ *   if (client.address != "127.0.0.1") {
+ *     return new Response("only from this machine", { status: 403 });
+ *   }
+ *
+ *   return new Response("hi");
+ * };
+ */
+export type Client = {
+  /** "203.0.113.7", or "2001:db8::1" for IPv6. */
+  address: string;
+  port: int;
+};
+
+/**
+ * Where and how a server listens, given once, when it is made: a server does
+ * not change them later. Every field may be left out.
+ *
+ * Connections, keep-alive and the order of the requests of a connection are
+ * the server's own; these fields are the limits it keeps.
+ *
+ * @example
+ * // This machine only, any free port:
+ * const server = new Server({ hostname: "127.0.0.1", port: 0 }, handler);
+ */
+export type ServeOptions = {
+  /** The port; 8000. 0 takes any free one, which `listen` then tells. */
+  port?: int;
+  /** The address; "0.0.0.0", every network. "127.0.0.1" is this machine only. */
+  hostname?: string;
+  /** Aborting it stops the server, as `stop()` does. */
+  signal?: AbortSignal;
+  /** A request with a larger body is answered with 413; 128 MB. */
+  maxBodySize?: double;
+  /**
+   * How long, in milliseconds, a connection may wait for its next request
+   * before the server closes it; 5000, as in node. Browsers keep a connection
+   * open after a response; without this limit such connections would hold a
+   * socket each forever.
+   *
+   * @example
+   * // Clients behind a slow proxy reuse connections longer:
+   * const server = new Server({ port: 3000, keepAliveTimeout: 30000 }, handler);
+   */
+  keepAliveTimeout?: int;
+  /**
+   * How long, in milliseconds, the line and the headers of a request may take
+   * to arrive, from their first byte; 60000, as in node. A slower client is
+   * answered with 408 and cut off: without this limit a client that sends a
+   * byte now and then would hold a connection forever.
+   */
+  headersTimeout?: int;
+  /** http or https; http, `{ secure: false }`, when left out. */
+  transport?: ServeTransport;
+};
+
+/**
+ * http or https, one of two:
+ * - `{ secure: false }` — http, no certificate;
+ * - `{ secure: true, cert, key }` — https: the certificate and its key, as PEM
+ *   text, a chain being the certificates after the first. `secure: true`
+ *   without them does not compile, and `secure: false` does not take them.
+ *
+ * @example
+ * const cert = readFileSync("cert.pem", "utf8");
+ * const key = readFileSync("key.pem", "utf8");
+ *
+ * if (cert.isErr()) {
+ *   console.error(`cert.pem: ${cert.error.message}`);
+ *   process.exit(1);
+ * }
+ *
+ * if (key.isErr()) {
+ *   console.error(`key.pem: ${key.error.message}`);
+ *   process.exit(1);
+ * }
+ *
+ * const server = new Server(
+ *   {
+ *     port: 443,
+ *     transport: { secure: true, cert: cert.value, key: key.value },
+ *   },
+ *   handler,
+ * );
+ */
+export type ServeTransport =
+  | {
+      secure: false;
+    }
+  | {
+      secure: true;
+      cert: string;
+      key: string;
+    };
+
+/**
+ * Why `listen` gave an Err: an error of the core of the server — its socket,
+ * its certificate — not of the handler or of the program. `kind` is
+ * "SERVER" for that. `code` says what happened and is one of
+ * `ListenErrorCode`, so a `switch` on it is checked; `message` is for people;
+ * `address` and `port` are where the server tried to listen, as in node. It
+ * is the error of `listen` alone, with only the fields it has.
+ *
+ * @example
+ * const server = new Server({ port: 80 }, handler);
+ * const listening = server.listen();
+ *
+ * if (listening.isErr()) {
+ *   switch (listening.error.code) {
+ *     case "EADDRINUSE": {
+ *       console.error(`port ${listening.error.port} is taken`);
+ *       break;
+ *     }
+ *     case "EACCES": {
+ *       console.error(`no right to port ${listening.error.port}`);
+ *       break;
+ *     }
+ *     default: {
+ *       console.error(listening.error.message);
+ *     }
+ *   }
+ *
+ *   process.exit(1);
+ * }
+ */
+export type ListenError = {
+  /** "SERVER": the error comes from the core of the server. */
+  kind: "SERVER";
+  /** What happened; one of `ListenErrorCode`. */
+  code: ListenErrorCode;
+  /** What happened, for people. */
+  message: string;
+  /** The number of the error of the system, as node gives it. */
+  errno: int;
+  /** The call of the system that failed: "listen", "getaddrinfo". */
+  syscall: string;
+  /** The hostname given to the server, or "0.0.0.0". */
+  address: string;
+  /** The port given to the server, or 8000. */
+  port: int;
+};
+
+/**
+ * - "EADDRINUSE" — the port is taken by another program;
+ * - "EACCES" — no right to the port;
+ * - "EADDRNOTAVAIL" — this machine has no such address;
+ * - "ENOTFOUND" — the host name is not found;
+ * - "ERR_INVALID_ARG_VALUE" — the host name is not ASCII;
+ * - "ERR_TLS_CERT", "ERR_TLS_KEY" — `cert` or `key` of an https server
+ *   cannot be read;
+ * - "EMFILE", "ENOBUFS" — the system has no more sockets to give;
+ * - "EAFNOSUPPORT" — the system has no IPv6 (or no IPv4);
+ * - "UNKNOWN" — another error of the system; `message` tells which.
+ */
+export type ListenErrorCode =
+  | "EADDRINUSE"
+  | "EACCES"
+  | "EADDRNOTAVAIL"
+  | "ENOTFOUND"
+  | "ERR_INVALID_ARG_VALUE"
+  | "ERR_TLS_CERT"
+  | "ERR_TLS_KEY"
+  | "EMFILE"
+  | "ENOBUFS"
+  | "EAFNOSUPPORT"
+  | "UNKNOWN";
+
+/**
+ * A server of HTTP/1.1, and of https with `transport: { secure: true, … }`.
+ * Each request goes to the handler, which gives a `Response`; requests run in
+ * parallel on all cores.
+ *
+ * A server is only its options and its handler, and never changes. Each
+ * `listen` opens a socket and gives a `Listening`, which answers requests
+ * until its `stop()`.
+ *
+ * @example
+ * import { Server } from "tz:http";
+ *
+ * const server = new Server({ port: 3000 }, (req) => new Response("hi"));
+ * const listening = server.listen();
+ *
+ * if (listening.isErr()) {
+ *   console.error(listening.error.message);
+ *   process.exit(1);
+ * }
+ *
+ * console.log(`listening on ${listening.value.url.href()}`);
+ *
+ * @example
+ * // With hono:
+ * const app = new Hono();
+ * app.get("/", (c) => c.text("Hello"));
+ * const server = new Server({ port: 3000 }, app.fetch);
+ * const listening = server.listen();
+ */
+export declare class Server {
+  /** A server without a socket; `listen` opens one. */
+  public constructor(options: ServeOptions, handler: Handler);
+
+  /**
+   * Opens a socket and starts answering on it; gives the `Listening` that
+   * stops it. Each call opens another socket with the same options: on the
+   * same port the second one is an Err "EADDRINUSE", on port 0 it is a second
+   * server on another port.
+   *
+   * @example
+   * const server = new Server({ hostname: "127.0.0.1", port: 0 }, handler);
+   * const listening = server.listen();
+   *
+   * if (listening.isErr()) {
+   *   console.error(listening.error.message);
+   *   process.exit(1);
+   * }
+   *
+   * const hello = new URL("/hello", listening.value.url);
+   * const res = await fetch(hello);
+   * await listening.value.stop();
+   */
+  public listen(): Result<Listening, ListenError>;
+}
+
+/**
+ * A server that listens: what `listen` gives. It answers requests on its
+ * socket until `stop()`, or until the `signal` of the server's options is
+ * aborted; either way `stop()` is how to wait for its end. A program does not
+ * make one itself; `listen` does.
+ *
+ * @example
+ * const listening = server.listen();
+ *
+ * if (listening.isErr()) {
+ *   console.error(listening.error.message);
+ *   process.exit(1);
+ * }
+ *
+ * console.log(`on port ${listening.value.port}`);
+ * const health = new URL("/health", listening.value.url);
+ * const res = await fetch(health);
+ * await listening.value.stop();
+ */
+export declare class Listening {
+  /** The URL to reach the server by; "localhost" for "0.0.0.0". */
+  public readonly url: URL;
+
+  /** The address it listens on, as given to the server. */
+  public readonly hostname: string;
+
+  /** The port it listens on: the real one, also when 0 was asked for. */
+  public readonly port: int;
+
+  /**
+   * Stops taking connections, closes those that wait for a request, and
+   * resolves once the requests being handled are answered. A second call,
+   * and a call after the `signal` stopped it, closes nothing and waits for
+   * the same: this is how to wait for the end of a server.
+   *
+   * @example
+   * process.on("SIGINT", async () => {
+   *   await listening.stop();
+   *   console.log("stopped");
+   * });
+   *
+   * @example
+   * // Stopped by a signal, waited for with stop():
+   * const abort = new AbortController();
+   * const server = new Server({ port: 3000, signal: abort.signal }, handler);
+   * const listening = server.listen();
+   *
+   * if (listening.isErr()) {
+   *   console.error(listening.error.message);
+   *   process.exit(1);
+   * }
+   *
+   * abort.abort();
+   * await listening.value.stop();
+   */
+  public stop(): Promise<void>;
+}

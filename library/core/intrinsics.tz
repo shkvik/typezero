@@ -1,6 +1,6 @@
 export declare function panic(message: string): void
 export declare function defer(release: () => void): object
-export declare function ahead<T>(promise: Promise<T>): Promise<T>
+export declare function ahead<T>(value: T | Promise<T>): Promise<T>
 export declare function order(): void
 export declare function asListener<F>(value: unknown): F
 export declare function asClass<T>(value: unknown): T | undefined

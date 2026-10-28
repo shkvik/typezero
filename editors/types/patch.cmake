@@ -53,3 +53,49 @@ patch_types(${types_node}/stream/web.d.ts [[interface ReadableStreamDefaultContr
         readonly desiredSize: number | null;]]
             [[interface ReadableStreamDefaultController<R = any> {
         desiredSize(): number;]])
+
+# A value that the object changes itself is read through a method
+# (docs/objects.md, section 6): the parts of a URL, the size of its
+# parameters, the state of a signal, of an event and of a stream, the body of
+# a request or a response.
+patch_types(${types_node}/url.d.ts [[`TypeError` will be thrown.
+         */
+        href: string;]] [[`TypeError` will be thrown.
+         */
+        href(): string;]])
+foreach(part hash host hostname password pathname port protocol search username)
+  patch_types(${types_node}/url.d.ts "        ${part}: string;" "        ${part}(): string;")
+endforeach()
+patch_types(${types_node}/url.d.ts [[        readonly origin: string;]] [[        origin(): string;]])
+patch_types(${types_node}/url.d.ts [[        readonly size: number;]] [[        size(): number;]])
+patch_types(${types_node}/web-globals/abortcontroller.d.ts [[    readonly aborted: boolean;]]
+            [[    aborted(): boolean;]])
+patch_types(${types_node}/web-globals/abortcontroller.d.ts [[    readonly reason: any;]]
+            [[    reason(): any;]])
+foreach(field "currentTarget: EventTarget | null" "defaultPrevented: boolean" "eventPhase: 0 | 2"
+              "isTrusted: boolean" "srcElement: EventTarget | null" "target: EventTarget | null")
+  string(REPLACE ":" "():" method "${field}")
+  patch_types(${types_node}/web-globals/events.d.ts "    readonly ${field};" "    ${method};")
+endforeach()
+patch_types(${types_node}/stream/web.d.ts [[interface ReadableStream<R = any> {
+        readonly locked: boolean;]] [[interface ReadableStream<R = any> {
+        locked(): boolean;]])
+patch_types(${types_undici}/fetch.d.ts [[  readonly body: ReadableStream | null]]
+            [[  body (): ReadableStream | null]])
+foreach(field "readableAborted: boolean" "readableDidRead: boolean"
+              "readableEncoding: BufferEncoding | null" "readableEnded: boolean"
+              "readableFlowing: boolean | null" "readableHighWaterMark: number"
+              "readableLength: number" "readableObjectMode: boolean" "closed: boolean"
+              "errored: Error | null" "writable: boolean" "writableAborted: boolean"
+              "writableEnded: boolean" "writableFinished: boolean" "writableHighWaterMark: number"
+              "writableLength: number" "writableObjectMode: boolean" "writableCorked: number"
+              "writableNeedDrain: boolean")
+  string(REPLACE ":" "():" method "${field}")
+  patch_types(${types_node}/stream.d.ts "            readonly ${field};" "            ${method};")
+endforeach()
+patch_types(${types_node}/stream.d.ts "            readable: boolean;" "            readable(): boolean;")
+patch_types(${types_node}/stream.d.ts "            destroyed: boolean;" "            destroyed(): boolean;")
+patch_types(${types_node}/stream.d.ts "            allowHalfOpen: boolean;" "            allowHalfOpen(): boolean;")
+patch_types(${types_node}/fs.d.ts "        bytesRead: number;" "        bytesRead(): number;")
+patch_types(${types_node}/fs.d.ts "        bytesWritten: number;" "        bytesWritten(): number;")
+patch_types(${types_node}/fs.d.ts "        pending: boolean;" "        pending(): boolean;")

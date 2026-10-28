@@ -3,8 +3,8 @@
 import { Server } from "tz:http"
 
 const port = parseInt(process.argv[2] ?? "8080").unwrapOr(8080)
-const server = new Server(() => new Response("Hello, World!"))
-const listened = server.listen({ port, hostname: "127.0.0.1" })
+const server = new Server({ port, hostname: "127.0.0.1" }, () => new Response("Hello, World!"))
+const listened = server.listen()
 if (listened.isErr()) {
   console.error(listened.error.message)
   process.exit(1)

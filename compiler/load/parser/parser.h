@@ -21,11 +21,14 @@ class ModuleParser;
 class TypeParser;
 class ObjectTypeParser;
 class FunctionTypeParser;
+class DeclarationParser;
+struct DeclarationFile;
 
 class Parser {
 public:
   Parser(Lexer &lexer, AstContext &ctx, Diagnostics &diags, bool library = false);
   SourceFile parseSourceFile();
+  DeclarationFile parseDeclarationFile();
   FunctionDecl *parseFunctionCopy();
   FunctionDecl *parseFunctionExprCopy();
   FunctionDecl *parseMethodCopy();
@@ -112,6 +115,7 @@ private:
   friend class TypeParser;
   friend class ObjectTypeParser;
   friend class FunctionTypeParser;
+  friend class DeclarationParser;
   std::unique_ptr<TokenCursor> cursor_;
   std::unique_ptr<StmtParser> stmts_;
   std::unique_ptr<VarParser> vars_;

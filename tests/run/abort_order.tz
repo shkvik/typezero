@@ -22,15 +22,15 @@ g.signal.addEventListener("abort", () => log("g listener"))
 g.signal.onabort = undefined
 g.signal.onabort = () => log("second handler")
 g.abort("plain reason")
-const reason = g.signal.reason
+const reason = g.signal.reason()
 log(typeof reason == "string" ? reason : "?")
 
 const a = new AbortController()
 const any = AbortSignal.any([a.signal])
 const anyOfAny = AbortSignal.any([any])
-any.addEventListener("abort", () => log(`any listener ${a.signal.aborted} ${anyOfAny.aborted}`))
+any.addEventListener("abort", () => log(`any listener ${a.signal.aborted()} ${anyOfAny.aborted()}`))
 anyOfAny.addEventListener("abort", () => log("any of any listener"))
-a.signal.addEventListener("abort", () => log(`a listener ${any.aborted} ${anyOfAny.aborted}`))
+a.signal.addEventListener("abort", () => log(`a listener ${any.aborted()} ${anyOfAny.aborted()}`))
 a.abort()
 
 const d = new AbortController()

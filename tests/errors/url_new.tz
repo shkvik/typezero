@@ -15,7 +15,7 @@ function make(text: string, base: string) {
   const known = new URL("https://example.com/a?b#c")
   const relative = new URL("/path", known)
   const copy = new URL(known)
-  const href = new URL(known.href)
+  const href = new URL(known.href())
   console.log(a, b, c, d, e, relative, copy, href, URL.parse(text, base).isOk())
 }
 make("x", "y")

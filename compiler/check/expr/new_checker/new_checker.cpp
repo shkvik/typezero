@@ -20,6 +20,7 @@
 #include "compiler/library/regex/regex_checker/regex_checker.h"
 #include "compiler/library/tz_modules/http_checker/http_checker.h"
 #include "compiler/library/tz_modules/library_calls/library_calls.h"
+#include "compiler/library/tz_modules/tz_modules_checker/tz_modules_checker.h"
 #include "compiler/library/tz_modules/url_checker/url_checker.h"
 #include "compiler/library/weakref/weak_ref_checker/weak_ref_checker.h"
 #include "llvm/ADT/STLExtras.h"
@@ -117,6 +118,9 @@ Expr *NewChecker::checkNew(NewExpr *expr, const Type *expected) {
       checker_.urlChecker().checkUrlNew(made);
     }
     if (auto *made = dyn_cast<NewExpr>(checked); made && cls->library) {
+      if (cls->name == "Server") {
+        checker_.tzModulesChecker().noteServer(made);
+      }
       if (cls->name == "Response") {
         checker_.httpChecker().checkResponseNew(made);
       } else if (cls->name == "Request") {

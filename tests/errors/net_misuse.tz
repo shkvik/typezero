@@ -4,17 +4,19 @@
 // library has.
 import { Server } from "tz:http"
 // expect-error: type 'string' is not assignable to type 'int | undefined' of field 'port'
-new Server(req => new Response("x")).listen({ port: "80" })
+new Server({ port: "80" }, req => new Response("x"))
 // expect-error: parameter 'req' is declared as 'string', but the function gets 'Request' here
-new Server((req: string) => new Response("x"))
+new Server({}, (req: string) => new Response("x"))
 // expect-error: type 'string' is not assignable to type 'Response | Promise<Response>'
-new Server(req => "text")
+new Server({}, req => "text")
+// expect-error: type '{ secure: boolean }' is not assignable to type '{ secure: false } | { secure: true; cert: string; key: string } | undefined' of field 'transport'; an object literal goes into a union as one of its members: it needs the fields of one of them, with its value of 'secure'
+new Server({ transport: { secure: true } }, req => new Response("x"))
+// expect-error: type '{ secure: boolean; cert: string; key: string }' is not assignable to type '{ secure: false } | { secure: true; cert: string; key: string } | undefined' of field 'transport'
+new Server({ transport: { secure: false, cert: "c", key: "k" } }, req => new Response("x"))
 // expect-error: cannot find name '__tz_net_close'
 const close = __tz_net_close
 const u = new URL("http://x")
-// expect-error: cannot assign to 'origin' because it is a read-only field of 'URL'
+// expect-error: 'origin' is a method of 'URL' and cannot be assigned: the object changes what it gives itself
 u.origin = "y"
-// expect-error: field 'href' is not a function; it has type 'string'
-u.href()
-// expect-error: cannot assign to 'port' because it is a read-only field of 'URL'; change it with 'setPort(...)'
+// expect-error: 'port' is a method of 'URL'; change it with 'setPort(...)'
 u.port += "1"

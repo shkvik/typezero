@@ -80,7 +80,7 @@ export class Connection {
 
   request(method: string, url: URL, text: string, bytes: Uint8Array | undefined, flags: int) {
     const head = this.head
-    const out: string[] = ["host", url.host]
+    const out: string[] = ["host", url.host()]
     for (let i = 0; i + 1 < head.length; i += 2) {
       const name = head[i] ?? ""
       if (name == "host") continue
@@ -92,7 +92,7 @@ export class Connection {
         out.push(name)
         out.push(value)
       }
-    const target = (url.pathname == "" ? "/" : url.pathname) + url.search
+    const target = (url.pathname() == "" ? "/" : url.pathname()) + url.search()
     httpRequest(this.socket, method, target, out, text, bytes, flags)
   }
 
@@ -387,28 +387,13 @@ class StreamState<R> {
   bytes = false
   highWaterMark: double = 1
   reads: ((result: ReadResult<R>) => void)[] = []
-  private watchers?: (() => void)[]
-
-  watch(watcher: () => void) {
-    const watchers = this.watchers ?? []
-    watchers.push(watcher)
-    this.watchers = watchers
-  }
 
   lock(locked: boolean) {
     this.locked = locked
-    this.changed()
   }
 
   disturb() {
-    if (this.disturbed) return
     this.disturbed = true
-    this.changed()
-  }
-
-  private changed() {
-    const watchers = this.watchers
-    if (watchers != undefined) for (const watcher of watchers) watcher()
   }
 }
 
@@ -599,12 +584,22 @@ function startedState<R>(source: UnderlyingSource<R> | undefined,
 }
 
 export class ReadableStream<R = Uint8Array> {
-  readonly locked = false
-  readonly disturbed = false
   private s?: StreamState<R>
 
   constructor(source?: UnderlyingSource<R>, strategy?: QueuingStrategy) {
-    if (source != undefined || strategy != undefined) this.watch(startedState(source, strategy))
+    if (source != undefined || strategy != undefined) this.s = startedState(source, strategy)
+  }
+
+  public locked(): boolean {
+    const s = this.s
+
+    return s != undefined && s.locked
+  }
+
+  public disturbed(): boolean {
+    const s = this.s
+
+    return s != undefined && s.disturbed
   }
 
   protected open(): StreamState<R> {
@@ -617,18 +612,8 @@ export class ReadableStream<R = Uint8Array> {
     const s = this.s
     if (s != undefined) return s
     const opened = this.open()
-    this.watch(opened)
+    this.s = opened
     return opened
-  }
-
-  private watch(s: StreamState<R>) {
-    this.s = s
-    this.locked = s.locked
-    this.disturbed = s.disturbed
-    s.watch(() => {
-      this.locked = s.locked
-      this.disturbed = s.disturbed
-    })
   }
 
   getReader(): ReadableStreamDefaultReader<R> {
@@ -684,13 +669,22 @@ const CODING_GZIP = 1
 const CODING_DEFLATE = 2
 const CODING_BR = 3
 
+export type Written =
+  | {
+      kind: "done"
+    }
+  | {
+      kind: "streaming"
+      finished: Promise<void>
+    }
+
 export type BodyInit = string | Uint8Array | ArrayBuffer | ReadableStream<Uint8Array> |
   URLSearchParams | FormData
 
 type Decode = (chunk: Uint8Array, last: boolean) => Result<Uint8Array, SystemError>
 
 function abortedReason(signal: AbortSignal): { timeout: boolean; message: string } {
-  const reason = signal.reason
+  const reason = signal.reason()
   if (reason instanceof DOMException)
     return { timeout: reason.name == "TimeoutError", message: reason.message }
   return { timeout: false, message: "This operation was aborted" }
@@ -726,7 +720,7 @@ class Wire {
   private failed(e: SystemError): BodyError {
     this.finished = true
     const signal = this.signal
-    if (signal != undefined && signal.aborted) return abortedBody(signal)
+    if (signal != undefined && signal.aborted()) return abortedBody(signal)
     return { code: "terminated", message: "terminated", cause: e.message }
   }
 
@@ -904,14 +898,14 @@ class Body {
 
   private locked(): boolean {
     const stream = this.stream
-    if (stream != undefined) return stream.locked
+    if (stream != undefined) return stream.locked()
     return this.opened?.locked ?? false
   }
 
   usedOrDisturbed(): boolean {
     if (this.used) return true
     const stream = this.stream
-    if (stream != undefined) return stream.disturbed
+    if (stream != undefined) return stream.disturbed()
     return this.opened?.disturbed ?? false
   }
 
@@ -1261,7 +1255,7 @@ export class Request {
   readonly isHistoryNavigation = false
   readonly duplex?: "half"
   readonly signal: AbortSignal
-  readonly body?: ReadableStream<Uint8Array>
+  private bodyStream?: ReadableStream<Uint8Array>
   private data: Body
 
   constructor(input: string | URL | Request, init?: RequestInit) {
@@ -1278,9 +1272,9 @@ export class Request {
     } else {
       if (typeof input == "string") {
         const parsed = URL.parse(input)
-        this.url = parsed.isOk() ? parsed.value.href : input
+        this.url = parsed.isOk() ? parsed.value.href() : input
       } else {
-        this.url = input.href
+        this.url = input.href()
       }
       this.headers = new Headers()
       this.data = Body.of(undefined)
@@ -1297,21 +1291,15 @@ export class Request {
       if (init.body != undefined) this.data = Body.of(init.body)
     }
     this.signal = signal ?? AbortSignal.withAbort().signal
-    this.body = this.data.view()
     const type = this.data.type
     if (type != undefined && !this.headers.has("content-type"))
       this.headers.append("content-type", type)
   }
 
-  private constructor(conn: Connection, base: string) {
+  private constructor(conn: Connection) {
     this.method = conn.method()
     this.headers = Headers.readFrom(conn)
-    const target = conn.target()
-    const host = this.headers.get("host")
-    const scheme = base.startsWith("https:") ? "https://" : "http://"
-    this.url = target.startsWith("/") ? (host != undefined ? scheme + host : base) + target
-             : target.startsWith("http://") || target.startsWith("https://") ? target
-             : base + "/" + target
+    this.url = conn.target()
     this.signal = AbortSignal.withAbort().signal
     if (conn.hasBody()) {
       this.data = Body.ofWire(new Wire(conn))
@@ -1319,11 +1307,10 @@ export class Request {
     } else {
       this.data = Body.of(undefined)
     }
-    this.body = this.data.view()
   }
 
-  static readFrom(conn: Connection, base: string): Request {
-    return new Request(conn, base)
+  static readFrom(conn: Connection): Request {
+    return new Request(conn)
   }
 
   async writeTo(conn: Connection, url: URL): Promise<Result<void, FetchError>> {
@@ -1355,6 +1342,17 @@ export class Request {
     return ok(undefined)
   }
 
+  public body(): ReadableStream<Uint8Array> | undefined {
+    const made = this.bodyStream
+    if (made != undefined) {
+      return made
+    }
+    const view = this.data.view()
+    this.bodyStream = view
+
+    return view
+  }
+
   bodyUsed(): boolean {
     return this.data.usedOrDisturbed()
   }
@@ -1364,8 +1362,7 @@ export class Request {
                                 signal: this.signal, duplex: this.duplex }
     const r = new Request(this.url, init)
     r.data = this.data.copy()
-    r.body = r.data.view()
-    this.body = this.data.view()
+    this.bodyStream = undefined
     return r
   }
 
@@ -1422,11 +1419,11 @@ export class Response {
   readonly status: int = 200
   readonly statusText: string = ""
   readonly headers: Headers
-  readonly body?: ReadableStream<Uint8Array>
   readonly ok: boolean = true
   readonly redirected: boolean = false
   readonly type: string = "default"
   readonly url: string = ""
+  private bodyStream?: ReadableStream<Uint8Array>
   private data: Body
 
   constructor(body?: BodyInit, init?: ResponseInit) {
@@ -1436,7 +1433,6 @@ export class Response {
     this.statusText = reasonPhrase(init?.statusText ?? "")
     this.headers = new Headers(init?.headers)
     this.data = Body.of(status == 204 || status == 205 || status == 304 ? undefined : body)
-    this.body = this.data.view()
     const type = this.data.type
     if (type != undefined && !this.headers.has("content-type"))
       this.headers.append("content-type", type)
@@ -1449,7 +1445,6 @@ export class Response {
     this.statusText = statusText
     this.headers = headers
     this.data = data
-    this.body = data.view()
     this.url = url
     this.redirected = redirected
     this.type = type
@@ -1475,14 +1470,26 @@ export class Response {
     return new Response(200, "", headers, Body.of(data.bytes), data.url, false, "default")
   }
 
-  writeTo(conn: Connection, head: boolean): Promise<void> | undefined {
+  writeTo(conn: Connection, headOnly: boolean): Written {
     const body = this.data
     const kind = body.kind
     this.headers.writeTo(conn)
-    if (kind == BODY_STREAM || kind == BODY_WIRE) return this.streamTo(conn, body, head)
+    if (kind == BODY_STREAM || kind == BODY_WIRE) {
+      const finished = this.streamTo(conn, body, headOnly)
+      const streaming: Written = {
+        kind: "streaming",
+        finished: finished,
+      }
+
+      return streaming
+    }
     conn.respond(this.status, this.statusText, kind == BODY_TEXT ? body.text : "", body.bytes,
-                 (head ? SEND_NO_BODY : 0) | (kind == BODY_BYTES ? SEND_BYTES : 0))
-    return undefined
+                 (headOnly ? SEND_NO_BODY : 0) | (kind == BODY_BYTES ? SEND_BYTES : 0))
+    const done: Written = {
+      kind: "done",
+    }
+
+    return done
   }
 
   private async streamTo(conn: Connection, body: Body, head: boolean) {
@@ -1520,16 +1527,27 @@ export class Response {
 
   static redirect(url: URL, status: RedirectStatus = 302): Response {
     const r = new Response(undefined, { status })
-    r.headers.set("location", url.href)
+    r.headers.set("location", url.href())
     return r
   }
 
   static error(): Response {
-    const r = new Response(undefined, { status: 200 })
-    r.status = 0
-    r.ok = false
-    r.type = "error"
-    return r
+    const headers = new Headers()
+    const data = Body.of(undefined)
+    const response = new Response(0, "", headers, data, "", false, "error")
+
+    return response
+  }
+
+  public body(): ReadableStream<Uint8Array> | undefined {
+    const made = this.bodyStream
+    if (made != undefined) {
+      return made
+    }
+    const view = this.data.view()
+    this.bodyStream = view
+
+    return view
   }
 
   bodyUsed(): boolean {
@@ -1537,18 +1555,13 @@ export class Response {
   }
 
   clone(): Response {
-    const r = new Response(undefined)
-    r.status = this.status
-    r.ok = this.ok
-    r.statusText = this.statusText
-    r.headers = new Headers(this.headers)
-    r.data = this.data.copy()
-    r.body = r.data.view()
-    this.body = this.data.view()
-    r.type = this.type
-    r.url = this.url
-    r.redirected = this.redirected
-    return r
+    const headers = new Headers(this.headers)
+    const data = this.data.copy()
+    this.bodyStream = undefined
+    const copy = new Response(this.status, this.statusText, headers, data, this.url,
+                              this.redirected, this.type)
+
+    return copy
   }
 
   async text(): Promise<Result<string, BodyError>> {
@@ -1632,7 +1645,7 @@ function abortedFetch(signal: AbortSignal): FetchError {
 }
 
 function fetchFailed(e: SystemError, signal: AbortSignal | undefined): FetchError {
-  if (signal != undefined && signal.aborted) return abortedFetch(signal)
+  if (signal != undefined && signal.aborted()) return abortedFetch(signal)
   return { code: e.errno == -1 ? "fetch_failed" : e.code, message: "fetch failed", cause: e.message }
 }
 
@@ -1643,7 +1656,7 @@ async function sendBody(conn: Connection, stream: ReadableStream<Uint8Array>,
     const r = await reader.read()
     if (r.isErr()) {
       reader.releaseLock()
-      if (signal.aborted) return abortedFetch(signal)
+      if (signal.aborted()) return abortedFetch(signal)
       return failed(r.error.message)
     }
     const step = r.value
@@ -1661,11 +1674,11 @@ async function sendBody(conn: Connection, stream: ReadableStream<Uint8Array>,
 async function send(request: Request, url: URL,
                     redirected: boolean): Promise<Result<Response, FetchError>> {
   const signal = request.signal
-  const hostname = url.hostname
+  const hostname = url.hostname()
   const host = hostname.startsWith("[") ? hostname.slice(1, hostname.length - 1) : hostname
-  const https = url.protocol == "https:"
-  const port = url.port == "" ? (https ? 443 : 80) : parseInt(url.port).unwrapOr(0)
-  const origin = url.protocol + host + ":" + String(port)
+  const https = url.protocol() == "https:"
+  const port = url.port() == "" ? (https ? 443 : 80) : parseInt(url.port()).unwrapOr(0)
+  const origin = url.protocol() + host + ":" + String(port)
   let idle = takeIdle(origin)
   let reused = idle != undefined
   for (;;) {
@@ -1686,7 +1699,7 @@ async function send(request: Request, url: URL,
     const status = await conn.response(signal)
     if (status.isErr()) {
       conn.close()
-      if (signal.aborted) return err(abortedFetch(signal))
+      if (signal.aborted()) return err(abortedFetch(signal))
       if (reused && !request.bodyUsed()) {
         idle = undefined
         reused = false
@@ -1694,7 +1707,7 @@ async function send(request: Request, url: URL,
       }
       return err(fetchFailed(status.error, signal))
     }
-    let shown = url.href
+    let shown = url.href()
     const hash = shown.indexOf("#")
     if (hash >= 0) shown = shown.slice(0, hash)
     return ok(Response.readFrom(conn, shown, redirected, signal))
@@ -1706,7 +1719,7 @@ class DataUrl {
 }
 
 function dataResponse(url: URL): Result<Response, FetchError> {
-  const text = url.href.slice(5)
+  const text = url.href().slice(5)
   const comma = text.indexOf(",")
   if (comma < 0) return err(failed("invalid data: URL"))
   let type = text.slice(0, comma)
@@ -1716,19 +1729,19 @@ function dataResponse(url: URL): Result<Response, FetchError> {
   const decoded = percentDecode(data)
   const bytes = base64 ? Buffer.from(new TextDecoder("latin1").decode(decoded), "base64") : decoded
   return ok(Response.readFrom(new DataUrl(type == "" ? "text/plain;charset=US-ASCII" : type,
-                                          new Uint8Array(bytes), url.href)))
+                                          new Uint8Array(bytes), url.href())))
 }
 
 function requestProblem(request: Request, url: Result<URL, UrlError>): FetchError | undefined {
   if (url.isErr())
     return { code: "bad_request", message: "Failed to parse URL from " + request.url,
              cause: url.error.message }
-  if (url.value.username != "" || url.value.password != "")
+  if (url.value.username() != "" || url.value.password() != "")
     return badRequest("Request cannot be constructed from a URL that includes credentials: " +
                       request.url)
   const method = methodProblem(request.method)
   if (method != undefined) return badRequest(method)
-  const body = request.body
+  const body = request.body()
   if (body == undefined) return undefined
   if (request.method == "GET" || request.method == "HEAD")
     return badRequest("Request with GET/HEAD method cannot have body.")
@@ -1747,16 +1760,16 @@ export async function fetch(input: string | URL | Request,
   const problem = requestProblem(request, first)
   if (problem != undefined) return err(problem)
   const signal = request.signal
-  if (signal.aborted) return err(abortedFetch(signal))
+  if (signal.aborted()) return err(abortedFetch(signal))
   if (first.isErr()) return err(failed(first.error.message))
   let url = first.value
   let current = request
   let redirects = 0
   for (;;) {
-    if (url.protocol == "data:") return dataResponse(url)
-    if (url.protocol != "http:" && url.protocol != "https:")
+    if (url.protocol() == "data:") return dataResponse(url)
+    if (url.protocol() != "http:" && url.protocol() != "https:")
       return err(failed("not implemented... yet..."))
-    if (url.port != "" && BAD_PORTS.has(parseInt(url.port).unwrapOr(0))) return err(failed("bad port"))
+    if (url.port() != "" && BAD_PORTS.has(parseInt(url.port()).unwrapOr(0))) return err(failed("bad port"))
     const sent = await send(current, url, redirects > 0)
     if (sent.isErr()) return sent
     const response = sent.value
@@ -1783,7 +1796,7 @@ export async function fetch(input: string | URL | Request,
     } else if (current.bodyUsed()) {
       return err(failed("cannot follow a redirect with a body that streams"))
     }
-    if (next.value.origin != url.origin) {
+    if (next.value.origin() != url.origin()) {
       current.headers.delete("authorization")
       current.headers.delete("cookie")
       current.headers.delete("proxy-authorization")

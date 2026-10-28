@@ -28,6 +28,7 @@ private:
   Lowering &lowering_;
   llvm::Function *asyncResumeFn_ = nullptr;
   const AwaitExpr *awaiting_ = nullptr;
+  bool readyGoesOn_ = false;
 };
 
 }

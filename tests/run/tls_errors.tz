@@ -13,16 +13,17 @@ const dir = process.env.TLS_DIR ?? "."
 const key = must(readFileSync(join(dir, "key.pem"), "utf8"))
 for (const name of ["expired", "future", "wrongname", "self", "other", "chain", "rooted", "localhost"]) {
   const cert = must(readFileSync(join(dir, `${name}.pem`), "utf8"))
-  const server = new Server(() => new Response("ok"))
-  const started = server.listen({ port: 0, hostname: "127.0.0.1", tls: { cert, key } })
+  const server = new Server({ port: 0, hostname: "127.0.0.1", transport: { secure: true, cert, key } }, () => new Response("ok"))
+  const started = server.listen()
   if (started.isErr()) {
     console.log("cannot listen:", started.error.message)
     process.exit(1)
   }
-  const res = await fetch(`https://localhost:${server.port}/`)
+  const listening = started.value
+  const res = await fetch(`https://localhost:${listening.port}/`)
   if (res.isOk()) console.log(name, res.value.status, must(await res.value.text()))
   else console.log(name, res.error.message, res.error.code)
-  await server.stop()
+  await listening.stop()
 }
 
 function must<T, E>(r: Result<T, E>): T {

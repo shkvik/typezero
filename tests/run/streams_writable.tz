@@ -9,7 +9,7 @@ const log = (s: string) => console.log(s)
 const w = new Writable({
   highWaterMark: 5,
   write(chunk, encoding, callback) {
-    log(`_write ${chunk.toString()} ${encoding} len=${this.writableLength}`)
+    log(`_write ${chunk.toString()} ${encoding} len=${this.writableLength()}`)
     setTimeout(() => callback(), 1)
   },
   final(callback) {
@@ -20,7 +20,7 @@ const w = new Writable({
 w.on("error", (err) => log(`w error ${err.message}`))
 w.on("drain", () => log("drain"))
 w.on("prefinish", () => log("prefinish"))
-w.on("finish", () => log(`finish finished=${w.writableFinished}`))
+w.on("finish", () => log(`finish finished=${w.writableFinished()}`))
 w.on("close", () => {
   log("close")
   w.removeAllListeners()
@@ -29,9 +29,9 @@ w.on("close", () => {
 log(`write1 ${w.write("abc")}`)
 log(`write2 ${w.write("de", () => log("cb de"))}`)
 log(`write3 ${w.write(Buffer.from("fgh"))}`)
-log(`needDrain ${w.writableNeedDrain} len ${w.writableLength}`)
+log(`needDrain ${w.writableNeedDrain()} len ${w.writableLength()}`)
 void w.end("end").then((r) => log(`end ${r.isOk()}`))
-log(`ended ${w.writableEnded}`)
+log(`ended ${w.writableEnded()}`)
 
 function more() {
   const v = new Writable({
@@ -45,7 +45,7 @@ function more() {
   v.write("b")
   v.write("c", "latin1")
   process.nextTick(() => {
-    log(`corked ${v.writableCorked}`)
+    log(`corked ${v.writableCorked()}`)
     v.uncork()
     v.write("d")
     void v.end().then((r) => log(`v end ${r.isOk()}`))

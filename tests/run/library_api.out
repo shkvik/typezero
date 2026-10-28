@@ -15,11 +15,10 @@ true
 true
 64
 InvalidAccessError
-0 "" true
-127.0.0.1 true true
+127.0.0.1 true 127.0.0.1
 hi /there
-ERR_SERVER_ALREADY_LISTEN
-ERR_SERVER_ALREADY_LISTEN
+another port
+listened after stop
 true true false
 3
 2

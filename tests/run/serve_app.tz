@@ -18,7 +18,7 @@ class App {
     return this
   }
   fetch = (request: Request, env?: unknown, ctx?: unknown): Response | Promise<Response> => {
-    const handler = this.routes.get(new URL(request.url).pathname)
+    const handler = this.routes.get(new URL(request.url).pathname())
     if (handler == undefined) return new Response("404 Not Found", { status: 404 })
     return handler(new Context(request))
   }
@@ -26,17 +26,18 @@ class App {
 const app = new App()
 app.get("/", c => c.text("Hello"))
 app.get("/async", async c => c.text(`async ${c.req.method}`))
-const server = new Server(app.fetch)
-const started = server.listen({ port: 0, hostname: "127.0.0.1" })
+const server = new Server({ port: 0, hostname: "127.0.0.1" }, app.fetch)
+const started = server.listen()
 if (started.isErr()) {
   console.log("cannot listen:", started.error.message)
   process.exit(1)
 }
+const listening = started.value
 for (const path of ["/", "/async", "/nope"]) {
-  const r = must(await fetch(`http://127.0.0.1:${server.port}${path}`))
+  const r = must(await fetch(`http://127.0.0.1:${listening.port}${path}`))
   console.log(r.status, must(await r.text()))
 }
-await server.stop()
+await listening.stop()
 
 function must<T, E>(r: Result<T, E>): T {
   if (r.isErr()) {

@@ -269,9 +269,10 @@ tz run                   # без файла — "main" из tz.json
   `setImmediate`, `setInterval` как async-итератор, `scheduler.wait` / `yield`), отмена —
   `AbortController` и `AbortSignal` на `EventTarget` (см. «События»), которые эти функции
   принимают в опции `signal`.
-- Сеть (см. «Сеть»): сервер `new Server(handler)` из `"tz:http"` (`server.listen(options)`
-  открывает сокет), где обработчик получает
-  `Request` и отдаёт `Response`, как в Deno и Bun (и `app.fetch` из hono), и клиент `fetch`, как в
+- Сеть (см. «Сеть»): сервер `new Server(options, handler)` из `"tz:http"` (`server.listen()`
+  открывает сокет и отдаёт `Listening`), где обработчик получает
+  `Request` и того, кто его прислал, и отдаёт `Response`, как в Deno и Bun (и `app.fetch` из
+  hono), и клиент `fetch`, как в
   node: keep-alive и пул соединений, редиректы, gzip / deflate / br, `AbortSignal`, ошибки —
   `Err` с `FetchError` (`fetch failed` и причина). `URL` и `URLSearchParams` по стандарту WHATWG, `Headers`,
   `Request`, `Response`, `ReadableStream`, `FormData` — глобальные, как в node; https — на OpenSSL.
@@ -2052,18 +2053,20 @@ const [user] = await once(bus, "user")
   Слушатель, который берёт `(e: CustomEvent<int>) => ...`, получает только такие события (другое —
   `TypeError`), и `e.detail` у него — `int`; без аннотации — `Event`.
 - **`AbortController` и `AbortSignal`** — на `EventTarget`: `abort(reason?)` (по умолчанию
-  `DOMException` `AbortError`), `aborted`, `reason` (`unknown`, как любое значение в JS),
-  `onabort` (`throwIfAborted()` — ошибка с подсказкой `if (signal.aborted)`: бросать нечего),
+  `DOMException` `AbortError`), `aborted()`, `reason()` (`unknown`, как любое значение в JS;
+  в node — свойства, а в tz то, что объект меняет сам, читается методом),
+  `onabort` (`throwIfAborted()` — ошибка с подсказкой `if (signal.aborted())`: бросать нечего),
   `AbortSignal.abort()`, `timeout(ms)` (его таймер не держит
-  программу) и `any(signals)`; печать — `AbortController { signal: AbortSignal { aborted: false }
-  }`. Порядок — как в node: `onabort` слушает с того места, где его задали впервые (заданный
+  программу) и `any(signals)`; печать — `AbortController { signal: AbortSignal { isAborted: false,
+  ... } }`. Порядок — как в node: `onabort` слушает с того места, где его задали впервые (заданный
   `undefined`, он остаётся там и ничего не делает); сигналы `any()` помечаются отменёнными раньше,
   чем выполнятся слушатели их источника. `new AbortSignal()` (конструктор закрыт) и присваивание
   `aborted` и `reason` — ошибки (в node это `TypeError` и геттеры). Сверх node:
   `AbortSignal.withAbort()` отдаёт сигнал вместе с функцией отмены — `const { signal, abort } =
   AbortSignal.withAbort()`, как `Promise.withResolvers()`; так сигнал берёт и контроллер.
-  Поля события, которые в web только для чтения (`target`, `currentTarget`, `eventPhase`,
-  `isTrusted`, `defaultPrevented`…), — `readonly`; `event.immediateStopped` говорит, был ли
+  То, что событие меняет само (`target()`, `currentTarget()`, `eventPhase()`, `isTrusted()`,
+  `defaultPrevented()`, `srcElement()`), — методы (в node — свойства); `event.immediateStopped()`
+  говорит, был ли
   `stopImmediatePropagation()`, а `event.dispatchOn(target, run)` — то, через что
   `dispatchEvent` рассылает событие (одно событие — одна рассылка за раз). Тот же сигнал отменяет ожидания рантайма
   (`node:timers/promises`, `node:fs/promises`, `node:readline`): у каждого сигнала есть сторона
@@ -2110,8 +2113,9 @@ const users = Readable.from([ann, bob])                         // Readable<User
   `Stream`, как в node (`Stream.isErrored(s)`).
 - **Состояние потока закрыто** ([streams.md](docs/streams.md), раздел 6): у node оно открыто под
   именами на `_` (`_readableState`, `_writableState`), и программа, которая его меняет, ломает
-  поток. В tz его нет снаружи: `r.readableState` — ошибка (`private`), а поля, которые поток
-  меняет сам (`readableLength`, `destroyed`, `writableEnded`…), — только для чтения.
+  поток. В tz его нет снаружи: `r.readableState` — ошибка (`private`), а то, что поток меняет
+  сам, читается методами (`r.readableLength()`, `r.destroyed()`, `w.writableEnded()`…; в node —
+  свойства): методы читают состояние прямо, без копии в полях.
 - **Ошибки — `Result`** ([streams.md](docs/streams.md), раздел 3): каждый кусок `for await` —
   `Result<T, StreamError>` (ошибка потока — `Err` в конце); `pipeline` и `finished` из
   `node:stream/promises` — `Promise<Result<...>>`; `end()` отдаёт `Promise<Result<void, StreamError>>`,
@@ -2146,7 +2150,8 @@ const users = Readable.from([ann, bob])                         // Readable<User
 - **Файлы**: `createReadStream(path, options)` и `createWriteStream(path, options)` из `node:fs` —
   `ReadStream` и `WriteStream` с опциями node (`encoding`, `start` и `end`, `highWaterMark` —
   64 КБ, `flags`, `mode`, `fd`, `autoClose`, `emitClose`, `flush`, `signal`), событиями `open`,
-  `ready` и `close` и полями `bytesRead`, `bytesWritten`, `path`, `pending`. Чтение и запись — в
+  `ready` и `close`, полем `path` и методами `fd()`, `bytesRead()`, `bytesWritten()`,
+  `pending()` (в node — свойства). Чтение и запись — в
   пуле потоков рантайма (`runtime/library/fs/fs_async/fs_async.c`), как у node через libuv.
 - **`process.stdin`** — `Readable` (байты, после `setEncoding` — строки): читает, только когда его
   слушают, из того же буфера, что `readLine` и `readFileSync(0)`. **`process.stdout`** и
@@ -2893,40 +2898,46 @@ a.run(2) at line 17:`. Анализ — `compiler/parallel/parallel_analysis/par
 ```ts
 import { Server } from "tz:http"
 
-const server = new Server(async req => {
+const server = new Server({ port: 3000 }, async (req, client) => {
   const url = new URL(req.url)
-  if (req.method == "POST" && url.pathname == "/users") {
+  if (req.method == "POST" && url.pathname() == "/users") {
     const user = await req.json()                          // Result<Json, BodyError | JsonError>
     if (user.isErr()) return new Response(user.error.message, { status: 400 })
-    return Response.json({ id: 1, user: user.value }, { status: 201 })
+    return Response.json({ id: 1, user: user.value, from: client.address }, { status: 201 })
   }
   return new Response(`привет, ${url.searchParams.get("name") ?? "мир"}`)
 })
-const listened = server.listen({ port: 3000 })                  // Result<URL, SystemError>
+const listened = server.listen()                                // Result<Listening, ListenError>
 if (listened.isErr()) {
-  console.error(listened.error.message)                         // порт занят
+  console.error(listened.error.code, listened.error.message)    // EADDRINUSE, если порт занят
   process.exit(1)
 }
+const listening = listened.value
 
-const r = await fetch(`http://localhost:${server.port}/?name=tz`, { signal: AbortSignal.timeout(5000) })
+const r = await fetch(`http://localhost:${listening.port}/?name=tz`, { signal: AbortSignal.timeout(5000) })
 if (r.isOk()) console.log(r.value.status, await r.value.text())   // 200 Ok { value: 'привет, tz' }
-await server.stop()
+await listening.stop()
 ```
 
-- **Сервер** ([net.md](docs/net.md), раздел 1) — `new Server(handler)` из `"tz:http"`, как в
-  node: сервер без сокета; `server.listen(options)` открывает сокет и отдаёт адрес —
-  `Result<URL, SystemError>` (занятый порт, хост, которого нет, или сертификат, который не
-  читается, — `Err`). Опции: `port` (8000, `0` — любой свободный), `hostname` (`"0.0.0.0"`), `signal` (отмена
-  останавливает сервер), `onListen({ hostname, port })`, `maxBodySize` (128 МБ, больше — ответ
-  413). Обработчик — `(req: Request) => Response | Promise<Response>`: подходят и обычная, и
-  async-функция, и `app.fetch` из hono (стрелка в поле с лишними необязательными параметрами).
-  Сервер знает `port`, `hostname`, `url`, `finished`; `stop()` перестаёт принимать соединения,
-  закрывает те, что ждут запроса, и ждёт ответов на те, что уже идут. Ошибки обработчик
-  отдаёт ответом сам: у него нет исключений, которые сервер мог бы превратить в `500`. Пока
-  сервер не слушает, `port` — 0, `url` — `undefined`; слушает сервер один раз, второй `listen` —
-  `ERR_SERVER_ALREADY_LISTEN`. Запрос сервера не разбирает адрес по пути: он строится из
-  соединения сразу.
-- **Запросы одного соединения** идут по очереди (keep-alive, до 5 с простоя, как в node, и
+- **Сервер** ([net.md](docs/net.md), раздел 1) — `new Server(options, handler)` из `"tz:http"`:
+  настройки и обработчик, после создания не меняются. `server.listen()` открывает сокет и
+  отдаёт `Result<Listening, ListenError>`: `Listening` — запущенный сервер с `url`, `hostname`,
+  `port` (настоящий, и при `port: 0`) и `stop()`; `ListenError` — `{ kind: "SERVER", code,
+  message, errno, syscall, address, port }`, `code` — `"EADDRINUSE"`, `"EACCES"`,
+  `"ENOTFOUND"`, `"ERR_TLS_CERT"` и другие из `ListenErrorCode`. Каждый `listen()` — ещё
+  один сокет с теми же настройками. Настройки: `port` (8000, `0` — любой свободный),
+  `hostname` (`"0.0.0.0"`), `signal` (отмена останавливает сервер), `maxBodySize` (128 МБ,
+  больше — ответ 413), `keepAliveTimeout` (5000 мс простоя соединения, как в node),
+  `headersTimeout` (60 000 мс на голову запроса, потом 408 — защита от клиента, который шлёт по
+  байту), `transport` — `{ secure: false }` или `{ secure: true, cert, key }`. Обработчик —
+  `(req: Request, client: Client) => Response | Promise<Response>`, `client` — `{ address,
+  port }` того, кто прислал запрос: подходят и обычная, и async-функция, и `app.fetch` из hono
+  (стрелка в поле, у которой второй параметр — `unknown`, а третий необязательный).
+  `stop()` перестаёт принимать соединения, закрывает те, что ждут запроса, и ждёт ответов на
+  те, что уже идут; второй вызов ждёт того же. Ошибки обработчик отдаёт ответом сам: у него нет
+  исключений, которые сервер мог бы превратить в `500`. Полный адрес запроса (`req.url`) и
+  адрес сервера строит рантайм из соединения сразу.
+- **Запросы одного соединения** идут по очереди (keep-alive, до `keepAliveTimeout` простоя, и
   конвейер), а разных соединений — одновременно; пока в одном потоке цикла событий, на всех ядрах
   — с параллельным рантаймом ([async.md](docs/async.md), шаг 4). Ответ — заголовки и тело одной
   записью в сокет, с `content-length` и `date`; тело-поток — кусками `transfer-encoding: chunked`.
@@ -2957,11 +2968,12 @@ await server.stop()
 - **`Request` и `Response`** — как в node: `text()`,
   `json()`, `bytes()`, `arrayBuffer()`, `formData()` дают `Promise<Result<T, BodyError>>` (`json()` —
   `BodyError | JsonError`): тело уже прочитано (`"body_used"`), связь оборвалась или сжатие
-  испорчено (`"terminated"`), отмена; читаются один раз, тело как поток — `body`
-  (`for await (const chunk of req.body)`), `bodyUsed()`, `clone()`, `Response.json`, `redirect`,
+  испорчено (`"terminated"`), отмена; читаются один раз, тело как поток — `body()`
+  (`for await (const chunk of req.body())`), `bodyUsed()`, `clone()`, `Response.json`, `redirect`,
   `error`; `status`, `statusText`, `ok`, `headers`, `redirected`, `url`, `type` — поля.
-  `bodyUsed()` — метод (в node — свойство): тело меняется, пока его читают через `body`, а поле
-  объекта меняет только сам объект ([objects.md](docs/objects.md), раздел 6).
+  `body()` и `bodyUsed()` — методы (в node — свойства): тело меняет сам объект (после `clone()`
+  у исходного — новый поток), а то, что объект меняет сам, читается методом
+  ([objects.md](docs/objects.md), раздел 6).
 - **`new Response` не может не получиться** — его аргументы проверяют типы
   ([errors.md](docs/errors.md), раздел 7). `status` — `HttpStatus` (200 … 599): литерал подходит
   сам (`{ status: 700 }` — ошибка компиляции), а значение программы — после проверки, которая это
@@ -2972,7 +2984,7 @@ await server.stop()
   строке из переменной такие символы выбрасываются. `Response.redirect(url, status)` берёт
   разобранный `URL` и `RedirectStatus` (`301 | 302 | 303 | 307 | 308`, по умолчанию 302).
 - **`new Request` тоже не может не получиться.** Адрес — литерал (проверяется при сборке), `URL`,
-  `url.href` или `req.url`; строку из переменной сначала разбирает `URL.parse`, или её отдают
+  `url.href()` или `req.url`; строку из переменной сначала разбирает `URL.parse`, или её отдают
   прямо `fetch`, который вернёт `Result`. Литерал метода, `GET` или `HEAD` с телом, поток без
   `duplex: "half"` (тип поля — `"half"`), адрес с логином — ошибки компиляции. Если то же
   выясняется только при работе (метод из переменной, `URL` с логином, запрос из уже прочитанного
@@ -2986,17 +2998,17 @@ await server.stop()
   `fetch`, и у `Response.redirect` (в node — `TypeError: immutable`). `clone()` прочитанного
   тела не бросает: у копии тело тоже прочитано. **`ReadableStream`** —
   `start` / `pull` / `cancel` (обычные и async), `getReader()`, `read()`, `releaseLock()`,
-  `cancel()`, `locked`, `disturbed` (читали ли поток — сверх node), `for await` (выход из цикла
-  отменяет поток); `desiredSize()` у
-  контроллера — метод (в node — свойство). **`FormData`** — поля-строки
+  `cancel()`, `locked()`, `disturbed()` (читали ли поток — сверх node), `for await` (выход из цикла
+  отменяет поток); `locked()` и `desiredSize()` у
+  контроллера — методы (в node — свойства). **`FormData`** — поля-строки
   (файлов пока нет), разбор `application/x-www-form-urlencoded` и `multipart/form-data`.
 - **`URL` и `URLSearchParams`** — по стандарту WHATWG, тем же автоматом состояний, что у ada в
   node: особые схемы, IPv4 во всех формах (`0x7f.1`), IPv6, `.` и `..` в путях, процентное
   кодирование, относительные адреса, `canParse`, `parse`, `url.searchParams`, который читает и
-  меняет запрос адреса (`url.href` после `url.searchParams.set(...)` — уже новый: параметры
+  меняет запрос адреса (`url.href()` после `url.searchParams.set(...)` — уже новый: параметры
   сообщают адресу о переменах подпиской, `params.watch(f)`, а `params.replace(text)` заменяет
-  их разбором текста). Части адреса —
-  поля только для чтения, меняют их методы: `setPathname`, `setSearch`, `setHash`, `setUsername`,
+  их разбором текста), `params.size()`. Части адреса
+  читаются методами (`url.pathname()`, `url.href()`; в node — свойства), меняют их методы: `setPathname`, `setSearch`, `setHash`, `setUsername`,
   `setPassword`; `setHref`, `setProtocol`, `setHost`, `setHostname` и `setPort`, значение которых
   адрес может не принять, дают `Result<void, UrlError>` (node молча оставляет старое), а литерал
   проверяется при сборке, и вызов с ним ничего не отдаёт: `url.setPort("8080")`. `url.pathname =
@@ -3006,15 +3018,16 @@ await server.stop()
   разбирает `URL.parse(input, base?)` — он отдаёт `Result<URL, UrlError>`, где `UrlError =
   { code: "bad_url"; message: string; input: string }`. `new URL(text)` с переменной — ошибка
   компиляции с подсказкой `URL.parse`. В `new URL` можно передать литерал (он проверяется при
-  сборке: схема, хост особых схем, порт до 65535), готовый `URL`, `url.href` и `req.url` запроса;
+  сборке: схема, хост особых схем, порт до 65535), готовый `URL`, `url.href()` и `req.url` запроса;
   относительный литерал — только с таким же основанием: `new URL("/path", req.url)`.
 - **Геттеров и сеттеров нет и у встроенных модулей** ([objects.md](docs/objects.md), раздел 6):
-  значение, которое не меняется, — поле (`res.status`, `req.url`, `server.port`); которое меняет
-  сам объект своими методами, — поле только для чтения (`url.pathname`, `stream.locked`,
-  `params.size`); которое меняется вместе с другим объектом, — метод (`res.bodyUsed()`).
+  значение, которое не меняется, — `readonly`-поле, его задаёт только конструктор (`res.status`,
+  `req.url`, `server.port`); которое объект меняет сам, — закрытое поле и метод с именем
+  значения (`url.pathname()`, `stream.locked()`, `params.size()`, `signal.aborted()`,
+  `res.body()`, `res.bodyUsed()`).
 - Печать: `Headers { 'content-type': '...' }` и `URLSearchParams { 'a' => '1' }` — как в node, а
   `URL`, `Response`, `Request`, сигналы, потоки и эмиттеры печатают все свои поля, и внутренние
-  (`URL { href: ..., record: UrlRecord {...} }`): печать — для отладки, а отладке нужно всё
+  (`URL { state: { href: ... }, record: UrlRecord {...} }`): печать — для отладки, а отладке нужно всё
   состояние (в node часть их скрыта).
 - **Отличия:** `headers.get(name)`, `params.get(name)` и `form.get(name)` без значения — `undefined`
   (в JS `null`); `null` как тело — `undefined`: `new Response(undefined, { status: 204 })`;
@@ -3027,10 +3040,11 @@ await server.stop()
   `NODE_EXTRA_CA_CERTS`, и с системными при `NODE_USE_SYSTEM_CA=1`; затем имя хоста. Ошибка —
   `fetch failed` с причиной-`SystemError` и кодом node: `CERT_HAS_EXPIRED`,
   `ERR_TLS_CERT_ALTNAME_INVALID`, `DEPTH_ZERO_SELF_SIGNED_CERT`, `UNABLE_TO_VERIFY_LEAF_SIGNATURE`
-  и другие. `server.listen({ tls: { cert, key } })` — сервер https (PEM, как у `createServer` node,
-  цепочка — сертификаты после первого). TLS встраивается в exe, только если программа может
-  пойти по https: `fetch` адреса, про который не известно, что он `http://` или `data:`, или
-  `listen` с `tls`; https-клиент — 5,8 МБ против 0,9 МБ того же клиента по http (у Go — 5,3 МБ).
+  и другие. `new Server({ transport: { secure: true, cert, key } }, handler)` — сервер https
+  (PEM, как у `createServer` node, цепочка — сертификаты после первого). TLS встраивается в exe,
+  только если программа может пойти по https: `fetch` адреса, про который не известно, что он
+  `http://` или `data:`, или `new Server` с `transport`, про который не известно, что он
+  `{ secure: false }`; https-клиент — 5,8 МБ против 0,9 МБ того же клиента по http (у Go — 5,3 МБ).
 - **Пока нет:** `node:http` и остальное из раздела 7; сеть в Linux (epoll и свой DNS).
 - **Скорость** (`bench/http.ps1`, «Hello, World!», 128 соединений, 10 с): tz — 314 тыс.
   запросов в секунду на всех ядрах, Go (`net/http`) — 239 тыс., node — 61 тыс.
@@ -3721,7 +3735,7 @@ powershell -ExecutionPolicy Bypass -File editors\vscode\install.ps1
   (`function (this: Server, ...)`), и тогда всегда эмиттер, также при вызове из `rawListeners()`
   (в node там `undefined`); `rawListeners()` даёт для слушателя `once()` функцию, которая
   печатается `[Function (anonymous)]` (в node — `[Function: bound onceWrapper] { listener: ... }`);
-  `currentTarget` после отправки события — `undefined` (в node — `null`); имена событий — только
+  `currentTarget()` после отправки события — `undefined` (в node — `null`); имена событий — только
   строки, поэтому нет `errorMonitor` и `captureRejectionSymbol`; нет `captureRejections`,
   `addAbortListener` и
   `EventEmitterAsyncResource`; `Object.values` и `Object.entries` эмиттера — ошибки; третий аргумент
@@ -3898,7 +3912,10 @@ CRT, без RTTI и исключений, поэтому `tz` собираетс
 `node:child_process` с `Result` ([tz-fs.mjs](tests/node/tz-fs.mjs),
 [tz-fs-promises.mjs](tests/node/tz-fs-promises.mjs),
 [tz-child-process.mjs](tests/node/tz-child-process.mjs)) и модули `"tz:io"` с `readLine` и
-`"tz:http"`.
+`"tz:http"`. То, что в tz читается методом (`url.pathname()`, `signal.aborted()`,
+`res.body()`), у web-классов node — геттер, который коду теста отдаёт функцию, а коду node —
+значение; состояние потоков node и `isTrusted` так не заменить, и заглушка убирает `()` после
+них в тексте самого теста.
 Дочерние процессы node получают её через `NODE_OPTIONS`.
 
 Команды tz проверяют `tests/cli/NAME.cmake`: скрипт CMake с помощниками из

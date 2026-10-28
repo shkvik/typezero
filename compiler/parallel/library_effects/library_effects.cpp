@@ -40,6 +40,65 @@ bool isTargetClass(llvm::StringRef cls) { return cls == "EventTarget" || cls == 
 
 bool isSignalClass(llvm::StringRef cls) { return cls == "AbortSignal" || cls == "AbortController"; }
 
+bool readOnlyExpr(const Expr *e) {
+  if (!e) {
+    return true;
+  }
+  switch (e->kind()) {
+  case Expr::Kind::IntLit:
+  case Expr::Kind::FloatLit:
+  case Expr::Kind::BoolLit:
+  case Expr::Kind::StringLit:
+  case Expr::Kind::Undefined:
+  case Expr::Kind::Name:
+    return true;
+  case Expr::Kind::Member:
+    return readOnlyExpr(llvm::cast<MemberExpr>(e)->object);
+  case Expr::Kind::Unary: {
+    auto *unary = llvm::cast<UnaryExpr>(e);
+    return unary->op != UnaryOp::Delete && readOnlyExpr(unary->operand);
+  }
+  case Expr::Kind::Binary: {
+    auto *binary = llvm::cast<BinaryExpr>(e);
+    return readOnlyExpr(binary->lhs) && readOnlyExpr(binary->rhs);
+  }
+  case Expr::Kind::Conditional: {
+    auto *conditional = llvm::cast<ConditionalExpr>(e);
+    return readOnlyExpr(conditional->cond) && readOnlyExpr(conditional->thenExpr) &&
+           readOnlyExpr(conditional->elseExpr);
+  }
+  case Expr::Kind::Cast:
+    return readOnlyExpr(llvm::cast<CastExpr>(e)->operand);
+  case Expr::Kind::OptionalChain:
+    return readOnlyExpr(llvm::cast<OptionalChainExpr>(e)->chain);
+  default:
+    return false;
+  }
+}
+
+bool readOnlyStmt(const Stmt *s) {
+  if (!s) {
+    return true;
+  }
+  if (auto *block = dyn_cast<BlockStmt>(s)) {
+    return llvm::all_of(block->body, readOnlyStmt);
+  }
+  if (auto *ret = dyn_cast<ReturnStmt>(s)) {
+    return readOnlyExpr(ret->value);
+  }
+  if (auto *branch = dyn_cast<IfStmt>(s)) {
+    return readOnlyExpr(branch->cond) && readOnlyStmt(branch->thenStmt) &&
+           readOnlyStmt(branch->elseStmt);
+  }
+  if (auto *decl = dyn_cast<VarDeclStmt>(s)) {
+    return decl->isConst && llvm::all_of(decl->decls, [](const VarDeclarator &d) {
+             return !d.destructured && readOnlyExpr(d.init);
+           });
+  }
+
+  return false;
+}
+
 }
 
 LibraryEffects::LibraryEffects(Analysis &analysis) : analysis_(analysis) {}
@@ -97,7 +156,7 @@ void LibraryEffects::libraryCall(const CallExpr *c, const FunctionDecl *decl, co
     }
   }
   if (self && !superCtor) {
-    libraryState(cls, name, self, true, at);
+    libraryState(cls, name, self, !readsOnly(decl), at);
   }
   if (isEmitterClass(cls) && name == "emit") {
     dispatch(c, CallKind::Inline, EmitterListeners, use);
@@ -153,8 +212,6 @@ void LibraryEffects::libraryArg(const CallExpr *c, llvm::StringRef cls, llvm::St
         libraryCallback(c, v, CallKind::Later, true);
       } else if (cls == "ReadableStream" && p.name == "cancel") {
         libraryCallback(c, v, CallKind::Later);
-      } else if (cls == "Server" && name == "listen" && p.name == "onListen") {
-        libraryCallback(c, v, CallKind::Inline);
       } else if (isTargetClass(cls) &&
                  (name == "addEventListener" || name == "addObjectListener") &&
                  p.name == "handleEvent") {
@@ -220,6 +277,18 @@ void LibraryEffects::dispatch(const CallExpr *c, CallKind kind, Channel channel,
   CallRec &rec = analysis_.codeWalk().record(c, kind, {}, c->loc());
   rec.call = c;
   rec.channel = channel;
+}
+
+bool LibraryEffects::readsOnly(const FunctionDecl *decl) {
+  auto found = readsOnly_.find(decl);
+  if (found != readsOnly_.end()) {
+    return found->second;
+  }
+  bool reads = decl->body && decl->params.empty() && !decl->isAsync && !decl->isGenerator &&
+               readOnlyStmt(decl->body);
+  readsOnly_[decl] = reads;
+
+  return reads;
 }
 
 void LibraryEffects::libraryState(llvm::StringRef cls, llvm::StringRef name,

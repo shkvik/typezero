@@ -20,7 +20,7 @@ sink.on("error", (e) => log(`sink error ${e.code}`))
 sink.write("a")
 sink.write(undefined, (e) => log(`write callback ${e?.code}`))
 await new Promise<void>((resolve) => setTimeout(resolve, 5))
-log(`sink destroyed ${sink.destroyed}`)
+log(`sink destroyed ${sink.destroyed()}`)
 
 function* withHole() {
   yield "x"

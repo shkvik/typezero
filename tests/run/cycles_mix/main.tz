@@ -67,7 +67,7 @@ async function session(): Promise<[WeakRef<Server>, WeakRef<Conn>]> {
   for await (const line of logged(server)) console.log(line)
   const ends = Promise.all([a.done, b.done])
   server.controller.abort()
-  console.log((await ends).join(", "), server.conns.size, server.controller.signal.aborted)
+  console.log((await ends).join(", "), server.conns.size, server.controller.signal.aborted())
   console.log(a.hash.digest("hex").slice(0, 12), b.hash.digest("hex").slice(0, 12))
   let handled = 0
   for (const h of server.handlers.values()) handled += h.handled

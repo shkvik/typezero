@@ -223,6 +223,8 @@ llvm::Value *ClosureLowerer::emitFunctionAdapter(CastExpr *cast) {
                                         qualifiedName(fn) + ".adapter", lowering_.module_.get());
     lowering_.functionBuilder().setFunctionAttributes(code);
     llvm::IRBuilderBase::InsertPoint point = lowering_.builder_.saveIP();
+    llvm::Function *outer = lowering_.function_;
+    lowering_.function_ = code;
     lowering_.builder_.SetInsertPoint(llvm::BasicBlock::Create(lowering_.ctx_, "entry", code));
     std::vector<llvm::Value *> args;
     llvm::ArrayRef<const Type *> params = from->params(), given = to->params();
@@ -232,9 +234,14 @@ llvm::Value *ClosureLowerer::emitFunctionAdapter(CastExpr *cast) {
         continue;
       }
       llvm::Value *arg = code->getArg(unsigned(i + 1));
-      args.push_back(params[i] == given[i] ? arg
-                                           : lowering_.optionalLowerer().makeOptional(
-                                                 arg, lowering_.builder_.getTrue(), params[i]));
+      if (params[i] == given[i]) {
+        args.push_back(arg);
+      } else if (params[i]->nonOptional()->isUnknown()) {
+        args.push_back(lowering_.exprLowerer().emitConversion(arg, given[i], params[i]));
+      } else {
+        args.push_back(
+            lowering_.optionalLowerer().makeOptional(arg, lowering_.builder_.getTrue(), params[i]));
+      }
     }
     for (size_t i = params.size(); i < given.size(); ++i) {
       lowering_.refCounts().releaseValue(code->getArg(unsigned(i + 1)), given[i]);
@@ -254,6 +261,7 @@ llvm::Value *ClosureLowerer::emitFunctionAdapter(CastExpr *cast) {
     } else {
       lowering_.builder_.CreateRet(result);
     }
+    lowering_.function_ = outer;
     lowering_.builder_.restoreIP(point);
     info = new llvm::GlobalVariable(
         *lowering_.module_, lowering_.fnInfoTy_, true, llvm::GlobalValue::PrivateLinkage,

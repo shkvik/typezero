@@ -228,6 +228,9 @@ void Lowering::setParallelPlan(const ParallelPlan *plan) {
       if (piece.fn) {
         aheadFunctions_.insert(piece.fn);
       }
+      if (piece.inOrderWith.empty() && piece.orderedAt.empty()) {
+        freeAwaits_.insert(piece.start);
+      }
     }
     for (llvm::SMLoc at : piece.orderedAt) {
       orderedLocs_.insert(at.getPointer());

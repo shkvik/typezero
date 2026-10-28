@@ -181,7 +181,16 @@ const Type *ClassMemberChecker::checkFieldTarget(MemberExpr *member, bool compou
     return Type::error();
   }
   if (!field || field->method) {
-    if (field || !ClassDeclarer::methodsNamed(cls, name, false).empty()) {
+    std::string setter = "set" + std::string(1, llvm::toUpper(name[0])) + name.drop_front().str();
+    bool method = field || !ClassDeclarer::methodsNamed(cls, name, false).empty();
+    if (method && cls->library && !ClassDeclarer::methodsNamed(cls, setter, false).empty()) {
+      checker_.diags_.error(member->loc(), "'" + name + "' is a method of '" + type->name() +
+                                               "'; change it with '" + setter + "(...)'");
+    } else if (method && cls->library) {
+      checker_.diags_.error(member->loc(), "'" + name + "' is a method of '" + type->name() +
+                                               "' and cannot be assigned: the object changes "
+                                               "what it gives itself");
+    } else if (method) {
       checker_.diags_.error(member->loc(),
                             "'" + name + "' is a method of '" + type->name() +
                                 "' and cannot be replaced: a method belongs to the class, "
@@ -201,18 +210,10 @@ const Type *ClassMemberChecker::checkFieldTarget(MemberExpr *member, bool compou
     checker_.diags_.error(member->loc(), "field '" + name + "' is read before it is set");
     return Type::error();
   }
-  bool library = owner && owner->library && checker_.libraryCalls().inLibrary(member->loc());
-  if (field->readonly && !library && !(viaThis && owner == checker_.initFn_->cls)) {
-    std::string setter = "set" + std::string(1, llvm::toUpper(name[0])) + name.drop_front().str();
-    std::string why = "; only its constructor can set it";
-    if (owner && owner->library) {
-      why = ClassDeclarer::methodsNamed(cls, setter, false).empty()
-                ? std::string()
-                : "; change it with '" + setter + "(...)'";
-    }
+  if (field->readonly && !(viaThis && owner == checker_.initFn_->cls)) {
     checker_.diags_.error(member->loc(), "cannot assign to '" + name +
                                              "' because it is a read-only field of '" +
-                                             type->name() + "'" + why);
+                                             type->name() + "'; only its constructor can set it");
   }
   if (!field->resolved) {
     if (viaThis && checker_.initFn_ == cls->init && owner == cls && !compound) {

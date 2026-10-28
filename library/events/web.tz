@@ -35,6 +35,16 @@ export interface EventInit {
   composed?: boolean
 }
 
+type EventState = {
+  defaultPrevented: boolean
+  isTrusted: boolean
+  target?: EventTarget
+  currentTarget?: EventTarget
+  srcElement?: EventTarget
+  eventPhase: int
+  immediateStopped: boolean
+}
+
 export class Event {
   static readonly NONE = 0
   static readonly CAPTURING_PHASE = 1
@@ -42,19 +52,13 @@ export class Event {
   static readonly BUBBLING_PHASE = 3
 
   readonly type: string
-  readonly defaultPrevented = false
   readonly cancelable: boolean
   readonly timeStamp: double
   readonly bubbles: boolean
   readonly composed: boolean
-  readonly isTrusted = false
-  readonly target?: EventTarget
-  readonly currentTarget?: EventTarget
-  readonly srcElement?: EventTarget
-  readonly eventPhase = 0
-  readonly immediateStopped = false
   returnValue = true
   cancelBubble = false
+  private state: EventState
 
   constructor(type: string, options?: EventInit) {
     this.type = type
@@ -62,11 +66,45 @@ export class Event {
     this.cancelable = options?.cancelable ?? false
     this.composed = options?.composed ?? false
     this.timeStamp = performance.now()
+    this.state = {
+      defaultPrevented: false,
+      isTrusted: false,
+      eventPhase: Event.NONE,
+      immediateStopped: false,
+    }
+  }
+
+  public defaultPrevented(): boolean {
+    return this.state.defaultPrevented
+  }
+
+  public isTrusted(): boolean {
+    return this.state.isTrusted
+  }
+
+  public target(): EventTarget | undefined {
+    return this.state.target
+  }
+
+  public currentTarget(): EventTarget | undefined {
+    return this.state.currentTarget
+  }
+
+  public srcElement(): EventTarget | undefined {
+    return this.state.srcElement
+  }
+
+  public eventPhase(): int {
+    return this.state.eventPhase
+  }
+
+  public immediateStopped(): boolean {
+    return this.state.immediateStopped
   }
 
   preventDefault() {
     if (!this.cancelable) return
-    this.defaultPrevented = true
+    this.state.defaultPrevented = true
     this.returnValue = false
   }
 
@@ -76,28 +114,28 @@ export class Event {
 
   stopImmediatePropagation() {
     this.cancelBubble = true
-    this.immediateStopped = true
+    this.state.immediateStopped = true
   }
 
   composedPath(): EventTarget[] {
-    const target = this.currentTarget
-    return this.eventPhase != Event.NONE && target != undefined ? [target] : []
+    const target = this.state.currentTarget
+    return this.state.eventPhase != Event.NONE && target != undefined ? [target] : []
   }
 
   dispatchOn(target: EventTarget, run: () => void): boolean {
-    if (this.eventPhase != Event.NONE) return false
-    this.target = target
-    this.srcElement = target
-    this.currentTarget = target
-    this.eventPhase = Event.AT_TARGET
+    if (this.state.eventPhase != Event.NONE) return false
+    this.state.target = target
+    this.state.srcElement = target
+    this.state.currentTarget = target
+    this.state.eventPhase = Event.AT_TARGET
     run()
-    this.currentTarget = undefined
-    this.eventPhase = Event.NONE
+    this.state.currentTarget = undefined
+    this.state.eventPhase = Event.NONE
     return true
   }
 
   protected markTrusted() {
-    this.isTrusted = true
+    this.state.isTrusted = true
   }
 }
 
@@ -180,7 +218,7 @@ export class EventTarget {
     options?: AddEventListenerOptions,
   ) {
     const signal = options?.signal
-    if (signal != undefined && signal.aborted) return
+    if (signal != undefined && signal.aborted()) return
     const capture = options?.capture ?? false
     let events = this.events
     if (events == undefined) {
@@ -234,7 +272,7 @@ export class EventTarget {
       while (handler != undefined) {
         const next: Listener | undefined = handler.next
         this.runtimeListeners(event.type, handler.order)
-        if (handler.removed || event.immediateStopped) {
+        if (handler.removed || event.immediateStopped()) {
           handler = next
           continue
         }
@@ -244,7 +282,7 @@ export class EventTarget {
       }
       this.runtimeListeners(event.type, Number.MAX_VALUE)
     })
-    return ran && !event.defaultPrevented
+    return ran && !event.defaultPrevented()
   }
 
   private listenersOf(type: string): unknown[] {
@@ -256,15 +294,25 @@ export class EventTarget {
 }
 
 export class AbortSignal extends EventTarget {
-  readonly aborted = false
-  readonly reason: unknown = undefined
   onabort?: (event: Event) => void
+  private isAborted: boolean
+  private abortReason: unknown
   private native: object = signalNew()
   private dependants?: AbortSignal[]
   private onabortListens = false
 
   private constructor() {
     super()
+    this.isAborted = false
+    this.abortReason = undefined
+  }
+
+  public aborted(): boolean {
+    return this.isAborted
+  }
+
+  public reason(): unknown {
+    return this.abortReason
   }
 
   static withAbort(): { signal: AbortSignal; abort: (reason: unknown) => void } {
@@ -284,7 +332,7 @@ export class AbortSignal extends EventTarget {
   }
 
   private abort(reason: unknown) {
-    if (this.aborted) return
+    if (this.isAborted) return
     const followers: AbortSignal[] = []
     this.markAborted(reason, followers)
     this.runAbort()
@@ -292,14 +340,14 @@ export class AbortSignal extends EventTarget {
   }
 
   private markAborted(reason: unknown, followers: AbortSignal[]) {
-    this.aborted = true
-    this.reason = reason
+    this.isAborted = true
+    this.abortReason = reason
     libSignalAbort(this.native, reason)
     const dependants = this.dependants
     this.dependants = undefined
     if (dependants == undefined) return
     for (const signal of dependants)
-      if (!signal.aborted) {
+      if (!signal.isAborted) {
         followers.push(signal)
         signal.markAborted(reason, followers)
       }
@@ -326,8 +374,8 @@ export class AbortSignal extends EventTarget {
   static any(signals: AbortSignal[]): AbortSignal {
     const result = new AbortSignal()
     for (const signal of signals)
-      if (signal.aborted) {
-        result.markAborted(signal.reason, [])
+      if (signal.isAborted) {
+        result.markAborted(signal.abortReason, [])
         return result
       }
     for (const signal of signals) {
@@ -355,7 +403,7 @@ export class AbortController {
 }
 
 function runOnabort(event: Event) {
-  const signal = event.currentTarget
+  const signal = event.currentTarget()
   if (!(signal instanceof AbortSignal)) return
   const handler = signal.onabort
   if (handler != undefined) handler(event)

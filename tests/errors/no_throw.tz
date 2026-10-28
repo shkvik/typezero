@@ -78,4 +78,4 @@ function json(j: Json) {
 }
 
 // expect-error: the Result is not used
-new Server(() => new Response("x")).listen({ port: 0 })
+new Server({ port: 0 }, () => new Response("x")).listen()

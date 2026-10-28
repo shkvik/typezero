@@ -35,18 +35,19 @@ await attempt("no duplex", "http://localhost:8000/", {
 })
 
 const corrupt = Buffer.from("not gzip at all")
-const server = new Server(async req => {
-  const path = new URL(req.url).pathname
+const server = new Server({ port: 0, hostname: "127.0.0.1", maxBodySize: 10 }, async req => {
+  const path = new URL(req.url).pathname()
   if (path == "/gzip") return new Response(corrupt, { headers: { "content-encoding": "gzip" } })
   const text = await req.text()
   return new Response(text.isOk() ? `${text.value.length} bytes` : text.error.message)
 })
-const started = server.listen({ port: 0, hostname: "127.0.0.1", maxBodySize: 10 })
+const started = server.listen()
 if (started.isErr()) {
   console.log("cannot listen:", started.error.message)
   process.exit(1)
 }
-const base = `http://127.0.0.1:${server.port}`
+const listening = started.value
+const base = `http://127.0.0.1:${listening.port}`
 await attempt("small body", base, { method: "POST", body: "0123456789" })
 await attempt("large body", base, { method: "POST", body: "0123456789!" })
 const big = new ReadableStream({
@@ -65,4 +66,4 @@ if (once.isOk()) {
   const again = await r.text()
   if (again.isErr()) console.log(again.error.code, again.error.message)
 }
-await server.stop()
+await listening.stop()

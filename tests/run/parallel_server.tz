@@ -13,8 +13,8 @@ async function later(path: string): Promise<Response> {
   return new Response(`later ${length}`)
 }
 
-const server = new Server((request: Request) => {
-  const path = new URL(request.url).pathname
+const server = new Server({ port: 0, hostname: "127.0.0.1" }, (request: Request) => {
+  const path = new URL(request.url).pathname()
   if (path == "/count") {
     hits++
     return new Response(String(hits))
@@ -22,13 +22,14 @@ const server = new Server((request: Request) => {
   if (path.startsWith("/later/")) return later(path)
   return new Response(`echo ${path}`)
 })
-const started = server.listen({ port: 0, hostname: "127.0.0.1" })
+const started = server.listen()
 if (started.isErr()) {
   console.log("cannot listen:", started.error.message)
   process.exit(1)
 }
+const listening = started.value
 
-const base = `http://127.0.0.1:${server.port}`
+const base = `http://127.0.0.1:${listening.port}`
 const paths: string[] = []
 for (let i = 0; i < 600; i++)
   paths.push(i % 3 == 0 ? "/count" : i % 3 == 1 ? `/later/${"x".repeat(i % 7)}` : `/echo/${i}`)
@@ -57,7 +58,7 @@ for (let n = 1; n <= 200; n++) if (!counts.has(String(n))) all = false
 console.log(`counted ${hits} times, each number once: ${counts.size == 200 && all}`)
 console.log(`echoes right: ${echoes} of 200`)
 console.log(`later answers right: ${laters} of 200`)
-await server.stop()
+await listening.stop()
 console.log("stopped")
 
 function must<T, E>(r: Result<T, E>): T {

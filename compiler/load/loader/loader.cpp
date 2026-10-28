@@ -89,6 +89,7 @@ Module *Loader::parse(const std::string &filePath, const std::string &realPath, 
   module->file = Parser(lexer, ctx_, diags_).parseSourceFile();
   library().importLibraryGlobals(module, text);
   library().importFsStreams(module, text);
+  loadDeclarations(module, filePath, false);
   byRealPath_[realPath] = module;
   realPaths_[module] = realPath;
   states_[module] = State::New;
@@ -132,6 +133,26 @@ void Loader::visit(Module *module) {
   states_[module] = State::Loaded;
   module->order = static_cast<unsigned>(order_.size());
   order_.push_back(module);
+}
+
+void Loader::loadDeclarations(Module *module, llvm::StringRef filePath, bool library) {
+  llvm::SmallString<256> declarations(filePath);
+  path::replace_extension(declarations, ".d.tz");
+  if (!fs::exists(declarations)) {
+    return;
+  }
+  auto buffer = llvm::MemoryBuffer::getFile(declarations);
+  if (!buffer) {
+    diags_.tool("cannot read '" + declarations + "': " + buffer.getError().message());
+    return;
+  }
+  unsigned id = sourceMgr_.AddNewSourceBuffer(std::move(*buffer), llvm::SMLoc());
+  module->buffers.push_back(id);
+  llvm::StringRef text = sourceMgr_.getMemoryBuffer(id)->getBuffer();
+  Lexer lexer(text, diags_);
+  module->declaration = std::make_unique<DeclarationFile>(
+      Parser(lexer, ctx_, diags_, library).parseDeclarationFile());
+  module->declaration->path = std::string(declarations);
 }
 
 std::string Loader::relativeName(llvm::StringRef realPath) const {

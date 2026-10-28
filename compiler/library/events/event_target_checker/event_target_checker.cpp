@@ -37,13 +37,6 @@ Expr *EventTargetChecker::onabortAssign(AssignExpr *assign, MemberExpr *member, 
   if (!cls || !cls->derivesFrom(signal) || member->object->type->isOptional()) {
     return nullptr;
   }
-  if (member->name == "aborted" || member->name == "reason") {
-    checker_.diags_.error(member->loc(), "'" + member->name +
-                                             "' of an AbortSignal is read-only; abort it with its "
-                                             "controller, 'controller.abort(reason)'");
-    assign->type = Type::error();
-    return assign;
-  }
   if (member->name != "onabort") {
     return nullptr;
   }

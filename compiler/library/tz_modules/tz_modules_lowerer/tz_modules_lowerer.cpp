@@ -132,8 +132,12 @@ llvm::Value *TzModulesLowerer::emitResultAdapter(CastExpr *cast) {
                                           lowering_.envLowerer().boxType(from), code->getArg(0), 2),
                                       "wrapped");
     std::vector<llvm::Value *> args;
+    llvm::ArrayRef<const Type *> mine = from->params(), given = to->params();
     for (unsigned i = 1; i < code->arg_size(); ++i) {
-      args.push_back(code->getArg(i));
+      llvm::Value *arg = code->getArg(i);
+      args.push_back(mine[i - 1] == given[i - 1]
+                         ? arg
+                         : lowering_.exprLowerer().emitConversion(arg, given[i - 1], mine[i - 1]));
     }
     llvm::Value *result = lowering_.closureLowerer().callFunctionValue(inner, from, args);
     lowering_.builder_.CreateRet(from->ret() == to->ret() ? result

@@ -149,7 +149,6 @@ class ReadableState {
   defaultEncoding = "utf8";
   errored?: StreamError;
   readable?: boolean;
-  synced: int = -1;
   constructor(bits: int) {
     this.bits = bits;
   }
@@ -178,7 +177,6 @@ class WritableState {
   errored?: StreamError;
   defaultEncoding = "utf8";
   writable?: boolean;
-  synced: int = -1;
   constructor(bits: int) {
     this.bits = bits;
   }
@@ -298,8 +296,8 @@ function isBufferChunk(chunk: unknown): boolean {
 function canPushMore(stream: Stream, state: ReadableState): boolean {
   return (
     (state.bits & kEnded) == 0 &&
-    (stream.readableLength < stream.readableHighWaterMark ||
-      stream.readableLength == 0)
+    (stream.readableLength() < stream.readableHighWaterMark() ||
+      stream.readableLength() == 0)
   );
 }
 
@@ -323,17 +321,17 @@ function computeNewHighWaterMark(size: int): int {
 function howMuchToRead(stream: Stream, n: int, state: ReadableState): int {
   if (
     (n <= 0 && n != -1) ||
-    (stream.readableLength == 0 && (state.bits & kEnded) != 0)
+    (stream.readableLength() == 0 && (state.bits & kEnded) != 0)
   )
     return 0;
   if ((state.bits & kObjectMode) != 0) return 1;
   if (n == -1) {
-    if ((state.bits & kFlowing) != 0 && stream.readableLength != 0)
+    if ((state.bits & kFlowing) != 0 && stream.readableLength() != 0)
       return lengthOf(state.buffer[state.bufferIndex]);
-    return stream.readableLength;
+    return stream.readableLength();
   }
-  if (n <= stream.readableLength) return n;
-  return (state.bits & kEnded) != 0 ? stream.readableLength : 0;
+  if (n <= stream.readableLength()) return n;
+  return (state.bits & kEnded) != 0 ? stream.readableLength() : 0;
 }
 
 function setChunk(buf: unknown[], idx: int, chunk: unknown) {
@@ -341,7 +339,7 @@ function setChunk(buf: unknown[], idx: int, chunk: unknown) {
 }
 
 function fromList(stream: Stream, size: int, state: ReadableState): unknown {
-  if (stream.readableLength == 0) return undefined;
+  if (stream.readableLength() == 0) return undefined;
   let n = size;
   let idx = state.bufferIndex;
   let ret: unknown;
@@ -350,7 +348,7 @@ function fromList(stream: Stream, size: int, state: ReadableState): unknown {
   if ((state.bits & kObjectMode) != 0) {
     ret = buf[idx];
     setChunk(buf, idx++, undefined);
-  } else if (n == 0 || n >= stream.readableLength) {
+  } else if (n == 0 || n >= stream.readableLength()) {
     if ((state.bits & kDecoder) != 0) {
       let text = "";
       while (idx < len) {
@@ -364,7 +362,7 @@ function fromList(stream: Stream, size: int, state: ReadableState): unknown {
       ret = buf[idx];
       setChunk(buf, idx++, undefined);
     } else {
-      const out = Buffer.allocUnsafe(stream.readableLength);
+      const out = Buffer.allocUnsafe(stream.readableLength());
       let i = 0;
       while (idx < len) {
         const data = bufferOf(buf[idx]);
@@ -464,7 +462,7 @@ function needFinish(stream: Stream, state: WritableState): boolean {
         kCloseEmitted |
         kErrored |
         kBuffered)) ==
-      (kEnding | kConstructed) && stream.writableLength == 0
+      (kEnding | kConstructed) && stream.writableLength() == 0
   );
 }
 
@@ -480,28 +478,14 @@ function callFinishedCallbacks(
 }
 
 export class Stream extends EventEmitterBase {
-  readonly allowHalfOpen = true;
-  readonly destroyed = false;
-  readonly closed = false;
-  readonly errored?: StreamError;
-  readonly readable = false;
-  readonly readableAborted = false;
-  readonly readableDidRead = false;
-  readonly readableEncoding?: string;
-  readonly readableEnded = false;
-  readonly readableFlowing?: boolean;
-  readonly readableHighWaterMark: int = 0;
-  readonly readableLength: int = 0;
-  readonly readableObjectMode = false;
-  readonly writable = false;
-  readonly writableAborted = false;
-  readonly writableCorked: int = 0;
-  readonly writableEnded = false;
-  readonly writableFinished = false;
-  readonly writableHighWaterMark: int = 0;
-  readonly writableLength: int = 0;
-  readonly writableNeedDrain = false;
-  readonly writableObjectMode = false;
+  private halfOpen = true;
+  private readHwm: int = 0;
+  private readLength: int = 0;
+  private readObjects = false;
+  private corked: int = 0;
+  private writeHwm: int = 0;
+  private writeLength: int = 0;
+  private writeObjects = false;
   private readableState?: ReadableState;
   private writableState?: WritableState;
   private ready = false;
@@ -524,6 +508,155 @@ export class Stream extends EventEmitterBase {
     super();
   }
 
+  public allowHalfOpen(): boolean {
+    return this.halfOpen;
+  }
+
+  public destroyed(): boolean {
+    const r = this.readableState;
+    const w = this.writableState;
+    if (r != undefined && w != undefined) {
+      return (r.bits & kDestroyed) != 0 && (w.bits & kDestroyed) != 0;
+    }
+    if (r != undefined) {
+      return (r.bits & kDestroyed) != 0;
+    }
+
+    return w != undefined && (w.bits & kDestroyed) != 0;
+  }
+
+  public closed(): boolean {
+    const r = this.readableState;
+    if (r != undefined) {
+      return (r.bits & kClosed) != 0;
+    }
+    const w = this.writableState;
+
+    return w != undefined && (w.bits & kClosed) != 0;
+  }
+
+  public errored(): StreamError | undefined {
+    const r = this.readableState;
+    if (r != undefined) {
+      return r.errored;
+    }
+
+    return this.writableState?.errored;
+  }
+
+  public readable(): boolean {
+    const r = this.readableState;
+
+    return (
+      r != undefined &&
+      r.readable != false &&
+      (r.bits & (kDestroyed | kErrorEmitted | kEndEmitted)) == 0
+    );
+  }
+
+  public readableAborted(): boolean {
+    const r = this.readableState;
+
+    return (
+      r != undefined &&
+      r.readable != false &&
+      ((r.bits & kDestroyed) != 0 || r.errored != undefined) &&
+      (r.bits & kEndEmitted) == 0
+    );
+  }
+
+  public readableDidRead(): boolean {
+    const r = this.readableState;
+
+    return r != undefined && (r.bits & kDataEmitted) != 0;
+  }
+
+  public readableEncoding(): string | undefined {
+    return this.readableState?.encoding;
+  }
+
+  public readableEnded(): boolean {
+    const r = this.readableState;
+
+    return r != undefined && (r.bits & kEndEmitted) != 0;
+  }
+
+  public readableFlowing(): boolean | undefined {
+    const r = this.readableState;
+    if (r == undefined || (r.bits & kHasFlowing) == 0) {
+      return undefined;
+    }
+
+    return (r.bits & kFlowing) != 0;
+  }
+
+  public readableHighWaterMark(): int {
+    return this.readHwm;
+  }
+
+  public readableLength(): int {
+    return this.readLength;
+  }
+
+  public readableObjectMode(): boolean {
+    return this.readObjects;
+  }
+
+  public writable(): boolean {
+    const w = this.writableState;
+
+    return (
+      w != undefined &&
+      w.writable != false &&
+      (w.bits & (kEnding | kWEnded | kDestroyed | kErrored)) == 0
+    );
+  }
+
+  public writableAborted(): boolean {
+    const w = this.writableState;
+
+    return (
+      w != undefined &&
+      w.writable != false &&
+      (w.bits & (kDestroyed | kErrored)) != 0 &&
+      (w.bits & kFinished) == 0
+    );
+  }
+
+  public writableCorked(): int {
+    return this.corked;
+  }
+
+  public writableEnded(): boolean {
+    const w = this.writableState;
+
+    return w != undefined && (w.bits & kEnding) != 0;
+  }
+
+  public writableFinished(): boolean {
+    const w = this.writableState;
+
+    return w != undefined && (w.bits & kFinished) != 0;
+  }
+
+  public writableHighWaterMark(): int {
+    return this.writeHwm;
+  }
+
+  public writableLength(): int {
+    return this.writeLength;
+  }
+
+  public writableNeedDrain(): boolean {
+    const w = this.writableState;
+
+    return w != undefined && (w.bits & (kDestroyed | kEnding | kNeedDrain)) == kNeedDrain;
+  }
+
+  public writableObjectMode(): boolean {
+    return this.writeObjects;
+  }
+
   protected setUp(setup: StreamSetup) {
     if (this.ready) return;
     this.ready = true;
@@ -531,7 +664,7 @@ export class Stream extends EventEmitterBase {
     if (readable != undefined) this.initReadable(readable, setup.duplex);
     const writable = setup.writable;
     if (writable != undefined) this.initWritable(writable, setup.duplex);
-    this.allowHalfOpen = setup.allowHalfOpen;
+    this.halfOpen = setup.allowHalfOpen;
     const r = this.readableState;
     const w = this.writableState;
     if (r != undefined && setup.readableOff) {
@@ -543,7 +676,6 @@ export class Stream extends EventEmitterBase {
       w.bits |= kEnding | kWEnded | kFinished;
     }
     if (r != undefined && setup.transform) r.bits &= ~kSync;
-    Stream.sync(this);
     this.hasConstruct = setup.hasConstruct;
     this.hasWritev = setup.hasWritev;
     this.hasFinal = setup.hasFinal;
@@ -561,7 +693,7 @@ export class Stream extends EventEmitterBase {
       (isDuplex && (options.sideObjectMode ?? false));
     if (objectMode) bits |= kObjectMode;
     const state = new ReadableState(bits);
-    this.readableHighWaterMark = getHighWaterMark(
+    this.readHwm = getHighWaterMark(
       options.highWaterMark ??
         (isDuplex ? options.sideHighWaterMark : undefined),
       isDuplex ? "options.readableHighWaterMark" : "options.highWaterMark",
@@ -579,8 +711,7 @@ export class Stream extends EventEmitterBase {
       state.encoding = state.decoder.encoding;
     }
     this.readableState = state;
-    this.readableObjectMode = objectMode;
-    Stream.sync(this);
+    this.readObjects = objectMode;
   }
 
   private initWritable(options: SideOptions, isDuplex: boolean) {
@@ -590,7 +721,7 @@ export class Stream extends EventEmitterBase {
       (isDuplex && (options.sideObjectMode ?? false));
     if (objectMode) bits |= kObjectMode;
     const state = new WritableState(bits);
-    this.writableHighWaterMark = getHighWaterMark(
+    this.writeHwm = getHighWaterMark(
       options.highWaterMark ??
         (isDuplex ? options.sideHighWaterMark : undefined),
       isDuplex ? "options.writableHighWaterMark" : "options.highWaterMark",
@@ -604,8 +735,7 @@ export class Stream extends EventEmitterBase {
       state.defaultEncoding = normalizeEncoding(defaultEncoding);
     resetBuffer(state);
     this.writableState = state;
-    this.writableObjectMode = objectMode;
-    Stream.sync(this);
+    this.writeObjects = objectMode;
   }
 
   private initEnd(signal: AbortSignal | undefined) {
@@ -695,7 +825,6 @@ export class Stream extends EventEmitterBase {
     const state = this.readableState;
     if (state == undefined) return undefined;
     const ret = Stream.read(this, state, size);
-    Stream.sync(this);
     return ret;
   }
 
@@ -712,7 +841,6 @@ export class Stream extends EventEmitterBase {
       (state.bits & kObjectMode) == 0
         ? Stream.readableAddChunkPushByteMode(this, state, chunk, encoding)
         : Stream.readableAddChunkPushObjectMode(this, state, chunk, encoding);
-    Stream.sync(this);
     return ret;
   }
 
@@ -723,7 +851,6 @@ export class Stream extends EventEmitterBase {
       (state.bits & kObjectMode) == 0
         ? Stream.readableAddChunkUnshiftByteMode(this, state, chunk, encoding)
         : Stream.readableAddChunkUnshiftObjectMode(this, state, chunk);
-    Stream.sync(this);
     return ret;
   }
 
@@ -754,7 +881,6 @@ export class Stream extends EventEmitterBase {
     cb: StreamCallback,
   ): boolean | StreamError {
     const ret = Stream.writeImpl(this, chunk, encoding, cb);
-    Stream.sync(this);
     return ret;
   }
 
@@ -775,13 +901,12 @@ export class Stream extends EventEmitterBase {
       if (typeof ret != "boolean") err = ret;
     }
     if ((state.bits & kCorked) != 0) {
-      this.writableCorked = 1;
+      this.corked = 1;
       this.uncork();
     }
     if (err != undefined) {
     } else if ((state.bits & (kEnding | kErrored)) == 0) {
       state.bits |= kEnding;
-      Stream.sync(this);
       Stream.finishMaybe(this, state, true);
       state.bits |= kWEnded;
     } else if ((state.bits & kFinished) != 0) {
@@ -807,7 +932,6 @@ export class Stream extends EventEmitterBase {
         state.onFinished.push(callback);
       }
     }
-    Stream.sync(this);
     return this;
   }
 
@@ -823,8 +947,7 @@ export class Stream extends EventEmitterBase {
       if ((state.bits & (kEndEmitted | kReadableListening)) == 0) {
         state.bits |= kReadableListening | kNeedReadable | kHasFlowing;
         state.bits &= ~(kFlowing | kEmittedReadable);
-        Stream.sync(this);
-        if (this.readableLength != 0) Stream.emitReadable(this);
+        if (this.readableLength() != 0) Stream.emitReadable(this);
         else if ((state.bits & kReading) == 0)
           process.nextTick(() => this.readChunk(0));
       }
@@ -882,9 +1005,7 @@ export class Stream extends EventEmitterBase {
     state.buffer = [];
     state.bufferIndex = 0;
     if (content != "") state.buffer.push(content);
-    this.readableLength = content.length;
-    state.synced = -1;
-    Stream.sync(this);
+    this.readLength = content.length;
     return this;
   }
 
@@ -917,7 +1038,6 @@ export class Stream extends EventEmitterBase {
     }
     state.bits |= kHasPaused;
     state.bits &= ~kPaused;
-    Stream.sync(this);
     return this;
   }
 
@@ -927,7 +1047,6 @@ export class Stream extends EventEmitterBase {
     if ((state.bits & (kHasFlowing | kFlowing)) != kHasFlowing) {
       state.bits |= kHasFlowing;
       state.bits &= ~kFlowing;
-      Stream.sync(this);
       this.emit("pause");
     }
     state.bits |= kHasPaused | kPaused;
@@ -938,18 +1057,17 @@ export class Stream extends EventEmitterBase {
     const state = this.writableState;
     if (state == undefined) return;
     state.bits |= kCorked;
-    this.writableCorked++;
+    this.corked++;
   }
 
   uncork() {
     const state = this.writableState;
     if (state == undefined) return;
-    if (this.writableCorked != 0) {
-      this.writableCorked--;
-      if (this.writableCorked == 0) state.bits &= ~kCorked;
+    if (this.writableCorked() != 0) {
+      this.corked--;
+      if (this.writableCorked() == 0) state.bits &= ~kCorked;
       if ((state.bits & kWriting) == 0) Stream.clearBuffer(this, state);
     }
-    Stream.sync(this);
   }
 
   setDefaultEncoding(encoding: BufferEncoding) {
@@ -984,68 +1102,6 @@ export class Stream extends EventEmitterBase {
     return state;
   }
 
-  private static sync(stream: Stream) {
-    const r = stream.readableState;
-    const w = stream.writableState;
-    if (
-      (r != undefined && r.synced != (r.bits & kReadablePublic)) ||
-      (w != undefined && w.synced != (w.bits & kWritablePublic))
-    )
-      Stream.syncNow(stream, r, w);
-  }
-
-  private static syncNow(
-    stream: Stream,
-    r: ReadableState | undefined,
-    w: WritableState | undefined,
-  ) {
-    if (r != undefined) r.synced = r.bits & kReadablePublic;
-    if (w != undefined) w.synced = w.bits & kWritablePublic;
-    if (r != undefined) {
-      const b = r.bits;
-      stream.readableEnded = (b & kEndEmitted) != 0;
-      stream.readableFlowing =
-        (b & kHasFlowing) != 0 ? (b & kFlowing) != 0 : undefined;
-      stream.readableDidRead = (b & kDataEmitted) != 0;
-      stream.readableEncoding = r.encoding;
-      stream.readable =
-        r.readable != false &&
-        (b & (kDestroyed | kErrorEmitted | kEndEmitted)) == 0;
-      stream.readableAborted =
-        r.readable != false &&
-        ((b & kDestroyed) != 0 || r.errored != undefined) &&
-        (b & kEndEmitted) == 0;
-    }
-    if (w != undefined) {
-      const b = w.bits;
-      stream.writableEnded = (b & kEnding) != 0;
-      stream.writableFinished = (b & kFinished) != 0;
-      stream.writableNeedDrain =
-        (b & (kDestroyed | kEnding | kNeedDrain)) == kNeedDrain;
-      stream.writable =
-        w.writable != false &&
-        (b & (kEnding | kWEnded | kDestroyed | kErrored)) == 0;
-      stream.writableAborted =
-        w.writable != false &&
-        (b & (kDestroyed | kErrored)) != 0 &&
-        (b & kFinished) == 0;
-    }
-    if (r != undefined && w != undefined) {
-      stream.destroyed =
-        (r.bits & kDestroyed) != 0 && (w.bits & kDestroyed) != 0;
-      stream.closed = (r.bits & kClosed) != 0;
-      stream.errored = r.errored;
-    } else if (r != undefined) {
-      stream.destroyed = (r.bits & kDestroyed) != 0;
-      stream.closed = (r.bits & kClosed) != 0;
-      stream.errored = r.errored;
-    } else if (w != undefined) {
-      stream.destroyed = (w.bits & kDestroyed) != 0;
-      stream.closed = (w.bits & kClosed) != 0;
-      stream.errored = w.errored;
-    }
-  }
-
   private static writeOne(stream: Stream, chunk: unknown, encoding: string) {
     if (stream.transformsWrites)
       Stream.transformWrite(stream, chunk, encoding, stream.written);
@@ -1061,7 +1117,7 @@ export class Stream extends EventEmitterBase {
     const count = stream.transformCount + 1;
     stream.transformCount = count;
     stream.transformWritten = callback;
-    stream.transformLength = stream.readableLength;
+    stream.transformLength = stream.readableLength();
     const self = stream.weakSelf ?? new WeakRef(stream);
     stream.weakSelf = self;
     stream.transformChunk(
@@ -1098,8 +1154,8 @@ export class Stream extends EventEmitterBase {
       process.nextTick(() => callback());
     } else if (
       (wState.bits & kWEnded) != 0 ||
-      stream.transformLength == stream.readableLength ||
-      stream.readableLength < stream.readableHighWaterMark
+      stream.transformLength == stream.readableLength() ||
+      stream.readableLength() < stream.readableHighWaterMark()
     ) {
       callback();
     } else {
@@ -1111,7 +1167,7 @@ export class Stream extends EventEmitterBase {
     stream: Stream,
     cb: StreamCallback | undefined,
   ) {
-    if (stream.hasFlush && !stream.destroyed) {
+    if (stream.hasFlush && !stream.destroyed()) {
       stream.onFlush((er?: StreamError, data?: unknown) => {
         if (er != undefined) {
           if (cb != undefined) cb(er);
@@ -1168,7 +1224,7 @@ export class Stream extends EventEmitterBase {
       }
     });
     while (true) {
-      const chunk = stream.destroyed ? undefined : stream.readChunk();
+      const chunk = stream.destroyed() ? undefined : stream.readChunk();
       if (chunk != undefined) {
         if (!isChunk<C>(chunk)) {
           failed = true;
@@ -1356,14 +1412,13 @@ export class Stream extends EventEmitterBase {
     if (
       (state.bits & (kFlowing | kSync | kDataListening)) ==
         (kFlowing | kDataListening) &&
-      stream.readableLength == 0
+      stream.readableLength() == 0
     ) {
       clearAwaitDrain(state);
       state.bits |= kDataEmitted;
-      Stream.sync(stream);
       stream.emitData(chunk);
     } else {
-      stream.readableLength +=
+      stream.readLength +=
         (state.bits & kObjectMode) != 0 ? 1 : lengthOf(chunk);
       if (addToFront) {
         const at = state.bufferIndex - 1;
@@ -1389,32 +1444,32 @@ export class Stream extends EventEmitterBase {
   ): unknown {
     let n = size ?? -1;
     const nOrig = n;
-    if (n > stream.readableHighWaterMark)
-      stream.readableHighWaterMark = computeNewHighWaterMark(n);
+    if (n > stream.readableHighWaterMark())
+      stream.readHwm = computeNewHighWaterMark(n);
     if (n != 0) state.bits &= ~kEmittedReadable;
     if (
       n == 0 &&
       (state.bits & kNeedReadable) != 0 &&
-      ((stream.readableHighWaterMark != 0
-        ? stream.readableLength >= stream.readableHighWaterMark
-        : stream.readableLength > 0) ||
+      ((stream.readableHighWaterMark() != 0
+        ? stream.readableLength() >= stream.readableHighWaterMark()
+        : stream.readableLength() > 0) ||
         (state.bits & kEnded) != 0)
     ) {
-      if (stream.readableLength == 0 && (state.bits & kEnded) != 0)
+      if (stream.readableLength() == 0 && (state.bits & kEnded) != 0)
         Stream.endReadable(stream);
       else Stream.emitReadable(stream);
       return undefined;
     }
     n = howMuchToRead(stream, n, state);
     if (n == 0 && (state.bits & kEnded) != 0) {
-      if (stream.readableLength == 0) Stream.endReadable(stream);
+      if (stream.readableLength() == 0) Stream.endReadable(stream);
       return undefined;
     }
 
     let doRead = (state.bits & kNeedReadable) != 0;
     if (
-      stream.readableLength == 0 ||
-      stream.readableLength - (n == -1 ? 0 : n) < stream.readableHighWaterMark
+      stream.readableLength() == 0 ||
+      stream.readableLength() - (n == -1 ? 0 : n) < stream.readableHighWaterMark()
     )
       doRead = true;
     if (
@@ -1425,8 +1480,8 @@ export class Stream extends EventEmitterBase {
       doRead = false;
     } else if (doRead) {
       state.bits |= kReading | kSync;
-      if (stream.readableLength == 0) state.bits |= kNeedReadable;
-      stream.onRead(stream.readableHighWaterMark);
+      if (stream.readableLength() == 0) state.bits |= kNeedReadable;
+      stream.onRead(stream.readableHighWaterMark());
       state.bits &= ~kSync;
       if ((state.bits & kReading) == 0) n = howMuchToRead(stream, nOrig, state);
     }
@@ -1434,15 +1489,15 @@ export class Stream extends EventEmitterBase {
     if (n > 0) ret = fromList(stream, n, state);
     if (ret == undefined) {
       state.bits |=
-        stream.readableLength <= stream.readableHighWaterMark
+        stream.readableLength() <= stream.readableHighWaterMark()
           ? kNeedReadable
           : 0;
       n = 0;
     } else {
-      stream.readableLength -= n;
+      stream.readLength -= n;
       clearAwaitDrain(state);
     }
-    if (stream.readableLength == 0) {
+    if (stream.readableLength() == 0) {
       if ((state.bits & kEnded) == 0) state.bits |= kNeedReadable;
       if (nOrig != n && (state.bits & kEnded) != 0) Stream.endReadable(stream);
     }
@@ -1451,7 +1506,6 @@ export class Stream extends EventEmitterBase {
       (state.bits & (kErrorEmitted | kCloseEmitted)) == 0
     ) {
       state.bits |= kDataEmitted;
-      Stream.sync(stream);
       stream.emitData(ret);
     }
     return ret;
@@ -1464,7 +1518,7 @@ export class Stream extends EventEmitterBase {
       const chunk = decoder.end();
       if (chunk.length != 0) {
         state.buffer.push(chunk);
-        stream.readableLength +=
+        stream.readLength +=
           (state.bits & kObjectMode) != 0 ? 1 : chunk.length;
       }
     }
@@ -1491,15 +1545,14 @@ export class Stream extends EventEmitterBase {
     const state = Stream.readableStateOf(stream);
     if (
       (state.bits & (kDestroyed | kErrored)) == 0 &&
-      (stream.readableLength != 0 || (state.bits & kEnded) != 0)
+      (stream.readableLength() != 0 || (state.bits & kEnded) != 0)
     ) {
-      Stream.sync(stream);
       stream.emit("readable");
       state.bits &= ~kEmittedReadable;
     }
     state.bits |=
       (state.bits & (kFlowing | kEnded)) == 0 &&
-      stream.readableLength <= stream.readableHighWaterMark
+      stream.readableLength() <= stream.readableHighWaterMark()
         ? kNeedReadable
         : 0;
     Stream.flow(stream);
@@ -1518,15 +1571,14 @@ export class Stream extends EventEmitterBase {
   private static maybeReadMoreNow(stream: Stream, state: ReadableState) {
     while (
       (state.bits & (kReading | kEnded)) == 0 &&
-      (stream.readableLength < stream.readableHighWaterMark ||
-        ((state.bits & kFlowing) != 0 && stream.readableLength == 0))
+      (stream.readableLength() < stream.readableHighWaterMark() ||
+        ((state.bits & kFlowing) != 0 && stream.readableLength() == 0))
     ) {
-      const len = stream.readableLength;
+      const len = stream.readableLength();
       Stream.read(stream, state, 0);
-      if (len == stream.readableLength) break;
+      if (len == stream.readableLength()) break;
     }
     state.bits &= ~kReadingMore;
-    Stream.sync(stream);
   }
 
   private static updateReadableListening(self: Stream) {
@@ -1543,7 +1595,6 @@ export class Stream extends EventEmitterBase {
     } else if ((state.bits & kReadableListening) == 0) {
       state.bits &= ~(kHasFlowing | kFlowing);
     }
-    Stream.sync(self);
   }
 
   private static resumeSoon(stream: Stream, state: ReadableState) {
@@ -1556,12 +1607,10 @@ export class Stream extends EventEmitterBase {
   private static resumeNow(stream: Stream, state: ReadableState) {
     if ((state.bits & kReading) == 0) Stream.read(stream, state, 0);
     state.bits &= ~kResumeScheduled;
-    Stream.sync(stream);
     stream.emit("resume");
     Stream.flow(stream);
     if ((state.bits & (kFlowing | kReading)) == kFlowing)
       Stream.read(stream, state, 0);
-    Stream.sync(stream);
   }
 
   private static flow(stream: Stream) {
@@ -1583,13 +1632,12 @@ export class Stream extends EventEmitterBase {
   private static endReadableNT(state: ReadableState, stream: Stream) {
     if (
       (state.bits & (kErrored | kCloseEmitted | kEndEmitted)) == 0 &&
-      stream.readableLength == 0
+      stream.readableLength() == 0
     ) {
       state.bits |= kEndEmitted;
-      Stream.sync(stream);
       stream.emit("end");
       const w = stream.writableState;
-      if (stream.writable && !stream.allowHalfOpen) {
+      if (stream.writable() && !stream.allowHalfOpen()) {
         process.nextTick(() => Stream.endWritableNT(stream));
       } else if ((state.bits & kAutoDestroy) != 0) {
         const autoDestroy =
@@ -1603,7 +1651,7 @@ export class Stream extends EventEmitterBase {
 
   private static endWritableNT(stream: Stream) {
     const writable =
-      stream.writable && !stream.writableEnded && !stream.destroyed;
+      stream.writable() && !stream.writableEnded() && !stream.destroyed();
     if (writable) stream.endWith(false, undefined, undefined, undefined);
   }
 
@@ -1701,7 +1749,7 @@ export class Stream extends EventEmitterBase {
       src.unpipe(dest);
     }
     dest.emit("pipe", src);
-    if (dest.writableNeedDrain) pause();
+    if (dest.writableNeedDrain()) pause();
     else if ((state.bits & kFlowing) == 0) src.resume();
   }
 
@@ -1775,7 +1823,7 @@ export class Stream extends EventEmitterBase {
     callback: StreamCallback,
   ): boolean {
     const len = (state.bits & kObjectMode) != 0 ? 1 : lengthOf(chunk);
-    stream.writableLength += len;
+    stream.writeLength += len;
     if (
       (state.bits & (kWriting | kErrored | kCorked | kConstructed)) !=
       kConstructed
@@ -1797,8 +1845,8 @@ export class Stream extends EventEmitterBase {
       state.bits &= ~kWSync;
     }
     const ret =
-      stream.writableLength < stream.writableHighWaterMark ||
-      stream.writableLength == 0;
+      stream.writableLength() < stream.writableHighWaterMark() ||
+      stream.writableLength() == 0;
     if (!ret) state.bits |= kNeedDrain;
     return ret && (state.bits & (kDestroyed | kErrored)) == 0;
   }
@@ -1858,7 +1906,7 @@ export class Stream extends EventEmitterBase {
     const cb = state.writecb;
     state.writecb = nop;
     state.bits &= ~(kWriting | kExpectWriteCb);
-    stream.writableLength -= state.writelen;
+    stream.writeLength -= state.writelen;
     state.writelen = 0;
     if (er != undefined) {
       if ((state.bits & kErrored) == 0) {
@@ -1870,7 +1918,6 @@ export class Stream extends EventEmitterBase {
         r.errored = er;
         r.bits |= kErrored;
       }
-      Stream.sync(stream);
       const error = er;
       if (isSync)
         process.nextTick(() => Stream.onwriteError(stream, state, error, cb));
@@ -1879,7 +1926,7 @@ export class Stream extends EventEmitterBase {
       if ((state.bits & kBuffered) != 0) Stream.clearBuffer(stream, state);
       if (isSync) {
         const needDrain =
-          (state.bits & kNeedDrain) != 0 && stream.writableLength == 0;
+          (state.bits & kNeedDrain) != 0 && stream.writableLength() == 0;
         const needTick =
           needDrain || (state.bits & kDestroyed) != 0 || cb != nop;
         const info = state.afterWriteTickInfo;
@@ -1912,7 +1959,6 @@ export class Stream extends EventEmitterBase {
         Stream.afterWrite(stream, state, 1, cb);
       }
     }
-    Stream.sync(stream);
   }
 
   private static afterWriteTick(
@@ -1934,10 +1980,9 @@ export class Stream extends EventEmitterBase {
     state.bits &= ~kAfterWritePending;
     const needDrain =
       (state.bits & (kEnding | kNeedDrain | kDestroyed)) == kNeedDrain &&
-      stream.writableLength == 0;
+      stream.writableLength() == 0;
     if (needDrain) {
       state.bits &= ~kNeedDrain;
-      Stream.sync(stream);
       stream.emit("drain");
     }
     let left = count;
@@ -1947,7 +1992,6 @@ export class Stream extends EventEmitterBase {
     }
     if ((state.bits & kDestroyed) != 0) Stream.errorBuffer(stream, state);
     if ((state.bits & kEnding) != 0) Stream.finishMaybe(stream, state, true);
-    Stream.sync(stream);
   }
 
   private static errorBuffer(stream: Stream, state: WritableState) {
@@ -1957,13 +2001,12 @@ export class Stream extends EventEmitterBase {
         const entry = state.buffered[n];
         if (entry == undefined) continue;
         const len = (state.bits & kObjectMode) != 0 ? 1 : lengthOf(entry.chunk);
-        stream.writableLength -= len;
+        stream.writeLength -= len;
         entry.callback(state.errored ?? streamDestroyed("write"));
       }
     }
     callFinishedCallbacks(state, state.errored ?? streamDestroyed("end"));
     resetBuffer(state);
-    Stream.sync(stream);
   }
 
   private static clearBuffer(stream: Stream, state: WritableState) {
@@ -2001,7 +2044,7 @@ export class Stream extends EventEmitterBase {
         const entry = buffered[n];
         if (entry != undefined) chunks.push(entry);
       }
-      Stream.doWritev(stream, state, stream.writableLength, chunks, callback);
+      Stream.doWritev(stream, state, stream.writableLength(), chunks, callback);
       resetBuffer(state);
     } else {
       do {
@@ -2046,7 +2089,6 @@ export class Stream extends EventEmitterBase {
       Stream.errorOrDestroy(stream, err, (state.bits & kWSync) != 0);
     } else if (needFinish(stream, state)) {
       state.bits |= kPrefinished;
-      Stream.sync(stream);
       Stream.emitPrefinish(stream);
       state.pendingcb++;
       process.nextTick(() => Stream.finish(stream, state));
@@ -2064,7 +2106,6 @@ export class Stream extends EventEmitterBase {
       state.bits &= ~kWSync;
     } else {
       state.bits |= kFinalCalled | kPrefinished;
-      Stream.sync(stream);
       Stream.emitPrefinish(stream);
     }
   }
@@ -2095,7 +2136,6 @@ export class Stream extends EventEmitterBase {
     state.pendingcb--;
     state.bits |= kFinished;
     callFinishedCallbacks(state, undefined);
-    Stream.sync(stream);
     stream.emit("finish");
     if ((state.bits & kAutoDestroy) != 0) {
       const r = stream.readableState;
@@ -2138,7 +2178,6 @@ export class Stream extends EventEmitterBase {
     Stream.checkError(stream, err);
     if (w != undefined) w.bits |= kDestroyed;
     if (r != undefined) r.bits |= kDestroyed;
-    Stream.sync(stream);
     const s = w ?? r;
     if (s != undefined && (s.bits & kConstructed) == 0) {
       stream.destroyWaits.push((er: StreamError | undefined) =>
@@ -2163,7 +2202,6 @@ export class Stream extends EventEmitterBase {
       const r = self.readableState;
       if (w != undefined) w.bits |= kClosed;
       if (r != undefined) r.bits |= kClosed;
-      Stream.sync(self);
       if (cb != undefined) cb(error);
       if (error != undefined) {
         const failed = error;
@@ -2183,7 +2221,6 @@ export class Stream extends EventEmitterBase {
     const w = self.writableState;
     if (w != undefined) w.bits |= kCloseEmitted;
     if (r != undefined) r.bits |= kCloseEmitted;
-    Stream.sync(self);
     if (
       (w != undefined && (w.bits & kEmitClose) != 0) ||
       (r != undefined && (r.bits & kEmitClose) != 0)
@@ -2201,7 +2238,6 @@ export class Stream extends EventEmitterBase {
       return;
     if (w != undefined) w.bits |= kErrorEmitted;
     if (r != undefined) r.bits |= kErrorEmitted;
-    Stream.sync(self);
     self.emit("error", err);
   }
 
@@ -2231,7 +2267,6 @@ export class Stream extends EventEmitterBase {
         r.errored = err;
         r.bits |= kErrored;
       }
-      Stream.sync(stream);
       if (isSync) process.nextTick(() => Stream.emitErrorNT(stream, err));
       else Stream.emitErrorNT(stream, err);
     }
@@ -2271,7 +2306,6 @@ export class Stream extends EventEmitterBase {
       } else {
         for (const wait of constructed) wait();
       }
-      Stream.sync(stream);
     }
     stream.onConstruct((err?: StreamError) => {
       process.nextTick(() => afterConstruct(err));
@@ -2288,7 +2322,7 @@ export class Stream extends EventEmitterBase {
   static isDestroyed(stream: Stream): boolean {
     const state = stream.writableState ?? stream.readableState;
     return (
-      stream.destroyed || (state != undefined && (state.bits & kDestroyed) != 0)
+      stream.destroyed() || (state != undefined && (state.bits & kDestroyed) != 0)
     );
   }
 
@@ -2309,7 +2343,7 @@ export class Stream extends EventEmitterBase {
   }
 
   private static isWritableEnded(stream: Stream): boolean {
-    if (stream.writableEnded) return true;
+    if (stream.writableEnded()) return true;
     const w = stream.writableState;
     if (w == undefined || w.errored != undefined) return false;
     return (w.bits & kWEnded) != 0;
@@ -2317,12 +2351,12 @@ export class Stream extends EventEmitterBase {
 
   private static isWritableFinished(stream: Stream, strict: boolean): boolean {
     if (!Stream.isWritableNodeStream(stream)) return false;
-    if (stream.writableFinished) return true;
+    if (stream.writableFinished()) return true;
     const w = Stream.writableStateOf(stream);
     if (w.errored != undefined) return false;
     return (
       (w.bits & kFinished) != 0 ||
-      (!strict && (w.bits & kWEnded) != 0 && stream.writableLength == 0)
+      (!strict && (w.bits & kWEnded) != 0 && stream.writableLength() == 0)
     );
   }
 
@@ -2332,7 +2366,7 @@ export class Stream extends EventEmitterBase {
     if (r.errored != undefined) return false;
     return (
       (r.bits & kEndEmitted) != 0 ||
-      (!strict && (r.bits & kEnded) != 0 && stream.readableLength == 0)
+      (!strict && (r.bits & kEnded) != 0 && stream.readableLength() == 0)
     );
   }
 
@@ -2340,7 +2374,7 @@ export class Stream extends EventEmitterBase {
     if (Stream.isDestroyed(stream)) return false;
     return (
       Stream.isReadableNodeStream(stream) &&
-      stream.readable &&
+      stream.readable() &&
       !Stream.isReadableFinished(stream, true)
     );
   }
@@ -2349,7 +2383,7 @@ export class Stream extends EventEmitterBase {
     if (Stream.isDestroyed(stream)) return false;
     return (
       Stream.isWritableNodeStream(stream) &&
-      stream.writable &&
+      stream.writable() &&
       !Stream.isWritableEnded(stream)
     );
   }
@@ -2395,7 +2429,7 @@ export class Stream extends EventEmitterBase {
   }
 
   static isDisturbed(stream: Stream): boolean {
-    return stream.readableDidRead || stream.readableAborted;
+    return stream.readableDidRead() || stream.readableAborted();
   }
 
   private static eos(
@@ -2469,7 +2503,7 @@ export class Stream extends EventEmitterBase {
         cleanup();
         endCallback(abortError());
       };
-      if (signal.aborted) {
+      if (signal.aborted()) {
         process.nextTick(abort);
       } else {
         const onAbort = (event: Event) => abort();
@@ -2486,15 +2520,15 @@ export class Stream extends EventEmitterBase {
 
   private static finishEvent(e: Eos, stream: Stream) {
     e.writableFinished = true;
-    if (stream.destroyed) e.willEmitClose = false;
-    if (e.willEmitClose && (!stream.readable || e.readable)) return;
+    if (stream.destroyed()) e.willEmitClose = false;
+    if (e.willEmitClose && (!stream.readable() || e.readable)) return;
     if (!e.readable || e.readableFinished) e.call();
   }
 
   private static endEvent(e: Eos, stream: Stream) {
     e.readableFinished = true;
-    if (stream.destroyed) e.willEmitClose = false;
-    if (e.willEmitClose && (!stream.writable || e.writable)) return;
+    if (stream.destroyed()) e.willEmitClose = false;
+    if (e.willEmitClose && (!stream.writable() || e.writable)) return;
     if (!e.writable || e.writableFinished) e.call();
   }
 
@@ -2550,7 +2584,7 @@ export class Stream extends EventEmitterBase {
     const onAbort = () => {
       stream.destroy(abortError());
     };
-    if (signal.aborted) {
+    if (signal.aborted()) {
       onAbort();
     } else {
       const listener = (event: Event) => onAbort();
@@ -2634,7 +2668,7 @@ export class Stream extends EventEmitterBase {
     writable.on("drain", ondrain);
     const cleanup = Stream.eos(writable, { readable: false }, resume);
     let going = true;
-    if (writable.writableNeedDrain) going = await wait();
+    if (writable.writableNeedDrain()) going = await wait();
     if (going) {
       for await (const chunk of iterable) {
         if (
@@ -2740,7 +2774,7 @@ export class Stream extends EventEmitterBase {
       const isLastStream = i == stages.length - 1;
       if (stage instanceof Stream) {
         const stream = stage;
-        if (next instanceof Stream && (next.closed || next.destroyed))
+        if (next instanceof Stream && (next.closed() || next.destroyed()))
           finishImpl(
             ps,
             failure(
@@ -2840,7 +2874,7 @@ export class Stream extends EventEmitterBase {
       const cleanup = Stream.pipelineDestroyer(pt, false, true, ps);
       if (isLastStream) ps.lastStreamCleanup.push(cleanup);
     }
-    if (signal.aborted || (outerSignal != undefined && outerSignal.aborted))
+    if (signal.aborted() || (outerSignal != undefined && outerSignal.aborted()))
       process.nextTick(abort);
     return retStream;
   }
@@ -2934,8 +2968,8 @@ export class Stream extends EventEmitterBase {
     const readable = Stream.isReadable(tail);
     const c = new Composition();
     const d = new Duplex<W, R>({
-      writableObjectMode: head.writableObjectMode,
-      readableObjectMode: tail.readableObjectMode,
+      writableObjectMode: head.writableObjectMode(),
+      readableObjectMode: tail.readableObjectMode(),
       writable,
       readable,
       write(chunk: W, encoding: string, callback: StreamCallback) {
@@ -3053,19 +3087,6 @@ export class Stream extends EventEmitterBase {
     }
   }
 }
-
-const kReadablePublic =
-  kEndEmitted |
-  kHasFlowing |
-  kFlowing |
-  kDataEmitted |
-  kDestroyed |
-  kErrorEmitted |
-  kErrored |
-  kClosed |
-  kDecoder;
-const kWritablePublic =
-  kEnding | kFinished | kDestroyed | kNeedDrain | kWEnded | kErrored | kClosed;
 
 function bufferOf(chunk: unknown): Buffer {
   return chunkOf<Buffer>(chunk);

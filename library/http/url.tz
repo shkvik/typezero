@@ -1053,40 +1053,86 @@ function refused(what: string, input: string): Result<void, UrlError> {
   return err({ code: "bad_url", message: what, input })
 }
 
+type UrlParts = {
+  href: string
+  origin: string
+  protocol: string
+  username: string
+  password: string
+  host: string
+  hostname: string
+  port: string
+  pathname: string
+  search: string
+  hash: string
+}
+
+function partsOf(r: UrlRecord): UrlParts {
+  const protocol = r.scheme + ":"
+  const hostname = r.host
+  const port = r.port == -1 ? "" : String(r.port)
+  const host = hostname == undefined ? "" : port == "" ? hostname : hostname + ":" + port
+  const pathname = r.pathText()
+  const search = r.query
+  const fragment = r.fragment
+  let href = protocol
+  if (hostname != undefined) {
+    href += "//"
+    if (r.includesCredentials()) {
+      href += r.username
+      if (r.password != "") href += ":" + r.password
+      href += "@"
+    }
+    href += host
+  } else if (r.opaquePath == undefined && r.path.length > 1 && r.path[0] == "") {
+    href += "/."
+  }
+  href += pathname
+  const searchText = search == undefined ? "" : "?" + search
+  const hashText = fragment == undefined ? "" : "#" + fragment
+  const parts = {
+    href: href + searchText + hashText,
+    origin: isSpecial(r.scheme) && r.scheme != "file" ? protocol + "//" + host : originOf(r),
+    protocol: protocol,
+    username: r.username,
+    password: r.password,
+    host: host,
+    hostname: hostname ?? "",
+    port: port,
+    pathname: pathname,
+    search: searchText.length > 1 ? searchText : "",
+    hash: hashText.length > 1 ? hashText : "",
+  }
+
+  return parts
+}
+
 export class URL {
-  readonly href: string = ""
-  readonly origin: string = ""
-  readonly protocol: string = ""
-  readonly username: string = ""
-  readonly password: string = ""
-  readonly host: string = ""
-  readonly hostname: string = ""
-  readonly port: string = ""
-  readonly pathname: string = ""
-  readonly search: string = ""
+  private state: UrlParts
   readonly searchParams = new URLSearchParams()
-  readonly hash: string = ""
   private record: UrlRecord
 
   constructor(input: string | URL, base?: string | URL) {
-    const text = typeof input == "string" ? input : input.href
+    const text = typeof input == "string" ? input : input.href()
     let parsedBase: UrlRecord | undefined = undefined
     if (base != undefined) {
-      const baseText = typeof base == "string" ? base : base.href
+      const baseText = typeof base == "string" ? base : base.href()
       parsedBase = parseUrl(baseText, undefined)
       if (parsedBase == undefined) panic("TypeError: Invalid URL: " + baseText)
     }
     const record = parseUrl(text, parsedBase)
     if (record == undefined) panic("TypeError: Invalid URL: " + text)
     this.record = record
+    this.state = partsOf(record)
     this.searchParams.watch((query?: string) => this.applyQuery(query))
-    this.changed(true)
+    this.searchParams.replace(record.query)
   }
 
   private constructor(record: UrlRecord) {
     this.record = record
+    this.state = partsOf(record)
     this.searchParams.watch((query?: string) => this.applyQuery(query))
-    this.changed(true)
+    this.searchParams.replace(record.query)
   }
 
   static canParse(input: string, base?: string): boolean {
@@ -1094,48 +1140,59 @@ export class URL {
   }
 
   static parse(input: string, base?: string | URL): Result<URL, UrlError> {
-    const record = parseAgainst(input, base instanceof URL ? base.href : base)
+    const record = parseAgainst(input, base instanceof URL ? base.href() : base)
     if (record == undefined) return err({ code: "bad_url", message: "Invalid URL", input })
 
     return ok(new URL(record))
   }
 
+  public href(): string {
+    return this.state.href
+  }
+
+  public origin(): string {
+    return this.state.origin
+  }
+
+  public protocol(): string {
+    return this.state.protocol
+  }
+
+  public username(): string {
+    return this.state.username
+  }
+
+  public password(): string {
+    return this.state.password
+  }
+
+  public host(): string {
+    return this.state.host
+  }
+
+  public hostname(): string {
+    return this.state.hostname
+  }
+
+  public port(): string {
+    return this.state.port
+  }
+
+  public pathname(): string {
+    return this.state.pathname
+  }
+
+  public search(): string {
+    return this.state.search
+  }
+
+  public hash(): string {
+    return this.state.hash
+  }
+
   private changed(query: boolean) {
-    const r = this.record
-    const protocol = r.scheme + ":"
-    const hostname = r.host
-    const port = r.port == -1 ? "" : String(r.port)
-    const host = hostname == undefined ? "" : port == "" ? hostname : hostname + ":" + port
-    const pathname = r.pathText()
-    const search = r.query
-    const fragment = r.fragment
-    let href = protocol
-    if (hostname != undefined) {
-      href += "//"
-      if (r.includesCredentials()) {
-        href += r.username
-        if (r.password != "") href += ":" + r.password
-        href += "@"
-      }
-      href += host
-    } else if (r.opaquePath == undefined && r.path.length > 1 && r.path[0] == "") {
-      href += "/."
-    }
-    href += pathname
-    const searchText = search == undefined ? "" : "?" + search
-    const hashText = fragment == undefined ? "" : "#" + fragment
-    this.href = href + searchText + hashText
-    this.origin = isSpecial(r.scheme) && r.scheme != "file" ? protocol + "//" + host : originOf(r)
-    this.protocol = protocol
-    this.username = r.username
-    this.password = r.password
-    this.hostname = hostname ?? ""
-    this.port = port
-    this.host = host
-    this.pathname = pathname
-    this.search = searchText.length > 1 ? searchText : ""
-    this.hash = hashText.length > 1 ? hashText : ""
-    if (query) this.searchParams.replace(search)
+    this.state = partsOf(this.record)
+    if (query) this.searchParams.replace(this.record.query)
   }
 
   setHref(value: string): Result<void, UrlError> {
@@ -1230,11 +1287,11 @@ export class URL {
   }
 
   toString(): string {
-    return this.href
+    return this.state.href
   }
 
   toJSON(): string {
-    return this.href
+    return this.state.href
   }
 
   private applyQuery(query?: string) {
@@ -1289,7 +1346,7 @@ export type URLSearchParamsInit = string | [string, string][] | Record<string, s
   URLSearchParams
 
 export class URLSearchParams {
-  readonly size: int = 0
+  private count: int = 0
   private list: [string, string][] = []
   private raw?: string
   private watcher?: (query?: string) => void
@@ -1306,7 +1363,11 @@ export class URLSearchParams {
     } else {
       for (const [name, value] of Object.entries(init)) this.list.push([name, value])
     }
-    this.size = this.list.length
+    this.count = this.list.length
+  }
+
+  public size(): int {
+    return this.count
   }
 
   watch(watcher: (query?: string) => void) {
@@ -1322,7 +1383,7 @@ export class URLSearchParams {
   replace(query?: string) {
     const raw = query ?? ""
     this.raw = raw
-    this.size = formCount(raw)
+    this.count = formCount(raw)
     this.tell(query)
   }
 
@@ -1343,7 +1404,7 @@ export class URLSearchParams {
   }
 
   private update() {
-    this.size = this.list.length
+    this.count = this.list.length
     if (this.watcher == undefined) return
     const query = serializeForm(this.list)
     this.tell(query == "" ? undefined : query)

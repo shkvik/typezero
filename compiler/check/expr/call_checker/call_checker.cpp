@@ -222,7 +222,7 @@ Expr *CallChecker::checkCall(CallExpr *call, const Type *expected) {
           !checker_.libraryCalls().inLibrary(member->loc())) {
         checker_.diags_.error(member->loc(),
                               "'throwIfAborted' is not supported: nothing is thrown in tz; check "
-                              "the signal and return an Err, e.g. 'if (signal.aborted) return "
+                              "the signal and return an Err, e.g. 'if (signal.aborted()) return "
                               "err({ code: \"ABORT_ERR\", message: \"aborted\" })'");
         call->type = Type::error();
         return call;
@@ -230,7 +230,6 @@ Expr *CallChecker::checkCall(CallExpr *call, const Type *expected) {
       bool proven = checker_.urlChecker().checkUrlSetter(member, call);
       Expr *checked = checker_.methodCallChecker().checkMethodCall(call, member, expected);
       checker_.httpChecker().checkHeadersCall(call, member);
-      checker_.tzModulesChecker().noteListen(call, member);
       if (proven && checked->type->isResult()) {
         auto *dropped = checker_.ctx_.make<UnaryExpr>(call->loc(), UnaryOp::Void, checked);
         dropped->type = Type::undefinedTy();

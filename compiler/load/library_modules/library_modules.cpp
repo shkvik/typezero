@@ -173,6 +173,7 @@ Module *LibraryModules::libraryModule(llvm::StringRef file, llvm::StringRef name
   module->builtin = true;
   module->buffers = std::move(buffers);
   module->file = std::move(*parsed);
+  loader_.loadDeclarations(module, path, true);
   loader_.realPaths_[module] = path;
   loader_.states_[module] = Loader::State::New;
   it->second = module;

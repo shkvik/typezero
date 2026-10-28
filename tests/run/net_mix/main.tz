@@ -13,20 +13,21 @@ const log: string[] = []
 stop.signal.onabort = () => log.push("onabort of the program")
 stop.signal.addEventListener("abort", () => log.push("listener of the program"))
 
-const server = new Server(async req => {
-  const name = routes.get(new URL(req.url).pathname)
+const server = new Server({ port: 0, hostname: "127.0.0.1", signal: stop.signal }, async req => {
+  const name = routes.get(new URL(req.url).pathname())
   if (name == undefined) return new Response("not found", { status: 404 })
   await undefined
   const method = Reflect.get(handlers, name)
   const result = Reflect.apply(method, handlers, [req]).unwrapOr(undefined)
   return result instanceof Response ? result : new Response("bad handler", { status: 500 })
 })
-const started = server.listen({ port: 0, hostname: "127.0.0.1", signal: stop.signal })
+const started = server.listen()
 if (started.isErr()) {
   console.log("cannot listen:", started.error.message)
   process.exit(1)
 }
-const base = `http://127.0.0.1:${server.port}`
+const listening = started.value
+const base = `http://127.0.0.1:${listening.port}`
 
 // 1. A signed response, checked by the client.
 const hello = must(await fetch(`${base}/hello?name=tz`))
@@ -38,7 +39,7 @@ console.log(hello.status, text, verified(text, signature), verified(text + "!", 
 const counted = must(await fetch(`${base}/count`))
 const decoder = new TextDecoder()
 let received = ""
-const body = counted.body
+const body = counted.body()
 if (body != undefined) for await (const chunk of body) if (chunk.isOk()) received += decoder.decode(chunk.value)
 console.log(received)
 
@@ -53,7 +54,6 @@ else console.log(slow.status, "aborted:", slowText.error.code)
 // 4. Not found, and the server stopped by its signal.
 console.log((must(await fetch(`${base}/nope`))).status, handlers.served)
 stop.abort()
-await server.finished
 console.log(log.join(", "))
 const after = await fetch(`${base}/hello`)
 if (after.isErr()) console.log("after stop:", after.error.message)

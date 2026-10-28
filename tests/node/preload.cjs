@@ -420,20 +420,49 @@ for (const proto of [Response.prototype, Request.prototype]) {
     return text.isErr() ? text : JSON.parse(text.value);
   };
 }
-// A value that changes is a method in tz (docs/objects.md, section 6): for
-// test code the getter gives a function, for node's own code the value.
+// A value that the object changes itself is a method in tz (docs/objects.md,
+// section 6): for test code the getter gives a function, for node's own code
+// the value. A setter stays as it was, and a field that node's own code
+// assigns becomes a getter with a setter that keeps its value.
 function asMethod(proto, name) {
-  const get = Object.getOwnPropertyDescriptor(proto, name).get;
+  const own = Object.getOwnPropertyDescriptor(proto, name);
+  if (own !== undefined && own.get !== undefined) {
+    const get = own.get;
+    Object.defineProperty(proto, name, {
+      configurable: true,
+      get() {
+        return fromNode() ? get.call(this) : () => get.call(this);
+      },
+      set: own.set,
+    });
+    return;
+  }
+  const slot = Symbol(name);
   Object.defineProperty(proto, name, {
     configurable: true,
     get() {
-      return fromNode() ? get.call(this) : () => get.call(this);
+      const value = this[slot];
+      return fromNode() ? value : () => value;
+    },
+    set(value) {
+      this[slot] = value;
     },
   });
 }
 asMethod(Response.prototype, "bodyUsed");
 asMethod(Request.prototype, "bodyUsed");
+asMethod(Response.prototype, "body");
+asMethod(Request.prototype, "body");
 asMethod(ReadableStreamDefaultController.prototype, "desiredSize");
+asMethod(globalThis.ReadableStream.prototype, "locked");
+for (const name of ["href", "origin", "protocol", "username", "password", "host", "hostname",
+                    "port", "pathname", "search", "hash"])
+  asMethod(URL.prototype, name);
+asMethod(URLSearchParams.prototype, "size");
+asMethod(AbortSignal.prototype, "aborted");
+asMethod(AbortSignal.prototype, "reason");
+for (const name of ["target", "currentTarget", "srcElement", "eventPhase", "defaultPrevented"])
+  asMethod(Event.prototype, name);
 // The parts of a URL change through its methods in tz; the ones that can
 // refuse a value give a Result.
 for (const name of ["pathname", "search", "hash", "username", "password"]) {
@@ -468,7 +497,27 @@ const tzEvents = pathToFileURL(join(__dirname, "tz-events.mjs")).href;
 const tzConsumers = pathToFileURL(join(__dirname, "tz-stream-consumers.mjs")).href;
 const tzStreamPromises = pathToFileURL(join(__dirname, "tz-stream-promises.mjs")).href;
 const here = pathToFileURL(__dirname).href + "/";
+// The state of a node stream, and isTrusted of an event, are properties in
+// node that cannot be redefined (non-configurable, or own properties of each
+// object), so the test's own code reads them as fields there.
+const fieldsInNode = new RegExp(
+  String.raw`\.(destroyed|closed|errored|readable|readableAborted|readableDidRead|` +
+    String.raw`readableEncoding|readableEnded|readableFlowing|readableHighWaterMark|` +
+    String.raw`readableLength|readableObjectMode|writable|writableAborted|writableEnded|` +
+    String.raw`writableFinished|writableHighWaterMark|writableLength|writableObjectMode|` +
+    String.raw`writableCorked|writableNeedDrain|allowHalfOpen|bytesRead|bytesWritten|pending|` +
+    String.raw`isTrusted)\(\)`,
+  "g");
+function testCode(url) {
+  return url.startsWith("file:") && !url.startsWith(here) && !url.includes("/node_modules/");
+}
 registerHooks({
+  load(url, context, nextLoad) {
+    const loaded = nextLoad(url, context);
+    if (!testCode(url) || loaded.source == null) return loaded;
+    const source = String(loaded.source).replace(fieldsInNode, ".$1");
+    return { ...loaded, source };
+  },
   resolve(specifier, context, nextResolve) {
     const own = context.parentURL?.startsWith(here) ?? false;
     if (!own && (specifier === "node:fs" || specifier === "fs"))

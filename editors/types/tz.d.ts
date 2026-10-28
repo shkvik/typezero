@@ -1,7 +1,10 @@
+/// <reference path="./http.d.ts" />
 // What tz has built in, declared for TypeScript's checker in the editor (tsc in
-// VS Code): the names a program uses without an import, and the modules
-// "tz:io" and "tz:http" (docs/modules.md, section 6). tz itself does not read
-// this file; tz build checks the program by its own rules.
+// VS Code): the names a program uses without an import, and the module "tz:io"
+// (docs/modules.md, section 6). tz itself does not read this file; tz build
+// checks the program by its own rules. "tz:http" is declared in its own
+// library/http/http.d.tz, which the build turns into http.d.ts next to this
+// file (editors/types/declarations.cmake).
 //
 // It lies next to tz as types/node_modules/@types/tz/index.d.ts, and
 // types/tsconfig.json (editors/types/tsconfig.json) brings it in together with
@@ -185,9 +188,9 @@ type HttpStatus =
 type RedirectStatus = 301 | 302 | 303 | 307 | 308
 declare function isHttpStatus(code: number): code is HttpStatus
 
-// The parts of a URL are fields that only its methods change (docs/objects.md,
-// section 6); @types/node still lets the fields be assigned. A value that the
-// URL can refuse gives a Result; tz checks a literal when it builds the program.
+// The parts of a URL are read with methods and changed with methods
+// (docs/objects.md, section 6). A value that the URL can refuse gives a
+// Result; tz checks a literal when it builds the program.
 declare module "url" {
   interface URL {
     setHref(value: string): Result<void, UrlError>
@@ -217,13 +220,13 @@ declare module "url" {
 // together with the function that aborts it, cannot be added here to the
 // AbortSignal of @types/node, which is a var.
 interface Event {
-  readonly immediateStopped: boolean
+  immediateStopped(): boolean
   dispatchOn(target: EventTarget, run: () => void): boolean
 }
 
 declare module "stream/web" {
   interface ReadableStream<R = any> {
-    readonly disturbed: boolean
+    disturbed(): boolean
   }
 }
 
@@ -533,53 +536,4 @@ declare module "tz:io" {
   // Prints the question as it is and reads a line, without its \n or \r\n;
   // undefined at the end of the input.
   export function readLine(question?: string): string | undefined
-}
-
-// A server of HTTP/1.1 and https (docs/net.md, section 1).
-declare module "tz:http" {
-  // What onListen gets.
-  export interface ServeAddress {
-    hostname: string
-    port: int
-  }
-
-  // The certificate of a server of https and its key, PEM.
-  export interface ServeTls {
-    cert: string
-    key: string
-  }
-
-  export interface ServeOptions {
-    port?: int
-    hostname?: string
-    tls?: ServeTls
-    signal?: AbortSignal
-    onListen?: (address: ServeAddress) => void
-    // A request with a larger body is answered with 413.
-    maxBodySize?: double
-  }
-
-  export type Handler = (request: Request) => Response | Promise<Response>
-
-  export class Server {
-    // A server without a socket yet; listen opens one.
-    constructor(handler: Handler)
-    // 0 and "" until it listens.
-    readonly port: int
-    readonly hostname: string
-    // Set once it listens.
-    readonly url?: URL
-    // Resolved once the server has stopped and its last response is out.
-    readonly finished: Promise<void>
-    // Opens the socket on `hostname` (0.0.0.0) and `port` (8000; 0 for any
-    // free one, which port then tells), of https with `tls`, and starts
-    // answering; gives the address. A port that is taken, a host that is not
-    // found or a certificate that cannot be read give an Err; so does a
-    // second listen, after stop too (ERR_SERVER_ALREADY_LISTEN): a server
-    // listens once.
-    listen(options: ServeOptions): Result<URL, SystemError>
-    // Stops taking connections and resolves once the requests being handled
-    // are answered; before listen it does nothing.
-    stop(): Promise<void>
-  }
 }

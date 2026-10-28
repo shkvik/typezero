@@ -17,9 +17,9 @@ const pulled = new ReadableStream<string>({
     else c.enqueue(word)
   },
 })
-console.log(pulled.locked)
+console.log(pulled.locked())
 const reader = pulled.getReader()
-console.log(pulled.locked)
+console.log(pulled.locked())
 for (;;) {
   const r = await reader.read()
   if (r.isErr()) break
@@ -28,7 +28,7 @@ for (;;) {
   console.log("read", step.value)
 }
 reader.releaseLock()
-console.log(pulled.locked)
+console.log(pulled.locked())
 
 const bytes = new ReadableStream({
   start: c => {
@@ -68,4 +68,4 @@ for await (const n of endless) {
 console.log("cancelled:", cancelled)
 const other = new ReadableStream<int>({ cancel: reason => { cancelled = reason?.message ?? "" } })
 await other.cancel({ code: "enough", message: "enough" })
-console.log("cancelled:", cancelled, other.locked)
+console.log("cancelled:", cancelled, other.locked())

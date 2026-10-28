@@ -6,9 +6,9 @@
 import { Server } from "tz:http"
 
 const enc = new TextEncoder()
-const server = new Server(async req => {
+const server = new Server({ port: 0, hostname: "127.0.0.1" }, async req => {
   const url = new URL(req.url)
-  switch (url.pathname) {
+  switch (url.pathname()) {
     case "/hello":
       return new Response(`hello ${url.searchParams.get("name") ?? "world"}`)
     case "/users": {
@@ -27,7 +27,7 @@ const server = new Server(async req => {
       }))
     case "/count": {
       let total = 0
-      const body = req.body
+      const body = req.body()
       if (body != undefined) for await (const chunk of body) total += chunk.isOk() ? chunk.value.length : 0
       return new Response(`${total} bytes`)
     }
@@ -51,13 +51,14 @@ const server = new Server(async req => {
   }
   return new Response("not found", { status: 404, statusText: "Nope" })
 })
-const started = server.listen({ port: 0, hostname: "127.0.0.1" })
+const started = server.listen()
 if (started.isErr()) {
   console.log("cannot listen:", started.error.message)
   process.exit(1)
 }
-const base = `http://127.0.0.1:${server.port}`
-const port = (s: string) => s.replaceAll(String(server.port), "PORT")
+const listening = started.value
+const base = `http://127.0.0.1:${listening.port}`
+const port = (s: string) => s.replaceAll(String(listening.port), "PORT")
 
 let r = must(await fetch(`${base}/hello?name=tz`))
 console.log(r.status, r.ok, r.statusText, r.headers.get("content-type"), must(await r.text()))
@@ -102,7 +103,7 @@ for (const path of ["/redirect", "/loop"]) {
   if (failed.isErr()) console.log(failed.error.code, failed.error.message, failed.error.cause)
 }
 r = must(await fetch(`${base}/empty`))
-console.log(r.status, r.body == undefined, JSON.stringify(must(await r.text())))
+console.log(r.status, r.body() == undefined, JSON.stringify(must(await r.text())))
 r = must(await fetch(`${base}/hello`, { method: "HEAD" }))
 console.log(r.status, JSON.stringify(must(await r.text())))
 
@@ -116,9 +117,8 @@ if (aborted.isErr()) console.log(aborted.error.code, aborted.error.message)
 const late = await fetch(`${base}/slow`, { signal: AbortSignal.timeout(50) })
 if (late.isErr()) console.log(late.error.code, late.error.message)
 
-await server.stop()
-await server.finished
-const refused = await fetch(`http://127.0.0.1:${server.port}/hello`)
+await listening.stop()
+const refused = await fetch(`http://127.0.0.1:${listening.port}/hello`)
 if (refused.isErr()) console.log(refused.error.code, refused.error.message)
 
 function must<T, E>(r: Result<T, E>): T {

@@ -308,11 +308,13 @@ llvm::Value *AsyncLowerer::awaitPromise(llvm::Value *promise, const Type *type, 
 
 llvm::Value *AsyncLowerer::emitAwait(AwaitExpr *await) {
   Expr *operand = await->value;
+  bool ahead = false;
   if (auto *call = dyn_cast<CallExpr>(operand); call && call->builtin == Builtin::LibAhead) {
     if (lowering_.parallel_) {
       lowering_.aheadStarts_.try_emplace(await, uint32_t(lowering_.aheadStarts_.size() + 1));
     }
     operand = call->args[0];
+    ahead = true;
   }
   if (const Expr *inner = resolvedValue(operand)) {
     operand = const_cast<Expr *>(inner);
@@ -324,7 +326,9 @@ llvm::Value *AsyncLowerer::emitAwait(AwaitExpr *await) {
   if (type->isPromise()) {
     result = awaitPromise(value, type, await->loc());
   } else if (holdsPromise(type)) {
+    bool outerReady = std::exchange(readyGoesOn_, ahead || lowering_.freeAwaits_.contains(await));
     result = awaitUnion(value, type, await->type, await->loc());
+    readyGoesOn_ = outerReady;
   } else {
     suspendAsync(nullptr, await->loc());
     result = type->isVoid() ? nullptr : value;
@@ -348,7 +352,9 @@ llvm::Value *AsyncLowerer::awaitUnion(llvm::Value *value, const Type *type, cons
                                       llvm::SMLoc loc) {
   llvm::Type *resultType = result->isVoid() ? nullptr : lowering_.moduleBuilder().lower(result);
   auto plain = [&](llvm::Value *v, const Type *t) -> llvm::Value * {
-    suspendAsync(nullptr, loc);
+    if (!readyGoesOn_) {
+      suspendAsync(nullptr, loc);
+    }
     if (!resultType) {
       if (v) {
         lowering_.refCounts().releaseValue(v, t);

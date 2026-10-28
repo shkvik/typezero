@@ -13,7 +13,7 @@ const pt = new PassThrough()
 pt.on("data", (c) => log(`pt ${c.toString()}`))
 const sank = sinkInto(pt, "into a duplex")
 const ptDone = await finished(pt)
-log(`pt finished ${ptDone.isOk()} ${pt.writableFinished} ${pt.readableEnded} ${(await sank).isOk()}`)
+log(`pt finished ${ptDone.isOk()} ${pt.writableFinished()} ${pt.readableEnded()} ${(await sank).isOk()}`)
 
 const upper = new Transform({
   transform(chunk, enc, cb) {

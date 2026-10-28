@@ -37,23 +37,24 @@ function names(all: Animal[]) {
 }
 const dogs: Dog[] = [new Dog("Rex"), new Dog("Ace")]
 
-const server = new Server(async (req) => {
-  const body = new URL(req.url).pathname == "/dogs" ? names(dogs) : "nothing"
+const server = new Server({ port: 0, hostname: "127.0.0.1" }, async (req) => {
+  const body = new URL(req.url).pathname() == "/dogs" ? names(dogs) : "nothing"
   const sig = must(await crypto.subtle.sign("HMAC", await hmac("server key"), enc.encode(body)))
   return new Response(body, { headers: { "x-signature": hex(sig) } })
 })
-const started = server.listen({ port: 0, hostname: "127.0.0.1" })
+const started = server.listen()
 if (started.isErr()) {
   console.log("cannot listen:", started.error.message)
   process.exit(1)
 }
+const listening = started.value
 
 class Checks extends EventEmitter<{ checked: [path: string, ok: boolean] }> {}
 const checks = new Checks()
 checks.on("checked", (path, ok) => console.log(`checked ${path}: ${ok}`))
 
 async function fetchSigned(path: string, secret: string) {
-  const url = URL.parse(path, `http://127.0.0.1:${server.port}`)
+  const url = URL.parse(path, `http://127.0.0.1:${listening.port}`)
   if (url.isErr()) return url.error.message
   const res = must(await fetch(url.value))
   const body = must(await res.text())
@@ -80,7 +81,7 @@ const signOnly = must(await crypto.subtle.importKey(
 const checked = await crypto.subtle.verify("HMAC", signOnly, new Uint8Array(32), enc.encode("x"))
 if (checked.isErr()) console.log(checked.error.code, checked.error.message)
 console.log(hex(must(await crypto.subtle.digest("SHA-256", enc.encode(names(dogs))))))
-await server.stop()
+await listening.stop()
 
 function must<T, E>(r: Result<T, E>): T {
   if (r.isErr()) {

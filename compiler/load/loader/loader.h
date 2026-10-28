@@ -30,6 +30,7 @@ private:
                 std::string &error);
   void visit(Module *module);
   std::string relativeName(llvm::StringRef realPath) const;
+  void loadDeclarations(Module *module, llvm::StringRef filePath, bool library);
   void rejectReferences(llvm::StringRef text);
   llvm::SourceMgr &sourceMgr_;
   AstContext &ctx_;

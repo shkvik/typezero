@@ -38,10 +38,10 @@ console.log("each stream got the same descriptor:", fds.length == 3 && fds[0] ==
 // One that is kept stays open.
 const kept = createReadStream(path)
 kept.on("error", (e) => console.log("error", e.message))
-for (let i = 0; i < 1000 && kept.fd == undefined; i++) await sleep(5)
+for (let i = 0; i < 1000 && kept.fd() == undefined; i++) await sleep(5)
 openReader(path)
 await opened(4)
-console.log("a kept stream holds its descriptor:", kept.fd != undefined && fds[3] != kept.fd)
+console.log("a kept stream holds its descriptor:", kept.fd() != undefined && fds[3] != kept.fd())
 
 must(rmSync(dir, { recursive: true }))
 

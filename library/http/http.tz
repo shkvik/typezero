@@ -7,161 +7,281 @@ declare function netListen(
   host: string,
   port: int,
   maxBody: double,
+  keepAlive: int,
+  headersTimeout: int,
 ): Result<object, SystemError>;
 declare function tlsListen(
   host: string,
   port: int,
   maxBody: double,
+  keepAlive: int,
+  headersTimeout: int,
   cert: string,
   key: string,
 ): Result<object, SystemError>;
 declare function netListenerPort(listener: object): int;
+declare function netListenerUrl(listener: object): string;
 declare function netAccept(listener: object): Promise<object | undefined>;
 declare function netCloseListener(listener: object): void;
-declare function netSweep(listener: object, idle: double): int;
+declare function netDrained(listener: object): Promise<void>;
+declare function netClientAddress(socket: object): string;
+declare function netClientPort(socket: object): int;
 
-export interface ServeAddress {
-  hostname: string;
+export type Handler = (
+  request: Request,
+  client: Client,
+) => Response | Promise<Response>;
+
+export type Client = {
+  address: string;
   port: int;
-}
+};
 
-export interface ServeTls {
-  cert: string;
-  key: string;
-}
-
-export interface ServeOptions {
+export type ServeOptions = {
   port?: int;
   hostname?: string;
-  tls?: ServeTls;
   signal?: AbortSignal;
-  onListen?: (address: ServeAddress) => void;
   maxBodySize?: double;
+  keepAliveTimeout?: int;
+  headersTimeout?: int;
+  transport?: ServeTransport;
+};
+
+export type ServeTransport =
+  | {
+      secure: false;
+    }
+  | {
+      secure: true;
+      cert: string;
+      key: string;
+    };
+
+export type ListenError = {
+  kind: "SERVER";
+  code: ListenErrorCode;
+  message: string;
+  errno: int;
+  syscall: string;
+  address: string;
+  port: int;
+};
+
+export type ListenErrorCode =
+  | "EADDRINUSE"
+  | "EACCES"
+  | "EADDRNOTAVAIL"
+  | "ENOTFOUND"
+  | "ERR_INVALID_ARG_VALUE"
+  | "ERR_TLS_CERT"
+  | "ERR_TLS_KEY"
+  | "EMFILE"
+  | "ENOBUFS"
+  | "EAFNOSUPPORT"
+  | "UNKNOWN";
+
+function listenCode(code: string): ListenErrorCode {
+  switch (code) {
+    case "EADDRINUSE":
+      return "EADDRINUSE";
+    case "EACCES":
+      return "EACCES";
+    case "EADDRNOTAVAIL":
+      return "EADDRNOTAVAIL";
+    case "ENOTFOUND":
+      return "ENOTFOUND";
+    case "ERR_INVALID_ARG_VALUE":
+      return "ERR_INVALID_ARG_VALUE";
+    case "ERR_TLS_CERT":
+      return "ERR_TLS_CERT";
+    case "ERR_TLS_KEY":
+      return "ERR_TLS_KEY";
+    case "EMFILE":
+      return "EMFILE";
+    case "ENOBUFS":
+      return "ENOBUFS";
+    case "EAFNOSUPPORT":
+      return "EAFNOSUPPORT";
+    default:
+      return "UNKNOWN";
+  }
 }
 
-export type Handler = (request: Request) => Response | Promise<Response>;
+class Listener {
+  public readonly native: object;
 
-const KEEP_ALIVE_MS = 5000;
+  public constructor(native: object) {
+    this.native = native;
+  }
+}
 
 export class Server {
-  readonly port: int = 0;
-  readonly hostname: string = "";
-  readonly url?: URL;
-  readonly finished: Promise<void>;
-  private handler: Handler;
-  private listener?: object;
-  private listened = false;
-  private base = "";
-  private stopping = false;
-  private open = 0;
-  private resolveFinished: () => void;
-  private sweep?: Timeout;
+  private readonly hostname: string;
+  private readonly port: int;
+  private readonly maxBody: double;
+  private readonly keepAlive: int;
+  private readonly headersTimeout: int;
+  private readonly transport: ServeTransport;
+  private readonly signal?: AbortSignal;
+  private readonly handler: Handler;
 
-  constructor(handler: Handler) {
+  public constructor(options: ServeOptions, handler: Handler) {
+    this.hostname = options.hostname ?? "0.0.0.0";
+    this.port = options.port ?? 8000;
+    this.maxBody = options.maxBodySize ?? 128 * 1024 * 1024;
+    this.keepAlive = options.keepAliveTimeout ?? 5000;
+    this.headersTimeout = options.headersTimeout ?? 60000;
+    this.transport = options.transport ?? { secure: false };
+    this.signal = options.signal;
     this.handler = handler;
-    const { promise, resolve } = Promise.withResolvers<void>();
-    this.finished = promise;
-    this.resolveFinished = resolve;
   }
 
-  listen(options: ServeOptions): Result<URL, SystemError> {
-    if (this.listened)
+  public listen(): Result<Listening, ListenError> {
+    const opened = this.open();
+
+    if (opened.isErr()) {
+      const code = listenCode(opened.error.code);
+
       return err({
-        code: "ERR_SERVER_ALREADY_LISTEN",
-        message:
-          "Listen method has been called more than once without closing.",
-        errno: 0,
-        syscall: "listen",
+        kind: "SERVER",
+        code: code,
+        message: opened.error.message,
+        errno: opened.error.errno,
+        syscall: opened.error.syscall,
+        address: this.hostname,
+        port: this.port,
       });
-    const hostname = options.hostname ?? "0.0.0.0";
-    const maxBody = options.maxBodySize ?? 128 * 1024 * 1024;
-    const tls = options.tls;
-    const opened =
-      tls == undefined
-        ? netListen(hostname, options.port ?? 8000, maxBody)
-        : tlsListen(hostname, options.port ?? 8000, maxBody, tls.cert, tls.key);
-    if (opened.isErr()) return err(opened.error);
-    this.listened = true;
-    const listener = opened.value;
-    this.listener = listener;
-    const scheme = tls == undefined ? "http" : "https";
-    const port = netListenerPort(listener);
-    this.port = port;
-    this.hostname = hostname;
-    const any = hostname == "0.0.0.0" || hostname == "::";
-    const host = any ? "localhost" : hostname;
-    const url = new URL(
-      scheme +
-        "://" +
-        (host.includes(":") ? "[" + host + "]" : host) +
-        ":" +
-        String(port) +
-        "/",
-    );
-    this.url = url;
-    const shown = hostname.includes(":") ? "[" + hostname + "]" : hostname;
-    this.base = scheme + "://" + shown + ":" + String(port);
-    const sweep = setInterval(() => {
-      netSweep(listener, KEEP_ALIVE_MS);
-    }, 1000);
-    sweep.unref();
-    this.sweep = sweep;
-    void this.accept(listener);
-    const signal = options.signal;
-    if (signal != undefined) {
-      if (signal.aborted) void this.stop();
-      else
-        signal.addEventListener(
-          "abort",
-          (event: Event) => {
-            void this.stop();
-          },
-          { once: true },
-        );
     }
-    options.onListen?.({ hostname, port });
-    return ok(url);
+
+    const listener = new Listener(opened.value);
+    const listening = new Listening(
+      listener,
+      this.hostname,
+      this.handler,
+      this.signal,
+    );
+
+    return ok(listening);
   }
 
-  async stop(): Promise<void> {
-    const listener = this.listener;
-    if (listener == undefined) return;
+  private open(): Result<object, SystemError> {
+    const transport = this.transport;
+    if (transport.secure) {
+      const secured = tlsListen(
+        this.hostname,
+        this.port,
+        this.maxBody,
+        this.keepAlive,
+        this.headersTimeout,
+        transport.cert,
+        transport.key,
+      );
+
+      return secured;
+    }
+    const plain = netListen(
+      this.hostname,
+      this.port,
+      this.maxBody,
+      this.keepAlive,
+      this.headersTimeout,
+    );
+
+    return plain;
+  }
+}
+
+export class Listening {
+  public readonly url: URL;
+  public readonly hostname: string;
+  public readonly port: int;
+
+  private readonly listener: Listener;
+  private readonly accepting: Promise<void>;
+  private stopping: boolean;
+
+  public constructor(
+    listener: Listener,
+    hostname: string,
+    handler: Handler,
+    signal?: AbortSignal,
+  ) {
+    this.listener = listener;
+    this.stopping = false;
+    const href = netListenerUrl(listener.native);
+    this.url = new URL(href);
+    this.hostname = hostname;
+    this.port = netListenerPort(listener.native);
+    this.accepting = Listening.acceptAll(listener, handler);
+    this.stopOnSignal(signal);
+  }
+
+  public async stop(): Promise<void> {
     if (!this.stopping) {
       this.stopping = true;
-      const sweep = this.sweep;
-      if (sweep != undefined) clearInterval(sweep);
-      this.sweep = undefined;
-      netCloseListener(listener);
-      netSweep(listener, 0);
-      if (this.open == 0) this.resolveFinished();
+      netCloseListener(this.listener.native);
     }
-    await this.finished;
+    await this.accepting;
   }
 
-  private async accept(listener: object) {
-    for (;;) {
-      const socket = await netAccept(listener);
-      if (socket == undefined) break;
-      void this.serve(new Connection(socket));
+  private stopOnSignal(signal?: AbortSignal): void {
+    if (signal == undefined) {
+      return;
     }
+    if (signal.aborted()) {
+      void this.stop();
+      return;
+    }
+    signal.addEventListener(
+      "abort",
+      (event: Event) => {
+        void this.stop();
+      },
+      { once: true },
+    );
   }
 
-  private async serve(conn: Connection) {
-    this.open++;
+  private static async acceptAll(
+    listener: Listener,
+    handler: Handler,
+  ): Promise<void> {
     for (;;) {
-      const got = await ahead(conn.next());
-      if (got.isErr() || got.value == 0) break;
-      const request = Request.readFrom(conn, this.base);
-      const answer = this.handler(request);
-      const response =
-        answer instanceof Response ? answer : await ahead(answer);
-      const streaming = response.writeTo(conn, request.method == "HEAD");
-      if (streaming != undefined) await streaming;
-      if (!conn.keepAlive()) break;
+      const socket = await netAccept(listener.native);
+      if (socket == undefined) {
+        break;
+      }
+      void Listening.serve(socket, handler);
+    }
+    await netDrained(listener.native);
+  }
+
+  private static async serve(socket: object, handler: Handler): Promise<void> {
+    const address = netClientAddress(socket);
+    const port = netClientPort(socket);
+    const client: Client = {
+      address: address,
+      port: port,
+    };
+    const conn = new Connection(socket);
+    for (;;) {
+      const next = conn.next();
+      const got = await ahead(next);
+      if (got.isErr() || got.value == 0) {
+        break;
+      }
+      const request = Request.readFrom(conn);
+      const handled = handler(request, client);
+      const response = await ahead(handled);
+      const headOnly = request.method == "HEAD";
+      const written = response.writeTo(conn, headOnly);
+      if (written.kind == "streaming") {
+        await written.finished;
+      }
+      if (!conn.keepAlive()) {
+        break;
+      }
     }
     order();
     conn.close();
-    this.open--;
-    if (this.stopping && this.open == 0) this.resolveFinished();
   }
 }

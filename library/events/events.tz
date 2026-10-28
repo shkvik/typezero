@@ -327,7 +327,7 @@ function onceResult<A extends unknown[], E>(
   errors = false,
 ): Promise<Result<A, E | AbortError>> {
   const signal = options?.signal
-  if (signal != undefined && signal.aborted) {
+  if (signal != undefined && signal.aborted()) {
     const failed: Result<A, E | AbortError> = err(aborted())
     return Promise.resolve(failed)
   }
@@ -398,7 +398,7 @@ function onResult<A extends unknown[], E>(
   function abortListener(_event: Event) {
     queue.fail(aborted())
   }
-  if (signal != undefined && signal.aborted) queue.fail(aborted())
+  if (signal != undefined && signal.aborted()) queue.fail(aborted())
   emitter.on(name, eventHandler)
   if (errors && name != "error") emitter.on("error", errorHandler)
   for (const closeName of close) emitter.on(closeName, closeHandler)
@@ -568,7 +568,7 @@ function onceTargetResult(
   options?: { signal?: AbortSignal },
 ): Promise<Result<[Event], AbortError>> {
   const signal = options?.signal
-  if (signal != undefined && signal.aborted) {
+  if (signal != undefined && signal.aborted()) {
     const failed: Result<[Event], AbortError> = err(aborted())
     return Promise.resolve(failed)
   }

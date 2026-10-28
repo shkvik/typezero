@@ -1,6 +1,7 @@
 #pragma once
 
 #include "compiler/parallel/analysis/analysis.h"
+#include "llvm/ADT/DenseMap.h"
 
 namespace tz::parallel {
 
@@ -21,9 +22,11 @@ public:
   void dispatch(const CallExpr *c, CallKind kind, Channel channel, const Use &use);
   void libraryState(llvm::StringRef cls, llvm::StringRef name, std::optional<Ref> self, bool write,
                     llvm::SMLoc at);
+  bool readsOnly(const FunctionDecl *decl);
 
 private:
   Analysis &analysis_;
+  llvm::DenseMap<const FunctionDecl *, bool> readsOnly_;
 };
 
 }

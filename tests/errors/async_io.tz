@@ -25,10 +25,10 @@ wait(10)
 // expect-error: 'constructor' is private in class 'AbortSignal'
 const made = new AbortSignal()
 const controller = new AbortController()
-// expect-error: 'aborted' of an AbortSignal is read-only; abort it with its controller, 'controller.abort(reason)'
+// expect-error: 'aborted' is a method of 'AbortSignal' and cannot be assigned: the object changes what it gives itself
 controller.signal.aborted = true
-// expect-error: 'reason' of an AbortSignal is read-only
-controller.signal.reason = new Error("why")
+// expect-error: 'reason' is a method of 'AbortSignal' and cannot be assigned
+controller.signal.reason = "why"
 // expect-error: only '=' can set 'onabort'
 controller.signal.onabort ??= () => console.log("aborted")
 // expect-error: class 'AbortSignal' has no static member 'never'

@@ -86,7 +86,7 @@ console.log(kinds.map((k) => k.name).join(" "))
 const made = Reflect.construct(AbortController, [])
 if (made.isOk()) {
   const controller = made.value
-  controller.signal.addEventListener("abort", () => console.log("aborted", Reflect.get(controller.signal, "aborted")))
+  controller.signal.addEventListener("abort", () => console.log("aborted", controller.signal.aborted()))
   controller.abort()
 }
 const TargetKind = kinds[0]
@@ -95,7 +95,7 @@ if (TargetKind != undefined) {
   if (target instanceof EventTarget) {
     // The listener knows its target from the event: one that held it would
     // make a cycle with it.
-    target.addEventListener("ping", (ev) => console.log("ping", ev.type, ev.target instanceof EventTarget))
+    target.addEventListener("ping", (ev) => console.log("ping", ev.type, ev.target() instanceof EventTarget))
     target.dispatchEvent(new Event("ping"))
   }
 }

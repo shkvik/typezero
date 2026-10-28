@@ -52,7 +52,8 @@ Expr *FunctionValueChecker::adaptFunction(Expr *expr, const Type *to) {
   }
   llvm::ArrayRef<const Type *> params = from->params(), wanted = to->params();
   for (size_t i = 0; i < wanted.size() && i < params.size(); ++i) {
-    if (params[i] != wanted[i] && !(params[i]->isOptional() && params[i]->inner() == wanted[i])) {
+    if (params[i] != wanted[i] && !(params[i]->isOptional() && params[i]->inner() == wanted[i]) &&
+        !(params[i]->nonOptional()->isUnknown() && !wanted[i]->isVoid())) {
       return nullptr;
     }
   }

@@ -83,13 +83,13 @@ export class Readable<T = Buffer> extends StreamEmitter<StreamEvents<T>> {
   }
 
   protected emitData(chunk: unknown): void {
-    if (this.readableObjectMode) this.emitWithUnknown("data", chunk, chunkOf<T>(chunk))
+    if (this.readableObjectMode()) this.emitWithUnknown("data", chunk, chunkOf<T>(chunk))
     else if (typeof chunk == "string") this.emitWithUnknown("data", chunk, chunk)
     else this.emitWithUnknown("data", chunk, chunkOf<Buffer>(chunk))
   }
 
   protected pushChunk(chunk: unknown, encoding?: string): boolean {
-    if (chunk != undefined && this.readableObjectMode && !isChunk<T>(chunk)) {
+    if (chunk != undefined && this.readableObjectMode() && !isChunk<T>(chunk)) {
       this.destroy(invalidChunk(chunk))
       return false
     }
@@ -662,7 +662,7 @@ class FromAsyncIterator<U> extends Readable<U> {
         await new Promise<void>((resolve) => {
           this.wake = resolve
         })
-      if (this.destroyed) return
+      if (this.destroyed()) return
     }
     this.pushChunk(undefined)
   }

@@ -15,7 +15,7 @@ for await (const item of pt) {
   text += item.value.toString()
 }
 log(`ended ${(await ending).isOk()}`)
-log(`text ${text} destroyed ${pt.destroyed}`)
+log(`text ${text} destroyed ${pt.destroyed()}`)
 
 const words = Readable.from(["alpha", "beta", "gamma"])
 for await (const item of words) {
@@ -23,7 +23,7 @@ for await (const item of words) {
   log(`word ${w.toUpperCase()}`)
   if (w == "beta") break
 }
-log(`after break destroyed ${words.destroyed}`)
+log(`after break destroyed ${words.destroyed()}`)
 
 async function* gen() {
   yield 1

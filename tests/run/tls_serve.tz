@@ -1,7 +1,7 @@
 // same-as-node
 // env: NODE_EXTRA_CA_CERTS=@TESTS@/tls/ca.pem
 // env: TLS_DIR=@TESTS@/tls
-// https (docs/net.md, step 4): a server of tz:http with `tls`, and fetch of
+// https (docs/net.md, step 4): a server of tz:http with a secure transport, and fetch of
 // https:// from it, its certificate checked against the CA the tests trust
 // (NODE_EXTRA_CA_CERTS) and by the name of the host: text and JSON both
 // ways, keep-alive, a body that streams, requests at the same time, and
@@ -16,11 +16,11 @@ const tls = {
   key: must(readFileSync(join(dir, "key.pem"), "utf8")),
 }
 const enc = new TextEncoder()
-const server = new Server(async (req) => {
+const server = new Server({ port: 0, hostname: "127.0.0.1", transport: { secure: true, cert: tls.cert, key: tls.key } }, async (req) => {
   const url = new URL(req.url)
-  switch (url.pathname) {
+  switch (url.pathname()) {
     case "/hello":
-      return new Response(`hello over ${url.protocol}`)
+      return new Response(`hello over ${url.protocol()}`)
     case "/echo":
       return Response.json({ got: (await req.json()).unwrapOr(null), method: req.method })
     case "/stream":
@@ -37,13 +37,14 @@ const server = new Server(async (req) => {
       return new Response("not here", { status: 404 })
   }
 })
-const started = server.listen({ port: 0, hostname: "127.0.0.1", tls })
+const started = server.listen()
 if (started.isErr()) {
   console.log("cannot listen:", started.error.message)
   process.exit(1)
 }
-console.log(server.url?.protocol, server.url?.hostname)
-const port = server.port
+const listening = started.value
+console.log(listening.url.protocol(), listening.url.hostname())
+const port = listening.port
 
 for (const host of ["localhost", "127.0.0.1"]) {
   const res = must(await fetch(`https://${host}:${port}/hello`))
@@ -65,7 +66,7 @@ console.log(all.join(" | "))
 
 const plain = await fetch(`http://localhost:${port}/hello`)
 console.log("http to https:", plain.isOk() ? "answered" : plain.error.message)
-await server.stop()
+await listening.stop()
 
 function must<T, E>(r: Result<T, E>): T {
   if (r.isErr()) {

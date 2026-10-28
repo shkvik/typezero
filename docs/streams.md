@@ -2,7 +2,8 @@
 
 Решения, принятые 24 октября 2026 года, и поправки 26 октября: ошибки потоков — `Result`, без
 исключений, `pipe()` убран (раздел 3, [errors.md](errors.md), раздел 5). 28 октября: состояние
-потока закрыто, методы, которые пишет свой класс, — `onRead`, `onWrite`… (раздел 6). Шаги 1–3 плана сделаны
+потока закрыто, читается методами (`r.readableLength()`), методы, которые пишет свой класс, —
+`onRead`, `onWrite`… (раздел 6). Шаги 1–3 плана сделаны
 24–25 октября (из шага 3 — без асинхронных функций `node:child_process`), шаг 6 — 27 октября; что осталось — в конце,
 в разделе «План реализации».
 
@@ -114,8 +115,11 @@ child.stdout.on("data", s => s.length)          // s: string
 
 - Состояние и вся работа потока — закрытые (`private`) члены класса `Stream`: чтение, запись,
   `pipeline`, `finished`, `compose` живут в его теле, потому что только там видно состояние любого
-  потока. `r.readableState` — ошибка. Поля, которые поток меняет сам (`readableLength`,
-  `readableFlowing`, `destroyed`, `writableEnded`…), — только для чтения.
+  потока. `r.readableState` — ошибка. То, что поток меняет сам, программа читает методами
+  (поправка 28 октября, [objects.md](objects.md), раздел 6): `r.readableLength()`,
+  `r.readableFlowing()`, `r.destroyed()`, `w.writableEnded()`, `w.writableNeedDrain()`…, у
+  файлового потока — `fd()`, `pending()`, `bytesRead()`, `bytesWritten()`. Методы читают
+  состояние прямо, копии в полях нет.
 - `isReadable`, `isWritable`, `isDestroyed`, `isErrored`, `isDisturbed`, `addAbortSignal` —
   функции `node:stream` и статические методы `Stream`, как в node (`Stream.isErrored(s)`).
 - Свой класс заменяет методы, которые зовёт поток: `onRead`, `onWrite`, `onWritev`,

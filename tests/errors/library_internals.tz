@@ -1,16 +1,16 @@
 // The library has no members only for itself (docs/objects.md, section 6):
-// what its objects keep inside is private, what only web and node read is
-// read-only, and the old service names are gone, as any name that does not
-// exist.
+// what its objects keep inside is private, what they change themselves is
+// read through a method, and the old service names are gone, as any name
+// that does not exist.
 import { Server } from "tz:http"
 import { Readable, Stream } from "node:stream"
 // expect-error: 'node:stream' has no export named 'streamFinished'
 import { streamFinished } from "node:stream"
 
 const event = new Event("x")
-// expect-error: cannot assign to 'isTrusted' because it is a read-only field of 'Event'
+// expect-error: 'isTrusted' is a method of 'Event' and cannot be assigned: the object changes what it gives itself
 event.isTrusted = true
-// expect-error: cannot assign to 'target' because it is a read-only field of 'Event'
+// expect-error: 'target' is a method of 'Event' and cannot be assigned
 event.target = new EventTarget()
 // expect-error: property 'beginDispatch' does not exist on type 'Event'
 event.beginDispatch(new EventTarget())
@@ -45,13 +45,13 @@ const headers = new Headers()
 // expect-error: property '__flat' does not exist on type 'Headers'
 headers.__flat()
 
-// expect-error: expected 1 argument, but got 4
+// expect-error: expected 2 arguments, but got 4
 const server = new Server({}, "x", () => new Response("hi"), "http")
 
 const stream = new ReadableStream<string>()
 // expect-error: property '__state' does not exist on type 'ReadableStream<string>'
 stream.__state()
-// expect-error: cannot assign to 'locked' because it is a read-only field of 'ReadableStream<string>'
+// expect-error: 'locked' is a method of 'ReadableStream<string>' and cannot be assigned
 stream.locked = true
 
 // expect-error: cannot find name '__tz_panic'
@@ -68,7 +68,7 @@ readable._readableState.bits = 0
 readable.pushChunk("x")
 // expect-error: 'onRead' is protected in class 'Readable'; only 'Readable' and the classes that extend it can use it
 readable.onRead(1)
-// expect-error: cannot assign to 'readableLength' because it is a read-only field of 'Readable<string>'
+// expect-error: 'readableLength' is a method of 'Readable<string>' and cannot be assigned
 readable.readableLength = 0
 // expect-error: 'eos' is private in class 'Stream'
 Stream.eos(readable, undefined, () => {})

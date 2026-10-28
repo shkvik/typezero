@@ -72,14 +72,23 @@ Expr *TzModulesChecker::adaptResult(Expr *expr, const Type *to) {
   const Type *from = expr->type;
   llvm::ArrayRef<const Type *> mine = from->params(), given = to->params();
   if (mine.size() < given.size() || from->minArgs() > given.size() || from->hasRest() ||
-      to->hasRest() || from->hasThis() != to->hasThis() || mine.take_front(given.size()) != given ||
-      (given.size() < to->minArgs())) {
+      to->hasRest() || from->hasThis() != to->hasThis() || (given.size() < to->minArgs())) {
     return nullptr;
+  }
+  bool converts = false;
+  for (size_t i = 0; i < given.size(); ++i) {
+    if (mine[i] == given[i]) {
+      continue;
+    }
+    if (!mine[i]->nonOptional()->isUnknown() || given[i]->isVoid()) {
+      return nullptr;
+    }
+    converts = true;
   }
   bool fewer = mine.size() > given.size();
   const Type *got = from->ret(), *wanted = to->ret();
-  if ((got == wanted && !fewer) || got->isVoid() || wanted->isVoid() || got->isError() ||
-      wanted->isError() ||
+  if ((got == wanted && !fewer && !converts) || got->isVoid() || wanted->isVoid() ||
+      got->isError() || wanted->isError() ||
       (got != wanted && !TypeRelations::isImplicitlyConvertible(got, wanted))) {
     return nullptr;
   }
@@ -147,25 +156,49 @@ void TzModulesChecker::noteHttpsCall(CallExpr *call, const FunctionDecl *fn) {
   }
 }
 
-void TzModulesChecker::noteListen(CallExpr *call, const MemberExpr *member) {
-  const ClassDecl *cls = member->object->type ? member->object->type->classDecl() : nullptr;
-  if (checker_.file_->usesTls || call->args.empty() || member->name != "listen" || !cls ||
-      !cls->library || cls->name != "Server" || checker_.libraryCalls().inLibrary(call->loc())) {
+void TzModulesChecker::noteServer(const NewExpr *made) {
+  const std::vector<Expr *> &args = made->ctor ? made->ctor->args : made->args;
+  if (checker_.file_->usesTls || args.empty() || checker_.libraryCalls().inLibrary(made->loc())) {
     return;
   }
-  noteServeOptions(call->args[0]);
+  noteServeOptions(args[0]);
+}
+
+static const Expr *uncast(const Expr *expr) {
+  while (auto *cast = dyn_cast<CastExpr>(expr)) {
+    expr = cast->operand;
+  }
+
+  return expr;
+}
+
+static bool plainTransport(const Expr *transport) {
+  auto *lit = dyn_cast<ObjectLitExpr>(uncast(transport));
+  if (!lit) {
+    return false;
+  }
+  for (const ObjectLitExpr::Property &p : lit->props) {
+    if (p.spread) {
+      return false;
+    }
+    if (p.name == "secure") {
+      auto *secure = dyn_cast_or_null<BoolLitExpr>(p.value ? uncast(p.value) : nullptr);
+      return secure && !secure->value;
+    }
+  }
+
+  return false;
 }
 
 void TzModulesChecker::noteServeOptions(const Expr *options) {
-  while (auto *cast = dyn_cast<CastExpr>(options)) {
-    options = cast->operand;
-  }
+  options = uncast(options);
   if (auto *lit = dyn_cast<ObjectLitExpr>(options)) {
-    checker_.file_->usesTls = llvm::any_of(
-        lit->props, [](const ObjectLitExpr::Property &p) { return p.spread || p.name == "tls"; });
+    checker_.file_->usesTls = llvm::any_of(lit->props, [](const ObjectLitExpr::Property &p) {
+      return p.spread || (p.name == "transport" && !plainTransport(p.value));
+    });
   } else {
-    checker_.file_->usesTls =
-        !options->type || !options->type->isObject() || options->type->field("tls") != nullptr;
+    checker_.file_->usesTls = !options->type || !options->type->isObject() ||
+                              options->type->field("transport") != nullptr;
   }
 }
 

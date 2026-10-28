@@ -240,6 +240,8 @@ typedef struct {
   int chunked;
   int coded;
   int close, keep_alive, hosts, expect_continue;
+  const uint8_t *host;
+  size_t host_length;
 } Framing;
 
 static int content_length(const uint8_t *v, size_t n, int64_t *out) {
@@ -620,6 +622,8 @@ static int parse_fields(const uint8_t *s, size_t at, size_t end, TzArray **out, 
       connection_tokens(s + v, ve - v, f);
     } else if (equals_lower(name, name_length, "host")) {
       ++f->hosts;
+      f->host = s + v;
+      f->host_length = ve - v;
       if (server && !host_ok(s + v, ve - v)) {
         ok = 0;
         break;
@@ -826,6 +830,34 @@ static void refuse(NetConn *c, int status) {
   settle_int(c, 0);
 }
 
+static TzStr request_url(NetConn *c, const uint8_t *target, size_t n, const Framing *f) {
+  if ((n >= 7 && memcmp(target, "http://", 7) == 0) ||
+      (n >= 8 && memcmp(target, "https://", 8) == 0)) {
+    return latin1(target, n);
+  }
+  NetListener *l = c->listener;
+  const char *scheme = l && l->tls ? "https://" : "http://";
+  TzBuf b;
+  tz_buf_init(&b);
+  tz_buf_bytes(&b, (const uint8_t *)scheme, strlen(scheme));
+  if (target[0] == '/' && f->host) {
+    tz_buf_bytes(&b, f->host, f->host_length);
+  } else {
+    const char *host = l ? l->host : "localhost";
+    int bracket = strchr(host, ':') != NULL;
+    char text[300];
+    int length = snprintf(text, sizeof text, "%s%s%s:%d", bracket ? "[" : "", host,
+                          bracket ? "]" : "", l ? (int)l->port : 80);
+    tz_buf_bytes(&b, (const uint8_t *)text, (size_t)length);
+    if (target[0] != '/') {
+      tz_buf_bytes(&b, (const uint8_t *)"/", 1);
+    }
+  }
+  tz_buf_bytes(&b, target, n);
+
+  return tz_buf_take(&b);
+}
+
 static int read_request(NetConn *c) {
   HttpState *h = &c->http;
   while (c->in_end - c->in_start >= 2 && c->in[c->in_start] == '\r' &&
@@ -856,6 +888,9 @@ static int read_request(NetConn *c) {
         settle_int(c, 0);
       }
       return -1;
+    }
+    if (c->in_end > c->in_start && h->head_since == 0) {
+      h->head_since = net_now();
     }
     return 0;
   }
@@ -920,7 +955,8 @@ static int read_request(NetConn *c) {
   }
   clear_head(h);
   h->method = latin1(s + at, method_end - at);
-  h->target = latin1(s + target, target_end - target);
+  h->target = request_url(c, s + target, target_end - target, &f);
+  h->head_since = 0;
   h->headers = headers;
   h->version = version;
   h->keep_alive = (version == 11 ? !f.close : f.keep_alive && !f.close) && !h->ending;
@@ -1306,6 +1342,14 @@ static void input(NetConn *c) {
     return;
   default:
     return;
+  }
+}
+
+void tz_http_too_slow(NetConn *c) {
+  HttpState *h = &c->http;
+  h->head_since = 0;
+  if (h->wait_kind == WAIT_REQUEST) {
+    refuse(c, 408);
   }
 }
 

@@ -170,8 +170,8 @@ type Json = null | boolean | number | string | Json[] | { [key: string]: Json }
   `JSON.parse<T>`, `fromJson`, `embedJson`, `embedText`, `embedBytes`, `Result` (свой, без
   neverthrow), типы ошибок (`SystemError`, `FetchError`, `DateError`…), `HttpStatus` и
   `isHttpStatus`, `Constructor`, `ConstructorArgs`, `MethodDescriptor`,
-  `Reflect.defineMetadata` и `getMetadata`, `Timeout`, типы Web Crypto, — и модули `"tz:io"` и
-  `"tz:http"`. С `Result` объявлены `node:fs`, `node:fs/promises`, `node:child_process`,
+  `Reflect.defineMetadata` и `getMetadata`, `Timeout`, типы Web Crypto, — и модуль `"tz:io"`;
+  `"tz:http"` — из его объявления `http.d.tz` (раздел 7). С `Result` объявлены `node:fs`, `node:fs/promises`, `node:child_process`,
   `JSON.parse`, `RegExp.parse`, `Date.parse`, `decimal(текст)` и web: `fetch`, чтение тел,
   `URL.parse`, чтение web-потоков. Где `@types/node` объявляет иначе (исключение, `null`,
   свойство вместо метода), объявление tz.d.ts его не поменяет — tz меняет его в своей копии
@@ -190,6 +190,53 @@ type Json = null | boolean | number | string | Json[] | { [key: string]: Json }
   объявлениями tz — в 69 программах, 299 ошибок. Остались места, где tsc строже tz: перегрузки с
   телом у каждого варианта ([overloads.md](overloads.md)), чтение полей `Json` без проверки,
   `onabort = undefined` (в tz нет `null`), члены, добавленные подменой класса, вычитание дат.
+
+## 7. Объявления `.d.tz`
+
+Решено 28 октября. У модуля может быть объявление — файл с тем же именем и `.d.tz` рядом:
+`box.tz` и `box.d.tz`. Объявление — открытая часть модуля, с описанием и примерами для
+людей и редактора; код модуля — без комментариев.
+
+```ts
+// box.d.tz
+/** A box with a number. */
+export declare class Box {
+  /** What is in the box. */
+  public readonly value: int;
+
+  public constructor(value: int);
+
+  /** Twice the value. @example new Box(2).twice() // 4 */
+  public twice(): int;
+}
+
+/** Makes a pair. */
+export declare function make(a: int): Pair;
+
+export type Pair = {
+  a: int;
+  b?: string;
+};
+```
+
+- **В объявлении только то, что модуль экспортирует:** `export type` (и `interface`),
+  `export declare function` и `export declare class` — подписи без тел, и `import` типов,
+  которые они называют. Код, тела и значения — ошибка.
+- **tz сверяет объявление с модулем** при каждой сборке, где модуль есть: каждое имя,
+  которое модуль экспортирует, объявлено, и ничего сверх; у типа — тот же тип (разница
+  показывается по полю), у функции и метода — те же параметры (обязательные и
+  необязательные) и тот же результат; у класса — все открытые и защищённые члены, с тем же
+  доступом, `static`, `readonly`, `?` и типом. Закрытое (`private`) в объявление не пишут.
+  Доступ у каждого члена написан явно ([style.md](style.md), раздел 4). Конструктор, который
+  берёт класс, не открытый модулем, можно не объявлять: программе его всё равно не позвать.
+  Расхождение — ошибка в объявлении (или у экспорта модуля, которого в объявлении нет), как в
+  тесте `tests/cli/declarations.cmake`.
+- **Пока не сверяется:** обобщённое (у типа, функции, класса с параметрами типов сверяется
+  только их число) и реэкспорт `export { … } from`.
+- **Для редактора** объявления модулей библиотеки становятся `.d.ts` при сборке tz:
+  `library/http/http.d.tz` — `types/node_modules/@types/tz/http.d.ts` с `declare module
+  "tz:http"` ([declarations.cmake](../editors/types/declarations.cmake)); `tz.d.ts` ссылается на
+  него, а своего описания `tz:http` в нём больше нет.
 
 ## План реализации
 
@@ -214,3 +261,8 @@ type Json = null | boolean | number | string | Json[] | { [key: string]: Json }
    `JSON.parse`, `JSON.parse<T>` и `fromJson` отдают `Result`; обновить `tz.d.ts` под числа и
    библиотеку на `Result`. Сделано 26 октября: `import` из `"neverthrow"` — ошибка с подсказкой
    «встроено», свой `Result` в `tz.d.ts`, объявления neverthrow убраны из `third_party/types`.
+6. **Объявления `.d.tz`** (раздел 7; сделано 28 октября): разбор (`DeclarationParser`), загрузка
+   рядом с модулем и с модулем библиотеки, сверка (`DeclarationChecker`), `http.d.tz` для
+   `tz:http` и `.d.ts` из него для редактора. Дальше: обобщённое и реэкспорт; объявления
+   остальной библиотеки и встроенного компилятора (`node:fs`, числа, `JSON`… — сейчас в
+   `tz.d.ts`); мосты в рантайм — в модулях `tz:internal`.

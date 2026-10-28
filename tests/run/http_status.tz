@@ -27,7 +27,7 @@ const empty = [204, 205, 304, 200]
 for (const code of empty) {
   if (isHttpStatus(code)) {
     const r = new Response("dropped", { status: code })
-    console.log(code, JSON.stringify(must(await r.text())), r.body == undefined)
+    console.log(code, JSON.stringify(must(await r.text())), r.body() == undefined)
   }
 }
 

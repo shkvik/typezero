@@ -178,8 +178,8 @@ void saveOrLog("Ann")                // ок: Promise<void>
 - Не пойманных ошибок в задачах нет: `Result` нельзя выбросить (раздел 6).
 - Отмена — `AbortController` / `AbortSignal`: сигнал передают явно (`timers/promises`,
   `fs/promises`, сеть). Операция с сигналом отдаёт `Err` с `{ code: "ABORT_ERR" }`; задача
-  проверяет `signal.aborted`, `signal.throwIfAborted()` нет — вместо него
-  `if (signal.aborted) return err(signal.reason)`. `Promise.race` не отменяет проигравших.
+  проверяет `signal.aborted()`, `signal.throwIfAborted()` нет — вместо него
+  `if (signal.aborted()) return err(signal.reason())`. `Promise.race` не отменяет проигравших.
 - `node:worker_threads` нет: параллельность и так есть.
 
 ## 8. Рантайм

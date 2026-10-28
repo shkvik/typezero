@@ -101,11 +101,11 @@ console.log(new Row(4).twice(), made, Reflect.getMetadata(Table, Row) ?? "none")
 const timer: Timeout = setTimeout(() => console.log("never"), 1000)
 clearTimeout(timer)
 console.log(readLine() ?? "no input")
-const server = new Server(request => new Response(`got ${new URL(request.url).pathname}`))
-const listened = server.listen({ hostname: "127.0.0.1", port: 0 })
+const server = new Server({ hostname: "127.0.0.1", port: 0 }, request => new Response(`got ${new URL(request.url).pathname()}`))
+const listened = server.listen()
 if (listened.isOk()) {
-  console.log(server.port > 0)
-  await server.stop()
+  console.log(listened.value.port > 0)
+  await listened.value.stop()
 }
 ]=])
 write(app/main.tz "${program}")
@@ -134,15 +134,15 @@ import { Server } from "tz:http"
 // status written in the code is an HttpStatus; one from a variable becomes
 // one after isHttpStatus.
 const code = 200 + (process.argv.length > 99 ? 1 : 0)
-const server = new Server(request => {
-  const path = new URL(request.url).pathname
+const server = new Server({ hostname: "127.0.0.1", port: 0 }, request => {
+  const path = new URL(request.url).pathname()
   if (path == "/away") return Response.redirect(new URL("/here", request.url), 307)
   if (isHttpStatus(code)) return new Response(`got ${path}`, { status: code })
   return new Response("none", { status: 500 })
 })
-const listened = server.listen({ hostname: "127.0.0.1", port: 0 })
+const listened = server.listen()
 if (listened.isOk()) {
-  const base = listened.value
+  const base = listened.value.url
   const res = await fetch(new URL("/away", base))
   if (res.isOk()) {
     const response = res.value
@@ -151,12 +151,12 @@ if (listened.isOk()) {
     console.log(text.unwrapOr("-"), response.bodyUsed())
   }
   const url = URL.parse("/a?b=1", base)
-  console.log(url.isOk() ? url.value.pathname : "bad", URL.parse("no url").isErr())
+  console.log(url.isOk() ? url.value.pathname() : "bad", URL.parse("no url").isErr())
   if (url.isOk()) {
     url.value.searchParams.replace("c=2")
-    console.log(url.value.href.endsWith("/a?c=2"), url.value.setPort(process.argv[2] ?? "x").isErr())
+    console.log(url.value.href().endsWith("/a?c=2"), url.value.setPort(process.argv[2] ?? "x").isErr())
   }
-  await server.stop()
+  await listened.value.stop()
 }
 
 // A stream of the web reads with a Result too.
@@ -169,12 +169,12 @@ const stream = new ReadableStream<string>({
 })
 const reader = stream.getReader()
 const first = await reader.read()
-console.log(first.isOk() && !first.value.done ? first.value.value : "-", stream.disturbed)
+console.log(first.isOk() && !first.value.done ? first.value.value : "-", stream.disturbed())
 reader.releaseLock()
 for await (const chunk of new ReadableStream<string>({ start: c => { c.enqueue("b"); c.close() } }))
   console.log(chunk.unwrapOr("-"))
 const ping = new Event("ping")
-console.log(ping.immediateStopped)
+console.log(ping.immediateStopped())
 const when = Date.parse("2026-10-28T10:00Z")
 const price = decimal(process.argv[3] ?? "1.5")
 console.log(when.isOk(), price.isOk() ? price.value.toFixed(1) : "-", decimal("2.5").toFixed(1))

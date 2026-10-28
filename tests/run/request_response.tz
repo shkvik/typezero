@@ -8,13 +8,13 @@
 // (errors/http_status.tz, errors/http_request.tz), and what only the
 // running program knows is in request_checks.tz.
 const r = new Response("hello", { status: 201, headers: { "x-y": "z" } })
-console.log(r.status, r.statusText, r.headers, r.body != undefined, r.bodyUsed(), r.ok,
+console.log(r.status, r.statusText, r.headers, r.body() != undefined, r.bodyUsed(), r.ok,
             r.redirected, r.type, r.url)
 const q = new Request("http://example.com/x", { method: "POST", body: "hi" })
 console.log(q.method, q.url, q.headers, q.destination, q.referrer, q.referrerPolicy, q.mode,
             q.credentials, q.cache, q.redirect, q.integrity, q.keepalive, q.isReloadNavigation,
-            q.isHistoryNavigation, q.signal.aborted, q.body != undefined)
-console.log(new ReadableStream().locked)
+            q.isHistoryNavigation, q.signal.aborted(), q.body() != undefined)
+console.log(new ReadableStream().locked())
 console.log(must(await q.text()), q.bodyUsed())
 const again = await q.text()
 if (again.isErr()) console.log(again.error.code, again.error.message)

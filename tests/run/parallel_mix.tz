@@ -41,22 +41,23 @@ stats.on("hit", (_path: string) => {
 const counts = new Map<string, int>()
 const registry = new Registry()
 const controller = new AbortController()
-const server = new Server(async (req) => {
-  const path = new URL(req.url).pathname
+const server = new Server({ hostname: "127.0.0.1", port: 0, signal: controller.signal }, async (req) => {
+  const path = new URL(req.url).pathname()
   await Promise.resolve()
   counts.set(path, (counts.get(path) ?? 0) + 1)
   stats.hit(path)
   const session = registry.open(path)
   return new Response(`${path} ${session.peer == undefined ? "first" : "again"}`)
 })
-const started = server.listen({ hostname: "127.0.0.1", port: 0, signal: controller.signal })
+const started = server.listen()
 if (started.isErr()) {
   console.log("cannot listen:", started.error.message)
   process.exit(1)
 }
+const listening = started.value
 
 async function get(path: string) {
-  const res = await fetch(`http://127.0.0.1:${server.port}${path}`)
+  const res = await fetch(`http://127.0.0.1:${listening.port}${path}`)
   if (res.isErr()) return res.error.message
   return (await res.value.text()).unwrapOr("")
 }

@@ -11,10 +11,10 @@ const r = new Readable({
     cb(err)
   },
 })
-r.on("error", (e) => log(`r error ${e.message} errored=${r.errored?.message}`))
-r.on("close", () => log(`r close closed=${r.closed} destroyed=${r.destroyed}`))
+r.on("error", (e) => log(`r error ${e.message} errored=${r.errored()?.message}`))
+r.on("close", () => log(`r close closed=${r.closed()} destroyed=${r.destroyed()}`))
 r.destroy({ code: "E_OOPS", message: "oops" })
-log(`destroyed now ${r.destroyed}`)
+log(`destroyed now ${r.destroyed()}`)
 r.destroy({ code: "E_AGAIN", message: "again" })
 
 const w = new Writable({ write(c, e, cb) { cb() } })

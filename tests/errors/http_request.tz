@@ -34,7 +34,7 @@ h.append("x-b", "1\n2")
 // expect-error: 'ü' is not a name of a header: a name is letters, digits and !#$%&'*+-.^_`|~, without spaces
 h.get("ü")
 const u = new URL("http://example.com/")
-// expect-error: cannot assign to 'href' because it is a read-only field of 'URL'; change it with 'setHref(...)'
+// expect-error: 'href' is a method of 'URL'; change it with 'setHref(...)'
 u.href = "http://example.org/"
 // expect-error: the Result is not used
 u.setHref(text)
@@ -51,4 +51,4 @@ u.setHost("a b:80")
 u.setProtocol("1http")
 u.setPort("8080")
 u.setProtocol("https:")
-console.log(h, u.href)
+console.log(h, u.href())

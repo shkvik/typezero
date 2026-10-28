@@ -48,7 +48,7 @@ class Collect extends Writable {
 
 const sink = new Collect()
 const piped = await pipeline(new Counter(3), new Upper(), sink)
-console.log(piped.isOk(), JSON.stringify(sink.parts.join("")), sink.destroyed)
+console.log(piped.isOk(), JSON.stringify(sink.parts.join("")), sink.destroyed())
 
 // A class of strings: onWrite() gets them as they were written.
 class Lines extends Writable<string> {

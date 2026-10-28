@@ -7,21 +7,21 @@ import { Readable, Stream, isErrored, isReadable } from "node:stream"
 // A signal with the function that aborts it, as Promise.withResolvers gives a
 // promise with its resolve; the controller makes its signal so.
 const { signal, abort } = AbortSignal.withAbort()
-signal.addEventListener("abort", (event) => console.log("aborted:", signal.reason, event.isTrusted))
-console.log(signal.aborted)
+signal.addEventListener("abort", (event) => console.log("aborted:", signal.reason(), event.isTrusted()))
+console.log(signal.aborted())
 abort("enough")
-console.log(signal.aborted)
+console.log(signal.aborted())
 
 // An event goes through dispatchOn: once at a time, and the listeners see it
 // at the target.
 const target = new EventTarget()
 const ping = new Event("ping")
 target.addEventListener("ping", (event) => {
-  console.log("first", event.eventPhase, event.target == target, event.isTrusted)
+  console.log("first", event.eventPhase(), event.target() == target, event.isTrusted())
   event.stopImmediatePropagation()
 })
 target.addEventListener("ping", () => console.log("never"))
-console.log(target.dispatchEvent(ping), ping.immediateStopped, ping.eventPhase)
+console.log(target.dispatchEvent(ping), ping.immediateStopped(), ping.eventPhase())
 const again = new Event("again")
 console.log(again.dispatchOn(target, () => console.log("inside", again.dispatchOn(target, () => {}))))
 
@@ -30,20 +30,20 @@ const url = new URL("https://example.com/a?x=1")
 const seen: (string | undefined)[] = []
 url.searchParams.watch((query) => seen.push(query))
 url.searchParams.append("y", "2 3")
-console.log(url.href, url.search)
+console.log(url.href(), url.search())
 url.searchParams.replace("z=9")
-console.log(url.href, url.searchParams.get("z"), url.searchParams.size)
+console.log(url.href(), url.searchParams.get("z"), url.searchParams.size())
 url.setSearch("?q=a b")
-console.log(url.href, url.searchParams.get("q"))
+console.log(url.href(), url.searchParams.get("q"))
 url.searchParams.replace()
-console.log(url.href, JSON.stringify(seen))
+console.log(url.href(), JSON.stringify(seen))
 
 // A stream says whether it was read.
 const stream = new ReadableStream<string>({ start: (c) => { c.enqueue("a"); c.close() } })
-console.log(stream.locked, stream.disturbed)
+console.log(stream.locked(), stream.disturbed())
 const reader = stream.getReader()
 const first = await reader.read()
-console.log(first.isOk() && !first.value.done ? first.value.value : "-", stream.locked, stream.disturbed)
+console.log(first.isOk() && !first.value.done ? first.value.value : "-", stream.locked(), stream.disturbed())
 
 // A key does its own operations; crypto.subtle calls them.
 const made = await crypto.subtle.generateKey({ name: "HMAC", hash: "SHA-256" }, true, ["sign", "verify"])
@@ -64,24 +64,26 @@ if (made.isOk() && made.value instanceof CryptoKey) {
   console.log(refused.isErr() ? refused.error.code : "encrypted")
 }
 
-// A server is made, then listens; listen gives its address.
-const server = new Server((request) => new Response(`hi ${new URL(request.url).pathname}`))
-console.log(server.port, JSON.stringify(server.hostname), server.url == undefined)
-await server.stop()
-const listened = server.listen({ port: 0, hostname: "127.0.0.1" })
+// A server is made with its options, then listens; listen gives what
+// listens: its address, and stop(). Each listen is another socket.
+const server = new Server({ port: 0, hostname: "127.0.0.1" }, (request) => new Response(`hi ${new URL(request.url).pathname()}`))
+const listened = server.listen()
 if (listened.isErr()) {
   console.log("cannot listen:", listened.error.message)
   process.exit(1)
 }
-const base = listened.value
-console.log(base.hostname, server.port > 0, server.url?.href == base.href)
-const res = await fetch(new URL("/there", base))
+const listening = listened.value
+console.log(listening.url.hostname(), listening.port > 0, listening.hostname)
+const res = await fetch(new URL("/there", listening.url))
 console.log(res.isOk() ? (await res.value.text()).unwrapOr("-") : "failed")
-const twice = server.listen({ port: 0, hostname: "127.0.0.1" })
-console.log(twice.isErr() ? twice.error.code : "listened twice")
-await server.stop()
-const after = server.listen({ port: 0, hostname: "127.0.0.1" })
+const twice = server.listen()
+console.log(twice.isOk() && twice.value.port != listening.port ? "another port" : "same")
+if (twice.isOk()) await twice.value.stop()
+await listening.stop()
+const taken = new Server({ port: listening.port, hostname: "127.0.0.1" }, () => new Response("x"))
+const after = taken.listen()
 console.log(after.isErr() ? after.error.code : "listened after stop")
+if (after.isOk()) await after.value.stop()
 
 // A stream of node keeps its state inside; what node:stream gives as
 // functions is there as statics of Stream too, as in node. A class of the
@@ -95,7 +97,7 @@ class Countdown extends Readable<string> {
 const countdown = new Countdown()
 console.log(Stream.isReadable(countdown), isReadable(countdown), isErrored(countdown))
 for await (const item of countdown) console.log(item.unwrapOr("-"))
-console.log(Stream.isReadable(countdown), countdown.readableEnded, Stream.isDisturbed(countdown))
+console.log(Stream.isReadable(countdown), countdown.readableEnded(), Stream.isDisturbed(countdown))
 
 // What a class may give its own stream with protected operations is checked:
 // a chunk of another type ends the stream with an error.

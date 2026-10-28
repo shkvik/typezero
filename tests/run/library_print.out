@@ -1,16 +1,18 @@
 URL {
-  href: 'https://user:pw@example.com:8080/a/b?x=1&y=2#frag',
-  origin: 'https://example.com:8080',
-  protocol: 'https:',
-  username: 'user',
-  password: 'pw',
-  host: 'example.com:8080',
-  hostname: 'example.com',
-  port: '8080',
-  pathname: '/a/b',
-  search: '?x=1&y=2',
+  state: {
+    href: 'https://user:pw@example.com:8080/a/b?x=1&y=2#frag',
+    origin: 'https://example.com:8080',
+    protocol: 'https:',
+    username: 'user',
+    password: 'pw',
+    host: 'example.com:8080',
+    hostname: 'example.com',
+    port: '8080',
+    pathname: '/a/b',
+    search: '?x=1&y=2',
+    hash: '#frag'
+  },
   searchParams: URLSearchParams { 'x' => '1', 'y' => '2' },
-  hash: '#frag',
   record: UrlRecord {
     scheme: 'https',
     username: 'user',
@@ -26,16 +28,6 @@ Response {
   status: 201,
   statusText: '',
   headers: Headers { 'x-y': 'z', 'content-type': 'text/plain;charset=UTF-8' },
-  body: BodyStream {
-    locked: false,
-    disturbed: false,
-    body: Body {
-      kind: 1,
-      text: 'hello',
-      used: false,
-      type: 'text/plain;charset=UTF-8'
-    }
-  },
   ok: true,
   redirected: false,
   type: 'default',
@@ -63,20 +55,10 @@ Request {
   isReloadNavigation: false,
   isHistoryNavigation: false,
   signal: AbortSignal {
-    aborted: false,
-    reason: undefined,
+    isAborted: false,
+    abortReason: undefined,
     native: AbortSignal {},
     onabortListens: false
-  },
-  body: BodyStream {
-    locked: false,
-    disturbed: false,
-    body: Body {
-      kind: 1,
-      text: 'hi',
-      used: false,
-      type: 'text/plain;charset=UTF-8'
-    }
   },
   data: Body {
     kind: 1,
@@ -85,19 +67,19 @@ Request {
     type: 'text/plain;charset=UTF-8'
   }
 }
-ReadableStream { locked: false, disturbed: false } Headers { 'x-a': '1' } URLSearchParams { 'a' => '1', 'b' => '2' }
+ReadableStream {} Headers { 'x-a': '1' } URLSearchParams { 'a' => '1', 'b' => '2' }
 AbortController {
   signal: AbortSignal {
-    aborted: false,
-    reason: undefined,
+    isAborted: false,
+    abortReason: undefined,
     native: AbortSignal {},
     onabortListens: false
   },
   cancel: [Function: abort]
 }
 AbortSignal {
-  aborted: true,
-  reason: 'stop',
+  isAborted: true,
+  abortReason: 'stop',
   native: AbortSignal {},
   onabortListens: false
 }

@@ -1,41 +1,41 @@
 // same-as-node
-// The options of listen: onListen, a signal that stops the server, and what
-// the server tells: its port, hostname and url; stop() lets the requests
-// being handled finish.
+// The options of a server: where it listens, a signal that stops it, and
+// what listen gives: its port, hostname and url; stop() lets the requests
+// being handled finish, and waits for them.
 import { Server } from "tz:http"
 
 const controller = new AbortController()
 const started = Promise.withResolvers<void>()
-let listened = ""
-const server = new Server(async req => {
-  if (new URL(req.url).pathname == "/slow") {
-    started.resolve()
-    await new Promise<void>(r => setTimeout(r, 100))
-  }
-  return new Response("done")
-})
-const listening = server.listen({
-  port: 0,
-  hostname: "127.0.0.1",
-  signal: controller.signal,
-  onListen: address => {
-    listened = `${address.hostname} ${address.port > 0}`
+const server = new Server(
+  {
+    port: 0,
+    hostname: "127.0.0.1",
+    signal: controller.signal,
   },
-})
-if (listening.isErr()) {
-  console.log("cannot listen:", listening.error.message)
+  async (req) => {
+    if (new URL(req.url).pathname() == "/slow") {
+      started.resolve()
+      await new Promise<void>((r) => setTimeout(r, 100))
+    }
+    return new Response("done")
+  },
+)
+const listened = server.listen()
+if (listened.isErr()) {
+  console.log("cannot listen:", listened.error.message)
   process.exit(1)
 }
-console.log(listened, server.hostname, server.port > 0)
-console.log((server.url?.href ?? "").replaceAll(String(server.port), "PORT"))
-const slow = fetch(`http://127.0.0.1:${server.port}/slow`)
+const listening = listened.value
+console.log(listening.hostname, listening.port > 0)
+console.log(listening.url.href().replaceAll(String(listening.port), "PORT"))
+const slow = fetch(`http://127.0.0.1:${listening.port}/slow`)
 await started.promise
 controller.abort()
 const r = must(await slow)
 console.log(r.status, must(await r.text()))
-await server.finished
+await listening.stop()
 console.log("finished")
-const after = await fetch(`http://127.0.0.1:${server.port}/`)
+const after = await fetch(`http://127.0.0.1:${listening.port}/`)
 if (after.isErr()) console.log(after.error.message)
 
 function must<T, E>(r: Result<T, E>): T {

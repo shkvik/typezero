@@ -36,18 +36,18 @@ for (const s of inputs) {
   const parsed = URL.parse(s)
   if (parsed.isErr()) continue
   const u = parsed.value
-  console.log(u.href, "|", u.origin, "|", u.protocol, u.username, u.password, u.host, u.hostname,
-              u.port, u.pathname, u.search, u.hash)
+  console.log(u.href(), "|", u.origin(), "|", u.protocol(), u.username(), u.password(), u.host(), u.hostname(),
+              u.port(), u.pathname(), u.search(), u.hash())
 }
 for (const s of ["http://h:65536/", "http://[::1/", "http://a b/", "http:///", "https://h:x/",
                  "http://192.168.0.257/", "nope"])
   console.log(s, URL.canParse(s), URL.parse(s).isErr())
 const base = "http://base.com/dir/file?q#f"
 for (const r of ["", "?x", "#y", "/abs", "../up", "//other.com/p", "./a/b", "http:foo"])
-  console.log(JSON.stringify(r), URL.parse(r, base).map((u) => u.href).unwrapOr("?"))
+  console.log(JSON.stringify(r), URL.parse(r, base).map((u) => u.href()).unwrapOr("?"))
 const baseUrl = URL.parse(base)
 if (baseUrl.isOk())
-  console.log(new URL("c", baseUrl.value).href, URL.canParse("/x", "http://h"))
+  console.log(new URL("c", baseUrl.value).href(), URL.canParse("/x", "http://h"))
 const bad = URL.parse("not a url")
 if (bad.isErr()) console.log(bad.error.code, bad.error.message, bad.error.input)
 
@@ -65,7 +65,7 @@ const near = [
 ]
 for (const s of near) {
   const parsed = URL.parse(s)
-  console.log(JSON.stringify(s), parsed.isOk() ? `${parsed.value.href} ${parsed.value.host} ${parsed.value.pathname}` : "error")
+  console.log(JSON.stringify(s), parsed.isOk() ? `${parsed.value.href()} ${parsed.value.host()} ${parsed.value.pathname()}` : "error")
 }
 
 // The parts change through methods; a literal is checked when the program is
@@ -77,21 +77,21 @@ u.setPort("8080")
 u.setHostname("other.org")
 u.setUsername("me")
 u.setPassword("s3cret")
-console.log(u.href)
+console.log(u.href())
 u.setProtocol("https")
 u.setPort("443")
-console.log(u.href, u.port == "")
+console.log(u.href(), u.port() == "")
 u.setHost("example.com:9000")
 u.setSearch("q=1 2")
-console.log(u.href)
+console.log(u.href())
 u.setHref("http://reset.com/")
-console.log(u.href, u.toString(), u.toJSON(), JSON.stringify({ u: u.toJSON() }))
+console.log(u.href(), u.toString(), u.toJSON(), JSON.stringify({ u: u.toJSON() }))
 for (const port of ["81", "x81", ""]) {
   const set = u.setPort(port)
-  console.log(set.isOk() ? "port " + u.port : set.error.code + " " + set.error.input, u.host)
+  console.log(set.isOk() ? "port " + u.port() : set.error.code + " " + set.error.input, u.host())
 }
 const mail = new URL("mailto:a@b.c")
 for (const host of ["example.com"]) {
   const refused = mail.setHost(host)
-  console.log(refused.isErr() ? refused.error.code : "set", mail.href)
+  console.log(refused.isErr() ? refused.error.code : "set", mail.href())
 }

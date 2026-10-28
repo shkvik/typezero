@@ -1,6 +1,7 @@
 #include "compiler/check/check_pass/check_pass.h"
 #include "compiler/check/checker/checker.h"
 #include "compiler/check/classes/class_checker/class_checker.h"
+#include "compiler/check/declarations/declaration_checker/declaration_checker.h"
 #include "compiler/check/functions/function_checker/function_checker.h"
 #include "compiler/check/top_level_checker/top_level_checker.h"
 #include "compiler/declare/function_names/function_names.h"
@@ -77,6 +78,11 @@ Errors CheckPass::run(Program &program) const {
     if (!fn->checked) {
       checker.flow_ = Checker::Flow();
       checker.functionChecker().checkFunctionBody(fn);
+    }
+  }
+  for (Module *module : file.modules) {
+    if (module->declaration) {
+      DeclarationChecker(checker).check(module);
     }
   }
 
