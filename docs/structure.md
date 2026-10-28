@@ -146,8 +146,8 @@ runtime/
                      fs/ — fs, fs_errors, fs_sync, fs_dirs, fs_async, fs_async_dirs, stdin,
                      readline, fs_stream (← fs.c); json/ — json, json_values, json_parse,
                      json_stringify, json_typed (← json.c)
-library/             по теме на папку; stream/stream.tz и его части stream_readable.tz,
-                     stream_writable.tz, stream_duplex.tz, stream_pipeline.tz
+library/             по теме на папку; stream/stream.tz (класс Stream со всей работой потока)
+                     и его части stream_duplex.tz, stream_pipeline.tz
 ```
 
 Что не так, как в цели, и почему:

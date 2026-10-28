@@ -1,7 +1,3 @@
-import { FinishedOptions, Stream, finishedPromise } from "node:stream"
-
-export function finished(stream: Stream, options?: FinishedOptions): Promise<Result<void, StreamError>> {
-  return finishedPromise(stream, options)
-}
+export function finished() {}
 
 export function pipeline() {}

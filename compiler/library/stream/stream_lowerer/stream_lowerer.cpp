@@ -91,6 +91,10 @@ llvm::Value *StreamLowerer::emitStreamBuiltin(CallExpr *call) {
   case Builtin::LibIsChunk: {
     const Type *wanted = call->args[1]->type;
     Lowering::Operand u = lowering_.refCounts().emitOperand(call->args[0], true);
+    if (wanted->isUnknown()) {
+      lowering_.refCounts().dropOperand(u);
+      return lowering_.builder_.getTrue();
+    }
     llvm::BasicBlock *fail = lowering_.functionFrame().newBlock("chunk.not");
     llvm::BasicBlock *end = lowering_.functionFrame().newBlock("chunk.end");
     llvm::Value *value = emitChunkAs(u.value, wanted, fail);

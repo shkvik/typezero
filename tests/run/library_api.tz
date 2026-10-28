@@ -2,6 +2,7 @@
 // node (docs/objects.md, section 6): every open member is safe, whoever calls
 // it, and the objects talk to each other through it.
 import { Server } from "tz:http"
+import { Readable, Stream, isErrored, isReadable } from "node:stream"
 
 // A signal with the function that aborts it, as Promise.withResolvers gives a
 // promise with its resolve; the controller makes its signal so.
@@ -81,3 +82,26 @@ console.log(twice.isErr() ? twice.error.code : "listened twice")
 await server.stop()
 const after = server.listen({ port: 0, hostname: "127.0.0.1" })
 console.log(after.isErr() ? after.error.code : "listened after stop")
+
+// A stream of node keeps its state inside; what node:stream gives as
+// functions is there as statics of Stream too, as in node. A class of the
+// program replaces the methods the stream calls: onRead and the others.
+class Countdown extends Readable<string> {
+  private left = 3
+  protected override onRead() {
+    this.push(this.left == 0 ? undefined : `${this.left--}`)
+  }
+}
+const countdown = new Countdown()
+console.log(Stream.isReadable(countdown), isReadable(countdown), isErrored(countdown))
+for await (const item of countdown) console.log(item.unwrapOr("-"))
+console.log(Stream.isReadable(countdown), countdown.readableEnded, Stream.isDisturbed(countdown))
+
+// What a class may give its own stream with protected operations is checked:
+// a chunk of another type ends the stream with an error.
+class Odd extends Readable<string> {
+  protected override onRead() {
+    this.pushChunk(42)
+  }
+}
+for await (const item of new Odd({ objectMode: true })) console.log(item.isErr() ? item.error.code : item.value)

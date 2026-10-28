@@ -39,6 +39,7 @@ private:
   void exportDefault(size_t i);
   void exportList(size_t open, size_t close);
   void importDecl(size_t i);
+  void streamHooks();
   bool members(const std::string &name, size_t skipBegin, size_t skipEnd,
                std::vector<std::string> &items);
   void tokens();

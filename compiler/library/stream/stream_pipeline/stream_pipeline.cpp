@@ -230,15 +230,6 @@ Expr *StreamPipeline::checkStreamFunction(CallExpr *call, FunctionDecl *decl, ll
   if (fn != "pipeline" && fn != "finished" && fn != "compose") {
     return nullptr;
   }
-  if (fn == "finished" && promises) {
-    if (!call->args.empty()) {
-      checker_.emitterChecker().noteErrorsHandled(call->args[0]);
-    }
-    return nullptr;
-  }
-  if (checker_.libraryCalls().inLibrary(call->loc())) {
-    return nullptr;
-  }
   call->type = Type::error();
   if (checker_.callChecker().rejectSpread(call)) {
     return call;
@@ -259,7 +250,8 @@ Expr *StreamPipeline::checkStreamFunction(CallExpr *call, FunctionDecl *decl, ll
         checker_.exprChecker().checkExpr(checker_.ctx_.make<UndefinedExpr>(loc)), type);
   };
   if (fn == "finished") {
-    if (!checker_.argumentChecker().checkArity(call, loc, 2, 3)) {
+    unsigned most = promises ? 2 : 3;
+    if (!checker_.argumentChecker().checkArity(call, loc, most - 1, most)) {
       return call;
     }
     TypeAliasDecl *alias = checker_.libTypes_.lookup("FinishedOptions");
@@ -267,14 +259,20 @@ Expr *StreamPipeline::checkStreamFunction(CallExpr *call, FunctionDecl *decl, ll
         alias ? Type::optional(checker_.typeDeclarer().resolveAlias(alias)) : Type::error();
     Expr *stream = checker_.argumentChecker().checkArg(call->args[0], streamType);
     checker_.emitterChecker().noteErrorsHandled(stream);
-    Expr *opts = call->args.size() == 3
+    Expr *opts = call->args.size() == most
                      ? checker_.argumentChecker().checkArg(call->args[1], options)
                      : undefinedOf(options);
+    if (promises) {
+      call->args = {stream, opts};
+      std::vector<bool> given(2, true);
+      return checker_.eventTargetChecker().callLibraryStatic(call, streamClass, "finishedResult",
+                                                             {}, given, loc);
+    }
     Expr *cb = checker_.argumentChecker().checkArg(call->args.back(), callback);
     call->args = {stream, opts, cb};
     std::vector<bool> given(3, true);
-    return checker_.eventTargetChecker().callLibraryFunction(call, "streamFinished", {}, given,
-                                                             loc);
+    return checker_.eventTargetChecker().callLibraryStatic(call, streamClass, "eos", {}, given,
+                                                           loc);
   }
   if (fn == "compose") {
     if (call->args.empty()) {
@@ -323,8 +321,8 @@ Expr *StreamPipeline::checkStreamFunction(CallExpr *call, FunctionDecl *decl, ll
     const Type *r = tail.readable ? tail.readable : Type::bytesType(Type::Bytes::Buffer);
     call->args = {list};
     std::vector<bool> given{true};
-    return checker_.eventTargetChecker().callLibraryFunction(call, "streamCompose", {w, r}, given,
-                                                             loc);
+    return checker_.eventTargetChecker().callLibraryStatic(call, streamClass, "composeAll", {w, r},
+                                                           given, loc);
   }
   size_t count = call->args.size();
   Expr *callbackArg = nullptr;
@@ -389,13 +387,13 @@ Expr *StreamPipeline::checkStreamFunction(CallExpr *call, FunctionDecl *decl, ll
     if (lastStream) {
       call->args = {list, lastStream, cb};
       given.assign(3, true);
-      return checker_.eventTargetChecker().callLibraryFunction(call, "streamPipeline",
-                                                               {lastStream->type}, given, loc);
+      return checker_.eventTargetChecker().callLibraryStatic(call, streamClass, "pipelineTo",
+                                                             {lastStream->type}, given, loc);
     }
     call->args = {list, cb};
     given.assign(2, true);
-    return checker_.eventTargetChecker().callLibraryFunction(call, "streamPipelineToStage", {},
-                                                             given, loc);
+    return checker_.eventTargetChecker().callLibraryStatic(call, streamClass, "pipelineOut", {},
+                                                           given, loc);
   }
   const Type *optionsType = Type::optional(Type::object(
       {Field{"signal", Type::optional(checker_.libraryClass("AbortSignal")->type), false},
@@ -408,12 +406,12 @@ Expr *StreamPipeline::checkStreamFunction(CallExpr *call, FunctionDecl *decl, ll
   call->args = {list, options};
   std::vector<bool> given(2, true);
   if (sinkValue && !sinkValue->isVoid()) {
-    return checker_.eventTargetChecker().callLibraryFunction(call, "streamPipelineValue",
-                                                             {sinkValue}, given, loc);
+    return checker_.eventTargetChecker().callLibraryStatic(call, streamClass, "pipelineValue",
+                                                           {sinkValue}, given, loc);
   }
 
-  return checker_.eventTargetChecker().callLibraryFunction(call, "streamPipelinePromise", {}, given,
-                                                           loc);
+  return checker_.eventTargetChecker().callLibraryStatic(call, streamClass, "pipelineResult", {},
+                                                         given, loc);
 }
 
 Expr *StreamPipeline::checkLibraryCall(CallExpr *call, NameExpr *name, FuncSymbol *func) {

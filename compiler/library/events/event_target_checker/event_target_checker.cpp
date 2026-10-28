@@ -158,7 +158,22 @@ Expr *EventTargetChecker::callLibraryFunction(CallExpr *call, llvm::StringRef na
                                               const std::vector<bool> &given, llvm::SMLoc loc) {
   FunctionDecl *fn = checker_.libFunctions_.lookup(name);
   assert(fn && fn->sym && "a function of the emitter's code");
-  FuncSymbol *sym = fn->sym;
+
+  return callLibrarySymbol(call, fn->sym, bound, given, loc);
+}
+
+Expr *EventTargetChecker::callLibraryStatic(CallExpr *call, ClassDecl *cls, llvm::StringRef name,
+                                            llvm::ArrayRef<const Type *> bound,
+                                            const std::vector<bool> &given, llvm::SMLoc loc) {
+  std::vector<FunctionDecl *> methods = ClassDeclarer::methodsNamed(cls, name, true);
+  assert(!methods.empty() && methods[0]->sym && "a static method of the library");
+
+  return callLibrarySymbol(call, methods[0]->sym, bound, given, loc);
+}
+
+Expr *EventTargetChecker::callLibrarySymbol(CallExpr *call, FuncSymbol *sym,
+                                            llvm::ArrayRef<const Type *> bound,
+                                            const std::vector<bool> &given, llvm::SMLoc loc) {
   checker_.returnInferrer().resolveParams(sym);
   const Type *ret = checker_.returnInferrer().returnType(sym);
   FuncSymbol *callee = sym;

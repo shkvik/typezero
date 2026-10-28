@@ -15,11 +15,17 @@ if (!existsSync(path)) {
   let seed = 1
   for (let i = 0; i < 800000; i++) {
     seed = (seed * 75 + 74) % 65537
-    parts.push(`line ${i}: value ${seed % 100000} status ${seed % 7 == 0 ? "error" : "ok"} ${"x".repeat(seed % 9)}\n`)
+    const pad = seed % 9
+    if (pad >= 0)
+      parts.push(`line ${i}: value ${seed % 100000} status ${seed % 7 == 0 ? "error" : "ok"} ${"x".repeat(pad)}\n`)
   }
   const making = `${path}-${Date.now()}`
-  writeFileSync(making, parts.join(""))
-  renameSync(making, path)
+  const written = writeFileSync(making, parts.join(""))
+  const moved = written.isOk() ? renameSync(making, path) : written
+  if (moved.isErr()) {
+    console.error(moved.error.message)
+    process.exit(1)
+  }
 }
 
 let rest = ""
@@ -54,5 +60,9 @@ const counter = new Writable({
     callback()
   },
 })
-await pipeline(createReadStream(path, "utf8"), lines, sevens, counter)
+const done = await pipeline(createReadStream(path, "utf8"), lines, sevens, counter)
+if (done.isErr()) {
+  console.error(done.error.message)
+  process.exit(1)
+}
 console.log(count, total)

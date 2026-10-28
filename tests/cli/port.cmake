@@ -5,15 +5,16 @@
 include(${SOURCE}/../cli.cmake)
 
 tz(port ${SOURCE}/port/autofix -o lib STDOUT [[
-ported autofix 1.0.0 into lib (4 files)
+ported autofix 1.0.0 into lib (5 files)
 changed:
     4  '#x' became 'private x'
-    5  '+' with a string became a template literal
-    5  '===' and '!==' became '==' and '!='
+    6  '+' with a string became a template literal
+    6  '===' and '!==' became '==' and '!='
+    1  '_read', '_write' and the other methods of a stream became 'onRead', 'onWrite'...
     3  'export default' became a named export
     1  'import * as' became named imports
     3  'import type' and 'export type' lost 'type'
-    2  'null' and 'void 0' became 'undefined'
+    3  'null' and 'void 0' became 'undefined'
     1  'var' became 'let'
     1  '| null' next to Json was dropped: a Json holds null itself
     1  default imports became named imports
@@ -36,6 +37,7 @@ import { Options } from "./options"
 import { Level, levels } from "./options"
 export { voice as loud } from "./voice"
 export { levels }
+export { Lines } from "./lines"
 export * from "./units.tz"
 
 export function greet(name: string, options?: Options): string {
@@ -81,6 +83,22 @@ export class Tally {
   }
 }
 ]])
+expect_file(lib/src/lines.tz [[
+import { Readable } from "node:stream"
+
+// The lines of a text as a stream of node, one chunk each.
+export class Lines extends Readable {
+  private left: string[]
+  constructor(lines: string[]) {
+    super()
+    this.left = lines
+  }
+  onRead() {
+    const line = this.left.shift()
+    this.push(line == undefined ? undefined : `${line}.`)
+  }
+}
+]])
 expect_match(lib/src/options.tz "
 export type Raw = Json
 export const nothing: Json = null
@@ -94,7 +112,7 @@ endif()
 tz(init app)
 tz(add ../lib IN app STDOUT "added autofix: file:../lib\n")
 write(app/main.tz [[
-import { greet, count, find, loud, levels, Tally } from "autofix"
+import { greet, count, find, loud, levels, Tally, Lines } from "autofix"
 console.log(greet("tz"))
 console.log(greet("tz", { level: "loud" }))
 console.log(greet("tz", { level: "quiet" }))
@@ -103,6 +121,7 @@ console.log(find(["a", "b"], "b"), find([], "c"), levels.length)
 const tally = new Tally()
 tally.add()
 console.log(tally.add())
+for await (const line of new Lines(["one", "two"])) console.log(line.isOk() ? line.value.toString().trim() : "-")
 ]])
 tz(run IN app STDOUT [[
 hello, tz!
@@ -111,6 +130,8 @@ HELLO, TZ!
 HELLO, X! 2 files (f) 1 dir (d)
 b undefined 3
 2
+one.
+two.
 ]])
 
 tz(port ${SOURCE}/port/manual STDOUT [[
@@ -174,7 +195,7 @@ if(GIT)
   git(commit -qm one IN src/autofix)
   git(tag v1.0.0 IN src/autofix)
   tz(port git:${WORK}/src/autofix@v1.0.0 -o fromgit)
-  string(FIND "${TZ_STDOUT}" "ported autofix 1.0.0 into fromgit (4 files)\n" found)
+  string(FIND "${TZ_STDOUT}" "ported autofix 1.0.0 into fromgit (5 files)\n" found)
   if(NOT found EQUAL 0)
     message(FATAL_ERROR "tz port git: printed\n${TZ_STDOUT}")
   endif()

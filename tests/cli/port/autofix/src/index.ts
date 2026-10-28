@@ -5,6 +5,7 @@ import type { Options } from "./options"
 import { type Level, levels } from "./options"
 export { default as loud } from "./voice"
 export { levels }
+export { Lines } from "./lines"
 export type * from "./units.js"
 
 export default function greet(name: string, options?: Options): string {

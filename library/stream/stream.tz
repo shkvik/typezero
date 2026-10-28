@@ -1,26 +1,34 @@
-import { EventEmitterBase } from "node:events"
-import { AbortController, AbortSignal, Event } from "tz:web"
-import { StringDecoder, normalizeEncoding } from "node:string_decoder"
-import { chunkKind, chunkOf, defer, isChunk, overrides, panic } from "tz:intrinsics"
+import { EventEmitterBase } from "node:events";
+import { AbortController, AbortSignal, Event } from "tz:web";
+import { StringDecoder, normalizeEncoding } from "node:string_decoder";
+import {
+  chunkKind,
+  chunkOf,
+  defer,
+  isChunk,
+  overrides,
+  panic,
+} from "tz:intrinsics";
 
 function failure(code: string, message: string): StreamError {
-  return { code, message }
+  return { code, message };
 }
 
-declare function libClassName(object: object): string
-declare function libInspect(value: unknown): string
+declare function libClassName(object: object): string;
+declare function libInspect(value: unknown): string;
 
 export function abortError(): StreamError {
-  return { code: "ABORT_ERR", message: "The operation was aborted" }
+  return { code: "ABORT_ERR", message: "The operation was aborted" };
 }
 
 function received(value: unknown): string {
-  if (value == undefined) return "Received undefined"
-  if (typeof value == "function") return "Received function"
-  if (typeof value == "object") return `Received an instance of ${libClassName(value)}`
-  let shown = libInspect(value)
-  if (shown.length > 28) shown = `${shown.slice(0, 25)}...`
-  return `Received type ${typeof value} (${shown})`
+  if (value == undefined) return "Received undefined";
+  if (typeof value == "function") return "Received function";
+  if (typeof value == "object")
+    return `Received an instance of ${libClassName(value)}`;
+  let shown = libInspect(value);
+  if (shown.length > 28) shown = `${shown.slice(0, 25)}...`;
+  return `Received type ${typeof value} (${shown})`;
 }
 
 function invalidChunk(value: unknown) {
@@ -28,659 +36,3047 @@ function invalidChunk(value: unknown) {
     "ERR_INVALID_ARG_TYPE",
     'The "chunk" argument must be of type string or an instance of Buffer, TypedArray, or ' +
       `DataView. ${received(value)}`,
-  )
+  );
 }
 
 function methodNotImplemented(method: string) {
-  return failure("ERR_METHOD_NOT_IMPLEMENTED", `The ${method} method is not implemented`)
+  return failure(
+    "ERR_METHOD_NOT_IMPLEMENTED",
+    `The ${method} method is not implemented`,
+  );
 }
 
 function streamDestroyed(method: string) {
   return failure(
     "ERR_STREAM_DESTROYED",
     `Cannot call ${method} after a stream was destroyed`,
-  )
+  );
 }
 
 function multipleCallback() {
-  return failure("ERR_MULTIPLE_CALLBACK", "Callback called multiple times")
+  return failure("ERR_MULTIPLE_CALLBACK", "Callback called multiple times");
 }
 
 function prematureClose() {
-  return failure("ERR_STREAM_PREMATURE_CLOSE", "Premature close")
+  return failure("ERR_STREAM_PREMATURE_CLOSE", "Premature close");
 }
 
 function nullValues() {
-  return failure("ERR_STREAM_NULL_VALUES", "May not write null values to stream")
+  return failure(
+    "ERR_STREAM_NULL_VALUES",
+    "May not write null values to stream",
+  );
 }
 
-function aggregateTwoErrors(inner: StreamError | undefined, outer: StreamError | undefined) {
-  return inner ?? outer
+function aggregateTwoErrors(
+  inner: StreamError | undefined,
+  outer: StreamError | undefined,
+) {
+  return inner ?? outer;
 }
 
 function codeOf(err: StreamError | undefined): string {
-  return err?.code ?? ""
+  return err?.code ?? "";
 }
 
-const kObjectMode = 1 << 0
-const kErrorEmitted = 1 << 1
-const kAutoDestroy = 1 << 2
-const kEmitClose = 1 << 3
-const kDestroyed = 1 << 4
-const kClosed = 1 << 5
-const kCloseEmitted = 1 << 6
-const kErrored = 1 << 7
-const kConstructed = 1 << 8
+const kObjectMode = 1 << 0;
+const kErrorEmitted = 1 << 1;
+const kAutoDestroy = 1 << 2;
+const kEmitClose = 1 << 3;
+const kDestroyed = 1 << 4;
+const kClosed = 1 << 5;
+const kCloseEmitted = 1 << 6;
+const kErrored = 1 << 7;
+const kConstructed = 1 << 8;
 
-const kEnded = 1 << 9
-const kEndEmitted = 1 << 10
-const kReading = 1 << 11
-const kSync = 1 << 12
-const kNeedReadable = 1 << 13
-const kEmittedReadable = 1 << 14
-const kReadableListening = 1 << 15
-const kResumeScheduled = 1 << 16
-const kMultiAwaitDrain = 1 << 17
-const kReadingMore = 1 << 18
-const kDataEmitted = 1 << 19
-const kDecoder = 1 << 21
-const kHasFlowing = 1 << 23
-const kFlowing = 1 << 24
-const kHasPaused = 1 << 25
-const kPaused = 1 << 26
-const kDataListening = 1 << 27
+const kEnded = 1 << 9;
+const kEndEmitted = 1 << 10;
+const kReading = 1 << 11;
+const kSync = 1 << 12;
+const kNeedReadable = 1 << 13;
+const kEmittedReadable = 1 << 14;
+const kReadableListening = 1 << 15;
+const kResumeScheduled = 1 << 16;
+const kMultiAwaitDrain = 1 << 17;
+const kReadingMore = 1 << 18;
+const kDataEmitted = 1 << 19;
+const kDecoder = 1 << 21;
+const kHasFlowing = 1 << 23;
+const kFlowing = 1 << 24;
+const kHasPaused = 1 << 25;
+const kPaused = 1 << 26;
+const kDataListening = 1 << 27;
 
-const kWSync = 1 << 9
-const kFinalCalled = 1 << 10
-const kNeedDrain = 1 << 11
-const kEnding = 1 << 12
-const kFinished = 1 << 13
-const kDecodeStrings = 1 << 14
-const kWriting = 1 << 15
-const kBufferProcessing = 1 << 16
-const kPrefinished = 1 << 17
-const kAllBuffers = 1 << 18
-const kAllNoop = 1 << 19
-const kOnFinished = 1 << 20
-const kCorked = 1 << 23
-const kExpectWriteCb = 1 << 26
-const kAfterWriteTickInfo = 1 << 27
-const kAfterWritePending = 1 << 28
-const kBuffered = 1 << 29
-const kWEnded = 1 << 30
+const kWSync = 1 << 9;
+const kFinalCalled = 1 << 10;
+const kNeedDrain = 1 << 11;
+const kEnding = 1 << 12;
+const kFinished = 1 << 13;
+const kDecodeStrings = 1 << 14;
+const kWriting = 1 << 15;
+const kBufferProcessing = 1 << 16;
+const kPrefinished = 1 << 17;
+const kAllBuffers = 1 << 18;
+const kAllNoop = 1 << 19;
+const kOnFinished = 1 << 20;
+const kCorked = 1 << 23;
+const kExpectWriteCb = 1 << 26;
+const kAfterWriteTickInfo = 1 << 27;
+const kAfterWritePending = 1 << 28;
+const kBuffered = 1 << 29;
+const kWEnded = 1 << 30;
 
-const kThisListener = 2
-const kUnknownArgListener = 3
+const kThisListener = 2;
+const kUnknownArgListener = 3;
 
-export type StreamCallback = (error?: StreamError) => void
+export type StreamCallback = (error?: StreamError) => void;
 
-export type TransformCallback = (error?: StreamError, data?: unknown) => void
+export type TransformCallback = (error?: StreamError, data?: unknown) => void;
 
-function nop(_error?: StreamError) {}
+function nop(error?: StreamError) {
+  void error;
+}
 
 class ReadableState {
-  bits: int
-  buffer: unknown[] = []
-  bufferIndex: int = 0
-  pipes: Stream[] = []
-  awaitDrainWriter?: Stream
-  awaitDrainWriters = new Set<Stream>()
-  decoder?: StringDecoder
-  encoding?: string
-  defaultEncoding = "utf8"
-  errored?: StreamError
-  readable?: boolean
-  synced: int = -1
+  bits: int;
+  buffer: unknown[] = [];
+  bufferIndex: int = 0;
+  pipes: Stream[] = [];
+  awaitDrainWriter?: Stream;
+  awaitDrainWriters = new Set<Stream>();
+  decoder?: StringDecoder;
+  encoding?: string;
+  defaultEncoding = "utf8";
+  errored?: StreamError;
+  readable?: boolean;
+  synced: int = -1;
   constructor(bits: int) {
-    this.bits = bits
+    this.bits = bits;
   }
 }
 
 interface BufferedWrite {
-  chunk: unknown
-  encoding: string
-  callback: StreamCallback
+  chunk: unknown;
+  encoding: string;
+  callback: StreamCallback;
 }
 
 class AfterWriteTick {
-  count: int = 1
+  count: int = 1;
   constructor(readonly cb: StreamCallback) {}
 }
 
 class WritableState {
-  bits: int
-  writelen: int = 0
-  buffered: (BufferedWrite | undefined)[] = []
-  bufferedIndex: int = 0
-  pendingcb: int = 0
-  writecb: StreamCallback = nop
-  afterWriteTickInfo?: AfterWriteTick
-  onFinished: StreamCallback[] = []
-  errored?: StreamError
-  defaultEncoding = "utf8"
-  writable?: boolean
-  synced: int = -1
+  bits: int;
+  writelen: int = 0;
+  buffered: (BufferedWrite | undefined)[] = [];
+  bufferedIndex: int = 0;
+  pendingcb: int = 0;
+  writecb: StreamCallback = nop;
+  afterWriteTickInfo?: AfterWriteTick;
+  onFinished: StreamCallback[] = [];
+  errored?: StreamError;
+  defaultEncoding = "utf8";
+  writable?: boolean;
+  synced: int = -1;
   constructor(bits: int) {
-    this.bits = bits
+    this.bits = bits;
   }
 }
 
-let defaultHighWaterMarkBytes: int = process.platform == "win32" ? 16 * 1024 : 64 * 1024
-let defaultHighWaterMarkObjectMode: int = 16
+let defaultHighWaterMarkBytes: int =
+  process.platform == "win32" ? 16 * 1024 : 64 * 1024;
+let defaultHighWaterMarkObjectMode: int = 16;
 
 export function getDefaultHighWaterMark(objectMode: boolean): int {
-  return objectMode ? defaultHighWaterMarkObjectMode : defaultHighWaterMarkBytes
+  return objectMode
+    ? defaultHighWaterMarkObjectMode
+    : defaultHighWaterMarkBytes;
 }
 
 export function setDefaultHighWaterMark(objectMode: boolean, value: int) {
-  const kept = value < 0 ? 0 : value
-  if (objectMode) defaultHighWaterMarkObjectMode = kept
-  else defaultHighWaterMarkBytes = kept
+  const kept = value < 0 ? 0 : value;
+  if (objectMode) defaultHighWaterMarkObjectMode = kept;
+  else defaultHighWaterMarkBytes = kept;
 }
 
-function getHighWaterMark(hwm: double | undefined, name: string, objectMode: boolean): int {
-  void name
-  if (hwm != undefined) return hwm > 0 && hwm < 9007199254740992 ? Math.floor(hwm).toInt() : 0
-  return getDefaultHighWaterMark(objectMode)
+function getHighWaterMark(
+  hwm: double | undefined,
+  name: string,
+  objectMode: boolean,
+): int {
+  void name;
+  if (hwm != undefined)
+    return hwm > 0 && hwm < 9007199254740992 ? Math.floor(hwm).toInt() : 0;
+  return getDefaultHighWaterMark(objectMode);
 }
 
 interface SideOptions {
-  highWaterMark?: double
-  sideHighWaterMark?: double
-  objectMode?: boolean
-  sideObjectMode?: boolean
-  encoding?: BufferEncoding
-  defaultEncoding?: BufferEncoding
-  decodeStrings?: boolean
-  emitClose?: boolean
-  autoDestroy?: boolean
+  highWaterMark?: double;
+  sideHighWaterMark?: double;
+  objectMode?: boolean;
+  sideObjectMode?: boolean;
+  encoding?: BufferEncoding;
+  defaultEncoding?: BufferEncoding;
+  decodeStrings?: boolean;
+  emitClose?: boolean;
+  autoDestroy?: boolean;
+}
+
+class StreamSetup {
+  readable?: SideOptions;
+  writable?: SideOptions;
+  duplex = false;
+  allowHalfOpen = true;
+  readableOff = false;
+  writableOff = false;
+  hasConstruct = false;
+  hasWritev = false;
+  hasFinal = false;
+  hasFlush = false;
+  transform = false;
+  transformsWrites = false;
+  transformsFinal = false;
+  signal?: AbortSignal;
+}
+
+export interface FinishedOptions {
+  error?: boolean;
+  readable?: boolean;
+  writable?: boolean;
+  signal?: AbortSignal;
+  cleanup?: boolean;
+}
+
+class Eos {
+  willEmitClose = false;
+  writableFinished = false;
+  readableFinished = false;
+  closed = false;
+  constructor(
+    readonly readable: boolean,
+    readonly writable: boolean,
+    public callback: StreamCallback,
+  ) {}
+
+  call(err?: StreamError) {
+    const callback = this.callback;
+    this.callback = nop;
+    callback(err);
+  }
+}
+
+class IteratorWait {
+  callback: () => void = noWait;
+  ended = false;
+  error?: StreamError;
+
+  wake() {
+    const callback = this.callback;
+    this.callback = noWait;
+    callback();
+  }
+}
+
+function noWait() {}
+
+class Composition {
+  head?: Stream;
+  tail?: Stream;
+  ondrain?: StreamCallback;
+  onfinish?: StreamCallback;
+  onreadable?: () => void;
+  onclose?: StreamCallback;
+  closing = true;
+  listeners: (() => void)[] = [];
+}
+
+function isBufferChunk(chunk: unknown): boolean {
+  return isChunk<Buffer>(chunk);
+}
+
+function canPushMore(stream: Stream, state: ReadableState): boolean {
+  return (
+    (state.bits & kEnded) == 0 &&
+    (stream.readableLength < stream.readableHighWaterMark ||
+      stream.readableLength == 0)
+  );
+}
+
+function clearAwaitDrain(state: ReadableState) {
+  if ((state.bits & kMultiAwaitDrain) != 0) state.awaitDrainWriters.clear();
+  else state.awaitDrainWriter = undefined;
+}
+
+const kMaxHwm = 0x40000000;
+function computeNewHighWaterMark(size: int): int {
+  if (size >= kMaxHwm) return kMaxHwm;
+  let n = size - 1;
+  n |= n >> 1;
+  n |= n >> 2;
+  n |= n >> 4;
+  n |= n >> 8;
+  n |= n >> 16;
+  return n + 1;
+}
+
+function howMuchToRead(stream: Stream, n: int, state: ReadableState): int {
+  if (
+    (n <= 0 && n != -1) ||
+    (stream.readableLength == 0 && (state.bits & kEnded) != 0)
+  )
+    return 0;
+  if ((state.bits & kObjectMode) != 0) return 1;
+  if (n == -1) {
+    if ((state.bits & kFlowing) != 0 && stream.readableLength != 0)
+      return lengthOf(state.buffer[state.bufferIndex]);
+    return stream.readableLength;
+  }
+  if (n <= stream.readableLength) return n;
+  return (state.bits & kEnded) != 0 ? stream.readableLength : 0;
+}
+
+function setChunk(buf: unknown[], idx: int, chunk: unknown) {
+  if (idx >= 0 && idx < buf.length) buf[idx] = chunk;
+}
+
+function fromList(stream: Stream, size: int, state: ReadableState): unknown {
+  if (stream.readableLength == 0) return undefined;
+  let n = size;
+  let idx = state.bufferIndex;
+  let ret: unknown;
+  const buf = state.buffer;
+  const len = buf.length;
+  if ((state.bits & kObjectMode) != 0) {
+    ret = buf[idx];
+    setChunk(buf, idx++, undefined);
+  } else if (n == 0 || n >= stream.readableLength) {
+    if ((state.bits & kDecoder) != 0) {
+      let text = "";
+      while (idx < len) {
+        text += textOf(buf[idx]);
+        setChunk(buf, idx++, undefined);
+      }
+      ret = text;
+    } else if (len - idx == 0) {
+      ret = Buffer.alloc(0);
+    } else if (len - idx == 1) {
+      ret = buf[idx];
+      setChunk(buf, idx++, undefined);
+    } else {
+      const out = Buffer.allocUnsafe(stream.readableLength);
+      let i = 0;
+      while (idx < len) {
+        const data = bufferOf(buf[idx]);
+        out.set(data, i);
+        i += data.length;
+        setChunk(buf, idx++, undefined);
+      }
+      ret = out;
+    }
+  } else if (n < lengthOf(buf[idx])) {
+    const first = buf[idx];
+    if (typeof first == "string") {
+      ret = first.slice(0, n);
+      setChunk(buf, idx, first.slice(n));
+    } else {
+      const data = bufferOf(first);
+      ret = data.subarray(0, n);
+      setChunk(buf, idx, data.subarray(n));
+    }
+  } else if (n == lengthOf(buf[idx])) {
+    ret = buf[idx];
+    setChunk(buf, idx++, undefined);
+  } else if ((state.bits & kDecoder) != 0) {
+    let text = "";
+    while (idx < len) {
+      const str = textOf(buf[idx]);
+      if (n > str.length) {
+        text += str;
+        n -= str.length;
+        setChunk(buf, idx++, undefined);
+      } else {
+        if (n == buf.length) {
+          text += str;
+          setChunk(buf, idx++, undefined);
+        } else {
+          text += str.slice(0, n);
+          setChunk(buf, idx, str.slice(n));
+        }
+        break;
+      }
+    }
+    ret = text;
+  } else {
+    const out = Buffer.allocUnsafe(n);
+    const retLen = n;
+    while (idx < len) {
+      const data = bufferOf(buf[idx]);
+      if (n > data.length) {
+        out.set(data, retLen - n);
+        n -= data.length;
+        setChunk(buf, idx++, undefined);
+      } else {
+        if (n == data.length) {
+          out.set(data, retLen - n);
+          setChunk(buf, idx++, undefined);
+        } else {
+          out.set(data.subarray(0, n), retLen - n);
+          setChunk(buf, idx, data.subarray(n));
+        }
+        break;
+      }
+    }
+    ret = out;
+  }
+  if (idx == len) {
+    state.buffer = [];
+    state.bufferIndex = 0;
+  } else if (idx > 1024) {
+    state.buffer.splice(0, idx);
+    state.bufferIndex = 0;
+  } else {
+    state.bufferIndex = idx;
+  }
+  return ret;
+}
+
+function textOf(chunk: unknown): string {
+  return typeof chunk == "string" ? chunk : "";
+}
+
+function resetBuffer(state: WritableState) {
+  state.buffered = [];
+  state.bufferedIndex = 0;
+  state.bits |= kAllBuffers | kAllNoop;
+  state.bits &= ~kBuffered;
+}
+
+function needFinish(stream: Stream, state: WritableState): boolean {
+  return (
+    (state.bits &
+      (kEnding |
+        kDestroyed |
+        kConstructed |
+        kFinished |
+        kWriting |
+        kErrorEmitted |
+        kCloseEmitted |
+        kErrored |
+        kBuffered)) ==
+      (kEnding | kConstructed) && stream.writableLength == 0
+  );
+}
+
+function callFinishedCallbacks(
+  state: WritableState,
+  err: StreamError | undefined,
+) {
+  if ((state.bits & kOnFinished) == 0) return;
+  const onfinishCallbacks = state.onFinished;
+  state.onFinished = [];
+  state.bits &= ~kOnFinished;
+  for (const cb of onfinishCallbacks) cb(err);
 }
 
 export class Stream extends EventEmitterBase {
-  _readableState?: ReadableState
-  _writableState?: WritableState
-  allowHalfOpen = true
-  destroyed = false
-  closed = false
-  errored?: StreamError
-  readable = false
-  readableAborted = false
-  readableDidRead = false
-  readableEncoding?: string
-  readableEnded = false
-  readableFlowing?: boolean
-  readableHighWaterMark: int = 0
-  readableLength: int = 0
-  readableObjectMode = false
-  writable = false
-  writableAborted = false
-  writableCorked: int = 0
-  writableEnded = false
-  writableFinished = false
-  writableHighWaterMark: int = 0
-  writableLength: int = 0
-  writableNeedDrain = false
-  writableObjectMode = false
-  _onConstruct: (() => void)[] = []
-  _onDestroy: ((err: StreamError | undefined) => void)[] = []
-  _hasConstruct = false
-  _hasWritev = false
-  _hasFinal = false
-  _hasFlush = false
-  _isTransform = false
-  _transformCallback?: StreamCallback
+  readonly allowHalfOpen = true;
+  readonly destroyed = false;
+  readonly closed = false;
+  readonly errored?: StreamError;
+  readonly readable = false;
+  readonly readableAborted = false;
+  readonly readableDidRead = false;
+  readonly readableEncoding?: string;
+  readonly readableEnded = false;
+  readonly readableFlowing?: boolean;
+  readonly readableHighWaterMark: int = 0;
+  readonly readableLength: int = 0;
+  readonly readableObjectMode = false;
+  readonly writable = false;
+  readonly writableAborted = false;
+  readonly writableCorked: int = 0;
+  readonly writableEnded = false;
+  readonly writableFinished = false;
+  readonly writableHighWaterMark: int = 0;
+  readonly writableLength: int = 0;
+  readonly writableNeedDrain = false;
+  readonly writableObjectMode = false;
+  private readableState?: ReadableState;
+  private writableState?: WritableState;
+  private ready = false;
+  private constructWaits: (() => void)[] = [];
+  private destroyWaits: ((err: StreamError | undefined) => void)[] = [];
+  private hasConstruct = false;
+  private hasWritev = false;
+  private hasFinal = false;
+  private hasFlush = false;
+  private transforming = false;
+  private transformsWrites = false;
+  private transformsFinal = false;
+  private transformCallback?: StreamCallback;
 
   constructor() {
-    super()
+    super();
   }
 
-  _initReadable(options: SideOptions, isDuplex: boolean) {
-    let bits = kEmitClose | kAutoDestroy | kConstructed | kSync
+  protected setUp(setup: StreamSetup) {
+    if (this.ready) return;
+    this.ready = true;
+    const readable = setup.readable;
+    if (readable != undefined) this.initReadable(readable, setup.duplex);
+    const writable = setup.writable;
+    if (writable != undefined) this.initWritable(writable, setup.duplex);
+    this.allowHalfOpen = setup.allowHalfOpen;
+    const r = this.readableState;
+    const w = this.writableState;
+    if (r != undefined && setup.readableOff) {
+      r.readable = false;
+      r.bits |= kEnded | kEndEmitted;
+    }
+    if (w != undefined && setup.writableOff) {
+      w.writable = false;
+      w.bits |= kEnding | kWEnded | kFinished;
+    }
+    if (r != undefined && setup.transform) r.bits &= ~kSync;
+    Stream.sync(this);
+    this.hasConstruct = setup.hasConstruct;
+    this.hasWritev = setup.hasWritev;
+    this.hasFinal = setup.hasFinal;
+    this.hasFlush = setup.hasFlush;
+    this.transforming = setup.transform;
+    this.transformsWrites = setup.transformsWrites;
+    this.transformsFinal = setup.transformsFinal;
+    this.initEnd(setup.signal);
+  }
+
+  private initReadable(options: SideOptions, isDuplex: boolean) {
+    let bits = kEmitClose | kAutoDestroy | kConstructed | kSync;
     const objectMode =
-      (options.objectMode ?? false) || (isDuplex && (options.sideObjectMode ?? false))
-    if (objectMode) bits |= kObjectMode
-    const state = new ReadableState(bits)
+      (options.objectMode ?? false) ||
+      (isDuplex && (options.sideObjectMode ?? false));
+    if (objectMode) bits |= kObjectMode;
+    const state = new ReadableState(bits);
     this.readableHighWaterMark = getHighWaterMark(
-      options.highWaterMark ?? (isDuplex ? options.sideHighWaterMark : undefined),
+      options.highWaterMark ??
+        (isDuplex ? options.sideHighWaterMark : undefined),
       isDuplex ? "options.readableHighWaterMark" : "options.highWaterMark",
       objectMode,
-    )
-    if (options.emitClose == false) state.bits &= ~kEmitClose
-    if (options.autoDestroy == false) state.bits &= ~kAutoDestroy
-    const defaultEncoding = options.defaultEncoding
-    if (defaultEncoding != undefined) state.defaultEncoding = normalizeEncoding(defaultEncoding)
-    const encoding = options.encoding
+    );
+    if (options.emitClose == false) state.bits &= ~kEmitClose;
+    if (options.autoDestroy == false) state.bits &= ~kAutoDestroy;
+    const defaultEncoding = options.defaultEncoding;
+    if (defaultEncoding != undefined)
+      state.defaultEncoding = normalizeEncoding(defaultEncoding);
+    const encoding = options.encoding;
     if (encoding != undefined) {
-      state.decoder = new StringDecoder(encoding)
-      state.bits |= kDecoder
-      state.encoding = state.decoder.encoding
+      state.decoder = new StringDecoder(encoding);
+      state.bits |= kDecoder;
+      state.encoding = state.decoder.encoding;
     }
-    this._readableState = state
-    this.readableObjectMode = objectMode
-    sync(this)
+    this.readableState = state;
+    this.readableObjectMode = objectMode;
+    Stream.sync(this);
   }
 
-  _initWritable(options: SideOptions, isDuplex: boolean) {
-    let bits = kWSync | kConstructed | kEmitClose | kAutoDestroy
+  private initWritable(options: SideOptions, isDuplex: boolean) {
+    let bits = kWSync | kConstructed | kEmitClose | kAutoDestroy;
     const objectMode =
-      (options.objectMode ?? false) || (isDuplex && (options.sideObjectMode ?? false))
-    if (objectMode) bits |= kObjectMode
-    const state = new WritableState(bits)
+      (options.objectMode ?? false) ||
+      (isDuplex && (options.sideObjectMode ?? false));
+    if (objectMode) bits |= kObjectMode;
+    const state = new WritableState(bits);
     this.writableHighWaterMark = getHighWaterMark(
-      options.highWaterMark ?? (isDuplex ? options.sideHighWaterMark : undefined),
+      options.highWaterMark ??
+        (isDuplex ? options.sideHighWaterMark : undefined),
       isDuplex ? "options.writableHighWaterMark" : "options.highWaterMark",
       objectMode,
-    )
-    if (options.decodeStrings != false) state.bits |= kDecodeStrings
-    if (options.emitClose == false) state.bits &= ~kEmitClose
-    if (options.autoDestroy == false) state.bits &= ~kAutoDestroy
-    const defaultEncoding = options.defaultEncoding
-    if (defaultEncoding != undefined) state.defaultEncoding = normalizeEncoding(defaultEncoding)
-    resetBuffer(state)
-    this._writableState = state
-    this.writableObjectMode = objectMode
-    sync(this)
+    );
+    if (options.decodeStrings != false) state.bits |= kDecodeStrings;
+    if (options.emitClose == false) state.bits &= ~kEmitClose;
+    if (options.autoDestroy == false) state.bits &= ~kAutoDestroy;
+    const defaultEncoding = options.defaultEncoding;
+    if (defaultEncoding != undefined)
+      state.defaultEncoding = normalizeEncoding(defaultEncoding);
+    resetBuffer(state);
+    this.writableState = state;
+    this.writableObjectMode = objectMode;
+    Stream.sync(this);
   }
 
-  _initEnd(signal: AbortSignal | undefined) {
-    if (signal != undefined) addAbortSignalNoValidate(signal, this)
-    if (this._hasConstruct) {
-      const self = this
-      construct(this, () => {
-        const r = self._readableState
-        if (r != undefined && (r.bits & kNeedReadable) != 0) maybeReadMore(self, r)
-        const w = self._writableState
+  private initEnd(signal: AbortSignal | undefined) {
+    if (signal != undefined) Stream.addAbortSignalNoValidate(signal, this);
+    if (this.hasConstruct) {
+      const self = this;
+      Stream.construct(this, () => {
+        const r = self.readableState;
+        if (r != undefined && (r.bits & kNeedReadable) != 0)
+          Stream.maybeReadMore(self, r);
+        const w = self.writableState;
         if (w != undefined) {
-          if ((w.bits & kWriting) == 0) clearBuffer(self, w)
-          if ((w.bits & kEnding) != 0) finishMaybe(self, w, false)
+          if ((w.bits & kWriting) == 0) Stream.clearBuffer(self, w);
+          if ((w.bits & kEnding) != 0) Stream.finishMaybe(self, w, false);
         }
-      })
+      });
     }
   }
 
-  _read(size: int): void {
-    void size
-    errorOrDestroy(this, methodNotImplemented("_read()"))
-  }
-
-  _writeChunk(chunk: unknown, encoding: string, callback: StreamCallback): void {
-    void chunk
-    void encoding
-    callback(methodNotImplemented("_write()"))
-  }
-
-  _writevChunks(chunks: BufferedWrite[], callback: StreamCallback): void {
-    void chunks
-    callback(methodNotImplemented("_writev()"))
-  }
-
-  _final(callback: StreamCallback): void {
-    callback()
-  }
-
-  _destroy(error: StreamError | undefined, callback: StreamCallback): void {
-    callback(error)
-  }
-
-  _construct(callback: StreamCallback): void {
-    callback()
-  }
-
-  _flush(callback: TransformCallback): void {
-    callback()
-  }
-
-  _ownTransformFinal(): boolean {
-    return true
-  }
-
-  _emitData(chunk: unknown): void {
-    this.emit("data", chunk)
-  }
-
-  on(type: string, listener: unknown, kind: int = 0) {
-    const res = super.on(type, listener, kind)
-    const state = this._readableState
-    if (state == undefined) return res
-    if (type == "data") {
-      state.bits |= kDataListening
-      state.bits |= this.listenerCount("readable") > 0 ? kReadableListening : 0
-      if ((state.bits & (kHasFlowing | kFlowing)) != kHasFlowing) this.resume()
-    } else if (type == "readable") {
-      if ((state.bits & (kEndEmitted | kReadableListening)) == 0) {
-        state.bits |= kReadableListening | kNeedReadable | kHasFlowing
-        state.bits &= ~(kFlowing | kEmittedReadable)
-        sync(this)
-        if (this.readableLength != 0) emitReadable(this)
-        else if ((state.bits & kReading) == 0) process.nextTick(() => this._readChunk(0))
-      }
+  protected onRead(size: int): void {
+    void size;
+    const callback = this.transformCallback;
+    if (callback != undefined) {
+      this.transformCallback = undefined;
+      callback();
+    } else if (!this.transforming) {
+      Stream.errorOrDestroy(this, methodNotImplemented("onRead()"));
     }
-    return res
   }
 
-  addListener(type: string, listener: unknown, kind: int = 0) {
-    return this.on(type, listener, kind)
+  protected onFinal(callback: StreamCallback): void {
+    callback();
   }
 
-  removeListener(type: string, listener: unknown) {
-    const res = super.removeListener(type, listener)
-    const state = this._readableState
-    if (state == undefined) return res
-    if (type == "readable") {
-      process.nextTick(() => updateReadableListening(this))
-    } else if (type == "data" && this.listenerCount("data") == 0) {
-      state.bits &= ~kDataListening
-    }
-    return res
+  protected onDestroy(
+    error: StreamError | undefined,
+    callback: StreamCallback,
+  ): void {
+    callback(error);
   }
 
-  removeAllListeners(type?: string) {
-    const res = super.removeAllListeners(type)
-    if (this._readableState != undefined && (type == "readable" || type == undefined))
-      process.nextTick(() => updateReadableListening(this))
-    return res
+  protected onConstruct(callback: StreamCallback): void {
+    callback();
   }
 
-  _pushChunk(chunk: unknown, encoding?: string): boolean {
-    const state = readableStateOf(this)
+  protected onFlush(callback: TransformCallback): void {
+    callback();
+  }
+
+  protected emitData(chunk: unknown): void {
+    this.emit("data", chunk);
+  }
+
+  protected writeChunk(
+    chunk: unknown,
+    encoding: string,
+    callback: StreamCallback,
+  ): void {
+    void chunk;
+    void encoding;
+    callback(methodNotImplemented("onWrite()"));
+  }
+
+  protected writevChunks(
+    chunks: BufferedWrite[],
+    callback: StreamCallback,
+  ): void {
+    void chunks;
+    callback(methodNotImplemented("onWritev()"));
+  }
+
+  protected transformChunk(
+    chunk: unknown,
+    encoding: string,
+    callback: TransformCallback,
+  ): void {
+    void chunk;
+    void encoding;
+    callback(methodNotImplemented("onTransform()"));
+  }
+
+  protected pushChunk(chunk: unknown, encoding?: string): boolean {
+    return this.pushTyped(chunk, encoding);
+  }
+
+  protected readChunk(size?: int): unknown {
+    const state = this.readableState;
+    if (state == undefined) return undefined;
+    const ret = Stream.read(this, state, size);
+    Stream.sync(this);
+    return ret;
+  }
+
+  protected iterate<C>(
+    destroyOnReturn: boolean,
+  ): AsyncGenerator<Result<C, StreamError>> {
+    return Stream.iterateChunks<C>(this, destroyOnReturn);
+  }
+
+  private pushTyped(chunk: unknown, encoding?: string): boolean {
+    const state = this.readableState;
+    if (state == undefined) return false;
     const ret =
       (state.bits & kObjectMode) == 0
-        ? readableAddChunkPushByteMode(this, state, chunk, encoding)
-        : readableAddChunkPushObjectMode(this, state, chunk, encoding)
-    sync(this)
-    return ret
+        ? Stream.readableAddChunkPushByteMode(this, state, chunk, encoding)
+        : Stream.readableAddChunkPushObjectMode(this, state, chunk, encoding);
+    Stream.sync(this);
+    return ret;
   }
 
-  _unshiftChunk(chunk: unknown, encoding?: string): boolean {
-    const state = readableStateOf(this)
+  private unshiftTyped(chunk: unknown, encoding?: string): boolean {
+    const state = this.readableState;
+    if (state == undefined) return false;
     const ret =
       (state.bits & kObjectMode) == 0
-        ? readableAddChunkUnshiftByteMode(this, state, chunk, encoding)
-        : readableAddChunkUnshiftObjectMode(this, state, chunk)
-    sync(this)
-    return ret
+        ? Stream.readableAddChunkUnshiftByteMode(this, state, chunk, encoding)
+        : Stream.readableAddChunkUnshiftObjectMode(this, state, chunk);
+    Stream.sync(this);
+    return ret;
   }
 
-  isPaused(): boolean {
-    const state = this._readableState
-    if (state == undefined) return false
-    return (state.bits & kPaused) != 0 || (state.bits & (kHasFlowing | kFlowing)) == kHasFlowing
+  private writeTyped(
+    chunk: unknown,
+    encoding: string | undefined,
+    cb: StreamCallback | undefined,
+  ): boolean {
+    return this.writeAny(chunk, encoding, cb ?? nop) == true;
   }
 
-  setEncoding(encoding?: BufferEncoding) {
-    const state = readableStateOf(this)
-    const decoder = new StringDecoder(encoding)
-    state.decoder = decoder
-    state.bits |= kDecoder
-    state.encoding = decoder.encoding
-    let content = ""
-    for (let i = state.bufferIndex; i < state.buffer.length; i++) {
-      const data = state.buffer[i]
-      content += typeof data == "string" ? data : decoder.write(bufferOf(data))
-    }
-    state.buffer = []
-    state.bufferIndex = 0
-    if (content != "") state.buffer.push(content)
-    this.readableLength = content.length
-    state.synced = -1
-    sync(this)
-    return this
+  private endTyped(
+    hasChunk: boolean,
+    chunk: unknown,
+    encoding: string | undefined,
+  ): Promise<Result<void, StreamError>> {
+    return new Promise<Result<void, StreamError>>((resolve) => {
+      this.endWith(hasChunk, chunk, encoding, (error?: StreamError) => {
+        if (error != undefined) resolve(err(error));
+        else resolve(ok());
+      });
+    });
   }
 
-  _readChunk(size?: int): unknown {
-    const ret = read(this, readableStateOf(this), size)
-    sync(this)
-    return ret
+  private writeAny(
+    chunk: unknown,
+    encoding: string | undefined,
+    cb: StreamCallback,
+  ): boolean | StreamError {
+    const ret = Stream.writeImpl(this, chunk, encoding, cb);
+    Stream.sync(this);
+    return ret;
   }
 
-  pipe<D extends Stream>(dest: D, options?: { end?: boolean }): D {
-    if (this._readableState == undefined) {
-      errorOrDestroy(this, failure("ERR_STREAM_CANNOT_PIPE", "Cannot pipe, not readable"))
-      return dest
-    }
-    pipe(this, dest, options?.end ?? true)
-    return dest
+  private written(er?: StreamError): void {
+    Stream.onwrite(this, er);
   }
 
-  unpipe(dest?: Stream) {
-    const state = readableStateOf(this)
-    if (state.pipes.length == 0) return this
-    if (dest == undefined) {
-      const dests = state.pipes
-      state.pipes = []
-      this.pause()
-      for (const d of dests) d.emit("unpipe", this, { hasUnpiped: false })
-      return this
-    }
-    const index = state.pipes.indexOf(dest)
-    if (index == -1) return this
-    state.pipes.splice(index, 1)
-    if (state.pipes.length == 0) this.pause()
-    dest.emit("unpipe", this, { hasUnpiped: false })
-    return this
-  }
-
-  resume() {
-    const state = readableStateOf(this)
-    if ((state.bits & kFlowing) == 0) {
-      state.bits |= kHasFlowing
-      if ((state.bits & kReadableListening) == 0) state.bits |= kFlowing
-      else state.bits &= ~kFlowing
-      resume(this, state)
-    }
-    state.bits |= kHasPaused
-    state.bits &= ~kPaused
-    sync(this)
-    return this
-  }
-
-  pause() {
-    const state = readableStateOf(this)
-    if ((state.bits & (kHasFlowing | kFlowing)) != kHasFlowing) {
-      state.bits |= kHasFlowing
-      state.bits &= ~kFlowing
-      sync(this)
-      this.emit("pause")
-    }
-    state.bits |= kHasPaused | kPaused
-    return this
-  }
-
-  _writeAny(chunk: unknown, encoding: string | undefined,
-            cb: StreamCallback): boolean | StreamError {
-    const ret = writeImpl(this, chunk, encoding, cb)
-    sync(this)
-    return ret
-  }
-
-  _onwrite(er?: StreamError): void {
-    onwrite(this, er)
-  }
-
-  _writeBool(chunk: unknown, encoding: string | undefined, cb: StreamCallback | undefined): boolean {
-    return this._writeAny(chunk, encoding, cb ?? nop) == true
-  }
-
-  cork() {
-    const state = writableStateOf(this)
-    state.bits |= kCorked
-    this.writableCorked++
-  }
-
-  uncork() {
-    const state = writableStateOf(this)
-    if (this.writableCorked != 0) {
-      this.writableCorked--
-      if (this.writableCorked == 0) state.bits &= ~kCorked
-      if ((state.bits & kWriting) == 0) clearBuffer(this, state)
-    }
-    sync(this)
-  }
-
-  setDefaultEncoding(encoding: BufferEncoding) {
-    writableStateOf(this).defaultEncoding = normalizeEncoding(encoding)
-    return this
-  }
-
-  _endWith(hasChunk: boolean, chunk: unknown, encoding: string | undefined,
-           cb: StreamCallback | undefined) {
-    const state = writableStateOf(this)
-    let err: StreamError | undefined = undefined
+  private endWith(
+    hasChunk: boolean,
+    chunk: unknown,
+    encoding: string | undefined,
+    cb: StreamCallback | undefined,
+  ) {
+    const state = Stream.writableStateOf(this);
+    let err: StreamError | undefined = undefined;
     if (hasChunk) {
-      const ret = writeImpl(this, chunk, encoding, nop)
-      if (typeof ret != "boolean") err = ret
+      const ret = Stream.writeImpl(this, chunk, encoding, nop);
+      if (typeof ret != "boolean") err = ret;
     }
     if ((state.bits & kCorked) != 0) {
-      this.writableCorked = 1
-      this.uncork()
+      this.writableCorked = 1;
+      this.uncork();
     }
     if (err != undefined) {
     } else if ((state.bits & (kEnding | kErrored)) == 0) {
-      state.bits |= kEnding
-      sync(this)
-      finishMaybe(this, state, true)
-      state.bits |= kWEnded
+      state.bits |= kEnding;
+      Stream.sync(this);
+      Stream.finishMaybe(this, state, true);
+      state.bits |= kWEnded;
     } else if ((state.bits & kFinished) != 0) {
       err = failure(
         "ERR_STREAM_ALREADY_FINISHED",
         "Cannot call end after a stream was finished",
-      )
+      );
     } else if ((state.bits & kDestroyed) != 0) {
-      err = streamDestroyed("end")
+      err = streamDestroyed("end");
     }
     if (cb != undefined) {
-      const callback = cb
-      const failed = err
+      const callback = cb;
+      const failed = err;
       if (failed != undefined) {
-        process.nextTick(() => callback(failed))
+        process.nextTick(() => callback(failed));
       } else if ((state.bits & kErrored) != 0) {
-        const errored = state.errored
-        process.nextTick(() => callback(errored))
+        const errored = state.errored;
+        process.nextTick(() => callback(errored));
       } else if ((state.bits & kFinished) != 0) {
-        process.nextTick(() => callback())
+        process.nextTick(() => callback());
       } else {
-        state.bits |= kOnFinished
-        state.onFinished.push(callback)
+        state.bits |= kOnFinished;
+        state.onFinished.push(callback);
       }
     }
-    sync(this)
-    return this
+    Stream.sync(this);
+    return this;
   }
 
-  _endResult(hasChunk: boolean, chunk: unknown, encoding: string | undefined):
-      Promise<Result<void, StreamError>> {
-    return new Promise<Result<void, StreamError>>((resolve) => {
-      this._endWith(hasChunk, chunk, encoding, (error?: StreamError) => {
-        if (error != undefined) resolve(err(error))
-        else resolve(ok())
-      })
-    })
+  on(type: string, listener: unknown, kind: int = 0) {
+    const res = super.on(type, listener, kind);
+    const state = this.readableState;
+    if (state == undefined) return res;
+    if (type == "data") {
+      state.bits |= kDataListening;
+      state.bits |= this.listenerCount("readable") > 0 ? kReadableListening : 0;
+      if ((state.bits & (kHasFlowing | kFlowing)) != kHasFlowing) this.resume();
+    } else if (type == "readable") {
+      if ((state.bits & (kEndEmitted | kReadableListening)) == 0) {
+        state.bits |= kReadableListening | kNeedReadable | kHasFlowing;
+        state.bits &= ~(kFlowing | kEmittedReadable);
+        Stream.sync(this);
+        if (this.readableLength != 0) Stream.emitReadable(this);
+        else if ((state.bits & kReading) == 0)
+          process.nextTick(() => this.readChunk(0));
+      }
+    }
+    return res;
+  }
+
+  addListener(type: string, listener: unknown, kind: int = 0) {
+    return this.on(type, listener, kind);
+  }
+
+  removeListener(type: string, listener: unknown) {
+    const res = super.removeListener(type, listener);
+    const state = this.readableState;
+    if (state == undefined) return res;
+    if (type == "readable") {
+      process.nextTick(() => Stream.updateReadableListening(this));
+    } else if (type == "data" && this.listenerCount("data") == 0) {
+      state.bits &= ~kDataListening;
+    }
+    return res;
+  }
+
+  removeAllListeners(type?: string) {
+    const res = super.removeAllListeners(type);
+    if (
+      this.readableState != undefined &&
+      (type == "readable" || type == undefined)
+    )
+      process.nextTick(() => Stream.updateReadableListening(this));
+    return res;
+  }
+
+  isPaused(): boolean {
+    const state = this.readableState;
+    if (state == undefined) return false;
+    return (
+      (state.bits & kPaused) != 0 ||
+      (state.bits & (kHasFlowing | kFlowing)) == kHasFlowing
+    );
+  }
+
+  setEncoding(encoding?: BufferEncoding) {
+    const state = this.readableState;
+    if (state == undefined) return this;
+    const decoder = new StringDecoder(encoding);
+    state.decoder = decoder;
+    state.bits |= kDecoder;
+    state.encoding = decoder.encoding;
+    let content = "";
+    for (let i = state.bufferIndex; i < state.buffer.length; i++) {
+      const data = state.buffer[i];
+      content += typeof data == "string" ? data : decoder.write(bufferOf(data));
+    }
+    state.buffer = [];
+    state.bufferIndex = 0;
+    if (content != "") state.buffer.push(content);
+    this.readableLength = content.length;
+    state.synced = -1;
+    Stream.sync(this);
+    return this;
+  }
+
+  unpipe(dest?: Stream) {
+    const state = this.readableState;
+    if (state == undefined || state.pipes.length == 0) return this;
+    if (dest == undefined) {
+      const dests = state.pipes;
+      state.pipes = [];
+      this.pause();
+      for (const d of dests) d.emit("unpipe", this, { hasUnpiped: false });
+      return this;
+    }
+    const index = state.pipes.indexOf(dest);
+    if (index == -1) return this;
+    state.pipes.splice(index, 1);
+    if (state.pipes.length == 0) this.pause();
+    dest.emit("unpipe", this, { hasUnpiped: false });
+    return this;
+  }
+
+  resume() {
+    const state = this.readableState;
+    if (state == undefined) return this;
+    if ((state.bits & kFlowing) == 0) {
+      state.bits |= kHasFlowing;
+      if ((state.bits & kReadableListening) == 0) state.bits |= kFlowing;
+      else state.bits &= ~kFlowing;
+      Stream.resumeSoon(this, state);
+    }
+    state.bits |= kHasPaused;
+    state.bits &= ~kPaused;
+    Stream.sync(this);
+    return this;
+  }
+
+  pause() {
+    const state = this.readableState;
+    if (state == undefined) return this;
+    if ((state.bits & (kHasFlowing | kFlowing)) != kHasFlowing) {
+      state.bits |= kHasFlowing;
+      state.bits &= ~kFlowing;
+      Stream.sync(this);
+      this.emit("pause");
+    }
+    state.bits |= kHasPaused | kPaused;
+    return this;
+  }
+
+  cork() {
+    const state = this.writableState;
+    if (state == undefined) return;
+    state.bits |= kCorked;
+    this.writableCorked++;
+  }
+
+  uncork() {
+    const state = this.writableState;
+    if (state == undefined) return;
+    if (this.writableCorked != 0) {
+      this.writableCorked--;
+      if (this.writableCorked == 0) state.bits &= ~kCorked;
+      if ((state.bits & kWriting) == 0) Stream.clearBuffer(this, state);
+    }
+    Stream.sync(this);
+  }
+
+  setDefaultEncoding(encoding: BufferEncoding) {
+    const state = this.writableState;
+    if (state != undefined) state.defaultEncoding = normalizeEncoding(encoding);
+    return this;
   }
 
   destroy(error?: StreamError, callback?: StreamCallback) {
-    const w = this._writableState
-    if (w != undefined && (w.bits & (kBuffered | kOnFinished)) != 0 &&
-        (w.bits & kDestroyed) == 0) {
-      const state = w
-      process.nextTick(() => errorBuffer(this, state))
+    const w = this.writableState;
+    if (
+      w != undefined &&
+      (w.bits & (kBuffered | kOnFinished)) != 0 &&
+      (w.bits & kDestroyed) == 0
+    ) {
+      const state = w;
+      process.nextTick(() => Stream.errorBuffer(this, state));
     }
-    destroyImpl(this, error, callback)
-    return this
+    Stream.destroyImpl(this, error, callback);
+    return this;
   }
 
-  _markStdio() {
-    stdioStreams.push(this)
+  private static readableStateOf(stream: Stream): ReadableState {
+    const state = stream.readableState;
+    if (state == undefined) panic("internal error: the stream is not readable");
+    return state;
   }
 
-  _undestroy() {
-    const r = this._readableState
-    const w = this._writableState
+  private static writableStateOf(stream: Stream): WritableState {
+    const state = stream.writableState;
+    if (state == undefined) panic("internal error: the stream is not writable");
+    return state;
+  }
+
+  private static sync(stream: Stream) {
+    const r = stream.readableState;
+    const w = stream.writableState;
+    if (
+      (r != undefined && r.synced != (r.bits & kReadablePublic)) ||
+      (w != undefined && w.synced != (w.bits & kWritablePublic))
+    )
+      Stream.syncNow(stream, r, w);
+  }
+
+  private static syncNow(
+    stream: Stream,
+    r: ReadableState | undefined,
+    w: WritableState | undefined,
+  ) {
+    if (r != undefined) r.synced = r.bits & kReadablePublic;
+    if (w != undefined) w.synced = w.bits & kWritablePublic;
     if (r != undefined) {
-      r.bits |= kConstructed
-      r.bits &= ~(kClosed | kCloseEmitted | kDestroyed | kErrored | kErrorEmitted | kReading)
-      r.errored = undefined
-      if (r.readable == false) r.bits |= kEnded | kEndEmitted
-      else r.bits &= ~(kEnded | kEndEmitted)
+      const b = r.bits;
+      stream.readableEnded = (b & kEndEmitted) != 0;
+      stream.readableFlowing =
+        (b & kHasFlowing) != 0 ? (b & kFlowing) != 0 : undefined;
+      stream.readableDidRead = (b & kDataEmitted) != 0;
+      stream.readableEncoding = r.encoding;
+      stream.readable =
+        r.readable != false &&
+        (b & (kDestroyed | kErrorEmitted | kEndEmitted)) == 0;
+      stream.readableAborted =
+        r.readable != false &&
+        ((b & kDestroyed) != 0 || r.errored != undefined) &&
+        (b & kEndEmitted) == 0;
     }
     if (w != undefined) {
-      w.bits |= kConstructed
-      w.bits &= ~(kDestroyed | kClosed | kCloseEmitted | kErrored | kErrorEmitted | kFinalCalled |
-        kPrefinished)
-      w.errored = undefined
-      if (w.writable == false) w.bits |= kWEnded | kEnding | kFinished
-      else w.bits &= ~(kWEnded | kEnding | kFinished)
+      const b = w.bits;
+      stream.writableEnded = (b & kEnding) != 0;
+      stream.writableFinished = (b & kFinished) != 0;
+      stream.writableNeedDrain =
+        (b & (kDestroyed | kEnding | kNeedDrain)) == kNeedDrain;
+      stream.writable =
+        w.writable != false &&
+        (b & (kEnding | kWEnded | kDestroyed | kErrored)) == 0;
+      stream.writableAborted =
+        w.writable != false &&
+        (b & (kDestroyed | kErrored)) != 0 &&
+        (b & kFinished) == 0;
     }
-    sync(this)
+    if (r != undefined && w != undefined) {
+      stream.destroyed =
+        (r.bits & kDestroyed) != 0 && (w.bits & kDestroyed) != 0;
+      stream.closed = (r.bits & kClosed) != 0;
+      stream.errored = r.errored;
+    } else if (r != undefined) {
+      stream.destroyed = (r.bits & kDestroyed) != 0;
+      stream.closed = (r.bits & kClosed) != 0;
+      stream.errored = r.errored;
+    } else if (w != undefined) {
+      stream.destroyed = (w.bits & kDestroyed) != 0;
+      stream.closed = (w.bits & kClosed) != 0;
+      stream.errored = w.errored;
+    }
+  }
+
+  private static writeOne(stream: Stream, chunk: unknown, encoding: string) {
+    if (stream.transformsWrites)
+      Stream.transformWrite(stream, chunk, encoding, stream.written);
+    else stream.writeChunk(chunk, encoding, stream.written);
+  }
+
+  private static transformWrite(
+    stream: Stream,
+    chunk: unknown,
+    encoding: string,
+    callback: StreamCallback,
+  ) {
+    const rState = Stream.readableStateOf(stream);
+    const wState = Stream.writableStateOf(stream);
+    const length = stream.readableLength;
+    stream.transformChunk(
+      chunk,
+      encoding,
+      (err?: StreamError, val?: unknown) => {
+        if (err != undefined) {
+          callback(err);
+          return;
+        }
+        if (val != undefined) stream.pushChunk(val);
+        if ((rState.bits & kEnded) != 0) {
+          process.nextTick(() => callback());
+        } else if (
+          (wState.bits & kWEnded) != 0 ||
+          length == stream.readableLength ||
+          stream.readableLength < stream.readableHighWaterMark
+        ) {
+          callback();
+        } else {
+          stream.transformCallback = callback;
+        }
+      },
+    );
+  }
+
+  private static transformFinal(
+    stream: Stream,
+    cb: StreamCallback | undefined,
+  ) {
+    if (stream.hasFlush && !stream.destroyed) {
+      stream.onFlush((er?: StreamError, data?: unknown) => {
+        if (er != undefined) {
+          if (cb != undefined) cb(er);
+          else stream.destroy(er);
+          return;
+        }
+        if (data != undefined) stream.pushChunk(data);
+        stream.pushChunk(undefined);
+        if (cb != undefined) cb();
+      });
+    } else {
+      stream.pushChunk(undefined);
+      if (cb != undefined) cb();
+    }
+  }
+
+  private static emitPrefinish(stream: Stream) {
+    if (stream.transforming && !stream.transformsFinal)
+      Stream.transformFinal(stream, undefined);
+    stream.emit("prefinish");
+  }
+
+  private static async *iterateChunks<C>(
+    stream: Stream,
+    destroyOnReturn: boolean,
+  ): AsyncGenerator<Result<C, StreamError>> {
+    const wait = new IteratorWait();
+    const next = function (this: Stream) {
+      void this;
+      wait.wake();
+    };
+    stream.on("readable", next, kThisListener);
+    const cleanup = Stream.eos(
+      stream,
+      { writable: false },
+      (err?: StreamError) => {
+        if (err != undefined) wait.error = aggregateTwoErrors(wait.error, err);
+        else wait.ended = true;
+        wait.wake();
+      },
+    );
+    let failed = false;
+    const finish = defer(() => {
+      const r = stream.readableState;
+      if (
+        (failed || destroyOnReturn) &&
+        ((!failed && !wait.ended) ||
+          (r != undefined && (r.bits & kAutoDestroy) != 0))
+      ) {
+        Stream.destroyer(stream, undefined);
+      } else {
+        stream.removeListener("readable", next);
+        cleanup();
+      }
+    });
+    while (true) {
+      const chunk = stream.destroyed ? undefined : stream.readChunk();
+      if (chunk != undefined) {
+        if (!isChunk<C>(chunk)) {
+          failed = true;
+          const item: Result<C, StreamError> = err(invalidChunk(chunk));
+          yield item;
+          return;
+        }
+        const item: Result<C, StreamError> = ok(chunkOf<C>(chunk));
+        yield item;
+      } else {
+        const error = wait.error;
+        if (error != undefined) {
+          failed = true;
+          const item: Result<C, StreamError> = err(error);
+          yield item;
+          return;
+        }
+        if (wait.ended) return;
+        await new Promise<void>((resolve) => {
+          wait.callback = resolve;
+        });
+      }
+    }
+  }
+
+  private static readableAddChunkUnshiftByteMode(
+    stream: Stream,
+    state: ReadableState,
+    chunk: unknown,
+    encoding: string | undefined,
+  ): boolean {
+    if (chunk == undefined) {
+      state.bits &= ~kReading;
+      Stream.onEofChunk(stream, state);
+      return false;
+    }
+    let value = chunk;
+    if (typeof chunk == "string") {
+      const enc =
+        encoding == undefined || encoding == ""
+          ? state.defaultEncoding
+          : encoding;
+      if (state.encoding != normalizeEncoding(enc)) {
+        const encoded = Buffer.from(chunk, enc);
+        const stateEncoding = state.encoding;
+        value =
+          stateEncoding != undefined
+            ? encoded.toString(stateEncoding)
+            : encoded;
+      }
+    } else if (chunk instanceof Uint8Array) {
+      value = Buffer.from(chunk.buffer, chunk.byteOffset, chunk.length);
+    } else if (!isBufferChunk(chunk)) {
+      Stream.errorOrDestroy(stream, invalidChunk(chunk));
+      return false;
+    }
+    if (lengthOf(value) <= 0) return canPushMore(stream, state);
+    return Stream.readableAddChunkUnshiftValue(stream, state, value);
+  }
+
+  private static readableAddChunkUnshiftObjectMode(
+    stream: Stream,
+    state: ReadableState,
+    chunk: unknown,
+  ): boolean {
+    if (chunk == undefined) {
+      state.bits &= ~kReading;
+      Stream.onEofChunk(stream, state);
+      return false;
+    }
+    return Stream.readableAddChunkUnshiftValue(stream, state, chunk);
+  }
+
+  private static readableAddChunkUnshiftValue(
+    stream: Stream,
+    state: ReadableState,
+    chunk: unknown,
+  ): boolean {
+    if ((state.bits & kEndEmitted) != 0)
+      Stream.errorOrDestroy(
+        stream,
+        failure(
+          "ERR_STREAM_UNSHIFT_AFTER_END_EVENT",
+          "stream.unshift() after end event",
+        ),
+      );
+    else if ((state.bits & (kDestroyed | kErrored)) != 0) return false;
+    else Stream.addChunk(stream, state, chunk, true);
+    return canPushMore(stream, state);
+  }
+
+  private static readableAddChunkPushByteMode(
+    stream: Stream,
+    state: ReadableState,
+    chunk: unknown,
+    encoding: string | undefined,
+  ): boolean {
+    if (chunk == undefined) {
+      state.bits &= ~kReading;
+      Stream.onEofChunk(stream, state);
+      return false;
+    }
+    let value = chunk;
+    let enc = encoding ?? "";
+    if (typeof chunk == "string") {
+      if (enc == "") enc = state.defaultEncoding;
+      if (state.encoding != normalizeEncoding(enc)) {
+        value = Buffer.from(chunk, enc);
+        enc = "";
+      }
+    } else if (isBufferChunk(chunk)) {
+      enc = "";
+    } else if (chunk instanceof Uint8Array) {
+      value = Buffer.from(chunk.buffer, chunk.byteOffset, chunk.length);
+      enc = "";
+    } else {
+      Stream.errorOrDestroy(stream, invalidChunk(chunk));
+      return false;
+    }
+    if (lengthOf(value) <= 0) {
+      state.bits &= ~kReading;
+      Stream.maybeReadMore(stream, state);
+      return canPushMore(stream, state);
+    }
+    if ((state.bits & kEnded) != 0) {
+      Stream.errorOrDestroy(
+        stream,
+        failure("ERR_STREAM_PUSH_AFTER_EOF", "stream.push() after EOF"),
+      );
+      return false;
+    }
+    if ((state.bits & (kDestroyed | kErrored)) != 0) return false;
+    state.bits &= ~kReading;
+    const decoder = state.decoder;
+    if (decoder != undefined && enc == "") {
+      const text = decoder.write(bufferOf(value));
+      if (text.length == 0) {
+        Stream.maybeReadMore(stream, state);
+        return canPushMore(stream, state);
+      }
+      value = text;
+    }
+    Stream.addChunk(stream, state, value, false);
+    return canPushMore(stream, state);
+  }
+
+  private static readableAddChunkPushObjectMode(
+    stream: Stream,
+    state: ReadableState,
+    chunk: unknown,
+    encoding: string | undefined,
+  ): boolean {
+    if (chunk == undefined) {
+      state.bits &= ~kReading;
+      Stream.onEofChunk(stream, state);
+      return false;
+    }
+    if ((state.bits & kEnded) != 0) {
+      Stream.errorOrDestroy(
+        stream,
+        failure("ERR_STREAM_PUSH_AFTER_EOF", "stream.push() after EOF"),
+      );
+      return false;
+    }
+    if ((state.bits & (kDestroyed | kErrored)) != 0) return false;
+    state.bits &= ~kReading;
+    let value = chunk;
+    const decoder = state.decoder;
+    if (
+      decoder != undefined &&
+      (encoding == undefined || encoding == "") &&
+      isBufferChunk(chunk)
+    )
+      value = decoder.write(bufferOf(chunk));
+    Stream.addChunk(stream, state, value, false);
+    return canPushMore(stream, state);
+  }
+
+  private static addChunk(
+    stream: Stream,
+    state: ReadableState,
+    chunk: unknown,
+    addToFront: boolean,
+  ) {
+    if (
+      (state.bits & (kFlowing | kSync | kDataListening)) ==
+        (kFlowing | kDataListening) &&
+      stream.readableLength == 0
+    ) {
+      clearAwaitDrain(state);
+      state.bits |= kDataEmitted;
+      Stream.sync(stream);
+      stream.emitData(chunk);
+    } else {
+      stream.readableLength +=
+        (state.bits & kObjectMode) != 0 ? 1 : lengthOf(chunk);
+      if (addToFront) {
+        const at = state.bufferIndex - 1;
+        const buffer = state.buffer;
+        if (at >= 0 && at < buffer.length) {
+          buffer[at] = chunk;
+          state.bufferIndex = at;
+        } else {
+          state.buffer.unshift(chunk);
+        }
+      } else {
+        state.buffer.push(chunk);
+      }
+      if ((state.bits & kNeedReadable) != 0) Stream.emitReadable(stream);
+    }
+    Stream.maybeReadMore(stream, state);
+  }
+
+  private static read(
+    stream: Stream,
+    state: ReadableState,
+    size?: int,
+  ): unknown {
+    let n = size ?? -1;
+    const nOrig = n;
+    if (n > stream.readableHighWaterMark)
+      stream.readableHighWaterMark = computeNewHighWaterMark(n);
+    if (n != 0) state.bits &= ~kEmittedReadable;
+    if (
+      n == 0 &&
+      (state.bits & kNeedReadable) != 0 &&
+      ((stream.readableHighWaterMark != 0
+        ? stream.readableLength >= stream.readableHighWaterMark
+        : stream.readableLength > 0) ||
+        (state.bits & kEnded) != 0)
+    ) {
+      if (stream.readableLength == 0 && (state.bits & kEnded) != 0)
+        Stream.endReadable(stream);
+      else Stream.emitReadable(stream);
+      return undefined;
+    }
+    n = howMuchToRead(stream, n, state);
+    if (n == 0 && (state.bits & kEnded) != 0) {
+      if (stream.readableLength == 0) Stream.endReadable(stream);
+      return undefined;
+    }
+
+    let doRead = (state.bits & kNeedReadable) != 0;
+    if (
+      stream.readableLength == 0 ||
+      stream.readableLength - (n == -1 ? 0 : n) < stream.readableHighWaterMark
+    )
+      doRead = true;
+    if (
+      (state.bits &
+        (kReading | kEnded | kDestroyed | kErrored | kConstructed)) !=
+      kConstructed
+    ) {
+      doRead = false;
+    } else if (doRead) {
+      state.bits |= kReading | kSync;
+      if (stream.readableLength == 0) state.bits |= kNeedReadable;
+      stream.onRead(stream.readableHighWaterMark);
+      state.bits &= ~kSync;
+      if ((state.bits & kReading) == 0) n = howMuchToRead(stream, nOrig, state);
+    }
+    let ret: unknown = undefined;
+    if (n > 0) ret = fromList(stream, n, state);
+    if (ret == undefined) {
+      state.bits |=
+        stream.readableLength <= stream.readableHighWaterMark
+          ? kNeedReadable
+          : 0;
+      n = 0;
+    } else {
+      stream.readableLength -= n;
+      clearAwaitDrain(state);
+    }
+    if (stream.readableLength == 0) {
+      if ((state.bits & kEnded) == 0) state.bits |= kNeedReadable;
+      if (nOrig != n && (state.bits & kEnded) != 0) Stream.endReadable(stream);
+    }
+    if (
+      ret != undefined &&
+      (state.bits & (kErrorEmitted | kCloseEmitted)) == 0
+    ) {
+      state.bits |= kDataEmitted;
+      Stream.sync(stream);
+      stream.emitData(ret);
+    }
+    return ret;
+  }
+
+  private static onEofChunk(stream: Stream, state: ReadableState) {
+    if ((state.bits & kEnded) != 0) return;
+    const decoder = state.decoder;
+    if (decoder != undefined) {
+      const chunk = decoder.end();
+      if (chunk.length != 0) {
+        state.buffer.push(chunk);
+        stream.readableLength +=
+          (state.bits & kObjectMode) != 0 ? 1 : chunk.length;
+      }
+    }
+    state.bits |= kEnded;
+    if ((state.bits & kSync) != 0) {
+      Stream.emitReadable(stream);
+    } else {
+      state.bits &= ~kNeedReadable;
+      state.bits |= kEmittedReadable;
+      Stream.emitReadableNow(stream);
+    }
+  }
+
+  private static emitReadable(stream: Stream) {
+    const state = Stream.readableStateOf(stream);
+    state.bits &= ~kNeedReadable;
+    if ((state.bits & kEmittedReadable) == 0) {
+      state.bits |= kEmittedReadable;
+      process.nextTick(() => Stream.emitReadableNow(stream));
+    }
+  }
+
+  private static emitReadableNow(stream: Stream) {
+    const state = Stream.readableStateOf(stream);
+    if (
+      (state.bits & (kDestroyed | kErrored)) == 0 &&
+      (stream.readableLength != 0 || (state.bits & kEnded) != 0)
+    ) {
+      Stream.sync(stream);
+      stream.emit("readable");
+      state.bits &= ~kEmittedReadable;
+    }
+    state.bits |=
+      (state.bits & (kFlowing | kEnded)) == 0 &&
+      stream.readableLength <= stream.readableHighWaterMark
+        ? kNeedReadable
+        : 0;
+    Stream.flow(stream);
+  }
+
+  private static maybeReadMore(stream: Stream, state: ReadableState) {
+    if (
+      (state.bits & (kReadingMore | kReading | kConstructed)) ==
+      kConstructed
+    ) {
+      state.bits |= kReadingMore;
+      process.nextTick(() => Stream.maybeReadMoreNow(stream, state));
+    }
+  }
+
+  private static maybeReadMoreNow(stream: Stream, state: ReadableState) {
+    while (
+      (state.bits & (kReading | kEnded)) == 0 &&
+      (stream.readableLength < stream.readableHighWaterMark ||
+        ((state.bits & kFlowing) != 0 && stream.readableLength == 0))
+    ) {
+      const len = stream.readableLength;
+      Stream.read(stream, state, 0);
+      if (len == stream.readableLength) break;
+    }
+    state.bits &= ~kReadingMore;
+    Stream.sync(stream);
+  }
+
+  private static updateReadableListening(self: Stream) {
+    const state = Stream.readableStateOf(self);
+    if (self.listenerCount("readable") > 0) state.bits |= kReadableListening;
+    else state.bits &= ~kReadableListening;
+    if (
+      (state.bits & (kHasPaused | kPaused | kResumeScheduled)) ==
+      (kHasPaused | kResumeScheduled)
+    ) {
+      state.bits |= kHasFlowing | kFlowing;
+    } else if ((state.bits & kDataListening) != 0) {
+      self.resume();
+    } else if ((state.bits & kReadableListening) == 0) {
+      state.bits &= ~(kHasFlowing | kFlowing);
+    }
+    Stream.sync(self);
+  }
+
+  private static resumeSoon(stream: Stream, state: ReadableState) {
+    if ((state.bits & kResumeScheduled) == 0) {
+      state.bits |= kResumeScheduled;
+      process.nextTick(() => Stream.resumeNow(stream, state));
+    }
+  }
+
+  private static resumeNow(stream: Stream, state: ReadableState) {
+    if ((state.bits & kReading) == 0) Stream.read(stream, state, 0);
+    state.bits &= ~kResumeScheduled;
+    Stream.sync(stream);
+    stream.emit("resume");
+    Stream.flow(stream);
+    if ((state.bits & (kFlowing | kReading)) == kFlowing)
+      Stream.read(stream, state, 0);
+    Stream.sync(stream);
+  }
+
+  private static flow(stream: Stream) {
+    const state = Stream.readableStateOf(stream);
+    while (
+      (state.bits & kFlowing) != 0 &&
+      Stream.read(stream, state) != undefined
+    ) {}
+  }
+
+  private static endReadable(stream: Stream) {
+    const state = Stream.readableStateOf(stream);
+    if ((state.bits & kEndEmitted) == 0) {
+      state.bits |= kEnded;
+      process.nextTick(() => Stream.endReadableNT(state, stream));
+    }
+  }
+
+  private static endReadableNT(state: ReadableState, stream: Stream) {
+    if (
+      (state.bits & (kErrored | kCloseEmitted | kEndEmitted)) == 0 &&
+      stream.readableLength == 0
+    ) {
+      state.bits |= kEndEmitted;
+      Stream.sync(stream);
+      stream.emit("end");
+      const w = stream.writableState;
+      if (stream.writable && !stream.allowHalfOpen) {
+        process.nextTick(() => Stream.endWritableNT(stream));
+      } else if ((state.bits & kAutoDestroy) != 0) {
+        const autoDestroy =
+          w == undefined ||
+          ((w.bits & kAutoDestroy) != 0 &&
+            ((w.bits & kFinished) != 0 || w.writable == false));
+        if (autoDestroy) stream.destroy();
+      }
+    }
+  }
+
+  private static endWritableNT(stream: Stream) {
+    const writable =
+      stream.writable && !stream.writableEnded && !stream.destroyed;
+    if (writable) stream.endWith(false, undefined, undefined, undefined);
+  }
+
+  private static pipe(src: Stream, dest: Stream) {
+    const state = Stream.readableStateOf(src);
+    let ondrain: (() => void) | undefined = undefined;
+    let cleanedUp = false;
+    if (state.pipes.length == 1) {
+      if ((state.bits & kMultiAwaitDrain) == 0) {
+        state.bits |= kMultiAwaitDrain;
+        state.awaitDrainWriters = new Set<Stream>();
+        const writer = state.awaitDrainWriter;
+        if (writer != undefined) state.awaitDrainWriters.add(writer);
+        state.awaitDrainWriter = undefined;
+      }
+    }
+    state.pipes.push(dest);
+    if ((state.bits & kEndEmitted) != 0) process.nextTick(unpipe);
+    else src.once("end", unpipe);
+    dest.on("unpipe", onunpipe);
+    function onunpipe(readable: Stream, unpipeInfo: { hasUnpiped: boolean }) {
+      if (readable == src && !unpipeInfo.hasUnpiped) {
+        unpipeInfo.hasUnpiped = true;
+        cleanup();
+      }
+    }
+    function cleanup() {
+      dest.removeListener("close", onclose);
+      dest.removeListener("finish", onfinish);
+      if (ondrain != undefined) dest.removeListener("drain", ondrain);
+      dest.removeListener("error", onerror);
+      dest.removeListener("unpipe", onunpipe);
+      src.removeListener("end", unpipe);
+      src.removeListener("data", ondata);
+      cleanedUp = true;
+      const awaiting =
+        (state.bits & kMultiAwaitDrain) != 0 ||
+        state.awaitDrainWriter != undefined;
+      const w = dest.writableState;
+      if (
+        ondrain != undefined &&
+        awaiting &&
+        (w == undefined || (w.bits & kNeedDrain) != 0)
+      )
+        ondrain();
+    }
+    function pause() {
+      if (!cleanedUp) {
+        if (state.pipes.length == 1 && state.pipes[0] == dest) {
+          state.awaitDrainWriter = dest;
+          state.bits &= ~kMultiAwaitDrain;
+        } else if (state.pipes.length > 1 && state.pipes.includes(dest)) {
+          state.awaitDrainWriters.add(dest);
+        }
+        src.pause();
+      }
+      if (ondrain == undefined) {
+        const drained = Stream.pipeOnDrain(src, dest);
+        ondrain = drained;
+        dest.on("drain", drained);
+      }
+    }
+    src.on("data", ondata, kUnknownArgListener);
+    function ondata(chunk: unknown) {
+      const ret = dest.writeAny(chunk, undefined, nop);
+      if (ret != true) pause();
+    }
+    function onerror(er: StreamError) {
+      unpipe();
+      dest.removeListener("error", onerror);
+      if (dest.listenerCount("error") == 0) {
+        const s = dest.writableState;
+        const r = dest.readableState;
+        const errorEmitted =
+          s != undefined
+            ? (s.bits & kErrorEmitted) != 0
+            : r != undefined && (r.bits & kErrorEmitted) != 0;
+        if ((s != undefined || r != undefined) && !errorEmitted)
+          Stream.errorOrDestroy(dest, er);
+        else dest.emit("error", er);
+      }
+    }
+    dest.prependListener("error", onerror);
+    function onclose() {
+      dest.removeListener("finish", onfinish);
+      unpipe();
+    }
+    dest.once("close", onclose);
+    function onfinish() {
+      dest.removeListener("close", onclose);
+      unpipe();
+    }
+    dest.once("finish", onfinish);
+    function unpipe() {
+      src.unpipe(dest);
+    }
+    dest.emit("pipe", src);
+    if (dest.writableNeedDrain) pause();
+    else if ((state.bits & kFlowing) == 0) src.resume();
+  }
+
+  private static pipeOnDrain(src: Stream, dest: Stream): () => void {
+    return () => {
+      const state = Stream.readableStateOf(src);
+      if (
+        (state.bits & kMultiAwaitDrain) == 0 &&
+        state.awaitDrainWriter == dest
+      ) {
+        state.awaitDrainWriter = undefined;
+      } else if ((state.bits & kMultiAwaitDrain) != 0) {
+        state.awaitDrainWriters.delete(dest);
+      }
+      const empty =
+        (state.bits & kMultiAwaitDrain) != 0
+          ? state.awaitDrainWriters.size == 0
+          : state.awaitDrainWriter == undefined;
+      if (empty && (state.bits & kDataListening) != 0) src.resume();
+    };
+  }
+
+  private static writeImpl(
+    stream: Stream,
+    chunk: unknown,
+    encoding: string | undefined,
+    cb: StreamCallback,
+  ): boolean | StreamError {
+    const state = Stream.writableStateOf(stream);
+    let value = chunk;
+    let enc = encoding ?? "";
+    let err: StreamError | undefined = undefined;
+    if (chunk == undefined) {
+      err = nullValues();
+    } else if ((state.bits & kObjectMode) == 0) {
+      if (enc == "" || (enc != "buffer" && !Buffer.isEncoding(enc)))
+        enc = state.defaultEncoding;
+      if (typeof chunk == "string") {
+        if ((state.bits & kDecodeStrings) != 0) {
+          value = Buffer.from(chunk, enc);
+          enc = "buffer";
+        }
+      } else if (isBufferChunk(chunk)) {
+        enc = "buffer";
+      } else if (chunk instanceof Uint8Array) {
+        value = Buffer.from(chunk.buffer, chunk.byteOffset, chunk.length);
+        enc = "buffer";
+      } else {
+        err = invalidChunk(chunk);
+      }
+    }
+    if (err == undefined && (state.bits & kEnding) != 0)
+      err = failure("ERR_STREAM_WRITE_AFTER_END", "write after end");
+    else if (err == undefined && (state.bits & kDestroyed) != 0)
+      err = streamDestroyed("write");
+    if (err != undefined) {
+      const failed = err;
+      process.nextTick(() => cb(failed));
+      Stream.errorOrDestroy(stream, err, true);
+      return err;
+    }
+    state.pendingcb++;
+    return Stream.writeOrBuffer(stream, state, value, enc, cb);
+  }
+
+  private static writeOrBuffer(
+    stream: Stream,
+    state: WritableState,
+    chunk: unknown,
+    encoding: string,
+    callback: StreamCallback,
+  ): boolean {
+    const len = (state.bits & kObjectMode) != 0 ? 1 : lengthOf(chunk);
+    stream.writableLength += len;
+    if (
+      (state.bits & (kWriting | kErrored | kCorked | kConstructed)) !=
+      kConstructed
+    ) {
+      if ((state.bits & kBuffered) == 0) {
+        state.bits |= kBuffered;
+        state.buffered = [];
+      }
+      state.buffered.push({ chunk, encoding, callback });
+      if ((state.bits & kAllBuffers) != 0 && encoding != "buffer")
+        state.bits &= ~kAllBuffers;
+      if ((state.bits & kAllNoop) != 0 && callback != nop)
+        state.bits &= ~kAllNoop;
+    } else {
+      state.writelen = len;
+      if (callback != nop) state.writecb = callback;
+      state.bits |= kWriting | kWSync | kExpectWriteCb;
+      Stream.writeOne(stream, chunk, encoding);
+      state.bits &= ~kWSync;
+    }
+    const ret =
+      stream.writableLength < stream.writableHighWaterMark ||
+      stream.writableLength == 0;
+    if (!ret) state.bits |= kNeedDrain;
+    return ret && (state.bits & (kDestroyed | kErrored)) == 0;
+  }
+
+  private static doWrite(
+    stream: Stream,
+    state: WritableState,
+    len: int,
+    chunk: unknown,
+    encoding: string,
+    cb: StreamCallback,
+  ) {
+    state.writelen = len;
+    if (cb != nop) state.writecb = cb;
+    state.bits |= kWriting | kWSync | kExpectWriteCb;
+    if ((state.bits & kDestroyed) != 0)
+      Stream.onwrite(stream, streamDestroyed("write"));
+    else Stream.writeOne(stream, chunk, encoding);
+    state.bits &= ~kWSync;
+  }
+
+  private static doWritev(
+    stream: Stream,
+    state: WritableState,
+    len: int,
+    chunks: BufferedWrite[],
+    cb: StreamCallback,
+  ) {
+    state.writelen = len;
+    if (cb != nop) state.writecb = cb;
+    state.bits |= kWriting | kWSync | kExpectWriteCb;
+    if ((state.bits & kDestroyed) != 0)
+      Stream.onwrite(stream, streamDestroyed("write"));
+    else stream.writevChunks(chunks, stream.written);
+    state.bits &= ~kWSync;
+  }
+
+  private static onwriteError(
+    stream: Stream,
+    state: WritableState,
+    er: StreamError,
+    cb: StreamCallback,
+  ) {
+    --state.pendingcb;
+    cb(er);
+    Stream.errorBuffer(stream, state);
+    Stream.errorOrDestroy(stream, er);
+  }
+
+  private static onwrite(stream: Stream, er: StreamError | undefined) {
+    const state = Stream.writableStateOf(stream);
+    if ((state.bits & kExpectWriteCb) == 0) {
+      Stream.errorOrDestroy(stream, multipleCallback());
+      return;
+    }
+    const isSync = (state.bits & kWSync) != 0;
+    const cb = state.writecb;
+    state.writecb = nop;
+    state.bits &= ~(kWriting | kExpectWriteCb);
+    stream.writableLength -= state.writelen;
+    state.writelen = 0;
+    if (er != undefined) {
+      if ((state.bits & kErrored) == 0) {
+        state.errored = er;
+        state.bits |= kErrored;
+      }
+      const r = stream.readableState;
+      if (r != undefined && r.errored == undefined) {
+        r.errored = er;
+        r.bits |= kErrored;
+      }
+      Stream.sync(stream);
+      const error = er;
+      if (isSync)
+        process.nextTick(() => Stream.onwriteError(stream, state, error, cb));
+      else Stream.onwriteError(stream, state, error, cb);
+    } else {
+      if ((state.bits & kBuffered) != 0) Stream.clearBuffer(stream, state);
+      if (isSync) {
+        const needDrain =
+          (state.bits & kNeedDrain) != 0 && stream.writableLength == 0;
+        const needTick =
+          needDrain || (state.bits & kDestroyed) != 0 || cb != nop;
+        const info = state.afterWriteTickInfo;
+        if (cb == nop) {
+          if ((state.bits & kAfterWritePending) == 0 && needTick) {
+            process.nextTick(() => Stream.afterWrite(stream, state, 1, cb));
+            state.bits |= kAfterWritePending;
+          } else {
+            state.pendingcb--;
+            if ((state.bits & kEnding) != 0)
+              Stream.finishMaybe(stream, state, true);
+          }
+        } else if (
+          (state.bits & kAfterWriteTickInfo) != 0 &&
+          info != undefined &&
+          info.cb == cb
+        ) {
+          info.count++;
+        } else if (needTick) {
+          const tick = new AfterWriteTick(cb);
+          state.afterWriteTickInfo = tick;
+          process.nextTick(() => Stream.afterWriteTick(stream, state, tick));
+          state.bits |= kAfterWritePending | kAfterWriteTickInfo;
+        } else {
+          state.pendingcb--;
+          if ((state.bits & kEnding) != 0)
+            Stream.finishMaybe(stream, state, true);
+        }
+      } else {
+        Stream.afterWrite(stream, state, 1, cb);
+      }
+    }
+    Stream.sync(stream);
+  }
+
+  private static afterWriteTick(
+    stream: Stream,
+    state: WritableState,
+    tick: AfterWriteTick,
+  ) {
+    state.bits &= ~kAfterWriteTickInfo;
+    state.afterWriteTickInfo = undefined;
+    Stream.afterWrite(stream, state, tick.count, tick.cb);
+  }
+
+  private static afterWrite(
+    stream: Stream,
+    state: WritableState,
+    count: int,
+    cb: StreamCallback,
+  ) {
+    state.bits &= ~kAfterWritePending;
+    const needDrain =
+      (state.bits & (kEnding | kNeedDrain | kDestroyed)) == kNeedDrain &&
+      stream.writableLength == 0;
+    if (needDrain) {
+      state.bits &= ~kNeedDrain;
+      Stream.sync(stream);
+      stream.emit("drain");
+    }
+    let left = count;
+    while (left-- > 0) {
+      state.pendingcb--;
+      cb();
+    }
+    if ((state.bits & kDestroyed) != 0) Stream.errorBuffer(stream, state);
+    if ((state.bits & kEnding) != 0) Stream.finishMaybe(stream, state, true);
+    Stream.sync(stream);
+  }
+
+  private static errorBuffer(stream: Stream, state: WritableState) {
+    if ((state.bits & kWriting) != 0) return;
+    if ((state.bits & kBuffered) != 0) {
+      for (let n = state.bufferedIndex; n < state.buffered.length; ++n) {
+        const entry = state.buffered[n];
+        if (entry == undefined) continue;
+        const len = (state.bits & kObjectMode) != 0 ? 1 : lengthOf(entry.chunk);
+        stream.writableLength -= len;
+        entry.callback(state.errored ?? streamDestroyed("write"));
+      }
+    }
+    callFinishedCallbacks(state, state.errored ?? streamDestroyed("end"));
+    resetBuffer(state);
+    Stream.sync(stream);
+  }
+
+  private static clearBuffer(stream: Stream, state: WritableState) {
+    if (
+      (state.bits &
+        (kDestroyed |
+          kBufferProcessing |
+          kCorked |
+          kBuffered |
+          kConstructed)) !=
+      (kBuffered | kConstructed)
+    )
+      return;
+    const objectMode = (state.bits & kObjectMode) != 0;
+    const buffered = state.buffered;
+    const bufferedIndex = state.bufferedIndex;
+    const bufferedLength = buffered.length - bufferedIndex;
+    if (bufferedLength == 0) return;
+    let i = bufferedIndex;
+    state.bits |= kBufferProcessing;
+    if (bufferedLength > 1 && stream.hasWritev) {
+      state.pendingcb -= bufferedLength - 1;
+      const start = i;
+      const callback: StreamCallback =
+        (state.bits & kAllNoop) != 0
+          ? nop
+          : (err?: StreamError) => {
+              for (let n = start; n < buffered.length; ++n) {
+                const entry = buffered[n];
+                if (entry != undefined) entry.callback(err);
+              }
+            };
+      const chunks: BufferedWrite[] = [];
+      for (let n = i; n < buffered.length; n++) {
+        const entry = buffered[n];
+        if (entry != undefined) chunks.push(entry);
+      }
+      Stream.doWritev(stream, state, stream.writableLength, chunks, callback);
+      resetBuffer(state);
+    } else {
+      do {
+        const entry = buffered[i];
+        if (i >= 0 && i < buffered.length) buffered[i] = undefined;
+        i++;
+        if (entry == undefined) continue;
+        const len = objectMode ? 1 : lengthOf(entry.chunk);
+        Stream.doWrite(
+          stream,
+          state,
+          len,
+          entry.chunk,
+          entry.encoding,
+          entry.callback,
+        );
+      } while (i < buffered.length && (state.bits & kWriting) == 0);
+      if (i == buffered.length) {
+        resetBuffer(state);
+      } else if (i > 256) {
+        buffered.splice(0, i);
+        state.bufferedIndex = 0;
+      } else {
+        state.bufferedIndex = i;
+      }
+    }
+    state.bits &= ~kBufferProcessing;
+  }
+
+  private static onFinish(
+    stream: Stream,
+    state: WritableState,
+    err: StreamError | undefined,
+  ) {
+    if ((state.bits & kPrefinished) != 0) {
+      Stream.errorOrDestroy(stream, err ?? multipleCallback());
+      return;
+    }
+    state.pendingcb--;
+    if (err != undefined) {
+      callFinishedCallbacks(state, err);
+      Stream.errorOrDestroy(stream, err, (state.bits & kWSync) != 0);
+    } else if (needFinish(stream, state)) {
+      state.bits |= kPrefinished;
+      Stream.sync(stream);
+      Stream.emitPrefinish(stream);
+      state.pendingcb++;
+      process.nextTick(() => Stream.finish(stream, state));
+    }
+  }
+
+  private static prefinish(stream: Stream, state: WritableState) {
+    if ((state.bits & (kPrefinished | kFinalCalled)) != 0) return;
+    if (stream.hasFinal && (state.bits & kDestroyed) == 0) {
+      state.bits |= kFinalCalled | kWSync;
+      state.pendingcb++;
+      const done = (err?: StreamError) => Stream.onFinish(stream, state, err);
+      if (stream.transformsFinal) Stream.transformFinal(stream, done);
+      else stream.onFinal(done);
+      state.bits &= ~kWSync;
+    } else {
+      state.bits |= kFinalCalled | kPrefinished;
+      Stream.sync(stream);
+      Stream.emitPrefinish(stream);
+    }
+  }
+
+  private static finishMaybe(
+    stream: Stream,
+    state: WritableState,
+    isSync: boolean,
+  ) {
+    if (needFinish(stream, state)) {
+      Stream.prefinish(stream, state);
+      if (state.pendingcb == 0) {
+        if (isSync) {
+          state.pendingcb++;
+          process.nextTick(() => {
+            if (needFinish(stream, state)) Stream.finish(stream, state);
+            else state.pendingcb--;
+          });
+        } else if (needFinish(stream, state)) {
+          state.pendingcb++;
+          Stream.finish(stream, state);
+        }
+      }
+    }
+  }
+
+  private static finish(stream: Stream, state: WritableState) {
+    state.pendingcb--;
+    state.bits |= kFinished;
+    callFinishedCallbacks(state, undefined);
+    Stream.sync(stream);
+    stream.emit("finish");
+    if ((state.bits & kAutoDestroy) != 0) {
+      const r = stream.readableState;
+      const autoDestroy =
+        r == undefined ||
+        ((r.bits & kAutoDestroy) != 0 &&
+          ((r.bits & kEndEmitted) != 0 || r.readable == false));
+      if (autoDestroy) stream.destroy();
+    }
+  }
+
+  private static checkError(stream: Stream, err: StreamError | undefined) {
+    if (err == undefined) return;
+    const w = stream.writableState;
+    const r = stream.readableState;
+    if (w != undefined && w.errored == undefined) {
+      w.errored = err;
+      w.bits |= kErrored;
+    }
+    if (r != undefined && r.errored == undefined) {
+      r.errored = err;
+      r.bits |= kErrored;
+    }
+  }
+
+  private static destroyImpl(
+    stream: Stream,
+    err: StreamError | undefined,
+    cb: StreamCallback | undefined,
+  ) {
+    const r = stream.readableState;
+    const w = stream.writableState;
+    if (
+      (w != undefined && (w.bits & kDestroyed) != 0) ||
+      (r != undefined && (r.bits & kDestroyed) != 0)
+    ) {
+      if (cb != undefined) cb();
+      return;
+    }
+    Stream.checkError(stream, err);
+    if (w != undefined) w.bits |= kDestroyed;
+    if (r != undefined) r.bits |= kDestroyed;
+    Stream.sync(stream);
+    const s = w ?? r;
+    if (s != undefined && (s.bits & kConstructed) == 0) {
+      stream.destroyWaits.push((er: StreamError | undefined) =>
+        Stream.destroyNow(stream, aggregateTwoErrors(er, err), cb),
+      );
+    } else {
+      Stream.destroyNow(stream, err, cb);
+    }
+  }
+
+  private static destroyNow(
+    self: Stream,
+    err: StreamError | undefined,
+    cb: StreamCallback | undefined,
+  ) {
+    let called = false;
+    function onDestroy(error?: StreamError) {
+      if (called) return;
+      called = true;
+      Stream.checkError(self, error);
+      const w = self.writableState;
+      const r = self.readableState;
+      if (w != undefined) w.bits |= kClosed;
+      if (r != undefined) r.bits |= kClosed;
+      Stream.sync(self);
+      if (cb != undefined) cb(error);
+      if (error != undefined) {
+        const failed = error;
+        process.nextTick(() => {
+          Stream.emitErrorNT(self, failed);
+          Stream.emitCloseNT(self);
+        });
+      } else {
+        process.nextTick(() => Stream.emitCloseNT(self));
+      }
+    }
+    self.onDestroy(err, onDestroy);
+  }
+
+  private static emitCloseNT(self: Stream) {
+    const r = self.readableState;
+    const w = self.writableState;
+    if (w != undefined) w.bits |= kCloseEmitted;
+    if (r != undefined) r.bits |= kCloseEmitted;
+    Stream.sync(self);
+    if (
+      (w != undefined && (w.bits & kEmitClose) != 0) ||
+      (r != undefined && (r.bits & kEmitClose) != 0)
+    )
+      self.emit("close");
+  }
+
+  private static emitErrorNT(self: Stream, err: StreamError) {
+    const r = self.readableState;
+    const w = self.writableState;
+    if (
+      (w != undefined && (w.bits & kErrorEmitted) != 0) ||
+      (r != undefined && (r.bits & kErrorEmitted) != 0)
+    )
+      return;
+    if (w != undefined) w.bits |= kErrorEmitted;
+    if (r != undefined) r.bits |= kErrorEmitted;
+    Stream.sync(self);
+    self.emit("error", err);
+  }
+
+  private static errorOrDestroy(
+    stream: Stream,
+    err: StreamError,
+    isSync = false,
+  ) {
+    const r = stream.readableState;
+    const w = stream.writableState;
+    if (
+      (w != undefined && (w.bits & kDestroyed) != 0) ||
+      (r != undefined && (r.bits & kDestroyed) != 0)
+    )
+      return;
+    if (
+      (r != undefined && (r.bits & kAutoDestroy) != 0) ||
+      (w != undefined && (w.bits & kAutoDestroy) != 0)
+    ) {
+      stream.destroy(err);
+    } else {
+      if (w != undefined && (w.bits & kErrored) == 0) {
+        w.errored = err;
+        w.bits |= kErrored;
+      }
+      if (r != undefined && (r.bits & kErrored) == 0) {
+        r.errored = err;
+        r.bits |= kErrored;
+      }
+      Stream.sync(stream);
+      if (isSync) process.nextTick(() => Stream.emitErrorNT(stream, err));
+      else Stream.emitErrorNT(stream, err);
+    }
+  }
+
+  private static construct(stream: Stream, cb: () => void) {
+    const r = stream.readableState;
+    const w = stream.writableState;
+    if (r != undefined) r.bits &= ~kConstructed;
+    if (w != undefined) w.bits &= ~kConstructed;
+    stream.constructWaits.push(cb);
+    if (stream.constructWaits.length > 1) return;
+    process.nextTick(() => Stream.constructNT(stream));
+  }
+
+  private static constructNT(stream: Stream) {
+    let called = false;
+    function afterConstruct(err?: StreamError) {
+      if (called) {
+        Stream.errorOrDestroy(stream, err ?? multipleCallback());
+        return;
+      }
+      called = true;
+      const r = stream.readableState;
+      const w = stream.writableState;
+      const s = w ?? r;
+      if (r != undefined) r.bits |= kConstructed;
+      if (w != undefined) w.bits |= kConstructed;
+      const constructed = stream.constructWaits;
+      stream.constructWaits = [];
+      if (s != undefined && (s.bits & kDestroyed) != 0) {
+        const waits = stream.destroyWaits;
+        stream.destroyWaits = [];
+        for (const wait of waits) wait(err);
+      } else if (err != undefined) {
+        Stream.errorOrDestroy(stream, err, true);
+      } else {
+        for (const wait of constructed) wait();
+      }
+      Stream.sync(stream);
+    }
+    stream.onConstruct((err?: StreamError) => {
+      process.nextTick(() => afterConstruct(err));
+    });
+  }
+
+  private static destroyer(stream: Stream, err: StreamError | undefined) {
+    if (Stream.isDestroyed(stream)) return;
+    let error = err;
+    if (error == undefined && !Stream.isFinished(stream)) error = abortError();
+    stream.destroy(error);
+  }
+
+  static isDestroyed(stream: Stream): boolean {
+    const state = stream.writableState ?? stream.readableState;
+    return (
+      stream.destroyed || (state != undefined && (state.bits & kDestroyed) != 0)
+    );
+  }
+
+  private static isReadableNodeStream(stream: Stream): boolean {
+    const r = stream.readableState;
+    return (
+      r != undefined &&
+      (stream.writableState == undefined || r.readable != false)
+    );
+  }
+
+  private static isWritableNodeStream(stream: Stream): boolean {
+    const w = stream.writableState;
+    return (
+      w != undefined &&
+      (stream.readableState == undefined || w.writable != false)
+    );
+  }
+
+  private static isWritableEnded(stream: Stream): boolean {
+    if (stream.writableEnded) return true;
+    const w = stream.writableState;
+    if (w == undefined || w.errored != undefined) return false;
+    return (w.bits & kWEnded) != 0;
+  }
+
+  private static isWritableFinished(stream: Stream, strict: boolean): boolean {
+    if (!Stream.isWritableNodeStream(stream)) return false;
+    if (stream.writableFinished) return true;
+    const w = Stream.writableStateOf(stream);
+    if (w.errored != undefined) return false;
+    return (
+      (w.bits & kFinished) != 0 ||
+      (!strict && (w.bits & kWEnded) != 0 && stream.writableLength == 0)
+    );
+  }
+
+  private static isReadableFinished(stream: Stream, strict: boolean): boolean {
+    if (!Stream.isReadableNodeStream(stream)) return false;
+    const r = Stream.readableStateOf(stream);
+    if (r.errored != undefined) return false;
+    return (
+      (r.bits & kEndEmitted) != 0 ||
+      (!strict && (r.bits & kEnded) != 0 && stream.readableLength == 0)
+    );
+  }
+
+  static isReadable(stream: Stream): boolean {
+    if (Stream.isDestroyed(stream)) return false;
+    return (
+      Stream.isReadableNodeStream(stream) &&
+      stream.readable &&
+      !Stream.isReadableFinished(stream, true)
+    );
+  }
+
+  static isWritable(stream: Stream): boolean {
+    if (Stream.isDestroyed(stream)) return false;
+    return (
+      Stream.isWritableNodeStream(stream) &&
+      stream.writable &&
+      !Stream.isWritableEnded(stream)
+    );
+  }
+
+  private static isFinished(stream: Stream): boolean {
+    if (Stream.isDestroyed(stream)) return true;
+    if (Stream.isReadable(stream)) return false;
+    if (Stream.isWritable(stream)) return false;
+    return true;
+  }
+
+  private static isClosed(stream: Stream): boolean {
+    const w = stream.writableState;
+    const r = stream.readableState;
+    return (
+      (w != undefined && (w.bits & kClosed) != 0) ||
+      (r != undefined && (r.bits & kClosed) != 0)
+    );
+  }
+
+  private static willEmitClose(stream: Stream): boolean {
+    const state = stream.writableState ?? stream.readableState;
+    return (
+      state != undefined &&
+      (state.bits & kAutoDestroy) != 0 &&
+      (state.bits & kEmitClose) != 0 &&
+      (state.bits & kClosed) == 0
+    );
+  }
+
+  private static erroredOf(stream: Stream): StreamError | undefined {
+    return stream.writableState?.errored ?? stream.readableState?.errored;
+  }
+
+  static isErrored(stream: Stream): boolean {
+    const r = stream.readableState;
+    const w = stream.writableState;
+    return (
+      (r != undefined && (r.bits & kErrorEmitted) != 0) ||
+      (w != undefined && (w.bits & kErrorEmitted) != 0) ||
+      Stream.erroredOf(stream) != undefined
+    );
+  }
+
+  static isDisturbed(stream: Stream): boolean {
+    return stream.readableDidRead || stream.readableAborted;
+  }
+
+  private static eos(
+    stream: Stream,
+    options: FinishedOptions | undefined,
+    callback: StreamCallback,
+  ): () => void {
+    const readable = options?.readable ?? Stream.isReadableNodeStream(stream);
+    const writable = options?.writable ?? Stream.isWritableNodeStream(stream);
+    const wState = stream.writableState;
+    const rState = stream.readableState;
+    const e = new Eos(readable, writable, callback);
+    e.willEmitClose =
+      Stream.willEmitClose(stream) &&
+      Stream.isReadableNodeStream(stream) == readable &&
+      Stream.isWritableNodeStream(stream) == writable;
+    e.writableFinished = Stream.isWritableFinished(stream, false);
+    e.readableFinished = Stream.isReadableFinished(stream, false);
+    e.closed = Stream.isClosed(stream);
+    const onfinish = function (this: Stream) {
+      Stream.finishEvent(e, this);
+    };
+    const onend = function (this: Stream) {
+      Stream.endEvent(e, this);
+    };
+    const onerror = function (this: Stream, err: StreamError) {
+      void this;
+      e.call(err);
+    };
+    const onclose = function (this: Stream) {
+      Stream.closeEvent(e, this);
+    };
+    stream.on("end", onend, kThisListener);
+    stream.on("finish", onfinish, kThisListener);
+    if (options?.error != false) stream.on("error", onerror, kThisListener);
+    stream.on("close", onclose, kThisListener);
+    if (e.closed) {
+      process.nextTick(() => Stream.closeEvent(e, stream));
+    } else if (
+      (wState != undefined && (wState.bits & kErrorEmitted) != 0) ||
+      (rState != undefined && (rState.bits & kErrorEmitted) != 0)
+    ) {
+      if (!e.willEmitClose)
+        process.nextTick(() => Stream.closedEvent(e, stream));
+    } else if (
+      !readable &&
+      (!e.willEmitClose || Stream.isReadable(stream)) &&
+      (e.writableFinished || !Stream.isWritable(stream)) &&
+      (wState == undefined || wState.pendingcb == 0)
+    ) {
+      process.nextTick(() => Stream.closedEvent(e, stream));
+    } else if (
+      !writable &&
+      (!e.willEmitClose || Stream.isWritable(stream)) &&
+      (e.readableFinished || !Stream.isReadable(stream))
+    ) {
+      process.nextTick(() => Stream.closedEvent(e, stream));
+    }
+    const cleanup = () => {
+      e.callback = nop;
+      stream.removeListener("finish", onfinish);
+      stream.removeListener("end", onend);
+      stream.removeListener("error", onerror);
+      stream.removeListener("close", onclose);
+    };
+    const optionSignal = options?.signal;
+    if (optionSignal != undefined && !e.closed) {
+      const signal = optionSignal;
+      const abort = () => {
+        const endCallback = e.callback;
+        cleanup();
+        endCallback(abortError());
+      };
+      if (signal.aborted) {
+        process.nextTick(abort);
+      } else {
+        const onAbort = (event: Event) => abort();
+        signal.addEventListener("abort", onAbort, { once: true });
+        const originalCallback = e.callback;
+        e.callback = (err?: StreamError) => {
+          signal.removeEventListener("abort", onAbort);
+          originalCallback(err);
+        };
+      }
+    }
+    return cleanup;
+  }
+
+  private static finishEvent(e: Eos, stream: Stream) {
+    e.writableFinished = true;
+    if (stream.destroyed) e.willEmitClose = false;
+    if (e.willEmitClose && (!stream.readable || e.readable)) return;
+    if (!e.readable || e.readableFinished) e.call();
+  }
+
+  private static endEvent(e: Eos, stream: Stream) {
+    e.readableFinished = true;
+    if (stream.destroyed) e.willEmitClose = false;
+    if (e.willEmitClose && (!stream.writable || e.writable)) return;
+    if (!e.writable || e.writableFinished) e.call();
+  }
+
+  private static closeEvent(e: Eos, stream: Stream) {
+    e.closed = true;
+    const errored = Stream.erroredOf(stream);
+    if (errored != undefined) {
+      e.call(errored);
+      return;
+    }
+    if (
+      e.readable &&
+      !e.readableFinished &&
+      Stream.isReadableNodeStream(stream)
+    ) {
+      if (!Stream.isReadableFinished(stream, false)) {
+        e.call(prematureClose());
+        return;
+      }
+    }
+    if (e.writable && !e.writableFinished) {
+      if (!Stream.isWritableFinished(stream, false)) {
+        e.call(prematureClose());
+        return;
+      }
+    }
+    e.call();
+  }
+
+  private static closedEvent(e: Eos, stream: Stream) {
+    e.closed = true;
+    const errored = Stream.erroredOf(stream);
+    if (errored != undefined) e.call(errored);
+    else e.call();
+  }
+
+  private static finishedResult(
+    stream: Stream,
+    options?: FinishedOptions,
+  ): Promise<Result<void, StreamError>> {
+    const autoCleanup = options?.cleanup ?? false;
+    return new Promise<Result<void, StreamError>>((resolve) => {
+      let cleanup: () => void = () => {};
+      cleanup = Stream.eos(stream, options, (error?: StreamError) => {
+        if (autoCleanup) cleanup();
+        if (error != undefined) resolve(err(error));
+        else resolve(ok());
+      });
+    });
+  }
+
+  private static addAbortSignalNoValidate(signal: AbortSignal, stream: Stream) {
+    const onAbort = () => {
+      stream.destroy(abortError());
+    };
+    if (signal.aborted) {
+      onAbort();
+    } else {
+      const listener = (event: Event) => onAbort();
+      signal.addEventListener("abort", listener, { once: true });
+      Stream.eos(stream, undefined, () =>
+        signal.removeEventListener("abort", listener),
+      );
+    }
+  }
+
+  static addAbortSignal<S extends Stream>(signal: AbortSignal, stream: S): S {
+    Stream.addAbortSignalNoValidate(signal, stream);
+    return stream;
+  }
+
+  private static pipelineDestroyer(
+    stream: Stream,
+    reading: boolean,
+    writing: boolean,
+    ps: PipelineState,
+  ): () => void {
+    const d = new PipelineDestroyer();
+    stream.on(
+      "close",
+      function (this: Stream) {
+        void this;
+        d.finished = true;
+      },
+      kThisListener,
+    );
+    const cleanup = Stream.eos(
+      stream,
+      { readable: reading, writable: writing },
+      (err?: StreamError) => {
+        d.finished = err == undefined;
+      },
+    );
+    ps.destroys.push((err: StreamError | undefined) => {
+      if (d.finished) return;
+      d.finished = true;
+      Stream.destroyer(stream, err ?? streamDestroyed("pipe"));
+    });
+    return cleanup;
+  }
+
+  private static async *readableChunks(
+    stream: Stream,
+    ps: PipelineState,
+  ): AsyncGenerator<unknown> {
+    for await (const item of Stream.iterateChunks<unknown>(stream, true)) {
+      if (item.isErr()) {
+        finishImpl(ps, item.error, false);
+        return;
+      }
+      yield item.value;
+    }
+  }
+
+  private static async pumpToNode(
+    iterable: AsyncGenerator<unknown>,
+    writable: Stream,
+    ps: PipelineState,
+    end: boolean,
+  ) {
+    let error: StreamError | undefined = undefined;
+    let onresolve: (() => void) | undefined = undefined;
+    const resume = (err?: StreamError) => {
+      if (err != undefined) error = err;
+      const callback = onresolve;
+      if (callback != undefined) {
+        onresolve = undefined;
+        callback();
+      }
+    };
+    const wait = () =>
+      new Promise<boolean>((resolve) => {
+        if (error != undefined) resolve(false);
+        else onresolve = () => resolve(error == undefined);
+      });
+    const ondrain = () => resume();
+    writable.on("drain", ondrain);
+    const cleanup = Stream.eos(writable, { readable: false }, resume);
+    let going = true;
+    if (writable.writableNeedDrain) going = await wait();
+    if (going) {
+      for await (const chunk of iterable) {
+        if (
+          writable.writeAny(chunk, undefined, nop) != true &&
+          !(await wait())
+        ) {
+          going = false;
+          break;
+        }
+      }
+    }
+    if (going && end) {
+      writable.endWith(false, undefined, undefined, undefined);
+      await wait();
+    }
+    pipelineFinish(ps, error);
+    cleanup();
+    writable.off("drain", ondrain);
+    onresolve = undefined;
+  }
+
+  private static pipelinePipe(
+    src: Stream,
+    dst: Stream,
+    ps: PipelineState,
+    end: boolean,
+  ): () => void {
+    const pp = new PipelineDestroyer();
+    dst.on(
+      "close",
+      function (this: Stream) {
+        void this;
+        if (!pp.finished) finishImpl(ps, prematureClose(), false);
+      },
+      kThisListener,
+    );
+    Stream.pipe(src, dst);
+    if (end) {
+      const endFn = () => {
+        pp.finished = true;
+        dst.endWith(false, undefined, undefined, undefined);
+      };
+      if (Stream.isReadableFinished(src, true)) process.nextTick(endFn);
+      else src.once("end", endFn);
+    } else {
+      pipelineFinish(ps);
+    }
+    Stream.eos(
+      src,
+      { readable: true, writable: false },
+      (err?: StreamError) => {
+        const rState = src.readableState;
+        if (
+          err != undefined &&
+          codeOf(err) == "ERR_STREAM_PREMATURE_CLOSE" &&
+          rState != undefined &&
+          (rState.bits & kEnded) != 0 &&
+          rState.errored == undefined &&
+          (rState.bits & kErrorEmitted) == 0
+        ) {
+          const finishFn = () => pipelineFinish(ps);
+          src.once("end", finishFn);
+          src.once("error", (e: StreamError) => pipelineFinish(ps, e));
+        } else {
+          pipelineFinish(ps, err);
+        }
+      },
+    );
+    return Stream.eos(
+      dst,
+      { readable: false, writable: true },
+      (err?: StreamError) => pipelineFinish(ps, err),
+    );
+  }
+
+  private static pipelineImpl(
+    stages: (Stream | PipelineStage)[],
+    ps: PipelineState,
+    end: boolean,
+    outerSignal: AbortSignal | undefined,
+  ): Stream | undefined {
+    if (stages.length < 2)
+      panic("internal error: pipeline() takes two streams or more");
+    const signal = ps.ac.signal;
+    const abort = () => finishImpl(ps, abortError(), false);
+    let onOuterAbort: ((event: Event) => void) | undefined = undefined;
+    if (outerSignal != undefined) {
+      const listener = (event: Event) => abort();
+      const outer = outerSignal;
+      onOuterAbort = listener;
+      outer.addEventListener("abort", listener, { once: true });
+      ps.destroys.push(() => outer.removeEventListener("abort", listener));
+    }
+    void onOuterAbort;
+    let retStream: Stream | undefined = undefined;
+    let retIterable: AsyncGenerator<unknown> | undefined = undefined;
+    for (let i = 0; i < stages.length; i++) {
+      const stage = stages[i];
+      const reading = i < stages.length - 1;
+      const writing = i > 0;
+      const next = i + 1 < stages.length ? stages[i + 1] : undefined;
+      const stageEnd = reading || end;
+      const isLastStream = i == stages.length - 1;
+      if (stage instanceof Stream) {
+        const stream = stage;
+        if (next instanceof Stream && (next.closed || next.destroyed))
+          finishImpl(
+            ps,
+            failure(
+              "ERR_STREAM_UNABLE_TO_PIPE",
+              "Cannot pipe to a closed or destroyed stream",
+            ),
+            false,
+          );
+        if (stageEnd) {
+          const cleanup = Stream.pipelineDestroyer(
+            stream,
+            reading,
+            writing,
+            ps,
+          );
+          if (Stream.isReadable(stream) && isLastStream)
+            ps.lastStreamCleanup.push(cleanup);
+        }
+        const onError = function (this: Stream, err: StreamError) {
+          void this;
+          if (
+            err.code != "ABORT_ERR" &&
+            err.code != "ERR_STREAM_PREMATURE_CLOSE"
+          )
+            finishImpl(ps, err, false);
+        };
+        stream.on("error", onError, kThisListener);
+        if (Stream.isReadable(stream) && isLastStream)
+          ps.lastStreamCleanup.push(() =>
+            stream.removeListener("error", onError),
+          );
+        if (i == 0) {
+          retStream = stream;
+        } else if (
+          retStream != undefined &&
+          Stream.isReadableNodeStream(retStream)
+        ) {
+          ps.finishCount += 2;
+          const cleanup = Stream.pipelinePipe(retStream, stream, ps, stageEnd);
+          if (Stream.isReadable(stream) && isLastStream)
+            ps.lastStreamCleanup.push(cleanup);
+          retStream = stream;
+        } else if (retIterable != undefined) {
+          ps.finishCount++;
+          void Stream.pumpToNode(retIterable, stream, ps, stageEnd);
+          retIterable = undefined;
+          retStream = stream;
+        } else {
+          finishImpl(
+            ps,
+            failure(
+              "ERR_INVALID_ARG_TYPE",
+              'The "val" argument must be an instance of Readable, Iterable, or AsyncIterable.',
+            ),
+            false,
+          );
+          retStream = stream;
+        }
+        continue;
+      }
+      if (i == 0) {
+        const source = stage.source;
+        if (source == undefined)
+          panic("internal error: the first stage is no source");
+        retIterable = source(signal);
+        continue;
+      }
+      const input =
+        retIterable ??
+        (retStream != undefined
+          ? Stream.readableChunks(retStream, ps)
+          : undefined);
+      if (input == undefined)
+        panic("internal error: a stage has nothing before it");
+      retStream = undefined;
+      const transform = stage.transform;
+      if (transform != undefined && reading) {
+        retIterable = transform(input, signal);
+        continue;
+      }
+      const pt = new PassThrough<unknown>({ objectMode: true });
+      const sink = stage.sink;
+      if (sink != undefined) {
+        ps.finishCount++;
+        void sink(input, signal).then((val: unknown) => {
+          ps.value = val;
+          if (val != undefined) pt.writeAny(val, undefined, nop);
+          if (stageEnd) pt.endWith(false, undefined, undefined, undefined);
+          process.nextTick(() => pipelineFinish(ps));
+        });
+      } else if (transform != undefined) {
+        ps.finishCount++;
+        void Stream.pumpToNode(transform(input, signal), pt, ps, stageEnd);
+      }
+      retIterable = undefined;
+      retStream = pt;
+      const cleanup = Stream.pipelineDestroyer(pt, false, true, ps);
+      if (isLastStream) ps.lastStreamCleanup.push(cleanup);
+    }
+    if (signal.aborted || (outerSignal != undefined && outerSignal.aborted))
+      process.nextTick(abort);
+    return retStream;
+  }
+
+  private static pipelineTo<S extends Stream>(
+    stages: (Stream | PipelineStage)[],
+    last: S,
+    callback: StreamCallback,
+  ): S {
+    const ps = new PipelineState(
+      (err: StreamError | undefined, value: unknown) => {
+        void value;
+        callback(err);
+      },
+    );
+    const lastStream: Stream = last;
+    stages.push(lastStream);
+    Stream.pipelineImpl(stages, ps, true, undefined);
+    return last;
+  }
+
+  private static pipelineOut(
+    stages: (Stream | PipelineStage)[],
+    callback: StreamCallback,
+  ): Stream {
+    const ps = new PipelineState(
+      (err: StreamError | undefined, value: unknown) => {
+        void value;
+        callback(err);
+      },
+    );
+    const last = Stream.pipelineImpl(stages, ps, true, undefined);
+    if (last == undefined) panic("internal error: the pipeline has no stream");
+    return last;
+  }
+
+  private static pipelineResult(
+    stages: (Stream | PipelineStage)[],
+    options?: { signal?: AbortSignal; end?: boolean },
+  ): Promise<Result<void, StreamError>> {
+    return new Promise<Result<void, StreamError>>((resolve) => {
+      const ps = new PipelineState(
+        (error: StreamError | undefined, value: unknown) => {
+          void value;
+          if (error != undefined) resolve(err(error));
+          else resolve(ok());
+        },
+      );
+      Stream.pipelineImpl(stages, ps, options?.end ?? true, options?.signal);
+    });
+  }
+
+  private static pipelineValue<V>(
+    stages: (Stream | PipelineStage)[],
+    options?: { signal?: AbortSignal; end?: boolean },
+  ): Promise<Result<V, StreamError>> {
+    return new Promise<Result<V, StreamError>>((resolve) => {
+      const ps = new PipelineState(
+        (error: StreamError | undefined, value: unknown) => {
+          if (error != undefined) resolve(err(error));
+          else resolve(ok(chunkOf<V>(value)));
+        },
+      );
+      Stream.pipelineImpl(stages, ps, options?.end ?? true, options?.signal);
+    });
+  }
+
+  private static composeAll<W, R>(streams: Stream[]): Duplex<W, R> {
+    let invalid: StreamError | undefined = undefined;
+    for (let n = 0; n < streams.length && invalid == undefined; ++n) {
+      const stream = streams[n];
+      if (stream == undefined) continue;
+      if (n < streams.length - 1 && !Stream.isReadable(stream))
+        invalid = failure(
+          "ERR_INVALID_ARG_VALUE",
+          `The argument 'streams[${n}]' must be readable. Received ${libClassName(stream)}`,
+        );
+      else if (n > 0 && !Stream.isWritable(stream))
+        invalid = failure(
+          "ERR_INVALID_ARG_VALUE",
+          `The argument 'streams[${n}]' must be writable. Received ${libClassName(stream)}`,
+        );
+    }
+    const first = streams[0];
+    const lastOne = streams[streams.length - 1];
+    if (first == undefined || lastOne == undefined)
+      panic("internal error: compose() takes one stream or more");
+    const head = first;
+    const tail = lastOne;
+    const writable = Stream.isWritable(head);
+    const readable = Stream.isReadable(tail);
+    const c = new Composition();
+    const d = new Duplex<W, R>({
+      writableObjectMode: head.writableObjectMode,
+      readableObjectMode: tail.readableObjectMode,
+      writable,
+      readable,
+      write(chunk: W, encoding: string, callback: StreamCallback) {
+        const to = c.head;
+        if (to == undefined) return;
+        if (to.writeAny(chunk, encoding, nop) == true) callback();
+        else c.ondrain = callback;
+      },
+      final(callback: StreamCallback) {
+        const to = c.head;
+        if (to != undefined) to.endWith(false, undefined, undefined, undefined);
+        c.onfinish = callback;
+      },
+      read(size: int) {
+        void size;
+        Stream.readComposed(this, c);
+      },
+      destroy(error: StreamError | undefined, callback: StreamCallback) {
+        let failed = error;
+        if (failed == undefined && c.closing) failed = abortError();
+        c.onreadable = undefined;
+        c.ondrain = undefined;
+        c.onfinish = undefined;
+        const listeners = c.listeners;
+        c.listeners = [];
+        for (const remove of listeners) remove();
+        const from = c.tail;
+        if (from != undefined) Stream.destroyer(from, failed);
+        if (!c.closing) callback(failed);
+        else c.onclose = callback;
+      },
+    });
+    if (invalid != undefined) {
+      c.closing = false;
+      d.destroy(invalid);
+      return d;
+    }
+    c.head = head;
+    c.tail = tail;
+    const onfinished = (err?: StreamError) => {
+      const cb = c.onclose;
+      c.closing = false;
+      c.onclose = undefined;
+      if (cb != undefined) cb(err);
+      else if (err != undefined) d.destroy(err);
+      else if (!readable && !writable) d.destroy();
+    };
+    if (streams.length == 1) {
+      onfinished();
+    } else {
+      const stages: (Stream | PipelineStage)[] = [];
+      for (const stream of streams) stages.push(stream);
+      const ps = new PipelineState(
+        (err: StreamError | undefined, value: unknown) => {
+          void value;
+          onfinished(err);
+        },
+      );
+      Stream.pipelineImpl(stages, ps, true, undefined);
+    }
+    if (writable) {
+      const ondrain = function (this: Stream) {
+        void this;
+        const cb = c.ondrain;
+        if (cb != undefined) {
+          c.ondrain = undefined;
+          cb();
+        }
+      };
+      head.on("drain", ondrain, kThisListener);
+      c.listeners.push(() => head.removeListener("drain", ondrain));
+      const cleanup = Stream.eos(tail, undefined, () => {
+        const cb = c.onfinish;
+        if (cb != undefined) {
+          c.onfinish = undefined;
+          cb();
+        }
+      });
+      c.listeners.push(cleanup);
+    }
+    if (readable) {
+      const onreadable = function (this: Stream) {
+        void this;
+        const cb = c.onreadable;
+        if (cb != undefined) {
+          c.onreadable = undefined;
+          cb();
+        }
+      };
+      const out: Stream = d;
+      const onend = function (this: Stream) {
+        void this;
+        out.pushChunk(undefined);
+      };
+      tail.on("readable", onreadable, kThisListener);
+      tail.on("end", onend, kThisListener);
+      c.listeners.push(() => {
+        tail.removeListener("readable", onreadable);
+        tail.removeListener("end", onend);
+      });
+    }
+    return d;
+  }
+
+  private static readComposed(d: Stream, c: Composition) {
+    const tail = c.tail;
+    if (tail == undefined) return;
+    while (true) {
+      const buf = tail.readChunk();
+      if (buf == undefined) {
+        c.onreadable = () => Stream.readComposed(d, c);
+        return;
+      }
+      if (!d.pushChunk(buf)) return;
+    }
   }
 }
 
-function readableStateOf(stream: Stream): ReadableState {
-  const state = stream._readableState
-  if (state == undefined) panic("internal error: the stream is not readable")
-  return state
-}
-
-function writableStateOf(stream: Stream): WritableState {
-  const state = stream._writableState
-  if (state == undefined) panic("internal error: the stream is not writable")
-  return state
-}
-
-const kReadablePublic = kEndEmitted | kHasFlowing | kFlowing | kDataEmitted | kDestroyed |
-  kErrorEmitted | kErrored | kClosed | kDecoder
-const kWritablePublic = kEnding | kFinished | kDestroyed | kNeedDrain | kWEnded | kErrored | kClosed
-
-function sync(stream: Stream) {
-  const r = stream._readableState
-  const w = stream._writableState
-  if ((r != undefined && r.synced != (r.bits & kReadablePublic)) ||
-      (w != undefined && w.synced != (w.bits & kWritablePublic)))
-    syncNow(stream, r, w)
-}
-
-function syncNow(stream: Stream, r: ReadableState | undefined, w: WritableState | undefined) {
-  if (r != undefined) r.synced = r.bits & kReadablePublic
-  if (w != undefined) w.synced = w.bits & kWritablePublic
-  if (r != undefined) {
-    const b = r.bits
-    stream.readableEnded = (b & kEndEmitted) != 0
-    stream.readableFlowing = (b & kHasFlowing) != 0 ? (b & kFlowing) != 0 : undefined
-    stream.readableDidRead = (b & kDataEmitted) != 0
-    stream.readableEncoding = r.encoding
-    stream.readable = r.readable != false && (b & (kDestroyed | kErrorEmitted | kEndEmitted)) == 0
-    stream.readableAborted =
-      r.readable != false && ((b & kDestroyed) != 0 || r.errored != undefined) &&
-      (b & kEndEmitted) == 0
-  }
-  if (w != undefined) {
-    const b = w.bits
-    stream.writableEnded = (b & kEnding) != 0
-    stream.writableFinished = (b & kFinished) != 0
-    stream.writableNeedDrain = (b & (kDestroyed | kEnding | kNeedDrain)) == kNeedDrain
-    stream.writable = w.writable != false && (b & (kEnding | kWEnded | kDestroyed | kErrored)) == 0
-    stream.writableAborted =
-      w.writable != false && (b & (kDestroyed | kErrored)) != 0 && (b & kFinished) == 0
-  }
-  if (r != undefined && w != undefined) {
-    stream.destroyed = (r.bits & kDestroyed) != 0 && (w.bits & kDestroyed) != 0
-    stream.closed = (r.bits & kClosed) != 0
-    stream.errored = r.errored
-  } else if (r != undefined) {
-    stream.destroyed = (r.bits & kDestroyed) != 0
-    stream.closed = (r.bits & kClosed) != 0
-    stream.errored = r.errored
-  } else if (w != undefined) {
-    stream.destroyed = (w.bits & kDestroyed) != 0
-    stream.closed = (w.bits & kClosed) != 0
-    stream.errored = w.errored
-  }
-}
+const kReadablePublic =
+  kEndEmitted |
+  kHasFlowing |
+  kFlowing |
+  kDataEmitted |
+  kDestroyed |
+  kErrorEmitted |
+  kErrored |
+  kClosed |
+  kDecoder;
+const kWritablePublic =
+  kEnding | kFinished | kDestroyed | kNeedDrain | kWEnded | kErrored | kClosed;
 
 function bufferOf(chunk: unknown): Buffer {
-  return chunkOf<Buffer>(chunk)
+  return chunkOf<Buffer>(chunk);
 }
 
 function lengthOf(chunk: unknown): int {
-  if (typeof chunk == "string") return chunk.length
-  return bufferOf(chunk).length
+  if (typeof chunk == "string") return chunk.length;
+  return bufferOf(chunk).length;
 }
+
+export function isReadable(stream: Stream): boolean {
+  return Stream.isReadable(stream);
+}
+
+export function isWritable(stream: Stream): boolean {
+  return Stream.isWritable(stream);
+}
+
+export function isDestroyed(stream: Stream): boolean {
+  return Stream.isDestroyed(stream);
+}
+
+export function isErrored(stream: Stream): boolean {
+  return Stream.isErrored(stream);
+}
+
+export function isDisturbed(stream: Stream): boolean {
+  return Stream.isDisturbed(stream);
+}
+
+export function addAbortSignal<S extends Stream>(
+  signal: AbortSignal,
+  stream: S,
+): S {
+  return Stream.addAbortSignal(signal, stream);
+}
+
+export function pipeline() {}
+export function finished() {}
+export function compose() {}

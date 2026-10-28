@@ -3,6 +3,9 @@
 // read-only, and the old service names are gone, as any name that does not
 // exist.
 import { Server } from "tz:http"
+import { Readable, Stream } from "node:stream"
+// expect-error: 'node:stream' has no export named 'streamFinished'
+import { streamFinished } from "node:stream"
 
 const event = new Event("x")
 // expect-error: cannot assign to 'isTrusted' because it is a read-only field of 'Event'
@@ -53,3 +56,25 @@ stream.locked = true
 
 // expect-error: cannot find name '__tz_panic'
 __tz_panic("x")
+
+// A stream of node keeps its state inside: what a class that extends it may
+// use is protected, and the rest is private.
+const readable = new Readable<string>({ read() {} })
+// expect-error: 'readableState' is private in class 'Stream'
+console.log(readable.readableState)
+// expect-error: property '_readableState' does not exist on type 'Readable<string>'
+readable._readableState.bits = 0
+// expect-error: 'pushChunk' is protected in class 'Readable'; only 'Readable' and the classes that extend it can use it
+readable.pushChunk("x")
+// expect-error: 'onRead' is protected in class 'Readable'; only 'Readable' and the classes that extend it can use it
+readable.onRead(1)
+// expect-error: cannot assign to 'readableLength' because it is a read-only field of 'Readable<string>'
+readable.readableLength = 0
+// expect-error: 'eos' is private in class 'Stream'
+Stream.eos(readable, undefined, () => {})
+class Peeker extends Readable<string> {
+  peek(other: Readable<string>) {
+    // expect-error: 'readChunk' is protected in class 'Stream'; 'Peeker' may use it only on its own objects, and this one is of class 'Readable'
+    return other.readChunk()
+  }
+}

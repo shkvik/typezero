@@ -152,6 +152,10 @@ void FilePort::run() {
   if (apply()) {
     retokenize();
   }
+  streamHooks();
+  if (apply()) {
+    retokenize();
+  }
   for (int pass = 0; pass < 8; ++pass) {
     tokens();
     concatenations();
@@ -163,6 +167,52 @@ void FilePort::run() {
   manual();
   std::stable_sort(notes_.begin(), notes_.end(),
                    [](const Note &a, const Note &b) { return a.offset < b.offset; });
+}
+
+void FilePort::streamHooks() {
+  static const llvm::StringLiteral streams[] = {"Readable", "Writable", "Duplex", "Transform",
+                                                "PassThrough"};
+  static const std::pair<llvm::StringLiteral, llvm::StringLiteral> hooks[] = {
+      {"_read", "onRead"},           {"_write", "onWrite"},        {"_writev", "onWritev"},
+      {"_transform", "onTransform"}, {"_flush", "onFlush"},        {"_final", "onFinal"},
+      {"_destroy", "onDestroy"},     {"_construct", "onConstruct"}};
+  const char *kind = "'_read', '_write' and the other methods of a stream became 'onRead', "
+                     "'onWrite'...";
+  for (size_t i = 0; i < toks_.size(); ++i) {
+    if (!isName(i, "class") || afterDot(i)) {
+      continue;
+    }
+    size_t open = i + 1;
+    llvm::StringRef base;
+    bool extends = false;
+    while (open < toks_.size() && !is(open, Tok::LBrace)) {
+      if (isName(open, "extends")) {
+        extends = true;
+      } else if (extends && base.empty() && is(open, Tok::Identifier) && !is(open + 1, Tok::Dot)) {
+        base = toks_[open].text;
+      }
+      ++open;
+    }
+    if (open >= toks_.size() || close_[open] == std::string::npos ||
+        !llvm::is_contained(streams, base)) {
+      continue;
+    }
+    for (size_t k = open + 1; k < close_[open]; ++k) {
+      if (!is(k, Tok::Identifier)) {
+        continue;
+      }
+      const auto *hook =
+          llvm::find_if(hooks, [&](const auto &h) { return h.first == toks_[k].text; });
+      if (hook == std::end(hooks)) {
+        continue;
+      }
+      bool member = !afterDot(k) && is(k + 1, Tok::LParen);
+      bool own = afterDot(k) && k >= 2 && (isName(k - 2, "this") || isName(k - 2, "super"));
+      if (member || own) {
+        add(at(k), endOf(k), hook->second.str(), kind);
+      }
+    }
+  }
 }
 
 void FilePort::modules() {

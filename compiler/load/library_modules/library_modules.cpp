@@ -100,8 +100,7 @@ struct ModuleParts {
   std::vector<llvm::StringLiteral> parts;
 };
 const ModuleParts kModuleParts[] = {
-    {"stream.tz",
-     {"stream_readable.tz", "stream_writable.tz", "stream_duplex.tz", "stream_pipeline.tz"}},
+    {"stream.tz", {"stream_duplex.tz", "stream_pipeline.tz"}},
 };
 
 void appendPart(SourceFile &file, SourceFile &part) {

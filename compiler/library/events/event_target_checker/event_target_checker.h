@@ -15,8 +15,13 @@ public:
   Expr *callLibraryFunction(CallExpr *call, llvm::StringRef name,
                             llvm::ArrayRef<const Type *> bound, const std::vector<bool> &given,
                             llvm::SMLoc loc);
+  Expr *callLibraryStatic(CallExpr *call, ClassDecl *cls, llvm::StringRef name,
+                          llvm::ArrayRef<const Type *> bound, const std::vector<bool> &given,
+                          llvm::SMLoc loc);
 
 private:
+  Expr *callLibrarySymbol(CallExpr *call, FuncSymbol *sym, llvm::ArrayRef<const Type *> bound,
+                          const std::vector<bool> &given, llvm::SMLoc loc);
   Checker &checker_;
 };
 

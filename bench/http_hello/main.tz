@@ -2,5 +2,9 @@
 // every request, on the port given.
 import { serve } from "tz:http"
 
-const port = parseInt(process.argv[2] ?? "8080") | 0
-serve({ port, hostname: "127.0.0.1" }, () => new Response("Hello, World!"))
+const port = parseInt(process.argv[2] ?? "8080").unwrapOr(8080)
+const server = serve({ port, hostname: "127.0.0.1" }, () => new Response("Hello, World!"))
+if (server.isErr()) {
+  console.error(server.error.message)
+  process.exit(1)
+}

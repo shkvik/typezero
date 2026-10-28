@@ -169,7 +169,7 @@ Expr *StreamChecker::streamChunkArg(Expr *arg, const Type *chunk, bool eof, bool
     checker_.diags_.error(arg->loc(),
                           "'" + method.str() + "' of a stream of " + chunk->name().str() +
                               " takes " + takes + ", but this is '" + type->name().str() + "'" +
-                              (onlyStrings ? "; a Writable<string> gives its _write() the "
+                              (onlyStrings ? "; a Writable<string> gives its onWrite() the "
                                              "strings written; make it a Writable<Buffer> to "
                                              "write bytes"
                                            : "; to write objects, make the stream an "
@@ -187,7 +187,7 @@ Expr *StreamChecker::checkStreamCall(CallExpr *call, MemberExpr *member, ClassDe
       name != "setEncoding" && name != "pipe") {
     return nullptr;
   }
-  if (checker_.libraryCalls().inLibrary(call->loc()) || !checker_.chunkTypes().isStreamClass(cls)) {
+  if (!checker_.chunkTypes().isStreamClass(cls)) {
     return nullptr;
   }
   std::vector<FunctionDecl *> methods = ClassDeclarer::methodsNamed(cls, name, false);
@@ -277,7 +277,7 @@ Expr *StreamChecker::checkStreamCall(CallExpr *call, MemberExpr *member, ClassDe
     }
     args.push_back(streamChunkArg(call->args[0], chunk, true, false, name, false));
     args.push_back(call->args.size() > 1 ? encodingArg(call->args[1]) : undefinedOf(encodingType));
-    impl = name == "push" ? "_pushChunk" : "_unshiftChunk";
+    impl = name == "push" ? "pushTyped" : "unshiftTyped";
   } else if (name == "write") {
     if (!checker_.argumentChecker().checkArity(call, member->loc(), 1, 3)) {
       return call;
@@ -298,7 +298,7 @@ Expr *StreamChecker::checkStreamCall(CallExpr *call, MemberExpr *member, ClassDe
     args.push_back(encoding ? encodingArg(encoding) : undefinedOf(encodingType));
     args.push_back(cb ? checkedAs(cb, Type::optional(callback))
                       : undefinedOf(Type::optional(callback)));
-    impl = "_writeBool";
+    impl = "writeTyped";
   } else {
     if (!checker_.argumentChecker().checkArity(call, member->loc(), 0, 3)) {
       return call;
@@ -331,7 +331,7 @@ Expr *StreamChecker::checkStreamCall(CallExpr *call, MemberExpr *member, ClassDe
         chunkArg ? streamChunkArg(chunkArg, chunk, false, true, name, checked.contains(chunkArg))
                  : undefinedOf(Type::unknown()));
     args.push_back(encoding ? encodingArg(encoding) : undefinedOf(encodingType));
-    impl = "_endResult";
+    impl = "endTyped";
   }
   for (Expr *arg : args) {
     if (arg->type->isError()) {

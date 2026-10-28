@@ -20,3 +20,9 @@ InvalidAccessError
 hi /there
 ERR_SERVER_ALREADY_LISTEN
 ERR_SERVER_ALREADY_LISTEN
+true true false
+3
+2
+1
+false true true
+ERR_INVALID_ARG_TYPE

@@ -1,7 +1,7 @@
 // same-as-node
 // A PassThrough where a Writable is expected (a Duplex is one), compose()
 // of two Transforms, finished() of node:stream/promises and with a callback,
-// addAbortSignal() and _construct(), which the writes wait for.
+// addAbortSignal() and construct(), which the writes wait for.
 import { PassThrough, Readable, Transform, Writable, compose, finished as finishedCb, addAbortSignal } from "node:stream"
 import { finished } from "node:stream/promises"
 const log = (s: string) => console.log(s)

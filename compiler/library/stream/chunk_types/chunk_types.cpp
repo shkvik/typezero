@@ -1,9 +1,9 @@
 #include "compiler/library/stream/chunk_types/chunk_types.h"
-#include "compiler/declare/prelude/prelude.h"
 #include "compiler/check/classes/class_bases/class_bases.h"
 #include "compiler/check/generics/alias_instantiator/alias_instantiator.h"
 #include "compiler/check/generics/generic_class_instantiator/generic_class_instantiator.h"
 #include "compiler/check/types/type_relations/type_relations.h"
+#include "compiler/declare/prelude/prelude.h"
 #include "compiler/library/events/event_map_inference/event_map_inference.h"
 #include "compiler/whole_program/flows/flows.h"
 #include "llvm/ADT/STLExtras.h"
@@ -91,19 +91,19 @@ std::optional<std::vector<const Type *>> ChunkTypes::streamHookParams(const Func
   const Type *callback = alias("StreamCallback");
   llvm::StringRef name = fn->name;
   std::vector<const Type *> params;
-  if (name == "_read" && readable) {
+  if (name == "onRead" && readable) {
     params = {Type::intTy()};
-  } else if (name == "_final" || name == "_construct") {
+  } else if (name == "onFinal" || name == "onConstruct") {
     params = {callback};
-  } else if (name == "_destroy") {
+  } else if (name == "onDestroy") {
     params = {Type::optional(checker_.prelude().builtinType("StreamError")), callback};
-  } else if (name == "_flush" && transform) {
+  } else if (name == "onFlush" && transform) {
     params = {alias("TransformCallback")};
-  } else if (name == "_transform" && transform) {
+  } else if (name == "onTransform" && transform) {
     params = {writable, Type::string(), alias("TransformCallback")};
-  } else if (name == "_write" && writable) {
+  } else if (name == "onWrite" && writable) {
     params = {writable, Type::string(), callback};
-  } else if (name == "_writev" && writable) {
+  } else if (name == "onWritev" && writable) {
     TypeAliasDecl *entry = checker_.libTypes_.lookup("WriteChunk");
     if (const Type *type =
             entry ? checker_.aliasInstantiator().instantiateAlias(entry, {writable}, fn->loc())
@@ -119,8 +119,8 @@ std::optional<std::vector<const Type *>> ChunkTypes::streamHookParams(const Func
 }
 
 bool ChunkTypes::isStreamHook(const FunctionDecl *fn, bool linked) const {
-  static const llvm::StringLiteral hooks[] = {"_read",  "_write", "_writev",  "_transform",
-                                              "_flush", "_final", "_destroy", "_construct"};
+  static const llvm::StringLiteral hooks[] = {"onRead",  "onWrite", "onWritev",  "onTransform",
+                                              "onFlush", "onFinal", "onDestroy", "onConstruct"};
   const ClassDecl *cls = fn->cls;
 
   return cls && !fn->isStatic && !cls->library && !cls->literal && cls->parent &&
@@ -153,7 +153,7 @@ void ChunkTypes::reportStreamHook(const FunctionDecl *fn,
     params += name.str() + ": " + hook->params[i]->name().str();
   }
   std::string chunks;
-  if (fn->name == "_write" || fn->name == "_writev" || fn->name == "_transform") {
+  if (fn->name == "onWrite" || fn->name == "onWritev" || fn->name == "onTransform") {
     chunks = "; for chunks of another type, give the class it extends type arguments, e.g. "
              "'extends Writable<string>'";
   }

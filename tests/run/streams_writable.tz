@@ -1,7 +1,7 @@
 // same-as-node
 // Writable of node:stream (docs/streams.md): write() gives false at the
 // highWaterMark and 'drain' comes when the writes are done, end() with a
-// chunk, whose Promise of a Result comes when the stream finished, _final(),
+// chunk, whose Promise of a Result comes when the stream finished, final(),
 // writev() of what cork() held, a stream of strings (decodeStrings: false),
 // and a write that fails.
 import { Writable } from "node:stream"
