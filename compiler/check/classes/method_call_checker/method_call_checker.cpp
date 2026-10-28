@@ -89,8 +89,10 @@ Expr *MethodCallChecker::checkMethodCall(CallExpr *call, MemberExpr *member, con
     checkArgsLoosely();
     return call;
   }
-  checker_.classMemberChecker().checkAccess(methods[0]->cls, methods[0]->access, name,
-                                            member->loc());
+  if (methods.size() == 1) {
+    checker_.classMemberChecker().checkAccess(methods[0]->cls, methods[0]->access, name,
+                                              member->loc(), member->object);
+  }
   if (checker_.classChecker().isInitThis(member->object) && !checker_.flow_.beforeSuper &&
       !checker_.classChecker().thisReady(checker_.flow_)) {
     checker_.diags_.error(member->loc(), "'this." + name +
@@ -104,6 +106,10 @@ Expr *MethodCallChecker::checkMethodCall(CallExpr *call, MemberExpr *member, con
                                                               member->loc(), checked, &bound);
   if (!sym) {
     return call;
+  }
+  if (methods.size() > 1 && sym->decl) {
+    checker_.classMemberChecker().checkAccess(sym->decl->cls, sym->decl->access, name,
+                                              member->loc(), member->object);
   }
   checker_.returnInferrer().resolveParams(sym);
   if (!sym->isGeneric() && !member->typeArgs.empty()) {
@@ -140,18 +146,6 @@ Expr *MethodCallChecker::checkClassNew(NewExpr *expr, ClassDecl *cls, const Type
   expr->type = Type::error();
   if (cls->isGeneric()) {
     return checker_.genericClassChecker().checkGenericNew(expr, cls, expected);
-  }
-  if (cls == checker_.libraryClass("AbortSignal") &&
-      !checker_.libraryCalls().inLibrary(expr->loc())) {
-    checker_.diags_.error(expr->loc(),
-                          "an AbortSignal is not made with 'new'; take the signal of a "
-                          "controller, 'new AbortController().signal', or use "
-                          "'AbortSignal.timeout(ms)', 'AbortSignal.abort()' or "
-                          "'AbortSignal.any(signals)'");
-    for (Expr *&arg : expr->args) {
-      arg = checker_.exprChecker().checkExpr(arg);
-    }
-    return expr;
   }
   if (checker_.fsDeclarer().isRuntimeClass(cls)) {
     checker_.diags_.error(expr->loc(),
@@ -194,14 +188,15 @@ Expr *MethodCallChecker::checkClassNew(NewExpr *expr, ClassDecl *cls, const Type
       return expr;
     }
   } else {
-    checker_.classMemberChecker().checkAccess(ctors[0]->cls, ctors[0]->access, "constructor",
-                                              expr->loc());
     bool checked = false;
     FuncSymbol *sym =
         checker_.overloadResolver().chooseVariant(ctors, call->args, {}, expr->loc(), checked);
     if (!sym) {
       return expr;
     }
+    const FunctionDecl *chosen = sym->decl ? sym->decl : ctors[0];
+    checker_.classMemberChecker().checkAccess(chosen->cls, chosen->access, "constructor",
+                                              expr->loc());
     checker_.returnInferrer().resolveParams(sym);
     call->func = sym;
     std::vector<bool> given(checked ? call->args.size() : 0, true);

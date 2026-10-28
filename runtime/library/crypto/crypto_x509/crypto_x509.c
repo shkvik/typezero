@@ -94,10 +94,10 @@ void tz_openssl_x509_valid_to(TzStr *out, const Certificate *c) {
   time_text(out, X509_get0_notAfter(c->cert));
 }
 
-static double time_ms(const ASN1_TIME *t) {
+static int64_t time_ms(const ASN1_TIME *t) {
   struct tm tm;
   if (!ASN1_TIME_to_tm(t, &tm)) {
-    return 0.0 / 0.0;
+    return 0;
   }
   int64_t y = tm.tm_year + 1900, m = tm.tm_mon + 1;
   y -= m <= 2;
@@ -107,14 +107,14 @@ static double time_ms(const ASN1_TIME *t) {
   int64_t doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
   int64_t days = era * 146097 + doe - 719468;
 
-  return (double)(((days * 24 + tm.tm_hour) * 60 + tm.tm_min) * 60 + tm.tm_sec) * 1000.0;
+  return (((days * 24 + tm.tm_hour) * 60 + tm.tm_min) * 60 + tm.tm_sec) * 1000;
 }
 
-double tz_openssl_x509_valid_from_date(const Certificate *c) {
+int64_t tz_openssl_x509_valid_from_date(const Certificate *c) {
   return time_ms(X509_get0_notBefore(c->cert));
 }
 
-double tz_openssl_x509_valid_to_date(const Certificate *c) {
+int64_t tz_openssl_x509_valid_to_date(const Certificate *c) {
   return time_ms(X509_get0_notAfter(c->cert));
 }
 

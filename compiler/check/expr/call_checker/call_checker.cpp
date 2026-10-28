@@ -227,9 +227,15 @@ Expr *CallChecker::checkCall(CallExpr *call, const Type *expected) {
         call->type = Type::error();
         return call;
       }
-      checker_.urlChecker().checkUrlSetter(member, call);
+      bool proven = checker_.urlChecker().checkUrlSetter(member, call);
       Expr *checked = checker_.methodCallChecker().checkMethodCall(call, member, expected);
       checker_.httpChecker().checkHeadersCall(call, member);
+      checker_.tzModulesChecker().noteListen(call, member);
+      if (proven && checked->type->isResult()) {
+        auto *dropped = checker_.ctx_.make<UnaryExpr>(call->loc(), UnaryOp::Void, checked);
+        dropped->type = Type::undefinedTy();
+        return dropped;
+      }
       return checked;
     }
     rejectTypeArgs();

@@ -148,6 +148,48 @@ interface URL {
   setHash(value: string): void
 }
 
+// What the objects of the web platform give in tz besides their API
+// (docs/objects.md, section 6): the parameters of a URL tell those who watch
+// them what changed and are set from a text with replace; an event is sent
+// out through dispatchOn and tells whether stopImmediatePropagation() was
+// called; a stream tells whether it was read; a key does its own operations,
+// which crypto.subtle calls. AbortSignal.withAbort(), which gives a signal
+// together with the function that aborts it, cannot be added here to the
+// AbortSignal of @types/node, which is a var.
+interface URLSearchParams {
+  watch(watcher: (query?: string) => void): void
+  replace(query?: string): void
+}
+
+interface Event {
+  readonly immediateStopped: boolean
+  dispatchOn(target: EventTarget, run: () => void): boolean
+}
+
+interface ReadableStream<R> {
+  readonly disturbed: boolean
+}
+
+declare module "crypto" {
+  namespace webcrypto {
+    interface CryptoKey {
+      sign(algorithm: AlgorithmIdentifier, data: BufferSource): Promise<Result<ArrayBuffer, SubtleError>>
+      verify(algorithm: AlgorithmIdentifier, signature: BufferSource,
+             data: BufferSource): Promise<Result<boolean, SubtleError>>
+      encrypt(algorithm: AlgorithmIdentifier, data: BufferSource): Promise<Result<ArrayBuffer, SubtleError>>
+      decrypt(algorithm: AlgorithmIdentifier, data: BufferSource): Promise<Result<ArrayBuffer, SubtleError>>
+      deriveBits(algorithm: AlgorithmIdentifier, length?: number): Promise<Result<ArrayBuffer, SubtleError>>
+      deriveKey(algorithm: AlgorithmIdentifier, derivedKeyAlgorithm: AlgorithmIdentifier,
+                extractable: boolean, usages: KeyUsage[]): Promise<Result<CryptoKey, SubtleError>>
+      wrap(format: KeyFormat, key: CryptoKey,
+           algorithm: AlgorithmIdentifier): Promise<Result<ArrayBuffer, SubtleError>>
+      unwrap(format: KeyFormat, wrappedKey: BufferSource,
+             algorithm: AlgorithmIdentifier): Promise<Result<ArrayBuffer | JsonWebKey, SubtleError>>
+      export(format: KeyFormat): Promise<Result<ArrayBuffer | JsonWebKey, SubtleError>>
+    }
+  }
+}
+
 interface RegExpConstructor {
   parse(source: string, flags?: string): Result<RegExp, RegexError>
 }
@@ -230,6 +272,12 @@ type Immediate = NodeJS.Immediate
 
 // An error of the system: a file that is not there, no access, a port that
 // is taken (docs/io.md, section 5). Node has no such global; tz does.
+type SubtleError = {
+  code: "NotSupportedError" | "DataError" | "OperationError" | "InvalidAccessError" |
+    "SyntaxError" | "TypeError" | "RangeError"
+  message: string
+}
+
 type SystemError = {
   code: string
   message: string
@@ -457,20 +505,27 @@ declare module "tz:http" {
   export type Handler = (request: Request) => Response | Promise<Response>
 
   export class Server {
-    private constructor()
+    // A server without a socket yet; listen opens one.
+    constructor(handler: Handler)
+    // 0 and "" until it listens.
     readonly port: int
     readonly hostname: string
-    readonly url: URL
+    // Set once it listens.
+    readonly url?: URL
     // Resolved once the server has stopped and its last response is out.
     readonly finished: Promise<void>
+    // Opens the socket and starts answering; gives the address. A port that
+    // is taken gives an Err; so does a second listen, after stop too
+    // (ERR_SERVER_ALREADY_LISTEN): a server listens once.
+    listen(options: ServeOptions): Result<URL, SystemError>
     // Stops taking connections and resolves once the requests being handled
-    // are answered.
+    // are answered; before listen it does nothing.
     stop(): Promise<void>
   }
 
-  // Starts a server on `hostname` (0.0.0.0) and `port` (8000; 0 for any free
-  // one, which server.port then tells), answering each request with
-  // `handler`; of https with `tls`. A port that is taken, a host that is not
-  // found or a certificate that cannot be read give an Err.
+  // Makes a server and listens at once: on `hostname` (0.0.0.0) and `port`
+  // (8000; 0 for any free one, which server.port then tells), answering each
+  // request with `handler`; of https with `tls`. A port that is taken, a host
+  // that is not found or a certificate that cannot be read give an Err.
   export function serve(options: ServeOptions, handler: Handler): Result<Server, SystemError>
 }

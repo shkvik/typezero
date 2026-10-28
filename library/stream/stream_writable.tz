@@ -694,10 +694,10 @@ function eos(stream: Stream, options: FinishedOptions | undefined,
       process.nextTick(abort)
     } else {
       const onAbort = (_event: Event) => abort()
-      signal.addFunctionListener<Event>("abort", onAbort, { once: true })
+      signal.addEventListener("abort", onAbort, { once: true })
       const originalCallback = e.callback
       e.callback = (err?: StreamError) => {
-        signal.removeListenerOf("abort", onAbort, false)
+        signal.removeEventListener("abort", onAbort)
         originalCallback(err)
       }
     }
@@ -730,8 +730,8 @@ function addAbortSignalNoValidate(signal: AbortSignal, stream: Stream) {
     onAbort()
   } else {
     const listener = (_event: Event) => onAbort()
-    signal.addFunctionListener<Event>("abort", listener, { once: true })
-    eos(stream, undefined, () => signal.removeListenerOf("abort", listener, false))
+    signal.addEventListener("abort", listener, { once: true })
+    eos(stream, undefined, () => signal.removeEventListener("abort", listener))
   }
 }
 

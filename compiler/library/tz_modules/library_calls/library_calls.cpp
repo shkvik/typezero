@@ -31,9 +31,14 @@ void LibraryCalls::prepareLibraries(SourceFile &program) {
       libraryRanges_.push_back({buffer->getBufferStart(), buffer->getBufferEnd()});
       checker_.diags_.quietRange(buffer->getBufferStart(), buffer->getBufferEnd());
     }
+    bool intrinsics = module->name == "tz:intrinsics";
     for (Stmt *item : module->file.items) {
       if (auto *fn = dyn_cast<FunctionDecl>(item)) {
-        checker_.libFunctions_[fn->name] = fn;
+        if (intrinsics) {
+          fn->intrinsic = fn->external;
+        } else {
+          checker_.libFunctions_[fn->name] = fn;
+        }
         continue;
       }
       if (auto *alias = dyn_cast<TypeAliasDecl>(item)) {
@@ -59,55 +64,42 @@ bool LibraryCalls::inLibrary(llvm::SMLoc loc) const {
 }
 
 Expr *LibraryCalls::checkLibCall(CallExpr *call, NameExpr *name) {
-  if (!name->name.starts_with("__tz_")) {
+  Checker::ScopeEntry own = checker_.scopes().lookup(name->name);
+  const FunctionDecl *decl = own.func ? own.func->decl : nullptr;
+  if (!decl || !decl->intrinsic) {
     return nullptr;
   }
+  llvm::StringRef intrinsicName = decl->name;
   call->type = Type::error();
   auto checkArgsLoosely = [&] {
     for (Expr *&arg : call->args) {
       arg = checker_.exprChecker().checkExpr(arg);
     }
   };
-  if (Checker::ScopeEntry own = checker_.scopes().lookup(name->name);
-      own.var || own.func || own.cls) {
-    return nullptr;
-  }
-  if (!inLibrary(call->loc())) {
-    checker_.diags_.error(name->loc(), "cannot find name '" + name->name + "'");
-    checkArgsLoosely();
-    return call;
-  }
-  if (name->name.starts_with("__tz_subtle_")) {
-    return checker_.webCryptoChecker().checkSubtleIntrinsic(call, name);
+  if (intrinsicName.starts_with("subtle")) {
+    return checker_.webCryptoChecker().checkSubtleIntrinsic(call, name, intrinsicName);
   }
   struct Intrinsic {
     llvm::StringLiteral name;
     Builtin builtin;
     unsigned args, typeArgs;
   };
-  static const Intrinsic intrinsics[] = {{"__tz_listener", Builtin::LibListener, 1, 1},
-                                         {"__tz_as", Builtin::LibAs, 1, 1},
-                                         {"__tz_chunk", Builtin::LibChunk, 1, 1},
-                                         {"__tz_isChunk", Builtin::LibIsChunk, 1, 1},
-                                         {"__tz_chunkKind", Builtin::LibChunkKind, 0, 1},
-                                         {"__tz_typeName", Builtin::LibTypeName, 0, 1},
-                                         {"__tz_overrides", Builtin::LibOverrides, 2, 0},
-                                         {"__tz_fsOpen", Builtin::LibFsOpen, 3, 0},
-                                         {"__tz_fsRead", Builtin::LibFsRead, 5, 0},
-                                         {"__tz_fsWrite", Builtin::LibFsWrite, 5, 0},
-                                         {"__tz_fsClose", Builtin::LibFsClose, 2, 0},
-                                         {"__tz_stdinChunk", Builtin::LibStdinChunk, 1, 0},
-                                         {"__tz_stdWrite", Builtin::LibStdWrite, 2, 0},
-                                         {"__tz_ahead", Builtin::LibAhead, 1, 0},
-                                         {"__tz_order", Builtin::LibOrder, 0, 0},
-                                         {"__tz_panic", Builtin::LibPanic, 1, 0},
-                                         {"__tz_defer", Builtin::LibDefer, 1, 0}};
+  static const Intrinsic intrinsics[] = {
+      {"asListener", Builtin::LibListener, 1, 1}, {"asClass", Builtin::LibAs, 1, 1},
+      {"chunkOf", Builtin::LibChunk, 1, 1},       {"isChunk", Builtin::LibIsChunk, 1, 1},
+      {"chunkKind", Builtin::LibChunkKind, 0, 1}, {"typeName", Builtin::LibTypeName, 0, 1},
+      {"overrides", Builtin::LibOverrides, 2, 0}, {"fsOpen", Builtin::LibFsOpen, 3, 0},
+      {"fsRead", Builtin::LibFsRead, 5, 0},       {"fsWrite", Builtin::LibFsWrite, 5, 0},
+      {"fsClose", Builtin::LibFsClose, 2, 0},     {"stdinChunk", Builtin::LibStdinChunk, 1, 0},
+      {"stdWrite", Builtin::LibStdWrite, 2, 0},   {"ahead", Builtin::LibAhead, 1, 0},
+      {"order", Builtin::LibOrder, 0, 0},         {"panic", Builtin::LibPanic, 1, 0},
+      {"defer", Builtin::LibDefer, 1, 0}};
   const Intrinsic *intrinsic =
-      llvm::find_if(intrinsics, [&](const Intrinsic &i) { return i.name == name->name; });
+      llvm::find_if(intrinsics, [&](const Intrinsic &i) { return i.name == intrinsicName; });
   if (intrinsic == std::end(intrinsics) || call->args.size() != intrinsic->args ||
       name->typeArgs.size() != intrinsic->typeArgs || call->hasSpread()) {
     checker_.diags_.error(name->loc(),
-                          "'" + name->name + "' is no intrinsic of tz, or is called wrongly");
+                          "'" + intrinsicName + "' is no intrinsic of tz, or is called wrongly");
     checkArgsLoosely();
     return call;
   }
@@ -126,14 +118,14 @@ Expr *LibraryCalls::checkLibCall(CallExpr *call, NameExpr *name) {
     call->args[0] = checker_.argumentChecker().checkArg(call->args[0], Type::unknown());
     call->type = fn;
     if (!fn->isFunction() && !fn->isParam() && !fn->isError()) {
-      checker_.diags_.error(name->loc(), "'__tz_listener' gives a function");
+      checker_.diags_.error(name->loc(), "'asListener' gives a function");
     }
     break;
   }
   case Builtin::LibAs:
     call->args[0] = checker_.exprChecker().checkExpr(call->args[0]);
     if (!typeArg->isClass() && !typeArg->isParam() && !typeArg->isError()) {
-      checker_.diags_.error(name->loc(), "'__tz_as' takes a class");
+      checker_.diags_.error(name->loc(), "'asClass' takes a class");
     }
     call->type = Type::optional(typeArg);
     break;
@@ -141,7 +133,7 @@ Expr *LibraryCalls::checkLibCall(CallExpr *call, NameExpr *name) {
     call->args[0] = checker_.exprChecker().checkExpr(call->args[0]);
     call->type = call->args[0]->type;
     if (!call->type->isPromise() && !call->type->isError()) {
-      checker_.diags_.error(name->loc(), "'__tz_ahead' takes the promise an await waits for");
+      checker_.diags_.error(name->loc(), "'ahead' takes the promise an await waits for");
     }
     if (checker_.currentFunction_ && checker_.currentFunction_->decl) {
       checker_.currentFunction_->decl->awaitsAhead = true;

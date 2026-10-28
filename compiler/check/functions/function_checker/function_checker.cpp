@@ -163,6 +163,10 @@ void FunctionChecker::declareFunction(FunctionDecl *fn, VarSymbol *var, bool sco
 }
 
 void FunctionChecker::checkFunctionBody(FunctionDecl *fn) {
+  if (fn->intrinsic) {
+    fn->checked = true;
+    return;
+  }
   if (fn->external) {
     checker_.tzModulesChecker().checkExternal(fn);
     return;

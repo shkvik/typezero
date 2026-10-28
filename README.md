@@ -450,8 +450,7 @@ else console.log(user.value.name)
 - **Что фатально.** То, что компилятор не может проверить при сборке, завершает программу: в
   stderr — `panic: текст`, код выхода 2, а напечатанное до этого дописывается. Это переполнение
   стека (`panic: stack overflow`), нехватка памяти, строка, массив или буфер длиннее предела,
-  `decimal` больше 10^10000000, корень из отрицательного `decimal`, дата, которую доверенная
-  арифметика увела за пределы JS (см. «Даты»). Операции с числами
+  `decimal` больше 10^10000000, корень из отрицательного `decimal`. Операции с числами
   компилятор доказывает ([numbers.md](docs/numbers.md)): деление на 0, сужение, выход за тип
   — ошибки компиляции; паника (`panic: Division by zero`, `panic: 1.5e+21 does not fit in
   int`) остаётся только там, где значение приходит из данных, за которыми компилятор не
@@ -1496,11 +1495,11 @@ for (const { groups } of text.matchAll(/(?<key>\w+)=(?<value>\w+)/g)) console.lo
 ## Даты
 
 Дата — ссылка на объект, как в JS ([date.md](docs/date.md)): в нём одно поле, время в
-миллисекундах с 1970 года по UTC. `set…` меняют сам объект, и это видят
+миллисекундах с 1970 года по UTC, `int`. `set…` меняют сам объект, и это видят
 все, у кого он есть. Время (`getTime()`, `a - b`, `a < b`) читается одной загрузкой из памяти, а
 поля, установку полей, строки и разбор считает рантайм ([date.c](runtime/library/date/date/date.c)) по тем же
 формулам, что V8. `console.log(d)` печатает как node: `2026-10-22T18:00:00.000Z`, в массивах и
-объектах тоже. Неправильной даты (`Invalid Date`) нет.
+объектах тоже. Неправильной даты (`Invalid Date`) нет, края, как у JS в 275760 году, — тоже.
 
 ```ts
 const d = new Date(2026, 9, 23, 10, 30)     // местное время
@@ -1533,16 +1532,20 @@ new Intl.DateTimeFormat("en-US", { dateStyle: "full", timeZone: "Asia/Bishkek" }
   отдаёт `Result<int, DateError>` с миллисекундами, где `DateError = { code: "bad_date";
   message: string; text: string }`; `new Date(text)` с переменной — ошибка компиляции с
   подсказкой `Date.parse` (`new Date` не может отдать `Result`), литерал проверяется при сборке.
-- **Дата всегда правильная.** Числа, из которых получается дата, компилятор доказывает: время
-  у `new Date(ms)`, `setTime` и `format(ms)` — в пределах ±8.64·10¹⁵ мс, а части у
-  `new Date(y, m, d…)`, `Date.UTC` и `set…` — такие, что дата не выходит за эти пределы (100
-  миллионов дней около 1970 года). Число из ввода сначала проверяют, подсказка — обычные границы
-  части: `if (v >= 1 && v <= 31)` у дня, от −271820 до 275759 у года. Время и поля существующей
-  даты — доверенные: `d.setDate(d.getDate() + 10)`, `new Date(d.getFullYear(), d.getMonth() + 1,
-  1)` и `new Date(d.getTime() + ms)` проверки не требуют. Если такая дата всё же уходит за
-  пределы (у края диапазона, в 275760 году), программа завершается паникой, как при переполнении
-  целого. Поэтому `toISOString()` и `format()` не падают, а `toJSON()` — `string` (в JS у
-  неправильной даты — `null`).
+- **Дата всегда правильная, и края JS у неё нет.** Время даты — любое `int`: `new Date(ms)`,
+  `setTime(ms)` и `format(ms)` ничего не проверяют, а даты за 275760 годом, где у JS край и
+  `Invalid Date`, просто продолжаются: `new Date(8640000000000000)` плюс день —
+  `+275760-09-14T00:00:00.000Z`, `new Date(9000000000000000)` — `+287168-08-24T16:00:00.000Z`,
+  год дальше ±999999 пишется всеми цифрами. Части у `new Date(y, m, d…)`, `Date.UTC` и `set…`
+  компилятор доказывает так, чтобы время помещалось в `int` (около ±292 млн лет): число из
+  ввода сначала проверяют, подсказка — обычные границы части: `if (v >= 1 && v <= 31)` у дня.
+  Поля существующей даты — доверенные: `d.setDate(d.getDate() + 10)` и
+  `new Date(d.getFullYear(), d.getMonth() + 1, 1)` проверки не требуют; если такая дата всё же
+  дойдёт до края `int`, время на нём остановится. Местное время дат за краем JS — по правилам
+  «равного» года рядом с нашим (тот же день недели 1 января, та же високосность), `Intl`
+  пишет и их (григорианский календарь — сдвигом на 400-летние циклы). Строки (`Date.parse`,
+  литералы) — в пределах JS, как в node. Поэтому `toISOString()` и `format()` не падают, а
+  `toJSON()` — `string` (в JS у неправильной даты — `null`).
 - **Языки**: `toLocaleString` и `Intl.DateTimeFormat` собирают из опций скелет шаблона
   (`yMMMMd`) и берут у ICU лучший шаблон языка, как V8, с теми же правилами часов (`hour12`,
   `hourCycle`, `-u-hc-`), частей по умолчанию и `dateStyle` / `timeStyle`. Без языка — язык
@@ -2042,8 +2045,14 @@ const [user] = await once(bus, "user")
   программу) и `any(signals)`; печать — `AbortController { signal: AbortSignal { aborted: false }
   }`. Порядок — как в node: `onabort` слушает с того места, где его задали впервые (заданный
   `undefined`, он остаётся там и ничего не делает); сигналы `any()` помечаются отменёнными раньше,
-  чем выполнятся слушатели их источника. `new AbortSignal()` и присваивание `aborted` и `reason` —
-  ошибки (в node это `TypeError` и геттеры). Тот же сигнал отменяет ожидания рантайма
+  чем выполнятся слушатели их источника. `new AbortSignal()` (конструктор закрыт) и присваивание
+  `aborted` и `reason` — ошибки (в node это `TypeError` и геттеры). Сверх node:
+  `AbortSignal.withAbort()` отдаёт сигнал вместе с функцией отмены — `const { signal, abort } =
+  AbortSignal.withAbort()`, как `Promise.withResolvers()`; так сигнал берёт и контроллер.
+  Поля события, которые в web только для чтения (`target`, `currentTarget`, `eventPhase`,
+  `isTrusted`, `defaultPrevented`…), — `readonly`; `event.immediateStopped` говорит, был ли
+  `stopImmediatePropagation()`, а `event.dispatchOn(target, run)` — то, через что
+  `dispatchEvent` рассылает событие (одно событие — одна рассылка за раз). Тот же сигнал отменяет ожидания рантайма
   (`node:timers/promises`, `node:fs/promises`, `node:readline`): у каждого сигнала есть сторона
   рантайма (`runtime/library/events/signal/signal.c`), которую компилятор передаёт туда, где вызов берёт `signal`, а
   слушатели рантайма выполняются среди слушателей программы на своих местах, как слушатели node.
@@ -2255,7 +2264,10 @@ const jwk = (await crypto.subtle.exportKey("jwk", publicKey)).unwrapOr({ kty: "E
   `exportKey` в `raw`, `pkcs8`, `spki` и `jwk`, `sign` / `verify` (HMAC, ECDSA, Ed25519,
   RSASSA-PKCS1-v1_5, RSA-PSS), `encrypt` / `decrypt` (AES-GCM, AES-CBC, AES-CTR, RSA-OAEP),
   `deriveBits` / `deriveKey` (PBKDF2, HKDF, ECDH, X25519), `wrapKey` / `unwrapKey` (AES-KW и шифры
-  выше). `CryptoKey` (`type`, `extractable`, `algorithm`, `usages`) печатается как в node. Типы
+  выше). `CryptoKey` (`type`, `extractable`, `algorithm`, `usages`) печатается как в node; ключ
+  OpenSSL в нём закрыт, а операции — методы ключа (`key.sign(alg, data)`, `verify`, `encrypt`,
+  `decrypt`, `deriveBits`, `deriveKey`, `wrap`, `unwrap` — отдаёт данные ключа, `export`): они
+  сами проверяют `usages` и `extractable`, а `crypto.subtle` зовёт их. Типы
   lib.dom — `CryptoKey`, `CryptoKeyPair`, `JsonWebKey`, `BufferSource`, `KeyUsage`,
   `HmacImportParams` и другие словари — видны без импорта; все словари алгоритмов — один тип
   `Algorithm` с необязательными полями, поэтому литерал алгоритма в переменной или в `return`
@@ -2283,7 +2295,7 @@ const jwk = (await crypto.subtle.exportKey("jwk", publicKey)).unwrapOr({ kty: "E
   пропущенный параметр с примером (`'iv: new Uint8Array(16)'`), неверная длина ключа AES или тега
   AES-GCM, неизвестная кривая, недопустимые usages (`'deriveBits' is no usage of a public ECDH key;
   it takes none: pass []`), пустые usages, формат, в котором семейство не импортируется, данные не
-  того вида для формата, `new CryptoKey()` и `key.handle`. Остальное — при выполнении, как в node.
+  того вида для формата, `new CryptoKey()`. Остальное — при выполнении, как в node.
 - **Два слоя**: что ключ умеет, решает его семейство, а `importKey` / `generateKey` / `deriveKey` /
   `unwrapKey` с алгоритмом в коде вызывают код только своего семейства. Поэтому программа с HMAC,
   AES, PBKDF2 и HKDF берёт прямой слой OpenSSL (`digest` — 382 КБ, HMAC — 472 КБ, AES-GCM —
@@ -2879,7 +2891,12 @@ await server.stop()
   async-функция, и `app.fetch` из hono (стрелка в поле с лишними необязательными параметрами).
   Сервер знает `port`, `hostname`, `url`, `finished`; `stop()` перестаёт принимать соединения,
   закрывает те, что ждут запроса, и ждёт ответов на те, что уже идут. Ошибки обработчик
-  отдаёт ответом сам: у него нет исключений, которые сервер мог бы превратить в `500`.
+  отдаёт ответом сам: у него нет исключений, которые сервер мог бы превратить в `500`. Как в
+  node, сервер можно создать, а слушать потом: `new Server(handler)` — без сокета (`port` — 0,
+  `url` — `undefined`), `server.listen(options)` открывает сокет и отдаёт адрес —
+  `Result<URL, SystemError>`; слушает сервер один раз, второй `listen` —
+  `ERR_SERVER_ALREADY_LISTEN`. Запрос сервера не разбирает адрес по пути: он строится из
+  соединения сразу.
 - **Запросы одного соединения** идут по очереди (keep-alive, до 5 с простоя, как в node, и
   конвейер), а разных соединений — одновременно; пока в одном потоке цикла событий, на всех ядрах
   — с параллельным рантаймом ([async.md](docs/async.md), шаг 4). Ответ — заголовки и тело одной
@@ -2940,13 +2957,16 @@ await server.stop()
   `fetch`, и у `Response.redirect` (в node — `TypeError: immutable`). `clone()` прочитанного
   тела не бросает: у копии тело тоже прочитано. **`ReadableStream`** —
   `start` / `pull` / `cancel` (обычные и async), `getReader()`, `read()`, `releaseLock()`,
-  `cancel()`, `locked`, `for await` (выход из цикла отменяет поток); `desiredSize()` у
+  `cancel()`, `locked`, `disturbed` (читали ли поток — сверх node), `for await` (выход из цикла
+  отменяет поток); `desiredSize()` у
   контроллера — метод (в node — свойство). **`FormData`** — поля-строки
   (файлов пока нет), разбор `application/x-www-form-urlencoded` и `multipart/form-data`.
 - **`URL` и `URLSearchParams`** — по стандарту WHATWG, тем же автоматом состояний, что у ada в
   node: особые схемы, IPv4 во всех формах (`0x7f.1`), IPv6, `.` и `..` в путях, процентное
   кодирование, относительные адреса, `canParse`, `parse`, `url.searchParams`, который читает и
-  меняет запрос адреса (`url.href` после `url.searchParams.set(...)` — уже новый). Части адреса —
+  меняет запрос адреса (`url.href` после `url.searchParams.set(...)` — уже новый: параметры
+  сообщают адресу о переменах подпиской, `params.watch(f)`, а `params.replace(text)` заменяет
+  их разбором текста). Части адреса —
   поля только для чтения, меняют их методы: `setPathname`, `setSearch`, `setHash`, `setUsername`,
   `setPassword`; `setHref`, `setProtocol`, `setHost`, `setHostname` и `setPort`, значение которых
   адрес может не принять, дают `Result<void, UrlError>` (node молча оставляет старое), а литерал
@@ -3564,9 +3584,8 @@ powershell -ExecutionPolicy Bypass -File editors\vscode\install.ps1
   работает); в `console.log` массивы `decimal` выглядят, как массивы чисел.
 - Неправильной даты нет, и `toJSON()` — `string` (в JS у неправильной даты — `null`).
   `x instanceof Date` вне объединения — ошибка: тип и так говорит, дата ли это.
-- Дата, которую доверенная арифметика увела за ±8.64·10¹⁵ мс, — паника `a date went outside
-  the dates JavaScript has` и код 2 (в JS — `Invalid Date`, а `toISOString()` бросает
-  `RangeError`).
+- Даты за 275760 годом (и до 271821 года до н. э.) — обычные даты, а в JS — `Invalid Date`,
+  и `toISOString()` бросает `RangeError`.
 - В Windows пояса и языки берутся из ICU системы, а она бывает старше, чем в node 24 (в
   Windows 11 — ICU 72 с базой поясов 2022g и CLDR 42, у node — ICU 78, 2025c и CLDR 48).
   Поэтому мелочи форматирования языков могут отличаться: вид пробела, запятые, `GMT` вместо
@@ -3806,10 +3825,10 @@ CRT, без RTTI и исключений, поэтому `tz` собираетс
 | `compiler/emit` | `EmitPass`: объектный файл; `--emit-llvm` (`ir_writer/`) |
 | `compiler/link` | `LinkPass`: встроенный LLD (`linker/`); какой OpenSSL нужен программе, список чужого кода в exe и `tz licenses` (`licenses/`, `licenses_pass/`) |
 | `compiler/packages` | проекты и пакеты, по классу на папку: `tz.json` (`manifest/`), `tz.lock` (`lock/`), выбор версий и граф пакетов (`resolver/`, `package_graph/`), semver (`version/`, `range/`), кэш, JSR и git (`jsr_client/`, `git_client/`, `package_cache/`), HTTP через WinHTTP (`http_client/`), JSON с позициями для ошибок и правок (`json_parser/`), импорты файла без парсера (`scanner/`), `tz port` (`port/`) |
-| `compiler/library` | C++-часть тем библиотеки: крючки темы (`feature/`), список тем (`feature_registry/`), и по папке на тему, в каждой `<тема>_feature/` и классы проверки и IR. `bytes`: байтовые массивы, `Buffer`, `TextEncoder` / `TextDecoder`, `embedBytes` и доказательства, что значение влезает в элемент; вызовы по группам (`*_calls/`). `child_process`: `spawnSync`, `execFileSync` и `execSync`. `crypto`: `node:crypto`, имена алгоритмов и выбор слоя OpenSSL, `crypto.subtle`. `date`: даты и `Intl.DateTimeFormat`; разборщик дат рантайма, собранный и в `tz` (`date_syntax/`). `decimal`: литералы, операторы и методы. `events`: карты событий, эмиттеры и `EventTarget`, `once()`. `builtin_modules`: имена модулей `node:*` и `tz:io`, привязка импортов, `node:timers/promises` и объекты, которые делает рантайм; что делает модуль, решает его тема через крючки `exportProblem`, `checkModuleCall`, `checkModuleValue` и `checkModuleMember`. `fs`: `node:fs`, `node:fs/promises`, `node:readline` и `tz:io`. `path`: `node:path`. `os`: `node:os`. `intl`: `Intl`, `toLocaleString`, `localeCompare` и `normalize`. `json`: `Json`, `JSON`, `embedJson`, `fromJson`, `JSON.parse<T>`. `console`, `math`, `process`. `reflect`: отражение и метаданные. `regex`: литералы, методы, машинный код литералов (`regex_native_lowerer/`, `matcher_*/`), компилятор регулярок рантайма, собранный и в `tz` (`regex_syntax/`). `result`: `Result` и место создания `Err` (`err_sites/`). `stream`: типы кусков `Readable<T>` и остальных классов `node:stream`. `tz_modules`: встроенные модули на tz и их `__tz_*`. `weakref`: `WeakRef` |
+| `compiler/library` | C++-часть тем библиотеки: крючки темы (`feature/`), список тем (`feature_registry/`), и по папке на тему, в каждой `<тема>_feature/` и классы проверки и IR. `bytes`: байтовые массивы, `Buffer`, `TextEncoder` / `TextDecoder`, `embedBytes` и доказательства, что значение влезает в элемент; вызовы по группам (`*_calls/`). `child_process`: `spawnSync`, `execFileSync` и `execSync`. `crypto`: `node:crypto`, имена алгоритмов и выбор слоя OpenSSL, `crypto.subtle`. `date`: даты и `Intl.DateTimeFormat`; разборщик дат рантайма, собранный и в `tz` (`date_syntax/`). `decimal`: литералы, операторы и методы. `events`: карты событий, эмиттеры и `EventTarget`, `once()`. `builtin_modules`: имена модулей `node:*` и `tz:io`, привязка импортов, `node:timers/promises` и объекты, которые делает рантайм; что делает модуль, решает его тема через крючки `exportProblem`, `checkModuleCall`, `checkModuleValue` и `checkModuleMember`. `fs`: `node:fs`, `node:fs/promises`, `node:readline` и `tz:io`. `path`: `node:path`. `os`: `node:os`. `intl`: `Intl`, `toLocaleString`, `localeCompare` и `normalize`. `json`: `Json`, `JSON`, `embedJson`, `fromJson`, `JSON.parse<T>`. `console`, `math`, `process`. `reflect`: отражение и метаданные. `regex`: литералы, методы, машинный код литералов (`regex_native_lowerer/`, `matcher_*/`), компилятор регулярок рантайма, собранный и в `tz` (`regex_syntax/`). `result`: `Result` и место создания `Err` (`err_sites/`). `stream`: типы кусков `Readable<T>` и остальных классов `node:stream`. `tz_modules`: встроенные модули на tz, их `declare function` и `tz:intrinsics`. `weakref`: `WeakRef` |
 | `runtime/core` | рантайм языка, у каждого модуля свой заголовок: общее — `TZ_HOT`, дескрипторы типов, раскладки (`tzrt`); вывод в stdout и stderr, форматирование чисел, граница стека, сбой рантайма (`output`); аллокатор, куча на каждый поток (`alloc`); потоки программы, пул, очередь node и куски, которые идут заранее (`parallel`); общие объекты и атомарные счётчики (`publish`); исключение в полёте, места стека ошибки, текст `e.stack` (`error`); строки (`string`); массивы (`array`); разбор чисел и `toFixed` (`number`); окружения замыканий (`closure`); `Object.keys` / `values` / `entries` (`object`); регистр букв по таблицам Unicode, которые [gen_unicode_tables.mjs](runtime/core/unicode/gen_unicode_tables.mjs) берёт из самого Node.js (`unicode`); `Promise`, очередь микрозадач, таймеры и цикл событий, как в node (`async`); пул потоков и ожидание ввода-вывода — IOCP в Windows (`io`); хеш-таблица словарей (`map`); коробки `unknown` (`unknown`); группы объектов в циклах, `WeakRef` и отладочный режим памяти (`group`) |
-| `runtime/library` | C-часть тем, по папке на модуль. `console`: `console.log` для массивов, объектов, `Result`, итераторов, `Json` и объединений как в Node (`inspect`). `math`: `Math`. `decimal`: точные десятичные числа. `json`: значения `Json` (`json`, `json_values`), `JSON.parse` как в V8 (`json_parse`), `JSON.stringify` любого значения (`json_stringify`) и проверки `JSON.parse<T>` (`json_typed`). `regex`: разбор и компиляция в программу (`regex_compile`, общий с `tz`) с таблицами Unicode от [gen_regex_tables.mjs](runtime/library/regex/regex_compile/gen_regex_tables.mjs), интерпретатор, методы и то, что зовёт машинный код регулярок (`regex`). `date`: поля, установка полей и строки (`date`), разбор строк, как в V8 (`date_parse`, общий с `tz`), местный пояс (`date_zone`) и языки (`date_format`). `intl`: ICU системы, которую `icu` загружает при первом обращении; языки, опции и части `formatToParts` (`intl`), числа и `PluralRules` (`intl_number`), `Collator`, `normalize` и `Segmenter` (`intl_text`), `RelativeTimeFormat`, `ListFormat` и `DisplayNames` (`intl_names`). `process`: аргументы, переменные окружения, код выхода и часы. `path`: `node:path` в обоих стилях. `fs`: общее функций файлов (`fs`), ошибки ОС `SystemError` как в libuv (`fs_errors`), синхронные функции файлов и папок (`fs_sync`, `fs_dirs`), `node:fs/promises` (`fs_async`, `fs_async_dirs`), stdin и `readLine` (`stdin`), `node:readline` (`readline`), чтение и запись кусками для потоков файлов (`fs_stream`). `os`: `node:os`. `events`: сторона рантайма у `AbortSignal`: отменённые ожидания на своих местах среди слушателей (`signal`). `stream`: что просит `node:stream`: проверка куска, байты в stdout и stderr. `child_process`: подготовка вызова как в node, запуск как в libuv (кавычки аргументов, поиск в `PATH`, окружение, каналы с overlapped I/O, таймаут), в Linux — `posix_spawn` (`child`). `bytes`: `ArrayBuffer`, типизированные массивы и их методы (`bytes`); `Buffer`, кодировки node, `TextEncoder` / `TextDecoder` (`buffer`) с таблицами однобайтовых кодировок, которые [gen_encodings.mjs](runtime/library/bytes/encodings/gen_encodings.mjs) берёт у node (`encodings`), и многобайтовые кодировки (`cjk`). `reflect`: записи метаданных (`meta`); `Reflect.get`, `apply`, `construct`, `new` класса, известного при выполнении, и проверки `unknown` (`reflect`). `net`: сокеты TCP на порту завершения цикла (AcceptEx, ConnectEx, WSARecv, WSASend) и поиск имён. `http`: HTTP/1.1: разбор голов и тел, ответы и запросы одной записью (`http`); распаковка тел `fetch` — inflate из zlib и декодер brotli из `third_party` (`decompress`). `tz_modules`: что просят встроенные модули на tz через `__tz_*` (`library`). Отдельно, в `tzcrypto.lib`: `crypto` — `node:crypto` поверх OpenSSL: общее без OpenSSL — объекты, HMAC, PBKDF2, HKDF, случайные числа, секретные ключи (`crypto`), хеши (`crypto_md`), AES (`crypto_aes`) и ChaCha20-Poly1305 (`crypto_chacha`), scrypt (`crypto_scrypt`) и Argon2 (`crypto_argon2`) прямого слоя, по объекту на алгоритм, и полный слой: имена из переменных и списки (`crypto_evp`), ключи, подписи и обмен ключами (`crypto_keys`), сертификаты (`crypto_x509`); Web Crypto (`crypto_subtle*`); `tls` — TLS соединений `net` для https: OpenSSL в памяти между сокетом и HTTP, проверка сервера как в node и корневые сертификаты Mozilla, которые [gen_tls_roots.mjs](runtime/library/tls/tls/gen_tls_roots.mjs) берёт у node |
-| `library` | встроенные модули, написанные на tz, которые лежат рядом с `tz.exe` в `lib`. `events`: `node:events` (`events.tz`) и глобальные `EventTarget`, `Event`, `CustomEvent`, `AbortController`, `AbortSignal`, `DOMException` (`web.tz`). `http`: `tz:http` (`http.tz`), глобальные `URL` и `URLSearchParams` (`url.tz`), `fetch`, `Headers`, `Request`, `Response`, `ReadableStream`, `FormData` (`fetch.tz`). `stream`: `node:stream` (`stream.tz` и его части `stream_readable.tz`, `stream_writable.tz`, `stream_duplex.tz`, `stream_pipeline.tz`, которые загрузчик читает как один модуль), `node:stream/promises` (`stream_promises.tz`), `node:stream/consumers` (`stream_consumers.tz`), `node:string_decoder` (`string_decoder.tz`), потоки файлов `createReadStream` / `createWriteStream` и `process.stdin` / `stdout` / `stderr` (`fs_stream.tz`). `crypto`: Web Crypto (`webcrypto.tz`). Глобальные получает сам файл, который их называет. Их код проверяется и компилируется вместе с программой; функции без тела `__tz_*` — функции рантайма, `__tz_listener<F>`, `__tz_as<C>`, `__tz_chunk<T>` и другие с типом — компилятора |
+| `runtime/library` | C-часть тем, по папке на модуль. `console`: `console.log` для массивов, объектов, `Result`, итераторов, `Json` и объединений как в Node (`inspect`). `math`: `Math`. `decimal`: точные десятичные числа. `json`: значения `Json` (`json`, `json_values`), `JSON.parse` как в V8 (`json_parse`), `JSON.stringify` любого значения (`json_stringify`) и проверки `JSON.parse<T>` (`json_typed`). `regex`: разбор и компиляция в программу (`regex_compile`, общий с `tz`) с таблицами Unicode от [gen_regex_tables.mjs](runtime/library/regex/regex_compile/gen_regex_tables.mjs), интерпретатор, методы и то, что зовёт машинный код регулярок (`regex`). `date`: поля, установка полей и строки (`date`), разбор строк, как в V8 (`date_parse`, общий с `tz`), местный пояс (`date_zone`) и языки (`date_format`). `intl`: ICU системы, которую `icu` загружает при первом обращении; языки, опции и части `formatToParts` (`intl`), числа и `PluralRules` (`intl_number`), `Collator`, `normalize` и `Segmenter` (`intl_text`), `RelativeTimeFormat`, `ListFormat` и `DisplayNames` (`intl_names`). `process`: аргументы, переменные окружения, код выхода и часы. `path`: `node:path` в обоих стилях. `fs`: общее функций файлов (`fs`), ошибки ОС `SystemError` как в libuv (`fs_errors`), синхронные функции файлов и папок (`fs_sync`, `fs_dirs`), `node:fs/promises` (`fs_async`, `fs_async_dirs`), stdin и `readLine` (`stdin`), `node:readline` (`readline`), чтение и запись кусками для потоков файлов (`fs_stream`). `os`: `node:os`. `events`: сторона рантайма у `AbortSignal`: отменённые ожидания на своих местах среди слушателей (`signal`). `stream`: что просит `node:stream`: проверка куска, байты в stdout и stderr. `child_process`: подготовка вызова как в node, запуск как в libuv (кавычки аргументов, поиск в `PATH`, окружение, каналы с overlapped I/O, таймаут), в Linux — `posix_spawn` (`child`). `bytes`: `ArrayBuffer`, типизированные массивы и их методы (`bytes`); `Buffer`, кодировки node, `TextEncoder` / `TextDecoder` (`buffer`) с таблицами однобайтовых кодировок, которые [gen_encodings.mjs](runtime/library/bytes/encodings/gen_encodings.mjs) берёт у node (`encodings`), и многобайтовые кодировки (`cjk`). `reflect`: записи метаданных (`meta`); `Reflect.get`, `apply`, `construct`, `new` класса, известного при выполнении, и проверки `unknown` (`reflect`). `net`: сокеты TCP на порту завершения цикла (AcceptEx, ConnectEx, WSARecv, WSASend) и поиск имён. `http`: HTTP/1.1: разбор голов и тел, ответы и запросы одной записью (`http`); распаковка тел `fetch` — inflate из zlib и декодер brotli из `third_party` (`decompress`). `tz_modules`: что просят встроенные модули на tz через `declare function` (`library`). Отдельно, в `tzcrypto.lib`: `crypto` — `node:crypto` поверх OpenSSL: общее без OpenSSL — объекты, HMAC, PBKDF2, HKDF, случайные числа, секретные ключи (`crypto`), хеши (`crypto_md`), AES (`crypto_aes`) и ChaCha20-Poly1305 (`crypto_chacha`), scrypt (`crypto_scrypt`) и Argon2 (`crypto_argon2`) прямого слоя, по объекту на алгоритм, и полный слой: имена из переменных и списки (`crypto_evp`), ключи, подписи и обмен ключами (`crypto_keys`), сертификаты (`crypto_x509`); Web Crypto (`crypto_subtle*`); `tls` — TLS соединений `net` для https: OpenSSL в памяти между сокетом и HTTP, проверка сервера как в node и корневые сертификаты Mozilla, которые [gen_tls_roots.mjs](runtime/library/tls/tls/gen_tls_roots.mjs) берёт у node |
+| `library` | встроенные модули, написанные на tz, которые лежат рядом с `tz.exe` в `lib`. `events`: `node:events` (`events.tz`) и глобальные `EventTarget`, `Event`, `CustomEvent`, `AbortController`, `AbortSignal`, `DOMException` (`web.tz`). `http`: `tz:http` (`http.tz`), глобальные `URL` и `URLSearchParams` (`url.tz`), `fetch`, `Headers`, `Request`, `Response`, `ReadableStream`, `FormData` (`fetch.tz`). `stream`: `node:stream` (`stream.tz` и его части `stream_readable.tz`, `stream_writable.tz`, `stream_duplex.tz`, `stream_pipeline.tz`, которые загрузчик читает как один модуль), `node:stream/promises` (`stream_promises.tz`), `node:stream/consumers` (`stream_consumers.tz`), `node:string_decoder` (`string_decoder.tz`), потоки файлов `createReadStream` / `createWriteStream` и `process.stdin` / `stdout` / `stderr` (`fs_stream.tz`). `crypto`: Web Crypto (`webcrypto.tz`). `core`: встроенные функции компилятора (`intrinsics.tz`, модуль `tz:intrinsics`: `panic`, `defer`, `asListener<F>`, `asClass<C>`, `chunkOf<T>` и другие), которые модули библиотеки импортируют по имени, а программа не видит. Глобальные получает сам файл, который их называет. Их код проверяется и компилируется вместе с программой; `declare function` в библиотеке — функция рантайма на C, имя которой выводится из имени: `netClose` — `tz_net_close` |
 | `editors/types` | встроенные имена tz для TypeScript (`tz.d.ts`) и настройки tsc для программ tz (`tsconfig.json`) — для будущего плагина tsserver; лежат рядом с `tz.exe` в `types` |
 | `editors/vscode` | расширение VS Code: подсветка и форматирование файлов `.tz` ([README](editors/vscode/README.md)) |
 | `third_party` | рецепт сборки OpenSSL ([openssl](third_party/openssl)) и тексты лицензий, которые печатает `tz licenses` ([licenses](third_party/licenses)); inflate из zlib и декодер brotli как есть, для `fetch` (лицензии — рядом с ними); `@types/node` и undici-types для редактора ([types](third_party/types/README.md)); Prettier — форматтер расширения VS Code ([prettier](third_party/prettier/README.md)) |

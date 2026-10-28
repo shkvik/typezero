@@ -53,7 +53,7 @@ const checks = new Checks()
 checks.on("checked", (path, ok) => console.log(`checked ${path}: ${ok}`))
 
 async function fetchSigned(path: string, secret: string) {
-  const url = URL.parse(path, server.url)
+  const url = URL.parse(path, `http://127.0.0.1:${server.port}`)
   if (url.isErr()) return url.error.message
   const res = must(await fetch(url.value))
   const body = must(await res.text())

@@ -287,7 +287,6 @@ Expr *SubtleCallChecker::checkSubtleCall(CallExpr *call, MemberExpr *member, con
           literalAlgorithm(checker_.diags_, algorithm(2), "get key length", "", bad);
         }
         usages(4, name, 0, true);
-        target = "subtleDeriveKey" + family.str();
       }
     }
   } else if (method == "wrapKey") {

@@ -1,0 +1,83 @@
+// What the objects of the library give a program besides the API of web and
+// node (docs/objects.md, section 6): every open member is safe, whoever calls
+// it, and the objects talk to each other through it.
+import { Server } from "tz:http"
+
+// A signal with the function that aborts it, as Promise.withResolvers gives a
+// promise with its resolve; the controller makes its signal so.
+const { signal, abort } = AbortSignal.withAbort()
+signal.addEventListener("abort", (event) => console.log("aborted:", signal.reason, event.isTrusted))
+console.log(signal.aborted)
+abort("enough")
+console.log(signal.aborted)
+
+// An event goes through dispatchOn: once at a time, and the listeners see it
+// at the target.
+const target = new EventTarget()
+const ping = new Event("ping")
+target.addEventListener("ping", (event) => {
+  console.log("first", event.eventPhase, event.target == target, event.isTrusted)
+  event.stopImmediatePropagation()
+})
+target.addEventListener("ping", () => console.log("never"))
+console.log(target.dispatchEvent(ping), ping.immediateStopped, ping.eventPhase)
+const again = new Event("again")
+console.log(again.dispatchOn(target, () => console.log("inside", again.dispatchOn(target, () => {}))))
+
+// The parameters of a URL tell it what changed; replace sets them from a text.
+const url = new URL("https://example.com/a?x=1")
+const seen: (string | undefined)[] = []
+url.searchParams.watch((query) => seen.push(query))
+url.searchParams.append("y", "2 3")
+console.log(url.href, url.search)
+url.searchParams.replace("z=9")
+console.log(url.href, url.searchParams.get("z"), url.searchParams.size)
+url.setSearch("?q=a b")
+console.log(url.href, url.searchParams.get("q"))
+url.searchParams.replace()
+console.log(url.href, JSON.stringify(seen))
+
+// A stream says whether it was read.
+const stream = new ReadableStream<string>({ start: (c) => { c.enqueue("a"); c.close() } })
+console.log(stream.locked, stream.disturbed)
+const reader = stream.getReader()
+const first = await reader.read()
+console.log(first.isOk() && !first.value.done ? first.value.value : "-", stream.locked, stream.disturbed)
+
+// A key does its own operations; crypto.subtle calls them.
+const made = await crypto.subtle.generateKey({ name: "HMAC", hash: "SHA-256" }, true, ["sign", "verify"])
+if (made.isOk() && made.value instanceof CryptoKey) {
+  const key = made.value
+  const data = new TextEncoder().encode("hello")
+  const signature = await key.sign("HMAC", data)
+  if (signature.isOk()) {
+    console.log((await key.verify("HMAC", signature.value, data)).unwrapOr(false))
+    console.log((await crypto.subtle.verify("HMAC", key, signature.value, data)).unwrapOr(false))
+  }
+  const raw = await key.export("raw")
+  if (raw.isOk()) {
+    const value = raw.value
+    console.log(value instanceof ArrayBuffer ? value.byteLength : -1)
+  }
+  const refused = await key.encrypt({ name: "AES-GCM", iv: new Uint8Array(12) }, data)
+  console.log(refused.isErr() ? refused.error.code : "encrypted")
+}
+
+// A server is made, then listens; listen gives its address.
+const server = new Server((request) => new Response(`hi ${new URL(request.url).pathname}`))
+console.log(server.port, JSON.stringify(server.hostname), server.url == undefined)
+await server.stop()
+const listened = server.listen({ port: 0, hostname: "127.0.0.1" })
+if (listened.isErr()) {
+  console.log("cannot listen:", listened.error.message)
+  process.exit(1)
+}
+const base = listened.value
+console.log(base.hostname, server.port > 0, server.url?.href == base.href)
+const res = await fetch(new URL("/there", base))
+console.log(res.isOk() ? (await res.value.text()).unwrapOr("-") : "failed")
+const twice = server.listen({ port: 0, hostname: "127.0.0.1" })
+console.log(twice.isErr() ? twice.error.code : "listened twice")
+await server.stop()
+const after = server.listen({ port: 0, hostname: "127.0.0.1" })
+console.log(after.isErr() ? after.error.code : "listened after stop")

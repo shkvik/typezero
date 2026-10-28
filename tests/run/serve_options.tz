@@ -27,7 +27,7 @@ if (listening.isErr()) {
 }
 const server = listening.value
 console.log(listened, server.hostname, server.port > 0)
-console.log(server.url.href.replaceAll(String(server.port), "PORT"))
+console.log((server.url?.href ?? "").replaceAll(String(server.port), "PORT"))
 const slow = fetch(`http://127.0.0.1:${server.port}/slow`)
 await started.promise
 controller.abort()

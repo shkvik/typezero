@@ -1,8 +1,9 @@
-function __tz_lib_class_name(object: object): string
-function __tz_signal_new(): object
-function __tz_lib_signal_abort(native: object, reason: unknown): void
-function __tz_lib_signal_run(native: object, order: double): void
-function __tz_lib_order(): double
+import { asClass } from "tz:intrinsics"
+declare function libClassName(object: object): string
+declare function signalNew(): object
+declare function libSignalAbort(native: object, reason: unknown): void
+declare function libSignalRun(native: object, order: double): void
+declare function libOrder(): double
 
 export class DOMException {
   readonly message: string
@@ -41,20 +42,19 @@ export class Event {
   static readonly BUBBLING_PHASE = 3
 
   readonly type: string
-  defaultPrevented = false
+  readonly defaultPrevented = false
   readonly cancelable: boolean
   readonly timeStamp: double
   readonly bubbles: boolean
   readonly composed: boolean
-  isTrusted = false
-  target: EventTarget | undefined = undefined
-  currentTarget: EventTarget | undefined = undefined
-  srcElement: EventTarget | undefined = undefined
-  eventPhase = 0
+  readonly isTrusted = false
+  readonly target?: EventTarget
+  readonly currentTarget?: EventTarget
+  readonly srcElement?: EventTarget
+  readonly eventPhase = 0
+  readonly immediateStopped = false
   returnValue = true
   cancelBubble = false
-  private inDispatch = false
-  private stopImmediate = false
 
   constructor(type: string, options?: EventInit) {
     this.type = type
@@ -76,34 +76,35 @@ export class Event {
 
   stopImmediatePropagation() {
     this.cancelBubble = true
-    this.stopImmediate = true
+    this.immediateStopped = true
   }
 
   composedPath(): EventTarget[] {
     const target = this.currentTarget
-    return this.inDispatch && target != undefined ? [target] : []
+    return this.eventPhase != Event.NONE && target != undefined ? [target] : []
   }
 
-  dispatching(): boolean {
-    return this.inDispatch
-  }
-
-  beginDispatch(target: EventTarget) {
-    this.inDispatch = true
+  dispatchOn(target: EventTarget, run: () => void): boolean {
+    if (this.eventPhase != Event.NONE) return false
     this.target = target
     this.srcElement = target
     this.currentTarget = target
     this.eventPhase = Event.AT_TARGET
-  }
-
-  endDispatch() {
-    this.inDispatch = false
+    run()
     this.currentTarget = undefined
     this.eventPhase = Event.NONE
+    return true
   }
 
-  stoppedImmediately() {
-    return this.stopImmediate
+  protected markTrusted() {
+    this.isTrusted = true
+  }
+}
+
+class TrustedEvent extends Event {
+  constructor(type: string) {
+    super(type)
+    this.markTrusted()
   }
 }
 
@@ -138,9 +139,9 @@ export interface AddEventListenerOptions {
 }
 
 class Listener {
-  next: Listener | undefined = undefined
+  next?: Listener
   removed = false
-  readonly order = __tz_lib_order()
+  readonly order = libOrder()
   constructor(
     readonly callback: (event: Event) => void,
     readonly original: unknown,
@@ -150,21 +151,21 @@ class Listener {
 }
 
 export class EventTarget {
-  private events = new Map<string, Listener>()
+  private events?: Map<string, Listener>
 
-  addFunctionListener<E extends Event>(
+  private addFunctionListener<E extends Event>(
     type: string,
     listener: (event: E) => void,
     options?: AddEventListenerOptions,
   ) {
     const callback = (event: Event) => {
-      const wanted = __tz_as<E>(event)
+      const wanted = asClass<E>(event)
       if (wanted != undefined) listener(wanted)
     }
     this.add(type, callback, listener, options)
   }
 
-  addObjectListener(
+  private addObjectListener(
     type: string,
     listener: EventListenerObject,
     options?: AddEventListenerOptions,
@@ -181,10 +182,15 @@ export class EventTarget {
     const signal = options?.signal
     if (signal != undefined && signal.aborted) return
     const capture = options?.capture ?? false
-    let root = this.events.get(type)
+    let events = this.events
+    if (events == undefined) {
+      events = new Map<string, Listener>()
+      this.events = events
+    }
+    let root = events.get(type)
     if (root == undefined) {
       root = new Listener(noListener, undefined, false, false)
-      this.events.set(type, root)
+      events.set(type, root)
     }
     let last = root
     for (let at = root.next; at != undefined; at = at.next) {
@@ -194,16 +200,16 @@ export class EventTarget {
     last.next = new Listener(callback, original, options?.once ?? false, capture)
     if (signal != undefined) {
       const remove = (_event: Event) => this.removeListenerOf(type, original, capture)
-      signal.addFunctionListener<Event>("abort", remove, { once: true })
+      signal.addEventListener("abort", remove, { once: true })
     }
   }
 
-  removeListenerWith(type: string, listener: unknown, options?: { capture?: boolean }) {
+  private removeListenerWith(type: string, listener: unknown, options?: { capture?: boolean }) {
     this.removeListenerOf(type, listener, options?.capture ?? false)
   }
 
-  removeListenerOf(type: string, original: unknown, capture: boolean) {
-    const root = this.events.get(type)
+  private removeListenerOf(type: string, original: unknown, capture: boolean) {
+    const root = this.events?.get(type)
     if (root == undefined) return
     let previous = root
     for (let at = root.next; at != undefined; at = at.next) {
@@ -222,54 +228,62 @@ export class EventTarget {
   }
 
   dispatchEvent(event: Event): boolean {
-    if (event.dispatching()) return false
-    event.beginDispatch(this)
-    const root = this.events.get(event.type)
-    let handler = root?.next
-    while (handler != undefined) {
-      const next: Listener | undefined = handler.next
-      this.runtimeListeners(event.type, handler.order)
-      if (handler.removed || event.stoppedImmediately()) {
+    const ran = event.dispatchOn(this, () => {
+      const root = this.events?.get(event.type)
+      let handler = root?.next
+      while (handler != undefined) {
+        const next: Listener | undefined = handler.next
+        this.runtimeListeners(event.type, handler.order)
+        if (handler.removed || event.immediateStopped) {
+          handler = next
+          continue
+        }
+        if (handler.once) this.removeListenerOf(event.type, handler.original, handler.capture)
+        handler.callback(event)
         handler = next
-        continue
       }
-      if (handler.once) this.removeListenerOf(event.type, handler.original, handler.capture)
-      handler.callback(event)
-      handler = next
-    }
-    this.runtimeListeners(event.type, Number.MAX_VALUE)
-    event.endDispatch()
-    return !event.defaultPrevented
+      this.runtimeListeners(event.type, Number.MAX_VALUE)
+    })
+    return ran && !event.defaultPrevented
   }
 
-  listenersOf(type: string): unknown[] {
+  private listenersOf(type: string): unknown[] {
     const out: unknown[] = []
-    const root = this.events.get(type)
+    const root = this.events?.get(type)
     for (let at = root?.next; at != undefined; at = at.next) out.push(at.original)
     return out
   }
 }
 
 export class AbortSignal extends EventTarget {
-  aborted = false
-  reason: unknown = undefined
-  onabort: ((event: Event) => void) | undefined = undefined
-  private native: object = __tz_signal_new()
-  private dependants: AbortSignal[] = []
+  readonly aborted = false
+  readonly reason: unknown = undefined
+  onabort?: (event: Event) => void
+  private native: object = signalNew()
+  private dependants?: AbortSignal[]
   private onabortListens = false
 
-  protected runtimeListeners(type: string, order: double) {
-    if (type == "abort") __tz_lib_signal_run(this.native, order)
+  private constructor() {
+    super()
   }
 
-  setOnabort(handler: ((event: Event) => void) | undefined) {
+  static withAbort(): { signal: AbortSignal; abort: (reason: unknown) => void } {
+    const signal = new AbortSignal()
+    return { signal, abort: (reason: unknown) => signal.abort(reason) }
+  }
+
+  protected runtimeListeners(type: string, order: double) {
+    if (type == "abort") libSignalRun(this.native, order)
+  }
+
+  private setOnabort(handler?: (event: Event) => void) {
     this.onabort = handler
     if (this.onabortListens) return
     this.onabortListens = true
-    this.addFunctionListener<Event>("abort", runOnabort)
+    this.addEventListener("abort", runOnabort)
   }
 
-  abortWith(reason: unknown) {
+  private abort(reason: unknown) {
     if (this.aborted) return
     const followers: AbortSignal[] = []
     this.markAborted(reason, followers)
@@ -280,9 +294,10 @@ export class AbortSignal extends EventTarget {
   private markAborted(reason: unknown, followers: AbortSignal[]) {
     this.aborted = true
     this.reason = reason
-    __tz_lib_signal_abort(this.native, reason)
+    libSignalAbort(this.native, reason)
     const dependants = this.dependants
-    this.dependants = []
+    this.dependants = undefined
+    if (dependants == undefined) return
     for (const signal of dependants)
       if (!signal.aborted) {
         followers.push(signal)
@@ -291,9 +306,7 @@ export class AbortSignal extends EventTarget {
   }
 
   private runAbort() {
-    const event = new Event("abort")
-    event.isTrusted = true
-    this.dispatchEvent(event)
+    this.dispatchEvent(new TrustedEvent("abort"))
   }
 
   static abort(reason?: unknown): AbortSignal {
@@ -305,7 +318,7 @@ export class AbortSignal extends EventTarget {
   static timeout(delay: double): AbortSignal {
     const signal = new AbortSignal()
     setTimeout(() => {
-      signal.abortWith(new DOMException("The operation was aborted due to timeout", "TimeoutError"))
+      signal.abort(new DOMException("The operation was aborted due to timeout", "TimeoutError"))
     }, delay).unref()
     return signal
   }
@@ -317,17 +330,27 @@ export class AbortSignal extends EventTarget {
         result.markAborted(signal.reason, [])
         return result
       }
-    for (const signal of signals)
-      if (!signal.dependants.includes(result)) signal.dependants.push(result)
+    for (const signal of signals) {
+      const dependants = signal.dependants ?? []
+      if (!dependants.includes(result)) dependants.push(result)
+      signal.dependants = dependants
+    }
     return result
   }
 }
 
 export class AbortController {
-  readonly signal = new AbortSignal()
+  readonly signal: AbortSignal
+  private cancel: (reason: unknown) => void
+
+  constructor() {
+    const made = AbortSignal.withAbort()
+    this.signal = made.signal
+    this.cancel = made.abort
+  }
 
   abort(reason?: unknown) {
-    this.signal.abortWith(reason ?? new DOMException("This operation was aborted", "AbortError"))
+    this.cancel(reason ?? new DOMException("This operation was aborted", "AbortError"))
   }
 }
 
@@ -338,4 +361,4 @@ function runOnabort(event: Event) {
   if (handler != undefined) handler(event)
 }
 
-function noListener(_event: Event) {}
+function noListener(event: Event) {}

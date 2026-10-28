@@ -965,7 +965,7 @@ const Type *Type::regExp() {
 const Type *Type::date() {
   static Type *type = [] {
     Type *t = interned().objects.emplace_back(new Type(Kind::Object, "Date")).get();
-    t->fields_.push_back({"%time", doubleTy(), false});
+    t->fields_.push_back({"%time", intTy(), false});
     t->date_ = true;
 
     return t;

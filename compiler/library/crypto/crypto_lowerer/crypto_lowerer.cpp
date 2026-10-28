@@ -154,8 +154,9 @@ llvm::Value *CryptoLowerer::emitCryptoCall(CallExpr *call) {
     }
   }
 
-  llvm::Type *ret = fn.result == 'o' || fn.result == 'p'   ? ptr
-                    : fn.result == 'f' || fn.result == 't' ? f64
+  llvm::Type *ret = fn.result == 'o' || fn.result == 'p' ? ptr
+                    : fn.result == 'f'                   ? f64
+                    : fn.result == 't'                   ? lowering_.builder_.getInt64Ty()
                     : fn.result == 'v' || fn.result == 's' || fn.result == 'S' || fn.result == 'P'
                         ? voidTy
                         : i32;

@@ -268,15 +268,15 @@ llvm::Constant *IntlLowerer::intlBoundInfo(IntlKind kind, const Type *fnType) {
     llvm::Value *date = code->getArg(1);
     llvm::Value *time;
     if (param->isDate()) {
-      time =
-          lowering_.builder_.CreateLoad(f64, lowering_.dateLowerer().dateTimeAddress(date), "time");
+      time = lowering_.builder_.CreateLoad(lowering_.builder_.getInt64Ty(),
+                                           lowering_.dateLowerer().dateTimeAddress(date), "time");
     } else {
-      llvm::Value *ms = param->isFloat() ? date : lowering_.builder_.CreateSIToFP(date, f64);
-      time = lowering_.builder_.CreateCall(
-          lowering_.processLowerer().processFunction("tz_date_clip", f64, {f64}), {ms});
+      time = param->isFloat() ? lowering_.dateLowerer().wholeTime(date)
+                              : lowering_.numberLowerer().toI64(date, param);
     }
     result = lowering_.stringLowerer().callReturningString(
-        lowering_.processLowerer().processFunction("tz_dtf_format", voidTy, {ptr, ptr, f64}),
+        lowering_.processLowerer().processFunction("tz_dtf_format", voidTy,
+                                                   {ptr, ptr, lowering_.builder_.getInt64Ty()}),
         {self, time});
     lowering_.refCounts().releaseValue(date, param);
   } else {

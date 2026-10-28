@@ -1,5 +1,4 @@
 #include "compiler/library/events/event_target_checker/event_target_checker.h"
-#include "compiler/declare/prelude/prelude.h"
 #include "compiler/check/expr/argument_checker/argument_checker.h"
 #include "compiler/check/expr/call_checker/call_checker.h"
 #include "compiler/check/expr/expr_checker/expr_checker.h"
@@ -9,6 +8,7 @@
 #include "compiler/check/types/type_relations/type_relations.h"
 #include "compiler/check/types/type_resolver/type_resolver.h"
 #include "compiler/declare/class_declarer/class_declarer.h"
+#include "compiler/declare/prelude/prelude.h"
 #include "compiler/declare/type_declarer/type_declarer.h"
 #include "compiler/infer/return_inferrer/return_inferrer.h"
 #include "compiler/library/events/emitter_checker/emitter_checker.h"
@@ -64,8 +64,7 @@ Expr *EventTargetChecker::onabortAssign(AssignExpr *assign, MemberExpr *member, 
 
 Expr *EventTargetChecker::checkEventTargetCall(CallExpr *call, MemberExpr *member, ClassDecl *cls) {
   bool add = member->name == "addEventListener";
-  if ((!add && member->name != "removeEventListener") ||
-      checker_.libraryCalls().inLibrary(call->loc())) {
+  if (!add && member->name != "removeEventListener") {
     return nullptr;
   }
   ClassDecl *eventClass = checker_.libraryClass("Event");

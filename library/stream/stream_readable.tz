@@ -46,7 +46,7 @@ function readableAddChunkUnshiftValue(stream: Stream, state: ReadableState,
 }
 
 function isBufferChunk(chunk: unknown): boolean {
-  return __tz_isChunk<Buffer>(chunk)
+  return isChunk<Buffer>(chunk)
 }
 
 function readableAddChunkPushByteMode(stream: Stream, state: ReadableState, chunk: unknown,

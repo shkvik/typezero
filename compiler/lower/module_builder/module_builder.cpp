@@ -99,7 +99,7 @@ std::unique_ptr<llvm::Module> ModuleBuilder::generate(SourceFile &file) {
   std::vector<ClassDecl *> classes;
   for (Stmt *item : file.items) {
     if (auto *fn = dyn_cast<FunctionDecl>(item);
-        fn && fn->typeParams.empty() && !file.unusedFunctions.contains(fn)) {
+        fn && fn->typeParams.empty() && !fn->intrinsic && !file.unusedFunctions.contains(fn)) {
       functions.push_back(fn);
     }
     if (auto *cls = dyn_cast<ClassDecl>(item)) {

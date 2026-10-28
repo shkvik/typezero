@@ -169,20 +169,19 @@ void UrlChecker::checkUrlNew(NewExpr *expr) {
   }
 }
 
-void UrlChecker::checkUrlSetter(MemberExpr *member, const CallExpr *call) {
-  if (call->args.size() != 1 || !isLibraryClass(member->object->type, "URL") ||
-      checker_.libraryCalls().inLibrary(member->loc())) {
-    return;
+bool UrlChecker::checkUrlSetter(MemberExpr *member, const CallExpr *call) {
+  if (call->args.size() != 1 || !isLibraryClass(member->object->type, "URL")) {
+    return false;
   }
   llvm::StringRef name = member->name;
   if (name != "setHref" && name != "setProtocol" && name != "setHost" && name != "setHostname" &&
       name != "setPort") {
-    return;
+    return false;
   }
   const Expr *input = call->args[0];
   std::optional<std::string> text = literalText(input);
   if (!text) {
-    return;
+    return false;
   }
   llvm::StringRef value = *text;
   std::string problem;
@@ -226,9 +225,10 @@ void UrlChecker::checkUrlSetter(MemberExpr *member, const CallExpr *call) {
   }
   if (!problem.empty()) {
     checker_.diags_.error(input->loc(), problem);
-    return;
+    return false;
   }
-  member->name = checker_.ctx_.keepName("__tz_" + name.str());
+
+  return true;
 }
 
 }

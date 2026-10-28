@@ -37,8 +37,8 @@ enum class NodeModule {
 
 std::string cryptoExportProblem(llvm::StringRef name, llvm::StringRef path);
 
-inline constexpr llvm::StringLiteral kSubtleName = "__tz_subtle";
-inline constexpr llvm::StringLiteral kIntlLocaleName = "__tz_IntlLocale";
+inline constexpr llvm::StringLiteral kSubtleName = "%subtle";
+inline constexpr llvm::StringLiteral kIntlLocaleName = "%IntlLocale";
 
 std::string builtinModuleProblem(llvm::StringRef path);
 

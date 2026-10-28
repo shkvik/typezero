@@ -79,14 +79,14 @@ double tz_date_time_clip(double time);
 typedef struct TzDate {
   int64_t rc;
   const TzLayout *layout;
-  double time;
+  int64_t time;
 } TzDate;
 
-void tz_buf_date(TzBuf *out, double t);
-void tz_date_iso(TzStr *out, double t);
-void tz_date_local_string(TzStr *out, double t, int32_t mode);
+void tz_buf_date(TzBuf *out, int64_t t);
+void tz_date_iso(TzStr *out, int64_t t);
+void tz_date_local_string(TzStr *out, int64_t t, int32_t mode);
 
-double tz_date_equivalent_time(double t);
+int64_t tz_date_equivalent_time(int64_t t);
 
 #endif
 

@@ -929,12 +929,8 @@ static const TzField *entries_getter(const TzLayout *layout, int *arrows) {
     if (field->offset != TZ_FIELD_GETTER) {
       continue;
     }
-    if (field->name_length == 12 && memcmp(field->name, "__tz_entries", 12) == 0) {
-      *arrows = 1;
-      return field;
-    }
-    if (field->name_length == 9 && memcmp(field->name, "__tz_keys", 9) == 0) {
-      *arrows = 0;
+    if (field->name_length == 7 && memcmp(field->name, "printed", 7) == 0) {
+      *arrows = named(layout, "URLSearchParams");
       return field;
     }
   }

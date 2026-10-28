@@ -61,7 +61,8 @@ Module *ModuleResolver::resolve(Module *from, llvm::StringRef spec, llvm::SMLoc 
   if (spec == "tz:http") {
     return loader_.library().libraryModule("http.tz", "tz:http", loc);
   }
-  if (from->builtin && (spec == "tz:web" || spec == "tz:url" || spec == "tz:fetch")) {
+  if (from->builtin &&
+      (spec == "tz:web" || spec == "tz:url" || spec == "tz:fetch" || spec == "tz:intrinsics")) {
     return loader_.library().libraryModule(spec.drop_front(3).str() + ".tz", spec, loc);
   }
   if (spec == "node:stream" || spec == "stream") {

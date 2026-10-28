@@ -149,29 +149,41 @@ static void offsets_at(double t, double *offset, double *dst) {
   tz_zone_cache_dst = *dst;
 }
 
-double tz_date_offset(double t) {
+static double zone_time(int64_t t) {
+  int distant = (double)t < -TZ_DATE_MAX_TIME || (double)t > TZ_DATE_MAX_TIME;
+
+  return (double)(distant ? tz_date_equivalent_time(t) : t);
+}
+
+static double offset_of(double t) {
   double offset, dst;
-  tz_lock(&tz_zone_lock);
   offsets_at(t, &offset, &dst);
-  tz_unlock(&tz_zone_lock);
 
   return offset;
 }
 
-static double local_to_utc(double local);
-
-double tz_date_local_to_utc(double local) {
+int64_t tz_date_offset(int64_t t) {
   tz_lock(&tz_zone_lock);
-  double utc = local_to_utc(local);
+  double offset = offset_of(zone_time(t));
   tz_unlock(&tz_zone_lock);
 
-  return utc;
+  return (int64_t)offset;
 }
 
-static double local_to_utc(double local) {
+static double local_offset(double local);
+
+int64_t tz_date_local_offset(int64_t local) {
+  tz_lock(&tz_zone_lock);
+  double offset = local_offset(zone_time(local));
+  tz_unlock(&tz_zone_lock);
+
+  return (int64_t)offset;
+}
+
+static double local_offset(double local) {
   void *cal = zone_calendar();
   if (!cal) {
-    return local;
+    return 0;
   }
   const TzIcu *icu = tz_icu();
   if (icu->ucal_getTimeZoneOffsetFromLocal) {
@@ -181,34 +193,32 @@ static double local_to_utc(double local) {
     icu->ucal_getTimeZoneOffsetFromLocal(cal, TZ_UCAL_TZ_LOCAL_FORMER, TZ_UCAL_TZ_LOCAL_FORMER,
                                          &raw, &dst, &status);
     if (!TZ_U_FAILURE(status)) {
-      return local - ((double)raw + (double)dst);
+      return (double)raw + (double)dst;
     }
   }
-  double before = tz_date_offset(local - 86400000.0);
-  double after = tz_date_offset(local + 86400000.0);
-  double former = local - before;
-  if (before == after || tz_date_offset(former) == before) {
-    return former;
+  double before = offset_of(local - 86400000.0);
+  double after = offset_of(local + 86400000.0);
+  if (before == after || offset_of(local - before) == before) {
+    return before;
   }
-  double latter = local - after;
 
-  return tz_date_offset(latter) == after ? latter : former;
+  return offset_of(local - after) == after ? after : before;
 }
 
-static void zone_name(TzBuf *out, double t);
+static void zone_name(TzBuf *out, int64_t t);
 
-void tz_date_zone_name(TzBuf *out, double t) {
+void tz_date_zone_name(TzBuf *out, int64_t t) {
   tz_lock(&tz_zone_lock);
   zone_name(out, t);
   tz_unlock(&tz_zone_lock);
 }
 
-static void zone_name(TzBuf *out, double t) {
-  if (t < 0 || t > 2147483647000.0) {
+static void zone_name(TzBuf *out, int64_t t) {
+  if (t < 0 || t > 2147483647000) {
     t = tz_date_equivalent_time(t);
   }
   double offset, dst;
-  offsets_at(t, &offset, &dst);
+  offsets_at((double)t, &offset, &dst);
   void *cal = zone_calendar();
   if (!cal) {
     tz_buf_ascii(out, "Coordinated Universal Time");

@@ -27,32 +27,33 @@ struct SubtleIntrinsic {
 };
 
 const SubtleIntrinsic kSubtleIntrinsics[] = {
-    {"__tz_subtle_digest", CryptoFn::SubtleDigest, "md", 'B'},
-    {"__tz_subtle_hmac", CryptoFn::SubtleHmac, "mdd", 'B'},
-    {"__tz_subtle_hmacVerify", CryptoFn::SubtleHmacVerify, "mddd", 'I'},
-    {"__tz_subtle_pbkdf2", CryptoFn::SubtlePbkdf2, "mddff", 'B'},
-    {"__tz_subtle_hkdf", CryptoFn::SubtleHkdf, "mdddf", 'U'},
-    {"__tz_subtle_aes", CryptoFn::SubtleAes, "cdbddiid", 'U'},
-    {"__tz_subtle_aesKw", CryptoFn::SubtleAesKw, "dbd", 'U'},
-    {"__tz_subtle_sign", CryptoFn::SubtleSign, "oisid", 'U'},
-    {"__tz_subtle_verify", CryptoFn::SubtleVerify, "oisidd", 'I'},
-    {"__tz_subtle_rsaOaep", CryptoFn::SubtleRsaOaep, "osdbd", 'U'},
-    {"__tz_subtle_derive", CryptoFn::SubtleDerive, "oo", 'U'},
-    {"__tz_subtle_generate", CryptoFn::SubtleGenerate, "iffs", 'K'},
+    {"subtleDigest", CryptoFn::SubtleDigest, "md", 'B'},
+    {"subtleHmac", CryptoFn::SubtleHmac, "mdd", 'B'},
+    {"subtleHmacVerify", CryptoFn::SubtleHmacVerify, "mddd", 'I'},
+    {"subtlePbkdf2", CryptoFn::SubtlePbkdf2, "mddff", 'B'},
+    {"subtleHkdf", CryptoFn::SubtleHkdf, "mdddf", 'U'},
+    {"subtleAes", CryptoFn::SubtleAes, "cdbddiid", 'U'},
+    {"subtleAesKw", CryptoFn::SubtleAesKw, "dbd", 'U'},
+    {"subtleSign", CryptoFn::SubtleSign, "oisid", 'U'},
+    {"subtleVerify", CryptoFn::SubtleVerify, "oisidd", 'I'},
+    {"subtleRsaOaep", CryptoFn::SubtleRsaOaep, "osdbd", 'U'},
+    {"subtleDerive", CryptoFn::SubtleDerive, "oo", 'U'},
+    {"subtleGenerate", CryptoFn::SubtleGenerate, "iffs", 'K'},
 };
 
 }
 
 WebCryptoChecker::WebCryptoChecker(Checker &checker) : checker_(checker) {}
 
-Expr *WebCryptoChecker::checkSubtleIntrinsic(CallExpr *call, NameExpr *name) {
+Expr *WebCryptoChecker::checkSubtleIntrinsic(CallExpr *call, NameExpr *name,
+                                             llvm::StringRef intrinsicName) {
   call->type = Type::error();
   const SubtleIntrinsic *intrinsic = llvm::find_if(
-      kSubtleIntrinsics, [&](const SubtleIntrinsic &i) { return i.name == name->name; });
+      kSubtleIntrinsics, [&](const SubtleIntrinsic &i) { return i.name == intrinsicName; });
   if (intrinsic == std::end(kSubtleIntrinsics) || call->args.size() != intrinsic->params.size() ||
       call->hasSpread()) {
     checker_.diags_.error(name->loc(),
-                          "'" + name->name + "' is no intrinsic of tz, or is called wrongly");
+                          "'" + intrinsicName + "' is no intrinsic of tz, or is called wrongly");
     for (Expr *&arg : call->args) {
       arg = checker_.exprChecker().checkExpr(arg);
     }
@@ -91,7 +92,7 @@ Expr *WebCryptoChecker::checkSubtleIntrinsic(CallExpr *call, NameExpr *name) {
     }
     char kind = intrinsic->params[i];
     if (checked && (kind == 'm' || kind == 'c') && !isa<IntLitExpr>(checked)) {
-      checker_.diags_.error(arg->loc(), "the hash or the cipher of '" + name->name +
+      checker_.diags_.error(arg->loc(), "the hash or the cipher of '" + intrinsicName +
                                             "' is a literal of the direct layer");
       checked = nullptr;
     }

@@ -43,11 +43,13 @@ constexpr double kMaxTime = 8.64e15;
 
 constexpr double kDay = 86400000;
 
-const double kPartLimits[7][2] = {{-271820, 275759}, {0, 11}, {1, 31}, {0, 23},
-                                  {0, 59},           {0, 59}, {0, 999}};
+constexpr double kFirstYear = -292275055, kLastYear = 292278994;
+
+const double kPartLimits[7][2] = {
+    {kFirstYear + 1, kLastYear - 1}, {0, 11}, {1, 31}, {0, 23}, {0, 59}, {0, 59}, {0, 999}};
 
 double monthStart(double months) {
-  if (!(std::fabs(months) < 1e9)) {
+  if (!(std::fabs(months) < 1e15)) {
     return months * 30.436875;
   }
   auto m = int64_t(months);
@@ -87,7 +89,7 @@ void BuiltinEvaluator::checkDateParts(const CallExpr *call, const std::vector<Va
     if (!field) {
       return;
     }
-    nums = {range(-271821, 275760, Origin::Trusted),
+    nums = {range(kFirstYear, kLastYear, Origin::Trusted),
             range(0, 11),
             range(1, 31),
             range(0, 23),
@@ -109,7 +111,8 @@ void BuiltinEvaluator::checkDateParts(const CallExpr *call, const std::vector<Va
   if (!setter && nums[0].lo <= 99 && nums[0].hi >= 0) {
     nums[0] = join(nums[0], range(1900, 1999));
   }
-  check_.overflowWarnings().checkDate(dateTime(nums), local ? kMaxTime - kDay : kMaxTime, parts);
+  double edge = double(std::numeric_limits<int64_t>::max());
+  check_.overflowWarnings().checkDate(dateTime(nums), local ? edge - kDay : edge, parts);
 }
 
 BuiltinEvaluator::BuiltinEvaluator(OverflowCheck &check) : check_(check) {}
@@ -356,44 +359,18 @@ Val BuiltinEvaluator::evalBuiltin(const CallExpr *call, State &st) {
     }
     return Val();
   case Builtin::DateNew:
-    if (!call->args.empty() && call->args[0]->type && call->args[0]->type->isInteger()) {
-      check_.overflowWarnings().checkWithin(call->args[0], arg(0).num, -kMaxTime, kMaxTime,
-                                            "the time of a date",
-                                            "±8640000000000000 ms, 100 million days around "
-                                            "1970");
-    }
-    return check_.overflowWarnings().trusted(type);
   case Builtin::DateSetTime:
-    if (!call->args.empty() && call->args[0]->type && call->args[0]->type->isInteger()) {
-      check_.overflowWarnings().checkWithin(call->args[0], arg(0).num, -kMaxTime, kMaxTime,
-                                            "the time of a date",
-                                            "±8640000000000000 ms, 100 million days around "
-                                            "1970");
-    }
-    return numVal(range(-kMaxTime, kMaxTime, Origin::Trusted));
+  case Builtin::DateGetTime:
+    return check_.overflowWarnings().trusted(type);
   case Builtin::DateFromFields:
   case Builtin::DateUTC:
-    checkDateParts(call, args);
-    return call->builtin == Builtin::DateUTC ? numVal(range(-kMaxTime, kMaxTime, Origin::Trusted))
-                                             : check_.overflowWarnings().trusted(type);
   case Builtin::DateSetUTC:
   case Builtin::DateSetLocal:
     checkDateParts(call, args);
-    return numVal(range(-kMaxTime, kMaxTime, Origin::Trusted));
-  case Builtin::DtfFormat:
-  case Builtin::DtfFormatToParts:
-    if (!call->args.empty() && call->args[0]->type && call->args[0]->type->isNumeric()) {
-      check_.overflowWarnings().checkWithin(call->args[0], arg(0).num, -kMaxTime, kMaxTime,
-                                            "the time of a date",
-                                            "±8640000000000000 ms, 100 million days around "
-                                            "1970");
-    }
-    break;
+    return check_.overflowWarnings().trusted(type);
   case Builtin::DateNow:
   case Builtin::PerformanceNow:
     return numVal(range(0, kMaxTime, Origin::Trusted));
-  case Builtin::DateGetTime:
-    return numVal(range(-kMaxTime, kMaxTime, Origin::Trusted));
   case Builtin::DateParse: {
     Val result;
     result.elem = share(numVal(range(-kMaxTime, kMaxTime, Origin::Trusted)));
@@ -404,7 +381,7 @@ Val BuiltinEvaluator::evalBuiltin(const CallExpr *call, State &st) {
     auto *field = call->args.empty() ? nullptr : dyn_cast<IntLitExpr>(call->args[0]);
     switch (field ? int(field->value) : -1) {
     case TZ_DATE_YEAR:
-      return numVal(range(-271821, 275760, Origin::Trusted));
+      return numVal(range(kFirstYear, kLastYear, Origin::Trusted));
     case TZ_DATE_MONTH:
       return numVal(range(0, 11));
     case TZ_DATE_DATE:

@@ -9,6 +9,7 @@
 #include "runtime/core/string/string.h"
 #include "runtime/core/tzrt/tzrt.h"
 #include <math.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -31,7 +32,23 @@ typedef struct {
   char values[TZ_DTO_COUNT][TEXT];
   int32_t hour12;
   int32_t fractional;
+  int32_t gregorian;
 } Resolved;
+
+typedef struct {
+  int32_t field, begin, end;
+} Span;
+
+enum { MAX_SPANS = 64, YEAR_FIELD = 1, YEAR_OF_CALENDAR = 1 };
+
+typedef struct {
+  TzUChar buffer[256];
+  TzUChar *heap;
+  TzUChar *text;
+  int32_t length;
+  Span spans[MAX_SPANS];
+  int32_t count;
+} Formatted;
 
 typedef struct {
   int64_t rc;
@@ -678,6 +695,8 @@ static Resolved *create(const TzDateOptions *o, int kind) {
 
   status = 0;
   type = icu->ucal_getType(icu->udat_getCalendar(format), &status);
+  r->gregorian = !TZ_U_FAILURE(status) && type &&
+                 (strcmp(type, "gregorian") == 0 || strcmp(type, "iso8601") == 0);
   const char *bcp =
       type && !TZ_U_FAILURE(status) ? icu->uloc_toUnicodeLocaleType("ca", type) : NULL;
   copy_text(r->values[TZ_DTO_CALENDAR], bcp ? bcp : "gregory");
@@ -723,17 +742,125 @@ static int32_t format_units(Resolved *r, double t, TzUChar *buffer, int32_t capa
   return n;
 }
 
-static TzStr format_string(Resolved *r, double t) {
-  TzUChar buffer[256], *heap;
-  int32_t n = format_units(r, t, buffer, 256, &heap, NULL);
-  TzUChar *text = heap ? heap : buffer;
-  for (int32_t i = 0; i < n; ++i) {
-    if (text[i] == 0x202F) {
-      text[i] = ' ';
+static int64_t within_icu(const Resolved *r, int64_t t, int64_t *years) {
+  const int64_t edge = 8640000000000000, cycle = 12622780800000;
+  *years = 0;
+  if (!r->gregorian || (t >= -edge && t <= edge)) {
+    return t;
+  }
+  if (t > edge) {
+    int64_t k = (t - edge) / cycle + 1;
+    *years = 400 * k;
+    return t - k * cycle;
+  }
+  int64_t k = (-edge - t) / cycle + 1;
+  *years = 400 * k;
+
+  return t + k * cycle;
+}
+
+static int32_t year_digits(const Resolved *r, int64_t year, TzUChar *out, int32_t capacity) {
+  const TzIcu *icu = tz_icu();
+  char locale[TEXT + 16];
+  snprintf(locale, sizeof locale, "en@numbers=%s", r->values[TZ_DTO_NUMBERING_SYSTEM]);
+  static const TzUChar skeleton[] = {'g', 'r', 'o', 'u', 'p', '-', 'o', 'f', 'f'};
+  char parse_error[128];
+  TzUErrorCode status = 0;
+  void *formatter =
+      icu->unumf_openForSkeletonAndLocaleWithError(skeleton, 9, locale, parse_error, &status);
+  void *result = TZ_U_FAILURE(status) ? NULL : icu->unumf_openResult(&status);
+  int32_t length = 0;
+  if (result) {
+    icu->unumf_formatInt(formatter, year, result, &status);
+    const void *value = TZ_U_FAILURE(status) ? NULL : icu->unumf_resultAsValue(result, &status);
+    const TzUChar *text = value ? icu->ufmtval_getString(value, &length, &status) : NULL;
+    if (!text || TZ_U_FAILURE(status) || length > capacity) {
+      length = 0;
+    } else {
+      memcpy(out, text, (size_t)length * sizeof(TzUChar));
+    }
+    icu->unumf_closeResult(result);
+  }
+  if (formatter) {
+    icu->unumf_close(formatter);
+  }
+
+  return length;
+}
+
+static void restore_year(const Resolved *r, double t, int64_t years, Formatted *f) {
+  const TzIcu *icu = tz_icu();
+  TzUErrorCode status = 0;
+  void *cal = icu->ucal_clone(icu->udat_getCalendar(r->format), &status);
+  if (TZ_U_FAILURE(status) || !cal) {
+    return;
+  }
+  icu->ucal_setMillis(cal, t, &status);
+  int32_t shown = icu->ucal_get(cal, YEAR_OF_CALENDAR, &status);
+  icu->ucal_close(cal);
+  TzUChar before[32], after[32];
+  int32_t from = TZ_U_FAILURE(status) ? 0 : year_digits(r, shown, before, 32);
+  int32_t to = from ? year_digits(r, shown + years, after, 32) : 0;
+  if (!to) {
+    return;
+  }
+  for (int32_t i = 0; i < f->count; ++i) {
+    Span *s = &f->spans[i];
+    if (s->field != YEAR_FIELD || s->end - s->begin != from ||
+        memcmp(f->text + s->begin, before, (size_t)from * sizeof(TzUChar)) != 0) {
+      continue;
+    }
+    int32_t delta = to - from, end = s->end;
+    TzUChar *text = (TzUChar *)tz_alloc(((size_t)(f->length + delta) + 1) * sizeof(TzUChar));
+    memcpy(text, f->text, (size_t)s->begin * sizeof(TzUChar));
+    memcpy(text + s->begin, after, (size_t)to * sizeof(TzUChar));
+    memcpy(text + s->begin + to, f->text + end, (size_t)(f->length - end) * sizeof(TzUChar));
+    tz_free(f->heap);
+    f->heap = f->text = text;
+    f->length += delta;
+    for (int32_t j = 0; j < f->count; ++j) {
+      if (f->spans[j].begin >= end) {
+        f->spans[j].begin += delta;
+      }
+      if (f->spans[j].end >= end) {
+        f->spans[j].end += delta;
+      }
     }
   }
-  TzStr s = tz_str_from_utf16(heap ? heap : buffer, (size_t)n);
-  tz_free(heap);
+}
+
+static void format_spans(Resolved *r, int64_t time, Formatted *f, int spans) {
+  const TzIcu *icu = tz_icu();
+  int64_t years;
+  double t = (double)within_icu(r, time, &years);
+  TzUErrorCode status = 0;
+  void *iterator = spans || years ? icu->ufieldpositer_open(&status) : NULL;
+  f->length = format_units(r, t, f->buffer, 256, &f->heap, iterator);
+  f->text = f->heap ? f->heap : f->buffer;
+  f->count = 0;
+  if (!iterator) {
+    return;
+  }
+  int32_t begin, end, field;
+  while (f->count < MAX_SPANS && (field = icu->ufieldpositer_next(iterator, &begin, &end)) >= 0) {
+    f->spans[f->count++] = (Span){field, begin, end};
+  }
+  icu->ufieldpositer_close(iterator);
+  if (years) {
+    restore_year(r, t, years, f);
+  }
+}
+
+static TzStr format_string(Resolved *r, int64_t t) {
+  Formatted f;
+  format_spans(r, t, &f, 0);
+  for (int32_t i = 0; i < f.length; ++i) {
+    if (f.text[i] == 0x202F) {
+      f.text[i] = ' ';
+    }
+  }
+  TzStr s = tz_str_from_utf16(f.text, (size_t)f.length);
+  tz_free(f.heap);
 
   return s;
 }
@@ -833,7 +960,7 @@ void tz_date_format_shutdown(void) {
   }
 }
 
-void tz_date_locale(TzStr *out, double t, int32_t kind, const TzDateOptions *o) {
+void tz_date_locale(TzStr *out, int64_t t, int32_t kind, const TzDateOptions *o) {
   Resolved *r = cached(kind, o);
   *out = r ? format_string(r, t) : tz_str_from_ascii("", 0);
 }
@@ -857,7 +984,7 @@ void tz_dtf_drop(void *object) {
   tz_obj_free(f);
 }
 
-void tz_dtf_format(TzStr *out, TzDateFormat *f, double t) { *out = format_string(f->resolved, t); }
+void tz_dtf_format(TzStr *out, TzDateFormat *f, int64_t t) { *out = format_string(f->resolved, t); }
 
 static const char *part_type(int32_t field) {
   switch (field) {
@@ -907,22 +1034,23 @@ static const char *part_type(int32_t field) {
   }
 }
 
-TzArray *tz_dtf_format_to_parts(TzDateFormat *f, double t, const TzType *part_type_desc,
+TzArray *tz_dtf_format_to_parts(TzDateFormat *f, int64_t t, const TzType *part_type_desc,
                                 const TzLayout *layout, int64_t size, uint32_t type_offset,
                                 uint32_t value_offset) {
-  const TzIcu *icu = tz_icu();
-  TzUErrorCode status = 0;
-  void *iterator = icu->ufieldpositer_open(&status);
-  TzUChar buffer[256], *heap;
-  int32_t n = format_units(f->resolved, t, buffer, 256, &heap, iterator);
-  const TzUChar *text = heap ? heap : buffer;
+  Formatted formatted;
+  format_spans(f->resolved, t, &formatted, 1);
+  const TzUChar *text = formatted.text;
+  int32_t n = formatted.length;
   TzArray *parts = tz_arr_new(part_type_desc, 0, 8);
   int32_t previous = 0, begin, end, field;
-  for (;;) {
-    field = icu->ufieldpositer_next(iterator, &begin, &end);
-    int last = field < 0;
+  for (int32_t at = 0;; ++at) {
+    int last = at >= formatted.count;
     if (last) {
       begin = end = n;
+    } else {
+      field = formatted.spans[at].field;
+      begin = formatted.spans[at].begin;
+      end = formatted.spans[at].end;
     }
     for (int k = 0; k < 2; ++k) {
       int32_t from = k == 0 ? previous : begin, to = k == 0 ? begin : end;
@@ -943,8 +1071,7 @@ TzArray *tz_dtf_format_to_parts(TzDateFormat *f, double t, const TzType *part_ty
     }
     previous = end;
   }
-  icu->ufieldpositer_close(iterator);
-  tz_free(heap);
+  tz_free(formatted.heap);
 
   return parts;
 }

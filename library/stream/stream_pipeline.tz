@@ -15,7 +15,7 @@ export class PipelineStage {
 }
 
 async function* chunksAs<A>(source: AsyncGenerator<unknown>): AsyncGenerator<A> {
-  for await (const chunk of source) yield __tz_chunk<A>(chunk)
+  for await (const chunk of source) yield chunkOf<A>(chunk)
 }
 
 async function* chunksOf<B>(source: AsyncGenerator<B>): AsyncGenerator<unknown> {
@@ -90,7 +90,7 @@ export function streamVoidSinkStage<A>(
 }
 
 class PipelineState {
-  error: StreamError | undefined = undefined
+  error?: StreamError
   value: unknown = undefined
   destroys: ((err: StreamError | undefined) => void)[] = []
   lastStreamCleanup: (() => void)[] = []
@@ -232,7 +232,7 @@ function pipelinePipe(src: Stream, dst: Stream, ps: PipelineState, end: boolean)
 
 function pipelineImpl(stages: (Stream | PipelineStage)[], ps: PipelineState, end: boolean,
                       outerSignal: AbortSignal | undefined): Stream | undefined {
-  if (stages.length < 2) __tz_panic("internal error: pipeline() takes two streams or more")
+  if (stages.length < 2) panic("internal error: pipeline() takes two streams or more")
   const signal = ps.ac.signal
   const abort = () => finishImpl(ps, abortError(), false)
   let onOuterAbort: ((event: Event) => void) | undefined = undefined
@@ -240,8 +240,8 @@ function pipelineImpl(stages: (Stream | PipelineStage)[], ps: PipelineState, end
     const listener = (_event: Event) => abort()
     const outer = outerSignal
     onOuterAbort = listener
-    outer.addFunctionListener<Event>("abort", listener, { once: true })
-    ps.destroys.push(() => outer.removeListenerOf("abort", listener, false))
+    outer.addEventListener("abort", listener, { once: true })
+    ps.destroys.push(() => outer.removeEventListener("abort", listener))
   }
   void onOuterAbort
   let retStream: Stream | undefined = undefined
@@ -293,13 +293,13 @@ function pipelineImpl(stages: (Stream | PipelineStage)[], ps: PipelineState, end
     }
     if (i == 0) {
       const source = stage.source
-      if (source == undefined) __tz_panic("internal error: the first stage is no source")
+      if (source == undefined) panic("internal error: the first stage is no source")
       retIterable = source(signal)
       continue
     }
     const input = retIterable ??
       (retStream != undefined ? readableChunks(retStream, ps) : undefined)
-    if (input == undefined) __tz_panic("internal error: a stage has nothing before it")
+    if (input == undefined) panic("internal error: a stage has nothing before it")
     retStream = undefined
     const transform = stage.transform
     if (transform != undefined && reading) {
@@ -348,7 +348,7 @@ export function streamPipelineToStage(stages: (Stream | PipelineStage)[],
     callback(err)
   })
   const last = pipelineImpl(stages, ps, true, undefined)
-  if (last == undefined) __tz_panic("internal error: the pipeline has no stream")
+  if (last == undefined) panic("internal error: the pipeline has no stream")
   return last
 }
 
@@ -371,7 +371,7 @@ export function streamPipelineValue<V>(stages: (Stream | PipelineStage)[],
   return new Promise<Result<V, StreamError>>((resolve) => {
     const ps = new PipelineState((error: StreamError | undefined, value: unknown) => {
       if (error != undefined) resolve(err(error))
-      else resolve(ok(__tz_chunk<V>(value)))
+      else resolve(ok(chunkOf<V>(value)))
     })
     pipelineImpl(stages, ps, options?.end ?? true, options?.signal)
   })
@@ -405,12 +405,12 @@ class ComposedDuplex<W, R> extends Duplex<W, R> {
   }
 
 
-  _head: Stream | undefined = undefined
-  _tail: Stream | undefined = undefined
-  _ondrain: StreamCallback | undefined = undefined
-  _onfinish: StreamCallback | undefined = undefined
-  _onreadable: (() => void) | undefined = undefined
-  _onclose: StreamCallback | undefined = undefined
+  _head?: Stream
+  _tail?: Stream
+  _ondrain?: StreamCallback
+  _onfinish?: StreamCallback
+  _onreadable?: () => void
+  _onclose?: StreamCallback
   _closing = true
   _composeListeners: (() => void)[] = []
 
@@ -465,18 +465,18 @@ export function streamCompose<W, R>(streams: Stream[]): Duplex<W, R> {
     if (n < streams.length - 1 && !isReadable(stream))
       invalid = failure(
         "ERR_INVALID_ARG_VALUE",
-        `The argument 'streams[${n}]' must be readable. Received ${__tz_lib_class_name(stream)}`,
+        `The argument 'streams[${n}]' must be readable. Received ${libClassName(stream)}`,
       )
     else if (n > 0 && !isWritable(stream))
       invalid = failure(
         "ERR_INVALID_ARG_VALUE",
-        `The argument 'streams[${n}]' must be writable. Received ${__tz_lib_class_name(stream)}`,
+        `The argument 'streams[${n}]' must be writable. Received ${libClassName(stream)}`,
       )
   }
   const first = streams[0]
   const lastOne = streams[streams.length - 1]
   if (first == undefined || lastOne == undefined)
-    __tz_panic("internal error: compose() takes one stream or more")
+    panic("internal error: compose() takes one stream or more")
   const head = first
   const tail = lastOne
   const writable = isWritable(head)

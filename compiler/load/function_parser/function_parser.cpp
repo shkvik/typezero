@@ -31,11 +31,6 @@ Stmt *FunctionParser::parseFunctionDecl(bool isAsync) {
   if (fn->body) {
     return fn;
   }
-  if (parser_.library_ && fn->name.starts_with("__tz_")) {
-    fn->external = true;
-    fn->body = parser_.ctx_.make<BlockStmt>(fn->loc());
-    return fn;
-  }
   llvm::StringRef name = fn->name;
   llvm::SMLoc loc = fn->loc();
   while (!fn->body) {
@@ -53,6 +48,19 @@ Stmt *FunctionParser::parseFunctionDecl(bool isAsync) {
   parser_.cursor().report(
       loc, "overload signatures are not supported: plain functions are not overloaded; give each "
            "variant its own name and body");
+
+  return fn;
+}
+
+Stmt *FunctionParser::parseDeclaredFunction() {
+  FunctionDecl *fn = parseFunction(false, false);
+  if (fn->body) {
+    parser_.cursor().report(fn->loc(), "a declared function has no body: the runtime of tz has "
+                                       "its code");
+    return fn;
+  }
+  fn->external = true;
+  fn->body = parser_.ctx_.make<BlockStmt>(fn->loc());
 
   return fn;
 }

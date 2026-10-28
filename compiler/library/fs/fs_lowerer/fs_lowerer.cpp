@@ -64,8 +64,7 @@ llvm::Value *FsLowerer::emitFsCall(CallExpr *call) {
     lowering_.refCounts().dropOperand(stats);
     llvm::Value *rounded = lowering_.builder_.CreateUnaryIntrinsic(
         llvm::Intrinsic::floor, lowering_.builder_.CreateFAdd(ms, llvm::ConstantFP::get(f64, 0.5)));
-    return lowering_.dateLowerer().newDate(lowering_.builder_.CreateCall(
-        lowering_.processLowerer().processFunction("tz_date_clip", f64, {f64}), {rounded}));
+    return lowering_.dateLowerer().newDate(lowering_.dateLowerer().wholeTime(rounded));
   }
 
   if (call->builtin == Builtin::FsIsKind) {

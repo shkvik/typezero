@@ -1,5 +1,6 @@
 import { AbortSignal } from "tz:web"
 import { Readable, Stream, StreamCallback, Writable, WriteChunk, streamFinished } from "node:stream"
+import { defer, fsClose, fsOpen, fsRead, fsWrite, stdWrite, stdinChunk } from "tz:intrinsics"
 
 function failure(code: string, message: string): StreamError {
   return { code, message }
@@ -44,18 +45,18 @@ export interface WriteStreamOptions {
   signal?: AbortSignal
 }
 
-function __tz_lib_close_fd(fd: int): boolean
+declare function libCloseFd(fd: int): boolean
 
 class OpenFile {
-  fd: int | undefined = undefined
+  fd?: int
 }
 
 function closeOnDrop(file: OpenFile) {
-  return __tz_defer(() => {
+  return defer(() => {
     const fd = file.fd
     if (fd == undefined) return
     file.fd = undefined
-    if (!__tz_lib_close_fd(fd))
+    if (!libCloseFd(fd))
       console.error(`closing file descriptor ${fd} on its last reference failed`)
   })
 }
@@ -68,13 +69,13 @@ function closeFd(fd: int | undefined, flush: boolean, err: StreamError | undefin
   }
   const open = fd
   const closeIt = (error: StreamError | undefined) => {
-    void __tz_fsClose(open, false).then((closed) => {
+    void fsClose(open, false).then((closed) => {
       if (closed.isErr()) cb(streamFailure(closed.error))
       else cb(error)
     })
   }
   if (flush)
-    void __tz_fsClose(open, true).then((synced) => {
+    void fsClose(open, true).then((synced) => {
       if (synced.isErr()) closeIt(err ?? streamFailure(synced.error))
       else closeIt(err)
     })
@@ -82,19 +83,19 @@ function closeFd(fd: int | undefined, flush: boolean, err: StreamError | undefin
 }
 
 export class ReadStream<T = Buffer> extends Readable<T> {
-  fd: int | undefined
+  fd?: int
   path: string
   flags: string
   mode: int
-  start: double | undefined
-  end: double | undefined
-  pos: double | undefined
+  start?: double
+  end?: double
+  pos?: double
   bytesRead = 0
   pending: boolean
   autoClose: boolean
   _performingIO = false
-  _ioDone: ((error: StreamError | undefined) => void) | undefined = undefined
-  _invalid: StreamError | undefined = undefined
+  _ioDone?: (error: StreamError | undefined) => void
+  _invalid?: StreamError
   _file = new OpenFile()
   _closer: object
 
@@ -140,7 +141,7 @@ export class ReadStream<T = Buffer> extends Readable<T> {
       callback()
       return
     }
-    void __tz_fsOpen(this.path, this.flags, this.mode).then((opened) => {
+    void fsOpen(this.path, this.flags, this.mode).then((opened) => {
       if (opened.isErr()) {
         callback(streamFailure(opened.error))
         return
@@ -170,7 +171,7 @@ export class ReadStream<T = Buffer> extends Readable<T> {
     }
     const buf = Buffer.allocUnsafeSlow(n)
     this._performingIO = true
-    void __tz_fsRead(fd, buf, 0, n, pos ?? -1).then((read) => {
+    void fsRead(fd, buf, 0, n, pos ?? -1).then((read) => {
       if (read.isErr()) this.afterRead(streamFailure(read.error), 0, buf)
       else this.afterRead(undefined, read.value, buf)
     })
@@ -220,19 +221,19 @@ export class ReadStream<T = Buffer> extends Readable<T> {
 }
 
 export class WriteStream extends Writable<Buffer> {
-  fd: int | undefined
+  fd?: int
   path: string
   flags: string
   mode: int
-  start: double | undefined
-  pos: double | undefined
+  start?: double
+  pos?: double
   bytesWritten = 0
   flush: boolean
   pending: boolean
   autoClose: boolean
   _performingIO = false
-  _ioDone: ((error: StreamError | undefined) => void) | undefined = undefined
-  _invalid: StreamError | undefined = undefined
+  _ioDone?: (error: StreamError | undefined) => void
+  _invalid?: StreamError
   _file = new OpenFile()
   _closer: object
 
@@ -269,7 +270,7 @@ export class WriteStream extends Writable<Buffer> {
       callback()
       return
     }
-    void __tz_fsOpen(this.path, this.flags, this.mode).then((opened) => {
+    void fsOpen(this.path, this.flags, this.mode).then((opened) => {
       if (opened.isErr()) {
         callback(streamFailure(opened.error))
         return
@@ -291,7 +292,7 @@ export class WriteStream extends Writable<Buffer> {
       cb(failure("ERR_STREAM_DESTROYED", "Cannot call write after a stream was destroyed"))
       return
     }
-    void __tz_fsWrite(fd, data, offset, size, pos ?? -1).then((written) => {
+    void fsWrite(fd, data, offset, size, pos ?? -1).then((written) => {
       if (written.isErr()) {
         cb(streamFailure(written.error))
         return
@@ -405,7 +406,7 @@ class StdinStream extends Readable<Buffer> {
   _read(size: int): void {
     if (this.reading) return
     this.reading = true
-    void __tz_stdinChunk(size).then((chunk: Buffer | undefined) => {
+    void stdinChunk(size).then((chunk: Buffer | undefined) => {
       this.reading = false
       this._pushChunk(chunk)
     })
@@ -419,7 +420,7 @@ class StdioStream extends Writable<Buffer> {
 
   _write(chunk: Buffer, encoding: string, callback: StreamCallback): void {
     void encoding
-    __tz_stdWrite(this.fd, chunk)
+    stdWrite(this.fd, chunk)
     callback()
   }
 }

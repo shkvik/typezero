@@ -9,6 +9,7 @@ public:
   explicit FunctionParser(Parser &parser);
 
   Stmt *parseFunctionDecl(bool isAsync = false);
+  Stmt *parseDeclaredFunction();
   FunctionDecl *parseFunction(bool expression, bool isAsync = false);
   bool asyncFunctionAhead();
   Expr *tryAsyncFunction();

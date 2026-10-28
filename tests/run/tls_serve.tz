@@ -42,8 +42,8 @@ if (started.isErr()) {
   process.exit(1)
 }
 const server = started.value
-console.log(server.url.protocol, server.url.hostname)
-const port = server.url.port
+console.log(server.url?.protocol, server.url?.hostname)
+const port = server.port
 
 for (const host of ["localhost", "127.0.0.1"]) {
   const res = must(await fetch(`https://${host}:${port}/hello`))

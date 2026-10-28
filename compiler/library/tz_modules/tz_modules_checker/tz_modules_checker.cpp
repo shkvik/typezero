@@ -145,17 +145,29 @@ void TzModulesChecker::noteHttpsCall(CallExpr *call, const FunctionDecl *fn) {
       checker_.file_->usesTls = true;
     }
   } else if (fn == checker_.libFunctions_.lookup("serve")) {
-    const Expr *options = call->args[0];
-    while (auto *cast = dyn_cast<CastExpr>(options)) {
-      options = cast->operand;
-    }
-    if (auto *lit = dyn_cast<ObjectLitExpr>(options)) {
-      checker_.file_->usesTls = llvm::any_of(
-          lit->props, [](const ObjectLitExpr::Property &p) { return p.spread || p.name == "tls"; });
-    } else {
-      checker_.file_->usesTls =
-          !options->type || !options->type->isObject() || options->type->field("tls") != nullptr;
-    }
+    noteServeOptions(call->args[0]);
+  }
+}
+
+void TzModulesChecker::noteListen(CallExpr *call, const MemberExpr *member) {
+  const ClassDecl *cls = member->object->type ? member->object->type->classDecl() : nullptr;
+  if (checker_.file_->usesTls || call->args.empty() || member->name != "listen" || !cls ||
+      !cls->library || cls->name != "Server" || checker_.libraryCalls().inLibrary(call->loc())) {
+    return;
+  }
+  noteServeOptions(call->args[0]);
+}
+
+void TzModulesChecker::noteServeOptions(const Expr *options) {
+  while (auto *cast = dyn_cast<CastExpr>(options)) {
+    options = cast->operand;
+  }
+  if (auto *lit = dyn_cast<ObjectLitExpr>(options)) {
+    checker_.file_->usesTls = llvm::any_of(
+        lit->props, [](const ObjectLitExpr::Property &p) { return p.spread || p.name == "tls"; });
+  } else {
+    checker_.file_->usesTls =
+        !options->type || !options->type->isObject() || options->type->field("tls") != nullptr;
   }
 }
 

@@ -1,3 +1,4 @@
+import { panic } from "tz:intrinsics"
 function codePoints(s: string): int[] {
   const out: int[] = []
   for (const ch of s) out.push(ch.codePointAt(0) ?? 0)
@@ -103,7 +104,7 @@ function hexValue(c: int): int {
   return c - 0x61 + 10
 }
 
-function percentDecode(s: string): Uint8Array {
+export function percentDecode(s: string): Uint8Array {
   const input = new TextEncoder().encode(s)
   const out = new Uint8Array(input.length)
   let n = 0
@@ -428,12 +429,12 @@ class UrlRecord {
   scheme = ""
   username = ""
   password = ""
-  host: string | undefined = undefined
+  host?: string
   port = -1
   path: string[] = []
-  opaquePath: string | undefined = undefined
-  query: string | undefined = undefined
-  fragment: string | undefined = undefined
+  opaquePath?: string
+  query?: string
+  fragment?: string
 
   copy(): UrlRecord {
     const r = new UrlRecord()
@@ -968,12 +969,12 @@ export class URL {
     if (base != undefined) {
       const baseText = typeof base == "string" ? base : base.href
       parsedBase = parseUrl(baseText, undefined)
-      if (parsedBase == undefined) __tz_panic("TypeError: Invalid URL: " + baseText)
+      if (parsedBase == undefined) panic("TypeError: Invalid URL: " + baseText)
     }
     const record = parseUrl(text, parsedBase)
-    if (record == undefined) __tz_panic("TypeError: Invalid URL: " + text)
+    if (record == undefined) panic("TypeError: Invalid URL: " + text)
     this.record = record
-    this.searchParams.__attach(this)
+    this.searchParams.watch((query?: string) => this.applyQuery(query))
     this.changed(true)
   }
 
@@ -1009,7 +1010,7 @@ export class URL {
     this.search = search == undefined || search == "" ? "" : "?" + search
     const fragment = r.fragment
     this.hash = fragment == undefined || fragment == "" ? "" : "#" + fragment
-    if (query) this.searchParams.__reload(search)
+    if (query) this.searchParams.replace(search)
   }
 
   setHref(value: string): Result<void, UrlError> {
@@ -1087,15 +1088,8 @@ export class URL {
   }
 
   setSearch(value: string) {
-    const r = this.record
-    if (value == "") {
-      r.query = undefined
-    } else {
-      const input = value.startsWith("?") ? value.slice(1) : value
-      r.query = ""
-      basicParse(input, undefined, r, QUERY)
-    }
-    this.changed(true)
+    const query = value.startsWith("?") ? value.slice(1) : value
+    this.searchParams.replace(value == "" ? undefined : query)
   }
 
   setHash(value: string) {
@@ -1110,26 +1104,6 @@ export class URL {
     this.changed(false)
   }
 
-  __tz_setHref(value: string) {
-    if (this.setHref(value).isErr()) return
-  }
-
-  __tz_setProtocol(value: string) {
-    if (this.setProtocol(value).isErr()) return
-  }
-
-  __tz_setHost(value: string) {
-    if (this.setHost(value).isErr()) return
-  }
-
-  __tz_setHostname(value: string) {
-    if (this.setHostname(value).isErr()) return
-  }
-
-  __tz_setPort(value: string) {
-    if (this.setPort(value).isErr()) return
-  }
-
   toString(): string {
     return this.href
   }
@@ -1138,8 +1112,15 @@ export class URL {
     return this.href
   }
 
-  __applyQuery(query: string | undefined) {
-    this.record.query = query
+  private applyQuery(query?: string) {
+    const r = this.record
+    if (query == r.query) return
+    if (query == undefined) {
+      r.query = undefined
+    } else {
+      r.query = ""
+      basicParse(query, undefined, r, QUERY)
+    }
     this.changed(false)
   }
 }
@@ -1185,8 +1166,9 @@ export type URLSearchParamsInit = string | [string, string][] | Record<string, s
 export class URLSearchParams {
   readonly size: int = 0
   private list: [string, string][] = []
-  private raw: string | undefined = undefined
-  private url: URL | undefined = undefined
+  private raw?: string
+  private watcher?: (query?: string) => void
+  private watchers?: ((query?: string) => void)[]
 
   constructor(init?: URLSearchParamsInit) {
     if (init == undefined) return
@@ -1202,14 +1184,28 @@ export class URLSearchParams {
     this.size = this.list.length
   }
 
-  __attach(url: URL) {
-    this.url = url
+  watch(watcher: (query?: string) => void) {
+    if (this.watcher == undefined) {
+      this.watcher = watcher
+      return
+    }
+    const watchers = this.watchers ?? []
+    watchers.push(watcher)
+    this.watchers = watchers
   }
 
-  __reload(query: string | undefined) {
+  replace(query?: string) {
     const raw = query ?? ""
     this.raw = raw
     this.size = formCount(raw)
+    this.tell(query)
+  }
+
+  private tell(query?: string) {
+    const watcher = this.watcher
+    if (watcher != undefined) watcher(query)
+    const watchers = this.watchers
+    if (watchers != undefined) for (const other of watchers) other(query)
   }
 
   private pairs(): [string, string][] {
@@ -1223,13 +1219,12 @@ export class URLSearchParams {
 
   private update() {
     this.size = this.list.length
-    const url = this.url
-    if (url == undefined) return
+    if (this.watcher == undefined) return
     const query = serializeForm(this.list)
-    url.__applyQuery(query == "" ? undefined : query)
+    this.tell(query == "" ? undefined : query)
   }
 
-  __tz_entries(): [string, string][] {
+  private printed(): [string, string][] {
     return [...this.pairs()]
   }
 
@@ -1306,10 +1301,3 @@ export class URLSearchParams {
   }
 }
 
-export function __formText(params: URLSearchParams): string {
-  return params.toString()
-}
-
-export function __percentDecode(text: string): Uint8Array {
-  return percentDecode(text)
-}

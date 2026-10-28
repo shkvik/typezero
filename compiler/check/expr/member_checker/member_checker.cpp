@@ -22,7 +22,6 @@
 #include "compiler/library/builtin_modules/runtime_object_checker/runtime_object_checker.h"
 #include "compiler/library/bytes/bytes_checker/bytes_checker.h"
 #include "compiler/library/crypto/crypto_checker/crypto_checker.h"
-#include "compiler/library/crypto/web_crypto_checker/web_crypto_checker.h"
 #include "compiler/library/date/date_checker/date_checker.h"
 #include "compiler/library/intl/intl_checker/intl_checker.h"
 #include "compiler/library/json/json_checker/json_checker.h"
@@ -30,7 +29,6 @@
 #include "compiler/library/regex/match_checker/match_checker.h"
 #include "compiler/library/regex/regex_checker/regex_checker.h"
 #include "compiler/library/result/result_checker/result_checker.h"
-#include "compiler/library/tz_modules/library_calls/library_calls.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/StringSet.h"
 #include "llvm/Support/ErrorHandling.h"
@@ -160,13 +158,6 @@ Expr *MemberChecker::checkMember(MemberExpr *member, const Type *expected) {
   }
   if (type->isTuple()) {
     return checker_.tupleChecker().checkTupleMember(member);
-  }
-  if (member->name == "handle" && checker_.webCryptoChecker().isSubtleClass(type, "CryptoKey") &&
-      !checker_.libraryCalls().inLibrary(member->loc())) {
-    checker_.diags_.error(member->loc(),
-                          "property 'handle' does not exist on type 'CryptoKey'; it has "
-                          "'type', 'extractable', 'algorithm' and 'usages'");
-    return member;
   }
   if (type->isClass()) {
     return checker_.classMemberChecker().checkClassMember(member, expected);

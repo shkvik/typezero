@@ -1,9 +1,10 @@
 import { AbortSignal, Event, EventTarget } from "tz:web"
+import { asListener, defer } from "tz:intrinsics"
 
-function __tz_lib_bare(map: Record<string, unknown>): Record<string, unknown>
-function __tz_lib_class_name(object: object): string
-function __tz_lib_inspect(value: unknown): string
-function __tz_lib_pid(): int
+declare function libBare(map: Record<string, unknown>): Record<string, unknown>
+declare function libClassName(object: object): string
+declare function libInspect(value: unknown): string
+declare function libPid(): int
 
 class OnceWrapper {
   private wasFired = false
@@ -58,9 +59,9 @@ function aborted(): AbortError {
 }
 
 export class EventEmitterBase {
-  private events: Record<string, unknown> = __tz_lib_bare({})
+  private events: Record<string, unknown> = libBare({})
   private eventsCount = 0
-  private maxListeners: double | undefined = undefined
+  private maxListeners?: double
   private shapeMode = false
   private capture = false
 
@@ -103,7 +104,7 @@ export class EventEmitterBase {
   private runWithUnknown<A extends unknown[]>(type: string, listener: unknown, boxed: unknown,
                                        ...args: A) {
     if (listener instanceof UnknownArgListener) {
-      __tz_listener<(arg: unknown) => void>(listener.listener)(boxed)
+      asListener<(arg: unknown) => void>(listener.listener)(boxed)
       return
     }
     this.run(type, listener, ...args)
@@ -118,19 +119,19 @@ export class EventEmitterBase {
       fn = fn.listener
     }
     if (fn instanceof AsyncListener) {
-      const promise = __tz_listener<(...args: A) => Promise<void>>(fn.listener)(...args)
+      const promise = asListener<(...args: A) => Promise<void>>(fn.listener)(...args)
       void promise
       return
     }
     if (fn instanceof ThisListener) {
-      __tz_listener<(this: unknown, ...args: A) => void>(fn.listener).call(this, ...args)
+      asListener<(this: unknown, ...args: A) => void>(fn.listener).call(this, ...args)
       return
     }
     if (fn instanceof UnknownArgListener) {
-      __tz_listener<(arg: unknown) => void>(fn.listener)(firstArg(...args))
+      asListener<(arg: unknown) => void>(fn.listener)(firstArg(...args))
       return
     }
-    __tz_listener<(...args: A) => void>(fn)(...args)
+    asListener<(...args: A) => void>(fn)(...args)
   }
 
   private insertListener(type: string, listener: unknown, prepend: boolean) {
@@ -162,7 +163,7 @@ export class EventEmitterBase {
       emitWarning(
         "MaxListenersExceededWarning",
         `Possible EventEmitter memory leak detected. ${list.length} ${type} listeners added to ` +
-          `[${__tz_lib_class_name(this)}]. MaxListeners is ${m}. Use emitter.setMaxListeners() to ` +
+          `[${libClassName(this)}]. MaxListeners is ${m}. Use emitter.setMaxListeners() to ` +
           `increase limit`,
       )
     }
@@ -199,7 +200,7 @@ export class EventEmitterBase {
       const list = kept
       if (!same(list, listener)) return this
       this.eventsCount -= 1
-      if (this.eventsCount == 0) this.events = __tz_lib_bare({})
+      if (this.eventsCount == 0) this.events = libBare({})
       else delete events[type]
       if (events["removeListener"] != undefined)
         this.emit("removeListener", type, original(list))
@@ -229,10 +230,10 @@ export class EventEmitterBase {
     const events = this.events
     if (events["removeListener"] == undefined) {
       if (type == undefined) {
-        this.events = __tz_lib_bare({})
+        this.events = libBare({})
         this.eventsCount = 0
       } else if (events[type] != undefined) {
-        if (--this.eventsCount == 0) this.events = __tz_lib_bare({})
+        if (--this.eventsCount == 0) this.events = libBare({})
         else delete events[type]
       }
       this.shapeMode = false
@@ -244,7 +245,7 @@ export class EventEmitterBase {
         this.removeAllListeners(key)
       }
       this.removeAllListeners("removeListener")
-      this.events = __tz_lib_bare({})
+      this.events = libBare({})
       this.eventsCount = 0
       this.shapeMode = false
       return this
@@ -276,7 +277,7 @@ export class EventEmitterBase {
     if (listener instanceof OnceWrapper || listener instanceof AsyncListener ||
         listener instanceof ThisListener || listener instanceof UnknownArgListener)
       return (...args: A) => this.run(type, listener, ...args)
-    return __tz_listener<(...args: A) => void>(listener)
+    return asListener<(...args: A) => void>(listener)
   }
 
   listenerCount(type: string, listener?: unknown): int {
@@ -333,12 +334,12 @@ function onceResult<A extends unknown[], E>(
   return new Promise<Result<A, E | AbortError>>((resolve) => {
     function errorListener(error: E) {
       emitter.removeListener(name, resolver)
-      if (signal != undefined) signal.removeListenerOf("abort", abortListener, false)
+      if (signal != undefined) signal.removeEventListener("abort", abortListener)
       resolve(err(error))
     }
     function resolver(...args: A) {
       if (errors) emitter.removeListener("error", errorListener)
-      if (signal != undefined) signal.removeListenerOf("abort", abortListener, false)
+      if (signal != undefined) signal.removeEventListener("abort", abortListener)
       resolve(ok(args))
     }
     function abortListener(_event: Event) {
@@ -349,7 +350,7 @@ function onceResult<A extends unknown[], E>(
     emitter.once(name, resolver)
     if (errors && name != "error") emitter.once("error", errorListener)
     if (signal != undefined)
-      signal.addFunctionListener<Event>("abort", abortListener, { once: true })
+      signal.addEventListener("abort", abortListener, { once: true })
   })
 }
 
@@ -402,20 +403,20 @@ function onResult<A extends unknown[], E>(
   if (errors && name != "error") emitter.on("error", errorHandler)
   for (const closeName of close) emitter.on(closeName, closeHandler)
   if (signal != undefined)
-    signal.addFunctionListener<Event>("abort", abortListener, { once: true })
+    signal.addEventListener("abort", abortListener, { once: true })
   return queue.results(() => {
     emitter.removeListener(name, eventHandler)
     emitter.removeListener("error", errorHandler)
     for (const closeName of close) emitter.removeListener(closeName, closeHandler)
-    if (signal != undefined) signal.removeListenerOf("abort", abortListener, false)
+    if (signal != undefined) signal.removeEventListener("abort", abortListener)
   })
 }
 
 class EventQueue<A extends unknown[], F> {
   private events: A[] = []
-  private error: F | undefined = undefined
+  private error?: F
   private finished = false
-  private wake: (() => void) | undefined = undefined
+  private wake?: () => void
 
   push(args: A) {
     if (this.finished) return
@@ -442,7 +443,7 @@ class EventQueue<A extends unknown[], F> {
   }
 
   private stopper(stop: () => void) {
-    return __tz_defer(() => {
+    return defer(() => {
       this.finished = true
       this.wake = undefined
       stop()
@@ -544,7 +545,7 @@ function validNumber(value: double, min: double): double {
 }
 
 function emitWarning(name: string, message: string) {
-  process.nextTick(() => console.error(`(node:${__tz_lib_pid()}) ${name}: ${message}`))
+  process.nextTick(() => console.error(`(node:${libPid()}) ${name}: ${message}`))
 }
 
 function onceTarget(
@@ -557,7 +558,7 @@ function onceTarget(
     function resolver(event: Event) {
       resolve([event])
     }
-    target.addFunctionListener<Event>(name, resolver, { once: true })
+    target.addEventListener(name, resolver, { once: true })
   })
 }
 
@@ -573,16 +574,16 @@ function onceTargetResult(
   }
   return new Promise<Result<[Event], AbortError>>((resolve) => {
     function resolver(event: Event) {
-      if (signal != undefined) signal.removeListenerOf("abort", abortListener, false)
+      if (signal != undefined) signal.removeEventListener("abort", abortListener)
       resolve(ok([event]))
     }
     function abortListener(_event: Event) {
-      target.removeListenerOf(name, resolver, false)
+      target.removeEventListener(name, resolver)
       resolve(err(aborted()))
     }
-    target.addFunctionListener<Event>(name, resolver, { once: true })
+    target.addEventListener(name, resolver, { once: true })
     if (signal != undefined)
-      signal.addFunctionListener<Event>("abort", abortListener, { once: true })
+      signal.addEventListener("abort", abortListener, { once: true })
   })
 }
 

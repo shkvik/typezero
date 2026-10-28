@@ -83,7 +83,7 @@ if (started.isErr()) {
   process.exit(1)
 }
 const server = started.value
-const res = must(await fetch(new URL("/", server.url)))
+const res = must(await fetch(`http://127.0.0.1:${server.port}/`))
 console.log(JSON.stringify(must(await res.text())), res.headers.get("x-digest")?.slice(0, 16))
 await server.stop()
 must(rmSync(dir, { recursive: true }))

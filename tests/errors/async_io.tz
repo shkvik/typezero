@@ -22,7 +22,7 @@ await wait(10, undefined, { repeat: true })
 // expect-error: the Promise is not awaited
 wait(10)
 
-// expect-error: an AbortSignal is not made with 'new'
+// expect-error: 'constructor' is private in class 'AbortSignal'
 const made = new AbortSignal()
 const controller = new AbortController()
 // expect-error: 'aborted' of an AbortSignal is read-only; abort it with its controller, 'controller.abort(reason)'
@@ -33,8 +33,8 @@ controller.signal.reason = new Error("why")
 controller.signal.onabort ??= () => console.log("aborted")
 // expect-error: class 'AbortSignal' has no static member 'never'
 AbortSignal.never()
-// expect-error: property 'cancel' does not exist on type 'AbortController'
-controller.cancel()
+// expect-error: property 'reset' does not exist on type 'AbortController'
+controller.reset()
 // expect-error: 'AbortController' is not assignable
 await wait(10, undefined, { signal: controller })
 

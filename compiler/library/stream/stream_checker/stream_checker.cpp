@@ -69,9 +69,8 @@ Expr *StreamChecker::checkStreamIntrinsic(CallExpr *call, NameExpr *name, const 
     ClassDecl *cls = ClassDeclarer::classOf(call->args[0]->type);
     auto *lit = dyn_cast<StringLitExpr>(call->args[1]);
     if (!cls || !lit) {
-      checker_.diags_.error(name->loc(),
-                            "'__tz_overrides' takes an object of a class and the name of a "
-                            "method, as a string literal");
+      checker_.diags_.error(name->loc(), "'overrides' takes an object of a class and the name of a "
+                                         "method, as a string literal");
       return call;
     }
     std::string method = utf8(lit->value);

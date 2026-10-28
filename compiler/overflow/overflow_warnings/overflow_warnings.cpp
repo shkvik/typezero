@@ -443,34 +443,6 @@ void OverflowWarnings::checkShiftCount(const Expr *count, const Num &n, unsigned
                          std::to_string(width) + ")'"});
 }
 
-void OverflowWarnings::checkWithin(const Expr *value, const Num &x, double lo, double hi,
-                                   llvm::StringRef what, llvm::StringRef limits) {
-  if (x.empty() || (x.lo >= lo && x.hi <= hi)) {
-    return;
-  }
-  bool blameLow = x.lo < lo && x.loOrigin != Origin::Trusted;
-  bool blameHigh = x.hi > hi && x.hiOrigin != Origin::Trusted;
-  if ((!blameLow && !blameHigh) || !check_.reporting_ || check_.quiet_) {
-    return;
-  }
-  Bound culprit = blameHigh ? x.high() : x.low();
-  llvm::SMLoc loc = value->loc();
-  std::string why;
-  if (culprit.origin == Origin::Input) {
-    why = subject(value) + " comes from " + inputText(culprit.why, loc);
-  } else if (culprit.origin == Origin::Loop) {
-    why = subject(value) + " grows with every pass of a loop";
-  } else {
-    why = "it may be " + numberText(culprit.v);
-  }
-  std::string text = exprText(value);
-  check_.warnings_.push_back(
-      {loc, "cannot prove that " + what.str() + " is within " + limits.str() +
-                ", and outside JavaScript would make an Invalid Date: " + why +
-                "; check it first, e.g. 'if (" + text + " >= " + numberText(lo) + " && " + text +
-                " <= " + numberText(hi) + ")'"});
-}
-
 void OverflowWarnings::checkDate(const Num &time, double limit, llvm::ArrayRef<DatePart> parts) {
   if (time.empty() || (time.lo >= -limit && time.hi <= limit)) {
     return;
@@ -511,8 +483,8 @@ void OverflowWarnings::checkDate(const Num &time, double limit, llvm::ArrayRef<D
     }
     std::string text = exprText(part->expr);
     check_.warnings_.push_back(
-        {loc, "cannot prove that the date is within the dates JavaScript has (100 million days "
-              "around 1970), and outside JavaScript would make an Invalid Date: " +
+        {loc, "cannot prove that the time of the date fits in 'int' (about 292 million years "
+              "around 1970): " +
                   why + "; check it first, e.g. 'if (" + text + " >= " + numberText(part->lo) +
                   " && " + text + " <= " + numberText(part->hi) + ")'"});
   }

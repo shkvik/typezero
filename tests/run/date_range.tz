@@ -1,14 +1,48 @@
-// A date never becomes an Invalid Date (docs/date.md, section 4). The
-// compiler proves the numbers that make a date; the time of a date that
-// exists is trusted, and if moving it still leaves the dates JavaScript has
-// (100 million days around 1970), the program stops, as an int that
-// overflows does.
-// expect-exit: 2
-// expect-stderr: panic: a date went outside the dates JavaScript has, 100 million days around 1970
+// env: TZ=America/New_York
+// A date has no edge of its own (docs/date.md, section 4): its time is any
+// int of milliseconds, and the dates go on past the 100 million days around
+// 1970 that JavaScript has, where node would make an Invalid Date. Only
+// texts keep to the dates of JavaScript, as Date.parse of node does.
 const last = new Date(8640000000000000)
 console.log(last, last.toJSON(), JSON.stringify([last]))
+last.setUTCDate(last.getUTCDate() + 1)
+console.log(last.toISOString(), last.getTime(), last.toUTCString())
+const far = new Date(9000000000000000)
+console.log(far.toISOString(), far.getUTCFullYear(), far.getUTCDay())
+const before = new Date(-9000000000000000)
+console.log(before.toISOString(), before.toUTCString(), before.getUTCFullYear())
 const first = new Date(Date.UTC(2026, 0, 31))
 const next = new Date(Date.UTC(first.getUTCFullYear(), first.getUTCMonth() + 1, 1))
 console.log(next.toISOString())
-last.setUTCDate(last.getUTCDate() + 1)
-console.log("not reached")
+
+// More than 999999 years away the year has all its digits.
+const million = new Date(Date.UTC(1000000, 0, 1))
+console.log(million.toISOString(), million.getTime())
+million.setUTCFullYear(-1000000)
+console.log(million.toISOString(), million.toUTCString())
+
+// The last and the first int: moving past them stops at them.
+const end = new Date(9223372036854775807)
+console.log(end.toISOString(), end.getUTCFullYear())
+end.setUTCFullYear(end.getUTCFullYear() + 1)
+console.log(end.getTime() == 9223372036854775807)
+const start = new Date(-9223372036854775807 - 1)
+console.log(start.toISOString())
+
+// Local time far away follows the rules of a year like it near today.
+const summer = new Date(2026 + 400000, 6, 1, 12, 0)
+console.log(summer.getFullYear(), summer.getMonth(), summer.getHours(), summer.getTimezoneOffset())
+const winter = new Date(2026 + 400000, 0, 1, 12, 0)
+console.log(winter.getHours(), winter.getTimezoneOffset(), winter.toISOString())
+
+// Intl writes them too, in any digits.
+const shown = new Date(200000000000000000)
+const utc = new Intl.DateTimeFormat("en-US", { timeZone: "UTC", dateStyle: "long", timeStyle: "medium" })
+console.log(utc.format(shown), "|", utc.format(far), "|", utc.format(start))
+console.log(new Intl.DateTimeFormat("ar-EG", { timeZone: "UTC", dateStyle: "full" }).format(shown))
+console.log(new Intl.DateTimeFormat("en", { timeZone: "UTC", year: "2-digit", month: "2-digit" }).format(shown))
+console.log(utc.formatToParts(shown).filter((p) => p.type == "year"))
+
+// Texts stay within the dates of JavaScript.
+const text = process.argv[2] ?? "+275760-09-14T00:00:00Z"
+console.log(Date.parse(text).isOk(), Date.parse("+275760-09-13T00:00:00Z").isOk())

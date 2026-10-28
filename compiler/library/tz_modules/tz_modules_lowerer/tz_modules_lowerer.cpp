@@ -15,6 +15,8 @@
 #include "compiler/lower/module_builder/module_builder.h"
 #include "compiler/lower/values/string_lowerer/string_lowerer.h"
 #include "compiler/memory/memory_plan/memory_plan.h"
+#include "llvm/ADT/StringExtras.h"
+#include <string>
 
 using llvm::BasicBlock;
 using llvm::cast;
@@ -74,10 +76,15 @@ void TzModulesLowerer::emitExternal(FunctionDecl *fn) {
   }
   params.push_back(ptr);
   args.push_back(lowering_.fsLowerer().systemErrorMaker());
-  llvm::StringRef name = fn->name;
-  name.consume_front("__");
+  std::string name = "tz_";
+  for (char c : fn->name) {
+    if (llvm::isUpper(c)) {
+      name += '_';
+    }
+    name += llvm::toLower(c);
+  }
   llvm::Value *result;
-  if (name.starts_with("tz_tls_") && !lowering_.usesTls_) {
+  if (llvm::StringRef(name).starts_with("tz_tls_") && !lowering_.usesTls_) {
     lowering_.builder_.CreateCall(
         lowering_.processLowerer().processFunction("tz_net_no_tls", lowering_.builder_.getVoidTy(),
                                                    {ptr, ptr}),
@@ -156,8 +163,7 @@ void TzModulesLowerer::appendPrintHooks(llvm::ArrayRef<const ClassDecl *> chain,
   std::vector<const FunctionDecl *> getters;
   for (const ClassDecl *c : chain) {
     for (const FunctionDecl *fn : c->methods) {
-      if (fn->isStatic || !fn->params.empty() ||
-          (fn->name != "__tz_entries" && fn->name != "__tz_keys")) {
+      if (fn->isStatic || !fn->params.empty() || fn->name != "printed") {
         continue;
       }
       auto it = llvm::find_if(getters, [&](const FunctionDecl *g) { return g->name == fn->name; });

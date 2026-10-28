@@ -133,9 +133,8 @@ llvm::Value *ProcessLowerer::emitProcessBuiltin(CallExpr *call) {
             {lowering_.exprLowerer().emitExpr(call->args[0])}),
         zero);
   case Builtin::DateNow:
-    return lowering_.builder_.CreateFPToSI(
-        lowering_.builder_.CreateCall(processFunction("tz_date_now", f64, {})),
-        lowering_.builder_.getInt64Ty());
+    return lowering_.builder_.CreateCall(
+        processFunction("tz_date_now", lowering_.builder_.getInt64Ty(), {}));
   case Builtin::PerformanceNow:
     return lowering_.builder_.CreateCall(processFunction("tz_performance_now", f64, {}));
   default:

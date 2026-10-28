@@ -34,8 +34,6 @@ public:
                    llvm::StringRef extra = "");
   bool checkClamp(const CallExpr *call, const Num &lo, const Num &hi);
   void overflowCall(const CallExpr *call, const Num &x, const Num &exceeding);
-  void checkWithin(const Expr *value, const Num &x, double lo, double hi, llvm::StringRef what,
-                   llvm::StringRef limits);
   void checkDate(const Num &time, double limit, llvm::ArrayRef<DatePart> parts);
 
 private:

@@ -99,6 +99,10 @@ Stmt *StmtParser::parseStatement(bool topLevel) {
                                         "code; put the code in a file of its own and import it "
                                         "by name");
       }
+      if (parser_.library_ && parser_.cursor().peek().is(Tok::KwFunction)) {
+        parser_.cursor().advance();
+        return parser_.functions().parseDeclaredFunction();
+      }
       llvm::StringRef what = parser_.cursor().peek().text;
       if (what == "module" || what == "global" || what == "namespace") {
         return skipDeclaration(loc, "'declare " + what +

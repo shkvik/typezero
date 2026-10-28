@@ -547,7 +547,7 @@ link/
 compiler/library/
   feature/            Feature: крючки темы
   feature_registry/   FeatureRegistry: список тем; поиск по глобальному имени и модулю
-  tz_modules/         TzModules: встроенные модули, написанные на tz, и их __tz_*
+  tz_modules/         TzModules: встроенные модули, написанные на tz, declare function и tz:intrinsics
                       (← sema_library.cpp, codegen_library.cpp)
   <тема>/
     <тема>_feature/   <Тема>Feature: какие крючки и где они

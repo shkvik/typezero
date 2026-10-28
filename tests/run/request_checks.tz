@@ -4,7 +4,7 @@
 // changed; a request that node's constructor would refuse is made, and
 // fetch gives its Err; a clone of a used body is used too. What a literal
 // shows is checked at compile time (errors/http_request.tz).
-import { serve } from "tz:http"
+import { Server } from "tz:http"
 
 const names = ["bad name", "", "ü", "x-ok"]
 const h = new Headers()
@@ -23,17 +23,17 @@ const red = Response.redirect(new URL("http://x.com/a"), 307)
 red.headers.set("location", "http://x.com/b")
 console.log(red.headers.get("location"))
 
-const started = serve({ port: 0, hostname: "127.0.0.1" }, async req => {
+const server = new Server(async req => {
   req.headers.set("x-seen", "yes")
   const body = await req.text()
   return new Response(`${req.method} ${req.headers.get("x-seen")} [${body.unwrapOr("-")}]`)
 })
-if (started.isErr()) {
-  console.log("cannot listen:", started.error.message)
+const listened = server.listen({ port: 0, hostname: "127.0.0.1" })
+if (listened.isErr()) {
+  console.log("cannot listen:", listened.error.message)
   process.exit(1)
 }
-const server = started.value
-const base = server.url
+const base = listened.value
 const res = must(await fetch(base))
 res.headers.set("x-mine", "1")
 console.log(must(await res.text()), res.headers.get("x-mine"))

@@ -9,7 +9,7 @@ public:
   explicit UrlChecker(Checker &checker);
 
   void checkUrlNew(NewExpr *expr);
-  void checkUrlSetter(MemberExpr *member, const CallExpr *call);
+  bool checkUrlSetter(MemberExpr *member, const CallExpr *call);
   static bool validUrlText(llvm::StringRef text, bool relative);
   static std::optional<std::string> literalText(const Expr *expr);
   static const Expr *unconverted(const Expr *expr);

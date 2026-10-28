@@ -1,0 +1,46 @@
+export declare function panic(message: string): void
+export declare function defer(release: () => void): object
+export declare function ahead<T>(promise: Promise<T>): Promise<T>
+export declare function order(): void
+export declare function asListener<F>(value: unknown): F
+export declare function asClass<T>(value: unknown): T | undefined
+export declare function chunkOf<T>(value: unknown): T
+export declare function isChunk<T>(value: unknown): boolean
+export declare function chunkKind<T>(): int
+export declare function typeName<T>(): string
+export declare function overrides(object: object, method: string): boolean
+export declare function fsOpen(path: string, flags: string,
+                               mode: int): Promise<Result<int, SystemError>>
+export declare function fsRead(fd: int, buffer: Buffer, offset: int, length: int,
+                               position: double): Promise<Result<int, SystemError>>
+export declare function fsWrite(fd: int, buffer: Buffer, offset: int, length: int,
+                                position: double): Promise<Result<int, SystemError>>
+export declare function fsClose(fd: int, sync: boolean): Promise<Result<int, SystemError>>
+export declare function stdinChunk(size: int): Promise<Buffer | undefined>
+export declare function stdWrite(fd: int, chunk: Buffer): void
+export declare function subtleDigest(hash: string, data: ArrayBuffer): Promise<ArrayBuffer>
+export declare function subtleHmac(hash: string, key: ArrayBuffer,
+                                   data: ArrayBuffer): Promise<ArrayBuffer>
+export declare function subtleHmacVerify(hash: string, key: ArrayBuffer, signature: ArrayBuffer,
+                                         data: ArrayBuffer): Promise<int>
+export declare function subtlePbkdf2(hash: string, password: ArrayBuffer, salt: ArrayBuffer,
+                                     iterations: double, bits: double): Promise<ArrayBuffer>
+export declare function subtleHkdf(hash: string, key: ArrayBuffer, salt: ArrayBuffer,
+                                   info: ArrayBuffer,
+                                   bits: double): Promise<ArrayBuffer | undefined>
+export declare function subtleAes(cipher: string, key: ArrayBuffer, encrypt: boolean,
+                                  iv: ArrayBuffer, data: ArrayBuffer, tagLength: int, counter: int,
+                                  additional: ArrayBuffer): Promise<ArrayBuffer | undefined>
+export declare function subtleAesKw(key: ArrayBuffer, wrap: boolean,
+                                    data: ArrayBuffer): Promise<ArrayBuffer | undefined>
+export declare function subtleSign(key: object, kind: int, hash: string, saltLength: int,
+                                   data: ArrayBuffer): Promise<ArrayBuffer | undefined>
+export declare function subtleVerify(key: object, kind: int, hash: string, saltLength: int,
+                                     signature: ArrayBuffer, data: ArrayBuffer): Promise<int>
+export declare function subtleRsaOaep(key: object, hash: string, label: ArrayBuffer,
+                                      encrypt: boolean,
+                                      data: ArrayBuffer): Promise<ArrayBuffer | undefined>
+export declare function subtleDerive(privateKey: object,
+                                     publicKey: object): Promise<ArrayBuffer | undefined>
+export declare function subtleGenerate(kind: int, size: double, exponent: double,
+                                       curve: string): Promise<object | undefined>

@@ -1,13 +1,14 @@
 import { EventEmitterBase } from "node:events"
 import { AbortController, AbortSignal, Event } from "tz:web"
 import { StringDecoder, normalizeEncoding } from "node:string_decoder"
+import { chunkKind, chunkOf, defer, isChunk, overrides, panic } from "tz:intrinsics"
 
 function failure(code: string, message: string): StreamError {
   return { code, message }
 }
 
-function __tz_lib_class_name(object: object): string
-function __tz_lib_inspect(value: unknown): string
+declare function libClassName(object: object): string
+declare function libInspect(value: unknown): string
 
 export function abortError(): StreamError {
   return { code: "ABORT_ERR", message: "The operation was aborted" }
@@ -16,8 +17,8 @@ export function abortError(): StreamError {
 function received(value: unknown): string {
   if (value == undefined) return "Received undefined"
   if (typeof value == "function") return "Received function"
-  if (typeof value == "object") return `Received an instance of ${__tz_lib_class_name(value)}`
-  let shown = __tz_lib_inspect(value)
+  if (typeof value == "object") return `Received an instance of ${libClassName(value)}`
+  let shown = libInspect(value)
   if (shown.length > 28) shown = `${shown.slice(0, 25)}...`
   return `Received type ${typeof value} (${shown})`
 }
@@ -122,13 +123,13 @@ class ReadableState {
   buffer: unknown[] = []
   bufferIndex: int = 0
   pipes: Stream[] = []
-  awaitDrainWriter: Stream | undefined = undefined
+  awaitDrainWriter?: Stream
   awaitDrainWriters = new Set<Stream>()
-  decoder: StringDecoder | undefined = undefined
-  encoding: string | undefined = undefined
+  decoder?: StringDecoder
+  encoding?: string
   defaultEncoding = "utf8"
-  errored: StreamError | undefined = undefined
-  readable: boolean | undefined = undefined
+  errored?: StreamError
+  readable?: boolean
   synced: int = -1
   constructor(bits: int) {
     this.bits = bits
@@ -153,11 +154,11 @@ class WritableState {
   bufferedIndex: int = 0
   pendingcb: int = 0
   writecb: StreamCallback = nop
-  afterWriteTickInfo: AfterWriteTick | undefined = undefined
+  afterWriteTickInfo?: AfterWriteTick
   onFinished: StreamCallback[] = []
-  errored: StreamError | undefined = undefined
+  errored?: StreamError
   defaultEncoding = "utf8"
-  writable: boolean | undefined = undefined
+  writable?: boolean
   synced: int = -1
   constructor(bits: int) {
     this.bits = bits
@@ -196,18 +197,18 @@ interface SideOptions {
 }
 
 export class Stream extends EventEmitterBase {
-  _readableState: ReadableState | undefined = undefined
-  _writableState: WritableState | undefined = undefined
+  _readableState?: ReadableState
+  _writableState?: WritableState
   allowHalfOpen = true
   destroyed = false
   closed = false
-  errored: StreamError | undefined = undefined
+  errored?: StreamError
   readable = false
   readableAborted = false
   readableDidRead = false
-  readableEncoding: string | undefined = undefined
+  readableEncoding?: string
   readableEnded = false
-  readableFlowing: boolean | undefined = undefined
+  readableFlowing?: boolean
   readableHighWaterMark: int = 0
   readableLength: int = 0
   readableObjectMode = false
@@ -227,7 +228,7 @@ export class Stream extends EventEmitterBase {
   _hasFinal = false
   _hasFlush = false
   _isTransform = false
-  _transformCallback: StreamCallback | undefined = undefined
+  _transformCallback?: StreamCallback
 
   constructor() {
     super()
@@ -615,13 +616,13 @@ export class Stream extends EventEmitterBase {
 
 function readableStateOf(stream: Stream): ReadableState {
   const state = stream._readableState
-  if (state == undefined) __tz_panic("internal error: the stream is not readable")
+  if (state == undefined) panic("internal error: the stream is not readable")
   return state
 }
 
 function writableStateOf(stream: Stream): WritableState {
   const state = stream._writableState
-  if (state == undefined) __tz_panic("internal error: the stream is not writable")
+  if (state == undefined) panic("internal error: the stream is not writable")
   return state
 }
 
@@ -676,7 +677,7 @@ function syncNow(stream: Stream, r: ReadableState | undefined, w: WritableState 
 }
 
 function bufferOf(chunk: unknown): Buffer {
-  return __tz_chunk<Buffer>(chunk)
+  return chunkOf<Buffer>(chunk)
 }
 
 function lengthOf(chunk: unknown): int {

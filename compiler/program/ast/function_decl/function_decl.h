@@ -69,6 +69,7 @@ struct FunctionDecl : Stmt {
   size_t listStart = 0;
   const Type *listType = nullptr;
   bool external = false;
+  bool intrinsic = false;
 };
 
 }

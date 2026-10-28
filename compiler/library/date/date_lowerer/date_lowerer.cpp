@@ -185,7 +185,11 @@ llvm::Value *DateLowerer::emitDateCall(CallExpr *call) {
     return lowering_.builder_.getInt32(uint32_t(cast<IntLitExpr>(call->args[i])->value));
   };
   auto timeOf = [&](llvm::Value *date) {
-    return lowering_.builder_.CreateLoad(f64, dateTimeAddress(date), "time");
+    return lowering_.builder_.CreateLoad(i64, dateTimeAddress(date), "time");
+  };
+  auto now = [&] {
+    return lowering_.builder_.CreateCall(
+        lowering_.processLowerer().processFunction("tz_date_now", i64, {}));
   };
   auto receiver = [&](size_t from) {
     auto rest = llvm::ArrayRef<Expr *>(call->args).drop_front(std::min(from, call->args.size()));
@@ -204,19 +208,12 @@ llvm::Value *DateLowerer::emitDateCall(CallExpr *call) {
   auto number = [&](Expr *arg) {
     llvm::Value *value = lowering_.exprLowerer().emitExpr(arg);
 
-    return arg->type->isFloat() ? value : lowering_.builder_.CreateSIToFP(value, f64);
+    return arg->type->isFloat() ? wholeTime(value) : value;
   };
 
   switch (call->builtin) {
   case Builtin::DateNew: {
-    llvm::Value *time =
-        call->args.empty()
-            ? lowering_.builder_.CreateCall(
-                  lowering_.processLowerer().processFunction("tz_date_now", f64, {}))
-            : lowering_.builder_.CreateCall(
-                  lowering_.processLowerer().processFunction("tz_date_clip", f64, {f64}),
-                  {number(call->args[0])});
-    return newDate(time);
+    return newDate(call->args.empty() ? now() : number(call->args[0]));
   }
   case Builtin::DateCopy: {
     Lowering::Operand date = lowering_.refCounts().emitOperand(call->args[0], true);
@@ -227,18 +224,15 @@ llvm::Value *DateLowerer::emitDateCall(CallExpr *call) {
   case Builtin::DateFromString:
   case Builtin::DateParse: {
     Lowering::Operand text = lowering_.refCounts().emitOperand(call->args[0], true);
+    bool parse = call->builtin == Builtin::DateParse;
     llvm::Value *time = lowering_.builder_.CreateCall(
-        lowering_.processLowerer().processFunction("tz_date_parse", f64, {ptr, i64}),
+        lowering_.processLowerer().processFunction(parse ? "tz_date_parse" : "tz_date_from_text",
+                                                   parse ? f64 : i64, {ptr, i64}),
         {lowering_.stringLowerer().stringObj(text.value),
          lowering_.stringLowerer().stringMeta(text.value)});
-    if (call->builtin == Builtin::DateParse) {
-      llvm::Value *result = parseResult(time, text.value, call);
-      lowering_.refCounts().dropOperand(text);
-      return result;
-    }
+    llvm::Value *result = parse ? parseResult(time, text.value, call) : newDate(time);
     lowering_.refCounts().dropOperand(text);
-    return newDate(lowering_.builder_.CreateCall(
-        lowering_.processLowerer().processFunction("tz_date_clip", f64, {f64}), {time}));
+    return result;
   }
   case Builtin::DateFromFields:
   case Builtin::DateUTC: {
@@ -247,21 +241,18 @@ llvm::Value *DateLowerer::emitDateCall(CallExpr *call) {
       values.push_back(number(arg));
     }
     for (size_t i = values.size(); i < 7; ++i) {
-      values.push_back(llvm::ConstantFP::get(f64, i == 2 ? 1.0 : 0.0));
+      values.push_back(lowering_.builder_.getInt64(i == 2 ? 1 : 0));
     }
     values.push_back(lowering_.builder_.getInt32(call->builtin == Builtin::DateFromFields));
     llvm::Value *time = lowering_.builder_.CreateCall(
-        lowering_.processLowerer().processFunction("tz_date_from_fields", f64,
-                                                   {f64, f64, f64, f64, f64, f64, f64, i32}),
+        lowering_.processLowerer().processFunction("tz_date_from_fields", i64,
+                                                   {i64, i64, i64, i64, i64, i64, i64, i32}),
         values);
-    return call->builtin == Builtin::DateUTC ? wholeTime(time) : newDate(time);
+    return call->builtin == Builtin::DateUTC ? time : newDate(time);
   }
-  case Builtin::DateText: {
-    llvm::Value *now = lowering_.builder_.CreateCall(
-        lowering_.processLowerer().processFunction("tz_date_now", f64, {}));
-    return stringOf("tz_date_local_string", {now, lowering_.builder_.getInt32(TZ_DATE_TEXT_FULL)},
-                    {f64, i32});
-  }
+  case Builtin::DateText:
+    return stringOf("tz_date_local_string", {now(), lowering_.builder_.getInt32(TZ_DATE_TEXT_FULL)},
+                    {i64, i32});
   case Builtin::DateGetTime:
   case Builtin::DateGetUTC:
   case Builtin::DateGetLocal: {
@@ -269,13 +260,13 @@ llvm::Value *DateLowerer::emitDateCall(CallExpr *call) {
     llvm::Value *time = timeOf(date.value);
     lowering_.refCounts().dropOperand(date);
     if (call->builtin == Builtin::DateGetTime) {
-      return wholeTime(time);
+      return time;
     }
     bool utc = call->builtin == Builtin::DateGetUTC;
-    return wholeTime(lowering_.builder_.CreateCall(
+    return lowering_.builder_.CreateCall(
         lowering_.processLowerer().processFunction(
-            utc ? "tz_date_utc_field" : "tz_date_local_field", f64, {f64, i32}),
-        {time, constant(0)}));
+            utc ? "tz_date_utc_field" : "tz_date_local_field", i64, {i64, i32}),
+        {time, constant(0)});
   }
   case Builtin::DateSetTime:
   case Builtin::DateSetUTC:
@@ -289,23 +280,22 @@ llvm::Value *DateLowerer::emitDateCall(CallExpr *call) {
     llvm::Value *address = dateTimeAddress(date.value);
     llvm::Value *time;
     if (setTime) {
-      time = lowering_.builder_.CreateCall(
-          lowering_.processLowerer().processFunction("tz_date_clip", f64, {f64}), {values[0]});
+      time = values[0];
     } else {
       llvm::Value *count = lowering_.builder_.getInt32(uint32_t(values.size()));
       while (values.size() < 4) {
-        values.push_back(llvm::ConstantFP::get(f64, 0.0));
+        values.push_back(lowering_.builder_.getInt64(0));
       }
       time = lowering_.builder_.CreateCall(
-          lowering_.processLowerer().processFunction("tz_date_set", f64,
-                                                     {f64, i32, i32, i32, f64, f64, f64, f64}),
-          {lowering_.builder_.CreateLoad(f64, address, "time"), constant(0),
+          lowering_.processLowerer().processFunction("tz_date_set", i64,
+                                                     {i64, i32, i32, i32, i64, i64, i64, i64}),
+          {lowering_.builder_.CreateLoad(i64, address, "time"), constant(0),
            lowering_.builder_.getInt32(call->builtin == Builtin::DateSetLocal), count, values[0],
            values[1], values[2], values[3]});
     }
     lowering_.builder_.CreateStore(time, address);
     lowering_.refCounts().dropOperand(date);
-    return wholeTime(time);
+    return time;
   }
   case Builtin::DateToISOString:
   case Builtin::DateToUTCString:
@@ -318,12 +308,12 @@ llvm::Value *DateLowerer::emitDateCall(CallExpr *call) {
     llvm::Value *time = timeOf(date.value);
     lowering_.refCounts().dropOperand(date);
     if (call->builtin == Builtin::DateToUTCString) {
-      return stringOf("tz_date_utc_string", {time}, {f64});
+      return stringOf("tz_date_utc_string", {time}, {i64});
     }
     if (call->builtin == Builtin::DateToLocalString) {
-      return stringOf("tz_date_local_string", {time, constant(0)}, {f64, i32});
+      return stringOf("tz_date_local_string", {time, constant(0)}, {i64, i32});
     }
-    return stringOf("tz_date_iso", {time}, {f64});
+    return stringOf("tz_date_iso", {time}, {i64});
   }
   case Builtin::DateToLocale: {
     Lowering::Operand date = receiver(1);
@@ -331,7 +321,7 @@ llvm::Value *DateLowerer::emitDateCall(CallExpr *call) {
     llvm::ArrayRef<Expr *> args = llvm::ArrayRef<Expr *>(call->args).drop_front();
     llvm::Value *options = emitDateOptions(args, held);
     llvm::Value *time = timeOf(date.value);
-    llvm::Value *text = stringOf("tz_date_locale", {time, constant(0), options}, {f64, i32, ptr});
+    llvm::Value *text = stringOf("tz_date_locale", {time, constant(0), options}, {i64, i32, ptr});
     for (const Lowering::Operand &operand : held) {
       lowering_.refCounts().dropOperand(operand);
     }
@@ -353,20 +343,17 @@ llvm::Value *DateLowerer::emitDateCall(CallExpr *call) {
     Lowering::Operand format = receiver(0);
     llvm::Value *time = nullptr;
     if (call->args.empty()) {
-      time = lowering_.builder_.CreateCall(
-          lowering_.processLowerer().processFunction("tz_date_now", f64, {}));
+      time = now();
     } else if (call->args[0]->type->isDate()) {
       Lowering::Operand date = lowering_.refCounts().emitOperand(call->args[0], true);
       time = timeOf(date.value);
       lowering_.refCounts().dropOperand(date);
     } else {
-      time = lowering_.builder_.CreateCall(
-          lowering_.processLowerer().processFunction("tz_date_clip", f64, {f64}),
-          {lowering_.exprLowerer().emitExpr(call->args[0])});
+      time = number(call->args[0]);
     }
     llvm::Value *result;
     if (call->builtin == Builtin::DtfFormat) {
-      result = stringOf("tz_dtf_format", {format.value, time}, {ptr, f64});
+      result = stringOf("tz_dtf_format", {format.value, time}, {ptr, i64});
     } else {
       const Type *part = call->type->inner();
       const Lowering::ObjectLayout &layout = lowering_.objectLayouts().objectLayout(part);
@@ -378,7 +365,7 @@ llvm::Value *DateLowerer::emitDateCall(CallExpr *call) {
       };
       result = lowering_.builder_.CreateCall(
           lowering_.processLowerer().processFunction("tz_dtf_format_to_parts", ptr,
-                                                     {ptr, f64, ptr, ptr, i64, i32, i32}),
+                                                     {ptr, i64, ptr, ptr, i64, i32, i32}),
           {format.value, time, lowering_.typeDescriptors().typeDescriptor(part),
            lowering_.objectLayouts().layoutDescriptor(part, {0, 1}),
            lowering_.builder_.getInt64(

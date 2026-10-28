@@ -34,16 +34,36 @@ const char *accessWord(Access access) {
 ClassMemberChecker::ClassMemberChecker(Checker &checker) : checker_(checker) {}
 
 bool ClassMemberChecker::checkAccess(const ClassDecl *cls, Access access, llvm::StringRef name,
-                                     llvm::SMLoc loc) {
+                                     llvm::SMLoc loc, const Expr *receiver) {
   if (access == Access::Public || Checker::sameClass(checker_.currentClass_, cls)) {
     return true;
   }
-  if (access == Access::Protected) {
-    for (const ClassDecl *c = checker_.currentClass_; c; c = c->parent) {
-      if (Checker::sameClass(c, cls)) {
+  auto derives = [](const ClassDecl *from, const ClassDecl *base) {
+    for (const ClassDecl *c = from; c; c = c->parent) {
+      if (Checker::sameClass(c, base)) {
         return true;
       }
     }
+
+    return false;
+  };
+  if (access == Access::Protected && derives(checker_.currentClass_, cls)) {
+    while (auto *cast = dyn_cast_or_null<CastExpr>(receiver)) {
+      receiver = cast->operand;
+    }
+    auto *self = dyn_cast_or_null<NameExpr>(receiver);
+    const ClassDecl *other =
+        receiver && receiver->type ? ClassDeclarer::classOf(receiver->type) : nullptr;
+    if (!receiver || (self && (self->name == "this" || self->name == "super")) || !other ||
+        derives(other, checker_.currentClass_)) {
+      return true;
+    }
+    checker_.diags_.error(loc,
+                          "'" + name.str() + "' is protected in class '" + cls->name.str() +
+                              "'; '" + checker_.currentClass_->name.str() +
+                              "' may use it only on its own objects, and this one is of class '" +
+                              other->name.str() + "'");
+    return false;
   }
   std::string message =
       "'" + name.str() + "' is " + accessWord(access) + " in class '" + cls->name.str() + "'";
@@ -67,7 +87,7 @@ Expr *ClassMemberChecker::checkClassMember(MemberExpr *member, const Type *expec
   const ClassDecl *owner = nullptr;
   const ClassField *field = ClassBases::findField(cls, name, &owner);
   if (field && !field->method) {
-    checkAccess(owner, field->access, name, member->loc());
+    checkAccess(owner, field->access, name, member->loc(), member->object);
     if (viaThis && owner == checker_.initFn_->cls &&
         !llvm::is_contained(checker_.flow_.setFields, name)) {
       checker_.diags_.error(member->loc(), "field '" + name + "' is read before it is set");
@@ -107,7 +127,7 @@ Expr *ClassMemberChecker::checkClassMember(MemberExpr *member, const Type *expec
     }
     return member;
   }
-  checkAccess(methods[0]->cls, methods[0]->access, name, member->loc());
+  checkAccess(methods[0]->cls, methods[0]->access, name, member->loc(), member->object);
   if (methods[0]->cls->library && checker_.eventMaps().isEmitterClass(cls) &&
       !checker_.libraryCalls().inLibrary(member->loc()) && name != "getMaxListeners" &&
       name != "eventNames") {
@@ -174,7 +194,7 @@ const Type *ClassMemberChecker::checkFieldTarget(MemberExpr *member, bool compou
     }
     return Type::error();
   }
-  checkAccess(owner, field->access, name, member->loc());
+  checkAccess(owner, field->access, name, member->loc(), member->object);
   bool viaThis = checker_.classChecker().isInitThis(member->object);
   if (compound && viaThis && owner == checker_.initFn_->cls &&
       !llvm::is_contained(checker_.flow_.setFields, name)) {

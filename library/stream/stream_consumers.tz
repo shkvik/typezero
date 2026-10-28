@@ -1,5 +1,6 @@
 import { Stream, streamChunks } from "node:stream"
 import { StringDecoder } from "node:string_decoder"
+import { chunkOf } from "tz:intrinsics"
 
 export async function text(stream: Stream): Promise<Result<string, StreamError>> {
   const dec = new StringDecoder("utf8")
@@ -8,7 +9,7 @@ export async function text(stream: Stream): Promise<Result<string, StreamError>>
     if (item.isErr()) return err(item.error)
     const chunk = item.value
     if (typeof chunk == "string") str += chunk
-    else str += dec.write(__tz_chunk<Buffer>(chunk))
+    else str += dec.write(chunkOf<Buffer>(chunk))
   }
   str += dec.end()
   return ok(str)
@@ -28,7 +29,7 @@ export async function buffer(stream: Stream): Promise<Result<Buffer, StreamError
     if (item.isErr()) return err(item.error)
     const chunk = item.value
     if (typeof chunk == "string") chunks.push(Buffer.from(chunk))
-    else chunks.push(__tz_chunk<Buffer>(chunk))
+    else chunks.push(chunkOf<Buffer>(chunk))
   }
   return ok(Buffer.concat(chunks))
 }

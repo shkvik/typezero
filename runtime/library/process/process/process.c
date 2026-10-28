@@ -372,17 +372,17 @@ void tz_clock_init(void) {
 #endif
 }
 
-double tz_date_now(void) {
+int64_t tz_date_now(void) {
 #ifdef _WIN32
   FILETIME time;
   GetSystemTimePreciseAsFileTime(&time);
   uint64_t ticks = ((uint64_t)time.dwHighDateTime << 32) | time.dwLowDateTime;
 
-  return (double)((int64_t)(ticks - 116444736000000000ull) / 10000);
+  return (int64_t)(ticks - 116444736000000000ull) / 10000;
 #else
   struct timespec now;
   clock_gettime(CLOCK_REALTIME, &now);
-  return (double)((int64_t)now.tv_sec * 1000 + now.tv_nsec / 1000000);
+  return (int64_t)now.tv_sec * 1000 + now.tv_nsec / 1000000;
 #endif
 }
 

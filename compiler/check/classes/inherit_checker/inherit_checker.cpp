@@ -254,11 +254,12 @@ Expr *InheritChecker::checkSuperCall(CallExpr *call) {
     }
     checkArgsLoosely();
   } else {
-    checker_.classMemberChecker().checkAccess(ctors[0]->cls, ctors[0]->access, "constructor",
-                                              call->loc());
     bool checked = false;
     if (FuncSymbol *sym = checker_.overloadResolver().chooseVariant(ctors, call->args, call->spread,
                                                                     call->loc(), checked)) {
+      const FunctionDecl *chosen = sym->decl ? sym->decl : ctors[0];
+      checker_.classMemberChecker().checkAccess(chosen->cls, chosen->access, "constructor",
+                                                call->loc());
       checker_.returnInferrer().resolveParams(sym);
       call->method = sym;
       std::vector<bool> given(checked ? call->args.size() : 0, true);

@@ -19,7 +19,7 @@ for (const name of ["expired", "future", "wrongname", "self", "other", "chain", 
     process.exit(1)
   }
   const server = started.value
-  const res = await fetch(`https://localhost:${server.url.port}/`)
+  const res = await fetch(`https://localhost:${server.port}/`)
   if (res.isOk()) console.log(name, res.value.status, must(await res.value.text()))
   else console.log(name, res.error.message, res.error.code)
   await server.stop()

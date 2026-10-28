@@ -206,7 +206,19 @@ void Inference::from(const Type *pattern, const Type *actual) {
     for (const Type *m : pattern->members()) {
       (mentionsAnyOf(m, params) ? open : fixed).push_back(m);
     }
-    if (open.size() != 1) {
+    if (open.size() > 1) {
+      const Type *value = actual->nonOptional();
+      for (const Type *m : open) {
+        const ClassDecl *cls = m->classDecl();
+        if (cls && !m->typeArgs().empty() &&
+            genericInstanceOf(value, cls->generic ? cls->generic : cls)) {
+          from(m, value);
+          return;
+        }
+      }
+      return;
+    }
+    if (open.empty()) {
       return;
     }
     std::vector<const Type *> rest;

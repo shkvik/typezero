@@ -44,6 +44,19 @@ serve({ port: 3000 }, app.fetch)
   для https, `maxBodySize` (по умолчанию 128 МБ, как в Bun).
 - **`server.stop()`** — перестать принимать соединения и дождаться запросов, которые уже идут.
   `server.port` — порт, если передан `port: 0`.
+- **Создать, потом слушать** (решено 28 октября, как в node): `new Server(handler)` делает
+  сервер без сокета, `server.listen(options)` открывает сокет и отдаёт адрес —
+  `Result<URL, SystemError>` (занятый порт — `Err`); `serve(options, handler)` — то же одним
+  вызовом. Пока сервер не слушает, `port` — 0, `hostname` — `""`, `url` — `undefined`, а
+  `stop()` ничего не делает. Слушает сервер один раз: второй `listen`, и после `stop()` тоже, —
+  `Err` с кодом `ERR_SERVER_ALREADY_LISTEN`.
+  ```ts
+  const server = new Server(req => new Response("hi"))
+  const url = server.listen({ port: 0 })      // Result<URL, SystemError>
+  if (url.isErr()) return url
+  const res = await fetch(new URL("/hello", url.value))
+  await server.stop()
+  ```
 - **Обработчик возвращает только `Response`** и ошибки разбирает сам: плохой JSON — 400,
   повтор — 409, упавшая база — 500. Особой обработки `Result` у `serve` нет: автоматический 500
   на любой `Err` отвечал бы 500 и на ошибки клиента ([errors.md](errors.md), раздел 4). Падать

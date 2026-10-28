@@ -8,7 +8,7 @@ class WebCryptoChecker {
 public:
   explicit WebCryptoChecker(Checker &checker);
 
-  Expr *checkSubtleIntrinsic(CallExpr *call, NameExpr *name);
+  Expr *checkSubtleIntrinsic(CallExpr *call, NameExpr *name, llvm::StringRef intrinsicName);
   Expr *subtleObject(MemberExpr *member);
   bool isSubtleClass(const Type *type, llvm::StringRef name) const;
 

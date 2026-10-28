@@ -5,8 +5,8 @@
 #include <stddef.h>
 #include <stdint.h>
 
-double tz_date_offset(double t);
-double tz_date_local_to_utc(double local);
-void tz_date_zone_name(TzBuf *out, double t);
+int64_t tz_date_offset(int64_t t);
+int64_t tz_date_local_offset(int64_t local);
+void tz_date_zone_name(TzBuf *out, int64_t t);
 
 #endif

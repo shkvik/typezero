@@ -1,34 +1,34 @@
-function __tz_intl_locale_tag(tag: string): string
-function __tz_intl_locale_part(tag: string, part: int): string
+declare function intlLocaleTag(tag: string): string
+declare function intlLocalePart(tag: string, part: int): string
 
 export class Locale {
   readonly baseName: string
   readonly language: string
-  readonly script: string | undefined
-  readonly region: string | undefined
+  readonly script?: string
+  readonly region?: string
   private tag: string
 
   constructor(tag: string) {
-    const canonical = __tz_intl_locale_tag(tag)
+    const canonical = intlLocaleTag(tag)
     this.tag = canonical == "" ? tag : canonical
-    this.baseName = __tz_intl_locale_part(this.tag, 0)
-    this.language = __tz_intl_locale_part(this.tag, 1)
-    const script = __tz_intl_locale_part(this.tag, 2)
+    this.baseName = intlLocalePart(this.tag, 0)
+    this.language = intlLocalePart(this.tag, 1)
+    const script = intlLocalePart(this.tag, 2)
     this.script = script == "" ? undefined : script
-    const region = __tz_intl_locale_part(this.tag, 3)
+    const region = intlLocalePart(this.tag, 3)
     this.region = region == "" ? undefined : region
   }
 
   static parse(tag: string): Result<Locale, LocaleError> {
     if (tag == "")
       return err({ code: "bad_locale", message: "First argument to Intl.Locale constructor can't be empty or missing", tag })
-    if (__tz_intl_locale_tag(tag) == "")
+    if (intlLocaleTag(tag) == "")
       return err({ code: "bad_locale", message: "Incorrect locale information provided", tag })
     return ok(new Locale(tag))
   }
 
   maximize(): Locale {
-    const longer = __tz_intl_locale_part(this.tag, 4)
+    const longer = intlLocalePart(this.tag, 4)
     return new Locale(longer == "" ? this.tag : longer)
   }
 

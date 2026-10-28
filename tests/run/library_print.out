@@ -28,6 +28,7 @@ Response {
   headers: Headers { 'x-y': 'z', 'content-type': 'text/plain;charset=UTF-8' },
   body: BodyStream {
     locked: false,
+    disturbed: false,
     body: Body {
       kind: 1,
       text: 'hello',
@@ -62,15 +63,14 @@ Request {
   isReloadNavigation: false,
   isHistoryNavigation: false,
   signal: AbortSignal {
-    events: Map(0) {},
     aborted: false,
     reason: undefined,
     native: AbortSignal {},
-    dependants: [],
     onabortListens: false
   },
   body: BodyStream {
     locked: false,
+    disturbed: false,
     body: Body {
       kind: 1,
       text: 'hi',
@@ -85,26 +85,23 @@ Request {
     type: 'text/plain;charset=UTF-8'
   }
 }
-ReadableStream { locked: false } Headers { 'x-a': '1' } URLSearchParams { 'a' => '1', 'b' => '2' }
+ReadableStream { locked: false, disturbed: false } Headers { 'x-a': '1' } URLSearchParams { 'a' => '1', 'b' => '2' }
 AbortController {
   signal: AbortSignal {
-    events: Map(0) {},
     aborted: false,
     reason: undefined,
     native: AbortSignal {},
-    dependants: [],
     onabortListens: false
-  }
+  },
+  cancel: [Function: abort]
 }
 AbortSignal {
-  events: Map(0) {},
   aborted: true,
   reason: 'stop',
   native: AbortSignal {},
-  dependants: [],
   onabortListens: false
 }
-EventTarget { events: Map(0) {} }
+EventTarget {}
 EventEmitter {
   events: [Object: null prototype] {},
   eventsCount: 0,

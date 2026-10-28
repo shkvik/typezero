@@ -49,6 +49,27 @@ int conversionRank(const Type *from, const Type *to) {
   if (from->isNever()) {
     return 1;
   }
+  if (to->isUnion()) {
+    int rank = -1;
+    if (from->isUnion()) {
+      rank = 0;
+      for (const Type *member : from->members()) {
+        int inner = conversionRank(member, to);
+        if (inner < 0) {
+          return -1;
+        }
+        rank = std::max(rank, inner);
+      }
+      return rank;
+    }
+    for (const Type *member : to->members()) {
+      int inner = conversionRank(from, member);
+      if (inner >= 0 && (rank < 0 || inner < rank)) {
+        rank = inner;
+      }
+    }
+    return rank < 0 ? -1 : rank + 1;
+  }
   if (to->isJson()) {
     return from->isString() || from->isNumeric() || from->isBool() ||
                    (from->isArray() && from->inner()->isJson())
@@ -89,6 +110,19 @@ int conversionRank(const Type *from, const Type *to) {
         return t && t->type == f.type && (!f.readonly || t->readonly);
       })) {
     return 1;
+  }
+  if (from->isObject() && to->isObject() && !from->isClass() && !to->isClass() &&
+      !from->isAnyObject() && !to->isAnyObject() && !from->isTuple() && !to->isTuple() &&
+      from->overloads().empty() && to->overloads().empty() &&
+      llvm::all_of(from->fields(),
+                   [&](const Field &f) {
+                     const Field *t = to->field(f.name);
+                     return t && conversionRank(f.type, t->type) >= 0;
+                   }) &&
+      llvm::all_of(to->fields(), [&](const Field &t) {
+        return from->field(t.name) || t.type->isOptional() || t.type->isUndefined();
+      })) {
+    return 2;
   }
   if (from->isResult() && to->isResult()) {
     auto half = [](const Type *a, const Type *b) {
@@ -186,6 +220,21 @@ FuncSymbol *OverloadResolver::chooseVariant(llvm::ArrayRef<FunctionDecl *> varia
     for (FunctionDecl *v : fit) {
       if (parameterAt(v->sym, i) != expected ||
           (expected && typeMentions(expected, v->sym->typeParams))) {
+        expected = nullptr;
+      }
+    }
+    if (!expected && isa<ObjectLitExpr>(args[i])) {
+      int shapes = 0;
+      for (FunctionDecl *v : fit) {
+        const Type *param = parameterAt(v->sym, i);
+        const Type *bare = param ? param->nonOptional() : nullptr;
+        if (bare && bare->isObject() && !bare->isClass() && !bare->isAnyObject() &&
+            !bare->isTuple() && param != expected) {
+          expected = param;
+          ++shapes;
+        }
+      }
+      if (shapes != 1) {
         expected = nullptr;
       }
     }

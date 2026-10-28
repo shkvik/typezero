@@ -1,0 +1,55 @@
+// The library has no members only for itself (docs/objects.md, section 6):
+// what its objects keep inside is private, what only web and node read is
+// read-only, and the old service names are gone, as any name that does not
+// exist.
+import { Server } from "tz:http"
+
+const event = new Event("x")
+// expect-error: cannot assign to 'isTrusted' because it is a read-only field of 'Event'
+event.isTrusted = true
+// expect-error: cannot assign to 'target' because it is a read-only field of 'Event'
+event.target = new EventTarget()
+// expect-error: property 'beginDispatch' does not exist on type 'Event'
+event.beginDispatch(new EventTarget())
+
+// expect-error: 'constructor' is private in class 'AbortSignal'
+const made = new AbortSignal()
+const controller = new AbortController()
+// expect-error: 'abort' is private in class 'AbortSignal'
+controller.signal.abort("x")
+// expect-error: property 'abortWith' does not exist on type 'AbortSignal'
+controller.signal.abortWith("x")
+
+class Sneaky extends Event {
+  static trust(other: Event) {
+    // expect-error: 'markTrusted' is protected in class 'Event'; 'Sneaky' may use it only on its own objects, and this one is of class 'Event'
+    other.markTrusted()
+  }
+}
+
+const url = new URL("https://example.com/?y=1")
+// expect-error: property '__reload' does not exist on type 'URLSearchParams'
+url.searchParams.__reload("z=2")
+// expect-error: 'applyQuery' is private in class 'URL'
+url.applyQuery("z=2")
+
+const response = new Response("hi")
+// expect-error: property '__bodyOf' does not exist on type 'Response'
+response.__bodyOf()
+// expect-error: 'data' is private in class 'Response'
+console.log(response.data)
+const headers = new Headers()
+// expect-error: property '__flat' does not exist on type 'Headers'
+headers.__flat()
+
+// expect-error: expected 1 argument, but got 4
+const server = new Server({}, "x", () => new Response("hi"), "http")
+
+const stream = new ReadableStream<string>()
+// expect-error: property '__state' does not exist on type 'ReadableStream<string>'
+stream.__state()
+// expect-error: cannot assign to 'locked' because it is a read-only field of 'ReadableStream<string>'
+stream.locked = true
+
+// expect-error: cannot find name '__tz_panic'
+__tz_panic("x")

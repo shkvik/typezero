@@ -162,7 +162,9 @@ Stmt *ModuleParser::parseExport(bool topLevel) {
                       (parser_.tok_.text == "type" || parser_.tok_.text == "interface" ||
                        parser_.tok_.text == "class" ||
                        (parser_.tok_.text == "abstract" && next.text == "class")) &&
-                      next.is(Tok::Identifier) && !next.newlineBefore);
+                      next.is(Tok::Identifier) && !next.newlineBefore) ||
+                     (parser_.library_ && parser_.tok_.is(Tok::Identifier) &&
+                      parser_.tok_.text == "declare" && next.is(Tok::KwFunction));
   if (declaration) {
     Stmt *stmt = parser_.stmts().parseStatement(topLevel);
     if (topLevel) {
