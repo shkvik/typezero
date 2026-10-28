@@ -83,7 +83,7 @@ std::string missingModule(llvm::StringRef path) {
     return message + "; setTimeout and the other timers are global, as in Node: drop the import";
   }
   if (bare == "http" || bare == "https") {
-    return message + " (docs/net.md, section 7); serve requests with 'serve' from \"tz:http\", "
+    return message + " (docs/net.md, section 7); serve requests with 'Server' from \"tz:http\", "
                      "and make them with the global 'fetch'";
   }
   static const llvm::StringLiteral network[] = {"http2", "net", "tls",

@@ -71,7 +71,7 @@ OpenSSL 3 ищет алгоритм по имени (`"sha256"`) в общей �
   `createCipheriv` для AES-GCM / CBC / CTR и ChaCha20-Poly1305 — когда имя алгоритма написано в
   коде строкой; случайные числа (`randomBytes`, `randomUUID`, `getRandomValues`) — от системы,
   `timingSafeEqual`.
-- **Сложное — OpenSSL целиком:** TLS (https в `fetch` и `serve`, [net.md](net.md)), ключи,
+- **Сложное — OpenSSL целиком:** TLS (https в `fetch` и `Server`, [net.md](net.md)), ключи,
   подписи, сертификаты, обмен ключами, имя алгоритма из переменной.
 
 ## 4. Скорость

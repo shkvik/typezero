@@ -5,7 +5,7 @@
 // tells: expired, not yet valid, for another name, signed by itself, by a CA
 // nobody trusts (alone, with an intermediate, with that CA sent along), and
 // then the one that is fine. fetch fails with the reason as its cause.
-import { serve } from "tz:http"
+import { Server } from "tz:http"
 import { readFileSync } from "node:fs"
 import { join } from "node:path"
 
@@ -13,12 +13,12 @@ const dir = process.env.TLS_DIR ?? "."
 const key = must(readFileSync(join(dir, "key.pem"), "utf8"))
 for (const name of ["expired", "future", "wrongname", "self", "other", "chain", "rooted", "localhost"]) {
   const cert = must(readFileSync(join(dir, `${name}.pem`), "utf8"))
-  const started = serve({ port: 0, hostname: "127.0.0.1", tls: { cert, key } }, () => new Response("ok"))
+  const server = new Server(() => new Response("ok"))
+  const started = server.listen({ port: 0, hostname: "127.0.0.1", tls: { cert, key } })
   if (started.isErr()) {
     console.log("cannot listen:", started.error.message)
     process.exit(1)
   }
-  const server = started.value
   const res = await fetch(`https://localhost:${server.port}/`)
   if (res.isOk()) console.log(name, res.value.status, must(await res.value.text()))
   else console.log(name, res.error.message, res.error.code)

@@ -6,7 +6,7 @@
 // (NODE_EXTRA_CA_CERTS) and by the name of the host: text and JSON both
 // ways, keep-alive, a body that streams, requests at the same time, and
 // http:// to a server of https.
-import { serve } from "tz:http"
+import { Server } from "tz:http"
 import { readFileSync } from "node:fs"
 import { join } from "node:path"
 
@@ -16,7 +16,7 @@ const tls = {
   key: must(readFileSync(join(dir, "key.pem"), "utf8")),
 }
 const enc = new TextEncoder()
-const started = serve({ port: 0, hostname: "127.0.0.1", tls }, async (req) => {
+const server = new Server(async (req) => {
   const url = new URL(req.url)
   switch (url.pathname) {
     case "/hello":
@@ -37,11 +37,11 @@ const started = serve({ port: 0, hostname: "127.0.0.1", tls }, async (req) => {
       return new Response("not here", { status: 404 })
   }
 })
+const started = server.listen({ port: 0, hostname: "127.0.0.1", tls })
 if (started.isErr()) {
   console.log("cannot listen:", started.error.message)
   process.exit(1)
 }
-const server = started.value
 console.log(server.url?.protocol, server.url?.hostname)
 const port = server.port
 

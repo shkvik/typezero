@@ -3,7 +3,7 @@
 // data runs on the thread that read the request; one that counts in a
 // global keeps node's order, so that no count is lost or given twice; an
 // async one goes on after its awaits. Every answer comes back right.
-import { serve } from "tz:http"
+import { Server } from "tz:http"
 
 let hits = 0
 
@@ -13,7 +13,7 @@ async function later(path: string): Promise<Response> {
   return new Response(`later ${length}`)
 }
 
-const started = serve({ port: 0, hostname: "127.0.0.1" }, (request: Request) => {
+const server = new Server((request: Request) => {
   const path = new URL(request.url).pathname
   if (path == "/count") {
     hits++
@@ -22,11 +22,11 @@ const started = serve({ port: 0, hostname: "127.0.0.1" }, (request: Request) => 
   if (path.startsWith("/later/")) return later(path)
   return new Response(`echo ${path}`)
 })
+const started = server.listen({ port: 0, hostname: "127.0.0.1" })
 if (started.isErr()) {
   console.log("cannot listen:", started.error.message)
   process.exit(1)
 }
-const server = started.value
 
 const base = `http://127.0.0.1:${server.port}`
 const paths: string[] = []

@@ -269,7 +269,8 @@ tz run                   # без файла — "main" из tz.json
   `setImmediate`, `setInterval` как async-итератор, `scheduler.wait` / `yield`), отмена —
   `AbortController` и `AbortSignal` на `EventTarget` (см. «События»), которые эти функции
   принимают в опции `signal`.
-- Сеть (см. «Сеть»): сервер `serve(options, handler)` из `"tz:http"`, где обработчик получает
+- Сеть (см. «Сеть»): сервер `new Server(handler)` из `"tz:http"` (`server.listen(options)`
+  открывает сокет), где обработчик получает
   `Request` и отдаёт `Response`, как в Deno и Bun (и `app.fetch` из hono), и клиент `fetch`, как в
   node: keep-alive и пул соединений, редиректы, gzip / deflate / br, `AbortSignal`, ошибки —
   `Err` с `FetchError` (`fetch failed` и причина). `URL` и `URLSearchParams` по стандарту WHATWG, `Headers`,
@@ -2783,7 +2784,7 @@ async-функции и из колбэка `then`, `Promise.all` / `race`,
 
 **Что пойдёт параллельно** (шаг 3). Компилятор делит async-код на куски: от `await` до `await`,
 от начала функции до первого `await`, код верхнего уровня и каждый колбэк (`then`, таймеры,
-`queueMicrotask`, обработчик `serve`). Для каждого он находит, что кусок читает и пишет:
+`queueMicrotask`, обработчик сервера). Для каждого он находит, что кусок читает и пишет:
 - глобальные и захваченные переменные, которые где-то меняются;
 - поля — по имени, у объекта, который создаёт выражение, если его держит константа (`const a = new
   Counter()`), иначе у любого объекта этого типа (с учётом наследников и интерфейсов);
@@ -2800,7 +2801,7 @@ async-функции и из колбэка `then`, `Promise.all` / `race`,
 Встроенные модули на tz (`node:events`, `tz:http`, `fetch`, потоки, `URL`, `EventTarget`,
 `AbortController`) анализ не обходит, а знает, что они делают. Вызов читает то, что ему дали, и
 меняет состояние объекта, на котором вызван; чтение поля такого объекта читает это состояние.
-Обработчик `serve` идёт позже,
+Обработчик сервера идёт позже,
 на каждый запрос, во многих копиях сразу. Слушателей `on`, `once` и `addListener` эмиттера
 запускает `emit` прямо там, слушателей `addEventListener` и `onabort` — `dispatchEvent` и `abort()`
 (состояние всех сигналов — одни данные), `AbortSignal.timeout()` — позже. `start` источника
@@ -2870,7 +2871,7 @@ a.run(2) at line 17:`. Анализ — `compiler/parallel/parallel_analysis/par
   которую видит один поток, он меняет без замка; общие группы — под одним замком.
 - `TZ_THREADS=n` задаёт число потоков (с главным; по умолчанию — число процессоров, `1` — всё в
   главном потоке).
-- **Сервер.** События соединений `serve` приходят в потоки пула, и поток, который прочитал
+- **Сервер.** События соединений сервера приходят в потоки пула, и поток, который прочитал
   запрос, сам выполняет обработчик и ответ; главный поток нужен, только если обработчик трогает
   общие данные. Async-обработчик с `await` пока идёт через главный поток: его аргументы становятся
   общими, а с ними и его `Promise`.
@@ -2890,9 +2891,9 @@ a.run(2) at line 17:`. Анализ — `compiler/parallel/parallel_analysis/par
 ## Сеть
 
 ```ts
-import { serve } from "tz:http"
+import { Server } from "tz:http"
 
-const server = serve({ port: 3000 }, async req => {
+const server = new Server(async req => {
   const url = new URL(req.url)
   if (req.method == "POST" && url.pathname == "/users") {
     const user = await req.json()                          // Result<Json, BodyError | JsonError>
@@ -2901,23 +2902,28 @@ const server = serve({ port: 3000 }, async req => {
   }
   return new Response(`привет, ${url.searchParams.get("name") ?? "мир"}`)
 })
+const listened = server.listen({ port: 3000 })                  // Result<URL, SystemError>
+if (listened.isErr()) {
+  console.error(listened.error.message)                         // порт занят
+  process.exit(1)
+}
 
 const r = await fetch(`http://localhost:${server.port}/?name=tz`, { signal: AbortSignal.timeout(5000) })
 if (r.isOk()) console.log(r.value.status, await r.value.text())   // 200 Ok { value: 'привет, tz' }
 await server.stop()
 ```
 
-- **Сервер** ([net.md](docs/net.md), раздел 1) — `serve(options, handler)` из `"tz:http"`.
-  Опции: `port` (8000, `0` — любой свободный), `hostname` (`"0.0.0.0"`), `signal` (отмена
+- **Сервер** ([net.md](docs/net.md), раздел 1) — `new Server(handler)` из `"tz:http"`, как в
+  node: сервер без сокета; `server.listen(options)` открывает сокет и отдаёт адрес —
+  `Result<URL, SystemError>` (занятый порт, хост, которого нет, или сертификат, который не
+  читается, — `Err`). Опции: `port` (8000, `0` — любой свободный), `hostname` (`"0.0.0.0"`), `signal` (отмена
   останавливает сервер), `onListen({ hostname, port })`, `maxBodySize` (128 МБ, больше — ответ
   413). Обработчик — `(req: Request) => Response | Promise<Response>`: подходят и обычная, и
   async-функция, и `app.fetch` из hono (стрелка в поле с лишними необязательными параметрами).
   Сервер знает `port`, `hostname`, `url`, `finished`; `stop()` перестаёт принимать соединения,
   закрывает те, что ждут запроса, и ждёт ответов на те, что уже идут. Ошибки обработчик
-  отдаёт ответом сам: у него нет исключений, которые сервер мог бы превратить в `500`. Как в
-  node, сервер можно создать, а слушать потом: `new Server(handler)` — без сокета (`port` — 0,
-  `url` — `undefined`), `server.listen(options)` открывает сокет и отдаёт адрес —
-  `Result<URL, SystemError>`; слушает сервер один раз, второй `listen` —
+  отдаёт ответом сам: у него нет исключений, которые сервер мог бы превратить в `500`. Пока
+  сервер не слушает, `port` — 0, `url` — `undefined`; слушает сервер один раз, второй `listen` —
   `ERR_SERVER_ALREADY_LISTEN`. Запрос сервера не разбирает адрес по пути: он строится из
   соединения сразу.
 - **Запросы одного соединения** идут по очереди (keep-alive, до 5 с простоя, как в node, и
@@ -3021,10 +3027,10 @@ await server.stop()
   `NODE_EXTRA_CA_CERTS`, и с системными при `NODE_USE_SYSTEM_CA=1`; затем имя хоста. Ошибка —
   `fetch failed` с причиной-`SystemError` и кодом node: `CERT_HAS_EXPIRED`,
   `ERR_TLS_CERT_ALTNAME_INVALID`, `DEPTH_ZERO_SELF_SIGNED_CERT`, `UNABLE_TO_VERIFY_LEAF_SIGNATURE`
-  и другие. `serve({ tls: { cert, key } }, ...)` — сервер https (PEM, как у `createServer` node,
+  и другие. `server.listen({ tls: { cert, key } })` — сервер https (PEM, как у `createServer` node,
   цепочка — сертификаты после первого). TLS встраивается в exe, только если программа может
   пойти по https: `fetch` адреса, про который не известно, что он `http://` или `data:`, или
-  `serve` с `tls`; https-клиент — 5,8 МБ против 0,9 МБ того же клиента по http (у Go — 5,3 МБ).
+  `listen` с `tls`; https-клиент — 5,8 МБ против 0,9 МБ того же клиента по http (у Go — 5,3 МБ).
 - **Пока нет:** `node:http` и остальное из раздела 7; сеть в Linux (epoll и свой DNS).
 - **Скорость** (`bench/http.ps1`, «Hello, World!», 128 соединений, 10 с): tz — 314 тыс.
   запросов в секунду на всех ядрах, Go (`net/http`) — 239 тыс., node — 61 тыс.

@@ -571,18 +571,15 @@ declare module "tz:http" {
     readonly url?: URL
     // Resolved once the server has stopped and its last response is out.
     readonly finished: Promise<void>
-    // Opens the socket and starts answering; gives the address. A port that
-    // is taken gives an Err; so does a second listen, after stop too
-    // (ERR_SERVER_ALREADY_LISTEN): a server listens once.
+    // Opens the socket on `hostname` (0.0.0.0) and `port` (8000; 0 for any
+    // free one, which port then tells), of https with `tls`, and starts
+    // answering; gives the address. A port that is taken, a host that is not
+    // found or a certificate that cannot be read give an Err; so does a
+    // second listen, after stop too (ERR_SERVER_ALREADY_LISTEN): a server
+    // listens once.
     listen(options: ServeOptions): Result<URL, SystemError>
     // Stops taking connections and resolves once the requests being handled
     // are answered; before listen it does nothing.
     stop(): Promise<void>
   }
-
-  // Makes a server and listens at once: on `hostname` (0.0.0.0) and `port`
-  // (8000; 0 for any free one, which server.port then tells), answering each
-  // request with `handler`; of https with `tls`. A port that is taken, a host
-  // that is not found or a certificate that cannot be read give an Err.
-  export function serve(options: ServeOptions, handler: Handler): Result<Server, SystemError>
 }

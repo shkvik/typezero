@@ -1,13 +1,14 @@
 # Сеть
 
 Решения, принятые 24 октября 2026 года, и поправки 26 октября: ошибки сети — `Result`,
-обработчик `serve` разбирает ошибки сам ([errors.md](errors.md), раздел 4). Шаги 1–4 плана
+обработчик сервера разбирает ошибки сам ([errors.md](errors.md), раздел 4); 28 октября:
+сервер — только `new Server(handler)` и `listen`, без `serve`. Шаги 1–4 плана
 сделаны 24–25 октября, шаг 6 — 26–28 октября; что осталось — в конце, в разделе «План реализации».
 
 ## Коротко
 
-- Сервер — `serve` из `"tz:http"`: обработчик получает `Request` и возвращает `Response`, как в
-  Deno и Bun. На этом же построен hono ([packages.md](packages.md)).
+- Сервер — `Server` из `"tz:http"`: обработчик получает `Request` и возвращает `Response`, как в
+  Deno и Bun; создать, потом `listen`, как в node. На этом же построен hono ([packages.md](packages.md)).
 - Клиент — `fetch`, как в JS.
 - Запросы обрабатываются параллельно на всех ядрах ([async.md](async.md), раздел 8): «Hello,
   World!» — 314 тыс. запросов в секунду, у Go — 239 тыс.
@@ -19,9 +20,9 @@
 ## 1. Сервер
 
 ```ts
-import { serve } from "tz:http"
+import { Server } from "tz:http"
 
-const server = serve({ port: 3000 }, async req => {
+const server = new Server(async req => {
   const url = new URL(req.url)
   if (req.method == "POST" && url.pathname == "/users") {
     const user = await req.json()                      // Result<Json, BodyError | JsonError>
@@ -30,6 +31,8 @@ const server = serve({ port: 3000 }, async req => {
   }
   return new Response("Not found", { status: 404 })
 })
+const url = server.listen({ port: 3000 })      // Result<URL, SystemError>
+if (url.isErr()) return url
 ```
 
 С hono:
@@ -37,28 +40,28 @@ const server = serve({ port: 3000 }, async req => {
 ```ts
 const app = new Hono()
 app.get("/", c => c.text("Hello"))
-serve({ port: 3000 }, app.fetch)
+const listened = new Server(app.fetch).listen({ port: 3000 })
 ```
 
-- **Параметры:** `port`, `hostname` (по умолчанию `0.0.0.0`), `tls: { cert, key }` — строки PEM
+- **Параметры `listen`:** `port`, `hostname` (по умолчанию `0.0.0.0`), `tls: { cert, key }` — строки PEM
   для https, `maxBodySize` (по умолчанию 128 МБ, как в Bun).
 - **`server.stop()`** — перестать принимать соединения и дождаться запросов, которые уже идут.
   `server.port` — порт, если передан `port: 0`.
 - **Создать, потом слушать** (решено 28 октября, как в node): `new Server(handler)` делает
   сервер без сокета, `server.listen(options)` открывает сокет и отдаёт адрес —
-  `Result<URL, SystemError>` (занятый порт — `Err`); `serve(options, handler)` — то же одним
-  вызовом. Пока сервер не слушает, `port` — 0, `hostname` — `""`, `url` — `undefined`, а
+  `Result<URL, SystemError>` (занятый порт — `Err`). Короткого `serve(options, handler)` нет
+  (убран 28 октября): путь один. Пока сервер не слушает, `port` — 0, `hostname` — `""`, `url` — `undefined`, а
   `stop()` ничего не делает. Слушает сервер один раз: второй `listen`, и после `stop()` тоже, —
   `Err` с кодом `ERR_SERVER_ALREADY_LISTEN`.
   ```ts
   const server = new Server(req => new Response("hi"))
-  const url = server.listen({ port: 0 })      // Result<URL, SystemError>
+  const url = server.listen({ port: 0 })      // любой свободный порт
   if (url.isErr()) return url
   const res = await fetch(new URL("/hello", url.value))
   await server.stop()
   ```
 - **Обработчик возвращает только `Response`** и ошибки разбирает сам: плохой JSON — 400,
-  повтор — 409, упавшая база — 500. Особой обработки `Result` у `serve` нет: автоматический 500
+  повтор — 409, упавшая база — 500. Особой обработки `Result` у сервера нет: автоматический 500
   на любой `Err` отвечал бы 500 и на ошибки клиента ([errors.md](errors.md), раздел 4). Падать
   обработчику нечему: исключений нет, а переполнение стека и нехватка памяти фатальны для всего
   процесса.
@@ -110,7 +113,7 @@ async function repo(name: string) {
 
 - **OpenSSL 3.5** — та же библиотека и версия, что в node 24 ([crypto.md](crypto.md)): TLS 1.2
   и 1.3, те же шифры и коды ошибок. Встраивается, только если программа ходит по `https://` или
-  запускает `serve` с `tls`.
+  запускает сервер с `tls`.
 - **Размер.** Статический https-клиент на C с проверкой сертификатов — 4,1 МБ (пустая
   программа — 14 КБ). Для сравнения, Go: hello — 1,5 МБ, https-клиент — 5,3 МБ, HTTP-сервер —
   5,2 МБ.
@@ -160,17 +163,17 @@ tz должен быть не ниже Go: параллельные обрабо
 1. **Сокеты и DNS** (сделано) — поверх ожидания ввода-вывода ([async.md](async.md), шаг 2): TCP-соединения
    на IOCP / epoll, свой DNS для Linux.
 2. **Сервер** (сделано) — разбор HTTP/1.1, keep-alive, `Request` / `Response` / `Headers` / `URL`, тела как
-   потоки, `serve` с параметрами, 500 на исключение, `stop()`. Нужны классы
+   потоки, сервер с параметрами, 500 на исключение, `stop()`. Нужны классы
    ([objects.md](objects.md), шаг 3), байты ([bytes.md](bytes.md)), `for await`
    ([iterators.md](iterators.md), шаг 4), `Json`. Параллельные обработчики — с параллельным
    рантаймом ([async.md](async.md), шаг 4; сделано 25 октября). Замеры против Go, Bun и node.
 3. **`fetch`** (сделано) — пул соединений, редиректы, gzip / deflate / brotli, `AbortSignal`, ошибки как
    в node.
 4. **TLS** (сделано) — OpenSSL в рантайме (в exe — только при https, [crypto.md](crypto.md)), корневые
-   сертификаты, `NODE_EXTRA_CA_CERTS`, `serve` с `tls`; замер размера.
+   сертификаты, `NODE_EXTRA_CA_CERTS`, сервер с `tls`; замер размера.
 5. **Позже** — раздел 7.
 6. **Без исключений** (сделано 26–28 октября; [errors.md](errors.md), шаг 2): `fetch` и чтение тел — `Result`;
-   обработчик `serve` возвращает только `Response`, убрать «500 на исключение»; `HttpStatus`,
+   обработчик сервера возвращает только `Response`, убрать «500 на исключение»; `HttpStatus`,
    перегрузки конструктора `Response`, `redirect(url: URL, …)`; геттеры `Request` / `Response`
    / `Headers` — в `readonly`-поля и методы. Переписать `library/http/*.tz`.
    Сделано 26 октября: `fetch` — `Promise<Result<Response, FetchError>>`, чтение тел —

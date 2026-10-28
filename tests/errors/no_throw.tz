@@ -2,10 +2,10 @@
 // built instead (docs/errors.md, step 5): an encoding or a label of a decoder
 // that only the running program knows, the arguments of the random functions
 // and of decimal methods, a rounding mode from a variable; and what became a
-// Result: serve, the key derivations, JSON.stringify of a value whose type
+// Result: listen of a server, the key derivations, JSON.stringify of a value whose type
 // may hold itself.
 import { randomBytes, randomFillSync, randomInt, pbkdf2Sync, generateKeySync } from "node:crypto"
-import { serve } from "tz:http"
+import { Server } from "tz:http"
 
 function encodings(enc: string, label: string, known: BufferEncoding) {
   const b = Buffer.from("hi")
@@ -78,4 +78,4 @@ function json(j: Json) {
 }
 
 // expect-error: the Result is not used
-serve({ port: 0 }, () => new Response("x"))
+new Server(() => new Response("x")).listen({ port: 0 })

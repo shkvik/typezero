@@ -1,8 +1,8 @@
 // same-as-node
-// serve with the handler of an app as hono has it: `app.fetch`, a field
+// A server with the handler of an app as hono has it: `app.fetch`, a field
 // that holds an arrow `(request, env?, ctx?) => Response | Promise<Response>`,
 // with routes that answer at once or async.
-import { serve } from "tz:http"
+import { Server } from "tz:http"
 
 class Context {
   req: Request
@@ -26,12 +26,12 @@ class App {
 const app = new App()
 app.get("/", c => c.text("Hello"))
 app.get("/async", async c => c.text(`async ${c.req.method}`))
-const started = serve({ port: 0, hostname: "127.0.0.1" }, app.fetch)
+const server = new Server(app.fetch)
+const started = server.listen({ port: 0, hostname: "127.0.0.1" })
 if (started.isErr()) {
   console.log("cannot listen:", started.error.message)
   process.exit(1)
 }
-const server = started.value
 for (const path of ["/", "/async", "/nope"]) {
   const r = must(await fetch(`http://127.0.0.1:${server.port}${path}`))
   console.log(r.status, must(await r.text()))

@@ -9,7 +9,7 @@
 - Библиотека — API node: `process`, `console`, `node:fs`, `node:path`, `node:os`. Делаем ту
   часть, что нужна первой; на остальное — ошибка «пока не поддерживается».
 - Своё — только то, чего в node нет совсем, в модулях `"tz:..."`: `readLine` из `"tz:io"`,
-  HTTP-сервер `serve` из `"tz:http"` ([net.md](net.md)).
+  HTTP-сервер `Server` из `"tz:http"` ([net.md](net.md)).
 - Ошибки ОС (нет файла, нет прав и т.п.) — `Result`: функции `node:fs` отдают
   `Result<T, SystemError>`, где `SystemError` — объект с меткой `code` и полями `message`,
   `errno`, `syscall`, `path`.

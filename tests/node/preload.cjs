@@ -38,7 +38,7 @@
 //   Result, and Math.min() and Math.max() of an empty spread give undefined
 //   (docs/numbers.md, section 10); Math.clamp, which node does not have yet.
 // - The module "tz:io", with readLine (tz-io.mjs next to this file).
-// - The module "tz:http", with serve over node:http (tz-http.mjs).
+// - The module "tz:http", with Server over node:http (tz-http.mjs).
 // - NODE_OPTIONS with this file, for the tests that run themselves again as
 //   a child process.
 "use strict";

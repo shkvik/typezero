@@ -1,18 +1,19 @@
 top-level code
   start
     writes the listeners of stats (line 38)
-    reads  the abort signals (line 44)
-    writes stdout (lines 53, 54)
-    reads  message of any SystemError (line 53)
-    writes stderr (line 54)
-    writes the exit code and environment (line 54)
-    reads  the state of any Server (line 64 in get)
+    reads  the abort signals (line 52)
+    reads  the state of server (line 64 in get)
+    writes the state of server (line 52)
+    writes stdout (lines 54, 55)
+    reads  message of any SystemError (line 54)
+    writes stderr (line 55)
+    writes the exit code and environment (line 55)
     in order with the arrow at line 44 after await at line 46: the listeners of stats
     in order: line 38
   after await at line 64
     writes stdout (line 65)
     reads  everything in any string[] (line 65)
-    reads  the state of any Server (line 66 in get)
+    reads  the state of server (line 66 in get)
     parallel
   after await at line 66
     writes stdout (lines 66, 68)
@@ -50,7 +51,7 @@ async arrow, line 44
 
 async function get, line 58
   start: runs inside its caller
-    reads  the state of any Server (line 59)
+    reads  the state of server (line 59)
   after await at line 59
     reads  message of any FetchError (line 60)
     writes the state of any Response (line 61)

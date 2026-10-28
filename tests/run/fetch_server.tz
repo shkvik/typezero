@@ -3,10 +3,10 @@
 // JSON both ways, status and headers, a body that streams each way, a 500
 // given by the handler, redirects, HEAD, requests at the same time, a
 // request cancelled by a signal, and stop().
-import { serve } from "tz:http"
+import { Server } from "tz:http"
 
 const enc = new TextEncoder()
-const started = serve({ port: 0, hostname: "127.0.0.1" }, async req => {
+const server = new Server(async req => {
   const url = new URL(req.url)
   switch (url.pathname) {
     case "/hello":
@@ -51,11 +51,11 @@ const started = serve({ port: 0, hostname: "127.0.0.1" }, async req => {
   }
   return new Response("not found", { status: 404, statusText: "Nope" })
 })
+const started = server.listen({ port: 0, hostname: "127.0.0.1" })
 if (started.isErr()) {
   console.log("cannot listen:", started.error.message)
   process.exit(1)
 }
-const server = started.value
 const base = `http://127.0.0.1:${server.port}`
 const port = (s: string) => s.replaceAll(String(server.port), "PORT")
 

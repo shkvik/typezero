@@ -1,10 +1,11 @@
 // The server of the HTTP benchmark (bench/http.ps1): "Hello, World!" to
 // every request, on the port given.
-import { serve } from "tz:http"
+import { Server } from "tz:http"
 
 const port = parseInt(process.argv[2] ?? "8080").unwrapOr(8080)
-const server = serve({ port, hostname: "127.0.0.1" }, () => new Response("Hello, World!"))
-if (server.isErr()) {
-  console.error(server.error.message)
+const server = new Server(() => new Response("Hello, World!"))
+const listened = server.listen({ port, hostname: "127.0.0.1" })
+if (listened.isErr()) {
+  console.error(listened.error.message)
   process.exit(1)
 }

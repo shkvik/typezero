@@ -144,8 +144,6 @@ void TzModulesChecker::noteHttpsCall(CallExpr *call, const FunctionDecl *fn) {
         !llvm::StringRef(prefix).starts_with("data:")) {
       checker_.file_->usesTls = true;
     }
-  } else if (fn == checker_.libFunctions_.lookup("serve")) {
-    noteServeOptions(call->args[0]);
   }
 }
 
@@ -173,8 +171,7 @@ void TzModulesChecker::noteServeOptions(const Expr *options) {
 
 void TzModulesChecker::noteHttpsValue(const FunctionDecl *fn, llvm::SMLoc loc) {
   if (fn && !checker_.libraryCalls().inLibrary(loc) &&
-      (fn == checker_.libFunctions_.lookup("fetch") ||
-       fn == checker_.libFunctions_.lookup("serve"))) {
+      fn == checker_.libFunctions_.lookup("fetch")) {
     checker_.file_->usesTls = true;
   }
 }

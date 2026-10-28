@@ -2,21 +2,21 @@
 // fetch decodes what the server compressed: gzip, deflate (with zlib's
 // header or without, as some servers send it) and br, whole and as it
 // streams.
-import { serve } from "tz:http"
+import { Server } from "tz:http"
 
 const data: Record<string, string> = {
   gzip: "H4sIAAAAAAAACstIzcnJ11FIzs8tKEotLk5NUSjPL8pJUVTIGJUYrhIAPdXVhPQBAAA=", deflate: "eJzLSM3JyddRSM7PLShKLS5OTVEozy/KSVFUyBiVGK4SAM1Stlk=", raw: "y0jNycnXUUjOzy0oSi0uTk1RKM8vyklRVMgYlRiuEgA=", br: "G/MBIIxUtb8GGWt7EyE5SCeUpYWEsrTmtRS4EgM=",
 }
-const started = serve({ port: 0, hostname: "127.0.0.1" }, req => {
+const server = new Server(req => {
   const coding = new URL(req.url).pathname.slice(1)
   const body = Buffer.from(data[coding] ?? "", "base64")
   return new Response(body, { headers: { "content-encoding": coding == "raw" ? "deflate" : coding } })
 })
+const started = server.listen({ port: 0, hostname: "127.0.0.1" })
 if (started.isErr()) {
   console.log("cannot listen:", started.error.message)
   process.exit(1)
 }
-const server = started.value
 for (const coding of ["gzip", "deflate", "raw", "br"]) {
   const r = must(await fetch(`http://127.0.0.1:${server.port}/${coding}`))
   const text = must(await r.text())

@@ -131,7 +131,7 @@ void LibraryEffects::libraryArg(const CallExpr *c, llvm::StringRef cls, llvm::St
     } else if (isTargetClass(cls) && (name == "addEventListener" || name == "addFunctionListener" ||
                                       name == "setOnabort")) {
       listen(f, TargetListeners);
-    } else if ((cls.empty() && name == "serve") || (cls == "Server" && name == "constructor")) {
+    } else if (cls == "Server" && name == "constructor") {
       libraryCallback(c, f, CallKind::Later, true, true);
     } else {
       libraryCallback(c, f, CallKind::Inline);
@@ -153,8 +153,7 @@ void LibraryEffects::libraryArg(const CallExpr *c, llvm::StringRef cls, llvm::St
         libraryCallback(c, v, CallKind::Later, true);
       } else if (cls == "ReadableStream" && p.name == "cancel") {
         libraryCallback(c, v, CallKind::Later);
-      } else if (((cls.empty() && name == "serve") || (cls == "Server" && name == "listen")) &&
-                 p.name == "onListen") {
+      } else if (cls == "Server" && name == "listen" && p.name == "onListen") {
         libraryCallback(c, v, CallKind::Inline);
       } else if (isTargetClass(cls) &&
                  (name == "addEventListener" || name == "addObjectListener") &&

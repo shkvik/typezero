@@ -96,7 +96,7 @@ child.stdout.on("data", s => s.length)          // s: string
   `node:stream/consumers` (`text`, `json`, `buffer`, `arrayBuffer`), `node:string_decoder`.
   Кроме `pipe` и того, что про ошибки (раздел 3).
 - «Не успеваю»: `write()` вернул `false` — ждать `drain`; буфер `highWaterMark` — как в node.
-- Web-потоки (`ReadableStream`, `WritableStream`) — для `fetch` и `serve` ([net.md](net.md));
+- Web-потоки (`ReadableStream`, `WritableStream`) — для `fetch` и `Server` ([net.md](net.md));
   переходы `Readable.toWeb()`, `Readable.fromWeb()`, `Writable.toWeb()` — как в node.
 
 ## 5. Скорость

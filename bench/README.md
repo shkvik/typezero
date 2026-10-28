@@ -360,7 +360,7 @@ node: 4 потока (`UV_THREADPOOL_SIZE`), а Go раскладывает го
 
 ## HTTP
 
-`http_hello` — сервер «Hello, World!» на tz (`serve` из `tz:http`), Go (`net/http`) и node
+`http_hello` — сервер «Hello, World!» на tz (`Server` из `tz:http`), Go (`net/http`) и node
 (`node:http`), и `http_load` — нагрузка на Go, как у bombardier: 128 соединений с keep-alive шлют
 запрос за запросом 10 с ([net.md](../docs/net.md), раздел 6). `run.ps1` пропускает каталоги
 `http_*`: сервер работает, пока его не остановят. Запуск:

@@ -4,7 +4,7 @@
 // signature, a key a generic cache keeps, an EventEmitter that reports the
 // checks, a Dog[] seen as an Animal[] only read on the way, and the Err of
 // a verify with a key that may only sign.
-import { serve } from "tz:http"
+import { Server } from "tz:http"
 import { EventEmitter } from "node:events"
 
 const enc = new TextEncoder()
@@ -37,16 +37,16 @@ function names(all: Animal[]) {
 }
 const dogs: Dog[] = [new Dog("Rex"), new Dog("Ace")]
 
-const started = serve({ port: 0, hostname: "127.0.0.1" }, async (req) => {
+const server = new Server(async (req) => {
   const body = new URL(req.url).pathname == "/dogs" ? names(dogs) : "nothing"
   const sig = must(await crypto.subtle.sign("HMAC", await hmac("server key"), enc.encode(body)))
   return new Response(body, { headers: { "x-signature": hex(sig) } })
 })
+const started = server.listen({ port: 0, hostname: "127.0.0.1" })
 if (started.isErr()) {
   console.log("cannot listen:", started.error.message)
   process.exit(1)
 }
-const server = started.value
 
 class Checks extends EventEmitter<{ checked: [path: string, ok: boolean] }> {}
 const checks = new Checks()

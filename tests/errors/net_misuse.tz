@@ -2,13 +2,13 @@
 // options and of the handler, the properties of URL that cannot be
 // assigned (or only with '='), and the intrinsics that only tz's own
 // library has.
-import { serve } from "tz:http"
+import { Server } from "tz:http"
 // expect-error: type 'string' is not assignable to type 'int | undefined' of field 'port'
-serve({ port: "80" }, req => new Response("x"))
+new Server(req => new Response("x")).listen({ port: "80" })
 // expect-error: parameter 'req' is declared as 'string', but the function gets 'Request' here
-serve({ port: 80 }, (req: string) => new Response("x"))
+new Server((req: string) => new Response("x"))
 // expect-error: type 'string' is not assignable to type 'Response | Promise<Response>'
-serve({ port: 80 }, req => "text")
+new Server(req => "text")
 // expect-error: cannot find name '__tz_net_close'
 const close = __tz_net_close
 const u = new URL("http://x")

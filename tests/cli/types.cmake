@@ -28,7 +28,7 @@ set(program [=[
 import { readFileSync } from "node:fs"
 import { execFileSync } from "node:child_process"
 import { readLine } from "tz:io"
-import { serve } from "tz:http"
+import { Server } from "tz:http"
 
 // Numbers.
 const n: int = 3
@@ -101,10 +101,11 @@ console.log(new Row(4).twice(), made, Reflect.getMetadata(Table, Row) ?? "none")
 const timer: Timeout = setTimeout(() => console.log("never"), 1000)
 clearTimeout(timer)
 console.log(readLine() ?? "no input")
-const server = serve({ hostname: "127.0.0.1", port: 0 }, request => new Response(`got ${new URL(request.url).pathname}`))
-if (server.isOk()) {
-  console.log(server.value.port > 0)
-  await server.value.stop()
+const server = new Server(request => new Response(`got ${new URL(request.url).pathname}`))
+const listened = server.listen({ hostname: "127.0.0.1", port: 0 })
+if (listened.isOk()) {
+  console.log(server.port > 0)
+  await server.stop()
 }
 ]=])
 write(app/main.tz "${program}")
@@ -127,20 +128,21 @@ true
 # null and properties: tz changes those declarations in its copy of
 # @types/node (editors/types/patch.cmake).
 set(web [=[
-import { serve } from "tz:http"
+import { Server } from "tz:http"
 
 // The web: fetch and reading a body give a Result; so does URL.parse. A
 // status written in the code is an HttpStatus; one from a variable becomes
 // one after isHttpStatus.
 const code = 200 + (process.argv.length > 99 ? 1 : 0)
-const server = serve({ hostname: "127.0.0.1", port: 0 }, request => {
+const server = new Server(request => {
   const path = new URL(request.url).pathname
   if (path == "/away") return Response.redirect(new URL("/here", request.url), 307)
   if (isHttpStatus(code)) return new Response(`got ${path}`, { status: code })
   return new Response("none", { status: 500 })
 })
-if (server.isOk()) {
-  const base = server.value.url
+const listened = server.listen({ hostname: "127.0.0.1", port: 0 })
+if (listened.isOk()) {
+  const base = listened.value
   const res = await fetch(new URL("/away", base))
   if (res.isOk()) {
     const response = res.value
@@ -154,7 +156,7 @@ if (server.isOk()) {
     url.value.searchParams.replace("c=2")
     console.log(url.value.href.endsWith("/a?c=2"), url.value.setPort(process.argv[2] ?? "x").isErr())
   }
-  await server.value.stop()
+  await server.stop()
 }
 
 // A stream of the web reads with a Result too.
