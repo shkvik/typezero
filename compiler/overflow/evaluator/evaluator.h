@@ -20,7 +20,10 @@ public:
                  bool square = false);
   Num floatArithmetic(const Expr *site, BinaryOp op, const Num &l, const Num &r, const Type *type,
                       const Expr *lhs, const Expr *rhs, const VarSymbol *accum, bool square);
+  Num decimalArithmetic(const Expr *site, BinaryOp op, const Num &l, const Num &r, const Expr *lhs,
+                        const Expr *rhs, bool square);
   Num bitwise(BinaryOp op, const Num &l, const Num &r, const Type *type) const;
+  static Num decimalLiteral(const Expr *expr);
 
 private:
   OverflowCheck &check_;

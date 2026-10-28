@@ -51,6 +51,23 @@ if (baseUrl.isOk())
 const bad = URL.parse("not a url")
 if (bad.isErr()) console.log(bad.error.code, bad.error.message, bad.error.input)
 
+// Plain addresses take a short way through the parser; whatever it does not
+// know (a dot segment, a host that may be a number, a character to encode,
+// upper case, a user) goes the long way, with the same result.
+const near = [
+  "https://example.com", "http://h:0080/x", "http://h:/", "ws://h:80/a", "wss://h:444/",
+  "ftp://h:21/f", "https://a..b/", "https://.a/", "https://a.b./c", "http://a.1/", "http://a.1b/",
+  "http://a.0x1/", "http://xn--p1ai/", "http://-a-.com/", "https://h/a/./b", "https://h/a/%2E%2e/b",
+  "https://h/a/.%2e", "https://h/...", "https://h/.a", "https://h/a^b", "https://h/{x}`", "https://h/a\\b",
+  "https://h/?'x'<", "https://h/#`x`", "https://h?x", "https://h#f", "https://h/?#", "https://h//a//b/",
+  "https://EXAMPLE.com/", "Https://h/", "https://h/	a", "https://u@h/", "https://h:1x/",
+  "https://h/%zz?%zz#%zz", "https:h/x", "https:///h/x",
+]
+for (const s of near) {
+  const parsed = URL.parse(s)
+  console.log(JSON.stringify(s), parsed.isOk() ? `${parsed.value.href} ${parsed.value.host} ${parsed.value.pathname}` : "error")
+}
+
 // The parts change through methods; a literal is checked when the program is
 // built, a text from a variable gives a Result.
 const u = new URL("http://h/p?a=1#top")

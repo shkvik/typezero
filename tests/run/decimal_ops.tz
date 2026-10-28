@@ -1,6 +1,8 @@
 // The expected output is what BigNumber.js 11 computes for the same values
 // with its default settings, which decimals follow (docs/decimal.md). The
 // values are written as text, as BigNumber.js reads them; each is a number.
+// A divisor read from text may be 0, so the loops check it, as the compiler
+// wants (docs/decimal.md, section 6).
 function num(text: string): decimal {
   return decimal(text).unwrapOr(0)
 }
@@ -17,14 +19,17 @@ const B: string[] = [
 for (const a of A)
   for (const b of B) {
     const x = num(a), y = num(b)
+    if (y == 0) continue
     console.log(x + y, x - y, x * y, x / y, x % y)
   }
 const P: string[] = ["0", "1", "-1", "2", "-2", "0.5", "1.1", "-0.3", "10", "123.456", "1e-5", "3"]
 const N: int[] = [0, 1, 2, 3, 7, 10, 25, -1, -2, -3, -7]
 for (const a of P)
-  for (const n of N)
-    if (!(a == "0" && n < 0))
-      console.log(num(a) ** n)
+  for (const n of N) {
+    const x = num(a)
+    if (n >= 0) console.log(x ** n)
+    else if (x != 0) console.log(x ** n)
+  }
 const C: string[] = [
   "0", "-0", "1", "1.0", "1.00000000000000000000000001", "-1", "0.1", "0.10",
   "123456789012345678901234567890", "123456789012345678901234567890.0", "1e30", "1e-30",

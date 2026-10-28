@@ -36,8 +36,14 @@ type DecimalRoundingMode =
   | "half-up" | "half-down" | "half-even" | "half-ceil" | "half-floor"
   | (string & {})
 
-// decimal("0.1"), decimal(x): an exact decimal from a string or a number.
-declare function decimal(value: string | number): decimal
+// decimal("0.1"), decimal(x): an exact decimal from a string or a number. A
+// string known when tz builds the program (a literal, a constant) is checked
+// then and gives a decimal; any other string gives a Result.
+type DecimalError = { code: "bad_decimal"; message: string; text: string }
+declare function decimal<S extends string>(
+  value: S,
+): string extends S ? Result<decimal, DecimalError> : decimal
+declare function decimal(value: number): decimal
 declare namespace decimal {
   function max(...values: decimal[]): decimal
   function min(...values: decimal[]): decimal
@@ -131,21 +137,75 @@ type JsonError = { code: "bad_json" | "bad_field" | "bad_class" | "circular"; me
 type UriError = { code: "bad_uri"; message: string }
 type RegexError = { code: "bad_regex"; message: string }
 type UrlError = { code: "bad_url"; message: string; input: string }
+type DateError = { code: "bad_date"; message: string; text: string }
+type LocaleError = { code: "bad_locale"; message: string; tag: string }
+type DecodeError = { code: "ERR_ENCODING_INVALID_ENCODED_DATA"; message: string }
+type EncodingError = { code: "ERR_ENCODING_NOT_SUPPORTED"; message: string }
+
+// Date.parse gives the milliseconds, or an Err for a text it cannot read
+// (docs/date.md, section 4).
+interface DateConstructor {
+  parse(text: string): Result<int, DateError>
+}
+
+// The web (docs/net.md): fetch, the reading of a body, URL.parse and the
+// reading of a stream give a Result; bodyUsed() and desiredSize() are
+// methods; the status of a Response is an HttpStatus. A declaration here
+// cannot change what @types/node declares, so tz changes those declarations in
+// its copy of @types/node (editors/types/patch.cmake).
+type FetchError = { code: string; message: string; cause?: string }
+type BodyError = {
+  code: "body_used" | "terminated" | "bad_form" | "body_failed" | "ABORT_ERR" | "TIMEOUT_ERR"
+  message: string
+  cause?: string
+}
+// The statuses a Response may have; a status from a variable becomes one
+// after a check: if (isHttpStatus(code)).
+type HttpStatus =
+  | 200 | 201 | 202 | 203 | 204 | 205 | 206 | 207 | 208 | 209 | 210 | 211 | 212 | 213 | 214 | 215 | 216 | 217 | 218 | 219
+  | 220 | 221 | 222 | 223 | 224 | 225 | 226 | 227 | 228 | 229 | 230 | 231 | 232 | 233 | 234 | 235 | 236 | 237 | 238 | 239
+  | 240 | 241 | 242 | 243 | 244 | 245 | 246 | 247 | 248 | 249 | 250 | 251 | 252 | 253 | 254 | 255 | 256 | 257 | 258 | 259
+  | 260 | 261 | 262 | 263 | 264 | 265 | 266 | 267 | 268 | 269 | 270 | 271 | 272 | 273 | 274 | 275 | 276 | 277 | 278 | 279
+  | 280 | 281 | 282 | 283 | 284 | 285 | 286 | 287 | 288 | 289 | 290 | 291 | 292 | 293 | 294 | 295 | 296 | 297 | 298 | 299
+  | 300 | 301 | 302 | 303 | 304 | 305 | 306 | 307 | 308 | 309 | 310 | 311 | 312 | 313 | 314 | 315 | 316 | 317 | 318 | 319
+  | 320 | 321 | 322 | 323 | 324 | 325 | 326 | 327 | 328 | 329 | 330 | 331 | 332 | 333 | 334 | 335 | 336 | 337 | 338 | 339
+  | 340 | 341 | 342 | 343 | 344 | 345 | 346 | 347 | 348 | 349 | 350 | 351 | 352 | 353 | 354 | 355 | 356 | 357 | 358 | 359
+  | 360 | 361 | 362 | 363 | 364 | 365 | 366 | 367 | 368 | 369 | 370 | 371 | 372 | 373 | 374 | 375 | 376 | 377 | 378 | 379
+  | 380 | 381 | 382 | 383 | 384 | 385 | 386 | 387 | 388 | 389 | 390 | 391 | 392 | 393 | 394 | 395 | 396 | 397 | 398 | 399
+  | 400 | 401 | 402 | 403 | 404 | 405 | 406 | 407 | 408 | 409 | 410 | 411 | 412 | 413 | 414 | 415 | 416 | 417 | 418 | 419
+  | 420 | 421 | 422 | 423 | 424 | 425 | 426 | 427 | 428 | 429 | 430 | 431 | 432 | 433 | 434 | 435 | 436 | 437 | 438 | 439
+  | 440 | 441 | 442 | 443 | 444 | 445 | 446 | 447 | 448 | 449 | 450 | 451 | 452 | 453 | 454 | 455 | 456 | 457 | 458 | 459
+  | 460 | 461 | 462 | 463 | 464 | 465 | 466 | 467 | 468 | 469 | 470 | 471 | 472 | 473 | 474 | 475 | 476 | 477 | 478 | 479
+  | 480 | 481 | 482 | 483 | 484 | 485 | 486 | 487 | 488 | 489 | 490 | 491 | 492 | 493 | 494 | 495 | 496 | 497 | 498 | 499
+  | 500 | 501 | 502 | 503 | 504 | 505 | 506 | 507 | 508 | 509 | 510 | 511 | 512 | 513 | 514 | 515 | 516 | 517 | 518 | 519
+  | 520 | 521 | 522 | 523 | 524 | 525 | 526 | 527 | 528 | 529 | 530 | 531 | 532 | 533 | 534 | 535 | 536 | 537 | 538 | 539
+  | 540 | 541 | 542 | 543 | 544 | 545 | 546 | 547 | 548 | 549 | 550 | 551 | 552 | 553 | 554 | 555 | 556 | 557 | 558 | 559
+  | 560 | 561 | 562 | 563 | 564 | 565 | 566 | 567 | 568 | 569 | 570 | 571 | 572 | 573 | 574 | 575 | 576 | 577 | 578 | 579
+  | 580 | 581 | 582 | 583 | 584 | 585 | 586 | 587 | 588 | 589 | 590 | 591 | 592 | 593 | 594 | 595 | 596 | 597 | 598 | 599
+type RedirectStatus = 301 | 302 | 303 | 307 | 308
+declare function isHttpStatus(code: number): code is HttpStatus
 
 // The parts of a URL are fields that only its methods change (docs/objects.md,
 // section 6); @types/node still lets the fields be assigned. A value that the
 // URL can refuse gives a Result; tz checks a literal when it builds the program.
-interface URL {
-  setHref(value: string): Result<void, UrlError>
-  setProtocol(value: string): Result<void, UrlError>
-  setHost(value: string): Result<void, UrlError>
-  setHostname(value: string): Result<void, UrlError>
-  setPort(value: string): Result<void, UrlError>
-  setUsername(value: string): void
-  setPassword(value: string): void
-  setPathname(value: string): void
-  setSearch(value: string): void
-  setHash(value: string): void
+declare module "url" {
+  interface URL {
+    setHref(value: string): Result<void, UrlError>
+    setProtocol(value: string): Result<void, UrlError>
+    setHost(value: string): Result<void, UrlError>
+    setHostname(value: string): Result<void, UrlError>
+    setPort(value: string): Result<void, UrlError>
+    setUsername(value: string): void
+    setPassword(value: string): void
+    setPathname(value: string): void
+    setSearch(value: string): void
+    setHash(value: string): void
+  }
+
+  interface URLSearchParams {
+    watch(watcher: (query?: string) => void): void
+    replace(query?: string): void
+  }
 }
 
 // What the objects of the web platform give in tz besides their API
@@ -156,18 +216,15 @@ interface URL {
 // which crypto.subtle calls. AbortSignal.withAbort(), which gives a signal
 // together with the function that aborts it, cannot be added here to the
 // AbortSignal of @types/node, which is a var.
-interface URLSearchParams {
-  watch(watcher: (query?: string) => void): void
-  replace(query?: string): void
-}
-
 interface Event {
   readonly immediateStopped: boolean
   dispatchOn(target: EventTarget, run: () => void): boolean
 }
 
-interface ReadableStream<R> {
-  readonly disturbed: boolean
+declare module "stream/web" {
+  interface ReadableStream<R = any> {
+    readonly disturbed: boolean
+  }
 }
 
 declare module "crypto" {

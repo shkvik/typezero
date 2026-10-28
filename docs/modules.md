@@ -165,15 +165,22 @@ type Json = null | boolean | number | string | Json[] | { [key: string]: Json }
   отдаёт файлы `.tz` проверке TypeScript.
 - **Для плагина всё готово** рядом с tz, в `types/`: настройки tsc для программ tz,
   `@types/node` (node 24) и `tz.d.ts` ([editors/types](../editors/types/tz.d.ts)) —
-  то, что в tz есть без импорта: `int`, `long`, `double`, `decimal` с методами, `Json`,
+  то, что в tz есть без импорта: числа из [numbers.md](numbers.md) (`int`, `int8` … `uint64`,
+  `double`, `Bit`, методы `toInt32()` и другие), `decimal` с методами, `Json`,
   `JSON.parse<T>`, `fromJson`, `embedJson`, `embedText`, `embedBytes`, `Result` (свой, без
-  neverthrow), `SystemError`, `ExecError`, `Constructor`, `ConstructorArgs`,
-  `MethodDescriptor`, `Reflect.defineMetadata` и `getMetadata`, `Timeout`, типы Web Crypto, — и
-  модули `"tz:io"` и `"tz:http"`. Тест `tests/cli/types.cmake` проверяет их TypeScript из
-  VS Code на копиях программ с расширением `.ts`. После переделки ошибок и чисел (26 октября)
-  объявления надо обновить: числа из [numbers.md](numbers.md) (`int8` … `uint64`, `Bit`,
-  `Bit.Wrap32`, методы `toInt32()` и другие, без `long`), `node:fs` и остальное с `Result`
-  вместо исключений, `SystemError` — тип объекта. `Result` уже свой (26 октября).
+  neverthrow), типы ошибок (`SystemError`, `FetchError`, `DateError`…), `HttpStatus` и
+  `isHttpStatus`, `Constructor`, `ConstructorArgs`, `MethodDescriptor`,
+  `Reflect.defineMetadata` и `getMetadata`, `Timeout`, типы Web Crypto, — и модули `"tz:io"` и
+  `"tz:http"`. С `Result` объявлены `node:fs`, `node:fs/promises`, `node:child_process`,
+  `JSON.parse`, `RegExp.parse`, `Date.parse`, `decimal(текст)` и web: `fetch`, чтение тел,
+  `URL.parse`, чтение web-потоков. Где `@types/node` объявляет иначе (исключение, `null`,
+  свойство вместо метода), объявление tz.d.ts его не поменяет — tz меняет его в своей копии
+  `@types/node` ([patch.cmake](../editors/types/patch.cmake)): `fetch`, тела, `bodyUsed()`,
+  статус `HttpStatus`, `URL.parse`, `read()` и `for await` web-потоков, `desiredSize()`. Пока
+  без `Result` в объявлениях: `node:crypto` и `crypto.subtle`, `Reflect.apply` / `construct`,
+  `once()` / `on()`, `node:timers/promises` и `question` с `signal`, потоки node (`for await`,
+  `pipeline`, `finished`), `TextDecoder` с `fatal`. Тест `tests/cli/types.cmake` проверяет
+  объявления TypeScript'ом из VS Code на копиях программ с расширением `.ts`.
 - **Настройки tsc.** Каждый файл — модуль (`moduleDetection: "force"`), импорты как в tz, DOM
   нет, `strict` без `noImplicitAny` (tz выводит типы параметров из вызовов), декораторы как в tz
   (`experimentalDecorators`). Где tz знает больше, объявление мягче: для tsc целые типы и

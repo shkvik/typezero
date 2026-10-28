@@ -7,18 +7,26 @@ import { existsSync, mkdirSync, writeFileSync, renameSync } from "node:fs"
 import { join } from "node:path"
 import { tmpdir } from "node:os"
 
+// Making the files is not measured; a failure there ends the program.
+function orExit<T>(done: Result<T, SystemError>) {
+  if (done.isErr()) {
+    console.error(done.error.message)
+    process.exit(1)
+  }
+}
+
 const count = 10000
 const dir = join(tmpdir(), "tz-bench-fsp-files")
 if (!existsSync(dir)) {
   const making = `${dir}-${process.argv.length}-${Date.now()}`
-  mkdirSync(making)
+  orExit(mkdirSync(making))
   for (let i = 0; i < count; i++)
-    writeFileSync(join(making, `f${i}.txt`), `file ${i}: ${"x".repeat(i % 100)}\n`)
-  renameSync(making, dir)
+    orExit(writeFileSync(join(making, `f${i}.txt`), `file ${i}: ${"x".repeat(i % 100)}\n`))
+  orExit(renameSync(making, dir))
 }
 const names: string[] = []
 for (let i = 0; i < count; i++) names.push(join(dir, `f${i}.txt`))
 const texts = await Promise.all(names.map((name) => readFile(name, "utf8")))
 let total = 0
-for (const text of texts) total += text.length
+for (const text of texts) total += text.unwrapOr("").length
 console.log(texts.length, total)

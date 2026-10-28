@@ -1,7 +1,7 @@
 # События: `EventEmitter`
 
 Решения, принятые 24 октября 2026 года, и поправки 26 октября: событие `error` без исключений
-(раздел 4, [errors.md](errors.md), раздел 5). Шаги 1–4 плана сделаны 24 октября; что осталось —
+(раздел 4, [errors.md](errors.md), раздел 5). Шаги 1–4 плана сделаны 24 октября, шаг 6 — 27 октября; что осталось —
 в конце, в разделе «План реализации».
 
 ## Коротко
@@ -136,7 +136,7 @@ README.
 4. **`EventTarget`, `Event`, `CustomEvent`**, `AbortController` / `AbortSignal` на них (сделано).
 5. Дальше на этом — потоки node, асинхронные функции `node:child_process`
    ([process.md](process.md)), `node:http` ([net.md](net.md)).
-6. **`error` без исключений** (раздел 4; [errors.md](errors.md), шаг 3): правило подписки на
+6. **`error` без исключений** (сделано 27 октября; раздел 4; [errors.md](errors.md), шаг 3): правило подписки на
    `error` по путям, ошибка на `error` без слушателя у своего объекта, ошибка на слушатель с
    `Result`, `Result` у `once()` и `on()`, убрать `captureRejections`, `uncaughtException` и
    `unhandledRejection`. Переписать `library/events/*.tz`. Сделано 27 октября; тип ошибки у

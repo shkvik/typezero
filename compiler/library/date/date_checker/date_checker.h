@@ -19,7 +19,7 @@ public:
   Expr *dateTime(Expr *date);
   Expr *dateToString(Expr *date);
   void checkDateLiteral(const Expr *arg);
-  void checkDateFields(std::vector<Expr *> &args);
+  void checkDateFields(std::vector<Expr *> &args, size_t first = 0, llvm::StringRef setter = "");
 
 private:
   Checker &checker_;

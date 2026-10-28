@@ -1,6 +1,7 @@
 #include "compiler/overflow/builtin_evaluator/builtin_evaluator.h"
 #include "compiler/check/checker/checker.h"
 #include "compiler/check/facts/facts.h"
+#include "compiler/library/decimal/decimal_literal/decimal_literal.h"
 #include "compiler/overflow/call_ranges/call_ranges.h"
 #include "compiler/overflow/evaluator/evaluator.h"
 #include "compiler/overflow/executor/executor.h"
@@ -189,6 +190,11 @@ Val BuiltinEvaluator::evalBuiltin(const CallExpr *call, State &st) {
       check_.overflowWarnings().checkConversion(call, call->args[0], arg(0).num, type);
       return numVal(arg(0).num);
     }
+    if (from && from->isDecimal()) {
+      Num x = arg(0).num;
+      return x.empty() ? check_.overflowWarnings().trusted(type)
+                       : numVal(narrowTo(x, -kDoubleMax, kDoubleMax));
+    }
     if (from && isNumberType(from)) {
       return numVal(arg(0).num);
     }
@@ -198,7 +204,13 @@ Val BuiltinEvaluator::evalBuiltin(const CallExpr *call, State &st) {
     return check_.overflowWarnings().trusted(type);
   }
   case Builtin::NumConvert: {
-    if (!receiverType || !isNumberType(receiverType) || type->isDecimal()) {
+    if (type->isDecimal() && receiverType && receiverType->isInteger() && !receiver.num.empty()) {
+      Num x = receiver.num;
+      bool exact = std::fabs(x.lo) <= 9007199254740992.0 && std::fabs(x.hi) <= 9007199254740992.0;
+      return numVal(exact ? x : widenedDecimal(x));
+    }
+    if (!receiverType || !isNumberType(receiverType) || type->isDecimal() ||
+        receiverType->isDecimal()) {
       return check_.overflowWarnings().trusted(type);
     }
     Num x = receiver.num;
@@ -398,6 +410,63 @@ Val BuiltinEvaluator::evalBuiltin(const CallExpr *call, State &st) {
     default:
       return numVal(range(-1440, 1440));
     }
+  }
+  case Builtin::DecimalOf: {
+    const Type *from =
+        call->args.empty() || !call->args[0]->type ? nullptr : call->args[0]->type->nonOptional();
+    Num x = arg(0).num;
+    if (from && from->isDecimal() && !x.empty()) {
+      return numVal(x);
+    }
+    if (from && from->isInteger() && !x.empty()) {
+      bool exact = std::fabs(x.lo) <= 9007199254740992.0 && std::fabs(x.hi) <= 9007199254740992.0;
+      return numVal(exact ? x : widenedDecimal(x));
+    }
+    if (from && from->isFloat() && !x.empty()) {
+      return numVal(widenedDecimal(x));
+    }
+    if (auto *text =
+            dyn_cast<StringLitExpr>(stripCasts(call->args.empty() ? nullptr : call->args[0]))) {
+      std::string utf8(text->value.begin(), text->value.end());
+      std::optional<DecimalLiteral> lit = readDecimalLiteral(utf8);
+      if (lit && lit->isZero()) {
+        return numVal(exactly(0));
+      }
+      if (lit) {
+        std::string digits = lit->digits + "e" + std::to_string(lit->exponent);
+        return numVal(widenedDecimal(exactly(std::strtod(digits.c_str(), nullptr))));
+      }
+    }
+    return check_.overflowWarnings().trusted(type);
+  }
+  case Builtin::DecAbs: {
+    Num x = receiver.num;
+    if (x.empty()) {
+      return check_.overflowWarnings().trusted(type);
+    }
+    Num r = make({x.lo >= 0   ? x.lo
+                  : x.hi <= 0 ? -x.hi
+                              : 0},
+                 std::fabs(x.lo) > std::fabs(x.hi) ? Bound{-x.lo, x.loOrigin, x.loWhy} : x.high());
+    r.away = x.away;
+    return numVal(r);
+  }
+  case Builtin::DecSqrt: {
+    Num x = receiver.num.empty() ? check_.overflowWarnings().trusted(type).num : receiver.num;
+    if (!check_.overflowWarnings().checkDecimalSqrt(call, receiverExpr, x)) {
+      return check_.overflowWarnings().trusted(type);
+    }
+    Num r = widenedDecimal(range(std::sqrt(std::max(x.lo, 0.0)), std::sqrt(x.hi)), 1e-20);
+    r.lo = std::max(r.lo, 0.0);
+    return numVal(r);
+  }
+  case Builtin::DecDiv: {
+    Num x = receiver.num.empty() ? check_.overflowWarnings().trusted(type).num : receiver.num;
+    Num n = arg(0).num.empty() ? check_.overflowWarnings().trusted(type).num : arg(0).num;
+    bool ok = check_.overflowWarnings().checkDivisor(
+        call, BinaryOp::Div, call->args.empty() ? nullptr : call->args[0], x, n);
+    check_.overflowWarnings().noteProof(call, ok);
+    return check_.overflowWarnings().trusted(type);
   }
   case Builtin::ProcessArgv:
   case Builtin::ObjectKeys:

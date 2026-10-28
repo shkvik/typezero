@@ -73,6 +73,22 @@ int64_t floorShift(int64_t v, int64_t n) {
 ByteProofs::ByteProofs(Checker &checker) : checker_(checker) {}
 
 ValueRange ByteProofs::valueRange(const Expr *e) const {
+  Range r = computedRange(e);
+  if (!e->type || !e->type->nonOptional()->isInteger()) {
+    return r;
+  }
+  const Type *type = e->type->nonOptional();
+  if (type->bitWidth() < 64 || type->isUnsigned()) {
+    r.lo = r.lo ? std::max(*r.lo, type->intMin()) : type->intMin();
+  }
+  if (type->bitWidth() < 64) {
+    r.hi = r.hi ? std::min(*r.hi, int64_t(type->intMax())) : int64_t(type->intMax());
+  }
+
+  return r;
+}
+
+ValueRange ByteProofs::computedRange(const Expr *e) const {
   if (!e->type || !e->type->nonOptional()->isInteger()) {
     return {};
   }
@@ -95,7 +111,7 @@ ValueRange ByteProofs::valueRange(const Expr *e) const {
   }
   case Expr::Kind::Name: {
     const VarSymbol *var = cast<NameExpr>(e)->var;
-    if (!var || !var->type->isInt()) {
+    if (!var || !var->type->isInteger() || var->type->isWrapping()) {
       return {};
     }
     Range r;
@@ -136,6 +152,8 @@ ValueRange ByteProofs::valueRange(const Expr *e) const {
         return {lo, hi};
       }
       return {};
+    case Builtin::NumConvert:
+      return valueRange(cast<MemberExpr>(call->callee)->object);
     case Builtin::DataViewGet:
     case Builtin::BufferRead:
       if (Type::bytesType(Bytes(cast<IntLitExpr>(call->args[0])->value))->elementRange(lo, hi)) {

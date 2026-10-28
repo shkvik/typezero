@@ -7,8 +7,20 @@ const pem =
   "MC4CAQAwBQYDK2VwBCIEILv4fsSzEiPk7kwDzHM70NuGeJRFZkyyEOjHEB0ttb//\n" +
   "-----END PRIVATE KEY-----\n"
 
-const key = createPrivateKey(pem)
+const keyMade = createPrivateKey(pem)
+if (keyMade.isErr()) {
+  console.error(keyMade.error.message)
+  process.exit(1)
+}
+const key = keyMade.value
 const data = Buffer.from("a message of some length to sign, as a token or a handshake would")
 let signature = Buffer.alloc(0)
-for (let i = 0; i < 50000; i++) signature = sign(undefined, data, key)
+for (let i = 0; i < 50000; i++) {
+  const made = sign(undefined, data, key)
+  if (made.isErr()) {
+    console.error(made.error.message)
+    process.exit(1)
+  }
+  signature = made.value
+}
 console.log(createHash("sha256").update(signature).digest("hex"))

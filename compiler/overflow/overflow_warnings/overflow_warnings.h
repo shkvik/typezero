@@ -29,6 +29,7 @@ public:
   void noteProof(const Expr *site, bool proven);
   void checkShiftCount(const Expr *count, const Num &n, unsigned width);
   bool checkPowerBase(const Expr *site, const Expr *base, const Num &a);
+  bool checkDecimalSqrt(const CallExpr *call, const Expr *value, const Num &x);
   bool checkDomain(const CallExpr *call, const Expr *value, const Num &x, double lo, double hi,
                    bool loOpen, bool hiOpen, llvm::StringRef what, llvm::StringRef condition,
                    llvm::StringRef extra = "");

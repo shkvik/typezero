@@ -1,6 +1,8 @@
 // The expected output is what BigNumber.js 11 computes for the same values
 // with its default settings, which decimals follow (docs/decimal.md). The
 // values are written as text, as BigNumber.js reads them; each is a number.
+// A divisor read from text may be 0, and a number under sqrt() negative, so
+// the loops check them, as the compiler wants (docs/decimal.md, section 6).
 function num(text: string): decimal {
   return decimal(text).unwrapOr(0)
 }
@@ -16,9 +18,12 @@ const D: string[] = [
 ]
 const DB: string[] = ["3", "7", "-3", "0.7", "8", "1e-5", "400"]
 for (const a of D)
-  for (const b of DB)
+  for (const b of DB) {
+    const divisor = num(b)
+    if (divisor == 0) continue
     for (const dp of [0, 2, 5])
-      console.log(modes.map(m => num(a).div(num(b), dp, m)).join(" "))
+      console.log(modes.map(m => num(a).div(divisor, dp, m)).join(" "))
+  }
 for (const a of D)
   console.log(num(a).div(3), num(a) / 3)
 const R: string[] = [
@@ -63,8 +68,10 @@ const Q: string[] = [
   "0", "1", "2", "4", "0.25", "1e-30", "2e-41", "1e30", "10", "0.0001", "99",
   "123456789012345678901234567890", "1.21", "0.5", "3e-21", "1e-40"
 ]
-for (const a of Q)
-  console.log(num(a).sqrt())
+for (const a of Q) {
+  const x = num(a)
+  if (x >= 0) console.log(x.sqrt())
+}
 const U: string[] = [
   "0", "-0", "1", "-1.50", "2.5000", "-123456789012345678901234567890.5", "1e-30", "1e30",
   "-7", "100", "0.1", "9223372036854775808", "-9223372036854775808"

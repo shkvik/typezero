@@ -11,19 +11,22 @@ console.log(d.getSeconds(), d.getMilliseconds(), d.getTimezoneOffset())
 const text = (x: Date) => x.toString().slice(0, 33)
 console.log(text(d), d.toDateString(), d.toTimeString().slice(0, 17))
 
-// Setters in local time: summer time ends on November 1, 2026.
+// Setters in local time: summer time ends on November 1, 2026. A number past
+// its field carries over to the next one, as in JavaScript, when it is
+// computed; written in the code, it is an error (errors/date.tz).
+const computed = (n: int) => n
 d.setMonth(10, 5)
 console.log(text(d), d.getTimezoneOffset())
 d.setDate(0)
 console.log(text(d))
-d.setHours(48, 5)
+d.setHours(computed(48), 5)
 console.log(text(d))
-d.setFullYear(2027, 1, 29)
+d.setFullYear(2027, 1, computed(29))
 console.log(text(d))
-d.setMinutes(-1, 30, 500)
+d.setMinutes(computed(-1), 30, 500)
 console.log(text(d), d.getMilliseconds())
-d.setSeconds(3600)
-d.setMilliseconds(-1)
+d.setSeconds(computed(3600))
+d.setMilliseconds(computed(-1))
 console.log(text(d), d.getMilliseconds())
 
 // A local time the clocks skip is read with the offset before the change; a

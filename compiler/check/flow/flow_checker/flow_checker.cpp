@@ -158,7 +158,7 @@ void FlowChecker::assigned(const VarSymbol *var, const Expr *value) {
     return;
   }
 
-  if (type->isInt()) {
+  if (type->isInteger() && !type->isWrapping()) {
     std::optional<Linear> v = checker_.indexProofs().linear(value);
     if (v && v->term == Term::of(var)) {
       incremented(var, v->offset);

@@ -42,6 +42,42 @@ nope false true
 "http:foo" http://base.com/dir/foo
 http://base.com/dir/c true
 bad_url Invalid URL not a url
+"https://example.com" https://example.com/ example.com /
+"http://h:0080/x" http://h/x h /x
+"http://h:/" http://h/ h /
+"ws://h:80/a" ws://h/a h /a
+"wss://h:444/" wss://h:444/ h:444 /
+"ftp://h:21/f" ftp://h/f h /f
+"https://a..b/" https://a..b/ a..b /
+"https://.a/" https://.a/ .a /
+"https://a.b./c" https://a.b./c a.b. /c
+"http://a.1/" error
+"http://a.1b/" http://a.1b/ a.1b /
+"http://a.0x1/" error
+"http://xn--p1ai/" http://xn--p1ai/ xn--p1ai /
+"http://-a-.com/" http://-a-.com/ -a-.com /
+"https://h/a/./b" https://h/a/b h /a/b
+"https://h/a/%2E%2e/b" https://h/b h /b
+"https://h/a/.%2e" https://h/ h /
+"https://h/..." https://h/... h /...
+"https://h/.a" https://h/.a h /.a
+"https://h/a^b" https://h/a%5Eb h /a%5Eb
+"https://h/{x}`" https://h/%7Bx%7D%60 h /%7Bx%7D%60
+"https://h/a\\b" https://h/a/b h /a/b
+"https://h/?'x'<" https://h/?%27x%27%3C h /
+"https://h/#`x`" https://h/#%60x%60 h /
+"https://h?x" https://h/?x h /
+"https://h#f" https://h/#f h /
+"https://h/?#" https://h/?# h /
+"https://h//a//b/" https://h//a//b/ h //a//b/
+"https://EXAMPLE.com/" https://example.com/ example.com /
+"Https://h/" https://h/ h /
+"https://h/\ta" https://h/a h /a
+"https://u@h/" https://u@h/ h /
+"https://h:1x/" error
+"https://h/%zz?%zz#%zz" https://h/%zz?%zz#%zz h /%zz
+"https:h/x" https://h/x h /x
+"https:///h/x" https://h/x h /x
 http://me:s3cret@other.org:8080/new%20path?a=1#end
 https://me:s3cret@other.org/new%20path?a=1#end true
 https://me:s3cret@example.com:9000/new%20path?q=1%202#end

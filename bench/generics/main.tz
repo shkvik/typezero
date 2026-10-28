@@ -11,7 +11,7 @@ function indexOf<T>(xs: T[], x: T): int {
 }
 const a: int[] = []
 for (let i = 0; i < 10000000; i++) a.push(i & 1023)
-const zero: long = 0
-let total: long = 0
+const zero = 0
+let total = 0
 for (let r = 0; r < 20; r++) total += fold(a, zero, (s, x) => s + x)
 console.log(total, indexOf(a, 1023), indexOf(a, 5000))

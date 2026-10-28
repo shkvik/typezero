@@ -8,7 +8,7 @@ const words = ["running", "data", "error", "the", "warning", "loading", "value",
 let seed = 42
 function next(n: int): int {
   seed = (seed * 1103515245 + 12345) & 0x7fffffff
-  return (seed >>> 16) % n
+  return (seed >> 16) % n
 }
 const parts: string[] = []
 let size = 0

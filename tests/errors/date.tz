@@ -34,6 +34,34 @@ const far = new Date("+275761-01-01T00:00Z")
 const lastDay = new Date(2026, 2, 0)
 const leap = new Date(2024, 1, 29)
 
+// The setters are checked the same way: a field written in the code is in
+// its range. setFullYear takes the year as it is, so 50 is the year 50.
+// expect-error: month 12 is January of the next year in JavaScript
+d.setMonth(12)
+// expect-error: 24 hours are out of range: hours are from 0 to 23
+d.setHours(24)
+// expect-error: 60 minutes are out of range
+d.setUTCHours(1, 60)
+// expect-error: -1 seconds are out of range
+d.setSeconds(-1)
+// expect-error: 1000 milliseconds are out of range
+d.setUTCMilliseconds(1000)
+// expect-error: February 2027 has no day 29, and JavaScript would make it March 1; the last day of February is day 0 of March: 'setFullYear(2027, 2, 0)'
+d.setFullYear(2027, 1, 29)
+// expect-error: February has no day 30, and JavaScript would move on to March; the last day of February is day 0 of March: 'setMonth(2, 0)'
+d.setMonth(1, 30)
+// expect-error: April has no day 31, and JavaScript would move on to May; April has 30 days
+d.setUTCMonth(3, 31)
+// expect-error: no month has day 32
+d.setDate(32)
+// expect-error: day -1 is outside the month
+d.setUTCDate(-1)
+d.setFullYear(50)
+d.setDate(0)
+d.setDate(31)
+d.setMonth(1, 29)
+d.setHours(23, 59, 59, 999)
+
 // expect-error: '+' with a date joins texts in JavaScript
 const sum = d + 1
 // expect-error: a date minus a number is a number of milliseconds in JavaScript, not a date

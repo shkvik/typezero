@@ -130,6 +130,13 @@ std::string numberText(double v) {
   return text;
 }
 
+std::string roughNumber(double v) {
+  char text[64];
+  std::snprintf(text, sizeof text, "%.6g", v);
+
+  return text;
+}
+
 std::string replaced(std::string text, llvm::StringRef from, llvm::StringRef to) {
   for (size_t at = text.find(from.str()); at != std::string::npos;
        at = text.find(from.str(), at + to.size())) {
@@ -318,6 +325,10 @@ bool OverflowWarnings::checkDivisor(const Expr *site, BinaryOp op, const Expr *d
       check_.programScan().isConstantTree(divisor)) {
     if (isFloatType(site->type)) {
       check_.warnings_.push_back({loc, "division by zero"});
+    } else if (isDecimalType(site->type) &&
+               !llvm::isa<IntLitExpr, FloatLitExpr>(stripCasts(divisor))) {
+      check_.warnings_.push_back(
+          {loc, "decimal division by zero; a decimal has no Infinity or NaN"});
     }
     return false;
   }
@@ -340,6 +351,28 @@ bool OverflowWarnings::checkDivisor(const Expr *site, BinaryOp op, const Expr *d
   }
   check_.warnings_.push_back({loc, "cannot prove that the divisor '" + text + "' is not 0: " + why +
                                        "; check it first, e.g. 'if (" + text + " != 0)'"});
+
+  return false;
+}
+
+bool OverflowWarnings::checkDecimalSqrt(const CallExpr *call, const Expr *value, const Num &x) {
+  if (x.empty() || x.lo >= 0) {
+    return true;
+  }
+  if (!check_.reporting_ || check_.quiet_) {
+    return false;
+  }
+  llvm::SMLoc loc = value ? value->loc() : call->loc();
+  std::string text = value ? exprText(value) : "x";
+  std::string why =
+      x.loOrigin == Origin::Input  ? subject(value) + " comes from " + inputText(x.loWhy, loc)
+      : x.loOrigin == Origin::Loop ? subject(value) + " grows with every pass of a loop"
+      : std::isfinite(x.lo)        ? "it may be about " + roughNumber(x.lo)
+                                   : std::string("it may be negative");
+  check_.warnings_.push_back({loc, "cannot prove that '" + text +
+                                       "' is not negative, which sqrt() needs (a decimal has no "
+                                       "NaN): " +
+                                       why + "; check it first, e.g. 'if (" + text + " >= 0)'"});
 
   return false;
 }

@@ -67,12 +67,15 @@ function offsetMomentum(bodies: Body[]) {
     py += b.vy * b.mass
     pz += b.vz * b.mass
   }
-  const sun = bodies[0]!
+  const sun = bodies[0]
+  if (sun == undefined) return
   sun.vx = -px / SOLAR_MASS
   sun.vy = -py / SOLAR_MASS
   sun.vz = -pz / SOLAR_MASS
 }
 
+// Two bodies closer than 1e-9 would divide by almost 0, and the double would
+// overflow (JavaScript gives Infinity); here they never come so close.
 function advance(bodies: Body[], dt: double) {
   const n = bodies.length
   for (let i = 0; i < n; i++) {
@@ -83,7 +86,9 @@ function advance(bodies: Body[], dt: double) {
       const dy = bi.y - bj.y
       const dz = bi.z - bj.z
       const d2 = dx * dx + dy * dy + dz * dz
-      const mag = dt / (d2 * Math.sqrt(d2))
+      const d3 = d2 * Math.sqrt(d2)
+      if (d3 < 1e-9) continue
+      const mag = dt / d3
       const bjm = bj.mass * mag
       bi.vx -= dx * bjm
       bi.vy -= dy * bjm
@@ -112,7 +117,8 @@ function energy(bodies: Body[]): double {
       const dx = bi.x - bj.x
       const dy = bi.y - bj.y
       const dz = bi.z - bj.z
-      e -= (bi.mass * bj.mass) / Math.sqrt(dx * dx + dy * dy + dz * dz)
+      const d = Math.sqrt(dx * dx + dy * dy + dz * dz)
+      if (d >= 1e-9) e -= (bi.mass * bj.mass) / d
     }
   }
   return e

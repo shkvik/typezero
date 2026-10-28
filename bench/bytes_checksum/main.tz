@@ -1,7 +1,7 @@
 // 100 MB of bytes: filled, XORed with a 16-byte key, summed, and hashed with
 // 32-bit FNV-1a; each a loop over a Uint8Array.
 function fill(data: Uint8Array) {
-  for (let i = 0; i < data.length; i++) data[i] = (i * 7 + (i >>> 9)) & 0xff
+  for (let i = 0; i < data.length; i++) data[i] = ((i * 7 + (i >> 9)) & 0xff).toUint8()
 }
 
 function xor(data: Uint8Array, key: Uint8Array) {
@@ -9,16 +9,16 @@ function xor(data: Uint8Array, key: Uint8Array) {
   for (let i = 0; i < data.length; i++) data[i] ^= key[i & 15]
 }
 
-function sum(data: Uint8Array): long {
-  let s: long = 0
-  for (let i = 0; i < data.length; i++) s += data[i]
+function sum(data: Uint8Array) {
+  let s = 0
+  for (let i = 0; i < data.length; i++) s += data[i].toInt()
   return s
 }
 
-function fnv1a(data: Uint8Array): long {
-  let h = 0x811c9dc5 | 0
-  for (let i = 0; i < data.length; i++) h = Math.imul(h ^ data[i], 0x01000193)
-  return h >>> 0
+function fnv1a(data: Uint8Array) {
+  let h: Bit.Wrap32 = 0x811c9dc5
+  for (let i = 0; i < data.length; i++) h = (h ^ data[i]) * 0x01000193
+  return h.value
 }
 
 const data = new Uint8Array(100 * 1024 * 1024)

@@ -1,6 +1,8 @@
 #include "compiler/overflow/evaluator/evaluator.h"
 #include "compiler/check/checker/checker.h"
 #include "compiler/check/facts/facts.h"
+#include "compiler/library/decimal/decimal_checker/decimal_checker.h"
+#include "compiler/library/decimal/decimal_literal/decimal_literal.h"
 #include "compiler/overflow/assign_evaluator/assign_evaluator.h"
 #include "compiler/overflow/call_ranges/call_ranges.h"
 #include "compiler/overflow/executor/executor.h"
@@ -69,8 +71,14 @@ Val Evaluator::eval(const Expr *expr, State &st, bool wraps) {
   }
   switch (expr->kind()) {
   case Expr::Kind::IntLit:
+    if (isDecimalType(expr->type)) {
+      return numVal(decimalLiteral(expr));
+    }
     return numVal(exactly(double(cast<IntLitExpr>(expr)->value)));
   case Expr::Kind::FloatLit:
+    if (isDecimalType(expr->type)) {
+      return numVal(decimalLiteral(expr));
+    }
     return numVal(exactly(cast<FloatLitExpr>(expr)->value));
   case Expr::Kind::BoolLit:
   case Expr::Kind::Undefined:
@@ -223,7 +231,7 @@ Val Evaluator::evalUnary(const UnaryExpr *unary, State &st, bool wraps) {
   const Type *type = unary->type;
   switch (unary->op) {
   case UnaryOp::Neg: {
-    if (auto *lit = dyn_cast<IntLitExpr>(unary->operand)) {
+    if (auto *lit = dyn_cast<IntLitExpr>(unary->operand); lit && !isDecimalType(type)) {
       return numVal(exactly(-double(lit->value)));
     }
     Num a = eval(unary->operand, st, wraps).num;
@@ -468,9 +476,58 @@ Num Evaluator::floatArithmetic(const Expr *site, BinaryOp op, const Num &l, cons
   return exact;
 }
 
+Num Evaluator::decimalLiteral(const Expr *expr) {
+  std::optional<DecimalLiteral> lit = DecimalChecker::decimalLiteral(expr);
+  if (!lit) {
+    return range(-kInf, kInf, Origin::Trusted);
+  }
+  if (lit->isZero()) {
+    return exactly(0);
+  }
+  std::string text = lit->digits + "e" + std::to_string(lit->exponent);
+  double v = std::strtod(text.c_str(), nullptr);
+  if (lit->exponent >= 0 && lit->top() < 15) {
+    return exactly(v);
+  }
+
+  return widenedDecimal(exactly(v));
+}
+
+Num Evaluator::decimalArithmetic(const Expr *site, BinaryOp op, const Num &given, const Num &other,
+                                 const Expr *lhs, const Expr *rhs, bool square) {
+  OverflowWarnings &warnings = check_.overflowWarnings();
+  Num unknown = range(-kInf, kInf, Origin::Trusted);
+  Num l = given.empty() ? unknown : given, r = other.empty() ? unknown : other;
+  bool divides = op == BinaryOp::Div || op == BinaryOp::Rem || (op == BinaryOp::Pow && r.lo < 0);
+  if (divides) {
+    bool ok = warnings.checkDivisor(site, op, op == BinaryOp::Pow ? lhs : rhs, l, r);
+    warnings.noteProof(site, ok);
+    if (!ok) {
+      return unknown;
+    }
+  }
+  switch (op) {
+  case BinaryOp::Add:
+    return widenedDecimal(add(l, r));
+  case BinaryOp::Sub:
+    return widenedDecimal(subtract(l, r));
+  case BinaryOp::Mul:
+    return widenedDecimal(square ? squared(l) : multiply(l, r));
+  case BinaryOp::Div:
+    return widenedDecimal(divide(l, r, false), 1e-20);
+  case BinaryOp::Rem:
+    return widenedDecimal(remainder(l, r, false));
+  default:
+    return unknown;
+  }
+}
+
 Num Evaluator::arithmetic(const Expr *site, BinaryOp op, const Num &given, const Num &other,
                           const Type *type, bool wraps, const Expr *lhs, const Expr *rhs,
                           const VarSymbol *accum, bool square) {
+  if (isDecimalType(type)) {
+    return decimalArithmetic(site, op, given, other, lhs, rhs, square);
+  }
   if (isFloatType(type)) {
     return floatArithmetic(site, op, given, other, type, lhs, rhs, accum, square);
   }

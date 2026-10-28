@@ -1,6 +1,7 @@
 // decimal: a double needs decimal(x), a decimal needs Number(x) to become a
-// double, a constant divisor of 0 is an error, and BigNumber.js's methods
-// that operators replace do not exist.
+// double, a divisor that may be 0 and a square root of what may be negative
+// are errors (docs/decimal.md, section 6), and BigNumber.js's methods that
+// operators replace do not exist.
 const price: decimal = 19.99
 const rate = 0.07
 // expect-error: convert it explicitly: 'price * decimal(rate)'
@@ -26,6 +27,28 @@ let total: decimal = 0
 total /= 0
 // expect-error: decimal division by zero
 const j = price.div(0, 2)
+const zero: decimal = 0
+// expect-error: decimal division by zero; a decimal has no Infinity or NaN
+const byConstant = price / zero
+const prices: decimal[] = [10, 0]
+for (const each of prices) {
+  // expect-error: cannot prove that the divisor 'each' is not 0: it may be 0; check it first, e.g. 'if (each != 0)'
+  total += 1 / each
+  // expect-error: cannot prove that the divisor 'each' is not 0
+  console.log(price.div(each, 2))
+  // expect-error: cannot prove that the divisor 'each' is not 0
+  console.log(price % each)
+  if (each != 0) console.log(price / each, price.div(each, 2))
+  // expect-error: cannot prove that 'each - 5' is not negative, which sqrt() needs (a decimal has no NaN): it may be about -5; check it first, e.g. 'if (each - 5 >= 0)'
+  console.log((each - 5).sqrt())
+  if (each >= 0) console.log(each.sqrt(), (each * each).sqrt(), (each - 5).abs().sqrt())
+  // expect-error: cannot prove that 'each ** -1' does not raise 0 to a negative power
+  console.log(each ** -1)
+}
+// Exact: 0.1 + 0.2 - 0.3 is 0 for a decimal, so it is no divisor.
+const tenth: decimal = 0.1
+// expect-error: cannot prove that the divisor 'tenth + 0.2 - 0.3' is not 0
+console.log(price / (tenth + 0.2 - 0.3), price / (tenth + 0.2))
 // expect-error: found 'double'; for a square root, use 'x.sqrt()'
 const k = price ** 0.5
 // expect-error: found 'decimal'

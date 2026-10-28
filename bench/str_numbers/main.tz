@@ -1,19 +1,24 @@
 // Numbers to strings and back: a million integers and three million doubles
 // in templates, String() and toFixed(2), then parseInt(), Number() and
-// parseFloat() of a million strings each.
+// parseFloat() of a million strings each. A number read from a string may be
+// any, so the sum takes those the strings were made from (below 10^8): that
+// is what keeps it within int.
 let size = 0
 const ints: string[] = []
 const decimals: string[] = []
 for (let i = 0; i < 1000000; i++) {
   const n = `${i * 79}`
-  const price = `${i * 0.37}`
-  size += n.length + price.length + String(i / 3.0).length + (i * 0.01).toFixed(2).length
+  const price = `${i.toDouble() * 0.37}`
+  size += n.length + price.length + String(i.toDouble() / 3.0).length + (i.toDouble() * 0.01).toFixed(2).length
   ints.push(n)
   decimals.push(price)
 }
-let sum: long = 0
+let sum = 0
 let big = 0
-for (const s of ints) sum += parseInt(s) | 0
-for (const s of decimals) if (Number(s) > 1000) big++
-for (const s of decimals) if (parseFloat(s) < 1000) big++
+for (const s of ints) {
+  const n = parseInt(s).unwrapOr(0)
+  if (n >= 0 && n < 100000000) sum += n
+}
+for (const s of decimals) if (Number(s).unwrapOr(0) > 1000) big++
+for (const s of decimals) if (parseFloat(s).unwrapOr(0) < 1000) big++
 console.log(size, sum, big)

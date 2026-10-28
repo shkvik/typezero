@@ -13,7 +13,7 @@
 | `push` | 10 млн `push` в `int[]` (в Go — `append` в `[]int32`) |
 | `sum` | `push` как в `push`, потом 20 проходов с суммированием |
 | `generics` | то же, что `sum`, через обобщённые функции: `fold` с колбэком и поиск `indexOf` |
-| `generic_classes` | обобщённые классы: 10 млн `push`/`pop` у `Stack<int>` и сортировка кучей миллиона чисел в `MinHeap<int>` (`MinHeap<T extends number>`; в Go — `Stack[T any]` и `MinHeap[T cmp.Ordered]`) |
+| `generic_classes` | обобщённые классы: 10 млн `push`/`pop` у `Stack<int>` и сортировка кучей миллиона чисел в `MinHeap<int>` (`MinHeap<T extends int \| double>`; в Go — `Stack[T any]` и `MinHeap[T cmp.Ordered]`) |
 | `queue` | 200 тыс. `push`, потом `shift` до пустого массива (в Go — `q = q[1:]`) |
 | `sieve` | решето Эратосфена до 20 млн, `new Array<boolean>` |
 | `words` | 1 млн коротких строк `` `w${i % 1000}` `` в массиве |
@@ -169,6 +169,16 @@ AMD Ryzen 9 9950X3D, Windows 11, Go 1.23.4, 21 октября 2026.
 
 `wordcount`: `join(" ")` текста теперь 7 мс (было 45), `split(" ")` — 16 мс против 18 мс у Go (было
 95), сам подсчёт (3,5 млн раз `counts.set(w, (counts.get(w) ?? 0) + 1)`) — 50 мс, у Go — 84 мс.
+
+28 октября программы переписаны под `Result` и правила чисел ([errors.md](../docs/errors.md),
+[numbers.md](../docs/numbers.md)): `long` → `int`, счёт с заворотом — `Bit.Wrap32`, явные
+приведения, `Result` у `node:crypto`, `crypto.subtle`, `node:fs` и разбора чисел. Где число
+приходит из байтов или строки (`bytes_records`, `str_numbers`), сумма берёт только значения,
+которые туда записаны, — так доказано, что она не переполнится; в `n-body` тела ближе 1e-9
+пропускаются (делитель доказуемо не 0). В Go `unions` теперь считает сумму в `int64`, как `int`
+в tz (в `int32` она заворачивалась). Все 58 собираются и печатают то же, что Go. Таблицу выше
+не перемерял; заметно хуже, чем в ней, — `stream_lines` (319 мс, 127 МБ) и `bytes_records`
+(64 мс).
 
 Размер исполняемого файла: `empty` — 141 КБ у tz против 2.1 МБ у Go.
 

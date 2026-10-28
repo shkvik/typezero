@@ -55,7 +55,7 @@ const shapes: Shape[] = []
 let seed = 12345
 for (let i = 0; i < 1000000; i++) {
   seed = (seed * 1103515245 + 12345) & 0x7fffffff
-  const size = 1 + (seed % 100) / 10.0
+  const size = 1 + (seed % 100).toDouble() / 10.0
   const kind = (seed >> 8) & 3
   if (kind == 0) shapes.push(new Circle(size))
   else if (kind == 1) shapes.push(new Rect(size, size + 1))

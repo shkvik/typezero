@@ -9,7 +9,7 @@ class Stack<T> {
   size() { return this.items.length }
 }
 
-class MinHeap<T extends number> {
+class MinHeap<T extends int | double> {
   items: T[] = []
   size() { return this.items.length }
   push(x: T) {
@@ -53,7 +53,7 @@ class MinHeap<T extends number> {
 
 const stack = new Stack<int>()
 for (let i = 0; i < 10000000; i++) stack.push(i & 1023)
-let total: long = 0
+let total = 0
 while (stack.size() > 0) total += stack.pop() ?? 0
 
 const heap = new MinHeap<int>()
@@ -64,7 +64,7 @@ for (let i = 0; i < 1000000; i++) {
 }
 let previous = -1
 let sorted = true
-let checksum: long = 0
+let checksum = 0
 let k = 0
 while (heap.size() > 0) {
   const x = heap.pop() ?? 0

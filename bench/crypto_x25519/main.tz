@@ -10,8 +10,25 @@ const publicPem =
   "MCowBQYDK2VuAyEAUK8OHWoiL3Lxgz3pczoxppdpSzndnKQX85k+QdmW2hk=\n" +
   "-----END PUBLIC KEY-----\n"
 
-const privateKey = createPrivateKey(privatePem)
-const publicKey = createPublicKey(publicPem)
+const privateKeyMade = createPrivateKey(privatePem)
+if (privateKeyMade.isErr()) {
+  console.error(privateKeyMade.error.message)
+  process.exit(1)
+}
+const privateKey = privateKeyMade.value
+const publicKeyMade = createPublicKey(publicPem)
+if (publicKeyMade.isErr()) {
+  console.error(publicKeyMade.error.message)
+  process.exit(1)
+}
+const publicKey = publicKeyMade.value
 let secret = Buffer.alloc(0)
-for (let i = 0; i < 50000; i++) secret = diffieHellman({ privateKey, publicKey })
+for (let i = 0; i < 50000; i++) {
+  const made = diffieHellman({ privateKey, publicKey })
+  if (made.isErr()) {
+    console.error(made.error.message)
+    process.exit(1)
+  }
+  secret = made.value
+}
 console.log(secret.toString("hex"))

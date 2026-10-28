@@ -381,7 +381,7 @@ bool isNumberType(const Type *type) {
     return false;
   }
   type = type->nonOptional();
-  if (type->isNumeric()) {
+  if (type->isNumeric() || type->isDecimal()) {
     return true;
   }
   if (type->isLiteral()) {
@@ -412,6 +412,26 @@ bool isFloatType(const Type *type) {
   type = type->nonOptional();
 
   return type->isFloat() || (type->isLiteral() && type->literalBase()->isFloat());
+}
+
+bool isDecimalType(const Type *type) { return type && type->nonOptional()->isDecimal(); }
+
+Num widenedDecimal(Num n, double slack) {
+  if (n.empty()) {
+    return n;
+  }
+  double tiny = std::numeric_limits<double>::denorm_min();
+  double lo = std::nextafter(n.lo - slack, -kInf), hi = std::nextafter(n.hi + slack, kInf);
+  if (slack == 0 && n.lo >= 0) {
+    lo = std::max(lo, n.lo > 0 ? tiny : 0.0);
+  }
+  if (slack == 0 && n.hi <= 0) {
+    hi = std::min(hi, n.hi < 0 ? -tiny : 0.0);
+  }
+  n.lo = lo;
+  n.hi = hi;
+
+  return n;
 }
 
 bool hasLength(const Type *type) {

@@ -123,9 +123,77 @@ no input
 true
 ]])
 
-# The program and the examples as .ts files, with the settings next to tz.
+# The web, where tz gives a Result and methods and node gives exceptions,
+# null and properties: tz changes those declarations in its copy of
+# @types/node (editors/types/patch.cmake).
+set(web [=[
+import { serve } from "tz:http"
+
+// The web: fetch and reading a body give a Result; so does URL.parse. A
+// status written in the code is an HttpStatus; one from a variable becomes
+// one after isHttpStatus.
+const code = 200 + (process.argv.length > 99 ? 1 : 0)
+const server = serve({ hostname: "127.0.0.1", port: 0 }, request => {
+  const path = new URL(request.url).pathname
+  if (path == "/away") return Response.redirect(new URL("/here", request.url), 307)
+  if (isHttpStatus(code)) return new Response(`got ${path}`, { status: code })
+  return new Response("none", { status: 500 })
+})
+if (server.isOk()) {
+  const base = server.value.url
+  const res = await fetch(new URL("/away", base))
+  if (res.isOk()) {
+    const response = res.value
+    console.log(response.status, response.redirected, response.bodyUsed())
+    const text = await response.text()
+    console.log(text.unwrapOr("-"), response.bodyUsed())
+  }
+  const url = URL.parse("/a?b=1", base)
+  console.log(url.isOk() ? url.value.pathname : "bad", URL.parse("no url").isErr())
+  if (url.isOk()) {
+    url.value.searchParams.replace("c=2")
+    console.log(url.value.href.endsWith("/a?c=2"), url.value.setPort(process.argv[2] ?? "x").isErr())
+  }
+  await server.value.stop()
+}
+
+// A stream of the web reads with a Result too.
+const stream = new ReadableStream<string>({
+  start: controller => {
+    console.log(controller.desiredSize())
+    controller.enqueue("a")
+    controller.close()
+  },
+})
+const reader = stream.getReader()
+const first = await reader.read()
+console.log(first.isOk() && !first.value.done ? first.value.value : "-", stream.disturbed)
+reader.releaseLock()
+for await (const chunk of new ReadableStream<string>({ start: c => { c.enqueue("b"); c.close() } }))
+  console.log(chunk.unwrapOr("-"))
+const ping = new Event("ping")
+console.log(ping.immediateStopped)
+const when = Date.parse("2026-10-28T10:00Z")
+const price = decimal(process.argv[3] ?? "1.5")
+console.log(when.isOk(), price.isOk() ? price.value.toFixed(1) : "-", decimal("2.5").toFixed(1))
+]=])
+write(app/web.tz "${web}")
+tz(run web.tz IN app STDOUT [[
+200 true false
+got /here true
+/a true
+true true
+1
+a true
+b
+false
+true 1.5 2.5
+]])
+
+# The programs and the examples as .ts files, with the settings next to tz.
 get_filename_component(types ${TZ} DIRECTORY)
 write(tsc/main.ts "${program}")
+write(tsc/web.ts "${web}")
 file(GLOB examples ${SOURCE}/../../examples/*.tz)
 foreach(example IN LISTS examples)
   get_filename_component(name ${example} NAME_WE)

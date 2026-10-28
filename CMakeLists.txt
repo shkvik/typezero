@@ -26,6 +26,7 @@ include(third_party/openssl/openssl.cmake)
 file(COPY third_party/licenses/ DESTINATION ${TZ_OUTPUT_DIR}/licenses)
 file(COPY third_party/types/node/ DESTINATION ${TZ_OUTPUT_DIR}/types/node_modules/@types/node)
 file(COPY third_party/types/undici-types/ DESTINATION ${TZ_OUTPUT_DIR}/types/node_modules/undici-types)
+include(editors/types/patch.cmake)
 configure_file(editors/types/tz.d.ts ${TZ_OUTPUT_DIR}/types/node_modules/@types/tz/index.d.ts
                COPYONLY)
 configure_file(editors/types/tsconfig.json ${TZ_OUTPUT_DIR}/types/tsconfig.json COPYONLY)

@@ -1,10 +1,10 @@
 // 30 MB of bytes to base64 and back with Buffer, five times, and the same
 // bytes as hex once.
 const data = new Uint8Array(30 * 1024 * 1024)
-let x = 12345
+let x: Bit.Wrap32 = 12345
 for (let i = 0; i < data.length; i++) {
-  x = (Math.imul(x, 1103515245) + 12345) | 0
-  data[i] = x >>> 24
+  x = x * 1103515245 + 12345
+  data[i] = (x >> 24).value.toUint8()
 }
 const bytes = Buffer.from(data)
 let length = 0

@@ -36,9 +36,9 @@ class World {
   particles: Particle[] = []
   constructor(count: int) {
     for (let i = 0; i < count; i++) {
-      const x = ((i * 7919) % 1000) / 100.0
-      const y = ((i * 104729) % 1000) / 100.0
-      this.particles.push(new Particle(new Vec(x, y), 1 + (i % 5)))
+      const x = ((i * 7919) % 1000).toDouble() / 100.0
+      const y = ((i * 104729) % 1000).toDouble() / 100.0
+      this.particles.push(new Particle(new Vec(x, y), (1 + i % 5).toDouble()))
     }
   }
   step(dt: double) {

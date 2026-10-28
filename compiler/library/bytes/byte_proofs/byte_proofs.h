@@ -18,6 +18,8 @@ public:
   void checkByteCallbackResult(const FunctionDecl *fn, const Expr *value);
 
 private:
+  ValueRange computedRange(const Expr *expr) const;
+
   Checker &checker_;
 };
 

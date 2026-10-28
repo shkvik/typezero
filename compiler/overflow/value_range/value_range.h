@@ -161,6 +161,10 @@ bool isIntegerType(const Type *type);
 
 bool isFloatType(const Type *type);
 
+bool isDecimalType(const Type *type);
+
+Num widenedDecimal(Num n, double slack = 0);
+
 bool hasLength(const Type *type);
 
 bool tracked(const Type *type);

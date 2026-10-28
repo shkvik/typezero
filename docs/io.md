@@ -1,7 +1,7 @@
 # Ввод-вывод
 
 Решения, принятые 23 октября 2026 года, и поправки 26 октября: ошибки ОС — `Result`, а не
-исключение (раздел 5, [errors.md](errors.md)). Шаги 1–3 плана сделаны 24 октября; что осталось —
+исключение (раздел 5, [errors.md](errors.md)). Шаги 1–3 плана сделаны 24 октября, шаг 5 — 26–27 октября; что осталось —
 в конце, в разделе «План реализации».
 
 ## Коротко
@@ -198,12 +198,11 @@ function readConfig() {
    - `statSync`, для которого нужны классы;
    - заглушка `SystemError` для запуска тестов в node.
 4. **С async** (`node:fs/promises`, `node:readline` сделаны; процессы, сеть и потоки — в своих документах) — `node:fs/promises`, `node:readline`, запуск других программ, сеть, потоки.
-5. **Ошибки ОС — `Result`** ([errors.md](errors.md), шаг 2): `node:fs`, `node:fs/promises`
+5. **Ошибки ОС — `Result`** (сделано 26–27 октября; [errors.md](errors.md), шаг 2): `node:fs`, `node:fs/promises`
    (`Promise<Result>`), `node:readline` отдают `Result<T, SystemError>`; `SystemError` — тип
    объекта вместо класса; убрать заглушку `SystemError` для node; коды выхода без «не пойманного
    исключения»; ресурсы (`FileHandle`) закрываются сами ([errors.md](errors.md), раздел 6).
    Сделано 26 октября: `node:fs` и `node:fs/promises` (путь с нулевым символом — тоже `Err`, с
    кодом node `ERR_INVALID_ARG_VALUE`; неверный `flag` — ошибка компиляции), объявления для
-   редактора. Осталось: `node:readline` и отмена через `signal` — с шагом 3 errors.md (там уходят
-   отказы `Promise`); `SystemError` — тип объекта, когда его перестанут бросать `child_process` и
-   сеть (тот же шаг 2 errors.md).
+   редактора. 27 октября, с шагом 3 errors.md: `node:readline` и отмена через `signal` (`question` с
+   `signal` отдаёт `Result`); `SystemError` — тип объекта, а не класс.

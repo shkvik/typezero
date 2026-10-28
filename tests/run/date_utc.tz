@@ -9,13 +9,16 @@ console.log(d.toISOString(), d.toJSON(), d.toUTCString())
 console.log(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate(), d.getUTCDay())
 console.log(d.getUTCHours(), d.getUTCMinutes(), d.getUTCSeconds(), d.getUTCMilliseconds())
 
-// The setters change the date and give its new time.
+// The setters change the date and give its new time; a computed number past
+// its field carries over.
 const same = d
-console.log(d.setUTCHours(25, 30), same)
+const computed = (n: int) => n
+console.log(d.setUTCHours(computed(25), 30), same)
 console.log(d.setUTCDate(0), d)
-console.log(d.setUTCMonth(13), d)
+console.log(d.setUTCMonth(computed(13)), d)
 console.log(d.setUTCFullYear(2028, 1, 29), d)
-console.log(d.setUTCMinutes(-1), d.setUTCSeconds(90, 500), d.setUTCMilliseconds(1234), d)
+console.log(d.setUTCMinutes(computed(-1)), d.setUTCSeconds(computed(90), 500),
+            d.setUTCMilliseconds(computed(1234)), d)
 console.log(d.setUTCHours(1, 2), d.setUTCDate(31), d)
 console.log(d.setTime(0), d, d.setTime(1), d.getTime())
 

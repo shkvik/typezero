@@ -10,9 +10,9 @@ function* naturals() {
   while (true) yield n++
 }
 const n = 10000000
-const zero: long = 0
+const zero = 0
 
-let multiples: long = 0
+let multiples = 0
 for (const i of range(0, n)) if (i % 3 == 0) multiples += i
 
 const doubled = naturals()
@@ -23,7 +23,7 @@ const doubled = naturals()
 
 const a: int[] = []
 for (let i = 0; i < 1000; i++) a.push(i)
-let big: long = 0
+let big = 0
 for (let round = 0; round < 10000; round++)
   big += a
     .values()

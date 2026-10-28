@@ -70,7 +70,7 @@ func main() {
 			tokens = append(tokens, "ccc")
 		}
 	}
-	a, p, t := 0.0, 0.0, int32(0)
+	a, p, t := 0.0, 0.0, int64(0)
 	for pass := 0; pass < 20; pass++ {
 		for _, s := range shapes {
 			a += area(s)
@@ -79,9 +79,9 @@ func main() {
 		for _, x := range tokens {
 			switch x := x.(type) {
 			case string:
-				t += int32(len(x))
+				t += int64(len(x))
 			case int32:
-				t += x
+				t += int64(x)
 			}
 		}
 	}

@@ -467,29 +467,6 @@ class UrlRecord {
     for (const segment of this.path) out += "/" + segment
     return out
   }
-
-  serialize(excludeFragment = false): string {
-    let out = this.scheme + ":"
-    const host = this.host
-    if (host != undefined) {
-      out += "//"
-      if (this.includesCredentials()) {
-        out += this.username
-        if (this.password != "") out += ":" + this.password
-        out += "@"
-      }
-      out += host
-      if (this.port != -1) out += ":" + String(this.port)
-    } else if (this.opaquePath == undefined && this.path.length > 1 && this.path[0] == "") {
-      out += "/."
-    }
-    out += this.pathText()
-    const query = this.query
-    if (query != undefined) out += "?" + query
-    const fragment = this.fragment
-    if (!excludeFragment && fragment != undefined) out += "#" + fragment
-    return out
-  }
 }
 
 function isWindowsDriveLetter(cps: int[], from: int): boolean {
@@ -926,9 +903,137 @@ function basicParse(input0: string, base: UrlRecord | undefined, url: UrlRecord,
   return true
 }
 
-function parseUrl(input: string, base: UrlRecord | undefined): UrlRecord | undefined {
+function isPlainHost(c: int): boolean {
+  return (c >= 0x61 && c <= 0x7a) || isAsciiDigit(c) || c == 0x2d || c == 0x2e
+}
+
+function isPlainPath(c: int): boolean {
+  return c > 0x20 && c < 0x7f && c != 0x22 && c != 0x3c && c != 0x3e && c != 0x5c &&
+         c != 0x5e && c != 0x60 && c != 0x7b && c != 0x7d
+}
+
+function isDotSegment(s: string): boolean {
+  if (s.length > 6 || s == "") return false
+  const first = s.charCodeAt(0)
+
+  return (first == 0x2e || first == 0x25) && (isSingleDot(s) || isDoubleDot(s))
+}
+
+function plainSegments(input: string, from: int, to: int): string[] | undefined {
+  const path: string[] = []
+  let start = from
+  for (let i = from; i < to; i++) {
+    const c = input.charCodeAt(i) ?? -1
+    if (c == 0x2f) {
+      const segment = input.slice(start, i)
+      if (isDotSegment(segment)) return undefined
+      path.push(segment)
+      start = i + 1
+    } else if (!isPlainPath(c)) {
+      return undefined
+    }
+  }
+  const last = input.slice(start, to)
+  if (isDotSegment(last)) return undefined
+  path.push(last)
+
+  return path
+}
+
+function quickParse(input: string): UrlRecord | undefined {
+  const n = input.length
+  let colon = -1
+  for (let i = 0; i < n && colon < 0; i++) {
+    const c = input.charCodeAt(i) ?? -1
+    if (c == 0x3a && i > 0) colon = i
+    else if (c < 0x61 || c > 0x7a) return undefined
+  }
+  if (colon < 0 || colon + 2 >= n) return undefined
+  const scheme = input.slice(0, colon)
+  if (!isSpecial(scheme) || scheme == "file") return undefined
+  if (input.charCodeAt(colon + 1) != 0x2f || input.charCodeAt(colon + 2) != 0x2f) return undefined
+  let i = colon + 3
+  const hostStart = i
+  let lastDot = -1
+  while (i < n) {
+    const c = input.charCodeAt(i) ?? -1
+    if (c == 0x3a || c == 0x2f || c == 0x3f || c == 0x23) break
+    if (!isPlainHost(c)) return undefined
+    if (c == 0x2e) {
+      if (i == hostStart || lastDot == i - 1) return undefined
+      lastDot = i
+    }
+    i++
+  }
+  if (i == hostStart || lastDot == i - 1) return undefined
+  const lastLabel = lastDot < 0 ? hostStart : lastDot + 1
+  if (isAsciiDigit(input.charCodeAt(lastLabel) ?? 0)) return undefined
+  const host = input.slice(hostStart, i)
+  if (host.includes("xn--")) return undefined
+  let port = -1
+  if (i < n && input.charCodeAt(i) == 0x3a) {
+    i++
+    const portStart = i
+    let value = 0
+    while (i < n) {
+      const c = input.charCodeAt(i) ?? -1
+      if (c == 0x2f || c == 0x3f || c == 0x23) break
+      if (!isAsciiDigit(c)) return undefined
+      value = value * 10 + c - 0x30
+      if (value > 65535) return undefined
+      i++
+    }
+    if (i > portStart && value != defaultPort(scheme)) port = value
+  }
+  let pathEnd = i
+  while (pathEnd < n && input.charCodeAt(pathEnd) != 0x3f && input.charCodeAt(pathEnd) != 0x23)
+    pathEnd++
+  let path: string[] | undefined = [""]
+  if (pathEnd > i) path = plainSegments(input, i + 1, pathEnd)
+  if (path == undefined) return undefined
   const url = new UrlRecord()
+  url.scheme = scheme
+  url.host = host
+  url.port = port
+  url.path = path
+  i = pathEnd
+  if (i < n && input.charCodeAt(i) == 0x3f) {
+    const queryStart = i + 1
+    i = queryStart
+    while (i < n) {
+      const c = input.charCodeAt(i) ?? -1
+      if (c == 0x23) break
+      if (c <= 0x20 || c >= 0x7f || c == 0x22 || c == 0x27 || c == 0x3c || c == 0x3e)
+        return undefined
+      i++
+    }
+    url.query = input.slice(queryStart, i)
+  }
+  if (i < n) {
+    for (let j = i + 1; j < n; j++) {
+      const c = input.charCodeAt(j) ?? -1
+      if (c <= 0x20 || c >= 0x7f || c == 0x22 || c == 0x3c || c == 0x3e || c == 0x60)
+        return undefined
+    }
+    url.fragment = input.slice(i + 1)
+  }
+
+  return url
+}
+
+function parseUrl(input: string, base: UrlRecord | undefined): UrlRecord | undefined {
+  const quick = quickParse(input)
+  if (quick != undefined) return quick
+  const url = new UrlRecord()
+
   return basicParse(input, base, url) ? url : undefined
+}
+
+function parseAgainst(input: string, base?: string): UrlRecord | undefined {
+  if (base == undefined) return parseUrl(input, undefined)
+  const parsedBase = parseUrl(base, undefined)
+
+  return parsedBase == undefined ? undefined : parseUrl(input, parsedBase)
 }
 
 function originOf(r: UrlRecord): string {
@@ -978,38 +1083,58 @@ export class URL {
     this.changed(true)
   }
 
+  private constructor(record: UrlRecord) {
+    this.record = record
+    this.searchParams.watch((query?: string) => this.applyQuery(query))
+    this.changed(true)
+  }
+
   static canParse(input: string, base?: string): boolean {
-    let parsedBase: UrlRecord | undefined = undefined
-    if (base != undefined) {
-      parsedBase = parseUrl(base, undefined)
-      if (parsedBase == undefined) return false
-    }
-    return parseUrl(input, parsedBase) != undefined
+    return parseAgainst(input, base) != undefined
   }
 
   static parse(input: string, base?: string | URL): Result<URL, UrlError> {
-    let baseText: string | undefined = undefined
-    if (base != undefined) baseText = typeof base == "string" ? base : base.href
-    if (!URL.canParse(input, baseText)) return err({ code: "bad_url", message: "Invalid URL", input })
-    return ok(new URL(input, baseText))
+    const record = parseAgainst(input, base instanceof URL ? base.href : base)
+    if (record == undefined) return err({ code: "bad_url", message: "Invalid URL", input })
+
+    return ok(new URL(record))
   }
 
   private changed(query: boolean) {
     const r = this.record
-    this.href = r.serialize()
-    this.origin = originOf(r)
-    this.protocol = r.scheme + ":"
+    const protocol = r.scheme + ":"
+    const hostname = r.host
+    const port = r.port == -1 ? "" : String(r.port)
+    const host = hostname == undefined ? "" : port == "" ? hostname : hostname + ":" + port
+    const pathname = r.pathText()
+    const search = r.query
+    const fragment = r.fragment
+    let href = protocol
+    if (hostname != undefined) {
+      href += "//"
+      if (r.includesCredentials()) {
+        href += r.username
+        if (r.password != "") href += ":" + r.password
+        href += "@"
+      }
+      href += host
+    } else if (r.opaquePath == undefined && r.path.length > 1 && r.path[0] == "") {
+      href += "/."
+    }
+    href += pathname
+    const searchText = search == undefined ? "" : "?" + search
+    const hashText = fragment == undefined ? "" : "#" + fragment
+    this.href = href + searchText + hashText
+    this.origin = isSpecial(r.scheme) && r.scheme != "file" ? protocol + "//" + host : originOf(r)
+    this.protocol = protocol
     this.username = r.username
     this.password = r.password
-    const host = r.host
-    this.hostname = host ?? ""
-    this.port = r.port == -1 ? "" : String(r.port)
-    this.host = host == undefined ? "" : r.port == -1 ? host : host + ":" + String(r.port)
-    this.pathname = r.pathText()
-    const search = r.query
-    this.search = search == undefined || search == "" ? "" : "?" + search
-    const fragment = r.fragment
-    this.hash = fragment == undefined || fragment == "" ? "" : "#" + fragment
+    this.hostname = hostname ?? ""
+    this.port = port
+    this.host = host
+    this.pathname = pathname
+    this.search = searchText.length > 1 ? searchText : ""
+    this.hash = hashText.length > 1 ? hashText : ""
     if (query) this.searchParams.replace(search)
   }
 

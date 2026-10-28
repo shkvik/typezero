@@ -198,23 +198,25 @@ void DateChecker::checkDateLiteral(const Expr *arg) {
   }
 }
 
-void DateChecker::checkDateFields(std::vector<Expr *> &args) {
+void DateChecker::checkDateFields(std::vector<Expr *> &args, size_t first, llvm::StringRef setter) {
   std::optional<int64_t> constant[7];
   for (size_t i = 0; i < args.size(); ++i) {
     args[i] = timeArg(args[i]);
     if (args[i]->type->isInteger()) {
-      constant[i] = checker_.constantFolder().intConstant(args[i]);
+      constant[first + i] = checker_.constantFolder().intConstant(args[i]);
     }
   }
-  auto report = [&](size_t i, const std::string &message) {
-    checker_.diags_.error(args[i]->loc(), message);
+  size_t end = first + args.size();
+  auto report = [&](size_t field, const std::string &message) {
+    checker_.diags_.error(args[field - first]->loc(), message);
   };
-  if (std::optional<int64_t> year = constant[0]; year && *year >= 0 && *year <= 99) {
+  bool shortYears = setter.empty();
+  if (std::optional<int64_t> year = constant[0]; shortYears && year && *year >= 0 && *year <= 99) {
     report(0, "the year " + std::to_string(*year) + " is " + std::to_string(1900 + *year) +
                   " in JavaScript, which reads the years 0 to 99 as 1900 to 1999; write the year "
                   "in full, or set a year before 100 with 'setFullYear'");
   }
-  std::optional<int64_t> month = args.size() > 1 ? constant[1] : std::optional<int64_t>(0);
+  std::optional<int64_t> month = constant[1];
   if (month && (*month < 0 || *month > 11)) {
     if (*month == 12) {
       report(1, "month 12 is January of the next year in JavaScript: months are counted from 0, "
@@ -225,18 +227,30 @@ void DateChecker::checkDateFields(std::vector<Expr *> &args) {
     }
     month.reset();
   }
-  if (std::optional<int64_t> day = args.size() > 2 ? constant[2] : std::nullopt) {
+  if (std::optional<int64_t> day = constant[2]) {
     if (*day < 0) {
       report(2, "day " + std::to_string(*day) +
                     " is outside the month: days are counted from 1, and 0 is the last day of the "
                     "month before");
     } else if (month) {
       std::optional<int64_t> year = constant[0];
-      int64_t fullYear = year && *year >= 0 && *year <= 99 ? 1900 + *year : year.value_or(0);
+      int64_t fullYear =
+          shortYears && year && *year >= 0 && *year <= 99 ? 1900 + *year : year.value_or(0);
       int last = year          ? daysInMonth(fullYear, *month)
                  : *month == 1 ? 29
                                : daysInMonth(2001, *month);
-      if (*day > last) {
+      if (*day > last && !setter.empty()) {
+        std::string missing =
+            missingDay(year ? std::optional<int64_t>(fullYear) : std::nullopt, *month, *day);
+        if (*month == 1) {
+          std::string yearPart = year ? std::to_string(fullYear) + ", " : "";
+          report(2, missing + "; the last day of February is day 0 of March: '" + setter.str() +
+                        "(" + yearPart + "2, 0)'");
+        } else {
+          report(2,
+                 missing + "; " + kMonthNames[*month] + " has " + std::to_string(last) + " days");
+        }
+      } else if (*day > last) {
         std::string next = std::to_string(*month == 11 ? 0 : *month + 1);
         std::string nextYear = year ? std::to_string(*month == 11 ? fullYear + 1 : fullYear) : "y";
         report(2, missingDay(year ? std::optional<int64_t>(fullYear) : std::nullopt, *month, *day) +
@@ -252,7 +266,7 @@ void DateChecker::checkDateFields(std::vector<Expr *> &args) {
     const char *what;
     int64_t max;
   } limits[] = {{"hours", 23}, {"minutes", 59}, {"seconds", 59}, {"milliseconds", 999}};
-  for (size_t i = 3; i < args.size(); ++i) {
+  for (size_t i = std::max<size_t>(first, 3); i < end; ++i) {
     std::optional<int64_t> value = constant[i];
     if (value && (*value < 0 || *value > limits[i - 3].max)) {
       report(i, std::to_string(*value) + " " + limits[i - 3].what +
@@ -459,14 +473,18 @@ Expr *DateChecker::checkDateMethod(CallExpr *call, MemberExpr *member) {
     call->type = Type::intTy();
     break;
   case Builtin::DateSetTime:
+    call->args[0] = timeArg(checker_.exprChecker().checkExpr(call->args[0], Type::intTy()));
+    call->type = Type::intTy();
+    break;
   case Builtin::DateSetUTC:
   case Builtin::DateSetLocal:
     for (Expr *&arg : call->args) {
-      arg = timeArg(checker_.exprChecker().checkExpr(arg, Type::intTy()));
+      arg = checker_.exprChecker().checkExpr(arg, Type::intTy());
     }
-    if (method->builtin != Builtin::DateSetTime) {
-      call->args.insert(call->args.begin(), field(method->field));
-    }
+    checkDateFields(call->args,
+                    size_t(method->field >= TZ_DATE_HOURS ? method->field - 1 : method->field),
+                    name);
+    call->args.insert(call->args.begin(), field(method->field));
     call->type = Type::intTy();
     break;
   case Builtin::DateToJSON:

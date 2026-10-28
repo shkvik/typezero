@@ -77,15 +77,15 @@ std::string valueText(const Expr *e) {
 std::string wrapHint(Bytes kind, const std::string &value) {
   switch (kind) {
   case Bytes::Int8:
-    return "(" + value + " << 24) >> 24";
+    return "((" + value + " & 0xff) ^ 0x80) - 0x80";
   case Bytes::Int16:
-    return "(" + value + " << 16) >> 16";
+    return "((" + value + " & 0xffff) ^ 0x8000) - 0x8000";
   case Bytes::Uint16:
     return value + " & 0xffff";
   case Bytes::Uint32:
-    return value + " >>> 0";
+    return value + " & 0xffffffff";
   case Bytes::Int32:
-    return value + " | 0";
+    return "((" + value + " & 0xffffffff) ^ 0x80000000) - 0x80000000";
   default:
     return value + " & 0xff";
   }
@@ -193,6 +193,21 @@ Range operateWide(BinaryOp op, const Range &a, const Range &b, bool isInt) {
   case BinaryOp::Add:
   case BinaryOp::Sub:
   case BinaryOp::Mul: {
+    if (op != BinaryOp::Mul && (!known(a) || !known(b))) {
+      bool add = op == BinaryOp::Add;
+      const std::optional<int64_t> &low = add ? b.lo : b.hi, &high = add ? b.hi : b.lo;
+      Range r;
+      int64_t v;
+      if (a.lo && low &&
+          !(add ? llvm::AddOverflow(*a.lo, *low, v) : llvm::SubOverflow(*a.lo, *low, v))) {
+        r.lo = v;
+      }
+      if (a.hi && high &&
+          !(add ? llvm::AddOverflow(*a.hi, *high, v) : llvm::SubOverflow(*a.hi, *high, v))) {
+        r.hi = v;
+      }
+      return r;
+    }
     if (!known(a) || !known(b)) {
       return {};
     }

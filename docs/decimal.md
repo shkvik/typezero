@@ -3,7 +3,7 @@
 Решения, принятые 23 октября 2026 года, и поправки 26 октября: целое становится `decimal` только
 явно, разбор строки отдаёт `Result`, деление на ноль и корень из отрицательного доказываются при
 сборке, как у других чисел ([numbers.md](numbers.md), [errors.md](errors.md)). Шаги 1 и 2 плана
-сделаны 24 октября, `JSON.stringify` — вместе с JSON.
+сделаны 24 октября, `JSON.stringify` — вместе с JSON, шаг 3 — 27–28 октября.
 
 ## Коротко
 
@@ -139,8 +139,12 @@ decimal("0.30") == decimal("0.3")                   // true
 2. **Методы** (сделано). `div` с режимами, `round`, `toFixed`, `toFormat`, `toString(base)`,
    `toExponential`, `toPrecision`, `sqrt`, `abs`, `isInteger`, `decimalPlaces()`, `shiftedBy`,
    `toFraction`, `decimal.max` / `min` / `sum`; `JSON.stringify` строкой.
-3. **Поправки 26 октября** (с [numbers.md](numbers.md), шаг 2, и [errors.md](errors.md),
-   шаг 2): целое в `decimal` только явно (`toDecimal()`, сделано 27 октября), `decimal(text)` — `Result`, деление
+3. **Поправки 26 октября** (сделано 27–28 октября; с [numbers.md](numbers.md), шаг 2, и
+   [errors.md](errors.md), шаг 2): целое в `decimal` только явно (`toDecimal()`, сделано 27 октября), `decimal(text)` — `Result`, деление
    и `sqrt` — с доказательством вместо `RangeError`. `decimal(text)` сделан 27 октября: строка, известная при
    сборке (литерал, константа, выбор из литералов), проверяется сразу и даёт `decimal`; иначе —
-   `Result<decimal, DecimalError>` (`code: "bad_decimal"`, `message`, `text`).
+   `Result<decimal, DecimalError>` (`code: "bad_decimal"`, `message`, `text`). Деление и `sqrt`
+   сделаны 28 октября: анализ диапазонов чисел ведёт и `decimal` — границы в `double`, после
+   каждого действия расширенные на шаг наружу (у деления — ещё на 10⁻²⁰, его округление), так
+   что точный ноль (`0.1 + 0.2 - 0.3`) всегда внутри; `x / n`, `x % n`, `x.div(n)`, `x ** -k`
+   требуют `n != 0`, `x.sqrt()` — `x >= 0`; константа 0 — «decimal division by zero».
