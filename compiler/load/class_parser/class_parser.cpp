@@ -77,9 +77,7 @@ ClassDecl *ClassParser::parseClass(bool expression) {
     }
   }
   parser_.cursor().expect(Tok::RBrace, "to close the class");
-  if (!cls->typeParams.empty()) {
-    cls->source = parser_.cursor().textFrom(start);
-  }
+  cls->source = parser_.cursor().textFrom(start);
 
   return cls;
 }

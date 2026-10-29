@@ -14,7 +14,10 @@ public:
                llvm::StringRef spec, llvm::SMLoc loc, int package);
 
 private:
+  const std::string *realFile(llvm::StringRef full);
+
   Loader &loader_;
+  llvm::StringMap<std::string> realFiles_;
 };
 
 }

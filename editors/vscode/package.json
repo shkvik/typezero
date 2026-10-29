@@ -1,11 +1,11 @@
 {
   "name": "tz",
   "displayName": "TypeZero",
-  "description": "Highlighting and formatting of TypeZero programs (.tz files)",
-  "version": "0.2.0",
+  "description": "Errors as you type, highlighting, formatting and a file icon for TypeZero programs (.tz files)",
+  "version": "0.4.0",
   "publisher": "typezero",
   "engines": {
-    "vscode": "^1.80.0"
+    "vscode": "^1.82.0"
   },
   "categories": [
     "Programming Languages",
@@ -16,6 +16,22 @@
     "onLanguage:tz"
   ],
   "contributes": {
+    "configuration": {
+      "title": "TypeZero",
+      "properties": {
+        "tz.path": {
+          "type": "string",
+          "default": "",
+          "description": "The tz executable whose language server (tz lsp) shows the errors. Empty: tz on PATH, else build/dev/bin/tz.exe of an open folder."
+        }
+      }
+    },
+    "commands": [
+      {
+        "command": "tz.restartServer",
+        "title": "TypeZero: Restart the Language Server"
+      }
+    ],
     "languages": [
       {
         "id": "tz",
@@ -26,7 +42,11 @@
         "extensions": [
           ".tz"
         ],
-        "configuration": "./language-configuration.json"
+        "configuration": "./language-configuration.json",
+        "icon": {
+          "light": "./icons/tz-light.svg",
+          "dark": "./icons/tz-dark.svg"
+        }
       }
     ],
     "grammars": [

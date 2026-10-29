@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "tz": {
+      "command": "node",
+      "args": ["editors/mcp/tz-mcp.cjs"]
+    }
+  }
+}

@@ -334,7 +334,10 @@ tz run                   # без файла — "main" из tz.json
 - Пакеты (см. «Пакеты»): `import { ms } from "ms"` по имени из `tz.json`, пакеты из каталога, git
   и JSR, `tz.lock` с версиями и хешами, общий кэш исходников, `tz init`, `tz add`, `tz remove`,
   `tz update`, `tz build` и `tz run` без файла; `tz port` переносит TS-библиотеку в файлы `.tz`.
-- Редактор (см. «Редактор»): подсветка файлов `.tz` в VS Code.
+- Редактор (см. «Редактор»): ошибки по мере набора (`tz lsp`), подсветка и форматирование файлов
+  `.tz` в VS Code.
+- Вопросы к компилятору (см. «Вопросы к компилятору и инструменты для ИИ»): `tz map`, `tz context`,
+  `tz query`, `tz impact` и сервер MCP `tz mcp` для ИИ-агентов, с проверкой правки без записи.
 - JSON (см. «JSON»): тип `Json` (`null` бывает только в нём), `JSON.parse(text)` с `Result`,
   `JSON.stringify(x, null, space)` любого значения, чтение и запись ключей (`j.users[0].name`),
   сужение `typeof`, `Array.isArray` и `!= null` — и у полей (`data.name`), и через функцию-проверку;
@@ -3272,18 +3275,45 @@ function box<T>(x: T): T extends string ? { text: T } : { value: T } { ... }
 ## Редактор
 
 Программы на tz — файлы `.tz`. Расширение [editors/vscode](editors/vscode/README.md) учит VS Code
-их подсвечивать и форматировать: язык TypeZero с грамматикой TypeScript, скобками, комментариями и
-отступами как у TS; Alt+Shift+F (Format Document) форматирует файл Prettier'ом, как TypeScript:
-отступ 2 пробела, точки с запятой, двойные кавычки. Установка:
+показывать их ошибки, подсвечивать и форматировать: ошибки компилятора подчёркиваются по мере
+набора (языковой сервер `tz lsp`, [docs/lsp.md](docs/lsp.md)); язык TypeZero с грамматикой
+TypeScript, скобками, комментариями и отступами как у TS; Alt+Shift+F (Format Document)
+форматирует файл Prettier'ом, как TypeScript: отступ 2 пробела, точки с запятой, двойные кавычки.
+Установка:
 
 ```
 powershell -ExecutionPolicy Bypass -File editors\vscode\install.ps1
 ```
 
-и `Developer: Reload Window`. Проверки типов в редакторе нет — ошибки показывает `tz build`.
+и `Developer: Reload Window`. Наведение, переход к определению, все ссылки, дополнение после
+точки и переименование отвечает тот же сервер — по последней проверке.
 Объявления встроенных имён tz для TypeScript ([tz.d.ts](editors/types/tz.d.ts)), `@types/node` и
 настройки tsc лежат рядом с `tz.exe`, в `types`, — для плагина tsserver, который проверял бы
 файлы `.tz` ([docs/modules.md](docs/modules.md), раздел 6); самого плагина пока нет.
+
+## Вопросы к компилятору и инструменты для ИИ
+
+Компилятор отвечает на вопросы о программе — из того, что он сам вывел при проверке, а не из
+поиска по тексту ([docs/lsp.md](docs/lsp.md), шаг 2):
+
+```
+tz map                          обзор: модули, что в них объявлено (с выведенными типами), импорты,
+                                сколько раз что используется; --budget 2000 — примерно в токенах
+tz context centroid             всё про символ: сигнатура, исходник, ошибки в нём, что он использует,
+tz context main.tz:12           кто его использует (со строкой каждого места), разделы docs и тесты
+tz query definition Vec         где объявлен
+tz query references Vec.add     все места
+tz query callers parseAge       кто вызывает
+tz query type main.tz:12:7      тип имени в точке, и у локальных тоже
+tz impact Vec.add               что затронет правка: кто использует, кто использует тех, по уровням
+```
+
+Программа — `"main"` ближайшего `tz.json`, файл из места (`main.tz:12`) или `--entry app.tz`;
+`--json` — то же данными. `tz query records` печатает сами записи модулей. Для ИИ-агентов те же
+ответы и проверка правки без записи на диск — сервер MCP `tz mcp` (инструменты `map`, `context`,
+`query`, `impact`, `check_edit`, `language_card` — памятка [docs/ai.md](docs/ai.md)); в этом
+репозитории он подключён в `.mcp.json` (через `editors/mcp/tz-mcp.cjs`: копия `tz` во временном
+каталоге, чтобы сборка могла заменить `tz.exe`).
 
 ## Чем отличается от TypeScript
 
@@ -3516,8 +3546,10 @@ powershell -ExecutionPolicy Bypass -File editors\vscode\install.ps1
   `(int | string)[]`), две функции, два итератора; `Result` и `Json` в объединении — тоже ошибки.
   `==` у объединений — как `===`: `1` и `"1"` типа `string | int` не равны (в JS `==` их приводит).
 - Литерал получает литеральный тип только там, где его ждут (`const d: Dir = "up"`,
-  `s.kind == "circle"`, `case "up":`); `const d = "up"` — это `string` (в TS — `"up"`). Литерал
-  объекта, который идёт в объединение, становится тем членом, чьи поля и метки он называет.
+  `s.kind == "circle"`, `case "up":`). `const d = "up"` и `const e = fast ? "up" : "down"`
+  подходят туда, где ждут литералы (`move(d)`, `obj[e]`), как в TS; `let` и `const d: string` —
+  строка (с 29 октября). Литерал объекта, который идёт в объединение, становится тем членом, чьи
+  поля и метки он называет.
 - `switch` по литеральному типу или по метке объединения без `default` должен разобрать все
   значения, иначе ошибка «does not handle "left"» (в TS — только с `never` в `default`). `sort()`
   без функции у массива объединения с числами или объектами — ошибка, как у чисел.
@@ -3891,10 +3923,13 @@ CRT, без RTTI и исключений, поэтому `tz` собираетс
 | Каталог | Что внутри |
 |---|---|
 | `compiler/pipeline` | конвейер проходов (`pipeline/`), опции сборки (`build_options/`), где лежат рантайм и библиотеки (`runtime_files/`) |
-| `compiler/cli` | `main.cpp` и команды `tz`: разбор командной строки (`args/`, `command_line/`), `build`, `run`, `init`, `add`, `remove`, `update`, `port`, `licenses`, `version` (`*_command/`), печать ошибок (`error_printer/`) |
+| `compiler/cli` | `main.cpp` и команды `tz`: разбор командной строки (`args/`, `command_line/`), `build`, `run`, `init`, `add`, `remove`, `update`, `port`, `licenses`, `lsp`, `mcp`, `version` (`*_command/`), `map` / `context` / `query` / `impact` (`knowledge_command/`), печать ошибок (`error_printer/`) |
+| `compiler/knowledge` | записи модулей и ответы по ним ([docs/lsp.md](docs/lsp.md), шаг 2): данные — символы, ссылки, типы в точках, импорты (`knowledge/`), `KnowledgePass` — записи из проверенной программы (`knowledge_pass/`, обход AST — `knowledge_walk/`, сигнатуры — `symbol_text/`), разбор цели `имя` / `Класс.член` / `файл.tz:строка:столбец` (`knowledge_target/`), разделы docs и тесты по тексту (`project_text/`), ответы `map`, `context`, `query`, `impact` текстом и JSON (`knowledge_answers/`) |
+| `compiler/mcp` | `tz mcp`: сервер MCP для ИИ-агентов (`mcp_server/`): инструменты зовут дочерний `tz` (`map`, `context`, `query`, `impact`; `check_edit` — `tz lsp --check` с текстом правки) |
+| `compiler/lsp` | `tz lsp`, языковой сервер ([docs/lsp.md](docs/lsp.md)): кадры JSON-RPC через stdin / stdout (`lsp_channel/`), открытые файлы и их правки в столбцах UTF-16 (`text_document/`), `file://`-адреса (`file_uri/`), сервер: какие программы проверять, пауза в наборе, публикация ошибок (`lsp_server/`); проверка идёт в дочернем `tz lsp --check` (`check_process/`, `lsp_check/`), ошибки как данные — файл, строка, столбцы UTF-16, заметки (`check_report/`, `source_places/`) |
 | `compiler/program` | что идёт по конвейеру: `Program` (`program/`), файл программы (`module/`, `source_file/`), по папке на узел AST (`ast/`; `ast.h` подключает их все), символы (`symbols/`), типы (`types/`: класс `Type` и модули функций над типами), диагностика и `Errors` |
 | `compiler/result` | `Result`, `ok` и `err`, как в neverthrow |
-| `compiler/load` | `LoadPass`: файлы программы по импортам и их порядок (`loader/`, `module_resolver/`), встроенные модули на tz и глобальные `tz:web`, `tz:url`, `tz:fetch` (`library_modules/`); токены (`token/`), лексер (`lexer/`): литерал регулярки лексер читает, когда парсер встречает `/` там, где начинается выражение; текст литералов (`literal_text/`); парсер рекурсивным спуском (`parser/`) и его части: токены по одному (`token_cursor/`), операторы, `let`, деструктуризация (раскрывается в обычные объявления через скрытые переменные), выражения, вызовы, первичные выражения, шаблоны, функции, классы, `type` / `interface` / `enum`, `import` / `export`, типы (`*_parser/`); `throw` и `try` разборщик только называет ошибкой и пропускает |
+| `compiler/load` | `LoadPass`: файлы программы по импортам и их порядок (`loader/`, `module_resolver/`), текст открытых в редакторе файлов вместо текста на диске (`source_overlay/`), встроенные модули на tz и глобальные `tz:web`, `tz:url`, `tz:fetch` (`library_modules/`); токены (`token/`), лексер (`lexer/`): литерал регулярки лексер читает, когда парсер встречает `/` там, где начинается выражение; текст литералов (`literal_text/`); парсер рекурсивным спуском (`parser/`) и его части: токены по одному (`token_cursor/`), операторы, `let`, деструктуризация (раскрывается в обычные объявления через скрытые переменные), выражения, вызовы, первичные выражения, шаблоны, функции, классы, `type` / `interface` / `enum`, `import` / `export`, типы (`*_parser/`); `throw` и `try` разборщик только называет ошибкой и пропускает |
 | `compiler/declare` | `DeclarePass`: встроенные типы ошибок и строк (`prelude/`), функции и типы каждого файла (`module_declarer/`), импорты к экспортам (`import_binder/`), псевдонимы, интерфейсы, `enum` и целые константы (`type_declarer/`, `constant_folder/`), классы и цепочки наследования (`class_declarer/`), имена в функциях (`function_names/`); классы тем объявляют их крючки `declare` |
 | `compiler/infer` | `InferPass`: циклы вызовов функций без типа возврата (`call_cycles/`) и тип возврата по `return` (`return_inferrer/`) |
 | `compiler/check` | `CheckPass` и `Checker` (`checker/`): разрешение имён и проверка типов; неявные преобразования становятся узлами `CastExpr`. По папке на часть языка: выражения (`expr/`: вызовы, члены, присваивания, истинность…), операторы (`stmt/`), поток и доказательства индексов (`flow/`, `facts/`), типы (`types/`: разрешение, отношения, условные и шаблонные типы, тип литерала по месту назначения, объединения, `unknown`), значения (`values/`: методы чисел, строк, массивов), объекты и словари (`objects/`), функции и замыкания (`functions/`), классы, наследование, перегрузка, декораторы (`classes/`), generics (`generics/`), генераторы и итераторы (`iterators/`), async, `Promise` и таймеры (`async/`); круги карт событий (`event_rounds/`) |
@@ -3913,8 +3948,9 @@ CRT, без RTTI и исключений, поэтому `tz` собираетс
 | `runtime/library` | C-часть тем, по папке на модуль. `console`: `console.log` для массивов, объектов, `Result`, итераторов, `Json` и объединений как в Node (`inspect`). `math`: `Math`. `decimal`: точные десятичные числа. `json`: значения `Json` (`json`, `json_values`), `JSON.parse` как в V8 (`json_parse`), `JSON.stringify` любого значения (`json_stringify`). `regex`: разбор и компиляция в программу (`regex_compile`, общий с `tz`) с таблицами Unicode от [gen_regex_tables.mjs](runtime/library/regex/regex_compile/gen_regex_tables.mjs), интерпретатор, методы и то, что зовёт машинный код регулярок (`regex`). `date`: поля, установка полей и строки (`date`), разбор строк, как в V8 (`date_parse`, общий с `tz`), местный пояс (`date_zone`) и языки (`date_format`). `intl`: ICU системы, которую `icu` загружает при первом обращении; языки, опции и части `formatToParts` (`intl`), числа и `PluralRules` (`intl_number`), `Collator`, `normalize` и `Segmenter` (`intl_text`), `RelativeTimeFormat`, `ListFormat` и `DisplayNames` (`intl_names`). `process`: аргументы, переменные окружения, код выхода и часы. `path`: `node:path` в обоих стилях. `fs`: общее функций файлов (`fs`), ошибки ОС `SystemError` как в libuv (`fs_errors`), синхронные функции файлов и папок (`fs_sync`, `fs_dirs`), `node:fs/promises` (`fs_async`, `fs_async_dirs`), stdin и `readLine` (`stdin`), `node:readline` (`readline`), чтение и запись кусками для потоков файлов (`fs_stream`). `os`: `node:os`. `stream`: что просит `node:stream`: проверка куска, байты в stdout и stderr. `child_process`: подготовка вызова как в node, запуск как в libuv (кавычки аргументов, поиск в `PATH`, окружение, каналы с overlapped I/O, таймаут), в Linux — `posix_spawn` (`child`). `bytes`: `ArrayBuffer`, типизированные массивы и их методы (`bytes`); `Buffer`, кодировки node, `TextEncoder` / `TextDecoder` (`buffer`) с таблицами однобайтовых кодировок, которые [gen_encodings.mjs](runtime/library/bytes/encodings/gen_encodings.mjs) берёт у node (`encodings`), и многобайтовые кодировки (`cjk`). `reflect`: записи метаданных (`meta`); `Reflect.get`, `apply`, `construct`, `new` класса, известного при выполнении, и проверки `unknown` (`reflect`). `net`: сокеты TCP на порту завершения цикла (AcceptEx, ConnectEx, WSARecv, WSASend) и поиск имён (`net`), срок `timeout` у `fetch`, который обрывает ожидания соединения (`deadline`). `http`: HTTP/1.1: разбор голов и тел, ответы и запросы одной записью (`http`); распаковка тел `fetch` — inflate из zlib и декодер brotli из `third_party` (`decompress`). `tz_modules`: что просят встроенные модули на tz через `declare function` (`library`). Отдельно, в `tzcrypto.lib`: `crypto` — `node:crypto` поверх OpenSSL: общее без OpenSSL — объекты, HMAC, PBKDF2, HKDF, случайные числа, секретные ключи (`crypto`), хеши (`crypto_md`), AES (`crypto_aes`) и ChaCha20-Poly1305 (`crypto_chacha`), scrypt (`crypto_scrypt`) и Argon2 (`crypto_argon2`) прямого слоя, по объекту на алгоритм, и полный слой: имена из переменных и списки (`crypto_evp`), ключи, подписи и обмен ключами (`crypto_keys`), сертификаты (`crypto_x509`); Web Crypto (`crypto_subtle*`); `tls` — TLS соединений `net` для https: OpenSSL в памяти между сокетом и HTTP, проверка сервера как в node и корневые сертификаты Mozilla, которые [gen_tls_roots.mjs](runtime/library/tls/tls/gen_tls_roots.mjs) берёт у node |
 | `library` | встроенные модули, написанные на tz, которые лежат рядом с `tz.exe` в `lib`. `events`: `node:events` (`events.tz`) и глобальные `EventTarget`, `Event`, `CustomEvent`, `DOMException` (`web.tz`). `http`: `tz:http` (`http.tz`), глобальные `URL` и `URLSearchParams` (`url.tz`), `fetch`, `Headers`, `Request`, `Response`, `ReadableStream`, `FormData` (`fetch.tz`). `stream`: `node:stream` (`stream.tz` — класс `Stream` со всей работой потока в закрытых методах, и его части `stream_duplex.tz` — `Readable`, `Writable`, `Duplex`, `Transform`, и `stream_pipeline.tz`, которые загрузчик читает как один модуль), `node:stream/promises` (`stream_promises.tz`), `node:stream/consumers` (`stream_consumers.tz`), `node:string_decoder` (`string_decoder.tz`), потоки файлов `createReadStream` / `createWriteStream` и `process.stdin` / `stdout` / `stderr` (`fs_stream.tz`). `crypto`: Web Crypto (`webcrypto.tz`). `core`: встроенные функции компилятора (`intrinsics.tz`, модуль `tz:intrinsics`: `panic`, `defer`, `asListener<F>`, `asClass<C>`, `chunkOf<T>` и другие), которые модули библиотеки импортируют по имени, а программа не видит. Глобальные получает сам файл, который их называет. Их код проверяется и компилируется вместе с программой; `declare function` в библиотеке — функция рантайма на C, имя которой выводится из имени: `netClose` — `tz_net_close` |
 | `editors/types` | встроенные имена tz для TypeScript (`tz.d.ts`) и настройки tsc для программ tz (`tsconfig.json`) — для будущего плагина tsserver; лежат рядом с `tz.exe` в `types` |
-| `editors/vscode` | расширение VS Code: подсветка и форматирование файлов `.tz` ([README](editors/vscode/README.md)) |
-| `third_party` | рецепт сборки OpenSSL ([openssl](third_party/openssl)) и тексты лицензий, которые печатает `tz licenses` ([licenses](third_party/licenses)); inflate из zlib и декодер brotli как есть, для `fetch` (лицензии — рядом с ними); `@types/node` и undici-types для редактора ([types](third_party/types/README.md)); Prettier — форматтер расширения VS Code ([prettier](third_party/prettier/README.md)) |
+| `editors/vscode` | расширение VS Code: ошибки по мере набора, подсветка и форматирование файлов `.tz` ([README](editors/vscode/README.md)) |
+| `editors/mcp` | запуск `tz mcp` для `.mcp.json` этого репозитория из копии `tz` (`tz-mcp.cjs`) |
+| `third_party` | рецепт сборки OpenSSL ([openssl](third_party/openssl)) и тексты лицензий, которые печатает `tz licenses` ([licenses](third_party/licenses)); inflate из zlib и декодер brotli как есть, для `fetch` (лицензии — рядом с ними); `@types/node` и undici-types для редактора ([types](third_party/types/README.md)); Prettier — форматтер расширения VS Code ([prettier](third_party/prettier/README.md)); `vscode-languageclient` — клиент `tz lsp` в нём ([vscode-languageclient](third_party/vscode-languageclient/README.md)) |
 | `tests` | `run/*.tz` с ожидаемым выводом в `*.out`; `errors/*.tz` с `// expect-error:`; программы из нескольких файлов — каталоги с `main.tz`; `cli/*.cmake` — команды tz; `packages` — пакеты, адаптированные для tz |
 | `bench` | одни и те же программы на typezero и Go и скрипт сравнения; сервер «Hello, World!» на tz, Go и node и нагрузка на него (`http.ps1`) |
 | `docs` | принятые решения, которые ещё не реализованы или реализованы не до конца: объекты и классы ([objects.md](docs/objects.md)), generics ([generics.md](docs/generics.md)), ошибки и `Result` без исключений ([errors.md](docs/errors.md)), числа ([numbers.md](docs/numbers.md)), модули и JSON ([modules.md](docs/modules.md)), ввод-вывод ([io.md](docs/io.md)), async ([async.md](docs/async.md)), итераторы и генераторы ([iterators.md](docs/iterators.md)), декораторы ([decorators.md](docs/decorators.md)), мелочи языка ([small.md](docs/small.md)), точные десятичные `decimal` ([decimal.md](docs/decimal.md)), регулярные выражения ([regex.md](docs/regex.md)), даты ([date.md](docs/date.md)), пакеты ([packages.md](docs/packages.md)), байтовые массивы ([bytes.md](docs/bytes.md)), сеть ([net.md](docs/net.md)), криптография ([crypto.md](docs/crypto.md)), запуск процессов ([process.md](docs/process.md)), события ([events.md](docs/events.md)), потоки ([streams.md](docs/streams.md)), перегрузка методов ([overloads.md](docs/overloads.md)), проверки и сужение, JSON в свои типы ([narrowing.md](docs/narrowing.md)), языки `Intl` ([intl.md](docs/intl.md)) |

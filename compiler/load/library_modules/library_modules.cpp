@@ -188,10 +188,16 @@ void LibraryModules::importLibraryGlobals(Module *module, llvm::StringRef text) 
   Lexer lexer(text, loader_.diags_);
   bool property = false;
   Token before[2];
+  static const llvm::StringSet<> names = [] {
+    llvm::StringSet<> all;
+    for (const LibraryGlobal &global : kLibraryGlobals) {
+      all.insert(global.name);
+    }
+
+    return all;
+  }();
   for (Token token = lexer.next(); !token.is(Tok::Eof); token = lexer.next()) {
-    if (token.is(Tok::Identifier) && !property &&
-        llvm::any_of(kLibraryGlobals,
-                     [&](const LibraryGlobal &global) { return global.name == token.text; })) {
+    if (token.is(Tok::Identifier) && !property && names.contains(token.text)) {
       mentions.try_emplace(token.text, token.text.data());
     }
     if (!subtle && token.is(Tok::Identifier) && token.text == "subtle" &&
@@ -314,6 +320,9 @@ void LibraryModules::importFsStreams(Module *module, llvm::StringRef text) {
         importedAt.insert(n.asLoc.getPointer());
       }
     }
+  }
+  if (streams.names.empty() && !text.contains("std")) {
+    return;
   }
   if (streams.names.empty()) {
     bool muted = loader_.diags_.setMuted(true);

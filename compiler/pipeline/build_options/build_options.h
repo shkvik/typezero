@@ -5,6 +5,8 @@
 
 namespace tz {
 
+class SourceOverlay;
+
 namespace pkg {
 struct Graph;
 }
@@ -16,6 +18,8 @@ struct BuildOptions {
   bool emitLLVM = false;
   const pkg::Graph *packages = nullptr;
   RuntimeFiles runtime;
+  const SourceOverlay *overlay = nullptr;
+  bool overflow = true;
 };
 
 }

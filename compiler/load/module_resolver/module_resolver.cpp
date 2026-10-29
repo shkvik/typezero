@@ -237,6 +237,21 @@ Module *ModuleResolver::resolvePackage(Module *from, llvm::StringRef spec, llvm:
   return load(package.dir, candidates, spec, loc, index);
 }
 
+const std::string *ModuleResolver::realFile(llvm::StringRef full) {
+  auto found = realFiles_.find(full);
+  if (found == realFiles_.end()) {
+    llvm::SmallString<256> real;
+    if (!fs::is_regular_file(full)) {
+      real.clear();
+    } else if (fs::real_path(full, real)) {
+      real = full;
+    }
+    found = realFiles_.try_emplace(full, std::string(real)).first;
+  }
+
+  return found->second.empty() ? nullptr : &found->second;
+}
+
 Module *ModuleResolver::load(llvm::StringRef baseDir, const std::vector<std::string> &candidates,
                              llvm::StringRef spec, llvm::SMLoc loc, int package) {
   const pkg::Package *owner =
@@ -246,13 +261,11 @@ Module *ModuleResolver::load(llvm::StringRef baseDir, const std::vector<std::str
     llvm::SmallString<256> full(baseDir);
     path::append(full, candidate);
     path::remove_dots(full, true);
-    if (!fs::is_regular_file(full)) {
+    const std::string *known = realFile(full);
+    if (!known) {
       continue;
     }
-    llvm::SmallString<256> real;
-    if (fs::real_path(full, real)) {
-      real = full;
-    }
+    llvm::SmallString<256> real(*known);
     if (real.str() != full.str() && real.str().equals_insensitive(full)) {
       loader_.diags_.error(
           loc, "the file is named '" + loader_.relativeName(real) + "', but the import says '" +

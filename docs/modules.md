@@ -178,7 +178,7 @@ type Json = null | boolean | number | string | Json[] | { [key: string]: Json }
 
 Файлы `.tz` VS Code сам не знает. Расширение [editors/vscode](../editors/vscode/README.md)
 добавляет язык `tz`: подсветку грамматикой TypeScript, которая есть в VS Code, комментарии,
-скобки и отступы как у TS. Ставится копией в каталог расширений
+скобки и отступы как у TS, значок файлов `.tz` (буквы «TZ», с 29 октября). Ставится копией в каталог расширений
 (`editors\vscode\install.ps1`).
 
 - **Форматирование** — Prettier в расширении ([third_party/prettier](../third_party/prettier/README.md)):

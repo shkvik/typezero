@@ -24,9 +24,19 @@ commands:
   port      copy a TypeScript library and adapt it to tz
   licenses  print the licenses of the code of others an executable embeds,
             which go along with it: tz licenses app.exe > LICENSES.txt
+  lsp       the language server: an editor starts it to show errors as you
+            type (the VS Code extension of editors/vscode does)
+  map       an overview of a program: modules, what they declare with types,
+            how much each is used: tz map [--budget <tokens>] [--json]
+  context   all about a symbol or place: source, uses, users, docs:
+            tz context parseAge, tz context main.tz:12 [--budget <tokens>]
+  query     tz query definition|references|callers|type <name | file.tz:line:col>
+  impact    what a change to a symbol can affect: tz impact Vec.add
+  mcp       the tools above for AI agents (MCP over stdin and stdout)
   version   print the version
 
-Without a file, build and run take "main" of tz.json.
+Without a file, build and run take "main" of tz.json; map, context, query and
+impact take it too, or the program named by --entry <file.tz>.
 
 options:
   -o <path>         where to write the output (build only)

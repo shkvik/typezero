@@ -5,7 +5,10 @@
 #include "compiler/cli/entry_file/entry_file.h"
 #include "compiler/cli/explain_command/explain_command.h"
 #include "compiler/cli/init_command/init_command.h"
+#include "compiler/cli/knowledge_command/knowledge_command.h"
 #include "compiler/cli/licenses_command/licenses_command.h"
+#include "compiler/cli/lsp_command/lsp_command.h"
+#include "compiler/cli/mcp_command/mcp_command.h"
 #include "compiler/cli/port_command/port_command.h"
 #include "compiler/cli/remove_command/remove_command.h"
 #include "compiler/cli/run_command/run_command.h"
@@ -41,6 +44,18 @@ int CommandLine::run(int argc, char **argv) const {
     }
     if (name == "port") {
       pkg::PortCommand command;
+      return command.run(rest);
+    }
+    if (name == "lsp") {
+      LspCommand command(argv[0]);
+      return command.run(rest);
+    }
+    if (name == "mcp") {
+      McpCommand command(argv[0]);
+      return command.run(rest);
+    }
+    if (name == "map" || name == "context" || name == "query" || name == "impact") {
+      KnowledgeCommand command(argv[0], name);
       return command.run(rest);
     }
   }

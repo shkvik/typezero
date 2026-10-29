@@ -5,6 +5,7 @@
 #include "compiler/load/library_modules/library_modules.h"
 #include "compiler/load/module_resolver/module_resolver.h"
 #include "compiler/load/parser/parser.h"
+#include "compiler/load/source_overlay/source_overlay.h"
 #include "compiler/packages/graph/graph.h"
 #include "compiler/packages/package/package.h"
 #include "compiler/packages/specifier/specifier.h"
@@ -72,9 +73,19 @@ bool Loader::run(llvm::StringRef entryPath, SourceFile &program) {
   return true;
 }
 
+llvm::ErrorOr<std::unique_ptr<llvm::MemoryBuffer>> Loader::read(llvm::StringRef filePath) const {
+  if (overlay_) {
+    if (const std::string *text = overlay_->find(filePath)) {
+      return llvm::MemoryBuffer::getMemBufferCopy(*text, filePath);
+    }
+  }
+
+  return llvm::MemoryBuffer::getFile(filePath);
+}
+
 Module *Loader::parse(const std::string &filePath, const std::string &realPath, std::string name,
                       std::string &error) {
-  auto buffer = llvm::MemoryBuffer::getFile(filePath);
+  auto buffer = read(filePath);
   if (!buffer) {
     error = buffer.getError().message();
     return nullptr;
@@ -101,7 +112,7 @@ Module *Loader::parse(const std::string &filePath, const std::string &realPath, 
 
 Module *Loader::parseJson(const std::string &filePath, const std::string &realPath,
                           std::string name, std::string &error) {
-  auto buffer = llvm::MemoryBuffer::getFile(filePath);
+  auto buffer = read(filePath);
   if (!buffer) {
     error = buffer.getError().message();
     return nullptr;
@@ -177,7 +188,7 @@ void Loader::loadDeclarations(Module *module, llvm::StringRef filePath, bool lib
   if (!fs::exists(declarations)) {
     return;
   }
-  auto buffer = llvm::MemoryBuffer::getFile(declarations);
+  auto buffer = read(declarations);
   if (!buffer) {
     diags_.tool("cannot read '" + declarations + "': " + buffer.getError().message());
     return;
@@ -229,13 +240,14 @@ void Loader::rejectReferences(llvm::StringRef text) {
 }
 
 bool loadProgram(llvm::StringRef entryPath, llvm::SourceMgr &sourceMgr, AstContext &ctx,
-                 Diagnostics &diags, SourceFile &program, const pkg::Graph *packages) {
-  return Loader(sourceMgr, ctx, diags, packages).run(entryPath, program);
+                 Diagnostics &diags, SourceFile &program, const pkg::Graph *packages,
+                 const SourceOverlay *overlay) {
+  return Loader(sourceMgr, ctx, diags, packages, overlay).run(entryPath, program);
 }
 
 Loader::Loader(llvm::SourceMgr &sourceMgr, AstContext &ctx, Diagnostics &diags,
-               const pkg::Graph *packages)
-    : sourceMgr_(sourceMgr), ctx_(ctx), diags_(diags), packages_(packages) {
+               const pkg::Graph *packages, const SourceOverlay *overlay)
+    : sourceMgr_(sourceMgr), ctx_(ctx), diags_(diags), packages_(packages), overlay_(overlay) {
   resolver_ = std::make_unique<ModuleResolver>(*this);
   library_ = std::make_unique<LibraryModules>(*this);
 }

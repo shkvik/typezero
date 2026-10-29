@@ -4,6 +4,8 @@
 #include "compiler/program/diagnostics/diagnostics.h"
 #include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/StringMap.h"
+#include "llvm/Support/ErrorOr.h"
+#include "llvm/Support/MemoryBuffer.h"
 #include "llvm/Support/SourceMgr.h"
 #include <memory>
 #include <string>
@@ -17,11 +19,12 @@ struct Graph;
 
 class ModuleResolver;
 class LibraryModules;
+class SourceOverlay;
 
 class Loader {
 public:
   Loader(llvm::SourceMgr &sourceMgr, AstContext &ctx, Diagnostics &diags,
-         const pkg::Graph *packages);
+         const pkg::Graph *packages, const SourceOverlay *overlay = nullptr);
   bool run(llvm::StringRef entryPath, SourceFile &program);
 
 private:
@@ -30,6 +33,7 @@ private:
                 std::string &error);
   Module *parseJson(const std::string &filePath, const std::string &realPath, std::string name,
                     std::string &error);
+  llvm::ErrorOr<std::unique_ptr<llvm::MemoryBuffer>> read(llvm::StringRef filePath) const;
   void visit(Module *module);
   std::string relativeName(llvm::StringRef realPath) const;
   void loadDeclarations(Module *module, llvm::StringRef filePath, bool library);
@@ -38,6 +42,7 @@ private:
   AstContext &ctx_;
   Diagnostics &diags_;
   const pkg::Graph *packages_;
+  const SourceOverlay *overlay_;
   llvm::DenseMap<const Module *, int> packageOf_;
   std::string entryDir_;
   std::string entryRealDir_;
@@ -62,6 +67,7 @@ private:
 };
 
 bool loadProgram(llvm::StringRef entryPath, llvm::SourceMgr &sourceMgr, AstContext &ctx,
-                 Diagnostics &diags, SourceFile &program, const pkg::Graph *packages = nullptr);
+                 Diagnostics &diags, SourceFile &program, const pkg::Graph *packages = nullptr,
+                 const SourceOverlay *overlay = nullptr);
 
 }

@@ -17,42 +17,57 @@
 #include "compiler/overflow/overflow_pass/overflow_pass.h"
 #include "compiler/parallel/parallel_pass/parallel_pass.h"
 #include "compiler/pipeline/build_options/build_options.h"
+#include "compiler/pipeline/pass_times/pass_times.h"
 #include "compiler/program/program/program.h"
 #include "compiler/whole_program/whole_program_pass/whole_program_pass.h"
 #include "llvm/Support/Path.h"
 
 namespace tz {
 
-Errors checkProgram(Program &program, const BuildOptions &options) {
+Errors checkProgram(Program &program, const BuildOptions &options, PassTimes *times) {
   const FeatureRegistry &features = FeatureRegistry::standard();
   EventRounds rounds;
+  PassTimes unused;
+  PassTimes &clock = times ? *times : unused;
   for (;;) {
-    LoadPass load(options.input, options.packages);
+    clock.round();
+    clock.start();
+    LoadPass load(options.input, options.packages, options.overlay);
     Errors errors = load.run(program);
+    clock.stop("load");
     if (errors) {
       return errors;
     }
 
     DeclarePass declare(rounds.inference(), features);
     errors.add(declare.run(program));
+    clock.stop("declare");
 
     InferPass infer;
     errors.add(infer.run(program));
+    clock.stop("infer");
 
     CheckPass check;
     errors.add(check.run(program));
+    clock.stop("check");
 
     InstancesPass instances;
     errors.add(instances.run(program));
+    clock.stop("instances");
 
     WholeProgramPass whole;
     errors.add(whole.run(program));
+    clock.stop("whole program");
     if (rounds.again()) {
       continue;
+    }
+    if (!options.overflow) {
+      return errors;
     }
 
     OverflowPass overflow;
     errors.add(overflow.run(program));
+    clock.stop("overflow");
 
     return errors;
   }
