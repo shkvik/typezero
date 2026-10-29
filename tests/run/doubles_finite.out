@@ -4,7 +4,7 @@
 undefined 1.5
 1.25
 the bytes hold NaN, which a tz double cannot be
-bad_number
+ERR_INVALID_NUMBER
 Number out of range in JSON at position 4 (line 1 column 5)
 [ 1, 1e+300 ]
 3.4028234663852886e+38 -3.4028234663852886e+38

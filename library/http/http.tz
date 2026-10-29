@@ -1,5 +1,6 @@
 import { Connection, Request, Response } from "tz:fetch";
 import { URL } from "tz:url";
+import { WebSocket, acceptKey } from "tz:websocket";
 import { ahead, order } from "tz:intrinsics";
 
 declare function netListen(
@@ -8,6 +9,7 @@ declare function netListen(
   maxBody: double,
   keepAlive: int,
   headersTimeout: int,
+  requestTimeout: int,
 ): Result<object, SystemError>;
 declare function tlsListen(
   host: string,
@@ -15,6 +17,7 @@ declare function tlsListen(
   maxBody: double,
   keepAlive: int,
   headersTimeout: int,
+  requestTimeout: int,
   cert: string,
   key: string,
 ): Result<object, SystemError>;
@@ -22,6 +25,7 @@ declare function netListenerPort(listener: object): int;
 declare function netListenerUrl(listener: object): string;
 declare function netAccept(listener: object): Promise<object | undefined>;
 declare function netCloseListener(listener: object): void;
+declare function netAbortAll(listener: object): void;
 declare function netDrained(listener: object): Promise<void>;
 declare function netClientAddress(socket: object): string;
 declare function netClientPort(socket: object): int;
@@ -42,6 +46,7 @@ export type ServeOptions = {
   maxBodySize?: double;
   keepAliveTimeout?: int;
   headersTimeout?: int;
+  requestTimeout?: int;
   transport?: ServeTransport;
 };
 
@@ -54,6 +59,69 @@ export type ServeTransport =
       cert: string;
       key: string;
     };
+
+export type StopOptions = {
+  timeout?: int;
+};
+
+export type UpgradeOptions = {
+  protocol?: string;
+  maxMessageSize?: int;
+};
+
+export type UpgradeError = {
+  kind: "REQUEST";
+  code: "ERR_NOT_WEBSOCKET" | "ERR_UNSUPPORTED_VERSION";
+  message: string;
+};
+
+export class Upgraded {
+  public readonly socket: WebSocket;
+  public readonly response: Response;
+
+  public constructor(socket: WebSocket, response: Response) {
+    this.socket = socket;
+    this.response = response;
+  }
+}
+
+export function upgradeWebSocket(
+  request: Request,
+  options?: UpgradeOptions,
+): Result<Upgraded, UpgradeError> {
+  const upgrade = (request.headers.get("upgrade") ?? "").toLowerCase();
+  const key = request.headers.get("sec-websocket-key") ?? "";
+  if (upgrade != "websocket" || key == "") {
+    return err({
+      kind: "REQUEST",
+      code: "ERR_NOT_WEBSOCKET",
+      message: "the request does not ask for a WebSocket: no 'upgrade: websocket' or no key",
+    });
+  }
+  const version = request.headers.get("sec-websocket-version") ?? "";
+  if (version != "13") {
+    return err({
+      kind: "REQUEST",
+      code: "ERR_UNSUPPORTED_VERSION",
+      message: `the WebSocket version ${version} is not 13`,
+    });
+  }
+  const protocol = options?.protocol ?? "";
+  const socket = WebSocket.forServer(protocol, options?.maxMessageSize ?? 16 * 1024 * 1024);
+  const accept = acceptKey(key);
+  const headers: Record<string, string> = {
+    upgrade: "websocket",
+    connection: "Upgrade",
+    "sec-websocket-accept": accept,
+  };
+  if (protocol != "") {
+    headers["sec-websocket-protocol"] = protocol;
+  }
+  const response = Response.switchingProtocols(headers, (conn: Connection) => socket.attach(conn));
+  const upgraded = new Upgraded(socket, response);
+
+  return ok(upgraded);
+}
 
 export type ListenError = {
   kind: "SERVER";
@@ -119,6 +187,7 @@ export class Server {
   private readonly maxBody: double;
   private readonly keepAlive: int;
   private readonly headersTimeout: int;
+  private readonly requestTimeout: int;
   private readonly transport: ServeTransport;
   private readonly handler: Handler;
 
@@ -128,6 +197,7 @@ export class Server {
     this.maxBody = options.maxBodySize ?? 128 * 1024 * 1024;
     this.keepAlive = options.keepAliveTimeout ?? 5000;
     this.headersTimeout = options.headersTimeout ?? 60000;
+    this.requestTimeout = options.requestTimeout ?? 300000;
     this.transport = options.transport ?? { secure: false };
     this.handler = handler;
   }
@@ -164,6 +234,7 @@ export class Server {
         this.maxBody,
         this.keepAlive,
         this.headersTimeout,
+        this.requestTimeout,
         transport.cert,
         transport.key,
       );
@@ -176,6 +247,7 @@ export class Server {
       this.maxBody,
       this.keepAlive,
       this.headersTimeout,
+      this.requestTimeout,
     );
 
     return plain;
@@ -201,12 +273,25 @@ export class Listening {
     this.accepting = Listening.acceptAll(listener, handler);
   }
 
-  public async stop(): Promise<void> {
+  public async stop(options?: StopOptions): Promise<void> {
+    const native = this.listener.native;
     if (!this.stopping) {
       this.stopping = true;
-      netCloseListener(this.listener.native);
+      netCloseListener(native);
     }
+    const timeout = options?.timeout;
+    if (timeout == undefined) {
+      await this.accepting;
+      return;
+    }
+    if (timeout <= 0) {
+      netAbortAll(native);
+      await this.accepting;
+      return;
+    }
+    const timer = setTimeout(() => netAbortAll(native), timeout);
     await this.accepting;
+    clearTimeout(timer);
   }
 
   private static async acceptAll(
@@ -244,6 +329,11 @@ export class Listening {
       const written = response.writeTo(conn, headOnly);
       if (written.kind == "streaming") {
         await written.finished;
+      }
+      const upgrade = response.upgrade;
+      if (upgrade != undefined) {
+        upgrade(conn);
+        return;
       }
       if (!conn.keepAlive()) {
         break;

@@ -79,7 +79,7 @@ ICU (в них не только даты); в каждый exe их не пол
   (`new Date("2026-10-23T10:00")`) проверяется при сборке, как в разделе 5. В JS вместо всего
   этого получается «не дата»: `getTime()` — `NaN`, а `toISOString()` бросает `RangeError`.
   ```ts
-  const ms = Date.parse(text)             // Result<int, { code: "bad_date"; text: string }>
+  const ms = Date.parse(text)             // Result<int, { code: "ERR_INVALID_DATE"; text: string }>
   if (ms.isErr()) return ms
   new Date(ms.value).toISOString()        // всегда строка
   ```

@@ -3,7 +3,7 @@ onoo 4
 Ok {
   value: { name: 'shop', limit: 3, price: 19.99, tags: [ 'a', 'b' ] }
 } Ok { value: 59.97 }
-Err { error: 'settings must be an object' } at readSettings (store.tz:34) {"value":{"name":"shop","limit":3,"price":"19.99","tags":["a","b"]}}
+Err { error: 'settings must be an object' } at readSettings (store.tz:35) {"value":{"name":"shop","limit":3,"price":"19.99","tags":["a","b"]}}
 { value: { title: 'Report 2024-05', pages: [ 3, 4 ] } } Ok { value: { title: 'Report 2024-05', pages: [ 3, 4 ] } } [ { title: 'Report 2024-05', pages: [ 3, 4 ] }, null ]
 2024 Report ####-## ["2024-05","2024","05"]
 {"re":{},"match":["a","a",null],"it":{}}

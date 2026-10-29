@@ -17,7 +17,8 @@
 - TLS — OpenSSL, как в node ([crypto.md](crypto.md)). Попадает в exe, только если программа
   работает с https: около 4 МБ (Go: https-клиент целиком — 5,3 МБ). Шифрование трафика — в 3
   раза быстрее, чем в Go. Корневые сертификаты Mozilla — внутри.
-- `node:http` (`createServer`), HTTP/2, WebSocket, сокеты TCP/UDP — позже.
+- HTTP/2, WebSocket, сокеты TCP/UDP — позже (решено 29 октября, `tmp/design`). `node:http` не
+  будет: сервер — `tz:http`, клиент — `fetch`.
 
 ## 1. Сервер
 
@@ -57,6 +58,9 @@ const listening = new Server({ port: 3000 }, app.fetch).listen()
   `hostname` (`0.0.0.0`), `maxBodySize` (128 МБ, как в Bun; больше — 413), `keepAliveTimeout` (5000 мс, как в node:
   столько соединение ждёт следующего запроса), `headersTimeout` (60 000 мс, как в node: столько
   может идти голова запроса, потом 408 и обрыв — защита от клиента, который шлёт по байту),
+  `requestTimeout` (300 000 мс, как в node, 0 — без предела: столько может идти весь запрос с
+  телом; потом 408 и обрыв, а обработчик, который читает тело, получает `BodyError` вида
+  `TIMEOUT`; сделано 29 октября),
   `transport` — `{ secure: false }` (http, по умолчанию) или `{ secure: true, cert, key }`
   (https, строки PEM). `secure: true` без `cert` и `key` не скомпилируется, `secure: false` с
   ними — тоже.
@@ -69,6 +73,17 @@ const listening = new Server({ port: 3000 }, app.fetch).listen()
   дождаться ответов на запросы, которые уже идут. Это единственный способ остановить сервер
   (опции `signal` нет: `AbortSignal` убран 28 октября, [async.md](async.md), раздел 7). Второй
   вызов ничего не закрывает, только ждёт того же: так ждут конца сервера.
+- **`stop({ timeout })`** (сделано 29 октября): ждать не дольше `timeout` мс, потом оборвать
+  оставшиеся соединения — у потока ответа (бесконечный SSE) вызывается `cancel` (запись падает,
+  `Response` отменяет читателя), зависший обработчик остаётся сам по себе, `stop` возвращается.
+  `timeout: 0` обрывает сразу; без `timeout` — ждать сколько нужно. Второй вызов с меньшим
+  `timeout` обрывает раньше. Как `Shutdown(ctx)` + `Close()` в Go. Остановка по сигналу:
+  ```ts
+  process.once("SIGTERM", async () => {
+    await listening.stop({ timeout: 10_000 })
+    process.exit(0)
+  })
+  ```
 - **Кто прислал запрос** — второй аргумент обработчика: `client: { address, port }` (за
   прокси — адрес прокси). Не поле `Request`: `Request` — класс web, его делает и сама
   программа для `fetch`. Так же у Deno, и hono это ждёт: `app.fetch(request, env?)` получает
@@ -89,11 +104,18 @@ const listening = new Server({ port: 3000 }, app.fetch).listen()
 - **Поля вместо геттеров:** `res.status`, `res.statusText` — `readonly`-поля; то, что объект
   меняет сам, — методы: `res.body()`, `res.bodyUsed()`, части `URL` (`url.pathname()`), которые
   меняют методы `url.setPathname(...)` и другие ([objects.md](objects.md), раздел 6).
+- **`url.portNumber(): int | undefined`** (сделано 29 октября) — порт числом; `undefined`, если
+  порта в адресе нет (порт схемы по умолчанию разбор убирает). Разбор порт уже проверил, поэтому
+  ошибки нет и в типе ([style.md](style.md), раздел 1); `fetch` берёт его вместо
+  `parseInt(url.port())`.
 - **Параллельно.** Каждый запрос — async-задача, обработчики идут на всех ядрах. Общие данные
   (счётчик на уровне модуля, кэш в `Map`) — по очереди, как в [async.md](async.md); код
   остаётся таким же, как для node.
-- `node:http` (`createServer((req, res) => …)`) — позже, если понадобится: он держится на
-  `EventEmitter` и потоках node, а express на нём — JS, его всё равно не скомпилировать.
+- **`node:http` нет** (решено 29 октября: «мы вообще его не повторяем»). Сервер — `tz:http`,
+  клиент — `fetch`. Пакеты, написанные под `node:http` (express, koa, fastify, axios, got),
+  переносятся с переделкой на `tz:http` и `fetch` или заменяются своими в их стиле
+  ([decorators.md](decorators.md), раздел 7); express и так не собрался бы: он подменяет
+  прототипы `req` и `res`, а их в tz нет.
 
 ## 2. Клиент: `fetch`
 
@@ -110,6 +132,11 @@ async function repo(name: string) {
 
 - `Request`, `Response`, `Headers`, `URL`, `URLSearchParams`, `FormData` — как в JS. `json()`
   возвращает `Json` ([modules.md](modules.md)).
+- **Полей браузера нет** (решено и сделано 29 октября): то, что вне браузера ничего не делает, не
+  принимается молча, а убрано. В `RequestInit` — только `method`, `headers`, `body`, `redirect`,
+  `timeout`, `duplex`; у `Request` нет `mode`, `credentials`, `cache`, `integrity`, `referrer`,
+  `referrerPolicy`, `keepalive`, `destination`, `isReloadNavigation`, `isHistoryNavigation`.
+  Такое поле — обычная ошибка «has no field …».
 - **`timeout`** вместо `AbortSignal` (решено 28 октября): опция `fetch` и `new Request` в
   миллисекундах, и `request.timeout` — её значение. Время идёт на весь запрос: соединение, TLS,
   отправку тела, голову ответа, редиректы и чтение тела. Не успел — `Err` с кодом
@@ -121,10 +148,45 @@ async function repo(name: string) {
   меньше запросов в секунду (102k вместо 312k).
 - Распаковка gzip, deflate и brotli, переходы по редиректам (до 20), соединения с keep-alive
   держатся в пуле — как в node.
-- **Ошибки — `Result`:** `fetch` отдаёт `Promise<Result<Response, FetchError>>`. `FetchError` —
-  объект с меткой `code`: `ECONNREFUSED`, `ENOTFOUND`, `ETIMEDOUT` ([io.md](io.md)), ошибка
-  сертификата, `TIMEOUT_ERR`, когда вышло время `timeout`; `message` — как в node. Чтение тела (`text()`, `json()`,
-  `bytes()`) — тоже `Promise<Result>`: обрыв связи, тело уже прочитано, плохой JSON.
+- **Прокси** (сделано 29 октября, кроме SOCKS и Digest): из окружения само — `HTTPS_PROXY` для
+  https://, `HTTP_PROXY` для http:// (сначала прописные, потом строчные; при `REQUEST_METHOD` —
+  CGI — `HTTP_PROXY` не читается, защита от httpoxy), `NO_PROXY` (через запятую: имя с
+  поддоменами, `.example.com`, IP, сеть `10.0.0.0/8`, `имя:порт`, `*`); `localhost`,
+  `127.0.0.1`, `::1` — мимо прокси всегда. В коде — `proxy: { enabled: true, url } |
+  { enabled: false }` у `fetch`. http:// — запрос с полным адресом к прокси; https:// —
+  туннель `CONNECT host:port`, потом TLS прямо с сервером (SNI и проверка — сервера); прокси
+  `https://` — сначала TLS до прокси. Логин и пароль в адресе прокси — `Proxy-Authorization:
+  Basic`. Соединения через прокси — в пуле по паре «прокси + сервер», `timeout` считает и
+  прокси. Ошибки — `FetchError` вида `PROXY`: `ERR_INVALID_PROXY_URL`, `ERR_PROXY_AUTH_REQUIRED`
+  (407), `ERR_PROXY_REFUSED` (403, 502…); поля `proxy` (адрес без пароля) и `status`. Прокси не
+  отвечает — `NETWORK` с адресом прокси и словами «the proxy» в тексте. Ещё нет: SOCKS4/5,
+  Digest, прокси через HTTP/2, прокси у WebSocket.
+- **Ошибки — `Result`** (переделано 29 октября): `fetch` отдаёт
+  `Promise<Result<Response, FetchError>>`. `FetchError` — объект с меткой `kind` (что делать
+  программе) и закрытым списком `code`:
+  ```ts
+  type FetchError =
+    | { kind: "REQUEST"; code: "ERR_INVALID_URL" | "ERR_CREDENTIALS_IN_URL" | "ERR_INVALID_METHOD"
+          | "ERR_BODY_WITH_GET" | "ERR_DUPLEX_REQUIRED" | "ERR_REQUEST_USED"
+          | "ERR_UNSUPPORTED_SCHEME" | "ERR_BLOCKED_PORT" | "ERR_STREAM_FAILED";
+        message: string; url: string }                 // чинить код
+    | { kind: "NETWORK"; code: "ENOTFOUND" | "EAI_AGAIN" | "ECONNREFUSED" | "ETIMEDOUT"
+          | "ENETUNREACH" | "EHOSTUNREACH" | "EADDRNOTAVAIL" | "ECONNRESET" | "ECONNABORTED"
+          | "EPIPE" | "EMFILE" | "ENOBUFS" | "UNKNOWN";
+        message: string; errno: int; syscall: string; host: string; port: int }  // можно повторить
+    | { kind: "RESPONSE"; code: "ERR_CLOSED" | "ERR_INVALID_RESPONSE" | "ERR_HEAD_TOO_LARGE";
+        message: string; host: string; port: int }
+    | { kind: "TLS"; code: TlsCode; message: string; host: string }
+    | { kind: "REDIRECT"; code: "ERR_UNEXPECTED_REDIRECT" | "ERR_TOO_MANY_REDIRECTS"
+          | "ERR_INVALID_LOCATION" | "ERR_REDIRECT_WITH_STREAM"; message: string; location: string }
+    | { kind: "TIMEOUT"; code: "TIMEOUT_ERR"; message: string; timeout: int }
+  ```
+  `TlsCode` — коды проверки OpenSSL, как в node, и `ERR_TLS_CERT_ALTNAME_INVALID`,
+  `ERR_TLS_HANDSHAKE`. `message` — что не вышло, где и почему: `could not find the address of
+  api.github.com: no such name in DNS`, `no full answer from api.github.com within 5000 ms`,
+  `the certificate of localhost is self-signed, so it is not trusted; if its root CA is installed
+  on this machine, run with NODE_USE_SYSTEM_CA=1`. Поля `cause` нет. Чтение тела (`text()`,
+  `json()`, `bytes()`) — тоже `Promise<Result>`, ошибка — `BodyError` (раздел 3).
 
 ## 3. Тела запросов и ответов
 
@@ -134,6 +196,26 @@ async function repo(name: string) {
   браузера) или `Response.json(значение)`.
 - `ReadableStream` — основное: создание с `start` / `pull` / `cancel`, `getReader()`,
   `for await`. `TransformStream`, `TextDecoderStream`, `CompressionStream` — позже.
+- **`BodyError`** (29 октября) — ошибка чтения тела:
+  ```ts
+  type BodyError =
+    | { kind: "USED"; code: "ERR_BODY_USED" | "ERR_BODY_LOCKED"; message: string }
+    | { kind: "NETWORK"; code: "ERR_CLOSED" | "ECONNRESET" | "ECONNABORTED" | "ETIMEDOUT"
+          | "ERR_TLS_FAILED" | "UNKNOWN"; message: string }
+    | { kind: "TIMEOUT"; code: "TIMEOUT_ERR"; message: string; timeout: int }
+    | { kind: "TOO_LARGE"; code: "ERR_BODY_TOO_LARGE"; message: string; limit: double }
+    | { kind: "MALFORMED"; code: "ERR_INVALID_CHUNKED" | "ERR_INVALID_COMPRESSION"; message: string }
+    | { kind: "CONTENT"; code: "ERR_INVALID_JSON" | "ERR_NOT_A_FORM" | "ERR_NO_BOUNDARY"
+          | "ERR_INVALID_MULTIPART"; message: string; contentType: string }
+    | { kind: "STREAM"; code: "ERR_STREAM_FAILED"; message: string }
+  ```
+  `json()` — `Result<Json, BodyError>` (не JSON — `CONTENT`, `ERR_INVALID_JSON`). Рантайм
+  различает «оборвалось» (`ERR_CLOSED`) и «кривые куски chunked» (`ERR_INVALID_CHUNKED`): на
+  сервере кривые куски — ещё и ответ 400. Кривая часть multipart не пропускается молча —
+  `ERR_INVALID_MULTIPART`. Один вид `CONTENT` для JSON и форм (в решении было два варианта с
+  одной меткой; объединены, поле `contentType` есть у обоих). Тип ошибки потока самого
+  `ReadableStream` (`ReadableStream<R, E>`) — пока `StreamError`: вывод `E` из
+  `controller.error(...)` не сделан.
 
 ## 4. TLS
 
@@ -176,10 +258,92 @@ tz должен быть не ниже Go: параллельные обрабо
 глобальной переменной), идёт в порядке node через главный поток — 92 000; async-обработчик с
 `await` пока тоже — 85 000 ([async.md](async.md), раздел 8).
 
-## 7. Позже
+## 7. TCP: `node:net` (первая часть сделана 29 октября)
 
-`node:http`, HTTP/2 (через ALPN в TLS), WebSocket (сервер и клиент), `node:net` и `node:dgram`,
-прокси для `fetch`, HTTP/3.
+```ts
+import { Server, Socket } from "node:net"
+
+const echo = new Server({ port: 7000, hostname: "127.0.0.1", idleTimeout: 60_000 }, async socket => {
+  for await (const chunkResult of socket) {           // поток node: Result<Buffer, StreamError>
+    if (chunkResult.isErr()) break
+    socket.write(chunkResult.value)
+  }
+})
+const listeningResult = echo.listen()                  // Result<Listening, ListenError>; stop({ timeout })
+
+const socket = new Socket({ host: "localhost", port: 6379, timeout: 5000, noDelay: true })
+const connectedResult = await socket.connect()         // Result<void, ConnectError>
+socket.write("PING\r\n")
+const endedResult = await socket.end()
+```
+- `Socket` — `Duplex` из `node:stream` над соединением рантайма (то же, что у `fetch` и
+  `tz:http`): чтение — новый вход рантайма `tcpRead`, запись — общий `httpWrite` с
+  ожиданием `drain`. Настройки: `host`, `port`, `timeout` (на подключение), `noDelay`
+  (по умолчанию `true`), `keepAlive`, `transport: { secure: true, servername? }` (TLS сразу);
+  `startTls(servername?)` — STARTTLS посреди соединения. `remoteAddress()`, `remotePort()`,
+  `bytesRead()`, `bytesWritten()`, `reset()` (RST). `connect()` снова после закрытия —
+  переподключение.
+- `ConnectError` — `kind`: `REQUEST` (`ERR_INVALID_HOST`, `ERR_ALREADY_CONNECTED`), `NETWORK`
+  (`ECONNREFUSED`, `ENOTFOUND`…), `TLS`, `TIMEOUT`; тексты — как у `fetch`.
+- `Server` — обработчик `async (socket) => …` на каждое соединение, своей задачей;
+  `idleTimeout` — сколько соединение может молчать; `stop({ timeout })` — как у `tz:http`.
+- `isIP`, `isIPv4`, `isIPv6`.
+- **Ещё не сделано** из решения ([tmp/spec/09-sockets.md](../tmp/spec/09-sockets.md)): слой
+  `tz:socket` (сокет любого вида, сырые сокеты, все настройки), `node:dgram` (UDP), сокеты Unix и
+  именованные каналы (`{ path }`), `SocketError` с метками у потока (сейчас поток отдаёт
+  `StreamError`), обработчик-не-`async`, объявления для редактора (`patch.cmake`).
+
+## 8. Пакеты: `tz:packet` (сделано 29 октября)
+
+Сборка и разбор заголовков на tz над `Uint8Array`, без особых прав: `parseEthernet`,
+`parseArp`, `parseIpv4` (проверяет контрольную сумму), `parseIpv6`, `parseUdp`, `parseTcp`
+(флаги `TCP_SYN`, `TCP_ACK`…), `parseIcmp` (проверяет сумму); `buildIpv4`, `buildUdp` (сумма с
+псевдозаголовком), `buildIcmpEcho`; `checksum(bytes, initial?)`, `transportChecksum(source,
+destination, protocol, segment)`. Ошибки — `Result` с `PacketError`: `kind: "PACKET"`,
+`ERR_TRUNCATED`, `ERR_INVALID_HEADER`, `ERR_INVALID_CHECKSUM`, поле `offset`. Отправлять пакеты
+нечем, пока нет сырых сокетов `tz:socket` (ping, traceroute — потом).
+
+## 9. WebSocket (первая часть сделана 29 октября)
+
+```ts
+// Клиент: один объект, конструктор — настройки, connect() — Result.
+const socket = new WebSocket({ url: "ws://127.0.0.1:3000/chat", protocols: ["chat"] })
+socket.on("message", data => { ... })          // data: string | Uint8Array
+socket.on("close", (code, reason) => { ... })
+socket.on("error", error => { ... })           // WebSocketError; без слушателя — ошибка сборки
+const connectedResult = await socket.connect()  // Result<void, WebSocketConnectError>
+const sentResult = socket.send("hello")         // Result<void, SendError>
+await socket.close(1000, "bye")
+
+// Сервер — как Deno, upgradeWebSocket из tz:http.
+new Server({ port: 3000 }, request => {
+  const upgradeResult = upgradeWebSocket(request, { protocol: "chat" })
+  if (upgradeResult.isErr()) return new Response(upgradeResult.error.message, { status: 426 })
+  const peer = upgradeResult.value.socket       // подключится, когда обработчик вернёт ответ
+  peer.on("message", data => { ... })
+  return upgradeResult.value.response           // 101
+})
+```
+- Кадры, маска, фрагменты, ping / pong, закрытие с кодом и причиной, проверка UTF-8 текста,
+  `maxMessageSize` (16 МБ) — на tz (`library/http/websocket.tz`); рукопожатие — свой SHA-1 на tz
+  (без OpenSSL); ввод-вывод — `tcpRead` / `httpWrite` рантайма, случайные байты маски —
+  `wsRandom` (`rand_s`). `wss:` — тем же TLS, что у `fetch`.
+- События — EventEmitter (`"message"`, `"close"`, `"error"`), `"open"` нет; `connect()` снова
+  после `"close"` — переподключение, у серверного сокета — `Err` `ERR_ALREADY_CONNECTED`.
+- Ошибки: `WebSocketConnectError` — `REQUEST` (`ERR_INVALID_URL`, `ERR_UNSUPPORTED_SCHEME`,
+  `ERR_ALREADY_CONNECTED`), `NETWORK`, `TIMEOUT`, `REFUSED` (`ERR_NOT_UPGRADED`, `status`);
+  `WebSocketError` (`"error"`) — `NETWORK` (`ERR_CLOSED` — оборвалось без кадра закрытия),
+  `PROTOCOL` (`ERR_INVALID_FRAME`, `ERR_INVALID_UTF8`, `ERR_UNMASKED_FRAME`), `TOO_LARGE`;
+  `SendError` — `NOT_CONNECTED` (`ERR_NOT_CONNECTED`, `ERR_CLOSING`); `UpgradeError` —
+  `ERR_NOT_WEBSOCKET`, `ERR_UNSUPPORTED_VERSION`.
+- **Ещё не сделано** из решения ([tmp/spec/10-websocket.md](../tmp/spec/10-websocket.md)):
+  `timeout` и `idleTimeout`, пинги рантайма, тип `CloseCode` (сейчас `close(code: int)`),
+  `bufferedAmount()`, прокси и `httpVersion`, WebSocket поверх HTTP/2, `TLS` и `PROXY` в
+  ошибках подключения, объявления для редактора.
+
+## 10. Позже
+
+HTTP/2 (через ALPN в TLS), `node:dgram`, SOCKS-прокси, HTTP/3 — решены 29 октября, не сделаны (`tmp/design`, `tmp/spec`). `node:http` не будет.
 
 ## План реализации
 

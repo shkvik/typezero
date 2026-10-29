@@ -1,8 +1,8 @@
 201  Headers { 'x-y': 'z', 'content-type': 'text/plain;charset=UTF-8' } true false true false default 
-POST http://example.com/x Headers { 'content-type': 'text/plain;charset=UTF-8' }  about:client  cors same-origin default follow  false false false undefined true
+POST http://example.com/x Headers { 'content-type': 'text/plain;charset=UTF-8' } follow undefined true
 false
 hi true
-body_used Body is unusable: Body has already been read
+ERR_BODY_USED the body is already read: text(), json(), bytes(), formData() and body() read it once
 202 application/json Ok { value: { a: [ 1, 2 ] } }
 307 http://x.com/a
 0 error false

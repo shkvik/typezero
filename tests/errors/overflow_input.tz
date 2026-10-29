@@ -1,18 +1,18 @@
 // An operation of integers that may not fit its type is an error
-// (docs/numbers.md, section 2): a value from outside (input, parseInt, JSON)
+// (docs/numbers.md, section 2): a value from outside (input, parseInt)
 // or a counter that grows in a loop without a bound may make it too large.
 // The message says where the value comes from and how to fix it.
 import { readLine } from "tz:io"
 
 const text = readLine() ?? "[1, 2, 3]"
-const parsed = JSON.parse<int[]>(text)
-if (parsed.isErr()) process.exit(1)
-const prices = parsed.value
+const parsed = text.split(",").map(s => parseInt(s).unwrapOr(0))
+if (parsed.length == 0) process.exit(1)
+const prices = parsed
 let sum = 0
-// expect-error: 'sum += p' may overflow int: 'p' comes from JSON on line 8; check the values before, or count in a decimal: 'let sum: decimal = 0' and add 'x.toDecimal()'
+// expect-error: 'sum += p' may overflow int: 'p' comes from parseInt on line 8; check the values before, or count in a decimal: 'let sum: decimal = 0' and add 'x.toDecimal()'
 for (const p of prices) sum += p
 let wide: int = 0
-// expect-error: 'wide += p' may overflow int: 'p' comes from JSON on line 8; check the values before, or count 'wide' in a 'decimal'
+// expect-error: 'wide += p' may overflow int: 'p' comes from parseInt on line 8; check the values before, or count 'wide' in a 'decimal'
 for (const p of prices) wide += p
 
 const seconds: int = parseInt(readLine() ?? "90").unwrapOr(0)
@@ -35,13 +35,13 @@ let unsafe = 7
 for (const c of text) unsafe = unsafe * 31 + c.length
 
 // Callbacks run where they are passed: reduce adds up the elements.
-// expect-error: 'total + p' may overflow int: 'p' comes from JSON on line 8
+// expect-error: 'total + p' may overflow int: 'p' comes from parseInt on line 8
 console.log(prices.reduce((total, p) => total + p, 0))
 
-// Fields filled from JSON come from outside too.
+// Fields filled from input come from outside too.
 type Order = { id: int; count: int }
-const order = JSON.parse<Order>('{"id": 7, "count": 3}').unwrapOr({ id: 0, count: 0 })
-// expect-error: 'order.count * 1000' may overflow int: 'order.count' comes from JSON on line 43
+const order: Order = { id: 7, count: parseInt(readLine() ?? "3").unwrapOr(0) }
+// expect-error: 'order.count * 1000' may overflow int: 'order.count' comes from parseInt on line 43
 console.log(order.count * 1000, order.id)
 
 // In an async function too: an await is a point where other code runs,

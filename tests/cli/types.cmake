@@ -39,11 +39,13 @@ console.log(total, total.toFixed(1), total.round(0, "half-even"), decimal("0.1")
 console.log(decimal.max(price, total), big)
 
 // JSON.
-type Config = { port: double; tags: string[] }
-const config = JSON.parse<Config>(embedText("./config.json"))
+const parsed = JSON.parse(embedText("./config.json"))
 const loose = JSON.parse("[1, 2]").unwrapOr(null)
-const json: Json = embedJson("./config.json")
-if (config.isOk()) console.log(config.value.port, config.value.tags, loose[1], fromJson<Config>(json).map(c => c.port).unwrapOr(0), embedBytes("./note.txt").length)
+if (parsed.isOk()) {
+  const data = parsed.value
+  if (typeof data == "object" && data != null && !Array.isArray(data) && typeof data.port == "number" && Array.isArray(data.tags))
+    console.log(data.port, data.tags, Array.isArray(loose) ? loose[1] : 0, data.port, embedBytes("./note.txt").length)
+}
 
 // Results.
 function half(x: int): Result<int, string> {

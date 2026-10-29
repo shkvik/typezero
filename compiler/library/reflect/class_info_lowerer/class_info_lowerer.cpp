@@ -156,12 +156,13 @@ void ClassInfoLowerer::emitConstructThunk(const ClassDecl *cls, llvm::Function *
   }
   if (none) {
     lowering_.functionFrame().switchTo(none);
-    lowering_.reflectArgsLowerer().emitReflectFail(
-        "no_variant", what + ": no constructor of " + className(cls) + " takes these arguments");
+    lowering_.reflectArgsLowerer().emitReflectFail("ERR_NO_VARIANT", what + ": no constructor of " +
+                                                                         className(cls) +
+                                                                         " takes these arguments");
     fail();
     lowering_.functionFrame().switchTo(several);
     lowering_.reflectArgsLowerer().emitReflectFail(
-        "several_variants",
+        "ERR_SEVERAL_VARIANTS",
         what + ": the arguments fit several constructors of " + className(cls) + " equally well");
     fail();
   }
@@ -225,8 +226,9 @@ llvm::Constant *ClassInfoLowerer::reflectAdapterInfo(const FunctionDecl *fn, con
   lowering_.builder_.CreateCondBr(matches, callBlock, failBlock);
   lowering_.builder_.SetInsertPoint(failBlock);
   lowering_.reflectArgsLowerer().emitReflectFail(
-      "bad_this", className(cls) + "." + fn->name.str() +
-                      " was called with a 'this' that is not an instance of " + className(cls));
+      "ERR_INVALID_THIS", className(cls) + "." + fn->name.str() +
+                              " was called with a 'this' that is not an instance of " +
+                              className(cls));
   for (size_t i = 1; i < params.size(); ++i) {
     lowering_.refCounts().releaseValue(adapter->getArg(unsigned(i + 1)), params[i]);
   }

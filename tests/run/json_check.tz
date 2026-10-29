@@ -1,0 +1,51 @@
+// same-as-node
+// JSON without special rights (docs/narrowing.md, section 3): JSON.parse
+// gives a Json, a function of the program checks what it holds, the facts
+// of the check reach the code after it — in the true branch and after an
+// early return — and the object of the program is made with a literal. The
+// fields of a Json narrow as a variable does, nested ones and arrays too.
+type User = { name: string; age: double; tags: string[] }
+
+function isUserJson(data: Json): boolean {
+  return typeof data == "object" && data != null && typeof data.name == "string" &&
+    typeof data.age == "number" && Array.isArray(data.tags)
+}
+
+function parseUser(text: string): Result<User, string> {
+  const parsedResult = JSON.parse(text)
+  if (parsedResult.isErr()) {
+    return err(parsedResult.error.code)
+  }
+
+  const data = parsedResult.value
+  if (!isUserJson(data)) {
+    return err("not a user")
+  }
+  const tags: string[] = []
+  for (const tag of data.tags) {
+    if (typeof tag == "string") {
+      tags.push(tag)
+    }
+  }
+  const user: User = { name: data.name, age: data.age, tags: tags }
+
+  return ok(user)
+}
+
+for (const text of ['{"name":"Ann","age":30,"tags":["a",1,"b"]}', '{"name":5}', "null", "{"]) {
+  const user = parseUser(text)
+  if (user.isOk()) console.log(user.value, user.value.name.length, user.value.age)
+  else console.log("error:", user.error)
+}
+
+const nested = JSON.parse('{"owner":{"name":"Bob","pets":["cat"]},"count":2}')
+if (nested.isOk()) {
+  const d = nested.value
+  if (typeof d == "object" && d != null && typeof d.owner == "object" && d.owner != null &&
+      typeof d.owner.name == "string" && Array.isArray(d.owner.pets)) {
+    console.log(d.owner.name.toUpperCase(), d.owner.pets.length)
+  }
+  if (typeof d == "object" && d != null && typeof d.count == "number") console.log(d.count)
+  if (typeof d == "object" && d != null && typeof d.count != "number") console.log("never")
+  else console.log("count is a number")
+}

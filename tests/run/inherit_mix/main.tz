@@ -43,7 +43,8 @@ const counters: Counter[] = [new Counter(), new Backwards()]
 for (const c of counters) console.log([...c.steps(3)], [...c.steps("ab")])
 
 console.log(JSON.stringify(shapes[0]), JSON.stringify(new Circle(2)))
-const named = must(JSON.parse<Named>('{"name": "from json", "extra": 1}'))
+const namedJson = must(JSON.parse('{"name": "from json", "extra": 1}'))
+const named: Named = { name: typeof namedJson.name == "string" ? namedJson.name : "" }
 const asNamed: Named = new Circle(3)
 console.log(named, asNamed.name)
 

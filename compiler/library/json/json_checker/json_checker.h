@@ -20,6 +20,9 @@ public:
   Expr *checkNullEquality(BinaryExpr *bin);
   Expr *checkJsonEquality(BinaryExpr *bin);
   void addJsonFacts(const Expr *cond, Checker::Flow &whenTrue, Checker::Flow &whenFalse) const;
+  std::optional<Checker::FieldPath> jsonField(const Expr *expr) const;
+  static void narrowJsonField(Checker::Flow &flow, const Checker::FieldPath &path,
+                              const Type *type);
   Expr *checkArrayIsArray(CallExpr *call, MemberExpr *member);
 
 private:

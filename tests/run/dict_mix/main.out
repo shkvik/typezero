@@ -25,7 +25,4 @@ Ledger {
 Map(3) { 'a' => 10, 'b' => 20, 'c' => 30 } Set(2) { 'b', 'c' } 60
 name too long: abcd
 1
-{ a: 1, b: 2 } 3
-bad_field b expected int, got string
-bad_field  expected Record<string, int>, got array
 Map(2) { '.ts' => [ 'a.ts', 'b.ts' ], '.md' => [ 'c.md' ] } a:a.ts,b:b.ts,c:c.md

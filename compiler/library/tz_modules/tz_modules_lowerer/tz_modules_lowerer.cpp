@@ -66,6 +66,11 @@ void TzModulesLowerer::emitExternal(FunctionDecl *fn) {
     } else if (type->isBool()) {
       params.push_back(i32);
       args.push_back(lowering_.builder_.CreateZExt(value, i32));
+    } else if (type->isFunction()) {
+      params.push_back(ptr);
+      params.push_back(ptr);
+      args.push_back(lowering_.builder_.CreateExtractValue(value, 0));
+      args.push_back(lowering_.builder_.CreateExtractValue(value, 1));
     } else {
       params.push_back(value->getType());
       args.push_back(value);

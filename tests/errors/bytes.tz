@@ -119,8 +119,6 @@ function traps(u: Uint8Array, b: Buffer, buffer: ArrayBuffer, x: int) {
   const checked: FatalTextDecoder = new TextDecoder("utf-8", { fatal: true })
   // expect-error: 'SharedArrayBuffer' is not supported yet
   const shared: SharedArrayBuffer | undefined = undefined
-  // expect-error: JSON has no binary data
-  console.log(JSON.parse<Uint8Array>("{}"))
   // expect-error: an ArrayBuffer that can change its size is not supported yet
   console.log(new ArrayBuffer(4, { maxByteLength: 8 }))
 }

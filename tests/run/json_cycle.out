@@ -1,6 +1,6 @@
 Ok { value: '{"name":"a","next":{"name":"b"}}' }
-circular Converting circular structure to JSON
+ERR_CIRCULAR_STRUCTURE Converting circular structure to JSON
 {"list":[1,2]}
-circular
+ERR_CIRCULAR_STRUCTURE
 {"list":[1,2],"self":null}
 {"at":{"x":1,"y":2},"tags":["x"]}

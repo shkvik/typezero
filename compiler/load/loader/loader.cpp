@@ -89,6 +89,7 @@ Module *Loader::parse(const std::string &filePath, const std::string &realPath, 
   module->file = Parser(lexer, ctx_, diags_).parseSourceFile();
   library().importLibraryGlobals(module, text);
   library().importFsStreams(module, text);
+  library().importProcessSignals(module, text);
   loadDeclarations(module, filePath, false);
   byRealPath_[realPath] = module;
   realPaths_[module] = realPath;

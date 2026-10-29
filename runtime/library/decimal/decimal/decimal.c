@@ -1825,7 +1825,7 @@ TZ_COLD static void not_decimal(TzMaker make, TzStr given, const uint16_t *s, si
   tz_buf_init(&text);
   tz_buf_utf8(&text, message, strlen(message));
   DecimalFailure parts;
-  parts.code = "bad_decimal";
+  parts.code = "ERR_INVALID_DECIMAL";
   parts.message = tz_buf_take(&text);
   tz_str_retain_value(given);
   parts.text = given;

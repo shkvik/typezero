@@ -1,21 +1,21 @@
 new Point { x: 3, y: 4 }
-construct bad_argument: new Point: argument 2: expected int, got 2.5
-construct bad_arity: new Point: expected 2 arguments, got 1
-construct bad_arity: new Point: expected 2 arguments, got 3
-construct bad_argument: new Point: argument 1: expected int, got a string
+construct ERR_INVALID_ARGUMENT: new Point: argument 2: expected int, got 2.5
+construct ERR_INVALID_ARITY: new Point: expected 2 arguments, got 1
+construct ERR_INVALID_ARITY: new Point: expected 2 arguments, got 3
+construct ERR_INVALID_ARGUMENT: new Point: argument 1: expected int, got a string
 new Label { text: 'here', at: Point { x: 1, y: 2 } }
-construct bad_argument: new Label: argument 2: expected Point, got an object of class Label
+construct ERR_INVALID_ARGUMENT: new Label: argument 2: expected Point, got an object of class Label
 apply Point { x: 4, y: 2 }
 apply Point { x: 7, y: 6 }
-apply bad_arity: Reflect.apply: expected 1 to 2 arguments, got 0
-apply bad_argument: Reflect.apply: argument 1: expected int, got true
-apply bad_this: Point.move was called with a 'this' that is not an instance of Point
+apply ERR_INVALID_ARITY: Reflect.apply: expected 1 to 2 arguments, got 0
+apply ERR_INVALID_ARGUMENT: Reflect.apply: argument 1: expected int, got true
+apply ERR_INVALID_THIS: Point.move was called with a 'this' that is not an instance of Point
 apply 21, 18
-apply bad_argument: Reflect.apply: argument 2: expected double, got a string
-apply not_function: Function.prototype.apply was called on 5, which is not a function
-apply not_function: Function.prototype.apply was called on 7, which is not a function
+apply ERR_INVALID_ARGUMENT: Reflect.apply: argument 2: expected double, got a string
+apply ERR_NOT_FUNCTION: Function.prototype.apply was called on 5, which is not a function
+apply ERR_NOT_FUNCTION: Function.prototype.apply was called on 7, which is not a function
 construct 9
-construct abstract: class Shape is abstract and cannot be made
+construct ERR_ABSTRACT_CLASS: class Shape is abstract and cannot be made
 get 7
 get undefined undefined
 get Point

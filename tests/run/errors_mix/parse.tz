@@ -1,5 +1,6 @@
 // Reading the input: regexes made when the program runs, decimal(s) and
-// JSON.parse<T>, whose errors become errors of the program in a Result.
+// JSON.parse with a check of its own, whose errors become errors of the
+// program in a Result.
 import { ConfigError, ParseError } from "./errors.tz"
 
 export type Entry = { name: string; amount: decimal; tags: string[] }
@@ -23,10 +24,22 @@ export function parseLine(line: string, n: int, separator: string): Result<Entry
 
 export type Config = { limit: decimal; rules: string[]; owner?: { name: string } }
 
+function isConfigJson(data: Json): boolean {
+  return typeof data == "object" && typeof data.limit == "number" && Array.isArray(data.rules)
+}
+
 export function loadConfig(text: string): Result<Config, ConfigError> {
-  const config = JSON.parse<Config>(text)
-  if (config.isErr()) return err({ code: "bad_config", message: "bad config", cause: config.error })
-  return ok(config.value)
+  const parsedResult = JSON.parse(text)
+  if (parsedResult.isErr())
+    return err({ code: "bad_config", message: "bad config", cause: parsedResult.error.message })
+  const data = parsedResult.value
+  if (!isConfigJson(data)) return err({ code: "bad_config", message: "bad config", cause: "not a config" })
+  const rules: string[] = []
+  for (const rule of data.rules) if (typeof rule == "string") rules.push(rule)
+  const limit = decimal(String(data.limit))
+  if (limit.isErr()) return err({ code: "bad_config", message: "bad config", cause: limit.error.message })
+  const config: Config = { limit: limit.value, rules: rules }
+  return ok(config)
 }
 
 // Reading a Json by hand: a key of null is undefined.

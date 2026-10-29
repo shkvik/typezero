@@ -87,11 +87,23 @@ export class Server {
 }
 
 class Listening {
-  stop() {
+  stop(options) {
     if (!this.stopping) {
       this.stopping = true;
       this.server.close(() => this.resolve());
       this.server.closeIdleConnections();
+    }
+    const timeout = options?.timeout;
+    if (timeout != undefined) {
+      const cut = () => {
+        this.server.closeAllConnections();
+        this.resolve();
+      };
+      if (timeout <= 0) cut();
+      else {
+        const timer = setTimeout(cut, timeout);
+        this.finished.then(() => clearTimeout(timer));
+      }
     }
     return this.finished;
   }

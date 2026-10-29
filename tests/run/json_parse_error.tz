@@ -5,4 +5,5 @@ console.log(JSON.parse('{"ok": [1, 2]}'))
 const text = '{\n  "a": 1\n  "b": 2\n}'
 const r = JSON.parse(text)
 if (r.isErr()) console.log(r.error)
-console.log(JSON.parse("").match((j) => "parsed", (e) => `${e.code}: ${e.message}`))
+const empty = process.argv[9] ?? ""
+console.log(JSON.parse(empty).match((j) => "parsed", (e) => `${e.code}: ${e.message}`))

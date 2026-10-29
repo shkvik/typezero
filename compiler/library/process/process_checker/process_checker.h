@@ -18,6 +18,8 @@ public:
                     const Type *type);
 
 private:
+  Expr *checkSignalCall(CallExpr *call, MemberExpr *member);
+
   Checker &checker_;
 };
 

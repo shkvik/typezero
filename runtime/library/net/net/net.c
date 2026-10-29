@@ -947,6 +947,10 @@ static void sweep_fired(TzObject *env) {
   double now = net_now();
   for (NetConn *c = l->conns; c; c = c->next) {
     conn_lock(c);
+    if (!c->closed && c->busy && l->request_timeout > 0 && c->http.request_since > 0 &&
+        !c->http.body_done && now - c->http.request_since >= l->request_timeout) {
+      tz_http_request_too_slow(c);
+    }
     if (!c->closed && !c->busy && !c->writing) {
       if (c->http.head_since > 0) {
         if (l->headers_timeout > 0 && now - c->http.head_since >= l->headers_timeout) {
@@ -970,10 +974,13 @@ static void start_sweep(NetListener *l) {
   if (l->headers_timeout > 0 && l->headers_timeout < every) {
     every = l->headers_timeout;
   }
+  if (l->request_timeout > 0 && l->request_timeout < every) {
+    every = l->request_timeout;
+  }
   if (every < 10) {
     every = 10;
   }
-  if (l->keep_alive <= 0 && l->headers_timeout <= 0) {
+  if (l->keep_alive <= 0 && l->headers_timeout <= 0 && l->request_timeout <= 0) {
     return;
   }
   Sweep *sweep = (Sweep *)tz_obj_alloc(sizeof(Sweep));
@@ -985,7 +992,8 @@ static void start_sweep(NetListener *l) {
 }
 
 void *tz_net_listen(void *host_obj, uint64_t host_meta, int64_t port, double max_body,
-                    int64_t keep_alive, int64_t headers_timeout, TzMaker make) {
+                    int64_t keep_alive, int64_t headers_timeout, int64_t request_timeout,
+                    TzMaker make) {
   TZ_ORDERED();
   start();
   tz_net_make = make;
@@ -1061,6 +1069,7 @@ void *tz_net_listen(void *host_obj, uint64_t host_meta, int64_t port, double max
   l->max_body = max_body;
   l->keep_alive = (double)keep_alive;
   l->headers_timeout = (double)headers_timeout;
+  l->request_timeout = (double)request_timeout;
   memcpy(l->host, host, strlen(host) + 1);
   SOCKADDR_STORAGE bound;
   int bound_length = sizeof bound;
@@ -1210,6 +1219,7 @@ static void accepted(NetListener *l, int32_t error) {
   }
   l->conns = c;
   c->http.max_body = l->max_body;
+  c->http.request_timeout = l->request_timeout;
   if (l->tls) {
     l->tls_accept(l, c);
   }
@@ -1236,7 +1246,7 @@ void tz_net_drained(TzPromise *p, void *listener, TzMaker make) {
     net_fulfill(&old, NULL, 0);
   }
   l->drained = p;
-  if (l->closed && !l->conns) {
+  if (l->closed && (!l->conns || l->aborted)) {
     net_fulfill(&l->drained, NULL, 0);
   }
 }
@@ -1254,6 +1264,26 @@ void tz_net_close_listener(void *listener, TzMaker make) {
       net_abort(c);
     }
     conn_unlock(c);
+  }
+}
+
+void tz_net_abort_all(void *listener, TzMaker make) {
+  TZ_ORDERED();
+  (void)make;
+  NetListener *l = (NetListener *)listener;
+  listener_close(l);
+  l->aborted = 1;
+  for (NetConn *c = l->conns; c; c = c->next) {
+    conn_lock(c);
+    c->http.ending = 1;
+    c->http.keep_alive = 0;
+    if (!c->closed) {
+      net_abort(c);
+    }
+    conn_unlock(c);
+  }
+  if (l->drained) {
+    net_fulfill(&l->drained, NULL, 0);
   }
 }
 
@@ -1582,13 +1612,15 @@ void tz_net_close(void *conn, TzMaker make) {
   (void)make;
 }
 void *tz_net_listen(void *host_obj, uint64_t host_meta, int64_t port, double max_body,
-                    int64_t keep_alive, int64_t headers_timeout, TzMaker make) {
+                    int64_t keep_alive, int64_t headers_timeout, int64_t request_timeout,
+                    TzMaker make) {
   (void)host_obj;
   (void)host_meta;
   (void)port;
   (void)max_body;
   (void)keep_alive;
   (void)headers_timeout;
+  (void)request_timeout;
   (void)make;
   unsupported();
 
@@ -1626,6 +1658,11 @@ void tz_net_accept(TzPromise *p, void *listener, TzMaker make) {
   unsupported();
 }
 void tz_net_close_listener(void *listener, TzMaker make) {
+  TZ_ORDERED();
+  (void)listener;
+  (void)make;
+}
+void tz_net_abort_all(void *listener, TzMaker make) {
   TZ_ORDERED();
   (void)listener;
   (void)make;

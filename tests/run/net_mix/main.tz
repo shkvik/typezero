@@ -48,7 +48,7 @@ else console.log(slow.status, "timed out:", slowText.error.code)
 console.log((must(await fetch(`${base}/nope`))).status, handlers.served)
 await listening.stop()
 const after = await fetch(`${base}/hello`)
-if (after.isErr()) console.log("after stop:", after.error.message)
+if (after.isErr()) console.log("after stop:", after.error.kind, after.error.code)
 
 function must<T, E>(r: Result<T, E>): T {
   if (r.isErr()) {

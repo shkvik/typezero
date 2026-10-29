@@ -96,8 +96,8 @@ Stmt *ModuleParser::parseImport(bool topLevel) {
       (parser_.tok_.text == "with" || parser_.tok_.text == "assert") &&
       !parser_.tok_.newlineBefore) {
     parser_.cursor().report(parser_.tok_.loc(),
-                            "import attributes are not supported; data files will be embedded with "
-                            "embedJson and embedText");
+                            "import attributes are not supported; a data file is embedded with "
+                            "embedText");
     parser_.cursor().advance();
     if (parser_.tok_.is(Tok::LBrace)) {
       parser_.cursor().advance();

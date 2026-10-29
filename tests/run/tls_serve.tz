@@ -65,7 +65,7 @@ const all = await Promise.all(
 console.log(all.join(" | "))
 
 const plain = await fetch(`http://localhost:${port}/hello`)
-console.log("http to https:", plain.isOk() ? "answered" : plain.error.message)
+console.log("http to https:", plain.isOk() ? "answered" : `${plain.error.kind} ${plain.error.code}`)
 await listening.stop()
 
 function must<T, E>(r: Result<T, E>): T {

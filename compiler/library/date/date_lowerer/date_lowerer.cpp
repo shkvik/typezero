@@ -145,7 +145,7 @@ llvm::Value *DateLowerer::parseResult(llvm::Value *time, llvm::Value *text, Call
   llvm::StructType *partsType = llvm::StructType::get(
       lowering_.ctx_, {lowering_.builder_.getPtrTy(), lowering_.strTy_, lowering_.strTy_});
   llvm::Value *parts = lowering_.functionFrame().createStackSlot(partsType, "date.error");
-  lowering_.builder_.CreateStore(lowering_.stringLowerer().utf8Constant("bad_date"),
+  lowering_.builder_.CreateStore(lowering_.stringLowerer().utf8Constant("ERR_INVALID_DATE"),
                                  lowering_.builder_.CreateStructGEP(partsType, parts, 0));
   lowering_.builder_.CreateStore(lowering_.stringLowerer().stringLiteral(u"Invalid Date"),
                                  lowering_.builder_.CreateStructGEP(partsType, parts, 1));

@@ -8,7 +8,7 @@ Err Err 0 2.5 Err 0
 Err Err Err Err Err
 Err Err Err Err Err Err Err
 0.5 5 Err 1000 1 0 7 0
-bad_number 17
+ERR_INVALID_NUMBER 17
 true false true
 false true false 1.5 8
 9007199254740991 -9007199254740991 2.220446049250313e-16 1.7976931348623157e+308 5e-324

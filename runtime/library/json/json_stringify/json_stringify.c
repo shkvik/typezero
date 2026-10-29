@@ -41,7 +41,7 @@ static void enter(Writer *w, const void *container) {
       TzBuf b;
       tz_buf_init(&b);
       tz_buf_ascii(&b, "Converting circular structure to JSON");
-      tz_json_fail("circular", &b, NULL);
+      tz_json_fail("ERR_CIRCULAR_STRUCTURE", &b, NULL);
       __builtin_longjmp(w->fail, 1);
     }
   }

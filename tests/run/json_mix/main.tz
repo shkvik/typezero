@@ -1,6 +1,6 @@
 // Json together with the rest of the language: a Json in a class field from
-// another file, JSON.parse<T> into a type with decimal fields inside a
-// Result, Json as a generic value and inside Results, iterator helpers over a
+// another file, settings with decimal fields made from a checked Json inside
+// a Result, Json as a generic value and inside Results, iterator helpers over a
 // Json[], regexes on strings a Json holds once a check shows they are
 // strings, and JSON.stringify of regexes, matches, iterators, classes,
 // decimals and Results.
@@ -20,7 +20,7 @@ const users = store.data.users
 if (users != undefined && Array.isArray(users))
   console.log(countKinds(users, u => (u == null ? "null" : typeof u)), users.length)
 
-// JSON.parse<T> and fromJson<T> into a declared type, as a Result.
+// A Json checked by a function and made into a declared type, as a Result.
 const settings = readSettings('{"name": "shop", "limit": 3, "price": 19.99, "tags": ["a", "b"]}')
 console.log(settings, settings.map(s => s.price * s.limit.toDecimal()))
 console.log(readSettings("[1, 2]"), JSON.stringify(settings))

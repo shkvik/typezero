@@ -124,7 +124,8 @@ function fromNode() {
     Number.isFinite(value)
       ? new Ok(value)
       : new Err({
-          code: "bad_number",
+          kind: "NUMBER",
+          code: "ERR_INVALID_NUMBER",
           message: value !== value ? "the bytes hold NaN, which a tz double cannot be"
                                    : "the bytes hold an infinity, which a tz double cannot be",
         });
@@ -171,9 +172,9 @@ function fromNode() {
   const plainParseInt = parseInt;
   const plainParseFloat = parseFloat;
   const numberResult = (value, text, integer) => {
-    if (Number.isNaN(value)) return new Err({ code: "bad_number", message: `not a number: '${text}'` });
+    if (Number.isNaN(value)) return new Err({ kind: "NUMBER", code: "ERR_INVALID_NUMBER", message: `not a number: '${text}'` });
     if (!Number.isFinite(value) || (integer && Math.abs(value) >= 2 ** 63)) {
-      return new Err({ code: "bad_number", message: `the number is out of range: '${text}'` });
+      return new Err({ kind: "NUMBER", code: "ERR_INVALID_NUMBER", message: `the number is out of range: '${text}'` });
     }
     return new Ok(value);
   };
@@ -245,36 +246,36 @@ JSON.parse = (text) => {
   try {
     return new Ok(parseJson(text));
   } catch (e) {
-    return new Err({ code: "bad_json", message: e.message, path: "" });
+    return new Err({ kind: "JSON", code: "ERR_INVALID_JSON", message: e.message, path: "" });
   }
 };
 
-function resulting(f, code) {
+function resulting(f, kind, code) {
   return (text) => {
     try {
       return new Ok(f(text));
     } catch (e) {
-      return new Err({ code, message: e.message });
+      return new Err({ kind, code, message: e.message });
     }
   };
 }
-globalThis.decodeURIComponent = resulting(decodeURIComponent, "bad_uri");
-globalThis.decodeURI = resulting(decodeURI, "bad_uri");
+globalThis.decodeURIComponent = resulting(decodeURIComponent, "URI", "ERR_INVALID_URI");
+globalThis.decodeURI = resulting(decodeURI, "URI", "ERR_INVALID_URI");
 const parseDate = Date.parse;
 Date.parse = (text) => {
   const ms = parseDate(text);
-  return Number.isNaN(ms) ? new Err({ code: "bad_date", message: "Invalid Date", text }) : new Ok(ms);
+  return Number.isNaN(ms) ? new Err({ kind: "DATE", code: "ERR_INVALID_DATE", message: "Invalid Date", text }) : new Ok(ms);
 };
 const parseUrl = URL.parse;
 URL.parse = (input, base) => {
   const url = parseUrl(input, base);
-  return url ? new Ok(url) : new Err({ code: "bad_url", message: "Invalid URL", input });
+  return url ? new Ok(url) : new Err({ kind: "URL", code: "ERR_INVALID_URL", message: "Invalid URL", input });
 };
 RegExp.parse = (pattern, flags) => {
   try {
     return new Ok(new RegExp(pattern, flags));
   } catch (e) {
-    return new Err({ code: "bad_regex", message: e.message });
+    return new Err({ kind: "REGEX", code: "ERR_INVALID_REGEX", message: e.message });
   }
 };
 globalThis.TextDecoder = class TextDecoder extends globalThis.TextDecoder {
@@ -298,7 +299,7 @@ Intl.Locale.parse = (tag) => {
   try {
     return new Ok(new Intl.Locale(tag));
   } catch (e) {
-    return new Err({ code: "bad_locale", message: e.message, tag });
+    return new Err({ kind: "LOCALE", code: "ERR_INVALID_LOCALE", message: e.message, tag });
   }
 };
 
@@ -374,34 +375,198 @@ for (const name of ["digest", "generateKey", "importKey", "exportKey", "sign", "
 }
 
 // fetch and the bodies of Request and Response give a Result in tz
-// (docs/net.md, section 2), and the timeout of a fetch is the signal of
+// (docs/net.md, section 2), with errors of a kind and a code and tz's texts,
+// built here from what node throws; the timeout of a fetch is the signal of
 // AbortSignal.timeout() in node.
+const tlsCodes = new Set([
+  "UNABLE_TO_GET_ISSUER_CERT", "UNABLE_TO_GET_CRL", "UNABLE_TO_DECRYPT_CERT_SIGNATURE",
+  "UNABLE_TO_DECRYPT_CRL_SIGNATURE", "UNABLE_TO_DECODE_ISSUER_PUBLIC_KEY",
+  "CERT_SIGNATURE_FAILURE", "CRL_SIGNATURE_FAILURE", "CERT_NOT_YET_VALID", "CERT_HAS_EXPIRED",
+  "CRL_NOT_YET_VALID", "CRL_HAS_EXPIRED", "ERROR_IN_CERT_NOT_BEFORE_FIELD",
+  "ERROR_IN_CERT_NOT_AFTER_FIELD", "ERROR_IN_CRL_LAST_UPDATE_FIELD",
+  "ERROR_IN_CRL_NEXT_UPDATE_FIELD", "OUT_OF_MEM", "DEPTH_ZERO_SELF_SIGNED_CERT",
+  "SELF_SIGNED_CERT_IN_CHAIN", "UNABLE_TO_GET_ISSUER_CERT_LOCALLY",
+  "UNABLE_TO_VERIFY_LEAF_SIGNATURE", "CERT_CHAIN_TOO_LONG", "CERT_REVOKED", "INVALID_CA",
+  "PATH_LENGTH_EXCEEDED", "INVALID_PURPOSE", "CERT_UNTRUSTED", "CERT_REJECTED",
+  "HOSTNAME_MISMATCH", "UNSPECIFIED", "ERR_TLS_CERT_ALTNAME_INVALID",
+]);
+const networkCodes = new Set([
+  "ENOTFOUND", "EAI_AGAIN", "ECONNREFUSED", "ETIMEDOUT", "ENETUNREACH", "EHOSTUNREACH",
+  "EADDRNOTAVAIL", "ECONNRESET", "ECONNABORTED", "EPIPE", "EMFILE", "ENOBUFS",
+]);
+function peerOf(input) {
+  const url = new URL(typeof input === "string" ? input : input.url ?? String(input));
+  const host = url.hostname.startsWith("[") ? url.hostname.slice(1, -1) : url.hostname;
+  const port = url.port === "" ? (url.protocol === "https:" ? 443 : 80) : Number(url.port);
+  return { url, host, port, name: `${host}:${port}` };
+}
+function tlsMessage(code, host) {
+  const hint = process.env.NODE_USE_SYSTEM_CA === "1" ? ""
+    : "; if its root CA is installed on this machine, run with NODE_USE_SYSTEM_CA=1";
+  switch (code) {
+    case "CERT_HAS_EXPIRED": return `the certificate of ${host} has expired`;
+    case "CERT_NOT_YET_VALID": return `the certificate of ${host} is not valid yet`;
+    case "DEPTH_ZERO_SELF_SIGNED_CERT":
+      return `the certificate of ${host} is self-signed, so it is not trusted${hint}`;
+    case "SELF_SIGNED_CERT_IN_CHAIN":
+      return `the certificates of ${host} lead to a root CA that is not trusted`;
+    case "UNABLE_TO_VERIFY_LEAF_SIGNATURE":
+      return `the certificate of ${host} is signed by an authority that is not known${hint}`;
+    case "UNABLE_TO_GET_ISSUER_CERT_LOCALLY":
+      return `the certificate of ${host} is signed by an authority that is not known`;
+    case "ERR_TLS_CERT_ALTNAME_INVALID":
+    case "HOSTNAME_MISMATCH":
+      return `the certificate is not for ${host}`;
+    case "CERT_REVOKED": return `the certificate of ${host} is revoked`;
+    default: return `the certificate of ${host} is not trusted`;
+  }
+}
+function networkMessage(code, peer, stage, detail) {
+  const name = peer.name;
+  switch (code) {
+    case "ENOTFOUND": return `could not find the address of ${peer.host}: no such name in DNS`;
+    case "EAI_AGAIN":
+      return `could not find the address of ${peer.host}: DNS did not answer; check the network`;
+    case "ECONNREFUSED": return `could not connect to ${name}: nothing listens on this port`;
+    case "ETIMEDOUT": return `could not connect to ${name}: the host did not answer in time`;
+    case "ENETUNREACH": return `could not connect to ${name}: the network is unreachable`;
+    case "EHOSTUNREACH": return `could not connect to ${name}: the host is unreachable`;
+    case "EADDRNOTAVAIL":
+      return `could not connect to ${name}: the address is not available on this machine`;
+    case "ECONNRESET": return `the connection to ${name} was reset while ${stage}`;
+    case "ECONNABORTED":
+      return `the connection to ${name} was aborted on this machine while ${stage}`;
+    case "EPIPE": return `the connection to ${name} broke while ${stage}`;
+    case "EMFILE":
+      return `could not connect to ${name}: too many files and sockets are open in this program`;
+    case "ENOBUFS": return `could not connect to ${name}: the system has no buffer space left`;
+    default: return `the connection to ${name} failed while ${stage}: ${detail}`;
+  }
+}
+function requestError(code, message, url) {
+  return { kind: "REQUEST", code, message, url };
+}
+function fetchError(e, input, init) {
+  const given = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
+  const message = e.message ?? "";
+  if (e instanceof DOMException) {
+    const peer = peerOf(input);
+    return { kind: "TIMEOUT", code: "TIMEOUT_ERR",
+             message: `no full answer from ${peer.host} within ${init.timeout} ms`,
+             timeout: init.timeout };
+  }
+  if (message.startsWith("Failed to parse URL from"))
+    return requestError("ERR_INVALID_URL", `fetch cannot parse "${given}" as a URL`, given);
+  if (message.includes("includes credentials"))
+    return requestError("ERR_CREDENTIALS_IN_URL",
+                        `the URL ${given} has a user name or a password; send them in the ` +
+                        "authorization header instead", given);
+  const method = init?.method ?? "GET";
+  if (message.includes("is not a valid HTTP method"))
+    return requestError("ERR_INVALID_METHOD", `'${method}' is not a valid HTTP method`, given);
+  if (message.includes("HTTP method is unsupported"))
+    return requestError("ERR_INVALID_METHOD", `fetch does not send ${method.toUpperCase()} requests`,
+                        given);
+  if (message.includes("cannot have body"))
+    return requestError("ERR_BODY_WITH_GET",
+                        `a ${method.toUpperCase()} request cannot have a body: use POST, or drop ` +
+                        "the body", given);
+  if (message.includes("duplex option is required"))
+    return requestError("ERR_DUPLEX_REQUIRED",
+                        'a request whose body is a stream needs duplex: "half"', given);
+  if (message.includes("has already been used"))
+    return requestError("ERR_REQUEST_USED",
+                        "the body of this Request is already read, so it cannot be sent", given);
+  const peer = peerOf(input);
+  const cause = e.cause ?? {};
+  const why = cause.message ?? "";
+  if (why === "bad port")
+    return requestError("ERR_BLOCKED_PORT",
+                        `fetch does not connect to port ${peer.port}: browsers and node block it too`,
+                        peer.url.href);
+  if (why.includes("not implemented") || why.includes("unknown scheme"))
+    return requestError("ERR_UNSUPPORTED_SCHEME",
+                        `fetch cannot get ${peer.url.href}: only http:, https: and data: work`,
+                        peer.url.href);
+  if (why === "unexpected redirect")
+    return { kind: "REDIRECT", code: "ERR_UNEXPECTED_REDIRECT",
+             message: `${peer.url.href} redirects, and redirect is "error"`, location: "" };
+  if (why === "redirect count exceeded")
+    return { kind: "REDIRECT", code: "ERR_TOO_MANY_REDIRECTS", message: "more than 20 redirects",
+             location: "" };
+  if (tlsCodes.has(cause.code))
+    return { kind: "TLS", code: cause.code, message: tlsMessage(cause.code, peer.host),
+             host: peer.host };
+  if (cause.code === "UND_ERR_SOCKET")
+    return { kind: "RESPONSE", code: "ERR_CLOSED",
+             message: `${peer.name} closed the connection before the response`, host: peer.host,
+             port: peer.port };
+  if (typeof cause.code === "string" && cause.code.startsWith("HPE_"))
+    return { kind: "RESPONSE", code: "ERR_INVALID_RESPONSE",
+             message: `${peer.name} did not answer in HTTP/1.1: ${why}`, host: peer.host,
+             port: peer.port };
+  const code = networkCodes.has(cause.code) ? cause.code : "UNKNOWN";
+  return { kind: "NETWORK", code, message: networkMessage(code, peer, "connecting", why),
+           errno: cause.errno ?? -1, syscall: cause.syscall ?? "", host: peer.host,
+           port: peer.port };
+}
 const originalFetch = globalThis.fetch;
 globalThis.fetch = async (input, init) => {
   const timeout = init?.timeout;
   const given = timeout === undefined ? init : { ...init, signal: AbortSignal.timeout(timeout) };
   try {
-    return new Ok(await originalFetch(input, given));
+    const response = await originalFetch(input, given);
+    responsePeers.set(response, { peer: peerOf(input), timeout });
+    return new Ok(response);
   } catch (e) {
-    if (e instanceof DOMException) return new Err({ code: "TIMEOUT_ERR", message: e.message });
-    const cause = e.cause;
-    if (e.message !== "fetch failed")
-      return new Err(cause === undefined ? { code: "bad_request", message: e.message }
-                                         : { code: "bad_request", message: e.message, cause: cause.message });
-    if (cause instanceof SystemError)
-      return new Err({ code: cause.code, message: e.message, cause: cause.message });
-    if (cause !== undefined) return new Err({ code: "fetch_failed", message: e.message, cause: cause.message });
-    return new Err({ code: "fetch_failed", message: e.message });
+    return new Err(fetchError(e, input, init));
   }
 };
-function bodyError(e) {
-  if (e instanceof DOMException) return { code: "TIMEOUT_ERR", message: e.message };
+const responsePeers = new WeakMap();
+function bodyError(e, owner) {
+  const known = responsePeers.get(owner);
+  if (e instanceof DOMException) {
+    const timeout = known?.timeout ?? 0;
+    return { kind: "TIMEOUT", code: "TIMEOUT_ERR",
+             message: `no full answer from ${known?.peer.host} within ${timeout} ms`, timeout };
+  }
   const message = e.message;
-  if (message.startsWith("Body is unusable")) return { code: "body_used", message };
-  if (message === "terminated")
-    return e.cause === undefined ? { code: "terminated", message } : { code: "terminated", message, cause: e.cause.message };
-  if (message.startsWith("Failed to parse body as FormData")) return { code: "bad_form", message };
-  return { code: "body_failed", message };
+  if (message.startsWith("Body is unusable"))
+    return { kind: "USED", code: "ERR_BODY_USED",
+             message: "the body is already read: text(), json(), bytes(), formData() and body() " +
+                      "read it once" };
+  if (message.includes("locked"))
+    return { kind: "USED", code: "ERR_BODY_LOCKED",
+             message: "the body is locked: a reader of body() holds it" };
+  if (message === "terminated") {
+    const cause = e.cause;
+    if (cause?.code?.startsWith("Z_") || cause?.code?.startsWith("ERR_BROTLI") ||
+        cause?.errno !== undefined && cause?.code === undefined) {
+      const coding = owner.headers.get("content-encoding") ?? "";
+      return { kind: "MALFORMED", code: "ERR_INVALID_COMPRESSION",
+               message: `the body is not valid ${coding}: ${cause.message}` };
+    }
+    const who = known === undefined ? "the client" : known.peer.name;
+    return { kind: "NETWORK", code: "ERR_CLOSED",
+             message: `${who} closed the connection before the end of the body` };
+  }
+  return { kind: "STREAM", code: "ERR_STREAM_FAILED",
+           message: `the stream of the body failed: ${message}` };
+}
+function formError(owner) {
+  const given = owner.headers.get("content-type") ?? "";
+  const type = given.toLowerCase();
+  if (type.startsWith("multipart/form-data") && !/boundary=/i.test(given))
+    return { kind: "CONTENT", code: "ERR_NO_BOUNDARY",
+             message: "the body is not a form: multipart/form-data has no boundary",
+             contentType: given };
+  if (type.startsWith("multipart/form-data"))
+    return { kind: "CONTENT", code: "ERR_INVALID_MULTIPART",
+             message: "the body is not a valid multipart form: a part has no end of its head",
+             contentType: given };
+  const what = given === "" ? "it has no content-type" : `content-type is ${given}`;
+  return { kind: "CONTENT", code: "ERR_NOT_A_FORM", message: `the body is not a form: ${what}`,
+           contentType: given };
 }
 for (const proto of [Response.prototype, Request.prototype]) {
   for (const name of ["text", "bytes", "arrayBuffer", "formData"]) {
@@ -410,13 +575,20 @@ for (const proto of [Response.prototype, Request.prototype]) {
       try {
         return new Ok(await original.call(this));
       } catch (e) {
-        return new Err(bodyError(e));
+        if (name === "formData" && e.message.startsWith("Failed to parse body as FormData"))
+          return new Err(formError(this));
+        return new Err(bodyError(e, this));
       }
     };
   }
   proto.json = async function () {
     const text = await this.text();
-    return text.isErr() ? text : JSON.parse(text.value);
+    if (text.isErr()) return text;
+    const parsed = JSON.parse(text.value);
+    if (parsed.isOk()) return parsed;
+    return new Err({ kind: "CONTENT", code: "ERR_INVALID_JSON",
+                     message: `the body is not JSON: ${parsed.error.message}`,
+                     contentType: this.headers.get("content-type") ?? "" });
   };
 }
 // A value that the object changes itself is a method in tz (docs/objects.md,
@@ -458,6 +630,9 @@ for (const name of ["href", "origin", "protocol", "username", "password", "host"
                     "port", "pathname", "search", "hash"])
   asMethod(URL.prototype, name);
 asMethod(URLSearchParams.prototype, "size");
+URL.prototype.portNumber = function () {
+  return this.port === "" ? undefined : Number(this.port);
+};
 for (const name of ["target", "currentTarget", "srcElement", "eventPhase", "defaultPrevented"])
   asMethod(Event.prototype, name);
 // The parts of a URL change through its methods in tz; the ones that can
@@ -473,11 +648,11 @@ for (const name of ["href", "protocol", "host", "hostname", "port"]) {
     try {
       this[name] = value;
     } catch (e) {
-      return new Err({ code: "bad_url", message: "Invalid URL", input: value });
+      return new Err({ kind: "URL", code: "ERR_INVALID_URL", message: "Invalid URL", input: value });
     }
     const wanted = name === "protocol" ? value.replace(/:$/, "") + ":" : value;
     if (this.href === before && this[name] !== wanted)
-      return new Err({ code: "bad_url", message: "Invalid " + name, input: value });
+      return new Err({ kind: "URL", code: "ERR_INVALID_URL", message: "Invalid " + name, input: value });
     return new Ok(undefined);
   };
 }

@@ -1,7 +1,8 @@
 Ok { value: { ok: [ 1, 2 ] } }
 {
-  code: 'bad_json',
+  kind: 'JSON',
+  code: 'ERR_INVALID_JSON',
   message: "Expected ',' or '}' after property value in JSON at position 13 (line 3 column 3)",
   path: ''
 }
-bad_json: Unexpected end of JSON input
+ERR_INVALID_JSON: Unexpected end of JSON input

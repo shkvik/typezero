@@ -1,10 +1,10 @@
-// How fetch fails: an Err of a FetchError whose code is the code of the
-// cause ("ENOTFOUND"), "fetch_failed" for a cause without one, and
-// "bad_request" for a request that cannot be made; the message is node's
-// ("fetch failed"). A body that cannot be read is an Err of a BodyError.
+// How fetch fails (docs/net.md, section 2): an Err of a FetchError whose
+// kind says what to do (REQUEST — fix the code, NETWORK — try again,
+// RESPONSE, TLS, REDIRECT, TIMEOUT), a closed code and a message that says
+// what, where and why. A body that cannot be read is an Err of a BodyError.
 // A request larger than maxBodySize gets 413; data: URLs need no network.
-// A name that is not found may be EAI_AGAIN on a machine without a
-// network. https is in tls_serve.tz and tls_errors.tz.
+// A name that is not found may be EAI_AGAIN on a machine without a network.
+// https is in tls_serve.tz and tls_errors.tz.
 import { Server } from "tz:http"
 
 async function attempt(what: string, url: string, init?: RequestInit) {
@@ -12,13 +12,12 @@ async function attempt(what: string, url: string, init?: RequestInit) {
   if (r.isErr()) {
     const e = r.error
     const code = e.code == "EAI_AGAIN" ? "ENOTFOUND" : e.code
-    const cause = e.cause == undefined ? "" : `(${e.cause.replaceAll("EAI_AGAIN", "ENOTFOUND")})`
-    console.log(what, `${code}: ${e.message}`, cause)
+    console.log(what, e.kind, `${code}: ${e.message.replaceAll("DNS did not answer; check the network", "no such name in DNS")}`)
     return
   }
   const text = await r.value.text()
   if (text.isOk()) console.log(what, r.value.status, text.value)
-  else console.log(what, `${text.error.code}: ${text.error.message}`, `(${text.error.cause ?? ""})`)
+  else console.log(what, text.error.kind, `${text.error.code}: ${text.error.message}`)
 }
 
 await attempt("bad port", "http://localhost:6000/")
@@ -29,6 +28,7 @@ await attempt("no host", "http://no-such-host.invalid/")
 await attempt("data", "data:text/plain,hello%20world")
 await attempt("base64", "data:;base64,aGk=")
 await attempt("get with body", "http://localhost:8000/", { method: "GET", body: "x" })
+await attempt("bad method", "http://localhost:8000/", { method: "TRACE" })
 await attempt("no duplex", "http://localhost:8000/", {
   method: "POST",
   body: new ReadableStream({ start: c => { c.close() } }),
@@ -64,6 +64,18 @@ if (once.isOk()) {
   const r = once.value
   console.log((await r.text()).unwrapOr("-"), r.bodyUsed())
   const again = await r.text()
-  if (again.isErr()) console.log(again.error.code, again.error.message)
+  if (again.isErr()) console.log(again.error.kind, again.error.code, again.error.message)
 }
 await listening.stop()
+const gone = new Server({ port: 0, hostname: "127.0.0.1" }, () => new Response("")).listen()
+if (gone.isOk()) {
+  const port = gone.value.port
+  await gone.value.stop()
+  const refused = await fetch(`http://127.0.0.1:${port}/`)
+  if (refused.isErr()) {
+    const e = refused.error
+    if (e.kind == "NETWORK")
+      console.log("refused", e.kind, e.code, e.message.replaceAll(String(port), "PORT"),
+                  e.syscall, e.host, e.port == port)
+  }
+}

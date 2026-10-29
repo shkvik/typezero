@@ -1,0 +1,56 @@
+// tz:packet (docs/net.md, section 7): headers of Ethernet, ARP, IPv4, IPv6,
+// UDP, TCP and ICMP read from bytes and built, with their checksums, in
+// plain tz over Uint8Array; what does not fit is an Err of kind "PACKET".
+import {
+  buildIcmpEcho, buildIpv4, buildUdp, checksum, parseArp, parseEthernet, parseIcmp, parseIpv4,
+  parseIpv6, parseTcp, parseUdp, TCP_ACK, TCP_SYN,
+} from "tz:packet"
+
+function hexBytes(text: string): Uint8Array {
+  const out = new Uint8Array(text.length / 2)
+  for (let i = 0; i < out.length; i++) out[i] = (parseInt(text.slice(i * 2, i * 2 + 2), 16).unwrapOr(0) & 0xff).toUint8()
+  return out
+}
+
+// The IPv4 header of the example in Wikipedia: checksum 0xb861.
+const header = hexBytes("450000730000400040110000c0a80001c0a800c7")
+console.log(checksum(header).toString(16))
+
+const udpResult = buildUdp("10.0.0.1", 5353, "10.0.0.2", 53, new TextEncoder().encode("hi"))
+if (udpResult.isOk()) {
+  const packetResult = buildIpv4({ protocol: 17, source: "10.0.0.1", destination: "10.0.0.2", ttl: 9, id: 7 }, udpResult.value)
+  if (packetResult.isOk()) {
+    const ip = parseIpv4(packetResult.value)
+    if (ip.isOk()) {
+      console.log(ip.value.source, ip.value.destination, ip.value.ttl, ip.value.protocol, ip.value.totalLength)
+      const udp = parseUdp(ip.value.payload)
+      if (udp.isOk()) console.log(udp.value.sourcePort, udp.value.destinationPort, new TextDecoder().decode(udp.value.payload))
+    }
+    const broken = packetResult.value.slice()
+    if (broken.length > 8) broken[8] = 0
+    const bad = parseIpv4(broken)
+    if (bad.isErr()) console.log(bad.error.kind, bad.error.code, bad.error.message)
+  }
+}
+
+const echo = buildIcmpEcho(1, 2, new TextEncoder().encode("ping"))
+const icmp = parseIcmp(echo)
+if (icmp.isOk()) console.log(icmp.value.type, icmp.value.code, checksum(echo))
+
+const frame = parseEthernet(hexBytes("ffffffffffff001122334455080600010800060400010011223344550a000001000000000000c0a80001"))
+if (frame.isOk()) {
+  console.log(frame.value.destination, frame.value.source, frame.value.etherType.toString(16))
+  const arp = parseArp(frame.value.payload)
+  if (arp.isOk()) console.log(arp.value.operation, arp.value.senderMac, arp.value.senderIp, arp.value.targetIp)
+}
+
+const v6 = parseIpv6(hexBytes("6000000000083a40fe800000000000000000000000000001ff0200000000000000000000000000018000f7ff00010002"))
+if (v6.isOk()) console.log(v6.value.source, v6.value.destination, v6.value.nextHeader, v6.value.hopLimit, v6.value.payloadLength)
+
+const tcp = parseTcp(hexBytes("1f90d4310000000100000000500272100000000000"))
+if (tcp.isOk()) console.log(tcp.value.sourcePort, tcp.value.destinationPort, tcp.value.sequence, (tcp.value.flags & TCP_SYN) != 0, (tcp.value.flags & TCP_ACK) != 0, tcp.value.window)
+
+const short = parseIpv4(new Uint8Array(10))
+if (short.isErr()) console.log(short.error.code, short.error.message)
+const six = parseIpv4(hexBytes("6000000000000000000000000000000000000000"))
+if (six.isErr()) console.log(six.error.code, six.error.message)

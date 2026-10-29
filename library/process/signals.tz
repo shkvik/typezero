@@ -1,0 +1,127 @@
+declare function signalListen(dispatch: (signal: int) => void): void;
+declare function signalWatch(signal: int, watched: boolean): void;
+
+export type Signal = "SIGINT" | "SIGTERM" | "SIGHUP" | "SIGBREAK";
+
+function signalNumber(signal: Signal): int {
+  switch (signal) {
+    case "SIGHUP":
+      return 1;
+    case "SIGINT":
+      return 2;
+    case "SIGTERM":
+      return 15;
+    case "SIGBREAK":
+      return 21;
+  }
+}
+
+class SignalListener {
+  public readonly signal: Signal;
+  public readonly once: boolean;
+  public readonly run?: () => void;
+  public readonly runAsync?: () => Promise<void>;
+
+  public constructor(
+    signal: Signal,
+    once: boolean,
+    run?: () => void,
+    runAsync?: () => Promise<void>,
+  ) {
+    this.signal = signal;
+    this.once = once;
+    this.run = run;
+    this.runAsync = runAsync;
+  }
+
+  public calls(signal: Signal, run?: () => void, runAsync?: () => Promise<void>): boolean {
+    return this.signal == signal && this.run == run && this.runAsync == runAsync;
+  }
+}
+
+class SignalListeners {
+  private items: SignalListener[];
+  private started: boolean;
+
+  public constructor() {
+    this.items = [];
+    this.started = false;
+  }
+
+  public add(listener: SignalListener): void {
+    if (!this.started) {
+      this.started = true;
+      signalListen(dispatchSignal);
+    }
+    this.items.push(listener);
+    this.watch(listener.signal);
+  }
+
+  public remove(signal: Signal, run?: () => void, runAsync?: () => Promise<void>): void {
+    const index = this.items.findLastIndex((item) => item.calls(signal, run, runAsync));
+    if (index < 0) {
+      return;
+    }
+    this.items.splice(index, 1);
+    this.watch(signal);
+  }
+
+  public dispatch(number: int): void {
+    const due = this.items.filter((item) => signalNumber(item.signal) == number);
+    for (const listener of due) {
+      if (listener.once) {
+        this.drop(listener);
+      }
+      const run = listener.run;
+      if (run != undefined) {
+        run();
+      }
+      const runAsync = listener.runAsync;
+      if (runAsync != undefined) {
+        void runAsync();
+      }
+    }
+  }
+
+  private drop(listener: SignalListener): void {
+    const index = this.items.indexOf(listener);
+    if (index < 0) {
+      return;
+    }
+    this.items.splice(index, 1);
+    this.watch(listener.signal);
+  }
+
+  private watch(signal: Signal): void {
+    const watched = this.items.some((item) => item.signal == signal);
+    signalWatch(signalNumber(signal), watched);
+  }
+}
+
+const listeners = new SignalListeners();
+
+function dispatchSignal(signal: int): void {
+  listeners.dispatch(signal);
+}
+
+export function processOn(signal: Signal, listener: () => void, once: boolean): void {
+  const entry = new SignalListener(signal, once, listener, undefined);
+  listeners.add(entry);
+}
+
+export function processOnAsync(
+  signal: Signal,
+  listener: () => Promise<void>,
+  once: boolean,
+): void {
+  const entry = new SignalListener(signal, once, undefined, listener);
+  listeners.add(entry);
+}
+
+export function processOff(signal: Signal, listener: () => void): void {
+  listeners.remove(signal, listener, undefined);
+}
+
+export function processOffAsync(signal: Signal, listener: () => Promise<void>): void {
+  listeners.remove(signal, undefined, listener);
+}

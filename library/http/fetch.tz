@@ -25,6 +25,10 @@ declare function httpMethod(conn: object): string
 declare function httpTarget(conn: object): string
 declare function httpKeepAlive(conn: object): boolean
 declare function httpEndAfter(conn: object): void
+declare function httpBodyLimit(conn: object): double
+declare function tcpRead(conn: object, deadline: object | undefined):
+  Promise<Result<Uint8Array | undefined, SystemError>>
+declare function httpRequestTimeout(conn: object): int
 declare function httpRespond(conn: object, status: int, statusText: string, headers: string[],
                              text: string, bytes: Uint8Array | undefined, flags: int): void
 declare function zlibNew(kind: int): object
@@ -46,6 +50,8 @@ const DEFAULT_REQUEST_HEADERS: [string, string][] = [
 export class Connection {
   origin = ""
   status = 0
+  absolute = false
+  proxyAuth = ""
   private socket: object
   private head: string[] = []
 
@@ -72,6 +78,14 @@ export class Connection {
     netClose(this.socket)
   }
 
+  async secure(host: string, deadline?: object): Promise<Result<void, SystemError>> {
+    return tlsConnect(this.socket, host, deadline)
+  }
+
+  readRaw(deadline?: object): Promise<Result<Uint8Array | undefined, SystemError>> {
+    return tcpRead(this.socket, deadline)
+  }
+
   setHead(headers: string[]) {
     this.head = headers
   }
@@ -94,7 +108,12 @@ export class Connection {
         out.push(name)
         out.push(value)
       }
-    const target = (url.pathname() == "" ? "/" : url.pathname()) + url.search()
+    if (this.proxyAuth != "") {
+      out.push("proxy-authorization")
+      out.push(`Basic ${this.proxyAuth}`)
+    }
+    const path = (url.pathname() == "" ? "/" : url.pathname()) + url.search()
+    const target = this.absolute ? url.protocol() + "//" + url.host() + path : path
     httpRequest(this.socket, method, target, out, text, bytes, flags)
   }
 
@@ -156,6 +175,14 @@ export class Connection {
 
   keepAlive(): boolean {
     return httpKeepAlive(this.socket)
+  }
+
+  bodyLimit(): double {
+    return httpBodyLimit(this.socket)
+  }
+
+  requestTimeout(): int {
+    return httpRequestTimeout(this.socket)
   }
 }
 
@@ -685,25 +712,349 @@ export type BodyInit = string | Uint8Array | ArrayBuffer | ReadableStream<Uint8A
 
 type Decode = (chunk: Uint8Array, last: boolean) => Result<Uint8Array, SystemError>
 
-const TIMED_OUT = "The operation was aborted due to timeout"
-
 function passed(deadline?: object): boolean {
   if (deadline == undefined) {
-    return false
+    return false;
   }
 
-  return deadlinePassed(deadline)
+  return deadlinePassed(deadline);
+}
+
+export class Peer {
+  public readonly host: string;
+  public readonly port: int;
+  public readonly timeout: int;
+  public readonly deadline?: object;
+
+  public constructor(host: string, port: int, timeout: int, deadline?: object) {
+    this.host = host;
+    this.port = port;
+    this.timeout = timeout;
+    this.deadline = deadline;
+  }
+
+  public name(): string {
+    return `${this.host}:${this.port}`;
+  }
+
+  public passed(): boolean {
+    return passed(this.deadline);
+  }
+}
+
+type NetworkCode =
+  | "ENOTFOUND"
+  | "EAI_AGAIN"
+  | "ECONNREFUSED"
+  | "ETIMEDOUT"
+  | "ENETUNREACH"
+  | "EHOSTUNREACH"
+  | "EADDRNOTAVAIL"
+  | "ECONNRESET"
+  | "ECONNABORTED"
+  | "EPIPE"
+  | "EMFILE"
+  | "ENOBUFS"
+  | "UNKNOWN";
+
+function networkCode(code: string): NetworkCode {
+  switch (code) {
+    case "ENOTFOUND":
+      return "ENOTFOUND";
+    case "EAI_AGAIN":
+      return "EAI_AGAIN";
+    case "ECONNREFUSED":
+      return "ECONNREFUSED";
+    case "ETIMEDOUT":
+      return "ETIMEDOUT";
+    case "ENETUNREACH":
+      return "ENETUNREACH";
+    case "EHOSTUNREACH":
+      return "EHOSTUNREACH";
+    case "EADDRNOTAVAIL":
+      return "EADDRNOTAVAIL";
+    case "ECONNRESET":
+      return "ECONNRESET";
+    case "ECONNABORTED":
+      return "ECONNABORTED";
+    case "EPIPE":
+      return "EPIPE";
+    case "EMFILE":
+      return "EMFILE";
+    case "ENOBUFS":
+      return "ENOBUFS";
+    default:
+      return "UNKNOWN";
+  }
+}
+
+function networkMessage(code: NetworkCode, peer: Peer, stage: string, detail: string): string {
+  const name = peer.name();
+  switch (code) {
+    case "ENOTFOUND":
+      return `could not find the address of ${peer.host}: no such name in DNS`;
+    case "EAI_AGAIN":
+      return `could not find the address of ${peer.host}: DNS did not answer; check the network`;
+    case "ECONNREFUSED":
+      return `could not connect to ${name}: nothing listens on this port`;
+    case "ETIMEDOUT":
+      return `could not connect to ${name}: the host did not answer in time`;
+    case "ENETUNREACH":
+      return `could not connect to ${name}: the network is unreachable`;
+    case "EHOSTUNREACH":
+      return `could not connect to ${name}: the host is unreachable`;
+    case "EADDRNOTAVAIL":
+      return `could not connect to ${name}: the address is not available on this machine`;
+    case "ECONNRESET":
+      return `the connection to ${name} was reset while ${stage}`;
+    case "ECONNABORTED":
+      return `the connection to ${name} was aborted on this machine while ${stage}`;
+    case "EPIPE":
+      return `the connection to ${name} broke while ${stage}`;
+    case "EMFILE":
+      return `could not connect to ${name}: too many files and sockets are open in this program`;
+    case "ENOBUFS":
+      return `could not connect to ${name}: the system has no buffer space left`;
+    case "UNKNOWN":
+      return `the connection to ${name} failed while ${stage}: ${detail}`;
+  }
+}
+
+function tlsCode(code: string): TlsCode | undefined {
+  switch (code) {
+    case "UNABLE_TO_GET_ISSUER_CERT":
+      return "UNABLE_TO_GET_ISSUER_CERT";
+    case "UNABLE_TO_GET_CRL":
+      return "UNABLE_TO_GET_CRL";
+    case "UNABLE_TO_DECRYPT_CERT_SIGNATURE":
+      return "UNABLE_TO_DECRYPT_CERT_SIGNATURE";
+    case "UNABLE_TO_DECRYPT_CRL_SIGNATURE":
+      return "UNABLE_TO_DECRYPT_CRL_SIGNATURE";
+    case "UNABLE_TO_DECODE_ISSUER_PUBLIC_KEY":
+      return "UNABLE_TO_DECODE_ISSUER_PUBLIC_KEY";
+    case "CERT_SIGNATURE_FAILURE":
+      return "CERT_SIGNATURE_FAILURE";
+    case "CRL_SIGNATURE_FAILURE":
+      return "CRL_SIGNATURE_FAILURE";
+    case "CERT_NOT_YET_VALID":
+      return "CERT_NOT_YET_VALID";
+    case "CERT_HAS_EXPIRED":
+      return "CERT_HAS_EXPIRED";
+    case "CRL_NOT_YET_VALID":
+      return "CRL_NOT_YET_VALID";
+    case "CRL_HAS_EXPIRED":
+      return "CRL_HAS_EXPIRED";
+    case "ERROR_IN_CERT_NOT_BEFORE_FIELD":
+      return "ERROR_IN_CERT_NOT_BEFORE_FIELD";
+    case "ERROR_IN_CERT_NOT_AFTER_FIELD":
+      return "ERROR_IN_CERT_NOT_AFTER_FIELD";
+    case "ERROR_IN_CRL_LAST_UPDATE_FIELD":
+      return "ERROR_IN_CRL_LAST_UPDATE_FIELD";
+    case "ERROR_IN_CRL_NEXT_UPDATE_FIELD":
+      return "ERROR_IN_CRL_NEXT_UPDATE_FIELD";
+    case "OUT_OF_MEM":
+      return "OUT_OF_MEM";
+    case "DEPTH_ZERO_SELF_SIGNED_CERT":
+      return "DEPTH_ZERO_SELF_SIGNED_CERT";
+    case "SELF_SIGNED_CERT_IN_CHAIN":
+      return "SELF_SIGNED_CERT_IN_CHAIN";
+    case "UNABLE_TO_GET_ISSUER_CERT_LOCALLY":
+      return "UNABLE_TO_GET_ISSUER_CERT_LOCALLY";
+    case "UNABLE_TO_VERIFY_LEAF_SIGNATURE":
+      return "UNABLE_TO_VERIFY_LEAF_SIGNATURE";
+    case "CERT_CHAIN_TOO_LONG":
+      return "CERT_CHAIN_TOO_LONG";
+    case "CERT_REVOKED":
+      return "CERT_REVOKED";
+    case "INVALID_CA":
+      return "INVALID_CA";
+    case "PATH_LENGTH_EXCEEDED":
+      return "PATH_LENGTH_EXCEEDED";
+    case "INVALID_PURPOSE":
+      return "INVALID_PURPOSE";
+    case "CERT_UNTRUSTED":
+      return "CERT_UNTRUSTED";
+    case "CERT_REJECTED":
+      return "CERT_REJECTED";
+    case "HOSTNAME_MISMATCH":
+      return "HOSTNAME_MISMATCH";
+    case "UNSPECIFIED":
+      return "UNSPECIFIED";
+    case "ERR_TLS_CERT_ALTNAME_INVALID":
+      return "ERR_TLS_CERT_ALTNAME_INVALID";
+    case "ERR_NO_TLS":
+      return "ERR_TLS_HANDSHAKE";
+  }
+  if (code.startsWith("ERR_SSL_") || code.startsWith("ERR_OSSL_")) {
+    return "ERR_TLS_HANDSHAKE";
+  }
+
+  return undefined;
+}
+
+const SYSTEM_CA_HINT =
+  "; if its root CA is installed on this machine, run with NODE_USE_SYSTEM_CA=1";
+
+function tlsMessage(code: TlsCode, host: string, detail: string): string {
+  const hint = detail.includes("NODE_USE_SYSTEM_CA") ? SYSTEM_CA_HINT : "";
+  switch (code) {
+    case "CERT_HAS_EXPIRED":
+      return `the certificate of ${host} has expired`;
+    case "CERT_NOT_YET_VALID":
+      return `the certificate of ${host} is not valid yet`;
+    case "DEPTH_ZERO_SELF_SIGNED_CERT":
+      return `the certificate of ${host} is self-signed, so it is not trusted${hint}`;
+    case "SELF_SIGNED_CERT_IN_CHAIN":
+      return `the certificates of ${host} lead to a root CA that is not trusted${hint}`;
+    case "UNABLE_TO_VERIFY_LEAF_SIGNATURE":
+      return `the certificate of ${host} is signed by an authority that is not known${hint}`;
+    case "UNABLE_TO_GET_ISSUER_CERT_LOCALLY":
+      return `the certificate of ${host} is signed by an authority that is not known${hint}`;
+    case "ERR_TLS_CERT_ALTNAME_INVALID":
+      return `the certificate is not for ${host}`;
+    case "HOSTNAME_MISMATCH":
+      return `the certificate is not for ${host}`;
+    case "CERT_REVOKED":
+      return `the certificate of ${host} is revoked`;
+    case "ERR_TLS_HANDSHAKE":
+      return `the TLS handshake with ${host} failed: ${detail}`;
+    default:
+      return `the certificate of ${host} is not trusted: ${detail}`;
+  }
+}
+
+function timeoutError(peer: Peer): FetchError {
+  return {
+    kind: "TIMEOUT",
+    code: "TIMEOUT_ERR",
+    message: `no full answer from ${peer.host} within ${peer.timeout} ms`,
+    timeout: peer.timeout,
+  };
+}
+
+function connectionError(e: SystemError, peer: Peer, stage: string): FetchError {
+  if (peer.passed()) {
+    return timeoutError(peer);
+  }
+  const tls = tlsCode(e.code);
+  if (tls != undefined) {
+    const message = tlsMessage(tls, peer.host, e.message);
+
+    return { kind: "TLS", code: tls, message: message, host: peer.host };
+  }
+  if (e.code == "ERR_CLOSED") {
+    return {
+      kind: "RESPONSE",
+      code: "ERR_CLOSED",
+      message: `${peer.name()} closed the connection before the response`,
+      host: peer.host,
+      port: peer.port,
+    };
+  }
+  if (e.code == "ERR_INVALID_RESPONSE") {
+    return {
+      kind: "RESPONSE",
+      code: "ERR_INVALID_RESPONSE",
+      message: `${peer.name()} did not answer in HTTP/1.1: ${e.message}`,
+      host: peer.host,
+      port: peer.port,
+    };
+  }
+  if (e.code == "ERR_HEAD_TOO_LARGE") {
+    return {
+      kind: "RESPONSE",
+      code: "ERR_HEAD_TOO_LARGE",
+      message: `the head of the response from ${peer.name()} is larger than 16 KB`,
+      host: peer.host,
+      port: peer.port,
+    };
+  }
+  const code = networkCode(e.code);
+  const message = networkMessage(code, peer, stage, e.message);
+
+  return {
+    kind: "NETWORK",
+    code: code,
+    message: message,
+    errno: e.errno,
+    syscall: e.syscall,
+    host: peer.host,
+    port: peer.port,
+  };
+}
+
+function requestError(
+  code:
+    | "ERR_INVALID_URL"
+    | "ERR_CREDENTIALS_IN_URL"
+    | "ERR_INVALID_METHOD"
+    | "ERR_BODY_WITH_GET"
+    | "ERR_DUPLEX_REQUIRED"
+    | "ERR_REQUEST_USED"
+    | "ERR_UNSUPPORTED_SCHEME"
+    | "ERR_BLOCKED_PORT"
+    | "ERR_STREAM_FAILED",
+  message: string,
+  url: string,
+): FetchError {
+  return { kind: "REQUEST", code: code, message: message, url: url };
+}
+
+function redirectError(
+  code:
+    | "ERR_UNEXPECTED_REDIRECT"
+    | "ERR_TOO_MANY_REDIRECTS"
+    | "ERR_INVALID_LOCATION"
+    | "ERR_REDIRECT_WITH_STREAM",
+  message: string,
+  location: string,
+): FetchError {
+  return { kind: "REDIRECT", code: code, message: message, location: location };
+}
+
+function bodyUsed(): BodyError {
+  return {
+    kind: "USED",
+    code: "ERR_BODY_USED",
+    message: "the body is already read: text(), json(), bytes(), formData() and body() read it once",
+  };
+}
+
+function bodyLocked(): BodyError {
+  return {
+    kind: "USED",
+    code: "ERR_BODY_LOCKED",
+    message: "the body is locked: a reader of body() holds it",
+  };
+}
+
+function contentError(
+  code: "ERR_INVALID_JSON" | "ERR_NOT_A_FORM" | "ERR_NO_BOUNDARY" | "ERR_INVALID_MULTIPART",
+  message: string,
+  contentType: string,
+): BodyError {
+  return { kind: "CONTENT", code: code, message: message, contentType: contentType };
+}
+
+function streamFailed(e: StreamError): BodyError {
+  return {
+    kind: "STREAM",
+    code: "ERR_STREAM_FAILED",
+    message: `the stream of the body failed: ${e.message}`,
+  };
 }
 
 class Wire {
   conn: Connection
-  deadline?: object
+  peer?: Peer
   decode?: Decode
+  coding = ""
   finished = false
+  failure?: BodyError
 
-  constructor(conn: Connection, deadline?: object) {
+  constructor(conn: Connection, peer?: Peer) {
     this.conn = conn
-    this.deadline = deadline
+    this.peer = peer
   }
 
   private decodeChunk(decode: Decode, chunk: Uint8Array, last: boolean): Result<Uint8Array, BodyError> {
@@ -711,18 +1062,24 @@ class Wire {
     if (data.isErr()) {
       this.finished = true
       this.conn.close()
-      return err({ code: "terminated", message: "terminated", cause: data.error.message })
+      const failure: BodyError = {
+        kind: "MALFORMED",
+        code: "ERR_INVALID_COMPRESSION",
+        message: `the body is not valid ${this.coding}: ${data.error.message}`,
+      }
+      this.failure = failure
+
+      return err(failure)
     }
     return ok(data.value)
   }
 
   private failed(e: SystemError): BodyError {
     this.finished = true
-    if (passed(this.deadline)) {
-      return { code: "TIMEOUT_ERR", message: TIMED_OUT }
-    }
+    const failure = wireError(e, this.peer, this.conn)
+    this.failure = failure
 
-    return { code: "terminated", message: "terminated", cause: e.message }
+    return failure
   }
 
   private finish() {
@@ -732,7 +1089,7 @@ class Wire {
 
   async next(): Promise<Result<Uint8Array | undefined, BodyError>> {
     while (!this.finished) {
-      const read = await this.conn.read(this.deadline)
+      const read = await this.conn.read(this.peer?.deadline)
       if (read.isErr()) return err(this.failed(read.error))
       const chunk = read.value
       const decode = this.decode
@@ -758,7 +1115,7 @@ class Wire {
   }
 
   async all(): Promise<Result<Uint8Array, BodyError>> {
-    const bytes = await this.conn.readAll(this.deadline)
+    const bytes = await this.conn.readAll(this.peer?.deadline)
     if (bytes.isErr()) return err(this.failed(bytes.error))
     const decode = this.decode
     let data = bytes.value
@@ -770,6 +1127,85 @@ class Wire {
     this.finish()
     return ok(data)
   }
+}
+
+function wireError(e: SystemError, peer: Peer | undefined, conn: Connection): BodyError {
+  if (peer != undefined && peer.passed()) {
+    return {
+      kind: "TIMEOUT",
+      code: "TIMEOUT_ERR",
+      message: `no full answer from ${peer.host} within ${peer.timeout} ms`,
+      timeout: peer.timeout,
+    };
+  }
+  const who = peer == undefined ? "the client" : peer.name();
+  const of = peer == undefined ? "with the client" : `to ${peer.name()}`;
+  switch (e.code) {
+    case "TIMEOUT_ERR": {
+      const timeout = conn.requestTimeout();
+
+      return {
+        kind: "TIMEOUT",
+        code: "TIMEOUT_ERR",
+        message: `the request did not come in full within ${timeout} ms (requestTimeout)`,
+        timeout: timeout,
+      };
+    }
+    case "ERR_BODY_TOO_LARGE": {
+      const limit = conn.bodyLimit();
+
+      return {
+        kind: "TOO_LARGE",
+        code: "ERR_BODY_TOO_LARGE",
+        message: `the body is larger than ${limit} bytes (maxBodySize)`,
+        limit: limit,
+      };
+    }
+    case "ERR_INVALID_CHUNKED":
+      return {
+        kind: "MALFORMED",
+        code: "ERR_INVALID_CHUNKED",
+        message: "the body is not valid chunked encoding",
+      };
+    case "ERR_CLOSED":
+      return {
+        kind: "NETWORK",
+        code: "ERR_CLOSED",
+        message: `${who} closed the connection before the end of the body`,
+      };
+    case "ECONNRESET":
+      return {
+        kind: "NETWORK",
+        code: "ECONNRESET",
+        message: `the connection ${of} was reset before the end of the body`,
+      };
+    case "ECONNABORTED":
+      return {
+        kind: "NETWORK",
+        code: "ECONNABORTED",
+        message: `the connection ${of} was aborted on this machine before the end of the body`,
+      };
+    case "ETIMEDOUT":
+      return {
+        kind: "NETWORK",
+        code: "ETIMEDOUT",
+        message: `the connection ${of} timed out before the end of the body`,
+      };
+  }
+  const tls = tlsCode(e.code);
+  if (tls != undefined) {
+    return {
+      kind: "NETWORK",
+      code: "ERR_TLS_FAILED",
+      message: `the TLS connection ${of} failed before the end of the body: ${e.message}`,
+    };
+  }
+
+  return {
+    kind: "NETWORK",
+    code: "UNKNOWN",
+    message: `the connection ${of} failed before the end of the body: ${e.message}`,
+  };
 }
 
 function concat(parts: Uint8Array[]): Uint8Array {
@@ -818,20 +1254,6 @@ function decodersOf(encoding: string | undefined): object[] | undefined {
     else return undefined
   }
   return out
-}
-
-function bodyUsed(): BodyError {
-  return { code: "body_used", message: "Body is unusable: Body has already been read" }
-}
-
-function bodyFailed(e: StreamError): BodyError {
-  const cause = e.cause
-  if (e.code == "terminated")
-    return cause == undefined ? { code: "terminated", message: e.message }
-                              : { code: "terminated", message: e.message, cause }
-  if (e.code == "TIMEOUT_ERR") return { code: "TIMEOUT_ERR", message: e.message }
-  return cause == undefined ? { code: "body_failed", message: e.message }
-                            : { code: "body_failed", message: e.message, cause }
 }
 
 class Body {
@@ -938,9 +1360,7 @@ class Body {
           const chunk = await wire.next()
           if (chunk.isErr()) {
             const e = chunk.error
-            const cause = e.cause
-            c.error(cause == undefined ? { code: e.code, message: e.message }
-                                       : { code: e.code, message: e.message, cause })
+            c.error({ code: e.code, message: e.message })
           } else {
             const value = chunk.value
             if (value == undefined) c.close()
@@ -963,7 +1383,8 @@ class Body {
   }
 
   async consume(): Promise<Result<Uint8Array, BodyError>> {
-    if (this.usedOrDisturbed() || this.locked()) return err(bodyUsed())
+    if (this.usedOrDisturbed()) return err(bodyUsed())
+    if (this.locked()) return err(bodyLocked())
     const touched = this.touched()
     this.used = true
     const stream = touched ? this.view() : undefined
@@ -974,7 +1395,7 @@ class Body {
         const r = await reader.read()
         if (r.isErr()) {
           reader.releaseLock()
-          return err(bodyFailed(r.error))
+          return err(this.wire?.failure ?? streamFailed(r.error))
         }
         const step = r.value
         if (step.done) break
@@ -1164,13 +1585,10 @@ function multipartText(form: FormData, boundary: string): string {
   return out + `--${boundary}--\r\n`
 }
 
-function badForm(): BodyError {
-  return { code: "bad_form", message: "Failed to parse body as FormData." }
-}
-
 function parseFormData(type: string | undefined, bytes: Uint8Array): Result<FormData, BodyError> {
   const form = new FormData()
-  const contentType = (type ?? "").toLowerCase()
+  const given = type ?? ""
+  const contentType = given.toLowerCase()
   if (contentType.startsWith("application/x-www-form-urlencoded")) {
     for (const [name, value] of new URLSearchParams(new TextDecoder().decode(bytes)))
       form.append(name, value)
@@ -1179,25 +1597,33 @@ function parseFormData(type: string | undefined, bytes: Uint8Array): Result<Form
   if (contentType.startsWith("multipart/form-data")) {
     const m = /boundary=(?:"([^"]+)"|([^;\s]+))/i.exec(type ?? "")
     const boundary = m == undefined ? "" : m[1] ?? m[2] ?? ""
-    if (boundary == "") return err(badForm())
+    if (boundary == "")
+      return err(contentError("ERR_NO_BOUNDARY",
+                              "the body is not a form: multipart/form-data has no boundary", given))
     const text = new TextDecoder().decode(bytes)
     const parts = text.split("--" + boundary)
     for (const part of parts.slice(1)) {
       if (part.startsWith("--")) break
       const headEnd = part.indexOf("\r\n\r\n")
-      if (headEnd < 0) continue
+      if (headEnd < 0)
+        return err(contentError("ERR_INVALID_MULTIPART",
+                                "the body is not a valid multipart form: a part has no end of its head",
+                                given))
       const head = part.slice(0, headEnd)
       let body = part.slice(headEnd + 4)
       if (body.endsWith("\r\n")) body = body.slice(0, body.length - 2)
       const name = /name="([^"]*)"/i.exec(head)
-      if (name == undefined) continue
+      if (name == undefined)
+        return err(contentError("ERR_INVALID_MULTIPART",
+                                "the body is not a valid multipart form: a part has no name", given))
       const field = (name[1] ?? "").replaceAll("%22", "\"").replaceAll("%0A", "\n")
         .replaceAll("%0D", "\r")
       form.append(field, body)
     }
     return ok(form)
   }
-  return err(badForm())
+  const what = given == "" ? "it has no content-type" : `content-type is ${given}`
+  return err(contentError("ERR_NOT_A_FORM", `the body is not a form: ${what}`, given))
 }
 
 export type RequestRedirect = "follow" | "error" | "manual"
@@ -1208,25 +1634,15 @@ export interface RequestInit {
   body?: BodyInit
   redirect?: RequestRedirect
   timeout?: int
-  keepalive?: boolean
-  cache?: string
-  credentials?: string
-  integrity?: string
-  mode?: string
-  referrer?: string
-  referrerPolicy?: string
   duplex?: "half"
-}
-
-function badRequest(message: string): FetchError {
-  return { code: "bad_request", message }
+  proxy?: ProxyOption
 }
 
 function methodProblem(method: string): string | undefined {
-  if (!isToken(method)) return `'${method}' is not a valid HTTP method.`
+  if (!isToken(method)) return `'${method}' is not a valid HTTP method`
   const upper = method.toUpperCase()
   if (upper == "CONNECT" || upper == "TRACE" || upper == "TRACK")
-    return `'${method}' HTTP method is unsupported.`
+    return `fetch does not send ${upper} requests`
   return undefined
 }
 
@@ -1242,17 +1658,7 @@ export class Request {
   readonly method: string = "GET"
   readonly url: string
   readonly headers: Headers
-  readonly destination = ""
-  readonly referrer = "about:client"
-  readonly referrerPolicy = ""
-  readonly mode = "cors"
-  readonly credentials = "same-origin"
-  readonly cache = "default"
   readonly redirect: RequestRedirect = "follow"
-  readonly integrity = ""
-  readonly keepalive: boolean = false
-  readonly isReloadNavigation = false
-  readonly isHistoryNavigation = false
   readonly duplex?: "half"
   readonly timeout?: int
   private bodyStream?: ReadableStream<Uint8Array>
@@ -1286,7 +1692,6 @@ export class Request {
       if (init.headers != undefined) this.headers = new Headers(init.headers)
       if (init.redirect != undefined) this.redirect = init.redirect
       if (init.timeout != undefined) timeout = init.timeout
-      if (init.keepalive != undefined) this.keepalive = init.keepalive
       if (init.duplex != undefined) this.duplex = init.duplex
       if (init.body != undefined) this.data = Body.of(init.body)
     }
@@ -1312,7 +1717,7 @@ export class Request {
     return new Request(conn)
   }
 
-  async writeTo(conn: Connection, url: URL, deadline?: object): Promise<Result<void, FetchError>> {
+  async writeTo(conn: Connection, url: URL, peer: Peer): Promise<Result<void, FetchError>> {
     const body = this.data
     let text = ""
     let bytes: Uint8Array | undefined = undefined
@@ -1333,7 +1738,7 @@ export class Request {
       body.used = true
       const stream = body.view()
       if (stream != undefined) {
-        const problem = await sendBody(conn, stream, deadline)
+        const problem = await sendBody(conn, stream, peer, url.href())
         if (problem != undefined) return err(problem)
       }
       conn.end()
@@ -1369,10 +1774,14 @@ export class Request {
     return this.data.consumeText()
   }
 
-  async json(): Promise<Result<Json, BodyError | JsonError>> {
+  async json(): Promise<Result<Json, BodyError>> {
     const text = await this.text()
     if (text.isErr()) return text
-    return JSON.parse(text.value)
+    const parsed = JSON.parse(text.value)
+    if (parsed.isErr())
+      return err(contentError("ERR_INVALID_JSON", `the body is not JSON: ${parsed.error.message}`,
+                              this.headers.get("content-type") ?? ""))
+    return ok(parsed.value)
   }
 
   async bytes(): Promise<Result<Uint8Array, BodyError>> {
@@ -1422,6 +1831,7 @@ export class Response {
   readonly redirected: boolean = false
   readonly type: string = "default"
   readonly url: string = ""
+  upgrade?: (conn: Connection) => void
   private bodyStream?: ReadableStream<Uint8Array>
   private data: Body
 
@@ -1449,19 +1859,28 @@ export class Response {
     this.type = type
   }
 
-  static readFrom(conn: Connection, url: string, redirected: boolean,
-                  deadline?: object): Response {
+  static readFrom(conn: Connection, url: string, redirected: boolean, peer: Peer): Response {
     const headers = Headers.readFrom(conn)
     let body: Body
     if (conn.hasBody()) {
-      const wire = new Wire(conn, deadline)
-      wire.decode = decoding(headers.get("content-encoding"))
+      const wire = new Wire(conn, peer)
+      const coding = headers.get("content-encoding")
+      wire.decode = decoding(coding)
+      wire.coding = coding ?? ""
       body = Body.ofWire(wire)
     } else {
       giveBack(conn)
       body = Body.of(undefined)
     }
     return new Response(conn.status, conn.statusText(), headers, body, url, redirected, "basic")
+  }
+
+  static switchingProtocols(headers: HeadersInit, upgrade: (conn: Connection) => void): Response {
+    const response = new Response(101, "Switching Protocols", new Headers(headers), Body.of(undefined),
+                                  "", false, "default")
+    response.upgrade = upgrade
+
+    return response
   }
 
   static readFrom(data: DataUrl): Response {
@@ -1567,10 +1986,14 @@ export class Response {
     return this.data.consumeText()
   }
 
-  async json(): Promise<Result<Json, BodyError | JsonError>> {
+  async json(): Promise<Result<Json, BodyError>> {
     const text = await this.text()
     if (text.isErr()) return text
-    return JSON.parse(text.value)
+    const parsed = JSON.parse(text.value)
+    if (parsed.isErr())
+      return err(contentError("ERR_INVALID_JSON", `the body is not JSON: ${parsed.error.message}`,
+                              this.headers.get("content-type") ?? ""))
+    return ok(parsed.value)
   }
 
   async bytes(): Promise<Result<Uint8Array, BodyError>> {
@@ -1634,76 +2057,336 @@ const BAD_PORTS = new Set<int>([
   6669, 6679, 6697, 10080,
 ])
 
-function failed(cause: string): FetchError {
-  return { code: "fetch_failed", message: "fetch failed", cause }
-}
-
-function timedOut(): FetchError {
-  return { code: "TIMEOUT_ERR", message: TIMED_OUT }
-}
-
-function fetchFailed(e: SystemError, deadline?: object): FetchError {
-  if (passed(deadline)) {
-    return timedOut()
-  }
-
-  return { code: e.errno == -1 ? "fetch_failed" : e.code, message: "fetch failed", cause: e.message }
-}
-
-async function sendBody(conn: Connection, stream: ReadableStream<Uint8Array>,
-                        deadline?: object): Promise<FetchError | undefined> {
+async function sendBody(conn: Connection, stream: ReadableStream<Uint8Array>, peer: Peer,
+                        url: string): Promise<FetchError | undefined> {
   const reader = stream.getReader()
   for (;;) {
     const r = await reader.read()
     if (r.isErr()) {
       reader.releaseLock()
-      if (passed(deadline)) {
-        return timedOut()
+      if (peer.passed()) {
+        return timeoutError(peer)
       }
 
-      return failed(r.error.message)
+      return requestError("ERR_STREAM_FAILED",
+                          `the stream of the body of the request failed: ${r.error.message}`, url)
     }
     const step = r.value
     if (step.done) break
     const wrote = await conn.write(step.value)
     if (wrote.isErr()) {
       reader.releaseLock()
-      return fetchFailed(wrote.error, deadline)
+      return connectionError(wrote.error, peer, "sending the request")
     }
   }
   reader.releaseLock()
   return undefined
 }
 
-async function send(request: Request, url: URL, redirected: boolean,
-                    deadline?: object): Promise<Result<Response, FetchError>> {
+function peerOf(url: URL, timeout?: int, deadline?: object): Peer {
   const hostname = url.hostname()
   const host = hostname.startsWith("[") ? hostname.slice(1, hostname.length - 1) : hostname
   const https = url.protocol() == "https:"
-  const port = url.port() == "" ? (https ? 443 : 80) : parseInt(url.port()).unwrapOr(0)
-  const origin = url.protocol() + host + ":" + String(port)
+  const port = url.portNumber() ?? (https ? 443 : 80)
+  const peer = new Peer(host, port, timeout ?? 0, deadline)
+
+  return peer
+}
+
+export type ProxyOption =
+  | {
+      enabled: true;
+      url: string;
+      httpVersion?: "auto" | "1.1";
+    }
+  | {
+      enabled: false;
+    };
+
+export class ProxyTarget {
+  public readonly host: string;
+  public readonly port: int;
+  public readonly secure: boolean;
+  public readonly auth: string;
+  public readonly shown: string;
+
+  public constructor(host: string, port: int, secure: boolean, auth: string, shown: string) {
+    this.host = host;
+    this.port = port;
+    this.secure = secure;
+    this.auth = auth;
+    this.shown = shown;
+  }
+
+  public name(): string {
+    return `${this.host}:${this.port}`;
+  }
+}
+
+function proxyError(
+  code: "ERR_INVALID_PROXY_URL" | "ERR_PROXY_AUTH_REQUIRED" | "ERR_PROXY_REFUSED",
+  message: string,
+  proxy: string,
+  status: int,
+): FetchError {
+  return { kind: "PROXY", code: code, message: message, proxy: proxy, status: status };
+}
+
+function envValue(names: string[]): [string, string] | undefined {
+  for (const name of names) {
+    const value = process.env[name];
+    if (value != undefined && value != "") {
+      return [name, value];
+    }
+  }
+
+  return undefined;
+}
+
+function hostMatches(host: string, port: int, entry: string): boolean {
+  let pattern = entry.trim().toLowerCase();
+  if (pattern == "") {
+    return false;
+  }
+  if (pattern == "*") {
+    return true;
+  }
+  const colon = pattern.lastIndexOf(":");
+  if (colon > 0 && !pattern.includes("]") && pattern.indexOf(":") == colon) {
+    const wanted = pattern.slice(colon + 1);
+    if (wanted != String(port)) {
+      return false;
+    }
+    pattern = pattern.slice(0, colon);
+  }
+  const slash = pattern.indexOf("/");
+  if (slash > 0) {
+    return inNetwork(host, pattern.slice(0, slash), pattern.slice(slash + 1));
+  }
+  if (pattern.startsWith(".")) {
+    return host.endsWith(pattern) || host == pattern.slice(1);
+  }
+
+  return host == pattern || host.endsWith("." + pattern);
+}
+
+function ipv4Number(text: string): double | undefined {
+  const parts = text.split(".");
+  if (parts.length != 4) {
+    return undefined;
+  }
+  let value = 0.0;
+  for (const part of parts) {
+    const parsed = parseInt(part);
+    if (parsed.isErr() || parsed.value < 0 || parsed.value > 255) {
+      return undefined;
+    }
+    value = value * 256 + parsed.value.toDouble();
+  }
+
+  return value;
+}
+
+function inNetwork(host: string, base: string, bits: string): boolean {
+  const address = ipv4Number(host);
+  const network = ipv4Number(base);
+  const width = parseInt(bits);
+  if (address == undefined || network == undefined || width.isErr()) {
+    return false;
+  }
+  const size = Math.pow(2, 32 - Math.min(32, Math.max(0, width.value)).toDouble());
+
+  return Math.floor(address / size) == Math.floor(network / size);
+}
+
+function bypassed(host: string, port: int): boolean {
+  const lower = host.toLowerCase();
+  if (lower == "localhost" || lower == "127.0.0.1" || lower == "::1") {
+    return true;
+  }
+  const found = envValue(["NO_PROXY", "no_proxy"]);
+  if (found == undefined) {
+    return false;
+  }
+
+  return found[1].split(",").some((entry) => hostMatches(lower, port, entry));
+}
+
+function proxyOf(text: string, source: string): Result<ProxyTarget, FetchError> {
+  const parsed = URL.parse(text);
+  const hint = source == "proxy.url" ? "" : `; write it as http://${text}`;
+  if (parsed.isErr()) {
+    return err(proxyError("ERR_INVALID_PROXY_URL",
+                          `${source} is not a URL: "${text}"${hint}`, text, 0));
+  }
+  const url = parsed.value;
+  const protocol = url.protocol();
+  if (protocol != "http:" && protocol != "https:") {
+    return err(proxyError("ERR_INVALID_PROXY_URL",
+                          `${source} is a ${protocol} proxy, and only http: and https: proxies work`,
+                          text, 0));
+  }
+  const secure = protocol == "https:";
+  const port = url.portNumber() ?? (secure ? 443 : 80);
+  const hostname = url.hostname();
+  const host = hostname.startsWith("[") ? hostname.slice(1, hostname.length - 1) : hostname;
+  let auth = "";
+  if (url.username() != "") {
+    const user = decodeURIComponent(url.username()).unwrapOr(url.username());
+    const password = decodeURIComponent(url.password()).unwrapOr(url.password());
+    auth = Buffer.from(`${user}:${password}`).toString("base64");
+  }
+  const shown = `${protocol}//${url.host()}`;
+  const proxy = new ProxyTarget(host, port, secure, auth, shown);
+
+  return ok(proxy);
+}
+
+function proxyFor(url: URL, peer: Peer, option?: ProxyOption): Result<ProxyTarget | undefined, FetchError> {
+  if (option != undefined) {
+    if (!option.enabled) {
+      return ok(undefined);
+    }
+    const explicitResult = proxyOf(option.url, "proxy.url");
+    if (explicitResult.isErr()) {
+      return err(explicitResult.error);
+    }
+
+    return ok(explicitResult.value);
+  }
+  const https = url.protocol() == "https:";
+  const cgi = process.env.REQUEST_METHOD != undefined;
+  const names = https ? ["HTTPS_PROXY", "https_proxy"] : cgi ? [] : ["HTTP_PROXY", "http_proxy"];
+  const found = envValue(names);
+  if (found == undefined || bypassed(peer.host, peer.port)) {
+    return ok(undefined);
+  }
+  const envResult = proxyOf(found[1], found[0]);
+  if (envResult.isErr()) {
+    return err(envResult.error);
+  }
+
+  return ok(envResult.value);
+}
+
+function proxyStatusError(status: int, proxy: ProxyTarget, peer: Peer): FetchError {
+  if (status == 407) {
+    return proxyError("ERR_PROXY_AUTH_REQUIRED",
+                      `the proxy ${proxy.name()} asks for a login (407): put user and password ` +
+                      "into its URL, http://user:password@host:port", proxy.shown, status);
+  }
+
+  return proxyError("ERR_PROXY_REFUSED",
+                    `the proxy ${proxy.name()} refused to connect to ${peer.name()} (${status})`,
+                    proxy.shown, status);
+}
+
+function proxyConnectionError(e: SystemError, proxy: ProxyTarget, peer: Peer): FetchError {
+  const proxyPeer = new Peer(proxy.host, proxy.port, peer.timeout, peer.deadline);
+  const failure = connectionError(e, proxyPeer, "connecting");
+  if (failure.kind == "NETWORK") {
+    return {
+      kind: "NETWORK",
+      code: failure.code,
+      message: `the proxy: ${failure.message}`,
+      errno: failure.errno,
+      syscall: failure.syscall,
+      host: failure.host,
+      port: failure.port,
+    };
+  }
+
+  return failure;
+}
+
+async function tunnel(conn: Connection, proxy: ProxyTarget, peer: Peer): Promise<FetchError | undefined> {
+  const target = peer.host.includes(":") ? `[${peer.host}]:${peer.port}` : peer.name();
+  let head = `CONNECT ${target} HTTP/1.1\r\nhost: ${target}\r\n`;
+  if (proxy.auth != "") {
+    head += `proxy-authorization: Basic ${proxy.auth}\r\n`;
+  }
+  head += "\r\n";
+  const encoder = new TextEncoder();
+  const wroteResult = await conn.write(encoder.encode(head));
+  if (wroteResult.isErr()) {
+    return proxyConnectionError(wroteResult.error, proxy, peer);
+  }
+  let answer = "";
+  const decoder = new TextDecoder("latin1");
+  while (!answer.includes("\r\n\r\n")) {
+    const readResult = await conn.readRaw(peer.deadline);
+    if (readResult.isErr()) {
+      return proxyConnectionError(readResult.error, proxy, peer);
+    }
+    const chunk = readResult.value;
+    if (chunk == undefined || answer.length > 16384) {
+      return proxyStatusError(502, proxy, peer);
+    }
+    answer += decoder.decode(chunk);
+  }
+  const statusText = answer.split(" ")[1] ?? "";
+  const status = parseInt(statusText).unwrapOr(502);
+  if (status < 200 || status > 299) {
+    return proxyStatusError(status, proxy, peer);
+  }
+
+  return undefined;
+}
+
+async function openThrough(proxy: ProxyTarget, https: boolean,
+                           peer: Peer): Promise<Result<Connection, FetchError>> {
+  const opened = await Connection.open(proxy.host, proxy.port, proxy.secure, peer.deadline)
+  if (opened.isErr()) return err(proxyConnectionError(opened.error, proxy, peer))
+  const conn = opened.value
+  if (!https) {
+    conn.absolute = true
+    conn.proxyAuth = proxy.auth
+    return ok(conn)
+  }
+  const problem = await tunnel(conn, proxy, peer)
+  if (problem != undefined) {
+    conn.close()
+    return err(problem)
+  }
+  const secured = await conn.secure(peer.host, peer.deadline)
+  if (secured.isErr()) {
+    conn.close()
+    return err(connectionError(secured.error, peer, "connecting"))
+  }
+  return ok(conn)
+}
+
+async function send(request: Request, url: URL, redirected: boolean, peer: Peer,
+                    proxy?: ProxyTarget): Promise<Result<Response, FetchError>> {
+  const https = url.protocol() == "https:"
+  const through = proxy == undefined ? "" : proxy.shown + "|"
+  const origin = through + url.protocol() + peer.host + ":" + String(peer.port)
   let idle = takeIdle(origin)
   let reused = idle != undefined
   for (;;) {
     let conn: Connection
     if (idle != undefined) {
       conn = idle
+    } else if (proxy != undefined) {
+      const opened = await openThrough(proxy, https, peer)
+      if (opened.isErr()) return opened
+      conn = opened.value
     } else {
-      const opened = await Connection.open(host, port, https, deadline)
-      if (opened.isErr()) return err(fetchFailed(opened.error, deadline))
+      const opened = await Connection.open(peer.host, peer.port, https, peer.deadline)
+      if (opened.isErr()) return err(connectionError(opened.error, peer, "connecting"))
       conn = opened.value
     }
     conn.origin = origin
-    const wrote = await request.writeTo(conn, url, deadline)
+    const wrote = await request.writeTo(conn, url, peer)
     if (wrote.isErr()) {
       conn.close()
       return wrote
     }
-    const status = await conn.response(deadline)
+    const status = await conn.response(peer.deadline)
     if (status.isErr()) {
       conn.close()
-      if (passed(deadline)) {
-        return err(timedOut())
+      if (peer.passed()) {
+        return err(timeoutError(peer))
       }
 
       if (reused && !request.bodyUsed()) {
@@ -1711,12 +2394,16 @@ async function send(request: Request, url: URL, redirected: boolean,
         reused = false
         continue
       }
-      return err(fetchFailed(status.error, deadline))
+      return err(connectionError(status.error, peer, "waiting for the response"))
     }
     let shown = url.href()
     const hash = shown.indexOf("#")
     if (hash >= 0) shown = shown.slice(0, hash)
-    return ok(Response.readFrom(conn, shown, redirected, deadline))
+    if (proxy != undefined && !https && conn.status == 407) {
+      conn.close()
+      return err(proxyStatusError(conn.status, proxy, peer))
+    }
+    return ok(Response.readFrom(conn, shown, redirected, peer))
   }
 }
 
@@ -1727,7 +2414,9 @@ class DataUrl {
 function dataResponse(url: URL): Result<Response, FetchError> {
   const text = url.href().slice(5)
   const comma = text.indexOf(",")
-  if (comma < 0) return err(failed("invalid data: URL"))
+  if (comma < 0)
+    return err(requestError("ERR_INVALID_URL", `${url.href()} is not a data: URL: it has no comma`,
+                            url.href()))
   let type = text.slice(0, comma)
   const data = text.slice(comma + 1)
   const base64 = /;base64$/i.test(type)
@@ -1738,21 +2427,22 @@ function dataResponse(url: URL): Result<Response, FetchError> {
                                           new Uint8Array(bytes), url.href())))
 }
 
-function requestProblem(request: Request, url: Result<URL, UrlError>): FetchError | undefined {
-  if (url.isErr())
-    return { code: "bad_request", message: "Failed to parse URL from " + request.url,
-             cause: url.error.message }
-  if (url.value.username() != "" || url.value.password() != "")
-    return badRequest("Request cannot be constructed from a URL that includes credentials: " +
-                      request.url)
+function requestProblem(request: Request, url: URL): FetchError | undefined {
+  if (url.username() != "" || url.password() != "")
+    return requestError("ERR_CREDENTIALS_IN_URL",
+                        `the URL ${request.url} has a user name or a password; send them in ` +
+                        "the authorization header instead", request.url)
   const method = methodProblem(request.method)
-  if (method != undefined) return badRequest(method)
+  if (method != undefined) return requestError("ERR_INVALID_METHOD", method, request.url)
   const body = request.body()
   if (body == undefined) return undefined
   if (request.method == "GET" || request.method == "HEAD")
-    return badRequest("Request with GET/HEAD method cannot have body.")
+    return requestError("ERR_BODY_WITH_GET",
+                        `a ${request.method} request cannot have a body: use POST, or drop the body`,
+                        request.url)
   if (!(body instanceof BodyStream) && request.duplex != "half")
-    return badRequest("RequestInit: duplex option is required when sending a body.")
+    return requestError("ERR_DUPLEX_REQUIRED",
+                        "a request whose body is a stream needs duplex: \"half\"", request.url)
   return undefined
 }
 
@@ -1771,23 +2461,36 @@ function startDeadline(timeout?: int): object | undefined {
 export async function fetch(input: string | URL | Request,
                             init?: RequestInit): Promise<Result<Response, FetchError>> {
   if (input instanceof Request && init?.body == undefined && input.bodyUsed())
-    return err(badRequest("Request.constructor: Cannot construct a Request with a Request " +
-                          "object that has already been used."))
+    return err(requestError("ERR_REQUEST_USED",
+                            "the body of this Request is already read, so it cannot be sent",
+                            input.url))
   const request = new Request(input, init)
   const first = URL.parse(request.url)
-  const problem = requestProblem(request, first)
+  if (first.isErr())
+    return err(requestError("ERR_INVALID_URL", `fetch cannot parse "${request.url}" as a URL`,
+                            request.url))
+  const problem = requestProblem(request, first.value)
   if (problem != undefined) return err(problem)
-  if (first.isErr()) return err(failed(first.error.message))
   let url = first.value
-  const deadline = startDeadline(request.timeout)
+  const timeout = request.timeout
+  const deadline = startDeadline(timeout)
   let current = request
   let redirects = 0
   for (;;) {
     if (url.protocol() == "data:") return dataResponse(url)
     if (url.protocol() != "http:" && url.protocol() != "https:")
-      return err(failed("not implemented... yet..."))
-    if (url.port() != "" && BAD_PORTS.has(parseInt(url.port()).unwrapOr(0))) return err(failed("bad port"))
-    const sent = await send(current, url, redirects > 0, deadline)
+      return err(requestError("ERR_UNSUPPORTED_SCHEME",
+                              `fetch cannot get ${url.href()}: only http:, https: and data: work`,
+                              url.href()))
+    const portNumber = url.portNumber()
+    if (portNumber != undefined && BAD_PORTS.has(portNumber))
+      return err(requestError("ERR_BLOCKED_PORT",
+                              `fetch does not connect to port ${portNumber}: browsers and node ` +
+                              "block it too", url.href()))
+    const peer = peerOf(url, timeout, deadline)
+    const proxied = proxyFor(url, peer, init?.proxy)
+    if (proxied.isErr()) return err(proxied.error)
+    const sent = await send(current, url, redirects > 0, peer, proxied.value)
     if (sent.isErr()) return sent
     const response = sent.value
     const status = response.status
@@ -1795,12 +2498,32 @@ export async function fetch(input: string | URL | Request,
     const redirect = status == 301 || status == 302 || status == 303 || status == 307 ||
                      status == 308
     if (!redirect || location == undefined || request.redirect == "manual") return ok(response)
-    if (request.redirect == "error") return err(failed("unexpected redirect"))
-    if (++redirects > 20) return err(failed("redirect count exceeded"))
+    if (request.redirect == "error")
+      return err(redirectError("ERR_UNEXPECTED_REDIRECT",
+                               `${url.href()} redirects to ${location}, and redirect is "error"`,
+                               location))
+    if (++redirects > 20)
+      return err(redirectError("ERR_TOO_MANY_REDIRECTS",
+                               `more than 20 redirects, the last one to ${location}`, location))
     const next = URL.parse(location, url)
-    if (next.isErr()) return err(failed(next.error.message))
+    if (next.isErr())
+      return err(redirectError("ERR_INVALID_LOCATION",
+                               `${url.href()} redirects to "${location}", which is not a URL`,
+                               location))
     const drained = await response.bytes()
-    if (drained.isErr()) return err(failed(drained.error.message))
+    if (drained.isErr()) {
+      if (peer.passed()) {
+        return err(timeoutError(peer))
+      }
+
+      return err({
+        kind: "RESPONSE",
+        code: "ERR_CLOSED",
+        message: `${peer.name()} closed the connection in the middle of a redirect`,
+        host: peer.host,
+        port: peer.port,
+      })
+    }
     const method = current.method
     if (((status == 301 || status == 302) && method == "POST") ||
         (status == 303 && method != "GET" && method != "HEAD")) {
@@ -1810,7 +2533,9 @@ export async function fetch(input: string | URL | Request,
         headers.delete(name)
       current = new Request(next.value, { method: "GET", headers, redirect: request.redirect })
     } else if (current.bodyUsed()) {
-      return err(failed("cannot follow a redirect with a body that streams"))
+      return err(redirectError("ERR_REDIRECT_WITH_STREAM",
+                               `${url.href()} redirects to ${location}, but the body of the ` +
+                               "request was a stream and is already sent", location))
     }
     if (next.value.origin() != url.origin()) {
       current.headers.delete("authorization")
@@ -1820,4 +2545,3 @@ export async function fetch(input: string | URL | Request,
     url = next.value
   }
 }
-

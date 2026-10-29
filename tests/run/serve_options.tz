@@ -34,7 +34,7 @@ console.log(r.status, must(await r.text()))
 await stopped
 console.log("finished")
 const after = await fetch(`http://127.0.0.1:${listening.port}/`)
-if (after.isErr()) console.log(after.error.message)
+if (after.isErr()) console.log(after.error.kind, after.error.code)
 
 function must<T, E>(r: Result<T, E>): T {
   if (r.isErr()) {

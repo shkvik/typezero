@@ -143,7 +143,7 @@ decimal("0.30") == decimal("0.3")                   // true
    [errors.md](errors.md), шаг 2): целое в `decimal` только явно (`toDecimal()`, сделано 27 октября), `decimal(text)` — `Result`, деление
    и `sqrt` — с доказательством вместо `RangeError`. `decimal(text)` сделан 27 октября: строка, известная при
    сборке (литерал, константа, выбор из литералов), проверяется сразу и даёт `decimal`; иначе —
-   `Result<decimal, DecimalError>` (`code: "bad_decimal"`, `message`, `text`). Деление и `sqrt`
+   `Result<decimal, DecimalError>` (`code: "ERR_INVALID_DECIMAL"`, `message`, `text`). Деление и `sqrt`
    сделаны 28 октября: анализ диапазонов чисел ведёт и `decimal` — границы в `double`, после
    каждого действия расширенные на шаг наружу (у деления — ещё на 10⁻²⁰, его округление), так
    что точный ноль (`0.1 + 0.2 - 0.3`) всегда внутри; `x / n`, `x % n`, `x.div(n)`, `x ** -k`

@@ -5,8 +5,10 @@
 #include "compiler/check/expr/expr_checker/expr_checker.h"
 #include "compiler/check/types/type_relations/type_relations.h"
 #include "compiler/library/date/date_checker/date_checker.h"
+#include "compiler/library/events/event_target_checker/event_target_checker.h"
 #include "compiler/library/result/result_checker/result_checker.h"
 #include "compiler/library/stream/stream_sources/stream_sources.h"
+#include "compiler/load/to_utf8/to_utf8.h"
 #include "llvm/Support/ConvertUTF.h"
 
 using llvm::cast;
@@ -156,6 +158,10 @@ Expr *ProcessChecker::checkProcessCall(CallExpr *call, MemberExpr *member) {
         "there is nothing to catch: nothing is thrown or rejected in tz, an error is a Result "
         "that the code which gets it handles (docs/errors.md, section 4)");
   }
+  if ((name == "on" || name == "once" || name == "off") &&
+      checker_.libFunctions_.lookup("processOn")) {
+    return checkSignalCall(call, member);
+  }
   if (llvm::is_contained(properties, name)) {
     checker_.diags_.error(member->loc(), "'process." + name + "' is not a function");
   } else {
@@ -164,6 +170,41 @@ Expr *ProcessChecker::checkProcessCall(CallExpr *call, MemberExpr *member) {
   checkArgsLoosely();
 
   return call;
+}
+
+Expr *ProcessChecker::checkSignalCall(CallExpr *call, MemberExpr *member) {
+  llvm::StringRef name = member->name;
+  call->type = Type::error();
+  if (!checker_.argumentChecker().checkArity(call, member->loc(), 2, 2)) {
+    return call;
+  }
+  static const char16_t *const signals[] = {u"SIGINT", u"SIGTERM", u"SIGHUP", u"SIGBREAK"};
+  auto *event = dyn_cast<StringLitExpr>(call->args[0]);
+  if (event && llvm::none_of(signals, [&](const char16_t *s) { return event->value == s; })) {
+    checker_.diags_.error(event->loc(), "'process." + name +
+                                            "' listens only to the signals 'SIGINT', 'SIGTERM', "
+                                            "'SIGHUP' and 'SIGBREAK', not to '" +
+                                            toUtf8(event->value) + "'");
+    call->args[1] = checker_.exprChecker().checkExpr(call->args[1]);
+    return call;
+  }
+  Expr *listener = checker_.exprChecker().checkExpr(call->args[1]);
+  call->args[1] = listener;
+  if (listener->type->isError()) {
+    return call;
+  }
+  bool waits = listener->type->isFunction() && listener->type->ret()->isPromise();
+  llvm::StringRef fn = name == "off" ? (waits ? "processOffAsync" : "processOff")
+                                     : (waits ? "processOnAsync" : "processOn");
+  if (name != "off") {
+    auto *once = checker_.ctx_.make<BoolLitExpr>(call->loc(), name == "once");
+    once->type = Type::boolTy();
+    call->args.push_back(once);
+  }
+  std::vector<bool> given(call->args.size(), true);
+  given[0] = false;
+
+  return checker_.eventTargetChecker().callLibraryFunction(call, fn, {}, given, member->loc());
 }
 
 Expr *ProcessChecker::checkProcessMember(MemberExpr *member) {

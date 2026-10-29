@@ -1,6 +1,6 @@
 // The path is relative to this file, which is in data/.
 export function settings(): Json {
-  return embedJson("../config.json")
+  return JSON.parse(embedText("../config.json")).unwrapOr(null)
 }
 
 export const page = embedText("./page.html")

@@ -18,8 +18,16 @@ bool isExternalReference(const Type *type) {
          type->isDict() || type->isPromise() || type->isUnknown();
 }
 
+bool isExternalCallback(const Type *type) {
+  return type->isFunction() && !type->hasRest() && type->ret()->isVoid() &&
+         llvm::all_of(type->params(), [](const Type *param) {
+           return param->isInteger() || param->isFloat() || param->isBool();
+         });
+}
+
 bool isExternalValue(const Type *type) {
-  if (type->isInteger() || type->isFloat() || type->isBool() || type->isString()) {
+  if (type->isInteger() || type->isFloat() || type->isBool() || type->isString() ||
+      isExternalCallback(type)) {
     return true;
   }
   if (type->isOptional()) {

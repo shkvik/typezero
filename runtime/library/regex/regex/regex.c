@@ -953,7 +953,7 @@ static TzRegex *from_string(void *p_obj, uint64_t p_meta, void *f_obj, uint64_t 
     if (!fail) {
       tz_panicf("internal error: %s", message);
     }
-    tz_fail_utf8(fail, "bad_regex", message);
+    tz_fail_utf8(fail, "ERR_INVALID_REGEX", message);
     return NULL;
   }
   const char *error = NULL;
@@ -970,7 +970,7 @@ static TzRegex *from_string(void *p_obj, uint64_t p_meta, void *f_obj, uint64_t 
     if (!fail) {
       tz_panicf("internal error: %s", message);
     }
-    tz_fail_utf8(fail, "bad_regex", message);
+    tz_fail_utf8(fail, "ERR_INVALID_REGEX", message);
     return NULL;
   }
   tz_buf_free(&p);

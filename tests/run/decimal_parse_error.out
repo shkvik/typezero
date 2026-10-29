@@ -1,8 +1,8 @@
 1.5
 -2000
 31
-bad_decimal Cannot convert 12abc to a decimal "12abc"
-bad_decimal Cannot convert  to a decimal ""
-bad_decimal Cannot convert NaN to a decimal "NaN"
+ERR_INVALID_DECIMAL Cannot convert 12abc to a decimal "12abc"
+ERR_INVALID_DECIMAL Cannot convert  to a decimal ""
+ERR_INVALID_DECIMAL Cannot convert NaN to a decimal "NaN"
 1000
 102.5

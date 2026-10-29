@@ -30,9 +30,9 @@ const inf = bytes.getFloat64(0)
 console.log(inf.isErr() ? inf.error.code : "Ok")
 
 // A number of JSON beyond a double is an error of JSON.
-const big = JSON.parse<double[]>("[1, 1e400]")
+const big = JSON.parse("[1, 1e400]")
 console.log(big.isErr() ? big.error.message : "Ok")
-const near = JSON.parse<double[]>("[1, 1e300]")
+const near = JSON.parse("[1, 1e300]")
 console.log(near.isOk() ? near.value : "Err")
 
 // A float32 holds up to 3.4e38: a larger value is stored as the largest.

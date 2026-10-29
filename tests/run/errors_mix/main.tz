@@ -14,14 +14,14 @@ for (const { line, separator } of inputs) {
     console.log("entry", JSON.stringify(entry.value))
   } else {
     const e = entry.error
-    if (e.code == "bad_regex") console.log("regex:", e.message)
+    if (e.code == "ERR_INVALID_REGEX") console.log("regex:", e.message)
     else console.log("parse:", describe(e))
   }
 }
 for (const text of ['{"limit": 100, "rules": ["positive"]}', '{"limit": "lots", "rules": []}', '{"limit": 1,']) {
   const config = loadConfig(text)
   if (config.isOk()) console.log("config", config.value.limit, config.value.rules)
-  else console.log("config:", config.error.message, config.error.cause.code, config.error.cause.path)
+  else console.log("config:", config.error.message, config.error.cause)
 }
 console.log(ownerName('{"owner": {"name": "Ann"}}'), ownerName('{"owner": null}'))
 
@@ -80,7 +80,7 @@ function total(lines: string[]): Result<decimal, string> {
   for (const entry of entries(lines)) {
     if (entry.isErr()) {
       const e = entry.error
-      return err(e.code == "bad_regex" ? e.message : describe(e))
+      return err(e.code == "ERR_INVALID_REGEX" ? e.message : describe(e))
     }
     const checked = checkAll(entry.value.amount)
     if (checked.isErr()) return err(describe(checked.error))

@@ -7,9 +7,9 @@
 #include "compiler/declare/prelude/prelude.h"
 #include "compiler/library/bytes/buffer_static_checker/buffer_static_checker.h"
 #include "compiler/library/json/json_checker/json_checker.h"
-#include "compiler/library/tz_modules/library_calls/library_calls.h"
 #include "compiler/library/json/json_type_checker/json_type_checker.h"
 #include "compiler/library/reflect/reflect_checker/reflect_checker.h"
+#include "compiler/library/tz_modules/library_calls/library_calls.h"
 #include "compiler/whole_program/flows/flows.h"
 #include "llvm/ADT/SmallString.h"
 #include "llvm/ADT/StringExtras.h"
@@ -296,9 +296,12 @@ Expr *JsonStaticChecker::checkJsonStatic(CallExpr *call, MemberExpr *member) {
   llvm::StringRef fn = member->name;
   if (fn == "parse") {
     if (call->args.size() == 2) {
-      checker_.diags_.error(call->args[1]->loc(),
-                            "the reviver of JSON.parse is not supported; convert the "
-                            "Json it gives, or give the type: 'JSON.parse<T>(text)'");
+      checker_.diags_.error(call->args[1]->loc(), "the reviver of JSON.parse is not supported");
+      checkArgsLoosely();
+      return call;
+    }
+    if (!member->typeArgs.empty()) {
+      checker_.diags_.error(member->loc(), "JSON.parse takes no type arguments");
       checkArgsLoosely();
       return call;
     }
@@ -306,27 +309,13 @@ Expr *JsonStaticChecker::checkJsonStatic(CallExpr *call, MemberExpr *member) {
       return call;
     }
     call->args[0] = checker_.argumentChecker().checkArg(call->args[0], Type::string());
-    if (member->typeArgs.empty()) {
-      call->builtin = Builtin::JsonParse;
-      call->type = Type::result(Type::json(), checker_.prelude().builtinType("JsonError"));
-      return call;
-    }
-    if (member->typeArgs.size() != 1) {
-      checker_.diags_.error(member->loc(), "JSON.parse takes one type argument, the type to build: "
-                                           "'JSON.parse<User>(text)'");
-      return call;
-    }
-    const Type *target = checker_.typeResolver().resolveType(member->typeArgs[0], false);
-    if (!checker_.jsonTypeChecker().checkFromJsonType(target, member->typeArgs[0].loc,
-                                                      "JSON.parse")) {
-      return call;
-    }
-    call->builtin = Builtin::JsonParseAs;
-    call->type = Type::result(target, checker_.prelude().builtinType("JsonError"));
+    checkConstantJson(call->args[0]);
+    call->builtin = Builtin::JsonParse;
+    call->type = Type::result(Type::json(), checker_.prelude().builtinType("JsonError"));
     return call;
   }
   if (!member->typeArgs.empty()) {
-    checker_.diags_.error(member->loc(), "only JSON.parse takes a type argument");
+    checker_.diags_.error(member->loc(), "'JSON." + fn + "' takes no type arguments");
   }
   if (fn != "stringify") {
     checker_.diags_.error(member->loc(),
@@ -447,8 +436,47 @@ bool JsonStaticChecker::readEmbedded(CallExpr *call, llvm::StringRef fn, std::st
   return true;
 }
 
+void JsonStaticChecker::checkConstantJson(const Expr *arg) {
+  while (auto *conv = llvm::dyn_cast<CastExpr>(arg)) {
+    if (!conv->isImplicit()) {
+      return;
+    }
+    arg = conv->operand;
+  }
+  auto *lit = llvm::dyn_cast<StringLitExpr>(arg);
+  if (!lit) {
+    return;
+  }
+  std::string text;
+  llvm::convertUTF16ToUTF8String(
+      llvm::ArrayRef<llvm::UTF16>(reinterpret_cast<const llvm::UTF16 *>(lit->value.data()),
+                                  lit->value.size()),
+      text);
+  if (llvm::StringRef(text).starts_with("\xEF\xBB\xBF")) {
+    checker_.diags_.error(lit->loc(), "this text is not JSON, so JSON.parse would always fail: it "
+                                      "starts with a byte order mark (BOM)");
+    return;
+  }
+  JsonProblem problem = checkJsonText(text);
+  if (problem.message.empty()) {
+    return;
+  }
+  size_t line = 1, column = 1;
+  for (size_t i = 0; i < problem.offset && i < text.size(); ++i) {
+    if (text[i] == '\n') {
+      ++line;
+      column = 1;
+    } else if ((static_cast<unsigned char>(text[i]) & 0xC0) != 0x80) {
+      ++column;
+    }
+  }
+  checker_.diags_.error(lit->loc(), "this text is not JSON, so JSON.parse would always fail: " +
+                                        problem.message + " (line " + std::to_string(line) +
+                                        ", column " + std::to_string(column) + ")");
+}
+
 Expr *JsonStaticChecker::checkJsonGlobal(CallExpr *call, NameExpr *name) {
-  static const llvm::StringLiteral names[] = {"embedJson", "embedText", "embedBytes", "fromJson"};
+  static const llvm::StringLiteral names[] = {"embedText", "embedBytes"};
   if (!llvm::any_of(
           names, [&](llvm::StringRef n) { return checker_.callChecker().isGlobalName(name, n); })) {
     return nullptr;
@@ -464,32 +492,6 @@ Expr *JsonStaticChecker::checkJsonGlobal(CallExpr *call, NameExpr *name) {
     return call;
   }
 
-  if (fn == "fromJson") {
-    if (name->typeArgs.empty() && call->args.size() == 2) {
-      return checker_.reflectChecker().checkFromJsonClass(call, name);
-    }
-    if (name->typeArgs.size() != 1) {
-      checker_.diags_.error(name->loc(),
-                            "fromJson needs the type to build, e.g. 'fromJson<User>(j)', or "
-                            "the class to make an object of, 'fromJson(User, j)'");
-      checkArgsLoosely();
-      return call;
-    }
-    if (!checker_.argumentChecker().checkArity(call, name->loc(), 1, 1)) {
-      return call;
-    }
-    Expr *arg = checker_.exprChecker().checkExpr(call->args[0], Type::json());
-    call->args[0] = checker_.typeRelations().coerce(
-        arg, arg->type->isOptional() || arg->type->isUndefined() ? Type::optional(Type::json())
-                                                                 : Type::json());
-    const Type *target = checker_.typeResolver().resolveType(name->typeArgs[0], false);
-    if (!checker_.jsonTypeChecker().checkFromJsonType(target, name->typeArgs[0].loc, "fromJson")) {
-      return call;
-    }
-    call->builtin = Builtin::FromJson;
-    call->type = Type::result(target, checker_.prelude().builtinType("JsonError"));
-    return call;
-  }
   if (!name->typeArgs.empty()) {
     checker_.diags_.error(name->loc(), "'" + fn + "' takes no type arguments");
   }
@@ -505,9 +507,6 @@ Expr *JsonStaticChecker::checkJsonGlobal(CallExpr *call, NameExpr *name) {
     return call;
   }
   llvm::StringRef text(bytes);
-  if (fn == "embedJson") {
-    text.consume_front("\xEF\xBB\xBF");
-  }
   llvm::SmallVector<llvm::UTF16, 64> units;
   if (!llvm::convertUTF8ToUTF16String(text, units)) {
     checker_.diags_.error(call->args[0]->loc(), "'" + shown + "' is not text in UTF-8");
@@ -515,44 +514,10 @@ Expr *JsonStaticChecker::checkJsonGlobal(CallExpr *call, NameExpr *name) {
   }
   std::u16string content(units.begin(), units.end());
 
-  if (fn == "embedText") {
-    auto *lit = checker_.ctx_.make<StringLitExpr>(call->loc(), std::move(content));
-    lit->type = Type::string();
-    return lit;
-  }
-  if (JsonProblem problem = checkJsonText(text); !problem.message.empty()) {
-    size_t line = 1, column = 1;
-    for (size_t i = 0; i < problem.offset && i < text.size(); ++i) {
-      if (text[i] == '\n') {
-        ++line;
-        column = 1;
-      } else if ((static_cast<unsigned char>(text[i]) & 0xC0) != 0x80) {
-        ++column;
-      }
-    }
-    checker_.diags_.error(call->args[0]->loc(),
-                          "'" + shown + "' is not valid JSON: " + problem.message + " (line " +
-                              std::to_string(line) + ", column " + std::to_string(column) + ")");
-    llvm::SourceMgr &sources = checker_.diags_.sourceMgr();
-    unsigned id =
-        sources.AddNewSourceBuffer(llvm::MemoryBuffer::getMemBufferCopy(text, full), llvm::SMLoc());
-    const char *start = sources.getMemoryBuffer(id)->getBufferStart();
-    checker_.diags_.note(llvm::SMLoc::getFromPointer(start + std::min(problem.offset, text.size())),
-                         "the JSON is wrong here");
-    return call;
-  }
-  llvm::SMLoc loc = call->args[0]->loc();
-  auto *lit = checker_.ctx_.make<StringLitExpr>(loc, std::move(content));
+  auto *lit = checker_.ctx_.make<StringLitExpr>(call->loc(), std::move(content));
   lit->type = Type::string();
-  llvm::SmallVector<llvm::UTF16, 64> path;
-  llvm::convertUTF8ToUTF16String(full, path);
-  auto *file = checker_.ctx_.make<StringLitExpr>(loc, std::u16string(path.begin(), path.end()));
-  file->type = Type::string();
-  call->args = {lit, file};
-  call->builtin = Builtin::EmbedJson;
-  call->type = Type::json();
 
-  return call;
+  return lit;
 }
 
 }

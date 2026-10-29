@@ -38,7 +38,7 @@ console.log(must(await crypto.subtle.exportKey("jwk", k2)))
 console.log(hex(must(await crypto.subtle.exportKey("raw", k2))))
 const k3 = must(await crypto.subtle.importKey("jwk", { kty: "oct", k: "c2VjcmV0", alg: "HS256", ext: true }, { name: "HMAC", hash: "SHA-256" }, true, ["sign"]))
 console.log(k3.algorithm, hex(must(await crypto.subtle.sign("HMAC", k3, enc.encode("message")))) == hex(sig))
-const jwk4 = JSON.parse<JsonWebKey>('{"kty":"oct","k":"AQID","key_ops":["verify"]}').unwrapOr({ kty: "oct" })
+const jwk4: JsonWebKey = { kty: "oct", k: "AQID", key_ops: ["verify"] }
 const k4 = must(await crypto.subtle.importKey("jwk", jwk4, { name: "HMAC", hash: "SHA-1" }, false, ["verify"]))
 console.log(k4.algorithm, k4.usages)
 

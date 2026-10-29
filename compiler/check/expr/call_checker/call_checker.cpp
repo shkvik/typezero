@@ -111,8 +111,7 @@ Expr *CallChecker::checkCall(CallExpr *call, const Type *expected) {
         return;
       }
       checker_.diags_.error(member->loc(),
-                            "type arguments can be given only to a generic function and to "
-                            "'JSON.parse<T>'");
+                            "type arguments can be given only to a generic function");
       member->typeArgs.clear();
     };
     if (auto *object = dyn_cast<NameExpr>(member->object);

@@ -1,5 +1,6 @@
 import { Request, Response } from "tz:fetch";
 import { URL } from "tz:url";
+import { WebSocket } from "tz:websocket";
 
 /**
  * What a server answers each request with: a request in, a response out, at
@@ -83,6 +84,13 @@ export type ServeOptions = {
    * byte now and then would hold a connection forever.
    */
   headersTimeout?: int;
+  /**
+   * How long, in milliseconds, a whole request may take to arrive, its body
+   * too, from its first byte; 300000, as in node; 0 is no limit. A slower
+   * client is answered with 408 and cut off, and a handler that reads the
+   * body gets a BodyError of kind "TIMEOUT".
+   */
+  requestTimeout?: int;
   /** http or https; http, `{ secure: false }`, when left out. */
   transport?: ServeTransport;
 };
@@ -125,6 +133,16 @@ export type ServeTransport =
       cert: string;
       key: string;
     };
+
+/**
+ * How `stop` ends a server: `timeout` is the most milliseconds to wait for
+ * the requests being handled; then the connections that are left are cut.
+ * Without it, `stop` waits as long as they need; 0 cuts them at once.
+ */
+export type StopOptions = {
+  /** The most milliseconds to wait before the connections left are cut. */
+  timeout?: int;
+};
 
 /**
  * Why `listen` gave an Err: an error of the core of the server — its socket,
@@ -285,13 +303,74 @@ export declare class Listening {
    * Stops taking connections, closes those that wait for a request, and
    * resolves once the requests being handled are answered. A second call
    * closes nothing and waits for the same: this is how to wait for the end
-   * of a server.
+   * of a server. With `timeout`, it waits no longer than that many
+   * milliseconds and then cuts the connections that are left: a stream
+   * being sent is cancelled, a handler that hangs is left behind.
    *
    * @example
-   * process.on("SIGINT", async () => {
-   *   await listening.stop();
-   *   console.log("stopped");
+   * process.once("SIGTERM", async () => {
+   *   await listening.stop({ timeout: 10_000 });
+   *   process.exit(0);
    * });
    */
-  public stop(): Promise<void>;
+  public stop(options?: StopOptions): Promise<void>;
 }
+
+/** What `upgradeWebSocket` may set for the WebSocket it makes. */
+export type UpgradeOptions = {
+  /** The subprotocol to answer with, one of those the client asked for. */
+  protocol?: string;
+  /** A larger message ends the connection with an error; 16 MB. */
+  maxMessageSize?: int;
+};
+
+/**
+ * Why `upgradeWebSocket` gave an Err: the request does not ask for a
+ * WebSocket (`ERR_NOT_WEBSOCKET`) or asks for a version other than 13
+ * (`ERR_UNSUPPORTED_VERSION`). Answer it with 426 or 400.
+ */
+export type UpgradeError = {
+  /** "REQUEST": the request is not a WebSocket one. */
+  kind: "REQUEST";
+  /** What is wrong with the request. */
+  code: "ERR_NOT_WEBSOCKET" | "ERR_UNSUPPORTED_VERSION";
+  /** What happened, for people. */
+  message: string;
+};
+
+/**
+ * What `upgradeWebSocket` gives: the WebSocket, connected once the handler
+ * returns `response`, and the response, 101, to return.
+ */
+export declare class Upgraded {
+  /** The WebSocket of this request; listen to its events before returning. */
+  public readonly socket: WebSocket;
+  /** The 101 response the handler returns. */
+  public readonly response: Response;
+
+  public constructor(socket: WebSocket, response: Response);
+}
+
+/**
+ * Turns a request into a WebSocket, as Deno does: the handler listens to the
+ * events of `socket` and returns `response`.
+ *
+ * @example
+ * new Server({ port: 3000 }, (request) => {
+ *   const upgradeResult = upgradeWebSocket(request);
+ *
+ *   if (upgradeResult.isErr()) {
+ *     return new Response(upgradeResult.error.message, { status: 426 });
+ *   }
+ *
+ *   const peer = upgradeResult.value.socket;
+ *   peer.on("message", (data) => console.log(data));
+ *   peer.on("error", (error) => console.log(error.message));
+ *
+ *   return upgradeResult.value.response;
+ * });
+ */
+export declare function upgradeWebSocket(
+  request: Request,
+  options?: UpgradeOptions,
+): Result<Upgraded, UpgradeError>;

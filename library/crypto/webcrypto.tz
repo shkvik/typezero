@@ -805,16 +805,144 @@ abstract class KeyHandle {
   }
 }
 
-function jsonFailure(e: JsonError): SubtleError {
-  return typeError(e.path == "" ? e.message : `${e.path}: ${e.message}`)
+function jsonKind(value: Json): string {
+  if (value == null) {
+    return "null";
+  }
+  if (Array.isArray(value)) {
+    return "array";
+  }
+
+  return typeof value;
+}
+
+function jwkText(json: Json, name: string, path: string): Result<string | undefined, SubtleError> {
+  const value = json[name];
+  if (value == undefined) {
+    return ok(undefined);
+  }
+  if (typeof value == "string") {
+    return ok(value);
+  }
+  const kind = jsonKind(value);
+
+  return err(typeError(`${path}${name}: expected string, got ${kind}`));
+}
+
+function jwkPrime(json: Json, at: string): Result<RsaOtherPrimesInfo, SubtleError> {
+  if (typeof json != "object" || json == null || Array.isArray(json)) {
+    const kind = jsonKind(json);
+
+    return err(typeError(`${at}: expected object, got ${kind}`));
+  }
+  const prefix = `${at}.`;
+  const dResult = jwkText(json, "d", prefix);
+  if (dResult.isErr()) {
+    return err(dResult.error);
+  }
+  const rResult = jwkText(json, "r", prefix);
+  if (rResult.isErr()) {
+    return err(rResult.error);
+  }
+  const tResult = jwkText(json, "t", prefix);
+  if (tResult.isErr()) {
+    return err(tResult.error);
+  }
+  const prime: RsaOtherPrimesInfo = { d: dResult.value, r: rResult.value, t: tResult.value };
+
+  return ok(prime);
+}
+
+function jwkFromJson(json: Json): Result<JsonWebKey, SubtleError> {
+  if (typeof json != "object" || json == null || Array.isArray(json)) {
+    const kind = jsonKind(json);
+
+    return err(typeError(`expected JsonWebKey, got ${kind}`));
+  }
+  const texts = new Map<string, string>();
+  for (const name of ["alg", "crv", "d", "dp", "dq", "e", "k", "kty", "n", "p", "q", "qi", "use",
+                      "x", "y"]) {
+    const textResult = jwkText(json, name, "");
+    if (textResult.isErr()) {
+      return err(textResult.error);
+    }
+    const text = textResult.value;
+    if (text != undefined) {
+      texts.set(name, text);
+    }
+  }
+  const extValue = json.ext;
+  let ext: boolean | undefined = undefined;
+  if (typeof extValue == "boolean") {
+    ext = extValue;
+  } else if (extValue != undefined) {
+    const kind = jsonKind(extValue);
+
+    return err(typeError(`ext: expected boolean, got ${kind}`));
+  }
+  const opsValue = json.key_ops;
+  let ops: string[] | undefined = undefined;
+  if (Array.isArray(opsValue)) {
+    const list: string[] = [];
+    for (const [i, op] of opsValue.entries()) {
+      if (typeof op != "string") {
+        const kind = jsonKind(op);
+
+        return err(typeError(`key_ops[${i}]: expected string, got ${kind}`));
+      }
+      list.push(op);
+    }
+    ops = list;
+  } else if (opsValue != undefined) {
+    const kind = jsonKind(opsValue);
+
+    return err(typeError(`key_ops: expected array, got ${kind}`));
+  }
+  const othValue = json.oth;
+  let oth: RsaOtherPrimesInfo[] | undefined = undefined;
+  if (Array.isArray(othValue)) {
+    const list: RsaOtherPrimesInfo[] = [];
+    for (const [i, item] of othValue.entries()) {
+      const primeResult = jwkPrime(item, `oth[${i}]`);
+      if (primeResult.isErr()) {
+        return err(primeResult.error);
+      }
+      list.push(primeResult.value);
+    }
+    oth = list;
+  } else if (othValue != undefined) {
+    const kind = jsonKind(othValue);
+
+    return err(typeError(`oth: expected array, got ${kind}`));
+  }
+  const jwk: JsonWebKey = {
+    alg: texts.get("alg"),
+    crv: texts.get("crv"),
+    d: texts.get("d"),
+    dp: texts.get("dp"),
+    dq: texts.get("dq"),
+    e: texts.get("e"),
+    ext: ext,
+    k: texts.get("k"),
+    key_ops: ops,
+    kty: texts.get("kty"),
+    n: texts.get("n"),
+    oth: oth,
+    p: texts.get("p"),
+    q: texts.get("q"),
+    qi: texts.get("qi"),
+    use: texts.get("use"),
+    x: texts.get("x"),
+    y: texts.get("y"),
+  };
+
+  return ok(jwk);
 }
 
 function jwkOfKey(key: KeyObject): Result<JsonWebKey, SubtleError> {
   const json = exported(key.export({ format: "jwk" }))
   if (json.isErr()) return err(json.error)
-  const jwk = fromJson<JsonWebKey>(json.value)
-  if (jwk.isErr()) return err(jsonFailure(jwk.error))
-  return ok(jwk.value)
+  return jwkFromJson(json.value)
 }
 
 function jsonOf(jwk: JsonWebKey): Json {
@@ -1829,7 +1957,7 @@ function unwrappedData(format: KeyFormat, bytes: ArrayBuffer): Result<KeyData, S
   if (text.isErr()) return err(dataError("Invalid wrapped JWK key"))
   const json = JSON.parse(text.value)
   if (json.isErr()) return err(dataError("Invalid wrapped JWK key"))
-  const jwk = fromJson<JsonWebKey>(json.value)
+  const jwk = jwkFromJson(json.value)
   if (jwk.isErr()) return err(dataError("Invalid wrapped JWK key"))
   return ok(jwk.value)
 }
@@ -2031,8 +2159,8 @@ export const subtle = new SubtleCrypto()
 
 function subtleJwkOf(json: Json | undefined): JsonWebKey | JwkFailure {
   if (json == undefined) return new JwkFailure(dataError("Invalid keyData"))
-  const jwk = fromJson<JsonWebKey>(json)
-  if (jwk.isErr()) return new JwkFailure(jsonFailure(jwk.error))
+  const jwk = jwkFromJson(json)
+  if (jwk.isErr()) return new JwkFailure(jwk.error)
   return jwk.value
 }
 

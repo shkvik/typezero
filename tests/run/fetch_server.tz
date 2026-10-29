@@ -111,7 +111,7 @@ console.log(r.status, port(r.headers.get("location") ?? ""), r.redirected)
 must(await r.arrayBuffer())
 for (const path of ["/redirect", "/loop"]) {
   const failed = await fetch(`${base}${path}`, { redirect: path == "/loop" ? "follow" : "error" })
-  if (failed.isErr()) console.log(failed.error.code, failed.error.message, failed.error.cause)
+  if (failed.isErr()) console.log(failed.error.kind, failed.error.code)
 }
 r = must(await fetch(`${base}/empty`))
 console.log(r.status, r.body() == undefined, JSON.stringify(must(await r.text())))
@@ -124,14 +124,16 @@ console.log(await Promise.all(names.map(async n => must(await must(await fetch(`
 const quick = must(await fetch(`${base}/hello?name=quick`, { timeout: 5000 }))
 console.log(must(await quick.text()))
 const late = await fetch(`${base}/slow`, { timeout: 50 })
-if (late.isErr()) console.log(late.error.code, late.error.message)
+if (late.isErr()) console.log(late.error.kind, late.error.code, late.error.message)
 const trickle = must(await fetch(`${base}/trickle`, { timeout: 100 }))
 const lateBody = await trickle.text()
-if (lateBody.isErr()) console.log(trickle.status, lateBody.error.code, lateBody.error.message)
+if (lateBody.isErr())
+  console.log(trickle.status, lateBody.error.kind, lateBody.error.code, lateBody.error.message)
 
 await listening.stop()
 const refused = await fetch(`http://127.0.0.1:${listening.port}/hello`)
-if (refused.isErr()) console.log(refused.error.code, refused.error.message)
+if (refused.isErr())
+  console.log(refused.error.kind, refused.error.code, port(refused.error.message))
 
 function must<T, E>(r: Result<T, E>): T {
   if (r.isErr()) {

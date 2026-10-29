@@ -1,0 +1,11 @@
+b861
+10.0.0.1 10.0.0.2 9 17 30
+5353 53 hi
+PACKET ERR_INVALID_CHECKSUM the checksum of the IPv4 header does not add up
+8 0 0
+ff:ff:ff:ff:ff:ff 00:11:22:33:44:55 806
+1 00:11:22:33:44:55 10.0.0.1 192.168.0.1
+fe80::1 ff02::1 58 64 8
+8080 54321 1 true false 29200
+ERR_TRUNCATED the IPv4 header needs 20 bytes, and there are 10
+ERR_INVALID_HEADER the version is 6, not 4

@@ -13,7 +13,7 @@ en-GB 1,234,567.5 25%
 other x, y and z
 1 day ago Japan
 [ 'en-GB' ] [ 'en-GB' ]
-bad_locale: Incorrect locale information provided (not a tag)
+ERR_INVALID_LOCALE: Incorrect locale information provided (not a tag)
 zh-Hant-TW 1,234,567.5 25%
 10月27日 星期二
 [ 'a', 'ä', 'b' ] 1
@@ -26,7 +26,7 @@ sr-Latn 1.234.567,5 25%
 few x, y i z
 pre 1 dana Japan
 [ 'sr-Latn' ] [ 'sr-Latn' ]
-bad_locale: Incorrect locale information provided (en_US)
-bad_locale: First argument to Intl.Locale constructor can't be empty or missing ()
+ERR_INVALID_LOCALE: Incorrect locale information provided (en_US)
+ERR_INVALID_LOCALE: First argument to Intl.Locale constructor can't be empty or missing ()
 1,5 2,5 [ 'en-US', 'ru' ]
 1.234.567,5

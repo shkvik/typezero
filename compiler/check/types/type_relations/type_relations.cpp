@@ -548,8 +548,7 @@ Expr *TypeRelations::coerce(Expr *expr, const Type *to, llvm::StringRef what) {
                "default with '??'";
   } else if (from->nonOptional()->isJson()) {
     message += "; a Json may hold any JSON value: check what it holds first (e.g. 'typeof x == "
-               "\"string\"' or 'Array.isArray(x)'), or convert it with 'fromJson<" +
-               to->nonOptional()->name().str() + ">(x)'";
+               "\"string\"' or 'Array.isArray(x)')";
   } else if (to->nonOptional()->isAnyObject()) {
     message += "; only objects of the language are 'object's (instances of classes, object "
                "literals, dates, dictionaries...); for any value at all there is 'unknown'";

@@ -1,3 +1,6 @@
+#ifdef _WIN32
+#define _CRT_RAND_S
+#endif
 #include "runtime/library/net/net/net.h"
 #include "runtime/core/alloc/alloc.h"
 #include "runtime/core/array/array.h"
@@ -11,6 +14,7 @@
 #include "runtime/library/bytes/bytes/bytes.h"
 #include "runtime/library/net/deadline/deadline.h"
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <time.h>
 
@@ -19,7 +23,7 @@
 #define HTTP_MAX_LINE 4096
 #define HTTP_MAX_DISCARD 1048576
 
-enum { WAIT_NONE, WAIT_REQUEST, WAIT_RESPONSE, WAIT_CHUNK, WAIT_ALL, WAIT_DRAIN };
+enum { WAIT_NONE, WAIT_REQUEST, WAIT_RESPONSE, WAIT_CHUNK, WAIT_ALL, WAIT_DRAIN, WAIT_RAW };
 
 enum { BODY_NONE, BODY_LENGTH, BODY_CHUNKED, BODY_TO_END };
 
@@ -165,10 +169,11 @@ static void *broken_error(NetConn *c) {
     return net_system_error(c->http.make, c->error, "read", NULL, 0);
   }
 
-  return net_failure("UND_ERR_SOCKET", "other side closed");
+  return net_failure("ERR_CLOSED", "other side closed");
 }
 
 static void input(NetConn *c);
+static void raw_input(NetConn *c);
 
 static void abort_wait(TzDeadlineListener *l) {
   HttpState *h = CONTAINING_RECORD(l, HttpState, abort);
@@ -956,6 +961,8 @@ static int read_request(NetConn *c) {
   clear_head(h);
   h->method = latin1(s + at, method_end - at);
   h->target = request_url(c, s + target, target_end - target, &f);
+  h->request_since = h->head_since > 0 ? h->head_since : net_now();
+  h->responded = 0;
   h->head_since = 0;
   h->headers = headers;
   h->version = version;
@@ -980,7 +987,7 @@ static int read_response(NetConn *c) {
     ptrdiff_t end = head_end(c);
     if (end < 0) {
       if (c->in_end - c->in_start > HTTP_MAX_HEAD) {
-        settle_error(c, net_failure("ERR_HTTP_RESPONSE", "the head of the response is too large"));
+        settle_error(c, net_failure("ERR_HEAD_TOO_LARGE", "the head of the response is too large"));
         net_abort(c);
         return -1;
       }
@@ -1003,14 +1010,14 @@ static int read_response(NetConn *c) {
       }
     }
     if (version <= 0 || status < 100 || status > 999 || (line > at + 12 && s[at + 12] != ' ')) {
-      settle_error(c, net_failure("ERR_HTTP_RESPONSE", "the response is not HTTP/1.1"));
+      settle_error(c, net_failure("ERR_INVALID_RESPONSE", "the response is not HTTP/1.1"));
       net_abort(c);
       return -1;
     }
     TzArray *headers = NULL;
     Framing f;
     if (!parse_fields(s, line + 2, (size_t)end, &headers, &f, 0)) {
-      settle_error(c, net_failure("ERR_HTTP_RESPONSE", "the response has a malformed header"));
+      settle_error(c, net_failure("ERR_INVALID_RESPONSE", "the response has a malformed header"));
       net_abort(c);
       return -1;
     }
@@ -1025,7 +1032,7 @@ static int read_response(NetConn *c) {
       if (tz_rc_dec(&headers->rc)) {
         tz_arr_free(headers);
       }
-      settle_error(c, net_failure("ERR_HTTP_RESPONSE",
+      settle_error(c, net_failure("ERR_INVALID_RESPONSE",
                                   "the response has both Content-Length and Transfer-Encoding"));
       net_abort(c);
       return -1;
@@ -1196,16 +1203,18 @@ static int take_body(NetConn *c, const uint8_t **data, size_t *length) {
 }
 
 static void *body_error(NetConn *c) {
+  if (!c->eof && !c->error) {
+    return net_failure("ERR_INVALID_CHUNKED", "the body is not valid chunked encoding");
+  }
   if (c->server) {
-    return net_failure("ERR_HTTP_BODY", "the body of the request is malformed or was cut off");
+    return net_failure("ERR_CLOSED", "the client closed the connection before the end of the body");
   }
 
   return broken_error(c);
 }
 
 static void *too_large(void) {
-  return net_failure("ERR_HTTP_BODY_TOO_LARGE",
-                     "the body of the request is larger than maxBodySize");
+  return net_failure("ERR_BODY_TOO_LARGE", "the body of the request is larger than maxBodySize");
 }
 
 static void send_continue(NetConn *c) {
@@ -1340,9 +1349,85 @@ static void input(NetConn *c) {
   case WAIT_ALL:
     feed_body(c);
     return;
+  case WAIT_RAW:
+    raw_input(c);
+    return;
   default:
     return;
   }
+}
+
+static void raw_input(NetConn *c) {
+  size_t have = c->in_end - c->in_start;
+  if (have) {
+    TzBytes *chunk = net_bytes(c->in + c->in_start, have);
+    c->in_start = c->in_end = 0;
+    settle_value(c, &chunk, sizeof chunk);
+    return;
+  }
+  if (c->error && c->error != -1) {
+    settle_error(c, broken_error(c));
+    return;
+  }
+  if (c->eof || c->closed) {
+    TzBytes *none = NULL;
+    settle_value(c, &none, sizeof none);
+    return;
+  }
+  net_read(c);
+}
+
+void tz_tcp_read(TzPromise *p, void *conn, void *deadline, TzMaker make) {
+  TZ_ORDERED();
+  NetConn *c = (NetConn *)conn;
+  conn_lock(c);
+  if (begin_wait(c, p, WAIT_RAW, deadline, make)) {
+    input(c);
+  }
+  conn_unlock(c);
+}
+
+void tz_tcp_no_delay(void *conn, int32_t on, TzMaker make) {
+  (void)make;
+  NetConn *c = (NetConn *)conn;
+  BOOL value = on ? TRUE : FALSE;
+  setsockopt(c->s, IPPROTO_TCP, TCP_NODELAY, (const char *)&value, sizeof value);
+}
+
+void tz_tcp_keep_alive(void *conn, int32_t on, TzMaker make) {
+  (void)make;
+  NetConn *c = (NetConn *)conn;
+  BOOL value = on ? TRUE : FALSE;
+  setsockopt(c->s, SOL_SOCKET, SO_KEEPALIVE, (const char *)&value, sizeof value);
+}
+
+void tz_ws_random(void *bytes, TzMaker make) {
+  (void)make;
+  TzBytes *b = (TzBytes *)bytes;
+  size_t length = (size_t)tz_bytes_byte_length(b);
+  uint8_t *data = (uint8_t *)b->data;
+  for (size_t i = 0; i < length; i += 4) {
+    unsigned int value = 0;
+    if (rand_s(&value) != 0) {
+      value = (unsigned int)GetTickCount() * 2654435761u;
+    }
+    for (size_t k = 0; k < 4 && i + k < length; ++k) {
+      data[i + k] = (uint8_t)(value >> (k * 8));
+    }
+  }
+}
+
+void tz_tcp_reset(void *conn, TzMaker make) {
+  TZ_ORDERED();
+  (void)make;
+  NetConn *c = (NetConn *)conn;
+  conn_lock(c);
+  if (!c->closed) {
+    struct linger hard = {1, 0};
+    setsockopt(c->s, SOL_SOCKET, SO_LINGER, (const char *)&hard, sizeof hard);
+    net_abort(c);
+  }
+  conn_unlock(c);
 }
 
 void tz_http_too_slow(NetConn *c) {
@@ -1351,6 +1436,34 @@ void tz_http_too_slow(NetConn *c) {
   if (h->wait_kind == WAIT_REQUEST) {
     refuse(c, 408);
   }
+}
+
+void tz_http_request_too_slow(NetConn *c) {
+  HttpState *h = &c->http;
+  h->request_since = 0;
+  h->keep_alive = 0;
+  if (h->wait_kind == WAIT_CHUNK || h->wait_kind == WAIT_ALL) {
+    settle_error(c, net_failure("TIMEOUT_ERR", "the request did not come in full in time"));
+  }
+  if (h->responded) {
+    net_abort(c);
+    return;
+  }
+  answer_error(c, 408);
+}
+
+double tz_http_body_limit(void *conn, TzMaker make) {
+  (void)make;
+  NetConn *c = (NetConn *)conn;
+
+  return c->http.max_body;
+}
+
+int64_t tz_http_request_timeout(void *conn, TzMaker make) {
+  (void)make;
+  NetConn *c = (NetConn *)conn;
+
+  return (int64_t)c->http.request_timeout;
 }
 
 int tz_http_waits_request(NetConn *c) {
@@ -1650,6 +1763,7 @@ static void respond(NetConn *c, int32_t status, void *text_obj, uint64_t text_me
   if (c->closed || c->error || h->refused) {
     return;
   }
+  h->responded = 1;
   if (flags & RESPOND_CLOSE) {
     h->keep_alive = 0;
   }
@@ -1803,7 +1917,7 @@ static void write_chunk(TzPromise *p, NetConn *c, void *bytes, TzMaker make) {
   size_t length = (size_t)tz_bytes_byte_length(data);
   if (c->closed || c->error || c->http.refused) {
     tz_net_make = make;
-    tz_promise_fail(p, net_failure("ERR_SOCKET_CLOSED", "the connection is closed"));
+    tz_promise_fail(p, net_failure("ERR_CLOSED", "the connection is closed"));
     return;
   }
   if (length) {

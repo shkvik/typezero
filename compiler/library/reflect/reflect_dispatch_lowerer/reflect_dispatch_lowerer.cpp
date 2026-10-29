@@ -89,8 +89,9 @@ llvm::Constant *ReflectDispatchLowerer::reflectDispatchInfo(
   lowering_.builder_.CreateCondBr(lowering_.unknownCastLowerer().classIdIn(id, {top}), okBlock,
                                   wrongBlock);
   lowering_.functionFrame().switchTo(wrongBlock);
-  fail("bad_this", className(top) + "." + name.str() +
-                       " was called with a 'this' that is not an instance of " + className(top));
+  fail("ERR_INVALID_THIS", className(top) + "." + name.str() +
+                               " was called with a 'this' that is not an instance of " +
+                               className(top));
   lowering_.functionFrame().switchTo(okBlock);
   llvm::Value *count =
       lowering_.builder_.CreateTrunc(lowering_.arrayLowerer().arrayLength(array), i32, "count");
@@ -115,7 +116,7 @@ llvm::Constant *ReflectDispatchLowerer::reflectDispatchInfo(
     lowering_.reflectArgsLowerer().emitReflectArgs(
         args, count, sym->minArgs, params, rest, values,
         [&](llvm::Value *, const Type *, llvm::Value *) {
-          fail("no_variant", "Reflect.apply: no variant of " + what + " takes these arguments");
+          fail("ERR_NO_VARIANT", "Reflect.apply: no variant of " + what + " takes these arguments");
         });
     llvm::Value *result =
         lowering_.builder_.CreateCall(lowering_.classDescriptors().methodCode(variants[v]), values);
@@ -127,9 +128,9 @@ llvm::Constant *ReflectDispatchLowerer::reflectDispatchInfo(
     lowering_.builder_.CreateRet(value);
   }
   lowering_.functionFrame().switchTo(noneBlock);
-  fail("no_variant", "Reflect.apply: no variant of " + what + " takes these arguments");
+  fail("ERR_NO_VARIANT", "Reflect.apply: no variant of " + what + " takes these arguments");
   lowering_.functionFrame().switchTo(severalBlock);
-  fail("several_variants",
+  fail("ERR_SEVERAL_VARIANTS",
        "Reflect.apply: the arguments fit several variants of " + what + " equally well");
   lowering_.function_ = outer;
 

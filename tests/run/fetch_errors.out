@@ -1,15 +1,17 @@
-bad port fetch_failed: fetch failed (bad port)
-ftp fetch_failed: fetch failed (not implemented... yet...)
-no url bad_request: Failed to parse URL from not a url (Invalid URL)
-credentials bad_request: Request cannot be constructed from a URL that includes credentials: http://user:pw@localhost/ 
-no host ENOTFOUND: fetch failed (getaddrinfo ENOTFOUND no-such-host.invalid)
+bad port REQUEST ERR_BLOCKED_PORT: fetch does not connect to port 6000: browsers and node block it too
+ftp REQUEST ERR_UNSUPPORTED_SCHEME: fetch cannot get ftp://example.com/: only http:, https: and data: work
+no url REQUEST ERR_INVALID_URL: fetch cannot parse "not a url" as a URL
+credentials REQUEST ERR_CREDENTIALS_IN_URL: the URL http://user:pw@localhost/ has a user name or a password; send them in the authorization header instead
+no host NETWORK ENOTFOUND: could not find the address of no-such-host.invalid: no such name in DNS
 data 200 hello world
 base64 200 hi
-get with body bad_request: Request with GET/HEAD method cannot have body. 
-no duplex bad_request: RequestInit: duplex option is required when sending a body. 
+get with body REQUEST ERR_BODY_WITH_GET: a GET request cannot have a body: use POST, or drop the body
+bad method REQUEST ERR_INVALID_METHOD: fetch does not send TRACE requests
+no duplex REQUEST ERR_DUPLEX_REQUIRED: a request whose body is a stream needs duplex: "half"
 small body 200 10 bytes
 large body 413 
 large stream 413 
-corrupt gzip terminated: terminated (incorrect header check)
+corrupt gzip MALFORMED ERR_INVALID_COMPRESSION: the body is not valid gzip: incorrect header check
 4 bytes true
-body_used Body is unusable: Body has already been read
+USED ERR_BODY_USED the body is already read: text(), json(), bytes(), formData() and body() read it once
+refused NETWORK ECONNREFUSED could not connect to 127.0.0.1:PORT: nothing listens on this port connect 127.0.0.1 true

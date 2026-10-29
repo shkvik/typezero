@@ -101,13 +101,6 @@ function* checked(names: string[]): Generator<[string, int]> {
 }
 console.log(new Map(checked(["ab", "abcd"])).size)
 
-// 6. JSON.parse into a Record: checked, and the errors as Results.
-for (const text of ['{"a": 1, "b": 2}', '{"a": 1, "b": "two"}', "[1]"]) {
-  const r = JSON.parse<Record<string, int>>(text)
-  if (r.isOk()) console.log(r.value, Object.values(r.value).reduce((x, y) => x + y, 0))
-  else console.log(r.error.code, r.error.path, r.error.message)
-}
-
 // 7. What node:fs and node:path give, grouped.
 const dir = must(mkdtempSync(join(tmpdir(), "tz-dict-mix-")))
 for (const f of ["a.ts", "b.ts", "c.md"]) must(writeFileSync(join(dir, f), f))

@@ -14,6 +14,8 @@ public:
                     std::string &full);
 
 private:
+  void checkConstantJson(const Expr *arg);
+
   Checker &checker_;
 };
 

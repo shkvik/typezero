@@ -1,0 +1,48 @@
+// node:net over the runtime's TCP (docs/net.md, section 7): a server whose
+// handler gets each connection as a Socket, a client Socket that connects
+// with a Result, writes and reads as a stream of node, and ends; the errors
+// of connect have a kind; stop() of the server, as tz:http has it. Only
+// 127.0.0.1.
+import { Server, Socket, isIP } from "node:net"
+
+const server = new Server({ port: 0, hostname: "127.0.0.1" }, async socket => {
+  for await (const chunkResult of socket) {
+    if (chunkResult.isErr()) break
+    const text = chunkResult.value.toString()
+    socket.write(text.toUpperCase())
+    if (text.includes("bye")) {
+      const endedResult = await socket.end()
+      if (endedResult.isErr()) console.log("end:", endedResult.error.message)
+      break
+    }
+  }
+})
+const startedResult = server.listen()
+if (startedResult.isErr()) {
+  console.log("cannot listen:", startedResult.error.message)
+  process.exit(1)
+}
+const listening = startedResult.value
+
+const client = new Socket({ host: "127.0.0.1", port: listening.port, timeout: 2000 })
+const connectedResult = await client.connect()
+if (connectedResult.isErr()) {
+  console.log("cannot connect:", connectedResult.error.message)
+  process.exit(1)
+}
+client.write("hello bye")
+let answer = ""
+for await (const chunkResult of client) {
+  if (chunkResult.isErr()) break
+  answer += chunkResult.value.toString()
+}
+console.log("answer:", answer, client.bytesWritten(), client.bytesRead())
+
+await listening.stop()
+const refused = new Socket({ host: "127.0.0.1", port: listening.port })
+const refusedResult = await refused.connect()
+if (refusedResult.isErr()) {
+  const e = refusedResult.error
+  console.log(e.kind, e.code, e.message.replaceAll(String(listening.port), "PORT"))
+}
+console.log(isIP("127.0.0.1"), isIP("::1"), isIP("example.com"))

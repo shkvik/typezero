@@ -1,0 +1,481 @@
+export type PacketError = {
+  kind: "PACKET";
+  code: "ERR_INVALID_HEADER" | "ERR_TRUNCATED" | "ERR_INVALID_CHECKSUM";
+  message: string;
+  offset: int;
+};
+
+export type EthernetFrame = {
+  destination: string;
+  source: string;
+  etherType: int;
+  payload: Uint8Array;
+};
+
+export type ArpPacket = {
+  operation: int;
+  senderMac: string;
+  senderIp: string;
+  targetMac: string;
+  targetIp: string;
+};
+
+export type Ipv4Packet = {
+  headerLength: int;
+  typeOfService: int;
+  totalLength: int;
+  id: int;
+  flags: int;
+  fragmentOffset: int;
+  ttl: int;
+  protocol: int;
+  checksum: int;
+  source: string;
+  destination: string;
+  payload: Uint8Array;
+};
+
+export type Ipv6Packet = {
+  trafficClass: int;
+  flowLabel: int;
+  payloadLength: int;
+  nextHeader: int;
+  hopLimit: int;
+  source: string;
+  destination: string;
+  payload: Uint8Array;
+};
+
+export type UdpDatagram = {
+  sourcePort: int;
+  destinationPort: int;
+  length: int;
+  checksum: int;
+  payload: Uint8Array;
+};
+
+export type TcpSegment = {
+  sourcePort: int;
+  destinationPort: int;
+  sequence: double;
+  acknowledgment: double;
+  dataOffset: int;
+  flags: int;
+  window: int;
+  checksum: int;
+  urgent: int;
+  payload: Uint8Array;
+};
+
+export type IcmpMessage = {
+  type: int;
+  code: int;
+  checksum: int;
+  rest: Uint8Array;
+};
+
+export const TCP_FIN = 1;
+export const TCP_SYN = 2;
+export const TCP_RST = 4;
+export const TCP_PSH = 8;
+export const TCP_ACK = 16;
+export const TCP_URG = 32;
+
+function packetError(
+  code: "ERR_INVALID_HEADER" | "ERR_TRUNCATED" | "ERR_INVALID_CHECKSUM",
+  message: string,
+  offset: int,
+): PacketError {
+  return { kind: "PACKET", code: code, message: message, offset: offset };
+}
+
+function truncated(what: string, need: int, have: int): PacketError {
+  return packetError("ERR_TRUNCATED", `the ${what} needs ${need} bytes, and there are ${have}`, have);
+}
+
+function byteAt(bytes: Uint8Array, at: int): int {
+  const value = bytes[at];
+  if (value == undefined) {
+    return 0;
+  }
+
+  return value.toInt();
+}
+
+function putByte(bytes: Uint8Array, at: int, value: int): void {
+  if (at >= 0 && at < bytes.length) {
+    bytes[at] = (value & 0xff).toUint8();
+  }
+}
+
+function putAll(bytes: Uint8Array, at: int, values: Uint8Array): void {
+  for (let i = 0; i < values.length; i++) {
+    putByte(bytes, at + i, byteAt(values, i));
+  }
+}
+
+function word(bytes: Uint8Array, at: int): int {
+  return byteAt(bytes, at) * 256 + byteAt(bytes, at + 1);
+}
+
+function long(bytes: Uint8Array, at: int): double {
+  return word(bytes, at).toDouble() * 65536 + word(bytes, at + 2).toDouble();
+}
+
+function putWord(bytes: Uint8Array, at: int, value: int): void {
+  putByte(bytes, at, value >> 8);
+  putByte(bytes, at + 1, value);
+}
+
+function hex2(value: int): string {
+  return value.toString(16).padStart(2, "0");
+}
+
+function macText(bytes: Uint8Array, at: int): string {
+  const parts: string[] = [];
+  for (let i = 0; i < 6; i++) {
+    parts.push(hex2(byteAt(bytes, at + i)));
+  }
+
+  return parts.join(":");
+}
+
+function ipv4Text(bytes: Uint8Array, at: int): string {
+  const parts: string[] = [];
+  for (let i = 0; i < 4; i++) {
+    parts.push(String(byteAt(bytes, at + i)));
+  }
+
+  return parts.join(".");
+}
+
+function ipv6Text(bytes: Uint8Array, at: int): string {
+  const groups: string[] = [];
+  for (let i = 0; i < 8; i++) {
+    groups.push(word(bytes, at + i * 2).toString(16));
+  }
+  let bestStart = -1;
+  let bestLength = 0;
+  let start = -1;
+  for (let i = 0; i <= 8; i++) {
+    const zero = i < 8 && groups[i] == "0";
+    if (zero && start < 0) {
+      start = i;
+    }
+    if (!zero && start >= 0) {
+      if (i - start > bestLength && i - start > 1) {
+        bestStart = start;
+        bestLength = i - start;
+      }
+      start = -1;
+    }
+  }
+  if (bestStart < 0) {
+    return groups.join(":");
+  }
+  const head = groups.slice(0, bestStart).join(":");
+  const tail = groups.slice(bestStart + bestLength).join(":");
+
+  return `${head}::${tail}`;
+}
+
+function ipv4Bytes(text: string): Result<Uint8Array, PacketError> {
+  const parts = text.split(".");
+  const out = new Uint8Array(4);
+  if (parts.length != 4) {
+    return err(packetError("ERR_INVALID_HEADER", `"${text}" is not an IPv4 address`, 0));
+  }
+  for (const [i, part] of parts.entries()) {
+    const valueResult = parseInt(part);
+    if (valueResult.isErr() || valueResult.value < 0 || valueResult.value > 255) {
+      return err(packetError("ERR_INVALID_HEADER", `"${text}" is not an IPv4 address`, 0));
+    }
+    putByte(out, i, valueResult.value);
+  }
+
+  return ok(out);
+}
+
+export function checksum(bytes: Uint8Array, initial: int = 0): int {
+  let sum = initial;
+  const length = bytes.length;
+  for (let i = 0; i + 1 < length; i += 2) {
+    sum += word(bytes, i);
+    sum = (sum & 0xffff) + (sum >> 16);
+  }
+  if (length % 2 == 1) {
+    sum += byteAt(bytes, length - 1) * 256;
+    sum = (sum & 0xffff) + (sum >> 16);
+  }
+  sum = (sum & 0xffff) + (sum >> 16);
+
+  return ~sum & 0xffff;
+}
+
+function pseudoSum(source: Uint8Array, destination: Uint8Array, protocol: int, length: int): int {
+  let sum = 0;
+  for (let i = 0; i + 1 < source.length; i += 2) {
+    sum += word(source, i) + word(destination, i);
+  }
+  sum += protocol + (length & 0xffff) + (length >> 16);
+
+  return sum;
+}
+
+export function parseEthernet(bytes: Uint8Array): Result<EthernetFrame, PacketError> {
+  if (bytes.length < 14) {
+    return err(truncated("Ethernet header", 14, bytes.length));
+  }
+  const frame: EthernetFrame = {
+    destination: macText(bytes, 0),
+    source: macText(bytes, 6),
+    etherType: word(bytes, 12),
+    payload: bytes.subarray(14),
+  };
+
+  return ok(frame);
+}
+
+export function parseArp(bytes: Uint8Array): Result<ArpPacket, PacketError> {
+  if (bytes.length < 28) {
+    return err(truncated("ARP packet", 28, bytes.length));
+  }
+  if (word(bytes, 0) != 1 || word(bytes, 2) != 0x0800 || byteAt(bytes, 4) != 6 ||
+      byteAt(bytes, 5) != 4) {
+    return err(packetError("ERR_INVALID_HEADER", "only ARP for Ethernet and IPv4 is read", 0));
+  }
+  const packet: ArpPacket = {
+    operation: word(bytes, 6),
+    senderMac: macText(bytes, 8),
+    senderIp: ipv4Text(bytes, 14),
+    targetMac: macText(bytes, 18),
+    targetIp: ipv4Text(bytes, 24),
+  };
+
+  return ok(packet);
+}
+
+export function parseIpv4(bytes: Uint8Array): Result<Ipv4Packet, PacketError> {
+  if (bytes.length < 20) {
+    return err(truncated("IPv4 header", 20, bytes.length));
+  }
+  const version = byteAt(bytes, 0) >> 4;
+  if (version != 4) {
+    return err(packetError("ERR_INVALID_HEADER", `the version is ${version}, not 4`, 0));
+  }
+  const headerLength = (byteAt(bytes, 0) & 0x0f) * 4;
+  if (headerLength < 20) {
+    return err(packetError("ERR_INVALID_HEADER", `the header length is ${headerLength}, less than 20`, 0));
+  }
+  if (bytes.length < headerLength) {
+    return err(truncated("IPv4 header", headerLength, bytes.length));
+  }
+  const totalLength = word(bytes, 2);
+  if (totalLength < headerLength || totalLength > bytes.length) {
+    return err(truncated("IPv4 packet", totalLength, bytes.length));
+  }
+  if (checksum(bytes.subarray(0, headerLength)) != 0) {
+    return err(packetError("ERR_INVALID_CHECKSUM", "the checksum of the IPv4 header does not add up", 10));
+  }
+  const packet: Ipv4Packet = {
+    headerLength: headerLength,
+    typeOfService: byteAt(bytes, 1),
+    totalLength: totalLength,
+    id: word(bytes, 4),
+    flags: byteAt(bytes, 6) >> 5,
+    fragmentOffset: word(bytes, 6) & 0x1fff,
+    ttl: byteAt(bytes, 8),
+    protocol: byteAt(bytes, 9),
+    checksum: word(bytes, 10),
+    source: ipv4Text(bytes, 12),
+    destination: ipv4Text(bytes, 16),
+    payload: bytes.subarray(headerLength, totalLength),
+  };
+
+  return ok(packet);
+}
+
+export function parseIpv6(bytes: Uint8Array): Result<Ipv6Packet, PacketError> {
+  if (bytes.length < 40) {
+    return err(truncated("IPv6 header", 40, bytes.length));
+  }
+  const version = byteAt(bytes, 0) >> 4;
+  if (version != 6) {
+    return err(packetError("ERR_INVALID_HEADER", `the version is ${version}, not 6`, 0));
+  }
+  const payloadLength = word(bytes, 4);
+  if (40 + payloadLength > bytes.length) {
+    return err(truncated("IPv6 packet", 40 + payloadLength, bytes.length));
+  }
+  const packet: Ipv6Packet = {
+    trafficClass: ((byteAt(bytes, 0) & 0x0f) << 4) | (byteAt(bytes, 1) >> 4),
+    flowLabel: ((byteAt(bytes, 1) & 0x0f) << 16) | word(bytes, 2),
+    payloadLength: payloadLength,
+    nextHeader: byteAt(bytes, 6),
+    hopLimit: byteAt(bytes, 7),
+    source: ipv6Text(bytes, 8),
+    destination: ipv6Text(bytes, 24),
+    payload: bytes.subarray(40, 40 + payloadLength),
+  };
+
+  return ok(packet);
+}
+
+export function parseUdp(bytes: Uint8Array): Result<UdpDatagram, PacketError> {
+  if (bytes.length < 8) {
+    return err(truncated("UDP header", 8, bytes.length));
+  }
+  const length = word(bytes, 4);
+  if (length < 8 || length > bytes.length) {
+    return err(truncated("UDP datagram", length, bytes.length));
+  }
+  const datagram: UdpDatagram = {
+    sourcePort: word(bytes, 0),
+    destinationPort: word(bytes, 2),
+    length: length,
+    checksum: word(bytes, 6),
+    payload: bytes.subarray(8, length),
+  };
+
+  return ok(datagram);
+}
+
+export function parseTcp(bytes: Uint8Array): Result<TcpSegment, PacketError> {
+  if (bytes.length < 20) {
+    return err(truncated("TCP header", 20, bytes.length));
+  }
+  const dataOffset = (byteAt(bytes, 12) >> 4) * 4;
+  if (dataOffset < 20) {
+    return err(packetError("ERR_INVALID_HEADER", `the data offset is ${dataOffset}, less than 20`, 12));
+  }
+  if (dataOffset > bytes.length) {
+    return err(truncated("TCP header", dataOffset, bytes.length));
+  }
+  const segment: TcpSegment = {
+    sourcePort: word(bytes, 0),
+    destinationPort: word(bytes, 2),
+    sequence: long(bytes, 4),
+    acknowledgment: long(bytes, 8),
+    dataOffset: dataOffset,
+    flags: byteAt(bytes, 13),
+    window: word(bytes, 14),
+    checksum: word(bytes, 16),
+    urgent: word(bytes, 18),
+    payload: bytes.subarray(dataOffset),
+  };
+
+  return ok(segment);
+}
+
+export function parseIcmp(bytes: Uint8Array): Result<IcmpMessage, PacketError> {
+  if (bytes.length < 8) {
+    return err(truncated("ICMP header", 8, bytes.length));
+  }
+  if (checksum(bytes) != 0) {
+    return err(packetError("ERR_INVALID_CHECKSUM", "the checksum of the ICMP message does not add up", 2));
+  }
+  const message: IcmpMessage = {
+    type: byteAt(bytes, 0),
+    code: byteAt(bytes, 1),
+    checksum: word(bytes, 2),
+    rest: bytes.subarray(4),
+  };
+
+  return ok(message);
+}
+
+export function transportChecksum(
+  source: string,
+  destination: string,
+  protocol: int,
+  segment: Uint8Array,
+): Result<int, PacketError> {
+  const sourceResult = ipv4Bytes(source);
+  if (sourceResult.isErr()) {
+    return err(sourceResult.error);
+  }
+  const destinationResult = ipv4Bytes(destination);
+  if (destinationResult.isErr()) {
+    return err(destinationResult.error);
+  }
+  const initial = pseudoSum(sourceResult.value, destinationResult.value, protocol, segment.length);
+  const sum = checksum(segment, initial);
+
+  return ok(sum);
+}
+
+export type Ipv4Fields = {
+  protocol: int;
+  source: string;
+  destination: string;
+  ttl?: int;
+  id?: int;
+  typeOfService?: int;
+  dontFragment?: boolean;
+};
+
+export function buildIpv4(fields: Ipv4Fields, payload: Uint8Array): Result<Uint8Array, PacketError> {
+  const sourceResult = ipv4Bytes(fields.source);
+  if (sourceResult.isErr()) {
+    return err(sourceResult.error);
+  }
+  const destinationResult = ipv4Bytes(fields.destination);
+  if (destinationResult.isErr()) {
+    return err(destinationResult.error);
+  }
+  const total = 20 + payload.length;
+  if (total > 65535) {
+    return err(packetError("ERR_INVALID_HEADER", `an IPv4 packet holds at most 65535 bytes, not ${total}`, 2));
+  }
+  const bytes = new Uint8Array(total);
+  putByte(bytes, 0, 0x45);
+  putByte(bytes, 1, fields.typeOfService ?? 0);
+  putWord(bytes, 2, total);
+  putWord(bytes, 4, (fields.id ?? 0) & 0xffff);
+  putWord(bytes, 6, fields.dontFragment ?? false ? 0x4000 : 0);
+  putByte(bytes, 8, fields.ttl ?? 64);
+  putByte(bytes, 9, fields.protocol);
+  putAll(bytes, 12, sourceResult.value);
+  putAll(bytes, 16, destinationResult.value);
+  putWord(bytes, 10, checksum(bytes.subarray(0, 20)));
+  putAll(bytes, 20, payload);
+
+  return ok(bytes);
+}
+
+export function buildUdp(
+  source: string,
+  sourcePort: int,
+  destination: string,
+  destinationPort: int,
+  payload: Uint8Array,
+): Result<Uint8Array, PacketError> {
+  const length = 8 + payload.length;
+  if (length > 65535) {
+    return err(packetError("ERR_INVALID_HEADER", `a UDP datagram holds at most 65535 bytes, not ${length}`, 4));
+  }
+  const bytes = new Uint8Array(length);
+  putWord(bytes, 0, sourcePort & 0xffff);
+  putWord(bytes, 2, destinationPort & 0xffff);
+  putWord(bytes, 4, length);
+  putAll(bytes, 8, payload);
+  const sumResult = transportChecksum(source, destination, 17, bytes);
+  if (sumResult.isErr()) {
+    return err(sumResult.error);
+  }
+  const sum = sumResult.value;
+  putWord(bytes, 6, sum == 0 ? 0xffff : sum);
+
+  return ok(bytes);
+}
+
+export function buildIcmpEcho(id: int, sequence: int, data: Uint8Array): Uint8Array {
+  const bytes = new Uint8Array(8 + data.length);
+  putByte(bytes, 0, 8);
+  putWord(bytes, 4, id & 0xffff);
+  putWord(bytes, 6, sequence & 0xffff);
+  putAll(bytes, 8, data);
+  putWord(bytes, 2, checksum(bytes));
+
+  return bytes;
+}

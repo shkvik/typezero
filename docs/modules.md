@@ -17,7 +17,8 @@
 - Циклические импорты разрешены. Ошибка компиляции — только если модуль при загрузке читает
   ещё не заданную переменную другого модуля (в node это `ReferenceError` при запуске).
 - Пакеты — по имени (`import { z } from "zod"`), из JSR и git: [packages.md](packages.md).
-- Файлы данных вшиваются в exe: `embedJson(путь)`, `embedText(путь)`. У JSON свой тип `Json`;
+- Файлы данных вшиваются в exe: `embedText(путь)` (JSON — `JSON.parse(embedText(путь))`,
+  проверяется при сборке; `embedJson` убран 29 октября, [narrowing.md](narrowing.md), раздел 3). У JSON свой тип `Json`;
   `null` бывает только в нём.
 
 ## 1. Импорт и экспорт
@@ -115,7 +116,7 @@ main.tz → a.tz → b.tz → (a.tz уже начат). Вычисли это в
 **Вшить файл в exe:**
 
 ```ts
-const config = embedJson("./config.json")   // Json; синтаксис проверяется при компиляции
+const config = JSON.parse(embedText("./config.json"))   // синтаксис проверяется при компиляции
 const page = embedText("./page.html")       // string
 ```
 
@@ -142,7 +143,8 @@ type Json = null | boolean | number | string | Json[] | { [key: string]: Json }
   подсказкой. Сравнивать с `null` можно только `Json`. `typeof null` — `"object"`, как в JS.
 - `JSON.stringify` своего объекта пропускает поля со значением `undefined`, как JS. Нужен
   `null` в выводе — собрать `Json` явно: `const patch: Json = { phone: null }`.
-- **Перевод `Json` в свои типы пишет компилятор:** `JSON.parse<Config>(text)` или
+- **Перевод `Json` в свои типы пишет программа** (с 29 октября; раньше —
+  компилятор, [narrowing.md](narrowing.md), раздел 3). Было: `JSON.parse<Config>(text)` или
   `fromJson<Config>(j)` проверяет каждое поле и строит объект; результат — `Result`, `Err` с
   путём до поля ([narrowing.md](narrowing.md), раздел 3). Руками тоже можно — проверками и
   сужением.

@@ -1010,14 +1010,15 @@ static void accept_tls(NetListener *l, NetConn *c) {
 static void release_context(void *tls) { SSL_CTX_free((SSL_CTX *)tls); }
 
 void *tz_tls_listen(void *host_obj, uint64_t host_meta, int64_t port, double max_body,
-                    int64_t keep_alive, int64_t headers_timeout, void *cert_obj, uint64_t cert_meta,
-                    void *key_obj, uint64_t key_meta, TzMaker make) {
+                    int64_t keep_alive, int64_t headers_timeout, int64_t request_timeout,
+                    void *cert_obj, uint64_t cert_meta, void *key_obj, uint64_t key_meta,
+                    TzMaker make) {
   SSL_CTX *ctx = server_context(cert_obj, cert_meta, key_obj, key_meta, make);
   if (!ctx) {
     return NULL;
   }
   NetListener *l = (NetListener *)tz_net_listen(host_obj, host_meta, port, max_body, keep_alive,
-                                                headers_timeout, make);
+                                                headers_timeout, request_timeout, make);
   if (!l) {
     SSL_CTX_free(ctx);
     return NULL;

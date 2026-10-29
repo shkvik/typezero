@@ -65,7 +65,7 @@ const text = parseAge("42").match(
 
 ```ts
 type ReadError = { code: "ENOENT" | "EACCES" | "EISDIR"; message: string; path: string }
-type ConfigError = ReadError | { code: "bad_json"; message: string; line: int }
+type ConfigError = ReadError | { code: "ERR_INVALID_JSON"; message: string; line: int }
 
 const r = readConfig("a.json")
 if (r.isErr()) {
@@ -73,7 +73,7 @@ if (r.isErr()) {
     case "ENOENT":
       console.log(`нет файла ${r.error.path}`)
       break
-    case "bad_json":
+    case "ERR_INVALID_JSON":
       console.log(`плохой JSON в строке ${r.error.line}`)
       break
     // ошибка: не разобраны "EACCES" и "EISDIR"
@@ -83,6 +83,14 @@ if (r.isErr()) {
 
 - **Ошибки библиотеки** — объекты с меткой и текстом: `{ code: "ENOENT", message, path }`.
   Имена `SystemError`, `JsonError`, `FetchError` остаются, но это типы объектов, а не классы.
+- **`kind` и коды `ERR_…`** (29 октября, [style.md](style.md), раздел 1): у ошибок библиотеки
+  есть `kind` — что делать программе (`"REGEX"`, `"URL"`, `"DATE"`, `"LOCALE"`, `"DECIMAL"`,
+  `"NUMBER"`, `"URI"`, `"JSON"`, `"ENCODING"`, `"REFLECT"`, `"SERVER"`), а `code` — SCREAM_CASE
+  с префиксом `ERR_`: `ERR_INVALID_REGEX`, `ERR_INVALID_URL`, `ERR_INVALID_JSON`,
+  `ERR_CIRCULAR_STRUCTURE`, `ERR_NO_VARIANT`… (было `bad_regex`, `bad_url`, `circular`,
+  `no_variant`). Системные коды (`ENOENT`), коды OpenSSL, `TIMEOUT_ERR` и `UNKNOWN` — как
+  есть. Ещё без `kind`: `SystemError`, `StreamError`, `ExecError`, `CryptoError` (`code:
+  string`), `SubtleError` — их разбор впереди.
 - **Место ошибки хранит сам `Err`, а не значение.** `err(...)` запоминает файл, строку и
   функцию — это ссылка на данные в exe, ничего не стоит. Печать:
   `Err { error: 'not_found' } at find (users.tz:13)`. Так в Zig: ошибка — простое значение, а

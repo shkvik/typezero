@@ -239,6 +239,11 @@ void PredicateChecker::endPredicate(FunctionDecl *fn) {
         side.fields.push_back({i, path.names});
       }
     }
+    for (const auto &[path, type] : flow.narrowedFields) {
+      if (int i = position(path.var); i != -2) {
+        side.narrowedFields.push_back({i, path.names, type});
+      }
+    }
     for (const Facts::Fact &fact : flow.facts.all()) {
       auto param = [&](const Term &t) {
         return t.isZero() || (!t.isSum() && position(t.var) != -2);
@@ -336,6 +341,13 @@ void PredicateChecker::applyPredicate(const CallExpr *call, Checker::Flow &whenT
     for (const auto &[i, names] : side.fields) {
       if (const VarSymbol *var = variable(i)) {
         FieldFacts::defineField(flow, Checker::FieldPath{var, names});
+      }
+    }
+    for (const Checker::PredicateSide::NarrowedField &field : side.narrowedFields) {
+      if (const VarSymbol *var = variable(field.param)) {
+        Checker::FieldPath path{var, field.names};
+        llvm::erase_if(flow.narrowedFields, [&](const auto &entry) { return entry.first == path; });
+        flow.narrowedFields.push_back({path, field.type});
       }
     }
     auto term = [&](const Term &t) -> std::optional<Linear> {

@@ -311,8 +311,8 @@ Expr *ExprChecker::checkCast(CastExpr *cast) {
   } else if (from->isDecimal() && to->isNumeric()) {
     message += "; 'Number(x)' gives the nearest double";
   } else if (from->nonOptional()->isJson()) {
-    message +=
-        "; convert a Json with 'fromJson<" + to->name().str() + ">(x)', which checks what it holds";
+    message += "; check what a Json holds first, e.g. 'typeof x == \"number\"', and the check "
+               "narrows it";
   } else {
     message += ", and type '" + from->name().str() + "' cannot become '" + to->name().str() + "'";
   }

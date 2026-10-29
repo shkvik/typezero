@@ -18,7 +18,7 @@ console.log(key.length, key.toString("hex").slice(0, 16))
 type Point = { x: int; y: int }
 const point: Point = { x: 3, y: -4 }
 const back = must(open(key, must(seal(key, point))))
-console.log(must(fromJson<Point>(back)), must(open(key, must(seal(key, ["a", "b"])))),
+console.log(back, must(open(key, must(seal(key, ["a", "b"])))),
             must(open(key, must(seal(key, 42.5)))))
 const tampered = must(seal(key, "secret"))
 if (tampered.length > 30) tampered[30] ^= 1

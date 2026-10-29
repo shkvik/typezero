@@ -11,10 +11,15 @@
 
 ## Коротко
 
-- **Ошибка — на месте.** Отдельный `if` в фигурных скобках, `return err({ ... })` с объектом
-  прямо там, по полю на строку. Чужую ошибку насквозь не отдают.
+- **Ошибка — на месте.** `Result` — в `const` с суффиксом `Result` (`openedResult`), сразу под
+  ним отдельный `if` в фигурных скобках, `return err({ ... })` с объектом прямо там, по полю на
+  строку. `Result` разбирают только `if` (без `map`, `unwrapOr`…), в аргумент не передают, чужую
+  ошибку насквозь не отдают.
 - **Без вложенных вызовов.** Результат вызова сначала получает имя в `const`, потом идёт
-  дальше. Успех тоже: `const listening = ...;` и `return ok(listening);`.
+  дальше. Успех тоже: `const listening = ...;` и `return ok(listening);`. Цепочка
+  `text.trim().toLowerCase()` — можно, кроме `Result`.
+- **Скобки всегда, тернарник один.** `{ }` у каждого `if` и цикла; `a ? b : c` можно, вложенный
+  — нет.
 - **Поля задаёт конструктор.** У объявления поля только модификаторы и тип.
 - **Модификаторы всегда.** `public`, `protected` или `private` у каждого поля, метода и
   конструктора, `public` тоже.
@@ -40,7 +45,7 @@
 
 ```ts
 public listen(): Result<Listening, ListenError> {
-  const opened = netListen({
+  const openedResult = netListen({
     hostname: this.hostname,
     port: this.port,
     maxBodySize: this.maxBody,
@@ -48,50 +53,85 @@ public listen(): Result<Listening, ListenError> {
     headersTimeout: this.headersTimeout,
     transport: this.transport,
   });
-
-  if (opened.isErr()) {
+  if (openedResult.isErr()) {
     return err({
       kind: "SERVER",
-      code: opened.error.code,
-      message: opened.error.message,
-      errno: opened.error.errno,
-      syscall: opened.error.syscall,
+      code: openedResult.error.code,
+      message: openedResult.error.message,
+      errno: openedResult.error.errno,
+      syscall: openedResult.error.syscall,
       address: this.hostname,
       port: this.port,
     });
   }
 
-  const listening = new Listening(opened.value, this.hostname, this.handler);
+  const listening = new Listening(openedResult.value, this.hostname, this.handler);
 
   return ok(listening);
 }
 ```
 
-- **Ветка ошибки — свой `if`** в фигурных скобках, с пустой строкой до и после. Её видно сразу,
-  даже когда листаешь.
+- **`Result` лежит в `const` с суффиксом `Result`:** `openedResult`, `parsedResult`. По имени
+  видно, что внутри ещё не значение, а успех или ошибка.
+- **Проверка — сразу под ним**, без пустой строки: получили `Result` и тут же разобрали. Ветка
+  ошибки — свой `if` в фигурных скобках, после него пустая строка. Её видно сразу, даже когда
+  листаешь.
+- **`Result` разбирают только `if`:** `isErr()`, потом `.value` или `.error`. Методов `Result`
+  (`map`, `mapErr`, `andThen`, `orElse`, `match`, `unwrapOr` и других) в библиотеке нет:
+  запасное значение и преобразование — обычный код в ветке и после неё.
 - **Объект ошибки строится прямо в `err({ ... })`**, по полю на строку, и по каждому полю видно,
-  откуда оно: `code`, `message`, `errno`, `syscall` — из ответа рантайма (`opened.error`),
+  откуда оно: `code`, `message`, `errno`, `syscall` — из ответа рантайма (`openedResult.error`),
   `address` и `port` — из настроек сервера.
-- **Чужую ошибку насквозь не отдают:** ни `err(opened.error)`, ни `return opened`. Тогда не
-  видно, что попадает наружу.
-- **Ошибку не прячут в функцию:** `err(listenError(opened, this.hostname))` — то же самое,
-  содержимое уехало в другое место.
-- **Разные причины — разные `if`.** Не `if (got.isErr() || got.value == 0)`, а два `if`, у
-  каждого своя ошибка.
+- **Чужую ошибку насквозь не отдают:** ни `err(openedResult.error)`, ни `return openedResult`.
+  Тогда не видно, что попадает наружу.
+- **Ошибку не прячут в функцию:** `err(listenError(openedResult, this.hostname))` — то же
+  самое, содержимое уехало в другое место.
+- **Разные причины — разные `if`.** Не `if (gotResult.isErr() || gotResult.value == 0)`, а два
+  `if`, у каждого своя ошибка.
+- **`Result` не передают в аргумент.** Его разбирают там, где получили, а дальше идёт уже
+  значение (`openedResult.value`). Параметров типа `Result` у функций и методов нет: иначе то,
+  что будет при ошибке, решает другая функция, и на месте вызова этого не видно.
+- **Ошибки, которой не бывает, нет и в типе.** Если значение уже проверено, его отдают готовым
+  типом, а не заставляют разбирать снова: парсер `URL` проверил порт и хранит число, поэтому
+  `url.portNumber(): int | undefined`, а не `parseInt(url.port())` с веткой ошибки, которая
+  никогда не сработает, и не `unwrapOr(0)`, который её прячет.
 - `err(...)` запоминает строку, где его вызвали ([errors.md](errors.md), раздел 2), поэтому
   местом ошибки становится именно эта ветка.
+
+Так:
+
+```ts
+function doubled(text: string): int {
+  const parsedResult = parseInt(text);
+  if (parsedResult.isErr()) {
+    return 0;
+  }
+
+  return parsedResult.value * 2;
+}
+```
 
 Не так:
 
 ```ts
-if (opened.isErr()) return err(opened.error);       // что внутри — не видно
+const opened = netListen(options);                           // Result без суффикса
 
-if (opened.isErr()) {
-  return err(listenError(opened, this.hostname));   // спрятано в функцию
+if (openedResult.isErr()) return err(openedResult.error);    // что внутри — не видно
+
+if (openedResult.isErr()) {
+  return err(listenError(openedResult, this.hostname));      // спрятано в функцию
 }
 
-if (got.isErr() || got.value == 0) {                // две причины — одна ошибка
+if (gotResult.isErr() || gotResult.value == 0) {             // две причины — одна ошибка
   return err({ code: "EMPTY" });
+}
+
+return parsedResult.map((n) => n * 2).unwrapOr(0);           // методы Result вместо if
+
+const doubled = doubleOr(parsedResult, 0);                   // Result ушёл в аргумент: что
+                                                             // будет при ошибке, решает
+function doubleOr(r: Result<int, string>, fallback: int) {   // другая функция
+  ...
 }
 ```
 
@@ -125,6 +165,17 @@ export type ListenErrorCode =
   `enum`: строковые литералы tz и так проверяет.
 - **Код — объединение строк.** `switch` по `code` проверяется на полноту, а опечатка в коде —
   ошибка компиляции.
+- **`message` — понятным языком:** что не вышло, где и почему, а если ясно, как чинить, — что
+  сделать. Одна строка, по-английски: `could not connect to 127.0.0.1:3000: nothing listens on
+  this port`. Кода в тексте нет — он в `code`, и `console.log(error)` печатает его вместе с
+  остальными полями. Поля `cause` нет: всё нужное — в `message` и в полях ошибки. Не так:
+  `fetch failed`, `listen EADDRINUSE: address already in use` (тексты node).
+- **Коды и метки ошибок — SCREAM_CASE:** `"EADDRINUSE"`, `"TIMEOUT_ERR"`, `"ERR_INVALID_URL"`,
+  `kind: "SERVER"`. Не `"bad_url"` и не `"badUrl"`: так же пишут коды node и системы, и все
+  коды выглядят одинаково. Свои коды — с префиксом `ERR_` (`ERR_BODY_USED`), «кривое на входе» —
+  `ERR_INVALID_…`; системные (`ECONNREFUSED`), OpenSSL, `TIMEOUT_ERR`, `UNKNOWN` — как есть.
+  `kind` есть у **каждого** типа ошибки (29 октября): `RegexError` — `"REGEX"`, `UrlError` —
+  `"URL"`, `JsonError` — `"JSON"` и так далее.
 - **Поля выписаны все**, без `extends`: всю ошибку видно в одном месте.
 
 ## 2. Без вложенных вызовов
@@ -150,11 +201,20 @@ private static async answer(
 Читается сверху вниз: запрос → клиент → обработчик → ответ → запись. У каждого шага есть имя.
 
 - **Вызов не бывает аргументом другого вызова.** Его результат сначала кладут в `const` с
-  именем. Аргумент — это имя, поле (`this.hostname`, `opened.value`) или литерал. Условие,
+  именем. Аргумент — это имя, поле (`this.hostname`, `openedResult.value`) или литерал. Условие,
   которое уходит в вызов, тоже получает имя (`headOnly`).
 - **`await` — не вызов:** `const exchange = await netNextRequest(listener);` можно.
 - **Успех — тоже через имя:** `const listening = new Listening(...);`, пустая строка,
   `return ok(listening);`.
+- **Цепочка — можно.** Вызов на результате вызова — не вложенный вызов:
+  `text.trim().toLowerCase()`, `users.filter((u) => u.active).map((u) => u.name).join(", ")`,
+  `this.pairs().filter(...)`, `reader.cancel().then(...)`. Длинная — по шагу на строку. Нельзя
+  только вызов в скобках другого вызова (`parseInt(url.port())`) и цепочки у `Result`
+  (раздел 1).
+- **В `return` — сразу**, если там нет вызова в аргументе: `return parsedResult.value * 2;`,
+  `return text.trim().toLowerCase();`.
+- **Заголовок `for` — имя.** Цепочку в цикл не кладут: сначала
+  `const parts = encoding.toLowerCase().split(",").reverse();`, потом `for (const part of parts)`.
 - **Объекты — по полю на строку:** в `const`, в аргументе (`netListen({ ... })`), в
   `err({ ... })`.
 - **Пустая строка перед последним `return`**, если в функции больше одной инструкции.
@@ -166,7 +226,36 @@ private static async answer(
 const response = await ahead(handler(request, client));
 response.writeTo(exchange, request.method == "HEAD");
 this.url = new URL(netListenerUrl(listener));
-return ok(new Listening(opened.value, this.hostname, this.handler));
+return ok(new Listening(openedResult.value, this.hostname, this.handler));
+for (const part of encoding.toLowerCase().split(",").reverse()) { ... }
+```
+
+### Ветки и циклы
+
+```ts
+for (;;) {
+  const exchange = await netNextRequest(listener);
+  if (exchange == undefined) {
+    break;
+  }
+  void Listening.answer(exchange, handler);
+}
+
+const fallback = https ? 443 : 80;
+```
+
+- **Фигурные скобки — у каждого `if`, `else`, `for` и `while`**, даже когда внутри одна строка,
+  а не только у ветки ошибки. Где ветка кончается, видно сразу, и строку в неё добавляют, не
+  трогая соседние.
+- **Тернарник — один:** `https ? 443 : 80` можно. Вложенный нельзя: тогда `if`, у каждого случая
+  своя ветка.
+
+Не так:
+
+```ts
+if (exchange == undefined) break;
+for (const pair of pairs) if (pair[0] == "host") continue;
+const port = text == "" ? (https ? 443 : 80) : given;
 ```
 
 ## 3. Поля задаёт конструктор
@@ -283,15 +372,14 @@ export interface ServeOptions {
 
 ```ts
 const server = new Server({ port: 3000 }, handler);   // настройки и обработчик, не меняется
-const listening = server.listen();                    // Result<Listening, ListenError>
-
-if (listening.isErr()) {
-  console.error(listening.error.message);
+const listeningResult = server.listen();              // Result<Listening, ListenError>
+if (listeningResult.isErr()) {
+  console.error(listeningResult.error.message);
   process.exit(1);
 }
 
-console.log(listening.value.url.href);                // без ?. и без нулей
-await listening.value.stop();
+console.log(listeningResult.value.url.href());        // без ?. и без нулей
+await listeningResult.value.stop();
 ```
 
 - **Состояние — это тип.** `Server` — только настройки, и они не меняются. Слушающий сервер —
@@ -465,15 +553,12 @@ export class Listening {
 }
 ```
 
-## Не решено
-
-- **Цепочки вызовов.** `text.trim().toLowerCase()` и `r.map((n) => n * 2).unwrapOr(0)` — это
-  вызов на результате вызова. По разделу 2 каждый шаг идёт в свой `const`. Или цепочку в одну
-  строку можно?
-
 ## Что сделано
 
-- Правила приняты 28 октября 2026 года. Прототип сервера (`tmp/design/server`) им следует,
+- Правила приняты 28 октября 2026 года; 29 октября — `Result` (суффикс, проверка сразу под
+  `const`, только `if`, не в аргумент), цепочки, скобки у каждого `if` и цикла, один тернарник, коды ошибок SCREAM_CASE, понятный `message` без кода
+  и `url.portNumber()` (примеры —
+  `tmp/design/chains.tz`). Прототип сервера (`tmp/design/server`) им следует,
   новый код библиотеки пишется так.
 - **Старая библиотека** (`library/`, около 11 тысяч строк) не переписана: будет по модулям,
   отдельной задачей.
@@ -482,4 +567,5 @@ export class Listening {
 - **`.d.tz`** компилятор читает и сверяет с модулем с 28 октября ([modules.md](modules.md),
   раздел 7); объявлен пока `tz:http` (`library/http/http.d.tz`). Остальное описание лежит в
   `editors/types/tz.d.ts`, мосты — прямо в модулях, ручки — `object`.
-- **`SystemError`** ещё есть: своя ошибка у каждого API — переделка по модулям.
+- **`SystemError`** ещё есть: своя ошибка у каждого API — переделка по модулям. Тексты
+  `message` пока как у node — их перепишем там же.

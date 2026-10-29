@@ -7,7 +7,7 @@ import { createServer } from "node:http"
 import { q } from "./missing"
 // expect-error: cannot find './lib/': there is no lib/index.tz
 import { r } from "./lib/"
-// expect-error: a .json file is not a module: only .tz files can be imported; embed the data with 'const data = embedJson("./data.json")'
+// expect-error: a .json file is not a module: only .tz files can be imported; embed the text with 'const data = JSON.parse(embedText("./data.json"))'
 import { d } from "./data.json"
 // expect-error: the files of tz end in .tz: import './util' or './util.tz'
 import { m } from "./util.mjs"

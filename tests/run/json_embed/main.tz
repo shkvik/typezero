@@ -1,10 +1,10 @@
-// embedJson and embedText (docs/modules.md, section 5): the files are read
+// embedText and JSON.parse (docs/modules.md, section 5): the files are read
 // when the program is compiled, relative to the file of the call, and the
-// exe needs them no more. The same file gives the same value every time, as
-// require() of a JSON file does in node.
+// exe needs them no more; JSON.parse of the text is checked when compiling
+// too. A Json is checked by a function before it becomes a typed value.
 import { page, settings } from "./data/settings.tz"
 
-const config = embedJson("./config.json")
+const config = must(JSON.parse(embedText("./config.json")))
 console.log(config)
 console.log(config.port, config.users[0].name, config.users[1].roles)
 console.log(config == settings(), settings() == settings())
@@ -12,9 +12,8 @@ console.log(page.length)
 console.log(page)
 
 type Config = { port: int; host: string; debug: boolean; users: { name: string; roles: string[] }[] }
-const typed = must(fromJson<Config>(config))
-const port = typed.port
-if (port >= 0 && port < 65535) console.log(port + 1, typed.users.length, typed.debug)
+if (typeof config.port == "number" && Array.isArray(config.users) && typeof config.debug == "boolean")
+  console.log(config.port + 1, config.users.length, config.debug)
 
 function must<T>(r: Result<T, JsonError>): T {
   if (r.isErr()) {

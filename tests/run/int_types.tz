@@ -46,10 +46,6 @@ maybe = 7
 const either: uint32 | string = 4294967295
 console.log(px, row, maybe, either)
 console.log(JSON.stringify(px), JSON.stringify({ u, big }))
-const parsed = JSON.parse<Pixel>('{"r": 1, "g": 2, "b": 3, "alpha": -5}')
-if (parsed.isOk()) console.log(parsed.value)
-const bad = JSON.parse<Pixel>('{"r": 300, "g": 2, "b": 3, "alpha": -5}')
-if (bad.isErr()) console.log(bad.error.message)
 const counts = new Map<uint8, string>()
 counts.set(1, "one")
 counts.set(255, "max")

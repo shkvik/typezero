@@ -23,5 +23,5 @@ XYZ 1.00
 1 liter per kilometer
 ($1.00)
 50 % ru
-bad_locale: Incorrect locale information provided (en_GB)
+ERR_INVALID_LOCALE: Incorrect locale information provided (en_GB)
 50 % de

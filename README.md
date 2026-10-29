@@ -128,7 +128,7 @@ tz run                   # без файла — "main" из tz.json
   — через `decimal(x)` (кратчайшая запись, как у `String(x)`), обратно — `Number(x)`;
   `decimal("1_000.5")` читает строку, как BigNumber.js: литерал проверяется при сборке и даёт
   `decimal`, а строка, известная только при выполнении, — `Result<decimal, DecimalError>`
-  (`code: "bad_decimal"`, `message`, `text`). `/` даёт 20 знаков после точки с
+  (`code: "ERR_INVALID_DECIMAL"`, `message`, `text`). `/` даёт 20 знаков после точки с
   округлением half-up. Печать, `String(x)` и шаблоны — без степени. Методы BigNumber.js, которые
   не заменены операторами: `div(y, places, mode)`, `round(places, mode)`, `toFixed`, `toFormat`,
   `toString(base)`, `toExponential`, `toPrecision`, `sqrt`, `abs`, `isInteger`, `decimalPlaces()`,
@@ -145,7 +145,7 @@ tz run                   # без файла — "main" из tz.json
   `String.fromCharCode`, `String.fromCodePoint`; по правилам языков — `localeCompare` и
   `normalize` (см. «Языки: Intl»). `encodeURIComponent` и `encodeURI` — как в
   node, с `URIError: URI malformed` у одиночного суррогата; `decodeURIComponent` и `decodeURI`
-  отдают `Result<string, UriError>`, где `UriError = { code: "bad_uri"; message: string }`, —
+  отдают `Result<string, UriError>`, где `UriError = { kind: "URI"; code: "ERR_INVALID_URI"; message: string }`, —
   `Err` у неверного `%`-кода; это функция рантайма над однобайтовой или двухбайтовой строкой, а строка, в которой
   нечего менять, возвращается без копии.
 - Регулярные выражения (см. «Регулярные выражения»): литералы `/…/` со всем синтаксисом JS и всеми
@@ -249,8 +249,7 @@ tz run                   # без файла — "main" из tz.json
   `Map`, `new k()`, `x instanceof k`; class-выражения, примеси (`function Mixin<B extends
   Constructor>(Base: B) { return class extends Base { ... } }`), `ConstructorArgs`,
   `InstanceType<typeof K>`. Отражение: `Reflect.get`, `Reflect.apply`, `Reflect.construct` с
-  проверкой при выполнении (`Result<T, ReflectError>`); `fromJson(User, j)` делает объект
-  класса через его конструктор.
+  проверкой при выполнении (`Result<T, ReflectError>`).
 - Ошибки (см. «Ошибки» и «Result»): значения `Result<T, E>`, ранний выход через `if`, ошибки —
   объекты с меткой `code`; `throw`, `try` / `catch` / `finally`, `Error` и его виды — ошибки
   компиляции с подсказкой. Стек — 1 ГБ на поток; фатальны только его переполнение, нехватка
@@ -338,9 +337,9 @@ tz run                   # без файла — "main" из tz.json
 - Редактор (см. «Редактор»): подсветка файлов `.tz` в VS Code.
 - JSON (см. «JSON»): тип `Json` (`null` бывает только в нём), `JSON.parse(text)` с `Result`,
   `JSON.stringify(x, null, space)` любого значения, чтение и запись ключей (`j.users[0].name`),
-  сужение `typeof`, `Array.isArray` и `!= null`, `JSON.parse<User>(text)` и `fromJson<User>(j)`,
-  которые проверяют каждое поле и отдают `Result`, файлы, вшитые в exe:
-  `embedJson("./config.json")`, `embedText("./page.html")`.
+  сужение `typeof`, `Array.isArray` и `!= null` — и у полей (`data.name`), и через функцию-проверку;
+  свой тип из `Json` — проверкой и литералом; файлы, вшитые в exe: `embedText("./page.html")`,
+  `JSON.parse(embedText("./config.json"))` (проверяется при сборке).
 - То, что нужно tsc, принимается и ничего не меняет: `readonly T[]` и `ReadonlyArray<T>`
   (изменения массива компилятор не запрещает). Целый литерал больше 64 бит — `double`, как в JS.
 
@@ -444,7 +443,7 @@ else console.log(user.value.name)
   файл закрывается только тогда.
 - **Ошибка — объект с меткой.** Свои ошибки — типы объектов с полем `code`; ошибки библиотеки —
   такие же встроенные типы (`SystemError`, `JsonError`, `FetchError`, `StreamError`…). Разные
-  ошибки в одном `Result` дают объединение, и `if (e.code == "bad_regex")` сужает его до одной.
+  ошибки в одном `Result` дают объединение, и `if (e.code == "ERR_INVALID_REGEX")` сужает его до одной.
 - **`Promise` не отклоняется** (см. «Async»): операция, которая может не получиться, отдаёт
   `Promise<Result<T, E>>`.
 - **Что фатально.** То, что компилятор не может проверить при сборке, завершает программу: в
@@ -700,7 +699,7 @@ console.log(c, inc == c.inc)   // Counter { step: 2, count: 2 } true
   `Reflect.get(obj, "add")` даёт функцию, которая выбирает вариант при вызове (`2` — `add(k:
   int)`, `2.5` — `add(k: double)`, объект `Dog` — `pet(d: Dog)`, а не `pet(a: Animal)`), так же
   `new cls(...)` и `Reflect.construct` выбирают конструктор; ни одного подходящего или два
-  одинаково хороших — `Err` (`several_variants: Reflect.apply: the arguments fit several
+  одинаково хороших — `Err` (`ERR_SEVERAL_VARIANTS: Reflect.apply: the arguments fit several
   variants of Vec.label equally well`).
 
 ```ts
@@ -1002,7 +1001,6 @@ const controller = new route.cls()                // route.cls: Constructor; т�
                                                   // каждый класс, что может тут быть, берёт ()
 const method = Reflect.get(controller, route.method)
 if (typeof method == "function") Reflect.apply(method, controller, [])   // Result<unknown, …>
-const order = fromJson(Order, JSON.parse(text))   // через конструктор Order
 ```
 
 Решения — в [decorators.md](docs/decorators.md), разделы 5 и 6.
@@ -1045,7 +1043,7 @@ const order = fromJson(Order, JSON.parse(text))   // через конструк
   `undefined`; `Reflect.apply(f, thisArg, args)` вызывает функцию из `unknown`, проверяя
   аргументы по её параметрам. `Reflect.apply` и `Reflect.construct` отдают `Result<T,
   ReflectError>`: не тот аргумент, не столько аргументов, не тот `this`, абстрактный класс —
-  `Err` с `code` (`"bad_argument"`, `"bad_arity"`, `"bad_this"`, `"abstract"`, `"no_variant"`,
+  `Err` с `code` (`"ERR_INVALID_ARGUMENT"`, `"ERR_INVALID_ARITY"`, `"ERR_INVALID_THIS"`, `"ERR_ABSTRACT_CLASS"`, `"ERR_NO_VARIANT"`,
   …) и объяснением: `new Point: argument 2: expected int, got 2.5`.
 - **`new k(...)` не может не получиться**, как любой конструктор. Компилятор знает, какие классы
   становятся значениями этого `Constructor<T>` (и какие значения `Constructor<A>` где-то
@@ -1073,7 +1071,8 @@ const order = fromJson(Order, JSON.parse(text))   // через конструк
   описания `UserService` ([tests/cli/reflect_unfold.cmake](tests/cli/reflect_unfold.cmake) ищет
   его в `--emit-llvm`); `bench/di_known` — 103 мс против 579 мс у того же DI через описание
   (`bench/di_reflect`), exe — 184 КБ против 264 КБ.
-- **`fromJson(cls, j)`** — объект класса из `Json` через его конструктор
+- **`fromJson(cls, j)`** — убран 29 октября ([narrowing.md](docs/narrowing.md), раздел 3); ниже —
+  как он работал. Объект класса из `Json` через его конструктор
   ([narrowing.md](docs/narrowing.md), раздел 3): ключи с именами параметров конструктора — его
   аргументы, каждый проверяется, как поле у `fromJson<T>`; потом публичные поля, которые можно
   менять, получают значения ключей, которые есть в `Json`. Классы внутри (параметры, поля,
@@ -1375,8 +1374,7 @@ const text = parseAge("42")
   ошибка с этой подсказкой. Несколько сразу — `Result.combine(await Promise.all(ps))`. Отдельного
   `ResultAsync` нет.
 - **Библиотека** отдаёт `Result` там, где node бросает: `fetch` (`FetchError`) и чтение тел
-  (`BodyError`), `JSON.parse`, `JSON.parse<T>` и
-  `fromJson` (`JsonError`), `decodeURIComponent` и `decodeURI` (`UriError`), `RegExp.parse`
+  (`BodyError`), `JSON.parse` (`JsonError`), `decodeURIComponent` и `decodeURI` (`UriError`), `RegExp.parse`
   (`RegexError`), `URL.parse` (`UrlError`), `Date.parse` (`DateError`), функции `node:fs`
   (`SystemError`) и `node:fs/promises` (`Promise<Result>`), `execSync`, `execFileSync` и
   `spawnSync` (`ExecError`), `node:crypto` там, где важны данные (`CryptoError`), и
@@ -1427,7 +1425,7 @@ for (const { groups } of text.matchAll(/(?<key>\w+)=(?<value>\w+)/g)) console.lo
   `string | undefined`, колбэк `replace` получает только совпадение, а `m.groups` пока не
   поддерживается. `new RegExp` с литералами (`new RegExp("\\d+", "g")`) — то же, что литерал.
 - **`RegExp.parse(source, flags?)`** разбирает шаблон из строки, известной только при
-  выполнении, и отдаёт `Result<RegExp, RegexError>`, где `RegexError = { code: "bad_regex";
+  выполнении, и отдаёт `Result<RegExp, RegexError>`, где `RegexError = { kind: "REGEX"; code: "ERR_INVALID_REGEX";
   message: string }`, а `message` — текст `SyntaxError` из node (`Invalid regular expression:
   /a(b/i: Unterminated group`, `Invalid flags supplied to RegExp constructor 'gg'`).
   `new RegExp(s)` с переменной — ошибка компиляции с подсказкой `RegExp.parse`: `new` не может
@@ -1539,7 +1537,7 @@ new Intl.DateTimeFormat("en-US", { dateStyle: "full", timeZone: "Asia/Bishkek" }
   местное) и всё, что V8 читает сверх него: `"2026/10/23"`, `"Oct 23 2026 10:00"`,
   `"Fri, 23 Oct 2026 10:00:00 GMT"`, текст `toString()`. Результаты сверены с node на сотнях
   тысяч случайных строк в разных поясах. Строку из переменной разбирает `Date.parse(text)` — он
-  отдаёт `Result<int, DateError>` с миллисекундами, где `DateError = { code: "bad_date";
+  отдаёт `Result<int, DateError>` с миллисекундами, где `DateError = { kind: "DATE"; code: "ERR_INVALID_DATE";
   message: string; text: string }`; `new Date(text)` с переменной — ошибка компиляции с
   подсказкой `Date.parse` (`new Date` не может отдать `Result`), литерал проверяется при сборке.
 - **Дата всегда правильная, и края JS у неё нет.** Время даты — любое `int`: `new Date(ms)`,
@@ -1583,8 +1581,7 @@ new Intl.DateTimeFormat("en-US", { dateStyle: "full", timeZone: "Asia/Bishkek" }
   `sort((a, b) => a.getTime() - b.getTime())`: в JS он сравнил бы тексты `toString()`, то есть
   по названиям дней недели.
 - **JSON**: `JSON.stringify` пишет дату её `toJSON()` — ISO-текстом, и в объектах, массивах и
-  классах тоже. `JSON.parse<T>` с датой в `T` — ошибка компиляции: в JSON
-  дат нет, и JS дал бы там строку; подсказка — поле `string` и `Date.parse(text)`.
+  классах тоже. В JSON дат нет: дату из `Json` делает программа — `Date.parse(text)` строки.
 
 ## Байтовые массивы
 
@@ -1768,7 +1765,7 @@ if (locale.isOk()) price.toLocaleString(locale.value, { style: "currency", curre
   `"ru" | "en"`), или `Intl.Locale`; `undefined` или без аргумента — язык системы; языка,
   которого нет в ICU, — ближайший (`"en-XX"` — `"en"`) или язык системы. Строка, известная
   только при выполнении, — ошибка с подсказкой `Intl.Locale.parse(tag)`: он отдаёт
-  `Result<Intl.Locale, LocaleError>` (`code: "bad_locale"`, текст ошибки V8, `tag`), а не
+  `Result<Intl.Locale, LocaleError>` (`code: "ERR_INVALID_LOCALE"`, текст ошибки V8, `tag`), а не
   `RangeError`. Массив языков в конструкторах не берётся (как и у дат); в `getCanonicalLocales`
   и `supportedLocalesOf` — берётся, если языки в нём написаны.
 - **`Intl.Locale`**: `new Intl.Locale("en-latn-us")` (литерал проверяется при сборке; опций
@@ -1801,7 +1798,25 @@ stdout буферизуется: в файл или другую програм�
 строкам, а `process.stdout.write` в консоль пишет сразу, как node (это может быть приглашение к
 вводу). Перед записью в stderr буфер сбрасывается, поэтому при `prog > out.txt 2>&1` строки stdout
 и stderr идут в том же порядке, что в node. При любом выходе — обычном, через `process.exit()` или по
-панике — напечатанное дописывается.
+панике — напечатанное дописывается. Буфер сбрасывается и тогда, когда программе нечего делать (она
+ждёт сеть, таймер, ввод): логи сервера в файле, Docker или systemd видны сразу, а не по 8 КБ, и не
+пропадают, если процесс убили. Большой вывод подряд по-прежнему уходит крупными кусками. Ctrl+C,
+Ctrl+Break и закрытие окна тоже сначала дописывают напечатанное.
+
+Сигналы ОС слушают `process.on(signal, listener)`, `process.once` и `process.off` — только
+`"SIGINT"` (Ctrl+C), `"SIGTERM"`, `"SIGHUP"` (в Windows — закрытие окна консоли) и `"SIGBREAK"`
+(Ctrl+Break); в Windows `SIGTERM` не приходит, но слушать его можно, как в node. Пока есть
+слушатель сигнала, по этому сигналу программа сама не выходит — решает слушатель; живой программу
+слушатель не держит. Слушатель — функция без аргументов, может быть `async`:
+
+```ts
+process.once("SIGTERM", async () => {
+  await listening.stop()
+  process.exit(0)
+})
+```
+
+Другие события `process` (`"exit"`, `"uncaughtException"`…) — ошибки компиляции.
 
 `process.exit(code)` завершает программу сразу, и компилятор знает, что код после вызова не
 выполняется: после `if (!file) process.exit(1)` переменная `file` — уже строка, а функция, которая
@@ -2288,8 +2303,8 @@ const jwk = (await crypto.subtle.exportKey("jwk", publicKey)).unwrapOr({ kty: "E
   `HmacImportParams` и другие словари — видны без импорта; все словари алгоритмов — один тип
   `Algorithm` с необязательными полями, поэтому литерал алгоритма в переменной или в `return`
   подходит без аннотаций. `generateKey` с алгоритмом в вызове даёт `CryptoKey` или `CryptoKeyPair`,
-  `exportKey("jwk")` — `JsonWebKey`, иначе `ArrayBuffer`. JWK из текста —
-  `JSON.parse<JsonWebKey>(text)`.
+  `exportKey("jwk")` — `JsonWebKey`, иначе `ArrayBuffer`. JWK из текста — `JSON.parse` и своя
+  проверка полей (литерал `JsonWebKey`).
 - **Ошибки — `Promise<Result<T, SubtleError>>`**, а не отказ `Promise`: `SubtleError = { code;
   message }`, где `code` — имя `DOMException` или `TypeError`, которыми node отвергает
   (`"NotSupportedError"`, `"InvalidAccessError"`, `"OperationError"`, `"DataError"`, `"SyntaxError"`,
@@ -2478,11 +2493,10 @@ import { red } from "@std/fmt/colors"   // путь внутри пакета �
 ## JSON
 
 `Json` — встроенный тип значения JSON: `null`, `boolean`, число, строка, массив `Json` или объект
-из них ([modules.md](docs/modules.md), раздел 5). Его дают `JSON.parse(text)` (в `Result`) и
-`embedJson(path)`.
+из них ([modules.md](docs/modules.md), раздел 5). Его даёт `JSON.parse(text)` (в `Result`).
 
 ```ts
-const config = embedJson("./config.json")        // файл читается при компиляции
+const config = JSON.parse(embedText("./config.json"))   // текст вшит и проверен при компиляции
 const parsed = JSON.parse(text)                   // Result<Json, JsonError>
 if (parsed.isErr()) return parsed
 const user = parsed.value                         // Json
@@ -2492,8 +2506,6 @@ if (typeof name == "string") console.log(name.toUpperCase())    // здесь na
 const tags = user.tags
 if (Array.isArray(tags)) for (const t of tags) console.log(t)    // tags — Json[]
 const patch: Json = { phone: null, tags: ["a", 1] }               // null бывает только в Json
-type User = { name: string; age: int; phone?: string }
-const u = JSON.parse<User>(text)   // Err: { code: 'bad_field', message: 'expected int, got 30.5', path: 'age' }
 ```
 
 - **Чтение** — как в JS: `j.name`, `j["content-type"]`, `j[0]`, `j.length` у массива и строки дают
@@ -2525,12 +2537,12 @@ const u = JSON.parse<User>(text)   // Err: { code: 'bad_field', message: 'expect
 - **Печать** — как в node, с тем же порядком ключей: ключи-индексы (`"1"`, `"2"`) первыми по
   возрастанию, остальные в порядке появления; повторный ключ в тексте заменяет значение, но не место.
 - **`JSON.parse(text)`** читает по грамматике V8 и отдаёт `Result<Json, JsonError>`. Ошибка —
-  встроенный тип `JsonError = { code: "bad_json" | "bad_field"; message: string; path: string }`:
-  у неразобранного текста `code` — `"bad_json"`, `message` — текст `SyntaxError` из node
+  встроенный тип `JsonError = { kind: "JSON"; code: "ERR_INVALID_JSON" | "ERR_CIRCULAR_STRUCTURE"; message: string; path: string }`:
+  у неразобранного текста `code` — `"ERR_INVALID_JSON"`, `message` — текст `SyntaxError` из node
   (`Unexpected token 'x', "[1, x]" is not valid JSON`, `Expected ',' or '}' after property value
   in JSON at position 13 (line 3 column 3)`), `path` — пустой. Второй аргумент (reviver) —
   ошибка компиляции. `Response.json()` и `Request.json()` отдают
-  `Promise<Result<Json, JsonError>>`, `json()` из `node:stream/consumers` —
+  `Promise<Result<Json, BodyError>>`, `json()` из `node:stream/consumers` —
   `Promise<Result<Json, StreamError | JsonError>>`.
 - **`JSON.stringify(x, null, space)`** пишет любое значение: `Json`, объекты и экземпляры классов
   (поля в порядке печати, и приватные, без методов и функций), массивы, кортежи (как массивы),
@@ -2543,36 +2555,28 @@ const u = JSON.parse<User>(text)   // Err: { code: 'bad_field', message: 'expect
   `string | undefined`, иначе `string`; если тип может содержать себя (`Json`, класс с полем своего
   вида), — `Result` с `JsonError`. `space` — число (до 10) или строка. Вместо replacer —
   только `null` или `undefined`; класс с методом `toJSON` — ошибка компиляции: tz сам не
-  вызывает код программы. Значение, которое содержит себя, — `Err` с кодом `"circular"` и текстом
+  вызывает код программы. Значение, которое содержит себя, — `Err` с кодом `"ERR_CIRCULAR_STRUCTURE"` и текстом
   `Converting circular structure to JSON` (без строк node о том, где круг).
-- **`JSON.parse<T>(text)` и `fromJson<T>(j)`** ([narrowing.md](docs/narrowing.md), раздел 3):
-  компилятор делает для каждого типа функцию, которая проверяет поля и строит объект. Целые
-  типы — целое в их пределах, точно и после 2^53 (`9007199254740993`), `double` — любое число,
-  `decimal` — точно, из текста числа, `boolean`, `string`, массивы, вложенные и рекурсивные типы
-  объектов, словари `Record<string, T>` (ключи — в порядке текста), `Json` — как есть. `Map` и
-  `Set` — ошибка с подсказкой прочитать `Record` или массив. Лишние ключи пропускаются; нет ключа или
-  `null` у необязательного
-  поля — `undefined` (у `Json | undefined` `null` остаётся `null`). Результат — `Result<T, JsonError>`;
-  неподходящее значение — `code: "bad_field"` с путём в `path` (`items[1].price`, `count`) и
-  текстом в `message` (`expected decimal, got string`, `expected int, got 2.5`, `expected
-  { city: string }, got undefined`). Класс — через `fromJson(User, j)`, который
-  вызывает его конструктор (см. «Классы как значения и отражение»); кортежи, функции, `RegExp` и
-  совпадения регулярок — ошибка компиляции: регулярку делает только литерал или `RegExp.parse`.
-- **Объединения и литеральные типы** в `T`: член выбирается по тому, что лежит в JSON (строка,
-  число, `boolean`, массив, объект — как `typeof`), литерал — по значению (`"up" | "down"`,
-  `0 | 1 | 2`, `"auto" | int`), объекты — по полю-метке, которое у каждого есть и имеет
-  литеральный тип со своим значением (`kind: "circle"`). Не подошло — `Err` с путём и текстом:
-  `kind` и `expected "circle" | "square", got "triangle"`, `[1]` и `expected 0 | 1 | 2, got 3`. Если
-  члена не выбрать (два числовых типа, объекты без метки, `Record` рядом с объектом), — ошибка
-  компиляции у `JSON.parse<T>`. `Record<"w" | "h", int>` — объект с этими полями, `Record<string,
-  T>` внутри `T` — словарь.
-- **`embedJson(path)` и `embedText(path)`** читают файл при компиляции; путь — строка-литерал
-  относительно файла с вызовом (`"./config.json"`, `"../data/page.html"`). Текст JSON проверяется
-  сразу: ошибка показывает строку и столбец в самом файле. В exe лежит текст; `embedJson` разбирает
-  его при первом вызове и потом отдаёт то же значение (как `require` файла JSON в node), из какого
-  бы файла программы его ни вшили. Метка порядка байтов в начале JSON пропускается, как у
-  `require`. `embedText` — обычная строка-литерал. `embedBytes` даёт `Uint8Array` (см.
-  «Байтовые массивы»).
+- **Свой тип из `Json` — проверкой и литералом** ([narrowing.md](docs/narrowing.md), раздел 3;
+  с 29 октября): `JSON.parse<T>`, `fromJson<T>`, `fromJson(cls, j)` и `embedJson` убраны — у JSON
+  нет особых прав, компилятор не пишет за программиста код перевода. Программа проверяет `Json`
+  своей функцией, факты проверки переходят в `if` (и после раннего `return` в ветке `false`), а
+  поля `Json` сужаются, как переменные, — и вложенные (`d.owner.name`), и массивы:
+  ```ts
+  function isUserJson(data: Json): boolean {
+    return typeof data == "object" && typeof data.name == "string" && typeof data.age == "number"
+  }
+  const parsedResult = JSON.parse(text)
+  if (parsedResult.isErr()) return err(parsedResult.error.message)
+  const data = parsedResult.value
+  if (!isUserJson(data)) return err("not a user")
+  const user: User = { name: data.name, age: data.age }   // data.name — string, data.age — double
+  ```
+- **`embedText(path)`** читает файл при компиляции; путь — строка-литерал относительно файла с
+  вызовом (`"./config.json"`, `"../data/page.html"`), в exe лежит текст. `JSON.parse` текста,
+  известного при сборке (литерал или `embedText`), проверяется при сборке: не JSON — ошибка
+  компиляции со строкой и столбцом (`JSON.parse(embedText("./config.json"))`). `Result`
+  остаётся. `embedBytes` даёт `Uint8Array` (см. «Байтовые массивы»).
 - **В памяти** `Json` — ссылка на узел рантайма со счётчиком ссылок, `Json | undefined` — та же
   ссылка или ноль; `null`, `true` и `false` — по одному узлу на программу. Объект хранит ключи в
   порядке добавления и, когда их больше восьми, хеш-индекс; массив — обычный `Json[]`. Разбор и
@@ -2910,12 +2914,16 @@ await listening.stop()
   `hostname` (`"0.0.0.0"`), `maxBodySize` (128 МБ,
   больше — ответ 413), `keepAliveTimeout` (5000 мс простоя соединения, как в node),
   `headersTimeout` (60 000 мс на голову запроса, потом 408 — защита от клиента, который шлёт по
-  байту), `transport` — `{ secure: false }` или `{ secure: true, cert, key }`. Обработчик —
+  байту), `requestTimeout` (300 000 мс на весь запрос с телом, 0 — без предела; потом 408, а
+  обработчик, который читает тело, получает `BodyError` вида `TIMEOUT`), `transport` — `{ secure: false }` или `{ secure: true, cert, key }`. Обработчик —
   `(req: Request, client: Client) => Response | Promise<Response>`, `client` — `{ address,
   port }` того, кто прислал запрос: подходят и обычная, и async-функция, и `app.fetch` из hono
   (стрелка в поле, у которой второй параметр — `unknown`, а третий необязательный).
   `stop()` перестаёт принимать соединения, закрывает те, что ждут запроса, и ждёт ответов на
-  те, что уже идут; второй вызов ждёт того же; другого способа остановить сервер нет. Ошибки обработчик отдаёт ответом сам: у него нет
+  те, что уже идут; второй вызов ждёт того же; другого способа остановить сервер нет.
+  `stop({ timeout: 10_000 })` ждёт не дольше 10 секунд, потом обрывает оставшиеся соединения:
+  у потока ответа (SSE) вызывается `cancel`, зависший обработчик остаётся сам по себе;
+  `timeout: 0` обрывает сразу. Ошибки обработчик отдаёт ответом сам: у него нет
   исключений, которые сервер мог бы превратить в `500`. Полный адрес запроса (`req.url`) и
   адрес сервера строит рантайм из соединения сразу.
 - **Запросы одного соединения** идут по очереди (keep-alive, до `keepAliveTimeout` простоя, и
@@ -2937,21 +2945,36 @@ await listening.stop()
   `ReadableStream` с `duplex: "half"`), `redirect` (`"follow"` до 20 переходов, `"manual"`,
   `"error"`), `timeout` — время на весь запрос в миллисекундах вместо `AbortSignal` (соединение,
   отправка, голова ответа, редиректы и чтение тела; не успел — `"TIMEOUT_ERR"`, таймер не держит
-  программу). Соединения с keep-alive ждут в пуле по 4 с, как в undici, а запрос по
+  программу). Полей браузера (`mode`, `credentials`, `cache`, `integrity`, `referrer`,
+  `referrerPolicy`, `keepalive`) нет: вне браузера они ничего не делают, и такое поле — ошибка
+  компиляции. Соединения с keep-alive ждут в пуле по 4 с, как в undici, а запрос по
   соединению, которое сервер успел закрыть, уходит снова по новому. Ответ сжатый gzip, deflate (и
   без обёртки zlib) и br распаковывается по мере чтения; `data:` URL — без сети. Имена хостов
   ищутся асинхронно (`GetAddrInfoExW`), `localhost` — без поиска, сначала IPv4.
-- **Ошибки — `Result`**: `fetch` отдаёт `Promise<Result<Response, FetchError>>`, где
-  `FetchError = { code: string; message: string; cause?: string }`. `code` — код причины
-  (`"ECONNREFUSED"`, `"ENOTFOUND"`, коды сертификата вроде `"CERT_HAS_EXPIRED"`), `"fetch_failed"`
-  для причины без кода (`redirect count exceeded`, `unexpected redirect`, `bad port`),
-  `"bad_request"` для запроса, который нельзя сделать (плохой адрес, тело у GET), `"TIMEOUT_ERR"`,
-  когда вышло время `timeout`; `message` и `cause` — тексты node (`fetch failed`, `connect
-  ECONNREFUSED 127.0.0.1:3000`).
-- **`Request` и `Response`** — как в node: `text()`,
-  `json()`, `bytes()`, `arrayBuffer()`, `formData()` дают `Promise<Result<T, BodyError>>` (`json()` —
-  `BodyError | JsonError`): тело уже прочитано (`"body_used"`), связь оборвалась или сжатие
-  испорчено (`"terminated"`), вышло время `timeout` (`"TIMEOUT_ERR"`); читаются один раз, тело как поток — `body()`
+- **Ошибки — `Result`**: `fetch` отдаёт `Promise<Result<Response, FetchError>>`. `FetchError` —
+  объект с меткой `kind`, которая говорит, что делать: `"REQUEST"` — программа собрала плохой запрос,
+  чинить код (`ERR_INVALID_URL`, `ERR_CREDENTIALS_IN_URL`, `ERR_INVALID_METHOD`,
+  `ERR_BODY_WITH_GET`, `ERR_DUPLEX_REQUIRED`, `ERR_REQUEST_USED`, `ERR_UNSUPPORTED_SCHEME`,
+  `ERR_BLOCKED_PORT`, `ERR_STREAM_FAILED`; поле `url`); `"NETWORK"` — не дошли или оборвалось,
+  можно повторить (`ENOTFOUND`, `EAI_AGAIN`, `ECONNREFUSED`, `ETIMEDOUT`, `ECONNRESET`… `UNKNOWN`;
+  поля `errno`, `syscall`, `host`, `port`); `"RESPONSE"` — сервер ответил не по HTTP или закрыл
+  соединение до ответа (`ERR_CLOSED`, `ERR_INVALID_RESPONSE`, `ERR_HEAD_TOO_LARGE`); `"TLS"` —
+  коды проверки сертификата OpenSSL, как в node (`CERT_HAS_EXPIRED`,
+  `DEPTH_ZERO_SELF_SIGNED_CERT`…), `ERR_TLS_CERT_ALTNAME_INVALID` и `ERR_TLS_HANDSHAKE`;
+  `"REDIRECT"` (`ERR_UNEXPECTED_REDIRECT`, `ERR_TOO_MANY_REDIRECTS`, `ERR_INVALID_LOCATION`,
+  `ERR_REDIRECT_WITH_STREAM`; поле `location`); `"TIMEOUT"` (`TIMEOUT_ERR`, поле `timeout`).
+  `message` — что, где и почему простыми словами: `could not connect to 127.0.0.1:3000: nothing
+  listens on this port`, `the certificate of expired.badssl.com has expired`, `a GET request
+  cannot have a body: use POST, or drop the body`. Поля `cause` нет.
+- **`Request` и `Response`** — как в node: `text()`, `json()`, `bytes()`, `arrayBuffer()`,
+  `formData()` дают `Promise<Result<T, BodyError>>` (`json()` — `Result<Json, BodyError>`).
+  `BodyError` тоже с `kind`: `"USED"` (`ERR_BODY_USED`, `ERR_BODY_LOCKED`), `"NETWORK"`
+  (`ERR_CLOSED` — другая сторона закрыла соединение до конца тела, `ECONNRESET`, `ERR_TLS_FAILED`…),
+  `"TIMEOUT"` (`timeout` у `fetch` или `requestTimeout` у сервера), `"TOO_LARGE"`
+  (`ERR_BODY_TOO_LARGE`, поле `limit`), `"MALFORMED"` (`ERR_INVALID_CHUNKED` — куски не по
+  chunked, `ERR_INVALID_COMPRESSION` — gzip или br испорчены), `"CONTENT"` (`ERR_INVALID_JSON`,
+  `ERR_NOT_A_FORM`, `ERR_NO_BOUNDARY`, `ERR_INVALID_MULTIPART`; поле `contentType`), `"STREAM"`
+  (свой поток тела упал). Тело читается один раз, тело как поток — `body()`
   (`for await (const chunk of req.body())`), `bodyUsed()`, `clone()`, `Response.json`, `redirect`,
   `error`; `status`, `statusText`, `ok`, `headers`, `redirected`, `url`, `type` — поля.
   `body()` и `bodyUsed()` — методы (в node — свойства): тело меняет сам объект (после `clone()`
@@ -2995,11 +3018,14 @@ await listening.stop()
   `setPassword`; `setHref`, `setProtocol`, `setHost`, `setHostname` и `setPort`, значение которых
   адрес может не принять, дают `Result<void, UrlError>` (node молча оставляет старое), а литерал
   проверяется при сборке, и вызов с ним ничего не отдаёт: `url.setPort("8080")`. `url.pathname =
-  "/x"` — ошибка с подсказкой `setPathname(...)`. Имена хостов не в ASCII — через NFKC,
+  "/x"` — ошибка с подсказкой `setPathname(...)`. `url.portNumber()` — порт числом, `int |
+  undefined` (`undefined`, если порта в адресе нет; порт схемы по умолчанию разбор убирает:
+  `https://a:443/` → `undefined`): разбор его уже проверил, так что ошибки нет и в типе, а
+  `parseInt(url.port())` не нужен. Имена хостов не в ASCII — через NFKC,
   нижний регистр и Punycode, без таблиц UTS #46 (несколько символов они отображают иначе).
 - **`new URL` не может не получиться.** Адрес из строки, известной только при выполнении,
   разбирает `URL.parse(input, base?)` — он отдаёт `Result<URL, UrlError>`, где `UrlError =
-  { code: "bad_url"; message: string; input: string }`. `new URL(text)` с переменной — ошибка
+  { kind: "URL"; code: "ERR_INVALID_URL"; message: string; input: string }`. `new URL(text)` с переменной — ошибка
   компиляции с подсказкой `URL.parse`. В `new URL` можно передать литерал (он проверяется при
   сборке: схема, хост особых схем, порт до 65535), готовый `URL`, `url.href()` и `req.url` запроса;
   относительный литерал — только с таким же основанием: `new URL("/path", req.url)`.
@@ -3021,14 +3047,32 @@ await listening.stop()
   1.3, те же шифры, SNI, ALPN `http/1.1`. `fetch("https://...")` проверяет сертификат сервера,
   как node: цепочку до корневых сертификатов Mozilla (встроены, как в node), с теми, что в файле
   `NODE_EXTRA_CA_CERTS`, и с системными при `NODE_USE_SYSTEM_CA=1`; затем имя хоста. Ошибка —
-  `fetch failed` с причиной-`SystemError` и кодом node: `CERT_HAS_EXPIRED`,
+  `FetchError` вида `TLS` с кодом node: `CERT_HAS_EXPIRED`,
   `ERR_TLS_CERT_ALTNAME_INVALID`, `DEPTH_ZERO_SELF_SIGNED_CERT`, `UNABLE_TO_VERIFY_LEAF_SIGNATURE`
   и другие. `new Server({ transport: { secure: true, cert, key } }, handler)` — сервер https
   (PEM, как у `createServer` node, цепочка — сертификаты после первого). TLS встраивается в exe,
   только если программа может пойти по https: `fetch` адреса, про который не известно, что он
   `http://` или `data:`, или `new Server` с `transport`, про который не известно, что он
   `{ secure: false }`; https-клиент — 5,8 МБ против 0,9 МБ того же клиента по http (у Go — 5,3 МБ).
-- **Пока нет:** `node:http` и остальное из раздела 7; сеть в Linux (epoll и свой DNS).
+- **Прокси у `fetch`** ([net.md](docs/net.md), раздел 2; 29 октября): `HTTPS_PROXY`,
+  `HTTP_PROXY`, `NO_PROXY` из окружения (как Go и curl; `localhost` — мимо всегда), в коде —
+  `proxy: { enabled: true, url } | { enabled: false }`; https — туннелем `CONNECT`, логин —
+  Basic из адреса прокси; ошибки — `FetchError` вида `PROXY` (`ERR_PROXY_AUTH_REQUIRED` и
+  другие). SOCKS и Digest — пока нет.
+- **`node:net`** ([net.md](docs/net.md), раздел 7; 29 октября) — TCP: `new Socket({ host, port,
+  timeout, noDelay, transport })` — поток `Duplex` node, `await socket.connect()` даёт
+  `Result<void, ConnectError>` (`kind`: `REQUEST`, `NETWORK`, `TLS`, `TIMEOUT`), `startTls()`,
+  `reset()`; `new Server({ port, hostname, idleTimeout }, async socket => …).listen()` —
+  `Result<Listening, ListenError>`, `stop({ timeout })`. `isIP`, `isIPv4`, `isIPv6`.
+- **WebSocket** ([net.md](docs/net.md), раздел 9; 29 октября): клиент — `new WebSocket({ url,
+  protocols, headers })`, события `"message"` / `"close"` / `"error"` EventEmitter, `await
+  socket.connect()` — `Result`, `send()` — `Result`, `close(code, reason)`; сервер —
+  `upgradeWebSocket(request)` из `tz:http`, как в Deno. Кадры и рукопожатие — на tz.
+- **`tz:packet`** ([net.md](docs/net.md), раздел 8; 29 октября) — разбор и сборка заголовков
+  Ethernet, ARP, IPv4, IPv6, UDP, TCP, ICMP и их контрольных сумм на tz; ошибки — `PacketError`
+  (`kind: "PACKET"`).
+- **Пока нет:** то, что в разделе 10 (HTTP/2, `node:dgram`, слой `tz:socket`, сокеты
+  Unix, SOCKS-прокси, HTTP/3); сеть в Linux (epoll и свой DNS). `node:http` не будет.
 - **Скорость** (`bench/http.ps1`, «Hello, World!», 128 соединений, 10 с): tz — 314 тыс.
   запросов в секунду на всех ядрах, Go (`net/http`) — 239 тыс., node — 61 тыс.
 
@@ -3279,7 +3323,7 @@ powershell -ExecutionPolicy Bypass -File editors\vscode\install.ps1
   по математике: `-1 < x` при `x: uint64` — `true`. `double ** n` с целым `n` — без приведения.
 - **Разбор строки даёт `Result`** ([numbers.md](docs/numbers.md), раздел 9): `parseInt(s)` —
   `Result<int, NumberError>`, `parseFloat(s)` и `Number(s)` — `Result<double, NumberError>`.
-  `Err` (`{ code: "bad_number", message }`) там, где JS дал бы `NaN` или бесконечность, и у
+  `Err` (`{ code: "ERR_INVALID_NUMBER", message }`) там, где JS дал бы `NaN` или бесконечность, и у
   `parseInt` — число длиннее 64 бит. Разбор как в JS: `parseInt("12px")` — `Ok(12)`,
   `Number("12px")` — `Err`. Значение из разбора — ввод: `parseInt(s).unwrapOr(0) * 1000` без
   проверки — ошибка о переполнении.
@@ -3469,9 +3513,7 @@ powershell -ExecutionPolicy Bypass -File editors\vscode\install.ps1
 - `Json` — тип значений JSON вместо `any`, которое дают `JSON.parse` и `require` файла JSON в TS:
   читать ключи можно сразу, а условие, строка, арифметика и методы — только после проверки
   (`typeof`, `Array.isArray`). `==` у него — как `===` (`0 == false` ложно); `j.x = undefined`
-  убирает ключ (в node остаётся `x: undefined`); `JSON.parse<T>` проверяет и строит `T` и
-  располагает поля в порядке типа (в TS это `any` без проверки). `JSON.parse` и `JSON.parse<T>`
-  отдают `Result` с `JsonError`, а ключ у `undefined` и `null` — `undefined` (в JS — `TypeError`).
+  убирает ключ (в node остаётся `x: undefined`). `JSON.parse` отдаёт `Result` с `JsonError`, а ключ у `undefined` и `null` — `undefined` (в JS — `TypeError`).
 - `[]` без типа — ошибка: нужен тип элементов (`let a: int[] = []`). `int[]` нельзя присвоить в
   `double[]` — у них разное представление в памяти; tsc считает оба `number[]`.
 - В массивах нет дыр: `new Array<int>(3)` — это `[0, 0, 0]`, а не три пустых места; увеличение

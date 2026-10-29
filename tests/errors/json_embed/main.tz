@@ -1,19 +1,19 @@
-// embedJson and embedText read their files when the program is compiled:
-// the path is a literal, relative to the file, and the JSON must be valid.
+// embedText reads its file when the program is compiled: the path is a
+// literal, relative to the file; JSON.parse of the text is checked then too.
 
-// expect-error: './bad.json' is not valid JSON: expected a value, found 'x' (line 3, column 8)
-const bad = embedJson("./bad.json")
+// expect-error: this text is not JSON, so JSON.parse would always fail: expected a value, found 'x' (line 3, column 8)
+const bad = JSON.parse(embedText("./bad.json"))
 // expect-error: cannot read './missing.json':
-const missing = embedJson("./missing.json")
+const missing = embedText("./missing.json")
 const name = "./good.json"
-// expect-error: the path of embedJson must be a string literal: the file is read when the program is compiled
-const computed = embedJson(name)
+// expect-error: the path of embedText must be a string literal: the file is read when the program is compiled
+const computed = embedText(name)
 // expect-error: the path of embedText is relative to the file it is written in, e.g. 'embedText("./page.html")'
 const absolute = embedText("/etc/hosts")
 // expect-error: write '/' in the path, not '\', as on every system
-const backslash = embedJson(".\\good.json")
+const backslash = embedText(".\\good.json")
 // expect-error: expected 1 argument, but got 2
 const two = embedText("./good.json", "./bad.json")
-const good = embedJson("./good.json")
+const good = JSON.parse(embedText("./good.json")).unwrapOr(null)
 // expect-error: a Json cannot be a condition
 if (good.ok) console.log("ok")

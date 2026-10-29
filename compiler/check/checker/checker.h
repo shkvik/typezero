@@ -426,6 +426,12 @@ private:
     std::vector<std::pair<int, const Type *>> narrowed;
     std::vector<int> defined;
     std::vector<std::pair<int, llvm::SmallVector<llvm::StringRef, 2>>> fields;
+    struct NarrowedField {
+      int param;
+      llvm::SmallVector<llvm::StringRef, 2> names;
+      const Type *type;
+    };
+    std::vector<NarrowedField> narrowedFields;
     std::vector<Facts::Fact> facts;
   };
   struct Predicate {

@@ -1,0 +1,79 @@
+// listening.stop({ timeout }) (docs/net.md, section 1): it waits no longer
+// than the timeout for the requests being handled, then cuts the
+// connections that are left: an endless stream of events is cancelled, and a
+// handler that is slow to answer is left behind; timeout 0 cuts at once;
+// stop() of a server without connections returns at once.
+import { Server } from "tz:http"
+
+const enc = new TextEncoder()
+let cancelled = 0
+let late = 0
+const server = new Server({ port: 0, hostname: "127.0.0.1" }, async req => {
+  const path = new URL(req.url).pathname()
+  if (path == "/events") {
+    return new Response(new ReadableStream({
+      pull: async c => {
+        await new Promise<void>(resolve => setTimeout(resolve, 20))
+        c.enqueue(enc.encode("data: tick\n\n"))
+      },
+      cancel: () => {
+        cancelled++
+      },
+    }), { headers: { "content-type": "text/event-stream" } })
+  }
+  if (path == "/slow") {
+    await new Promise<void>(resolve => setTimeout(resolve, 800))
+    late++
+    return new Response("too late")
+  }
+  return new Response("ok")
+})
+
+async function listen() {
+  const started = server.listen()
+  if (started.isErr()) {
+    console.log("cannot listen:", started.error.message)
+    process.exit(1)
+  }
+  return started.value
+}
+
+const first = await listen()
+const events = await fetch(`http://127.0.0.1:${first.port}/events`)
+if (events.isErr()) {
+  console.log(events.error.message)
+  process.exit(1)
+}
+const body = events.value.body()
+if (body == undefined) process.exit(1)
+const reader = body.getReader()
+const chunk = await reader.read()
+console.log("first event:", chunk.isOk() && !chunk.value.done)
+let t0 = performance.now()
+await first.stop({ timeout: 200 })
+let took = performance.now() - t0
+console.log("stopped after the timeout:", took >= 150 && took < 2000)
+for (;;) {
+  const next = await reader.read()
+  if (next.isErr() || next.value.done) break
+}
+await new Promise<void>(resolve => setTimeout(resolve, 100))
+console.log("the stream ended; cancelled:", cancelled)
+
+const second = await listen()
+const slow = fetch(`http://127.0.0.1:${second.port}/slow`)
+await new Promise<void>(resolve => setTimeout(resolve, 100))
+t0 = performance.now()
+await second.stop({ timeout: 0 })
+took = performance.now() - t0
+console.log("timeout 0 stops at once:", took < 500)
+const answer = await slow
+console.log("the slow request failed:", answer.isErr(), "answered:", late)
+
+const third = await listen()
+t0 = performance.now()
+await third.stop({ timeout: 5000 })
+took = performance.now() - t0
+console.log("no connections, no wait:", took < 500)
+await new Promise<void>(resolve => setTimeout(resolve, 900))
+console.log("the slow handler ended later:", late)

@@ -1,8 +1,9 @@
 # Проверки, сужение и JSON в свои типы
 
 Решения, принятые 24 октября 2026 года, и поправки 26 октября: `asserts` убран, перевод JSON
-отдаёт `Result` ([errors.md](errors.md)). Шаги 1–3 плана сделаны 24 октября, шаг 4 — 28
-октября; план — в конце, в разделе «План реализации».
+отдаёт `Result` ([errors.md](errors.md)); 29 октября: у JSON нет особых прав в языке —
+`JSON.parse<T>`, `fromJson<T>` и `fromJson(cls, j)` убираются (раздел 3). Шаги 1–3 плана сделаны
+24 октября, шаг 4 — 28 октября, шаг 5 не сделан; план — в конце, в разделе «План реализации».
 
 ## Коротко
 
@@ -11,8 +12,8 @@
   объекта, пределы чисел, длины.
 - `x is T` писать не нужно. Если написан — компилятор проверяет тело: проверка, которая
   врёт, — ошибка. В TS тело такой проверки не проверяется вовсе.
-- JSON в свои типы переводит компилятор: `JSON.parse<User>(text)` проверяет каждое поле и
-  строит объект `User`.
+- У JSON нет особых прав: `JSON.parse(text)` отдаёт `Json`, форму проверяет обычная
+  функция программы, а свой объект строится на виду, литералом.
 
 ## 1. Функция-условие сужает
 
@@ -69,38 +70,59 @@ function isUser(x: unknown): x is User {
   нужно не проверить, а перевести (раздел 3).
 - Написанный `x is T` — документация: компилятор и без него вывел бы то же самое.
 
-## 3. JSON в свои типы
+## 3. JSON в свои типы — проверкой, без особых прав
+
+Решено 29 октября. До этого был `JSON.parse<User>(text)`: компилятор по типу сам писал перевод.
+Убран, как и `fromJson<T>` и `fromJson(cls, j)`.
 
 ```ts
-type User = { name: string; age: int; address: { city: string }; phone?: string }
+type User = {
+  name: string;
+  age: double;
+};
 
-const user = JSON.parse<User>(text)        // текст → Result<User, JsonError>
-const same = fromJson<User>(j)             // уже разобранный Json → Result<User, JsonError>
-// Err { error: { code: 'bad_field', path: 'address.city', message: 'ждали string, пришло number' } }
+function isUserJson(data: Json): boolean {
+  return typeof data == "object" && typeof data.name == "string" && typeof data.age == "number";
+}
+
+const parsedResult = JSON.parse(text);              // Result<Json, JsonError>
+if (parsedResult.isErr()) {
+  ...
+}
+
+const data = parsedResult.value;
+if (!isUserJson(data)) {
+  ...
+}
+
+const user: User = {
+  name: data.name,                                  // string — факт из isUserJson
+  age: data.age,                                    // double
+};
 ```
 
-- Компилятор знает устройство `User` и сам пишет перевод: проверяет каждое поле и строит
-  объект. Так делают Go (`json.Unmarshal` в структуру), C# (`JsonSerializer.Deserialize<T>`),
-  Rust (serde). В tz это возможно, потому что generics компилируются копией под каждый тип
-  ([generics.md](generics.md)): копия для `User` знает его при работе.
-- **Ошибка** — `Err` с путём до поля: `address.city`, `items[3].price`.
-- **Правила:**
-  - лишние поля в JSON пропускаются;
-  - нет обязательного поля — ошибка; необязательное (`phone?`) — `undefined`, и `null` тоже
-    даёт `undefined`;
-  - целые (`int`, `int32`, `uint8`…) — только целое в пределах типа ([numbers.md](numbers.md));
-    `double` — любое число; `decimal` — точно, из текста числа ([decimal.md](decimal.md));
-    `boolean`, `string` — как есть;
-  - массивы, вложенные объекты, словари (`Record<string, T>`) — да;
-  - объединения — по метке (`kind`) или по `typeof`; если вариант не определить — ошибка
-    компиляции у `JSON.parse<T>`;
-  - `Json` внутри типа — берётся как есть;
-  - классы — не здесь, а через отражение ([decorators.md](decorators.md), раздел 6): у
-    класса есть конструктор, и обходить его нельзя.
-- `JSON.parse(text)` без типа — по-прежнему `Json` ([modules.md](modules.md), раздел 5).
+- **Граница для компилятора:** он выводит и проверяет — типы, факты, копии обобщений, — но не
+  дописывает за программиста код, которого тот не мог бы написать сам. `JSON.parse<User>`
+  дописывал: обходил поля `User` и собирал объект, и только для JSON.
+- **JSON — один формат из многих** (YAML, TOML, CSV, MessagePack…), и особых прав в языке у него
+  нет. Дать такое право всем — это шаблоны C++ с особым поведением под отдельные типы;
+  обобщения в tz работают одинаково для любого `T` ([generics.md](generics.md)).
+- **`JSON.parse(text)` отдаёт `Json`** — дерево, как у парсера любого формата.
+- **Единственная особенность — `JSON.parse` встроен, и компилятор умеет выполнить его при
+  сборке**, если текст известен заранее: литерал или `embedText(путь)`. Ошибка синтаксиса тогда —
+  ошибка сборки с местом в самом файле (`config.json:3:5: unexpected "}"`), как у литералов
+  `/…/`. `embedJson` поэтому не нужен и убирается: `JSON.parse(embedText("./config.json"))`.
+  Результат и тут `Result`, и `if` на ошибку пишется всегда, хоть ветка и мёртвая — правило
+  одно для любого текста.
+- **Форму проверяет программа** обычной функцией. Компилятор переносит её факты о полях `Json` в
+  `if` по общему правилу (раздел 1): `Json` — объединение, и `typeof data.name == "string"`
+  сужает его так же, как `typeof x == "string"` сужает `string | int`. `data is User` не нужно
+  и нельзя: `Json` — дерево, а `User` — структура с полями на своих местах (раздел 2).
+- **Свой объект строится на виду** — литералом из проверенных полей. Число JSON — `double`;
+  целое поле получают явным переводом после проверки ([numbers.md](numbers.md)).
+- **Большие схемы** — библиотекой на обычном tz (как zod): схема — значение, проверка — обычный
+  код, без особых прав.
 - Обратно — `JSON.stringify(user)`, как в JS.
-- В редакторе `JSON.parse<User>` объявлен tz для tsc ([modules.md](modules.md), раздел 6), а
-  `JSON.parse(text)` без типа для tsc — его собственный, с `any`.
 
 ## План реализации
 
@@ -111,9 +133,26 @@ const same = fromJson<User>(j)             // уже разобранный Json
    объединения ([objects.md](objects.md), шаг 6).
 2. **Факты из функций-условий** (сделано): поля объектов, пределы чисел, длины — расширение того, что
    уже доказывает проверка индексов; правила, когда факт о поле забывается.
-3. **`JSON.parse<T>` и `fromJson<T>`** (сделано) — после `Json` ([modules.md](modules.md), шаг 3),
+3. **`JSON.parse<T>` и `fromJson<T>`** (сделано; отменено 29 октября — шаг 5) — после `Json` ([modules.md](modules.md), шаг 3),
    исключений ([errors.md](errors.md), шаг 2) и generics ([generics.md](generics.md),
    шаг 1); объединения и словари — с шагами 6 и 7 [objects.md](objects.md).
 4. **Поправки 26 октября** ([errors.md](errors.md), шаг 2; сделано 28 октября): `Result` у
    `JSON.parse<T>` и `fromJson<T>` вместо `TypeError`, ошибка на `asserts` (и в типе функции,
    и в списке `tz port`), проверки типа целых по [numbers.md](numbers.md).
+5. **JSON без особых прав** (решено и сделано 29 октября). Убрать `JSON.parse<T>`,
+   `fromJson<T>`, `fromJson(cls, j)` ([decorators.md](decorators.md), раздел 6) и `embedJson` —
+   без подсказок, как всё убранное; `JSON.parse` с текстом, известным при сборке (литерал,
+   `embedText`), разбирается при сборке, ошибка синтаксиса — ошибка сборки (сейчас
+   `JSON.parse('{"a":')` собирается молча); факты из функций-условий о полях `Json` (сейчас после
+   `isUserJson(data)` поля остаются `Json | undefined`); `JsonError` без `BAD_FIELD` и
+   `BAD_CLASS`; JWK в `library/crypto/webcrypto.tz` — проверкой руками; тесты (28 файлов);
+   modules.md, errors.md, io.md, decorators.md, numbers.md, net.md, README.
+
+   Сделано: поля `Json` — пути `data.name`, `data.owner.name` — сужаются `typeof`,
+   `Array.isArray` и `!= undefined`, как переменные (`JsonChecker::addJsonFacts`,
+   `FieldFacts::fieldPath`); факты о полях выходят из функции-проверки в `if` и в ветку `false`
+   (`PredicateChecker`: `narrowedFields` в сводке); `JSON.parse<T>`, `fromJson`, `embedJson`
+   убраны (`fromJson` / `embedJson` — просто неизвестные имена); `JSON.parse` литерала или
+   `embedText` проверяется при сборке; `webcrypto` разбирает JWK своей функцией. Остался код
+   перевода по типу внутри компилятора (`FromJsonLowerer`, `json_typed.c`, `from_json` в описании
+   класса) — до него больше нет пути, удалить отдельным шагом.

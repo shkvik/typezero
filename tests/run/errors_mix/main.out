@@ -3,8 +3,8 @@ parse: line 1: cannot read '???'
 parse: line 1: bad amount '1.2.3'
 regex: Invalid regular expression: /^(\w+)(\s*(\S+)(.*)$/: Unterminated group
 config 100 [ 'positive' ]
-config: bad config bad_field limit
-config: bad config bad_json 
+config: bad config not a config
+config: bad config Expected double-quoted property name in JSON at position 12 (line 1 column 13)
 Ann ?
 check 5: 5
 check -1: negative -1
@@ -29,5 +29,5 @@ Err {
 } at Positive.check (errors.tz:24)
 Err {
   error: { code: 'unreadable', message: "cannot read 'bad'", line: 10 }
-} at parseLine (parse.tz:17)
+} at parseLine (parse.tz:18)
 {"code":"limit","message":"over the limit of 100","limit":"100"}

@@ -32,16 +32,30 @@ patch_types(${types_undici}/fetch.d.ts [[  readonly bytes: () => Promise<Uint8Ar
 patch_types(${types_undici}/fetch.d.ts [[  readonly formData: () => Promise<FormData>]]
             [[  readonly formData: () => Promise<Result<FormData, BodyError>>]])
 patch_types(${types_undici}/fetch.d.ts [[  readonly json: () => Promise<unknown>]]
-            [[  readonly json: () => Promise<Result<Json, BodyError | JsonError>>]])
+            [[  readonly json: () => Promise<Result<Json, BodyError>>]])
 patch_types(${types_undici}/fetch.d.ts [[  readonly text: () => Promise<string>]]
             [[  readonly text: () => Promise<Result<string, BodyError>>]])
 patch_types(${types_undici}/fetch.d.ts [[  readonly status?: number]] [[  readonly status?: HttpStatus]])
 
 # tz has no AbortSignal: a fetch is limited in time by its timeout, in
 # milliseconds.
-patch_types(${types_undici}/fetch.d.ts [[  signal?: AbortSignal | null]] [[  timeout?: number]])
+patch_types(${types_undici}/fetch.d.ts [[  signal?: AbortSignal | null]] [[  timeout?: number
+  proxy?: { enabled: true; url: string; httpVersion?: "auto" | "1.1" } | { enabled: false }]])
 patch_types(${types_undici}/fetch.d.ts [[  readonly signal: AbortSignal]]
             [[  readonly timeout?: number]])
+
+# Fields that do something only in a browser are not there (docs/net.md,
+# section 2): a request has no mode, cache, credentials, integrity, referrer
+# or keepalive.
+foreach(field "cache?: RequestCache" "credentials?: RequestCredentials" "dispatcher?: Dispatcher"
+              "integrity?: string" "keepalive?: boolean" "mode?: RequestMode" "referrer?: string"
+              "referrerPolicy?: ReferrerPolicy" "window?: null" "readonly cache: RequestCache"
+              "readonly credentials: RequestCredentials"
+              "readonly destination: RequestDestination" "readonly integrity: string"
+              "readonly mode: RequestMode" "readonly referrer: string"
+              "readonly referrerPolicy: ReferrerPolicy" "readonly keepalive: boolean")
+  patch_types(${types_undici}/fetch.d.ts "\n  ${field}\n" "\n")
+endforeach()
 
 # URL.parse gives a Result.
 patch_types(${types_node}/url.d.ts [[static parse(input: string, base?: string): URL | null;]]
@@ -72,6 +86,8 @@ patch_types(${types_node}/url.d.ts [[`TypeError` will be thrown.
 foreach(part hash host hostname password pathname port protocol search username)
   patch_types(${types_node}/url.d.ts "        ${part}: string;" "        ${part}(): string;")
 endforeach()
+patch_types(${types_node}/url.d.ts [[        port(): string;]] [[        port(): string;
+        portNumber(): int | undefined;]])
 patch_types(${types_node}/url.d.ts [[        readonly origin: string;]] [[        origin(): string;]])
 patch_types(${types_node}/url.d.ts [[        readonly size: number;]] [[        size(): number;]])
 foreach(field "currentTarget: EventTarget | null" "defaultPrevented: boolean" "eventPhase: 0 | 2"

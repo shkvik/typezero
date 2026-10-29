@@ -85,5 +85,3 @@ const notPairs = new Map([1, 2])
 const grouped = Object.groupBy([1, 2], x => x)
 // expect-error: the keys of an object are strings, and JavaScript would turn 'int' keys into them; convert them first, or make a Map: 'new Map(...)'
 const entries = Object.fromEntries([[1, "a"]])
-// expect-error: JSON has objects, not a Map; read a 'Record<string, T>' and make the Map of it, 'new Map(Object.entries(r))'
-console.log(JSON.parse<Map<string, int>>("{}"))

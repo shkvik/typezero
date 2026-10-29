@@ -41,7 +41,7 @@ nope false true
 "./a/b" http://base.com/dir/a/b
 "http:foo" http://base.com/dir/foo
 http://base.com/dir/c true
-bad_url Invalid URL not a url
+ERR_INVALID_URL Invalid URL not a url
 "https://example.com" https://example.com/ example.com /
 "http://h:0080/x" http://h/x h /x
 "http://h:/" http://h/ h /
@@ -79,10 +79,16 @@ bad_url Invalid URL not a url
 "https:h/x" https://h/x h /x
 "https:///h/x" https://h/x h /x
 http://me:s3cret@other.org:8080/new%20path?a=1#end
-https://me:s3cret@other.org/new%20path?a=1#end true
+https://me:s3cret@other.org/new%20path?a=1#end true undefined
 https://me:s3cret@example.com:9000/new%20path?q=1%202#end
 http://reset.com/ http://reset.com/ http://reset.com/ {"u":"http://reset.com/"}
 port 81 reset.com:81
-bad_url x81 reset.com:81
+ERR_INVALID_URL x81 reset.com:81
 port  reset.com
-bad_url mailto:a@b.c
+http://a:8080/ 8080 8081
+http://a/ undefined no port
+https://a:443/ undefined no port
+ftp://a:21/x undefined no port
+http://a:0/ 0 1
+9090
+ERR_INVALID_URL mailto:a@b.c

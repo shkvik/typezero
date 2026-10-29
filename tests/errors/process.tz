@@ -21,8 +21,19 @@ process.exit(1, 2)
 const cwd = process.cwd
 // expect-error: 'process.argv' is not a function
 process.argv()
-// expect-error: 'process.on' is not supported yet
+// expect-error: 'process.on' listens only to the signals 'SIGINT', 'SIGTERM', 'SIGHUP' and 'SIGBREAK', not to 'exit'
 process.on("exit", () => {})
+// expect-error: 'process.once' listens only to the signals 'SIGINT', 'SIGTERM', 'SIGHUP' and 'SIGBREAK', not to 'SIGKILL'
+process.once("SIGKILL", () => {})
+// expect-error: expected 2 arguments, but got 1
+process.off("SIGINT")
+// expect-error: 'process.addListener' is not supported yet
+process.addListener("SIGINT", () => {})
+const signalName: string = "SIGINT"
+// expect-error: type 'string' is not assignable to type '"SIGINT" | "SIGTERM" | "SIGHUP" | "SIGBREAK"'
+process.on(signalName, () => {})
+// expect-error: type '(int) => void' is not assignable to type '() => void'
+process.on("SIGINT", (n: int) => console.log(n))
 // expect-error: 'process' can only be used through its properties, e.g. 'process.argv'
 const p = process
 // expect-error: 'write' of a stream of Buffer takes a string, a Buffer or a Uint8Array, but this is 'int'

@@ -1,6 +1,7 @@
 // What main.tz builds on: a registry of classes that a class decorator fills,
 // a method decorator for async methods and async generators, a mixin over an
-// emitter class, and a generic store whose items fromJson makes.
+// emitter class, and a generic store whose items Reflect.construct makes from
+// the fields of a Json.
 import { EventEmitter } from "node:events"
 
 export const registered: Constructor[] = []
@@ -41,9 +42,9 @@ export class Store<T extends object> {
   items: T[] = []
   constructor(readonly kind: Constructor<T>) {}
 
-  load(data: Json[]) {
+  load(data: Json[], args: (j: Json) => unknown[]) {
     for (const j of data) {
-      const item = fromJson(this.kind, j)
+      const item = Reflect.construct(this.kind, args(j))
       if (item.isOk()) this.items.push(item.value)
     }
     return this

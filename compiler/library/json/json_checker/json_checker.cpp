@@ -3,6 +3,7 @@
 #include "compiler/check/expr/binary_checker/binary_checker.h"
 #include "compiler/check/expr/call_checker/call_checker.h"
 #include "compiler/check/expr/expr_checker/expr_checker.h"
+#include "compiler/check/flow/field_facts/field_facts.h"
 #include "compiler/check/types/type_relations/type_relations.h"
 #include "compiler/check/values/array_literal_checker/array_literal_checker.h"
 #include "llvm/ADT/SmallString.h"
@@ -64,6 +65,13 @@ Expr *JsonChecker::checkNull(NameExpr *name, const Type *expected) {
 
 Expr *JsonChecker::checkJsonMember(MemberExpr *member) {
   member->type = Type::optional(Type::json());
+  if (Expr *narrowed = checker_.fieldFacts().narrowedField(member); narrowed != member) {
+    return narrowed;
+  }
+  if (std::optional<Checker::FieldPath> path = checker_.fieldFacts().fieldPath(member);
+      path && checker_.fieldFacts().isFieldDefined(*path)) {
+    return checker_.typeRelations().convert(member, Type::json());
+  }
 
   return member;
 }
@@ -224,6 +232,25 @@ Expr *JsonChecker::checkJsonEquality(BinaryExpr *bin) {
   return bin;
 }
 
+std::optional<Checker::FieldPath> JsonChecker::jsonField(const Expr *expr) const {
+  if (auto *conv = dyn_cast<CastExpr>(expr); conv && conv->isImplicit()) {
+    expr = conv->operand;
+  }
+  auto *member = dyn_cast<MemberExpr>(expr);
+  if (!member || !member->object->type || !member->object->type->nonOptional()->isJson()) {
+    return std::nullopt;
+  }
+
+  return checker_.fieldFacts().fieldPath(member);
+}
+
+void JsonChecker::narrowJsonField(Checker::Flow &flow, const Checker::FieldPath &path,
+                                  const Type *type) {
+  llvm::erase_if(flow.narrowedFields, [&](const auto &entry) { return entry.first == path; });
+  flow.narrowedFields.push_back({path, type});
+  FieldFacts::defineField(flow, path);
+}
+
 void JsonChecker::addJsonFacts(const Expr *cond, Checker::Flow &whenTrue,
                                Checker::Flow &whenFalse) const {
   if (auto *call = dyn_cast<CallExpr>(cond); call && call->builtin == Builtin::ArrayIsArray) {
@@ -232,6 +259,8 @@ void JsonChecker::addJsonFacts(const Expr *cond, Checker::Flow &whenTrue,
       if (var->type->isOptional()) {
         whenTrue.defined.insert(var);
       }
+    } else if (std::optional<Checker::FieldPath> path = jsonField(call->args[0])) {
+      narrowJsonField(whenTrue, *path, Type::array(Type::json()));
     }
     return;
   }
@@ -245,6 +274,11 @@ void JsonChecker::addJsonFacts(const Expr *cond, Checker::Flow &whenTrue,
     if (isNothing(other)) {
       if (const VarSymbol *var = jsonVariable(side); var && var->type->isOptional()) {
         different.defined.insert(var);
+      } else if (std::optional<Checker::FieldPath> path = jsonField(side)) {
+        if (nullName(other)) {
+          continue;
+        }
+        FieldFacts::defineField(different, *path);
       }
       continue;
     }
@@ -253,14 +287,25 @@ void JsonChecker::addJsonFacts(const Expr *cond, Checker::Flow &whenTrue,
     if (!typeOf || typeOf->op != UnaryOp::TypeOf || !text) {
       continue;
     }
-    const VarSymbol *var = jsonVariable(typeOf->operand);
-    if (!var) {
-      continue;
-    }
     const Type *narrowed = text->value == u"string"    ? Type::string()
                            : text->value == u"number"  ? Type::doubleTy()
                            : text->value == u"boolean" ? Type::boolTy()
                                                        : nullptr;
+    const VarSymbol *var = jsonVariable(typeOf->operand);
+    if (!var) {
+      std::optional<Checker::FieldPath> path = jsonField(typeOf->operand);
+      if (!path) {
+        continue;
+      }
+      if (narrowed) {
+        narrowJsonField(equal, *path, narrowed);
+      } else if (text->value == u"object") {
+        FieldFacts::defineField(equal, *path);
+      } else if (text->value == u"undefined") {
+        FieldFacts::defineField(different, *path);
+      }
+      continue;
+    }
     if (narrowed) {
       equal.narrowed.push_back({var, narrowed});
     }

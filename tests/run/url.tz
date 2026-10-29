@@ -80,7 +80,7 @@ u.setPassword("s3cret")
 console.log(u.href())
 u.setProtocol("https")
 u.setPort("443")
-console.log(u.href(), u.port() == "")
+console.log(u.href(), u.port() == "", u.portNumber())
 u.setHost("example.com:9000")
 u.setSearch("q=1 2")
 console.log(u.href())
@@ -90,6 +90,15 @@ for (const port of ["81", "x81", ""]) {
   const set = u.setPort(port)
   console.log(set.isOk() ? "port " + u.port() : set.error.code + " " + set.error.input, u.host())
 }
+for (const text of ["http://a:8080/", "http://a/", "https://a:443/", "ftp://a:21/x", "http://a:0/"]) {
+  const parsed = URL.parse(text)
+  if (parsed.isOk()) {
+    const port = parsed.value.portNumber()
+    console.log(text, port, port == undefined ? "no port" : port + 1)
+  }
+}
+u.setPort("9090")
+console.log(u.portNumber())
 const mail = new URL("mailto:a@b.c")
 for (const host of ["example.com"]) {
   const refused = mail.setHost(host)

@@ -2233,7 +2233,7 @@ static const int8_t kHexDigits[256] = URI_EACH256(URI_HEX);
 TZ_THREAD_LOCAL TzMaker tz_uri_fail;
 
 static void uri_malformed(TzStr *out) {
-  tz_fail_ascii(tz_uri_fail, "bad_uri", "URI malformed");
+  tz_fail_ascii(tz_uri_fail, "ERR_INVALID_URI", "URI malformed");
   *out = kEmpty;
 }
 
@@ -2600,7 +2600,7 @@ static void number_fail(TzMaker fail, const char *what, void *obj, uint64_t meta
   tz_buf_utf8(&text, ": '", 3);
   tz_buf_str(&text, given);
   tz_buf_utf8(&text, "'", 1);
-  tz_fail(fail, "bad_number", tz_buf_take(&text));
+  tz_fail(fail, "ERR_INVALID_NUMBER", tz_buf_take(&text));
 }
 
 int64_t tz_parse_int_r(void *obj, uint64_t meta, int64_t radix, TzMaker fail) {
@@ -2640,7 +2640,7 @@ double tz_finite_r(double value, TzMaker fail) {
                          ? "the bytes hold an infinity, which a tz double cannot be"
                          : NULL;
   if (what) {
-    tz_fail(fail, "bad_number", tz_str_from_ascii(what, strlen(what)));
+    tz_fail(fail, "ERR_INVALID_NUMBER", tz_str_from_ascii(what, strlen(what)));
     return 0;
   }
 

@@ -1,5 +1,6 @@
 // The other file of json_mix: a class that keeps a Json in a field, settings
-// read into a declared type, and a parser that returns Results.
+// checked by a function and made with a literal, and a parser that returns
+// Results.
 export interface Settings {
   name: string
   limit: int
@@ -32,5 +33,26 @@ export function readSettings(text: string): Result<Settings, string> {
   const json = parsed.value
   if (json == null || typeof json != "object" || Array.isArray(json))
     return err("settings must be an object")
-  return fromJson<Settings>(json).mapErr((e) => `${e.path}: ${e.message}`)
+  if (!isSettingsJson(json)) return err("settings need a name, a limit, a price and tags")
+  const tags: string[] = []
+  for (const tag of json.tags) if (typeof tag == "string") tags.push(tag)
+  const price = decimal(String(json.price))
+  if (price.isErr()) return err(price.error.message)
+  const limit = json.limit
+  if (!(limit >= 0 && limit <= 1000000)) return err("limit: from 0 to 1000000")
+  const note = json.note
+  const settings: Settings = {
+    name: json.name,
+    limit: Math.trunc(limit).toInt(),
+    price: price.value,
+    tags: tags,
+    note: typeof note == "string" ? note : undefined,
+  }
+  return ok(settings)
+}
+
+function isSettingsJson(json: Json): boolean {
+  return typeof json.name == "string" && typeof json.limit == "number" &&
+    Number.isInteger(json.limit) &&
+    typeof json.price == "number" && Array.isArray(json.tags)
 }

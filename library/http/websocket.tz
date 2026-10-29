@@ -1,0 +1,632 @@
+import { EventEmitter } from "node:events";
+import { Connection, ProxyOption } from "tz:fetch";
+import { URL } from "tz:url";
+
+declare function wsRandom(bytes: Uint8Array): void;
+
+export type WebSocketOptions = {
+  url: string;
+  protocols?: string[];
+  headers?: Record<string, string>;
+  timeout?: int;
+  proxy?: ProxyOption;
+  maxMessageSize?: int;
+};
+
+export type WebSocketConnectError =
+  | {
+      kind: "REQUEST";
+      code: "ERR_INVALID_URL" | "ERR_UNSUPPORTED_SCHEME" | "ERR_ALREADY_CONNECTED";
+      message: string;
+      url: string;
+    }
+  | {
+      kind: "NETWORK";
+      code: string;
+      message: string;
+      host: string;
+      port: int;
+    }
+  | {
+      kind: "TIMEOUT";
+      code: "TIMEOUT_ERR";
+      message: string;
+      timeout: int;
+    }
+  | {
+      kind: "REFUSED";
+      code: "ERR_NOT_UPGRADED";
+      message: string;
+      status: int;
+    };
+
+export type WebSocketError =
+  | {
+      kind: "NETWORK";
+      code: "ERR_CLOSED" | "ECONNRESET" | "ECONNABORTED" | "UNKNOWN";
+      message: string;
+    }
+  | {
+      kind: "PROTOCOL";
+      code: "ERR_INVALID_FRAME" | "ERR_INVALID_UTF8" | "ERR_UNMASKED_FRAME";
+      message: string;
+    }
+  | {
+      kind: "TOO_LARGE";
+      code: "ERR_MESSAGE_TOO_LARGE";
+      message: string;
+      limit: int;
+    };
+
+export type SendError = {
+  kind: "NOT_CONNECTED";
+  code: "ERR_NOT_CONNECTED" | "ERR_CLOSING";
+  message: string;
+};
+
+export type UpgradeError = {
+  kind: "REQUEST";
+  code: "ERR_NOT_WEBSOCKET" | "ERR_UNSUPPORTED_VERSION";
+  message: string;
+};
+
+const GUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11";
+const OP_CONTINUATION = 0;
+const OP_TEXT = 1;
+const OP_BINARY = 2;
+const OP_CLOSE = 8;
+const OP_PING = 9;
+const OP_PONG = 10;
+
+function rotate(x: int, n: int): int {
+  return ((x << n) | (x >> (32 - n))) & 0xffffffff;
+}
+
+function byteAt(bytes: Uint8Array, at: int): int {
+  const value = bytes[at];
+  if (value == undefined) {
+    return 0;
+  }
+
+  return value.toInt();
+}
+
+function putByte(bytes: Uint8Array, at: int, value: int): void {
+  if (at >= 0 && at < bytes.length) {
+    bytes[at] = (value & 0xff).toUint8();
+  }
+}
+
+function sha1(data: Uint8Array): Uint8Array {
+  const length = data.length;
+  const padded = new Uint8Array(((length + 8) / 64) * 64 + 64);
+  for (let i = 0; i < length; i++) {
+    putByte(padded, i, byteAt(data, i));
+  }
+  putByte(padded, length, 0x80);
+  const bits = length * 8;
+  for (let i = 0; i < 8; i++) {
+    putByte(padded, padded.length - 1 - i, (bits >> (i * 8)) & 0xff);
+  }
+  let h0 = 0x67452301;
+  let h1 = 0xefcdab89;
+  let h2 = 0x98badcfe;
+  let h3 = 0x10325476;
+  let h4 = 0xc3d2e1f0;
+  for (let block = 0; block < padded.length; block += 64) {
+    const w: int[] = [];
+    for (let i = 0; i < 16; i++) {
+      const at = block + i * 4;
+      w.push((byteAt(padded, at) << 24) | (byteAt(padded, at + 1) << 16) |
+        (byteAt(padded, at + 2) << 8) | byteAt(padded, at + 3));
+    }
+    for (let i = 16; i < 80; i++) {
+      w.push(rotate((w[i - 3] ?? 0) ^ (w[i - 8] ?? 0) ^ (w[i - 14] ?? 0) ^ (w[i - 16] ?? 0), 1));
+    }
+    let a = h0;
+    let b = h1;
+    let c = h2;
+    let d = h3;
+    let e = h4;
+    for (let i = 0; i < 80; i++) {
+      let f = 0;
+      let k = 0;
+      if (i < 20) {
+        f = (b & c) | (~b & 0xffffffff & d);
+        k = 0x5a827999;
+      } else if (i < 40) {
+        f = b ^ c ^ d;
+        k = 0x6ed9eba1;
+      } else if (i < 60) {
+        f = (b & c) | (b & d) | (c & d);
+        k = 0x8f1bbcdc;
+      } else {
+        f = b ^ c ^ d;
+        k = 0xca62c1d6;
+      }
+      const t = (rotate(a, 5) + f + e + k + (w[i] ?? 0)) & 0xffffffff;
+      e = d;
+      d = c;
+      c = rotate(b, 30);
+      b = a;
+      a = t;
+    }
+    h0 = (h0 + a) & 0xffffffff;
+    h1 = (h1 + b) & 0xffffffff;
+    h2 = (h2 + c) & 0xffffffff;
+    h3 = (h3 + d) & 0xffffffff;
+    h4 = (h4 + e) & 0xffffffff;
+  }
+  const out = new Uint8Array(20);
+  for (const [i, h] of [h0, h1, h2, h3, h4].entries()) {
+    putByte(out, i * 4, h >> 24);
+    putByte(out, i * 4 + 1, h >> 16);
+    putByte(out, i * 4 + 2, h >> 8);
+    putByte(out, i * 4 + 3, h);
+  }
+
+  return out;
+}
+
+export function acceptKey(key: string): string {
+  const encoder = new TextEncoder();
+  const digest = sha1(encoder.encode(key + GUID));
+
+  return Buffer.from(digest).toString("base64");
+}
+
+function frame(opcode: int, payload: Uint8Array, masked: boolean): Uint8Array {
+  const length = payload.length;
+  const lengthBytes = length < 126 ? 0 : length < 65536 ? 2 : 8;
+  const maskBytes = masked ? 4 : 0;
+  const head = 2 + lengthBytes + maskBytes;
+  const out = new Uint8Array(head + length);
+  putByte(out, 0, 0x80 | opcode);
+  const maskBit = masked ? 0x80 : 0;
+  if (lengthBytes == 0) {
+    putByte(out, 1, maskBit | length);
+  } else if (lengthBytes == 2) {
+    putByte(out, 1, maskBit | 126);
+    putByte(out, 2, length >> 8);
+    putByte(out, 3, length);
+  } else {
+    putByte(out, 1, maskBit | 127);
+    for (let i = 0; i < 8; i++) {
+      putByte(out, 9 - i, (length >> (i * 8)) & 0xff);
+    }
+  }
+  const mask = new Uint8Array(4);
+  if (masked) {
+    wsRandom(mask);
+    for (let i = 0; i < 4; i++) {
+      putByte(out, 2 + lengthBytes + i, byteAt(mask, i));
+    }
+  }
+  for (let i = 0; i < length; i++) {
+    const value = masked ? byteAt(payload, i) ^ byteAt(mask, i % 4) : byteAt(payload, i);
+    putByte(out, head + i, value);
+  }
+
+  return out;
+}
+
+function concatBytes(a: Uint8Array, b: Uint8Array): Uint8Array {
+  const out = new Uint8Array(a.length + b.length);
+  for (let i = 0; i < a.length; i++) {
+    putByte(out, i, byteAt(a, i));
+  }
+  for (let i = 0; i < b.length; i++) {
+    putByte(out, a.length + i, byteAt(b, i));
+  }
+
+  return out;
+}
+
+class Parsed {
+  public readonly opcode: int;
+  public readonly fin: boolean;
+  public readonly masked: boolean;
+  public readonly payload: Uint8Array;
+  public readonly size: int;
+
+  public constructor(opcode: int, fin: boolean, masked: boolean, payload: Uint8Array, size: int) {
+    this.opcode = opcode;
+    this.fin = fin;
+    this.masked = masked;
+    this.payload = payload;
+    this.size = size;
+  }
+}
+
+function parseFrame(bytes: Uint8Array, limit: int): Result<Parsed | undefined, WebSocketError> {
+  if (bytes.length < 2) {
+    return ok(undefined);
+  }
+  const first = byteAt(bytes, 0);
+  const second = byteAt(bytes, 1);
+  if ((first & 0x70) != 0) {
+    return err({ kind: "PROTOCOL", code: "ERR_INVALID_FRAME", message: "a frame has reserved bits set" });
+  }
+  const masked = (second & 0x80) != 0;
+  let length = second & 0x7f;
+  let at = 2;
+  if (length == 126) {
+    if (bytes.length < 4) {
+      return ok(undefined);
+    }
+    length = byteAt(bytes, 2) * 256 + byteAt(bytes, 3);
+    at = 4;
+  } else if (length == 127) {
+    if (bytes.length < 10) {
+      return ok(undefined);
+    }
+    length = 0;
+    for (let i = 2; i < 10; i++) {
+      length = length * 256 + byteAt(bytes, i);
+    }
+    at = 10;
+  }
+  if (length > limit) {
+    return err({
+      kind: "TOO_LARGE",
+      code: "ERR_MESSAGE_TOO_LARGE",
+      message: `a message is larger than ${limit} bytes (maxMessageSize)`,
+      limit: limit,
+    });
+  }
+  const maskAt = at;
+  if (masked) {
+    at += 4;
+  }
+  if (bytes.length < at + length) {
+    return ok(undefined);
+  }
+  const payload = new Uint8Array(length);
+  for (let i = 0; i < length; i++) {
+    const value = masked ? byteAt(bytes, at + i) ^ byteAt(bytes, maskAt + (i % 4)) : byteAt(bytes, at + i);
+    putByte(payload, i, value);
+  }
+  const parsed = new Parsed(first & 0x0f, (first & 0x80) != 0, masked, payload, at + length);
+
+  return ok(parsed);
+}
+
+export type WebSocketEvents = {
+  message: [data: string | Uint8Array];
+  close: [code: int, reason: string];
+  error: [error: WebSocketError];
+};
+
+export class WebSocket extends EventEmitter<WebSocketEvents> {
+  public readonly url: string;
+  public readonly protocols: string[];
+  public readonly timeout?: int;
+  public readonly maxMessageSize: int;
+
+  private readonly headers: Record<string, string>;
+  private conn?: Connection;
+  private server: boolean;
+  private state: int;
+  private buffered: Uint8Array;
+  private pieces: Uint8Array[];
+  private pieceOpcode: int;
+  private chosen: string;
+
+  public constructor(options: WebSocketOptions) {
+    super();
+    this.url = options.url;
+    this.protocols = options.protocols ?? [];
+    this.timeout = options.timeout;
+    this.maxMessageSize = options.maxMessageSize ?? 16 * 1024 * 1024;
+    this.headers = options.headers ?? {};
+    this.conn = undefined;
+    this.server = false;
+    this.state = 3;
+    this.buffered = new Uint8Array(0);
+    this.pieces = [];
+    this.pieceOpcode = 0;
+    this.chosen = "";
+  }
+
+  public static forServer(protocol: string, maxMessageSize: int): WebSocket {
+    const socket = new WebSocket({ url: "", maxMessageSize: maxMessageSize });
+    socket.server = true;
+    socket.chosen = protocol;
+
+    return socket;
+  }
+
+  public attach(conn: Connection): void {
+    this.start(conn, new Uint8Array(0));
+  }
+
+  public readyState(): int {
+    return this.state;
+  }
+
+  public protocol(): string {
+    return this.chosen;
+  }
+
+  public async connect(): Promise<Result<void, WebSocketConnectError>> {
+    if (this.conn != undefined || this.server) {
+      return err({
+        kind: "REQUEST",
+        code: "ERR_ALREADY_CONNECTED",
+        message: `the WebSocket to ${this.url} is connected already`,
+        url: this.url,
+      });
+    }
+    const parsedResult = URL.parse(this.url);
+    if (parsedResult.isErr()) {
+      return err({
+        kind: "REQUEST",
+        code: "ERR_INVALID_URL",
+        message: `"${this.url}" is not a URL`,
+        url: this.url,
+      });
+    }
+    const url = parsedResult.value;
+    const protocol = url.protocol();
+    if (protocol != "ws:" && protocol != "wss:") {
+      return err({
+        kind: "REQUEST",
+        code: "ERR_UNSUPPORTED_SCHEME",
+        message: `a WebSocket goes to ws: or wss:, not ${protocol}`,
+        url: this.url,
+      });
+    }
+    const secure = protocol == "wss:";
+    const hostname = url.hostname();
+    const host = hostname.startsWith("[") ? hostname.slice(1, hostname.length - 1) : hostname;
+    const port = url.portNumber() ?? (secure ? 443 : 80);
+    this.state = 0;
+    const openedResult = await Connection.open(host, port, secure, undefined);
+    if (openedResult.isErr()) {
+      this.state = 3;
+
+      return err({
+        kind: "NETWORK",
+        code: openedResult.error.code,
+        message: `could not connect to ${host}:${port}: ${openedResult.error.message}`,
+        host: host,
+        port: port,
+      });
+    }
+    const conn = openedResult.value;
+    const nonce = new Uint8Array(16);
+    wsRandom(nonce);
+    const key = Buffer.from(nonce).toString("base64");
+    const path = (url.pathname() == "" ? "/" : url.pathname()) + url.search();
+    let head = `GET ${path} HTTP/1.1\r\nhost: ${url.host()}\r\nupgrade: websocket\r\n` +
+      `connection: Upgrade\r\nsec-websocket-key: ${key}\r\nsec-websocket-version: 13\r\n`;
+    if (this.protocols.length > 0) {
+      head += `sec-websocket-protocol: ${this.protocols.join(", ")}\r\n`;
+    }
+    for (const [name, value] of Object.entries(this.headers)) {
+      head += `${name}: ${value}\r\n`;
+    }
+    head += "\r\n";
+    const encoder = new TextEncoder();
+    const wroteResult = await conn.write(encoder.encode(head));
+    if (wroteResult.isErr()) {
+      conn.close();
+      this.state = 3;
+
+      return err({
+        kind: "NETWORK",
+        code: wroteResult.error.code,
+        message: `the connection to ${host}:${port} broke during the handshake`,
+        host: host,
+        port: port,
+      });
+    }
+    let answer = new Uint8Array(0);
+    let end = -1;
+    const decoder = new TextDecoder("latin1");
+    while (end < 0) {
+      const readResult = await conn.readRaw(undefined);
+      const chunk = readResult.isOk() ? readResult.value : undefined;
+      if (chunk == undefined || answer.length > 16384) {
+        conn.close();
+        this.state = 3;
+
+        return err({
+          kind: "NETWORK",
+          code: "ERR_CLOSED",
+          message: `${host}:${port} closed the connection during the handshake`,
+          host: host,
+          port: port,
+        });
+      }
+      answer = concatBytes(answer, chunk);
+      end = decoder.decode(answer).indexOf("\r\n\r\n");
+    }
+    const text = decoder.decode(answer.subarray(0, end));
+    const lines = text.split("\r\n");
+    const status = parseInt((lines[0] ?? "").split(" ")[1] ?? "").unwrapOr(0);
+    let accept = "";
+    for (const line of lines.slice(1)) {
+      const colon = line.indexOf(":");
+      const name = line.slice(0, colon).trim().toLowerCase();
+      const value = line.slice(colon + 1).trim();
+      if (name == "sec-websocket-accept") {
+        accept = value;
+      }
+      if (name == "sec-websocket-protocol") {
+        this.chosen = value;
+      }
+    }
+    if (status != 101 || accept != acceptKey(key)) {
+      conn.close();
+      this.state = 3;
+
+      return err({
+        kind: "REFUSED",
+        code: "ERR_NOT_UPGRADED",
+        message: `${host}:${port} answered ${status} and did not switch to WebSocket`,
+        status: status,
+      });
+    }
+    this.start(conn, answer.subarray(end + 4));
+
+    return ok(undefined);
+  }
+
+  public send(data: string | Uint8Array): Result<void, SendError> {
+    const conn = this.conn;
+    if (conn == undefined || this.state != 1) {
+      return err({
+        kind: "NOT_CONNECTED",
+        code: this.state == 2 ? "ERR_CLOSING" : "ERR_NOT_CONNECTED",
+        message: "the WebSocket is not open, so nothing can be sent",
+      });
+    }
+    const text = typeof data == "string";
+    const payload = typeof data == "string" ? new TextEncoder().encode(data) : data;
+    void this.write(conn, frame(text ? OP_TEXT : OP_BINARY, payload, !this.server));
+
+    return ok(undefined);
+  }
+
+  public async close(code: int = 1000, reason: string = ""): Promise<void> {
+    const conn = this.conn;
+    if (conn == undefined || this.state != 1) {
+      return;
+    }
+    this.state = 2;
+    const reasonBytes = new TextEncoder().encode(reason);
+    const payload = new Uint8Array(2 + reasonBytes.length);
+    putByte(payload, 0, code >> 8);
+    putByte(payload, 1, code);
+    for (let i = 0; i < reasonBytes.length && i < 123; i++) {
+      putByte(payload, 2 + i, byteAt(reasonBytes, i));
+    }
+    await this.write(conn, frame(OP_CLOSE, payload, !this.server));
+  }
+
+  private async write(conn: Connection, bytes: Uint8Array): Promise<void> {
+    const wroteResult = await conn.write(bytes);
+    if (wroteResult.isErr()) {
+      this.fail({ kind: "NETWORK", code: "ERR_CLOSED", message: "the connection closed while sending" });
+    }
+  }
+
+  private start(conn: Connection, initial: Uint8Array): void {
+    this.conn = conn;
+    this.state = 1;
+    this.buffered = initial;
+    this.pieces = [];
+    void this.readLoop(conn);
+  }
+
+  private finish(code: int, reason: string): void {
+    const conn = this.conn;
+    if (conn == undefined) {
+      return;
+    }
+    this.conn = undefined;
+    this.state = 3;
+    conn.close();
+    this.emit("close", code, reason);
+  }
+
+  private fail(error: WebSocketError): void {
+    if (this.conn == undefined) {
+      return;
+    }
+    this.emit("error", error);
+    this.finish(1006, "");
+  }
+
+  private async readLoop(conn: Connection): Promise<void> {
+    for (;;) {
+      for (;;) {
+        const parsedResult = parseFrame(this.buffered, this.maxMessageSize);
+        if (parsedResult.isErr()) {
+          this.fail(parsedResult.error);
+          return;
+        }
+        const parsed = parsedResult.value;
+        if (parsed == undefined) {
+          break;
+        }
+        this.buffered = this.buffered.subarray(parsed.size);
+        if (this.server && !parsed.masked) {
+          this.fail({
+            kind: "PROTOCOL",
+            code: "ERR_UNMASKED_FRAME",
+            message: "a frame from the client is not masked",
+          });
+          return;
+        }
+        if (!this.handle(conn, parsed)) {
+          return;
+        }
+      }
+      const readResult = await conn.readRaw(undefined);
+      const chunk = readResult.isOk() ? readResult.value : undefined;
+      if (chunk == undefined) {
+        if (this.conn != undefined) {
+          this.fail({
+            kind: "NETWORK",
+            code: "ERR_CLOSED",
+            message: "the connection closed without a close frame",
+          });
+        }
+        return;
+      }
+      this.buffered = concatBytes(this.buffered, chunk);
+    }
+  }
+
+  private handle(conn: Connection, parsed: Parsed): boolean {
+    const opcode = parsed.opcode;
+    if (opcode == OP_PING) {
+      void this.write(conn, frame(OP_PONG, parsed.payload, !this.server));
+      return true;
+    }
+    if (opcode == OP_PONG) {
+      return true;
+    }
+    if (opcode == OP_CLOSE) {
+      const payload = parsed.payload;
+      const code = payload.length >= 2 ? byteAt(payload, 0) * 256 + byteAt(payload, 1) : 1005;
+      const reason = new TextDecoder().decode(payload.subarray(2));
+      if (this.state == 1) {
+        this.state = 2;
+        void this.write(conn, frame(OP_CLOSE, payload.subarray(0, 2), !this.server));
+      }
+      this.finish(code, reason);
+      return false;
+    }
+    if (opcode == OP_TEXT || opcode == OP_BINARY) {
+      this.pieceOpcode = opcode;
+      this.pieces = [];
+    } else if (opcode != OP_CONTINUATION) {
+      this.fail({ kind: "PROTOCOL", code: "ERR_INVALID_FRAME", message: `a frame has the unknown opcode ${opcode}` });
+      return false;
+    }
+    this.pieces.push(parsed.payload);
+    if (!parsed.fin) {
+      return true;
+    }
+    let message = new Uint8Array(0);
+    for (const piece of this.pieces) {
+      message = concatBytes(message, piece);
+    }
+    this.pieces = [];
+    if (this.pieceOpcode == OP_BINARY) {
+      this.emit<[string | Uint8Array]>("message", message);
+      return true;
+    }
+    const textResult = new TextDecoder("utf-8", { fatal: true }).decode(message);
+    if (textResult.isErr()) {
+      this.fail({ kind: "PROTOCOL", code: "ERR_INVALID_UTF8", message: "a text message is not UTF-8" });
+      return false;
+    }
+    this.emit<[string | Uint8Array]>("message", textResult.value);
+
+    return true;
+  }
+}

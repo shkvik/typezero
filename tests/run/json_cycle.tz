@@ -1,6 +1,6 @@
 // JSON.stringify gives a Result when the type of the value may hold itself
 // (docs/errors.md, section 7): Json, a class with a field of its own kind, a
-// tree; an Err with the code "circular" when the value does hold itself
+// tree; an Err with the code "ERR_CIRCULAR_STRUCTURE" when the value does hold itself
 // (JavaScript throws a TypeError). A type that is a tree by itself gives a
 // string.
 class Node {

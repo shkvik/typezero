@@ -309,7 +309,7 @@ const { hi, lo } = Bit.mul64(a, b)           // Poly1305, X25519
 4. **Биты** (сделано 27 октября). Побитовые операции по ширине типа, ошибки на `| 0` и
    `>>> 0`, `Bit.Wrap32`, `Bit.Wrap64`, объект `Bit`; код с битами в `library/` и тестах
    переписан. Сюда же переехал разбор из шага 5: `parseInt`, `parseFloat` и `Number(строка)`
-   дают `Result`, тип ошибки — `NumberError` (`{ code: "bad_number"; message }`). `+s` у
+   дают `Result`, тип ошибки — `NumberError` (`{ code: "ERR_INVALID_NUMBER"; message }`). `+s` у
    строки — ошибка с подсказкой `Number(s)`.
 5. **Без `NaN` и `Infinity`** (сделано 27 октября). Диапазоны `double`, области определения
    `Math`, `Math.clamp`, `Result` у чтения дробных из байтов, флаги `nnan` и `ninf` там, где

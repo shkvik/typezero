@@ -1,5 +1,10 @@
 2026-10-23T10:00:00.000Z
-{ code: 'bad_date', message: 'Invalid Date', text: 'not a date' }
+{
+  kind: 'DATE',
+  code: 'ERR_INVALID_DATE',
+  message: 'Invalid Date',
+  text: 'not a date'
+}
 Asia/Bishkek 6 AM
 Asia/Bishkek 1/1/1970, 6:00:00 AM
 Mars/Base 12 AM

@@ -2,13 +2,13 @@ proved Point { x: 3, y: 6 }
 optional left out point 1,2
 optional given at 1,2
 optional undefined point 1,2
-fraction bad_argument: Reflect.apply: argument 1: expected int, got 2.5
-string bad_argument: Reflect.apply: argument 1: expected int, got a string
-too many bad_arity: Reflect.apply: expected 1 argument, got 2
-too few bad_arity: Reflect.apply: expected 1 argument, got 0
-other this bad_this: Point.scale was called with a 'this' that is not an instance of Point
+fraction ERR_INVALID_ARGUMENT: Reflect.apply: argument 1: expected int, got 2.5
+string ERR_INVALID_ARGUMENT: Reflect.apply: argument 1: expected int, got a string
+too many ERR_INVALID_ARITY: Reflect.apply: expected 1 argument, got 2
+too few ERR_INVALID_ARITY: Reflect.apply: expected 1 argument, got 0
+other this ERR_INVALID_THIS: Point.scale was called with a 'this' that is not an instance of Point
 unknown argument Point { x: 4, y: 8 }
 double argument Point { x: 2, y: 4 }
 construct Point { x: 5, y: 6 }
-construct fraction bad_argument: new Point: argument 2: expected int, got 6.5
-construct arity bad_arity: new Point: expected 2 arguments, got 1
+construct fraction ERR_INVALID_ARGUMENT: new Point: argument 2: expected int, got 6.5
+construct arity ERR_INVALID_ARITY: new Point: expected 2 arguments, got 1

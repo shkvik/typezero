@@ -1,0 +1,7 @@
+{ name: 'Ann', age: 30, tags: [ 'a', 'b' ] } 3 30
+error: not a user
+error: not a user
+error: ERR_INVALID_JSON
+BOB 1
+2
+count is a number

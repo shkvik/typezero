@@ -42,7 +42,7 @@ type DecimalRoundingMode =
 // decimal("0.1"), decimal(x): an exact decimal from a string or a number. A
 // string known when tz builds the program (a literal, a constant) is checked
 // then and gives a decimal; any other string gives a Result.
-type DecimalError = { code: "bad_decimal"; message: string; text: string }
+type DecimalError = { kind: "DECIMAL"; code: "ERR_INVALID_DECIMAL"; message: string; text: string }
 declare function decimal<S extends string>(
   value: S,
 ): string extends S ? Result<decimal, DecimalError> : decimal
@@ -85,7 +85,7 @@ interface Number {
 
 // Numbers from strings give a Result (docs/numbers.md, section 9). tsc keeps its
 // own global parseInt and parseFloat, which come first.
-type NumberError = { code: "bad_number"; message: string }
+type NumberError = { kind: "NUMBER"; code: "ERR_INVALID_NUMBER"; message: string }
 interface NumberConstructor {
   (value: string): Result<number, NumberError>
   parseInt(text: string, radix?: number): Result<int, NumberError>
@@ -136,14 +136,19 @@ declare namespace Bit {
 
 // JSON (docs/modules.md, section 5; docs/narrowing.md, section 3).
 type Json = null | boolean | number | string | Json[] | { [key: string]: Json }
-type JsonError = { code: "bad_json" | "bad_field" | "bad_class" | "circular"; message: string; path: string }
-type UriError = { code: "bad_uri"; message: string }
-type RegexError = { code: "bad_regex"; message: string }
-type UrlError = { code: "bad_url"; message: string; input: string }
-type DateError = { code: "bad_date"; message: string; text: string }
-type LocaleError = { code: "bad_locale"; message: string; tag: string }
-type DecodeError = { code: "ERR_ENCODING_INVALID_ENCODED_DATA"; message: string }
-type EncodingError = { code: "ERR_ENCODING_NOT_SUPPORTED"; message: string }
+type JsonError = {
+  kind: "JSON"
+  code: "ERR_INVALID_JSON" | "ERR_CIRCULAR_STRUCTURE"
+  message: string
+  path: string
+}
+type UriError = { kind: "URI"; code: "ERR_INVALID_URI"; message: string }
+type RegexError = { kind: "REGEX"; code: "ERR_INVALID_REGEX"; message: string }
+type UrlError = { kind: "URL"; code: "ERR_INVALID_URL"; message: string; input: string }
+type DateError = { kind: "DATE"; code: "ERR_INVALID_DATE"; message: string; text: string }
+type LocaleError = { kind: "LOCALE"; code: "ERR_INVALID_LOCALE"; message: string; tag: string }
+type DecodeError = { kind: "ENCODING"; code: "ERR_ENCODING_INVALID_ENCODED_DATA"; message: string }
+type EncodingError = { kind: "ENCODING"; code: "ERR_ENCODING_NOT_SUPPORTED"; message: string }
 
 // Date.parse gives the milliseconds, or an Err for a text it cannot read
 // (docs/date.md, section 4).
@@ -156,12 +161,80 @@ interface DateConstructor {
 // methods; the status of a Response is an HttpStatus. A declaration here
 // cannot change what @types/node declares, so tz changes those declarations in
 // its copy of @types/node (editors/types/patch.cmake).
-type FetchError = { code: string; message: string; cause?: string }
-type BodyError = {
-  code: "body_used" | "terminated" | "bad_form" | "body_failed" | "ABORT_ERR" | "TIMEOUT_ERR"
-  message: string
-  cause?: string
-}
+type TlsCode =
+  | "UNABLE_TO_GET_ISSUER_CERT" | "UNABLE_TO_GET_CRL" | "UNABLE_TO_DECRYPT_CERT_SIGNATURE"
+  | "UNABLE_TO_DECRYPT_CRL_SIGNATURE" | "UNABLE_TO_DECODE_ISSUER_PUBLIC_KEY"
+  | "CERT_SIGNATURE_FAILURE" | "CRL_SIGNATURE_FAILURE" | "CERT_NOT_YET_VALID" | "CERT_HAS_EXPIRED"
+  | "CRL_NOT_YET_VALID" | "CRL_HAS_EXPIRED" | "ERROR_IN_CERT_NOT_BEFORE_FIELD"
+  | "ERROR_IN_CERT_NOT_AFTER_FIELD" | "ERROR_IN_CRL_LAST_UPDATE_FIELD"
+  | "ERROR_IN_CRL_NEXT_UPDATE_FIELD" | "OUT_OF_MEM" | "DEPTH_ZERO_SELF_SIGNED_CERT"
+  | "SELF_SIGNED_CERT_IN_CHAIN" | "UNABLE_TO_GET_ISSUER_CERT_LOCALLY"
+  | "UNABLE_TO_VERIFY_LEAF_SIGNATURE" | "CERT_CHAIN_TOO_LONG" | "CERT_REVOKED" | "INVALID_CA"
+  | "PATH_LENGTH_EXCEEDED" | "INVALID_PURPOSE" | "CERT_UNTRUSTED" | "CERT_REJECTED"
+  | "HOSTNAME_MISMATCH" | "UNSPECIFIED" | "ERR_TLS_CERT_ALTNAME_INVALID" | "ERR_TLS_HANDSHAKE"
+// What went wrong with a fetch: the kind says what to do (REQUEST — fix the
+// code; NETWORK — try again; RESPONSE, TLS, REDIRECT, TIMEOUT), the code is
+// one of a closed list (docs/net.md, section 2).
+type FetchError =
+  | {
+      kind: "REQUEST"
+      code: "ERR_INVALID_URL" | "ERR_CREDENTIALS_IN_URL" | "ERR_INVALID_METHOD" | "ERR_BODY_WITH_GET"
+        | "ERR_DUPLEX_REQUIRED" | "ERR_REQUEST_USED" | "ERR_UNSUPPORTED_SCHEME" | "ERR_BLOCKED_PORT"
+        | "ERR_STREAM_FAILED"
+      message: string
+      url: string
+    }
+  | {
+      kind: "NETWORK"
+      code: "ENOTFOUND" | "EAI_AGAIN" | "ECONNREFUSED" | "ETIMEDOUT" | "ENETUNREACH" | "EHOSTUNREACH"
+        | "EADDRNOTAVAIL" | "ECONNRESET" | "ECONNABORTED" | "EPIPE" | "EMFILE" | "ENOBUFS" | "UNKNOWN"
+      message: string
+      errno: int
+      syscall: string
+      host: string
+      port: int
+    }
+  | {
+      kind: "RESPONSE"
+      code: "ERR_CLOSED" | "ERR_INVALID_RESPONSE" | "ERR_HEAD_TOO_LARGE"
+      message: string
+      host: string
+      port: int
+    }
+  | { kind: "TLS"; code: TlsCode; message: string; host: string }
+  | {
+      kind: "REDIRECT"
+      code: "ERR_UNEXPECTED_REDIRECT" | "ERR_TOO_MANY_REDIRECTS" | "ERR_INVALID_LOCATION"
+        | "ERR_REDIRECT_WITH_STREAM"
+      message: string
+      location: string
+    }
+  | { kind: "TIMEOUT"; code: "TIMEOUT_ERR"; message: string; timeout: int }
+  | {
+      kind: "PROXY"
+      code: "ERR_INVALID_PROXY_URL" | "ERR_PROXY_AUTH_REQUIRED" | "ERR_PROXY_REFUSED"
+      message: string
+      proxy: string
+      status: int
+    }
+// What went wrong while reading a body (docs/net.md, section 3).
+type BodyError =
+  | { kind: "USED"; code: "ERR_BODY_USED" | "ERR_BODY_LOCKED"; message: string }
+  | {
+      kind: "NETWORK"
+      code: "ERR_CLOSED" | "ECONNRESET" | "ECONNABORTED" | "ETIMEDOUT" | "ERR_TLS_FAILED" | "UNKNOWN"
+      message: string
+    }
+  | { kind: "TIMEOUT"; code: "TIMEOUT_ERR"; message: string; timeout: int }
+  | { kind: "TOO_LARGE"; code: "ERR_BODY_TOO_LARGE"; message: string; limit: double }
+  | { kind: "MALFORMED"; code: "ERR_INVALID_CHUNKED" | "ERR_INVALID_COMPRESSION"; message: string }
+  | {
+      kind: "CONTENT"
+      code: "ERR_INVALID_JSON" | "ERR_NOT_A_FORM" | "ERR_NO_BOUNDARY" | "ERR_INVALID_MULTIPART"
+      message: string
+      contentType: string
+    }
+  | { kind: "STREAM"; code: "ERR_STREAM_FAILED"; message: string }
 // The statuses a Response may have; a status from a variable becomes one
 // after a check: if (isHttpStatus(code)).
 type HttpStatus =
@@ -253,26 +326,13 @@ interface RegExpConstructor {
 }
 
 interface JSON {
-  // JSON.parse<User>(text) checks every field and gives a Result with a User.
-  // Without a type argument the rest parameter wants a value of type never,
-  // so this declaration does not fit and tsc takes its own JSON.parse.
-  parse<T = never>(
-    text: string,
-    ...noTypeArgument: [T] extends [never] ? [never] : []
-  ): Result<T, JsonError>
+  // JSON.parse gives a Result with a Json; the program checks what it holds
+  // (docs/narrowing.md, section 3).
+  parse(text: string): Result<Json, JsonError>
 }
-
-// A Json value as type T, every field checked; with a class, made by its
-// constructor.
-declare function fromJson<T>(json: Json): Result<T, JsonError>
-declare function fromJson<T>(
-  cls: abstract new (...args: never[]) => T,
-  json: Json,
-): Result<T, JsonError>
 
 // Files built into the executable, read when the program is compiled; the
 // path is relative to the file of the call.
-declare function embedJson(path: string): Json
 declare function embedText(path: string): string
 declare function embedBytes(path: string): Buffer
 

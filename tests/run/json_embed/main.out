@@ -5,7 +5,7 @@
   users: [ { name: 'Ann', roles: [Array] }, { name: 'Bob', roles: [] } ]
 }
 8080 Ann []
-true true
+false false
 30
 <h1>Привет</h1>
 <p>line 2</p>

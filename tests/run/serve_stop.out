@@ -1,0 +1,7 @@
+first event: true
+stopped after the timeout: true
+the stream ended; cancelled: 1
+timeout 0 stops at once: true
+the slow request failed: true answered: 0
+no connections, no wait: true
+the slow handler ended later: 1

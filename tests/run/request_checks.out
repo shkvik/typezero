@@ -8,17 +8,17 @@
 "spaces"
 http://x.com/b
 GET yes [] 1
-CONNECT CONNECT bad_request: 'CONNECT' HTTP method is unsupported.
-bad method bad method bad_request: 'bad method' is not a valid HTTP method.
-GET GET bad_request: Request with GET/HEAD method cannot have body.
+CONNECT CONNECT ERR_INVALID_METHOD: fetch does not send CONNECT requests
+bad method bad method ERR_INVALID_METHOD: 'bad method' is not a valid HTTP method
+GET GET ERR_BODY_WITH_GET: a GET request cannot have a body: use POST, or drop the body
 post POST POST yes [x]
-Request cannot be constructed from a URL that includes credentials: http://user:pw@127.0.0.1:9/
-RequestInit: duplex option is required when sending a body.
+the URL http://user:pw@127.0.0.1:9/ has a user name or a password; send them in the authorization header instead
+a request whose body is a stream needs duplex: "half"
 POST yes [twice?] true
-Request.constructor: Cannot construct a Request with a Request object that has already been used.
+the body of this Request is already read, so it cannot be sent
 once
-Request.constructor: Cannot construct a Request with a Request object that has already been used.
+the body of this Request is already read, so it cannot be sent
 body
-true body_used
+true ERR_BODY_USED
 http://b.com/y
 kept http://b.com/y

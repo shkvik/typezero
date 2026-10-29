@@ -12,6 +12,7 @@
 #include "runtime/library/intl/intl/intl.h"
 #include "runtime/library/json/json/json.h"
 #include "runtime/library/process/process/process.h"
+#include "runtime/library/process/signals/signals.h"
 #include "runtime/library/reflect/meta/meta.h"
 #include <math.h>
 #include <stdarg.h>
@@ -141,6 +142,24 @@ void tz_err_end(void) {
 
 static void out_flush_all(void) { tz_out_flush(1); }
 
+void tz_out_idle(void) {
+  if (tz_out_len != 0) {
+    tz_out_flush(!tz_out_target->isConsole);
+  }
+}
+
+void tz_out_rescue(void) {
+  size_t n = __atomic_load_n(&tz_out_len, __ATOMIC_ACQUIRE);
+  if (n > sizeof tz_out_buf) {
+    n = sizeof tz_out_buf;
+  }
+  if (n == 0) {
+    return;
+  }
+  stream_write(tz_out_target, tz_out_buf, n);
+  __atomic_compare_exchange_n(&tz_out_len, &n, 0, 0, __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE);
+}
+
 TZ_NOINLINE void tz_out_write_slow(const char *data, size_t len) {
   tz_out_flush(1);
   if (len >= sizeof tz_out_buf) {
@@ -224,6 +243,7 @@ void tz_rt_init(void) {
   tz_thread_stack_init();
   tz_parallel_init();
   atexit(out_flush_all);
+  tz_signal_init();
   tz_clock_init();
 }
 
@@ -236,6 +256,7 @@ void tz_rt_main_done(void) {
 
 void tz_rt_shutdown(void) {
   tz_process_shutdown();
+  tz_signal_shutdown();
   tz_meta_shutdown();
   tz_json_shutdown();
   tz_fs_shutdown();

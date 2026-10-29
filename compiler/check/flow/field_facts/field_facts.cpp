@@ -18,7 +18,8 @@ FieldFacts::FieldFacts(Checker &checker) : checker_(checker) {}
 std::optional<Checker::FieldPath> FieldFacts::fieldPath(const Expr *expr) const {
   auto *member = dyn_cast<MemberExpr>(unnarrowed(expr));
   if (!member || member->optional || !member->object->type ||
-      !(member->object->type->isObject() || member->object->type->isUnion())) {
+      !(member->object->type->isObject() || member->object->type->isUnion() ||
+        member->object->type->nonOptional()->isJson())) {
     return std::nullopt;
   }
   const Expr *object = unnarrowed(member->object);

@@ -186,7 +186,7 @@ typedef struct {
 } ErrorParts;
 
 void tz_json_fail(const char *code, TzBuf *message, TzBuf *path) {
-  if (!tz_json_error_maker && strcmp(code, "circular") == 0) {
+  if (!tz_json_error_maker && strcmp(code, "ERR_CIRCULAR_STRUCTURE") == 0) {
     tz_panicf("TypeError: Converting circular structure to JSON");
   }
   if (!tz_json_error_maker) {

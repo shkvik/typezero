@@ -1,0 +1,76 @@
+// WebSocket (docs/net.md, section 9): the server upgrades a request with
+// upgradeWebSocket from tz:http, as Deno does; the client is one object whose
+// constructor takes the settings and connect() gives a Result; events of an
+// EventEmitter carry the data; text and binary messages, a large one, close
+// with a code and a reason, and a request that is not a WebSocket. Only
+// 127.0.0.1.
+import { Server, upgradeWebSocket } from "tz:http"
+
+const server = new Server({ port: 0, hostname: "127.0.0.1" }, request => {
+  const upgradeResult = upgradeWebSocket(request, { protocol: "echo" })
+  if (upgradeResult.isErr()) {
+    return new Response(upgradeResult.error.code, { status: 426 })
+  }
+  const peer = upgradeResult.value.socket
+  peer.on("message", data => {
+    if (typeof data == "string") {
+      if (data == "bye") {
+        void peer.close(4000, "done")
+        return
+      }
+      const sent = peer.send(data.toUpperCase())
+      if (sent.isErr()) console.log("server send:", sent.error.code)
+    } else {
+      const sent = peer.send(data)
+      if (sent.isErr()) console.log("server send:", sent.error.code)
+    }
+  })
+  peer.on("error", error => console.log("server error:", error.code))
+  peer.on("close", (code, reason) => console.log("server close:", code, reason))
+  return upgradeResult.value.response
+})
+const startedResult = server.listen()
+if (startedResult.isErr()) {
+  console.log("cannot listen:", startedResult.error.message)
+  process.exit(1)
+}
+const listening = startedResult.value
+const url = `ws://127.0.0.1:${listening.port}/chat`
+
+const plain = await fetch(`http://127.0.0.1:${listening.port}/`)
+if (plain.isOk()) console.log("plain:", plain.value.status, (await plain.value.text()).unwrapOr(""))
+
+const socket = new WebSocket({ url, protocols: ["echo"] })
+const closed = Promise.withResolvers<void>()
+const big = "x".repeat(70000)
+socket.on("message", data => {
+  if (typeof data == "string") console.log("got:", data.length > 100 ? `${data.length} chars` : data)
+  else console.log("got bytes:", data.length, data[0], data[data.length - 1])
+})
+socket.on("error", error => console.log("client error:", error.code))
+socket.on("close", (code, reason) => {
+  console.log("client close:", code, reason)
+  closed.resolve()
+})
+const connectedResult = await socket.connect()
+if (connectedResult.isErr()) {
+  console.log("cannot connect:", connectedResult.error.message)
+  process.exit(1)
+}
+console.log("open:", socket.readyState(), socket.protocol())
+const again = await socket.connect()
+if (again.isErr()) console.log("again:", again.error.code)
+const sent = socket.send("hello")
+console.log("sent:", sent.isOk())
+const sentBytes = socket.send(new Uint8Array([1, 2, 3, 250]))
+const sentBig = socket.send(big)
+const sentBye = socket.send("bye")
+console.log("all sent:", sentBytes.isOk() && sentBig.isOk() && sentBye.isOk())
+await closed.promise
+const late = socket.send("late")
+if (late.isErr()) console.log("late:", late.error.code)
+
+const wrong = new WebSocket({ url: "http://127.0.0.1/" })
+const wrongResult = await wrong.connect()
+if (wrongResult.isErr()) console.log(wrongResult.error.kind, wrongResult.error.code)
+await listening.stop()

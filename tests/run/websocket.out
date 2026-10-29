@@ -1,0 +1,12 @@
+plain: 426 ERR_NOT_WEBSOCKET
+open: 1 echo
+again: ERR_ALREADY_CONNECTED
+sent: true
+all sent: true
+got: HELLO
+got bytes: 4 1 250
+got: 70000 chars
+client close: 4000 done
+late: ERR_NOT_CONNECTED
+REQUEST ERR_UNSUPPORTED_SCHEME
+server close: 4000 

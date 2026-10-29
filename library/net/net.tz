@@ -1,0 +1,600 @@
+import { Duplex, StreamCallback } from "node:stream";
+import { URL } from "tz:url";
+
+declare function netConnect(
+  host: string,
+  port: int,
+  deadline: object | undefined,
+): Promise<Result<object, SystemError>>;
+declare function tlsConnect(
+  conn: object,
+  host: string,
+  deadline: object | undefined,
+): Promise<Result<void, SystemError>>;
+declare function netClose(conn: object): void;
+declare function tcpRead(
+  conn: object,
+  deadline: object | undefined,
+): Promise<Result<Uint8Array | undefined, SystemError>>;
+declare function httpWrite(conn: object, chunk: Uint8Array): Promise<Result<void, SystemError>>;
+declare function tcpNoDelay(conn: object, on: boolean): void;
+declare function tcpKeepAlive(conn: object, on: boolean): void;
+declare function tcpReset(conn: object): void;
+declare function netListen(
+  host: string,
+  port: int,
+  maxBody: double,
+  keepAlive: int,
+  headersTimeout: int,
+  requestTimeout: int,
+): Result<object, SystemError>;
+declare function netListenerPort(listener: object): int;
+declare function netAccept(listener: object): Promise<object | undefined>;
+declare function netCloseListener(listener: object): void;
+declare function netAbortAll(listener: object): void;
+declare function netDrained(listener: object): Promise<void>;
+declare function netClientAddress(socket: object): string;
+declare function netClientPort(socket: object): int;
+declare function deadlineNew(): object;
+declare function deadlinePass(deadline: object): void;
+declare function deadlinePassed(deadline: object): boolean;
+
+export type SocketTransport =
+  | {
+      secure: false;
+    }
+  | {
+      secure: true;
+      servername?: string;
+    };
+
+export type SocketOptions = {
+  host: string;
+  port: int;
+  timeout?: int;
+  noDelay?: boolean;
+  keepAlive?: boolean;
+  transport?: SocketTransport;
+};
+
+export type ConnectError =
+  | {
+      kind: "REQUEST";
+      code: "ERR_INVALID_HOST" | "ERR_ALREADY_CONNECTED";
+      message: string;
+      host: string;
+      port: int;
+    }
+  | {
+      kind: "NETWORK";
+      code:
+        | "ENOTFOUND"
+        | "EAI_AGAIN"
+        | "ECONNREFUSED"
+        | "ETIMEDOUT"
+        | "ENETUNREACH"
+        | "EHOSTUNREACH"
+        | "EADDRNOTAVAIL"
+        | "ECONNRESET"
+        | "EMFILE"
+        | "ENOBUFS"
+        | "UNKNOWN";
+      message: string;
+      errno: int;
+      syscall: string;
+      host: string;
+      port: int;
+    }
+  | {
+      kind: "TLS";
+      code: string;
+      message: string;
+      host: string;
+    }
+  | {
+      kind: "TIMEOUT";
+      code: "TIMEOUT_ERR";
+      message: string;
+      timeout: int;
+    };
+
+type ConnectNetworkCode =
+  | "ENOTFOUND"
+  | "EAI_AGAIN"
+  | "ECONNREFUSED"
+  | "ETIMEDOUT"
+  | "ENETUNREACH"
+  | "EHOSTUNREACH"
+  | "EADDRNOTAVAIL"
+  | "ECONNRESET"
+  | "EMFILE"
+  | "ENOBUFS"
+  | "UNKNOWN";
+
+function connectCode(code: string): ConnectNetworkCode {
+  switch (code) {
+    case "ENOTFOUND":
+      return "ENOTFOUND";
+    case "EAI_AGAIN":
+      return "EAI_AGAIN";
+    case "ECONNREFUSED":
+      return "ECONNREFUSED";
+    case "ETIMEDOUT":
+      return "ETIMEDOUT";
+    case "ENETUNREACH":
+      return "ENETUNREACH";
+    case "EHOSTUNREACH":
+      return "EHOSTUNREACH";
+    case "EADDRNOTAVAIL":
+      return "EADDRNOTAVAIL";
+    case "ECONNRESET":
+      return "ECONNRESET";
+    case "EMFILE":
+      return "EMFILE";
+    case "ENOBUFS":
+      return "ENOBUFS";
+    default:
+      return "UNKNOWN";
+  }
+}
+
+function connectMessage(code: ConnectNetworkCode, host: string, port: int, detail: string): string {
+  switch (code) {
+    case "ENOTFOUND":
+      return `could not find the address of ${host}: no such name in DNS`;
+    case "EAI_AGAIN":
+      return `could not find the address of ${host}: DNS did not answer; check the network`;
+    case "ECONNREFUSED":
+      return `could not connect to ${host}:${port}: nothing listens on this port`;
+    case "ETIMEDOUT":
+      return `could not connect to ${host}:${port}: the host did not answer in time`;
+    case "ENETUNREACH":
+      return `could not connect to ${host}:${port}: the network is unreachable`;
+    case "EHOSTUNREACH":
+      return `could not connect to ${host}:${port}: the host is unreachable`;
+    case "EADDRNOTAVAIL":
+      return `could not connect to ${host}:${port}: the address is not available on this machine`;
+    case "ECONNRESET":
+      return `the connection to ${host}:${port} was reset while connecting`;
+    case "EMFILE":
+      return `could not connect to ${host}:${port}: too many files and sockets are open in this program`;
+    case "ENOBUFS":
+      return `could not connect to ${host}:${port}: the system has no buffer space left`;
+    case "UNKNOWN":
+      return `could not connect to ${host}:${port}: ${detail}`;
+  }
+}
+
+function passed(deadline?: object): boolean {
+  if (deadline == undefined) {
+    return false;
+  }
+
+  return deadlinePassed(deadline);
+}
+
+function startDeadline(timeout?: int): object | undefined {
+  if (timeout == undefined) {
+    return undefined;
+  }
+  const deadline = deadlineNew();
+  const timer = setTimeout(() => deadlinePass(deadline), timeout);
+  timer.unref();
+
+  return deadline;
+}
+
+function streamFailure(e: SystemError): StreamError {
+  return { code: e.code, message: e.message, errno: e.errno, syscall: e.syscall };
+}
+
+export class Socket extends Duplex<Buffer> {
+  private conn?: object;
+  private readonly host: string;
+  private readonly port: int;
+  private readonly timeout?: int;
+  private readonly noDelay: boolean;
+  private readonly keepAlive: boolean;
+  private readonly transport: SocketTransport;
+  private reading: boolean;
+  private peerAddress: string;
+  private peerPort: int;
+  private bytesIn: double;
+  private bytesOut: double;
+
+  public constructor(options: SocketOptions) {
+    super({ allowHalfOpen: false });
+    this.conn = undefined;
+    this.host = options.host;
+    this.port = options.port;
+    this.timeout = options.timeout;
+    this.noDelay = options.noDelay ?? true;
+    this.keepAlive = options.keepAlive ?? false;
+    this.transport = options.transport ?? { secure: false };
+    this.reading = false;
+    this.peerAddress = options.host;
+    this.peerPort = options.port;
+    this.bytesIn = 0;
+    this.bytesOut = 0;
+  }
+
+  public static accepted(conn: object): Socket {
+    const address = netClientAddress(conn);
+    const port = netClientPort(conn);
+    const socket = new Socket({ host: address, port: port });
+    socket.conn = conn;
+    socket.peerAddress = address;
+    socket.peerPort = port;
+
+    return socket;
+  }
+
+  public async connect(): Promise<Result<void, ConnectError>> {
+    if (this.conn != undefined) {
+      return err({
+        kind: "REQUEST",
+        code: "ERR_ALREADY_CONNECTED",
+        message: `the socket to ${this.host}:${this.port} is connected already`,
+        host: this.host,
+        port: this.port,
+      });
+    }
+    if (this.host == "") {
+      return err({
+        kind: "REQUEST",
+        code: "ERR_INVALID_HOST",
+        message: "the host to connect to is empty",
+        host: this.host,
+        port: this.port,
+      });
+    }
+    const deadline = startDeadline(this.timeout);
+    const connectedResult = await netConnect(this.host, this.port, deadline);
+    if (connectedResult.isErr()) {
+      const e = connectedResult.error;
+      if (passed(deadline)) {
+        const timeout = this.timeout ?? 0;
+
+        return err({
+          kind: "TIMEOUT",
+          code: "TIMEOUT_ERR",
+          message: `could not connect to ${this.host}:${this.port} within ${timeout} ms`,
+          timeout: timeout,
+        });
+      }
+      const code = connectCode(e.code);
+      const message = connectMessage(code, this.host, this.port, e.message);
+
+      return err({
+        kind: "NETWORK",
+        code: code,
+        message: message,
+        errno: e.errno,
+        syscall: e.syscall,
+        host: this.host,
+        port: this.port,
+      });
+    }
+    const conn = connectedResult.value;
+    tcpNoDelay(conn, this.noDelay);
+    tcpKeepAlive(conn, this.keepAlive);
+    const transport = this.transport;
+    if (transport.secure) {
+      const servername = transport.servername ?? this.host;
+      const securedResult = await tlsConnect(conn, servername, deadline);
+      if (securedResult.isErr()) {
+        netClose(conn);
+
+        return err({
+          kind: "TLS",
+          code: securedResult.error.code,
+          message: `the TLS handshake with ${servername} failed: ${securedResult.error.message}`,
+          host: servername,
+        });
+      }
+    }
+    this.conn = conn;
+
+    return ok(undefined);
+  }
+
+  public async startTls(servername?: string): Promise<Result<void, ConnectError>> {
+    const conn = this.conn;
+    const name = servername ?? this.host;
+    if (conn == undefined) {
+      return err({
+        kind: "REQUEST",
+        code: "ERR_INVALID_HOST",
+        message: `the socket to ${this.host}:${this.port} is not connected, so TLS cannot start`,
+        host: this.host,
+        port: this.port,
+      });
+    }
+    const securedResult = await tlsConnect(conn, name, undefined);
+    if (securedResult.isErr()) {
+      return err({
+        kind: "TLS",
+        code: securedResult.error.code,
+        message: `the TLS handshake with ${name} failed: ${securedResult.error.message}`,
+        host: name,
+      });
+    }
+
+    return ok(undefined);
+  }
+
+  public remoteAddress(): string {
+    return this.peerAddress;
+  }
+
+  public remotePort(): int {
+    return this.peerPort;
+  }
+
+  public bytesRead(): double {
+    return this.bytesIn;
+  }
+
+  public bytesWritten(): double {
+    return this.bytesOut;
+  }
+
+  public reset(): void {
+    const conn = this.conn;
+    if (conn != undefined) {
+      tcpReset(conn);
+    }
+    this.destroy();
+  }
+
+  protected onRead(size: int): void {
+    void size;
+    const conn = this.conn;
+    if (conn == undefined || this.reading) {
+      return;
+    }
+    this.reading = true;
+    void this.readChunk(conn);
+  }
+
+  private async readChunk(conn: object): Promise<void> {
+    const chunkResult = await tcpRead(conn, undefined);
+    this.reading = false;
+    if (chunkResult.isErr()) {
+      const failure = streamFailure(chunkResult.error);
+      this.destroy(failure);
+      return;
+    }
+    const chunk = chunkResult.value;
+    if (chunk == undefined) {
+      this.pushChunk(undefined);
+      return;
+    }
+    this.bytesIn += chunk.length.toDouble();
+    const bytes = Buffer.from(chunk);
+    this.pushChunk(bytes);
+  }
+
+  protected onWrite(chunk: Buffer, encoding: string, callback: StreamCallback): void {
+    void encoding;
+    const conn = this.conn;
+    if (conn == undefined) {
+      callback({ code: "ERR_SOCKET_CLOSED", message: "the socket is not connected" });
+      return;
+    }
+    this.bytesOut += chunk.length.toDouble();
+    void this.writeChunk(conn, chunk, callback);
+  }
+
+  private async writeChunk(conn: object, chunk: Buffer, callback: StreamCallback): Promise<void> {
+    const wroteResult = await httpWrite(conn, chunk);
+    if (wroteResult.isErr()) {
+      const failure = streamFailure(wroteResult.error);
+      callback(failure);
+      return;
+    }
+    callback();
+  }
+
+  protected onFinal(callback: StreamCallback): void {
+    const conn = this.conn;
+    if (conn != undefined) {
+      netClose(conn);
+    }
+    callback();
+  }
+
+  protected onDestroy(error: StreamError | undefined, callback: StreamCallback): void {
+    const conn = this.conn;
+    if (conn != undefined) {
+      this.conn = undefined;
+      netClose(conn);
+    }
+    callback(error);
+  }
+}
+
+export type ServerOptions = {
+  port?: int;
+  hostname?: string;
+  idleTimeout?: int;
+};
+
+export type SocketHandler = (socket: Socket) => Promise<void>;
+
+export type ListenError = {
+  kind: "SERVER";
+  code:
+    | "EADDRINUSE"
+    | "EACCES"
+    | "EADDRNOTAVAIL"
+    | "ENOTFOUND"
+    | "ERR_INVALID_ARG_VALUE"
+    | "EMFILE"
+    | "ENOBUFS"
+    | "EAFNOSUPPORT"
+    | "UNKNOWN";
+  message: string;
+  errno: int;
+  syscall: string;
+  address: string;
+  port: int;
+};
+
+type ListenCode =
+  | "EADDRINUSE"
+  | "EACCES"
+  | "EADDRNOTAVAIL"
+  | "ENOTFOUND"
+  | "ERR_INVALID_ARG_VALUE"
+  | "EMFILE"
+  | "ENOBUFS"
+  | "EAFNOSUPPORT"
+  | "UNKNOWN";
+
+function listenCode(code: string): ListenCode {
+  switch (code) {
+    case "EADDRINUSE":
+      return "EADDRINUSE";
+    case "EACCES":
+      return "EACCES";
+    case "EADDRNOTAVAIL":
+      return "EADDRNOTAVAIL";
+    case "ENOTFOUND":
+      return "ENOTFOUND";
+    case "ERR_INVALID_ARG_VALUE":
+      return "ERR_INVALID_ARG_VALUE";
+    case "EMFILE":
+      return "EMFILE";
+    case "ENOBUFS":
+      return "ENOBUFS";
+    case "EAFNOSUPPORT":
+      return "EAFNOSUPPORT";
+    default:
+      return "UNKNOWN";
+  }
+}
+
+export type StopOptions = {
+  timeout?: int;
+};
+
+export class Server {
+  private readonly hostname: string;
+  private readonly port: int;
+  private readonly idleTimeout: int;
+  private readonly handler: SocketHandler;
+
+  public constructor(options: ServerOptions, handler: SocketHandler) {
+    this.hostname = options.hostname ?? "0.0.0.0";
+    this.port = options.port ?? 0;
+    this.idleTimeout = options.idleTimeout ?? 0;
+    this.handler = handler;
+  }
+
+  public listen(): Result<Listening, ListenError> {
+    const openedResult = netListen(this.hostname, this.port, 0, this.idleTimeout, 0, 0);
+    if (openedResult.isErr()) {
+      const e = openedResult.error;
+      const code = listenCode(e.code);
+
+      return err({
+        kind: "SERVER",
+        code: code,
+        message: e.message,
+        errno: e.errno,
+        syscall: e.syscall,
+        address: this.hostname,
+        port: this.port,
+      });
+    }
+    const listening = new Listening(openedResult.value, this.hostname, this.handler);
+
+    return ok(listening);
+  }
+}
+
+export class Listening {
+  public readonly hostname: string;
+  public readonly port: int;
+
+  private readonly native: object;
+  private readonly accepting: Promise<void>;
+  private stopping: boolean;
+
+  public constructor(native: object, hostname: string, handler: SocketHandler) {
+    this.native = native;
+    this.hostname = hostname;
+    this.port = netListenerPort(native);
+    this.stopping = false;
+    this.accepting = Listening.acceptAll(native, handler);
+  }
+
+  public async stop(options?: StopOptions): Promise<void> {
+    const native = this.native;
+    if (!this.stopping) {
+      this.stopping = true;
+      netCloseListener(native);
+    }
+    const timeout = options?.timeout;
+    if (timeout == undefined) {
+      await this.accepting;
+      return;
+    }
+    if (timeout <= 0) {
+      netAbortAll(native);
+      await this.accepting;
+      return;
+    }
+    const timer = setTimeout(() => netAbortAll(native), timeout);
+    await this.accepting;
+    clearTimeout(timer);
+  }
+
+  private static async acceptAll(native: object, handler: SocketHandler): Promise<void> {
+    for (;;) {
+      const conn = await netAccept(native);
+      if (conn == undefined) {
+        break;
+      }
+      void Listening.serve(conn, handler);
+    }
+    await netDrained(native);
+  }
+
+  private static async serve(conn: object, handler: SocketHandler): Promise<void> {
+    const socket = Socket.accepted(conn);
+    await handler(socket);
+  }
+}
+
+export function isIPv4(text: string): boolean {
+  const parts = text.split(".");
+  if (parts.length != 4) {
+    return false;
+  }
+  for (const part of parts) {
+    if (!/^(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9]?[0-9])$/.test(part)) {
+      return false;
+    }
+  }
+
+  return true;
+}
+
+export function isIPv6(text: string): boolean {
+  const parsedResult = URL.parse(`http://[${text}]/`);
+
+  return parsedResult.isOk() && !text.includes("[") && text.includes(":");
+}
+
+export function isIP(text: string): int {
+  if (isIPv4(text)) {
+    return 4;
+  }
+  if (isIPv6(text)) {
+    return 6;
+  }
+
+  return 0;
+}

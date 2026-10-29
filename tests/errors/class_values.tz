@@ -101,16 +101,3 @@ Reflect.get(j, "x")
 // expect-error: the third argument of Reflect.construct, the class whose prototype the object gets, is not supported
 Reflect.construct(User, ["a"], User)
 
-// fromJson makes a class through its constructor, which a Json must be
-// able to give the arguments of.
-class Callback {
-  constructor(public run: () => void) {}
-}
-// expect-error: fromJson cannot make a 'Callback' from a Json: parameter 'run' of its constructor: a value of type '() => void' cannot come from JSON
-fromJson(Callback, j)
-// expect-error: fromJson cannot make a 'Shape' from a Json: 'Shape' is abstract
-fromJson(Shape, j)
-// expect-error: fromJson(cls, j) makes an object of the class 'cls', and this is a 'int'
-fromJson(5, j)
-// expect-error: JSON.parse<User> cannot build a 'User': 'User' is a class, and only its constructor makes one; make it with 'fromJson(User, j)'
-JSON.parse<User>("{}")

@@ -10,7 +10,7 @@ export type ParseError =
   | { code: "unreadable"; message: string; line: int }
   | { code: "bad_amount"; message: string; line: int; text: string }
 
-export type ConfigError = { code: "bad_config"; message: string; cause: JsonError }
+export type ConfigError = { code: "bad_config"; message: string; cause: string }
 
 export abstract class Rule {
   abstract check(value: decimal): Result<decimal, AppError>

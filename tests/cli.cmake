@@ -1,8 +1,8 @@
 # Helpers for the tests of tz's commands: each tests/cli/NAME.cmake includes
 # this file and runs tz the way a person would, in directories of its own.
 #
-# A test runs with TZ (the compiler), GIT and NODE (empty if they are not
-# installed), SOURCE (tests/cli) and WORK, a fresh directory for the test.
+# A test runs with TZ (the compiler), GIT, NODE and PYTHON (empty if they are
+# not installed), SOURCE (tests/cli) and WORK, a fresh directory for the test.
 # The cache of packages is WORK/cache and the JSR registry is WORK/jsr, a
 # mirror on the disk that jsr_publish fills: no test touches the machine's
 # cache or the network. Programs run with TZ_CHECK_LEAKS set, as in the run

@@ -77,8 +77,9 @@ console.log(weekdays.join(), log.join(", "))
 console.log(JSON.stringify(events[0]), JSON.stringify(events[1]))
 console.log(JSON.stringify({ when: new Date(base), list: moments.slice(0, 1) }))
 const saved = JSON.stringify({ title: "x", at: new Date(base) })
-const back = must(JSON.parse<{ title: string; at: string }>(saved))
-console.log(back.title, Date.parse(back.at).unwrapOr(0) == base)
+const back = must(JSON.parse(saved))
+const at = back.at
+console.log(back.title, typeof at == "string" && Date.parse(at).unwrapOr(0) == base)
 
 // 7. What JavaScript throws for: a text that is not a date is an Err, lateness
 // is an Err with the dates, a zone nobody knows is left out.

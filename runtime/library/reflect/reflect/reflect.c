@@ -175,8 +175,8 @@ void tz_reflect_mismatch(const char *what, uint32_t what_length, int32_t index,
                          const char *expected, uint32_t expected_length, const void *got) {
   char given[160];
   describe(got, given, sizeof given);
-  reflect_fail("bad_argument", "%.*s: argument %d: expected %.*s, got %s", (int)what_length, what,
-               (int)index + 1, (int)expected_length, expected, given);
+  reflect_fail("ERR_INVALID_ARGUMENT", "%.*s: argument %d: expected %.*s, got %s", (int)what_length,
+               what, (int)index + 1, (int)expected_length, expected, given);
 }
 
 void tz_reflect_arity(const char *what, uint32_t what_length, int32_t min, int32_t max,
@@ -189,7 +189,8 @@ void tz_reflect_arity(const char *what, uint32_t what_length, int32_t min, int32
   } else {
     snprintf(takes, sizeof takes, "%d to %d arguments", (int)min, (int)max);
   }
-  reflect_fail("bad_arity", "%.*s: expected %s, got %u", (int)what_length, what, takes, count);
+  reflect_fail("ERR_INVALID_ARITY", "%.*s: expected %s, got %u", (int)what_length, what, takes,
+               count);
 }
 
 void tz_class_name(TzStr *out, const TzClass *cls) {
@@ -227,7 +228,7 @@ static const TzClass *as_class(const void *u) {
   }
   char given[160];
   describe(u, given, sizeof given);
-  reflect_fail("not_class", "%s is not a constructor", given);
+  reflect_fail("ERR_NOT_CLASS", "%s is not a constructor", given);
 
   return NULL;
 }
@@ -235,13 +236,13 @@ static const TzClass *as_class(const void *u) {
 void *tz_reflect_new(const TzClass *cls, void *const *args, uint32_t count) {
   const TzLayout *layout = cls->layout;
   if (!cls->info) {
-    reflect_fail("not_reflected", "%.*s of JavaScript cannot be made through reflection",
+    reflect_fail("ERR_NOT_REFLECTED", "%.*s of JavaScript cannot be made through reflection",
                  (int)layout->name_length, layout->name);
     return NULL;
   }
   if (!cls->info->construct) {
-    reflect_fail("abstract", "class %.*s is abstract and cannot be made", (int)layout->name_length,
-                 layout->name);
+    reflect_fail("ERR_ABSTRACT_CLASS", "class %.*s is abstract and cannot be made",
+                 (int)layout->name_length, layout->name);
     return NULL;
   }
 
@@ -346,7 +347,7 @@ void *tz_reflect_apply(const void *f, void *self, const TzArray *args) {
   if (!box || box->type->kind != TZ_T_FUNCTION) {
     char given[160];
     describe(f, given, sizeof given);
-    reflect_fail("not_function",
+    reflect_fail("ERR_NOT_FUNCTION",
                  "Function.prototype.apply was called on %s, which is not a function", given);
     return NULL;
   }
@@ -357,7 +358,7 @@ void *tz_reflect_apply(const void *f, void *self, const TzArray *args) {
     }
   }
   if (!invoke) {
-    reflect_fail("not_function", "Reflect.apply cannot call this function");
+    reflect_fail("ERR_NOT_FUNCTION", "Reflect.apply cannot call this function");
     return NULL;
   }
   void *small[8];
@@ -381,7 +382,7 @@ void *tz_reflect_from_json(const TzClass *cls, const TzJson *json) {
     int length = snprintf(text, sizeof text, "class %.*s cannot be made from JSON",
                           (int)layout->name_length, layout->name);
     tz_buf_utf8(&message, text, length < 0 ? 0 : (size_t)length);
-    tz_json_fail("bad_class", &message, NULL);
+    tz_json_fail("ERR_INVALID_CLASS", &message, NULL);
     return NULL;
   }
 

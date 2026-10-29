@@ -23,7 +23,7 @@ j.a += 1
 j.items.map((x: Json) => x)
 // expect-error: a Json has no method 'trim' until a check shows what it holds, e.g. 'if (Array.isArray(j)) j.trim(...)'
 j.trim()
-// expect-error: 'as' is not supported; convert a Json with 'fromJson<double>(x)'
+// expect-error: 'as' is not supported; check what a Json holds first, e.g. 'typeof x == "number"', and the check narrows it
 const cast = j as number
 // expect-error: a key of a Json is a string or a number, found 'boolean'
 const byFlag = j[true]
@@ -61,29 +61,19 @@ console.log(JSON.stringify(j, null, true))
 console.log(JSON.parse("1", (key: string, value: Json) => value))
 // expect-error: 'JSON.load' does not exist; JSON has parse and stringify
 JSON.load("x")
-// expect-error: type arguments can be given only to a generic function and to 'JSON.parse<T>'
+// expect-error: type arguments can be given only to a generic function
 const mapped = [1, 2].map<int>(x => x)
 
-// JSON.parse<T> and fromJson<T> build plain types.
-// expect-error: JSON.parse<Money> cannot build a 'Money': 'Money' is a class, and only its constructor makes one
+// JSON has no special rights (docs/narrowing.md, section 3): JSON.parse gives
+// a Json and takes no type; a text known when compiling is checked then.
+// expect-error: JSON.parse takes no type arguments
 const money = JSON.parse<Money>("1")
-type Handler = { run: () => void }
-// expect-error: cannot build a 'Handler': a value of type '() => void' cannot come from JSON
-const handler = JSON.parse<Handler>("{}")
-// expect-error: fromJson<[int, string]> cannot build a '[int, string]': tuples are not supported yet
-const tuple = fromJson<[int, string]>(j)
-// A union: the kind of value JSON holds tells its members apart, and among
-// objects a tag field; when neither can, the compiler says so.
-interface Named { name: string }
-interface Aged { age: int }
-// expect-error: 'Named' and 'Aged' are both objects in JSON, and no field tells them apart; give each a field of a literal type with its own value, e.g. 'kind: "circle"'
-const someone = JSON.parse<Named | Aged>("{}")
-// expect-error: 'int' and 'decimal' are both numbers in JSON, so a number could be either; keep one of them
-const amount = fromJson<int | decimal>(j)
-// expect-error: a Record is an object in JSON, as 'Named' is, so an object could be either
-const either = JSON.parse<Record<string, int> | Named>("{}")
-// expect-error: fromJson needs the type to build, e.g. 'fromJson<User>(j)'
-const untyped = fromJson(j)
+// expect-error: cannot find name 'fromJson'
+const amount = fromJson<int>(j)
+// expect-error: cannot find name 'embedJson'
+const embedded = embedJson("./data.json")
+// expect-error: this text is not JSON, so JSON.parse would always fail: expected a property name in double quotes (line 1, column 3)
+const broken = JSON.parse("{ bad")
 const list = j.items
 if (Array.isArray(list)) {
   // expect-error: Json values cannot be converted to strings: an object would be '[object Object]'

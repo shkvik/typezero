@@ -21,9 +21,9 @@ export class Locale {
 
   static parse(tag: string): Result<Locale, LocaleError> {
     if (tag == "")
-      return err({ code: "bad_locale", message: "First argument to Intl.Locale constructor can't be empty or missing", tag })
+      return err({ kind: "LOCALE", code: "ERR_INVALID_LOCALE", message: "First argument to Intl.Locale constructor can't be empty or missing", tag })
     if (intlLocaleTag(tag) == "")
-      return err({ code: "bad_locale", message: "Incorrect locale information provided", tag })
+      return err({ kind: "LOCALE", code: "ERR_INVALID_LOCALE", message: "Incorrect locale information provided", tag })
     return ok(new Locale(tag))
   }
 

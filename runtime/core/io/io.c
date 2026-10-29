@@ -467,6 +467,9 @@ void tz_io_poll(int64_t timeout) {
   if (tz_io_due_head || (timeout < 0 && !PENDING())) {
     timeout = 0;
   }
+  if (timeout != 0) {
+    tz_out_idle();
+  }
 #if TZ_PARALLEL
   if (tz_ahead_on) {
     tz_ahead_deliver();

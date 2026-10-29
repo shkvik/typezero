@@ -61,8 +61,14 @@ Module *ModuleResolver::resolve(Module *from, llvm::StringRef spec, llvm::SMLoc 
   if (spec == "tz:http") {
     return loader_.library().libraryModule("http.tz", "tz:http", loc);
   }
-  if (from->builtin &&
-      (spec == "tz:web" || spec == "tz:url" || spec == "tz:fetch" || spec == "tz:intrinsics")) {
+  if (spec == "node:net" || spec == "net") {
+    return loader_.library().libraryModule("net.tz", "node:net", loc);
+  }
+  if (spec == "tz:packet") {
+    return loader_.library().libraryModule("packet.tz", "tz:packet", loc);
+  }
+  if (from->builtin && (spec == "tz:web" || spec == "tz:url" || spec == "tz:fetch" ||
+                        spec == "tz:intrinsics" || spec == "tz:websocket")) {
     return loader_.library().libraryModule(spec.drop_front(3).str() + ".tz", spec, loc);
   }
   if (spec == "node:stream" || spec == "stream") {
@@ -113,8 +119,8 @@ Module *ModuleResolver::resolve(Module *from, llvm::StringRef spec, llvm::SMLoc 
   } else if (ext == ".json") {
     loader_.diags_.error(loc,
                          "a .json file is not a module: only .tz files can be imported; embed the "
-                         "data with 'const data = embedJson(\"" +
-                             spec.str() + "\")'");
+                         "text with 'const data = JSON.parse(embedText(\"" +
+                             spec.str() + "\"))'");
     return nullptr;
   } else if (std::string problem = foreignFile(baseDir, spec, spec); !problem.empty()) {
     loader_.diags_.error(loc, problem);

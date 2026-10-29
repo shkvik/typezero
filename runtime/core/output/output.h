@@ -17,5 +17,7 @@ void tz_thread_stack_init(void);
 int32_t tz_stdout_write(void *obj, uint64_t meta);
 int32_t tz_stderr_write(void *obj, uint64_t meta);
 void tz_out_flush(int all);
+void tz_out_idle(void);
+void tz_out_rescue(void);
 
 #endif

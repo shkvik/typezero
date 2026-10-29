@@ -21,10 +21,14 @@ const std::vector<llvm::StringRef> &orderOf(const Type *type, llvm::ArrayRef<Mak
       }
       continue;
     }
-    if (entry.cls || type->fields().size() != entry.fields.size()) {
+    if (entry.cls) {
       continue;
     }
-    if (llvm::all_of(entry.fields, [&](llvm::StringRef f) { return type->field(f) != nullptr; })) {
+    auto listed = [&](const Field &f) {
+      return llvm::is_contained(entry.fields, f.name) || f.type->isStringLiteral();
+    };
+    if (llvm::all_of(entry.fields, [&](llvm::StringRef f) { return type->field(f) != nullptr; }) &&
+        llvm::all_of(type->fields(), listed)) {
       return entry.fields;
     }
   }
@@ -103,6 +107,11 @@ llvm::Function *ObjectMaker::maker(const Type *type, llvm::ArrayRef<MakerFields>
     object = lowering_.classLowerer().allocInstance(cls);
   } else {
     std::vector<unsigned> keys;
+    for (const Field &field : type->fields()) {
+      if (!llvm::is_contained(order, field.name)) {
+        keys.push_back(ObjectLayouts::fieldIndex(type, field.name));
+      }
+    }
     for (llvm::StringRef field : order) {
       keys.push_back(ObjectLayouts::fieldIndex(type, field));
     }
@@ -122,6 +131,13 @@ llvm::Function *ObjectMaker::maker(const Type *type, llvm::ArrayRef<MakerFields>
                                                              address, order[i]);
     lowering_.builder_.CreateStore(
         value, lowering_.objectLayouts().fieldAddress(object, type, order[i], true));
+  }
+  for (const Field &field : type->fields()) {
+    if (!llvm::is_contained(order, field.name)) {
+      lowering_.builder_.CreateStore(
+          lowering_.builder_.getInt32(field.type->atom()),
+          lowering_.objectLayouts().fieldAddress(object, type, field.name, true));
+    }
   }
   lowering_.groupLowerer().adoptFields(object, type);
   lowering_.builder_.CreateRet(object);

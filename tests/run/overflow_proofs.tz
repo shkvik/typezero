@@ -7,9 +7,17 @@
 import { readLine } from "tz:io"
 
 const text = readLine() ?? "[1, 2, 3]"
-const parsed = JSON.parse<int[]>(text)
+const parsed = JSON.parse(text)
 if (parsed.isErr()) process.exit(1)
-const prices = parsed.value
+const prices: int[] = []
+const list = parsed.value
+if (Array.isArray(list)) {
+  for (const item of list) {
+    if (typeof item != "number") continue
+    const value = item
+    if (value >= 0 && value < 1000000) prices.push(Math.trunc(value).toInt())
+  }
+}
 let sum = 0
 for (const p of prices) if (p >= 0 && p < 1000000) sum += p
 console.log(sum)

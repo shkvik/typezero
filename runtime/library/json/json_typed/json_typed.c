@@ -79,7 +79,7 @@ static void convert_error(const TzJsonPath *path, const char *type, int64_t type
   } else {
     tz_buf_ascii(&b, tz_json_kind_name(got));
   }
-  tz_json_fail("bad_field", &b, &where);
+  tz_json_fail("ERR_INVALID_FIELD", &b, &where);
 }
 
 void tz_json_expect_object(const TzJson *j, const TzJsonPath *path, const char *type,
@@ -247,5 +247,5 @@ void tz_json_mismatch(const TzJson *j, const TzJsonPath *path, const char *type,
   tz_buf_ascii_n(&b, type, (size_t)type_length);
   tz_buf_ascii(&b, ", got ");
   tz_json_quote(&b, j->u.string);
-  tz_json_fail("bad_field", &b, &where);
+  tz_json_fail("ERR_INVALID_FIELD", &b, &where);
 }

@@ -36,6 +36,7 @@ constexpr LibraryGlobal kLibraryGlobals[] = {
     {"DOMException", "web.tz", "tz:web"},
     {"EventListenerObject", "web.tz", "tz:web"},
     {"URL", "url.tz", "tz:url"},
+    {"WebSocket", "websocket.tz", "tz:websocket"},
     {"URLSearchParams", "url.tz", "tz:url"},
     {"Headers", "fetch.tz", "tz:fetch"},
     {"Request", "fetch.tz", "tz:fetch"},
@@ -385,6 +386,39 @@ void LibraryModules::importFsStreams(Module *module, llvm::StringRef text) {
   streams.from = libraryModule("fs_stream.tz", "node:internal/fs/streams", streams.loc);
   if (streams.from) {
     module->file.imports.push_back(std::move(streams));
+  }
+}
+
+void LibraryModules::importProcessSignals(Module *module, llvm::StringRef text) {
+  if (!text.contains("process")) {
+    return;
+  }
+  bool muted = loader_.diags_.setMuted(true);
+  Lexer lexer(text, loader_.diags_);
+  Token before[3];
+  const char *at = nullptr;
+  for (Token token = lexer.next(); !token.is(Tok::Eof) && !at; token = lexer.next()) {
+    if (token.is(Tok::Identifier) &&
+        (token.text == "on" || token.text == "once" || token.text == "off") &&
+        before[2].is(Tok::Dot) && before[1].is(Tok::Identifier) && before[1].text == "process" &&
+        !before[0].is(Tok::Dot) && !before[0].is(Tok::QuestionDot)) {
+      at = before[1].text.data();
+    }
+    before[0] = before[1];
+    before[1] = before[2];
+    before[2] = token;
+  }
+  loader_.diags_.setMuted(muted);
+  if (!at) {
+    return;
+  }
+  ImportDecl signals;
+  signals.implicit = true;
+  signals.loc = signals.pathLoc = llvm::SMLoc::getFromPointer(at);
+  signals.path = "node:internal/process/signals";
+  signals.from = libraryModule("signals.tz", signals.path, signals.loc);
+  if (signals.from) {
+    module->file.imports.push_back(std::move(signals));
   }
 }
 
