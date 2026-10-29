@@ -673,6 +673,10 @@ const Type *Type::unionOf(llvm::ArrayRef<const Type *> types) {
   if (llvm::any_of(members, [](const Type *m) { return m->isAnyObject(); })) {
     llvm::erase_if(members, [](const Type *m) { return m->isObject() && !m->isAnyObject(); });
   }
+  llvm::erase_if(members, [](const Type *m) {
+    return m->isObject() && !m->isClass() && !m->isTuple() &&
+           llvm::any_of(m->fields(), [](const Field &f) { return f.type->isNever(); });
+  });
   std::vector<const Type *> reduced;
   for (const Type *m : members) {
     if (!m->isObject() || llvm::none_of(members, [&](const Type *o) {

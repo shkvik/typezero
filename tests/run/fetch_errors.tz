@@ -1,7 +1,9 @@
 // How fetch fails (docs/net.md, section 2): an Err of a FetchError whose
 // kind says what to do (REQUEST — fix the code, NETWORK — try again,
 // RESPONSE, TLS, REDIRECT, TIMEOUT), a closed code and a message that says
-// what, where and why. A body that cannot be read is an Err of a BodyError.
+// what, where and why. A body that cannot be read is an Err with the errors
+// of its method: TextError, JsonBodyError (with the start of a body that is
+// not JSON), FormDataError.
 // A request larger than maxBodySize gets 413; data: URLs need no network.
 // A name that is not found may be EAI_AGAIN on a machine without a network.
 // https is in tls_serve.tz and tls_errors.tz.
@@ -18,6 +20,20 @@ async function attempt(what: string, url: string, init?: RequestInit) {
   const text = await r.value.text()
   if (text.isOk()) console.log(what, r.value.status, text.value)
   else console.log(what, text.error.kind, `${text.error.code}: ${text.error.message}`)
+}
+
+function advice(e: TextError): string {
+  switch (e.kind) {
+    case "USED":
+      return "fix the code"
+    case "NETWORK":
+    case "TIMEOUT":
+      return "try again"
+    case "TOO_LARGE":
+    case "MALFORMED":
+    case "STREAM":
+      return "bad body"
+  }
 }
 
 await attempt("bad port", "http://localhost:6000/")
@@ -38,6 +54,9 @@ const corrupt = Buffer.from("not gzip at all")
 const server = new Server({ port: 0, hostname: "127.0.0.1", maxBodySize: 10 }, async req => {
   const path = new URL(req.url).pathname()
   if (path == "/gzip") return new Response(corrupt, { headers: { "content-encoding": "gzip" } })
+  if (path == "/html")
+    return new Response("<html><title>502 Bad Gateway</title></html>", { headers: { "content-type": "text/html" } })
+  if (path == "/bare") return new Response(Buffer.from("name=x"))
   const text = await req.text()
   return new Response(text.isOk() ? `${text.value.length} bytes` : text.error.message)
 })
@@ -64,7 +83,23 @@ if (once.isOk()) {
   const r = once.value
   console.log((await r.text()).unwrapOr("-"), r.bodyUsed())
   const again = await r.text()
-  if (again.isErr()) console.log(again.error.kind, again.error.code, again.error.message)
+  if (again.isErr()) console.log(again.error.kind, again.error.code, again.error.message, advice(again.error))
+}
+const html = await fetch(`${base}/html`)
+if (html.isOk()) {
+  const parsed = await html.value.json()
+  if (parsed.isErr() && parsed.error.kind == "CONTENT") {
+    const e = parsed.error
+    console.log("html", e.code, e.contentType, e.start)
+  }
+}
+const bare = await fetch(`${base}/bare`)
+if (bare.isOk()) {
+  const form = await bare.value.formData()
+  if (form.isErr() && form.error.kind == "CONTENT") {
+    const e = form.error
+    console.log("bare", e.code, e.contentType ?? "no content-type", e.message)
+  }
 }
 await listening.stop()
 const gone = new Server({ port: 0, hostname: "127.0.0.1" }, () => new Response("")).listen()
@@ -72,10 +107,9 @@ if (gone.isOk()) {
   const port = gone.value.port
   await gone.value.stop()
   const refused = await fetch(`http://127.0.0.1:${port}/`)
-  if (refused.isErr()) {
+  if (refused.isErr() && refused.error.kind == "NETWORK") {
     const e = refused.error
-    if (e.kind == "NETWORK")
-      console.log("refused", e.kind, e.code, e.message.replaceAll(String(port), "PORT"),
-                  e.syscall, e.host, e.port == port)
+    console.log("refused", e.kind, e.code, e.message.replaceAll(String(port), "PORT"),
+                e.syscall, e.host, e.port == port)
   }
 }

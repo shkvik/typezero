@@ -52,7 +52,7 @@ pkcs1 6fdf1efcacca0b69ba0deb4af50a9c95d1533753f7ba90c5be3ec1236b92c7a0f4dfc48f17
 true
 pss 128 true false
 oaep 128 the data
-OperationError The operation failed for an operation-specific reason
+ERR_OPERATION_FAILED The operation failed for an operation-specific reason
 {
   key_ops: [ 'verify' ],
   ext: true,
@@ -90,7 +90,7 @@ true
   hash: { name: 'SHA-256' }
 } PS256 12
 true
-OperationError The operation failed for an operation-specific reason
+ERR_OPERATION_FAILED The operation failed for an operation-specific reason
 ECDSA 241
 Ed25519 48
 X25519 48

@@ -7,5 +7,5 @@ Rex,Ace
 checked /x: true
 checked /y: true
 nothing nothing
-InvalidAccessError Unable to use this key to verify
+ERR_INVALID_ACCESS Unable to use this key to verify
 e9b366411a35f9785d787f98c1ce17fc5a80a9b26a6f1bdb7e0f91d015687651

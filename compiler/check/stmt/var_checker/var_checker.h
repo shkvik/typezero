@@ -12,8 +12,10 @@ public:
   void noteUntyped(VarSymbol *var, bool initUndefined);
   void assignedUntyped(const VarSymbol *var, const Type *type);
   void reportUntyped();
+  void reportUncheckedResults();
 
 private:
+  bool exported(llvm::StringRef name) const;
   Checker &checker_;
 };
 

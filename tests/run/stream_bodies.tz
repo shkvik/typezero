@@ -1,0 +1,118 @@
+// A stream with an error of its own (docs/net.md, section 3) is sent with a
+// method, which takes the type of the error from the stream: a response with
+// Response.stream(stream), a request with fetch(url, { body: stream }), whose
+// Err then holds the error of the stream whole in details. A stream that
+// cannot fail goes to new Response(stream) as on the web; reading a body
+// gives BodyError | ReaderError. Only 127.0.0.1.
+import { Server } from "tz:http"
+
+type DiskError = { kind: "DISK"; code: "EIO"; message: string; path: string }
+
+function parts(texts: string[], failAt: int): ReadableStream<Uint8Array, DiskError> {
+  let next = 0
+  const stream = new ReadableStream<Uint8Array, DiskError>({
+    pull: async c => {
+      if (next == failAt) {
+        c.error({ kind: "DISK", code: "EIO", message: "disk failed", path: `part${next}` })
+        return
+      }
+      const text = texts[next]
+      next++
+      if (text == undefined) {
+        c.close()
+        return
+      }
+      c.enqueue(new TextEncoder().encode(text))
+    },
+  })
+
+  return stream
+}
+
+function quiet(texts: string[]): ReadableStream<Uint8Array> {
+  let next = 0
+  const stream = new ReadableStream<Uint8Array>({
+    pull: async c => {
+      const text = texts[next]
+      next++
+      if (text == undefined) c.close()
+      else c.enqueue(new TextEncoder().encode(text))
+    },
+  })
+
+  return stream
+}
+
+const server = new Server({ port: 0, hostname: "127.0.0.1" }, async req => {
+  const path = new URL(req.url).pathname()
+  if (path == "/good") return Response.stream(parts(["a", "b", "c"], -1), { headers: { "x-kind": "own" } })
+  if (path == "/quiet") return new Response(quiet(["q", "r"]))
+  if (path == "/broken") return Response.stream(parts(["a", "b"], 1))
+  if (path == "/upload") {
+    const text = await req.text()
+    return new Response(text.isOk() ? `got ${text.value}` : `failed ${text.error.kind}`)
+  }
+  return new Response("not found", { status: 404 })
+})
+const started = server.listen()
+if (started.isErr()) {
+  console.log("cannot listen:", started.error.message)
+  process.exit(1)
+}
+const listening = started.value
+const base = `http://127.0.0.1:${listening.port}`
+
+const good = await fetch(`${base}/good`)
+if (good.isOk()) console.log((await good.value.text()).unwrapOr("-"), good.value.headers.get("x-kind"))
+const cut = await fetch(`${base}/broken`)
+if (cut.isOk()) {
+  const text = await cut.value.text()
+  if (text.isErr()) console.log("cut:", text.error.kind, text.error.code)
+}
+const quietGot = await fetch(`${base}/quiet`)
+if (quietGot.isOk()) console.log((await quietGot.value.text()).unwrapOr("-"))
+
+const sent = await fetch(`${base}/upload`, { method: "POST", body: parts(["x", "y"], -1), duplex: "half" })
+if (sent.isOk()) console.log((await sent.value.text()).unwrapOr("-"))
+const broken = await fetch(`${base}/upload`, { method: "POST", body: parts(["x", "y"], 1), duplex: "half" })
+if (broken.isErr()) {
+  const e = broken.error
+  if (e.code == "ERR_STREAM_FAILED") console.log(e.kind, e.code, e.message, e.details.path, e.details.code)
+  else console.log("other", e.code, e.message)
+}
+
+const own = await Response.stream(parts(["a"], 1)).text()
+if (own.isErr()) console.log(own.error.kind, own.error.code, own.error.message)
+
+const proxied = await fetch(`${base}/quiet`)
+if (proxied.isOk()) {
+  const again = Response.stream(proxied.value.body())
+  console.log((await again.text()).unwrapOr("-"))
+}
+
+const read = await fetch(`${base}/good`)
+if (read.isOk()) {
+  const body = read.value.body()
+  if (body != undefined) {
+    const holder = body.getReader()
+    for await (const chunk of body) {
+      if (chunk.isErr()) {
+        const e = chunk.error
+        switch (e.kind) {
+          case "USED":
+            console.log("used", e.code)
+            break
+          case "NETWORK":
+          case "TIMEOUT":
+          case "TOO_LARGE":
+          case "MALFORMED":
+          case "STREAM":
+            console.log("failed", e.message)
+            break
+        }
+      }
+    }
+    holder.releaseLock()
+  }
+}
+await listening.stop()

@@ -1,0 +1,30 @@
+// A Result kept in a variable that nothing reads loses its error as surely as
+// one left unused (docs/errors.md, section 2); so does a Promise of a Result
+// that is never awaited. A read anywhere counts, a closure too.
+function half(n: int): Result<int, string> {
+  if (n % 2 == 1) return err("odd")
+  return ok(n / 2)
+}
+
+async function later(n: int): Promise<Result<int, string>> {
+  return half(n)
+}
+
+function inside() {
+  // expect-error: the Result in 'lost' is never checked, so an error in it would go unchecked; check it, e.g. 'if (lost.isErr()) ...'
+  const lost = half(3)
+  const used = half(4)
+  const closure = () => used.isOk()
+  console.log(closure())
+}
+
+// expect-error: 'pending' holds a Promise of a Result that is never awaited, so an error in it would go unchecked; await it and check it, e.g. 'const r = await pending; if (r.isErr()) ...'
+const pending = later(2)
+// expect-error: the Result in 'awaited' is never checked
+const awaited = await later(2)
+const matched = half(6)
+console.log(matched.match(v => v, e => -1))
+// expect-error: the Result in 'changing' is never checked
+let changing = half(1)
+changing = half(2)
+inside()

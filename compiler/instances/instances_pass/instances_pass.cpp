@@ -1,6 +1,7 @@
 #include "compiler/instances/instances_pass/instances_pass.h"
 #include "compiler/check/checker/checker.h"
 #include "compiler/check/generics/generic_instantiator/generic_instantiator.h"
+#include "compiler/check/stmt/var_checker/var_checker.h"
 #include "compiler/instances/constructor_calls/constructor_calls.h"
 #include "compiler/instances/late_classes/late_classes.h"
 #include "compiler/program/program/program.h"
@@ -23,6 +24,7 @@ Errors InstancesPass::run(Program &program) const {
     checker.genericInstantiator().checkInstances();
   } while (checker.lateChecked_ < checker.lateClasses_.size());
   checker.constructorCalls().checkConstructorCalls();
+  checker.varChecker().reportUncheckedResults();
 
   return program.diags->take();
 }

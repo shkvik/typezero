@@ -64,6 +64,9 @@ Module *ModuleResolver::resolve(Module *from, llvm::StringRef spec, llvm::SMLoc 
   if (spec == "node:net" || spec == "net") {
     return loader_.library().libraryModule("net.tz", "node:net", loc);
   }
+  if (spec == "node:dgram" || spec == "dgram") {
+    return loader_.library().libraryModule("dgram.tz", "node:dgram", loc);
+  }
   if (spec == "tz:packet") {
     return loader_.library().libraryModule("packet.tz", "tz:packet", loc);
   }
@@ -114,14 +117,8 @@ Module *ModuleResolver::resolve(Module *from, llvm::StringRef spec, llvm::SMLoc 
   std::string baseDir = path::parent_path(loader_.realPaths_[from]).str();
   if (spec.ends_with("/") || last == "." || last == "..") {
     candidates.push_back((spec.rtrim('/') + "/index.tz").str());
-  } else if (ext == ".tz") {
+  } else if (ext == ".tz" || ext == ".json") {
     candidates.push_back(spec.str());
-  } else if (ext == ".json") {
-    loader_.diags_.error(loc,
-                         "a .json file is not a module: only .tz files can be imported; embed the "
-                         "text with 'const data = JSON.parse(embedText(\"" +
-                             spec.str() + "\"))'");
-    return nullptr;
   } else if (std::string problem = foreignFile(baseDir, spec, spec); !problem.empty()) {
     loader_.diags_.error(loc, problem);
     return nullptr;
@@ -267,7 +264,8 @@ Module *ModuleResolver::load(llvm::StringRef baseDir, const std::vector<std::str
     if (Module *known = loader_.byRealPath_.lookup(real)) {
       return known;
     }
-    if (path::extension(real) != ".tz") {
+    bool json = path::extension(real) == ".json";
+    if (path::extension(real) != ".tz" && !json) {
       loader_.diags_.error(loc, "'" + spec + "' names " + path::filename(real) +
                                     ", and the files of tz end in .tz: rename it to " +
                                     path::stem(real) + ".tz");
@@ -296,10 +294,11 @@ Module *ModuleResolver::load(llvm::StringRef baseDir, const std::vector<std::str
       filePath = std::string(joined);
     }
     std::string error;
-    Module *module = loader_.parse(filePath, std::string(real), name, error);
-    if (!module) {
+    Module *module = json ? loader_.parseJson(filePath, std::string(real), name, error)
+                          : loader_.parse(filePath, std::string(real), name, error);
+    if (!module && !error.empty()) {
       loader_.diags_.error(loc, "cannot read '" + name + "': " + error);
-    } else {
+    } else if (module) {
       loader_.packageOf_[module] = package;
     }
     return module;

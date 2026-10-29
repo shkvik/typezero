@@ -209,4 +209,16 @@ void *tz_net_listen(void *host_obj, uint64_t host_meta, int64_t port, double max
 void tz_http_too_slow(NetConn *c);
 void tz_http_request_too_slow(NetConn *c);
 
+#ifdef _WIN32
+void net_start(void);
+int net_attach(SOCKET s);
+void net_op_begin(NetOp *op, void (*done)(TzWork *), int unref);
+void net_op_wait(NetOp *op);
+int32_t net_op_error(NetOp *op, SOCKET s, int closed);
+void net_address_text(const SOCKADDR *sa, char *out, size_t size);
+int net_address_port(const SOCKADDR *sa);
+int net_ascii_of(void *obj, uint64_t meta, char *out, size_t size);
+int net_parse_literal(const char *host, int port, SOCKADDR_STORAGE *out, int *length);
+#endif
+
 #endif

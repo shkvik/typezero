@@ -87,23 +87,48 @@ Expr *UnionChecker::checkUnionMember(MemberExpr *member) {
                           lacking->name().str() + "', which '" + type->name().str() +
                           "' may be; narrow it first";
     bool hinted = false;
+    std::string fallback;
+    auto literals = [](const Type *t) {
+      return t->isLiteral() || (t->isUnion() && llvm::all_of(t->members(), [](const Type *m) {
+                                  return m->isLiteral();
+                                }));
+    };
+    auto holds = [](const Type *set, const Type *literal) {
+      return set == literal || (set->isUnion() && llvm::is_contained(set->members(), literal));
+    };
     for (const Field &f : type->members().front()->fields()) {
       bool tags = llvm::all_of(type->members(), [&](const Type *m) {
         const Field *g = m->field(f.name);
-        return g && g->type->isLiteral();
+        return g && literals(g->type);
       });
       if (!tags) {
         continue;
       }
       for (const Type *m : type->members()) {
-        if (m->field(member->name)) {
-          message += ", e.g. 'if (" + fieldText(member->object, f.name) +
-                     " == " + m->field(f.name)->type->name().str() + ")'";
-          hinted = true;
-          break;
+        const Type *tag = m->field(f.name)->type;
+        if (!m->field(member->name) || !tag->isLiteral()) {
+          continue;
         }
+        std::string hint =
+            ", e.g. 'if (" + fieldText(member->object, f.name) + " == " + tag->name().str() + ")'";
+        bool unique = llvm::none_of(type->members(), [&](const Type *other) {
+          return !other->field(member->name) && holds(other->field(f.name)->type, tag);
+        });
+        if (unique) {
+          message += hint;
+          hinted = true;
+        } else if (fallback.empty()) {
+          fallback = hint;
+        }
+        break;
       }
-      break;
+      if (hinted) {
+        break;
+      }
+    }
+    if (!hinted && !fallback.empty()) {
+      message += fallback;
+      hinted = true;
     }
     if (!hinted) {
       const Type *with = nullptr;

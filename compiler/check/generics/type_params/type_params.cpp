@@ -318,6 +318,9 @@ bool TypeParams::hasMembersOf(const Type *arg, const Type *constraint) {
   if (arg->isParam() && arg->constraint()) {
     return hasMembersOf(arg->constraint(), constraint);
   }
+  if (arg->isUnion()) {
+    return llvm::all_of(arg->members(), [&](const Type *m) { return hasMembersOf(m, constraint); });
+  }
   if (!arg->isObject() || arg->isTuple() != constraint->isTuple() || constraint->isClass() ||
       arg->isAnyObject()) {
     return false;

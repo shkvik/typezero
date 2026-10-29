@@ -55,6 +55,7 @@ Expr *NameChecker::checkName(NameExpr *name) {
                                 "or keep it in a global");
     }
     name->var = entry.var;
+    entry.var->read = true;
     checker_.nestedFunctions().noteUse(entry.var, name->loc());
     name->type = checker_.scopes().varType(entry.var);
     checker_.scopes().checkVisible(name, entry.var);

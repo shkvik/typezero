@@ -26,15 +26,15 @@ patch_types(${types_node}/web-globals/fetch.d.ts [[): Promise<Response>;]]
             [[): Promise<Result<Response, FetchError>>;]])
 patch_types(${types_undici}/fetch.d.ts [[  readonly bodyUsed: boolean]] [[  bodyUsed (): boolean]])
 patch_types(${types_undici}/fetch.d.ts [[  readonly arrayBuffer: () => Promise<ArrayBuffer>]]
-            [[  readonly arrayBuffer: () => Promise<Result<ArrayBuffer, BodyError>>]])
+            [[  readonly arrayBuffer: () => Promise<Result<ArrayBuffer, BytesError>>]])
 patch_types(${types_undici}/fetch.d.ts [[  readonly bytes: () => Promise<Uint8Array>]]
-            [[  readonly bytes: () => Promise<Result<Uint8Array, BodyError>>]])
+            [[  readonly bytes: () => Promise<Result<Uint8Array, BytesError>>]])
 patch_types(${types_undici}/fetch.d.ts [[  readonly formData: () => Promise<FormData>]]
-            [[  readonly formData: () => Promise<Result<FormData, BodyError>>]])
+            [[  readonly formData: () => Promise<Result<FormData, FormDataError>>]])
 patch_types(${types_undici}/fetch.d.ts [[  readonly json: () => Promise<unknown>]]
-            [[  readonly json: () => Promise<Result<Json, BodyError>>]])
+            [[  readonly json: () => Promise<Result<Json, JsonBodyError>>]])
 patch_types(${types_undici}/fetch.d.ts [[  readonly text: () => Promise<string>]]
-            [[  readonly text: () => Promise<Result<string, BodyError>>]])
+            [[  readonly text: () => Promise<Result<string, TextError>>]])
 patch_types(${types_undici}/fetch.d.ts [[  readonly status?: number]] [[  readonly status?: HttpStatus]])
 
 # tz has no AbortSignal: a fetch is limited in time by its timeout, in

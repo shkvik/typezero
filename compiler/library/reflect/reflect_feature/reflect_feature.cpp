@@ -29,7 +29,6 @@ bool ReflectFeature::lowers(Builtin builtin) const {
   case Builtin::ReflectGet:
   case Builtin::ReflectApply:
   case Builtin::ReflectConstruct:
-  case Builtin::FromJsonClass:
   case Builtin::ReflectMethod:
     return true;
   default:

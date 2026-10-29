@@ -2,10 +2,10 @@
 gcm 207eb20a16c921f14c0e3bb817f396314252efaf992251aa5f0a06
 hello world
 gcm96 2072a20352eec894a35b1f499a58
-OperationError The operation failed for an operation-specific reason
+ERR_OPERATION_FAILED The operation failed for an operation-specific reason
 cbc 67a850570488668c60dc6ff6e89207295802d3e8ec957a19645a0dfe6a9e8d56
 sixteen bytes!!!
-OperationError The operation failed for an operation-specific reason
+ERR_OPERATION_FAILED The operation failed for an operation-specific reason
 ctr 92b29c334f1600cdb13c39782bdb5a78aea06e45c1dee8be3923811061a3db166a032fcea84205316b5e65360a7f27dcffe8
 ctr back 090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f303132333435363738393a
 ctr128 92b29c334f1600cdb13c39782bdb5a78aea06e45c1dee8be3923811061a3db1607526e560936a299
@@ -18,7 +18,7 @@ kw 1fa68b0a8112b447aef34bd8fb5a7b829d3e862371d2cfe5
 } 00112233445566778899aabbccddeeff
 kw jwk 112
 { name: 'AES-GCM', length: 128 } [ 'encrypt' ]
-OperationError The operation failed for an operation-specific reason
+ERR_OPERATION_FAILED The operation failed for an operation-specific reason
 gcm wrap 78aab1ab19e9cce2800af8e253d7901b85ecdadf6b677b47929efb86e4ffe3bd0c2074593a51aeae52fcd380f2f2c787eb77805820bc113a38339e90eba8fc8ba8e45feacb9a174d4d1a0693f76640d4fcf57d49c09cfe9a6640827ac596c7d3770c0f4c6f6947eced329203b3be20fecd4f79d404
 { name: 'AES-GCM', length: 128 }
 cbc of u32 0e9262c589338006a4562f0d45512d66 010000000200000003000000

@@ -373,22 +373,6 @@ void *tz_reflect_apply(const void *f, void *self, const TzArray *args) {
   return result;
 }
 
-void *tz_reflect_from_json(const TzClass *cls, const TzJson *json) {
-  const TzLayout *layout = cls->layout;
-  if (!cls->info || !cls->info->from_json) {
-    TzBuf message;
-    tz_buf_init(&message);
-    char text[200];
-    int length = snprintf(text, sizeof text, "class %.*s cannot be made from JSON",
-                          (int)layout->name_length, layout->name);
-    tz_buf_utf8(&message, text, length < 0 ? 0 : (size_t)length);
-    tz_json_fail("ERR_INVALID_CLASS", &message, NULL);
-    return NULL;
-  }
-
-  return cls->info->from_json(json, NULL);
-}
-
 static int box_number(const void *u, double *out) {
   const TzBox *box = as_box(u);
   if (!box) {

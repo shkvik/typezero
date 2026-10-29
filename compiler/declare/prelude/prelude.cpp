@@ -27,7 +27,6 @@ type JsonError = {
   kind: "JSON"
   code: "ERR_INVALID_JSON" | "ERR_CIRCULAR_STRUCTURE"
   message: string
-  path: string
 }
 type BufferEncoding =
   | "ascii"
@@ -115,7 +114,7 @@ type TlsCode =
   | "UNSPECIFIED"
   | "ERR_TLS_CERT_ALTNAME_INVALID"
   | "ERR_TLS_HANDSHAKE"
-type FetchError =
+type FetchError<E = never> =
   | {
       kind: "REQUEST"
       code:
@@ -127,10 +126,11 @@ type FetchError =
         | "ERR_REQUEST_USED"
         | "ERR_UNSUPPORTED_SCHEME"
         | "ERR_BLOCKED_PORT"
-        | "ERR_STREAM_FAILED"
+        | "ERR_BODY_FAILED"
       message: string
       url: string
     }
+  | { kind: "REQUEST"; code: "ERR_STREAM_FAILED"; message: string; url: string; details: E }
   | {
       kind: "NETWORK"
       code:
@@ -189,22 +189,35 @@ type BodyError =
   | { kind: "TIMEOUT"; code: "TIMEOUT_ERR"; message: string; timeout: int }
   | { kind: "TOO_LARGE"; code: "ERR_BODY_TOO_LARGE"; message: string; limit: double }
   | { kind: "MALFORMED"; code: "ERR_INVALID_CHUNKED" | "ERR_INVALID_COMPRESSION"; message: string }
+  | { kind: "STREAM"; code: "ERR_STREAM_FAILED"; message: string }
+type ReaderError = {
+  kind: "USED"
+  code: "ERR_STREAM_LOCKED" | "ERR_READER_RELEASED"
+  message: string
+}
+type TextError = BodyError
+type BytesError = BodyError
+type JsonBodyError =
+  | BodyError
+  | { kind: "CONTENT"; code: "ERR_INVALID_JSON"; message: string; contentType?: string; start: string }
+type FormDataError =
+  | BodyError
   | {
       kind: "CONTENT"
-      code: "ERR_INVALID_JSON" | "ERR_NOT_A_FORM" | "ERR_NO_BOUNDARY" | "ERR_INVALID_MULTIPART"
+      code: "ERR_NOT_A_FORM" | "ERR_NO_BOUNDARY" | "ERR_INVALID_MULTIPART"
       message: string
-      contentType: string
+      contentType?: string
     }
-  | { kind: "STREAM"; code: "ERR_STREAM_FAILED"; message: string }
 type SubtleError = {
+  kind: "SUBTLE"
   code:
-    | "NotSupportedError"
-    | "DataError"
-    | "OperationError"
-    | "InvalidAccessError"
-    | "SyntaxError"
-    | "TypeError"
-    | "RangeError"
+    | "ERR_NOT_SUPPORTED"
+    | "ERR_INVALID_DATA"
+    | "ERR_OPERATION_FAILED"
+    | "ERR_INVALID_ACCESS"
+    | "ERR_INVALID_KEY_USAGE"
+    | "ERR_INVALID_ARG_TYPE"
+    | "ERR_OUT_OF_RANGE"
   message: string
 }
 type ExecError<Out> = {

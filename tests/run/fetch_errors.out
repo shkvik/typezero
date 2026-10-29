@@ -13,5 +13,7 @@ large body 413
 large stream 413 
 corrupt gzip MALFORMED ERR_INVALID_COMPRESSION: the body is not valid gzip: incorrect header check
 4 bytes true
-USED ERR_BODY_USED the body is already read: text(), json(), bytes(), formData() and body() read it once
+USED ERR_BODY_USED the body is already read: text(), json(), bytes(), formData() and body() read it once fix the code
+html ERR_INVALID_JSON text/html <html><title>502 Bad Gateway</title></html>
+bare ERR_NOT_A_FORM no content-type the body is not a form: it has no content-type
 refused NETWORK ECONNREFUSED could not connect to 127.0.0.1:PORT: nothing listens on this port connect 127.0.0.1 true

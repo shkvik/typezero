@@ -402,8 +402,7 @@ void BuiltinEffects::builtinEffects(const CallExpr *c, const Expr *recv) {
     rec.byObject = self ? self->type : nullptr;
     return;
   }
-  case Builtin::ReflectConstruct:
-  case Builtin::FromJsonClass: {
+  case Builtin::ReflectConstruct: {
     for (size_t i = 1; i < c->args.size(); ++i) {
       analysis_.exprWalk().contents(c->args[i], false, at);
     }

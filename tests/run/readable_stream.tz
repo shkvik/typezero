@@ -1,8 +1,8 @@
 // same-as-node
 // ReadableStream, as the bodies of fetch have it: made with start and
 // pull, sync or async; read with getReader() and with for await, where each
-// chunk comes in a Result and an error of the source is an Err (docs/errors.md,
-// step 5); cancel; `locked`, a field that a reader changes. How a stream prints
+// chunk comes in a Result and an error of the source, of the type the stream
+// names as its second argument, is an Err (docs/errors.md, step 5); cancel; `locked`, a field that a reader changes. How a stream prints
 // is in library_print.tz.
 const enc = new TextEncoder()
 const dec = new TextDecoder()
@@ -41,10 +41,11 @@ let text = ""
 for await (const chunk of bytes) if (chunk.isOk()) text += dec.decode(chunk.value)
 console.log(text)
 
-const failing = new ReadableStream<int>({
+type SourceError = { kind: "SOURCE"; code: "ERR_SOURCE"; message: string }
+const failing = new ReadableStream<int, SourceError>({
   start: c => {
     c.enqueue(1)
-    c.error({ code: "source", message: "source failed" })
+    c.error({ kind: "SOURCE", code: "ERR_SOURCE", message: "source failed" })
   },
 })
 for await (const n of failing) {

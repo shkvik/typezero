@@ -1,0 +1,22 @@
+// Only a const without a written type takes its literal type; the literal must
+// still be one of the expected ones.
+function move(direction: "up" | "down") {
+  console.log(direction)
+}
+
+const left = "left"
+// expect-error: type '"left"' is not assignable to type '"up" | "down"'
+move(left)
+
+const declared: string = "up"
+// expect-error: type 'string' is not assignable to type '"up" | "down"'
+move(declared)
+
+let changing = "up"
+// expect-error: type 'string' is not assignable to type '"up" | "down"'
+move(changing)
+
+const fast = process.argv.length > 5
+const mixed = fast ? "up" : "sideways"
+// expect-error: type '"up" | "sideways"' is not assignable to type '"up" | "down"'
+move(mixed)

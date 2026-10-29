@@ -133,7 +133,14 @@ ClassDecl *GenericClassInstantiator::instantiateClass(ClassDecl *generic,
   inst->resolved = true;
   inst->declared = true;
   inst->id = ++checker_.classCount_;
-  Type *type = Type::classType(name + "<" + typeNames(args) + ">", inst);
+  size_t shown = args.size();
+  while (shown > 0 && shown - 1 < defaults.size() && defaults[shown - 1] &&
+         defaults[shown - 1]->isNever() && args[shown - 1]->isNever()) {
+    --shown;
+  }
+  std::string display =
+      shown == 0 ? name : name + "<" + typeNames(llvm::ArrayRef(args).take_front(shown)) + ">";
+  Type *type = Type::classType(display, inst);
   type->setTypeArgs(args);
   inst->type = type;
   checker_.classes_.push_back(inst);

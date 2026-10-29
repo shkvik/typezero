@@ -1,0 +1,15 @@
+// A JSON file is imported whole, with 'with { type: "json" }'; import
+// attributes are only for JSON files.
+// expect-error: a JSON file is imported with 'with { type: "json" }', as in node and TypeScript: 'import plain from "./config.json" with { type: "json" }'
+import plain from "./config.json"
+// expect-error: a JSON file is one value: import it whole, e.g. 'import data from "./config.json" with { type: "json" }'
+import { port } from "./config.json" with { type: "json" }
+// expect-error: 'assert' is the old form of import attributes; write 'with { type: "json" }'
+import old from "./config.json" assert { type: "json" }
+// expect-error: a JSON file takes one import attribute: 'with { type: "json" }'
+import other from "./config.json" with { type: "text" }
+// expect-error: import attributes are only for JSON files, e.g. 'import config from "./config.json" with { type: "json" }'
+import { x } from "./util" with { type: "json" }
+// expect-error: cannot find './missing.json': there is no missing.json
+import missing from "./missing.json" with { type: "json" }
+console.log(plain, old, other, x, missing)

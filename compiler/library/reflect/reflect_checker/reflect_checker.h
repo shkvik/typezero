@@ -9,8 +9,6 @@ public:
   explicit ReflectChecker(Checker &checker);
 
   Expr *checkReflection(CallExpr *call, MemberExpr *member, const Type *expected);
-  Expr *checkFromJsonClass(CallExpr *call, NameExpr *name);
-  std::string classJsonProblem(const ClassDecl *cls);
   void noteReflectedConversion(const Type *from, const Type *to, const CastExpr *cast);
   void noteConstructorFlow(const Type *from, const Type *to);
   void finishReflection();
@@ -26,8 +24,6 @@ private:
   llvm::SmallPtrSet<ClassDecl *, 8> escaped_;
   llvm::SmallPtrSet<ClassDecl *, 8> reflectedObjects_;
   bool reflectGetAny_ = false;
-  bool jsonReflect_ = false;
-  llvm::DenseMap<const ClassDecl *, std::string> jsonProblems_;
 };
 
 }

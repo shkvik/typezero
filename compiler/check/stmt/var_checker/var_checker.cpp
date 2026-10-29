@@ -204,9 +204,22 @@ void VarChecker::checkVarDecl(VarDeclStmt *decl) {
         (isa<ObjectLitExpr>(value) || isa<StringLitExpr>(value) ||
          (isa<ConditionalExpr>(value) && isTextChoice(value)))) {
       checker_.constLiterals_[d.sym] = value;
+      d.sym->literalConst = !declared && type->isString();
+    }
+    if (auto *alias = dyn_cast_or_null<NameExpr>(value); decl->isConst && alias && alias->var &&
+                                                         alias->var->literalConst && !declared &&
+                                                         type->isString()) {
+      checker_.constLiterals_[d.sym] = checker_.constLiterals_.lookup(alias->var);
+      d.sym->literalConst = true;
     }
     if (!places.empty()) {
       checker_.destinations_[d.sym] = std::move(places);
+    }
+    if (const Type *held = type->nonOptional();
+        !d.destructured && !checker_.checkingInstance_ &&
+        (held->isResult() || (held->isPromise() && held->promised()->isResult())) &&
+        !exported(d.name)) {
+      checker_.resultVars_.push_back(d.sym);
     }
     if (untyped) {
       noteUntyped(d.sym, d.init != nullptr);
@@ -238,6 +251,46 @@ void VarChecker::checkVarDecl(VarDeclStmt *decl) {
       }
     }
   }
+}
+
+bool VarChecker::exported(llvm::StringRef name) const {
+  if (checker_.scopes_.size() != 1 || !checker_.module_) {
+    return false;
+  }
+
+  return llvm::any_of(checker_.module_->file.exports, [&](const ExportDecl &decl) {
+    return decl.path.empty() &&
+           llvm::any_of(decl.names, [&](const ModuleName &n) { return n.name == name; });
+  });
+}
+
+void VarChecker::reportUncheckedResults() {
+  llvm::DenseMap<const char *, bool> readAt;
+  for (const VarSymbol *var : checker_.resultVars_) {
+    readAt[var->loc.getPointer()] |= var->read;
+  }
+  for (const VarSymbol *var : checker_.resultVars_) {
+    bool &done = readAt[var->loc.getPointer()];
+    if (done) {
+      continue;
+    }
+    done = true;
+    std::string name = var->name.str();
+    const Type *held = var->type->nonOptional();
+    if (held->isPromise()) {
+      checker_.diags_.error(var->loc, "'" + name +
+                                          "' holds a Promise of a Result that is never awaited, "
+                                          "so an error in it would go unchecked; await it and "
+                                          "check it, e.g. 'const r = await " +
+                                          name + "; if (r.isErr()) ...'");
+      continue;
+    }
+    checker_.diags_.error(var->loc, "the Result in '" + name +
+                                        "' is never checked, so an error in it would go "
+                                        "unchecked; check it, e.g. 'if (" +
+                                        name + ".isErr()) ...'");
+  }
+  checker_.resultVars_.clear();
 }
 
 void VarChecker::noteUntyped(VarSymbol *var, bool initUndefined) {

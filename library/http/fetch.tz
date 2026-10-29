@@ -400,13 +400,13 @@ function isLower(s: string): boolean {
 
 export type ReadableStreamReadResult<R> = { done: false; value: R } | { done: true; value?: R }
 
-type ReadResult<R> = Result<ReadableStreamReadResult<R>, StreamError>
+type ReadResult<R, E> = Result<ReadableStreamReadResult<R>, E | ReaderError>
 
-class StreamState<R> {
+class StreamState<R, E> {
   queue: R[] = []
   state = "readable"
-  error?: StreamError
-  source?: UnderlyingSource<R>
+  error?: E
+  source?: UnderlyingSource<R, E>
   started = false
   pulling = false
   pullAgain = false
@@ -415,7 +415,7 @@ class StreamState<R> {
   disturbed = false
   bytes = false
   highWaterMark: double = 1
-  reads: ((result: ReadResult<R>) => void)[] = []
+  reads: ((result: ReadResult<R, E>) => void)[] = []
 
   lock(locked: boolean) {
     this.locked = locked
@@ -426,9 +426,9 @@ class StreamState<R> {
   }
 }
 
-export interface UnderlyingSource<R> {
-  start?: (controller: ReadableStreamDefaultController<R>) => Promise<void> | undefined
-  pull?: (controller: ReadableStreamDefaultController<R>) => Promise<void> | undefined
+export interface UnderlyingSource<R, E = never> {
+  start?: (controller: ReadableStreamDefaultController<R, E>) => Promise<void> | undefined
+  pull?: (controller: ReadableStreamDefaultController<R, E>) => Promise<void> | undefined
   cancel?: (reason: StreamError | undefined) => Promise<void> | undefined
   type?: string
 }
@@ -437,11 +437,23 @@ export interface QueuingStrategy {
   highWaterMark?: double
 }
 
-function invalidState(message: string): StreamError {
-  return { code: "ERR_INVALID_STATE", message }
+function lockedError(): ReaderError {
+  return {
+    kind: "USED",
+    code: "ERR_STREAM_LOCKED",
+    message: "the stream is locked: another reader holds it; read it with that reader",
+  }
 }
 
-function closeStream<R>(s: StreamState<R>) {
+function releasedError(): ReaderError {
+  return {
+    kind: "USED",
+    code: "ERR_READER_RELEASED",
+    message: "the reader has released the stream: get a new reader with getReader()",
+  }
+}
+
+function closeStream<R, E>(s: StreamState<R, E>) {
   if (s.state != "readable") return
   s.state = "closed"
   s.source = undefined
@@ -450,7 +462,7 @@ function closeStream<R>(s: StreamState<R>) {
   for (const r of reads) r(ok({ done: true }))
 }
 
-function errorStream<R>(s: StreamState<R>, e: StreamError) {
+function errorStream<R, E>(s: StreamState<R, E>, e: E) {
   if (s.state != "readable") return
   s.state = "errored"
   s.error = e
@@ -461,11 +473,11 @@ function errorStream<R>(s: StreamState<R>, e: StreamError) {
   for (const r of reads) r(err(e))
 }
 
-function desiredSize<R>(s: StreamState<R>): double {
+function desiredSize<R, E>(s: StreamState<R, E>): double {
   return s.highWaterMark - s.queue.length.toDouble()
 }
 
-function pullIfNeeded<R>(s: StreamState<R>) {
+function pullIfNeeded<R, E>(s: StreamState<R, E>) {
   if (s.state != "readable" || s.closeRequested || !s.started) return
   const pull = s.source?.pull
   if (pull == undefined) return
@@ -475,7 +487,7 @@ function pullIfNeeded<R>(s: StreamState<R>) {
     return
   }
   s.pulling = true
-  const pulled = pull(new ReadableStreamDefaultController<R>(s))
+  const pulled = pull(new ReadableStreamDefaultController<R, E>(s))
   if (pulled == undefined) {
     afterPull(s)
     return
@@ -483,7 +495,7 @@ function pullIfNeeded<R>(s: StreamState<R>) {
   void pulled.then(() => afterPull(s))
 }
 
-function afterPull<R>(s: StreamState<R>) {
+function afterPull<R, E>(s: StreamState<R, E>) {
   s.pulling = false
   if (s.pullAgain) {
     s.pullAgain = false
@@ -491,10 +503,10 @@ function afterPull<R>(s: StreamState<R>) {
   }
 }
 
-export class ReadableStreamDefaultController<R> {
-  private s: StreamState<R>
+export class ReadableStreamDefaultController<R, E = never> {
+  private s: StreamState<R, E>
 
-  constructor(state: StreamState<R>) {
+  constructor(state: StreamState<R, E>) {
     this.s = state
   }
 
@@ -518,16 +530,16 @@ export class ReadableStreamDefaultController<R> {
     if (s.queue.length == 0) closeStream(s)
   }
 
-  error(e: StreamError) {
+  error(e: E) {
     errorStream(this.s, e)
   }
 }
 
-export class ReadableStreamDefaultReader<R> {
-  private s?: StreamState<R>
-  private problem?: StreamError
+export class ReadableStreamDefaultReader<R, E = never> {
+  private s?: StreamState<R, E>
+  private problem?: ReaderError
 
-  constructor(source: ReadableStream<R> | StreamState<R>) {
+  constructor(source: ReadableStream<R, E> | StreamState<R, E>) {
     if (source instanceof ReadableStream) {
       const made = source.getReader()
       this.s = made.s
@@ -535,16 +547,16 @@ export class ReadableStreamDefaultReader<R> {
       return
     }
     if (source.locked) {
-      this.problem = invalidState("Invalid state: ReadableStream is locked")
+      this.problem = lockedError()
       return
     }
     source.lock(true)
     this.s = source
   }
 
-  async read(): Promise<ReadResult<R>> {
+  async read(): Promise<ReadResult<R, E>> {
     const s = this.s
-    if (s == undefined) return err(this.problem ?? invalidState("Reader is released"))
+    if (s == undefined) return err(this.problem ?? releasedError())
     s.disturb()
     if (s.queue.length > 0) {
       const chunk = s.queue.shift()
@@ -553,9 +565,11 @@ export class ReadableStreamDefaultReader<R> {
       if (chunk != undefined) return ok({ done: false, value: chunk })
     }
     if (s.state == "closed") return ok({ done: true })
-    const error = s.error
-    if (s.state == "errored" && error != undefined) return err(error)
-    const read = Promise.withResolvers<ReadResult<R>>()
+    if (s.state == "errored") {
+      const error = s.error
+      if (error != undefined) return err(error)
+    }
+    const read = Promise.withResolvers<ReadResult<R, E>>()
     s.reads.push(read.resolve)
     pullIfNeeded(s)
     return read.promise
@@ -568,7 +582,7 @@ export class ReadableStreamDefaultReader<R> {
     this.s = undefined
     const reads = s.reads
     s.reads = []
-    for (const r of reads) r(err(invalidState("Reader was released")))
+    for (const r of reads) r(err(releasedError()))
   }
 
   async cancel(reason?: StreamError): Promise<void> {
@@ -577,7 +591,7 @@ export class ReadableStreamDefaultReader<R> {
   }
 }
 
-async function cancelStream<R>(s: StreamState<R>, reason: StreamError | undefined): Promise<void> {
+async function cancelStream<R, E>(s: StreamState<R, E>, reason: StreamError | undefined): Promise<void> {
   s.disturb()
   if (s.state != "readable") return
   const cancel = s.source?.cancel
@@ -589,15 +603,15 @@ async function cancelStream<R>(s: StreamState<R>, reason: StreamError | undefine
   }
 }
 
-function startedState<R>(source: UnderlyingSource<R> | undefined,
-                         strategy: QueuingStrategy | undefined): StreamState<R> {
-  const s = new StreamState<R>()
+function startedState<R, E>(source: UnderlyingSource<R, E> | undefined,
+                            strategy: QueuingStrategy | undefined): StreamState<R, E> {
+  const s = new StreamState<R, E>()
   s.source = source
   s.highWaterMark = strategy?.highWaterMark ?? (source?.type == "bytes" ? 0 : 1)
   s.bytes = source?.type == "bytes"
   const start = source?.start
   let started: Promise<void> | undefined = undefined
-  if (start != undefined) started = start(new ReadableStreamDefaultController<R>(s))
+  if (start != undefined) started = start(new ReadableStreamDefaultController<R, E>(s))
   if (started == undefined) {
     queueMicrotask(() => {
       s.started = true
@@ -612,10 +626,10 @@ function startedState<R>(source: UnderlyingSource<R> | undefined,
   return s
 }
 
-export class ReadableStream<R = Uint8Array> {
-  private s?: StreamState<R>
+export class ReadableStream<R = Uint8Array, E = never> {
+  private s?: StreamState<R, E>
 
-  constructor(source?: UnderlyingSource<R>, strategy?: QueuingStrategy) {
+  constructor(source?: UnderlyingSource<R, E>, strategy?: QueuingStrategy) {
     if (source != undefined || strategy != undefined) this.s = startedState(source, strategy)
   }
 
@@ -631,13 +645,22 @@ export class ReadableStream<R = Uint8Array> {
     return s != undefined && s.disturbed
   }
 
-  protected open(): StreamState<R> {
-    const s = new StreamState<R>()
+  public failure(): E | undefined {
+    const s = this.s
+    if (s == undefined) {
+      return undefined
+    }
+
+    return s.error
+  }
+
+  protected open(): StreamState<R, E> {
+    const s = new StreamState<R, E>()
     s.started = true
     return s
   }
 
-  private state(): StreamState<R> {
+  private state(): StreamState<R, E> {
     const s = this.s
     if (s != undefined) return s
     const opened = this.open()
@@ -645,8 +668,8 @@ export class ReadableStream<R = Uint8Array> {
     return opened
   }
 
-  getReader(): ReadableStreamDefaultReader<R> {
-    return new ReadableStreamDefaultReader<R>(this.state())
+  getReader(): ReadableStreamDefaultReader<R, E> {
+    return new ReadableStreamDefaultReader<R, E>(this.state())
   }
 
   async cancel(reason?: StreamError): Promise<void> {
@@ -655,7 +678,7 @@ export class ReadableStream<R = Uint8Array> {
     await cancelStream(s, reason)
   }
 
-  async *values(): AsyncGenerator<Result<R, StreamError>, void, void> {
+  async *values(): AsyncGenerator<Result<R, E | ReaderError>, void, void> {
     const reader = this.getReader()
     let finished = false
     const release = defer(() => {
@@ -669,7 +692,7 @@ export class ReadableStream<R = Uint8Array> {
       const r = await reader.read()
       if (r.isErr()) {
         finished = true
-        const failed: Result<R, StreamError> = err(r.error)
+        const failed: Result<R, E | ReaderError> = err(r.error)
         yield failed
         return
       }
@@ -678,14 +701,56 @@ export class ReadableStream<R = Uint8Array> {
         finished = true
         return
       }
-      const item: Result<R, StreamError> = ok(step.value)
+      const item: Result<R, E | ReaderError> = ok(step.value)
       yield item
     }
   }
 
-  async *[Symbol.asyncIterator](): AsyncGenerator<Result<R, StreamError>, void, void> {
+  async *[Symbol.asyncIterator](): AsyncGenerator<Result<R, E | ReaderError>, void, void> {
     yield* this.values()
   }
+}
+
+function streamMessage<E extends { message: string }>(failure: E): string {
+  const message = `the stream of the body failed: ${failure.message}`
+
+  return message
+}
+
+function bodyStream<E extends { message: string }>(source: ReadableStream<Uint8Array, E>):
+    ReadableStream<Uint8Array, BodyError> {
+  let reader: ReadableStreamDefaultReader<Uint8Array, E> | undefined = undefined
+  const stream = new ReadableStream<Uint8Array, BodyError>({
+    type: "bytes",
+    pull: async c => {
+      let current = reader
+      if (current == undefined) {
+        current = source.getReader()
+        reader = current
+      }
+      const r = await current.read()
+      if (r.isOk()) {
+        const step = r.value
+        if (step.done) c.close()
+        else c.enqueue(step.value)
+        return
+      }
+      const failure = source.failure()
+      if (failure != undefined) {
+        const message = streamMessage(failure)
+        c.error({ kind: "STREAM", code: "ERR_STREAM_FAILED", message: message })
+        return
+      }
+      c.error(bodyLocked())
+    },
+    cancel: async reason => {
+      const current = reader
+      if (current != undefined) await current.cancel(reason)
+      else await source.cancel(reason)
+    },
+  })
+
+  return stream
 }
 
 const BODY_NONE = 0
@@ -707,8 +772,9 @@ export type Written =
       finished: Promise<void>
     }
 
-export type BodyInit = string | Uint8Array | ArrayBuffer | ReadableStream<Uint8Array> |
-  URLSearchParams | FormData
+export type BodyData = string | Uint8Array | ArrayBuffer | URLSearchParams | FormData
+
+export type BodyInit = BodyData | ReadableStream<Uint8Array>
 
 type Decode = (chunk: Uint8Array, last: boolean) => Result<Uint8Array, SystemError>
 
@@ -993,7 +1059,7 @@ function requestError(
     | "ERR_REQUEST_USED"
     | "ERR_UNSUPPORTED_SCHEME"
     | "ERR_BLOCKED_PORT"
-    | "ERR_STREAM_FAILED",
+    | "ERR_BODY_FAILED",
   message: string,
   url: string,
 ): FetchError {
@@ -1028,20 +1094,41 @@ function bodyLocked(): BodyError {
   };
 }
 
-function contentError(
-  code: "ERR_INVALID_JSON" | "ERR_NOT_A_FORM" | "ERR_NO_BOUNDARY" | "ERR_INVALID_MULTIPART",
+function formError(
+  code: "ERR_NOT_A_FORM" | "ERR_NO_BOUNDARY" | "ERR_INVALID_MULTIPART",
   message: string,
-  contentType: string,
-): BodyError {
+  contentType: string | undefined,
+): FormDataError {
   return { kind: "CONTENT", code: code, message: message, contentType: contentType };
 }
 
-function streamFailed(e: StreamError): BodyError {
-  return {
-    kind: "STREAM",
-    code: "ERR_STREAM_FAILED",
-    message: `the stream of the body failed: ${e.message}`,
-  };
+function jsonBody(text: Result<string, TextError>, contentType: string | undefined): Result<Json, JsonBodyError> {
+  if (text.isErr()) {
+    return text;
+  }
+  const parsed = JSON.parse(text.value);
+  if (parsed.isErr()) {
+    const message = `the body is not JSON: ${parsed.error.message}`;
+    const start = text.value.slice(0, 200);
+
+    return err({
+      kind: "CONTENT",
+      code: "ERR_INVALID_JSON",
+      message: message,
+      contentType: contentType,
+      start: start,
+    });
+  }
+
+  return ok(parsed.value);
+}
+
+function bodyFailure(e: BodyError | ReaderError): BodyError {
+  if (e.kind == "USED") {
+    return bodyLocked();
+  }
+
+  return e;
 }
 
 class Wire {
@@ -1260,11 +1347,11 @@ class Body {
   kind = BODY_NONE
   text = ""
   bytes?: Uint8Array
-  stream?: ReadableStream<Uint8Array>
+  stream?: ReadableStream<Uint8Array, BodyError>
   wire?: Wire
   used = false
   type?: string
-  opened?: StreamState<Uint8Array>
+  opened?: StreamState<Uint8Array, BodyError>
 
   static of(init: BodyInit | undefined): Body {
     const b = new Body()
@@ -1281,7 +1368,7 @@ class Body {
       b.bytes = new Uint8Array(init.slice(0))
     } else if (init instanceof ReadableStream) {
       b.kind = BODY_STREAM
-      b.stream = init
+      b.stream = bodyStream(init)
     } else if (init instanceof URLSearchParams) {
       b.kind = BODY_TEXT
       b.text = init.toString()
@@ -1292,6 +1379,14 @@ class Body {
       b.text = multipartText(init, boundary)
       b.type = "multipart/form-data; boundary=" + boundary
     }
+    return b
+  }
+
+  static ofStream(stream: ReadableStream<Uint8Array, BodyError>): Body {
+    const b = new Body()
+    b.kind = BODY_STREAM
+    b.stream = stream
+
     return b
   }
 
@@ -1335,32 +1430,31 @@ class Body {
     return this.kind == BODY_NONE
   }
 
-  view(): ReadableStream<Uint8Array> | undefined {
+  view(): ReadableStream<Uint8Array, BodyError> | undefined {
     if (this.kind == BODY_NONE) return undefined
     const stream = this.stream
     return stream != undefined ? stream : new BodyStream(this)
   }
 
-  state(): StreamState<Uint8Array> | undefined {
+  state(): StreamState<Uint8Array, BodyError> | undefined {
     const opened = this.opened
     if (opened != undefined) return opened
     if (this.kind == BODY_NONE) return undefined
-    let made: StreamState<Uint8Array>
+    let made: StreamState<Uint8Array, BodyError>
     const maybeWire = this.wire
     if (this.used) {
-      made = new StreamState<Uint8Array>()
+      made = new StreamState<Uint8Array, BodyError>()
       made.started = true
       made.disturbed = true
       made.state = "closed"
     } else if (maybeWire != undefined) {
       const wire: Wire = maybeWire
-      made = startedState<Uint8Array>({
+      made = startedState<Uint8Array, BodyError>({
         type: "bytes",
         pull: async c => {
           const chunk = await wire.next()
           if (chunk.isErr()) {
-            const e = chunk.error
-            c.error({ code: e.code, message: e.message })
+            c.error(chunk.error)
           } else {
             const value = chunk.value
             if (value == undefined) c.close()
@@ -1370,7 +1464,7 @@ class Body {
       }, undefined)
     } else {
       const bytes = this.kind == BODY_TEXT ? new TextEncoder().encode(this.text) : this.bytes
-      made = startedState<Uint8Array>({
+      made = startedState<Uint8Array, BodyError>({
         type: "bytes",
         start: c => {
           if (bytes != undefined && bytes.length > 0) c.enqueue(bytes)
@@ -1395,7 +1489,7 @@ class Body {
         const r = await reader.read()
         if (r.isErr()) {
           reader.releaseLock()
-          return err(this.wire?.failure ?? streamFailed(r.error))
+          return err(this.wire?.failure ?? bodyFailure(r.error))
         }
         const step = r.value
         if (step.done) break
@@ -1449,7 +1543,7 @@ class Body {
   }
 }
 
-class BodyStream extends ReadableStream<Uint8Array> {
+class BodyStream extends ReadableStream<Uint8Array, BodyError> {
   private body: Body
 
   constructor(body: Body) {
@@ -1457,27 +1551,27 @@ class BodyStream extends ReadableStream<Uint8Array> {
     this.body = body
   }
 
-  protected override open(): StreamState<Uint8Array> {
-    return this.body.state() ?? new StreamState<Uint8Array>()
+  protected override open(): StreamState<Uint8Array, BodyError> {
+    return this.body.state() ?? new StreamState<Uint8Array, BodyError>()
   }
 }
 
 class TeeState {
   buffers: Uint8Array[][] = [[], []]
   done = false
-  failure?: StreamError
+  failure?: BodyError
   reading?: Promise<void>
 }
 
-function tee(source: ReadableStream<Uint8Array>):
-    [ReadableStream<Uint8Array>, ReadableStream<Uint8Array>] {
+function tee(source: ReadableStream<Uint8Array, BodyError>):
+    [ReadableStream<Uint8Array, BodyError>, ReadableStream<Uint8Array, BodyError>] {
   const reader = source.getReader()
   const state = new TeeState()
   const readMore = async () => {
     const r = await reader.read()
     state.reading = undefined
     if (r.isErr()) {
-      state.failure = r.error
+      state.failure = bodyFailure(r.error)
       state.done = true
       return
     }
@@ -1489,7 +1583,7 @@ function tee(source: ReadableStream<Uint8Array>):
     state.buffers[0]?.push(step.value)
     state.buffers[1]?.push(step.value)
   }
-  const branch = (i: int) => new ReadableStream<Uint8Array>({
+  const branch = (i: int) => new ReadableStream<Uint8Array, BodyError>({
     pull: async c => {
       for (;;) {
         const next = (state.buffers[i] ?? []).shift()
@@ -1585,7 +1679,7 @@ function multipartText(form: FormData, boundary: string): string {
   return out + `--${boundary}--\r\n`
 }
 
-function parseFormData(type: string | undefined, bytes: Uint8Array): Result<FormData, BodyError> {
+function parseFormData(type: string | undefined, bytes: Uint8Array): Result<FormData, FormDataError> {
   const form = new FormData()
   const given = type ?? ""
   const contentType = given.toLowerCase()
@@ -1598,24 +1692,24 @@ function parseFormData(type: string | undefined, bytes: Uint8Array): Result<Form
     const m = /boundary=(?:"([^"]+)"|([^;\s]+))/i.exec(type ?? "")
     const boundary = m == undefined ? "" : m[1] ?? m[2] ?? ""
     if (boundary == "")
-      return err(contentError("ERR_NO_BOUNDARY",
-                              "the body is not a form: multipart/form-data has no boundary", given))
+      return err(formError("ERR_NO_BOUNDARY",
+                              "the body is not a form: multipart/form-data has no boundary", type))
     const text = new TextDecoder().decode(bytes)
     const parts = text.split("--" + boundary)
     for (const part of parts.slice(1)) {
       if (part.startsWith("--")) break
       const headEnd = part.indexOf("\r\n\r\n")
       if (headEnd < 0)
-        return err(contentError("ERR_INVALID_MULTIPART",
+        return err(formError("ERR_INVALID_MULTIPART",
                                 "the body is not a valid multipart form: a part has no end of its head",
-                                given))
+                                type))
       const head = part.slice(0, headEnd)
       let body = part.slice(headEnd + 4)
       if (body.endsWith("\r\n")) body = body.slice(0, body.length - 2)
       const name = /name="([^"]*)"/i.exec(head)
       if (name == undefined)
-        return err(contentError("ERR_INVALID_MULTIPART",
-                                "the body is not a valid multipart form: a part has no name", given))
+        return err(formError("ERR_INVALID_MULTIPART",
+                                "the body is not a valid multipart form: a part has no name", type))
       const field = (name[1] ?? "").replaceAll("%22", "\"").replaceAll("%0A", "\n")
         .replaceAll("%0D", "\r")
       form.append(field, body)
@@ -1623,15 +1717,15 @@ function parseFormData(type: string | undefined, bytes: Uint8Array): Result<Form
     return ok(form)
   }
   const what = given == "" ? "it has no content-type" : `content-type is ${given}`
-  return err(contentError("ERR_NOT_A_FORM", `the body is not a form: ${what}`, given))
+  return err(formError("ERR_NOT_A_FORM", `the body is not a form: ${what}`, type))
 }
 
 export type RequestRedirect = "follow" | "error" | "manual"
 
-export interface RequestInit {
+export interface RequestInit<E = never> {
   method?: string
   headers?: HeadersInit
-  body?: BodyInit
+  body?: BodyData | ReadableStream<Uint8Array, E>
   redirect?: RequestRedirect
   timeout?: int
   duplex?: "half"
@@ -1661,7 +1755,7 @@ export class Request {
   readonly redirect: RequestRedirect = "follow"
   readonly duplex?: "half"
   readonly timeout?: int
-  private bodyStream?: ReadableStream<Uint8Array>
+  private bodyStream?: ReadableStream<Uint8Array, BodyError>
   private data: Body
 
   constructor(input: string | URL | Request, init?: RequestInit) {
@@ -1717,6 +1811,16 @@ export class Request {
     return new Request(conn)
   }
 
+  public static stream<E extends { message: string }>(input: string | URL | Request,
+                                                      body: ReadableStream<Uint8Array, E>,
+                                                      init?: RequestInit): Request {
+    const request = new Request(input, init)
+    const stream = bodyStream(body)
+    request.data = Body.ofStream(stream)
+
+    return request
+  }
+
   async writeTo(conn: Connection, url: URL, peer: Peer): Promise<Result<void, FetchError>> {
     const body = this.data
     let text = ""
@@ -1746,7 +1850,7 @@ export class Request {
     return ok(undefined)
   }
 
-  public body(): ReadableStream<Uint8Array> | undefined {
+  public body(): ReadableStream<Uint8Array, BodyError> | undefined {
     const made = this.bodyStream
     if (made != undefined) {
       return made
@@ -1770,31 +1874,29 @@ export class Request {
     return r
   }
 
-  async text(): Promise<Result<string, BodyError>> {
+  async text(): Promise<Result<string, TextError>> {
     return this.data.consumeText()
   }
 
-  async json(): Promise<Result<Json, BodyError>> {
+  async json(): Promise<Result<Json, JsonBodyError>> {
     const text = await this.text()
-    if (text.isErr()) return text
-    const parsed = JSON.parse(text.value)
-    if (parsed.isErr())
-      return err(contentError("ERR_INVALID_JSON", `the body is not JSON: ${parsed.error.message}`,
-                              this.headers.get("content-type") ?? ""))
-    return ok(parsed.value)
+    const contentType = this.headers.get("content-type")
+    const parsed = jsonBody(text, contentType)
+
+    return parsed
   }
 
-  async bytes(): Promise<Result<Uint8Array, BodyError>> {
+  async bytes(): Promise<Result<Uint8Array, BytesError>> {
     return this.data.consume()
   }
 
-  async arrayBuffer(): Promise<Result<ArrayBuffer, BodyError>> {
+  async arrayBuffer(): Promise<Result<ArrayBuffer, BytesError>> {
     const bytes = await this.data.consume()
     if (bytes.isErr()) return bytes
     return ok(bytes.value.slice().buffer)
   }
 
-  async formData(): Promise<Result<FormData, BodyError>> {
+  async formData(): Promise<Result<FormData, FormDataError>> {
     const bytes = await this.data.consume()
     if (bytes.isErr()) return bytes
     return parseFormData(this.headers.get("content-type"), bytes.value)
@@ -1832,7 +1934,7 @@ export class Response {
   readonly type: string = "default"
   readonly url: string = ""
   upgrade?: (conn: Connection) => void
-  private bodyStream?: ReadableStream<Uint8Array>
+  private bodyStream?: ReadableStream<Uint8Array, BodyError>
   private data: Body
 
   constructor(body?: BodyInit, init?: ResponseInit) {
@@ -1845,6 +1947,22 @@ export class Response {
     const type = this.data.type
     if (type != undefined && !this.headers.has("content-type"))
       this.headers.append("content-type", type)
+  }
+
+  public static stream<E extends { message: string }>(body: ReadableStream<Uint8Array, E> | undefined,
+                                                      init?: ResponseInit): Response {
+    const status: int = init?.status ?? 200
+    const statusText = reasonPhrase(init?.statusText ?? "")
+    const headers = new Headers(init?.headers)
+    const empty = status == 204 || status == 205 || status == 304
+    let data = Body.of(undefined)
+    if (body != undefined && !empty) {
+      const stream = bodyStream(body)
+      data = Body.ofStream(stream)
+    }
+    const response = new Response(status, statusText, headers, data, "", false, "default")
+
+    return response
   }
 
   private constructor(status: int, statusText: string, headers: Headers, data: Body,
@@ -1957,7 +2075,7 @@ export class Response {
     return response
   }
 
-  public body(): ReadableStream<Uint8Array> | undefined {
+  public body(): ReadableStream<Uint8Array, BodyError> | undefined {
     const made = this.bodyStream
     if (made != undefined) {
       return made
@@ -1982,31 +2100,29 @@ export class Response {
     return copy
   }
 
-  async text(): Promise<Result<string, BodyError>> {
+  async text(): Promise<Result<string, TextError>> {
     return this.data.consumeText()
   }
 
-  async json(): Promise<Result<Json, BodyError>> {
+  async json(): Promise<Result<Json, JsonBodyError>> {
     const text = await this.text()
-    if (text.isErr()) return text
-    const parsed = JSON.parse(text.value)
-    if (parsed.isErr())
-      return err(contentError("ERR_INVALID_JSON", `the body is not JSON: ${parsed.error.message}`,
-                              this.headers.get("content-type") ?? ""))
-    return ok(parsed.value)
+    const contentType = this.headers.get("content-type")
+    const parsed = jsonBody(text, contentType)
+
+    return parsed
   }
 
-  async bytes(): Promise<Result<Uint8Array, BodyError>> {
+  async bytes(): Promise<Result<Uint8Array, BytesError>> {
     return this.data.consume()
   }
 
-  async arrayBuffer(): Promise<Result<ArrayBuffer, BodyError>> {
+  async arrayBuffer(): Promise<Result<ArrayBuffer, BytesError>> {
     const bytes = await this.data.consume()
     if (bytes.isErr()) return bytes
     return ok(bytes.value.slice().buffer)
   }
 
-  async formData(): Promise<Result<FormData, BodyError>> {
+  async formData(): Promise<Result<FormData, FormDataError>> {
     const bytes = await this.data.consume()
     if (bytes.isErr()) return bytes
     return parseFormData(this.headers.get("content-type"), bytes.value)
@@ -2057,7 +2173,7 @@ const BAD_PORTS = new Set<int>([
   6669, 6679, 6697, 10080,
 ])
 
-async function sendBody(conn: Connection, stream: ReadableStream<Uint8Array>, peer: Peer,
+async function sendBody(conn: Connection, stream: ReadableStream<Uint8Array, BodyError>, peer: Peer,
                         url: string): Promise<FetchError | undefined> {
   const reader = stream.getReader()
   for (;;) {
@@ -2068,8 +2184,8 @@ async function sendBody(conn: Connection, stream: ReadableStream<Uint8Array>, pe
         return timeoutError(peer)
       }
 
-      return requestError("ERR_STREAM_FAILED",
-                          `the stream of the body of the request failed: ${r.error.message}`, url)
+      return requestError("ERR_BODY_FAILED",
+                          `the body of the request could not be read: ${r.error.message}`, url)
     }
     const step = r.value
     if (step.done) break
@@ -2458,13 +2574,64 @@ function startDeadline(timeout?: int): object | undefined {
   return deadline
 }
 
-export async function fetch(input: string | URL | Request,
-                            init?: RequestInit): Promise<Result<Response, FetchError>> {
-  if (input instanceof Request && init?.body == undefined && input.bodyUsed())
+function plainInit<E>(init: RequestInit<E> | undefined, body: BodyData | undefined):
+    RequestInit | undefined {
+  if (init == undefined) {
+    return undefined
+  }
+  const plain: RequestInit = {
+    method: init.method,
+    headers: init.headers,
+    body: body,
+    redirect: init.redirect,
+    timeout: init.timeout,
+    duplex: init.duplex,
+    proxy: init.proxy,
+  }
+
+  return plain
+}
+
+export async function fetch<E extends { message: string } = never>(input: string | URL | Request,
+                                                                   init?: RequestInit<E>):
+    Promise<Result<Response, FetchError<E>>> {
+  const body = init?.body
+  if (input instanceof Request && body == undefined && input.bodyUsed()) {
     return err(requestError("ERR_REQUEST_USED",
                             "the body of this Request is already read, so it cannot be sent",
                             input.url))
-  const request = new Request(input, init)
+  }
+  if (!(body instanceof ReadableStream)) {
+    const plain = plainInit(init, body)
+    const request = new Request(input, plain)
+    const sent = await fetchRequest(request, init?.proxy)
+
+    return sent
+  }
+  const rest = plainInit(init, undefined)
+  const request = Request.stream(input, body, rest)
+  const sent = await fetchRequest(request, init?.proxy)
+  if (sent.isOk()) {
+    return sent
+  }
+  const failure = body.failure()
+  if (failure != undefined) {
+    const message = `the stream of the body of the request failed: ${failure.message}`
+
+    return err({
+      kind: "REQUEST",
+      code: "ERR_STREAM_FAILED",
+      message: message,
+      url: request.url,
+      details: failure,
+    })
+  }
+
+  return sent
+}
+
+async function fetchRequest(request: Request, proxyOption: ProxyOption | undefined):
+    Promise<Result<Response, FetchError>> {
   const first = URL.parse(request.url)
   if (first.isErr())
     return err(requestError("ERR_INVALID_URL", `fetch cannot parse "${request.url}" as a URL`,
@@ -2488,7 +2655,7 @@ export async function fetch(input: string | URL | Request,
                               `fetch does not connect to port ${portNumber}: browsers and node ` +
                               "block it too", url.href()))
     const peer = peerOf(url, timeout, deadline)
-    const proxied = proxyFor(url, peer, init?.proxy)
+    const proxied = proxyFor(url, peer, proxyOption)
     if (proxied.isErr()) return err(proxied.error)
     const sent = await send(current, url, redirects > 0, peer, proxied.value)
     if (sent.isErr()) return sent

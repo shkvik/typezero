@@ -1,4 +1,4 @@
-ERR_INVALID_STATE: Invalid state: ReadableStream is locked
+USED ERR_STREAM_LOCKED: the stream is locked: another reader holds it; read it with that reader
 1
 true
-Reader is released
+ERR_READER_RELEASED: the reader has released the stream: get a new reader with getReader()

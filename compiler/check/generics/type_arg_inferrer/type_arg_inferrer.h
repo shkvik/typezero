@@ -4,6 +4,8 @@
 
 namespace tz {
 
+struct Inference;
+
 class TypeArgInferrer {
 public:
   explicit TypeArgInferrer(Checker &checker);
@@ -18,6 +20,8 @@ public:
                           std::vector<const Type *> &bound);
 
 private:
+  void precheckFields(ObjectLitExpr *lit, const Type *pattern,
+                      llvm::ArrayRef<const Type *> typeParams, Inference &inference);
   Checker &checker_;
 };
 

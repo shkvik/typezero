@@ -19,6 +19,9 @@ const Expr *unnarrowed(const Expr *expr) {
   if (from->isOptional() && conv->type == from->inner()) {
     return conv->operand;
   }
+  if (isa<NameExpr>(conv->operand) && from->isResult() && conv->type->isResult()) {
+    return conv->operand;
+  }
   if (isa<NameExpr>(conv->operand) && conv->type->isClass() && conv->type != from->nonOptional() &&
       conv->type->isSubtypeOf(from->nonOptional())) {
     return conv->operand;

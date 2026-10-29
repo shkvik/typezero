@@ -1,0 +1,9 @@
+8081 LOCALHOST 3
+true [ 'web', null ] [ 1, 2.5 ] [] [ [], [ 1, 2 ] ]
+text/html 2 [ true, false ] a "quoted" é line
+break
+api 3000
+web no port
+RED GREEN BLUE 3
+localhost true
+{"port":8080,"host":"localhost","proxy":null,"ratio":1.5,"tags":["web",null],"sizes":[1,2.5],"empty":[],"grid":[[],[1,2]],"content-type":"text/html","services":[{"name":"api","port":3000},{"name":"web"}],"level":2,"deep":{"flags":[true,false],"note":"a \"quoted\" é line\nbreak"}}

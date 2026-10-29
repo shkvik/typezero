@@ -57,9 +57,61 @@ std::optional<std::u16string> writtenText(const Expr *e) {
   return std::nullopt;
 }
 
+bool choiceTexts(const Expr *e, std::vector<std::u16string> &texts) {
+  while (auto *conv = dyn_cast<CastExpr>(e)) {
+    if (!conv->isImplicit()) {
+      return false;
+    }
+    e = conv->operand;
+  }
+  if (auto *choice = dyn_cast<ConditionalExpr>(e)) {
+    return choiceTexts(choice->thenExpr, texts) && choiceTexts(choice->elseExpr, texts);
+  }
+  std::optional<std::u16string> text = writtenText(e);
+  if (!text) {
+    return false;
+  }
+  if (!llvm::is_contained(texts, *text)) {
+    texts.push_back(*text);
+  }
+
+  return true;
+}
+
 }
 
 LiteralTypes::LiteralTypes(Checker &checker) : checker_(checker) {}
+
+const Type *LiteralTypes::constTextType(const Expr *checked, const Type *expected) {
+  auto *name = dyn_cast<NameExpr>(checked);
+  if (!name || !name->var || !name->var->literalConst || !checked->type->isString()) {
+    return nullptr;
+  }
+  const Expr *written = checker_.constLiterals_.lookup(name->var);
+  std::vector<std::u16string> texts;
+  if (!written || !choiceTexts(written, texts)) {
+    return nullptr;
+  }
+  std::vector<const Type *> literals;
+  for (const std::u16string &text : texts) {
+    const Type *literal = expected ? stringLiteralFor(expected, text) : Type::stringLiteral(text);
+    if (!literal) {
+      return nullptr;
+    }
+    literals.push_back(literal);
+  }
+
+  return Type::unionOf(literals);
+}
+
+Expr *LiteralTypes::constText(Expr *checked, const Type *expected) {
+  if (!expected) {
+    return checked;
+  }
+  const Type *type = constTextType(checked, expected);
+
+  return type ? checker_.typeRelations().convert(checked, type) : checked;
+}
 
 const Type *LiteralTypes::unionMemberFor(const Type *from, const Type *to) {
   for (const Type *m : to->members()) {

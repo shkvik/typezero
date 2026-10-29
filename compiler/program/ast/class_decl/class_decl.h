@@ -70,8 +70,6 @@ struct ClassDecl : Stmt {
   bool replaced = false;
   bool reflectNew = false;
   bool reflectMethods = false;
-  bool reflectJson = false;
-  std::vector<std::string> jsonParams, jsonFields;
 
   std::vector<TypeParamDecl> typeParams;
   llvm::StringRef source;

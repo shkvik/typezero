@@ -28,7 +28,7 @@ import { Server } from "tz:http"
 const server = new Server({ port: 3000 }, async (req, client) => {
   const url = new URL(req.url)
   if (req.method == "POST" && url.pathname() == "/users") {
-    const user = await req.json()                      // Result<Json, BodyError | JsonError>
+    const user = await req.json()                      // Result<Json, JsonBodyError>
     if (user.isErr()) return new Response("плохой JSON", { status: 400 })
     return Response.json({ id: 1, user: user.value, from: client.address }, { status: 201 })
   }
@@ -165,11 +165,13 @@ async function repo(name: string) {
   `Promise<Result<Response, FetchError>>`. `FetchError` — объект с меткой `kind` (что делать
   программе) и закрытым списком `code`:
   ```ts
-  type FetchError =
+  type FetchError<E = never> =
     | { kind: "REQUEST"; code: "ERR_INVALID_URL" | "ERR_CREDENTIALS_IN_URL" | "ERR_INVALID_METHOD"
           | "ERR_BODY_WITH_GET" | "ERR_DUPLEX_REQUIRED" | "ERR_REQUEST_USED"
-          | "ERR_UNSUPPORTED_SCHEME" | "ERR_BLOCKED_PORT" | "ERR_STREAM_FAILED";
+          | "ERR_UNSUPPORTED_SCHEME" | "ERR_BLOCKED_PORT" | "ERR_BODY_FAILED";
         message: string; url: string }                 // чинить код
+    | { kind: "REQUEST"; code: "ERR_STREAM_FAILED"; message: string; url: string;
+        details: E }                                   // свой поток тела упал (раздел 3)
     | { kind: "NETWORK"; code: "ENOTFOUND" | "EAI_AGAIN" | "ECONNREFUSED" | "ETIMEDOUT"
           | "ENETUNREACH" | "EHOSTUNREACH" | "EADDRNOTAVAIL" | "ECONNRESET" | "ECONNABORTED"
           | "EPIPE" | "EMFILE" | "ENOBUFS" | "UNKNOWN";
@@ -194,8 +196,28 @@ async function repo(name: string) {
   Целиком — `text()`, `json()`, `bytes()`, `arrayBuffer()`, `formData()`.
 - Ответ — строка, `Uint8Array`, `ReadableStream` (отдавать по кускам, например события для
   браузера) или `Response.json(значение)`.
-- `ReadableStream` — основное: создание с `start` / `pull` / `cancel`, `getReader()`,
-  `for await`. `TransformStream`, `TextDecoderStream`, `CompressionStream` — позже.
+- `ReadableStream<R, E>` (В9, 29 октября, ночь) — основное: создание с `start` / `pull` /
+  `cancel`, `getReader()`, `for await`. `E` — тип ошибки потока, то, что отдают в
+  `controller.error(...)`; по умолчанию `never` — поток без ошибок. Кто зовёт
+  `controller.error`, пишет тип сам: `new ReadableStream<string, DiskError>({ ... })`; без
+  него — ошибка «nothing fits 'never'» с подсказкой. `read()` и `for await` отдают
+  `Result<…, E | ReaderError>`; `ReaderError = { kind: "USED"; code: "ERR_STREAM_LOCKED" |
+  "ERR_READER_RELEASED"; message }` — поток читают неправильно (второй читатель, чтение после
+  `releaseLock()`); `getReader()` — без `Result`, второй читатель «пустой», ошибка — при первом
+  `read()`. `stream.failure()` — ошибка, с которой поток упал (`E | undefined`).
+  `TransformStream`, `TextDecoderStream`, `CompressionStream` — позже.
+- **Поток телом** (В9): `new Response(поток)` и `new Request(url, { body: поток })` берут только
+  поток без ошибок. Поток, который может упасть, — своя ошибка или тело другого ответа
+  (`ReadableStream<Uint8Array, BodyError>`, прокси), — отдают методом, который берёт его тип
+  ошибки: `Response.stream(поток, init?)`, `Request.stream(url, поток, init?)` или
+  `fetch(url, { body: поток })`. У `fetch` своя ошибка потока приходит целиком:
+  `{ kind: "REQUEST", code: "ERR_STREAM_FAILED", message, url, details: E }`; у `fetch(url)`
+  без потока `E = never`, такой ошибки нет (ветку не пишут, сравнение с ней — ошибка сборки).
+  Тело `Request`, которое упало при отправке, а своего типа ошибки у `fetch` нет
+  (`fetch(request)`), — `ERR_BODY_FAILED`. Внутри тело хранит поток с `BodyError`: поток
+  другого вида оборачивается (`bodyStream`), его ошибка становится `{ kind: "STREAM", code:
+  "ERR_STREAM_FAILED", message }`. Упал поток ответа сервера — ошибка в stderr, соединение
+  обрывается (как в node). Пример — `tmp/design/stream-as-body.tz`, тест `run/stream_bodies`.
 - **`BodyError`** (29 октября) — ошибка чтения тела:
   ```ts
   type BodyError =
@@ -205,17 +227,24 @@ async function repo(name: string) {
     | { kind: "TIMEOUT"; code: "TIMEOUT_ERR"; message: string; timeout: int }
     | { kind: "TOO_LARGE"; code: "ERR_BODY_TOO_LARGE"; message: string; limit: double }
     | { kind: "MALFORMED"; code: "ERR_INVALID_CHUNKED" | "ERR_INVALID_COMPRESSION"; message: string }
-    | { kind: "CONTENT"; code: "ERR_INVALID_JSON" | "ERR_NOT_A_FORM" | "ERR_NO_BOUNDARY"
-          | "ERR_INVALID_MULTIPART"; message: string; contentType: string }
     | { kind: "STREAM"; code: "ERR_STREAM_FAILED"; message: string }
+  type TextError = BodyError                     // text()
+  type BytesError = BodyError                    // bytes(), arrayBuffer()
+  type JsonBodyError = BodyError                 // json()
+    | { kind: "CONTENT"; code: "ERR_INVALID_JSON"; message: string; contentType?: string;
+        start: string }                          // start — первые 200 символов тела
+  type FormDataError = BodyError                 // formData()
+    | { kind: "CONTENT"; code: "ERR_NOT_A_FORM" | "ERR_NO_BOUNDARY" | "ERR_INVALID_MULTIPART";
+        message: string; contentType?: string }
   ```
-  `json()` — `Result<Json, BodyError>` (не JSON — `CONTENT`, `ERR_INVALID_JSON`). Рантайм
+  С 29 октября (ночь) у каждого метода — только его ошибки (`switch` не требует ветки, которой
+  не бывает); `contentType` — заголовок ответа, нет заголовка — нет поля; `start` у «не JSON»
+  показывает, что пришло вместо него (чаще всего — HTML-страница ошибки). Рантайм
   различает «оборвалось» (`ERR_CLOSED`) и «кривые куски chunked» (`ERR_INVALID_CHUNKED`): на
   сервере кривые куски — ещё и ответ 400. Кривая часть multipart не пропускается молча —
-  `ERR_INVALID_MULTIPART`. Один вид `CONTENT` для JSON и форм (в решении было два варианта с
-  одной меткой; объединены, поле `contentType` есть у обоих). Тип ошибки потока самого
-  `ReadableStream` (`ReadableStream<R, E>`) — пока `StreamError`: вывод `E` из
-  `controller.error(...)` не сделан.
+  `ERR_INVALID_MULTIPART`. Поток тела — `body()` — это `ReadableStream<Uint8Array, BodyError>`:
+  `for await` по нему даёт `Result<Uint8Array, BodyError | ReaderError>`, `switch` по `kind`
+  — без новой ветки (`ReaderError` — тоже `USED`).
 
 ## 4. TLS
 
@@ -289,7 +318,7 @@ const endedResult = await socket.end()
   `idleTimeout` — сколько соединение может молчать; `stop({ timeout })` — как у `tz:http`.
 - `isIP`, `isIPv4`, `isIPv6`.
 - **Ещё не сделано** из решения ([tmp/spec/09-sockets.md](../tmp/spec/09-sockets.md)): слой
-  `tz:socket` (сокет любого вида, сырые сокеты, все настройки), `node:dgram` (UDP), сокеты Unix и
+  `tz:socket` (сокет любого вида, сырые сокеты, все настройки), сокеты Unix и
   именованные каналы (`{ path }`), `SocketError` с метками у потока (сейчас поток отдаёт
   `StreamError`), обработчик-не-`async`, объявления для редактора (`patch.cmake`).
 
@@ -335,15 +364,55 @@ new Server({ port: 3000 }, request => {
   `WebSocketError` (`"error"`) — `NETWORK` (`ERR_CLOSED` — оборвалось без кадра закрытия),
   `PROTOCOL` (`ERR_INVALID_FRAME`, `ERR_INVALID_UTF8`, `ERR_UNMASKED_FRAME`), `TOO_LARGE`;
   `SendError` — `NOT_CONNECTED` (`ERR_NOT_CONNECTED`, `ERR_CLOSING`); `UpgradeError` —
-  `ERR_NOT_WEBSOCKET`, `ERR_UNSUPPORTED_VERSION`.
+  `ERR_NOT_WEBSOCKET`, `ERR_UNSUPPORTED_VERSION`. С 29 октября `emit` в коде библиотеки
+  сверяется с картой событий, как в программе.
 - **Ещё не сделано** из решения ([tmp/spec/10-websocket.md](../tmp/spec/10-websocket.md)):
   `timeout` и `idleTimeout`, пинги рантайма, тип `CloseCode` (сейчас `close(code: int)`),
   `bufferedAmount()`, прокси и `httpVersion`, WebSocket поверх HTTP/2, `TLS` и `PROXY` в
   ошибках подключения, объявления для редактора.
 
-## 10. Позже
+## 10. UDP: `node:dgram` (сделано 29 октября)
 
-HTTP/2 (через ALPN в TLS), `node:dgram`, SOCKS-прокси, HTTP/3 — решены 29 октября, не сделаны (`tmp/design`, `tmp/spec`). `node:http` не будет.
+```ts
+import { Socket } from "node:dgram"
+
+const socket = new Socket({ type: "udp4", port: 41234, address: "0.0.0.0" })  // настройки — тут
+socket.on("message", (data, from) => { ... })   // data: Buffer; from: { address, family, port, size }
+socket.on("error", error => { ... })
+const boundResult = await socket.bind()          // Result<void, BindError>
+const sentResult = await socket.send("hi", { address: "127.0.0.1", port: 53 })  // Result<void, SendError>
+await socket.close()                             // ждёт конца приёма, потом "close"
+```
+- Решение — [tmp/design/udp.tz](../tmp/design/udp.tz) (U1–U9). `type` необязателен: без него
+  один сокет на IPv4 и IPv6 (двойной стек), адрес отправителя IPv4 — в обычном виде
+  (`127.0.0.1`, а не `::ffff:127.0.0.1`); `"udp4"` / `"udp6"` — ровно одна версия.
+- Настройки — в конструкторе: `port`, `address` (IP, `localhost` или имя — ищется в DNS),
+  `reuseAddr` / `reusePort` (в Windows оба — `SO_REUSEADDR`), `ipv6Only`, `broadcast`, `ttl`,
+  `multicast: { ttl, loopback, interface }`, `recvBufferSize`, `sendBufferSize`.
+- Приём — событие `"message"` (или цикл `on(socket, "message")`), с `bind()` до `close()`;
+  программа живёт, пока сокет открыт. Клиенту `bind()` не нужен: первый `send()` или
+  `connect()` сам займёт свободный порт.
+- `send(data, { address, port })` — `string` (UTF-8) или `Uint8Array`, имя ищется в DNS.
+  `connect({ address, port })` — «подключённый» сокет: `send(data)` без адреса, письма только
+  оттуда; если там никто не слушает, следующий `send` — `Err` `ECONNREFUSED`. `disconnect()`.
+- Мультикаст: `addMembership(group, interface?)`, `dropMembership`,
+  `addSourceMembership(source, group, interface?)` (только IPv4), `dropSourceMembership` — после
+  `bind()`, `Result`. `address()`, `remoteAddress()`.
+- Ошибки: `BindError` — `REQUEST` (`ERR_INVALID_ADDRESS`, `ERR_SOCKET_BOUND`,
+  `ERR_SOCKET_CLOSED`), `BIND` (`EADDRINUSE`, `EACCES`, `EADDRNOTAVAIL`, `ENOTFOUND`…);
+  `SendError` — `REQUEST` (`ERR_NO_ADDRESS`, `ERR_SOCKET_CONNECTED`, `ENOTFOUND`…), `NETWORK`
+  (`ECONNREFUSED`, `ENETUNREACH`…), `TOO_LARGE` (`EMSGSIZE`: больше 65 507 байт у IPv4, 65 527
+  у IPv6), `PERMISSION` (`EACCES`: широковещание без `broadcast: true`), `CLOSED`;
+  `ConnectError`, `MembershipError`; `"error"` — `SocketError` (то, что пришло не в ответ на
+  `send`). Тексты — понятным языком.
+- Рантайм — `runtime/library/net/udp/udp.c`: `WSARecvFrom` / `WSASendTo` на порту завершения
+  цикла, поиск имён — `GetAddrInfoExW`; в Linux пока нет (как и TCP).
+- **Ещё не сделано:** `ref()` / `unref()`, DTLS, QUIC (с HTTP/3), сырые UDP (`tz:socket`),
+  объявления для редактора.
+
+## 11. Позже
+
+HTTP/2 (через ALPN в TLS), SOCKS-прокси, HTTP/3 — решены 29 октября, не сделаны (`tmp/design`, `tmp/spec`). `node:http` не будет.
 
 ## План реализации
 

@@ -51,6 +51,7 @@ static const NetError kNetErrors[] = {
     {"EINVAL", "invalid argument", -4071},
     {"ENOTFOUND", "getaddrinfo ENOTFOUND", -3008},
     {"EAI_AGAIN", "temporary failure", -3001},
+    {"EMSGSIZE", "message too long", -4040},
 };
 
 enum {
@@ -74,6 +75,7 @@ enum {
   NE_EINVAL,
   NE_ENOTFOUND,
   NE_EAI_AGAIN,
+  NE_EMSGSIZE,
 };
 
 #define NET_NOT_FOUND (-3008)
@@ -141,6 +143,10 @@ const NetError *net_error_of(int32_t error) {
     break;
   case WSAEINVAL:
     index = NE_EINVAL;
+    break;
+  case WSAEMSGSIZE:
+  case ERROR_MORE_DATA:
+    index = NE_EMSGSIZE;
     break;
   case NET_NOT_FOUND:
     index = NE_ENOTFOUND;
@@ -884,6 +890,28 @@ static int parse_literal(const char *host, int port, SOCKADDR_STORAGE *out, int 
   }
 
   return 0;
+}
+
+void net_start(void) { start(); }
+
+int net_attach(SOCKET s) { return attach(s); }
+
+void net_op_begin(NetOp *op, void (*done)(TzWork *), int unref) { op_begin(op, done, unref); }
+
+void net_op_wait(NetOp *op) { op_wait(op); }
+
+int32_t net_op_error(NetOp *op, SOCKET s, int closed) { return op_error(op, s, closed); }
+
+void net_address_text(const SOCKADDR *sa, char *out, size_t size) { address_text(sa, out, size); }
+
+int net_address_port(const SOCKADDR *sa) { return address_port(sa); }
+
+int net_ascii_of(void *obj, uint64_t meta, char *out, size_t size) {
+  return ascii_of(obj, meta, out, size);
+}
+
+int net_parse_literal(const char *host, int port, SOCKADDR_STORAGE *out, int *length) {
+  return parse_literal(host, port, out, length);
 }
 
 static void listener_free(NetListener *l) {

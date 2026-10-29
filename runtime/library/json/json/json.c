@@ -182,10 +182,9 @@ void tz_json_errors(TzMaker make) { tz_json_error_maker = make; }
 typedef struct {
   const char *code;
   TzStr message;
-  TzStr path;
 } ErrorParts;
 
-void tz_json_fail(const char *code, TzBuf *message, TzBuf *path) {
+void tz_json_fail(const char *code, TzBuf *message) {
   if (!tz_json_error_maker && strcmp(code, "ERR_CIRCULAR_STRUCTURE") == 0) {
     tz_panicf("TypeError: Converting circular structure to JSON");
   }
@@ -195,13 +194,6 @@ void tz_json_fail(const char *code, TzBuf *message, TzBuf *path) {
   ErrorParts parts;
   parts.code = code;
   parts.message = tz_buf_take(message);
-  if (path) {
-    parts.path = tz_buf_take(path);
-  } else {
-    TzBuf empty;
-    tz_buf_init(&empty);
-    parts.path = tz_buf_take(&empty);
-  }
   tz_failed = tz_json_error_maker(&parts);
 }
 

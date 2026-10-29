@@ -96,7 +96,6 @@ class LibraryCallLowerer;
 class IntlLowerer;
 class IntlCallLowerer;
 class JsonLowerer;
-class FromJsonLowerer;
 class FsPromisesLowerer;
 class FsLowerer;
 class PathLowerer;
@@ -182,7 +181,6 @@ private:
   };
   llvm::DenseMap<const Type *, llvm::Function *> unionRetains_, unionReleases_;
   std::vector<const Type *> subtypes_;
-  llvm::StructType *jsonPathTy_ = nullptr;
   struct Consumer {
     std::function<llvm::Value *(llvm::Value *)> each;
     std::function<void()> stop;
@@ -240,7 +238,7 @@ private:
   std::vector<const ClassDecl *> emittedClasses_;
   llvm::DenseMap<const ClassDecl *, llvm::GlobalVariable *> classInfos_;
   llvm::SetVector<const Type *> unknownFunctionTypes_;
-  bool reflectsNew_ = false, reflectsGet_ = false, reflectsJson_ = false;
+  bool reflectsNew_ = false, reflectsGet_ = false;
   llvm::MDNode *tbaaHeader_ = nullptr, *tbaaData_ = nullptr;
   llvm::StructType *bytesTy_ = nullptr;
   struct IntlNumber {
@@ -501,7 +499,6 @@ public:
   IntlLowerer &intlLowerer() const { return *intlLowererPart_; }
   IntlCallLowerer &intlCallLowerer() const { return *intlCallLowererPart_; }
   JsonLowerer &jsonLowerer() const { return *jsonLowererPart_; }
-  FromJsonLowerer &fromJsonLowerer() const { return *fromJsonLowererPart_; }
   FsPromisesLowerer &fsPromisesLowerer() const { return *fsPromisesLowererPart_; }
   FsLowerer &fsLowerer() const { return *fsLowererPart_; }
   PathLowerer &pathLowerer() const { return *pathLowererPart_; }
@@ -598,7 +595,6 @@ private:
   friend class IntlLowerer;
   friend class IntlCallLowerer;
   friend class JsonLowerer;
-  friend class FromJsonLowerer;
   friend class FsPromisesLowerer;
   friend class FsLowerer;
   friend class PathLowerer;
@@ -687,7 +683,6 @@ private:
   std::unique_ptr<IntlLowerer> intlLowererPart_;
   std::unique_ptr<IntlCallLowerer> intlCallLowererPart_;
   std::unique_ptr<JsonLowerer> jsonLowererPart_;
-  std::unique_ptr<FromJsonLowerer> fromJsonLowererPart_;
   std::unique_ptr<FsPromisesLowerer> fsPromisesLowererPart_;
   std::unique_ptr<FsLowerer> fsLowererPart_;
   std::unique_ptr<PathLowerer> pathLowererPart_;

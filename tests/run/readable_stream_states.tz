@@ -1,7 +1,8 @@
 // What a ReadableStream does where the WHATWG standard throws a TypeError
 // (docs/errors.md, step 5): a second reader of a locked stream gives an Err
 // at each read, a released reader too; enqueue() and close() on a closed
-// stream are left out; cancel() of a locked stream does nothing.
+// stream are left out; cancel() of a locked stream does nothing. The Err of a
+// wrong read is a ReaderError of kind USED (docs/net.md, section 3).
 const s = new ReadableStream<int>({
   start: c => {
     c.enqueue(1)
@@ -13,7 +14,7 @@ const s = new ReadableStream<int>({
 const first = s.getReader()
 const second = s.getReader()
 const late = await second.read()
-console.log(late.isErr() ? `${late.error.code}: ${late.error.message}` : "read")
+console.log(late.isErr() ? `${late.error.kind} ${late.error.code}: ${late.error.message}` : "read")
 await s.cancel({ code: "x", message: "ignored" })
 const r = await first.read()
 console.log(r.isOk() && !r.value.done ? r.value.value : "none")
@@ -21,4 +22,4 @@ const end = await first.read()
 console.log(end.isOk() && end.value.done)
 first.releaseLock()
 const released = await first.read()
-console.log(released.isErr() ? released.error.message : "read")
+console.log(released.isErr() ? `${released.error.code}: ${released.error.message}` : "read")

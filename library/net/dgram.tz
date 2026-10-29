@@ -1,0 +1,952 @@
+import { EventEmitter } from "node:events";
+
+declare function udpOpen(
+  family: int,
+  address: string,
+  port: int,
+  reuse: boolean,
+  ipv6Only: boolean,
+): Result<object, SystemError>;
+declare function udpOption(socket: object, option: int, value: int): Result<int, SystemError>;
+declare function udpMulticastInterface(socket: object, via: string): Result<int, SystemError>;
+declare function udpMembership(
+  socket: object,
+  group: string,
+  via: string,
+  source: string,
+  join: boolean,
+): Result<int, SystemError>;
+declare function udpReceive(socket: object): Promise<Result<Uint8Array | undefined, SystemError>>;
+declare function udpSenderAddress(socket: object): string;
+declare function udpSenderPort(socket: object): int;
+declare function udpSend(
+  socket: object,
+  data: Uint8Array,
+  address: string,
+  port: int,
+): Promise<Result<void, SystemError>>;
+declare function udpConnect(socket: object, address: string, port: int): Result<int, SystemError>;
+declare function udpDisconnect(socket: object): void;
+declare function udpLocalAddress(socket: object): string;
+declare function udpLocalPort(socket: object): int;
+declare function udpClose(socket: object): void;
+declare function udpLookup(host: string, family: int): Promise<Result<string, SystemError>>;
+
+const OPTION_BROADCAST = 1;
+const OPTION_TTL = 2;
+const OPTION_MULTICAST_TTL = 3;
+const OPTION_MULTICAST_LOOP = 4;
+const OPTION_RECEIVE_BUFFER = 5;
+const OPTION_SEND_BUFFER = 6;
+const LIMIT_IPV4 = 65507;
+const LIMIT_IPV6 = 65527;
+
+export type SocketType = "udp4" | "udp6";
+
+export type Family = "IPv4" | "IPv6";
+
+export type MulticastOptions = {
+  ttl?: int;
+  loopback?: boolean;
+  interface?: string;
+};
+
+export type SocketOptions = {
+  type?: SocketType;
+  port?: int;
+  address?: string;
+  reuseAddr?: boolean;
+  reusePort?: boolean;
+  ipv6Only?: boolean;
+  broadcast?: boolean;
+  ttl?: int;
+  multicast?: MulticastOptions;
+  recvBufferSize?: int;
+  sendBufferSize?: int;
+};
+
+export type Destination = {
+  address: string;
+  port: int;
+};
+
+export type AddressInfo = {
+  address: string;
+  family: Family;
+  port: int;
+};
+
+export type RemoteInfo = {
+  address: string;
+  family: Family;
+  port: int;
+  size: int;
+};
+
+export type BindError =
+  | {
+      kind: "REQUEST";
+      code: "ERR_INVALID_ADDRESS" | "ERR_SOCKET_BOUND" | "ERR_SOCKET_CLOSED";
+      message: string;
+      address: string;
+      port: int;
+    }
+  | {
+      kind: "BIND";
+      code:
+        | "EADDRINUSE"
+        | "EACCES"
+        | "EADDRNOTAVAIL"
+        | "EAFNOSUPPORT"
+        | "ENOTFOUND"
+        | "EAI_AGAIN"
+        | "EINVAL"
+        | "EMFILE"
+        | "ENOBUFS"
+        | "UNKNOWN";
+      message: string;
+      errno: int;
+      syscall: string;
+      address: string;
+      port: int;
+    };
+
+export type SendError =
+  | {
+      kind: "REQUEST";
+      code:
+        | "ERR_INVALID_ADDRESS"
+        | "ERR_NO_ADDRESS"
+        | "ERR_SOCKET_CONNECTED"
+        | "ENOTFOUND"
+        | "EAI_AGAIN"
+        | "EAFNOSUPPORT";
+      message: string;
+      address: string;
+      port: int;
+    }
+  | {
+      kind: "NETWORK";
+      code: NetworkCode;
+      message: string;
+      errno: int;
+      syscall: string;
+      address: string;
+      port: int;
+    }
+  | {
+      kind: "TOO_LARGE";
+      code: "EMSGSIZE";
+      message: string;
+      size: int;
+      limit: int;
+    }
+  | {
+      kind: "PERMISSION";
+      code: "EACCES";
+      message: string;
+      address: string;
+      port: int;
+    }
+  | {
+      kind: "CLOSED";
+      code: "ERR_SOCKET_CLOSED";
+      message: string;
+    };
+
+export type ConnectError =
+  | {
+      kind: "REQUEST";
+      code:
+        | "ERR_INVALID_ADDRESS"
+        | "ERR_SOCKET_CONNECTED"
+        | "ERR_NOT_CONNECTED"
+        | "ENOTFOUND"
+        | "EAI_AGAIN"
+        | "EAFNOSUPPORT";
+      message: string;
+      address: string;
+      port: int;
+    }
+  | {
+      kind: "NETWORK";
+      code: NetworkCode;
+      message: string;
+      errno: int;
+      syscall: string;
+      address: string;
+      port: int;
+    }
+  | {
+      kind: "CLOSED";
+      code: "ERR_SOCKET_CLOSED";
+      message: string;
+    };
+
+export type MembershipError =
+  | {
+      kind: "REQUEST";
+      code: "ERR_INVALID_ADDRESS" | "ERR_SOCKET_NOT_BOUND" | "ERR_NOT_SUPPORTED";
+      message: string;
+      group: string;
+    }
+  | {
+      kind: "NETWORK";
+      code: NetworkCode;
+      message: string;
+      errno: int;
+      syscall: string;
+      group: string;
+    }
+  | {
+      kind: "CLOSED";
+      code: "ERR_SOCKET_CLOSED";
+      message: string;
+    };
+
+export type SocketError = {
+  kind: "NETWORK";
+  code: NetworkCode;
+  message: string;
+  errno: int;
+  syscall: string;
+};
+
+export type NetworkCode =
+  | "ENETUNREACH"
+  | "EHOSTUNREACH"
+  | "ECONNREFUSED"
+  | "ECONNRESET"
+  | "EADDRINUSE"
+  | "EADDRNOTAVAIL"
+  | "EACCES"
+  | "EINVAL"
+  | "EMFILE"
+  | "ENOBUFS"
+  | "UNKNOWN";
+
+export type SocketEvents = {
+  message: [data: Buffer, from: RemoteInfo];
+  listening: [];
+  close: [];
+  error: [error: SocketError];
+};
+
+function networkCode(code: string): NetworkCode {
+  switch (code) {
+    case "ENETUNREACH":
+      return "ENETUNREACH";
+    case "EHOSTUNREACH":
+      return "EHOSTUNREACH";
+    case "ECONNREFUSED":
+      return "ECONNREFUSED";
+    case "ECONNRESET":
+      return "ECONNRESET";
+    case "EADDRINUSE":
+      return "EADDRINUSE";
+    case "EADDRNOTAVAIL":
+      return "EADDRNOTAVAIL";
+    case "EACCES":
+      return "EACCES";
+    case "EINVAL":
+      return "EINVAL";
+    case "EMFILE":
+      return "EMFILE";
+    case "ENOBUFS":
+      return "ENOBUFS";
+    default:
+      return "UNKNOWN";
+  }
+}
+
+type BindCode =
+  | "EADDRINUSE"
+  | "EACCES"
+  | "EADDRNOTAVAIL"
+  | "EAFNOSUPPORT"
+  | "ENOTFOUND"
+  | "EAI_AGAIN"
+  | "EINVAL"
+  | "EMFILE"
+  | "ENOBUFS"
+  | "UNKNOWN";
+
+function bindCode(code: string): BindCode {
+  switch (code) {
+    case "EADDRINUSE":
+      return "EADDRINUSE";
+    case "EACCES":
+      return "EACCES";
+    case "EADDRNOTAVAIL":
+      return "EADDRNOTAVAIL";
+    case "EAFNOSUPPORT":
+      return "EAFNOSUPPORT";
+    case "ENOTFOUND":
+      return "ENOTFOUND";
+    case "EAI_AGAIN":
+      return "EAI_AGAIN";
+    case "EINVAL":
+      return "EINVAL";
+    case "EMFILE":
+      return "EMFILE";
+    case "ENOBUFS":
+      return "ENOBUFS";
+    default:
+      return "UNKNOWN";
+  }
+}
+
+function bindMessage(code: BindCode, address: string, port: int, detail: string): string {
+  const where = `${address == "" ? "any address" : address}:${port}`;
+  switch (code) {
+    case "EADDRINUSE":
+      return `could not bind to ${where}: another socket uses this port; pass reuseAddr: true to share it`;
+    case "EACCES":
+      return `could not bind to ${where}: no permission to use this port`;
+    case "EADDRNOTAVAIL":
+      return `could not bind to ${where}: the address is not on this machine`;
+    case "EAFNOSUPPORT":
+      return `could not bind to ${where}: the address is not of the IP version of the socket`;
+    case "ENOTFOUND":
+      return `could not find the address of ${address}: no such name in DNS`;
+    case "EAI_AGAIN":
+      return `could not find the address of ${address}: DNS did not answer; check the network`;
+    case "EINVAL":
+      return `could not set up the socket on ${where}: ${detail}`;
+    case "EMFILE":
+      return `could not bind to ${where}: too many files and sockets are open in this program`;
+    case "ENOBUFS":
+      return `could not bind to ${where}: the system has no buffer space left`;
+    case "UNKNOWN":
+      return `could not bind to ${where}: ${detail}`;
+  }
+}
+
+function sendMessage(code: NetworkCode, address: string, port: int, detail: string): string {
+  const where = `${address}:${port}`;
+  switch (code) {
+    case "ENETUNREACH":
+      return `could not send to ${where}: the network is unreachable`;
+    case "EHOSTUNREACH":
+      return `could not send to ${where}: the host is unreachable`;
+    case "ECONNREFUSED":
+      return `nothing listens on ${where}: the system refused the last message sent there`;
+    case "ECONNRESET":
+      return `nothing listens on ${where}: the system refused the last message sent there`;
+    case "EADDRINUSE":
+      return `could not send to ${where}: no free port to send from`;
+    case "EADDRNOTAVAIL":
+      return `could not send to ${where}: the address cannot be reached from this socket`;
+    case "EACCES":
+      return `could not send to ${where}: no permission`;
+    case "EINVAL":
+      return `could not send to ${where}: ${detail}`;
+    case "EMFILE":
+      return `could not send to ${where}: too many files and sockets are open in this program`;
+    case "ENOBUFS":
+      return `could not send to ${where}: the system has no buffer space left`;
+    case "UNKNOWN":
+      return `could not send to ${where}: ${detail}`;
+  }
+}
+
+function familyOf(address: string): Family {
+  if (address.includes(":")) {
+    return "IPv6";
+  }
+
+  return "IPv4";
+}
+
+function isLiteral(address: string): boolean {
+  if (address.includes(":")) {
+    return true;
+  }
+
+  return /^[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}$/.test(address);
+}
+
+function isMulticast(group: string): boolean {
+  if (group.includes(":")) {
+    return group.toLowerCase().startsWith("ff");
+  }
+  const parts = group.split(".");
+  const head = parts[0] ?? "";
+  const firstResult = parseInt(head);
+  if (parts.length != 4 || firstResult.isErr()) {
+    return false;
+  }
+  const first = firstResult.value;
+
+  return first >= 224 && first <= 239;
+}
+
+type Resolved = {
+  address: string;
+  failed: boolean;
+  code: string;
+  errno: int;
+  syscall: string;
+};
+
+export class Socket extends EventEmitter<SocketEvents> {
+  public readonly type?: SocketType;
+
+  private readonly host: string;
+  private readonly port: int;
+  private readonly reuse: boolean;
+  private readonly ipv6Only: boolean;
+  private readonly broadcast: boolean;
+  private readonly ttl?: int;
+  private readonly multicast?: MulticastOptions;
+  private readonly recvBufferSize?: int;
+  private readonly sendBufferSize?: int;
+  private native?: object;
+  private closed: boolean;
+  private connectedTo?: Destination;
+  private receiving?: Promise<void>;
+
+  public constructor(options?: SocketOptions) {
+    super();
+    this.type = options?.type;
+    this.host = options?.address ?? "";
+    this.port = options?.port ?? 0;
+    this.reuse = (options?.reuseAddr ?? false) || (options?.reusePort ?? false);
+    this.ipv6Only = options?.ipv6Only ?? false;
+    this.broadcast = options?.broadcast ?? false;
+    this.ttl = options?.ttl;
+    this.multicast = options?.multicast;
+    this.recvBufferSize = options?.recvBufferSize;
+    this.sendBufferSize = options?.sendBufferSize;
+    this.native = undefined;
+    this.closed = false;
+    this.connectedTo = undefined;
+    this.receiving = undefined;
+  }
+
+  public async bind(): Promise<Result<void, BindError>> {
+    if (this.closed) {
+      return err({
+        kind: "REQUEST",
+        code: "ERR_SOCKET_CLOSED",
+        message: "the socket is closed",
+        address: this.host,
+        port: this.port,
+      });
+    }
+    if (this.native != undefined) {
+      return err({
+        kind: "REQUEST",
+        code: "ERR_SOCKET_BOUND",
+        message: "the socket is bound already",
+        address: this.host,
+        port: this.port,
+      });
+    }
+    const resolved = await this.resolve(this.host);
+    if (resolved.failed) {
+      const code = bindCode(resolved.code);
+      const message = bindMessage(code, this.host, this.port, "");
+
+      return err({
+        kind: "BIND",
+        code: code,
+        message: message,
+        errno: resolved.errno,
+        syscall: resolved.syscall,
+        address: this.host,
+        port: this.port,
+      });
+    }
+    const family = this.familyNumber();
+    const openedResult = udpOpen(family, resolved.address, this.port, this.reuse, this.ipv6Only);
+    if (openedResult.isErr()) {
+      const e = openedResult.error;
+      if (e.code == "ERR_INVALID_ADDRESS") {
+        return err({
+          kind: "REQUEST",
+          code: "ERR_INVALID_ADDRESS",
+          message: `could not bind to ${this.host}: ${e.message}`,
+          address: this.host,
+          port: this.port,
+        });
+      }
+      const code = bindCode(e.code);
+      const message = bindMessage(code, this.host, this.port, e.message);
+
+      return err({
+        kind: "BIND",
+        code: code,
+        message: message,
+        errno: e.errno,
+        syscall: e.syscall,
+        address: this.host,
+        port: this.port,
+      });
+    }
+    const native = openedResult.value;
+    const configuredResult = this.configure(native);
+    if (configuredResult.isErr()) {
+      udpClose(native);
+      const e = configuredResult.error;
+      const code = bindCode(e.code);
+      const message = bindMessage(code, this.host, this.port, e.message);
+
+      return err({
+        kind: "BIND",
+        code: code,
+        message: message,
+        errno: e.errno,
+        syscall: e.syscall,
+        address: this.host,
+        port: this.port,
+      });
+    }
+    this.native = native;
+    this.receiving = this.receiveAll(native);
+    this.emit("listening");
+
+    return ok();
+  }
+
+  public async send(data: Uint8Array | string, to?: Destination): Promise<Result<void, SendError>> {
+    if (this.closed) {
+      return err({ kind: "CLOSED", code: "ERR_SOCKET_CLOSED", message: "the socket is closed" });
+    }
+    const connected = this.connectedTo;
+    if (to == undefined && connected == undefined) {
+      return err({
+        kind: "REQUEST",
+        code: "ERR_NO_ADDRESS",
+        message: "send needs an address: the socket is not connected; pass { address, port }",
+        address: "",
+        port: 0,
+      });
+    }
+    if (to != undefined && connected != undefined) {
+      return err({
+        kind: "REQUEST",
+        code: "ERR_SOCKET_CONNECTED",
+        message: `the socket is connected to ${connected.address}:${connected.port}; send without an address`,
+        address: to.address,
+        port: to.port,
+      });
+    }
+    const encoder = new TextEncoder();
+    const bytes = typeof data == "string" ? encoder.encode(data) : data;
+    const address = to?.address ?? connected?.address ?? "";
+    const port = to?.port ?? connected?.port ?? 0;
+    const literal = isLiteral(address);
+    const family = familyOf(address);
+    const limit = this.type == "udp4" || (literal && family == "IPv4") ? LIMIT_IPV4 : LIMIT_IPV6;
+    if (bytes.length > limit) {
+      return err({
+        kind: "TOO_LARGE",
+        code: "EMSGSIZE",
+        message: `the message is ${bytes.length} bytes; UDP carries at most ${limit}`,
+        size: bytes.length,
+        limit: limit,
+      });
+    }
+    const native = await this.opened();
+    if (native == undefined) {
+      return err({
+        kind: "NETWORK",
+        code: "UNKNOWN",
+        message: `could not send to ${address}:${port}: the socket could not take a port`,
+        errno: -1,
+        syscall: "bind",
+        address: address,
+        port: port,
+      });
+    }
+    let target = "";
+    if (to != undefined) {
+      const resolved = await this.resolve(to.address);
+      if (resolved.failed) {
+        const code = resolved.code == "EAI_AGAIN" ? "EAI_AGAIN" : "ENOTFOUND";
+        const message = bindMessage(code, to.address, to.port, "");
+
+        return err({
+          kind: "REQUEST",
+          code: code,
+          message: message,
+          address: to.address,
+          port: to.port,
+        });
+      }
+      target = resolved.address;
+    }
+    const sentResult = await udpSend(native, bytes, target, port);
+    if (sentResult.isErr()) {
+      const e = sentResult.error;
+      if (e.code == "ERR_SOCKET_CLOSED") {
+        return err({ kind: "CLOSED", code: "ERR_SOCKET_CLOSED", message: "the socket is closed" });
+      }
+      if (e.code == "EMSGSIZE") {
+        return err({
+          kind: "TOO_LARGE",
+          code: "EMSGSIZE",
+          message: `the message is ${bytes.length} bytes, more than the network carries in one piece`,
+          size: bytes.length,
+          limit: limit,
+        });
+      }
+      if (e.code == "EACCES") {
+        return err({
+          kind: "PERMISSION",
+          code: "EACCES",
+          message: `could not send to ${address}:${port}: a broadcast address needs the option broadcast: true`,
+          address: address,
+          port: port,
+        });
+      }
+      if (e.code == "EAFNOSUPPORT" || e.code == "ERR_INVALID_ADDRESS") {
+        return err({
+          kind: "REQUEST",
+          code: e.code == "EAFNOSUPPORT" ? "EAFNOSUPPORT" : "ERR_INVALID_ADDRESS",
+          message: `could not send to ${address}:${port}: the address is not of the IP version of the socket`,
+          address: address,
+          port: port,
+        });
+      }
+      const code = networkCode(e.code);
+      const message = sendMessage(code, address, port, e.message);
+
+      return err({
+        kind: "NETWORK",
+        code: code,
+        message: message,
+        errno: e.errno,
+        syscall: e.syscall,
+        address: address,
+        port: port,
+      });
+    }
+
+    return ok();
+  }
+
+  public async connect(to: Destination): Promise<Result<void, ConnectError>> {
+    if (this.closed) {
+      return err({ kind: "CLOSED", code: "ERR_SOCKET_CLOSED", message: "the socket is closed" });
+    }
+    const connected = this.connectedTo;
+    if (connected != undefined) {
+      return err({
+        kind: "REQUEST",
+        code: "ERR_SOCKET_CONNECTED",
+        message: `the socket is connected to ${connected.address}:${connected.port} already; disconnect() first`,
+        address: to.address,
+        port: to.port,
+      });
+    }
+    const native = await this.opened();
+    if (native == undefined) {
+      return err({
+        kind: "NETWORK",
+        code: "UNKNOWN",
+        message: `could not connect to ${to.address}:${to.port}: the socket could not take a port`,
+        errno: -1,
+        syscall: "bind",
+        address: to.address,
+        port: to.port,
+      });
+    }
+    const resolved = await this.resolve(to.address);
+    if (resolved.failed) {
+      const code = resolved.code == "EAI_AGAIN" ? "EAI_AGAIN" : "ENOTFOUND";
+      const message = bindMessage(code, to.address, to.port, "");
+
+      return err({
+        kind: "REQUEST",
+        code: code,
+        message: message,
+        address: to.address,
+        port: to.port,
+      });
+    }
+    const connectedResult = udpConnect(native, resolved.address, to.port);
+    if (connectedResult.isErr()) {
+      const e = connectedResult.error;
+      if (e.code == "EAFNOSUPPORT" || e.code == "EINVAL") {
+        return err({
+          kind: "REQUEST",
+          code: "EAFNOSUPPORT",
+          message: `could not connect to ${to.address}:${to.port}: the address is not of the IP version of the socket`,
+          address: to.address,
+          port: to.port,
+        });
+      }
+      const code = networkCode(e.code);
+      const message = sendMessage(code, to.address, to.port, e.message);
+
+      return err({
+        kind: "NETWORK",
+        code: code,
+        message: message,
+        errno: e.errno,
+        syscall: e.syscall,
+        address: to.address,
+        port: to.port,
+      });
+    }
+    this.connectedTo = { address: to.address, port: to.port };
+
+    return ok();
+  }
+
+  public disconnect(): Result<void, ConnectError> {
+    const native = this.native;
+    const connected = this.connectedTo;
+    if (native == undefined || connected == undefined) {
+      return err({
+        kind: "REQUEST",
+        code: "ERR_NOT_CONNECTED",
+        message: "the socket is not connected",
+        address: "",
+        port: 0,
+      });
+    }
+    udpDisconnect(native);
+    this.connectedTo = undefined;
+
+    return ok();
+  }
+
+  public address(): AddressInfo | undefined {
+    const native = this.native;
+    if (native == undefined || this.closed) {
+      return undefined;
+    }
+    const address = udpLocalAddress(native);
+    const port = udpLocalPort(native);
+    const family = familyOf(address);
+
+    return { address: address, family: family, port: port };
+  }
+
+  public remoteAddress(): AddressInfo | undefined {
+    const connected = this.connectedTo;
+    if (connected == undefined) {
+      return undefined;
+    }
+    const family = familyOf(connected.address);
+
+    return { address: connected.address, family: family, port: connected.port };
+  }
+
+  public addMembership(group: string, via?: string): Result<void, MembershipError> {
+    const joined = this.membership(group, via ?? "", "", true);
+
+    return joined;
+  }
+
+  public dropMembership(group: string, via?: string): Result<void, MembershipError> {
+    const left = this.membership(group, via ?? "", "", false);
+
+    return left;
+  }
+
+  public addSourceMembership(source: string, group: string, via?: string): Result<void, MembershipError> {
+    const joined = this.membership(group, via ?? "", source, true);
+
+    return joined;
+  }
+
+  public dropSourceMembership(source: string, group: string, via?: string): Result<void, MembershipError> {
+    const left = this.membership(group, via ?? "", source, false);
+
+    return left;
+  }
+
+  public async close(): Promise<void> {
+    if (this.closed) {
+      return;
+    }
+    this.closed = true;
+    const native = this.native;
+    if (native != undefined) {
+      udpClose(native);
+    }
+    const receiving = this.receiving;
+    if (receiving != undefined) {
+      await receiving;
+    }
+    this.emit("close");
+  }
+
+  private familyNumber(): int {
+    if (this.type == "udp4") {
+      return 4;
+    }
+    if (this.type == "udp6") {
+      return 6;
+    }
+
+    return 0;
+  }
+
+  private async resolve(address: string): Promise<Resolved> {
+    if (address == "" || isLiteral(address)) {
+      return { address: address, failed: false, code: "", errno: 0, syscall: "" };
+    }
+    if (address.toLowerCase() == "localhost") {
+      const local = this.type == "udp6" ? "::1" : "127.0.0.1";
+
+      return { address: local, failed: false, code: "", errno: 0, syscall: "" };
+    }
+    const family = this.familyNumber();
+    const foundResult = await udpLookup(address, family);
+    if (foundResult.isErr()) {
+      const e = foundResult.error;
+
+      return { address: address, failed: true, code: e.code, errno: e.errno, syscall: e.syscall };
+    }
+    const found = foundResult.value;
+
+    return { address: found, failed: false, code: "", errno: 0, syscall: "" };
+  }
+
+  private async opened(): Promise<object | undefined> {
+    const native = this.native;
+    if (native != undefined) {
+      return native;
+    }
+    const boundResult = await this.bind();
+    if (boundResult.isErr()) {
+      return undefined;
+    }
+
+    return this.native;
+  }
+
+  private configure(native: object): Result<void, SystemError> {
+    if (this.broadcast) {
+      const setResult = udpOption(native, OPTION_BROADCAST, 1);
+      if (setResult.isErr()) {
+        return err(setResult.error);
+      }
+    }
+    const ttl = this.ttl;
+    if (ttl != undefined) {
+      const setResult = udpOption(native, OPTION_TTL, ttl);
+      if (setResult.isErr()) {
+        return err(setResult.error);
+      }
+    }
+    const multicastTtl = this.multicast?.ttl;
+    if (multicastTtl != undefined) {
+      const setResult = udpOption(native, OPTION_MULTICAST_TTL, multicastTtl);
+      if (setResult.isErr()) {
+        return err(setResult.error);
+      }
+    }
+    const loopback = this.multicast?.loopback;
+    if (loopback != undefined) {
+      const setResult = udpOption(native, OPTION_MULTICAST_LOOP, loopback ? 1 : 0);
+      if (setResult.isErr()) {
+        return err(setResult.error);
+      }
+    }
+    const via = this.multicast?.interface;
+    if (via != undefined) {
+      const setResult = udpMulticastInterface(native, via);
+      if (setResult.isErr()) {
+        return err(setResult.error);
+      }
+    }
+    const receiveSize = this.recvBufferSize;
+    if (receiveSize != undefined) {
+      const setResult = udpOption(native, OPTION_RECEIVE_BUFFER, receiveSize);
+      if (setResult.isErr()) {
+        return err(setResult.error);
+      }
+    }
+    const sendSize = this.sendBufferSize;
+    if (sendSize != undefined) {
+      const setResult = udpOption(native, OPTION_SEND_BUFFER, sendSize);
+      if (setResult.isErr()) {
+        return err(setResult.error);
+      }
+    }
+
+    return ok();
+  }
+
+  private membership(group: string, via: string, source: string, join: boolean): Result<void, MembershipError> {
+    if (this.closed) {
+      return err({ kind: "CLOSED", code: "ERR_SOCKET_CLOSED", message: "the socket is closed" });
+    }
+    if (!isLiteral(group) || !isMulticast(group)) {
+      return err({
+        kind: "REQUEST",
+        code: "ERR_INVALID_ADDRESS",
+        message: `${group} is not a multicast address: IPv4 groups are 224.0.0.0 to 239.255.255.255, IPv6 groups start with ff`,
+        group: group,
+      });
+    }
+    const native = this.native;
+    if (native == undefined) {
+      return err({
+        kind: "REQUEST",
+        code: "ERR_SOCKET_NOT_BOUND",
+        message: `join the group ${group} after bind(): the socket has no port yet`,
+        group: group,
+      });
+    }
+    const changedResult = udpMembership(native, group, via, source, join);
+    if (changedResult.isErr()) {
+      const e = changedResult.error;
+      if (e.code == "ERR_NOT_SUPPORTED") {
+        return err({
+          kind: "REQUEST",
+          code: "ERR_NOT_SUPPORTED",
+          message: `could not join ${group}: ${e.message}`,
+          group: group,
+        });
+      }
+      const code = networkCode(e.code);
+      const what = join ? "join" : "leave";
+
+      return err({
+        kind: "NETWORK",
+        code: code,
+        message: `could not ${what} the group ${group}: ${e.message}`,
+        errno: e.errno,
+        syscall: e.syscall,
+        group: group,
+      });
+    }
+
+    return ok();
+  }
+
+  private async receiveAll(native: object): Promise<void> {
+    for (;;) {
+      const receivedResult = await udpReceive(native);
+      if (receivedResult.isErr()) {
+        const e = receivedResult.error;
+        const code = networkCode(e.code);
+        this.emit("error", {
+          kind: "NETWORK",
+          code: code,
+          message: `could not receive: ${e.message}`,
+          errno: e.errno,
+          syscall: e.syscall,
+        });
+        return;
+      }
+      const data = receivedResult.value;
+      if (data == undefined) {
+        return;
+      }
+      const address = udpSenderAddress(native);
+      const port = udpSenderPort(native);
+      const family = familyOf(address);
+      const bytes = Buffer.from(data);
+      const from: RemoteInfo = { address: address, family: family, port: port, size: data.length };
+      this.emit("message", bytes, from);
+    }
+  }
+}

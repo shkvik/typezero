@@ -131,7 +131,6 @@
 #include "compiler/library/intl/intl_options_checker/intl_options_checker.h"
 #include "compiler/library/json/json_checker/json_checker.h"
 #include "compiler/library/json/json_static_checker/json_static_checker.h"
-#include "compiler/library/json/json_type_checker/json_type_checker.h"
 #include "compiler/library/math/math_checker/math_checker.h"
 #include "compiler/library/os/os_checker/os_checker.h"
 #include "compiler/library/path/path_checker/path_checker.h"
@@ -335,7 +334,6 @@ Checker::Checker(AstContext &ctx, Diagnostics &diags) : ctx_(ctx), diags_(diags)
   intlOptionsCheckerPart_ = std::make_unique<IntlOptionsChecker>(*this);
   intlMethodCheckerPart_ = std::make_unique<IntlMethodChecker>(*this);
   jsonCheckerPart_ = std::make_unique<JsonChecker>(*this);
-  jsonTypeCheckerPart_ = std::make_unique<JsonTypeChecker>(*this);
   jsonStaticCheckerPart_ = std::make_unique<JsonStaticChecker>(*this);
   builtinModuleCheckerPart_ = std::make_unique<BuiltinModuleChecker>(*this);
   fsCheckerPart_ = std::make_unique<FsChecker>(*this);

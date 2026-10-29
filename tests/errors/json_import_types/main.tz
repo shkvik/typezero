@@ -1,0 +1,10 @@
+// What has no single type in an imported JSON file is Json: null, and arrays
+// of values of different kinds.
+import config from "./config.json" with { type: "json" }
+
+// expect-error: type 'Json' is not assignable to type 'string'
+const proxy: string = config.proxy
+// expect-error: type 'Json[]' is not assignable to type 'string[]'
+const tags: string[] = config.tags
+const port: int = config.port
+console.log(proxy, tags, port)

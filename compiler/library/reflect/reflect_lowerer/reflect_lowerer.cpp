@@ -1,5 +1,4 @@
 #include "compiler/library/reflect/reflect_lowerer/reflect_lowerer.h"
-#include "compiler/library/json/from_json_lowerer/from_json_lowerer.h"
 #include "compiler/library/json/json_lowerer/json_lowerer.h"
 #include "compiler/library/reflect/class_info_lowerer/class_info_lowerer.h"
 #include "compiler/library/reflect/reflect_dispatch_lowerer/reflect_dispatch_lowerer.h"
@@ -48,112 +47,6 @@ std::vector<FunctionDecl *> constructorsOf(const ClassDecl *cls) {
 
 ReflectLowerer::ReflectLowerer(Lowering &lowering) : lowering_(lowering) {}
 
-llvm::Function *ReflectLowerer::classFromJsonFunction(const ClassDecl *cls) {
-  llvm::Function *&fn = classConverters_[cls];
-  if (!fn) {
-    llvm::Type *ptr = lowering_.builder_.getPtrTy();
-    fn = llvm::Function::Create(
-        llvm::FunctionType::get(ptr, {ptr, ptr}, false), llvm::GlobalValue::InternalLinkage,
-        "tz.fromJson.class." + lowering_.symbolPrefixes_.lookup(cls) + className(cls),
-        lowering_.module_.get());
-    lowering_.functionBuilder().setFunctionAttributes(fn);
-    pendingConverters_.push_back(cls);
-  }
-
-  return fn;
-}
-
-void ReflectLowerer::emitClassFromJson(const ClassDecl *cls, llvm::Function *fn) {
-  llvm::Type *ptr = lowering_.builder_.getPtrTy(), *i64 = lowering_.builder_.getInt64Ty();
-  lowering_.functionBuilder().beginFunction(fn, nullptr);
-  lowering_.loc_ = cls->loc();
-  lowering_.functionFrame().pushScope();
-  if (!lowering_.jsonPathTy_) {
-    lowering_.jsonPathTy_ =
-        llvm::StructType::create(lowering_.ctx_, {ptr, ptr, i64, i64}, "tz.jsonpath");
-  }
-  llvm::Value *json = fn->getArg(0), *path = fn->getArg(1);
-  llvm::Value *null = llvm::ConstantPointerNull::get(lowering_.builder_.getPtrTy());
-  std::string name = className(cls);
-  llvm::Value *link = lowering_.functionFrame().createStackSlot(lowering_.jsonPathTy_, "path");
-  lowering_.builder_.CreateStore(
-      path, lowering_.builder_.CreateStructGEP(lowering_.jsonPathTy_, link, 0));
-  llvm::Value *keyObj = lowering_.builder_.CreateStructGEP(lowering_.jsonPathTy_, link, 1);
-  llvm::Value *keyMeta = lowering_.builder_.CreateStructGEP(lowering_.jsonPathTy_, link, 2);
-  lowering_.builder_.CreateStore(
-      llvm::ConstantInt::getSigned(i64, -1),
-      lowering_.builder_.CreateStructGEP(lowering_.jsonPathTy_, link, 3));
-  auto failIfFailed = [&](llvm::function_ref<void()> release) {
-    llvm::BasicBlock *failBlock = lowering_.functionFrame().newBlock("json.failed");
-    llvm::BasicBlock *goBlock = lowering_.functionFrame().newBlock("json.fits");
-    lowering_.builder_.CreateCondBr(lowering_.resultLowerer().isFailed(), failBlock, goBlock,
-                                    llvm::MDBuilder(lowering_.ctx_).createUnlikelyBranchWeights());
-    lowering_.functionFrame().switchTo(failBlock);
-    release();
-    lowering_.functionFrame().emitCleanups(0);
-    lowering_.builder_.CreateRet(null);
-    lowering_.functionFrame().switchTo(goBlock);
-  };
-  lowering_.builder_.CreateCall(lowering_.jsonLowerer().jsonFunction("tz_json_expect_object",
-                                                                     lowering_.builder_.getVoidTy(),
-                                                                     {ptr, ptr, ptr, i64}),
-                                {json, path, lowering_.stringLowerer().utf8Constant(name),
-                                 lowering_.builder_.getInt64(name.size())});
-  failIfFailed([] {});
-  auto keyed = [&](llvm::StringRef key) {
-    llvm::Value *text =
-        lowering_.stringLowerer().stringLiteral(std::u16string(key.begin(), key.end()));
-    lowering_.builder_.CreateStore(lowering_.stringLowerer().stringObj(text), keyObj);
-    lowering_.builder_.CreateStore(lowering_.stringLowerer().stringMeta(text), keyMeta);
-
-    return lowering_.builder_.CreateCall(
-        lowering_.jsonLowerer().jsonFunction("tz_json_field", ptr, {ptr, ptr, i64}),
-        {json, lowering_.stringLowerer().stringObj(text),
-         lowering_.stringLowerer().stringMeta(text)},
-        key);
-  };
-  std::vector<FunctionDecl *> ctors = constructorsOf(cls);
-  const FunctionDecl *ctor = ctors.empty() ? nullptr : ctors.front();
-  const FuncSymbol *sym = ctor ? ctor->sym : nullptr;
-  std::vector<llvm::Value *> values;
-  llvm::StringSet<> given;
-  for (size_t k = 0; sym && k < sym->params.size() && k < cls->jsonParams.size(); ++k) {
-    llvm::StringRef param = cls->jsonParams[k];
-    given.insert(param);
-    llvm::Value *item = keyed(param);
-    values.push_back(lowering_.fromJsonLowerer().emitFromJson(sym->params[k], item, link));
-    failIfFailed([&] {
-      for (size_t made = 0; made < k; ++made) {
-        lowering_.refCounts().releaseValue(values[made], sym->params[made]);
-      }
-    });
-  }
-  llvm::Value *object = lowering_.classLowerer().allocInstance(cls);
-  lowering_.classLowerer().emitConstruct(object, cls, sym, values);
-  for (const Field &f : cls->type->fields()) {
-    if (given.contains(f.name) || !llvm::is_contained(cls->jsonFields, f.name)) {
-      continue;
-    }
-    llvm::Value *item = keyed(f.name);
-    llvm::BasicBlock *setBlock = lowering_.functionFrame().newBlock("json.field");
-    llvm::BasicBlock *nextBlock = lowering_.functionFrame().newBlock("json.field.next");
-    lowering_.builder_.CreateCondBr(lowering_.builder_.CreateIsNotNull(item), setBlock, nextBlock);
-    lowering_.functionFrame().switchTo(setBlock);
-    llvm::Value *value = lowering_.fromJsonLowerer().emitFromJson(f.type, item, link);
-    failIfFailed([&] { lowering_.refCounts().releaseValue(object, cls->type); });
-    lowering_.storeLowerer().storeBarrier(object, value, f.type);
-    lowering_.stmtLowerer().storeReplacing(
-        lowering_.objectLayouts().fieldAddress(object, cls->type, f.name), value, f.type);
-    lowering_.builder_.CreateBr(nextBlock);
-    lowering_.functionFrame().switchTo(nextBlock);
-  }
-  lowering_.functionFrame().emitCleanups(0);
-  lowering_.builder_.CreateRet(object);
-  lowering_.functionFrame().startDeadBlock();
-  lowering_.functionFrame().popScope();
-  lowering_.functionBuilder().finishFunction();
-}
-
 llvm::Function *ReflectLowerer::constructFunction(const ClassDecl *cls) {
   if (llvm::Function *found = constructFunctions_.lookup(cls)) {
     return found;
@@ -171,14 +64,10 @@ llvm::Function *ReflectLowerer::constructFunction(const ClassDecl *cls) {
 }
 
 void ReflectLowerer::finishReflection(SourceFile &file, llvm::Instruction *init) {
-  for (size_t i = 0; i < pendingConverters_.size(); ++i) {
-    emitClassFromJson(pendingConverters_[i], classConverters_.lookup(pendingConverters_[i]));
-  }
   auto described = [&](const ClassDecl *cls) {
     return cls->isEmitted() && !cls->literal && !cls->builtin &&
            ((lowering_.reflectsNew_ && cls->reflectNew) ||
-            (lowering_.reflectsGet_ && cls->reflectMethods) ||
-            (lowering_.reflectsJson_ && cls->reflectJson));
+            (lowering_.reflectsGet_ && cls->reflectMethods));
   };
   llvm::Type *ptr = lowering_.builder_.getPtrTy(), *i32 = lowering_.builder_.getInt32Ty();
   llvm::Constant *null = llvm::ConstantPointerNull::get(lowering_.builder_.getPtrTy());
@@ -197,10 +86,6 @@ void ReflectLowerer::finishReflection(SourceFile &file, llvm::Instruction *init)
     llvm::Constant *construct = null;
     if (lowering_.reflectsNew_ && cls->reflectNew && !cls->isAbstract) {
       construct = constructFunction(cls);
-    }
-    llvm::Constant *fromJson = null;
-    if (lowering_.reflectsJson_ && cls->reflectJson && !cls->isAbstract) {
-      fromJson = classFromJsonFunction(cls);
     }
     std::vector<llvm::Constant *> methods;
     llvm::StringSet<> named;
@@ -249,17 +134,12 @@ void ReflectLowerer::finishReflection(SourceFile &file, llvm::Instruction *init)
     auto *info = cast<llvm::GlobalVariable>(lowering_.classInfoLowerer().classInfoGlobal(cls));
     info->setInitializer(llvm::ConstantStruct::get(
         lowering_.classInfoLowerer().classInfoType(),
-        {construct, fromJson, table, lowering_.builder_.getInt32(uint32_t(methods.size()))}));
+        {construct, table, lowering_.builder_.getInt32(uint32_t(methods.size()))}));
   }
   for (size_t i = 0; i < constructFunctions_.size(); ++i) {
     auto [cls, fn] = *(constructFunctions_.begin() + i);
     if (fn->empty()) {
       lowering_.classInfoLowerer().emitConstructThunk(cls, fn);
-    }
-  }
-  for (size_t i = 0; i < pendingConverters_.size(); ++i) {
-    if (classConverters_.lookup(pendingConverters_[i])->empty()) {
-      emitClassFromJson(pendingConverters_[i], classConverters_.lookup(pendingConverters_[i]));
     }
   }
   for (auto &[cls, global] : lowering_.classInfos_) {
@@ -269,8 +149,7 @@ void ReflectLowerer::finishReflection(SourceFile &file, llvm::Instruction *init)
       global = nullptr;
     }
   }
-  if (!lowering_.reflectsNew_ && !lowering_.reflectsGet_ && !lowering_.reflectsJson_ &&
-      !usesApply_) {
+  if (!lowering_.reflectsNew_ && !lowering_.reflectsGet_ && !usesApply_) {
     return;
   }
 
@@ -396,24 +275,6 @@ llvm::Value *ReflectLowerer::emitReflectCall(CallExpr *call) {
           {values[0], values[1]}, "object");
     }
     lowering_.refCounts().releaseValue(values[1], call->args[1]->type);
-    return lowering_.resultLowerer().catchFailure(object, call->type, call->loc());
-  }
-  case Builtin::FromJsonClass: {
-    lowering_.jsonLowerer().useErrors(call->type->errType());
-    llvm::Value *cls = lowering_.exprLowerer().emitExpr(call->args[0]);
-    Lowering::Operand json = lowering_.refCounts().emitOperand(call->args[1], true);
-    llvm::Value *object;
-    if (const ClassDecl *known = call->args[0]->type->classRef()) {
-      object = lowering_.builder_.CreateCall(
-          classFromJsonFunction(known),
-          {json.value, llvm::ConstantPointerNull::get(lowering_.builder_.getPtrTy())}, "object");
-    } else {
-      lowering_.reflectsJson_ = true;
-      object = lowering_.builder_.CreateCall(
-          lowering_.unknownLowerer().unknownFunction("tz_reflect_from_json", ptr, {ptr, ptr}),
-          {cls, json.value}, "object");
-    }
-    lowering_.refCounts().dropOperand(json);
     return lowering_.resultLowerer().catchFailure(object, call->type, call->loc());
   }
   case Builtin::ReflectMethod: {

@@ -86,7 +86,7 @@ std::string missingModule(llvm::StringRef path) {
     return message + " (docs/net.md, section 7); serve requests with 'Server' from \"tz:http\", "
                      "and make them with the global 'fetch'";
   }
-  static const llvm::StringLiteral network[] = {"http2", "tls", "dgram", "dns", "dns/promises"};
+  static const llvm::StringLiteral network[] = {"http2", "tls", "dns", "dns/promises"};
   if (llvm::is_contained(network, bare)) {
     return message + " (docs/net.md, section 7)";
   }

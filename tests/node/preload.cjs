@@ -246,7 +246,7 @@ JSON.parse = (text) => {
   try {
     return new Ok(parseJson(text));
   } catch (e) {
-    return new Err({ kind: "JSON", code: "ERR_INVALID_JSON", message: e.message, path: "" });
+    return new Err({ kind: "JSON", code: "ERR_INVALID_JSON", message: e.message });
   }
 };
 
@@ -356,8 +356,13 @@ Intl.Locale.parse = (tag) => {
   };
 }
 
-// crypto.subtle gives a Promise of a Result in tz, with the name of the
-// DOMException (or TypeError) node rejects with as the code.
+// crypto.subtle gives a Promise of a Result in tz, with a code of tz for the
+// DOMException (or TypeError) node rejects with.
+const subtleCodes = {
+  NotSupportedError: "ERR_NOT_SUPPORTED", DataError: "ERR_INVALID_DATA",
+  OperationError: "ERR_OPERATION_FAILED", InvalidAccessError: "ERR_INVALID_ACCESS",
+  InvalidAccessException: "ERR_INVALID_ACCESS", SyntaxError: "ERR_INVALID_KEY_USAGE",
+};
 const subtleProto = Object.getPrototypeOf(globalThis.crypto.subtle);
 for (const name of ["digest", "generateKey", "importKey", "exportKey", "sign", "verify", "encrypt",
                     "decrypt", "deriveBits", "deriveKey", "wrapKey", "unwrapKey"]) {
@@ -367,9 +372,9 @@ for (const name of ["digest", "generateKey", "importKey", "exportKey", "sign", "
       return new Ok(await original.apply(this, args));
     } catch (e) {
       const code = e instanceof DOMException
-        ? (e.name === "InvalidAccessException" ? "InvalidAccessError" : e.name)
-        : e instanceof RangeError ? "RangeError" : "TypeError";
-      return new Err({ code, message: e.message });
+        ? subtleCodes[e.name] ?? e.name
+        : e instanceof RangeError ? "ERR_OUT_OF_RANGE" : "ERR_INVALID_ARG_TYPE";
+      return new Err({ kind: "SUBTLE", code, message: e.message });
     }
   };
 }
@@ -554,19 +559,18 @@ function bodyError(e, owner) {
            message: `the stream of the body failed: ${message}` };
 }
 function formError(owner) {
-  const given = owner.headers.get("content-type") ?? "";
+  const header = owner.headers.get("content-type") ?? undefined;
+  const given = header ?? "";
   const type = given.toLowerCase();
+  const withType = (error) => (header === undefined ? error : { ...error, contentType: header });
   if (type.startsWith("multipart/form-data") && !/boundary=/i.test(given))
-    return { kind: "CONTENT", code: "ERR_NO_BOUNDARY",
-             message: "the body is not a form: multipart/form-data has no boundary",
-             contentType: given };
+    return withType({ kind: "CONTENT", code: "ERR_NO_BOUNDARY",
+                      message: "the body is not a form: multipart/form-data has no boundary" });
   if (type.startsWith("multipart/form-data"))
-    return { kind: "CONTENT", code: "ERR_INVALID_MULTIPART",
-             message: "the body is not a valid multipart form: a part has no end of its head",
-             contentType: given };
+    return withType({ kind: "CONTENT", code: "ERR_INVALID_MULTIPART",
+                      message: "the body is not a valid multipart form: a part has no end of its head" });
   const what = given === "" ? "it has no content-type" : `content-type is ${given}`;
-  return { kind: "CONTENT", code: "ERR_NOT_A_FORM", message: `the body is not a form: ${what}`,
-           contentType: given };
+  return withType({ kind: "CONTENT", code: "ERR_NOT_A_FORM", message: `the body is not a form: ${what}` });
 }
 for (const proto of [Response.prototype, Request.prototype]) {
   for (const name of ["text", "bytes", "arrayBuffer", "formData"]) {
@@ -586,9 +590,12 @@ for (const proto of [Response.prototype, Request.prototype]) {
     if (text.isErr()) return text;
     const parsed = JSON.parse(text.value);
     if (parsed.isOk()) return parsed;
-    return new Err({ kind: "CONTENT", code: "ERR_INVALID_JSON",
-                     message: `the body is not JSON: ${parsed.error.message}`,
-                     contentType: this.headers.get("content-type") ?? "" });
+    const header = this.headers.get("content-type") ?? undefined;
+    const error = { kind: "CONTENT", code: "ERR_INVALID_JSON",
+                    message: `the body is not JSON: ${parsed.error.message}` };
+    if (header !== undefined) error.contentType = header;
+    error.start = text.value.slice(0, 200);
+    return new Err(error);
   };
 }
 // A value that the object changes itself is a method in tz (docs/objects.md,

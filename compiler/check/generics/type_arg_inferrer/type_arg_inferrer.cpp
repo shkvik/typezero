@@ -87,6 +87,29 @@ bool isContextSensitive(const Expr *arg) {
 
 TypeArgInferrer::TypeArgInferrer(Checker &checker) : checker_(checker) {}
 
+void TypeArgInferrer::precheckFields(ObjectLitExpr *lit, const Type *pattern,
+                                     llvm::ArrayRef<const Type *> typeParams,
+                                     Inference &inference) {
+  const Type *target = pattern->nonOptional();
+  if (!target->isObject() || target->isClass() || target->isTuple() || lit->hasSpread() ||
+      llvm::any_of(lit->props, [](const ObjectLitExpr::Property &p) {
+        return p.method || p.key || p.defaulted;
+      })) {
+    return;
+  }
+  for (ObjectLitExpr::Property &prop : lit->props) {
+    const Field *field = target->field(prop.name);
+    if (!field || !mentionsAnyOf(field->type, typeParams) || isContextSensitive(prop.value) ||
+        isa<ObjectLitExpr>(prop.value) || isa<ArrayLitExpr>(prop.value) ||
+        GenericChecker::literalShape(prop.value)) {
+      continue;
+    }
+    prop.value = checker_.exprChecker().checkExpr(prop.value);
+    checker_.prechecked_.insert(prop.value);
+    inference.from(field->type, prop.value->type);
+  }
+}
+
 bool TypeArgInferrer::finishTypeArgs(FuncSymbol *generic, std::vector<const Type *> &bound,
                                      llvm::SMLoc loc, bool call, bool quiet) {
   llvm::ArrayRef<const Type *> params = generic->typeParams;
@@ -328,6 +351,9 @@ bool TypeArgInferrer::bindGenericCall(CallExpr *call, FuncSymbol *generic, llvm:
         inference.intLiteral = false;
       } else if (isa<ArrayLitExpr>(arg) || isa<ObjectLitExpr>(arg)) {
         sensitive.push_back(i);
+        if (auto *lit = dyn_cast<ObjectLitExpr>(arg)) {
+          precheckFields(lit, pattern, typeParams, inference);
+        }
       } else {
         arg = checker_.exprChecker().checkExpr(arg);
         checked[i] = true;

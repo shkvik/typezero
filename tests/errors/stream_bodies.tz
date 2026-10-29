@@ -1,0 +1,31 @@
+// A stream with an error of its own is not a body of new Response or new
+// Request: it goes with Response.stream or fetch. A fetch without such a
+// stream has no ERR_STREAM_FAILED, and details is read after a check.
+type DiskError = { kind: "DISK"; code: "EIO"; message: string }
+
+const file = new ReadableStream<Uint8Array, DiskError>({
+  pull: async c => {
+    c.error({ kind: "DISK", code: "EIO", message: "disk failed" })
+  },
+})
+
+// expect-error: a stream with errors of its own is sent with a method that takes their type: 'Response.stream(stream, init)' for a response, 'fetch(url, { body: stream })' for a request
+const response = new Response(file)
+// expect-error: of field 'body'; a stream with errors of its own is sent with a method that takes their type
+const request = new Request("http://127.0.0.1:1/", { method: "POST", body: file, duplex: "half" })
+
+const sent = await fetch("http://127.0.0.1:1/", { method: "POST", body: file, duplex: "half" })
+// expect-error: narrow it first, e.g. 'if (sent.error.code == "ERR_STREAM_FAILED")'
+if (sent.isErr()) console.log(sent.error.details)
+
+const page = await fetch("http://127.0.0.1:1/")
+// expect-error: operator '==' cannot be applied to types
+if (page.isErr() && page.error.code == "ERR_STREAM_FAILED") console.log("never")
+
+const plain = new ReadableStream<int>({
+  start: c => {
+    // expect-error: nothing fits 'never': if it comes from a type argument left out, write it, e.g. 'new ReadableStream<int, MyError>(...)' for a stream that fails with MyError
+    c.error({ kind: "DISK", code: "EIO", message: "disk failed" })
+  },
+})
+console.log(response, request, plain)

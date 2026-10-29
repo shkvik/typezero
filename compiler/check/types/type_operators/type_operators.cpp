@@ -272,8 +272,8 @@ const Type *TypeOperators::resolveTypeOp(const TypeRef &ref) {
       type = var->type;
     } else if (entry.cls && !entry.cls->isGeneric()) {
       type = checker_.classValueChecker().classValueType(entry.cls);
-    } else if (entry.func && !entry.func->isGeneric()) {
-      type = checker_.returnInferrer().functionType(entry.func);
+    } else if (entry.func) {
+      type = checker_.utilityTypes().functionValueType(entry.func);
     }
     for (Stmt *item : checker_.module_ ? checker_.module_->file.items : std::vector<Stmt *>()) {
       if (type) {

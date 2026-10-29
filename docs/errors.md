@@ -46,6 +46,12 @@ const text = parseAge("42").match(
   памяти. Цепочка `.map(...).andThen(...).match(...)` компилируется в обычные `if` / `else`,
   лямбды встраиваются.
 - **`==` на `Result`** — ошибка компиляции. Сравнивают через `match`, `isOk()`, `value`.
+- **Забытый `Result` — ошибка компиляции.** Вызов, чей `Result` никто не берёт (`save(x)` одной
+  строкой), и переменная с `Result`, которую потом ни разу не читают (`const r = save(x)` — и
+  всё), — с 29 октября и она: `Err` пропал бы молча. То же для переменной с
+  `Promise<Result<...>>`, которую не ждут. Читать — любое чтение, хоть внутри стрелки;
+  `if (r.isOk())` без `else` разрешён: ошибку посмотрели и решили не разбирать. Экспортируемые
+  переменные не проверяются: их читают другие модули.
 - **`Result` нельзя выбросить нигде — ошибка компиляции.** Ни строкой (`saveFile("")` без
   использования результата), ни через `void`, ни из колбэка, результат которого никто не
   читает (раздел 4). Если результат правда не нужен — отказ пишут явно, например
@@ -85,12 +91,12 @@ if (r.isErr()) {
   Имена `SystemError`, `JsonError`, `FetchError` остаются, но это типы объектов, а не классы.
 - **`kind` и коды `ERR_…`** (29 октября, [style.md](style.md), раздел 1): у ошибок библиотеки
   есть `kind` — что делать программе (`"REGEX"`, `"URL"`, `"DATE"`, `"LOCALE"`, `"DECIMAL"`,
-  `"NUMBER"`, `"URI"`, `"JSON"`, `"ENCODING"`, `"REFLECT"`, `"SERVER"`), а `code` — SCREAM_CASE
+  `"NUMBER"`, `"URI"`, `"JSON"`, `"ENCODING"`, `"REFLECT"`, `"SERVER"`, `"SUBTLE"`), а `code` — SCREAM_CASE
   с префиксом `ERR_`: `ERR_INVALID_REGEX`, `ERR_INVALID_URL`, `ERR_INVALID_JSON`,
-  `ERR_CIRCULAR_STRUCTURE`, `ERR_NO_VARIANT`… (было `bad_regex`, `bad_url`, `circular`,
-  `no_variant`). Системные коды (`ENOENT`), коды OpenSSL, `TIMEOUT_ERR` и `UNKNOWN` — как
+  `ERR_CIRCULAR_STRUCTURE`, `ERR_NO_VARIANT`, `ERR_INVALID_DATA`… (было `bad_regex`, `bad_url`,
+  `circular`, `no_variant`, `DataError`). Системные коды (`ENOENT`), коды OpenSSL, `TIMEOUT_ERR` и `UNKNOWN` — как
   есть. Ещё без `kind`: `SystemError`, `StreamError`, `ExecError`, `CryptoError` (`code:
-  string`), `SubtleError` — их разбор впереди.
+  string`) — их разбор впереди.
 - **Место ошибки хранит сам `Err`, а не значение.** `err(...)` запоминает файл, строку и
   функцию — это ссылка на данные в exe, ничего не стоит. Печать:
   `Err { error: 'not_found' } at find (users.tz:13)`. Так в Zig: ошибка — простое значение, а

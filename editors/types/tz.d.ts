@@ -140,7 +140,6 @@ type JsonError = {
   kind: "JSON"
   code: "ERR_INVALID_JSON" | "ERR_CIRCULAR_STRUCTURE"
   message: string
-  path: string
 }
 type UriError = { kind: "URI"; code: "ERR_INVALID_URI"; message: string }
 type RegexError = { kind: "REGEX"; code: "ERR_INVALID_REGEX"; message: string }
@@ -174,16 +173,18 @@ type TlsCode =
   | "HOSTNAME_MISMATCH" | "UNSPECIFIED" | "ERR_TLS_CERT_ALTNAME_INVALID" | "ERR_TLS_HANDSHAKE"
 // What went wrong with a fetch: the kind says what to do (REQUEST — fix the
 // code; NETWORK — try again; RESPONSE, TLS, REDIRECT, TIMEOUT), the code is
-// one of a closed list (docs/net.md, section 2).
-type FetchError =
+// one of a closed list (docs/net.md, section 2). E is the error of a stream
+// sent as the body: its failure comes whole in details.
+type FetchError<E = never> =
   | {
       kind: "REQUEST"
       code: "ERR_INVALID_URL" | "ERR_CREDENTIALS_IN_URL" | "ERR_INVALID_METHOD" | "ERR_BODY_WITH_GET"
         | "ERR_DUPLEX_REQUIRED" | "ERR_REQUEST_USED" | "ERR_UNSUPPORTED_SCHEME" | "ERR_BLOCKED_PORT"
-        | "ERR_STREAM_FAILED"
+        | "ERR_BODY_FAILED"
       message: string
       url: string
     }
+  | { kind: "REQUEST"; code: "ERR_STREAM_FAILED"; message: string; url: string; details: E }
   | {
       kind: "NETWORK"
       code: "ENOTFOUND" | "EAI_AGAIN" | "ECONNREFUSED" | "ETIMEDOUT" | "ENETUNREACH" | "EHOSTUNREACH"
@@ -228,13 +229,30 @@ type BodyError =
   | { kind: "TIMEOUT"; code: "TIMEOUT_ERR"; message: string; timeout: int }
   | { kind: "TOO_LARGE"; code: "ERR_BODY_TOO_LARGE"; message: string; limit: double }
   | { kind: "MALFORMED"; code: "ERR_INVALID_CHUNKED" | "ERR_INVALID_COMPRESSION"; message: string }
+  | { kind: "STREAM"; code: "ERR_STREAM_FAILED"; message: string }
+// A stream read the wrong way: a second reader, or a read after releaseLock().
+type ReaderError = {
+  kind: "USED"
+  code: "ERR_STREAM_LOCKED" | "ERR_READER_RELEASED"
+  message: string
+}
+// The errors of text(), bytes() and arrayBuffer(): those of every body.
+type TextError = BodyError
+type BytesError = BodyError
+// The errors of json(): those of every body, and a body that is not JSON
+// (start: its first 200 characters).
+type JsonBodyError =
+  | BodyError
+  | { kind: "CONTENT"; code: "ERR_INVALID_JSON"; message: string; contentType?: string; start: string }
+// The errors of formData(): those of every body, and a body that is not a form.
+type FormDataError =
+  | BodyError
   | {
       kind: "CONTENT"
-      code: "ERR_INVALID_JSON" | "ERR_NOT_A_FORM" | "ERR_NO_BOUNDARY" | "ERR_INVALID_MULTIPART"
+      code: "ERR_NOT_A_FORM" | "ERR_NO_BOUNDARY" | "ERR_INVALID_MULTIPART"
       message: string
-      contentType: string
+      contentType?: string
     }
-  | { kind: "STREAM"; code: "ERR_STREAM_FAILED"; message: string }
 // The statuses a Response may have; a status from a variable becomes one
 // after a check: if (isHttpStatus(code)).
 type HttpStatus =
@@ -391,8 +409,9 @@ type Immediate = NodeJS.Immediate
 // An error of the system: a file that is not there, no access, a port that
 // is taken (docs/io.md, section 5). Node has no such global; tz does.
 type SubtleError = {
-  code: "NotSupportedError" | "DataError" | "OperationError" | "InvalidAccessError" |
-    "SyntaxError" | "TypeError" | "RangeError"
+  kind: "SUBTLE"
+  code: "ERR_NOT_SUPPORTED" | "ERR_INVALID_DATA" | "ERR_OPERATION_FAILED" | "ERR_INVALID_ACCESS" |
+    "ERR_INVALID_KEY_USAGE" | "ERR_INVALID_ARG_TYPE" | "ERR_OUT_OF_RANGE"
   message: string
 }
 

@@ -1,6 +1,6 @@
 // same-as-node
-// Web Crypto: what node rejects when the program runs is an Err of a SubtleError here, with the
-// name of node's DOMException (or TypeError of Web IDL) as its code, and node's message. The algorithms come from variables:
+// Web Crypto: what node rejects when the program runs is an Err of a SubtleError here, with a
+// code of tz for node's DOMException (or TypeError of Web IDL), and node's message. The algorithms come from variables:
 // written in the call, these would be errors of the compiler (tests/errors/webcrypto.tz).
 const subtle = crypto.subtle
 const enc = new TextEncoder()

@@ -135,4 +135,5 @@ OpenSSL быстрее Go. В node те же функции идут через 
    node у того, что зависит от данных и у имён из переменных; `X509Certificate.parse`; хеш не
    закрывается после `digest()`; ошибки порядка у шифра отдаёт `final()`. Числа вне диапазона —
    с шагом 4 errors.md (доказательства). `crypto.subtle` отдаёт `Promise<Result<T, SubtleError>>`
-   (`code` — имя `DOMException` node); внутри `webcrypto.tz` исключений нет с шагом 5 (27 октября).
+   (`code` — имя `DOMException` node; с 29 октября — наш вид: `kind: "SUBTLE"`,
+   `ERR_INVALID_DATA`, `ERR_NOT_SUPPORTED`, `ERR_OPERATION_FAILED`… — README, «Web Crypto»); внутри `webcrypto.tz` исключений нет с шагом 5 (27 октября).

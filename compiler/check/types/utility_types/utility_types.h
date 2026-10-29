@@ -8,6 +8,7 @@ class UtilityTypes {
 public:
   explicit UtilityTypes(Checker &checker);
 
+  const Type *functionValueType(FuncSymbol *fn);
   const Type *importedValueType(Module *from, llvm::StringRef name);
   const Type *resolveUtilityType(const TypeRef &ref);
   bool wantsLiteral(const Type *param) const;

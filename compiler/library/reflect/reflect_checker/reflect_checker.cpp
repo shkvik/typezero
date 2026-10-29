@@ -14,7 +14,6 @@
 #include "compiler/declare/prelude/prelude.h"
 #include "compiler/infer/return_inferrer/return_inferrer.h"
 #include "compiler/library/fs/fs_declarer/fs_declarer.h"
-#include "compiler/library/json/json_type_checker/json_type_checker.h"
 #include "compiler/library/reflect/reflect_call_checker/reflect_call_checker.h"
 #include "compiler/whole_program/flows/flows.h"
 #include "llvm/ADT/STLExtras.h"
@@ -158,7 +157,7 @@ void ReflectChecker::finishReflection() {
   }
   if (!checker_.reflectionUsed_) {
     for (ClassDecl *cls : checker_.classes_) {
-      cls->reflectNew = cls->reflectMethods = cls->reflectJson = false;
+      cls->reflectNew = cls->reflectMethods = false;
     }
     return;
   }
@@ -183,13 +182,6 @@ void ReflectChecker::finishReflection() {
   }
   for (ClassDecl *cls : reflectedObjects_) {
     methods(cls);
-  }
-  if (jsonReflect_) {
-    for (ClassDecl *cls : checker_.classes_) {
-      if (cls->reflectNew && !cls->isAbstract && classJsonProblem(cls).empty()) {
-        cls->reflectJson = true;
-      }
-    }
   }
   checkReflectNews();
 }
@@ -302,78 +294,6 @@ void ReflectChecker::checkReflectNews() {
       }
     }
   }
-}
-
-std::string ReflectChecker::classJsonProblem(const ClassDecl *cls) {
-  auto *c = const_cast<ClassDecl *>(cls);
-  if (auto found = jsonProblems_.find(cls); found != jsonProblems_.end()) {
-    return found->second;
-  }
-  jsonProblems_[cls] = "";
-  std::string name = cls->type ? cls->type->name().str() : cls->name.str();
-  std::string problem;
-  std::vector<FunctionDecl *> ctors = ClassLinks::constructorsOf(cls);
-  if (cls->builtin || checker_.fsDeclarer().isRuntimeClass(cls)) {
-    problem = "'" + name + "' is made only by the runtime";
-  } else if (cls->isAbstract) {
-    problem = "'" + name + "' is abstract, so no object is only a '" + name + "'";
-  } else if (ctors.size() > 1) {
-    problem = "'" + name + "' has several constructors, and fromJson calls the one a class has";
-  }
-  const FunctionDecl *ctor = ctors.empty() ? nullptr : ctors.front();
-  c->jsonParams.clear();
-  if (problem.empty() && ctor && ctor->sym) {
-    checker_.returnInferrer().resolveParams(ctor->sym);
-    std::function<std::string(const FunctionDecl *, size_t)> keyOf = [&](const FunctionDecl *fn,
-                                                                         size_t k) {
-      if (!fn->listName.empty() && k >= fn->listStart && fn->cls && fn->cls->parent) {
-        std::vector<FunctionDecl *> up = ClassLinks::constructorsOf(fn->cls->parent);
-        if (up.size() == 1 && k - fn->listStart < up[0]->params.size()) {
-          return keyOf(up[0], k - fn->listStart);
-        }
-      }
-
-      return fn->params[k].name.str();
-    };
-    for (size_t i = 0; i < ctor->sym->params.size() && i < ctor->params.size(); ++i) {
-      c->jsonParams.push_back(keyOf(ctor, i));
-    }
-    for (size_t i = 0; i < ctor->sym->params.size() && problem.empty(); ++i) {
-      const Type *type = ctor->sym->params[i];
-      if (!type || (ctor->sym->hasRest && i + 1 == ctor->sym->params.size())) {
-        problem = "its constructor takes a rest parameter, which no key of a Json names";
-        break;
-      }
-      std::string why = JsonTypeChecker::jsonProblem(
-          type, [&](const ClassDecl *inner) { return classJsonProblem(inner); });
-      if (!why.empty()) {
-        problem = "parameter '" + c->jsonParams[i] + "' of its constructor: " + why;
-      }
-    }
-  }
-  if (problem.empty()) {
-    checker_.classDeclarer().completeClass(c);
-    c->jsonFields.clear();
-    for (const Field &f : c->type->fields()) {
-      if (llvm::is_contained(c->jsonParams, f.name)) {
-        continue;
-      }
-      const ClassDecl *owner = nullptr;
-      const ClassField *field = ClassBases::findField(cls, f.name, &owner);
-      if (!field || field->isStatic || field->method || f.readonly ||
-          field->access != Access::Public) {
-        continue;
-      }
-      if (JsonTypeChecker::jsonProblem(f.type, [&](const ClassDecl *inner) {
-            return classJsonProblem(inner);
-          }).empty()) {
-        c->jsonFields.push_back(f.name);
-      }
-    }
-  }
-  jsonProblems_[cls] = problem;
-
-  return problem;
 }
 
 Expr *ReflectChecker::checkReflection(CallExpr *call, MemberExpr *member, const Type *expected) {
@@ -568,45 +488,6 @@ Expr *ReflectChecker::checkReflection(CallExpr *call, MemberExpr *member, const 
   checker_.reflectionUsed_ |= !known && !onlyChecked();
   call->builtin = Builtin::ReflectConstruct;
   call->type = Type::result(ClassValueChecker::constructedBy(cls->type), reflectError());
-
-  return call;
-}
-
-Expr *ReflectChecker::checkFromJsonClass(CallExpr *call, NameExpr *name) {
-  call->type = Type::error();
-  Expr *&cls = call->args[0];
-  cls = checker_.exprChecker().checkExpr(cls);
-  Expr *arg = checker_.exprChecker().checkExpr(call->args[1], Type::json());
-  call->args[1] = checker_.typeRelations().coerce(arg, Type::json());
-  const Type *type = cls->type;
-  if (type->isError()) {
-    return call;
-  }
-  if (!type->isClassRef()) {
-    checker_.diags_.error(cls->loc(),
-                          "fromJson(cls, j) makes an object of the class 'cls', and this is a '" +
-                              type->name() + "'; to build a value of a type, write 'fromJson<" +
-                              type->name() + ">(j)'");
-    return call;
-  }
-  if (const ClassDecl *known = type->classRef()) {
-    std::string problem = known->type ? classJsonProblem(known)
-                                      : "'" + known->name.str() + "' is a class of JavaScript";
-    if (!problem.empty()) {
-      checker_.diags_.error(name->loc(), "fromJson cannot make a '" + known->name.str() +
-                                             "' from a Json: " + problem);
-      return call;
-    }
-    call->type = known->type;
-  } else {
-    if (!onlyChecked()) {
-      checker_.reflectionUsed_ = true;
-      jsonReflect_ = true;
-    }
-    call->type = type->constructed();
-  }
-  call->type = Type::result(call->type, checker_.prelude().builtinType("JsonError"));
-  call->builtin = Builtin::FromJsonClass;
 
   return call;
 }

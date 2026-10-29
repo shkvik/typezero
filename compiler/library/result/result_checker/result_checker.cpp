@@ -3,6 +3,7 @@
 #include "compiler/check/expr/argument_checker/argument_checker.h"
 #include "compiler/check/expr/call_checker/call_checker.h"
 #include "compiler/check/expr/expr_checker/expr_checker.h"
+#include "compiler/check/flow/field_facts/field_facts.h"
 #include "compiler/check/functions/closure_checker/closure_checker.h"
 #include "compiler/check/types/type_relations/type_relations.h"
 #include "compiler/library/result/result_types/result_types.h"
@@ -247,7 +248,7 @@ Expr *ResultChecker::checkResultMember(MemberExpr *member) {
   if (name == "value") {
     if (type->errType()->isNever()) {
       member->type = halfParam(type->okType());
-      return member;
+      return checker_.fieldFacts().narrowedField(member);
     }
     checker_.diags_.error(member->loc(),
                           "'value' is there only when the Result is an Ok: check it first, 'if (" +
@@ -255,7 +256,7 @@ Expr *ResultChecker::checkResultMember(MemberExpr *member) {
   } else if (name == "error") {
     if (type->okType()->isNever()) {
       member->type = halfParam(type->errType());
-      return member;
+      return checker_.fieldFacts().narrowedField(member);
     }
     checker_.diags_.error(member->loc(),
                           "'error' is there only when the Result is an Err: check it first, 'if (" +
@@ -306,7 +307,7 @@ void ResultChecker::checkDiscarded(const Expr *expr, bool callback, llvm::SMLoc 
   } else {
     checker_.diags_.error(expr->loc(),
                           "the Result is not used, so an error in it would go unchecked; handle "
-                          "it, e.g. with '.match(...)', or keep it in a variable");
+                          "it, e.g. with '.match(...)', or keep it in a variable and check it");
   }
 }
 

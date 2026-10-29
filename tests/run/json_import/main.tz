@@ -1,0 +1,20 @@
+// A JSON file imported with 'with { type: "json" }' is embedded when the
+// program is built: its value is a literal of the program, one for all
+// imports; the type is exact (int without a point, double with one), and
+// what has no single type (null, mixed arrays, []) is Json.
+import config from "./config.json" with { type: "json" }
+import colors from "./colors.json" with { type: "json" }
+import { hostOf, sameConfig } from "./names"
+
+type Service = { name: string; port?: int }
+
+const next: int = config.port + 1
+console.log(next, config.host.toUpperCase(), config.ratio * 2)
+console.log(config.proxy == null, config.tags, config.sizes, config.empty, config.grid)
+console.log(config["content-type"], config.level, config.deep.flags, config.deep.note)
+const services: Service[] = config.services
+for (const service of services) console.log(service.name, service.port ?? "no port")
+console.log(colors.map(c => c.toUpperCase()).join(" "), colors.length)
+console.log(hostOf(), sameConfig == config)
+const text = JSON.stringify(config)
+if (text.isOk()) console.log(text.value)

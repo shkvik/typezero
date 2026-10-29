@@ -119,7 +119,8 @@ Expr *ExprChecker::checkExprKind(Expr *expr, const Type *expected, bool wraps) {
     if (Expr *null = checker_.jsonChecker().checkNull(cast<NameExpr>(expr), expected)) {
       return null;
     }
-    return checker_.nameChecker().checkName(cast<NameExpr>(expr));
+    return checker_.literalTypes().constText(checker_.nameChecker().checkName(cast<NameExpr>(expr)),
+                                             expected);
   case Expr::Kind::Member:
     return checker_.memberChecker().checkMember(cast<MemberExpr>(expr), expected);
   case Expr::Kind::Index:

@@ -382,7 +382,8 @@ Expr *EmitterChecker::callLibraryMethod(CallExpr *call, MemberExpr *member, Clas
 Expr *EmitterChecker::checkEmitterCall(CallExpr *call, MemberExpr *member, ClassDecl *cls,
                                        bool super) {
   EmitterMethod kind = emitterMethod(member->name);
-  if (kind == EmitterMethod::None || checker_.libraryCalls().inLibrary(call->loc())) {
+  bool library = checker_.libraryCalls().inLibrary(call->loc());
+  if (kind == EmitterMethod::None || (library && kind != EmitterMethod::Emit)) {
     return nullptr;
   }
   std::vector<FunctionDecl *> methods = ClassDeclarer::methodsNamed(cls, member->name, false);
@@ -391,7 +392,7 @@ Expr *EmitterChecker::checkEmitterCall(CallExpr *call, MemberExpr *member, Class
   }
   const Type *receiver = member->object->type;
   const Type *events = checker_.eventMaps().eventMapOf(receiver);
-  if (!events) {
+  if (!events || (library && mentionsParam(events))) {
     return nullptr;
   }
   call->type = Type::error();
@@ -457,7 +458,7 @@ Expr *EmitterChecker::checkEmitterCall(CallExpr *call, MemberExpr *member, Class
       checkArgsLoosely(1);
       return call;
     }
-    if (event == "error") {
+    if (event == "error" && !library) {
       checker_.errorEmits_.push_back({events, member->loc()});
     }
     std::vector<bool> given(call->args.size(), false);

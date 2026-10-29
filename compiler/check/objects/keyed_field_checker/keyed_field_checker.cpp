@@ -3,6 +3,8 @@
 #include "compiler/check/expr/expr_checker/expr_checker.h"
 #include "compiler/check/flow/field_facts/field_facts.h"
 #include "compiler/check/objects/object_checker/object_checker.h"
+#include "compiler/check/types/literal_types/literal_types.h"
+#include "compiler/check/types/type_relations/type_relations.h"
 #include "compiler/declare/class_declarer/class_declarer.h"
 #include "compiler/declare/constant_folder/constant_folder.h"
 #include "compiler/whole_program/flows/flows.h"
@@ -159,11 +161,16 @@ Expr *KeyedFieldChecker::checkKeyedField(IndexExpr *index, bool write) {
     name = std::to_string(*position);
   } else {
     index->index = checker_.exprChecker().checkExpr(index->index);
+    std::optional<std::string> key = constantKey(index->index);
+    if (const Type *texts =
+            key ? nullptr : checker_.literalTypes().constTextType(index->index, nullptr);
+        texts && keyedFieldType(type, texts)) {
+      index->index = checker_.typeRelations().convert(index->index, texts);
+    }
     const Type *keyType = index->index->type;
     if (keyType->isError()) {
       return index;
     }
-    std::optional<std::string> key = constantKey(index->index);
     if (const Type *field = key ? nullptr : keyedFieldType(type, keyType)) {
       llvm::ArrayRef<const Type *> names =
           keyType->isUnion() ? keyType->members() : llvm::ArrayRef<const Type *>(keyType);

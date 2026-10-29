@@ -45,7 +45,7 @@ llvm::StructType *ClassInfoLowerer::classInfoType() {
   if (!classInfoTy_) {
     llvm::Type *ptr = lowering_.builder_.getPtrTy();
     classInfoTy_ = llvm::StructType::create(
-        lowering_.ctx_, {ptr, ptr, ptr, lowering_.builder_.getInt32Ty()}, "tz.classinfo");
+        lowering_.ctx_, {ptr, ptr, lowering_.builder_.getInt32Ty()}, "tz.classinfo");
   }
 
   return classInfoTy_;

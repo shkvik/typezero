@@ -1,0 +1,14 @@
+// A narrowed error or value of a Result is forgotten when the Result is replaced.
+type Shape = { kind: "CIRCLE"; radius: number } | { kind: "SQUARE"; side: number }
+
+function make(n: int): Result<int, Shape> {
+  if (n == 0) return err({ kind: "CIRCLE", radius: 2 })
+  return ok(n)
+}
+
+let r = make(0)
+if (r.isErr() && r.error.kind == "CIRCLE") {
+  r = make(1)
+  // expect-error: property 'radius' does not exist on '{ kind: "SQUARE"; side: double }', which '{ kind: "CIRCLE"; radius: double } | { kind: "SQUARE"; side: double }' may be; narrow it first, e.g. 'if (r.error.kind == "CIRCLE")'
+  if (r.isErr()) console.log(r.error.radius)
+}

@@ -140,6 +140,17 @@ std::optional<bool> GenericChecker::constantCondition(const Expr *cond) const {
     return std::nullopt;
   }
   for (auto [side, other] : {std::pair{bin->lhs, bin->rhs}, std::pair{bin->rhs, bin->lhs}}) {
+    const Expr *operand = side;
+    while (isa<CastExpr>(operand) && cast<CastExpr>(operand)->isImplicit()) {
+      operand = cast<CastExpr>(operand)->operand;
+    }
+    const Type *type = operand->type;
+    if (isa<UndefinedExpr>(other) && isa<NameExpr>(operand) &&
+        (type->isUndefined() || (type->isOptional() && type->inner()->isNever()))) {
+      return bin->op == BinaryOp::Eq;
+    }
+  }
+  for (auto [side, other] : {std::pair{bin->lhs, bin->rhs}, std::pair{bin->rhs, bin->lhs}}) {
     auto *typeOf = dyn_cast<UnaryExpr>(side);
     auto *text = dyn_cast<StringLitExpr>(other);
     if (!typeOf || typeOf->op != UnaryOp::TypeOf || !text) {

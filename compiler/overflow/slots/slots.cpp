@@ -129,8 +129,6 @@ bool Slots::isPrivateArray(const Expr *expr) const {
     case Builtin::ArrayFrom:
     case Builtin::StrSplit:
     case Builtin::StrSplitRegex:
-    case Builtin::JsonParseAs:
-    case Builtin::FromJson:
       return true;
     default:
       return false;

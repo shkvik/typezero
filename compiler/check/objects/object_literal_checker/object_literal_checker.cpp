@@ -161,7 +161,9 @@ Expr *ObjectLiteralChecker::checkObjectLit(ObjectLitExpr *lit, const Type *expec
     if (target) {
       const Field *field = target->field(prop.name);
       if (!field) {
-        prop.value = checker_.exprChecker().checkExpr(prop.value);
+        if (!checker_.prechecked_.erase(prop.value)) {
+          prop.value = checker_.exprChecker().checkExpr(prop.value);
+        }
         if (!target->overload(prop.name)) {
           checker_.diags_.error(prop.loc,
                                 "type '" + target->name() + "' has no field '" + prop.name +
@@ -169,11 +171,15 @@ Expr *ObjectLiteralChecker::checkObjectLit(ObjectLitExpr *lit, const Type *expec
         }
         continue;
       }
-      prop.value = checker_.typeRelations().coerce(
-          checker_.exprChecker().checkExpr(prop.value, field->type), field->type, what);
+      Expr *value = checker_.prechecked_.erase(prop.value)
+                        ? prop.value
+                        : checker_.exprChecker().checkExpr(prop.value, field->type);
+      prop.value = checker_.typeRelations().coerce(value, field->type, what);
       continue;
     }
-    prop.value = checker_.exprChecker().checkExpr(prop.value);
+    if (!checker_.prechecked_.erase(prop.value)) {
+      prop.value = checker_.exprChecker().checkExpr(prop.value);
+    }
     const Type *type = prop.value->type;
     if (type->isError()) {
       ok = false;

@@ -1,0 +1,31 @@
+// A check on the error or the value of a Result narrows it, as a check on a field does.
+type Shape = { kind: "CIRCLE"; radius: number } | { kind: "SQUARE"; side: number }
+
+function make(n: int): Result<Shape, Shape> {
+  if (n == 0) return err({ kind: "CIRCLE", radius: 2 })
+  return ok({ kind: "SQUARE", side: 3 })
+}
+
+const failed = make(0)
+if (failed.isErr() && failed.error.kind == "CIRCLE") {
+  console.log("radius", failed.error.radius)
+  const e = failed.error
+  console.log("copied", e.radius)
+}
+if (failed.isErr()) {
+  if (failed.error.kind == "SQUARE") console.log("never")
+  else console.log("else", failed.error.radius)
+}
+
+const made = make(1)
+if (made.isOk() && made.value.kind != "CIRCLE") {
+  const shape = made.value
+  console.log("side", made.value.side, shape.side)
+}
+
+function area(r: Result<Shape, string>) {
+  if (r.isErr()) return -1
+  if (r.value.kind == "CIRCLE") return 3 * r.value.radius * r.value.radius
+  return r.value.side * r.value.side
+}
+console.log(area(ok({ kind: "CIRCLE", radius: 1 })), area(ok({ kind: "SQUARE", side: 4 })), area(err("x")))

@@ -1,5 +1,6 @@
 #include "compiler/load/loader/loader.h"
 #include "compiler/check/checker/checker.h"
+#include "compiler/load/json_module/json_module.h"
 #include "compiler/load/lexer/lexer.h"
 #include "compiler/load/library_modules/library_modules.h"
 #include "compiler/load/module_resolver/module_resolver.h"
@@ -91,6 +92,40 @@ Module *Loader::parse(const std::string &filePath, const std::string &realPath, 
   library().importFsStreams(module, text);
   library().importProcessSignals(module, text);
   loadDeclarations(module, filePath, false);
+  byRealPath_[realPath] = module;
+  realPaths_[module] = realPath;
+  states_[module] = State::New;
+
+  return module;
+}
+
+Module *Loader::parseJson(const std::string &filePath, const std::string &realPath,
+                          std::string name, std::string &error) {
+  auto buffer = llvm::MemoryBuffer::getFile(filePath);
+  if (!buffer) {
+    error = buffer.getError().message();
+    return nullptr;
+  }
+  unsigned id = sourceMgr_.AddNewSourceBuffer(std::move(*buffer), llvm::SMLoc());
+  llvm::StringRef json = sourceMgr_.getMemoryBuffer(id)->getBuffer();
+  size_t skipped = json.starts_with("\xEF\xBB\xBF") ? 3 : 0;
+  std::string source;
+  size_t at = 0;
+  std::string problem;
+  if (!jsonModuleText(json.drop_front(skipped), kJsonExport, source, at, problem)) {
+    diags_.error(llvm::SMLoc::getFromPointer(json.data() + skipped + at),
+                 "'" + name + "' is not JSON: " + problem);
+    return nullptr;
+  }
+  unsigned generated = sourceMgr_.AddNewSourceBuffer(
+      llvm::MemoryBuffer::getMemBufferCopy(source, filePath), llvm::SMLoc());
+  llvm::StringRef text = sourceMgr_.getMemoryBuffer(generated)->getBuffer();
+
+  Module *module = ctx_.newModule();
+  module->path = filePath;
+  module->name = std::move(name);
+  Lexer lexer(text, diags_);
+  module->file = Parser(lexer, ctx_, diags_).parseSourceFile();
   byRealPath_[realPath] = module;
   realPaths_[module] = realPath;
   states_[module] = State::New;

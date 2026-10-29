@@ -217,10 +217,7 @@ enum class Builtin {
   StrReplaceRegexFn,
   StrSplitRegex,
   JsonParse,
-  JsonParseAs,
-  FromJson,
   JsonStringify,
-  EmbedJson,
   ArrayIsArray,
   WeakRefNew,
   WeakRefDeref,
@@ -463,7 +460,6 @@ enum class Builtin {
   ReflectGet,
   ReflectApply,
   ReflectConstruct,
-  FromJsonClass,
   ReflectMethod,
 };
 

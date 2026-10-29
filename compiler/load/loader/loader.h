@@ -28,6 +28,8 @@ private:
   enum class State { New, Loading, Loaded };
   Module *parse(const std::string &filePath, const std::string &realPath, std::string name,
                 std::string &error);
+  Module *parseJson(const std::string &filePath, const std::string &realPath, std::string name,
+                    std::string &error);
   void visit(Module *module);
   std::string relativeName(llvm::StringRef realPath) const;
   void loadDeclarations(Module *module, llvm::StringRef filePath, bool library);

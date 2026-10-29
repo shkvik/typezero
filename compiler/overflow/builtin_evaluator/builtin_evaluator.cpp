@@ -223,15 +223,6 @@ Val BuiltinEvaluator::evalBuiltin(const CallExpr *call, State &st) {
     }
     return numVal(type->isInteger() ? narrowTo(x, limitsOf(type).lo, limitsOf(type).hi) : x);
   }
-  case Builtin::JsonParseAs:
-  case Builtin::FromJson: {
-    const Reason *why = check_.overflowWarnings().reason(Origin::Input, call->loc(), "JSON");
-    llvm::SmallPtrSet<const Type *, 8> seen;
-    jsonValues(type->okType(), why, seen);
-    Val result;
-    result.elem = share(jsonVal(type->okType(), why));
-    return result;
-  }
   case Builtin::StrCharCodeAt:
     return numVal(range(0, 65535));
   case Builtin::StrCodePointAt:
@@ -713,57 +704,6 @@ Val BuiltinEvaluator::evalMath(const CallExpr *call, State &st) {
     return numVal(range(kInt32Min, kInt32Max));
   default:
     return check_.overflowWarnings().trusted(type);
-  }
-}
-
-Val BuiltinEvaluator::jsonVal(const Type *type, const Reason *why) {
-  if (!type) {
-    return Val();
-  }
-  const Type *base = type->nonOptional();
-  Val v;
-  if (isNumberType(base)) {
-    Limits l = limitsOf(base);
-    v.num = range(l.lo, l.hi, Origin::Input, why);
-  } else if (base->isString()) {
-    v.len = someLength();
-  } else if (base->isArray()) {
-    v.len = someLength();
-    v.elem = share(jsonVal(base->inner(), why));
-  }
-
-  return v;
-}
-
-void BuiltinEvaluator::jsonValues(const Type *type, const Reason *why,
-                                  llvm::SmallPtrSetImpl<const Type *> &seen) {
-  if (!type) {
-    return;
-  }
-  type = type->nonOptional();
-  if (type->isArray()) {
-    jsonValues(type->inner(), why, seen);
-    return;
-  }
-  if (type->isUnion()) {
-    for (const Type *m : type->members()) {
-      jsonValues(m, why, seen);
-    }
-    return;
-  }
-  if (type->isDict()) {
-    check_.contribute(check_.next_.dicts[type], jsonVal(type->valueType(), why));
-    jsonValues(type->valueType(), why, seen);
-    return;
-  }
-  if (!type->isObject() || !seen.insert(type).second) {
-    return;
-  }
-  for (const Field &f : type->fields()) {
-    if (tracked(f.type)) {
-      check_.slots().storeField(type, f.name, f.type, jsonVal(f.type, why));
-    }
-    jsonValues(f.type, why, seen);
   }
 }
 

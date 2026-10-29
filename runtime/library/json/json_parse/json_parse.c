@@ -189,7 +189,7 @@ TZ_NORETURN static void unexpected(Parser *p, int token, const char *message) {
     tz_buf_ascii(&b, " is not valid JSON");
   }
   tz_buf_free(&p->text);
-  tz_json_fail("ERR_INVALID_JSON", &b, NULL);
+  tz_json_fail("ERR_INVALID_JSON", &b);
   __builtin_longjmp(p->fail, 1);
 }
 
@@ -529,63 +529,4 @@ TzJson *tz_json_parse(void *obj, uint64_t meta) {
   tz_buf_free(&p.text);
 
   return result;
-}
-
-typedef struct {
-  TzJson **slots[64];
-  TzJson ***more;
-  size_t count, capacity;
-} Caches;
-
-Caches tz_json_caches;
-
-TzLock tz_json_embed_lock;
-
-TzJson *tz_json_embed(TzJson **cache, void *obj, uint64_t meta) {
-  TzJson *found = __atomic_load_n(cache, __ATOMIC_ACQUIRE);
-  if (found) {
-    return tz_json_retained(found);
-  }
-  tz_lock(&tz_json_embed_lock);
-  if (!*cache) {
-    TzJson *parsed = tz_json_parse(obj, meta);
-#if TZ_PARALLEL
-    tz_json_publish(parsed);
-#endif
-    __atomic_store_n(cache, parsed, __ATOMIC_RELEASE);
-    Caches *c = &tz_json_caches;
-    if (c->count < 64) {
-      c->slots[c->count] = cache;
-    } else {
-      size_t extra = c->count - 64;
-      if (extra == c->capacity) {
-        size_t capacity = c->capacity * 2 + 16;
-        TzJson ***more = (TzJson ***)tz_alloc(capacity * sizeof(TzJson **));
-        if (extra) {
-          memcpy(more, c->more, extra * sizeof(TzJson **));
-        }
-        tz_free(c->more);
-        c->more = more;
-        c->capacity = capacity;
-      }
-      c->more[extra] = cache;
-    }
-    ++c->count;
-  }
-  found = *cache;
-  tz_unlock(&tz_json_embed_lock);
-
-  return tz_json_retained(found);
-}
-
-void tz_json_shutdown(void) {
-  Caches *c = &tz_json_caches;
-  for (size_t i = 0; i < c->count; ++i) {
-    TzJson **cache = i < 64 ? c->slots[i] : c->more[i - 64];
-    TzJson *j = *cache;
-    *cache = NULL;
-    tz_json_release(j);
-  }
-  tz_free(c->more);
-  memset(c, 0, sizeof *c);
 }

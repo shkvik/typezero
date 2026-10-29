@@ -480,6 +480,27 @@ Expr *TypeRelations::coerce(Expr *expr, const Type *to, llvm::StringRef what) {
     message += "; the types of functions must match exactly: wrap it in an arrow that converts "
                "what it needs";
   }
+  auto stream = [](const Type *t) -> const ClassDecl * {
+    const ClassDecl *cls = t->classDecl();
+    return cls && cls->library && cls->generic && cls->generic->name == "ReadableStream" &&
+                   cls->typeArgs.size() == 2
+               ? cls
+               : nullptr;
+  };
+  llvm::ArrayRef<const Type *> wanted =
+      toObject->isUnion() ? toObject->members() : llvm::ArrayRef<const Type *>(toObject);
+  if (const ClassDecl *given = stream(fromObject);
+      given && !given->typeArgs[1]->isNever() &&
+      llvm::any_of(wanted, [&](const Type *m) { return stream(m) != nullptr; })) {
+    message += "; a stream with errors of its own is sent with a method that takes their type: "
+               "'Response.stream(stream, init)' for a response, 'fetch(url, { body: stream })' "
+               "for a request";
+  }
+  if (to->isNever()) {
+    message += "; nothing fits 'never': if it comes from a type argument left out, write it, "
+               "e.g. 'new ReadableStream<int, MyError>(...)' for a stream that fails with "
+               "MyError";
+  }
   const std::vector<std::pair<const Type *, llvm::SMLoc>> *places = nullptr;
   const Type *otherPlace = nullptr;
   if (auto *name = dyn_cast<NameExpr>(expr); name && name->var) {

@@ -153,6 +153,7 @@ const user: User = {
    `FieldFacts::fieldPath`); факты о полях выходят из функции-проверки в `if` и в ветку `false`
    (`PredicateChecker`: `narrowedFields` в сводке); `JSON.parse<T>`, `fromJson`, `embedJson`
    убраны (`fromJson` / `embedJson` — просто неизвестные имена); `JSON.parse` литерала или
-   `embedText` проверяется при сборке; `webcrypto` разбирает JWK своей функцией. Остался код
-   перевода по типу внутри компилятора (`FromJsonLowerer`, `json_typed.c`, `from_json` в описании
-   класса) — до него больше нет пути, удалить отдельным шагом.
+   `embedText` проверяется при сборке; `webcrypto` разбирает JWK своей функцией. Код перевода
+   по типу внутри компилятора (`FromJsonLowerer`, `json_typed.c`, `from_json` в описании класса,
+   `JsonTypeChecker`, разовый разбор `embedJson`) удалён 29 октября; у `JsonError` больше нет
+   поля `path` — оно было только у ошибок перевода по типу.

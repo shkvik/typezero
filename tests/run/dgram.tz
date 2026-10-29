@@ -1,0 +1,120 @@
+// node:dgram over the runtime's UDP (docs/net.md, section 7): a socket binds
+// with a Result, gets messages as events with the sender, sends with a Result;
+// a connected socket sends without an address; errors have a kind. Only
+// 127.0.0.1.
+import { Socket, RemoteInfo } from "node:dgram"
+
+const server = new Socket({ type: "udp4", address: "127.0.0.1" })
+server.on("error", e => console.log("server error:", e.message))
+server.on("listening", () => console.log("listening"))
+const seen: string[] = []
+const echoed = Promise.withResolvers<void>()
+async function echo(data: Buffer, from: RemoteInfo) {
+  const sentResult = await server.send(data.toString().toUpperCase(), { address: from.address, port: from.port })
+  if (sentResult.isErr()) console.log("echo:", sentResult.error.message)
+}
+server.on("message", (data, from) => {
+  seen.push(`${data.toString()} from ${from.family} ${from.address} ${from.size}`)
+  void echo(data, from)
+  if (seen.length == 2) echoed.resolve()
+})
+const boundResult = await server.bind()
+if (boundResult.isErr()) {
+  console.log("cannot bind:", boundResult.error.message)
+  process.exit(1)
+}
+const local = server.address()
+const port = local?.port ?? 0
+console.log("bound:", local?.address, local?.family, port > 0)
+
+const client = new Socket({ type: "udp4" })
+client.on("error", e => console.log("client error:", e.message))
+const answers = Promise.withResolvers<string[]>()
+const got: string[] = []
+client.on("message", (data: Buffer, from: RemoteInfo) => {
+  got.push(`${data.toString()} ${from.port == port}`)
+  if (got.length == 2) answers.resolve(got)
+})
+const sentResult = await client.send("hello", { address: "127.0.0.1", port: port })
+console.log("sent:", sentResult.isOk())
+const bytesResult = await client.send(new Uint8Array([119, 111, 114, 108, 100]), { address: "localhost", port: port })
+console.log("sent bytes:", bytesResult.isOk())
+await echoed.promise
+console.log(seen.join("; "))
+console.log((await answers.promise).join("; "))
+
+const tooBig = await client.send(new Uint8Array(70000), { address: "127.0.0.1", port: port })
+if (tooBig.isErr()) console.log(tooBig.error.kind, tooBig.error.code, tooBig.error.message)
+const noAddress = await client.send("x")
+if (noAddress.isErr()) console.log(noAddress.error.kind, noAddress.error.code)
+
+const taken = new Socket({ type: "udp4", address: "127.0.0.1", port: port })
+const takenResult = await taken.bind()
+if (takenResult.isErr()) {
+  const e = takenResult.error
+  console.log(e.kind, e.code, e.message.replaceAll(String(port), "PORT"))
+}
+const twice = await server.bind()
+if (twice.isErr()) console.log(twice.error.kind, twice.error.code)
+
+const connected = new Socket({ type: "udp4" })
+connected.on("error", e => console.log("connected error:", e.message))
+const connectResult = await connected.connect({ address: "127.0.0.1", port: port })
+console.log("connected:", connectResult.isOk(), connected.remoteAddress()?.port == port)
+const viaConnection = Promise.withResolvers<string>()
+connected.on("message", data => viaConnection.resolve(data.toString()))
+const plainResult = await connected.send("ping")
+console.log("connected send:", plainResult.isOk(), await viaConnection.promise)
+const withAddress = await connected.send("x", { address: "127.0.0.1", port: port })
+if (withAddress.isErr()) console.log(withAddress.error.kind, withAddress.error.code)
+const again = await connected.connect({ address: "127.0.0.1", port: port })
+if (again.isErr()) console.log(again.error.kind, again.error.code)
+console.log("disconnect:", connected.disconnect().isOk(), connected.remoteAddress() == undefined)
+
+const group = server.addMembership("10.0.0.1")
+if (group.isErr()) console.log(group.error.kind, group.error.code)
+const unbound = new Socket({ type: "udp4" })
+const early = unbound.addMembership("239.255.0.1")
+if (early.isErr()) console.log(early.error.kind, early.error.code)
+
+const gone = new Socket({ type: "udp4", address: "127.0.0.1" })
+const goneBound = await gone.bind()
+const gonePort = gone.address()?.port ?? 0
+await gone.close()
+const lonely = new Socket({ type: "udp4" })
+lonely.on("error", e => console.log("lonely error:", e.message))
+const lonelyResult = await lonely.connect({ address: "127.0.0.1", port: gonePort })
+console.log("lonely:", goneBound.isOk(), lonelyResult.isOk())
+for (let i = 0; i < 20; i++) {
+  const triedResult = await lonely.send("anyone?")
+  if (triedResult.isErr()) {
+    const e = triedResult.error
+    console.log(e.kind, e.code, e.message.replaceAll(String(gonePort), "PORT"))
+    break
+  }
+  await new Promise<void>(resolve => setTimeout(resolve, 20))
+}
+const loud = new Socket({ type: "udp4" })
+loud.on("error", e => console.log("loud error:", e.message))
+const loudResult = await loud.send("x", { address: "255.255.255.255", port: 9 })
+if (loudResult.isErr()) console.log(loudResult.error.kind, loudResult.error.code, loudResult.error.message)
+
+const dual = new Socket()
+dual.on("error", e => console.log("dual error:", e.message))
+const dualGot = Promise.withResolvers<string>()
+dual.on("message", (data, from) => dualGot.resolve(`${data.toString()} ${from.family} ${from.address}`))
+const dualResult = await dual.bind()
+console.log("dual:", dualResult.isOk(), dual.address()?.address, dual.address()?.family)
+const mappedResult = await client.send("mapped", { address: "127.0.0.1", port: dual.address()?.port ?? 0 })
+console.log("mapped:", mappedResult.isOk(), await dualGot.promise)
+
+server.on("close", () => console.log("closed"))
+await client.close()
+await connected.close()
+await server.close()
+const afterClose = await server.send("x", { address: "127.0.0.1", port: port })
+if (afterClose.isErr()) console.log(afterClose.error.kind, afterClose.error.code)
+await unbound.close()
+await lonely.close()
+await loud.close()
+await dual.close()

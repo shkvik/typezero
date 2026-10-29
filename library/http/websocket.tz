@@ -617,7 +617,7 @@ export class WebSocket extends EventEmitter<WebSocketEvents> {
     }
     this.pieces = [];
     if (this.pieceOpcode == OP_BINARY) {
-      this.emit<[string | Uint8Array]>("message", message);
+      this.emit("message", message);
       return true;
     }
     const textResult = new TextDecoder("utf-8", { fatal: true }).decode(message);
@@ -625,7 +625,7 @@ export class WebSocket extends EventEmitter<WebSocketEvents> {
       this.fail({ kind: "PROTOCOL", code: "ERR_INVALID_UTF8", message: "a text message is not UTF-8" });
       return false;
     }
-    this.emit<[string | Uint8Array]>("message", textResult.value);
+    this.emit("message", textResult.value);
 
     return true;
   }

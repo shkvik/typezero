@@ -221,7 +221,6 @@ class IntlChecker;
 class IntlOptionsChecker;
 class IntlMethodChecker;
 class JsonChecker;
-class JsonTypeChecker;
 class JsonStaticChecker;
 class BuiltinModuleChecker;
 class FsChecker;
@@ -415,7 +414,6 @@ private:
 
     return type->isResult();
   }
-  using ClassProblem = llvm::function_ref<std::string(const ClassDecl *)>;
   struct NarrowTarget {
     const VarSymbol *var = nullptr;
     std::optional<FieldPath> path;
@@ -502,6 +500,8 @@ private:
   llvm::StringMap<FunctionDecl *> libFunctions_;
   llvm::StringMap<TypeAliasDecl *> libTypes_;
   llvm::DenseMap<const VarSymbol *, const Expr *> constLiterals_;
+  llvm::SmallPtrSet<const Expr *, 4> prechecked_;
+  std::vector<VarSymbol *> resultVars_;
   bool isDefined(const VarSymbol *var) const { return flow_.defined.contains(var); }
   struct Binding {
     Module *module = nullptr;
@@ -796,7 +796,6 @@ public:
   IntlOptionsChecker &intlOptionsChecker() const { return *intlOptionsCheckerPart_; }
   IntlMethodChecker &intlMethodChecker() const { return *intlMethodCheckerPart_; }
   JsonChecker &jsonChecker() const { return *jsonCheckerPart_; }
-  JsonTypeChecker &jsonTypeChecker() const { return *jsonTypeCheckerPart_; }
   JsonStaticChecker &jsonStaticChecker() const { return *jsonStaticCheckerPart_; }
   BuiltinModuleChecker &builtinModuleChecker() const { return *builtinModuleCheckerPart_; }
   FsChecker &fsChecker() const { return *fsCheckerPart_; }
@@ -962,7 +961,6 @@ private:
   friend class IntlOptionsChecker;
   friend class IntlMethodChecker;
   friend class JsonChecker;
-  friend class JsonTypeChecker;
   friend class JsonStaticChecker;
   friend class BuiltinModuleChecker;
   friend class FsChecker;
@@ -1120,7 +1118,6 @@ private:
   std::unique_ptr<IntlOptionsChecker> intlOptionsCheckerPart_;
   std::unique_ptr<IntlMethodChecker> intlMethodCheckerPart_;
   std::unique_ptr<JsonChecker> jsonCheckerPart_;
-  std::unique_ptr<JsonTypeChecker> jsonTypeCheckerPart_;
   std::unique_ptr<JsonStaticChecker> jsonStaticCheckerPart_;
   std::unique_ptr<BuiltinModuleChecker> builtinModuleCheckerPart_;
   std::unique_ptr<FsChecker> fsCheckerPart_;

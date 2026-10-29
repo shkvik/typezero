@@ -135,7 +135,14 @@ const Type *AliasInstantiator::instantiateAlias(TypeAliasDecl *alias,
       type = Type::error();
       break;
     }
-    std::string display = alias->name.str() + "<" + typeList(args) + ">";
+    size_t shown = args.size();
+    while (shown > 0 && defaults[shown - 1] && defaults[shown - 1]->isNever() &&
+           args[shown - 1]->isNever()) {
+      --shown;
+    }
+    std::string display = shown == 0 ? alias->name.str()
+                                     : alias->name.str() + "<" +
+                                           typeList(llvm::ArrayRef(args).take_front(shown)) + ">";
     entry.resolving = true;
     chain.push_back(&entry);
     ++aliasDepth_;
@@ -188,6 +195,9 @@ const Type *AliasInstantiator::instantiateAlias(TypeAliasDecl *alias,
     }
     if (type->isObject() && !type->isError() && !checker_.aliasOrigins_.count(type)) {
       checker_.aliasOrigins_[type] = {alias, args};
+    }
+    if (type->isUnion() && checker_.builtinAliases_.lookup(alias->name) == alias) {
+      Type::nameUnion(type, display);
     }
   }
   for (Checker::AliasInstance *entry : chain) {

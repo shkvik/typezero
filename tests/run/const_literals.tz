@@ -1,0 +1,48 @@
+// A const holding a string, or a choice of strings, fits a parameter of literal
+// types, as in TypeScript; a let, or a const with a written type, stays a string.
+type Dir = "up" | "down"
+
+function move(direction: Dir): string {
+  return `move ${direction}`
+}
+
+class Car {
+  public dir: Dir
+
+  public constructor(dir: Dir) {
+    this.dir = dir
+  }
+
+  public turn(to: Dir, speed?: "slow" | "fast"): string {
+    return `${to} ${speed ?? "-"}`
+  }
+}
+
+const fast = process.argv.length > 5
+const d = "up"
+const e = fast ? "up" : "down"
+const alias = e
+console.log(move(d), move(e), move(alias))
+
+function pick(): Dir {
+  const x = fast ? "up" : "down"
+
+  return x
+}
+console.log(pick())
+
+const car = new Car(d)
+const slow = "slow"
+console.log(car.dir, car.turn(e, slow))
+const opts: { dir: Dir; label: string } = { dir: e, label: d }
+const dirs: Dir[] = [d, e]
+console.log(opts.dir, opts.label, dirs.join())
+
+const counts = { up: 1, down: 2 }
+console.log(counts[d], counts[e])
+
+let changing = d
+changing = "anything"
+const words = [d, "left"]
+words.push("right")
+console.log(changing, words.join(), d.length, `${d}!`)

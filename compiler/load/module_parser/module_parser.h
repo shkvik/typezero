@@ -15,6 +15,8 @@ public:
   void exportDeclared(const Stmt *stmt);
 
 private:
+  bool parseImportAttributes(bool json);
+
   Parser &parser_;
 };
 

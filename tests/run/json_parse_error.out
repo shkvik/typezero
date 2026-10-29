@@ -2,7 +2,6 @@ Ok { value: { ok: [ 1, 2 ] } }
 {
   kind: 'JSON',
   code: 'ERR_INVALID_JSON',
-  message: "Expected ',' or '}' after property value in JSON at position 13 (line 3 column 3)",
-  path: ''
+  message: "Expected ',' or '}' after property value in JSON at position 13 (line 3 column 3)"
 }
 ERR_INVALID_JSON: Unexpected end of JSON input

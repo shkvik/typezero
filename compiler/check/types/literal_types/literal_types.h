@@ -18,6 +18,8 @@ public:
   const Type *literalMember(const ObjectLitExpr *lit, const Type *target) const;
   const Type *typeIn(const Checker::Flow &flow, const VarSymbol *var) const;
   std::optional<std::vector<std::string>> knownTexts(const Expr *arg);
+  const Type *constTextType(const Expr *checked, const Type *expected);
+  Expr *constText(Expr *checked, const Type *expected);
   const Type *literalExpectation(const Type *expected, unsigned depth = 0);
 
 private:

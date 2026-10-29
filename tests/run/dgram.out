@@ -1,0 +1,24 @@
+listening
+bound: 127.0.0.1 IPv4 true
+sent: true
+sent bytes: true
+hello from IPv4 127.0.0.1 5; world from IPv4 127.0.0.1 5
+HELLO true; WORLD true
+TOO_LARGE EMSGSIZE the message is 70000 bytes; UDP carries at most 65507
+REQUEST ERR_NO_ADDRESS
+BIND EADDRINUSE could not bind to 127.0.0.1:PORT: another socket uses this port; pass reuseAddr: true to share it
+REQUEST ERR_SOCKET_BOUND
+connected: true true
+connected send: true PING
+REQUEST ERR_SOCKET_CONNECTED
+REQUEST ERR_SOCKET_CONNECTED
+disconnect: true true
+REQUEST ERR_INVALID_ADDRESS
+REQUEST ERR_SOCKET_NOT_BOUND
+lonely: true true
+NETWORK ECONNREFUSED nothing listens on 127.0.0.1:PORT: the system refused the last message sent there
+PERMISSION EACCES could not send to 255.255.255.255:9: a broadcast address needs the option broadcast: true
+dual: true :: IPv6
+mapped: true mapped IPv4 127.0.0.1
+closed
+CLOSED ERR_SOCKET_CLOSED

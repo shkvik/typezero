@@ -3,6 +3,7 @@
 #include "compiler/load/decl_parser/decl_parser.h"
 #include "compiler/load/expr_parser/expr_parser.h"
 #include "compiler/load/function_parser/function_parser.h"
+#include "compiler/load/json_module/json_module.h"
 #include "compiler/load/literal_text/literal_text.h"
 #include "compiler/load/pattern_parser/pattern_parser.h"
 #include "compiler/load/stmt_parser/stmt_parser.h"
@@ -92,19 +93,32 @@ Stmt *ModuleParser::parseImport(bool topLevel) {
   if (parser_.recovering_ || !parseFromPath(decl.path, decl.pathLoc)) {
     return parser_.ctx_.make<EmptyStmt>(loc);
   }
+  bool json = llvm::StringRef(decl.path).ends_with(".json");
+  bool jsonType = false;
   if (parser_.tok_.is(Tok::Identifier) &&
       (parser_.tok_.text == "with" || parser_.tok_.text == "assert") &&
       !parser_.tok_.newlineBefore) {
-    parser_.cursor().report(parser_.tok_.loc(),
-                            "import attributes are not supported; a data file is embedded with "
-                            "embedText");
-    parser_.cursor().advance();
-    if (parser_.tok_.is(Tok::LBrace)) {
-      parser_.cursor().advance();
-      parser_.cursor().skipToClosingBrace();
-    }
+    jsonType = parseImportAttributes(json);
   }
   parser_.cursor().expectSemicolon();
+  if (json) {
+    std::string name = defaultName.empty() ? "data" : defaultName.str();
+    std::string example =
+        "'import " + name + " from \"" + decl.path + "\" with { type: \"json\" }'";
+    if (form != Form::Default) {
+      parser_.cursor().report(formLoc,
+                              "a JSON file is one value: import it whole, e.g. " + example);
+      return parser_.ctx_.make<EmptyStmt>(loc);
+    }
+    if (!jsonType) {
+      parser_.cursor().report(decl.pathLoc, "a JSON file is imported with 'with { type: "
+                                            "\"json\" }', as in node and TypeScript: " +
+                                                example);
+    }
+    decl.names.push_back({kJsonExport, formLoc, defaultName, formLoc});
+    parser_.imports_.push_back(std::move(decl));
+    return parser_.ctx_.make<EmptyStmt>(loc);
+  }
   if (form != Form::Named && isBuiltinModule(decl.path) && !defaultName.empty()) {
     decl.whole = defaultName;
     decl.wholeLoc = formLoc;
@@ -300,6 +314,58 @@ void ModuleParser::parseModuleNames(std::vector<ModuleName> &names, bool import)
   }
   parser_.cursor().expect(Tok::RBrace,
                           import ? "to close the names to import" : "to close the names to export");
+}
+
+bool ModuleParser::parseImportAttributes(bool json) {
+  llvm::SMLoc at = parser_.tok_.loc();
+  bool old = parser_.tok_.text == "assert";
+  parser_.cursor().advance();
+  if (!parser_.cursor().expect(Tok::LBrace, "after 'with'")) {
+    return false;
+  }
+  bool typeJson = false;
+  bool other = false;
+  while (!parser_.tok_.is(Tok::RBrace) && !parser_.tok_.is(Tok::Eof)) {
+    std::string key;
+    llvm::SMLoc keyLoc;
+    if (parser_.tok_.is(Tok::Identifier)) {
+      key = parser_.tok_.text.str();
+      parser_.cursor().advance();
+    } else if (!parseFromPath(key, keyLoc, false)) {
+      parser_.cursor().skipToClosingBrace();
+      return false;
+    }
+    std::string value;
+    llvm::SMLoc valueLoc;
+    if (!parser_.cursor().expect(Tok::Colon, "after the name of an import attribute") ||
+        !parseFromPath(value, valueLoc, false)) {
+      parser_.cursor().skipToClosingBrace();
+      return false;
+    }
+    if (key == "type" && value == "json") {
+      typeJson = true;
+    } else {
+      other = true;
+    }
+    if (!parser_.cursor().accept(Tok::Comma)) {
+      break;
+    }
+  }
+  parser_.cursor().expect(Tok::RBrace, "after the import attributes");
+  if (!json) {
+    parser_.cursor().report(at, "import attributes are only for JSON files, e.g. 'import config "
+                                "from \"./config.json\" with { type: \"json\" }'");
+    return false;
+  }
+  if (old) {
+    parser_.cursor().report(at, "'assert' is the old form of import attributes; write 'with { "
+                                "type: \"json\" }'");
+  } else if (other) {
+    parser_.cursor().report(at, "a JSON file takes one import attribute: 'with { type: \"json\" "
+                                "}'");
+  }
+
+  return typeJson || old || other;
 }
 
 bool ModuleParser::parseFromPath(std::string &path, llvm::SMLoc &loc, bool from) {

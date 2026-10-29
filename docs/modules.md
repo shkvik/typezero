@@ -10,16 +10,17 @@
 
 - Файлы программ на tz — `.tz`: `main.tz`, `math.tz`. Файлы `.ts` и `.js` tz не собирает.
 - Импорт — одной формой: `import { a, b as c } from "./x"`. Импорта по умолчанию,
-  `export default`, `import * as`, `import "./x"` и слова `type` в импорте нет.
+  `export default`, `import * as`, `import "./x"` и слова `type` в импорте нет. Исключение —
+  файл JSON (с 29 октября, раздел 5): `import config from "./config.json" with { type: "json" }`.
 - Экспорт: `export` перед объявлением, `export { a, b as c }`, `export { a } from "./x"`,
   `export * from "./x"`.
 - `as` есть только в `import` и `export` — как переименование. Оператора `as` нет.
 - Циклические импорты разрешены. Ошибка компиляции — только если модуль при загрузке читает
   ещё не заданную переменную другого модуля (в node это `ReferenceError` при запуске).
 - Пакеты — по имени (`import { z } from "zod"`), из JSR и git: [packages.md](packages.md).
-- Файлы данных вшиваются в exe: `embedText(путь)` (JSON — `JSON.parse(embedText(путь))`,
-  проверяется при сборке; `embedJson` убран 29 октября, [narrowing.md](narrowing.md), раздел 3). У JSON свой тип `Json`;
-  `null` бывает только в нём.
+- Файлы данных вшиваются в exe: `embedText(путь)`, JSON — `import config from "./config.json"
+  with { type: "json" }` (точный тип) или `JSON.parse(embedText(путь))` (тип `Json`); оба
+  проверяются при сборке. У JSON свой тип `Json`; `null` бывает только в нём.
 
 ## 1. Импорт и экспорт
 
@@ -113,10 +114,34 @@ main.tz → a.tz → b.tz → (a.tz уже начат). Вычисли это в
 
 ## 5. Файлы данных и JSON
 
-**Вшить файл в exe:**
+**Импорт файла JSON** (решено и сделано 29 октября; примеры — `tmp/design/json-import.tz`):
 
 ```ts
-const config = JSON.parse(embedText("./config.json"))   // синтаксис проверяется при компиляции
+import config from "./config.json" with { type: "json" }
+// config.json: { "port": 8080, "host": "localhost", "proxy": null, "tags": ["web", null] }
+// тип:         { port: int; host: string; proxy: Json; tags: Json[] }
+console.log(config.port + 1)                    // 8081, без проверок
+```
+
+- Файл вшивается при сборке: его значение — литерал программы, будто его вставили в код руками.
+  При запуске ничего не читается и не разбирается; поменял файл — пересобери. Значение одно на
+  программу: все импорты одного файла — один объект.
+- `with { type: "json" }` обязателен, как в node и TS (стандарт ES2025). Только целиком:
+  `import { port } from "./config.json"` — ошибка (файл JSON — одно значение).
+- Тип точный: число без точки и без `e` — `int`, с ними — `double`; `[1, 2.5]` — `double[]`;
+  объекты в массиве с разными полями — один тип, поле, которого нет у части объектов, —
+  необязательное (`[{"name":"a","port":1},{"name":"b"}]` → `{ name: string; port?: int }[]`).
+  Всё, что не сводится к одному типу, — `Json`: `null`, `["a", 1]`, пустой `[]` (`Json[]`).
+- Свой тип — присваиванием, компилятор сверит при сборке: `const settings: Config = config`.
+- Кривой JSON — ошибка сборки с местом в файле JSON. Повторяющийся ключ — берётся последний,
+  как в JS. BOM в начале файла пропускается, как в node.
+- Внутри: файл JSON становится модулем `export const json: <тип> = <литерал>`
+  (`compiler/load/json_module`), импорт — `import { json as config }`.
+
+**Вшить текст в exe:**
+
+```ts
+const config = JSON.parse(embedText("./config.json"))   // Json; синтаксис проверяется при компиляции
 const page = embedText("./page.html")       // string
 ```
 

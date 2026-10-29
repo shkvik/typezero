@@ -48,7 +48,6 @@ struct TzJson {
 
 extern const TzType tz_json_type;
 int64_t tz_json_live_objects(void);
-void tz_json_shutdown(void);
 void tz_json_free(TzJson *j);
 static inline void tz_json_release(TzJson *j) {
   if (j && tz_rc_dec(&j->rc)) {
@@ -75,7 +74,7 @@ void tz_json_publish(TzJson *root);
 #endif
 
 void tz_json_errors(TzMaker make);
-void tz_json_fail(const char *code, TzBuf *message, TzBuf *path);
+void tz_json_fail(const char *code, TzBuf *message);
 
 typedef struct {
   TzStr flat;

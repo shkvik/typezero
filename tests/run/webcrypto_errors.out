@@ -1,29 +1,29 @@
-unknown name NotSupportedError Unrecognized algorithm name
+unknown name ERR_NOT_SUPPORTED Unrecognized algorithm name
 name case ok
-no usage InvalidAccessError Unable to use this key to sign
-wrong key InvalidAccessError The requested operation is not valid for the provided key
-cbc iv OperationError algorithm.iv must contain exactly 16 bytes
-gcm short InvalidAccessError The requested operation is not valid for the provided key
-not extractable InvalidAccessError key is not extractable
-bad der DataError Invalid keyData
-aes length DataError Invalid key length
-jwk alg DataError JWK "alg" does not match the requested algorithm
-jwk ext DataError JWK "ext" Parameter and extractable mismatch
-jwk ops DataError Key operations and usage mismatch
-jwk kty DataError Invalid JWK "kty" Parameter
-jwk use DataError Invalid JWK "use" Parameter
-missing hash TypeError Failed to normalize algorithm: passed algorithm can not be converted to 'HmacImportParams' because 'hash' is required in 'HmacImportParams'.
-derive usage InvalidAccessError baseKey does not have deriveBits usage
-iterations OperationError iterations cannot be zero
-public of ecdh InvalidAccessError algorithm.public must be a public key
-export pbkdf2 NotSupportedError PBKDF2 key export is not supported
-spki of secret NotSupportedError Unable to export AES-GCM secret key using spki format
-ecdh too long OperationError derived bit length is too small
-raw private NotSupportedError Unable to export Ed25519 private key using raw format
-ed raw len DataError Ed25519 raw keys must be exactly 32-bytes
+no usage ERR_INVALID_ACCESS Unable to use this key to sign
+wrong key ERR_INVALID_ACCESS The requested operation is not valid for the provided key
+cbc iv ERR_OPERATION_FAILED algorithm.iv must contain exactly 16 bytes
+gcm short ERR_INVALID_ACCESS The requested operation is not valid for the provided key
+not extractable ERR_INVALID_ACCESS key is not extractable
+bad der ERR_INVALID_DATA Invalid keyData
+aes length ERR_INVALID_DATA Invalid key length
+jwk alg ERR_INVALID_DATA JWK "alg" does not match the requested algorithm
+jwk ext ERR_INVALID_DATA JWK "ext" Parameter and extractable mismatch
+jwk ops ERR_INVALID_DATA Key operations and usage mismatch
+jwk kty ERR_INVALID_DATA Invalid JWK "kty" Parameter
+jwk use ERR_INVALID_DATA Invalid JWK "use" Parameter
+missing hash ERR_INVALID_ARG_TYPE Failed to normalize algorithm: passed algorithm can not be converted to 'HmacImportParams' because 'hash' is required in 'HmacImportParams'.
+derive usage ERR_INVALID_ACCESS baseKey does not have deriveBits usage
+iterations ERR_OPERATION_FAILED iterations cannot be zero
+public of ecdh ERR_INVALID_ACCESS algorithm.public must be a public key
+export pbkdf2 ERR_NOT_SUPPORTED PBKDF2 key export is not supported
+spki of secret ERR_NOT_SUPPORTED Unable to export AES-GCM secret key using spki format
+ecdh too long ERR_OPERATION_FAILED derived bit length is too small
+raw private ERR_NOT_SUPPORTED Unable to export Ed25519 private key using raw format
+ed raw len ERR_INVALID_DATA Ed25519 raw keys must be exactly 32-bytes
 ok ok
-ctr wraps OperationError The operation failed for an operation-specific reason
+ctr wraps ERR_OPERATION_FAILED The operation failed for an operation-specific reason
 ctr fits ok
-no usages SyntaxError Usages cannot be empty when importing a secret key.
-ecdh usage SyntaxError Usages cannot be empty when creating a key.
-exponent OperationError The publicExponent must be equivalent to an unsigned 32-bit value
+no usages ERR_INVALID_KEY_USAGE Usages cannot be empty when importing a secret key.
+ecdh usage ERR_INVALID_KEY_USAGE Usages cannot be empty when creating a key.
+exponent ERR_OPERATION_FAILED The publicExponent must be equivalent to an unsigned 32-bit value

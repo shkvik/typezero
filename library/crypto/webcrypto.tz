@@ -267,31 +267,31 @@ export class CryptoKey {
 const kFailed = "The operation failed for an operation-specific reason"
 
 function failed(): SubtleError {
-  return { code: "OperationError", message: kFailed }
+  return { kind: "SUBTLE", code: "ERR_OPERATION_FAILED", message: kFailed }
 }
 
 function operationError(message: string): SubtleError {
-  return { code: "OperationError", message }
+  return { kind: "SUBTLE", code: "ERR_OPERATION_FAILED", message }
 }
 
 function notSupported(message: string): SubtleError {
-  return { code: "NotSupportedError", message }
+  return { kind: "SUBTLE", code: "ERR_NOT_SUPPORTED", message }
 }
 
 function dataError(message: string): SubtleError {
-  return { code: "DataError", message }
+  return { kind: "SUBTLE", code: "ERR_INVALID_DATA", message }
 }
 
 function syntaxError(message: string): SubtleError {
-  return { code: "SyntaxError", message }
+  return { kind: "SUBTLE", code: "ERR_INVALID_KEY_USAGE", message }
 }
 
 function invalidAccess(message: string): SubtleError {
-  return { code: "InvalidAccessError", message }
+  return { kind: "SUBTLE", code: "ERR_INVALID_ACCESS", message }
 }
 
 function typeError(message: string): SubtleError {
-  return { code: "TypeError", message }
+  return { kind: "SUBTLE", code: "ERR_INVALID_ARG_TYPE", message }
 }
 
 class JwkFailure {

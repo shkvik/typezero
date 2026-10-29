@@ -11,7 +11,7 @@ a true true
 true
 true
 64
-InvalidAccessError
+ERR_INVALID_ACCESS
 127.0.0.1 true 127.0.0.1
 hi /there
 another port

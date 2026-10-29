@@ -27,7 +27,6 @@ public:
 
 private:
   Lowering &lowering_;
-  std::map<std::u16string, llvm::GlobalVariable *> embedCaches_;
 };
 
 }

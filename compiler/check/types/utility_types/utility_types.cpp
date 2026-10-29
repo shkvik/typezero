@@ -1,6 +1,7 @@
 #include "compiler/check/types/utility_types/utility_types.h"
 #include "compiler/check/classes/class_value_checker/class_value_checker.h"
 #include "compiler/check/expr/expr_checker/expr_checker.h"
+#include "compiler/check/generics/type_params/type_params.h"
 #include "compiler/check/scopes/scopes.h"
 #include "compiler/check/types/conditional_types/conditional_types.h"
 #include "compiler/check/types/type_operators/type_operators.h"
@@ -31,11 +32,23 @@ llvm::ArrayRef<const Type *> membersOf(const Type *&type) {
 
 UtilityTypes::UtilityTypes(Checker &checker) : checker_(checker) {}
 
+const Type *UtilityTypes::functionValueType(FuncSymbol *fn) {
+  if (!fn->isGeneric()) {
+    return checker_.returnInferrer().functionType(fn);
+  }
+  if (fn->typeDefaults.size() != fn->typeParams.size() ||
+      llvm::is_contained(fn->typeDefaults, nullptr)) {
+    return nullptr;
+  }
+  const Type *type = checker_.returnInferrer().functionType(fn);
+
+  return checker_.typeParams().substitute(type, fn->typeParams, fn->typeDefaults);
+}
+
 const Type *UtilityTypes::importedValueType(Module *from, llvm::StringRef name) {
   for (Stmt *item : from->file.items) {
     if (auto *fn = dyn_cast<FunctionDecl>(item); fn && fn->name == name) {
-      return fn->sym && !fn->sym->isGeneric() ? checker_.returnInferrer().functionType(fn->sym)
-                                              : nullptr;
+      return fn->sym ? functionValueType(fn->sym) : nullptr;
     }
     if (auto *cls = dyn_cast<ClassDecl>(item); cls && cls->name == name) {
       return cls->isGeneric() ? nullptr : checker_.classValueChecker().classValueType(cls);

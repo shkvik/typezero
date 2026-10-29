@@ -258,7 +258,6 @@ void tz_rt_shutdown(void) {
   tz_process_shutdown();
   tz_signal_shutdown();
   tz_meta_shutdown();
-  tz_json_shutdown();
   tz_fs_shutdown();
   tz_intl_shutdown();
   tz_out_flush(1);

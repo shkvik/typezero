@@ -1,0 +1,7 @@
+import config from "./config.json" with { type: "json" }
+
+export function hostOf(): string {
+  return config.host
+}
+
+export const sameConfig = config

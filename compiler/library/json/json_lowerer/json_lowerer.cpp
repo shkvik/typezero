@@ -1,5 +1,4 @@
 #include "compiler/library/json/json_lowerer/json_lowerer.h"
-#include "compiler/library/json/from_json_lowerer/from_json_lowerer.h"
 #include "compiler/library/result/result_lowerer/result_lowerer.h"
 #include "compiler/lower/expr/assign_lowerer/assign_lowerer.h"
 #include "compiler/lower/expr/expr_lowerer/expr_lowerer.h"
@@ -387,7 +386,7 @@ llvm::Value *JsonLowerer::emitJsonObjectCall(CallExpr *call) {
 }
 
 void JsonLowerer::useErrors(const Type *errorType) {
-  static const std::vector<MakerFields> orders = {{nullptr, {"code", "message", "path"}}};
+  static const std::vector<MakerFields> orders = {{nullptr, {"code", "message"}}};
   llvm::Type *ptr = lowering_.builder_.getPtrTy();
   lowering_.builder_.CreateCall(
       jsonFunction("tz_json_errors", lowering_.builder_.getVoidTy(), {ptr}),
@@ -399,8 +398,7 @@ llvm::Value *JsonLowerer::emitJsonCall(CallExpr *call) {
              *i64 = lowering_.builder_.getInt64Ty();
   llvm::Value *noPath = llvm::ConstantPointerNull::get(lowering_.builder_.getPtrTy());
   switch (call->builtin) {
-  case Builtin::JsonParse:
-  case Builtin::JsonParseAs: {
+  case Builtin::JsonParse: {
     useErrors(call->type->errType());
     Lowering::Operand text = lowering_.refCounts().emitOperand(call->args[0], true);
     llvm::Value *json =
@@ -409,35 +407,7 @@ llvm::Value *JsonLowerer::emitJsonCall(CallExpr *call) {
                                        lowering_.stringLowerer().stringMeta(text.value)},
                                       "json");
     lowering_.refCounts().dropOperand(text);
-    if (call->builtin == Builtin::JsonParse) {
-      return lowering_.resultLowerer().catchFailure(json, call->type, call->loc());
-    }
-    llvm::Value *result =
-        lowering_.fromJsonLowerer().emitFromJsonOrSkip(call->type->okType(), json, noPath);
-    lowering_.refCounts().releaseValue(json, Type::json());
-    return lowering_.resultLowerer().catchFailure(result, call->type, call->loc());
-  }
-  case Builtin::FromJson: {
-    useErrors(call->type->errType());
-    Lowering::Operand json = lowering_.refCounts().emitOperand(call->args[0], true);
-    llvm::Value *result =
-        lowering_.fromJsonLowerer().emitFromJson(call->type->okType(), json.value, noPath);
-    lowering_.refCounts().dropOperand(json);
-    return lowering_.resultLowerer().catchFailure(result, call->type, call->loc());
-  }
-  case Builtin::EmbedJson: {
-    const std::u16string &text = cast<StringLitExpr>(call->args[0])->value;
-    llvm::GlobalVariable *&cache = embedCaches_[cast<StringLitExpr>(call->args[1])->value];
-    if (!cache) {
-      cache = new llvm::GlobalVariable(
-          *lowering_.module_, ptr, false, llvm::GlobalValue::InternalLinkage,
-          llvm::ConstantPointerNull::get(lowering_.builder_.getPtrTy()), "tz.embed");
-    }
-    llvm::Value *literal = lowering_.stringLowerer().stringLiteral(text);
-    return lowering_.builder_.CreateCall(jsonFunction("tz_json_embed", ptr, {ptr, ptr, i64}),
-                                         {cache, lowering_.stringLowerer().stringObj(literal),
-                                          lowering_.stringLowerer().stringMeta(literal)},
-                                         "embedded");
+    return lowering_.resultLowerer().catchFailure(json, call->type, call->loc());
   }
   case Builtin::JsonStringify: {
     bool fallible = call->type->isResult();

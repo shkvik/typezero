@@ -56,12 +56,26 @@ std::string noField(const Type *type, llvm::StringRef name) {
   return message;
 }
 
+std::string chainText(const Expr *expr) {
+  expr = unnarrowed(expr);
+  if (auto *name = dyn_cast<NameExpr>(expr)) {
+    return name->name.str();
+  }
+  auto *member = dyn_cast<MemberExpr>(expr);
+  if (!member || member->optional) {
+    return "";
+  }
+  std::string outer = chainText(member->object);
+
+  return outer.empty() ? "" : outer + "." + member->name.str();
+}
+
 }
 
 std::string fieldText(const Expr *object, llvm::StringRef field) {
-  std::string text = "o";
-  if (auto *name = dyn_cast<NameExpr>(unnarrowed(object))) {
-    text = name->name.str();
+  std::string text = chainText(object);
+  if (text.empty()) {
+    text = "o";
   }
   bool identifier = !field.empty() && !llvm::isDigit(field[0]) && llvm::all_of(field, [](char c) {
     return llvm::isAlnum(c) || c == '_' || c == '$';
