@@ -18,17 +18,6 @@ console.log(must(argon2Sync("argon2id", { message: "password", nonce, parallelis
 console.log(must(argon2Sync("argon2i", { message: "password", nonce, parallelism: 4, tagLength: 32, memory: 100, passes: 3 })).toString("hex"))
 console.log(must(argon2Sync("argon2d", { message: "password", nonce, parallelism: 1, tagLength: 100, memory: 64, passes: 2,
                                     secret: Buffer.from("key"), associatedData: "ad" })).toString("hex"))
-const failed = [
-  pbkdf2Sync("pw", "salt", 0, 16, "sha256"),
-  pbkdf2Sync("pw", "salt", 1.5, 16, "sha256"),
-  scryptSync("pw", "salt", 16, { N: 3 }),
-  scryptSync("pw", "salt", 16, { N: 2 ** 20 }),
-  argon2Sync("argon2id", { message: "pw", nonce: Buffer.alloc(4), parallelism: 1, tagLength: 32, memory: 64, passes: 3 }),
-  argon2Sync("argon2id", { message: "pw", nonce, parallelism: 1, tagLength: 32, memory: 7, passes: 3 }),
-]
-for (const r of failed) console.log(r.isErr() ? `${r.error.code} ${r.error.message}` : "ok")
-const long = hkdfSync("sha256", "k", "s", "i", 255 * 32 + 1)
-console.log(long.isErr() ? `${long.error.code} ${long.error.message}` : "ok")
 
 // Random numbers: their shape, not their values.
 console.log(randomBytes(16).length, randomUUID().length, /^[0-9a-f-]{36}$/.test(randomUUID()))

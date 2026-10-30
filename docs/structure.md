@@ -91,6 +91,9 @@ tests/ docs/ bench/ examples/ third_party/
 
 ## Сейчас
 
+Полная карта — строка на каждую папку `compiler/` — [compiler-map.md](compiler-map.md); тест
+`docs/compiler_map` следит, чтобы в ней были все папки. Ниже — обзор.
+
 ```
 compiler/
   CMakeLists.txt     все .cpp под compiler/ по маске
@@ -101,7 +104,8 @@ compiler/
                      symbols/, types/ (type/ — класс Type; type_op/, union_slot/, field/, overload/…
                      и модули функций над типами), diagnostic/, diagnostics/, errors/
   result/            result/, ok/, err/
-  load/              load_pass/, loader/, module_resolver/, library_modules/, lexer/, token/,
+  load/              load_pass/, loader/, module_resolver/, library_modules/, library_files/,
+                     source_overlay/, json_module/, lexer/, token/,
                      literal_text/, parser/ и его части: token_cursor/, stmt_parser/, var_parser/,
                      pattern_parser/, expr_parser/, call_parser/, primary_parser/, template_parser/,
                      function_parser/, class_parser/, decl_parser/, module_parser/, type_parser/,
@@ -136,6 +140,9 @@ compiler/
                      console crypto date decimal events fs intl json math os path process
                      reflect regex result stream tz_modules weakref — в каждой <тема>_feature/
                      и классы проверки и IR
+  knowledge/         записи о программе для редактора и ИИ: knowledge_pass/, knowledge_answers/…
+  lsp/               tz lsp: lsp_server/, lsp_check/ (дочерняя проверка), lsp_features/…
+  mcp/               tz mcp: mcp_server/
 runtime/
   core/              tzrt/ (только общее: TZ_HOT, дескрипторы типов, раскладки), output/ (← tzrt.c),
                      alloc/ group/ publish/ closure/ string/ unicode/ number/ array/ object/ map/

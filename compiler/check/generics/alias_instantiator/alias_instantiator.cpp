@@ -136,8 +136,9 @@ const Type *AliasInstantiator::instantiateAlias(TypeAliasDecl *alias,
       break;
     }
     size_t shown = args.size();
-    while (shown > 0 && defaults[shown - 1] && defaults[shown - 1]->isNever() &&
-           args[shown - 1]->isNever()) {
+    while (shown > 0 && defaults[shown - 1] &&
+           (defaults[shown - 1] == args[shown - 1] ||
+            (defaults[shown - 1]->isNever() && args[shown - 1]->isNever()))) {
       --shown;
     }
     std::string display = shown == 0 ? alias->name.str()

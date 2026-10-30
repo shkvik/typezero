@@ -40,6 +40,7 @@ typedef struct StdinRead {
   TzWork work;
   Raw data;
   int32_t ended;
+  int32_t failed;
   int32_t console;
 } StdinRead;
 
@@ -98,8 +99,12 @@ static void stdin_read_work(TzWork *w) {
   }
   tz_fs_raw_reserve(&r->data, 65536);
   DWORD got = 0;
-  if (!ReadFile(h, r->data.data, 65536, &got, NULL) || got == 0) {
+  BOOL read = ReadFile(h, r->data.data, 65536, &got, NULL);
+  if (!read || got == 0) {
+    DWORD failure = read ? ERROR_SUCCESS : GetLastError();
     r->ended = 1;
+    r->failed = failure != ERROR_SUCCESS && failure != ERROR_BROKEN_PIPE &&
+                failure != ERROR_HANDLE_EOF && failure != ERROR_NO_DATA;
   } else {
     r->data.length = got;
   }
@@ -112,6 +117,7 @@ static void stdin_read_work(TzWork *w) {
     }
     if (got <= 0) {
       r->ended = 1;
+      r->failed = got < 0;
     } else {
       r->data.length = (size_t)got;
     }
@@ -127,6 +133,7 @@ static void stdin_read_done(TzWork *w) {
   tz_stdin_read = NULL;
   if (r->ended) {
     tz_in_eof = 1;
+    tz_in_failed = r->failed;
   } else if (r->console) {
 #ifdef _WIN32
     const uint16_t *units = (const uint16_t *)r->data.data;
@@ -377,14 +384,11 @@ static void question_failed(TzPromise *p, TzMaker make) {
   if (!make) {
     return;
   }
-  TzSystemErrorParts parts;
+  TzFsErrorParts parts;
   memset(&parts, 0, sizeof parts);
+  parts.code = "ERR_USE_AFTER_CLOSE";
   parts.message = tz_fs_ascii("readline was closed");
-  parts.code = tz_fs_ascii("ERR_USE_AFTER_CLOSE");
-  parts.syscall = tz_fs_ascii("");
-  tz_fs_throw_parts(make, &parts);
-  void *error = tz_failed;
-  tz_failed = NULL;
+  void *error = make(&parts);
   tz_promise_fail(p, error);
 }
 

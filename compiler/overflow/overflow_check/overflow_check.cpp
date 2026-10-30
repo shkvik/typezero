@@ -108,6 +108,55 @@ void OverflowCheck::run() {
   }
 }
 
+void OverflowCheck::joinInto(Summaries &into, const Summaries &from) {
+  for (const auto &[fn, slots] : from.params) {
+    std::vector<Slot> &target = into.params[fn];
+    if (target.size() < slots.size()) {
+      target.resize(slots.size());
+    }
+    for (size_t i = 0; i < slots.size(); ++i) {
+      target[i].val = join(target[i].val, slots[i].val);
+    }
+  }
+  auto joinSlot = [](Slot &target, const Slot &slot) {
+    target.val = join(target.val, slot.val);
+    if (!target.type) {
+      target.type = slot.type;
+    }
+  };
+  for (const auto &[fn, slot] : from.rets) {
+    joinSlot(into.rets[fn], slot);
+  }
+  for (const auto &[var, slot] : from.vars) {
+    joinSlot(into.vars[var], slot);
+  }
+  for (const auto &[key, slot] : from.fields) {
+    joinSlot(into.fields[key], slot);
+  }
+  for (const auto &[type, slot] : from.elements) {
+    joinSlot(into.elements[type], slot);
+  }
+  for (const auto &[type, slot] : from.dicts) {
+    joinSlot(into.dicts[type], slot);
+  }
+  auto joinFacts = [](std::vector<Num> &facts, const std::vector<Num> &more) {
+    if (facts.size() < more.size()) {
+      facts.resize(more.size());
+    }
+    for (size_t i = 0; i < more.size(); ++i) {
+      facts[i] = join(facts[i], more[i]);
+    }
+  };
+  for (const auto &[fn, pred] : from.preds) {
+    Pred &target = into.preds[fn];
+    joinFacts(target.whenTrue, pred.whenTrue);
+    joinFacts(target.whenFalse, pred.whenFalse);
+  }
+  for (const auto &[key, calls] : from.dangerousCalls) {
+    llvm::append_range(into.dangerousCalls[key], calls);
+  }
+}
+
 void checkIntOverflow(SourceFile &program, Diagnostics &diags) {
   OverflowCheck(program, diags).run();
 }

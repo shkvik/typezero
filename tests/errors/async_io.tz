@@ -4,7 +4,7 @@ import { setTimeout as wait } from "node:timers/promises"
 import { createInterface } from "node:readline/promises"
 
 const options = { encoding: "utf8" }
-// Fine: without an encoding, a Promise<Result<Buffer, SystemError>>.
+// Fine: without an encoding, a Promise<Result<Buffer, ReadFileError>>.
 const bytes = (await readFile("a.txt")).unwrapOr(Buffer.alloc(0))
 // expect-error: an encoding is for text; 'writeFile' writes the bytes as they are: drop the encoding
 await writeFile("b.txt", bytes, "hex")

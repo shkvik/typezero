@@ -145,7 +145,7 @@ tz run                   # без файла — "main" из tz.json
   `String.fromCharCode`, `String.fromCodePoint`; по правилам языков — `localeCompare` и
   `normalize` (см. «Языки: Intl»). `encodeURIComponent` и `encodeURI` — как в
   node, с `URIError: URI malformed` у одиночного суррогата; `decodeURIComponent` и `decodeURI`
-  отдают `Result<string, UriError>`, где `UriError = { kind: "URI"; code: "ERR_INVALID_URI"; message: string }`, —
+  отдают `Result<string, UriError>`, где `UriError = { kind: "URI_ERROR"; code: "ERR_INVALID_URI"; message: string }`, —
   `Err` у неверного `%`-кода; это функция рантайма над однобайтовой или двухбайтовой строкой, а строка, в которой
   нечего менять, возвращается без копии.
 - Регулярные выражения (см. «Регулярные выражения»): литералы `/…/` со всем синтаксисом JS и всеми
@@ -299,7 +299,8 @@ tz run                   # без файла — "main" из tz.json
   `sep`, `delimiter`, `posix` и `win32`), `node:os`, `import { argv, env } from "node:process"`,
   файлы из `node:fs` (`readFileSync(path, "utf8")`, `writeFileSync`, `appendFileSync`, `existsSync`,
   `mkdirSync`, `readdirSync`, `statSync`, `rmSync`, `renameSync`, `copyFileSync` и другие) дают
-  `Result`: ошибка ОС — `Err` с `SystemError`, как в node (`code`, `errno`, `syscall`, `path`), те
+  `Result` со своим типом ошибки у каждой функции (`ReadFileError`, `RenameError`…: `kind` —
+  функция и причина, `code` — как в node, `message`, `syscall`, `path`), те
   же функции из `node:fs/promises` дают `Promise<Result>` (`await readFile(path, "utf8")`),
   `node:readline` поверх stdin
   (`rl.question(...)`, `for await (const line of rl)`) и `readLine` из `"tz:io"` — строка ввода.
@@ -323,8 +324,8 @@ tz run                   # без файла — "main" из tz.json
   `timingSafeEqual`, `pbkdf2Sync`, `scryptSync`, `argon2Sync`, `hkdfSync`, шифры (`createCipheriv`:
   AES-GCM / CBC / CTR, ChaCha20-Poly1305 и остальные из `getCiphers()`), ключи `KeyObject` в PEM /
   DER / JWK, подписи RSA / ECDSA / Ed25519, `generateKeyPairSync`, ECDH и X25519,
-  `X509Certificate`. То, что зависит от данных (ключ, тег, PEM, подпись), даёт `Result` с
-  `CryptoError`. OpenSSL попадает в exe, только если программа им пользуется, а алгоритм с
+  `X509Certificate`. То, где OpenSSL может отказать, даёт `Result` со своим типом ошибки у каждой
+  функции (`CreateCipherError`, `DecipherFinalError`…). OpenSSL попадает в exe, только если программа им пользуется, а алгоритм с
   именем в коде — без остального OpenSSL; `tz licenses app.exe` печатает лицензии того, что в exe.
 - Необязательные точки с запятой (ASI), комментарии, escape-последовательности.
 - Программы из нескольких файлов (см. «Модули»): `import { a, b as c } from "./x"`, `export`
@@ -447,7 +448,7 @@ else console.log(user.value.name)
   Известный недочёт: поток, которого ждали через `once()`, пока живёт до конца программы, и его
   файл закрывается только тогда.
 - **Ошибка — объект с меткой.** Свои ошибки — типы объектов с полем `code`; ошибки библиотеки —
-  такие же встроенные типы (`SystemError`, `JsonError`, `FetchError`, `StreamError`…). Разные
+  такие же встроенные типы (`JsonError`, `FetchError`, `ReadFileError`, `StreamError`…). Разные
   ошибки в одном `Result` дают объединение, и `if (e.code == "ERR_INVALID_REGEX")` сужает его до одной.
 - **`Promise` не отклоняется** (см. «Async»): операция, которая может не получиться, отдаёт
   `Promise<Result<T, E>>`.
@@ -1376,9 +1377,11 @@ const text = parseAge("42")
 - **Библиотека** отдаёт `Result` там, где node бросает: `fetch` (`FetchError`) и чтение тел
   (`BodyError`), `JSON.parse` (`JsonError`), `decodeURIComponent` и `decodeURI` (`UriError`), `RegExp.parse`
   (`RegexError`), `URL.parse` (`UrlError`), `Date.parse` (`DateError`), функции `node:fs`
-  (`SystemError`) и `node:fs/promises` (`Promise<Result>`), `execSync`, `execFileSync` и
-  `spawnSync` (`ExecError`), `node:crypto` там, где важны данные (`CryptoError`), и
-  `crypto.subtle` (`Promise<Result>` с `SubtleError`), `Reflect.apply` и `Reflect.construct`
+  (`ReadFileError`, `RenameError`… — свой тип у каждой) и `node:fs/promises` (`Promise<Result>`),
+  `execSync`, `execFileSync` и `spawnSync` (`ExecTextError`, `ExecFileTextError`,
+  `SpawnTextError`…), `node:crypto` (`CreateCipherError`, `DecipherFinalError`… — свой тип у
+  каждой), и
+  `crypto.subtle` (`Promise<Result>` с `SubtleSignError`, `SubtleDecryptError`… — свой тип у каждого метода), `Reflect.apply` и `Reflect.construct`
   (`ReflectError`), `Intl.Locale.parse` (`LocaleError`), `decimal(text)` (`DecimalError`),
   `decode` у `TextDecoder` с `fatal` (`DecodeError`). Ошибки — объекты с меткой `code`, их типы встроены. `Err` из кода
   библиотеки получает место вызова в программе. Конструкторы не бросают: что может не
@@ -1425,7 +1428,7 @@ for (const { groups } of text.matchAll(/(?<key>\w+)=(?<value>\w+)/g)) console.lo
   `string | undefined`, колбэк `replace` получает только совпадение, а `m.groups` пока не
   поддерживается. `new RegExp` с литералами (`new RegExp("\\d+", "g")`) — то же, что литерал.
 - **`RegExp.parse(source, flags?)`** разбирает шаблон из строки, известной только при
-  выполнении, и отдаёт `Result<RegExp, RegexError>`, где `RegexError = { kind: "REGEX"; code: "ERR_INVALID_REGEX";
+  выполнении, и отдаёт `Result<RegExp, RegexError>`, где `RegexError = { kind: "REGEX_ERROR"; code: "ERR_INVALID_REGEX";
   message: string }`, а `message` — текст `SyntaxError` из node (`Invalid regular expression:
   /a(b/i: Unterminated group`, `Invalid flags supplied to RegExp constructor 'gg'`).
   `new RegExp(s)` с переменной — ошибка компиляции с подсказкой `RegExp.parse`: `new` не может
@@ -1537,7 +1540,7 @@ new Intl.DateTimeFormat("en-US", { dateStyle: "full", timeZone: "Asia/Bishkek" }
   местное) и всё, что V8 читает сверх него: `"2026/10/23"`, `"Oct 23 2026 10:00"`,
   `"Fri, 23 Oct 2026 10:00:00 GMT"`, текст `toString()`. Результаты сверены с node на сотнях
   тысяч случайных строк в разных поясах. Строку из переменной разбирает `Date.parse(text)` — он
-  отдаёт `Result<int, DateError>` с миллисекундами, где `DateError = { kind: "DATE"; code: "ERR_INVALID_DATE";
+  отдаёт `Result<int, DateError>` с миллисекундами, где `DateError = { kind: "DATE_ERROR"; code: "ERR_INVALID_DATE";
   message: string; text: string }`; `new Date(text)` с переменной — ошибка компиляции с
   подсказкой `Date.parse` (`new Date` не может отдать `Result`), литерал проверяется при сборке.
 - **Дата всегда правильная, и края JS у неё нет.** Время даты — любое `int`: `new Date(ms)`,
@@ -1837,12 +1840,12 @@ import { homedir } from "node:os"
 import { readLine } from "tz:io"
 
 const name = readLine("Имя? ")                                  // string | undefined
-const text = readFileSync(join(homedir(), "notes.txt"), "utf8")  // Result<string, SystemError>
+const text = readFileSync(join(homedir(), "notes.txt"), "utf8")  // Result<string, ReadFileError>
 if (text.isErr()) {
-  console.log(text.error.code == "ENOENT" ? "заметок нет" : text.error.message)
+  console.log(text.error.kind == "READ_FILE_ERROR_NOT_FOUND" ? "заметок нет" : text.error.message)
   process.exit(1)
 }
-const saved = writeFileSync("out.txt", text.value.toUpperCase())  // Result<void, SystemError>
+const saved = writeFileSync("out.txt", text.value.toUpperCase())  // Result<void, WriteFileError>
 if (saved.isErr()) console.log(saved.error.message)
 for (const entry of readdirSync(".", { withFileTypes: true }).unwrapOr([]))
   if (entry.isFile()) console.log(basename(entry.name, ".txt"))
@@ -1868,15 +1871,16 @@ for (const entry of readdirSync(".", { withFileTypes: true }).unwrapOr([]))
 - **`node:process`** — `argv`, `env`, `exit`, `exitCode`, `cwd`, `platform`, `execPath`, `stdin`,
   `stdout`, `stderr`: то же, что у глобального `process`.
 - **`node:buffer`** — `Buffer`: тот же, что глобальный.
-- **`node:fs`** — синхронные функции. Все, кроме `existsSync`, дают `Result<T, SystemError>`:
-  ошибка ОС — `Err`, а не исключение (`Result<void, SystemError>` у тех, что ничего не
-  возвращают). Путь с нулевым символом — тоже `Err`, с кодом и текстом node
-  (`ERR_INVALID_ARG_VALUE`; node бросает `TypeError`). Функции: `readFileSync`, `writeFileSync`, `appendFileSync`,
+- **`node:fs`** — синхронные функции. Все, кроме `existsSync`, дают `Result` со своим типом
+  ошибки: ошибка ОС — `Err`, а не исключение (`Result<void, UnlinkError>` у тех, что ничего не
+  возвращают). Путь с нулевым символом — литералом ошибка сборки, строкой из работы — `Err` с
+  кодом `ERR_INVALID_PATH`. Функции: `readFileSync`, `writeFileSync`, `appendFileSync`,
   `existsSync`, `accessSync`, `chmodSync`, `truncateSync`, `statSync` и `lstatSync`
   (`{ throwIfNoEntry: false }` — `Stats | undefined`), `readdirSync` (`recursive`, `withFileTypes` —
   `Dirent` с `isFile()`, `isDirectory()` и т.п.), `mkdirSync` (`recursive`; результат — первый
   созданный каталог, как в node), `mkdtempSync`, `rmdirSync`, `unlinkSync`, `rmSync` (`recursive`,
-  `force`), `renameSync`, `copyFileSync` (`constants.COPYFILE_EXCL`), `realpathSync`, `constants`;
+  `force`), `renameSync` и `copyFileSync` (никогда не заменяют то, что лежит под новым именем;
+  заменить нарочно — `replaceSync` из `"tz:fs"`), `realpathSync`, `constants`;
   `Stats` и `Dirent` — типы (`const s: Stats = statSync(p).unwrapOr(fallback)`), печатаются как в node:
   `Stats { dev: ..., mode: 33206, ... }`. Даты `atime`, `mtime`, `ctime` и `birthtime` делаются
   при чтении из `atimeMs` и других, округлённых до миллисекунды, как их делают геттеры node,
@@ -1895,14 +1899,15 @@ for (const entry of readdirSync(".", { withFileTypes: true }).unwrapOr([]))
   `appendFile`, `access`, `chmod`, `truncate`, `stat`, `lstat`, `readdir`, `mkdir`, `mkdtemp`,
   `rmdir`, `unlink`, `rm`, `rename`, `copyFile`, `realpath`, `constants`: те же аргументы и опции,
   что у функций `...Sync`, а результат — `Promise<Result>` того же: ошибка ОС и ноль в пути —
-  `Err` с тем же `SystemError`, `Promise` не отклоняется. Различия с `...Sync` — как
+  `Err` того же типа, что у `...Sync`, `Promise` не отклоняется; `replace` из `"tz:fs"` — то же
+  для `replaceSync`. Различия с `...Sync` — как
   в node: `readdir` с `recursive` идёт, как его async-версия, — каталог, встреченный в списке,
   читается сразу, а обходится последним (стек, а не уровни); `realpath` — путь, который даёт
   система (`GetFinalPathNameByHandle`), с буквами, как на диске; ошибка `mkdir` с `recursive`
   показывает путь, на котором она случилась. `readFile` без кодировки даёт `Buffer`, а
   `writeFile` и `appendFile` пишут и байты, как их `...Sync`; `open` и `FileHandle` пока нет.
 - **Как ждут.** Вызов — одна работа для пула потоков (`UV_THREADPOOL_SIZE` потоков, по умолчанию
-  4, как в node): `readFile` в потоке открывает, читает и закрывает файл, а строку и `SystemError`
+  4, как в node): `readFile` в потоке открывает, читает и закрывает файл, а строку и ошибку
   делает главный поток, в фазе poll цикла событий, после каждой — микрозадачи, как после колбэка
   node. В Windows фаза poll ждёт на одном порте завершения (IOCP), а время до следующего таймера
   отмеряет таймер высокого разрешения. Порядок — такой, какой мог бы дать node: там `readFile` —
@@ -1922,12 +1927,17 @@ for (const entry of readdirSync(".", { withFileTypes: true }).unwrapOr([]))
   уходят слушателям `line` или пропадают. Интерфейс, у которого строк не просят, ничего не читает
   и не держит программу до конца ввода. События (`rl.on("line", ...)`) — с `EventEmitter`
   ([events.md](docs/events.md)), до тех пор ошибка с подсказкой.
-- **`SystemError`** — ошибка в `Err` функций файлов, встроенный тип объекта с полями `code`
-  (`"ENOENT"`...), `message`, `errno` (число, которое дал бы node: в Windows `-4058`), `syscall`,
-  `path` и `dest`; `message` — как в node: `ENOENT: no such file or directory, open
-  'C:\app\config.txt'`. Коды те же, что у node на этой ОС: ошибка Windows переводится так же, как
-  это делает libuv (`EPERM` у `unlinkSync` каталога, `EISDIR` у чтения каталога). `rmSync`
-  каталога без `recursive` — `SystemError` с кодом `ERR_FS_EISDIR`, как в node. `Stats` и `Dirent`
+- **Ошибки файлов** ([io.md](docs/io.md), раздел 5) — у каждой функции свой тип
+  (`ReadFileError`, `WriteFileError`, `RenameError`, всего 23; импорт — `import { ReadFileError }
+  from "node:fs"`), объединение вариантов по причине: `kind` (`READ_FILE_ERROR_NOT_FOUND`,
+  `RENAME_ERROR_EXISTS`…) уникален во всей библиотеке и сужает тип, `code` — системное имя, как в
+  node (`"ENOENT"`; неожиданный — `"UNKNOWN"`, настоящий — в тексте), `message` — что не вышло,
+  где, почему и что сделать (`could not write C:\app\out\r.txt: the folder C:\app\out does not
+  exist; create it with mkdirSync(path, { recursive: true })`), `syscall`, `path` (всегда полный;
+  у числа — `"<stdin>"`, `"<fd 5>"`) и у переноса и копирования `dest`; `errno` нет. Опции-литералы
+  меняют тип: `flag: "wx"` — `WriteNewFileError`, `{ force: true }` — `ForceRemoveError`.
+  Коды — как у libuv (`EPERM` у `unlinkSync` каталога, `EISDIR` у чтения каталога), кроме
+  `"a?b.txt"` — `EINVAL`, и `rmSync` каталога без `recursive` — `EISDIR`. `Stats` и `Dirent`
   делает только рантайм: `new` и `extends` с ними — ошибки.
 - **Пути в Windows** — как у node: путь разрешается (`resolve`) и идёт в систему в виде
   `\\?\C:\...`, поэтому длинные пути работают, а ошибки показывают его полным, без префикса. Все
@@ -1937,15 +1947,15 @@ for (const entry of readdirSync(".", { withFileTypes: true }).unwrapOr([]))
   читается через `ReadConsoleW`, поэтому русские буквы вводятся при любой кодовой странице; из файла
   или другой программы — UTF-8. `readLine` и `readFileSync(0)` читают stdin через один буфер: что не
   взяла одна, получит другая.
-- Объекты, которые делает рантайм (`SystemError`, `Stats`, `Dirent`, результат `parse()`, `cpus()`),
+- Объекты, которые делает рантайм (ошибки файлов, `Stats`, `Dirent`, результат `parse()`, `cpus()`),
   он строит функцией программы: заполняет структуру с полями, а функция кладёт их в объект нужной
-  раскладки.
+  раскладки; у ошибок файлов функция ещё выбирает вариант по коду и просит у рантайма текст.
 
 ```ts
 import { execFileSync, execSync, spawnSync } from "node:child_process"
 
-const head = execFileSync("git", ["rev-parse", "HEAD"], { encoding: "utf8" })   // Result<string, ExecError<string>>
-const files = execSync("dir /b", { cwd: "C:\\work" })                           // Result<Buffer, ExecError<Buffer>>
+const head = execFileSync("git", ["rev-parse", "HEAD"], { encoding: "utf8" })   // Result<string, ExecFileTextError>
+const files = execSync("dir /b", { cwd: "C:\\work" })                           // Result<Buffer, ExecBytesError>
 const r = spawnSync("git", ["status"], { encoding: "utf8", timeout: 5000 })
 if (r.isErr()) console.log(r.error.code, r.error.message)  // не запустилась, таймаут
 else if (r.value.status != 0) console.log(`код ${r.value.status}`, r.value.stderr)
@@ -1963,16 +1973,20 @@ if (tests.isErr()) process.exit(tests.error.status ?? 1)
   `ENOBUFS`, программа убита), `shell` (`true` или путь), `windowsHide`, `windowsVerbatimArguments`,
   `detached`, `argv0`, `uid` и `gid` (в Windows — `ENOTSUP`, как в node). `encoding` и `stdio` пишут
   литералами: от них зависит тип результата, а поток, который не канал, даёт `undefined`.
-- **Ошибки — `Err` с `ExecError<Out>`**, встроенным типом объекта: `code`, `message`, `errno?`,
-  `syscall?`, `path?`, `spawnargs?`, `status?`, `signal?`, `stdout?` и `stderr?` типа `Out` (`string`
-  или `Buffer`, по `encoding` вызова). Программа вышла не с 0 или её убили — `code: "exit"`, текст
-  `Command failed: git status` и то, что программа написала в stderr (в node у этой ошибки `code`
-  нет). Программа не запустилась (её нет — `ENOENT`; `.bat` и `.cmd` без `shell` — `EINVAL`, как в
-  node с 2024 года), таймаут (`ETIMEDOUT`) и переполнение (`ENOBUFS`) — код системы, текст node
-  `spawnSync git ENOENT`, `errno`, `syscall`, `path` и `spawnargs`; у `spawnSync` это тоже `Err`, а
-  не поле `error`. Неверные значения опций — `Err` с кодом и текстом node (`ERR_INVALID_ARG_VALUE`
-  для нулевого символа и пустого имени, `ERR_OUT_OF_RANGE`, `ERR_UNKNOWN_SIGNAL`), node бросает
-  `TypeError` и `RangeError`. Что программа написала в stderr, `execSync` и `execFileSync` без
+- **Ошибки** ([process.md](docs/process.md), раздел 1, «Ошибки») — у каждой функции свой тип:
+  `ExecTextError` / `ExecBytesError` (`execSync`), `ExecFileTextError` / `ExecFileBytesError`,
+  `SpawnTextError` / `SpawnBytesError` (Text — с `encoding`), с `shell` — `ExecFileShell…` и
+  `SpawnShell…`; импорт — `import { ExecFileTextError } from "node:child_process"`. `kind` —
+  тип и причина (`EXEC_FILE_TEXT_ERROR_EXIT`, `…_PROGRAM_NOT_FOUND_IN_PATH`, `…_TIMEOUT`,
+  `…_CRASHED`…), у варианта только его поля: `status` после `EXIT`, `timeout` после
+  `TIMEOUT`; вместо `path` и `spawnargs` — `command`, `file`, `args`; `errno` нет. Свои коды, где
+  системного нет: `ERR_NONZERO_EXIT` (было `"exit"`), `ERR_CRASHED`, `ERR_COMMAND_NOT_FOUND`…
+  Тексты — что не вышло и почему: `could not run git: there is no such program in PATH`,
+  `git status exited with code 128: fatal: not a git repository`. Нет папки `cwd` —
+  `CWD_NOT_FOUND`, а не «нет программы». Ошибки в литералах опций (ноль, отрицательный
+  `timeout`, неизвестный `killSignal`, пустое имя) — ошибка сборки; из значений — `Err`
+  (`ZERO_CHARACTER`, `OUT_OF_RANGE`…). У `spawnSync` таймаут, переполнение и незапуск — тоже
+  `Err`, а не поле `error`; `stdout` и `stderr` результата — необязательные. Что программа написала в stderr, `execSync` и `execFileSync` без
   опции `stdio` дописывают в stderr своей программы.
 - **Запуск в Windows** — шаги node и libuv: аргументы в кавычках по правилам `quote_cmd_arg`
   libuv (сверено с node на сотнях случайных аргументов с пробелами, кавычками, `\`, `&` и буквами
@@ -2085,16 +2099,19 @@ import { createReadStream, createWriteStream } from "node:fs"
 import { Readable, Transform } from "node:stream"
 import { pipeline } from "node:stream/promises"
 
-const upper = new Transform({
-  transform(chunk, encoding, callback) {                        // chunk: Buffer
+class Upper extends Transform<Buffer, string> {
+  protected onTransform(chunk, encoding, callback) {            // chunk: Buffer
     callback(undefined, chunk.toString().toUpperCase())
-  },
-})
-const copied = await pipeline(createReadStream("in.txt"), upper, createWriteStream("out.txt"))
+  }
+}
+const copied = await pipeline(createReadStream("in.txt"), new Upper(), createWriteStream("out.txt"))
 if (copied.isErr()) console.log(copied.error.message)          // нет файла, нет прав
 
-for await (const text of createReadStream("log.txt", "utf8")) {  // Result<string, StreamError>
-  if (text.isErr()) break
+for await (const text of createReadStream("log.txt", "utf8")) {
+  if (text.isErr()) {                                           // ReadStreamError | …
+    if (text.error.kind == "READ_STREAM_ERROR_NOT_FOUND") console.log("no log yet")
+    break
+  }
   console.log(text.value.length)
 }
 const users = Readable.from([ann, bob])                         // Readable<User>
@@ -2118,19 +2135,27 @@ const users = Readable.from([ann, bob])                         // Readable<User
   поток. В tz его нет снаружи: `r.readableState` — ошибка (`private`), а то, что поток меняет
   сам, читается методами (`r.readableLength()`, `r.destroyed()`, `w.writableEnded()`…; в node —
   свойства): методы читают состояние прямо, без копии в полях.
-- **Ошибки — `Result`** ([streams.md](docs/streams.md), раздел 3): каждый кусок `for await` —
-  `Result<T, StreamError>` (ошибка потока — `Err` в конце); `pipeline` и `finished` из
-  `node:stream/promises` — `Promise<Result<...>>`; `end()` отдаёт `Promise<Result<void, StreamError>>`,
-  который выполняется, когда поток дописан (колбэка у `end()` нет); `text`, `json`, `buffer`,
-  `arrayBuffer` из `node:stream/consumers` — тоже `Result`. `pipe()` — ошибка с подсказкой
-  `pipeline`: `pipe` не передаёт ошибку дальше. Слушатели событий потока требуют слушателя
-  `error` (см. «События»).
+- **Ошибки — `Result`, и тип ошибки — у потока** ([streams.md](docs/streams.md), раздел 3):
+  `Readable<T, E extends StreamError = StreamError>`, где `interface StreamError { message:
+  string }`. Свой поток пишет свою ошибку: `interface CsvError extends StreamError { kind: …;
+  line: int }`, `class Lines extends Readable<string, CsvError>`; `Readable<string>` — любой поток,
+  у его ошибок есть только `message`, и поток с точной ошибкой идёт туда, где ждут его. Каждый
+  кусок `for await` — `Result<T, E | PrematureCloseError | PushAfterEndError>` (ошибка — `Err` в
+  конце); `end()` отдаёт `Promise<Result<void, E | WriteAfterEndError | …>>`, который выполняется,
+  когда поток дописан (колбэка у `end()` нет). Ошибку кладёт только сам поток:
+  `destroy(error)` — `protected`, снаружи — `destroy()` без ошибки (читатель получит
+  `PrematureCloseError`). Потоки файлов — `ReadStreamError` / `WriteStreamError` с причинами, как
+  у `readFile` / `writeFile`. `pipeline` и `finished` из `node:stream/promises` —
+  `Promise<Result<...>>` (пока с ошибкой `StreamFault`: `code`, `message`); `text`, `json`,
+  `buffer`, `arrayBuffer` из `node:stream/consumers` — тоже `Result`. `pipe()` — ошибка с
+  подсказкой `pipeline`: `pipe` не передаёт ошибку дальше. Слушатели событий потока требуют
+  слушателя `error` (см. «События»).
 - **Тип кусков** известен при компиляции ([streams.md](docs/streams.md)): `Readable<T>`,
   `Writable<T>`, `Duplex<W, R>`, `Transform<W, R>`. По умолчанию — `Buffer`; кодировка при создании
   (`{ encoding: "utf8" }`, `createReadStream(path, "utf8")`) — `string`; в `objectMode` — тип того,
   что программа кладёт в `push()`, пишет в `write()` и `end()` и отдаёт колбэку `transform`
   (выводится по всей программе, как карта событий из `emit`), или явно:
-  `new Readable<User>({ objectMode: true, read() {} })`. Этот тип получают слушатель `data`,
+  `class Users extends Readable<User>`. Этот тип получают слушатель `data`,
   `read()`, `for await` и `onWrite`; `write("текст")` в поток байтов можно, как в node, а `push(42)`
   в него и `pipeline` потока `User` в поток `Buffer` — ошибки компиляции.
 - **`setEncoding("utf8")`** меняет тип кусков у той же константы (или пути через `readonly`
@@ -2146,9 +2171,12 @@ const users = Readable.from([ann, bob])                         // Readable<User
   параметрами — ошибка: иначе это был бы ещё один вариант перегрузки, которого поток не вызывает.
   Наследнику открыто ещё несколько операций: `pushChunk` (положить кусок, тип которого компилятор
   не знает; кусок не того типа кончает поток ошибкой), `readChunk`, `iterate<C>()`.
-  Запись объектом, `new Readable({ read() {} })`, — как в node.
-- **Отличия от node**: конец потока — `push(undefined)` (`null` в tz нет), `read()` без данных
-  даёт `undefined`.
+  `Readable`, `Writable`, `Duplex` и `Transform` — абстрактные: поток — только подкласс. Запись
+  объектом из node, `new Readable({ read() {} })`, — ошибка с подсказкой (настройки без функций —
+  `objectMode`, `highWaterMark`, `encoding` — идут в `super(...)`); поток из готовых данных —
+  `Readable.from(...)`; `PassThrough` делается через `new`.
+- **Отличия от node**: конец потока — `pushEnd()` (`push(undefined)` — ошибка сборки; `tz port`
+  переводит `push(null)` сам), `read()` без данных даёт `undefined`.
 - **Файлы**: `createReadStream(path, options)` и `createWriteStream(path, options)` из `node:fs` —
   `ReadStream` и `WriteStream` с опциями node (`encoding`, `start` и `end`, `highWaterMark` —
   64 КБ, `flags`, `mode`, `fd`, `autoClose`, `emitClose`, `flush`), событиями `open`,
@@ -2169,7 +2197,7 @@ const users = Readable.from([ann, bob])                         // Readable<User
 - **Скорость** (`bench/stream_lines`): 32 МБ, 800 тыс. строк через `createReadStream` → `Transform`
   на строки → `Transform` с `includes` и `toUpperCase` → `Writable` — 136 мс против 150 мс у Go
   (горутины и каналы) и 187 мс у node.
-- **Пока нет**: web-потоки (`ReadableStream`, `toWeb` / `fromWeb`), `Readable.wrap`, операторы
+- **Пока нет**: `WritableStream`, `TransformStream`, `toWeb` / `fromWeb`, `Readable.wrap`, операторы
   `Readable` (`map`, `filter`, `toArray`...), `Duplex.from`, `compose` функций, свои события у
   наследников потоков, асинхронные функции `node:child_process`; `Hash`, `Cipheriv` и другие
   объекты `node:crypto` — ещё не потоки.
@@ -2179,16 +2207,16 @@ const users = Readable.from([ann, bob])                         // Readable<User
 ```ts
 import { createHash, createHmac, createCipheriv, randomBytes, scryptSync, sign, generateKeyPairSync } from "node:crypto"
 
-createHash("sha256").update("abc").digest("hex")            // "ba7816bf..."
-createHmac("sha256", secret).update(body).digest("base64")   // подпись вебхука
-const key = scryptSync(password, salt, 32)                   // ключ из пароля
+createHash("sha256").map(h => h.update("abc").digest("hex")) // Result<string, CreateHashError>
+createHmac("sha256", secret)                                  // Result<Hmac, CreateHmacError>
+const key = scryptSync(password, salt, 32)                    // Result<Buffer, ScryptError>
 const iv = randomBytes(12)
-const c = createCipheriv("aes-256-gcm", key, iv)              // Result<Cipheriv, CryptoError>
+const c = createCipheriv("aes-256-gcm", key, iv)              // Result<Cipheriv, CreateCipherError>
 if (c.isErr()) return c                                        // ключ или IV не той длины
 const head = c.value.update(text, "utf8")
-const tail = c.value.final()                                   // Result<Buffer, CryptoError>
-const tag = c.value.getAuthTag()                               // Result<Buffer, CryptoError>
-const pair = generateKeyPairSync("ed25519")                    // Result<KeyPair, CryptoError>
+const tail = c.value.final()                                   // Result<Buffer, CipherFinalError>
+const tag = c.value.getAuthTag()                               // Result<Buffer, GetAuthTagError>
+const pair = generateKeyPairSync("ed25519")                    // Result<KeyPair, GenerateKeyPairError>
 if (pair.isOk()) console.log(sign(undefined, Buffer.from("message"), pair.value.privateKey))
 ```
 
@@ -2213,18 +2241,23 @@ if (pair.isOk()) console.log(sign(undefined, Buffer.from("message"), pair.value.
   171 КБ, плюс SHA-256 с именем в коде — 287 КБ (сам SHA-256 с ассемблером — около 30 КБ,
   остальное — кодировки `hex` и ошибки рантайма), AES-GCM — 1 МБ (почти всё — ассемблер AVX-512
   OpenSSL, на котором и держится скорость), всё OpenSSL — 4,1 МБ.
-- **Ошибки — `Result<T, CryptoError>`**, где `CryptoError = { code: string; message: string }`, с
-  кодами и текстами node (`ERR_CRYPTO_INVALID_KEYLEN`, `ERR_OSSL_BAD_DECRYPT` и `error:1C800064:
-  Provider routines::bad decrypt`...; где у node кода нет, у tz свой: `ERR_CRYPTO_AUTH_FAILED` —
-  тег AES-GCM не совпал). `Result` дают: `createCipheriv` и `createDecipheriv` (длина ключа, IV и
-  тега), `final()` и `getAuthTag()`, `createPrivateKey` и `createPublicKey`, `key.export()`,
-  `sign` и `verify` и одноимённые методы `Sign` и `Verify`, `generateKeyPairSync`,
-  `diffieHellman`, у `ECDH` — `computeSecret`, `setPrivateKey`, `getPublicKey`, `getPrivateKey`,
-  у сертификата — `checkPrivateKey` и `verify`, а ещё любая функция с именем алгоритма из
-  переменной (`createHash(name)`, `createHmac(name, key)`, `pbkdf2Sync(…, digest)`...) и `createHmac`
-  с `KeyObject`. Сертификат читает `X509Certificate.parse(pem)`; `new X509Certificate(...)` —
-  ошибка с этой подсказкой. Числа вне диапазона (`randomBytes(-1)`, `randomInt(5, 5)`) — ошибки
-  компиляции, пока проверка в `if` не докажет диапазон (в node — `RangeError`).
+- **Ошибки — `Result` со своим типом у каждой функции** ([crypto.md](docs/crypto.md), раздел 5,
+  «Ошибки»): `CreateHashError`, `CreateCipherError`, `DecipherFinalError`, `CreatePrivateKeyError`,
+  `SignError`… (32 типа), импорт — `import { DecipherFinalError } from "node:crypto"`. `kind` —
+  тип и причина (`DECIPHER_FINAL_ERROR_AUTHENTICATION_FAILED`, `CREATE_CIPHER_ERROR_WRONG_KEY_LENGTH`,
+  `CREATE_PRIVATE_KEY_ERROR_PASSPHRASE_MISSING`…), у варианта только его поля: `algorithm`,
+  `length` и `expected`, `got`, `parameter` и `value`, `field`, `format`, `openssl`. `code` — код
+  node, у ошибок OpenSSL — его причина (`ERR_OSSL_PEM_NO_START_LINE`, `ERR_OSSL_BAD_DECRYPT`);
+  ключ, который OpenSSL не прочитал, tz разбирает сам, чтобы сказать почему. Тексты — что не
+  вышло и почему: `aes-256-gcm needs a 32-byte key, but the key has 5 bytes`, `could not decrypt
+  with aes-256-gcm: the data was changed or the key is wrong (the authentication tag does not
+  match)`. `Result` дают и функции с именем алгоритма в коде (`createHash("sha256")`): имя
+  проверено при сборке, а OpenSSL может отказать и по другим причинам. Что видно по коду, —
+  ошибка сборки: длина ключа и IV у `createCipheriv`, `iterations` и `keylen` меньше 1, `N` у
+  `scryptSync` — не степень двойки, `modulusLength` RSA меньше 512; числа вне диапазона
+  (`randomBytes(-1)`, `randomInt(5, 5)`) — тоже, пока проверка в `if` не докажет диапазон (в
+  node — `RangeError`). Сертификат читает `X509Certificate.parse(pem)`; `new
+  X509Certificate(...)` — ошибка с этой подсказкой.
 - **Хеш не закрывается** (как в Python и Go): `digest()` можно позвать снова или дописать данные
   после него; в node второй `digest()` бросает `Digest already called`. **Ошибки порядка у шифра**
   (`setAAD` у шифра без AEAD, тег не той длины, `update` после `final`) запоминаются, и их отдаёт
@@ -2284,7 +2317,7 @@ if (pair.isOk()) console.log(sign(undefined, Buffer.from("message"), pair.value.
 
 ```ts
 const key = await crypto.subtle.importKey("raw", secret, { name: "HMAC", hash: "SHA-256" }, false, ["sign"])
-if (key.isErr()) return key                                            // Result<CryptoKey, SubtleError>
+if (key.isErr()) return key                                            // Result<CryptoKey, SubtleImportKeyError>
 const mac = await crypto.subtle.sign("HMAC", key.value, data)          // так пишут hono и jose
 const pair = await crypto.subtle.generateKey({ name: "ECDSA", namedCurve: "P-256" }, true, ["sign", "verify"])
 const sealed = await crypto.subtle.encrypt({ name: "AES-GCM", iv }, aesKey, data)
@@ -2305,15 +2338,22 @@ const jwk = (await crypto.subtle.exportKey("jwk", publicKey)).unwrapOr({ kty: "E
   подходит без аннотаций. `generateKey` с алгоритмом в вызове даёт `CryptoKey` или `CryptoKeyPair`,
   `exportKey("jwk")` — `JsonWebKey`, иначе `ArrayBuffer`. JWK из текста — `JSON.parse` и своя
   проверка полей (литерал `JsonWebKey`).
-- **Ошибки — `Promise<Result<T, SubtleError>>`**, а не отказ `Promise`: `SubtleError = { kind:
-  "SUBTLE"; code; message }`. `code` — наш вид имени `DOMException` или `TypeError`, которыми
-  node отвергает (29 октября): `NotSupportedError` → `"ERR_NOT_SUPPORTED"`, `DataError` →
+- **Ошибки — `Promise<Result<T, E>>`**, а не отказ `Promise`; у каждого метода свой тип
+  ([crypto.md](docs/crypto.md), раздел 5, «Ошибки»): `SubtleDigestError`, `SubtleGenerateKeyError`,
+  `SubtleImportKeyError`, `SubtleExportKeyError`, `SubtleSignError`, `SubtleVerifyError`,
+  `SubtleEncryptError`, `SubtleDecryptError`, `SubtleDeriveBitsError`, `SubtleDeriveKeyError`,
+  `SubtleWrapKeyError`, `SubtleUnwrapKeyError` — видны без импорта. `kind` — метод и причина:
+  `UNSUPPORTED_ALGORITHM`, `WRONG_PARAMETERS`, `WRONG_KEY` (ключ не для этой операции или не
+  извлекаемый), `WRONG_USAGE`, `NOT_A_KEY` (данные ключа), `DECRYPTION_FAILED` (у `decrypt` и
+  `unwrapKey`: ключ не тот или данные изменены), `SYSTEM` — например
+  `SUBTLE_DECRYPT_ERROR_DECRYPTION_FAILED`. `code` — наш вид имени `DOMException` или `TypeError`,
+  которыми node отвергает (29 октября): `NotSupportedError` → `"ERR_NOT_SUPPORTED"`, `DataError` →
   `"ERR_INVALID_DATA"`, `OperationError` → `"ERR_OPERATION_FAILED"`, `InvalidAccessError` (и
   `InvalidAccessException` у `key is not extractable`) → `"ERR_INVALID_ACCESS"`, `SyntaxError` →
-  `"ERR_INVALID_KEY_USAGE"`, `TypeError` → `"ERR_INVALID_ARG_TYPE"`, `RangeError` →
-  `"ERR_OUT_OF_RANGE"`. Текст — как в node (`Unrecognized algorithm name`, `Unable to use this key
-  to sign`, `Invalid keyData`, `Usages cannot be empty when creating a key.`, `Failed to normalize
-  algorithm: ... because 'hash' is required in 'HmacImportParams'.`).
+  `"ERR_INVALID_KEY_USAGE"`, `TypeError` → `"ERR_INVALID_ARG_TYPE"`. Текст — как в node
+  (`Unrecognized algorithm name`, `Unable to use this key to sign`, `Invalid keyData`, `Usages
+  cannot be empty when creating a key.`, `Failed to normalize algorithm: ... because 'hash' is
+  required in 'HmacImportParams'.`).
 - **Как в node**: имена алгоритмов без учёта регистра; ключи JWK — в порядке node. Тесты
   сверяются с node байт в байт: ключи и векторы фиксированы, у случайного печатаются длины и
   результаты `verify`.
@@ -2539,7 +2579,7 @@ const patch: Json = { phone: null, tags: ["a", 1] }               // null быв
 - **Печать** — как в node, с тем же порядком ключей: ключи-индексы (`"1"`, `"2"`) первыми по
   возрастанию, остальные в порядке появления; повторный ключ в тексте заменяет значение, но не место.
 - **`JSON.parse(text)`** читает по грамматике V8 и отдаёт `Result<Json, JsonError>`. Ошибка —
-  встроенный тип `JsonError = { kind: "JSON"; code: "ERR_INVALID_JSON" | "ERR_CIRCULAR_STRUCTURE"; message: string }`:
+  встроенный тип `JsonError = { kind: "JSON_ERROR"; code: "ERR_INVALID_JSON" | "ERR_CIRCULAR_STRUCTURE"; message: string }`:
   у неразобранного текста `code` — `"ERR_INVALID_JSON"`, `message` — текст `SyntaxError` из node
   (`Unexpected token 'x', "[1, x]" is not valid JSON`, `Expected ',' or '}' after property value
   in JSON at position 13 (line 3 column 3)`). Второй аргумент (reviver) —
@@ -2909,7 +2949,7 @@ await listening.stop()
 - **Сервер** ([net.md](docs/net.md), раздел 1) — `new Server(options, handler)` из `"tz:http"`:
   настройки и обработчик, после создания не меняются. `server.listen()` открывает сокет и
   отдаёт `Result<Listening, ListenError>`: `Listening` — запущенный сервер с `url`, `hostname`,
-  `port` (настоящий, и при `port: 0`) и `stop()`; `ListenError` — `{ kind: "SERVER", code,
+  `port` (настоящий, и при `port: 0`) и `stop()`; `ListenError` — `{ kind: "LISTEN_ERROR", code,
   message, errno, syscall, address, port }`, `code` — `"EADDRINUSE"`, `"EACCES"`,
   `"ENOTFOUND"`, `"ERR_TLS_CERT"` и другие из `ListenErrorCode`. Каждый `listen()` — ещё
   один сокет с теми же настройками. Настройки: `port` (8000, `0` — любой свободный),
@@ -3007,17 +3047,20 @@ await listening.stop()
   (`has` — `false`), а перевод строки и NUL из значения выбрасываются — ничего не бросается, и
   подставить свой заголовок через значение нельзя. Заголовки можно менять всегда, и у ответа
   `fetch`, и у `Response.redirect` (в node — `TypeError: immutable`). `clone()` прочитанного
-  тела не бросает: у копии тело тоже прочитано. **`ReadableStream<R, E>`** (`E` — тип ошибки
-  потока, по умолчанию `never`; `read()` и `for await` — `Result<…, E | ReaderError>`,
-  `ReaderError` — `USED` `ERR_STREAM_LOCKED` / `ERR_READER_RELEASED`; `failure()`) —
+  тела не бросает: у копии тело тоже прочитано. **`ReadableStream<R, E>`** (`E extends StreamError` — тип
+  ошибки потока, по умолчанию `StreamError`, у которой только `message`; `read()` и `for await` —
+  `Result<…, E | ReaderError | ControllerClosedError>`, `ReaderError` — `USED`
+  `ERR_STREAM_LOCKED` / `ERR_READER_RELEASED`, `ControllerClosedError` — `enqueue()` или `close()`
+  после `close()`; `failure()`) —
   `start` / `pull` / `cancel` (обычные и async), `getReader()`, `read()`, `releaseLock()`,
   `cancel()`, `locked()`, `disturbed()` (читали ли поток — сверх node), `for await` (выход из цикла
   отменяет поток); `locked()` и `desiredSize()` у
-  контроллера — методы (в node — свойства). Поток, который может упасть, отдают телом методом:
-  `Response.stream(поток, init?)`, `Request.stream(url, поток, init?)`, `fetch(url, { body:
-  поток })` — тогда `FetchError` вида `REQUEST` `ERR_STREAM_FAILED` несёт ошибку потока
-  целиком в `details`; `new Response` / `new Request` берут только поток без ошибок
-  (docs/net.md, раздел 3). **`FormData`** — поля-строки
+  контроллера — методы (в node — свойства). Поток телом отдают только методом:
+  `Response.stream(поток, init?)`, `Request.stream(url, поток, options?)`, `fetch(url, { body:
+  поток, duplex: "half" })` — тогда `FetchError` вида `REQUEST` `ERR_STREAM_FAILED` несёт ошибку
+  потока целиком в `details`; `new Response(тело)` и `new Request(url, options)` потоков не берут
+  совсем: тело — `BodyData` (строка, байты, `URLSearchParams`, `FormData`), настройки —
+  `RequestOptions` (docs/net.md, раздел 3). **`FormData`** — поля-строки
   (файлов пока нет), разбор `application/x-www-form-urlencoded` и `multipart/form-data`.
 - **`URL` и `URLSearchParams`** — по стандарту WHATWG, тем же автоматом состояний, что у ada в
   node: особые схемы, IPv4 во всех формах (`0x7f.1`), IPv6, `.` и `..` в путях, процентное
@@ -3036,7 +3079,7 @@ await listening.stop()
   нижний регистр и Punycode, без таблиц UTS #46 (несколько символов они отображают иначе).
 - **`new URL` не может не получиться.** Адрес из строки, известной только при выполнении,
   разбирает `URL.parse(input, base?)` — он отдаёт `Result<URL, UrlError>`, где `UrlError =
-  { kind: "URL"; code: "ERR_INVALID_URL"; message: string; input: string }`. `new URL(text)` с переменной — ошибка
+  { kind: "URL_ERROR"; code: "ERR_INVALID_URL"; message: string; input: string }`. `new URL(text)` с переменной — ошибка
   компиляции с подсказкой `URL.parse`. В `new URL` можно передать литерал (он проверяется при
   сборке: схема, хост особых схем, порт до 65535), готовый `URL`, `url.href()` и `req.url` запроса;
   относительный литерал — только с таким же основанием: `new URL("/path", req.url)`.
@@ -3081,7 +3124,7 @@ await listening.stop()
   `upgradeWebSocket(request)` из `tz:http`, как в Deno. Кадры и рукопожатие — на tz.
 - **`tz:packet`** ([net.md](docs/net.md), раздел 8; 29 октября) — разбор и сборка заголовков
   Ethernet, ARP, IPv4, IPv6, UDP, TCP, ICMP и их контрольных сумм на tz; ошибки — `PacketError`
-  (`kind: "PACKET"`).
+  (`kind: "PACKET_ERROR"`).
 - **`node:dgram`** ([net.md](docs/net.md), раздел 10; 29 октября) — UDP: `new Socket({ type,
   port, address, broadcast, multicast })`, `await socket.bind()` — `Result<void, BindError>`,
   приём — событие `"message"` с `(data, from)`, `await socket.send(data, { address, port })` —
@@ -3608,10 +3651,10 @@ tz impact Vec.add               что затронет правка: кто и�
 - `node:child_process`: где node даёт `null`, у tz `undefined` (`status` программы, убитой
   сигналом, `signal`, `output[0]`), и `console.log` таких полей не показывает. Опции `encoding` и
   `stdio` — литералы: от них зависит тип результата. `stdout` потока-канала —
-  `string` или `Buffer` без `| undefined` (в типах node — тоже, хотя у программы, которая не
-  запустилась, node даёт там `undefined`). Ошибки — `Err` с `ExecError`, а не исключения: у
-  «вышла не с 0» `code: "exit"` (в node `code` нет), в `ExecError` нет `name`, `output` и `pid`, а
-  у `spawnSync` нет поля `error` — таймаут, переполнение и незапуск у него тоже `Err`. `status` — `int`:
+  `string` или `Buffer` у `execSync` / `execFileSync`; у результата `spawnSync`
+  (`SpawnTextResult`) `stdout?` и `stderr?` — необязательные. Ошибки — `Err` своего типа, а не
+  исключения: у «вышла не с 0» `code: "ERR_NONZERO_EXIT"` (в node `code` нет), тексты свои, а у
+  `spawnSync` нет поля `error` — таймаут, переполнение и незапуск у него тоже `Err`. `status` — `int`:
   код больше 2^31 (падение программы в Windows, `0xC0000005`) отрицателен. Предупреждение node
   DEP0190 об аргументах с `shell: true` tz не печатает; в `stdio` — только три потока.
 - `new Array(n)` и `a.length = n` — с доказательством, что `n` не меньше нуля (в JS —
@@ -3945,7 +3988,7 @@ CRT, без RTTI и исключений, поэтому `tz` собираетс
 | `compiler/packages` | проекты и пакеты, по классу на папку: `tz.json` (`manifest/`), `tz.lock` (`lock/`), выбор версий и граф пакетов (`resolver/`, `package_graph/`), semver (`version/`, `range/`), кэш, JSR и git (`jsr_client/`, `git_client/`, `package_cache/`), HTTP через WinHTTP (`http_client/`), JSON с позициями для ошибок и правок (`json_parser/`), импорты файла без парсера (`scanner/`), `tz port` (`port/`) |
 | `compiler/library` | C++-часть тем библиотеки: крючки темы (`feature/`), список тем (`feature_registry/`), и по папке на тему, в каждой `<тема>_feature/` и классы проверки и IR. `bytes`: байтовые массивы, `Buffer`, `TextEncoder` / `TextDecoder`, `embedBytes` и доказательства, что значение влезает в элемент; вызовы по группам (`*_calls/`). `child_process`: `spawnSync`, `execFileSync` и `execSync`. `crypto`: `node:crypto`, имена алгоритмов и выбор слоя OpenSSL, `crypto.subtle`. `date`: даты и `Intl.DateTimeFormat`; разборщик дат рантайма, собранный и в `tz` (`date_syntax/`). `decimal`: литералы, операторы и методы. `events`: карты событий, эмиттеры и `EventTarget`, `once()`. `builtin_modules`: имена модулей `node:*` и `tz:io`, привязка импортов, `node:timers/promises` и объекты, которые делает рантайм; что делает модуль, решает его тема через крючки `exportProblem`, `checkModuleCall`, `checkModuleValue` и `checkModuleMember`. `fs`: `node:fs`, `node:fs/promises`, `node:readline` и `tz:io`. `path`: `node:path`. `os`: `node:os`. `intl`: `Intl`, `toLocaleString`, `localeCompare` и `normalize`. `json`: `Json` и `JSON`, проверка `JSON.parse` текста, известного при сборке. `console`, `math`, `process`. `reflect`: отражение и метаданные. `regex`: литералы, методы, машинный код литералов (`regex_native_lowerer/`, `matcher_*/`), компилятор регулярок рантайма, собранный и в `tz` (`regex_syntax/`). `result`: `Result` и место создания `Err` (`err_sites/`). `stream`: типы кусков `Readable<T>` и остальных классов `node:stream`. `tz_modules`: встроенные модули на tz, их `declare function` и `tz:intrinsics`. `weakref`: `WeakRef` |
 | `runtime/core` | рантайм языка, у каждого модуля свой заголовок: общее — `TZ_HOT`, дескрипторы типов, раскладки (`tzrt`); вывод в stdout и stderr, форматирование чисел, граница стека, сбой рантайма (`output`); аллокатор, куча на каждый поток (`alloc`); потоки программы, пул, очередь node и куски, которые идут заранее (`parallel`); общие объекты и атомарные счётчики (`publish`); исключение в полёте, места стека ошибки, текст `e.stack` (`error`); строки (`string`); массивы (`array`); разбор чисел и `toFixed` (`number`); окружения замыканий (`closure`); `Object.keys` / `values` / `entries` (`object`); регистр букв по таблицам Unicode, которые [gen_unicode_tables.mjs](runtime/core/unicode/gen_unicode_tables.mjs) берёт из самого Node.js (`unicode`); `Promise`, очередь микрозадач, таймеры и цикл событий, как в node (`async`); пул потоков и ожидание ввода-вывода — IOCP в Windows (`io`); хеш-таблица словарей (`map`); коробки `unknown` (`unknown`); группы объектов в циклах, `WeakRef` и отладочный режим памяти (`group`) |
-| `runtime/library` | C-часть тем, по папке на модуль. `console`: `console.log` для массивов, объектов, `Result`, итераторов, `Json` и объединений как в Node (`inspect`). `math`: `Math`. `decimal`: точные десятичные числа. `json`: значения `Json` (`json`, `json_values`), `JSON.parse` как в V8 (`json_parse`), `JSON.stringify` любого значения (`json_stringify`). `regex`: разбор и компиляция в программу (`regex_compile`, общий с `tz`) с таблицами Unicode от [gen_regex_tables.mjs](runtime/library/regex/regex_compile/gen_regex_tables.mjs), интерпретатор, методы и то, что зовёт машинный код регулярок (`regex`). `date`: поля, установка полей и строки (`date`), разбор строк, как в V8 (`date_parse`, общий с `tz`), местный пояс (`date_zone`) и языки (`date_format`). `intl`: ICU системы, которую `icu` загружает при первом обращении; языки, опции и части `formatToParts` (`intl`), числа и `PluralRules` (`intl_number`), `Collator`, `normalize` и `Segmenter` (`intl_text`), `RelativeTimeFormat`, `ListFormat` и `DisplayNames` (`intl_names`). `process`: аргументы, переменные окружения, код выхода и часы. `path`: `node:path` в обоих стилях. `fs`: общее функций файлов (`fs`), ошибки ОС `SystemError` как в libuv (`fs_errors`), синхронные функции файлов и папок (`fs_sync`, `fs_dirs`), `node:fs/promises` (`fs_async`, `fs_async_dirs`), stdin и `readLine` (`stdin`), `node:readline` (`readline`), чтение и запись кусками для потоков файлов (`fs_stream`). `os`: `node:os`. `stream`: что просит `node:stream`: проверка куска, байты в stdout и stderr. `child_process`: подготовка вызова как в node, запуск как в libuv (кавычки аргументов, поиск в `PATH`, окружение, каналы с overlapped I/O, таймаут), в Linux — `posix_spawn` (`child`). `bytes`: `ArrayBuffer`, типизированные массивы и их методы (`bytes`); `Buffer`, кодировки node, `TextEncoder` / `TextDecoder` (`buffer`) с таблицами однобайтовых кодировок, которые [gen_encodings.mjs](runtime/library/bytes/encodings/gen_encodings.mjs) берёт у node (`encodings`), и многобайтовые кодировки (`cjk`). `reflect`: записи метаданных (`meta`); `Reflect.get`, `apply`, `construct`, `new` класса, известного при выполнении, и проверки `unknown` (`reflect`). `net`: сокеты TCP на порту завершения цикла (AcceptEx, ConnectEx, WSARecv, WSASend) и поиск имён (`net`), срок `timeout` у `fetch`, который обрывает ожидания соединения (`deadline`). `http`: HTTP/1.1: разбор голов и тел, ответы и запросы одной записью (`http`); распаковка тел `fetch` — inflate из zlib и декодер brotli из `third_party` (`decompress`). `tz_modules`: что просят встроенные модули на tz через `declare function` (`library`). Отдельно, в `tzcrypto.lib`: `crypto` — `node:crypto` поверх OpenSSL: общее без OpenSSL — объекты, HMAC, PBKDF2, HKDF, случайные числа, секретные ключи (`crypto`), хеши (`crypto_md`), AES (`crypto_aes`) и ChaCha20-Poly1305 (`crypto_chacha`), scrypt (`crypto_scrypt`) и Argon2 (`crypto_argon2`) прямого слоя, по объекту на алгоритм, и полный слой: имена из переменных и списки (`crypto_evp`), ключи, подписи и обмен ключами (`crypto_keys`), сертификаты (`crypto_x509`); Web Crypto (`crypto_subtle*`); `tls` — TLS соединений `net` для https: OpenSSL в памяти между сокетом и HTTP, проверка сервера как в node и корневые сертификаты Mozilla, которые [gen_tls_roots.mjs](runtime/library/tls/tls/gen_tls_roots.mjs) берёт у node |
+| `runtime/library` | C-часть тем, по папке на модуль. `console`: `console.log` для массивов, объектов, `Result`, итераторов, `Json` и объединений как в Node (`inspect`). `math`: `Math`. `decimal`: точные десятичные числа. `json`: значения `Json` (`json`, `json_values`), `JSON.parse` как в V8 (`json_parse`), `JSON.stringify` любого значения (`json_stringify`). `regex`: разбор и компиляция в программу (`regex_compile`, общий с `tz`) с таблицами Unicode от [gen_regex_tables.mjs](runtime/library/regex/regex_compile/gen_regex_tables.mjs), интерпретатор, методы и то, что зовёт машинный код регулярок (`regex`). `date`: поля, установка полей и строки (`date`), разбор строк, как в V8 (`date_parse`, общий с `tz`), местный пояс (`date_zone`) и языки (`date_format`). `intl`: ICU системы, которую `icu` загружает при первом обращении; языки, опции и части `formatToParts` (`intl`), числа и `PluralRules` (`intl_number`), `Collator`, `normalize` и `Segmenter` (`intl_text`), `RelativeTimeFormat`, `ListFormat` и `DisplayNames` (`intl_names`). `process`: аргументы, переменные окружения, код выхода и часы. `path`: `node:path` в обоих стилях. `fs`: общее функций файлов (`fs`), ошибки ОС: коды как в libuv и тексты (`fs_errors`), синхронные функции файлов и папок (`fs_sync`, `fs_dirs`), `node:fs/promises` (`fs_async`, `fs_async_dirs`), stdin и `readLine` (`stdin`), `node:readline` (`readline`), чтение и запись кусками для потоков файлов (`fs_stream`). `os`: `node:os`. `stream`: что просит `node:stream`: проверка куска, байты в stdout и stderr. `child_process`: подготовка вызова как в node, запуск как в libuv (кавычки аргументов, поиск в `PATH`, окружение, каналы с overlapped I/O, таймаут), в Linux — `posix_spawn` (`child`). `bytes`: `ArrayBuffer`, типизированные массивы и их методы (`bytes`); `Buffer`, кодировки node, `TextEncoder` / `TextDecoder` (`buffer`) с таблицами однобайтовых кодировок, которые [gen_encodings.mjs](runtime/library/bytes/encodings/gen_encodings.mjs) берёт у node (`encodings`), и многобайтовые кодировки (`cjk`). `reflect`: записи метаданных (`meta`); `Reflect.get`, `apply`, `construct`, `new` класса, известного при выполнении, и проверки `unknown` (`reflect`). `net`: сокеты TCP на порту завершения цикла (AcceptEx, ConnectEx, WSARecv, WSASend) и поиск имён (`net`), срок `timeout` у `fetch`, который обрывает ожидания соединения (`deadline`). `http`: HTTP/1.1: разбор голов и тел, ответы и запросы одной записью (`http`); распаковка тел `fetch` — inflate из zlib и декодер brotli из `third_party` (`decompress`). `tz_modules`: что просят встроенные модули на tz через `declare function` (`library`). Отдельно, в `tzcrypto.lib`: `crypto` — `node:crypto` поверх OpenSSL: общее без OpenSSL — объекты, HMAC, PBKDF2, HKDF, случайные числа, секретные ключи (`crypto`), хеши (`crypto_md`), AES (`crypto_aes`) и ChaCha20-Poly1305 (`crypto_chacha`), scrypt (`crypto_scrypt`) и Argon2 (`crypto_argon2`) прямого слоя, по объекту на алгоритм, и полный слой: имена из переменных и списки (`crypto_evp`), ключи, подписи и обмен ключами (`crypto_keys`), сертификаты (`crypto_x509`); Web Crypto (`crypto_subtle*`); `tls` — TLS соединений `net` для https: OpenSSL в памяти между сокетом и HTTP, проверка сервера как в node и корневые сертификаты Mozilla, которые [gen_tls_roots.mjs](runtime/library/tls/tls/gen_tls_roots.mjs) берёт у node |
 | `library` | встроенные модули, написанные на tz, которые лежат рядом с `tz.exe` в `lib`. `events`: `node:events` (`events.tz`) и глобальные `EventTarget`, `Event`, `CustomEvent`, `DOMException` (`web.tz`). `http`: `tz:http` (`http.tz`), глобальные `URL` и `URLSearchParams` (`url.tz`), `fetch`, `Headers`, `Request`, `Response`, `ReadableStream`, `FormData` (`fetch.tz`). `stream`: `node:stream` (`stream.tz` — класс `Stream` со всей работой потока в закрытых методах, и его части `stream_duplex.tz` — `Readable`, `Writable`, `Duplex`, `Transform`, и `stream_pipeline.tz`, которые загрузчик читает как один модуль), `node:stream/promises` (`stream_promises.tz`), `node:stream/consumers` (`stream_consumers.tz`), `node:string_decoder` (`string_decoder.tz`), потоки файлов `createReadStream` / `createWriteStream` и `process.stdin` / `stdout` / `stderr` (`fs_stream.tz`). `crypto`: Web Crypto (`webcrypto.tz`). `core`: встроенные функции компилятора (`intrinsics.tz`, модуль `tz:intrinsics`: `panic`, `defer`, `asListener<F>`, `asClass<C>`, `chunkOf<T>` и другие), которые модули библиотеки импортируют по имени, а программа не видит. Глобальные получает сам файл, который их называет. Их код проверяется и компилируется вместе с программой; `declare function` в библиотеке — функция рантайма на C, имя которой выводится из имени: `netClose` — `tz_net_close` |
 | `editors/types` | встроенные имена tz для TypeScript (`tz.d.ts`) и настройки tsc для программ tz (`tsconfig.json`) — для будущего плагина tsserver; лежат рядом с `tz.exe` в `types` |
 | `editors/vscode` | расширение VS Code: ошибки по мере набора, подсветка и форматирование файлов `.tz` ([README](editors/vscode/README.md)) |
@@ -3980,7 +4023,6 @@ CRT, без RTTI и исключений, поэтому `tz` собираетс
 тест с `enum` запускается с `--experimental-transform-types`, потому что `enum`, в отличие от
 типов, нельзя просто отбросить. Перед тестом в node загружается заглушка
 [tests/node/preload.cjs](tests/node/preload.cjs): она даёт то, что в tz встроено, а в node нет, —
-глобальные `SystemError` (`instanceof` верно для `Error` со строковыми `code` и `syscall`),
 `Result` с `ok` и `err`, функции, которые в tz дают `Result` (`JSON.parse`, `URL.parse`,
 `Date.parse`, `RegExp.parse`, `decodeURIComponent`), `node:fs`, `node:fs/promises` и
 `node:child_process` с `Result` ([tz-fs.mjs](tests/node/tz-fs.mjs),

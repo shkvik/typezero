@@ -1,0 +1,14 @@
+line 1,apple,3
+bad line 2: line 2 is not CSV
+2 lines
+failed after 1: line 2 is not CSV
+full, 0 free
+small true
+WRITE_AFTER_END_ERROR: could not write: end() was already called on this stream
+got 1,a,2
+PREMATURE_CLOSE_ERROR: the stream was closed before its end
+errored nothing
+no file true (open)
+READ_STREAM_ERROR_INVALID_RANGE: could not read stream_errors.tz: start (9) is after end (2)
+exists EEXIST true
+WRITE_STREAM_ERROR_INVALID_RANGE: could not write never.txt: start must be a whole number from 0 to 9007199254740991, not -1

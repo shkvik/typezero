@@ -200,7 +200,7 @@ Expr *CryptoChecker::checkCryptoNew(NewExpr *expr, llvm::StringRef cls) {
   checker_.diags_.error(expr->loc(),
                         "'new X509Certificate' may fail on the data it reads, and 'new' gives no "
                         "Result; write 'X509Certificate.parse(pem)', which gives a "
-                        "Result<X509Certificate, CryptoError>");
+                        "Result<X509Certificate, ParseCertificateError>");
   for (Expr *&arg : expr->args) {
     arg = checker_.exprChecker().checkExpr(arg);
   }

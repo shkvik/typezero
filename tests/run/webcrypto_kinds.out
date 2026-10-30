@@ -1,0 +1,8 @@
+SUBTLE_DIGEST_ERROR_UNSUPPORTED_ALGORITHM | ERR_NOT_SUPPORTED | Unrecognized algorithm name
+SUBTLE_DECRYPT_ERROR_DECRYPTION_FAILED | ERR_OPERATION_FAILED | The operation failed for an operation-specific reason
+SUBTLE_ENCRYPT_ERROR_WRONG_KEY | ERR_INVALID_ACCESS | The requested operation is not valid for the provided key
+SUBTLE_EXPORT_KEY_ERROR_WRONG_KEY | ERR_INVALID_ACCESS | key is not extractable
+SUBTLE_IMPORT_KEY_ERROR_NOT_A_KEY | ERR_INVALID_DATA | Invalid key length
+SUBTLE_UNWRAP_KEY_ERROR_DECRYPTION_FAILED | ERR_OPERATION_FAILED | The operation failed for an operation-specific reason
+SUBTLE_SIGN_ERROR_WRONG_KEY | ERR_INVALID_ACCESS | Unable to use this key to sign
+the key is wrong or the data was changed

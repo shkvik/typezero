@@ -1,0 +1,66 @@
+CREATE_HASH_ERROR_UNKNOWN_ALGORITHM | ERR_CRYPTO_INVALID_DIGEST | there is no hash "sha-nope"; getHashes() lists them
+sha-nope
+CREATE_HASH_ERROR_UNSUPPORTED_ALGORITHM | ERR_OSSL_EVP_UNSUPPORTED | the hash md4 is outdated and tz does not include it
+CREATE_HASH_ERROR_WRONG_PARAMETERS | ERR_OSSL_EVP_NOT_XOF_OR_INVALID_LENGTH | sha256 always makes 32 bytes, so outputLength cannot be 5; only shake128 and shake256 take another length
+outputLength 5
+HASH_ERROR_UNKNOWN_ALGORITHM | ERR_CRYPTO_INVALID_DIGEST | there is no hash "nope"; getHashes() lists them
+CREATE_HMAC_ERROR_UNKNOWN_ALGORITHM | ERR_CRYPTO_INVALID_DIGEST | createHmac cannot use shake256: it has no fixed length; use a hash such as sha256
+CREATE_HMAC_ERROR_WRONG_KEY_TYPE | ERR_CRYPTO_INVALID_KEY_OBJECT_TYPE | the key must be a secret key, but this one is public
+public secret
+PBKDF2_ERROR_WRONG_PARAMETERS | ERR_OUT_OF_RANGE | iterations must be a whole number from 1 to 2147483647, not 0
+iterations 0
+PBKDF2_ERROR_WRONG_PARAMETERS | ERR_OUT_OF_RANGE | keylen must be a whole number from 1 to 2147483647, not 0
+PBKDF2_ERROR_UNKNOWN_ALGORITHM | ERR_CRYPTO_INVALID_DIGEST | there is no hash "nope"; getHashes() lists them
+PBKDF2_ERROR_WRONG_KEY_TYPE | ERR_CRYPTO_INVALID_KEY_OBJECT_TYPE | the password must be a secret key, but this one is private
+HKDF_ERROR_WRONG_PARAMETERS | ERR_CRYPTO_INVALID_KEYLEN | hkdf with sha256 makes at most 8160 bytes, not 8161
+SCRYPT_ERROR_WRONG_PARAMETERS | ERR_CRYPTO_INVALID_SCRYPT_PARAMS | scrypt: N must be a power of two greater than 1, not 3
+SCRYPT_ERROR_WRONG_PARAMETERS | ERR_OSSL_EVP_MEMORY_LIMIT_EXCEEDED | scrypt with N = 1048576, r = 8 and p = 1 needs 1073744896 bytes of memory, more than maxmem (33554432)
+ARGON2_ERROR_WRONG_PARAMETERS | ERR_OUT_OF_RANGE | argon2: the nonce must have 8 bytes or more, not 4
+ARGON2_ERROR_WRONG_PARAMETERS | ERR_OUT_OF_RANGE | memory must be a whole number from 8 to 4294967295, not 7
+CREATE_CIPHER_ERROR_WRONG_KEY_LENGTH | ERR_CRYPTO_INVALID_KEYLEN | aes-256-gcm needs a 32-byte key, but the key has 5 bytes
+aes-256-gcm 5 32
+CREATE_CIPHER_ERROR_WRONG_IV_LENGTH | ERR_CRYPTO_INVALID_IV | aes-256-cbc needs a 16-byte IV, but it has 12 bytes
+CREATE_DECIPHER_ERROR_UNKNOWN_ALGORITHM | ERR_CRYPTO_UNKNOWN_CIPHER | there is no cipher "aes-999-gcm"; getCiphers() lists them
+CREATE_CIPHER_ERROR_WRONG_TAG_LENGTH | ERR_CRYPTO_INVALID_AUTH_TAG | aes-256-gcm takes an authentication tag of 4, 8 or 12 to 16 bytes, not 3
+CREATE_CIPHER_ERROR_WRONG_KEY_TYPE | ERR_CRYPTO_INVALID_KEY_OBJECT_TYPE | the key must be a secret key, but this one is public
+CIPHER_FINAL_ERROR_WRONG_ORDER | ERR_CRYPTO_INVALID_STATE | final() was already called on this cipher; make a new one with createCipheriv
+DECIPHER_FINAL_ERROR_AUTHENTICATION_FAILED | ERR_CRYPTO_AUTH_FAILED | could not decrypt with aes-256-gcm: the data was changed or the key is wrong (the authentication tag does not match)
+DECIPHER_FINAL_ERROR_WRONG_ORDER | ERR_CRYPTO_INVALID_STATE | aes-256-gcm needs the authentication tag: call setAuthTag() before final()
+DECIPHER_FINAL_ERROR_WRONG_TAG_LENGTH | ERR_CRYPTO_INVALID_AUTH_TAG | aes-256-gcm takes an authentication tag of 4, 8 or 12 to 16 bytes, not 3
+GET_AUTH_TAG_ERROR_WRONG_ORDER | ERR_CRYPTO_INVALID_STATE | getAuthTag() works only after final(); call final() first
+CIPHER_FINAL_ERROR_WRONG_ORDER | ERR_CRYPTO_INVALID_STATE | final() was already called on this cipher; make a new one with createCipheriv
+DECIPHER_FINAL_ERROR_BAD_DECRYPT | ERR_OSSL_BAD_DECRYPT | could not decrypt with aes-256-cbc: the key is wrong or the data is damaged
+DECIPHER_FINAL_ERROR_WRONG_DATA_LENGTH | ERR_OSSL_WRONG_FINAL_BLOCK_LENGTH | could not decrypt with aes-256-cbc: 20 bytes is not a multiple of 16
+CIPHER_FINAL_ERROR_WRONG_DATA_LENGTH | ERR_OSSL_WRONG_FINAL_BLOCK_LENGTH | could not encrypt with aes-128-cbc: 5 bytes is not a multiple of 16 (padding is off)
+aes-128-cbc 5
+CREATE_PRIVATE_KEY_ERROR_NOT_A_KEY | ERR_OSSL_PEM_NO_START_LINE | could not read the private key: the text is not PEM (no "-----BEGIN" line)
+pem | PEM routines::no start line
+CREATE_PRIVATE_KEY_ERROR_WRONG_KEY_TYPE | ERR_CRYPTO_INVALID_KEY_OBJECT_TYPE | could not read the private key: this is a public key; read it with createPublicKey
+CREATE_PRIVATE_KEY_ERROR_NOT_A_KEY | ERR_OSSL_PEM_BAD_BASE64_DECODE | could not read the private key: the PEM body is not valid base64
+CREATE_PRIVATE_KEY_ERROR_NOT_A_KEY | ERR_OSSL_ASN1_TOO_LONG | could not read the private key: the data is damaged (too long)
+CREATE_PRIVATE_KEY_ERROR_PASSPHRASE_MISSING | ERR_MISSING_PASSPHRASE | could not read the private key: it is encrypted, but no passphrase was given
+CREATE_PRIVATE_KEY_ERROR_WRONG_PASSPHRASE | ERR_OSSL_BAD_DECRYPT | could not read the private key: the passphrase is wrong
+CREATE_PUBLIC_KEY_ERROR_INVALID_JWK | ERR_CRYPTO_INVALID_JWK | could not read the JWK: "kty" must be "RSA", "EC" or "OKP", not "foo"
+kty
+CREATE_PUBLIC_KEY_ERROR_WRONG_KEY_TYPE | ERR_CRYPTO_INVALID_KEY_OBJECT_TYPE | createPublicKey needs a private key object, but this one is secret
+GENERATE_KEY_PAIR_ERROR_WRONG_PARAMETERS | ERR_OSSL_KEY_SIZE_TOO_SMALL | could not generate the key pair: key size too small
+GENERATE_KEY_PAIR_ERROR_UNKNOWN_ALGORITHM | ERR_CRYPTO_INVALID_CURVE | there is no curve "P-999"; getCurves() lists them
+KEY_EXPORT_ERROR_INCOMPATIBLE_OPTIONS | ERR_CRYPTO_INCOMPATIBLE_KEY_OPTIONS | pkcs1 is only for RSA keys, but this key is ec
+KEY_EXPORT_ERROR_INCOMPATIBLE_OPTIONS | ERR_CRYPTO_INCOMPATIBLE_KEY_OPTIONS | a public key cannot be exported as pkcs8; use spki or pkcs1 (RSA)
+KEY_EXPORT_ERROR_UNKNOWN_ALGORITHM | ERR_CRYPTO_UNKNOWN_CIPHER | there is no cipher "aes-999-cbc"; getCiphers() lists them
+KEY_EXPORT_ERROR_INCOMPATIBLE_OPTIONS | ERR_CRYPTO_INCOMPATIBLE_KEY_OPTIONS | a secret key cannot be exported as pem; use export() or { format: "jwk" }
+SIGN_ERROR_WRONG_KEY_TYPE | ERR_CRYPTO_INVALID_KEY_OBJECT_TYPE | signing needs a private key, but this one is public
+public private
+SIGN_ERROR_UNKNOWN_ALGORITHM | ERR_CRYPTO_INVALID_DIGEST | there is no hash "sha-nope"; getHashes() lists them
+SIGN_ERROR_NOT_A_KEY | ERR_OSSL_PEM_NO_START_LINE | could not read the private key: the text is not PEM (no "-----BEGIN" line)
+SIGNER_SIGN_ERROR_UNSUPPORTED_ALGORITHM | ERR_CRYPTO_UNSUPPORTED_OPERATION | createSign cannot sign with an ed25519 key; use sign(null, data, key)
+SIGNER_SIGN_ERROR_WRONG_ORDER | ERR_CRYPTO_INVALID_STATE | sign() was already called on this signer; make a new one with createSign
+CREATE_ECDH_ERROR_UNKNOWN_ALGORITHM | ERR_CRYPTO_INVALID_CURVE | there is no curve "nope"; getCurves() lists them
+ECDH_GET_PUBLIC_KEY_ERROR_WRONG_ORDER | ERR_CRYPTO_INVALID_STATE | getPublicKey() needs keys; call generateKeys() or setPrivateKey() first
+ECDH_SET_PRIVATE_KEY_ERROR_WRONG_KEY_TYPE | ERR_CRYPTO_INVALID_KEYTYPE | the private key is not valid for prime256v1: it must be a number from 1 to the order of the curve
+ECDH_COMPUTE_SECRET_ERROR_INVALID_PUBLIC_KEY | ERR_CRYPTO_ECDH_INVALID_PUBLIC_KEY | could not compute the secret: the other side's public key is not a point on prime256v1
+DIFFIE_HELLMAN_ERROR_INCOMPATIBLE_KEYS | ERR_CRYPTO_INCOMPATIBLE_KEY | diffieHellman needs two keys of one type, but got x25519 and ec
+DIFFIE_HELLMAN_ERROR_WRONG_KEY_TYPE | ERR_CRYPTO_INVALID_KEY_OBJECT_TYPE | diffieHellman needs a private key as privateKey, but this one is public
+PARSE_CERTIFICATE_ERROR_NOT_A_CERTIFICATE | ERR_OSSL_PEM_NO_START_LINE | could not read the certificate: the text is not PEM (no "-----BEGIN" line)
+PEM routines::no start line
+PARSE_CERTIFICATE_ERROR_NOT_A_CERTIFICATE | ERR_OSSL_ASN1_WRONG_TAG | could not read the certificate: the data is damaged (wrong tag)

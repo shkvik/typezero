@@ -79,19 +79,19 @@ export function streamVoidSinkStage<A>(
 }
 
 class PipelineState {
-  error?: StreamError
+  error?: StreamFault
   value: unknown = undefined
-  destroys: ((err: StreamError | undefined) => void)[] = []
+  destroys: ((err: StreamFault | undefined) => void)[] = []
   lastStreamCleanup: (() => void)[] = []
   finishCount: int = 0
-  constructor(public callback: ((err: StreamError | undefined, value: unknown) => void) | undefined) {}
+  constructor(public callback: ((err: StreamFault | undefined, value: unknown) => void) | undefined) {}
 }
 
 class PipelineDestroyer {
   finished = false
 }
 
-function finishImpl(ps: PipelineState, err: StreamError | undefined, final: boolean) {
+function finishImpl(ps: PipelineState, err: StreamFault | undefined, final: boolean) {
   if (err != undefined && (ps.error == undefined || codeOf(ps.error) == "ERR_STREAM_PREMATURE_CLOSE"))
     ps.error = err
   if (ps.error == undefined && !final) return
@@ -113,6 +113,6 @@ function finishImpl(ps: PipelineState, err: StreamError | undefined, final: bool
   }
 }
 
-function pipelineFinish(ps: PipelineState, err?: StreamError) {
+function pipelineFinish(ps: PipelineState, err?: StreamFault) {
   finishImpl(ps, err, --ps.finishCount == 0)
 }

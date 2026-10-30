@@ -17,6 +17,9 @@
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
+#ifndef _WIN32
+#include <poll.h>
+#endif
 
 #define HTTP_MAX_HEAD 16384
 #define HTTP_MAX_HEADERS 1000
@@ -1569,6 +1572,33 @@ int32_t tz_http_reusable(void *conn, TzMaker make) {
   conn_unlock(c);
 
   return reusable;
+}
+
+int32_t tz_http_alive(void *conn, TzMaker make) {
+  TZ_ORDERED();
+  (void)make;
+  NetConn *c = (NetConn *)conn;
+  conn_lock(c);
+  int32_t alive = !c->closed && !c->error && !c->eof && !c->closing;
+  if (alive && !c->reading) {
+    if (c->in_end > c->in_start || c->raw_end > c->raw_start) {
+      alive = 0;
+    } else {
+#ifdef _WIN32
+      fd_set readable;
+      FD_ZERO(&readable);
+      FD_SET(c->s, &readable);
+      TIMEVAL now = {0, 0};
+      alive = select(0, &readable, NULL, NULL, &now) == 0;
+#else
+      struct pollfd watched = {c->s, POLLIN, 0};
+      alive = poll(&watched, 1, 0) == 0;
+#endif
+    }
+  }
+  conn_unlock(c);
+
+  return alive;
 }
 
 int32_t tz_http_keep_alive(void *conn, TzMaker make) {

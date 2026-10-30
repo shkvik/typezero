@@ -48,4 +48,9 @@ for (let i = 0; i < 3000; i++) {
   }
   signature = made.value
 }
-console.log(createHash("sha256").update(signature).digest("hex"))
+const hashed = createHash("sha256")
+if (hashed.isErr()) {
+  console.error(hashed.error.message)
+  process.exit(1)
+}
+console.log(hashed.value.update(signature).digest("hex"))

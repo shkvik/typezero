@@ -102,6 +102,40 @@ static int check(uint64_t n, uint64_t r, uint64_t p, uint64_t maxmem) {
   return 1;
 }
 
+static void explain(int ok, uint64_t n, uint64_t r, uint64_t p, uint64_t limit) {
+  if (ok == 0 && r == 0) {
+    tz_crypto_note_parameter("r", 0);
+    tz_crypto_fail("ERR_CRYPTO_INVALID_SCRYPT_PARAMS", "scrypt: r must be 1 or more, not 0");
+    return;
+  }
+  if (ok == 0 && p == 0) {
+    tz_crypto_note_parameter("p", 0);
+    tz_crypto_fail("ERR_CRYPTO_INVALID_SCRYPT_PARAMS", "scrypt: p must be 1 or more, not 0");
+    return;
+  }
+  if (ok == 0) {
+    tz_crypto_note_parameter("N", (double)n);
+    tz_crypto_fail("ERR_CRYPTO_INVALID_SCRYPT_PARAMS",
+                   "scrypt: N must be a power of two greater than 1, not %llu",
+                   (unsigned long long)n);
+    return;
+  }
+  double need = 128.0 * (double)r * ((double)n + 2) + 128.0 * (double)r * (double)p;
+  if (need > (double)limit) {
+    tz_crypto_note_parameter("maxmem", (double)limit);
+    tz_crypto_fail("ERR_OSSL_EVP_MEMORY_LIMIT_EXCEEDED",
+                   "scrypt with N = %llu, r = %llu and p = %llu needs %.0f bytes of memory, more "
+                   "than maxmem (%llu)",
+                   (unsigned long long)n, (unsigned long long)r, (unsigned long long)p, need,
+                   (unsigned long long)limit);
+    return;
+  }
+  tz_crypto_note_parameter("N", (double)n);
+  tz_crypto_fail("ERR_CRYPTO_INVALID_SCRYPT_PARAMS",
+                 "scrypt: N = %llu, r = %llu and p = %llu are too large together",
+                 (unsigned long long)n, (unsigned long long)r, (unsigned long long)p);
+}
+
 TzBytes *tz_crypto_scrypt(const TzType *pt, const void *pv, const TzType *st, const void *sv,
                           double keylen, double cost, double block_size, double parallelization,
                           double maxmem) {
@@ -114,12 +148,10 @@ TzBytes *tz_crypto_scrypt(const TzType *pt, const void *pv, const TzType *st, co
   }
   uint64_t n = cost ? (uint64_t)cost : 16384, r = block_size ? (uint64_t)block_size : 8;
   uint64_t p = parallelization ? (uint64_t)parallelization : 1;
-  int ok = check(n, r, p, maxmem ? (uint64_t)maxmem : 32u << 20);
+  uint64_t limit = maxmem ? (uint64_t)maxmem : 32u << 20;
+  int ok = check(n, r, p, limit);
   if (ok <= 0) {
-    tz_crypto_fail("ERR_CRYPTO_INVALID_SCRYPT_PARAMS",
-                   ok < 0 ? "Invalid scrypt params: error:030000AC:digital envelope "
-                            "routines::memory limit exceeded"
-                          : "Invalid scrypt params");
+    explain(ok, n, r, p, limit);
     return NULL;
   }
   TzCryptoData password, salt;

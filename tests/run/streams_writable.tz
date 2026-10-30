@@ -1,22 +1,50 @@
 // same-as-node
 // Writable of node:stream (docs/streams.md): write() gives false at the
 // highWaterMark and 'drain' comes when the writes are done, end() with a
-// chunk, whose Promise of a Result comes when the stream finished, final(),
-// writev() of what cork() held, a stream of strings (decodeStrings: false),
-// and a write that fails.
+// chunk, whose Promise of a Result comes when the stream finished, onFinal(),
+// onWritev() of what cork() held (_final() and _writev() in node), a stream
+// of strings (decodeStrings: false), and a write that fails.
 import { Writable } from "node:stream"
 const log = (s: string) => console.log(s)
-const w = new Writable({
-  highWaterMark: 5,
-  write(chunk, encoding, callback) {
+class Slow extends Writable {
+  constructor() {
+    super({ highWaterMark: 5 })
+  }
+  onWrite(chunk, encoding, callback) {
     log(`_write ${chunk.toString()} ${encoding} len=${this.writableLength()}`)
     setTimeout(() => callback(), 1)
-  },
-  final(callback) {
+  }
+  onFinal(callback) {
     log("_final")
     callback()
-  },
-})
+  }
+}
+class Batched extends Writable {
+  onWrite(chunk, encoding, callback) {
+    this.onWritev([{ chunk, encoding }], callback)
+  }
+  onWritev(chunks, callback) {
+    log(`_writev ${chunks.map((c) => c.chunk.toString()).join("|")}`)
+    process.nextTick(() => callback())
+  }
+}
+class Strings extends Writable<string> {
+  constructor() {
+    super({ decodeStrings: false })
+  }
+  onWrite(chunk, enc, cb) {
+    log(`string chunk ${typeof chunk} ${chunk} ${enc}`)
+    cb()
+  }
+}
+class Failing extends Writable {
+  onWrite(chunk, enc, cb) {
+    void chunk
+    void enc
+    cb({ message: "boom" })
+  }
+}
+const w = new Slow()
 w.on("error", (err) => log(`w error ${err.message}`))
 w.on("drain", () => log("drain"))
 w.on("prefinish", () => log("prefinish"))
@@ -34,12 +62,7 @@ void w.end("end").then((r) => log(`end ${r.isOk()}`))
 log(`ended ${w.writableEnded()}`)
 
 function more() {
-  const v = new Writable({
-    writev(chunks, callback) {
-      log(`_writev ${chunks.map((c) => c.chunk.toString()).join("|")}`)
-      process.nextTick(() => callback())
-    },
-  })
+  const v = new Batched()
   v.cork()
   v.write("a")
   v.write("b")
@@ -52,22 +75,10 @@ function more() {
   })
   v.on("error", (err) => log(`v error ${err.message}`))
   v.on("finish", () => log("v finish"))
-  const s = new Writable({
-    decodeStrings: false,
-    write(chunk, enc, cb) {
-      log(`string chunk ${typeof chunk} ${chunk} ${enc}`)
-      cb()
-    },
-  })
+  const s = new Strings()
   s.write("hi")
   void s.end("there", "utf8").then((r) => log(`s end ${r.isOk()}`))
-  const e = new Writable({
-    write(chunk, enc, cb) {
-      void chunk
-      void enc
-      cb({ code: "E_BOOM", message: "boom" })
-    },
-  })
+  const e = new Failing()
   e.on("error", (err) => log(`error ${err.message}`))
   e.on("close", () => {
     log("close e")

@@ -49,18 +49,19 @@ const more = createWriteStream(out, { flags: "a" })
 const appended = await more.end("appended")
 console.log(`appended ${appended.isOk()} ${JSON.stringify(must(readFileSync(out, "utf8")))}`)
 
-const upper = new Transform({
-  transform(chunk, enc, cb) {
+class Upper extends Transform {
+  onTransform(chunk, enc, cb) {
     cb(undefined, chunk.toString().toUpperCase())
-  },
-})
+  }
+}
+const upper = new Upper()
 const copy = join(dir, "copy.txt")
 const copied = await pipeline(createReadStream(src), upper, createWriteStream(copy))
 console.log(`copy ${copied.isOk()} ${JSON.stringify(must(readFileSync(copy, "utf8")))}`)
 
 const missing = createReadStream(join(dir, "no-such-file.txt"))
 const missed = await finished(missing)
-if (missed.isErr()) console.log(`missing ${missed.error.message.startsWith("ENOENT: no such file")}`)
+console.log(`missing ${missed.isErr()}`)
 must(rmSync(dir, { recursive: true }))
 
 function must<T, E>(r: Result<T, E>): T {

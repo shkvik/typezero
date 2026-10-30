@@ -1,8 +1,8 @@
 abc own
-cut: NETWORK ERR_CLOSED
+cut: BODY_ERROR_NETWORK ERR_CLOSED
 qr
 got xy
-REQUEST ERR_STREAM_FAILED the stream of the body of the request failed: disk failed part1 EIO
-STREAM ERR_STREAM_FAILED the stream of the body failed: disk failed
+FETCH_ERROR_REQUEST ERR_STREAM_FAILED the stream of the body of the request failed: disk failed part1 EIO
+BODY_ERROR_STREAM ERR_STREAM_FAILED the stream of the body failed: disk failed
 qr
 used ERR_STREAM_LOCKED

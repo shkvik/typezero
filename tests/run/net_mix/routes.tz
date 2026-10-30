@@ -14,7 +14,9 @@ export function Route(path: string) {
 }
 
 export function sign(body: string): string {
-  return createHmac("sha256", SECRET).update(body).digest("hex")
+  const mac = createHmac("sha256", SECRET)
+  if (mac.isErr()) return mac.error.message
+  return mac.value.update(body).digest("hex")
 }
 
 export function verified(body: string, signature: string): boolean {
@@ -45,7 +47,7 @@ export class Handlers {
   @Route("/count")
   count(_req: Request): Response {
     this.served++
-    return new Response(new ReadableStream({
+    return Response.stream(new ReadableStream({
       start: async c => {
         for await (const chunk of counting(5)) c.enqueue(chunk)
         c.close()
@@ -57,7 +59,7 @@ export class Handlers {
   @Route("/slow")
   slow(_req: Request): Response {
     this.served++
-    return new Response(new ReadableStream({
+    return Response.stream(new ReadableStream({
       start: async c => {
         c.enqueue(new TextEncoder().encode("first;"))
         await new Promise<void>(resolve => setTimeout(resolve, 2000))

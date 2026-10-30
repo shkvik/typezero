@@ -82,6 +82,19 @@ Expr *UnionChecker::checkUnionMember(MemberExpr *member) {
       fieldTypes.push_back(f->type);
     }
   }
+  bool nowhere = llvm::none_of(type->members(), [&](const Type *m) {
+    return m->isObject() && !m->isClass() && m->field(member->name);
+  });
+  if (lacking && nowhere &&
+      llvm::all_of(type->members(), [](const Type *m) { return m->isObject() && !m->isClass(); })) {
+    std::string message = "'" + type->name().str() + "' has no field '" + member->name.str() + "'";
+    if (member->name == "errno") {
+      message += ": tz gives no errno; the reason is in 'kind', the system's code in 'code'";
+    }
+    checker_.diags_.error(member->loc(), message);
+    member->type = Type::error();
+    return member;
+  }
   if (lacking) {
     std::string message = "property '" + member->name.str() + "' does not exist on '" +
                           lacking->name().str() + "', which '" + type->name().str() +

@@ -1,10 +1,10 @@
-// same-as-node
 // expect-stderr: to stderr
-// execFileSync and execSync give a Result of what the program printed. It
-// is an Err of an ExecError when the program fails: with the code "exit",
-// what it printed and how it ended, or with the code of the system when it
-// could not start or ran too long. What it wrote to stderr goes on to this
-// program's stderr.
+// execFileSync and execSync give a Result of what the program printed. When
+// the program fails, it is an Err of the function's own type
+// (docs/process.md, section 3): ExecFileTextError, ExecBytesError... — kind
+// tells the reason (EXIT, PROGRAM_NOT_FOUND_IN_PATH, TIMEOUT...), and only
+// that reason's fields are there: status after EXIT, timeout after TIMEOUT.
+// What the program wrote to stderr goes on to this program's stderr.
 import { execFileSync, execSync } from "node:child_process"
 import { writeFileSync, mkdtempSync, rmSync } from "node:fs"
 import { join } from "node:path"
@@ -40,10 +40,18 @@ if (at >= 0) {
   failure(execSync("echo failed 1>&2 && exit 3", { encoding: "utf8", stdio: "pipe" }))
   failure(execFileSync(process.execPath, [...self, "sleep"], { timeout: 300, stdio: "pipe" }))
   const slept = execSync(`"${process.execPath}" "${script}" --child sleep`, { timeout: 300 })
-  if (slept.isErr()) {
+  if (slept.isErr() && slept.error.kind == "EXEC_BYTES_ERROR_TIMEOUT") {
     const e = slept.error
-    console.log(e.code, e.errno, e.signal, e.status ?? "-", e.syscall?.startsWith("spawnSync "),
-                e.spawnargs?.length)
+    console.log(e.code, e.timeout, e.signal, e.stdout?.length)
+  }
+  const exited = execFileSync(process.execPath, [...self, "print", "o", "bad\nmore\n", "7"], { encoding: "utf8", stdio: "pipe" })
+  if (exited.isErr() && exited.error.kind == "EXEC_FILE_TEXT_ERROR_EXIT") {
+    const e = exited.error
+    console.log(e.code, e.status, JSON.stringify(e.stdout), JSON.stringify(e.stderr), e.args.length)
+  }
+  const missing = execFileSync("tz-no-such-program", ["a"], { encoding: "utf8" })
+  if (missing.isErr() && missing.error.kind == "EXEC_FILE_TEXT_ERROR_PROGRAM_NOT_FOUND_IN_PATH") {
+    console.log(missing.error.file, missing.error.args, missing.error.syscall)
   }
 
   // Through the shell, as in Node: cmd.exe on Windows.
@@ -60,7 +68,7 @@ if (at >= 0) {
   must(writeFileSync(bat, "@echo from batch %1\r\n"))
   const batch = execFileSync(bat, ["x"])
   if (batch.isErr())
-    console.log(batch.error.code, batch.error.errno, batch.error.message.replaceAll(dir, "D"))
+    console.log(batch.error.kind, batch.error.code, batch.error.message.replaceAll(dir, "D"))
   console.log(must(execFileSync(`"${bat}"`, ["x"], { shell: true, encoding: "utf8" })).trim())
   console.log(must(execSync(`"${bat}" y`, { encoding: "utf8", cwd: dir })).trim())
   must(rmSync(dir, { recursive: true }))
@@ -85,14 +93,11 @@ function clean(text: string) {
              .replaceAll(process.execPath, "EXE").replaceAll("\r", "")
 }
 
-function failure<T, O>(r: Result<T, ExecError<O>>) {
+function failure<T, E extends { kind: string; code: string; message: string }>(r: Result<T, E>) {
   if (r.isOk()) {
     console.log("no error")
     return
   }
   const e = r.error
-  const message = e.code == "exit" ? clean(e.message) : e.message.replaceAll(process.execPath, "EXE")
-  console.log(e.code, JSON.stringify(message), e.status ?? "-", e.signal ?? "-", e.stdout, e.stderr,
-              e.errno ?? "-", e.syscall?.replaceAll(process.execPath, "EXE") ?? "-",
-              e.spawnargs?.length ?? "-")
+  console.log(e.kind, e.code, "|", clean(e.message))
 }

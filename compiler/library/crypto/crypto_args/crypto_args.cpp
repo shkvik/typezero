@@ -1,16 +1,21 @@
 #include "compiler/library/crypto/crypto_args/crypto_args.h"
 #include "compiler/check/expr/argument_checker/argument_checker.h"
 #include "compiler/check/expr/expr_checker/expr_checker.h"
+#include "compiler/check/flow/index_proofs/index_proofs.h"
 #include "compiler/check/types/type_relations/type_relations.h"
+#include "compiler/declare/constant_folder/constant_folder.h"
 #include "compiler/declare/prelude/prelude.h"
 #include "compiler/library/bytes/bytes_checker/bytes_checker.h"
 #include "compiler/library/crypto/crypto_api/crypto_api.h"
 #include "compiler/library/crypto/crypto_check_helpers/crypto_check_helpers.h"
+#include "compiler/library/crypto/crypto_error_types/crypto_error_types.h"
 #include "compiler/library/crypto/crypto_names/crypto_names.h"
 #include "compiler/library/process/process_checker/process_checker.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/StringExtras.h"
 #include "llvm/Support/ConvertUTF.h"
+#include "llvm/Support/FormatVariadic.h"
+#include <cmath>
 
 using llvm::cast;
 using llvm::dyn_cast;
@@ -70,15 +75,9 @@ Expr *CryptoArgs::cryptoCall(CallExpr *call, CryptoFn fn, std::vector<Expr *> ar
 
 Expr *CryptoArgs::cryptoResult(CallExpr *call, CryptoFn fn, std::vector<Expr *> args,
                                const Type *type) {
-  return cryptoCall(call, fn, std::move(args), Type::result(type, cryptoError()));
-}
+  const Type *error = checker_.cryptoErrorTypes().ofCall(fn, args);
 
-const Type *CryptoArgs::cryptoError() { return checker_.prelude().builtinType("CryptoError"); }
-
-bool CryptoArgs::holdsKeyObject(const Type *type) const {
-  auto key = [](const Type *t) { return t->crypto() == Crypto::KeyObject; };
-
-  return key(type) || (type->isUnion() && llvm::any_of(type->members(), key));
+  return cryptoCall(call, fn, std::move(args), Type::result(type, error));
 }
 
 Expr *CryptoArgs::cryptoInt(llvm::SMLoc loc, int64_t value) {
@@ -316,6 +315,89 @@ Expr *CryptoArgs::cryptoCipher(Expr *arg) {
 
 Expr *CryptoArgs::cryptoNumber(Expr *arg) {
   return checker_.argumentChecker().checkArg(arg, Type::doubleTy());
+}
+
+std::string CryptoArgs::numberText(double value) {
+  if (value == std::floor(value) && std::fabs(value) < 1e15) {
+    return std::to_string(int64_t(value));
+  }
+
+  return llvm::formatv("{0:g}", value).str();
+}
+
+std::optional<double> CryptoArgs::knownNumber(const Expr *arg) const {
+  if (auto *lit = dyn_cast<FloatLitExpr>(arg)) {
+    return lit->value;
+  }
+  if (auto *lit = dyn_cast<IntLitExpr>(arg)) {
+    return double(lit->value);
+  }
+  if (auto *unary = dyn_cast<UnaryExpr>(arg); unary && unary->op == UnaryOp::Neg) {
+    std::optional<double> inner = knownNumber(unary->operand);
+    if (inner) {
+      return -*inner;
+    }
+  }
+  if (auto *conversion = dyn_cast<CastExpr>(arg)) {
+    if (std::optional<int64_t> value = checker_.constantFolder().intConstant(conversion->operand)) {
+      return double(*value);
+    }
+  }
+  std::optional<int64_t> value = checker_.constantFolder().intConstant(arg);
+  if (!value) {
+    return std::nullopt;
+  }
+
+  return double(*value);
+}
+
+bool CryptoArgs::checkWhole(const Expr *arg, llvm::StringRef name, double least) {
+  std::optional<double> value = knownNumber(arg);
+  if (!value || (*value == std::floor(*value) && *value >= least)) {
+    return true;
+  }
+  checker_.diags_.error(arg->loc(), name + " must be a whole number of " + numberText(least) +
+                                        " or more, not " + numberText(*value));
+
+  return false;
+}
+
+bool CryptoArgs::checkCipherLengths(const Expr *cipher, const Expr *key, const Expr *iv) {
+  auto *index = dyn_cast<IntLitExpr>(cipher);
+  if (!index) {
+    return true;
+  }
+  llvm::StringRef name = kDirectCiphers[index->value].name;
+  int64_t keyBytes = name.contains("128") ? 16 : name.contains("192") ? 24 : 32;
+  bool anyIv = name.ends_with("gcm");
+  int64_t ivBytes = name.starts_with("chacha") ? 12 : 16;
+  auto bytesOf = [&](const Expr *e) -> std::optional<int64_t> {
+    Type::Bytes kind = e->type->bytes();
+    if (kind != Type::Bytes::Buffer && kind != Type::Bytes::Uint8) {
+      return std::nullopt;
+    }
+
+    return checker_.indexProofs().exactLength(e);
+  };
+  bool ok = true;
+  if (std::optional<int64_t> have = bytesOf(key); have && *have != keyBytes) {
+    checker_.diags_.error(key->loc(), name + " needs a " + std::to_string(keyBytes) +
+                                          "-byte key, but this one has " + std::to_string(*have) +
+                                          " bytes");
+    ok = false;
+  }
+  std::optional<int64_t> ivHave = bytesOf(iv);
+  if (ivHave && anyIv && *ivHave == 0) {
+    checker_.diags_.error(iv->loc(), name + " needs an IV of 1 byte or more, but it is empty");
+    ok = false;
+  } else if (ivHave && !anyIv && *ivHave != ivBytes) {
+    checker_.diags_.error(iv->loc(), name + " needs a " + std::to_string(ivBytes) +
+                                         "-byte IV, but this one has " + std::to_string(*ivHave) +
+                                         " bytes");
+    ok = false;
+  }
+
+  return ok;
 }
 
 Expr *CryptoArgs::cryptoKey(Expr *arg, llvm::StringRef what) {

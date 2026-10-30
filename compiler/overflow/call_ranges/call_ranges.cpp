@@ -41,6 +41,13 @@ CallRanges::CallRanges(OverflowCheck &check) : check_(check) {}
 
 bool CallRanges::mergeSummaries(bool narrowing) {
   bool changed = false;
+  check_.changed_.clear();
+  auto note = [&](bool grew, const void *map, const void *key, llvm::StringRef field) {
+    if (grew) {
+      changed = true;
+      check_.changed_.insert({map, key, field.str()});
+    }
+  };
   for (auto &entry : check_.cur_.params) {
     const FunctionDecl *fn = entry.first;
     auto from = check_.next_.params.find(fn);
@@ -49,7 +56,8 @@ bool CallRanges::mergeSummaries(bool narrowing) {
           from != check_.next_.params.end() && i < from->second.size() ? &from->second[i] : nullptr;
       const Type *type =
           i < fn->params.size() && fn->params[i].sym ? fn->params[i].sym->type : nullptr;
-      changed |= check_.slots().mergeSlot(entry.second[i], slot, type, narrowing);
+      note(check_.slots().mergeSlot(entry.second[i], slot, type, narrowing), &check_.cur_.params,
+           fn, "");
       Num &num = entry.second[i].val.num;
       if (dangerous(num.worst())) {
         if (const Reason *why = check_.slots().paramReason(fn, i)) {
@@ -66,37 +74,45 @@ bool CallRanges::mergeSummaries(bool narrowing) {
   for (auto &entry : check_.cur_.rets) {
     auto from = check_.next_.rets.find(entry.first);
     const Type *type = entry.first->sym ? entry.first->sym->ret : nullptr;
-    changed |= check_.slots().mergeSlot(
-        entry.second, from != check_.next_.rets.end() ? &from->second : nullptr, type, narrowing);
+    note(check_.slots().mergeSlot(entry.second,
+                                  from != check_.next_.rets.end() ? &from->second : nullptr, type,
+                                  narrowing),
+         &check_.cur_.rets, entry.first, "");
   }
   for (auto &entry : check_.cur_.vars) {
     auto from = check_.next_.vars.find(entry.first);
-    changed |= check_.slots().mergeSlot(entry.second,
-                                        from != check_.next_.vars.end() ? &from->second : nullptr,
-                                        entry.first->type, narrowing);
+    note(check_.slots().mergeSlot(entry.second,
+                                  from != check_.next_.vars.end() ? &from->second : nullptr,
+                                  entry.first->type, narrowing),
+         &check_.cur_.vars, entry.first, "");
   }
   for (auto &entry : check_.cur_.fields) {
     auto from = check_.next_.fields.find(entry.first);
     const OverflowCheck::Slot *slot = from != check_.next_.fields.end() ? &from->second : nullptr;
-    changed |= check_.slots().mergeSlot(entry.second, slot, slot ? slot->type : entry.second.type,
-                                        narrowing);
+    note(check_.slots().mergeSlot(entry.second, slot, slot ? slot->type : entry.second.type,
+                                  narrowing),
+         &check_.cur_.fields, entry.first.first, entry.first.second);
   }
   for (auto &entry : check_.cur_.elements) {
     auto from = check_.next_.elements.find(entry.first);
-    changed |= check_.slots().mergeSlot(
-        entry.second, from != check_.next_.elements.end() ? &from->second : nullptr, entry.first,
-        narrowing);
+    note(check_.slots().mergeSlot(entry.second,
+                                  from != check_.next_.elements.end() ? &from->second : nullptr,
+                                  entry.first, narrowing),
+         &check_.cur_.elements, entry.first, "");
   }
   for (auto &entry : check_.cur_.dicts) {
     auto from = check_.next_.dicts.find(entry.first);
     const Type *value = entry.first->valueType();
-    changed |= check_.slots().mergeSlot(
-        entry.second, from != check_.next_.dicts.end() ? &from->second : nullptr, value, narrowing);
+    note(check_.slots().mergeSlot(entry.second,
+                                  from != check_.next_.dicts.end() ? &from->second : nullptr, value,
+                                  narrowing),
+         &check_.cur_.dicts, entry.first, "");
   }
   if (!narrowing) {
     for (auto &entry : check_.next_.preds) {
       OverflowCheck::Pred &into = check_.cur_.preds[entry.first];
       const OverflowCheck::Pred &from = entry.second;
+      bool grew = false;
       auto merge = [&](std::vector<Num> &a, const std::vector<Num> &b) {
         if (a.size() < b.size()) {
           a.resize(b.size());
@@ -105,12 +121,13 @@ bool CallRanges::mergeSummaries(bool narrowing) {
           Num joined = join(a[i], b[i]);
           if (!sameNum(joined, a[i])) {
             a[i] = joined;
-            changed = true;
+            grew = true;
           }
         }
       };
       merge(into.whenTrue, from.whenTrue);
       merge(into.whenFalse, from.whenFalse);
+      note(grew, &check_.cur_.preds, entry.first, "");
     }
   }
 
@@ -122,6 +139,8 @@ void CallRanges::analyzeAll() {
   check_.owner_ = nullptr;
   check_.frames_.assign(1, OverflowCheck::Frame());
   check_.targets_.clear();
+  check_.reading_ = nullptr;
+  check_.loopRanges().forget();
   State st;
   for (const Stmt *item : check_.program_.items) {
     if (isa<FunctionDecl>(item)) {
@@ -129,8 +148,26 @@ void CallRanges::analyzeAll() {
     }
     check_.executor().exec(item, st);
   }
-  for (const FunctionDecl *fn : check_.functions_) {
-    analyzeFunction(fn);
+  check_.memos_.resize(check_.functions_.size());
+  for (size_t i = 0; i < check_.functions_.size(); ++i) {
+    OverflowCheck::FunctionMemo &memo = check_.memos_[i];
+    if (memo.valid && !check_.reporting_ && !check_.readsChanged(memo)) {
+      check_.work_ += memo.work;
+      OverflowCheck::joinInto(check_.next_, memo.made);
+      continue;
+    }
+    OverflowCheck::Summaries others = std::move(check_.next_);
+    check_.next_ = OverflowCheck::Summaries();
+    memo.reads.clear();
+    check_.reading_ = &memo;
+    uint64_t before = check_.work_;
+    analyzeFunction(check_.functions_[i]);
+    check_.reading_ = nullptr;
+    memo.work = check_.work_ - before;
+    memo.made = std::move(check_.next_);
+    memo.valid = check_.round_ >= 1;
+    check_.next_ = std::move(others);
+    OverflowCheck::joinInto(check_.next_, memo.made);
   }
 }
 
@@ -142,6 +179,7 @@ Val CallRanges::paramValue(const FunctionDecl *fn, size_t index) {
   }
   Val v;
   bool known = false;
+  check_.noteRead(&check_.cur_.params, fn);
   auto found = check_.cur_.params.find(fn);
   if (found != check_.cur_.params.end() && index < found->second.size()) {
     v = found->second[index].val;
@@ -159,6 +197,7 @@ void CallRanges::analyzeFunction(const FunctionDecl *fn) {
   check_.frames_.assign(1, OverflowCheck::Frame());
   check_.frames_.back().fn = fn;
   check_.targets_.clear();
+  check_.loopRanges().forget();
   State st;
   for (size_t i = 0; i < fn->params.size(); ++i) {
     const Param &p = fn->params[i];

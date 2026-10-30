@@ -6,5 +6,5 @@ true 34 "Ελληνικά: текст 😀\n"
 true 24 "ß.txt: текст 😀\n"
 false файл.txt: текст 😀
 
-ENOENT: no such file or directory, open 'D\папка ✓\нет такого.txt'
+ENOENT D\папка ✓\нет такого.txt
 false

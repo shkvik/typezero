@@ -98,6 +98,48 @@ bool grows(const Stmt *body, const VarSymbol *var) {
   return found;
 }
 
+bool identicalNum(const Num &a, const Num &b) {
+  return (a.lo == b.lo || (std::isnan(a.lo) && std::isnan(b.lo))) &&
+         (a.hi == b.hi || (std::isnan(a.hi) && std::isnan(b.hi))) && a.loOrigin == b.loOrigin &&
+         a.hiOrigin == b.hiOrigin && a.loWhy == b.loWhy && a.hiWhy == b.hiWhy && a.base == b.base &&
+         a.offLo == b.offLo && a.offHi == b.offHi && a.away == b.away;
+}
+
+bool identicalVal(const Val &a, const Val &b) {
+  if (!identicalNum(a.num, b.num) || !identicalNum(a.len, b.len)) {
+    return false;
+  }
+  if (a.elem == b.elem) {
+    return true;
+  }
+
+  return a.elem && b.elem && identicalVal(*a.elem, *b.elem);
+}
+
+bool identicalState(const State &a, const State &b) {
+  if (a.dead != b.dead || a.vars.size() != b.vars.size()) {
+    return false;
+  }
+  for (const auto &entry : a.vars) {
+    auto found = b.vars.find(entry.first);
+    if (found == b.vars.end() || !identicalVal(entry.second, found->second)) {
+      return false;
+    }
+  }
+
+  return true;
+}
+
+bool freshBase(const Val &v, uint64_t before) {
+  if (v.num.base > before || v.len.base > before) {
+    return true;
+  }
+
+  return v.elem && freshBase(*v.elem, before);
+}
+
+constexpr size_t kRememberedPerLoop = 16;
+
 std::optional<std::pair<double, double>> stepOf(const Num &end, uint64_t base) {
   if (end.empty() || end.base != base || !base) {
     return std::nullopt;
@@ -158,6 +200,7 @@ void LoopRanges::execLoop(const Stmt *stmt, llvm::ArrayRef<llvm::StringRef> labe
   } else if (type && type->isDict()) {
     spec.passes = someLength();
   }
+  spec.source = iterable;
   spec.exitAtHead = true;
   spec.simple = !containsLoop(s->body);
   spec.body = [this, s, type, element, iterated](State &in) {
@@ -271,10 +314,110 @@ Num LoopRanges::passCount(const OverflowCheck::LoopSpec &spec, const State &entr
   return best;
 }
 
+void LoopRanges::forget() { remembered_.clear(); }
+
+std::vector<uint64_t> LoopRanges::contextOf() const {
+  const OverflowCheck::Frame &frame = check_.frames_.back();
+  std::vector<uint64_t> context = {check_.quiet_,
+                                   check_.frames_.size(),
+                                   uint64_t(reinterpret_cast<uintptr_t>(frame.fn)),
+                                   frame.callback ? 1u : 0u,
+                                   frame.quiet,
+                                   frame.targets,
+                                   check_.targets_.size()};
+  for (size_t i = frame.targets; i < check_.targets_.size(); ++i) {
+    context.push_back(check_.targets_[i].quiet);
+  }
+
+  return context;
+}
+
+bool LoopRanges::freshBases(const State &state, uint64_t before) const {
+  for (const auto &entry : state.vars) {
+    if (freshBase(entry.second, before)) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
 void LoopRanges::runLoop(const OverflowCheck::LoopSpec &spec, State &st) {
   if (st.dead) {
     return;
   }
+  if (check_.quiet_ == 0 || check_.overBudget()) {
+    solveLoop(spec, st);
+    return;
+  }
+  std::vector<uint64_t> context = contextOf();
+  const std::vector<RememberedLoop> &known = remembered_[spec.loc.getPointer()];
+  OverflowCheck::Frame &frame = check_.frames_.back();
+  size_t floor = frame.targets;
+  for (const RememberedLoop &loop : known) {
+    if (loop.context != context || check_.work_ + loop.work > OverflowCheck::kWorkBudget ||
+        loop.source.has_value() != spec.source.has_value() ||
+        (loop.source && !identicalVal(*loop.source, *spec.source)) ||
+        !identicalState(loop.entry, st)) {
+      continue;
+    }
+    for (size_t i = 0; i < loop.jumps.size(); ++i) {
+      OverflowCheck::Target &target = check_.targets_[floor + i];
+      target.breaks = join(target.breaks, loop.jumps[i].first);
+      target.conts = join(target.conts, loop.jumps[i].second);
+    }
+    frame.returned = join(frame.returned, loop.returned);
+    frame.result = join(frame.result, loop.result);
+    check_.work_ += loop.work;
+    st = loop.exit;
+    return;
+  }
+  RememberedLoop loop;
+  loop.context = std::move(context);
+  loop.entry = st;
+  loop.source = spec.source;
+  std::vector<std::pair<State, State>> saved;
+  for (size_t i = floor; i < check_.targets_.size(); ++i) {
+    OverflowCheck::Target &target = check_.targets_[i];
+    saved.push_back({std::move(target.breaks), std::move(target.conts)});
+    target.breaks = deadState();
+    target.conts = deadState();
+  }
+  State savedReturned = std::move(frame.returned);
+  Val savedResult = std::move(frame.result);
+  frame.returned = deadState();
+  frame.result = Val();
+  uint64_t workBefore = check_.work_;
+  uint64_t basesBefore = check_.bases_;
+  solveLoop(spec, st);
+  OverflowCheck::Frame &after = check_.frames_.back();
+  bool fresh = freshBases(st, basesBefore) || freshBases(after.returned, basesBefore) ||
+               freshBase(after.result, basesBefore);
+  for (size_t i = 0; i < saved.size(); ++i) {
+    OverflowCheck::Target &target = check_.targets_[floor + i];
+    fresh =
+        fresh || freshBases(target.breaks, basesBefore) || freshBases(target.conts, basesBefore);
+    loop.jumps.push_back({target.breaks, target.conts});
+    target.breaks = join(saved[i].first, target.breaks);
+    target.conts = join(saved[i].second, target.conts);
+  }
+  loop.returned = after.returned;
+  loop.result = after.result;
+  after.returned = join(savedReturned, after.returned);
+  after.result = join(savedResult, after.result);
+  loop.work = check_.work_ - workBefore;
+  if (fresh || check_.overBudget()) {
+    return;
+  }
+  loop.exit = st;
+  std::vector<RememberedLoop> &remembered = remembered_[spec.loc.getPointer()];
+  if (remembered.size() >= kRememberedPerLoop) {
+    remembered.erase(remembered.begin());
+  }
+  remembered.push_back(std::move(loop));
+}
+
+void LoopRanges::solveLoop(const OverflowCheck::LoopSpec &spec, State &st) {
   const State entry = st;
   ++check_.quiet_;
   llvm::DenseMap<const VarSymbol *, uint64_t> bases;

@@ -52,6 +52,7 @@ bool KnowledgeCommand::learn(const std::string &entry, Knowledge &out) const {
   KnowledgePass pass(program, entry, ProgramEntry::rootOf(entry));
   out = pass.run();
   SourcePlaces places(program.sourceMgr);
+  places.nameFiles(program.file.modules);
   for (const Diagnostic &diagnostic : errors) {
     if (diagnostic.kind != llvm::SourceMgr::DK_Error &&
         diagnostic.kind != llvm::SourceMgr::DK_Warning) {

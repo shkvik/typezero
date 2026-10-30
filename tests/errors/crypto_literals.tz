@@ -1,0 +1,29 @@
+// What node:crypto would refuse when the program runs, caught when it is built because the
+// values are written in the code (docs/crypto.md, "Ошибки"): lengths of keys and IVs, counts.
+// The calls still give a Result: OpenSSL may refuse for other reasons.
+import { createCipheriv, createDecipheriv, generateKeyPairSync, hkdfSync, pbkdf2Sync, scryptSync } from "node:crypto"
+
+const iv = Buffer.alloc(12)
+// expect-error: aes-256-gcm needs a 32-byte key, but this one has 5 bytes
+createCipheriv("aes-256-gcm", Buffer.alloc(5), iv)
+// expect-error: aes-256-cbc needs a 16-byte IV, but this one has 12 bytes
+createDecipheriv("aes-256-cbc", Buffer.alloc(32), iv)
+// expect-error: aes-128-gcm needs an IV of 1 byte or more, but it is empty
+createCipheriv("aes-128-gcm", Buffer.alloc(16), Buffer.alloc(0))
+// expect-error: chacha20-poly1305 needs a 12-byte IV, but this one has 16 bytes
+createCipheriv("chacha20-poly1305", Buffer.alloc(32), Buffer.alloc(16))
+// expect-error: iterations must be a whole number of 1 or more, not -1
+pbkdf2Sync("pw", "salt", -1, 32, "sha256")
+// expect-error: keylen must be a whole number of 1 or more, not 0
+pbkdf2Sync("pw", "salt", 1000, 0, "sha256")
+// expect-error: keylen must be a whole number of 1 or more, not 0
+hkdfSync("sha256", "key", "salt", "info", 0)
+// expect-error: N must be a power of two greater than 1, not 3
+scryptSync("pw", "salt", 32, { N: 3 })
+// expect-error: an RSA key needs a modulusLength of 512 bits or more, not 100
+generateKeyPairSync("rsa", { modulusLength: 100 })
+// Fine: right lengths, and values known only when the program runs.
+const fine = createCipheriv("aes-256-gcm", Buffer.alloc(32), iv)
+const count = process.argv.length
+const derived = pbkdf2Sync("pw", "salt", count.toDouble(), 32, "sha256")
+console.log(fine.isOk(), derived.isOk())

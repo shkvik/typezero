@@ -248,10 +248,9 @@ TzBytes *tz_crypto_argon2(int32_t type, void *name_obj, uint64_t name_meta, cons
            : strcmp(name, "argon2id") == 0 ? 2
                                            : -1;
     if (type < 0) {
+      tz_crypto_note_algorithm(name);
       tz_crypto_fail("ERR_INVALID_ARG_VALUE",
-                     "The argument 'algorithm' must be one of: 'argon2d', 'argon2i', "
-                     "'argon2id'. Received '%s'",
-                     name);
+                     "there is no algorithm \"%s\"; use argon2d, argon2i or argon2id", name);
       return NULL;
     }
   }
@@ -271,9 +270,8 @@ TzBytes *tz_crypto_argon2(int32_t type, void *name_obj, uint64_t name_meta, cons
     goto done;
   }
   if (nonce.length < 8) {
-    tz_crypto_fail("ERR_OUT_OF_RANGE",
-                   "The value of \"parameters.nonce.byteLength\" is out of range. It "
-                   "must be >= 8 && <= 4294967295. Received %zu",
+    tz_crypto_note_parameter("nonce", (double)nonce.length);
+    tz_crypto_fail("ERR_OUT_OF_RANGE", "argon2: the nonce must have 8 bytes or more, not %zu",
                    nonce.length);
     goto done;
   }

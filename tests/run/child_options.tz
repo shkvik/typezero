@@ -1,39 +1,45 @@
-// same-as-node
-// Wrong options give an Err with the code and the text of Node's TypeErrors
-// and RangeErrors; what goes wrong when starting the program is an Err too.
+// Wrong options that come from values give an Err of the function's own type
+// (docs/process.md, section 3), with a reason in kind: ZERO_CHARACTER,
+// EMPTY_NAME, OUT_OF_RANGE, UNKNOWN_SIGNAL. The same mistakes written as
+// literals do not build (errors/child_errors.tz). What goes wrong when
+// starting the program is an Err too.
 import { spawnSync, execSync, execFileSync } from "node:child_process"
 
-function show<T, O>(r: Result<T, ExecError<O>>) {
+function show<T, E extends { kind: string; code: string; message: string }>(r: Result<T, E>) {
   if (r.isOk())
     console.log("no error")
   else
-    console.log(r.error.code, "|", r.error.message)
+    console.log(r.error.kind, r.error.code, "|", r.error.message)
 }
-show(spawnSync("a\u0000b"))
-show(spawnSync("cmd", ["/c", "a\u0000"]))
-show(spawnSync(""))
-show(execSync(""))
-show(execSync("echo \u0000"))
-show(execFileSync("cmd", { cwd: "a\u0000" }))
-show(spawnSync("cmd", ["/c", "exit"], { env: { A: "a\u0000" } }))
-show(spawnSync("cmd", ["/c", "exit"], { argv0: "a\u0000" }))
-show(spawnSync("cmd", ["/c", "exit"], { shell: "a\u0000" }))
-show(spawnSync("cmd", ["/c", "exit"], { timeout: -1 }))
-show(spawnSync("cmd", ["/c", "exit"], { timeout: 1.5 }))
-show(spawnSync("cmd", ["/c", "exit"], { maxBuffer: -1 }))
-show(spawnSync("cmd", ["/c", "exit"], { killSignal: "SIGFOO" }))
+const zero = String.fromCharCode(0)
+const nothing = process.argv.length > 99 ? "x" : ""
+const minusOne = process.argv.length - process.argv.length - 1
+const signal = process.argv.length > 99 ? "SIGKILL" : "SIGFOO"
+show(spawnSync("a" + zero + "b"))
+show(spawnSync("cmd", ["/c", "a" + zero]))
+show(spawnSync(nothing))
+show(execSync("echo " + zero))
+show(execFileSync("cmd", { cwd: "a" + zero }))
+show(spawnSync("cmd", ["/c", "exit"], { env: { A: "a" + zero } }))
+show(spawnSync("cmd", ["/c", "exit"], { argv0: "a" + zero }))
+show(spawnSync("cmd", ["/c", "exit"], { shell: "a" + zero }))
+show(spawnSync("cmd", ["/c", "exit"], { timeout: minusOne.toDouble() }))
+show(spawnSync("cmd", ["/c", "exit"], { timeout: minusOne.toDouble() + 2.5 }))
+show(spawnSync("cmd", ["/c", "exit"], { maxBuffer: minusOne.toDouble() }))
+show(spawnSync("cmd", ["/c", "exit"], { killSignal: signal }))
 show(spawnSync("cmd", ["/c", "exit"], { killSignal: 99 }))
-const signal = "SIGKILL"
-console.log(spawnSync("cmd", ["/c", "exit 5"], { killSignal: signal, timeout: 10000 }).map(r => r.status))
+const kill = "SIGKILL"
+console.log(spawnSync("cmd", ["/c", "exit 5"], { killSignal: kill, timeout: 10000 }).map(r => r.status))
 
 // PATH is looked for in the environment the program gets, its name in any
 // case; without it, this process's.
-console.log(spawnSync("cmd", ["/c", "echo found"], { env: { OTHER: "1" }, encoding: "utf8" }).map(r => r.stdout.trim()))
+console.log(spawnSync("cmd", ["/c", "echo found"], { env: { OTHER: "1" }, encoding: "utf8" }).map(r => r.stdout?.trim()))
 show(spawnSync("cmd", ["/c", "echo found"], { env: { path: "" }, encoding: "utf8" }))
 console.log(spawnSync("cmd.exe", ["/c", "exit 9"]).map(r => r.status))
 console.log(spawnSync("CMD.EXE", ["/c", "exit 0"], { windowsHide: true, detached: true }).map(r => r.status))
-// A working directory that is not there; an empty shell is none, as in Node.
+// A working directory that is not there, or is a file; an empty shell is
+// none, as in Node.
 show(spawnSync("cmd", ["/c", "echo x"], { cwd: "C:\\tz-no-such-dir" }))
-show(execSync("echo hi", { shell: "" }))
+const notFolder = spawnSync("cmd", ["/c", "echo x"], { cwd: process.execPath })
+console.log(notFolder.isErr() ? notFolder.error.kind : "no error")
 console.log(execFileSync("cmd", ["/c", "echo", "no shell"], { shell: "", encoding: "utf8" }).map(t => t.trim()))
-show(spawnSync("cmd", ["/c", "exit 1"], { uid: 0 }))

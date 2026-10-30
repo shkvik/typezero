@@ -360,7 +360,11 @@ void Narrowing::narrowComparison(const BinaryExpr *bin, const Val &l, const Val 
 
 void Narrowing::applyPredicate(const CallExpr *call, State &whenTrue, State &whenFalse) {
   const FunctionDecl *fn = call->func ? call->func->decl : nullptr;
-  if (!fn || check_.round_ == 0) {
+  if (!fn) {
+    return;
+  }
+  check_.noteRead(&check_.cur_.preds, fn);
+  if (check_.round_ == 0) {
     return;
   }
   auto found = check_.cur_.preds.find(fn);

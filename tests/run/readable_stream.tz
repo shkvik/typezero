@@ -59,7 +59,7 @@ const endless = new ReadableStream<int>({
     c.enqueue(7)
   },
   cancel: reason => {
-    cancelled = reason?.message ?? "no reason"
+    cancelled = reason ?? "no reason"
   },
 })
 for await (const n of endless) {
@@ -67,6 +67,6 @@ for await (const n of endless) {
   break
 }
 console.log("cancelled:", cancelled)
-const other = new ReadableStream<int>({ cancel: reason => { cancelled = reason?.message ?? "" } })
-await other.cancel({ code: "enough", message: "enough" })
+const other = new ReadableStream<int>({ cancel: reason => { cancelled = reason ?? "" } })
+await other.cancel("enough")
 console.log("cancelled:", cancelled, other.locked())

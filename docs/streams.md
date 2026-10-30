@@ -39,7 +39,7 @@ for await (const item of createReadStream("big.log")) {
   use(item.value)
 }
 const r = await pipeline(createReadStream("a.log"), createGzip(), createWriteStream("a.log.gz"))
-// r: Result<void, SystemError | ZlibError> — первая ошибка любого из потоков
+// r: Result<void, StreamFault> — первая ошибка любого из потоков (точный тип — позже)
 const out = await text(child.stdout)            // node:stream/consumers, Result<string, …>
 ```
 
@@ -71,7 +71,7 @@ child.stdout.on("data", s => s.length)          // s: string
 - `Writable<T>` — так же: что можно писать. `write("текст")` в поток байтов — можно, как в
   node (строка кодируется в UTF-8).
 - События описаны: `on("data", chunk => …)` — `chunk: T`, `on("error", e => …)` — `e` —
-  объект ошибки с меткой (`SystemError`, `ZlibError` — типы объектов, не классы).
+  объект ошибки с меткой (`ReadStreamError`, `SocketError` — типы объектов, не классы).
 
 ## 3. Ошибки
 
@@ -81,14 +81,60 @@ child.stdout.on("data", s => s.length)          // s: string
 - **Всё, что ждёт поток, отдаёт `Result`:** каждый элемент `for await` — `Result<T, E>` (как
   `lines()` в Rust: ошибку не пропустить); `pipeline`, `finished`, `once`, `text` / `json` /
   `buffer` из `node:stream/consumers` — `Promise<Result<...>>`. Слушатель `error` там не нужен.
+- **Тип ошибки — у потока** (решено 30 октября, `tmp/design/stream-errors*.tz`, Т1–Т8):
+  `Readable<T, E extends StreamError = StreamError>`, `Writable<T, E>`, `Duplex<W, R, E>`,
+  `Transform<W, R, E>`; `interface StreamError { message: string }` — у ошибки любого потока
+  есть текст, своя ошибка своего потока — `interface CsvError extends StreamError { kind; … }`.
+  `Readable<string>` — любой поток: у его ошибок есть только `message`; поток с точной ошибкой
+  (`Readable<string, CsvError>`) идёт туда, где ждут `Readable<string>` ([generics.md](generics.md),
+  раздел 5: чужую ошибку в него снаружи не положить).
+- **Кто кладёт ошибку:** только сам поток — `destroy(ошибка: E)` защищённый (`protected`),
+  `callback(ошибка: E)` у `onWrite` / `onTransform` / `onFinal` / `onConstruct`. Снаружи —
+  только `destroy()` без ошибки: остановить. Читатель получает точную ошибку целиком.
+- **Ошибки самой библиотеки** — свои типы с `kind` (Т3, тексты Т6): `PrematureCloseError`
+  (поток закрыли раньше конца — у `for await` после `destroy()`), `WriteAfterEndError`,
+  `WriteAfterDestroyError`, `AlreadyEndedError`, `CallbackTwiceError` (у `end()` и колбэка
+  `write`), `PushAfterEndError`. Каждый элемент `for await` — `Result<T, E | PrematureCloseError |
+  PushAfterEndError>`, `end()` — `Result<void, E | WriteAfterEndError | …>`. Ошибка, положенная в
+  ядро мимо `E` (метод ядра `breakWith`, его видят и подклассы), приходит как `PrematureCloseError`
+  с её текстом: в `E` чужое не попадает.
+- **Поток делается только подклассом** (вариант Г, `tmp/design/stream-options-destroy.tz`):
+  `Readable` / `Writable` / `Duplex` / `Transform` — абстрактные, работа — в `onRead` / `onWrite` /
+  `onTransform`; запись опциями из node (`new Readable({ read() {} })`) — ошибка сборки с
+  подсказкой; поток из готовых данных — `Readable.from(...)`. Конец потока — `pushEnd()`
+  (`push(undefined)` — ошибка сборки; `tz port` переводит `push(null)` сам).
 - **Запись:** `write()` копит и запоминает первую ошибку, `end()` отдаёт её —
-  `await w.end()` даёт `Result<void, SystemError>`; забытый `Result` — ошибка компиляции.
+  `await w.end()` даёт `Result`; забытый `Result` — ошибка компиляции.
 - **Подписка на события** (`on("data")`, `on("end")`) у потока, который может испустить
   `error`, требует подписки на `error` в той же функции на каждом пути — иначе ошибка
   компиляции с подсказкой: `on("error", …)` или `for await`.
 - **`pipe()` нет** — ошибка с подсказкой `pipeline`: `pipe` не передаёт ошибку дальше, источник
   падает, а приёмник остаётся открытым.
-- **`stream.destroy(e)`** остаётся: ошибка уходит в `Result` у `for await`, `end` и `finished`.
+- **`stream.destroy()`** снаружи — остановить поток; читатель получит `PrematureCloseError`.
+- **Потоки файлов** (Т2, сделано 31 октября): `createReadStream` — `ReadStream<T> extends
+  Readable<T, ReadStreamError>`, `createWriteStream` — `WriteStream extends Writable<Buffer,
+  WriteStreamError>`: причины как у `readFile` / `writeFile` (`READ_STREAM_ERROR_NOT_FOUND`…) и
+  `INVALID_RANGE` (`start` / `end` вне диапазона или `start > end`), каждая — `interface …
+  extends StreamError` ([io.md](io.md)).
+- **Web-потоки** (В2, Т3, Г2, сделано 31 октября): `ReadableStream<R, E extends StreamError =
+  StreamError>` — без `E` поток падает с любой `StreamError` и отдаёт только `message`; свою
+  ошибку пишут типом: `new ReadableStream<Uint8Array, DiskError>(…)`. `BodyError` и
+  `ReaderError` — тоже `StreamError`. `enqueue()` или `close()` после `close()` ломают поток:
+  читатель вместо остатка получает `ControllerClosedError` (`kind: "CONTROLLER_CLOSED_ERROR"`,
+  `code: "ERR_INVALID_STATE"`); после конца потока сказать некому — как у `push()` после конца в
+  node. `new Response` и `new Request` потоков не берут ([net.md](net.md), раздел 3).
+- **Сокеты и stdio** (Т2, сделано 31 октября): `Socket` из `node:net` — `Duplex<Buffer, Buffer,
+  SocketError>`: `SOCKET_ERROR_NETWORK` (`ECONNRESET`, `EPIPE`, `ECONNABORTED`, `ETIMEDOUT`,
+  `ERR_CLOSED`, `UNKNOWN`) и `SOCKET_ERROR_TLS`; варианта `TIMEOUT` нет — у чтения и записи
+  сокета нет срока. `process.stdin` — `Readable<Buffer, StdinError>` (`STDIN_ERROR`, `EIO`:
+  система не смогла прочитать), `process.stdout` / `stderr` — `Writable<Buffer, StdoutError>`
+  (`STDOUT_ERROR`, `EOF` в Windows и `EPIPE` в других системах, как у node: читатель ушёл —
+  `tz run a.tz | head`); другие сбои записи в stdout (диск полон) пока не видны, как и у
+  `console.log`.
+- **События** (`on("error")`) и `pipeline` / `finished` пока отдают ошибку как `StreamFault`
+  (`code`, `message`, у потоков файлов — `syscall`, `path`; `errno` нет); точный тип —
+  объединение `E` всех потоков и `PrematureCloseError` — следующий шаг (нужно: точная ошибка
+  у каждого потока через ядро, тип-объединение от компилятора и безопасный перевод в него).
 
 ## 4. Как в node
 

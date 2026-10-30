@@ -10,8 +10,6 @@ public:
 
   Expr *cryptoCall(CallExpr *call, CryptoFn fn, std::vector<Expr *> args, const Type *type);
   Expr *cryptoResult(CallExpr *call, CryptoFn fn, std::vector<Expr *> args, const Type *type);
-  const Type *cryptoError();
-  bool holdsKeyObject(const Type *type) const;
   Expr *cryptoInt(llvm::SMLoc loc, int64_t value);
   Expr *cryptoDouble(llvm::SMLoc loc, double value);
   Expr *cryptoBool(llvm::SMLoc loc, bool value);
@@ -26,6 +24,10 @@ public:
   Expr *cryptoMd(Expr *arg, bool hmac);
   Expr *cryptoCipher(Expr *arg);
   Expr *cryptoNumber(Expr *arg);
+  std::optional<double> knownNumber(const Expr *arg) const;
+  static std::string numberText(double value);
+  bool checkWhole(const Expr *arg, llvm::StringRef name, double least);
+  bool checkCipherLengths(const Expr *cipher, const Expr *key, const Expr *iv);
   Expr *cryptoKey(Expr *arg, llvm::StringRef what);
   Expr *cryptoKeyObject(Expr *arg, llvm::StringRef what);
   bool cryptoSignKey(Expr *arg, llvm::StringRef fn, bool priv, std::vector<Expr *> &args);

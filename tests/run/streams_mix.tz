@@ -32,40 +32,45 @@ async function* herd(all: Animal[]) {
 const dir = must(mkdtempSync(join(tmpdir(), "tz-streams-mix-")))
 const file = join(dir, "herd.txt")
 let records = 0
-const toLine = new Transform({
-  objectMode: true,
-  transform(a: Animal, _encoding, callback) {
+class ToLine extends Transform<Animal, string> {
+  constructor() {
+    super({ objectMode: true })
+  }
+  onTransform(a, _encoding, callback) {
     records++
     callback(undefined, `${a.name} ${a.legs}\n`)
-  },
-  flush(callback) {
+  }
+  onFlush(callback) {
     stages.emit("stage", "lines", records)
     callback()
-  },
-})
+  }
+}
+const toLine = new ToLine()
 must(await pipeline(Readable.from(herd(dogs)), toLine, createWriteStream(file)))
 console.log("written", dogs.map((d) => d.name).join(","))
 
 // The file back, a hash of its chunks, and its lines counted by a Writable.
-const hash = createHash("sha256")
+const hash = must(createHash("sha256"))
 let lines = 0
-const counter = new Writable({
-  write(chunk: Buffer, _encoding, callback) {
+class Counter extends Writable {
+  onWrite(chunk: Buffer, _encoding, callback) {
     hash.update(chunk)
     lines += chunk.toString().split("\n").length - 1
     callback()
-  },
-})
+  }
+}
+const counter = new Counter()
 must(await pipeline(createReadStream(file), counter))
 stages.emit("stage", "counted", lines)
 console.log("sha256", hash.digest("hex"))
 
 // A read stream joined to a Transform with pipeline(), and the text it gives.
-const upper = new Transform({
-  transform(chunk: Buffer, _encoding, callback) {
+class Upper extends Transform {
+  onTransform(chunk: Buffer, _encoding, callback) {
     callback(undefined, chunk.toString().toUpperCase())
-  },
-})
+  }
+}
+const upper = new Upper()
 const joined = chain(createReadStream(file), upper, (err) => {
   if (err != undefined) console.log(err.message)
 })

@@ -1,7 +1,9 @@
 // same-as-node
 // spawnSync runs a program and gives a Result of what happened: Ok with its
-// output and how it ended, or an Err of an ExecError when it could not start,
-// ran too long or printed too much. The program here is this one again,
+// output and how it ended (SpawnTextResult, SpawnBytesResult), or an Err of
+// SpawnTextError / SpawnBytesError when it could not start, ran too long or
+// printed too much. Of the error, only what Node has too is printed here
+// (code, signal, stdout); the rest is in child_exec. The program here is this one again,
 // which does what its arguments after --child say.
 import { spawnSync } from "node:child_process"
 import { readFileSync } from "node:fs"
@@ -38,7 +40,7 @@ if (at >= 0) {
   const hex = must(spawnSync(process.execPath, [...self, "print", "hi"], { encoding: "hex" }))
   console.log(hex.stdout, hex.stderr == "")
   const latin1 = must(spawnSync(process.execPath, [...self, "print", "é"], { encoding: "latin1" }))
-  console.log(latin1.stdout.length)
+  console.log(latin1.stdout?.length)
   const buffer = must(spawnSync(process.execPath, [...self, "print", "b"], { encoding: "buffer" }))
   console.log(buffer.stdout)
 
@@ -48,16 +50,16 @@ if (at >= 0) {
   console.log(must(spawnSync(process.execPath, [...self, "echo"], { input: "68690a", encoding: "hex" })).stdout)
   console.log(must(spawnSync(process.execPath, [...self, "echo"], { input: new Uint8Array([111, 107]), encoding: "utf8" })).stdout)
   const large = "line of text\n".repeat(20000)
-  console.log(must(spawnSync(process.execPath, [...self, "echo"], { input: large, encoding: "utf8" })).stdout.length)
+  console.log(must(spawnSync(process.execPath, [...self, "echo"], { input: large, encoding: "utf8" })).stdout?.length)
   console.log(JSON.stringify(must(spawnSync(process.execPath, [...self, "echo"], { encoding: "utf8" })).stdout))
 
   // env and cwd.
-  console.log(must(spawnSync(process.execPath, [...self, "env"], { encoding: "utf8", env: { ...process.env, TZ_CHILD_TEST: "set" } })).stdout.trim())
+  console.log(must(spawnSync(process.execPath, [...self, "env"], { encoding: "utf8", env: { ...process.env, TZ_CHILD_TEST: "set" } })).stdout?.trim())
   const only: Record<string, string> = { TZ_OTHER: "only" }
   const path = process.env.PATH
   if (path != undefined) only.PATH = path
-  console.log(must(spawnSync(process.execPath, [...self, "env"], { encoding: "utf8", env: only })).stdout.trim())
-  console.log(must(spawnSync(process.execPath, [...self, "cwd"], { encoding: "utf8", cwd: tmpdir() })).stdout.trim())
+  console.log(must(spawnSync(process.execPath, [...self, "env"], { encoding: "utf8", env: only })).stdout?.trim())
+  console.log(must(spawnSync(process.execPath, [...self, "cwd"], { encoding: "utf8", cwd: tmpdir() })).stdout?.trim())
 
   // stdio: a stream the child does not write to a pipe gives nothing.
   const ignored = must(spawnSync(process.execPath, [...self, "print", "a", "b"], { stdio: "ignore", encoding: "utf8" }))
@@ -70,26 +72,22 @@ if (at >= 0) {
 
   // A program that is not there.
   const missing = spawnSync("tz-no-such-program", ["a", "b"], { encoding: "utf8" })
-  if (missing.isErr()) {
-    const e = missing.error
-    console.log(e.message, e.code, e.errno, e.syscall, e.path, e.spawnargs)
-    console.log(e.status == undefined, e.signal == undefined, e.stdout == undefined)
-  }
+  if (missing.isErr())
+    console.log(missing.error.code)
 
   // Out of time: killed with killSignal, SIGTERM by default.
   const slow = spawnSync(process.execPath, [...self, "sleep"], { timeout: 300, encoding: "utf8" })
-  if (slow.isErr())
-    console.log(slow.error.code, slow.error.message.startsWith("spawnSync "),
-                slow.error.status == undefined, slow.error.signal, slow.error.stdout == "")
+  if (slow.isErr() && slow.error.code == "ETIMEDOUT")
+    console.log(slow.error.code, slow.error.signal, slow.error.stdout == "")
   const killed = spawnSync(process.execPath, [...self, "sleep"], { timeout: 300, killSignal: "SIGKILL" })
-  if (killed.isErr())
+  if (killed.isErr() && killed.error.code == "ETIMEDOUT")
     console.log(killed.error.code, killed.error.signal)
 
   // Too much output: ENOBUFS, and the program is killed.
   const big = spawnSync(process.execPath, [...self, "big"], { maxBuffer: 1000, encoding: "utf8" })
-  if (big.isErr())
-    console.log(big.error.code, big.error.errno, big.error.signal, (big.error.stdout ?? "").length > 1000)
-  console.log(must(spawnSync(process.execPath, [...self, "big"], { encoding: "utf8" })).stdout.length)
+  if (big.isErr() && big.error.code == "ENOBUFS")
+    console.log(big.error.code, big.error.signal, (big.error.stdout ?? "").length > 1000)
+  console.log(must(spawnSync(process.execPath, [...self, "big"], { encoding: "utf8" })).stdout?.length)
 }
 
 function must<T, E>(r: Result<T, E>): T {

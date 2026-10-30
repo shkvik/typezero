@@ -1,3 +1,11 @@
+export type NativeError = {
+  code: string
+  message: string
+  errno: int
+  syscall: string
+  path?: string
+  dest?: string
+}
 export declare function panic(message: string): void
 export declare function defer(release: () => void): object
 export declare function ahead<T>(value: T | Promise<T>): Promise<T>
@@ -9,15 +17,16 @@ export declare function isChunk<T>(value: unknown): boolean
 export declare function chunkKind<T>(): int
 export declare function typeName<T>(): string
 export declare function overrides(object: object, method: string): boolean
-export declare function fsOpen(path: string, flags: string,
-                               mode: int): Promise<Result<int, SystemError>>
-export declare function fsRead(fd: int, buffer: Buffer, offset: int, length: int,
-                               position: double): Promise<Result<int, SystemError>>
-export declare function fsWrite(fd: int, buffer: Buffer, offset: int, length: int,
-                                position: double): Promise<Result<int, SystemError>>
-export declare function fsClose(fd: int, sync: boolean): Promise<Result<int, SystemError>>
+export declare function fsOpen<E>(path: string, flags: string,
+                               mode: int): Promise<Result<int, E>>
+export declare function fsRead<E>(fd: int, buffer: Buffer, offset: int, length: int,
+                               position: double): Promise<Result<int, E>>
+export declare function fsWrite<E>(fd: int, buffer: Buffer, offset: int, length: int,
+                                position: double): Promise<Result<int, E>>
+export declare function fsClose<E>(fd: int, sync: boolean): Promise<Result<int, E>>
 export declare function stdinChunk(size: int): Promise<Buffer | undefined>
-export declare function stdWrite(fd: int, chunk: Buffer): void
+export declare function stdWrite(fd: int, chunk: Buffer): int
+export declare function stdinFailed(): boolean
 export declare function subtleDigest(hash: string, data: ArrayBuffer): Promise<ArrayBuffer>
 export declare function subtleHmac(hash: string, key: ArrayBuffer,
                                    data: ArrayBuffer): Promise<ArrayBuffer>

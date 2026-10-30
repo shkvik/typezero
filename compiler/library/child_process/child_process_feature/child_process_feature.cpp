@@ -1,11 +1,14 @@
 #include "compiler/library/child_process/child_process_feature/child_process_feature.h"
 #include "compiler/check/checker/checker.h"
 #include "compiler/library/child_process/child_checker/child_checker.h"
+#include "compiler/library/child_process/child_error_types/child_error_types.h"
 #include "compiler/library/child_process/child_exports/child_exports.h"
 #include "compiler/library/child_process/child_lowerer/child_lowerer.h"
 #include "compiler/lower/lowering/lowering.h"
 
 namespace tz {
+
+void ChildProcessFeature::declare(Checker &checker) const { checker.childErrorTypes().declare(); }
 
 std::optional<std::string> ChildProcessFeature::exportProblem(NodeModule module,
                                                               llvm::StringRef exportName,

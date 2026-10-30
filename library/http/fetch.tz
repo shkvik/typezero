@@ -1,39 +1,40 @@
 import { URL, URLSearchParams, percentDecode } from "tz:url"
-import { defer } from "tz:intrinsics"
+import { defer, NativeError } from "tz:intrinsics"
 
 declare function netConnect(host: string, port: int,
-                            deadline: object | undefined): Promise<Result<object, SystemError>>
+                            deadline: object | undefined): Promise<Result<object, NativeError>>
 declare function netClose(conn: object): void
 declare function tlsConnect(conn: object, host: string,
-                            deadline: object | undefined): Promise<Result<void, SystemError>>
+                            deadline: object | undefined): Promise<Result<void, NativeError>>
 declare function httpRequest(conn: object, method: string, target: string, headers: string[],
                              text: string, bytes: Uint8Array | undefined, flags: int): void
 declare function httpResponse(conn: object,
-                              deadline: object | undefined): Promise<Result<int, SystemError>>
+                              deadline: object | undefined): Promise<Result<int, NativeError>>
 declare function httpStatusText(conn: object): string
 declare function httpHeaders(conn: object): string[]
 declare function httpHasBody(conn: object): boolean
 declare function httpRead(conn: object, deadline: object | undefined):
-  Promise<Result<Uint8Array | undefined, SystemError>>
+  Promise<Result<Uint8Array | undefined, NativeError>>
 declare function httpReadAll(conn: object, deadline: object | undefined):
-  Promise<Result<Uint8Array, SystemError>>
+  Promise<Result<Uint8Array, NativeError>>
 declare function httpReusable(conn: object): boolean
-declare function httpWrite(conn: object, chunk: Uint8Array): Promise<Result<void, SystemError>>
+declare function httpAlive(conn: object): boolean
+declare function httpWrite(conn: object, chunk: Uint8Array): Promise<Result<void, NativeError>>
 declare function httpEnd(conn: object): void
-declare function httpNext(conn: object): Promise<Result<int, SystemError>>
+declare function httpNext(conn: object): Promise<Result<int, NativeError>>
 declare function httpMethod(conn: object): string
 declare function httpTarget(conn: object): string
 declare function httpKeepAlive(conn: object): boolean
 declare function httpEndAfter(conn: object): void
 declare function httpBodyLimit(conn: object): double
 declare function tcpRead(conn: object, deadline: object | undefined):
-  Promise<Result<Uint8Array | undefined, SystemError>>
+  Promise<Result<Uint8Array | undefined, NativeError>>
 declare function httpRequestTimeout(conn: object): int
 declare function httpRespond(conn: object, status: int, statusText: string, headers: string[],
                              text: string, bytes: Uint8Array | undefined, flags: int): void
 declare function zlibNew(kind: int): object
-declare function zlibPush(decoder: object, chunk: Uint8Array): Result<Uint8Array, SystemError>
-declare function zlibEnd(decoder: object): Result<Uint8Array, SystemError>
+declare function zlibPush(decoder: object, chunk: Uint8Array): Result<Uint8Array, NativeError>
+declare function zlibEnd(decoder: object): Result<Uint8Array, NativeError>
 declare function deadlineNew(): object
 declare function deadlinePass(deadline: object): void
 declare function deadlinePassed(deadline: object): boolean
@@ -60,7 +61,7 @@ export class Connection {
   }
 
   static async open(host: string, port: int, secure: boolean,
-                    deadline?: object): Promise<Result<Connection, SystemError>> {
+                    deadline?: object): Promise<Result<Connection, NativeError>> {
     const connected = await netConnect(host, port, deadline)
     if (connected.isErr()) return err(connected.error)
     const socket = connected.value
@@ -78,11 +79,11 @@ export class Connection {
     netClose(this.socket)
   }
 
-  async secure(host: string, deadline?: object): Promise<Result<void, SystemError>> {
+  async secure(host: string, deadline?: object): Promise<Result<void, NativeError>> {
     return tlsConnect(this.socket, host, deadline)
   }
 
-  readRaw(deadline?: object): Promise<Result<Uint8Array | undefined, SystemError>> {
+  readRaw(deadline?: object): Promise<Result<Uint8Array | undefined, NativeError>> {
     return tcpRead(this.socket, deadline)
   }
 
@@ -122,7 +123,7 @@ export class Connection {
     httpRespond(this.socket, status, statusText, this.head, text, bytes, flags)
   }
 
-  async response(deadline?: object): Promise<Result<void, SystemError>> {
+  async response(deadline?: object): Promise<Result<void, NativeError>> {
     const status = await httpResponse(this.socket, deadline)
     if (status.isErr()) return err(status.error)
     this.status = status.value
@@ -137,15 +138,15 @@ export class Connection {
     return httpHasBody(this.socket)
   }
 
-  read(deadline?: object): Promise<Result<Uint8Array | undefined, SystemError>> {
+  read(deadline?: object): Promise<Result<Uint8Array | undefined, NativeError>> {
     return httpRead(this.socket, deadline)
   }
 
-  readAll(deadline?: object): Promise<Result<Uint8Array, SystemError>> {
+  readAll(deadline?: object): Promise<Result<Uint8Array, NativeError>> {
     return httpReadAll(this.socket, deadline)
   }
 
-  write(chunk: Uint8Array): Promise<Result<void, SystemError>> {
+  write(chunk: Uint8Array): Promise<Result<void, NativeError>> {
     return httpWrite(this.socket, chunk)
   }
 
@@ -161,7 +162,11 @@ export class Connection {
     return httpReusable(this.socket)
   }
 
-  next(): Promise<Result<int, SystemError>> {
+  alive(): boolean {
+    return httpAlive(this.socket)
+  }
+
+  next(): Promise<Result<int, NativeError>> {
     return httpNext(this.socket)
   }
 
@@ -400,12 +405,13 @@ function isLower(s: string): boolean {
 
 export type ReadableStreamReadResult<R> = { done: false; value: R } | { done: true; value?: R }
 
-type ReadResult<R, E> = Result<ReadableStreamReadResult<R>, E | ReaderError>
+type ReadResult<R, E> = Result<ReadableStreamReadResult<R>, E | ReaderError | ControllerClosedError>
 
-class StreamState<R, E> {
+class StreamState<R, E extends StreamError> {
   queue: R[] = []
   state = "readable"
   error?: E
+  misuse?: ControllerClosedError
   source?: UnderlyingSource<R, E>
   started = false
   pulling = false
@@ -426,10 +432,10 @@ class StreamState<R, E> {
   }
 }
 
-export interface UnderlyingSource<R, E = never> {
+export interface UnderlyingSource<R, E extends StreamError = StreamError> {
   start?: (controller: ReadableStreamDefaultController<R, E>) => Promise<void> | undefined
   pull?: (controller: ReadableStreamDefaultController<R, E>) => Promise<void> | undefined
-  cancel?: (reason: StreamError | undefined) => Promise<void> | undefined
+  cancel?: (reason: string | undefined) => Promise<void> | undefined
   type?: string
 }
 
@@ -439,7 +445,7 @@ export interface QueuingStrategy {
 
 function lockedError(): ReaderError {
   return {
-    kind: "USED",
+    kind: "READER_ERROR",
     code: "ERR_STREAM_LOCKED",
     message: "the stream is locked: another reader holds it; read it with that reader",
   }
@@ -447,13 +453,13 @@ function lockedError(): ReaderError {
 
 function releasedError(): ReaderError {
   return {
-    kind: "USED",
+    kind: "READER_ERROR",
     code: "ERR_READER_RELEASED",
     message: "the reader has released the stream: get a new reader with getReader()",
   }
 }
 
-function closeStream<R, E>(s: StreamState<R, E>) {
+function closeStream<R, E extends StreamError>(s: StreamState<R, E>) {
   if (s.state != "readable") return
   s.state = "closed"
   s.source = undefined
@@ -462,7 +468,7 @@ function closeStream<R, E>(s: StreamState<R, E>) {
   for (const r of reads) r(ok({ done: true }))
 }
 
-function errorStream<R, E>(s: StreamState<R, E>, e: E) {
+function errorStream<R, E extends StreamError>(s: StreamState<R, E>, e: E) {
   if (s.state != "readable") return
   s.state = "errored"
   s.error = e
@@ -473,11 +479,31 @@ function errorStream<R, E>(s: StreamState<R, E>, e: E) {
   for (const r of reads) r(err(e))
 }
 
-function desiredSize<R, E>(s: StreamState<R, E>): double {
+function misuseStream<R, E extends StreamError>(s: StreamState<R, E>, message: string) {
+  if (s.state != "readable") {
+    return
+  }
+  const problem: ControllerClosedError = {
+    kind: "CONTROLLER_CLOSED_ERROR",
+    code: "ERR_INVALID_STATE",
+    message: message,
+  }
+  s.state = "errored"
+  s.misuse = problem
+  s.queue = []
+  s.source = undefined
+  const reads = s.reads
+  s.reads = []
+  for (const r of reads) {
+    r(err(problem))
+  }
+}
+
+function desiredSize<R, E extends StreamError>(s: StreamState<R, E>): double {
   return s.highWaterMark - s.queue.length.toDouble()
 }
 
-function pullIfNeeded<R, E>(s: StreamState<R, E>) {
+function pullIfNeeded<R, E extends StreamError>(s: StreamState<R, E>) {
   if (s.state != "readable" || s.closeRequested || !s.started) return
   const pull = s.source?.pull
   if (pull == undefined) return
@@ -495,7 +521,7 @@ function pullIfNeeded<R, E>(s: StreamState<R, E>) {
   void pulled.then(() => afterPull(s))
 }
 
-function afterPull<R, E>(s: StreamState<R, E>) {
+function afterPull<R, E extends StreamError>(s: StreamState<R, E>) {
   s.pulling = false
   if (s.pullAgain) {
     s.pullAgain = false
@@ -503,7 +529,7 @@ function afterPull<R, E>(s: StreamState<R, E>) {
   }
 }
 
-export class ReadableStreamDefaultController<R, E = never> {
+export class ReadableStreamDefaultController<R, E extends StreamError = StreamError> {
   private s: StreamState<R, E>
 
   constructor(state: StreamState<R, E>) {
@@ -516,7 +542,11 @@ export class ReadableStreamDefaultController<R, E = never> {
 
   enqueue(chunk: R) {
     const s = this.s
-    if (s.state != "readable" || s.closeRequested) return
+    if (s.state != "readable") return
+    if (s.closeRequested) {
+      misuseStream(s, "enqueue() after close(): this stream has already been closed")
+      return
+    }
     const read = s.reads.shift()
     if (read != undefined) read(ok({ done: false, value: chunk }))
     else s.queue.push(chunk)
@@ -525,7 +555,11 @@ export class ReadableStreamDefaultController<R, E = never> {
 
   close() {
     const s = this.s
-    if (s.state != "readable" || s.closeRequested) return
+    if (s.state != "readable") return
+    if (s.closeRequested) {
+      misuseStream(s, "close() was already called on this stream")
+      return
+    }
     s.closeRequested = true
     if (s.queue.length == 0) closeStream(s)
   }
@@ -535,7 +569,7 @@ export class ReadableStreamDefaultController<R, E = never> {
   }
 }
 
-export class ReadableStreamDefaultReader<R, E = never> {
+export class ReadableStreamDefaultReader<R, E extends StreamError = StreamError> {
   private s?: StreamState<R, E>
   private problem?: ReaderError
 
@@ -568,6 +602,8 @@ export class ReadableStreamDefaultReader<R, E = never> {
     if (s.state == "errored") {
       const error = s.error
       if (error != undefined) return err(error)
+      const misuse = s.misuse
+      if (misuse != undefined) return err(misuse)
     }
     const read = Promise.withResolvers<ReadResult<R, E>>()
     s.reads.push(read.resolve)
@@ -585,13 +621,14 @@ export class ReadableStreamDefaultReader<R, E = never> {
     for (const r of reads) r(err(releasedError()))
   }
 
-  async cancel(reason?: StreamError): Promise<void> {
+  async cancel(reason?: string): Promise<void> {
     const s = this.s
     if (s != undefined) await cancelStream(s, reason)
   }
 }
 
-async function cancelStream<R, E>(s: StreamState<R, E>, reason: StreamError | undefined): Promise<void> {
+async function cancelStream<R, E extends StreamError>(s: StreamState<R, E>,
+                                                      reason: string | undefined): Promise<void> {
   s.disturb()
   if (s.state != "readable") return
   const cancel = s.source?.cancel
@@ -603,7 +640,7 @@ async function cancelStream<R, E>(s: StreamState<R, E>, reason: StreamError | un
   }
 }
 
-function startedState<R, E>(source: UnderlyingSource<R, E> | undefined,
+function startedState<R, E extends StreamError>(source: UnderlyingSource<R, E> | undefined,
                             strategy: QueuingStrategy | undefined): StreamState<R, E> {
   const s = new StreamState<R, E>()
   s.source = source
@@ -626,7 +663,7 @@ function startedState<R, E>(source: UnderlyingSource<R, E> | undefined,
   return s
 }
 
-export class ReadableStream<R = Uint8Array, E = never> {
+export class ReadableStream<R = Uint8Array, E extends StreamError = StreamError> {
   private s?: StreamState<R, E>
 
   constructor(source?: UnderlyingSource<R, E>, strategy?: QueuingStrategy) {
@@ -672,13 +709,13 @@ export class ReadableStream<R = Uint8Array, E = never> {
     return new ReadableStreamDefaultReader<R, E>(this.state())
   }
 
-  async cancel(reason?: StreamError): Promise<void> {
+  async cancel(reason?: string): Promise<void> {
     const s = this.state()
     if (s.locked) return
     await cancelStream(s, reason)
   }
 
-  async *values(): AsyncGenerator<Result<R, E | ReaderError>, void, void> {
+  async *values(): AsyncGenerator<Result<R, E | ReaderError | ControllerClosedError>, void, void> {
     const reader = this.getReader()
     let finished = false
     const release = defer(() => {
@@ -692,7 +729,7 @@ export class ReadableStream<R = Uint8Array, E = never> {
       const r = await reader.read()
       if (r.isErr()) {
         finished = true
-        const failed: Result<R, E | ReaderError> = err(r.error)
+        const failed: Result<R, E | ReaderError | ControllerClosedError> = err(r.error)
         yield failed
         return
       }
@@ -701,23 +738,17 @@ export class ReadableStream<R = Uint8Array, E = never> {
         finished = true
         return
       }
-      const item: Result<R, E | ReaderError> = ok(step.value)
+      const item: Result<R, E | ReaderError | ControllerClosedError> = ok(step.value)
       yield item
     }
   }
 
-  async *[Symbol.asyncIterator](): AsyncGenerator<Result<R, E | ReaderError>, void, void> {
+  async *[Symbol.asyncIterator](): AsyncGenerator<Result<R, E | ReaderError | ControllerClosedError>, void, void> {
     yield* this.values()
   }
 }
 
-function streamMessage<E extends { message: string }>(failure: E): string {
-  const message = `the stream of the body failed: ${failure.message}`
-
-  return message
-}
-
-function bodyStream<E extends { message: string }>(source: ReadableStream<Uint8Array, E>):
+function bodyStream<E extends StreamError>(source: ReadableStream<Uint8Array, E>):
     ReadableStream<Uint8Array, BodyError> {
   let reader: ReadableStreamDefaultReader<Uint8Array, E> | undefined = undefined
   const stream = new ReadableStream<Uint8Array, BodyError>({
@@ -725,6 +756,10 @@ function bodyStream<E extends { message: string }>(source: ReadableStream<Uint8A
     pull: async c => {
       let current = reader
       if (current == undefined) {
+        if (source.locked()) {
+          c.error(bodyLocked())
+          return
+        }
         current = source.getReader()
         reader = current
       }
@@ -735,13 +770,9 @@ function bodyStream<E extends { message: string }>(source: ReadableStream<Uint8A
         else c.enqueue(step.value)
         return
       }
-      const failure = source.failure()
-      if (failure != undefined) {
-        const message = streamMessage(failure)
-        c.error({ kind: "STREAM", code: "ERR_STREAM_FAILED", message: message })
-        return
-      }
-      c.error(bodyLocked())
+      const failure = r.error
+      const message = `the stream of the body failed: ${failure.message}`
+      c.error({ kind: "BODY_ERROR_STREAM", code: "ERR_STREAM_FAILED", message: message })
     },
     cancel: async reason => {
       const current = reader
@@ -774,9 +805,7 @@ export type Written =
 
 export type BodyData = string | Uint8Array | ArrayBuffer | URLSearchParams | FormData
 
-export type BodyInit = BodyData | ReadableStream<Uint8Array>
-
-type Decode = (chunk: Uint8Array, last: boolean) => Result<Uint8Array, SystemError>
+type Decode = (chunk: Uint8Array, last: boolean) => Result<Uint8Array, NativeError>
 
 function passed(deadline?: object): boolean {
   if (deadline == undefined) {
@@ -991,14 +1020,14 @@ function tlsMessage(code: TlsCode, host: string, detail: string): string {
 
 function timeoutError(peer: Peer): FetchError {
   return {
-    kind: "TIMEOUT",
+    kind: "FETCH_ERROR_TIMEOUT",
     code: "TIMEOUT_ERR",
     message: `no full answer from ${peer.host} within ${peer.timeout} ms`,
     timeout: peer.timeout,
   };
 }
 
-function connectionError(e: SystemError, peer: Peer, stage: string): FetchError {
+function connectionError(e: NativeError, peer: Peer, stage: string): FetchError {
   if (peer.passed()) {
     return timeoutError(peer);
   }
@@ -1006,11 +1035,11 @@ function connectionError(e: SystemError, peer: Peer, stage: string): FetchError 
   if (tls != undefined) {
     const message = tlsMessage(tls, peer.host, e.message);
 
-    return { kind: "TLS", code: tls, message: message, host: peer.host };
+    return { kind: "FETCH_ERROR_TLS", code: tls, message: message, host: peer.host };
   }
   if (e.code == "ERR_CLOSED") {
     return {
-      kind: "RESPONSE",
+      kind: "FETCH_ERROR_RESPONSE",
       code: "ERR_CLOSED",
       message: `${peer.name()} closed the connection before the response`,
       host: peer.host,
@@ -1019,7 +1048,7 @@ function connectionError(e: SystemError, peer: Peer, stage: string): FetchError 
   }
   if (e.code == "ERR_INVALID_RESPONSE") {
     return {
-      kind: "RESPONSE",
+      kind: "FETCH_ERROR_RESPONSE",
       code: "ERR_INVALID_RESPONSE",
       message: `${peer.name()} did not answer in HTTP/1.1: ${e.message}`,
       host: peer.host,
@@ -1028,7 +1057,7 @@ function connectionError(e: SystemError, peer: Peer, stage: string): FetchError 
   }
   if (e.code == "ERR_HEAD_TOO_LARGE") {
     return {
-      kind: "RESPONSE",
+      kind: "FETCH_ERROR_RESPONSE",
       code: "ERR_HEAD_TOO_LARGE",
       message: `the head of the response from ${peer.name()} is larger than 16 KB`,
       host: peer.host,
@@ -1039,10 +1068,9 @@ function connectionError(e: SystemError, peer: Peer, stage: string): FetchError 
   const message = networkMessage(code, peer, stage, e.message);
 
   return {
-    kind: "NETWORK",
+    kind: "FETCH_ERROR_NETWORK",
     code: code,
     message: message,
-    errno: e.errno,
     syscall: e.syscall,
     host: peer.host,
     port: peer.port,
@@ -1063,7 +1091,7 @@ function requestError(
   message: string,
   url: string,
 ): FetchError {
-  return { kind: "REQUEST", code: code, message: message, url: url };
+  return { kind: "FETCH_ERROR_REQUEST", code: code, message: message, url: url };
 }
 
 function redirectError(
@@ -1075,12 +1103,12 @@ function redirectError(
   message: string,
   location: string,
 ): FetchError {
-  return { kind: "REDIRECT", code: code, message: message, location: location };
+  return { kind: "FETCH_ERROR_REDIRECT", code: code, message: message, location: location };
 }
 
 function bodyUsed(): BodyError {
   return {
-    kind: "USED",
+    kind: "BODY_ERROR_USED",
     code: "ERR_BODY_USED",
     message: "the body is already read: text(), json(), bytes(), formData() and body() read it once",
   };
@@ -1088,7 +1116,7 @@ function bodyUsed(): BodyError {
 
 function bodyLocked(): BodyError {
   return {
-    kind: "USED",
+    kind: "BODY_ERROR_USED",
     code: "ERR_BODY_LOCKED",
     message: "the body is locked: a reader of body() holds it",
   };
@@ -1099,7 +1127,7 @@ function formError(
   message: string,
   contentType: string | undefined,
 ): FormDataError {
-  return { kind: "CONTENT", code: code, message: message, contentType: contentType };
+  return { kind: "FORM_DATA_ERROR_CONTENT", code: code, message: message, contentType: contentType };
 }
 
 function jsonBody(text: Result<string, TextError>, contentType: string | undefined): Result<Json, JsonBodyError> {
@@ -1112,7 +1140,7 @@ function jsonBody(text: Result<string, TextError>, contentType: string | undefin
     const start = text.value.slice(0, 200);
 
     return err({
-      kind: "CONTENT",
+      kind: "JSON_BODY_ERROR_CONTENT",
       code: "ERR_INVALID_JSON",
       message: message,
       contentType: contentType,
@@ -1123,9 +1151,14 @@ function jsonBody(text: Result<string, TextError>, contentType: string | undefin
   return ok(parsed.value);
 }
 
-function bodyFailure(e: BodyError | ReaderError): BodyError {
-  if (e.kind == "USED") {
+function bodyFailure(e: BodyError | ReaderError | ControllerClosedError): BodyError {
+  if (e.kind == "READER_ERROR") {
     return bodyLocked();
+  }
+  if (e.kind == "CONTROLLER_CLOSED_ERROR") {
+    const failure: BodyError = { kind: "BODY_ERROR_STREAM", code: "ERR_STREAM_FAILED", message: e.message };
+
+    return failure;
   }
 
   return e;
@@ -1150,7 +1183,7 @@ class Wire {
       this.finished = true
       this.conn.close()
       const failure: BodyError = {
-        kind: "MALFORMED",
+        kind: "BODY_ERROR_MALFORMED",
         code: "ERR_INVALID_COMPRESSION",
         message: `the body is not valid ${this.coding}: ${data.error.message}`,
       }
@@ -1161,7 +1194,7 @@ class Wire {
     return ok(data.value)
   }
 
-  private failed(e: SystemError): BodyError {
+  private failed(e: NativeError): BodyError {
     this.finished = true
     const failure = wireError(e, this.peer, this.conn)
     this.failure = failure
@@ -1216,10 +1249,10 @@ class Wire {
   }
 }
 
-function wireError(e: SystemError, peer: Peer | undefined, conn: Connection): BodyError {
+function wireError(e: NativeError, peer: Peer | undefined, conn: Connection): BodyError {
   if (peer != undefined && peer.passed()) {
     return {
-      kind: "TIMEOUT",
+      kind: "BODY_ERROR_TIMEOUT",
       code: "TIMEOUT_ERR",
       message: `no full answer from ${peer.host} within ${peer.timeout} ms`,
       timeout: peer.timeout,
@@ -1232,7 +1265,7 @@ function wireError(e: SystemError, peer: Peer | undefined, conn: Connection): Bo
       const timeout = conn.requestTimeout();
 
       return {
-        kind: "TIMEOUT",
+        kind: "BODY_ERROR_TIMEOUT",
         code: "TIMEOUT_ERR",
         message: `the request did not come in full within ${timeout} ms (requestTimeout)`,
         timeout: timeout,
@@ -1242,7 +1275,7 @@ function wireError(e: SystemError, peer: Peer | undefined, conn: Connection): Bo
       const limit = conn.bodyLimit();
 
       return {
-        kind: "TOO_LARGE",
+        kind: "BODY_ERROR_TOO_LARGE",
         code: "ERR_BODY_TOO_LARGE",
         message: `the body is larger than ${limit} bytes (maxBodySize)`,
         limit: limit,
@@ -1250,31 +1283,31 @@ function wireError(e: SystemError, peer: Peer | undefined, conn: Connection): Bo
     }
     case "ERR_INVALID_CHUNKED":
       return {
-        kind: "MALFORMED",
+        kind: "BODY_ERROR_MALFORMED",
         code: "ERR_INVALID_CHUNKED",
         message: "the body is not valid chunked encoding",
       };
     case "ERR_CLOSED":
       return {
-        kind: "NETWORK",
+        kind: "BODY_ERROR_NETWORK",
         code: "ERR_CLOSED",
         message: `${who} closed the connection before the end of the body`,
       };
     case "ECONNRESET":
       return {
-        kind: "NETWORK",
+        kind: "BODY_ERROR_NETWORK",
         code: "ECONNRESET",
         message: `the connection ${of} was reset before the end of the body`,
       };
     case "ECONNABORTED":
       return {
-        kind: "NETWORK",
+        kind: "BODY_ERROR_NETWORK",
         code: "ECONNABORTED",
         message: `the connection ${of} was aborted on this machine before the end of the body`,
       };
     case "ETIMEDOUT":
       return {
-        kind: "NETWORK",
+        kind: "BODY_ERROR_NETWORK",
         code: "ETIMEDOUT",
         message: `the connection ${of} timed out before the end of the body`,
       };
@@ -1282,14 +1315,14 @@ function wireError(e: SystemError, peer: Peer | undefined, conn: Connection): Bo
   const tls = tlsCode(e.code);
   if (tls != undefined) {
     return {
-      kind: "NETWORK",
+      kind: "BODY_ERROR_NETWORK",
       code: "ERR_TLS_FAILED",
       message: `the TLS connection ${of} failed before the end of the body: ${e.message}`,
     };
   }
 
   return {
-    kind: "NETWORK",
+    kind: "BODY_ERROR_NETWORK",
     code: "UNKNOWN",
     message: `the connection ${of} failed before the end of the body: ${e.message}`,
   };
@@ -1353,7 +1386,7 @@ class Body {
   type?: string
   opened?: StreamState<Uint8Array, BodyError>
 
-  static of(init: BodyInit | undefined): Body {
+  static of(init: BodyData | undefined): Body {
     const b = new Body()
     if (init == undefined) return b
     if (typeof init == "string") {
@@ -1366,9 +1399,6 @@ class Body {
     } else if (init instanceof ArrayBuffer) {
       b.kind = BODY_BYTES
       b.bytes = new Uint8Array(init.slice(0))
-    } else if (init instanceof ReadableStream) {
-      b.kind = BODY_STREAM
-      b.stream = bodyStream(init)
     } else if (init instanceof URLSearchParams) {
       b.kind = BODY_TEXT
       b.text = init.toString()
@@ -1722,7 +1752,7 @@ function parseFormData(type: string | undefined, bytes: Uint8Array): Result<Form
 
 export type RequestRedirect = "follow" | "error" | "manual"
 
-export interface RequestInit<E = never> {
+export interface RequestInit<E extends StreamError = StreamError> {
   method?: string
   headers?: HeadersInit
   body?: BodyData | ReadableStream<Uint8Array, E>
@@ -1730,6 +1760,15 @@ export interface RequestInit<E = never> {
   timeout?: int
   duplex?: "half"
   proxy?: ProxyOption
+}
+
+export interface RequestOptions {
+  method?: string
+  headers?: HeadersInit
+  body?: BodyData
+  redirect?: RequestRedirect
+  timeout?: int
+  duplex?: "half"
 }
 
 function methodProblem(method: string): string | undefined {
@@ -1758,7 +1797,7 @@ export class Request {
   private bodyStream?: ReadableStream<Uint8Array, BodyError>
   private data: Body
 
-  constructor(input: string | URL | Request, init?: RequestInit) {
+  constructor(input: string | URL | Request, init?: RequestOptions) {
     if (input instanceof Request) {
       this.method = input.method
       this.url = input.url
@@ -1811,9 +1850,9 @@ export class Request {
     return new Request(conn)
   }
 
-  public static stream<E extends { message: string }>(input: string | URL | Request,
-                                                      body: ReadableStream<Uint8Array, E>,
-                                                      init?: RequestInit): Request {
+  public static stream<E extends StreamError>(input: string | URL | Request,
+                                              body: ReadableStream<Uint8Array, E>,
+                                              init?: RequestOptions): Request {
     const request = new Request(input, init)
     const stream = bodyStream(body)
     request.data = Body.ofStream(stream)
@@ -1866,8 +1905,9 @@ export class Request {
   }
 
   clone(): Request {
-    const init: RequestInit = { method: this.method, headers: this.headers, redirect: this.redirect,
-                                timeout: this.timeout, duplex: this.duplex }
+    const init: RequestOptions = { method: this.method, headers: this.headers,
+                                   redirect: this.redirect, timeout: this.timeout,
+                                   duplex: this.duplex }
     const r = new Request(this.url, init)
     r.data = this.data.copy()
     this.bodyStream = undefined
@@ -1937,7 +1977,7 @@ export class Response {
   private bodyStream?: ReadableStream<Uint8Array, BodyError>
   private data: Body
 
-  constructor(body?: BodyInit, init?: ResponseInit) {
+  constructor(body?: BodyData, init?: ResponseInit) {
     const status: int = init?.status ?? 200
     this.status = status
     this.ok = status >= 200 && status <= 299
@@ -1949,8 +1989,8 @@ export class Response {
       this.headers.append("content-type", type)
   }
 
-  public static stream<E extends { message: string }>(body: ReadableStream<Uint8Array, E> | undefined,
-                                                      init?: ResponseInit): Response {
+  public static stream<E extends StreamError>(body: ReadableStream<Uint8Array, E> | undefined,
+                                              init?: ResponseInit): Response {
     const status: int = init?.status ?? 200
     const statusText = reasonPhrase(init?.statusText ?? "")
     const headers = new Headers(init?.headers)
@@ -2147,7 +2187,7 @@ function takeIdle(origin: string): Connection | undefined {
   for (;;) {
     const idle = list.pop()
     if (idle == undefined) return undefined
-    if (now - idle.since < KEEP_ALIVE_MS) return idle.conn
+    if (now - idle.since < KEEP_ALIVE_MS && idle.conn.alive()) return idle.conn
     idle.conn.close()
   }
 }
@@ -2245,7 +2285,7 @@ function proxyError(
   proxy: string,
   status: int,
 ): FetchError {
-  return { kind: "PROXY", code: code, message: message, proxy: proxy, status: status };
+  return { kind: "FETCH_ERROR_PROXY", code: code, message: message, proxy: proxy, status: status };
 }
 
 function envValue(names: string[]): [string, string] | undefined {
@@ -2397,15 +2437,14 @@ function proxyStatusError(status: int, proxy: ProxyTarget, peer: Peer): FetchErr
                     proxy.shown, status);
 }
 
-function proxyConnectionError(e: SystemError, proxy: ProxyTarget, peer: Peer): FetchError {
+function proxyConnectionError(e: NativeError, proxy: ProxyTarget, peer: Peer): FetchError {
   const proxyPeer = new Peer(proxy.host, proxy.port, peer.timeout, peer.deadline);
   const failure = connectionError(e, proxyPeer, "connecting");
-  if (failure.kind == "NETWORK") {
+  if (failure.kind == "FETCH_ERROR_NETWORK") {
     return {
-      kind: "NETWORK",
+      kind: "FETCH_ERROR_NETWORK",
       code: failure.code,
       message: `the proxy: ${failure.message}`,
-      errno: failure.errno,
       syscall: failure.syscall,
       host: failure.host,
       port: failure.port,
@@ -2477,50 +2516,42 @@ async function send(request: Request, url: URL, redirected: boolean, peer: Peer,
   const https = url.protocol() == "https:"
   const through = proxy == undefined ? "" : proxy.shown + "|"
   const origin = through + url.protocol() + peer.host + ":" + String(peer.port)
-  let idle = takeIdle(origin)
-  let reused = idle != undefined
-  for (;;) {
-    let conn: Connection
-    if (idle != undefined) {
-      conn = idle
-    } else if (proxy != undefined) {
-      const opened = await openThrough(proxy, https, peer)
-      if (opened.isErr()) return opened
-      conn = opened.value
-    } else {
-      const opened = await Connection.open(peer.host, peer.port, https, peer.deadline)
-      if (opened.isErr()) return err(connectionError(opened.error, peer, "connecting"))
-      conn = opened.value
-    }
-    conn.origin = origin
-    const wrote = await request.writeTo(conn, url, peer)
-    if (wrote.isErr()) {
-      conn.close()
-      return wrote
-    }
-    const status = await conn.response(peer.deadline)
-    if (status.isErr()) {
-      conn.close()
-      if (peer.passed()) {
-        return err(timeoutError(peer))
-      }
-
-      if (reused && !request.bodyUsed()) {
-        idle = undefined
-        reused = false
-        continue
-      }
-      return err(connectionError(status.error, peer, "waiting for the response"))
-    }
-    let shown = url.href()
-    const hash = shown.indexOf("#")
-    if (hash >= 0) shown = shown.slice(0, hash)
-    if (proxy != undefined && !https && conn.status == 407) {
-      conn.close()
-      return err(proxyStatusError(conn.status, proxy, peer))
-    }
-    return ok(Response.readFrom(conn, shown, redirected, peer))
+  const idle = takeIdle(origin)
+  let conn: Connection
+  if (idle != undefined) {
+    conn = idle
+  } else if (proxy != undefined) {
+    const opened = await openThrough(proxy, https, peer)
+    if (opened.isErr()) return opened
+    conn = opened.value
+  } else {
+    const opened = await Connection.open(peer.host, peer.port, https, peer.deadline)
+    if (opened.isErr()) return err(connectionError(opened.error, peer, "connecting"))
+    conn = opened.value
   }
+  conn.origin = origin
+  const wrote = await request.writeTo(conn, url, peer)
+  if (wrote.isErr()) {
+    conn.close()
+    return wrote
+  }
+  const status = await conn.response(peer.deadline)
+  if (status.isErr()) {
+    conn.close()
+    if (peer.passed()) {
+      return err(timeoutError(peer))
+    }
+
+    return err(connectionError(status.error, peer, "waiting for the response"))
+  }
+  let shown = url.href()
+  const hash = shown.indexOf("#")
+  if (hash >= 0) shown = shown.slice(0, hash)
+  if (proxy != undefined && !https && conn.status == 407) {
+    conn.close()
+    return err(proxyStatusError(conn.status, proxy, peer))
+  }
+  return ok(Response.readFrom(conn, shown, redirected, peer))
 }
 
 class DataUrl {
@@ -2574,26 +2605,25 @@ function startDeadline(timeout?: int): object | undefined {
   return deadline
 }
 
-function plainInit<E>(init: RequestInit<E> | undefined, body: BodyData | undefined):
-    RequestInit | undefined {
+function plainInit<E extends StreamError>(init: RequestInit<E> | undefined,
+                                          body: BodyData | undefined): RequestOptions | undefined {
   if (init == undefined) {
     return undefined
   }
-  const plain: RequestInit = {
+  const plain: RequestOptions = {
     method: init.method,
     headers: init.headers,
     body: body,
     redirect: init.redirect,
     timeout: init.timeout,
     duplex: init.duplex,
-    proxy: init.proxy,
   }
 
   return plain
 }
 
-export async function fetch<E extends { message: string } = never>(input: string | URL | Request,
-                                                                   init?: RequestInit<E>):
+export async function fetch<E extends StreamError = never>(input: string | URL | Request,
+                                                          init?: RequestInit<E>):
     Promise<Result<Response, FetchError<E>>> {
   const body = init?.body
   if (input instanceof Request && body == undefined && input.bodyUsed()) {
@@ -2619,7 +2649,7 @@ export async function fetch<E extends { message: string } = never>(input: string
     const message = `the stream of the body of the request failed: ${failure.message}`
 
     return err({
-      kind: "REQUEST",
+      kind: "FETCH_ERROR_REQUEST",
       code: "ERR_STREAM_FAILED",
       message: message,
       url: request.url,
@@ -2684,7 +2714,7 @@ async function fetchRequest(request: Request, proxyOption: ProxyOption | undefin
       }
 
       return err({
-        kind: "RESPONSE",
+        kind: "FETCH_ERROR_RESPONSE",
         code: "ERR_CLOSED",
         message: `${peer.name()} closed the connection in the middle of a redirect`,
         host: peer.host,

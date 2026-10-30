@@ -15,26 +15,26 @@ export type WebSocketOptions = {
 
 export type WebSocketConnectError =
   | {
-      kind: "REQUEST";
+      kind: "WEB_SOCKET_CONNECT_ERROR_REQUEST";
       code: "ERR_INVALID_URL" | "ERR_UNSUPPORTED_SCHEME" | "ERR_ALREADY_CONNECTED";
       message: string;
       url: string;
     }
   | {
-      kind: "NETWORK";
+      kind: "WEB_SOCKET_CONNECT_ERROR_NETWORK";
       code: string;
       message: string;
       host: string;
       port: int;
     }
   | {
-      kind: "TIMEOUT";
+      kind: "WEB_SOCKET_CONNECT_ERROR_TIMEOUT";
       code: "TIMEOUT_ERR";
       message: string;
       timeout: int;
     }
   | {
-      kind: "REFUSED";
+      kind: "WEB_SOCKET_CONNECT_ERROR_REFUSED";
       code: "ERR_NOT_UPGRADED";
       message: string;
       status: int;
@@ -42,30 +42,30 @@ export type WebSocketConnectError =
 
 export type WebSocketError =
   | {
-      kind: "NETWORK";
+      kind: "WEB_SOCKET_ERROR_NETWORK";
       code: "ERR_CLOSED" | "ECONNRESET" | "ECONNABORTED" | "UNKNOWN";
       message: string;
     }
   | {
-      kind: "PROTOCOL";
+      kind: "WEB_SOCKET_ERROR_PROTOCOL";
       code: "ERR_INVALID_FRAME" | "ERR_INVALID_UTF8" | "ERR_UNMASKED_FRAME";
       message: string;
     }
   | {
-      kind: "TOO_LARGE";
+      kind: "WEB_SOCKET_ERROR_TOO_LARGE";
       code: "ERR_MESSAGE_TOO_LARGE";
       message: string;
       limit: int;
     };
 
-export type SendError = {
-  kind: "NOT_CONNECTED";
+export type WebSocketSendError = {
+  kind: "WEB_SOCKET_SEND_ERROR";
   code: "ERR_NOT_CONNECTED" | "ERR_CLOSING";
   message: string;
 };
 
 export type UpgradeError = {
-  kind: "REQUEST";
+  kind: "UPGRADE_ERROR";
   code: "ERR_NOT_WEBSOCKET" | "ERR_UNSUPPORTED_VERSION";
   message: string;
 };
@@ -245,7 +245,7 @@ function parseFrame(bytes: Uint8Array, limit: int): Result<Parsed | undefined, W
   const first = byteAt(bytes, 0);
   const second = byteAt(bytes, 1);
   if ((first & 0x70) != 0) {
-    return err({ kind: "PROTOCOL", code: "ERR_INVALID_FRAME", message: "a frame has reserved bits set" });
+    return err({ kind: "WEB_SOCKET_ERROR_PROTOCOL", code: "ERR_INVALID_FRAME", message: "a frame has reserved bits set" });
   }
   const masked = (second & 0x80) != 0;
   let length = second & 0x7f;
@@ -268,7 +268,7 @@ function parseFrame(bytes: Uint8Array, limit: int): Result<Parsed | undefined, W
   }
   if (length > limit) {
     return err({
-      kind: "TOO_LARGE",
+      kind: "WEB_SOCKET_ERROR_TOO_LARGE",
       code: "ERR_MESSAGE_TOO_LARGE",
       message: `a message is larger than ${limit} bytes (maxMessageSize)`,
       limit: limit,
@@ -351,7 +351,7 @@ export class WebSocket extends EventEmitter<WebSocketEvents> {
   public async connect(): Promise<Result<void, WebSocketConnectError>> {
     if (this.conn != undefined || this.server) {
       return err({
-        kind: "REQUEST",
+        kind: "WEB_SOCKET_CONNECT_ERROR_REQUEST",
         code: "ERR_ALREADY_CONNECTED",
         message: `the WebSocket to ${this.url} is connected already`,
         url: this.url,
@@ -360,7 +360,7 @@ export class WebSocket extends EventEmitter<WebSocketEvents> {
     const parsedResult = URL.parse(this.url);
     if (parsedResult.isErr()) {
       return err({
-        kind: "REQUEST",
+        kind: "WEB_SOCKET_CONNECT_ERROR_REQUEST",
         code: "ERR_INVALID_URL",
         message: `"${this.url}" is not a URL`,
         url: this.url,
@@ -370,7 +370,7 @@ export class WebSocket extends EventEmitter<WebSocketEvents> {
     const protocol = url.protocol();
     if (protocol != "ws:" && protocol != "wss:") {
       return err({
-        kind: "REQUEST",
+        kind: "WEB_SOCKET_CONNECT_ERROR_REQUEST",
         code: "ERR_UNSUPPORTED_SCHEME",
         message: `a WebSocket goes to ws: or wss:, not ${protocol}`,
         url: this.url,
@@ -386,7 +386,7 @@ export class WebSocket extends EventEmitter<WebSocketEvents> {
       this.state = 3;
 
       return err({
-        kind: "NETWORK",
+        kind: "WEB_SOCKET_CONNECT_ERROR_NETWORK",
         code: openedResult.error.code,
         message: `could not connect to ${host}:${port}: ${openedResult.error.message}`,
         host: host,
@@ -414,7 +414,7 @@ export class WebSocket extends EventEmitter<WebSocketEvents> {
       this.state = 3;
 
       return err({
-        kind: "NETWORK",
+        kind: "WEB_SOCKET_CONNECT_ERROR_NETWORK",
         code: wroteResult.error.code,
         message: `the connection to ${host}:${port} broke during the handshake`,
         host: host,
@@ -432,7 +432,7 @@ export class WebSocket extends EventEmitter<WebSocketEvents> {
         this.state = 3;
 
         return err({
-          kind: "NETWORK",
+          kind: "WEB_SOCKET_CONNECT_ERROR_NETWORK",
           code: "ERR_CLOSED",
           message: `${host}:${port} closed the connection during the handshake`,
           host: host,
@@ -462,7 +462,7 @@ export class WebSocket extends EventEmitter<WebSocketEvents> {
       this.state = 3;
 
       return err({
-        kind: "REFUSED",
+        kind: "WEB_SOCKET_CONNECT_ERROR_REFUSED",
         code: "ERR_NOT_UPGRADED",
         message: `${host}:${port} answered ${status} and did not switch to WebSocket`,
         status: status,
@@ -473,11 +473,11 @@ export class WebSocket extends EventEmitter<WebSocketEvents> {
     return ok(undefined);
   }
 
-  public send(data: string | Uint8Array): Result<void, SendError> {
+  public send(data: string | Uint8Array): Result<void, WebSocketSendError> {
     const conn = this.conn;
     if (conn == undefined || this.state != 1) {
       return err({
-        kind: "NOT_CONNECTED",
+        kind: "WEB_SOCKET_SEND_ERROR",
         code: this.state == 2 ? "ERR_CLOSING" : "ERR_NOT_CONNECTED",
         message: "the WebSocket is not open, so nothing can be sent",
       });
@@ -508,7 +508,7 @@ export class WebSocket extends EventEmitter<WebSocketEvents> {
   private async write(conn: Connection, bytes: Uint8Array): Promise<void> {
     const wroteResult = await conn.write(bytes);
     if (wroteResult.isErr()) {
-      this.fail({ kind: "NETWORK", code: "ERR_CLOSED", message: "the connection closed while sending" });
+      this.fail({ kind: "WEB_SOCKET_ERROR_NETWORK", code: "ERR_CLOSED", message: "the connection closed while sending" });
     }
   }
 
@@ -554,7 +554,7 @@ export class WebSocket extends EventEmitter<WebSocketEvents> {
         this.buffered = this.buffered.subarray(parsed.size);
         if (this.server && !parsed.masked) {
           this.fail({
-            kind: "PROTOCOL",
+            kind: "WEB_SOCKET_ERROR_PROTOCOL",
             code: "ERR_UNMASKED_FRAME",
             message: "a frame from the client is not masked",
           });
@@ -569,7 +569,7 @@ export class WebSocket extends EventEmitter<WebSocketEvents> {
       if (chunk == undefined) {
         if (this.conn != undefined) {
           this.fail({
-            kind: "NETWORK",
+            kind: "WEB_SOCKET_ERROR_NETWORK",
             code: "ERR_CLOSED",
             message: "the connection closed without a close frame",
           });
@@ -604,7 +604,7 @@ export class WebSocket extends EventEmitter<WebSocketEvents> {
       this.pieceOpcode = opcode;
       this.pieces = [];
     } else if (opcode != OP_CONTINUATION) {
-      this.fail({ kind: "PROTOCOL", code: "ERR_INVALID_FRAME", message: `a frame has the unknown opcode ${opcode}` });
+      this.fail({ kind: "WEB_SOCKET_ERROR_PROTOCOL", code: "ERR_INVALID_FRAME", message: `a frame has the unknown opcode ${opcode}` });
       return false;
     }
     this.pieces.push(parsed.payload);
@@ -622,7 +622,7 @@ export class WebSocket extends EventEmitter<WebSocketEvents> {
     }
     const textResult = new TextDecoder("utf-8", { fatal: true }).decode(message);
     if (textResult.isErr()) {
-      this.fail({ kind: "PROTOCOL", code: "ERR_INVALID_UTF8", message: "a text message is not UTF-8" });
+      this.fail({ kind: "WEB_SOCKET_ERROR_PROTOCOL", code: "ERR_INVALID_UTF8", message: "a text message is not UTF-8" });
       return false;
     }
     this.emit("message", textResult.value);

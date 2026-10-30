@@ -18,7 +18,7 @@ const server = new Server({ port: 0, hostname: "127.0.0.1" }, async req => {
     case "/boom":
       return new Response("boom", { status: 500 })
     case "/stream":
-      return new Response(new ReadableStream({
+      return Response.stream(new ReadableStream({
         start: c => {
           c.enqueue(enc.encode("one "))
           c.enqueue(enc.encode("two "))
@@ -49,7 +49,7 @@ const server = new Server({ port: 0, hostname: "127.0.0.1" }, async req => {
       await new Promise<void>(resolve => setTimeout(resolve, 300))
       return new Response("slow")
     case "/trickle":
-      return new Response(new ReadableStream({
+      return Response.stream(new ReadableStream({
         start: c => {
           c.enqueue(enc.encode("first "))
         },

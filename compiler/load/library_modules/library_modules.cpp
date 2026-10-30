@@ -48,9 +48,10 @@ constexpr LibraryGlobal kLibraryGlobals[] = {
     {"fetch", "fetch.tz", "tz:fetch"},
     {"isHttpStatus", "fetch.tz", "tz:fetch"},
     {"RequestInit", "fetch.tz", "tz:fetch"},
+    {"RequestOptions", "fetch.tz", "tz:fetch"},
     {"ResponseInit", "fetch.tz", "tz:fetch"},
     {"HeadersInit", "fetch.tz", "tz:fetch"},
-    {"BodyInit", "fetch.tz", "tz:fetch"},
+    {"BodyData", "fetch.tz", "tz:fetch"},
     {"RequestRedirect", "fetch.tz", "tz:fetch"},
     {"ReadableStreamReadResult", "fetch.tz", "tz:fetch"},
     {"UnderlyingSource", "fetch.tz", "tz:fetch"},
@@ -122,20 +123,30 @@ std::optional<SourceFile> LibraryModules::parseLibraryFile(llvm::StringRef file,
                                                            llvm::StringRef name, llvm::SMLoc loc,
                                                            std::string &fullPath,
                                                            std::vector<unsigned> &buffers) {
-  std::string self = llvm::sys::fs::getMainExecutable(nullptr, (void *)(intptr_t)&loadProgram);
-  llvm::SmallString<256> path(path::parent_path(self));
-  path::append(path, "lib", file);
+  std::string tree = loader_.treeFile(file);
+  llvm::SmallString<256> path;
+  if (tree.empty()) {
+    std::string self = llvm::sys::fs::getMainExecutable(nullptr, (void *)(intptr_t)&loadProgram);
+    path = path::parent_path(self);
+    path::append(path, "lib", file);
+  } else {
+    path = tree;
+  }
   fullPath = std::string(path);
-  auto buffer = llvm::MemoryBuffer::getFile(path);
+  auto buffer = tree.empty() ? llvm::MemoryBuffer::getFile(path) : loader_.read(path);
   if (!buffer) {
+    std::string advice = tree.empty() ? "; reinstall tz" : "";
     loader_.diags_.error(loc, "cannot read '" + std::string(path) + "', the code of '" + name +
                                   "' that tz has built in: " + buffer.getError().message() +
-                                  "; reinstall tz");
+                                  advice);
     return std::nullopt;
   }
   unsigned id = loader_.sourceMgr_.AddNewSourceBuffer(
       llvm::MemoryBuffer::getMemBufferCopy((*buffer)->getBuffer(), name), llvm::SMLoc());
   buffers.push_back(id);
+  if (!tree.empty()) {
+    loader_.treeBuffers_[id] = tree;
+  }
   llvm::StringRef text = loader_.sourceMgr_.getMemoryBuffer(id)->getBuffer();
   Lexer lexer(text, loader_.diags_);
 
@@ -171,6 +182,12 @@ Module *LibraryModules::libraryModule(llvm::StringRef file, llvm::StringRef name
   module->name = name.str();
   module->builtin = true;
   module->buffers = std::move(buffers);
+  for (unsigned id : module->buffers) {
+    auto tree = loader_.treeBuffers_.find(id);
+    if (tree != loader_.treeBuffers_.end()) {
+      module->bufferFiles.push_back({id, tree->second});
+    }
+  }
   module->file = std::move(*parsed);
   loader_.loadDeclarations(module, path, true);
   loader_.realPaths_[module] = path;
@@ -288,7 +305,7 @@ void LibraryModules::importLibraryGlobals(Module *module, llvm::StringRef text) 
 
 void LibraryModules::importFsStreams(Module *module, llvm::StringRef text) {
   static constexpr llvm::StringLiteral kNames[] = {"createReadStream", "createWriteStream",
-                                                   "ReadStream", "WriteStream"};
+                                                   "ReadStream", "WriteStream", "WriteNewStream"};
   ImportDecl streams;
   streams.implicit = true;
   for (ImportDecl &decl : module->file.imports) {

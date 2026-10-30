@@ -98,6 +98,8 @@ struct TzCipher {
   int32_t has_problem;
   char problem_code[48];
   char problem[208];
+  int64_t problem_length;
+  int64_t total;
   _Alignas(16) uint8_t ctx[];
 };
 
@@ -140,7 +142,34 @@ int tz_crypto_data(TzCryptoData *out, const TzType *type, const void *value, int
                    const char *what);
 void tz_crypto_data_done(TzCryptoData *d);
 
+typedef struct {
+  TzStr code_text;
+  TzStr message;
+  const char *code;
+  TzStr algorithm;
+  int64_t length;
+  int64_t expected;
+  const char *got;
+  const char *expected_kind;
+  TzStr parameter;
+  double value;
+  TzStr field;
+  const char *format;
+  TzStr openssl;
+} TzCryptoParts;
+
 void tz_crypto_errors(TzMaker make);
+void tz_crypto_note_algorithm(const char *name);
+void tz_crypto_note_lengths(int64_t length, int64_t expected);
+void tz_crypto_note_key_types(const char *got, const char *expected);
+void tz_crypto_note_parameter(const char *name, double value);
+void tz_crypto_note_field(const char *name);
+void tz_crypto_note_format(const char *format);
+void tz_crypto_note_openssl(const char *text);
+void tz_crypto_auth_failed(const TzCipher *c);
+int tz_crypto_looks_like_pem(const uint8_t *data, size_t length);
+void tz_crypto_bad_decrypt(const TzCipher *c);
+void tz_crypto_block_length_failed(const TzCipher *c);
 void tz_crypto_fail(const char *code, const char *format, ...);
 void tz_openssl_fail(const char *code, const char *otherwise);
 

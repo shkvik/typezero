@@ -1,8 +1,8 @@
 // Classes of the program that extend those of node:stream and replace the
 // methods the stream calls (onRead, onWrite, onTransform... — _read, _write,
 // _transform in node): they take the parameters node passes, whose types may
-// be left out, as may the last of them (`onRead()`), as in node. undefined ends a stream, as null does in
-// node: the output is node's with push(null).
+// be left out, as may the last of them (`onRead()`), as in node. pushEnd()
+// ends a stream, as push(null) does in node: the output is node's.
 import { Duplex, Readable, Transform, Writable } from "node:stream"
 import { finished, pipeline } from "node:stream/promises"
 
@@ -15,7 +15,7 @@ class Counter extends Readable {
   }
   onRead() {
     this.n++
-    if (this.n > this.limit) this.push(undefined)
+    if (this.n > this.limit) this.pushEnd()
     else this.push(`${this.n}\n`)
   }
 }
@@ -70,7 +70,7 @@ class Sized extends Readable {
   sent = 0
   onRead(size: number) {
     if (this.sent > 0) {
-      this.push(undefined)
+      this.pushEnd()
       return
     }
     this.sent = size
@@ -90,7 +90,7 @@ class Echo extends Duplex {
     callback()
   }
   onFinal(callback) {
-    this.push(undefined)
+    this.pushEnd()
     callback()
   }
 }

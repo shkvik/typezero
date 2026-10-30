@@ -1,0 +1,151 @@
+// The errors of streams (docs/streams.md, section 3): a stream has the type of its errors,
+// Readable<T, E extends StreamError = StreamError>; destroy(error) is the stream's own, and the
+// reader gets the exact error back; what goes wrong in the order of calls is an error of the
+// library with a kind of its own; a stream with exact errors goes where any stream is wanted.
+import { createReadStream, createWriteStream, WriteNewStream } from "node:fs"
+import { Readable, Writable } from "node:stream"
+
+interface CsvError extends StreamError {
+  kind: "CSV_ERROR_BAD_LINE"
+  line: int
+}
+
+interface DiskError extends StreamError {
+  kind: "DISK_ERROR_FULL"
+  free: int
+}
+
+class CsvLines extends Readable<string, CsvError> {
+  private next: int
+  private lines: string[]
+
+  constructor(lines: string[]) {
+    super()
+    this.next = 0
+    this.lines = lines
+  }
+
+  protected onRead() {
+    const line = this.lines[this.next]
+    this.next++
+    if (line == undefined) {
+      this.pushEnd()
+      return
+    }
+    if (line.split(",").length != 3) {
+      this.destroy({ kind: "CSV_ERROR_BAD_LINE", line: this.next, message: `line ${this.next} is not CSV` })
+      return
+    }
+    this.push(line)
+  }
+}
+
+class Disk extends Writable<string, DiskError> {
+  private used: int
+
+  constructor() {
+    super({ decodeStrings: false })
+    this.used = 0
+  }
+
+  protected onWrite(chunk: string, encoding: string, callback: (error?: DiskError) => void) {
+    this.used += chunk.length
+    if (this.used > 8) callback({ kind: "DISK_ERROR_FULL", free: 0, message: "the disk is full" })
+    else callback()
+  }
+}
+
+// The exact error of the stream, narrowed by kind.
+for await (const line of new CsvLines(["1,apple,3", "2,pear", "3,plum,7"])) {
+  if (line.isErr()) {
+    const e = line.error
+    switch (e.kind) {
+      case "CSV_ERROR_BAD_LINE":
+        console.log(`bad line ${e.line}: ${e.message}`)
+        break
+      default:
+        console.log(`${e.kind}: ${e.message}`)
+    }
+    break
+  }
+  console.log("line", line.value)
+}
+
+// Any stream: only the message.
+async function count(lines: Readable<string>) {
+  let n = 0
+  for await (const line of lines) {
+    if (line.isErr()) return `failed after ${n}: ${line.error.message}`
+    n++
+  }
+  return `${n} lines`
+}
+console.log(await count(new CsvLines(["1,a,2", "3,b,4"])))
+console.log(await count(new CsvLines(["1,a,2", "bad"])))
+
+// The writer's own error comes back from end(); writing after end() is an error of the library.
+const disk = new Disk()
+disk.write("12345")
+disk.write("67890")
+const ended = await disk.end()
+if (ended.isErr()) {
+  const e = ended.error
+  switch (e.kind) {
+    case "DISK_ERROR_FULL":
+      console.log(`full, ${e.free} free`)
+      break
+    default:
+      console.log(`${e.kind}: ${e.message}`)
+  }
+}
+const small = new Disk()
+const smallEnded = await small.end("ok")
+console.log("small", smallEnded.isOk())
+small.write("late", (e) => console.log(e == undefined ? "written" : `${e.kind}: ${e.message}`))
+await new Promise<void>((resolve) => setTimeout(resolve, 1))
+
+// Stopped from outside: the reader gets PrematureCloseError.
+const stopped = new CsvLines(["1,a,2", "3,b,4", "5,c,6"])
+for await (const line of stopped) {
+  if (line.isErr()) {
+    console.log(`${line.error.kind}: ${line.error.message}`)
+    break
+  }
+  console.log("got", line.value)
+  stopped.destroy()
+}
+console.log("errored", stopped.errored()?.kind ?? "nothing")
+
+// Streams of files: the error of each reason, with its fields.
+for await (const chunk of createReadStream("no-such-file.txt")) {
+  if (chunk.isErr()) {
+    const e = chunk.error
+    switch (e.kind) {
+      case "READ_STREAM_ERROR_NOT_FOUND":
+        console.log(`no file ${e.path.endsWith("no-such-file.txt")} (${e.syscall})`)
+        break
+      default:
+        console.log(`${e.kind}: ${e.message}`)
+    }
+  }
+}
+for await (const chunk of createReadStream("stream_errors.tz", { start: 9, end: 2 })) {
+  if (chunk.isErr()) console.log(`${chunk.error.kind}: ${chunk.error.message}`)
+}
+
+// flags "wx" in a literal: a stream of a new file, whose errors have EXISTS.
+const fresh: WriteNewStream = createWriteStream("stream_errors.tz", { flags: "wx" })
+fresh.write("never")
+const freshEnded = await fresh.end()
+if (freshEnded.isErr()) {
+  const e = freshEnded.error
+  switch (e.kind) {
+    case "WRITE_NEW_STREAM_ERROR_EXISTS":
+      console.log(`exists ${e.code} ${e.path.endsWith("stream_errors.tz")}`)
+      break
+    default:
+      console.log(`${e.kind}: ${e.message}`)
+  }
+}
+const badStart = await createWriteStream("never.txt", { start: -1 }).end()
+if (badStart.isErr()) console.log(`${badStart.error.kind}: ${badStart.error.message}`)

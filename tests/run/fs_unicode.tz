@@ -20,7 +20,7 @@ must(renameSync(join(folder, "файл.txt"), join(folder, "переименов
 console.log(existsSync(join(folder, "файл.txt")), must(readFileSync(join(folder, "переименован.txt"), "utf8")))
 const missing = readFileSync(join(folder, "нет такого.txt"), "utf8")
 if (missing.isErr())
-  console.log(missing.error.message.replaceAll(dir, "D"))
+  console.log(missing.error.code, missing.error.path.replaceAll(dir, "D"))
 must(rmSync(dir, { recursive: true }))
 console.log(existsSync(dir))
 

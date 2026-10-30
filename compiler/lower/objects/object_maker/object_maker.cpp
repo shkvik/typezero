@@ -53,8 +53,12 @@ llvm::Value *ObjectMaker::atomOf(const Type *type, llvm::Value *text) {
   llvm::Type *i32 = lowering_.builder_.getInt32Ty(), *ptr = lowering_.builder_.getPtrTy();
   llvm::FunctionCallee compare = lowering_.module_->getOrInsertFunction(
       "strcmp", llvm::FunctionType::get(i32, {ptr, ptr}, false));
-  llvm::Value *atom = lowering_.builder_.getInt32(0);
-  for (const Type *literal : literalsOf(type)) {
+  std::vector<const Type *> literals = literalsOf(type);
+  llvm::Value *atom = lowering_.builder_.getInt32(literals.empty() ? 0 : literals.front()->atom());
+  if (literals.size() == 1) {
+    return atom;
+  }
+  for (const Type *literal : literals) {
     std::string ascii;
     for (char16_t unit : literal->literalText()) {
       ascii.push_back(char(unit));

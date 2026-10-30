@@ -3,6 +3,7 @@
 #include "compiler/library/crypto/crypto_api/crypto_api.h"
 #include "compiler/library/crypto/crypto_args/crypto_args.h"
 #include "compiler/library/crypto/crypto_check_helpers/crypto_check_helpers.h"
+#include "compiler/library/crypto/crypto_error_types/crypto_error_types.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/StringExtras.h"
 #include "llvm/Support/ConvertUTF.h"
@@ -90,6 +91,12 @@ Expr *KeyPairChecker::checkGenerateKeyPair(CallExpr *call, llvm::SMLoc loc) {
   Expr *curve = checker_.cryptoArgs().cryptoString(loc, "");
   if (Expr *m = options.lookup("modulusLength")) {
     modulus = checker_.cryptoArgs().cryptoNumber(m);
+    std::optional<double> bits = checker_.cryptoArgs().knownNumber(modulus);
+    if ((which == 0 || which == 1) && bits && *bits < 512) {
+      checker_.diags_.error(m->loc(), "an RSA key needs a modulusLength of 512 bits or more, not " +
+                                          CryptoArgs::numberText(*bits));
+      return call;
+    }
   }
   if (Expr *e = options.lookup("publicExponent")) {
     exponent = checker_.cryptoArgs().cryptoNumber(e);
@@ -179,7 +186,7 @@ Expr *KeyPairChecker::checkGenerateKeyPair(CallExpr *call, llvm::SMLoc loc) {
   call->builtin = Builtin::CryptoKeyPair;
   call->type = Type::result(
       Type::object({{"publicKey", fields[0], false}, {"privateKey", fields[1], false}}, "KeyPair"),
-      checker_.cryptoArgs().cryptoError());
+      checker_.cryptoErrorTypes().named("GenerateKeyPairError"));
 
   return call;
 }

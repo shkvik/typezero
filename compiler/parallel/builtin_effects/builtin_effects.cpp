@@ -240,6 +240,7 @@ void BuiltinEffects::builtinEffects(const CallExpr *c, const Expr *recv) {
   case Builtin::FsUnlink:
   case Builtin::FsRm:
   case Builtin::FsRename:
+  case Builtin::FsReplace:
   case Builtin::FsCopyFile:
     analysis_.resource(Res::Files, true, at);
     return;

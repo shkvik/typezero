@@ -96,12 +96,8 @@ Expr *CryptoFunctionChecker::checkCryptoCall(CallExpr *call, llvm::StringRef fn,
     Expr *length = options.lookup("outputLength");
     std::vector<Expr *> hashArgs = {md, length ? checker_.cryptoArgs().cryptoNumber(length)
                                                : checker_.cryptoArgs().cryptoDouble(loc, -1)};
-    if (!isa<IntLitExpr>(md) || length) {
-      return checker_.cryptoArgs().cryptoResult(call, CryptoFn::HashNew, std::move(hashArgs),
-                                                Type::cryptoType(Crypto::Hash));
-    }
-    return checker_.cryptoArgs().cryptoCall(call, CryptoFn::HashNew, std::move(hashArgs),
-                                            Type::cryptoType(Crypto::Hash));
+    return checker_.cryptoArgs().cryptoResult(call, CryptoFn::HashNew, std::move(hashArgs),
+                                              Type::cryptoType(Crypto::Hash));
   }
   if (fn == "createHmac") {
     if (!checker_.argumentChecker().checkArity(call, loc, 2, 2)) {
@@ -113,12 +109,8 @@ Expr *CryptoFunctionChecker::checkCryptoCall(CallExpr *call, llvm::StringRef fn,
       return call;
     }
     std::vector<Expr *> hmacArgs = {md, key, checker_.cryptoArgs().cryptoInt(loc, 0)};
-    if (!isa<IntLitExpr>(md) || checker_.cryptoArgs().holdsKeyObject(key->type)) {
-      return checker_.cryptoArgs().cryptoResult(call, CryptoFn::HmacNew, std::move(hmacArgs),
-                                                Type::cryptoType(Crypto::Hmac));
-    }
-    return checker_.cryptoArgs().cryptoCall(call, CryptoFn::HmacNew, std::move(hmacArgs),
-                                            Type::cryptoType(Crypto::Hmac));
+    return checker_.cryptoArgs().cryptoResult(call, CryptoFn::HmacNew, std::move(hmacArgs),
+                                              Type::cryptoType(Crypto::Hmac));
   }
   if (fn == "hash") {
     if (!checker_.argumentChecker().checkArity(call, loc, 2, 3)) {
@@ -130,18 +122,11 @@ Expr *CryptoFunctionChecker::checkCryptoCall(CallExpr *call, llvm::StringRef fn,
     if (!md || data->type->isError() || !encoding) {
       return call;
     }
-    bool named = isa<IntLitExpr>(md);
     if (int64_t(cast<IntLitExpr>(encoding)->value) < 0) {
-      return named ? checker_.cryptoArgs().cryptoCall(call, CryptoFn::HashOnce, {md, data}, buffer)
-                   : checker_.cryptoArgs().cryptoResult(call, CryptoFn::HashOnce, {md, data},
-                                                        buffer);
+      return checker_.cryptoArgs().cryptoResult(call, CryptoFn::HashOnce, {md, data}, buffer);
     }
-    if (!named) {
-      return checker_.cryptoArgs().cryptoResult(call, CryptoFn::HashOnceText,
-                                                {md, data, encoding}, Type::string());
-    }
-    return checker_.cryptoArgs().cryptoCall(call, CryptoFn::HashOnceText, {md, data, encoding},
-                                            Type::string());
+    return checker_.cryptoArgs().cryptoResult(call, CryptoFn::HashOnceText, {md, data, encoding},
+                                              Type::string());
   }
   auto proven = [&](Expr *arg, int64_t lo, std::optional<int64_t> hi,
                     llvm::StringRef what) -> Expr * {
@@ -199,13 +184,13 @@ Expr *CryptoFunctionChecker::checkCryptoCall(CallExpr *call, llvm::StringRef fn,
         return call;
       }
     }
-    if (!checker_.indexProofs().requireLess(
-            min, max, args.size() == 2 ? "the maximum is greater than the minimum"
-                                       : "the maximum is greater than 0")) {
+    if (!checker_.indexProofs().requireLess(min, max,
+                                            args.size() == 2
+                                                ? "the maximum is greater than the minimum"
+                                                : "the maximum is greater than 0")) {
       return call;
     }
-    return checker_.cryptoArgs().cryptoCall(call, CryptoFn::RandomInt32, {min, max},
-                                            Type::intTy());
+    return checker_.cryptoArgs().cryptoCall(call, CryptoFn::RandomInt32, {min, max}, Type::intTy());
   }
   if (fn == "randomFillSync" || fn == "getRandomValues") {
     if (!checker_.argumentChecker().checkArity(call, loc, 1, fn == "randomFillSync" ? 3 : 1)) {
@@ -254,7 +239,7 @@ Expr *CryptoFunctionChecker::checkCryptoCall(CallExpr *call, llvm::StringRef fn,
           return call;
         }
         if (!checker_.indexProofs().provesSumUpTo(checker_.indexProofs().linear(at),
-                                                   checker_.indexProofs().linear(count), target) &&
+                                                  checker_.indexProofs().linear(count), target) &&
             !checker_.indexProofs().exempt(count->loc())) {
           checker_.diags_.error(count->loc(),
                                 "cannot prove that the offset and the size fit in the bytes, "
@@ -293,7 +278,9 @@ Expr *CryptoFunctionChecker::checkCryptoCall(CallExpr *call, llvm::StringRef fn,
     Expr *iterations = checker_.cryptoArgs().cryptoNumber(args[2]),
          *keylen = checker_.cryptoArgs().cryptoNumber(args[3]);
     Expr *md = checker_.cryptoArgs().cryptoMd(args[4], true);
-    if (!md || password->type->isError() || salt->type->isError()) {
+    if (!md || password->type->isError() || salt->type->isError() ||
+        !checker_.cryptoArgs().checkWhole(iterations, "iterations", 1) ||
+        !checker_.cryptoArgs().checkWhole(keylen, "keylen", 1)) {
       return call;
     }
     return checker_.cryptoArgs().cryptoResult(call, CryptoFn::Pbkdf2,
@@ -308,7 +295,8 @@ Expr *CryptoFunctionChecker::checkCryptoCall(CallExpr *call, llvm::StringRef fn,
     Expr *salt = checker_.cryptoArgs().cryptoData(args[2], "salt", true, false, true);
     Expr *info = checker_.cryptoArgs().cryptoData(args[3], "info", true, false, true);
     Expr *keylen = checker_.cryptoArgs().cryptoNumber(args[4]);
-    if (!md || key->type->isError() || salt->type->isError() || info->type->isError()) {
+    if (!md || key->type->isError() || salt->type->isError() || info->type->isError() ||
+        !checker_.cryptoArgs().checkWhole(keylen, "keylen", 1)) {
       return call;
     }
     return checker_.cryptoArgs().cryptoResult(call, CryptoFn::Hkdf, {md, key, salt, info, keylen},
@@ -337,6 +325,14 @@ Expr *CryptoFunctionChecker::checkCryptoCall(CallExpr *call, llvm::StringRef fn,
       }
       values[i] = a || b ? checker_.cryptoArgs().cryptoNumber(a ? a : b)
                          : checker_.cryptoArgs().cryptoDouble(loc, 0);
+    }
+    if (std::optional<double> cost = checker_.cryptoArgs().knownNumber(values[0])) {
+      int64_t n = int64_t(*cost);
+      if (*cost != 0 && (double(n) != *cost || n < 2 || (n & (n - 1)) != 0)) {
+        checker_.diags_.error(values[0]->loc(), "N must be a power of two greater than 1, not " +
+                                                    CryptoArgs::numberText(*cost));
+        return call;
+      }
     }
     Expr *maxmem = options.lookup("maxmem");
     if (password->type->isError() || salt->type->isError()) {
@@ -413,7 +409,7 @@ Expr *CryptoFunctionChecker::checkCryptoCall(CallExpr *call, llvm::StringRef fn,
     Expr *key = checker_.cryptoArgs().cryptoData(args[1], "key", true, true, true);
     Expr *iv = checker_.cryptoArgs().cryptoData(args[2], "iv", true, false, true);
     if (!optionsAt(3, {"authTagLength"}) || !cipher || key->type->isError() ||
-        iv->type->isError()) {
+        iv->type->isError() || !checker_.cryptoArgs().checkCipherLengths(cipher, key, iv)) {
       return call;
     }
     Expr *tag = options.lookup("authTagLength");
@@ -602,11 +598,7 @@ Expr *CryptoFunctionChecker::checkCryptoCall(CallExpr *call, llvm::StringRef fn,
     std::vector<Expr *> signArgs = {checker_.argumentChecker().checkArg(name, Type::string()),
                                     checker_.cryptoArgs().cryptoBool(loc, verify)};
     const Type *made = Type::cryptoType(verify ? Crypto::Verify : Crypto::Sign);
-    if (!literal) {
-      return checker_.cryptoArgs().cryptoResult(call, CryptoFn::SignNew, std::move(signArgs),
-                                                made);
-    }
-    return checker_.cryptoArgs().cryptoCall(call, CryptoFn::SignNew, std::move(signArgs), made);
+    return checker_.cryptoArgs().cryptoResult(call, CryptoFn::SignNew, std::move(signArgs), made);
   }
   if (fn == "createECDH") {
     if (!checker_.argumentChecker().checkArity(call, loc, 1, 1)) {
@@ -620,12 +612,8 @@ Expr *CryptoFunctionChecker::checkCryptoCall(CallExpr *call, llvm::StringRef fn,
       return loosely();
     }
     Expr *name = checker_.argumentChecker().checkArg(args[0], Type::string());
-    if (!curve) {
-      return checker_.cryptoArgs().cryptoResult(call, CryptoFn::EcdhNew, {name},
-                                                Type::cryptoType(Crypto::Ecdh));
-    }
-    return checker_.cryptoArgs().cryptoCall(call, CryptoFn::EcdhNew, {name},
-                                            Type::cryptoType(Crypto::Ecdh));
+    return checker_.cryptoArgs().cryptoResult(call, CryptoFn::EcdhNew, {name},
+                                              Type::cryptoType(Crypto::Ecdh));
   }
   if (fn == "diffieHellman") {
     if (!checker_.argumentChecker().checkArity(call, loc, 1, 1) ||
@@ -641,8 +629,7 @@ Expr *CryptoFunctionChecker::checkCryptoCall(CallExpr *call, llvm::StringRef fn,
     if (priv->type->isError() || pub->type->isError()) {
       return call;
     }
-    return checker_.cryptoArgs().cryptoResult(call, CryptoFn::DiffieHellman, {priv, pub},
-                                              buffer);
+    return checker_.cryptoArgs().cryptoResult(call, CryptoFn::DiffieHellman, {priv, pub}, buffer);
   }
   checker_.diags_.error(loc, cryptoExportProblem(fn, "node:crypto"));
 

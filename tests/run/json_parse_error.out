@@ -1,6 +1,6 @@
 Ok { value: { ok: [ 1, 2 ] } }
 {
-  kind: 'JSON',
+  kind: 'JSON_ERROR',
   code: 'ERR_INVALID_JSON',
   message: "Expected ',' or '}' after property value in JSON at position 13 (line 3 column 3)"
 }

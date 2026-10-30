@@ -138,7 +138,7 @@ llvm::Value *StreamLowerer::emitStreamBuiltin(CallExpr *call) {
       args.insert(args.begin(), promise);
       if (maker) {
         params.push_back(ptr);
-        args.push_back(lowering_.fsLowerer().systemErrorMaker());
+        args.push_back(lowering_.fsLowerer().errorMaker(call->type->promised()->errType()));
       }
       lowering_.builder_.CreateCall(
           lowering_.processLowerer().processFunction(name, voidTy, params), args);
@@ -172,12 +172,18 @@ llvm::Value *StreamLowerer::emitStreamBuiltin(CallExpr *call) {
   }
   case Builtin::LibStdWrite: {
     std::vector<llvm::Value *> values = lowering_.exprLowerer().emitExprs(call->args);
-    lowering_.builder_.CreateCall(lowering_.processLowerer().processFunction(
-                                      "tz_lib_std_write", lowering_.builder_.getVoidTy(),
-                                      {lowering_.builder_.getInt64Ty(), ptr}),
-                                  {values[0], values[1]});
+    llvm::Value *gone = lowering_.builder_.CreateCall(
+        lowering_.processLowerer().processFunction("tz_lib_std_write_checked",
+                                                   lowering_.builder_.getInt64Ty(),
+                                                   {lowering_.builder_.getInt64Ty(), ptr}),
+        {values[0], values[1]});
     lowering_.refCounts().releaseValue(values[1], call->args[1]->type);
-    return nullptr;
+    return gone;
+  }
+  case Builtin::LibStdinFailed: {
+    llvm::Value *failed = lowering_.builder_.CreateCall(lowering_.processLowerer().processFunction(
+        "tz_stdin_failed", lowering_.builder_.getInt32Ty(), {}));
+    return lowering_.builder_.CreateICmpNE(failed, lowering_.builder_.getInt32(0));
   }
   default:
     return nullptr;

@@ -11,28 +11,36 @@ interface User {
   age: int
 }
 const log = (s: string) => console.log(s)
-const users = new Readable<User>({
-  objectMode: true,
-  read() {},
-})
+class Users extends Readable<User> {
+  constructor() {
+    super({ objectMode: true })
+  }
+  onRead() {}
+}
+const users = new Users()
 users.push({ name: "ann", age: 31 })
 users.push({ name: "bob", age: 25 })
-users.push(undefined)
-const toLine = new Transform<User, string>({
-  writableObjectMode: true,
-  encoding: "utf8",
-  transform(user, encoding, callback) {
+users.pushEnd()
+class ToLine extends Transform<User, string> {
+  constructor() {
+    super({ writableObjectMode: true, encoding: "utf8" })
+  }
+  onTransform(user, encoding, callback) {
     callback(undefined, `${user.name}:${user.age}\n`)
-  },
-})
+  }
+}
+const toLine = new ToLine()
 const lines: string[] = []
-const sink = new Writable<string>({
-  decodeStrings: false,
-  write(chunk, encoding, callback) {
+class Sink extends Writable<string> {
+  constructor() {
+    super({ decodeStrings: false })
+  }
+  onWrite(chunk, encoding, callback) {
     lines.push(chunk)
     callback()
-  },
-})
+  }
+}
+const sink = new Sink()
 const piped = await pipeline(users, toLine, sink)
 log(`lines ${piped.isOk()} ${JSON.stringify(lines)}`)
 
@@ -66,27 +74,37 @@ class Point {
   }
 }
 let n = 0
-const points = new Readable({
-  objectMode: true,
-  read() {
+type Total = { label: string; total: int }
+class Points extends Readable<Point> {
+  constructor() {
+    super({ objectMode: true })
+  }
+  onRead() {
     n++
     if (n <= 3) this.push(new Point(n, n * n))
-    else this.push(undefined)
-  },
-})
-const sum = new Transform({
-  objectMode: true,
-  transform(p: Point, encoding, callback) {
+    else this.pushEnd()
+  }
+}
+class Sum extends Transform<Point, Total> {
+  constructor() {
+    super({ objectMode: true })
+  }
+  onTransform(p, encoding, callback) {
     callback(undefined, { label: `p${p.x}`, total: p.x + p.y })
-  },
-})
-const totals = new Writable({
-  objectMode: true,
-  write(item: { label: string; total: int }, encoding, callback) {
+  }
+}
+class Totals extends Writable<Total> {
+  constructor() {
+    super({ objectMode: true })
+  }
+  onWrite(item, encoding, callback) {
     log(`${item.label} = ${item.total}`)
     callback()
-  },
-})
+  }
+}
+const points = new Points()
+const sum = new Sum()
+const totals = new Totals()
 points.on("data", (p) => log(`point ${p.x},${p.y}`))
 totals.on("finish", () => log("finish"))
 const summed = await pipeline(points, sum, totals)

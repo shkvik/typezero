@@ -158,8 +158,8 @@ int tz_fs_fsp_succeeded(FsRequest *r) {
     tz_fs_throw_failure(r->make, r->failure, r->syscall, &at.shown, NULL);
     tz_fs_path_free(&at);
   } else {
-    tz_fs_throw_failure(r->make, r->failure, r->syscall, r->shows > 0 ? &r->path.shown : NULL,
-                        r->shows > 1 ? &r->dest.shown : NULL);
+    tz_fs_throw_failure(r->make, r->failure, r->syscall, r->paths > 0 ? &r->path.shown : NULL,
+                        r->paths > 1 ? &r->dest.shown : NULL);
   }
   tz_fs_fsp_settle_failed(r);
 

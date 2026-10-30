@@ -1050,7 +1050,7 @@ function originOf(r: UrlRecord): string {
 }
 
 function refused(what: string, input: string): Result<void, UrlError> {
-  return err({ kind: "URL", code: "ERR_INVALID_URL", message: what, input })
+  return err({ kind: "URL_ERROR", code: "ERR_INVALID_URL", message: what, input })
 }
 
 type UrlParts = {
@@ -1141,7 +1141,7 @@ export class URL {
 
   static parse(input: string, base?: string | URL): Result<URL, UrlError> {
     const record = parseAgainst(input, base instanceof URL ? base.href() : base)
-    if (record == undefined) return err({ kind: "URL", code: "ERR_INVALID_URL", message: "Invalid URL", input })
+    if (record == undefined) return err({ kind: "URL_ERROR", code: "ERR_INVALID_URL", message: "Invalid URL", input })
 
     return ok(new URL(record))
   }

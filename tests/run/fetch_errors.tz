@@ -24,14 +24,14 @@ async function attempt(what: string, url: string, init?: RequestInit) {
 
 function advice(e: TextError): string {
   switch (e.kind) {
-    case "USED":
+    case "BODY_ERROR_USED":
       return "fix the code"
-    case "NETWORK":
-    case "TIMEOUT":
+    case "BODY_ERROR_NETWORK":
+    case "BODY_ERROR_TIMEOUT":
       return "try again"
-    case "TOO_LARGE":
-    case "MALFORMED":
-    case "STREAM":
+    case "BODY_ERROR_TOO_LARGE":
+    case "BODY_ERROR_MALFORMED":
+    case "BODY_ERROR_STREAM":
       return "bad body"
   }
 }
@@ -88,7 +88,7 @@ if (once.isOk()) {
 const html = await fetch(`${base}/html`)
 if (html.isOk()) {
   const parsed = await html.value.json()
-  if (parsed.isErr() && parsed.error.kind == "CONTENT") {
+  if (parsed.isErr() && parsed.error.kind == "JSON_BODY_ERROR_CONTENT") {
     const e = parsed.error
     console.log("html", e.code, e.contentType, e.start)
   }
@@ -96,7 +96,7 @@ if (html.isOk()) {
 const bare = await fetch(`${base}/bare`)
 if (bare.isOk()) {
   const form = await bare.value.formData()
-  if (form.isErr() && form.error.kind == "CONTENT") {
+  if (form.isErr() && form.error.kind == "FORM_DATA_ERROR_CONTENT") {
     const e = form.error
     console.log("bare", e.code, e.contentType ?? "no content-type", e.message)
   }
@@ -107,7 +107,7 @@ if (gone.isOk()) {
   const port = gone.value.port
   await gone.value.stop()
   const refused = await fetch(`http://127.0.0.1:${port}/`)
-  if (refused.isErr() && refused.error.kind == "NETWORK") {
+  if (refused.isErr() && refused.error.kind == "FETCH_ERROR_NETWORK") {
     const e = refused.error
     console.log("refused", e.kind, e.code, e.message.replaceAll(String(port), "PORT"),
                 e.syscall, e.host, e.port == port)

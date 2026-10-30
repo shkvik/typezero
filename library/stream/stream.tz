@@ -9,14 +9,14 @@ import {
   panic,
 } from "tz:intrinsics";
 
-function failure(code: string, message: string): StreamError {
+function failure(code: string, message: string): StreamFault {
   return { code, message };
 }
 
 declare function libClassName(object: object): string;
 declare function libInspect(value: unknown): string;
 
-export function abortError(): StreamError {
+export function abortError(): StreamFault {
   return { code: "ABORT_ERR", message: "The operation was aborted" };
 }
 
@@ -68,13 +68,13 @@ function nullValues() {
 }
 
 function aggregateTwoErrors(
-  inner: StreamError | undefined,
-  outer: StreamError | undefined,
+  inner: StreamFault | undefined,
+  outer: StreamFault | undefined,
 ) {
   return inner ?? outer;
 }
 
-function codeOf(err: StreamError | undefined): string {
+function codeOf(err: StreamFault | undefined): string {
   return err?.code ?? "";
 }
 
@@ -128,11 +128,149 @@ const kWEnded = 1 << 30;
 const kThisListener = 2;
 const kUnknownArgListener = 3;
 
+export interface StreamFault extends StreamError {
+  code: string;
+  syscall?: string;
+  path?: string;
+  cause?: string;
+}
+
 export type StreamCallback = (error?: StreamError) => void;
 
 export type TransformCallback = (error?: StreamError, data?: unknown) => void;
 
-function nop(error?: StreamError) {
+export type FaultCallback = (error?: StreamFault) => void;
+
+export type HookCallback<E> = (error?: E) => void;
+
+export type TransformHookCallback<E> = (error?: E, data?: unknown) => void;
+
+export type FaultTransformCallback = (error?: StreamFault, data?: unknown) => void;
+
+export interface PrematureCloseError extends StreamError {
+  kind: "PREMATURE_CLOSE_ERROR";
+  code: "ERR_STREAM_PREMATURE_CLOSE";
+}
+
+export interface PushAfterEndError extends StreamError {
+  kind: "PUSH_AFTER_END_ERROR";
+  code: "ERR_STREAM_PUSH_AFTER_EOF";
+}
+
+export interface WriteAfterEndError extends StreamError {
+  kind: "WRITE_AFTER_END_ERROR";
+  code: "ERR_STREAM_WRITE_AFTER_END";
+}
+
+export interface WriteAfterDestroyError extends StreamError {
+  kind: "WRITE_AFTER_DESTROY_ERROR";
+  code: "ERR_STREAM_DESTROYED";
+}
+
+export interface AlreadyEndedError extends StreamError {
+  kind: "ALREADY_ENDED_ERROR";
+  code: "ERR_STREAM_ALREADY_FINISHED";
+}
+
+export interface CallbackTwiceError extends StreamError {
+  kind: "CALLBACK_TWICE_ERROR";
+  code: "ERR_MULTIPLE_CALLBACK";
+}
+
+export function readError<E>(
+  own: E | undefined,
+  fault: StreamFault,
+): E | PrematureCloseError | PushAfterEndError {
+  if (fault.code == "" && own != undefined) return own;
+  if (fault.code == "ERR_STREAM_PUSH_AFTER_EOF") {
+    const pushed: PushAfterEndError = {
+      kind: "PUSH_AFTER_END_ERROR",
+      code: "ERR_STREAM_PUSH_AFTER_EOF",
+      message: "push() after pushEnd(): this stream has already ended",
+    };
+
+    return pushed;
+  }
+  const closed = closedEarly(fault);
+
+  return closed;
+}
+
+export function writeError<E>(
+  own: E | undefined,
+  fault: StreamFault,
+):
+  | E
+  | PrematureCloseError
+  | WriteAfterEndError
+  | WriteAfterDestroyError
+  | AlreadyEndedError
+  | CallbackTwiceError {
+  if (fault.code == "" && own != undefined) return own;
+  if (fault.code == "ERR_STREAM_WRITE_AFTER_END") {
+    const ended: WriteAfterEndError = {
+      kind: "WRITE_AFTER_END_ERROR",
+      code: "ERR_STREAM_WRITE_AFTER_END",
+      message: "could not write: end() was already called on this stream",
+    };
+
+    return ended;
+  }
+  if (fault.code == "ERR_STREAM_DESTROYED") {
+    const destroyed: WriteAfterDestroyError = {
+      kind: "WRITE_AFTER_DESTROY_ERROR",
+      code: "ERR_STREAM_DESTROYED",
+      message: "could not write: this stream was destroyed",
+    };
+
+    return destroyed;
+  }
+  if (fault.code == "ERR_STREAM_ALREADY_FINISHED") {
+    const finished: AlreadyEndedError = {
+      kind: "ALREADY_ENDED_ERROR",
+      code: "ERR_STREAM_ALREADY_FINISHED",
+      message: "end() was already called on this stream",
+    };
+
+    return finished;
+  }
+  if (fault.code == "ERR_MULTIPLE_CALLBACK") {
+    const twice: CallbackTwiceError = {
+      kind: "CALLBACK_TWICE_ERROR",
+      code: "ERR_MULTIPLE_CALLBACK",
+      message: "the callback was called twice",
+    };
+
+    return twice;
+  }
+  const closed = closedEarly(fault);
+
+  return closed;
+}
+
+function closedEarly(fault: StreamFault): PrematureCloseError {
+  const message =
+    fault.code == "ERR_STREAM_PREMATURE_CLOSE" || fault.code == "ABORT_ERR"
+      ? "the stream was closed before its end"
+      : fault.message;
+  const closed: PrematureCloseError = {
+    kind: "PREMATURE_CLOSE_ERROR",
+    code: "ERR_STREAM_PREMATURE_CLOSE",
+    message,
+  };
+
+  return closed;
+}
+
+function sameFault(fault: StreamFault): StreamFault {
+  return fault;
+}
+
+export function faultOf(error: StreamError): StreamFault {
+  return { code: "", message: error.message };
+}
+
+function nop(error?: StreamFault) {
   void error;
 }
 
@@ -146,22 +284,22 @@ class ReadableState {
   decoder?: StringDecoder;
   encoding?: string;
   defaultEncoding = "utf8";
-  errored?: StreamError;
+  errored?: StreamFault;
   readable?: boolean;
   constructor(bits: int) {
     this.bits = bits;
   }
 }
 
-interface BufferedWrite {
+export interface BufferedWrite {
   chunk: unknown;
   encoding: string;
-  callback: StreamCallback;
+  callback: FaultCallback;
 }
 
 class AfterWriteTick {
   count: int = 1;
-  constructor(readonly cb: StreamCallback) {}
+  constructor(readonly cb: FaultCallback) {}
 }
 
 class WritableState {
@@ -170,10 +308,10 @@ class WritableState {
   buffered: (BufferedWrite | undefined)[] = [];
   bufferedIndex: int = 0;
   pendingcb: int = 0;
-  writecb: StreamCallback = nop;
+  writecb: FaultCallback = nop;
   afterWriteTickInfo?: AfterWriteTick;
-  onFinished: StreamCallback[] = [];
-  errored?: StreamError;
+  onFinished: FaultCallback[] = [];
+  errored?: StreamFault;
   defaultEncoding = "utf8";
   writable?: boolean;
   constructor(bits: int) {
@@ -251,10 +389,10 @@ class Eos {
   constructor(
     readonly readable: boolean,
     readonly writable: boolean,
-    public callback: StreamCallback,
+    public callback: FaultCallback,
   ) {}
 
-  call(err?: StreamError) {
+  call(err?: StreamFault) {
     const callback = this.callback;
     this.callback = nop;
     callback(err);
@@ -264,7 +402,7 @@ class Eos {
 class IteratorWait {
   callback: () => void = noWait;
   ended = false;
-  error?: StreamError;
+  error?: StreamFault;
 
   wake() {
     const callback = this.callback;
@@ -278,12 +416,57 @@ function noWait() {}
 class Composition {
   head?: Stream;
   tail?: Stream;
-  ondrain?: StreamCallback;
-  onfinish?: StreamCallback;
+  ondrain?: FaultCallback;
+  onfinish?: FaultCallback;
   onreadable?: () => void;
-  onclose?: StreamCallback;
+  onclose?: FaultCallback;
   closing = true;
   listeners: (() => void)[] = [];
+  write?: (chunk: unknown, encoding: string, callback: FaultCallback) => void;
+  final?: (callback: FaultCallback) => void;
+  read?: (self: Stream) => void;
+  destroy?: (error: StreamFault | undefined, callback: FaultCallback) => void;
+}
+
+class ComposedDuplex<W, R> extends Duplex<W, R> {
+  private composition: Composition;
+
+  constructor(composition: Composition, options: DuplexOptions) {
+    super(options);
+    this.composition = composition;
+  }
+
+  protected onWrite(chunk: W, encoding: string, callback: HookCallback<StreamError>): void {
+    void chunk;
+    void encoding;
+    callback();
+  }
+
+  protected onFinal(callback: HookCallback<StreamError>): void {
+    callback();
+  }
+
+  protected writeChunk(chunk: unknown, encoding: string, callback: FaultCallback): void {
+    const write = this.composition.write;
+    if (write != undefined) write(chunk, encoding, callback);
+  }
+
+  protected finalHook(callback: FaultCallback): void {
+    const final = this.composition.final;
+    if (final != undefined) final(callback);
+  }
+
+  protected onRead(size: int): void {
+    void size;
+    const read = this.composition.read;
+    if (read != undefined) read(this);
+  }
+
+  protected destroyHook(error: StreamFault | undefined, callback: FaultCallback): void {
+    const destroy = this.composition.destroy;
+    if (destroy != undefined) destroy(error, callback);
+    else callback(error);
+  }
 }
 
 function isBufferChunk(chunk: unknown): boolean {
@@ -465,7 +648,7 @@ function needFinish(stream: Stream, state: WritableState): boolean {
 
 function callFinishedCallbacks(
   state: WritableState,
-  err: StreamError | undefined,
+  err: StreamFault | undefined,
 ) {
   if ((state.bits & kOnFinished) == 0) return;
   const onfinishCallbacks = state.onFinished;
@@ -487,7 +670,7 @@ export class Stream extends EventEmitterBase {
   private writableState?: WritableState;
   private ready = false;
   private constructWaits: (() => void)[] = [];
-  private destroyWaits: ((err: StreamError | undefined) => void)[] = [];
+  private destroyWaits: ((err: StreamFault | undefined) => void)[] = [];
   private hasConstruct = false;
   private hasWritev = false;
   private hasFinal = false;
@@ -495,8 +678,8 @@ export class Stream extends EventEmitterBase {
   private transforming = false;
   private transformsWrites = false;
   private transformsFinal = false;
-  private transformCallback?: StreamCallback;
-  private transformWritten?: StreamCallback;
+  private transformCallback?: FaultCallback;
+  private transformWritten?: FaultCallback;
   private transformLength = 0;
   private transformCount = 0;
   private weakSelf?: WeakRef<Stream>;
@@ -532,7 +715,7 @@ export class Stream extends EventEmitterBase {
     return w != undefined && (w.bits & kClosed) != 0;
   }
 
-  public errored(): StreamError | undefined {
+  protected fault(): StreamFault | undefined {
     const r = this.readableState;
     if (r != undefined) {
       return r.errored;
@@ -751,7 +934,11 @@ export class Stream extends EventEmitterBase {
     }
   }
 
-  protected onRead(size: int): void {
+  protected requestChunks(size: int): void {
+    this.pullTransformed(size);
+  }
+
+  protected pullTransformed(size: int): void {
     void size;
     const callback = this.transformCallback;
     if (callback != undefined) {
@@ -762,22 +949,22 @@ export class Stream extends EventEmitterBase {
     }
   }
 
-  protected onFinal(callback: StreamCallback): void {
+  protected finalHook(callback: FaultCallback): void {
     callback();
   }
 
-  protected onDestroy(
-    error: StreamError | undefined,
-    callback: StreamCallback,
+  protected destroyHook(
+    error: StreamFault | undefined,
+    callback: FaultCallback,
   ): void {
     callback(error);
   }
 
-  protected onConstruct(callback: StreamCallback): void {
+  protected constructHook(callback: FaultCallback): void {
     callback();
   }
 
-  protected onFlush(callback: TransformCallback): void {
+  protected flushHook(callback: FaultTransformCallback): void {
     callback();
   }
 
@@ -788,7 +975,7 @@ export class Stream extends EventEmitterBase {
   protected writeChunk(
     chunk: unknown,
     encoding: string,
-    callback: StreamCallback,
+    callback: FaultCallback,
   ): void {
     void chunk;
     void encoding;
@@ -797,7 +984,7 @@ export class Stream extends EventEmitterBase {
 
   protected writevChunks(
     chunks: BufferedWrite[],
-    callback: StreamCallback,
+    callback: FaultCallback,
   ): void {
     void chunks;
     callback(methodNotImplemented("onWritev()"));
@@ -806,7 +993,7 @@ export class Stream extends EventEmitterBase {
   protected transformChunk(
     chunk: unknown,
     encoding: string,
-    callback: TransformCallback,
+    callback: FaultTransformCallback,
   ): void {
     void chunk;
     void encoding;
@@ -824,10 +1011,11 @@ export class Stream extends EventEmitterBase {
     return ret;
   }
 
-  protected iterate<C>(
+  protected iterate<C, F>(
     destroyOnReturn: boolean,
-  ): AsyncGenerator<Result<C, StreamError>> {
-    return Stream.iterateChunks<C>(this, destroyOnReturn);
+    typed: (fault: StreamFault) => F,
+  ): AsyncGenerator<Result<C, F>> {
+    return Stream.iterateChunks<C, F>(this, destroyOnReturn, typed);
   }
 
   private pushTyped(chunk: unknown, encoding?: string): boolean {
@@ -850,21 +1038,21 @@ export class Stream extends EventEmitterBase {
     return ret;
   }
 
-  private writeTyped(
+  protected writeFault(
     chunk: unknown,
     encoding: string | undefined,
-    cb: StreamCallback | undefined,
+    cb: FaultCallback | undefined,
   ): boolean {
     return this.writeAny(chunk, encoding, cb ?? nop) == true;
   }
 
-  private endTyped(
+  protected endFault(
     hasChunk: boolean,
     chunk: unknown,
     encoding: string | undefined,
-  ): Promise<Result<void, StreamError>> {
-    return new Promise<Result<void, StreamError>>((resolve) => {
-      this.endWith(hasChunk, chunk, encoding, (error?: StreamError) => {
+  ): Promise<Result<void, StreamFault>> {
+    return new Promise<Result<void, StreamFault>>((resolve) => {
+      this.endWith(hasChunk, chunk, encoding, (error?: StreamFault) => {
         if (error != undefined) resolve(err(error));
         else resolve(ok());
       });
@@ -874,13 +1062,13 @@ export class Stream extends EventEmitterBase {
   private writeAny(
     chunk: unknown,
     encoding: string | undefined,
-    cb: StreamCallback,
-  ): boolean | StreamError {
+    cb: FaultCallback,
+  ): boolean | StreamFault {
     const ret = Stream.writeImpl(this, chunk, encoding, cb);
     return ret;
   }
 
-  private written(er?: StreamError): void {
+  private written(er?: StreamFault): void {
     Stream.onwrite(this, er);
   }
 
@@ -888,10 +1076,10 @@ export class Stream extends EventEmitterBase {
     hasChunk: boolean,
     chunk: unknown,
     encoding: string | undefined,
-    cb: StreamCallback | undefined,
+    cb: FaultCallback | undefined,
   ) {
     const state = Stream.writableStateOf(this);
-    let err: StreamError | undefined = undefined;
+    let err: StreamFault | undefined = undefined;
     if (hasChunk) {
       const ret = Stream.writeImpl(this, chunk, encoding, nop);
       if (typeof ret != "boolean") err = ret;
@@ -1072,7 +1260,18 @@ export class Stream extends EventEmitterBase {
     return this;
   }
 
-  destroy(error?: StreamError, callback?: StreamCallback) {
+  public destroy() {
+    return this.destroyWith(undefined, undefined);
+  }
+
+  protected breakWith(error: StreamError) {
+    return this.destroyWith(faultOf(error), undefined);
+  }
+
+  private destroyWith(
+    error: StreamFault | undefined,
+    callback: FaultCallback | undefined,
+  ) {
     const w = this.writableState;
     if (
       w != undefined &&
@@ -1108,7 +1307,7 @@ export class Stream extends EventEmitterBase {
     stream: Stream,
     chunk: unknown,
     encoding: string,
-    callback: StreamCallback,
+    callback: FaultCallback,
   ) {
     const count = stream.transformCount + 1;
     stream.transformCount = count;
@@ -1119,7 +1318,7 @@ export class Stream extends EventEmitterBase {
     stream.transformChunk(
       chunk,
       encoding,
-      (err?: StreamError, val?: unknown) => {
+      (err?: StreamFault, val?: unknown) => {
         const target = self.deref();
         if (target != undefined) Stream.transformed(target, count, err, val);
       },
@@ -1129,7 +1328,7 @@ export class Stream extends EventEmitterBase {
   private static transformed(
     stream: Stream,
     count: int,
-    err?: StreamError,
+    err?: StreamFault,
     val?: unknown,
   ) {
     const written = stream.transformWritten;
@@ -1161,13 +1360,13 @@ export class Stream extends EventEmitterBase {
 
   private static transformFinal(
     stream: Stream,
-    cb: StreamCallback | undefined,
+    cb: FaultCallback | undefined,
   ) {
     if (stream.hasFlush && !stream.destroyed()) {
-      stream.onFlush((er?: StreamError, data?: unknown) => {
+      stream.flushHook((er?: StreamFault, data?: unknown) => {
         if (er != undefined) {
           if (cb != undefined) cb(er);
-          else stream.destroy(er);
+          else stream.destroyWith(er, undefined);
           return;
         }
         if (data != undefined) stream.pushChunk(data);
@@ -1186,10 +1385,11 @@ export class Stream extends EventEmitterBase {
     stream.emit("prefinish");
   }
 
-  private static async *iterateChunks<C>(
+  private static async *iterateChunks<C, F>(
     stream: Stream,
     destroyOnReturn: boolean,
-  ): AsyncGenerator<Result<C, StreamError>> {
+    typed: (fault: StreamFault) => F,
+  ): AsyncGenerator<Result<C, F>> {
     const wait = new IteratorWait();
     const next = function (this: Stream) {
       void this;
@@ -1199,7 +1399,7 @@ export class Stream extends EventEmitterBase {
     const cleanup = Stream.eos(
       stream,
       { writable: false },
-      (err?: StreamError) => {
+      (err?: StreamFault) => {
         if (err != undefined) wait.error = aggregateTwoErrors(wait.error, err);
         else wait.ended = true;
         wait.wake();
@@ -1224,17 +1424,17 @@ export class Stream extends EventEmitterBase {
       if (chunk != undefined) {
         if (!isChunk<C>(chunk)) {
           failed = true;
-          const item: Result<C, StreamError> = err(invalidChunk(chunk));
+          const item: Result<C, F> = err(typed(invalidChunk(chunk)));
           yield item;
           return;
         }
-        const item: Result<C, StreamError> = ok(chunkOf<C>(chunk));
+        const item: Result<C, F> = ok(chunkOf<C>(chunk));
         yield item;
       } else {
         const error = wait.error;
         if (error != undefined) {
           failed = true;
-          const item: Result<C, StreamError> = err(error);
+          const item: Result<C, F> = err(typed(error));
           yield item;
           return;
         }
@@ -1477,7 +1677,7 @@ export class Stream extends EventEmitterBase {
     } else if (doRead) {
       state.bits |= kReading | kSync;
       if (stream.readableLength() == 0) state.bits |= kNeedReadable;
-      stream.onRead(stream.readableHighWaterMark());
+      stream.requestChunks(stream.readableHighWaterMark());
       state.bits &= ~kSync;
       if ((state.bits & kReading) == 0) n = howMuchToRead(stream, nOrig, state);
     }
@@ -1715,7 +1915,7 @@ export class Stream extends EventEmitterBase {
       const ret = dest.writeAny(chunk, undefined, nop);
       if (ret != true) pause();
     }
-    function onerror(er: StreamError) {
+    function onerror(er: StreamFault) {
       unpipe();
       dest.removeListener("error", onerror);
       if (dest.listenerCount("error") == 0) {
@@ -1772,12 +1972,12 @@ export class Stream extends EventEmitterBase {
     stream: Stream,
     chunk: unknown,
     encoding: string | undefined,
-    cb: StreamCallback,
-  ): boolean | StreamError {
+    cb: FaultCallback,
+  ): boolean | StreamFault {
     const state = Stream.writableStateOf(stream);
     let value = chunk;
     let enc = encoding ?? "";
-    let err: StreamError | undefined = undefined;
+    let err: StreamFault | undefined = undefined;
     if (chunk == undefined) {
       err = nullValues();
     } else if ((state.bits & kObjectMode) == 0) {
@@ -1816,7 +2016,7 @@ export class Stream extends EventEmitterBase {
     state: WritableState,
     chunk: unknown,
     encoding: string,
-    callback: StreamCallback,
+    callback: FaultCallback,
   ): boolean {
     const len = (state.bits & kObjectMode) != 0 ? 1 : lengthOf(chunk);
     stream.writeLength += len;
@@ -1853,7 +2053,7 @@ export class Stream extends EventEmitterBase {
     len: int,
     chunk: unknown,
     encoding: string,
-    cb: StreamCallback,
+    cb: FaultCallback,
   ) {
     state.writelen = len;
     if (cb != nop) state.writecb = cb;
@@ -1869,7 +2069,7 @@ export class Stream extends EventEmitterBase {
     state: WritableState,
     len: int,
     chunks: BufferedWrite[],
-    cb: StreamCallback,
+    cb: FaultCallback,
   ) {
     state.writelen = len;
     if (cb != nop) state.writecb = cb;
@@ -1883,8 +2083,8 @@ export class Stream extends EventEmitterBase {
   private static onwriteError(
     stream: Stream,
     state: WritableState,
-    er: StreamError,
-    cb: StreamCallback,
+    er: StreamFault,
+    cb: FaultCallback,
   ) {
     --state.pendingcb;
     cb(er);
@@ -1892,7 +2092,7 @@ export class Stream extends EventEmitterBase {
     Stream.errorOrDestroy(stream, er);
   }
 
-  private static onwrite(stream: Stream, er: StreamError | undefined) {
+  private static onwrite(stream: Stream, er: StreamFault | undefined) {
     const state = Stream.writableStateOf(stream);
     if ((state.bits & kExpectWriteCb) == 0) {
       Stream.errorOrDestroy(stream, multipleCallback());
@@ -1971,7 +2171,7 @@ export class Stream extends EventEmitterBase {
     stream: Stream,
     state: WritableState,
     count: int,
-    cb: StreamCallback,
+    cb: FaultCallback,
   ) {
     state.bits &= ~kAfterWritePending;
     const needDrain =
@@ -2026,10 +2226,10 @@ export class Stream extends EventEmitterBase {
     if (bufferedLength > 1 && stream.hasWritev) {
       state.pendingcb -= bufferedLength - 1;
       const start = i;
-      const callback: StreamCallback =
+      const callback: FaultCallback =
         (state.bits & kAllNoop) != 0
           ? nop
-          : (err?: StreamError) => {
+          : (err?: StreamFault) => {
               for (let n = start; n < buffered.length; ++n) {
                 const entry = buffered[n];
                 if (entry != undefined) entry.callback(err);
@@ -2073,7 +2273,7 @@ export class Stream extends EventEmitterBase {
   private static onFinish(
     stream: Stream,
     state: WritableState,
-    err: StreamError | undefined,
+    err: StreamFault | undefined,
   ) {
     if ((state.bits & kPrefinished) != 0) {
       Stream.errorOrDestroy(stream, err ?? multipleCallback());
@@ -2096,9 +2296,9 @@ export class Stream extends EventEmitterBase {
     if (stream.hasFinal && (state.bits & kDestroyed) == 0) {
       state.bits |= kFinalCalled | kWSync;
       state.pendingcb++;
-      const done = (err?: StreamError) => Stream.onFinish(stream, state, err);
+      const done = (err?: StreamFault) => Stream.onFinish(stream, state, err);
       if (stream.transformsFinal) Stream.transformFinal(stream, done);
-      else stream.onFinal(done);
+      else stream.finalHook(done);
       state.bits &= ~kWSync;
     } else {
       state.bits |= kFinalCalled | kPrefinished;
@@ -2143,7 +2343,7 @@ export class Stream extends EventEmitterBase {
     }
   }
 
-  private static checkError(stream: Stream, err: StreamError | undefined) {
+  private static checkError(stream: Stream, err: StreamFault | undefined) {
     if (err == undefined) return;
     const w = stream.writableState;
     const r = stream.readableState;
@@ -2159,8 +2359,8 @@ export class Stream extends EventEmitterBase {
 
   private static destroyImpl(
     stream: Stream,
-    err: StreamError | undefined,
-    cb: StreamCallback | undefined,
+    err: StreamFault | undefined,
+    cb: FaultCallback | undefined,
   ) {
     const r = stream.readableState;
     const w = stream.writableState;
@@ -2176,7 +2376,7 @@ export class Stream extends EventEmitterBase {
     if (r != undefined) r.bits |= kDestroyed;
     const s = w ?? r;
     if (s != undefined && (s.bits & kConstructed) == 0) {
-      stream.destroyWaits.push((er: StreamError | undefined) =>
+      stream.destroyWaits.push((er: StreamFault | undefined) =>
         Stream.destroyNow(stream, aggregateTwoErrors(er, err), cb),
       );
     } else {
@@ -2186,11 +2386,11 @@ export class Stream extends EventEmitterBase {
 
   private static destroyNow(
     self: Stream,
-    err: StreamError | undefined,
-    cb: StreamCallback | undefined,
+    err: StreamFault | undefined,
+    cb: FaultCallback | undefined,
   ) {
     let called = false;
-    function onDestroy(error?: StreamError) {
+    function onDestroy(error?: StreamFault) {
       if (called) return;
       called = true;
       Stream.checkError(self, error);
@@ -2209,7 +2409,7 @@ export class Stream extends EventEmitterBase {
         process.nextTick(() => Stream.emitCloseNT(self));
       }
     }
-    self.onDestroy(err, onDestroy);
+    self.destroyHook(err, onDestroy);
   }
 
   private static emitCloseNT(self: Stream) {
@@ -2224,7 +2424,7 @@ export class Stream extends EventEmitterBase {
       self.emit("close");
   }
 
-  private static emitErrorNT(self: Stream, err: StreamError) {
+  private static emitErrorNT(self: Stream, err: StreamFault) {
     const r = self.readableState;
     const w = self.writableState;
     if (
@@ -2239,7 +2439,7 @@ export class Stream extends EventEmitterBase {
 
   private static errorOrDestroy(
     stream: Stream,
-    err: StreamError,
+    err: StreamFault,
     isSync = false,
   ) {
     const r = stream.readableState;
@@ -2253,7 +2453,7 @@ export class Stream extends EventEmitterBase {
       (r != undefined && (r.bits & kAutoDestroy) != 0) ||
       (w != undefined && (w.bits & kAutoDestroy) != 0)
     ) {
-      stream.destroy(err);
+      stream.destroyWith(err, undefined);
     } else {
       if (w != undefined && (w.bits & kErrored) == 0) {
         w.errored = err;
@@ -2280,7 +2480,7 @@ export class Stream extends EventEmitterBase {
 
   private static constructNT(stream: Stream) {
     let called = false;
-    function afterConstruct(err?: StreamError) {
+    function afterConstruct(err?: StreamFault) {
       if (called) {
         Stream.errorOrDestroy(stream, err ?? multipleCallback());
         return;
@@ -2303,16 +2503,16 @@ export class Stream extends EventEmitterBase {
         for (const wait of constructed) wait();
       }
     }
-    stream.onConstruct((err?: StreamError) => {
+    stream.constructHook((err?: StreamFault) => {
       process.nextTick(() => afterConstruct(err));
     });
   }
 
-  private static destroyer(stream: Stream, err: StreamError | undefined) {
+  private static destroyer(stream: Stream, err: StreamFault | undefined) {
     if (Stream.isDestroyed(stream)) return;
     let error = err;
     if (error == undefined && !Stream.isFinished(stream)) error = abortError();
-    stream.destroy(error);
+    stream.destroyWith(error, undefined);
   }
 
   static isDestroyed(stream: Stream): boolean {
@@ -2410,7 +2610,7 @@ export class Stream extends EventEmitterBase {
     );
   }
 
-  private static erroredOf(stream: Stream): StreamError | undefined {
+  private static erroredOf(stream: Stream): StreamFault | undefined {
     return stream.writableState?.errored ?? stream.readableState?.errored;
   }
 
@@ -2428,10 +2628,18 @@ export class Stream extends EventEmitterBase {
     return stream.readableDidRead() || stream.readableAborted();
   }
 
-  private static eos(
+  private static eosFor(
     stream: Stream,
     options: FinishedOptions | undefined,
     callback: StreamCallback,
+  ): () => void {
+    return Stream.eos(stream, options, (fault?: StreamFault) => callback(fault));
+  }
+
+  private static eos(
+    stream: Stream,
+    options: FinishedOptions | undefined,
+    callback: FaultCallback,
   ): () => void {
     const readable = options?.readable ?? Stream.isReadableNodeStream(stream);
     const writable = options?.writable ?? Stream.isWritableNodeStream(stream);
@@ -2451,7 +2659,7 @@ export class Stream extends EventEmitterBase {
     const onend = function (this: Stream) {
       Stream.endEvent(e, this);
     };
-    const onerror = function (this: Stream, err: StreamError) {
+    const onerror = function (this: Stream, err: StreamFault) {
       void this;
       e.call(err);
     };
@@ -2544,11 +2752,11 @@ export class Stream extends EventEmitterBase {
   private static finishedResult(
     stream: Stream,
     options?: FinishedOptions,
-  ): Promise<Result<void, StreamError>> {
+  ): Promise<Result<void, StreamFault>> {
     const autoCleanup = options?.cleanup ?? false;
-    return new Promise<Result<void, StreamError>>((resolve) => {
+    return new Promise<Result<void, StreamFault>>((resolve) => {
       let cleanup: () => void = () => {};
-      cleanup = Stream.eos(stream, options, (error?: StreamError) => {
+      cleanup = Stream.eos(stream, options, (error?: StreamFault) => {
         if (autoCleanup) cleanup();
         if (error != undefined) resolve(err(error));
         else resolve(ok());
@@ -2574,11 +2782,11 @@ export class Stream extends EventEmitterBase {
     const cleanup = Stream.eos(
       stream,
       { readable: reading, writable: writing },
-      (err?: StreamError) => {
+      (err?: StreamFault) => {
         d.finished = err == undefined;
       },
     );
-    ps.destroys.push((err: StreamError | undefined) => {
+    ps.destroys.push((err: StreamFault | undefined) => {
       if (d.finished) return;
       d.finished = true;
       Stream.destroyer(stream, err ?? streamDestroyed("pipe"));
@@ -2590,7 +2798,11 @@ export class Stream extends EventEmitterBase {
     stream: Stream,
     ps: PipelineState,
   ): AsyncGenerator<unknown> {
-    for await (const item of Stream.iterateChunks<unknown>(stream, true)) {
+    for await (const item of Stream.iterateChunks<unknown, StreamFault>(
+      stream,
+      true,
+      sameFault,
+    )) {
       if (item.isErr()) {
         finishImpl(ps, item.error, false);
         return;
@@ -2605,9 +2817,9 @@ export class Stream extends EventEmitterBase {
     ps: PipelineState,
     end: boolean,
   ) {
-    let error: StreamError | undefined = undefined;
+    let error: StreamFault | undefined = undefined;
     let onresolve: (() => void) | undefined = undefined;
-    const resume = (err?: StreamError) => {
+    const resume = (err?: StreamFault) => {
       if (err != undefined) error = err;
       const callback = onresolve;
       if (callback != undefined) {
@@ -2675,7 +2887,7 @@ export class Stream extends EventEmitterBase {
     Stream.eos(
       src,
       { readable: true, writable: false },
-      (err?: StreamError) => {
+      (err?: StreamFault) => {
         const rState = src.readableState;
         if (
           err != undefined &&
@@ -2687,7 +2899,7 @@ export class Stream extends EventEmitterBase {
         ) {
           const finishFn = () => pipelineFinish(ps);
           src.once("end", finishFn);
-          src.once("error", (e: StreamError) => pipelineFinish(ps, e));
+          src.once("error", (e: StreamFault) => pipelineFinish(ps, e));
         } else {
           pipelineFinish(ps, err);
         }
@@ -2696,7 +2908,7 @@ export class Stream extends EventEmitterBase {
     return Stream.eos(
       dst,
       { readable: false, writable: true },
-      (err?: StreamError) => pipelineFinish(ps, err),
+      (err?: StreamFault) => pipelineFinish(ps, err),
     );
   }
 
@@ -2737,7 +2949,7 @@ export class Stream extends EventEmitterBase {
           if (Stream.isReadable(stream) && isLastStream)
             ps.lastStreamCleanup.push(cleanup);
         }
-        const onError = function (this: Stream, err: StreamError) {
+        const onError = function (this: Stream, err: StreamFault) {
           void this;
           if (
             err.code != "ABORT_ERR" &&
@@ -2827,7 +3039,7 @@ export class Stream extends EventEmitterBase {
     callback: StreamCallback,
   ): S {
     const ps = new PipelineState(
-      (err: StreamError | undefined, value: unknown) => {
+      (err: StreamFault | undefined, value: unknown) => {
         void value;
         callback(err);
       },
@@ -2843,7 +3055,7 @@ export class Stream extends EventEmitterBase {
     callback: StreamCallback,
   ): Stream {
     const ps = new PipelineState(
-      (err: StreamError | undefined, value: unknown) => {
+      (err: StreamFault | undefined, value: unknown) => {
         void value;
         callback(err);
       },
@@ -2856,10 +3068,10 @@ export class Stream extends EventEmitterBase {
   private static pipelineResult(
     stages: (Stream | PipelineStage)[],
     options?: { end?: boolean },
-  ): Promise<Result<void, StreamError>> {
-    return new Promise<Result<void, StreamError>>((resolve) => {
+  ): Promise<Result<void, StreamFault>> {
+    return new Promise<Result<void, StreamFault>>((resolve) => {
       const ps = new PipelineState(
-        (error: StreamError | undefined, value: unknown) => {
+        (error: StreamFault | undefined, value: unknown) => {
           void value;
           if (error != undefined) resolve(err(error));
           else resolve(ok());
@@ -2872,10 +3084,10 @@ export class Stream extends EventEmitterBase {
   private static pipelineValue<V>(
     stages: (Stream | PipelineStage)[],
     options?: { end?: boolean },
-  ): Promise<Result<V, StreamError>> {
-    return new Promise<Result<V, StreamError>>((resolve) => {
+  ): Promise<Result<V, StreamFault>> {
+    return new Promise<Result<V, StreamFault>>((resolve) => {
       const ps = new PipelineState(
-        (error: StreamError | undefined, value: unknown) => {
+        (error: StreamFault | undefined, value: unknown) => {
           if (error != undefined) resolve(err(error));
           else resolve(ok(chunkOf<V>(value)));
         },
@@ -2885,7 +3097,7 @@ export class Stream extends EventEmitterBase {
   }
 
   private static composeAll<W, R>(streams: Stream[]): Duplex<W, R> {
-    let invalid: StreamError | undefined = undefined;
+    let invalid: StreamFault | undefined = undefined;
     for (let n = 0; n < streams.length && invalid == undefined; ++n) {
       const stream = streams[n];
       if (stream == undefined) continue;
@@ -2909,54 +3121,51 @@ export class Stream extends EventEmitterBase {
     const writable = Stream.isWritable(head);
     const readable = Stream.isReadable(tail);
     const c = new Composition();
-    const d = new Duplex<W, R>({
+    c.write = (chunk: unknown, encoding: string, callback: FaultCallback) => {
+      const to = c.head;
+      if (to == undefined) return;
+      if (to.writeAny(chunk, encoding, nop) == true) callback();
+      else c.ondrain = callback;
+    };
+    c.final = (callback: FaultCallback) => {
+      const to = c.head;
+      if (to != undefined) to.endWith(false, undefined, undefined, undefined);
+      c.onfinish = callback;
+    };
+    c.read = (self: Stream) => Stream.readComposed(self, c);
+    c.destroy = (error: StreamFault | undefined, callback: FaultCallback) => {
+      let failed = error;
+      if (failed == undefined && c.closing) failed = abortError();
+      c.onreadable = undefined;
+      c.ondrain = undefined;
+      c.onfinish = undefined;
+      const listeners = c.listeners;
+      c.listeners = [];
+      for (const remove of listeners) remove();
+      const from = c.tail;
+      if (from != undefined) Stream.destroyer(from, failed);
+      if (!c.closing) callback(failed);
+      else c.onclose = callback;
+    };
+    const d = new ComposedDuplex<W, R>(c, {
       writableObjectMode: head.writableObjectMode(),
       readableObjectMode: tail.readableObjectMode(),
       writable,
       readable,
-      write(chunk: W, encoding: string, callback: StreamCallback) {
-        const to = c.head;
-        if (to == undefined) return;
-        if (to.writeAny(chunk, encoding, nop) == true) callback();
-        else c.ondrain = callback;
-      },
-      final(callback: StreamCallback) {
-        const to = c.head;
-        if (to != undefined) to.endWith(false, undefined, undefined, undefined);
-        c.onfinish = callback;
-      },
-      read(size: int) {
-        void size;
-        Stream.readComposed(this, c);
-      },
-      destroy(error: StreamError | undefined, callback: StreamCallback) {
-        let failed = error;
-        if (failed == undefined && c.closing) failed = abortError();
-        c.onreadable = undefined;
-        c.ondrain = undefined;
-        c.onfinish = undefined;
-        const listeners = c.listeners;
-        c.listeners = [];
-        for (const remove of listeners) remove();
-        const from = c.tail;
-        if (from != undefined) Stream.destroyer(from, failed);
-        if (!c.closing) callback(failed);
-        else c.onclose = callback;
-      },
     });
     if (invalid != undefined) {
       c.closing = false;
-      d.destroy(invalid);
+      d.breakWith(invalid);
       return d;
     }
     c.head = head;
     c.tail = tail;
-    const onfinished = (err?: StreamError) => {
+    const onfinished = (err?: StreamFault) => {
       const cb = c.onclose;
       c.closing = false;
       c.onclose = undefined;
       if (cb != undefined) cb(err);
-      else if (err != undefined) d.destroy(err);
+      else if (err != undefined) d.breakWith(err);
       else if (!readable && !writable) d.destroy();
     };
     if (streams.length == 1) {
@@ -2965,7 +3174,7 @@ export class Stream extends EventEmitterBase {
       const stages: (Stream | PipelineStage)[] = [];
       for (const stream of streams) stages.push(stream);
       const ps = new PipelineState(
-        (err: StreamError | undefined, value: unknown) => {
+        (err: StreamFault | undefined, value: unknown) => {
           void value;
           onfinished(err);
         },

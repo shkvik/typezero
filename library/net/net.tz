@@ -1,22 +1,23 @@
-import { Duplex, StreamCallback } from "node:stream";
+import { NativeError } from "tz:intrinsics";
+import { Duplex, FaultCallback, HookCallback, StreamFault } from "node:stream";
 import { URL } from "tz:url";
 
 declare function netConnect(
   host: string,
   port: int,
   deadline: object | undefined,
-): Promise<Result<object, SystemError>>;
+): Promise<Result<object, NativeError>>;
 declare function tlsConnect(
   conn: object,
   host: string,
   deadline: object | undefined,
-): Promise<Result<void, SystemError>>;
+): Promise<Result<void, NativeError>>;
 declare function netClose(conn: object): void;
 declare function tcpRead(
   conn: object,
   deadline: object | undefined,
-): Promise<Result<Uint8Array | undefined, SystemError>>;
-declare function httpWrite(conn: object, chunk: Uint8Array): Promise<Result<void, SystemError>>;
+): Promise<Result<Uint8Array | undefined, NativeError>>;
+declare function httpWrite(conn: object, chunk: Uint8Array): Promise<Result<void, NativeError>>;
 declare function tcpNoDelay(conn: object, on: boolean): void;
 declare function tcpKeepAlive(conn: object, on: boolean): void;
 declare function tcpReset(conn: object): void;
@@ -27,7 +28,7 @@ declare function netListen(
   keepAlive: int,
   headersTimeout: int,
   requestTimeout: int,
-): Result<object, SystemError>;
+): Result<object, NativeError>;
 declare function netListenerPort(listener: object): int;
 declare function netAccept(listener: object): Promise<object | undefined>;
 declare function netCloseListener(listener: object): void;
@@ -59,14 +60,14 @@ export type SocketOptions = {
 
 export type ConnectError =
   | {
-      kind: "REQUEST";
+      kind: "CONNECT_ERROR_REQUEST";
       code: "ERR_INVALID_HOST" | "ERR_ALREADY_CONNECTED";
       message: string;
       host: string;
       port: int;
     }
   | {
-      kind: "NETWORK";
+      kind: "CONNECT_ERROR_NETWORK";
       code:
         | "ENOTFOUND"
         | "EAI_AGAIN"
@@ -80,19 +81,18 @@ export type ConnectError =
         | "ENOBUFS"
         | "UNKNOWN";
       message: string;
-      errno: int;
       syscall: string;
       host: string;
       port: int;
     }
   | {
-      kind: "TLS";
+      kind: "CONNECT_ERROR_TLS";
       code: string;
       message: string;
       host: string;
     }
   | {
-      kind: "TIMEOUT";
+      kind: "CONNECT_ERROR_TIMEOUT";
       code: "TIMEOUT_ERR";
       message: string;
       timeout: int;
@@ -184,11 +184,59 @@ function startDeadline(timeout?: int): object | undefined {
   return deadline;
 }
 
-function streamFailure(e: SystemError): StreamError {
-  return { code: e.code, message: e.message, errno: e.errno, syscall: e.syscall };
+export interface SocketErrorNetwork extends StreamError {
+  kind: "SOCKET_ERROR_NETWORK";
+  code: "ECONNRESET" | "EPIPE" | "ECONNABORTED" | "ETIMEDOUT" | "ERR_CLOSED" | "UNKNOWN";
+  syscall: string;
+  host: string;
+  port: int;
 }
 
-export class Socket extends Duplex<Buffer> {
+export interface SocketErrorTls extends StreamError {
+  kind: "SOCKET_ERROR_TLS";
+  code: string;
+  host: string;
+}
+
+export type SocketError = SocketErrorNetwork | SocketErrorTls;
+
+type SocketNetworkCode = "ECONNRESET" | "EPIPE" | "ECONNABORTED" | "ETIMEDOUT" | "ERR_CLOSED" | "UNKNOWN";
+
+function socketCode(code: string): SocketNetworkCode {
+  switch (code) {
+    case "ECONNRESET":
+      return "ECONNRESET";
+    case "EPIPE":
+      return "EPIPE";
+    case "ECONNABORTED":
+      return "ECONNABORTED";
+    case "ETIMEDOUT":
+      return "ETIMEDOUT";
+    case "ERR_CLOSED":
+      return "ERR_CLOSED";
+    default:
+      return "UNKNOWN";
+  }
+}
+
+function socketMessage(code: SocketNetworkCode, peer: string, detail: string): string {
+  switch (code) {
+    case "ECONNRESET":
+      return `the connection to ${peer} was reset by the other side`;
+    case "EPIPE":
+      return `could not write to ${peer}: the other side closed the connection`;
+    case "ECONNABORTED":
+      return `the connection to ${peer} was aborted on this machine`;
+    case "ETIMEDOUT":
+      return `the connection to ${peer} timed out: the other side stopped answering`;
+    case "ERR_CLOSED":
+      return `the connection to ${peer} is closed`;
+    case "UNKNOWN":
+      return `the connection to ${peer} failed: ${detail}`;
+  }
+}
+
+export class Socket extends Duplex<Buffer, Buffer, SocketError> {
   private conn?: object;
   private readonly host: string;
   private readonly port: int;
@@ -201,6 +249,7 @@ export class Socket extends Duplex<Buffer> {
   private peerPort: int;
   private bytesIn: double;
   private bytesOut: double;
+  private secured: boolean;
 
   public constructor(options: SocketOptions) {
     super({ allowHalfOpen: false });
@@ -216,6 +265,7 @@ export class Socket extends Duplex<Buffer> {
     this.peerPort = options.port;
     this.bytesIn = 0;
     this.bytesOut = 0;
+    this.secured = false;
   }
 
   public static accepted(conn: object): Socket {
@@ -232,7 +282,7 @@ export class Socket extends Duplex<Buffer> {
   public async connect(): Promise<Result<void, ConnectError>> {
     if (this.conn != undefined) {
       return err({
-        kind: "REQUEST",
+        kind: "CONNECT_ERROR_REQUEST",
         code: "ERR_ALREADY_CONNECTED",
         message: `the socket to ${this.host}:${this.port} is connected already`,
         host: this.host,
@@ -241,7 +291,7 @@ export class Socket extends Duplex<Buffer> {
     }
     if (this.host == "") {
       return err({
-        kind: "REQUEST",
+        kind: "CONNECT_ERROR_REQUEST",
         code: "ERR_INVALID_HOST",
         message: "the host to connect to is empty",
         host: this.host,
@@ -256,7 +306,7 @@ export class Socket extends Duplex<Buffer> {
         const timeout = this.timeout ?? 0;
 
         return err({
-          kind: "TIMEOUT",
+          kind: "CONNECT_ERROR_TIMEOUT",
           code: "TIMEOUT_ERR",
           message: `could not connect to ${this.host}:${this.port} within ${timeout} ms`,
           timeout: timeout,
@@ -266,10 +316,9 @@ export class Socket extends Duplex<Buffer> {
       const message = connectMessage(code, this.host, this.port, e.message);
 
       return err({
-        kind: "NETWORK",
+        kind: "CONNECT_ERROR_NETWORK",
         code: code,
         message: message,
-        errno: e.errno,
         syscall: e.syscall,
         host: this.host,
         port: this.port,
@@ -286,12 +335,13 @@ export class Socket extends Duplex<Buffer> {
         netClose(conn);
 
         return err({
-          kind: "TLS",
+          kind: "CONNECT_ERROR_TLS",
           code: securedResult.error.code,
           message: `the TLS handshake with ${servername} failed: ${securedResult.error.message}`,
           host: servername,
         });
       }
+      this.secured = true;
     }
     this.conn = conn;
 
@@ -303,7 +353,7 @@ export class Socket extends Duplex<Buffer> {
     const name = servername ?? this.host;
     if (conn == undefined) {
       return err({
-        kind: "REQUEST",
+        kind: "CONNECT_ERROR_REQUEST",
         code: "ERR_INVALID_HOST",
         message: `the socket to ${this.host}:${this.port} is not connected, so TLS cannot start`,
         host: this.host,
@@ -313,12 +363,13 @@ export class Socket extends Duplex<Buffer> {
     const securedResult = await tlsConnect(conn, name, undefined);
     if (securedResult.isErr()) {
       return err({
-        kind: "TLS",
+        kind: "CONNECT_ERROR_TLS",
         code: securedResult.error.code,
         message: `the TLS handshake with ${name} failed: ${securedResult.error.message}`,
         host: name,
       });
     }
+    this.secured = true;
 
     return ok(undefined);
   }
@@ -361,7 +412,7 @@ export class Socket extends Duplex<Buffer> {
     const chunkResult = await tcpRead(conn, undefined);
     this.reading = false;
     if (chunkResult.isErr()) {
-      const failure = streamFailure(chunkResult.error);
+      const failure = this.socketError(chunkResult.error);
       this.destroy(failure);
       return;
     }
@@ -375,28 +426,63 @@ export class Socket extends Duplex<Buffer> {
     this.pushChunk(bytes);
   }
 
-  protected onWrite(chunk: Buffer, encoding: string, callback: StreamCallback): void {
+  protected onWrite(chunk: Buffer, encoding: string, callback: HookCallback<SocketError>): void {
     void encoding;
     const conn = this.conn;
     if (conn == undefined) {
-      callback({ code: "ERR_SOCKET_CLOSED", message: "the socket is not connected" });
+      const peer = `${this.peerAddress}:${this.peerPort}`;
+
+      callback({
+        kind: "SOCKET_ERROR_NETWORK",
+        code: "ERR_CLOSED",
+        message: `could not write to ${peer}: the socket is not connected`,
+        syscall: "write",
+        host: this.peerAddress,
+        port: this.peerPort,
+      });
       return;
     }
     this.bytesOut += chunk.length.toDouble();
     void this.writeChunk(conn, chunk, callback);
   }
 
-  private async writeChunk(conn: object, chunk: Buffer, callback: StreamCallback): Promise<void> {
+  private async writeChunk(conn: object, chunk: Buffer,
+                           callback: HookCallback<SocketError>): Promise<void> {
     const wroteResult = await httpWrite(conn, chunk);
     if (wroteResult.isErr()) {
-      const failure = streamFailure(wroteResult.error);
+      const failure = this.socketError(wroteResult.error);
       callback(failure);
       return;
     }
     callback();
   }
 
-  protected onFinal(callback: StreamCallback): void {
+  private socketError(e: NativeError): SocketError {
+    const code = socketCode(e.code);
+    if (this.secured && code == "UNKNOWN") {
+      const tls: SocketErrorTls = {
+        kind: "SOCKET_ERROR_TLS",
+        code: e.code,
+        message: `the TLS connection to ${this.peerAddress}:${this.peerPort} failed: ${e.message}`,
+        host: this.peerAddress,
+      };
+
+      return tls;
+    }
+    const message = socketMessage(code, `${this.peerAddress}:${this.peerPort}`, e.message);
+    const network: SocketErrorNetwork = {
+      kind: "SOCKET_ERROR_NETWORK",
+      code: code,
+      message: message,
+      syscall: e.syscall,
+      host: this.peerAddress,
+      port: this.peerPort,
+    };
+
+    return network;
+  }
+
+  protected onFinal(callback: HookCallback<SocketError>): void {
     const conn = this.conn;
     if (conn != undefined) {
       netClose(conn);
@@ -404,7 +490,7 @@ export class Socket extends Duplex<Buffer> {
     callback();
   }
 
-  protected onDestroy(error: StreamError | undefined, callback: StreamCallback): void {
+  protected destroyHook(error: StreamFault | undefined, callback: FaultCallback): void {
     const conn = this.conn;
     if (conn != undefined) {
       this.conn = undefined;
@@ -422,8 +508,8 @@ export type ServerOptions = {
 
 export type SocketHandler = (socket: Socket) => Promise<void>;
 
-export type ListenError = {
-  kind: "SERVER";
+export type NetListenError = {
+  kind: "NET_LISTEN_ERROR";
   code:
     | "EADDRINUSE"
     | "EACCES"
@@ -435,7 +521,6 @@ export type ListenError = {
     | "EAFNOSUPPORT"
     | "UNKNOWN";
   message: string;
-  errno: int;
   syscall: string;
   address: string;
   port: int;
@@ -492,17 +577,16 @@ export class Server {
     this.handler = handler;
   }
 
-  public listen(): Result<Listening, ListenError> {
+  public listen(): Result<Listening, NetListenError> {
     const openedResult = netListen(this.hostname, this.port, 0, this.idleTimeout, 0, 0);
     if (openedResult.isErr()) {
       const e = openedResult.error;
       const code = listenCode(e.code);
 
       return err({
-        kind: "SERVER",
+        kind: "NET_LISTEN_ERROR",
         code: code,
         message: e.message,
-        errno: e.errno,
         syscall: e.syscall,
         address: this.hostname,
         port: this.port,

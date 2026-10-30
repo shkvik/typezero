@@ -186,21 +186,9 @@ export const generateKeyPairSync = resulting(crypto.generateKeyPairSync);
 export const sign = resulting(crypto.sign);
 export const verify = resulting(crypto.verify);
 export const diffieHellman = resulting(crypto.diffieHellman);
-function unknownDigest(f) {
-  return function (...args) {
-    try {
-      return f.apply(this, args);
-    } catch (e) {
-      if (e.code !== "ERR_CRYPTO_INVALID_DIGEST" && !e.message.startsWith("Digest method"))
-        throw e;
-      return err(cryptoError(e));
-    }
-  };
-}
-
 export const pbkdf2Sync = resulting(crypto.pbkdf2Sync);
 export const hkdfSync = resulting(crypto.hkdfSync);
 export const scryptSync = resulting(crypto.scryptSync);
 export const argon2Sync = resulting(crypto.argon2Sync);
 export const timingSafeEqual = (a, b) => a.byteLength === b.byteLength && crypto.timingSafeEqual(a, b);
-export const hash = unknownDigest(crypto.hash);
+export const hash = resulting(crypto.hash);

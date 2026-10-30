@@ -1,4 +1,5 @@
 #include "compiler/program/source_places/source_places.h"
+#include "compiler/program/module/module.h"
 #include "llvm/ADT/SmallString.h"
 #include "llvm/Support/FileSystem.h"
 #include "llvm/Support/MemoryBuffer.h"
@@ -97,6 +98,14 @@ void SourcePlaces::position(unsigned id, const char *at, unsigned &line,
   }
   line = row - 1;
   character = utf16Length(before);
+}
+
+void SourcePlaces::nameFiles(const std::vector<Module *> &modules) {
+  for (const Module *module : modules) {
+    for (const auto &[id, file] : module->bufferFiles) {
+      paths_[id] = {absolute(file), true};
+    }
+  }
 }
 
 std::string SourcePlaces::pathOf(unsigned id, bool &file) const {

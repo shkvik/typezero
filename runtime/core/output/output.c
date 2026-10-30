@@ -24,6 +24,7 @@
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
 #else
+#include <errno.h>
 #include <unistd.h>
 #endif
 
@@ -34,6 +35,7 @@ typedef struct {
   int fd;
 #endif
   int isConsole;
+  int gone;
 } Stream;
 
 Stream tz_out_stream;
@@ -71,6 +73,10 @@ static void stream_write(Stream *s, const char *data, size_t len) {
     while (len > 0) {
       DWORD chunk = len > 0x40000000 ? 0x40000000 : (DWORD)len, written = 0;
       if (!WriteFile(s->handle, data, chunk, &written, NULL) || written == 0) {
+        DWORD failure = GetLastError();
+        if (failure == ERROR_NO_DATA || failure == ERROR_BROKEN_PIPE) {
+          s->gone = 1;
+        }
         return;
       }
       data += written;
@@ -108,6 +114,9 @@ static void stream_write(Stream *s, const char *data, size_t len) {
   while (len > 0) {
     ssize_t written = write(s->fd, data, len);
     if (written <= 0) {
+      if (written < 0 && errno == EPIPE) {
+        s->gone = 1;
+      }
       return;
     }
     data += written;
@@ -316,6 +325,8 @@ int32_t tz_stderr_write(void *obj, uint64_t meta) {
 }
 
 int32_t tz_is_tty(int64_t fd) { return (fd == 2 ? &tz_err_stream : &tz_out_stream)->isConsole; }
+
+int32_t tz_std_gone(int32_t fd) { return (fd == 2 ? &tz_err_stream : &tz_out_stream)->gone; }
 
 static void print_u64(uint64_t value, int negative) {
   char buf[24];

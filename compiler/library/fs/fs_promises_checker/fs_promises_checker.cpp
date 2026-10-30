@@ -1,6 +1,7 @@
 #include "compiler/library/fs/fs_promises_checker/fs_promises_checker.h"
 #include "compiler/check/expr/expr_checker/expr_checker.h"
 #include "compiler/library/fs/fs_checker/fs_checker.h"
+#include "compiler/library/fs/fs_error_types/fs_error_types.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/Support/SaveAndRestore.h"
 
@@ -48,12 +49,12 @@ Expr *FsPromisesChecker::checkFsPromisesCall(CallExpr *call, llvm::StringRef fn,
       {Builtin::FsMkdtemp, Builtin::FspMkdtemp},   {Builtin::FsRmdir, Builtin::FspRmdir},
       {Builtin::FsUnlink, Builtin::FspUnlink},     {Builtin::FsRm, Builtin::FspRm},
       {Builtin::FsRename, Builtin::FspRename},     {Builtin::FsCopyFile, Builtin::FspCopyFile},
-      {Builtin::FsRealpath, Builtin::FspRealpath}};
+      {Builtin::FsReplace, Builtin::FspReplace},   {Builtin::FsRealpath, Builtin::FspRealpath}};
   for (const auto &[sync, async] : waiting) {
     if (call->builtin == sync) {
+      const Type *error = checker_.fsErrorTypes().ofCall(call);
       call->builtin = async;
-      call->type =
-          Type::promise(Type::result(call->type, checker_.fsChecker().systemError()));
+      call->type = Type::promise(Type::result(call->type, error));
       return call;
     }
   }

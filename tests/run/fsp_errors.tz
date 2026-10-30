@@ -1,36 +1,38 @@
-// same-as-node
-// What fails in node:fs/promises gives a Promise of the Err node:fs gives for
-// the same. The directory of the test shows as D.
+// What fails in node:fs/promises gives a Promise of the Err that node:fs gives
+// for the same call, with the same type (docs/io.md, section 5); replace of
+// "tz:fs" moves over a file that is there. The directory of the test shows
+// as D.
 import { readFile, writeFile, appendFile, mkdir, mkdtemp, readdir, stat, lstat, rm, rmdir,
-         rename, copyFile, unlink, access, chmod, truncate, realpath } from "node:fs/promises"
+         rename, copyFile, unlink, access, chmod, truncate, realpath, ReadFileError } from "node:fs/promises"
+import { replace } from "tz:fs"
 import { join } from "node:path"
 import { tmpdir } from "node:os"
 
 const dir = must(await mkdtemp(join(tmpdir(), "tz-fsp-errors-")))
 const file = join(dir, "file.txt")
+const other = join(dir, "other.txt")
 const sub = join(dir, "sub")
 const missing = join(dir, "missing")
 must(await writeFile(file, "text"))
+must(await writeFile(other, "other"))
 must(await mkdir(sub))
 must(await writeFile(join(sub, "inside.txt"), "inside"))
+const zero = "a" + String.fromCharCode(0) + "b"
 
-async function show<T>(what: string, p: Promise<Result<T, SystemError>>) {
+async function show<T, E extends { kind: string; code: string; message: string; path: string }>(
+  what: string, p: Promise<Result<T, E>>) {
   const r = await p
   if (r.isOk()) {
     console.log(what, "-> no error")
     return
   }
   const e = r.error
-  if (e.code == "ERR_INVALID_ARG_VALUE")
-    console.log(what, "->", e.code, "|", e.message)
-  else
-    console.log(what, "->", e.code, e.errno, e.syscall, (e.path ?? "-").replaceAll(dir, "D"),
-                (e.dest ?? "-").replaceAll(dir, "D"), "|", e.message.replaceAll(dir, "D"))
+  console.log(what, "->", e.kind, e.code, "|", e.message.replaceAll(dir, "D"))
 }
 
 await show("read missing", readFile(missing, "utf8"))
 await show("read directory", readFile(sub, "utf8"))
-await show("read zero char", readFile("a\u0000b", "utf8"))
+await show("read zero char", readFile(zero, "utf8"))
 await show("write missing dir", writeFile(join(missing, "x.txt"), "x"))
 await show("write exclusive", writeFile(file, "x", { flag: "wx" }))
 await show("append missing dir", appendFile(join(missing, "x.txt"), "x"))
@@ -44,8 +46,12 @@ await show("unlink directory", unlink(sub))
 await show("unlink missing", unlink(missing))
 await show("rm directory", rm(sub))
 await show("rm missing", rm(missing))
-await show("rename missing", rename(missing, join(dir, "other")))
-await show("copy missing", copyFile(missing, join(dir, "other")))
+await show("rename missing", rename(missing, join(dir, "x")))
+await show("rename onto file", rename(file, other))
+await show("copy missing", copyFile(missing, join(dir, "x")))
+await show("copy onto file", copyFile(file, other))
+await show("copy directory", copyFile(sub, join(dir, "x")))
+await show("replace onto folder", replace(file, sub))
 await show("readdir file", readdir(file))
 await show("readdir missing", readdir(missing))
 await show("stat missing", stat(missing))
@@ -58,6 +64,30 @@ await show("truncate missing", truncate(missing))
 // Not awaited at once: the Err waits in the Promise until it is.
 const later = readFile(missing, "utf8")
 await show("awaited later", later)
+
+function advice(e: ReadFileError): string {
+  switch (e.kind) {
+    case "READ_FILE_ERROR_NOT_FOUND":
+      return "use the defaults"
+    case "READ_FILE_ERROR_WRONG_TYPE":
+      return "ask for a file"
+    case "READ_FILE_ERROR_PERMISSION":
+      return "tell the user"
+    case "READ_FILE_ERROR_BUSY":
+      return "try again later"
+    case "READ_FILE_ERROR_PATH":
+      return "fix the input"
+    case "READ_FILE_ERROR_SYSTEM":
+      return "log it and stop"
+  }
+}
+const config = await readFile(join(dir, "config.json"), "utf8")
+if (config.isErr()) {
+  console.log(advice(config.error))
+}
+
+await show("replace onto file", replace(file, other))
+console.log(must(await readFile(other, "utf8")))
 
 must(await rm(dir, { recursive: true }))
 console.log("done")

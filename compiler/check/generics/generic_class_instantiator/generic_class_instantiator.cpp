@@ -135,7 +135,8 @@ ClassDecl *GenericClassInstantiator::instantiateClass(ClassDecl *generic,
   inst->id = ++checker_.classCount_;
   size_t shown = args.size();
   while (shown > 0 && shown - 1 < defaults.size() && defaults[shown - 1] &&
-         defaults[shown - 1]->isNever() && args[shown - 1]->isNever()) {
+         (defaults[shown - 1] == args[shown - 1] ||
+          (defaults[shown - 1]->isNever() && args[shown - 1]->isNever()))) {
     --shown;
   }
   std::string display =

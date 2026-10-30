@@ -9,16 +9,19 @@ import { Readable, Writable } from "node:stream"
 
 const log = (s: string) => console.log(s)
 
-const sink = new Writable({
-  objectMode: true,
-  write(chunk: string | undefined, encoding, callback) {
+class Sink extends Writable<string | undefined> {
+  constructor() {
+    super({ objectMode: true })
+  }
+  onWrite(chunk, encoding, callback) {
     log(`wrote ${chunk}`)
     callback()
-  },
-})
+  }
+}
+const sink = new Sink()
 sink.on("error", (e) => log(`sink error ${e.code}`))
 sink.write("a")
-sink.write(undefined, (e) => log(`write callback ${e?.code}`))
+sink.write(undefined, (e) => log(`write callback ${e?.message}`))
 await new Promise<void>((resolve) => setTimeout(resolve, 5))
 log(`sink destroyed ${sink.destroyed()}`)
 
@@ -28,7 +31,7 @@ function* withHole() {
   yield "y"
 }
 for await (const item of Readable.from(withHole())) {
-  if (item.isErr()) log(`from error ${item.error.code}`)
+  if (item.isErr()) log(`from error ${item.error.message}`)
   else log(`from ${item.value}`)
 }
 

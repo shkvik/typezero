@@ -36,6 +36,7 @@ const char *endOf(llvm::StringRef text) { return text.data() + text.size(); }
 
 KnowledgePass::KnowledgePass(const Program &program, llvm::StringRef entry, llvm::StringRef root)
     : program_(program), places_(program.sourceMgr) {
+  places_.nameFiles(program.file.modules);
   out_.entry = SourcePlaces::absolute(entry);
   out_.root = SourcePlaces::absolute(root);
 }

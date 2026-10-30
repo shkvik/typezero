@@ -9,6 +9,10 @@ export class Lines extends Readable {
   }
   _read() {
     const line = this.left.shift()
-    this.push(line === undefined ? null : line + ".")
+    if (line === undefined) {
+      this.push(null)
+      return
+    }
+    this.push(line + ".")
   }
 }

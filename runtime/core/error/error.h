@@ -22,4 +22,14 @@ typedef struct {
   TzOptStr path, dest;
 } TzSystemErrorParts;
 
+typedef struct {
+  const char *code;
+  TzStr message;
+  TzStr syscall;
+  TzStr path;
+  TzStr dest;
+  int32_t index;
+  uint32_t system;
+} TzFsErrorParts;
+
 #endif

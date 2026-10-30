@@ -1,5 +1,5 @@
 export type PacketError = {
-  kind: "PACKET";
+  kind: "PACKET_ERROR";
   code: "ERR_INVALID_HEADER" | "ERR_TRUNCATED" | "ERR_INVALID_CHECKSUM";
   message: string;
   offset: int;
@@ -86,7 +86,7 @@ function packetError(
   message: string,
   offset: int,
 ): PacketError {
-  return { kind: "PACKET", code: code, message: message, offset: offset };
+  return { kind: "PACKET_ERROR", code: code, message: message, offset: offset };
 }
 
 function truncated(what: string, need: int, have: int): PacketError {

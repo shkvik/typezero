@@ -37,6 +37,9 @@
 Bytes tz_in;
 
 int tz_in_eof;
+int tz_in_failed;
+
+int32_t tz_stdin_failed(void) { return tz_in_failed; }
 
 #ifdef _WIN32
 uint16_t tz_in_surrogate;

@@ -1,5 +1,5 @@
 // Waiting for I/O with the rest of the language, across files: node:fs/promises
-// with Buffers and encodings and its SystemError Errs; node:timers/promises;
+// with Buffers and encodings and its typed Errs; node:timers/promises;
 // a class with
 // [Symbol.asyncIterator]() and an AsyncIterable parameter; async generators
 // in a decorated method, in a generic class and of unknown values; and the

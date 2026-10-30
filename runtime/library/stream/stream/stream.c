@@ -10,7 +10,16 @@ void tz_lib_bad_chunk(const void *u, const char *type, uint32_t type_length) {
 }
 
 void tz_lib_std_write(int64_t fd, const TzBytes *b) {
-  tz_std_write_bytes(fd, b->data, (size_t)tz_bytes_byte_length(b));
+  tz_std_write_bytes((int32_t)fd, b->data, (size_t)tz_bytes_byte_length(b));
+}
+
+int64_t tz_lib_std_write_checked(int64_t fd, const TzBytes *b) {
+  tz_std_write_bytes((int32_t)fd, b->data, (size_t)tz_bytes_byte_length(b));
+  if (fd != 2) {
+    tz_out_flush(1);
+  }
+
+  return tz_std_gone((int32_t)fd);
 }
 
 int32_t tz_lib_is_bytes(const void *u, int32_t kind) {

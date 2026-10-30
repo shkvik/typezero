@@ -292,6 +292,30 @@ async function main() {
     if (!tokens.includes(wanted)) throw new Error(`no token '${wanted}' in ${JSON.stringify(tokens)}`)
   }
 
+  // A file of tz's own library is checked as the module it is: no errors of a
+  // program (declare, tz:intrinsics), and an error typed into it is shown in
+  // it, on its line.
+  const library = file("library")
+  const libraryFiles = []
+  for (const folder of fs.readdirSync(library, { withFileTypes: true })) {
+    if (!folder.isDirectory()) continue
+    for (const name of fs.readdirSync(path.join(library, folder.name))) {
+      if (name.endsWith(".tz")) libraryFiles.push(path.join(library, folder.name, name))
+    }
+  }
+  for (const libraryFile of libraryFiles) {
+    waited = server.errors(libraryFile, () => true)
+    server.open(libraryFile)
+    errors = await waited
+    if (errors.length != 0) throw new Error(`errors of ${libraryFile}: ${JSON.stringify(errors)}`)
+    if (!libraryFile.endsWith("fetch.tz")) server.close(libraryFile)
+  }
+  const fetchFile = path.join(library, "http", "fetch.tz")
+  waited = server.errors(fetchFile, some)
+  server.change(fetchFile, [{ range: range(2, 0, 2, 0), text: "const broken: int = \"text\"\n" }])
+  errors = await waited
+  expect("the error typed into fetch.tz", [errors.length, errors[0].range.start.line], [1, 2])
+
   const shutdown = await server.request("shutdown", null)
   expect("the answer to shutdown", shutdown.result, null)
   server.notify("exit")

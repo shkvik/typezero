@@ -144,8 +144,8 @@ void HttpChecker::checkHeadersInit(const Expr *init) {
   }
   if (auto *list = dyn_cast<ArrayLitExpr>(init)) {
     for (const ArrayLitExpr::Element &e : list->elements) {
-      auto *pair = e.spread || !e.expr ? nullptr
-                                       : dyn_cast<ArrayLitExpr>(UrlChecker::unconverted(e.expr));
+      auto *pair =
+          e.spread || !e.expr ? nullptr : dyn_cast<ArrayLitExpr>(UrlChecker::unconverted(e.expr));
       if (pair && pair->elements.size() == 2 && !pair->elements[0].spread &&
           !pair->elements[1].spread) {
         checkHeaderName(pair->elements[0].expr);
@@ -267,15 +267,11 @@ void HttpChecker::checkRequestNew(NewExpr *expr) {
   }
   const ObjectLitExpr::Property *body = property(init, "body");
   if (body && knownMethod && (method == "GET" || method == "HEAD") && hasBody(body->value)) {
-    checker_.diags_.error(body->value->loc(),
-                          "a " + method + " request has no body" +
-                              (property(init, "method") ? "" : " (a request without 'method' is a GET)") +
-                              "; give the method, e.g. 'method: \"POST\"'");
-  }
-  if (body && isLibraryClass(UrlChecker::unconverted(body->value)->type, "ReadableStream") &&
-      !property(init, "duplex")) {
-    checker_.diags_.error(body->value->loc(), "a request with a stream for its body needs "
-                                              "'duplex: \"half\"', as in node");
+    checker_.diags_.error(
+        body->value->loc(),
+        "a " + method + " request has no body" +
+            (property(init, "method") ? "" : " (a request without 'method' is a GET)") +
+            "; give the method, e.g. 'method: \"POST\"'");
   }
   if (const ObjectLitExpr::Property *headers = property(init, "headers")) {
     checkHeadersInit(headers->value);

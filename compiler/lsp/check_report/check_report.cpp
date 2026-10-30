@@ -25,8 +25,8 @@ llvm::json::Object CheckReport::range(const SourcePlace &place) {
   return llvm::json::Object{{"start", std::move(start)}, {"end", std::move(end)}};
 }
 
-llvm::json::Value CheckReport::build(const Errors &errors,
-                                     const std::vector<Module *> &modules) const {
+llvm::json::Value CheckReport::build(const Errors &errors, const std::vector<Module *> &modules) {
+  places_.nameFiles(modules);
   std::vector<Item> items;
   for (const Diagnostic &diagnostic : errors) {
     std::optional<SourcePlace> place =
@@ -73,8 +73,16 @@ llvm::json::Value CheckReport::build(const Errors &errors,
   }
   llvm::json::Array files;
   for (const Module *module : modules) {
-    if (!module->builtin && !module->path.empty()) {
+    if ((!module->builtin || !module->bufferFiles.empty()) && !module->path.empty()) {
       files.push_back(SourcePlaces::absolute(module->path));
+      for (const auto &[id, file] : module->bufferFiles) {
+        if (file != module->path) {
+          files.push_back(SourcePlaces::absolute(file));
+        }
+      }
+      if (module->declaration && !module->declaration->path.empty()) {
+        files.push_back(SourcePlaces::absolute(module->declaration->path));
+      }
     }
   }
 

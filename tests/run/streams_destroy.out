@@ -3,7 +3,7 @@ destroyed now true
 duplex write abc
 r error oops errored=oops
 r close closed=true destroyed=true
-late cb write after end
+late cb could not write: end() was already called on this stream
 w error write after end
 w close
 duplex data cba

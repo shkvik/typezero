@@ -3,7 +3,7 @@
 // looks up and which give a Result; the ciphers only it has (CCM, Camellia, 3DES...); the
 // lists of node.
 import {
-  createHash, createHmac, createCipheriv, createDecipheriv, getCiphers, getCurves, pbkdf2Sync,
+  createHash, createHmac, createCipheriv, createDecipheriv, getCiphers, getCurves,
 } from "node:crypto"
 
 const names = ["sha256", "sha3-512", "md5", "sm3"]
@@ -23,17 +23,8 @@ const ccm = must(createCipheriv("aes-128-ccm", Buffer.alloc(16, 1), Buffer.alloc
 ccm.setAAD(Buffer.from("aad"), { plaintextLength: 5 })
 const ccmOut = ccm.update("hello", "utf8", "hex") + must(ccm.final("hex"))
 console.log(ccmOut, must(ccm.getAuthTag()).toString("hex"))
-const unknown: string = ["foo"][0] ?? ""
-show(createHash(unknown))
-show(createHmac(unknown, "k"))
-show(createCipheriv(unknown, Buffer.alloc(16), Buffer.alloc(16)))
-show(pbkdf2Sync("pw", "salt", 1, 16, unknown))
 console.log(getCiphers().length, getCiphers().includes("aes-256-gcm"), getCurves().includes("prime256v1"))
 console.log(getCurves().join(","))
-
-function show<T>(r: Result<T, CryptoError>) {
-  console.log(r.isErr() ? `${r.error.code} | ${r.error.message}` : "no error")
-}
 
 function must<T, E>(r: Result<T, E>): T {
   if (r.isErr()) {

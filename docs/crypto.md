@@ -96,16 +96,99 @@ OpenSSL быстрее Go. В node те же функции идут через 
 
 - Имена алгоритмов, `getHashes()`, `getCiphers()`, коды ошибок — как в node: библиотека та же.
 - Имя алгоритма в коде, которого нет (`createHash("sha265")`, `createHash("md4")`), — ошибка
-  компиляции. В node — ошибка при работе. Имя из переменной — `createHash(name)` отдаёт
-  `Result`: `Err`, если такого алгоритма нет.
-- **Ошибки — `Result`, а не исключения** ([errors.md](errors.md)): неверный ключ, плохой PEM,
-  не совпал тег AES-GCM при расшифровке, неверная подпись в разборе — `Err` с меткой `code`, как
-  коды ошибок node. `crypto.subtle` отдаёт `Promise<Result<...>>` вместо отказа `Promise`.
-  Проверка аргументов, которая выражается типом (имена алгоритмов, длина ключа AES
-  `128 | 192 | 256`), — при сборке ([errors.md](errors.md), раздел 7).
+  компиляции. В node — ошибка при работе. Имя из переменной — `Err` с причиной
+  `UNKNOWN_ALGORITHM`.
+- **Ошибки — `Result`, а не исключения** ([errors.md](errors.md)); `crypto.subtle` отдаёт
+  `Promise<Result<...>>` вместо отказа `Promise`. Как устроены — ниже, «Ошибки».
+- Что видно по коду, — ошибка сборки, а не `Err` (решено 30 октября, К4): длина ключа и IV
+  у `createCipheriv` с именем в коде (`aes-256-gcm needs a 32-byte key, but this one has 5
+  bytes`), `iterations` и `keylen` у `pbkdf2Sync` / `hkdfSync` меньше 1, `N` у `scryptSync` —
+  не степень двойки, `modulusLength` RSA меньше 512, длина AES-ключа у `generateKeySync`.
+  `Result` при этом остаётся: OpenSSL может отказать и по другим причинам.
 - Функции с колбэком (`scrypt(…, cb)`, `pbkdf2(…, cb)`, `randomBytes(n, cb)`) — ошибка с
   подсказкой: `…Sync` или `crypto.subtle`, как с `node:fs` ([io.md](io.md)).
 - md5 и sha1 — есть, как в node: нужны для старых форматов и проверки файлов.
+
+### Ошибки
+
+Решено 30 октября (`tmp/design/crypto-errors.tz`, К1–К8), по правилам `node:fs` и
+`node:child_process`: у каждой функции свой тип ошибки, общего `CryptoError` нет.
+
+```ts
+import { createDecipheriv, DecipherFinalError } from "node:crypto"
+
+const decipher = createDecipheriv("aes-256-gcm", key, iv)
+if (decipher.isErr()) return
+decipher.value.setAuthTag(tag)
+const head = decipher.value.update(sealed)
+const tail = decipher.value.final()
+if (tail.isErr()) {
+  switch (tail.error.kind) {
+    case "DECIPHER_FINAL_ERROR_AUTHENTICATION_FAILED": console.log("the data was changed"); break
+    case "DECIPHER_FINAL_ERROR_WRONG_ORDER": console.log(tail.error.message); break
+    default: console.log(tail.error.code, tail.error.message)
+  }
+}
+```
+
+- **Что отдаёт `Result`** — всё, где OpenSSL может отказать: `createHash`, `hash`,
+  `hash.copy({ outputLength })`, `createHmac`, `pbkdf2Sync`, `hkdfSync`, `scryptSync`,
+  `argon2Sync`, `createCipheriv`, `createDecipheriv`, `cipher.final()`, `decipher.final()`,
+  `cipher.getAuthTag()`, `createPrivateKey`, `createPublicKey`, `generateKeyPairSync`,
+  `key.export()`, `sign`, `verify`, `createSign`, `createVerify`, `signer.sign()`,
+  `verifier.verify()`, `createECDH`, `ecdh.getPublicKey()`, `ecdh.getPrivateKey()`,
+  `ecdh.setPrivateKey()`, `ecdh.computeSecret()`, `diffieHellman`, `X509Certificate.parse`,
+  `cert.checkPrivateKey()`, `cert.verify()`. С именем алгоритма в коде — тоже (К4а): имя
+  проверено при сборке, а `Result` — на всё остальное. Без `Result`: `randomBytes`, `randomInt`,
+  `randomUUID`, `getRandomValues`, `timingSafeEqual`, `createSecretKey`, `generateKeySync`,
+  `update`, `setAAD`, `setAuthTag` — что пошло не так в `update`, `setAAD` и `setAuthTag`,
+  отдаёт следующий `final()`.
+- **Типы** — по функции: `CreateHashError`, `HashError`, `HashCopyError`, `CreateHmacError`,
+  `Pbkdf2Error`, `HkdfError`, `ScryptError`, `Argon2Error`, `CreateCipherError`,
+  `CreateDecipherError`, `CipherFinalError`, `DecipherFinalError`, `GetAuthTagError`,
+  `CreatePrivateKeyError`, `CreatePublicKeyError`, `GenerateKeyPairError`, `KeyExportError`,
+  `SignError`, `VerifyError`, `CreateSignError`, `CreateVerifyError`, `SignerSignError`,
+  `VerifierVerifyError`, `CreateEcdhError`, `EcdhGetPublicKeyError`, `EcdhGetPrivateKeyError`,
+  `EcdhSetPrivateKeyError`, `EcdhComputeSecretError`, `DiffieHellmanError`,
+  `ParseCertificateError`, `CertificateCheckPrivateKeyError`, `CertificateVerifyError`;
+  импорт — `import { CreateCipherError } from "node:crypto"`.
+- **`kind`** — имя типа и причина (`CREATE_CIPHER_ERROR_WRONG_KEY_LENGTH`). Причины:
+  ошибки программы — `UNKNOWN_ALGORITHM`, `UNSUPPORTED_ALGORITHM` (md4, des: в tz их нет),
+  `WRONG_KEY_LENGTH`, `WRONG_IV_LENGTH`, `WRONG_TAG_LENGTH`, `WRONG_KEY_TYPE`,
+  `INCOMPATIBLE_KEYS`, `WRONG_PARAMETERS`, `INCOMPATIBLE_OPTIONS`, `WRONG_ORDER` (второй
+  `final()`, `getAuthTag()` до `final()`, ECDH без ключей); данные — `AUTHENTICATION_FAILED`
+  (GCM / CCM / ChaCha: тег не сошёлся), `BAD_DECRYPT` (CBC: ключ не тот или данные испорчены),
+  `WRONG_DATA_LENGTH`, `NOT_A_KEY`, `PASSPHRASE_MISSING`, `WRONG_PASSPHRASE`, `INVALID_JWK`,
+  `NOT_A_CERTIFICATE`, `INVALID_PUBLIC_KEY`, `CANNOT_EXPORT`; сломалось ниже — `SYSTEM`
+  (`ERR_CRYPTO_OPERATION_FAILED` или `UNKNOWN`: код, которого нет в списке).
+- **`code`** — код node; у ошибок OpenSSL — его причина (`ERR_OSSL_PEM_NO_START_LINE`,
+  `ERR_OSSL_ASN1_TOO_LONG`, `ERR_OSSL_BAD_DECRYPT`…, К3). Ключ, который OpenSSL не прочитал,
+  tz разбирает сам (рамка PEM, метка, строение DER), чтобы сказать почему: «нет
+  `-----BEGIN`», «битый base64», «это открытый ключ», «зашифрован, а пароля нет»;
+  `ERR_OSSL_UNSUPPORTED` — только когда строение верное, а такой ключ OpenSSL не знает.
+- **Поля — у варианта только свои:** `algorithm` (`"aes-256-gcm"`), `length` и `expected`
+  (ключ 5 из 32 байт), `got` и `expected` (`"public"` вместо `"private"`), `parameter` и
+  `value` (`"iterations"`, `0`), `field` (поле JWK), `format` (`"pem"` / `"der"` / `"jwk"`),
+  `openssl` (что сказал OpenSSL, как есть: `PEM routines::no start line`).
+- **Тексты** — что не вышло и почему: `aes-256-gcm needs a 32-byte key, but the key has 5
+  bytes`, `could not decrypt with aes-256-gcm: the data was changed or the key is wrong (the
+  authentication tag does not match)`, `final() was already called on this decipher; make a new
+  one with createDecipheriv`, `could not read the private key: the text is not PEM (no
+  "-----BEGIN" line)`, `scrypt: N must be a power of two greater than 1, not 3`.
+- **`crypto.subtle`** (К8) — по тому же правилу: свой тип у каждого метода
+  (`SubtleDigestError`, `SubtleGenerateKeyError`, `SubtleImportKeyError`, `SubtleExportKeyError`,
+  `SubtleSignError`, `SubtleVerifyError`, `SubtleEncryptError`, `SubtleDecryptError`,
+  `SubtleDeriveBitsError`, `SubtleDeriveKeyError`, `SubtleWrapKeyError`,
+  `SubtleUnwrapKeyError`; без импорта, как сам `crypto.subtle`), те же типы у методов
+  `CryptoKey` (`key.sign` — `SubtleSignError`). Причины: `UNSUPPORTED_ALGORITHM`,
+  `WRONG_PARAMETERS`, `WRONG_KEY`, `WRONG_USAGE`, `NOT_A_KEY`, `DECRYPTION_FAILED` (`decrypt`,
+  `unwrapKey`), `SYSTEM`; у метода — только те, что у него бывают; что пришло сверх списка, —
+  `SYSTEM`. `code` и тексты — как в node (имя `DOMException` в нашем виде), их сверяет тест.
+- Отличия от node: свои тексты; `X509Certificate.parse` байтов DER говорит про DER (раньше tz
+  отдавал ошибку PEM); зашифрованный ключ без пароля — `ERR_MISSING_PASSPHRASE`, как в node
+  (было `ERR_OSSL_CRYPTO_PASSED_INVALID_ARGUMENT`); `pbkdf2Sync` и `hkdfSync` с `keylen: 0` —
+  `WRONG_PARAMETERS`; `decipher.final()` GCM без `setAuthTag()` — `WRONG_ORDER` (в node
+  `ERR_CRYPTO_AUTH_FAILED`).
 
 ## 6. Обновления и лицензия
 
@@ -135,5 +218,10 @@ OpenSSL быстрее Go. В node те же функции идут через 
    node у того, что зависит от данных и у имён из переменных; `X509Certificate.parse`; хеш не
    закрывается после `digest()`; ошибки порядка у шифра отдаёт `final()`. Числа вне диапазона —
    с шагом 4 errors.md (доказательства). `crypto.subtle` отдаёт `Promise<Result<T, SubtleError>>`
+   (с 30 октября — свой тип у каждого метода, раздел 5)
    (`code` — имя `DOMException` node; с 29 октября — наш вид: `kind: "SUBTLE"`,
    `ERR_INVALID_DATA`, `ERR_NOT_SUPPORTED`, `ERR_OPERATION_FAILED`… — README, «Web Crypto»); внутри `webcrypto.tz` исключений нет с шагом 5 (27 октября).
+7. **Ошибки по функциям** (сделано 30 октября, 4.6 шаг 3, `tmp/design/crypto-errors.tz` К1–К8):
+   32 типа `node:crypto` и 12 типов `crypto.subtle` вместо `CryptoError` и `SubtleError`, причины
+   в `kind`, поля по месту, коды OpenSSL, разбор нечитаемых ключей самим tz, тексты К6, ошибки
+   сборки К4, `Result` и у имён в коде (К4а), `WRONG_ORDER` (К5). Раздел 5, «Ошибки».

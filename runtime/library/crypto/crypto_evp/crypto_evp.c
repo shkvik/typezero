@@ -9,6 +9,7 @@
 #include <openssl/err.h>
 #include <openssl/evp.h>
 #include <openssl/objects.h>
+#include <openssl/proverr.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -88,6 +89,29 @@ static const char *library_of(unsigned long error) {
   }
 }
 
+static const char *plain_text(const char *text) {
+  if (strncmp(text, "error:", 6) != 0) {
+    return text;
+  }
+  const char *colon = strchr(text + 6, ':');
+
+  return colon ? colon + 1 : text;
+}
+
+static const char *reason_phrase(const char *reason) {
+  if (strcmp(reason, "no start line") == 0) {
+    return "the text is not PEM (no \"-----BEGIN\" line)";
+  }
+  if (strcmp(reason, "bad end line") == 0) {
+    return "the PEM has no matching \"-----END\" line";
+  }
+  if (strcmp(reason, "bad base64 decode") == 0) {
+    return "the PEM body is not valid base64";
+  }
+
+  return reason;
+}
+
 void tz_openssl_fail(const char *code, const char *otherwise) {
   unsigned long error = ERR_get_error();
   ERR_clear_error();
@@ -97,21 +121,29 @@ void tz_openssl_fail(const char *code, const char *otherwise) {
   }
   char text[256];
   ERR_error_string_n(error, text, sizeof text);
+  tz_crypto_note_openssl(plain_text(text));
   const char *reason = ERR_reason_error_string(error);
   char name[128];
   snprintf(name, sizeof name, "ERR_OSSL_%s%s", library_of(error), reason ? reason : "UNKNOWN");
   for (char *at = name; *at; ++at) {
     *at = *at == ' ' ? '_' : (*at >= 'a' && *at <= 'z') ? (char)(*at - 'a' + 'A') : *at;
   }
-  tz_crypto_fail(name, "%s", text);
+  const char *said = reason ? reason : plain_text(text);
+  char damaged[160];
+  if (ERR_GET_LIB(error) == ERR_LIB_ASN1) {
+    snprintf(damaged, sizeof damaged, "the data is damaged (%s)", said);
+    said = damaged;
+  }
+  tz_crypto_fail(name, "%s: %s", otherwise, reason_phrase(said));
 }
 
-static int unsupported(const char *name) {
+static int unsupported(const char *name, const char *kind) {
+  tz_crypto_note_algorithm(name);
   if (OBJ_sn2nid(name) == NID_undef && OBJ_ln2nid(name) == NID_undef) {
     return 0;
   }
-  tz_crypto_fail("ERR_OSSL_EVP_UNSUPPORTED",
-                 "error:0308010C:digital envelope routines::unsupported");
+  tz_crypto_fail("ERR_OSSL_EVP_UNSUPPORTED", "the %s %s is outdated and tz does not include it",
+                 kind, name);
 
   return 1;
 }
@@ -188,14 +220,10 @@ const TzMd *tz_openssl_md(void *obj, uint64_t meta, int32_t caller) {
   EVP_MD *md = EVP_MD_fetch(NULL, legacy ? EVP_MD_get0_name(legacy) : name, NULL);
   ERR_clear_error();
   if (!md) {
-    if (!unsupported(name)) {
-      if (caller == 0) {
-        tz_crypto_fail("ERR_CRYPTO_INVALID_DIGEST", "Digest method not supported");
-      } else if (caller == 1) {
-        tz_crypto_fail("ERR_CRYPTO_INVALID_DIGEST", "Digest method %s is not supported", name);
-      } else {
-        tz_crypto_fail("ERR_CRYPTO_INVALID_DIGEST", "Invalid digest: %s", name);
-      }
+    (void)caller;
+    if (!unsupported(name, "hash")) {
+      tz_crypto_fail("ERR_CRYPTO_INVALID_DIGEST", "there is no hash \"%s\"; getHashes() lists them",
+                     name);
     }
     return NULL;
   }
@@ -255,7 +283,10 @@ static int evp_init(TzCipher *c, const uint8_t *key, size_t key_length, const ui
     ok = EVP_CipherInit_ex(e->ctx, NULL, NULL, key, iv_length ? iv : NULL, !c->decrypt);
   }
   if (!ok) {
-    tz_openssl_fail("ERR_CRYPTO_INVALID_IV", "Invalid initialization vector");
+    char text[96];
+    snprintf(text, sizeof text, "could not start %s", c->alg->name);
+    tz_crypto_note_algorithm(c->alg->name);
+    tz_openssl_fail("ERR_CRYPTO_OPERATION_FAILED", text);
     EVP_CIPHER_CTX_free(e->ctx);
     e->ctx = NULL;
   }
@@ -285,8 +316,8 @@ static int ccm_length(TzCipher *c, EvpCipher *e, double length) {
 static int evp_aad(TzCipher *c, const uint8_t *aad, size_t length, double plaintext_length) {
   EvpCipher *e = (EvpCipher *)c->ctx;
   if (e->ccm && plaintext_length < 0) {
-    tz_crypto_fail("ERR_CRYPTO_INVALID_STATE",
-                   "options.plaintextLength required for CCM mode with AAD");
+    tz_crypto_fail("ERR_CRYPTO_INVALID_STATE", "%s needs plaintextLength in the setAAD() options",
+                   c->alg->name);
     return 0;
   }
   int out;
@@ -295,12 +326,19 @@ static int evp_aad(TzCipher *c, const uint8_t *aad, size_t length, double plaint
          EVP_CipherUpdate(e->ctx, NULL, &out, aad, (int)length) > 0;
 }
 
+static void update_failed(const TzCipher *c) {
+  char text[96];
+  snprintf(text, sizeof text, "could not %s with %s", c->decrypt ? "decrypt" : "encrypt",
+           c->alg->name);
+  tz_openssl_fail("ERR_CRYPTO_OPERATION_FAILED", text);
+}
+
 static int64_t evp_update(TzCipher *c, const uint8_t *in, size_t length, uint8_t *out) {
   EvpCipher *e = (EvpCipher *)c->ctx;
   EVP_CIPHER_CTX_set_padding(e->ctx, c->padding);
   int written = 0;
   if (!ccm_length(c, e, (double)length) || !give_tag(c, e)) {
-    tz_openssl_fail("ERR_CRYPTO_INVALID_STATE", "Trying to add data in unsupported state");
+    update_failed(c);
     return -1;
   }
   if (!EVP_CipherUpdate(e->ctx, out, &written, in, (int)length)) {
@@ -309,7 +347,7 @@ static int64_t evp_update(TzCipher *c, const uint8_t *in, size_t length, uint8_t
       e->ccm_failed = 1;
       return 0;
     }
-    tz_openssl_fail("ERR_CRYPTO_INVALID_STATE", "Trying to add data in unsupported state");
+    update_failed(c);
     return -1;
   }
 
@@ -324,16 +362,24 @@ static int64_t evp_final(TzCipher *c, uint8_t *out) {
     if (!e->ccm_failed) {
       return 0;
     }
-    tz_crypto_fail("ERR_CRYPTO_AUTH_FAILED", "Unsupported state or unable to authenticate data");
+    tz_crypto_auth_failed(c);
     return -1;
   }
   int written = 0;
   if (!give_tag(c, e) || !EVP_CipherFinal_ex(e->ctx, out, &written)) {
-    if (aead) {
+    int reason = ERR_GET_REASON(ERR_peek_error());
+    if (aead && c->decrypt) {
       ERR_clear_error();
-      tz_crypto_fail("ERR_CRYPTO_AUTH_FAILED", "Unsupported state or unable to authenticate data");
+      tz_crypto_auth_failed(c);
+    } else if (reason == PROV_R_BAD_DECRYPT) {
+      ERR_clear_error();
+      tz_crypto_bad_decrypt(c);
+    } else if (reason == PROV_R_WRONG_FINAL_BLOCK_LENGTH) {
+      ERR_clear_error();
+      tz_crypto_block_length_failed(c);
     } else {
-      tz_openssl_fail("ERR_CRYPTO_INVALID_STATE", "Unsupported state");
+      tz_crypto_note_algorithm(c->alg->name);
+      update_failed(c);
     }
     return -1;
   }
@@ -363,8 +409,9 @@ const TzCipherAlg *tz_openssl_cipher(void *obj, uint64_t meta) {
   EVP_CIPHER *cipher = EVP_CIPHER_fetch(NULL, legacy ? EVP_CIPHER_get0_name(legacy) : name, NULL);
   ERR_clear_error();
   if (!cipher) {
-    if (!unsupported(name)) {
-      tz_crypto_fail("ERR_CRYPTO_UNKNOWN_CIPHER", "Unknown cipher");
+    if (!unsupported(name, "cipher")) {
+      tz_crypto_fail("ERR_CRYPTO_UNKNOWN_CIPHER",
+                     "there is no cipher \"%s\"; getCiphers() lists them", name);
     }
     return NULL;
   }

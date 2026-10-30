@@ -2,6 +2,7 @@
 #include "compiler/check/async/timer_checker/timer_checker.h"
 #include "compiler/check/expr/expr_checker/expr_checker.h"
 #include "compiler/check/scopes/scopes.h"
+#include "compiler/library/builtin_modules/builtin_module_types/builtin_module_types.h"
 #include "compiler/library/builtin_modules/node_check_helpers/node_check_helpers.h"
 #include "compiler/library/feature_registry/feature_registry.h"
 #include "llvm/ADT/STLExtras.h"
@@ -18,6 +19,9 @@ namespace {
 std::optional<NodeModule> moduleOf(llvm::StringRef path) {
   if (path == "tz:io") {
     return NodeModule::TzIo;
+  }
+  if (path == "tz:fs") {
+    return NodeModule::TzFs;
   }
   llvm::StringRef bare = path;
   bare.consume_front("node:");
@@ -70,7 +74,7 @@ std::string missingModule(llvm::StringRef path) {
     if (path == "tz:string") {
       return "built-in module " + quoted + " is not supported yet";
     }
-    return "there is no built-in module " + quoted + "; tz has 'tz:io' and 'tz:http'";
+    return "there is no built-in module " + quoted + "; tz has 'tz:io', 'tz:fs' and 'tz:http'";
   }
   llvm::StringRef bare = path;
   bare.consume_front("node:");
@@ -123,6 +127,8 @@ llvm::StringRef typicalName(NodeModule module) {
     return "Buffer";
   case NodeModule::TzIo:
     return "readLine";
+  case NodeModule::TzFs:
+    return "replaceSync";
   case NodeModule::ChildProcess:
     return "execFileSync";
   case NodeModule::Crypto:
@@ -157,6 +163,9 @@ BuiltinModuleChecker::BuiltinModuleChecker(Checker &checker) : checker_(checker)
 
 std::string BuiltinModuleChecker::exportProblem(NodeModule module, llvm::StringRef name,
                                                 llvm::StringRef path) const {
+  if (checker_.builtinModuleTypes().exported(module, name)) {
+    return "";
+  }
   for (const Feature *feature : checker_.features_->all()) {
     if (std::optional<std::string> problem = feature->exportProblem(module, name, path)) {
       return *problem;

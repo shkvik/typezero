@@ -195,7 +195,7 @@ type Json = null | boolean | number | string | Json[] | { [key: string]: Json }
   то, что в tz есть без импорта: числа из [numbers.md](numbers.md) (`int`, `int8` … `uint64`,
   `double`, `Bit`, методы `toInt32()` и другие), `decimal` с методами, `Json`,
   `JSON.parse<T>`, `fromJson`, `embedJson`, `embedText`, `embedBytes`, `Result` (свой, без
-  neverthrow), типы ошибок (`SystemError`, `FetchError`, `DateError`…), `HttpStatus` и
+  neverthrow), типы ошибок (`FetchError`, `DateError`, `QuestionError`…), `HttpStatus` и
   `isHttpStatus`, `Constructor`, `ConstructorArgs`, `MethodDescriptor`,
   `Reflect.defineMetadata` и `getMetadata`, `Timeout`, типы Web Crypto, — и модуль `"tz:io"`;
   `"tz:http"` — из его объявления `http.d.tz` (раздел 7). С `Result` объявлены `node:fs`, `node:fs/promises`, `node:child_process`,

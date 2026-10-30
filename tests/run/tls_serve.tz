@@ -24,7 +24,7 @@ const server = new Server({ port: 0, hostname: "127.0.0.1", transport: { secure:
     case "/echo":
       return Response.json({ got: (await req.json()).unwrapOr(null), method: req.method })
     case "/stream":
-      return new Response(
+      return Response.stream(
         new ReadableStream({
           start: (c) => {
             c.enqueue(enc.encode("one "))

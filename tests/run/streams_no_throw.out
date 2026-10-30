@@ -1,9 +1,9 @@
 wrote a
-write callback ERR_STREAM_NULL_VALUES
+write callback May not write null values to stream
 sink error ERR_STREAM_NULL_VALUES
 sink destroyed true
 from x
-from error ERR_STREAM_NULL_VALUES
+from error May not write null values to stream
 file error ERR_OUT_OF_RANGE
 heard E_ONE
 true

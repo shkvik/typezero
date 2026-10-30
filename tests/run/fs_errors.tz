@@ -1,44 +1,50 @@
-// same-as-node
-// What fails in node:fs gives an Err of a SystemError with the code, number,
-// call and paths Node gives, and Node's text; the directory of the test
-// shows as D. A path with a zero character is an Err too, with Node's code
-// and text (Node throws a TypeError).
+// What fails in node:fs gives an Err of the function's own error type
+// (docs/io.md, section 5): kind names the function and the reason, code is
+// the system's, the text says what failed, where and why, and path is whole.
+// renameSync and copyFileSync never replace a file that is there;
+// replaceSync of "tz:fs" does. The directory of the test shows as D.
 import { readFileSync, writeFileSync, appendFileSync, mkdirSync, mkdtempSync, readdirSync,
          statSync, lstatSync, rmSync, renameSync, copyFileSync, unlinkSync, rmdirSync,
-         realpathSync, accessSync, chmodSync, truncateSync, existsSync, constants } from "node:fs"
+         realpathSync, accessSync, chmodSync, truncateSync, existsSync } from "node:fs"
+import { replaceSync } from "tz:fs"
 import { join } from "node:path"
 import { tmpdir } from "node:os"
 
 const dir = must(mkdtempSync(join(tmpdir(), "tz-errors-")))
 const file = join(dir, "file.txt")
+const other = join(dir, "other.txt")
 const sub = join(dir, "sub")
 const missing = join(dir, "missing")
 must(writeFileSync(file, "text"))
+must(writeFileSync(other, "other"))
 must(mkdirSync(sub))
 must(writeFileSync(join(sub, "inside.txt"), "inside"))
+const zero = "a" + String.fromCharCode(0) + "b"
 
-function show<T>(what: string, r: Result<T, SystemError>) {
+function show<T, E extends { kind: string; code: string; message: string; syscall: string; path: string }>(
+  what: string, r: Result<T, E>) {
   if (r.isOk()) {
     console.log(what, "-> no error")
     return
   }
   const e = r.error
-  if (e.code == "ERR_INVALID_ARG_VALUE")
-    console.log(what, "->", e.code, "|", e.message)
-  else
-    console.log(what, "->", e.code, e.errno, e.syscall, (e.path ?? "-").replaceAll(dir, "D"),
-                (e.dest ?? "-").replaceAll(dir, "D"), "|", e.message.replaceAll(dir, "D"))
+  console.log(what, "->", e.kind, e.code, e.syscall,
+              e.path.replaceAll(dir, "D").replaceAll(String.fromCharCode(0), "\\0"))
+  console.log("   ", e.message.replaceAll(dir, "D"))
 }
 
 show("read missing", readFileSync(missing, "utf8"))
 show("read directory", readFileSync(sub, "utf8"))
 show("read through file", readFileSync(join(file, "x"), "utf8"))
 show("read empty path", readFileSync("", "utf8"))
-show("read zero char", readFileSync("a\u0000b", "utf8"))
+show("read zero char", readFileSync(zero, "utf8"))
+show("read bad name", readFileSync(join(dir, "a?b.txt"), "utf8"))
+show("read bad number", readFileSync(99, "utf8"))
 show("write missing dir", writeFileSync(join(missing, "x.txt"), "x"))
 show("write exclusive", writeFileSync(file, "x", { flag: "wx" }))
 show("write directory", writeFileSync(sub, "x"))
 show("append missing dir", appendFileSync(join(missing, "x.txt"), "x"))
+show("append exclusive", appendFileSync(file, "x", { flag: "ax" }))
 show("mkdir existing", mkdirSync(sub))
 show("mkdir existing file", mkdirSync(file, { recursive: true }))
 show("mkdir missing parent", mkdirSync(join(missing, "a")))
@@ -52,23 +58,34 @@ show("unlink missing", unlinkSync(missing))
 show("rm directory", rmSync(sub))
 show("rm missing", rmSync(missing))
 show("rm missing recursive", rmSync(missing, { recursive: true }))
-show("rename missing", renameSync(missing, join(dir, "other")))
+show("rm missing force", rmSync(missing, { force: true }))
+show("rename missing", renameSync(missing, join(dir, "x")))
+show("rename onto file", renameSync(file, other))
 show("rename onto directory", renameSync(file, sub))
-show("copy missing", copyFileSync(missing, join(dir, "other")))
-show("copy exclusive", copyFileSync(file, join(sub, "inside.txt"), constants.COPYFILE_EXCL))
-show("copy directory", copyFileSync(sub, join(dir, "other")))
-show("copy clone force", copyFileSync(file, join(dir, "other"), constants.COPYFILE_FICLONE_FORCE))
+show("copy missing", copyFileSync(missing, join(dir, "x")))
+show("copy onto file", copyFileSync(file, other))
+show("copy directory", copyFileSync(sub, join(dir, "x")))
+show("copy onto itself", copyFileSync(file, file))
+show("replace missing", replaceSync(missing, other))
+show("replace onto folder", replaceSync(file, sub))
 show("readdir file", readdirSync(file))
 show("readdir missing", readdirSync(missing))
 show("stat missing", statSync(missing))
+show("stat missing, no throw", statSync(missing, { throwIfNoEntry: false }))
 show("lstat missing", lstatSync(missing))
 show("stat through file", statSync(join(file, "x")))
 show("realpath missing", realpathSync(join(missing, "deeper")))
 show("access missing", accessSync(missing))
 show("chmod missing", chmodSync(missing, 0o644))
 show("truncate missing", truncateSync(missing))
-show("copy onto itself", copyFileSync(file, file))
-console.log(existsSync("a\u0000b"), existsSync(""))
+console.log(existsSync(zero), existsSync(""))
+
+const moved = renameSync(file, other)
+if (moved.isErr() && moved.error.kind == "RENAME_ERROR_EXISTS") {
+  console.log("dest:", moved.error.dest.replaceAll(dir, "D"))
+}
+show("replace onto file", replaceSync(file, other))
+console.log(existsSync(file), must(readFileSync(other, "utf8")))
 
 must(rmSync(dir, { recursive: true }))
 console.log(existsSync(dir))

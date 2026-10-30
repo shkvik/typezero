@@ -1,9 +1,9 @@
 # Bodies that go wrong (docs/net.md, sections 1-3): fetch tells a body in
-# chunks that are not chunked encoding (MALFORMED, ERR_INVALID_CHUNKED) from a
-# body the server cut off (NETWORK, ERR_CLOSED); a server answers a request
+# chunks that are not chunked encoding (BODY_ERROR_MALFORMED, ERR_INVALID_CHUNKED) from a
+# body the server cut off (BODY_ERROR_NETWORK, ERR_CLOSED); a server answers a request
 # body in bad chunks with 400 and its handler gets ERR_INVALID_CHUNKED; a
 # request whose body comes slower than requestTimeout is answered with 408 and
-# its handler gets TIMEOUT. Node.js plays the other side over raw sockets,
+# its handler gets BODY_ERROR_TIMEOUT. Node.js plays the other side over raw sockets,
 # on 127.0.0.1.
 include(${SOURCE}/../cli.cmake)
 if(NOT NODE)
@@ -56,8 +56,8 @@ execute_process(COMMAND ${NODE} ${WORK}/raw-server.mjs ${raw_port} COMMAND ${WOR
   OUTPUT_VARIABLE out ERROR_VARIABLE err RESULTS_VARIABLE codes)
 normalize(out "${out}")
 set(expected [[
-/bad MALFORMED ERR_INVALID_CHUNKED the body is not valid chunked encoding
-/cut NETWORK ERR_CLOSED 127.0.0.1:PORT closed the connection before the end of the body
+/bad BODY_ERROR_MALFORMED ERR_INVALID_CHUNKED the body is not valid chunked encoding
+/cut BODY_ERROR_NETWORK ERR_CLOSED 127.0.0.1:PORT closed the connection before the end of the body
 ]])
 if(NOT codes STREQUAL "0;0" OR NOT out STREQUAL expected)
   message(FATAL_ERROR "client: exit codes ${codes}\n--- expected:\n${expected}\n--- actual:\n"
@@ -130,8 +130,8 @@ execute_process(COMMAND ${NODE} ${WORK}/slow-client.mjs ${tz_port} COMMAND ${WOR
 normalize(out "${out}")
 normalize(err "${err}")
 set(expected [[
-/slow TIMEOUT TIMEOUT_ERR the request did not come in full within 300 ms (requestTimeout)
-/chunks MALFORMED ERR_INVALID_CHUNKED the body is not valid chunked encoding
+/slow BODY_ERROR_TIMEOUT TIMEOUT_ERR the request did not come in full within 300 ms (requestTimeout)
+/chunks BODY_ERROR_MALFORMED ERR_INVALID_CHUNKED the body is not valid chunked encoding
 ]])
 set(expected_err [[
 slow body: HTTP/1.1 408 Request Timeout true

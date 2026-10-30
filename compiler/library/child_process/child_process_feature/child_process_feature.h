@@ -8,6 +8,7 @@ class ChildProcessFeature : public Feature {
 public:
   llvm::StringRef name() const override { return "child_process"; }
 
+  void declare(Checker &checker) const override;
   std::optional<std::string> exportProblem(NodeModule module, llvm::StringRef exportName,
                                            llvm::StringRef path) const override;
   Expr *checkModuleCall(Checker &checker, CallExpr *call, NodeModule module, llvm::StringRef fn,

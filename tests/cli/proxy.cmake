@@ -117,16 +117,16 @@ execute_process(COMMAND ${NODE} ${WORK}/proxy.mjs ${proxy_port} ${auth_port} COM
   WORKING_DIRECTORY ${WORK}
   OUTPUT_VARIABLE out ERROR_VARIABLE err RESULTS_VARIABLE codes)
 normalize(out "${out}")
-string(REGEX REPLACE "no proxy [A-Z]+ [A-Z_]+ [^\n]*" "no proxy (direct, no such host)" out "${out}")
+string(REGEX REPLACE "no proxy [A-Z_]+ [A-Z_]+ [^\n]*" "no proxy (direct, no such host)" out "${out}")
 set(expected [[
 env http 200 plain proxy
 localhost 200 plain direct
 no proxy (direct, no such host)
 https tunnel 200 secure
-login asked PROXY ERR_PROXY_AUTH_REQUIRED the proxy 127.0.0.1:AUTH asks for a login (407): put user and password into its URL, http://user:password@host:port
+login asked FETCH_ERROR_PROXY ERR_PROXY_AUTH_REQUIRED the proxy 127.0.0.1:AUTH asks for a login (407): put user and password into its URL, http://user:password@host:port
 login given 200 secure
-refused PROXY ERR_PROXY_REFUSED the proxy 127.0.0.1:PROXY refused to connect to blocked.test:PORT (403)
-bad env PROXY ERR_INVALID_PROXY_URL HTTPS_PROXY is a proxy.corp: proxy, and only http: and https: proxies work
+refused FETCH_ERROR_PROXY ERR_PROXY_REFUSED the proxy 127.0.0.1:PROXY refused to connect to blocked.test:PORT (403)
+bad env FETCH_ERROR_PROXY ERR_INVALID_PROXY_URL HTTPS_PROXY is a proxy.corp: proxy, and only http: and https: proxies work
 ]])
 if(NOT codes STREQUAL "0;0" OR NOT out STREQUAL expected)
   message(FATAL_ERROR "exit codes ${codes}\n--- expected:\n${expected}\n--- actual:\n${out}"

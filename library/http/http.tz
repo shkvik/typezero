@@ -1,7 +1,7 @@
 import { Connection, Request, Response } from "tz:fetch";
 import { URL } from "tz:url";
 import { WebSocket, acceptKey } from "tz:websocket";
-import { ahead, order } from "tz:intrinsics";
+import { ahead, NativeError, order } from "tz:intrinsics";
 
 declare function netListen(
   host: string,
@@ -10,7 +10,7 @@ declare function netListen(
   keepAlive: int,
   headersTimeout: int,
   requestTimeout: int,
-): Result<object, SystemError>;
+): Result<object, NativeError>;
 declare function tlsListen(
   host: string,
   port: int,
@@ -20,7 +20,7 @@ declare function tlsListen(
   requestTimeout: int,
   cert: string,
   key: string,
-): Result<object, SystemError>;
+): Result<object, NativeError>;
 declare function netListenerPort(listener: object): int;
 declare function netListenerUrl(listener: object): string;
 declare function netAccept(listener: object): Promise<object | undefined>;
@@ -70,7 +70,7 @@ export type UpgradeOptions = {
 };
 
 export type UpgradeError = {
-  kind: "REQUEST";
+  kind: "UPGRADE_ERROR";
   code: "ERR_NOT_WEBSOCKET" | "ERR_UNSUPPORTED_VERSION";
   message: string;
 };
@@ -93,7 +93,7 @@ export function upgradeWebSocket(
   const key = request.headers.get("sec-websocket-key") ?? "";
   if (upgrade != "websocket" || key == "") {
     return err({
-      kind: "REQUEST",
+      kind: "UPGRADE_ERROR",
       code: "ERR_NOT_WEBSOCKET",
       message: "the request does not ask for a WebSocket: no 'upgrade: websocket' or no key",
     });
@@ -101,7 +101,7 @@ export function upgradeWebSocket(
   const version = request.headers.get("sec-websocket-version") ?? "";
   if (version != "13") {
     return err({
-      kind: "REQUEST",
+      kind: "UPGRADE_ERROR",
       code: "ERR_UNSUPPORTED_VERSION",
       message: `the WebSocket version ${version} is not 13`,
     });
@@ -124,10 +124,9 @@ export function upgradeWebSocket(
 }
 
 export type ListenError = {
-  kind: "SERVER";
+  kind: "LISTEN_ERROR";
   code: ListenErrorCode;
   message: string;
-  errno: int;
   syscall: string;
   address: string;
   port: int;
@@ -209,10 +208,9 @@ export class Server {
       const code = listenCode(opened.error.code);
 
       return err({
-        kind: "SERVER",
+        kind: "LISTEN_ERROR",
         code: code,
         message: opened.error.message,
-        errno: opened.error.errno,
         syscall: opened.error.syscall,
         address: this.hostname,
         port: this.port,
@@ -225,7 +223,7 @@ export class Server {
     return ok(listening);
   }
 
-  private open(): Result<object, SystemError> {
+  private open(): Result<object, NativeError> {
     const transport = this.transport;
     if (transport.secure) {
       const secured = tlsListen(

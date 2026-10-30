@@ -28,6 +28,7 @@ enum class NodeModule {
   Process,
   Buffer,
   TzIo,
+  TzFs,
   TimersPromises,
   Readline,
   ReadlinePromises,
@@ -167,6 +168,7 @@ class GenericInstantiator;
 class AliasInstantiator;
 class GenericClassChecker;
 class GenericClassInstantiator;
+class GenericWidening;
 class ReturnInferrer;
 class ClassBases;
 class ClassLinks;
@@ -225,6 +227,10 @@ class JsonStaticChecker;
 class BuiltinModuleChecker;
 class FsChecker;
 class FsDeclarer;
+class FsErrorTypes;
+class BuiltinModuleTypes;
+class ChildErrorTypes;
+class CryptoErrorTypes;
 class PathChecker;
 class OsChecker;
 class RuntimeObjectChecker;
@@ -739,6 +745,7 @@ public:
   GenericInstantiator &genericInstantiator() const { return *genericInstantiatorPart_; }
   AliasInstantiator &aliasInstantiator() const { return *aliasInstantiatorPart_; }
   GenericClassChecker &genericClassChecker() const { return *genericClassCheckerPart_; }
+  GenericWidening &genericWidening() const { return *genericWideningPart_; }
   GenericClassInstantiator &genericClassInstantiator() const {
     return *genericClassInstantiatorPart_;
   }
@@ -800,6 +807,10 @@ public:
   BuiltinModuleChecker &builtinModuleChecker() const { return *builtinModuleCheckerPart_; }
   FsChecker &fsChecker() const { return *fsCheckerPart_; }
   FsDeclarer &fsDeclarer() const { return *fsDeclarerPart_; }
+  FsErrorTypes &fsErrorTypes() const { return *fsErrorTypesPart_; }
+  BuiltinModuleTypes &builtinModuleTypes() const { return *builtinModuleTypesPart_; }
+  ChildErrorTypes &childErrorTypes() const { return *childErrorTypesPart_; }
+  CryptoErrorTypes &cryptoErrorTypes() const { return *cryptoErrorTypesPart_; }
   PathChecker &pathChecker() const { return *pathCheckerPart_; }
   OsChecker &osChecker() const { return *osCheckerPart_; }
   RuntimeObjectChecker &runtimeObjectChecker() const { return *runtimeObjectCheckerPart_; }
@@ -907,6 +918,7 @@ private:
   friend class AliasInstantiator;
   friend class GenericClassChecker;
   friend class GenericClassInstantiator;
+  friend class GenericWidening;
   friend class ReturnInferrer;
   friend class ClassBases;
   friend class ClassLinks;
@@ -965,6 +977,10 @@ private:
   friend class BuiltinModuleChecker;
   friend class FsChecker;
   friend class FsDeclarer;
+  friend class FsErrorTypes;
+  friend class BuiltinModuleTypes;
+  friend class ChildErrorTypes;
+  friend class CryptoErrorTypes;
   friend class PathChecker;
   friend class OsChecker;
   friend class RuntimeObjectChecker;
@@ -1064,6 +1080,7 @@ private:
   std::unique_ptr<AliasInstantiator> aliasInstantiatorPart_;
   std::unique_ptr<GenericClassChecker> genericClassCheckerPart_;
   std::unique_ptr<GenericClassInstantiator> genericClassInstantiatorPart_;
+  std::unique_ptr<GenericWidening> genericWideningPart_;
   std::unique_ptr<ReturnInferrer> returnInferrerPart_;
   std::unique_ptr<ClassBases> classBasesPart_;
   std::unique_ptr<ClassLinks> classLinksPart_;
@@ -1122,6 +1139,10 @@ private:
   std::unique_ptr<BuiltinModuleChecker> builtinModuleCheckerPart_;
   std::unique_ptr<FsChecker> fsCheckerPart_;
   std::unique_ptr<FsDeclarer> fsDeclarerPart_;
+  std::unique_ptr<FsErrorTypes> fsErrorTypesPart_;
+  std::unique_ptr<BuiltinModuleTypes> builtinModuleTypesPart_;
+  std::unique_ptr<ChildErrorTypes> childErrorTypesPart_;
+  std::unique_ptr<CryptoErrorTypes> cryptoErrorTypesPart_;
   std::unique_ptr<PathChecker> pathCheckerPart_;
   std::unique_ptr<OsChecker> osCheckerPart_;
   std::unique_ptr<RuntimeObjectChecker> runtimeObjectCheckerPart_;

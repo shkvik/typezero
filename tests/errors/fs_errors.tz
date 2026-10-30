@@ -1,0 +1,26 @@
+// The errors of node:fs (docs/io.md, section 5): each function has its own
+// type, kind tells the reason, and what can never happen does not build.
+// expect-error: 'node:fs' has no export named 'replaceSync'; it is in "tz:fs"
+import { readFileSync, copyFileSync, rmSync, constants, replaceSync } from "node:fs"
+// expect-error: 'tz:fs' has no export named 'readLine'; it has replaceSync, replace and ReplaceError
+import { readLine } from "tz:fs"
+
+// expect-error: the path has a zero character in it, which no file name can have
+const text = readFileSync("a\u0000b", "utf8")
+console.log(text.isOk())
+
+// expect-error: 'copyFileSync' never replaces a file that is already there, so it takes no mode
+const copied = copyFileSync("a.txt", "b.txt", constants.COPYFILE_EXCL)
+console.log(copied.isOk())
+
+const read = readFileSync("a.txt", "utf8")
+if (read.isErr()) {
+  // expect-error: 'ReadFileError' has no field 'errno': tz gives no errno; the reason is in 'kind', the system's code in 'code'
+  console.log(read.error.errno)
+}
+
+const removed = rmSync("tmp", { force: true })
+// expect-error: operator '==' cannot be applied to types
+if (removed.isErr() && removed.error.kind == "FORCE_REMOVE_ERROR_NOT_FOUND") {
+  console.log("with force, a missing file is no error")
+}

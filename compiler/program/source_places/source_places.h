@@ -6,8 +6,11 @@
 #include "llvm/Support/SourceMgr.h"
 #include <optional>
 #include <string>
+#include <vector>
 
 namespace tz {
+
+struct Module;
 
 struct SourcePlace {
   std::string path;
@@ -21,6 +24,8 @@ struct SourcePlace {
 class SourcePlaces {
 public:
   explicit SourcePlaces(const llvm::SourceMgr &sourceMgr);
+
+  void nameFiles(const std::vector<Module *> &modules);
 
   std::optional<SourcePlace> find(llvm::SMLoc loc) const;
   std::optional<SourcePlace> locate(llvm::SMLoc loc) const;

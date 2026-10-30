@@ -3,5 +3,13 @@
   "cmake.useCMakePresets": "always",
   "files.associations": {
     "*.out": "plaintext"
+  },
+  "claudeCode.respectGitIgnore": false,
+  "search.exclude": {
+    "build/**": true,
+    "out/**": true,
+    "bench/out/**": true,
+    ".vs/**": true,
+    ".cache/**": true
   }
 }

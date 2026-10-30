@@ -48,6 +48,7 @@ console.log((must(statSync(dir)).mode & 0o170000) == 0o040000, (stats.mode & 0o1
 // Moving, copying and deleting.
 must(renameSync(join(dir, "b", "y.txt"), join(dir, "z.txt")))
 must(copyFileSync(join(dir, "z.txt"), join(dir, "copy.txt")))
+must(unlinkSync(join(dir, "copy.txt")))
 must(copyFileSync(join(dir, "notes.txt"), join(dir, "copy.txt")))
 console.log(must(readFileSync(join(dir, "copy.txt"), "utf8")), existsSync(join(dir, "b", "y.txt")))
 must(unlinkSync(join(dir, "copy.txt")))

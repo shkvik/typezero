@@ -20,6 +20,7 @@ struct Graph;
 class ModuleResolver;
 class LibraryModules;
 class SourceOverlay;
+struct LibraryFile;
 
 class Loader {
 public:
@@ -34,6 +35,8 @@ private:
   Module *parseJson(const std::string &filePath, const std::string &realPath, std::string name,
                     std::string &error);
   llvm::ErrorOr<std::unique_ptr<llvm::MemoryBuffer>> read(llvm::StringRef filePath) const;
+  Module *libraryEntry(const LibraryFile &library);
+  std::string treeFile(llvm::StringRef file);
   void visit(Module *module);
   std::string relativeName(llvm::StringRef realPath) const;
   void loadDeclarations(Module *module, llvm::StringRef filePath, bool library);
@@ -46,6 +49,9 @@ private:
   llvm::DenseMap<const Module *, int> packageOf_;
   std::string entryDir_;
   std::string entryRealDir_;
+  std::string libraryTree_;
+  llvm::StringMap<std::string> treeFiles_;
+  llvm::DenseMap<unsigned, std::string> treeBuffers_;
   llvm::StringMap<Module *> byRealPath_;
   llvm::StringMap<Module *> libraries_;
   llvm::DenseMap<const Module *, std::string> realPaths_;

@@ -77,7 +77,11 @@ void TzModulesLowerer::emitExternal(FunctionDecl *fn) {
     }
   }
   params.push_back(ptr);
-  args.push_back(lowering_.fsLowerer().systemErrorMaker());
+  if (lowering_.nativeError_) {
+    args.push_back(lowering_.fsLowerer().nativeErrorMaker());
+  } else {
+    args.push_back(llvm::ConstantPointerNull::get(llvm::cast<llvm::PointerType>(ptr)));
+  }
   std::string name = "tz_";
   for (char c : fn->name) {
     if (llvm::isUpper(c)) {

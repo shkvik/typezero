@@ -1,40 +1,50 @@
-// destroy() with an error and _destroy(), 'error' then 'close'; a write
-// after end(); a Duplex with read(), write() and final(); push() after the
-// end. undefined ends a stream, as null does in node: the output is node's
-// with push(null).
+// destroy() with an error, which only the stream itself may call, and
+// onDestroy(), 'error' then 'close'; a write after end(); a Duplex with
+// onRead(), onWrite() and onFinal(); push() after the end. pushEnd() ends a
+// stream, as push(null) does in node: the output is node's.
 import { Duplex, PassThrough, Readable, Writable } from "node:stream"
 const log = (s: string) => console.log(s)
-const r = new Readable({
-  read() {},
-  destroy(err, cb) {
+class Breakable extends Readable {
+  onRead() {}
+  onDestroy(err, cb) {
     log(`_destroy ${err?.message}`)
     cb(err)
-  },
-})
+  }
+  break(message: string) {
+    this.destroy({ message })
+  }
+}
+const r = new Breakable()
 r.on("error", (e) => log(`r error ${e.message} errored=${r.errored()?.message}`))
 r.on("close", () => log(`r close closed=${r.closed()} destroyed=${r.destroyed()}`))
-r.destroy({ code: "E_OOPS", message: "oops" })
+r.break("oops")
 log(`destroyed now ${r.destroyed()}`)
-r.destroy({ code: "E_AGAIN", message: "again" })
+r.break("again")
 
-const w = new Writable({ write(c, e, cb) { cb() } })
+class Sink extends Writable {
+  onWrite(c, e, cb) {
+    cb()
+  }
+}
+const w = new Sink()
 w.on("close", () => log("w close"))
 w.on("error", (e) => log(`w error ${e.message}`))
 const wEnded = w.end()
 w.write("late", (err) => log(`late cb ${err?.message}`))
 
-const d = new Duplex({
-  read() {},
-  write(chunk, enc, cb) {
+class Reverser extends Duplex {
+  onRead() {}
+  onWrite(chunk, enc, cb) {
     log(`duplex write ${chunk.toString()}`)
     this.push(chunk.toString().split("").reverse().join(""))
     cb()
-  },
-  final(cb) {
-    this.push(undefined)
+  }
+  onFinal(cb) {
+    this.pushEnd()
     cb()
-  },
-})
+  }
+}
+const d = new Reverser()
 d.on("error", (e) => log(`duplex error ${e.message}`))
 d.on("data", (c) => log(`duplex data ${c.toString()}`))
 d.on("end", () => log("duplex end"))
@@ -46,7 +56,7 @@ const dEnded = d.end()
 const p = new PassThrough()
 p.on("error", (e) => log(`p error ${e.message}`))
 p.push("x")
-p.push(undefined)
+p.pushEnd()
 p.push("after eof")
 log(`w ended ${(await wEnded).isOk()}, duplex ended ${(await dEnded).isOk()}`)
 

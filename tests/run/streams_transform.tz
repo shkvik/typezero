@@ -1,20 +1,21 @@
 // same-as-node
-// Transform and PassThrough of node:stream (docs/streams.md): transform()
-// and flush(), a Transform of strings to words in object mode, and the
-// backpressure of a PassThrough.
+// Transform and PassThrough of node:stream (docs/streams.md): onTransform()
+// and onFlush() (_transform() and _flush() in node), a Transform of strings
+// to words in object mode, and the backpressure of a PassThrough.
 import { PassThrough, Transform } from "node:stream"
 const log = (s: string) => console.log(s)
-const upper = new Transform({
-  transform(chunk, encoding, callback) {
+class Upper extends Transform {
+  onTransform(chunk, encoding, callback) {
     log(`_transform ${chunk.toString()} ${encoding}`)
     callback(undefined, chunk.toString().toUpperCase())
-  },
-  flush(callback) {
+  }
+  onFlush(callback) {
     log("_flush")
     this.push("!")
     callback()
-  },
-})
+  }
+}
+const upper = new Upper()
 upper.on("error", (e) => log(`upper error ${e.message}`))
 upper.on("data", (chunk) => log(`data ${chunk.toString()}`))
 upper.on("end", () => log("end"))
@@ -27,14 +28,16 @@ upper.write("hello")
 upper.write(" world")
 const upperEnded = upper.end()
 
-const split = new Transform<string, string>({
-  decodeStrings: false,
-  readableObjectMode: true,
-  transform(chunk, encoding, callback) {
+class Split extends Transform<string, string> {
+  constructor() {
+    super({ decodeStrings: false, readableObjectMode: true })
+  }
+  onTransform(chunk, encoding, callback) {
     for (const word of chunk.split(" ")) this.push(word)
     callback()
-  },
-})
+  }
+}
+const split = new Split()
 split.on("error", (e) => log(`split error ${e.message}`))
 split.on("data", (word) => log(`word ${word} ${typeof word}`))
 const splitEnded = split.end("a bb ccc")
@@ -53,12 +56,13 @@ log(`ended ${(await upperEnded).isOk()} ${(await splitEnded).isOk()} ${(await pt
 
 // A transform that calls its callback twice is an error, as in node; each
 // write keeps its own callback, so a late second call is caught too.
-const twice = new Transform({
-  transform(chunk: Buffer, encoding, callback) {
+class Twice extends Transform {
+  onTransform(chunk: Buffer, encoding, callback) {
     callback(undefined, chunk)
     callback()
-  },
-})
+  }
+}
+const twice = new Twice()
 twice.on("error", (e) => log(`twice error ${e.code}`))
 twice.on("data", (c) => log(`twice data ${c.length}`))
 twice.write("ab")

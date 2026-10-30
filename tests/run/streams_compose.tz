@@ -15,16 +15,18 @@ const sank = sinkInto(pt, "into a duplex")
 const ptDone = await finished(pt)
 log(`pt finished ${ptDone.isOk()} ${pt.writableFinished()} ${pt.readableEnded()} ${(await sank).isOk()}`)
 
-const upper = new Transform({
-  transform(chunk, enc, cb) {
+class Upper extends Transform {
+  onTransform(chunk, enc, cb) {
     cb(undefined, chunk.toString().toUpperCase())
-  },
-})
-const exclaim = new Transform({
-  transform(chunk, enc, cb) {
+  }
+}
+class Exclaim extends Transform {
+  onTransform(chunk, enc, cb) {
     cb(undefined, `${chunk.toString()}!`)
-  },
-})
+  }
+}
+const upper = new Upper()
+const exclaim = new Exclaim()
 const both = compose(upper, exclaim)
 both.on("data", (c) => log(`composed ${c.toString()}`))
 both.write("hey")
@@ -33,19 +35,20 @@ const bothDone = await finished(both)
 log(`composed done ${bothDone.isOk()} ${(await bothEnded).isOk()}`)
 
 let constructed = false
-const c = new Writable({
-  construct(cb) {
+class Constructed extends Writable {
+  onConstruct(cb) {
     log("construct")
     setTimeout(() => {
       constructed = true
       cb()
     }, 1)
-  },
-  write(chunk, enc, cb) {
+  }
+  onWrite(chunk, enc, cb) {
     log(`write after construct ${constructed} ${chunk.toString()}`)
     cb()
-  },
-})
+  }
+}
+const c = new Constructed()
 c.write("x")
 const cEnded = c.end()
 finishedCb(c, (err) => log(`c finished ${err == undefined}`))

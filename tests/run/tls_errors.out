@@ -1,8 +1,8 @@
-expired TLS CERT_HAS_EXPIRED the certificate of localhost has expired
-future TLS CERT_NOT_YET_VALID the certificate of localhost is not valid yet
-wrongname TLS ERR_TLS_CERT_ALTNAME_INVALID the certificate is not for localhost
-self TLS DEPTH_ZERO_SELF_SIGNED_CERT the certificate of localhost is self-signed, so it is not trusted; if its root CA is installed on this machine, run with NODE_USE_SYSTEM_CA=1
-other TLS UNABLE_TO_VERIFY_LEAF_SIGNATURE the certificate of localhost is signed by an authority that is not known; if its root CA is installed on this machine, run with NODE_USE_SYSTEM_CA=1
-chain TLS UNABLE_TO_GET_ISSUER_CERT_LOCALLY the certificate of localhost is signed by an authority that is not known
-rooted TLS SELF_SIGNED_CERT_IN_CHAIN the certificates of localhost lead to a root CA that is not trusted
+expired FETCH_ERROR_TLS CERT_HAS_EXPIRED the certificate of localhost has expired
+future FETCH_ERROR_TLS CERT_NOT_YET_VALID the certificate of localhost is not valid yet
+wrongname FETCH_ERROR_TLS ERR_TLS_CERT_ALTNAME_INVALID the certificate is not for localhost
+self FETCH_ERROR_TLS DEPTH_ZERO_SELF_SIGNED_CERT the certificate of localhost is self-signed, so it is not trusted; if its root CA is installed on this machine, run with NODE_USE_SYSTEM_CA=1
+other FETCH_ERROR_TLS UNABLE_TO_VERIFY_LEAF_SIGNATURE the certificate of localhost is signed by an authority that is not known; if its root CA is installed on this machine, run with NODE_USE_SYSTEM_CA=1
+chain FETCH_ERROR_TLS UNABLE_TO_GET_ISSUER_CERT_LOCALLY the certificate of localhost is signed by an authority that is not known
+rooted FETCH_ERROR_TLS SELF_SIGNED_CERT_IN_CHAIN the certificates of localhost lead to a root CA that is not trusted
 localhost 200 ok

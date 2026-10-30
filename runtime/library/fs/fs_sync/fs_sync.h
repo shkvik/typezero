@@ -26,8 +26,14 @@ enum {
 
 #ifdef _WIN32
 DWORD tz_fs_stat_of(const wchar_t *path, int follow, TzStatsParts *st);
+
+Failure tz_fs_move_failure(DWORD error, int how, const Path *from, const Path *to);
 #else
 int tz_fs_stat_of(const char *path, int follow, TzStatsParts *st);
+
+int tz_fs_rename_no_replace(const char *from, const char *to);
+
+int tz_fs_copy_new(const char *from, const char *to);
 #endif
 
 #endif

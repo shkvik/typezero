@@ -49,7 +49,7 @@ export class Vault extends EventEmitter {
   async put<T>(name: string, value: T) {
     const sealed = must(seal(this.key, value))
     must(await writeFile(join(this.dir, name), sealed))
-    this.emit("stored", name, createHash("sha256").update(sealed).digest("hex").length)
+    this.emit("stored", name, must(createHash("sha256")).update(sealed).digest("hex").length)
   }
 
   async get(name: string) {

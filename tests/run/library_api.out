@@ -21,4 +21,4 @@ true true false
 2
 1
 false true true
-ERR_INVALID_ARG_TYPE
+The "chunk" argument must be of type string or an instance of Buffer, TypedArray, or DataView. Received type number (42)

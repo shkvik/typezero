@@ -88,15 +88,22 @@ if (r.isErr()) {
 ```
 
 - **Ошибки библиотеки** — объекты с меткой и текстом: `{ code: "ENOENT", message, path }`.
-  Имена `SystemError`, `JsonError`, `FetchError` остаются, но это типы объектов, а не классы.
+  Имена `JsonError`, `FetchError`, `ReadFileError` — типы объектов, а не классы. Общего
+  `SystemError` нет с 31 октября: у каждой функции свой тип ошибки.
 - **`kind` и коды `ERR_…`** (29 октября, [style.md](style.md), раздел 1): у ошибок библиотеки
-  есть `kind` — что делать программе (`"REGEX"`, `"URL"`, `"DATE"`, `"LOCALE"`, `"DECIMAL"`,
-  `"NUMBER"`, `"URI"`, `"JSON"`, `"ENCODING"`, `"REFLECT"`, `"SERVER"`, `"SUBTLE"`), а `code` — SCREAM_CASE
+  есть `kind` — что сломалось и почему (с 31 октября, Ф9, уникален во всей библиотеке: имя
+  типа и причина — `FETCH_ERROR_NETWORK`, `BODY_ERROR_TOO_LARGE`; у типа с одной причиной — имя
+  типа: `"REGEX_ERROR"`, `"URL_ERROR"`, `"DATE_ERROR"`, `"LOCALE_ERROR"`, `"DECIMAL_ERROR"`,
+  `"NUMBER_ERROR"`, `"URI_ERROR"`, `"JSON_ERROR"`, `"DECODE_ERROR"`, `"ENCODING_ERROR"`,
+  `"REFLECT_ERROR"`, `"LISTEN_ERROR"`), а `code` — SCREAM_CASE
   с префиксом `ERR_`: `ERR_INVALID_REGEX`, `ERR_INVALID_URL`, `ERR_INVALID_JSON`,
   `ERR_CIRCULAR_STRUCTURE`, `ERR_NO_VARIANT`, `ERR_INVALID_DATA`… (было `bad_regex`, `bad_url`,
   `circular`, `no_variant`, `DataError`). Системные коды (`ENOENT`), коды OpenSSL, `TIMEOUT_ERR` и `UNKNOWN` — как
-  есть. Ещё без `kind`: `SystemError`, `StreamError`, `ExecError`, `CryptoError` (`code:
-  string`) — их разбор впереди.
+  есть. С 30 октября (4.6) у функций `node:fs`, `node:child_process` и `node:crypto` свой тип
+  ошибки на функцию с `kind` вида `ИМЯ_ТИПА_ПРИЧИНА` ([io.md](io.md), раздел 5;
+  [process.md](process.md), раздел 1; [crypto.md](crypto.md), раздел 5). Ошибки потоков —
+  `interface … extends StreamError` с `kind` своего типа ([streams.md](streams.md), раздел 3).
+  Поля `errno` нет ни у одной ошибки, и у сетевых тоже (Ф7, 31 октября).
 - **Место ошибки хранит сам `Err`, а не значение.** `err(...)` запоминает файл, строку и
   функцию — это ссылка на данные в exe, ничего не стоит. Печать:
   `Err { error: 'not_found' } at find (users.tz:13)`. Так в Zig: ошибка — простое значение, а

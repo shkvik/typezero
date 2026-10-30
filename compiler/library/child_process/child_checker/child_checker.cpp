@@ -3,8 +3,9 @@
 #include "compiler/check/expr/call_checker/call_checker.h"
 #include "compiler/check/expr/expr_checker/expr_checker.h"
 #include "compiler/check/types/type_relations/type_relations.h"
-#include "compiler/declare/prelude/prelude.h"
+#include "compiler/library/builtin_modules/node_check_helpers/node_check_helpers.h"
 #include "compiler/library/bytes/bytes_checker/bytes_checker.h"
+#include "compiler/library/child_process/child_error_types/child_error_types.h"
 #include "compiler/library/fs/fs_checker/fs_checker.h"
 #include "compiler/whole_program/flows/flows.h"
 #include "llvm/Support/ConvertUTF.h"
@@ -28,6 +29,29 @@ std::string utf8(const std::u16string &text) {
 }
 
 const Type *bufferType() { return Type::bytesType(Type::Bytes::Buffer); }
+
+bool knownSignal(llvm::StringRef name) {
+  static const llvm::StringLiteral windows[] = {"SIGHUP",  "SIGINT",   "SIGQUIT", "SIGILL",
+                                                "SIGABRT", "SIGFPE",   "SIGKILL", "SIGSEGV",
+                                                "SIGTERM", "SIGBREAK", "SIGWINCH"};
+  static const llvm::StringLiteral posix[] = {
+      "SIGHUP",   "SIGINT",  "SIGQUIT", "SIGILL",    "SIGTRAP", "SIGABRT",   "SIGIOT",
+      "SIGBUS",   "SIGFPE",  "SIGKILL", "SIGUSR1",   "SIGSEGV", "SIGUSR2",   "SIGPIPE",
+      "SIGALRM",  "SIGTERM", "SIGCHLD", "SIGSTKFLT", "SIGCONT", "SIGSTOP",   "SIGTSTP",
+      "SIGTTIN",  "SIGTTOU", "SIGURG",  "SIGXCPU",   "SIGXFSZ", "SIGVTALRM", "SIGPROF",
+      "SIGWINCH", "SIGIO",   "SIGPOLL", "SIGPWR",    "SIGSYS"};
+  if (targetIsWindows()) {
+    return llvm::is_contained(windows, name);
+  }
+
+  return llvm::is_contained(posix, name);
+}
+
+bool hasZero(const Expr *expr) {
+  auto *lit = llvm::dyn_cast_or_null<StringLitExpr>(expr);
+
+  return lit && lit->value.find(u'\0') != std::u16string::npos;
+}
 
 }
 
@@ -62,9 +86,30 @@ Expr *ChildChecker::checkChildCall(CallExpr *call, llvm::StringRef fn, llvm::SML
 
   std::vector<Expr *> args(ChildArgCount, nullptr);
   args[ChildFile] = call->args[0] = checker_.argumentChecker().checkArg(call->args[0], string);
+  bool failed = false;
+  if (hasZero(call->args[0])) {
+    checker_.diags_.error(call->args[0]->loc(), "could not run it: the " +
+                                                    std::string(exec ? "command" : "program name") +
+                                                    " has a zero character in it");
+    failed = true;
+  } else if (auto *lit = dyn_cast<StringLitExpr>(call->args[0]);
+             lit && lit->value.empty() && !exec) {
+    checker_.diags_.error(call->args[0]->loc(), "could not run a program: its name is empty");
+    failed = true;
+  }
   size_t optionsAt = 1;
   if (!exec && call->args.size() > 1 && !isa<ObjectLitExpr>(call->args[1])) {
     if (!isa<UndefinedExpr>(call->args[1])) {
+      if (auto *list = dyn_cast<ArrayLitExpr>(call->args[1])) {
+        for (size_t i = 0; i < list->elements.size(); ++i) {
+          if (!list->elements[i].spread && hasZero(list->elements[i].expr)) {
+            checker_.diags_.error(list->elements[i].expr->loc(),
+                                  "could not run it: args[" + std::to_string(i) +
+                                      "] has a zero character in it");
+            failed = true;
+          }
+        }
+      }
       args[ChildArgs] = call->args[1] =
           checker_.argumentChecker().checkArg(call->args[1], Type::array(string));
     }
@@ -101,7 +146,6 @@ Expr *ChildChecker::checkChildCall(CallExpr *call, llvm::StringRef fn, llvm::SML
     return call;
   }
 
-  bool failed = false;
   unsigned encoding = ChildBytes;
   if (Expr *value = options.lookup("encoding"); value && !isa<UndefinedExpr>(value)) {
     auto *lit = dyn_cast<StringLitExpr>(value);
@@ -215,6 +259,37 @@ Expr *ChildChecker::checkChildCall(CallExpr *call, llvm::StringRef fn, llvm::SML
 
     return value ? checker_.argumentChecker().checkArg(value, Type::optional(type)) : absent(type);
   };
+  if (hasZero(options.lookup("cwd"))) {
+    checker_.diags_.error(options.lookup("cwd")->loc(),
+                          "could not run it: cwd has a zero character in it");
+    failed = true;
+  }
+  for (llvm::StringRef limit : {"timeout", "maxBuffer"}) {
+    Expr *value = options.lookup(limit);
+    auto *unary = value ? dyn_cast<UnaryExpr>(value) : nullptr;
+    if (unary && unary->op == UnaryOp::Neg &&
+        (isa<IntLitExpr>(unary->operand) || isa<FloatLitExpr>(unary->operand))) {
+      checker_.diags_.error(value->loc(),
+                            "could not run it: " + limit.str() + " must be 0 or more");
+      failed = true;
+    }
+  }
+  if (targetIsWindows()) {
+    for (llvm::StringRef id : {"uid", "gid"}) {
+      if (Expr *value = options.lookup(id); value && !isa<UndefinedExpr>(value)) {
+        checker_.diags_.error(value->loc(), "'" + id.str() +
+                                                "' works only on Linux and macOS: Windows has "
+                                                "no user and group numbers");
+        failed = true;
+      }
+    }
+  }
+  if (auto *lit = dyn_cast_or_null<StringLitExpr>(options.lookup("killSignal"));
+      lit && !knownSignal(utf8(lit->value))) {
+    checker_.diags_.error(lit->loc(), "could not run it: there is no signal " + utf8(lit->value) +
+                                          " (killSignal)");
+    failed = true;
+  }
   args[ChildCwd] = option("cwd", string);
   args[ChildEnv] = option("env", Type::dict(Type::DictKind::Record, string, string));
   args[ChildTimeout] = option("timeout", Type::doubleTy());
@@ -276,11 +351,16 @@ Expr *ChildChecker::checkChildCall(CallExpr *call, llvm::StringRef fn, llvm::SML
   } else {
     args[ChildKillSignal] = absent(string);
   }
+  bool viaShell = exec;
   if (Expr *value = options.lookup("shell")) {
+    if (auto *lit = dyn_cast<BoolLitExpr>(value)) {
+      viaShell = viaShell || lit->value;
+    }
     Expr *shell = checker_.exprChecker().checkExpr(value, string);
     const Type *t = shell->type->nonOptional();
     bool isBool = t->isBool() || (t->isLiteral() && t->literalBase()->isBool());
     if (t->isStringLiteral() || t->isString()) {
+      viaShell = true;
       args[ChildShell] = checker_.typeRelations().coerce(shell, Type::optional(string));
     } else if (isBool && exec) {
       if (auto *lit = dyn_cast<BoolLitExpr>(shell); lit && lit->value) {
@@ -292,6 +372,12 @@ Expr *ChildChecker::checkChildCall(CallExpr *call, llvm::StringRef fn, llvm::SML
                               "and to run a program without one, use 'execFileSync'");
         failed = true;
       }
+    } else if (isBool && !isa<BoolLitExpr>(value)) {
+      checker_.diags_.error(shell->loc(),
+                            "the option 'shell' of '" + fn +
+                                "' is written as a literal, true or false: what can go wrong, "
+                                "and so the type of the error, depends on it");
+      failed = true;
     } else if (isBool) {
       args[ChildShell] = checker_.typeRelations().coerce(shell, Type::optional(Type::boolTy()));
     } else {
@@ -317,20 +403,13 @@ Expr *ChildChecker::checkChildCall(CallExpr *call, llvm::StringRef fn, llvm::SML
   call->args = std::move(args);
   call->spread.clear();
 
-  const Type *text = encoding == ChildBytes ? bufferType() : string;
-  const Type *failure = checker_.prelude().builtinType("ExecError", {text});
+  bool textOutput = encoding != ChildBytes;
+  const Type *text = textOutput ? string : bufferType();
+  const Type *failure = checker_.childErrorTypes().errorOf(fn, textOutput, viaShell);
   auto output = [&](unsigned i) { return stdio[i] == ChildPipe ? text : Type::optional(text); };
   if (fn == "spawnSync") {
     call->builtin = Builtin::ChildSpawnSync;
-    const Type *t = Type::object(
-        {{"status", Type::optional(Type::intTy()), false},
-         {"signal", Type::optional(string), false},
-         {"output", Type::array(Type::optional(text)), false},
-         {"pid", Type::intTy(), false},
-         {"stdout", output(1), false},
-         {"stderr", output(2), false}},
-        encoding == ChildBytes ? "SpawnSyncReturns<Buffer>" : "SpawnSyncReturns<string>");
-    call->type = Type::result(t, failure);
+    call->type = Type::result(checker_.childErrorTypes().spawnResult(textOutput), failure);
   } else {
     call->builtin = exec ? Builtin::ChildExecSync : Builtin::ChildExecFileSync;
     call->type = Type::result(output(1), failure);

@@ -1,0 +1,174 @@
+// The errors of node:crypto (docs/crypto.md, "Ошибки"): a type per function, kind = the type
+// and the reason, the fields of the reason, and texts that say what failed and why. The values
+// come through at() and named(), so that the compiler does not catch them first.
+import {
+  createHash, createHmac, hash, pbkdf2Sync, hkdfSync, scryptSync, argon2Sync, createCipheriv,
+  createDecipheriv, createPrivateKey, createPublicKey, createSecretKey, generateKeyPairSync, sign,
+  createSign, createECDH, diffieHellman, X509Certificate,
+} from "node:crypto"
+
+function at(n: double): double {
+  return process.argv.length > 99 ? 0 : n
+}
+
+function bytes(n: int): Buffer {
+  if (n < 0)
+    return Buffer.alloc(0)
+  return Buffer.alloc(process.argv.length > 99 ? 0 : n)
+}
+
+function named(s: string): string {
+  return process.argv.length > 99 ? "" : s
+}
+
+function show<T, E extends { kind: string; code: string; message: string }>(r: Result<T, E>) {
+  console.log(r.isErr() ? `${r.error.kind} | ${r.error.code} | ${r.error.message}` : "no error")
+}
+
+function must<T, E>(r: Result<T, E>): T {
+  if (r.isErr()) {
+    console.log(r.error)
+    process.exit(1)
+  }
+  return r.value
+}
+
+// Hashes and HMAC.
+const nope = createHash(named("sha-nope"))
+show(nope)
+if (nope.isErr() && nope.error.kind == "CREATE_HASH_ERROR_UNKNOWN_ALGORITHM")
+  console.log(nope.error.algorithm)
+show(createHash(named("md4")))
+const short = createHash("sha256", { outputLength: at(5) })
+show(short)
+if (short.isErr() && short.error.kind == "CREATE_HASH_ERROR_WRONG_PARAMETERS")
+  console.log(short.error.parameter, short.error.value)
+show(hash(named("nope"), "data"))
+show(createHmac(named("shake256"), "key"))
+const pair = must(generateKeyPairSync("ec", { namedCurve: "P-256" }))
+const hmac = createHmac("sha256", pair.publicKey)
+show(hmac)
+if (hmac.isErr() && hmac.error.kind == "CREATE_HMAC_ERROR_WRONG_KEY_TYPE")
+  console.log(hmac.error.got, hmac.error.expected)
+
+// Keys from passwords.
+const iterations = pbkdf2Sync("pw", "salt", at(0), 16, "sha256")
+show(iterations)
+if (iterations.isErr() && iterations.error.kind == "PBKDF2_ERROR_WRONG_PARAMETERS")
+  console.log(iterations.error.parameter, iterations.error.value)
+show(pbkdf2Sync("pw", "salt", 1, at(0), "sha256"))
+show(pbkdf2Sync("pw", "salt", 1, 16, named("nope")))
+show(pbkdf2Sync(pair.privateKey, "salt", 1, 16, "sha256"))
+show(hkdfSync("sha256", "key", "salt", "info", at(255 * 32 + 1)))
+show(scryptSync("pw", "salt", 16, { N: at(3) }))
+show(scryptSync("pw", "salt", 16, { N: at(1048576) }))
+const nonce = Buffer.alloc(16, 1)
+show(argon2Sync("argon2id", { message: "pw", nonce: bytes(4), parallelism: 1, tagLength: 32, memory: 64, passes: 3 }))
+show(argon2Sync("argon2id", { message: "pw", nonce, parallelism: 1, tagLength: 32, memory: at(7), passes: 3 }))
+
+// Ciphers.
+const key = Buffer.alloc(32, 7)
+const iv = Buffer.alloc(12, 9)
+const keyLength = createCipheriv("aes-256-gcm", bytes(5), iv)
+show(keyLength)
+if (keyLength.isErr() && keyLength.error.kind == "CREATE_CIPHER_ERROR_WRONG_KEY_LENGTH")
+  console.log(keyLength.error.algorithm, keyLength.error.length, keyLength.error.expected)
+show(createCipheriv("aes-256-cbc", key, bytes(12)))
+show(createDecipheriv(named("aes-999-gcm"), key, iv))
+show(createCipheriv("aes-256-gcm", key, iv, { authTagLength: at(3) }))
+show(createCipheriv("aes-256-gcm", pair.publicKey, iv))
+
+const gcm = must(createCipheriv("aes-256-gcm", key, iv))
+const sealed = Buffer.concat([gcm.update("secret text"), must(gcm.final())])
+show(gcm.final())
+const changed = must(createDecipheriv("aes-256-gcm", key, iv))
+changed.setAuthTag(Buffer.alloc(16))
+changed.update(sealed)
+show(changed.final())
+const noTag = must(createDecipheriv("aes-256-gcm", key, iv))
+noTag.update(sealed)
+show(noTag.final())
+const shortTag = must(createDecipheriv("aes-256-gcm", key, iv))
+shortTag.setAuthTag(Buffer.alloc(3))
+show(shortTag.final())
+show(must(createCipheriv("aes-256-gcm", key, iv)).getAuthTag())
+const after = must(createCipheriv("aes-256-ctr", key, Buffer.alloc(16)))
+must(after.final())
+after.update("more")
+show(after.final())
+
+const cbc = must(createCipheriv("aes-256-cbc", key, Buffer.alloc(16)))
+const blocks = Buffer.concat([cbc.update("sixteen bytes!!!"), must(cbc.final())])
+const wrongKey = must(createDecipheriv("aes-256-cbc", Buffer.alloc(32, 1), Buffer.alloc(16)))
+wrongKey.update(blocks)
+show(wrongKey.final())
+const cut = must(createDecipheriv("aes-256-cbc", key, Buffer.alloc(16)))
+cut.update(blocks.subarray(0, 20))
+show(cut.final())
+const raw = must(createCipheriv("aes-128-cbc", key.subarray(0, 16), Buffer.alloc(16)))
+raw.setAutoPadding(false)
+raw.update(Buffer.alloc(5))
+const rawEnd = raw.final()
+show(rawEnd)
+if (rawEnd.isErr() && rawEnd.error.kind == "CIPHER_FINAL_ERROR_WRONG_DATA_LENGTH")
+  console.log(rawEnd.error.algorithm, rawEnd.error.length)
+
+// Keys.
+const notPem = createPrivateKey(named("hello"))
+show(notPem)
+if (notPem.isErr() && notPem.error.kind == "CREATE_PRIVATE_KEY_ERROR_NOT_A_KEY")
+  console.log(notPem.error.format, "|", notPem.error.openssl)
+const publicPem = must(pair.publicKey.export({ format: "pem", type: "spki" }))
+show(createPrivateKey(publicPem))
+const privatePem = must(pair.privateKey.export({ format: "pem", type: "pkcs8" }))
+const lines = privatePem.split("\n")
+show(createPrivateKey(lines[0] + "\n" + (lines[1] ?? "").slice(0, 20) + "!!!\n" + lines.slice(2).join("\n")))
+show(createPrivateKey({ key: Buffer.from([0x30, 0x10, 1, 2]), format: "der", type: "pkcs8" }))
+const locked = must(pair.privateKey.export({ format: "pem", type: "pkcs8", cipher: "aes-256-cbc", passphrase: "right" }))
+show(createPrivateKey(locked))
+show(createPrivateKey({ key: locked, passphrase: "wrong" }))
+const jwk = must(JSON.parse(named("{\"kty\":\"foo\"}")))
+const badJwk = createPublicKey({ key: jwk, format: "jwk" })
+show(badJwk)
+if (badJwk.isErr() && badJwk.error.kind == "CREATE_PUBLIC_KEY_ERROR_INVALID_JWK")
+  console.log(badJwk.error.field)
+show(createPublicKey(createSecretKey(Buffer.alloc(16))))
+show(generateKeyPairSync("rsa", { modulusLength: at(100) }))
+show(generateKeyPairSync("ec", { namedCurve: named("P-999") }))
+show(pair.privateKey.export({ format: "pem", type: "pkcs1" }))
+show(pair.publicKey.export({ format: "pem", type: "pkcs8" }))
+show(pair.privateKey.export({ format: "pem", type: "pkcs8", cipher: named("aes-999-cbc"), passphrase: "x" }))
+show(createSecretKey(Buffer.alloc(16)).export({ format: "pem", type: "pkcs8" }))
+
+// Signatures and key exchange.
+const data = Buffer.from("data")
+const wrongType = sign("sha256", data, pair.publicKey)
+show(wrongType)
+if (wrongType.isErr() && wrongType.error.kind == "SIGN_ERROR_WRONG_KEY_TYPE")
+  console.log(wrongType.error.got, wrongType.error.expected)
+show(sign(named("sha-nope"), data, pair.privateKey))
+show(sign("sha256", data, named("not a key")))
+const ed = must(generateKeyPairSync("ed25519"))
+const signer = must(createSign("sha256"))
+signer.update(data)
+show(signer.sign(ed.privateKey))
+const twice = must(createSign("sha256"))
+twice.update(data)
+must(twice.sign(pair.privateKey))
+show(twice.sign(pair.privateKey))
+show(createECDH(named("nope")))
+const ecdh = must(createECDH("prime256v1"))
+show(ecdh.getPublicKey())
+show(ecdh.setPrivateKey(Buffer.alloc(32)))
+ecdh.generateKeys()
+show(ecdh.computeSecret(Buffer.from("0400", "hex")))
+const x = must(generateKeyPairSync("x25519"))
+show(diffieHellman({ privateKey: x.privateKey, publicKey: pair.publicKey }))
+show(diffieHellman({ privateKey: x.publicKey, publicKey: x.publicKey }))
+
+// Certificates.
+const notCertificate = X509Certificate.parse(named("not a certificate"))
+show(notCertificate)
+if (notCertificate.isErr() && notCertificate.error.kind == "PARSE_CERTIFICATE_ERROR_NOT_A_CERTIFICATE")
+  console.log(notCertificate.error.openssl)
+show(X509Certificate.parse(Buffer.from([0x30, 0x03, 2, 1, 1])))

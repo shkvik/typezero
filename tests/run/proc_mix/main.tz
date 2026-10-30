@@ -1,6 +1,6 @@
 // Child processes with the rest of the language, across files: a decorated
 // method that runs this program again, an async generator of what a child
-// prints, the fields of an ExecError narrowed by checks, unknown values, a
+// prints, the fields of an ExecFileTextError narrowed by kind, unknown values, a
 // child that reads its input with readLine of tz:io, and the overflow
 // warnings for numbers a child printed.
 import { execSync, spawnSync } from "node:child_process"
@@ -36,20 +36,20 @@ if (at >= 0) {
   }
   console.log(total, ran)
 
-  // 2. A child that fails: an Err of an ExecError, whose fields checks
-  // narrow.
+  // 2. A child that fails: an Err of an ExecFileTextError, whose fields a
+  // check of kind narrows.
   const failed = runner.text("fail", "3")
-  console.log(failed.match(out => `ok ${out}`, e => `status ${e.status ?? -1}`))
+  console.log(failed.match(out => `ok ${out}`, e => e.kind == "EXEC_FILE_TEXT_ERROR_EXIT" ? `status ${e.status}` : e.message))
   console.log(runner.text("count", "1").map(out => out.trim()).unwrapOr("-"))
   const four = runner.text("fail", "4")
-  if (four.isErr()) {
+  if (four.isErr() && four.error.kind == "EXEC_FILE_TEXT_ERROR_EXIT") {
     const out = four.error.stdout
     const problem = four.error.stderr
     if (out != undefined && problem != undefined)
       console.log(four.error.status, out.trim(), problem.trim())
   }
   const five = execSync(`"${process.execPath}" "${process.argv[1] ?? ""}" --child fail 5`, { stdio: "pipe" })
-  if (five.isErr()) {
+  if (five.isErr() && five.error.kind == "EXEC_BYTES_ERROR_EXIT") {
     const out = five.error.stdout
     const problem = five.error.stderr
     if (out != undefined && problem != undefined)
@@ -58,8 +58,8 @@ if (at >= 0) {
 
   // 3. Results as unknown values.
   const outputs: unknown[] = [
-    spawnSync(process.execPath, [...runner.self, "count", "1"]).map(r => r.stdout).unwrapOr(Buffer.alloc(0)),
-    spawnSync(process.execPath, [...runner.self, "count", "1"], { encoding: "utf8" }).map(r => r.stdout).unwrapOr(""),
+    spawnSync(process.execPath, [...runner.self, "count", "1"]).map(r => r.stdout ?? Buffer.alloc(0)).unwrapOr(Buffer.alloc(0)),
+    spawnSync(process.execPath, [...runner.self, "count", "1"], { encoding: "utf8" }).map(r => r.stdout ?? "").unwrapOr(""),
   ]
   for (const out of outputs)
     console.log(typeof out, out instanceof Buffer ? out.toString("hex") : out)

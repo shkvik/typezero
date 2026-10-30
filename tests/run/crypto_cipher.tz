@@ -1,8 +1,7 @@
 // same-as-node
 // AES-GCM, CBC and CTR and ChaCha20-Poly1305 of the direct layer. crypto_cipher_aesni and
 // crypto_cipher_soft run the same with the CPU features OpenSSL may use turned off.
-// createCipheriv, final() and getAuthTag() give a Result: a key or an IV of a
-// wrong length, a tag that does not match and calls out of order are an Err.
+// createCipheriv, final() and getAuthTag() give a Result; their errors are in crypto_errors.
 import { createCipheriv, createDecipheriv } from "node:crypto"
 
 const key = Buffer.alloc(32, 7)
@@ -30,10 +29,6 @@ const g192 = must(createCipheriv("aes-192-gcm", key.subarray(0, 24), Buffer.allo
 console.log(g192.update("x".repeat(1000), "utf8", "base64").length + must(g192.final("base64")).length,
             must(g192.getAuthTag()).toString("hex"))
 
-const bad = must(createDecipheriv("aes-256-gcm", key, iv))
-bad.setAuthTag(Buffer.alloc(16))
-bad.update(sealed)
-show(bad.final())
 
 // CBC with padding, without it, and the pieces a decipher holds back.
 const cbc = must(createCipheriv("aes-256-cbc", key, Buffer.alloc(16, 3)))
@@ -46,13 +41,6 @@ console.log(pieces.map(p => p.length).join(","), must(dc.final()).length)
 const raw = must(createCipheriv("aes-128-cbc", key.subarray(0, 16), Buffer.alloc(16)))
 raw.setAutoPadding(false)
 console.log(raw.update(Buffer.alloc(32, 1)).toString("hex"), must(raw.final()).length)
-const raw2 = must(createCipheriv("aes128", key.subarray(0, 16), Buffer.alloc(16)))
-raw2.setAutoPadding(false)
-raw2.update(Buffer.alloc(5))
-show(raw2.final())
-const wrong = must(createDecipheriv("aes-256-cbc", key, Buffer.alloc(16, 4)))
-wrong.update(bytes)
-show(wrong.final())
 
 // CTR across pieces of any length.
 const ctr = must(createCipheriv("aes-192-ctr", key.subarray(0, 24), Buffer.alloc(16, 0xff)))
@@ -71,35 +59,9 @@ const cd = must(createDecipheriv("chacha20-poly1305", key, iv, { authTagLength: 
 cd.setAAD(Buffer.from("aad"))
 cd.setAuthTag(must(cc.getAuthTag()))
 console.log(cd.update(ccOut).toString("utf8") == text)
-show(cd.final())
-
-// Errors of the arguments: createCipheriv gives an Err.
-show(createCipheriv("aes-256-gcm", Buffer.alloc(31), iv))
-show(createCipheriv("aes-256-cbc", key, iv))
-show(createCipheriv("chacha20-poly1305", key, Buffer.alloc(8)))
-// Errors of the order of calls: getAuthTag() before final() is an Err, and
-// what goes wrong in setAAD, setAuthTag and update is the Err of the next
-// final().
-show(must(createCipheriv("aes-256-gcm", key, iv)).getAuthTag())
-const aad = must(createCipheriv("aes-256-cbc", key, Buffer.alloc(16)))
-aad.setAAD(Buffer.alloc(1))
-show(aad.final())
-const short = must(createDecipheriv("aes-256-gcm", key, iv))
-short.setAuthTag(Buffer.alloc(3))
-show(short.final())
-const long = must(createDecipheriv("aes-256-gcm", key, iv, { authTagLength: 8 }))
-long.setAuthTag(Buffer.alloc(16))
-show(long.final())
-const done = must(createCipheriv("aes-256-ctr", key, Buffer.alloc(16)))
-show(done.final())
-show(done.final())
-console.log(done.update("x").length)
+console.log(must(cd.final()).length)
 
 export const ciphered = true
-
-function show<T>(r: Result<T, CryptoError>) {
-  console.log(r.isErr() ? `${r.error.code} | ${r.error.message}` : "no error")
-}
 
 function must<T, E>(r: Result<T, E>): T {
   if (r.isErr()) {

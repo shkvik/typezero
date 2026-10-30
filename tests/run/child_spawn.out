@@ -17,9 +17,8 @@ true
 a true
 inherited
 after true 0
-spawnSync tz-no-such-program ENOENT ENOENT -4058 spawnSync tz-no-such-program tz-no-such-program [ 'a', 'b' ]
-true true true
-ETIMEDOUT true true SIGTERM true
+ENOENT
+ETIMEDOUT SIGTERM true
 ETIMEDOUT SIGKILL
-ENOBUFS -4060 SIGTERM true
+ENOBUFS SIGTERM true
 100000

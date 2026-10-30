@@ -1,21 +1,42 @@
 // Readable of node:stream (docs/streams.md): flowing mode with 'data',
 // paused mode with 'readable' and read(), unshift(), pause() and resume(),
-// in node's order of events and calls of _read(). undefined ends a stream,
-// as null does in node (tz has no null): the expected output is node's with
-// push(null). Who listens to a stream listens for 'error' too.
+// in node's order of events and calls of onRead() (_read() in node).
+// pushEnd() ends a stream, as push(null) does in node: the expected output is
+// node's. Who listens to a stream listens for 'error' too.
 import { Readable } from "node:stream"
 const log = (s: string) => console.log(s)
 
 // Flowing: the chunks of read(), then 'end' and 'close'.
 let n = 0
-const r = new Readable({
-  read(size) {
+class Chunks extends Readable {
+  onRead(size) {
     log(`read ${size}`)
     n++
     if (n <= 3) this.push(`chunk${n}`)
-    else this.push(undefined)
-  },
-})
+    else this.pushEnd()
+  }
+}
+class Later extends Readable {
+  private chunks: string[]
+  constructor(chunks: string[]) {
+    super({ highWaterMark: 4 })
+    this.chunks = chunks
+  }
+  onRead(size) {
+    const next = this.chunks.shift()
+    log(`_read ${size} -> ${next ?? "EOF"}`)
+    if (next == undefined) {
+      this.pushEnd()
+      return
+    }
+    const chunk: string = next
+    setTimeout(() => this.push(chunk), 1)
+  }
+}
+class Manual extends Readable {
+  onRead() {}
+}
+const r = new Chunks()
 r.on("error", (e) => log(`error ${e.message}`))
 r.on("data", (chunk) => log(`data ${chunk.toString()}`))
 r.on("end", () => log("end"))
@@ -28,16 +49,7 @@ log("sync done")
 // Paused: 'readable', and read() until it gives undefined.
 r.on("close", () => {
   log("close")
-  const chunks = ["ab", "cd", "ef"]
-  const p = new Readable({
-    highWaterMark: 4,
-    read(size) {
-      const next = chunks.shift()
-      log(`_read ${size} -> ${next ?? "EOF"}`)
-      if (next == undefined) this.push(undefined)
-      else setTimeout(() => this.push(next), 1)
-    },
-  })
+  const p = new Later(["ab", "cd", "ef"])
   p.on("error", (e) => log(`p error ${e.message}`))
   p.on("readable", () => {
     log(`readable len=${p.readableLength()}`)
@@ -55,7 +67,7 @@ r.on("close", () => {
 
 // read(n), unshift(), pause() and resume().
 function more() {
-  const s = new Readable({ read() {} })
+  const s = new Manual()
   s.push("hello ")
   s.push("world")
   log(`len ${s.readableLength()}`)
@@ -65,7 +77,7 @@ function more() {
   log(`len ${s.readableLength()}`)
   const all = s.read()
   log(`all ${all?.toString()}`)
-  s.push(undefined)
+  s.pushEnd()
   s.on("error", (e) => log(`s error ${e.message}`))
   s.on("end", () => log("s end"))
   s.resume()

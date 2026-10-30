@@ -48,6 +48,7 @@
 #include "compiler/check/generics/generic_class_checker/generic_class_checker.h"
 #include "compiler/check/generics/generic_class_instantiator/generic_class_instantiator.h"
 #include "compiler/check/generics/generic_instantiator/generic_instantiator.h"
+#include "compiler/check/generics/generic_widening/generic_widening.h"
 #include "compiler/check/generics/type_arg_inferrer/type_arg_inferrer.h"
 #include "compiler/check/generics/type_params/type_params.h"
 #include "compiler/check/iterators/generator_checker/generator_checker.h"
@@ -99,6 +100,7 @@
 #include "compiler/instances/constructor_calls/constructor_calls.h"
 #include "compiler/instances/late_classes/late_classes.h"
 #include "compiler/library/builtin_modules/builtin_module_checker/builtin_module_checker.h"
+#include "compiler/library/builtin_modules/builtin_module_types/builtin_module_types.h"
 #include "compiler/library/builtin_modules/runtime_object_checker/runtime_object_checker.h"
 #include "compiler/library/bytes/buffer_checker/buffer_checker.h"
 #include "compiler/library/bytes/buffer_static_checker/buffer_static_checker.h"
@@ -107,9 +109,11 @@
 #include "compiler/library/bytes/bytes_new_checker/bytes_new_checker.h"
 #include "compiler/library/bytes/typed_array_checker/typed_array_checker.h"
 #include "compiler/library/child_process/child_checker/child_checker.h"
+#include "compiler/library/child_process/child_error_types/child_error_types.h"
 #include "compiler/library/console/console_checker/console_checker.h"
 #include "compiler/library/crypto/crypto_args/crypto_args.h"
 #include "compiler/library/crypto/crypto_checker/crypto_checker.h"
+#include "compiler/library/crypto/crypto_error_types/crypto_error_types.h"
 #include "compiler/library/crypto/crypto_function_checker/crypto_function_checker.h"
 #include "compiler/library/crypto/crypto_method_checker/crypto_method_checker.h"
 #include "compiler/library/crypto/key_pair_checker/key_pair_checker.h"
@@ -124,6 +128,7 @@
 #include "compiler/library/events/event_target_checker/event_target_checker.h"
 #include "compiler/library/fs/fs_checker/fs_checker.h"
 #include "compiler/library/fs/fs_declarer/fs_declarer.h"
+#include "compiler/library/fs/fs_error_types/fs_error_types.h"
 #include "compiler/library/fs/fs_promises_checker/fs_promises_checker.h"
 #include "compiler/library/fs/readline_checker/readline_checker.h"
 #include "compiler/library/intl/intl_checker/intl_checker.h"
@@ -280,6 +285,7 @@ Checker::Checker(AstContext &ctx, Diagnostics &diags) : ctx_(ctx), diags_(diags)
   aliasInstantiatorPart_ = std::make_unique<AliasInstantiator>(*this);
   genericClassCheckerPart_ = std::make_unique<GenericClassChecker>(*this);
   genericClassInstantiatorPart_ = std::make_unique<GenericClassInstantiator>(*this);
+  genericWideningPart_ = std::make_unique<GenericWidening>(*this);
   returnInferrerPart_ = std::make_unique<ReturnInferrer>(*this);
   classBasesPart_ = std::make_unique<ClassBases>(*this);
   classLinksPart_ = std::make_unique<ClassLinks>(*this);
@@ -338,6 +344,10 @@ Checker::Checker(AstContext &ctx, Diagnostics &diags) : ctx_(ctx), diags_(diags)
   builtinModuleCheckerPart_ = std::make_unique<BuiltinModuleChecker>(*this);
   fsCheckerPart_ = std::make_unique<FsChecker>(*this);
   fsDeclarerPart_ = std::make_unique<FsDeclarer>(*this);
+  fsErrorTypesPart_ = std::make_unique<FsErrorTypes>(*this);
+  builtinModuleTypesPart_ = std::make_unique<BuiltinModuleTypes>(*this);
+  childErrorTypesPart_ = std::make_unique<ChildErrorTypes>(*this);
+  cryptoErrorTypesPart_ = std::make_unique<CryptoErrorTypes>(*this);
   pathCheckerPart_ = std::make_unique<PathChecker>(*this);
   osCheckerPart_ = std::make_unique<OsChecker>(*this);
   runtimeObjectCheckerPart_ = std::make_unique<RuntimeObjectChecker>(*this);

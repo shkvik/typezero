@@ -36,16 +36,18 @@ Certificate *tz_openssl_x509_new(const TzType *type, const void *value) {
   if (!tz_crypto_data(&d, type, value, TZ_ENC_UTF8, "buffer")) {
     return NULL;
   }
-  BIO *bio = BIO_new_mem_buf(d.data, (int)d.length);
-  X509 *cert = PEM_read_bio_X509_AUX(bio, NULL, NULL, NULL);
-  if (!cert) {
+  X509 *cert = NULL;
+  if (tz_crypto_looks_like_pem(d.data, d.length)) {
+    BIO *bio = BIO_new_mem_buf(d.data, (int)d.length);
+    cert = PEM_read_bio_X509_AUX(bio, NULL, NULL, NULL);
+    BIO_free(bio);
+  } else {
     const unsigned char *p = d.data;
     cert = d2i_X509(NULL, &p, (long)d.length);
   }
-  BIO_free(bio);
   tz_crypto_data_done(&d);
   if (!cert) {
-    tz_openssl_fail("ERR_CRYPTO_OPERATION_FAILED", "Failed to parse the certificate");
+    tz_openssl_fail("ERR_CRYPTO_OPERATION_FAILED", "could not read the certificate");
     return NULL;
   }
   ERR_clear_error();
@@ -236,7 +238,8 @@ TzKey *tz_openssl_key_of(void *pkey, int private_key);
 TzKey *tz_openssl_x509_public_key(const Certificate *c) {
   EVP_PKEY *pkey = X509_get_pubkey(c->cert);
   if (!pkey) {
-    tz_openssl_fail("ERR_CRYPTO_OPERATION_FAILED", "Failed to get the public key");
+    tz_openssl_fail("ERR_CRYPTO_OPERATION_FAILED",
+                    "could not get the public key of the certificate");
     return NULL;
   }
 
@@ -319,9 +322,10 @@ int32_t tz_openssl_x509_check_issued(const Certificate *c, const Certificate *is
 
 int32_t tz_openssl_x509_check_private_key(const Certificate *c, const TzKey *key) {
   if (key->type != TZ_KEY_PRIVATE) {
+    const char *got = key->type == TZ_KEY_SECRET ? "secret" : "public";
+    tz_crypto_note_key_types(got, "private");
     tz_crypto_fail("ERR_CRYPTO_INVALID_KEY_OBJECT_TYPE",
-                   "Invalid key object type %s, expected private.",
-                   key->type == TZ_KEY_SECRET ? "secret" : "public");
+                   "checkPrivateKey needs a private key, but this one is %s", got);
     return 0;
   }
   int ok = X509_check_private_key(c->cert, (EVP_PKEY *)key->pkey) == 1;
@@ -332,9 +336,10 @@ int32_t tz_openssl_x509_check_private_key(const Certificate *c, const TzKey *key
 
 int32_t tz_openssl_x509_verify(const Certificate *c, const TzKey *key) {
   if (key->type != TZ_KEY_PUBLIC) {
+    const char *got = key->type == TZ_KEY_SECRET ? "secret" : "private";
+    tz_crypto_note_key_types(got, "public");
     tz_crypto_fail("ERR_CRYPTO_INVALID_KEY_OBJECT_TYPE",
-                   "Invalid key object type %s, expected public.",
-                   key->type == TZ_KEY_SECRET ? "secret" : "private");
+                   "verify needs the public key of the issuer, but this one is %s", got);
     return 0;
   }
   int ok = X509_verify(c->cert, (EVP_PKEY *)key->pkey) > 0;

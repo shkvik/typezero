@@ -1,0 +1,54 @@
+// A class with a type argument goes where the same class with a wider one is wanted, when
+// nothing outside it can put a value of that type into it (docs/generics.md): Box<A> is a
+// Box<StreamError>, because put() is protected. Two kinds of box from one function join into
+// Box<A | B>, and a switch on kind works on the joined error.
+interface StreamError {
+  message: string
+}
+interface A extends StreamError {
+  kind: "A"
+}
+interface B extends StreamError {
+  kind: "B"
+}
+class Box<E extends StreamError = StreamError> {
+  private value?: E
+  public constructor() {}
+  protected put(value: E): void {
+    this.value = value
+  }
+  public get(): E | undefined {
+    return this.value
+  }
+  public async *[Symbol.asyncIterator](): AsyncGenerator<Result<int, E>> {
+    if (this.value != undefined) yield err(this.value)
+  }
+}
+class BoxA extends Box<A> {
+  public constructor() {
+    super()
+    this.put({ kind: "A", message: "a" })
+  }
+}
+class BoxB extends Box<B> {
+  public constructor() {
+    super()
+    this.put({ kind: "B", message: "b" })
+  }
+}
+function pick(n: int) {
+  if (n > 0) return new BoxA()
+  return new BoxB()
+}
+function wide(box: Box) {
+  console.log(box.get()?.message)
+}
+wide(new BoxA())
+for await (const r of pick(1)) {
+  if (r.isErr()) {
+    switch (r.error.kind) {
+      case "A": console.log("got A"); break
+      case "B": console.log("got B"); break
+    }
+  }
+}

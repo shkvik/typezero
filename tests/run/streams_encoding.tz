@@ -1,15 +1,18 @@
 // setEncoding() makes the chunks strings from that point on (the type of
 // the stream changes there, docs/streams.md, section 2), keeping a character
 // that a chunk cuts until the next; an encoding at creation gives strings
-// too. undefined ends a stream, as null does in node: the output is node's
-// with push(null).
+// too. pushEnd() ends a stream, as push(null) does in node: the output is
+// node's.
 import { PassThrough, Readable } from "node:stream"
 const log = (s: string) => console.log(s)
-const r = new Readable({ read() {} })
+class Manual extends Readable {
+  onRead() {}
+}
+const r = new Manual()
 r.push(Buffer.from([0xd0, 0xbf, 0xd1]))
 r.setEncoding("utf8")
 r.push(Buffer.from([0x80, 0xd0, 0xb8]))
-r.push(undefined)
+r.pushEnd()
 r.on("error", (e) => log(`error ${e.message}`))
 r.on("data", (s) => log(`data ${JSON.stringify(s)} ${typeof s} ${s.length}`))
 r.on("end", () => log("end"))

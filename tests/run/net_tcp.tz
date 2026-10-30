@@ -1,8 +1,8 @@
 // node:net over the runtime's TCP (docs/net.md, section 7): a server whose
 // handler gets each connection as a Socket, a client Socket that connects
 // with a Result, writes and reads as a stream of node, and ends; the errors
-// of connect have a kind; stop() of the server, as tz:http has it. Only
-// 127.0.0.1.
+// of connect have a kind; stop() of the server, as tz:http has it; a socket
+// the other side resets ends with SocketError. Only 127.0.0.1.
 import { Server, Socket, isIP } from "node:net"
 
 const server = new Server({ port: 0, hostname: "127.0.0.1" }, async socket => {
@@ -46,3 +46,29 @@ if (refusedResult.isErr()) {
   console.log(e.kind, e.code, e.message.replaceAll(String(listening.port), "PORT"))
 }
 console.log(isIP("127.0.0.1"), isIP("::1"), isIP("example.com"))
+
+const resetting = new Server({ port: 0, hostname: "127.0.0.1" }, async socket => {
+  socket.reset()
+})
+const resettingResult = resetting.listen()
+if (resettingResult.isOk()) {
+  const port = resettingResult.value.port
+  const victim = new Socket({ host: "127.0.0.1", port: port })
+  const victimResult = await victim.connect()
+  if (victimResult.isOk()) {
+    for await (const chunkResult of victim) {
+      if (chunkResult.isErr()) {
+        const e = chunkResult.error
+        switch (e.kind) {
+          case "SOCKET_ERROR_NETWORK":
+            console.log(e.kind, e.code, e.message.replaceAll(String(port), "PORT"), e.syscall != "")
+            break
+          default:
+            console.log(e.kind, e.message)
+        }
+        break
+      }
+    }
+  }
+  await resettingResult.value.stop()
+}

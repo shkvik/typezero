@@ -1,4 +1,6 @@
-USED ERR_STREAM_LOCKED: the stream is locked: another reader holds it; read it with that reader
+READER_ERROR ERR_STREAM_LOCKED: the stream is locked: another reader holds it; read it with that reader
 1
-true
 ERR_READER_RELEASED: the reader has released the stream: get a new reader with getReader()
+CONTROLLER_CLOSED_ERROR ERR_INVALID_STATE: enqueue() after close(): this stream has already been closed
+CONTROLLER_CLOSED_ERROR ERR_INVALID_STATE: close() was already called on this stream
+nothing

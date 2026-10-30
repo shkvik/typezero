@@ -40,8 +40,8 @@ console.log(a, b, c)
 const view = new DataView(new ArrayBuffer(8))
 view.setUint32(0, 0xdeadbeef)
 view.setFloat32(4, 1.5, true)
-const whole = createHash("sha256").update(new Uint8Array(view.buffer)).digest("hex")
-const halves = createHash("sha256")
+const whole = must(createHash("sha256")).update(new Uint8Array(view.buffer)).digest("hex")
+const halves = must(createHash("sha256"))
   .update(new Uint8Array(view.buffer, 0, 4))
   .update(Buffer.from(view.buffer, 4, 4))
   .digest("hex")
@@ -54,7 +54,7 @@ async function* lines(count: int) {
     yield `line ${i}`
   }
 }
-const mac = createHmac("sha256", key)
+const mac = must(createHmac("sha256", key))
 for await (const line of lines(3)) mac.update(line).update("\n")
 console.log(mac.digest("base64"))
 

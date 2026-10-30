@@ -65,6 +65,7 @@ Refs FlowBuiltins::builtin(CallExpr *c, MemberExpr *member, const Refs &receiver
   case Builtin::LibFsWrite:
   case Builtin::LibFsClose:
   case Builtin::LibStdinChunk:
+  case Builtin::LibStdinFailed:
   case Builtin::LibStdWrite:
   case Builtin::LibOrder:
     return {};

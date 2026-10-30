@@ -18,8 +18,8 @@ new Request("http://example.com/", { method: "TRACE" })
 new Request("http://example.com/", { method: "get", body: "x" })
 // expect-error: a GET request has no body (a request without 'method' is a GET); give the method, e.g. 'method: "POST"'
 new Request("http://example.com/", { body: "x" })
-// expect-error: a request with a stream for its body needs 'duplex: "half"', as in node
-new Request("http://example.com/", { method: "POST", body: new ReadableStream<Uint8Array>() })
+// expect-error: 'new Response' and 'new Request' take no streams: a stream is sent with 'Response.stream(stream, init)', 'Request.stream(input, stream, options)' or 'fetch(url, { body: stream })'
+new Request("http://example.com/", { method: "POST", body: new ReadableStream<Uint8Array>(), duplex: "half" })
 // expect-error: type '"full"' is not assignable to type '"half" | undefined' of field 'duplex'
 new Request("http://example.com/", { method: "POST", body: "x", duplex: "full" })
 // expect-error: 'bad name' is not a name of a header: a name is letters, digits and !#$%&'*+-.^_`|~, without spaces
@@ -54,9 +54,9 @@ u.setProtocol("https:")
 console.log(h, u.href())
 // Fields that do something only in a browser are not there (docs/net.md,
 // section 2).
-// expect-error: type 'RequestInit' has no field 'mode'
+// expect-error: type 'RequestInit<never>' has no field 'mode'
 const browser = await fetch("http://127.0.0.1:1/", { mode: "cors" })
-// expect-error: type 'RequestInit' has no field 'keepalive'
+// expect-error: type 'RequestOptions' has no field 'keepalive'
 const kept = new Request("http://example.com/", { keepalive: true })
 // expect-error: property 'credentials' does not exist on type 'Request'
 console.log(new Request("http://example.com/").credentials)

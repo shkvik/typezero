@@ -55,10 +55,9 @@ public listen(): Result<Listening, ListenError> {
   });
   if (openedResult.isErr()) {
     return err({
-      kind: "SERVER",
+      kind: "LISTEN_ERROR",
       code: openedResult.error.code,
       message: openedResult.error.message,
-      errno: openedResult.error.errno,
       syscall: openedResult.error.syscall,
       address: this.hostname,
       port: this.port,
@@ -139,10 +138,9 @@ function doubleOr(r: Result<int, string>, fallback: int) {   // другая ф�
 
 ```ts
 export type ListenError = {
-  kind: "SERVER";
+  kind: "LISTEN_ERROR";
   code: ListenErrorCode;
   message: string;
-  errno: int;
   syscall: string;
   address: string;
   port: int;
@@ -161,8 +159,11 @@ export type ListenErrorCode =
 - **У каждого API своя ошибка**, и в ней только те поля, что правда бывают. У `ListenError`
   нет `path` и `dest`: при `listen` их не бывает. Общей `SystemError` на всю библиотеку не
   будет.
-- **Метка вида — строка:** `kind: "SERVER"` (ошибка ядра сервера: сокет, сертификат). Не
-  `enum`: строковые литералы tz и так проверяет.
+- **Метка вида — строка, уникальная во всей библиотеке** (31 октября, Ф9): имя типа и причина
+  в SCREAM_CASE — `FETCH_ERROR_NETWORK`, `READ_FILE_ERROR_NOT_FOUND`; у типа с одной причиной —
+  имя типа: `kind: "LISTEN_ERROR"`. Одна проверка `kind` говорит, какая функция сломалась и
+  почему. Не `enum`: строковые литералы tz и так проверяет. Поля `errno` нет ни у одной ошибки
+  (Ф7), `syscall` есть.
 - **Код — объединение строк.** `switch` по `code` проверяется на полноту, а опечатка в коде —
   ошибка компиляции.
 - **`message` — понятным языком:** что не вышло, где и почему, а если ясно, как чинить, — что
@@ -171,11 +172,11 @@ export type ListenErrorCode =
   остальными полями. Поля `cause` нет: всё нужное — в `message` и в полях ошибки. Не так:
   `fetch failed`, `listen EADDRINUSE: address already in use` (тексты node).
 - **Коды и метки ошибок — SCREAM_CASE:** `"EADDRINUSE"`, `"TIMEOUT_ERR"`, `"ERR_INVALID_URL"`,
-  `kind: "SERVER"`. Не `"bad_url"` и не `"badUrl"`: так же пишут коды node и системы, и все
+  `kind: "LISTEN_ERROR"`. Не `"bad_url"` и не `"badUrl"`: так же пишут коды node и системы, и все
   коды выглядят одинаково. Свои коды — с префиксом `ERR_` (`ERR_BODY_USED`), «кривое на входе» —
   `ERR_INVALID_…`; системные (`ECONNREFUSED`), OpenSSL, `TIMEOUT_ERR`, `UNKNOWN` — как есть.
-  `kind` есть у **каждого** типа ошибки (29 октября): `RegexError` — `"REGEX"`, `UrlError` —
-  `"URL"`, `JsonError` — `"JSON"` и так далее.
+  `kind` есть у **каждого** типа ошибки (29 октября): `RegexError` — `"REGEX_ERROR"`, `UrlError`
+  — `"URL_ERROR"`, `JsonError` — `"JSON_ERROR"` и так далее.
 - **Поля выписаны все**, без `extends`: всю ошибку видно в одном месте.
 
 ## 2. Без вложенных вызовов
@@ -391,6 +392,11 @@ await listeningResult.value.stop();
   потом, ни пар необязательных полей, которые задаются вместе.
 - **Если создание может не получиться**, конструктор закрыт, а объект делает статическая
   функция с `Result` ([objects.md](objects.md), раздел 6): `Port.parse(text)`.
+- **Конструктор берёт только то, что точно не даст ошибки** — ни при создании, ни потом, при
+  работе (30.10). Всё, что может упасть, идёт через метод: `new Response(тело)` берёт строку,
+  байты, `URLSearchParams`, `FormData` — из них сразу готовые данные; поток (любой, и с `never`)
+  — только `Response.stream(поток)`: его могли уже начать читать, он может зависнуть или упасть.
+  Так же `new Request` и `Request.stream`.
 
 Не так (так сейчас в `library/http`):
 
@@ -567,5 +573,6 @@ export class Listening {
 - **`.d.tz`** компилятор читает и сверяет с модулем с 28 октября ([modules.md](modules.md),
   раздел 7); объявлен пока `tz:http` (`library/http/http.d.tz`). Остальное описание лежит в
   `editors/types/tz.d.ts`, мосты — прямо в модулях, ручки — `object`.
-- **`SystemError`** ещё есть: своя ошибка у каждого API — переделка по модулям. Тексты
-  `message` пока как у node — их перепишем там же.
+- **`SystemError` убран** (31 октября): у каждого API своя ошибка. Объявленные функции рантайма
+  в библиотеке отдают `NativeError` из `tz:intrinsics` — программа его не видит, библиотека
+  переводит его в ошибку своего API.

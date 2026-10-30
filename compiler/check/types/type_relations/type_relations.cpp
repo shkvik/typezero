@@ -3,6 +3,7 @@
 #include "compiler/check/classes/class_value_checker/class_value_checker.h"
 #include "compiler/check/functions/function_value_checker/function_value_checker.h"
 #include "compiler/check/generics/generic_checker/generic_checker.h"
+#include "compiler/check/generics/generic_widening/generic_widening.h"
 #include "compiler/check/iterators/iterable_checker/iterable_checker.h"
 #include "compiler/check/objects/object_checker/object_checker.h"
 #include "compiler/check/types/conditional_types/conditional_types.h"
@@ -105,6 +106,9 @@ bool TypeRelations::isImplicitlyConvertible(const Type *from, const Type *to) {
     return from->isMatch() && to->isMatch() && to->matchGroups() < 0 && !from->field("indices");
   }
   if (from->isObject() && to->isObject() && from->isSubtypeOf(to)) {
+    return true;
+  }
+  if (GenericWidening::widens(from, to)) {
     return true;
   }
   if (from->isObject() && to->isObject() && !from->isClass() && !to->isClass() &&
@@ -489,12 +493,20 @@ Expr *TypeRelations::coerce(Expr *expr, const Type *to, llvm::StringRef what) {
   };
   llvm::ArrayRef<const Type *> wanted =
       toObject->isUnion() ? toObject->members() : llvm::ArrayRef<const Type *>(toObject);
-  if (const ClassDecl *given = stream(fromObject);
-      given && !given->typeArgs[1]->isNever() &&
-      llvm::any_of(wanted, [&](const Type *m) { return stream(m) != nullptr; })) {
-    message += "; a stream with errors of its own is sent with a method that takes their type: "
-               "'Response.stream(stream, init)' for a response, 'fetch(url, { body: stream })' "
-               "for a request";
+  auto body = [](const Type *m) {
+    const ClassDecl *cls = m->classDecl();
+    return cls && cls->library && cls->name == "FormData";
+  };
+  if (stream(fromObject) && llvm::any_of(wanted, body) &&
+      llvm::none_of(wanted, [&](const Type *m) { return stream(m) != nullptr; })) {
+    message += "; 'new Response' and 'new Request' take no streams: a stream is sent with "
+               "'Response.stream(stream, init)', 'Request.stream(input, stream, options)' or "
+               "'fetch(url, { body: stream })'";
+  }
+  if (llvm::StringRef(fromObject->name()).starts_with("RequestInit") &&
+      toObject->name() == "RequestOptions") {
+    message += "; 'new Request' takes 'RequestOptions', whose body is never a stream; a "
+               "'RequestInit' goes to 'fetch(url, init)'";
   }
   if (to->isNever()) {
     message += "; nothing fits 'never': if it comes from a type argument left out, write it, "
@@ -532,6 +544,8 @@ Expr *TypeRelations::coerce(Expr *expr, const Type *to, llvm::StringRef what) {
   } else if (fromClass && fromClass->literal && toObject->isObject()) {
     message += "; an object literal with methods has a type of its own; to give it this type, "
                "write its functions as fields, 'f: () => ...'";
+  } else if (std::string why = GenericWidening::whyNot(fromObject, toObject); !why.empty()) {
+    message += why;
   } else if (fromObject->isClass() && toObject->isObject() && fromObject != toObject) {
     message += toObject->isClass()
                    ? "; classes are told apart by their names, whatever their fields, and '" +

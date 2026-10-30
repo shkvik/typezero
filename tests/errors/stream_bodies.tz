@@ -1,7 +1,11 @@
-// A stream with an error of its own is not a body of new Response or new
-// Request: it goes with Response.stream or fetch. A fetch without such a
-// stream has no ERR_STREAM_FAILED, and details is read after a check.
-type DiskError = { kind: "DISK"; code: "EIO"; message: string }
+// A stream is never a body of new Response or new Request (docs/net.md,
+// section 3): it goes with Response.stream, Request.stream or fetch. A fetch
+// without a stream has no ERR_STREAM_FAILED, and details is read after a
+// check. Errors of a stream extend StreamError.
+interface DiskError extends StreamError {
+  kind: "DISK"
+  code: "EIO"
+}
 
 const file = new ReadableStream<Uint8Array, DiskError>({
   pull: async c => {
@@ -9,10 +13,13 @@ const file = new ReadableStream<Uint8Array, DiskError>({
   },
 })
 
-// expect-error: a stream with errors of its own is sent with a method that takes their type: 'Response.stream(stream, init)' for a response, 'fetch(url, { body: stream })' for a request
+// expect-error: 'new Response' and 'new Request' take no streams: a stream is sent with 'Response.stream(stream, init)', 'Request.stream(input, stream, options)' or 'fetch(url, { body: stream })'
 const response = new Response(file)
-// expect-error: of field 'body'; a stream with errors of its own is sent with a method that takes their type
+// expect-error: of field 'body'; 'new Response' and 'new Request' take no streams
 const request = new Request("http://127.0.0.1:1/", { method: "POST", body: file, duplex: "half" })
+const init: RequestInit = { method: "POST", body: "x" }
+// expect-error: 'new Request' takes 'RequestOptions', whose body is never a stream; a 'RequestInit' goes to 'fetch(url, init)'
+const fromInit = new Request("http://127.0.0.1:1/", init)
 
 const sent = await fetch("http://127.0.0.1:1/", { method: "POST", body: file, duplex: "half" })
 // expect-error: narrow it first, e.g. 'if (sent.error.code == "ERR_STREAM_FAILED")'
@@ -22,10 +29,50 @@ const page = await fetch("http://127.0.0.1:1/")
 // expect-error: operator '==' cannot be applied to types
 if (page.isErr() && page.error.code == "ERR_STREAM_FAILED") console.log("never")
 
+// A stream without its type of errors fails with any StreamError, and gives
+// only the message.
 const plain = new ReadableStream<int>({
   start: c => {
-    // expect-error: nothing fits 'never': if it comes from a type argument left out, write it, e.g. 'new ReadableStream<int, MyError>(...)' for a stream that fails with MyError
+    // expect-error: type 'StreamError' has no field 'kind'; an object must have exactly the fields of its type; an error with fields of its own has a type of its own, e.g. 'interface MyError extends StreamError { ... }', and the stream names it
+    // expect-error: type 'StreamError' has no field 'code'
     c.error({ kind: "DISK", code: "EIO", message: "disk failed" })
   },
 })
-console.log(response, request, plain)
+for await (const n of plain) {
+  // expect-error: property 'kind' does not exist on type 'StreamError'
+  if (n.isErr()) console.log(n.error.kind)
+}
+
+// A type of errors that does not say it extends StreamError is not one.
+type LooseError = { kind: "LOOSE"; message: string }
+function loose(): ReadableStream<int, LooseError> {
+  const stream = new ReadableStream<int, LooseError>({ start: c => { c.close() } })
+
+  return stream
+}
+function anyStream(stream: ReadableStream<int>) {
+  console.log(stream.locked())
+}
+// expect-error: 'LooseError' does not extend 'StreamError': a type goes where a wider one is wanted only when it says so, e.g. 'interface LooseError extends StreamError { ... }'
+anyStream(loose())
+
+// After close() the stream takes nothing: enqueue() or close() again breaks it
+// for its reader with ControllerClosedError.
+const twice = new ReadableStream<int, never>({
+  start: c => {
+    c.enqueue(1)
+    c.close()
+    c.enqueue(2)
+  },
+})
+for await (const n of twice) {
+  if (n.isErr()) {
+    // expect-error: the switch does not handle "CONTROLLER_CLOSED_ERROR"
+    switch (n.error.kind) {
+      case "READER_ERROR":
+        console.log(n.error.code)
+        break
+    }
+  }
+}
+console.log(response, request, fromInit, plain)

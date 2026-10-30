@@ -260,30 +260,8 @@ int tz_fs_path_init(Path *p, void *obj, uint64_t meta, TzMaker make, const char 
     if (p->given.data[i] != 0) {
       continue;
     }
-    TzBuf m;
-    tz_buf_init(&m);
-    tz_buf_ascii(&m, "The argument 'path' must be a string, Uint8Array, or URL without null bytes. "
-                     "Received '");
-    for (size_t k = 0; k < p->given.length; ++k) {
-      if (p->given.data[k] == 0) {
-        tz_buf_ascii(&m, "\\x00");
-      } else {
-        tz_buf_push(&m, p->given.data[k]);
-      }
-    }
-    tz_buf_push(&m, '\'');
-    TzSystemErrorParts parts;
-    memset(&parts, 0, sizeof parts);
-    parts.message = tz_buf_take(&m);
-#ifdef _WIN32
-    parts.errno_value = tz_fs_errors[E_EINVAL].windows;
-#else
-    parts.errno_value = tz_fs_errno_failure(EINVAL).number;
-#endif
-    parts.code = tz_fs_ascii("ERR_INVALID_ARG_VALUE");
-    parts.syscall = tz_fs_ascii(syscall);
-    parts.path = tz_fs_opt_of(&p->given);
-    tz_fs_throw_parts(make, &parts);
+    tz_fs_throw_failure(make, (Failure){E_INVALID_PATH, tz_fs_errors[E_INVALID_PATH].windows, 0},
+                        syscall, &p->given, NULL);
     tz_buf_free(&p->given);
 
     return 0;
@@ -359,22 +337,8 @@ int tz_fs_flags_of(void *obj, uint64_t meta, OpenFlags *f, TzMaker make) {
   tz_buf_str(&flag, (TzStr){obj, meta});
   int ok = parse_flags(&flag, f);
   if (!ok) {
-    TzBuf m;
-    tz_buf_init(&m);
-    tz_buf_ascii(&m, "The argument 'flags' is invalid. Received '");
-    tz_buf_units(&m, flag.data, flag.length);
-    tz_buf_push(&m, '\'');
-    TzSystemErrorParts parts;
-    memset(&parts, 0, sizeof parts);
-    parts.message = tz_buf_take(&m);
-#ifdef _WIN32
-    parts.errno_value = tz_fs_errors[E_EINVAL].windows;
-#else
-    parts.errno_value = tz_fs_errno_failure(EINVAL).number;
-#endif
-    parts.code = tz_fs_ascii("ERR_INVALID_ARG_VALUE");
-    parts.syscall = tz_fs_ascii("open");
-    tz_fs_throw_parts(make, &parts);
+    tz_fs_throw_failure(make, (Failure){E_EINVAL, tz_fs_errors[E_EINVAL].windows, 0}, "open", NULL,
+                        NULL);
   }
   tz_buf_free(&flag);
 
@@ -416,7 +380,7 @@ File tz_fs_open_raw(const Path *p, OpenFlags f, int32_t mode, Failure *failure) 
 
 void tz_fs_close_file(File f) { CloseHandle(f); }
 
-int tz_fs_read_all(File f, Bytes *out, TzMaker make) {
+int tz_fs_read_all(File f, Bytes *out, const TzBuf *shown, TzMaker make) {
   LARGE_INTEGER size;
   if (GetFileSizeEx(f, &size) && size.QuadPart > 0 && size.QuadPart < ((int64_t)1 << 31)) {
     tz_fs_bytes_reserve(out, (size_t)size.QuadPart + 1);
@@ -429,7 +393,7 @@ int tz_fs_read_all(File f, Bytes *out, TzMaker make) {
       if (error == ERROR_HANDLE_EOF || error == ERROR_BROKEN_PIPE) {
         return 1;
       }
-      tz_fs_fail_win32(make, error, "read", NULL, NULL);
+      tz_fs_throw_failure(make, tz_fs_win32_failure(error), "read", shown, NULL);
       return 0;
     }
     if (got == 0) {
@@ -439,11 +403,11 @@ int tz_fs_read_all(File f, Bytes *out, TzMaker make) {
   }
 }
 
-int tz_fs_write_all(File f, const uint8_t *data, size_t n, TzMaker make) {
+int tz_fs_write_all(File f, const uint8_t *data, size_t n, const TzBuf *shown, TzMaker make) {
   while (n > 0) {
     DWORD chunk = n > 0x40000000 ? 0x40000000 : (DWORD)n, written = 0;
     if (!WriteFile(f, data, chunk, &written, NULL)) {
-      tz_fs_fail_win32(make, GetLastError(), "write", NULL, NULL);
+      tz_fs_throw_failure(make, tz_fs_win32_failure(GetLastError()), "write", shown, NULL);
       return 0;
     }
     data += written;
@@ -453,17 +417,34 @@ int tz_fs_write_all(File f, const uint8_t *data, size_t n, TzMaker make) {
   return 1;
 }
 
+static void ignore_invalid_parameter(const wchar_t *expression, const wchar_t *function,
+                                     const wchar_t *file, unsigned int line, uintptr_t reserved) {
+  (void)expression;
+  (void)function;
+  (void)file;
+  (void)line;
+  (void)reserved;
+}
+
 File tz_fs_fd_file(int32_t fd) {
   if (fd == 0) {
     return GetStdHandle(STD_INPUT_HANDLE);
   }
+  _invalid_parameter_handler old =
+      _set_thread_local_invalid_parameter_handler(ignore_invalid_parameter);
   intptr_t h = _get_osfhandle(fd);
+  _set_thread_local_invalid_parameter_handler(old);
 
   return h == -1 || h == -2 ? NO_FILE : (HANDLE)h;
 }
 
-void tz_fs_fail_bad_fd(TzMaker make, const char *syscall) {
-  tz_fs_fail_index(make, E_EBADF, syscall, NULL);
+void tz_fs_fail_bad_fd(TzMaker make, const char *syscall, int64_t fd) {
+  TzBuf name;
+  tz_buf_init(&name);
+  tz_fs_fd_name(&name, fd);
+  tz_fs_throw_failure(make, (Failure){E_EBADF, tz_fs_errors[E_EBADF].windows, ERROR_INVALID_HANDLE},
+                      syscall, &name, NULL);
+  tz_buf_free(&name);
 }
 #else
 
@@ -491,7 +472,7 @@ File tz_fs_open_raw(const Path *p, OpenFlags f, int32_t mode, Failure *failure) 
 
 void tz_fs_close_file(File f) { close(f); }
 
-int tz_fs_read_all(File f, Bytes *out, TzMaker make) {
+int tz_fs_read_all(File f, Bytes *out, const TzBuf *shown, TzMaker make) {
   for (;;) {
     tz_fs_bytes_reserve(out, 65536);
     ssize_t got = read(f, out->data + out->length, 65536);
@@ -499,7 +480,7 @@ int tz_fs_read_all(File f, Bytes *out, TzMaker make) {
       if (errno == EINTR) {
         continue;
       }
-      tz_fs_fail_errno(make, errno, "read", NULL, NULL);
+      tz_fs_throw_failure(make, tz_fs_errno_failure(errno), "read", shown, NULL);
       return 0;
     }
     if (got == 0) {
@@ -509,14 +490,14 @@ int tz_fs_read_all(File f, Bytes *out, TzMaker make) {
   }
 }
 
-int tz_fs_write_all(File f, const uint8_t *data, size_t n, TzMaker make) {
+int tz_fs_write_all(File f, const uint8_t *data, size_t n, const TzBuf *shown, TzMaker make) {
   while (n > 0) {
     ssize_t written = write(f, data, n);
     if (written < 0) {
       if (errno == EINTR) {
         continue;
       }
-      tz_fs_fail_errno(make, errno, "write", NULL, NULL);
+      tz_fs_throw_failure(make, tz_fs_errno_failure(errno), "write", shown, NULL);
       return 0;
     }
     data += written;
@@ -528,8 +509,12 @@ int tz_fs_write_all(File f, const uint8_t *data, size_t n, TzMaker make) {
 
 File tz_fs_fd_file(int32_t fd) { return fd; }
 
-void tz_fs_fail_bad_fd(TzMaker make, const char *syscall) {
-  tz_fs_throw_failure(make, tz_fs_errno_failure(EBADF), syscall, NULL, NULL);
+void tz_fs_fail_bad_fd(TzMaker make, const char *syscall, int64_t fd) {
+  TzBuf name;
+  tz_buf_init(&name);
+  tz_fs_fd_name(&name, fd);
+  tz_fs_throw_failure(make, tz_fs_errno_failure(EBADF), syscall, &name, NULL);
+  tz_buf_free(&name);
 }
 #endif
 

@@ -4,6 +4,10 @@
 #include "compiler/program/ast/ast.h"
 #include "compiler/program/diagnostics/diagnostics.h"
 #include <memory>
+#include <set>
+#include <string>
+#include <tuple>
+#include <vector>
 
 namespace tz {
 
@@ -73,8 +77,46 @@ private:
       slot.val = join(slot.val, v);
     }
   }
-  template <typename Map, typename Key>
-  std::optional<Val> summary(const Map &map, const Key &key) const {
+  struct SummaryKey {
+    const void *map = nullptr;
+    const void *key = nullptr;
+    std::string field;
+
+    bool operator<(const SummaryKey &other) const {
+      return std::tie(map, key, field) < std::tie(other.map, other.key, other.field);
+    }
+  };
+  struct FunctionMemo {
+    Summaries made;
+    std::set<SummaryKey> reads;
+    uint64_t work = 0;
+    bool valid = false;
+  };
+  std::vector<FunctionMemo> memos_;
+  FunctionMemo *reading_ = nullptr;
+  std::set<SummaryKey> changed_;
+  void noteRead(const void *map, const void *key) {
+    if (reading_) {
+      reading_->reads.insert({map, key, ""});
+    }
+  }
+  void noteRead(const void *map, const std::pair<const Type *, std::string> &key) {
+    if (reading_) {
+      reading_->reads.insert({map, key.first, key.second});
+    }
+  }
+  bool readsChanged(const FunctionMemo &memo) const {
+    for (const SummaryKey &key : memo.reads) {
+      if (changed_.count(key) != 0) {
+        return true;
+      }
+    }
+
+    return false;
+  }
+  static void joinInto(Summaries &into, const Summaries &from);
+  template <typename Map, typename Key> std::optional<Val> summary(const Map &map, const Key &key) {
+    noteRead(&map, key);
     if (round_ == 0) {
       return std::nullopt;
     }
@@ -114,6 +156,7 @@ private:
     Num passes;
     bool openEnded = false;
     bool simple = false;
+    std::optional<Val> source;
   };
   struct Place {
     enum class Kind { None, Var, Field, Element, Length } kind = Kind::None;
@@ -133,7 +176,8 @@ private:
   };
   unsigned quiet_ = 0;
   uint64_t work_ = 0;
-  bool overBudget() const { return work_ > 2000000; }
+  static constexpr uint64_t kWorkBudget = 2000000;
+  bool overBudget() const { return work_ > kWorkBudget; }
   const FunctionDecl *owner_ = nullptr;
   std::vector<Frame> frames_;
   std::vector<Target> targets_;

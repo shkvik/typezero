@@ -37,7 +37,7 @@ llvm::Value *FsPromisesLowerer::emitFsPromise(CallExpr *call) {
     params.insert(params.begin(), ptr);
     args.insert(args.begin(), promise);
     params.push_back(ptr);
-    args.push_back(lowering_.fsLowerer().systemErrorMaker());
+    args.push_back(lowering_.fsLowerer().errorMaker(settled->errType()));
     lowering_.builder_.CreateCall(lowering_.processLowerer().processFunction(name, voidTy, params),
                                   args);
   };
@@ -92,11 +92,12 @@ llvm::Value *FsPromisesLowerer::emitFsPromise(CallExpr *call) {
     run("tz_fsp_rm", {ptr, i64, i32, i32}, {obj(0), meta(0), flag(1), flag(2)});
     break;
   case Builtin::FspRename:
-    run("tz_fsp_rename", {ptr, i64, ptr, i64}, {obj(0), meta(0), obj(1), meta(1)});
-    break;
+  case Builtin::FspReplace:
   case Builtin::FspCopyFile:
-    run("tz_fsp_copy_file", {ptr, i64, ptr, i64, i64},
-        {obj(0), meta(0), obj(1), meta(1), values[2]});
+    run(call->builtin == Builtin::FspRename    ? "tz_fsp_rename"
+        : call->builtin == Builtin::FspReplace ? "tz_fsp_replace"
+                                               : "tz_fsp_copy_file",
+        {ptr, i64, ptr, i64}, {obj(0), meta(0), obj(1), meta(1)});
     break;
   case Builtin::FspRealpath:
     run("tz_fsp_realpath", {ptr, i64}, {obj(0), meta(0)});
@@ -127,11 +128,12 @@ llvm::Value *FsPromisesLowerer::emitReadlineBuiltin(CallExpr *call) {
   case Builtin::RlQuestion: {
     std::vector<llvm::Value *> values = lowering_.exprLowerer().emitExprs(call->args);
     result = lowering_.promiseLowerer().newPromise(call->type->promised());
-    lowering_.builder_.CreateCall(lowering_.processLowerer().processFunction(
-                                      "tz_readline_question", voidTy, {ptr, ptr, ptr, i64, ptr}),
-                                  {rl.value, result, lowering_.stringLowerer().stringObj(values[0]),
-                                   lowering_.stringLowerer().stringMeta(values[0]),
-                                   lowering_.fsLowerer().systemErrorMaker()});
+    lowering_.builder_.CreateCall(
+        lowering_.processLowerer().processFunction("tz_readline_question", voidTy,
+                                                   {ptr, ptr, ptr, i64, ptr}),
+        {rl.value, result, lowering_.stringLowerer().stringObj(values[0]),
+         lowering_.stringLowerer().stringMeta(values[0]),
+         lowering_.fsLowerer().objectMaker(call->type->promised()->errType())});
     for (size_t i = 0; i < values.size(); ++i) {
       lowering_.refCounts().releaseValue(values[i], call->args[i]->type);
     }

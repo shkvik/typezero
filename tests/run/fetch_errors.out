@@ -1,19 +1,19 @@
-bad port REQUEST ERR_BLOCKED_PORT: fetch does not connect to port 6000: browsers and node block it too
-ftp REQUEST ERR_UNSUPPORTED_SCHEME: fetch cannot get ftp://example.com/: only http:, https: and data: work
-no url REQUEST ERR_INVALID_URL: fetch cannot parse "not a url" as a URL
-credentials REQUEST ERR_CREDENTIALS_IN_URL: the URL http://user:pw@localhost/ has a user name or a password; send them in the authorization header instead
-no host NETWORK ENOTFOUND: could not find the address of no-such-host.invalid: no such name in DNS
+bad port FETCH_ERROR_REQUEST ERR_BLOCKED_PORT: fetch does not connect to port 6000: browsers and node block it too
+ftp FETCH_ERROR_REQUEST ERR_UNSUPPORTED_SCHEME: fetch cannot get ftp://example.com/: only http:, https: and data: work
+no url FETCH_ERROR_REQUEST ERR_INVALID_URL: fetch cannot parse "not a url" as a URL
+credentials FETCH_ERROR_REQUEST ERR_CREDENTIALS_IN_URL: the URL http://user:pw@localhost/ has a user name or a password; send them in the authorization header instead
+no host FETCH_ERROR_NETWORK ENOTFOUND: could not find the address of no-such-host.invalid: no such name in DNS
 data 200 hello world
 base64 200 hi
-get with body REQUEST ERR_BODY_WITH_GET: a GET request cannot have a body: use POST, or drop the body
-bad method REQUEST ERR_INVALID_METHOD: fetch does not send TRACE requests
-no duplex REQUEST ERR_DUPLEX_REQUIRED: a request whose body is a stream needs duplex: "half"
+get with body FETCH_ERROR_REQUEST ERR_BODY_WITH_GET: a GET request cannot have a body: use POST, or drop the body
+bad method FETCH_ERROR_REQUEST ERR_INVALID_METHOD: fetch does not send TRACE requests
+no duplex FETCH_ERROR_REQUEST ERR_DUPLEX_REQUIRED: a request whose body is a stream needs duplex: "half"
 small body 200 10 bytes
 large body 413 
 large stream 413 
-corrupt gzip MALFORMED ERR_INVALID_COMPRESSION: the body is not valid gzip: incorrect header check
+corrupt gzip BODY_ERROR_MALFORMED ERR_INVALID_COMPRESSION: the body is not valid gzip: incorrect header check
 4 bytes true
-USED ERR_BODY_USED the body is already read: text(), json(), bytes(), formData() and body() read it once fix the code
+BODY_ERROR_USED ERR_BODY_USED the body is already read: text(), json(), bytes(), formData() and body() read it once fix the code
 html ERR_INVALID_JSON text/html <html><title>502 Bad Gateway</title></html>
 bare ERR_NOT_A_FORM no content-type the body is not a form: it has no content-type
-refused NETWORK ECONNREFUSED could not connect to 127.0.0.1:PORT: nothing listens on this port connect 127.0.0.1 true
+refused FETCH_ERROR_NETWORK ECONNREFUSED could not connect to 127.0.0.1:PORT: nothing listens on this port connect 127.0.0.1 true

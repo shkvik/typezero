@@ -9,6 +9,8 @@
 #include "compiler/declare/class_declarer/class_declarer.h"
 #include "compiler/declare/constant_folder/constant_folder.h"
 #include "compiler/declare/module_declarer/module_declarer.h"
+#include "compiler/library/builtin_modules/builtin_module_checker/builtin_module_checker.h"
+#include "compiler/library/builtin_modules/builtin_module_types/builtin_module_types.h"
 #include "compiler/whole_program/flows/flows.h"
 #include "llvm/Support/CheckedArithmetic.h"
 #include "llvm/Support/ConvertUTF.h"
@@ -119,7 +121,17 @@ Stmt *TypeDeclarer::lookupType(llvm::StringRef name) const {
       return found->second;
     }
   }
-  return checker_.builtinAliases_.lookup(name);
+  if (TypeAliasDecl *alias = checker_.builtinAliases_.lookup(name)) {
+    return alias;
+  }
+  if (const Checker::NodeName *imported = checker_.builtinModuleChecker().nodeName(name)) {
+    return checker_.builtinModuleTypes().exported(imported->module, imported->name);
+  }
+  if (builtinDepth_ > 0) {
+    return checker_.builtinModuleTypes().alias(name);
+  }
+
+  return nullptr;
 }
 
 const Type *TypeDeclarer::resolveAlias(TypeAliasDecl *alias) {
@@ -144,6 +156,8 @@ const Type *TypeDeclarer::resolveAlias(TypeAliasDecl *alias) {
     return alias->resolved;
   }
   alias->resolving = true;
+  bool builtinModule = checker_.builtinModuleTypes().alias(alias->name) == alias;
+  builtinDepth_ += builtinModule ? 1 : 0;
   const Type *type;
   if (alias->type.kind == TypeRef::Kind::Object) {
     alias->self = Type::declareObject(alias->name);
@@ -184,11 +198,13 @@ const Type *TypeDeclarer::resolveAlias(TypeAliasDecl *alias) {
     type = checker_.typeResolver().resolveTypeInner(alias->type);
   }
   alias->resolving = false;
+  builtinDepth_ -= builtinModule ? 1 : 0;
   if (!alias->resolved) {
     alias->resolved = type;
   }
-  if (checker_.builtinAliases_.lookup(alias->name) == alias &&
-      alias->type.kind == TypeRef::Kind::Union) {
+  bool builtin = checker_.builtinAliases_.lookup(alias->name) == alias ||
+                 checker_.builtinModuleTypes().alias(alias->name) == alias;
+  if (builtin && alias->type.kind == TypeRef::Kind::Union) {
     Type::nameUnion(alias->resolved, alias->name);
   }
 

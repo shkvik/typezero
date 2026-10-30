@@ -2,6 +2,7 @@
 #include "compiler/check/checker/checker.h"
 #include "compiler/check/expr/call_checker/call_checker.h"
 #include "compiler/library/crypto/crypto_checker/crypto_checker.h"
+#include "compiler/library/crypto/crypto_error_types/crypto_error_types.h"
 #include "compiler/library/crypto/crypto_function_checker/crypto_function_checker.h"
 #include "compiler/library/crypto/crypto_lowerer/crypto_lowerer.h"
 #include "compiler/library/crypto/crypto_method_checker/crypto_method_checker.h"
@@ -11,6 +12,8 @@
 #include "compiler/lower/lowering/lowering.h"
 
 namespace tz {
+
+void CryptoFeature::declare(Checker &checker) const { checker.cryptoErrorTypes().declare(); }
 
 Expr *CryptoFeature::checkStaticCall(Checker &checker, CallExpr *call, MemberExpr *member,
                                      const Type *) const {

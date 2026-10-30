@@ -2,7 +2,7 @@ Name? Age? Ann is 42
 City? city Paris
 line: one
 line: two
-after close: ERR_USE_AFTER_CLOSE readline was closed
+after close: QUESTION_ERROR ERR_USE_AFTER_CLOSE readline was closed
 rest: three
 rest: four
 end

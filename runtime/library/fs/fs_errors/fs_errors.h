@@ -57,6 +57,7 @@ enum {
   E_ENXIO,
   E_EINTR,
   E_ENODEV,
+  E_INVALID_PATH,
 };
 
 extern const SysError tz_fs_errors[];
@@ -64,6 +65,7 @@ extern const SysError tz_fs_errors[];
 typedef struct {
   int index;
   int32_t number;
+  uint32_t system;
 } Failure;
 
 #ifdef _WIN32
@@ -80,5 +82,9 @@ void tz_fs_throw_parts(TzMaker make, TzSystemErrorParts *parts);
 
 void tz_fs_throw_failure(TzMaker make, Failure f, const char *syscall, const TzBuf *path,
                          const TzBuf *dest);
+
+void tz_fs_fd_name(TzBuf *out, int64_t fd);
+
+void tz_fs_compose(TzFsErrorParts *parts, const char *verb, int32_t known);
 
 #endif

@@ -51,20 +51,24 @@ __tz_panic("x")
 
 // A stream of node keeps its state inside: what a class that extends it may
 // use is protected, and the rest is private.
-const readable = new Readable<string>({ read() {} })
+class Quiet extends Readable<string> {
+  protected onRead() {}
+}
+const readable = new Quiet()
 // expect-error: 'readableState' is private in class 'Stream'
 console.log(readable.readableState)
-// expect-error: property '_readableState' does not exist on type 'Readable<string>'
+// expect-error: property '_readableState' does not exist on type 'Quiet'
 readable._readableState.bits = 0
 // expect-error: 'pushChunk' is protected in class 'Readable'; only 'Readable' and the classes that extend it can use it
 readable.pushChunk("x")
-// expect-error: 'onRead' is protected in class 'Readable'; only 'Readable' and the classes that extend it can use it
+// expect-error: 'onRead' is protected in class 'Quiet'; only 'Quiet' and the classes that extend it can use it
 readable.onRead(1)
-// expect-error: 'readableLength' is a method of 'Readable<string>' and cannot be assigned
+// expect-error: 'readableLength' is a method of 'Quiet' and cannot be replaced
 readable.readableLength = 0
 // expect-error: 'eos' is private in class 'Stream'
 Stream.eos(readable, undefined, () => {})
 class Peeker extends Readable<string> {
+  protected onRead() {}
   peek(other: Readable<string>) {
     // expect-error: 'readChunk' is protected in class 'Stream'; 'Peeker' may use it only on its own objects, and this one is of class 'Readable'
     return other.readChunk()

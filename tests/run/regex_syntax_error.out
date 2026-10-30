@@ -1,7 +1,7 @@
 true
 true
 {
-  kind: 'REGEX',
+  kind: 'REGEX_ERROR',
   code: 'ERR_INVALID_REGEX',
   message: 'Invalid regular expression: /a(b/i: Unterminated group'
 }

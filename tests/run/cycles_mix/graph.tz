@@ -4,7 +4,7 @@
 // of what each reads; and handlers that a class decorator registers by path,
 // which reflection makes for each server.
 import { EventEmitter } from "node:events"
-import { createHash } from "node:crypto"
+import { createHash, Hash } from "node:crypto"
 
 export class Room extends EventEmitter {
   lines: string[] = []
@@ -38,7 +38,7 @@ export class Conn {
   onData?: (text: string) => void
   readonly finish: (why: string) => void
   readonly done: Promise<string>
-  readonly hash = createHash("sha256")
+  readonly hash = sha256()
   constructor(readonly server: Server, readonly id: int) {
     // The resolve of the promise, whose environment is the promise.
     const { promise, resolve } = Promise.withResolvers<string>()
@@ -79,4 +79,14 @@ export class Server {
   route(path: string, conn: Conn, text: string): string {
     return this.handlers.get(path)?.handle(conn, text) ?? `no route ${path}`
   }
+}
+
+// createHash gives a Result (OpenSSL may refuse); a connection without its hash cannot work.
+function sha256(): Hash {
+  const made = createHash("sha256")
+  if (made.isErr()) {
+    console.log(made.error.message)
+    process.exit(1)
+  }
+  return made.value
 }

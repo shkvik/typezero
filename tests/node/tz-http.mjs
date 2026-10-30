@@ -70,8 +70,8 @@ export class Server {
     if (family) {
       const handle = net._createServerHandle(hostname, port, family);
       if (typeof handle === "number")
-        return err({ kind: "SERVER", code: "EADDRINUSE", message: `listen failed (${handle})`,
-                     errno: handle, syscall: "listen", address: hostname, port });
+        return err({ kind: "LISTEN_ERROR", code: "EADDRINUSE", message: `listen failed (${handle})`,
+                     syscall: "listen", address: hostname, port });
       server.listen(handle);
     } else {
       server.listen(port, hostname);

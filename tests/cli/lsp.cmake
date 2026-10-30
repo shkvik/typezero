@@ -4,8 +4,9 @@
 # "main" of its tz.json, a file that main does not import is checked alone,
 # notes go along with their error. A quick check comes first, then the whole
 # program (step 5). What the check learns answers hover,
-# definition, references, completion after a dot and rename (step 4). Needs
-# node.
+# definition, references, completion after a dot and rename (step 4). A file
+# of tz's own library is checked as the module it is, with the text of the
+# editor, so it shows only its real errors (D8). Needs node.
 include(${SOURCE}/../cli.cmake)
 if(NOT NODE)
   skip("node is not installed")
@@ -71,6 +72,8 @@ function f() {
 }
 f()
 ]])
+
+file(COPY ${SOURCE}/../../library DESTINATION ${WORK})
 
 execute_process(COMMAND ${NODE} ${SOURCE}/lsp.cjs ${TZ} ${WORK}
   OUTPUT_VARIABLE out ERROR_VARIABLE err RESULT_VARIABLE code)

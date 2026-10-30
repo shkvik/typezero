@@ -25,7 +25,7 @@ for await (const line of rl) {
   if (++taken == 2) break
 }
 const closed = await rl.question("Closed? ")
-if (closed.isErr()) console.log(`after close: ${closed.error.code} ${closed.error.message}`)
+if (closed.isErr()) console.log(`after close: ${closed.error.kind} ${closed.error.code} ${closed.error.message}`)
 for await (const line of rl) console.log("never", line)
 
 // A new Interface gets what is left.

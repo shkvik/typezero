@@ -3,7 +3,7 @@
 // and give a Promise, in a directory of the test's own under the temporary
 // one, which it removes at the end.
 import { readFile, writeFile, appendFile, mkdtemp, mkdir, readdir, stat, lstat, rm, rmdir,
-         rename, copyFile, unlink, access, chmod, truncate, realpath, constants } from "node:fs/promises"
+         rename, copyFile, unlink, access, chmod, truncate, realpath } from "node:fs/promises"
 import { promises } from "node:fs"
 import { join, basename, relative } from "node:path"
 import { tmpdir } from "node:os"
@@ -42,7 +42,8 @@ console.log(st.isFile(), st.size, st.mtimeMs > 0, (must(await lstat(dir))).isDir
 // Moving, copying, permissions and deleting.
 must(await rename(join(dir, "x", "f3.txt"), join(dir, "moved.txt")))
 must(await copyFile(join(dir, "moved.txt"), join(dir, "copy.txt")))
-must(await copyFile(join(dir, "moved.txt"), join(dir, "copy.txt"), constants.COPYFILE_FICLONE))
+must(await unlink(join(dir, "copy.txt")))
+must(await copyFile(join(dir, "moved.txt"), join(dir, "copy.txt")))
 must(await access(join(dir, "copy.txt")))
 console.log(must(await readFile(join(dir, "copy.txt"), "utf8")))
 must(await chmod(join(dir, "copy.txt"), 0o444))

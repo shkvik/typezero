@@ -1,3 +1,4 @@
+import { NativeError } from "tz:intrinsics";
 import { EventEmitter } from "node:events";
 
 declare function udpOpen(
@@ -6,17 +7,17 @@ declare function udpOpen(
   port: int,
   reuse: boolean,
   ipv6Only: boolean,
-): Result<object, SystemError>;
-declare function udpOption(socket: object, option: int, value: int): Result<int, SystemError>;
-declare function udpMulticastInterface(socket: object, via: string): Result<int, SystemError>;
+): Result<object, NativeError>;
+declare function udpOption(socket: object, option: int, value: int): Result<int, NativeError>;
+declare function udpMulticastInterface(socket: object, via: string): Result<int, NativeError>;
 declare function udpMembership(
   socket: object,
   group: string,
   via: string,
   source: string,
   join: boolean,
-): Result<int, SystemError>;
-declare function udpReceive(socket: object): Promise<Result<Uint8Array | undefined, SystemError>>;
+): Result<int, NativeError>;
+declare function udpReceive(socket: object): Promise<Result<Uint8Array | undefined, NativeError>>;
 declare function udpSenderAddress(socket: object): string;
 declare function udpSenderPort(socket: object): int;
 declare function udpSend(
@@ -24,13 +25,13 @@ declare function udpSend(
   data: Uint8Array,
   address: string,
   port: int,
-): Promise<Result<void, SystemError>>;
-declare function udpConnect(socket: object, address: string, port: int): Result<int, SystemError>;
+): Promise<Result<void, NativeError>>;
+declare function udpConnect(socket: object, address: string, port: int): Result<int, NativeError>;
 declare function udpDisconnect(socket: object): void;
 declare function udpLocalAddress(socket: object): string;
 declare function udpLocalPort(socket: object): int;
 declare function udpClose(socket: object): void;
-declare function udpLookup(host: string, family: int): Promise<Result<string, SystemError>>;
+declare function udpLookup(host: string, family: int): Promise<Result<string, NativeError>>;
 
 const OPTION_BROADCAST = 1;
 const OPTION_TTL = 2;
@@ -83,16 +84,16 @@ export type RemoteInfo = {
   size: int;
 };
 
-export type BindError =
+export type UdpBindError =
   | {
-      kind: "REQUEST";
+      kind: "UDP_BIND_ERROR_REQUEST";
       code: "ERR_INVALID_ADDRESS" | "ERR_SOCKET_BOUND" | "ERR_SOCKET_CLOSED";
       message: string;
       address: string;
       port: int;
     }
   | {
-      kind: "BIND";
+      kind: "UDP_BIND_ERROR_NETWORK";
       code:
         | "EADDRINUSE"
         | "EACCES"
@@ -105,15 +106,14 @@ export type BindError =
         | "ENOBUFS"
         | "UNKNOWN";
       message: string;
-      errno: int;
       syscall: string;
       address: string;
       port: int;
     };
 
-export type SendError =
+export type UdpSendError =
   | {
-      kind: "REQUEST";
+      kind: "UDP_SEND_ERROR_REQUEST";
       code:
         | "ERR_INVALID_ADDRESS"
         | "ERR_NO_ADDRESS"
@@ -126,37 +126,36 @@ export type SendError =
       port: int;
     }
   | {
-      kind: "NETWORK";
+      kind: "UDP_SEND_ERROR_NETWORK";
       code: NetworkCode;
       message: string;
-      errno: int;
       syscall: string;
       address: string;
       port: int;
     }
   | {
-      kind: "TOO_LARGE";
+      kind: "UDP_SEND_ERROR_TOO_LARGE";
       code: "EMSGSIZE";
       message: string;
       size: int;
       limit: int;
     }
   | {
-      kind: "PERMISSION";
+      kind: "UDP_SEND_ERROR_PERMISSION";
       code: "EACCES";
       message: string;
       address: string;
       port: int;
     }
   | {
-      kind: "CLOSED";
+      kind: "UDP_SEND_ERROR_CLOSED";
       code: "ERR_SOCKET_CLOSED";
       message: string;
     };
 
-export type ConnectError =
+export type UdpConnectError =
   | {
-      kind: "REQUEST";
+      kind: "UDP_CONNECT_ERROR_REQUEST";
       code:
         | "ERR_INVALID_ADDRESS"
         | "ERR_SOCKET_CONNECTED"
@@ -169,46 +168,43 @@ export type ConnectError =
       port: int;
     }
   | {
-      kind: "NETWORK";
+      kind: "UDP_CONNECT_ERROR_NETWORK";
       code: NetworkCode;
       message: string;
-      errno: int;
       syscall: string;
       address: string;
       port: int;
     }
   | {
-      kind: "CLOSED";
+      kind: "UDP_CONNECT_ERROR_CLOSED";
       code: "ERR_SOCKET_CLOSED";
       message: string;
     };
 
-export type MembershipError =
+export type UdpMembershipError =
   | {
-      kind: "REQUEST";
+      kind: "UDP_MEMBERSHIP_ERROR_REQUEST";
       code: "ERR_INVALID_ADDRESS" | "ERR_SOCKET_NOT_BOUND" | "ERR_NOT_SUPPORTED";
       message: string;
       group: string;
     }
   | {
-      kind: "NETWORK";
+      kind: "UDP_MEMBERSHIP_ERROR_NETWORK";
       code: NetworkCode;
       message: string;
-      errno: int;
       syscall: string;
       group: string;
     }
   | {
-      kind: "CLOSED";
+      kind: "UDP_MEMBERSHIP_ERROR_CLOSED";
       code: "ERR_SOCKET_CLOSED";
       message: string;
     };
 
-export type SocketError = {
-  kind: "NETWORK";
+export type UdpSocketError = {
+  kind: "UDP_SOCKET_ERROR";
   code: NetworkCode;
   message: string;
-  errno: int;
   syscall: string;
 };
 
@@ -229,7 +225,7 @@ export type SocketEvents = {
   message: [data: Buffer, from: RemoteInfo];
   listening: [];
   close: [];
-  error: [error: SocketError];
+  error: [error: UdpSocketError];
 };
 
 function networkCode(code: string): NetworkCode {
@@ -385,7 +381,6 @@ type Resolved = {
   address: string;
   failed: boolean;
   code: string;
-  errno: int;
   syscall: string;
 };
 
@@ -424,10 +419,10 @@ export class Socket extends EventEmitter<SocketEvents> {
     this.receiving = undefined;
   }
 
-  public async bind(): Promise<Result<void, BindError>> {
+  public async bind(): Promise<Result<void, UdpBindError>> {
     if (this.closed) {
       return err({
-        kind: "REQUEST",
+        kind: "UDP_BIND_ERROR_REQUEST",
         code: "ERR_SOCKET_CLOSED",
         message: "the socket is closed",
         address: this.host,
@@ -436,7 +431,7 @@ export class Socket extends EventEmitter<SocketEvents> {
     }
     if (this.native != undefined) {
       return err({
-        kind: "REQUEST",
+        kind: "UDP_BIND_ERROR_REQUEST",
         code: "ERR_SOCKET_BOUND",
         message: "the socket is bound already",
         address: this.host,
@@ -449,10 +444,9 @@ export class Socket extends EventEmitter<SocketEvents> {
       const message = bindMessage(code, this.host, this.port, "");
 
       return err({
-        kind: "BIND",
+        kind: "UDP_BIND_ERROR_NETWORK",
         code: code,
         message: message,
-        errno: resolved.errno,
         syscall: resolved.syscall,
         address: this.host,
         port: this.port,
@@ -464,7 +458,7 @@ export class Socket extends EventEmitter<SocketEvents> {
       const e = openedResult.error;
       if (e.code == "ERR_INVALID_ADDRESS") {
         return err({
-          kind: "REQUEST",
+          kind: "UDP_BIND_ERROR_REQUEST",
           code: "ERR_INVALID_ADDRESS",
           message: `could not bind to ${this.host}: ${e.message}`,
           address: this.host,
@@ -475,10 +469,9 @@ export class Socket extends EventEmitter<SocketEvents> {
       const message = bindMessage(code, this.host, this.port, e.message);
 
       return err({
-        kind: "BIND",
+        kind: "UDP_BIND_ERROR_NETWORK",
         code: code,
         message: message,
-        errno: e.errno,
         syscall: e.syscall,
         address: this.host,
         port: this.port,
@@ -493,10 +486,9 @@ export class Socket extends EventEmitter<SocketEvents> {
       const message = bindMessage(code, this.host, this.port, e.message);
 
       return err({
-        kind: "BIND",
+        kind: "UDP_BIND_ERROR_NETWORK",
         code: code,
         message: message,
-        errno: e.errno,
         syscall: e.syscall,
         address: this.host,
         port: this.port,
@@ -509,14 +501,14 @@ export class Socket extends EventEmitter<SocketEvents> {
     return ok();
   }
 
-  public async send(data: Uint8Array | string, to?: Destination): Promise<Result<void, SendError>> {
+  public async send(data: Uint8Array | string, to?: Destination): Promise<Result<void, UdpSendError>> {
     if (this.closed) {
-      return err({ kind: "CLOSED", code: "ERR_SOCKET_CLOSED", message: "the socket is closed" });
+      return err({ kind: "UDP_SEND_ERROR_CLOSED", code: "ERR_SOCKET_CLOSED", message: "the socket is closed" });
     }
     const connected = this.connectedTo;
     if (to == undefined && connected == undefined) {
       return err({
-        kind: "REQUEST",
+        kind: "UDP_SEND_ERROR_REQUEST",
         code: "ERR_NO_ADDRESS",
         message: "send needs an address: the socket is not connected; pass { address, port }",
         address: "",
@@ -525,7 +517,7 @@ export class Socket extends EventEmitter<SocketEvents> {
     }
     if (to != undefined && connected != undefined) {
       return err({
-        kind: "REQUEST",
+        kind: "UDP_SEND_ERROR_REQUEST",
         code: "ERR_SOCKET_CONNECTED",
         message: `the socket is connected to ${connected.address}:${connected.port}; send without an address`,
         address: to.address,
@@ -541,7 +533,7 @@ export class Socket extends EventEmitter<SocketEvents> {
     const limit = this.type == "udp4" || (literal && family == "IPv4") ? LIMIT_IPV4 : LIMIT_IPV6;
     if (bytes.length > limit) {
       return err({
-        kind: "TOO_LARGE",
+        kind: "UDP_SEND_ERROR_TOO_LARGE",
         code: "EMSGSIZE",
         message: `the message is ${bytes.length} bytes; UDP carries at most ${limit}`,
         size: bytes.length,
@@ -551,10 +543,9 @@ export class Socket extends EventEmitter<SocketEvents> {
     const native = await this.opened();
     if (native == undefined) {
       return err({
-        kind: "NETWORK",
+        kind: "UDP_SEND_ERROR_NETWORK",
         code: "UNKNOWN",
         message: `could not send to ${address}:${port}: the socket could not take a port`,
-        errno: -1,
         syscall: "bind",
         address: address,
         port: port,
@@ -568,7 +559,7 @@ export class Socket extends EventEmitter<SocketEvents> {
         const message = bindMessage(code, to.address, to.port, "");
 
         return err({
-          kind: "REQUEST",
+          kind: "UDP_SEND_ERROR_REQUEST",
           code: code,
           message: message,
           address: to.address,
@@ -581,11 +572,11 @@ export class Socket extends EventEmitter<SocketEvents> {
     if (sentResult.isErr()) {
       const e = sentResult.error;
       if (e.code == "ERR_SOCKET_CLOSED") {
-        return err({ kind: "CLOSED", code: "ERR_SOCKET_CLOSED", message: "the socket is closed" });
+        return err({ kind: "UDP_SEND_ERROR_CLOSED", code: "ERR_SOCKET_CLOSED", message: "the socket is closed" });
       }
       if (e.code == "EMSGSIZE") {
         return err({
-          kind: "TOO_LARGE",
+          kind: "UDP_SEND_ERROR_TOO_LARGE",
           code: "EMSGSIZE",
           message: `the message is ${bytes.length} bytes, more than the network carries in one piece`,
           size: bytes.length,
@@ -594,7 +585,7 @@ export class Socket extends EventEmitter<SocketEvents> {
       }
       if (e.code == "EACCES") {
         return err({
-          kind: "PERMISSION",
+          kind: "UDP_SEND_ERROR_PERMISSION",
           code: "EACCES",
           message: `could not send to ${address}:${port}: a broadcast address needs the option broadcast: true`,
           address: address,
@@ -603,7 +594,7 @@ export class Socket extends EventEmitter<SocketEvents> {
       }
       if (e.code == "EAFNOSUPPORT" || e.code == "ERR_INVALID_ADDRESS") {
         return err({
-          kind: "REQUEST",
+          kind: "UDP_SEND_ERROR_REQUEST",
           code: e.code == "EAFNOSUPPORT" ? "EAFNOSUPPORT" : "ERR_INVALID_ADDRESS",
           message: `could not send to ${address}:${port}: the address is not of the IP version of the socket`,
           address: address,
@@ -614,10 +605,9 @@ export class Socket extends EventEmitter<SocketEvents> {
       const message = sendMessage(code, address, port, e.message);
 
       return err({
-        kind: "NETWORK",
+        kind: "UDP_SEND_ERROR_NETWORK",
         code: code,
         message: message,
-        errno: e.errno,
         syscall: e.syscall,
         address: address,
         port: port,
@@ -627,14 +617,14 @@ export class Socket extends EventEmitter<SocketEvents> {
     return ok();
   }
 
-  public async connect(to: Destination): Promise<Result<void, ConnectError>> {
+  public async connect(to: Destination): Promise<Result<void, UdpConnectError>> {
     if (this.closed) {
-      return err({ kind: "CLOSED", code: "ERR_SOCKET_CLOSED", message: "the socket is closed" });
+      return err({ kind: "UDP_CONNECT_ERROR_CLOSED", code: "ERR_SOCKET_CLOSED", message: "the socket is closed" });
     }
     const connected = this.connectedTo;
     if (connected != undefined) {
       return err({
-        kind: "REQUEST",
+        kind: "UDP_CONNECT_ERROR_REQUEST",
         code: "ERR_SOCKET_CONNECTED",
         message: `the socket is connected to ${connected.address}:${connected.port} already; disconnect() first`,
         address: to.address,
@@ -644,10 +634,9 @@ export class Socket extends EventEmitter<SocketEvents> {
     const native = await this.opened();
     if (native == undefined) {
       return err({
-        kind: "NETWORK",
+        kind: "UDP_CONNECT_ERROR_NETWORK",
         code: "UNKNOWN",
         message: `could not connect to ${to.address}:${to.port}: the socket could not take a port`,
-        errno: -1,
         syscall: "bind",
         address: to.address,
         port: to.port,
@@ -659,7 +648,7 @@ export class Socket extends EventEmitter<SocketEvents> {
       const message = bindMessage(code, to.address, to.port, "");
 
       return err({
-        kind: "REQUEST",
+        kind: "UDP_CONNECT_ERROR_REQUEST",
         code: code,
         message: message,
         address: to.address,
@@ -671,7 +660,7 @@ export class Socket extends EventEmitter<SocketEvents> {
       const e = connectedResult.error;
       if (e.code == "EAFNOSUPPORT" || e.code == "EINVAL") {
         return err({
-          kind: "REQUEST",
+          kind: "UDP_CONNECT_ERROR_REQUEST",
           code: "EAFNOSUPPORT",
           message: `could not connect to ${to.address}:${to.port}: the address is not of the IP version of the socket`,
           address: to.address,
@@ -682,10 +671,9 @@ export class Socket extends EventEmitter<SocketEvents> {
       const message = sendMessage(code, to.address, to.port, e.message);
 
       return err({
-        kind: "NETWORK",
+        kind: "UDP_CONNECT_ERROR_NETWORK",
         code: code,
         message: message,
-        errno: e.errno,
         syscall: e.syscall,
         address: to.address,
         port: to.port,
@@ -696,12 +684,12 @@ export class Socket extends EventEmitter<SocketEvents> {
     return ok();
   }
 
-  public disconnect(): Result<void, ConnectError> {
+  public disconnect(): Result<void, UdpConnectError> {
     const native = this.native;
     const connected = this.connectedTo;
     if (native == undefined || connected == undefined) {
       return err({
-        kind: "REQUEST",
+        kind: "UDP_CONNECT_ERROR_REQUEST",
         code: "ERR_NOT_CONNECTED",
         message: "the socket is not connected",
         address: "",
@@ -736,25 +724,25 @@ export class Socket extends EventEmitter<SocketEvents> {
     return { address: connected.address, family: family, port: connected.port };
   }
 
-  public addMembership(group: string, via?: string): Result<void, MembershipError> {
+  public addMembership(group: string, via?: string): Result<void, UdpMembershipError> {
     const joined = this.membership(group, via ?? "", "", true);
 
     return joined;
   }
 
-  public dropMembership(group: string, via?: string): Result<void, MembershipError> {
+  public dropMembership(group: string, via?: string): Result<void, UdpMembershipError> {
     const left = this.membership(group, via ?? "", "", false);
 
     return left;
   }
 
-  public addSourceMembership(source: string, group: string, via?: string): Result<void, MembershipError> {
+  public addSourceMembership(source: string, group: string, via?: string): Result<void, UdpMembershipError> {
     const joined = this.membership(group, via ?? "", source, true);
 
     return joined;
   }
 
-  public dropSourceMembership(source: string, group: string, via?: string): Result<void, MembershipError> {
+  public dropSourceMembership(source: string, group: string, via?: string): Result<void, UdpMembershipError> {
     const left = this.membership(group, via ?? "", source, false);
 
     return left;
@@ -789,23 +777,23 @@ export class Socket extends EventEmitter<SocketEvents> {
 
   private async resolve(address: string): Promise<Resolved> {
     if (address == "" || isLiteral(address)) {
-      return { address: address, failed: false, code: "", errno: 0, syscall: "" };
+      return { address: address, failed: false, code: "", syscall: "" };
     }
     if (address.toLowerCase() == "localhost") {
       const local = this.type == "udp6" ? "::1" : "127.0.0.1";
 
-      return { address: local, failed: false, code: "", errno: 0, syscall: "" };
+      return { address: local, failed: false, code: "", syscall: "" };
     }
     const family = this.familyNumber();
     const foundResult = await udpLookup(address, family);
     if (foundResult.isErr()) {
       const e = foundResult.error;
 
-      return { address: address, failed: true, code: e.code, errno: e.errno, syscall: e.syscall };
+      return { address: address, failed: true, code: e.code, syscall: e.syscall };
     }
     const found = foundResult.value;
 
-    return { address: found, failed: false, code: "", errno: 0, syscall: "" };
+    return { address: found, failed: false, code: "", syscall: "" };
   }
 
   private async opened(): Promise<object | undefined> {
@@ -821,7 +809,7 @@ export class Socket extends EventEmitter<SocketEvents> {
     return this.native;
   }
 
-  private configure(native: object): Result<void, SystemError> {
+  private configure(native: object): Result<void, NativeError> {
     if (this.broadcast) {
       const setResult = udpOption(native, OPTION_BROADCAST, 1);
       if (setResult.isErr()) {
@@ -874,13 +862,13 @@ export class Socket extends EventEmitter<SocketEvents> {
     return ok();
   }
 
-  private membership(group: string, via: string, source: string, join: boolean): Result<void, MembershipError> {
+  private membership(group: string, via: string, source: string, join: boolean): Result<void, UdpMembershipError> {
     if (this.closed) {
-      return err({ kind: "CLOSED", code: "ERR_SOCKET_CLOSED", message: "the socket is closed" });
+      return err({ kind: "UDP_MEMBERSHIP_ERROR_CLOSED", code: "ERR_SOCKET_CLOSED", message: "the socket is closed" });
     }
     if (!isLiteral(group) || !isMulticast(group)) {
       return err({
-        kind: "REQUEST",
+        kind: "UDP_MEMBERSHIP_ERROR_REQUEST",
         code: "ERR_INVALID_ADDRESS",
         message: `${group} is not a multicast address: IPv4 groups are 224.0.0.0 to 239.255.255.255, IPv6 groups start with ff`,
         group: group,
@@ -889,7 +877,7 @@ export class Socket extends EventEmitter<SocketEvents> {
     const native = this.native;
     if (native == undefined) {
       return err({
-        kind: "REQUEST",
+        kind: "UDP_MEMBERSHIP_ERROR_REQUEST",
         code: "ERR_SOCKET_NOT_BOUND",
         message: `join the group ${group} after bind(): the socket has no port yet`,
         group: group,
@@ -900,7 +888,7 @@ export class Socket extends EventEmitter<SocketEvents> {
       const e = changedResult.error;
       if (e.code == "ERR_NOT_SUPPORTED") {
         return err({
-          kind: "REQUEST",
+          kind: "UDP_MEMBERSHIP_ERROR_REQUEST",
           code: "ERR_NOT_SUPPORTED",
           message: `could not join ${group}: ${e.message}`,
           group: group,
@@ -910,10 +898,9 @@ export class Socket extends EventEmitter<SocketEvents> {
       const what = join ? "join" : "leave";
 
       return err({
-        kind: "NETWORK",
+        kind: "UDP_MEMBERSHIP_ERROR_NETWORK",
         code: code,
         message: `could not ${what} the group ${group}: ${e.message}`,
-        errno: e.errno,
         syscall: e.syscall,
         group: group,
       });
@@ -929,10 +916,9 @@ export class Socket extends EventEmitter<SocketEvents> {
         const e = receivedResult.error;
         const code = networkCode(e.code);
         this.emit("error", {
-          kind: "NETWORK",
+          kind: "UDP_SOCKET_ERROR",
           code: code,
           message: `could not receive: ${e.message}`,
-          errno: e.errno,
           syscall: e.syscall,
         });
         return;

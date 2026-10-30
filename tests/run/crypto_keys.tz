@@ -40,7 +40,6 @@ const der = must(rsa.export({ format: "der", type: "pkcs8" }))
 console.log(must(createPrivateKey({ key: der, format: "der", type: "pkcs8" })).equals(rsa))
 const locked = must(rsa.export({ format: "pem", type: "pkcs8", cipher: "aes-256-cbc", passphrase: "secret" }))
 console.log(locked.split("\n")[0], must(createPrivateKey({ key: locked, passphrase: "secret" })).equals(rsa))
-show(createPrivateKey({ key: locked, passphrase: "wrong" }))
 
 // Signatures: Ed25519 and RSA with PKCS#1 v1.5 give the same bytes each time.
 const data = Buffer.from("message to sign")
@@ -55,14 +54,13 @@ const p1363 = must(sign("sha256", data, { key: ec, dsaEncoding: "ieee-p1363" }))
 console.log(p1363.length, must(verify("sha256", data, { key: must(createPublicKey(ec)), dsaEncoding: "ieee-p1363" }, p1363)))
 const pss = must(sign("sha256", data, { key: rsa, padding: constants.RSA_PKCS1_PSS_PADDING, saltLength: 32 }))
 console.log(pss.length, must(verify("sha256", data, { key: rsaPub, padding: constants.RSA_PKCS1_PSS_PADDING, saltLength: 32 }, pss)))
-const signer = createSign("SHA256")
+const signer = must(createSign("SHA256"))
 signer.update("message ").update("to sign")
 const signature = must(signer.sign(rsa, "hex"))
 console.log(signature == must(sign("sha256", data, rsa)).toString("hex"))
-const verifier = createVerify("SHA256")
+const verifier = must(createVerify("SHA256"))
 verifier.update(data)
 console.log(must(verifier.verify(rsaPub, signature, "hex")))
-show(sign("sha256", data, rsaPub))
 
 // Generated keys: their kinds and encodings.
 const pair = must(generateKeyPairSync("ed25519"))
@@ -82,18 +80,15 @@ console.log(jwkPair.publicKey.kty, jwkPair.privateKey.crv)
 // Key exchange: X25519 and ECDH with keys fixed.
 const other = must(createPrivateKey(x2Pem))
 console.log(must(diffieHellman({ privateKey: x, publicKey: must(createPublicKey(other)) })).toString("hex"))
-const alice = createECDH("prime256v1"), bob = createECDH("prime256v1")
+const alice = must(createECDH("prime256v1")), bob = must(createECDH("prime256v1"))
 must(alice.setPrivateKey(Buffer.alloc(32, 1)))
 must(bob.setPrivateKey(Buffer.alloc(32, 2)))
 console.log(must(alice.getPublicKey("hex")))
 console.log(must(alice.getPublicKey("base64", "compressed")), must(alice.getPrivateKey("hex")))
 console.log(must(alice.computeSecret(must(bob.getPublicKey()))).toString("hex"))
 console.log(must(bob.computeSecret(must(alice.getPublicKey("hex")), "hex", "hex")))
-const fresh = createECDH("secp256k1")
+const fresh = must(createECDH("secp256k1"))
 console.log(fresh.generateKeys().length, must(fresh.getPublicKey(undefined, "compressed")).length)
-show(alice.computeSecret(Buffer.from("0400", "hex")))
-const curve: string = "nonsense"
-show(createECDH(curve))
 
 // KeyObject as a type.
 const k: KeyObject = rsaPub
@@ -101,10 +96,6 @@ console.log(k.type)
 
 // Last: node leaves an error of OpenSSL behind here for the next call to find.
 console.log(edPub.equals(rsaPub))
-
-function show<T>(r: Result<T, CryptoError>) {
-  console.log(r.isErr() ? `${r.error.code} | ${r.error.message}` : "no error")
-}
 
 function must<T, E>(r: Result<T, E>): T {
   if (r.isErr()) {

@@ -2,6 +2,7 @@
 #include "compiler/check/checker/checker.h"
 #include "compiler/library/fs/fs_checker/fs_checker.h"
 #include "compiler/library/fs/fs_declarer/fs_declarer.h"
+#include "compiler/library/fs/fs_error_types/fs_error_types.h"
 #include "compiler/library/fs/fs_exports/fs_exports.h"
 #include "compiler/library/fs/fs_lowerer/fs_lowerer.h"
 #include "compiler/library/fs/fs_promises_checker/fs_promises_checker.h"
@@ -10,7 +11,10 @@
 
 namespace tz {
 
-void FsFeature::declare(Checker &checker) const { checker.fsDeclarer().declareFsClasses(); }
+void FsFeature::declare(Checker &checker) const {
+  checker.fsDeclarer().declareFsClasses();
+  checker.fsErrorTypes().declare();
+}
 
 std::optional<std::string> FsFeature::exportProblem(NodeModule module, llvm::StringRef exportName,
                                                     llvm::StringRef path) const {
@@ -26,21 +30,24 @@ std::optional<std::string> FsFeature::exportProblem(NodeModule module, llvm::Str
   if (module == NodeModule::TzIo) {
     return tzIoExportProblem(exportName, path);
   }
+  if (module == NodeModule::TzFs) {
+    return tzFsExportProblem(exportName, path);
+  }
 
   return std::nullopt;
 }
 
 Expr *FsFeature::checkModuleCall(Checker &checker, CallExpr *call, NodeModule module,
                                  llvm::StringRef fn, llvm::SMLoc loc, const Type *) const {
-  if (module == NodeModule::Fs) {
+  if (module == NodeModule::Fs || (module == NodeModule::TzFs && fn == "replaceSync")) {
     Expr *checked = checker.fsChecker().checkFsCall(call, fn, loc);
     if (auto *done = llvm::dyn_cast<CallExpr>(checked);
         done && isFsBuiltin(done->builtin) && !done->type->isError()) {
-      done->type = Type::result(done->type, checker.fsChecker().systemError());
+      done->type = Type::result(done->type, checker.fsErrorTypes().ofCall(done));
     }
     return checked;
   }
-  if (module == NodeModule::FsPromises) {
+  if (module == NodeModule::FsPromises || (module == NodeModule::TzFs && fn == "replace")) {
     return checker.fsPromisesChecker().checkFsPromisesCall(call, fn, loc);
   }
   if (module == NodeModule::Readline || module == NodeModule::ReadlinePromises) {

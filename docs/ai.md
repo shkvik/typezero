@@ -117,8 +117,11 @@ const server = new Server({ port: 3000, hostname: "127.0.0.1" }, async req => ne
 const listening = server.listen()                                // Result<Listening, ListenError>
 ```
 
-- Поток со своей ошибкой — `new ReadableStream<Uint8Array, MyError>({ … })`; телом его отдают
-  через `Response.stream(stream)` или `fetch(url, { body: stream })`.
+- Поток со своей ошибкой — `interface MyError extends StreamError { … }`, `new
+  ReadableStream<Uint8Array, MyError>({ … })`; без второго аргумента — любая `StreamError`
+  (только `message`). Телом поток отдают только методом: `Response.stream(stream)`,
+  `Request.stream(url, stream, options)` или `fetch(url, { body: stream, duplex: "half" })`;
+  `new Response(stream)` — ошибка.
 
 ## Стиль кода библиотеки (`library/`) — docs/style.md
 

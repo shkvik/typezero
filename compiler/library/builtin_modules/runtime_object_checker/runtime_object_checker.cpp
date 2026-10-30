@@ -3,6 +3,7 @@
 #include "compiler/check/expr/call_checker/call_checker.h"
 #include "compiler/check/expr/expr_checker/expr_checker.h"
 #include "compiler/check/functions/callback_checker/callback_checker.h"
+#include "compiler/declare/prelude/prelude.h"
 #include "compiler/library/fs/fs_checker/fs_checker.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/Support/SaveAndRestore.h"
@@ -88,8 +89,8 @@ Expr *RuntimeObjectChecker::checkRuntimeMethod(CallExpr *call, MemberExpr *membe
       if (promises) {
         call->args = {query};
         call->builtin = Builtin::RlQuestion;
-        call->type =
-            Type::promise(Type::result(Type::string(), checker_.fsChecker().systemError()));
+        call->type = Type::promise(
+            Type::result(Type::string(), checker_.prelude().builtinType("QuestionError")));
         return call;
       }
       if (call->args.size() < 2) {

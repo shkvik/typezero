@@ -77,6 +77,15 @@ typedef struct {
   int32_t pid;
   int32_t text_mode;
   int32_t piped[3];
+  const char *reason;
+  const char *code_name;
+  const char *detail;
+  TzStr command;
+  TzStr cwd;
+  TzStr shell;
+  TzStr argument;
+  int64_t limit;
+  double value;
 } TzSpawnParts;
 
 typedef struct {
@@ -125,6 +134,7 @@ enum {
   X_EROFS,
   X_EXDEV,
   X_ETXTBSY,
+  X_ENOEXEC,
 };
 
 static const UvError kErrors[] = {
@@ -161,6 +171,7 @@ static const UvError kErrors[] = {
     {"EROFS", UV_NUMBER(-4043, -EROFS)},
     {"EXDEV", UV_NUMBER(-4037, -EXDEV)},
     {"ETXTBSY", UV_NUMBER(-4038, -ETXTBSY)},
+    {"ENOEXEC", UV_NUMBER(-4029, -ENOEXEC)},
 };
 
 #ifdef _WIN32
@@ -375,79 +386,94 @@ static int has_zero(const TzBuf *b) {
   return 0;
 }
 
-static void buf_received(TzBuf *m, const TzBuf *value) {
-  int single = 0, dbl = 0;
-  for (size_t i = 0; i < value->length; ++i) {
-    single |= value->data[i] == '\'';
-    dbl |= value->data[i] == '"';
+static void fail_reason(TzMaker make, TzSpawnParts *parts, const char *reason, const char *code,
+                        TzStr message) {
+  parts->reason = reason;
+  parts->code_name = code;
+  parts->message = message;
+  tz_failed = make(parts);
+}
+
+static void program_name(TzBuf *m, const TzSpawnRequest *req) {
+  TzBuf name;
+  tz_buf_init(&name);
+  tz_buf_str(&name, req->file);
+  if (req->mode != TZ_CHILD_EXEC && (name.length == 0 || has_zero(&name))) {
+    tz_buf_ascii(m, "a program");
+    tz_buf_free(&name);
+    return;
   }
-  uint16_t quote = single && !dbl ? '"' : '\'';
-  tz_buf_ascii(m, ". Received ");
-  tz_buf_push(m, quote);
-  for (size_t i = 0; i < value->length; ++i) {
-    uint16_t c = value->data[i];
-    char hex[8];
-    if (c == quote || c == '\\') {
-      tz_buf_push(m, '\\');
-      tz_buf_push(m, c);
-    } else if (c == '\n') {
-      tz_buf_ascii(m, "\\n");
-    } else if (c == '\t') {
-      tz_buf_ascii(m, "\\t");
-    } else if (c == '\r') {
-      tz_buf_ascii(m, "\\r");
-    } else if (c < 0x20 || c == 0x7F) {
-      static const char digits[] = "0123456789ABCDEF";
-      hex[0] = '\\';
-      hex[1] = 'x';
-      hex[2] = digits[c >> 4];
-      hex[3] = digits[c & 15];
-      hex[4] = 0;
-      tz_buf_ascii(m, hex);
+  if (req->mode == TZ_CHILD_EXEC) {
+    tz_buf_push(m, '"');
+  }
+  for (size_t i = 0; i < name.length; ++i) {
+    if (name.data[i] == 0) {
+      tz_buf_ascii(m, "\\0");
     } else {
-      tz_buf_push(m, c);
+      tz_buf_push(m, name.data[i]);
     }
   }
-  tz_buf_push(m, quote);
+  if (req->mode == TZ_CHILD_EXEC) {
+    tz_buf_push(m, '"');
+  }
+  tz_buf_free(&name);
 }
 
-static void fail_with(TzMaker make, const char *code, TzStr message) {
+static void fail_null_bytes(TzMaker make, const TzSpawnRequest *req, const char *name,
+                            const TzBuf *key) {
   TzSpawnParts parts;
   memset(&parts, 0, sizeof parts);
-  parts.message = message;
-  parts.code = ascii(code);
-  tz_failed = make(&parts);
-}
-
-static void fail_null_bytes(TzMaker make, const char *name, const TzBuf *key, const char *reason,
-                            const TzBuf *value) {
+  TzBuf argument;
+  tz_buf_init(&argument);
+  tz_buf_ascii(&argument, name);
+  if (key) {
+    tz_buf_push(&argument, '.');
+    buf_take_units(&argument, key);
+  }
   TzBuf m;
   tz_buf_init(&m);
-  tz_buf_ascii(&m, strchr(name, '.') ? "The property '" : "The argument '");
-  tz_buf_ascii(&m, name);
-  if (key) {
-    tz_buf_ascii(&m, "['");
-    buf_take_units(&m, key);
-    tz_buf_ascii(&m, "']");
-  }
-  tz_buf_ascii(&m, "' ");
-  tz_buf_ascii(&m, reason);
-  buf_received(&m, value);
-  fail_with(make, "ERR_INVALID_ARG_VALUE", tz_buf_take(&m));
+  tz_buf_ascii(&m, "could not run ");
+  program_name(&m, req);
+  tz_buf_ascii(&m, ": ");
+  buf_take_units(&m, &argument);
+  tz_buf_ascii(&m, " has a zero character in it");
+  parts.argument = tz_buf_take(&argument);
+  fail_reason(make, &parts, "ZERO_CHARACTER", "ERR_INVALID_ARG_VALUE", tz_buf_take(&m));
 }
 
-static void fail_out_of_range(TzMaker make, const char *name, const char *must, double value) {
+static void fail_out_of_range(TzMaker make, const TzSpawnRequest *req, const char *name,
+                              const char *must, double value) {
   char number[32];
   number[tz_format_f64(value, number)] = 0;
+  TzSpawnParts parts;
+  memset(&parts, 0, sizeof parts);
   TzBuf m;
   tz_buf_init(&m);
-  tz_buf_ascii(&m, "The value of \"");
+  tz_buf_ascii(&m, "could not run ");
+  program_name(&m, req);
+  tz_buf_ascii(&m, ": ");
   tz_buf_ascii(&m, name);
-  tz_buf_ascii(&m, "\" is out of range. It must be ");
+  tz_buf_ascii(&m, " must be ");
   tz_buf_ascii(&m, must);
-  tz_buf_ascii(&m, ". Received ");
+  tz_buf_ascii(&m, ", not ");
   tz_buf_ascii(&m, number);
-  fail_with(make, "ERR_OUT_OF_RANGE", tz_buf_take(&m));
+  parts.detail = name;
+  parts.value = value;
+  fail_reason(make, &parts, "OUT_OF_RANGE", "ERR_OUT_OF_RANGE", tz_buf_take(&m));
+}
+
+static void fail_unknown_signal(TzMaker make, const TzSpawnRequest *req, TzStr signal) {
+  TzSpawnParts parts;
+  memset(&parts, 0, sizeof parts);
+  TzBuf m;
+  tz_buf_init(&m);
+  tz_buf_ascii(&m, "could not run ");
+  program_name(&m, req);
+  tz_buf_ascii(&m, ": there is no signal ");
+  tz_buf_str(&m, signal);
+  tz_buf_ascii(&m, " (killSignal)");
+  parts.signal = signal;
+  fail_reason(make, &parts, "UNKNOWN_SIGNAL", "ERR_UNKNOWN_SIGNAL", tz_buf_take(&m));
 }
 
 typedef struct {
@@ -531,6 +557,7 @@ typedef struct {
   double max_buffer;
   TzBytes *input;
   TzMaker make_error;
+  int shell;
 } Call;
 
 static void call_free(Call *c) {
@@ -599,8 +626,7 @@ static int collect_env(Call *c) {
       tz_buf_init(&value);
       tz_buf_str(&value, *(const TzStr *)(e + layout->value_offset));
       if (has_zero(name) || has_zero(&value)) {
-        fail_null_bytes(c->make_error, "options.env", name, "must be a string without null bytes",
-                         has_zero(name) ? name : &value);
+        fail_null_bytes(c->make_error, c->req, "env", name);
         tz_buf_free(&value);
         list_free(&pairs);
         list_free(&names);
@@ -701,8 +727,7 @@ static int prepare(Call *c, const TzSpawnRequest *req, TzMaker make_error) {
   tz_buf_str(&c->file, req->file);
   int exec = req->mode == TZ_CHILD_EXEC;
   if (has_zero(&c->file)) {
-    fail_null_bytes(c->make_error, exec ? "command" : "file", NULL, "must be a string without null bytes",
-                     &c->file);
+    fail_null_bytes(c->make_error, req, exec ? "command" : "file", NULL);
     return 0;
   }
   TzBuf argv0;
@@ -710,17 +735,16 @@ static int prepare(Call *c, const TzSpawnRequest *req, TzMaker make_error) {
   if (req->has & HAS_ARGV0) {
     tz_buf_str(&argv0, req->argv0);
     if (has_zero(&argv0)) {
-      fail_null_bytes(c->make_error, "options.argv0", NULL, "must be a string without null bytes", &argv0);
+      fail_null_bytes(c->make_error, req, "argv0", NULL);
       tz_buf_free(&argv0);
       return 0;
     }
   }
-  if (c->file.length == 0) {
-    TzBuf m;
-    tz_buf_init(&m);
-    tz_buf_ascii(&m, "The argument 'file' cannot be empty");
-    buf_received(&m, &c->file);
-    fail_with(c->make_error, "ERR_INVALID_ARG_VALUE", tz_buf_take(&m));
+  if (c->file.length == 0 && !exec) {
+    TzSpawnParts parts;
+    memset(&parts, 0, sizeof parts);
+    fail_reason(c->make_error, &parts, "EMPTY_NAME", "ERR_INVALID_ARG_VALUE",
+                ascii("could not run a program: its name is empty"));
     tz_buf_free(&argv0);
     return 0;
   }
@@ -732,7 +756,7 @@ static int prepare(Call *c, const TzSpawnRequest *req, TzMaker make_error) {
     if (has_zero(arg)) {
       char name[32];
       snprintf(name, sizeof name, "args[%u]", i);
-      fail_null_bytes(c->make_error, name, NULL, "must be a string without null bytes", arg);
+      fail_null_bytes(c->make_error, req, name, NULL);
       list_free(&given);
       tz_buf_free(&argv0);
       return 0;
@@ -742,8 +766,7 @@ static int prepare(Call *c, const TzSpawnRequest *req, TzMaker make_error) {
     c->has_cwd = 1;
     tz_buf_str(&c->cwd, req->cwd);
     if (has_zero(&c->cwd)) {
-      fail_null_bytes(c->make_error, "options.cwd", NULL,
-                      "must be a string, Uint8Array, or URL without null bytes", &c->cwd);
+      fail_null_bytes(c->make_error, req, "cwd", NULL);
       list_free(&given);
       tz_buf_free(&argv0);
       return 0;
@@ -759,9 +782,10 @@ static int prepare(Call *c, const TzSpawnRequest *req, TzMaker make_error) {
       shell = SHELL_NONE;
     }
   }
+  c->shell = shell != SHELL_NONE;
   if (shell != SHELL_NONE) {
     if (has_zero(&path)) {
-      fail_null_bytes(c->make_error, "options.shell", NULL, "must be a string without null bytes", &path);
+      fail_null_bytes(c->make_error, req, "shell", NULL);
       tz_buf_free(&path);
       list_free(&given);
       tz_buf_free(&argv0);
@@ -821,7 +845,7 @@ static int prepare(Call *c, const TzSpawnRequest *req, TzMaker make_error) {
   if (req->has & HAS_TIMEOUT) {
     double t = req->timeout;
     if (!(t >= 0 && isfinite(t) && t == floor(t))) {
-      fail_out_of_range(c->make_error, "timeout", "an unsigned integer", t);
+      fail_out_of_range(c->make_error, req, "timeout", "a whole number, 0 or more", t);
       return 0;
     }
     c->timeout = t > 1e15 ? (int64_t)1e15 : (int64_t)t;
@@ -829,7 +853,7 @@ static int prepare(Call *c, const TzSpawnRequest *req, TzMaker make_error) {
   c->max_buffer = 1024 * 1024;
   if (req->has & HAS_MAX_BUFFER) {
     if (!(req->max_buffer >= 0)) {
-      fail_out_of_range(c->make_error, "options.maxBuffer", "a positive number", req->max_buffer);
+      fail_out_of_range(c->make_error, req, "maxBuffer", "0 or more", req->max_buffer);
       return 0;
     }
     c->max_buffer = req->max_buffer;
@@ -846,21 +870,16 @@ static int prepare(Call *c, const TzSpawnRequest *req, TzMaker make_error) {
       }
     }
     if (found < 0) {
-      TzBuf m;
-      tz_buf_init(&m);
-      tz_buf_ascii(&m, "Unknown signal: ");
-      buf_take_units(&m, &name);
-      fail_with(c->make_error, "ERR_UNKNOWN_SIGNAL", tz_buf_take(&m));
-      tz_buf_free(&name);
+      fail_unknown_signal(c->make_error, req, tz_buf_take(&name));
       return 0;
     }
     tz_buf_free(&name);
     c->kill_signal = found;
   } else if (req->has & HAS_KILL_NUMBER) {
     if (!signal_name(req->kill_number)) {
-      char text[48];
-      snprintf(text, sizeof text, "Unknown signal: %d", req->kill_number);
-      fail_with(c->make_error, "ERR_UNKNOWN_SIGNAL", ascii(text));
+      char text[32];
+      snprintf(text, sizeof text, "%d", req->kill_number);
+      fail_unknown_signal(c->make_error, req, ascii(text));
       return 0;
     }
     c->kill_signal = req->kill_number;
@@ -880,6 +899,9 @@ typedef struct {
   int error;
   int pipe_error;
   int started;
+  int overflow;
+  int batch;
+  uint32_t system;
   int32_t pid;
   int64_t status;
   int signal;
@@ -1292,6 +1314,7 @@ static void run(Call *c, Outcome *o) {
   const TzSpawnRequest *req = c->req;
   if (is_batch_file(&c->file)) {
     o->error = X_EINVAL;
+    o->batch = 1;
     return;
   }
   if (req->has & (HAS_UID | HAS_GID)) {
@@ -1492,6 +1515,7 @@ static void run(Call *c, Outcome *o) {
   }
   if (failure) {
     o->error = win32_error(failure);
+    o->system = failure;
     for (int i = 0; i < 3; ++i) {
       pipe_close(&pipes[i]);
       if (pipes[i].ov.hEvent) {
@@ -1589,6 +1613,7 @@ static void run(Call *c, Outcome *o) {
       buffered += got;
       if (c->max_buffer > 0 && buffered > c->max_buffer) {
         set_error(o, X_ENOBUFS);
+        o->overflow = i;
         stop = 1;
       } else {
         pipe_read(p, o);
@@ -1800,6 +1825,7 @@ static void run(Call *c, Outcome *o) {
   tz_free(program);
   if (failure) {
     o->error = errno_error(failure);
+    o->system = (uint32_t)failure;
     for (int i = 0; i < 3; ++i) {
       if (parent[i] >= 0) {
         close(parent[i]);
@@ -1889,6 +1915,7 @@ static void run(Call *c, Outcome *o) {
         buffered += (double)got;
         if (c->max_buffer > 0 && buffered > c->max_buffer) {
           set_error(o, X_ENOBUFS);
+          o->overflow = i;
           stop = 1;
         }
       } else if (got == 0 || errno != EAGAIN) {
@@ -1926,26 +1953,6 @@ static void run(Call *c, Outcome *o) {
 
 static TzStr str_of_buf(const TzBuf *b) { return tz_str_from_utf16(b->data, b->length); }
 
-static TzStr syscall_of(const Call *c) {
-  TzBuf b;
-  tz_buf_init(&b);
-  tz_buf_ascii(&b, "spawnSync ");
-  buf_take_units(&b, &c->file);
-
-  return tz_buf_take(&b);
-}
-
-static TzStr errno_message(const Call *c, int error) {
-  TzBuf b;
-  tz_buf_init(&b);
-  tz_buf_ascii(&b, "spawnSync ");
-  buf_take_units(&b, &c->file);
-  tz_buf_push(&b, ' ');
-  tz_buf_ascii(&b, kErrors[error].code);
-
-  return tz_buf_take(&b);
-}
-
 static void fill_output(const Call *c, const Outcome *o, TzSpawnParts *parts) {
   int32_t encoding = c->req->encoding;
   parts->text_mode = encoding > 0;
@@ -1973,6 +1980,202 @@ static void release_output(TzSpawnParts *parts, int from) {
     }
     parts->bytes[i] = NULL;
   }
+}
+
+enum { KIND_MISSING, KIND_FILE, KIND_FOLDER };
+
+static int kind_of(const TzBuf *path) {
+#ifdef _WIN32
+  TzBuf wide;
+  tz_buf_init(&wide);
+  buf_take_units(&wide, path);
+  tz_buf_push(&wide, 0);
+  DWORD attributes = GetFileAttributesW((const wchar_t *)wide.data);
+  tz_buf_free(&wide);
+  if (attributes == INVALID_FILE_ATTRIBUTES) {
+    return KIND_MISSING;
+  }
+
+  return (attributes & FILE_ATTRIBUTE_DIRECTORY) ? KIND_FOLDER : KIND_FILE;
+#else
+  char *text = utf8_of(path);
+  struct stat st;
+  int found = stat(text, &st) == 0;
+  tz_free(text);
+  if (!found) {
+    return KIND_MISSING;
+  }
+
+  return S_ISDIR(st.st_mode) ? KIND_FOLDER : KIND_FILE;
+#endif
+}
+
+static int has_separator(const TzBuf *b) {
+  for (size_t i = 0; i < b->length; ++i) {
+    if (b->data[i] == '/' || b->data[i] == '\\') {
+      return 1;
+    }
+  }
+
+  return 0;
+}
+
+static void who(TzBuf *m, const TzSpawnRequest *req) { tz_buf_str(m, req->file); }
+
+static void command_line(TzBuf *m, const TzSpawnRequest *req) {
+  tz_buf_str(m, req->file);
+  if (req->mode == TZ_CHILD_EXEC) {
+    return;
+  }
+  uint32_t count = req->args ? req->args->length : 0;
+  for (uint32_t i = 0; i < count; ++i) {
+    tz_buf_push(m, ' ');
+    tz_buf_str(m, ((const TzStr *)req->args->data)[i]);
+  }
+}
+
+static TzArray *given_args(const TzSpawnRequest *req) {
+  uint32_t count = req->args ? req->args->length : 0;
+  TzArray *args = tz_arr_new(req->string_type, 0, (int64_t)count);
+  for (uint32_t i = 0; i < count; ++i) {
+    TzStr arg = ((const TzStr *)req->args->data)[i];
+    tz_str_retain_value(arg);
+    tz_arr_push_value(args, &arg);
+  }
+
+  return args;
+}
+
+typedef struct {
+  const char *reason;
+  const char *code;
+  const char *text;
+} Cause;
+
+static Cause cause_of_start(const Call *c, const Outcome *o, int error) {
+  const TzSpawnRequest *req = c->req;
+  int exec = req->mode == TZ_CHILD_EXEC;
+  if (error == X_ENOENT || error == X_ENOTDIR) {
+    if (c->has_cwd) {
+      int kind = kind_of(&c->cwd);
+      if (kind == KIND_MISSING) {
+        return (Cause){"CWD_NOT_FOUND", "ENOENT", NULL};
+      }
+      if (kind == KIND_FILE) {
+        return (Cause){"CWD_NOT_A_FOLDER", "ENOTDIR", NULL};
+      }
+    }
+    if (error == X_ENOENT && c->shell) {
+      return (Cause){"SHELL_NOT_FOUND", "ENOENT", NULL};
+    }
+    if (error == X_ENOENT) {
+      TzBuf file;
+      tz_buf_init(&file);
+      tz_buf_str(&file, req->file);
+      int path = has_separator(&file);
+      tz_buf_free(&file);
+      return path ? (Cause){"PROGRAM_FILE_NOT_FOUND", "ENOENT", "there is no such file"}
+                  : (Cause){"PROGRAM_NOT_FOUND_IN_PATH", "ENOENT",
+                            "there is no such program in PATH; install it or give the full path"};
+    }
+  }
+#ifdef _WIN32
+  if (error == X_EACCES && o->system == ERROR_ELEVATION_REQUIRED && !exec) {
+    return (Cause){"NEEDS_ADMINISTRATOR", "EACCES", "it needs to run as administrator"};
+  }
+#endif
+  if (error == X_EACCES || error == X_EPERM) {
+    return (Cause){"NO_PERMISSION", kErrors[error].code, "no permission"};
+  }
+  if (error == X_EINVAL && o->batch) {
+    return (Cause){"BATCH_FILE_WITHOUT_SHELL", "EINVAL",
+                   "it is a batch file; run it with execSync or pass { shell: true }"};
+  }
+  if ((error == X_EFTYPE || error == X_ENOEXEC) && !exec) {
+    return (Cause){"NOT_A_PROGRAM", kErrors[error].code, "it is not a program"};
+  }
+  if (error == X_E2BIG) {
+    return (Cause){"COMMAND_LINE_TOO_LONG", "E2BIG",
+                   "the command line is longer than the system allows"};
+  }
+  if (error == X_ENAMETOOLONG && !exec) {
+    return (Cause){"PATH_TOO_LONG", "ENAMETOOLONG", "the path is too long"};
+  }
+  if (error == X_EMFILE) {
+    return (Cause){"TOO_MANY_FILES", "EMFILE", "too many files are open in this program"};
+  }
+  if (error == X_EAGAIN) {
+    return (Cause){"TOO_MANY_PROCESSES", "EAGAIN", "the system allows no more processes"};
+  }
+  if (error == X_ENOMEM) {
+    return (Cause){"OUT_OF_MEMORY", "ENOMEM", "not enough memory"};
+  }
+  if (error == X_EIO || error == X_EFAULT) {
+    return (Cause){"SYSTEM", kErrors[error].code, NULL};
+  }
+
+  return (Cause){"SYSTEM", "UNKNOWN", NULL};
+}
+
+typedef struct {
+  const char *name;
+  uint32_t code;
+  const char *what;
+} Crash;
+
+static const Crash kCrashes[] = {
+    {"SIGSEGV", 0, "it read memory it does not own"},
+    {"SIGBUS", 0, "it read memory in a way the processor does not allow"},
+    {"SIGILL", 0, "it ran an instruction the processor does not have"},
+    {"SIGFPE", 0, "it divided by zero"},
+    {"SIGABRT", 0, "it stopped itself (abort)"},
+    {"ACCESS_VIOLATION", 0xC0000005u, "it read memory it does not own"},
+    {"STACK_OVERFLOW", 0xC00000FDu, "it ran out of stack"},
+    {"STACK_BUFFER_OVERRUN", 0xC0000409u, "it wrote past the end of a buffer"},
+    {"ILLEGAL_INSTRUCTION", 0xC000001Du, "it ran an instruction the processor does not have"},
+    {"INTEGER_DIVIDE_BY_ZERO", 0xC0000094u, "it divided by zero"},
+    {"HEAP_CORRUPTION", 0xC0000374u, "it broke its own memory"},
+};
+
+static const Crash *crash_of(const Outcome *o, const char *signal) {
+  for (size_t i = 0; i < sizeof kCrashes / sizeof kCrashes[0]; ++i) {
+    if (signal && kCrashes[i].code == 0 && strcmp(kCrashes[i].name, signal) == 0) {
+      return &kCrashes[i];
+    }
+    if (!signal && kCrashes[i].code != 0 && (uint32_t)o->status == kCrashes[i].code) {
+      return &kCrashes[i];
+    }
+  }
+
+  return NULL;
+}
+
+static void first_line(TzBuf *m, const TzSpawnParts *parts, const Outcome *o) {
+  if (!parts->piped[2] || o->out[2].length == 0) {
+    return;
+  }
+  TzStr text = tz_buffer_decode(o->out[2].data, (int64_t)o->out[2].length, 0);
+  TzBuf all;
+  tz_buf_init(&all);
+  tz_buf_str(&all, text);
+  tz_str_release_value(text);
+  size_t start = 0;
+  while (start < all.length &&
+         (all.data[start] == '\n' || all.data[start] == '\r' || all.data[start] == ' ')) {
+    ++start;
+  }
+  size_t end = start;
+  while (end < all.length && all.data[end] != '\n' && all.data[end] != '\r') {
+    ++end;
+  }
+  while (end > start && all.data[end - 1] == ' ') {
+    --end;
+  }
+  if (end > start) {
+    tz_buf_ascii(m, ": ");
+    tz_buf_units(m, all.data + start, end - start);
+  }
+  tz_buf_free(&all);
 }
 
 static void *finish(Call *c, Outcome *o, TzSpawnParts *out, TzMaker make) {
@@ -2003,6 +2206,12 @@ static void *finish(Call *c, Outcome *o, TzSpawnParts *out, TzMaker make) {
       tz_std_write_bytes(2, o->out[2].data, o->out[2].length);
     }
   }
+  const char *crash_signal = NULL;
+  const Crash *crash = NULL;
+  if (error == X_NONE && o->started) {
+    crash_signal = parts.has_signal ? signal_name(o->signal) : NULL;
+    crash = crash_of(o, parts.has_signal ? crash_signal : NULL);
+  }
   if (req->mode != TZ_CHILD_SPAWN && error == X_NONE && parts.has_status && parts.status == 0) {
     out->text_mode = parts.text_mode;
     out->piped[1] = parts.piped[1];
@@ -2018,45 +2227,128 @@ static void *finish(Call *c, Outcome *o, TzSpawnParts *out, TzMaker make) {
     release_output(&parts, 0);
     parts.piped[1] = parts.piped[2] = 0;
   }
+  parts.command = req->file;
+  tz_str_retain_value(parts.command);
+  if (req->mode != TZ_CHILD_EXEC) {
+    parts.spawnargs = given_args(req);
+  }
+  const char *kill = signal_name(c->kill_signal);
+  int shell_missing = 0, shell_refused = 0;
+#ifndef _WIN32
+  if (req->mode == TZ_CHILD_EXEC && c->shell && parts.has_status) {
+    shell_missing = parts.status == 127;
+    shell_refused = parts.status == 126;
+  }
+#endif
   TzBuf m;
   tz_buf_init(&m);
-  if (error != X_NONE) {
-    TzStr message = errno_message(c, error);
-    tz_buf_str(&m, message);
-    tz_str_release_value(message);
-    parts.has_code = 1;
-    parts.errno_value = kErrors[error].number;
-    parts.code = ascii(kErrors[error].code);
-    parts.syscall = syscall_of(c);
-    parts.path = str_of_buf(&c->file);
-    parts.spawnargs = tz_arr_new(req->string_type, 0, (int64_t)c->args.count);
-    for (size_t i = 1; i < c->args.count; ++i) {
-      TzStr arg = str_of_buf(&c->args.items[i]);
-      tz_arr_push_value(parts.spawnargs, &arg);
-    }
-  } else {
-    parts.code = ascii("exit");
-    tz_buf_ascii(&m, "Command failed: ");
-    if (req->mode == TZ_CHILD_EXEC) {
-      tz_buf_str(&m, req->file);
+  if (error == X_ETIMEDOUT) {
+    parts.reason = "TIMEOUT";
+    parts.code_name = "ETIMEDOUT";
+    parts.limit = c->timeout;
+    tz_str_release_value(parts.signal);
+    parts.signal = ascii(kill ? kill : "SIGTERM");
+    char number[32];
+    snprintf(number, sizeof number, "%lld", (long long)c->timeout);
+    who(&m, req);
+    tz_buf_ascii(&m, " did not finish in ");
+    tz_buf_ascii(&m, number);
+    tz_buf_ascii(&m, " ms and was stopped");
+  } else if (error == X_ENOBUFS) {
+    parts.reason = "OUTPUT_TOO_LARGE";
+    parts.code_name = "ENOBUFS";
+    parts.detail = o->overflow == 2 ? "stderr" : "stdout";
+    parts.limit = (int64_t)c->max_buffer;
+    tz_str_release_value(parts.signal);
+    parts.signal = ascii(kill ? kill : "SIGTERM");
+    char number[32];
+    snprintf(number, sizeof number, "%lld", (long long)c->max_buffer);
+    who(&m, req);
+    tz_buf_ascii(&m, " printed more than ");
+    tz_buf_ascii(&m, number);
+    tz_buf_ascii(&m, " bytes to ");
+    tz_buf_ascii(&m, parts.detail);
+    tz_buf_ascii(&m, " (maxBuffer) and was stopped");
+  } else if (error == X_EPIPE || error == X_EOF) {
+    parts.reason = "INPUT_CLOSED";
+    parts.code_name = kErrors[error].code;
+    parts.syscall = ascii("write");
+    who(&m, req);
+    tz_buf_ascii(&m, " closed its input before reading all of it");
+  } else if (error != X_NONE || !o->started) {
+    int failed = error != X_NONE ? error : X_UNKNOWN;
+    Cause cause = cause_of_start(c, o, failed);
+    parts.reason = cause.reason;
+    parts.code_name = cause.code;
+    parts.syscall = ascii("spawn");
+    tz_buf_ascii(&m, "could not run ");
+    program_name(&m, req);
+    tz_buf_ascii(&m, ": ");
+    if (strcmp(cause.reason, "CWD_NOT_FOUND") == 0 ||
+        strcmp(cause.reason, "CWD_NOT_A_FOLDER") == 0) {
+      parts.cwd = str_of_buf(&c->cwd);
+      int found = strcmp(cause.reason, "CWD_NOT_A_FOLDER") == 0;
+      tz_buf_ascii(&m, found ? "" : "the folder ");
+      buf_take_units(&m, &c->cwd);
+      tz_buf_ascii(&m, found ? " (cwd) is a file, not a folder" : " (cwd) does not exist");
+    } else if (strcmp(cause.reason, "SHELL_NOT_FOUND") == 0) {
+      parts.shell = str_of_buf(&c->file);
+      tz_buf_ascii(&m, "there is no shell ");
+      buf_take_units(&m, &c->file);
+      tz_buf_ascii(&m, " on this system; run the program with execFileSync");
+    } else if (cause.text) {
+      tz_buf_ascii(&m, cause.text);
     } else {
-      tz_buf_str(&m, (req->has & HAS_ARGV0) ? req->argv0 : req->file);
-      uint32_t count = req->args ? req->args->length : 0;
-      for (uint32_t i = 0; i < count; ++i) {
-        tz_buf_push(&m, ' ');
-        tz_buf_str(&m, ((const TzStr *)req->args->data)[i]);
+      tz_buf_ascii(&m, "the system failed with ");
+      tz_buf_ascii(&m, kErrors[failed].code);
+#ifdef _WIN32
+      if (o->system) {
+        char number[48];
+        snprintf(number, sizeof number, " (Windows error %lu)", (unsigned long)o->system);
+        tz_buf_ascii(&m, number);
       }
+#endif
     }
-    if (parts.piped[2] && o->out[2].length > 0) {
-      tz_buf_push(&m, '\n');
-      if (parts.text_mode) {
-        tz_buf_str(&m, parts.text[2]);
-      } else {
-        TzStr text = tz_buffer_decode(o->out[2].data, (int64_t)o->out[2].length, 0);
-        tz_buf_str(&m, text);
-        tz_str_release_value(text);
-      }
+  } else if (crash) {
+    parts.reason = "CRASHED";
+    parts.code_name = "ERR_CRASHED";
+    parts.detail = crash->name;
+    who(&m, req);
+    tz_buf_ascii(&m, " crashed: ");
+    tz_buf_ascii(&m, crash->name);
+    tz_buf_ascii(&m, " (");
+    tz_buf_ascii(&m, crash->what);
+    tz_buf_push(&m, ')');
+  } else if (parts.has_signal) {
+    const char *name = crash_signal ? crash_signal : "";
+    int asked = strcmp(name, "SIGTERM") == 0 || strcmp(name, "SIGINT") == 0 ||
+                strcmp(name, "SIGHUP") == 0 || strcmp(name, "SIGQUIT") == 0;
+    parts.reason = asked ? "STOPPED" : "KILLED";
+    parts.code_name = asked ? "ERR_STOPPED_BY_SIGNAL" : "ERR_KILLED_BY_SIGNAL";
+    parts.detail = name;
+    who(&m, req);
+    tz_buf_ascii(&m, asked ? " was stopped by " : " was killed by ");
+    tz_buf_ascii(&m, name);
+    if (strcmp(name, "SIGKILL") == 0) {
+      tz_buf_ascii(&m, " (often: the system ran out of memory)");
     }
+  } else if (shell_missing || shell_refused) {
+    int missing = shell_missing;
+    parts.reason = missing ? "SHELL_COMMAND_NOT_FOUND" : "SHELL_COMMAND_NOT_RUNNABLE";
+    parts.code_name = missing ? "ERR_COMMAND_NOT_FOUND" : "ERR_COMMAND_NOT_RUNNABLE";
+    tz_buf_ascii(&m, missing ? "the shell could not find the command in \""
+                             : "the shell could not run the command in \"");
+    tz_buf_str(&m, req->file);
+    tz_buf_ascii(&m, missing ? "\"" : "\": no permission");
+  } else {
+    parts.reason = "EXIT";
+    parts.code_name = "ERR_NONZERO_EXIT";
+    char number[32];
+    snprintf(number, sizeof number, "%d", parts.status);
+    command_line(&m, req);
+    tz_buf_ascii(&m, " exited with code ");
+    tz_buf_ascii(&m, number);
+    first_line(&m, &parts, o);
   }
   parts.message = tz_buf_take(&m);
   tz_failed = c->make_error(&parts);
@@ -2064,8 +2356,7 @@ static void *finish(Call *c, Outcome *o, TzSpawnParts *out, TzMaker make) {
   return NULL;
 }
 
-void *tz_child_run(const TzSpawnRequest *req, TzSpawnParts *out, TzMaker make_error,
-                   TzMaker make) {
+void *tz_child_run(const TzSpawnRequest *req, TzSpawnParts *out, TzMaker make_error, TzMaker make) {
   memset(out, 0, sizeof *out);
   Call c;
   if (!prepare(&c, req, make_error)) {

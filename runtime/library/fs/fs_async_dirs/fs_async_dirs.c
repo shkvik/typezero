@@ -567,83 +567,53 @@ void tz_fsp_rm(TzPromise *p, void *path_obj, uint64_t path_meta, int32_t recursi
   tz_fs_fsp_queue(r, rm_work, rm_done);
 }
 
-static void rename_work(TzWork *w) {
+static void move_work(TzWork *w) {
   FsRequest *r = (FsRequest *)w;
+  const char *syscall = r->mode == 2 ? "copyfile" : "rename";
 #ifdef _WIN32
-  if (!MoveFileExW(tz_fs_wide(&r->path), tz_fs_wide(&r->dest), MOVEFILE_REPLACE_EXISTING)) {
-    tz_fs_fsp_fail_system(r, GetLastError(), "rename", 2);
+  BOOL done = r->mode == 2   ? CopyFileW(tz_fs_wide(&r->path), tz_fs_wide(&r->dest), TRUE)
+              : r->mode == 1 ? MoveFileExW(tz_fs_wide(&r->path), tz_fs_wide(&r->dest),
+                                           MOVEFILE_REPLACE_EXISTING)
+                             : MoveFileExW(tz_fs_wide(&r->path), tz_fs_wide(&r->dest), 0);
+  if (!done) {
+    tz_fs_fsp_fail(r, tz_fs_move_failure(GetLastError(), r->mode, &r->path, &r->dest), syscall, 2);
   }
 #else
-  if (rename(tz_fs_native(&r->path), tz_fs_native(&r->dest)) != 0) {
-    tz_fs_fsp_fail_system(r, errno, "rename", 2);
+  int failed = r->mode == 2 ? tz_fs_copy_new(tz_fs_native(&r->path), tz_fs_native(&r->dest))
+               : r->mode == 1
+                   ? rename(tz_fs_native(&r->path), tz_fs_native(&r->dest))
+                   : tz_fs_rename_no_replace(tz_fs_native(&r->path), tz_fs_native(&r->dest));
+  if (failed != 0) {
+    tz_fs_fsp_fail_system(r, errno, syscall, 2);
   }
 #endif
+}
+
+static void queue_move(TzPromise *p, void *from_obj, uint64_t from_meta, void *to_obj,
+                       uint64_t to_meta, int32_t how, TzMaker make) {
+  const char *syscall = how == 2 ? "copyfile" : "rename";
+  FsRequest *r = tz_fs_fsp_new(p, make);
+  if (!tz_fs_fsp_path(r, from_obj, from_meta, syscall) ||
+      !tz_fs_fsp_path(r, to_obj, to_meta, syscall)) {
+    return;
+  }
+  r->mode = how;
+  tz_fs_fsp_queue(r, move_work, tz_fs_fsp_done_void);
 }
 
 void tz_fsp_rename(TzPromise *p, void *from_obj, uint64_t from_meta, void *to_obj, uint64_t to_meta,
                    TzMaker make) {
-  FsRequest *r = tz_fs_fsp_new(p, make);
-  if (!tz_fs_fsp_path(r, from_obj, from_meta, "rename") ||
-      !tz_fs_fsp_path(r, to_obj, to_meta, "rename")) {
-    return;
-  }
-  tz_fs_fsp_queue(r, rename_work, tz_fs_fsp_done_void);
+  queue_move(p, from_obj, from_meta, to_obj, to_meta, 0, make);
 }
 
-static void copy_file_work(TzWork *w) {
-  FsRequest *r = (FsRequest *)w;
-#ifdef _WIN32
-  if (r->mode & 4) {
-    tz_fs_fsp_fail(r, (Failure){E_ENOSYS, tz_fs_errors[E_ENOSYS].windows}, "copyfile", 2);
-  } else if (!CopyFileW(tz_fs_wide(&r->path), tz_fs_wide(&r->dest), (r->mode & 1) != 0)) {
-    DWORD error = GetLastError();
-    TzStatsParts a, b;
-    int same = tz_fs_win32_failure(error).index == E_EBUSY &&
-               tz_fs_stat_of(tz_fs_wide(&r->path), 1, &a) == 0 &&
-               tz_fs_stat_of(tz_fs_wide(&r->dest), 1, &b) == 0 && a.dev == b.dev && a.ino == b.ino;
-    if (!same) {
-      tz_fs_fsp_fail_system(r, error, "copyfile", 2);
-    }
-  }
-#else
-  int in = -1, out = -1;
-  if (r->mode & 4) {
-    tz_fs_fsp_fail_system(r, ENOSYS, "copyfile", 2);
-  } else if ((in = open(tz_fs_native(&r->path), O_RDONLY | O_CLOEXEC)) < 0) {
-    tz_fs_fsp_fail_system(r, errno, "copyfile", 2);
-  } else {
-    struct stat s;
-    fstat(in, &s);
-    out = open(tz_fs_native(&r->dest),
-               O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC | ((r->mode & 1) ? O_EXCL : 0),
-               s.st_mode & 0777);
-    if (out < 0) {
-      tz_fs_fsp_fail_system(r, errno, "copyfile", 2);
-    } else {
-      char chunk[65536];
-      ssize_t got;
-      while ((got = read(in, chunk, sizeof chunk)) > 0) {
-        if (write(out, chunk, (size_t)got) != got) {
-          tz_fs_fsp_fail_system(r, errno, "copyfile", 2);
-          break;
-        }
-      }
-      close(out);
-    }
-    close(in);
-  }
-#endif
+void tz_fsp_replace(TzPromise *p, void *from_obj, uint64_t from_meta, void *to_obj,
+                    uint64_t to_meta, TzMaker make) {
+  queue_move(p, from_obj, from_meta, to_obj, to_meta, 1, make);
 }
 
 void tz_fsp_copy_file(TzPromise *p, void *from_obj, uint64_t from_meta, void *to_obj,
-                      uint64_t to_meta, int64_t mode, TzMaker make) {
-  FsRequest *r = tz_fs_fsp_new(p, make);
-  if (!tz_fs_fsp_path(r, from_obj, from_meta, "copyfile") ||
-      !tz_fs_fsp_path(r, to_obj, to_meta, "copyfile")) {
-    return;
-  }
-  r->mode = mode;
-  tz_fs_fsp_queue(r, copy_file_work, tz_fs_fsp_done_void);
+                      uint64_t to_meta, TzMaker make) {
+  queue_move(p, from_obj, from_meta, to_obj, to_meta, 2, make);
 }
 
 static void realpath_work(TzWork *w) {

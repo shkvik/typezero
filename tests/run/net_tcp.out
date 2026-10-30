@@ -1,3 +1,4 @@
 answer: HELLO BYE 9 9
-NETWORK ECONNREFUSED could not connect to 127.0.0.1:PORT: nothing listens on this port
+CONNECT_ERROR_NETWORK ECONNREFUSED could not connect to 127.0.0.1:PORT: nothing listens on this port
 4 6 0
+SOCKET_ERROR_NETWORK ECONNRESET the connection to 127.0.0.1:PORT was reset by the other side true

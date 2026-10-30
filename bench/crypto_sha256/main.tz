@@ -3,6 +3,11 @@ import { createHash } from "node:crypto"
 
 const piece = Buffer.alloc(1 << 20)
 for (let i = 0; i < piece.length; i++) piece[i] = (i & 0xff).toUint8()
-const h = createHash("sha256")
+const made = createHash("sha256")
+if (made.isErr()) {
+  console.error(made.error.message)
+  process.exit(1)
+}
+const h = made.value
 for (let i = 0; i < 2048; i++) h.update(piece)
 console.log(h.digest("hex"))

@@ -331,7 +331,13 @@ bool TypeParams::hasMembersOf(const Type *arg, const Type *constraint) {
   const ClassDecl *cls = arg->classDecl();
   for (const Field &f : constraint->fields()) {
     if (const Field *have = arg->field(f.name)) {
-      if (have->type != f.type || (have->readonly && !f.readonly)) {
+      bool literal =
+          f.type->isString() &&
+          (have->type->isStringLiteral() ||
+           (have->type->isUnion() && llvm::all_of(have->type->members(), [](const Type *m) {
+              return m->isStringLiteral();
+            })));
+      if ((have->type != f.type && !literal) || (have->readonly && !f.readonly)) {
         return false;
       }
       continue;

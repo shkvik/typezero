@@ -1,21 +1,25 @@
-import { Readable, StreamCallback, Writable, WriteChunk, finished } from "node:stream"
-import { defer, fsClose, fsOpen, fsRead, fsWrite, stdWrite, stdinChunk } from "tz:intrinsics"
+import {
+  BufferedWrite,
+  FaultCallback,
+  HookCallback,
+  Readable,
+  StreamCallback,
+  StreamFault,
+  Writable,
+  WriteChunk,
+  faultOf,
+  finished,
+} from "node:stream"
+import { ReadStreamError, WriteNewStreamError, WriteStreamError } from "node:fs"
+import { chunkOf, defer, fsClose, fsOpen, fsRead, fsWrite, stdWrite, stdinChunk, stdinFailed } from "tz:intrinsics"
 
-function failure(code: string, message: string): StreamError {
+function failure(code: string, message: string): StreamFault {
   return { code, message }
 }
 
-function streamFailure(e: SystemError): StreamError {
-  return { code: e.code, message: e.message, errno: e.errno, syscall: e.syscall, path: e.path }
-}
-
-function invalidInteger(value: double, name: string): StreamError | undefined {
+function rangeProblem(value: double, name: string): string | undefined {
   if (Number.isInteger(value) && value >= 0 && value <= Number.MAX_SAFE_INTEGER) return undefined
-  return failure(
-    "ERR_OUT_OF_RANGE",
-    `The value of "${name}" is out of range. It must be >= 0 && <= 9007199254740991. ` +
-      `Received ${value}`,
-  )
+  return `${name} must be a whole number from 0 to 9007199254740991, not ${value}`
 }
 
 export interface ReadStreamOptions {
@@ -58,28 +62,29 @@ function closeOnDrop(file: OpenFile) {
   })
 }
 
-function closeFd(fd: int | undefined, flush: boolean, err: StreamError | undefined,
-                 cb: StreamCallback) {
+function closeFd<E extends StreamError>(fd: int | undefined, flush: boolean,
+                                        err: StreamFault | undefined, cb: FaultCallback,
+                                        fault: (error: E) => StreamFault) {
   if (fd == undefined) {
     cb(err)
     return
   }
   const open = fd
-  const closeIt = (error: StreamError | undefined) => {
-    void fsClose(open, false).then((closed) => {
-      if (closed.isErr()) cb(streamFailure(closed.error))
+  const closeIt = (error: StreamFault | undefined) => {
+    void fsClose<E>(open, false).then((closed) => {
+      if (closed.isErr()) cb(fault(closed.error))
       else cb(error)
     })
   }
   if (flush)
-    void fsClose(open, true).then((synced) => {
-      if (synced.isErr()) closeIt(err ?? streamFailure(synced.error))
+    void fsClose<E>(open, true).then((synced) => {
+      if (synced.isErr()) closeIt(err ?? fault(synced.error))
       else closeIt(err)
     })
   else closeIt(err)
 }
 
-export class ReadStream<T = Buffer> extends Readable<T> {
+export class ReadStream<T = Buffer> extends Readable<T, ReadStreamError> {
   private fileFd?: int
   readonly path: string
   readonly flags: string
@@ -91,8 +96,8 @@ export class ReadStream<T = Buffer> extends Readable<T> {
   private opening: boolean
   readonly autoClose: boolean
   private performingIO = false
-  private ioDone?: (error: StreamError | undefined) => void
-  private invalid?: StreamError
+  private ioDone?: (error: StreamFault | undefined) => void
+  private invalid?: ReadStreamError
   private file = new OpenFile()
   private closer: object
 
@@ -113,18 +118,19 @@ export class ReadStream<T = Buffer> extends Readable<T> {
     const start = options?.start
     this.start = start
     this.position = start
-    if (start != undefined) this.invalid = invalidInteger(start, "start")
     const end = options?.end
     this.end = end
-    if (end != undefined && this.invalid == undefined) {
-      this.invalid = invalidInteger(end, "end")
-      if (start != undefined && start > end && this.invalid == undefined)
-        this.invalid = failure(
-          "ERR_OUT_OF_RANGE",
-          `The value of "start" is out of range. It must be <= "end" (here: ${end}). ` +
-            `Received ${start}`,
-        )
-    }
+    let problem = start == undefined ? undefined : rangeProblem(start, "start")
+    if (problem == undefined && end != undefined) problem = rangeProblem(end, "end")
+    if (problem == undefined && start != undefined && end != undefined && start > end)
+      problem = `start (${start}) is after end (${end})`
+    if (problem != undefined)
+      this.invalid = {
+        kind: "READ_STREAM_ERROR_INVALID_RANGE",
+        code: "ERR_OUT_OF_RANGE",
+        message: `could not read ${path}: ${problem}`,
+        path,
+      }
     this.opening = this.fileFd == undefined
   }
 
@@ -144,18 +150,19 @@ export class ReadStream<T = Buffer> extends Readable<T> {
     return this.readCount
   }
 
-  protected onConstruct(callback: StreamCallback): void {
-    if (this.invalid != undefined) {
-      callback(this.invalid)
+  protected onConstruct(callback: HookCallback<ReadStreamError>): void {
+    const invalid = this.invalid
+    if (invalid != undefined) {
+      callback(invalid)
       return
     }
     if (this.fileFd != undefined) {
       callback()
       return
     }
-    void fsOpen(this.path, this.flags, this.mode).then((opened) => {
+    void fsOpen<ReadStreamError>(this.path, this.flags, this.mode).then((opened) => {
       if (opened.isErr()) {
-        callback(streamFailure(opened.error))
+        callback(opened.error)
         return
       }
       const fd = opened.value
@@ -183,18 +190,18 @@ export class ReadStream<T = Buffer> extends Readable<T> {
     }
     const buf = Buffer.allocUnsafeSlow(n)
     this.performingIO = true
-    void fsRead(fd, buf, 0, n, pos ?? -1).then((read) => {
-      if (read.isErr()) this.afterRead(streamFailure(read.error), 0, buf)
+    void fsRead<ReadStreamError>(fd, buf, 0, n, pos ?? -1).then((read) => {
+      if (read.isErr()) this.afterRead(read.error, 0, buf)
       else this.afterRead(undefined, read.value, buf)
     })
   }
 
-  private afterRead(er: StreamError | undefined, bytesRead: int, buf: Buffer) {
+  private afterRead(er: ReadStreamError | undefined, bytesRead: int, buf: Buffer) {
     this.performingIO = false
     if (this.destroyed()) {
       const done = this.ioDone
       this.ioDone = undefined
-      if (done != undefined) done(er)
+      if (done != undefined) done(er == undefined ? undefined : this.faultFrom(er))
       return
     }
     if (er != undefined) {
@@ -215,14 +222,14 @@ export class ReadStream<T = Buffer> extends Readable<T> {
     }
   }
 
-  protected onDestroy(error: StreamError | undefined, callback: StreamCallback): void {
-    const finish = (er: StreamError | undefined) => {
+  protected destroyHook(error: StreamFault | undefined, callback: FaultCallback): void {
+    const finish = (er: StreamFault | undefined) => {
       const fd = this.fileFd
       this.fileFd = undefined
       this.file.fd = undefined
-      closeFd(fd, false, er, callback)
+      closeFd<ReadStreamError>(fd, false, er, callback, (e: ReadStreamError) => this.faultFrom(e))
     }
-    if (this.performingIO) this.ioDone = (er: StreamError | undefined) => finish(error ?? er)
+    if (this.performingIO) this.ioDone = (er: StreamFault | undefined) => finish(error ?? er)
     else finish(error)
   }
 
@@ -232,7 +239,7 @@ export class ReadStream<T = Buffer> extends Readable<T> {
   }
 }
 
-export class WriteStream extends Writable<Buffer> {
+abstract class FileWriter<E extends StreamError> extends Writable<Buffer, E> {
   private fileFd?: int
   readonly path: string
   readonly flags: string
@@ -244,8 +251,8 @@ export class WriteStream extends Writable<Buffer> {
   private opening: boolean
   readonly autoClose: boolean
   private performingIO = false
-  private ioDone?: (error: StreamError | undefined) => void
-  private invalid?: StreamError
+  private ioDone?: (error: StreamFault | undefined) => void
+  private problem?: string
   private file = new OpenFile()
   private closer: object
 
@@ -268,7 +275,7 @@ export class WriteStream extends Writable<Buffer> {
     const start = options?.start
     this.start = start
     this.position = start
-    if (start != undefined) this.invalid = invalidInteger(start, "start")
+    this.problem = start == undefined ? undefined : rangeProblem(start, "start")
     this.opening = this.fileFd == undefined
   }
 
@@ -288,18 +295,22 @@ export class WriteStream extends Writable<Buffer> {
     return this.writeCount
   }
 
-  protected onConstruct(callback: StreamCallback): void {
-    if (this.invalid != undefined) {
-      callback(this.invalid)
+  protected abstract rangeError(message: string): E
+
+  protected onConstruct(callback: HookCallback<E>): void {
+    const problem = this.problem
+    if (problem != undefined) {
+      const invalid = this.rangeError(`could not write ${this.path}: ${problem}`)
+      callback(invalid)
       return
     }
     if (this.fileFd != undefined) {
       callback()
       return
     }
-    void fsOpen(this.path, this.flags, this.mode).then((opened) => {
+    void fsOpen<E>(this.path, this.flags, this.mode).then((opened) => {
       if (opened.isErr()) {
-        callback(streamFailure(opened.error))
+        callback(opened.error)
         return
       }
       const fd = opened.value
@@ -312,16 +323,16 @@ export class WriteStream extends Writable<Buffer> {
     })
   }
 
-  private writeAll(data: Buffer, offset: int, size: int, pos: double | undefined, cb: StreamCallback,
+  private writeAll(data: Buffer, offset: int, size: int, pos: double | undefined, cb: FaultCallback,
             retries: int) {
     const fd = this.fileFd
     if (fd == undefined) {
       cb(failure("ERR_STREAM_DESTROYED", "Cannot call write after a stream was destroyed"))
       return
     }
-    void fsWrite(fd, data, offset, size, pos ?? -1).then((written) => {
+    void fsWrite<E>(fd, data, offset, size, pos ?? -1).then((written) => {
       if (written.isErr()) {
-        cb(streamFailure(written.error))
+        cb(this.faultFrom(written.error))
         return
       }
       const bytesWritten = written.value
@@ -340,10 +351,25 @@ export class WriteStream extends Writable<Buffer> {
     })
   }
 
-  protected onWrite(chunk: Buffer, encoding: string, callback: StreamCallback): void {
+  protected onWrite(chunk: Buffer, encoding: string, callback: HookCallback<E>): void {
+    void chunk
     void encoding
+    callback()
+  }
+
+  protected writeChunk(chunk: unknown, encoding: string, callback: FaultCallback): void {
+    this.writeBuffer(chunkOf<Buffer>(chunk), callback)
+  }
+
+  protected writevChunks(chunks: BufferedWrite[], callback: FaultCallback): void {
+    const all: Buffer[] = []
+    for (const c of chunks) all.push(chunkOf<Buffer>(c.chunk))
+    this.writeBuffer(Buffer.concat(all), callback)
+  }
+
+  private writeBuffer(chunk: Buffer, callback: FaultCallback): void {
     this.performingIO = true
-    this.writeAll(chunk, 0, chunk.length, this.position, (er?: StreamError) => {
+    this.writeAll(chunk, 0, chunk.length, this.position, (er?: StreamFault) => {
       this.performingIO = false
       if (this.destroyed()) {
         callback(er)
@@ -358,20 +384,19 @@ export class WriteStream extends Writable<Buffer> {
     if (pos != undefined) this.position = pos + chunk.length.toDouble()
   }
 
-  protected onWritev(chunks: WriteChunk<Buffer>[], callback: StreamCallback): void {
-    const all: Buffer[] = []
-    for (const c of chunks) all.push(c.chunk)
-    this.onWrite(Buffer.concat(all), "buffer", callback)
+  protected onWritev(chunks: WriteChunk<Buffer>[], callback: HookCallback<E>): void {
+    void chunks
+    callback()
   }
 
-  protected onDestroy(error: StreamError | undefined, callback: StreamCallback): void {
-    const finish = (er: StreamError | undefined) => {
+  protected destroyHook(error: StreamFault | undefined, callback: FaultCallback): void {
+    const finish = (er: StreamFault | undefined) => {
       const fd = this.fileFd
       this.fileFd = undefined
       this.file.fd = undefined
-      closeFd(fd, this.flush, er, callback)
+      closeFd<E>(fd, this.flush, er, callback, (e: E) => this.faultFrom(e))
     }
-    if (this.performingIO) this.ioDone = (er: StreamError | undefined) => finish(error ?? er)
+    if (this.performingIO) this.ioDone = (er: StreamFault | undefined) => finish(error ?? er)
     else finish(error)
   }
 
@@ -386,6 +411,40 @@ export class WriteStream extends Writable<Buffer> {
     }
     if (!this.autoClose) this.on("finish", () => this.destroy())
     void this.end()
+  }
+}
+
+export class WriteStream extends FileWriter<WriteStreamError> {
+  public constructor(path: string, options?: WriteStreamOptions) {
+    super(path, options)
+  }
+
+  protected rangeError(message: string): WriteStreamError {
+    const invalid: WriteStreamError = {
+      kind: "WRITE_STREAM_ERROR_INVALID_RANGE",
+      code: "ERR_OUT_OF_RANGE",
+      message: message,
+      path: this.path,
+    }
+
+    return invalid
+  }
+}
+
+export class WriteNewStream extends FileWriter<WriteNewStreamError> {
+  public constructor(path: string, options?: WriteStreamOptions) {
+    super(path, options)
+  }
+
+  protected rangeError(message: string): WriteNewStreamError {
+    const invalid: WriteNewStreamError = {
+      kind: "WRITE_NEW_STREAM_ERROR_INVALID_RANGE",
+      code: "ERR_OUT_OF_RANGE",
+      message: message,
+      path: this.path,
+    }
+
+    return invalid
   }
 }
 
@@ -408,12 +467,14 @@ export function streamReadFile<T>(path: string, options: ReadStreamOptions | und
   })
 }
 
-export function streamWriteFile(path: string, options: WriteStreamOptions | undefined,
-                                encoding: BufferEncoding | undefined): WriteStream {
-  if (encoding == undefined) return new WriteStream(path, options)
-  return new WriteStream(path, {
+function writeOptions(options: WriteStreamOptions | undefined,
+                      encoding: BufferEncoding | undefined): WriteStreamOptions | undefined {
+  if (encoding == undefined) {
+    return options
+  }
+  const merged: WriteStreamOptions = {
     flags: options?.flags,
-    encoding,
+    encoding: encoding,
     fd: options?.fd,
     mode: options?.mode,
     autoClose: options?.autoClose,
@@ -421,10 +482,39 @@ export function streamWriteFile(path: string, options: WriteStreamOptions | unde
     start: options?.start,
     flush: options?.flush,
     highWaterMark: options?.highWaterMark,
-  })
+  }
+
+  return merged
 }
 
-class StdinStream extends Readable<Buffer> {
+export function streamWriteFile(path: string, options: WriteStreamOptions | undefined,
+                                encoding: BufferEncoding | undefined): WriteStream {
+  const merged = writeOptions(options, encoding)
+  const stream = new WriteStream(path, merged)
+
+  return stream
+}
+
+export function streamWriteNewFile(path: string, options: WriteStreamOptions | undefined,
+                                   encoding: BufferEncoding | undefined): WriteNewStream {
+  const merged = writeOptions(options, encoding)
+  const stream = new WriteNewStream(path, merged)
+
+  return stream
+}
+
+export interface StdinError extends StreamError {
+  kind: "STDIN_ERROR"
+  code: "EIO"
+}
+
+export interface StdoutError extends StreamError {
+  kind: "STDOUT_ERROR"
+  code: "EPIPE" | "EOF"
+  fd: int
+}
+
+class StdinStream extends Readable<Buffer, StdinError> {
   readonly fd = 0
   private reading = false
 
@@ -433,20 +523,39 @@ class StdinStream extends Readable<Buffer> {
     this.reading = true
     void stdinChunk(size).then((chunk: Buffer | undefined) => {
       this.reading = false
+      if (chunk == undefined && stdinFailed()) {
+        this.destroy({
+          kind: "STDIN_ERROR",
+          code: "EIO",
+          message: "could not read stdin: the system failed to read it",
+        })
+        return
+      }
       this.pushChunk(chunk)
     })
   }
 }
 
-class StdioStream extends Writable<Buffer> {
+class StdioStream extends Writable<Buffer, StdoutError> {
   constructor(readonly fd: int) {
     super({ emitClose: false, autoDestroy: false })
   }
 
-  protected onWrite(chunk: Buffer, encoding: string, callback: StreamCallback): void {
+  protected onWrite(chunk: Buffer, encoding: string, callback: HookCallback<StdoutError>): void {
     void encoding
-    stdWrite(this.fd, chunk)
-    callback()
+    const gone = stdWrite(this.fd, chunk)
+    if (gone == 0) {
+      callback()
+      return
+    }
+    const name = this.fd == 2 ? "stderr" : "stdout"
+
+    callback({
+      kind: "STDOUT_ERROR",
+      code: process.platform == "win32" ? "EOF" : "EPIPE",
+      message: `could not write to ${name}: the reader is gone`,
+      fd: this.fd,
+    })
   }
 }
 
@@ -454,7 +563,7 @@ let stdinStream: StdinStream | undefined = undefined
 let stdoutStream: StdioStream | undefined = undefined
 let stderrStream: StdioStream | undefined = undefined
 
-export function processStdin(): Readable<Buffer> {
+export function processStdin(): Readable<Buffer, StdinError> {
   const made = stdinStream
   if (made != undefined) return made
   const stream = new StdinStream({ highWaterMark: 64 * 1024 })
@@ -462,7 +571,7 @@ export function processStdin(): Readable<Buffer> {
   return stream
 }
 
-export function processStdout(fd: int): Writable<Buffer> {
+export function processStdout(fd: int): Writable<Buffer, StdoutError> {
   const made = fd == 2 ? stderrStream : stdoutStream
   if (made != undefined) return made
   const stream = new StdioStream(fd)

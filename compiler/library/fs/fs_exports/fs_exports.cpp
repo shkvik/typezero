@@ -138,6 +138,9 @@ std::string fsExportProblem(llvm::StringRef name, llvm::StringRef path) {
       name == "Dirent") {
     return "";
   }
+  if (name == "replaceSync" || name == "ReplaceError") {
+    return quoted + " has no export named '" + name.str() + "'; it is in \"tz:fs\"";
+  }
   std::string sync = (name + "Sync").str();
   if (llvm::is_contained(kFsFunctions, sync)) {
     if (llvm::is_contained(kFspFunctions, name)) {
@@ -165,6 +168,9 @@ std::string fsPromisesExportProblem(llvm::StringRef name, llvm::StringRef path) 
   if (llvm::is_contained(kFspFunctions, name) || name == "constants") {
     return "";
   }
+  if (name == "replace" || name == "ReplaceError") {
+    return quoted + " has no export named '" + name.str() + "'; it is in \"tz:fs\"";
+  }
   if (llvm::is_contained(kFspExports, name)) {
     return what + " is not supported yet";
   }
@@ -189,6 +195,19 @@ std::string readlineExportProblem(llvm::StringRef name, llvm::StringRef path, bo
   }
 
   return quoted + " has no export named '" + name.str() + "'";
+}
+
+std::string tzFsExportProblem(llvm::StringRef name, llvm::StringRef path) {
+  if (name == "replaceSync" || name == "replace") {
+    return "";
+  }
+  std::string message = "'" + path.str() + "' has no export named '" + name.str() +
+                        "'; it has replaceSync, replace and ReplaceError";
+  if (llvm::is_contained(kFsFunctions, name) || llvm::is_contained(kFspFunctions, name)) {
+    message += "; '" + name.str() + "' is in \"node:fs\"";
+  }
+
+  return message;
 }
 
 std::string tzIoExportProblem(llvm::StringRef name, llvm::StringRef path) {

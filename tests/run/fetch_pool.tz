@@ -1,0 +1,35 @@
+// fetch never repeats a request by itself (docs/net.md, section 2): a
+// connection kept for the next request, which the server has closed in the
+// meantime, is found out before sending, and the request goes once, on a new
+// connection. Only 127.0.0.1.
+import { Server } from "tz:http"
+
+let requests = 0
+const server = new Server({ port: 0, hostname: "127.0.0.1", keepAliveTimeout: 50 }, async req => {
+  requests++
+  return new Response(`answer ${requests} to ${req.method}`)
+})
+const started = server.listen()
+if (started.isErr()) {
+  console.log("cannot listen:", started.error.message)
+  process.exit(1)
+}
+const listening = started.value
+const base = `http://127.0.0.1:${listening.port}/`
+
+async function ask(method: string): Promise<string> {
+  const sent = await fetch(base, { method: method, body: method == "POST" ? "data" : undefined })
+  if (sent.isErr()) return `${sent.error.kind} ${sent.error.code}`
+  const text = await sent.value.text()
+
+  return text.isOk() ? text.value : `${text.error.kind} ${text.error.code}`
+}
+
+console.log(await ask("GET"))
+console.log(await ask("GET"))
+await new Promise<void>(resolve => setTimeout(resolve, 300))
+console.log(await ask("POST"))
+await new Promise<void>(resolve => setTimeout(resolve, 300))
+console.log(await ask("GET"))
+console.log("requests:", requests)
+await listening.stop()

@@ -2,6 +2,7 @@
 #include "compiler/check/checker/checker.h"
 #include "compiler/load/json_module/json_module.h"
 #include "compiler/load/lexer/lexer.h"
+#include "compiler/load/library_files/library_files.h"
 #include "compiler/load/library_modules/library_modules.h"
 #include "compiler/load/module_resolver/module_resolver.h"
 #include "compiler/load/parser/parser.h"
@@ -47,14 +48,22 @@ bool Loader::run(llvm::StringRef entryPath, SourceFile &program) {
   }
   entryDir_ = path::parent_path(entryPath).str();
   entryRealDir_ = path::parent_path(real).str();
-  std::string error;
-  Module *entry = parse(entryPath.str(), std::string(real), path::filename(real).str(), error);
+  Module *entry = nullptr;
+  if (std::optional<LibraryFile> library = LibraryFiles::find(real)) {
+    entry = libraryEntry(*library);
+  } else {
+    std::string error;
+    entry = parse(entryPath.str(), std::string(real), path::filename(real).str(), error);
+    if (!entry) {
+      diags_.tool("cannot read '" + entryPath + "': " + error);
+      return false;
+    }
+    packageOf_[entry] = packages_ ? 0 : -1;
+  }
   if (!entry) {
-    diags_.tool("cannot read '" + entryPath + "': " + error);
     return false;
   }
   entry->isEntry = true;
-  packageOf_[entry] = packages_ ? 0 : -1;
   visit(entry);
 
   for (Module *module : order_) {
@@ -71,6 +80,37 @@ bool Loader::run(llvm::StringRef entryPath, SourceFile &program) {
   }
 
   return true;
+}
+
+Module *Loader::libraryEntry(const LibraryFile &library) {
+  libraryTree_ = library.tree;
+  Module *found = this->library().libraryModule(library.file, library.module, llvm::SMLoc());
+  if (!found) {
+    return nullptr;
+  }
+  Module *entry = ctx_.newModule();
+  entry->name = library.module + " (checked alone)";
+  ImportDecl decl;
+  decl.implicit = true;
+  decl.path = library.module;
+  decl.from = found;
+  entry->file.imports.push_back(std::move(decl));
+  packageOf_[entry] = -1;
+  states_[entry] = State::New;
+
+  return entry;
+}
+
+std::string Loader::treeFile(llvm::StringRef file) {
+  if (libraryTree_.empty()) {
+    return "";
+  }
+  auto [it, inserted] = treeFiles_.try_emplace(file);
+  if (inserted) {
+    it->second = LibraryFiles::pathIn(libraryTree_, file);
+  }
+
+  return it->second;
 }
 
 llvm::ErrorOr<std::unique_ptr<llvm::MemoryBuffer>> Loader::read(llvm::StringRef filePath) const {

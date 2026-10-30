@@ -75,6 +75,7 @@ llvm::Value *LibraryCallLowerer::emitLibBuiltin(CallExpr *call) {
   case Builtin::LibFsWrite:
   case Builtin::LibFsClose:
   case Builtin::LibStdinChunk:
+  case Builtin::LibStdinFailed:
   case Builtin::LibStdWrite:
     return lowering_.streamLowerer().emitStreamBuiltin(call);
   case Builtin::LibAhead:

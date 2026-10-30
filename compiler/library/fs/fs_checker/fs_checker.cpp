@@ -4,6 +4,7 @@
 #include "compiler/check/expr/expr_checker/expr_checker.h"
 #include "compiler/check/types/type_relations/type_relations.h"
 #include "compiler/declare/prelude/prelude.h"
+#include "compiler/declare/type_declarer/type_declarer.h"
 #include "compiler/library/builtin_modules/builtin_module_checker/builtin_module_checker.h"
 #include "compiler/library/bytes/bytes_checker/bytes_checker.h"
 #include "compiler/library/fs/fs_exports/fs_exports.h"
@@ -78,7 +79,11 @@ bool FsChecker::nodeOptions(CallExpr *call, size_t index, llvm::StringRef fn,
   return true;
 }
 
-const Type *FsChecker::systemError() const { return checker_.prelude().builtinType("SystemError"); }
+const Type *FsChecker::nativeError() const {
+  TypeAliasDecl *alias = checker_.libTypes_.lookup("NativeError");
+
+  return alias ? checker_.typeDeclarer().resolveAlias(alias) : Type::error();
+}
 
 Expr *FsChecker::checkEncoding(Expr *encoding, llvm::StringRef fn, bool any) {
   auto *lit = dyn_cast<StringLitExpr>(encoding);
@@ -143,6 +148,11 @@ Expr *FsChecker::checkFsCall(CallExpr *call, llvm::StringRef fn, llvm::SMLoc loc
   };
   auto path = [&](Expr *arg, bool fd) {
     arg = checker_.exprChecker().checkExpr(arg, string);
+    if (auto *lit = dyn_cast<StringLitExpr>(arg);
+        lit && lit->value.find(u'\0') != std::u16string::npos) {
+      checker_.diags_.error(arg->loc(), "the path has a zero character in it, which no file "
+                                        "name can have");
+    }
     if (fd && !checker_.fsAsync_ && arg->type->isInt()) {
       return arg;
     }
@@ -471,22 +481,25 @@ Expr *FsChecker::checkFsCall(CallExpr *call, llvm::StringRef fn, llvm::SMLoc loc
     call->type = Type::voidTy();
     return call;
   }
-  if (op == "renameSync" || op == "copyFileSync") {
-    if (!checker_.argumentChecker().checkArity(call, loc, 2, op == "renameSync" ? 2 : 3)) {
+  if (op == "renameSync" || op == "copyFileSync" || op == "replaceSync") {
+    if (op == "copyFileSync" && call->args.size() == 3) {
+      checker_.diags_.error(call->args[2]->loc(),
+                            "'" + fn +
+                                "' never replaces a file that is already there, so it takes no "
+                                "mode: drop it; to replace a file on purpose, copy it to a "
+                                "temporary name and move that over the file with 'replaceSync' "
+                                "from \"tz:fs\"");
+      return loosely();
+    }
+    if (!checker_.argumentChecker().checkArity(call, loc, 2, 2)) {
       return call;
     }
     Expr *from = path(call->args[0], false);
     Expr *to = path(call->args[1], false);
-    if (op == "renameSync") {
-      call->args = {from, to};
-      call->builtin = Builtin::FsRename;
-    } else {
-      Expr *mode = call->args.size() > 2
-                       ? checker_.argumentChecker().checkArg(call->args[2], Type::intTy())
-                       : intLit(0);
-      call->args = {from, to, mode};
-      call->builtin = Builtin::FsCopyFile;
-    }
+    call->args = {from, to};
+    call->builtin = op == "renameSync"    ? Builtin::FsRename
+                    : op == "replaceSync" ? Builtin::FsReplace
+                                          : Builtin::FsCopyFile;
     call->type = Type::voidTy();
     return call;
   }

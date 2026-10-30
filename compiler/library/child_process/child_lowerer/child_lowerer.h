@@ -10,6 +10,7 @@ public:
 
   llvm::Value *emitChildBuiltin(CallExpr *call);
   llvm::Function *spawnMaker(const Type *type);
+  llvm::Function *errorMaker(const Type *type);
   llvm::StructType *spawnPartsType();
   llvm::Value *spawnStream(llvm::Value *parts, unsigned stream, const Type *to, bool retain);
 

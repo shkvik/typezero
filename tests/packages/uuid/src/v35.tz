@@ -11,7 +11,7 @@ export function stringToBytes(str: string) {
 export const DNS = '6ba7b810-9dad-11d1-80b4-00c04fd430c8';
 export const URL = '6ba7b811-9dad-11d1-80b4-00c04fd430c8';
 
-type HashFunction = (bytes: Uint8Array) => Uint8Array;
+type HashFunction = (bytes: Uint8Array) => Result<Uint8Array, UuidError>;
 
 export function v35<TBuf extends Uint8Array = never>(
   version: 0x30 | 0x50,
@@ -46,8 +46,10 @@ export function v35<TBuf extends Uint8Array = never>(
   input.set(namespaceBytes);
   input.set(valueBytes, namespaceBytes.length);
   // tz: the first 16 bytes of the hash, in an array of 16 whose bytes need no checks.
+  const digest = hash(input);
+  if (digest.isErr()) return err(digest.error);
   const bytes = new Uint8Array(16);
-  bytes.set(hash(input).subarray(0, 16));
+  bytes.set(digest.value.subarray(0, 16));
 
   bytes[6] = (((bytes[6].toInt() & 0x0f) | version) & 0xff).toUint8();
   bytes[8] = (bytes[8] & 0x3f) | 0x80;

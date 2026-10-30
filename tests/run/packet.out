@@ -1,7 +1,7 @@
 b861
 10.0.0.1 10.0.0.2 9 17 30
 5353 53 hi
-PACKET ERR_INVALID_CHECKSUM the checksum of the IPv4 header does not add up
+PACKET_ERROR ERR_INVALID_CHECKSUM the checksum of the IPv4 header does not add up
 8 0 0
 ff:ff:ff:ff:ff:ff 00:11:22:33:44:55 806
 1 00:11:22:33:44:55 10.0.0.1 192.168.0.1

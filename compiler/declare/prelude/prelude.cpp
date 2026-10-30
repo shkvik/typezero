@@ -24,7 +24,7 @@ type Pick<T, K extends keyof T> = { [P in K]: T[P] }
 type Omit<T, K extends keyof T> = { [P in Exclude<keyof T, K>]: T[P] }
 type Awaited<T> = T extends Promise<infer U> ? Awaited<U> : T
 type JsonError = {
-  kind: "JSON"
+  kind: "JSON_ERROR"
   code: "ERR_INVALID_JSON" | "ERR_CIRCULAR_STRUCTURE"
   message: string
 }
@@ -41,35 +41,22 @@ type BufferEncoding =
   | "latin1"
   | "binary"
   | "hex"
-type UriError = { kind: "URI"; code: "ERR_INVALID_URI"; message: string }
-type StreamError = {
-  code: string
+type UriError = { kind: "URI_ERROR"; code: "ERR_INVALID_URI"; message: string }
+interface StreamError {
   message: string
-  errno?: int
-  syscall?: string
-  path?: string
-  cause?: string
 }
-type SystemError = {
-  code: string
-  message: string
-  errno: int
-  syscall: string
-  path?: string
-  dest?: string
-}
-type RegexError = { kind: "REGEX"; code: "ERR_INVALID_REGEX"; message: string }
-type UrlError = { kind: "URL"; code: "ERR_INVALID_URL"; message: string; input: string }
-type DateError = { kind: "DATE"; code: "ERR_INVALID_DATE"; message: string; text: string }
-type LocaleError = { kind: "LOCALE"; code: "ERR_INVALID_LOCALE"; message: string; tag: string }
-type DecodeError = { kind: "ENCODING"; code: "ERR_ENCODING_INVALID_ENCODED_DATA"; message: string }
-type EncodingError = { kind: "ENCODING"; code: "ERR_ENCODING_NOT_SUPPORTED"; message: string }
-type DecimalError = { kind: "DECIMAL"; code: "ERR_INVALID_DECIMAL"; message: string; text: string }
-type NumberError = { kind: "NUMBER"; code: "ERR_INVALID_NUMBER"; message: string }
-type CryptoError = { code: string; message: string }
+type QuestionError = { kind: "QUESTION_ERROR"; code: "ERR_USE_AFTER_CLOSE"; message: string }
+type RegexError = { kind: "REGEX_ERROR"; code: "ERR_INVALID_REGEX"; message: string }
+type UrlError = { kind: "URL_ERROR"; code: "ERR_INVALID_URL"; message: string; input: string }
+type DateError = { kind: "DATE_ERROR"; code: "ERR_INVALID_DATE"; message: string; text: string }
+type LocaleError = { kind: "LOCALE_ERROR"; code: "ERR_INVALID_LOCALE"; message: string; tag: string }
+type DecodeError = { kind: "DECODE_ERROR"; code: "ERR_ENCODING_INVALID_ENCODED_DATA"; message: string }
+type EncodingError = { kind: "ENCODING_ERROR"; code: "ERR_ENCODING_NOT_SUPPORTED"; message: string }
+type DecimalError = { kind: "DECIMAL_ERROR"; code: "ERR_INVALID_DECIMAL"; message: string; text: string }
+type NumberError = { kind: "NUMBER_ERROR"; code: "ERR_INVALID_NUMBER"; message: string }
 type RedirectStatus = 301 | 302 | 303 | 307 | 308
 type ReflectError = {
-  kind: "REFLECT"
+  kind: "REFLECT_ERROR"
   code:
     | "ERR_INVALID_ARGUMENT"
     | "ERR_INVALID_ARITY"
@@ -116,7 +103,7 @@ type TlsCode =
   | "ERR_TLS_HANDSHAKE"
 type FetchError<E = never> =
   | {
-      kind: "REQUEST"
+      kind: "FETCH_ERROR_REQUEST"
       code:
         | "ERR_INVALID_URL"
         | "ERR_CREDENTIALS_IN_URL"
@@ -130,9 +117,9 @@ type FetchError<E = never> =
       message: string
       url: string
     }
-  | { kind: "REQUEST"; code: "ERR_STREAM_FAILED"; message: string; url: string; details: E }
+  | { kind: "FETCH_ERROR_REQUEST"; code: "ERR_STREAM_FAILED"; message: string; url: string; details: E }
   | {
-      kind: "NETWORK"
+      kind: "FETCH_ERROR_NETWORK"
       code:
         | "ENOTFOUND"
         | "EAI_AGAIN"
@@ -148,21 +135,20 @@ type FetchError<E = never> =
         | "ENOBUFS"
         | "UNKNOWN"
       message: string
-      errno: int
       syscall: string
       host: string
       port: int
     }
   | {
-      kind: "RESPONSE"
+      kind: "FETCH_ERROR_RESPONSE"
       code: "ERR_CLOSED" | "ERR_INVALID_RESPONSE" | "ERR_HEAD_TOO_LARGE"
       message: string
       host: string
       port: int
     }
-  | { kind: "TLS"; code: TlsCode; message: string; host: string }
+  | { kind: "FETCH_ERROR_TLS"; code: TlsCode; message: string; host: string }
   | {
-      kind: "REDIRECT"
+      kind: "FETCH_ERROR_REDIRECT"
       code:
         | "ERR_UNEXPECTED_REDIRECT"
         | "ERR_TOO_MANY_REDIRECTS"
@@ -171,67 +157,133 @@ type FetchError<E = never> =
       message: string
       location: string
     }
-  | { kind: "TIMEOUT"; code: "TIMEOUT_ERR"; message: string; timeout: int }
+  | { kind: "FETCH_ERROR_TIMEOUT"; code: "TIMEOUT_ERR"; message: string; timeout: int }
   | {
-      kind: "PROXY"
+      kind: "FETCH_ERROR_PROXY"
       code: "ERR_INVALID_PROXY_URL" | "ERR_PROXY_AUTH_REQUIRED" | "ERR_PROXY_REFUSED"
       message: string
       proxy: string
       status: int
     }
+interface BodyErrorUsed extends StreamError {
+  kind: "BODY_ERROR_USED"
+  code: "ERR_BODY_USED" | "ERR_BODY_LOCKED"
+}
+interface BodyErrorNetwork extends StreamError {
+  kind: "BODY_ERROR_NETWORK"
+  code: "ERR_CLOSED" | "ECONNRESET" | "ECONNABORTED" | "ETIMEDOUT" | "ERR_TLS_FAILED" | "UNKNOWN"
+}
+interface BodyErrorTimeout extends StreamError {
+  kind: "BODY_ERROR_TIMEOUT"
+  code: "TIMEOUT_ERR"
+  timeout: int
+}
+interface BodyErrorTooLarge extends StreamError {
+  kind: "BODY_ERROR_TOO_LARGE"
+  code: "ERR_BODY_TOO_LARGE"
+  limit: double
+}
+interface BodyErrorMalformed extends StreamError {
+  kind: "BODY_ERROR_MALFORMED"
+  code: "ERR_INVALID_CHUNKED" | "ERR_INVALID_COMPRESSION"
+}
+interface BodyErrorStream extends StreamError {
+  kind: "BODY_ERROR_STREAM"
+  code: "ERR_STREAM_FAILED"
+}
 type BodyError =
-  | { kind: "USED"; code: "ERR_BODY_USED" | "ERR_BODY_LOCKED"; message: string }
-  | {
-      kind: "NETWORK"
-      code: "ERR_CLOSED" | "ECONNRESET" | "ECONNABORTED" | "ETIMEDOUT" | "ERR_TLS_FAILED" | "UNKNOWN"
-      message: string
-    }
-  | { kind: "TIMEOUT"; code: "TIMEOUT_ERR"; message: string; timeout: int }
-  | { kind: "TOO_LARGE"; code: "ERR_BODY_TOO_LARGE"; message: string; limit: double }
-  | { kind: "MALFORMED"; code: "ERR_INVALID_CHUNKED" | "ERR_INVALID_COMPRESSION"; message: string }
-  | { kind: "STREAM"; code: "ERR_STREAM_FAILED"; message: string }
-type ReaderError = {
-  kind: "USED"
+  | BodyErrorUsed
+  | BodyErrorNetwork
+  | BodyErrorTimeout
+  | BodyErrorTooLarge
+  | BodyErrorMalformed
+  | BodyErrorStream
+interface ReaderError extends StreamError {
+  kind: "READER_ERROR"
   code: "ERR_STREAM_LOCKED" | "ERR_READER_RELEASED"
-  message: string
+}
+interface ControllerClosedError extends StreamError {
+  kind: "CONTROLLER_CLOSED_ERROR"
+  code: "ERR_INVALID_STATE"
 }
 type TextError = BodyError
 type BytesError = BodyError
 type JsonBodyError =
   | BodyError
-  | { kind: "CONTENT"; code: "ERR_INVALID_JSON"; message: string; contentType?: string; start: string }
+  | { kind: "JSON_BODY_ERROR_CONTENT"; code: "ERR_INVALID_JSON"; message: string; contentType?: string; start: string }
 type FormDataError =
   | BodyError
   | {
-      kind: "CONTENT"
+      kind: "FORM_DATA_ERROR_CONTENT"
       code: "ERR_NOT_A_FORM" | "ERR_NO_BOUNDARY" | "ERR_INVALID_MULTIPART"
       message: string
       contentType?: string
     }
-type SubtleError = {
-  kind: "SUBTLE"
-  code:
-    | "ERR_NOT_SUPPORTED"
-    | "ERR_INVALID_DATA"
-    | "ERR_OPERATION_FAILED"
-    | "ERR_INVALID_ACCESS"
-    | "ERR_INVALID_KEY_USAGE"
-    | "ERR_INVALID_ARG_TYPE"
-    | "ERR_OUT_OF_RANGE"
-  message: string
-}
-type ExecError<Out> = {
-  code: string
-  message: string
-  errno?: int
-  syscall?: string
-  path?: string
-  spawnargs?: string[]
-  status?: int
-  signal?: string
-  stdout?: Out
-  stderr?: Out
-}
+type SubtleDigestError =
+  | { kind: "SUBTLE_DIGEST_ERROR_UNSUPPORTED_ALGORITHM"; code: "ERR_NOT_SUPPORTED"; message: string }
+  | { kind: "SUBTLE_DIGEST_ERROR_WRONG_PARAMETERS"; code: "ERR_OPERATION_FAILED" | "ERR_INVALID_ARG_TYPE"; message: string }
+  | { kind: "SUBTLE_DIGEST_ERROR_SYSTEM"; code: "ERR_OPERATION_FAILED"; message: string }
+type SubtleGenerateKeyError =
+  | { kind: "SUBTLE_GENERATE_KEY_ERROR_UNSUPPORTED_ALGORITHM"; code: "ERR_NOT_SUPPORTED"; message: string }
+  | { kind: "SUBTLE_GENERATE_KEY_ERROR_WRONG_PARAMETERS"; code: "ERR_OPERATION_FAILED" | "ERR_INVALID_ARG_TYPE"; message: string }
+  | { kind: "SUBTLE_GENERATE_KEY_ERROR_WRONG_USAGE"; code: "ERR_INVALID_KEY_USAGE"; message: string }
+  | { kind: "SUBTLE_GENERATE_KEY_ERROR_SYSTEM"; code: "ERR_OPERATION_FAILED"; message: string }
+type SubtleImportKeyError =
+  | { kind: "SUBTLE_IMPORT_KEY_ERROR_UNSUPPORTED_ALGORITHM"; code: "ERR_NOT_SUPPORTED"; message: string }
+  | { kind: "SUBTLE_IMPORT_KEY_ERROR_WRONG_PARAMETERS"; code: "ERR_OPERATION_FAILED" | "ERR_INVALID_ARG_TYPE"; message: string }
+  | { kind: "SUBTLE_IMPORT_KEY_ERROR_WRONG_USAGE"; code: "ERR_INVALID_KEY_USAGE"; message: string }
+  | { kind: "SUBTLE_IMPORT_KEY_ERROR_NOT_A_KEY"; code: "ERR_INVALID_DATA"; message: string }
+  | { kind: "SUBTLE_IMPORT_KEY_ERROR_SYSTEM"; code: "ERR_OPERATION_FAILED"; message: string }
+type SubtleExportKeyError =
+  | { kind: "SUBTLE_EXPORT_KEY_ERROR_UNSUPPORTED_ALGORITHM"; code: "ERR_NOT_SUPPORTED"; message: string }
+  | { kind: "SUBTLE_EXPORT_KEY_ERROR_WRONG_KEY"; code: "ERR_INVALID_ACCESS"; message: string }
+  | { kind: "SUBTLE_EXPORT_KEY_ERROR_SYSTEM"; code: "ERR_OPERATION_FAILED"; message: string }
+type SubtleSignError =
+  | { kind: "SUBTLE_SIGN_ERROR_UNSUPPORTED_ALGORITHM"; code: "ERR_NOT_SUPPORTED"; message: string }
+  | { kind: "SUBTLE_SIGN_ERROR_WRONG_PARAMETERS"; code: "ERR_OPERATION_FAILED" | "ERR_INVALID_ARG_TYPE"; message: string }
+  | { kind: "SUBTLE_SIGN_ERROR_WRONG_KEY"; code: "ERR_INVALID_ACCESS"; message: string }
+  | { kind: "SUBTLE_SIGN_ERROR_SYSTEM"; code: "ERR_OPERATION_FAILED"; message: string }
+type SubtleVerifyError =
+  | { kind: "SUBTLE_VERIFY_ERROR_UNSUPPORTED_ALGORITHM"; code: "ERR_NOT_SUPPORTED"; message: string }
+  | { kind: "SUBTLE_VERIFY_ERROR_WRONG_PARAMETERS"; code: "ERR_OPERATION_FAILED" | "ERR_INVALID_ARG_TYPE"; message: string }
+  | { kind: "SUBTLE_VERIFY_ERROR_WRONG_KEY"; code: "ERR_INVALID_ACCESS"; message: string }
+  | { kind: "SUBTLE_VERIFY_ERROR_SYSTEM"; code: "ERR_OPERATION_FAILED"; message: string }
+type SubtleEncryptError =
+  | { kind: "SUBTLE_ENCRYPT_ERROR_UNSUPPORTED_ALGORITHM"; code: "ERR_NOT_SUPPORTED"; message: string }
+  | { kind: "SUBTLE_ENCRYPT_ERROR_WRONG_PARAMETERS"; code: "ERR_OPERATION_FAILED" | "ERR_INVALID_ARG_TYPE"; message: string }
+  | { kind: "SUBTLE_ENCRYPT_ERROR_WRONG_KEY"; code: "ERR_INVALID_ACCESS"; message: string }
+  | { kind: "SUBTLE_ENCRYPT_ERROR_SYSTEM"; code: "ERR_OPERATION_FAILED"; message: string }
+type SubtleDecryptError =
+  | { kind: "SUBTLE_DECRYPT_ERROR_UNSUPPORTED_ALGORITHM"; code: "ERR_NOT_SUPPORTED"; message: string }
+  | { kind: "SUBTLE_DECRYPT_ERROR_WRONG_PARAMETERS"; code: "ERR_OPERATION_FAILED" | "ERR_INVALID_ARG_TYPE"; message: string }
+  | { kind: "SUBTLE_DECRYPT_ERROR_WRONG_KEY"; code: "ERR_INVALID_ACCESS"; message: string }
+  | { kind: "SUBTLE_DECRYPT_ERROR_DECRYPTION_FAILED"; code: "ERR_OPERATION_FAILED"; message: string }
+  | { kind: "SUBTLE_DECRYPT_ERROR_SYSTEM"; code: "ERR_OPERATION_FAILED"; message: string }
+type SubtleDeriveBitsError =
+  | { kind: "SUBTLE_DERIVE_BITS_ERROR_UNSUPPORTED_ALGORITHM"; code: "ERR_NOT_SUPPORTED"; message: string }
+  | { kind: "SUBTLE_DERIVE_BITS_ERROR_WRONG_PARAMETERS"; code: "ERR_OPERATION_FAILED" | "ERR_INVALID_ARG_TYPE"; message: string }
+  | { kind: "SUBTLE_DERIVE_BITS_ERROR_WRONG_KEY"; code: "ERR_INVALID_ACCESS"; message: string }
+  | { kind: "SUBTLE_DERIVE_BITS_ERROR_SYSTEM"; code: "ERR_OPERATION_FAILED"; message: string }
+type SubtleDeriveKeyError =
+  | { kind: "SUBTLE_DERIVE_KEY_ERROR_UNSUPPORTED_ALGORITHM"; code: "ERR_NOT_SUPPORTED"; message: string }
+  | { kind: "SUBTLE_DERIVE_KEY_ERROR_WRONG_PARAMETERS"; code: "ERR_OPERATION_FAILED" | "ERR_INVALID_ARG_TYPE"; message: string }
+  | { kind: "SUBTLE_DERIVE_KEY_ERROR_WRONG_KEY"; code: "ERR_INVALID_ACCESS"; message: string }
+  | { kind: "SUBTLE_DERIVE_KEY_ERROR_WRONG_USAGE"; code: "ERR_INVALID_KEY_USAGE"; message: string }
+  | { kind: "SUBTLE_DERIVE_KEY_ERROR_NOT_A_KEY"; code: "ERR_INVALID_DATA"; message: string }
+  | { kind: "SUBTLE_DERIVE_KEY_ERROR_SYSTEM"; code: "ERR_OPERATION_FAILED"; message: string }
+type SubtleWrapKeyError =
+  | { kind: "SUBTLE_WRAP_KEY_ERROR_UNSUPPORTED_ALGORITHM"; code: "ERR_NOT_SUPPORTED"; message: string }
+  | { kind: "SUBTLE_WRAP_KEY_ERROR_WRONG_PARAMETERS"; code: "ERR_OPERATION_FAILED" | "ERR_INVALID_ARG_TYPE"; message: string }
+  | { kind: "SUBTLE_WRAP_KEY_ERROR_WRONG_KEY"; code: "ERR_INVALID_ACCESS"; message: string }
+  | { kind: "SUBTLE_WRAP_KEY_ERROR_SYSTEM"; code: "ERR_OPERATION_FAILED"; message: string }
+type SubtleUnwrapKeyError =
+  | { kind: "SUBTLE_UNWRAP_KEY_ERROR_UNSUPPORTED_ALGORITHM"; code: "ERR_NOT_SUPPORTED"; message: string }
+  | { kind: "SUBTLE_UNWRAP_KEY_ERROR_WRONG_PARAMETERS"; code: "ERR_OPERATION_FAILED" | "ERR_INVALID_ARG_TYPE"; message: string }
+  | { kind: "SUBTLE_UNWRAP_KEY_ERROR_WRONG_KEY"; code: "ERR_INVALID_ACCESS"; message: string }
+  | { kind: "SUBTLE_UNWRAP_KEY_ERROR_WRONG_USAGE"; code: "ERR_INVALID_KEY_USAGE"; message: string }
+  | { kind: "SUBTLE_UNWRAP_KEY_ERROR_NOT_A_KEY"; code: "ERR_INVALID_DATA"; message: string }
+  | { kind: "SUBTLE_UNWRAP_KEY_ERROR_DECRYPTION_FAILED"; code: "ERR_OPERATION_FAILED"; message: string }
+  | { kind: "SUBTLE_UNWRAP_KEY_ERROR_SYSTEM"; code: "ERR_OPERATION_FAILED"; message: string }
 )";
 
 }

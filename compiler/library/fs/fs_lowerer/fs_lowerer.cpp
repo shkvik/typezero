@@ -1,9 +1,11 @@
 #include "compiler/library/fs/fs_lowerer/fs_lowerer.h"
 #include "compiler/library/date/date_lowerer/date_lowerer.h"
+#include "compiler/library/fs/fs_error_types/fs_error_types.h"
 #include "compiler/library/fs/fs_promises_lowerer/fs_promises_lowerer.h"
 #include "compiler/library/process/process_lowerer/process_lowerer.h"
 #include "compiler/library/result/result_lowerer/result_lowerer.h"
 #include "compiler/lower/expr/expr_lowerer/expr_lowerer.h"
+#include "compiler/lower/function_builder/function_builder.h"
 #include "compiler/lower/function_frame/function_frame.h"
 #include "compiler/lower/layouts/object_layouts/object_layouts.h"
 #include "compiler/lower/layouts/type_descriptors/type_descriptors.h"
@@ -23,6 +25,10 @@ namespace {
 const std::vector<MakerFields> &fsObjects() {
   static const std::vector<MakerFields> table = {
       {nullptr, {"message", "errno", "code", "syscall", "path", "dest"}},
+      {nullptr, {"code", "message", "syscall", "path"}},
+      {nullptr, {"code", "message", "syscall", "path", "dest"}},
+      {nullptr, {"code", "message", "path"}},
+      {nullptr, {"code", "message"}},
       {"Stats",
        {"dev", "mode", "nlink", "uid", "gid", "rdev", "blksize", "ino", "size", "blocks", "atimeMs",
         "mtimeMs", "ctimeMs", "birthtimeMs"}},
@@ -40,7 +46,83 @@ llvm::Function *FsLowerer::objectMaker(const Type *type) {
   return lowering_.objectMaker().maker(type, fsObjects());
 }
 
-llvm::Function *FsLowerer::systemErrorMaker() { return objectMaker(lowering_.systemError_); }
+llvm::Function *FsLowerer::nativeErrorMaker() { return objectMaker(lowering_.nativeError_); }
+
+llvm::Function *FsLowerer::errorMaker(const Type *error) {
+  if (error == lowering_.nativeError_) {
+    return nativeErrorMaker();
+  }
+  llvm::Function *&made = errorMakers_[error];
+  if (made) {
+    return made;
+  }
+  llvm::Type *ptr = lowering_.builder_.getPtrTy(), *i32 = lowering_.builder_.getInt32Ty();
+  std::vector<const Type *> variants(error->members().begin(), error->members().end());
+  std::vector<llvm::Function *> makers;
+  for (const Type *variant : variants) {
+    makers.push_back(objectMaker(variant));
+  }
+  made = llvm::Function::Create(llvm::FunctionType::get(ptr, {ptr}, false),
+                                llvm::GlobalValue::InternalLinkage,
+                                "tz.make." + error->name().str(), lowering_.module_.get());
+  llvm::Function *function = made;
+  lowering_.functionBuilder().setFunctionAttributes(function);
+  llvm::IRBuilderBase::InsertPoint point = lowering_.builder_.saveIP();
+  llvm::Function *outer = std::exchange(lowering_.function_, function);
+  lowering_.builder_.SetInsertPoint(llvm::BasicBlock::Create(lowering_.ctx_, "entry", function));
+  llvm::Value *parts = function->getArg(0);
+  llvm::Value *code = lowering_.builder_.CreateLoad(ptr, parts, "code");
+  llvm::FunctionCallee compare = lowering_.module_->getOrInsertFunction(
+      "strcmp", llvm::FunctionType::get(i32, {ptr, ptr}, false));
+  llvm::Value *none = llvm::ConstantInt::getSigned(i32, -1);
+  llvm::Value *index = none;
+  unsigned unknown = 0;
+  for (size_t v = 0; v < variants.size(); ++v) {
+    const Type *codes = variants[v]->field("code")->type;
+    std::vector<const Type *> literals =
+        codes->isStringLiteral()
+            ? std::vector<const Type *>{codes}
+            : std::vector<const Type *>(codes->members().begin(), codes->members().end());
+    for (const Type *literal : literals) {
+      std::string ascii;
+      for (char16_t unit : literal->literalText()) {
+        ascii.push_back(char(unit));
+      }
+      if (ascii == "UNKNOWN") {
+        unknown = unsigned(v);
+      }
+      llvm::Value *same = lowering_.builder_.CreateICmpEQ(
+          lowering_.builder_.CreateCall(compare,
+                                        {code, lowering_.stringLowerer().utf8Constant(ascii)}),
+          lowering_.builder_.getInt32(0));
+      index =
+          lowering_.builder_.CreateSelect(same, lowering_.builder_.getInt32(unsigned(v)), index);
+    }
+  }
+  llvm::Value *known = lowering_.builder_.CreateICmpNE(index, none);
+  lowering_.builder_.CreateCall(
+      lowering_.processLowerer().processFunction("tz_fs_compose", lowering_.builder_.getVoidTy(),
+                                                 {ptr, ptr, i32}),
+      {parts, lowering_.stringLowerer().utf8Constant(FsErrorTypes::verbOf(error->name())),
+       lowering_.builder_.CreateZExt(known, i32)});
+  llvm::Value *chosen =
+      lowering_.builder_.CreateSelect(known, index, lowering_.builder_.getInt32(unknown));
+  llvm::BasicBlock *fallback = llvm::BasicBlock::Create(lowering_.ctx_, "unknown", function);
+  llvm::SwitchInst *pick =
+      lowering_.builder_.CreateSwitch(chosen, fallback, unsigned(variants.size()));
+  for (size_t v = 0; v < variants.size(); ++v) {
+    llvm::BasicBlock *block = llvm::BasicBlock::Create(lowering_.ctx_, "variant", function);
+    pick->addCase(lowering_.builder_.getInt32(unsigned(v)), block);
+    lowering_.builder_.SetInsertPoint(block);
+    lowering_.builder_.CreateRet(lowering_.builder_.CreateCall(makers[v], {parts}));
+  }
+  lowering_.builder_.SetInsertPoint(fallback);
+  lowering_.builder_.CreateRet(lowering_.builder_.CreateCall(makers[unknown], {parts}));
+  lowering_.function_ = outer;
+  lowering_.builder_.restoreIP(point);
+
+  return function;
+}
 
 llvm::Value *FsLowerer::emitFsCall(CallExpr *call) {
   if (isFspBuiltin(call->builtin)) {
@@ -97,7 +179,7 @@ llvm::Value *FsLowerer::emitFsCall(CallExpr *call) {
   auto fsCall = [&](llvm::StringRef name, llvm::Type *ret, std::vector<llvm::Type *> params,
                     std::vector<llvm::Value *> args) -> llvm::Value * {
     params.push_back(ptr);
-    args.push_back(systemErrorMaker());
+    args.push_back(errorMaker(call->type->errType()));
     llvm::Value *result = lowering_.builder_.CreateCall(fn(name, ret, params), args);
     release();
 
@@ -205,11 +287,12 @@ llvm::Value *FsLowerer::emitFsCall(CallExpr *call) {
     fsCall("tz_fs_rm", voidTy, {ptr, i64, i32, i32}, {obj(0), meta(0), flag(1), flag(2)});
     return nullptr;
   case Builtin::FsRename:
-    fsCall("tz_fs_rename", voidTy, {ptr, i64, ptr, i64}, {obj(0), meta(0), obj(1), meta(1)});
-    return nullptr;
+  case Builtin::FsReplace:
   case Builtin::FsCopyFile:
-    fsCall("tz_fs_copy_file", voidTy, {ptr, i64, ptr, i64, i64},
-           {obj(0), meta(0), obj(1), meta(1), values[2]});
+    fsCall(call->builtin == Builtin::FsRename    ? "tz_fs_rename"
+           : call->builtin == Builtin::FsReplace ? "tz_fs_replace"
+                                                 : "tz_fs_copy_file",
+           voidTy, {ptr, i64, ptr, i64}, {obj(0), meta(0), obj(1), meta(1)});
     return nullptr;
   default:
     llvm_unreachable("not a built-in of node:fs");

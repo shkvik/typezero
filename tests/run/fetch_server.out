@@ -9,12 +9,12 @@ yes Uint8Array(3) [ 1, 2, 255 ]
 [ 'a=1', 'b=2' ] c
 200 true http://127.0.0.1:PORT/final final GET
 302 http://127.0.0.1:PORT/final false
-REDIRECT ERR_UNEXPECTED_REDIRECT
-REDIRECT ERR_TOO_MANY_REDIRECTS
+FETCH_ERROR_REDIRECT ERR_UNEXPECTED_REDIRECT
+FETCH_ERROR_REDIRECT ERR_TOO_MANY_REDIRECTS
 204 true ""
 200 ""
 [ 'hello a', 'hello b', 'hello c', 'hello d', 'hello e', 'hello f' ]
 hello quick
-TIMEOUT TIMEOUT_ERR no full answer from 127.0.0.1 within 50 ms
-200 TIMEOUT TIMEOUT_ERR no full answer from 127.0.0.1 within 100 ms
-NETWORK ECONNREFUSED could not connect to 127.0.0.1:PORT: nothing listens on this port
+FETCH_ERROR_TIMEOUT TIMEOUT_ERR no full answer from 127.0.0.1 within 50 ms
+200 BODY_ERROR_TIMEOUT TIMEOUT_ERR no full answer from 127.0.0.1 within 100 ms
+FETCH_ERROR_NETWORK ECONNREFUSED could not connect to 127.0.0.1:PORT: nothing listens on this port

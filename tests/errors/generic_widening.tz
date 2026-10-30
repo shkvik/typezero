@@ -1,0 +1,33 @@
+// A class with a type argument goes where a wider one is wanted only when nothing outside can
+// put a value of that type into it (docs/generics.md).
+interface Named {
+  name: string
+}
+interface Dog extends Named {
+  kind: "DOG"
+}
+class Shelf<T extends Named> {
+  private items: T[]
+  public constructor() {
+    this.items = []
+  }
+  public add(item: T): void {
+    this.items.push(item)
+  }
+  public first(): T | undefined {
+    return this.items[0]
+  }
+}
+class Label<T extends Named> {
+  public value?: T
+}
+function anyShelf(shelf: Shelf<Named>) {
+  shelf.add({ name: "cat" })
+}
+function anyLabel(label: Label<Named>) {
+  console.log(label.value?.name)
+}
+// expect-error: 'Shelf' with a wider T would let a value of another type into it: its public method 'add' takes T
+anyShelf(new Shelf<Dog>())
+// expect-error: 'Label' with a wider T would let a value of another type into it: its public field 'value' can be set
+anyLabel(new Label<Dog>())

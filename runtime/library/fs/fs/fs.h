@@ -111,13 +111,13 @@ File tz_fs_open_raw(const Path *p, OpenFlags f, int32_t mode, Failure *failure);
 
 void tz_fs_close_file(File f);
 
-int tz_fs_read_all(File f, Bytes *out, TzMaker make);
+int tz_fs_read_all(File f, Bytes *out, const TzBuf *shown, TzMaker make);
 
-int tz_fs_write_all(File f, const uint8_t *data, size_t n, TzMaker make);
+int tz_fs_write_all(File f, const uint8_t *data, size_t n, const TzBuf *shown, TzMaker make);
 
 File tz_fs_fd_file(int32_t fd);
 
-void tz_fs_fail_bad_fd(TzMaker make, const char *syscall);
+void tz_fs_fail_bad_fd(TzMaker make, const char *syscall, int64_t fd);
 #else
 typedef int File;
 
@@ -127,13 +127,13 @@ File tz_fs_open_raw(const Path *p, OpenFlags f, int32_t mode, Failure *failure);
 
 void tz_fs_close_file(File f);
 
-int tz_fs_read_all(File f, Bytes *out, TzMaker make);
+int tz_fs_read_all(File f, Bytes *out, const TzBuf *shown, TzMaker make);
 
-int tz_fs_write_all(File f, const uint8_t *data, size_t n, TzMaker make);
+int tz_fs_write_all(File f, const uint8_t *data, size_t n, const TzBuf *shown, TzMaker make);
 
 File tz_fs_fd_file(int32_t fd);
 
-void tz_fs_fail_bad_fd(TzMaker make, const char *syscall);
+void tz_fs_fail_bad_fd(TzMaker make, const char *syscall, int64_t fd);
 #endif
 
 File tz_fs_open_file(const Path *p, OpenFlags f, int32_t mode, TzMaker make);

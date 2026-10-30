@@ -8,7 +8,7 @@ file(MAKE_DIRECTORY ${DIR})
 file(WRITE ${DIR}/plain.tz "console.log(\"hi\")\n")
 file(WRITE ${DIR}/direct.tz
      "import { createHash } from \"node:crypto\"\n"
-     "console.log(createHash(\"sha256\").update(\"abc\").digest(\"hex\"))\n")
+     "console.log(createHash(\"sha256\").map(h => h.update(\"abc\").digest(\"hex\")).unwrapOr(\"\"))\n")
 file(WRITE ${DIR}/full.tz
      "import { createHash } from \"node:crypto\"\n"
      "const name: string = process.argv[2] ?? \"sha256\"\n"

@@ -10,9 +10,10 @@
   часть, что нужна первой; на остальное — ошибка «пока не поддерживается».
 - Своё — только то, чего в node нет совсем, в модулях `"tz:..."`: `readLine` из `"tz:io"`,
   HTTP-сервер `Server` из `"tz:http"` ([net.md](net.md)).
-- Ошибки ОС (нет файла, нет прав и т.п.) — `Result`: функции `node:fs` отдают
-  `Result<T, SystemError>`, где `SystemError` — объект с меткой `code` и полями `message`,
-  `errno`, `syscall`, `path`.
+- Ошибки ОС (нет файла, нет прав и т.п.) — `Result`: у каждой функции `node:fs` свой тип
+  ошибки — `readFileSync` отдаёт `Result<string, ReadFileError>`, `renameSync` —
+  `Result<void, RenameError>` (раздел 5): по варианту на причину, `kind` говорит и что
+  делали, и почему не вышло.
 - `process.argv` — как в node: аргументы начинаются с индекса 2.
 - Сейчас — только синхронные функции и только текст.
 
@@ -24,7 +25,7 @@ import { join } from "node:path"
 import { readLine } from "tz:io"
 
 const [input, output] = process.argv.slice(2)
-const text = readFileSync(input, "utf8")         // Result<string, SystemError>
+const text = readFileSync(input, "utf8")         // Result<string, ReadFileError>
 if (text.isErr()) {
   console.error(text.error.message)
   process.exit(1)
@@ -103,7 +104,7 @@ if (w.isErr()) {
 import { readFileSync } from "node:fs"
 import { readLine } from "tz:io"
 
-const all = readFileSync(0, "utf8")      // весь ввод разом; 0 — stdin; Result<string, SystemError>
+const all = readFileSync(0, "utf8")      // весь ввод разом; 0 — stdin; Result<string, ReadFileError>
 
 const name = readLine("Имя? ")           // печатает вопрос как есть и ждёт строку
 console.log("привет,", name)
@@ -123,43 +124,105 @@ while ((line = readLine()) != undefined) {    // без вопроса ниче�
 
 ## 5. Ошибки ОС
 
+Решено 30 октября (4.6, шаг 1; все решения — `tmp/design/fs-errors.tz`, Ф1–Ф10).
+
 ```ts
+import { readFileSync, ReadFileError } from "node:fs"
+
 function readConfig() {
-  const text = readFileSync("config.txt", "utf8")
+  const text = readFileSync("config.txt", "utf8")   // Result<string, ReadFileError>
   if (text.isErr()) {
-    switch (text.error.code) {
-      case "ENOENT":
-        return ok(defaults)           // нет файла — беру настройки по умолчанию
-      default:
-        return text                   // остальное — наверх, место ошибки сохраняется
+    if (text.error.kind == "READ_FILE_ERROR_NOT_FOUND") {
+      return ok(defaults)           // нет файла — беру настройки по умолчанию
     }
+    return text                     // остальное — наверх, место ошибки сохраняется
   }
-  return JSON.parse<Config>(text.value)
+  return parseConfig(text.value)
+}
+
+function advice(e: ReadFileError): string {
+  switch (e.kind) {                 // полный switch: шесть причин чтения
+    case "READ_FILE_ERROR_NOT_FOUND": return "use the defaults"
+    case "READ_FILE_ERROR_WRONG_TYPE": return "ask for a file, not a folder"
+    case "READ_FILE_ERROR_PERMISSION": return "tell the user"
+    case "READ_FILE_ERROR_BUSY": return "try again later"
+    case "READ_FILE_ERROR_PATH": return "fix the input"
+    case "READ_FILE_ERROR_SYSTEM": return "log it and stop"
+  }
 }
 ```
 
-- **`SystemError`** — тип объекта, а не класс ([errors.md](errors.md), раздел 2). Его поля:
-  - `code` — метка: `"ENOENT"`, `"EACCES"`, `"EEXIST"`, `"EISDIR"`, `"ENOTDIR"`,
-    `"ENOTEMPTY"` и т.д.; вид ошибки разбирают `switch` по `code`;
-  - `message: string` — текст, как в node: `ENOENT: no such file or directory, open '…'`;
-  - `errno: int` — число, которое node даёт на этой ОС;
-  - `syscall: string` — например, `"open"`;
-  - `path?: string`;
-  - `dest?: string` — второй путь у `renameSync` и `copyFileSync`.
+- **Тип на функцию.** У каждой функции свой тип ошибки — объединение вариантов, по варианту на
+  причину; у `readFileSync` и `readFile` из `node:fs/promises` — один (`ReadFileError`).
+  Типы: `ReadFileError`, `WriteFileError`, `AppendFileError`, `TruncateError`, `AccessError`,
+  `ChangeModeError` (chmod), `StatusError` (stat), `LinkStatusError` (lstat),
+  `ReadDirectoryError`, `RealPathError`, `MakeDirectoryError`, `MakeTemporaryDirectoryError`,
+  `RemoveDirectoryError`, `UnlinkError`, `RemoveError` (rm), `RenameError`, `CopyFileError`.
+  Их импортируют из `node:fs` или `node:fs/promises` (`import { ReadFileError } from
+  "node:fs"`), глобальных нет; писать их руками почти не нужно — тип результата tz выводит сам.
+  Общего объединения «любая ошибка файлов» нет: кому нужно, пишет `ReadFileError | RenameError`.
+- **Опции-литералы меняют тип**: `flag: "wx"` — `WriteNewFileError` (есть причина `EXISTS`),
+  `"ax"` — `AppendNewFileError`, `{ throwIfNoEntry: false }` — `StatusIfExistsError` /
+  `LinkStatusIfExistsError` (нет `NOT_FOUND`: нет файла — `undefined`), `{ force: true }` —
+  `ForceRemoveError` (нет `NOT_FOUND`).
+- **Поля**: `kind`, `code`, `message`, `syscall`, `path`; у `renameSync`, `copyFileSync` и
+  `replaceSync` ещё `dest`.
+- **Потоки файлов** (30 октября, Т2): `createReadStream` — `ReadStream` типа
+  `Readable<…, ReadStreamError>`, `createWriteStream` — `Writable<Buffer, WriteStreamError>`;
+  причины — как у `ReadFileError` / `WriteFileError` и ещё `INVALID_RANGE` (`start` / `end` из
+  переменных не целые или `start > end`); варианты — интерфейсы `extends StreamError`
+  (`ReadStreamErrorNotFound`…), поэтому поток файла идёт и туда, где ждут любой поток
+  (`Readable<string>`). Тексты те же: `could not read a.log: there is no such file`.
+  `flags` с `x` литералом (`{ flags: "wx" }`) — `WriteNewStream`, `Writable<Buffer,
+  WriteNewStreamError>`, с причиной `EXISTS` (31 октября).
+  - `kind` уникален во всей библиотеке — имя типа и причина: `READ_FILE_ERROR_NOT_FOUND`,
+    `RENAME_ERROR_EXISTS`. Одна проверка `kind` говорит, какая функция сломалась и почему, и
+    сужает тип: после `kind == "RENAME_ERROR_UNSUPPORTED"` есть `dest`, а `code` — только
+    `"EXDEV"`. Причины: `NOT_FOUND`, `EXISTS`, `NOT_EMPTY`, `WRONG_TYPE` (папка вместо файла и
+    наоборот), `PERMISSION` (в Windows «доступ запрещён» — `EPERM`, в Linux — `EACCES`; `kind`
+    собирает оба), `BUSY`, `FULL`, `PATH` (плохой путь), `UNSUPPORTED` (только перенос на другой
+    диск), `SYSTEM`. У функции — только её причины и только её коды: у чтения нет `EROFS`.
+  - `code` — системное имя, как в node (`"ENOENT"`, `"EACCES"`…): `e.code == "ENOENT"` из кода
+    node работает. Неожиданный код (система дала то, чего у функции не ждали) — причина
+    `SYSTEM` с кодом `"UNKNOWN"`, настоящий код — в `message`.
+  - `message` — что не вышло, где, почему и что сделать: `could not read C:\app\config.json:
+    there is no such file`; `could not write C:\app\out\report.txt: the folder C:\app\out
+    does not exist; create it with mkdirSync(path, { recursive: true })` (какой папки нет,
+    рантайм узнаёт сам, только при ошибке).
+  - `syscall` — на какой операции упало: `"open"`, `"read"`, `"mkdir"`…
+  - `path` — всегда и всегда полный; у числа вместо пути — `"<stdin>"`, `"<stdout>"`,
+    `"<stderr>"`, `"<fd 5>"`.
+  - `errno` нет: число node на этой ОС сверх `code` ничего не даёт; `e.errno` — ошибка сборки с
+    подсказкой.
+- **Перенос и копирование никогда не стирают файл молча**: `renameSync` и `copyFileSync`, если
+  под новым именем что-то есть, дают `RENAME_ERROR_EXISTS` / `COPY_FILE_ERROR_EXISTS` (в node —
+  заменяют). Проверка «занято ли имя» и перенос — одно действие системы (Windows —
+  `MoveFileExW` без замены, Linux — `renameat2(RENAME_NOREPLACE)`). У `copyFileSync` нет
+  третьего аргумента (`COPYFILE_EXCL` не нужен). Заменить нарочно — `replaceSync` / `replace` из
+  `"tz:fs"` (`ReplaceError`): перенос поверх за один шаг, так файл сохраняют безопасно:
+  ```ts
+  import { replaceSync } from "tz:fs"
+  writeFileSync("config.json.tmp", text)
+  replaceSync("config.json.tmp", "config.json")
+  ```
+- **Ноль в пути**: литерал (`readFileSync("a\0b")`) — ошибка сборки; строка, собранная при
+  работе, — `Err` с причиной `PATH` и кодом `ERR_INVALID_PATH`. Имя с запрещёнными в Windows
+  знаками (`"a?b.txt"`) — `EINVAL` (`PATH`), а не `ENOENT`, как в node: «нет такого файла» тут
+  неправда. `rmSync` папки без `recursive` — `EISDIR` (`WRONG_TYPE`), не `ERR_FS_EISDIR`.
 - **Печать** — как объект, плюс место, где `Err` родился:
   ```
   Err {
     error: {
+      kind: 'READ_FILE_ERROR_NOT_FOUND',
       code: 'ENOENT',
-      message: "ENOENT: no such file or directory, open 'C:\\...\\config.txt'",
-      errno: -4058,
+      message: 'could not read C:\\app\\config.txt: there is no such file',
       syscall: 'open',
-      path: 'C:\\...\\config.txt'
+      path: 'C:\\app\\config.txt'
     }
   } at readConfig (config.tz:4)
   ```
-- **Тесты, которые сравнивают вывод с node,** печатают ошибку сами (`r.error.code`,
-  `r.error.message`): в node те же функции бросают исключение.
+- **Тесты, которые сравнивают вывод с node,** печатают из ошибки только то, что у node то же
+  (`r.error.code`, `r.error.path`): тексты и `rename` поверх файла у tz свои.
 
 ## 6. Время
 
@@ -175,12 +238,12 @@ function readConfig() {
 | `node:path` | `join`, `resolve`, `dirname`, `basename`, `extname`, `relative`, `isAbsolute`, `sep` |
 | `node:os` | `EOL`, `platform`, `homedir`, `tmpdir` |
 | `tz:io` | `readLine` |
-| глобальные | `console.error` / `warn` / `info` / `debug`, тип `SystemError`, `Date.now`, `performance.now` |
+| глобальные | `console.error` / `warn` / `info` / `debug`, `Date.now`, `performance.now` |
 
 Запуск других программ, сеть и потоки (streams) — вместе с async.
 
-**Редактор.** Объявления tz для tsc ([modules.md](modules.md), раздел 6) дают тип
-`SystemError`, модуль `"tz:io"` и сигнатуры `node:fs` с `Result`; `@types/node` для них не
+**Редактор.** Объявления tz для tsc ([modules.md](modules.md), раздел 6) дают типы ошибок
+функций (`ReadFileError`…), модуль `"tz:io"` и сигнатуры `node:fs` с `Result`; `@types/node` для них не
 подходит — там функции бросают.
 
 ## План реализации

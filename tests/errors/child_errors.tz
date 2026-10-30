@@ -1,0 +1,25 @@
+// The errors of node:child_process (docs/process.md, section 3): what is
+// wrong in the literals of a call does not build.
+import { execFileSync, spawnSync } from "node:child_process"
+
+const flag = process.argv.length > 2
+// expect-error: could not run it: args[1] has a zero character in it
+const zero = execFileSync("cmd", ["/c", "echo a\u0000b"])
+console.log(zero.isOk())
+// expect-error: could not run it: timeout must be 0 or more
+const negative = execFileSync("git", [], { timeout: -5 })
+console.log(negative.isOk())
+// expect-error: could not run it: there is no signal SIGFOO (killSignal)
+const signal = execFileSync("git", [], { killSignal: "SIGFOO" })
+console.log(signal.isOk())
+// expect-error: could not run a program: its name is empty
+const empty = execFileSync("", [])
+console.log(empty.isOk())
+// expect-error: the option 'shell' of 'spawnSync' is written as a literal, true or false
+const shell = spawnSync("git", [], { shell: flag })
+console.log(shell.isOk())
+const exit = execFileSync("git", ["status"], { encoding: "utf8" })
+if (exit.isErr()) {
+  // expect-error: 'ExecFileTextError' has no field 'errno'
+  console.log(exit.error.errno)
+}

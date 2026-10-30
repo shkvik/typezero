@@ -79,7 +79,6 @@ FNKD/4m8aat5n1kSHLg8p2KlMK/hWLsIMw==
 true true
 true
 -----BEGIN ENCRYPTED PRIVATE KEY----- true
-ERR_OSSL_BAD_DECRYPT | error:1C800064:Provider routines::bad decrypt
 926d7ab8350e09f7aa87b467775c5342a369df730233afe71cdbd0fb4c824e4b9281d1cff1cdf63fa0fc4c754b1a1dfd8ca8cee2ea288e88d26224124d0cf001
 EiG3ymcjJEa4A4sQshdJSo35yVr5jcDj7pruj2CwGvzLvMdW0YbI6AG6+neaS9unWv9jFq6zaARg/0Wxprb1LVunG02zxQX06Cd3xUQ/stAd/4SLidrsZA5BWxbcKgDXNnX11aIOBQgdKW4OGWonhxh88bF+zMxq1h1geA5srdI=
 EiG3ymcjJEa4A4sQshdJSo35yVr5jcDj7pruj2CwGvzLvMdW0YbI6AG6+neaS9unWv9jFq6zaARg/0Wxprb1LVunG02zxQX06Cd3xUQ/stAd/4SLidrsZA5BWxbcKgDXNnX11aIOBQgdKW4OGWonhxh88bF+zMxq1h1geA5srdI=
@@ -90,7 +89,6 @@ true false
 128 true
 true
 true
-ERR_CRYPTO_INVALID_KEY_OBJECT_TYPE | Invalid key object type public, expected private.
 public ed25519
 true
 -----BEGIN PUBLIC KEY----- true
@@ -102,7 +100,5 @@ Am/wO5SSQc4drdQ1GeaWDgqFtBppoFwygQOqK84VlMoW 01010101010101010101010101010101010
 eb459a6b30d70eb4c0ddcd34ea96ed59e8f8d1843c22dd895ab603aa13d9a81d
 eb459a6b30d70eb4c0ddcd34ea96ed59e8f8d1843c22dd895ab603aa13d9a81d
 65 33
-ERR_CRYPTO_ECDH_INVALID_PUBLIC_KEY | Public key is not valid for specified curve
-ERR_CRYPTO_INVALID_CURVE | Invalid EC curve name
 public
 false

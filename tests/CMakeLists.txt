@@ -90,6 +90,10 @@ add_test(NAME crypto/link
   COMMAND ${CMAKE_COMMAND} -DTZ=$<TARGET_FILE:tz> -DDIR=${CMAKE_CURRENT_BINARY_DIR}/crypto_link
           -P ${CMAKE_CURRENT_SOURCE_DIR}/crypto_link.cmake)
 
+# docs/compiler-map.md: a line for every folder of compiler/.
+add_test(NAME docs/compiler_map
+  COMMAND ${CMAKE_COMMAND} -DROOT=${PROJECT_SOURCE_DIR} -P ${CMAKE_CURRENT_SOURCE_DIR}/compiler_map.cmake)
+
 file(GLOB TZ_ERROR_TESTS CONFIGURE_DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/errors/*.tz
      ${CMAKE_CURRENT_SOURCE_DIR}/errors/*/main.tz)
 foreach(src ${TZ_ERROR_TESTS})

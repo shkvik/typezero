@@ -27,11 +27,6 @@ console.log(cert.checkIP("10.0.0.1"), cert.checkIssued(ca), ca.checkIssued(cert)
 console.log(must(cert.verify(ca.publicKey)), must(cert.verify(cert.publicKey)),
             must(cert.checkPrivateKey(must(createPrivateKey(leafKeyPem)))))
 console.log(must(X509Certificate.parse(cert.raw)).serialNumber)
-show(X509Certificate.parse("not a certificate"))
-
-function show<T>(r: Result<T, CryptoError>) {
-  console.log(r.isErr() ? `${r.error.code} | ${r.error.message}` : "no error")
-}
 
 function must<T, E>(r: Result<T, E>): T {
   if (r.isErr()) {

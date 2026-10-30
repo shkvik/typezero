@@ -2,7 +2,7 @@ export type StreamEvents<T> = {
   close: []
   data: [chunk: T]
   end: []
-  error: [err: StreamError]
+  error: [err: StreamFault]
   pause: []
   readable: []
   resume: []
@@ -21,15 +21,12 @@ let pendingSides: DuplexSides | undefined = undefined
 
 const kStringChunks = 1
 
-export interface ReadableOptions<T> {
+export interface ReadableOptions {
   highWaterMark?: double
   encoding?: BufferEncoding
   objectMode?: boolean
   emitClose?: boolean
   autoDestroy?: boolean
-  read?: (this: Readable<T>, size: int) => void
-  destroy?: (this: Readable<T>, error: StreamError | undefined, callback: StreamCallback) => void
-  construct?: (this: Readable<T>, callback: StreamCallback) => void
 }
 
 function chunkEncoding(kind: int, objectMode: boolean,
@@ -38,17 +35,18 @@ function chunkEncoding(kind: int, objectMode: boolean,
   return encoding ?? "utf8"
 }
 
-export class Readable<T = Buffer> extends StreamEmitter<StreamEvents<T>> {
-  private readOption?: (this: Readable<T>, size: int) => void
-  private destroyOption?:
-    (this: Readable<T>, error: StreamError | undefined, callback: StreamCallback) => void
-  private constructOption?: (this: Readable<T>, callback: StreamCallback) => void
+function backFault(back: StreamError | undefined, given: StreamFault | undefined): StreamFault | undefined {
+  if (back == undefined) return undefined
+  if (given != undefined && back == given) return given
+  return faultOf(back)
+}
 
-  constructor(options?: ReadableOptions<T>) {
+export abstract class Readable<T = Buffer, E extends StreamError = StreamError>
+    extends StreamEmitter<StreamEvents<T>> {
+  private failure?: E
+
+  constructor(options?: ReadableOptions) {
     super()
-    this.readOption = options?.read
-    this.destroyOption = options?.destroy
-    this.constructOption = options?.construct
     if (pendingSides != undefined) return
     const setup = new StreamSetup()
     setup.readable = {
@@ -58,26 +56,54 @@ export class Readable<T = Buffer> extends StreamEmitter<StreamEvents<T>> {
       emitClose: options?.emitClose,
       autoDestroy: options?.autoDestroy,
     }
-    setup.hasConstruct = options?.construct != undefined || overrides(this, "onConstruct")
+    setup.hasConstruct = overrides(this, "onConstruct")
     this.setUp(setup)
   }
 
-  protected onRead(size: int): void {
-    const read = this.readOption
-    if (read == undefined) super.onRead(size)
-    else read.call(this, size)
+  protected abstract onRead(size: int): void
+
+  protected onConstruct(callback: HookCallback<E>): void {
+    callback()
   }
 
   protected onDestroy(error: StreamError | undefined, callback: StreamCallback): void {
-    const destroy = this.destroyOption
-    if (destroy == undefined) callback(error)
-    else destroy.call(this, error, callback)
+    callback(error)
   }
 
-  protected onConstruct(callback: StreamCallback): void {
-    const construct = this.constructOption
-    if (construct == undefined) callback()
-    else construct.call(this, callback)
+  protected destroy(error: E): void {
+    this.noteError(error)
+    this.breakWith(error)
+  }
+
+  protected noteError(error: E): void {
+    if (this.failure == undefined) this.failure = error
+  }
+
+  protected faultFrom(error: E): StreamFault {
+    this.noteError(error)
+    return faultOf(error)
+  }
+
+  protected readFault(fault: StreamFault): E | PrematureCloseError | PushAfterEndError {
+    return readError<E>(this.failure, fault)
+  }
+
+  protected writeFaultOf(fault: StreamFault):
+      E | PrematureCloseError | WriteAfterEndError | WriteAfterDestroyError | AlreadyEndedError |
+      CallbackTwiceError {
+    return writeError<E>(this.failure, fault)
+  }
+
+  protected requestChunks(size: int): void {
+    this.onRead(size)
+  }
+
+  protected constructHook(callback: FaultCallback): void {
+    this.onConstruct((error?: E) => callback(error == undefined ? undefined : this.faultFrom(error)))
+  }
+
+  protected destroyHook(error: StreamFault | undefined, callback: FaultCallback): void {
+    this.onDestroy(error, (back?: StreamError) => callback(backFault(back, error)))
   }
 
   protected emitData(chunk: unknown): void {
@@ -88,10 +114,14 @@ export class Readable<T = Buffer> extends StreamEmitter<StreamEvents<T>> {
 
   protected pushChunk(chunk: unknown, encoding?: string): boolean {
     if (chunk != undefined && this.readableObjectMode() && !isChunk<T>(chunk)) {
-      this.destroy(invalidChunk(chunk))
+      this.breakWith(invalidChunk(chunk))
       return false
     }
     return super.pushChunk(chunk, encoding)
+  }
+
+  pushEnd(): void {
+    this.pushChunk(undefined)
   }
 
   read(size?: int): T | undefined {
@@ -99,12 +129,21 @@ export class Readable<T = Buffer> extends StreamEmitter<StreamEvents<T>> {
     return chunk == undefined ? undefined : chunkOf<T>(chunk)
   }
 
-  [Symbol.asyncIterator](): AsyncGenerator<Result<T, StreamError>> {
-    return this.iterate<T>(true)
+  errored(): E | PrematureCloseError | PushAfterEndError | undefined {
+    const fault = this.fault()
+    if (fault == undefined) return undefined
+    return this.readFault(fault)
   }
 
-  iterator(options?: { destroyOnReturn?: boolean }): AsyncGenerator<Result<T, StreamError>> {
-    return this.iterate<T>(options?.destroyOnReturn ?? true)
+  [Symbol.asyncIterator](): AsyncGenerator<Result<T, E | PrematureCloseError | PushAfterEndError>> {
+    return this.iterate<T, E | PrematureCloseError | PushAfterEndError>(
+      true, (fault: StreamFault) => this.readFault(fault))
+  }
+
+  iterator(options?: { destroyOnReturn?: boolean }):
+      AsyncGenerator<Result<T, E | PrematureCloseError | PushAfterEndError>> {
+    return this.iterate<T, E | PrematureCloseError | PushAfterEndError>(
+      options?.destroyOnReturn ?? true, (fault: StreamFault) => this.readFault(fault))
   }
 }
 
@@ -113,18 +152,13 @@ export interface WriteChunk<T> {
   encoding: string
 }
 
-export interface WritableOptions<T> {
+export interface WritableOptions {
   highWaterMark?: double
   decodeStrings?: boolean
   defaultEncoding?: BufferEncoding
   objectMode?: boolean
   emitClose?: boolean
   autoDestroy?: boolean
-  write?: (this: Writable<T>, chunk: T, encoding: string, callback: StreamCallback) => void
-  writev?: (this: Writable<T>, chunks: WriteChunk<T>[], callback: StreamCallback) => void
-  final?: (this: Writable<T>, callback: StreamCallback) => void
-  destroy?: (this: Writable<T>, error: StreamError | undefined, callback: StreamCallback) => void
-  construct?: (this: Writable<T>, callback: StreamCallback) => void
 }
 
 function typedChunks<T>(chunks: BufferedWrite[]): WriteChunk<T>[] {
@@ -137,23 +171,12 @@ function decodesStrings(kind: int, objectMode: boolean) {
   return objectMode || kind != kStringChunks
 }
 
-export class Writable<T = Buffer> extends StreamEmitter<StreamEvents<T>> {
-  private writeOption?:
-    (this: Writable<T>, chunk: T, encoding: string, callback: StreamCallback) => void
-  private writevOption?:
-    (this: Writable<T>, chunks: WriteChunk<T>[], callback: StreamCallback) => void
-  private finalOption?: (this: Writable<T>, callback: StreamCallback) => void
-  private destroyOption?:
-    (this: Writable<T>, error: StreamError | undefined, callback: StreamCallback) => void
-  private constructOption?: (this: Writable<T>, callback: StreamCallback) => void
+export abstract class Writable<T = Buffer, E extends StreamError = StreamError>
+    extends StreamEmitter<StreamEvents<T>> {
+  private failure?: E
 
-  constructor(options?: WritableOptions<T>) {
+  constructor(options?: WritableOptions) {
     super()
-    this.writeOption = options?.write
-    this.writevOption = options?.writev
-    this.finalOption = options?.final
-    this.destroyOption = options?.destroy
-    this.constructOption = options?.construct
     const setup = new StreamSetup()
     setup.writable = {
       highWaterMark: options?.highWaterMark,
@@ -163,54 +186,101 @@ export class Writable<T = Buffer> extends StreamEmitter<StreamEvents<T>> {
       emitClose: options?.emitClose,
       autoDestroy: options?.autoDestroy,
     }
-    setup.hasWritev = options?.writev != undefined || overrides(this, "onWritev")
-    setup.hasFinal = options?.final != undefined || overrides(this, "onFinal")
-    setup.hasConstruct = options?.construct != undefined || overrides(this, "onConstruct")
+    setup.hasWritev = overrides(this, "onWritev")
+    setup.hasFinal = overrides(this, "onFinal")
+    setup.hasConstruct = overrides(this, "onConstruct")
     this.setUp(setup)
   }
 
-  protected writeChunk(chunk: unknown, encoding: string, callback: StreamCallback): void {
-    this.onWrite(chunkOf<T>(chunk), encoding, callback)
+  protected abstract onWrite(chunk: T, encoding: string, callback: HookCallback<E>): void
+
+  protected onWritev(chunks: WriteChunk<T>[], callback: HookCallback<E>): void {
+    void chunks
+    callback()
   }
 
-  protected writevChunks(chunks: BufferedWrite[], callback: StreamCallback): void {
-    this.onWritev(typedChunks<T>(chunks), callback)
+  protected onFinal(callback: HookCallback<E>): void {
+    callback()
   }
 
-  protected onWrite(chunk: T, encoding: string, callback: StreamCallback): void {
-    const write = this.writeOption
-    if (write != undefined) write.call(this, chunk, encoding, callback)
-    else if (this.writevOption != undefined || overrides(this, "onWritev"))
-      this.onWritev([{ chunk, encoding }], callback)
-    else callback(methodNotImplemented("onWrite()"))
-  }
-
-  protected onWritev(chunks: WriteChunk<T>[], callback: StreamCallback): void {
-    const writev = this.writevOption
-    if (writev == undefined) callback(methodNotImplemented("onWritev()"))
-    else writev.call(this, chunks, callback)
-  }
-
-  protected onFinal(callback: StreamCallback): void {
-    const final = this.finalOption
-    if (final == undefined) callback()
-    else final.call(this, callback)
+  protected onConstruct(callback: HookCallback<E>): void {
+    callback()
   }
 
   protected onDestroy(error: StreamError | undefined, callback: StreamCallback): void {
-    const destroy = this.destroyOption
-    if (destroy == undefined) callback(error)
-    else destroy.call(this, error, callback)
+    callback(error)
   }
 
-  protected onConstruct(callback: StreamCallback): void {
-    const construct = this.constructOption
-    if (construct == undefined) callback()
-    else construct.call(this, callback)
+  protected destroy(error: E): void {
+    this.noteError(error)
+    this.breakWith(error)
+  }
+
+  protected noteError(error: E): void {
+    if (this.failure == undefined) this.failure = error
+  }
+
+  protected faultFrom(error: E): StreamFault {
+    this.noteError(error)
+    return faultOf(error)
+  }
+
+  protected writeChunk(chunk: unknown, encoding: string, callback: FaultCallback): void {
+    this.onWrite(chunkOf<T>(chunk), encoding,
+                 (error?: E) => callback(error == undefined ? undefined : this.faultFrom(error)))
+  }
+
+  protected writevChunks(chunks: BufferedWrite[], callback: FaultCallback): void {
+    this.onWritev(typedChunks<T>(chunks),
+                  (error?: E) => callback(error == undefined ? undefined : this.faultFrom(error)))
+  }
+
+  protected finalHook(callback: FaultCallback): void {
+    this.onFinal((error?: E) => callback(error == undefined ? undefined : this.faultFrom(error)))
+  }
+
+  protected constructHook(callback: FaultCallback): void {
+    this.onConstruct((error?: E) => callback(error == undefined ? undefined : this.faultFrom(error)))
+  }
+
+  protected destroyHook(error: StreamFault | undefined, callback: FaultCallback): void {
+    this.onDestroy(error, (back?: StreamError) => callback(backFault(back, error)))
+  }
+
+  errored():
+      E | PrematureCloseError | WriteAfterEndError | WriteAfterDestroyError | AlreadyEndedError |
+      CallbackTwiceError | undefined {
+    const fault = this.fault()
+    if (fault == undefined) return undefined
+    return writeError<E>(this.failure, fault)
+  }
+
+  private writeTyped(
+    chunk: unknown,
+    encoding: string | undefined,
+    cb: ((error?: E | PrematureCloseError | WriteAfterEndError | WriteAfterDestroyError |
+          AlreadyEndedError | CallbackTwiceError) => void) | undefined,
+  ): boolean {
+    if (cb == undefined) return this.writeFault(chunk, encoding, undefined)
+    const done = cb
+    return this.writeFault(chunk, encoding, (fault?: StreamFault) =>
+      done(fault == undefined ? undefined : writeError<E>(this.failure, fault)))
+  }
+
+  private endTyped(
+    hasChunk: boolean,
+    chunk: unknown,
+    encoding: string | undefined,
+  ): Promise<Result<void, E | PrematureCloseError | WriteAfterEndError | WriteAfterDestroyError |
+                         AlreadyEndedError | CallbackTwiceError>> {
+    return this.endFault(hasChunk, chunk, encoding).then((ended) => {
+      if (ended.isErr()) return err(writeError<E>(this.failure, ended.error))
+      return ok()
+    })
   }
 }
 
-export interface DuplexOptions<W, R> {
+export interface DuplexOptions {
   allowHalfOpen?: boolean
   readable?: boolean
   writable?: boolean
@@ -225,12 +295,6 @@ export interface DuplexOptions<W, R> {
   defaultEncoding?: BufferEncoding
   emitClose?: boolean
   autoDestroy?: boolean
-  read?: (this: Duplex<W, R>, size: int) => void
-  write?: (this: Duplex<W, R>, chunk: W, encoding: string, callback: StreamCallback) => void
-  writev?: (this: Duplex<W, R>, chunks: WriteChunk<W>[], callback: StreamCallback) => void
-  final?: (this: Duplex<W, R>, callback: StreamCallback) => void
-  destroy?: (this: Duplex<W, R>, error: StreamError | undefined, callback: StreamCallback) => void
-  construct?: (this: Duplex<W, R>, callback: StreamCallback) => void
 }
 
 class DuplexSides {
@@ -286,99 +350,91 @@ function duplexSetup<W, R>(sides: DuplexSides): StreamSetup {
   return setup
 }
 
-export class Duplex<W = Buffer, R = W> extends Readable<R> {
-  private duplexRead?: (this: Duplex<W, R>, size: int) => void
-  private duplexWrite?:
-    (this: Duplex<W, R>, chunk: W, encoding: string, callback: StreamCallback) => void
-  private duplexWritev?:
-    (this: Duplex<W, R>, chunks: WriteChunk<W>[], callback: StreamCallback) => void
-  private duplexFinal?: (this: Duplex<W, R>, callback: StreamCallback) => void
-  private duplexDestroy?:
-    (this: Duplex<W, R>, error: StreamError | undefined, callback: StreamCallback) => void
-  private duplexConstruct?: (this: Duplex<W, R>, callback: StreamCallback) => void
+function duplexSides(options: DuplexOptions | undefined): DuplexSides {
+  const sides = new DuplexSides()
+  sides.allowHalfOpen = options?.allowHalfOpen
+  sides.readable = options?.readable
+  sides.writable = options?.writable
+  sides.highWaterMark = options?.highWaterMark
+  sides.readableHighWaterMark = options?.readableHighWaterMark
+  sides.writableHighWaterMark = options?.writableHighWaterMark
+  sides.objectMode = options?.objectMode
+  sides.readableObjectMode = options?.readableObjectMode
+  sides.writableObjectMode = options?.writableObjectMode
+  sides.encoding = options?.encoding
+  sides.decodeStrings = options?.decodeStrings
+  sides.defaultEncoding = options?.defaultEncoding
+  sides.emitClose = options?.emitClose
+  sides.autoDestroy = options?.autoDestroy
+  return sides
+}
 
-  constructor(options?: DuplexOptions<W, R>) {
+export abstract class Duplex<W = Buffer, R = W, E extends StreamError = StreamError>
+    extends Readable<R, E> {
+  constructor(options?: DuplexOptions) {
     const given = pendingSides
     if (given == undefined) pendingSides = new DuplexSides()
     super()
     pendingSides = undefined
-    this.duplexRead = options?.read
-    this.duplexWrite = options?.write
-    this.duplexWritev = options?.writev
-    this.duplexFinal = options?.final
-    this.duplexDestroy = options?.destroy
-    this.duplexConstruct = options?.construct
     if (given != undefined) return
-    const sides = new DuplexSides()
-    sides.allowHalfOpen = options?.allowHalfOpen
-    sides.readable = options?.readable
-    sides.writable = options?.writable
-    sides.highWaterMark = options?.highWaterMark
-    sides.readableHighWaterMark = options?.readableHighWaterMark
-    sides.writableHighWaterMark = options?.writableHighWaterMark
-    sides.objectMode = options?.objectMode
-    sides.readableObjectMode = options?.readableObjectMode
-    sides.writableObjectMode = options?.writableObjectMode
-    sides.encoding = options?.encoding
-    sides.decodeStrings = options?.decodeStrings
-    sides.defaultEncoding = options?.defaultEncoding
-    sides.emitClose = options?.emitClose
-    sides.autoDestroy = options?.autoDestroy
-    const setup = duplexSetup<W, R>(sides)
-    setup.hasWritev = options?.writev != undefined || overrides(this, "onWritev")
-    setup.hasFinal = options?.final != undefined || overrides(this, "onFinal")
-    setup.hasConstruct = options?.construct != undefined || overrides(this, "onConstruct")
+    const setup = duplexSetup<W, R>(duplexSides(options))
+    setup.hasWritev = overrides(this, "onWritev")
+    setup.hasFinal = overrides(this, "onFinal")
+    setup.hasConstruct = overrides(this, "onConstruct")
     this.setUp(setup)
   }
 
-  protected onRead(size: int): void {
-    const read = this.duplexRead
-    if (read == undefined) super.onRead(size)
-    else read.call(this, size)
+  protected abstract onWrite(chunk: W, encoding: string, callback: HookCallback<E>): void
+
+  protected onWritev(chunks: WriteChunk<W>[], callback: HookCallback<E>): void {
+    void chunks
+    callback()
   }
 
-  protected writeChunk(chunk: unknown, encoding: string, callback: StreamCallback): void {
-    this.onWrite(chunkOf<W>(chunk), encoding, callback)
+  protected onFinal(callback: HookCallback<E>): void {
+    callback()
   }
 
-  protected writevChunks(chunks: BufferedWrite[], callback: StreamCallback): void {
-    this.onWritev(typedChunks<W>(chunks), callback)
+  protected writeChunk(chunk: unknown, encoding: string, callback: FaultCallback): void {
+    this.onWrite(chunkOf<W>(chunk), encoding,
+                 (error?: E) => callback(error == undefined ? undefined : this.faultFrom(error)))
   }
 
-  protected onWrite(chunk: W, encoding: string, callback: StreamCallback): void {
-    const write = this.duplexWrite
-    if (write != undefined) write.call(this, chunk, encoding, callback)
-    else if (this.duplexWritev != undefined || overrides(this, "onWritev"))
-      this.onWritev([{ chunk, encoding }], callback)
-    else callback(methodNotImplemented("onWrite()"))
+  protected writevChunks(chunks: BufferedWrite[], callback: FaultCallback): void {
+    this.onWritev(typedChunks<W>(chunks),
+                  (error?: E) => callback(error == undefined ? undefined : this.faultFrom(error)))
   }
 
-  protected onWritev(chunks: WriteChunk<W>[], callback: StreamCallback): void {
-    const writev = this.duplexWritev
-    if (writev == undefined) callback(methodNotImplemented("onWritev()"))
-    else writev.call(this, chunks, callback)
+  protected finalHook(callback: FaultCallback): void {
+    this.onFinal((error?: E) => callback(error == undefined ? undefined : this.faultFrom(error)))
   }
 
-  protected onFinal(callback: StreamCallback): void {
-    const final = this.duplexFinal
-    if (final == undefined) callback()
-    else final.call(this, callback)
+  private writeTyped(
+    chunk: unknown,
+    encoding: string | undefined,
+    cb: ((error?: E | PrematureCloseError | WriteAfterEndError | WriteAfterDestroyError |
+          AlreadyEndedError | CallbackTwiceError) => void) | undefined,
+  ): boolean {
+    if (cb == undefined) return this.writeFault(chunk, encoding, undefined)
+    const done = cb
+    return this.writeFault(chunk, encoding, (fault?: StreamFault) =>
+      done(fault == undefined ? undefined : this.writeFaultOf(fault)))
   }
 
-  protected onDestroy(error: StreamError | undefined, callback: StreamCallback): void {
-    const destroy = this.duplexDestroy
-    if (destroy == undefined) callback(error)
-    else destroy.call(this, error, callback)
-  }
-
-  protected onConstruct(callback: StreamCallback): void {
-    const construct = this.duplexConstruct
-    if (construct == undefined) callback()
-    else construct.call(this, callback)
+  private endTyped(
+    hasChunk: boolean,
+    chunk: unknown,
+    encoding: string | undefined,
+  ): Promise<Result<void, E | PrematureCloseError | WriteAfterEndError | WriteAfterDestroyError |
+                         AlreadyEndedError | CallbackTwiceError>> {
+    return this.endFault(hasChunk, chunk, encoding).then((ended) => {
+      if (ended.isErr()) return err(this.writeFaultOf(ended.error))
+      return ok()
+    })
   }
 }
 
-export interface TransformOptions<W, R> {
+export interface TransformOptions {
   allowHalfOpen?: boolean
   readable?: boolean
   writable?: boolean
@@ -393,137 +449,73 @@ export interface TransformOptions<W, R> {
   defaultEncoding?: BufferEncoding
   emitClose?: boolean
   autoDestroy?: boolean
-  read?: (this: Transform<W, R>, size: int) => void
-  write?: (this: Transform<W, R>, chunk: W, encoding: string, callback: StreamCallback) => void
-  writev?: (this: Transform<W, R>, chunks: WriteChunk<W>[], callback: StreamCallback) => void
-  final?: (this: Transform<W, R>, callback: StreamCallback) => void
-  destroy?: (this: Transform<W, R>, error: StreamError | undefined, callback: StreamCallback) => void
-  construct?: (this: Transform<W, R>, callback: StreamCallback) => void
-  transform?: (this: Transform<W, R>, chunk: W, encoding: string,
-               callback: TransformCallback) => void
-  flush?: (this: Transform<W, R>, callback: TransformCallback) => void
 }
 
-function transformSides<W, R>(options: TransformOptions<W, R> | undefined): DuplexSides {
-  const sides = new DuplexSides()
+function transformSides(options: TransformOptions | undefined): DuplexSides {
+  const sides = duplexSides(options)
   const hwm = options?.highWaterMark ?? options?.readableHighWaterMark
   const zero = hwm == 0
-  sides.allowHalfOpen = options?.allowHalfOpen
-  sides.readable = options?.readable
-  sides.writable = options?.writable
   sides.highWaterMark = zero ? undefined : options?.highWaterMark
   sides.readableHighWaterMark = zero ? 0 : options?.readableHighWaterMark
   sides.writableHighWaterMark = zero
     ? options?.writableHighWaterMark ?? 0
     : options?.writableHighWaterMark
-  sides.objectMode = options?.objectMode
-  sides.readableObjectMode = options?.readableObjectMode
-  sides.writableObjectMode = options?.writableObjectMode
-  sides.encoding = options?.encoding
-  sides.decodeStrings = options?.decodeStrings
-  sides.defaultEncoding = options?.defaultEncoding
-  sides.emitClose = options?.emitClose
-  sides.autoDestroy = options?.autoDestroy
   sides.transform = true
   return sides
 }
 
-export class Transform<W = Buffer, R = W> extends Duplex<W, R> {
-  private transformRead?: (this: Transform<W, R>, size: int) => void
-  private transformWrite?:
-    (this: Transform<W, R>, chunk: W, encoding: string, callback: StreamCallback) => void
-  private transformWritev?:
-    (this: Transform<W, R>, chunks: WriteChunk<W>[], callback: StreamCallback) => void
-  private transformFinal?: (this: Transform<W, R>, callback: StreamCallback) => void
-  private transformDestroy?:
-    (this: Transform<W, R>, error: StreamError | undefined, callback: StreamCallback) => void
-  private transformConstruct?: (this: Transform<W, R>, callback: StreamCallback) => void
-  private transformOption?:
-    (this: Transform<W, R>, chunk: W, encoding: string, callback: TransformCallback) => void
-  private flushOption?: (this: Transform<W, R>, callback: TransformCallback) => void
-
-  constructor(options?: TransformOptions<W, R>) {
+export abstract class Transform<W = Buffer, R = W, E extends StreamError = StreamError>
+    extends Duplex<W, R, E> {
+  constructor(options?: TransformOptions) {
     const sides = transformSides(options)
     pendingSides = sides
     super()
-    this.transformRead = options?.read
-    this.transformWrite = options?.write
-    this.transformWritev = options?.writev
-    this.transformFinal = options?.final
-    this.transformDestroy = options?.destroy
-    this.transformConstruct = options?.construct
-    this.transformOption = options?.transform
-    this.flushOption = options?.flush
     const setup = duplexSetup<W, R>(sides)
     setup.transform = true
-    setup.hasWritev = options?.writev != undefined || overrides(this, "onWritev")
+    setup.hasWritev = overrides(this, "onWritev")
     setup.hasFinal = true
-    setup.hasConstruct = options?.construct != undefined || overrides(this, "onConstruct")
-    setup.hasFlush = options?.flush != undefined || overrides(this, "onFlush")
-    setup.transformsWrites = options?.write == undefined && !overrides(this, "onWrite")
-    setup.transformsFinal = options?.final == undefined && !overrides(this, "onFinal")
+    setup.hasConstruct = overrides(this, "onConstruct")
+    setup.hasFlush = overrides(this, "onFlush")
+    setup.transformsWrites = !overrides(this, "onWrite")
+    setup.transformsFinal = !overrides(this, "onFinal")
     this.setUp(setup)
   }
 
+  protected abstract onTransform(chunk: W, encoding: string,
+                                 callback: TransformHookCallback<E>): void
+
+  protected onFlush(callback: TransformHookCallback<E>): void {
+    callback()
+  }
+
   protected onRead(size: int): void {
-    const read = this.transformRead
-    if (read == undefined) super.onRead(size)
-    else read.call(this, size)
+    this.pullTransformed(size)
   }
 
-  protected onWrite(chunk: W, encoding: string, callback: StreamCallback): void {
-    const write = this.transformWrite
-    if (write == undefined) callback(methodNotImplemented("onWrite()"))
-    else write.call(this, chunk, encoding, callback)
+  protected onWrite(chunk: W, encoding: string, callback: HookCallback<E>): void {
+    void chunk
+    void encoding
+    callback()
   }
 
-  protected onWritev(chunks: WriteChunk<W>[], callback: StreamCallback): void {
-    const writev = this.transformWritev
-    if (writev == undefined) callback(methodNotImplemented("onWritev()"))
-    else writev.call(this, chunks, callback)
+  protected transformChunk(chunk: unknown, encoding: string, callback: FaultTransformCallback): void {
+    this.onTransform(chunkOf<W>(chunk), encoding, (error?: E, data?: unknown) =>
+      callback(error == undefined ? undefined : this.faultFrom(error), data))
   }
 
-  protected onFinal(callback: StreamCallback): void {
-    const final = this.transformFinal
-    if (final == undefined) callback()
-    else final.call(this, callback)
-  }
-
-  protected onDestroy(error: StreamError | undefined, callback: StreamCallback): void {
-    const destroy = this.transformDestroy
-    if (destroy == undefined) callback(error)
-    else destroy.call(this, error, callback)
-  }
-
-  protected onConstruct(callback: StreamCallback): void {
-    const construct = this.transformConstruct
-    if (construct == undefined) callback()
-    else construct.call(this, callback)
-  }
-
-  protected transformChunk(chunk: unknown, encoding: string, callback: TransformCallback): void {
-    this.onTransform(chunkOf<W>(chunk), encoding, callback)
-  }
-
-  protected onTransform(chunk: W, encoding: string, callback: TransformCallback): void {
-    const transform = this.transformOption
-    if (transform == undefined) callback(methodNotImplemented("onTransform()"))
-    else transform.call(this, chunk, encoding, callback)
-  }
-
-  protected onFlush(callback: TransformCallback): void {
-    const flush = this.flushOption
-    if (flush == undefined) callback()
-    else flush.call(this, callback)
+  protected flushHook(callback: FaultTransformCallback): void {
+    this.onFlush((error?: E, data?: unknown) =>
+      callback(error == undefined ? undefined : this.faultFrom(error), data))
   }
 }
 
 export class PassThrough<W = Buffer, R = W> extends Transform<W, R> {
-  constructor(options?: TransformOptions<W, R>) {
+  constructor(options?: TransformOptions) {
     super(options)
   }
 
-  protected onTransform(chunk: W, encoding: string, callback: TransformCallback): void {
+  protected onTransform(chunk: W, encoding: string,
+                        callback: TransformHookCallback<StreamError>): void {
     void encoding
     callback(undefined, chunk)
   }
@@ -537,8 +529,8 @@ export interface ReadableFromOptions {
   autoDestroy?: boolean
 }
 
-function fromOptions<U>(options: ReadableFromOptions | undefined, hwm: double | undefined):
-    ReadableOptions<U> {
+function fromOptions(options: ReadableFromOptions | undefined, hwm: double | undefined):
+    ReadableOptions {
   return {
     objectMode: options?.objectMode ?? true,
     highWaterMark: options?.highWaterMark ?? hwm,
@@ -549,12 +541,12 @@ function fromOptions<U>(options: ReadableFromOptions | undefined, hwm: double | 
 }
 
 export function streamFromValue<U>(value: U, options?: ReadableFromOptions): Readable<U> {
-  return new FromValue<U>(value, fromOptions<U>(options, undefined))
+  return new FromValue<U>(value, fromOptions(options, undefined))
 }
 
 class FromValue<U> extends Readable<U> {
   private value?: U
-  constructor(value: U, options: ReadableOptions<U>) {
+  constructor(value: U, options: ReadableOptions) {
     super(options)
     this.value = value
   }
@@ -570,13 +562,13 @@ class FromValue<U> extends Readable<U> {
 
 export function streamFromIterator<U>(iterator: Iterator<U>, options?: ReadableFromOptions):
     Readable<U> {
-  return new FromIterator<U>(iterator, fromOptions<U>(options, 1))
+  return new FromIterator<U>(iterator, fromOptions(options, 1))
 }
 
 class FromIterator<U> extends Readable<U> {
   private source: Iterator<U>
   private reading = false
-  constructor(iterator: Iterator<U>, options: ReadableOptions<U>) {
+  constructor(iterator: Iterator<U>, options: ReadableOptions) {
     super(options)
     this.source = iterator
   }
@@ -599,7 +591,7 @@ class FromIterator<U> extends Readable<U> {
       const value: unknown = result.value
       if (value == undefined) {
         this.reading = false
-        this.destroy(nullValues())
+        this.breakWith(nullValues())
         return
       }
       if (this.pushChunk(value)) continue
@@ -611,14 +603,14 @@ class FromIterator<U> extends Readable<U> {
 
 export function streamFromAsyncIterator<U>(iterator: AsyncIterator<U>,
                                            options?: ReadableFromOptions): Readable<U> {
-  return new FromAsyncIterator<U>(iterator, fromOptions<U>(options, 1))
+  return new FromAsyncIterator<U>(iterator, fromOptions(options, 1))
 }
 
 class FromAsyncIterator<U> extends Readable<U> {
   private source: AsyncIterator<U>
   private started = false
   private wake?: () => void
-  constructor(iterator: AsyncIterator<U>, options: ReadableOptions<U>) {
+  constructor(iterator: AsyncIterator<U>, options: ReadableOptions) {
     super(options)
     this.source = iterator
   }
@@ -643,7 +635,7 @@ class FromAsyncIterator<U> extends Readable<U> {
     for await (const value of this.source) {
       const chunk: unknown = value
       if (chunk == undefined) {
-        this.destroy(nullValues())
+        this.breakWith(nullValues())
         return
       }
       if (!this.pushChunk(chunk))

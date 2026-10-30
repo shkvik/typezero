@@ -170,6 +170,7 @@ bool knownBuiltin(Builtin b) {
   case Builtin::FsUnlink:
   case Builtin::FsRm:
   case Builtin::FsRename:
+  case Builtin::FsReplace:
   case Builtin::FsCopyFile:
   case Builtin::FsRealpath:
   case Builtin::FsIsKind:
@@ -187,6 +188,7 @@ bool knownBuiltin(Builtin b) {
   case Builtin::FspUnlink:
   case Builtin::FspRm:
   case Builtin::FspRename:
+  case Builtin::FspReplace:
   case Builtin::FspCopyFile:
   case Builtin::FspRealpath:
   case Builtin::FspOpen:

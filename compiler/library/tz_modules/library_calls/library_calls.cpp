@@ -88,12 +88,12 @@ Expr *LibraryCalls::checkLibCall(CallExpr *call, NameExpr *name) {
       {"asListener", Builtin::LibListener, 1, 1}, {"asClass", Builtin::LibAs, 1, 1},
       {"chunkOf", Builtin::LibChunk, 1, 1},       {"isChunk", Builtin::LibIsChunk, 1, 1},
       {"chunkKind", Builtin::LibChunkKind, 0, 1}, {"typeName", Builtin::LibTypeName, 0, 1},
-      {"overrides", Builtin::LibOverrides, 2, 0}, {"fsOpen", Builtin::LibFsOpen, 3, 0},
-      {"fsRead", Builtin::LibFsRead, 5, 0},       {"fsWrite", Builtin::LibFsWrite, 5, 0},
-      {"fsClose", Builtin::LibFsClose, 2, 0},     {"stdinChunk", Builtin::LibStdinChunk, 1, 0},
-      {"stdWrite", Builtin::LibStdWrite, 2, 0},   {"ahead", Builtin::LibAhead, 1, 0},
-      {"order", Builtin::LibOrder, 0, 0},         {"panic", Builtin::LibPanic, 1, 0},
-      {"defer", Builtin::LibDefer, 1, 0}};
+      {"overrides", Builtin::LibOverrides, 2, 0}, {"fsOpen", Builtin::LibFsOpen, 3, 1},
+      {"fsRead", Builtin::LibFsRead, 5, 1},       {"fsWrite", Builtin::LibFsWrite, 5, 1},
+      {"fsClose", Builtin::LibFsClose, 2, 1},     {"stdinChunk", Builtin::LibStdinChunk, 1, 0},
+      {"stdWrite", Builtin::LibStdWrite, 2, 0},   {"stdinFailed", Builtin::LibStdinFailed, 0, 0},
+      {"ahead", Builtin::LibAhead, 1, 0},         {"order", Builtin::LibOrder, 0, 0},
+      {"panic", Builtin::LibPanic, 1, 0},         {"defer", Builtin::LibDefer, 1, 0}};
   const Intrinsic *intrinsic =
       llvm::find_if(intrinsics, [&](const Intrinsic &i) { return i.name == intrinsicName; });
   if (intrinsic == std::end(intrinsics) || call->args.size() != intrinsic->args ||
@@ -165,6 +165,7 @@ Expr *LibraryCalls::checkLibCall(CallExpr *call, NameExpr *name) {
   case Builtin::LibFsWrite:
   case Builtin::LibFsClose:
   case Builtin::LibStdinChunk:
+  case Builtin::LibStdinFailed:
   case Builtin::LibStdWrite:
     return checker_.streamChecker().checkStreamIntrinsic(call, name, typeArg);
   default:

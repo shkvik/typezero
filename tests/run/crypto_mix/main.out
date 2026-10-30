@@ -1,6 +1,6 @@
 32 aad95f91055aa272
 { x: 3, y: -4 } [ 'a', 'b' ] 42.5
-tampered: Unsupported state or unable to authenticate data
+tampered: could not decrypt with aes-256-gcm: the data was changed or the key is wrong (the authentication tag does not match)
 [ 'a:64', 'b:64', 'c:64' ]
 { n: 1 } two [ 3, 3, 3 ]
 true 907e27e9da83

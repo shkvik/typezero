@@ -509,6 +509,11 @@ void FilePort::tokens() {
         if (is(i + 1, Tok::Colon) && i > 0 && (is(i - 1, Tok::LBrace) || is(i - 1, Tok::Comma))) {
           break;
         }
+        if (i >= 2 && is(i - 1, Tok::LParen) && isName(i - 2, "push") && afterDot(i - 2) &&
+            is(i + 1, Tok::RParen)) {
+          add(at(i - 2), endOf(i + 1), "pushEnd()", "'push(null)' became 'pushEnd()'");
+          break;
+        }
         const char *json = "'| null' next to Json was dropped: a Json holds null itself";
         if (i >= 2 && is(i - 1, Tok::Pipe) && isName(i - 2, "Json")) {
           add(endOf(i - 2), endOf(i), "", json);

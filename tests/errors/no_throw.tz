@@ -45,7 +45,7 @@ function random(n: int, low: int, high: int, x: double) {
   console.log(generateKeySync("aes", { length: n }))
   // expect-error: cannot prove that the length of the key is at least 8
   console.log(generateKeySync("hmac", { length: n }))
-  // expect-error: property 'length' does not exist on type 'Result<Buffer, CryptoError>'
+  // expect-error: property 'length' does not exist on type 'Result<Buffer, Pbkdf2Error>'
   console.log(pbkdf2Sync("pw", "salt", 1, 16, "sha256").length)
 }
 

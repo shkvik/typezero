@@ -35,7 +35,7 @@ Checker::StreamChunks ChunkTypes::streamChunksOf(const ClassDecl *cls) const {
       chunks.readable = c->typeArgs[0];
     } else if (name == "Writable" && !chunks.writable) {
       chunks.writable = c->typeArgs[0];
-    } else if (name == "Duplex" && c->typeArgs.size() == 2 && !chunks.writable) {
+    } else if (name == "Duplex" && c->typeArgs.size() >= 2 && !chunks.writable) {
       chunks.writable = c->typeArgs[0];
     }
   }
@@ -47,11 +47,11 @@ void ChunkTypes::addStreamBases(ClassDecl *inst, llvm::SMLoc loc) {
   ClassDecl *generic = inst->generic;
   ClassDecl *writable = checker_.libraryClass("Writable");
   if (!generic || !generic->library || generic->name != "Duplex" || !writable ||
-      inst->typeArgs.size() != 2) {
+      inst->typeArgs.size() != 3) {
     return;
   }
   if (ClassDecl *side = checker_.genericClassInstantiator().instantiateClass(
-          writable, {inst->typeArgs[0]}, loc)) {
+          writable, {inst->typeArgs[0], inst->typeArgs[2]}, loc)) {
     checker_.classBases().addBase(inst->type, side->type);
     if (inst->isEmitted() && !llvm::is_contained(checker_.file_->subtypes, inst->type)) {
       checker_.file_->subtypes.push_back(inst->type);
@@ -73,11 +73,18 @@ std::optional<std::vector<const Type *>> ChunkTypes::streamHookParams(const Func
   llvm::StringRef kind = lib->generic->name;
   bool transform = kind == "Transform" || kind == "PassThrough";
   const Type *readable = nullptr, *writable = nullptr;
-  if (kind == "Readable" && lib->typeArgs.size() == 1) {
+  const Type *error = checker_.prelude().builtinType("StreamError");
+  if (kind == "Readable" && lib->typeArgs.size() == 2) {
     readable = lib->typeArgs[0];
-  } else if (kind == "Writable" && lib->typeArgs.size() == 1) {
+    error = lib->typeArgs[1];
+  } else if (kind == "Writable" && lib->typeArgs.size() == 2) {
     writable = lib->typeArgs[0];
-  } else if ((kind == "Duplex" || transform) && lib->typeArgs.size() == 2) {
+    error = lib->typeArgs[1];
+  } else if ((kind == "Duplex" || kind == "Transform") && lib->typeArgs.size() == 3) {
+    writable = lib->typeArgs[0];
+    readable = lib->typeArgs[1];
+    error = lib->typeArgs[2];
+  } else if (kind == "PassThrough" && lib->typeArgs.size() == 2) {
     writable = lib->typeArgs[0];
     readable = lib->typeArgs[1];
   } else {
@@ -88,7 +95,13 @@ std::optional<std::vector<const Type *>> ChunkTypes::streamHookParams(const Func
 
     return decl ? decl->resolved : nullptr;
   };
-  const Type *callback = alias("StreamCallback");
+  auto generic = [&](llvm::StringRef name, const Type *arg) -> const Type * {
+    TypeAliasDecl *decl = checker_.libTypes_.lookup(name);
+
+    return decl ? checker_.aliasInstantiator().instantiateAlias(decl, {arg}, fn->loc()) : nullptr;
+  };
+  const Type *callback = generic("HookCallback", error);
+  const Type *transformCallback = generic("TransformHookCallback", error);
   llvm::StringRef name = fn->name;
   std::vector<const Type *> params;
   if (name == "onRead" && readable) {
@@ -96,19 +109,17 @@ std::optional<std::vector<const Type *>> ChunkTypes::streamHookParams(const Func
   } else if (name == "onFinal" || name == "onConstruct") {
     params = {callback};
   } else if (name == "onDestroy") {
-    params = {Type::optional(checker_.prelude().builtinType("StreamError")), callback};
+    params = {Type::optional(checker_.prelude().builtinType("StreamError")),
+              alias("StreamCallback")};
   } else if (name == "onFlush" && transform) {
-    params = {alias("TransformCallback")};
+    params = {transformCallback};
   } else if (name == "onTransform" && transform) {
-    params = {writable, Type::string(), alias("TransformCallback")};
+    params = {writable, Type::string(), transformCallback};
   } else if (name == "onWrite" && writable) {
     params = {writable, Type::string(), callback};
   } else if (name == "onWritev" && writable) {
-    TypeAliasDecl *entry = checker_.libTypes_.lookup("WriteChunk");
-    if (const Type *type =
-            entry ? checker_.aliasInstantiator().instantiateAlias(entry, {writable}, fn->loc())
-                  : nullptr) {
-      params = {Type::array(type), callback};
+    if (const Type *chunk = generic("WriteChunk", writable)) {
+      params = {Type::array(chunk), callback};
     }
   }
   if (params.empty() || llvm::is_contained(params, nullptr)) {

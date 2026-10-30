@@ -1,40 +1,93 @@
-read missing -> ENOENT -4058 open D\missing - | ENOENT: no such file or directory, open 'D\missing'
-read directory -> EISDIR -4068 read - - | EISDIR: illegal operation on a directory, read
-read through file -> ENOENT -4058 open D\file.txt\x - | ENOENT: no such file or directory, open 'D\file.txt\x'
-read empty path -> ENOENT -4058 open  - | ENOENT: no such file or directory, open ''
-read zero char -> ERR_INVALID_ARG_VALUE | The argument 'path' must be a string, Uint8Array, or URL without null bytes. Received 'a\x00b'
-write missing dir -> ENOENT -4058 open D\missing\x.txt - | ENOENT: no such file or directory, open 'D\missing\x.txt'
-write exclusive -> EEXIST -4075 open D\file.txt - | EEXIST: file already exists, open 'D\file.txt'
-write directory -> EISDIR -4068 open D\sub - | EISDIR: illegal operation on a directory, open 'D\sub'
-append missing dir -> ENOENT -4058 open D\missing\x.txt - | ENOENT: no such file or directory, open 'D\missing\x.txt'
-mkdir existing -> EEXIST -4075 mkdir D\sub - | EEXIST: file already exists, mkdir 'D\sub'
-mkdir existing file -> EEXIST -4075 mkdir D\file.txt - | EEXIST: file already exists, mkdir 'D\file.txt'
-mkdir missing parent -> ENOENT -4058 mkdir D\missing\a - | ENOENT: no such file or directory, mkdir 'D\missing\a'
-mkdir under file -> ENOTDIR -4052 mkdir D\file.txt\a\b - | ENOTDIR: not a directory, mkdir 'D\file.txt\a\b'
-mkdtemp missing -> ENOENT -4058 mkdtemp D\missing\t-XXXXXX - | ENOENT: no such file or directory, mkdtemp 'D\missing\t-XXXXXX'
-rmdir not empty -> ENOTEMPTY -4051 rmdir D\sub - | ENOTEMPTY: directory not empty, rmdir 'D\sub'
-rmdir file -> ENOENT -4058 rmdir D\file.txt - | ENOENT: no such file or directory, rmdir 'D\file.txt'
-rmdir missing -> ENOENT -4058 rmdir D\missing - | ENOENT: no such file or directory, rmdir 'D\missing'
-unlink directory -> EPERM -4048 unlink D\sub - | EPERM: operation not permitted, unlink 'D\sub'
-unlink missing -> ENOENT -4058 unlink D\missing - | ENOENT: no such file or directory, unlink 'D\missing'
-rm directory -> ERR_FS_EISDIR 21 rm D\sub - | Path is a directory: rm returned EISDIR (is a directory) D\sub
-rm missing -> ENOENT -4058 lstat D\missing - | ENOENT: no such file or directory, lstat 'D\missing'
-rm missing recursive -> ENOENT -4058 lstat D\missing - | ENOENT: no such file or directory, lstat 'D\missing'
-rename missing -> ENOENT -4058 rename D\missing D\other | ENOENT: no such file or directory, rename 'D\missing' -> 'D\other'
-rename onto directory -> EPERM -4048 rename D\file.txt D\sub | EPERM: operation not permitted, rename 'D\file.txt' -> 'D\sub'
-copy missing -> ENOENT -4058 copyfile D\missing D\other | ENOENT: no such file or directory, copyfile 'D\missing' -> 'D\other'
-copy exclusive -> EEXIST -4075 copyfile D\file.txt D\sub\inside.txt | EEXIST: file already exists, copyfile 'D\file.txt' -> 'D\sub\inside.txt'
-copy directory -> EPERM -4048 copyfile D\sub D\other | EPERM: operation not permitted, copyfile 'D\sub' -> 'D\other'
-copy clone force -> ENOSYS -4054 copyfile D\file.txt D\other | ENOSYS: function not implemented, copyfile 'D\file.txt' -> 'D\other'
-readdir file -> ENOTDIR -4052 scandir D\file.txt - | ENOTDIR: not a directory, scandir 'D\file.txt'
-readdir missing -> ENOENT -4058 scandir D\missing - | ENOENT: no such file or directory, scandir 'D\missing'
-stat missing -> ENOENT -4058 stat D\missing - | ENOENT: no such file or directory, stat 'D\missing'
-lstat missing -> ENOENT -4058 lstat D\missing - | ENOENT: no such file or directory, lstat 'D\missing'
-stat through file -> ENOENT -4058 stat D\file.txt\x - | ENOENT: no such file or directory, stat 'D\file.txt\x'
-realpath missing -> ENOENT -4058 lstat D\missing - | ENOENT: no such file or directory, lstat 'D\missing'
-access missing -> ENOENT -4058 access D\missing - | ENOENT: no such file or directory, access 'D\missing'
-chmod missing -> ENOENT -4058 chmod D\missing - | ENOENT: no such file or directory, chmod 'D\missing'
-truncate missing -> ENOENT -4058 open D\missing - | ENOENT: no such file or directory, open 'D\missing'
-copy onto itself -> no error
+read missing -> READ_FILE_ERROR_NOT_FOUND ENOENT open D\missing
+    could not read D\missing: there is no such file
+read directory -> READ_FILE_ERROR_WRONG_TYPE EISDIR read D\sub
+    could not read D\sub: it is a folder, not a file
+read through file -> READ_FILE_ERROR_NOT_FOUND ENOENT open D\file.txt\x
+    could not read D\file.txt\x: there is no such file
+read empty path -> READ_FILE_ERROR_NOT_FOUND ENOENT open 
+    could not read "": there is no such file
+read zero char -> READ_FILE_ERROR_PATH ERR_INVALID_PATH open a\0b
+    could not read "a\0b": the path has a zero character in it
+read bad name -> READ_FILE_ERROR_PATH EINVAL open D\a?b.txt
+    could not read D\a?b.txt: the name has characters the system does not allow, such as ? or *
+read bad number -> READ_FILE_ERROR_SYSTEM EBADF read <fd 99>
+    could not read <fd 99>: it is not an open file
+write missing dir -> WRITE_FILE_ERROR_NOT_FOUND ENOENT open D\missing\x.txt
+    could not write D\missing\x.txt: the folder D\missing does not exist; create it with mkdirSync(path, { recursive: true })
+write exclusive -> WRITE_NEW_FILE_ERROR_EXISTS EEXIST open D\file.txt
+    could not write D\file.txt: it already exists
+write directory -> WRITE_FILE_ERROR_WRONG_TYPE EISDIR open D\sub
+    could not write D\sub: it is a folder, not a file
+append missing dir -> APPEND_FILE_ERROR_NOT_FOUND ENOENT open D\missing\x.txt
+    could not append to D\missing\x.txt: the folder D\missing does not exist; create it with mkdirSync(path, { recursive: true })
+append exclusive -> APPEND_NEW_FILE_ERROR_EXISTS EEXIST open D\file.txt
+    could not append to D\file.txt: it already exists
+mkdir existing -> MAKE_DIRECTORY_ERROR_EXISTS EEXIST mkdir D\sub
+    could not create the folder D\sub: it already exists
+mkdir existing file -> MAKE_DIRECTORY_ERROR_EXISTS EEXIST mkdir D\file.txt
+    could not create the folder D\file.txt: it already exists
+mkdir missing parent -> MAKE_DIRECTORY_ERROR_NOT_FOUND ENOENT mkdir D\missing\a
+    could not create the folder D\missing\a: the folder D\missing does not exist; pass { recursive: true } to create it too
+mkdir under file -> MAKE_DIRECTORY_ERROR_WRONG_TYPE ENOTDIR mkdir D\file.txt\a\b
+    could not create the folder D\file.txt\a\b: a part of the path is a file, not a folder
+mkdtemp missing -> MAKE_TEMPORARY_DIRECTORY_ERROR_NOT_FOUND ENOENT mkdtemp D\missing\t-XXXXXX
+    could not create a temporary folder at D\missing\t-XXXXXX: the folder D\missing does not exist
+rmdir not empty -> REMOVE_DIRECTORY_ERROR_NOT_EMPTY ENOTEMPTY rmdir D\sub
+    could not remove the folder D\sub: it is not empty; pass { recursive: true } to rmSync to remove it with its contents
+rmdir file -> REMOVE_DIRECTORY_ERROR_WRONG_TYPE ENOTDIR rmdir D\file.txt
+    could not remove the folder D\file.txt: it is a file, not a folder
+rmdir missing -> REMOVE_DIRECTORY_ERROR_NOT_FOUND ENOENT rmdir D\missing
+    could not remove the folder D\missing: there is no such folder
+unlink directory -> UNLINK_ERROR_PERMISSION EPERM unlink D\sub
+    could not remove D\sub: it is a folder; remove it with rmdirSync, or with its contents with rmSync(path, { recursive: true })
+unlink missing -> UNLINK_ERROR_NOT_FOUND ENOENT unlink D\missing
+    could not remove D\missing: there is no such file or folder
+rm directory -> REMOVE_ERROR_WRONG_TYPE EISDIR rm D\sub
+    could not remove D\sub: it is a folder; pass { recursive: true } to rmSync to remove it with its contents
+rm missing -> REMOVE_ERROR_NOT_FOUND ENOENT lstat D\missing
+    could not remove D\missing: there is no such file or folder
+rm missing recursive -> REMOVE_ERROR_NOT_FOUND ENOENT lstat D\missing
+    could not remove D\missing: there is no such file or folder
+rm missing force -> no error
+rename missing -> RENAME_ERROR_NOT_FOUND ENOENT rename D\missing
+    could not move D\missing to D\x: there is no such file
+rename onto file -> RENAME_ERROR_EXISTS EEXIST rename D\file.txt
+    could not move D\file.txt to D\other.txt: other.txt already exists; to replace it on purpose, use replaceSync from "tz:fs"
+rename onto directory -> RENAME_ERROR_EXISTS EEXIST rename D\file.txt
+    could not move D\file.txt to D\sub: sub already exists; to replace it on purpose, use replaceSync from "tz:fs"
+copy missing -> COPY_FILE_ERROR_NOT_FOUND ENOENT copyfile D\missing
+    could not copy D\missing to D\x: there is no such file
+copy onto file -> COPY_FILE_ERROR_EXISTS EEXIST copyfile D\file.txt
+    could not copy D\file.txt to D\other.txt: other.txt already exists; to replace it on purpose, copy to a temporary name and move that over it with replaceSync from "tz:fs"
+copy directory -> COPY_FILE_ERROR_WRONG_TYPE EISDIR copyfile D\sub
+    could not copy D\sub to D\x: it is a folder, not a file
+copy onto itself -> COPY_FILE_ERROR_EXISTS EEXIST copyfile D\file.txt
+    could not copy D\file.txt to D\file.txt: file.txt already exists; to replace it on purpose, copy to a temporary name and move that over it with replaceSync from "tz:fs"
+replace missing -> REPLACE_ERROR_NOT_FOUND ENOENT rename D\missing
+    could not move D\missing to D\other.txt: there is no such file
+replace onto folder -> REPLACE_ERROR_WRONG_TYPE EISDIR rename D\file.txt
+    could not move D\file.txt to D\sub: D\sub is a folder
+readdir file -> READ_DIRECTORY_ERROR_WRONG_TYPE ENOTDIR scandir D\file.txt
+    could not list D\file.txt: it is a file, not a folder
+readdir missing -> READ_DIRECTORY_ERROR_NOT_FOUND ENOENT scandir D\missing
+    could not list D\missing: there is no such folder
+stat missing -> STATUS_ERROR_NOT_FOUND ENOENT stat D\missing
+    could not get the info of D\missing: there is no such file or folder
+stat missing, no throw -> no error
+lstat missing -> LINK_STATUS_ERROR_NOT_FOUND ENOENT lstat D\missing
+    could not get the info of D\missing: there is no such file or folder
+stat through file -> STATUS_ERROR_NOT_FOUND ENOENT stat D\file.txt\x
+    could not get the info of D\file.txt\x: there is no such file or folder
+realpath missing -> REAL_PATH_ERROR_NOT_FOUND ENOENT lstat D\missing
+    could not resolve D\missing: there is no such file or folder
+access missing -> ACCESS_ERROR_NOT_FOUND ENOENT access D\missing
+    could not check D\missing: there is no such file or folder
+chmod missing -> CHANGE_MODE_ERROR_NOT_FOUND ENOENT chmod D\missing
+    could not change the mode of D\missing: there is no such file or folder
+truncate missing -> TRUNCATE_ERROR_NOT_FOUND ENOENT open D\missing
+    could not truncate D\missing: there is no such file
 false false
+dest: D\other.txt
+replace onto file -> no error
+false text
 false

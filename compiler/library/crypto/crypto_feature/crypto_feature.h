@@ -7,6 +7,7 @@ namespace tz {
 class CryptoFeature : public Feature {
 public:
   llvm::StringRef name() const override { return "crypto"; }
+  void declare(Checker &checker) const override;
 
   Expr *checkStaticCall(Checker &checker, CallExpr *call, MemberExpr *member,
                         const Type *expected) const override;

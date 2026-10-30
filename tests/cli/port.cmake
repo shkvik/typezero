@@ -14,7 +14,8 @@ changed:
     3  'export default' became a named export
     1  'import * as' became named imports
     3  'import type' and 'export type' lost 'type'
-    3  'null' and 'void 0' became 'undefined'
+    2  'null' and 'void 0' became 'undefined'
+    1  'push(null)' became 'pushEnd()'
     1  'var' became 'let'
     1  '| null' next to Json was dropped: a Json holds null itself
     1  default imports became named imports
@@ -95,7 +96,11 @@ export class Lines extends Readable {
   }
   onRead() {
     const line = this.left.shift()
-    this.push(line == undefined ? undefined : `${line}.`)
+    if (line == undefined) {
+      this.pushEnd()
+      return
+    }
+    this.push(`${line}.`)
   }
 }
 ]])

@@ -1,8 +1,14 @@
 import { createHash } from 'node:crypto';
+import { UuidError } from './types.tz';
 
 // tz: the bytes are a Uint8Array, as the type says: no branches for an array or a string.
-function md5(bytes: Uint8Array): Uint8Array {
-  return createHash('md5').update(bytes).digest();
+// createHash gives a Result in tz (OpenSSL may refuse), and so does this.
+function md5(bytes: Uint8Array): Result<Uint8Array, UuidError> {
+  const hash = createHash('md5');
+  if (hash.isErr()) {
+    return err({ name: 'Error', message: hash.error.message });
+  }
+  return ok(hash.value.update(bytes).digest());
 }
 
 export { md5 };

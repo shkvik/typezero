@@ -11,7 +11,7 @@ let late = 0
 const server = new Server({ port: 0, hostname: "127.0.0.1" }, async req => {
   const path = new URL(req.url).pathname()
   if (path == "/events") {
-    return new Response(new ReadableStream({
+    return Response.stream(new ReadableStream({
       pull: async c => {
         await new Promise<void>(resolve => setTimeout(resolve, 20))
         c.enqueue(enc.encode("data: tick\n\n"))

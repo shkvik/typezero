@@ -154,7 +154,10 @@ static int64_t gcm_update(TzCipher *c, const uint8_t *in, size_t length, uint8_t
   }
   if (failed) {
     if (!c->quiet) {
-      tz_crypto_fail("ERR_CRYPTO_INVALID_STATE", "Trying to add data in unsupported state");
+      tz_crypto_note_algorithm(c->alg->name);
+      tz_crypto_fail("ERR_CRYPTO_OPERATION_FAILED",
+                     "could not %s with %s: one key and IV can take at most 64 GiB",
+                     c->decrypt ? "decrypt" : "encrypt", c->alg->name);
     }
     return -1;
   }
@@ -184,7 +187,7 @@ static int64_t gcm_final(TzCipher *c, uint8_t *out) {
   }
   if (!ok) {
     if (!c->quiet) {
-      tz_crypto_fail("ERR_CRYPTO_AUTH_FAILED", "Unsupported state or unable to authenticate data");
+      tz_crypto_auth_failed(c);
     }
     return -1;
   }

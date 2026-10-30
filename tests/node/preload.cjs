@@ -1,13 +1,6 @@
 // Runs before every `// same-as-node` test under Node (see check.cmake): it
 // gives Node what tz has built in and Node has not (docs/io.md).
 //
-// - SystemError: Node has no global of that name, only the errors of the
-//   system it describes. Here `e instanceof SystemError` holds for an Error
-//   with a string `code` and `syscall`, which those errors have, and for
-//   the errors of TLS, which tz gives as SystemError too (docs/net.md,
-//   section 4) and node as an Error with a code only: a certificate that
-//   does not verify (CERT_HAS_EXPIRED), ERR_TLS_* and ERR_SSL_*, and the
-//   ECONNRESET of a handshake the server ended.
 // - Result, ok and err (docs/errors.md, section 1): Ok and Err print as tz
 //   prints them, except that tz adds where an Err was made.
 // - JSON.parse, decodeURIComponent, decodeURI, URL.parse and Date.parse,
@@ -47,32 +40,6 @@ const { join } = require("node:path");
 const { pathToFileURL } = require("node:url");
 
 // The codes node gives a certificate that does not verify (X509ErrorCode).
-const certificateCodes = new Set([
-  "UNABLE_TO_GET_ISSUER_CERT", "UNABLE_TO_GET_CRL", "UNABLE_TO_DECRYPT_CERT_SIGNATURE",
-  "UNABLE_TO_DECRYPT_CRL_SIGNATURE", "UNABLE_TO_DECODE_ISSUER_PUBLIC_KEY",
-  "CERT_SIGNATURE_FAILURE", "CRL_SIGNATURE_FAILURE", "CERT_NOT_YET_VALID", "CERT_HAS_EXPIRED",
-  "CRL_NOT_YET_VALID", "CRL_HAS_EXPIRED", "ERROR_IN_CERT_NOT_BEFORE_FIELD",
-  "ERROR_IN_CERT_NOT_AFTER_FIELD", "ERROR_IN_CRL_LAST_UPDATE_FIELD",
-  "ERROR_IN_CRL_NEXT_UPDATE_FIELD", "OUT_OF_MEM", "DEPTH_ZERO_SELF_SIGNED_CERT",
-  "SELF_SIGNED_CERT_IN_CHAIN", "UNABLE_TO_GET_ISSUER_CERT_LOCALLY",
-  "UNABLE_TO_VERIFY_LEAF_SIGNATURE", "CERT_CHAIN_TOO_LONG", "CERT_REVOKED", "INVALID_CA",
-  "PATH_LENGTH_EXCEEDED", "INVALID_PURPOSE", "CERT_UNTRUSTED", "CERT_REJECTED",
-  "HOSTNAME_MISMATCH", "UNSPECIFIED",
-]);
-
-function isTlsError(e) {
-  return certificateCodes.has(e.code) || e.code.startsWith("ERR_TLS_") ||
-         e.code.startsWith("ERR_SSL_") ||
-         (e.code === "ECONNRESET" && e.message.startsWith("Client network socket disconnected"));
-}
-
-globalThis.SystemError = class SystemError extends Error {
-  static [Symbol.hasInstance](value) {
-    return value instanceof Error && typeof value.code === "string" &&
-           (typeof value.syscall === "string" || isTlsError(value));
-  }
-};
-
 class Ok {
   constructor(value) { this.value = value; }
   isOk() { return true; }
@@ -124,7 +91,7 @@ function fromNode() {
     Number.isFinite(value)
       ? new Ok(value)
       : new Err({
-          kind: "NUMBER",
+          kind: "NUMBER_ERROR",
           code: "ERR_INVALID_NUMBER",
           message: value !== value ? "the bytes hold NaN, which a tz double cannot be"
                                    : "the bytes hold an infinity, which a tz double cannot be",
@@ -172,9 +139,9 @@ function fromNode() {
   const plainParseInt = parseInt;
   const plainParseFloat = parseFloat;
   const numberResult = (value, text, integer) => {
-    if (Number.isNaN(value)) return new Err({ kind: "NUMBER", code: "ERR_INVALID_NUMBER", message: `not a number: '${text}'` });
+    if (Number.isNaN(value)) return new Err({ kind: "NUMBER_ERROR", code: "ERR_INVALID_NUMBER", message: `not a number: '${text}'` });
     if (!Number.isFinite(value) || (integer && Math.abs(value) >= 2 ** 63)) {
-      return new Err({ kind: "NUMBER", code: "ERR_INVALID_NUMBER", message: `the number is out of range: '${text}'` });
+      return new Err({ kind: "NUMBER_ERROR", code: "ERR_INVALID_NUMBER", message: `the number is out of range: '${text}'` });
     }
     return new Ok(value);
   };
@@ -246,7 +213,7 @@ JSON.parse = (text) => {
   try {
     return new Ok(parseJson(text));
   } catch (e) {
-    return new Err({ kind: "JSON", code: "ERR_INVALID_JSON", message: e.message });
+    return new Err({ kind: "JSON_ERROR", code: "ERR_INVALID_JSON", message: e.message });
   }
 };
 
@@ -259,23 +226,23 @@ function resulting(f, kind, code) {
     }
   };
 }
-globalThis.decodeURIComponent = resulting(decodeURIComponent, "URI", "ERR_INVALID_URI");
-globalThis.decodeURI = resulting(decodeURI, "URI", "ERR_INVALID_URI");
+globalThis.decodeURIComponent = resulting(decodeURIComponent, "URI_ERROR", "ERR_INVALID_URI");
+globalThis.decodeURI = resulting(decodeURI, "URI_ERROR", "ERR_INVALID_URI");
 const parseDate = Date.parse;
 Date.parse = (text) => {
   const ms = parseDate(text);
-  return Number.isNaN(ms) ? new Err({ kind: "DATE", code: "ERR_INVALID_DATE", message: "Invalid Date", text }) : new Ok(ms);
+  return Number.isNaN(ms) ? new Err({ kind: "DATE_ERROR", code: "ERR_INVALID_DATE", message: "Invalid Date", text }) : new Ok(ms);
 };
 const parseUrl = URL.parse;
 URL.parse = (input, base) => {
   const url = parseUrl(input, base);
-  return url ? new Ok(url) : new Err({ kind: "URL", code: "ERR_INVALID_URL", message: "Invalid URL", input });
+  return url ? new Ok(url) : new Err({ kind: "URL_ERROR", code: "ERR_INVALID_URL", message: "Invalid URL", input });
 };
 RegExp.parse = (pattern, flags) => {
   try {
     return new Ok(new RegExp(pattern, flags));
   } catch (e) {
-    return new Err({ kind: "REGEX", code: "ERR_INVALID_REGEX", message: e.message });
+    return new Err({ kind: "REGEX_ERROR", code: "ERR_INVALID_REGEX", message: e.message });
   }
 };
 globalThis.TextDecoder = class TextDecoder extends globalThis.TextDecoder {
@@ -299,7 +266,7 @@ Intl.Locale.parse = (tag) => {
   try {
     return new Ok(new Intl.Locale(tag));
   } catch (e) {
-    return new Err({ kind: "LOCALE", code: "ERR_INVALID_LOCALE", message: e.message, tag });
+    return new Err({ kind: "LOCALE_ERROR", code: "ERR_INVALID_LOCALE", message: e.message, tag });
   }
 };
 
@@ -336,6 +303,35 @@ Intl.Locale.parse = (tag) => {
     const chunks = iterator.call(this, options);
     return fromTest() ? results(chunks) : chunks;
   };
+  // A stream of tz is a class with onRead, onWrite, onTransform... (node's
+  // _read, _write, _transform), and pushEnd() ends it (node's push(null)).
+  stream.Readable.prototype.pushEnd = function () {
+    return this.push(null);
+  };
+  const hooks = [
+    ["_read", "onRead", [stream.Readable.prototype]],
+    ["_write", "onWrite", [stream.Writable.prototype, stream.Duplex.prototype]],
+    ["_writev", "onWritev", [stream.Writable.prototype, stream.Duplex.prototype]],
+    ["_final", "onFinal", [stream.Writable.prototype, stream.Duplex.prototype]],
+    ["_destroy", "onDestroy", [stream.Readable.prototype, stream.Writable.prototype, stream.Duplex.prototype]],
+    ["_construct", "onConstruct", [stream.Readable.prototype, stream.Writable.prototype, stream.Duplex.prototype]],
+    ["_transform", "onTransform", [stream.Transform.prototype]],
+    ["_flush", "onFlush", [stream.Transform.prototype]],
+  ];
+  for (const [node, tz, protos] of hooks) {
+    for (const proto of protos) {
+      const fallback = proto[node];
+      Object.defineProperty(proto, node, {
+        configurable: true,
+        get() {
+          return typeof this[tz] === "function" ? this[tz] : fallback;
+        },
+        set(value) {
+          Object.defineProperty(this, node, { value, writable: true, configurable: true });
+        },
+      });
+    }
+  }
   // The same for a web ReadableStream (the body of fetch): each chunk in a
   // Result, and so is what read() of its reader gives.
   const web = globalThis.ReadableStream.prototype;
@@ -449,14 +445,14 @@ function networkMessage(code, peer, stage, detail) {
   }
 }
 function requestError(code, message, url) {
-  return { kind: "REQUEST", code, message, url };
+  return { kind: "FETCH_ERROR_REQUEST", code, message, url };
 }
 function fetchError(e, input, init) {
   const given = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
   const message = e.message ?? "";
   if (e instanceof DOMException) {
     const peer = peerOf(input);
-    return { kind: "TIMEOUT", code: "TIMEOUT_ERR",
+    return { kind: "FETCH_ERROR_TIMEOUT", code: "TIMEOUT_ERR",
              message: `no full answer from ${peer.host} within ${init.timeout} ms`,
              timeout: init.timeout };
   }
@@ -494,25 +490,25 @@ function fetchError(e, input, init) {
                         `fetch cannot get ${peer.url.href}: only http:, https: and data: work`,
                         peer.url.href);
   if (why === "unexpected redirect")
-    return { kind: "REDIRECT", code: "ERR_UNEXPECTED_REDIRECT",
+    return { kind: "FETCH_ERROR_REDIRECT", code: "ERR_UNEXPECTED_REDIRECT",
              message: `${peer.url.href} redirects, and redirect is "error"`, location: "" };
   if (why === "redirect count exceeded")
-    return { kind: "REDIRECT", code: "ERR_TOO_MANY_REDIRECTS", message: "more than 20 redirects",
+    return { kind: "FETCH_ERROR_REDIRECT", code: "ERR_TOO_MANY_REDIRECTS", message: "more than 20 redirects",
              location: "" };
   if (tlsCodes.has(cause.code))
-    return { kind: "TLS", code: cause.code, message: tlsMessage(cause.code, peer.host),
+    return { kind: "FETCH_ERROR_TLS", code: cause.code, message: tlsMessage(cause.code, peer.host),
              host: peer.host };
   if (cause.code === "UND_ERR_SOCKET")
-    return { kind: "RESPONSE", code: "ERR_CLOSED",
+    return { kind: "FETCH_ERROR_RESPONSE", code: "ERR_CLOSED",
              message: `${peer.name} closed the connection before the response`, host: peer.host,
              port: peer.port };
   if (typeof cause.code === "string" && cause.code.startsWith("HPE_"))
-    return { kind: "RESPONSE", code: "ERR_INVALID_RESPONSE",
+    return { kind: "FETCH_ERROR_RESPONSE", code: "ERR_INVALID_RESPONSE",
              message: `${peer.name} did not answer in HTTP/1.1: ${why}`, host: peer.host,
              port: peer.port };
   const code = networkCodes.has(cause.code) ? cause.code : "UNKNOWN";
-  return { kind: "NETWORK", code, message: networkMessage(code, peer, "connecting", why),
-           errno: cause.errno ?? -1, syscall: cause.syscall ?? "", host: peer.host,
+  return { kind: "FETCH_ERROR_NETWORK", code, message: networkMessage(code, peer, "connecting", why),
+           syscall: cause.syscall ?? "", host: peer.host,
            port: peer.port };
 }
 const originalFetch = globalThis.fetch;
@@ -532,30 +528,30 @@ function bodyError(e, owner) {
   const known = responsePeers.get(owner);
   if (e instanceof DOMException) {
     const timeout = known?.timeout ?? 0;
-    return { kind: "TIMEOUT", code: "TIMEOUT_ERR",
+    return { kind: "BODY_ERROR_TIMEOUT", code: "TIMEOUT_ERR",
              message: `no full answer from ${known?.peer.host} within ${timeout} ms`, timeout };
   }
   const message = e.message;
   if (message.startsWith("Body is unusable"))
-    return { kind: "USED", code: "ERR_BODY_USED",
+    return { kind: "BODY_ERROR_USED", code: "ERR_BODY_USED",
              message: "the body is already read: text(), json(), bytes(), formData() and body() " +
                       "read it once" };
   if (message.includes("locked"))
-    return { kind: "USED", code: "ERR_BODY_LOCKED",
+    return { kind: "BODY_ERROR_USED", code: "ERR_BODY_LOCKED",
              message: "the body is locked: a reader of body() holds it" };
   if (message === "terminated") {
     const cause = e.cause;
     if (cause?.code?.startsWith("Z_") || cause?.code?.startsWith("ERR_BROTLI") ||
         cause?.errno !== undefined && cause?.code === undefined) {
       const coding = owner.headers.get("content-encoding") ?? "";
-      return { kind: "MALFORMED", code: "ERR_INVALID_COMPRESSION",
+      return { kind: "BODY_ERROR_MALFORMED", code: "ERR_INVALID_COMPRESSION",
                message: `the body is not valid ${coding}: ${cause.message}` };
     }
     const who = known === undefined ? "the client" : known.peer.name;
-    return { kind: "NETWORK", code: "ERR_CLOSED",
+    return { kind: "BODY_ERROR_NETWORK", code: "ERR_CLOSED",
              message: `${who} closed the connection before the end of the body` };
   }
-  return { kind: "STREAM", code: "ERR_STREAM_FAILED",
+  return { kind: "BODY_ERROR_STREAM", code: "ERR_STREAM_FAILED",
            message: `the stream of the body failed: ${message}` };
 }
 function formError(owner) {
@@ -564,14 +560,17 @@ function formError(owner) {
   const type = given.toLowerCase();
   const withType = (error) => (header === undefined ? error : { ...error, contentType: header });
   if (type.startsWith("multipart/form-data") && !/boundary=/i.test(given))
-    return withType({ kind: "CONTENT", code: "ERR_NO_BOUNDARY",
+    return withType({ kind: "FORM_DATA_ERROR_CONTENT", code: "ERR_NO_BOUNDARY",
                       message: "the body is not a form: multipart/form-data has no boundary" });
   if (type.startsWith("multipart/form-data"))
-    return withType({ kind: "CONTENT", code: "ERR_INVALID_MULTIPART",
+    return withType({ kind: "FORM_DATA_ERROR_CONTENT", code: "ERR_INVALID_MULTIPART",
                       message: "the body is not a valid multipart form: a part has no end of its head" });
   const what = given === "" ? "it has no content-type" : `content-type is ${given}`;
-  return withType({ kind: "CONTENT", code: "ERR_NOT_A_FORM", message: `the body is not a form: ${what}` });
+  return withType({ kind: "FORM_DATA_ERROR_CONTENT", code: "ERR_NOT_A_FORM", message: `the body is not a form: ${what}` });
 }
+// A stream goes into a body only through these (docs/net.md, section 3).
+Response.stream = (body, init) => new Response(body, init);
+Request.stream = (input, body, init) => new Request(input, { ...init, body });
 for (const proto of [Response.prototype, Request.prototype]) {
   for (const name of ["text", "bytes", "arrayBuffer", "formData"]) {
     const original = proto[name];
@@ -591,7 +590,7 @@ for (const proto of [Response.prototype, Request.prototype]) {
     const parsed = JSON.parse(text.value);
     if (parsed.isOk()) return parsed;
     const header = this.headers.get("content-type") ?? undefined;
-    const error = { kind: "CONTENT", code: "ERR_INVALID_JSON",
+    const error = { kind: "JSON_BODY_ERROR_CONTENT", code: "ERR_INVALID_JSON",
                     message: `the body is not JSON: ${parsed.error.message}` };
     if (header !== undefined) error.contentType = header;
     error.start = text.value.slice(0, 200);
@@ -655,11 +654,11 @@ for (const name of ["href", "protocol", "host", "hostname", "port"]) {
     try {
       this[name] = value;
     } catch (e) {
-      return new Err({ kind: "URL", code: "ERR_INVALID_URL", message: "Invalid URL", input: value });
+      return new Err({ kind: "URL_ERROR", code: "ERR_INVALID_URL", message: "Invalid URL", input: value });
     }
     const wanted = name === "protocol" ? value.replace(/:$/, "") + ":" : value;
     if (this.href === before && this[name] !== wanted)
-      return new Err({ kind: "URL", code: "ERR_INVALID_URL", message: "Invalid " + name, input: value });
+      return new Err({ kind: "URL_ERROR", code: "ERR_INVALID_URL", message: "Invalid " + name, input: value });
     return new Ok(undefined);
   };
 }

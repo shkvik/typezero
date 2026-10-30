@@ -1,4 +1,5 @@
 #include "compiler/whole_program/wide_writes/wide_writes.h"
+#include "compiler/check/generics/generic_widening/generic_widening.h"
 #include "compiler/check/types/type_relations/type_relations.h"
 #include "compiler/library/tz_modules/library_calls/library_calls.h"
 #include "compiler/whole_program/flows/flows.h"
@@ -70,7 +71,7 @@ WideWrites::WideWrites(Checker &checker) : checker_(checker) {}
 
 bool WideWrites::widensWrites(const Type *from, const Type *to) {
   const Type *a = from->nonOptional(), *b = to->nonOptional();
-  if (a == b) {
+  if (a == b || GenericWidening::widens(a, b)) {
     return false;
   }
   bool arrays = a->isArray() && b->isArray();
@@ -302,7 +303,7 @@ bool WideWrites::sameReference(const Type *from, const Type *to) {
   if (!from->isObject() || !to->isObject() || from->isAnyObject() || to->isAnyObject()) {
     return false;
   }
-  if (from->isSubtypeOf(to)) {
+  if (from->isSubtypeOf(to) || GenericWidening::widens(from, to)) {
     return true;
   }
   if (from->isClass() || to->isClass() || from->isTuple() != to->isTuple() ||

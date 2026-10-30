@@ -50,5 +50,5 @@ readLine("a", "b")
 // expect-error: 'mkdirSync' of 'node:fs' can only be called
 mkdirSync.call(1)
 
-// expect-error: 'SystemError' is not a class, and a class can extend only a class
-class MyError extends SystemError {}
+// expect-error: 'JsonError' is not a class, and a class can extend only a class
+class MyError extends JsonError {}

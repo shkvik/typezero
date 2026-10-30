@@ -4,6 +4,7 @@
 #include "compiler/check/flow/loop_bounds/loop_bounds.h"
 #include "compiler/check/flow/loop_scanner/loop_scanner.h"
 #include "compiler/check/generics/generic_checker/generic_checker.h"
+#include "compiler/check/generics/generic_widening/generic_widening.h"
 #include "compiler/check/iterators/generator_checker/generator_checker.h"
 #include "compiler/check/iterators/iterable_checker/iterable_checker.h"
 #include "compiler/check/iterators/iterator_methods/iterator_methods.h"
@@ -231,6 +232,7 @@ void AsyncChecker::checkForAwait(ForOfStmt *stmt) {
   checker_.iteratorMethods().markFused(stmt->iterable);
   stmt->iterable =
       checker_.genericChecker().apparent(checker_.exprChecker().checkExpr(stmt->iterable));
+  stmt->iterable = checker_.genericWidening().joined(stmt->iterable);
   if (Expr *iterator = checker_.iterableChecker().asyncUserIterator(stmt->iterable)) {
     stmt->iterable = iterator;
   } else {

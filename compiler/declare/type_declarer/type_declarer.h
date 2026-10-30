@@ -18,6 +18,7 @@ public:
 
 private:
   Checker &checker_;
+  int builtinDepth_ = 0;
 };
 
 }

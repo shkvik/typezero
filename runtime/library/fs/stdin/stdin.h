@@ -16,6 +16,9 @@
 extern Bytes tz_in;
 
 extern int tz_in_eof;
+extern int tz_in_failed;
+
+int32_t tz_stdin_failed(void);
 
 #ifdef _WIN32
 extern uint16_t tz_in_surrogate;

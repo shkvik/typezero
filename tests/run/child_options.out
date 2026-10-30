@@ -1,23 +1,21 @@
-ERR_INVALID_ARG_VALUE | The argument 'file' must be a string without null bytes. Received 'a\x00b'
-ERR_INVALID_ARG_VALUE | The argument 'args[1]' must be a string without null bytes. Received 'a\x00'
-ERR_INVALID_ARG_VALUE | The argument 'file' cannot be empty. Received ''
-ERR_INVALID_ARG_VALUE | The argument 'file' cannot be empty. Received ''
-ERR_INVALID_ARG_VALUE | The argument 'command' must be a string without null bytes. Received 'echo \x00'
-ERR_INVALID_ARG_VALUE | The property 'options.cwd' must be a string, Uint8Array, or URL without null bytes. Received 'a\x00'
-ERR_INVALID_ARG_VALUE | The property 'options.env['A']' must be a string without null bytes. Received 'a\x00'
-ERR_INVALID_ARG_VALUE | The property 'options.argv0' must be a string without null bytes. Received 'a\x00'
-ERR_INVALID_ARG_VALUE | The property 'options.shell' must be a string without null bytes. Received 'a\x00'
-ERR_OUT_OF_RANGE | The value of "timeout" is out of range. It must be an unsigned integer. Received -1
-ERR_OUT_OF_RANGE | The value of "timeout" is out of range. It must be an unsigned integer. Received 1.5
-ERR_OUT_OF_RANGE | The value of "options.maxBuffer" is out of range. It must be a positive number. Received -1
-ERR_UNKNOWN_SIGNAL | Unknown signal: SIGFOO
-ERR_UNKNOWN_SIGNAL | Unknown signal: 99
+SPAWN_BYTES_ERROR_ZERO_CHARACTER ERR_INVALID_ARG_VALUE | could not run a program: file has a zero character in it
+SPAWN_BYTES_ERROR_ZERO_CHARACTER ERR_INVALID_ARG_VALUE | could not run cmd: args[1] has a zero character in it
+SPAWN_BYTES_ERROR_EMPTY_NAME ERR_INVALID_ARG_VALUE | could not run a program: its name is empty
+EXEC_BYTES_ERROR_ZERO_CHARACTER ERR_INVALID_ARG_VALUE | could not run "echo \0": command has a zero character in it
+EXEC_FILE_BYTES_ERROR_ZERO_CHARACTER ERR_INVALID_ARG_VALUE | could not run cmd: cwd has a zero character in it
+SPAWN_BYTES_ERROR_ZERO_CHARACTER ERR_INVALID_ARG_VALUE | could not run cmd: env.A has a zero character in it
+SPAWN_BYTES_ERROR_ZERO_CHARACTER ERR_INVALID_ARG_VALUE | could not run cmd: argv0 has a zero character in it
+SPAWN_SHELL_BYTES_ERROR_ZERO_CHARACTER ERR_INVALID_ARG_VALUE | could not run cmd: shell has a zero character in it
+SPAWN_BYTES_ERROR_OUT_OF_RANGE ERR_OUT_OF_RANGE | could not run cmd: timeout must be a whole number, 0 or more, not -1
+SPAWN_BYTES_ERROR_OUT_OF_RANGE ERR_OUT_OF_RANGE | could not run cmd: timeout must be a whole number, 0 or more, not 1.5
+SPAWN_BYTES_ERROR_OUT_OF_RANGE ERR_OUT_OF_RANGE | could not run cmd: maxBuffer must be 0 or more, not -1
+SPAWN_BYTES_ERROR_UNKNOWN_SIGNAL ERR_UNKNOWN_SIGNAL | could not run cmd: there is no signal SIGFOO (killSignal)
+SPAWN_BYTES_ERROR_UNKNOWN_SIGNAL ERR_UNKNOWN_SIGNAL | could not run cmd: there is no signal 99 (killSignal)
 Ok { value: 5 }
 Ok { value: 'found' }
-ENOENT | spawnSync cmd ENOENT
+SPAWN_TEXT_ERROR_PROGRAM_NOT_FOUND_IN_PATH ENOENT | could not run cmd: there is no such program in PATH; install it or give the full path
 Ok { value: 9 }
 Ok { value: 0 }
-ENOENT | spawnSync cmd ENOENT
-ENOENT | spawnSync echo hi ENOENT
+SPAWN_BYTES_ERROR_CWD_NOT_FOUND ENOENT | could not run cmd: the folder C:\tz-no-such-dir (cwd) does not exist
+SPAWN_BYTES_ERROR_CWD_NOT_A_FOLDER
 Ok { value: '"no shell"' }
-ENOTSUP | spawnSync cmd ENOTSUP

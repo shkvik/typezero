@@ -26,18 +26,62 @@ const r = spawnSync("git", ["status"], { encoding: "utf8" })        // { status,
 
 - **Тип результата — по `encoding`:** с `encoding: "utf8"` — `string`, без него — `Buffer`
   ([bytes.md](bytes.md)), как в node.
-- **Ошибки — `Result`:** `execSync` и `execFileSync` отдают `Result<string | Buffer,
-  ExecError>`. `Err` — если программа не запустилась (`{ code: "ENOENT" }` и другие, как у
-  [io.md](io.md)) или вышла с кодом ≠ 0: тогда в ошибке `code: "exit"`, `status`, `stdout`,
-  `stderr`. `spawnSync` код выхода ошибкой не считает и возвращает `status`; `Err` у него —
-  если запустить не вышло или программу убили за таймаут или `maxBuffer`. Тип ошибки —
-  `ExecError<Out>`, где `Out` — `string` или `Buffer`, как у вывода.
+- **Ошибки — `Result`, у каждой функции свой тип** (раздел 3 ниже; решено 30 октября,
+  `tmp/design/process-errors.tz`, П0–П7): `execSync` — `ExecTextError` / `ExecBytesError`,
+  `execFileSync` — `ExecFileTextError` / `ExecFileBytesError`, `spawnSync` — `SpawnTextError` /
+  `SpawnBytesError` (Text — с `encoding`, вывод строкой; Bytes — без него, `Buffer`); с `shell`
+  у `execFileSync` и `spawnSync` — `ExecFileShell…` / `SpawnShell…`. `spawnSync` код выхода
+  ошибкой не считает: Ok — `SpawnTextResult` / `SpawnBytesResult` (`status`, `signal`,
+  `output`, `pid`, `stdout?`, `stderr?`).
 - **Опции — как в node:** `cwd`, `env`, `input`, `stdio` (`"pipe"`, `"inherit"`, `"ignore"`),
   `timeout`, `killSignal`, `maxBuffer` (1 МБ, сверх — ошибка `ENOBUFS`), `shell`, `windowsHide`.
 - Перед запуском с `stdio: "inherit"` tz сбрасывает свой буфер stdout ([io.md](io.md)), чтобы
   вывод программы и дочернего процесса не перепутался.
 - Пока синхронная функция ждёт, поток занят; параллельные async-задачи идут на других потоках
   ([async.md](async.md)).
+
+### Ошибки
+
+```ts
+import { execFileSync, ExecFileTextError } from "node:child_process"
+
+const head = execFileSync("git", ["rev-parse", "HEAD"], { encoding: "utf8" })
+if (head.isErr()) {
+  switch (head.error.kind) {
+    case "EXEC_FILE_TEXT_ERROR_PROGRAM_NOT_FOUND_IN_PATH": console.log("install git first"); break
+    case "EXEC_FILE_TEXT_ERROR_EXIT": console.log(head.error.status, head.error.stderr); break
+    case "EXEC_FILE_TEXT_ERROR_TIMEOUT": console.log(head.error.timeout); break
+    default: console.log(head.error.message)
+  }
+}
+```
+
+- **`kind`** — имя типа и причина (`EXEC_FILE_TEXT_ERROR_EXIT`); у варианта только его поля:
+  после `EXIT` есть `status: int`, после `TIMEOUT` — `timeout` и `signal`, после
+  `OUTPUT_TOO_LARGE` — `stream` (`"stdout"` / `"stderr"`) и `maxBuffer`. Вместо `path` и
+  `spawnargs` (имена node) — имена параметров: `command` у `execSync` и `spawnSync`, `file` и
+  `args` у `execFileSync` (у `spawnSync` — `command` и `args`). `errno` нет; `syscall` — только
+  там, где упал вызов системы: `"spawn"`, `"write"`.
+- **Причины** (вариант выбирает рантайм — у разных причин бывает один код):
+  - не запустилась: `PROGRAM_NOT_FOUND_IN_PATH` (имя без пути, в `PATH` нет),
+    `PROGRAM_FILE_NOT_FOUND` (путь дан, файла нет), `SHELL_NOT_FOUND` (поле `shell`),
+    `CWD_NOT_FOUND` / `CWD_NOT_A_FOLDER` (рантайм смотрит папку `cwd` только при ошибке),
+    `NO_PERMISSION`, `NEEDS_ADMINISTRATOR`, `BATCH_FILE_WITHOUT_SHELL` (`.bat` без
+    `shell: true`), `NOT_A_PROGRAM`, `COMMAND_LINE_TOO_LONG`, `PATH_TOO_LONG`,
+    `TOO_MANY_FILES`, `TOO_MANY_PROCESSES`, `OUT_OF_MEMORY`, `SYSTEM`;
+  - остановлена: `INPUT_CLOSED`, `TIMEOUT`, `OUTPUT_TOO_LARGE`;
+  - кончилась плохо (только `execSync` и `execFileSync`): `EXIT` (`ERR_NONZERO_EXIT`),
+    `SHELL_COMMAND_NOT_FOUND` / `SHELL_COMMAND_NOT_RUNNABLE` (`sh` вышла с 127 / 126),
+    `CRASHED` (поле `crash`: `SIGSEGV`… или `ACCESS_VIOLATION`, `STACK_OVERFLOW`… в Windows по
+    коду выхода), `STOPPED` (`SIGTERM`, `SIGINT`…), `KILLED`;
+  - ошибка в значениях: `ZERO_CHARACTER` (поле `argument`: `"args[1]"`, `"cwd"`, `"env.A"`),
+    `EMPTY_NAME`, `OUT_OF_RANGE`, `UNKNOWN_SIGNAL`. Те же ошибки в литералах — ошибка сборки
+    (`execFileSync("git", [], { timeout: -5 })`, `killSignal: "SIGFOO"`, ноль в аргументе,
+    пустое имя, `uid` в Windows); `shell` пишут литералом (`true` / `false`) или строкой: от
+    него зависит тип ошибки.
+- **Тексты** — что не вышло и почему: `could not run git: there is no such program in PATH;
+  install it or give the full path`, `git rev-parse HEAD exited with code 128: fatal: not a git
+  repository` (в конце — первая строка stderr), `cmd did not finish in 100 ms and was stopped`.
 
 ## 2. Асинхронные функции
 

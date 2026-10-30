@@ -37,6 +37,22 @@ const Type *GenericChecker::apparentType(const Type *type) {
       })) {
     return type->members().front()->literalBase();
   }
+  if (type->isUnion() && llvm::any_of(type->members(), [](const Type *m) {
+        return m->isParam() && m->constraint() && !m->isListParam();
+      })) {
+    std::vector<const Type *> members;
+    for (const Type *m : type->members()) {
+      bool bounded = m->isParam() && m->constraint() && !m->isListParam();
+      const Type *seen = bounded ? m->constraint() : m;
+      if (!seen->isObject() || seen->isClass()) {
+        return type;
+      }
+      members.push_back(seen);
+    }
+    const Type *joined = Type::unionOf(members);
+
+    return joined->isTagged() ? type : joined;
+  }
 
   return type;
 }

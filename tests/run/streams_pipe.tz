@@ -1,28 +1,34 @@
 // pipeline() with backpressure (write() false, 'drain', pause and resume of
 // the source), pipeline() of streams with its callback and an error that
-// destroys them all, and finished(), in node's order of events. undefined
-// ends a stream, as null does in node: the output is node's with push(null).
+// destroys them all, and finished(), in node's order of events. pushEnd()
+// ends a stream, as push(null) does in node: the output is node's.
 // There is no pipe(): it would not pass an error on (docs/streams.md).
 import { PassThrough, Readable, Writable, pipeline, finished } from "node:stream"
 const log = (s: string) => console.log(s)
 let i = 0
-const src = new Readable({
-  highWaterMark: 4,
-  read() {
+class Parts extends Readable {
+  constructor() {
+    super({ highWaterMark: 4 })
+  }
+  onRead() {
     i++
     if (i <= 5) this.push(`part${i};`)
-    else this.push(undefined)
-  },
-})
+    else this.pushEnd()
+  }
+}
+const src = new Parts()
 const got: string[] = []
-const dst = new Writable({
-  highWaterMark: 6,
-  write(chunk, enc, cb) {
+class Slow extends Writable {
+  constructor() {
+    super({ highWaterMark: 6 })
+  }
+  onWrite(chunk, enc, cb) {
     got.push(chunk.toString())
     log(`write ${chunk.toString()}`)
     setImmediate(() => cb())
-  },
-})
+  }
+}
+const dst = new Slow()
 src.on("pause", () => log("src pause"))
 src.on("resume", () => log("src resume"))
 dst.on("pipe", () => log("dst pipe"))
@@ -36,20 +42,26 @@ pipeline(src, dst, (err) => log(`src to dst ${err == undefined}`))
 
 const a = new PassThrough()
 const b = new PassThrough()
-const c = new Writable({
-  write(chunk, enc, cb) {
+class Printer extends Writable {
+  onWrite(chunk, enc, cb) {
     log(`c got ${chunk.toString()}`)
     cb()
-  },
-})
+  }
+}
+const c = new Printer()
 const last = pipeline(a, b, c, (err) => log(`pipeline done ${err == undefined}`))
 log(`last is c ${last == c}`)
 finished(c, (err) => log(`finished c ${err?.message ?? "ok"}`))
 a.write("x")
 const ending = a.end("y")
 
-const e1 = new PassThrough()
+class Breakable extends PassThrough {
+  break(message: string) {
+    this.destroy({ message })
+  }
+}
+const e1 = new Breakable()
 const e2 = new PassThrough()
 pipeline(e1, e2, (err) => log(`pipeline error ${err?.message} e1=${e1.destroyed()} e2=${e2.destroyed()}`))
-e1.destroy({ code: "E_BAD", message: "bad" })
+e1.break("bad")
 log(`a ended ${(await ending).isOk()}`)

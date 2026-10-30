@@ -5,6 +5,7 @@
 
 void tz_out_write(const char *data, size_t len);
 void tz_std_write_bytes(int32_t fd, const uint8_t *data, size_t len);
+int32_t tz_std_gone(int32_t fd);
 
 size_t tz_format_f64(double value, char *out);
 

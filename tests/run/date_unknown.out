@@ -1,6 +1,6 @@
 2026-10-23T10:00:00.000Z
 {
-  kind: 'DATE',
+  kind: 'DATE_ERROR',
   code: 'ERR_INVALID_DATE',
   message: 'Invalid Date',
   text: 'not a date'

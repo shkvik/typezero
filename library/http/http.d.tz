@@ -88,7 +88,7 @@ export type ServeOptions = {
    * How long, in milliseconds, a whole request may take to arrive, its body
    * too, from its first byte; 300000, as in node; 0 is no limit. A slower
    * client is answered with 408 and cut off, and a handler that reads the
-   * body gets a BodyError of kind "TIMEOUT".
+   * body gets a BodyError of kind "BODY_ERROR_TIMEOUT".
    */
   requestTimeout?: int;
   /** http or https; http, `{ secure: false }`, when left out. */
@@ -147,7 +147,7 @@ export type StopOptions = {
 /**
  * Why `listen` gave an Err: an error of the core of the server — its socket,
  * its certificate — not of the handler or of the program. `kind` is
- * "SERVER" for that. `code` says what happened and is one of
+ * "LISTEN_ERROR" for that. `code` says what happened and is one of
  * `ListenErrorCode`, so a `switch` on it is checked; `message` is for people;
  * `address` and `port` are where the server tried to listen, as in node. It
  * is the error of `listen` alone, with only the fields it has.
@@ -175,14 +175,12 @@ export type StopOptions = {
  * }
  */
 export type ListenError = {
-  /** "SERVER": the error comes from the core of the server. */
-  kind: "SERVER";
+  /** "LISTEN_ERROR": the server could not start to listen. */
+  kind: "LISTEN_ERROR";
   /** What happened; one of `ListenErrorCode`. */
   code: ListenErrorCode;
   /** What happened, for people. */
   message: string;
-  /** The number of the error of the system, as node gives it. */
-  errno: int;
   /** The call of the system that failed: "listen", "getaddrinfo". */
   syscall: string;
   /** The hostname given to the server, or "0.0.0.0". */
@@ -330,8 +328,8 @@ export type UpgradeOptions = {
  * (`ERR_UNSUPPORTED_VERSION`). Answer it with 426 or 400.
  */
 export type UpgradeError = {
-  /** "REQUEST": the request is not a WebSocket one. */
-  kind: "REQUEST";
+  /** "UPGRADE_ERROR": the request is not a WebSocket one. */
+  kind: "UPGRADE_ERROR";
   /** What is wrong with the request. */
   code: "ERR_NOT_WEBSOCKET" | "ERR_UNSUPPORTED_VERSION";
   /** What happened, for people. */

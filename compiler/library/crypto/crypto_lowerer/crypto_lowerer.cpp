@@ -1,11 +1,13 @@
 #include "compiler/library/crypto/crypto_lowerer/crypto_lowerer.h"
 #include "compiler/library/crypto/crypto_api/crypto_api.h"
+#include "compiler/library/crypto/crypto_error_types/crypto_error_types.h"
 #include "compiler/library/date/date_lowerer/date_lowerer.h"
 #include "compiler/library/process/process_lowerer/process_lowerer.h"
 #include "compiler/library/result/err_sites/err_sites.h"
 #include "compiler/library/result/result_lowerer/result_lowerer.h"
 #include "compiler/lower/async/promise_lowerer/promise_lowerer.h"
 #include "compiler/lower/expr/expr_lowerer/expr_lowerer.h"
+#include "compiler/lower/function_builder/function_builder.h"
 #include "compiler/lower/function_frame/function_frame.h"
 #include "compiler/lower/layouts/object_layouts/object_layouts.h"
 #include "compiler/lower/layouts/type_descriptors/type_descriptors.h"
@@ -13,6 +15,7 @@
 #include "compiler/lower/module_builder/module_builder.h"
 #include "compiler/lower/objects/object_maker/object_maker.h"
 #include "compiler/lower/types/optional_lowerer/optional_lowerer.h"
+#include "compiler/lower/types/union_layout/union_layout.h"
 #include "compiler/lower/values/string_lowerer/string_lowerer.h"
 #include "llvm/Support/ErrorHandling.h"
 
@@ -24,12 +27,206 @@ using llvm::Value;
 
 namespace tz {
 
+namespace {
+
+enum PartsSlot : unsigned {
+  SlotCodeText,
+  SlotMessage,
+  SlotCode,
+  SlotAlgorithm,
+  SlotLength,
+  SlotExpected,
+  SlotGot,
+  SlotExpectedKind,
+  SlotParameter,
+  SlotValue,
+  SlotField,
+  SlotFormat,
+  SlotOpenssl,
+};
+
+std::string asciiOf(const Type *literal) {
+  std::string text;
+  for (char16_t unit : literal->literalText()) {
+    text.push_back(char(unit));
+  }
+
+  return text;
+}
+
+std::vector<const Type *> literalsOf(const Type *type) {
+  if (type->isStringLiteral()) {
+    return {type};
+  }
+
+  return std::vector<const Type *>(type->members().begin(), type->members().end());
+}
+
+}
+
 CryptoLowerer::CryptoLowerer(Lowering &lowering) : lowering_(lowering) {}
+
+llvm::StructType *CryptoLowerer::partsType() {
+  llvm::Type *ptr = lowering_.builder_.getPtrTy(), *i64 = lowering_.builder_.getInt64Ty();
+  llvm::Type *str = lowering_.strTy_;
+
+  return llvm::StructType::get(lowering_.ctx_, {str, str, ptr, str, i64, i64, ptr, ptr, str,
+                                                lowering_.builder_.getDoubleTy(), str, ptr, str});
+}
+
+llvm::Function *CryptoLowerer::variantMaker(const Type *variant) {
+  llvm::Function *&made = makers_[variant];
+  if (made) {
+    return made;
+  }
+  llvm::Type *ptr = lowering_.builder_.getPtrTy();
+  made = llvm::Function::Create(llvm::FunctionType::get(ptr, {ptr}, false),
+                                llvm::GlobalValue::InternalLinkage, "tz.make.crypto",
+                                lowering_.module_.get());
+  llvm::Function *function = made;
+  lowering_.functionBuilder().setFunctionAttributes(function);
+  llvm::IRBuilderBase::InsertPoint point = lowering_.builder_.saveIP();
+  llvm::Function *outer = std::exchange(lowering_.function_, function);
+  lowering_.builder_.SetInsertPoint(llvm::BasicBlock::Create(lowering_.ctx_, "entry", function));
+  llvm::Value *parts = function->getArg(0);
+  llvm::StructType *layout = partsType();
+  auto load = [&](unsigned slot) {
+    return lowering_.builder_.CreateLoad(layout->getElementType(slot),
+                                         lowering_.builder_.CreateStructGEP(layout, parts, slot));
+  };
+  std::vector<unsigned> keys;
+  for (const Field &field : variant->fields()) {
+    keys.push_back(ObjectLayouts::fieldIndex(variant, field.name));
+  }
+  llvm::Value *object = lowering_.objectLayouts().allocObject(variant, keys);
+  for (const Field &field : variant->fields()) {
+    llvm::StringRef name = field.name;
+    const Type *t = field.type;
+    bool atomic = UnionLayout::isAtomType(t);
+    llvm::Value *value = nullptr;
+    if (t->isStringLiteral()) {
+      value = lowering_.builder_.getInt32(t->atom());
+    } else if (name == "code") {
+      value = lowering_.objectMaker().atomOf(t, load(SlotCode));
+    } else if (name == "message") {
+      value = load(SlotMessage);
+    } else if (name == "algorithm") {
+      value = load(SlotAlgorithm);
+    } else if (name == "length") {
+      value = load(SlotLength);
+    } else if (name == "expected") {
+      value =
+          atomic ? lowering_.objectMaker().atomOf(t, load(SlotExpectedKind)) : load(SlotExpected);
+    } else if (name == "got") {
+      value = lowering_.objectMaker().atomOf(t, load(SlotGot));
+    } else if (name == "parameter") {
+      value = load(SlotParameter);
+    } else if (name == "value") {
+      value = load(SlotValue);
+    } else if (name == "field") {
+      value = load(SlotField);
+    } else if (name == "format") {
+      value = lowering_.objectMaker().atomOf(t, load(SlotFormat));
+    } else if (name == "openssl") {
+      value = load(SlotOpenssl);
+    } else {
+      continue;
+    }
+    lowering_.builder_.CreateStore(
+        value, lowering_.objectLayouts().fieldAddress(object, variant, name, true));
+  }
+  const std::pair<unsigned, llvm::StringRef> texts[] = {{SlotAlgorithm, "algorithm"},
+                                                        {SlotParameter, "parameter"},
+                                                        {SlotField, "field"},
+                                                        {SlotOpenssl, "openssl"}};
+  for (const auto &[slot, name] : texts) {
+    if (!variant->field(name)) {
+      lowering_.refCounts().releaseValue(load(slot), Type::string());
+    }
+  }
+  lowering_.builder_.CreateRet(object);
+  lowering_.function_ = outer;
+  lowering_.builder_.restoreIP(point);
+
+  return function;
+}
+
+llvm::Function *CryptoLowerer::errorMaker(const Type *error) {
+  llvm::Function *&made = makers_[error];
+  if (made) {
+    return made;
+  }
+  llvm::Type *ptr = lowering_.builder_.getPtrTy(), *i32 = lowering_.builder_.getInt32Ty();
+  std::vector<const Type *> variants =
+      error->isUnion() ? std::vector<const Type *>(error->members().begin(), error->members().end())
+                       : std::vector<const Type *>{error};
+  std::vector<llvm::Function *> makers;
+  unsigned system = 0;
+  bool unknownCode = false;
+  for (size_t v = 0; v < variants.size(); ++v) {
+    makers.push_back(variantMaker(variants[v]));
+    for (const Type *literal : literalsOf(variants[v]->field("code")->type)) {
+      if (asciiOf(literal) == "UNKNOWN") {
+        system = unsigned(v);
+        unknownCode = true;
+      }
+    }
+  }
+  made = llvm::Function::Create(llvm::FunctionType::get(ptr, {ptr}, false),
+                                llvm::GlobalValue::InternalLinkage,
+                                "tz.make." + error->name().str(), lowering_.module_.get());
+  llvm::Function *function = made;
+  lowering_.functionBuilder().setFunctionAttributes(function);
+  llvm::IRBuilderBase::InsertPoint point = lowering_.builder_.saveIP();
+  llvm::Function *outer = std::exchange(lowering_.function_, function);
+  lowering_.builder_.SetInsertPoint(llvm::BasicBlock::Create(lowering_.ctx_, "entry", function));
+  llvm::Value *parts = function->getArg(0);
+  llvm::StructType *layout = partsType();
+  llvm::Value *codeAt = lowering_.builder_.CreateStructGEP(layout, parts, SlotCode);
+  llvm::Value *code = lowering_.builder_.CreateLoad(ptr, codeAt, "code");
+  lowering_.refCounts().releaseValue(
+      lowering_.builder_.CreateLoad(
+          lowering_.strTy_, lowering_.builder_.CreateStructGEP(layout, parts, SlotCodeText)),
+      Type::string());
+  llvm::FunctionCallee compare = lowering_.module_->getOrInsertFunction(
+      "strcmp", llvm::FunctionType::get(i32, {ptr, ptr}, false));
+  llvm::Value *index = llvm::ConstantInt::getSigned(i32, -1);
+  for (size_t v = 0; v < variants.size(); ++v) {
+    for (const Type *literal : literalsOf(variants[v]->field("code")->type)) {
+      llvm::Value *same = lowering_.builder_.CreateICmpEQ(
+          lowering_.builder_.CreateCall(
+              compare, {code, lowering_.stringLowerer().utf8Constant(asciiOf(literal))}),
+          lowering_.builder_.getInt32(0));
+      index =
+          lowering_.builder_.CreateSelect(same, lowering_.builder_.getInt32(unsigned(v)), index);
+    }
+  }
+  llvm::BasicBlock *unknown = llvm::BasicBlock::Create(lowering_.ctx_, "unknown", function);
+  llvm::SwitchInst *pick =
+      lowering_.builder_.CreateSwitch(index, unknown, unsigned(variants.size()));
+  for (size_t v = 0; v < variants.size(); ++v) {
+    llvm::BasicBlock *block = llvm::BasicBlock::Create(lowering_.ctx_, "variant", function);
+    pick->addCase(lowering_.builder_.getInt32(unsigned(v)), block);
+    lowering_.builder_.SetInsertPoint(block);
+    lowering_.builder_.CreateRet(lowering_.builder_.CreateCall(makers[v], {parts}));
+  }
+  lowering_.builder_.SetInsertPoint(unknown);
+  if (unknownCode) {
+    lowering_.builder_.CreateStore(lowering_.stringLowerer().utf8Constant("UNKNOWN"), codeAt);
+  }
+  lowering_.builder_.CreateRet(lowering_.builder_.CreateCall(makers[system], {parts}));
+  lowering_.function_ = outer;
+  lowering_.builder_.restoreIP(point);
+
+  return function;
+}
 
 void CryptoLowerer::useErrors(const Type *errorType) {
   llvm::Type *ptr = lowering_.builder_.getPtrTy();
   llvm::Value *maker = llvm::ConstantPointerNull::get(lowering_.builder_.getPtrTy());
-  if (errorType) {
+  if (errorType && CryptoErrorTypes::isCryptoError(errorType)) {
+    maker = errorMaker(errorType);
+  } else if (errorType) {
     maker = lowering_.resultLowerer().failureMaker(errorType);
   }
   lowering_.builder_.CreateCall(lowering_.processLowerer().processFunction(

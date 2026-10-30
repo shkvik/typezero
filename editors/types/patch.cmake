@@ -100,6 +100,16 @@ patch_types(${types_node}/stream/web.d.ts [[interface ReadableStream<R = any> {
         locked(): boolean;]])
 patch_types(${types_undici}/fetch.d.ts [[  readonly body: ReadableStream | null]]
             [[  body (): ReadableStream | null]])
+
+# A constructor of Response or Request takes no stream; a stream goes with
+# Response.stream or Request.stream (docs/net.md, section 3).
+patch_types(${types_undici}/fetch.d.ts [[  constructor (body?: BodyInit, init?: ResponseInit)]]
+            [[  constructor (body?: BodyData, init?: ResponseInit)
+  static stream (body: ReadableStream<Uint8Array> | undefined, init?: ResponseInit): Response]])
+patch_types(${types_undici}/fetch.d.ts [[  constructor (input: RequestInfo, init?: RequestInit)]]
+            [[  constructor (input: RequestInfo, init?: RequestOptions)
+  static stream (input: RequestInfo, body: ReadableStream<Uint8Array>,
+                 init?: RequestOptions): Request]])
 foreach(field "readableAborted: boolean" "readableDidRead: boolean"
               "readableEncoding: BufferEncoding | null" "readableEnded: boolean"
               "readableFlowing: boolean | null" "readableHighWaterMark: number"

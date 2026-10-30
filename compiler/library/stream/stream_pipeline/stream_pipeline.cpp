@@ -264,7 +264,7 @@ Expr *StreamPipeline::checkStreamFunction(CallExpr *call, FunctionDecl *decl, ll
     Expr *cb = checker_.argumentChecker().checkArg(call->args.back(), callback);
     call->args = {stream, opts, cb};
     std::vector<bool> given(3, true);
-    return checker_.eventTargetChecker().callLibraryStatic(call, streamClass, "eos", {}, given,
+    return checker_.eventTargetChecker().callLibraryStatic(call, streamClass, "eosFor", {}, given,
                                                            loc);
   }
   if (fn == "compose") {

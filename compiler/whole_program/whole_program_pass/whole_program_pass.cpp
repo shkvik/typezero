@@ -5,6 +5,7 @@
 #include "compiler/declare/module_declarer/module_declarer.h"
 #include "compiler/declare/prelude/prelude.h"
 #include "compiler/library/events/emitter_checker/emitter_checker.h"
+#include "compiler/library/fs/fs_checker/fs_checker.h"
 #include "compiler/library/reflect/reflect_checker/reflect_checker.h"
 #include "compiler/program/program/program.h"
 #include "compiler/whole_program/load_order/load_order.h"
@@ -36,7 +37,8 @@ Errors WholeProgramPass::run(Program &program) const {
     }
   }
   checker.popScope();
-  file.systemError = checker.prelude().builtinType("SystemError");
+  const Type *native = checker.fsChecker().nativeError();
+  file.nativeError = native->isError() ? nullptr : native;
   checker.classLinks().numberClasses();
   for (ClassDecl *cls : checker.classes_) {
     if ((cls->generic || (cls->expression && cls->type)) && cls->isEmitted()) {

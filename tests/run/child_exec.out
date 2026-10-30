@@ -2,17 +2,18 @@
 out
 true
 xtrue
-exit "Command failed: CHILD --child print o e 2\ne" 2 - <Buffer 6f> <Buffer 65> - - -
-exit "Command failed: CHILD --child print o  1" 1 - o  - - -
-exit "Command failed: CHILD --child print o bad\n 7\nbad\n" 7 - o bad
- - - -
-exit "Command failed: named SCRIPT --child print o e 1\ne" 1 - o e - - -
-ENOENT "spawnSync tz-no-such-program ENOENT" - - undefined undefined -4058 spawnSync tz-no-such-program 1
-exit "Command failed: exit 4" 4 - <Buffer > <Buffer > - - -
-exit "Command failed: echo failed 1>&2 && exit 3\nfailed  \n" 3 -  failed  
- - - -
-ETIMEDOUT "spawnSync EXE ETIMEDOUT" - SIGTERM <Buffer > <Buffer > -4039 spawnSync EXE 3
-ETIMEDOUT -4039 SIGTERM - true 4
+EXEC_FILE_BYTES_ERROR_EXIT ERR_NONZERO_EXIT | CHILD --child print o e 2 exited with code 2: e
+EXEC_FILE_TEXT_ERROR_EXIT ERR_NONZERO_EXIT | CHILD --child print o  1 exited with code 1
+EXEC_FILE_TEXT_ERROR_EXIT ERR_NONZERO_EXIT | CHILD --child print o bad
+ 7 exited with code 7: bad
+EXEC_FILE_TEXT_ERROR_EXIT ERR_NONZERO_EXIT | CHILD --child print o e 1 exited with code 1: e
+EXEC_FILE_BYTES_ERROR_PROGRAM_NOT_FOUND_IN_PATH ENOENT | could not run tz-no-such-program: there is no such program in PATH; install it or give the full path
+EXEC_BYTES_ERROR_EXIT ERR_NONZERO_EXIT | exit 4 exited with code 4
+EXEC_TEXT_ERROR_EXIT ERR_NONZERO_EXIT | echo failed 1>&2 && exit 3 exited with code 3: failed
+EXEC_FILE_BYTES_ERROR_TIMEOUT ETIMEDOUT | SCRIPT did not finish in 300 ms and was stopped
+ETIMEDOUT 300 SIGTERM 0
+ERR_NONZERO_EXIT 7 "o" "bad\nmore\n" 6
+tz-no-such-program [ 'a' ] spawn
 hello 
 world
 
@@ -23,7 +24,7 @@ hi
 injected
 
 ["hi & echo injected"]
-EINVAL -4071 spawnSync D\hello.bat EINVAL
+EXEC_FILE_BYTES_ERROR_BATCH_FILE_WITHOUT_SHELL EINVAL could not run D\hello.bat: it is a batch file; run it with execSync or pass { shell: true }
 from batch x
 from batch y
 ["a b","c"]

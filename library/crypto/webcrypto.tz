@@ -1,10 +1,27 @@
-import { createPrivateKey, createPublicKey, createSecretKey, KeyObject, randomBytes } from "node:crypto"
 import {
-  subtleAes, subtleAesKw, subtleDerive, subtleDigest, subtleGenerate, subtleHkdf, subtleHmac,
-  subtleHmacVerify, subtlePbkdf2, subtleRsaOaep, subtleSign, subtleVerify,
-} from "tz:intrinsics"
+  createPrivateKey,
+  createPublicKey,
+  createSecretKey,
+  KeyExportError,
+  KeyObject,
+  randomBytes,
+} from "node:crypto";
+import {
+  subtleAes,
+  subtleAesKw,
+  subtleDerive,
+  subtleDigest,
+  subtleGenerate,
+  subtleHkdf,
+  subtleHmac,
+  subtleHmacVerify,
+  subtlePbkdf2,
+  subtleRsaOaep,
+  subtleSign,
+  subtleVerify,
+} from "tz:intrinsics";
 
-export type KeyType = "public" | "private" | "secret"
+export type KeyType = "public" | "private" | "secret";
 export type KeyUsage =
   | "encrypt"
   | "decrypt"
@@ -13,8 +30,8 @@ export type KeyUsage =
   | "deriveKey"
   | "deriveBits"
   | "wrapKey"
-  | "unwrapKey"
-export type KeyFormat = "jwk" | "pkcs8" | "raw" | "spki"
+  | "unwrapKey";
+export type KeyFormat = "jwk" | "pkcs8" | "raw" | "spki";
 export type BufferSource =
   | ArrayBuffer
   | DataView
@@ -26,147 +43,147 @@ export type BufferSource =
   | Int32Array
   | Uint32Array
   | Float32Array
-  | Float64Array
-export type NamedCurve = string
-export type BigInteger = Uint8Array
+  | Float64Array;
+export type NamedCurve = string;
+export type BigInteger = Uint8Array;
 
 export interface Algorithm {
-  name: string
-  hash?: string | Algorithm
-  length?: double
-  namedCurve?: string
-  modulusLength?: double
-  publicExponent?: Uint8Array
-  iv?: BufferSource
-  additionalData?: BufferSource
-  tagLength?: double
-  counter?: BufferSource
-  saltLength?: double
-  label?: BufferSource
-  salt?: BufferSource
-  info?: BufferSource
-  iterations?: double
-  public?: CryptoKey
+  name: string;
+  hash?: string | Algorithm;
+  length?: double;
+  namedCurve?: string;
+  modulusLength?: double;
+  publicExponent?: Uint8Array;
+  iv?: BufferSource;
+  additionalData?: BufferSource;
+  tagLength?: double;
+  counter?: BufferSource;
+  saltLength?: double;
+  label?: BufferSource;
+  salt?: BufferSource;
+  info?: BufferSource;
+  iterations?: double;
+  public?: CryptoKey;
 }
 
-export type AlgorithmIdentifier = string | Algorithm
-export type HashAlgorithmIdentifier = string | Algorithm
-export type KeyAlgorithm = Algorithm
-export type AesKeyAlgorithm = Algorithm
-export type HmacKeyAlgorithm = Algorithm
-export type EcKeyAlgorithm = Algorithm
-export type RsaKeyAlgorithm = Algorithm
-export type RsaHashedKeyAlgorithm = Algorithm
-export type AesCbcParams = Algorithm
-export type AesCtrParams = Algorithm
-export type AesGcmParams = Algorithm
-export type AesKeyGenParams = Algorithm
-export type AesDerivedKeyParams = Algorithm
-export type HmacImportParams = Algorithm
-export type HmacKeyGenParams = Algorithm
-export type EcKeyGenParams = Algorithm
-export type EcKeyImportParams = Algorithm
-export type EcdsaParams = Algorithm
-export type EcdhKeyDeriveParams = Algorithm
-export type RsaKeyGenParams = Algorithm
-export type RsaHashedKeyGenParams = Algorithm
-export type RsaHashedImportParams = Algorithm
-export type RsaPssParams = Algorithm
-export type RsaOaepParams = Algorithm
-export type Pbkdf2Params = Algorithm
-export type HkdfParams = Algorithm
+export type AlgorithmIdentifier = string | Algorithm;
+export type HashAlgorithmIdentifier = string | Algorithm;
+export type KeyAlgorithm = Algorithm;
+export type AesKeyAlgorithm = Algorithm;
+export type HmacKeyAlgorithm = Algorithm;
+export type EcKeyAlgorithm = Algorithm;
+export type RsaKeyAlgorithm = Algorithm;
+export type RsaHashedKeyAlgorithm = Algorithm;
+export type AesCbcParams = Algorithm;
+export type AesCtrParams = Algorithm;
+export type AesGcmParams = Algorithm;
+export type AesKeyGenParams = Algorithm;
+export type AesDerivedKeyParams = Algorithm;
+export type HmacImportParams = Algorithm;
+export type HmacKeyGenParams = Algorithm;
+export type EcKeyGenParams = Algorithm;
+export type EcKeyImportParams = Algorithm;
+export type EcdsaParams = Algorithm;
+export type EcdhKeyDeriveParams = Algorithm;
+export type RsaKeyGenParams = Algorithm;
+export type RsaHashedKeyGenParams = Algorithm;
+export type RsaHashedImportParams = Algorithm;
+export type RsaPssParams = Algorithm;
+export type RsaOaepParams = Algorithm;
+export type Pbkdf2Params = Algorithm;
+export type HkdfParams = Algorithm;
 
 export interface RsaOtherPrimesInfo {
-  d?: string
-  r?: string
-  t?: string
+  d?: string;
+  r?: string;
+  t?: string;
 }
 
 export interface JsonWebKey {
-  alg?: string
-  crv?: string
-  d?: string
-  dp?: string
-  dq?: string
-  e?: string
-  ext?: boolean
-  k?: string
-  key_ops?: string[]
-  kty?: string
-  n?: string
-  oth?: RsaOtherPrimesInfo[]
-  p?: string
-  q?: string
-  qi?: string
-  use?: string
-  x?: string
-  y?: string
+  alg?: string;
+  crv?: string;
+  d?: string;
+  dp?: string;
+  dq?: string;
+  e?: string;
+  ext?: boolean;
+  k?: string;
+  key_ops?: string[];
+  kty?: string;
+  n?: string;
+  oth?: RsaOtherPrimesInfo[];
+  p?: string;
+  q?: string;
+  qi?: string;
+  use?: string;
+  x?: string;
+  y?: string;
 }
 
 export interface CryptoKeyPair {
-  publicKey: CryptoKey
-  privateKey: CryptoKey
+  publicKey: CryptoKey;
+  privateKey: CryptoKey;
 }
 
 export class CryptoKey {
-  readonly type: KeyType
-  readonly extractable: boolean
-  readonly algorithm: Algorithm
-  readonly usages: KeyUsage[]
-  private handle: KeyHandle
+  readonly type: KeyType;
+  readonly extractable: boolean;
+  readonly algorithm: Algorithm;
+  readonly usages: KeyUsage[];
+  private handle: KeyHandle;
 
   constructor(handle: KeyHandle, algorithm: Algorithm, extractable: boolean) {
-    this.handle = handle
-    this.type = handle.type
-    this.extractable = extractable
-    this.algorithm = algorithm
-    this.usages = [...handle.usages]
+    this.handle = handle;
+    this.type = handle.type;
+    this.extractable = extractable;
+    this.algorithm = algorithm;
+    this.usages = [...handle.usages];
   }
 
-  async sign(algorithm: AlgorithmIdentifier,
-             data: BufferSource): Promise<Result<ArrayBuffer, SubtleError>> {
-    const alg = normalize(algorithm, "sign")
-    if (alg.isErr()) return err(alg.error)
-    const handle = this.handle
-    if (!handle.usages.includes("sign") || alg.value.name != handle.name)
-      return err(invalidAccess("Unable to use this key to sign"))
-    return handle.sign(alg.value, data)
+  async sign(
+    algorithm: AlgorithmIdentifier,
+    data: BufferSource,
+  ): Promise<Result<ArrayBuffer, SubtleSignError>> {
+    const result = await this.signOrProblem(algorithm, data);
+
+    return signResult(result);
   }
 
-  async verify(algorithm: AlgorithmIdentifier, signature: BufferSource,
-               data: BufferSource): Promise<Result<boolean, SubtleError>> {
-    const alg = normalize(algorithm, "verify")
-    if (alg.isErr()) return err(alg.error)
-    const handle = this.handle
-    if (!handle.usages.includes("verify") || alg.value.name != handle.name)
-      return err(invalidAccess("Unable to use this key to verify"))
-    return handle.verify(alg.value, signature, data)
+  async verify(
+    algorithm: AlgorithmIdentifier,
+    signature: BufferSource,
+    data: BufferSource,
+  ): Promise<Result<boolean, SubtleVerifyError>> {
+    const result = await this.verifyOrProblem(algorithm, signature, data);
+
+    return verifyResult(result);
   }
 
-  async encrypt(algorithm: AlgorithmIdentifier,
-                data: BufferSource): Promise<Result<ArrayBuffer, SubtleError>> {
-    const alg = normalize(algorithm, "encrypt")
-    if (alg.isErr()) return err(alg.error)
-    return this.cipher(false, alg.value, data, "encrypt")
+  async encrypt(
+    algorithm: AlgorithmIdentifier,
+    data: BufferSource,
+  ): Promise<Result<ArrayBuffer, SubtleEncryptError>> {
+    const result = await this.encryptOrProblem(algorithm, data);
+
+    return encryptResult(result);
   }
 
-  async decrypt(algorithm: AlgorithmIdentifier,
-                data: BufferSource): Promise<Result<ArrayBuffer, SubtleError>> {
-    const alg = normalize(algorithm, "decrypt")
-    if (alg.isErr()) return err(alg.error)
-    return this.cipher(true, alg.value, data, "decrypt")
+  async decrypt(
+    algorithm: AlgorithmIdentifier,
+    data: BufferSource,
+  ): Promise<Result<ArrayBuffer, SubtleDecryptError>> {
+    const result = await this.decryptOrProblem(algorithm, data);
+
+    return decryptResult(result);
   }
 
-  async deriveBits(algorithm: AlgorithmIdentifier,
-                   length?: double): Promise<Result<ArrayBuffer, SubtleError>> {
-    const alg = normalize(algorithm, "deriveBits")
-    if (alg.isErr()) return err(alg.error)
-    const handle = this.handle
-    if (!handle.usages.includes("deriveBits"))
-      return err(invalidAccess("baseKey does not have deriveBits usage"))
-    if (handle.name != alg.value.name) return err(invalidAccess("Key algorithm mismatch"))
-    const bits = length == undefined ? undefined : unsignedLong(length)
-    return handle.deriveBits(alg.value, bits, alg.value.public?.handle)
+  async deriveBits(
+    algorithm: AlgorithmIdentifier,
+    length?: double,
+  ): Promise<Result<ArrayBuffer, SubtleDeriveBitsError>> {
+    const result = await this.deriveBitsOrProblem(algorithm, length);
+
+    return deriveBitsResult(result);
   }
 
   async deriveKey(
@@ -174,131 +191,804 @@ export class CryptoKey {
     derivedKeyAlgorithm: AlgorithmIdentifier,
     extractable: boolean,
     usages: KeyUsage[],
-  ): Promise<Result<CryptoKey, SubtleError>> {
-    const alg = normalize(algorithm, "deriveBits")
-    if (alg.isErr()) return err(alg.error)
-    const derived = normalize(derivedKeyAlgorithm, "importKey")
-    if (derived.isErr()) return err(derived.error)
-    const handle = this.handle
+  ): Promise<Result<CryptoKey, SubtleDeriveKeyError>> {
+    const result = await this.deriveKeyOrProblem(algorithm, derivedKeyAlgorithm, extractable, usages);
+
+    return deriveKeyResult(result);
+  }
+
+  async wrap(
+    format: KeyFormat,
+    key: CryptoKey,
+    algorithm: AlgorithmIdentifier,
+  ): Promise<Result<ArrayBuffer, SubtleWrapKeyError>> {
+    const result = await this.wrapOrProblem(format, key, algorithm);
+
+    return wrapKeyResult(result);
+  }
+
+  async unwrap(
+    format: KeyFormat,
+    wrappedKey: BufferSource,
+    algorithm: AlgorithmIdentifier,
+  ): Promise<Result<KeyData, SubtleUnwrapKeyError>> {
+    const result = await this.unwrapOrProblem(format, wrappedKey, algorithm);
+
+    return unwrapKeyResult(result);
+  }
+
+  async export(
+    format: KeyFormat,
+  ): Promise<Result<ArrayBuffer | JsonWebKey, SubtleExportKeyError>> {
+    const result = await this.exportOrProblem(format);
+
+    return exportKeyResult(result);
+  }
+  private async signOrProblem(
+    algorithm: AlgorithmIdentifier,
+    data: BufferSource,
+  ): Promise<Result<ArrayBuffer, Problem>> {
+    const alg = normalize(algorithm, "sign");
+    if (alg.isErr()) return err(alg.error);
+    const handle = this.handle;
+    if (!handle.usages.includes("sign") || alg.value.name != handle.name)
+      return err(invalidAccess("Unable to use this key to sign"));
+    return handle.sign(alg.value, data);
+  }
+
+  private async verifyOrProblem(
+    algorithm: AlgorithmIdentifier,
+    signature: BufferSource,
+    data: BufferSource,
+  ): Promise<Result<boolean, Problem>> {
+    const alg = normalize(algorithm, "verify");
+    if (alg.isErr()) return err(alg.error);
+    const handle = this.handle;
+    if (!handle.usages.includes("verify") || alg.value.name != handle.name)
+      return err(invalidAccess("Unable to use this key to verify"));
+    return handle.verify(alg.value, signature, data);
+  }
+
+  private async encryptOrProblem(
+    algorithm: AlgorithmIdentifier,
+    data: BufferSource,
+  ): Promise<Result<ArrayBuffer, Problem>> {
+    const alg = normalize(algorithm, "encrypt");
+    if (alg.isErr()) return err(alg.error);
+    return this.cipher(false, alg.value, data, "encrypt");
+  }
+
+  private async decryptOrProblem(
+    algorithm: AlgorithmIdentifier,
+    data: BufferSource,
+  ): Promise<Result<ArrayBuffer, Problem>> {
+    const alg = normalize(algorithm, "decrypt");
+    if (alg.isErr()) return err(alg.error);
+    return this.cipher(true, alg.value, data, "decrypt");
+  }
+
+  private async deriveBitsOrProblem(
+    algorithm: AlgorithmIdentifier,
+    length?: double,
+  ): Promise<Result<ArrayBuffer, Problem>> {
+    const alg = normalize(algorithm, "deriveBits");
+    if (alg.isErr()) return err(alg.error);
+    const handle = this.handle;
+    if (!handle.usages.includes("deriveBits"))
+      return err(invalidAccess("baseKey does not have deriveBits usage"));
+    if (handle.name != alg.value.name)
+      return err(invalidAccess("Key algorithm mismatch"));
+    const bits = length == undefined ? undefined : unsignedLong(length);
+    return handle.deriveBits(alg.value, bits, alg.value.public?.handle);
+  }
+
+  private async deriveKeyOrProblem(
+    algorithm: AlgorithmIdentifier,
+    derivedKeyAlgorithm: AlgorithmIdentifier,
+    extractable: boolean,
+    usages: KeyUsage[],
+  ): Promise<Result<CryptoKey, Problem>> {
+    const alg = normalize(algorithm, "deriveBits");
+    if (alg.isErr()) return err(alg.error);
+    const derived = normalize(derivedKeyAlgorithm, "importKey");
+    if (derived.isErr()) return err(derived.error);
+    const handle = this.handle;
     if (!handle.usages.includes("deriveKey"))
-      return err(invalidAccess("baseKey does not have deriveKey usage"))
-    if (handle.name != alg.value.name) return err(invalidAccess("Key algorithm mismatch"))
-    const length = keyLength(derivedKeyAlgorithm)
-    if (length.isErr()) return err(length.error)
-    const bits = await handle.deriveBits(alg.value, length.value, alg.value.public?.handle)
-    if (bits.isErr()) return err(bits.error)
-    return imported(importSecret("raw", bits.value, derived.value, extractable, usages),
-                    derived.value, "raw")
+      return err(invalidAccess("baseKey does not have deriveKey usage"));
+    if (handle.name != alg.value.name)
+      return err(invalidAccess("Key algorithm mismatch"));
+    const length = keyLength(derivedKeyAlgorithm);
+    if (length.isErr()) return err(length.error);
+    const bits = await handle.deriveBits(
+      alg.value,
+      length.value,
+      alg.value.public?.handle,
+    );
+    if (bits.isErr()) return err(bits.error);
+    return imported(
+      importSecret("raw", bits.value, derived.value, extractable, usages),
+      derived.value,
+      "raw",
+    );
   }
 
-  async wrap(format: KeyFormat, key: CryptoKey,
-             algorithm: AlgorithmIdentifier): Promise<Result<ArrayBuffer, SubtleError>> {
-    const alg = normalizeOr(algorithm, "wrapKey", "encrypt")
-    if (alg.isErr()) return err(alg.error)
-    const exported = key.exported(format)
-    if (exported.isErr()) return err(exported.error)
-    const data = exported.value
-    let bytes: Uint8Array
+  private async wrapOrProblem(
+    format: KeyFormat,
+    key: CryptoKey,
+    algorithm: AlgorithmIdentifier,
+  ): Promise<Result<ArrayBuffer, Problem>> {
+    const alg = normalizeOr(algorithm, "wrapKey", "encrypt");
+    if (alg.isErr()) return err(alg.error);
+    const exported = key.exported(format);
+    if (exported.isErr()) return err(exported.error);
+    const data = exported.value;
+    let bytes: Uint8Array;
     if (data instanceof ArrayBuffer) {
-      bytes = new Uint8Array(data)
+      bytes = new Uint8Array(data);
     } else {
-      let text = JSON.stringify(data)
+      let text = JSON.stringify(data);
       if (alg.value.name == "AES-KW" && text.length % 8 != 0)
-        text = text + " ".repeat(8 - (text.length % 8))
-      bytes = new TextEncoder().encode(text)
+        text = text + " ".repeat(8 - (text.length % 8));
+      bytes = new TextEncoder().encode(text);
     }
-    return this.cipher(false, alg.value, bytes, "wrapKey")
+    return this.cipher(false, alg.value, bytes, "wrapKey");
   }
 
-  async unwrap(format: KeyFormat, wrappedKey: BufferSource,
-               algorithm: AlgorithmIdentifier): Promise<Result<KeyData, SubtleError>> {
-    const alg = normalizeOr(algorithm, "unwrapKey", "decrypt")
-    if (alg.isErr()) return err(alg.error)
-    const bytes = await this.cipher(true, alg.value, wrappedKey, "unwrapKey")
-    if (bytes.isErr()) return err(bytes.error)
-    return unwrappedData(format, bytes.value)
+  private async unwrapOrProblem(
+    format: KeyFormat,
+    wrappedKey: BufferSource,
+    algorithm: AlgorithmIdentifier,
+  ): Promise<Result<KeyData, Problem>> {
+    const alg = normalizeOr(algorithm, "unwrapKey", "decrypt");
+    if (alg.isErr()) return err(alg.error);
+    const bytes = await this.cipher(true, alg.value, wrappedKey, "unwrapKey");
+    if (bytes.isErr()) return err(bytes.error);
+    return unwrappedData(format, bytes.value);
   }
 
-  async export(format: KeyFormat): Promise<Result<ArrayBuffer | JsonWebKey, SubtleError>> {
-    return this.exported(format)
+  private async exportOrProblem(
+    format: KeyFormat,
+  ): Promise<Result<ArrayBuffer | JsonWebKey, Problem>> {
+    return this.exported(format);
   }
 
-  private exported(format: KeyFormat): Result<ArrayBuffer | JsonWebKey, SubtleError> {
-    const handle = this.handle
+  private exported(
+    format: KeyFormat,
+  ): Result<ArrayBuffer | JsonWebKey, Problem> {
+    const handle = this.handle;
     if (normalize(handle.name, "exportKey").isErr())
-      return err(notSupported(`${handle.name} key export is not supported`))
-    if (!this.extractable) return err(invalidAccess("key is not extractable"))
+      return err(notSupported(`${handle.name} key export is not supported`));
+    if (!this.extractable) return err(invalidAccess("key is not extractable"));
     if (format == "jwk") {
-      const jwk = handle.exportJwk(this.extractable)
-      if (jwk.isErr()) return err(jwk.error)
-      const value = jwk.value
-      if (value != undefined) return ok(value)
+      const jwk = handle.exportJwk(this.extractable);
+      if (jwk.isErr()) return err(jwk.error);
+      const value = jwk.value;
+      if (value != undefined) return ok(value);
     } else {
-      let bytes: Result<ArrayBuffer | undefined, SubtleError> = ok(undefined)
-      if (format == "spki") bytes = handle.exportSpki()
-      else if (format == "pkcs8") bytes = handle.exportPkcs8()
-      else if (handle.type != "private") bytes = handle.exportRaw()
-      if (bytes.isErr()) return err(bytes.error)
-      const value = bytes.value
-      if (value != undefined) return ok(value)
+      let bytes: Result<ArrayBuffer | undefined, Problem> = ok(undefined);
+      if (format == "spki") bytes = handle.exportSpki();
+      else if (format == "pkcs8") bytes = handle.exportPkcs8();
+      else if (handle.type != "private") bytes = handle.exportRaw();
+      if (bytes.isErr()) return err(bytes.error);
+      const value = bytes.value;
+      if (value != undefined) return ok(value);
     }
-    return err(notSupported(
-      `Unable to export ${handle.name} ${handle.type} key using ${format} format`))
+    return err(
+      notSupported(
+        `Unable to export ${handle.name} ${handle.type} key using ${format} format`,
+      ),
+    );
   }
 
-  private async cipher(decrypt: boolean, algorithm: Algorithm, data: BufferSource,
-                       op: KeyUsage): Promise<Result<ArrayBuffer, SubtleError>> {
-    const handle = this.handle
+  private async cipher(
+    decrypt: boolean,
+    algorithm: Algorithm,
+    data: BufferSource,
+    op: KeyUsage,
+  ): Promise<Result<ArrayBuffer, Problem>> {
+    const handle = this.handle;
     if (handle.name != algorithm.name || !handle.usages.includes(op))
-      return err(invalidAccess("The requested operation is not valid for the provided key"))
+      return err(
+        invalidAccess(
+          "The requested operation is not valid for the provided key",
+        ),
+      );
     switch (algorithm.name) {
       case "RSA-OAEP":
       case "AES-CTR":
       case "AES-CBC":
       case "AES-GCM":
-        return handle.cipher(algorithm, data, decrypt)
+        return handle.cipher(algorithm, data, decrypt);
       case "AES-KW":
-        if (op == "wrapKey" || op == "unwrapKey") return handle.wrap(data, decrypt)
+        if (op == "wrapKey" || op == "unwrapKey")
+          return handle.wrap(data, decrypt);
     }
-    return err(notSupported(kUnrecognized))
+    return err(notSupported(kUnrecognized));
   }
 }
 
-const kFailed = "The operation failed for an operation-specific reason"
+const kFailed = "The operation failed for an operation-specific reason";
 
-function failed(): SubtleError {
-  return { kind: "SUBTLE", code: "ERR_OPERATION_FAILED", message: kFailed }
+type Problem =
+  | { reason: "UNSUPPORTED_ALGORITHM"; code: "ERR_NOT_SUPPORTED"; message: string }
+  | {
+      reason: "WRONG_PARAMETERS";
+      code: "ERR_OPERATION_FAILED" | "ERR_INVALID_ARG_TYPE";
+      message: string;
+    }
+  | { reason: "WRONG_KEY"; code: "ERR_INVALID_ACCESS"; message: string }
+  | { reason: "WRONG_USAGE"; code: "ERR_INVALID_KEY_USAGE"; message: string }
+  | { reason: "NOT_A_KEY"; code: "ERR_INVALID_DATA"; message: string }
+  | { reason: "DECRYPTION_FAILED"; code: "ERR_OPERATION_FAILED"; message: string }
+  | { reason: "SYSTEM"; code: "ERR_OPERATION_FAILED"; message: string };
+
+function failed(): Problem {
+  return { reason: "SYSTEM", code: "ERR_OPERATION_FAILED", message: kFailed };
 }
 
-function operationError(message: string): SubtleError {
-  return { kind: "SUBTLE", code: "ERR_OPERATION_FAILED", message }
+function systemError(message: string): Problem {
+  return { reason: "SYSTEM", code: "ERR_OPERATION_FAILED", message };
 }
 
-function notSupported(message: string): SubtleError {
-  return { kind: "SUBTLE", code: "ERR_NOT_SUPPORTED", message }
+function decryptionFailed(message: string): Problem {
+  return { reason: "DECRYPTION_FAILED", code: "ERR_OPERATION_FAILED", message };
 }
 
-function dataError(message: string): SubtleError {
-  return { kind: "SUBTLE", code: "ERR_INVALID_DATA", message }
+function cipherFailed(decrypt: boolean): Problem {
+  if (decrypt) {
+    return decryptionFailed(kFailed);
+  }
+
+  return failed();
 }
 
-function syntaxError(message: string): SubtleError {
-  return { kind: "SUBTLE", code: "ERR_INVALID_KEY_USAGE", message }
+function parametersFailed(): Problem {
+  return { reason: "WRONG_PARAMETERS", code: "ERR_OPERATION_FAILED", message: kFailed };
 }
 
-function invalidAccess(message: string): SubtleError {
-  return { kind: "SUBTLE", code: "ERR_INVALID_ACCESS", message }
+function operationError(message: string): Problem {
+  return { reason: "WRONG_PARAMETERS", code: "ERR_OPERATION_FAILED", message };
 }
 
-function typeError(message: string): SubtleError {
-  return { kind: "SUBTLE", code: "ERR_INVALID_ARG_TYPE", message }
+function notSupported(message: string): Problem {
+  return { reason: "UNSUPPORTED_ALGORITHM", code: "ERR_NOT_SUPPORTED", message };
 }
 
+function dataError(message: string): Problem {
+  return { reason: "NOT_A_KEY", code: "ERR_INVALID_DATA", message };
+}
+
+function syntaxError(message: string): Problem {
+  return { reason: "WRONG_USAGE", code: "ERR_INVALID_KEY_USAGE", message };
+}
+
+function invalidAccess(message: string): Problem {
+  return { reason: "WRONG_KEY", code: "ERR_INVALID_ACCESS", message };
+}
+
+function typeError(message: string): Problem {
+  return { reason: "WRONG_PARAMETERS", code: "ERR_INVALID_ARG_TYPE", message };
+}
+
+function digestError(problem: Problem): SubtleDigestError {
+  if (problem.reason == "UNSUPPORTED_ALGORITHM") {
+    return {
+      kind: "SUBTLE_DIGEST_ERROR_UNSUPPORTED_ALGORITHM",
+      code: problem.code,
+      message: problem.message,
+    };
+  }
+  if (problem.reason == "WRONG_PARAMETERS") {
+    return {
+      kind: "SUBTLE_DIGEST_ERROR_WRONG_PARAMETERS",
+      code: problem.code,
+      message: problem.message,
+    };
+  }
+
+  return {
+    kind: "SUBTLE_DIGEST_ERROR_SYSTEM",
+    code: "ERR_OPERATION_FAILED",
+    message: problem.message,
+  };
+}
+
+function digestResult<T>(result: Result<T, Problem>): Result<T, SubtleDigestError> {
+  if (result.isErr()) {
+    const error = digestError(result.error);
+
+    return err(error);
+  }
+
+  return ok(result.value);
+}
+
+function generateKeyError(problem: Problem): SubtleGenerateKeyError {
+  if (problem.reason == "UNSUPPORTED_ALGORITHM") {
+    return {
+      kind: "SUBTLE_GENERATE_KEY_ERROR_UNSUPPORTED_ALGORITHM",
+      code: problem.code,
+      message: problem.message,
+    };
+  }
+  if (problem.reason == "WRONG_PARAMETERS") {
+    return {
+      kind: "SUBTLE_GENERATE_KEY_ERROR_WRONG_PARAMETERS",
+      code: problem.code,
+      message: problem.message,
+    };
+  }
+  if (problem.reason == "WRONG_USAGE") {
+    return {
+      kind: "SUBTLE_GENERATE_KEY_ERROR_WRONG_USAGE",
+      code: problem.code,
+      message: problem.message,
+    };
+  }
+
+  return {
+    kind: "SUBTLE_GENERATE_KEY_ERROR_SYSTEM",
+    code: "ERR_OPERATION_FAILED",
+    message: problem.message,
+  };
+}
+
+function generateKeyResult<T>(result: Result<T, Problem>): Result<T, SubtleGenerateKeyError> {
+  if (result.isErr()) {
+    const error = generateKeyError(result.error);
+
+    return err(error);
+  }
+
+  return ok(result.value);
+}
+
+function importKeyError(problem: Problem): SubtleImportKeyError {
+  if (problem.reason == "UNSUPPORTED_ALGORITHM") {
+    return {
+      kind: "SUBTLE_IMPORT_KEY_ERROR_UNSUPPORTED_ALGORITHM",
+      code: problem.code,
+      message: problem.message,
+    };
+  }
+  if (problem.reason == "WRONG_PARAMETERS") {
+    return {
+      kind: "SUBTLE_IMPORT_KEY_ERROR_WRONG_PARAMETERS",
+      code: problem.code,
+      message: problem.message,
+    };
+  }
+  if (problem.reason == "WRONG_USAGE") {
+    return {
+      kind: "SUBTLE_IMPORT_KEY_ERROR_WRONG_USAGE",
+      code: problem.code,
+      message: problem.message,
+    };
+  }
+  if (problem.reason == "NOT_A_KEY") {
+    return {
+      kind: "SUBTLE_IMPORT_KEY_ERROR_NOT_A_KEY",
+      code: problem.code,
+      message: problem.message,
+    };
+  }
+
+  return {
+    kind: "SUBTLE_IMPORT_KEY_ERROR_SYSTEM",
+    code: "ERR_OPERATION_FAILED",
+    message: problem.message,
+  };
+}
+
+function importKeyResult<T>(result: Result<T, Problem>): Result<T, SubtleImportKeyError> {
+  if (result.isErr()) {
+    const error = importKeyError(result.error);
+
+    return err(error);
+  }
+
+  return ok(result.value);
+}
+
+function exportKeyError(problem: Problem): SubtleExportKeyError {
+  if (problem.reason == "UNSUPPORTED_ALGORITHM") {
+    return {
+      kind: "SUBTLE_EXPORT_KEY_ERROR_UNSUPPORTED_ALGORITHM",
+      code: problem.code,
+      message: problem.message,
+    };
+  }
+  if (problem.reason == "WRONG_KEY") {
+    return {
+      kind: "SUBTLE_EXPORT_KEY_ERROR_WRONG_KEY",
+      code: problem.code,
+      message: problem.message,
+    };
+  }
+
+  return {
+    kind: "SUBTLE_EXPORT_KEY_ERROR_SYSTEM",
+    code: "ERR_OPERATION_FAILED",
+    message: problem.message,
+  };
+}
+
+function exportKeyResult<T>(result: Result<T, Problem>): Result<T, SubtleExportKeyError> {
+  if (result.isErr()) {
+    const error = exportKeyError(result.error);
+
+    return err(error);
+  }
+
+  return ok(result.value);
+}
+
+function signError(problem: Problem): SubtleSignError {
+  if (problem.reason == "UNSUPPORTED_ALGORITHM") {
+    return {
+      kind: "SUBTLE_SIGN_ERROR_UNSUPPORTED_ALGORITHM",
+      code: problem.code,
+      message: problem.message,
+    };
+  }
+  if (problem.reason == "WRONG_PARAMETERS") {
+    return {
+      kind: "SUBTLE_SIGN_ERROR_WRONG_PARAMETERS",
+      code: problem.code,
+      message: problem.message,
+    };
+  }
+  if (problem.reason == "WRONG_KEY") {
+    return {
+      kind: "SUBTLE_SIGN_ERROR_WRONG_KEY",
+      code: problem.code,
+      message: problem.message,
+    };
+  }
+
+  return {
+    kind: "SUBTLE_SIGN_ERROR_SYSTEM",
+    code: "ERR_OPERATION_FAILED",
+    message: problem.message,
+  };
+}
+
+function signResult<T>(result: Result<T, Problem>): Result<T, SubtleSignError> {
+  if (result.isErr()) {
+    const error = signError(result.error);
+
+    return err(error);
+  }
+
+  return ok(result.value);
+}
+
+function verifyError(problem: Problem): SubtleVerifyError {
+  if (problem.reason == "UNSUPPORTED_ALGORITHM") {
+    return {
+      kind: "SUBTLE_VERIFY_ERROR_UNSUPPORTED_ALGORITHM",
+      code: problem.code,
+      message: problem.message,
+    };
+  }
+  if (problem.reason == "WRONG_PARAMETERS") {
+    return {
+      kind: "SUBTLE_VERIFY_ERROR_WRONG_PARAMETERS",
+      code: problem.code,
+      message: problem.message,
+    };
+  }
+  if (problem.reason == "WRONG_KEY") {
+    return {
+      kind: "SUBTLE_VERIFY_ERROR_WRONG_KEY",
+      code: problem.code,
+      message: problem.message,
+    };
+  }
+
+  return {
+    kind: "SUBTLE_VERIFY_ERROR_SYSTEM",
+    code: "ERR_OPERATION_FAILED",
+    message: problem.message,
+  };
+}
+
+function verifyResult<T>(result: Result<T, Problem>): Result<T, SubtleVerifyError> {
+  if (result.isErr()) {
+    const error = verifyError(result.error);
+
+    return err(error);
+  }
+
+  return ok(result.value);
+}
+
+function encryptError(problem: Problem): SubtleEncryptError {
+  if (problem.reason == "UNSUPPORTED_ALGORITHM") {
+    return {
+      kind: "SUBTLE_ENCRYPT_ERROR_UNSUPPORTED_ALGORITHM",
+      code: problem.code,
+      message: problem.message,
+    };
+  }
+  if (problem.reason == "WRONG_PARAMETERS") {
+    return {
+      kind: "SUBTLE_ENCRYPT_ERROR_WRONG_PARAMETERS",
+      code: problem.code,
+      message: problem.message,
+    };
+  }
+  if (problem.reason == "WRONG_KEY") {
+    return {
+      kind: "SUBTLE_ENCRYPT_ERROR_WRONG_KEY",
+      code: problem.code,
+      message: problem.message,
+    };
+  }
+
+  return {
+    kind: "SUBTLE_ENCRYPT_ERROR_SYSTEM",
+    code: "ERR_OPERATION_FAILED",
+    message: problem.message,
+  };
+}
+
+function encryptResult<T>(result: Result<T, Problem>): Result<T, SubtleEncryptError> {
+  if (result.isErr()) {
+    const error = encryptError(result.error);
+
+    return err(error);
+  }
+
+  return ok(result.value);
+}
+
+function decryptError(problem: Problem): SubtleDecryptError {
+  if (problem.reason == "UNSUPPORTED_ALGORITHM") {
+    return {
+      kind: "SUBTLE_DECRYPT_ERROR_UNSUPPORTED_ALGORITHM",
+      code: problem.code,
+      message: problem.message,
+    };
+  }
+  if (problem.reason == "WRONG_PARAMETERS") {
+    return {
+      kind: "SUBTLE_DECRYPT_ERROR_WRONG_PARAMETERS",
+      code: problem.code,
+      message: problem.message,
+    };
+  }
+  if (problem.reason == "WRONG_KEY") {
+    return {
+      kind: "SUBTLE_DECRYPT_ERROR_WRONG_KEY",
+      code: problem.code,
+      message: problem.message,
+    };
+  }
+  if (problem.reason == "DECRYPTION_FAILED") {
+    return {
+      kind: "SUBTLE_DECRYPT_ERROR_DECRYPTION_FAILED",
+      code: problem.code,
+      message: problem.message,
+    };
+  }
+
+  return {
+    kind: "SUBTLE_DECRYPT_ERROR_SYSTEM",
+    code: "ERR_OPERATION_FAILED",
+    message: problem.message,
+  };
+}
+
+function decryptResult<T>(result: Result<T, Problem>): Result<T, SubtleDecryptError> {
+  if (result.isErr()) {
+    const error = decryptError(result.error);
+
+    return err(error);
+  }
+
+  return ok(result.value);
+}
+
+function deriveBitsError(problem: Problem): SubtleDeriveBitsError {
+  if (problem.reason == "UNSUPPORTED_ALGORITHM") {
+    return {
+      kind: "SUBTLE_DERIVE_BITS_ERROR_UNSUPPORTED_ALGORITHM",
+      code: problem.code,
+      message: problem.message,
+    };
+  }
+  if (problem.reason == "WRONG_PARAMETERS") {
+    return {
+      kind: "SUBTLE_DERIVE_BITS_ERROR_WRONG_PARAMETERS",
+      code: problem.code,
+      message: problem.message,
+    };
+  }
+  if (problem.reason == "WRONG_KEY") {
+    return {
+      kind: "SUBTLE_DERIVE_BITS_ERROR_WRONG_KEY",
+      code: problem.code,
+      message: problem.message,
+    };
+  }
+
+  return {
+    kind: "SUBTLE_DERIVE_BITS_ERROR_SYSTEM",
+    code: "ERR_OPERATION_FAILED",
+    message: problem.message,
+  };
+}
+
+function deriveBitsResult<T>(result: Result<T, Problem>): Result<T, SubtleDeriveBitsError> {
+  if (result.isErr()) {
+    const error = deriveBitsError(result.error);
+
+    return err(error);
+  }
+
+  return ok(result.value);
+}
+
+function deriveKeyError(problem: Problem): SubtleDeriveKeyError {
+  if (problem.reason == "UNSUPPORTED_ALGORITHM") {
+    return {
+      kind: "SUBTLE_DERIVE_KEY_ERROR_UNSUPPORTED_ALGORITHM",
+      code: problem.code,
+      message: problem.message,
+    };
+  }
+  if (problem.reason == "WRONG_PARAMETERS") {
+    return {
+      kind: "SUBTLE_DERIVE_KEY_ERROR_WRONG_PARAMETERS",
+      code: problem.code,
+      message: problem.message,
+    };
+  }
+  if (problem.reason == "WRONG_KEY") {
+    return {
+      kind: "SUBTLE_DERIVE_KEY_ERROR_WRONG_KEY",
+      code: problem.code,
+      message: problem.message,
+    };
+  }
+  if (problem.reason == "WRONG_USAGE") {
+    return {
+      kind: "SUBTLE_DERIVE_KEY_ERROR_WRONG_USAGE",
+      code: problem.code,
+      message: problem.message,
+    };
+  }
+  if (problem.reason == "NOT_A_KEY") {
+    return {
+      kind: "SUBTLE_DERIVE_KEY_ERROR_NOT_A_KEY",
+      code: problem.code,
+      message: problem.message,
+    };
+  }
+
+  return {
+    kind: "SUBTLE_DERIVE_KEY_ERROR_SYSTEM",
+    code: "ERR_OPERATION_FAILED",
+    message: problem.message,
+  };
+}
+
+function deriveKeyResult<T>(result: Result<T, Problem>): Result<T, SubtleDeriveKeyError> {
+  if (result.isErr()) {
+    const error = deriveKeyError(result.error);
+
+    return err(error);
+  }
+
+  return ok(result.value);
+}
+
+function wrapKeyError(problem: Problem): SubtleWrapKeyError {
+  if (problem.reason == "UNSUPPORTED_ALGORITHM") {
+    return {
+      kind: "SUBTLE_WRAP_KEY_ERROR_UNSUPPORTED_ALGORITHM",
+      code: problem.code,
+      message: problem.message,
+    };
+  }
+  if (problem.reason == "WRONG_PARAMETERS") {
+    return {
+      kind: "SUBTLE_WRAP_KEY_ERROR_WRONG_PARAMETERS",
+      code: problem.code,
+      message: problem.message,
+    };
+  }
+  if (problem.reason == "WRONG_KEY") {
+    return {
+      kind: "SUBTLE_WRAP_KEY_ERROR_WRONG_KEY",
+      code: problem.code,
+      message: problem.message,
+    };
+  }
+
+  return {
+    kind: "SUBTLE_WRAP_KEY_ERROR_SYSTEM",
+    code: "ERR_OPERATION_FAILED",
+    message: problem.message,
+  };
+}
+
+function wrapKeyResult<T>(result: Result<T, Problem>): Result<T, SubtleWrapKeyError> {
+  if (result.isErr()) {
+    const error = wrapKeyError(result.error);
+
+    return err(error);
+  }
+
+  return ok(result.value);
+}
+
+function unwrapKeyError(problem: Problem): SubtleUnwrapKeyError {
+  if (problem.reason == "UNSUPPORTED_ALGORITHM") {
+    return {
+      kind: "SUBTLE_UNWRAP_KEY_ERROR_UNSUPPORTED_ALGORITHM",
+      code: problem.code,
+      message: problem.message,
+    };
+  }
+  if (problem.reason == "WRONG_PARAMETERS") {
+    return {
+      kind: "SUBTLE_UNWRAP_KEY_ERROR_WRONG_PARAMETERS",
+      code: problem.code,
+      message: problem.message,
+    };
+  }
+  if (problem.reason == "WRONG_KEY") {
+    return {
+      kind: "SUBTLE_UNWRAP_KEY_ERROR_WRONG_KEY",
+      code: problem.code,
+      message: problem.message,
+    };
+  }
+  if (problem.reason == "WRONG_USAGE") {
+    return {
+      kind: "SUBTLE_UNWRAP_KEY_ERROR_WRONG_USAGE",
+      code: problem.code,
+      message: problem.message,
+    };
+  }
+  if (problem.reason == "NOT_A_KEY") {
+    return {
+      kind: "SUBTLE_UNWRAP_KEY_ERROR_NOT_A_KEY",
+      code: problem.code,
+      message: problem.message,
+    };
+  }
+  if (problem.reason == "DECRYPTION_FAILED") {
+    return {
+      kind: "SUBTLE_UNWRAP_KEY_ERROR_DECRYPTION_FAILED",
+      code: problem.code,
+      message: problem.message,
+    };
+  }
+
+  return {
+    kind: "SUBTLE_UNWRAP_KEY_ERROR_SYSTEM",
+    code: "ERR_OPERATION_FAILED",
+    message: problem.message,
+  };
+}
+
+function unwrapKeyResult<T>(result: Result<T, Problem>): Result<T, SubtleUnwrapKeyError> {
+  if (result.isErr()) {
+    const error = unwrapKeyError(result.error);
+
+    return err(error);
+  }
+
+  return ok(result.value);
+}
 class JwkFailure {
-  constructor(readonly error: SubtleError) {}
+  constructor(readonly error: Problem) {}
 }
 
-type KeyData = BufferSource | JsonWebKey | JwkFailure
+type KeyData = BufferSource | JsonWebKey | JwkFailure;
 
 type Importer = (
   format: KeyFormat,
@@ -306,435 +996,562 @@ type Importer = (
   algorithm: Algorithm,
   extractable: boolean,
   usages: KeyUsage[],
-) => Result<CryptoKey | undefined, SubtleError>
+) => Result<CryptoKey | undefined, Problem>;
 
-const kUnrecognized = "Unrecognized algorithm name"
+const kUnrecognized = "Unrecognized algorithm name";
 
 function bytesOf(data: BufferSource): Uint8Array {
-  if (data instanceof ArrayBuffer) return new Uint8Array(data)
-  if (data instanceof Uint8Array) return data
-  if (data instanceof DataView) return new Uint8Array(data.buffer, data.byteOffset, data.byteLength)
-  if (data instanceof Int8Array) return new Uint8Array(data.buffer, data.byteOffset, data.byteLength)
+  if (data instanceof ArrayBuffer) return new Uint8Array(data);
+  if (data instanceof Uint8Array) return data;
+  if (data instanceof DataView)
+    return new Uint8Array(data.buffer, data.byteOffset, data.byteLength);
+  if (data instanceof Int8Array)
+    return new Uint8Array(data.buffer, data.byteOffset, data.byteLength);
   if (data instanceof Uint8ClampedArray)
-    return new Uint8Array(data.buffer, data.byteOffset, data.byteLength)
-  if (data instanceof Int16Array) return new Uint8Array(data.buffer, data.byteOffset, data.byteLength)
+    return new Uint8Array(data.buffer, data.byteOffset, data.byteLength);
+  if (data instanceof Int16Array)
+    return new Uint8Array(data.buffer, data.byteOffset, data.byteLength);
   if (data instanceof Uint16Array)
-    return new Uint8Array(data.buffer, data.byteOffset, data.byteLength)
-  if (data instanceof Int32Array) return new Uint8Array(data.buffer, data.byteOffset, data.byteLength)
+    return new Uint8Array(data.buffer, data.byteOffset, data.byteLength);
+  if (data instanceof Int32Array)
+    return new Uint8Array(data.buffer, data.byteOffset, data.byteLength);
   if (data instanceof Uint32Array)
-    return new Uint8Array(data.buffer, data.byteOffset, data.byteLength)
+    return new Uint8Array(data.buffer, data.byteOffset, data.byteLength);
   if (data instanceof Float32Array)
-    return new Uint8Array(data.buffer, data.byteOffset, data.byteLength)
-  return new Uint8Array(data.buffer, data.byteOffset, data.byteLength)
+    return new Uint8Array(data.buffer, data.byteOffset, data.byteLength);
+  return new Uint8Array(data.buffer, data.byteOffset, data.byteLength);
 }
 
 function arrayBufferOf(bytes: Uint8Array): ArrayBuffer {
-  const out = new ArrayBuffer(bytes.length)
-  new Uint8Array(out).set(bytes)
-  return out
+  const out = new ArrayBuffer(bytes.length);
+  new Uint8Array(out).set(bytes);
+  return out;
 }
 
 function concat(parts: Uint8Array[]): Uint8Array {
-  let length = 0
-  for (const p of parts) length += p.length
-  const out = new Uint8Array(length)
-  let at = 0
+  let length = 0;
+  for (const p of parts) length += p.length;
+  const out = new Uint8Array(length);
+  let at = 0;
   for (const p of parts) {
-    out.set(p, at)
-    at += p.length
+    out.set(p, at);
+    at += p.length;
   }
-  return out
+  return out;
 }
 
 function base64url(text: string): Uint8Array {
-  return new Uint8Array(Buffer.from(text, "base64url"))
+  return new Uint8Array(Buffer.from(text, "base64url"));
 }
 
-const kNoBytes = new Uint8Array(0)
+const kNoBytes = new Uint8Array(0);
 
 function algorithmsOf(op: string): string[] {
   switch (op) {
     case "digest":
-      return ["SHA-1", "SHA-256", "SHA-384", "SHA-512"]
+      return ["SHA-1", "SHA-256", "SHA-384", "SHA-512"];
     case "generateKey":
       return [
-        "AES-CBC", "AES-CTR", "AES-GCM", "AES-KW", "ECDH", "ECDSA", "Ed25519", "HMAC", "RSA-OAEP",
-        "RSA-PSS", "RSASSA-PKCS1-v1_5", "X25519",
-      ]
+        "AES-CBC",
+        "AES-CTR",
+        "AES-GCM",
+        "AES-KW",
+        "ECDH",
+        "ECDSA",
+        "Ed25519",
+        "HMAC",
+        "RSA-OAEP",
+        "RSA-PSS",
+        "RSASSA-PKCS1-v1_5",
+        "X25519",
+      ];
     case "exportKey":
       return [
-        "AES-CBC", "AES-CTR", "AES-GCM", "AES-KW", "ECDH", "ECDSA", "Ed25519", "HMAC", "RSA-OAEP",
-        "RSA-PSS", "RSASSA-PKCS1-v1_5", "X25519",
-      ]
+        "AES-CBC",
+        "AES-CTR",
+        "AES-GCM",
+        "AES-KW",
+        "ECDH",
+        "ECDSA",
+        "Ed25519",
+        "HMAC",
+        "RSA-OAEP",
+        "RSA-PSS",
+        "RSASSA-PKCS1-v1_5",
+        "X25519",
+      ];
     case "importKey":
       return [
-        "AES-CBC", "AES-CTR", "AES-GCM", "AES-KW", "ECDH", "ECDSA", "Ed25519", "HKDF", "HMAC",
-        "PBKDF2", "RSA-OAEP", "RSA-PSS", "RSASSA-PKCS1-v1_5", "X25519",
-      ]
+        "AES-CBC",
+        "AES-CTR",
+        "AES-GCM",
+        "AES-KW",
+        "ECDH",
+        "ECDSA",
+        "Ed25519",
+        "HKDF",
+        "HMAC",
+        "PBKDF2",
+        "RSA-OAEP",
+        "RSA-PSS",
+        "RSASSA-PKCS1-v1_5",
+        "X25519",
+      ];
     case "encrypt":
     case "decrypt":
-      return ["AES-CBC", "AES-CTR", "AES-GCM", "RSA-OAEP"]
+      return ["AES-CBC", "AES-CTR", "AES-GCM", "RSA-OAEP"];
     case "sign":
     case "verify":
-      return ["ECDSA", "Ed25519", "HMAC", "RSA-PSS", "RSASSA-PKCS1-v1_5"]
+      return ["ECDSA", "Ed25519", "HMAC", "RSA-PSS", "RSASSA-PKCS1-v1_5"];
     case "deriveBits":
-      return ["ECDH", "HKDF", "PBKDF2", "X25519"]
+      return ["ECDH", "HKDF", "PBKDF2", "X25519"];
     case "wrapKey":
     case "unwrapKey":
-      return ["AES-KW"]
+      return ["AES-KW"];
     case "get key length":
-      return ["AES-CBC", "AES-CTR", "AES-GCM", "AES-KW", "HKDF", "HMAC", "PBKDF2"]
+      return [
+        "AES-CBC",
+        "AES-CTR",
+        "AES-GCM",
+        "AES-KW",
+        "HKDF",
+        "HMAC",
+        "PBKDF2",
+      ];
   }
-  return []
+  return [];
 }
 
 function dictionaryOf(op: string, name: string): string {
-  const aes = name.startsWith("AES-")
+  const aes = name.startsWith("AES-");
   switch (op) {
     case "generateKey":
-      if (aes) return "AesKeyGenParams"
-      if (name == "ECDH" || name == "ECDSA") return "EcKeyGenParams"
-      if (name == "HMAC") return "HmacKeyGenParams"
-      if (name.startsWith("RSA")) return "RsaHashedKeyGenParams"
-      return ""
+      if (aes) return "AesKeyGenParams";
+      if (name == "ECDH" || name == "ECDSA") return "EcKeyGenParams";
+      if (name == "HMAC") return "HmacKeyGenParams";
+      if (name.startsWith("RSA")) return "RsaHashedKeyGenParams";
+      return "";
     case "importKey":
-      if (name == "ECDH" || name == "ECDSA") return "EcKeyImportParams"
-      if (name == "HMAC") return "HmacImportParams"
-      if (name.startsWith("RSA")) return "RsaHashedImportParams"
-      return ""
+      if (name == "ECDH" || name == "ECDSA") return "EcKeyImportParams";
+      if (name == "HMAC") return "HmacImportParams";
+      if (name.startsWith("RSA")) return "RsaHashedImportParams";
+      return "";
     case "encrypt":
     case "decrypt":
-      if (name == "AES-CBC") return "AesCbcParams"
-      if (name == "AES-CTR") return "AesCtrParams"
-      if (name == "AES-GCM") return "AeadParams"
-      return "RsaOaepParams"
+      if (name == "AES-CBC") return "AesCbcParams";
+      if (name == "AES-CTR") return "AesCtrParams";
+      if (name == "AES-GCM") return "AeadParams";
+      return "RsaOaepParams";
     case "sign":
     case "verify":
-      if (name == "ECDSA") return "EcdsaParams"
-      if (name == "RSA-PSS") return "RsaPssParams"
-      return ""
+      if (name == "ECDSA") return "EcdsaParams";
+      if (name == "RSA-PSS") return "RsaPssParams";
+      return "";
     case "deriveBits":
-      if (name == "HKDF") return "HkdfParams"
-      if (name == "PBKDF2") return "Pbkdf2Params"
-      return "EcdhKeyDeriveParams"
+      if (name == "HKDF") return "HkdfParams";
+      if (name == "PBKDF2") return "Pbkdf2Params";
+      return "EcdhKeyDeriveParams";
     case "get key length":
-      if (aes) return "AesDerivedKeyParams"
-      if (name == "HMAC") return "HmacImportParams"
-      return ""
+      if (aes) return "AesDerivedKeyParams";
+      if (name == "HMAC") return "HmacImportParams";
+      return "";
   }
-  return ""
+  return "";
 }
 
-const kPrefix = "Failed to normalize algorithm"
+const kPrefix = "Failed to normalize algorithm";
 
-function required(dictionary: string, member: string): SubtleError {
+function required(dictionary: string, member: string): Problem {
   return typeError(
     `${kPrefix}: passed algorithm can not be converted to '${dictionary}' because '${member}' is required in '${dictionary}'.`,
-  )
+  );
 }
 
-function integer(value: double, member: string, dictionary: string,
-                 max: double): Result<double, SubtleError> {
-  const x = Math.trunc(value)
+function integer(
+  value: double,
+  member: string,
+  dictionary: string,
+  max: double,
+): Result<double, Problem> {
+  const x = Math.trunc(value);
   if (x < 0 || x > max)
-    return err(typeError(
-      `${kPrefix}: '${member}' of '${dictionary}' (passed algorithm) is outside the expected range of 0 to ${max}.`,
-    ))
-  return ok(x)
+    return err(
+      typeError(
+        `${kPrefix}: '${member}' of '${dictionary}' (passed algorithm) is outside the expected range of 0 to ${max}.`,
+      ),
+    );
+  return ok(x);
 }
 
-const kUnsignedLong = 4294967295
+const kUnsignedLong = 4294967295;
 
 function unsignedLong(value: double): double {
-  if (value == 0) return 0
-  const x = Math.trunc(value)
-  if (x >= 0 && x <= kUnsignedLong) return x
-  return x % 4294967296
+  if (value == 0) return 0;
+  const x = Math.trunc(value);
+  if (x >= 0 && x <= kUnsignedLong) return x;
+  return x % 4294967296;
 }
 
-const kTagLengths: double[] = [32, 64, 96, 104, 112, 120, 128]
+const kTagLengths: double[] = [32, 64, 96, 104, 112, 120, 128];
 
-function bytesMember(value: BufferSource | undefined, member: string,
-                     dictionary: string): Result<Uint8Array, SubtleError> {
-  if (value == undefined) return err(required(dictionary, member))
-  return ok(bytesOf(value).slice())
+function bytesMember(
+  value: BufferSource | undefined,
+  member: string,
+  dictionary: string,
+): Result<Uint8Array, Problem> {
+  if (value == undefined) return err(required(dictionary, member));
+  return ok(bytesOf(value).slice());
 }
 
-function hashMember(given: Algorithm, dictionary: string): Result<string | Algorithm, SubtleError> {
-  const hash = given.hash
-  if (hash == undefined) return err(required(dictionary, "hash"))
-  const name = typeof hash == "string" ? hash : hash.name
+function hashMember(
+  given: Algorithm,
+  dictionary: string,
+): Result<string | Algorithm, Problem> {
+  const hash = given.hash;
+  if (hash == undefined) return err(required(dictionary, "hash"));
+  const name = typeof hash == "string" ? hash : hash.name;
   if (!name.toLowerCase().startsWith("sha"))
-    return err(notSupported(`Only SHA hashes are supported in ${dictionary}`))
-  return ok(hash)
+    return err(notSupported(`Only SHA hashes are supported in ${dictionary}`));
+  return ok(hash);
 }
 
-function byteLength(bytes: Uint8Array, member: string, length: int): SubtleError | undefined {
-  if (bytes.length == length) return undefined
-  return operationError(`${member} must contain exactly ${length} bytes`)
+function byteLength(
+  bytes: Uint8Array,
+  member: string,
+  length: int,
+): Problem | undefined {
+  if (bytes.length == length) return undefined;
+  return operationError(`${member} must contain exactly ${length} bytes`);
 }
 
-function normalize(algorithm: AlgorithmIdentifier, op: string): Result<Algorithm, SubtleError> {
-  const given: Algorithm = typeof algorithm == "string" ? { name: algorithm } : algorithm
-  let name = ""
-  const upper = given.name.toUpperCase()
-  for (const known of algorithmsOf(op)) if (known.toUpperCase() == upper) name = known
-  if (name == "") return err(notSupported(kUnrecognized))
-  const dictionary = dictionaryOf(op, name)
+function normalize(
+  algorithm: AlgorithmIdentifier,
+  op: string,
+): Result<Algorithm, Problem> {
+  const given: Algorithm =
+    typeof algorithm == "string" ? { name: algorithm } : algorithm;
+  let name = "";
+  const upper = given.name.toUpperCase();
+  for (const known of algorithmsOf(op))
+    if (known.toUpperCase() == upper) name = known;
+  if (name == "") return err(notSupported(kUnrecognized));
+  const dictionary = dictionaryOf(op, name);
   switch (dictionary) {
     case "":
-      return ok({ name })
+      return ok({ name });
     case "AesKeyGenParams":
     case "AesDerivedKeyParams": {
-      if (given.length == undefined) return err(required(dictionary, "length"))
-      const length = integer(given.length, "length", dictionary, 65535)
-      if (length.isErr()) return err(length.error)
+      if (given.length == undefined) return err(required(dictionary, "length"));
+      const length = integer(given.length, "length", dictionary, 65535);
+      if (length.isErr()) return err(length.error);
       if (length.value != 128 && length.value != 192 && length.value != 256)
-        return err(operationError("AES key length must be 128, 192, or 256 bits"))
-      return ok({ name, length: length.value })
+        return err(
+          operationError("AES key length must be 128, 192, or 256 bits"),
+        );
+      return ok({ name, length: length.value });
     }
     case "EcKeyGenParams":
     case "EcKeyImportParams": {
-      const curve = given.namedCurve
-      if (curve == undefined) return err(required(dictionary, "namedCurve"))
+      const curve = given.namedCurve;
+      if (curve == undefined) return err(required(dictionary, "namedCurve"));
       if (curve != "P-256" && curve != "P-384" && curve != "P-521")
-        return err(notSupported("Unrecognized namedCurve"))
-      return ok({ name, namedCurve: curve })
+        return err(notSupported("Unrecognized namedCurve"));
+      return ok({ name, namedCurve: curve });
     }
     case "HmacKeyGenParams":
     case "HmacImportParams": {
-      const hash = hashMember(given, dictionary)
-      if (hash.isErr()) return err(hash.error)
-      const givenLength = given.length
+      const hash = hashMember(given, dictionary);
+      if (hash.isErr()) return err(hash.error);
+      const givenLength = given.length;
       if (givenLength == undefined) {
-        const hashAlg = normalizeHash(hash.value)
-        if (hashAlg.isErr()) return err(hashAlg.error)
-        return ok({ name, hash: hashAlg.value })
+        const hashAlg = normalizeHash(hash.value);
+        if (hashAlg.isErr()) return err(hashAlg.error);
+        return ok({ name, hash: hashAlg.value });
       }
-      const length = integer(givenLength, "length", dictionary, kUnsignedLong)
-      if (length.isErr()) return err(length.error)
+      const length = integer(givenLength, "length", dictionary, kUnsignedLong);
+      if (length.isErr()) return err(length.error);
       if (length.value == 0) {
-        const message = `${dictionary}.length cannot be 0`
-        if (dictionary == "HmacImportParams") return err(dataError(message))
-        return err(operationError(message))
+        const message = `${dictionary}.length cannot be 0`;
+        if (dictionary == "HmacImportParams") return err(dataError(message));
+        return err(operationError(message));
       }
-      if (length.value % 8 != 0) return err(notSupported(`Unsupported ${dictionary}.length`))
-      const hashAlg = normalizeHash(hash.value)
-      if (hashAlg.isErr()) return err(hashAlg.error)
-      return ok({ name, hash: hashAlg.value, length: length.value })
+      if (length.value % 8 != 0)
+        return err(notSupported(`Unsupported ${dictionary}.length`));
+      const hashAlg = normalizeHash(hash.value);
+      if (hashAlg.isErr()) return err(hashAlg.error);
+      return ok({ name, hash: hashAlg.value, length: length.value });
     }
     case "RsaHashedKeyGenParams": {
-      const hash = hashMember(given, dictionary)
-      if (hash.isErr()) return err(hash.error)
-      if (given.modulusLength == undefined) return err(required(dictionary, "modulusLength"))
-      const modulusLength = integer(given.modulusLength, "modulusLength", dictionary, kUnsignedLong)
-      if (modulusLength.isErr()) return err(modulusLength.error)
-      const exponent = given.publicExponent
-      if (exponent == undefined) return err(required(dictionary, "publicExponent"))
-      const hashAlg = normalizeHash(hash.value)
-      if (hashAlg.isErr()) return err(hashAlg.error)
+      const hash = hashMember(given, dictionary);
+      if (hash.isErr()) return err(hash.error);
+      if (given.modulusLength == undefined)
+        return err(required(dictionary, "modulusLength"));
+      const modulusLength = integer(
+        given.modulusLength,
+        "modulusLength",
+        dictionary,
+        kUnsignedLong,
+      );
+      if (modulusLength.isErr()) return err(modulusLength.error);
+      const exponent = given.publicExponent;
+      if (exponent == undefined)
+        return err(required(dictionary, "publicExponent"));
+      const hashAlg = normalizeHash(hash.value);
+      if (hashAlg.isErr()) return err(hashAlg.error);
       return ok({
         name,
         hash: hashAlg.value,
         modulusLength: modulusLength.value,
         publicExponent: exponent.slice(),
-      })
+      });
     }
     case "RsaHashedImportParams":
     case "EcdsaParams": {
-      const hash = hashMember(given, dictionary)
-      if (hash.isErr()) return err(hash.error)
-      const hashAlg = normalizeHash(hash.value)
-      if (hashAlg.isErr()) return err(hashAlg.error)
-      return ok({ name, hash: hashAlg.value })
+      const hash = hashMember(given, dictionary);
+      if (hash.isErr()) return err(hash.error);
+      const hashAlg = normalizeHash(hash.value);
+      if (hashAlg.isErr()) return err(hashAlg.error);
+      return ok({ name, hash: hashAlg.value });
     }
     case "RsaPssParams": {
-      if (given.saltLength == undefined) return err(required(dictionary, "saltLength"))
-      const saltLength = integer(given.saltLength, "saltLength", dictionary, kUnsignedLong)
-      if (saltLength.isErr()) return err(saltLength.error)
-      return ok({ name, saltLength: saltLength.value })
+      if (given.saltLength == undefined)
+        return err(required(dictionary, "saltLength"));
+      const saltLength = integer(
+        given.saltLength,
+        "saltLength",
+        dictionary,
+        kUnsignedLong,
+      );
+      if (saltLength.isErr()) return err(saltLength.error);
+      return ok({ name, saltLength: saltLength.value });
     }
     case "RsaOaepParams": {
-      const label = given.label
-      if (label == undefined) return ok({ name })
-      return ok({ name, label: bytesOf(label).slice() })
+      const label = given.label;
+      if (label == undefined) return ok({ name });
+      return ok({ name, label: bytesOf(label).slice() });
     }
     case "Pbkdf2Params": {
-      const hash = hashMember(given, dictionary)
-      if (hash.isErr()) return err(hash.error)
-      if (given.iterations == undefined) return err(required(dictionary, "iterations"))
-      const iterations = integer(given.iterations, "iterations", dictionary, kUnsignedLong)
-      if (iterations.isErr()) return err(iterations.error)
-      if (iterations.value == 0) return err(operationError("iterations cannot be zero"))
-      const salt = bytesMember(given.salt, "salt", dictionary)
-      if (salt.isErr()) return err(salt.error)
-      const hashAlg = normalizeHash(hash.value)
-      if (hashAlg.isErr()) return err(hashAlg.error)
-      return ok({ name, hash: hashAlg.value, iterations: iterations.value, salt: salt.value })
+      const hash = hashMember(given, dictionary);
+      if (hash.isErr()) return err(hash.error);
+      if (given.iterations == undefined)
+        return err(required(dictionary, "iterations"));
+      const iterations = integer(
+        given.iterations,
+        "iterations",
+        dictionary,
+        kUnsignedLong,
+      );
+      if (iterations.isErr()) return err(iterations.error);
+      if (iterations.value == 0)
+        return err(operationError("iterations cannot be zero"));
+      const salt = bytesMember(given.salt, "salt", dictionary);
+      if (salt.isErr()) return err(salt.error);
+      const hashAlg = normalizeHash(hash.value);
+      if (hashAlg.isErr()) return err(hashAlg.error);
+      return ok({
+        name,
+        hash: hashAlg.value,
+        iterations: iterations.value,
+        salt: salt.value,
+      });
     }
     case "HkdfParams": {
-      const hash = hashMember(given, dictionary)
-      if (hash.isErr()) return err(hash.error)
-      const info = bytesMember(given.info, "info", dictionary)
-      if (info.isErr()) return err(info.error)
-      const salt = bytesMember(given.salt, "salt", dictionary)
-      if (salt.isErr()) return err(salt.error)
-      const hashAlg = normalizeHash(hash.value)
-      if (hashAlg.isErr()) return err(hashAlg.error)
-      return ok({ name, hash: hashAlg.value, info: info.value, salt: salt.value })
+      const hash = hashMember(given, dictionary);
+      if (hash.isErr()) return err(hash.error);
+      const info = bytesMember(given.info, "info", dictionary);
+      if (info.isErr()) return err(info.error);
+      const salt = bytesMember(given.salt, "salt", dictionary);
+      if (salt.isErr()) return err(salt.error);
+      const hashAlg = normalizeHash(hash.value);
+      if (hashAlg.isErr()) return err(hashAlg.error);
+      return ok({
+        name,
+        hash: hashAlg.value,
+        info: info.value,
+        salt: salt.value,
+      });
     }
     case "AesCbcParams": {
-      const iv = bytesMember(given.iv, "iv", dictionary)
-      if (iv.isErr()) return err(iv.error)
-      const wrong = byteLength(iv.value, "algorithm.iv", 16)
-      if (wrong != undefined) return err(wrong)
-      return ok({ name, iv: iv.value })
+      const iv = bytesMember(given.iv, "iv", dictionary);
+      if (iv.isErr()) return err(iv.error);
+      const wrong = byteLength(iv.value, "algorithm.iv", 16);
+      if (wrong != undefined) return err(wrong);
+      return ok({ name, iv: iv.value });
     }
     case "AesCtrParams": {
-      const counter = bytesMember(given.counter, "counter", dictionary)
-      if (counter.isErr()) return err(counter.error)
-      const wrong = byteLength(counter.value, "algorithm.counter", 16)
-      if (wrong != undefined) return err(wrong)
-      if (given.length == undefined) return err(required(dictionary, "length"))
-      const length = integer(given.length, "length", dictionary, 255)
-      if (length.isErr()) return err(length.error)
+      const counter = bytesMember(given.counter, "counter", dictionary);
+      if (counter.isErr()) return err(counter.error);
+      const wrong = byteLength(counter.value, "algorithm.counter", 16);
+      if (wrong != undefined) return err(wrong);
+      if (given.length == undefined) return err(required(dictionary, "length"));
+      const length = integer(given.length, "length", dictionary, 255);
+      if (length.isErr()) return err(length.error);
       if (length.value == 0 || length.value > 128)
-        return err(operationError("AES-CTR algorithm.length must be between 1 and 128"))
-      return ok({ name, counter: counter.value, length: length.value })
+        return err(
+          operationError("AES-CTR algorithm.length must be between 1 and 128"),
+        );
+      return ok({ name, counter: counter.value, length: length.value });
     }
     case "AeadParams": {
-      const data = given.additionalData
-      const additionalData = data == undefined ? undefined : bytesOf(data).slice()
-      const iv = bytesMember(given.iv, "iv", "AeadParams")
-      if (iv.isErr()) return err(iv.error)
-      const tag = given.tagLength
-      if (tag == undefined) return ok({ name, additionalData, iv: iv.value })
-      const tagLength = integer(tag, "tagLength", "AeadParams", 255)
-      if (tagLength.isErr()) return err(tagLength.error)
+      const data = given.additionalData;
+      const additionalData =
+        data == undefined ? undefined : bytesOf(data).slice();
+      const iv = bytesMember(given.iv, "iv", "AeadParams");
+      if (iv.isErr()) return err(iv.error);
+      const tag = given.tagLength;
+      if (tag == undefined) return ok({ name, additionalData, iv: iv.value });
+      const tagLength = integer(tag, "tagLength", "AeadParams", 255);
+      if (tagLength.isErr()) return err(tagLength.error);
       if (!kTagLengths.includes(tagLength.value))
-        return err(operationError(`${tagLength.value} is not a valid AES-GCM tag length`))
-      return ok({ name, additionalData, iv: iv.value, tagLength: tagLength.value })
+        return err(
+          operationError(
+            `${tagLength.value} is not a valid AES-GCM tag length`,
+          ),
+        );
+      return ok({
+        name,
+        additionalData,
+        iv: iv.value,
+        tagLength: tagLength.value,
+      });
     }
     case "EcdhKeyDeriveParams": {
-      const key = given.public
-      if (key == undefined) return err(required(dictionary, "public"))
+      const key = given.public;
+      if (key == undefined) return err(required(dictionary, "public"));
       if (key.type != "public")
-        return err(invalidAccess("algorithm.public must be a public key"))
+        return err(invalidAccess("algorithm.public must be a public key"));
       if (key.algorithm.name.toLowerCase() != name.toLowerCase())
-        return err(invalidAccess("key algorithm mismatch"))
-      return ok({ name, public: key })
+        return err(invalidAccess("key algorithm mismatch"));
+      return ok({ name, public: key });
     }
   }
-  return ok({ name })
+  return ok({ name });
 }
 
-function normalizeHash(hash: string | Algorithm): Result<Algorithm, SubtleError> {
-  return normalize(hash, "digest")
+function normalizeHash(
+  hash: string | Algorithm,
+): Result<Algorithm, Problem> {
+  return normalize(hash, "digest");
 }
 
 function hashOf(algorithm: Algorithm): string {
-  const hash = algorithm.hash
-  if (hash == undefined) return ""
-  return typeof hash == "string" ? hash : hash.name
+  const hash = algorithm.hash;
+  if (hash == undefined) return "";
+  return typeof hash == "string" ? hash : hash.name;
 }
 
 function opensslHash(name: string): string {
   switch (name) {
     case "SHA-1":
-      return "SHA1"
+      return "SHA1";
     case "SHA-384":
-      return "SHA384"
+      return "SHA384";
     case "SHA-512":
-      return "SHA512"
+      return "SHA512";
   }
-  return "SHA256"
+  return "SHA256";
 }
 
 function digestBytes(name: string): int {
   switch (name) {
     case "SHA-1":
-      return 20
+      return 20;
     case "SHA-384":
-      return 48
+      return 48;
     case "SHA-512":
-      return 64
+      return 64;
   }
-  return 32
+  return 32;
 }
 
 function digestOf(name: string, data: BufferSource): Promise<ArrayBuffer> {
   switch (name) {
     case "SHA-1":
-      return subtleDigest("sha1", data)
+      return subtleDigest("sha1", data);
     case "SHA-384":
-      return subtleDigest("sha384", data)
+      return subtleDigest("sha384", data);
     case "SHA-512":
-      return subtleDigest("sha512", data)
+      return subtleDigest("sha512", data);
   }
-  return subtleDigest("sha256", data)
+  return subtleDigest("sha256", data);
 }
 
 function anyNotIn(usages: KeyUsage[], allowed: KeyUsage[]): boolean {
-  for (const u of usages) if (!allowed.includes(u)) return true
-  return false
+  for (const u of usages) if (!allowed.includes(u)) return true;
+  return false;
 }
 
 function distinct(usages: KeyUsage[]): KeyUsage[] {
-  const out: KeyUsage[] = []
-  for (const u of usages) if (!out.includes(u)) out.push(u)
-  return out
+  const out: KeyUsage[] = [];
+  for (const u of usages) if (!out.includes(u)) out.push(u);
+  return out;
 }
 
 function union(usages: KeyUsage[], wanted: KeyUsage[]): KeyUsage[] {
-  const out: KeyUsage[] = []
-  for (const u of wanted) if (usages.includes(u)) out.push(u)
-  return out
+  const out: KeyUsage[] = [];
+  for (const u of wanted) if (usages.includes(u)) out.push(u);
+  return out;
 }
 
-const kKeyOps = ["sign", "verify", "encrypt", "decrypt", "wrapKey", "unwrapKey", "deriveKey", "deriveBits"]
+const kKeyOps = [
+  "sign",
+  "verify",
+  "encrypt",
+  "decrypt",
+  "wrapKey",
+  "unwrapKey",
+  "deriveKey",
+  "deriveBits",
+];
 
-
-function checkKeyOps(ops: string[] | undefined, usages: KeyUsage[]): SubtleError | undefined {
-  if (ops == undefined) return undefined
-  const seen: string[] = []
+function checkKeyOps(
+  ops: string[] | undefined,
+  usages: KeyUsage[],
+): Problem | undefined {
+  if (ops == undefined) return undefined;
+  const seen: string[] = [];
   for (const op of ops) {
-    if (!kKeyOps.includes(op)) continue
-    if (seen.includes(op)) return dataError("Duplicate key operation")
-    seen.push(op)
+    if (!kKeyOps.includes(op)) continue;
+    if (seen.includes(op)) return dataError("Duplicate key operation");
+    seen.push(op);
   }
   for (const u of usages) {
-    let found = false
-    for (const op of ops) if (op == u) found = true
-    if (!found) return dataError("Key operations and usage mismatch")
+    let found = false;
+    for (const op of ops) if (op == u) found = true;
+    if (!found) return dataError("Key operations and usage mismatch");
   }
-  return undefined
+  return undefined;
 }
 
-function checkJwk(jwk: JsonWebKey, use: string, usages: KeyUsage[],
-                  extractable: boolean): SubtleError | undefined {
+function checkJwk(
+  jwk: JsonWebKey,
+  use: string,
+  usages: KeyUsage[],
+  extractable: boolean,
+): Problem | undefined {
   if (usages.length > 0 && jwk.use != undefined && jwk.use != use)
-    return dataError('Invalid JWK "use" Parameter')
-  const ops = checkKeyOps(jwk.key_ops, usages)
-  if (ops != undefined) return ops
+    return dataError('Invalid JWK "use" Parameter');
+  const ops = checkKeyOps(jwk.key_ops, usages);
+  if (ops != undefined) return ops;
   if (jwk.ext != undefined && jwk.ext == false && extractable)
-    return dataError('JWK "ext" Parameter and extractable mismatch')
-  return undefined
+    return dataError('JWK "ext" Parameter and extractable mismatch');
+  return undefined;
 }
 
 function opsOf(usages: KeyUsage[]): string[] {
-  const out: string[] = []
-  for (const u of usages) out.push(u)
-  return out
+  const out: string[] = [];
+  for (const u of usages) out.push(u);
+  return out;
 }
 
-function exported<T>(r: Result<T, CryptoError>): Result<T, SubtleError> {
-  if (r.isErr()) return err(operationError(r.error.message))
-  return ok(r.value)
+function exported<T>(r: Result<T, KeyExportError>): Result<T, Problem> {
+  if (r.isErr()) return err(systemError(r.error.message));
+  return ok(r.value);
 }
 
-function madeKey(r: Result<KeyObject, CryptoError>): Result<KeyObject, SubtleError> {
-  if (r.isErr()) return err(dataError("Invalid keyData"))
-  return ok(r.value)
+function madeKey<E>(r: Result<KeyObject, E>): Result<KeyObject, Problem> {
+  if (r.isErr()) return err(dataError("Invalid keyData"));
+  return ok(r.value);
 }
 
 abstract class KeyHandle {
@@ -745,63 +1562,78 @@ abstract class KeyHandle {
     readonly usages: KeyUsage[],
   ) {}
 
-  async sign(algorithm: Algorithm, data: BufferSource): Promise<Result<ArrayBuffer, SubtleError>> {
-    void algorithm
-    void data
-    return err(notSupported(kUnrecognized))
+  async sign(
+    algorithm: Algorithm,
+    data: BufferSource,
+  ): Promise<Result<ArrayBuffer, Problem>> {
+    void algorithm;
+    void data;
+    return err(notSupported(kUnrecognized));
   }
 
-  async verify(algorithm: Algorithm, signature: BufferSource,
-               data: BufferSource): Promise<Result<boolean, SubtleError>> {
-    void algorithm
-    void signature
-    void data
-    return err(notSupported(kUnrecognized))
+  async verify(
+    algorithm: Algorithm,
+    signature: BufferSource,
+    data: BufferSource,
+  ): Promise<Result<boolean, Problem>> {
+    void algorithm;
+    void signature;
+    void data;
+    return err(notSupported(kUnrecognized));
   }
 
-  async cipher(algorithm: Algorithm, data: BufferSource,
-               decrypt: boolean): Promise<Result<ArrayBuffer, SubtleError>> {
-    void algorithm
-    void data
-    void decrypt
-    return err(notSupported(kUnrecognized))
+  async cipher(
+    algorithm: Algorithm,
+    data: BufferSource,
+    decrypt: boolean,
+  ): Promise<Result<ArrayBuffer, Problem>> {
+    void algorithm;
+    void data;
+    void decrypt;
+    return err(notSupported(kUnrecognized));
   }
 
-  async wrap(data: BufferSource, unwrap: boolean): Promise<Result<ArrayBuffer, SubtleError>> {
-    void data
-    void unwrap
-    return err(notSupported(kUnrecognized))
+  async wrap(
+    data: BufferSource,
+    unwrap: boolean,
+  ): Promise<Result<ArrayBuffer, Problem>> {
+    void data;
+    void unwrap;
+    return err(notSupported(kUnrecognized));
   }
 
-  async deriveBits(algorithm: Algorithm, length: double | undefined,
-                   peer?: KeyHandle): Promise<Result<ArrayBuffer, SubtleError>> {
-    void algorithm
-    void length
-    void peer
-    return err(notSupported(kUnrecognized))
+  async deriveBits(
+    algorithm: Algorithm,
+    length: double | undefined,
+    peer?: KeyHandle,
+  ): Promise<Result<ArrayBuffer, Problem>> {
+    void algorithm;
+    void length;
+    void peer;
+    return err(notSupported(kUnrecognized));
   }
 
-  exportRaw(): Result<ArrayBuffer | undefined, SubtleError> {
-    return ok(undefined)
+  exportRaw(): Result<ArrayBuffer | undefined, Problem> {
+    return ok(undefined);
   }
 
-  exportSpki(): Result<ArrayBuffer | undefined, SubtleError> {
-    if (this.type != "public") return ok(undefined)
-    const bytes = exported(this.key.export({ format: "der", type: "spki" }))
-    if (bytes.isErr()) return err(bytes.error)
-    return ok(arrayBufferOf(bytes.value))
+  exportSpki(): Result<ArrayBuffer | undefined, Problem> {
+    if (this.type != "public") return ok(undefined);
+    const bytes = exported(this.key.export({ format: "der", type: "spki" }));
+    if (bytes.isErr()) return err(bytes.error);
+    return ok(arrayBufferOf(bytes.value));
   }
 
-  exportPkcs8(): Result<ArrayBuffer | undefined, SubtleError> {
-    if (this.type != "private") return ok(undefined)
-    const bytes = exported(this.key.export({ format: "der", type: "pkcs8" }))
-    if (bytes.isErr()) return err(bytes.error)
-    return ok(arrayBufferOf(bytes.value))
+  exportPkcs8(): Result<ArrayBuffer | undefined, Problem> {
+    if (this.type != "private") return ok(undefined);
+    const bytes = exported(this.key.export({ format: "der", type: "pkcs8" }));
+    if (bytes.isErr()) return err(bytes.error);
+    return ok(arrayBufferOf(bytes.value));
   }
 
-  exportJwk(extractable: boolean): Result<JsonWebKey | undefined, SubtleError> {
-    void extractable
-    return ok(undefined)
+  exportJwk(extractable: boolean): Result<JsonWebKey | undefined, Problem> {
+    void extractable;
+    return ok(undefined);
   }
 }
 
@@ -816,7 +1648,11 @@ function jsonKind(value: Json): string {
   return typeof value;
 }
 
-function jwkText(json: Json, name: string, path: string): Result<string | undefined, SubtleError> {
+function jwkText(
+  json: Json,
+  name: string,
+  path: string,
+): Result<string | undefined, Problem> {
   const value = json[name];
   if (value == undefined) {
     return ok(undefined);
@@ -829,7 +1665,10 @@ function jwkText(json: Json, name: string, path: string): Result<string | undefi
   return err(typeError(`${path}${name}: expected string, got ${kind}`));
 }
 
-function jwkPrime(json: Json, at: string): Result<RsaOtherPrimesInfo, SubtleError> {
+function jwkPrime(
+  json: Json,
+  at: string,
+): Result<RsaOtherPrimesInfo, Problem> {
   if (typeof json != "object" || json == null || Array.isArray(json)) {
     const kind = jsonKind(json);
 
@@ -848,20 +1687,39 @@ function jwkPrime(json: Json, at: string): Result<RsaOtherPrimesInfo, SubtleErro
   if (tResult.isErr()) {
     return err(tResult.error);
   }
-  const prime: RsaOtherPrimesInfo = { d: dResult.value, r: rResult.value, t: tResult.value };
+  const prime: RsaOtherPrimesInfo = {
+    d: dResult.value,
+    r: rResult.value,
+    t: tResult.value,
+  };
 
   return ok(prime);
 }
 
-function jwkFromJson(json: Json): Result<JsonWebKey, SubtleError> {
+function jwkFromJson(json: Json): Result<JsonWebKey, Problem> {
   if (typeof json != "object" || json == null || Array.isArray(json)) {
     const kind = jsonKind(json);
 
     return err(typeError(`expected JsonWebKey, got ${kind}`));
   }
   const texts = new Map<string, string>();
-  for (const name of ["alg", "crv", "d", "dp", "dq", "e", "k", "kty", "n", "p", "q", "qi", "use",
-                      "x", "y"]) {
+  for (const name of [
+    "alg",
+    "crv",
+    "d",
+    "dp",
+    "dq",
+    "e",
+    "k",
+    "kty",
+    "n",
+    "p",
+    "q",
+    "qi",
+    "use",
+    "x",
+    "y",
+  ]) {
     const textResult = jwkText(json, name, "");
     if (textResult.isErr()) {
       return err(textResult.error);
@@ -939,10 +1797,10 @@ function jwkFromJson(json: Json): Result<JsonWebKey, SubtleError> {
   return ok(jwk);
 }
 
-function jwkOfKey(key: KeyObject): Result<JsonWebKey, SubtleError> {
-  const json = exported(key.export({ format: "jwk" }))
-  if (json.isErr()) return err(json.error)
-  return jwkFromJson(json.value)
+function jwkOfKey(key: KeyObject): Result<JsonWebKey, Problem> {
+  const json = exported(key.export({ format: "jwk" }));
+  if (json.isErr()) return err(json.error);
+  return jwkFromJson(json.value);
 }
 
 function jsonOf(jwk: JsonWebKey): Json {
@@ -960,12 +1818,12 @@ function jsonOf(jwk: JsonWebKey): Json {
     dq: jwk.dq,
     qi: jwk.qi,
     k: jwk.k,
-  }
-  return j
+  };
+  return j;
 }
 
-function jwkData(keyData: KeyData): Result<JsonWebKey, SubtleError> {
-  if (keyData instanceof JwkFailure) return err(keyData.error)
+function jwkData(keyData: KeyData): Result<JsonWebKey, Problem> {
+  if (keyData instanceof JwkFailure) return err(keyData.error);
   if (
     keyData instanceof ArrayBuffer ||
     keyData instanceof Uint8Array ||
@@ -979,103 +1837,135 @@ function jwkData(keyData: KeyData): Result<JsonWebKey, SubtleError> {
     keyData instanceof Float32Array ||
     keyData instanceof Float64Array
   )
-    return err(dataError("Invalid keyData"))
-  return ok(keyData)
+    return err(dataError("Invalid keyData"));
+  return ok(keyData);
 }
 
-function rawData(keyData: KeyData, op: string): Result<Uint8Array, SubtleError> {
-  if (keyData instanceof ArrayBuffer) return ok(new Uint8Array(keyData))
-  if (keyData instanceof Uint8Array) return ok(keyData)
-  if (keyData instanceof DataView) return ok(bytesOf(keyData))
-  if (keyData instanceof Int8Array) return ok(bytesOf(keyData))
-  if (keyData instanceof Uint8ClampedArray) return ok(bytesOf(keyData))
-  if (keyData instanceof Int16Array) return ok(bytesOf(keyData))
-  if (keyData instanceof Uint16Array) return ok(bytesOf(keyData))
-  if (keyData instanceof Int32Array) return ok(bytesOf(keyData))
-  if (keyData instanceof Uint32Array) return ok(bytesOf(keyData))
-  if (keyData instanceof Float32Array) return ok(bytesOf(keyData))
-  if (keyData instanceof Float64Array) return ok(bytesOf(keyData))
-  return err(typeError(
-    `Failed to execute '${op}' on 'SubtleCrypto': 2nd argument is not instance of ArrayBuffer, Buffer, TypedArray, or DataView.`,
-  ))
+function rawData(
+  keyData: KeyData,
+  op: string,
+): Result<Uint8Array, Problem> {
+  if (keyData instanceof ArrayBuffer) return ok(new Uint8Array(keyData));
+  if (keyData instanceof Uint8Array) return ok(keyData);
+  if (keyData instanceof DataView) return ok(bytesOf(keyData));
+  if (keyData instanceof Int8Array) return ok(bytesOf(keyData));
+  if (keyData instanceof Uint8ClampedArray) return ok(bytesOf(keyData));
+  if (keyData instanceof Int16Array) return ok(bytesOf(keyData));
+  if (keyData instanceof Uint16Array) return ok(bytesOf(keyData));
+  if (keyData instanceof Int32Array) return ok(bytesOf(keyData));
+  if (keyData instanceof Uint32Array) return ok(bytesOf(keyData));
+  if (keyData instanceof Float32Array) return ok(bytesOf(keyData));
+  if (keyData instanceof Float64Array) return ok(bytesOf(keyData));
+  return err(
+    typeError(
+      `Failed to execute '${op}' on 'SubtleCrypto': 2nd argument is not instance of ArrayBuffer, Buffer, TypedArray, or DataView.`,
+    ),
+  );
 }
 
-function hmacOf(hash: string, key: KeyObject, data: BufferSource): Promise<ArrayBuffer> {
+function hmacOf(
+  hash: string,
+  key: KeyObject,
+  data: BufferSource,
+): Promise<ArrayBuffer> {
   switch (hash) {
     case "SHA-1":
-      return subtleHmac("sha1", key, data)
+      return subtleHmac("sha1", key, data);
     case "SHA-384":
-      return subtleHmac("sha384", key, data)
+      return subtleHmac("sha384", key, data);
     case "SHA-512":
-      return subtleHmac("sha512", key, data)
+      return subtleHmac("sha512", key, data);
   }
-  return subtleHmac("sha256", key, data)
+  return subtleHmac("sha256", key, data);
 }
 
-function hmacVerifyOf(hash: string, key: KeyObject, signature: BufferSource,
-                      data: BufferSource): Promise<int> {
+function hmacVerifyOf(
+  hash: string,
+  key: KeyObject,
+  signature: BufferSource,
+  data: BufferSource,
+): Promise<int> {
   switch (hash) {
     case "SHA-1":
-      return subtleHmacVerify("sha1", key, signature, data)
+      return subtleHmacVerify("sha1", key, signature, data);
     case "SHA-384":
-      return subtleHmacVerify("sha384", key, signature, data)
+      return subtleHmacVerify("sha384", key, signature, data);
     case "SHA-512":
-      return subtleHmacVerify("sha512", key, signature, data)
+      return subtleHmacVerify("sha512", key, signature, data);
   }
-  return subtleHmacVerify("sha256", key, signature, data)
+  return subtleHmacVerify("sha256", key, signature, data);
 }
 
 class HmacHandle extends KeyHandle {
-  constructor(key: KeyObject, usages: KeyUsage[], readonly hash: string) {
-    super(key, "secret", "HMAC", usages)
+  constructor(
+    key: KeyObject,
+    usages: KeyUsage[],
+    readonly hash: string,
+  ) {
+    super(key, "secret", "HMAC", usages);
   }
 
-  async sign(algorithm: Algorithm, data: BufferSource): Promise<Result<ArrayBuffer, SubtleError>> {
-    void algorithm
-    const mac = await hmacOf(this.hash, this.key, data)
-    return ok(mac)
+  async sign(
+    algorithm: Algorithm,
+    data: BufferSource,
+  ): Promise<Result<ArrayBuffer, Problem>> {
+    void algorithm;
+    const mac = await hmacOf(this.hash, this.key, data);
+    return ok(mac);
   }
 
-  async verify(algorithm: Algorithm, signature: BufferSource,
-               data: BufferSource): Promise<Result<boolean, SubtleError>> {
-    void algorithm
-    const verdict = await hmacVerifyOf(this.hash, this.key, signature, data)
-    return ok(verdict == 1)
+  async verify(
+    algorithm: Algorithm,
+    signature: BufferSource,
+    data: BufferSource,
+  ): Promise<Result<boolean, Problem>> {
+    void algorithm;
+    const verdict = await hmacVerifyOf(this.hash, this.key, signature, data);
+    return ok(verdict == 1);
   }
 
-  exportRaw(): Result<ArrayBuffer | undefined, SubtleError> {
-    const raw = exported(this.key.export())
-    if (raw.isErr()) return err(raw.error)
-    return ok(arrayBufferOf(raw.value))
+  exportRaw(): Result<ArrayBuffer | undefined, Problem> {
+    const raw = exported(this.key.export());
+    if (raw.isErr()) return err(raw.error);
+    return ok(arrayBufferOf(raw.value));
   }
 
-  exportJwk(extractable: boolean): Result<JsonWebKey | undefined, SubtleError> {
-    const alg = this.hash == "SHA-1" ? "HS1" : `HS${this.hash.slice(4)}`
-    const raw = exported(this.key.export())
-    if (raw.isErr()) return err(raw.error)
+  exportJwk(extractable: boolean): Result<JsonWebKey | undefined, Problem> {
+    const alg = this.hash == "SHA-1" ? "HS1" : `HS${this.hash.slice(4)}`;
+    const raw = exported(this.key.export());
+    if (raw.isErr()) return err(raw.error);
     return ok({
       key_ops: opsOf(this.usages),
       ext: extractable,
       alg,
       kty: "oct",
       k: raw.value.toString("base64url"),
-    })
+    });
   }
 }
 
 function blockBits(hash: string): double {
-  return hash == "SHA-384" || hash == "SHA-512" ? 1024 : 512
+  return hash == "SHA-384" || hash == "SHA-512" ? 1024 : 512;
 }
 
-function generateHmac(algorithm: Algorithm, extractable: boolean,
-                      usages: KeyUsage[]): Result<CryptoKey, SubtleError> {
-  const hash = hashOf(algorithm)
-  const length = algorithm.length ?? blockBits(hash)
+function generateHmac(
+  algorithm: Algorithm,
+  extractable: boolean,
+  usages: KeyUsage[],
+): Result<CryptoKey, Problem> {
+  const hash = hashOf(algorithm);
+  const length = algorithm.length ?? blockBits(hash);
   if (anyNotIn(usages, ["sign", "verify"]))
-    return err(syntaxError("Unsupported key usage for an HMAC key"))
-  const key = createSecretKey(randomBytes(length / 8))
-  const handle = new HmacHandle(key, distinct(usages), hash)
-  return ok(new CryptoKey(handle, { name: "HMAC", length, hash: { name: hash } }, extractable))
+    return err(syntaxError("Unsupported key usage for an HMAC key"));
+  const key = createSecretKey(randomBytes(length / 8));
+  const handle = new HmacHandle(key, distinct(usages), hash);
+  return ok(
+    new CryptoKey(
+      handle,
+      { name: "HMAC", length, hash: { name: hash } },
+      extractable,
+    ),
+  );
 }
 
 function importHmac(
@@ -1084,127 +1974,220 @@ function importHmac(
   algorithm: Algorithm,
   extractable: boolean,
   usages: KeyUsage[],
-): Result<CryptoKey | undefined, SubtleError> {
+): Result<CryptoKey | undefined, Problem> {
   if (anyNotIn(usages, ["sign", "verify"]))
-    return err(syntaxError("Unsupported key usage for HMAC key"))
-  const hash = hashOf(algorithm)
-  let bytes: Uint8Array
+    return err(syntaxError("Unsupported key usage for HMAC key"));
+  const hash = hashOf(algorithm);
+  let bytes: Uint8Array;
   if (format == "raw") {
-    const raw = rawData(keyData, "importKey")
-    if (raw.isErr()) return err(raw.error)
-    bytes = raw.value
+    const raw = rawData(keyData, "importKey");
+    if (raw.isErr()) return err(raw.error);
+    bytes = raw.value;
   } else if (format == "jwk") {
-    const data = jwkData(keyData)
-    if (data.isErr()) return err(data.error)
-    const jwk = data.value
-    if (jwk.kty == undefined) return err(dataError("Invalid keyData"))
-    if (jwk.kty != "oct") return err(dataError('Invalid JWK "kty" Parameter'))
-    const bad = checkJwk(jwk, "sig", usages, extractable)
-    if (bad != undefined) return err(bad)
-    const expected = hash == "SHA-1" ? "HS1" : `HS${hash.slice(4)}`
+    const data = jwkData(keyData);
+    if (data.isErr()) return err(data.error);
+    const jwk = data.value;
+    if (jwk.kty == undefined) return err(dataError("Invalid keyData"));
+    if (jwk.kty != "oct") return err(dataError('Invalid JWK "kty" Parameter'));
+    const bad = checkJwk(jwk, "sig", usages, extractable);
+    if (bad != undefined) return err(bad);
+    const expected = hash == "SHA-1" ? "HS1" : `HS${hash.slice(4)}`;
     if (jwk.alg != undefined && jwk.alg != expected)
-      return err(dataError('JWK "alg" does not match the requested algorithm'))
-    const k = jwk.k
-    if (k == undefined) return err(dataError("Invalid keyData"))
-    bytes = base64url(k)
+      return err(dataError('JWK "alg" does not match the requested algorithm'));
+    const k = jwk.k;
+    if (k == undefined) return err(dataError("Invalid keyData"));
+    bytes = base64url(k);
   } else {
-    return ok(undefined)
+    return ok(undefined);
   }
-  const length = bytes.length * 8
-  if (length == 0) return err(dataError("Zero-length key is not supported"))
+  const length = bytes.length * 8;
+  if (length == 0) return err(dataError("Zero-length key is not supported"));
   if (algorithm.length != undefined && algorithm.length != length.toDouble())
-    return err(dataError("Invalid key length"))
-  const handle = new HmacHandle(createSecretKey(bytes), usages, hash)
-  return ok(new CryptoKey(handle, { name: "HMAC", length: length.toDouble(), hash: { name: hash } }, extractable))
+    return err(dataError("Invalid key length"));
+  const handle = new HmacHandle(createSecretKey(bytes), usages, hash);
+  return ok(
+    new CryptoKey(
+      handle,
+      { name: "HMAC", length: length.toDouble(), hash: { name: hash } },
+      extractable,
+    ),
+  );
 }
 
 class AesHandle extends KeyHandle {
-  constructor(key: KeyObject, name: string, usages: KeyUsage[], readonly bits: double) {
-    super(key, "secret", name, usages)
+  constructor(
+    key: KeyObject,
+    name: string,
+    usages: KeyUsage[],
+    readonly bits: double,
+  ) {
+    super(key, "secret", name, usages);
   }
 
-  async cipher(algorithm: Algorithm, data: BufferSource,
-               decrypt: boolean): Promise<Result<ArrayBuffer, SubtleError>> {
-    let result: ArrayBuffer | undefined = undefined
+  async cipher(
+    algorithm: Algorithm,
+    data: BufferSource,
+    decrypt: boolean,
+  ): Promise<Result<ArrayBuffer, Problem>> {
+    let result: ArrayBuffer | undefined = undefined;
     if (this.name == "AES-GCM") {
-      const tag = (algorithm.tagLength ?? 128) / 8
+      const tag = (algorithm.tagLength ?? 128) / 8;
       if (decrypt && tag > bytesOf(data).length.toDouble())
-        return err(operationError("The provided data is too small."))
-      result = await this.gcm(algorithm, data, decrypt, Math.trunc(tag).toInt())
+        return err(decryptionFailed("The provided data is too small."));
+      result = await this.gcm(
+        algorithm,
+        data,
+        decrypt,
+        Math.trunc(tag).toInt(),
+      );
     } else if (this.name == "AES-CBC") {
-      result = await this.cbc(algorithm, data, decrypt)
+      result = await this.cbc(algorithm, data, decrypt);
     } else {
-      result = await this.ctr(algorithm, data, decrypt)
+      result = await this.ctr(algorithm, data, decrypt);
     }
-    if (result == undefined) return err(failed())
-    return ok(result)
+    if (result == undefined) return err(cipherFailed(decrypt));
+    return ok(result);
   }
 
-  private gcm(algorithm: Algorithm, data: BufferSource, decrypt: boolean, tag: int) {
-    const iv = algorithm.iv ?? kNoBytes
-    const aad = algorithm.additionalData ?? kNoBytes
-    if (this.bits == 128) return subtleAes("aes-128-gcm", this.key, decrypt, iv, aad, tag, 0, data)
-    if (this.bits == 192) return subtleAes("aes-192-gcm", this.key, decrypt, iv, aad, tag, 0, data)
-    return subtleAes("aes-256-gcm", this.key, decrypt, iv, aad, tag, 0, data)
+  private gcm(
+    algorithm: Algorithm,
+    data: BufferSource,
+    decrypt: boolean,
+    tag: int,
+  ) {
+    const iv = algorithm.iv ?? kNoBytes;
+    const aad = algorithm.additionalData ?? kNoBytes;
+    if (this.bits == 128)
+      return subtleAes("aes-128-gcm", this.key, decrypt, iv, aad, tag, 0, data);
+    if (this.bits == 192)
+      return subtleAes("aes-192-gcm", this.key, decrypt, iv, aad, tag, 0, data);
+    return subtleAes("aes-256-gcm", this.key, decrypt, iv, aad, tag, 0, data);
   }
 
   private cbc(algorithm: Algorithm, data: BufferSource, decrypt: boolean) {
-    const iv = algorithm.iv ?? kNoBytes
+    const iv = algorithm.iv ?? kNoBytes;
     if (this.bits == 128)
-      return subtleAes("aes-128-cbc", this.key, decrypt, iv, kNoBytes, 0, 0, data)
+      return subtleAes(
+        "aes-128-cbc",
+        this.key,
+        decrypt,
+        iv,
+        kNoBytes,
+        0,
+        0,
+        data,
+      );
     if (this.bits == 192)
-      return subtleAes("aes-192-cbc", this.key, decrypt, iv, kNoBytes, 0, 0, data)
-    return subtleAes("aes-256-cbc", this.key, decrypt, iv, kNoBytes, 0, 0, data)
+      return subtleAes(
+        "aes-192-cbc",
+        this.key,
+        decrypt,
+        iv,
+        kNoBytes,
+        0,
+        0,
+        data,
+      );
+    return subtleAes(
+      "aes-256-cbc",
+      this.key,
+      decrypt,
+      iv,
+      kNoBytes,
+      0,
+      0,
+      data,
+    );
   }
 
   private ctr(algorithm: Algorithm, data: BufferSource, decrypt: boolean) {
-    const counter = algorithm.counter ?? kNoBytes
-    const bits = Math.trunc(algorithm.length ?? 128).toInt()
+    const counter = algorithm.counter ?? kNoBytes;
+    const bits = Math.trunc(algorithm.length ?? 128).toInt();
     if (this.bits == 128)
-      return subtleAes("aes-128-ctr", this.key, decrypt, counter, kNoBytes, 0, bits, data)
+      return subtleAes(
+        "aes-128-ctr",
+        this.key,
+        decrypt,
+        counter,
+        kNoBytes,
+        0,
+        bits,
+        data,
+      );
     if (this.bits == 192)
-      return subtleAes("aes-192-ctr", this.key, decrypt, counter, kNoBytes, 0, bits, data)
-    return subtleAes("aes-256-ctr", this.key, decrypt, counter, kNoBytes, 0, bits, data)
+      return subtleAes(
+        "aes-192-ctr",
+        this.key,
+        decrypt,
+        counter,
+        kNoBytes,
+        0,
+        bits,
+        data,
+      );
+    return subtleAes(
+      "aes-256-ctr",
+      this.key,
+      decrypt,
+      counter,
+      kNoBytes,
+      0,
+      bits,
+      data,
+    );
   }
 
-  async wrap(data: BufferSource, unwrap: boolean): Promise<Result<ArrayBuffer, SubtleError>> {
-    const result = await subtleAesKw(this.key, unwrap, data)
-    if (result == undefined) return err(failed())
-    return ok(result)
+  async wrap(
+    data: BufferSource,
+    unwrap: boolean,
+  ): Promise<Result<ArrayBuffer, Problem>> {
+    const result = await subtleAesKw(this.key, unwrap, data);
+    if (result == undefined) return err(cipherFailed(unwrap));
+    return ok(result);
   }
 
-  exportRaw(): Result<ArrayBuffer | undefined, SubtleError> {
-    const raw = exported(this.key.export())
-    if (raw.isErr()) return err(raw.error)
-    return ok(arrayBufferOf(raw.value))
+  exportRaw(): Result<ArrayBuffer | undefined, Problem> {
+    const raw = exported(this.key.export());
+    if (raw.isErr()) return err(raw.error);
+    return ok(arrayBufferOf(raw.value));
   }
 
-  exportJwk(extractable: boolean): Result<JsonWebKey | undefined, SubtleError> {
-    const raw = exported(this.key.export())
-    if (raw.isErr()) return err(raw.error)
+  exportJwk(extractable: boolean): Result<JsonWebKey | undefined, Problem> {
+    const raw = exported(this.key.export());
+    if (raw.isErr()) return err(raw.error);
     return ok({
       key_ops: opsOf(this.usages),
       ext: extractable,
       alg: `A${this.bits}${this.name.slice(4)}`,
       kty: "oct",
       k: raw.value.toString("base64url"),
-    })
+    });
   }
 }
 
 function aesUsages(name: string): KeyUsage[] {
-  return name == "AES-KW" ? ["wrapKey", "unwrapKey"] : ["wrapKey", "unwrapKey", "encrypt", "decrypt"]
+  return name == "AES-KW"
+    ? ["wrapKey", "unwrapKey"]
+    : ["wrapKey", "unwrapKey", "encrypt", "decrypt"];
 }
 
-function generateAes(algorithm: Algorithm, extractable: boolean,
-                     usages: KeyUsage[]): Result<CryptoKey, SubtleError> {
-  const name = algorithm.name
-  const length = algorithm.length ?? 0
+function generateAes(
+  algorithm: Algorithm,
+  extractable: boolean,
+  usages: KeyUsage[],
+): Result<CryptoKey, Problem> {
+  const name = algorithm.name;
+  const length = algorithm.length ?? 0;
   if (anyNotIn(usages, aesUsages(name)))
-    return err(syntaxError("Unsupported key usage for an AES key"))
-  const key = createSecretKey(randomBytes(length / 8))
-  return ok(new CryptoKey(new AesHandle(key, name, distinct(usages), length), { name, length },
-                          extractable))
+    return err(syntaxError("Unsupported key usage for an AES key"));
+  const key = createSecretKey(randomBytes(length / 8));
+  return ok(
+    new CryptoKey(
+      new AesHandle(key, name, distinct(usages), length),
+      { name, length },
+      extractable,
+    ),
+  );
 }
 
 function importAes(
@@ -1213,86 +2196,111 @@ function importAes(
   algorithm: Algorithm,
   extractable: boolean,
   usages: KeyUsage[],
-): Result<CryptoKey | undefined, SubtleError> {
-  const name = algorithm.name
+): Result<CryptoKey | undefined, Problem> {
+  const name = algorithm.name;
   if (anyNotIn(usages, aesUsages(name)))
-    return err(syntaxError("Unsupported key usage for an AES key"))
-  let bytes: Uint8Array
+    return err(syntaxError("Unsupported key usage for an AES key"));
+  let bytes: Uint8Array;
   if (format == "raw") {
-    const raw = rawData(keyData, "importKey")
-    if (raw.isErr()) return err(raw.error)
-    bytes = raw.value
-    const length = bytes.length * 8
-    if (length != 128 && length != 192 && length != 256) return err(dataError("Invalid key length"))
+    const raw = rawData(keyData, "importKey");
+    if (raw.isErr()) return err(raw.error);
+    bytes = raw.value;
+    const length = bytes.length * 8;
+    if (length != 128 && length != 192 && length != 256)
+      return err(dataError("Invalid key length"));
   } else if (format == "jwk") {
-    const data = jwkData(keyData)
-    if (data.isErr()) return err(data.error)
-    const jwk = data.value
-    if (jwk.kty == undefined) return err(dataError("Invalid keyData"))
-    if (jwk.kty != "oct") return err(dataError('Invalid JWK "kty" Parameter'))
-    const bad = checkJwk(jwk, "enc", usages, extractable)
-    if (bad != undefined) return err(bad)
-    const k = jwk.k
-    if (k == undefined) return err(dataError("Invalid keyData"))
-    bytes = base64url(k)
-    const length = bytes.length * 8
-    if (length != 128 && length != 192 && length != 256) return err(dataError("Invalid key length"))
+    const data = jwkData(keyData);
+    if (data.isErr()) return err(data.error);
+    const jwk = data.value;
+    if (jwk.kty == undefined) return err(dataError("Invalid keyData"));
+    if (jwk.kty != "oct") return err(dataError('Invalid JWK "kty" Parameter'));
+    const bad = checkJwk(jwk, "enc", usages, extractable);
+    if (bad != undefined) return err(bad);
+    const k = jwk.k;
+    if (k == undefined) return err(dataError("Invalid keyData"));
+    bytes = base64url(k);
+    const length = bytes.length * 8;
+    if (length != 128 && length != 192 && length != 256)
+      return err(dataError("Invalid key length"));
     if (jwk.alg != undefined && jwk.alg != `A${length}${name.slice(4)}`)
-      return err(dataError('JWK "alg" does not match the requested algorithm'))
+      return err(dataError('JWK "alg" does not match the requested algorithm'));
   } else {
-    return ok(undefined)
+    return ok(undefined);
   }
-  const length = bytes.length * 8
-  const handle = new AesHandle(createSecretKey(bytes), name, usages, length.toDouble())
-  return ok(new CryptoKey(handle, { name, length: length.toDouble() }, extractable))
+  const length = bytes.length * 8;
+  const handle = new AesHandle(
+    createSecretKey(bytes),
+    name,
+    usages,
+    length.toDouble(),
+  );
+  return ok(
+    new CryptoKey(handle, { name, length: length.toDouble() }, extractable),
+  );
 }
 
-function pbkdf2Of(hash: string, key: KeyObject, salt: BufferSource, iterations: double,
-                  length: double): Promise<ArrayBuffer> {
+function pbkdf2Of(
+  hash: string,
+  key: KeyObject,
+  salt: BufferSource,
+  iterations: double,
+  length: double,
+): Promise<ArrayBuffer> {
   switch (hash) {
     case "SHA-1":
-      return subtlePbkdf2("sha1", key, salt, iterations, length)
+      return subtlePbkdf2("sha1", key, salt, iterations, length);
     case "SHA-384":
-      return subtlePbkdf2("sha384", key, salt, iterations, length)
+      return subtlePbkdf2("sha384", key, salt, iterations, length);
     case "SHA-512":
-      return subtlePbkdf2("sha512", key, salt, iterations, length)
+      return subtlePbkdf2("sha512", key, salt, iterations, length);
   }
-  return subtlePbkdf2("sha256", key, salt, iterations, length)
+  return subtlePbkdf2("sha256", key, salt, iterations, length);
 }
 
-function hkdfOf(hash: string, key: KeyObject, salt: BufferSource, info: BufferSource,
-                length: double): Promise<ArrayBuffer | undefined> {
+function hkdfOf(
+  hash: string,
+  key: KeyObject,
+  salt: BufferSource,
+  info: BufferSource,
+  length: double,
+): Promise<ArrayBuffer | undefined> {
   switch (hash) {
     case "SHA-1":
-      return subtleHkdf("sha1", key, salt, info, length)
+      return subtleHkdf("sha1", key, salt, info, length);
     case "SHA-384":
-      return subtleHkdf("sha384", key, salt, info, length)
+      return subtleHkdf("sha384", key, salt, info, length);
     case "SHA-512":
-      return subtleHkdf("sha512", key, salt, info, length)
+      return subtleHkdf("sha512", key, salt, info, length);
   }
-  return subtleHkdf("sha256", key, salt, info, length)
+  return subtleHkdf("sha256", key, salt, info, length);
 }
 
 class KdfHandle extends KeyHandle {
-  async deriveBits(algorithm: Algorithm, length: double | undefined,
-                   peer?: KeyHandle): Promise<Result<ArrayBuffer, SubtleError>> {
-    void peer
-    if (length == undefined) return err(operationError("length cannot be null"))
-    if (length % 8 != 0) return err(operationError("length must be a multiple of 8"))
-    if (length == 0) return ok(new ArrayBuffer(0))
-    const salt = algorithm.salt ?? kNoBytes
-    const hash = hashOf(algorithm)
+  async deriveBits(
+    algorithm: Algorithm,
+    length: double | undefined,
+    peer?: KeyHandle,
+  ): Promise<Result<ArrayBuffer, Problem>> {
+    void peer;
+    if (length == undefined)
+      return err(operationError("length cannot be null"));
+    if (length % 8 != 0)
+      return err(operationError("length must be a multiple of 8"));
+    if (length == 0) return ok(new ArrayBuffer(0));
+    const salt = algorithm.salt ?? kNoBytes;
+    const hash = hashOf(algorithm);
     if (this.name == "PBKDF2") {
-      const iterations = algorithm.iterations ?? 1
-      if (iterations > 2147483647 || length / 8 > 2147483647) return err(failed())
-      const bits = await pbkdf2Of(hash, this.key, salt, iterations, length / 8)
-      return ok(bits)
+      const iterations = algorithm.iterations ?? 1;
+      if (iterations > 2147483647 || length / 8 > 2147483647)
+        return err(parametersFailed());
+      const bits = await pbkdf2Of(hash, this.key, salt, iterations, length / 8);
+      return ok(bits);
     }
-    const info = algorithm.info ?? kNoBytes
-    if (bytesOf(info).length > 1024) return err(failed())
-    const result = await hkdfOf(hash, this.key, salt, info, length / 8)
-    if (result == undefined) return err(failed())
-    return ok(result)
+    const info = algorithm.info ?? kNoBytes;
+    if (bytesOf(info).length > 1024) return err(parametersFailed());
+    const result = await hkdfOf(hash, this.key, salt, info, length / 8);
+    if (result == undefined) return err(failed());
+    return ok(result);
   }
 }
 
@@ -1302,81 +2310,126 @@ function importKdf(
   algorithm: Algorithm,
   extractable: boolean,
   usages: KeyUsage[],
-): Result<CryptoKey | undefined, SubtleError> {
-  const name = algorithm.name
-  if (extractable) return err(syntaxError(`${name} keys are not extractable`))
+): Result<CryptoKey | undefined, Problem> {
+  const name = algorithm.name;
+  if (extractable) return err(syntaxError(`${name} keys are not extractable`));
   if (anyNotIn(usages, ["deriveKey", "deriveBits"]))
-    return err(syntaxError(`Unsupported key usage for a ${name} key`))
-  if (format != "raw") return ok(undefined)
-  const raw = rawData(keyData, "importKey")
-  if (raw.isErr()) return err(raw.error)
-  const key = createSecretKey(raw.value)
-  return ok(new CryptoKey(new KdfHandle(key, "secret", name, usages), { name }, false))
+    return err(syntaxError(`Unsupported key usage for a ${name} key`));
+  if (format != "raw") return ok(undefined);
+  const raw = rawData(keyData, "importKey");
+  if (raw.isErr()) return err(raw.error);
+  const key = createSecretKey(raw.value);
+  return ok(
+    new CryptoKey(new KdfHandle(key, "secret", name, usages), { name }, false),
+  );
 }
 
-function derKey(bytes: Uint8Array, format: KeyFormat): Result<KeyObject, SubtleError> {
-  if (format == "spki") return madeKey(createPublicKey({ key: bytes, format: "der", type: "spki" }))
-  return madeKey(createPrivateKey({ key: bytes, format: "der", type: "pkcs8" }))
+function derKey(
+  bytes: Uint8Array,
+  format: KeyFormat,
+): Result<KeyObject, Problem> {
+  if (format == "spki")
+    return madeKey(
+      createPublicKey({ key: bytes, format: "der", type: "spki" }),
+    );
+  return madeKey(
+    createPrivateKey({ key: bytes, format: "der", type: "pkcs8" }),
+  );
 }
 
-function jwkKey(jwk: JsonWebKey): Result<KeyObject, SubtleError> {
-  if (jwk.d == undefined) return madeKey(createPublicKey({ key: jsonOf(jwk), format: "jwk" }))
-  return madeKey(createPrivateKey({ key: jsonOf(jwk), format: "jwk" }))
+function jwkKey(jwk: JsonWebKey): Result<KeyObject, Problem> {
+  if (jwk.d == undefined)
+    return madeKey(createPublicKey({ key: jsonOf(jwk), format: "jwk" }));
+  return madeKey(createPrivateKey({ key: jsonOf(jwk), format: "jwk" }));
 }
 
 function keyType(key: KeyObject): KeyType {
-  return key.type == "private" ? "private" : key.type == "public" ? "public" : "secret"
+  return key.type == "private"
+    ? "private"
+    : key.type == "public"
+      ? "public"
+      : "secret";
 }
 
 function derLength(n: int): Uint8Array {
-  if (n < 128) return new Uint8Array([(n & 0x7f).toUint8()])
-  if (n < 256) return new Uint8Array([0x81, (n & 0xff).toUint8()])
-  return new Uint8Array([0x82, ((n >> 8) & 0xff).toUint8(), (n & 0xff).toUint8()])
+  if (n < 128) return new Uint8Array([(n & 0x7f).toUint8()]);
+  if (n < 256) return new Uint8Array([0x81, (n & 0xff).toUint8()]);
+  return new Uint8Array([
+    0x82,
+    ((n >> 8) & 0xff).toUint8(),
+    (n & 0xff).toUint8(),
+  ]);
 }
 
 function der(tag: int, content: Uint8Array): Uint8Array {
-  return concat([new Uint8Array([(tag & 0xff).toUint8()]), derLength(content.length), content])
+  return concat([
+    new Uint8Array([(tag & 0xff).toUint8()]),
+    derLength(content.length),
+    content,
+  ]);
 }
 
 class EcHandle extends KeyHandle {
-  constructor(key: KeyObject, name: string, usages: KeyUsage[], readonly curve: string) {
-    super(key, keyType(key), name, usages)
+  constructor(
+    key: KeyObject,
+    name: string,
+    usages: KeyUsage[],
+    readonly curve: string,
+  ) {
+    super(key, keyType(key), name, usages);
   }
 
-  async sign(algorithm: Algorithm, data: BufferSource): Promise<Result<ArrayBuffer, SubtleError>> {
-    if (this.type != "private") return err(invalidAccess("Key must be a private key"))
-    const result = await subtleSign(this.key, 2, opensslHash(hashOf(algorithm)), 0, data)
-    if (result == undefined) return err(failed())
-    return ok(result)
+  async sign(
+    algorithm: Algorithm,
+    data: BufferSource,
+  ): Promise<Result<ArrayBuffer, Problem>> {
+    if (this.type != "private")
+      return err(invalidAccess("Key must be a private key"));
+    const result = await subtleSign(
+      this.key,
+      2,
+      opensslHash(hashOf(algorithm)),
+      0,
+      data,
+    );
+    if (result == undefined) return err(failed());
+    return ok(result);
   }
 
-  async verify(algorithm: Algorithm, signature: BufferSource,
-               data: BufferSource): Promise<Result<boolean, SubtleError>> {
-    if (this.type != "public") return err(invalidAccess("Key must be a public key"))
-    const hash = opensslHash(hashOf(algorithm))
-    const verdict = await subtleVerify(this.key, 2, hash, 0, signature, data)
-    if (verdict < 0) return err(failed())
-    return ok(verdict == 1)
+  async verify(
+    algorithm: Algorithm,
+    signature: BufferSource,
+    data: BufferSource,
+  ): Promise<Result<boolean, Problem>> {
+    if (this.type != "public")
+      return err(invalidAccess("Key must be a public key"));
+    const hash = opensslHash(hashOf(algorithm));
+    const verdict = await subtleVerify(this.key, 2, hash, 0, signature, data);
+    if (verdict < 0) return err(failed());
+    return ok(verdict == 1);
   }
 
-  async deriveBits(algorithm: Algorithm, length: double | undefined,
-                   peer?: KeyHandle): Promise<Result<ArrayBuffer, SubtleError>> {
-    return ecdhDeriveBits(this, algorithm, length, peer)
+  async deriveBits(
+    algorithm: Algorithm,
+    length: double | undefined,
+    peer?: KeyHandle,
+  ): Promise<Result<ArrayBuffer, Problem>> {
+    return ecdhDeriveBits(this, algorithm, length, peer);
   }
 
-  exportRaw(): Result<ArrayBuffer | undefined, SubtleError> {
-    if (this.type != "public") return ok(undefined)
-    const jwk = jwkOfKey(this.key)
-    if (jwk.isErr()) return err(jwk.error)
-    const x = base64url(jwk.value.x ?? "")
-    const y = base64url(jwk.value.y ?? "")
-    return ok(arrayBufferOf(concat([new Uint8Array([4]), x, y])))
+  exportRaw(): Result<ArrayBuffer | undefined, Problem> {
+    if (this.type != "public") return ok(undefined);
+    const jwk = jwkOfKey(this.key);
+    if (jwk.isErr()) return err(jwk.error);
+    const x = base64url(jwk.value.x ?? "");
+    const y = base64url(jwk.value.y ?? "");
+    return ok(arrayBufferOf(concat([new Uint8Array([4]), x, y])));
   }
 
-  exportJwk(extractable: boolean): Result<JsonWebKey | undefined, SubtleError> {
-    const exportedJwk = jwkOfKey(this.key)
-    if (exportedJwk.isErr()) return err(exportedJwk.error)
-    const jwk = exportedJwk.value
+  exportJwk(extractable: boolean): Result<JsonWebKey | undefined, Problem> {
+    const exportedJwk = jwkOfKey(this.key);
+    if (exportedJwk.isErr()) return err(exportedJwk.error);
+    const jwk = exportedJwk.value;
     return ok({
       key_ops: opsOf(this.usages),
       ext: extractable,
@@ -1385,48 +2438,65 @@ class EcHandle extends KeyHandle {
       y: jwk.y,
       crv: jwk.crv,
       d: jwk.d,
-    })
+    });
   }
 }
 
 function ecUsages(name: string, isPublic: boolean): KeyUsage[] {
-  if (name == "ECDH") return isPublic ? [] : ["deriveKey", "deriveBits"]
-  return isPublic ? ["verify"] : ["sign"]
+  if (name == "ECDH") return isPublic ? [] : ["deriveKey", "deriveBits"];
+  return isPublic ? ["verify"] : ["sign"];
 }
 
-function checkEcUsages(name: string, isPublic: boolean, usages: KeyUsage[]): SubtleError | undefined {
+function checkEcUsages(
+  name: string,
+  isPublic: boolean,
+  usages: KeyUsage[],
+): Problem | undefined {
   if (anyNotIn(usages, ecUsages(name, isPublic)))
-    return syntaxError(`Unsupported key usage for a ${name} key`)
-  return undefined
+    return syntaxError(`Unsupported key usage for a ${name} key`);
+  return undefined;
 }
 
 function ecAlgorithm(curve: string): Uint8Array {
-  const ecPublicKey = new Uint8Array([0x06, 0x07, 0x2a, 0x86, 0x48, 0xce, 0x3d, 0x02, 0x01])
+  const ecPublicKey = new Uint8Array([
+    0x06, 0x07, 0x2a, 0x86, 0x48, 0xce, 0x3d, 0x02, 0x01,
+  ]);
   const oid =
     curve == "P-256"
-      ? new Uint8Array([0x06, 0x08, 0x2a, 0x86, 0x48, 0xce, 0x3d, 0x03, 0x01, 0x07])
+      ? new Uint8Array([
+          0x06, 0x08, 0x2a, 0x86, 0x48, 0xce, 0x3d, 0x03, 0x01, 0x07,
+        ])
       : curve == "P-384"
         ? new Uint8Array([0x06, 0x05, 0x2b, 0x81, 0x04, 0x00, 0x22])
-        : new Uint8Array([0x06, 0x05, 0x2b, 0x81, 0x04, 0x00, 0x23])
-  return der(0x30, concat([ecPublicKey, oid]))
+        : new Uint8Array([0x06, 0x05, 0x2b, 0x81, 0x04, 0x00, 0x23]);
+  return der(0x30, concat([ecPublicKey, oid]));
 }
 
 async function generateEc(
   algorithm: Algorithm,
   extractable: boolean,
   usages: KeyUsage[],
-): Promise<Result<CryptoKeyPair, SubtleError>> {
-  const name = algorithm.name
-  const curve = algorithm.namedCurve ?? "P-256"
-  if (anyNotIn(usages, name == "ECDSA" ? ["sign", "verify"] : ["deriveKey", "deriveBits"]))
-    return err(syntaxError(`Unsupported key usage for an ${name} key`))
-  const privateKey = await subtleGenerate(1, 0, 0, curve)
-  if (privateKey == undefined) return err(failed())
-  const publicKey = madeKey(createPublicKey(privateKey))
-  if (publicKey.isErr()) return err(publicKey.error)
-  const set = distinct(usages)
-  const publicUsages: KeyUsage[] = name == "ECDSA" ? union(set, ["verify"]) : []
-  const privateUsages = name == "ECDSA" ? union(set, ["sign"]) : union(set, ["deriveKey", "deriveBits"])
+): Promise<Result<CryptoKeyPair, Problem>> {
+  const name = algorithm.name;
+  const curve = algorithm.namedCurve ?? "P-256";
+  if (
+    anyNotIn(
+      usages,
+      name == "ECDSA" ? ["sign", "verify"] : ["deriveKey", "deriveBits"],
+    )
+  )
+    return err(syntaxError(`Unsupported key usage for an ${name} key`));
+  const privateKey = await subtleGenerate(1, 0, 0, curve);
+  if (privateKey == undefined) return err(failed());
+  const publicKey = madeKey(createPublicKey(privateKey));
+  if (publicKey.isErr()) return err(publicKey.error);
+  const set = distinct(usages);
+  const publicUsages: KeyUsage[] =
+    name == "ECDSA" ? union(set, ["verify"]) : [];
+  const privateUsages =
+    name == "ECDSA"
+      ? union(set, ["sign"])
+      : union(set, ["deriveKey", "deriveBits"]);
   return ok({
     publicKey: new CryptoKey(
       new EcHandle(publicKey.value, name, publicUsages, curve),
@@ -1438,7 +2508,7 @@ async function generateEc(
       { name, namedCurve: curve },
       extractable,
     ),
-  })
+  });
 }
 
 function importEc(
@@ -1447,58 +2517,87 @@ function importEc(
   algorithm: Algorithm,
   extractable: boolean,
   usages: KeyUsage[],
-): Result<CryptoKey | undefined, SubtleError> {
-  const name = algorithm.name
-  const curve = algorithm.namedCurve ?? "P-256"
-  let key: KeyObject
+): Result<CryptoKey | undefined, Problem> {
+  const name = algorithm.name;
+  const curve = algorithm.namedCurve ?? "P-256";
+  let key: KeyObject;
   if (format == "spki" || format == "pkcs8") {
-    const badUsage = checkEcUsages(name, format == "spki", usages)
-    if (badUsage != undefined) return err(badUsage)
-    const raw = rawData(keyData, "importKey")
-    if (raw.isErr()) return err(raw.error)
-    const made = derKey(raw.value, format)
-    if (made.isErr()) return err(made.error)
-    key = made.value
+    const badUsage = checkEcUsages(name, format == "spki", usages);
+    if (badUsage != undefined) return err(badUsage);
+    const raw = rawData(keyData, "importKey");
+    if (raw.isErr()) return err(raw.error);
+    const made = derKey(raw.value, format);
+    if (made.isErr()) return err(made.error);
+    key = made.value;
   } else if (format == "jwk") {
-    const data = jwkData(keyData)
-    if (data.isErr()) return err(data.error)
-    const jwk = data.value
-    if (jwk.kty == undefined) return err(dataError("Invalid keyData"))
-    if (jwk.kty != "EC") return err(dataError('Invalid JWK "kty" Parameter'))
-    if (jwk.crv != curve) return err(dataError('JWK "crv" does not match the requested algorithm'))
-    const badUsage = checkEcUsages(name, jwk.d == undefined, usages)
-    if (badUsage != undefined) return err(badUsage)
-    const bad = checkJwk(jwk, name == "ECDH" ? "enc" : "sig", usages, extractable)
-    if (bad != undefined) return err(bad)
+    const data = jwkData(keyData);
+    if (data.isErr()) return err(data.error);
+    const jwk = data.value;
+    if (jwk.kty == undefined) return err(dataError("Invalid keyData"));
+    if (jwk.kty != "EC") return err(dataError('Invalid JWK "kty" Parameter'));
+    if (jwk.crv != curve)
+      return err(dataError('JWK "crv" does not match the requested algorithm'));
+    const badUsage = checkEcUsages(name, jwk.d == undefined, usages);
+    if (badUsage != undefined) return err(badUsage);
+    const bad = checkJwk(
+      jwk,
+      name == "ECDH" ? "enc" : "sig",
+      usages,
+      extractable,
+    );
+    if (bad != undefined) return err(bad);
     if (name == "ECDSA" && jwk.alg != undefined) {
-      const wanted = jwk.alg == "ES256" ? "P-256" : jwk.alg == "ES384" ? "P-384" : jwk.alg == "ES512" ? "P-521" : ""
-      if (wanted != curve) return err(dataError('JWK "alg" does not match the requested algorithm'))
+      const wanted =
+        jwk.alg == "ES256"
+          ? "P-256"
+          : jwk.alg == "ES384"
+            ? "P-384"
+            : jwk.alg == "ES512"
+              ? "P-521"
+              : "";
+      if (wanted != curve)
+        return err(
+          dataError('JWK "alg" does not match the requested algorithm'),
+        );
     }
-    const made = jwkKey(jwk)
-    if (made.isErr()) return err(made.error)
-    key = made.value
+    const made = jwkKey(jwk);
+    if (made.isErr()) return err(made.error);
+    key = made.value;
   } else if (format == "raw") {
-    const badUsage = checkEcUsages(name, true, usages)
-    if (badUsage != undefined) return err(badUsage)
-    const point = rawData(keyData, "importKey")
-    if (point.isErr()) return err(point.error)
-    const made = madeKey(createPublicKey({
-      key: der(0x30, concat([ecAlgorithm(curve), der(0x03, concat([new Uint8Array([0]), point.value]))])),
-      format: "der",
-      type: "spki",
-    }))
-    if (made.isErr()) return err(made.error)
-    key = made.value
+    const badUsage = checkEcUsages(name, true, usages);
+    if (badUsage != undefined) return err(badUsage);
+    const point = rawData(keyData, "importKey");
+    if (point.isErr()) return err(point.error);
+    const made = madeKey(
+      createPublicKey({
+        key: der(
+          0x30,
+          concat([
+            ecAlgorithm(curve),
+            der(0x03, concat([new Uint8Array([0]), point.value])),
+          ]),
+        ),
+        format: "der",
+        type: "spki",
+      }),
+    );
+    if (made.isErr()) return err(made.error);
+    key = made.value;
   } else {
-    return ok(undefined)
+    return ok(undefined);
   }
-  if (key.asymmetricKeyType != "ec") return err(dataError("Invalid key type"))
-  let actual = ""
-  const actualJwk = jwkOfKey(key)
-  if (actualJwk.isOk()) actual = actualJwk.value.crv ?? ""
-  if (actual != curve) return err(dataError("Named curve mismatch"))
-  return ok(new CryptoKey(new EcHandle(key, name, usages, curve), { name, namedCurve: curve },
-                          extractable))
+  if (key.asymmetricKeyType != "ec") return err(dataError("Invalid key type"));
+  let actual = "";
+  const actualJwk = jwkOfKey(key);
+  if (actualJwk.isOk()) actual = actualJwk.value.crv ?? "";
+  if (actual != curve) return err(dataError("Named curve mismatch"));
+  return ok(
+    new CryptoKey(
+      new EcHandle(key, name, usages, curve),
+      { name, namedCurve: curve },
+      extractable,
+    ),
+  );
 }
 
 async function ecdhDeriveBits(
@@ -1506,26 +2605,36 @@ async function ecdhDeriveBits(
   algorithm: Algorithm,
   length: double | undefined,
   theirs: KeyHandle | undefined,
-): Promise<Result<ArrayBuffer, SubtleError>> {
-  if (theirs == undefined) return err(required("EcdhKeyDeriveParams", "public"))
-  if (handle.type != "private") return err(invalidAccess("baseKey must be a private key"))
+): Promise<Result<ArrayBuffer, Problem>> {
+  if (theirs == undefined)
+    return err(required("EcdhKeyDeriveParams", "public"));
+  if (handle.type != "private")
+    return err(invalidAccess("baseKey must be a private key"));
   if (theirs.name != handle.name)
-    return err(invalidAccess("The public and private keys must be of the same type"))
-  if (handle instanceof EcHandle && theirs instanceof EcHandle && handle.curve != theirs.curve)
-    return err(invalidAccess("Named curve mismatch"))
-  const bits = await subtleDerive(handle.key, theirs.key)
-  if (bits == undefined) return err(failed())
-  if (length == undefined) return ok(bits)
-  const bytes = Math.ceil(length / 8).toInt()
-  if (bits.byteLength < bytes) return err(operationError("derived bit length is too small"))
-  const cut = new Uint8Array(bits.slice(0, bytes))
-  const rest = length % 8
+    return err(
+      invalidAccess("The public and private keys must be of the same type"),
+    );
+  if (
+    handle instanceof EcHandle &&
+    theirs instanceof EcHandle &&
+    handle.curve != theirs.curve
+  )
+    return err(invalidAccess("Named curve mismatch"));
+  const bits = await subtleDerive(handle.key, theirs.key);
+  if (bits == undefined) return err(failed());
+  if (length == undefined) return ok(bits);
+  const bytes = Math.ceil(length / 8).toInt();
+  if (bits.byteLength < bytes)
+    return err(operationError("derived bit length is too small"));
+  const cut = new Uint8Array(bits.slice(0, bytes));
+  const rest = length % 8;
   if (rest != 0) {
-    const masks: uint8[] = [0, 0x80, 0xc0, 0xe0, 0xf0, 0xf8, 0xfc, 0xfe]
-    const last = cut.length - 1
-    if (last >= 0) cut[last] = cut[last] & (masks[Math.trunc(rest).toInt()] ?? 0)
+    const masks: uint8[] = [0, 0x80, 0xc0, 0xe0, 0xf0, 0xf8, 0xfc, 0xfe];
+    const last = cut.length - 1;
+    if (last >= 0)
+      cut[last] = cut[last] & (masks[Math.trunc(rest).toInt()] ?? 0);
   }
-  return ok(arrayBufferOf(cut))
+  return ok(arrayBufferOf(cut));
 }
 
 class RsaHandle extends KeyHandle {
@@ -1536,53 +2645,90 @@ class RsaHandle extends KeyHandle {
     readonly hash: string,
     readonly modulusLength: double,
   ) {
-    super(key, keyType(key), name, usages)
+    super(key, keyType(key), name, usages);
   }
 
-  async sign(algorithm: Algorithm, data: BufferSource): Promise<Result<ArrayBuffer, SubtleError>> {
-    if (this.type != "private") return err(invalidAccess("Key must be a private key"))
-    const pss = this.name == "RSA-PSS"
-    const salt = pss ? this.saltLength(algorithm) : 0
-    if (salt < 0) return err(failed())
-    const result = await subtleSign(this.key, pss ? 1 : 0, opensslHash(this.hash), salt, data)
-    if (result == undefined) return err(failed())
-    return ok(result)
+  async sign(
+    algorithm: Algorithm,
+    data: BufferSource,
+  ): Promise<Result<ArrayBuffer, Problem>> {
+    if (this.type != "private")
+      return err(invalidAccess("Key must be a private key"));
+    const pss = this.name == "RSA-PSS";
+    const salt = pss ? this.saltLength(algorithm) : 0;
+    if (salt < 0) return err(parametersFailed());
+    const result = await subtleSign(
+      this.key,
+      pss ? 1 : 0,
+      opensslHash(this.hash),
+      salt,
+      data,
+    );
+    if (result == undefined) return err(failed());
+    return ok(result);
   }
 
-  async verify(algorithm: Algorithm, signature: BufferSource,
-               data: BufferSource): Promise<Result<boolean, SubtleError>> {
-    if (this.type != "public") return err(invalidAccess("Key must be a public key"))
-    const pss = this.name == "RSA-PSS"
-    const salt = pss ? this.saltLength(algorithm) : 0
-    if (salt < 0) return err(failed())
-    const hash = opensslHash(this.hash)
-    const verdict = await subtleVerify(this.key, pss ? 1 : 0, hash, salt, signature, data)
-    if (verdict < 0) return err(failed())
-    return ok(verdict == 1)
+  async verify(
+    algorithm: Algorithm,
+    signature: BufferSource,
+    data: BufferSource,
+  ): Promise<Result<boolean, Problem>> {
+    if (this.type != "public")
+      return err(invalidAccess("Key must be a public key"));
+    const pss = this.name == "RSA-PSS";
+    const salt = pss ? this.saltLength(algorithm) : 0;
+    if (salt < 0) return err(parametersFailed());
+    const hash = opensslHash(this.hash);
+    const verdict = await subtleVerify(
+      this.key,
+      pss ? 1 : 0,
+      hash,
+      salt,
+      signature,
+      data,
+    );
+    if (verdict < 0) return err(failed());
+    return ok(verdict == 1);
   }
 
   private saltLength(algorithm: Algorithm): int {
-    const salt = algorithm.saltLength ?? 0
-    const most = Math.ceil((this.modulusLength - 1) / 8) - digestBytes(this.hash).toDouble() - 2
-    if (salt > most) return -1
-    return Math.trunc(salt).toInt()
+    const salt = algorithm.saltLength ?? 0;
+    const most =
+      Math.ceil((this.modulusLength - 1) / 8) -
+      digestBytes(this.hash).toDouble() -
+      2;
+    if (salt > most) return -1;
+    return Math.trunc(salt).toInt();
   }
 
-  async cipher(algorithm: Algorithm, data: BufferSource,
-               decrypt: boolean): Promise<Result<ArrayBuffer, SubtleError>> {
+  async cipher(
+    algorithm: Algorithm,
+    data: BufferSource,
+    decrypt: boolean,
+  ): Promise<Result<ArrayBuffer, Problem>> {
     if (this.type != (decrypt ? "private" : "public"))
-      return err(invalidAccess("The requested operation is not valid for the provided key"))
-    const label = algorithm.label ?? kNoBytes
-    const result = await subtleRsaOaep(this.key, opensslHash(this.hash), label, decrypt, data)
-    if (result == undefined) return err(failed())
-    return ok(result)
+      return err(
+        invalidAccess(
+          "The requested operation is not valid for the provided key",
+        ),
+      );
+    const label = algorithm.label ?? kNoBytes;
+    const result = await subtleRsaOaep(
+      this.key,
+      opensslHash(this.hash),
+      label,
+      decrypt,
+      data,
+    );
+    if (result == undefined) return err(cipherFailed(decrypt));
+    return ok(result);
   }
 
-  exportJwk(extractable: boolean): Result<JsonWebKey | undefined, SubtleError> {
-    const exportedJwk = jwkOfKey(this.key)
-    if (exportedJwk.isErr()) return err(exportedJwk.error)
-    const jwk = exportedJwk.value
-    const bits = this.hash == "SHA-1" ? "1" : this.hash.slice(4)
+  exportJwk(extractable: boolean): Result<JsonWebKey | undefined, Problem> {
+    const exportedJwk = jwkOfKey(this.key);
+    if (exportedJwk.isErr()) return err(exportedJwk.error);
+    const jwk = exportedJwk.value;
+    const bits = this.hash == "SHA-1" ? "1" : this.hash.slice(4);
     const alg =
       this.name == "RSASSA-PKCS1-v1_5"
         ? `RS${bits}`
@@ -1590,7 +2736,7 @@ class RsaHandle extends KeyHandle {
           ? `PS${bits}`
           : this.hash == "SHA-1"
             ? "RSA-OAEP"
-            : `RSA-OAEP-${bits}`
+            : `RSA-OAEP-${bits}`;
     return ok({
       key_ops: opsOf(this.usages),
       ext: extractable,
@@ -1604,53 +2750,79 @@ class RsaHandle extends KeyHandle {
       dp: jwk.dp,
       dq: jwk.dq,
       qi: jwk.qi,
-    })
+    });
   }
 }
 
 function rsaUsages(name: string, isPublic: boolean): KeyUsage[] {
-  if (name == "RSA-OAEP") return isPublic ? ["encrypt", "wrapKey"] : ["decrypt", "unwrapKey"]
-  return isPublic ? ["verify"] : ["sign"]
+  if (name == "RSA-OAEP")
+    return isPublic ? ["encrypt", "wrapKey"] : ["decrypt", "unwrapKey"];
+  return isPublic ? ["verify"] : ["sign"];
 }
 
-function rsaDetails(key: KeyObject): Result<Algorithm, SubtleError> {
-  const exportedJwk = jwkOfKey(key)
-  if (exportedJwk.isErr()) return err(exportedJwk.error)
-  const jwk = exportedJwk.value
-  const n = base64url(jwk.n ?? "")
-  let bits = n.length * 8
-  const first = n[0] ?? 0
-  for (let bit = 0x80; bit > 0 && (first.toInt() & bit) == 0; bit = bit >> 1) bits -= 1
-  return ok({ name: "", modulusLength: bits.toDouble(), publicExponent: base64url(jwk.e ?? "") })
+function rsaDetails(key: KeyObject): Result<Algorithm, Problem> {
+  const exportedJwk = jwkOfKey(key);
+  if (exportedJwk.isErr()) return err(exportedJwk.error);
+  const jwk = exportedJwk.value;
+  const n = base64url(jwk.n ?? "");
+  let bits = n.length * 8;
+  const first = n[0] ?? 0;
+  for (let bit = 0x80; bit > 0 && (first.toInt() & bit) == 0; bit = bit >> 1)
+    bits -= 1;
+  return ok({
+    name: "",
+    modulusLength: bits.toDouble(),
+    publicExponent: base64url(jwk.e ?? ""),
+  });
 }
 
 async function generateRsa(
   algorithm: Algorithm,
   extractable: boolean,
   usages: KeyUsage[],
-): Promise<Result<CryptoKeyPair, SubtleError>> {
-  const name = algorithm.name
-  const exponent = algorithm.publicExponent ?? kNoBytes
-  let value = 0
+): Promise<Result<CryptoKeyPair, Problem>> {
+  const name = algorithm.name;
+  const exponent = algorithm.publicExponent ?? kNoBytes;
+  let value = 0;
   for (let i = 0; i < exponent.length; i++) {
-    const shift = exponent.length - i - 1
-    const byte = exponent[i] ?? 0
+    const shift = exponent.length - i - 1;
+    const byte = exponent[i] ?? 0;
     if (shift >= 4 && byte != 0)
-      return err(operationError("The publicExponent must be equivalent to an unsigned 32-bit value"))
-    if (shift < 4) value = value + byte.toInt() * Math.pow(256, shift)
+      return err(
+        operationError(
+          "The publicExponent must be equivalent to an unsigned 32-bit value",
+        ),
+      );
+    if (shift < 4) value = value + byte.toInt() * Math.pow(256, shift);
   }
-  if (anyNotIn(usages, name == "RSA-OAEP" ? ["encrypt", "decrypt", "wrapKey", "unwrapKey"] : ["sign", "verify"]))
-    return err(syntaxError("Unsupported key usage for a RSA key"))
-  const modulusLength = algorithm.modulusLength ?? 0
-  const privateKey = await subtleGenerate(0, modulusLength, value.toDouble(), "")
-  if (privateKey == undefined) return err(failed())
-  const publicKey = madeKey(createPublicKey(privateKey))
-  if (publicKey.isErr()) return err(publicKey.error)
-  const set = distinct(usages)
-  const oaep = name == "RSA-OAEP"
-  const publicUsages = oaep ? union(set, ["encrypt", "wrapKey"]) : union(set, ["verify"])
-  const privateUsages = oaep ? union(set, ["decrypt", "unwrapKey"]) : union(set, ["sign"])
-  const hash = hashOf(algorithm)
+  if (
+    anyNotIn(
+      usages,
+      name == "RSA-OAEP"
+        ? ["encrypt", "decrypt", "wrapKey", "unwrapKey"]
+        : ["sign", "verify"],
+    )
+  )
+    return err(syntaxError("Unsupported key usage for a RSA key"));
+  const modulusLength = algorithm.modulusLength ?? 0;
+  const privateKey = await subtleGenerate(
+    0,
+    modulusLength,
+    value.toDouble(),
+    "",
+  );
+  if (privateKey == undefined) return err(failed());
+  const publicKey = madeKey(createPublicKey(privateKey));
+  if (publicKey.isErr()) return err(publicKey.error);
+  const set = distinct(usages);
+  const oaep = name == "RSA-OAEP";
+  const publicUsages = oaep
+    ? union(set, ["encrypt", "wrapKey"])
+    : union(set, ["verify"]);
+  const privateUsages = oaep
+    ? union(set, ["decrypt", "unwrapKey"])
+    : union(set, ["sign"]);
+  const hash = hashOf(algorithm);
   return ok({
     publicKey: new CryptoKey(
       new RsaHandle(publicKey.value, name, publicUsages, hash, modulusLength),
@@ -1659,10 +2831,15 @@ async function generateRsa(
     ),
     privateKey: new CryptoKey(
       new RsaHandle(privateKey, name, privateUsages, hash, modulusLength),
-      { name, modulusLength, publicExponent: exponent.slice(), hash: { name: hash } },
+      {
+        name,
+        modulusLength,
+        publicExponent: exponent.slice(),
+        hash: { name: hash },
+      },
       extractable,
     ),
-  })
+  });
 }
 
 function importRsa(
@@ -1671,30 +2848,35 @@ function importRsa(
   algorithm: Algorithm,
   extractable: boolean,
   usages: KeyUsage[],
-): Result<CryptoKey | undefined, SubtleError> {
-  const name = algorithm.name
-  const hash = hashOf(algorithm)
-  let key: KeyObject
+): Result<CryptoKey | undefined, Problem> {
+  const name = algorithm.name;
+  const hash = hashOf(algorithm);
+  let key: KeyObject;
   if (format == "spki" || format == "pkcs8") {
     if (anyNotIn(usages, rsaUsages(name, format == "spki")))
-      return err(syntaxError(`Unsupported key usage for an ${name} key`))
-    const raw = rawData(keyData, "importKey")
-    if (raw.isErr()) return err(raw.error)
-    const made = derKey(raw.value, format)
-    if (made.isErr()) return err(made.error)
-    key = made.value
+      return err(syntaxError(`Unsupported key usage for an ${name} key`));
+    const raw = rawData(keyData, "importKey");
+    if (raw.isErr()) return err(raw.error);
+    const made = derKey(raw.value, format);
+    if (made.isErr()) return err(made.error);
+    key = made.value;
   } else if (format == "jwk") {
-    const data = jwkData(keyData)
-    if (data.isErr()) return err(data.error)
-    const jwk = data.value
-    if (jwk.kty == undefined) return err(dataError("Invalid keyData"))
-    if (jwk.kty != "RSA") return err(dataError('Invalid JWK "kty" Parameter'))
+    const data = jwkData(keyData);
+    if (data.isErr()) return err(data.error);
+    const jwk = data.value;
+    if (jwk.kty == undefined) return err(dataError("Invalid keyData"));
+    if (jwk.kty != "RSA") return err(dataError('Invalid JWK "kty" Parameter'));
     if (anyNotIn(usages, rsaUsages(name, jwk.d == undefined)))
-      return err(syntaxError(`Unsupported key usage for an ${name} key`))
-    const bad = checkJwk(jwk, name == "RSA-OAEP" ? "enc" : "sig", usages, extractable)
-    if (bad != undefined) return err(bad)
+      return err(syntaxError(`Unsupported key usage for an ${name} key`));
+    const bad = checkJwk(
+      jwk,
+      name == "RSA-OAEP" ? "enc" : "sig",
+      usages,
+      extractable,
+    );
+    if (bad != undefined) return err(bad);
     if (jwk.alg != undefined) {
-      const bits = hash == "SHA-1" ? "1" : hash.slice(4)
+      const bits = hash == "SHA-1" ? "1" : hash.slice(4);
       const expected =
         name == "RSASSA-PKCS1-v1_5"
           ? `RS${bits}`
@@ -1702,68 +2884,94 @@ function importRsa(
             ? `PS${bits}`
             : hash == "SHA-1"
               ? "RSA-OAEP"
-              : `RSA-OAEP-${bits}`
+              : `RSA-OAEP-${bits}`;
       if (jwk.alg != expected)
-        return err(dataError('JWK "alg" does not match the requested algorithm'))
+        return err(
+          dataError('JWK "alg" does not match the requested algorithm'),
+        );
     }
-    const made = jwkKey(jwk)
-    if (made.isErr()) return err(made.error)
-    key = made.value
+    const made = jwkKey(jwk);
+    if (made.isErr()) return err(made.error);
+    key = made.value;
   } else {
-    return ok(undefined)
+    return ok(undefined);
   }
-  if (key.asymmetricKeyType != "rsa") return err(dataError("Invalid key type"))
-  const details = rsaDetails(key)
-  if (details.isErr()) return err(details.error)
-  const modulusLength = details.value.modulusLength ?? 0
-  const handle = new RsaHandle(key, name, usages, hash, modulusLength)
-  const publicExponent = details.value.publicExponent ?? kNoBytes
-  return ok(new CryptoKey(handle, { name, modulusLength, publicExponent, hash: { name: hash } },
-                          extractable))
+  if (key.asymmetricKeyType != "rsa") return err(dataError("Invalid key type"));
+  const details = rsaDetails(key);
+  if (details.isErr()) return err(details.error);
+  const modulusLength = details.value.modulusLength ?? 0;
+  const handle = new RsaHandle(key, name, usages, hash, modulusLength);
+  const publicExponent = details.value.publicExponent ?? kNoBytes;
+  return ok(
+    new CryptoKey(
+      handle,
+      { name, modulusLength, publicExponent, hash: { name: hash } },
+      extractable,
+    ),
+  );
 }
 
 function okpAlgorithm(name: string): Uint8Array {
-  return new Uint8Array([0x30, 0x05, 0x06, 0x03, 0x2b, 0x65, name == "Ed25519" ? 0x70 : 0x6e])
+  return new Uint8Array([
+    0x30,
+    0x05,
+    0x06,
+    0x03,
+    0x2b,
+    0x65,
+    name == "Ed25519" ? 0x70 : 0x6e,
+  ]);
 }
 
 class OkpHandle extends KeyHandle {
   constructor(key: KeyObject, name: string, usages: KeyUsage[]) {
-    super(key, keyType(key), name, usages)
+    super(key, keyType(key), name, usages);
   }
 
-  async sign(algorithm: Algorithm, data: BufferSource): Promise<Result<ArrayBuffer, SubtleError>> {
-    void algorithm
-    if (this.type != "private") return err(invalidAccess("Key must be a private key"))
-    const result = await subtleSign(this.key, 3, "", 0, data)
-    if (result == undefined) return err(failed())
-    return ok(result)
+  async sign(
+    algorithm: Algorithm,
+    data: BufferSource,
+  ): Promise<Result<ArrayBuffer, Problem>> {
+    void algorithm;
+    if (this.type != "private")
+      return err(invalidAccess("Key must be a private key"));
+    const result = await subtleSign(this.key, 3, "", 0, data);
+    if (result == undefined) return err(failed());
+    return ok(result);
   }
 
-  async verify(algorithm: Algorithm, signature: BufferSource,
-               data: BufferSource): Promise<Result<boolean, SubtleError>> {
-    void algorithm
-    if (this.type != "public") return err(invalidAccess("Key must be a public key"))
-    const verdict = await subtleVerify(this.key, 3, "", 0, signature, data)
-    if (verdict < 0) return err(failed())
-    return ok(verdict == 1)
+  async verify(
+    algorithm: Algorithm,
+    signature: BufferSource,
+    data: BufferSource,
+  ): Promise<Result<boolean, Problem>> {
+    void algorithm;
+    if (this.type != "public")
+      return err(invalidAccess("Key must be a public key"));
+    const verdict = await subtleVerify(this.key, 3, "", 0, signature, data);
+    if (verdict < 0) return err(failed());
+    return ok(verdict == 1);
   }
 
-  async deriveBits(algorithm: Algorithm, length: double | undefined,
-                   peer?: KeyHandle): Promise<Result<ArrayBuffer, SubtleError>> {
-    return ecdhDeriveBits(this, algorithm, length, peer)
+  async deriveBits(
+    algorithm: Algorithm,
+    length: double | undefined,
+    peer?: KeyHandle,
+  ): Promise<Result<ArrayBuffer, Problem>> {
+    return ecdhDeriveBits(this, algorithm, length, peer);
   }
 
-  exportRaw(): Result<ArrayBuffer | undefined, SubtleError> {
-    if (this.type != "public") return ok(undefined)
-    const jwk = jwkOfKey(this.key)
-    if (jwk.isErr()) return err(jwk.error)
-    return ok(arrayBufferOf(base64url(jwk.value.x ?? "")))
+  exportRaw(): Result<ArrayBuffer | undefined, Problem> {
+    if (this.type != "public") return ok(undefined);
+    const jwk = jwkOfKey(this.key);
+    if (jwk.isErr()) return err(jwk.error);
+    return ok(arrayBufferOf(base64url(jwk.value.x ?? "")));
   }
 
-  exportJwk(extractable: boolean): Result<JsonWebKey | undefined, SubtleError> {
-    const exportedJwk = jwkOfKey(this.key)
-    if (exportedJwk.isErr()) return err(exportedJwk.error)
-    const jwk = exportedJwk.value
+  exportJwk(extractable: boolean): Result<JsonWebKey | undefined, Problem> {
+    const exportedJwk = jwkOfKey(this.key);
+    if (exportedJwk.isErr()) return err(exportedJwk.error);
+    const jwk = exportedJwk.value;
     return ok({
       key_ops: opsOf(this.usages),
       ext: extractable,
@@ -1772,57 +2980,93 @@ class OkpHandle extends KeyHandle {
       d: jwk.d,
       x: jwk.x,
       kty: "OKP",
-    })
+    });
   }
 }
 
 function okpUsages(name: string, isPublic: boolean): KeyUsage[] {
-  if (name == "X25519") return isPublic ? [] : ["deriveKey", "deriveBits"]
-  return isPublic ? ["verify"] : ["sign"]
+  if (name == "X25519") return isPublic ? [] : ["deriveKey", "deriveBits"];
+  return isPublic ? ["verify"] : ["sign"];
 }
 
-function checkOkpUsages(name: string, isPublic: boolean, usages: KeyUsage[]): SubtleError | undefined {
+function checkOkpUsages(
+  name: string,
+  isPublic: boolean,
+  usages: KeyUsage[],
+): Problem | undefined {
   if (anyNotIn(usages, okpUsages(name, isPublic)))
-    return syntaxError(`Unsupported key usage for a ${name} key`)
-  return undefined
+    return syntaxError(`Unsupported key usage for a ${name} key`);
+  return undefined;
 }
 
-function okpRawKey(name: string, bytes: Uint8Array, isPublic: boolean): Result<KeyObject, SubtleError> {
-  if (bytes.length != 32) return err(dataError(`${name} raw keys must be exactly 32-bytes`))
+function okpRawKey(
+  name: string,
+  bytes: Uint8Array,
+  isPublic: boolean,
+): Result<KeyObject, Problem> {
+  if (bytes.length != 32)
+    return err(dataError(`${name} raw keys must be exactly 32-bytes`));
   if (isPublic)
-    return madeKey(createPublicKey({
-      key: der(0x30, concat([okpAlgorithm(name), der(0x03, concat([new Uint8Array([0]), bytes]))])),
+    return madeKey(
+      createPublicKey({
+        key: der(
+          0x30,
+          concat([
+            okpAlgorithm(name),
+            der(0x03, concat([new Uint8Array([0]), bytes])),
+          ]),
+        ),
+        format: "der",
+        type: "spki",
+      }),
+    );
+  const inner = der(0x04, bytes);
+  return madeKey(
+    createPrivateKey({
+      key: der(
+        0x30,
+        concat([
+          new Uint8Array([0x02, 0x01, 0x00]),
+          okpAlgorithm(name),
+          der(0x04, inner),
+        ]),
+      ),
       format: "der",
-      type: "spki",
-    }))
-  const inner = der(0x04, bytes)
-  return madeKey(createPrivateKey({
-    key: der(0x30, concat([new Uint8Array([0x02, 0x01, 0x00]), okpAlgorithm(name), der(0x04, inner)])),
-    format: "der",
-    type: "pkcs8",
-  }))
+      type: "pkcs8",
+    }),
+  );
 }
 
 async function generateOkp(
   algorithm: Algorithm,
   extractable: boolean,
   usages: KeyUsage[],
-): Promise<Result<CryptoKeyPair, SubtleError>> {
-  const name = algorithm.name
-  const ed = name == "Ed25519"
+): Promise<Result<CryptoKeyPair, Problem>> {
+  const name = algorithm.name;
+  const ed = name == "Ed25519";
   if (anyNotIn(usages, ed ? ["sign", "verify"] : ["deriveKey", "deriveBits"]))
-    return err(syntaxError(`Unsupported key usage for an ${name} key`))
-  const privateKey = await subtleGenerate(ed ? 2 : 3, 0, 0, "")
-  if (privateKey == undefined) return err(failed())
-  const publicKey = madeKey(createPublicKey(privateKey))
-  if (publicKey.isErr()) return err(publicKey.error)
-  const set = distinct(usages)
-  const publicUsages: KeyUsage[] = ed ? union(set, ["verify"]) : []
-  const privateUsages = ed ? union(set, ["sign"]) : union(set, ["deriveKey", "deriveBits"])
+    return err(syntaxError(`Unsupported key usage for an ${name} key`));
+  const privateKey = await subtleGenerate(ed ? 2 : 3, 0, 0, "");
+  if (privateKey == undefined) return err(failed());
+  const publicKey = madeKey(createPublicKey(privateKey));
+  if (publicKey.isErr()) return err(publicKey.error);
+  const set = distinct(usages);
+  const publicUsages: KeyUsage[] = ed ? union(set, ["verify"]) : [];
+  const privateUsages = ed
+    ? union(set, ["sign"])
+    : union(set, ["deriveKey", "deriveBits"]);
   return ok({
-    privateKey: new CryptoKey(new OkpHandle(privateKey, name, privateUsages), { name }, extractable),
-    publicKey: new CryptoKey(new OkpHandle(publicKey.value, name, publicUsages), { name }, true),
-  })
+    privateKey: new CryptoKey(
+      new OkpHandle(privateKey, name, privateUsages),
+      { name },
+      extractable,
+    ),
+    publicKey: new CryptoKey(
+      new OkpHandle(publicKey.value, name, publicUsages),
+      { name },
+      true,
+    ),
+  });
 }
 
 function importOkp(
@@ -1831,73 +3075,93 @@ function importOkp(
   algorithm: Algorithm,
   extractable: boolean,
   usages: KeyUsage[],
-): Result<CryptoKey | undefined, SubtleError> {
-  const name = algorithm.name
-  let key: KeyObject
+): Result<CryptoKey | undefined, Problem> {
+  const name = algorithm.name;
+  let key: KeyObject;
   if (format == "spki" || format == "pkcs8") {
-    const badUsage = checkOkpUsages(name, format == "spki", usages)
-    if (badUsage != undefined) return err(badUsage)
-    const raw = rawData(keyData, "importKey")
-    if (raw.isErr()) return err(raw.error)
-    const made = derKey(raw.value, format)
-    if (made.isErr()) return err(made.error)
-    key = made.value
+    const badUsage = checkOkpUsages(name, format == "spki", usages);
+    if (badUsage != undefined) return err(badUsage);
+    const raw = rawData(keyData, "importKey");
+    if (raw.isErr()) return err(raw.error);
+    const made = derKey(raw.value, format);
+    if (made.isErr()) return err(made.error);
+    key = made.value;
   } else if (format == "jwk") {
-    const data = jwkData(keyData)
-    if (data.isErr()) return err(data.error)
-    const jwk = data.value
-    if (jwk.kty == undefined) return err(dataError("Invalid keyData"))
-    if (jwk.kty != "OKP") return err(dataError('Invalid JWK "kty" Parameter'))
-    if (jwk.crv != name) return err(dataError('JWK "crv" Parameter and algorithm name mismatch'))
-    const isPublic = jwk.d == undefined
-    const bad = checkJwk(jwk, name == "Ed25519" ? "sig" : "enc", usages, extractable)
-    if (bad != undefined) return err(bad)
-    if (jwk.alg != undefined && name == "Ed25519" && jwk.alg != name && jwk.alg != "EdDSA")
-      return err(dataError('JWK "alg" does not match the requested algorithm'))
-    const x = jwk.x
-    if (x == undefined) return err(dataError(isPublic ? "Invalid keyData" : "Invalid JWK"))
-    const badUsage = checkOkpUsages(name, isPublic, usages)
-    if (badUsage != undefined) return err(badUsage)
-    const publicKey = okpRawKey(name, base64url(x), true)
-    if (publicKey.isErr()) return err(publicKey.error)
-    const d = jwk.d
+    const data = jwkData(keyData);
+    if (data.isErr()) return err(data.error);
+    const jwk = data.value;
+    if (jwk.kty == undefined) return err(dataError("Invalid keyData"));
+    if (jwk.kty != "OKP") return err(dataError('Invalid JWK "kty" Parameter'));
+    if (jwk.crv != name)
+      return err(dataError('JWK "crv" Parameter and algorithm name mismatch'));
+    const isPublic = jwk.d == undefined;
+    const bad = checkJwk(
+      jwk,
+      name == "Ed25519" ? "sig" : "enc",
+      usages,
+      extractable,
+    );
+    if (bad != undefined) return err(bad);
+    if (
+      jwk.alg != undefined &&
+      name == "Ed25519" &&
+      jwk.alg != name &&
+      jwk.alg != "EdDSA"
+    )
+      return err(dataError('JWK "alg" does not match the requested algorithm'));
+    const x = jwk.x;
+    if (x == undefined)
+      return err(dataError(isPublic ? "Invalid keyData" : "Invalid JWK"));
+    const badUsage = checkOkpUsages(name, isPublic, usages);
+    if (badUsage != undefined) return err(badUsage);
+    const publicKey = okpRawKey(name, base64url(x), true);
+    if (publicKey.isErr()) return err(publicKey.error);
+    const d = jwk.d;
     if (d == undefined) {
-      key = publicKey.value
+      key = publicKey.value;
     } else {
-      const privateKey = okpRawKey(name, base64url(d), false)
-      if (privateKey.isErr()) return err(privateKey.error)
-      key = privateKey.value
-      const derived = madeKey(createPublicKey(privateKey.value))
-      if (derived.isErr()) return err(derived.error)
-      if (!derived.value.equals(publicKey.value)) return err(dataError("Invalid keyData"))
+      const privateKey = okpRawKey(name, base64url(d), false);
+      if (privateKey.isErr()) return err(privateKey.error);
+      key = privateKey.value;
+      const derived = madeKey(createPublicKey(privateKey.value));
+      if (derived.isErr()) return err(derived.error);
+      if (!derived.value.equals(publicKey.value))
+        return err(dataError("Invalid keyData"));
     }
   } else if (format == "raw") {
-    const badUsage = checkOkpUsages(name, true, usages)
-    if (badUsage != undefined) return err(badUsage)
-    const raw = rawData(keyData, "importKey")
-    if (raw.isErr()) return err(raw.error)
-    const made = okpRawKey(name, raw.value, true)
-    if (made.isErr()) return err(made.error)
-    key = made.value
+    const badUsage = checkOkpUsages(name, true, usages);
+    if (badUsage != undefined) return err(badUsage);
+    const raw = rawData(keyData, "importKey");
+    if (raw.isErr()) return err(raw.error);
+    const made = okpRawKey(name, raw.value, true);
+    if (made.isErr()) return err(made.error);
+    key = made.value;
   } else {
-    return ok(undefined)
+    return ok(undefined);
   }
-  if (key.asymmetricKeyType != name.toLowerCase()) return err(dataError("Invalid key type"))
-  return ok(new CryptoKey(new OkpHandle(key, name, usages), { name }, extractable))
+  if (key.asymmetricKeyType != name.toLowerCase())
+    return err(dataError("Invalid key type"));
+  return ok(
+    new CryptoKey(new OkpHandle(key, name, usages), { name }, extractable),
+  );
 }
 
 function imported(
-  made: Result<CryptoKey | undefined, SubtleError>,
+  made: Result<CryptoKey | undefined, Problem>,
   algorithm: Algorithm,
   format: KeyFormat,
-): Result<CryptoKey, SubtleError> {
-  if (made.isErr()) return err(made.error)
-  const key = made.value
+): Result<CryptoKey, Problem> {
+  if (made.isErr()) return err(made.error);
+  const key = made.value;
   if (key == undefined)
-    return err(notSupported(`Unable to import ${algorithm.name} using ${format} format`))
+    return err(
+      notSupported(`Unable to import ${algorithm.name} using ${format} format`),
+    );
   if ((key.type == "secret" || key.type == "private") && key.usages.length == 0)
-    return err(syntaxError(`Usages cannot be empty when importing a ${key.type} key.`))
-  return ok(key)
+    return err(
+      syntaxError(`Usages cannot be empty when importing a ${key.type} key.`),
+    );
+  return ok(key);
 }
 
 function importAny(
@@ -1906,79 +3170,117 @@ function importAny(
   algorithm: Algorithm,
   extractable: boolean,
   usages: KeyUsage[],
-): Result<CryptoKey, SubtleError> {
-  const name = algorithm.name
+): Result<CryptoKey, Problem> {
+  const name = algorithm.name;
   if (name == "HMAC")
-    return imported(importHmac(format, keyData, algorithm, extractable, usages), algorithm, format)
+    return imported(
+      importHmac(format, keyData, algorithm, extractable, usages),
+      algorithm,
+      format,
+    );
   if (name.startsWith("AES-"))
-    return imported(importAes(format, keyData, algorithm, extractable, usages), algorithm, format)
+    return imported(
+      importAes(format, keyData, algorithm, extractable, usages),
+      algorithm,
+      format,
+    );
   if (name == "PBKDF2" || name == "HKDF")
-    return imported(importKdf(format, keyData, algorithm, extractable, usages), algorithm, format)
+    return imported(
+      importKdf(format, keyData, algorithm, extractable, usages),
+      algorithm,
+      format,
+    );
   if (name == "ECDSA" || name == "ECDH")
-    return imported(importEc(format, keyData, algorithm, extractable, usages), algorithm, format)
+    return imported(
+      importEc(format, keyData, algorithm, extractable, usages),
+      algorithm,
+      format,
+    );
   if (name.startsWith("RSA"))
-    return imported(importRsa(format, keyData, algorithm, extractable, usages), algorithm, format)
-  return imported(importOkp(format, keyData, algorithm, extractable, usages), algorithm, format)
+    return imported(
+      importRsa(format, keyData, algorithm, extractable, usages),
+      algorithm,
+      format,
+    );
+  return imported(
+    importOkp(format, keyData, algorithm, extractable, usages),
+    algorithm,
+    format,
+  );
 }
 
-function createdKey(made: Result<CryptoKey, SubtleError>): Result<CryptoKey, SubtleError> {
-  if (made.isErr()) return err(made.error)
+function createdKey(
+  made: Result<CryptoKey, Problem>,
+): Result<CryptoKey, Problem> {
+  if (made.isErr()) return err(made.error);
   if (made.value.usages.length == 0)
-    return err(syntaxError("Usages cannot be empty when creating a key."))
-  return ok(made.value)
+    return err(syntaxError("Usages cannot be empty when creating a key."));
+  return ok(made.value);
 }
 
-function createdPair(made: Result<CryptoKeyPair, SubtleError>): Result<CryptoKeyPair, SubtleError> {
-  if (made.isErr()) return err(made.error)
+function createdPair(
+  made: Result<CryptoKeyPair, Problem>,
+): Result<CryptoKeyPair, Problem> {
+  if (made.isErr()) return err(made.error);
   if (made.value.privateKey.usages.length == 0)
-    return err(syntaxError("Usages cannot be empty when creating a key."))
-  return ok(made.value)
+    return err(syntaxError("Usages cannot be empty when creating a key."));
+  return ok(made.value);
 }
 
-function normalizeOr(algorithm: AlgorithmIdentifier, op: string,
-                     fallback: string): Result<Algorithm, SubtleError> {
-  const first = normalize(algorithm, op)
-  if (first.isOk()) return ok(first.value)
-  return normalize(algorithm, fallback)
+function normalizeOr(
+  algorithm: AlgorithmIdentifier,
+  op: string,
+  fallback: string,
+): Result<Algorithm, Problem> {
+  const first = normalize(algorithm, op);
+  if (first.isOk()) return ok(first.value);
+  return normalize(algorithm, fallback);
 }
 
-async function exportBytes(format: KeyFormat,
-                           key: CryptoKey): Promise<Result<ArrayBuffer, SubtleError>> {
-  const result = await key.export(format)
-  if (result.isErr()) return err(result.error)
-  const value = result.value
-  if (value instanceof ArrayBuffer) return ok(value)
-  return ok(arrayBufferOf(new TextEncoder().encode(JSON.stringify(value))))
+async function exportBytes(
+  format: KeyFormat,
+  key: CryptoKey,
+): Promise<Result<ArrayBuffer, SubtleExportKeyError>> {
+  const result = await key.export(format);
+  if (result.isErr()) return err(result.error);
+  const value = result.value;
+  if (value instanceof ArrayBuffer) return ok(value);
+  return ok(arrayBufferOf(new TextEncoder().encode(JSON.stringify(value))));
 }
 
-function unwrappedData(format: KeyFormat, bytes: ArrayBuffer): Result<KeyData, SubtleError> {
-  if (format != "jwk") return ok(bytes)
-  const text = new TextDecoder("utf-8", { fatal: true }).decode(bytes)
-  if (text.isErr()) return err(dataError("Invalid wrapped JWK key"))
-  const json = JSON.parse(text.value)
-  if (json.isErr()) return err(dataError("Invalid wrapped JWK key"))
-  const jwk = jwkFromJson(json.value)
-  if (jwk.isErr()) return err(dataError("Invalid wrapped JWK key"))
-  return ok(jwk.value)
+function unwrappedData(
+  format: KeyFormat,
+  bytes: ArrayBuffer,
+): Result<KeyData, Problem> {
+  if (format != "jwk") return ok(bytes);
+  const text = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+  if (text.isErr()) return err(dataError("Invalid wrapped JWK key"));
+  const json = JSON.parse(text.value);
+  if (json.isErr()) return err(dataError("Invalid wrapped JWK key"));
+  const jwk = jwkFromJson(json.value);
+  if (jwk.isErr()) return err(dataError("Invalid wrapped JWK key"));
+  return ok(jwk.value);
 }
 
-function keyLength(algorithm: AlgorithmIdentifier): Result<double | undefined, SubtleError> {
-  const normalizedAlg = normalize(algorithm, "get key length")
-  if (normalizedAlg.isErr()) return err(normalizedAlg.error)
-  const a = normalizedAlg.value
+function keyLength(
+  algorithm: AlgorithmIdentifier,
+): Result<double | undefined, Problem> {
+  const normalizedAlg = normalize(algorithm, "get key length");
+  if (normalizedAlg.isErr()) return err(normalizedAlg.error);
+  const a = normalizedAlg.value;
   if (a.name.startsWith("AES-")) {
-    const length = a.length ?? 0
+    const length = a.length ?? 0;
     if (length != 128 && length != 192 && length != 256)
-      return err(operationError("Invalid key length"))
-    return ok(length)
+      return err(operationError("Invalid key length"));
+    return ok(length);
   }
   if (a.name == "HMAC") {
-    const length = a.length
-    if (length == undefined) return ok(blockBits(hashOf(a)))
-    if (length != 0) return ok(length)
-    return err(operationError("Invalid key length"))
+    const length = a.length;
+    if (length == undefined) return ok(blockBits(hashOf(a)));
+    if (length != 0) return ok(length);
+    return err(operationError("Invalid key length"));
   }
-  return ok(undefined)
+  return ok(undefined);
 }
 
 async function unwrapWith(
@@ -1990,15 +3292,27 @@ async function unwrapWith(
   extractable: boolean,
   usages: KeyUsage[],
   importer: Importer,
-): Promise<Result<CryptoKey, SubtleError>> {
-  const unwrapAlg = normalizeOr(unwrapAlgorithm, "unwrapKey", "decrypt")
-  if (unwrapAlg.isErr()) return err(unwrapAlg.error)
-  const keyAlg = normalize(unwrappedKeyAlgorithm, "importKey")
-  if (keyAlg.isErr()) return err(keyAlg.error)
-  const keyData = await unwrappingKey.unwrap(format, wrappedKey, unwrapAlgorithm)
-  if (keyData.isErr()) return err(keyData.error)
-  return imported(importer(format, keyData.value, keyAlg.value, extractable, usages), keyAlg.value,
-                  format)
+): Promise<Result<CryptoKey, SubtleUnwrapKeyError>> {
+  const unwrapAlg = normalizeOr(unwrapAlgorithm, "unwrapKey", "decrypt");
+  if (unwrapAlg.isErr()) {
+    return err(unwrapKeyError(unwrapAlg.error));
+  }
+  const keyAlg = normalize(unwrappedKeyAlgorithm, "importKey");
+  if (keyAlg.isErr()) {
+    return err(unwrapKeyError(keyAlg.error));
+  }
+  const keyData = await unwrappingKey.unwrap(
+    format,
+    wrappedKey,
+    unwrapAlgorithm,
+  );
+  if (keyData.isErr()) {
+    return err(keyData.error);
+  }
+  const made = importer(format, keyData.value, keyAlg.value, extractable, usages);
+  const key = imported(made, keyAlg.value, format);
+
+  return unwrapKeyResult(key);
 }
 
 function importWith(
@@ -2008,36 +3322,38 @@ function importWith(
   extractable: boolean,
   usages: KeyUsage[],
   importer: Importer,
-): Result<CryptoKey, SubtleError> {
-  const alg = normalize(algorithm, "importKey")
-  if (alg.isErr()) return err(alg.error)
-  return imported(importer(format, keyData, alg.value, extractable, usages), alg.value, format)
+): Result<CryptoKey, Problem> {
+  const alg = normalize(algorithm, "importKey");
+  if (alg.isErr()) return err(alg.error);
+  return imported(
+    importer(format, keyData, alg.value, extractable, usages),
+    alg.value,
+    format,
+  );
 }
 
 export class SubtleCrypto {
-  async digest(algorithm: AlgorithmIdentifier,
-               data: BufferSource): Promise<Result<ArrayBuffer, SubtleError>> {
-    const alg = normalize(algorithm, "digest")
-    if (alg.isErr()) return err(alg.error)
-    const hashed = await digestOf(alg.value.name, data)
-    return ok(hashed)
+  async digest(
+    algorithm: AlgorithmIdentifier,
+    data: BufferSource,
+  ): Promise<Result<ArrayBuffer, SubtleDigestError>> {
+    const alg = normalize(algorithm, "digest");
+    if (alg.isErr()) {
+      return err(digestError(alg.error));
+    }
+    const hashed = await digestOf(alg.value.name, data);
+
+    return ok(hashed);
   }
 
   async generateKey(
     algorithm: AlgorithmIdentifier,
     extractable: boolean,
     keyUsages: KeyUsage[],
-  ): Promise<Result<CryptoKey | CryptoKeyPair, SubtleError>> {
-    const normalizedAlg = normalize(algorithm, "generateKey")
-    if (normalizedAlg.isErr()) return err(normalizedAlg.error)
-    const alg = normalizedAlg.value
-    const name = alg.name
-    if (name == "HMAC") return createdKey(generateHmac(alg, extractable, keyUsages))
-    if (name.startsWith("AES-")) return createdKey(generateAes(alg, extractable, keyUsages))
-    if (name == "ECDSA" || name == "ECDH")
-      return createdPair(await generateEc(alg, extractable, keyUsages))
-    if (name.startsWith("RSA")) return createdPair(await generateRsa(alg, extractable, keyUsages))
-    return createdPair(await generateOkp(alg, extractable, keyUsages))
+  ): Promise<Result<CryptoKey | CryptoKeyPair, SubtleGenerateKeyError>> {
+    const generated = await generateAny(algorithm, extractable, keyUsages);
+
+    return generateKeyResult(generated);
   }
 
   async importKey(
@@ -2046,20 +3362,29 @@ export class SubtleCrypto {
     algorithm: AlgorithmIdentifier,
     extractable: boolean,
     keyUsages: KeyUsage[],
-  ): Promise<Result<CryptoKey, SubtleError>> {
-    const alg = normalize(algorithm, "importKey")
-    if (alg.isErr()) return err(alg.error)
-    return importAny(format, keyData, alg.value, extractable, keyUsages)
+  ): Promise<Result<CryptoKey, SubtleImportKeyError>> {
+    const alg = normalize(algorithm, "importKey");
+    if (alg.isErr()) {
+      return err(importKeyError(alg.error));
+    }
+    const imported = importAny(format, keyData, alg.value, extractable, keyUsages);
+
+    return importKeyResult(imported);
   }
 
-  async exportKey(format: KeyFormat,
-                  key: CryptoKey): Promise<Result<ArrayBuffer | JsonWebKey, SubtleError>> {
-    return key.export(format)
+  async exportKey(
+    format: KeyFormat,
+    key: CryptoKey,
+  ): Promise<Result<ArrayBuffer | JsonWebKey, SubtleExportKeyError>> {
+    return key.export(format);
   }
 
-  async sign(algorithm: AlgorithmIdentifier, key: CryptoKey,
-             data: BufferSource): Promise<Result<ArrayBuffer, SubtleError>> {
-    return key.sign(algorithm, data)
+  async sign(
+    algorithm: AlgorithmIdentifier,
+    key: CryptoKey,
+    data: BufferSource,
+  ): Promise<Result<ArrayBuffer, SubtleSignError>> {
+    return key.sign(algorithm, data);
   }
 
   async verify(
@@ -2067,26 +3392,32 @@ export class SubtleCrypto {
     key: CryptoKey,
     signature: BufferSource,
     data: BufferSource,
-  ): Promise<Result<boolean, SubtleError>> {
-    return key.verify(algorithm, signature, data)
+  ): Promise<Result<boolean, SubtleVerifyError>> {
+    return key.verify(algorithm, signature, data);
   }
 
-  async encrypt(algorithm: AlgorithmIdentifier, key: CryptoKey,
-                data: BufferSource): Promise<Result<ArrayBuffer, SubtleError>> {
-    return key.encrypt(algorithm, data)
+  async encrypt(
+    algorithm: AlgorithmIdentifier,
+    key: CryptoKey,
+    data: BufferSource,
+  ): Promise<Result<ArrayBuffer, SubtleEncryptError>> {
+    return key.encrypt(algorithm, data);
   }
 
-  async decrypt(algorithm: AlgorithmIdentifier, key: CryptoKey,
-                data: BufferSource): Promise<Result<ArrayBuffer, SubtleError>> {
-    return key.decrypt(algorithm, data)
+  async decrypt(
+    algorithm: AlgorithmIdentifier,
+    key: CryptoKey,
+    data: BufferSource,
+  ): Promise<Result<ArrayBuffer, SubtleDecryptError>> {
+    return key.decrypt(algorithm, data);
   }
 
   async deriveBits(
     algorithm: AlgorithmIdentifier,
     baseKey: CryptoKey,
     length?: double,
-  ): Promise<Result<ArrayBuffer, SubtleError>> {
-    return baseKey.deriveBits(algorithm, length)
+  ): Promise<Result<ArrayBuffer, SubtleDeriveBitsError>> {
+    return baseKey.deriveBits(algorithm, length);
   }
 
   async deriveKey(
@@ -2095,8 +3426,13 @@ export class SubtleCrypto {
     derivedKeyAlgorithm: AlgorithmIdentifier,
     extractable: boolean,
     keyUsages: KeyUsage[],
-  ): Promise<Result<CryptoKey, SubtleError>> {
-    return baseKey.deriveKey(algorithm, derivedKeyAlgorithm, extractable, keyUsages)
+  ): Promise<Result<CryptoKey, SubtleDeriveKeyError>> {
+    return baseKey.deriveKey(
+      algorithm,
+      derivedKeyAlgorithm,
+      extractable,
+      keyUsages,
+    );
   }
 
   async wrapKey(
@@ -2104,8 +3440,8 @@ export class SubtleCrypto {
     key: CryptoKey,
     wrappingKey: CryptoKey,
     wrapAlgorithm: AlgorithmIdentifier,
-  ): Promise<Result<ArrayBuffer, SubtleError>> {
-    return wrappingKey.wrap(format, key, wrapAlgorithm)
+  ): Promise<Result<ArrayBuffer, SubtleWrapKeyError>> {
+    return wrappingKey.wrap(format, key, wrapAlgorithm);
   }
 
   async unwrapKey(
@@ -2116,7 +3452,7 @@ export class SubtleCrypto {
     unwrappedKeyAlgorithm: AlgorithmIdentifier,
     extractable: boolean,
     keyUsages: KeyUsage[],
-  ): Promise<Result<CryptoKey, SubtleError>> {
+  ): Promise<Result<CryptoKey, SubtleUnwrapKeyError>> {
     return unwrapWith(
       format,
       wrappedKey,
@@ -2126,8 +3462,28 @@ export class SubtleCrypto {
       extractable,
       keyUsages,
       importAnyFamily,
-    )
+    );
   }
+}
+
+async function generateAny(
+  algorithm: AlgorithmIdentifier,
+  extractable: boolean,
+  keyUsages: KeyUsage[],
+): Promise<Result<CryptoKey | CryptoKeyPair, Problem>> {
+  const normalizedAlg = normalize(algorithm, "generateKey");
+  if (normalizedAlg.isErr()) return err(normalizedAlg.error);
+  const alg = normalizedAlg.value;
+  const name = alg.name;
+  if (name == "HMAC")
+    return createdKey(generateHmac(alg, extractable, keyUsages));
+  if (name.startsWith("AES-"))
+    return createdKey(generateAes(alg, extractable, keyUsages));
+  if (name == "ECDSA" || name == "ECDH")
+    return createdPair(await generateEc(alg, extractable, keyUsages));
+  if (name.startsWith("RSA"))
+    return createdPair(await generateRsa(alg, extractable, keyUsages));
+  return createdPair(await generateOkp(alg, extractable, keyUsages));
 }
 
 function importSecret(
@@ -2136,13 +3492,15 @@ function importSecret(
   algorithm: Algorithm,
   extractable: boolean,
   usages: KeyUsage[],
-): Result<CryptoKey | undefined, SubtleError> {
-  const name = algorithm.name
-  if (name == "HMAC") return importHmac(format, keyData, algorithm, extractable, usages)
-  if (name.startsWith("AES-")) return importAes(format, keyData, algorithm, extractable, usages)
+): Result<CryptoKey | undefined, Problem> {
+  const name = algorithm.name;
+  if (name == "HMAC")
+    return importHmac(format, keyData, algorithm, extractable, usages);
+  if (name.startsWith("AES-"))
+    return importAes(format, keyData, algorithm, extractable, usages);
   if (name == "PBKDF2" || name == "HKDF")
-    return importKdf(format, keyData, algorithm, extractable, usages)
-  return ok(undefined)
+    return importKdf(format, keyData, algorithm, extractable, usages);
+  return ok(undefined);
 }
 
 function importAnyFamily(
@@ -2151,17 +3509,17 @@ function importAnyFamily(
   algorithm: Algorithm,
   extractable: boolean,
   usages: KeyUsage[],
-): Result<CryptoKey | undefined, SubtleError> {
-  return importAny(format, keyData, algorithm, extractable, usages)
+): Result<CryptoKey | undefined, Problem> {
+  return importAny(format, keyData, algorithm, extractable, usages);
 }
 
-export const subtle = new SubtleCrypto()
+export const subtle = new SubtleCrypto();
 
 function subtleJwkOf(json: Json | undefined): JsonWebKey | JwkFailure {
-  if (json == undefined) return new JwkFailure(dataError("Invalid keyData"))
-  const jwk = jwkFromJson(json)
-  if (jwk.isErr()) return new JwkFailure(jwk.error)
-  return jwk.value
+  if (json == undefined) return new JwkFailure(dataError("Invalid keyData"));
+  const jwk = jwkFromJson(json);
+  if (jwk.isErr()) return new JwkFailure(jwk.error);
+  return jwk.value;
 }
 
 async function subtleImportAny(
@@ -2170,10 +3528,14 @@ async function subtleImportAny(
   algorithm: AlgorithmIdentifier,
   extractable: boolean,
   keyUsages: KeyUsage[],
-): Promise<Result<CryptoKey, SubtleError>> {
-  const alg = normalize(algorithm, "importKey")
-  if (alg.isErr()) return err(alg.error)
-  return importAny(format, keyData, alg.value, extractable, keyUsages)
+): Promise<Result<CryptoKey, SubtleImportKeyError>> {
+  const alg = normalize(algorithm, "importKey");
+  if (alg.isErr()) {
+    return err(importKeyError(alg.error));
+  }
+  const made = importAny(format, keyData, alg.value, extractable, keyUsages);
+
+  return importKeyResult(made);
 }
 
 async function subtleImportHmac(
@@ -2182,8 +3544,17 @@ async function subtleImportHmac(
   algorithm: AlgorithmIdentifier,
   extractable: boolean,
   keyUsages: KeyUsage[],
-): Promise<Result<CryptoKey, SubtleError>> {
-  return importWith(format, keyData, algorithm, extractable, keyUsages, importHmac)
+): Promise<Result<CryptoKey, SubtleImportKeyError>> {
+  const made = importWith(
+    format,
+    keyData,
+    algorithm,
+    extractable,
+    keyUsages,
+    importHmac,
+  );
+
+  return importKeyResult(made);
 }
 
 async function subtleImportAes(
@@ -2192,8 +3563,17 @@ async function subtleImportAes(
   algorithm: AlgorithmIdentifier,
   extractable: boolean,
   keyUsages: KeyUsage[],
-): Promise<Result<CryptoKey, SubtleError>> {
-  return importWith(format, keyData, algorithm, extractable, keyUsages, importAes)
+): Promise<Result<CryptoKey, SubtleImportKeyError>> {
+  const made = importWith(
+    format,
+    keyData,
+    algorithm,
+    extractable,
+    keyUsages,
+    importAes,
+  );
+
+  return importKeyResult(made);
 }
 
 async function subtleImportKdf(
@@ -2202,8 +3582,17 @@ async function subtleImportKdf(
   algorithm: AlgorithmIdentifier,
   extractable: boolean,
   keyUsages: KeyUsage[],
-): Promise<Result<CryptoKey, SubtleError>> {
-  return importWith(format, keyData, algorithm, extractable, keyUsages, importKdf)
+): Promise<Result<CryptoKey, SubtleImportKeyError>> {
+  const made = importWith(
+    format,
+    keyData,
+    algorithm,
+    extractable,
+    keyUsages,
+    importKdf,
+  );
+
+  return importKeyResult(made);
 }
 
 async function subtleImportEc(
@@ -2212,8 +3601,17 @@ async function subtleImportEc(
   algorithm: AlgorithmIdentifier,
   extractable: boolean,
   keyUsages: KeyUsage[],
-): Promise<Result<CryptoKey, SubtleError>> {
-  return importWith(format, keyData, algorithm, extractable, keyUsages, importEc)
+): Promise<Result<CryptoKey, SubtleImportKeyError>> {
+  const made = importWith(
+    format,
+    keyData,
+    algorithm,
+    extractable,
+    keyUsages,
+    importEc,
+  );
+
+  return importKeyResult(made);
 }
 
 async function subtleImportRsa(
@@ -2222,8 +3620,17 @@ async function subtleImportRsa(
   algorithm: AlgorithmIdentifier,
   extractable: boolean,
   keyUsages: KeyUsage[],
-): Promise<Result<CryptoKey, SubtleError>> {
-  return importWith(format, keyData, algorithm, extractable, keyUsages, importRsa)
+): Promise<Result<CryptoKey, SubtleImportKeyError>> {
+  const made = importWith(
+    format,
+    keyData,
+    algorithm,
+    extractable,
+    keyUsages,
+    importRsa,
+  );
+
+  return importKeyResult(made);
 }
 
 async function subtleImportOkp(
@@ -2232,72 +3639,105 @@ async function subtleImportOkp(
   algorithm: AlgorithmIdentifier,
   extractable: boolean,
   keyUsages: KeyUsage[],
-): Promise<Result<CryptoKey, SubtleError>> {
-  return importWith(format, keyData, algorithm, extractable, keyUsages, importOkp)
+): Promise<Result<CryptoKey, SubtleImportKeyError>> {
+  const made = importWith(
+    format,
+    keyData,
+    algorithm,
+    extractable,
+    keyUsages,
+    importOkp,
+  );
+
+  return importKeyResult(made);
 }
 
 async function subtleGenerateHmac(
   algorithm: AlgorithmIdentifier,
   extractable: boolean,
   keyUsages: KeyUsage[],
-): Promise<Result<CryptoKey, SubtleError>> {
-  const alg = normalize(algorithm, "generateKey")
-  if (alg.isErr()) return err(alg.error)
-  return createdKey(generateHmac(alg.value, extractable, keyUsages))
+): Promise<Result<CryptoKey, SubtleGenerateKeyError>> {
+  const alg = normalize(algorithm, "generateKey");
+  if (alg.isErr()) {
+    return err(generateKeyError(alg.error));
+  }
+  const made = createdKey(generateHmac(alg.value, extractable, keyUsages));
+
+  return generateKeyResult(made);
 }
 
 async function subtleGenerateAes(
   algorithm: AlgorithmIdentifier,
   extractable: boolean,
   keyUsages: KeyUsage[],
-): Promise<Result<CryptoKey, SubtleError>> {
-  const alg = normalize(algorithm, "generateKey")
-  if (alg.isErr()) return err(alg.error)
-  return createdKey(generateAes(alg.value, extractable, keyUsages))
+): Promise<Result<CryptoKey, SubtleGenerateKeyError>> {
+  const alg = normalize(algorithm, "generateKey");
+  if (alg.isErr()) {
+    return err(generateKeyError(alg.error));
+  }
+  const made = createdKey(generateAes(alg.value, extractable, keyUsages));
+
+  return generateKeyResult(made);
 }
 
 async function subtleGenerateEc(
   algorithm: AlgorithmIdentifier,
   extractable: boolean,
   keyUsages: KeyUsage[],
-): Promise<Result<CryptoKeyPair, SubtleError>> {
-  const alg = normalize(algorithm, "generateKey")
-  if (alg.isErr()) return err(alg.error)
-  return createdPair(await generateEc(alg.value, extractable, keyUsages))
+): Promise<Result<CryptoKeyPair, SubtleGenerateKeyError>> {
+  const alg = normalize(algorithm, "generateKey");
+  if (alg.isErr()) {
+    return err(generateKeyError(alg.error));
+  }
+  const made = createdPair(await generateEc(alg.value, extractable, keyUsages));
+
+  return generateKeyResult(made);
 }
 
 async function subtleGenerateRsa(
   algorithm: AlgorithmIdentifier,
   extractable: boolean,
   keyUsages: KeyUsage[],
-): Promise<Result<CryptoKeyPair, SubtleError>> {
-  const alg = normalize(algorithm, "generateKey")
-  if (alg.isErr()) return err(alg.error)
-  return createdPair(await generateRsa(alg.value, extractable, keyUsages))
+): Promise<Result<CryptoKeyPair, SubtleGenerateKeyError>> {
+  const alg = normalize(algorithm, "generateKey");
+  if (alg.isErr()) {
+    return err(generateKeyError(alg.error));
+  }
+  const made = createdPair(await generateRsa(alg.value, extractable, keyUsages));
+
+  return generateKeyResult(made);
 }
 
 async function subtleGenerateOkp(
   algorithm: AlgorithmIdentifier,
   extractable: boolean,
   keyUsages: KeyUsage[],
-): Promise<Result<CryptoKeyPair, SubtleError>> {
-  const alg = normalize(algorithm, "generateKey")
-  if (alg.isErr()) return err(alg.error)
-  return createdPair(await generateOkp(alg.value, extractable, keyUsages))
+): Promise<Result<CryptoKeyPair, SubtleGenerateKeyError>> {
+  const alg = normalize(algorithm, "generateKey");
+  if (alg.isErr()) {
+    return err(generateKeyError(alg.error));
+  }
+  const made = createdPair(await generateOkp(alg.value, extractable, keyUsages));
+
+  return generateKeyResult(made);
 }
 
-async function subtleExportJwk(format: KeyFormat,
-                               key: CryptoKey): Promise<Result<JsonWebKey, SubtleError>> {
-  const result = await key.export(format)
-  if (result.isErr()) return err(result.error)
-  const value = result.value
-  if (value instanceof ArrayBuffer) return ok({})
-  return ok(value)
+async function subtleExportJwk(
+  format: KeyFormat,
+  key: CryptoKey,
+): Promise<Result<JsonWebKey, SubtleExportKeyError>> {
+  const result = await key.export(format);
+  if (result.isErr()) return err(result.error);
+  const value = result.value;
+  if (value instanceof ArrayBuffer) return ok({});
+  return ok(value);
 }
 
-async function subtleExportBytes(format: KeyFormat,
-                                 key: CryptoKey): Promise<Result<ArrayBuffer, SubtleError>> {
-  return exportBytes(format, key)
+async function subtleExportBytes(
+  format: KeyFormat,
+  key: CryptoKey,
+): Promise<Result<ArrayBuffer, SubtleExportKeyError>> {
+  return exportBytes(format, key);
 }
 
 async function subtleUnwrapHmac(
@@ -2308,9 +3748,17 @@ async function subtleUnwrapHmac(
   unwrappedKeyAlgorithm: AlgorithmIdentifier,
   extractable: boolean,
   keyUsages: KeyUsage[],
-): Promise<Result<CryptoKey, SubtleError>> {
-  return unwrapWith(format, wrappedKey, unwrappingKey, unwrapAlgorithm, unwrappedKeyAlgorithm,
-                    extractable, keyUsages, importHmac)
+): Promise<Result<CryptoKey, SubtleUnwrapKeyError>> {
+  return unwrapWith(
+    format,
+    wrappedKey,
+    unwrappingKey,
+    unwrapAlgorithm,
+    unwrappedKeyAlgorithm,
+    extractable,
+    keyUsages,
+    importHmac,
+  );
 }
 
 async function subtleUnwrapAes(
@@ -2321,9 +3769,17 @@ async function subtleUnwrapAes(
   unwrappedKeyAlgorithm: AlgorithmIdentifier,
   extractable: boolean,
   keyUsages: KeyUsage[],
-): Promise<Result<CryptoKey, SubtleError>> {
-  return unwrapWith(format, wrappedKey, unwrappingKey, unwrapAlgorithm, unwrappedKeyAlgorithm,
-                    extractable, keyUsages, importAes)
+): Promise<Result<CryptoKey, SubtleUnwrapKeyError>> {
+  return unwrapWith(
+    format,
+    wrappedKey,
+    unwrappingKey,
+    unwrapAlgorithm,
+    unwrappedKeyAlgorithm,
+    extractable,
+    keyUsages,
+    importAes,
+  );
 }
 
 async function subtleUnwrapKdf(
@@ -2334,9 +3790,17 @@ async function subtleUnwrapKdf(
   unwrappedKeyAlgorithm: AlgorithmIdentifier,
   extractable: boolean,
   keyUsages: KeyUsage[],
-): Promise<Result<CryptoKey, SubtleError>> {
-  return unwrapWith(format, wrappedKey, unwrappingKey, unwrapAlgorithm, unwrappedKeyAlgorithm,
-                    extractable, keyUsages, importKdf)
+): Promise<Result<CryptoKey, SubtleUnwrapKeyError>> {
+  return unwrapWith(
+    format,
+    wrappedKey,
+    unwrappingKey,
+    unwrapAlgorithm,
+    unwrappedKeyAlgorithm,
+    extractable,
+    keyUsages,
+    importKdf,
+  );
 }
 
 async function subtleUnwrapEc(
@@ -2347,9 +3811,17 @@ async function subtleUnwrapEc(
   unwrappedKeyAlgorithm: AlgorithmIdentifier,
   extractable: boolean,
   keyUsages: KeyUsage[],
-): Promise<Result<CryptoKey, SubtleError>> {
-  return unwrapWith(format, wrappedKey, unwrappingKey, unwrapAlgorithm, unwrappedKeyAlgorithm,
-                    extractable, keyUsages, importEc)
+): Promise<Result<CryptoKey, SubtleUnwrapKeyError>> {
+  return unwrapWith(
+    format,
+    wrappedKey,
+    unwrappingKey,
+    unwrapAlgorithm,
+    unwrappedKeyAlgorithm,
+    extractable,
+    keyUsages,
+    importEc,
+  );
 }
 
 async function subtleUnwrapRsa(
@@ -2360,9 +3832,17 @@ async function subtleUnwrapRsa(
   unwrappedKeyAlgorithm: AlgorithmIdentifier,
   extractable: boolean,
   keyUsages: KeyUsage[],
-): Promise<Result<CryptoKey, SubtleError>> {
-  return unwrapWith(format, wrappedKey, unwrappingKey, unwrapAlgorithm, unwrappedKeyAlgorithm,
-                    extractable, keyUsages, importRsa)
+): Promise<Result<CryptoKey, SubtleUnwrapKeyError>> {
+  return unwrapWith(
+    format,
+    wrappedKey,
+    unwrappingKey,
+    unwrapAlgorithm,
+    unwrappedKeyAlgorithm,
+    extractable,
+    keyUsages,
+    importRsa,
+  );
 }
 
 async function subtleUnwrapOkp(
@@ -2373,7 +3853,15 @@ async function subtleUnwrapOkp(
   unwrappedKeyAlgorithm: AlgorithmIdentifier,
   extractable: boolean,
   keyUsages: KeyUsage[],
-): Promise<Result<CryptoKey, SubtleError>> {
-  return unwrapWith(format, wrappedKey, unwrappingKey, unwrapAlgorithm, unwrappedKeyAlgorithm,
-                    extractable, keyUsages, importOkp)
+): Promise<Result<CryptoKey, SubtleUnwrapKeyError>> {
+  return unwrapWith(
+    format,
+    wrappedKey,
+    unwrappingKey,
+    unwrapAlgorithm,
+    unwrappedKeyAlgorithm,
+    extractable,
+    keyUsages,
+    importOkp,
+  );
 }

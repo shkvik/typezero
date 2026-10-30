@@ -779,18 +779,8 @@ int tz_fs_rm_raw(const Path *p, int32_t recursive, int32_t force, Failure *failu
 }
 
 void tz_fs_throw_rm_directory(const Path *p, TzMaker make) {
-  TzBuf m;
-  tz_buf_init(&m);
-  tz_buf_ascii(&m, "Path is a directory: rm returned EISDIR (is a directory) ");
-  tz_buf_units(&m, p->given.data, p->given.length);
-  TzSystemErrorParts parts;
-  memset(&parts, 0, sizeof parts);
-  parts.message = tz_buf_take(&m);
-  parts.errno_value = 21;
-  parts.code = tz_fs_ascii("ERR_FS_EISDIR");
-  parts.syscall = tz_fs_ascii("rm");
-  parts.path = tz_fs_opt_of(&p->given);
-  tz_fs_throw_parts(make, &parts);
+  tz_fs_throw_failure(make, (Failure){E_EISDIR, tz_fs_errors[E_EISDIR].windows, 0}, "rm", &p->shown,
+                      NULL);
 }
 
 void tz_fs_rm(void *path_obj, uint64_t path_meta, int32_t recursive, int32_t force, TzMaker make) {

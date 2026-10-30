@@ -14,10 +14,10 @@ public:
   explicit ObjectMaker(Lowering &lowering);
 
   llvm::Function *maker(const Type *type, llvm::ArrayRef<MakerFields> orders);
+  llvm::Value *atomOf(const Type *type, llvm::Value *text);
 
 private:
   llvm::StructType *parts(const Type *type, llvm::ArrayRef<MakerFields> orders);
-  llvm::Value *atomOf(const Type *type, llvm::Value *text);
 
   Lowering &lowering_;
   std::map<const Type *, llvm::Function *> makers_;

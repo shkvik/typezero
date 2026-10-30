@@ -57,7 +57,7 @@ if (at >= 0) {
   const reads = names.map((n) => readFile(join(dir, n + ".txt"), "utf8"))
   const between = must(spawnSync(process.execPath, [...self, "say", "while reading"], { encoding: "utf8" }))
   const texts = await Promise.all(reads)
-  console.log(said, between.stdout.trim(), between.status, texts.map((t) => must(t).length).join(","))
+  console.log(said, between.stdout?.trim(), between.status, texts.map((t) => must(t).length).join(","))
 
   // Children between awaits, in a timer and from an async generator.
   async function step(name: string, ms: int) {
@@ -78,9 +78,9 @@ if (at >= 0) {
 
   // A child that waits on its own event loop and ends with a code.
   const later = must(spawnSync(process.execPath, [...self, "later", "30"], { encoding: "utf8" }))
-  console.log(later.stdout.trim(), later.status)
+  console.log(later.stdout?.trim(), later.status)
   const failed = execFileSync(process.execPath, [...self, "later", "1"])
-  if (failed.isErr()) {
+  if (failed.isErr() && failed.error.code == "ERR_NONZERO_EXIT") {
     // Without an encoding what it printed is a Buffer.
     const out = failed.error.stdout
     console.log("failed with", failed.error.status, out == undefined ? "-" : out.toString().trim())
@@ -98,7 +98,7 @@ if (at >= 0) {
     encoding: "utf8",
     env: { ...process.env, TZ_MIX_OWN: "own" },
   }))
-  console.log(own.stdout.trim())
+  console.log(own.stdout?.trim())
   process.env.TZ_MIX_SET = "changed"
   console.log(run("env").trim())
   delete process.env.TZ_MIX_SET
@@ -115,7 +115,7 @@ if (at >= 0) {
   const shell = must(execSync(`"${process.execPath}" ${self.map((a) => `"${a}"`).join(" ")} say "through the shell"`))
   console.log(shell.toString().trim(), shell.byteLength)
   const both = must(spawnSync(process.execPath, [...self, "upper"], { input: "привет" }))
-  console.log(both.stdout.toString(), both.stdout.length, both.stderr.length)
+  console.log(both.stdout?.toString(), both.stdout?.length, both.stderr?.length)
 
   must(await rm(dir, { recursive: true }))
   console.log("done")

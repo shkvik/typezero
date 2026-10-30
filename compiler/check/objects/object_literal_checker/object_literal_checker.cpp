@@ -165,9 +165,16 @@ Expr *ObjectLiteralChecker::checkObjectLit(ObjectLitExpr *lit, const Type *expec
           prop.value = checker_.exprChecker().checkExpr(prop.value);
         }
         if (!target->overload(prop.name)) {
-          checker_.diags_.error(prop.loc,
-                                "type '" + target->name() + "' has no field '" + prop.name +
-                                    "'; an object must have exactly the fields of its type");
+          std::string message = "type '" + target->name().str() + "' has no field '" +
+                                prop.name.str() +
+                                "'; an object must have exactly the fields of its type";
+          if (target->name() == "StreamError") {
+            message += "; an error with fields of its own has a type of its own, e.g. 'interface "
+                       "MyError extends StreamError { ... }', and the stream names it: "
+                       "'new ReadableStream<int, MyError>(...)', 'class Lines extends "
+                       "Readable<string, MyError>'";
+          }
+          checker_.diags_.error(prop.loc, message);
         }
         continue;
       }

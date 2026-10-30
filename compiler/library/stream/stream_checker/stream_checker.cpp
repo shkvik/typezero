@@ -6,6 +6,7 @@
 #include "compiler/check/types/type_relations/type_relations.h"
 #include "compiler/declare/class_declarer/class_declarer.h"
 #include "compiler/declare/prelude/prelude.h"
+#include "compiler/infer/return_inferrer/return_inferrer.h"
 #include "compiler/library/events/emitter_checker/emitter_checker.h"
 #include "compiler/library/fs/fs_checker/fs_checker.h"
 #include "compiler/library/result/result_checker/result_checker.h"
@@ -84,6 +85,9 @@ Expr *StreamChecker::checkStreamIntrinsic(CallExpr *call, NameExpr *name, const 
     call->method = methods[0]->sym;
     return call;
   }
+  case Builtin::LibStdinFailed:
+    call->type = Type::boolTy();
+    return call;
   case Builtin::LibFsOpen:
   case Builtin::LibFsRead:
   case Builtin::LibFsWrite:
@@ -92,8 +96,8 @@ Expr *StreamChecker::checkStreamIntrinsic(CallExpr *call, NameExpr *name, const 
   case Builtin::LibStdWrite: {
     const Type *buffer = Type::bytesType(Type::Bytes::Buffer);
     std::vector<const Type *> params;
-    const Type *result =
-        Type::promise(Type::result(Type::intTy(), checker_.fsChecker().systemError()));
+    const Type *result = Type::promise(
+        Type::result(Type::intTy(), typeArg ? typeArg : checker_.fsChecker().nativeError()));
     switch (call->builtin) {
     case Builtin::LibFsOpen:
       params = {Type::string(), Type::string(), Type::intTy()};
@@ -111,7 +115,7 @@ Expr *StreamChecker::checkStreamIntrinsic(CallExpr *call, NameExpr *name, const 
       break;
     default:
       params = {Type::intTy(), buffer};
-      result = Type::voidTy();
+      result = Type::intTy();
       break;
     }
     for (size_t i = 0; i < params.size(); ++i) {
@@ -135,11 +139,15 @@ const Type *StreamChecker::streamCallbackType() {
 Expr *StreamChecker::streamChunkArg(Expr *arg, const Type *chunk, bool eof, bool writing,
                                     llvm::StringRef method, bool checked) {
   if (eof && isa<UndefinedExpr>(arg)) {
-    return checker_.typeRelations().convert(checked ? arg : checker_.exprChecker().checkExpr(arg),
-                                            Type::unknown());
+    checker_.diags_.error(arg->loc(), "'" + method.str() +
+                                          "(undefined)' does not end a stream: a chunk is "
+                                          "never undefined; end the stream with 'pushEnd()'");
+    arg->type = Type::error();
+
+    return arg;
   }
   if (!isByteChunk(chunk)) {
-    const Type *want = eof ? Type::optional(chunk) : chunk;
+    const Type *want = chunk;
     arg = checked ? checker_.typeRelations().coerce(arg, want)
                   : checker_.argumentChecker().checkArg(arg, want);
     return checker_.typeRelations().convert(arg, Type::unknown());
@@ -162,7 +170,7 @@ Expr *StreamChecker::streamChunkArg(Expr *arg, const Type *chunk, bool eof, bool
 
     return !onlyStrings && (t->isBuffer() || t->bytes() == Type::Bytes::Uint8);
   };
-  const Type *value = eof ? type->nonOptional() : type;
+  const Type *value = type;
   bool ok = value->isUnion() ? llvm::all_of(value->members(), fits) : fits(value);
   if (!ok) {
     std::string takes = onlyStrings ? "a string" : "a string, a Buffer or a Uint8Array";
@@ -173,8 +181,9 @@ Expr *StreamChecker::streamChunkArg(Expr *arg, const Type *chunk, bool eof, bool
                                              "strings written; make it a Writable<Buffer> to "
                                              "write bytes"
                                            : "; to write objects, make the stream an "
-                                             "object-mode one of their type, e.g. 'new "
-                                             "Readable<User>({ objectMode: true, ... })'"));
+                                             "object-mode one of their type, e.g. 'class "
+                                             "Users extends Readable<User>' with "
+                                             "'super({ objectMode: true })'"));
     return arg;
   }
 
@@ -296,8 +305,15 @@ Expr *StreamChecker::checkStreamCall(CallExpr *call, MemberExpr *member, ClassDe
       cb = call->args[2];
     }
     args.push_back(encoding ? encodingArg(encoding) : undefinedOf(encodingType));
-    args.push_back(cb ? checkedAs(cb, Type::optional(callback))
-                      : undefinedOf(Type::optional(callback)));
+    const Type *written = Type::optional(callback);
+    for (FunctionDecl *typed : ClassDeclarer::methodsNamed(cls, "writeTyped", false)) {
+      if (typed->sym && typed->params.size() == 3) {
+        checker_.returnInferrer().resolveParams(typed->sym);
+        written = typed->sym->params[2];
+        break;
+      }
+    }
+    args.push_back(cb ? checkedAs(cb, written) : undefinedOf(written));
     impl = "writeTyped";
   } else {
     if (!checker_.argumentChecker().checkArity(call, member->loc(), 0, 3)) {

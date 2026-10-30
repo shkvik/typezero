@@ -51,6 +51,7 @@ Expr *StreamSources::checkFsStreamFunction(CallExpr *call, FunctionDecl *decl, l
   Expr *opts = nullptr;
   Expr *encoding = nullptr;
   bool text = false;
+  bool fresh = false;
   if (call->args.size() == 2) {
     Expr *arg = call->args[1];
     if (isa<ObjectLitExpr>(arg)) {
@@ -58,6 +59,11 @@ Expr *StreamSources::checkFsStreamFunction(CallExpr *call, FunctionDecl *decl, l
       for (const ObjectLitExpr::Property &prop : lit->props) {
         if (!prop.spread && prop.name == "encoding" && !isa<UndefinedExpr>(prop.value)) {
           text = true;
+        }
+        auto *flags =
+            prop.spread || prop.name != "flags" ? nullptr : dyn_cast<StringLitExpr>(prop.value);
+        if (flags && flags->value.find(u'x') != std::u16string::npos) {
+          fresh = true;
         }
       }
       opts = checker_.argumentChecker().checkArg(arg, options);
@@ -86,8 +92,8 @@ Expr *StreamSources::checkFsStreamFunction(CallExpr *call, FunctionDecl *decl, l
   call->args = {path, opts, encoding};
   std::vector<bool> given(3, true);
   if (!reading) {
-    return checker_.eventTargetChecker().callLibraryFunction(call, "streamWriteFile", {}, given,
-                                                             loc);
+    return checker_.eventTargetChecker().callLibraryFunction(
+        call, fresh ? "streamWriteNewFile" : "streamWriteFile", {}, given, loc);
   }
   const Type *chunk = text ? Type::string() : Type::bytesType(Type::Bytes::Buffer);
 

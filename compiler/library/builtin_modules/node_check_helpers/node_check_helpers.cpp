@@ -31,6 +31,8 @@ std::string moduleLabel(NodeModule module) {
     return "node:buffer";
   case NodeModule::TzIo:
     return "tz:io";
+  case NodeModule::TzFs:
+    return "tz:fs";
   case NodeModule::ChildProcess:
     return "node:child_process";
   case NodeModule::Crypto:

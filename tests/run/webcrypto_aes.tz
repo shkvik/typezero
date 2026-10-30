@@ -65,7 +65,7 @@ function must<T, E>(r: Result<T, E>): T {
   return r.value
 }
 
-function show<T>(r: Result<T, SubtleError>) {
+function show<T, E extends { code: string; message: string }>(r: Result<T, E>) {
   if (r.isErr()) console.log(r.error.code, r.error.message)
 }
 

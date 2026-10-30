@@ -4,6 +4,11 @@
 // console.log.
 import { Transform } from "node:stream"
 import { pipeline } from "node:stream/promises"
+class Upper extends Transform {
+  onTransform(chunk, enc, cb) {
+    cb(undefined, chunk.toString().toUpperCase())
+  }
+}
 process.stdin.setEncoding("utf8")
 let text = ""
 process.stdin.on("error", (e) => console.log(`stdin error ${e.message}`))
@@ -12,11 +17,7 @@ process.stdin.on("data", (s) => {
 })
 process.stdin.on("end", () => {
   console.log(`got ${text.length} chars: ${JSON.stringify(text)}`)
-  const upper = new Transform({
-    transform(chunk, enc, cb) {
-      cb(undefined, chunk.toString().toUpperCase())
-    },
-  })
+  const upper = new Upper()
   void pipeline(upper, process.stdout, { end: false }).then((r) => {
     if (r.isErr()) console.log(`pipeline error ${r.error.message}`)
   })

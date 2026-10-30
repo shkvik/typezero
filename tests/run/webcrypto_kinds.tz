@@ -1,0 +1,33 @@
+// The errors of crypto.subtle (docs/crypto.md, "Ошибки"): a type per method (SubtleDigestError,
+// SubtleDecryptError...), kind = the method and the reason; code and message as node's
+// DOMException (webcrypto_errors checks those against node).
+const subtle = crypto.subtle
+const names = ["SHA-999", "AES-GCM"]
+
+function show<T, E extends { kind: string; code: string; message: string }>(r: Result<T, E>) {
+  console.log(r.isErr() ? `${r.error.kind} | ${r.error.code} | ${r.error.message}` : "no error")
+}
+
+function must<T, E>(r: Result<T, E>): T {
+  if (r.isErr()) {
+    console.log(r.error)
+    process.exit(1)
+  }
+  return r.value
+}
+
+show(await subtle.digest(names[0] ?? "", new Uint8Array(1)))
+const key = must(await subtle.importKey("raw", new Uint8Array(16), "AES-GCM", false, ["encrypt", "decrypt"]))
+const other = must(await subtle.importKey("raw", new Uint8Array(16).fill(1), "AES-GCM", false, ["decrypt", "unwrapKey"]))
+const iv = new Uint8Array(12)
+const sealed = must(await subtle.encrypt({ name: "AES-GCM", iv }, key, new Uint8Array(8)))
+show(await subtle.decrypt({ name: "AES-GCM", iv }, other, sealed))
+show(await subtle.encrypt({ name: "AES-GCM", iv }, other, new Uint8Array(8)))
+show(await subtle.exportKey("raw", key))
+show(await subtle.importKey("raw", new Uint8Array(10), names[1] ?? "", true, ["encrypt"]))
+show(await subtle.unwrapKey("raw", sealed, other, { name: "AES-GCM", iv }, "AES-GCM", true, ["encrypt"]))
+const hmac = must(await subtle.importKey("raw", new Uint8Array(16), { name: "HMAC", hash: "SHA-256" }, false, ["verify"]))
+show(await subtle.sign("HMAC", hmac, new Uint8Array(1)))
+const decrypted = await subtle.decrypt({ name: "AES-GCM", iv }, other, sealed)
+if (decrypted.isErr() && decrypted.error.kind == "SUBTLE_DECRYPT_ERROR_DECRYPTION_FAILED")
+  console.log("the key is wrong or the data was changed")

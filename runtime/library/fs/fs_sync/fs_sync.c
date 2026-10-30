@@ -32,6 +32,9 @@
 #include <sys/stat.h>
 #include <time.h>
 #include <unistd.h>
+#ifdef __linux__
+#include <sys/syscall.h>
+#endif
 #endif
 
 static int read_path(Bytes *data, void *path_obj, uint64_t path_meta, void *flag_obj,
@@ -47,7 +50,7 @@ static int read_path(Bytes *data, void *path_obj, uint64_t path_meta, void *flag
   int ok = 0;
   File f = tz_fs_open_file(&p, flags, 0666, make);
   if (f != NO_FILE) {
-    ok = tz_fs_read_all(f, data, make);
+    ok = tz_fs_read_all(f, data, &p.shown, make);
     tz_fs_close_file(f);
   }
   tz_fs_path_free(&p);
@@ -62,11 +65,16 @@ static int read_fd(Bytes *data, int32_t fd, TzMaker make) {
   }
   File f = tz_fs_fd_file(fd);
   if (f == NO_FILE || fd < 0) {
-    tz_fs_fail_bad_fd(make, "read");
+    tz_fs_fail_bad_fd(make, "read", fd);
     return 0;
   }
+  TzBuf name;
+  tz_buf_init(&name);
+  tz_fs_fd_name(&name, fd);
+  int ok = tz_fs_read_all(f, data, &name, make);
+  tz_buf_free(&name);
 
-  return tz_fs_read_all(f, data, make);
+  return ok;
 }
 
 static TzStr text_of(const Bytes *data, int32_t encoding) {
@@ -137,7 +145,7 @@ static void write_path(void *path_obj, uint64_t path_meta, const uint8_t *data, 
   }
   File f = tz_fs_open_file(&p, flags, mode, make);
   if (f != NO_FILE) {
-    tz_fs_write_all(f, data, length, make);
+    tz_fs_write_all(f, data, length, &p.shown, make);
     tz_fs_close_file(f);
   }
   tz_fs_path_free(&p);
@@ -150,10 +158,14 @@ static void write_fd(int32_t fd, const uint8_t *data, size_t length, TzMaker mak
   }
   File f = fd < 0 ? NO_FILE : tz_fs_fd_file(fd);
   if (f == NO_FILE) {
-    tz_fs_fail_bad_fd(make, "write");
+    tz_fs_fail_bad_fd(make, "write", fd);
     return;
   }
-  tz_fs_write_all(f, data, length, make);
+  TzBuf name;
+  tz_buf_init(&name);
+  tz_fs_fd_name(&name, fd);
+  tz_fs_write_all(f, data, length, &name, make);
+  tz_buf_free(&name);
 }
 
 void tz_fs_write_file(void *path_obj, uint64_t path_meta, void *data_obj, uint64_t data_meta,
@@ -285,11 +297,11 @@ void tz_fs_truncate(void *path_obj, uint64_t path_meta, int64_t length, TzMaker 
     LARGE_INTEGER at;
     at.QuadPart = length < 0 ? 0 : length;
     if (!SetFilePointerEx(f, at, NULL, FILE_BEGIN) || !SetEndOfFile(f)) {
-      tz_fs_fail_win32(make, GetLastError(), "ftruncate", NULL, NULL);
+      tz_fs_fail_win32(make, GetLastError(), "ftruncate", &p, NULL);
     }
 #else
     if (ftruncate(f, length < 0 ? 0 : length) != 0) {
-      tz_fs_fail_errno(make, errno, "ftruncate", NULL, NULL);
+      tz_fs_fail_errno(make, errno, "ftruncate", &p, NULL);
     }
 #endif
     tz_fs_close_file(f);
@@ -423,83 +435,126 @@ void *tz_fs_stat(void *path_obj, uint64_t path_meta, int32_t follow, int32_t thr
   return result;
 }
 
-void tz_fs_rename(void *from_obj, uint64_t from_meta, void *to_obj, uint64_t to_meta,
-                  TzMaker make) {
+#ifndef _WIN32
+int tz_fs_rename_no_replace(const char *from, const char *to) {
+#if defined(__linux__) && defined(SYS_renameat2)
+  if (syscall(SYS_renameat2, AT_FDCWD, from, AT_FDCWD, to, 1) == 0) {
+    return 0;
+  }
+  if (errno != EINVAL && errno != ENOSYS) {
+    return -1;
+  }
+#elif defined(__APPLE__)
+  return renamex_np(from, to, RENAME_EXCL);
+#endif
+  if (link(from, to) == 0) {
+    unlink(from);
+    return 0;
+  }
+  if (errno == EEXIST) {
+    return -1;
+  }
+  struct stat st;
+  if (lstat(to, &st) == 0) {
+    errno = EEXIST;
+    return -1;
+  }
+
+  return rename(from, to);
+}
+
+int tz_fs_copy_new(const char *from, const char *to) {
+  int in = open(from, O_RDONLY | O_CLOEXEC);
+  if (in < 0) {
+    return -1;
+  }
+  struct stat s;
+  fstat(in, &s);
+  int out = open(to, O_WRONLY | O_CREAT | O_EXCL | O_CLOEXEC, s.st_mode & 0777);
+  if (out < 0) {
+    int error = errno;
+    close(in);
+    errno = error;
+    return -1;
+  }
+  char chunk[65536];
+  ssize_t got;
+  int result = 0;
+  while ((got = read(in, chunk, sizeof chunk)) > 0) {
+    if (write(out, chunk, (size_t)got) != got) {
+      result = -1;
+      break;
+    }
+  }
+  int error = errno;
+  close(out);
+  close(in);
+  errno = error;
+
+  return result;
+}
+#endif
+
+#ifdef _WIN32
+Failure tz_fs_move_failure(DWORD error, int how, const Path *from, const Path *to) {
+  Failure f = tz_fs_win32_failure(error);
+  if (how != 0 && (f.index == E_EPERM || f.index == E_EACCES)) {
+    TzStatsParts st;
+    const wchar_t *folder = how == 2 ? tz_fs_wide(from) : tz_fs_wide(to);
+    if (tz_fs_stat_of(folder, 1, &st) == 0 && (st.mode & S_KIND) == S_DIR) {
+      f = (Failure){E_EISDIR, tz_fs_errors[E_EISDIR].windows, error};
+    }
+  }
+
+  return f;
+}
+#endif
+
+static void move_or_copy(void *from_obj, uint64_t from_meta, void *to_obj, uint64_t to_meta,
+                         int how, TzMaker make) {
+  const char *syscall = how == 2 ? "copyfile" : "rename";
   Path from, to;
-  if (!tz_fs_path_init(&from, from_obj, from_meta, make, "rename")) {
+  if (!tz_fs_path_init(&from, from_obj, from_meta, make, syscall)) {
     return;
   }
-  if (!tz_fs_path_init(&to, to_obj, to_meta, make, "rename")) {
+  if (!tz_fs_path_init(&to, to_obj, to_meta, make, syscall)) {
     tz_fs_path_free(&from);
     return;
   }
 #ifdef _WIN32
-  if (!MoveFileExW(tz_fs_wide(&from), tz_fs_wide(&to), MOVEFILE_REPLACE_EXISTING)) {
-    tz_fs_fail_win32(make, GetLastError(), "rename", &from, &to);
+  BOOL done = how == 2 ? CopyFileW(tz_fs_wide(&from), tz_fs_wide(&to), TRUE)
+              : how == 1
+                  ? MoveFileExW(tz_fs_wide(&from), tz_fs_wide(&to), MOVEFILE_REPLACE_EXISTING)
+                  : MoveFileExW(tz_fs_wide(&from), tz_fs_wide(&to), 0);
+  if (!done) {
+    tz_fs_throw_failure(make, tz_fs_move_failure(GetLastError(), how, &from, &to), syscall,
+                        &from.shown, &to.shown);
   }
 #else
-  if (rename(tz_fs_native(&from), tz_fs_native(&to)) != 0) {
-    tz_fs_fail_errno(make, errno, "rename", &from, &to);
+  int failed = how == 2   ? tz_fs_copy_new(tz_fs_native(&from), tz_fs_native(&to))
+               : how == 1 ? rename(tz_fs_native(&from), tz_fs_native(&to))
+                          : tz_fs_rename_no_replace(tz_fs_native(&from), tz_fs_native(&to));
+  if (failed != 0) {
+    tz_fs_fail_errno(make, errno, syscall, &from, &to);
   }
 #endif
   tz_fs_path_free(&from);
   tz_fs_path_free(&to);
 }
 
+void tz_fs_rename(void *from_obj, uint64_t from_meta, void *to_obj, uint64_t to_meta,
+                  TzMaker make) {
+  move_or_copy(from_obj, from_meta, to_obj, to_meta, 0, make);
+}
+
+void tz_fs_replace(void *from_obj, uint64_t from_meta, void *to_obj, uint64_t to_meta,
+                   TzMaker make) {
+  move_or_copy(from_obj, from_meta, to_obj, to_meta, 1, make);
+}
+
 void tz_fs_copy_file(void *from_obj, uint64_t from_meta, void *to_obj, uint64_t to_meta,
-                     int64_t mode, TzMaker make) {
-  Path from, to;
-  if (!tz_fs_path_init(&from, from_obj, from_meta, make, "copyfile")) {
-    return;
-  }
-  if (!tz_fs_path_init(&to, to_obj, to_meta, make, "copyfile")) {
-    tz_fs_path_free(&from);
-    return;
-  }
-#ifdef _WIN32
-  if (mode & 4) {
-    tz_fs_throw_failure(make, (Failure){E_ENOSYS, tz_fs_errors[E_ENOSYS].windows}, "copyfile",
-                        &from.shown, &to.shown);
-  } else if (!CopyFileW(tz_fs_wide(&from), tz_fs_wide(&to), (mode & 1) != 0)) {
-    DWORD error = GetLastError();
-    TzStatsParts a, b;
-    int same = tz_fs_win32_failure(error).index == E_EBUSY &&
-               tz_fs_stat_of(tz_fs_wide(&from), 1, &a) == 0 &&
-               tz_fs_stat_of(tz_fs_wide(&to), 1, &b) == 0 && a.dev == b.dev && a.ino == b.ino;
-    if (!same) {
-      tz_fs_fail_win32(make, error, "copyfile", &from, &to);
-    }
-  }
-#else
-  int in = -1, out = -1;
-  if (mode & 4) {
-    tz_fs_fail_errno(make, ENOSYS, "copyfile", &from, &to);
-  } else if ((in = open(tz_fs_native(&from), O_RDONLY | O_CLOEXEC)) < 0) {
-    tz_fs_fail_errno(make, errno, "copyfile", &from, &to);
-  } else {
-    struct stat s;
-    fstat(in, &s);
-    out = open(tz_fs_native(&to),
-               O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC | ((mode & 1) ? O_EXCL : 0),
-               s.st_mode & 0777);
-    if (out < 0) {
-      tz_fs_fail_errno(make, errno, "copyfile", &from, &to);
-    } else {
-      char chunk[65536];
-      ssize_t got;
-      while ((got = read(in, chunk, sizeof chunk)) > 0) {
-        if (write(out, chunk, (size_t)got) != got) {
-          tz_fs_fail_errno(make, errno, "copyfile", &from, &to);
-          break;
-        }
-      }
-      close(out);
-    }
-    close(in);
-  }
-#endif
-  tz_fs_path_free(&from);
-  tz_fs_path_free(&to);
+                     TzMaker make) {
+  move_or_copy(from_obj, from_meta, to_obj, to_meta, 2, make);
 }
 
 #ifdef _WIN32

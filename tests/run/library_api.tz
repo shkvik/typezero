@@ -83,7 +83,8 @@ if (after.isOk()) await after.value.stop()
 class Countdown extends Readable<string> {
   private left = 3
   protected override onRead() {
-    this.push(this.left == 0 ? undefined : `${this.left--}`)
+    if (this.left == 0) this.pushEnd()
+    else this.push(`${this.left--}`)
   }
 }
 const countdown = new Countdown()
@@ -98,4 +99,4 @@ class Odd extends Readable<string> {
     this.pushChunk(42)
   }
 }
-for await (const item of new Odd({ objectMode: true })) console.log(item.isErr() ? item.error.code : item.value)
+for await (const item of new Odd({ objectMode: true })) console.log(item.isErr() ? item.error.message : item.value)

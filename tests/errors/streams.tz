@@ -2,11 +2,36 @@
 // on a stream that went elsewhere before, or where its type would depend on
 // a branch; chunks of another type in push(), write() and pipeline(); an
 // object-mode stream whose type nothing tells; pipe(), which does not pass
-// an error on.
-import { PassThrough, Readable, Writable, compose, pipeline } from "node:stream"
+// an error on; streams made without a class of their own (Readable, Writable,
+// Duplex and Transform are abstract), push(undefined) instead of pushEnd(),
+// and an error put into a stream from outside.
+import { PassThrough, Readable, Transform, Writable, compose, pipeline } from "node:stream"
 import { createReadStream } from "node:fs"
 class User {
   constructor(public name: string) {}
+}
+class Users extends Readable<User> {
+  constructor() {
+    super({ objectMode: true })
+  }
+  onRead() {}
+}
+class Bytes extends Readable {
+  onRead() {}
+}
+class Strings extends Writable<string> {
+  constructor() {
+    super({ decodeStrings: false })
+  }
+  onWrite(c, e, cb) {
+    cb()
+  }
+}
+class Ends extends Readable<string> {
+  onRead() {
+    // expect-error: 'push(undefined)' does not end a stream: a chunk is never undefined; end the stream with 'pushEnd()'
+    this.push(undefined)
+  }
 }
 function use(r: Readable) {
   r.on("error", (e) => console.log(e.message))
@@ -31,21 +56,21 @@ const e = createReadStream("e.txt")
 setTimeout(() => e.resume(), 1)
 // expect-error: a function written before uses it before this
 e.setEncoding("utf8")
-const objects = new Readable<User>({ objectMode: true, read() {} })
+const objects = new Users()
 // expect-error: setEncoding() decodes the Buffers of a stream of bytes, and this is an object-mode stream of User
 objects.setEncoding("utf8")
-// expect-error: type 'string' is not assignable to type 'User | undefined'
+// expect-error: type 'string' is not assignable to type 'User'
 objects.push("not a user")
-const bytes = new Readable({ read() {} })
+const bytes = new Bytes()
 // expect-error: 'push' of a stream of Buffer takes a string, a Buffer or a Uint8Array, but this is 'int'
 bytes.push(42)
-const strings = new Writable<string>({ decodeStrings: false, write(c, e, cb) { cb() } })
+const strings = new Strings()
 // expect-error: 'write' of a stream of string takes a string, but this is 'Buffer'
 strings.write(Buffer.from("x"))
 // expect-error: 'pipe' is not supported: it does not pass an error on, so the source stops and the destination stays open; join the streams with 'await pipeline(source, destination)', which gives a Result
 objects.pipe(new PassThrough())
-// expect-error: cannot infer the type of the chunks of this object-mode Readable: no code of the program pushes into it
-const nothing = new Readable({ objectMode: true, read() {} })
+// expect-error: cannot infer the type of the written chunks of this object-mode PassThrough: no code of the program writes to it
+const nothing = new PassThrough({ objectMode: true })
 // expect-error: parameter 's' is declared as 'string', but the function gets 'Buffer' here
 bytes.on("data", (s: string) => console.log(s))
 // expect-error: pipeline() writes chunks of User to 'PassThrough<Buffer, Buffer>', which takes Buffer
@@ -54,14 +79,23 @@ pipeline(objects, new PassThrough(), (err) => {})
 compose(bytes, 5)
 // expect-error: 'Readable.from' takes an iterable, an async iterable, a string or a Buffer, but this is 'int'
 Readable.from(42)
-// expect-error: 'Writable<string>' has no push(): it is not readable
+// expect-error: 'Strings' has no push(): it is not readable
 strings.push("x")
+// expect-error: 'Readable' is abstract: write a class that extends it and puts its work in 'onRead', e.g. 'class Lines extends Readable<string> { protected onRead() { ... } }'; for a stream of values you already have, use 'Readable.from(values)'
+new Readable({ read() {} })
+// expect-error: 'Transform' is abstract: write a class that extends it and puts its work in 'onTransform'
+new Transform()
+// expect-error: 'destroy' is protected in class 'Readable'; only 'Readable' and the classes that extend it can use it
+bytes.destroy({ message: "stop" })
+bytes.destroy()
 // A method the stream calls, with other parameters: another variant of the
 // name, which the stream would never call.
+// expect-error: class 'WrongChunks' does not implement the abstract method onWrite
 class WrongChunks extends Writable {
   // expect-error: 'onWrite' is what node:stream calls, as 'onWrite(chunk: Buffer, encoding: string, callback: (StreamError?) => void)'
   onWrite(chunk: string, encoding: string, callback: () => void) {}
 }
+// expect-error: class 'WrongSize' does not implement the abstract method onRead
 class WrongSize extends Readable {
   // expect-error: 'onRead' is what node:stream calls, as 'onRead(size: int)'
   onRead(size: string) {}
