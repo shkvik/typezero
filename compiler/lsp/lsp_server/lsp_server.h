@@ -77,6 +77,8 @@ private:
   CheckProcess process_;
   std::string running_;
   int runningLevel_ = 1;
+  bool refreshTokens_ = false;
+  int nextRequest_ = 1;
   bool checking_ = false;
   bool cancel_ = false;
   bool stopping_ = false;

@@ -253,6 +253,114 @@ llvm::json::Value LspFeatures::rename(unsigned line, unsigned character, llvm::S
   return llvm::json::Object{{"changes", std::move(all)}};
 }
 
+llvm::json::Object LspFeatures::legend() {
+  llvm::json::Array types{"class",  "type",     "enum",     "function",
+                          "method", "property", "variable", "parameter"};
+  llvm::json::Array modifiers{"declaration", "readonly", "defaultLibrary"};
+
+  return llvm::json::Object{{"tokenTypes", std::move(types)},
+                            {"tokenModifiers", std::move(modifiers)}};
+}
+
+llvm::json::Value LspFeatures::semanticTokens() const {
+  struct Token {
+    unsigned line;
+    unsigned character;
+    unsigned length;
+    int type;
+    int modifiers;
+  };
+  auto typeOf = [](llvm::StringRef kind) {
+    if (kind == "class" || kind == "constructor") {
+      return 0;
+    }
+    if (kind == "type") {
+      return 1;
+    }
+    if (kind == "enum") {
+      return 2;
+    }
+    if (kind == "function") {
+      return 3;
+    }
+    if (kind == "method") {
+      return 4;
+    }
+    if (kind == "field") {
+      return 5;
+    }
+
+    return 6;
+  };
+  std::map<std::pair<unsigned, unsigned>, Token> found;
+  auto add = [&](const SourcePlace &place, llvm::StringRef name, int type, int modifiers) {
+    if (place.endLine != place.line || name.empty()) {
+      return;
+    }
+    size_t at = offset(place.line, place.character);
+    llvm::StringRef rest = text_.substr(at);
+    if (!rest.starts_with(name) || (rest.size() > name.size() && isWordChar(rest[name.size()]))) {
+      return;
+    }
+    auto [slot, added] = found.try_emplace(
+        {place.line, place.character},
+        Token{place.line, place.character, place.endCharacter - place.character, type, modifiers});
+    if (!added && type < slot->second.type) {
+      slot->second.type = type;
+    }
+  };
+  auto modifiersOf = [&](size_t symbol, bool declaration) {
+    const KnownSymbol &known = knowledge_.symbols[symbol];
+    int modifiers = declaration ? 1 : 0;
+    if (known.kind == "const" || llvm::StringRef(known.signature).contains("readonly ")) {
+      modifiers |= 2;
+    }
+    if (knowledge_.modules[known.module].library) {
+      modifiers |= 4;
+    }
+
+    return modifiers;
+  };
+  for (size_t symbol : knowledge_.symbolsOf(module_)) {
+    const KnownSymbol &known = knowledge_.symbols[symbol];
+    llvm::StringRef name = known.kind == "constructor" ? llvm::StringRef() : known.name;
+    add(known.place, name, typeOf(known.kind), modifiersOf(symbol, true));
+  }
+  for (const KnownReference &reference : knowledge_.references) {
+    if (reference.module != module_) {
+      continue;
+    }
+    const KnownSymbol &known = knowledge_.symbols[reference.symbol];
+    llvm::StringRef name = known.kind == "constructor" ? known.container : known.name;
+    add(reference.place, name, typeOf(known.kind), modifiersOf(reference.symbol, false));
+  }
+  for (const KnownLocal &local : knowledge_.locals) {
+    if (local.module != module_) {
+      continue;
+    }
+    add(local.place, local.name, 6, 1);
+    for (const SourcePlace &use : local.uses) {
+      add(use, local.name, 6, 0);
+    }
+  }
+  llvm::json::Array data;
+  unsigned line = 0;
+  unsigned character = 0;
+  for (const auto &[at, token] : found) {
+    unsigned deltaLine = token.line - line;
+    unsigned deltaCharacter = deltaLine == 0 ? token.character - character : token.character;
+    data.push_back(deltaLine);
+    data.push_back(deltaCharacter);
+    data.push_back(token.length);
+    data.push_back(token.type);
+    data.push_back(token.modifiers);
+    line = token.line;
+    character = token.character;
+  }
+
+  return llvm::json::Object{{"data", std::move(data)}};
+}
+
 llvm::json::Value LspFeatures::completion(unsigned line, unsigned character) const {
   size_t at = offset(line, character);
   size_t start = at;

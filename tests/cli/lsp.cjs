@@ -276,6 +276,22 @@ async function main() {
   answer = await server.request("textDocument/rename", { ...at(complete, 12, 12), newName: "1x" })
   if (!answer.error) throw new Error(`rename to '1x' did not fail: ${JSON.stringify(answer)}`)
 
+  // Colors by meaning: classes, methods, fields, variables, as the check knows them.
+  answer = await server.request("textDocument/semanticTokens/full", { textDocument: { uri: uriOf(complete) } })
+  const legend = init.result.capabilities.semanticTokensProvider.legend.tokenTypes
+  const tokens = []
+  let tokenLine = 0
+  let tokenColumn = 0
+  for (let i = 0; i < answer.result.data.length; i += 5) {
+    const [deltaLine, deltaColumn, , type, modifiers] = answer.result.data.slice(i, i + 5)
+    tokenLine += deltaLine
+    tokenColumn = deltaLine ? deltaColumn : tokenColumn + deltaColumn
+    tokens.push(`${tokenLine}:${tokenColumn} ${legend[type]}${modifiers & 1 ? " declaration" : ""}`)
+  }
+  for (const wanted of ["0:6 class declaration", "1:9 property declaration", "11:14 class", "12:14 method"]) {
+    if (!tokens.includes(wanted)) throw new Error(`no token '${wanted}' in ${JSON.stringify(tokens)}`)
+  }
+
   const shutdown = await server.request("shutdown", null)
   expect("the answer to shutdown", shutdown.result, null)
   server.notify("exit")

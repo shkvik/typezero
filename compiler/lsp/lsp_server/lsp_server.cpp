@@ -108,12 +108,19 @@ bool LspServer::handle(const llvm::json::Object &message) {
     llvm::json::Object sync{{"openClose", true}, {"change", 2}};
     llvm::json::Object completion{{"triggerCharacters", llvm::json::Array{"."}}};
     llvm::json::Object renames{{"prepareProvider", true}};
+    llvm::json::Object tokens{{"legend", LspFeatures::legend()}, {"full", true}};
+    const llvm::json::Object *client = args.getObject("capabilities");
+    const llvm::json::Object *workspace = client ? client->getObject("workspace") : nullptr;
+    const llvm::json::Object *semantic =
+        workspace ? workspace->getObject("semanticTokens") : nullptr;
+    refreshTokens_ = semantic && semantic->getBoolean("refreshSupport").value_or(false);
     llvm::json::Object capabilities{{"textDocumentSync", std::move(sync)},
                                     {"hoverProvider", true},
                                     {"definitionProvider", true},
                                     {"referencesProvider", true},
                                     {"completionProvider", std::move(completion)},
-                                    {"renameProvider", std::move(renames)}};
+                                    {"renameProvider", std::move(renames)},
+                                    {"semanticTokensProvider", std::move(tokens)}};
     llvm::json::Object info{{"name", "tz"}, {"version", TZ_VERSION}};
     reply(id ? *id : nullptr, llvm::json::Object{{"capabilities", std::move(capabilities)},
                                                  {"serverInfo", std::move(info)}});
@@ -148,9 +155,13 @@ bool LspServer::handle(const llvm::json::Object &message) {
 
 bool LspServer::answer(llvm::StringRef method, const llvm::json::Value &id,
                        const llvm::json::Object &args) {
-  const llvm::StringRef methods[] = {"textDocument/hover",         "textDocument/definition",
-                                     "textDocument/references",    "textDocument/completion",
-                                     "textDocument/prepareRename", "textDocument/rename"};
+  const llvm::StringRef methods[] = {"textDocument/hover",
+                                     "textDocument/definition",
+                                     "textDocument/references",
+                                     "textDocument/completion",
+                                     "textDocument/prepareRename",
+                                     "textDocument/rename",
+                                     "textDocument/semanticTokens/full"};
   if (!llvm::is_contained(methods, method)) {
     return false;
   }
@@ -160,7 +171,7 @@ bool LspServer::answer(llvm::StringRef method, const llvm::json::Value &id,
   auto found = uri ? documents_.find(uri->str()) : documents_.end();
   const Knowledge *knowledge = nullptr;
   size_t module = 0;
-  if (found != documents_.end() && position) {
+  if (found != documents_.end()) {
     const TextDocument &document = *found->second;
     auto own = entries_.find(document.entry);
     if (own != entries_.end()) {
@@ -179,6 +190,10 @@ bool LspServer::answer(llvm::StringRef method, const llvm::json::Value &id,
       }
     }
   }
+  if (!knowledge && method == "textDocument/semanticTokens/full") {
+    reply(id, llvm::json::Object{{"data", llvm::json::Array{}}});
+    return true;
+  }
   if (!knowledge) {
     if (method == "textDocument/completion") {
       reply(id, llvm::json::Object{{"isIncomplete", true}, {"items", llvm::json::Array{}}});
@@ -187,8 +202,9 @@ bool LspServer::answer(llvm::StringRef method, const llvm::json::Value &id,
     }
     return true;
   }
-  unsigned line = static_cast<unsigned>(position->getInteger("line").value_or(0));
-  unsigned character = static_cast<unsigned>(position->getInteger("character").value_or(0));
+  unsigned line = position ? static_cast<unsigned>(position->getInteger("line").value_or(0)) : 0;
+  unsigned character =
+      position ? static_cast<unsigned>(position->getInteger("character").value_or(0)) : 0;
   auto uriOf = [this](llvm::StringRef file) { return uriFor(file); };
   auto textOf = [this](llvm::StringRef file) {
     std::string key = SourceOverlay::key(file);
@@ -202,7 +218,9 @@ bool LspServer::answer(llvm::StringRef method, const llvm::json::Value &id,
     return buffer ? (*buffer)->getBuffer().str() : std::string();
   };
   LspFeatures features(*knowledge, module, found->second->text(), uriOf, textOf);
-  if (method == "textDocument/hover") {
+  if (method == "textDocument/semanticTokens/full") {
+    reply(id, features.semanticTokens());
+  } else if (method == "textDocument/hover") {
     reply(id, features.hover(line, character));
   } else if (method == "textDocument/definition") {
     reply(id, features.definition(line, character));
@@ -572,6 +590,11 @@ void LspServer::finish(int code) {
 
   if (const llvm::json::Value *known = report->get("knowledge")) {
     KnowledgeJson::read(*known, entry.knowledge);
+    if (refreshTokens_) {
+      channel_.send(llvm::json::Object{{"jsonrpc", "2.0"},
+                                       {"id", "tz-" + std::to_string(nextRequest_++)},
+                                       {"method", "workspace/semanticTokens/refresh"}});
+    }
   }
   entry.files.clear();
   if (const llvm::json::Array *files = report->getArray("files")) {

@@ -26,7 +26,10 @@ public:
                            std::string &error) const;
 
   static llvm::json::Object range(const SourcePlace &place);
+  llvm::json::Value semanticTokens() const;
+
   static bool isName(llvm::StringRef name);
+  static llvm::json::Object legend();
 
 private:
   llvm::json::Object location(const SourcePlace &place) const;
