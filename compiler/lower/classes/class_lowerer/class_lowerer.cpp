@@ -140,6 +140,9 @@ llvm::Value *ClassLowerer::emitMethodCall(CallExpr *call) {
   for (size_t i = call->args.size(); i < method->params.size(); ++i) {
     args.push_back(lowering_.optionalLowerer().undefinedValue(method->params[i]));
   }
+  if (!call->virtualCall) {
+    lowering_.markAwaitedCall(call, method->decl);
+  }
   llvm::CallInst *result =
       call->virtualCall
           ? lowering_.builder_.CreateCall(

@@ -100,6 +100,9 @@ void StmtLowerer::emitStatements(BlockStmt *block) {
     if (group && i == group->firstUse) {
       lowering_.envLowerer().emitGroupCreation(group);
     }
+    if (i + 1 < block->body.size()) {
+      lowering_.noteAwaitedNext(block->body[i], block->body[i + 1]);
+    }
     emitStmt(block->body[i]);
   }
 }

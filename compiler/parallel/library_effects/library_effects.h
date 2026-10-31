@@ -16,7 +16,7 @@ public:
   void libraryArg(const CallExpr *c, llvm::StringRef cls, llvm::StringRef name, const Expr *arg,
                   llvm::SMLoc at);
   void libraryCallback(const CallExpr *c, const Expr *f, CallKind kind, bool interval = false,
-                       bool handled = false);
+                       bool handled = false, bool served = false);
   void listen(const Expr *f, Channel channel);
   void libraryReads(const Expr *e, llvm::SMLoc at);
   void dispatch(const CallExpr *c, CallKind kind, Channel channel, const Use &use);

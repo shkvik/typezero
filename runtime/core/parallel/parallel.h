@@ -16,6 +16,7 @@ typedef struct TzThread {
   struct TzReactor *local_head, *local_tail;
   void *caches[4];
   TzHeap heap;
+  int32_t awaited_call;
 } TzThread;
 
 enum { TZ_CACHE_INTL = 0, TZ_CACHE_DATE_FORMAT = 1 };
@@ -35,6 +36,8 @@ TzThread *tz_thread_at(int32_t i);
 int32_t tz_thread_index(void);
 void tz_parallel_init(void);
 void tz_thread_yield(void);
+void tz_call_awaited(void);
+int32_t tz_take_awaited(void);
 static inline void tz_cpu_relax(void) {
 #if defined(__x86_64__) || defined(_M_X64) || defined(__i386__)
   __builtin_ia32_pause();

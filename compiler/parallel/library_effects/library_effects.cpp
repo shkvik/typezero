@@ -185,8 +185,8 @@ void LibraryEffects::libraryArg(const CallExpr *c, llvm::StringRef cls, llvm::St
     } else if (isTargetClass(cls) &&
                (name == "addEventListener" || name == "addFunctionListener")) {
       listen(f, TargetListeners);
-    } else if (cls == "Server" && name == "constructor") {
-      libraryCallback(c, f, CallKind::Later, true, true);
+    } else if ((cls == "Server" || cls == "Http2Server") && name == "constructor") {
+      libraryCallback(c, f, CallKind::Later, true, true, true);
     } else {
       libraryCallback(c, f, CallKind::Inline);
       libraryCallback(c, f, CallKind::Later);
@@ -232,11 +232,12 @@ void LibraryEffects::libraryReads(const Expr *e, llvm::SMLoc at) {
 }
 
 void LibraryEffects::libraryCallback(const CallExpr *c, const Expr *f, CallKind kind, bool interval,
-                                     bool handled) {
+                                     bool handled, bool served) {
   CallRec &rec = analysis_.codeWalk().record(f, kind, {}, f->loc());
   rec.call = c;
   rec.interval |= interval;
   rec.handled |= handled;
+  rec.served |= served;
   if (kind == CallKind::Inline) {
     rec.repeated = true;
   }

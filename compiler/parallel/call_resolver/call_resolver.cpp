@@ -7,6 +7,7 @@
 #include "compiler/parallel/explainer/explainer.h"
 #include "compiler/parallel/expr_walk/expr_walk.h"
 #include "compiler/parallel/library_effects/library_effects.h"
+#include "compiler/parallel/ownership/ownership.h"
 #include "compiler/parallel/parallel_helpers/parallel_helpers.h"
 #include "compiler/parallel/parallel_model/parallel_model.h"
 #include "compiler/parallel/pieces/pieces.h"
@@ -151,11 +152,15 @@ void CallResolver::resolve() {
 }
 
 std::optional<Access> CallResolver::substitute(const Access &a, const FnInfo &callee,
-                                               const std::optional<Ref> &self,
+                                               const FnInfo &caller, const Callee &call,
                                                const CallRec &rec) const {
+  const std::optional<Ref> &self = call.self;
   Access b = a;
   b.at = rec.loc;
   b.via = callee.decl;
+  if (b.loc.ref.kind == RefKind::Owned) {
+    b.loc.ref = analysis_.ownership().substituted(b.loc.ref, callee, caller, rec, call.mode);
+  }
   if (b.loc.ref.kind == RefKind::This) {
     auto *owner = static_cast<const FunctionDecl *>(b.loc.ref.ptr);
     if (owner == callee.thisOwner && self) {
@@ -207,7 +212,7 @@ void CallResolver::fold() {
         const FnInfo &g = analysis_.fns_[c.fn];
         std::vector<Access> added;
         for (const Access &a : g.inlineEffects) {
-          if (std::optional<Access> b = substitute(a, g, c.self, rec)) {
+          if (std::optional<Access> b = substitute(a, g, f, c, rec)) {
             added.push_back(*b);
           }
         }

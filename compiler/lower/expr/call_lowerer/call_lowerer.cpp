@@ -142,6 +142,7 @@ llvm::Value *CallLowerer::emitCall(CallExpr *call) {
     args.push_back(lowering_.optionalLowerer().undefinedValue(func->params[i]));
   }
   llvm::CallInst *result;
+  lowering_.markAwaitedCall(call, func->decl);
   if (func->decl->isClosure()) {
     args.insert(args.begin(), lowering_.closureLowerer().closureEnv(call));
     result =

@@ -266,6 +266,15 @@ private:
   };
   std::vector<PublishedObject> publishedObjects_;
   llvm::DenseSet<const FunctionDecl *> aheadFunctions_;
+  llvm::DenseSet<const VarSymbol *> ownedParams_;
+  llvm::DenseSet<const CallExpr *> awaitedCalls_;
+  bool publishesFrame(const FunctionDecl *fn) const {
+    return parallel_ && fn && fn->isAsync && !fn->isGenerator &&
+           (aheadFunctions_.contains(fn) || fn->awaitsAhead);
+  }
+  void noteAwaited(const Expr *operand);
+  void noteAwaitedNext(const Stmt *declared, const Stmt *next);
+  void markAwaitedCall(const CallExpr *call, const FunctionDecl *target);
   llvm::DenseMap<llvm::Function *, llvm::Constant *> memberDescriptors_;
   std::vector<std::pair<llvm::Constant *, const Type *>> boxDescriptors_;
   llvm::DenseSet<llvm::Value *> eternalSlots_;

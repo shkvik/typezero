@@ -27,6 +27,7 @@ struct ParallelPlan {
   };
   std::vector<Task> tasks;
   std::vector<Piece> pieces;
+  std::vector<const VarSymbol *> ownedParams;
 };
 
 ParallelPlan planParallel(const SourceFile &program, const llvm::SourceMgr &sources);

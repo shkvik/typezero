@@ -265,7 +265,6 @@ void tz_promise_fulfill(TzPromise *p) {
     tz_order_wait();
   }
 #endif
-  p->state = TZ_PROMISE_FULFILLED;
   const TzType *type = value_type(p);
 #if TZ_PARALLEL
   if (type && !(p->flags & TZ_PROMISE_DONE)) {
@@ -275,6 +274,7 @@ void tz_promise_fulfill(TzPromise *p) {
   if (p->rc < 0 && type) {
     tz_group_store_value(p, type, value_of(p));
   }
+  __atomic_store_n(&p->state, TZ_PROMISE_FULFILLED, __ATOMIC_RELEASE);
   trigger(p);
 }
 
@@ -359,7 +359,8 @@ static int await_ahead(TzReactor *r, TzPromise *p, int32_t ahead) {
     }
     return 1;
   }
-  if (!tz_thread.await_lock && !tz_ahead_private(p)) {
+  if (!tz_thread.await_lock && !tz_ahead_private(p) &&
+      __atomic_load_n(&p->state, __ATOMIC_ACQUIRE) != TZ_PROMISE_FULFILLED) {
     return 0;
   }
   if (p->state == TZ_PROMISE_PENDING) {

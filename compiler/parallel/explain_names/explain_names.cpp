@@ -168,6 +168,8 @@ std::string ExplainNames::refName(Ref r) const {
   }
   case RefKind::Type:
     return "any " + typeText(static_cast<const Type *>(r.ptr));
+  case RefKind::Owned:
+    return "any " + typeText(static_cast<const OwnedRef *>(r.ptr)->type);
   }
 
   return "?";

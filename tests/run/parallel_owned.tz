@@ -1,0 +1,90 @@
+// The objects a server gives one call of its handler belong to that call
+// (docs/async.md, section 8): touching them, also through helpers that take
+// them or what was read from them, runs in parallel. When one leaks out —
+// into a global, into a task that runs on its own, into a timer — it is
+// shared again, and the handler keeps node's order.
+import { Server } from "tz:http"
+import { Http2Server } from "tz:http2"
+
+const kept: Request[] = []
+
+function header(headers: Headers, name: string): string {
+  return headers.get(name) ?? "none"
+}
+
+function agent(request: Request): string {
+  return header(request.headers, "x-agent")
+}
+
+function size(request: Request): string {
+  return request.headers.get("x-size") ?? "0"
+}
+
+async function later(request: Request): Promise<void> {
+  await Promise.resolve()
+  request.headers.set("x-later", "1")
+}
+
+const own = new Server({ port: 0, hostname: "127.0.0.1" }, async request => {
+  const name = agent(request)
+  const body = await request.text()
+  return new Response(`${name} ${body.isOk() ? body.value : "?"}`)
+})
+
+const keeps = new Server({ port: 0, hostname: "127.0.0.1" }, request => {
+  kept.push(request)
+  return new Response(`kept ${agent(request)}`)
+})
+
+const spawns = new Server({ port: 0, hostname: "127.0.0.1" }, request => {
+  void later(request)
+  return new Response(`spawned ${request.headers.get("x-agent") ?? "none"}`)
+})
+
+const timers = new Server({ port: 0, hostname: "127.0.0.1" }, request => {
+  setTimeout(() => request.headers.set("x-timer", "1"), 1)
+  return new Response(`timer ${request.headers.get("x-agent") ?? "none"}`)
+})
+
+const shares = new Server({ port: 0, hostname: "127.0.0.1" }, request => {
+  return new Response(`size ${size(request)}`)
+})
+
+const streams = new Http2Server({ port: 0, hostname: "127.0.0.1" }, async request => {
+  const responded = request.respond({ status: 200 })
+  if (responded.isErr()) return
+  const response = responded.value
+  const hello = new TextEncoder().encode(request.path)
+  const wrote = await response.write(hello)
+  if (wrote.isErr()) return
+  const ended = await response.end()
+  if (ended.isErr()) return
+})
+
+const probe = new Request("http://localhost/", { headers: { "x-size": "7" } })
+console.log(`probe ${size(probe)}`)
+
+const servers = [own, keeps, spawns, timers, shares]
+for (const server of servers) {
+  const started = server.listen()
+  if (started.isErr()) {
+    console.log("cannot listen:", started.error.message)
+    process.exit(1)
+  }
+  const listening = started.value
+  const answered = await fetch(`http://127.0.0.1:${listening.port}/`, {
+    method: "POST",
+    headers: { "x-agent": "tz", "x-size": "3" },
+    body: "hi",
+  })
+  if (answered.isErr()) {
+    console.log(answered.error.message)
+    process.exit(1)
+  }
+  const text = await answered.value.text()
+  console.log(text.isOk() ? text.value : text.error.message)
+  await listening.stop({ timeout: 0 })
+}
+const started = streams.listen()
+if (started.isOk()) await started.value.stop()
+console.log(`kept ${kept.length}`)

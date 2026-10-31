@@ -1,0 +1,7 @@
+probe 7
+tz hi
+kept tz
+spawned tz
+timer tz
+size 3
+kept 1

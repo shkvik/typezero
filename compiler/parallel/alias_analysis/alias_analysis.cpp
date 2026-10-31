@@ -8,6 +8,7 @@
 #include "compiler/parallel/explainer/explainer.h"
 #include "compiler/parallel/expr_walk/expr_walk.h"
 #include "compiler/parallel/library_effects/library_effects.h"
+#include "compiler/parallel/ownership/ownership.h"
 #include "compiler/parallel/parallel_helpers/parallel_helpers.h"
 #include "compiler/parallel/parallel_model/parallel_model.h"
 #include "compiler/parallel/pieces/pieces.h"
@@ -96,6 +97,9 @@ Ref AliasAnalysis::refOf(const Expr *e) {
   if (isAllocation(e)) {
     return Ref{RefKind::Local, nullptr};
   }
+  if (std::optional<Ref> owned = analysis_.ownership().ownedRef(e)) {
+    return *owned;
+  }
 
   return Ref{RefKind::Type, e->type->nonOptional()};
 }
@@ -137,6 +141,8 @@ const Type *AliasAnalysis::typeOfRef(Ref r) const {
     auto *owner = static_cast<const FunctionDecl *>(r.ptr);
     return owner && owner->cls ? owner->cls->type : nullptr;
   }
+  case RefKind::Owned:
+    return static_cast<const OwnedRef *>(r.ptr)->type;
   case RefKind::Local:
     return nullptr;
   }

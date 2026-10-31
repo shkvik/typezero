@@ -12,6 +12,7 @@
 #include "compiler/parallel/explainer/explainer.h"
 #include "compiler/parallel/expr_walk/expr_walk.h"
 #include "compiler/parallel/library_effects/library_effects.h"
+#include "compiler/parallel/ownership/ownership.h"
 #include "compiler/parallel/parallel_helpers/parallel_helpers.h"
 #include "compiler/parallel/parallel_model/parallel_model.h"
 #include "compiler/parallel/pieces/pieces.h"
@@ -62,7 +63,9 @@ void Analysis::run() {
   listenersKey_ = intern("%listeners");
   codeWalk().discover(nullptr);
   callResolver().resolve();
+  ownership().decide();
   callResolver().fold();
+  ownership().rewrite();
   pieces().explore();
   pieces().findPieces();
   pieces().findHosts();
@@ -100,6 +103,7 @@ ParallelPlan Analysis::plan() const {
     piece.orderedAt = decisions_[i].ats;
     plan.pieces.push_back(std::move(piece));
   }
+  plan.ownedParams.assign(ownedParams_.begin(), ownedParams_.end());
 
   return plan;
 }
@@ -119,6 +123,7 @@ Analysis::Analysis(const SourceFile &program, const llvm::SourceMgr &sources)
   explainerPart_ = std::make_unique<Explainer>(*this);
   explainNamesPart_ = std::make_unique<ExplainNames>(*this);
   explainTitlesPart_ = std::make_unique<ExplainTitles>(*this);
+  ownershipPart_ = std::make_unique<Ownership>(*this);
   for (const Module *module : program.modules) {
     if (!module->builtin) {
       continue;

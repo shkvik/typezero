@@ -891,6 +891,15 @@ TZ_NOINLINE void tz_order_wait(void) {
 
 void tz_order_enter(void) { TZ_ORDERED(); }
 
+TZ_HOT void tz_call_awaited(void) { tz_thread.awaited_call = 1; }
+
+TZ_HOT int32_t tz_take_awaited(void) {
+  int32_t awaited = tz_thread.awaited_call;
+  tz_thread.awaited_call = 0;
+
+  return awaited;
+}
+
 void tz_thread_yield(void) { SwitchToThread(); }
 
 #else
@@ -914,5 +923,9 @@ int64_t tz_thread_sum(size_t offset) {
 }
 
 void tz_order_enter(void) {}
+
+void tz_call_awaited(void) {}
+
+int32_t tz_take_awaited(void) { return 0; }
 
 #endif

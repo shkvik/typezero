@@ -30,7 +30,6 @@ top-level code
 
 async arrow, line 43
   start (in the callbacks at line 43)
-    reads  the state of any Request (line 44)
     reads  the state of the URL made at line 44 (line 44)
     parallel
   after await at line 45 (in the callbacks at line 43)

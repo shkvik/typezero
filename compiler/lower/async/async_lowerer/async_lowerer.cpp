@@ -165,6 +165,14 @@ void AsyncLowerer::emitAsyncFunction(FunctionDecl *fn, llvm::Function *function)
   state.dropsPromise = !ret->isPromise();
   beginAsync();
   lowering_.functionFrame().pushScope();
+  bool publishes = lowering_.publishesFrame(fn);
+  llvm::Value *awaited = nullptr;
+  if (publishes) {
+    awaited =
+        lowering_.builder_.CreateCall(lowering_.processLowerer().processFunction(
+                                          "tz_take_awaited", lowering_.builder_.getInt32Ty(), {}),
+                                      {}, "awaited");
+  }
   std::vector<llvm::Value *> args;
   unsigned first = 0;
   if (fn->isClosure() || fn->takesThis()) {
@@ -183,18 +191,30 @@ void AsyncLowerer::emitAsyncFunction(FunctionDecl *fn, llvm::Function *function)
     args.push_back(lowering_.function_->getArg(i));
   }
   lowering_.functionBuilder().emitParams(fn, args);
-  if (lowering_.parallel_ && (lowering_.aheadFunctions_.contains(fn) || fn->awaitsAhead)) {
-    if (fn->isClosure() || fn->takesThis()) {
-      lowering_.builder_.CreateCall(
-          lowering_.processLowerer().processFunction(
-              "tz_publish_object", lowering_.builder_.getVoidTy(), {lowering_.builder_.getPtrTy()}),
-          {lowering_.envParam_});
+  if (publishes) {
+    llvm::FunctionCallee publishObject = lowering_.processLowerer().processFunction(
+        "tz_publish_object", lowering_.builder_.getVoidTy(), {lowering_.builder_.getPtrTy()});
+    if (fn->isClosure()) {
+      lowering_.builder_.CreateCall(publishObject, {lowering_.envParam_});
+    }
+    llvm::BasicBlock *publishBlock = lowering_.functionFrame().newBlock("publish");
+    llvm::BasicBlock *doneBlock = lowering_.functionFrame().newBlock("publish.done");
+    llvm::Value *shared = lowering_.builder_.CreateICmpEQ(awaited, lowering_.builder_.getInt32(0));
+    lowering_.builder_.CreateCondBr(shared, publishBlock, doneBlock);
+    lowering_.functionFrame().switchTo(publishBlock);
+    if (fn->takesThis() && !fn->isClosure()) {
+      lowering_.builder_.CreateCall(publishObject, {lowering_.envParam_});
     }
     for (size_t i = 0; i < fn->params.size(); ++i) {
       const Param &param = fn->params[i];
+      if (lowering_.ownedParams_.contains(param.sym)) {
+        continue;
+      }
       lowering_.storeLowerer().publishValue(
           args[i], param.defaultValue ? Type::optional(param.sym->type) : param.sym->type);
     }
+    lowering_.builder_.CreateBr(doneBlock);
+    lowering_.functionFrame().switchTo(doneBlock);
   }
   lowering_.stmtLowerer().emitStmt(fn->body);
   if (lowering_.functionFrame().blockIsOpen()) {
@@ -319,6 +339,7 @@ llvm::Value *AsyncLowerer::emitAwait(AwaitExpr *await) {
   if (const Expr *inner = resolvedValue(operand)) {
     operand = const_cast<Expr *>(inner);
   }
+  lowering_.noteAwaited(operand);
   const Type *type = operand->type;
   llvm::Value *value = lowering_.exprLowerer().emitExpr(operand);
   const AwaitExpr *outer = std::exchange(awaiting_, await);

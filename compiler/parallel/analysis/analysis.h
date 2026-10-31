@@ -35,6 +35,7 @@ class Conflicts;
 class Explainer;
 class ExplainNames;
 class ExplainTitles;
+class Ownership;
 
 class Analysis {
 public:
@@ -87,6 +88,9 @@ private:
   std::vector<const Type *> listenerTypes_[ChannelCount];
   llvm::DenseSet<const VarSymbol *> resolvers_;
   llvm::DenseSet<const VarSymbol *> ownIndex_;
+  std::deque<OwnedRef> ownedRefs_;
+  std::map<std::pair<const VarSymbol *, const Type *>, const OwnedRef *> ownedRefIndex_;
+  llvm::DenseSet<const VarSymbol *> ownedParams_;
   llvm::DenseMap<const FunctionDecl *, const AwaitExpr *> joinReturns_;
   struct AwaitInfo {
     unsigned fn = 0;
@@ -171,6 +175,7 @@ public:
   Explainer &explainer() const { return *explainerPart_; }
   ExplainNames &explainNames() const { return *explainNamesPart_; }
   ExplainTitles &explainTitles() const { return *explainTitlesPart_; }
+  Ownership &ownership() const { return *ownershipPart_; }
 
 private:
   friend class CodeWalk;
@@ -186,6 +191,7 @@ private:
   friend class Explainer;
   friend class ExplainNames;
   friend class ExplainTitles;
+  friend class Ownership;
   std::unique_ptr<CodeWalk> codeWalkPart_;
   std::unique_ptr<ExprWalk> exprWalkPart_;
   std::unique_ptr<CallWalk> callWalkPart_;
@@ -199,6 +205,7 @@ private:
   std::unique_ptr<Explainer> explainerPart_;
   std::unique_ptr<ExplainNames> explainNamesPart_;
   std::unique_ptr<ExplainTitles> explainTitlesPart_;
+  std::unique_ptr<Ownership> ownershipPart_;
 };
 
 }

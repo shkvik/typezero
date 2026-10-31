@@ -243,4 +243,36 @@ bool knownBuiltin(Builtin b) {
   }
 }
 
+bool onlyReadsArgs(Builtin b) {
+  switch (b) {
+  case Builtin::ConsoleLog:
+  case Builtin::ConsoleError:
+  case Builtin::StringOf:
+  case Builtin::JsonStringify:
+  case Builtin::ObjectKeys:
+  case Builtin::ObjectValues:
+  case Builtin::ObjectEntries:
+  case Builtin::ArrayIsArray:
+  case Builtin::ArrIncludes:
+  case Builtin::ArrIndexOf:
+  case Builtin::ArrLastIndexOf:
+  case Builtin::ArrConcat:
+  case Builtin::ArrayFrom:
+  case Builtin::MapHas:
+  case Builtin::MapGet:
+  case Builtin::DictNew:
+  case Builtin::BytesFromArray:
+  case Builtin::BytesFromBytes:
+  case Builtin::BufferConcat:
+  case Builtin::BufferCompare:
+  case Builtin::BufferEquals:
+  case Builtin::BufferIsBuffer:
+  case Builtin::ProcessStdoutWrite:
+  case Builtin::ProcessStderrWrite:
+    return true;
+  default:
+    return false;
+  }
+}
+
 }

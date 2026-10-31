@@ -1606,6 +1606,14 @@ int tz_http_waits_request(NetConn *c) {
   return c->on_input == input && c->http.wait_kind == WAIT_REQUEST && c->http.waiting;
 }
 
+static void stream_await(NetConn *c) {
+#if TZ_PARALLEL
+  tz_thread.await_lock = conn_lock_of(c);
+#else
+  conn_unlock(c);
+#endif
+}
+
 void tz_http_next(TzPromise *p, void *conn, TzMaker make) {
   NetConn *c = (NetConn *)conn;
   conn_lock(c);
@@ -1633,32 +1641,31 @@ void tz_http_response(TzPromise *p, void *conn, void *deadline, TzMaker make) {
   conn_unlock(c);
 }
 
-void tz_http_read(TzPromise *p, void *conn, void *deadline, TzMaker make) {
-  TZ_ORDERED();
-  NetConn *c = (NetConn *)conn;
+static void read_wait(TzPromise *p, NetConn *c, int kind, void *deadline, TzMaker make) {
+  if (deadline) {
+    TZ_ORDERED();
+  }
   conn_lock(c);
-  if (begin_wait(c, p, WAIT_CHUNK, deadline, make)) {
+  if (begin_wait(c, p, kind, deadline, make)) {
     send_continue(c);
     input(c);
   }
   if (c->h2parent) {
     tz_h2_send_pending(c);
   }
-  conn_unlock(c);
+  if (deadline) {
+    conn_unlock(c);
+    return;
+  }
+  stream_await(c);
+}
+
+void tz_http_read(TzPromise *p, void *conn, void *deadline, TzMaker make) {
+  read_wait(p, (NetConn *)conn, WAIT_CHUNK, deadline, make);
 }
 
 void tz_http_read_all(TzPromise *p, void *conn, void *deadline, TzMaker make) {
-  TZ_ORDERED();
-  NetConn *c = (NetConn *)conn;
-  conn_lock(c);
-  if (begin_wait(c, p, WAIT_ALL, deadline, make)) {
-    send_continue(c);
-    input(c);
-  }
-  if (c->h2parent) {
-    tz_h2_send_pending(c);
-  }
-  conn_unlock(c);
+  read_wait(p, (NetConn *)conn, WAIT_ALL, deadline, make);
 }
 
 static TzStr take_str(TzStr *s) {
@@ -2194,14 +2201,6 @@ static int stream_busy(TzPromise *p, NetConn *c, TzMaker make) {
   tz_promise_fail(p, net_failure("ERR_HTTP2_BUSY", "another task already waits on this stream"));
 
   return 1;
-}
-
-static void stream_await(NetConn *c) {
-#if TZ_PARALLEL
-  tz_thread.await_lock = conn_lock_of(c);
-#else
-  conn_unlock(c);
-#endif
 }
 
 void tz_http2_read(TzPromise *p, void *conn, TzMaker make) {

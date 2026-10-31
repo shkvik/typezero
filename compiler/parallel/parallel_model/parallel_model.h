@@ -26,6 +26,12 @@ enum class RefKind : uint8_t {
   This,
   Site,
   Type,
+  Owned,
+};
+
+struct OwnedRef {
+  const VarSymbol *root = nullptr;
+  const Type *type = nullptr;
 };
 
 struct Ref {
@@ -161,6 +167,7 @@ struct CallRec {
   bool inLoop = false;
   bool interval = false;
   bool handled = false;
+  bool served = false;
   int channel = -1;
   enum class Reflect : uint8_t { None, Apply, Construct } reflect = Reflect::None;
 };

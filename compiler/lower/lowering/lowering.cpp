@@ -217,6 +217,7 @@ void Lowering::setParallelPlan(const ParallelPlan *plan) {
   if (!parallel_) {
     return;
   }
+  ownedParams_.insert(plan->ownedParams.begin(), plan->ownedParams.end());
   for (const ParallelPlan::Piece &piece : plan->pieces) {
     if (piece.alone) {
       continue;
@@ -234,6 +235,76 @@ void Lowering::setParallelPlan(const ParallelPlan *plan) {
       orderedLocs_.insert(at.getPointer());
     }
   }
+}
+
+namespace {
+
+const Expr *stripImplicit(const Expr *e) {
+  while (auto *c = llvm::dyn_cast_or_null<CastExpr>(e)) {
+    if (!c->isImplicit()) {
+      break;
+    }
+    e = c->operand;
+  }
+
+  return e;
+}
+
+const Expr *awaitedOperand(const Expr *e) {
+  auto *await = llvm::dyn_cast_or_null<AwaitExpr>(stripImplicit(e));
+  if (!await) {
+    return nullptr;
+  }
+  const Expr *operand = stripImplicit(await->value);
+  if (auto *call = llvm::dyn_cast_or_null<CallExpr>(operand);
+      call && call->builtin == Builtin::LibAhead && !call->args.empty()) {
+    operand = stripImplicit(call->args[0]);
+  }
+
+  return operand;
+}
+
+}
+
+void Lowering::noteAwaited(const Expr *operand) {
+  if (!parallel_) {
+    return;
+  }
+  if (auto *call = llvm::dyn_cast_or_null<CallExpr>(stripImplicit(operand))) {
+    awaitedCalls_.insert(call);
+  }
+}
+
+void Lowering::noteAwaitedNext(const Stmt *declared, const Stmt *next) {
+  auto *decl = llvm::dyn_cast_or_null<VarDeclStmt>(declared);
+  if (!parallel_ || !decl || decl->decls.size() != 1 || !next) {
+    return;
+  }
+  const VarDeclarator &d = decl->decls[0];
+  auto *call = llvm::dyn_cast_or_null<CallExpr>(stripImplicit(d.init));
+  if (!call || !d.sym || d.destructured || d.alias) {
+    return;
+  }
+  const Expr *first = nullptr;
+  if (auto *s = llvm::dyn_cast<ExprStmt>(next)) {
+    first = s->expr;
+  } else if (auto *v = llvm::dyn_cast<VarDeclStmt>(next); v && !v->decls.empty()) {
+    first = v->decls[0].init;
+  } else if (auto *r = llvm::dyn_cast<ReturnStmt>(next)) {
+    first = r->value;
+  }
+  auto *name = llvm::dyn_cast_or_null<NameExpr>(awaitedOperand(first));
+  if (name && name->var == d.sym) {
+    awaitedCalls_.insert(call);
+  }
+}
+
+void Lowering::markAwaitedCall(const CallExpr *call, const FunctionDecl *target) {
+  if (!publishesFrame(target) || !awaitedCalls_.contains(call)) {
+    return;
+  }
+  builder_.CreateCall(
+      processLowerer().processFunction("tz_call_awaited", builder_.getVoidTy(), {}));
 }
 
 void Lowering::orderAt(llvm::SMLoc loc) {

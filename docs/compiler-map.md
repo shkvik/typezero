@@ -341,6 +341,7 @@ parallel/             проход ParallelPass: что можно выполн�
   explainer/          Explainer: печать плана параллельности
   expr_walk/          ExprWalk: обход выражений
   library_effects/    LibraryEffects: эффекты вызовов библиотеки на tz
+  ownership/          Ownership: объекты, которые принадлежат одному вызову
   parallel_analysis/  ParallelPlan: что нашёл анализ, для LowerPass
   parallel_helpers/   общие помощники анализа
   parallel_model/     модель анализа: ссылки, доступы, куски, корни

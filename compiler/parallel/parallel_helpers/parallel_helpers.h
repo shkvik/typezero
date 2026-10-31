@@ -16,4 +16,6 @@ llvm::StringRef libraryClassName(const ClassDecl *cls);
 
 bool knownBuiltin(Builtin b);
 
+bool onlyReadsArgs(Builtin b);
+
 }

@@ -1,0 +1,132 @@
+top-level code
+  start
+    writes stdout (lines 65, 71, 72, 90)
+    writes the state of any Headers (line 65 in size)
+    reads  the state of any Request (line 65 in size)
+    reads  elements of servers (line 68)
+    writes the state of any Server (line 69)
+    reads  message of any ListenError (line 71)
+    writes stderr (line 72)
+    writes the exit code and environment (line 72)
+    reads  the state of any Listening (line 75)
+    writes the state of streams (line 88)
+    writes the state of any Http2Listening (line 89)
+    reads  the length of kept (line 90)
+    in order with later after await at line 24: the state of any Headers
+    in order with the arrow at line 34: the length of kept, the state of any Headers
+    in order with the arrow at line 39: the state of any Headers
+    in order with the arrow at line 44: the state of any Headers
+    in order with the arrow at line 45: the state of any Headers
+    in order: lines 65-90
+  after await at line 75
+    writes stdout (lines 81, 82)
+    reads  message of any FetchError (line 81)
+    writes stderr (line 82)
+    writes the exit code and environment (line 82)
+    writes the state of any Response (line 84)
+    parallel
+  after await at line 84
+    writes stdout (line 85)
+    reads  message of any BodyError (line 85)
+    writes the state of any Listening (line 86)
+    parallel
+  after await at line 86
+    reads  elements of servers (line 68)
+    writes the state of any Server (line 69)
+    writes stdout (lines 71, 72, 90)
+    reads  message of any ListenError (line 71)
+    writes stderr (line 72)
+    writes the exit code and environment (line 72)
+    reads  the state of any Listening (line 75)
+    writes the state of streams (line 88)
+    writes the state of any Http2Listening (line 89)
+    reads  the length of kept (line 90)
+    in order with the arrow at line 34: the length of kept
+    in order: line 90
+  after await at line 89
+    writes stdout (line 90)
+    reads  the length of kept (line 90)
+    in order with the arrow at line 34: the length of kept
+    in order: line 90
+
+async function later, line 23
+  start: runs inside its caller
+  after await at line 24 (in the task later(request) at line 40)
+    reads  the state of any Request (line 25)
+    writes the state of any Headers (line 25)
+    in order with the arrow at line 34: the state of any Headers
+    in order with the arrow at line 39: the state of any Headers
+    in order with the arrow at line 44: the state of any Headers
+    in order with the arrow at line 45: the state of any Headers
+    in order with the start of the top-level code: the state of any Headers
+    in order: line 25
+
+async arrow, line 28
+  start (in the callbacks at line 28)
+    parallel
+  after await at line 30 (in the callbacks at line 28)
+    parallel
+
+arrow, line 34
+  start (in the callbacks at line 34)
+    writes elements of kept (line 35)
+    writes the length of kept (line 35)
+    writes the state of any Headers (line 36 in agent)
+    reads  the state of any Request (line 36 in agent)
+    in order with later after await at line 24: the state of any Headers
+    in order with the arrow at line 39: the state of any Headers
+    in order with the arrow at line 44: the state of any Headers
+    in order with the arrow at line 45: the state of any Headers
+    in order with the same piece in other tasks: elements of kept, the length of kept, the state of any Headers
+    in order with the start of the top-level code: the length of kept, the state of any Headers
+    in order with the top-level code after await at line 86: the length of kept
+    in order with the top-level code after await at line 89: the length of kept
+    in order: lines 35-36
+
+arrow, line 39
+  start (in the callbacks at line 39)
+    reads  the state of any Request (line 41)
+    writes the state of any Headers (line 41)
+    in order with later after await at line 24: the state of any Headers
+    in order with the arrow at line 34: the state of any Headers
+    in order with the arrow at line 44: the state of any Headers
+    in order with the arrow at line 45: the state of any Headers
+    in order with the same piece in other tasks: the state of any Headers
+    in order with the start of the top-level code: the state of any Headers
+    in order: line 41
+
+arrow, line 44
+  start (in the callbacks at line 44)
+    reads  the state of any Request (line 46)
+    writes the state of any Headers (line 46)
+    in order with later after await at line 24: the state of any Headers
+    in order with the arrow at line 34: the state of any Headers
+    in order with the arrow at line 39: the state of any Headers
+    in order with the arrow at line 45: the state of any Headers
+    in order with the same piece in other tasks: the state of any Headers
+    in order with the start of the top-level code: the state of any Headers
+    in order: line 46
+
+arrow, line 45
+  start (in the callback at line 45)
+    reads  the state of any Request (line 45)
+    writes the state of any Headers (line 45)
+    in order with later after await at line 24: the state of any Headers
+    in order with the arrow at line 34: the state of any Headers
+    in order with the arrow at line 39: the state of any Headers
+    in order with the arrow at line 44: the state of any Headers
+    in order with the start of the top-level code: the state of any Headers
+    in order: line 45
+
+arrow, line 49
+  start (in the callbacks at line 49)
+    parallel
+
+async arrow, line 53
+  start (in the callbacks at line 53)
+    reads  everything in hello (line 58)
+    parallel
+  after await at line 58 (in the callbacks at line 53)
+    parallel
+  after await at line 60 (in the callbacks at line 53)
+    parallel

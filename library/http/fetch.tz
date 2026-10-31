@@ -1,5 +1,5 @@
 import { URL, URLSearchParams, percentDecode } from "tz:url"
-import { defer, NativeError } from "tz:intrinsics"
+import { ahead, defer, NativeError } from "tz:intrinsics"
 
 declare function netConnect(host: string, port: int,
                             deadline: object | undefined): Promise<Result<object, NativeError>>
@@ -1363,7 +1363,17 @@ class Wire {
   }
 
   async all(): Promise<Result<Uint8Array, BodyError>> {
-    const bytes = await this.conn.readAll(this.peer?.deadline)
+    const peer = this.peer
+    const reading = this.conn.readAll(peer?.deadline)
+    if (peer == undefined) {
+      const served = await ahead(reading)
+      return this.collected(served)
+    }
+    const bytes = await reading
+    return this.collected(bytes)
+  }
+
+  private collected(bytes: Result<Uint8Array, NativeError>): Result<Uint8Array, BodyError> {
     if (bytes.isErr()) return err(this.failed(bytes.error))
     const decode = this.decode
     let data = bytes.value
@@ -1660,7 +1670,11 @@ class Body {
     const bytes = this.bytes
     if (bytes != undefined) return ok(bytes)
     const wire = this.wire
-    if (wire != undefined) return wire.all()
+    if (wire != undefined) {
+      const reading = wire.all()
+      const read = await ahead(reading)
+      return read
+    }
     return ok(new Uint8Array(0))
   }
 
@@ -1669,6 +1683,13 @@ class Body {
       if (this.used) return err(bodyUsed())
       this.used = true
       return ok(this.text)
+    }
+    const fresh = !this.touched() && (this.kind == BODY_NONE || this.kind == BODY_WIRE)
+    if (fresh) {
+      const consuming = this.consume()
+      const read = await ahead(consuming)
+      if (read.isErr()) return read
+      return ok(new TextDecoder().decode(read.value))
     }
     const bytes = await this.consume()
     if (bytes.isErr()) return bytes
@@ -2044,19 +2065,26 @@ export class Request {
   }
 
   async text(): Promise<Result<string, TextError>> {
-    return this.data.consumeText()
+    const consuming = this.data.consumeText()
+    const text = await ahead(consuming)
+
+    return text
   }
 
   async json(): Promise<Result<Json, JsonBodyError>> {
-    const text = await this.text()
     const contentType = this.headers.get("content-type")
+    const texting = this.text()
+    const text = await ahead(texting)
     const parsed = jsonBody(text, contentType)
 
     return parsed
   }
 
   async bytes(): Promise<Result<Uint8Array, BytesError>> {
-    return this.data.consume()
+    const consuming = this.data.consume()
+    const bytes = await ahead(consuming)
+
+    return bytes
   }
 
   async arrayBuffer(): Promise<Result<ArrayBuffer, BytesError>> {
@@ -2280,19 +2308,26 @@ export class Response {
   }
 
   async text(): Promise<Result<string, TextError>> {
-    return this.data.consumeText()
+    const consuming = this.data.consumeText()
+    const text = await ahead(consuming)
+
+    return text
   }
 
   async json(): Promise<Result<Json, JsonBodyError>> {
-    const text = await this.text()
     const contentType = this.headers.get("content-type")
+    const texting = this.text()
+    const text = await ahead(texting)
     const parsed = jsonBody(text, contentType)
 
     return parsed
   }
 
   async bytes(): Promise<Result<Uint8Array, BytesError>> {
-    return this.data.consume()
+    const consuming = this.data.consume()
+    const bytes = await ahead(consuming)
+
+    return bytes
   }
 
   async arrayBuffer(): Promise<Result<ArrayBuffer, BytesError>> {
