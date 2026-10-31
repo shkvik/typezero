@@ -381,7 +381,7 @@ export class WebSocket extends EventEmitter<WebSocketEvents> {
     const host = hostname.startsWith("[") ? hostname.slice(1, hostname.length - 1) : hostname;
     const port = url.portNumber() ?? (secure ? 443 : 80);
     this.state = 0;
-    const openedResult = await Connection.open(host, port, secure, undefined);
+    const openedResult = await Connection.open(host, port, secure, undefined, false);
     if (openedResult.isErr()) {
       this.state = 3;
 

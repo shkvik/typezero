@@ -133,6 +133,8 @@ type FetchError<E = never> =
         | "EPIPE"
         | "EMFILE"
         | "ENOBUFS"
+        | "ERR_NOT_PROCESSED"
+        | "ERR_STREAM_RESET"
         | "UNKNOWN"
       message: string
       syscall: string
@@ -141,7 +143,7 @@ type FetchError<E = never> =
     }
   | {
       kind: "FETCH_ERROR_RESPONSE"
-      code: "ERR_CLOSED" | "ERR_INVALID_RESPONSE" | "ERR_HEAD_TOO_LARGE"
+      code: "ERR_CLOSED" | "ERR_INVALID_RESPONSE" | "ERR_HEAD_TOO_LARGE" | "ERR_NO_HTTP2"
       message: string
       host: string
       port: int

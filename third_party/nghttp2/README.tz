@@ -1,0 +1,6 @@
+nghttp2 1.70.0 (https://github.com/nghttp2/nghttp2), the library lib/ only: the HTTP/2
+frames, HPACK and streams of tz:http and fetch. Taken from the release tarball; nghttp2ver.h
+is the one its CMake build generates. One change: the runtime linker of tz takes no
+non-constant static variables, so two are global with names of their own —
+mem_default in nghttp2_mem.c is nghttp2_mem_default_value, version in nghttp2_version.c is
+nghttp2_version_value.

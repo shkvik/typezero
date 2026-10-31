@@ -1,0 +1,1288 @@
+import {
+  Connection,
+  Headers,
+  HeadersInit,
+  NetworkCode,
+  Peer,
+  ReadableStream,
+  networkMessage,
+  peerOf,
+  startDeadline,
+  tlsCode,
+  tlsMessage,
+} from "tz:fetch";
+import { Client, ListenError, ListenErrorCode, ServeTransport, StopOptions } from "tz:http";
+import { URL } from "tz:url";
+import { ahead, NativeError, order } from "tz:intrinsics";
+
+declare function netListen(
+  host: string,
+  port: int,
+  maxBody: double,
+  keepAlive: int,
+  headersTimeout: int,
+  requestTimeout: int,
+): Result<object, NativeError>;
+declare function tlsListen(
+  host: string,
+  port: int,
+  maxBody: double,
+  keepAlive: int,
+  headersTimeout: int,
+  requestTimeout: int,
+  cert: string,
+  key: string,
+): Result<object, NativeError>;
+declare function netListenerPort(listener: object): int;
+declare function netListenerUrl(listener: object): string;
+declare function netAccept(listener: object): Promise<object | undefined>;
+declare function netCloseListener(listener: object): void;
+declare function netAbortAll(listener: object): void;
+declare function netDrained(listener: object): Promise<void>;
+declare function netClientAddress(socket: object): string;
+declare function netClientPort(socket: object): int;
+declare function netListenHttp2(listener: object, flags: int, streams: int): void;
+declare function httpStream(conn: object): Promise<object | undefined>;
+declare function httpStreamDone(conn: object): void;
+
+const CODE_OPEN = -2;
+const CODE_NOT_HTTP2 = -3;
+const CODE_CLOSED_HERE = -4;
+const STATE_GOAWAY = 1;
+const STATE_NOT_HTTP2 = 3;
+const STATE_CLOSED_HERE = 4;
+const FLAG_ENDED = 2;
+const FLAG_BODY_DONE = 4;
+const FLAG_RESET_HERE = 8;
+const OUTCOME_DONE = 0;
+const OUTCOME_ALREADY = 1;
+const LISTEN_SECURE = 5;
+const LISTEN_CLEARTEXT = 6;
+
+export type Http2ErrorCode =
+  | "NO_ERROR"
+  | "PROTOCOL_ERROR"
+  | "INTERNAL_ERROR"
+  | "FLOW_CONTROL_ERROR"
+  | "SETTINGS_TIMEOUT"
+  | "STREAM_CLOSED"
+  | "FRAME_SIZE_ERROR"
+  | "REFUSED_STREAM"
+  | "CANCEL"
+  | "COMPRESSION_ERROR"
+  | "CONNECT_ERROR"
+  | "ENHANCE_YOUR_CALM"
+  | "INADEQUATE_SECURITY"
+  | "HTTP_1_1_REQUIRED";
+
+export type Http2ConnectionCode =
+  | "ERR_HTTP2_CONNECTION_LOST"
+  | "ERR_HTTP2_CLOSED"
+  | "ERR_HTTP2_NOT_SUPPORTED";
+
+function errorCodeName(code: int): Http2ErrorCode {
+  switch (code) {
+    case 0:
+      return "NO_ERROR";
+    case 1:
+      return "PROTOCOL_ERROR";
+    case 3:
+      return "FLOW_CONTROL_ERROR";
+    case 4:
+      return "SETTINGS_TIMEOUT";
+    case 5:
+      return "STREAM_CLOSED";
+    case 6:
+      return "FRAME_SIZE_ERROR";
+    case 7:
+      return "REFUSED_STREAM";
+    case 8:
+      return "CANCEL";
+    case 9:
+      return "COMPRESSION_ERROR";
+    case 10:
+      return "CONNECT_ERROR";
+    case 11:
+      return "ENHANCE_YOUR_CALM";
+    case 12:
+      return "INADEQUATE_SECURITY";
+    case 13:
+      return "HTTP_1_1_REQUIRED";
+    default:
+      return "INTERNAL_ERROR";
+  }
+}
+
+function errorCodeNumber(code: Http2ErrorCode): int {
+  switch (code) {
+    case "NO_ERROR":
+      return 0;
+    case "PROTOCOL_ERROR":
+      return 1;
+    case "INTERNAL_ERROR":
+      return 2;
+    case "FLOW_CONTROL_ERROR":
+      return 3;
+    case "SETTINGS_TIMEOUT":
+      return 4;
+    case "STREAM_CLOSED":
+      return 5;
+    case "FRAME_SIZE_ERROR":
+      return 6;
+    case "REFUSED_STREAM":
+      return 7;
+    case "CANCEL":
+      return 8;
+    case "COMPRESSION_ERROR":
+      return 9;
+    case "CONNECT_ERROR":
+      return 10;
+    case "ENHANCE_YOUR_CALM":
+      return 11;
+    case "INADEQUATE_SECURITY":
+      return 12;
+    case "HTTP_1_1_REQUIRED":
+      return 13;
+  }
+}
+
+export interface Http2BodyErrorReset extends StreamError {
+  kind: "HTTP2_BODY_ERROR_RESET";
+  code: Http2ErrorCode;
+}
+
+export interface Http2BodyErrorConnection extends StreamError {
+  kind: "HTTP2_BODY_ERROR_CONNECTION";
+  code: Http2ConnectionCode;
+}
+
+export interface Http2BodyErrorBusy extends StreamError {
+  kind: "HTTP2_BODY_ERROR_BUSY";
+  code: "ERR_HTTP2_BUSY";
+}
+
+export type Http2BodyError = Http2BodyErrorReset | Http2BodyErrorConnection | Http2BodyErrorBusy;
+
+export type Http2TrailersError = {
+  kind: "HTTP2_TRAILERS_ERROR_BODY_NOT_READ";
+  code: "ERR_HTTP2_TRAILERS_NOT_READY";
+  message: string;
+};
+
+export type Http2RespondError =
+  | {
+      kind: "HTTP2_RESPOND_ERROR_RESET";
+      code: Http2ErrorCode;
+      message: string;
+    }
+  | {
+      kind: "HTTP2_RESPOND_ERROR_CONNECTION";
+      code: Http2ConnectionCode;
+      message: string;
+    }
+  | {
+      kind: "HTTP2_RESPOND_ERROR_ALREADY_RESPONDED";
+      code: "ERR_HTTP2_HEADERS_SENT";
+      message: string;
+    }
+  | {
+      kind: "HTTP2_RESPOND_ERROR_INVALID_STATUS";
+      code: "ERR_HTTP2_STATUS_INVALID";
+      message: string;
+    };
+
+export type Http2ResponseWriteError =
+  | {
+      kind: "HTTP2_RESPONSE_WRITE_ERROR_RESET";
+      code: Http2ErrorCode;
+      message: string;
+    }
+  | {
+      kind: "HTTP2_RESPONSE_WRITE_ERROR_CONNECTION";
+      code: Http2ConnectionCode;
+      message: string;
+    }
+  | {
+      kind: "HTTP2_RESPONSE_WRITE_ERROR_AFTER_END";
+      code: "ERR_STREAM_WRITE_AFTER_END";
+      message: string;
+    };
+
+export type Http2ResponseEndError =
+  | {
+      kind: "HTTP2_RESPONSE_END_ERROR_RESET";
+      code: Http2ErrorCode;
+      message: string;
+    }
+  | {
+      kind: "HTTP2_RESPONSE_END_ERROR_CONNECTION";
+      code: Http2ConnectionCode;
+      message: string;
+    }
+  | {
+      kind: "HTTP2_RESPONSE_END_ERROR_ALREADY_ENDED";
+      code: "ERR_STREAM_ALREADY_FINISHED";
+      message: string;
+    };
+
+export type Http2NetworkCode =
+  | "ENOTFOUND"
+  | "EAI_AGAIN"
+  | "ECONNREFUSED"
+  | "ETIMEDOUT"
+  | "ENETUNREACH"
+  | "EHOSTUNREACH"
+  | "EADDRNOTAVAIL"
+  | "ECONNRESET"
+  | "ECONNABORTED"
+  | "EPIPE"
+  | "EMFILE"
+  | "ENOBUFS"
+  | "UNKNOWN";
+
+export type Http2ConnectError =
+  | {
+      kind: "HTTP2_CONNECT_ERROR_URL";
+      code: "ERR_INVALID_URL" | "ERR_UNSUPPORTED_PROTOCOL";
+      message: string;
+      url: string;
+    }
+  | {
+      kind: "HTTP2_CONNECT_ERROR_NETWORK";
+      code: Http2NetworkCode;
+      message: string;
+      syscall: string;
+      host: string;
+      port: int;
+    }
+  | {
+      kind: "HTTP2_CONNECT_ERROR_TLS";
+      code: TlsCode;
+      message: string;
+      host: string;
+    }
+  | {
+      kind: "HTTP2_CONNECT_ERROR_TIMEOUT";
+      code: "TIMEOUT_ERR";
+      message: string;
+      timeout: int;
+    }
+  | {
+      kind: "HTTP2_CONNECT_ERROR_NOT_HTTP2";
+      code: "ERR_HTTP2_NOT_SUPPORTED";
+      message: string;
+      host: string;
+      port: int;
+    };
+
+export type Http2RequestError =
+  | {
+      kind: "HTTP2_REQUEST_ERROR_INVALID";
+      code: "ERR_HTTP2_INVALID_METHOD" | "ERR_HTTP2_INVALID_PATH";
+      message: string;
+    }
+  | {
+      kind: "HTTP2_REQUEST_ERROR_CLOSED";
+      code: "ERR_HTTP2_GOAWAY" | Http2ConnectionCode;
+      message: string;
+    };
+
+export type Http2RequestWriteError =
+  | {
+      kind: "HTTP2_REQUEST_WRITE_ERROR_RESET";
+      code: Http2ErrorCode;
+      message: string;
+    }
+  | {
+      kind: "HTTP2_REQUEST_WRITE_ERROR_CONNECTION";
+      code: Http2ConnectionCode;
+      message: string;
+    }
+  | {
+      kind: "HTTP2_REQUEST_WRITE_ERROR_AFTER_END";
+      code: "ERR_STREAM_WRITE_AFTER_END";
+      message: string;
+    };
+
+export type Http2RequestEndError =
+  | {
+      kind: "HTTP2_REQUEST_END_ERROR_RESET";
+      code: Http2ErrorCode;
+      message: string;
+    }
+  | {
+      kind: "HTTP2_REQUEST_END_ERROR_CONNECTION";
+      code: Http2ConnectionCode;
+      message: string;
+    }
+  | {
+      kind: "HTTP2_REQUEST_END_ERROR_ALREADY_ENDED";
+      code: "ERR_STREAM_ALREADY_FINISHED";
+      message: string;
+    };
+
+export type Http2ResponseWaitError =
+  | {
+      kind: "HTTP2_RESPONSE_WAIT_ERROR_RESET";
+      code: Http2ErrorCode;
+      message: string;
+    }
+  | {
+      kind: "HTTP2_RESPONSE_WAIT_ERROR_CONNECTION";
+      code: Http2ConnectionCode;
+      message: string;
+    }
+  | {
+      kind: "HTTP2_RESPONSE_WAIT_ERROR_BUSY";
+      code: "ERR_HTTP2_BUSY";
+      message: string;
+    };
+
+type Broken =
+  | {
+      reset: true;
+      code: Http2ErrorCode;
+      message: string;
+    }
+  | {
+      reset: false;
+      code: Http2ConnectionCode;
+      message: string;
+    };
+
+class Http2Stream {
+  public readonly conn: Connection;
+  public readonly peer: string;
+
+  public constructor(conn: Connection, peer: string) {
+    this.conn = conn;
+    this.peer = peer;
+  }
+
+  public hasEnded(): boolean {
+    const flags = this.conn.streamFlags();
+
+    return flags % 4 >= FLAG_ENDED;
+  }
+
+  public isBodyDone(): boolean {
+    const flags = this.conn.streamFlags();
+
+    return flags % 8 >= FLAG_BODY_DONE;
+  }
+
+  public cancel(code: Http2ErrorCode): void {
+    const number = errorCodeNumber(code);
+    this.conn.reset(number);
+  }
+
+  public finish(): void {
+    if (!this.hasEnded()) {
+      this.cancel("INTERNAL_ERROR");
+    }
+  }
+
+  public isOpen(): boolean {
+    return this.conn.errorCode() == CODE_OPEN;
+  }
+
+  public broken(stage: string): Broken {
+    const number = this.conn.errorCode();
+    if (number == CODE_NOT_HTTP2) {
+      return {
+        reset: false,
+        code: "ERR_HTTP2_NOT_SUPPORTED",
+        message: `${this.peer} answered in HTTP/1.1: it does not speak HTTP/2 without TLS`,
+      };
+    }
+    if (number == CODE_CLOSED_HERE) {
+      return {
+        reset: false,
+        code: "ERR_HTTP2_CLOSED",
+        message: `the connection was closed with close() while ${stage}`,
+      };
+    }
+    if (number < 0) {
+      return {
+        reset: false,
+        code: "ERR_HTTP2_CONNECTION_LOST",
+        message: `the connection to ${this.peer} was lost while ${stage}`,
+      };
+    }
+    const code = errorCodeName(number);
+    const flags = this.conn.streamFlags();
+    if (flags >= FLAG_RESET_HERE) {
+      return {
+        reset: true,
+        code: code,
+        message: `this side reset the stream (${code}), so ${stage} stopped`,
+      };
+    }
+    if (code == "REFUSED_STREAM") {
+      return {
+        reset: true,
+        code: code,
+        message: `${this.peer} did not process the request (REFUSED_STREAM), so it can be sent again`,
+      };
+    }
+
+    return {
+      reset: true,
+      code: code,
+      message: `${this.peer} reset the stream (${code}) while ${stage}`,
+    };
+  }
+}
+
+export class Http2Body {
+  private readonly state: Http2Stream;
+
+  public constructor(state: Http2Stream) {
+    this.state = state;
+  }
+
+  public async read(): Promise<Result<Uint8Array | undefined, Http2BodyError>> {
+    const reading = this.state.conn.readStream();
+    const got = await ahead(reading);
+    if (got.isErr()) {
+      if (got.error.code == "ERR_HTTP2_BUSY") {
+        return err({
+          kind: "HTTP2_BODY_ERROR_BUSY",
+          code: "ERR_HTTP2_BUSY",
+          message: "could not read the body: another task reads it at the same time",
+        });
+      }
+      const broken = this.state.broken("reading the body");
+      if (broken.reset) {
+        return err({
+          kind: "HTTP2_BODY_ERROR_RESET",
+          code: broken.code,
+          message: broken.message,
+        });
+      }
+
+      return err({
+        kind: "HTTP2_BODY_ERROR_CONNECTION",
+        code: broken.code,
+        message: broken.message,
+      });
+    }
+    const chunk = got.value;
+
+    return ok(chunk);
+  }
+
+  public async *[Symbol.asyncIterator](): AsyncGenerator<Result<Uint8Array, Http2BodyError>, void, void> {
+    for (;;) {
+      const got = await this.read();
+      if (got.isErr()) {
+        const failed: Result<Uint8Array, Http2BodyError> = err(got.error);
+        yield failed;
+        return;
+      }
+      const chunk = got.value;
+      if (chunk == undefined) {
+        return;
+      }
+      const item: Result<Uint8Array, Http2BodyError> = ok(chunk);
+      yield item;
+    }
+  }
+
+  public cancel(code?: Http2ErrorCode): void {
+    this.state.cancel(code ?? "CANCEL");
+  }
+
+  public toStream(): ReadableStream<Uint8Array, Http2BodyError> {
+    const body = this;
+    const stream = new ReadableStream<Uint8Array, Http2BodyError>({
+      type: "bytes",
+      pull: async controller => {
+        const got = await body.read();
+        if (got.isErr()) {
+          controller.error(got.error);
+          return;
+        }
+        const chunk = got.value;
+        if (chunk == undefined) {
+          controller.close();
+          return;
+        }
+        controller.enqueue(chunk);
+      },
+      cancel: async reason => {
+        void reason;
+        body.cancel("CANCEL");
+      },
+    });
+
+    return stream;
+  }
+}
+
+function notReadError(): Http2TrailersError {
+  return {
+    kind: "HTTP2_TRAILERS_ERROR_BODY_NOT_READ",
+    code: "ERR_HTTP2_TRAILERS_NOT_READY",
+    message: "could not take the trailers: read the body to its end first",
+  };
+}
+
+function trailersOf(state: Http2Stream): Result<Headers, Http2TrailersError> {
+  if (!state.isBodyDone()) {
+    return err(notReadError());
+  }
+  const conn = state.conn;
+  const list = conn.trailerList();
+  const trailers = Headers.fromList(conn, list);
+
+  return ok(trailers);
+}
+
+export type Http2ResponseInit = {
+  status: int;
+  headers?: HeadersInit;
+};
+
+export class Http2IncomingRequest {
+  public readonly method: string;
+  public readonly scheme: string;
+  public readonly authority: string;
+  public readonly path: string;
+  public readonly headers: Headers;
+  private readonly state: Http2Stream;
+  private readonly content: Http2Body;
+
+  public constructor(state: Http2Stream) {
+    const conn = state.conn;
+    this.method = conn.field(0);
+    this.scheme = conn.field(1);
+    this.authority = conn.field(2);
+    this.path = conn.field(3);
+    const list = conn.headerList();
+    this.headers = Headers.fromList(conn, list);
+    this.state = state;
+    this.content = new Http2Body(state);
+  }
+
+  public body(): Http2Body {
+    return this.content;
+  }
+
+  public trailers(): Result<Headers, Http2TrailersError> {
+    return trailersOf(this.state);
+  }
+
+  public respond(init: Http2ResponseInit): Result<Http2OutgoingResponse, Http2RespondError> {
+    const status = init.status;
+    if (status < 200 || status > 599) {
+      return err({
+        kind: "HTTP2_RESPOND_ERROR_INVALID_STATUS",
+        code: "ERR_HTTP2_STATUS_INVALID",
+        message: `could not respond: the status ${status} is not from 200 to 599`,
+      });
+    }
+    const conn = this.state.conn;
+    const headers = new Headers(init.headers);
+    const list = headers.listFor(conn);
+    const outcome = conn.respondStream(status, list);
+    if (outcome == OUTCOME_ALREADY) {
+      return err({
+        kind: "HTTP2_RESPOND_ERROR_ALREADY_RESPONDED",
+        code: "ERR_HTTP2_HEADERS_SENT",
+        message: "could not respond: respond() was already called for this request",
+      });
+    }
+    if (outcome != OUTCOME_DONE) {
+      const broken = this.state.broken("responding");
+      if (broken.reset) {
+        return err({
+          kind: "HTTP2_RESPOND_ERROR_RESET",
+          code: broken.code,
+          message: broken.message,
+        });
+      }
+
+      return err({
+        kind: "HTTP2_RESPOND_ERROR_CONNECTION",
+        code: broken.code,
+        message: broken.message,
+      });
+    }
+    const response = new Http2OutgoingResponse(this.state);
+
+    return ok(response);
+  }
+}
+
+export class Http2OutgoingResponse {
+  private readonly state: Http2Stream;
+
+  public constructor(state: Http2Stream) {
+    this.state = state;
+  }
+
+  public async write(chunk: Uint8Array): Promise<Result<void, Http2ResponseWriteError>> {
+    if (this.state.hasEnded()) {
+      return err({
+        kind: "HTTP2_RESPONSE_WRITE_ERROR_AFTER_END",
+        code: "ERR_STREAM_WRITE_AFTER_END",
+        message: "could not write the response: end() was already called",
+      });
+    }
+    const writing = this.state.conn.writeStream(chunk);
+    const wrote = await ahead(writing);
+    if (wrote.isErr()) {
+      const broken = this.state.broken("writing the response");
+      if (broken.reset) {
+        return err({
+          kind: "HTTP2_RESPONSE_WRITE_ERROR_RESET",
+          code: broken.code,
+          message: broken.message,
+        });
+      }
+
+      return err({
+        kind: "HTTP2_RESPONSE_WRITE_ERROR_CONNECTION",
+        code: broken.code,
+        message: broken.message,
+      });
+    }
+
+    return ok(undefined);
+  }
+
+  public async end(trailers?: HeadersInit): Promise<Result<void, Http2ResponseEndError>> {
+    const conn = this.state.conn;
+    const fields = new Headers(trailers);
+    const list = fields.listFor(conn);
+    const outcome = conn.endStream(list);
+    if (outcome == OUTCOME_ALREADY) {
+      return err({
+        kind: "HTTP2_RESPONSE_END_ERROR_ALREADY_ENDED",
+        code: "ERR_STREAM_ALREADY_FINISHED",
+        message: "could not end the response: end() was already called",
+      });
+    }
+    if (outcome != OUTCOME_DONE) {
+      const broken = this.state.broken("ending the response");
+      if (broken.reset) {
+        return err({
+          kind: "HTTP2_RESPONSE_END_ERROR_RESET",
+          code: broken.code,
+          message: broken.message,
+        });
+      }
+
+      return err({
+        kind: "HTTP2_RESPONSE_END_ERROR_CONNECTION",
+        code: broken.code,
+        message: broken.message,
+      });
+    }
+
+    return ok(undefined);
+  }
+}
+
+export type Http2Handler = (request: Http2IncomingRequest, client: Client) => Promise<void>;
+
+export type Http2ServeOptions = {
+  port?: int;
+  hostname?: string;
+  transport?: ServeTransport;
+  maxConcurrentStreams?: int;
+  headersTimeout?: int;
+  keepAliveTimeout?: int;
+};
+
+function listenCode(code: string): ListenErrorCode {
+  switch (code) {
+    case "EADDRINUSE":
+      return "EADDRINUSE";
+    case "EACCES":
+      return "EACCES";
+    case "EADDRNOTAVAIL":
+      return "EADDRNOTAVAIL";
+    case "ENOTFOUND":
+      return "ENOTFOUND";
+    case "ERR_INVALID_ARG_VALUE":
+      return "ERR_INVALID_ARG_VALUE";
+    case "ERR_TLS_CERT":
+      return "ERR_TLS_CERT";
+    case "ERR_TLS_KEY":
+      return "ERR_TLS_KEY";
+    case "EMFILE":
+      return "EMFILE";
+    case "ENOBUFS":
+      return "ENOBUFS";
+    case "EAFNOSUPPORT":
+      return "EAFNOSUPPORT";
+    default:
+      return "UNKNOWN";
+  }
+}
+
+class Http2Socket {
+  public readonly native: object;
+
+  public constructor(native: object) {
+    this.native = native;
+  }
+}
+
+export class Http2Server {
+  private readonly hostname: string;
+  private readonly port: int;
+  private readonly transport: ServeTransport;
+  private readonly maxConcurrentStreams: int;
+  private readonly headersTimeout: int;
+  private readonly keepAliveTimeout: int;
+  private readonly handler: Http2Handler;
+
+  public constructor(options: Http2ServeOptions, handler: Http2Handler) {
+    this.hostname = options.hostname ?? "0.0.0.0";
+    this.port = options.port ?? 8000;
+    this.transport = options.transport ?? { secure: false };
+    this.maxConcurrentStreams = options.maxConcurrentStreams ?? 100;
+    this.headersTimeout = options.headersTimeout ?? 60000;
+    this.keepAliveTimeout = options.keepAliveTimeout ?? 0;
+    this.handler = handler;
+  }
+
+  public listen(): Result<Http2Listening, ListenError> {
+    const opened = this.open();
+    if (opened.isErr()) {
+      const code = listenCode(opened.error.code);
+
+      return err({
+        kind: "LISTEN_ERROR",
+        code: code,
+        message: opened.error.message,
+        syscall: opened.error.syscall,
+        address: this.hostname,
+        port: this.port,
+      });
+    }
+    const flags = this.transport.secure ? LISTEN_SECURE : LISTEN_CLEARTEXT;
+    netListenHttp2(opened.value, flags, this.maxConcurrentStreams);
+    const socket = new Http2Socket(opened.value);
+    const listening = new Http2Listening(socket, this.hostname, this.handler);
+
+    return ok(listening);
+  }
+
+  private open(): Result<object, NativeError> {
+    const transport = this.transport;
+    if (transport.secure) {
+      const secured = tlsListen(
+        this.hostname,
+        this.port,
+        0,
+        this.keepAliveTimeout,
+        this.headersTimeout,
+        0,
+        transport.cert,
+        transport.key,
+      );
+
+      return secured;
+    }
+    const plain = netListen(
+      this.hostname,
+      this.port,
+      0,
+      this.keepAliveTimeout,
+      this.headersTimeout,
+      0,
+    );
+
+    return plain;
+  }
+}
+
+export class Http2Listening {
+  public readonly url: URL;
+  public readonly hostname: string;
+  public readonly port: int;
+
+  private readonly listener: object;
+  private readonly accepting: Promise<void>;
+  private stopping: boolean;
+
+  public constructor(socket: Http2Socket, hostname: string, handler: Http2Handler) {
+    const listener = socket.native;
+    this.listener = listener;
+    this.stopping = false;
+    const href = netListenerUrl(listener);
+    this.url = new URL(href);
+    this.hostname = hostname;
+    this.port = netListenerPort(listener);
+    this.accepting = Http2Listening.acceptAll(listener, handler);
+  }
+
+  public async stop(options?: StopOptions): Promise<void> {
+    const native = this.listener;
+    if (!this.stopping) {
+      this.stopping = true;
+      netCloseListener(native);
+    }
+    const timeout = options?.timeout;
+    if (timeout == undefined) {
+      await this.accepting;
+      return;
+    }
+    if (timeout <= 0) {
+      netAbortAll(native);
+      await this.accepting;
+      return;
+    }
+    const timer = setTimeout(() => netAbortAll(native), timeout);
+    await this.accepting;
+    clearTimeout(timer);
+  }
+
+  private static async acceptAll(listener: object, handler: Http2Handler): Promise<void> {
+    for (;;) {
+      const socket = await netAccept(listener);
+      if (socket == undefined) {
+        break;
+      }
+      void Http2Listening.serve(socket, handler);
+    }
+    await netDrained(listener);
+  }
+
+  private static async serve(socket: object, handler: Http2Handler): Promise<void> {
+    const conn = new Connection(socket);
+    const next = conn.next();
+    const got = await ahead(next);
+    if (got.isOk() && got.value == 2) {
+      for (;;) {
+        const waiting = httpStream(socket);
+        const stream = await ahead(waiting);
+        if (stream == undefined) {
+          break;
+        }
+        void Http2Listening.serveStream(stream, handler);
+      }
+    }
+    order();
+    conn.close();
+  }
+
+  private static async serveStream(stream: object, handler: Http2Handler): Promise<void> {
+    const conn = new Connection(stream);
+    const next = conn.next();
+    const got = await ahead(next);
+    if (got.isErr() || got.value == 0) {
+      httpStreamDone(stream);
+      return;
+    }
+    const address = netClientAddress(stream);
+    const port = netClientPort(stream);
+    const client: Client = {
+      address: address,
+      port: port,
+      protocol: "h2",
+    };
+    const state = new Http2Stream(conn, "the client");
+    const request = new Http2IncomingRequest(state);
+    const handled = handler(request, client);
+    await ahead(handled);
+    state.finish();
+    httpStreamDone(stream);
+  }
+}
+
+export type Http2ClientOptions = {
+  url: string | URL;
+  timeout?: int;
+};
+
+function connectCode(code: string): Http2NetworkCode {
+  switch (code) {
+    case "ENOTFOUND":
+      return "ENOTFOUND";
+    case "EAI_AGAIN":
+      return "EAI_AGAIN";
+    case "ECONNREFUSED":
+      return "ECONNREFUSED";
+    case "ETIMEDOUT":
+      return "ETIMEDOUT";
+    case "ENETUNREACH":
+      return "ENETUNREACH";
+    case "EHOSTUNREACH":
+      return "EHOSTUNREACH";
+    case "EADDRNOTAVAIL":
+      return "EADDRNOTAVAIL";
+    case "ECONNRESET":
+      return "ECONNRESET";
+    case "ECONNABORTED":
+      return "ECONNABORTED";
+    case "EPIPE":
+      return "EPIPE";
+    case "EMFILE":
+      return "EMFILE";
+    case "ENOBUFS":
+      return "ENOBUFS";
+    default:
+      return "UNKNOWN";
+  }
+}
+
+function connectError(e: NativeError, peer: Peer): Http2ConnectError {
+  if (peer.passed()) {
+    return {
+      kind: "HTTP2_CONNECT_ERROR_TIMEOUT",
+      code: "TIMEOUT_ERR",
+      message: `could not connect to ${peer.name()} within ${peer.timeout} ms`,
+      timeout: peer.timeout,
+    };
+  }
+  const tls = tlsCode(e.code);
+  if (tls != undefined) {
+    const told = tlsMessage(tls, peer.host, e.message);
+
+    return {
+      kind: "HTTP2_CONNECT_ERROR_TLS",
+      code: tls,
+      message: told,
+      host: peer.host,
+    };
+  }
+  const code = connectCode(e.code);
+  const shown: NetworkCode = code;
+  const message = networkMessage(shown, peer, "connecting", e.message);
+
+  return {
+    kind: "HTTP2_CONNECT_ERROR_NETWORK",
+    code: code,
+    message: message,
+    syscall: e.syscall,
+    host: peer.host,
+    port: peer.port,
+  };
+}
+
+export class Http2Client {
+  private readonly url: string | URL;
+  private readonly timeout?: int;
+
+  public constructor(options: Http2ClientOptions) {
+    this.url = options.url;
+    this.timeout = options.timeout;
+  }
+
+  public async connect(): Promise<Result<Http2Connection, Http2ConnectError>> {
+    const given = this.url;
+    let url: URL;
+    if (given instanceof URL) {
+      url = given;
+    } else {
+      const parsed = URL.parse(given);
+      if (parsed.isErr()) {
+        return err({
+          kind: "HTTP2_CONNECT_ERROR_URL",
+          code: "ERR_INVALID_URL",
+          message: `could not connect: '${given}' is not a URL`,
+          url: given,
+        });
+      }
+      url = parsed.value;
+    }
+    const protocol = url.protocol();
+    if (protocol != "http:" && protocol != "https:") {
+      return err({
+        kind: "HTTP2_CONNECT_ERROR_URL",
+        code: "ERR_UNSUPPORTED_PROTOCOL",
+        message: `could not connect to ${url.href()}: HTTP/2 goes over http: or https:, not ${protocol}`,
+        url: url.href(),
+      });
+    }
+    const secure = protocol == "https:";
+    const deadline = startDeadline(this.timeout);
+    const peer = peerOf(url, this.timeout, deadline);
+    const opened = await Connection.open(peer.host, peer.port, secure, deadline, true);
+    if (opened.isErr()) {
+      const failure = connectError(opened.error, peer);
+
+      return err(failure);
+    }
+    const conn = opened.value;
+    if (secure && !conn.isH2()) {
+      conn.close();
+
+      return err({
+        kind: "HTTP2_CONNECT_ERROR_NOT_HTTP2",
+        code: "ERR_HTTP2_NOT_SUPPORTED",
+        message: `${peer.name()} does not speak HTTP/2: it chose HTTP/1.1 in the TLS handshake`,
+        host: peer.host,
+        port: peer.port,
+      });
+    }
+    conn.startH2();
+    const side = new Http2Peer(conn, peer, url);
+    const connection = new Http2Connection(side);
+
+    return ok(connection);
+  }
+}
+
+export type Http2RequestInit = {
+  method: string;
+  path: string;
+  headers?: HeadersInit;
+  authority?: string;
+};
+
+function isMethod(method: string): boolean {
+  if (method == "") {
+    return false;
+  }
+  for (let i = 0; i < method.length; i++) {
+    const c = method.charCodeAt(i);
+    const letter = (c >= 0x41 && c <= 0x5a) || (c >= 0x61 && c <= 0x7a);
+    const digit = c >= 0x30 && c <= 0x39;
+    const mark = c == 0x21 || c == 0x23 || c == 0x24 || c == 0x25 || c == 0x26 || c == 0x27 ||
+      c == 0x2a || c == 0x2b || c == 0x2d || c == 0x2e || c == 0x5e || c == 0x5f || c == 0x60 ||
+      c == 0x7c || c == 0x7e;
+    if (!letter && !digit && !mark) {
+      return false;
+    }
+  }
+
+  return true;
+}
+
+function isPath(path: string): boolean {
+  if (path == "*") {
+    return true;
+  }
+  if (!path.startsWith("/")) {
+    return false;
+  }
+  for (let i = 0; i < path.length; i++) {
+    const c = path.charCodeAt(i);
+    if (c <= 0x20 || c >= 0x7f) {
+      return false;
+    }
+  }
+
+  return true;
+}
+
+class Http2Peer {
+  public readonly conn: Connection;
+  public readonly peer: Peer;
+  public readonly url: URL;
+
+  public constructor(conn: Connection, peer: Peer, url: URL) {
+    this.conn = conn;
+    this.peer = peer;
+    this.url = url;
+  }
+}
+
+export class Http2Connection {
+  private readonly conn: Connection;
+  private readonly peer: Peer;
+  private readonly url: URL;
+
+  public constructor(side: Http2Peer) {
+    this.conn = side.conn;
+    this.peer = side.peer;
+    this.url = side.url;
+  }
+
+  public async request(init: Http2RequestInit): Promise<Result<Http2OutgoingRequest, Http2RequestError>> {
+    if (!isMethod(init.method)) {
+      return err({
+        kind: "HTTP2_REQUEST_ERROR_INVALID",
+        code: "ERR_HTTP2_INVALID_METHOD",
+        message: `could not start a request: '${init.method}' is not a method`,
+      });
+    }
+    if (!isPath(init.path)) {
+      return err({
+        kind: "HTTP2_REQUEST_ERROR_INVALID",
+        code: "ERR_HTTP2_INVALID_PATH",
+        message: `could not start a request: the path '${init.path}' does not start with / or has spaces`,
+      });
+    }
+    const stream = this.conn.openStream();
+    if (stream == undefined) {
+      const state = this.conn.connectionState();
+      if (state == STATE_GOAWAY) {
+        return err({
+          kind: "HTTP2_REQUEST_ERROR_CLOSED",
+          code: "ERR_HTTP2_GOAWAY",
+          message: `could not start a request: ${this.peer.name()} is closing this connection (GOAWAY); connect again`,
+        });
+      }
+      if (state == STATE_CLOSED_HERE) {
+        return err({
+          kind: "HTTP2_REQUEST_ERROR_CLOSED",
+          code: "ERR_HTTP2_CLOSED",
+          message: "could not start a request: the connection was closed with close()",
+        });
+      }
+      if (state == STATE_NOT_HTTP2) {
+        return err({
+          kind: "HTTP2_REQUEST_ERROR_CLOSED",
+          code: "ERR_HTTP2_NOT_SUPPORTED",
+          message: `could not start a request: ${this.peer.name()} answered in HTTP/1.1, it does not speak HTTP/2 without TLS`,
+        });
+      }
+
+      return err({
+        kind: "HTTP2_REQUEST_ERROR_CLOSED",
+        code: "ERR_HTTP2_CONNECTION_LOST",
+        message: `could not start a request: the connection to ${this.peer.name()} was lost; connect again`,
+      });
+    }
+    const headers = new Headers(init.headers);
+    const authority = init.authority ?? this.url.host();
+    headers.set("host", authority);
+    const list = headers.listFor(stream);
+    stream.requestStream(init.method, init.path, list);
+    const state = new Http2Stream(stream, this.peer.name());
+    const call = new Http2OutgoingRequest(state);
+
+    return ok(call);
+  }
+
+  public async close(): Promise<void> {
+    this.conn.closeHttp2();
+  }
+}
+
+export class Http2OutgoingRequest {
+  private readonly state: Http2Stream;
+
+  public constructor(state: Http2Stream) {
+    this.state = state;
+  }
+
+  public async write(chunk: Uint8Array): Promise<Result<void, Http2RequestWriteError>> {
+    if (this.state.hasEnded()) {
+      return err({
+        kind: "HTTP2_REQUEST_WRITE_ERROR_AFTER_END",
+        code: "ERR_STREAM_WRITE_AFTER_END",
+        message: "could not write the request: end() was already called",
+      });
+    }
+    const writing = this.state.conn.writeStream(chunk);
+    const wrote = await ahead(writing);
+    if (wrote.isErr()) {
+      const broken = this.state.broken("writing the request");
+      if (broken.reset) {
+        return err({
+          kind: "HTTP2_REQUEST_WRITE_ERROR_RESET",
+          code: broken.code,
+          message: broken.message,
+        });
+      }
+
+      return err({
+        kind: "HTTP2_REQUEST_WRITE_ERROR_CONNECTION",
+        code: broken.code,
+        message: broken.message,
+      });
+    }
+
+    return ok(undefined);
+  }
+
+  public async end(trailers?: HeadersInit): Promise<Result<void, Http2RequestEndError>> {
+    const conn = this.state.conn;
+    const fields = new Headers(trailers);
+    const list = fields.listFor(conn);
+    const outcome = conn.endStream(list);
+    if (outcome == OUTCOME_ALREADY) {
+      return err({
+        kind: "HTTP2_REQUEST_END_ERROR_ALREADY_ENDED",
+        code: "ERR_STREAM_ALREADY_FINISHED",
+        message: "could not end the request: end() was already called",
+      });
+    }
+    if (outcome != OUTCOME_DONE) {
+      const broken = this.state.broken("ending the request");
+      if (broken.reset) {
+        return err({
+          kind: "HTTP2_REQUEST_END_ERROR_RESET",
+          code: broken.code,
+          message: broken.message,
+        });
+      }
+
+      return err({
+        kind: "HTTP2_REQUEST_END_ERROR_CONNECTION",
+        code: broken.code,
+        message: broken.message,
+      });
+    }
+
+    return ok(undefined);
+  }
+
+  public cancel(code?: Http2ErrorCode): void {
+    this.state.cancel(code ?? "CANCEL");
+  }
+
+  public async response(): Promise<Result<Http2IncomingResponse, Http2ResponseWaitError>> {
+    const conn = this.state.conn;
+    const waiting = conn.responseStream();
+    const got = await ahead(waiting);
+    if (got.isErr()) {
+      if (got.error.code == "ERR_HTTP2_BUSY") {
+        return err({
+          kind: "HTTP2_RESPONSE_WAIT_ERROR_BUSY",
+          code: "ERR_HTTP2_BUSY",
+          message: "could not wait for the response: another task waits for it at the same time",
+        });
+      }
+      const broken = this.state.broken("waiting for the response");
+      if (broken.reset) {
+        return err({
+          kind: "HTTP2_RESPONSE_WAIT_ERROR_RESET",
+          code: broken.code,
+          message: broken.message,
+        });
+      }
+
+      return err({
+        kind: "HTTP2_RESPONSE_WAIT_ERROR_CONNECTION",
+        code: broken.code,
+        message: broken.message,
+      });
+    }
+    const response = new Http2IncomingResponse(this.state, got.value);
+
+    return ok(response);
+  }
+}
+
+export class Http2IncomingResponse {
+  public readonly status: int;
+  public readonly headers: Headers;
+  private readonly state: Http2Stream;
+  private readonly content: Http2Body;
+
+  public constructor(state: Http2Stream, status: int) {
+    const conn = state.conn;
+    this.status = status;
+    const list = conn.headerCopy();
+    this.headers = Headers.fromList(conn, list);
+    this.state = state;
+    this.content = new Http2Body(state);
+  }
+
+  public body(): Http2Body {
+    return this.content;
+  }
+
+  public trailers(): Result<Headers, Http2TrailersError> {
+    return trailersOf(this.state);
+  }
+}

@@ -29,6 +29,10 @@ declare function netAbortAll(listener: object): void;
 declare function netDrained(listener: object): Promise<void>;
 declare function netClientAddress(socket: object): string;
 declare function netClientPort(socket: object): int;
+declare function netClientProtocol(socket: object): string;
+declare function netListenHttp2(listener: object, flags: int, streams: int): void;
+declare function httpStream(conn: object): Promise<object | undefined>;
+declare function httpStreamDone(conn: object): void;
 
 export type Handler = (
   request: Request,
@@ -38,7 +42,10 @@ export type Handler = (
 export type Client = {
   address: string;
   port: int;
+  protocol: ClientProtocol;
 };
+
+export type ClientProtocol = "http/1.1" | "h2";
 
 export type ServeOptions = {
   port?: int;
@@ -48,7 +55,18 @@ export type ServeOptions = {
   headersTimeout?: int;
   requestTimeout?: int;
   transport?: ServeTransport;
+  http2?: ServeHttp2;
 };
+
+export type ServeHttp2 =
+  | {
+      enabled: false;
+    }
+  | {
+      enabled: true;
+      cleartext?: boolean;
+      maxConcurrentStreams?: int;
+    };
 
 export type ServeTransport =
   | {
@@ -188,6 +206,8 @@ export class Server {
   private readonly headersTimeout: int;
   private readonly requestTimeout: int;
   private readonly transport: ServeTransport;
+  private readonly http2Flags: int;
+  private readonly http2Streams: int;
   private readonly handler: Handler;
 
   public constructor(options: ServeOptions, handler: Handler) {
@@ -198,6 +218,22 @@ export class Server {
     this.headersTimeout = options.headersTimeout ?? 60000;
     this.requestTimeout = options.requestTimeout ?? 300000;
     this.transport = options.transport ?? { secure: false };
+    const http2 = options.http2;
+    let flags = this.transport.secure ? 1 : 0;
+    let streams = 100;
+    if (http2 != undefined) {
+      if (http2.enabled) {
+        flags = 1;
+        if (http2.cleartext == true) {
+          flags = 3;
+        }
+        streams = http2.maxConcurrentStreams ?? 100;
+      } else {
+        flags = 0;
+      }
+    }
+    this.http2Flags = flags;
+    this.http2Streams = streams;
     this.handler = handler;
   }
 
@@ -217,6 +253,7 @@ export class Server {
       });
     }
 
+    netListenHttp2(opened.value, this.http2Flags, this.http2Streams);
     const listener = new Listener(opened.value);
     const listening = new Listening(listener, this.hostname, this.handler);
 
@@ -306,18 +343,61 @@ export class Listening {
     await netDrained(listener.native);
   }
 
-  private static async serve(socket: object, handler: Handler): Promise<void> {
-    const address = netClientAddress(socket);
-    const port = netClientPort(socket);
+  private static async serveStreams(socket: object, handler: Handler): Promise<void> {
+    for (;;) {
+      const waiting = httpStream(socket);
+      const stream = await ahead(waiting);
+      if (stream == undefined) {
+        return;
+      }
+      void Listening.serveStream(stream, handler);
+    }
+  }
+
+  private static async serveStream(stream: object, handler: Handler): Promise<void> {
+    const address = netClientAddress(stream);
+    const port = netClientPort(stream);
     const client: Client = {
       address: address,
       port: port,
+      protocol: "h2",
+    };
+    const conn = new Connection(stream);
+    const next = conn.next();
+    const got = await ahead(next);
+    if (got.isErr() || got.value == 0) {
+      httpStreamDone(stream);
+      return;
+    }
+    const request = Request.readFrom(conn);
+    const handled = handler(request, client);
+    const response = await ahead(handled);
+    const headOnly = request.method == "HEAD";
+    const written = response.writeTo(conn, headOnly);
+    if (written.kind == "streaming") {
+      await written.finished;
+    }
+    httpStreamDone(stream);
+  }
+
+  private static async serve(socket: object, handler: Handler): Promise<void> {
+    const address = netClientAddress(socket);
+    const port = netClientPort(socket);
+    const protocol = netClientProtocol(socket) == "h2" ? "h2" : "http/1.1";
+    const client: Client = {
+      address: address,
+      port: port,
+      protocol: protocol,
     };
     const conn = new Connection(socket);
     for (;;) {
       const next = conn.next();
       const got = await ahead(next);
       if (got.isErr() || got.value == 0) {
+        break;
+      }
+      if (got.value == 2) {
+        await Listening.serveStreams(socket, handler);
         break;
       }
       const request = Request.readFrom(conn);

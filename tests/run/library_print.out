@@ -32,6 +32,7 @@ Response {
   redirected: false,
   type: 'default',
   url: '',
+  protocol: 'http/1.1',
   data: Body {
     kind: 1,
     text: 'hello',

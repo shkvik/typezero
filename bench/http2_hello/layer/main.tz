@@ -1,0 +1,22 @@
+// The HTTP/2 benchmark (bench/http2.ps1) through the open layer tz:http2:
+// "Hello, World!" to every request with respond, write and end, over HTTP/2
+// without TLS, on the port given. Next to main.tz it shows what the layer
+// costs over Server of tz:http.
+import { Http2Server } from "tz:http2"
+
+const port = parseInt(process.argv[2] ?? "8080").unwrapOr(8080)
+const hello = new TextEncoder().encode("Hello, World!")
+const server = new Http2Server({ port, hostname: "127.0.0.1" }, async request => {
+  const responded = request.respond({ status: 200, headers: { "content-type": "text/plain;charset=UTF-8" } })
+  if (responded.isErr()) return
+  const response = responded.value
+  const wrote = await response.write(hello)
+  if (wrote.isErr()) return
+  const ended = await response.end()
+  if (ended.isErr()) return
+})
+const listened = server.listen()
+if (listened.isErr()) {
+  console.error(listened.error.message)
+  process.exit(1)
+}

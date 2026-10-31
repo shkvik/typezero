@@ -61,6 +61,9 @@ Module *ModuleResolver::resolve(Module *from, llvm::StringRef spec, llvm::SMLoc 
   if (spec == "tz:http") {
     return loader_.library().libraryModule("http.tz", "tz:http", loc);
   }
+  if (spec == "tz:http2") {
+    return loader_.library().libraryModule("http2.tz", "tz:http2", loc);
+  }
   if (spec == "node:net" || spec == "net") {
     return loader_.library().libraryModule("net.tz", "node:net", loc);
   }

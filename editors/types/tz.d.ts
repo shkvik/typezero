@@ -1,10 +1,11 @@
 /// <reference path="./http.d.ts" />
+/// <reference path="./http2.d.ts" />
 // What tz has built in, declared for TypeScript's checker in the editor (tsc in
 // VS Code): the names a program uses without an import, and the module "tz:io"
 // (docs/modules.md, section 6). tz itself does not read this file; tz build
-// checks the program by its own rules. "tz:http" is declared in its own
-// library/http/http.d.tz, which the build turns into http.d.ts next to this
-// file (editors/types/declarations.cmake).
+// checks the program by its own rules. "tz:http" and "tz:http2" are declared in
+// their own library/http/http.d.tz and http2.d.tz, which the build turns into
+// http.d.ts and http2.d.ts next to this file (editors/types/declarations.cmake).
 //
 // It lies next to tz as types/node_modules/@types/tz/index.d.ts, and
 // types/tsconfig.json (editors/types/tsconfig.json) brings it in together with

@@ -1,6 +1,8 @@
 #include "compiler/load/declaration_parser/declaration_parser.h"
+#include "compiler/load/class_parser/class_parser.h"
 #include "compiler/load/function_parser/function_parser.h"
 #include "compiler/load/module_parser/module_parser.h"
+#include "compiler/load/object_type_parser/object_type_parser.h"
 #include "compiler/load/stmt_parser/stmt_parser.h"
 #include "compiler/load/token_cursor/token_cursor.h"
 #include "compiler/load/type_parser/type_parser.h"
@@ -127,7 +129,8 @@ void DeclarationParser::parseClass(DeclarationFile &file, bool isAbstract) {
 bool DeclarationParser::memberWordAhead() const {
   const Token &next = parser_.cursor().peek();
 
-  return next.is(Tok::Identifier) || isKeyword(next.kind) || next.is(Tok::StringLiteral);
+  return next.is(Tok::Identifier) || isKeyword(next.kind) || next.is(Tok::StringLiteral) ||
+         next.is(Tok::LBracket);
 }
 
 void DeclarationParser::parseMember(DeclaredClass &cls) {
@@ -154,7 +157,12 @@ void DeclarationParser::parseMember(DeclaredClass &cls) {
     parser_.cursor().advance();
   }
   member.loc = parser_.tok_.loc();
-  if (parser_.tok_.is(Tok::Identifier) || isKeyword(parser_.tok_.kind)) {
+  if (parser_.classes().symbolKeyAhead()) {
+    if (!parser_.objectTypes().parseFieldName(member.name)) {
+      skipItem();
+      return;
+    }
+  } else if (parser_.tok_.is(Tok::Identifier) || isKeyword(parser_.tok_.kind)) {
     member.name = parser_.tok_.text;
     parser_.cursor().advance();
   } else {

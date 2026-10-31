@@ -37,6 +37,8 @@ static const char kCiphers[] =
     "DHE-RSA-AES128-SHA256:ECDHE-RSA-AES256-SHA384:DHE-RSA-AES256-SHA384:ECDHE-RSA-AES256-SHA256:"
     "DHE-RSA-AES256-SHA256:HIGH:!aNULL:!eNULL:!EXPORT:!DES:!RC4:!MD5:!PSK:!SRP:!CAMELLIA";
 static const unsigned char kAlpn[] = "\x08http/1.1";
+static const unsigned char kAlpnH2[] = "\x02h2\x08http/1.1";
+static const unsigned char kAlpnH2Only[] = "\x02h2";
 
 SSL_CTX *tz_tls_client;
 BIO_METHOD *tz_tls_bio_method;
@@ -401,7 +403,17 @@ static void tls_release(NetConn *c) {
   tz_free(t);
 }
 
-static const NetTlsOps tls_ops = {tls_open, tls_seal, tls_shutdown, tls_failure, tls_release};
+static int tls_h2(NetConn *c) {
+  Tls *t = (Tls *)c->tls;
+  const unsigned char *chosen = NULL;
+  unsigned int length = 0;
+  SSL_get0_alpn_selected(t->ssl, &chosen, &length);
+
+  return length == 2 && memcmp(chosen, "h2", 2) == 0;
+}
+
+static const NetTlsOps tls_ops = {tls_open,    tls_seal,    tls_shutdown,
+                                  tls_failure, tls_release, tls_h2};
 
 static Tls *tls_new(NetConn *c, SSL_CTX *ctx) {
   Tls *t = (Tls *)tz_alloc(sizeof(Tls));
@@ -602,9 +614,17 @@ static SSL_CTX *client_context(void) {
 static int select_alpn(SSL *ssl, const unsigned char **out, unsigned char *out_length,
                        const unsigned char *in, unsigned int in_length, void *arg) {
   (void)ssl;
-  (void)arg;
+  const unsigned char *offered = kAlpn;
+  unsigned int offered_length = sizeof kAlpn - 1;
+  if (arg == (void *)kAlpnH2) {
+    offered = kAlpnH2;
+    offered_length = sizeof kAlpnH2 - 1;
+  } else if (arg == (void *)kAlpnH2Only) {
+    offered = kAlpnH2Only;
+    offered_length = sizeof kAlpnH2Only - 1;
+  }
   unsigned char *chosen = NULL;
-  int status = SSL_select_next_proto(&chosen, out_length, kAlpn, sizeof kAlpn - 1, in, in_length);
+  int status = SSL_select_next_proto(&chosen, out_length, offered, offered_length, in, in_length);
   *out = chosen;
 
   return status == OPENSSL_NPN_NEGOTIATED ? SSL_TLSEXT_ERR_OK : SSL_TLSEXT_ERR_ALERT_FATAL;
@@ -985,6 +1005,9 @@ void tz_tls_connect(TzPromise *p, void *conn, void *host_obj, uint64_t host_meta
   if (!address_of(t->host, address)) {
     SSL_set_tlsext_host_name(t->ssl, t->host);
   }
+  if (c->h2offer) {
+    SSL_set_alpn_protos(t->ssl, kAlpnH2, sizeof kAlpnH2 - 1);
+  }
   SSL_set_connect_state(t->ssl);
   c->on_input = handshake_input;
   if (deadline) {
@@ -1009,6 +1032,11 @@ static void accept_tls(NetListener *l, NetConn *c) {
 
 static void release_context(void *tls) { SSL_CTX_free((SSL_CTX *)tls); }
 
+static void offer_alpn(NetListener *l) {
+  void *offered = l->h2only ? (void *)kAlpnH2Only : l->h2 ? (void *)kAlpnH2 : NULL;
+  SSL_CTX_set_alpn_select_cb((SSL_CTX *)l->tls, select_alpn, offered);
+}
+
 void *tz_tls_listen(void *host_obj, uint64_t host_meta, int64_t port, double max_body,
                     int64_t keep_alive, int64_t headers_timeout, int64_t request_timeout,
                     void *cert_obj, uint64_t cert_meta, void *key_obj, uint64_t key_meta,
@@ -1026,6 +1054,7 @@ void *tz_tls_listen(void *host_obj, uint64_t host_meta, int64_t port, double max
   l->tls = ctx;
   l->tls_accept = accept_tls;
   l->tls_release = release_context;
+  l->tls_alpn = offer_alpn;
 
   return l;
 }

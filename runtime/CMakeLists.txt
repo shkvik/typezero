@@ -12,8 +12,19 @@ set(third_party_sources
     zlib/adler32.c zlib/crc32.c zlib/inffast.c zlib/inflate.c zlib/inftrees.c zlib/zutil.c
     brotli/common/constants.c brotli/common/context.c brotli/common/dictionary.c
     brotli/common/platform.c brotli/common/shared_dictionary.c brotli/common/transform.c
-    brotli/dec/bit_reader.c brotli/dec/decode.c brotli/dec/huffman.c brotli/dec/state.c)
-set(includes -I${PROJECT_SOURCE_DIR} -I${third_party}/zlib -I${third_party}/brotli/include)
+    brotli/dec/bit_reader.c brotli/dec/decode.c brotli/dec/huffman.c brotli/dec/state.c
+    nghttp2/lib/nghttp2_alpn.c nghttp2/lib/nghttp2_buf.c nghttp2/lib/nghttp2_callbacks.c
+    nghttp2/lib/nghttp2_debug.c nghttp2/lib/nghttp2_extpri.c nghttp2/lib/nghttp2_frame.c
+    nghttp2/lib/nghttp2_hd.c nghttp2/lib/nghttp2_hd_huffman.c
+    nghttp2/lib/nghttp2_hd_huffman_data.c nghttp2/lib/nghttp2_helper.c nghttp2/lib/nghttp2_http.c
+    nghttp2/lib/nghttp2_map.c nghttp2/lib/nghttp2_mem.c nghttp2/lib/nghttp2_option.c
+    nghttp2/lib/nghttp2_outbound_item.c nghttp2/lib/nghttp2_pq.c
+    nghttp2/lib/nghttp2_priority_spec.c nghttp2/lib/nghttp2_queue.c nghttp2/lib/nghttp2_ratelim.c
+    nghttp2/lib/nghttp2_rcbuf.c nghttp2/lib/nghttp2_session.c nghttp2/lib/nghttp2_stream.c
+    nghttp2/lib/nghttp2_submit.c nghttp2/lib/nghttp2_time.c nghttp2/lib/nghttp2_version.c
+    nghttp2/lib/sfparse.c)
+set(includes -I${PROJECT_SOURCE_DIR} -I${third_party}/zlib -I${third_party}/brotli/include
+    -I${third_party}/nghttp2/lib/includes -DNGHTTP2_STATICLIB -DNGHTTP2_NO_SSIZE_T)
 set(flags -O2 -std=c17 -Wall -Wextra -D_CRT_SECURE_NO_WARNINGS ${includes})
 if(WIN32)
   list(APPEND flags -fms-runtime-lib=static)
@@ -49,9 +60,10 @@ foreach(source ${third_party_sources})
   string(REPLACE "/" "_" name ${source})
   string(REPLACE ".c" "" name ${name})
   set(bitcode ${dir}/third_party_${name}.bc)
-  set(third_party_flags -O2 -std=c17 -w -D_CRT_SECURE_NO_WARNINGS ${includes})
+  set(third_party_flags -O2 -std=c17 -w -D_CRT_SECURE_NO_WARNINGS -DBUILDING_NGHTTP2 ${includes})
   if(WIN32)
-    list(APPEND third_party_flags -fms-runtime-lib=static)
+    list(APPEND third_party_flags -fms-runtime-lib=static -DHAVE_WINDOWS_H -DHAVE_GETTICKCOUNT64
+         -Dssize_t=__int64)
   endif()
   add_custom_command(OUTPUT ${bitcode}
     COMMAND ${TZ_CLANG} ${third_party_flags} -flto=full -c -MD -MF ${bitcode}.d -o ${bitcode}

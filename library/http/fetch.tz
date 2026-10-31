@@ -19,6 +19,25 @@ declare function httpReadAll(conn: object, deadline: object | undefined):
   Promise<Result<Uint8Array, NativeError>>
 declare function httpReusable(conn: object): boolean
 declare function httpAlive(conn: object): boolean
+declare function httpOfferH2(conn: object): void
+declare function httpIsH2(conn: object): boolean
+declare function httpStartClient(conn: object): void
+declare function httpOpenStream(conn: object): object | undefined
+declare function httpStreamsLeft(conn: object): int
+declare function http2End(conn: object, trailers: string[]): int
+declare function http2Reset(conn: object, code: int): void
+declare function http2ErrorCode(conn: object): int
+declare function http2Field(conn: object, which: int): string
+declare function http2Trailers(conn: object): string[]
+declare function http2Headers(conn: object): string[]
+declare function http2Flags(conn: object): int
+declare function http2ConnectionState(conn: object): int
+declare function http2Close(conn: object): void
+declare function http2Read(conn: object): Promise<Result<Uint8Array | undefined, NativeError>>
+declare function http2Write(conn: object, chunk: Uint8Array): Promise<Result<void, NativeError>>
+declare function http2Response(conn: object): Promise<Result<int, NativeError>>
+declare function http2Request(conn: object, method: string, target: string, headers: string[]): void
+declare function http2Respond(conn: object, status: int, headers: string[]): int
 declare function httpWrite(conn: object, chunk: Uint8Array): Promise<Result<void, NativeError>>
 declare function httpEnd(conn: object): void
 declare function httpNext(conn: object): Promise<Result<int, NativeError>>
@@ -53,6 +72,7 @@ export class Connection {
   status = 0
   absolute = false
   proxyAuth = ""
+  protocol: ResponseProtocol = "http/1.1"
   private socket: object
   private head: string[] = []
 
@@ -60,12 +80,13 @@ export class Connection {
     this.socket = socket
   }
 
-  static async open(host: string, port: int, secure: boolean,
-                    deadline?: object): Promise<Result<Connection, NativeError>> {
+  static async open(host: string, port: int, secure: boolean, deadline: object | undefined,
+                    offerH2: boolean): Promise<Result<Connection, NativeError>> {
     const connected = await netConnect(host, port, deadline)
     if (connected.isErr()) return err(connected.error)
     const socket = connected.value
     if (secure) {
+      if (offerH2) httpOfferH2(socket)
       const secured = await tlsConnect(socket, host, deadline)
       if (secured.isErr()) {
         netClose(socket)
@@ -123,6 +144,62 @@ export class Connection {
     httpRespond(this.socket, status, statusText, this.head, text, bytes, flags)
   }
 
+  requestStream(method: string, target: string, headers: string[]) {
+    http2Request(this.socket, method, target, headers)
+  }
+
+  respondStream(status: int, headers: string[]): int {
+    return http2Respond(this.socket, status, headers)
+  }
+
+  endStream(trailers: string[]): int {
+    return http2End(this.socket, trailers)
+  }
+
+  readStream(): Promise<Result<Uint8Array | undefined, NativeError>> {
+    return http2Read(this.socket)
+  }
+
+  writeStream(chunk: Uint8Array): Promise<Result<void, NativeError>> {
+    return http2Write(this.socket, chunk)
+  }
+
+  responseStream(): Promise<Result<int, NativeError>> {
+    return http2Response(this.socket)
+  }
+
+  headerCopy(): string[] {
+    return http2Headers(this.socket)
+  }
+
+  streamFlags(): int {
+    return http2Flags(this.socket)
+  }
+
+  reset(code: int) {
+    http2Reset(this.socket, code)
+  }
+
+  errorCode(): int {
+    return http2ErrorCode(this.socket)
+  }
+
+  field(which: int): string {
+    return http2Field(this.socket, which)
+  }
+
+  trailerList(): string[] {
+    return http2Trailers(this.socket)
+  }
+
+  connectionState(): int {
+    return http2ConnectionState(this.socket)
+  }
+
+  closeHttp2() {
+    http2Close(this.socket)
+  }
+
   async response(deadline?: object): Promise<Result<void, NativeError>> {
     const status = await httpResponse(this.socket, deadline)
     if (status.isErr()) return err(status.error)
@@ -164,6 +241,30 @@ export class Connection {
 
   alive(): boolean {
     return httpAlive(this.socket)
+  }
+
+  isH2(): boolean {
+    return httpIsH2(this.socket)
+  }
+
+  startH2() {
+    httpStartClient(this.socket)
+    this.protocol = "h2"
+  }
+
+  openStream(): Connection | undefined {
+    const stream = httpOpenStream(this.socket)
+    if (stream == undefined) {
+      return undefined
+    }
+    const conn = new Connection(stream)
+    conn.protocol = "h2"
+
+    return conn
+  }
+
+  streamsLeft(): int {
+    return httpStreamsLeft(this.socket)
   }
 
   next(): Promise<Result<int, NativeError>> {
@@ -257,6 +358,18 @@ export class Headers {
     const h = new Headers()
     h.list = conn.headerList()
     return h
+  }
+
+  static fromList(conn: Connection, list: string[]): Headers {
+    void conn
+    const h = new Headers()
+    h.list = list
+    return h
+  }
+
+  listFor(conn: Connection): string[] {
+    void conn
+    return [...this.list]
   }
 
   writeTo(conn: Connection) {
@@ -837,7 +950,7 @@ export class Peer {
   }
 }
 
-type NetworkCode =
+export type NetworkCode =
   | "ENOTFOUND"
   | "EAI_AGAIN"
   | "ECONNREFUSED"
@@ -850,6 +963,8 @@ type NetworkCode =
   | "EPIPE"
   | "EMFILE"
   | "ENOBUFS"
+  | "ERR_NOT_PROCESSED"
+  | "ERR_STREAM_RESET"
   | "UNKNOWN";
 
 function networkCode(code: string): NetworkCode {
@@ -878,12 +993,16 @@ function networkCode(code: string): NetworkCode {
       return "EMFILE";
     case "ENOBUFS":
       return "ENOBUFS";
+    case "ERR_NOT_PROCESSED":
+      return "ERR_NOT_PROCESSED";
+    case "ERR_STREAM_RESET":
+      return "ERR_STREAM_RESET";
     default:
       return "UNKNOWN";
   }
 }
 
-function networkMessage(code: NetworkCode, peer: Peer, stage: string, detail: string): string {
+export function networkMessage(code: NetworkCode, peer: Peer, stage: string, detail: string): string {
   const name = peer.name();
   switch (code) {
     case "ENOTFOUND":
@@ -910,12 +1029,16 @@ function networkMessage(code: NetworkCode, peer: Peer, stage: string, detail: st
       return `could not connect to ${name}: too many files and sockets are open in this program`;
     case "ENOBUFS":
       return `could not connect to ${name}: the system has no buffer space left`;
+    case "ERR_NOT_PROCESSED":
+      return `${name} did not process the request (HTTP/2), so it can be sent again`;
+    case "ERR_STREAM_RESET":
+      return `${name} reset the HTTP/2 stream of the request while ${stage}`;
     case "UNKNOWN":
       return `the connection to ${name} failed while ${stage}: ${detail}`;
   }
 }
 
-function tlsCode(code: string): TlsCode | undefined {
+export function tlsCode(code: string): TlsCode | undefined {
   switch (code) {
     case "UNABLE_TO_GET_ISSUER_CERT":
       return "UNABLE_TO_GET_ISSUER_CERT";
@@ -990,7 +1113,7 @@ function tlsCode(code: string): TlsCode | undefined {
 const SYSTEM_CA_HINT =
   "; if its root CA is installed on this machine, run with NODE_USE_SYSTEM_CA=1";
 
-function tlsMessage(code: TlsCode, host: string, detail: string): string {
+export function tlsMessage(code: TlsCode, host: string, detail: string): string {
   const hint = detail.includes("NODE_USE_SYSTEM_CA") ? SYSTEM_CA_HINT : "";
   switch (code) {
     case "CERT_HAS_EXPIRED":
@@ -1012,6 +1135,11 @@ function tlsMessage(code: TlsCode, host: string, detail: string): string {
     case "CERT_REVOKED":
       return `the certificate of ${host} is revoked`;
     case "ERR_TLS_HANDSHAKE":
+      if (detail.includes("no application protocol")) {
+        return `${host} speaks none of the offered versions of HTTP (TLS alert: no application ` +
+               `protocol); with httpVersion: "1.1" only HTTP/1.1 is offered`;
+      }
+
       return `the TLS handshake with ${host} failed: ${detail}`;
     default:
       return `the certificate of ${host} is not trusted: ${detail}`;
@@ -1760,6 +1888,7 @@ export interface RequestInit<E extends StreamError = StreamError> {
   timeout?: int
   duplex?: "half"
   proxy?: ProxyOption
+  httpVersion?: HttpVersion
 }
 
 export interface RequestOptions {
@@ -1965,6 +2094,10 @@ function reasonPhrase(text: string): string {
   return from == 0 ? text : kept + text.slice(from)
 }
 
+export type ResponseProtocol = "http/1.1" | "h2"
+
+export type HttpVersion = "auto" | "1.1" | "2"
+
 export class Response {
   readonly status: int = 200
   readonly statusText: string = ""
@@ -1973,6 +2106,7 @@ export class Response {
   readonly redirected: boolean = false
   readonly type: string = "default"
   readonly url: string = ""
+  readonly protocol: ResponseProtocol = "http/1.1"
   upgrade?: (conn: Connection) => void
   private bodyStream?: ReadableStream<Uint8Array, BodyError>
   private data: Body
@@ -2000,13 +2134,15 @@ export class Response {
       const stream = bodyStream(body)
       data = Body.ofStream(stream)
     }
-    const response = new Response(status, statusText, headers, data, "", false, "default")
+    const response = new Response(status, statusText, headers, data, "", false, "default",
+                                  "http/1.1")
 
     return response
   }
 
   private constructor(status: int, statusText: string, headers: Headers, data: Body,
-                      url: string, redirected: boolean, type: string) {
+                      url: string, redirected: boolean, type: string,
+                      protocol: ResponseProtocol) {
     this.status = status
     this.ok = status >= 200 && status <= 299
     this.statusText = statusText
@@ -2015,6 +2151,7 @@ export class Response {
     this.url = url
     this.redirected = redirected
     this.type = type
+    this.protocol = protocol
   }
 
   static readFrom(conn: Connection, url: string, redirected: boolean, peer: Peer): Response {
@@ -2030,12 +2167,13 @@ export class Response {
       giveBack(conn)
       body = Body.of(undefined)
     }
-    return new Response(conn.status, conn.statusText(), headers, body, url, redirected, "basic")
+    return new Response(conn.status, conn.statusText(), headers, body, url, redirected, "basic",
+                        conn.protocol)
   }
 
   static switchingProtocols(headers: HeadersInit, upgrade: (conn: Connection) => void): Response {
     const response = new Response(101, "Switching Protocols", new Headers(headers), Body.of(undefined),
-                                  "", false, "default")
+                                  "", false, "default", "http/1.1")
     response.upgrade = upgrade
 
     return response
@@ -2043,7 +2181,8 @@ export class Response {
 
   static readFrom(data: DataUrl): Response {
     const headers = new Headers({ "content-type": data.type })
-    return new Response(200, "", headers, Body.of(data.bytes), data.url, false, "default")
+    return new Response(200, "", headers, Body.of(data.bytes), data.url, false, "default",
+                        "http/1.1")
   }
 
   writeTo(conn: Connection, headOnly: boolean): Written {
@@ -2110,7 +2249,7 @@ export class Response {
   static error(): Response {
     const headers = new Headers()
     const data = Body.of(undefined)
-    const response = new Response(0, "", headers, data, "", false, "error")
+    const response = new Response(0, "", headers, data, "", false, "error", "http/1.1")
 
     return response
   }
@@ -2135,7 +2274,7 @@ export class Response {
     const data = this.data.copy()
     this.bodyStream = undefined
     const copy = new Response(this.status, this.statusText, headers, data, this.url,
-                              this.redirected, this.type)
+                              this.redirected, this.type, this.protocol)
 
     return copy
   }
@@ -2239,7 +2378,7 @@ async function sendBody(conn: Connection, stream: ReadableStream<Uint8Array, Bod
   return undefined
 }
 
-function peerOf(url: URL, timeout?: int, deadline?: object): Peer {
+export function peerOf(url: URL, timeout?: int, deadline?: object): Peer {
   const hostname = url.hostname()
   const host = hostname.startsWith("[") ? hostname.slice(1, hostname.length - 1) : hostname
   const https = url.protocol() == "https:"
@@ -2490,7 +2629,7 @@ async function tunnel(conn: Connection, proxy: ProxyTarget, peer: Peer): Promise
 
 async function openThrough(proxy: ProxyTarget, https: boolean,
                            peer: Peer): Promise<Result<Connection, FetchError>> {
-  const opened = await Connection.open(proxy.host, proxy.port, proxy.secure, peer.deadline)
+  const opened = await Connection.open(proxy.host, proxy.port, proxy.secure, peer.deadline, false)
   if (opened.isErr()) return err(proxyConnectionError(opened.error, proxy, peer))
   const conn = opened.value
   if (!https) {
@@ -2511,12 +2650,114 @@ async function openThrough(proxy: ProxyTarget, https: boolean,
   return ok(conn)
 }
 
+const h2pool = new Map<string, Connection[]>()
+
+function takeH2(origin: string): Connection | undefined {
+  const list = h2pool.get(origin)
+  if (list == undefined) {
+    return undefined
+  }
+  let found: Connection | undefined = undefined
+  const kept: Connection[] = []
+  for (const conn of list) {
+    const left = conn.streamsLeft()
+    if (left < 0) {
+      conn.close()
+      continue
+    }
+    kept.push(conn)
+    if (found == undefined && left > 0) {
+      found = conn
+    }
+  }
+  h2pool.set(origin, kept)
+
+  return found
+}
+
+function keepH2(origin: string, conn: Connection) {
+  let list = h2pool.get(origin)
+  if (list == undefined) {
+    list = []
+    h2pool.set(origin, list)
+  }
+  list.push(conn)
+}
+
+async function exchange(request: Request, url: URL, redirected: boolean, peer: Peer,
+                        conn: Connection): Promise<Result<Response, FetchError>> {
+  const wrote = await request.writeTo(conn, url, peer)
+  if (wrote.isErr()) {
+    conn.close()
+    return wrote
+  }
+  const status = await conn.response(peer.deadline)
+  if (status.isErr()) {
+    conn.close()
+    if (peer.passed()) {
+      return err(timeoutError(peer))
+    }
+
+    return err(connectionError(status.error, peer, "waiting for the response"))
+  }
+  let shown = url.href()
+  const hash = shown.indexOf("#")
+  if (hash >= 0) shown = shown.slice(0, hash)
+  const response = Response.readFrom(conn, shown, redirected, peer)
+
+  return ok(response)
+}
+
 async function send(request: Request, url: URL, redirected: boolean, peer: Peer,
-                    proxy?: ProxyTarget): Promise<Result<Response, FetchError>> {
+                    version: HttpVersion, proxy?: ProxyTarget): Promise<Result<Response, FetchError>> {
   const https = url.protocol() == "https:"
   const through = proxy == undefined ? "" : proxy.shown + "|"
   const origin = through + url.protocol() + peer.host + ":" + String(peer.port)
-  const idle = takeIdle(origin)
+  const http2 = proxy == undefined && version != "1.1" && (https || version == "2")
+  let fresh: Connection | undefined = undefined
+  if (http2) {
+    let parent = takeH2(origin)
+    if (parent == undefined) {
+      const opened = await Connection.open(peer.host, peer.port, https, peer.deadline, true)
+      if (opened.isErr()) return err(connectionError(opened.error, peer, "connecting"))
+      const conn = opened.value
+      conn.origin = origin
+      if (!https || conn.isH2()) {
+        conn.startH2()
+        keepH2(origin, conn)
+        parent = conn
+      } else if (version == "2") {
+        conn.close()
+
+        return err({
+          kind: "FETCH_ERROR_RESPONSE",
+          code: "ERR_NO_HTTP2",
+          message: `${peer.name()} does not speak HTTP/2: drop httpVersion: "2" to take HTTP/1.1`,
+          host: peer.host,
+          port: peer.port,
+        })
+      } else {
+        fresh = conn
+      }
+    }
+    if (parent != undefined) {
+      const stream = parent.openStream()
+      if (stream == undefined) {
+        return err({
+          kind: "FETCH_ERROR_NETWORK",
+          code: "ERR_NOT_PROCESSED",
+          message: `${peer.name()} closed the HTTP/2 connection before the request, so it can be sent again`,
+          syscall: "write",
+          host: peer.host,
+          port: peer.port,
+        })
+      }
+      const sent = await exchange(request, url, redirected, peer, stream)
+
+      return sent
+    }
+  }
+  const idle = fresh ?? takeIdle(origin)
   let conn: Connection
   if (idle != undefined) {
     conn = idle
@@ -2525,7 +2766,7 @@ async function send(request: Request, url: URL, redirected: boolean, peer: Peer,
     if (opened.isErr()) return opened
     conn = opened.value
   } else {
-    const opened = await Connection.open(peer.host, peer.port, https, peer.deadline)
+    const opened = await Connection.open(peer.host, peer.port, https, peer.deadline, false)
     if (opened.isErr()) return err(connectionError(opened.error, peer, "connecting"))
     conn = opened.value
   }
@@ -2593,7 +2834,7 @@ function requestProblem(request: Request, url: URL): FetchError | undefined {
   return undefined
 }
 
-function startDeadline(timeout?: int): object | undefined {
+export function startDeadline(timeout?: int): object | undefined {
   if (timeout == undefined) {
     return undefined
   }
@@ -2634,13 +2875,13 @@ export async function fetch<E extends StreamError = never>(input: string | URL |
   if (!(body instanceof ReadableStream)) {
     const plain = plainInit(init, body)
     const request = new Request(input, plain)
-    const sent = await fetchRequest(request, init?.proxy)
+    const sent = await fetchRequest(request, init?.proxy, init?.httpVersion ?? "auto")
 
     return sent
   }
   const rest = plainInit(init, undefined)
   const request = Request.stream(input, body, rest)
-  const sent = await fetchRequest(request, init?.proxy)
+  const sent = await fetchRequest(request, init?.proxy, init?.httpVersion ?? "auto")
   if (sent.isOk()) {
     return sent
   }
@@ -2660,8 +2901,8 @@ export async function fetch<E extends StreamError = never>(input: string | URL |
   return sent
 }
 
-async function fetchRequest(request: Request, proxyOption: ProxyOption | undefined):
-    Promise<Result<Response, FetchError>> {
+async function fetchRequest(request: Request, proxyOption: ProxyOption | undefined,
+                            version: HttpVersion): Promise<Result<Response, FetchError>> {
   const first = URL.parse(request.url)
   if (first.isErr())
     return err(requestError("ERR_INVALID_URL", `fetch cannot parse "${request.url}" as a URL`,
@@ -2687,7 +2928,7 @@ async function fetchRequest(request: Request, proxyOption: ProxyOption | undefin
     const peer = peerOf(url, timeout, deadline)
     const proxied = proxyFor(url, peer, proxyOption)
     if (proxied.isErr()) return err(proxied.error)
-    const sent = await send(current, url, redirects > 0, peer, proxied.value)
+    const sent = await send(current, url, redirects > 0, peer, version, proxied.value)
     if (sent.isErr()) return sent
     const response = sent.value
     const status = response.status

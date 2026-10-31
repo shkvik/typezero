@@ -1,0 +1,13 @@
+// The server of the HTTP/2 benchmark (bench/http2.ps1): "Hello, World!" to
+// every request over HTTP/2 without TLS (h2c, prior knowledge), on the port
+// given.
+import { Server } from "tz:http"
+
+const port = parseInt(process.argv[2] ?? "8080").unwrapOr(8080)
+const options = { port, hostname: "127.0.0.1", http2: { enabled: true, cleartext: true } }
+const server = new Server(options, () => new Response("Hello, World!"))
+const listened = server.listen()
+if (listened.isErr()) {
+  console.error(listened.error.message)
+  process.exit(1)
+}

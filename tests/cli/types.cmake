@@ -131,6 +131,7 @@ true
 # @types/node (editors/types/patch.cmake).
 set(web [=[
 import { Server } from "tz:http"
+import { Http2Client, Http2Server } from "tz:http2"
 
 // The web: fetch and reading a body give a Result; so does URL.parse. A
 // status written in the code is an HttpStatus; one from a variable becomes
@@ -161,6 +162,32 @@ if (listened.isOk()) {
   await listened.value.stop()
 }
 
+// Streams of HTTP/2 with trailers (tz:http2).
+const h2 = new Http2Server({ hostname: "127.0.0.1", port: 0 }, async request => {
+  const responded = request.respond({ status: 200 })
+  if (responded.isErr()) return
+  const ended = await responded.value.end({ "x-done": "1" })
+  if (ended.isErr()) console.log(ended.error.kind)
+})
+const h2listened = h2.listen()
+if (h2listened.isOk()) {
+  const connected = await new Http2Client({ url: h2listened.value.url }).connect()
+  if (connected.isOk()) {
+    const started = await connected.value.request({ method: "GET", path: "/" })
+    if (started.isOk()) {
+      const ended = await started.value.end()
+      const answered = await started.value.response()
+      if (answered.isOk()) {
+        for await (const chunkResult of answered.value.body()) if (chunkResult.isErr()) break
+        const trailers = answered.value.trailers()
+        console.log(answered.value.status, trailers.isOk() ? trailers.value.get("x-done") : "-", ended.isOk())
+      }
+    }
+    await connected.value.close()
+  }
+  await h2listened.value.stop()
+}
+
 // A stream of the web reads with a Result too.
 const stream = new ReadableStream<string>({
   start: controller => {
@@ -187,6 +214,7 @@ tz(run web.tz IN app STDOUT [[
 got /here true
 /a true
 true true
+200 1 true
 1
 a true
 b

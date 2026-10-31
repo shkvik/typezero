@@ -1,0 +1,13 @@
+https h2 200 OK GET over h2
+https 1.1 http/1.1 200 OK GET over http/1.1
+h2c h2 200 OK GET over h2
+http auto http/1.1 200 OK GET over http/1.1
+missing h2 404 Not Found nowhere
+head h2 200 OK 
+post h2 200 OK got 300000
+parts h2 200 OK one two
+big h2 true
+upload h2 200 OK got 7
+at once 20 1
+no http2 FETCH_ERROR_RESPONSE ERR_NO_HTTP2 localhost:PORT does not speak HTTP/2: drop httpVersion: "2" to take HTTP/1.1
+old auto http/1.1 200 OK GET over http/1.1

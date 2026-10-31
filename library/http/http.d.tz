@@ -46,7 +46,12 @@ export type Client = {
   /** "203.0.113.7", or "2001:db8::1" for IPv6. */
   address: string;
   port: int;
+  /** How the request came: "http/1.1", or "h2" for HTTP/2. */
+  protocol: ClientProtocol;
 };
+
+/** The version of HTTP of a request: "http/1.1" or "h2" (HTTP/2). */
+export type ClientProtocol = "http/1.1" | "h2";
 
 /**
  * Where and how a server listens, given once, when it is made: a server does
@@ -93,7 +98,36 @@ export type ServeOptions = {
   requestTimeout?: int;
   /** http or https; http, `{ secure: false }`, when left out. */
   transport?: ServeTransport;
+  /**
+   * HTTP/2: on with https, off with http, when left out. With https a client
+   * and the server agree on it in the TLS handshake (ALPN), and older clients
+   * get HTTP/1.1; `cleartext: true` takes HTTP/2 without TLS from a client
+   * that starts with it (h2c behind a balancer, gRPC). The handler is the same
+   * for both; `client.protocol` tells which came.
+   *
+   * @example
+   * const server = new Server({ port: 8080, http2: { enabled: true, cleartext: true } }, handler);
+   */
+  http2?: ServeHttp2;
 };
+
+/**
+ * HTTP/2 of a server, one of two:
+ * - `{ enabled: false }` — only HTTP/1.1;
+ * - `{ enabled: true, cleartext?, maxConcurrentStreams? }` — HTTP/2: with
+ *   https by ALPN, and without TLS too when `cleartext` is true;
+ *   `maxConcurrentStreams` — how many requests one connection may have at
+ *   once; 100.
+ */
+export type ServeHttp2 =
+  | {
+      enabled: false;
+    }
+  | {
+      enabled: true;
+      cleartext?: boolean;
+      maxConcurrentStreams?: int;
+    };
 
 /**
  * http or https, one of two:

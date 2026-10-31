@@ -1,4 +1,5 @@
 #include "runtime/library/net/net/net.h"
+#include "runtime/library/http/http2/http2.h"
 #include "runtime/core/alloc/alloc.h"
 #include "runtime/core/async/async.h"
 #include "runtime/core/closure/closure.h"
@@ -374,6 +375,14 @@ static NetConn *conn_new(SOCKET s) {
 }
 
 static void conn_free(NetConn *c) {
+  NetConn *parent = c->h2parent;
+  if (parent) {
+    tz_free(c->in);
+    tz_free(c->out);
+    tz_obj_free(c);
+    tz_instance_release((TzInstance *)parent);
+    return;
+  }
   NetListener *l = c->listener;
   if (l) {
     if (c->prev) {
@@ -408,6 +417,14 @@ static void close_socket(NetConn *c) {
     return;
   }
   c->closed = 1;
+  if (c->h2parent) {
+    if (c->server) {
+      tz_h2_reset(c);
+    } else {
+      tz_h2_cancel(c);
+    }
+    return;
+  }
   closesocket(c->s);
 }
 
@@ -426,8 +443,10 @@ static void conn_unlock_settle(NetConn *c) {
 }
 
 static void conn_drop(void *object) {
-  TZ_ORDERED();
   NetConn *c = (NetConn *)object;
+  if (!c->h2parent) {
+    TZ_ORDERED();
+  }
   conn_lock(c);
   tz_http_release(c);
   if (c->drain) {
@@ -513,6 +532,12 @@ static void raw_got(NetConn *c, uint32_t got) {
 }
 
 void net_read(NetConn *c) {
+  if (c->h2parent) {
+    if (c->eof || c->error || c->closed) {
+      c->on_input(c);
+    }
+    return;
+  }
   if (c->reading || c->closed) {
     return;
   }
@@ -654,6 +679,10 @@ uint8_t *net_seal_reserve(NetConn *c, size_t length) {
 }
 
 size_t net_pending_output(const NetConn *c) {
+  if (c->h2parent) {
+    return (size_t)c->out_len - c->flight_len;
+  }
+
   return (size_t)c->out_len + c->flight_len + c->sealed_len;
 }
 
@@ -673,6 +702,10 @@ static void finish_close(NetConn *c) {
 }
 
 void net_flush(NetConn *c) {
+  if (c->h2parent) {
+    tz_h2_flush(c);
+    return;
+  }
   while (!c->writing && !c->closed && !c->error) {
     if (c->tls) {
       c->tls_ops->seal(c);
@@ -764,8 +797,9 @@ static void net_completed_pooled(OVERLAPPED_ENTRY *entry) {
   int reading = op->work.done == read_done;
   NetConn *c = reading ? CONTAINING_RECORD(op, NetConn, rop) : CONTAINING_RECORD(op, NetConn, wop);
   conn_lock(c);
-  int here = !c->orphan && !c->closed && !c->tls && !c->error && !op->error &&
-             (reading ? op->bytes > 0 && tz_http_waits_request(c) : !c->closing && !c->drain);
+  int here =
+      !c->orphan && !c->closed && !c->tls && !c->error && !op->error &&
+      (reading ? op->bytes > 0 && (tz_http_waits_request(c) || c->h2) : !c->closing && !c->drain);
   if (!here) {
     conn_unlock(c);
     tz_io_due_remote(&op->work);
@@ -801,6 +835,15 @@ void net_close(NetConn *c) {
   if (c->closed) {
     return;
   }
+  if (c->h2parent) {
+    c->closing = 1;
+    if (c->server) {
+      tz_h2_end(c);
+    } else if (!c->eof) {
+      tz_h2_cancel(c);
+    }
+    return;
+  }
   c->closing = 1;
   if (c->tls) {
     c->tls_ops->shutdown(c);
@@ -816,6 +859,55 @@ void net_abort(NetConn *c) {
   c->out_len = 0;
   c->sealed_len = 0;
   close_socket(c);
+}
+
+NetConn *net_stream_new(NetConn *parent) {
+  NetConn *c = (NetConn *)tz_obj_alloc(sizeof(NetConn));
+  memset(c, 0, sizeof *c);
+  c->rc = 1;
+  c->layout = &conn_layout;
+  c->s = INVALID_SOCKET;
+  c->h2parent = parent;
+  tz_rc_inc(&parent->rc);
+  c->server = 1;
+  c->last_active = net_now();
+  memcpy(c->peer, parent->peer, sizeof c->peer);
+  c->peer_port = parent->peer_port;
+  c->http.max_body = parent->http.max_body;
+  c->http.request_timeout = parent->http.request_timeout;
+  c->on_input = tz_http_stream_input;
+
+  return c;
+}
+
+void net_accept_ready(NetListener *l, NetConn *c) {
+  tz_lock(&l->ready_lock);
+  if (l->pending) {
+    net_fulfill(&l->pending, &c, sizeof c);
+    tz_unlock(&l->ready_lock);
+    return;
+  }
+  c->ready_next = NULL;
+  if (l->ready_last) {
+    l->ready_last->ready_next = c;
+  } else {
+    l->ready_first = c;
+  }
+  l->ready_last = c;
+  tz_unlock(&l->ready_lock);
+}
+
+static NetConn *take_ready(NetListener *l) {
+  NetConn *c = l->ready_first;
+  if (c) {
+    l->ready_first = c->ready_next;
+    if (!l->ready_first) {
+      l->ready_last = NULL;
+    }
+    c->ready_next = NULL;
+  }
+
+  return c;
 }
 
 void tz_net_close(void *conn, TzMaker make) {
@@ -945,6 +1037,9 @@ static void listener_drop(void *object) {
   TZ_ORDERED();
   NetListener *l = (NetListener *)object;
   listener_close(l);
+  for (NetConn *c = take_ready(l); c; c = take_ready(l)) {
+    tz_instance_release((TzInstance *)c);
+  }
   if (l->pending) {
     TzPromise *p = l->pending;
     l->pending = NULL;
@@ -975,6 +1070,14 @@ static void sweep_fired(TzObject *env) {
   double now = net_now();
   for (NetConn *c = l->conns; c; c = c->next) {
     conn_lock(c);
+    if (c->h2) {
+      if (!c->closed && tz_h2_idle(c) && l->keep_alive > 0 &&
+          now - c->last_active >= l->keep_alive) {
+        tz_h2_shutdown(c);
+      }
+      conn_unlock(c);
+      continue;
+    }
     if (!c->closed && c->busy && l->request_timeout > 0 && c->http.request_since > 0 &&
         !c->http.body_done && now - c->http.request_since >= l->request_timeout) {
       tz_http_request_too_slow(c);
@@ -1135,6 +1238,12 @@ int64_t tz_net_client_port(void *conn, TzMaker make) {
   return ((NetConn *)conn)->peer_port;
 }
 
+void tz_net_client_protocol(TzStr *out, void *conn, TzMaker make) {
+  (void)make;
+  const char *protocol = ((NetConn *)conn)->h2parent ? "h2" : "http/1.1";
+  *out = tz_str_from_ascii(protocol, strlen(protocol));
+}
+
 int64_t tz_net_listener_port(void *listener, TzMaker make) {
   TZ_ORDERED();
   (void)make;
@@ -1145,20 +1254,25 @@ int64_t tz_net_listener_port(void *listener, TzMaker make) {
 static void accept_done(TzWork *w);
 static void accepted(NetListener *l, int32_t error);
 
+static void settle_none(NetListener *l) {
+  tz_lock(&l->ready_lock);
+  if (l->pending) {
+    void *none = NULL;
+    net_fulfill(&l->pending, &none, sizeof none);
+  }
+  tz_unlock(&l->ready_lock);
+}
+
 static void accept_next(NetListener *l) {
   for (;;) {
     if (l->closed) {
-      void *none = NULL;
-      if (l->pending) {
-        net_fulfill(&l->pending, &none, sizeof none);
-      }
+      settle_none(l);
       return;
     }
     l->accepting = WSASocketW(l->family, SOCK_STREAM, IPPROTO_TCP, NULL, 0,
                               WSA_FLAG_OVERLAPPED | WSA_FLAG_NO_HANDLE_INHERIT);
     if (l->accepting == INVALID_SOCKET) {
-      void *none = NULL;
-      net_fulfill(&l->pending, &none, sizeof none);
+      settle_none(l);
       return;
     }
     DWORD got = 0;
@@ -1200,10 +1314,7 @@ static void accepted(NetListener *l, int32_t error) {
   if (error || l->closed) {
     closesocket(s);
     if (l->closed) {
-      void *none = NULL;
-      if (l->pending) {
-        net_fulfill(&l->pending, &none, sizeof none);
-      }
+      settle_none(l);
       return;
     }
     accept_next(l);
@@ -1251,7 +1362,7 @@ static void accepted(NetListener *l, int32_t error) {
   if (l->tls) {
     l->tls_accept(l, c);
   }
-  net_fulfill(&l->pending, &c, sizeof c);
+  net_accept_ready(l, c);
 }
 
 void tz_net_accept(TzPromise *p, void *listener, TzMaker make) {
@@ -1259,8 +1370,31 @@ void tz_net_accept(TzPromise *p, void *listener, TzMaker make) {
   NetListener *l = (NetListener *)listener;
   tz_net_make = make;
   tz_ref_retain(p);
+  tz_lock(&l->ready_lock);
   l->pending = p;
-  accept_next(l);
+  NetConn *ready = take_ready(l);
+  if (ready) {
+    net_fulfill(&l->pending, &ready, sizeof ready);
+    tz_unlock(&l->ready_lock);
+    return;
+  }
+  tz_unlock(&l->ready_lock);
+  if (l->accepting == INVALID_SOCKET) {
+    accept_next(l);
+  }
+}
+
+void tz_net_listen_http2(void *listener, int64_t flags, int64_t streams, TzMaker make) {
+  TZ_ORDERED();
+  (void)make;
+  NetListener *l = (NetListener *)listener;
+  l->h2 = (flags & 1) != 0;
+  l->h2c = (flags & 2) != 0;
+  l->h2only = (flags & 4) != 0;
+  l->h2_streams = streams > 0 ? (uint32_t)streams : 100;
+  if (l->tls && l->tls_alpn) {
+    l->tls_alpn(l);
+  }
 }
 
 void tz_net_drained(TzPromise *p, void *listener, TzMaker make) {
@@ -1288,7 +1422,9 @@ void tz_net_close_listener(void *listener, TzMaker make) {
     conn_lock(c);
     c->http.ending = 1;
     c->http.keep_alive = 0;
-    if (!c->closed && !c->busy && !c->writing) {
+    if (c->h2) {
+      tz_h2_shutdown(c);
+    } else if (!c->closed && !c->busy && !c->writing) {
       net_abort(c);
     }
     conn_unlock(c);
@@ -1672,6 +1808,11 @@ int64_t tz_net_client_port(void *conn, TzMaker make) {
 
   return 0;
 }
+void tz_net_client_protocol(TzStr *out, void *conn, TzMaker make) {
+  (void)out;
+  (void)conn;
+  (void)make;
+}
 int64_t tz_net_listener_port(void *listener, TzMaker make) {
   TZ_ORDERED();
   (void)listener;
@@ -1694,6 +1835,22 @@ void tz_net_abort_all(void *listener, TzMaker make) {
   TZ_ORDERED();
   (void)listener;
   (void)make;
+}
+void tz_net_listen_http2(void *listener, int64_t flags, int64_t streams, TzMaker make) {
+  (void)listener;
+  (void)flags;
+  (void)streams;
+  (void)make;
+}
+NetConn *net_stream_new(NetConn *parent) {
+  (void)parent;
+  unsupported();
+
+  return NULL;
+}
+void net_accept_ready(NetListener *l, NetConn *c) {
+  (void)l;
+  (void)c;
 }
 void tz_net_drained(TzPromise *p, void *listener, TzMaker make) {
   TZ_ORDERED();

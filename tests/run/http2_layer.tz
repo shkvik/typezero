@@ -1,0 +1,412 @@
+// env: NODE_EXTRA_CA_CERTS=@TESTS@/tls/ca.pem
+// env: TLS_DIR=@TESTS@/tls
+// tz:http2 (docs/net.md, section 11): HTTP/2 streams directly. The four kinds
+// of gRPC calls: one request and one answer with trailers, one request and
+// many answers until the client cancels, many requests and one answer, both
+// ways at once. Then: a handler that returns without end() resets the stream
+// with INTERNAL_ERROR, trailers before the end of the body are an error, a
+// body passed on as a ReadableStream, TLS, a server that does not speak
+// HTTP/2, nobody listening, a closed connection. Only 127.0.0.1.
+import { readFileSync } from "node:fs"
+import { join } from "node:path"
+import { Socket } from "node:net"
+import { Server } from "tz:http"
+import {
+  Http2Client,
+  Http2Connection,
+  Http2IncomingRequest,
+  Http2OutgoingRequest,
+  Http2Server,
+} from "tz:http2"
+
+const encoder = new TextEncoder()
+const decoder = new TextDecoder()
+
+function check<E extends StreamError>(where: string, result: Result<void, E>) {
+  if (result.isErr()) console.log(`${where}: ${result.error.message}`)
+}
+
+function pause(milliseconds: int): Promise<boolean> {
+  const next = Promise.withResolvers<boolean>()
+  setTimeout(() => next.resolve(true), milliseconds)
+  return next.promise
+}
+
+async function getPrice(request: Http2IncomingRequest) {
+  let asked = ""
+  for await (const chunkResult of request.body()) {
+    if (chunkResult.isErr()) {
+      console.log(`server: ${chunkResult.error.message}`)
+      return
+    }
+    asked += decoder.decode(chunkResult.value)
+  }
+  const sent = request.trailers()
+  const marker = sent.isOk() ? sent.value.get("x-marker") ?? "none" : sent.error.code
+  const responded = request.respond({ status: 200, headers: { "content-type": "application/grpc" } })
+  if (responded.isErr()) return
+  const response = responded.value
+  const price = encoder.encode(`${asked} costs 7 EUR (${request.method} ${request.scheme} ${marker})`)
+  check("server", await response.write(price))
+  check("server", await response.end({ "grpc-status": "0", "grpc-message": "fine" }))
+}
+
+async function watchPrices(request: Http2IncomingRequest) {
+  const responded = request.respond({ status: 200 })
+  if (responded.isErr()) return
+  const response = responded.value
+  for (let price = 7; price <= 1000; price++) {
+    await pause(5)
+    const wrote = await response.write(encoder.encode(`apple ${price} EUR`))
+    if (wrote.isErr()) {
+      const e = wrote.error
+      switch (e.kind) {
+        case "HTTP2_RESPONSE_WRITE_ERROR_RESET":
+          console.log(`server: the client stopped watching (${e.code})`)
+          const late = await response.end()
+          console.log("server: end after the reset:", late.isErr() ? late.error.kind : "ended")
+          return
+        default:
+          console.log(`server: ${e.message}`)
+          return
+      }
+    }
+  }
+  check("server", await response.end())
+}
+
+async function cartTotal(request: Http2IncomingRequest) {
+  let total: decimal = 0
+  for await (const chunkResult of request.body()) {
+    if (chunkResult.isErr()) return
+    const parsed = parseInt(decoder.decode(chunkResult.value))
+    if (parsed.isOk()) total += parsed.value.toDecimal()
+  }
+  const responded = request.respond({ status: 200 })
+  if (responded.isErr()) return
+  check("server", await responded.value.write(encoder.encode(`total ${total} EUR`)))
+  check("server", await responded.value.end())
+}
+
+async function talk(request: Http2IncomingRequest) {
+  const responded = request.respond({ status: 200 })
+  if (responded.isErr()) return
+  const response = responded.value
+  for await (const chunkResult of request.body()) {
+    if (chunkResult.isErr()) return
+    check("server", await response.write(encoder.encode(`echo: ${decoder.decode(chunkResult.value)}`)))
+  }
+  check("server", await response.end())
+}
+
+async function misuse(request: Http2IncomingRequest) {
+  const early = request.trailers()
+  console.log("early trailers:", early.isErr() ? early.error.kind : "taken")
+  const bad = request.respond({ status: 101 })
+  console.log("status 101:", bad.isErr() ? bad.error.code : "sent")
+  const first = request.respond({ status: 200 })
+  const second = request.respond({ status: 200 })
+  console.log("respond twice:", first.isOk(), second.isErr() ? second.error.code : "sent")
+  if (first.isOk()) {
+    check("server", await first.value.write(encoder.encode("half")))
+    const after = await first.value.end()
+    const again = await first.value.end()
+    const write = await first.value.write(encoder.encode("more"))
+    console.log("end twice:", after.isOk(), again.isErr() ? again.error.code : "ended",
+                write.isErr() ? write.error.code : "written")
+  }
+}
+
+async function handle(request: Http2IncomingRequest): Promise<void> {
+  switch (request.path) {
+    case "/shop.Prices/Get":
+      await getPrice(request)
+      return
+    case "/shop.Prices/Watch":
+      await watchPrices(request)
+      return
+    case "/shop.Cart/Total":
+      await cartTotal(request)
+      return
+    case "/shop.Chat/Talk":
+      await talk(request)
+      return
+    case "/misuse":
+      await misuse(request)
+      return
+    case "/forgot": {
+      const forgot = request.respond({ status: 200 })
+      console.log("forgot end:", forgot.isOk())
+      return
+    }
+    case "/echo": {
+      const responded = request.respond({ status: 200 })
+      if (responded.isErr()) return
+      for await (const chunkResult of request.body()) {
+        if (chunkResult.isOk()) check("server", await responded.value.write(chunkResult.value))
+      }
+      check("server", await responded.value.end())
+      return
+    }
+  }
+  const missing = request.respond({ status: 404 })
+  if (missing.isOk()) check("server", await missing.value.end())
+}
+
+async function askPrice(connection: Http2Connection) {
+  const started = await connection.request({
+    method: "POST",
+    path: "/shop.Prices/Get",
+    headers: { "content-type": "application/grpc", te: "trailers" },
+  })
+  if (started.isErr()) {
+    console.log(`client: ${started.error.message}`)
+    return
+  }
+  const call = started.value
+  check("client", await call.write(encoder.encode("apple")))
+  check("client", await call.end({ "x-marker": "sent-after-body" }))
+  const answered = await call.response()
+  if (answered.isErr()) {
+    console.log(`client: ${answered.error.message}`)
+    return
+  }
+  const response = answered.value
+  const early = response.trailers()
+  let text = ""
+  for await (const chunkResult of response.body()) {
+    if (chunkResult.isOk()) text += decoder.decode(chunkResult.value)
+  }
+  const trailers = response.trailers()
+  const status = trailers.isOk() ? trailers.value.get("grpc-status") ?? "none" : "error"
+  const told = trailers.isOk() ? trailers.value.get("grpc-message") ?? "none" : "error"
+  console.log(`call 1: ${response.status} ${response.headers.get("content-type")} "${text}"`)
+  console.log(`call 1: trailers before the body ${early.isErr() ? early.error.code : "taken"}, ` +
+              `grpc-status ${status} ${told}`)
+}
+
+async function watchTwoPrices(connection: Http2Connection) {
+  const started = await connection.request({ method: "POST", path: "/shop.Prices/Watch" })
+  if (started.isErr()) return
+  const call = started.value
+  check("client", await call.end())
+  const answered = await call.response()
+  if (answered.isErr()) return
+  let seen = 0
+  for await (const chunkResult of answered.value.body()) {
+    if (chunkResult.isErr()) {
+      console.log(`call 2: ${chunkResult.error.kind} ${chunkResult.error.code}`)
+      return
+    }
+    console.log(`call 2: ${decoder.decode(chunkResult.value)}`)
+    seen++
+    if (seen == 2) {
+      call.cancel()
+      console.log("call 2: enough, cancelled")
+    }
+  }
+}
+
+async function sendCart(connection: Http2Connection) {
+  const started = await connection.request({ method: "POST", path: "/shop.Cart/Total" })
+  if (started.isErr()) return
+  const call = started.value
+  for (const item of ["3", "5", "12"]) {
+    check("client", await call.write(encoder.encode(item)))
+    await pause(5)
+  }
+  check("client", await call.end())
+  const answered = await call.response()
+  if (answered.isErr()) return
+  for await (const chunkResult of answered.value.body()) {
+    if (chunkResult.isOk()) console.log(`call 3: ${decoder.decode(chunkResult.value)}`)
+  }
+}
+
+async function writeLines(call: Http2OutgoingRequest) {
+  for (const line of ["hi", "how much is a plum?", "bye"]) {
+    check("client", await call.write(encoder.encode(line)))
+    await pause(20)
+  }
+  check("client", await call.end())
+}
+
+async function chat(connection: Http2Connection) {
+  const started = await connection.request({ method: "POST", path: "/shop.Chat/Talk" })
+  if (started.isErr()) return
+  const call = started.value
+  const answered = await call.response()
+  if (answered.isErr()) return
+  const writing = writeLines(call)
+  for await (const chunkResult of answered.value.body()) {
+    if (chunkResult.isOk()) console.log(`call 4: ${decoder.decode(chunkResult.value)}`)
+  }
+  await writing
+}
+
+async function twoReaders(connection: Http2Connection) {
+  const started = await connection.request({ method: "POST", path: "/shop.Chat/Talk" })
+  if (started.isErr()) return
+  const call = started.value
+  const answered = await call.response()
+  if (answered.isErr()) return
+  const body = answered.value.body()
+  const first = body.read()
+  const second = await body.read()
+  console.log("second reader:", second.isErr() ? second.error.kind : "read")
+  check("client", await call.write(encoder.encode("once")))
+  const got = await first
+  let firstText = "nothing"
+  if (got.isOk()) {
+    const chunk = got.value
+    if (chunk != undefined) firstText = decoder.decode(chunk)
+  }
+  console.log("first reader:", firstText)
+  check("client", await call.end())
+  const again = await call.response()
+  console.log("response again:", again.isOk() ? again.value.status : again.error.code)
+}
+
+async function simple(connection: Http2Connection, path: string) {
+  const started = await connection.request({ method: "GET", path: path })
+  if (started.isErr()) return
+  const call = started.value
+  check("client", await call.end())
+  const answered = await call.response()
+  if (answered.isErr()) {
+    console.log(`${path}: ${answered.error.kind} ${answered.error.code}`)
+    return
+  }
+  const read = await answered.value.body().read()
+  console.log(`${path}: ${answered.value.status}`, read.isErr() ? `${read.error.kind} ${read.error.code}` : "body")
+}
+
+async function passOn(connection: Http2Connection) {
+  const started = await connection.request({ method: "PUT", path: "/echo" })
+  if (started.isErr()) return
+  const call = started.value
+  check("client", await call.write(encoder.encode("passed ")))
+  check("client", await call.write(encoder.encode("on")))
+  check("client", await call.end())
+  const answered = await call.response()
+  if (answered.isErr()) return
+  const passed = Response.stream(answered.value.body().toStream())
+  const text = await passed.text()
+  console.log("toStream:", text.isOk() ? text.value : text.error.code)
+}
+
+const plain = new Http2Server({ port: 0, hostname: "127.0.0.1" }, handle).listen()
+if (plain.isErr()) {
+  console.log(plain.error.message)
+  process.exit(1)
+}
+const client = new Http2Client({ url: `http://127.0.0.1:${plain.value.port}` })
+const connected = await client.connect()
+if (connected.isErr()) {
+  console.log(connected.error.message)
+  process.exit(1)
+}
+const connection = connected.value
+await askPrice(connection)
+await watchTwoPrices(connection)
+await sendCart(connection)
+await chat(connection)
+await twoReaders(connection)
+await simple(connection, "/misuse")
+await simple(connection, "/forgot")
+await simple(connection, "/nowhere")
+await passOn(connection)
+const invalid = await connection.request({ method: "GET", path: "no-slash" })
+console.log("bad path:", invalid.isErr() ? invalid.error.code : "started")
+await connection.close()
+const closed = await connection.request({ method: "GET", path: "/" })
+console.log("after close:", closed.isErr() ? closed.error.code : "started")
+
+const dir = process.env.TLS_DIR ?? "."
+const cert = readFileSync(join(dir, "localhost.pem"), "utf8")
+const key = readFileSync(join(dir, "key.pem"), "utf8")
+if (cert.isOk() && key.isOk()) {
+  const transport = { secure: true, cert: cert.value, key: key.value }
+  const secure = new Http2Server({ port: 0, hostname: "127.0.0.1", transport }, handle).listen()
+  if (secure.isOk()) {
+    const tlsClient = new Http2Client({ url: `https://localhost:${secure.value.port}` })
+    const tlsConnected = await tlsClient.connect()
+    if (tlsConnected.isOk()) {
+      await askPrice(tlsConnected.value)
+      await tlsConnected.value.close()
+    } else {
+      console.log(tlsConnected.error.message)
+    }
+    const answer = await fetch(`https://localhost:${secure.value.port}/nowhere`, { httpVersion: "1.1" })
+    console.log("fetch 1.1 to an HTTP/2 server:", answer.isErr() ? answer.error.message : answer.value.status)
+    await secure.value.stop()
+  }
+}
+
+const old = new Server({ port: 0, hostname: "127.0.0.1" }, () => new Response("old")).listen()
+if (old.isOk()) {
+  const oldClient = new Http2Client({ url: `http://127.0.0.1:${old.value.port}` })
+  const oldConnected = await oldClient.connect()
+  if (oldConnected.isOk()) {
+    await simple(oldConnected.value, "/")
+    const after = await oldConnected.value.request({ method: "GET", path: "/" })
+    console.log("old server:", after.isErr() ? after.error.code : "started")
+  }
+  await old.value.stop()
+}
+
+async function closeAtOnce(port: int): Promise<boolean> {
+  const socket = new Socket({ host: "127.0.0.1", port: port, timeout: 2000 })
+  const connected = await socket.connect()
+  if (connected.isErr()) return false
+  const ended = await socket.end()
+  return ended.isOk()
+}
+
+async function askInHttp11(port: int): Promise<string> {
+  const socket = new Socket({ host: "127.0.0.1", port: port, timeout: 2000 })
+  const connected = await socket.connect()
+  if (connected.isErr()) return connected.error.code
+  socket.write("GET / HTTP/1.1\r\nhost: localhost\r\n\r\n")
+  let answer = ""
+  for await (const chunkResult of socket) {
+    if (chunkResult.isErr()) break
+    answer += chunkResult.value.toString()
+  }
+  return answer.split("\r\n")[0] ?? ""
+}
+
+console.log("closed at once:", await closeAtOnce(plain.value.port))
+console.log("HTTP/1.1 to tz:http2:", await askInHttp11(plain.value.port))
+const both = new Server({ port: 0, hostname: "127.0.0.1", http2: { enabled: true, cleartext: true } },
+                        () => new Response("both")).listen()
+if (both.isOk()) {
+  console.log("closed at once, tz:http:", await closeAtOnce(both.value.port))
+  const still = await fetch(`http://127.0.0.1:${both.value.port}/`, { httpVersion: "2" })
+  let served = "no"
+  if (still.isOk()) {
+    const stillText = await still.value.text()
+    if (stillText.isOk()) served = stillText.value
+  }
+  console.log("tz:http still serves:", served)
+  await both.value.stop()
+}
+
+const nowhere = new Http2Client({ url: "http://127.0.0.1:1" })
+const refused = await nowhere.connect()
+if (refused.isErr()) {
+  const e = refused.error
+  switch (e.kind) {
+    case "HTTP2_CONNECT_ERROR_NETWORK":
+      console.log(`connect: ${e.code} ${e.port}`)
+      break
+    default:
+      console.log(`connect: ${e.message}`)
+  }
+}
+const ftp = await new Http2Client({ url: "ftp://127.0.0.1/" }).connect()
+console.log("ftp:", ftp.isErr() ? ftp.error.code : "connected")
+const bad = await new Http2Client({ url: "not a url" }).connect()
+console.log("bad url:", bad.isErr() ? bad.error.code : "connected")
+
+await plain.value.stop()

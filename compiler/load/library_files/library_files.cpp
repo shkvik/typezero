@@ -22,6 +22,8 @@ const KnownFile kKnownFiles[] = {
     {"web.tz", "web.tz", "tz:web"},
     {"http.tz", "http.tz", "tz:http"},
     {"http.d.tz", "http.tz", "tz:http"},
+    {"http2.tz", "http2.tz", "tz:http2"},
+    {"http2.d.tz", "http2.tz", "tz:http2"},
     {"fetch.tz", "fetch.tz", "tz:fetch"},
     {"url.tz", "url.tz", "tz:url"},
     {"websocket.tz", "websocket.tz", "tz:websocket"},

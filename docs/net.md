@@ -17,8 +17,10 @@
 - TLS — OpenSSL, как в node ([crypto.md](crypto.md)). Попадает в exe, только если программа
   работает с https: около 4 МБ (Go: https-клиент целиком — 5,3 МБ). Шифрование трафика — в 3
   раза быстрее, чем в Go. Корневые сертификаты Mozilla — внутри.
-- HTTP/2, WebSocket, сокеты TCP/UDP — позже (решено 29 октября, `tmp/design`). `node:http` не
-  будет: сервер — `tz:http`, клиент — `fetch`.
+- HTTP/2 — у сервера (раздел 1) и у `fetch` (раздел 2), сделан 31 октября; потоки HTTP/2
+  напрямую — с трейлерами и полным дуплексом, основа для gRPC — `tz:http2` (раздел 11).
+  WebSocket и сокеты TCP/UDP — разделы 7–10. `node:http` не будет: сервер — `tz:http`, клиент —
+  `fetch`.
 
 ## 1. Сервер
 
@@ -111,6 +113,22 @@ const listening = new Server({ port: 3000 }, app.fetch).listen()
 - **Параллельно.** Каждый запрос — async-задача, обработчики идут на всех ядрах. Общие данные
   (счётчик на уровне модуля, кэш в `Map`) — по очереди, как в [async.md](async.md); код
   остаётся таким же, как для node.
+- **HTTP/2** (сделано 31 октября, [tmp/spec/12-http2.md](../tmp/spec/12-http2.md)): с TLS сервер
+  договаривается о нём сам (ALPN `h2`), старые клиенты получают HTTP/1.1; настройка
+  `http2?: { enabled: false } | { enabled: true; cleartext?: boolean; maxConcurrentStreams?: int }`
+  — без неё включено при `secure: true` и выключено без TLS; `cleartext: true` — HTTP/2 без TLS
+  (h2c) только «с первого байта», переход `Upgrade: h2c` убран из стандарта и не делается.
+  Обработчик тот же, `client.protocol` — `"http/1.1"` или `"h2"`. Каждый поток HTTP/2 — своя
+  задача на любом ядре; поток в рантайме — то же соединение для `Request` и `Response`, так что
+  тела в обе стороны, потоковые ответы и `maxBodySize` работают как в HTTP/1.1. Движок —
+  nghttp2 1.70.0 ([third_party/nghttp2](../third_party/nghttp2), MIT, в `tz licenses`): кадры,
+  HPACK, окна, защита от Rapid Reset и CONTINUATION flood — его. Пределы: 100 потоков сразу,
+  заголовки — 16 КБ, окно потока — 1 МБ, соединения — 16 МБ. Окно открывается, когда программа
+  читает тело: не читает — клиент ждёт, память не растёт (31.10). Тело, которое обработчик не
+  дочитал, закрывает только поток (`RST_STREAM` с `NO_ERROR`, как Go). `stop()` шлёт GOAWAY
+  (сначала предупреждение, потом с последним принятым потоком) и ждёт начатых. Ещё нет:
+  `headersTimeout` и `requestTimeout` у потоков, WebSocket поверх HTTP/2. Потоки напрямую —
+  `tz:http2` (раздел 11). Тест — `cli/http2_server` (клиент — `node:http2`).
 - **`node:http` нет** (решено 29 октября: «мы вообще его не повторяем»). Сервер — `tz:http`,
   клиент — `fetch`. Пакеты, написанные под `node:http` (express, koa, fastify, axios, got),
   переносятся с переделкой на `tz:http` и `fetch` или заменяются своими в их стиле
@@ -146,6 +164,19 @@ async function repo(name: string) {
   ([async.md](async.md), раздел 7). У запроса сервера `timeout` нет, и сигнала тоже — каждый
   запрос раньше делал свой `AbortSignal`, и его освобождение по очереди стоило серверу втрое
   меньше запросов в секунду (102k вместо 312k).
+- **HTTP/2** (сделано 31 октября, H3, H9, H10, Q9б): по `https://` `fetch` предлагает HTTP/2 в
+  ALPN и берёт его, если сервер согласен; все запросы к серверу идут сразу по одному
+  соединению, второе открывается, только когда первое заполнено (`MAX_CONCURRENT_STREAMS`
+  сервера). `http://` — HTTP/1.1, как у браузеров. Явный выбор — `httpVersion?: "auto" | "1.1" |
+  "2"` в `RequestInit`: `"1.1"` — только HTTP/1.1, `"2"` — HTTP/2 и без TLS (h2c «с первого
+  байта»), а сервер без HTTP/2 — ошибка `FETCH_ERROR_RESPONSE` `ERR_NO_HTTP2`; если по `http://`
+  ответил сервер только с h2c — `ERR_INVALID_RESPONSE` с подсказкой `httpVersion: "2"`.
+  `response.protocol` — `"http/1.1"` или `"h2"`; `statusText` по HTTP/2 — стандартный текст
+  кода (в HTTP/2 его нет). Запрос в поток, который сервер не тронул (`REFUSED_STREAM`, GOAWAY
+  ниже номера), — `FETCH_ERROR_NETWORK` `ERR_NOT_PROCESSED`: его можно смело отправить снова;
+  сброс потока посреди ответа — `ERR_STREAM_RESET`. Простаивающее соединение HTTP/2 читает без
+  счёта (не держит программу). Тот же движок nghttp2, что у сервера. Ещё нет: HTTP/2 через
+  прокси, `trace` (H15). Тест — `run/fetch_http2`; с Rust hyper (h2c) проверено руками.
 - Распаковка gzip, deflate и brotli, переходы по редиректам (до 20), соединения с keep-alive
   держатся в пуле — как в node. **`fetch` никогда не повторяет запрос сам** (H12, 31 октября):
   запрос уходит один раз, и `POST` тоже; повторять и писать в журнал — дело программы. Чтобы
@@ -303,6 +334,15 @@ tz должен быть не ниже Go: параллельные обрабо
 глобальной переменной), идёт в порядке node через главный поток — 92 000; async-обработчик с
 `await` пока тоже — 85 000 ([async.md](async.md), раздел 8).
 
+HTTP/2 без TLS (h2c), «Hello, World!», `oha --http2 -c 32 -p 8` (32 соединения по 8 запросов
+сразу) на той же машине, 31 октября (`bench/http2.ps1`):
+
+| | запросов в секунду |
+|---|---|
+| Rust (hyper 1, tokio) | 757 000 |
+| **tz** (nghttp2) | **379 000** |
+| Go (`net/http` + `x/net/http2/h2c`) | 232 000 |
+
 ## 7. TCP: `node:net` (первая часть сделана 29 октября)
 
 ```ts
@@ -438,7 +478,96 @@ await socket.close()                             // ждёт конца приё
 - **`ref()` / `unref()` нет** (решено 30 октября): открытый сокет держит программу, отпускает её
   `close()`; добавим, если понадобится.
 
-## 11. Позже
+## 11. Потоки HTTP/2 напрямую: `tz:http2` (сделано 31 октября)
+
+`Server` и `fetch` прячут HTTP/2 за теми же `Request` и `Response`. `tz:http2` — для того, чего
+в `Response` нет: трейлеры (заголовки после тела, на них стоит gRPC), полный дуплекс (запрос и
+ответ идут одновременно) и отмена одного запроса с кодом из стандарта. Решения —
+[tmp/spec/12-http2.md](../tmp/spec/12-http2.md) (30 и 31 октября), примеры —
+[tmp/design/http2-layer.tz](../tmp/design/http2-layer.tz).
+
+```ts
+import { Http2Client, Http2Server } from "tz:http2"
+
+const server = new Http2Server({ port: 50051 }, async (request, client) => {
+  let asked = ""
+  for await (const chunkResult of request.body()) {
+    if (chunkResult.isErr()) return
+    asked += new TextDecoder().decode(chunkResult.value)
+  }
+  const responded = request.respond({ status: 200, headers: { "content-type": "application/grpc" } })
+  if (responded.isErr()) return
+  const response = responded.value
+  const wrote = await response.write(new TextEncoder().encode(`${asked}: 7 EUR`))
+  if (wrote.isErr()) return
+  const ended = await response.end({ "grpc-status": "0" })
+  if (ended.isErr()) console.log(ended.error.message)
+})
+
+const connected = await new Http2Client({ url: "http://localhost:50051" }).connect()
+if (connected.isOk()) {
+  const started = await connected.value.request({ method: "POST", path: "/shop.Prices/Get" })
+  // call.write(bytes), call.end(trailers?), call.cancel(code?), await call.response()
+  // → response.status, response.headers, response.body(), response.trailers()
+}
+```
+
+- **Сервер** — `new Http2Server(options, handler).listen()` → `Result<Http2Listening,
+  ListenError>`; настройки — как у `Server`: `port`, `hostname`, `transport`,
+  `maxConcurrentStreams` (100), `headersTimeout` (60 000), `keepAliveTimeout`. Только HTTP/2:
+  без TLS — h2c «с первого байта», с TLS — ALPN только `h2`; клиент HTTP/1.1 получает `505 HTTP
+  Version Not Supported`, по TLS без `h2` — отказ в рукопожатии. Общего срока на запрос и срока
+  простоя соединения по умолчанию нет (как в node и Go): поток вроде «следить за ценой» живёт
+  часами, срок ставит программа. Общий порт с `Server` — вместе с библиотекой gRPC (31.10).
+- **Обработчик** — `(request: Http2IncomingRequest, client: Client) => Promise<void>`: у запроса
+  `method`, `scheme`, `authority`, `path` (как пришли, с `?…`), `headers`, `body()`,
+  `trailers()`, `respond({ status, headers? })` → `Http2OutgoingResponse` с `write(bytes)` и
+  `end(trailers?)`. Обработчик закончился, а `end()` не было (или не было `respond()`) — поток
+  сбрасывается с `INTERNAL_ERROR`: клиент видит ошибку, а не обрезанный ответ, похожий на
+  успешный (31.10). Долгий ответ обработчик ждёт сам. Не дочитанное тело запроса после конца
+  ответа закрывает только поток (`RST_STREAM` с `NO_ERROR`, как Go).
+- **Клиент** — `new Http2Client({ url, timeout? }).connect()` → `Http2Connection`; `url` —
+  строка или `URL`; https — ALPN, http — h2c «с первого байта». `connection.request({ method,
+  path, headers?, authority? })` → `Http2OutgoingRequest`: `write`, `end(trailers?)`,
+  `cancel(code?)`, `response()` → `Http2IncomingResponse` (`status`, `headers`, `body()`,
+  `trailers()`). Заполненное соединение (`maxConcurrentStreams` сервера) — запрос ждёт места,
+  как в gRPC у Go. Оборвалось соединение или пришёл GOAWAY — программа подключается заново сама
+  (ничего скрытого: `fetch` тоже сам не повторяет, раздел 2); запрос, который сервер не трогал, — код
+  `REFUSED_STREAM`, его можно повторить. `connection.close()` шлёт GOAWAY.
+- **Тело — свой класс `Http2Body`** (31.10): `for await` и `read()` дают `Result<Uint8Array,
+  Http2BodyError>` только с ошибками HTTP/2; `cancel(code?)` сбрасывает поток с кодом RFC 9113
+  (`CANCEL` без кода) — в HTTP/2 закрыть одну сторону нельзя, сброс закрывает весь поток;
+  `toStream()` — `ReadableStream`, чтобы отдать тело в `fetch` или `Response.stream`. Тело
+  берётся прямо из буфера рантайма. Скорость в обе стороны держит окно HTTP/2: программа не
+  читает — другая сторона ждёт (окно потока 1 МБ, соединения 16 МБ); `write()` ждёт, пока
+  другая сторона готова принять. Два чтения одного тела сразу — ошибка `HTTP2_BODY_ERROR_BUSY`.
+- **Трейлеры** — `trailers()` после того, как тело прочитано до конца; раньше — ошибка
+  `HTTP2_TRAILERS_ERROR_BODY_NOT_READ`. В `end(trailers)` псевдозаголовки и запрещённые в
+  трейлерах поля (`content-length`, `host`, `te`, поля соединения) выкидываются. `te: trailers`
+  в запросе проходит (его требует gRPC).
+- **Ошибки** — тип на функцию, `kind` уникален ([errors.md](errors.md)): `Http2ConnectError`
+  (`HTTP2_CONNECT_ERROR_URL`, `_NETWORK`, `_TLS`, `_TIMEOUT`, `_NOT_HTTP2`),
+  `Http2RequestError` (`_INVALID`, `_CLOSED` с `ERR_HTTP2_GOAWAY`, `ERR_HTTP2_CLOSED`,
+  `ERR_HTTP2_CONNECTION_LOST`, `ERR_HTTP2_NOT_SUPPORTED`), `Http2RequestWriteError`,
+  `Http2RequestEndError`, `Http2ResponseWaitError`, `Http2RespondError` (`…_ALREADY_RESPONDED`,
+  `…_INVALID_STATUS` для статуса не из 200–599), `Http2ResponseWriteError`,
+  `Http2ResponseEndError`, `Http2TrailersError`, `Http2BodyError` (интерфейсы от `StreamError`).
+  Сброс потока — вид `…_RESET` с кодом `Http2ErrorCode` (имена RFC 9113: `NO_ERROR` …
+  `HTTP_1_1_REQUIRED`); обрыв соединения — `…_CONNECTION`. h2c-клиент к серверу HTTP/1.1 —
+  `ERR_HTTP2_NOT_SUPPORTED` («ответил по HTTP/1.1»).
+- **Скорость.** «Hello, World!» через `respond` + `write` + `end` (`bench/http2_hello/layer`) —
+  38 000 запросов в секунду против 376 000 у `Server`: обработчик с `await` идёт по очереди
+  ([async.md](async.md), раздел 8; у `Server` с `await request.text()` — те же 85 000). Сам слой
+  состояния в tz не держит — флаги потока, трейлеры и ожидания в рантайме, функции рантайма
+  очереди не ждут; ускорится вместе с обработчиками `Server`.
+- **Тест** — `run/http2_layer`: четыре вида вызовов gRPC (один запрос — один ответ с
+  трейлерами, поток ответов до отмены, поток запросов, обе стороны сразу), сброс без `end()`,
+  трейлеры раньше тела, `toStream()`, TLS, два чтения сразу, сервер без HTTP/2, отказ в
+  соединении.
+- **Ещё нет:** `.d.tz` с описаниями для редактора, пинги и настройки соединения (SETTINGS),
+  приоритеты (RFC 9218), общий порт с `Server`.
+
+## 12. Позже
 
 HTTP/2 (через ALPN в TLS), SOCKS-прокси, HTTP/3 — решены 29 октября, не сделаны (`tmp/design`, `tmp/spec`). `node:http` не будет.
 

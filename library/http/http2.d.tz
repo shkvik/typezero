@@ -1,0 +1,496 @@
+import { Headers, HeadersInit, ReadableStream } from "tz:fetch";
+import { Client, ListenError, ServeTransport, StopOptions } from "tz:http";
+import { URL } from "tz:url";
+
+/**
+ * The codes of HTTP/2 a stream is reset with (RFC 9113, section 7), by their
+ * names in the standard. "CANCEL" is what `cancel()` sends when no code is
+ * given; "REFUSED_STREAM" means the server did not process the request, so it
+ * can be sent again.
+ */
+export type Http2ErrorCode =
+  | "NO_ERROR"
+  | "PROTOCOL_ERROR"
+  | "INTERNAL_ERROR"
+  | "FLOW_CONTROL_ERROR"
+  | "SETTINGS_TIMEOUT"
+  | "STREAM_CLOSED"
+  | "FRAME_SIZE_ERROR"
+  | "REFUSED_STREAM"
+  | "CANCEL"
+  | "COMPRESSION_ERROR"
+  | "CONNECT_ERROR"
+  | "ENHANCE_YOUR_CALM"
+  | "INADEQUATE_SECURITY"
+  | "HTTP_1_1_REQUIRED";
+
+/**
+ * Why the whole connection is gone:
+ * - "ERR_HTTP2_CONNECTION_LOST" — the socket broke or the other side closed it;
+ * - "ERR_HTTP2_CLOSED" — this side closed it with `close()`;
+ * - "ERR_HTTP2_NOT_SUPPORTED" — the server answered in HTTP/1.1 to HTTP/2
+ *   without TLS.
+ */
+export type Http2ConnectionCode =
+  | "ERR_HTTP2_CONNECTION_LOST"
+  | "ERR_HTTP2_CLOSED"
+  | "ERR_HTTP2_NOT_SUPPORTED";
+
+/** Reading a body stopped: the stream was reset, by the other side or here. */
+export interface Http2BodyErrorReset extends StreamError {
+  kind: "HTTP2_BODY_ERROR_RESET";
+  /** The code of the reset. */
+  code: Http2ErrorCode;
+}
+
+/** Reading a body stopped: the connection is gone. */
+export interface Http2BodyErrorConnection extends StreamError {
+  kind: "HTTP2_BODY_ERROR_CONNECTION";
+  /** Why the connection is gone. */
+  code: Http2ConnectionCode;
+}
+
+/** Another task reads the same body at the same time: read it in one place. */
+export interface Http2BodyErrorBusy extends StreamError {
+  kind: "HTTP2_BODY_ERROR_BUSY";
+  code: "ERR_HTTP2_BUSY";
+}
+
+/** What reading a body (`read`, `for await`, `toStream`) can give instead of bytes. */
+export type Http2BodyError = Http2BodyErrorReset | Http2BodyErrorConnection | Http2BodyErrorBusy;
+
+/** `trailers()` before the body is read to its end. */
+export type Http2TrailersError = {
+  kind: "HTTP2_TRAILERS_ERROR_BODY_NOT_READ";
+  code: "ERR_HTTP2_TRAILERS_NOT_READY";
+  message: string;
+};
+
+/** Why `respond` gave an Err. */
+export type Http2RespondError =
+  | {
+      /** The client reset the stream before the response. */
+      kind: "HTTP2_RESPOND_ERROR_RESET";
+      code: Http2ErrorCode;
+      message: string;
+    }
+  | {
+      /** The connection to the client is gone. */
+      kind: "HTTP2_RESPOND_ERROR_CONNECTION";
+      code: Http2ConnectionCode;
+      message: string;
+    }
+  | {
+      /** `respond` was already called for this request. */
+      kind: "HTTP2_RESPOND_ERROR_ALREADY_RESPONDED";
+      code: "ERR_HTTP2_HEADERS_SENT";
+      message: string;
+    }
+  | {
+      /** The status is not from 200 to 599. */
+      kind: "HTTP2_RESPOND_ERROR_INVALID_STATUS";
+      code: "ERR_HTTP2_STATUS_INVALID";
+      message: string;
+    };
+
+/** Why `write` of a response gave an Err. */
+export type Http2ResponseWriteError =
+  | {
+      kind: "HTTP2_RESPONSE_WRITE_ERROR_RESET";
+      code: Http2ErrorCode;
+      message: string;
+    }
+  | {
+      kind: "HTTP2_RESPONSE_WRITE_ERROR_CONNECTION";
+      code: Http2ConnectionCode;
+      message: string;
+    }
+  | {
+      kind: "HTTP2_RESPONSE_WRITE_ERROR_AFTER_END";
+      code: "ERR_STREAM_WRITE_AFTER_END";
+      message: string;
+    };
+
+/** Why `end` of a response gave an Err. */
+export type Http2ResponseEndError =
+  | {
+      kind: "HTTP2_RESPONSE_END_ERROR_RESET";
+      code: Http2ErrorCode;
+      message: string;
+    }
+  | {
+      kind: "HTTP2_RESPONSE_END_ERROR_CONNECTION";
+      code: Http2ConnectionCode;
+      message: string;
+    }
+  | {
+      kind: "HTTP2_RESPONSE_END_ERROR_ALREADY_ENDED";
+      code: "ERR_STREAM_ALREADY_FINISHED";
+      message: string;
+    };
+
+/** The errors of the network a connection can fail with, as in node. */
+export type Http2NetworkCode =
+  | "ENOTFOUND"
+  | "EAI_AGAIN"
+  | "ECONNREFUSED"
+  | "ETIMEDOUT"
+  | "ENETUNREACH"
+  | "EHOSTUNREACH"
+  | "EADDRNOTAVAIL"
+  | "ECONNRESET"
+  | "ECONNABORTED"
+  | "EPIPE"
+  | "EMFILE"
+  | "ENOBUFS"
+  | "UNKNOWN";
+
+/** Why `connect` gave an Err. */
+export type Http2ConnectError =
+  | {
+      /** The URL is not one, or not http: or https:. */
+      kind: "HTTP2_CONNECT_ERROR_URL";
+      code: "ERR_INVALID_URL" | "ERR_UNSUPPORTED_PROTOCOL";
+      message: string;
+      url: string;
+    }
+  | {
+      /** The network failed: no such host, nobody listens, and others. */
+      kind: "HTTP2_CONNECT_ERROR_NETWORK";
+      code: Http2NetworkCode;
+      message: string;
+      syscall: string;
+      host: string;
+      port: int;
+    }
+  | {
+      /** The TLS handshake failed or the certificate is not trusted. */
+      kind: "HTTP2_CONNECT_ERROR_TLS";
+      code: TlsCode;
+      message: string;
+      host: string;
+    }
+  | {
+      /** No connection within `timeout` milliseconds. */
+      kind: "HTTP2_CONNECT_ERROR_TIMEOUT";
+      code: "TIMEOUT_ERR";
+      message: string;
+      timeout: int;
+    }
+  | {
+      /** The server chose HTTP/1.1 in the TLS handshake. */
+      kind: "HTTP2_CONNECT_ERROR_NOT_HTTP2";
+      code: "ERR_HTTP2_NOT_SUPPORTED";
+      message: string;
+      host: string;
+      port: int;
+    };
+
+/** Why `request` gave an Err. */
+export type Http2RequestError =
+  | {
+      /** The method is not a token, or the path does not start with "/". */
+      kind: "HTTP2_REQUEST_ERROR_INVALID";
+      code: "ERR_HTTP2_INVALID_METHOD" | "ERR_HTTP2_INVALID_PATH";
+      message: string;
+    }
+  | {
+      /**
+       * The connection takes no more requests: the server closes it
+       * ("ERR_HTTP2_GOAWAY") or it is gone; connect again.
+       */
+      kind: "HTTP2_REQUEST_ERROR_CLOSED";
+      code: "ERR_HTTP2_GOAWAY" | Http2ConnectionCode;
+      message: string;
+    };
+
+/** Why `write` of a request gave an Err. */
+export type Http2RequestWriteError =
+  | {
+      kind: "HTTP2_REQUEST_WRITE_ERROR_RESET";
+      code: Http2ErrorCode;
+      message: string;
+    }
+  | {
+      kind: "HTTP2_REQUEST_WRITE_ERROR_CONNECTION";
+      code: Http2ConnectionCode;
+      message: string;
+    }
+  | {
+      kind: "HTTP2_REQUEST_WRITE_ERROR_AFTER_END";
+      code: "ERR_STREAM_WRITE_AFTER_END";
+      message: string;
+    };
+
+/** Why `end` of a request gave an Err. */
+export type Http2RequestEndError =
+  | {
+      kind: "HTTP2_REQUEST_END_ERROR_RESET";
+      code: Http2ErrorCode;
+      message: string;
+    }
+  | {
+      kind: "HTTP2_REQUEST_END_ERROR_CONNECTION";
+      code: Http2ConnectionCode;
+      message: string;
+    }
+  | {
+      kind: "HTTP2_REQUEST_END_ERROR_ALREADY_ENDED";
+      code: "ERR_STREAM_ALREADY_FINISHED";
+      message: string;
+    };
+
+/** Why `response()` gave an Err. */
+export type Http2ResponseWaitError =
+  | {
+      /** The server reset the stream; "REFUSED_STREAM": it did not process it. */
+      kind: "HTTP2_RESPONSE_WAIT_ERROR_RESET";
+      code: Http2ErrorCode;
+      message: string;
+    }
+  | {
+      kind: "HTTP2_RESPONSE_WAIT_ERROR_CONNECTION";
+      code: Http2ConnectionCode;
+      message: string;
+    }
+  | {
+      /** Another task waits for the same response at the same time. */
+      kind: "HTTP2_RESPONSE_WAIT_ERROR_BUSY";
+      code: "ERR_HTTP2_BUSY";
+      message: string;
+    };
+
+/**
+ * The body of a request or a response, as it comes: chunks of bytes, then
+ * the end. The other side sends only as fast as the program reads.
+ *
+ * @example
+ * for await (const chunkResult of request.body()) {
+ *   if (chunkResult.isErr()) {
+ *     console.log(chunkResult.error.message);
+ *     return;
+ *   }
+ *   console.log(chunkResult.value.length);
+ * }
+ */
+export declare class Http2Body {
+  /** The next chunk; `undefined` at the end of the body. */
+  public read(): Promise<Result<Uint8Array | undefined, Http2BodyError>>;
+
+  /** The chunks until the end; an Err ends the loop. */
+  public [Symbol.asyncIterator](): AsyncGenerator<Result<Uint8Array, Http2BodyError>, void, void>;
+
+  /**
+   * Resets the stream with `code`, "CANCEL" by default. In HTTP/2 a reset
+   * closes both ways: the other side stops sending and receiving.
+   */
+  public cancel(code?: Http2ErrorCode): void;
+
+  /** The body as a `ReadableStream`: to pass on to `fetch` or `Response.stream`. */
+  public toStream(): ReadableStream<Uint8Array, Http2BodyError>;
+}
+
+/** The status and the headers `respond` sends. */
+export type Http2ResponseInit = {
+  /** From 200 to 599. */
+  status: int;
+  headers?: HeadersInit;
+};
+
+/**
+ * A request that came to an `Http2Server`: its head at once, its body and its
+ * trailers as they come.
+ */
+export declare class Http2IncomingRequest {
+  /** "GET", "POST" and others, as sent. */
+  public readonly method: string;
+  /** "http" or "https". */
+  public readonly scheme: string;
+  /** The host and the port the request is for, as `host` in HTTP/1.1. */
+  public readonly authority: string;
+  /** The path with its query, as sent: "/shop.Prices/Get", "/items?page=2". */
+  public readonly path: string;
+  public readonly headers: Headers;
+
+  /** The body; its chunks come as the client sends them. */
+  public body(): Http2Body;
+
+  /** The headers after the body; an Err until the body is read to its end. */
+  public trailers(): Result<Headers, Http2TrailersError>;
+
+  /**
+   * Sends the status and the headers; the body and the trailers follow with
+   * the response it gives. A handler that ends without `end()` resets the
+   * stream with INTERNAL_ERROR.
+   *
+   * @example
+   * const responded = request.respond({ status: 200, headers: { "content-type": "text/plain" } });
+   *
+   * if (responded.isErr()) {
+   *   return;
+   * }
+   *
+   * const written = await responded.value.write(new TextEncoder().encode("hi"));
+   * const ended = await responded.value.end({ "grpc-status": "0" });
+   */
+  public respond(init: Http2ResponseInit): Result<Http2OutgoingResponse, Http2RespondError>;
+}
+
+/** The body and the trailers of a response being sent. */
+export declare class Http2OutgoingResponse {
+  /** Sends a chunk; waits while the client does not take more. */
+  public write(chunk: Uint8Array): Promise<Result<void, Http2ResponseWriteError>>;
+
+  /** Ends the response, with trailers after the body if given. */
+  public end(trailers?: HeadersInit): Promise<Result<void, Http2ResponseEndError>>;
+}
+
+/**
+ * What a server does with each request: reads it, responds, writes and ends.
+ * Each stream is its own task. The response ends when `end()` is called;
+ * returning without it resets the stream.
+ */
+export type Http2Handler = (request: Http2IncomingRequest, client: Client) => Promise<void>;
+
+/** How an `Http2Server` listens. */
+export type Http2ServeOptions = {
+  /** 8000; 0 is any free port. */
+  port?: int;
+  /** "0.0.0.0". */
+  hostname?: string;
+  /** Without TLS HTTP/2 comes from the first byte (h2c); with TLS by ALPN "h2". */
+  transport?: ServeTransport;
+  /** How many streams a client may have at once; 100. */
+  maxConcurrentStreams?: int;
+  /** How long the start of a connection may take, in milliseconds; 60000. */
+  headersTimeout?: int;
+  /** How long a connection without streams may stay; 0, no limit. */
+  keepAliveTimeout?: int;
+};
+
+/**
+ * A server of HTTP/2 streams: for trailers, both ways at once, and gRPC. It
+ * speaks only HTTP/2: a client of HTTP/1.1 gets 505. No request has a limit of
+ * time unless the program sets one.
+ *
+ * @example
+ * import { Http2Server } from "tz:http2";
+ *
+ * const server = new Http2Server({ port: 50051 }, async (request) => {
+ *   const responded = request.respond({ status: 200 });
+ *
+ *   if (responded.isErr()) {
+ *     return;
+ *   }
+ *
+ *   for await (const chunkResult of request.body()) {
+ *     if (chunkResult.isErr()) {
+ *       return;
+ *     }
+ *     const echoed = await responded.value.write(chunkResult.value);
+ *   }
+ *
+ *   const ended = await responded.value.end();
+ * });
+ * const listening = server.listen();
+ */
+export declare class Http2Server {
+  public constructor(options: Http2ServeOptions, handler: Http2Handler);
+
+  /** Opens a socket and starts answering on it. */
+  public listen(): Result<Http2Listening, ListenError>;
+}
+
+/** An `Http2Server` that listens: what `listen` gives. */
+export declare class Http2Listening {
+  public readonly url: URL;
+  public readonly hostname: string;
+  /** The real port, also when 0 was asked for. */
+  public readonly port: int;
+
+  /** Says GOAWAY to every client and waits for the streams being handled. */
+  public stop(options?: StopOptions): Promise<void>;
+}
+
+/** Where an `Http2Client` connects. */
+export type Http2ClientOptions = {
+  /** "https://…" takes HTTP/2 by ALPN; "http://…" speaks it from the first byte. */
+  url: string | URL;
+  /** How long connecting may take, in milliseconds; no limit by default. */
+  timeout?: int;
+};
+
+/**
+ * A client of HTTP/2 streams. One connection, many requests on it at once;
+ * when it is gone, the program connects again.
+ *
+ * @example
+ * import { Http2Client } from "tz:http2";
+ *
+ * const connected = await new Http2Client({ url: "http://localhost:50051" }).connect();
+ *
+ * if (connected.isErr()) {
+ *   console.log(connected.error.message);
+ *   process.exit(1);
+ * }
+ *
+ * const started = await connected.value.request({ method: "POST", path: "/echo" });
+ */
+export declare class Http2Client {
+  public constructor(options: Http2ClientOptions);
+
+  /** Connects; an Err if the server does not speak HTTP/2. */
+  public connect(): Promise<Result<Http2Connection, Http2ConnectError>>;
+}
+
+/** The head of a request a connection starts. */
+export type Http2RequestInit = {
+  method: string;
+  /** Starts with "/" (or is "*"), with the query if any. */
+  path: string;
+  headers?: HeadersInit;
+  /** The host the request is for; the host of the URL by default. */
+  authority?: string;
+};
+
+/** A connection of HTTP/2: what `connect` gives. */
+export declare class Http2Connection {
+  /**
+   * Starts a request: sends its head at once; the body and the trailers
+   * follow with the request it gives. When the server takes no more streams
+   * at once, the request waits for a free one.
+   */
+  public request(init: Http2RequestInit): Promise<Result<Http2OutgoingRequest, Http2RequestError>>;
+
+  /** Says GOAWAY and closes; requests still going end with an Err. */
+  public close(): Promise<void>;
+}
+
+/** A request being sent: its body, its trailers, and the response. */
+export declare class Http2OutgoingRequest {
+  /** Sends a chunk; waits while the server does not take more. */
+  public write(chunk: Uint8Array): Promise<Result<void, Http2RequestWriteError>>;
+
+  /** Ends the request, with trailers after the body if given. */
+  public end(trailers?: HeadersInit): Promise<Result<void, Http2RequestEndError>>;
+
+  /** Resets the stream with `code`, "CANCEL" by default: both ways stop. */
+  public cancel(code?: Http2ErrorCode): void;
+
+  /**
+   * Waits for the status and the headers of the response; it may come
+   * before the end of the request.
+   */
+  public response(): Promise<Result<Http2IncomingResponse, Http2ResponseWaitError>>;
+}
+
+/** A response that came to a request: its head at once, its body and trailers as they come. */
+export declare class Http2IncomingResponse {
+  public readonly status: int;
+  public readonly headers: Headers;
+
+  public body(): Http2Body;
+
+  /** The headers after the body; an Err until the body is read to its end. */
+  public trailers(): Result<Headers, Http2TrailersError>;
+}

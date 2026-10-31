@@ -1,0 +1,103 @@
+// env: NODE_EXTRA_CA_CERTS=@TESTS@/tls/ca.pem
+// env: TLS_DIR=@TESTS@/tls
+// fetch over HTTP/2 (docs/net.md, section 2): https:// takes HTTP/2 by ALPN
+// when the server speaks it, and every request to that server goes at once on
+// one connection; httpVersion: "1.1" keeps HTTP/1.1, httpVersion: "2" takes
+// HTTP/2 without TLS too (h2c) and is an error with a server that does not
+// speak it; response.protocol tells which came; statusText over HTTP/2 is the
+// standard text of the status. Bodies go both ways, in parts too. Only
+// 127.0.0.1.
+import { readFileSync } from "node:fs"
+import { join } from "node:path"
+import { Handler, Server } from "tz:http"
+
+const dir = process.env.TLS_DIR ?? "."
+const cert = readFileSync(join(dir, "localhost.pem"), "utf8")
+const key = readFileSync(join(dir, "key.pem"), "utf8")
+if (cert.isErr() || key.isErr()) process.exit(1)
+const enc = new TextEncoder()
+const big = "x".repeat(1024 * 1024)
+
+const handler: Handler = async (req, client) => {
+  const url = new URL(req.url)
+  switch (url.pathname()) {
+    case "/hello":
+      return new Response(`${req.method} over ${client.protocol}`)
+    case "/port":
+      return new Response(String(client.port))
+    case "/echo": {
+      const text = await req.text()
+      return new Response(text.isOk() ? `got ${text.value.length}` : `failed ${text.error.code}`)
+    }
+    case "/big":
+      return new Response(big)
+    case "/parts":
+      return Response.stream(new ReadableStream<Uint8Array>({
+        start: c => {
+          c.enqueue(enc.encode("one "))
+          c.enqueue(enc.encode("two"))
+          c.close()
+        },
+      }))
+  }
+  return new Response("nowhere", { status: 404, statusText: "Lost" })
+}
+
+const transport = { secure: true, cert: cert.value, key: key.value }
+const secure = new Server({ port: 0, hostname: "127.0.0.1", transport }, handler).listen()
+const plain = new Server({ port: 0, hostname: "127.0.0.1", http2: { enabled: true, cleartext: true } },
+                         handler).listen()
+const old = new Server({ port: 0, hostname: "127.0.0.1", transport, http2: { enabled: false } },
+                       handler).listen()
+if (secure.isErr() || plain.isErr() || old.isErr()) process.exit(1)
+const https = `https://localhost:${secure.value.port}`
+const http = `http://127.0.0.1:${plain.value.port}`
+
+async function show(what: string, url: string, init?: RequestInit) {
+  const sent = await fetch(url, init)
+  if (sent.isErr()) {
+    console.log(what, sent.error.kind, sent.error.code, sent.error.message.replaceAll(/:\d+/g, ":PORT"))
+    return
+  }
+  const r = sent.value
+  const text = await r.text()
+  console.log(what, r.protocol, r.status, r.statusText, text.isOk() ? text.value : text.error.code)
+}
+
+await show("https", `${https}/hello`)
+await show("https 1.1", `${https}/hello`, { httpVersion: "1.1" })
+await show("h2c", `${http}/hello`, { httpVersion: "2" })
+await show("http auto", `${http}/hello`)
+await show("missing", `${https}/missing`)
+await show("head", `${https}/hello`, { method: "HEAD" })
+await show("post", `${https}/echo`, { method: "POST", body: "y".repeat(300000) })
+await show("parts", `${https}/parts`)
+const sentBig = await fetch(`${https}/big`)
+if (sentBig.isOk()) {
+  const text = await sentBig.value.text()
+  console.log("big", sentBig.value.protocol, text.isOk() && text.value == big)
+}
+const upload = new ReadableStream<Uint8Array>({
+  start: c => {
+    c.enqueue(enc.encode("abc"))
+    c.enqueue(enc.encode("defg"))
+    c.close()
+  },
+})
+await show("upload", `${https}/echo`, { method: "PUT", body: upload, duplex: "half" })
+async function portOf(): Promise<string> {
+  const sent = await fetch(`${https}/port`)
+  if (sent.isErr()) return "error"
+  const text = await sent.value.text()
+  return text.isOk() ? text.value : "error"
+}
+const asks: Promise<string>[] = []
+for (let i = 0; i < 20; i++) asks.push(portOf())
+const ports = await Promise.all(asks)
+console.log("at once", ports.length, new Set(ports).size)
+await show("no http2", `https://localhost:${old.value.port}/hello`, { httpVersion: "2" })
+await show("old auto", `https://localhost:${old.value.port}/hello`)
+
+await secure.value.stop()
+await plain.value.stop()
+await old.value.stop()

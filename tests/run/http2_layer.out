@@ -1,0 +1,38 @@
+call 1: 200 application/grpc "apple costs 7 EUR (POST http sent-after-body)"
+call 1: trailers before the body ERR_HTTP2_TRAILERS_NOT_READY, grpc-status 0 fine
+call 2: apple 7 EUR
+call 2: apple 8 EUR
+call 2: enough, cancelled
+call 2: HTTP2_BODY_ERROR_RESET CANCEL
+server: the client stopped watching (CANCEL)
+server: end after the reset: HTTP2_RESPONSE_END_ERROR_RESET
+call 3: total 20 EUR
+call 4: echo: hi
+call 4: echo: how much is a plum?
+call 4: echo: bye
+second reader: HTTP2_BODY_ERROR_BUSY
+first reader: echo: once
+response again: 200
+early trailers: HTTP2_TRAILERS_ERROR_BODY_NOT_READ
+status 101: ERR_HTTP2_STATUS_INVALID
+respond twice: true ERR_HTTP2_HEADERS_SENT
+end twice: true ERR_STREAM_ALREADY_FINISHED ERR_STREAM_WRITE_AFTER_END
+/misuse: 200 body
+forgot end: true
+/forgot: 200 HTTP2_BODY_ERROR_RESET INTERNAL_ERROR
+/nowhere: 404 body
+toStream: passed on
+bad path: ERR_HTTP2_INVALID_PATH
+after close: ERR_HTTP2_CLOSED
+call 1: 200 application/grpc "apple costs 7 EUR (POST https sent-after-body)"
+call 1: trailers before the body ERR_HTTP2_TRAILERS_NOT_READY, grpc-status 0 fine
+fetch 1.1 to an HTTP/2 server: localhost speaks none of the offered versions of HTTP (TLS alert: no application protocol); with httpVersion: "1.1" only HTTP/1.1 is offered
+/: HTTP2_RESPONSE_WAIT_ERROR_CONNECTION ERR_HTTP2_NOT_SUPPORTED
+old server: ERR_HTTP2_NOT_SUPPORTED
+closed at once: true
+HTTP/1.1 to tz:http2: HTTP/1.1 505 HTTP Version Not Supported
+closed at once, tz:http: true
+tz:http still serves: both
+connect: ECONNREFUSED 1
+ftp: ERR_UNSUPPORTED_PROTOCOL
+bad url: ERR_INVALID_URL

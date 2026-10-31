@@ -2,6 +2,7 @@
 #define _CRT_RAND_S
 #endif
 #include "runtime/library/net/net/net.h"
+#include "runtime/library/http/http2/http2.h"
 #include "runtime/core/alloc/alloc.h"
 #include "runtime/core/array/array.h"
 #include "runtime/core/async/async.h"
@@ -131,6 +132,11 @@ static void stop_listening(HttpState *h) {
 
 void tz_http_release(NetConn *c) {
   HttpState *h = &c->http;
+  if (c->h2parent) {
+    tz_h2_dropped(c);
+  } else if (c->h2) {
+    tz_h2_release(c);
+  }
   clear_head(h);
   stop_listening(h);
   if (h->waiting) {
@@ -165,6 +171,13 @@ static void settle_error(NetConn *c, void *error) {
 }
 
 static void *broken_error(NetConn *c) {
+  if (c->error == H2_REFUSED) {
+    return net_failure("ERR_NOT_PROCESSED",
+                       "the server did not process the request, so it can be sent again");
+  }
+  if (c->error == H2_RESET) {
+    return net_failure("ERR_STREAM_RESET", "the server reset the stream of the request");
+  }
   if (c->error == NET_TLS_FAILED) {
     return c->tls_ops->error(c, c->http.make);
   }
@@ -823,6 +836,13 @@ void tz_http_reason(TzStr *out, int64_t status, TzMaker make) {
 }
 
 static void answer_error(NetConn *c, int status) {
+  if (c->h2parent) {
+    c->http.keep_alive = 0;
+    c->http.refused = 1;
+    c->out_len = c->flight_len = 0;
+    tz_h2_respond(c, status, NULL, 1, 0);
+    return;
+  }
   char text[160];
   int n = snprintf(text, sizeof text,
                    "HTTP/1.1 %d %s\r\nconnection: close\r\ncontent-length: 0\r\n\r\n", status,
@@ -984,10 +1004,26 @@ static int read_request(NetConn *c) {
   return 1;
 }
 
+static const char h2_answer_hint[] =
+    "the server answered in HTTP/2 without TLS (h2c); add httpVersion: \"2\" to fetch";
+
+static int looks_like_h2(const NetConn *c) {
+  const uint8_t *s = c->in + c->in_start;
+  size_t have = c->in_end - c->in_start;
+
+  return have >= 9 && (s[3] == 0x04 || s[3] == 0x07) && s[5] == 0 && s[6] == 0 && s[7] == 0 &&
+         s[8] == 0;
+}
+
 static int read_response(NetConn *c) {
   HttpState *h = &c->http;
   for (;;) {
     ptrdiff_t end = head_end(c);
+    if (end < 0 && looks_like_h2(c)) {
+      settle_error(c, net_failure("ERR_INVALID_RESPONSE", h2_answer_hint));
+      net_abort(c);
+      return -1;
+    }
     if (end < 0) {
       if (c->in_end - c->in_start > HTTP_MAX_HEAD) {
         settle_error(c, net_failure("ERR_HEAD_TOO_LARGE", "the head of the response is too large"));
@@ -1013,7 +1049,9 @@ static int read_response(NetConn *c) {
       }
     }
     if (version <= 0 || status < 100 || status > 999 || (line > at + 12 && s[at + 12] != ' ')) {
-      settle_error(c, net_failure("ERR_INVALID_RESPONSE", "the response is not HTTP/1.1"));
+      settle_error(c,
+                   net_failure("ERR_INVALID_RESPONSE",
+                               looks_like_h2(c) ? h2_answer_hint : "the response is not HTTP/1.1"));
       net_abort(c);
       return -1;
     }
@@ -1083,6 +1121,9 @@ static int take_body(NetConn *c, const uint8_t **data, size_t *length) {
         *data = s;
         *length = have;
         c->in_start = c->in_end;
+        if (c->h2parent) {
+          tz_h2_consumed(c, have);
+        }
         return 1;
       }
       if (c->eof) {
@@ -1313,10 +1354,50 @@ static int discard_body(NetConn *c, int *wait) {
   return 1;
 }
 
+static int switch_to_h2(NetConn *c) {
+  if (c->http.version || c->h2parent) {
+    return 0;
+  }
+  const NetListener *l = c->listener;
+  int only = l && l->h2only;
+  int h2 = 0;
+  if (c->tls) {
+    h2 = c->tls_ops->h2 && c->tls_ops->h2(c);
+  }
+  if (!h2 && l && (only || (!c->tls && l->h2c))) {
+    h2 = tz_h2_preface(c);
+    if (h2 < 0 && !c->eof && !c->error && !c->closed) {
+      net_read(c);
+      return 1;
+    }
+    if (h2 < 0) {
+      h2 = 0;
+    }
+  }
+  if (!h2) {
+    if (only) {
+      refuse(c, 505);
+      return 1;
+    }
+    return 0;
+  }
+  settle_int(c, 2);
+  tz_h2_start(c);
+
+  return 1;
+}
+
 static void input(NetConn *c) {
   HttpState *h = &c->http;
   switch (h->wait_kind) {
   case WAIT_REQUEST: {
+    if (c->h2parent) {
+      int fresh = c->h2fresh;
+      c->h2fresh = 0;
+      c->busy = fresh;
+      settle_int(c, fresh);
+      return;
+    }
     int wait = 0;
     if (!h->keep_alive || !discard_body(c, &wait)) {
       net_close(c);
@@ -1325,6 +1406,9 @@ static void input(NetConn *c) {
     }
     if (wait) {
       net_read(c);
+      return;
+    }
+    if (switch_to_h2(c)) {
       return;
     }
     int got = read_request(c);
@@ -1338,6 +1422,15 @@ static void input(NetConn *c) {
     return;
   }
   case WAIT_RESPONSE: {
+    if (c->h2parent) {
+      if (c->h2fresh || tz_h2_head_done(c)) {
+        c->h2fresh = 0;
+        settle_int(c, h->status);
+      } else if (c->error || c->closed) {
+        settle_error(c, broken_error(c));
+      }
+      return;
+    }
     int got = read_response(c);
     if (got == 0) {
       net_read(c);
@@ -1469,6 +1562,46 @@ int64_t tz_http_request_timeout(void *conn, TzMaker make) {
   return (int64_t)c->http.request_timeout;
 }
 
+void tz_http_stream_input(NetConn *c) { input(c); }
+
+void tz_http_stream_request(NetConn *s, TzStr method, TzStr target, TzArray *headers, int head,
+                            int ended) {
+  HttpState *h = &s->http;
+  clear_head(h);
+  h->method = method;
+  h->target = target;
+  h->headers = headers;
+  h->version = 20;
+  h->keep_alive = 0;
+  h->head_request = (uint8_t)head;
+  h->body = ended ? BODY_NONE : BODY_TO_END;
+  h->body_done = (uint8_t)ended;
+  h->body_read = 0;
+  h->request_since = net_now();
+  h->responded = 0;
+  if (ended) {
+    s->eof = 1;
+  }
+}
+
+void tz_http_stream_response(NetConn *s, int32_t status, TzArray *headers, int ended) {
+  HttpState *h = &s->http;
+  clear_head(h);
+  h->status = status;
+  h->status_text = ascii(reason_of(status));
+  h->headers = headers;
+  h->version = 20;
+  h->keep_alive = 0;
+  int none = ended || h->head_request || status == 204 || status == 304;
+  h->body = none ? BODY_NONE : BODY_TO_END;
+  h->body_done = (uint8_t)none;
+  h->body_read = 0;
+  h->remaining = 0;
+  if (ended) {
+    s->eof = 1;
+  }
+}
+
 int tz_http_waits_request(NetConn *c) {
   return c->on_input == input && c->http.wait_kind == WAIT_REQUEST && c->http.waiting;
 }
@@ -1484,7 +1617,7 @@ void tz_http_next(TzPromise *p, void *conn, TzMaker make) {
     input(c);
   }
 #if TZ_PARALLEL
-  tz_thread.await_lock = &c->lock;
+  tz_thread.await_lock = conn_lock_of(c);
 #else
   conn_unlock(c);
 #endif
@@ -1508,6 +1641,9 @@ void tz_http_read(TzPromise *p, void *conn, void *deadline, TzMaker make) {
     send_continue(c);
     input(c);
   }
+  if (c->h2parent) {
+    tz_h2_send_pending(c);
+  }
   conn_unlock(c);
 }
 
@@ -1518,6 +1654,9 @@ void tz_http_read_all(TzPromise *p, void *conn, void *deadline, TzMaker make) {
   if (begin_wait(c, p, WAIT_ALL, deadline, make)) {
     send_continue(c);
     input(c);
+  }
+  if (c->h2parent) {
+    tz_h2_send_pending(c);
   }
   conn_unlock(c);
 }
@@ -1634,6 +1773,8 @@ static const char *http_date(void) {
 
   return tz_http_date;
 }
+
+const char *tz_http_date_text(void) { return http_date(); }
 
 static size_t utf8_of(TzStr text, uint8_t *out) {
   uint32_t n;
@@ -1794,6 +1935,30 @@ static void respond(NetConn *c, int32_t status, void *text_obj, uint64_t text_me
     return;
   }
   h->responded = 1;
+  if (c->h2parent) {
+    (void)text_obj;
+    (void)text_meta;
+    int stream = (flags & RESPOND_STREAM) != 0;
+    int no_body = (flags & RESPOND_NO_BODY) ||
+                  (!stream && (status == 204 || status == 304 || (status >= 100 && status < 200)));
+    if (!no_body && !stream) {
+      TzStr text = {body_obj, body_meta};
+      const TzBytes *data = (const TzBytes *)bytes;
+      size_t length = (flags & RESPOND_BYTES) ? (data ? (size_t)tz_bytes_byte_length(data) : 0)
+                                              : utf8_of(text, NULL);
+      if (length) {
+        uint8_t *at = net_reserve(c, length);
+        if (flags & RESPOND_BYTES) {
+          memcpy(at, data->data, length);
+        } else {
+          utf8_of(text, at);
+        }
+        net_wrote(c, length);
+      }
+    }
+    tz_h2_respond(c, status, (const TzArray *)headers, no_body, stream);
+    return;
+  }
   if (flags & RESPOND_CLOSE) {
     h->keep_alive = 0;
   }
@@ -1894,6 +2059,33 @@ static void request(NetConn *c, void *method_obj, uint64_t method_meta, void *ta
                     void *bytes, int32_t flags) {
   HttpState *h = &c->http;
   TzStr method = {method_obj, method_meta}, target = {target_obj, target_meta};
+  if (c->h2parent) {
+    uint32_t units_length;
+    int wide;
+    const void *units = tz_str_units(&method, &units_length, &wide);
+    h->head_request = !wide && units_length == 4 && memcmp(units, "HEAD", 4) == 0;
+    int stream = (flags & RESPOND_STREAM) != 0;
+    int no_body = (flags & RESPOND_NO_BODY) != 0;
+    if (!no_body && !stream) {
+      TzStr text = {body_obj, body_meta};
+      const TzBytes *data = (const TzBytes *)bytes;
+      size_t length = (flags & RESPOND_BYTES) ? (data ? (size_t)tz_bytes_byte_length(data) : 0)
+                                              : utf8_of(text, NULL);
+      if (length) {
+        uint8_t *at = net_reserve(c, length);
+        if (flags & RESPOND_BYTES) {
+          memcpy(at, data->data, length);
+        } else {
+          utf8_of(text, at);
+        }
+        net_wrote(c, length);
+      } else {
+        no_body = 1;
+      }
+    }
+    tz_h2_request(c, method, target, (const TzArray *)headers, no_body, stream);
+    return;
+  }
   put_str(c, method);
   put(c, " ");
   put_str(c, target);
@@ -1985,9 +2177,80 @@ void tz_http_end(void *conn, TzMaker make) {
       net_write(c, "0\r\n\r\n", 5);
     }
     net_flush(c);
-    if (c->server && !c->http.keep_alive) {
+    if (c->h2parent && !c->server) {
+      tz_h2_end(c);
+    } else if (c->server && !c->http.keep_alive) {
       net_close(c);
     }
   }
   conn_unlock(c);
+}
+
+static int stream_busy(TzPromise *p, NetConn *c, TzMaker make) {
+  if (!c->http.waiting) {
+    return 0;
+  }
+  tz_net_make = make;
+  tz_promise_fail(p, net_failure("ERR_HTTP2_BUSY", "another task already waits on this stream"));
+
+  return 1;
+}
+
+static void stream_await(NetConn *c) {
+#if TZ_PARALLEL
+  tz_thread.await_lock = conn_lock_of(c);
+#else
+  conn_unlock(c);
+#endif
+}
+
+void tz_http2_read(TzPromise *p, void *conn, TzMaker make) {
+  NetConn *c = (NetConn *)conn;
+  conn_lock(c);
+  if (!stream_busy(p, c, make) && begin_wait(c, p, WAIT_CHUNK, NULL, make)) {
+    input(c);
+    tz_h2_send_pending(c);
+  }
+  stream_await(c);
+}
+
+void tz_http2_response(TzPromise *p, void *conn, TzMaker make) {
+  NetConn *c = (NetConn *)conn;
+  conn_lock(c);
+  if (!stream_busy(p, c, make) && begin_wait(c, p, WAIT_RESPONSE, NULL, make)) {
+    input(c);
+  }
+  stream_await(c);
+}
+
+void tz_http2_write(TzPromise *p, void *conn, void *bytes, TzMaker make) {
+  NetConn *c = (NetConn *)conn;
+  conn_lock(c);
+  write_chunk(p, c, bytes, make);
+  stream_await(c);
+}
+
+void tz_http2_request(void *conn, void *method_obj, uint64_t method_meta, void *target_obj,
+                      uint64_t target_meta, void *headers, TzMaker make) {
+  (void)make;
+  NetConn *c = (NetConn *)conn;
+  conn_lock(c);
+  if (c->h2parent) {
+    TzStr method = {method_obj, method_meta}, target = {target_obj, target_meta};
+    tz_h2_request(c, method, target, (const TzArray *)headers, 0, 1);
+  }
+  conn_unlock(c);
+}
+
+int64_t tz_http2_respond(void *conn, int64_t status, void *headers, TzMaker make) {
+  (void)make;
+  NetConn *c = (NetConn *)conn;
+  conn_lock(c);
+  int64_t outcome = tz_h2_respond_once(c, (int32_t)status, (const TzArray *)headers);
+  if (outcome == 0) {
+    c->http.responded = 1;
+  }
+  conn_unlock(c);
+
+  return outcome;
 }

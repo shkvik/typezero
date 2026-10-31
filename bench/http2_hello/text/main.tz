@@ -1,0 +1,16 @@
+// The HTTP/2 benchmark (bench/http2.ps1) with a handler that reads the body
+// of the request first: next to main.tz it shows what an await on the
+// request costs in the parallel runtime.
+import { Server } from "tz:http"
+
+const port = parseInt(process.argv[2] ?? "8080").unwrapOr(8080)
+const options = { port, hostname: "127.0.0.1", http2: { enabled: true, cleartext: true } }
+const server = new Server(options, async request => {
+  const text = await request.text()
+  return new Response(text.isOk() ? "Hello, World!" : "no body")
+})
+const listened = server.listen()
+if (listened.isErr()) {
+  console.error(listened.error.message)
+  process.exit(1)
+}

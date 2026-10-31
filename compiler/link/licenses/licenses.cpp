@@ -32,6 +32,7 @@ const Project kProjects[] = {
     {"v8", "V8: the runtime of tz follows its parser of dates", "BSD-3-Clause", "V8.txt"},
     {"whatwg", "WHATWG Encoding Standard: the indexes of the multi-byte encodings of TextDecoder",
      "BSD-3-Clause", "WHATWG.txt"},
+    {"nghttp2", "nghttp2 1.70.0: the HTTP/2 of tz:http, tz:http2 and fetch", "MIT", "nghttp2.txt"},
 };
 
 }
@@ -73,6 +74,17 @@ bool usesEncodingIndexes(const llvm::Module &module) {
   return false;
 }
 
+bool usesHttp2(const llvm::Module &module) {
+  for (llvm::StringRef name : {"tz_http_stream", "tz_http_start_client"}) {
+    const llvm::Function *function = module.getFunction(name);
+    if (function && !function->use_empty()) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
 void addLicenseManifest(llvm::Module &module, const Embedded &embedded) {
   std::string text = kHeader.str();
   if (embedded.openssl) {
@@ -81,6 +93,9 @@ void addLicenseManifest(llvm::Module &module, const Embedded &embedded) {
   text += "node\nv8\n";
   if (embedded.whatwg) {
     text += "whatwg\n";
+  }
+  if (embedded.nghttp2) {
+    text += "nghttp2\n";
   }
   llvm::Constant *data = llvm::ConstantDataArray::getString(module.getContext(), text);
   auto *manifest = new llvm::GlobalVariable(module, data->getType(), true,

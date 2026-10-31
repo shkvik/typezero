@@ -10,6 +10,7 @@ namespace tz {
 struct Embedded {
   bool openssl = false;
   bool whatwg = false;
+  bool nghttp2 = false;
 };
 
 struct CryptoUse {
@@ -19,6 +20,7 @@ struct CryptoUse {
 };
 CryptoUse cryptoUse(const llvm::Module &module);
 bool usesEncodingIndexes(const llvm::Module &module);
+bool usesHttp2(const llvm::Module &module);
 
 void addLicenseManifest(llvm::Module &module, const Embedded &embedded);
 

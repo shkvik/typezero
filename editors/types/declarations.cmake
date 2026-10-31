@@ -19,5 +19,7 @@ endfunction()
 
 set(types_tz ${TZ_OUTPUT_DIR}/types/node_modules/@types/tz)
 declare_module(${CMAKE_CURRENT_SOURCE_DIR}/library/http/http.d.tz "tz:http" ${types_tz}/http.d.ts)
+declare_module(${CMAKE_CURRENT_SOURCE_DIR}/library/http/http2.d.tz "tz:http2" ${types_tz}/http2.d.ts)
 set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
-             ${CMAKE_CURRENT_SOURCE_DIR}/library/http/http.d.tz)
+             ${CMAKE_CURRENT_SOURCE_DIR}/library/http/http.d.tz
+             ${CMAKE_CURRENT_SOURCE_DIR}/library/http/http2.d.tz)

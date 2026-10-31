@@ -74,7 +74,8 @@ std::string missingModule(llvm::StringRef path) {
     if (path == "tz:string") {
       return "built-in module " + quoted + " is not supported yet";
     }
-    return "there is no built-in module " + quoted + "; tz has 'tz:io', 'tz:fs' and 'tz:http'";
+    return "there is no built-in module " + quoted +
+           "; tz has 'tz:io', 'tz:fs', 'tz:http' and 'tz:http2'";
   }
   llvm::StringRef bare = path;
   bare.consume_front("node:");
@@ -90,7 +91,11 @@ std::string missingModule(llvm::StringRef path) {
     return message + " (docs/net.md, section 7); serve requests with 'Server' from \"tz:http\", "
                      "and make them with the global 'fetch'";
   }
-  static const llvm::StringLiteral network[] = {"http2", "tls", "dns", "dns/promises"};
+  if (bare == "http2") {
+    return message + " (docs/net.md, section 7); HTTP/2 streams are in \"tz:http2\": "
+                     "'Http2Server' and 'Http2Client'";
+  }
+  static const llvm::StringLiteral network[] = {"tls", "dns", "dns/promises"};
   if (llvm::is_contained(network, bare)) {
     return message + " (docs/net.md, section 7)";
   }

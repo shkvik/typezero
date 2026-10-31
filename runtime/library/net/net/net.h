@@ -37,6 +37,7 @@ typedef struct NetTlsOps {
   void (*shutdown)(NetConn *c);
   void *(*error)(NetConn *c, TzMaker make);
   void (*release)(NetConn *c);
+  int (*h2)(NetConn *c);
 } NetTlsOps;
 
 typedef struct NetOp {
@@ -121,11 +122,24 @@ struct NetConn {
   uint32_t sealed_len, sealed_cap;
   char peer[64];
   int32_t peer_port;
+  void *h2;
+  NetConn *h2parent;
+  NetConn *ready_next;
+  int32_t h2id;
+  uint8_t h2fresh;
+  uint8_t h2ended;
+  uint8_t h2open;
+  uint8_t h2submitted;
+  uint8_t h2offer;
 };
+
+static inline TzLock *conn_lock_of(NetConn *c) {
+  return c->h2parent ? &c->h2parent->lock : &c->lock;
+}
 
 static inline void conn_lock(NetConn *c) {
 #if TZ_PARALLEL && !defined(TZ_NO_THREAD_STATE)
-  tz_lock(&c->lock);
+  tz_lock(conn_lock_of(c));
   ++tz_thread.conn_locks;
 #else
   (void)c;
@@ -135,7 +149,7 @@ static inline void conn_lock(NetConn *c) {
 static inline void conn_unlock(NetConn *c) {
 #if TZ_PARALLEL && !defined(TZ_NO_THREAD_STATE)
   --tz_thread.conn_locks;
-  tz_unlock(&c->lock);
+  tz_unlock(conn_lock_of(c));
 #else
   (void)c;
 #endif
@@ -170,6 +184,11 @@ struct NetListener {
   void *tls;
   void (*tls_accept)(NetListener *l, NetConn *c);
   void (*tls_release)(void *tls);
+  void (*tls_alpn)(NetListener *l);
+  NetConn *ready_first, *ready_last;
+  TzLock ready_lock;
+  uint8_t h2, h2c, h2only;
+  uint32_t h2_streams;
 };
 
 double net_now(void);
@@ -184,6 +203,8 @@ void net_wrote(NetConn *c, size_t length);
 size_t net_pending_output(const NetConn *c);
 void net_close(NetConn *c);
 void net_abort(NetConn *c);
+NetConn *net_stream_new(NetConn *parent);
+void net_accept_ready(NetListener *l, NetConn *c);
 
 typedef struct NetError {
   const char *code, *message;
