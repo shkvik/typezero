@@ -4,6 +4,7 @@
 #include "runtime/core/group/group.h"
 #include "runtime/core/io/io.h"
 #include "runtime/core/output/output.h"
+#include "runtime/core/pendulum/pendulum.h"
 #include "runtime/core/tzrt/tzrt.h"
 #include <stddef.h>
 #include <stdio.h>
@@ -230,7 +231,7 @@ static int run_job(TzJob *job) {
   } else {
     r->run(r, job->source);
   }
-  tz_io_send_pending();
+  tz_pendulum_swing();
   if (job->ahead < 0) {
     job->ahead = ticks() - job->started;
   }
@@ -281,7 +282,7 @@ static DWORD WINAPI worker_main(void *arg) {
       }
     } else {
       ((void (*)(OVERLAPPED_ENTRY *))entry.lpCompletionKey)(&entry);
-      tz_io_send_pending();
+      tz_pendulum_swing();
     }
     __atomic_fetch_sub(&tz_pool_running, 1, __ATOMIC_RELAXED);
   }
@@ -630,6 +631,20 @@ int32_t tz_ahead_here(TzPromise *p) {
   return 1;
 }
 
+int32_t tz_trigger_take(TzPromise **out);
+
+void tz_ahead_forward(TzPromise *p);
+
+void tz_ahead_settle_held(void) {
+  TzPromise *held[16];
+  int32_t n = tz_trigger_take(held);
+  for (int32_t i = 0; i < n; ++i) {
+    if (n > 1 || !tz_ahead_here(held[i])) {
+      tz_ahead_forward(held[i]);
+    }
+  }
+}
+
 void tz_ahead_forward(TzPromise *p) {
   TzJob *job = (TzJob *)malloc(sizeof(TzJob));
   if (!job) {
@@ -691,7 +706,7 @@ int32_t tz_ahead_defer(TzPromise *p) {
 static void grant_turn(TzReactor *r, TzPromise *source) {
   (void)source;
   TzJob *job = (TzJob *)((char *)r - offsetof(TzJob, grant));
-  tz_io_send_pending();
+  tz_pendulum_swing();
   set_state(&job->state, JOB_GRANTED);
   ++tz_pool_stat_waited;
   tz_pool_main_waits = job;
@@ -818,7 +833,7 @@ static int32_t finish_job(TzReactor *r, TzPromise **source) {
   }
   ++tz_pool_stat_waited;
   tz_pool_main_waits = job;
-  tz_io_send_pending();
+  tz_pendulum_swing();
   for (;;) {
     int32_t now = __atomic_load_n(&job->state, __ATOMIC_ACQUIRE);
     if (now == JOB_DONE) {
@@ -851,7 +866,7 @@ TZ_NOINLINE void tz_order_wait(void) {
   if (tz_thread.conn_locks) {
     tz_panic("the parallel runtime: waits for the turn holding a connection", 61);
   }
-  tz_io_send_pending();
+  tz_pendulum_swing();
   if (tz_thread.turn) {
     return;
   }

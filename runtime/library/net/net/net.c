@@ -412,62 +412,26 @@ static int has_output(const NetConn *c) { return c->out_len || c->sealed_len; }
 
 #if TZ_PARALLEL
 void tz_trigger_hold(void);
-int32_t tz_trigger_take(TzPromise **out);
-int32_t tz_ahead_here(TzPromise *p);
-void tz_ahead_forward(TzPromise *p);
 #endif
 
 static void conn_unlock_settle(NetConn *c);
 
-#if TZ_PARALLEL
-static void run_held(void) {
-  TzPromise *held[16];
-  int32_t n = tz_trigger_take(held);
-  for (int32_t i = 0; i < n; ++i) {
-    if (n > 1 || !tz_ahead_here(held[i])) {
-      tz_ahead_forward(held[i]);
-    }
-  }
-}
-#endif
-
-static void send_listed(void) {
-#if TZ_PARALLEL
-  int outside = tz_thread.worker && !tz_thread.job;
-  if (outside) {
-    tz_trigger_hold();
-  }
-#endif
-  while (tz_thread.send_count) {
-    NetConn *c = (NetConn *)tz_thread.sends[--tz_thread.send_count];
-    conn_lock(c);
-    --c->ops;
-    tz_h2_send_listed(c);
-    conn_unlock_settle(c);
-  }
-#if TZ_PARALLEL
-  if (outside) {
-    run_held();
-  }
-#endif
+static void release_weight(TzWeight *weight) {
+  NetConn *c = CONTAINING_RECORD(weight, NetConn, weight);
+  conn_lock(c);
+  --c->ops;
+  tz_h2_send_listed(c);
+  conn_unlock_settle(c);
 }
 
-void net_send_later(NetConn *c) {
-  int32_t count = tz_thread.send_count;
-  for (int32_t i = 0; i < count; ++i) {
-    if (tz_thread.sends[i] == c) {
-      return;
-    }
-  }
-  int32_t room = (int32_t)(sizeof tz_thread.sends / sizeof tz_thread.sends[0]);
-  if (count == room) {
+void net_hold(NetConn *c) {
+  c->weight.release = release_weight;
+  TzHold hold = tz_pendulum_hold(&c->weight);
+  if (hold == TZ_HOLD_NEW) {
+    ++c->ops;
+  } else if (hold == TZ_HOLD_FULL) {
     tz_h2_send_listed(c);
-    return;
   }
-  ++c->ops;
-  tz_thread.sends[count] = c;
-  tz_thread.send_count = count + 1;
-  __atomic_store_n(&tz_io_sender, send_listed, __ATOMIC_RELAXED);
 }
 
 void tz_http_release(NetConn *c);
@@ -876,7 +840,7 @@ static void net_completed_pooled(OVERLAPPED_ENTRY *entry) {
     net_flush(c);
   }
   conn_unlock(c);
-  run_held();
+  tz_ahead_settle_held();
   tz_io_done_remote(&op->work);
 }
 #endif
@@ -1803,7 +1767,7 @@ void net_write(NetConn *c, const void *data, size_t length) {
   (void)length;
 }
 void net_flush(NetConn *c) { (void)c; }
-void net_send_later(NetConn *c) { (void)c; }
+void net_hold(NetConn *c) { (void)c; }
 uint8_t *net_reserve(NetConn *c, size_t length) {
   (void)c;
   (void)length;

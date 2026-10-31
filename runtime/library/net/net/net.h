@@ -5,6 +5,7 @@
 #include "runtime/core/async/async.h"
 #include "runtime/core/io/io.h"
 #include "runtime/core/parallel/parallel.h"
+#include "runtime/core/pendulum/pendulum.h"
 #include "runtime/core/string/string.h"
 #include "runtime/core/tzrt/tzrt.h"
 #include "runtime/library/bytes/bytes/bytes.h"
@@ -131,6 +132,7 @@ struct NetConn {
   uint8_t h2open;
   uint8_t h2submitted;
   uint8_t h2offer;
+  TzWeight weight;
 };
 
 static inline TzLock *conn_lock_of(NetConn *c) {
@@ -198,7 +200,7 @@ void net_input_room(NetConn *c, uint32_t room);
 uint8_t *net_seal_reserve(NetConn *c, size_t length);
 void net_write(NetConn *c, const void *data, size_t length);
 void net_flush(NetConn *c);
-void net_send_later(NetConn *c);
+void net_hold(NetConn *c);
 uint8_t *net_reserve(NetConn *c, size_t length);
 void net_wrote(NetConn *c, size_t length);
 size_t net_pending_output(const NetConn *c);

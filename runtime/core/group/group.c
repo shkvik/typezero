@@ -86,9 +86,9 @@ static inline void set_leader(void *member, void *leader) {
 #endif
 }
 
+#if TZ_PARALLEL
 static inline int is_leader_count(int64_t rc) { return rc >= TZ_RC_DYING - (INT64_C(1) << 59); }
 
-#if TZ_PARALLEL
 static inline int64_t rc_load(const TzObject *leader) {
   return __atomic_load_n(&leader->rc, __ATOMIC_RELAXED);
 }

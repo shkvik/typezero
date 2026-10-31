@@ -8,6 +8,7 @@
 #include "runtime/core/io/io.h"
 #include "runtime/core/output/output.h"
 #include "runtime/core/parallel/parallel.h"
+#include "runtime/core/pendulum/pendulum.h"
 #include "runtime/core/publish/publish.h"
 #include "runtime/core/string/string.h"
 #include "runtime/core/tzrt/tzrt.h"
@@ -1188,7 +1189,7 @@ static void run_immediates(void) {
 }
 
 static int loop_alive(void) {
-  return tz_timer_refs > 0 || tz_immediate_refs > 0 || tz_io_alive() || tz_thread.send_count;
+  return tz_timer_refs > 0 || tz_immediate_refs > 0 || tz_io_alive() || tz_pendulum_holding();
 }
 
 void tz_async_run(int32_t es_module) {

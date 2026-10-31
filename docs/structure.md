@@ -640,7 +640,17 @@ runtime/core/
   string/ unicode/ number/ array/ object/ map/ closure/ unknown/   значения и таблицы к ним
   error/                                       исключение в полёте, стек
   async/ io/ parallel/                         цикл событий, IOCP, потоки
+  pendulum/                                    Pendulum: вывод тактами
 ```
+
+**Pendulum** (`core/pendulum/`) — вывод тактами. Объект, которому есть что отправить (соединение
+HTTP/2), кладёт в список своего потока «гирю» (`TzWeight`, `tz_pendulum_hold`) вместо системного
+вызова; взмах (`tz_pendulum_swing`) отпускает все гири потока разом — одна отправка на соединение
+вместо отправки на каждый `respond` / `write` / `end`. Взмах — в конце куска (`run_job`), после
+завершения ввода-вывода в пуле, перед ожиданием очереди и кусков (`tz_order_wait`, `finish_job`,
+`grant_turn`) и до и после ожидания главного цикла (`tz_io_poll`); главный цикл не кончается, пока
+гири есть. Правило: **поток засыпает только после взмаха**. Что отправлять — у владельца гири
+(`NetConn::weight`, `net_hold` в `library/net/net/`).
 
 ## Пакеты: `compiler/packages/`
 

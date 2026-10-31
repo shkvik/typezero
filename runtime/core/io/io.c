@@ -3,7 +3,7 @@
 #include "runtime/core/closure/closure.h"
 #include "runtime/core/group/group.h"
 #include "runtime/core/output/output.h"
-#include "runtime/core/parallel/parallel.h"
+#include "runtime/core/pendulum/pendulum.h"
 #include "runtime/core/tzrt/tzrt.h"
 #include <stdlib.h>
 #include <string.h>
@@ -439,15 +439,6 @@ void tz_work_unref(TzWork *w) {
 
 int tz_io_alive(void) { return PENDING() > 0; }
 
-void (*tz_io_sender)(void);
-
-void tz_io_send_pending(void) {
-  if (tz_thread.send_count) {
-    void (*sender)(void) = __atomic_load_n(&tz_io_sender, __ATOMIC_RELAXED);
-    sender();
-  }
-}
-
 #if TZ_PARALLEL
 int32_t tz_ahead_defer(TzPromise *p);
 int32_t tz_ahead_deliver(void);
@@ -485,7 +476,7 @@ void tz_io_poll(int64_t timeout) {
     tz_ahead_deliver();
   }
 #endif
-  tz_io_send_pending();
+  tz_pendulum_swing();
   gather(timeout);
   TzWork *list = tz_io_due_head;
   tz_io_due_head = tz_io_due_tail = NULL;
@@ -520,7 +511,7 @@ void tz_io_poll(int64_t timeout) {
     tz_ahead_deliver();
   }
 #endif
-  tz_io_send_pending();
+  tz_pendulum_swing();
 }
 
 #ifdef _WIN32

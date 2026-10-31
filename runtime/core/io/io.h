@@ -26,7 +26,5 @@ void tz_work_unref(TzWork *w);
 void tz_work_ref(TzWork *w);
 int tz_io_alive(void);
 void tz_io_poll(int64_t timeout);
-extern void (*tz_io_sender)(void);
-void tz_io_send_pending(void);
 
 #endif
