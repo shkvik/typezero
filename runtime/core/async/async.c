@@ -149,13 +149,29 @@ void tz_promise_drop(void *object) {
 }
 
 #if TZ_PARALLEL
-#define HELD_MAX 16
-TZ_THREAD_LOCAL TzPromise *tz_held[HELD_MAX];
+TZ_THREAD_LOCAL TzPromise **tz_held;
+TZ_THREAD_LOCAL int32_t tz_held_capacity;
 TZ_THREAD_LOCAL int32_t tz_held_count = -1;
 
 static void trigger(TzPromise *p);
 
 void tz_trigger_hold(void) { tz_held_count = 0; }
+
+int32_t tz_trigger_holding(void) { return tz_held_count >= 0; }
+
+static void hold(TzPromise *p) {
+  if (tz_held_count == tz_held_capacity) {
+    int32_t capacity = tz_held_capacity ? tz_held_capacity * 2 : 16;
+    TzPromise **grown = (TzPromise **)realloc(tz_held, (size_t)capacity * sizeof *grown);
+    if (!grown) {
+      tz_panic("out of memory", 13);
+    }
+    tz_held = grown;
+    tz_held_capacity = capacity;
+  }
+  retain(p);
+  tz_held[tz_held_count++] = p;
+}
 
 TzPromise *tz_trigger_release(int32_t queue) {
   int32_t n = tz_held_count;
@@ -163,22 +179,30 @@ TzPromise *tz_trigger_release(int32_t queue) {
   if (n == 1 && !queue) {
     return tz_held[0];
   }
+  TzPromise **items = tz_held;
+  int32_t capacity = tz_held_capacity;
+  tz_held = NULL;
+  tz_held_capacity = 0;
   for (int32_t i = 0; i < n; ++i) {
-    trigger(tz_held[i]);
-    release(tz_held[i]);
+    trigger(items[i]);
+    release(items[i]);
+  }
+  if (tz_held) {
+    free(items);
+  } else {
+    tz_held = items;
+    tz_held_capacity = capacity;
   }
 
   return NULL;
 }
 
-int32_t tz_trigger_take(TzPromise **out) {
+TzPromise **tz_trigger_take(int32_t *count) {
   int32_t n = tz_held_count;
   tz_held_count = -1;
-  for (int32_t i = 0; i < n; ++i) {
-    out[i] = tz_held[i];
-  }
+  *count = n < 0 ? 0 : n;
 
-  return n < 0 ? 0 : n;
+  return tz_held;
 }
 #endif
 
@@ -189,17 +213,7 @@ void tz_promise_trigger(TzPromise *p) { trigger(p); }
 static void trigger(TzPromise *p) {
 #if TZ_PARALLEL
   if (tz_held_count >= 0 && p->head) {
-    if (tz_held_count == HELD_MAX) {
-      TZ_ORDERED();
-      tz_held_count = -1;
-      for (int32_t i = 0; i < HELD_MAX; ++i) {
-        trigger(tz_held[i]);
-        release(tz_held[i]);
-      }
-      tz_held_count = 0;
-    }
-    retain(p);
-    tz_held[tz_held_count++] = p;
+    hold(p);
     return;
   }
 #endif

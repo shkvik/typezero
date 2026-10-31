@@ -202,20 +202,26 @@ static void run_early(TzJob *job) {
     tz_obj_release((TzObject *)source);
   }
   tz_obj_release(owner);
-  while (tz_thread.local_head) {
-    TzReactor *next = tz_thread.local_head;
-    tz_thread.local_head = next->next;
+  for (;;) {
+    while (tz_thread.local_head) {
+      TzReactor *next = tz_thread.local_head;
+      tz_thread.local_head = next->next;
+      if (!tz_thread.local_head) {
+        tz_thread.local_tail = NULL;
+      }
+      TzPromise *got = next->source;
+      TzObject *of = next->owner;
+      next->source = NULL;
+      next->run(next, got);
+      if (got) {
+        tz_obj_release((TzObject *)got);
+      }
+      tz_obj_release(of);
+    }
+    tz_pendulum_swing();
     if (!tz_thread.local_head) {
-      tz_thread.local_tail = NULL;
+      break;
     }
-    TzPromise *got = next->source;
-    TzObject *of = next->owner;
-    next->source = NULL;
-    next->run(next, got);
-    if (got) {
-      tz_obj_release((TzObject *)got);
-    }
-    tz_obj_release(of);
   }
 }
 
@@ -230,8 +236,8 @@ static int run_job(TzJob *job) {
     run_early(job);
   } else {
     r->run(r, job->source);
+    tz_pendulum_swing();
   }
-  tz_pendulum_swing();
   if (job->ahead < 0) {
     job->ahead = ticks() - job->started;
   }
@@ -631,17 +637,22 @@ int32_t tz_ahead_here(TzPromise *p) {
   return 1;
 }
 
-int32_t tz_trigger_take(TzPromise **out);
+TzPromise **tz_trigger_take(int32_t *count);
 
 void tz_ahead_forward(TzPromise *p);
 
 void tz_ahead_settle_held(void) {
-  TzPromise *held[16];
-  int32_t n = tz_trigger_take(held);
-  for (int32_t i = 0; i < n; ++i) {
-    if (n > 1 || !tz_ahead_here(held[i])) {
-      tz_ahead_forward(held[i]);
+  int32_t n;
+  TzPromise **held = tz_trigger_take(&n);
+  if (n == 1) {
+    TzPromise *p = held[0];
+    if (!tz_ahead_here(p)) {
+      tz_ahead_forward(p);
     }
+    return;
+  }
+  for (int32_t i = 0; i < n; ++i) {
+    tz_ahead_forward(held[i]);
   }
 }
 

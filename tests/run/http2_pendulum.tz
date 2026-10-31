@@ -1,0 +1,64 @@
+// tz:http2 and the Pendulum engine (docs/structure.md, "Pendulum"): frames of
+// the streams of one connection leave together when the pendulum swings. Every
+// write here is larger than the stream buffer, so write() waits until frames
+// are sent, and its Promise is fulfilled during a swing. Eight streams at once
+// on one connection, four writes of 100 000 bytes each, three rounds. Only
+// 127.0.0.1.
+import { Http2Client, Http2Connection, Http2IncomingRequest, Http2Server } from "tz:http2"
+
+const encoder = new TextEncoder()
+const block = encoder.encode("a".repeat(100000))
+
+async function handle(request: Http2IncomingRequest): Promise<void> {
+  const responded = request.respond({ status: 200 })
+  if (responded.isErr()) return
+  const response = responded.value
+  for (let part = 0; part < 4; part++) {
+    const wrote = await response.write(block)
+    if (wrote.isErr()) {
+      console.log(`server: ${wrote.error.message}`)
+      return
+    }
+  }
+  const ended = await response.end()
+  if (ended.isErr()) console.log(`server: ${ended.error.message}`)
+}
+
+async function download(connection: Http2Connection, index: int): Promise<string> {
+  const started = await connection.request({ method: "GET", path: `/${index}` })
+  if (started.isErr()) return `${index}: ${started.error.code}`
+  const call = started.value
+  const ended = await call.end()
+  if (ended.isErr()) return `${index}: ${ended.error.code}`
+  const answered = await call.response()
+  if (answered.isErr()) return `${index}: ${answered.error.code}`
+  let length = 0
+  for await (const chunkResult of answered.value.body()) {
+    if (chunkResult.isErr()) return `${index}: ${chunkResult.error.code}`
+    length += chunkResult.value.length
+  }
+
+  return `${index}: ${length}`
+}
+
+const listened = new Http2Server({ port: 0, hostname: "127.0.0.1" }, handle).listen()
+if (listened.isErr()) {
+  console.log(listened.error.message)
+  process.exit(1)
+}
+const listening = listened.value
+const client = new Http2Client({ url: `http://127.0.0.1:${listening.port}` })
+const connected = await client.connect()
+if (connected.isErr()) {
+  console.log(connected.error.message)
+  process.exit(1)
+}
+const connection = connected.value
+for (let round = 0; round < 3; round++) {
+  const calls: Promise<string>[] = []
+  for (let index = 0; index < 8; index++) calls.push(download(connection, index))
+  const lengths = await Promise.all(calls)
+  console.log(lengths.join(" "))
+}
+await connection.close()
+await listening.stop()
