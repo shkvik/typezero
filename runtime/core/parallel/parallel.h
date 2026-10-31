@@ -17,6 +17,8 @@ typedef struct TzThread {
   void *caches[4];
   TzHeap heap;
   int32_t awaited_call;
+  int32_t send_count;
+  void *sends[16];
 } TzThread;
 
 enum { TZ_CACHE_INTL = 0, TZ_CACHE_DATE_FORMAT = 1 };

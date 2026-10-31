@@ -878,7 +878,7 @@ void tz_h2_respond(NetConn *s, int32_t status, const TzArray *headers, int no_bo
     nghttp2_submit_response2(h->session, s->h2id, f.nva, f.n, &provider);
   }
   fields_free(&f);
-  send_frames(s->h2parent);
+  net_send_later(s->h2parent);
 }
 
 void tz_http_stream_done(void *conn, TzMaker make) {
@@ -895,7 +895,7 @@ void tz_h2_flush(NetConn *s) {
   }
   H2 *h = session_of(s);
   nghttp2_session_resume_data(h->session, s->h2id);
-  send_frames(s->h2parent);
+  net_send_later(s->h2parent);
 }
 
 void tz_h2_end(NetConn *s) {
@@ -933,7 +933,7 @@ static void reset_stream(NetConn *s, uint32_t code) {
     return;
   }
   nghttp2_submit_rst_stream(h->session, NGHTTP2_FLAG_NONE, s->h2id, code);
-  send_frames(s->h2parent);
+  net_send_later(s->h2parent);
 }
 
 void tz_h2_reset(NetConn *s) { reset_stream(s, NGHTTP2_INTERNAL_ERROR); }
@@ -989,6 +989,12 @@ void tz_h2_consumed(NetConn *s, size_t length) {
     if (!h->done) {
       nghttp2_session_consume(h->session, s->h2id, n);
     }
+  }
+}
+
+void tz_h2_send_listed(NetConn *c) {
+  if (c->h2) {
+    send_frames(c);
   }
 }
 
@@ -1174,7 +1180,7 @@ void tz_h2_request(NetConn *s, TzStr method, TzStr target, const TzArray *header
     return;
   }
   s->h2id = id;
-  send_frames(s->h2parent);
+  net_send_later(s->h2parent);
 }
 
 void tz_h2_cancel(NetConn *s) { reset_stream(s, NGHTTP2_CANCEL); }

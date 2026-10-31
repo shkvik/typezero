@@ -198,6 +198,7 @@ void net_input_room(NetConn *c, uint32_t room);
 uint8_t *net_seal_reserve(NetConn *c, size_t length);
 void net_write(NetConn *c, const void *data, size_t length);
 void net_flush(NetConn *c);
+void net_send_later(NetConn *c);
 uint8_t *net_reserve(NetConn *c, size_t length);
 void net_wrote(NetConn *c, size_t length);
 size_t net_pending_output(const NetConn *c);

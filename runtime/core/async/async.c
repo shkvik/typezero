@@ -1187,7 +1187,9 @@ static void run_immediates(void) {
   release(prev);
 }
 
-static int loop_alive(void) { return tz_timer_refs > 0 || tz_immediate_refs > 0 || tz_io_alive(); }
+static int loop_alive(void) {
+  return tz_timer_refs > 0 || tz_immediate_refs > 0 || tz_io_alive() || tz_thread.send_count;
+}
 
 void tz_async_run(int32_t es_module) {
   if (es_module) {

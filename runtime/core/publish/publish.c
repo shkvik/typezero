@@ -11,7 +11,6 @@
 #include "runtime/library/bytes/bytes/bytes.h"
 #include "runtime/library/decimal/decimal/decimal.h"
 #include "runtime/library/json/json/json.h"
-#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -174,11 +173,6 @@ static void publish_contents(void *item) {
     tz_publish_value(box->type, box + 1);
   } else if (flags & TZ_LAYOUT_TIMER) {
   } else {
-    if (getenv("TZ_PUBLISH_DEBUG")) {
-      fprintf(stderr, "publish fallback: object %p layout %p drop %p count %u flags %x\n", object,
-              (const void *)layout, (void *)layout->drop, layout->count, layout->flags);
-      fflush(stderr);
-    }
     for (uint32_t i = 0; i < layout->count; ++i) {
       const TzField *f = &layout->fields[i];
       if (f->offset != TZ_FIELD_METHOD && f->offset != TZ_FIELD_GETTER) {

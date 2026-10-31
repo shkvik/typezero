@@ -230,6 +230,7 @@ static int run_job(TzJob *job) {
   } else {
     r->run(r, job->source);
   }
+  tz_io_send_pending();
   if (job->ahead < 0) {
     job->ahead = ticks() - job->started;
   }
@@ -280,6 +281,7 @@ static DWORD WINAPI worker_main(void *arg) {
       }
     } else {
       ((void (*)(OVERLAPPED_ENTRY *))entry.lpCompletionKey)(&entry);
+      tz_io_send_pending();
     }
     __atomic_fetch_sub(&tz_pool_running, 1, __ATOMIC_RELAXED);
   }
@@ -689,6 +691,7 @@ int32_t tz_ahead_defer(TzPromise *p) {
 static void grant_turn(TzReactor *r, TzPromise *source) {
   (void)source;
   TzJob *job = (TzJob *)((char *)r - offsetof(TzJob, grant));
+  tz_io_send_pending();
   set_state(&job->state, JOB_GRANTED);
   ++tz_pool_stat_waited;
   tz_pool_main_waits = job;
@@ -815,6 +818,7 @@ static int32_t finish_job(TzReactor *r, TzPromise **source) {
   }
   ++tz_pool_stat_waited;
   tz_pool_main_waits = job;
+  tz_io_send_pending();
   for (;;) {
     int32_t now = __atomic_load_n(&job->state, __ATOMIC_ACQUIRE);
     if (now == JOB_DONE) {
@@ -846,6 +850,10 @@ TZ_NOINLINE void tz_order_wait(void) {
   }
   if (tz_thread.conn_locks) {
     tz_panic("the parallel runtime: waits for the turn holding a connection", 61);
+  }
+  tz_io_send_pending();
+  if (tz_thread.turn) {
+    return;
   }
   job->ahead = ticks() - job->started;
   if (job->early && !job->listed) {

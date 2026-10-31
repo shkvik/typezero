@@ -69,10 +69,48 @@ TZ_NOINLINE void tz_group_check_unstored(const void *object);
 #define LEADER_PUBLISHED ((uintptr_t)1)
 
 static inline TzObject *leader_of(const void *member) {
-  return (TzObject *)((uintptr_t)tz_group_link(member)->leader & ~LEADER_PUBLISHED);
+#if TZ_PARALLEL
+  void *leader = __atomic_load_n(&tz_group_link(member)->leader, __ATOMIC_ACQUIRE);
+#else
+  void *leader = tz_group_link(member)->leader;
+#endif
+
+  return (TzObject *)((uintptr_t)leader & ~LEADER_PUBLISHED);
 }
 
+static inline void set_leader(void *member, void *leader) {
 #if TZ_PARALLEL
+  __atomic_store_n(&tz_group_link(member)->leader, leader, __ATOMIC_RELEASE);
+#else
+  tz_group_link(member)->leader = leader;
+#endif
+}
+
+static inline int is_leader_count(int64_t rc) { return rc >= TZ_RC_DYING - (INT64_C(1) << 59); }
+
+#if TZ_PARALLEL
+static inline int64_t rc_load(const TzObject *leader) {
+  return __atomic_load_n(&leader->rc, __ATOMIC_RELAXED);
+}
+
+static inline int64_t rc_add(TzObject *leader, int64_t n) {
+  return __atomic_add_fetch(&leader->rc, n, __ATOMIC_ACQ_REL);
+}
+
+static TzObject *count_in_group(const void *member, int64_t n, int64_t *after) {
+  for (;;) {
+    TzObject *leader = leader_of(member);
+    int64_t now = rc_add(leader, n);
+    if (is_leader_count(now - n)) {
+      *after = now;
+      return leader;
+    }
+    while (leader_of(member) == leader) {
+      tz_cpu_relax();
+    }
+  }
+}
+
 static inline int member_published(const void *member) {
   void *leader = __atomic_load_n(&tz_group_link(member)->leader, __ATOMIC_RELAXED);
 
@@ -80,9 +118,21 @@ static inline int member_published(const void *member) {
 }
 
 static inline int published(const TzObject *leader) { return member_published(leader); }
+#else
+static inline int64_t rc_load(const TzObject *leader) { return leader->rc; }
 
-static inline int lock_for(const void *a, const void *b) {
-  if (!tz_group_listing && !member_published(a) && (!b || !member_published(b))) {
+static inline int64_t rc_add(TzObject *leader, int64_t n) { return leader->rc += n; }
+
+static TzObject *count_in_group(const void *member, int64_t n, int64_t *after) {
+  TzObject *leader = leader_of(member);
+  *after = rc_add(leader, n);
+
+  return leader;
+}
+#endif
+
+static inline int lock_listing(void) {
+  if (!tz_group_listing) {
     return 0;
   }
   group_lock();
@@ -90,21 +140,17 @@ static inline int lock_for(const void *a, const void *b) {
   return 1;
 }
 
-static inline void unlock_for(int locked) {
+static inline void unlock_listing(int locked) {
   if (locked) {
     group_unlock();
   }
 }
-#else
-#define lock_for(a, b) 0
-#define unlock_for(locked) ((void)(locked))
-#endif
 
 static inline void *untagged(uintptr_t next) { return (void *)(next & ~TZ_GROUP_ARRAY); }
 
 static inline void *next_of(const void *member) { return untagged(tz_group_link(member)->next); }
 
-static inline int is_eternal(const TzObject *leader) { return leader->rc >= TZ_RC_ETERNAL; }
+static inline int is_eternal(const TzObject *leader) { return rc_load(leader) >= TZ_RC_ETERNAL; }
 
 static inline size_t front_size(void) {
   return sizeof(TzGroupLink) + (tz_group_listing ? sizeof(Listed) : 0);
@@ -177,27 +223,25 @@ TZ_HOT void tz_group_obj_free(void *object) {
 }
 
 #if TZ_PARALLEL
-TZ_NOINLINE void tz_group_retain_locked(void *member) {
-  group_lock();
-  ++leader_of(member)->rc;
+TZ_NOINLINE void tz_group_retain_shared(void *member) {
+  int locked = lock_listing();
+  int64_t after;
+  count_in_group(member, 1, &after);
   if (tz_group_listing) {
     ++listed(member)->outside;
   }
-  group_unlock();
+  unlock_listing(locked);
 }
 
-TZ_NOINLINE void tz_group_release_locked(void *member) {
-  group_lock();
-  TzObject *leader = leader_of(member);
+TZ_NOINLINE void tz_group_release_shared(void *member) {
+  int locked = lock_listing();
+  int64_t after;
+  TzObject *leader = count_in_group(member, -1, &after);
   if (tz_group_listing) {
     --listed(member)->outside;
   }
-  int dead = --leader->rc == TZ_RC_GROUP;
-  if (dead) {
-    leader->rc = TZ_RC_DYING;
-  }
-  group_unlock();
-  if (dead) {
+  unlock_listing(locked);
+  if (after == TZ_RC_GROUP) {
     tz_group_free(leader);
   }
 }
@@ -209,7 +253,7 @@ TZ_HOT void tz_group_retain(void *member) {
   } else if (!tz_group_listing && !member_published(member)) {
     ++leader_of(member)->rc;
   } else {
-    tz_group_retain_locked(member);
+    tz_group_retain_shared(member);
   }
 }
 
@@ -225,7 +269,7 @@ TZ_HOT void tz_group_release(void *member) {
       tz_group_free(leader);
     }
   } else {
-    tz_group_release_locked(member);
+    tz_group_release_shared(member);
   }
 }
 #else
@@ -264,8 +308,8 @@ static void each_member(TzObject *leader, void (*each)(void *member, int32_t arr
 }
 
 static void publish_member(void *member, int32_t array) {
-  TzGroupLink *link = tz_group_link(member);
-  link->leader = (void *)((uintptr_t)link->leader | LEADER_PUBLISHED);
+  TzObject *leader = leader_of(member);
+  set_leader(member, (void *)((uintptr_t)leader | LEADER_PUBLISHED));
   tz_publish_contents(member, array);
 }
 
@@ -297,16 +341,21 @@ static TzObject *merge(TzObject *a, TzObject *b) {
     joined = (void *)((uintptr_t)b | LEADER_PUBLISHED);
   }
 #endif
+#if TZ_PARALLEL
+  int64_t moved = __atomic_exchange_n(&a->rc, TZ_RC_MEMBER, __ATOMIC_ACQ_REL);
+#else
+  int64_t moved = a->rc;
+  a->rc = TZ_RC_MEMBER;
+#endif
+  rc_add(b, moved - TZ_RC_GROUP);
   void *m = a;
   do {
-    tz_group_link(m)->leader = joined;
+    set_leader(m, joined);
     m = next_of(m);
   } while (m != a);
   uintptr_t t = tz_group_link(a)->next;
   tz_group_link(a)->next = tz_group_link(b)->next;
   tz_group_link(b)->next = t;
-  b->rc += a->rc - TZ_RC_GROUP;
-  a->rc = TZ_RC_MEMBER;
   if (tz_group_listing) {
     listed(b)->size += listed(a)->size;
     if (tz_group_debugging) {
@@ -319,7 +368,7 @@ static TzObject *merge(TzObject *a, TzObject *b) {
 
 TZ_NOINLINE void tz_group_link_groups(TzObject *owner, TzObject *leader, void *ref) {
   if (is_eternal(leader)) {
-    --leader->rc;
+    rc_add(leader, -1);
     if (tz_group_listing) {
       --listed(ref)->outside;
     }
@@ -328,11 +377,49 @@ TZ_NOINLINE void tz_group_link_groups(TzObject *owner, TzObject *leader, void *r
   if (is_eternal(owner)) {
     return;
   }
-  --merge(owner, leader)->rc;
+  rc_add(merge(owner, leader), -1);
   if (tz_group_listing) {
     --listed(ref)->outside;
   }
 }
+
+#if TZ_PARALLEL
+TZ_NOINLINE void tz_group_store_shared(void *owner, void *ref) {
+  if (!tz_group_listing && leader_of(owner) == leader_of(ref)) {
+    int64_t after;
+    count_in_group(ref, -1, &after);
+    return;
+  }
+  group_lock();
+  TzObject *lo = leader_of(owner), *lr = leader_of(ref);
+  if (lo == lr) {
+    rc_add(lr, -1);
+    if (tz_group_listing) {
+      --listed(ref)->outside;
+    }
+  } else {
+    tz_group_link_groups(lo, lr, ref);
+  }
+  group_unlock();
+}
+
+TZ_NOINLINE void tz_group_unstore_shared(void *owner, void *ref, int32_t member) {
+  int locked = lock_listing();
+  if (member && (leader_of(owner) == leader_of(ref) || is_eternal(leader_of(ref)))) {
+    unlock_listing(locked);
+    return;
+  }
+  int64_t after;
+  TzObject *lr = count_in_group(ref, -1, &after);
+  if (tz_group_listing) {
+    --listed(ref)->outside;
+  }
+  unlock_listing(locked);
+  if (after == TZ_RC_GROUP) {
+    tz_group_free(lr);
+  }
+}
+#endif
 
 TZ_HOT void tz_group_store(void *owner, void *ref) {
   if (!ref) {
@@ -347,7 +434,12 @@ TZ_HOT void tz_group_store(void *owner, void *ref) {
   if (!tz_rc_is_member(((TzObject *)owner)->rc)) {
     return;
   }
-  int locked = lock_for(owner, ref);
+#if TZ_PARALLEL
+  if (tz_group_listing || member_published(owner) || member_published(ref)) {
+    tz_group_store_shared(owner, ref);
+    return;
+  }
+#endif
   TzObject *lo = leader_of(owner), *lr = leader_of(ref);
   if (lo == lr) {
     --lr->rc;
@@ -357,7 +449,6 @@ TZ_HOT void tz_group_store(void *owner, void *ref) {
   } else {
     tz_group_link_groups(lo, lr, ref);
   }
-  unlock_for(locked);
 }
 
 TZ_HOT void tz_group_unstore(void *owner, void *ref) {
@@ -368,21 +459,20 @@ TZ_HOT void tz_group_unstore(void *owner, void *ref) {
   }
 #endif
   int member = tz_rc_is_member(((TzObject *)owner)->rc);
-  int locked = lock_for(ref, member ? owner : NULL);
+#if TZ_PARALLEL
+  if (tz_group_listing || member_published(ref) || (member && member_published(owner))) {
+    tz_group_unstore_shared(owner, ref, member);
+    return;
+  }
+#endif
   TzObject *lr = leader_of(ref);
   if (member && (leader_of(owner) == lr || is_eternal(lr))) {
-    unlock_for(locked);
     return;
   }
   if (tz_group_listing) {
     --listed(ref)->outside;
   }
-  int dead = --lr->rc == TZ_RC_GROUP;
-  if (dead) {
-    lr->rc = TZ_RC_DYING;
-  }
-  unlock_for(locked);
-  if (dead) {
+  if (--lr->rc == TZ_RC_GROUP) {
     tz_group_free(lr);
   }
 }
@@ -392,16 +482,16 @@ int32_t tz_group_store_within(void *owner, void *ref) {
       !tz_rc_is_member(((TzObject *)ref)->rc)) {
     return 0;
   }
-  int locked = lock_for(owner, ref);
-  TzObject *lr = leader_of(ref);
-  int within = leader_of(owner) == lr;
+  int locked = lock_listing();
+  int within = leader_of(owner) == leader_of(ref);
   if (within) {
-    --lr->rc;
+    int64_t after;
+    count_in_group(ref, -1, &after);
     if (tz_group_listing) {
       --listed(ref)->outside;
     }
   }
-  unlock_for(locked);
+  unlock_listing(locked);
 
   return within;
 }
@@ -410,15 +500,15 @@ void tz_group_take(void *owner, void *ref) {
   if (!tz_rc_is_member(((TzObject *)owner)->rc) || !tz_rc_is_member(((TzObject *)ref)->rc)) {
     return;
   }
-  int locked = lock_for(owner, ref);
-  TzObject *lr = leader_of(ref);
-  if (leader_of(owner) == lr || is_eternal(lr)) {
-    ++lr->rc;
+  int locked = lock_listing();
+  if (leader_of(owner) == leader_of(ref) || is_eternal(leader_of(ref))) {
+    int64_t after;
+    count_in_group(ref, 1, &after);
     if (tz_group_listing) {
       ++listed(ref)->outside;
     }
   }
-  unlock_for(locked);
+  unlock_listing(locked);
 }
 
 #if TZ_PARALLEL
@@ -426,21 +516,21 @@ void tz_group_publish(void *member, void (*each)(void *member, int32_t array)) {
   if (member_published(member)) {
     return;
   }
-  group_lock();
+  int locked = lock_listing();
   TzObject *leader = leader_of(member);
+  void *marked = (void *)((uintptr_t)leader | LEADER_PUBLISHED);
   uintptr_t at = tz_group_link(leader)->next;
   for (;;) {
     void *m = untagged(at);
-    TzGroupLink *link = tz_group_link(m);
-    uintptr_t following = link->next;
-    link->leader = (void *)((uintptr_t)leader | LEADER_PUBLISHED);
+    uintptr_t following = tz_group_link(m)->next;
+    set_leader(m, marked);
     each(m, (at & TZ_GROUP_ARRAY) != 0);
     if (m == leader) {
       break;
     }
     at = following;
   }
-  group_unlock();
+  unlock_listing(locked);
 }
 
 int32_t tz_group_published(const void *member) { return member_published(member); }
@@ -496,8 +586,8 @@ static void pin_one(void *owner, void *ref) {
   }
   group_lock();
   TzObject *leader = leader_of(ref);
-  if (leader->rc < TZ_RC_ETERNAL) {
-    leader->rc += TZ_RC_ETERNAL - TZ_RC_GROUP;
+  if (!is_eternal(leader)) {
+    rc_add(leader, TZ_RC_ETERNAL - TZ_RC_GROUP);
   }
   group_unlock();
 }

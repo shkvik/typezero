@@ -4,7 +4,7 @@
 #include "runtime/core/closure/closure.h"
 #include "runtime/core/tzrt/tzrt.h"
 
-#define TZ_RC_MEMBER INT64_MIN
+#define TZ_RC_MEMBER (INT64_MIN + (INT64_C(1) << 59))
 #define TZ_RC_DYING (-(INT64_C(1) << 62) - (INT64_C(1) << 60))
 #define TZ_RC_GROUP (-(INT64_C(1) << 62))
 #define TZ_RC_ETERNAL (-(INT64_C(1) << 61))

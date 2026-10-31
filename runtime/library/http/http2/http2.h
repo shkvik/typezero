@@ -26,6 +26,7 @@ int tz_h2_idle(const NetConn *c);
 void tz_h2_release(NetConn *c);
 void tz_h2_consumed(NetConn *s, size_t length);
 void tz_h2_send_pending(NetConn *s);
+void tz_h2_send_listed(NetConn *c);
 int tz_h2_head_done(const NetConn *s);
 int64_t tz_h2_respond_once(NetConn *s, int32_t status, const TzArray *headers);
 
