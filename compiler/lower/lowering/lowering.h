@@ -2,6 +2,7 @@
 
 #include "compiler/memory/memory_plan/memory_plan.h"
 #include "compiler/parallel/parallel_analysis/parallel_analysis.h"
+#include "compiler/pipeline/build_options/build_options.h"
 #include "compiler/program/ast/ast.h"
 #include "compiler/program/types/types.h"
 #include "llvm/ADT/DenseMap.h"
@@ -112,6 +113,7 @@ class RegexNativeLowerer;
 class ResultLowerer;
 class ResultCombineLowerer;
 class ErrSites;
+class DebugInfo;
 class StreamLowerer;
 class TzModulesLowerer;
 
@@ -124,6 +126,11 @@ public:
   void setFeatures(const FeatureRegistry *features) { features_ = features; }
   void setParallelPlan(const ParallelPlan *plan);
   void setMemoryPlan(const MemoryPlan *memory) { memory_ = memory; }
+  void setDebug(DebugLevel level, bool optimized, bool codeView) {
+    debugLevel_ = level;
+    optimized_ = optimized;
+    codeView_ = codeView;
+  }
   bool parallel() const { return parallel_; }
   void orderAt(llvm::SMLoc loc);
 
@@ -433,6 +440,9 @@ private:
   llvm::Function *instanceReleaseFn_ = nullptr;
   llvm::DenseSet<const CallExpr *> tailJumps_;
   llvm::SMLoc loc_;
+  DebugLevel debugLevel_ = DebugLevel::None;
+  bool optimized_ = true;
+  bool codeView_ = true;
   const llvm::SourceMgr *sourceMgr_ = nullptr;
   std::string mismatch_;
 
@@ -525,6 +535,7 @@ public:
   ResultLowerer &resultLowerer() const { return *resultLowererPart_; }
   ResultCombineLowerer &resultCombineLowerer() const { return *resultCombineLowererPart_; }
   ErrSites &errSites() const { return *errSitesPart_; }
+  DebugInfo &debugInfo() const { return *debugInfoPart_; }
   StreamLowerer &streamLowerer() const { return *streamLowererPart_; }
   TzModulesLowerer &tzModulesLowerer() const { return *tzModulesLowererPart_; }
 
@@ -621,6 +632,8 @@ private:
   friend class ResultLowerer;
   friend class ResultCombineLowerer;
   friend class ErrSites;
+  friend class DebugInfo;
+  friend class DebugTypes;
   friend class StreamLowerer;
   friend class TzModulesLowerer;
   std::unique_ptr<ModuleBuilder> moduleBuilderPart_;
@@ -709,6 +722,7 @@ private:
   std::unique_ptr<ResultLowerer> resultLowererPart_;
   std::unique_ptr<ResultCombineLowerer> resultCombineLowererPart_;
   std::unique_ptr<ErrSites> errSitesPart_;
+  std::unique_ptr<DebugInfo> debugInfoPart_;
   std::unique_ptr<StreamLowerer> streamLowererPart_;
   std::unique_ptr<TzModulesLowerer> tzModulesLowererPart_;
 };

@@ -266,6 +266,7 @@ BlockStmt *StmtParser::parseBlock() {
       parser_.cursor().synchronize();
     }
   }
+  block->end = parser_.tok_.loc();
   parser_.cursor().expect(Tok::RBrace, "to close the block");
 
   return block;

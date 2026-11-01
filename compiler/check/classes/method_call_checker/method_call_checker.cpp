@@ -33,6 +33,7 @@ MethodCallChecker::MethodCallChecker(Checker &checker) : checker_(checker) {}
 Expr *MethodCallChecker::checkMethodCall(CallExpr *call, MemberExpr *member, const Type *expected) {
   ClassDecl *cls = ClassDeclarer::classOf(member->object->type);
   checker_.classDeclarer().completeClass(cls);
+  checker_.tzModulesChecker().noteTlsMethod(member, cls);
   call->type = Type::error();
   member->type = Type::error();
   llvm::StringRef name = member->name;

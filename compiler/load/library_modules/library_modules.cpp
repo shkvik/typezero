@@ -145,6 +145,7 @@ std::optional<SourceFile> LibraryModules::parseLibraryFile(llvm::StringRef file,
   unsigned id = loader_.sourceMgr_.AddNewSourceBuffer(
       llvm::MemoryBuffer::getMemBufferCopy((*buffer)->getBuffer(), name), llvm::SMLoc());
   buffers.push_back(id);
+  loader_.libraryBuffers_[id] = std::string(path);
   if (!tree.empty()) {
     loader_.treeBuffers_[id] = tree;
   }
@@ -184,6 +185,7 @@ Module *LibraryModules::libraryModule(llvm::StringRef file, llvm::StringRef name
   module->builtin = true;
   module->buffers = std::move(buffers);
   for (unsigned id : module->buffers) {
+    module->bufferPaths.push_back({id, loader_.libraryBuffers_.lookup(id)});
     auto tree = loader_.treeBuffers_.find(id);
     if (tree != loader_.treeBuffers_.end()) {
       module->bufferFiles.push_back({id, tree->second});

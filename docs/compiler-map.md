@@ -379,6 +379,8 @@ lower/                         проход LowerPass: программа → LL
     class_lowerer/             ClassLowerer: new, вызов метода, instanceof
     decorator_lowerer/         DecoratorLowerer: вызовы декораторов, метаданные
     inherit_lowerer/           InheritLowerer: выбор метода по классу, таблицы интерфейсов
+  debug_info/                  DebugInfo: отладочная информация — функции, файлы, строки .tz, переменные
+  debug_types/                 DebugTypes: типы tz для отладчика (--debug) по их раскладке в памяти
   expr/                        выражения в IR
     assign_lowerer/            AssignLowerer: присваивания, ??=, ++
     binary_lowerer/            BinaryLowerer: арифметика и сравнения

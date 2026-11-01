@@ -2,6 +2,8 @@
 // each thread has 1 GB of stack, and running out of it is fatal, with code 2.
 // expect-exit: 2
 // expect-stderr: panic: stack overflow
+// expect-stderr: at grow (
+// expect-stderr: [previous line repeated
 function grow(n: int): int {
   return n < 0 ? 0 : grow(n + 1) + grow(n + 2)
 }

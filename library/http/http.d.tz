@@ -4,8 +4,9 @@ import { WebSocket } from "tz:websocket";
 
 /**
  * What a server answers each request with: a request in, a response out, at
- * once or later. A function, an async function, or `app.fetch` of hono (it
- * gets `client` as its second argument, as under Deno).
+ * once or later. A function, an async function, or `app.fetch` of a framework
+ * in the style of fetch (it gets `client` as its second argument, as under
+ * Deno).
  *
  * The handler answers its own errors with a status: 400 for bad JSON, 500 for
  * a database that is down. There are no exceptions for the server to turn
@@ -273,11 +274,16 @@ export type ListenErrorCode =
  * console.log(`listening on ${listening.value.url.href()}`);
  *
  * @example
- * // With hono:
- * const app = new Hono();
- * app.get("/", (c) => c.text("Hello"));
- * const server = new Server({ port: 3000 }, app.fetch);
- * const listening = server.listen();
+ * // Routes without a framework: the path and regular expressions with named
+ * // groups, which are compiled when the program is built.
+ * const app = async (request: Request): Promise<Response> => {
+ *   const url = URL.parse(request.url);
+ *   const path = url.isOk() ? url.value.pathname() : "/";
+ *   const user = path.match(/^\/users\/(?<id>[^/]+)$/);
+ *   if (user != undefined) return Response.json({ id: user.groups.id });
+ *   return new Response("no such path", { status: 404 });
+ * };
+ * const listening = new Server({ port: 3000 }, (request) => app(request)).listen();
  */
 export declare class Server {
   /** A server without a socket; `listen` opens one. */

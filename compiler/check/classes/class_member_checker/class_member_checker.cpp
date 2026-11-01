@@ -78,6 +78,7 @@ bool ClassMemberChecker::checkAccess(const ClassDecl *cls, Access access, llvm::
 Expr *ClassMemberChecker::checkClassMember(MemberExpr *member, const Type *expected) {
   ClassDecl *cls = ClassDeclarer::classOf(member->object->type);
   checker_.classDeclarer().completeClass(cls);
+  checker_.tzModulesChecker().noteTlsMethod(member, cls);
   member->type = Type::error();
   llvm::StringRef name = member->name;
   if (Expr *date = checker_.fsDeclarer().checkStatsDate(member, cls)) {

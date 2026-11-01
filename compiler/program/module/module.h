@@ -17,6 +17,7 @@ struct Module {
   bool builtin = false;
   std::vector<unsigned> buffers;
   std::vector<std::pair<unsigned, std::string>> bufferFiles;
+  std::vector<std::pair<unsigned, std::string>> bufferPaths;
   unsigned order = 0;
   std::vector<Module *> loadPath;
   std::unique_ptr<DeclarationFile> declaration;

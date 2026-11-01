@@ -1,6 +1,7 @@
 #include "compiler/lower/stmt/stmt_lowerer/stmt_lowerer.h"
 #include "compiler/lower/async/async_lowerer/async_lowerer.h"
 #include "compiler/lower/classes/decorator_lowerer/decorator_lowerer.h"
+#include "compiler/lower/debug_info/debug_info.h"
 #include "compiler/lower/expr/assign_lowerer/assign_lowerer.h"
 #include "compiler/lower/expr/expr_lowerer/expr_lowerer.h"
 #include "compiler/lower/function_frame/function_frame.h"
@@ -33,12 +34,15 @@ StmtLowerer::StmtLowerer(Lowering &lowering) : lowering_(lowering) {}
 
 void StmtLowerer::emitStmt(Stmt *stmt) {
   lowering_.orderAt(stmt->loc());
+  llvm::DebugLoc outer = lowering_.debugInfo().here();
+  lowering_.debugInfo().at(stmt->loc());
   switch (stmt->kind()) {
   case Stmt::Kind::Block:
     lowering_.functionFrame().pushScope();
     emitStatements(cast<BlockStmt>(stmt));
+    lowering_.debugInfo().at(cast<BlockStmt>(stmt)->end);
     lowering_.functionFrame().popScope();
-    break;
+    return;
   case Stmt::Kind::VarDecl:
     emitVarDecl(cast<VarDeclStmt>(stmt));
     break;
@@ -92,6 +96,7 @@ void StmtLowerer::emitStmt(Stmt *stmt) {
     lowering_.builder_.CreateCall(lowering_.rt_.debugger);
     break;
   }
+  lowering_.debugInfo().restore(outer);
 }
 
 void StmtLowerer::emitStatements(BlockStmt *block) {

@@ -1,5 +1,6 @@
 #include "compiler/lower/functions/env_lowerer/env_lowerer.h"
 #include "compiler/lower/classes/class_descriptors/class_descriptors.h"
+#include "compiler/lower/debug_info/debug_info.h"
 #include "compiler/lower/function_frame/function_frame.h"
 #include "compiler/lower/functions/closure_lowerer/closure_lowerer.h"
 #include "compiler/lower/layouts/object_layouts/object_layouts.h"
@@ -297,6 +298,7 @@ void EnvLowerer::bindCaptures(const FunctionDecl *fn) {
       } else {
         lowering_.addresses_[var] = field;
       }
+      lowering_.debugInfo().declare(var, lowering_.functionFrame().addressOf(var));
     }
     return;
   }
@@ -312,6 +314,7 @@ void EnvLowerer::bindCaptures(const FunctionDecl *fn) {
     } else {
       lowering_.addresses_[var] = field;
     }
+    lowering_.debugInfo().declare(var, lowering_.functionFrame().addressOf(var));
   }
 }
 

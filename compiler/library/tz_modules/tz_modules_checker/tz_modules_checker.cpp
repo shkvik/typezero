@@ -210,6 +210,19 @@ void TzModulesChecker::noteServeOptions(const Expr *options) {
   }
 }
 
+void TzModulesChecker::noteTlsMethod(const MemberExpr *member, const ClassDecl *cls) {
+  if (checker_.file_->usesTls || member->name != "startTls" ||
+      checker_.libraryCalls().inLibrary(member->loc())) {
+    return;
+  }
+  for (; cls; cls = cls->parent) {
+    if (cls->library && cls->name == "Socket") {
+      checker_.file_->usesTls = true;
+      return;
+    }
+  }
+}
+
 void TzModulesChecker::noteHttpsValue(const FunctionDecl *fn, llvm::SMLoc loc) {
   if (fn && !checker_.libraryCalls().inLibrary(loc) &&
       fn == checker_.libFunctions_.lookup("fetch")) {

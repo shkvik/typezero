@@ -1,4 +1,5 @@
 #include "runtime/core/output/output.h"
+#include "runtime/core/output/stack_trace.h"
 #include "runtime/core/array/array.h"
 #include "runtime/core/closure/closure.h"
 #include "runtime/core/error/error.h"
@@ -189,40 +190,42 @@ void tz_out_write(const char *data, size_t len) {
   tz_out_len += len;
 }
 
-#ifdef _WIN32
-static void crash_trace(EXCEPTION_POINTERS *info) {
-  char line[128];
-  HMODULE base = GetModuleHandleA(NULL);
-  uintptr_t at = (uintptr_t)info->ExceptionRecord->ExceptionAddress;
-  int n = snprintf(line, sizeof line, "tz: crash %08lx at +0x%llx (thread %d)\n",
-                   (unsigned long)info->ExceptionRecord->ExceptionCode,
-                   (unsigned long long)(at - (uintptr_t)base), (int)tz_thread_index());
-  stream_write(&tz_err_stream, line, (size_t)n);
-  uintptr_t *sp = (uintptr_t *)info->ContextRecord->Rsp;
-  IMAGE_NT_HEADERS *nt = (IMAGE_NT_HEADERS *)((char *)base + ((IMAGE_DOS_HEADER *)base)->e_lfanew);
-  uintptr_t lo = (uintptr_t)base, hi = lo + nt->OptionalHeader.SizeOfImage;
-  int shown = 0;
-  for (int i = 0; i < 4096 && shown < 40; ++i) {
-    if (sp[i] > lo && sp[i] < hi) {
-      n = snprintf(line, sizeof line, "  +0x%llx\n", (unsigned long long)(sp[i] - lo));
-      stream_write(&tz_err_stream, line, (size_t)n);
-      ++shown;
-    }
-  }
-}
+void tz_err_raw(const char *data, size_t len) { stream_write(&tz_err_stream, data, len); }
 
+#ifdef _WIN32
 static LONG WINAPI on_exception(EXCEPTION_POINTERS *info) {
-  if (info->ExceptionRecord->ExceptionCode == EXCEPTION_ACCESS_VIOLATION &&
-      getenv("TZ_CRASH_TRACE")) {
-    crash_trace(info);
-    return EXCEPTION_CONTINUE_SEARCH;
-  }
   if (info->ExceptionRecord->ExceptionCode != EXCEPTION_STACK_OVERFLOW) {
     return EXCEPTION_CONTINUE_SEARCH;
   }
   static const char message[] = "panic: stack overflow\n";
   tz_out_flush(1);
   stream_write(&tz_err_stream, message, sizeof message - 1);
+  tz_stack_print(info->ContextRecord);
+  TerminateProcess(GetCurrentProcess(), 2);
+
+  return EXCEPTION_CONTINUE_SEARCH;
+}
+
+static LONG WINAPI on_unhandled(EXCEPTION_POINTERS *info) {
+  DWORD code = info->ExceptionRecord->ExceptionCode;
+#if defined(_M_X64) || defined(__x86_64__)
+  if (code == EXCEPTION_BREAKPOINT) {
+    info->ContextRecord->Rip += 1;
+    return EXCEPTION_CONTINUE_EXECUTION;
+  }
+#endif
+  const char *what = code == EXCEPTION_ACCESS_VIOLATION        ? "access violation"
+                     : code == EXCEPTION_ILLEGAL_INSTRUCTION   ? "illegal instruction"
+                     : code == EXCEPTION_INT_DIVIDE_BY_ZERO    ? "integer division by zero"
+                     : code == EXCEPTION_ARRAY_BOUNDS_EXCEEDED ? "array bounds exceeded"
+                                                               : NULL;
+  char line[96];
+  int n = what ? snprintf(line, sizeof line, "panic: internal error: %s\n", what)
+               : snprintf(line, sizeof line, "panic: internal error: exception 0x%08lx\n",
+                          (unsigned long)code);
+  tz_out_rescue();
+  stream_write(&tz_err_stream, line, (size_t)n);
+  tz_stack_print(info->ContextRecord);
   TerminateProcess(GetCurrentProcess(), 2);
 
   return EXCEPTION_CONTINUE_SEARCH;
@@ -244,6 +247,7 @@ void tz_rt_init(void) {
   stream_init(&tz_out_stream, STD_OUTPUT_HANDLE);
   stream_init(&tz_err_stream, STD_ERROR_HANDLE);
   AddVectoredExceptionHandler(1, on_exception);
+  SetUnhandledExceptionFilter(on_unhandled);
 #else
   stream_init(&tz_out_stream, 1);
   stream_init(&tz_err_stream, 2);
@@ -496,6 +500,7 @@ TZ_NORETURN void tz_panic(const char *message, int64_t len) {
   stream_write(&tz_err_stream, "panic: ", 7);
   stream_write(&tz_err_stream, message, (size_t)len);
   stream_write(&tz_err_stream, "\n", 1);
+  tz_stack_print(NULL);
   exit(2);
 }
 

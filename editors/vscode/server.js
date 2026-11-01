@@ -128,4 +128,4 @@ function deactivate() {
   return stop()
 }
 
-module.exports = { activate, deactivate }
+module.exports = { activate, deactivate, findTz }

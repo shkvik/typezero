@@ -3,6 +3,7 @@
 #include "compiler/library/process/process_lowerer/process_lowerer.h"
 #include "compiler/library/regex/matcher_builder/matcher_builder.h"
 #include "compiler/lower/async/promise_lowerer/promise_lowerer.h"
+#include "compiler/lower/debug_info/debug_info.h"
 #include "compiler/lower/expr/expr_lowerer/expr_lowerer.h"
 #include "compiler/lower/function_builder/function_builder.h"
 #include "compiler/lower/function_frame/function_frame.h"
@@ -233,6 +234,7 @@ llvm::Function *AsyncLowerer::emitAsyncMain(SourceFile &file) {
                                       lowering_.module_.get());
   lowering_.functionBuilder().setFunctionAttributes(body);
   lowering_.functionBuilder().beginFunction(body, nullptr);
+  lowering_.debugInfo().beginTopLevel(body);
   Lowering::Coroutine coroutine{};
   lowering_.coro_ = &coroutine;
   Lowering::AsyncState state{};

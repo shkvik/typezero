@@ -18,6 +18,7 @@ int BuildCommand::run(const Args &args, llvm::StringRef output) const {
   }
   BuildOptions options{args.input,    output.str(),     args.optimize,
                        args.emitLLVM, packages.graph(), runtime_};
+  options.debug = args.debug ? DebugLevel::Full : DebugLevel::Lines;
   Program program;
   ErrorPrinter printer(program.sourceMgr, args.hints);
 

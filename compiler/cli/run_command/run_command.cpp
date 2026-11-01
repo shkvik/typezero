@@ -5,6 +5,7 @@
 #include "llvm/ADT/SmallString.h"
 #include "llvm/Support/FileSystem.h"
 #include "llvm/Support/FileUtilities.h"
+#include "llvm/Support/Path.h"
 #include "llvm/Support/Program.h"
 #include "llvm/Support/raw_ostream.h"
 #include <string>
@@ -21,6 +22,9 @@ int RunCommand::run(const Args &args) const {
     return kExitError;
   }
   llvm::FileRemover removeExe(exe);
+  llvm::SmallString<128> pdb(exe);
+  llvm::sys::path::replace_extension(pdb, "pdb");
+  llvm::FileRemover removePdb(pdb);
   BuildCommand build(runtime_);
   if (int status = build.run(args, exe)) {
     return status;

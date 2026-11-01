@@ -1,5 +1,6 @@
 #include "compiler/lower/function_frame/function_frame.h"
 #include "compiler/library/process/process_lowerer/process_lowerer.h"
+#include "compiler/lower/debug_info/debug_info.h"
 #include "compiler/lower/functions/closure_lowerer/closure_lowerer.h"
 #include "compiler/lower/functions/env_lowerer/env_lowerer.h"
 #include "compiler/lower/iterators/async_generator_lowerer/async_generator_lowerer.h"
@@ -136,13 +137,16 @@ llvm::Value *FunctionFrame::createLocal(const VarSymbol *var, llvm::StringRef na
     llvm::Value *old = lowering_.builder_.CreateLoad(lowering_.builder_.getPtrTy(), slot);
     lowering_.builder_.CreateStore(box, slot);
     lowering_.builder_.CreateCall(lowering_.objReleaseFn_, {old});
-    return lowering_.builder_.CreateStructGEP(
+    llvm::Value *value = lowering_.builder_.CreateStructGEP(
         lowering_.envLowerer().boxType(ClosureLowerer::typeOf(var)), box, 2, name);
+    lowering_.debugInfo().declare(var, value);
+    return value;
   }
   llvm::Value *slot = var->type->isManaged()
                           ? createManagedSlot(var->type, name)
                           : createStackSlot(lowering_.moduleBuilder().lower(var->type), name);
   lowering_.addresses_[var] = slot;
+  lowering_.debugInfo().declare(var, slot);
 
   return slot;
 }

@@ -87,7 +87,7 @@ Errors buildProgram(Program &program, const BuildOptions &options) {
 
   llvm::LLVMContext context;
   LowerPass lower(context, target.value(), llvm::sys::path::filename(options.input),
-                  FeatureRegistry::standard());
+                  FeatureRegistry::standard(), options.debug, options.optimize);
   Result<Lowered, Errors> lowered = lower.run(program, plan, memoryPlan);
   if (lowered.isErr()) {
     return lowered.error();

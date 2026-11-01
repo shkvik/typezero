@@ -2,6 +2,7 @@
 #include "compiler/library/tz_modules/tz_modules_lowerer/tz_modules_lowerer.h"
 #include "compiler/lower/async/async_lowerer/async_lowerer.h"
 #include "compiler/lower/classes/decorator_lowerer/decorator_lowerer.h"
+#include "compiler/lower/debug_info/debug_info.h"
 #include "compiler/lower/expr/expr_lowerer/expr_lowerer.h"
 #include "compiler/lower/function_frame/function_frame.h"
 #include "compiler/lower/functions/closure_lowerer/closure_lowerer.h"
@@ -73,6 +74,7 @@ void FunctionBuilder::beginFunction(llvm::Function *function, FunctionDecl *fn) 
   lowering_.groupEnvs_.clear();
   lowering_.builder_.SetInsertPoint(
       llvm::BasicBlock::Create(lowering_.ctx_, "entry", lowering_.function_));
+  lowering_.debugInfo().beginFunction(function, fn);
 }
 
 void FunctionBuilder::emitFunction(FunctionDecl *fn) {
@@ -131,6 +133,7 @@ void FunctionBuilder::emitParams(FunctionDecl *fn, llvm::ArrayRef<llvm::Value *>
         lowering_.functionFrame().createStackSlot(lowering_.builder_.getPtrTy(), "this");
     lowering_.builder_.CreateStore(lowering_.envParam_, slot);
     lowering_.addresses_[fn->thisVar] = slot;
+    lowering_.debugInfo().declare(fn->thisVar, slot);
   }
   for (size_t i = 0; i < fn->params.size(); ++i) {
     const Param &param = fn->params[i];

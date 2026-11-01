@@ -46,6 +46,12 @@ unsigned ObjectLayouts::fieldIndex(const Type *type, llvm::StringRef name) {
   llvm_unreachable("Checker checked that the field exists");
 }
 
+const Lowering::ObjectLayout *ObjectLayouts::builtLayout(const Type *type) const {
+  auto found = objectLayouts_.find(type);
+
+  return found == objectLayouts_.end() || !found->second.type ? nullptr : &found->second;
+}
+
 const Lowering::ObjectLayout &ObjectLayouts::objectLayout(const Type *type) {
   auto [it, inserted] = objectLayouts_.try_emplace(type);
   Lowering::ObjectLayout &layout = it->second;

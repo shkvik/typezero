@@ -1,0 +1,132 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  How a debugger shows the values of a tz program built for debugging
+  (docs/debug.md). tz writes the types of the program into its .pdb under these
+  names and puts this file into the .pdb too, so Visual Studio and VS Code (the
+  C/C++ extension, "cppvsdbg") use it without settings.
+-->
+<AutoVisualizer xmlns="http://schemas.microsoft.com/vstudio/debugger/natvis/2010">
+
+  <Type Name="string">
+    <DisplayString Condition="(meta &amp; 0x3fffffff) == 0">""</DisplayString>
+    <DisplayString Condition="(meta &amp; 0xe000000000000000) == 0x4000000000000000">"{(char*)&amp;obj,[meta &amp; 0x3fffffff]s8b}"</DisplayString>
+    <DisplayString Condition="(meta &amp; 0xc000000000000000) == 0xc000000000000000 &amp;&amp; ((tz_rope*)obj)-&gt;flat.meta != 0">{((tz_rope*)obj)-&gt;flat}</DisplayString>
+    <DisplayString Condition="(meta &amp; 0xc000000000000000) == 0xc000000000000000">{((tz_rope*)obj)-&gt;left} + {((tz_rope*)obj)-&gt;right}</DisplayString>
+    <DisplayString Condition="(meta &amp; 0x2000000000000000) != 0">"{((wchar_t*)((char*)obj + 24)) + ((meta &gt;&gt; 30) &amp; 0x3fffffff),[meta &amp; 0x3fffffff]sub}"</DisplayString>
+    <DisplayString Condition="(meta &amp; 0x1000000000000000) != 0">"{((char*)obj + 24) + ((meta &gt;&gt; 30) &amp; 0x3fffffff),[meta &amp; 0x3fffffff]s8b}"</DisplayString>
+    <DisplayString>"{((char*)obj + 24) + ((meta &gt;&gt; 30) &amp; 0x3fffffff),[meta &amp; 0x3fffffff]sb}"</DisplayString>
+    <Expand>
+      <Item Name="length">meta &amp; 0x3fffffff</Item>
+    </Expand>
+  </Type>
+
+  <Type Name="tz_rope">
+    <DisplayString>{left} + {right}</DisplayString>
+  </Type>
+
+  <Type Name="tz_object" Inheritable="false">
+    <DisplayString>object</DisplayString>
+  </Type>
+
+  <Type Name="Array&lt;*&gt;">
+    <DisplayString>{{ length={length} }}</DisplayString>
+    <Expand>
+      <ArrayItems>
+        <Size>length</Size>
+        <ValuePointer>data</ValuePointer>
+      </ArrayItems>
+    </Expand>
+  </Type>
+
+  <Type Name="Optional&lt;*&gt;">
+    <DisplayString Condition="!has">undefined</DisplayString>
+    <DisplayString>{value}</DisplayString>
+    <Expand>
+      <ExpandedItem Condition="has">value</ExpandedItem>
+    </Expand>
+  </Type>
+
+  <Type Name="Result&lt;*,*&gt;">
+    <DisplayString Condition="ok" Optional="true">Ok({value})</DisplayString>
+    <DisplayString Condition="ok">Ok</DisplayString>
+    <DisplayString Optional="true">Err({error})</DisplayString>
+    <DisplayString>Err</DisplayString>
+    <Expand>
+      <Item Name="value" Condition="ok" Optional="true">value</Item>
+      <Item Name="error" Condition="!ok" Optional="true">error</Item>
+    </Expand>
+  </Type>
+
+  <Type Name="Map&lt;*,*&gt;">
+    <AlternativeType Name="Record&lt;*,*&gt;" />
+    <DisplayString>{{ size={count} }}</DisplayString>
+    <Expand>
+      <CustomListItems>
+        <Variable Name="i" InitialValue="0" />
+        <Loop>
+          <Break Condition="i &gt;= used" />
+          <If Condition="entries[i].live != 0">
+            <Item Name="{entries[i].key}">entries[i].value</Item>
+          </If>
+          <Exec>i++</Exec>
+        </Loop>
+      </CustomListItems>
+    </Expand>
+  </Type>
+
+  <Type Name="Set&lt;*&gt;">
+    <DisplayString>{{ size={count} }}</DisplayString>
+    <Expand>
+      <CustomListItems>
+        <Variable Name="i" InitialValue="0" />
+        <Loop>
+          <Break Condition="i &gt;= used" />
+          <If Condition="entries[i].live != 0">
+            <Item>entries[i].key</Item>
+          </If>
+          <Exec>i++</Exec>
+        </Loop>
+      </CustomListItems>
+    </Expand>
+  </Type>
+
+  <Type Name="Union&lt;*&gt;">
+    <DisplayString Condition="tag == 0">undefined</DisplayString>
+    <DisplayString Condition="tag == 1" Optional="true">{payload.String}</DisplayString>
+    <DisplayString Condition="tag == 2" Optional="true">{payload.Atom}</DisplayString>
+    <DisplayString Condition="tag == 3" Optional="true">{payload.Int}</DisplayString>
+    <DisplayString Condition="tag == 4" Optional="true">{payload.Double}</DisplayString>
+    <DisplayString Condition="tag == 5" Optional="true">{payload.Bool}</DisplayString>
+    <DisplayString Condition="tag == 6" Optional="true">{payload.Decimal}</DisplayString>
+    <DisplayString Condition="tag == 7" Optional="true">{*payload.Object}</DisplayString>
+    <DisplayString Condition="tag == 8" Optional="true">{*payload.Array}</DisplayString>
+    <DisplayString Condition="tag == 9" Optional="true">{payload.Function}</DisplayString>
+    <DisplayString>{payload}</DisplayString>
+    <Expand>
+      <ExpandedItem Condition="tag == 6" Optional="true">payload.Decimal</ExpandedItem>
+      <ExpandedItem Condition="tag == 7" Optional="true">*payload.Object</ExpandedItem>
+      <ExpandedItem Condition="tag == 8" Optional="true">*payload.Array</ExpandedItem>
+    </Expand>
+  </Type>
+
+  <Type Name="atom">
+    <DisplayString Condition="index == 0">undefined</DisplayString>
+    <DisplayString>{tz_atoms[index]}</DisplayString>
+  </Type>
+
+  <Type Name="Function">
+    <DisplayString Condition="info == 0">undefined</DisplayString>
+    <DisplayString>function {info-&gt;name}</DisplayString>
+    <Expand>
+      <Item Name="code">info-&gt;code</Item>
+      <Item Name="env">env</Item>
+    </Expand>
+  </Type>
+
+  <Type Name="decimal">
+    <DisplayString Condition="(meta &amp; 0x4000000000000000) == 0 &amp;&amp; (unsigned int)meta == 0">{coef}</DisplayString>
+    <DisplayString Condition="(meta &amp; 0x4000000000000000) == 0">{coef}e-{(unsigned int)meta}</DisplayString>
+    <DisplayString>(a long decimal)</DisplayString>
+  </Type>
+
+</AutoVisualizer>

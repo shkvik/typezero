@@ -5,6 +5,7 @@
 #include "compiler/lower/classes/class_descriptors/class_descriptors.h"
 #include "compiler/lower/classes/decorator_lowerer/decorator_lowerer.h"
 #include "compiler/lower/classes/inherit_lowerer/inherit_lowerer.h"
+#include "compiler/lower/debug_info/debug_info.h"
 #include "compiler/lower/function_builder/function_builder.h"
 #include "compiler/lower/function_frame/function_frame.h"
 #include "compiler/lower/functions/closure_lowerer/closure_lowerer.h"
@@ -37,6 +38,7 @@ ModuleBuilder::ModuleBuilder(Lowering &lowering) : lowering_(lowering) {}
 
 std::unique_ptr<llvm::Module> ModuleBuilder::generate(SourceFile &file) {
   lowering_.comparesFunctions_ = file.comparesFunctions;
+  lowering_.debugInfo().start(file);
   if (lowering_.parallel_) {
     for (const Module *module : file.modules) {
       if (!module->builtin) {
@@ -140,6 +142,7 @@ std::unique_ptr<llvm::Module> ModuleBuilder::generate(SourceFile &file) {
   lowering_.decoratorLowerer().finishMetadata(file, mainInit_);
   lowering_.memoryDebug().finishGroupDebug(mainInit_);
   lowering_.publishLowerer().finishPublishTable(mainInit_);
+  lowering_.debugInfo().finish();
 
   return std::move(lowering_.module_);
 }
@@ -212,6 +215,7 @@ void ModuleBuilder::declareGlobals(SourceFile &file) {
                       *lowering_.module_, type, false, llvm::GlobalValue::InternalLinkage,
                       llvm::Constant::getNullValue(type),
                       "tz." + lowering_.symbolPrefixes_.lookup(cls) + f.var->name);
+        lowering_.debugInfo().declareGlobal(f.var, lowering_.globals_[f.var]);
         if (f.var->type->isManaged()) {
           managedGlobals_.push_back(f.var);
         }
@@ -245,6 +249,7 @@ void ModuleBuilder::declareGlobals(SourceFile &file) {
           *lowering_.module_, type, false, llvm::GlobalValue::InternalLinkage,
           llvm::Constant::getNullValue(type),
           "tz." + lowering_.symbolPrefixes_.lookup(decl) + d.name);
+      lowering_.debugInfo().declareGlobal(d.sym, lowering_.globals_[d.sym]);
       if (d.sym->type->isManaged()) {
         managedGlobals_.push_back(d.sym);
       }
@@ -260,6 +265,9 @@ void ModuleBuilder::emitMain(SourceFile &file) {
                                       lowering_.module_.get());
   lowering_.functionBuilder().setFunctionAttributes(main);
   lowering_.functionBuilder().beginFunction(main, nullptr);
+  if (!asyncMain) {
+    lowering_.debugInfo().beginTopLevel(main);
+  }
   mainInit_ = lowering_.builder_.CreateCall(lowering_.rt_.init);
   lowering_.functionFrame().pushScope();
   llvm::Type *voidTy = lowering_.builder_.getVoidTy(), *ptr = lowering_.builder_.getPtrTy();

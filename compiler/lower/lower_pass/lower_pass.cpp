@@ -9,8 +9,9 @@
 namespace tz {
 
 LowerPass::LowerPass(llvm::LLVMContext &context, const Target &target, llvm::StringRef moduleName,
-                     const FeatureRegistry &features)
-    : context_(context), target_(target), moduleName_(moduleName.str()), features_(features) {}
+                     const FeatureRegistry &features, DebugLevel debug, bool optimize)
+    : context_(context), target_(target), moduleName_(moduleName.str()), features_(features),
+      debug_(debug), optimize_(optimize) {}
 
 Result<Lowered, Errors> LowerPass::run(Program &program, const ParallelPlan &plan,
                                        const MemoryPlan &memory) const {
@@ -20,6 +21,7 @@ Result<Lowered, Errors> LowerPass::run(Program &program, const ParallelPlan &pla
   lowering.setParallelPlan(&plan);
   lowering.setMemoryPlan(&memory);
   lowering.setFeatures(&features_);
+  lowering.setDebug(debug_, optimize_, target_.triple().isOSWindows());
   std::unique_ptr<llvm::Module> module = lowering.moduleBuilder().generate(program.file);
   std::string problems = lowering.mismatch();
   llvm::raw_string_ostream out(problems);

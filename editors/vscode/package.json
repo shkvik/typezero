@@ -2,7 +2,7 @@
   "name": "tz",
   "displayName": "TypeZero",
   "description": "Errors as you type, highlighting, formatting and a file icon for TypeZero programs (.tz files)",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "publisher": "typezero",
   "engines": {
     "vscode": "^1.82.0"
@@ -13,7 +13,8 @@
   ],
   "main": "./extension.js",
   "activationEvents": [
-    "onLanguage:tz"
+    "onLanguage:tz",
+    "onDebugResolve:tz"
   ],
   "contributes": {
     "configuration": {
@@ -78,6 +79,76 @@
         "editor.insertSpaces": true,
         "editor.detectIndentation": false
       }
-    }
+    },
+    "breakpoints": [
+      {
+        "language": "tz"
+      }
+    ],
+    "debuggers": [
+      {
+        "type": "tz",
+        "label": "TypeZero",
+        "languages": [
+          "tz"
+        ],
+        "configurationAttributes": {
+          "launch": {
+            "properties": {
+              "program": {
+                "type": "string",
+                "description": "The .tz file to build with tz build --debug and run.",
+                "default": "${file}"
+              },
+              "args": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "description": "Command-line arguments of the program.",
+                "default": []
+              },
+              "cwd": {
+                "type": "string",
+                "description": "The working directory; by default the directory of the program."
+              },
+              "env": {
+                "type": "object",
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "description": "Environment variables of the program.",
+                "default": {}
+              },
+              "stopAtEntry": {
+                "type": "boolean",
+                "description": "Stop at the start of the program.",
+                "default": false
+              }
+            }
+          }
+        },
+        "initialConfigurations": [
+          {
+            "type": "tz",
+            "request": "launch",
+            "name": "Debug the .tz file",
+            "program": "${file}"
+          }
+        ],
+        "configurationSnippets": [
+          {
+            "label": "TypeZero: Launch",
+            "description": "Build a .tz file with tz build --debug and debug it",
+            "body": {
+              "type": "tz",
+              "request": "launch",
+              "name": "Debug the .tz file",
+              "program": "^\"\\${file}\""
+            }
+          }
+        ]
+      }
+    ]
   }
 }

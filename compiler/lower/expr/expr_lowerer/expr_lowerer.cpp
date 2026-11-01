@@ -11,6 +11,7 @@
 #include "compiler/lower/async/async_lowerer/async_lowerer.h"
 #include "compiler/lower/classes/class_lowerer/class_lowerer.h"
 #include "compiler/lower/classes/decorator_lowerer/decorator_lowerer.h"
+#include "compiler/lower/debug_info/debug_info.h"
 #include "compiler/lower/expr/assign_lowerer/assign_lowerer.h"
 #include "compiler/lower/expr/binary_lowerer/binary_lowerer.h"
 #include "compiler/lower/expr/call_lowerer/call_lowerer.h"
@@ -63,6 +64,8 @@ ExprLowerer::ExprLowerer(Lowering &lowering) : lowering_(lowering) {}
 llvm::Value *ExprLowerer::emitExpr(Expr *expr) {
   llvm::SMLoc outer = std::exchange(lowering_.loc_, expr->loc());
   lowering_.orderAt(expr->loc());
+  llvm::DebugLoc outerDebug = lowering_.debugInfo().here();
+  lowering_.debugInfo().at(expr->loc());
   llvm::Value *value = emitExprKind(expr);
   if (value && lowering_.mismatch_.empty() && !expr->type->isVoid() && !expr->type->isError() &&
       !expr->type->isNever() && lowering_.builder_.GetInsertBlock()) {
@@ -84,6 +87,7 @@ llvm::Value *ExprLowerer::emitExpr(Expr *expr) {
     }
   }
   lowering_.loc_ = outer;
+  lowering_.debugInfo().restore(outerDebug);
 
   return value;
 }

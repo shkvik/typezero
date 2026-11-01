@@ -16,7 +16,7 @@ Get-ChildItem $extensions -Directory -Filter "$name-*" | Remove-Item -Recurse -F
 $target = Join-Path $extensions "$name-$($manifest.version)"
 New-Item -ItemType Directory -Force $target | Out-Null
 foreach ($item in "package.json", "language-configuration.json", "syntaxes", "icons",
-                  "extension.js", "format.js", "server.js", "README.md") {
+                  "extension.js", "format.js", "server.js", "debug.js", "README.md") {
   Copy-Item -Recurse (Join-Path $PSScriptRoot $item) $target
 }
 # The formatter (format.js) needs Prettier next to it.

@@ -66,7 +66,16 @@ Errors LinkPass::run(const ObjectFile &object, const CryptoUse &crypto, bool par
   }
 
   std::string messages;
-  if (!linkExecutable(triple, inputs, options_.output, messages)) {
+  std::string natvis;
+  if (options_.debug == DebugLevel::Full) {
+    natvis = options_.runtime.path("tz.natvis");
+    if (!llvm::sys::fs::exists(natvis)) {
+      errors.tool("the debugger views of tz are missing: " + natvis);
+      return errors;
+    }
+  }
+  if (!linkExecutable(triple, inputs, options_.output, options_.debug != DebugLevel::None, natvis,
+                      messages)) {
     if (inUse(options_.output)) {
       errors.tool("cannot write '" + options_.output +
                   "': it is in use, probably still running; stop it and build again");

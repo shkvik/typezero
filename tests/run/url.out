@@ -5,6 +5,15 @@ http://[2001:db8::1:0:0:1]/ | http://[2001:db8::1:0:0:1] | http:   [2001:db8::1:
 http://[::ffff:c0a8:1]/ | http://[::ffff:c0a8:1] | http:   [::ffff:c0a8:1] [::ffff:c0a8:1]  /  
 http://127.0.0.1/ | http://127.0.0.1 | http:   127.0.0.1 127.0.0.1  /  
 http://192.168.0.1/ | http://192.168.0.1 | http:   192.168.0.1 192.168.0.1  /  
+http://127.0.0.1:3000/users/42?limit=10 | http://127.0.0.1:3000 | http:   127.0.0.1:3000 127.0.0.1 3000 /users/42 ?limit=10 
+http://1.2.3.4/ | http://1.2.3.4 | http:   1.2.3.4 1.2.3.4  /  
+http://1.2.0.3/ | http://1.2.0.3 | http:   1.2.0.3 1.2.0.3  /  
+http://10.0.0.255/x | http://10.0.0.255 | http:   10.0.0.255 10.0.0.255  /x  
+http://localhost/x | http://localhost | http:   localhost localhost  /x  
+http://localhost:3000/x | http://localhost:3000 | http:   localhost:3000 localhost 3000 /x  
+http://localhost/?q | http://localhost | http:   localhost localhost  / ?q 
+http://localhost:3000/a?# | http://localhost:3000 | http:   localhost:3000 localhost 3000 /a  
+https://api.example.com/v1/items?id=7#top | https://api.example.com | https:   api.example.com api.example.com  /v1/items ?id=7 #top
 file:///C:/Users/y.txt | null | file:      /C:/Users/y.txt  
 file:///etc/hosts | null | file:      /etc/hosts  
 file:///c:a | null | file:      /c:a  

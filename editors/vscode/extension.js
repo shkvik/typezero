@@ -1,12 +1,14 @@
 // The extension's code: the formatter of .tz files (Format Document,
-// Alt+Shift+F, and Format Selection) through format.js, and the errors as you
-// type through the language server, server.js. Everything else, the language
-// and its highlighting, is in package.json.
+// Alt+Shift+F, and Format Selection) through format.js, the errors as you
+// type through the language server, server.js, and F5 on a .tz file through
+// debug.js. Everything else, the language and its highlighting, is in
+// package.json.
 "use strict"
 const path = require("path")
 const vscode = require("vscode")
 const { format } = require("./format.js")
 const server = require("./server.js")
+const debug = require("./debug.js")
 
 // The edits that format the document, or the statements that `range` touches.
 // A syntax error leaves the text as it is and is shown with its line.
@@ -38,6 +40,7 @@ function activate(context) {
     }),
   )
   server.activate(context)
+  debug.activate(context, server.findTz)
 }
 
 function deactivate() {

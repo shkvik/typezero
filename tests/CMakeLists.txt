@@ -138,12 +138,14 @@ if(NOT EXISTS "${TZ_TYPESCRIPT}")
   endif()
 endif()
 find_program(TZ_PYTHON NAMES python python3)
+# llvm-pdbutil of the LLVM tz is built with, for cli/debug: what a .pdb holds.
+find_program(TZ_PDBUTIL llvm-pdbutil PATHS ${LLVM_TOOLS_BINARY_DIR} NO_DEFAULT_PATH)
 file(GLOB TZ_CLI_TESTS CONFIGURE_DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/cli/*.cmake)
 foreach(src ${TZ_CLI_TESTS})
   get_filename_component(name ${src} NAME_WE)
   add_test(NAME cli/${name}
     COMMAND ${CMAKE_COMMAND} -DTZ=$<TARGET_FILE:tz> -DGIT=${TZ_GIT} -DNODE=${TZ_NODE}
-            -DPYTHON=${TZ_PYTHON} -DTYPESCRIPT=${TZ_TYPESCRIPT}
+            -DPYTHON=${TZ_PYTHON} -DTYPESCRIPT=${TZ_TYPESCRIPT} -DPDBUTIL=${TZ_PDBUTIL}
             -DSOURCE=${CMAKE_CURRENT_SOURCE_DIR}/cli -DWORK=${CMAKE_CURRENT_BINARY_DIR}/cli/${name}
             -P ${src})
   set_tests_properties(cli/${name} PROPERTIES SKIP_REGULAR_EXPRESSION "skipped: ")

@@ -7,6 +7,8 @@ namespace tz {
 
 class SourceOverlay;
 
+enum class DebugLevel { None, Lines, Full };
+
 namespace pkg {
 struct Graph;
 }
@@ -20,6 +22,7 @@ struct BuildOptions {
   RuntimeFiles runtime;
   const SourceOverlay *overlay = nullptr;
   bool overflow = true;
+  DebugLevel debug = DebugLevel::Lines;
 };
 
 }

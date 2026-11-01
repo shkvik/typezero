@@ -14,6 +14,7 @@ public:
   void noteServer(const NewExpr *made);
   void noteServeOptions(const Expr *options);
   void noteHttpsValue(const FunctionDecl *fn, llvm::SMLoc loc);
+  void noteTlsMethod(const MemberExpr *member, const ClassDecl *cls);
   std::string knownPrefix(const Expr *expr) const;
 
 private:

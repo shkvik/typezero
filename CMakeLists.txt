@@ -32,6 +32,7 @@ configure_file(editors/types/tz.d.ts ${TZ_OUTPUT_DIR}/types/node_modules/@types/
 include(editors/types/declarations.cmake)
 configure_file(editors/types/tsconfig.json ${TZ_OUTPUT_DIR}/types/tsconfig.json COPYONLY)
 configure_file(docs/ai.md ${TZ_OUTPUT_DIR}/ai.md COPYONLY)
+configure_file(editors/debug/tz.natvis ${TZ_OUTPUT_DIR}/tz.natvis COPYONLY)
 
 add_subdirectory(runtime)
 add_subdirectory(compiler)

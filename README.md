@@ -15,6 +15,7 @@ console.log("fib(30) =", fib(30))
 ```
 tz run fib.tz            # скомпилировать и запустить
 tz build fib.tz          # получить fib.exe
+tz build --debug fib.tz  # для отладчика: без оптимизаций, с переменными (см. «Редактор»)
 tz build --emit-llvm fib.tz   # посмотреть LLVM IR (fib.ll)
 tz build --explain-parallel app.tz   # что пойдёт параллельно и почему (см. «Async»)
 tz init                  # проект: tz.json, main.tz и .gitignore
@@ -269,8 +270,8 @@ tz run                   # без файла — "main" из tz.json
   `AbortController` и `AbortSignal` убраны, время `fetch` ограничивает его опция `timeout`.
 - Сеть (см. «Сеть»): потоки HTTP/2 с трейлерами — `tz:http2`; сервер `new Server(options, handler)` из `"tz:http"` (`server.listen()`
   открывает сокет и отдаёт `Listening`), где обработчик получает
-  `Request` и того, кто его прислал, и отдаёт `Response`, как в Deno и Bun (и `app.fetch` из
-  hono), и клиент `fetch`, как в
+  `Request` и того, кто его прислал, и отдаёт `Response`, как в Deno и Bun (роутера во
+  встроенной библиотеке нет: маршруты пишет программа или фреймворк поверх), и клиент `fetch`, как в
   node: keep-alive и пул соединений, редиректы, gzip / deflate / br, `timeout`, ошибки —
   `Err` с `FetchError` (`fetch failed` и причина). `URL` и `URLSearchParams` по стандарту WHATWG, `Headers`,
   `Request`, `Response`, `ReadableStream`, `FormData` — глобальные, как в node; https — на OpenSSL.
@@ -2964,7 +2965,7 @@ await listening.stop()
   `{ enabled: true, cleartext?, maxConcurrentStreams? }` (без него HTTP/2 включён при https:
   о нём договариваются по ALPN, а `cleartext: true` берёт его и без TLS, h2c). Обработчик —
   `(req: Request, client: Client) => Response | Promise<Response>`, `client` — `{ address,
-  port, protocol }` того, кто прислал запрос (`protocol` — `"http/1.1"` или `"h2"`): подходят и обычная, и async-функция, и `app.fetch` из hono
+  port, protocol }` того, кто прислал запрос (`protocol` — `"http/1.1"` или `"h2"`): подходят и обычная, и async-функция, и `app.fetch` фреймворка в стиле `fetch`
   (стрелка в поле, у которой второй параметр — `unknown`, а третий необязательный).
   `stop()` перестаёт принимать соединения, закрывает те, что ждут запроса, и ждёт ответов на
   те, что уже идут; второй вызов ждёт того же; другого способа остановить сервер нет.
@@ -3367,6 +3368,12 @@ powershell -ExecutionPolicy Bypass -File editors\vscode\install.ps1
 
 и `Developer: Reload Window`. Наведение, переход к определению, все ссылки, дополнение после
 точки и переименование отвечает тот же сервер — по последней проверке.
+
+Отладка ([docs/debug.md](docs/debug.md)): `tz build` всегда пишет рядом с exe `.pdb` со строками
+`.tz`, и паника печатает стек со строками (`at deeper (main.tz:15)`); `tz build --debug` добавляет
+переменные с их значениями. В VS Code F5 на файле `.tz` собирает его с `--debug` и запускает под
+отладчиком расширения C/C++ от Microsoft: точки останова и шаги в `.tz`, строки, массивы, `Map`,
+объекты и `Result` видны значениями.
 Объявления встроенных имён tz для TypeScript ([tz.d.ts](editors/types/tz.d.ts)), `@types/node` и
 настройки tsc лежат рядом с `tz.exe`, в `types`, — для плагина tsserver, который проверял бы
 файлы `.tz` ([docs/modules.md](docs/modules.md), раздел 6); самого плагина пока нет.

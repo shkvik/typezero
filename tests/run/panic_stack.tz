@@ -1,0 +1,32 @@
+// A panic prints the stack with the lines of the .tz files (docs/errors.md,
+// section 9): every function on the way, inlined ones too, read from the .pdb
+// next to the program; the top level has no name.
+// expect-exit: 2
+// expect-stderr: panic: Maximum decimal size exceeded
+// expect-stderr: at deeper (
+// expect-stderr: panic_stack.tz:15)
+// expect-stderr: at middle (
+// expect-stderr: panic_stack.tz:20)
+// expect-stderr: at new Counter (
+// expect-stderr: panic_stack.tz:27)
+// expect-stderr: panic_stack.tz:32
+function deeper(power: int): string {
+  const ten: decimal = 10
+  const big = ten ** power
+  return big.toPrecision(3)
+}
+
+function middle(n: int): string {
+  const text = deeper(n * 1000)
+  return text + "!"
+}
+
+class Counter {
+  public readonly text: string
+  public constructor(n: int) {
+    this.text = middle(n)
+  }
+}
+
+console.log(middle(1))
+console.log(new Counter(100000).text)

@@ -12,6 +12,7 @@ struct BlockStmt : Stmt {
 
   std::vector<Stmt *> body;
   NestedGroup *group = nullptr;
+  llvm::SMLoc end;
 };
 
 }

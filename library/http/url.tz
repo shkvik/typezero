@@ -435,6 +435,7 @@ class UrlRecord {
   opaquePath?: string
   query?: string
   fragment?: string
+  parts?: UrlParts
 
   copy(): UrlRecord {
     const r = new UrlRecord()
@@ -940,6 +941,28 @@ function plainSegments(input: string, from: int, to: int): string[] | undefined 
   return path
 }
 
+function isCanonicalIPv4(input: string, from: int, to: int): boolean {
+  let parts = 0
+  let value = 0
+  let digits = 0
+  for (let i = from; i <= to; i++) {
+    const c = i < to ? input.charCodeAt(i) ?? -1 : 0x2e
+    if (c == 0x2e) {
+      if (digits == 0 || value > 255) return false
+      parts++
+      value = 0
+      digits = 0
+    } else if (isAsciiDigit(c) && digits < 3 && !(digits > 0 && value == 0)) {
+      value = value * 10 + c - 0x30
+      digits++
+    } else {
+      return false
+    }
+  }
+
+  return parts == 4
+}
+
 function quickParse(input: string): UrlRecord | undefined {
   const n = input.length
   let colon = -1
@@ -967,10 +990,13 @@ function quickParse(input: string): UrlRecord | undefined {
   }
   if (i == hostStart || lastDot == i - 1) return undefined
   const lastLabel = lastDot < 0 ? hostStart : lastDot + 1
-  if (isAsciiDigit(input.charCodeAt(lastLabel) ?? 0)) return undefined
+  if (isAsciiDigit(input.charCodeAt(lastLabel) ?? 0) && !isCanonicalIPv4(input, hostStart, i))
+    return undefined
   const host = input.slice(hostStart, i)
   if (host.includes("xn--")) return undefined
+  const hostEnd = i
   let port = -1
+  let canonical = true
   if (i < n && input.charCodeAt(i) == 0x3a) {
     i++
     const portStart = i
@@ -984,7 +1010,9 @@ function quickParse(input: string): UrlRecord | undefined {
       i++
     }
     if (i > portStart && value != defaultPort(scheme)) port = value
+    canonical = port != -1 && !(i - portStart > 1 && input.charCodeAt(portStart) == 0x30)
   }
+  const pathStart = i
   let pathEnd = i
   while (pathEnd < n && input.charCodeAt(pathEnd) != 0x3f && input.charCodeAt(pathEnd) != 0x23)
     pathEnd++
@@ -997,8 +1025,9 @@ function quickParse(input: string): UrlRecord | undefined {
   url.port = port
   url.path = path
   i = pathEnd
+  let queryStart = -1
   if (i < n && input.charCodeAt(i) == 0x3f) {
-    const queryStart = i + 1
+    queryStart = i + 1
     i = queryStart
     while (i < n) {
       const c = input.charCodeAt(i) ?? -1
@@ -1016,6 +1045,21 @@ function quickParse(input: string): UrlRecord | undefined {
         return undefined
     }
     url.fragment = input.slice(i + 1)
+  }
+  if (canonical && pathEnd > pathStart) {
+    url.parts = {
+      href: input,
+      origin: input.slice(0, pathStart),
+      protocol: input.slice(0, colon + 1),
+      username: "",
+      password: "",
+      host: input.slice(hostStart, pathStart),
+      hostname: host,
+      port: port == -1 ? "" : input.slice(hostEnd + 1, pathStart),
+      pathname: input.slice(pathStart, pathEnd),
+      search: queryStart >= 0 && i > queryStart ? input.slice(queryStart - 1, i) : "",
+      hash: i + 1 < n ? input.slice(i) : "",
+    }
   }
 
   return url
@@ -1068,6 +1112,8 @@ type UrlParts = {
 }
 
 function partsOf(r: UrlRecord): UrlParts {
+  const known = r.parts
+  if (known != undefined) return known
   const protocol = r.scheme + ":"
   const hostname = r.host
   const port = r.port == -1 ? "" : String(r.port)
@@ -1197,6 +1243,7 @@ export class URL {
   }
 
   private changed(query: boolean) {
+    this.record.parts = undefined
     this.state = partsOf(this.record)
     if (query) this.searchParams.replace(this.record.query)
   }

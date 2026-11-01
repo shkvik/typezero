@@ -22,6 +22,7 @@ public:
   std::string output;
   std::string outputStem;
   bool optimize = true;
+  bool debug = false;
   bool emitLLVM = false;
   bool explainParallel = false;
   bool hints = false;

@@ -38,6 +38,7 @@
 #include "compiler/lower/classes/class_lowerer/class_lowerer.h"
 #include "compiler/lower/classes/decorator_lowerer/decorator_lowerer.h"
 #include "compiler/lower/classes/inherit_lowerer/inherit_lowerer.h"
+#include "compiler/lower/debug_info/debug_info.h"
 #include "compiler/lower/expr/assign_lowerer/assign_lowerer.h"
 #include "compiler/lower/expr/binary_lowerer/binary_lowerer.h"
 #include "compiler/lower/expr/call_lowerer/call_lowerer.h"
@@ -192,6 +193,7 @@ Lowering::Lowering(llvm::LLVMContext &ctx, llvm::StringRef moduleName,
   resultLowererPart_ = std::make_unique<ResultLowerer>(*this);
   resultCombineLowererPart_ = std::make_unique<ResultCombineLowerer>(*this);
   errSitesPart_ = std::make_unique<ErrSites>(*this);
+  debugInfoPart_ = std::make_unique<DebugInfo>(*this);
   streamLowererPart_ = std::make_unique<StreamLowerer>(*this);
   tzModulesLowererPart_ = std::make_unique<TzModulesLowerer>(*this);
   module_->setDataLayout(layout);

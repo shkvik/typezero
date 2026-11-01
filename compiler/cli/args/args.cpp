@@ -40,6 +40,8 @@ impact take it too, or the program named by --entry <file.tz>.
 
 options:
   -o <path>         where to write the output (build only)
+  --debug           for a debugger: no optimization, and the variables and
+                    their values in the .pdb next to the executable
   --emit-llvm       write LLVM IR (.ll) instead of an executable (build only)
   --explain-parallel
                     print what runs in parallel and why, instead of building
@@ -96,6 +98,9 @@ int Args::parse(llvm::ArrayRef<const char *> args) {
       }
       output = args[i];
     } else if (arg == "-O0") {
+      optimize = false;
+    } else if (arg == "--debug") {
+      debug = true;
       optimize = false;
     } else if (arg == "--emit-llvm") {
       emitLLVM = true;

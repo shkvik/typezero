@@ -52,6 +52,7 @@ private:
   std::string libraryTree_;
   llvm::StringMap<std::string> treeFiles_;
   llvm::DenseMap<unsigned, std::string> treeBuffers_;
+  llvm::DenseMap<unsigned, std::string> libraryBuffers_;
   llvm::StringMap<Module *> byRealPath_;
   llvm::StringMap<Module *> libraries_;
   llvm::DenseMap<const Module *, std::string> realPaths_;

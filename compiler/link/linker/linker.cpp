@@ -10,7 +10,8 @@ LLD_HAS_DRIVER(coff)
 namespace tz {
 
 bool linkExecutable(const llvm::Triple &triple, llvm::ArrayRef<std::string> inputs,
-                    llvm::StringRef output, std::string &errors) {
+                    llvm::StringRef output, bool debug, llvm::StringRef natvis,
+                    std::string &errors) {
   if (!triple.isOSWindows()) {
     errors = "tz: linking for " + triple.str() + " is not supported yet\n";
     return false;
@@ -30,6 +31,14 @@ bool linkExecutable(const llvm::Triple &triple, llvm::ArrayRef<std::string> inpu
   args.push_back("/defaultlib:kernel32");
   if (std::getenv("TZ_LINK_DEBUG")) {
     args.push_back("/debug");
+  } else if (debug) {
+    args.push_back("/debug");
+    args.push_back("/opt:ref");
+    args.push_back("/opt:icf");
+    args.push_back("/pdbaltpath:%_PDB%");
+    if (!natvis.empty()) {
+      args.push_back("/natvis:" + natvis.str());
+    }
   }
 
   std::vector<const char *> argv;

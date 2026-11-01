@@ -9,6 +9,7 @@ public:
   explicit ObjectLayouts(Lowering &lowering);
 
   const Lowering::ObjectLayout &objectLayout(const Type *type);
+  const Lowering::ObjectLayout *builtLayout(const Type *type) const;
   llvm::Constant *layoutDescriptor(const Type *type, llvm::ArrayRef<unsigned> keys);
   llvm::Constant *layoutDescriptor(const Type *type, llvm::ArrayRef<unsigned> keys, uint32_t flags);
   void emitObjectDrop(const Type *type, Lowering::ObjectLayout &layout);
