@@ -1,0 +1,107 @@
+// Hints about places that may run long without await (docs/async.md,
+// section 5): a loop or a tail recursion whose amount of work depends on data
+// gets a hint when nothing in the code limits it. A limit written as plain
+// code (a constant, a check before, a slice) is enough; a loop with await,
+// non-tail recursion and blocking calls get no hint.
+// args: 7 one two three
+import { readFileSync } from "node:fs"
+
+function counted(text: string, lines: string[]): int {
+  const n = parseInt(text).unwrapOr(0)
+  let total = 0
+
+  // expect-hint: how many times this loop runs depends on data
+  for (let i = 0; i < n; i++) total++
+
+  if (n > 1000) return total
+  for (let i = 0; i < n; i++) total++
+
+  for (let i = 0; i < 100; i++) total++
+
+  let j = 0
+  while (j < n) {
+    j += 2
+  }
+
+  // expect-hint: how many times this loop runs depends on data
+  for (const line of lines) total += line.length
+
+  for (const line of lines.slice(0, 100)) total += line.length
+
+  if (lines.length <= 500) {
+    for (const line of lines) total += line.length
+  }
+
+  return total
+}
+
+type Item = { next?: Item }
+
+function count(first: Item): int {
+  let total = 0
+  let at: Item | undefined = first
+  // expect-hint: how many times this loop runs depends on data
+  while (at != undefined) {
+    total++
+    at = at.next
+  }
+
+  return total
+}
+
+function down(n: int): int {
+  return n <= 0 ? 0 : down(n - 1)
+}
+
+function downIf(n: int): int {
+  if (n <= 0) {
+    return 0
+  }
+
+  return downIf(n - 1)
+}
+
+function depths(lines: string[]): int {
+  const n = lines.length
+  // expect-hint: how deep the tail recursion of 'down' goes depends on this argument
+  const first = down(n)
+  // expect-hint: how deep the tail recursion of 'downIf' goes depends on this argument
+  const second = downIf(n)
+  if (n > 1000) return first + second
+
+  return first + second + down(n) + downIf(n)
+}
+
+function last(item: Item): Item {
+  // expect-hint: how deep this tail recursion goes depends on data
+  return item.next == undefined ? item : last(item.next)
+}
+
+function size(item: Item): int {
+  return item.next == undefined ? 1 : 1 + size(item.next)
+}
+
+function config(): string {
+  const text = readFileSync("tz-long-loops-missing.json", "utf8")
+
+  return text.isOk() ? text.value : ""
+}
+
+async function waits(names: string[]): Promise<int> {
+  let total = 0
+  for (const name of names) {
+    const got = await Promise.resolve(name)
+    total += got.length
+  }
+
+  return total
+}
+
+const words = process.argv.slice(3)
+console.log(counted(process.argv[2] ?? "0", words))
+console.log(count({ next: { next: {} } }))
+console.log(depths(words))
+console.log(last({ next: { next: {} } }).next == undefined)
+console.log(size({ next: { next: {} } }))
+console.log(config().length)
+console.log(await waits(words))

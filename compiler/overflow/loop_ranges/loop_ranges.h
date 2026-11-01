@@ -15,6 +15,9 @@ public:
                 const State &from, const State &end);
   State rebased(const State &state, llvm::DenseMap<const VarSymbol *, uint64_t> &bases);
   void forget();
+  void reportLong();
+  void findRecursions();
+  void noteCall(const CallExpr *call, const FunctionDecl *target, llvm::ArrayRef<Val> args);
 
 private:
   struct RememberedLoop {
@@ -28,6 +31,8 @@ private:
     uint64_t work = 0;
   };
   void solveLoop(const OverflowCheck::LoopSpec &spec, State &st);
+  void noteLoop(const OverflowCheck::LoopSpec &spec, const Num &passes);
+  void reportRecursions();
   std::vector<uint64_t> contextOf() const;
   bool freshBases(const State &state, uint64_t before) const;
 

@@ -257,7 +257,8 @@ const Expr *awaitedOperand(const Expr *e) {
   }
   const Expr *operand = stripImplicit(await->value);
   if (auto *call = llvm::dyn_cast_or_null<CallExpr>(operand);
-      call && call->builtin == Builtin::LibAhead && !call->args.empty()) {
+      call && (call->builtin == Builtin::LibAhead || call->builtin == Builtin::LibAheadMovable) &&
+      !call->args.empty()) {
     operand = stripImplicit(call->args[0]);
   }
 

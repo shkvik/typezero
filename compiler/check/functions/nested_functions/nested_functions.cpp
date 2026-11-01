@@ -238,6 +238,104 @@ void visitExprs(const Stmt *stmt, llvm::function_ref<void(const Expr *)> visit,
   }
 }
 
+static void forEachReturnValue(Stmt *stmt, llvm::function_ref<void(Expr *)> visit) {
+  if (!stmt) {
+    return;
+  }
+  switch (stmt->kind()) {
+  case Stmt::Kind::Block:
+    for (Stmt *s : cast<BlockStmt>(stmt)->body) {
+      forEachReturnValue(s, visit);
+    }
+    break;
+  case Stmt::Kind::If:
+    forEachReturnValue(cast<IfStmt>(stmt)->thenStmt, visit);
+    forEachReturnValue(cast<IfStmt>(stmt)->elseStmt, visit);
+    break;
+  case Stmt::Kind::While:
+    forEachReturnValue(cast<WhileStmt>(stmt)->body, visit);
+    break;
+  case Stmt::Kind::DoWhile:
+    forEachReturnValue(cast<DoWhileStmt>(stmt)->body, visit);
+    break;
+  case Stmt::Kind::For:
+    forEachReturnValue(cast<ForStmt>(stmt)->body, visit);
+    break;
+  case Stmt::Kind::ForOf:
+    forEachReturnValue(cast<ForOfStmt>(stmt)->body, visit);
+    break;
+  case Stmt::Kind::Switch:
+    for (SwitchCase &c : cast<SwitchStmt>(stmt)->cases) {
+      for (Stmt *s : c.body) {
+        forEachReturnValue(s, visit);
+      }
+    }
+    break;
+  case Stmt::Kind::Labeled:
+    forEachReturnValue(cast<LabeledStmt>(stmt)->body, visit);
+    break;
+  case Stmt::Kind::Return:
+    if (Expr *value = cast<ReturnStmt>(stmt)->value) {
+      visit(value);
+    }
+    break;
+  default:
+    break;
+  }
+}
+
+void tailCallsOf(Expr *value, std::vector<CallExpr *> &calls) {
+  if (auto *call = dyn_cast<CallExpr>(value)) {
+    if (call->func && call->builtin == Builtin::None) {
+      calls.push_back(call);
+    }
+  } else if (auto *cond = dyn_cast<ConditionalExpr>(value)) {
+    tailCallsOf(cond->thenExpr, calls);
+    tailCallsOf(cond->elseExpr, calls);
+  } else if (auto *bin = dyn_cast<BinaryExpr>(value)) {
+    if (bin->op == BinaryOp::LogAnd || bin->op == BinaryOp::LogOr || bin->op == BinaryOp::Nullish) {
+      tailCallsOf(bin->rhs, calls);
+    }
+  } else if (auto *seq = dyn_cast<SequenceExpr>(value)) {
+    tailCallsOf(seq->exprs.back(), calls);
+  }
+}
+
+void tailStatementsOf(Stmt *stmt, bool tail, std::vector<Stmt *> &stmts) {
+  if (auto *block = dyn_cast<BlockStmt>(stmt)) {
+    for (size_t i = 0; i < block->body.size(); ++i) {
+      bool beforeReturn = i + 1 < block->body.size() && isa<ReturnStmt>(block->body[i + 1]) &&
+                          !cast<ReturnStmt>(block->body[i + 1])->value;
+      tailStatementsOf(block->body[i], beforeReturn || (tail && i + 1 == block->body.size()),
+                       stmts);
+    }
+  } else if (auto *ifStmt = dyn_cast<IfStmt>(stmt)) {
+    tailStatementsOf(ifStmt->thenStmt, tail, stmts);
+    if (ifStmt->elseStmt) {
+      tailStatementsOf(ifStmt->elseStmt, tail, stmts);
+    }
+  } else if (auto *expr = dyn_cast<ExprStmt>(stmt); expr && tail) {
+    auto *call = dyn_cast<CallExpr>(expr->expr);
+    if (call && call->func && call->builtin == Builtin::None) {
+      stmts.push_back(stmt);
+    }
+  }
+}
+
+std::vector<CallExpr *> tailCallsIn(FunctionDecl *fn) {
+  std::vector<CallExpr *> calls;
+  forEachReturnValue(fn->body, [&](Expr *value) { tailCallsOf(value, calls); });
+  if (fn->sym->ret->isVoid()) {
+    std::vector<Stmt *> stmts;
+    tailStatementsOf(fn->body, true, stmts);
+    for (Stmt *stmt : stmts) {
+      calls.push_back(cast<CallExpr>(cast<ExprStmt>(stmt)->expr));
+    }
+  }
+
+  return calls;
+}
+
 namespace {
 
 void collectAssigned(const Stmt *stmt, std::vector<llvm::StringRef> &names) {

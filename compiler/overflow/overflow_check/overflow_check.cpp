@@ -84,6 +84,7 @@ void OverflowCheck::run() {
   }
   ++round_;
   reporting_ = true;
+  loopRanges().findRecursions();
   next_ = Summaries();
   callRanges().analyzeAll();
 
@@ -100,6 +101,7 @@ void OverflowCheck::run() {
   for (auto [expr, proven] : proofs_) {
     expr->rangeProven = proven;
   }
+  loopRanges().reportLong();
   std::set<const char *> shown;
   for (const Warning &w : warnings_) {
     if (shown.insert(w.loc.getPointer()).second && !diags_.isQuiet(w.loc)) {

@@ -84,16 +84,25 @@ Expr *LibraryCalls::checkLibCall(CallExpr *call, NameExpr *name) {
     Builtin builtin;
     unsigned args, typeArgs;
   };
-  static const Intrinsic intrinsics[] = {
-      {"asListener", Builtin::LibListener, 1, 1}, {"asClass", Builtin::LibAs, 1, 1},
-      {"chunkOf", Builtin::LibChunk, 1, 1},       {"isChunk", Builtin::LibIsChunk, 1, 1},
-      {"chunkKind", Builtin::LibChunkKind, 0, 1}, {"typeName", Builtin::LibTypeName, 0, 1},
-      {"overrides", Builtin::LibOverrides, 2, 0}, {"fsOpen", Builtin::LibFsOpen, 3, 1},
-      {"fsRead", Builtin::LibFsRead, 5, 1},       {"fsWrite", Builtin::LibFsWrite, 5, 1},
-      {"fsClose", Builtin::LibFsClose, 2, 1},     {"stdinChunk", Builtin::LibStdinChunk, 1, 0},
-      {"stdWrite", Builtin::LibStdWrite, 2, 0},   {"stdinFailed", Builtin::LibStdinFailed, 0, 0},
-      {"ahead", Builtin::LibAhead, 1, 0},         {"order", Builtin::LibOrder, 0, 0},
-      {"panic", Builtin::LibPanic, 1, 0},         {"defer", Builtin::LibDefer, 1, 0}};
+  static const Intrinsic intrinsics[] = {{"asListener", Builtin::LibListener, 1, 1},
+                                         {"asClass", Builtin::LibAs, 1, 1},
+                                         {"chunkOf", Builtin::LibChunk, 1, 1},
+                                         {"isChunk", Builtin::LibIsChunk, 1, 1},
+                                         {"chunkKind", Builtin::LibChunkKind, 0, 1},
+                                         {"typeName", Builtin::LibTypeName, 0, 1},
+                                         {"overrides", Builtin::LibOverrides, 2, 0},
+                                         {"fsOpen", Builtin::LibFsOpen, 3, 1},
+                                         {"fsRead", Builtin::LibFsRead, 5, 1},
+                                         {"fsWrite", Builtin::LibFsWrite, 5, 1},
+                                         {"fsClose", Builtin::LibFsClose, 2, 1},
+                                         {"stdinChunk", Builtin::LibStdinChunk, 1, 0},
+                                         {"stdWrite", Builtin::LibStdWrite, 2, 0},
+                                         {"stdinFailed", Builtin::LibStdinFailed, 0, 0},
+                                         {"ahead", Builtin::LibAhead, 1, 0},
+                                         {"order", Builtin::LibOrder, 0, 0},
+                                         {"panic", Builtin::LibPanic, 1, 0},
+                                         {"defer", Builtin::LibDefer, 1, 0},
+                                         {"aheadMovable", Builtin::LibAheadMovable, 1, 0}};
   const Intrinsic *intrinsic =
       llvm::find_if(intrinsics, [&](const Intrinsic &i) { return i.name == intrinsicName; });
   if (intrinsic == std::end(intrinsics) || call->args.size() != intrinsic->args ||
@@ -130,14 +139,15 @@ Expr *LibraryCalls::checkLibCall(CallExpr *call, NameExpr *name) {
     call->type = Type::optional(typeArg);
     break;
   case Builtin::LibAhead:
+  case Builtin::LibAheadMovable:
     call->args[0] = checker_.exprChecker().checkExpr(call->args[0]);
     call->type = call->args[0]->type;
     if (!call->type->isError() && !call->type->isPromise() &&
         !(call->type->isUnion() &&
           llvm::any_of(call->type->members(), [](const Type *m) { return m->isPromise(); }))) {
-      checker_.diags_.error(name->loc(),
-                            "'ahead' takes what an await waits for: a promise, or a value or a "
-                            "promise");
+      checker_.diags_.error(name->loc(), "'" + intrinsicName +
+                                             "' takes what an await waits for: a promise, or a "
+                                             "value or a promise");
     }
     if (checker_.currentFunction_ && checker_.currentFunction_->decl) {
       checker_.currentFunction_->decl->awaitsAhead = true;

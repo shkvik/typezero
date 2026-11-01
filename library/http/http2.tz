@@ -13,7 +13,7 @@ import {
 } from "tz:fetch";
 import { Client, ListenError, ListenErrorCode, ServeTransport, StopOptions } from "tz:http";
 import { URL } from "tz:url";
-import { ahead, NativeError, order } from "tz:intrinsics";
+import { ahead, aheadMovable, NativeError, order } from "tz:intrinsics";
 
 declare function netListen(
   host: string,
@@ -860,7 +860,7 @@ export class Http2Listening {
     if (got.isOk() && got.value == 2) {
       for (;;) {
         const waiting = httpStream(socket);
-        const stream = await ahead(waiting);
+        const stream = await aheadMovable(waiting);
         if (stream == undefined) {
           break;
         }
@@ -874,7 +874,7 @@ export class Http2Listening {
   private static async serveStream(stream: object, handler: Http2Handler): Promise<void> {
     const conn = new Connection(stream);
     const next = conn.next();
-    const got = await ahead(next);
+    const got = await aheadMovable(next);
     if (got.isErr() || got.value == 0) {
       httpStreamDone(stream);
       return;

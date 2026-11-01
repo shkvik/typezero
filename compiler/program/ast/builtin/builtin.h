@@ -456,6 +456,7 @@ enum class Builtin {
   LibStdinFailed,
   LibStdWrite,
   LibAhead,
+  LibAheadMovable,
   LibOrder,
   LibPanic,
   LibDefer,

@@ -479,6 +479,10 @@ static void conn_drop(void *object) {
     tz_obj_release((TzObject *)p);
   }
   c->orphan = 1;
+  if (c->linger == 2 && !c->closed) {
+    conn_unlock_settle(c);
+    return;
+  }
   if (c->closing && (c->writing || has_output(c))) {
     if (!c->writing) {
       net_flush(c);
@@ -616,17 +620,24 @@ void net_read(NetConn *c) {
       c->eof = 1;
     }
     c->in_end += got;
+#if TZ_PARALLEL
+    if (got > 0 && net_input_in_pool(c)) {
+      return;
+    }
+#endif
     c->on_input(c);
     return;
   }
 }
+
+static void linger_input(NetConn *c);
 
 static void read_done(TzWork *w) {
   NetConn *c = CONTAINING_RECORD(CONTAINING_RECORD(w, NetOp, work), NetConn, rop);
   conn_lock(c);
   --c->ops;
   c->reading = 0;
-  if (c->orphan) {
+  if (c->orphan && c->linger != 2) {
     conn_unlock_settle(c);
     return;
   }
@@ -645,6 +656,11 @@ static void read_done(TzWork *w) {
       c->eof = 1;
     }
     c->in_end += c->rop.bytes;
+  }
+  if (c->orphan) {
+    linger_input(c);
+    conn_unlock_settle(c);
+    return;
   }
   tz_rc_inc(&c->rc);
   if (c->tls && !c->error) {
@@ -718,11 +734,35 @@ static void drained(NetConn *c) {
   }
 }
 
-static void finish_close(NetConn *c) {
-  if (c->closing && !c->writing && !has_output(c)) {
-    shutdown(c->s, SD_SEND);
+#define LINGER_MS 2000.0
+#define LINGER_BYTES (1u << 20)
+
+static void linger_input(NetConn *c) {
+  c->linger_bytes += c->in_end - c->in_start;
+  c->in_start = c->in_end = 0;
+  if (c->eof || c->error || c->closed || c->linger_bytes > LINGER_BYTES ||
+      net_now() - c->linger_since >= LINGER_MS) {
     close_socket(c);
+    return;
   }
+  net_read(c);
+}
+
+static void finish_close(NetConn *c) {
+  if (c->linger == 2 || !c->closing || c->writing || has_output(c)) {
+    return;
+  }
+  shutdown(c->s, SD_SEND);
+  if (c->linger == 1 && !c->tls && !c->eof && !c->error && !c->closed) {
+    c->linger = 2;
+    c->linger_bytes = 0;
+    c->linger_since = net_now();
+    c->in_start = c->in_end = 0;
+    c->on_input = linger_input;
+    net_read(c);
+    return;
+  }
+  close_socket(c);
 }
 
 void net_flush(NetConn *c) {
@@ -842,6 +882,38 @@ static void net_completed_pooled(OVERLAPPED_ENTRY *entry) {
   conn_unlock(c);
   tz_ahead_settle_held();
   tz_io_done_remote(&op->work);
+}
+
+static void input_pooled(OVERLAPPED_ENTRY *entry) {
+  NetConn *c = (NetConn *)entry->lpOverlapped;
+  conn_lock(c);
+  --c->ops;
+  if (c->orphan) {
+    conn_unlock_settle(c);
+    return;
+  }
+  tz_trigger_hold();
+  c->on_input(c);
+  conn_unlock(c);
+  tz_ahead_settle_held();
+}
+
+int net_input_in_pool(NetConn *c) {
+  if (!c->pooled || c->linger || c->in_end == c->in_start ||
+      (tz_thread.worker && !tz_thread.turn)) {
+    return 0;
+  }
+  void *pool = tz_pool_port_handle();
+  if (!pool) {
+    return 0;
+  }
+  ++c->ops;
+  if (!PostQueuedCompletionStatus((HANDLE)pool, 0, (ULONG_PTR)input_pooled, (OVERLAPPED *)c)) {
+    --c->ops;
+    return 0;
+  }
+
+  return 1;
 }
 #endif
 
@@ -1091,6 +1163,9 @@ static void sweep_fired(TzObject *env) {
       }
       conn_unlock(c);
       continue;
+    }
+    if (c->linger == 2 && !c->closed && now - c->linger_since >= LINGER_MS) {
+      close_socket(c);
     }
     if (!c->closed && c->busy && l->request_timeout > 0 && c->http.request_since > 0 &&
         !c->http.body_done && now - c->http.request_since >= l->request_timeout) {

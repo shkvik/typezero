@@ -76,6 +76,18 @@ foreach(expected ${TZ_EXPLAIN_TESTS})
             -P ${CMAKE_CURRENT_SOURCE_DIR}/check.cmake)
 endforeach()
 
+# Hints (docs/async.md, section 5): a run test with `// expect-hint:` lines is
+# also built with `tz build --hints`, which must print exactly those hints.
+foreach(src ${TZ_RUN_TESTS})
+  file(STRINGS ${src} hint_lines REGEX "// expect-hint:")
+  if(hint_lines)
+    tz_test_name(${src} name multi)
+    add_test(NAME hints/${name}
+      COMMAND ${CMAKE_COMMAND} -DTZ=$<TARGET_FILE:tz> -DSRC=${src} -DMODE=hints
+              -P ${CMAKE_CURRENT_SOURCE_DIR}/check.cmake)
+  endif()
+endforeach()
+
 # Examples have no expected output; they only have to compile and exit with 0.
 file(GLOB TZ_EXAMPLES CONFIGURE_DEPENDS ${PROJECT_SOURCE_DIR}/examples/*.tz)
 foreach(src ${TZ_EXAMPLES})

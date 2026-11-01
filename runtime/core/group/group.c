@@ -97,6 +97,15 @@ static inline int64_t rc_add(TzObject *leader, int64_t n) {
   return __atomic_add_fetch(&leader->rc, n, __ATOMIC_ACQ_REL);
 }
 
+extern int32_t tz_pool_provoke;
+void tz_provoke_pause(void);
+
+static inline void provoke(int32_t where) {
+  if (tz_pool_provoke & where) {
+    tz_provoke_pause();
+  }
+}
+
 static TzObject *count_in_group(const void *member, int64_t n, int64_t *after) {
   for (;;) {
     TzObject *leader = leader_of(member);
@@ -242,6 +251,9 @@ TZ_NOINLINE void tz_group_release_shared(void *member) {
   }
   unlock_listing(locked);
   if (after == TZ_RC_GROUP) {
+    if (tz_weak_count) {
+      provoke(1);
+    }
     tz_group_free(leader);
   }
 }
@@ -343,6 +355,7 @@ static TzObject *merge(TzObject *a, TzObject *b) {
 #endif
 #if TZ_PARALLEL
   int64_t moved = __atomic_exchange_n(&a->rc, TZ_RC_MEMBER, __ATOMIC_ACQ_REL);
+  provoke(2);
 #else
   int64_t moved = a->rc;
   a->rc = TZ_RC_MEMBER;
@@ -416,6 +429,9 @@ TZ_NOINLINE void tz_group_unstore_shared(void *owner, void *ref, int32_t member)
   }
   unlock_listing(locked);
   if (after == TZ_RC_GROUP) {
+    if (tz_weak_count) {
+      provoke(1);
+    }
     tz_group_free(lr);
   }
 }
@@ -701,11 +717,72 @@ void *tz_weak_new(const TzLayout *layout, void *target) {
   return w;
 }
 
+#if TZ_PARALLEL
+static int retain_alive(void *member) {
+  for (;;) {
+    TzObject *leader = leader_of(member);
+    int64_t rc = rc_load(leader);
+    if (!is_leader_count(rc)) {
+      while (leader_of(member) == leader) {
+        tz_cpu_relax();
+      }
+      continue;
+    }
+    if (rc <= TZ_RC_GROUP) {
+      return 0;
+    }
+    if (__atomic_compare_exchange_n(&leader->rc, &rc, rc + 1, 0, __ATOMIC_ACQ_REL,
+                                    __ATOMIC_RELAXED)) {
+      break;
+    }
+  }
+  if (tz_group_listing) {
+    ++listed(member)->outside;
+  }
+
+  return 1;
+}
+#else
+static int retain_alive(void *member) {
+  TzObject *leader = leader_of(member);
+  if (leader->rc <= TZ_RC_GROUP) {
+    return 0;
+  }
+  ++leader->rc;
+  if (tz_group_listing) {
+    ++listed(member)->outside;
+  }
+
+  return 1;
+}
+#endif
+
+#if TZ_PARALLEL
+void *tz_weak_private_target(void *weak) {
+  group_lock();
+  void *target = ((TzWeak *)weak)->target;
+  if (target) {
+    int64_t rc = ((TzObject *)target)->rc;
+    int shared = tz_rc_is_member(rc) ? member_published(target) : !(rc > 0 && rc < TZ_RC_FOREVER);
+    if (shared) {
+      target = NULL;
+    }
+  }
+  group_unlock();
+
+  return target;
+}
+#endif
+
 void *tz_weak_deref(void *weak) {
   group_lock();
   void *target = ((TzWeak *)weak)->target;
   if (target) {
-    tz_ref_retain(target);
+    if (!tz_rc_is_member(((TzObject *)target)->rc)) {
+      tz_ref_retain(target);
+    } else if (!retain_alive(target)) {
+      target = NULL;
+    }
   }
   group_unlock();
 

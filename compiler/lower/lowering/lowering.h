@@ -284,6 +284,7 @@ private:
   bool parallel_ = false;
   llvm::DenseMap<const Node *, uint32_t> aheadStarts_;
   llvm::DenseSet<const Node *> freeAwaits_;
+  llvm::DenseSet<const Node *> movableAwaits_;
   llvm::DenseSet<const char *> orderedLocs_;
   llvm::DenseSet<const VarSymbol *> libraryState_;
   llvm::Function *refRetainFn_ = nullptr;

@@ -27,7 +27,7 @@ after close: ERR_HTTP2_CLOSED
 call 1: 200 application/grpc "apple costs 7 EUR (POST https sent-after-body)"
 call 1: trailers before the body ERR_HTTP2_TRAILERS_NOT_READY, grpc-status 0 fine
 fetch 1.1 to an HTTP/2 server: localhost speaks none of the offered versions of HTTP (TLS alert: no application protocol); with httpVersion: "1.1" only HTTP/1.1 is offered
-/: HTTP2_RESPONSE_WAIT_ERROR_CONNECTION ERR_HTTP2_NOT_SUPPORTED
+/ on the old server: ERR_HTTP2_NOT_SUPPORTED
 old server: ERR_HTTP2_NOT_SUPPORTED
 closed at once: true
 HTTP/1.1 to tz:http2: HTTP/1.1 505 HTTP Version Not Supported

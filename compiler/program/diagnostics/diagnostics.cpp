@@ -32,6 +32,13 @@ void Diagnostics::warning(llvm::SMLoc loc, const llvm::Twine &message) {
   errors_.add({llvm::SourceMgr::DK_Warning, Diagnostic::Form::Located, loc, message.str()});
 }
 
+void Diagnostics::hint(llvm::SMLoc loc, const llvm::Twine &message) {
+  if (muted_ || capture_ || isQuiet(loc)) {
+    return;
+  }
+  errors_.add({llvm::SourceMgr::DK_Remark, Diagnostic::Form::Located, loc, message.str()});
+}
+
 void Diagnostics::note(llvm::SMLoc loc, const llvm::Twine &message) {
   if (muted_ || capture_) {
     return;

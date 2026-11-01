@@ -2,7 +2,13 @@
 #define TZ_PARALLEL_H
 
 #include "runtime/core/alloc/alloc.h"
+#include "runtime/core/pendulum/pendulum.h"
 #include "runtime/core/tzrt/tzrt.h"
+
+typedef struct {
+  int32_t owner;
+  int32_t depth;
+} TzLock;
 
 typedef struct TzThread {
   void *failed;
@@ -14,6 +20,9 @@ typedef struct TzThread {
   int32_t conn_locks;
   void *await_lock;
   struct TzReactor *local_head, *local_tail;
+  struct TzReactor *movable_head, *movable_tail, *movable_ready;
+  TzLock movable_lock;
+  TzWeight movable_weight;
   void *caches[4];
   TzHeap heap;
   int32_t awaited_call;
@@ -44,11 +53,6 @@ static inline void tz_cpu_relax(void) {
   __builtin_ia32_pause();
 #endif
 }
-
-typedef struct {
-  int32_t owner;
-  int32_t depth;
-} TzLock;
 
 #if TZ_PARALLEL && !defined(TZ_NO_THREAD_STATE)
 static inline void tz_lock(TzLock *l) {

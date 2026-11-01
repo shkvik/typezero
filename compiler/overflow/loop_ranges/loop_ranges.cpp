@@ -130,6 +130,103 @@ bool identicalState(const State &a, const State &b) {
   return true;
 }
 
+bool awaitsIn(const Stmt *stmt) {
+  if (!stmt) {
+    return false;
+  }
+  switch (stmt->kind()) {
+  case Stmt::Kind::ForOf:
+    if (cast<ForOfStmt>(stmt)->isAwait) {
+      return true;
+    }
+    return awaitsIn(cast<ForOfStmt>(stmt)->body);
+  case Stmt::Kind::While:
+    return awaitsIn(cast<WhileStmt>(stmt)->body);
+  case Stmt::Kind::DoWhile:
+    return awaitsIn(cast<DoWhileStmt>(stmt)->body);
+  case Stmt::Kind::For:
+    return awaitsIn(cast<ForStmt>(stmt)->body);
+  case Stmt::Kind::Block:
+    return llvm::any_of(cast<BlockStmt>(stmt)->body, awaitsIn);
+  case Stmt::Kind::If:
+    return awaitsIn(cast<IfStmt>(stmt)->thenStmt) || awaitsIn(cast<IfStmt>(stmt)->elseStmt);
+  case Stmt::Kind::Labeled:
+    return awaitsIn(cast<LabeledStmt>(stmt)->body);
+  case Stmt::Kind::Switch:
+    for (const SwitchCase &c : cast<SwitchStmt>(stmt)->cases) {
+      if (llvm::any_of(c.body, awaitsIn)) {
+        return true;
+      }
+    }
+    return false;
+  default:
+    return false;
+  }
+}
+
+bool waitsOrYields(const Stmt *stmt) {
+  bool found = false;
+  visitExprs(stmt, [&](const Expr *e) { found |= isa<AwaitExpr, YieldExpr>(e); }, false);
+
+  return found || awaitsIn(stmt);
+}
+
+bool readsInput(const Expr *cond) {
+  bool input = false;
+  if (cond) {
+    visitExprs(cond, [&](const Expr *e) {
+      if (auto *call = dyn_cast<CallExpr>(e)) {
+        input |= call->builtin == Builtin::ReadLine || isFsBuiltin(call->builtin) ||
+                 isChildBuiltin(call->builtin);
+      }
+    });
+  }
+
+  return input;
+}
+
+std::optional<double> counterStep(const Expr *arg, const VarSymbol *param) {
+  auto *bin = dyn_cast<BinaryExpr>(stripCasts(arg));
+  if (!bin || (bin->op != BinaryOp::Add && bin->op != BinaryOp::Sub)) {
+    return std::nullopt;
+  }
+  auto isParam = [&](const Expr *e) {
+    auto *name = dyn_cast<NameExpr>(stripCasts(e));
+
+    return name && name->var == param;
+  };
+  auto literal = [](const Expr *e) -> std::optional<double> {
+    if (auto *lit = dyn_cast<IntLitExpr>(stripCasts(e)); lit && lit->value > 0) {
+      return double(lit->value);
+    }
+
+    return std::nullopt;
+  };
+  if (isParam(bin->lhs)) {
+    if (std::optional<double> c = literal(bin->rhs)) {
+      return bin->op == BinaryOp::Add ? *c : -*c;
+    }
+  }
+  if (bin->op == BinaryOp::Add && isParam(bin->rhs)) {
+    return literal(bin->lhs);
+  }
+
+  return std::nullopt;
+}
+
+bool limitedTowards(const Num &n, double step) {
+  if (n.empty()) {
+    return false;
+  }
+
+  return step < 0 ? n.loOrigin == Origin::Proven && n.lo > -kLengthMax
+                  : n.hiOrigin == Origin::Proven && n.hi < kLengthMax;
+}
+
+constexpr const char *kWhileItRuns =
+    ", and nothing in the code limits it: while it runs without 'await', nothing else runs on "
+    "this thread";
+
 bool freshBase(const Val &v, uint64_t before) {
   if (v.num.base > before || v.len.base > before) {
     return true;
@@ -154,6 +251,7 @@ LoopRanges::LoopRanges(OverflowCheck &check) : check_(check) {}
 
 void LoopRanges::execLoop(const Stmt *stmt, llvm::ArrayRef<llvm::StringRef> labels, State &st) {
   OverflowCheck::LoopSpec spec;
+  spec.stmt = stmt;
   spec.loc = stmt->loc();
   spec.labels.assign(labels.begin(), labels.end());
   if (auto *s = dyn_cast<WhileStmt>(stmt)) {
@@ -315,6 +413,144 @@ Num LoopRanges::passCount(const OverflowCheck::LoopSpec &spec, const State &entr
 }
 
 void LoopRanges::forget() { remembered_.clear(); }
+
+void LoopRanges::noteLoop(const OverflowCheck::LoopSpec &spec, const Num &passes) {
+  if (!spec.stmt || !check_.reporting_ || check_.quiet_ != 1 || check_.overBudget()) {
+    return;
+  }
+  OverflowCheck::LongLoop &loop = check_.loops_[spec.stmt];
+  if (!passes.empty() && passes.hiOrigin == Origin::Proven && passes.hi < kLengthMax) {
+    return;
+  }
+  loop.bounded = false;
+  if (!loop.why && !passes.empty() && passes.hiOrigin == Origin::Input) {
+    loop.why = passes.hiWhy;
+  }
+}
+
+void LoopRanges::findRecursions() {
+  for (const FunctionDecl *fn : check_.functions_) {
+    if (!fn->body || !fn->sym || !fn->sym->ret || fn->isAsync || fn->isGenerator) {
+      continue;
+    }
+    OverflowCheck::Recursion recursion;
+    for (CallExpr *call : tailCallsIn(const_cast<FunctionDecl *>(fn))) {
+      if (call->func && call->func->decl == fn && call->func->ret == fn->sym->ret) {
+        recursion.self.push_back(call);
+      }
+    }
+    if (recursion.self.empty()) {
+      continue;
+    }
+    bool other = false;
+    visitExprs(
+        fn->body,
+        [&](const Expr *e) {
+          auto *call = dyn_cast<CallExpr>(e);
+          other |= call && call->func && call->func->decl == fn &&
+                   !llvm::is_contained(recursion.self, call);
+        },
+        false);
+    if (other) {
+      continue;
+    }
+    for (size_t i = 0; i < fn->params.size() && recursion.counter < 0; ++i) {
+      const VarSymbol *param = fn->params[i].sym;
+      if (!param || !isIntegerType(param->type)) {
+        continue;
+      }
+      std::optional<double> step;
+      for (const CallExpr *call : recursion.self) {
+        std::optional<double> s =
+            i < call->args.size() ? counterStep(call->args[i], param) : std::nullopt;
+        if (!s || (step && (*s < 0) != (*step < 0))) {
+          step.reset();
+          break;
+        }
+        step = s;
+      }
+      if (step) {
+        recursion.counter = int(i);
+        recursion.step = *step;
+      }
+    }
+    check_.recursions_[fn] = std::move(recursion);
+  }
+}
+
+void LoopRanges::noteCall(const CallExpr *call, const FunctionDecl *target,
+                          llvm::ArrayRef<Val> args) {
+  if (!check_.reporting_ || check_.quiet_ != 0 || check_.overBudget() || !call->func ||
+      !check_.recursions_.count(target)) {
+    return;
+  }
+  OverflowCheck::CallArgs &known = check_.recursiveCalls_[call];
+  bool first = !known.target;
+  known.target = target;
+  known.args.resize(args.size());
+  for (size_t i = 0; i < args.size(); ++i) {
+    known.args[i] = first ? args[i].num : join(known.args[i], args[i].num);
+  }
+}
+
+void LoopRanges::reportRecursions() {
+  for (const auto &[fn, recursion] : check_.recursions_) {
+    bool stops = recursion.counter >= 0;
+    bool seen = true;
+    for (const CallExpr *call : recursion.self) {
+      auto found = check_.recursiveCalls_.find(call);
+      if (found == check_.recursiveCalls_.end()) {
+        seen = false;
+        continue;
+      }
+      stops = stops && size_t(recursion.counter) < found->second.args.size() &&
+              limitedTowards(found->second.args[recursion.counter], recursion.step);
+    }
+    if (!seen) {
+      continue;
+    }
+    std::string name = fn->name.empty() ? std::string("this function") : "'" + fn->name.str() + "'";
+    if (!stops) {
+      check_.diags_.hint(recursion.self.front()->loc(),
+                         "how deep this tail recursion goes depends on data" +
+                             std::string(kWhileItRuns));
+      continue;
+    }
+    for (const auto &[call, known] : check_.recursiveCalls_) {
+      if (known.target != fn || llvm::is_contained(recursion.self, call) ||
+          (size_t(recursion.counter) < known.args.size() &&
+           limitedTowards(known.args[recursion.counter], -recursion.step))) {
+        continue;
+      }
+      check_.diags_.hint(call->loc(), "how deep the tail recursion of " + name +
+                                          " goes depends on this argument" + kWhileItRuns);
+    }
+  }
+}
+
+void LoopRanges::reportLong() {
+  reportRecursions();
+  for (const auto &[stmt, loop] : check_.loops_) {
+    if (loop.bounded || waitsOrYields(stmt)) {
+      continue;
+    }
+    const Expr *cond = nullptr;
+    if (auto *s = dyn_cast<WhileStmt>(stmt)) {
+      cond = s->cond;
+    } else if (auto *s = dyn_cast<DoWhileStmt>(stmt)) {
+      cond = s->cond;
+    } else if (auto *s = dyn_cast<ForStmt>(stmt)) {
+      cond = s->cond;
+    }
+    if (readsInput(cond)) {
+      continue;
+    }
+    std::string data =
+        loop.why ? " (" + check_.overflowWarnings().inputText(loop.why, stmt->loc()) + ")" : "";
+    check_.diags_.hint(stmt->loc(),
+                       "how many times this loop runs depends on data" + data + kWhileItRuns);
+  }
+}
 
 std::vector<uint64_t> LoopRanges::contextOf() const {
   const OverflowCheck::Frame &frame = check_.frames_.back();
@@ -582,6 +818,7 @@ void LoopRanges::solveLoop(const OverflowCheck::LoopSpec &spec, State &st) {
       }
     }
   }
+  noteLoop(spec, passes);
   State unrolledExits = deadState();
   bool unrolled = false;
   if (!passes.empty() && passes.hi <= kUnrollPasses && spec.simple && !check_.overBudget()) {

@@ -70,6 +70,7 @@ Refs FlowBuiltins::builtin(CallExpr *c, MemberExpr *member, const Refs &receiver
   case Builtin::LibOrder:
     return {};
   case Builtin::LibAhead:
+  case Builtin::LibAheadMovable:
     return args.empty() ? Refs() : args[0];
   default:
     break;

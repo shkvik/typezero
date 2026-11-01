@@ -34,6 +34,11 @@
 #   explain tests (MODE=explain): `tz build --explain-parallel` of the source
 #     must succeed and print exactly <name>.explain, next to it.
 #
+#   hint tests (MODE=hints): `tz build --hints` of a run test with
+#     // expect-hint: text   lines must succeed and print exactly the hints
+#                            they expect, each on the next line that is not
+#                            such a comment, as for expect-error below
+#
 #   error tests (MODE=error):
 #     // expect-error: text    the compiler must report an error containing
 #                              text on the next line that is not such a
@@ -157,7 +162,7 @@ function(collect_expectations kind out)
     set(lineno 0)
     foreach(line IN LISTS source_lines)
       math(EXPR lineno "${lineno} + 1")
-      if(line MATCHES "^[ \t]*// expect-(error|warning): *(.*)$")
+      if(line MATCHES "^[ \t]*// expect-(error|warning|hint): *(.*)$")
         if(CMAKE_MATCH_1 STREQUAL kind)
           list(APPEND pending "${CMAKE_MATCH_2}")
         endif()
@@ -342,6 +347,18 @@ elseif(MODE STREQUAL "explain")
   if(NOT stdout STREQUAL expected)
     fail("the explanation differs from ${name}.explain\n--- expected:\n${expected}\n--- actual:\n${stdout}")
   endif()
+
+elseif(MODE STREQUAL "hints")
+  execute_process(
+    COMMAND ${TZ} build --hints -o ${CMAKE_CURRENT_BINARY_DIR}/hints-test.exe ${SRC}
+    OUTPUT_VARIABLE stdout
+    ERROR_VARIABLE stderr
+    RESULT_VARIABLE exit_code)
+  if(NOT exit_code EQUAL 0)
+    fail("tz build --hints exited with ${exit_code}:\n${stderr}")
+  endif()
+  collect_expectations(hint expected_hints)
+  check_messages(hint "${expected_hints}" "${stderr}" TRUE)
 
 elseif(MODE STREQUAL "error")
   execute_process(

@@ -48,6 +48,7 @@ llvm::json::Value CheckReport::build(const Errors &errors, const std::vector<Mod
     Item item;
     item.severity = diagnostic.kind == llvm::SourceMgr::DK_Error     ? 1
                     : diagnostic.kind == llvm::SourceMgr::DK_Warning ? 2
+                    : diagnostic.kind == llvm::SourceMgr::DK_Remark  ? 4
                                                                      : 3;
     item.message = located;
     if (place) {

@@ -3,10 +3,18 @@
 
 namespace tz {
 
-ErrorPrinter::ErrorPrinter(const llvm::SourceMgr &sourceMgr) : sourceMgr_(sourceMgr) {}
+ErrorPrinter::ErrorPrinter(const llvm::SourceMgr &sourceMgr, bool hints)
+    : sourceMgr_(sourceMgr), hints_(hints) {}
 
 void ErrorPrinter::print(const Errors &errors) const {
   for (const Diagnostic &diagnostic : errors) {
+    if (diagnostic.kind == llvm::SourceMgr::DK_Remark) {
+      if (hints_ && diagnostic.form == Diagnostic::Form::Located) {
+        sourceMgr_.GetMessage(diagnostic.loc, diagnostic.kind, "hint: " + diagnostic.message)
+            .print(nullptr, llvm::errs(), true, false);
+      }
+      continue;
+    }
     switch (diagnostic.form) {
     case Diagnostic::Form::Located:
       sourceMgr_.PrintMessage(llvm::errs(), diagnostic.loc, diagnostic.kind, diagnostic.message);

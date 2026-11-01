@@ -268,7 +268,15 @@ Val BuiltinEvaluator::evalBuiltin(const CallExpr *call, State &st) {
         check_.slots().elementsOf(receiverExpr, receiver, receiverType), type);
   case Builtin::ArrSlice: {
     Val v;
-    v.len = make({0}, length().high());
+    Bound most = length().high();
+    if (args.size() >= 2 && !args[0].num.empty() && !args[1].num.empty() && args[0].num.lo >= 0 &&
+        args[1].num.lo >= 0) {
+      double count = std::max(args[1].num.hi - args[0].num.lo, 0.0);
+      if (count < most.v) {
+        most = joint(count, args[1].num.high(), args[0].num.low());
+      }
+    }
+    v.len = make({0}, most);
     v.elem = share(check_.slots().elementsOf(receiverExpr, receiver, receiverType));
     return v;
   }

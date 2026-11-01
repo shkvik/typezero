@@ -6,6 +6,7 @@
 
 void tz_io_wake_loop(void);
 void tz_work_ref_count(int32_t n);
+void tz_io_start_held(void);
 
 typedef struct TzWork {
   struct TzWork *next;

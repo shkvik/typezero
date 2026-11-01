@@ -24,6 +24,7 @@ public:
   bool optimize = true;
   bool emitLLVM = false;
   bool explainParallel = false;
+  bool hints = false;
   std::vector<std::string> programArgs;
 };
 

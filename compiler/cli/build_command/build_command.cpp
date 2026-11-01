@@ -19,7 +19,7 @@ int BuildCommand::run(const Args &args, llvm::StringRef output) const {
   BuildOptions options{args.input,    output.str(),     args.optimize,
                        args.emitLLVM, packages.graph(), runtime_};
   Program program;
-  ErrorPrinter printer(program.sourceMgr);
+  ErrorPrinter printer(program.sourceMgr, args.hints);
 
   Errors checkErrors = checkProgram(program, options);
   printer.print(checkErrors);

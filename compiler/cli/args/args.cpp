@@ -44,6 +44,8 @@ options:
   --explain-parallel
                     print what runs in parallel and why, instead of building
                     (build only)
+  --hints           print hints too: places that may run long without 'await'
+                    (build only)
 )";
 
 }
@@ -99,6 +101,8 @@ int Args::parse(llvm::ArrayRef<const char *> args) {
       emitLLVM = true;
     } else if (arg == "--explain-parallel") {
       explainParallel = true;
+    } else if (arg == "--hints") {
+      hints = true;
     } else if (arg.starts_with("-")) {
       return usageError("unknown option '" + arg + "'");
     } else if (command == Command::Run && !arg.ends_with_insensitive(".tz") &&
@@ -123,6 +127,9 @@ int Args::parse(llvm::ArrayRef<const char *> args) {
   }
   if (command == Command::Run && (emitLLVM || !output.empty())) {
     return usageError("'-o' and '--emit-llvm' only apply to 'tz build'");
+  }
+  if (command == Command::Run && hints) {
+    return usageError("'--hints' only applies to 'tz build'");
   }
   if (command == Command::Run && explainParallel) {
     return usageError("'--explain-parallel' only applies to 'tz build'");

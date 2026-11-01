@@ -1,0 +1,48 @@
+// A request the server refuses (413: the body is larger than maxBodySize)
+// gets its answer even when the client goes on sending the body after it.
+// The server used to close the socket with that data unread, and the system
+// then resets the connection: the client lost the 413 it had already got.
+// Now the server reads and drops what still comes for up to 2 s (or 1 MB)
+// and closes after the client does. Only 127.0.0.1.
+import { Socket } from "node:net"
+import { Server } from "tz:http"
+
+const server = new Server({ port: 0, hostname: "127.0.0.1", maxBodySize: 10 }, async request => {
+  const text = await request.text()
+  return new Response(text.isOk() ? `${text.value.length} bytes` : text.error.message)
+})
+
+function wait(ms: int): Promise<void> {
+  return new Promise(resolve => {
+    setTimeout(() => resolve(), ms)
+  })
+}
+
+async function sendTooMuch(port: int, gap: int): Promise<string> {
+  const socket = new Socket({ host: "127.0.0.1", port: port, timeout: 5000 })
+  const connected = await socket.connect()
+  if (connected.isErr()) return connected.error.code
+  socket.write("POST / HTTP/1.1\r\nhost: localhost\r\ntransfer-encoding: chunked\r\n\r\n")
+  socket.write("a\r\n0123456789\r\n1\r\n!\r\n")
+  await wait(gap)
+  socket.write("5\r\nmore!\r\n0\r\n\r\n")
+  await wait(gap)
+  let answer = ""
+  for await (const chunkResult of socket) {
+    if (chunkResult.isErr()) return `${chunkResult.error.code} after "${answer.split("\r\n")[0] ?? ""}"`
+    answer += chunkResult.value.toString()
+  }
+
+  return answer.split("\r\n")[0] ?? ""
+}
+
+const listened = server.listen()
+if (listened.isErr()) {
+  console.log(listened.error.message)
+  process.exit(1)
+}
+const listening = listened.value
+for (const gap of [0, 20, 100]) {
+  console.log(`gap ${gap} ms:`, await sendTooMuch(listening.port, gap))
+}
+await listening.stop({ timeout: 0 })

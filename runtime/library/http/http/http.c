@@ -849,6 +849,7 @@ static void answer_error(NetConn *c, int status) {
                    reason_of(status));
   c->http.keep_alive = 0;
   c->http.refused = 1;
+  c->linger = 1;
   net_write(c, text, (size_t)n);
   net_close(c);
 }
@@ -1622,7 +1623,13 @@ void tz_http_next(TzPromise *p, void *conn, TzMaker make) {
     c->http.keep_alive = !c->http.ending;
   }
   if (begin_wait(c, p, WAIT_REQUEST, NULL, make)) {
+#if TZ_PARALLEL
+    if (!net_input_in_pool(c)) {
+      input(c);
+    }
+#else
     input(c);
+#endif
   }
 #if TZ_PARALLEL
   tz_thread.await_lock = conn_lock_of(c);

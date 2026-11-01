@@ -286,6 +286,7 @@ Val CallRanges::evalCall(const CallExpr *call, State &st) {
                                               : nullptr;
   if (target) {
     passArgs(target, call, args);
+    check_.loopRanges().noteCall(call, target, args);
   }
   for (const CallExpr::UnionMethod &m : call->unionMethods) {
     if (m.method && m.method->decl) {

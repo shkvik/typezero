@@ -3,6 +3,7 @@
 #include "compiler/overflow/value_range/value_range.h"
 #include "compiler/program/ast/ast.h"
 #include "compiler/program/diagnostics/diagnostics.h"
+#include "llvm/ADT/MapVector.h"
 #include <memory>
 #include <set>
 #include <string>
@@ -146,6 +147,7 @@ private:
     unsigned quiet = 0;
   };
   struct LoopSpec {
+    const Stmt *stmt = nullptr;
     llvm::SMLoc loc;
     llvm::SmallVector<llvm::StringRef, 1> labels;
     const Expr *cond = nullptr;
@@ -190,6 +192,22 @@ private:
   };
   std::vector<Warning> warnings_;
   llvm::DenseMap<const Expr *, bool> proofs_;
+  struct LongLoop {
+    bool bounded = true;
+    const Reason *why = nullptr;
+  };
+  llvm::MapVector<const Stmt *, LongLoop> loops_;
+  struct Recursion {
+    std::vector<const CallExpr *> self;
+    int counter = -1;
+    double step = 0;
+  };
+  llvm::MapVector<const FunctionDecl *, Recursion> recursions_;
+  struct CallArgs {
+    const FunctionDecl *target = nullptr;
+    std::vector<Num> args;
+  };
+  llvm::MapVector<const CallExpr *, CallArgs> recursiveCalls_;
 
 public:
   ~OverflowCheck();

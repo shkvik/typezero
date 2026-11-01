@@ -1203,5 +1203,8 @@ void visitExprs(const Stmt *stmt, llvm::function_ref<void(const Expr *)> visit,
                 bool intoFunctions = true);
 void visitExprs(const Expr *expr, llvm::function_ref<void(const Expr *)> visit,
                 bool intoFunctions = true);
+void tailCallsOf(Expr *value, std::vector<CallExpr *> &calls);
+void tailStatementsOf(Stmt *stmt, bool tail, std::vector<Stmt *> &stmts);
+std::vector<CallExpr *> tailCallsIn(FunctionDecl *fn);
 
 }

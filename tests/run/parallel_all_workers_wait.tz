@@ -1,0 +1,70 @@
+// The parallel runtime when every pool thread waits for its turn: the main
+// thread must not wait for one of them to start a queued piece, it runs the
+// piece itself. Two threads, so the only pool thread often runs a piece of a
+// connection (it read the socket) that waits for its turn while the main
+// thread reaches another queued piece. With TZ_PARALLEL_STRESS (the threads
+// variant) the main thread used to wait for the pool thread there, and the
+// pool thread for the main one: the program hung. HTTP/2 server and clients
+// in one program, connections opened and closed in rounds. Only 127.0.0.1.
+// env: TZ_THREADS=2
+import { Server } from "tz:http"
+import { Http2Connection, Http2Client } from "tz:http2"
+
+const options = { port: 0, hostname: "127.0.0.1", http2: { enabled: true, cleartext: true } }
+const server = new Server(options, request => {
+  const path = new URL(request.url).pathname()
+  if (path == "/slow") {
+    const start = performance.now()
+    let spins = 0
+    while (performance.now() - start < 2) spins++
+    return new Response(`slow ${spins > 0}`)
+  }
+  return new Response("fast")
+})
+
+async function call(connection: Http2Connection, path: string): Promise<boolean> {
+  const opened = await connection.request({ method: "GET", path })
+  if (opened.isErr()) return false
+  const request = opened.value
+  const ended = await request.end()
+  if (ended.isErr()) return false
+  const answered = await request.response()
+  if (answered.isErr()) return false
+  for await (const chunkResult of answered.value.body()) {
+    if (chunkResult.isErr()) return false
+  }
+
+  return true
+}
+
+async function visit(url: string): Promise<int> {
+  const client = new Http2Client({ url })
+  const connected = await client.connect()
+  if (connected.isErr()) return 0
+  const connection = connected.value
+  const calls: Promise<boolean>[] = []
+  calls.push(call(connection, "/fast/1"))
+  calls.push(call(connection, "/slow"))
+  calls.push(call(connection, "/fast/2"))
+  const results = await Promise.all(calls)
+  await connection.close()
+
+  return results.filter(ok => ok).length
+}
+
+const listened = server.listen()
+if (listened.isErr()) {
+  console.log(listened.error.message)
+  process.exit(1)
+}
+const listening = listened.value
+const url = `http://127.0.0.1:${listening.port}`
+let answered = 0
+for (let round = 0; round < 60; round++) {
+  const visits: Promise<int>[] = []
+  for (let index = 0; index < 8; index++) visits.push(visit(url))
+  const counts = await Promise.all(visits)
+  for (const count of counts) answered += count
+}
+console.log(`answered: ${answered}`)
+await listening.stop()

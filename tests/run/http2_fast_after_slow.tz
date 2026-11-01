@@ -1,0 +1,64 @@
+// Requests that come in one packet after a request whose handler computes
+// for long without await are not held up by it. One HTTP/2 connection: one
+// request that computes 300 ms, then seven fast ones. The thread that read
+// the packet runs the slow handler; the rest of its queue (the next streams)
+// waits behind it until the Pendulum watchdog sees it waiting over 1 ms and
+// hands it to other threads (docs/async.md, "Pendulum"). Before, the fast
+// responses came after the slow one. Four threads: the reader, two free
+// ones and the main one. Only 127.0.0.1.
+// env: TZ_THREADS=4
+import { Server } from "tz:http"
+import { Http2Connection, Http2Client } from "tz:http2"
+
+const options = { port: 0, hostname: "127.0.0.1", http2: { enabled: true, cleartext: true } }
+const server = new Server(options, request => {
+  const path = new URL(request.url).pathname()
+  if (path == "/slow") {
+    const start = performance.now()
+    let spins = 0
+    while (performance.now() - start < 300) spins++
+    return new Response(`slow ${spins > 0}`)
+  }
+  return new Response("fast")
+})
+
+async function call(connection: Http2Connection, path: string, started: number): Promise<number> {
+  const opened = await connection.request({ method: "GET", path })
+  if (opened.isErr()) return -1
+  const request = opened.value
+  const ended = await request.end()
+  if (ended.isErr()) return -1
+  const answered = await request.response()
+  if (answered.isErr()) return -1
+  for await (const chunkResult of answered.value.body()) {
+    if (chunkResult.isErr()) return -1
+  }
+
+  return performance.now() - started
+}
+
+const listened = server.listen()
+if (listened.isErr()) {
+  console.log(listened.error.message)
+  process.exit(1)
+}
+const listening = listened.value
+const client = new Http2Client({ url: `http://127.0.0.1:${listening.port}` })
+const connected = await client.connect()
+if (connected.isErr()) {
+  console.log(connected.error.message)
+  process.exit(1)
+}
+const connection = connected.value
+const warm = await call(connection, "/fast", performance.now())
+console.log(`warm: ${warm >= 0}`)
+const started = performance.now()
+const slow = call(connection, "/slow", started)
+const fast: Promise<number>[] = []
+for (let index = 0; index < 7; index++) fast.push(call(connection, `/fast/${index}`, started))
+const fastTimes = await Promise.all(fast)
+const slowTime = await slow
+console.log(`fast within 150 ms: ${fastTimes.every(time => time >= 0 && time < 150)}`)
+console.log(`slow after 300 ms: ${slowTime >= 300}`)
+await connection.close()
+await listening.stop()

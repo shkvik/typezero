@@ -1,0 +1,84 @@
+// env: TZ_PARALLEL_PROVOKE=1
+// Group counts under threads (tmp/spec/19-pendulum-tails.md, П5). Pairs of
+// objects that point at each other form groups; weak references point at
+// them. Readers on the pool threads take the pairs through the weak
+// references while the main thread drops the last strong ones, so a group
+// may die while another thread takes it. TZ_PARALLEL_PROVOKE=1 makes the
+// runtime wait a little inside such windows to make the races show. Before
+// the fix, deref could revive a dying group (crash on free), and the target
+// of a WeakRef stayed private while pool threads counted it (leaks, crashes).
+import { readFile, writeFile, mkdtemp, rm } from "node:fs/promises"
+import { join } from "node:path"
+import { tmpdir } from "node:os"
+
+class Peer {
+  other?: Peer
+  constructor(public value: int) {}
+}
+
+function pair(value: int): Peer {
+  const first = new Peer(value)
+  const second = new Peer(value)
+  first.other = second
+  second.other = first
+  return first
+}
+
+const count = 64
+let holders: (Peer | undefined)[] = []
+const weaks: WeakRef<Peer>[] = []
+for (let i = 0; i < count; i++) {
+  const made = pair(i)
+  holders.push(made)
+  weaks.push(new WeakRef(made))
+}
+
+const dir = must(await mkdtemp(join(tmpdir(), "tz-group-race-")))
+const name = join(dir, "tick.txt")
+must(await writeFile(name, "tick"))
+
+async function read(refs: WeakRef<Peer>[], rounds: int): Promise<boolean> {
+  let fine = true
+  for (let round = 0; round < rounds; round++) {
+    const text = await readFile(name, "utf8")
+    if (text.isErr()) fine = false
+    for (const ref of refs) {
+      const peer = ref.deref()
+      if (peer != undefined) {
+        const other = peer.other
+        if (other == undefined || other.value != peer.value) fine = false
+      }
+    }
+  }
+  return fine
+}
+
+async function release(rounds: int): Promise<int> {
+  let released = 0
+  for (let round = 0; round < rounds; round++) {
+    const text = await readFile(name, "utf8")
+    if (text.isOk() && round < holders.length) {
+      holders[round] = undefined
+      released++
+    }
+  }
+  return released
+}
+
+const readers: Promise<boolean>[] = []
+for (let i = 0; i < 6; i++) readers.push(read(weaks, 40))
+const released = await release(count)
+const fine = await Promise.all(readers)
+console.log(`released: ${released}`)
+console.log(`readers saw whole pairs: ${fine.every(ok => ok)}`)
+console.log(`left: ${weaks.filter(ref => ref.deref() != undefined).length}`)
+holders = []
+must(await rm(dir, { recursive: true }))
+
+function must<T, E>(r: Result<T, E>): T {
+  if (r.isErr()) {
+    console.log(r.error)
+    process.exit(1)
+  }
+  return r.value
+}

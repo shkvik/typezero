@@ -98,6 +98,9 @@ struct NetConn {
   uint8_t eof;
   uint8_t reading, writing;
   uint8_t server;
+  uint8_t linger;
+  uint32_t linger_bytes;
+  double linger_since;
   int32_t error;
   int32_t ops;
   NetListener *listener;
@@ -158,6 +161,7 @@ static inline void conn_unlock(NetConn *c) {
 }
 
 int tz_http_waits_request(NetConn *c);
+int net_input_in_pool(NetConn *c);
 
 struct NetListener {
   int64_t rc;

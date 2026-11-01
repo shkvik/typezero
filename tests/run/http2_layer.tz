@@ -343,12 +343,26 @@ if (cert.isOk() && key.isOk()) {
   }
 }
 
+// The old server answers the preface in HTTP/1.1 and closes. Whether that
+// comes before request(), end() or response() depends on timing; each fails
+// with the same code.
+async function firstErrorCode(connection: Http2Connection): Promise<string> {
+  const started = await connection.request({ method: "GET", path: "/" })
+  if (started.isErr()) return started.error.code
+  const call = started.value
+  const ended = await call.end()
+  if (ended.isErr()) return ended.error.code
+  const answered = await call.response()
+  if (answered.isErr()) return answered.error.code
+  return `${answered.value.status}`
+}
+
 const old = new Server({ port: 0, hostname: "127.0.0.1" }, () => new Response("old")).listen()
 if (old.isOk()) {
   const oldClient = new Http2Client({ url: `http://127.0.0.1:${old.value.port}` })
   const oldConnected = await oldClient.connect()
   if (oldConnected.isOk()) {
-    await simple(oldConnected.value, "/")
+    console.log("/ on the old server:", await firstErrorCode(oldConnected.value))
     const after = await oldConnected.value.request({ method: "GET", path: "/" })
     console.log("old server:", after.isErr() ? after.error.code : "started")
   }

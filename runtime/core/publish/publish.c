@@ -152,6 +152,10 @@ static void publish_contents(void *item) {
   }
   void *object = item;
   const TzLayout *layout = ((TzInstance *)object)->layout;
+  if (layout->drop == tz_weak_drop) {
+    publish_ref(tz_weak_private_target(object));
+    return;
+  }
   void (*publish)(void *) = publisher_of(layout);
   if (publish) {
     publish(object);

@@ -3,6 +3,7 @@
 #include "runtime/core/closure/closure.h"
 #include "runtime/core/group/group.h"
 #include "runtime/core/output/output.h"
+#include "runtime/core/parallel/parallel.h"
 #include "runtime/core/pendulum/pendulum.h"
 #include "runtime/core/tzrt/tzrt.h"
 #include <stdlib.h>
@@ -325,6 +326,21 @@ static void gather(int64_t timeout) {
 
 #endif
 
+#if TZ_PARALLEL
+TZ_THREAD_LOCAL TzWork *tz_io_held_head, *tz_io_held_tail;
+
+void tz_io_start_held(void) {
+  TzWork *w = tz_io_held_head;
+  tz_io_held_head = tz_io_held_tail = NULL;
+  while (w) {
+    TzWork *next = w->next;
+    w->next = NULL;
+    push_work(w);
+    w = next;
+  }
+}
+#endif
+
 void tz_work_queue(TzWork *w) {
   w->next = NULL;
   w->settles = NULL;
@@ -354,6 +370,17 @@ void tz_work_queue(TzWork *w) {
 #endif
     start_pool();
   }
+#if TZ_PARALLEL
+  if (tz_thread.job && !tz_thread.turn) {
+    if (tz_io_held_tail) {
+      tz_io_held_tail->next = w;
+    } else {
+      tz_io_held_head = w;
+    }
+    tz_io_held_tail = w;
+    return;
+  }
+#endif
   push_work(w);
 }
 

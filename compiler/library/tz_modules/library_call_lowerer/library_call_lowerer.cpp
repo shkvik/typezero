@@ -79,6 +79,7 @@ llvm::Value *LibraryCallLowerer::emitLibBuiltin(CallExpr *call) {
   case Builtin::LibStdWrite:
     return lowering_.streamLowerer().emitStreamBuiltin(call);
   case Builtin::LibAhead:
+  case Builtin::LibAheadMovable:
     return lowering_.exprLowerer().emitExpr(call->args[0]);
   case Builtin::LibPanic: {
     llvm::Value *text = lowering_.exprLowerer().emitExpr(call->args[0]);

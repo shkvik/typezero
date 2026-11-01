@@ -1,7 +1,7 @@
 import { Connection, Request, Response } from "tz:fetch";
 import { URL } from "tz:url";
 import { WebSocket, acceptKey } from "tz:websocket";
-import { ahead, NativeError, order } from "tz:intrinsics";
+import { ahead, aheadMovable, NativeError, order } from "tz:intrinsics";
 
 declare function netListen(
   host: string,
@@ -346,7 +346,7 @@ export class Listening {
   private static async serveStreams(socket: object, handler: Handler): Promise<void> {
     for (;;) {
       const waiting = httpStream(socket);
-      const stream = await ahead(waiting);
+      const stream = await aheadMovable(waiting);
       if (stream == undefined) {
         return;
       }
@@ -364,7 +364,7 @@ export class Listening {
     };
     const conn = new Connection(stream);
     const next = conn.next();
-    const got = await ahead(next);
+    const got = await aheadMovable(next);
     if (got.isErr() || got.value == 0) {
       httpStreamDone(stream);
       return;
@@ -397,7 +397,8 @@ export class Listening {
         break;
       }
       if (got.value == 2) {
-        await Listening.serveStreams(socket, handler);
+        const streams = Listening.serveStreams(socket, handler);
+        await ahead(streams);
         break;
       }
       const request = Request.readFrom(conn);

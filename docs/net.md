@@ -66,6 +66,11 @@ const listening = new Server({ port: 3000 }, app.fetch).listen()
   `transport` — `{ secure: false }` (http, по умолчанию) или `{ secure: true, cert, key }`
   (https, строки PEM). `secure: true` без `cert` и `key` не скомпилируется, `secure: false` с
   ними — тоже.
+- **Отказ доходит до клиента** (1.11). Ответив отказом (413, 408, 400…) и закрыв соединение,
+  сервер HTTP/1.1 ещё до 2 с (или до 1 МБ) читает и выбрасывает то, что клиент дошлёт, и
+  закрывает сокет после клиента. Без этого остаток тела, пришедший после отказа, заставлял систему
+  сбросить соединение, и клиент терял уже пришедший ответ. Пока без TLS. Тест —
+  `run/http_refuse_late_body`.
 - **Ошибка `listen()` — `ListenError`**: `kind: "LISTEN_ERROR"` (ошибка ядра сервера: сокет,
   сертификат), `code` — один из `ListenErrorCode` (`EADDRINUSE`, `EACCES`, `EADDRNOTAVAIL`,
   `ENOTFOUND`, `ERR_INVALID_ARG_VALUE`, `ERR_TLS_CERT`, `ERR_TLS_KEY`, `EMFILE`, `ENOBUFS`,

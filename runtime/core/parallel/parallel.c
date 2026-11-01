@@ -30,12 +30,15 @@ int32_t tz_thread_index(void) { return tz_thread.index; }
 TzThread *tz_thread_list[MAX_THREADS];
 int32_t tz_thread_count;
 
+static void movable_release(TzWeight *weight);
+
 void tz_thread_register(void) {
   int32_t i = __atomic_fetch_add(&tz_thread_count, 1, __ATOMIC_ACQ_REL);
   if (i >= MAX_THREADS) {
     tz_panic("too many threads", 16);
   }
   tz_thread.index = i;
+  tz_thread.movable_weight.release = movable_release;
   __atomic_store_n(&tz_thread_list[i], &tz_thread, __ATOMIC_RELEASE);
 }
 
@@ -70,8 +73,13 @@ typedef struct TzJob {
   int64_t started;
   int64_t ahead;
   int32_t early;
+  int32_t counted;
   struct TzJob *later;
 } TzJob;
+
+#define MOVABLE ((uintptr_t)1 << 18)
+
+static inline uint32_t site_number(uintptr_t ahead) { return (uint32_t)(ahead & (MOVABLE - 1)); }
 
 static inline int64_t ticks(void) {
   LARGE_INTEGER now;
@@ -130,6 +138,9 @@ extern uint32_t tz_ahead_site_count;
 int64_t tz_pool_stat_dispatched, tz_pool_stat_ran, tz_pool_stat_taken, tz_pool_stat_waited;
 
 int32_t tz_pool_stress;
+int32_t tz_pool_provoke;
+
+void tz_provoke_pause(void) { Sleep(1); }
 
 TzJob *tz_pool_main_waits;
 extern int32_t tz_group_lock_owner;
@@ -180,9 +191,13 @@ static void print_stats(void) {
     fprintf(stderr, "  stopped ahead at +0x%llx: %lld times\n",
             (unsigned long long)tz_pool_stop_at[i].at, (long long)tz_pool_stop_at[i].count);
   }
-  fprintf(stderr, "tz: %lld pieces handed out, %lld ran ahead, %lld taken back, %lld waited for\n",
+  extern int64_t tz_pool_stat_moved;
+  fprintf(stderr,
+          "tz: %lld pieces handed out, %lld ran ahead, %lld taken back, %lld waited for, %lld "
+          "moved off a busy thread\n",
           (long long)tz_pool_stat_dispatched, (long long)tz_pool_stat_ran,
-          (long long)tz_pool_stat_taken, (long long)tz_pool_stat_waited);
+          (long long)tz_pool_stat_taken, (long long)tz_pool_stat_waited,
+          (long long)tz_pool_stat_moved);
   for (uint32_t i = 0; i < tz_ahead_site_count && i < 8; ++i) {
     if (tz_ahead_sites[i].runs) {
       fprintf(stderr, "  site %u: %u runs, %.0f ticks on average\n", i + 1, tz_ahead_sites[i].runs,
@@ -192,6 +207,37 @@ static void print_stats(void) {
 }
 
 extern TzReactor *tz_micro_head, *tz_micro_tail;
+
+static TzReactor *take_local(void) {
+  TzReactor *next = tz_thread.local_head;
+  if (next) {
+    tz_thread.local_head = next->next;
+    if (!tz_thread.local_head) {
+      tz_thread.local_tail = NULL;
+    }
+  }
+  if (!__atomic_load_n(&tz_thread.movable_head, __ATOMIC_ACQUIRE)) {
+    return next;
+  }
+  tz_lock(&tz_thread.movable_lock);
+  if (!next) {
+    next = tz_thread.movable_head;
+    if (next) {
+      __atomic_store_n(&tz_thread.movable_head, next->next, __ATOMIC_RELEASE);
+      if (!next->next) {
+        tz_thread.movable_tail = NULL;
+      }
+    }
+  }
+  tz_thread.movable_ready = tz_thread.movable_tail;
+  int waiting = tz_thread.movable_ready != NULL;
+  tz_unlock(&tz_thread.movable_lock);
+  if (waiting) {
+    tz_pendulum_hold(&tz_thread.movable_weight);
+  }
+
+  return next;
+}
 
 static void run_early(TzJob *job) {
   TzReactor *r = job->reactor;
@@ -203,12 +249,8 @@ static void run_early(TzJob *job) {
   }
   tz_obj_release(owner);
   for (;;) {
-    while (tz_thread.local_head) {
-      TzReactor *next = tz_thread.local_head;
-      tz_thread.local_head = next->next;
-      if (!tz_thread.local_head) {
-        tz_thread.local_tail = NULL;
-      }
+    TzReactor *next;
+    while ((next = take_local()) != NULL) {
       TzPromise *got = next->source;
       TzObject *of = next->owner;
       next->source = NULL;
@@ -219,11 +261,13 @@ static void run_early(TzJob *job) {
       tz_obj_release(of);
     }
     tz_pendulum_swing();
-    if (!tz_thread.local_head) {
+    if (!tz_thread.local_head && !__atomic_load_n(&tz_thread.movable_head, __ATOMIC_ACQUIRE)) {
       break;
     }
   }
 }
+
+TZ_THREAD_LOCAL int64_t tz_run_spent;
 
 static int run_job(TzJob *job) {
   TzReactor *r = job->reactor;
@@ -238,9 +282,15 @@ static int run_job(TzJob *job) {
     r->run(r, job->source);
     tz_pendulum_swing();
   }
+  tz_io_start_held();
+  if (job->counted) {
+    job->counted = 0;
+    tz_work_ref_count(-1);
+  }
   if (job->ahead < 0) {
     job->ahead = ticks() - job->started;
   }
+  tz_run_spent = job->ahead;
   tz_thread.turn = 0;
   __atomic_store_n(&tz_thread.job, NULL, __ATOMIC_RELEASE);
   int32_t early = job->early;
@@ -325,6 +375,10 @@ static int32_t pool_size(void) {
     atexit(print_stats);
   }
   tz_pool_stress = getenv("TZ_PARALLEL_STRESS") != NULL;
+  const char *provoke = getenv("TZ_PARALLEL_PROVOKE");
+  if (provoke) {
+    tz_pool_provoke = strcmp(provoke, "free") == 0 ? 1 : strcmp(provoke, "merge") == 0 ? 2 : 3;
+  }
   if (getenv("TZ_PARALLEL_WATCHDOG")) {
     HANDLE t = CreateThread(NULL, 0, watchdog,
                             (void *)(intptr_t)atoi(getenv("TZ_PARALLEL_WATCHDOG")), 0, NULL);
@@ -363,6 +417,54 @@ static void push_job(TzJob *job) {
   __atomic_fetch_add(&tz_pool_queued, 1, __ATOMIC_RELAXED);
   start_thread();
   PostQueuedCompletionStatus(tz_pool_port, 0, POOL_JOB, (OVERLAPPED *)job);
+}
+
+int64_t tz_pool_stat_moved;
+
+static void hand_out(TzReactor *r) {
+  TzJob *job = (TzJob *)malloc(sizeof(TzJob));
+  if (!job) {
+    tz_panic("out of memory", 13);
+  }
+  job->reactor = r;
+  job->source = r->source;
+  r->source = NULL;
+  job->state = JOB_QUEUED;
+  job->site = site_number(r->ahead);
+  job->early = 1;
+  job->listed = 0;
+  job->forward = 0;
+  job->counted = 1;
+  job->later = NULL;
+  r->ahead = (uintptr_t)job;
+  tz_work_ref_count(1);
+  __atomic_fetch_add(&tz_pool_stat_moved, 1, __ATOMIC_RELAXED);
+  push_job(job);
+}
+
+static void movable_release(TzWeight *weight) {
+  TzThread *owner = (TzThread *)((char *)weight - offsetof(TzThread, movable_weight));
+  if (owner == &tz_thread) {
+    return;
+  }
+  tz_lock(&owner->movable_lock);
+  TzReactor *first = NULL;
+  TzReactor *last = owner->movable_ready;
+  if (last) {
+    first = owner->movable_head;
+    __atomic_store_n(&owner->movable_head, last->next, __ATOMIC_RELEASE);
+    if (!last->next) {
+      owner->movable_tail = NULL;
+    }
+    last->next = NULL;
+    owner->movable_ready = NULL;
+  }
+  tz_unlock(&owner->movable_lock);
+  while (first) {
+    TzReactor *r = first;
+    first = r->next;
+    hand_out(r);
+  }
 }
 
 void *tz_pool_port_handle(void) {
@@ -489,7 +591,7 @@ void tz_ahead_dispatch(TzReactor *head) {
   for (TzReactor *r = first; r && scanned < AHEAD_WINDOW; r = r->next, ++scanned) {
     uintptr_t site = r->ahead;
     if (site != 0 && site < EXAMINED) {
-      Site *s = site_of((uint32_t)site);
+      Site *s = site_of(site_number(site));
       if (!s) {
         return;
       }
@@ -506,10 +608,11 @@ void tz_ahead_dispatch(TzReactor *head) {
         job->reactor = r;
         job->source = r->source;
         job->state = JOB_QUEUED;
-        job->site = (uint32_t)site;
+        job->site = site_number(site);
         job->early = 0;
         job->listed = 0;
         job->forward = 0;
+        job->counted = 0;
         job->later = NULL;
         r->source = NULL;
         r->ahead = (uintptr_t)job;
@@ -522,7 +625,7 @@ void tz_ahead_dispatch(TzReactor *head) {
 }
 
 int32_t tz_ahead_keep(int32_t site) {
-  Site *s = site_of((uint32_t)site);
+  Site *s = site_of(site_number((uintptr_t)site));
   if (!s || tz_pool_stress || !is_short(s)) {
     return site;
   }
@@ -575,6 +678,17 @@ int32_t tz_ahead_local(TzReactor *r) {
     return 0;
   }
   r->next = NULL;
+  if (ahead & MOVABLE) {
+    tz_lock(&tz_thread.movable_lock);
+    if (tz_thread.movable_tail) {
+      tz_thread.movable_tail->next = r;
+    } else {
+      __atomic_store_n(&tz_thread.movable_head, r, __ATOMIC_RELEASE);
+    }
+    tz_thread.movable_tail = r;
+    tz_unlock(&tz_thread.movable_lock);
+    return 1;
+  }
   if (tz_thread.local_tail) {
     tz_thread.local_tail->next = r;
   } else {
@@ -589,6 +703,18 @@ int32_t tz_ahead_local(TzReactor *r) {
 #define TURNED_MAX 32
 #define TURNED_PROBE 64
 int32_t tz_ahead_turned[TURNED_SITES];
+
+double tz_ahead_long_piece;
+
+static double long_piece(void) {
+  if (tz_ahead_long_piece == 0) {
+    LARGE_INTEGER frequency;
+    QueryPerformanceFrequency(&frequency);
+    tz_ahead_long_piece = (double)frequency.QuadPart * 30e-6;
+  }
+
+  return tz_ahead_long_piece;
+}
 TZ_THREAD_LOCAL uint32_t tz_ahead_probe;
 
 int32_t tz_ahead_here(TzPromise *p) {
@@ -600,7 +726,7 @@ int32_t tz_ahead_here(TzPromise *p) {
   if ((ahead & ~EXAMINED) == 0 || ahead >= MAX_SITE) {
     return 0;
   }
-  uint32_t site = (uint32_t)(ahead & ~EXAMINED);
+  uint32_t site = site_number(ahead);
   int32_t *turned = site < TURNED_SITES ? &tz_ahead_turned[site] : NULL;
   if (turned && __atomic_load_n(turned, __ATOMIC_RELAXED) > TURNED_MAX / 2 &&
       ++tz_ahead_probe % TURNED_PROBE != 0 && !tz_pool_stress) {
@@ -619,17 +745,20 @@ int32_t tz_ahead_here(TzPromise *p) {
   job->reactor = r;
   job->source = p;
   job->state = JOB_RUNNING;
-  job->site = (uint32_t)(ahead & ~EXAMINED);
+  job->site = site;
   job->early = 1;
   job->listed = 0;
   job->forward = 0;
+  job->counted = 0;
   job->later = NULL;
   r->ahead = (uintptr_t)job;
   __atomic_fetch_add(&tz_pool_stat_dispatched, 1, __ATOMIC_RELAXED);
   int waited = run_job(job);
   if (turned) {
     int32_t now = __atomic_load_n(turned, __ATOMIC_RELAXED);
-    if (waited ? now < TURNED_MAX : now > 0) {
+    if ((double)tz_run_spent >= long_piece()) {
+      __atomic_store_n(turned, 0, __ATOMIC_RELAXED);
+    } else if (waited ? now < TURNED_MAX : now > 0) {
       __atomic_store_n(turned, waited ? now + 1 : now - 1, __ATOMIC_RELAXED);
     }
   }
@@ -677,7 +806,7 @@ int32_t tz_ahead_defer(TzPromise *p) {
   if (site == 0 || site >= EXAMINED) {
     return 0;
   }
-  Site *s = site_of((uint32_t)site);
+  Site *s = site_of(site_number(site));
   if (!s || !worth_a_thread(s)) {
     return 0;
   }
@@ -695,10 +824,11 @@ int32_t tz_ahead_defer(TzPromise *p) {
   job->reactor = r;
   job->source = p;
   job->state = JOB_QUEUED;
-  job->site = (uint32_t)site;
+  job->site = site_number(site);
   job->early = 1;
   job->listed = 1;
   job->forward = 0;
+  job->counted = 0;
   job->later = NULL;
   r->ahead = (uintptr_t)job;
   if (tz_ahead_early_tail) {
@@ -788,7 +918,7 @@ static int32_t finish_job(TzReactor *r, TzPromise **source);
 
 void tz_ahead_run(TzReactor *r, TzPromise *source) {
   uintptr_t ahead = r->ahead;
-  uint32_t site = (uint32_t)(ahead & ~EXAMINED);
+  uint32_t site = site_number(ahead);
   if (ahead >= MAX_SITE) {
     site = ((TzJob *)ahead)->site;
     if (finish_job(r, &source)) {
@@ -812,12 +942,36 @@ void tz_ahead_run(TzReactor *r, TzPromise *source) {
   }
 }
 
+int32_t tz_pool_waiting;
+
+static int32_t workers_wait_for_main(void) {
+  return __atomic_load_n(&tz_pool_idle, __ATOMIC_ACQUIRE) == 0 &&
+         __atomic_load_n(&tz_pool_waiting, __ATOMIC_ACQUIRE) >=
+             __atomic_load_n(&tz_pool_started, __ATOMIC_ACQUIRE);
+}
+
+static int32_t wait_for_worker(TzJob *job) {
+  for (int spin = 0;; ++spin) {
+    int32_t state = __atomic_load_n(&job->state, __ATOMIC_ACQUIRE);
+    if (state != JOB_QUEUED) {
+      return 0;
+    }
+    if (workers_wait_for_main()) {
+      return 1;
+    }
+    if (spin < 4000) {
+      YieldProcessor();
+    } else {
+      WaitOnAddress(&job->state, &state, sizeof state, 1);
+    }
+  }
+}
+
 static int32_t finish_job(TzReactor *r, TzPromise **source) {
   TzJob *job = (TzJob *)r->ahead;
   *source = job->source;
   int32_t state = JOB_QUEUED;
-  if (tz_pool_stress) {
-    wait_state(&job->state, JOB_QUEUED);
+  if (tz_pool_stress && !wait_for_worker(job)) {
     state = __atomic_load_n(&job->state, __ATOMIC_ACQUIRE);
   } else if (__atomic_compare_exchange_n(&job->state, &state, JOB_TAKEN, 0, __ATOMIC_ACQ_REL,
                                          __ATOMIC_ACQUIRE)) {
@@ -906,7 +1060,9 @@ TZ_NOINLINE void tz_order_wait(void) {
     if (tz_thread.index < 64) {
       tz_thread_where[tz_thread.index] = "waits for its turn";
     }
+    __atomic_fetch_add(&tz_pool_waiting, 1, __ATOMIC_ACQ_REL);
     wait_state(&job->state, JOB_WAITING);
+    __atomic_fetch_sub(&tz_pool_waiting, 1, __ATOMIC_ACQ_REL);
     if (tz_thread.index < 64) {
       tz_thread_where[tz_thread.index] = "has its turn";
     }
@@ -920,6 +1076,21 @@ TZ_NOINLINE void tz_order_wait(void) {
     }
     tz_micro_tail = tz_thread.local_tail;
     tz_thread.local_head = tz_thread.local_tail = NULL;
+  }
+  if (__atomic_load_n(&tz_thread.movable_head, __ATOMIC_ACQUIRE)) {
+    tz_lock(&tz_thread.movable_lock);
+    TzReactor *head = tz_thread.movable_head, *tail = tz_thread.movable_tail;
+    __atomic_store_n(&tz_thread.movable_head, NULL, __ATOMIC_RELEASE);
+    tz_thread.movable_tail = tz_thread.movable_ready = NULL;
+    tz_unlock(&tz_thread.movable_lock);
+    if (head) {
+      if (tz_micro_tail) {
+        tz_micro_tail->next = head;
+      } else {
+        tz_micro_head = head;
+      }
+      tz_micro_tail = tail;
+    }
   }
 }
 

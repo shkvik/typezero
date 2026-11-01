@@ -298,6 +298,9 @@ void AsyncLowerer::emitAsyncReturnStmt(ReturnStmt *stmt) {
 void AsyncLowerer::suspendAsync(llvm::Value *promise, llvm::SMLoc loc) {
   llvm::Type *ptr = lowering_.builder_.getPtrTy();
   uint32_t site = awaiting_ ? lowering_.aheadStarts_.lookup(awaiting_) : 0;
+  if (site && lowering_.movableAwaits_.contains(awaiting_)) {
+    site |= 1u << 18;
+  }
   lowering_.builder_.CreateCall(asyncFunction("tz_async_await", lowering_.builder_.getVoidTy(),
                                               {ptr, ptr, lowering_.builder_.getInt32Ty()}),
                                 {lowering_.async_->reactor,
@@ -329,9 +332,13 @@ llvm::Value *AsyncLowerer::awaitPromise(llvm::Value *promise, const Type *type, 
 llvm::Value *AsyncLowerer::emitAwait(AwaitExpr *await) {
   Expr *operand = await->value;
   bool ahead = false;
-  if (auto *call = dyn_cast<CallExpr>(operand); call && call->builtin == Builtin::LibAhead) {
+  if (auto *call = dyn_cast<CallExpr>(operand);
+      call && (call->builtin == Builtin::LibAhead || call->builtin == Builtin::LibAheadMovable)) {
     if (lowering_.parallel_) {
       lowering_.aheadStarts_.try_emplace(await, uint32_t(lowering_.aheadStarts_.size() + 1));
+      if (call->builtin == Builtin::LibAheadMovable) {
+        lowering_.movableAwaits_.insert(await);
+      }
     }
     operand = call->args[0];
     ahead = true;

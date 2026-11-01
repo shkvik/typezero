@@ -16,6 +16,7 @@ public:
   void error(llvm::SMLoc loc, const llvm::Twine &message);
   void note(llvm::SMLoc loc, const llvm::Twine &message);
   void warning(llvm::SMLoc loc, const llvm::Twine &message);
+  void hint(llvm::SMLoc loc, const llvm::Twine &message);
   void tool(const llvm::Twine &message);
 
   bool setMuted(bool muted) {

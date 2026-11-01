@@ -1,0 +1,63 @@
+// HTTP/2 handlers that compute for long run in parallel also when the
+// request comes in the first packet of a connection, together with the
+// preface. Such requests used to reach the main thread and their handlers
+// ran there one after another, in two ways: the data was already in the
+// socket when the server started to read, so the read finished at once on
+// the main thread; or the piece that read it stopped for its turn where
+// serve() of tz:http awaits serveStreams(). Eight raw connections, each
+// writes the preface, SETTINGS and one GET /slow at once; /slow computes
+// 200 ms. One after another that is 1.6 s, in parallel about 0.2-0.4 s.
+// Only 127.0.0.1.
+// env: TZ_THREADS=8
+import { Socket } from "node:net"
+import { Server } from "tz:http"
+
+const options = { port: 0, hostname: "127.0.0.1", http2: { enabled: true, cleartext: true } }
+const server = new Server(options, request => {
+  const path = new URL(request.url).pathname()
+  if (path == "/slow") {
+    const start = performance.now()
+    let spins = 0
+    while (performance.now() - start < 200) spins++
+    return new Response(`slow ${spins > 0}`)
+  }
+  return new Response("fast")
+})
+
+const preface = Buffer.from("PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n")
+const settings = Buffer.from([0, 0, 0, 4, 0, 0, 0, 0, 0])
+const headersFrame = Buffer.from([0, 0, 20, 1, 5, 0, 0, 0, 1, 0x82, 0x86, 4, 5])
+const path = Buffer.from("/slow")
+const authorityLength = Buffer.from([1, 9])
+const authority = Buffer.from("127.0.0.1")
+const hello = Buffer.concat([preface, settings, headersFrame, path, authorityLength, authority])
+
+async function askSlow(port: int, started: number): Promise<number> {
+  const socket = new Socket({ host: "127.0.0.1", port: port, timeout: 5000 })
+  const connected = await socket.connect()
+  if (connected.isErr()) return -1
+  socket.write(hello)
+  let answer = ""
+  for await (const chunkResult of socket) {
+    if (chunkResult.isErr()) return -1
+    answer += chunkResult.value.toString("latin1")
+    if (answer.includes("slow true")) break
+  }
+  if (!answer.includes("slow true")) return -1
+
+  return performance.now() - started
+}
+
+const listened = server.listen()
+if (listened.isErr()) {
+  console.log(listened.error.message)
+  process.exit(1)
+}
+const listening = listened.value
+const started = performance.now()
+const asks: Promise<number>[] = []
+for (let index = 0; index < 8; index++) asks.push(askSlow(listening.port, started))
+const times = await Promise.all(asks)
+console.log(`answered: ${times.filter(time => time >= 0).length}`)
+console.log(`all within 1000 ms: ${times.every(time => time >= 0 && time < 1000)}`)
+await listening.stop({ timeout: 0 })
