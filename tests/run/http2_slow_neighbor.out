@@ -1,0 +1,3 @@
+warm: true
+fast within 150 ms: true
+slow after 300 ms: true
