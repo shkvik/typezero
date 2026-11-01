@@ -1,0 +1,117 @@
+// tz:socket (docs/net.md, section 7): a socket of any kind, as socket2 in
+// Rust. A TCP server and client (bind, listen, accept, connect, send,
+// receive with peek, shutdown, the addresses of both ends), UDP datagrams
+// with sendTo and receiveFrom, a Unix stream socket, settings that the
+// system takes and one it refuses, an address that is not one, a type the
+// system does not have, and a raw socket, which needs administrator rights:
+// without them the Err has the kind PERMISSION and a hint. Only 127.0.0.1.
+import { randomUUID } from "node:crypto"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
+import { Socket } from "tz:socket"
+
+function text(bytes: Uint8Array): string {
+  return new TextDecoder().decode(bytes)
+}
+
+const encoder = new TextEncoder()
+
+const server = new Socket({ domain: "ipv4", type: "stream" })
+const set = server.configure({ reuseAddress: true })
+console.log("tcp settings:", set.isOk())
+const bound = server.bind({ address: "127.0.0.1", port: 0 })
+const listened = server.listen(8)
+console.log("tcp listen:", bound.isOk(), listened.isOk())
+const port = server.localAddress().port
+const accepting = server.accept()
+const client = new Socket({ domain: "ipv4", type: "stream", protocol: 6 })
+const connected = await client.connect({ address: "127.0.0.1", port: port })
+console.log("tcp connect:", connected.isOk())
+const acceptedResult = await accepting
+if (acceptedResult.isErr()) {
+  console.log("accept:", acceptedResult.error.message)
+  process.exit(1)
+}
+const peer = acceptedResult.value
+const tuned = client.configure({ noDelay: true, keepAlive: true, keepAliveDelay: 3000, ttl: 64,
+                                 sendBufferSize: 32768, linger: 0 })
+console.log("tcp client settings:", tuned.isOk())
+console.log("tcp ends:", client.remoteAddress().port == port, peer.remoteAddress().port == client.localAddress().port)
+const sent = await client.send(encoder.encode("hello socket"))
+console.log("tcp sent:", sent.isOk() ? sent.value : -1)
+const peeked = await peer.receive({ peek: true, size: 5 })
+const got = await peer.receive({ size: 64 })
+console.log("tcp peek:", peeked.isOk() ? text(peeked.value) : "", "got:", got.isOk() ? text(got.value) : "")
+const shut = client.shutdown("write")
+const end = await peer.receive()
+console.log("tcp shutdown:", shut.isOk(), "end read:", end.isOk() ? end.value.length : -1)
+client.close()
+peer.close()
+server.close()
+const late = await client.send(encoder.encode("late"))
+if (late.isErr()) console.log("tcp after close:", late.error.kind, late.error.code)
+
+const left = new Socket({ domain: "ipv4", type: "datagram" })
+const right = new Socket({ domain: "ipv4", type: "datagram" })
+const leftBound = left.bind({ address: "127.0.0.1", port: 0 })
+const rightBound = right.bind({ address: "127.0.0.1", port: 0 })
+console.log("udp bind:", leftBound.isOk(), rightBound.isOk())
+const receiving = right.receiveFrom()
+const datagramSent = await left.sendTo(encoder.encode("ping"), { address: "127.0.0.1", port: right.localAddress().port })
+const datagramResult = await receiving
+if (datagramSent.isOk() && datagramResult.isOk()) {
+  const d = datagramResult.value
+  console.log("udp got:", text(d.data), d.address, d.port == left.localAddress().port)
+}
+const wrongFamily = await left.sendTo(encoder.encode("x"), { address: "::1", port: 9 })
+if (wrongFamily.isErr()) console.log("udp wrong family:", wrongFamily.error.kind, wrongFamily.error.code)
+const notAddress = await left.sendTo(encoder.encode("x"), { address: "localhost", port: 9 })
+if (notAddress.isErr()) console.log("udp name:", notAddress.error.code)
+const refused = left.configure({ ipv6Only: true })
+if (refused.isErr()) {
+  const e = refused.error
+  switch (e.kind) {
+    case "SOCKET_OPERATION_ERROR_SETTING":
+      console.log("udp setting refused:", e.kind, e.setting)
+      break
+    default:
+      console.log("udp setting:", e.kind)
+  }
+}
+left.close()
+right.close()
+
+const path = join(tmpdir(), `tz-socket-${randomUUID()}.sock`)
+const unixServer = new Socket({ domain: "unix", type: "stream" })
+const unixBound = unixServer.bind({ path: path })
+const unixListened = unixServer.listen()
+console.log("unix listen:", unixBound.isOk(), unixListened.isOk())
+const unixAccepting = unixServer.accept()
+const unixClient = new Socket({ domain: "unix", type: "stream" })
+const unixConnected = await unixClient.connect({ path: path })
+const unixPeer = await unixAccepting
+if (unixConnected.isOk() && unixPeer.isOk()) {
+  const unixSent = await unixClient.send(encoder.encode("over unix"))
+  const unixGot = await unixPeer.value.receive()
+  console.log("unix got:", unixSent.isOk(), unixGot.isOk() ? text(unixGot.value) : "")
+  unixPeer.value.close()
+} else {
+  console.log("unix: connect", unixConnected.isOk(), "accept", unixPeer.isOk())
+}
+unixClient.close()
+unixServer.close()
+
+const odd = new Socket({ domain: "ipv4", type: "seqpacket" })
+const oddResult = odd.bind({ address: "127.0.0.1", port: 0 })
+if (oddResult.isErr()) console.log("seqpacket over ipv4:", oddResult.error.kind)
+
+const raw = new Socket({ domain: "ipv4", type: "raw", protocol: 1 })
+const rawResult = raw.bind({ address: "127.0.0.1", port: 0 })
+if (rawResult.isErr()) {
+  const e = rawResult.error
+  const hinted = e.kind == "SOCKET_OPERATION_ERROR_PERMISSION" && e.message.includes("administrator")
+  console.log("raw: refused with a hint, or allowed:", hinted)
+} else {
+  console.log("raw: refused with a hint, or allowed:", true)
+}
+raw.close()

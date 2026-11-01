@@ -28,6 +28,9 @@
 #include "runtime/library/bytes/buffer/buffer.h"
 #include "runtime/library/bytes/bytes/bytes.h"
 #include "runtime/library/net/deadline/deadline.h"
+#include "runtime/library/net/udp/udp.h"
+#include <openssl/hmac.h>
+#include <openssl/rand.h>
 
 static const char kSuites[] =
     "TLS_AES_256_GCM_SHA384:TLS_CHACHA20_POLY1305_SHA256:TLS_AES_128_GCM_SHA256";
@@ -653,11 +656,9 @@ static void fail_openssl(TzMaker make, const char *code, const char *otherwise) 
   tz_set_failed(make(&parts));
 }
 
-static SSL_CTX *server_context(void *cert_obj, uint64_t cert_meta, void *key_obj, uint64_t key_meta,
-                               TzMaker make) {
-  SSL_CTX *ctx = SSL_CTX_new(TLS_server_method());
-  configure(ctx);
-  SSL_CTX_set_alpn_select_cb(ctx, select_alpn, NULL);
+static SSL_CTX *context_for(const SSL_METHOD *method, void *cert_obj, uint64_t cert_meta,
+                            void *key_obj, uint64_t key_meta, TzMaker make) {
+  SSL_CTX *ctx = SSL_CTX_new(method);
   ERR_clear_error();
   TzBytes *cert = bytes_of(cert_obj, cert_meta);
   BIO *bio = BIO_new_mem_buf(cert->data, cert->length);
@@ -692,6 +693,18 @@ static SSL_CTX *server_context(void *cert_obj, uint64_t cert_meta, void *key_obj
     SSL_CTX_free(ctx);
     return NULL;
   }
+
+  return ctx;
+}
+
+static SSL_CTX *server_context(void *cert_obj, uint64_t cert_meta, void *key_obj, uint64_t key_meta,
+                               TzMaker make) {
+  SSL_CTX *ctx = context_for(TLS_server_method(), cert_obj, cert_meta, key_obj, key_meta, make);
+  if (!ctx) {
+    return NULL;
+  }
+  configure(ctx);
+  SSL_CTX_set_alpn_select_cb(ctx, select_alpn, NULL);
 
   return ctx;
 }
@@ -1064,3 +1077,484 @@ void *tz_tls_listen(void *host_obj, uint64_t host_meta, int64_t port, double max
 
   return l;
 }
+
+#ifdef _WIN32
+
+#define DTLS_PEERS_MAX 4096
+#define DTLS_HANDSHAKE_MS 10000.0
+#define DTLS_TICK_MS 100.0
+#define DTLS_LINK_MTU 1500
+
+typedef struct DtlsPeer {
+  struct DtlsPeer *next;
+  SSL *ssl;
+  BIO *in, *out;
+  SOCKADDR_STORAGE address;
+  int address_length;
+  double since;
+  uint8_t ready;
+} DtlsPeer;
+
+typedef struct Dtls {
+  void *sock;
+  SSL_CTX *ctx;
+  uint8_t server;
+  uint8_t own_ctx;
+  uint8_t closed;
+  DtlsPeer *peers;
+  int32_t count;
+  TzPromise *connecting;
+  TzMaker make;
+  char host[256];
+  struct TzTimer *timer;
+  uint8_t secret[32];
+  uint8_t plain[65536];
+} Dtls;
+
+typedef struct DtlsTick {
+  TzObject base;
+  Dtls *d;
+} DtlsTick;
+
+SSL_CTX *tz_dtls_client;
+
+static void dtls_tick_drop(void *object) { tz_obj_free(object); }
+
+static const TzObjectDesc dtls_tick_desc = {dtls_tick_drop};
+
+static int same_address(const SOCKADDR_STORAGE *a, const SOCKADDR_STORAGE *b) {
+  if (a->ss_family != b->ss_family) {
+    return 0;
+  }
+  if (a->ss_family == AF_INET) {
+    const SOCKADDR_IN *x = (const SOCKADDR_IN *)a, *y = (const SOCKADDR_IN *)b;
+    return x->sin_port == y->sin_port && x->sin_addr.s_addr == y->sin_addr.s_addr;
+  }
+  const SOCKADDR_IN6 *x = (const SOCKADDR_IN6 *)a, *y = (const SOCKADDR_IN6 *)b;
+
+  return x->sin6_port == y->sin6_port &&
+         memcmp(&x->sin6_addr, &y->sin6_addr, sizeof x->sin6_addr) == 0;
+}
+
+static size_t address_bytes(const SOCKADDR_STORAGE *a, uint8_t *out) {
+  if (a->ss_family == AF_INET) {
+    const SOCKADDR_IN *v4 = (const SOCKADDR_IN *)a;
+    memcpy(out, &v4->sin_addr, 4);
+    memcpy(out + 4, &v4->sin_port, 2);
+    return 6;
+  }
+  const SOCKADDR_IN6 *v6 = (const SOCKADDR_IN6 *)a;
+  memcpy(out, &v6->sin6_addr, 16);
+  memcpy(out + 16, &v6->sin6_port, 2);
+
+  return 18;
+}
+
+static int cookie_of(SSL *ssl, unsigned char *cookie, unsigned int *length) {
+  DtlsPeer *peer = (DtlsPeer *)SSL_get_app_data(ssl);
+  Dtls *d = (Dtls *)SSL_CTX_get_app_data(SSL_get_SSL_CTX(ssl));
+  if (!peer || !d) {
+    return 0;
+  }
+  uint8_t data[32];
+  size_t n = address_bytes(&peer->address, data);
+  unsigned int size = 0;
+  if (!HMAC(EVP_sha256(), d->secret, sizeof d->secret, data, n, cookie, &size)) {
+    return 0;
+  }
+  *length = size;
+
+  return 1;
+}
+
+static int make_cookie(SSL *ssl, unsigned char *cookie, unsigned int *length) {
+  return cookie_of(ssl, cookie, length);
+}
+
+static int check_cookie(SSL *ssl, const unsigned char *cookie, unsigned int length) {
+  unsigned char wanted[EVP_MAX_MD_SIZE];
+  unsigned int size = 0;
+
+  return cookie_of(ssl, wanted, &size) && size == length &&
+         CRYPTO_memcmp(wanted, cookie, size) == 0;
+}
+
+static void dtls_configure(SSL_CTX *ctx) {
+  SSL_CTX_set_min_proto_version(ctx, DTLS1_2_VERSION);
+  SSL_CTX_set_cipher_list(ctx, kCiphers);
+  SSL_CTX_set_options(ctx, SSL_OP_NO_RENEGOTIATION | SSL_OP_NO_QUERY_MTU);
+  SSL_CTX_set_read_ahead(ctx, 1);
+}
+
+static SSL_CTX *dtls_client_context(void) {
+  if (tz_dtls_client) {
+    return tz_dtls_client;
+  }
+  SSL_CTX *ctx = SSL_CTX_new(DTLS_client_method());
+  dtls_configure(ctx);
+  SSL_CTX_set_cert_store(ctx, trusted_roots());
+  SSL_CTX_set_verify(ctx, SSL_VERIFY_NONE, verify_all);
+  tz_dtls_client = ctx;
+
+  return ctx;
+}
+
+static void flush_peer(Dtls *d, DtlsPeer *peer, TzPromise *promise, TzMaker make) {
+  uint8_t packet[DTLS_LINK_MTU + 512];
+  const SOCKADDR_STORAGE *to = d->server ? &peer->address : NULL;
+  int to_length = d->server ? peer->address_length : 0;
+  for (;;) {
+    int n = BIO_read(peer->out, packet, (int)sizeof packet);
+    if (n <= 0) {
+      break;
+    }
+    int last = BIO_ctrl_pending(peer->out) == 0;
+    udp_send_datagram(d->sock, to, to_length, packet, (size_t)n, last ? promise : NULL, make);
+    if (last) {
+      promise = NULL;
+      break;
+    }
+  }
+  if (promise) {
+    net_fulfill(&promise, NULL, 0);
+  }
+}
+
+static DtlsPeer *peer_new(Dtls *d, const SOCKADDR_STORAGE *address, int length) {
+  DtlsPeer *peer = (DtlsPeer *)tz_alloc(sizeof(DtlsPeer));
+  memset(peer, 0, sizeof *peer);
+  peer->ssl = SSL_new(d->ctx);
+  peer->in = BIO_new(BIO_s_dgram_mem());
+  peer->out = BIO_new(BIO_s_dgram_mem());
+  SSL_set_bio(peer->ssl, peer->in, peer->out);
+  SSL_set_app_data(peer->ssl, peer);
+  DTLS_set_link_mtu(peer->ssl, DTLS_LINK_MTU);
+  memcpy(&peer->address, address, sizeof peer->address);
+  peer->address_length = length;
+  peer->since = net_now();
+  peer->next = d->peers;
+  d->peers = peer;
+  ++d->count;
+
+  return peer;
+}
+
+static void peer_free(Dtls *d, DtlsPeer *peer) {
+  for (DtlsPeer **at = &d->peers; *at; at = &(*at)->next) {
+    if (*at == peer) {
+      *at = peer->next;
+      break;
+    }
+  }
+  --d->count;
+  SSL_free(peer->ssl);
+  tz_free(peer);
+}
+
+static DtlsPeer *peer_of(Dtls *d, const SOCKADDR_STORAGE *address) {
+  if (!d->server) {
+    return d->peers;
+  }
+  for (DtlsPeer *peer = d->peers; peer; peer = peer->next) {
+    if (same_address(&peer->address, address)) {
+      return peer;
+    }
+  }
+
+  return NULL;
+}
+
+static void *dtls_failure(Dtls *d, DtlsPeer *peer, unsigned long error) {
+  if (error) {
+    return ssl_error(d->make, error);
+  }
+  long result = SSL_get_verify_result(peer->ssl);
+  if (result != X509_V_OK) {
+    return verify_error(d->make, result);
+  }
+
+  return tls_error(d->make, "ERR_TLS_HANDSHAKE", "the DTLS handshake failed", 0);
+}
+
+static void connect_done(Dtls *d, DtlsPeer *peer, void *error) {
+  if (!d->connecting) {
+    if (error) {
+      tz_instance_release((TzInstance *)error);
+    }
+    return;
+  }
+  if (!error) {
+    X509 *cert = SSL_get1_peer_certificate(peer->ssl);
+    long result = cert ? SSL_get_verify_result(peer->ssl) : X509_V_ERR_UNABLE_TO_GET_ISSUER_CERT;
+    if (result != X509_V_OK) {
+      error = verify_error(d->make, result);
+    } else {
+      error = check_identity(d->make, d->host, cert);
+    }
+    X509_free(cert);
+  }
+  if (error) {
+    net_reject(&d->connecting, error);
+  } else {
+    net_fulfill(&d->connecting, NULL, 0);
+  }
+}
+
+static void step_handshake(Dtls *d, DtlsPeer *peer) {
+  ERR_clear_error();
+  int rc = SSL_do_handshake(peer->ssl);
+  flush_peer(d, peer, NULL, d->make);
+  if (rc == 1) {
+    peer->ready = 1;
+    if (!d->server) {
+      connect_done(d, peer, NULL);
+    }
+    return;
+  }
+  int reason = SSL_get_error(peer->ssl, rc);
+  if (reason == SSL_ERROR_WANT_READ || reason == SSL_ERROR_WANT_WRITE) {
+    return;
+  }
+  unsigned long error = ERR_get_error();
+  ERR_clear_error();
+  if (!d->server) {
+    connect_done(d, peer, dtls_failure(d, peer, error));
+    return;
+  }
+  peer_free(d, peer);
+}
+
+static int dtls_input(void *state, const SOCKADDR_STORAGE *from, int from_length,
+                      const uint8_t *data, uint32_t length, uint8_t **plain,
+                      uint32_t *plain_length) {
+  Dtls *d = (Dtls *)state;
+  if (d->closed || length == 0) {
+    return 0;
+  }
+  DtlsPeer *peer = peer_of(d, from);
+  if (!peer) {
+    if (!d->server || data[0] != 22 || d->count >= DTLS_PEERS_MAX) {
+      return 0;
+    }
+    peer = peer_new(d, from, from_length);
+    SSL_set_accept_state(peer->ssl);
+  }
+  BIO_write(peer->in, data, (int)length);
+  if (!peer->ready) {
+    step_handshake(d, peer);
+    if (!peer->ready) {
+      return 0;
+    }
+  }
+  ERR_clear_error();
+  int n = SSL_read(peer->ssl, d->plain, (int)sizeof d->plain);
+  if (n > 0) {
+    *plain = d->plain;
+    *plain_length = (uint32_t)n;
+    return 1;
+  }
+  int reason = SSL_get_error(peer->ssl, n);
+  flush_peer(d, peer, NULL, d->make);
+  if (reason == SSL_ERROR_ZERO_RETURN || reason == SSL_ERROR_SSL) {
+    ERR_clear_error();
+    if (d->server) {
+      peer_free(d, peer);
+    } else {
+      peer->ready = 0;
+    }
+  }
+
+  return 0;
+}
+
+static void dtls_seal(void *state, const SOCKADDR_STORAGE *to, int to_length, const uint8_t *data,
+                      size_t length, TzPromise *promise, TzMaker make) {
+  Dtls *d = (Dtls *)state;
+  (void)to_length;
+  DtlsPeer *peer = NULL;
+  if (d->server) {
+    peer = to ? peer_of(d, to) : NULL;
+  } else if (!to) {
+    peer = d->peers;
+  }
+  if (!peer || !peer->ready) {
+    const char *message =
+        d->server ? "no DTLS session with this address: the peer has not connected, or has left"
+        : to      ? "a DTLS client sends only to the address it is connected to"
+                  : "the DTLS handshake is not finished";
+    net_reject(&promise,
+               tls_error(make, d->server ? "ERR_NO_SESSION" : "ERR_NOT_CONNECTED", message, 0));
+    return;
+  }
+  ERR_clear_error();
+  int n = SSL_write(peer->ssl, data, (int)length);
+  if (n <= 0) {
+    unsigned long error = ERR_get_error();
+    ERR_clear_error();
+    net_reject(&promise, error ? ssl_error(make, error)
+                               : tls_error(make, "ERR_TLS_FAILED", "DTLS could not send", 0));
+    return;
+  }
+  flush_peer(d, peer, promise, make);
+}
+
+static void dtls_close(void *state) {
+  Dtls *d = (Dtls *)state;
+  if (d->closed) {
+    return;
+  }
+  d->closed = 1;
+  uint8_t packet[512];
+  for (DtlsPeer *peer = d->peers; peer; peer = peer->next) {
+    if (!peer->ready) {
+      continue;
+    }
+    SSL_shutdown(peer->ssl);
+    for (;;) {
+      int n = BIO_read(peer->out, packet, (int)sizeof packet);
+      if (n <= 0) {
+        break;
+      }
+      udp_send_now(d->sock, d->server ? &peer->address : NULL, d->server ? peer->address_length : 0,
+                   packet, (size_t)n);
+    }
+  }
+  if (d->connecting) {
+    net_reject(&d->connecting, tls_error(d->make, "ERR_SOCKET_CLOSED", "the socket is closed", 0));
+  }
+  if (d->timer) {
+    tz_timer_clear(d->timer);
+    tz_obj_release((TzObject *)d->timer);
+    d->timer = NULL;
+  }
+}
+
+static void dtls_release(void *state) {
+  Dtls *d = (Dtls *)state;
+  dtls_close(d);
+  while (d->peers) {
+    peer_free(d, d->peers);
+  }
+  if (d->own_ctx) {
+    SSL_CTX_free(d->ctx);
+  }
+  tz_free(d);
+}
+
+static const UdpDtlsOps dtls_ops = {dtls_input, dtls_seal, dtls_close, dtls_release};
+
+static void dtls_ticked(TzObject *env) {
+  Dtls *d = ((DtlsTick *)env)->d;
+  if (d->closed) {
+    return;
+  }
+  double now = net_now();
+  DtlsPeer *peer = d->peers;
+  while (peer) {
+    DtlsPeer *next = peer->next;
+    if (!peer->ready) {
+      if (now - peer->since >= DTLS_HANDSHAKE_MS) {
+        if (d->server) {
+          peer_free(d, peer);
+        } else {
+          connect_done(d, peer,
+                       tls_error(d->make, "ETIMEDOUT",
+                                 "the DTLS handshake did not finish within 10 seconds", -4039));
+        }
+      } else if (DTLSv1_handle_timeout(peer->ssl) > 0) {
+        flush_peer(d, peer, NULL, d->make);
+      }
+    }
+    peer = next;
+  }
+}
+
+static const TzFunctionInfo dtls_tick_info = {(void *)dtls_ticked, {NULL, 0}};
+
+static Dtls *dtls_new(void *sock, SSL_CTX *ctx, int server, TzMaker make) {
+  Dtls *d = (Dtls *)tz_alloc(sizeof(Dtls));
+  memset(d, 0, offsetof(Dtls, plain));
+  d->sock = sock;
+  d->ctx = ctx;
+  d->server = (uint8_t)server;
+  d->own_ctx = (uint8_t)server;
+  d->make = make;
+  DtlsTick *tick = (DtlsTick *)tz_obj_alloc(sizeof(DtlsTick));
+  tick->base.rc = 1;
+  tick->base.desc = &dtls_tick_desc;
+  tick->d = d;
+  d->timer = tz_timer_new(&dtls_tick_info, &tick->base, DTLS_TICK_MS, 1);
+  tz_timer_ref(d->timer, 0);
+  udp_attach_dtls(sock, d, &dtls_ops);
+
+  return d;
+}
+
+void tz_tls_udp_connect(TzPromise *p, void *sock, void *host_obj, uint64_t host_meta,
+                        TzMaker make) {
+  tz_net_make = make;
+  tz_ref_retain(p);
+  TzPromise *promise = p;
+  SOCKADDR_STORAGE address;
+  int length = 0;
+  if (!udp_peer(sock, &address, &length)) {
+    net_reject(&promise, tls_error(make, "ERR_NOT_CONNECTED",
+                                   "DTLS needs a connected socket: connect() first", 0));
+    return;
+  }
+  Dtls *d = dtls_new(sock, dtls_client_context(), 0, make);
+  TzBytes *host = bytes_of(host_obj, host_meta);
+  size_t n = (size_t)host->length < sizeof d->host - 1 ? (size_t)host->length : sizeof d->host - 1;
+  memcpy(d->host, host->data, n);
+  d->host[n] = 0;
+  tz_instance_release((TzInstance *)host);
+  DtlsPeer *peer = peer_new(d, &address, length);
+  unsigned char literal[16];
+  if (!address_of(d->host, literal)) {
+    SSL_set_tlsext_host_name(peer->ssl, d->host);
+  }
+  SSL_set_connect_state(peer->ssl);
+  d->connecting = promise;
+  step_handshake(d, peer);
+}
+
+int64_t tz_tls_udp_serve(void *sock, void *cert_obj, uint64_t cert_meta, void *key_obj,
+                         uint64_t key_meta, TzMaker make) {
+  SSL_CTX *ctx = context_for(DTLS_server_method(), cert_obj, cert_meta, key_obj, key_meta, make);
+  if (!ctx) {
+    return 0;
+  }
+  dtls_configure(ctx);
+  SSL_CTX_set_options(ctx, SSL_OP_COOKIE_EXCHANGE);
+  SSL_CTX_set_cookie_generate_cb(ctx, make_cookie);
+  SSL_CTX_set_cookie_verify_cb(ctx, check_cookie);
+  Dtls *d = dtls_new(sock, ctx, 1, make);
+  RAND_bytes(d->secret, sizeof d->secret);
+  SSL_CTX_set_app_data(ctx, d);
+
+  return 0;
+}
+
+#else
+
+void tz_tls_udp_connect(TzPromise *p, void *sock, void *host_obj, uint64_t host_meta,
+                        TzMaker make) {
+  (void)sock;
+  (void)host_obj;
+  (void)host_meta;
+  tz_promise_fail(p, tls_error(make, "ERR_NOT_SUPPORTED", "DTLS is not supported here yet", 0));
+}
+
+int64_t tz_tls_udp_serve(void *sock, void *cert_obj, uint64_t cert_meta, void *key_obj,
+                         uint64_t key_meta, TzMaker make) {
+  (void)sock;
+  (void)cert_obj;
+  (void)cert_meta;
+  (void)key_obj;
+  (void)key_meta;
+  tz_set_failed(tls_error(make, "ERR_NOT_SUPPORTED", "DTLS is not supported here yet", 0));
+
+  return 0;
+}
+
+#endif

@@ -17,6 +17,7 @@
 #include <string.h>
 
 #ifdef _WIN32
+#include <afunix.h>
 #pragma comment(lib, "ws2_32.lib")
 #endif
 
@@ -53,6 +54,11 @@ static const NetError kNetErrors[] = {
     {"ENOTFOUND", "getaddrinfo ENOTFOUND", -3008},
     {"EAI_AGAIN", "temporary failure", -3001},
     {"EMSGSIZE", "message too long", -4040},
+    {"ENOENT", "no such file or directory", -4058},
+    {"EBUSY", "resource busy or locked", -4082},
+    {"ENOTSUP", "operation not supported on socket", -4049},
+    {"EPROTONOSUPPORT", "protocol not supported", -4046},
+    {"ESOCKTNOSUPPORT", "socket type not supported", -4025},
 };
 
 enum {
@@ -77,6 +83,11 @@ enum {
   NE_ENOTFOUND,
   NE_EAI_AGAIN,
   NE_EMSGSIZE,
+  NE_ENOENT,
+  NE_EBUSY,
+  NE_ENOTSUP,
+  NE_EPROTONOSUPPORT,
+  NE_ESOCKTNOSUPPORT,
 };
 
 #define NET_NOT_FOUND (-3008)
@@ -125,7 +136,25 @@ const NetError *net_error_of(int32_t error) {
     break;
   case WSAESHUTDOWN:
   case ERROR_BROKEN_PIPE:
+  case ERROR_NO_DATA:
+  case ERROR_PIPE_NOT_CONNECTED:
     index = NE_EPIPE;
+    break;
+  case ERROR_FILE_NOT_FOUND:
+  case ERROR_PATH_NOT_FOUND:
+    index = NE_ENOENT;
+    break;
+  case ERROR_PIPE_BUSY:
+    index = NE_EBUSY;
+    break;
+  case WSAEOPNOTSUPP:
+    index = NE_ENOTSUP;
+    break;
+  case WSAEPROTONOSUPPORT:
+    index = NE_EPROTONOSUPPORT;
+    break;
+  case WSAESOCKTNOSUPPORT:
+    index = NE_ESOCKTNOSUPPORT;
     break;
   case ERROR_OPERATION_ABORTED:
     index = NE_ECANCELED;
@@ -361,6 +390,63 @@ static int32_t op_error(NetOp *op, SOCKET s, int closed) {
   return error ? error : WSAECONNRESET;
 }
 
+static int32_t conn_op_error(NetConn *c, NetOp *op) {
+  if (!c->pipe || !op->error) {
+    return op_error(op, c->s, c->closed);
+  }
+  if (c->closed) {
+    return ERROR_OPERATION_ABORTED;
+  }
+  DWORD bytes = 0;
+  if (GetOverlappedResult((HANDLE)c->s, &op->ov, &bytes, FALSE)) {
+    return 0;
+  }
+  int32_t error = (int32_t)GetLastError();
+
+  return error ? error : ERROR_BROKEN_PIPE;
+}
+
+static int pipe_ended(int32_t error) {
+  return error == ERROR_BROKEN_PIPE || error == ERROR_PIPE_NOT_CONNECTED ||
+         error == ERROR_NO_DATA || error == ERROR_HANDLE_EOF;
+}
+
+static int conn_recv(NetConn *c, WSABUF *buf, DWORD *got, OVERLAPPED *ov) {
+  if (!c->pipe) {
+    DWORD flags = 0;
+
+    return WSARecv(c->s, buf, 1, got, &flags, ov, NULL);
+  }
+  if (ReadFile((HANDLE)c->s, buf->buf, buf->len, got, ov)) {
+    return 0;
+  }
+  DWORD error = GetLastError();
+  if (error == ERROR_IO_PENDING) {
+    WSASetLastError(WSA_IO_PENDING);
+    return SOCKET_ERROR;
+  }
+  if (pipe_ended((int32_t)error)) {
+    *got = 0;
+    return 0;
+  }
+  WSASetLastError((int)error);
+
+  return SOCKET_ERROR;
+}
+
+static int conn_send(NetConn *c, WSABUF *buf, DWORD *sent, OVERLAPPED *ov) {
+  if (!c->pipe) {
+    return WSASend(c->s, buf, 1, sent, 0, ov, NULL);
+  }
+  if (WriteFile((HANDLE)c->s, buf->buf, buf->len, sent, ov)) {
+    return 0;
+  }
+  DWORD error = GetLastError();
+  WSASetLastError(error == ERROR_IO_PENDING ? WSA_IO_PENDING : (int)error);
+
+  return SOCKET_ERROR;
+}
+
 static NetConn *conn_new(SOCKET s) {
   NetConn *c = (NetConn *)tz_obj_alloc(sizeof(NetConn));
   memset(c, 0, sizeof *c);
@@ -447,6 +533,10 @@ static void close_socket(NetConn *c) {
     } else {
       tz_h2_cancel(c);
     }
+    return;
+  }
+  if (c->pipe) {
+    CloseHandle((HANDLE)c->s);
     return;
   }
   closesocket(c->s);
@@ -596,11 +686,11 @@ void net_read(NetConn *c) {
       buf.len = c->in_cap - c->in_end;
       buf.buf = (char *)(c->in + c->in_end);
     }
-    DWORD got = 0, flags = 0;
+    DWORD got = 0;
     op_begin(&c->rop, read_done, 0);
     c->reading = 1;
     ++c->ops;
-    int rc = WSARecv(c->s, &buf, 1, &got, &flags, &c->rop.ov, NULL);
+    int rc = conn_recv(c, &buf, &got, &c->rop.ov);
     if (rc == SOCKET_ERROR && WSAGetLastError() == WSA_IO_PENDING) {
       op_wait(&c->rop);
       return;
@@ -641,7 +731,11 @@ static void read_done(TzWork *w) {
     conn_unlock_settle(c);
     return;
   }
-  int32_t error = op_error(&c->rop, c->s, c->closed);
+  int32_t error = conn_op_error(c, &c->rop);
+  if (c->pipe && pipe_ended(error)) {
+    error = 0;
+    c->rop.bytes = 0;
+  }
   if (!error && c->closed) {
     error = ERROR_OPERATION_ABORTED;
   }
@@ -752,7 +846,9 @@ static void finish_close(NetConn *c) {
   if (c->linger == 2 || !c->closing || c->writing || has_output(c)) {
     return;
   }
-  shutdown(c->s, SD_SEND);
+  if (!c->pipe) {
+    shutdown(c->s, SD_SEND);
+  }
   if (c->linger == 1 && !c->tls && !c->eof && !c->error && !c->closed) {
     c->linger = 2;
     c->linger_bytes = 0;
@@ -796,7 +892,7 @@ void net_flush(NetConn *c) {
     op_begin(&c->wop, write_done, 0);
     c->writing = 1;
     ++c->ops;
-    int rc = WSASend(c->s, &buf, 1, &sent, 0, &c->wop.ov, NULL);
+    int rc = conn_send(c, &buf, &sent, &c->wop.ov);
     if (rc == SOCKET_ERROR && WSAGetLastError() == WSA_IO_PENDING) {
       op_wait(&c->wop);
       return;
@@ -817,6 +913,10 @@ void net_flush(NetConn *c) {
     }
   }
   drained(c);
+  if (c->shut == 1 && !c->writing && !has_output(c) && !c->closed) {
+    c->shut = 2;
+    shutdown(c->s, SD_SEND);
+  }
   finish_close(c);
 }
 
@@ -826,7 +926,7 @@ static void write_done(TzWork *w) {
   --c->ops;
   c->writing = 0;
   c->flight_len = 0;
-  int32_t error = op_error(&c->wop, c->s, c->closed);
+  int32_t error = conn_op_error(c, &c->wop);
   if (error && !c->error) {
     c->error = error;
   }
@@ -1007,7 +1107,9 @@ void tz_net_close(void *conn, TzMaker make) {
 
 static void address_text(const SOCKADDR *sa, char *out, size_t size) {
   out[0] = 0;
-  if (sa->sa_family == AF_INET) {
+  if (sa->sa_family == AF_UNIX) {
+    snprintf(out, size, "%s", ((const SOCKADDR_UN *)sa)->sun_path);
+  } else if (sa->sa_family == AF_INET) {
     inet_ntop(AF_INET, &((const SOCKADDR_IN *)sa)->sin_addr, out, size);
   } else if (sa->sa_family == AF_INET6) {
     inet_ntop(AF_INET6, &((const SOCKADDR_IN6 *)sa)->sin6_addr, out, size);
@@ -1015,6 +1117,10 @@ static void address_text(const SOCKADDR *sa, char *out, size_t size) {
 }
 
 static int address_port(const SOCKADDR *sa) {
+  if (sa->sa_family != AF_INET && sa->sa_family != AF_INET6) {
+    return 0;
+  }
+
   return ntohs(sa->sa_family == AF_INET ? ((const SOCKADDR_IN *)sa)->sin_port
                                         : ((const SOCKADDR_IN6 *)sa)->sin6_port);
 }
@@ -1119,7 +1225,19 @@ static void listener_close(NetListener *l) {
     tz_obj_release((TzObject *)l->sweep);
     l->sweep = NULL;
   }
+  if (l->pipe) {
+    if (l->accepting != INVALID_SOCKET) {
+      CloseHandle((HANDLE)l->accepting);
+      if (!l->ops) {
+        l->accepting = INVALID_SOCKET;
+      }
+    }
+    return;
+  }
   closesocket(l->s);
+  if (l->unix_socket) {
+    DeleteFileW(l->path);
+  }
   if (l->accepting != INVALID_SOCKET && !l->ops) {
     closesocket(l->accepting);
     l->accepting = INVALID_SOCKET;
@@ -1221,10 +1339,22 @@ static void start_sweep(NetListener *l) {
   tz_timer_ref(l->sweep, 0);
 }
 
-void *tz_net_listen(void *host_obj, uint64_t host_meta, int64_t port, double max_body,
-                    int64_t keep_alive, int64_t headers_timeout, int64_t request_timeout,
-                    TzMaker make) {
-  TZ_ORDERED();
+static NetListener *listener_new(SOCKET s, int family) {
+  NetListener *l = (NetListener *)tz_obj_alloc(sizeof(NetListener));
+  memset(l, 0, sizeof *l);
+  l->rc = 1;
+  l->layout = &listener_layout;
+  l->s = s;
+  l->accepting = INVALID_SOCKET;
+  l->family = family;
+  l->protocol = family == AF_UNIX ? 0 : IPPROTO_TCP;
+
+  return l;
+}
+
+static void *listen_tcp(void *host_obj, uint64_t host_meta, int64_t port, double max_body,
+                        int64_t keep_alive, int64_t headers_timeout, int64_t request_timeout,
+                        int64_t backlog, int64_t flags, TzMaker make) {
   start();
   tz_net_make = make;
   char host[256];
@@ -1276,12 +1406,13 @@ void *tz_net_listen(void *host_obj, uint64_t host_meta, int64_t port, double max
     return NULL;
   }
   if (family == AF_INET6) {
-    DWORD no = 0;
-    setsockopt(s, IPPROTO_IPV6, IPV6_V6ONLY, (const char *)&no, sizeof no);
+    DWORD only = (flags & 1) != 0;
+    setsockopt(s, IPPROTO_IPV6, IPV6_V6ONLY, (const char *)&only, sizeof only);
   }
   BOOL yes = TRUE;
   setsockopt(s, SOL_SOCKET, SO_EXCLUSIVEADDRUSE, (const char *)&yes, sizeof yes);
-  if (bind(s, (SOCKADDR *)&address, length) == SOCKET_ERROR || listen(s, 511) == SOCKET_ERROR ||
+  int queue = backlog > 0 ? (int)backlog : 511;
+  if (bind(s, (SOCKADDR *)&address, length) == SOCKET_ERROR || listen(s, queue) == SOCKET_ERROR ||
       !attach(s)) {
     int error = WSAGetLastError();
     closesocket(s);
@@ -1289,13 +1420,7 @@ void *tz_net_listen(void *host_obj, uint64_t host_meta, int64_t port, double max
     return NULL;
   }
   load_extensions(s);
-  NetListener *l = (NetListener *)tz_obj_alloc(sizeof(NetListener));
-  memset(l, 0, sizeof *l);
-  l->rc = 1;
-  l->layout = &listener_layout;
-  l->s = s;
-  l->accepting = INVALID_SOCKET;
-  l->family = family;
+  NetListener *l = listener_new(s, family);
   l->max_body = max_body;
   l->keep_alive = (double)keep_alive;
   l->headers_timeout = (double)headers_timeout;
@@ -1308,6 +1433,27 @@ void *tz_net_listen(void *host_obj, uint64_t host_meta, int64_t port, double max
   start_sweep(l);
 
   return l;
+}
+
+void *tz_net_listen(void *host_obj, uint64_t host_meta, int64_t port, double max_body,
+                    int64_t keep_alive, int64_t headers_timeout, int64_t request_timeout,
+                    TzMaker make) {
+  TZ_ORDERED();
+
+  return listen_tcp(host_obj, host_meta, port, max_body, keep_alive, headers_timeout,
+                    request_timeout, 0, 0, make);
+}
+
+void *tz_net_listen_socket(void *host_obj, uint64_t host_meta, int64_t port, int64_t idle,
+                           int64_t backlog, int64_t flags, TzMaker make) {
+  TZ_ORDERED();
+  if (flags & 2) {
+    tz_failed = net_system_error(make, WSAEOPNOTSUPP, "listen",
+                                 "reusePort: Windows has no SO_REUSEPORT", 1);
+    return NULL;
+  }
+
+  return listen_tcp(host_obj, host_meta, port, 0, idle, 0, 0, backlog, flags, make);
 }
 
 void tz_net_listener_url(TzStr *out, void *listener, TzMaker make) {
@@ -1368,7 +1514,7 @@ static void accept_next(NetListener *l) {
       settle_none(l);
       return;
     }
-    l->accepting = WSASocketW(l->family, SOCK_STREAM, IPPROTO_TCP, NULL, 0,
+    l->accepting = WSASocketW(l->family, SOCK_STREAM, l->protocol, NULL, 0,
                               WSA_FLAG_OVERLAPPED | WSA_FLAG_NO_HANDLE_INHERIT);
     if (l->accepting == INVALID_SOCKET) {
       settle_none(l);
@@ -1448,6 +1594,9 @@ static void accepted(NetListener *l, int32_t error) {
     address_text(remote, c->peer, sizeof c->peer);
     c->peer_port = address_port(remote);
   }
+  if (!c->peer[0] && l->unix_socket) {
+    snprintf(c->peer, sizeof c->peer, "%s", l->host);
+  }
   c->pooled = pool != NULL;
   c->server = 1;
   c->listener = l;
@@ -1464,6 +1613,8 @@ static void accepted(NetListener *l, int32_t error) {
   net_accept_ready(l, c);
 }
 
+static void pipe_accept_next(NetListener *l);
+
 void tz_net_accept(TzPromise *p, void *listener, TzMaker make) {
   TZ_ORDERED();
   NetListener *l = (NetListener *)listener;
@@ -1478,6 +1629,14 @@ void tz_net_accept(TzPromise *p, void *listener, TzMaker make) {
     return;
   }
   tz_unlock(&l->ready_lock);
+  if (l->pipe) {
+    if (l->closed) {
+      settle_none(l);
+    } else if (!l->ops) {
+      pipe_accept_next(l);
+    }
+    return;
+  }
   if (l->accepting == INVALID_SOCKET) {
     accept_next(l);
   }
@@ -1570,6 +1729,9 @@ typedef struct Connect {
   int looking;
   int done;
   int lookup_only;
+  int has_local;
+  char local[72];
+  int local_port;
 } Connect;
 
 static void connect_free(Connect *r) {
@@ -1687,6 +1849,20 @@ static void connect_next(Connect *r) {
     SOCKADDR_STORAGE any;
     memset(&any, 0, sizeof any);
     any.ss_family = address->ss_family;
+    if (r->has_local) {
+      SOCKADDR_STORAGE wanted;
+      int wanted_length = 0;
+      const char *local = r->local[0]                      ? r->local
+                          : address->ss_family == AF_INET6 ? "::"
+                                                           : "0.0.0.0";
+      if (!parse_literal(local, r->local_port, &wanted, &wanted_length) ||
+          wanted.ss_family != address->ss_family) {
+        attempt_failed(r, WSAEADDRNOTAVAIL);
+        closesocket(s);
+        continue;
+      }
+      any = wanted;
+    }
     if (bind(s, (SOCKADDR *)&any, length) == SOCKET_ERROR || !attach(s)) {
       attempt_failed(r, WSAGetLastError());
       closesocket(s);
@@ -1799,7 +1975,8 @@ static void abort_connect(TzDeadlineListener *l) {
 }
 
 static void begin_connect(TzPromise *p, void *host_obj, uint64_t host_meta, int64_t port,
-                          void *deadline, TzMaker make, int lookup_only) {
+                          void *deadline, TzMaker make, int lookup_only, void *local,
+                          uint64_t local_meta, int64_t local_port) {
   start();
   tz_net_make = make;
   Connect *r = (Connect *)tz_alloc(sizeof(Connect));
@@ -1824,6 +2001,16 @@ static void begin_connect(TzPromise *p, void *host_obj, uint64_t host_meta, int6
     r->deadline = (TzDeadline *)deadline;
     r->abort.run = abort_connect;
     tz_deadline_listen(r->deadline, &r->abort);
+  }
+  if (local) {
+    r->has_local = 1;
+    r->local_port = (int)local_port;
+    if (!ascii_of(local, local_meta, r->local, sizeof r->local)) {
+      net_reject(&r->promise,
+                 net_failure("ERR_INVALID_ARG_VALUE", "the local address must be ASCII"));
+      connect_free(r);
+      return;
+    }
   }
   int length;
   if (parse_literal(r->host, port, &r->addresses[0], &length)) {
@@ -1869,12 +2056,19 @@ static void begin_connect(TzPromise *p, void *host_obj, uint64_t host_meta, int6
 void tz_net_connect(TzPromise *p, void *host_obj, uint64_t host_meta, int64_t port, void *deadline,
                     TzMaker make) {
   TZ_ORDERED();
-  begin_connect(p, host_obj, host_meta, port, deadline, make, 0);
+  begin_connect(p, host_obj, host_meta, port, deadline, make, 0, NULL, 0, 0);
+}
+
+void tz_net_connect_from(TzPromise *p, void *host_obj, uint64_t host_meta, int64_t port,
+                         void *local_obj, uint64_t local_meta, int64_t local_port, void *deadline,
+                         TzMaker make) {
+  TZ_ORDERED();
+  begin_connect(p, host_obj, host_meta, port, deadline, make, 0, local_obj, local_meta, local_port);
 }
 
 void tz_net_lookup(TzPromise *p, void *host_obj, uint64_t host_meta, void *deadline, TzMaker make) {
   TZ_ORDERED();
-  begin_connect(p, host_obj, host_meta, 0, deadline, make, 1);
+  begin_connect(p, host_obj, host_meta, 0, deadline, make, 1, NULL, 0, 0);
 }
 
 void tz_net_local_address(TzStr *out, void *conn, TzMaker make) {
@@ -1902,6 +2096,378 @@ void tz_net_tls_version(TzStr *out, void *conn, TzMaker make) {
   const char *version = c->tls && c->tls_ops->version ? c->tls_ops->version(c) : "";
   *out = tz_str_from_ascii(version, strlen(version));
   conn_unlock(c);
+}
+
+static int wide_of(void *obj, uint64_t meta, wchar_t *out, size_t size) {
+  TzStr s = {obj, meta};
+  uint32_t length;
+  int two;
+  const void *units = tz_str_units(&s, &length, &two);
+  if (length == 0 || length + 1 > size) {
+    return 0;
+  }
+  for (uint32_t i = 0; i < length; ++i) {
+    uint32_t c = two ? ((const uint16_t *)units)[i] : ((const uint8_t *)units)[i];
+    if (c == 0) {
+      return 0;
+    }
+    out[i] = (wchar_t)c;
+  }
+  out[length] = 0;
+
+  return 1;
+}
+
+static int is_pipe_name(const wchar_t *path) {
+  return wcsncmp(path, L"\\\\.\\pipe\\", 9) == 0 || wcsncmp(path, L"\\\\?\\pipe\\", 9) == 0;
+}
+
+static void path_where(const wchar_t *path, char *out, size_t size) {
+  if (!WideCharToMultiByte(CP_UTF8, 0, path, -1, out, (int)size, NULL, NULL)) {
+    out[0] = 0;
+  }
+}
+
+static int unix_address(const wchar_t *path, SOCKADDR_UN *address) {
+  memset(address, 0, sizeof *address);
+  address->sun_family = AF_UNIX;
+
+  return WideCharToMultiByte(CP_UTF8, 0, path, -1, address->sun_path, (int)sizeof address->sun_path,
+                             NULL, NULL) > 0;
+}
+
+static HANDLE pipe_instance(const wchar_t *path, int first) {
+  DWORD open =
+      PIPE_ACCESS_DUPLEX | FILE_FLAG_OVERLAPPED | (first ? FILE_FLAG_FIRST_PIPE_INSTANCE : 0);
+
+  return CreateNamedPipeW(
+      path, open, PIPE_TYPE_BYTE | PIPE_READMODE_BYTE | PIPE_WAIT | PIPE_REJECT_REMOTE_CLIENTS,
+      PIPE_UNLIMITED_INSTANCES, 65536, 65536, 0, NULL);
+}
+
+void tz_net_connect_path(TzPromise *p, void *path_obj, uint64_t path_meta, TzMaker make) {
+  TZ_ORDERED();
+  start();
+  tz_net_make = make;
+  tz_ref_retain(p);
+  TzPromise *promise = p;
+  wchar_t path[256];
+  char where[512];
+  if (!wide_of(path_obj, path_meta, path, sizeof path / sizeof path[0])) {
+    net_reject(&promise,
+               net_failure("ERR_INVALID_ARG_VALUE",
+                           "the path is empty, longer than 255 characters or has a zero"));
+    return;
+  }
+  path_where(path, where, sizeof where);
+  if (is_pipe_name(path)) {
+    HANDLE h = CreateFileW(path, GENERIC_READ | GENERIC_WRITE, 0, NULL, OPEN_EXISTING,
+                           FILE_FLAG_OVERLAPPED, NULL);
+    if (h == INVALID_HANDLE_VALUE) {
+      net_reject(&promise, net_system_error(make, (int32_t)GetLastError(), "connect", where, 1));
+      return;
+    }
+    if (!attach((SOCKET)h)) {
+      int32_t error = (int32_t)GetLastError();
+      CloseHandle(h);
+      net_reject(&promise, net_system_error(make, error, "connect", where, 1));
+      return;
+    }
+    NetConn *c = conn_new((SOCKET)h);
+    c->pipe = 1;
+    snprintf(c->peer, sizeof c->peer, "%s", where);
+    net_fulfill(&promise, &c, sizeof c);
+    return;
+  }
+  SOCKADDR_UN address;
+  SOCKET s = WSASocketW(AF_UNIX, SOCK_STREAM, 0, NULL, 0,
+                        WSA_FLAG_OVERLAPPED | WSA_FLAG_NO_HANDLE_INHERIT);
+  if (s == INVALID_SOCKET || !unix_address(path, &address) ||
+      connect(s, (SOCKADDR *)&address, sizeof address) == SOCKET_ERROR || !attach(s)) {
+    int32_t error = WSAGetLastError();
+    if (s != INVALID_SOCKET) {
+      closesocket(s);
+    }
+    net_reject(&promise, net_system_error(make, error, "connect", where, 1));
+    return;
+  }
+  NetConn *c = conn_new(s);
+  snprintf(c->peer, sizeof c->peer, "%s", where);
+  net_fulfill(&promise, &c, sizeof c);
+}
+
+static void pipe_accept_done(TzWork *w);
+static void pipe_accepted(NetListener *l, int32_t error);
+
+static void pipe_accept_next(NetListener *l) {
+  if (l->closed) {
+    settle_none(l);
+    return;
+  }
+  if (l->accepting == INVALID_SOCKET) {
+    HANDLE h = pipe_instance(l->path, 0);
+    if (h == INVALID_HANDLE_VALUE) {
+      settle_none(l);
+      return;
+    }
+    if (!attach((SOCKET)h)) {
+      CloseHandle(h);
+      settle_none(l);
+      return;
+    }
+    l->accepting = (SOCKET)h;
+  }
+  op_begin(&l->aop, pipe_accept_done, 0);
+  ++l->ops;
+  if (ConnectNamedPipe((HANDLE)l->accepting, &l->aop.ov)) {
+    --l->ops;
+    pipe_accepted(l, 0);
+    return;
+  }
+  DWORD error = GetLastError();
+  if (error == ERROR_IO_PENDING) {
+    op_wait(&l->aop);
+    return;
+  }
+  --l->ops;
+  pipe_accepted(l, error == ERROR_PIPE_CONNECTED ? 0 : (int32_t)error);
+}
+
+static void pipe_accept_done(TzWork *w) {
+  NetListener *l = CONTAINING_RECORD(CONTAINING_RECORD(w, NetOp, work), NetListener, aop);
+  --l->ops;
+  int32_t error = 0;
+  if (l->closed) {
+    error = ERROR_OPERATION_ABORTED;
+  } else if (l->aop.error) {
+    DWORD bytes = 0;
+    if (!GetOverlappedResult((HANDLE)l->accepting, &l->aop.ov, &bytes, FALSE)) {
+      error = (int32_t)GetLastError();
+    }
+  }
+  pipe_accepted(l, error);
+}
+
+static void pipe_accepted(NetListener *l, int32_t error) {
+  HANDLE h = (HANDLE)l->accepting;
+  if (l->closed) {
+    l->accepting = INVALID_SOCKET;
+    if (l->orphan) {
+      if (!l->ops) {
+        listener_free(l);
+      }
+      return;
+    }
+    settle_none(l);
+    return;
+  }
+  l->accepting = INVALID_SOCKET;
+  if (error) {
+    CloseHandle(h);
+    if (error == ERROR_NO_DATA) {
+      pipe_accept_next(l);
+      return;
+    }
+    settle_none(l);
+    return;
+  }
+  NetConn *c = conn_new((SOCKET)h);
+  c->pipe = 1;
+  snprintf(c->peer, sizeof c->peer, "%s", l->host);
+  c->server = 1;
+  c->listener = l;
+  c->next = l->conns;
+  if (l->conns) {
+    l->conns->prev = c;
+  }
+  l->conns = c;
+  c->http.max_body = l->max_body;
+  c->http.request_timeout = l->request_timeout;
+  net_accept_ready(l, c);
+  pipe_accept_next(l);
+}
+
+void *tz_net_listen_path(void *path_obj, uint64_t path_meta, int64_t idle, int64_t backlog,
+                         TzMaker make) {
+  TZ_ORDERED();
+  start();
+  tz_net_make = make;
+  wchar_t path[256];
+  char where[512];
+  if (!wide_of(path_obj, path_meta, path, sizeof path / sizeof path[0])) {
+    tz_failed = net_failure("ERR_INVALID_ARG_VALUE",
+                            "the path is empty, longer than 255 characters or has a zero");
+    return NULL;
+  }
+  path_where(path, where, sizeof where);
+  if (is_pipe_name(path)) {
+    HANDLE h = pipe_instance(path, 1);
+    if (h == INVALID_HANDLE_VALUE) {
+      int32_t error = (int32_t)GetLastError();
+      tz_failed = net_system_error(make, error == ERROR_ACCESS_DENIED ? WSAEADDRINUSE : error,
+                                   "listen", where, 1);
+      return NULL;
+    }
+    if (!attach((SOCKET)h)) {
+      int32_t error = (int32_t)GetLastError();
+      CloseHandle(h);
+      tz_failed = net_system_error(make, error, "listen", where, 1);
+      return NULL;
+    }
+    NetListener *l = listener_new(INVALID_SOCKET, AF_UNIX);
+    l->pipe = 1;
+    l->accepting = (SOCKET)h;
+    wcscpy_s(l->path, sizeof l->path / sizeof l->path[0], path);
+    snprintf(l->host, sizeof l->host, "%s", where);
+    l->keep_alive = (double)idle;
+    start_sweep(l);
+
+    return l;
+  }
+  SOCKADDR_UN address;
+  if (!unix_address(path, &address)) {
+    tz_failed = net_failure("ERR_INVALID_ARG_VALUE", "the path of a Unix socket is too long");
+    return NULL;
+  }
+  SOCKET s = WSASocketW(AF_UNIX, SOCK_STREAM, 0, NULL, 0,
+                        WSA_FLAG_OVERLAPPED | WSA_FLAG_NO_HANDLE_INHERIT);
+  if (s == INVALID_SOCKET) {
+    tz_failed = net_system_error(make, WSAGetLastError(), "listen", where, 1);
+    return NULL;
+  }
+  int queue = backlog > 0 ? (int)backlog : 511;
+  if (bind(s, (SOCKADDR *)&address, sizeof address) == SOCKET_ERROR ||
+      listen(s, queue) == SOCKET_ERROR || !attach(s)) {
+    int error = WSAGetLastError();
+    closesocket(s);
+    tz_failed = net_system_error(make, error, "listen", where, 1);
+    return NULL;
+  }
+  load_extensions(s);
+  NetListener *l = listener_new(s, AF_UNIX);
+  l->unix_socket = 1;
+  wcscpy_s(l->path, sizeof l->path / sizeof l->path[0], path);
+  snprintf(l->host, sizeof l->host, "%s", where);
+  l->keep_alive = (double)idle;
+  start_sweep(l);
+
+  return l;
+}
+
+int32_t tz_net_socket_option(void *conn, int64_t option, int64_t value, TzMaker make) {
+  (void)make;
+  NetConn *c = (NetConn *)conn;
+  conn_lock(c);
+  if (c->pipe || c->h2parent || c->closed) {
+    conn_unlock(c);
+    return 0;
+  }
+  SOCKADDR_STORAGE local;
+  int length = sizeof local;
+  int family = getsockname(c->s, (SOCKADDR *)&local, &length) == 0 ? local.ss_family : AF_INET;
+  int v6 = family == AF_INET6;
+  BOOL on = value != 0;
+  DWORD number = value < 0 ? 0 : (DWORD)value;
+  DWORD seconds = (DWORD)((value + 999) / 1000);
+  if (seconds == 0) {
+    seconds = 1;
+  }
+  struct linger hold = {value >= 0 ? 1 : 0, (u_short)(value >= 0 ? value : 0)};
+  int rc = SOCKET_ERROR;
+  switch (option) {
+  case 1:
+    rc = setsockopt(c->s, IPPROTO_TCP, TCP_NODELAY, (const char *)&on, sizeof on);
+    break;
+  case 2:
+    rc = setsockopt(c->s, SOL_SOCKET, SO_KEEPALIVE, (const char *)&on, sizeof on);
+    break;
+  case 3:
+    rc = setsockopt(c->s, IPPROTO_TCP, TCP_KEEPIDLE, (const char *)&seconds, sizeof seconds);
+    break;
+  case 4:
+    rc = setsockopt(c->s, IPPROTO_TCP, TCP_KEEPINTVL, (const char *)&seconds, sizeof seconds);
+    break;
+  case 5:
+    rc = setsockopt(c->s, IPPROTO_TCP, TCP_KEEPCNT, (const char *)&number, sizeof number);
+    break;
+  case 6:
+    rc = setsockopt(c->s, SOL_SOCKET, SO_SNDBUF, (const char *)&number, sizeof number);
+    break;
+  case 7:
+    rc = setsockopt(c->s, SOL_SOCKET, SO_RCVBUF, (const char *)&number, sizeof number);
+    break;
+  case 8:
+    rc = setsockopt(c->s, v6 ? IPPROTO_IPV6 : IPPROTO_IP, v6 ? IPV6_UNICAST_HOPS : IP_TTL,
+                    (const char *)&number, sizeof number);
+    break;
+  case 9:
+    rc = setsockopt(c->s, v6 ? IPPROTO_IPV6 : IPPROTO_IP, v6 ? IPV6_TCLASS : IP_TOS,
+                    (const char *)&number, sizeof number);
+    break;
+  case 10:
+    rc = setsockopt(c->s, IPPROTO_TCP, TCP_MAXRTMS, (const char *)&number, sizeof number);
+    break;
+  case 11:
+    rc = setsockopt(c->s, SOL_SOCKET, SO_LINGER, (const char *)&hold, sizeof hold);
+    break;
+  default:
+    break;
+  }
+  conn_unlock(c);
+
+  return rc != SOCKET_ERROR;
+}
+
+void tz_tcp_shutdown(void *conn, TzMaker make) {
+  TZ_ORDERED();
+  (void)make;
+  NetConn *c = (NetConn *)conn;
+  conn_lock(c);
+  if (!c->closed && !c->pipe && !c->h2parent && !c->shut) {
+    c->shut = 1;
+    if (c->tls) {
+      c->tls_ops->shutdown(c);
+    }
+    if (c->writing || has_output(c)) {
+      net_flush(c);
+    } else {
+      c->shut = 2;
+      shutdown(c->s, SD_SEND);
+    }
+  }
+  conn_unlock(c);
+}
+
+void tz_net_local_host(TzStr *out, void *conn, TzMaker make) {
+  (void)make;
+  NetConn *c = (NetConn *)conn;
+  conn_lock(c);
+  SOCKADDR_STORAGE local;
+  int length = sizeof local;
+  char text[128];
+  text[0] = 0;
+  if (!c->h2parent && !c->closed && !c->pipe &&
+      getsockname(c->s, (SOCKADDR *)&local, &length) == 0) {
+    address_text((SOCKADDR *)&local, text, sizeof text);
+  }
+  conn_unlock(c);
+  *out = net_utf8(text);
+}
+
+int64_t tz_net_local_port(void *conn, TzMaker make) {
+  (void)make;
+  NetConn *c = (NetConn *)conn;
+  conn_lock(c);
+  SOCKADDR_STORAGE local;
+  int length = sizeof local;
+  int port = 0;
+  if (!c->h2parent && !c->closed && !c->pipe &&
+      getsockname(c->s, (SOCKADDR *)&local, &length) == 0) {
+    port = address_port((SOCKADDR *)&local);
+  }
+  conn_unlock(c);
+
+  return port;
 }
 
 #else
@@ -2061,6 +2627,76 @@ void tz_net_local_address(TzStr *out, void *conn, TzMaker make) {
 }
 void tz_net_tls_version(TzStr *out, void *conn, TzMaker make) {
   (void)out;
+  (void)conn;
+  (void)make;
+  unsupported();
+}
+
+void tz_net_connect_from(TzPromise *p, void *host_obj, uint64_t host_meta, int64_t port,
+                         void *local_obj, uint64_t local_meta, int64_t local_port, void *deadline,
+                         TzMaker make) {
+  TZ_ORDERED();
+  (void)p;
+  (void)host_obj;
+  (void)host_meta;
+  (void)port;
+  (void)local_obj;
+  (void)local_meta;
+  (void)local_port;
+  (void)deadline;
+  (void)make;
+  unsupported();
+}
+void tz_net_connect_path(TzPromise *p, void *path_obj, uint64_t path_meta, TzMaker make) {
+  TZ_ORDERED();
+  (void)p;
+  (void)path_obj;
+  (void)path_meta;
+  (void)make;
+  unsupported();
+}
+void *tz_net_listen_path(void *path_obj, uint64_t path_meta, int64_t idle, int64_t backlog,
+                         TzMaker make) {
+  TZ_ORDERED();
+  (void)path_obj;
+  (void)path_meta;
+  (void)idle;
+  (void)backlog;
+  (void)make;
+  unsupported();
+}
+void *tz_net_listen_socket(void *host_obj, uint64_t host_meta, int64_t port, int64_t idle,
+                           int64_t backlog, int64_t flags, TzMaker make) {
+  TZ_ORDERED();
+  (void)host_obj;
+  (void)host_meta;
+  (void)port;
+  (void)idle;
+  (void)backlog;
+  (void)flags;
+  (void)make;
+  unsupported();
+}
+int32_t tz_net_socket_option(void *conn, int64_t option, int64_t value, TzMaker make) {
+  (void)conn;
+  (void)option;
+  (void)value;
+  (void)make;
+  unsupported();
+}
+void tz_tcp_shutdown(void *conn, TzMaker make) {
+  TZ_ORDERED();
+  (void)conn;
+  (void)make;
+  unsupported();
+}
+void tz_net_local_host(TzStr *out, void *conn, TzMaker make) {
+  (void)out;
+  (void)conn;
+  (void)make;
+  unsupported();
+}
+int64_t tz_net_local_port(void *conn, TzMaker make) {
   (void)conn;
   (void)make;
   unsupported();

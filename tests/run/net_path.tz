@@ -1,0 +1,128 @@
+// node:net beyond plain TCP (docs/net.md, section 7): a server and a client
+// on a Unix socket (AF_UNIX, a file in a temporary folder that stop()
+// removes) and on a named pipe of Windows (\\.\pipe\...); a path nobody
+// listens on; a second server on a pipe that is taken; socket settings of
+// TCP (keep-alive with its delay, buffers, ttl, linger) and the local address
+// and port, a client bound to a local address; half-open: the client ends its
+// side and still reads the answer. Only 127.0.0.1.
+import { randomUUID } from "node:crypto"
+import { existsSync, mkdtempSync, rmSync } from "node:fs"
+import { Server, Socket } from "node:net"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
+
+async function echoOver(what: string, path: string) {
+  const server = new Server({ path: path }, async socket => {
+    for await (const chunkResult of socket) {
+      if (chunkResult.isErr()) break
+      const text = chunkResult.value.toString()
+      socket.write(text.toUpperCase())
+      if (text.includes("bye")) {
+        const endedResult = await socket.end()
+        if (endedResult.isErr()) console.log(`${what} server end:`, endedResult.error.message)
+        break
+      }
+    }
+  })
+  const listeningResult = server.listen()
+  if (listeningResult.isErr()) {
+    console.log(`${what}: cannot listen:`, listeningResult.error.code)
+    return
+  }
+  const listening = listeningResult.value
+  console.log(`${what}: listening, port ${listening.port}, path given back: ${listening.path == path}`)
+  const second = new Server({ path: path }, async socket => {
+    const endedResult = await socket.end()
+    if (endedResult.isErr()) console.log(endedResult.error.message)
+  }).listen()
+  if (second.isErr()) console.log(`${what}: second server:`, second.error.code)
+  else await second.value.stop()
+  for (const word of ["one", "two"]) {
+    const client = new Socket({ path: path })
+    const connectedResult = await client.connect()
+    if (connectedResult.isErr()) {
+      console.log(`${what}: cannot connect:`, connectedResult.error.code, connectedResult.error.message)
+      continue
+    }
+    client.write(`hello ${word} bye`)
+    let answer = ""
+    for await (const chunkResult of client) {
+      if (chunkResult.isErr()) break
+      answer += chunkResult.value.toString()
+    }
+    console.log(`${what}: answer ${answer}, remote ${client.remoteAddress() == path}`)
+  }
+  await listening.stop()
+}
+
+const unique = randomUUID()
+const dir = mkdtempSync(join(tmpdir(), "tz-net-path-"))
+if (dir.isErr()) process.exit(1)
+const file = join(dir.value, "echo.sock")
+await echoOver("unix", file)
+console.log("unix: file removed by stop:", !existsSync(file))
+await echoOver("pipe", `\\\\.\\pipe\\tz-net-path-${unique}`)
+
+const nobody = new Socket({ path: `\\\\.\\pipe\\tz-net-nobody-${unique}` })
+const nobodyResult = await nobody.connect()
+if (nobodyResult.isErr()) console.log("nobody:", nobodyResult.error.kind, nobodyResult.error.code)
+const missing = new Socket({ path: join(dir.value, "missing.sock") })
+const missingResult = await missing.connect()
+if (missingResult.isErr()) console.log("missing file:", missingResult.error.kind)
+
+let serverSaw = ""
+const tcp = new Server({ port: 0, hostname: "127.0.0.1", backlog: 16, keepAlive: true, keepAliveDelay: 5000,
+                         allowHalfOpen: true }, async socket => {
+  let got = ""
+  for await (const chunkResult of socket.iterator({ destroyOnReturn: false })) {
+    if (chunkResult.isErr()) break
+    got += chunkResult.value.toString()
+  }
+  serverSaw = got
+  socket.write(`you said ${got}`)
+  const endedResult = await socket.end()
+  if (endedResult.isErr()) console.log("tcp server end:", endedResult.error.message)
+})
+const tcpResult = tcp.listen()
+if (tcpResult.isErr()) process.exit(1)
+const port = tcpResult.value.port
+const client = new Socket({
+  host: "127.0.0.1",
+  port: port,
+  localAddress: "127.0.0.1",
+  allowHalfOpen: true,
+  keepAlive: true,
+  keepAliveDelay: 2000,
+  keepAliveInterval: 1000,
+  keepAliveCount: 3,
+  sendBufferSize: 65536,
+  receiveBufferSize: 65536,
+  ttl: 32,
+  linger: 1,
+})
+const clientResult = await client.connect()
+if (clientResult.isErr()) {
+  console.log("tcp: cannot connect:", clientResult.error.message)
+  process.exit(1)
+}
+console.log("tcp local:", client.localAddress(), client.localPort() > 0, client.localPort() != port)
+client.write("half")
+const halfResult = await client.end()
+console.log("tcp ended its side:", halfResult.isOk())
+let reply = ""
+for await (const chunkResult of client.iterator({ destroyOnReturn: false })) {
+  if (chunkResult.isErr()) break
+  reply += chunkResult.value.toString()
+}
+console.log("tcp reply after end:", reply, "server saw:", serverSaw)
+await tcpResult.value.stop()
+
+const reused = new Server({ port: 0, hostname: "127.0.0.1", reusePort: true }, async socket => {
+  const endedResult = await socket.end()
+  if (endedResult.isErr()) console.log(endedResult.error.message)
+}).listen()
+if (reused.isErr()) console.log("reusePort:", reused.error.code)
+else await reused.value.stop()
+
+const removed = rmSync(dir.value, { recursive: true })
+if (removed.isErr()) console.log("cannot remove the folder")

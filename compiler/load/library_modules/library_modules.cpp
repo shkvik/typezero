@@ -101,6 +101,7 @@ struct ModuleParts {
 };
 const ModuleParts kModuleParts[] = {
     {"stream.tz", {"stream_duplex.tz", "stream_pipeline.tz"}},
+    {"fetch.tz", {"fetch_proxy.tz"}},
 };
 
 void appendPart(SourceFile &file, SourceFile &part) {

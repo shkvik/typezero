@@ -1,0 +1,524 @@
+import { NativeError } from "tz:intrinsics";
+
+declare function socketOpen(domain: int, type: int, protocol: int): Result<object, NativeError>;
+declare function socketBind(socket: object, address: string, port: int): Result<int, NativeError>;
+declare function socketListen(socket: object, backlog: int): Result<int, NativeError>;
+declare function socketAccept(socket: object): Promise<Result<object, NativeError>>;
+declare function socketConnect(
+  socket: object,
+  address: string,
+  port: int,
+): Promise<Result<void, NativeError>>;
+declare function socketSend(
+  socket: object,
+  data: Uint8Array,
+  address: string,
+  port: int,
+  flags: int,
+): Promise<Result<int, NativeError>>;
+declare function socketReceive(
+  socket: object,
+  size: int,
+  flags: int,
+): Promise<Result<Uint8Array, NativeError>>;
+declare function socketSenderAddress(socket: object): string;
+declare function socketSenderPort(socket: object): int;
+declare function socketShutdown(socket: object, how: int): Result<int, NativeError>;
+declare function socketOption(socket: object, option: int, value: int): Result<int, NativeError>;
+declare function socketLocalAddress(socket: object): string;
+declare function socketLocalPort(socket: object): int;
+declare function socketRemoteAddress(socket: object): string;
+declare function socketRemotePort(socket: object): int;
+declare function socketClose(socket: object): void;
+
+export type SocketDomain = "ipv4" | "ipv6" | "unix";
+
+export type SocketKind = "stream" | "datagram" | "raw" | "seqpacket";
+
+export type SocketOptions = {
+  domain: SocketDomain;
+  type: SocketKind;
+  protocol?: int;
+};
+
+export type SocketAddress =
+  | {
+      address: string;
+      port: int;
+    }
+  | {
+      path: string;
+    };
+
+export type SendOptions = {
+  outOfBand?: boolean;
+  dontRoute?: boolean;
+};
+
+export type ReceiveOptions = {
+  size?: int;
+  peek?: boolean;
+  outOfBand?: boolean;
+  waitAll?: boolean;
+};
+
+export type SocketSettings = {
+  reuseAddress?: boolean;
+  broadcast?: boolean;
+  keepAlive?: boolean;
+  keepAliveDelay?: int;
+  keepAliveInterval?: int;
+  keepAliveCount?: int;
+  noDelay?: boolean;
+  linger?: int;
+  sendBufferSize?: int;
+  receiveBufferSize?: int;
+  ttl?: int;
+  typeOfService?: int;
+  ipv6Only?: boolean;
+  headerIncluded?: boolean;
+  multicastTtl?: int;
+  multicastLoop?: boolean;
+  userTimeout?: int;
+  outOfBandInline?: boolean;
+  dontFragment?: boolean;
+};
+
+export type SocketOperationError =
+  | {
+      kind: "SOCKET_OPERATION_ERROR_PERMISSION";
+      code: "EACCES";
+      message: string;
+      syscall: string;
+    }
+  | {
+      kind: "SOCKET_OPERATION_ERROR_REQUEST";
+      code:
+        | "ERR_INVALID_ADDRESS"
+        | "ERR_SOCKET_CLOSED"
+        | "ERR_SOCKET_BUSY"
+        | "ERR_NOT_SUPPORTED"
+        | "ERR_INVALID_ARG_VALUE";
+      message: string;
+    }
+  | {
+      kind: "SOCKET_OPERATION_ERROR_SYSTEM";
+      code: string;
+      message: string;
+      syscall: string;
+    }
+  | {
+      kind: "SOCKET_OPERATION_ERROR_SETTING";
+      code: string;
+      message: string;
+      setting: string;
+    };
+
+export class Endpoint {
+  public readonly address: string;
+  public readonly port: int;
+
+  public constructor(address: string, port: int) {
+    this.address = address;
+    this.port = port;
+  }
+}
+
+export class Datagram {
+  public readonly data: Uint8Array;
+  public readonly address: string;
+  public readonly port: int;
+
+  public constructor(data: Uint8Array, address: string, port: int) {
+    this.data = data;
+    this.address = address;
+    this.port = port;
+  }
+}
+
+const PERMISSION_HINT =
+  "raw sockets need administrator rights: run the program as administrator " +
+  "(Linux: setcap cap_net_raw+ep ./app)";
+
+type RequestCode =
+  | "ERR_INVALID_ADDRESS"
+  | "ERR_SOCKET_CLOSED"
+  | "ERR_SOCKET_BUSY"
+  | "ERR_NOT_SUPPORTED"
+  | "ERR_INVALID_ARG_VALUE";
+
+function requestCode(code: string): RequestCode | undefined {
+  switch (code) {
+    case "ERR_INVALID_ADDRESS":
+      return "ERR_INVALID_ADDRESS";
+    case "ERR_SOCKET_CLOSED":
+      return "ERR_SOCKET_CLOSED";
+    case "ERR_SOCKET_BUSY":
+      return "ERR_SOCKET_BUSY";
+    case "ERR_NOT_SUPPORTED":
+      return "ERR_NOT_SUPPORTED";
+    case "ERR_INVALID_ARG_VALUE":
+      return "ERR_INVALID_ARG_VALUE";
+  }
+
+  return undefined;
+}
+
+function domainNumber(domain: SocketDomain): int {
+  switch (domain) {
+    case "ipv4":
+      return 1;
+    case "ipv6":
+      return 2;
+    case "unix":
+      return 3;
+  }
+}
+
+function kindNumber(kind: SocketKind): int {
+  switch (kind) {
+    case "stream":
+      return 1;
+    case "datagram":
+      return 2;
+    case "raw":
+      return 3;
+    case "seqpacket":
+      return 4;
+  }
+}
+
+function addressParts(target: SocketAddress): [string, int] {
+  if ("path" in target) {
+    return [target.path, 0];
+  }
+
+  return [target.address, target.port];
+}
+
+export class Socket {
+  public readonly domain: SocketDomain;
+  public readonly type: SocketKind;
+  public readonly protocol: int;
+
+  private native?: object;
+  private closed: boolean;
+
+  public constructor(options: SocketOptions) {
+    this.domain = options.domain;
+    this.type = options.type;
+    this.protocol = options.protocol ?? 0;
+    this.native = undefined;
+    this.closed = false;
+  }
+
+  private failure(e: NativeError): SocketOperationError {
+    if (e.code == "EACCES") {
+      const hint = this.type == "raw" ? `; ${PERMISSION_HINT}` : "";
+
+      return {
+        kind: "SOCKET_OPERATION_ERROR_PERMISSION",
+        code: "EACCES",
+        message: `${e.message}${hint}`,
+        syscall: e.syscall,
+      };
+    }
+    const request = requestCode(e.code);
+    if (request != undefined) {
+      return { kind: "SOCKET_OPERATION_ERROR_REQUEST", code: request, message: e.message };
+    }
+
+    return {
+      kind: "SOCKET_OPERATION_ERROR_SYSTEM",
+      code: e.code,
+      message: e.message,
+      syscall: e.syscall,
+    };
+  }
+
+  private open(): Result<object, SocketOperationError> {
+    const native = this.native;
+    if (native != undefined) {
+      return ok(native);
+    }
+    if (this.closed) {
+      return err({
+        kind: "SOCKET_OPERATION_ERROR_REQUEST",
+        code: "ERR_SOCKET_CLOSED",
+        message: "the socket is closed",
+      });
+    }
+    const domain = domainNumber(this.domain);
+    const kind = kindNumber(this.type);
+    const openedResult = socketOpen(domain, kind, this.protocol);
+    if (openedResult.isErr()) {
+      const failure = this.failure(openedResult.error);
+
+      return err(failure);
+    }
+    const opened = openedResult.value;
+    this.native = opened;
+
+    return ok(opened);
+  }
+
+  private static adopt(native: object, domain: SocketDomain, type: SocketKind,
+                       protocol: int): Socket {
+    const socket = new Socket({ domain: domain, type: type, protocol: protocol });
+    socket.native = native;
+
+    return socket;
+  }
+
+  public bind(address: SocketAddress): Result<void, SocketOperationError> {
+    const openResult = this.open();
+    if (openResult.isErr()) {
+      return err(openResult.error);
+    }
+    const [host, port] = addressParts(address);
+    const boundResult = socketBind(openResult.value, host, port);
+    if (boundResult.isErr()) {
+      const failure = this.failure(boundResult.error);
+
+      return err(failure);
+    }
+
+    return ok(undefined);
+  }
+
+  public listen(backlog?: int): Result<void, SocketOperationError> {
+    const openResult = this.open();
+    if (openResult.isErr()) {
+      return err(openResult.error);
+    }
+    const listenedResult = socketListen(openResult.value, backlog ?? 0);
+    if (listenedResult.isErr()) {
+      const failure = this.failure(listenedResult.error);
+
+      return err(failure);
+    }
+
+    return ok(undefined);
+  }
+
+  public async accept(): Promise<Result<Socket, SocketOperationError>> {
+    const openResult = this.open();
+    if (openResult.isErr()) {
+      return err(openResult.error);
+    }
+    const acceptedResult = await socketAccept(openResult.value);
+    if (acceptedResult.isErr()) {
+      const failure = this.failure(acceptedResult.error);
+
+      return err(failure);
+    }
+    const peer = Socket.adopt(acceptedResult.value, this.domain, this.type, this.protocol);
+
+    return ok(peer);
+  }
+
+  public async connect(address: SocketAddress): Promise<Result<void, SocketOperationError>> {
+    const openResult = this.open();
+    if (openResult.isErr()) {
+      return err(openResult.error);
+    }
+    const [host, port] = addressParts(address);
+    const connectedResult = await socketConnect(openResult.value, host, port);
+    if (connectedResult.isErr()) {
+      const failure = this.failure(connectedResult.error);
+
+      return err(failure);
+    }
+
+    return ok(undefined);
+  }
+
+  public async send(data: Uint8Array,
+                    options?: SendOptions): Promise<Result<int, SocketOperationError>> {
+    const sent = await this.sendBy(data, "", 0, options);
+
+    return sent;
+  }
+
+  public async sendTo(data: Uint8Array, address: SocketAddress,
+                      options?: SendOptions): Promise<Result<int, SocketOperationError>> {
+    const [host, port] = addressParts(address);
+    if (host == "") {
+      return err({
+        kind: "SOCKET_OPERATION_ERROR_REQUEST",
+        code: "ERR_INVALID_ADDRESS",
+        message: "sendTo needs an address to send to; send() goes to the connected one",
+      });
+    }
+    const sent = await this.sendBy(data, host, port, options);
+
+    return sent;
+  }
+
+  private async sendBy(data: Uint8Array, host: string, port: int,
+                       options?: SendOptions): Promise<Result<int, SocketOperationError>> {
+    const openResult = this.open();
+    if (openResult.isErr()) {
+      return err(openResult.error);
+    }
+    const outOfBand = options?.outOfBand ?? false;
+    const dontRoute = options?.dontRoute ?? false;
+    const flags = (outOfBand ? 1 : 0) | (dontRoute ? 2 : 0);
+    const sentResult = await socketSend(openResult.value, data, host, port, flags);
+    if (sentResult.isErr()) {
+      const failure = this.failure(sentResult.error);
+
+      return err(failure);
+    }
+
+    return ok(sentResult.value);
+  }
+
+  public async receive(options?: ReceiveOptions): Promise<Result<Uint8Array, SocketOperationError>> {
+    const openResult = this.open();
+    if (openResult.isErr()) {
+      return err(openResult.error);
+    }
+    const flags = receiveFlags(options);
+    const receivedResult = await socketReceive(openResult.value, options?.size ?? 0, flags);
+    if (receivedResult.isErr()) {
+      const failure = this.failure(receivedResult.error);
+
+      return err(failure);
+    }
+
+    return ok(receivedResult.value);
+  }
+
+  public async receiveFrom(options?: ReceiveOptions): Promise<Result<Datagram, SocketOperationError>> {
+    const openResult = this.open();
+    if (openResult.isErr()) {
+      return err(openResult.error);
+    }
+    const native = openResult.value;
+    const flags = receiveFlags(options);
+    const receivedResult = await socketReceive(native, options?.size ?? 0, flags);
+    if (receivedResult.isErr()) {
+      const failure = this.failure(receivedResult.error);
+
+      return err(failure);
+    }
+    const address = socketSenderAddress(native);
+    const port = socketSenderPort(native);
+    const datagram = new Datagram(receivedResult.value, address, port);
+
+    return ok(datagram);
+  }
+
+  public shutdown(how: "read" | "write" | "both"): Result<void, SocketOperationError> {
+    const openResult = this.open();
+    if (openResult.isErr()) {
+      return err(openResult.error);
+    }
+    const side = how == "read" ? 0 : how == "write" ? 1 : 2;
+    const shutResult = socketShutdown(openResult.value, side);
+    if (shutResult.isErr()) {
+      const failure = this.failure(shutResult.error);
+
+      return err(failure);
+    }
+
+    return ok(undefined);
+  }
+
+  public configure(settings: SocketSettings): Result<void, SocketOperationError> {
+    const openResult = this.open();
+    if (openResult.isErr()) {
+      return err(openResult.error);
+    }
+    const native = openResult.value;
+    const wanted: [string, int, int | undefined][] = [
+      ["reuseAddress", 1, flag(settings.reuseAddress)],
+      ["broadcast", 2, flag(settings.broadcast)],
+      ["keepAlive", 3, flag(settings.keepAlive)],
+      ["keepAliveDelay", 4, settings.keepAliveDelay],
+      ["keepAliveInterval", 5, settings.keepAliveInterval],
+      ["keepAliveCount", 6, settings.keepAliveCount],
+      ["noDelay", 7, flag(settings.noDelay)],
+      ["linger", 8, settings.linger],
+      ["sendBufferSize", 9, settings.sendBufferSize],
+      ["receiveBufferSize", 10, settings.receiveBufferSize],
+      ["ttl", 11, settings.ttl],
+      ["typeOfService", 12, settings.typeOfService],
+      ["ipv6Only", 13, flag(settings.ipv6Only)],
+      ["headerIncluded", 14, flag(settings.headerIncluded)],
+      ["multicastTtl", 15, settings.multicastTtl],
+      ["multicastLoop", 16, flag(settings.multicastLoop)],
+      ["userTimeout", 17, settings.userTimeout],
+      ["outOfBandInline", 18, flag(settings.outOfBandInline)],
+      ["dontFragment", 19, flag(settings.dontFragment)],
+    ];
+    for (const [name, option, value] of wanted) {
+      if (value == undefined) {
+        continue;
+      }
+      const setResult = socketOption(native, option, value);
+      if (setResult.isErr()) {
+        const e = setResult.error;
+
+        return err({
+          kind: "SOCKET_OPERATION_ERROR_SETTING",
+          code: e.code,
+          message: `the system did not take ${name}: ${e.message}`,
+          setting: name,
+        });
+      }
+    }
+
+    return ok(undefined);
+  }
+
+  public localAddress(): Endpoint {
+    const native = this.native;
+    if (native == undefined) {
+      return new Endpoint("", 0);
+    }
+    const address = socketLocalAddress(native);
+    const port = socketLocalPort(native);
+    const local = new Endpoint(address, port);
+
+    return local;
+  }
+
+  public remoteAddress(): Endpoint {
+    const native = this.native;
+    if (native == undefined) {
+      return new Endpoint("", 0);
+    }
+    const address = socketRemoteAddress(native);
+    const port = socketRemotePort(native);
+    const remote = new Endpoint(address, port);
+
+    return remote;
+  }
+
+  public close(): void {
+    const native = this.native;
+    this.closed = true;
+    this.native = undefined;
+    if (native != undefined) {
+      socketClose(native);
+    }
+  }
+}
+
+function flag(value: boolean | undefined): int | undefined {
+  if (value == undefined) {
+    return undefined;
+  }
+
+  return value ? 1 : 0;
+}
+
+function receiveFlags(options?: ReceiveOptions): int {
+  const peek = options?.peek ?? false;
+  const outOfBand = options?.outOfBand ?? false;
+  const waitAll = options?.waitAll ?? false;
+
+  return (peek ? 1 : 0) | (outOfBand ? 2 : 0) | (waitAll ? 4 : 0);
+}

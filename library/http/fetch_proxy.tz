@@ -1,0 +1,1165 @@
+declare function wsRandom(bytes: Uint8Array): void;
+
+export type ProxyOption =
+  | {
+      enabled: true;
+      url: string;
+    }
+  | {
+      enabled: false;
+    };
+
+type ProxyScheme = "http" | "https" | "socks4" | "socks4a" | "socks5" | "socks5h";
+
+export class ProxyTarget {
+  public readonly scheme: ProxyScheme;
+  public readonly host: string;
+  public readonly port: int;
+  public readonly secure: boolean;
+  public readonly user: string;
+  public readonly password: string;
+  public readonly shown: string;
+
+  public constructor(scheme: ProxyScheme, host: string, port: int, user: string, password: string,
+                     shown: string) {
+    this.scheme = scheme;
+    this.host = host;
+    this.port = port;
+    this.secure = scheme == "https";
+    this.user = user;
+    this.password = password;
+    this.shown = shown;
+  }
+
+  public name(): string {
+    return `${this.host}:${this.port}`;
+  }
+
+  public socks(): boolean {
+    return this.scheme != "http" && this.scheme != "https";
+  }
+
+  public hasLogin(): boolean {
+    return this.user != "" || this.password != "";
+  }
+
+  public key(): string {
+    return `${this.shown}|${this.user}`;
+  }
+
+  public poolKey(): string {
+    return `${this.shown}|${this.user}:${this.password}`;
+  }
+
+  public authorization(method: string, uri: string): string {
+    if (!this.hasLogin()) {
+      return "";
+    }
+    const digest = digestStates.get(this.key());
+    if (digest != undefined) {
+      const answer = digest.answer(this.user, this.password, method, uri);
+
+      return answer;
+    }
+    const basic = Buffer.from(`${this.user}:${this.password}`).toString("base64");
+
+    return `Basic ${basic}`;
+  }
+}
+
+function proxyError(
+  code: "ERR_INVALID_PROXY_URL" | "ERR_PROXY_AUTH_REQUIRED" | "ERR_PROXY_REFUSED",
+  message: string,
+  proxy: string,
+  status: int,
+): FetchError {
+  return { kind: "FETCH_ERROR_PROXY", code: code, message: message, proxy: proxy, status: status };
+}
+
+function envValue(names: string[]): [string, string] | undefined {
+  for (const name of names) {
+    const value = process.env[name];
+    if (value != undefined && value != "") {
+      return [name, value];
+    }
+  }
+
+  return undefined;
+}
+
+function hostMatches(host: string, port: int, entry: string): boolean {
+  let pattern = entry.trim().toLowerCase();
+  if (pattern == "") {
+    return false;
+  }
+  if (pattern == "*") {
+    return true;
+  }
+  const colon = pattern.lastIndexOf(":");
+  if (colon > 0 && !pattern.includes("]") && pattern.indexOf(":") == colon) {
+    const wanted = pattern.slice(colon + 1);
+    if (wanted != String(port)) {
+      return false;
+    }
+    pattern = pattern.slice(0, colon);
+  }
+  const slash = pattern.indexOf("/");
+  if (slash > 0) {
+    return inNetwork(host, pattern.slice(0, slash), pattern.slice(slash + 1));
+  }
+  if (pattern.startsWith(".")) {
+    return host.endsWith(pattern) || host == pattern.slice(1);
+  }
+
+  return host == pattern || host.endsWith("." + pattern);
+}
+
+function ipv4Number(text: string): double | undefined {
+  const parts = text.split(".");
+  if (parts.length != 4) {
+    return undefined;
+  }
+  let value = 0.0;
+  for (const part of parts) {
+    const parsed = parseInt(part);
+    if (parsed.isErr() || parsed.value < 0 || parsed.value > 255) {
+      return undefined;
+    }
+    value = value * 256 + parsed.value.toDouble();
+  }
+
+  return value;
+}
+
+function inNetwork(host: string, base: string, bits: string): boolean {
+  const address = ipv4Number(host);
+  const network = ipv4Number(base);
+  const width = parseInt(bits);
+  if (address == undefined || network == undefined || width.isErr()) {
+    return false;
+  }
+  const size = Math.pow(2, 32 - Math.min(32, Math.max(0, width.value)).toDouble());
+
+  return Math.floor(address / size) == Math.floor(network / size);
+}
+
+function bypassed(host: string, port: int): boolean {
+  const lower = host.toLowerCase();
+  if (lower == "localhost" || lower == "127.0.0.1" || lower == "::1") {
+    return true;
+  }
+  const found = envValue(["NO_PROXY", "no_proxy"]);
+  if (found == undefined) {
+    return false;
+  }
+
+  return found[1].split(",").some((entry) => hostMatches(lower, port, entry));
+}
+
+function schemeOf(protocol: string): ProxyScheme | undefined {
+  switch (protocol) {
+    case "http:":
+      return "http";
+    case "https:":
+      return "https";
+    case "socks4:":
+      return "socks4";
+    case "socks4a:":
+      return "socks4a";
+    case "socks5:":
+      return "socks5";
+    case "socks5h:":
+      return "socks5h";
+  }
+
+  return undefined;
+}
+
+function defaultPort(scheme: ProxyScheme): int {
+  switch (scheme) {
+    case "http":
+      return 80;
+    case "https":
+      return 443;
+    default:
+      return 1080;
+  }
+}
+
+function proxyOf(text: string, source: string): Result<ProxyTarget, FetchError> {
+  const parsed = URL.parse(text);
+  const hint = source == "proxy.url" ? "" : `; write it as http://${text}`;
+  if (parsed.isErr()) {
+    return err(proxyError("ERR_INVALID_PROXY_URL",
+                          `${source} is not a URL: "${text}"${hint}`, text, 0));
+  }
+  const url = parsed.value;
+  const protocol = url.protocol();
+  const scheme = schemeOf(protocol);
+  if (scheme == undefined) {
+    return err(proxyError("ERR_INVALID_PROXY_URL",
+                          `${source} is a ${protocol} proxy, and only http:, https:, socks4:, ` +
+                          "socks4a:, socks5: and socks5h: proxies work", text, 0));
+  }
+  const port = url.portNumber() ?? defaultPort(scheme);
+  const hostname = url.hostname();
+  const host = hostname.startsWith("[") ? hostname.slice(1, hostname.length - 1) : hostname;
+  const user = decodeURIComponent(url.username()).unwrapOr(url.username());
+  const password = decodeURIComponent(url.password()).unwrapOr(url.password());
+  const shown = `${protocol}//${url.host()}`;
+  if ((scheme == "socks4" || scheme == "socks4a") && password != "") {
+    return err(proxyError("ERR_INVALID_PROXY_URL",
+                          `${source} gives a password to a SOCKS4 proxy, which takes only a ` +
+                          `user: drop the password, or take socks5:`, shown, 0));
+  }
+  const encoder = new TextEncoder();
+  if (encoder.encode(user).length > 255 || encoder.encode(password).length > 255) {
+    return err(proxyError("ERR_INVALID_PROXY_URL",
+                          `${source} has a user or a password longer than 255 bytes`, shown, 0));
+  }
+  const proxy = new ProxyTarget(scheme, host, port, user, password, shown);
+
+  return ok(proxy);
+}
+
+export function proxyFor(https: boolean, peer: Peer,
+                         option?: ProxyOption): Result<ProxyTarget | undefined, FetchError> {
+  if (option != undefined) {
+    if (!option.enabled) {
+      return ok(undefined);
+    }
+    const explicitResult = proxyOf(option.url, "proxy.url");
+    if (explicitResult.isErr()) {
+      return err(explicitResult.error);
+    }
+
+    return ok(explicitResult.value);
+  }
+  const cgi = process.env.REQUEST_METHOD != undefined;
+  const names = https ? ["HTTPS_PROXY", "https_proxy"] : cgi ? [] : ["HTTP_PROXY", "http_proxy"];
+  const found = envValue(names);
+  if (found == undefined || bypassed(peer.host, peer.port)) {
+    return ok(undefined);
+  }
+  const envResult = proxyOf(found[1], found[0]);
+  if (envResult.isErr()) {
+    return err(envResult.error);
+  }
+
+  return ok(envResult.value);
+}
+
+function proxyStatusError(status: int, proxy: ProxyTarget, peer: Peer): FetchError {
+  if (status == 407 && proxy.hasLogin()) {
+    return proxyError("ERR_PROXY_AUTH_REQUIRED",
+                      `the proxy ${proxy.name()} did not take the login (407): check the user ` +
+                      "and the password in its URL", proxy.shown, status);
+  }
+  if (status == 407) {
+    return proxyError("ERR_PROXY_AUTH_REQUIRED",
+                      `the proxy ${proxy.name()} asks for a login (407): put user and password ` +
+                      "into its URL, http://user:password@host:port", proxy.shown, status);
+  }
+
+  return proxyError("ERR_PROXY_REFUSED",
+                    `the proxy ${proxy.name()} refused to connect to ${peer.name()} (${status})`,
+                    proxy.shown, status);
+}
+
+function proxyConnectionError(e: NativeError, proxy: ProxyTarget, peer: Peer): FetchError {
+  const proxyPeer = new Peer(proxy.host, proxy.port, peer.timeout, peer.deadline);
+  const failure = connectionError(e, proxyPeer, "connecting");
+  if (failure.kind == "FETCH_ERROR_NETWORK") {
+    return {
+      kind: "FETCH_ERROR_NETWORK",
+      code: failure.code,
+      message: `the proxy: ${failure.message}`,
+      syscall: failure.syscall,
+      host: failure.host,
+      port: failure.port,
+    };
+  }
+
+  return failure;
+}
+
+function socksRefused(proxy: ProxyTarget, peer: Peer, reason: string): FetchError {
+  return proxyError("ERR_PROXY_REFUSED",
+                    `the proxy ${proxy.name()} refused to connect to ${peer.name()}: ${reason}`,
+                    proxy.shown, 0);
+}
+
+function socksLogin(proxy: ProxyTarget, reason: string): FetchError {
+  return proxyError("ERR_PROXY_AUTH_REQUIRED", `the proxy ${proxy.name()} ${reason}`, proxy.shown, 0);
+}
+
+function bytesOf(values: int[]): Uint8Array {
+  const out = new Uint8Array(values.length);
+  for (let i = 0; i < values.length; i++) {
+    const value = values[i] ?? 0;
+    if (i < out.length) {
+      out[i] = (value & 0xff).toUint8();
+    }
+  }
+
+  return out;
+}
+
+function pushText(values: int[], text: string): void {
+  for (const value of new TextEncoder().encode(text)) {
+    values.push(value.toInt());
+  }
+}
+
+function byteIn(bytes: Uint8Array, at: int): int {
+  const value = bytes[at];
+  if (value == undefined) {
+    return 0;
+  }
+
+  return value.toInt();
+}
+
+async function readAtLeast(conn: Connection, have: Uint8Array, count: int, proxy: ProxyTarget,
+                           peer: Peer): Promise<Result<Uint8Array, FetchError>> {
+  let got = have;
+  while (got.length < count) {
+    const readResult = await conn.readRaw(peer.deadline);
+    if (readResult.isErr()) {
+      const failure = proxyConnectionError(readResult.error, proxy, peer);
+
+      return err(failure);
+    }
+    const chunk = readResult.value;
+    if (chunk == undefined) {
+      const closed = socksRefused(proxy, peer, "it closed the connection during the handshake");
+
+      return err(closed);
+    }
+    got = concat([got, chunk]);
+  }
+
+  return ok(got);
+}
+
+async function writeBytes(conn: Connection, values: int[], proxy: ProxyTarget,
+                          peer: Peer): Promise<FetchError | undefined> {
+  const bytes = bytesOf(values);
+  const wroteResult = await conn.write(bytes);
+  if (wroteResult.isErr()) {
+    const failure = proxyConnectionError(wroteResult.error, proxy, peer);
+
+    return failure;
+  }
+
+  return undefined;
+}
+
+function ipv4Bytes(text: string): int[] | undefined {
+  const parts = text.split(".");
+  if (parts.length != 4) {
+    return undefined;
+  }
+  const out: int[] = [];
+  for (const part of parts) {
+    const parsed = parseInt(part);
+    if (parsed.isErr() || parsed.value < 0 || parsed.value > 255) {
+      return undefined;
+    }
+    out.push(parsed.value);
+  }
+
+  return out;
+}
+
+function ipv6Bytes(text: string): int[] | undefined {
+  const zone = text.indexOf("%");
+  const plain = zone >= 0 ? text.slice(0, zone) : text;
+  const halves = plain.split("::");
+  if (halves.length > 2) {
+    return undefined;
+  }
+  const first = halves[0] ?? "";
+  const second = halves[1] ?? "";
+  const head = first == "" ? [] : first.split(":");
+  const tail = second == "" ? [] : second.split(":");
+  const missing = 8 - head.length - tail.length;
+  if (missing < 0 || (halves.length == 1 && missing != 0)) {
+    return undefined;
+  }
+  const groups: string[] = [...head];
+  for (let i = 0; i < missing; i++) {
+    groups.push("0");
+  }
+  for (const group of tail) {
+    groups.push(group);
+  }
+  const out: int[] = [];
+  for (const group of groups) {
+    const parsed = parseInt(group, 16);
+    if (group.length > 4 || parsed.isErr() || parsed.value < 0 || parsed.value > 0xffff) {
+      return undefined;
+    }
+    out.push(parsed.value >> 8);
+    out.push(parsed.value & 0xff);
+  }
+
+  return out;
+}
+
+async function addressesOf(peer: Peer): Promise<Result<string[], FetchError>> {
+  if (isAddressLiteral(peer.host)) {
+    return ok([peer.host]);
+  }
+  const foundResult = await netLookup(peer.host, peer.deadline);
+  if (foundResult.isErr()) {
+    const failure = connectionError(foundResult.error, peer, "connecting");
+
+    return err(failure);
+  }
+  const addresses = foundResult.value.split(" ").filter((address) => address != "");
+
+  return ok(addresses);
+}
+
+const SOCKS4_REPLIES = new Map<int, string>([
+  [91, "the request was rejected or failed (91)"],
+  [92, "it could not reach the identd of this machine (92)"],
+  [93, "the identd of this machine gave another user (93)"],
+]);
+
+async function socks4(conn: Connection, proxy: ProxyTarget,
+                      peer: Peer): Promise<FetchError | undefined> {
+  const out: int[] = [4, 1, (peer.port >> 8) & 0xff, peer.port & 0xff];
+  const byName = proxy.scheme == "socks4a" && !isAddressLiteral(peer.host);
+  if (byName) {
+    out.push(0, 0, 0, 1);
+  } else {
+    const addressesResult = await addressesOf(peer);
+    if (addressesResult.isErr()) {
+      return addressesResult.error;
+    }
+    let address: int[] | undefined = undefined;
+    for (const text of addressesResult.value) {
+      address = address ?? ipv4Bytes(text);
+    }
+    if (address == undefined) {
+      const failure = socksRefused(proxy, peer, "a SOCKS4 proxy takes only IPv4 addresses, and " +
+                                   `${peer.host} has none; take socks5:`);
+
+      return failure;
+    }
+    for (const value of address) {
+      out.push(value);
+    }
+  }
+  pushText(out, proxy.user);
+  out.push(0);
+  if (byName) {
+    pushText(out, peer.host);
+    out.push(0);
+  }
+  const wrote = await writeBytes(conn, out, proxy, peer);
+  if (wrote != undefined) {
+    return wrote;
+  }
+  const answerResult = await readAtLeast(conn, new Uint8Array(0), 8, proxy, peer);
+  if (answerResult.isErr()) {
+    return answerResult.error;
+  }
+  const answer = answerResult.value;
+  if (byteIn(answer, 0) != 0) {
+    const failure = socksRefused(proxy, peer, "it did not answer in SOCKS4");
+
+    return failure;
+  }
+  const reply = byteIn(answer, 1);
+  if (reply != 90) {
+    const reason = SOCKS4_REPLIES.get(reply) ?? `the reply ${reply}`;
+    const failure = socksRefused(proxy, peer, reason);
+
+    return failure;
+  }
+
+  return undefined;
+}
+
+const SOCKS5_REPLIES = new Map<int, string>([
+  [1, "general failure (1)"],
+  [2, "the rules of the proxy do not allow it (2)"],
+  [3, "the network is unreachable (3)"],
+  [4, "the host is unreachable (4)"],
+  [5, "the connection was refused (5)"],
+  [6, "the time to live expired (6)"],
+  [7, "the proxy does not take CONNECT (7)"],
+  [8, "the proxy does not take this type of address (8)"],
+]);
+
+async function socks5Login(conn: Connection, proxy: ProxyTarget,
+                           peer: Peer): Promise<FetchError | undefined> {
+  const login = proxy.hasLogin();
+  const greeting: int[] = login ? [5, 2, 0, 2] : [5, 1, 0];
+  const wrote = await writeBytes(conn, greeting, proxy, peer);
+  if (wrote != undefined) {
+    return wrote;
+  }
+  const choiceResult = await readAtLeast(conn, new Uint8Array(0), 2, proxy, peer);
+  if (choiceResult.isErr()) {
+    return choiceResult.error;
+  }
+  const choice = choiceResult.value;
+  if (byteIn(choice, 0) != 5) {
+    const failure = socksRefused(proxy, peer, "it did not answer in SOCKS5");
+
+    return failure;
+  }
+  const method = byteIn(choice, 1);
+  if (method == 0) {
+    return undefined;
+  }
+  if (method != 2 || !login) {
+    const reason = login
+      ? "takes none of the ways to log in that tz has (user and password)"
+      : "asks for a login: put user and password into its URL, socks5://user:password@host:port";
+    const failure = socksLogin(proxy, reason);
+
+    return failure;
+  }
+  const out: int[] = [1];
+  const encoder = new TextEncoder();
+  out.push(encoder.encode(proxy.user).length);
+  pushText(out, proxy.user);
+  out.push(encoder.encode(proxy.password).length);
+  pushText(out, proxy.password);
+  const sent = await writeBytes(conn, out, proxy, peer);
+  if (sent != undefined) {
+    return sent;
+  }
+  const verdictResult = await readAtLeast(conn, new Uint8Array(0), 2, proxy, peer);
+  if (verdictResult.isErr()) {
+    return verdictResult.error;
+  }
+  if (byteIn(verdictResult.value, 1) != 0) {
+    const failure = socksLogin(proxy, "did not take the login: check the user and the password in its URL");
+
+    return failure;
+  }
+
+  return undefined;
+}
+
+async function socks5(conn: Connection, proxy: ProxyTarget,
+                      peer: Peer): Promise<FetchError | undefined> {
+  const login = await socks5Login(conn, proxy, peer);
+  if (login != undefined) {
+    return login;
+  }
+  const out: int[] = [5, 1, 0];
+  if (proxy.scheme == "socks5h" && !isAddressLiteral(peer.host)) {
+    const name = new TextEncoder().encode(peer.host);
+    if (name.length > 255) {
+      const failure = socksRefused(proxy, peer, "the name of the host is longer than 255 bytes");
+
+      return failure;
+    }
+    out.push(3, name.length);
+    pushText(out, peer.host);
+  } else {
+    const addressesResult = await addressesOf(peer);
+    if (addressesResult.isErr()) {
+      return addressesResult.error;
+    }
+    const first = addressesResult.value[0] ?? "";
+    const v4 = ipv4Bytes(first);
+    const v6 = v4 == undefined ? ipv6Bytes(first) : undefined;
+    if (v4 != undefined) {
+      out.push(1);
+      for (const value of v4) {
+        out.push(value);
+      }
+    } else if (v6 != undefined) {
+      out.push(4);
+      for (const value of v6) {
+        out.push(value);
+      }
+    } else {
+      const failure = socksRefused(proxy, peer, `${first} is not an address`);
+
+      return failure;
+    }
+  }
+  out.push((peer.port >> 8) & 0xff, peer.port & 0xff);
+  const wrote = await writeBytes(conn, out, proxy, peer);
+  if (wrote != undefined) {
+    return wrote;
+  }
+  const headResult = await readAtLeast(conn, new Uint8Array(0), 5, proxy, peer);
+  if (headResult.isErr()) {
+    return headResult.error;
+  }
+  const head = headResult.value;
+  if (byteIn(head, 0) != 5) {
+    const failure = socksRefused(proxy, peer, "it did not answer in SOCKS5");
+
+    return failure;
+  }
+  const reply = byteIn(head, 1);
+  if (reply != 0) {
+    const reason = SOCKS5_REPLIES.get(reply) ?? `the reply ${reply}`;
+    const failure = socksRefused(proxy, peer, reason);
+
+    return failure;
+  }
+  const kind = byteIn(head, 3);
+  const size = kind == 1 ? 4 : kind == 4 ? 16 : 1 + byteIn(head, 4);
+  const restResult = await readAtLeast(conn, head, 4 + size + 2, proxy, peer);
+  if (restResult.isErr()) {
+    return restResult.error;
+  }
+
+  return undefined;
+}
+
+function headerValues(answer: string, wanted: string): string[] {
+  const values: string[] = [];
+  for (const line of answer.split("\r\n").slice(1)) {
+    const colon = line.indexOf(":");
+    if (colon > 0 && line.slice(0, colon).trim().toLowerCase() == wanted) {
+      values.push(line.slice(colon + 1).trim());
+    }
+  }
+
+  return values;
+}
+
+async function connectTunnel(conn: Connection, proxy: ProxyTarget, peer: Peer,
+                             mayRetry: boolean): Promise<Result<boolean, FetchError>> {
+  const target = peer.host.includes(":") ? `[${peer.host}]:${peer.port}` : peer.name();
+  let head = `CONNECT ${target} HTTP/1.1\r\nhost: ${target}\r\n`;
+  const authorization = proxy.authorization("CONNECT", target);
+  if (authorization != "") {
+    head += `proxy-authorization: ${authorization}\r\n`;
+  }
+  head += "\r\n";
+  const encoder = new TextEncoder();
+  const wroteResult = await conn.write(encoder.encode(head));
+  if (wroteResult.isErr()) {
+    const failure = proxyConnectionError(wroteResult.error, proxy, peer);
+
+    return err(failure);
+  }
+  let answer = "";
+  const decoder = new TextDecoder("latin1");
+  while (!answer.includes("\r\n\r\n")) {
+    const readResult = await conn.readRaw(peer.deadline);
+    if (readResult.isErr()) {
+      const failure = proxyConnectionError(readResult.error, proxy, peer);
+
+      return err(failure);
+    }
+    const chunk = readResult.value;
+    if (chunk == undefined || answer.length > 16384) {
+      const failure = proxyStatusError(502, proxy, peer);
+
+      return err(failure);
+    }
+    answer += decoder.decode(chunk);
+  }
+  const statusText = answer.split(" ")[1] ?? "";
+  const status = parseInt(statusText).unwrapOr(502);
+  if (status == 407 && mayRetry) {
+    const challenges = headerValues(answer, "proxy-authenticate");
+    if (learnDigest(proxy, challenges)) {
+      return ok(false);
+    }
+  }
+  if (status < 200 || status > 299) {
+    const failure = proxyStatusError(status, proxy, peer);
+
+    return err(failure);
+  }
+
+  return ok(true);
+}
+
+async function tunnel(conn: Connection, proxy: ProxyTarget, peer: Peer,
+                      mayRetry: boolean): Promise<Result<boolean, FetchError>> {
+  if (proxy.scheme == "socks4" || proxy.scheme == "socks4a") {
+    const failure = await socks4(conn, proxy, peer);
+    if (failure != undefined) {
+      return err(failure);
+    }
+
+    return ok(true);
+  }
+  if (proxy.scheme == "socks5" || proxy.scheme == "socks5h") {
+    const failure = await socks5(conn, proxy, peer);
+    if (failure != undefined) {
+      return err(failure);
+    }
+
+    return ok(true);
+  }
+  const opened = await connectTunnel(conn, proxy, peer, mayRetry);
+
+  return opened;
+}
+
+async function reachThrough(proxy: ProxyTarget, peer: Peer,
+                            tracer: FetchTracer | undefined): Promise<Result<Connection, FetchError>> {
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const openedResult = await Connection.open(proxy.host, proxy.port, proxy.secure, peer.deadline,
+                                               false, tracer);
+    if (openedResult.isErr()) {
+      const failure = proxyConnectionError(openedResult.error, proxy, peer);
+
+      return err(failure);
+    }
+    const conn = openedResult.value;
+    const tunneledResult = await tunnel(conn, proxy, peer, attempt == 0);
+    if (tunneledResult.isErr()) {
+      conn.close();
+
+      return err(tunneledResult.error);
+    }
+    if (tunneledResult.value) {
+      if (tracer != undefined) {
+        tracer.emit({ kind: "FETCH_STEP_PROXY_TUNNEL_OPENED", elapsed: tracer.elapsed(), proxy: proxy.shown });
+      }
+
+      return ok(conn);
+    }
+    conn.close();
+  }
+  const refused = proxyStatusError(407, proxy, peer);
+
+  return err(refused);
+}
+
+async function openThrough(proxy: ProxyTarget, https: boolean, peer: Peer,
+                           tracer: FetchTracer | undefined): Promise<Result<Connection, FetchError>> {
+  if (!https && !proxy.socks()) {
+    const openedResult = await Connection.open(proxy.host, proxy.port, proxy.secure, peer.deadline,
+                                               false, tracer);
+    if (openedResult.isErr()) {
+      const failure = proxyConnectionError(openedResult.error, proxy, peer);
+
+      return err(failure);
+    }
+    const conn = openedResult.value;
+    conn.absolute = true;
+    conn.proxyTarget = proxy;
+
+    return ok(conn);
+  }
+  const reachedResult = await reachThrough(proxy, peer, tracer);
+  if (reachedResult.isErr()) {
+    return reachedResult;
+  }
+  const conn = reachedResult.value;
+  if (!https) {
+    return ok(conn);
+  }
+  const securedResult = await conn.secure(peer.host, peer.deadline, tracer);
+  if (securedResult.isErr()) {
+    conn.close();
+    const failure = connectionError(securedResult.error, peer, "connecting");
+
+    return err(failure);
+  }
+
+  return ok(conn);
+}
+
+export async function openWire(peer: Peer, secure: boolean,
+                               proxy: ProxyTarget | undefined): Promise<Result<Connection, FetchError>> {
+  if (proxy == undefined) {
+    const directResult = await Connection.open(peer.host, peer.port, secure, peer.deadline, false);
+    if (directResult.isErr()) {
+      const failure = connectionError(directResult.error, peer, "connecting");
+
+      return err(failure);
+    }
+
+    return ok(directResult.value);
+  }
+  const reachedResult = await reachThrough(proxy, peer, undefined);
+  if (reachedResult.isErr()) {
+    return reachedResult;
+  }
+  const conn = reachedResult.value;
+  if (secure) {
+    const securedResult = await conn.secure(peer.host, peer.deadline);
+    if (securedResult.isErr()) {
+      conn.close();
+      const failure = connectionError(securedResult.error, peer, "connecting");
+
+      return err(failure);
+    }
+  }
+
+  return ok(conn);
+}
+
+class DigestState {
+  public readonly realm: string;
+  public readonly nonce: string;
+  public readonly opaque: string;
+  public readonly qop: string;
+  public readonly algorithm: string;
+  private count: int;
+
+  public constructor(realm: string, nonce: string, opaque: string, qop: string, algorithm: string) {
+    this.realm = realm;
+    this.nonce = nonce;
+    this.opaque = opaque;
+    this.qop = qop;
+    this.algorithm = algorithm;
+    this.count = 0;
+  }
+
+  public answer(user: string, password: string, method: string, uri: string): string {
+    this.count = (this.count + 1) & 0xffffffff;
+    const nc = hexOf(this.count, 8);
+    const random = new Uint8Array(8);
+    wsRandom(random);
+    const cnonce = Buffer.from(random).toString("hex");
+    const sha = this.algorithm.startsWith("SHA-256");
+    let secret = digestHash(sha, `${user}:${this.realm}:${password}`);
+    if (this.algorithm.endsWith("-sess")) {
+      secret = digestHash(sha, `${secret}:${this.nonce}:${cnonce}`);
+    }
+    const action = digestHash(sha, `${method}:${uri}`);
+    const signed = this.qop == ""
+      ? `${secret}:${this.nonce}:${action}`
+      : `${secret}:${this.nonce}:${nc}:${cnonce}:${this.qop}:${action}`;
+    const response = digestHash(sha, signed);
+    let header = `Digest username="${quoted(user)}", realm="${quoted(this.realm)}", ` +
+      `nonce="${quoted(this.nonce)}", uri="${quoted(uri)}", algorithm=${this.algorithm}, ` +
+      `response="${response}"`;
+    if (this.qop != "") {
+      header += `, qop=${this.qop}, nc=${nc}, cnonce="${cnonce}"`;
+    }
+    if (this.opaque != "") {
+      header += `, opaque="${quoted(this.opaque)}"`;
+    }
+
+    return header;
+  }
+}
+
+const digestStates = new Map<string, DigestState>();
+
+function quoted(text: string): string {
+  return text.replaceAll("\\", "\\\\").replaceAll("\"", "\\\"");
+}
+
+function hexOf(value: int, width: int): string {
+  const digits = "0123456789abcdef";
+  let out = "";
+  for (let i = width - 1; i >= 0; i--) {
+    out += digits.charAt((value >> (i * 4)) & 0xf);
+  }
+
+  return out;
+}
+
+function digestParams(text: string): Map<string, string> {
+  const params = new Map<string, string>();
+  let at = 0;
+  while (at < text.length) {
+    while (at < text.length && (text.charAt(at) == " " || text.charAt(at) == ",")) {
+      at++;
+    }
+    const equals = text.indexOf("=", at);
+    if (equals < 0) {
+      break;
+    }
+    const name = text.slice(at, equals).trim().toLowerCase();
+    at = equals + 1;
+    let value = "";
+    if (text.charAt(at) == "\"") {
+      at++;
+      while (at < text.length && text.charAt(at) != "\"") {
+        if (text.charAt(at) == "\\") {
+          at++;
+        }
+        value += text.charAt(at);
+        at++;
+      }
+      at++;
+    } else {
+      const comma = text.indexOf(",", at);
+      const end = comma < 0 ? text.length : comma;
+      value = text.slice(at, end).trim();
+      at = end;
+    }
+    params.set(name, value);
+  }
+
+  return params;
+}
+
+function digestAlgorithm(text: string): string | undefined {
+  switch (text.toUpperCase()) {
+    case "MD5":
+      return "MD5";
+    case "MD5-SESS":
+      return "MD5-sess";
+    case "SHA-256":
+      return "SHA-256";
+    case "SHA-256-SESS":
+      return "SHA-256-sess";
+  }
+
+  return undefined;
+}
+
+function learnDigest(proxy: ProxyTarget, challenges: string[]): boolean {
+  if (!proxy.hasLogin()) {
+    return false;
+  }
+  let best: DigestState | undefined = undefined;
+  let stale = false;
+  for (const value of challenges) {
+    const at = value.toLowerCase().indexOf("digest ");
+    if (at < 0) {
+      continue;
+    }
+    const params = digestParams(value.slice(at + 7));
+    const algorithm = digestAlgorithm(params.get("algorithm") ?? "MD5");
+    if (algorithm == undefined) {
+      continue;
+    }
+    const offered = params.get("qop");
+    let qop = "";
+    if (offered != undefined) {
+      if (!offered.split(",").some((one) => one.trim() == "auth")) {
+        continue;
+      }
+      qop = "auth";
+    }
+    const state = new DigestState(params.get("realm") ?? "", params.get("nonce") ?? "",
+                                  params.get("opaque") ?? "", qop, algorithm);
+    if (best == undefined || (algorithm.startsWith("SHA-256") && !best.algorithm.startsWith("SHA-256"))) {
+      best = state;
+      stale = (params.get("stale") ?? "").toLowerCase() == "true";
+    }
+  }
+  if (best == undefined) {
+    return false;
+  }
+  const previous = digestStates.get(proxy.key());
+  if (previous != undefined && previous.nonce == best.nonce && !stale) {
+    return false;
+  }
+  digestStates.set(proxy.key(), best);
+
+  return true;
+}
+
+export function proxyChallenge(proxy: ProxyTarget, headers: string[]): boolean {
+  const challenges: string[] = [];
+  for (let i = 0; i + 1 < headers.length; i += 2) {
+    if ((headers[i] ?? "").toLowerCase() == "proxy-authenticate") {
+      challenges.push(headers[i + 1] ?? "");
+    }
+  }
+  const learned = learnDigest(proxy, challenges);
+
+  return learned;
+}
+
+function digestHash(sha: boolean, text: string): string {
+  const data = new TextEncoder().encode(text);
+  const digest = sha ? sha256(data) : md5(data);
+
+  return Buffer.from(digest).toString("hex");
+}
+
+function rotateLeft(x: int, n: int): int {
+  return ((x << n) | (x >> (32 - n))) & 0xffffffff;
+}
+
+function rotateRight(x: int, n: int): int {
+  return ((x >> n) | (x << (32 - n))) & 0xffffffff;
+}
+
+function padded(data: Uint8Array, bigEndian: boolean): Uint8Array {
+  const length = data.length;
+  const out = new Uint8Array(((length + 8) / 64) * 64 + 64);
+  for (let i = 0; i < length; i++) {
+    const value = data[i];
+    if (value != undefined && i < out.length) {
+      out[i] = value;
+    }
+  }
+  if (length < out.length) {
+    out[length] = 0x80;
+  }
+  const bits = length * 8;
+  for (let i = 0; i < 8; i++) {
+    const at = bigEndian ? out.length - 1 - i : out.length - 8 + i;
+    if (at >= 0 && at < out.length) {
+      out[at] = ((bits >> (i * 8)) & 0xff).toUint8();
+    }
+  }
+
+  return out;
+}
+
+function wordAt(bytes: Uint8Array, at: int, bigEndian: boolean): int {
+  const a = byteIn(bytes, at);
+  const b = byteIn(bytes, at + 1);
+  const c = byteIn(bytes, at + 2);
+  const d = byteIn(bytes, at + 3);
+  if (bigEndian) {
+    return (a << 24) | (b << 16) | (c << 8) | d;
+  }
+
+  return (d << 24) | (c << 16) | (b << 8) | a;
+}
+
+function putWord(out: Uint8Array, at: int, word: int, bigEndian: boolean): void {
+  for (let i = 0; i < 4; i++) {
+    const shift = bigEndian ? 24 - i * 8 : i * 8;
+    const where = at + i;
+    if (where >= 0 && where < out.length) {
+      out[where] = ((word >> shift) & 0xff).toUint8();
+    }
+  }
+}
+
+const MD5_SHIFTS: int[] = [
+  7, 12, 17, 22, 7, 12, 17, 22, 7, 12, 17, 22, 7, 12, 17, 22,
+  5, 9, 14, 20, 5, 9, 14, 20, 5, 9, 14, 20, 5, 9, 14, 20,
+  4, 11, 16, 23, 4, 11, 16, 23, 4, 11, 16, 23, 4, 11, 16, 23,
+  6, 10, 15, 21, 6, 10, 15, 21, 6, 10, 15, 21, 6, 10, 15, 21,
+];
+
+const MD5_TABLE: int[] = [
+  0xd76aa478, 0xe8c7b756, 0x242070db, 0xc1bdceee, 0xf57c0faf, 0x4787c62a, 0xa8304613, 0xfd469501,
+  0x698098d8, 0x8b44f7af, 0xffff5bb1, 0x895cd7be, 0x6b901122, 0xfd987193, 0xa679438e, 0x49b40821,
+  0xf61e2562, 0xc040b340, 0x265e5a51, 0xe9b6c7aa, 0xd62f105d, 0x02441453, 0xd8a1e681, 0xe7d3fbc8,
+  0x21e1cde6, 0xc33707d6, 0xf4d50d87, 0x455a14ed, 0xa9e3e905, 0xfcefa3f8, 0x676f02d9, 0x8d2a4c8a,
+  0xfffa3942, 0x8771f681, 0x6d9d6122, 0xfde5380c, 0xa4beea44, 0x4bdecfa9, 0xf6bb4b60, 0xbebfbc70,
+  0x289b7ec6, 0xeaa127fa, 0xd4ef3085, 0x04881d05, 0xd9d4d039, 0xe6db99e5, 0x1fa27cf8, 0xc4ac5665,
+  0xf4292244, 0x432aff97, 0xab9423a7, 0xfc93a039, 0x655b59c3, 0x8f0ccc92, 0xffeff47d, 0x85845dd1,
+  0x6fa87e4f, 0xfe2ce6e0, 0xa3014314, 0x4e0811a1, 0xf7537e82, 0xbd3af235, 0x2ad7d2bb, 0xeb86d391,
+];
+
+function md5(data: Uint8Array): Uint8Array {
+  const bytes = padded(data, false);
+  let a0 = 0x67452301;
+  let b0 = 0xefcdab89;
+  let c0 = 0x98badcfe;
+  let d0 = 0x10325476;
+  for (let block = 0; block < bytes.length; block += 64) {
+    const words: int[] = [];
+    for (let i = 0; i < 16; i++) {
+      words.push(wordAt(bytes, block + i * 4, false));
+    }
+    let a = a0;
+    let b = b0;
+    let c = c0;
+    let d = d0;
+    for (let i = 0; i < 64; i++) {
+      let f = 0;
+      let g = 0;
+      if (i < 16) {
+        f = (b & c) | (~b & 0xffffffff & d);
+        g = i;
+      } else if (i < 32) {
+        f = (d & b) | (~d & 0xffffffff & c);
+        g = (5 * i + 1) % 16;
+      } else if (i < 48) {
+        f = b ^ c ^ d;
+        g = (3 * i + 5) % 16;
+      } else {
+        f = c ^ (b | (~d & 0xffffffff));
+        g = (7 * i) % 16;
+      }
+      const sum = (f + a + (MD5_TABLE[i] ?? 0) + (words[g] ?? 0)) & 0xffffffff;
+      a = d;
+      d = c;
+      c = b;
+      b = (b + rotateLeft(sum, MD5_SHIFTS[i] ?? 0)) & 0xffffffff;
+    }
+    a0 = (a0 + a) & 0xffffffff;
+    b0 = (b0 + b) & 0xffffffff;
+    c0 = (c0 + c) & 0xffffffff;
+    d0 = (d0 + d) & 0xffffffff;
+  }
+  const out = new Uint8Array(16);
+  putWord(out, 0, a0, false);
+  putWord(out, 4, b0, false);
+  putWord(out, 8, c0, false);
+  putWord(out, 12, d0, false);
+
+  return out;
+}
+
+const SHA256_TABLE: int[] = [
+  0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5, 0x3956c25b, 0x59f111f1, 0x923f82a4, 0xab1c5ed5,
+  0xd807aa98, 0x12835b01, 0x243185be, 0x550c7dc3, 0x72be5d74, 0x80deb1fe, 0x9bdc06a7, 0xc19bf174,
+  0xe49b69c1, 0xefbe4786, 0x0fc19dc6, 0x240ca1cc, 0x2de92c6f, 0x4a7484aa, 0x5cb0a9dc, 0x76f988da,
+  0x983e5152, 0xa831c66d, 0xb00327c8, 0xbf597fc7, 0xc6e00bf3, 0xd5a79147, 0x06ca6351, 0x14292967,
+  0x27b70a85, 0x2e1b2138, 0x4d2c6dfc, 0x53380d13, 0x650a7354, 0x766a0abb, 0x81c2c92e, 0x92722c85,
+  0xa2bfe8a1, 0xa81a664b, 0xc24b8b70, 0xc76c51a3, 0xd192e819, 0xd6990624, 0xf40e3585, 0x106aa070,
+  0x19a4c116, 0x1e376c08, 0x2748774c, 0x34b0bcb5, 0x391c0cb3, 0x4ed8aa4a, 0x5b9cca4f, 0x682e6ff3,
+  0x748f82ee, 0x78a5636f, 0x84c87814, 0x8cc70208, 0x90befffa, 0xa4506ceb, 0xbef9a3f7, 0xc67178f2,
+];
+
+function sha256(data: Uint8Array): Uint8Array {
+  const bytes = padded(data, true);
+  const hash: int[] = [
+    0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a, 0x510e527f, 0x9b05688c, 0x1f83d9ab, 0x5be0cd19,
+  ];
+  for (let block = 0; block < bytes.length; block += 64) {
+    const w: int[] = [];
+    for (let i = 0; i < 16; i++) {
+      w.push(wordAt(bytes, block + i * 4, true));
+    }
+    for (let i = 16; i < 64; i++) {
+      const early = w[i - 15] ?? 0;
+      const late = w[i - 2] ?? 0;
+      const s0 = rotateRight(early, 7) ^ rotateRight(early, 18) ^ (early >> 3);
+      const s1 = rotateRight(late, 17) ^ rotateRight(late, 19) ^ (late >> 10);
+      w.push(((w[i - 16] ?? 0) + s0 + (w[i - 7] ?? 0) + s1) & 0xffffffff);
+    }
+    let a = hash[0] ?? 0;
+    let b = hash[1] ?? 0;
+    let c = hash[2] ?? 0;
+    let d = hash[3] ?? 0;
+    let e = hash[4] ?? 0;
+    let f = hash[5] ?? 0;
+    let g = hash[6] ?? 0;
+    let h = hash[7] ?? 0;
+    for (let i = 0; i < 64; i++) {
+      const s1 = rotateRight(e, 6) ^ rotateRight(e, 11) ^ rotateRight(e, 25);
+      const choice = (e & f) ^ (~e & 0xffffffff & g);
+      const first = (h + s1 + choice + (SHA256_TABLE[i] ?? 0) + (w[i] ?? 0)) & 0xffffffff;
+      const s0 = rotateRight(a, 2) ^ rotateRight(a, 13) ^ rotateRight(a, 22);
+      const majority = (a & b) ^ (a & c) ^ (b & c);
+      const second = (s0 + majority) & 0xffffffff;
+      h = g;
+      g = f;
+      f = e;
+      e = (d + first) & 0xffffffff;
+      d = c;
+      c = b;
+      b = a;
+      a = (first + second) & 0xffffffff;
+    }
+    const results = [a, b, c, d, e, f, g, h];
+    for (let i = 0; i < hash.length; i++) {
+      hash[i] = ((hash[i] ?? 0) + (results[i] ?? 0)) & 0xffffffff;
+    }
+  }
+  const out = new Uint8Array(32);
+  for (let i = 0; i < 8; i++) {
+    putWord(out, i * 4, hash[i] ?? 0, true);
+  }
+
+  return out;
+}

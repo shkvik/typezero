@@ -32,6 +32,8 @@ declare function udpLocalAddress(socket: object): string;
 declare function udpLocalPort(socket: object): int;
 declare function udpClose(socket: object): void;
 declare function udpLookup(host: string, family: int): Promise<Result<string, NativeError>>;
+declare function tlsUdpConnect(socket: object, host: string): Promise<Result<void, NativeError>>;
+declare function tlsUdpServe(socket: object, cert: string, key: string): Result<int, NativeError>;
 
 const OPTION_BROADCAST = 1;
 const OPTION_TTL = 2;
@@ -52,8 +54,20 @@ export type MulticastOptions = {
   interface?: string;
 };
 
+export type DgramTransport =
+  | {
+      secure: false;
+    }
+  | {
+      secure: true;
+      servername?: string;
+      cert?: string;
+      key?: string;
+    };
+
 export type SocketOptions = {
   type?: SocketType;
+  transport?: DgramTransport;
   port?: int;
   address?: string;
   reuseAddr?: boolean;
@@ -93,6 +107,13 @@ export type UdpBindError =
       port: int;
     }
   | {
+      kind: "UDP_BIND_ERROR_TLS";
+      code: string;
+      message: string;
+      address: string;
+      port: int;
+    }
+  | {
       kind: "UDP_BIND_ERROR_NETWORK";
       code:
         | "EADDRINUSE"
@@ -118,6 +139,8 @@ export type UdpSendError =
         | "ERR_INVALID_ADDRESS"
         | "ERR_NO_ADDRESS"
         | "ERR_SOCKET_CONNECTED"
+        | "ERR_NOT_CONNECTED"
+        | "ERR_NO_SESSION"
         | "ENOTFOUND"
         | "EAI_AGAIN"
         | "EAFNOSUPPORT";
@@ -172,6 +195,13 @@ export type UdpConnectError =
       code: NetworkCode;
       message: string;
       syscall: string;
+      address: string;
+      port: int;
+    }
+  | {
+      kind: "UDP_CONNECT_ERROR_TLS";
+      code: string;
+      message: string;
       address: string;
       port: int;
     }
@@ -386,6 +416,7 @@ type Resolved = {
 
 export class Socket extends EventEmitter<SocketEvents> {
   public readonly type?: SocketType;
+  public readonly transport: DgramTransport;
 
   private readonly host: string;
   private readonly port: int;
@@ -400,10 +431,13 @@ export class Socket extends EventEmitter<SocketEvents> {
   private closed: boolean;
   private connectedTo?: Destination;
   private receiving?: Promise<void>;
+  private secured: boolean;
 
   public constructor(options?: SocketOptions) {
     super();
     this.type = options?.type;
+    this.transport = options?.transport ?? { secure: false };
+    this.secured = false;
     this.host = options?.address ?? "";
     this.port = options?.port ?? 0;
     this.reuse = (options?.reuseAddr ?? false) || (options?.reusePort ?? false);
@@ -494,6 +528,27 @@ export class Socket extends EventEmitter<SocketEvents> {
         port: this.port,
       });
     }
+    const transport = this.transport;
+    if (transport.secure) {
+      const cert = transport.cert;
+      const key = transport.key;
+      if (cert != undefined && key != undefined) {
+        const servedResult = tlsUdpServe(native, cert, key);
+        if (servedResult.isErr()) {
+          udpClose(native);
+          const e = servedResult.error;
+
+          return err({
+            kind: "UDP_BIND_ERROR_TLS",
+            code: e.code,
+            message: `could not set up DTLS on ${this.host}:${this.port}: ${e.message}`,
+            address: this.host,
+            port: this.port,
+          });
+        }
+        this.secured = true;
+      }
+    }
     this.native = native;
     this.receiving = this.receiveAll(native);
     this.emit("listening");
@@ -522,6 +577,15 @@ export class Socket extends EventEmitter<SocketEvents> {
         message: `the socket is connected to ${connected.address}:${connected.port}; send without an address`,
         address: to.address,
         port: to.port,
+      });
+    }
+    if (this.transport.secure && !this.secured) {
+      return err({
+        kind: "UDP_SEND_ERROR_REQUEST",
+        code: "ERR_NOT_CONNECTED",
+        message: "a DTLS socket sends after connect() (a client) or bind() with cert and key (a server)",
+        address: to?.address ?? "",
+        port: to?.port ?? 0,
       });
     }
     const encoder = new TextEncoder();
@@ -573,6 +637,15 @@ export class Socket extends EventEmitter<SocketEvents> {
       const e = sentResult.error;
       if (e.code == "ERR_SOCKET_CLOSED") {
         return err({ kind: "UDP_SEND_ERROR_CLOSED", code: "ERR_SOCKET_CLOSED", message: "the socket is closed" });
+      }
+      if (e.code == "ERR_NO_SESSION" || e.code == "ERR_NOT_CONNECTED") {
+        return err({
+          kind: "UDP_SEND_ERROR_REQUEST",
+          code: e.code == "ERR_NO_SESSION" ? "ERR_NO_SESSION" : "ERR_NOT_CONNECTED",
+          message: `could not send to ${address}:${port}: ${e.message}`,
+          address: address,
+          port: port,
+        });
       }
       if (e.code == "EMSGSIZE") {
         return err({
@@ -680,6 +753,25 @@ export class Socket extends EventEmitter<SocketEvents> {
       });
     }
     this.connectedTo = { address: to.address, port: to.port };
+    const transport = this.transport;
+    if (transport.secure && transport.cert == undefined) {
+      const servername = transport.servername ?? to.address;
+      const securedResult = await tlsUdpConnect(native, servername);
+      if (securedResult.isErr()) {
+        udpDisconnect(native);
+        this.connectedTo = undefined;
+        const e = securedResult.error;
+
+        return err({
+          kind: "UDP_CONNECT_ERROR_TLS",
+          code: e.code,
+          message: `the DTLS handshake with ${to.address}:${to.port} failed: ${e.message}`,
+          address: to.address,
+          port: to.port,
+        });
+      }
+      this.secured = true;
+    }
 
     return ok();
   }

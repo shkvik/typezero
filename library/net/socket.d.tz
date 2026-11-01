@@ -1,0 +1,172 @@
+/** The family of addresses of a socket: IPv4, IPv6 or a path of a Unix socket. */
+export type SocketDomain = "ipv4" | "ipv6" | "unix";
+
+/**
+ * How a socket carries data: a stream of bytes (TCP), datagrams (UDP), raw
+ * packets of IP (needs administrator rights) or a stream of packets.
+ */
+export type SocketKind = "stream" | "datagram" | "raw" | "seqpacket";
+
+/** What a `Socket` is; the system socket is made at its first action. */
+export type SocketOptions = {
+  domain: SocketDomain;
+  type: SocketKind;
+  /** The number of the protocol of IP: 1 ICMP, 6 TCP, 17 UDP, 58 ICMPv6; 0 by default. */
+  protocol?: int;
+};
+
+/** An IP address with a port (only a literal address, no names), or a path. */
+export type SocketAddress =
+  | {
+      address: string;
+      port: int;
+    }
+  | {
+      path: string;
+    };
+
+/** How `send` and `sendTo` send: urgent data (TCP), or past the routing table. */
+export type SendOptions = {
+  outOfBand?: boolean;
+  dontRoute?: boolean;
+};
+
+/**
+ * How `receive` and `receiveFrom` read: at most `size` bytes (64 KB),
+ * `peek` leaves the data to be read again, `outOfBand` reads urgent data,
+ * `waitAll` waits for all `size` bytes of a stream.
+ */
+export type ReceiveOptions = {
+  size?: int;
+  peek?: boolean;
+  outOfBand?: boolean;
+  waitAll?: boolean;
+};
+
+/** The settings `configure` gives the system socket; times in milliseconds, `linger` in seconds. */
+export type SocketSettings = {
+  reuseAddress?: boolean;
+  broadcast?: boolean;
+  keepAlive?: boolean;
+  keepAliveDelay?: int;
+  keepAliveInterval?: int;
+  keepAliveCount?: int;
+  noDelay?: boolean;
+  linger?: int;
+  sendBufferSize?: int;
+  receiveBufferSize?: int;
+  ttl?: int;
+  typeOfService?: int;
+  ipv6Only?: boolean;
+  headerIncluded?: boolean;
+  multicastTtl?: int;
+  multicastLoop?: boolean;
+  userTimeout?: int;
+  outOfBandInline?: boolean;
+  dontFragment?: boolean;
+};
+
+/**
+ * Why an action of a `Socket` gave an Err:
+ * - PERMISSION — the system said no; for a raw socket the message tells how
+ *   to get the rights;
+ * - REQUEST — the call itself is wrong: an address that is not a literal
+ *   one, a closed socket, an action already waiting;
+ * - SYSTEM — any other refusal of the system, by its code;
+ * - SETTING — `configure` met a setting the system did not take.
+ */
+export type SocketOperationError =
+  | {
+      kind: "SOCKET_OPERATION_ERROR_PERMISSION";
+      code: "EACCES";
+      message: string;
+      syscall: string;
+    }
+  | {
+      kind: "SOCKET_OPERATION_ERROR_REQUEST";
+      code:
+        | "ERR_INVALID_ADDRESS"
+        | "ERR_SOCKET_CLOSED"
+        | "ERR_SOCKET_BUSY"
+        | "ERR_NOT_SUPPORTED"
+        | "ERR_INVALID_ARG_VALUE";
+      message: string;
+    }
+  | {
+      kind: "SOCKET_OPERATION_ERROR_SYSTEM";
+      code: string;
+      message: string;
+      syscall: string;
+    }
+  | {
+      kind: "SOCKET_OPERATION_ERROR_SETTING";
+      code: string;
+      message: string;
+      /** The name of the setting in `SocketSettings`. */
+      setting: string;
+    };
+
+/** One end of a connection: an address and a port, or a path and 0. */
+export declare class Endpoint {
+  public readonly address: string;
+  public readonly port: int;
+
+  public constructor(address: string, port: int);
+}
+
+/** What `receiveFrom` gives: the data and who sent it. */
+export declare class Datagram {
+  public readonly data: Uint8Array;
+  public readonly address: string;
+  public readonly port: int;
+
+  public constructor(data: Uint8Array, address: string, port: int);
+}
+
+/**
+ * A socket of any kind, as socket2 in Rust. Every action gives a Result.
+ *
+ * @example
+ * const server = new Socket({ domain: "ipv4", type: "stream" });
+ * const boundResult = server.bind({ address: "127.0.0.1", port: 0 });
+ * const listenedResult = server.listen(128);
+ * const acceptedResult = await server.accept();
+ */
+export declare class Socket {
+  public readonly domain: SocketDomain;
+  public readonly type: SocketKind;
+  public readonly protocol: int;
+
+  public constructor(options: SocketOptions);
+
+  /** Gives the socket an address of its own; "" is any address. */
+  public bind(address: SocketAddress): Result<void, SocketOperationError>;
+  /** Starts taking connections; `backlog` — how many may wait. */
+  public listen(backlog?: int): Result<void, SocketOperationError>;
+  /** Waits for the next connection. */
+  public accept(): Promise<Result<Socket, SocketOperationError>>;
+  /** Connects a stream, or fixes the address of datagrams. */
+  public connect(address: SocketAddress): Promise<Result<void, SocketOperationError>>;
+  /** Sends to the connected address; gives how many bytes went. */
+  public send(data: Uint8Array, options?: SendOptions): Promise<Result<int, SocketOperationError>>;
+  /** Sends a datagram to `address`; gives how many bytes went. */
+  public sendTo(
+    data: Uint8Array,
+    address: SocketAddress,
+    options?: SendOptions,
+  ): Promise<Result<int, SocketOperationError>>;
+  /** Reads what came; an empty array — the other side ended the stream. */
+  public receive(options?: ReceiveOptions): Promise<Result<Uint8Array, SocketOperationError>>;
+  /** Reads a datagram with the address of its sender. */
+  public receiveFrom(options?: ReceiveOptions): Promise<Result<Datagram, SocketOperationError>>;
+  /** Ends reading, writing or both. */
+  public shutdown(how: "read" | "write" | "both"): Result<void, SocketOperationError>;
+  /** Gives the system the settings, in order; stops at the first it refuses. */
+  public configure(settings: SocketSettings): Result<void, SocketOperationError>;
+  /** The address of this end. */
+  public localAddress(): Endpoint;
+  /** The address of the other end of a connection. */
+  public remoteAddress(): Endpoint;
+  /** Closes the socket; later actions give ERR_SOCKET_CLOSED. */
+  public close(): void;
+}

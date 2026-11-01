@@ -1,0 +1,15 @@
+unix: listening, port 0, path given back: true
+unix: second server: EADDRINUSE
+unix: answer HELLO ONE BYE, remote true
+unix: answer HELLO TWO BYE, remote true
+unix: file removed by stop: true
+pipe: listening, port 0, path given back: true
+pipe: second server: EADDRINUSE
+pipe: answer HELLO ONE BYE, remote true
+pipe: answer HELLO TWO BYE, remote true
+nobody: CONNECT_ERROR_NETWORK ENOENT
+missing file: CONNECT_ERROR_NETWORK
+tcp local: 127.0.0.1 true true
+tcp ended its side: true
+tcp reply after end: you said half server saw: half
+reusePort: ENOTSUP

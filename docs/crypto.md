@@ -44,7 +44,8 @@ ChaCha20-Poly1305), ключи (`KeyObject`, PEM / DER / JWK), подписи (R
   нужны. Сборка — 11 секунд.
 - **Что убрано** — то, что node 24 по умолчанию выключил сам (RC4, RC2, RC5, Blowfish, CAST,
   IDEA, SEED, MD4, MDC2, Whirlpool, одинарный DES — в node они дают `ERR_OSSL_EVP_UNSUPPORTED`),
-  и то, чем API node не пользуется (SSLv3, DTLS, SRP, CMS, CMP, движки, устаревший API). Всё,
+  и то, чем API node не пользуется (SSLv3, SRP, CMS, CMP, движки, устаревший API; DTLS вернули
+  1 ноября — для `node:dgram`, docs/net.md, раздел 10). Всё,
   что работает в node по умолчанию, работает и в tz: 3DES, DH, DSA, SM2 / SM3 / SM4, RIPEMD-160,
   Camellia, ARIA остаются.
 - **Почему не mbedTLS:** он меньше, но в 7–17 раз медленнее. **Почему не убрать больше:**

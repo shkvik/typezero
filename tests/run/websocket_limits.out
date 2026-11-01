@@ -1,0 +1,16 @@
+idle error: WEB_SOCKET_ERROR_TIMEOUT ERR_IDLE_TIMEOUT
+idle close: 1006
+idle pings: true after the whole silence: true
+silent connect: WEB_SOCKET_CONNECT_ERROR_TIMEOUT TIMEOUT_ERR
+silent state: 3
+reset sent: true
+reset error: WEB_SOCKET_ERROR_NETWORK ECONNRESET
+reset close: 1006
+tls connect: WEB_SOCKET_CONNECT_ERROR_TLS
+tunnels: 1
+sent: true
+proxied got: hello through the proxy
+buffered after the answer: 0
+server close: 3007 61
+proxied close: 3007 
+refused connect: WEB_SOCKET_CONNECT_ERROR_PROXY ERR_PROXY_REFUSED 403

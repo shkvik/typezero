@@ -1,0 +1,18 @@
+tcp settings: true
+tcp listen: true true
+tcp connect: true
+tcp client settings: true
+tcp ends: true true
+tcp sent: 12
+tcp peek: hello got: hello socket
+tcp shutdown: true end read: 0
+tcp after close: SOCKET_OPERATION_ERROR_REQUEST ERR_SOCKET_CLOSED
+udp bind: true true
+udp got: ping 127.0.0.1 true
+udp wrong family: SOCKET_OPERATION_ERROR_REQUEST ERR_INVALID_ADDRESS
+udp name: ERR_INVALID_ADDRESS
+udp setting refused: SOCKET_OPERATION_ERROR_SETTING ipv6Only
+unix listen: true true
+unix got: true over unix
+seqpacket over ipv4: SOCKET_OPERATION_ERROR_SYSTEM
+raw: refused with a hint, or allowed: true

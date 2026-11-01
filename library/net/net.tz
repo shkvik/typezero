@@ -18,17 +18,27 @@ declare function tcpRead(
   deadline: object | undefined,
 ): Promise<Result<Uint8Array | undefined, NativeError>>;
 declare function httpWrite(conn: object, chunk: Uint8Array): Promise<Result<void, NativeError>>;
-declare function tcpNoDelay(conn: object, on: boolean): void;
-declare function tcpKeepAlive(conn: object, on: boolean): void;
-declare function tcpReset(conn: object): void;
-declare function netListen(
+declare function netConnectFrom(
   host: string,
   port: int,
-  maxBody: double,
-  keepAlive: int,
-  headersTimeout: int,
-  requestTimeout: int,
+  localAddress: string,
+  localPort: int,
+  deadline: object | undefined,
+): Promise<Result<object, NativeError>>;
+declare function netConnectPath(path: string): Promise<Result<object, NativeError>>;
+declare function netSocketOption(conn: object, option: int, value: int): boolean;
+declare function netLocalHost(conn: object): string;
+declare function netLocalPort(conn: object): int;
+declare function tcpShutdown(conn: object): void;
+declare function tcpReset(conn: object): void;
+declare function netListenSocket(
+  host: string,
+  port: int,
+  idle: int,
+  backlog: int,
+  flags: int,
 ): Result<object, NativeError>;
+declare function netListenPath(path: string, idle: int, backlog: int): Result<object, NativeError>;
 declare function netListenerPort(listener: object): int;
 declare function netAccept(listener: object): Promise<object | undefined>;
 declare function netCloseListener(listener: object): void;
@@ -49,14 +59,91 @@ export type SocketTransport =
       servername?: string;
     };
 
-export type SocketOptions = {
+export type TcpSocketOptions = {
   host: string;
   port: int;
   timeout?: int;
+  transport?: SocketTransport;
+  allowHalfOpen?: boolean;
+  localAddress?: string;
+  localPort?: int;
   noDelay?: boolean;
   keepAlive?: boolean;
-  transport?: SocketTransport;
+  keepAliveDelay?: int;
+  keepAliveInterval?: int;
+  keepAliveCount?: int;
+  sendBufferSize?: int;
+  receiveBufferSize?: int;
+  ttl?: int;
+  typeOfService?: int;
+  userTimeout?: int;
+  linger?: int;
 };
+
+export type PathSocketOptions = {
+  path: string;
+  timeout?: int;
+  allowHalfOpen?: boolean;
+};
+
+export type SocketOptions = TcpSocketOptions | PathSocketOptions;
+
+export type SocketTuning = {
+  noDelay?: boolean;
+  keepAlive?: boolean;
+  keepAliveDelay?: int;
+  keepAliveInterval?: int;
+  keepAliveCount?: int;
+  sendBufferSize?: int;
+  receiveBufferSize?: int;
+  ttl?: int;
+  typeOfService?: int;
+  userTimeout?: int;
+  linger?: int;
+};
+
+function tune(conn: object, tuning: SocketTuning): void {
+  const noDelay = tuning.noDelay ?? true;
+  netSocketOption(conn, 1, noDelay ? 1 : 0);
+  const keepAlive = tuning.keepAlive ?? false;
+  netSocketOption(conn, 2, keepAlive ? 1 : 0);
+  const delay = tuning.keepAliveDelay;
+  if (keepAlive && delay != undefined) {
+    netSocketOption(conn, 3, delay);
+  }
+  const interval = tuning.keepAliveInterval;
+  if (keepAlive && interval != undefined) {
+    netSocketOption(conn, 4, interval);
+  }
+  const count = tuning.keepAliveCount;
+  if (keepAlive && count != undefined) {
+    netSocketOption(conn, 5, count);
+  }
+  const sendBufferSize = tuning.sendBufferSize;
+  if (sendBufferSize != undefined) {
+    netSocketOption(conn, 6, sendBufferSize);
+  }
+  const receiveBufferSize = tuning.receiveBufferSize;
+  if (receiveBufferSize != undefined) {
+    netSocketOption(conn, 7, receiveBufferSize);
+  }
+  const ttl = tuning.ttl;
+  if (ttl != undefined) {
+    netSocketOption(conn, 8, ttl);
+  }
+  const typeOfService = tuning.typeOfService;
+  if (typeOfService != undefined) {
+    netSocketOption(conn, 9, typeOfService);
+  }
+  const userTimeout = tuning.userTimeout;
+  if (userTimeout != undefined) {
+    netSocketOption(conn, 10, userTimeout);
+  }
+  const linger = tuning.linger;
+  if (linger != undefined) {
+    netSocketOption(conn, 11, linger);
+  }
+}
 
 export type ConnectError =
   | {
@@ -79,6 +166,9 @@ export type ConnectError =
         | "ECONNRESET"
         | "EMFILE"
         | "ENOBUFS"
+        | "ENOENT"
+        | "EBUSY"
+        | "EACCES"
         | "UNKNOWN";
       message: string;
       syscall: string;
@@ -109,6 +199,9 @@ type ConnectNetworkCode =
   | "ECONNRESET"
   | "EMFILE"
   | "ENOBUFS"
+  | "ENOENT"
+  | "EBUSY"
+  | "EACCES"
   | "UNKNOWN";
 
 function connectCode(code: string): ConnectNetworkCode {
@@ -133,6 +226,12 @@ function connectCode(code: string): ConnectNetworkCode {
       return "EMFILE";
     case "ENOBUFS":
       return "ENOBUFS";
+    case "ENOENT":
+      return "ENOENT";
+    case "EBUSY":
+      return "EBUSY";
+    case "EACCES":
+      return "EACCES";
     default:
       return "UNKNOWN";
   }
@@ -140,6 +239,12 @@ function connectCode(code: string): ConnectNetworkCode {
 
 function connectMessage(code: ConnectNetworkCode, host: string, port: int, detail: string): string {
   switch (code) {
+    case "ENOENT":
+      return `could not connect to ${host}: no socket or pipe has this path`;
+    case "EBUSY":
+      return `could not connect to ${host}: every instance of the pipe is busy`;
+    case "EACCES":
+      return `could not connect to ${host}: permission denied`;
     case "ENOTFOUND":
       return `could not find the address of ${host}: no such name in DNS`;
     case "EAI_AGAIN":
@@ -240,9 +345,12 @@ export class Socket extends Duplex<Buffer, Buffer, SocketError> {
   private conn?: object;
   private readonly host: string;
   private readonly port: int;
+  private readonly path?: string;
   private readonly timeout?: int;
-  private readonly noDelay: boolean;
-  private readonly keepAlive: boolean;
+  private readonly halfOpen: boolean;
+  private readonly localAddressWanted?: string;
+  private readonly localPortWanted?: int;
+  private readonly tuning: SocketTuning;
   private readonly transport: SocketTransport;
   private reading: boolean;
   private peerAddress: string;
@@ -252,26 +360,60 @@ export class Socket extends Duplex<Buffer, Buffer, SocketError> {
   private secured: boolean;
 
   public constructor(options: SocketOptions) {
-    super({ allowHalfOpen: false });
+    const halfOpen = options.allowHalfOpen ?? false;
+    super({ allowHalfOpen: halfOpen });
     this.conn = undefined;
-    this.host = options.host;
-    this.port = options.port;
     this.timeout = options.timeout;
-    this.noDelay = options.noDelay ?? true;
-    this.keepAlive = options.keepAlive ?? false;
-    this.transport = options.transport ?? { secure: false };
+    this.halfOpen = halfOpen;
+    if ("path" in options) {
+      this.host = options.path;
+      this.port = 0;
+      this.path = options.path;
+      this.localAddressWanted = undefined;
+      this.localPortWanted = undefined;
+      this.tuning = {};
+      this.transport = { secure: false };
+    } else {
+      this.host = options.host;
+      this.port = options.port;
+      this.path = undefined;
+      this.localAddressWanted = options.localAddress;
+      this.localPortWanted = options.localPort;
+      this.tuning = {
+        noDelay: options.noDelay,
+        keepAlive: options.keepAlive,
+        keepAliveDelay: options.keepAliveDelay,
+        keepAliveInterval: options.keepAliveInterval,
+        keepAliveCount: options.keepAliveCount,
+        sendBufferSize: options.sendBufferSize,
+        receiveBufferSize: options.receiveBufferSize,
+        ttl: options.ttl,
+        typeOfService: options.typeOfService,
+        userTimeout: options.userTimeout,
+        linger: options.linger,
+      };
+      this.transport = options.transport ?? { secure: false };
+    }
     this.reading = false;
-    this.peerAddress = options.host;
-    this.peerPort = options.port;
+    this.peerAddress = this.host;
+    this.peerPort = this.port;
     this.bytesIn = 0;
     this.bytesOut = 0;
     this.secured = false;
   }
 
-  public static accepted(conn: object): Socket {
+  public static accepted(conn: object, path: string | undefined, tuning: SocketTuning,
+                         halfOpen: boolean): Socket {
     const address = netClientAddress(conn);
     const port = netClientPort(conn);
-    const socket = new Socket({ host: address, port: port });
+    if (path != undefined) {
+      const local = new Socket({ path: path, allowHalfOpen: halfOpen });
+      local.conn = conn;
+
+      return local;
+    }
+    tune(conn, tuning);
+    const socket = new Socket({ host: address, port: port, allowHalfOpen: halfOpen });
     socket.conn = conn;
     socket.peerAddress = address;
     socket.peerPort = port;
@@ -279,12 +421,20 @@ export class Socket extends Duplex<Buffer, Buffer, SocketError> {
     return socket;
   }
 
+  private target(): string {
+    if (this.path != undefined) {
+      return this.path;
+    }
+
+    return `${this.host}:${this.port}`;
+  }
+
   public async connect(): Promise<Result<void, ConnectError>> {
     if (this.conn != undefined) {
       return err({
         kind: "CONNECT_ERROR_REQUEST",
         code: "ERR_ALREADY_CONNECTED",
-        message: `the socket to ${this.host}:${this.port} is connected already`,
+        message: `the socket to ${this.target()} is connected already`,
         host: this.host,
         port: this.port,
       });
@@ -299,7 +449,16 @@ export class Socket extends Duplex<Buffer, Buffer, SocketError> {
       });
     }
     const deadline = startDeadline(this.timeout);
-    const connectedResult = await netConnect(this.host, this.port, deadline);
+    const path = this.path;
+    const localAddress = this.localAddressWanted;
+    const localPort = this.localPortWanted;
+    let connecting = netConnect(this.host, this.port, deadline);
+    if (path != undefined) {
+      connecting = netConnectPath(path);
+    } else if (localAddress != undefined || localPort != undefined) {
+      connecting = netConnectFrom(this.host, this.port, localAddress ?? "", localPort ?? 0, deadline);
+    }
+    const connectedResult = await connecting;
     if (connectedResult.isErr()) {
       const e = connectedResult.error;
       if (passed(deadline)) {
@@ -308,7 +467,7 @@ export class Socket extends Duplex<Buffer, Buffer, SocketError> {
         return err({
           kind: "CONNECT_ERROR_TIMEOUT",
           code: "TIMEOUT_ERR",
-          message: `could not connect to ${this.host}:${this.port} within ${timeout} ms`,
+          message: `could not connect to ${this.target()} within ${timeout} ms`,
           timeout: timeout,
         });
       }
@@ -325,8 +484,9 @@ export class Socket extends Duplex<Buffer, Buffer, SocketError> {
       });
     }
     const conn = connectedResult.value;
-    tcpNoDelay(conn, this.noDelay);
-    tcpKeepAlive(conn, this.keepAlive);
+    if (path == undefined) {
+      tune(conn, this.tuning);
+    }
     const transport = this.transport;
     if (transport.secure) {
       const servername = transport.servername ?? this.host;
@@ -380,6 +540,26 @@ export class Socket extends Duplex<Buffer, Buffer, SocketError> {
 
   public remotePort(): int {
     return this.peerPort;
+  }
+
+  public localAddress(): string {
+    const conn = this.conn;
+    if (conn == undefined) {
+      return "";
+    }
+    const address = netLocalHost(conn);
+
+    return address;
+  }
+
+  public localPort(): int {
+    const conn = this.conn;
+    if (conn == undefined) {
+      return 0;
+    }
+    const port = netLocalPort(conn);
+
+    return port;
   }
 
   public bytesRead(): double {
@@ -484,7 +664,9 @@ export class Socket extends Duplex<Buffer, Buffer, SocketError> {
 
   protected onFinal(callback: HookCallback<SocketError>): void {
     const conn = this.conn;
-    if (conn != undefined) {
+    if (conn != undefined && this.halfOpen && this.path == undefined) {
+      tcpShutdown(conn);
+    } else if (conn != undefined) {
       netClose(conn);
     }
     callback();
@@ -500,11 +682,35 @@ export class Socket extends Duplex<Buffer, Buffer, SocketError> {
   }
 }
 
-export type ServerOptions = {
+export type TcpServerOptions = {
   port?: int;
   hostname?: string;
   idleTimeout?: int;
+  backlog?: int;
+  ipv6Only?: boolean;
+  reusePort?: boolean;
+  allowHalfOpen?: boolean;
+  noDelay?: boolean;
+  keepAlive?: boolean;
+  keepAliveDelay?: int;
+  keepAliveInterval?: int;
+  keepAliveCount?: int;
+  sendBufferSize?: int;
+  receiveBufferSize?: int;
+  ttl?: int;
+  typeOfService?: int;
+  userTimeout?: int;
+  linger?: int;
 };
+
+export type PathServerOptions = {
+  path: string;
+  idleTimeout?: int;
+  backlog?: int;
+  allowHalfOpen?: boolean;
+};
+
+export type ServerOptions = TcpServerOptions | PathServerOptions;
 
 export type SocketHandler = (socket: Socket) => Promise<void>;
 
@@ -519,6 +725,7 @@ export type NetListenError = {
     | "EMFILE"
     | "ENOBUFS"
     | "EAFNOSUPPORT"
+    | "ENOTSUP"
     | "UNKNOWN";
   message: string;
   syscall: string;
@@ -535,6 +742,7 @@ type ListenCode =
   | "EMFILE"
   | "ENOBUFS"
   | "EAFNOSUPPORT"
+  | "ENOTSUP"
   | "UNKNOWN";
 
 function listenCode(code: string): ListenCode {
@@ -555,6 +763,8 @@ function listenCode(code: string): ListenCode {
       return "ENOBUFS";
     case "EAFNOSUPPORT":
       return "EAFNOSUPPORT";
+    case "ENOTSUP":
+      return "ENOTSUP";
     default:
       return "UNKNOWN";
   }
@@ -567,18 +777,53 @@ export type StopOptions = {
 export class Server {
   private readonly hostname: string;
   private readonly port: int;
+  private readonly path?: string;
   private readonly idleTimeout: int;
+  private readonly backlog: int;
+  private readonly flags: int;
+  private readonly settings: Settings;
   private readonly handler: SocketHandler;
 
   public constructor(options: ServerOptions, handler: SocketHandler) {
-    this.hostname = options.hostname ?? "0.0.0.0";
-    this.port = options.port ?? 0;
     this.idleTimeout = options.idleTimeout ?? 0;
+    this.backlog = options.backlog ?? 511;
+    const halfOpen = options.allowHalfOpen ?? false;
+    if ("path" in options) {
+      this.hostname = options.path;
+      this.port = 0;
+      this.path = options.path;
+      this.flags = 0;
+      this.settings = new Settings(options.path, {}, halfOpen);
+    } else {
+      this.hostname = options.hostname ?? "0.0.0.0";
+      this.port = options.port ?? 0;
+      this.path = undefined;
+      const ipv6Only = options.ipv6Only ?? false;
+      const reusePort = options.reusePort ?? false;
+      this.flags = (ipv6Only ? 1 : 0) | (reusePort ? 2 : 0);
+      const tuning: SocketTuning = {
+        noDelay: options.noDelay,
+        keepAlive: options.keepAlive,
+        keepAliveDelay: options.keepAliveDelay,
+        keepAliveInterval: options.keepAliveInterval,
+        keepAliveCount: options.keepAliveCount,
+        sendBufferSize: options.sendBufferSize,
+        receiveBufferSize: options.receiveBufferSize,
+        ttl: options.ttl,
+        typeOfService: options.typeOfService,
+        userTimeout: options.userTimeout,
+        linger: options.linger,
+      };
+      this.settings = new Settings(undefined, tuning, halfOpen);
+    }
     this.handler = handler;
   }
 
   public listen(): Result<Listening, NetListenError> {
-    const openedResult = netListen(this.hostname, this.port, 0, this.idleTimeout, 0, 0);
+    const path = this.path;
+    const openedResult = path != undefined
+      ? netListenPath(path, this.idleTimeout, this.backlog)
+      : netListenSocket(this.hostname, this.port, this.idleTimeout, this.backlog, this.flags);
     if (openedResult.isErr()) {
       const e = openedResult.error;
       const code = listenCode(e.code);
@@ -592,26 +837,40 @@ export class Server {
         port: this.port,
       });
     }
-    const listening = new Listening(openedResult.value, this.hostname, this.handler);
+    const listening = new Listening(openedResult.value, this.hostname, this.settings, this.handler);
 
     return ok(listening);
+  }
+}
+
+class Settings {
+  public readonly path?: string;
+  public readonly tuning: SocketTuning;
+  public readonly halfOpen: boolean;
+
+  public constructor(path: string | undefined, tuning: SocketTuning, halfOpen: boolean) {
+    this.path = path;
+    this.tuning = tuning;
+    this.halfOpen = halfOpen;
   }
 }
 
 export class Listening {
   public readonly hostname: string;
   public readonly port: int;
+  public readonly path?: string;
 
   private readonly native: object;
   private readonly accepting: Promise<void>;
   private stopping: boolean;
 
-  public constructor(native: object, hostname: string, handler: SocketHandler) {
+  public constructor(native: object, hostname: string, settings: Settings, handler: SocketHandler) {
     this.native = native;
     this.hostname = hostname;
-    this.port = netListenerPort(native);
+    this.path = settings.path;
+    this.port = settings.path == undefined ? netListenerPort(native) : 0;
     this.stopping = false;
-    this.accepting = Listening.acceptAll(native, handler);
+    this.accepting = Listening.acceptAll(native, settings, handler);
   }
 
   public async stop(options?: StopOptions): Promise<void> {
@@ -635,19 +894,20 @@ export class Listening {
     clearTimeout(timer);
   }
 
-  private static async acceptAll(native: object, handler: SocketHandler): Promise<void> {
+  private static async acceptAll(native: object, settings: Settings,
+                                 handler: SocketHandler): Promise<void> {
     for (;;) {
       const conn = await netAccept(native);
       if (conn == undefined) {
         break;
       }
-      void Listening.serve(conn, handler);
+      void Listening.serve(conn, settings, handler);
     }
     await netDrained(native);
   }
 
-  private static async serve(conn: object, handler: SocketHandler): Promise<void> {
-    const socket = Socket.accepted(conn);
+  private static async serve(conn: object, settings: Settings, handler: SocketHandler): Promise<void> {
+    const socket = Socket.accepted(conn, settings.path, settings.tuning, settings.halfOpen);
     await handler(socket);
   }
 }

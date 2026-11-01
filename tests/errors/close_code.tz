@@ -1,0 +1,19 @@
+// The code of WebSocket.close is a CloseCode: 1000 or 3000 to 4999 (the codes
+// a program may send). A literal fits by itself; a value of the program fits
+// after a check that proves it inside one of the parts; a union this large
+// names its parts in the message.
+const socket = new WebSocket({ url: "ws://127.0.0.1:1/" })
+const code = process.argv.length + 3000
+// expect-error: type '1001' is not assignable to type 'CloseCode | undefined', which holds 1000 or 3000 to 4999
+void socket.close(1001)
+// expect-error: type 'int' is not assignable to type 'CloseCode | undefined', which holds 1000 or 3000 to 4999; the value may be outside: check it first, e.g. 'if (code >= 3000 && code <= 4999)'
+void socket.close(code)
+if (code >= 3000 && code <= 4999) {
+  void socket.close(code, "fits")
+}
+if (code >= 3000) {
+  // expect-error: type 'int' is not assignable to type 'CloseCode', which holds 1000 or 3000 to 4999; the value may be outside: check it first, e.g. 'if (code >= 3000 && code <= 4999)'
+  const half: CloseCode = code
+}
+void socket.close(1000)
+void socket.close(4999, "last")

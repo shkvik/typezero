@@ -73,6 +73,9 @@ Module *ModuleResolver::resolve(Module *from, llvm::StringRef spec, llvm::SMLoc 
   if (spec == "tz:packet") {
     return loader_.library().libraryModule("packet.tz", "tz:packet", loc);
   }
+  if (spec == "tz:socket") {
+    return loader_.library().libraryModule("socket.tz", "tz:socket", loc);
+  }
   if (from->builtin && (spec == "tz:web" || spec == "tz:url" || spec == "tz:fetch" ||
                         spec == "tz:intrinsics" || spec == "tz:websocket")) {
     return loader_.library().libraryModule(spec.drop_front(3).str() + ".tz", spec, loc);

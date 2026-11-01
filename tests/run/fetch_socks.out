@@ -1,0 +1,31 @@
+socks4: 200 hello from /four
+  proxy saw: socks4 127.0.0.1 user=bob
+socks4a: 200 hello from /four-a
+  proxy saw: socks4 far.test user=
+socks5: 200 hello from /five
+  proxy saw: socks5 type=1 127.0.0.1
+socks5 v6: 200 hello from /six
+  proxy saw: socks5 type=4 ::1
+socks5h: 200 hello from /five-h
+  proxy saw: socks5 type=3 far.test
+socks5 login: 200 hello from /login
+  proxy saw: socks5 type=1 127.0.0.1
+socks5 wrong: FETCH_ERROR_PROXY ERR_PROXY_AUTH_REQUIRED the proxy 127.0.0.1:PORT did not take the login: check the user and the password in its URL
+socks5 none: FETCH_ERROR_PROXY ERR_PROXY_AUTH_REQUIRED the proxy 127.0.0.1:PORT asks for a login: put user and password into its URL, socks5://user:password@host:port
+socks5 refused: FETCH_ERROR_PROXY ERR_PROXY_REFUSED the proxy 127.0.0.1:PORT refused to connect to blocked.test:PORT: the rules of the proxy do not allow it (2)
+socks4 refused: FETCH_ERROR_PROXY ERR_PROXY_REFUSED the proxy 127.0.0.1:PORT refused to connect to blocked.test:PORT: the request was rejected or failed (91)
+socks4 password: FETCH_ERROR_PROXY ERR_INVALID_PROXY_URL proxy.url gives a password to a SOCKS4 proxy, which takes only a user: drop the password, or take socks5:
+digest md5: 200 hello from /plain
+  proxy saw: digest MD5 GET 407 Basic
+  proxy saw: digest MD5 GET ok
+digest md5 again: 200 hello from /again
+  proxy saw: digest MD5 GET ok
+digest sha-256: 200 hello from /sha
+  proxy saw: digest SHA-256 GET 407 Basic
+  proxy saw: digest SHA-256 GET ok
+digest wrong: FETCH_ERROR_PROXY ERR_PROXY_AUTH_REQUIRED the proxy 127.0.0.1:PORT did not take the login (407): check the user and the password in its URL
+ws socks5: got hello ws socks5
+  proxy saw: socks5 type=1 127.0.0.1
+ws digest: got hello ws digest
+  proxy saw: digest SHA-256 CONNECT ok
+ws socks5 wrong: cannot connect: WEB_SOCKET_CONNECT_ERROR_PROXY ERR_PROXY_AUTH_REQUIRED

@@ -118,7 +118,7 @@ Expr *NewChecker::checkNew(NewExpr *expr, const Type *expected) {
       checker_.urlChecker().checkUrlNew(made);
     }
     if (auto *made = dyn_cast<NewExpr>(checked); made && cls->library) {
-      if (cls->name == "Server") {
+      if (cls->name == "Server" || cls->name == "Socket") {
         checker_.tzModulesChecker().noteServer(made);
       }
       if (cls->name == "Response") {

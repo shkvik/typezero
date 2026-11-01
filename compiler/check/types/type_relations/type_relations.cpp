@@ -447,9 +447,16 @@ Expr *TypeRelations::coerce(Expr *expr, const Type *to, llvm::StringRef what) {
     }
   }
 
-  std::optional<std::pair<int64_t, int64_t>> range = LiteralTypes::intRange(to->nonOptional());
-  if (range && from->isInt() &&
-      checker_.byteProofs().provesFits(expr, range->first, range->second)) {
+  const Type *target = to->nonOptional();
+  std::vector<std::pair<int64_t, int64_t>> intervals;
+  if (std::optional<std::pair<int64_t, int64_t>> range = LiteralTypes::intRange(target)) {
+    intervals.push_back(*range);
+  } else if (target->isUnion() && target->members().size() >= 64) {
+    intervals = LiteralTypes::intIntervals(target);
+  }
+  if (from->isInt() && llvm::any_of(intervals, [&](const std::pair<int64_t, int64_t> &interval) {
+        return checker_.byteProofs().provesFits(expr, interval.first, interval.second);
+      })) {
     return convert(expr, to);
   }
 
@@ -458,19 +465,33 @@ Expr *TypeRelations::coerce(Expr *expr, const Type *to, llvm::StringRef what) {
   if (!what.empty()) {
     message += (" of " + what).str();
   }
-  if (range && (from->isInt() || (from->isLiteral() && from->literalBase()->isInt()))) {
-    std::string lo = std::to_string(range->first), hi = std::to_string(range->second);
-    message += ", which holds " + lo + " to " + hi;
+  if (!intervals.empty() &&
+      (from->isInt() || (from->isLiteral() && from->literalBase()->isInt()))) {
+    std::string holds;
+    for (const std::pair<int64_t, int64_t> &interval : intervals) {
+      holds += holds.empty() ? "" : " or ";
+      holds += std::to_string(interval.first);
+      if (interval.second != interval.first) {
+        holds += " to " + std::to_string(interval.second);
+      }
+    }
+    message += ", which holds " + holds;
     if (from->isInt()) {
+      std::pair<int64_t, int64_t> widest =
+          *llvm::max_element(intervals, [](const std::pair<int64_t, int64_t> &a,
+                                           const std::pair<int64_t, int64_t> &b) {
+            return a.second - a.first < b.second - b.first;
+          });
+      std::string lo = std::to_string(widest.first), hi = std::to_string(widest.second);
       std::string text = "x";
       if (auto *name = dyn_cast<NameExpr>(expr)) {
         text = name->name.str();
       }
-      message += "; the value may be outside: check it first, e.g. 'if (" +
-                 (to->nonOptional()->name() == "HttpStatus"
-                      ? "isHttpStatus(" + text + ")"
-                      : text + " >= " + lo + " && " + text + " <= " + hi) +
-                 ")'";
+      message +=
+          "; the value may be outside: check it first, e.g. 'if (" +
+          (target->name() == "HttpStatus" ? "isHttpStatus(" + text + ")"
+                                          : text + " >= " + lo + " && " + text + " <= " + hi) +
+          ")'";
     }
     checker_.diags_.error(expr->loc(), message);
     return expr;

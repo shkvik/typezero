@@ -1,0 +1,69 @@
+// env: NODE_EXTRA_CA_CERTS=@TESTS@/tls/ca.pem
+// env: TLS_DIR=@TESTS@/tls
+// DTLS over node:dgram (docs/net.md, section 10): a server bound with a
+// certificate and a key keeps a DTLS session for each peer (with a cookie
+// exchange), a client gets one by connect(); messages and answers go
+// encrypted, events carry the plain data; a client that expects another
+// name, a client that sends before connect(), a server that sends to an
+// address without a session. Only 127.0.0.1.
+import { readFileSync } from "node:fs"
+import { Socket, RemoteInfo } from "node:dgram"
+import { join } from "node:path"
+
+const dir = process.env.TLS_DIR ?? "."
+const cert = readFileSync(join(dir, "localhost.pem"), "utf8")
+const key = readFileSync(join(dir, "key.pem"), "utf8")
+if (cert.isErr() || key.isErr()) process.exit(1)
+
+const server = new Socket({
+  type: "udp4",
+  address: "127.0.0.1",
+  transport: { secure: true, cert: cert.value, key: key.value },
+})
+server.on("error", e => console.log("server error:", e.message))
+async function echo(data: Buffer, from: RemoteInfo) {
+  const sentResult = await server.send(data.toString().toUpperCase(), { address: from.address, port: from.port })
+  if (sentResult.isErr()) console.log("echo:", sentResult.error.code)
+}
+server.on("message", (data, from) => {
+  console.log("server got:", data.toString(), from.size)
+  void echo(data, from)
+})
+const boundResult = await server.bind()
+if (boundResult.isErr()) {
+  console.log("cannot bind:", boundResult.error.message)
+  process.exit(1)
+}
+const port = server.address()?.port ?? 0
+
+const early = new Socket({ type: "udp4", transport: { secure: true, servername: "localhost" } })
+const earlyResult = await early.send("too early", { address: "127.0.0.1", port: port })
+if (earlyResult.isErr()) console.log("before connect:", earlyResult.error.kind, earlyResult.error.code)
+await early.close()
+
+const client = new Socket({ type: "udp4", transport: { secure: true, servername: "localhost" } })
+const answered = Promise.withResolvers<void>()
+client.on("message", data => {
+  console.log("client got:", data.toString())
+  answered.resolve()
+})
+client.on("error", e => console.log("client error:", e.message))
+const connectedResult = await client.connect({ address: "127.0.0.1", port: port })
+if (connectedResult.isErr()) {
+  console.log("cannot connect:", connectedResult.error.kind, connectedResult.error.message)
+  process.exit(1)
+}
+const sentResult = await client.send("hello dtls")
+console.log("client sent:", sentResult.isOk())
+await answered.promise
+
+const nobody = await server.send("to nobody", { address: "127.0.0.1", port: 9 })
+if (nobody.isErr()) console.log("server to nobody:", nobody.error.kind, nobody.error.code)
+
+const wrong = new Socket({ type: "udp4", transport: { secure: true, servername: "wrong.example" } })
+const wrongResult = await wrong.connect({ address: "127.0.0.1", port: port })
+if (wrongResult.isErr()) console.log("wrong name:", wrongResult.error.kind, wrongResult.error.code)
+await wrong.close()
+
+await client.close()
+await server.close()

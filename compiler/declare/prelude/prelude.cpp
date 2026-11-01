@@ -330,6 +330,10 @@ void Prelude::declarePrelude() {
   for (int status = 200; status <= 599; ++status) {
     source += (status == 200 ? " " : " | ") + std::to_string(status);
   }
+  source += "\ntype CloseCode = 1000";
+  for (int code = 3000; code <= 4999; ++code) {
+    source += " | " + std::to_string(code);
+  }
   source += "\n";
   std::unique_ptr<llvm::MemoryBuffer> buffer = llvm::MemoryBuffer::getMemBufferCopy(source, "<tz>");
   llvm::StringRef text = buffer->getBuffer();

@@ -1,0 +1,214 @@
+// env: TLS_DIR=@TESTS@/tls
+// WebSocket limits and options (docs/net.md, section 9): idleTimeout sends a
+// ping after half of the silence and ends the socket with ERR_IDLE_TIMEOUT
+// and 1006 after all of it; timeout of connect; a reset connection gives
+// ECONNRESET; a certificate nobody trusts gives a TLS error of connect; a
+// reason longer than 123 bytes is cut on a whole character; a close code from
+// a variable after a check; bufferedAmount; a WebSocket through a CONNECT
+// proxy, ws: too, and a proxy that refuses. A raw node:net server plays the
+// silent and the resetting peer, another one the proxy. Only 127.0.0.1.
+import { createHash } from "node:crypto"
+import { readFileSync } from "node:fs"
+import { Server as TcpServer, Socket } from "node:net"
+import { join } from "node:path"
+import { Server, upgradeWebSocket } from "tz:http"
+
+const GUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
+
+function answerOf(head: string): string {
+  let key = ""
+  for (const line of head.split("\r\n")) {
+    if (line.toLowerCase().startsWith("sec-websocket-key:")) key = line.slice(18).trim()
+  }
+  const hashResult = createHash("sha1")
+  if (hashResult.isErr()) return ""
+  const accept = hashResult.value.update(key + GUID).digest("base64")
+  return "HTTP/1.1 101 Switching Protocols\r\nupgrade: websocket\r\nconnection: Upgrade\r\n" +
+    `sec-websocket-accept: ${accept}\r\n\r\n`
+}
+
+let pings = 0
+const raw = new TcpServer({ port: 0, hostname: "127.0.0.1" }, async socket => {
+  let head = ""
+  let open = false
+  for await (const chunkResult of socket) {
+    if (chunkResult.isErr()) break
+    const chunk = chunkResult.value
+    if (open) {
+      const first = chunk[0]
+      if (first != undefined && (first.toInt() & 0x0f) == 9) {
+        pings++
+      } else if (head.startsWith("GET /reset")) {
+        socket.reset()
+        break
+      }
+      continue
+    }
+    head += chunk.toString("latin1")
+    if (!head.includes("\r\n\r\n") || head.startsWith("GET /silent")) continue
+    socket.write(answerOf(head))
+    open = true
+  }
+})
+
+let tunnels = 0
+let proxyEnds = 0
+async function pump(from: Socket, to: Socket) {
+  for await (const chunkResult of from) {
+    if (chunkResult.isErr()) break
+    to.write(chunkResult.value)
+  }
+  const endedResult = await to.end()
+  if (endedResult.isErr()) proxyEnds++
+}
+const proxy = new TcpServer({ port: 0, hostname: "127.0.0.1" }, async client => {
+  let head = ""
+  let upstream: Socket | undefined = undefined
+  for await (const chunkResult of client) {
+    if (chunkResult.isErr()) break
+    const chunk = chunkResult.value
+    if (upstream != undefined) {
+      upstream.write(chunk)
+      continue
+    }
+    head += chunk.toString("latin1")
+    if (!head.includes("\r\n\r\n")) continue
+    const target = head.split(" ")[1] ?? ""
+    if (target.startsWith("blocked")) {
+      client.write("HTTP/1.1 403 Forbidden\r\ncontent-length: 0\r\n\r\n")
+      const endedResult = await client.end()
+      if (endedResult.isErr()) proxyEnds++
+      break
+    }
+    const port = parseInt(target.split(":").pop() ?? "").unwrapOr(0)
+    const next = new Socket({ host: "127.0.0.1", port: port })
+    const connected = await next.connect()
+    if (connected.isErr()) break
+    tunnels++
+    client.write("HTTP/1.1 200 Connection Established\r\n\r\n")
+    upstream = next
+    void pump(next, client)
+  }
+  if (upstream != undefined) {
+    const endedResult = await upstream.end()
+    if (endedResult.isErr()) proxyEnds++
+  }
+})
+
+const echo = new Server({ port: 0, hostname: "127.0.0.1" }, request => {
+  const upgradeResult = upgradeWebSocket(request, { idleTimeout: 0 })
+  if (upgradeResult.isErr()) return new Response(upgradeResult.error.code, { status: 426 })
+  const peer = upgradeResult.value.socket
+  peer.on("message", data => {
+    const sent = peer.send(data)
+    if (sent.isErr()) console.log("server send:", sent.error.code)
+  })
+  peer.on("error", error => console.log("server error:", error.code))
+  peer.on("close", (code, reason) => console.log("server close:", code, reason.length))
+  return upgradeResult.value.response
+})
+
+const dir = process.env.TLS_DIR ?? "."
+const cert = readFileSync(join(dir, "localhost.pem"), "utf8")
+const key = readFileSync(join(dir, "key.pem"), "utf8")
+if (cert.isErr() || key.isErr()) process.exit(1)
+const transport = { secure: true, cert: cert.value, key: key.value }
+const untrusted = new Server({ port: 0, hostname: "127.0.0.1", transport }, request => {
+  return new Response("hi")
+})
+
+const rawResult = raw.listen()
+const proxyResult = proxy.listen()
+const echoResult = echo.listen()
+const untrustedResult = untrusted.listen()
+if (rawResult.isErr() || proxyResult.isErr() || echoResult.isErr() || untrustedResult.isErr()) {
+  console.log("cannot listen")
+  process.exit(1)
+}
+const rawPort = rawResult.value.port
+const proxyUrl = `http://127.0.0.1:${proxyResult.value.port}`
+const echoUrl = `ws://127.0.0.1:${echoResult.value.port}/`
+
+const idle = new WebSocket({ url: `ws://127.0.0.1:${rawPort}/idle`, idleTimeout: 400 })
+const idleClosed = Promise.withResolvers<void>()
+idle.on("error", error => console.log("idle error:", error.kind, error.code))
+idle.on("close", (code, reason) => {
+  console.log("idle close:", code)
+  idleClosed.resolve()
+})
+const started = performance.now()
+const idleResult = await idle.connect()
+if (idleResult.isErr()) console.log("idle connect:", idleResult.error.message)
+await idleClosed.promise
+const idleFor = performance.now() - started
+console.log("idle pings:", pings > 0, "after the whole silence:", idleFor >= 350)
+
+const silent = new WebSocket({ url: `ws://127.0.0.1:${rawPort}/silent`, timeout: 200 })
+silent.on("error", error => console.log("silent error:", error.code))
+const silentResult = await silent.connect()
+if (silentResult.isErr()) console.log("silent connect:", silentResult.error.kind, silentResult.error.code)
+console.log("silent state:", silent.readyState())
+
+const resetting = new WebSocket({ url: `ws://127.0.0.1:${rawPort}/reset` })
+const resetClosed = Promise.withResolvers<void>()
+resetting.on("error", error => console.log("reset error:", error.kind, error.code))
+resetting.on("close", code => {
+  console.log("reset close:", code)
+  resetClosed.resolve()
+})
+const resetResult = await resetting.connect()
+if (resetResult.isOk()) {
+  const sent = resetting.send("reset me")
+  console.log("reset sent:", sent.isOk())
+  await resetClosed.promise
+}
+
+const tls = new WebSocket({ url: `wss://localhost:${untrustedResult.value.port}/` })
+tls.on("error", error => console.log("tls error:", error.code))
+const tlsResult = await tls.connect()
+if (tlsResult.isErr()) console.log("tls connect:", tlsResult.error.kind)
+
+const proxied = new WebSocket({ url: echoUrl, proxy: { enabled: true, url: proxyUrl } })
+const answered = Promise.withResolvers<void>()
+const proxiedClosed = Promise.withResolvers<void>()
+proxied.on("message", data => {
+  if (typeof data == "string") console.log("proxied got:", data.length > 50 ? `${data.length} chars` : data)
+  answered.resolve()
+})
+proxied.on("error", error => console.log("proxied error:", error.code))
+proxied.on("close", (code, reason) => {
+  console.log("proxied close:", code, reason)
+  proxiedClosed.resolve()
+})
+const proxiedResult = await proxied.connect()
+if (proxiedResult.isErr()) {
+  console.log("proxied connect:", proxiedResult.error.message)
+  process.exit(1)
+}
+console.log("tunnels:", tunnels)
+const sentResult = proxied.send("hello through the proxy")
+console.log("sent:", sentResult.isOk())
+await answered.promise
+console.log("buffered after the answer:", proxied.bufferedAmount())
+const code = parseInt("3007").unwrapOr(0)
+if (code >= 3000 && code <= 4999) await proxied.close(code, "é".repeat(100))
+await proxiedClosed.promise
+
+const refused = new WebSocket({ url: "ws://blocked.test:80/", proxy: { enabled: true, url: proxyUrl } })
+refused.on("error", error => console.log("refused error:", error.code))
+const refusedResult = await refused.connect()
+if (refusedResult.isErr()) {
+  const e = refusedResult.error
+  switch (e.kind) {
+    case "WEB_SOCKET_CONNECT_ERROR_PROXY":
+      console.log("refused connect:", e.kind, e.code, e.status)
+      break
+    default:
+      console.log("refused connect:", e.kind, e.message)
+  }
+}
+
+await rawResult.value.stop()
+await proxyResult.value.stop()
+await echoResult.value.stop()
+await untrustedResult.value.stop()

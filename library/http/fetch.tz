@@ -129,7 +129,7 @@ export class Connection {
   origin = ""
   status = 0
   absolute = false
-  proxyAuth = ""
+  proxyTarget: ProxyTarget | undefined = undefined
   protocol: ResponseProtocol = "http/1.1"
   address = ""
   usedAt: double = 0
@@ -289,12 +289,16 @@ export class Connection {
         out.push(name)
         out.push(value)
       }
-    if (this.proxyAuth != "") {
-      out.push("proxy-authorization")
-      out.push(`Basic ${this.proxyAuth}`)
-    }
     const path = (url.pathname() == "" ? "/" : url.pathname()) + url.search()
     const target = this.absolute ? url.protocol() + "//" + url.host() + path : path
+    const proxy = this.proxyTarget
+    if (proxy != undefined) {
+      const authorization = proxy.authorization(method, target)
+      if (authorization != "") {
+        out.push("proxy-authorization")
+        out.push(authorization)
+      }
+    }
     httpRequest(this.socket, method, target, out, text, bytes, flags)
   }
 
@@ -2692,271 +2696,6 @@ export function peerOf(url: URL, timeout?: int, deadline?: object): Peer {
   return peer
 }
 
-export type ProxyOption =
-  | {
-      enabled: true;
-      url: string;
-    }
-  | {
-      enabled: false;
-    };
-
-export class ProxyTarget {
-  public readonly host: string;
-  public readonly port: int;
-  public readonly secure: boolean;
-  public readonly auth: string;
-  public readonly shown: string;
-
-  public constructor(host: string, port: int, secure: boolean, auth: string, shown: string) {
-    this.host = host;
-    this.port = port;
-    this.secure = secure;
-    this.auth = auth;
-    this.shown = shown;
-  }
-
-  public name(): string {
-    return `${this.host}:${this.port}`;
-  }
-}
-
-function proxyError(
-  code: "ERR_INVALID_PROXY_URL" | "ERR_PROXY_AUTH_REQUIRED" | "ERR_PROXY_REFUSED",
-  message: string,
-  proxy: string,
-  status: int,
-): FetchError {
-  return { kind: "FETCH_ERROR_PROXY", code: code, message: message, proxy: proxy, status: status };
-}
-
-function envValue(names: string[]): [string, string] | undefined {
-  for (const name of names) {
-    const value = process.env[name];
-    if (value != undefined && value != "") {
-      return [name, value];
-    }
-  }
-
-  return undefined;
-}
-
-function hostMatches(host: string, port: int, entry: string): boolean {
-  let pattern = entry.trim().toLowerCase();
-  if (pattern == "") {
-    return false;
-  }
-  if (pattern == "*") {
-    return true;
-  }
-  const colon = pattern.lastIndexOf(":");
-  if (colon > 0 && !pattern.includes("]") && pattern.indexOf(":") == colon) {
-    const wanted = pattern.slice(colon + 1);
-    if (wanted != String(port)) {
-      return false;
-    }
-    pattern = pattern.slice(0, colon);
-  }
-  const slash = pattern.indexOf("/");
-  if (slash > 0) {
-    return inNetwork(host, pattern.slice(0, slash), pattern.slice(slash + 1));
-  }
-  if (pattern.startsWith(".")) {
-    return host.endsWith(pattern) || host == pattern.slice(1);
-  }
-
-  return host == pattern || host.endsWith("." + pattern);
-}
-
-function ipv4Number(text: string): double | undefined {
-  const parts = text.split(".");
-  if (parts.length != 4) {
-    return undefined;
-  }
-  let value = 0.0;
-  for (const part of parts) {
-    const parsed = parseInt(part);
-    if (parsed.isErr() || parsed.value < 0 || parsed.value > 255) {
-      return undefined;
-    }
-    value = value * 256 + parsed.value.toDouble();
-  }
-
-  return value;
-}
-
-function inNetwork(host: string, base: string, bits: string): boolean {
-  const address = ipv4Number(host);
-  const network = ipv4Number(base);
-  const width = parseInt(bits);
-  if (address == undefined || network == undefined || width.isErr()) {
-    return false;
-  }
-  const size = Math.pow(2, 32 - Math.min(32, Math.max(0, width.value)).toDouble());
-
-  return Math.floor(address / size) == Math.floor(network / size);
-}
-
-function bypassed(host: string, port: int): boolean {
-  const lower = host.toLowerCase();
-  if (lower == "localhost" || lower == "127.0.0.1" || lower == "::1") {
-    return true;
-  }
-  const found = envValue(["NO_PROXY", "no_proxy"]);
-  if (found == undefined) {
-    return false;
-  }
-
-  return found[1].split(",").some((entry) => hostMatches(lower, port, entry));
-}
-
-function proxyOf(text: string, source: string): Result<ProxyTarget, FetchError> {
-  const parsed = URL.parse(text);
-  const hint = source == "proxy.url" ? "" : `; write it as http://${text}`;
-  if (parsed.isErr()) {
-    return err(proxyError("ERR_INVALID_PROXY_URL",
-                          `${source} is not a URL: "${text}"${hint}`, text, 0));
-  }
-  const url = parsed.value;
-  const protocol = url.protocol();
-  if (protocol != "http:" && protocol != "https:") {
-    return err(proxyError("ERR_INVALID_PROXY_URL",
-                          `${source} is a ${protocol} proxy, and only http: and https: proxies work`,
-                          text, 0));
-  }
-  const secure = protocol == "https:";
-  const port = url.portNumber() ?? (secure ? 443 : 80);
-  const hostname = url.hostname();
-  const host = hostname.startsWith("[") ? hostname.slice(1, hostname.length - 1) : hostname;
-  let auth = "";
-  if (url.username() != "") {
-    const user = decodeURIComponent(url.username()).unwrapOr(url.username());
-    const password = decodeURIComponent(url.password()).unwrapOr(url.password());
-    auth = Buffer.from(`${user}:${password}`).toString("base64");
-  }
-  const shown = `${protocol}//${url.host()}`;
-  const proxy = new ProxyTarget(host, port, secure, auth, shown);
-
-  return ok(proxy);
-}
-
-function proxyFor(url: URL, peer: Peer, option?: ProxyOption): Result<ProxyTarget | undefined, FetchError> {
-  if (option != undefined) {
-    if (!option.enabled) {
-      return ok(undefined);
-    }
-    const explicitResult = proxyOf(option.url, "proxy.url");
-    if (explicitResult.isErr()) {
-      return err(explicitResult.error);
-    }
-
-    return ok(explicitResult.value);
-  }
-  const https = url.protocol() == "https:";
-  const cgi = process.env.REQUEST_METHOD != undefined;
-  const names = https ? ["HTTPS_PROXY", "https_proxy"] : cgi ? [] : ["HTTP_PROXY", "http_proxy"];
-  const found = envValue(names);
-  if (found == undefined || bypassed(peer.host, peer.port)) {
-    return ok(undefined);
-  }
-  const envResult = proxyOf(found[1], found[0]);
-  if (envResult.isErr()) {
-    return err(envResult.error);
-  }
-
-  return ok(envResult.value);
-}
-
-function proxyStatusError(status: int, proxy: ProxyTarget, peer: Peer): FetchError {
-  if (status == 407) {
-    return proxyError("ERR_PROXY_AUTH_REQUIRED",
-                      `the proxy ${proxy.name()} asks for a login (407): put user and password ` +
-                      "into its URL, http://user:password@host:port", proxy.shown, status);
-  }
-
-  return proxyError("ERR_PROXY_REFUSED",
-                    `the proxy ${proxy.name()} refused to connect to ${peer.name()} (${status})`,
-                    proxy.shown, status);
-}
-
-function proxyConnectionError(e: NativeError, proxy: ProxyTarget, peer: Peer): FetchError {
-  const proxyPeer = new Peer(proxy.host, proxy.port, peer.timeout, peer.deadline);
-  const failure = connectionError(e, proxyPeer, "connecting");
-  if (failure.kind == "FETCH_ERROR_NETWORK") {
-    return {
-      kind: "FETCH_ERROR_NETWORK",
-      code: failure.code,
-      message: `the proxy: ${failure.message}`,
-      syscall: failure.syscall,
-      host: failure.host,
-      port: failure.port,
-    };
-  }
-
-  return failure;
-}
-
-async function tunnel(conn: Connection, proxy: ProxyTarget, peer: Peer): Promise<FetchError | undefined> {
-  const target = peer.host.includes(":") ? `[${peer.host}]:${peer.port}` : peer.name();
-  let head = `CONNECT ${target} HTTP/1.1\r\nhost: ${target}\r\n`;
-  if (proxy.auth != "") {
-    head += `proxy-authorization: Basic ${proxy.auth}\r\n`;
-  }
-  head += "\r\n";
-  const encoder = new TextEncoder();
-  const wroteResult = await conn.write(encoder.encode(head));
-  if (wroteResult.isErr()) {
-    return proxyConnectionError(wroteResult.error, proxy, peer);
-  }
-  let answer = "";
-  const decoder = new TextDecoder("latin1");
-  while (!answer.includes("\r\n\r\n")) {
-    const readResult = await conn.readRaw(peer.deadline);
-    if (readResult.isErr()) {
-      return proxyConnectionError(readResult.error, proxy, peer);
-    }
-    const chunk = readResult.value;
-    if (chunk == undefined || answer.length > 16384) {
-      return proxyStatusError(502, proxy, peer);
-    }
-    answer += decoder.decode(chunk);
-  }
-  const statusText = answer.split(" ")[1] ?? "";
-  const status = parseInt(statusText).unwrapOr(502);
-  if (status < 200 || status > 299) {
-    return proxyStatusError(status, proxy, peer);
-  }
-
-  return undefined;
-}
-
-async function openThrough(proxy: ProxyTarget, https: boolean, peer: Peer,
-                           tracer: FetchTracer | undefined): Promise<Result<Connection, FetchError>> {
-  const opened = await Connection.open(proxy.host, proxy.port, proxy.secure, peer.deadline, false,
-                                       tracer)
-  if (opened.isErr()) return err(proxyConnectionError(opened.error, proxy, peer))
-  const conn = opened.value
-  if (!https) {
-    conn.absolute = true
-    conn.proxyAuth = proxy.auth
-    return ok(conn)
-  }
-  const problem = await tunnel(conn, proxy, peer)
-  if (problem != undefined) {
-    conn.close()
-    return err(problem)
-  }
-  if (tracer != undefined) {
-    tracer.emit({ kind: "FETCH_STEP_PROXY_TUNNEL_OPENED", elapsed: tracer.elapsed(), proxy: proxy.shown })
-  }
-  const secured = await conn.secure(peer.host, peer.deadline, tracer)
-  if (secured.isErr()) {
-    conn.close()
-    return err(connectionError(secured.error, peer, "connecting"))
-  }
-  return ok(conn)
-}
-
 const h2pool = new Map<string, Connection[]>()
 
 function takeH2(origin: string, tracer: FetchTracer | undefined): Connection | undefined {
@@ -3032,8 +2771,8 @@ function tunnelError(code: string, message: string): NativeError {
   return failure
 }
 
-export async function openTunnel(host: string, port: int, secure: boolean,
-                                 explicit: boolean): Promise<Result<Connection | undefined, NativeError>> {
+export async function openTunnel(host: string, port: int, secure: boolean, explicit: boolean,
+                                 deadline?: object): Promise<Result<Connection | undefined, NativeError>> {
   const origin = (secure ? "https:" : "http:") + host + ":" + String(port)
   const name = addressWithPort(host, port)
   let parent = takeH2(origin, undefined)
@@ -3041,7 +2780,7 @@ export async function openTunnel(host: string, port: int, secure: boolean,
     if (!explicit) {
       return ok(undefined)
     }
-    const opened = await Connection.open(host, port, secure, undefined, true)
+    const opened = await Connection.open(host, port, secure, deadline, true)
     if (opened.isErr()) {
       return err(opened.error)
     }
@@ -3115,9 +2854,10 @@ async function exchange(request: Request, url: URL, redirected: boolean, peer: P
 
 async function send(request: Request, url: URL, redirected: boolean, peer: Peer,
                     version: HttpVersion, proxy: ProxyTarget | undefined,
-                    tracer: FetchTracer | undefined): Promise<Result<Response, FetchError>> {
+                    tracer: FetchTracer | undefined,
+                    mayRetry: boolean): Promise<Result<Response, FetchError>> {
   const https = url.protocol() == "https:"
-  const through = proxy == undefined ? "" : proxy.shown + "|"
+  const through = proxy == undefined ? "" : proxy.poolKey() + "|"
   const origin = through + url.protocol() + peer.host + ":" + String(peer.port)
   const http2 = proxy == undefined && version != "1.1" && (https || version == "2")
   let fresh: Connection | undefined = undefined
@@ -3198,8 +2938,14 @@ async function send(request: Request, url: URL, redirected: boolean, peer: Peer,
   let shown = url.href()
   const hash = shown.indexOf("#")
   if (hash >= 0) shown = shown.slice(0, hash)
-  if (proxy != undefined && !https && conn.status == 407) {
+  if (proxy != undefined && !https && !proxy.socks() && conn.status == 407) {
+    const learned = mayRetry && !request.bodyUsed() && proxyChallenge(proxy, conn.headerList())
     conn.close()
+    if (learned) {
+      const again = await send(request, url, redirected, peer, version, proxy, tracer, false)
+
+      return again
+    }
     return err(proxyStatusError(conn.status, proxy, peer))
   }
   return ok(Response.readFrom(conn, shown, redirected, peer, tracer))
@@ -3339,9 +3085,9 @@ async function fetchRequest(request: Request, proxyOption: ProxyOption | undefin
                               `fetch does not connect to port ${portNumber}: browsers and node ` +
                               "block it too", url.href()))
     const peer = peerOf(url, timeout, deadline)
-    const proxied = proxyFor(url, peer, proxyOption)
+    const proxied = proxyFor(url.protocol() == "https:", peer, proxyOption)
     if (proxied.isErr()) return err(proxied.error)
-    const sent = await send(current, url, redirects > 0, peer, version, proxied.value, tracer)
+    const sent = await send(current, url, redirects > 0, peer, version, proxied.value, tracer, true)
     if (sent.isErr()) return sent
     const response = sent.value
     const status = response.status

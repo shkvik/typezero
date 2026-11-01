@@ -356,6 +356,11 @@ export type UpgradeOptions = {
   protocol?: string;
   /** A larger message ends the connection with an error; 16 MB. */
   maxMessageSize?: int;
+  /**
+   * After half of this silence the WebSocket sends a ping; after all of it,
+   * an "error" with `ERR_IDLE_TIMEOUT` and "close" 1006; 120 000 ms, 0 — never.
+   */
+  idleTimeout?: int;
 };
 
 /**

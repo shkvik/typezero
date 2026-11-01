@@ -56,7 +56,7 @@ $Options = @(
   'no-shared', 'no-module', 'no-apps', 'no-tests', 'no-docs', 'no-makedepend',
   'no-legacy', 'no-rc2', 'no-rc4', 'no-rc5', 'no-bf', 'no-cast', 'no-idea', 'no-seed', 'no-md4',
   'no-mdc2', 'no-whirlpool',
-  'no-ssl3', 'no-ssl3-method', 'no-dtls', 'no-srp', 'no-cms', 'no-cmp', 'no-engine',
+  'no-ssl3', 'no-ssl3-method', 'no-srp', 'no-cms', 'no-cmp', 'no-engine',
   'no-deprecated', 'no-comp', 'no-ui-console',
   # A program reads no openssl.cnf it did not ask for.
   'no-autoload-config',

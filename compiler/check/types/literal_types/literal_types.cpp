@@ -232,6 +232,30 @@ std::optional<std::pair<int64_t, int64_t>> LiteralTypes::intRange(const Type *ty
   return std::pair(lo, hi);
 }
 
+std::vector<std::pair<int64_t, int64_t>> LiteralTypes::intIntervals(const Type *type) {
+  std::vector<std::pair<int64_t, int64_t>> intervals;
+  if (!type->isUnion()) {
+    return intervals;
+  }
+  std::vector<int64_t> values;
+  for (const Type *m : type->members()) {
+    if (!m->isLiteral() || !m->literalBase()->isInt()) {
+      return intervals;
+    }
+    values.push_back(int64_t(m->literalNumber()));
+  }
+  llvm::sort(values);
+  for (int64_t value : values) {
+    if (!intervals.empty() && intervals.back().second + 1 >= value) {
+      intervals.back().second = std::max(intervals.back().second, value);
+      continue;
+    }
+    intervals.emplace_back(value, value);
+  }
+
+  return intervals;
+}
+
 const Type *LiteralTypes::numberMemberOf(const Type *expected, bool fraction) {
   if (!expected) {
     return nullptr;

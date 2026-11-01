@@ -1,8 +1,11 @@
 import { EventEmitter } from "node:events";
-import { Connection, ProxyOption, openTunnel } from "tz:fetch";
+import { NativeError } from "tz:intrinsics";
+import { Connection, Peer, ProxyOption, openTunnel, openWire, proxyFor, tlsCode, tlsMessage } from "tz:fetch";
 import { URL } from "tz:url";
 
 declare function wsRandom(bytes: Uint8Array): void;
+declare function deadlineNew(): object;
+declare function deadlinePass(deadline: object): void;
 
 export type WebSocketOptions = {
   url: string;
@@ -10,6 +13,7 @@ export type WebSocketOptions = {
   headers?: Record<string, string>;
   timeout?: int;
   proxy?: ProxyOption;
+  idleTimeout?: int;
   maxMessageSize?: int;
   httpVersion?: "auto" | "1.1" | "2";
 };
@@ -29,6 +33,12 @@ export type WebSocketConnectError =
       port: int;
     }
   | {
+      kind: "WEB_SOCKET_CONNECT_ERROR_TLS";
+      code: TlsCode;
+      message: string;
+      host: string;
+    }
+  | {
       kind: "WEB_SOCKET_CONNECT_ERROR_TIMEOUT";
       code: "TIMEOUT_ERR";
       message: string;
@@ -39,12 +49,19 @@ export type WebSocketConnectError =
       code: "ERR_NOT_UPGRADED" | "ERR_NO_HTTP2" | "ERR_NO_EXTENDED_CONNECT";
       message: string;
       status: int;
+    }
+  | {
+      kind: "WEB_SOCKET_CONNECT_ERROR_PROXY";
+      code: "ERR_INVALID_PROXY_URL" | "ERR_PROXY_AUTH_REQUIRED" | "ERR_PROXY_REFUSED";
+      message: string;
+      proxy: string;
+      status: int;
     };
 
 export type WebSocketError =
   | {
       kind: "WEB_SOCKET_ERROR_NETWORK";
-      code: "ERR_CLOSED" | "ECONNRESET" | "ECONNABORTED" | "UNKNOWN";
+      code: "ERR_CLOSED" | "ECONNRESET" | "ECONNABORTED" | "ERR_TLS_FAILED" | "UNKNOWN";
       message: string;
     }
   | {
@@ -57,6 +74,12 @@ export type WebSocketError =
       code: "ERR_MESSAGE_TOO_LARGE";
       message: string;
       limit: int;
+    }
+  | {
+      kind: "WEB_SOCKET_ERROR_TIMEOUT";
+      code: "ERR_IDLE_TIMEOUT";
+      message: string;
+      timeout: int;
     };
 
 export type WebSocketSendError = {
@@ -292,6 +315,121 @@ function parseFrame(bytes: Uint8Array, limit: int): Result<Parsed | undefined, W
   return ok(parsed);
 }
 
+function closeReason(reason: string): Uint8Array {
+  const bytes = new TextEncoder().encode(reason);
+  if (bytes.length <= 123) {
+    return bytes;
+  }
+  let cut = 123;
+  while (cut > 0 && (byteAt(bytes, cut) & 0xc0) == 0x80) {
+    cut--;
+  }
+
+  return bytes.subarray(0, cut);
+}
+
+function timeoutFailure(peer: Peer): WebSocketConnectError {
+  return {
+    kind: "WEB_SOCKET_CONNECT_ERROR_TIMEOUT",
+    code: "TIMEOUT_ERR",
+    message: `the WebSocket to ${peer.name()} did not open within ${peer.timeout} ms`,
+    timeout: peer.timeout,
+  };
+}
+
+function nativeFailure(e: NativeError, peer: Peer, stage: string): WebSocketConnectError {
+  if (peer.passed()) {
+    const timedOut = timeoutFailure(peer);
+
+    return timedOut;
+  }
+  const tls = tlsCode(e.code);
+  if (tls != undefined) {
+    const message = tlsMessage(tls, peer.host, e.message);
+
+    return { kind: "WEB_SOCKET_CONNECT_ERROR_TLS", code: tls, message: message, host: peer.host };
+  }
+
+  return {
+    kind: "WEB_SOCKET_CONNECT_ERROR_NETWORK",
+    code: e.code,
+    message: `the connection to ${peer.name()} failed while ${stage}: ${e.message}`,
+    host: peer.host,
+    port: peer.port,
+  };
+}
+
+function connectFailure(failure: FetchError, peer: Peer): WebSocketConnectError {
+  switch (failure.kind) {
+    case "FETCH_ERROR_TIMEOUT": {
+      const timedOut = timeoutFailure(peer);
+
+      return timedOut;
+    }
+    case "FETCH_ERROR_TLS":
+      return {
+        kind: "WEB_SOCKET_CONNECT_ERROR_TLS",
+        code: failure.code,
+        message: failure.message,
+        host: failure.host,
+      };
+    case "FETCH_ERROR_PROXY":
+      return {
+        kind: "WEB_SOCKET_CONNECT_ERROR_PROXY",
+        code: failure.code,
+        message: failure.message,
+        proxy: failure.proxy,
+        status: failure.status,
+      };
+    default:
+      break;
+  }
+
+  return {
+    kind: "WEB_SOCKET_CONNECT_ERROR_NETWORK",
+    code: failure.code,
+    message: failure.message,
+    host: peer.host,
+    port: peer.port,
+  };
+}
+
+function networkFailure(e: NativeError, stage: string): WebSocketError {
+  switch (e.code) {
+    case "ECONNRESET":
+      return {
+        kind: "WEB_SOCKET_ERROR_NETWORK",
+        code: "ECONNRESET",
+        message: `the other side reset the connection while ${stage}`,
+      };
+    case "ECONNABORTED":
+      return {
+        kind: "WEB_SOCKET_ERROR_NETWORK",
+        code: "ECONNABORTED",
+        message: `the connection was aborted on this machine while ${stage}`,
+      };
+    case "ERR_CLOSED":
+      return {
+        kind: "WEB_SOCKET_ERROR_NETWORK",
+        code: "ERR_CLOSED",
+        message: `the connection closed without a close frame while ${stage}`,
+      };
+  }
+  if (tlsCode(e.code) != undefined) {
+    return {
+      kind: "WEB_SOCKET_ERROR_NETWORK",
+      code: "ERR_TLS_FAILED",
+      message: `the TLS connection failed while ${stage}: ${e.message}`,
+    };
+  }
+
+  return {
+    kind: "WEB_SOCKET_ERROR_NETWORK",
+    code: "UNKNOWN",
+    message: `the connection failed while ${stage}: ${e.message}`,
+  };
+}
+
 export type WebSocketEvents = {
   message: [data: string | Uint8Array];
   close: [code: int, reason: string];
@@ -302,11 +440,14 @@ export class WebSocket extends EventEmitter<WebSocketEvents> {
   public readonly url: string;
   public readonly protocols: string[];
   public readonly timeout?: int;
+  public readonly proxy?: ProxyOption;
+  public readonly idleTimeout: int;
   public readonly maxMessageSize: int;
   public readonly httpVersion: "auto" | "1.1" | "2";
 
   private readonly headers: Record<string, string>;
   private conn?: Connection;
+  private handshake?: Connection;
   private server: boolean;
   private overHttp2: boolean;
   private state: int;
@@ -314,16 +455,23 @@ export class WebSocket extends EventEmitter<WebSocketEvents> {
   private pieces: Uint8Array[];
   private pieceOpcode: int;
   private chosen: string;
+  private pending: int;
+  private heardAt: double;
+  private pinged: boolean;
+  private idleTimer?: Timeout;
 
   public constructor(options: WebSocketOptions) {
     super();
     this.url = options.url;
     this.protocols = options.protocols ?? [];
     this.timeout = options.timeout;
+    this.proxy = options.proxy;
+    this.idleTimeout = options.idleTimeout ?? 120000;
     this.maxMessageSize = options.maxMessageSize ?? 16 * 1024 * 1024;
     this.httpVersion = options.httpVersion ?? "auto";
     this.headers = options.headers ?? {};
     this.conn = undefined;
+    this.handshake = undefined;
     this.server = false;
     this.overHttp2 = false;
     this.state = 3;
@@ -331,10 +479,14 @@ export class WebSocket extends EventEmitter<WebSocketEvents> {
     this.pieces = [];
     this.pieceOpcode = 0;
     this.chosen = "";
+    this.pending = 0;
+    this.heardAt = 0.0;
+    this.pinged = false;
+    this.idleTimer = undefined;
   }
 
-  public static forServer(protocol: string, maxMessageSize: int): WebSocket {
-    const socket = new WebSocket({ url: "", maxMessageSize: maxMessageSize });
+  public static forServer(protocol: string, maxMessageSize: int, idleTimeout: int): WebSocket {
+    const socket = new WebSocket({ url: "", maxMessageSize: maxMessageSize, idleTimeout: idleTimeout });
     socket.server = true;
     socket.chosen = protocol;
 
@@ -354,8 +506,12 @@ export class WebSocket extends EventEmitter<WebSocketEvents> {
     return this.chosen;
   }
 
+  public bufferedAmount(): int {
+    return this.pending;
+  }
+
   public async connect(): Promise<Result<void, WebSocketConnectError>> {
-    if (this.conn != undefined || this.server) {
+    if (this.conn != undefined || this.server || this.state == 0) {
       return err({
         kind: "WEB_SOCKET_CONNECT_ERROR_REQUEST",
         code: "ERR_ALREADY_CONNECTED",
@@ -363,6 +519,29 @@ export class WebSocket extends EventEmitter<WebSocketEvents> {
         url: this.url,
       });
     }
+    const deadline = deadlineNew();
+    const timeout = this.timeout;
+    const timer = timeout == undefined ? undefined : setTimeout(() => this.timedOut(deadline), timeout);
+    this.state = 0;
+    const connectedResult = await this.connectBy(deadline);
+    clearTimeout(timer);
+    this.handshake = undefined;
+    if (connectedResult.isErr()) {
+      this.state = 3;
+    }
+
+    return connectedResult;
+  }
+
+  private timedOut(deadline: object): void {
+    deadlinePass(deadline);
+    const stream = this.handshake;
+    if (stream != undefined) {
+      stream.reset(8);
+    }
+  }
+
+  private async connectBy(deadline: object): Promise<Result<void, WebSocketConnectError>> {
     const parsedResult = URL.parse(this.url);
     if (parsedResult.isErr()) {
       return err({
@@ -386,11 +565,17 @@ export class WebSocket extends EventEmitter<WebSocketEvents> {
     const hostname = url.hostname();
     const host = hostname.startsWith("[") ? hostname.slice(1, hostname.length - 1) : hostname;
     const port = url.portNumber() ?? (secure ? 443 : 80);
-    this.state = 0;
-    if (this.httpVersion != "1.1") {
-      const tunnelResult = await openTunnel(host, port, secure, this.httpVersion == "2");
+    const peer = new Peer(host, port, this.timeout ?? 0, deadline);
+    const proxiedResult = proxyFor(secure, peer, this.proxy);
+    if (proxiedResult.isErr()) {
+      const failure = connectFailure(proxiedResult.error, peer);
+
+      return err(failure);
+    }
+    const proxy = proxiedResult.value;
+    if (this.httpVersion != "1.1" && proxy == undefined) {
+      const tunnelResult = await openTunnel(host, port, secure, this.httpVersion == "2", deadline);
       if (tunnelResult.isErr()) {
-        this.state = 3;
         const failure = tunnelResult.error;
         const code = failure.code;
         if (code == "ERR_NO_HTTP2" || code == "ERR_NO_EXTENDED_CONNECT") {
@@ -401,33 +586,22 @@ export class WebSocket extends EventEmitter<WebSocketEvents> {
             status: 0,
           });
         }
+        const problem = nativeFailure(failure, peer, "connecting");
 
-        return err({
-          kind: "WEB_SOCKET_CONNECT_ERROR_NETWORK",
-          code: failure.code,
-          message: `could not connect to ${host}:${port}: ${failure.message}`,
-          host: host,
-          port: port,
-        });
+        return err(problem);
       }
       const stream = tunnelResult.value;
       if (stream != undefined) {
-        const tunneled = await this.connectOverHttp2(stream, url, host, port);
+        const tunneled = await this.connectOverHttp2(stream, url, peer);
 
         return tunneled;
       }
     }
-    const openedResult = await Connection.open(host, port, secure, undefined, false);
+    const openedResult = await openWire(peer, secure, proxy);
     if (openedResult.isErr()) {
-      this.state = 3;
+      const failure = connectFailure(openedResult.error, peer);
 
-      return err({
-        kind: "WEB_SOCKET_CONNECT_ERROR_NETWORK",
-        code: openedResult.error.code,
-        message: `could not connect to ${host}:${port}: ${openedResult.error.message}`,
-        host: host,
-        port: port,
-      });
+      return err(failure);
     }
     const conn = openedResult.value;
     const nonce = new Uint8Array(16);
@@ -447,30 +621,29 @@ export class WebSocket extends EventEmitter<WebSocketEvents> {
     const wroteResult = await conn.write(encoder.encode(head));
     if (wroteResult.isErr()) {
       conn.close();
-      this.state = 3;
+      const problem = nativeFailure(wroteResult.error, peer, "sending the handshake");
 
-      return err({
-        kind: "WEB_SOCKET_CONNECT_ERROR_NETWORK",
-        code: wroteResult.error.code,
-        message: `the connection to ${host}:${port} broke during the handshake`,
-        host: host,
-        port: port,
-      });
+      return err(problem);
     }
     let answer = new Uint8Array(0);
     let end = -1;
     const decoder = new TextDecoder("latin1");
     while (end < 0) {
-      const readResult = await conn.readRaw(undefined);
-      const chunk = readResult.isOk() ? readResult.value : undefined;
+      const readResult = await conn.readRaw(deadline);
+      if (readResult.isErr()) {
+        conn.close();
+        const problem = nativeFailure(readResult.error, peer, "waiting for the handshake");
+
+        return err(problem);
+      }
+      const chunk = readResult.value;
       if (chunk == undefined || answer.length > 16384) {
         conn.close();
-        this.state = 3;
 
         return err({
           kind: "WEB_SOCKET_CONNECT_ERROR_NETWORK",
           code: "ERR_CLOSED",
-          message: `${host}:${port} closed the connection during the handshake`,
+          message: `${peer.name()} closed the connection during the handshake`,
           host: host,
           port: port,
         });
@@ -495,12 +668,11 @@ export class WebSocket extends EventEmitter<WebSocketEvents> {
     }
     if (status != 101 || accept != acceptKey(key)) {
       conn.close();
-      this.state = 3;
 
       return err({
         kind: "WEB_SOCKET_CONNECT_ERROR_REFUSED",
         code: "ERR_NOT_UPGRADED",
-        message: `${host}:${port} answered ${status} and did not switch to WebSocket`,
+        message: `${peer.name()} answered ${status} and did not switch to WebSocket`,
         status: status,
       });
     }
@@ -509,8 +681,8 @@ export class WebSocket extends EventEmitter<WebSocketEvents> {
     return ok(undefined);
   }
 
-  private async connectOverHttp2(stream: Connection, url: URL, host: string,
-                                 port: int): Promise<Result<void, WebSocketConnectError>> {
+  private async connectOverHttp2(stream: Connection, url: URL,
+                                 peer: Peer): Promise<Result<void, WebSocketConnectError>> {
     const path = (url.pathname() == "" ? "/" : url.pathname()) + url.search();
     const head: string[] = ["host", url.host(), ":protocol", "websocket", "sec-websocket-version", "13"];
     if (this.protocols.length > 0) {
@@ -521,29 +693,23 @@ export class WebSocket extends EventEmitter<WebSocketEvents> {
       head.push(name.toLowerCase());
       head.push(value);
     }
+    this.handshake = stream;
     stream.requestStream("CONNECT", path, head);
     const answeredResult = await stream.responseStream();
     if (answeredResult.isErr()) {
       stream.close();
-      this.state = 3;
+      const problem = nativeFailure(answeredResult.error, peer, "opening the HTTP/2 stream");
 
-      return err({
-        kind: "WEB_SOCKET_CONNECT_ERROR_NETWORK",
-        code: answeredResult.error.code,
-        message: `the HTTP/2 stream to ${host}:${port} broke during the handshake: ${answeredResult.error.message}`,
-        host: host,
-        port: port,
-      });
+      return err(problem);
     }
     const status = answeredResult.value;
     if (status != 200) {
       stream.close();
-      this.state = 3;
 
       return err({
         kind: "WEB_SOCKET_CONNECT_ERROR_REFUSED",
         code: "ERR_NOT_UPGRADED",
-        message: `${host}:${port} answered ${status} and did not open a WebSocket over HTTP/2`,
+        message: `${peer.name()} answered ${status} and did not open a WebSocket over HTTP/2`,
         status: status,
       });
     }
@@ -575,27 +741,30 @@ export class WebSocket extends EventEmitter<WebSocketEvents> {
     return ok(undefined);
   }
 
-  public async close(code: int = 1000, reason: string = ""): Promise<void> {
+  public async close(code: CloseCode = 1000, reason: string = ""): Promise<void> {
     const conn = this.conn;
     if (conn == undefined || this.state != 1) {
       return;
     }
     this.state = 2;
-    const reasonBytes = new TextEncoder().encode(reason);
+    const reasonBytes = closeReason(reason);
     const payload = new Uint8Array(2 + reasonBytes.length);
     putByte(payload, 0, code >> 8);
     putByte(payload, 1, code);
-    for (let i = 0; i < reasonBytes.length && i < 123; i++) {
+    for (let i = 0; i < reasonBytes.length; i++) {
       putByte(payload, 2 + i, byteAt(reasonBytes, i));
     }
     await this.write(conn, frame(OP_CLOSE, payload, !this.server));
   }
 
   private async write(conn: Connection, bytes: Uint8Array): Promise<void> {
+    this.pending += bytes.length;
     const writing = this.overHttp2 ? conn.writeStream(bytes) : conn.write(bytes);
     const wroteResult = await writing;
+    this.pending -= bytes.length;
     if (wroteResult.isErr()) {
-      this.fail({ kind: "WEB_SOCKET_ERROR_NETWORK", code: "ERR_CLOSED", message: "the connection closed while sending" });
+      const failure = networkFailure(wroteResult.error, "sending");
+      this.fail(failure);
     }
   }
 
@@ -604,7 +773,44 @@ export class WebSocket extends EventEmitter<WebSocketEvents> {
     this.state = 1;
     this.buffered = initial;
     this.pieces = [];
+    this.heardAt = performance.now();
+    this.pinged = false;
+    if (this.idleTimeout > 0) {
+      const half = this.idleTimeout.toDouble() / 2;
+      this.watchIdle(half);
+    }
     void this.readLoop(conn);
+  }
+
+  private watchIdle(delay: double): void {
+    const timer = setTimeout(() => this.idleCheck(), Math.max(1.0, delay));
+    timer.unref();
+    this.idleTimer = timer;
+  }
+
+  private idleCheck(): void {
+    const conn = this.conn;
+    if (conn == undefined) {
+      return;
+    }
+    const limit = this.idleTimeout.toDouble();
+    const half = limit / 2;
+    const silence = performance.now() - this.heardAt;
+    if (silence >= limit) {
+      this.fail({
+        kind: "WEB_SOCKET_ERROR_TIMEOUT",
+        code: "ERR_IDLE_TIMEOUT",
+        message: `nothing came from the other side for ${this.idleTimeout} ms (idleTimeout)`,
+        timeout: this.idleTimeout,
+      });
+      return;
+    }
+    if (silence >= half && !this.pinged) {
+      this.pinged = true;
+      void this.write(conn, frame(OP_PING, new Uint8Array(0), !this.server));
+    }
+    const wait = silence < half ? half - silence : limit - silence;
+    this.watchIdle(wait);
   }
 
   private finish(code: int, reason: string): void {
@@ -614,6 +820,8 @@ export class WebSocket extends EventEmitter<WebSocketEvents> {
     }
     this.conn = undefined;
     this.state = 3;
+    clearTimeout(this.idleTimer);
+    this.idleTimer = undefined;
     if (this.overHttp2) {
       conn.endStream([]);
     }
@@ -656,17 +864,25 @@ export class WebSocket extends EventEmitter<WebSocketEvents> {
       }
       const reading = this.overHttp2 ? conn.readStream() : conn.readRaw(undefined);
       const readResult = await reading;
-      const chunk = readResult.isOk() ? readResult.value : undefined;
-      if (chunk == undefined) {
-        if (this.conn != undefined) {
-          this.fail({
-            kind: "WEB_SOCKET_ERROR_NETWORK",
-            code: "ERR_CLOSED",
-            message: "the connection closed without a close frame",
-          });
-        }
+      if (this.conn != conn) {
         return;
       }
+      if (readResult.isErr()) {
+        const failure = networkFailure(readResult.error, "reading");
+        this.fail(failure);
+        return;
+      }
+      const chunk = readResult.value;
+      if (chunk == undefined) {
+        this.fail({
+          kind: "WEB_SOCKET_ERROR_NETWORK",
+          code: "ERR_CLOSED",
+          message: "the connection closed without a close frame",
+        });
+        return;
+      }
+      this.heardAt = performance.now();
+      this.pinged = false;
       this.buffered = concatBytes(this.buffered, chunk);
     }
   }

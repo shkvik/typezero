@@ -3117,17 +3117,26 @@ await listening.stop()
   `HTTP_PROXY`, `NO_PROXY` из окружения (как Go и curl; `localhost` — мимо всегда), в коде —
   `proxy: { enabled: true, url } | { enabled: false }`; https — туннелем `CONNECT`, логин —
   Basic из адреса прокси; ошибки — `FetchError` вида `PROXY` (`ERR_PROXY_AUTH_REQUIRED` и
-  другие). SOCKS и Digest — пока нет.
+  другие). С 1 ноября — SOCKS4 / 4a / 5 / 5h (логин у SOCKS5) и вход Digest (MD5, SHA-256).
 - **`node:net`** ([net.md](docs/net.md), раздел 7; 29 октября) — TCP: `new Socket({ host, port,
   timeout, noDelay, transport })` — поток `Duplex` node, `await socket.connect()` даёт
   `Result<void, ConnectError>` (`kind`: `REQUEST`, `NETWORK`, `TLS`, `TIMEOUT`), `startTls()`,
   `reset()`; `new Server({ port, hostname, idleTimeout }, async socket => …).listen()` —
-  `Result<Listening, ListenError>`, `stop({ timeout })`. `isIP`, `isIPv4`, `isIPv6`.
+  `Result<Listening, ListenError>`, `stop({ timeout })`. `isIP`, `isIPv4`, `isIPv6`. С 1 ноября —
+  сокеты Unix и именованные каналы Windows (`{ path }`), настройки сокета (keep-alive с
+  задержкой, буферы, `ttl`, `linger`, `localAddress`, `allowHalfOpen`, `backlog`…),
+  `localAddress()` / `localPort()`.
+- **`tz:socket`** ([net.md](docs/net.md), раздел 7; 1 ноября) — сокет любого вида, как `socket2`
+  у Rust: `new Socket({ domain, type, protocol })`, `bind` / `listen` / `accept` / `connect` /
+  `send` / `sendTo` / `receive` / `receiveFrom` / `shutdown` / `configure` — всё `Result`; сырой
+  сокет без прав — `Err` вида `PERMISSION` с подсказкой.
 - **WebSocket** ([net.md](docs/net.md), раздел 9; 29 октября): клиент — `new WebSocket({ url,
   protocols, headers, httpVersion })`, события `"message"` / `"close"` / `"error"` EventEmitter,
   `await socket.connect()` — `Result`, `send()` — `Result`, `close(code, reason)`; сервер —
   `upgradeWebSocket(request)` из `tz:http`, как в Deno. Кадры и рукопожатие — на tz. С 1 ноября —
-  и потоком HTTP/2 (RFC 8441): сервер с HTTP/2 объявляет сам, клиент — по `httpVersion`.
+  и потоком HTTP/2 (RFC 8441): сервер с HTTP/2 объявляет сам, клиент — по `httpVersion`;
+  `timeout`, `idleTimeout` с пингами, `CloseCode` (1000 или 3000–4999), `bufferedAmount()`,
+  прокси (как у `fetch`, всегда туннелем).
 - **`tz:packet`** ([net.md](docs/net.md), раздел 8; 29 октября) — разбор и сборка заголовков
   Ethernet, ARP, IPv4, IPv6, UDP, TCP, ICMP и их контрольных сумм на tz; ошибки — `PacketError`
   (`kind: "PACKET_ERROR"`).
@@ -3136,7 +3145,9 @@ await listening.stop()
   приём — событие `"message"` с `(data, from)`, `await socket.send(data, { address, port })` —
   `Result<void, SendError>` (`kind`: `REQUEST`, `NETWORK`, `TOO_LARGE`, `PERMISSION`,
   `CLOSED`), `connect()` / `disconnect()`, мультикаст — `addMembership()` и другие с `Result`.
-  Без `type` — один сокет на IPv4 и IPv6.
+  Без `type` — один сокет на IPv4 и IPv6. С 1 ноября — DTLS 1.2: `transport: { secure: true,
+  cert, key }` у сервера (сессия на каждого собеседника, обмен cookie), `{ secure: true,
+  servername }` у клиента (рукопожатие в `connect()`).
 - **HTTP/2 сервера** (31 октября) — на nghttp2 1.70.0 (`third_party/nghttp2`): каждый поток —
   своя задача на любом ядре, тела и потоковые ответы — как в HTTP/1.1; `stop()` шлёт GOAWAY.
   Скорость (`bench/http2.ps1`, h2c, 32 соединения по 8 запросов): tz — 1,61–1,75 млн запросов в
@@ -3157,8 +3168,7 @@ await listening.stop()
   `response()`. Тело — `Http2Body`: `for await` / `read()` с ошибками HTTP/2, `cancel(code)`,
   `toStream()`. Обработчик без `end()` — сброс потока с `INTERNAL_ERROR`. Ошибки — тип на
   функцию, коды сброса — имена RFC 9113.
-- **Пока нет:** прокси у WebSocket, слой `tz:socket`, сокеты Unix,
-  SOCKS-прокси; сеть в Linux (epoll и свой DNS). `node:http` и HTTP/3 не будет (HTTP/3 —
+- **Пока нет:** сеть в Linux (epoll и свой DNS). `node:http` и HTTP/3 не будет (HTTP/3 —
   прокси перед сервером, [net.md](docs/net.md), раздел 12).
 - **Скорость** (`bench/http.ps1`, «Hello, World!», 128 соединений, 10 с): tz — 314 тыс.
   запросов в секунду на всех ядрах, Go (`net/http`) — 239 тыс., node — 61 тыс.

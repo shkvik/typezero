@@ -100,6 +100,8 @@ struct NetConn {
   uint8_t reading, writing;
   uint8_t server;
   uint8_t linger;
+  uint8_t pipe;
+  uint8_t shut;
   uint32_t linger_bytes;
   double linger_since;
   int32_t error;
@@ -175,8 +177,13 @@ struct NetListener {
   int s;
 #endif
   int32_t family;
+  int32_t protocol;
   int32_t port;
   uint8_t closed, orphan, aborted;
+  uint8_t pipe, unix_socket;
+#ifdef _WIN32
+  wchar_t path[256];
+#endif
   int32_t ops;
   NetOp aop;
   TzPromise *pending;

@@ -86,6 +86,7 @@ export type StopOptions = {
 export type UpgradeOptions = {
   protocol?: string;
   maxMessageSize?: int;
+  idleTimeout?: int;
 };
 
 export type UpgradeError = {
@@ -128,7 +129,9 @@ function upgradeOverHttp2(
     });
   }
   const protocol = options?.protocol ?? "";
-  const socket = WebSocket.forServer(protocol, options?.maxMessageSize ?? 16 * 1024 * 1024);
+  const maxMessageSize = options?.maxMessageSize ?? 16 * 1024 * 1024;
+  const idleTimeout = options?.idleTimeout ?? 120000;
+  const socket = WebSocket.forServer(protocol, maxMessageSize, idleTimeout);
   const headers: Record<string, string> = {};
   if (protocol != "") {
     headers["sec-websocket-protocol"] = protocol;
@@ -166,7 +169,9 @@ export function upgradeWebSocket(
     });
   }
   const protocol = options?.protocol ?? "";
-  const socket = WebSocket.forServer(protocol, options?.maxMessageSize ?? 16 * 1024 * 1024);
+  const maxMessageSize = options?.maxMessageSize ?? 16 * 1024 * 1024;
+  const idleTimeout = options?.idleTimeout ?? 120000;
+  const socket = WebSocket.forServer(protocol, maxMessageSize, idleTimeout);
   const accept = acceptKey(key);
   const headers: Record<string, string> = {
     upgrade: "websocket",

@@ -15,6 +15,7 @@ public:
   const Type *numberLiteralFor(const Type *expected, double value, bool fraction);
   static const Type *numberMemberOf(const Type *expected, bool fraction);
   static std::optional<std::pair<int64_t, int64_t>> intRange(const Type *type);
+  static std::vector<std::pair<int64_t, int64_t>> intIntervals(const Type *type);
   const Type *literalMember(const ObjectLitExpr *lit, const Type *target) const;
   const Type *typeIn(const Checker::Flow &flow, const VarSymbol *var) const;
   std::optional<std::vector<std::string>> knownTexts(const Expr *arg);

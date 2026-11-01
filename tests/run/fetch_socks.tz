@@ -1,0 +1,312 @@
+// Proxies of fetch and WebSocket (docs/net.md, section 2): SOCKS4 with an
+// address, SOCKS4a and SOCKS5h with a name the proxy looks up, SOCKS5 with an
+// address, with a login, with a wrong login and without one, a SOCKS proxy
+// that refuses; an HTTP proxy that asks for a Digest login (MD5 and SHA-256),
+// over CONNECT and with a full address, and a wrong password for it; a
+// WebSocket through SOCKS5. Small proxies on node:net play the other side,
+// and check the Digest answers with node:crypto. Only 127.0.0.1.
+import { createHash } from "node:crypto"
+import { Server as TcpServer, Socket } from "node:net"
+import { Server, upgradeWebSocket } from "tz:http"
+
+function byteOf(bytes: Uint8Array, at: int): int {
+  const value = bytes[at]
+  if (value == undefined) return 0
+  return value.toInt()
+}
+
+function bytesOf(values: int[]): Uint8Array {
+  const out = new Uint8Array(values.length)
+  for (let i = 0; i < values.length && i < out.length; i++) {
+    out[i] = ((values[i] ?? 0) & 0xff).toUint8()
+  }
+  return out
+}
+
+function textOf(bytes: Uint8Array): string {
+  return new TextDecoder("latin1").decode(bytes)
+}
+
+let proxyEnds = 0
+
+async function pump(from: Socket, to: Socket) {
+  for await (const chunkResult of from) {
+    if (chunkResult.isErr()) break
+    to.write(chunkResult.value)
+  }
+  const endedResult = await to.end()
+  if (endedResult.isErr()) proxyEnds++
+}
+
+async function finish(socket: Socket) {
+  const endedResult = await socket.end()
+  if (endedResult.isErr()) proxyEnds++
+}
+
+const seen: string[] = []
+
+function socksServer(needLogin: boolean): TcpServer {
+  return new TcpServer({ port: 0, hostname: "127.0.0.1" }, async client => {
+    let stage = 0
+    let upstream: Socket | undefined = undefined
+    for await (const chunkResult of client) {
+      if (chunkResult.isErr()) break
+      const chunk = new Uint8Array(chunkResult.value)
+      if (upstream != undefined) {
+        upstream.write(chunk)
+        continue
+      }
+      let port = 0
+      let target = ""
+      let answer: int[] = []
+      if (stage == 0 && byteOf(chunk, 0) == 4) {
+        port = byteOf(chunk, 2) * 256 + byteOf(chunk, 3)
+        const ip = `${byteOf(chunk, 4)}.${byteOf(chunk, 5)}.${byteOf(chunk, 6)}.${byteOf(chunk, 7)}`
+        const rest = textOf(chunk.subarray(8)).split("\u0000")
+        target = ip.startsWith("0.0.0.") ? rest[1] ?? "" : ip
+        seen.push(`socks4 ${target} user=${rest[0] ?? ""}`)
+        if (target.startsWith("blocked")) {
+          client.write(bytesOf([0, 91, 0, 0, 0, 0, 0, 0]))
+          await finish(client)
+          break
+        }
+        answer = [0, 90, 0, 0, 0, 0, 0, 0]
+      } else if (stage == 0) {
+        const methods = Array.from(chunk.subarray(2)).map(value => value.toInt())
+        if (!needLogin) {
+          client.write(bytesOf([5, 0]))
+          stage = 2
+        } else if (methods.includes(2)) {
+          client.write(bytesOf([5, 2]))
+          stage = 1
+        } else {
+          client.write(bytesOf([5, 0xff]))
+          await finish(client)
+          break
+        }
+        continue
+      } else if (stage == 1) {
+        const userLength = byteOf(chunk, 1)
+        const user = textOf(chunk.subarray(2, 2 + userLength))
+        const password = textOf(chunk.subarray(3 + userLength))
+        if (user != "ann" || password != "secret") {
+          client.write(bytesOf([1, 1]))
+          await finish(client)
+          break
+        }
+        client.write(bytesOf([1, 0]))
+        stage = 2
+        continue
+      } else {
+        const kind = byteOf(chunk, 3)
+        let at = 4
+        if (kind == 1) {
+          target = `${byteOf(chunk, 4)}.${byteOf(chunk, 5)}.${byteOf(chunk, 6)}.${byteOf(chunk, 7)}`
+          at = 8
+        } else if (kind == 3) {
+          const length = byteOf(chunk, 4)
+          target = textOf(chunk.subarray(5, 5 + length))
+          at = 5 + length
+        } else {
+          const hex = Buffer.from(chunk.subarray(4, 20)).toString("hex")
+          target = hex == "00000000000000000000000000000001" ? "::1" : hex
+          at = 20
+        }
+        port = byteOf(chunk, at) * 256 + byteOf(chunk, at + 1)
+        seen.push(`socks5 type=${kind} ${target}`)
+        if (target.startsWith("blocked")) {
+          client.write(bytesOf([5, 2, 0, 1, 0, 0, 0, 0, 0, 0]))
+          await finish(client)
+          break
+        }
+        answer = [5, 0, 0, 1, 127, 0, 0, 1, port >> 8, port & 0xff]
+      }
+      const next = new Socket({ host: "127.0.0.1", port: port })
+      const connected = await next.connect()
+      if (connected.isErr()) break
+      client.write(bytesOf(answer))
+      upstream = next
+      void pump(next, client)
+    }
+    if (upstream != undefined) await finish(upstream)
+  })
+}
+
+function hex(algorithm: "md5" | "sha256", text: string): string {
+  const hashResult = createHash(algorithm)
+  if (hashResult.isErr()) return ""
+  return hashResult.value.update(text).digest("hex")
+}
+
+function paramsOf(header: string): Map<string, string> {
+  const params = new Map<string, string>()
+  for (const part of header.slice(7).split(", ")) {
+    const equals = part.indexOf("=")
+    let value = part.slice(equals + 1)
+    if (value.startsWith("\"")) value = value.slice(1, value.length - 1)
+    params.set(part.slice(0, equals), value)
+  }
+  return params
+}
+
+let digestNonces = 0
+function digestOk(header: string, method: string, algorithm: "md5" | "sha256"): boolean {
+  if (!header.startsWith("Digest ")) return false
+  const p = paramsOf(header)
+  const user = p.get("username") ?? ""
+  const realm = p.get("realm") ?? ""
+  const secret = hex(algorithm, `${user}:${realm}:secret`)
+  const action = hex(algorithm, `${method}:${p.get("uri") ?? ""}`)
+  const signed = `${secret}:${p.get("nonce") ?? ""}:${p.get("nc") ?? ""}:${p.get("cnonce") ?? ""}:auth:${action}`
+  return p.get("response") == hex(algorithm, signed) && p.get("opaque") == "op"
+}
+
+function digestServer(algorithm: "md5" | "sha256"): TcpServer {
+  const name = algorithm == "md5" ? "MD5" : "SHA-256"
+  return new TcpServer({ port: 0, hostname: "127.0.0.1" }, async client => {
+    let head = ""
+    let upstream: Socket | undefined = undefined
+    for await (const chunkResult of client) {
+      if (chunkResult.isErr()) break
+      const chunk = chunkResult.value
+      if (upstream != undefined) {
+        upstream.write(chunk)
+        continue
+      }
+      head += chunk.toString("latin1")
+      if (!head.includes("\r\n\r\n")) continue
+      const request = head
+      head = ""
+      const method = request.split(" ")[0] ?? ""
+      const target = request.split(" ")[1] ?? ""
+      let login = ""
+      for (const line of request.split("\r\n")) {
+        if (line.toLowerCase().startsWith("proxy-authorization:")) login = line.slice(20).trim()
+      }
+      if (!digestOk(login, method, algorithm)) {
+        digestNonces++
+        seen.push(`digest ${name} ${method} 407 ${login.split(" ")[0] ?? ""}`)
+        client.write("HTTP/1.1 407 Proxy Authentication Required\r\n" +
+                     `proxy-authenticate: Basic realm="tz"\r\n` +
+                     `proxy-authenticate: Digest realm="tz", qop="auth", algorithm=${name}, ` +
+                     `nonce="n${digestNonces}", opaque="op"\r\ncontent-length: 0\r\n\r\n`)
+        continue
+      }
+      seen.push(`digest ${name} ${method} ok`)
+      if (method != "CONNECT") {
+        const parsed = URL.parse(target)
+        if (parsed.isErr()) break
+        const url = parsed.value
+        const fetched = await fetch(`http://127.0.0.1:${url.port()}${url.pathname()}`)
+        const text = fetched.isOk() ? (await fetched.value.text()).unwrapOr("") : "fail"
+        client.write(`HTTP/1.1 200 OK\r\ncontent-length: ${text.length}\r\n\r\n${text}`)
+        continue
+      }
+      const port = parseInt(target.split(":").pop() ?? "").unwrapOr(0)
+      const next = new Socket({ host: "127.0.0.1", port: port })
+      const connected = await next.connect()
+      if (connected.isErr()) break
+      client.write("HTTP/1.1 200 Connection Established\r\n\r\n")
+      upstream = next
+      void pump(next, client)
+    }
+    if (upstream != undefined) await finish(upstream)
+  })
+}
+
+const site = new Server({ port: 0, hostname: "127.0.0.1" }, request => {
+  const upgradeResult = upgradeWebSocket(request)
+  if (upgradeResult.isErr()) return new Response(`hello from ${new URL(request.url).pathname()}`)
+  const peer = upgradeResult.value.socket
+  peer.on("message", data => {
+    const sent = peer.send(data)
+    if (sent.isErr()) console.log("server send:", sent.error.code)
+  })
+  peer.on("error", error => console.log("server error:", error.code))
+  return upgradeResult.value.response
+})
+
+const siteResult = site.listen()
+const openResult = socksServer(false).listen()
+const lockedResult = socksServer(true).listen()
+const md5Result = digestServer("md5").listen()
+const shaResult = digestServer("sha256").listen()
+if (siteResult.isErr() || openResult.isErr() || lockedResult.isErr() || md5Result.isErr() ||
+    shaResult.isErr()) {
+  console.log("cannot listen")
+  process.exit(1)
+}
+const sitePort = siteResult.value.port
+const open = openResult.value.port
+const locked = lockedResult.value.port
+
+async function get(what: string, url: string, proxy: string) {
+  const answered = await fetch(url, { proxy: { enabled: true, url: proxy } })
+  if (answered.isErr()) {
+    const e = answered.error
+    switch (e.kind) {
+      case "FETCH_ERROR_PROXY":
+        console.log(`${what}:`, e.kind, e.code, e.message.replaceAll(/\d{4,5}/g, "PORT"))
+        break
+      default:
+        console.log(`${what}:`, e.kind, e.code, e.message.replaceAll(/\d{4,5}/g, "PORT"))
+    }
+    return
+  }
+  const text = await answered.value.text()
+  console.log(`${what}:`, answered.value.status, text.unwrapOr(""))
+  for (const line of seen) console.log("  proxy saw:", line.replaceAll(/\d{4,5}/g, "PORT"))
+  seen.length = 0
+}
+
+await get("socks4", `http://127.0.0.1:${sitePort}/four`, `socks4://bob@127.0.0.1:${open}`)
+await get("socks4a", `http://far.test:${sitePort}/four-a`, `socks4a://127.0.0.1:${open}`)
+await get("socks5", `http://127.0.0.1:${sitePort}/five`, `socks5://127.0.0.1:${open}`)
+await get("socks5 v6", `http://[::1]:${sitePort}/six`, `socks5://127.0.0.1:${open}`)
+await get("socks5h", `http://far.test:${sitePort}/five-h`, `socks5h://127.0.0.1:${open}`)
+await get("socks5 login", `http://127.0.0.1:${sitePort}/login`, `socks5://ann:secret@127.0.0.1:${locked}`)
+await get("socks5 wrong", `http://127.0.0.1:${sitePort}/x`, `socks5://ann:nope@127.0.0.1:${locked}`)
+await get("socks5 none", `http://127.0.0.1:${sitePort}/x`, `socks5://127.0.0.1:${locked}`)
+await get("socks5 refused", `http://blocked.test:${sitePort}/x`, `socks5h://127.0.0.1:${open}`)
+await get("socks4 refused", `http://blocked.test:${sitePort}/x`, `socks4a://127.0.0.1:${open}`)
+await get("socks4 password", `http://127.0.0.1:${sitePort}/x`, `socks4://bob:pw@127.0.0.1:${open}`)
+seen.length = 0
+
+const md5 = `http://ann:secret@127.0.0.1:${md5Result.value.port}`
+const sha = `http://ann:secret@127.0.0.1:${shaResult.value.port}`
+await get("digest md5", `http://127.0.0.1:${sitePort}/plain`, md5)
+await get("digest md5 again", `http://127.0.0.1:${sitePort}/again`, md5)
+await get("digest sha-256", `http://127.0.0.1:${sitePort}/sha`, sha)
+await get("digest wrong", `http://127.0.0.1:${sitePort}/x`, `http://ann:nope@127.0.0.1:${shaResult.value.port}`)
+seen.length = 0
+
+async function talk(what: string, proxy: string) {
+  const socket = new WebSocket({ url: `ws://127.0.0.1:${sitePort}/ws`, proxy: { enabled: true, url: proxy } })
+  const answered = Promise.withResolvers<void>()
+  socket.on("message", data => {
+    if (typeof data == "string") console.log(`${what}: got ${data}`)
+    answered.resolve()
+  })
+  socket.on("error", error => console.log(`${what}: error ${error.code}`))
+  const connectedResult = await socket.connect()
+  if (connectedResult.isErr()) {
+    console.log(`${what}: cannot connect: ${connectedResult.error.kind} ${connectedResult.error.code}`)
+    return
+  }
+  const sent = socket.send(`hello ${what}`)
+  if (sent.isErr()) console.log(`${what}: send ${sent.error.code}`)
+  await answered.promise
+  await socket.close()
+  for (const line of seen) console.log("  proxy saw:", line.replaceAll(/\d{4,5}/g, "PORT"))
+  seen.length = 0
+}
+
+await talk("ws socks5", `socks5://127.0.0.1:${open}`)
+await talk("ws digest", sha)
+await talk("ws socks5 wrong", `socks5://ann:nope@127.0.0.1:${locked}`)
+
+await siteResult.value.stop()
+await openResult.value.stop()
+await lockedResult.value.stop()
+await md5Result.value.stop()
+await shaResult.value.stop()

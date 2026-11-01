@@ -217,7 +217,7 @@ async function repo(name: string) {
   соединение из пула, которое сервер успел закрыть, не съело запрос, перед отправкой рантайм
   проверяет его (H13: готово ли оно к чтению — пришёл конец, сброс или лишние байты — значит,
   мёртвое) и берёт новое; запрос в мёртвое соединение не уходит. Тест — `run/fetch_pool`.
-- **Прокси** (сделано 29 октября, кроме SOCKS и Digest): из окружения само — `HTTPS_PROXY` для
+- **Прокси** (сделано 29 октября, SOCKS и Digest — 1 ноября): из окружения само — `HTTPS_PROXY` для
   https://, `HTTP_PROXY` для http:// (сначала прописные, потом строчные; при `REQUEST_METHOD` —
   CGI — `HTTP_PROXY` не читается, защита от httpoxy), `NO_PROXY` (через запятую: имя с
   поддоменами, `.example.com`, IP, сеть `10.0.0.0/8`, `имя:порт`, `*`); `localhost`,
@@ -228,8 +228,24 @@ async function repo(name: string) {
   Basic`. Соединения через прокси — в пуле по паре «прокси + сервер», `timeout` считает и
   прокси. Ошибки — `FetchError` вида `FETCH_ERROR_PROXY`: `ERR_INVALID_PROXY_URL`, `ERR_PROXY_AUTH_REQUIRED`
   (407), `ERR_PROXY_REFUSED` (403, 502…); поля `proxy` (адрес без пароля) и `status`. Прокси не
-  отвечает — `FETCH_ERROR_NETWORK` с адресом прокси и словами «the proxy» в тексте. Ещё нет: SOCKS4/5,
-  Digest, прокси у WebSocket. Прокси через HTTP/2 не будет (1 ноября).
+  отвечает — `FETCH_ERROR_NETWORK` с адресом прокси и словами «the proxy» в тексте. Прокси через
+  HTTP/2 не будет (1 ноября).
+  - **SOCKS** (1 ноября): адрес прокси `socks4://`, `socks4a://`, `socks5://`, `socks5h://`
+    (порт по умолчанию 1080) — и в `proxy.url`, и в `HTTPS_PROXY` / `HTTP_PROXY`. Туннель SOCKS —
+    и для http://, и для https:// (потом TLS прямо с сервером). `socks4` и `socks5` ищут адрес
+    сервера сами (SOCKS4 — только IPv4), `socks4a` и `socks5h` отдают имя прокси. Пользователь
+    в адресе — USERID у SOCKS4 (пароль у SOCKS4 — `ERR_INVALID_PROXY_URL`), логин и пароль у
+    SOCKS5 (RFC 1929). Отказ прокси — `ERR_PROXY_REFUSED` со словами ответа SOCKS (`status` —
+    0), логин не принят или не дан — `ERR_PROXY_AUTH_REQUIRED`.
+  - **Digest** (1 ноября): 407 с `Proxy-Authenticate: Digest` (MD5, MD5-sess, SHA-256,
+    SHA-256-sess; `qop=auth` или без него) при логине в адресе — тот же запрос ещё раз с
+    ответом Digest (для `CONNECT` — новое соединение; для http:// — если тело можно послать
+    снова). Вызов запоминается для этого прокси и логина: следующие запросы идут сразу с Digest
+    (счётчик `nc` растёт), новый 407 — ещё одна попытка с новым `nonce`, тот же `nonce` — значит,
+    пароль не тот: `ERR_PROXY_AUTH_REQUIRED`. Сначала, как и раньше, посылается Basic (как curl
+    и Go). MD5 и SHA-256 — на tz (`library/http/fetch_proxy.tz`, без OpenSSL).
+  - Тест — `run/fetch_socks` (SOCKS4/4a/5/5h, логин, отказы, Digest MD5 и SHA-256, WebSocket
+    через SOCKS5 и Digest); код прокси — часть `tz:fetch` в `library/http/fetch_proxy.tz`.
 - **Ошибки — `Result`** (переделано 29 октября): `fetch` отдаёт
   `Promise<Result<Response, FetchError>>`. `FetchError` — объект с меткой `kind` (что делать
   программе) и закрытым списком `code`. С 31 октября (Ф7, Ф9) `kind` уникален во всей
@@ -384,7 +400,7 @@ HTTP/2 без TLS (h2c), «Hello, World!», `oha --http2 -c 32 -p 8` (32 сое�
 «Pendulum»), а ответ рядом с долгим расчётом уходит не позже чем через ~2 мс. С `await
 request.text()` и у `tz:http2` с `write` и `end` — 1,54–1,68 млн.
 
-## 7. TCP: `node:net` (первая часть сделана 29 октября)
+## 7. TCP: `node:net` (сделано 29 октября — 1 ноября)
 
 ```ts
 import { Server, Socket } from "node:net"
@@ -420,10 +436,67 @@ const endedResult = await socket.end()
 - `Server` — обработчик `async (socket) => …` на каждое соединение, своей задачей;
   `idleTimeout` — сколько соединение может молчать; `stop({ timeout })` — как у `tz:http`.
 - `isIP`, `isIPv4`, `isIPv6`.
-- **Ещё не сделано** из решения ([tmp/spec/09-sockets.md](../tmp/spec/09-sockets.md)): слой
-  `tz:socket` (сокет любого вида, сырые сокеты, все настройки), сокеты Unix и
-  именованные каналы (`{ path }`), `SocketError` с метками у потока (сейчас поток отдаёт
-  `StreamError`), обработчик-не-`async`, объявления для редактора (`patch.cmake`).
+- **Сокеты Unix и именованные каналы** (1 ноября): `new Socket({ path })` и `new Server({ path },
+  …)` — настройки адреса — объединение `{ host; port; … } | { path; … }`. Путь вида
+  `\\.\pipe\имя` — именованный канал Windows (`CreateNamedPipe` / `ConnectNamedPipe`, чтение и
+  запись — `ReadFile` / `WriteFile` на том же IOCP), любой другой — сокет Unix (`AF_UNIX`,
+  Windows 10 1803+). Файл сокета Unix сервер удаляет в `stop()`; занятый путь — `EADDRINUSE`
+  (у канала — тоже). Ошибки подключения — ещё `ENOENT` (никто не слушает этот путь), `EBUSY`
+  (все экземпляры канала заняты), `EACCES`; у ошибок `host` — путь, `port` — 0.
+  `Listening.path` — путь, `port` — 0; `remoteAddress()` сокета — путь.
+- **Настройки сокета** (T8, 1 ноября): у `Socket` — `localAddress`, `localPort` (привязка перед
+  подключением), `allowHalfOpen` (`end()` — только `FIN`, чтение идёт дальше), `noDelay`,
+  `keepAlive` с `keepAliveDelay` / `keepAliveInterval` (мс) и `keepAliveCount`,
+  `sendBufferSize`, `receiveBufferSize`, `ttl`, `typeOfService`, `userTimeout` (мс,
+  `TCP_MAXRTMS` в Windows), `linger` (с, `0` — `RST` при закрытии); у `Server` — те же для
+  принятых соединений и ещё `backlog` (511), `ipv6Only`, `reusePort` (в Windows `SO_REUSEPORT`
+  нет — `listen()` даёт `Err` `ENOTSUP`, как node). Методы `localAddress()`, `localPort()`.
+  Настройку, которую система не приняла, `Socket` пропускает молча, как node. `interface`
+  (привязка к сетевому интерфейсу) — нет (в Windows — индекс интерфейса, не имя; потом).
+  Тест — `run/net_path`.
+- **Ещё не сделано** из решения ([tmp/spec/09-sockets.md](../tmp/spec/09-sockets.md)):
+  обработчик-не-`async`, объявления для редактора (`patch.cmake`).
+
+### Сокет любого вида: `tz:socket` (сделано 1 ноября)
+
+```ts
+import { Socket } from "tz:socket"
+
+const ping = new Socket({ domain: "ipv4", type: "raw", protocol: 1 })   // ICMP
+const sentResult = await ping.sendTo(packet, { address: "8.8.8.8", port: 0 })
+if (sentResult.isErr() && sentResult.error.kind == "SOCKET_OPERATION_ERROR_PERMISSION") { … }
+
+const server = new Socket({ domain: "ipv4", type: "stream" })
+server.configure({ reuseAddress: true })        // Result; все настройки с типами
+server.bind({ address: "127.0.0.1", port: 0 })  // Result
+server.listen(128)                              // Result
+const acceptedResult = await server.accept()    // Promise<Result<Socket, SocketOperationError>>
+```
+- Как `socket2` у Rust: `new Socket({ domain: "ipv4" | "ipv6" | "unix", type: "stream" |
+  "datagram" | "raw" | "seqpacket", protocol? })` — только настройки, системный сокет создаётся
+  при первом действии. Действия — `bind`, `listen`, `accept`, `connect`, `send` / `sendTo`
+  (`outOfBand`, `dontRoute`; отдают число байтов), `receive` / `receiveFrom` (`size`, `peek`,
+  `outOfBand`, `waitAll`; `receiveFrom` — `Datagram` с адресом отправителя), `shutdown("read" |
+  "write" | "both")`, `configure(settings)`, `close()`; адреса — `localAddress()` /
+  `remoteAddress()` (`Endpoint`). Адрес — `{ address, port }` (только IP-литерал, имён нет: DNS —
+  отдельно) или `{ path }` у `unix`; `""` при `bind` — любой адрес.
+- Настройки `configure`: `reuseAddress`, `broadcast`, `keepAlive` (+ `keepAliveDelay`,
+  `keepAliveInterval`, `keepAliveCount`), `noDelay`, `linger`, `sendBufferSize`,
+  `receiveBufferSize`, `ttl`, `typeOfService`, `ipv6Only`, `headerIncluded` (`IP_HDRINCL`),
+  `multicastTtl`, `multicastLoop`, `userTimeout`, `outOfBandInline`, `dontFragment`. Первую,
+  которую система не приняла, `configure` возвращает `Err` вида `SETTING` с её именем.
+- Ошибки — `SocketOperationError` (имя `SocketError` занято `node:net`):
+  `SOCKET_OPERATION_ERROR_PERMISSION` (`EACCES`; у сырого сокета в тексте подсказка «run the
+  program as administrator (Linux: setcap cap_net_raw+ep ./app)» — это N6d),
+  `…_REQUEST` (`ERR_INVALID_ADDRESS`, `ERR_SOCKET_CLOSED`, `ERR_SOCKET_BUSY`,
+  `ERR_NOT_SUPPORTED`, `ERR_INVALID_ARG_VALUE`), `…_SYSTEM` (код системы: `ECONNREFUSED`,
+  `ESOCKTNOSUPPORT`…), `…_SETTING` (`setting`).
+- Рантайм — `runtime/library/net/socket/socket.c`: свой объект над `SOCKET` на том же IOCP
+  (`AcceptEx`, `ConnectEx`, `WSARecvFrom`, `WSASendTo`). `node:net` и `node:dgram` на него **не**
+  переведены (решено 1 ноября): у них свой быстрый путь (буферы рантайма, пул, TLS, HTTP), а
+  перевод дал бы лишний слой на каждом чтении; `tz:socket` — для того, чего у них нет. Ограничения
+  Windows: сырой TCP слать нельзя, `seqpacket` — нет, `AF_UNIX` — только `stream`. Тест —
+  `run/socket_any`.
 
 ## 8. Пакеты: `tz:packet` (сделано 29 октября)
 
@@ -435,7 +508,7 @@ destination, protocol, segment)`. Ошибки — `Result` с `PacketError`: `k
 `ERR_TRUNCATED`, `ERR_INVALID_HEADER`, `ERR_INVALID_CHECKSUM`, поле `offset`. Отправлять пакеты
 нечем, пока нет сырых сокетов `tz:socket` (ping, traceroute — потом).
 
-## 9. WebSocket (первая часть сделана 29 октября)
+## 9. WebSocket (сделано 29 октября — 1 ноября)
 
 ```ts
 // Клиент: один объект, конструктор — настройки, connect() — Result.
@@ -482,11 +555,29 @@ new Server({ port: 3000 }, request => {
   `WEB_SOCKET_CONNECT_ERROR_REFUSED` с кодом `ERR_NO_HTTP2` или `ERR_NO_EXTENDED_CONNECT`;
   `"1.1"` — всегда HTTP/1.1. У запроса `CONNECT` поле `request.connectProtocol` — его
   `:protocol`. Тест — `run/websocket_http2`.
-- **Ещё не сделано** из решения ([tmp/spec/10-websocket.md](../tmp/spec/10-websocket.md)):
-  `timeout` и `idleTimeout`, пинги рантайма, тип `CloseCode` (сейчас `close(code: int)`),
-  `bufferedAmount()`, прокси, `TLS` и `PROXY` в ошибках подключения, объявления для редактора.
+- **Сроки, пинги, коды закрытия, прокси** (сделано 1 ноября):
+  - `timeout` — срок подключения целиком (адрес, TCP, TLS, прокси, рукопожатие; у потока
+    HTTP/2 — сброс потока): `WEB_SOCKET_CONNECT_ERROR_TIMEOUT`, `TIMEOUT_ERR`.
+  - `idleTimeout` (у клиента в настройках, у сервера — в `upgradeWebSocket`; 120 000 мс, `0` —
+    без срока): тишина половину срока — ping, весь срок — `"error"`
+    `WEB_SOCKET_ERROR_TIMEOUT` `ERR_IDLE_TIMEOUT` и `"close"` 1006. Таймер — на tz.
+  - `close(code?: CloseCode, reason?)`: `CloseCode = 1000 | 3000 … 4999` — тип в прелюдии, как
+    `HttpStatus`; число из переменной подходит после проверки, доказывающей предел
+    (`if (code >= 3000 && code <= 4999)`; сообщение компилятора подскажет). Отдельной функции
+    `isCloseCode` нет: проверка «1000 или 3000–4999» одной функцией не сужает (факты
+    компилятора — только «и»). Причина длиннее 123 байт обрезается по целому символу.
+  - `bufferedAmount()` — байты, отданные `send()`, но ещё не ушедшие в сеть.
+  - Ошибки подключения — ещё `WEB_SOCKET_CONNECT_ERROR_TLS` (коды `TlsCode`, как у `fetch`) и
+    `WEB_SOCKET_CONNECT_ERROR_PROXY` (`ERR_INVALID_PROXY_URL`, `ERR_PROXY_AUTH_REQUIRED`,
+    `ERR_PROXY_REFUSED`, `status`); у `"error"` — коды сети `ECONNRESET`, `ECONNABORTED`,
+    `ERR_TLS_FAILED`, `UNKNOWN`.
+  - Прокси — как у `fetch`: `proxy` в настройках или `HTTP_PROXY` (для `ws:`) / `HTTPS_PROXY`
+    (для `wss:`) и `NO_PROXY`; всегда туннелем `CONNECT`, и для `ws:` (прокси не видит
+    кадров). Через прокси — только HTTP/1.1, как у `fetch`.
+  Тест — `run/websocket_limits`.
+- **Ещё не сделано:** объявления для редактора.
 
-## 10. UDP: `node:dgram` (сделано 29 октября)
+## 10. UDP: `node:dgram` (сделано 29 октября, DTLS — 1 ноября)
 
 ```ts
 import { Socket } from "node:dgram"
@@ -524,8 +615,23 @@ await socket.close()                             // ждёт конца приё
   что пришло не в ответ на `send`). Поля `errno` нет. Тексты — понятным языком.
 - Рантайм — `runtime/library/net/udp/udp.c`: `WSARecvFrom` / `WSASendTo` на порту завершения
   цикла, поиск имён — `GetAddrInfoExW`; в Linux пока нет (как и TCP).
-- **Ещё не сделано:** DTLS, сырые UDP (`tz:socket`), объявления для редактора. QUIC и HTTP/3
-  не будет — раздел 12.
+- **DTLS** (1 ноября): `transport: { secure: true, … }` в настройках `Socket`. Сервер —
+  `{ secure: true, cert, key }`: после `bind()` у каждого адреса-собеседника своя сессия DTLS
+  1.2 (с обменом cookie — HMAC-SHA256 адреса на случайном ключе сокета, против подмены адреса;
+  не больше 4096 сессий; незаконченное рукопожатие живёт 10 с), `"message"` несёт расшифрованные
+  данные, `send(data, { address, port })` шифрует для сессии этого адреса (нет сессии —
+  `UDP_SEND_ERROR_REQUEST` `ERR_NO_SESSION`). Клиент — `{ secure: true, servername? }`:
+  `connect({ address, port })` делает рукопожатие и проверяет сертификат и имя (как у `fetch`;
+  `servername` по умолчанию — адрес), ошибка — `UDP_CONNECT_ERROR_TLS` (`code` — как у TLS:
+  `ERR_TLS_CERT_ALTNAME_INVALID`, `DEPTH_ZERO_SELF_SIGNED_CERT`…, `ETIMEDOUT` за 10 с); до
+  `connect()` `send` — `ERR_NOT_CONNECTED`. Неверный сертификат или ключ сервера —
+  `UDP_BIND_ERROR_TLS`. `close()` шлёт `close_notify` каждой сессии. Повторы рукопожатия —
+  таймер рантайма раз в 100 мс (`DTLSv1_handle_timeout`), MTU — 1500. Рантайм — `tls.c`
+  (OpenSSL, `BIO_s_dgram_mem`), `udp.c` отдаёт ему каждое письмо сокета с DTLS. OpenSSL теперь
+  собран с DTLS (`build.ps1` без `no-dtls`): размер программ с TLS не изменился (замер 1 ноября:
+  https-клиент 6 209 024 → 6 208 512 байт). Тест — `run/dgram_dtls`.
+- **Ещё не сделано:** объявления для редактора. Сырые UDP — `tz:socket` (раздел 7). QUIC и
+  HTTP/3 не будет — раздел 12.
 - **`ref()` / `unref()` нет** (решено 30 октября): открытый сокет держит программу, отпускает её
   `close()`; добавим, если понадобится.
 
@@ -622,7 +728,7 @@ if (connected.isOk()) {
 
 ## 12. Позже
 
-SOCKS-прокси — решён 29 октября, не сделан (`tmp/design`, `tmp/spec`). `node:http` не будет.
+`node:http` не будет.
 
 **HTTP/3 и QUIC не будет** (решено 1 ноября). Замер движков (ngtcp2 + nghttp3, OpenSSL QUIC,
 quic-go; `tmp/spec/13-http3.md`): HTTP/3 на запрос дороже HTTP/2 по процессору и у сервера, и у

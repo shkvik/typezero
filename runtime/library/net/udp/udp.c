@@ -8,6 +8,7 @@
 #include "runtime/core/tzrt/tzrt.h"
 #include "runtime/library/bytes/bytes/bytes.h"
 #include "runtime/library/net/net/net.h"
+#include "runtime/library/net/udp/udp.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -51,6 +52,8 @@ typedef struct UdpSocket {
   int32_t family;
   uint8_t closed, orphan, connected, dual;
   int32_t ops;
+  void *dtls;
+  const UdpDtlsOps *dtls_ops;
   int32_t pending_error;
   NetOp rop;
   TzPromise *received;
@@ -86,7 +89,13 @@ typedef struct UdpLookup {
 static void udp_drop(void *object);
 static const TzLayout udp_layout = {udp_drop, NULL, 0, 0, "Socket", 6, 0};
 
-static void udp_free(UdpSocket *u) { tz_obj_free(u); }
+static void udp_free(UdpSocket *u) {
+  if (u->dtls) {
+    u->dtls_ops->release(u->dtls);
+    u->dtls = NULL;
+  }
+  tz_obj_free(u);
+}
 
 static void udp_settle(UdpSocket *u) {
   if (u->orphan && u->ops == 0) {
@@ -97,6 +106,9 @@ static void udp_settle(UdpSocket *u) {
 static void udp_close_socket(UdpSocket *u) {
   if (u->closed) {
     return;
+  }
+  if (u->dtls) {
+    u->dtls_ops->close(u->dtls);
   }
   u->closed = 1;
   closesocket(u->s);
@@ -414,19 +426,33 @@ int64_t tz_udp_membership(void *sock, void *group_obj, uint64_t group_meta, void
 
 static void receive_done(TzWork *w);
 
-static void receive_settle(UdpSocket *u, int32_t error, uint32_t bytes) {
+static int receive_settle(UdpSocket *u, int32_t error, uint32_t bytes) {
   if (error == 0) {
-    TzBytes *data = net_bytes(u->data, bytes);
+    const uint8_t *data = u->data;
+    uint32_t length = bytes;
+    if (u->dtls) {
+      uint8_t *plain = NULL;
+      uint32_t plain_length = 0;
+      if (!u->dtls_ops->input(u->dtls, &u->from, u->from_length, u->data, bytes, &plain,
+                              &plain_length)) {
+        return 0;
+      }
+      data = plain;
+      length = plain_length;
+    }
+    TzBytes *received = net_bytes(data, length);
     address_of(&u->from, u->sender, sizeof u->sender, &u->sender_port);
-    net_fulfill(&u->received, &data, sizeof data);
-    return;
+    net_fulfill(&u->received, &received, sizeof received);
+    return 1;
   }
   if (u->closed || error == ERROR_OPERATION_ABORTED || error == WSA_OPERATION_ABORTED) {
     TzBytes *none = NULL;
     net_fulfill(&u->received, &none, sizeof none);
-    return;
+    return 1;
   }
   net_reject(&u->received, net_system_error(u->make, error, "recvmsg", NULL, 1));
+
+  return 1;
 }
 
 static int receive_retry(UdpSocket *u, int32_t error) {
@@ -469,7 +495,9 @@ static void receive_next(UdpSocket *u) {
     if (error && receive_retry(u, error)) {
       continue;
     }
-    receive_settle(u, error, got);
+    if (!receive_settle(u, error, got)) {
+      continue;
+    }
     return;
   }
 }
@@ -486,7 +514,9 @@ static void receive_done(TzWork *w) {
     receive_next(u);
     return;
   }
-  receive_settle(u, error, u->rop.bytes);
+  if (!receive_settle(u, error, u->rop.bytes)) {
+    receive_next(u);
+  }
 }
 
 void tz_udp_receive(TzPromise *p, void *sock, TzMaker make) {
@@ -520,13 +550,78 @@ static void send_done(TzWork *w);
 
 static void send_settle(UdpSend *r, int32_t error) {
   UdpSocket *u = r->u;
-  if (error) {
+  if (r->promise && error) {
     net_reject(&r->promise, net_system_error(r->make, error, "send", r->where, 1));
-  } else {
+  } else if (r->promise) {
     net_fulfill(&r->promise, NULL, 0);
   }
   tz_free(r);
   udp_settle(u);
+}
+
+void udp_send_datagram(void *sock, const SOCKADDR_STORAGE *to, int to_length, const uint8_t *data,
+                       size_t length, TzPromise *promise, TzMaker make) {
+  UdpSocket *u = (UdpSocket *)sock;
+  if (u->closed) {
+    if (promise) {
+      net_reject(&promise, udp_failure(make, "ERR_SOCKET_CLOSED", "the socket is closed", "send"));
+    }
+    return;
+  }
+  UdpSend *r = (UdpSend *)tz_alloc(sizeof(UdpSend) + length);
+  memset(r, 0, sizeof *r);
+  r->u = u;
+  r->promise = promise;
+  r->make = make;
+  r->length = (uint32_t)length;
+  if (length) {
+    memcpy(r->data, data, length);
+  }
+  WSABUF buffer;
+  buffer.len = (ULONG)length;
+  buffer.buf = (CHAR *)r->data;
+  DWORD sent = 0;
+  net_op_begin(&r->op, send_done, 0);
+  ++u->ops;
+  int rc = to && to_length > 0 ? WSASendTo(u->s, &buffer, 1, &sent, 0, (const SOCKADDR *)to,
+                                           to_length, &r->op.ov, NULL)
+                               : WSASend(u->s, &buffer, 1, &sent, 0, &r->op.ov, NULL);
+  int32_t error = rc == SOCKET_ERROR ? WSAGetLastError() : 0;
+  if (error == WSA_IO_PENDING) {
+    net_op_wait(&r->op);
+    return;
+  }
+  --u->ops;
+  send_settle(r, error);
+}
+
+void udp_send_now(void *sock, const SOCKADDR_STORAGE *to, int to_length, const uint8_t *data,
+                  size_t length) {
+  UdpSocket *u = (UdpSocket *)sock;
+  if (u->closed) {
+    return;
+  }
+  if (to && to_length > 0) {
+    sendto(u->s, (const char *)data, (int)length, 0, (const SOCKADDR *)to, to_length);
+  } else {
+    send(u->s, (const char *)data, (int)length, 0);
+  }
+}
+
+void udp_attach_dtls(void *sock, void *state, const UdpDtlsOps *ops) {
+  UdpSocket *u = (UdpSocket *)sock;
+  if (u->dtls) {
+    u->dtls_ops->release(u->dtls);
+  }
+  u->dtls = state;
+  u->dtls_ops = ops;
+}
+
+int udp_peer(void *sock, SOCKADDR_STORAGE *out, int *length) {
+  UdpSocket *u = (UdpSocket *)sock;
+  *length = sizeof *out;
+
+  return getpeername(u->s, (SOCKADDR *)out, length) == 0;
 }
 
 static void send_done(TzWork *w) {
@@ -571,6 +666,11 @@ void tz_udp_send(TzPromise *p, void *sock, void *data, void *address_obj, uint64
   }
   TzBytes *bytes = (TzBytes *)data;
   size_t size = (size_t)tz_bytes_byte_length(bytes);
+  if (u->dtls) {
+    u->dtls_ops->seal(u->dtls, host[0] ? &address : NULL, host[0] ? length : 0,
+                      (const uint8_t *)bytes->data, size, promise, make);
+    return;
+  }
   UdpSend *r = (UdpSend *)tz_alloc(sizeof(UdpSend) + size);
   memset(r, 0, sizeof *r);
   r->u = u;

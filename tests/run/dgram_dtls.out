@@ -1,0 +1,6 @@
+before connect: UDP_SEND_ERROR_REQUEST ERR_NOT_CONNECTED
+client sent: true
+server got: hello dtls 10
+client got: HELLO DTLS
+server to nobody: UDP_SEND_ERROR_REQUEST ERR_NO_SESSION
+wrong name: UDP_CONNECT_ERROR_TLS ERR_TLS_CERT_ALTNAME_INVALID
