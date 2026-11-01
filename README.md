@@ -3158,7 +3158,8 @@ await listening.stop()
   `toStream()`. Обработчик без `end()` — сброс потока с `INTERNAL_ERROR`. Ошибки — тип на
   функцию, коды сброса — имена RFC 9113.
 - **Пока нет:** прокси у WebSocket, слой `tz:socket`, сокеты Unix,
-  SOCKS-прокси, HTTP/3; сеть в Linux (epoll и свой DNS). `node:http` не будет.
+  SOCKS-прокси; сеть в Linux (epoll и свой DNS). `node:http` и HTTP/3 не будет (HTTP/3 —
+  прокси перед сервером, [net.md](docs/net.md), раздел 12).
 - **Скорость** (`bench/http.ps1`, «Hello, World!», 128 соединений, 10 с): tz — 314 тыс.
   запросов в секунду на всех ядрах, Go (`net/http`) — 239 тыс., node — 61 тыс.
 

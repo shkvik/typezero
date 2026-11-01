@@ -174,7 +174,7 @@ type FetchStep =
       kind: "FETCH_STEP_CONNECTION_REUSED"
       elapsed: double
       address: string
-      protocol: "http/1.1" | "h2" | "h3"
+      protocol: "http/1.1" | "h2"
       idle: double
     }
   | { kind: "FETCH_STEP_CONNECTION_CLOSED_BY_SERVER"; elapsed: double; address: string; idle: double }
@@ -186,7 +186,7 @@ type FetchStep =
   | {
       kind: "FETCH_STEP_TLS_DONE"
       elapsed: double
-      protocol: "http/1.1" | "h2" | "h3"
+      protocol: "http/1.1" | "h2"
       tlsVersion: "TLSv1.2" | "TLSv1.3"
     }
   | { kind: "FETCH_STEP_REQUEST_SENT"; elapsed: double; method: string; url: string; bytes: int }
