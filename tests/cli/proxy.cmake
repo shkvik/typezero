@@ -1,7 +1,7 @@
 # fetch through a proxy (docs/net.md, section 2): HTTP_PROXY from the
 # environment for http:// (the request goes to the proxy with the full
 # address), proxy: { enabled, url } in the code for https:// (a CONNECT
-# tunnel, then TLS with the server itself), a proxy that asks for a login
+# tunnel, then TLS with the server itself; its steps in trace), a proxy that asks for a login
 # (407) and one given with it, a proxy that refuses (403), a proxy URL that
 # is not one, localhost always past the proxy. Node.js plays the proxy on
 # 127.0.0.1, and sends every host to 127.0.0.1.
@@ -91,6 +91,12 @@ await show(\"env http\", `http://example.test:\${plain.port}/`)
 await show(\"localhost\", `http://localhost:\${plain.port}/`)
 await show(\"no proxy\", `http://example.test:\${plain.port}/`, { proxy: { enabled: false }, timeout: 3000 })
 process.env.HTTP_PROXY = \"\"
+const kinds: string[] = []
+const traced = await fetch(`https://localhost:\${secure.port}/`, { proxy: { enabled: true, url: proxyUrl }, trace: step => {
+  kinds.push(step.kind == \"FETCH_STEP_TLS_DONE\" ? `TLS_DONE \${step.protocol}` : step.kind.slice(11))
+} })
+const tracedText = traced.isOk() ? must(await traced.value.text()) : traced.error.code
+console.log(\"traced tunnel\", tracedText, kinds.join(\" \"))
 await show(\"https tunnel\", `https://localhost:\${secure.port}/`, { proxy: { enabled: true, url: proxyUrl } })
 await show(\"login asked\", `https://localhost:\${secure.port}/`, { proxy: { enabled: true, url: \"http://127.0.0.1:${auth_port}\" } })
 await show(\"login given\", `https://localhost:\${secure.port}/`, { proxy: { enabled: true, url: \"http://ann:secret@127.0.0.1:${auth_port}\" } })
@@ -122,6 +128,7 @@ set(expected [[
 env http 200 plain proxy
 localhost 200 plain direct
 no proxy (direct, no such host)
+traced tunnel secure CONNECTING CONNECTED PROXY_TUNNEL_OPENED TLS_DONE http/1.1 REQUEST_SENT RESPONSE_STARTED BODY_RECEIVED CONNECTION_RETURNED
 https tunnel 200 secure
 login asked FETCH_ERROR_PROXY ERR_PROXY_AUTH_REQUIRED the proxy 127.0.0.1:AUTH asks for a login (407): put user and password into its URL, http://user:password@host:port
 login given 200 secure

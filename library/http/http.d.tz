@@ -114,10 +114,11 @@ export type ServeOptions = {
 /**
  * HTTP/2 of a server, one of two:
  * - `{ enabled: false }` — only HTTP/1.1;
- * - `{ enabled: true, cleartext?, maxConcurrentStreams? }` — HTTP/2: with
- *   https by ALPN, and without TLS too when `cleartext` is true;
+ * - `{ enabled: true, cleartext?, maxConcurrentStreams?, webSocket? }` —
+ *   HTTP/2: with https by ALPN, and without TLS too when `cleartext` is true;
  *   `maxConcurrentStreams` — how many requests one connection may have at
- *   once; 100.
+ *   once; 100; `webSocket` — whether a WebSocket may come as an HTTP/2 stream
+ *   (RFC 8441, `upgradeWebSocket` takes it); true.
  */
 export type ServeHttp2 =
   | {
@@ -127,6 +128,7 @@ export type ServeHttp2 =
       enabled: true;
       cleartext?: boolean;
       maxConcurrentStreams?: int;
+      webSocket?: boolean;
     };
 
 /**

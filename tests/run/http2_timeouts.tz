@@ -1,0 +1,210 @@
+// HTTP/2 streams keep the server's headersTimeout and requestTimeout
+// (docs/net.md, section 1). Raw h2c connections write frames by hand:
+// - a request head that never ends (HEADERS without END_HEADERS): after
+//   headersTimeout the server answers 408 on that stream, resets it with
+//   NO_ERROR and sends GOAWAY - in the middle of a header block the
+//   connection cannot carry anything else - then closes the connection;
+//   the same for trailers that never end;
+// - a request body that never ends (HEADERS without END_STREAM, no DATA):
+//   after requestTimeout the handler reading the body gets
+//   BODY_ERROR_TIMEOUT, the client gets 408 and RST_STREAM NO_ERROR, and the
+//   connection stays: the next request on it is answered;
+// - the same while the handler streams its answer: the stream is reset with
+//   CANCEL, the answer is cut.
+// The server counts time with a clock of about 16 ms steps, so a timeout may
+// come up to that much early by the client's clock: the checks allow 50 ms.
+// Only 127.0.0.1.
+import { Socket } from "node:net"
+import { Server } from "tz:http"
+
+const encoder = new TextEncoder()
+const seen = Promise.withResolvers<string>()
+const options = {
+  port: 0,
+  hostname: "127.0.0.1",
+  headersTimeout: 300,
+  requestTimeout: 600,
+  http2: { enabled: true, cleartext: true },
+}
+const server = new Server(options, async request => {
+  const path = new URL(request.url).pathname()
+  if (path == "/upload") {
+    const text = await request.text()
+    if (text.isErr()) seen.resolve(`${text.error.kind} ${text.error.message}`)
+    else seen.resolve(`read ${text.value}`)
+    return new Response("uploaded")
+  }
+  if (path == "/stream") {
+    return Response.stream(new ReadableStream({
+      start: controller => {
+        controller.enqueue(encoder.encode("part "))
+      },
+      pull: async controller => {
+        await new Promise<void>(resolve => setTimeout(resolve, 1000))
+        controller.enqueue(encoder.encode("late"))
+        controller.close()
+      },
+    }))
+  }
+  return new Response("fast")
+})
+
+const GET: uint8 = 0x82
+const POST: uint8 = 0x83
+const preface = Buffer.from("PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n")
+const settings = Buffer.from([0, 0, 0, 4, 0, 0, 0, 0, 0])
+
+type Frame = { type: int; flags: int; stream: int; payload: Buffer }
+
+function frame(type: uint8, flags: uint8, stream: uint8, payload: Buffer): Buffer {
+  const length = payload.length
+  const high = ((length >> 16) & 255).toUint8()
+  const middle = ((length >> 8) & 255).toUint8()
+  const low = (length & 255).toUint8()
+  const head = Buffer.from([high, middle, low, type, flags, 0, 0, 0, stream])
+  return Buffer.concat([head, payload])
+}
+
+function requestHead(method: uint8, path: string): Buffer {
+  const pathBytes = Buffer.from(path)
+  const authority = Buffer.from("127.0.0.1")
+  const start = Buffer.from([method, 0x86, 4, (pathBytes.length & 255).toUint8()])
+  const authorityStart = Buffer.from([1, (authority.length & 255).toUint8()])
+  return Buffer.concat([start, pathBytes, authorityStart, authority])
+}
+
+function codeName(code: int): string {
+  if (code == 0) return "NO_ERROR"
+  if (code == 2) return "INTERNAL_ERROR"
+  if (code == 8) return "CANCEL"
+  return `${code}`
+}
+
+function resetCode(received: Frame): string {
+  const payload = received.payload
+  if (payload.length < 4) return "short"
+  return codeName(payload.readUInt32BE(0))
+}
+
+function statusOf(received: Frame): string {
+  const payload = received.payload
+  if (payload.length > 0 && payload[0] == 0x88) return "200"
+  return payload.toString("latin1").includes("408") ? "408" : "other"
+}
+
+async function readFrames(socket: Socket, onFrame: (received: Frame) => boolean): Promise<string> {
+  let pending = Buffer.alloc(0)
+  for await (const chunkResult of socket) {
+    if (chunkResult.isErr()) return "error"
+    pending = Buffer.concat([pending, chunkResult.value])
+    while (pending.length >= 9) {
+      const length = pending.readUIntBE(0, 3)
+      if (pending.length < 9 + length) break
+      const received = {
+        type: pending.readUInt8(3),
+        flags: pending.readUInt8(4),
+        stream: pending.readUInt32BE(5),
+        payload: pending.subarray(9, 9 + length),
+      }
+      pending = pending.subarray(9 + length)
+      if (onFrame(received)) return "stopped"
+    }
+  }
+  return "closed"
+}
+
+async function stuck(port: int, name: string, frames: Buffer[]): Promise<string> {
+  const socket = new Socket({ host: "127.0.0.1", port: port, timeout: 5000 })
+  const connected = await socket.connect()
+  if (connected.isErr()) return `${name}: no connection`
+  const started = performance.now()
+  socket.write(Buffer.concat([preface, settings, ...frames]))
+  let status = "none"
+  let reset = "none"
+  let goaway = false
+  const end = await readFrames(socket, received => {
+    if (received.type == 1 && received.stream == 1) status = statusOf(received)
+    if (received.type == 3 && received.stream == 1) reset = resetCode(received)
+    if (received.type == 7) goaway = true
+    return false
+  })
+  const elapsed = performance.now() - started
+  const inTime = elapsed >= 250 && elapsed < 3000
+  return `${name}: ${status}, reset ${reset}, goaway ${goaway}, ${end}, after headersTimeout ${inTime}`
+}
+
+function stuckHead(port: int): Promise<string> {
+  const head = frame(1, 1, 1, requestHead(GET, "/fast"))
+  return stuck(port, "stuck head", [head])
+}
+
+function stuckTrailers(port: int): Promise<string> {
+  const head = frame(1, 4, 1, requestHead(POST, "/upload"))
+  const body = frame(0, 0, 1, Buffer.from("abc"))
+  const trailers = frame(1, 1, 1, Buffer.from([0, 5, 0x78, 0x2d, 0x65, 0x6e, 0x64, 1, 0x31]))
+  return stuck(port, "stuck trailers", [head, body, trailers])
+}
+
+async function slowBody(port: int): Promise<string> {
+  const socket = new Socket({ host: "127.0.0.1", port: port, timeout: 5000 })
+  const connected = await socket.connect()
+  if (connected.isErr()) return "slow body: no connection"
+  const started = performance.now()
+  socket.write(Buffer.concat([preface, settings, frame(1, 4, 1, requestHead(POST, "/upload"))]))
+  let status = "none"
+  let reset = "none"
+  let goaway = false
+  let answer = ""
+  let elapsed: double = 0
+  const end = await readFrames(socket, received => {
+    if (received.type == 1 && received.stream == 1) {
+      status = statusOf(received)
+      elapsed = performance.now() - started
+    }
+    if (received.type == 3 && received.stream == 1) {
+      reset = resetCode(received)
+      socket.write(frame(1, 5, 3, requestHead(GET, "/fast")))
+    }
+    if (received.type == 7) goaway = true
+    if (received.type == 0 && received.stream == 3) {
+      answer += received.payload.toString()
+      return (received.flags & 1) != 0
+    }
+    return false
+  })
+  const inTime = elapsed >= 550 && elapsed < 3000
+  return `slow body: ${status}, reset ${reset}, goaway ${goaway}, then ${answer} (${end}), after requestTimeout ${inTime}`
+}
+
+async function cutAnswer(port: int): Promise<string> {
+  const socket = new Socket({ host: "127.0.0.1", port: port, timeout: 5000 })
+  const connected = await socket.connect()
+  if (connected.isErr()) return "cut answer: no connection"
+  socket.write(Buffer.concat([preface, settings, frame(1, 4, 1, requestHead(POST, "/stream"))]))
+  let status = "none"
+  let answer = ""
+  let reset = "none"
+  const end = await readFrames(socket, received => {
+    if (received.type == 1 && received.stream == 1) status = statusOf(received)
+    if (received.type == 0 && received.stream == 1) answer += received.payload.toString()
+    if (received.type == 3 && received.stream == 1) {
+      reset = resetCode(received)
+      return true
+    }
+    return false
+  })
+  return `cut answer: ${status}, got "${answer}", reset ${reset} (${end})`
+}
+
+const listened = server.listen()
+if (listened.isErr()) {
+  console.log(listened.error.message)
+  process.exit(1)
+}
+const listening = listened.value
+console.log(await stuckHead(listening.port))
+console.log(await slowBody(listening.port))
+console.log(`handler: ${await seen.promise}`)
+console.log(await stuckTrailers(listening.port))
+console.log(await cutAnswer(listening.port))
+await listening.stop({ timeout: 0 })

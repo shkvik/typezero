@@ -3124,9 +3124,10 @@ await listening.stop()
   `reset()`; `new Server({ port, hostname, idleTimeout }, async socket => …).listen()` —
   `Result<Listening, ListenError>`, `stop({ timeout })`. `isIP`, `isIPv4`, `isIPv6`.
 - **WebSocket** ([net.md](docs/net.md), раздел 9; 29 октября): клиент — `new WebSocket({ url,
-  protocols, headers })`, события `"message"` / `"close"` / `"error"` EventEmitter, `await
-  socket.connect()` — `Result`, `send()` — `Result`, `close(code, reason)`; сервер —
-  `upgradeWebSocket(request)` из `tz:http`, как в Deno. Кадры и рукопожатие — на tz.
+  protocols, headers, httpVersion })`, события `"message"` / `"close"` / `"error"` EventEmitter,
+  `await socket.connect()` — `Result`, `send()` — `Result`, `close(code, reason)`; сервер —
+  `upgradeWebSocket(request)` из `tz:http`, как в Deno. Кадры и рукопожатие — на tz. С 1 ноября —
+  и потоком HTTP/2 (RFC 8441): сервер с HTTP/2 объявляет сам, клиент — по `httpVersion`.
 - **`tz:packet`** ([net.md](docs/net.md), раздел 8; 29 октября) — разбор и сборка заголовков
   Ethernet, ARP, IPv4, IPv6, UDP, TCP, ICMP и их контрольных сумм на tz; ошибки — `PacketError`
   (`kind: "PACKET_ERROR"`).
@@ -3145,7 +3146,9 @@ await listening.stop()
 - **HTTP/2 у `fetch`** (31 октября): по https — сам, если сервер согласен (ALPN), все запросы
   к серверу — по одному соединению; `httpVersion: "auto" | "1.1" | "2"` в `RequestInit`
   (`"2"` — и h2c без TLS); `response.protocol` — `"http/1.1"` или `"h2"`; запрос, который
-  сервер не тронул, — `ERR_NOT_PROCESSED` (можно отправить снова).
+  сервер не тронул, — `ERR_NOT_PROCESSED` (можно отправить снова). С 1 ноября —
+  `trace`: шаги запроса (поиск адресов, подключение, TLS, пул, ответ) функцией программы, как
+  `httptrace` в Go. Потоки сервера держат `headersTimeout` и `requestTimeout`.
 - **`tz:http2`** ([net.md](docs/net.md), раздел 11; 31 октября) — потоки HTTP/2 напрямую, для
   трейлеров, полного дуплекса и gRPC: `new Http2Server(options, handler).listen()`, у запроса
   `method`, `path`, `authority`, `headers`, `body()`, `trailers()`, `respond({ status, headers
@@ -3154,7 +3157,7 @@ await listening.stop()
   `response()`. Тело — `Http2Body`: `for await` / `read()` с ошибками HTTP/2, `cancel(code)`,
   `toStream()`. Обработчик без `end()` — сброс потока с `INTERNAL_ERROR`. Ошибки — тип на
   функцию, коды сброса — имена RFC 9113.
-- **Пока нет:** HTTP/2 через прокси и у WebSocket, слой `tz:socket`, сокеты Unix,
+- **Пока нет:** прокси у WebSocket, слой `tz:socket`, сокеты Unix,
   SOCKS-прокси, HTTP/3; сеть в Linux (epoll и свой DNS). `node:http` не будет.
 - **Скорость** (`bench/http.ps1`, «Hello, World!», 128 соединений, 10 с): tz — 314 тыс.
   запросов в секунду на всех ядрах, Go (`net/http`) — 239 тыс., node — 61 тыс.

@@ -1,0 +1,28 @@
+h2c: open, protocol echo
+h2c: got HELLO over h2
+h2c: got 100000 bytes, last 7
+h2c: closed 1000 
+auto, nothing open: open, protocol echo
+auto, nothing open: got HELLO over http/1.1
+auto, nothing open: got 100000 bytes, last 7
+auto, nothing open: closed 1000 
+fetch over h2: not a WebSocket: ERR_NOT_WEBSOCKET
+auto, h2c open but not announced: open, protocol echo
+auto, h2c open but not announced: got HELLO over http/1.1
+auto, h2c open but not announced: got 100000 bytes, last 7
+auto, h2c open but not announced: closed 1000 
+auto, h2c open: open, protocol echo
+auto, h2c open: got HELLO over h2
+auto, h2c open: got 100000 bytes, last 7
+auto, h2c open: closed 1000 
+1.1: open, protocol echo
+1.1: got HELLO over http/1.1
+1.1: got 100000 bytes, last 7
+1.1: closed 1000 
+tls: open, protocol echo
+tls: got HELLO over h2
+tls: got 100000 bytes, last 7
+tls: closed 1000 
+not announced: WEB_SOCKET_CONNECT_ERROR_REFUSED ERR_NO_EXTENDED_CONNECT
+no http2: WEB_SOCKET_CONNECT_ERROR_REFUSED ERR_NO_HTTP2
+fetch: not a WebSocket: ERR_NOT_WEBSOCKET

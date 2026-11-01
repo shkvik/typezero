@@ -218,6 +218,42 @@ type FetchError<E = never> =
       proxy: string
       status: int
     }
+// One step of a fetch, for the program's log: fetch(url, { trace }) hands
+// each to the function (docs/net.md, section 2). elapsed is milliseconds from
+// the call of fetch.
+type FetchStep =
+  | { kind: "FETCH_STEP_LOOKUP_STARTED"; elapsed: double; host: string }
+  | { kind: "FETCH_STEP_LOOKUP_DONE"; elapsed: double; host: string; addresses: string[] }
+  | {
+      kind: "FETCH_STEP_CONNECTION_REUSED"
+      elapsed: double
+      address: string
+      protocol: "http/1.1" | "h2" | "h3"
+      idle: double
+    }
+  | { kind: "FETCH_STEP_CONNECTION_CLOSED_BY_SERVER"; elapsed: double; address: string; idle: double }
+  | { kind: "FETCH_STEP_CONNECTION_FULL"; elapsed: double; address: string; streams: int }
+  | { kind: "FETCH_STEP_CONNECTING"; elapsed: double; address: string }
+  | { kind: "FETCH_STEP_CONNECT_FAILED"; elapsed: double; address: string; code: string }
+  | { kind: "FETCH_STEP_CONNECTED"; elapsed: double; address: string; localAddress: string }
+  | { kind: "FETCH_STEP_PROXY_TUNNEL_OPENED"; elapsed: double; proxy: string }
+  | {
+      kind: "FETCH_STEP_TLS_DONE"
+      elapsed: double
+      protocol: "http/1.1" | "h2" | "h3"
+      tlsVersion: "TLSv1.2" | "TLSv1.3"
+    }
+  | { kind: "FETCH_STEP_REQUEST_SENT"; elapsed: double; method: string; url: string; bytes: int }
+  | { kind: "FETCH_STEP_RESPONSE_STARTED"; elapsed: double; status: int }
+  | { kind: "FETCH_STEP_REDIRECTED"; elapsed: double; status: int; location: string }
+  | { kind: "FETCH_STEP_BODY_RECEIVED"; elapsed: double; bytes: int }
+  | { kind: "FETCH_STEP_CONNECTION_RETURNED"; elapsed: double; address: string }
+  | {
+      kind: "FETCH_STEP_CONNECTION_CLOSED"
+      elapsed: double
+      address: string
+      reason: "SERVER_ASKED" | "BODY_NOT_READ" | "ERROR"
+    }
 // What went wrong while reading a body (docs/net.md, section 3); each is a
 // StreamError, as the body is a stream.
 interface BodyErrorUsed extends StreamError { kind: "BODY_ERROR_USED"; code: "ERR_BODY_USED" | "ERR_BODY_LOCKED" }

@@ -412,8 +412,14 @@ static int tls_h2(NetConn *c) {
   return length == 2 && memcmp(chosen, "h2", 2) == 0;
 }
 
-static const NetTlsOps tls_ops = {tls_open,    tls_seal,    tls_shutdown,
-                                  tls_failure, tls_release, tls_h2};
+static const char *tls_version(NetConn *c) {
+  const Tls *t = (const Tls *)c->tls;
+
+  return SSL_get_version(t->ssl);
+}
+
+static const NetTlsOps tls_ops = {tls_open,    tls_seal, tls_shutdown, tls_failure,
+                                  tls_release, tls_h2,   tls_version};
 
 static Tls *tls_new(NetConn *c, SSL_CTX *ctx) {
   Tls *t = (Tls *)tz_alloc(sizeof(Tls));

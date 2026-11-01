@@ -40,8 +40,9 @@ patch_types(${types_undici}/fetch.d.ts [[  readonly status?: number]] [[  readon
 # tz has no AbortSignal: a fetch is limited in time by its timeout, in
 # milliseconds.
 patch_types(${types_undici}/fetch.d.ts [[  signal?: AbortSignal | null]] [[  timeout?: number
-  proxy?: { enabled: true; url: string; httpVersion?: "auto" | "1.1" } | { enabled: false }
-  httpVersion?: "auto" | "1.1" | "2"]])
+  proxy?: { enabled: true; url: string } | { enabled: false }
+  httpVersion?: "auto" | "1.1" | "2"
+  trace?: (step: FetchStep) => void]])
 
 # A response tells the version of HTTP it came by (docs/net.md, section 2).
 patch_types(${types_undici}/fetch.d.ts [[  readonly redirected: boolean]]

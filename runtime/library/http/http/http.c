@@ -1542,6 +1542,13 @@ void tz_http_request_too_slow(NetConn *c) {
   if (h->wait_kind == WAIT_CHUNK || h->wait_kind == WAIT_ALL) {
     settle_error(c, net_failure("TIMEOUT_ERR", "the request did not come in full in time"));
   }
+  if (c->h2parent) {
+    if (!c->h2submitted) {
+      answer_error(c, 408);
+    }
+    tz_h2_too_slow(c);
+    return;
+  }
   if (h->responded) {
     net_abort(c);
     return;
@@ -1578,7 +1585,6 @@ void tz_http_stream_request(NetConn *s, TzStr method, TzStr target, TzArray *hea
   h->body = ended ? BODY_NONE : BODY_TO_END;
   h->body_done = (uint8_t)ended;
   h->body_read = 0;
-  h->request_since = net_now();
   h->responded = 0;
   if (ended) {
     s->eof = 1;

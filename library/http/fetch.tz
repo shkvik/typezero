@@ -4,6 +4,12 @@ import { ahead, defer, NativeError } from "tz:intrinsics"
 declare function netConnect(host: string, port: int,
                             deadline: object | undefined): Promise<Result<object, NativeError>>
 declare function netClose(conn: object): void
+declare function netLookup(host: string,
+                           deadline: object | undefined): Promise<Result<string, NativeError>>
+declare function netLocalAddress(conn: object): string
+declare function netTlsVersion(conn: object): string
+declare function httpStreamsOpen(conn: object): int
+declare function httpConnectProtocol(conn: object): Promise<int>
 declare function tlsConnect(conn: object, host: string,
                             deadline: object | undefined): Promise<Result<void, NativeError>>
 declare function httpRequest(conn: object, method: string, target: string, headers: string[],
@@ -67,12 +73,66 @@ const DEFAULT_REQUEST_HEADERS: [string, string][] = [
   ["sec-fetch-mode", "cors"], ["user-agent", "tz"], ["accept-encoding", "gzip, deflate, br"],
 ]
 
+export class FetchTracer {
+  private readonly report: (step: FetchStep) => void;
+  private readonly started: double;
+
+  public constructor(report: (step: FetchStep) => void) {
+    this.report = report;
+    this.started = performance.now();
+  }
+
+  public elapsed(): double {
+    const now = performance.now();
+
+    return now - this.started;
+  }
+
+  public emit(step: FetchStep): void {
+    this.report(step);
+  }
+}
+
+function isAddressLiteral(host: string): boolean {
+  if (host.includes(":")) {
+    return true;
+  }
+  for (let i = 0; i < host.length; i++) {
+    const c = host.charCodeAt(i);
+    const digitOrDot = (c >= 48 && c <= 57) || c == 46;
+    if (!digitOrDot) {
+      return false;
+    }
+  }
+
+  return host.length > 0;
+}
+
+function addressWithPort(address: string, port: int): string {
+  if (address.includes(":")) {
+    return `[${address}]:${port}`;
+  }
+
+  return `${address}:${port}`;
+}
+
+function tlsVersionOf(socket: object): "TLSv1.2" | "TLSv1.3" {
+  const version = netTlsVersion(socket);
+  if (version == "TLSv1.2") {
+    return "TLSv1.2";
+  }
+
+  return "TLSv1.3";
+}
+
 export class Connection {
   origin = ""
   status = 0
   absolute = false
   proxyAuth = ""
   protocol: ResponseProtocol = "http/1.1"
+  address = ""
+  usedAt: double = 0
   private socket: object
   private head: string[] = []
 
@@ -81,10 +141,11 @@ export class Connection {
   }
 
   static async open(host: string, port: int, secure: boolean, deadline: object | undefined,
-                    offerH2: boolean): Promise<Result<Connection, NativeError>> {
-    const connected = await netConnect(host, port, deadline)
-    if (connected.isErr()) return err(connected.error)
-    const socket = connected.value
+                    offerH2: boolean, tracer?: FetchTracer): Promise<Result<Connection, NativeError>> {
+    const reached = await Connection.reach(host, port, deadline, tracer)
+    if (reached.isErr()) return err(reached.error)
+    const conn = reached.value
+    const socket = conn.socket
     if (secure) {
       if (offerH2) httpOfferH2(socket)
       const secured = await tlsConnect(socket, host, deadline)
@@ -92,16 +153,114 @@ export class Connection {
         netClose(socket)
         return err(secured.error)
       }
+      if (tracer != undefined) {
+        const protocol: ResponseProtocol = offerH2 && httpIsH2(socket) ? "h2" : "http/1.1"
+        const tlsVersion = tlsVersionOf(socket)
+        tracer.emit({
+          kind: "FETCH_STEP_TLS_DONE",
+          elapsed: tracer.elapsed(),
+          protocol: protocol,
+          tlsVersion: tlsVersion,
+        })
+      }
     }
-    return ok(new Connection(socket))
+    return ok(conn)
+  }
+
+  private static async reach(host: string, port: int, deadline: object | undefined,
+                             tracer: FetchTracer | undefined): Promise<Result<Connection, NativeError>> {
+    const literal = isAddressLiteral(host);
+    if (tracer != undefined && !literal) {
+      tracer.emit({ kind: "FETCH_STEP_LOOKUP_STARTED", elapsed: tracer.elapsed(), host: host });
+    }
+    const foundResult = await netLookup(host, deadline);
+    if (foundResult.isErr()) {
+      return err(foundResult.error);
+    }
+    const addresses = foundResult.value.split(" ");
+    if (tracer != undefined && !literal) {
+      const shown = addresses.map(address => address.includes(":") ? `[${address}]` : address);
+      tracer.emit({
+        kind: "FETCH_STEP_LOOKUP_DONE",
+        elapsed: tracer.elapsed(),
+        host: host,
+        addresses: shown,
+      });
+    }
+    let failure: NativeError = {
+      code: "ENOTFOUND",
+      message: `${host} has no address`,
+      errno: 0,
+      syscall: "getaddrinfo",
+    };
+    let failed = false;
+    for (const address of addresses) {
+      const shown = addressWithPort(address, port);
+      if (tracer != undefined) {
+        tracer.emit({ kind: "FETCH_STEP_CONNECTING", elapsed: tracer.elapsed(), address: shown });
+      }
+      const connected = await netConnect(address, port, deadline);
+      if (connected.isOk()) {
+        const socket = connected.value;
+        if (tracer != undefined) {
+          const local = netLocalAddress(socket);
+          tracer.emit({
+            kind: "FETCH_STEP_CONNECTED",
+            elapsed: tracer.elapsed(),
+            address: shown,
+            localAddress: local,
+          });
+        }
+
+        const conn = new Connection(socket);
+        conn.address = shown;
+
+        return ok(conn);
+      }
+      if (tracer != undefined) {
+        tracer.emit({
+          kind: "FETCH_STEP_CONNECT_FAILED",
+          elapsed: tracer.elapsed(),
+          address: shown,
+          code: connected.error.code,
+        });
+      }
+      if (deadline != undefined && deadlinePassed(deadline)) {
+        return err(connected.error);
+      }
+      if (!failed) {
+        failure = connected.error;
+        failed = true;
+      }
+    }
+
+    return err(failure);
   }
 
   close() {
     netClose(this.socket)
   }
 
-  async secure(host: string, deadline?: object): Promise<Result<void, NativeError>> {
-    return tlsConnect(this.socket, host, deadline)
+  async secure(host: string, deadline?: object, tracer?: FetchTracer): Promise<Result<void, NativeError>> {
+    const secured = await tlsConnect(this.socket, host, deadline)
+    if (secured.isOk() && tracer != undefined) {
+      const tlsVersion = tlsVersionOf(this.socket)
+      tracer.emit({
+        kind: "FETCH_STEP_TLS_DONE",
+        elapsed: tracer.elapsed(),
+        protocol: "http/1.1",
+        tlsVersion: tlsVersion,
+      })
+    }
+    return secured
+  }
+
+  streamsOpen(): int {
+    return httpStreamsOpen(this.socket)
+  }
+
+  connectProtocol(): Promise<int> {
+    return httpConnectProtocol(this.socket)
   }
 
   readRaw(deadline?: object): Promise<Result<Uint8Array | undefined, NativeError>> {
@@ -1295,14 +1454,39 @@ function bodyFailure(e: BodyError | ReaderError | ControllerClosedError): BodyEr
 class Wire {
   conn: Connection
   peer?: Peer
+  tracer?: FetchTracer
   decode?: Decode
   coding = ""
   finished = false
   failure?: BodyError
+  received = 0
 
-  constructor(conn: Connection, peer?: Peer) {
+  constructor(conn: Connection, peer?: Peer, tracer?: FetchTracer) {
     this.conn = conn
     this.peer = peer
+    this.tracer = tracer
+  }
+
+  private closedFor(reason: "SERVER_ASKED" | "BODY_NOT_READ" | "ERROR") {
+    const tracer = this.tracer
+    if (tracer == undefined || this.conn.origin == "") {
+      return
+    }
+    tracer.emit({
+      kind: "FETCH_STEP_CONNECTION_CLOSED",
+      elapsed: tracer.elapsed(),
+      address: this.conn.address,
+      reason: reason,
+    })
+  }
+
+  cancel() {
+    if (this.finished) {
+      return
+    }
+    this.finished = true
+    this.conn.close()
+    this.closedFor("BODY_NOT_READ")
   }
 
   private decodeChunk(decode: Decode, chunk: Uint8Array, last: boolean): Result<Uint8Array, BodyError> {
@@ -1310,6 +1494,7 @@ class Wire {
     if (data.isErr()) {
       this.finished = true
       this.conn.close()
+      this.closedFor("ERROR")
       const failure: BodyError = {
         kind: "BODY_ERROR_MALFORMED",
         code: "ERR_INVALID_COMPRESSION",
@@ -1326,13 +1511,18 @@ class Wire {
     this.finished = true
     const failure = wireError(e, this.peer, this.conn)
     this.failure = failure
+    this.closedFor("ERROR")
 
     return failure
   }
 
   private finish() {
     this.finished = true
-    if (this.conn.origin != "") giveBack(this.conn)
+    const tracer = this.tracer
+    if (tracer != undefined) {
+      tracer.emit({ kind: "FETCH_STEP_BODY_RECEIVED", elapsed: tracer.elapsed(), bytes: this.received })
+    }
+    if (this.conn.origin != "") giveBack(this.conn, tracer)
   }
 
   async next(): Promise<Result<Uint8Array | undefined, BodyError>> {
@@ -1341,6 +1531,7 @@ class Wire {
       if (read.isErr()) return err(this.failed(read.error))
       const chunk = read.value
       const decode = this.decode
+      if (chunk != undefined) this.received += chunk.length
       if (chunk == undefined) {
         let rest: Uint8Array | undefined = undefined
         if (decode != undefined) {
@@ -1375,6 +1566,7 @@ class Wire {
 
   private collected(bytes: Result<Uint8Array, NativeError>): Result<Uint8Array, BodyError> {
     if (bytes.isErr()) return err(this.failed(bytes.error))
+    this.received += bytes.value.length
     const decode = this.decode
     let data = bytes.value
     if (decode != undefined) {
@@ -1619,6 +1811,10 @@ class Body {
       const wire: Wire = maybeWire
       made = startedState<Uint8Array, BodyError>({
         type: "bytes",
+        cancel: reason => {
+          wire.cancel()
+          return undefined
+        },
         pull: async c => {
           const chunk = await wire.next()
           if (chunk.isErr()) {
@@ -1910,6 +2106,7 @@ export interface RequestInit<E extends StreamError = StreamError> {
   duplex?: "half"
   proxy?: ProxyOption
   httpVersion?: HttpVersion
+  trace?: (step: FetchStep) => void
 }
 
 export interface RequestOptions {
@@ -1944,6 +2141,7 @@ export class Request {
   readonly redirect: RequestRedirect = "follow"
   readonly duplex?: "half"
   readonly timeout?: int
+  readonly connectProtocol?: string
   private bodyStream?: ReadableStream<Uint8Array, BodyError>
   private data: Body
 
@@ -1988,6 +2186,9 @@ export class Request {
     this.method = conn.method()
     this.headers = Headers.readFrom(conn)
     this.url = conn.target()
+    if (this.method == "CONNECT") {
+      this.connectProtocol = conn.field(4)
+    }
     if (conn.hasBody()) {
       this.data = Body.ofWire(new Wire(conn))
       this.duplex = "half"
@@ -2010,7 +2211,8 @@ export class Request {
     return request
   }
 
-  async writeTo(conn: Connection, url: URL, peer: Peer): Promise<Result<void, FetchError>> {
+  async writeTo(conn: Connection, url: URL, peer: Peer,
+                tracer?: FetchTracer): Promise<Result<void, FetchError>> {
     const body = this.data
     let text = ""
     let bytes: Uint8Array | undefined = undefined
@@ -2027,14 +2229,33 @@ export class Request {
     }
     this.headers.writeTo(conn)
     conn.request(this.method, url, text, bytes, flags)
+    let sent = 0
     if (flags == SEND_STREAM) {
       body.used = true
       const stream = body.view()
       if (stream != undefined) {
-        const problem = await sendBody(conn, stream, peer, url.href())
-        if (problem != undefined) return err(problem)
+        const streamed = await sendBody(conn, stream, peer, url.href())
+        if (streamed.isErr()) return err(streamed.error)
+        sent = streamed.value
       }
       conn.end()
+    }
+    if (tracer != undefined) {
+      if (flags == SEND_BYTES) {
+        sent = bytes?.length ?? 0
+      } else if (body.kind == BODY_TEXT) {
+        sent = Buffer.byteLength(text)
+      }
+      let shown = url.href()
+      const hash = shown.indexOf("#")
+      if (hash >= 0) shown = shown.slice(0, hash)
+      tracer.emit({
+        kind: "FETCH_STEP_REQUEST_SENT",
+        elapsed: tracer.elapsed(),
+        method: this.method,
+        url: shown,
+        bytes: sent,
+      })
     }
     return ok(undefined)
   }
@@ -2182,21 +2403,33 @@ export class Response {
     this.protocol = protocol
   }
 
-  static readFrom(conn: Connection, url: string, redirected: boolean, peer: Peer): Response {
+  static readFrom(conn: Connection, url: string, redirected: boolean, peer: Peer,
+                  tracer?: FetchTracer): Response {
     const headers = Headers.readFrom(conn)
     let body: Body
     if (conn.hasBody()) {
-      const wire = new Wire(conn, peer)
+      const wire = new Wire(conn, peer, tracer)
       const coding = headers.get("content-encoding")
       wire.decode = decoding(coding)
       wire.coding = coding ?? ""
       body = Body.ofWire(wire)
     } else {
-      giveBack(conn)
+      if (tracer != undefined) {
+        tracer.emit({ kind: "FETCH_STEP_BODY_RECEIVED", elapsed: tracer.elapsed(), bytes: 0 })
+      }
+      giveBack(conn, tracer)
       body = Body.of(undefined)
     }
     return new Response(conn.status, conn.statusText(), headers, body, url, redirected, "basic",
                         conn.protocol)
+  }
+
+  static tunnel(headers: HeadersInit, upgrade: (conn: Connection) => void): Response {
+    const response = new Response(200, "OK", new Headers(headers), Body.of(undefined), "", false,
+                                  "default", "h2")
+    response.upgrade = upgrade
+
+    return response
   }
 
   static switchingProtocols(headers: HeadersInit, upgrade: (conn: Connection) => void): Response {
@@ -2354,21 +2587,51 @@ class Idle {
 const pool = new Map<string, Idle[]>()
 const KEEP_ALIVE_MS = 4000
 
-function takeIdle(origin: string): Connection | undefined {
+function takeIdle(origin: string, tracer: FetchTracer | undefined): Connection | undefined {
   const list = pool.get(origin)
   if (list == undefined) return undefined
   const now = Date.now()
   for (;;) {
     const idle = list.pop()
     if (idle == undefined) return undefined
-    if (now - idle.since < KEEP_ALIVE_MS && idle.conn.alive()) return idle.conn
+    const fresh = now - idle.since < KEEP_ALIVE_MS
+    const alive = fresh && idle.conn.alive()
+    if (tracer != undefined && fresh) {
+      const idleFor = performance.now() - idle.conn.usedAt
+      if (alive) {
+        tracer.emit({
+          kind: "FETCH_STEP_CONNECTION_REUSED",
+          elapsed: tracer.elapsed(),
+          address: idle.conn.address,
+          protocol: "http/1.1",
+          idle: idleFor,
+        })
+      } else {
+        tracer.emit({
+          kind: "FETCH_STEP_CONNECTION_CLOSED_BY_SERVER",
+          elapsed: tracer.elapsed(),
+          address: idle.conn.address,
+          idle: idleFor,
+        })
+      }
+    }
+    if (alive) return idle.conn
     idle.conn.close()
   }
 }
 
-function giveBack(conn: Connection) {
+function giveBack(conn: Connection, tracer?: FetchTracer) {
+  const traced = tracer != undefined && conn.origin != ""
   if (!conn.reusable()) {
     conn.close()
+    if (tracer != undefined && traced) {
+      tracer.emit({
+        kind: "FETCH_STEP_CONNECTION_CLOSED",
+        elapsed: tracer.elapsed(),
+        address: conn.address,
+        reason: "SERVER_ASKED",
+      })
+    }
     return
   }
   let list = pool.get(conn.origin)
@@ -2376,7 +2639,11 @@ function giveBack(conn: Connection) {
     list = []
     pool.set(conn.origin, list)
   }
+  conn.usedAt = performance.now()
   list.push(new Idle(conn, Date.now()))
+  if (tracer != undefined && traced) {
+    tracer.emit({ kind: "FETCH_STEP_CONNECTION_RETURNED", elapsed: tracer.elapsed(), address: conn.address })
+  }
 }
 
 const BAD_PORTS = new Set<int>([
@@ -2388,29 +2655,31 @@ const BAD_PORTS = new Set<int>([
 ])
 
 async function sendBody(conn: Connection, stream: ReadableStream<Uint8Array, BodyError>, peer: Peer,
-                        url: string): Promise<FetchError | undefined> {
+                        url: string): Promise<Result<int, FetchError>> {
   const reader = stream.getReader()
+  let sent = 0
   for (;;) {
     const r = await reader.read()
     if (r.isErr()) {
       reader.releaseLock()
       if (peer.passed()) {
-        return timeoutError(peer)
+        return err(timeoutError(peer))
       }
 
-      return requestError("ERR_BODY_FAILED",
-                          `the body of the request could not be read: ${r.error.message}`, url)
+      return err(requestError("ERR_BODY_FAILED",
+                              `the body of the request could not be read: ${r.error.message}`, url))
     }
     const step = r.value
     if (step.done) break
+    sent += step.value.length
     const wrote = await conn.write(step.value)
     if (wrote.isErr()) {
       reader.releaseLock()
-      return connectionError(wrote.error, peer, "sending the request")
+      return err(connectionError(wrote.error, peer, "sending the request"))
     }
   }
   reader.releaseLock()
-  return undefined
+  return ok(sent)
 }
 
 export function peerOf(url: URL, timeout?: int, deadline?: object): Peer {
@@ -2427,7 +2696,6 @@ export type ProxyOption =
   | {
       enabled: true;
       url: string;
-      httpVersion?: "auto" | "1.1";
     }
   | {
       enabled: false;
@@ -2662,9 +2930,10 @@ async function tunnel(conn: Connection, proxy: ProxyTarget, peer: Peer): Promise
   return undefined;
 }
 
-async function openThrough(proxy: ProxyTarget, https: boolean,
-                           peer: Peer): Promise<Result<Connection, FetchError>> {
-  const opened = await Connection.open(proxy.host, proxy.port, proxy.secure, peer.deadline, false)
+async function openThrough(proxy: ProxyTarget, https: boolean, peer: Peer,
+                           tracer: FetchTracer | undefined): Promise<Result<Connection, FetchError>> {
+  const opened = await Connection.open(proxy.host, proxy.port, proxy.secure, peer.deadline, false,
+                                       tracer)
   if (opened.isErr()) return err(proxyConnectionError(opened.error, proxy, peer))
   const conn = opened.value
   if (!https) {
@@ -2677,7 +2946,10 @@ async function openThrough(proxy: ProxyTarget, https: boolean,
     conn.close()
     return err(problem)
   }
-  const secured = await conn.secure(peer.host, peer.deadline)
+  if (tracer != undefined) {
+    tracer.emit({ kind: "FETCH_STEP_PROXY_TUNNEL_OPENED", elapsed: tracer.elapsed(), proxy: proxy.shown })
+  }
+  const secured = await conn.secure(peer.host, peer.deadline, tracer)
   if (secured.isErr()) {
     conn.close()
     return err(connectionError(secured.error, peer, "connecting"))
@@ -2687,7 +2959,7 @@ async function openThrough(proxy: ProxyTarget, https: boolean,
 
 const h2pool = new Map<string, Connection[]>()
 
-function takeH2(origin: string): Connection | undefined {
+function takeH2(origin: string, tracer: FetchTracer | undefined): Connection | undefined {
   const list = h2pool.get(origin)
   if (list == undefined) {
     return undefined
@@ -2698,6 +2970,15 @@ function takeH2(origin: string): Connection | undefined {
     const left = conn.streamsLeft()
     if (left < 0) {
       conn.close()
+      if (tracer != undefined) {
+        const idleFor = performance.now() - conn.usedAt
+        tracer.emit({
+          kind: "FETCH_STEP_CONNECTION_CLOSED_BY_SERVER",
+          elapsed: tracer.elapsed(),
+          address: conn.address,
+          idle: idleFor,
+        })
+      }
       continue
     }
     kept.push(conn)
@@ -2706,6 +2987,27 @@ function takeH2(origin: string): Connection | undefined {
     }
   }
   h2pool.set(origin, kept)
+  if (tracer != undefined) {
+    const full = kept[0]
+    if (found != undefined) {
+      const idleFor = performance.now() - found.usedAt
+      tracer.emit({
+        kind: "FETCH_STEP_CONNECTION_REUSED",
+        elapsed: tracer.elapsed(),
+        address: found.address,
+        protocol: "h2",
+        idle: idleFor,
+      })
+    } else if (full != undefined) {
+      const streams = full.streamsOpen()
+      tracer.emit({
+        kind: "FETCH_STEP_CONNECTION_FULL",
+        elapsed: tracer.elapsed(),
+        address: full.address,
+        streams: streams,
+      })
+    }
+  }
 
   return found
 }
@@ -2719,9 +3021,74 @@ function keepH2(origin: string, conn: Connection) {
   list.push(conn)
 }
 
+function tunnelError(code: string, message: string): NativeError {
+  const failure: NativeError = {
+    code: code,
+    message: message,
+    errno: 0,
+    syscall: "connect",
+  }
+
+  return failure
+}
+
+export async function openTunnel(host: string, port: int, secure: boolean,
+                                 explicit: boolean): Promise<Result<Connection | undefined, NativeError>> {
+  const origin = (secure ? "https:" : "http:") + host + ":" + String(port)
+  const name = addressWithPort(host, port)
+  let parent = takeH2(origin, undefined)
+  if (parent == undefined) {
+    if (!explicit) {
+      return ok(undefined)
+    }
+    const opened = await Connection.open(host, port, secure, undefined, true)
+    if (opened.isErr()) {
+      return err(opened.error)
+    }
+    const conn = opened.value
+    if (secure && !conn.isH2()) {
+      conn.close()
+
+      return err(tunnelError("ERR_NO_HTTP2",
+                             `${name} does not speak HTTP/2: drop httpVersion: "2" to take HTTP/1.1`))
+    }
+    conn.origin = origin
+    conn.startH2()
+    keepH2(origin, conn)
+    parent = conn
+  }
+  const allowed = await parent.connectProtocol()
+  if (allowed != 1) {
+    if (!explicit) {
+      return ok(undefined)
+    }
+    if (allowed < 0) {
+      return err(tunnelError("ERR_NO_HTTP2",
+                             `${name} does not speak HTTP/2: drop httpVersion: "2" to take HTTP/1.1`))
+    }
+
+    return err(tunnelError("ERR_NO_EXTENDED_CONNECT",
+                           `${name} does not take a WebSocket over HTTP/2 (RFC 8441): ` +
+                           `drop httpVersion: "2" to take HTTP/1.1`))
+  }
+  parent.usedAt = performance.now()
+  const stream = parent.openStream()
+  if (stream == undefined) {
+    if (!explicit) {
+      return ok(undefined)
+    }
+
+    return err(tunnelError("ERR_NOT_PROCESSED",
+                           `${name} closed the HTTP/2 connection before the WebSocket was opened`))
+  }
+
+  return ok(stream)
+}
+
 async function exchange(request: Request, url: URL, redirected: boolean, peer: Peer,
-                        conn: Connection): Promise<Result<Response, FetchError>> {
-  const wrote = await request.writeTo(conn, url, peer)
+                        conn: Connection,
+                        tracer: FetchTracer | undefined): Promise<Result<Response, FetchError>> {
+  const wrote = await request.writeTo(conn, url, peer, tracer)
   if (wrote.isErr()) {
     conn.close()
     return wrote
@@ -2735,25 +3102,29 @@ async function exchange(request: Request, url: URL, redirected: boolean, peer: P
 
     return err(connectionError(status.error, peer, "waiting for the response"))
   }
+  if (tracer != undefined) {
+    tracer.emit({ kind: "FETCH_STEP_RESPONSE_STARTED", elapsed: tracer.elapsed(), status: conn.status })
+  }
   let shown = url.href()
   const hash = shown.indexOf("#")
   if (hash >= 0) shown = shown.slice(0, hash)
-  const response = Response.readFrom(conn, shown, redirected, peer)
+  const response = Response.readFrom(conn, shown, redirected, peer, tracer)
 
   return ok(response)
 }
 
 async function send(request: Request, url: URL, redirected: boolean, peer: Peer,
-                    version: HttpVersion, proxy?: ProxyTarget): Promise<Result<Response, FetchError>> {
+                    version: HttpVersion, proxy: ProxyTarget | undefined,
+                    tracer: FetchTracer | undefined): Promise<Result<Response, FetchError>> {
   const https = url.protocol() == "https:"
   const through = proxy == undefined ? "" : proxy.shown + "|"
   const origin = through + url.protocol() + peer.host + ":" + String(peer.port)
   const http2 = proxy == undefined && version != "1.1" && (https || version == "2")
   let fresh: Connection | undefined = undefined
   if (http2) {
-    let parent = takeH2(origin)
+    let parent = takeH2(origin, tracer)
     if (parent == undefined) {
-      const opened = await Connection.open(peer.host, peer.port, https, peer.deadline, true)
+      const opened = await Connection.open(peer.host, peer.port, https, peer.deadline, true, tracer)
       if (opened.isErr()) return err(connectionError(opened.error, peer, "connecting"))
       const conn = opened.value
       conn.origin = origin
@@ -2776,6 +3147,7 @@ async function send(request: Request, url: URL, redirected: boolean, peer: Peer,
       }
     }
     if (parent != undefined) {
+      parent.usedAt = performance.now()
       const stream = parent.openStream()
       if (stream == undefined) {
         return err({
@@ -2787,26 +3159,26 @@ async function send(request: Request, url: URL, redirected: boolean, peer: Peer,
           port: peer.port,
         })
       }
-      const sent = await exchange(request, url, redirected, peer, stream)
+      const sent = await exchange(request, url, redirected, peer, stream, tracer)
 
       return sent
     }
   }
-  const idle = fresh ?? takeIdle(origin)
+  const idle = fresh ?? takeIdle(origin, tracer)
   let conn: Connection
   if (idle != undefined) {
     conn = idle
   } else if (proxy != undefined) {
-    const opened = await openThrough(proxy, https, peer)
+    const opened = await openThrough(proxy, https, peer, tracer)
     if (opened.isErr()) return opened
     conn = opened.value
   } else {
-    const opened = await Connection.open(peer.host, peer.port, https, peer.deadline, false)
+    const opened = await Connection.open(peer.host, peer.port, https, peer.deadline, false, tracer)
     if (opened.isErr()) return err(connectionError(opened.error, peer, "connecting"))
     conn = opened.value
   }
   conn.origin = origin
-  const wrote = await request.writeTo(conn, url, peer)
+  const wrote = await request.writeTo(conn, url, peer, tracer)
   if (wrote.isErr()) {
     conn.close()
     return wrote
@@ -2820,6 +3192,9 @@ async function send(request: Request, url: URL, redirected: boolean, peer: Peer,
 
     return err(connectionError(status.error, peer, "waiting for the response"))
   }
+  if (tracer != undefined) {
+    tracer.emit({ kind: "FETCH_STEP_RESPONSE_STARTED", elapsed: tracer.elapsed(), status: conn.status })
+  }
   let shown = url.href()
   const hash = shown.indexOf("#")
   if (hash >= 0) shown = shown.slice(0, hash)
@@ -2827,7 +3202,7 @@ async function send(request: Request, url: URL, redirected: boolean, peer: Peer,
     conn.close()
     return err(proxyStatusError(conn.status, proxy, peer))
   }
-  return ok(Response.readFrom(conn, shown, redirected, peer))
+  return ok(Response.readFrom(conn, shown, redirected, peer, tracer))
 }
 
 class DataUrl {
@@ -2910,13 +3285,13 @@ export async function fetch<E extends StreamError = never>(input: string | URL |
   if (!(body instanceof ReadableStream)) {
     const plain = plainInit(init, body)
     const request = new Request(input, plain)
-    const sent = await fetchRequest(request, init?.proxy, init?.httpVersion ?? "auto")
+    const sent = await fetchRequest(request, init?.proxy, init?.httpVersion ?? "auto", init?.trace)
 
     return sent
   }
   const rest = plainInit(init, undefined)
   const request = Request.stream(input, body, rest)
-  const sent = await fetchRequest(request, init?.proxy, init?.httpVersion ?? "auto")
+  const sent = await fetchRequest(request, init?.proxy, init?.httpVersion ?? "auto", init?.trace)
   if (sent.isOk()) {
     return sent
   }
@@ -2937,7 +3312,10 @@ export async function fetch<E extends StreamError = never>(input: string | URL |
 }
 
 async function fetchRequest(request: Request, proxyOption: ProxyOption | undefined,
-                            version: HttpVersion): Promise<Result<Response, FetchError>> {
+                            version: HttpVersion,
+                            trace: ((step: FetchStep) => void) | undefined):
+    Promise<Result<Response, FetchError>> {
+  const tracer = trace == undefined ? undefined : new FetchTracer(trace)
   const first = URL.parse(request.url)
   if (first.isErr())
     return err(requestError("ERR_INVALID_URL", `fetch cannot parse "${request.url}" as a URL`,
@@ -2963,7 +3341,7 @@ async function fetchRequest(request: Request, proxyOption: ProxyOption | undefin
     const peer = peerOf(url, timeout, deadline)
     const proxied = proxyFor(url, peer, proxyOption)
     if (proxied.isErr()) return err(proxied.error)
-    const sent = await send(current, url, redirects > 0, peer, version, proxied.value)
+    const sent = await send(current, url, redirects > 0, peer, version, proxied.value, tracer)
     if (sent.isErr()) return sent
     const response = sent.value
     const status = response.status
@@ -2983,6 +3361,14 @@ async function fetchRequest(request: Request, proxyOption: ProxyOption | undefin
       return err(redirectError("ERR_INVALID_LOCATION",
                                `${url.href()} redirects to "${location}", which is not a URL`,
                                location))
+    if (tracer != undefined) {
+      tracer.emit({
+        kind: "FETCH_STEP_REDIRECTED",
+        elapsed: tracer.elapsed(),
+        status: status,
+        location: next.value.href(),
+      })
+    }
     const drained = await response.bytes()
     if (drained.isErr()) {
       if (peer.passed()) {

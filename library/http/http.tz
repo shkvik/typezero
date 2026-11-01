@@ -66,6 +66,7 @@ export type ServeHttp2 =
       enabled: true;
       cleartext?: boolean;
       maxConcurrentStreams?: int;
+      webSocket?: boolean;
     };
 
 export type ServeTransport =
@@ -93,6 +94,10 @@ export type UpgradeError = {
   message: string;
 };
 
+const HTTP2_ON = 1;
+const HTTP2_CLEARTEXT = 2;
+const HTTP2_WEB_SOCKET = 8;
+
 export class Upgraded {
   public readonly socket: WebSocket;
   public readonly response: Response;
@@ -103,10 +108,46 @@ export class Upgraded {
   }
 }
 
+function upgradeOverHttp2(
+  request: Request,
+  options?: UpgradeOptions,
+): Result<Upgraded, UpgradeError> {
+  if (request.connectProtocol != "websocket") {
+    return err({
+      kind: "UPGRADE_ERROR",
+      code: "ERR_NOT_WEBSOCKET",
+      message: `the request does not ask for a WebSocket: CONNECT with :protocol '${request.connectProtocol ?? ""}'`,
+    });
+  }
+  const version = request.headers.get("sec-websocket-version") ?? "";
+  if (version != "13") {
+    return err({
+      kind: "UPGRADE_ERROR",
+      code: "ERR_UNSUPPORTED_VERSION",
+      message: `the WebSocket version ${version} is not 13`,
+    });
+  }
+  const protocol = options?.protocol ?? "";
+  const socket = WebSocket.forServer(protocol, options?.maxMessageSize ?? 16 * 1024 * 1024);
+  const headers: Record<string, string> = {};
+  if (protocol != "") {
+    headers["sec-websocket-protocol"] = protocol;
+  }
+  const response = Response.tunnel(headers, (conn: Connection) => socket.attach(conn));
+  const upgraded = new Upgraded(socket, response);
+
+  return ok(upgraded);
+}
+
 export function upgradeWebSocket(
   request: Request,
   options?: UpgradeOptions,
 ): Result<Upgraded, UpgradeError> {
+  if (request.method == "CONNECT") {
+    const overHttp2 = upgradeOverHttp2(request, options);
+
+    return overHttp2;
+  }
   const upgrade = (request.headers.get("upgrade") ?? "").toLowerCase();
   const key = request.headers.get("sec-websocket-key") ?? "";
   if (upgrade != "websocket" || key == "") {
@@ -219,13 +260,16 @@ export class Server {
     this.requestTimeout = options.requestTimeout ?? 300000;
     this.transport = options.transport ?? { secure: false };
     const http2 = options.http2;
-    let flags = this.transport.secure ? 1 : 0;
+    let flags = this.transport.secure ? HTTP2_ON | HTTP2_WEB_SOCKET : 0;
     let streams = 100;
     if (http2 != undefined) {
       if (http2.enabled) {
-        flags = 1;
+        flags = HTTP2_ON;
         if (http2.cleartext == true) {
-          flags = 3;
+          flags = flags | HTTP2_CLEARTEXT;
+        }
+        if (http2.webSocket != false) {
+          flags = flags | HTTP2_WEB_SOCKET;
         }
         streams = http2.maxConcurrentStreams ?? 100;
       } else {
@@ -363,6 +407,7 @@ export class Listening {
       protocol: "h2",
     };
     const conn = new Connection(stream);
+    conn.protocol = "h2";
     const next = conn.next();
     const got = await aheadMovable(next);
     if (got.isErr() || got.value == 0) {
@@ -372,6 +417,17 @@ export class Listening {
     const request = Request.readFrom(conn);
     const handled = handler(request, client);
     const response = await ahead(handled);
+    const upgrade = response.upgrade;
+    if (upgrade != undefined && request.method == "CONNECT") {
+      const head = response.headers.listFor(conn);
+      const answered = conn.respondStream(response.status, head);
+      if (answered == 0) {
+        upgrade(conn);
+        return;
+      }
+      httpStreamDone(stream);
+      return;
+    }
     const headOnly = request.method == "HEAD";
     const written = response.writeTo(conn, headOnly);
     if (written.kind == "streaming") {

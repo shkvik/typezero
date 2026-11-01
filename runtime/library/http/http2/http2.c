@@ -18,7 +18,9 @@ typedef struct H2 {
   NetConn *first;
   NetConn *ready_first, *ready_last;
   TzPromise *waiter;
+  TzPromise *settings_waiter;
   int32_t streams;
+  uint8_t settings_seen;
   uint8_t done;
   uint8_t sending;
   uint8_t client;
@@ -34,10 +36,11 @@ typedef struct Field {
 } Field;
 
 typedef struct H2Request {
-  Field method, path, scheme, authority;
+  Field method, path, scheme, authority, protocol;
   TzArray *headers;
   TzArray *trailers;
   TzArray *send_trailers;
+  double block_since;
   size_t bytes;
   size_t unconsumed;
   int32_t status;
@@ -124,6 +127,7 @@ static void free_request(NetConn *s) {
   free(r->path.data);
   free(r->scheme.data);
   free(r->authority.data);
+  free(r->protocol.data);
   release_array(&r->headers);
   release_array(&r->trailers);
   release_array(&r->send_trailers);
@@ -208,7 +212,9 @@ static int begin_headers(nghttp2_session *session, const nghttp2_frame *frame, v
   }
   if (!h->client && frame->headers.cat == NGHTTP2_HCAT_REQUEST) {
     NetConn *s = net_stream_new(h->conn);
-    new_request(s);
+    H2Request *fresh = new_request(s);
+    fresh->block_since = s->last_active;
+    s->http.request_since = s->last_active;
     s->h2id = frame->hd.stream_id;
     s->h2open = 1;
     link_stream(h, s);
@@ -222,6 +228,9 @@ static int begin_headers(nghttp2_session *session, const nghttp2_frame *frame, v
   H2Request *r = (H2Request *)s->h2;
   r->bytes = 0;
   if (r->head_done) {
+    if (!h->client) {
+      r->block_since = net_now();
+    }
     r->in_trailers = 1;
     if (!r->trailers) {
       r->trailers = tz_arr_new(&tz_string_type, 0, 8);
@@ -282,6 +291,8 @@ static int on_header(nghttp2_session *session, const nghttp2_frame *frame, const
       into = &r->scheme;
     } else if (name_length == 10 && memcmp(name, ":authority", 10) == 0) {
       into = &r->authority;
+    } else if (name_length == 9 && memcmp(name, ":protocol", 9) == 0) {
+      into = &r->protocol;
     }
     if (into) {
       set_field(into, value, value_length);
@@ -406,10 +417,26 @@ static void response_ready(NetConn *s, int ended) {
   wake(s);
 }
 
+static void settings_answer(H2 *h, int64_t value) {
+  if (h->settings_waiter) {
+    net_fulfill(&h->settings_waiter, &value, sizeof value);
+  }
+}
+
+static int64_t connect_protocol(const H2 *h) {
+  return (int64_t)nghttp2_session_get_remote_settings(h->session,
+                                                      NGHTTP2_SETTINGS_ENABLE_CONNECT_PROTOCOL);
+}
+
 static int on_frame(nghttp2_session *session, const nghttp2_frame *frame, void *user_data) {
   H2 *h = (H2 *)user_data;
   if (frame->hd.type == NGHTTP2_GOAWAY) {
     h->goaway = 1;
+    return 0;
+  }
+  if (frame->hd.type == NGHTTP2_SETTINGS && !(frame->hd.flags & NGHTTP2_FLAG_ACK)) {
+    h->settings_seen = 1;
+    settings_answer(h, connect_protocol(h));
     return 0;
   }
   NetConn *s = (NetConn *)nghttp2_session_get_stream_user_data(session, frame->hd.stream_id);
@@ -419,6 +446,7 @@ static int on_frame(nghttp2_session *session, const nghttp2_frame *frame, void *
   int ended = (frame->hd.flags & NGHTTP2_FLAG_END_STREAM) != 0;
   if (frame->hd.type == NGHTTP2_HEADERS && s->h2 && (frame->hd.flags & NGHTTP2_FLAG_END_HEADERS)) {
     H2Request *r = (H2Request *)s->h2;
+    r->block_since = 0;
     if (r->in_trailers) {
       r->in_trailers = 0;
     } else if (!r->head_done) {
@@ -700,6 +728,7 @@ static void finish(NetConn *c) {
     NetConn *none = NULL;
     net_fulfill(&h->waiter, &none, sizeof none);
   }
+  settings_answer(h, -1);
 }
 
 static void send_frames(NetConn *c) {
@@ -809,9 +838,13 @@ void tz_h2_start(NetConn *c) {
       {NGHTTP2_SETTINGS_INITIAL_WINDOW_SIZE, H2_STREAM_WINDOW},
       {NGHTTP2_SETTINGS_MAX_HEADER_LIST_SIZE, H2_MAX_HEAD},
       {NGHTTP2_SETTINGS_ENABLE_PUSH, 0},
+      {NGHTTP2_SETTINGS_ENABLE_CONNECT_PROTOCOL, 1},
   };
-  nghttp2_submit_settings(h->session, NGHTTP2_FLAG_NONE, settings,
-                          sizeof settings / sizeof settings[0]);
+  size_t count = sizeof settings / sizeof settings[0];
+  if (!l || !l->h2_websocket) {
+    --count;
+  }
+  nghttp2_submit_settings(h->session, NGHTTP2_FLAG_NONE, settings, count);
   nghttp2_session_set_local_window_size(h->session, NGHTTP2_FLAG_NONE, 0, H2_CONNECTION_WINDOW);
   c->h2 = h;
   c->busy = 0;
@@ -958,6 +991,58 @@ int tz_h2_idle(const NetConn *c) {
   return !h || h->streams == 0;
 }
 
+void tz_h2_too_slow(NetConn *s) {
+  H2Request *r = (H2Request *)s->h2;
+  if (!r || !s->h2open) {
+    return;
+  }
+  if (s->h2submitted && !s->h2ended) {
+    reset_stream(s, NGHTTP2_CANCEL);
+    return;
+  }
+  r->abandon = 1;
+  if (r->sent_end) {
+    stop_reading(session_of(s)->session, s);
+    net_hold(s->h2parent);
+  }
+}
+
+void tz_h2_sweep(NetConn *c, double now) {
+  H2 *h = (H2 *)c->h2;
+  const NetListener *l = c->listener;
+  if (!h || h->done || h->client || !l) {
+    return;
+  }
+  int stuck = 0;
+  NetConn *next;
+  for (NetConn *s = h->first; s; s = next) {
+    next = s->next;
+    H2Request *r = (H2Request *)s->h2;
+    if (!r || !s->h2open) {
+      continue;
+    }
+    if (r->block_since > 0 && l->headers_timeout > 0 &&
+        now - r->block_since >= l->headers_timeout) {
+      r->block_since = 0;
+      stuck = 1;
+      if (r->head_done) {
+        tz_http_request_too_slow(s);
+      } else {
+        r->abandon = 1;
+        tz_h2_respond(s, 408, NULL, 1, 0);
+      }
+    } else if (r->head_done && !s->eof && l->request_timeout > 0 && s->http.request_since > 0 &&
+               now - s->http.request_since >= l->request_timeout) {
+      tz_http_request_too_slow(s);
+    }
+  }
+  if (stuck) {
+    tz_h2_shutdown(c);
+  } else if (nghttp2_session_want_write(h->session)) {
+    send_frames(c);
+  }
+}
+
 void tz_h2_release(NetConn *c) {
   H2 *h = (H2 *)c->h2;
   if (!h) {
@@ -973,8 +1058,40 @@ void tz_h2_release(NetConn *c) {
     h->waiter = NULL;
     tz_obj_release((TzObject *)p);
   }
+  if (h->settings_waiter) {
+    TzPromise *p = h->settings_waiter;
+    h->settings_waiter = NULL;
+    tz_obj_release((TzObject *)p);
+  }
   nghttp2_session_del(h->session);
   free(h);
+}
+
+void tz_http_connect_protocol(TzPromise *p, void *conn, TzMaker make) {
+  NetConn *c = (NetConn *)conn;
+  conn_lock(c);
+  H2 *h = (H2 *)c->h2;
+  tz_net_make = make;
+  tz_ref_retain(p);
+  if (!h || h->done || c->closed || c->error) {
+    int64_t none = -1;
+    net_fulfill(&p, &none, sizeof none);
+  } else if (h->settings_seen) {
+    int64_t value = connect_protocol(h);
+    net_fulfill(&p, &value, sizeof value);
+  } else {
+    if (h->settings_waiter) {
+      TzPromise *old = h->settings_waiter;
+      h->settings_waiter = NULL;
+      tz_obj_release((TzObject *)old);
+    }
+    h->settings_waiter = p;
+  }
+#if TZ_PARALLEL
+  tz_thread.await_lock = conn_lock_of(c);
+#else
+  conn_unlock(c);
+#endif
 }
 
 void tz_h2_consumed(NetConn *s, size_t length) {
@@ -1086,6 +1203,28 @@ int64_t tz_http_streams_left(void *conn, TzMaker make) {
   return left;
 }
 
+int64_t tz_http_streams_open(void *conn, TzMaker make) {
+  (void)make;
+  NetConn *c = (NetConn *)conn;
+  conn_lock(c);
+  const H2 *h = (const H2 *)c->h2;
+  int64_t open = h ? h->streams : 0;
+  conn_unlock(c);
+
+  return open;
+}
+
+static int is_protocol_name(TzStr name) {
+  uint32_t n;
+  int two;
+  const void *units = tz_str_units(&name, &n, &two);
+  if (n != 9 || two) {
+    return 0;
+  }
+
+  return memcmp(units, ":protocol", 9) == 0;
+}
+
 static int skipped_request_header(const char *name, const uint8_t *value, size_t value_length) {
   if (strcmp(name, "te") == 0) {
     return !(value_length == 8 && memcmp(value, "trailers", 8) == 0);
@@ -1131,6 +1270,13 @@ void tz_h2_request(NetConn *s, TzStr method, TzStr target, const TzArray *header
   f.nva[f.n++] =
       (nghttp2_nv){(uint8_t *)":path", path_bytes, 5, path_length, NGHTTP2_NV_FLAG_NO_COPY_NAME};
   const TzStr *items = headers ? (const TzStr *)headers->data : NULL;
+  for (uint32_t i = 0; i < count; ++i) {
+    uint8_t *value;
+    size_t value_length;
+    if (is_protocol_name(items[2 * i]) && value_bytes(items[2 * i + 1], &value, &value_length)) {
+      fields_add(&f, ":protocol", 9, value, value_length);
+    }
+  }
   for (uint32_t i = 0; i < count; ++i) {
     char name[64];
     size_t name_length, value_length;
@@ -1301,6 +1447,7 @@ void tz_http2_field(TzStr *out, void *conn, int64_t which, TzMaker make) {
     const Field *f = which == 0   ? &r->method
                      : which == 1 ? &r->scheme
                      : which == 2 ? &r->authority
+                     : which == 4 ? &r->protocol
                                   : &r->path;
     *out = text_of_field(f);
   }

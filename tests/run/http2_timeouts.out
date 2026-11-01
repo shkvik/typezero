@@ -1,0 +1,5 @@
+stuck head: 408, reset NO_ERROR, goaway true, closed, after headersTimeout true
+slow body: 408, reset NO_ERROR, goaway false, then fast (stopped), after requestTimeout true
+handler: BODY_ERROR_TIMEOUT the request did not come in full within 600 ms (requestTimeout)
+stuck trailers: 408, reset NO_ERROR, goaway true, closed, after headersTimeout true
+cut answer: 200, got "part ", reset CANCEL (stopped)

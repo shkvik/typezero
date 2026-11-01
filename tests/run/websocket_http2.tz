@@ -1,0 +1,101 @@
+// env: NODE_EXTRA_CA_CERTS=@TESTS@/tls/ca.pem
+// env: TLS_DIR=@TESTS@/tls
+// WebSocket over HTTP/2 (RFC 8441, docs/net.md, section 9): the server
+// announces it and upgradeWebSocket takes both ways - HTTP/1.1 (101) and an
+// HTTP/2 stream (CONNECT with :protocol websocket, 200). The client chooses
+// by httpVersion: "2" opens a stream, over TLS or h2c; "auto" takes a stream
+// of an HTTP/2 connection already open to that server and HTTP/1.1 when there
+// is none; "1.1" - always HTTP/1.1. A server with webSocket: false and one
+// without HTTP/2 refuse "2". Only 127.0.0.1.
+import { readFileSync } from "node:fs"
+import { join } from "node:path"
+import { Handler, Server, upgradeWebSocket } from "tz:http"
+
+const dir = process.env.TLS_DIR ?? "."
+const cert = readFileSync(join(dir, "localhost.pem"), "utf8")
+const key = readFileSync(join(dir, "key.pem"), "utf8")
+if (cert.isErr() || key.isErr()) process.exit(1)
+
+const handler: Handler = (request, client) => {
+  const upgradeResult = upgradeWebSocket(request, { protocol: "echo" })
+  if (upgradeResult.isErr()) {
+    return new Response(`not a WebSocket: ${upgradeResult.error.code}`)
+  }
+  const peer = upgradeResult.value.socket
+  const way = client.protocol
+  peer.on("message", data => {
+    if (typeof data == "string") {
+      const sent = peer.send(`${data.toUpperCase()} over ${way}`)
+      if (sent.isErr()) console.log("server send:", sent.error.code)
+    } else {
+      const sent = peer.send(data)
+      if (sent.isErr()) console.log("server send:", sent.error.code)
+    }
+  })
+  peer.on("error", error => console.log("server error:", error.code))
+  return upgradeResult.value.response
+}
+
+const plain = new Server({ port: 0, hostname: "127.0.0.1", http2: { enabled: true, cleartext: true } },
+                         handler).listen()
+const transport = { secure: true, cert: cert.value, key: key.value }
+const secure = new Server({ port: 0, hostname: "127.0.0.1", transport }, handler).listen()
+const silent = new Server({
+  port: 0,
+  hostname: "127.0.0.1",
+  http2: { enabled: true, cleartext: true, webSocket: false },
+}, handler).listen()
+const old = new Server({ port: 0, hostname: "127.0.0.1" }, handler).listen()
+if (plain.isErr() || secure.isErr() || silent.isErr() || old.isErr()) process.exit(1)
+
+async function talk(what: string, url: string, httpVersion?: "auto" | "1.1" | "2") {
+  const socket = new WebSocket({ url: url, protocols: ["echo"], httpVersion: httpVersion })
+  const answered = Promise.withResolvers<void>()
+  const closed = Promise.withResolvers<void>()
+  socket.on("message", data => {
+    if (typeof data == "string") console.log(`${what}: got ${data}`)
+    else console.log(`${what}: got ${data.length} bytes, last ${data[data.length - 1]}`)
+    answered.resolve()
+  })
+  socket.on("error", error => console.log(`${what}: error ${error.code}`))
+  socket.on("close", (code, reason) => {
+    console.log(`${what}: closed ${code} ${reason}`)
+    closed.resolve()
+  })
+  const connected = await socket.connect()
+  if (connected.isErr()) {
+    console.log(`${what}: ${connected.error.kind} ${connected.error.code}`)
+    return
+  }
+  console.log(`${what}: open, protocol ${socket.protocol()}`)
+  const sent = socket.send("hello")
+  if (sent.isErr()) console.log(`${what}: send ${sent.error.code}`)
+  await answered.promise
+  const big = new Uint8Array(100000)
+  big[big.length - 1] = 7
+  const answeredBig = Promise.withResolvers<void>()
+  socket.on("message", () => answeredBig.resolve())
+  const sentBig = socket.send(big)
+  if (sentBig.isErr()) console.log(`${what}: send ${sentBig.error.code}`)
+  await answeredBig.promise
+  await socket.close(1000, "done")
+  await closed.promise
+}
+
+const cleartext = `ws://127.0.0.1:${plain.value.port}/chat`
+await talk("h2c", cleartext, "2")
+await talk("auto, nothing open", `ws://127.0.0.1:${silent.value.port}/chat`)
+const opened = await fetch(`http://127.0.0.1:${silent.value.port}/`, { httpVersion: "2" })
+if (opened.isOk()) console.log(`fetch over ${opened.value.protocol}: ${(await opened.value.text()).unwrapOr("")}`)
+await talk("auto, h2c open but not announced", `ws://127.0.0.1:${silent.value.port}/chat`)
+await talk("auto, h2c open", cleartext)
+await talk("1.1", cleartext, "1.1")
+await talk("tls", `wss://localhost:${secure.value.port}/chat`, "2")
+await talk("not announced", `ws://127.0.0.1:${silent.value.port}/chat`, "2")
+await talk("no http2", `ws://127.0.0.1:${old.value.port}/chat`, "2")
+const notSocket = await fetch(`http://127.0.0.1:${plain.value.port}/`, { httpVersion: "2" })
+if (notSocket.isOk()) console.log(`fetch: ${(await notSocket.value.text()).unwrapOr("")}`)
+await plain.value.stop({ timeout: 0 })
+await secure.value.stop({ timeout: 0 })
+await silent.value.stop({ timeout: 0 })
+await old.value.stop({ timeout: 0 })

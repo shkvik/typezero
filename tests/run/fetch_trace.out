@@ -1,0 +1,100 @@
+redirect
+  looking up localhost
+  localhost is 127.0.0.1, [::1]
+  connecting to 127.0.0.1:PLAIN
+  connected to 127.0.0.1:PLAIN
+  sent GET http://localhost:PLAIN/old, 0 bytes of body
+  response 301
+  301 to http://localhost:PLAIN/new
+  body read, 5 bytes
+  connection to 127.0.0.1:PLAIN back to the pool
+  reusing http/1.1 to 127.0.0.1:PLAIN
+  sent GET http://localhost:PLAIN/new, 0 bytes of body
+  response 200
+  body read, 8 bytes
+  connection to 127.0.0.1:PLAIN back to the pool
+  text: new page
+reused
+  reusing http/1.1 to 127.0.0.1:PLAIN
+  sent POST http://localhost:PLAIN/upload, 3 bytes of body
+  response 200
+  body read, 7 bytes
+  connection to 127.0.0.1:PLAIN back to the pool
+  text: got abc
+cancelled
+  reusing http/1.1 to 127.0.0.1:PLAIN
+  sent GET http://localhost:PLAIN/big, 0 bytes of body
+  response 200
+  connection to 127.0.0.1:PLAIN closed: BODY_NOT_READ
+server asked
+  connecting to 127.0.0.1:CLOSING
+  connected to 127.0.0.1:CLOSING
+  sent GET http://127.0.0.1:CLOSING/, 0 bytes of body
+  response 200
+  body read, 6 bytes
+  connection to 127.0.0.1:CLOSING closed: SERVER_ASKED
+  text: closed
+brief
+  connecting to 127.0.0.1:BRIEF
+  connected to 127.0.0.1:BRIEF
+  sent GET http://127.0.0.1:BRIEF/new, 0 bytes of body
+  response 200
+  body read, 8 bytes
+  connection to 127.0.0.1:BRIEF back to the pool
+  text: new page
+brief later
+  127.0.0.1:BRIEF closed the idle connection
+  connecting to 127.0.0.1:BRIEF
+  connected to 127.0.0.1:BRIEF
+  sent GET http://127.0.0.1:BRIEF/new, 0 bytes of body
+  response 200
+  body read, 8 bytes
+  connection to 127.0.0.1:BRIEF back to the pool
+  text: new page
+nobody
+  looking up localhost
+  localhost is 127.0.0.1, [::1]
+  connecting to 127.0.0.1:GONE
+  127.0.0.1:GONE failed with ECONNREFUSED
+  connecting to [::1]:GONE
+  [::1]:GONE failed with ECONNREFUSED
+  error ECONNREFUSED
+h2c
+  connecting to 127.0.0.1:PLAIN
+  connected to 127.0.0.1:PLAIN
+  sent GET http://127.0.0.1:PLAIN/new, 0 bytes of body
+  response 200
+  body read, 8 bytes
+  text: new page
+h2c again
+  reusing h2 to 127.0.0.1:PLAIN
+  sent GET http://127.0.0.1:PLAIN/new, 0 bytes of body
+  response 200
+  body read, 8 bytes
+  text: new page
+full
+  slow: connecting to 127.0.0.1:NARROW
+  slow: connected to 127.0.0.1:NARROW
+  slow: sent GET http://127.0.0.1:NARROW/slow, 0 bytes of body
+  second
+  second: all 1 streams to 127.0.0.1:NARROW are busy
+  second: connecting to 127.0.0.1:NARROW
+  second: connected to 127.0.0.1:NARROW
+  second: sent GET http://127.0.0.1:NARROW/new, 0 bytes of body
+  second: response 200
+  second: body read, 8 bytes
+  text: new page
+  slow: response 200
+  slow: body read, 9 bytes
+  slow text: slow page
+https
+  looking up localhost
+  localhost is 127.0.0.1, [::1]
+  connecting to 127.0.0.1:SECURE
+  connected to 127.0.0.1:SECURE
+  TLSv1.3, speaking h2
+  sent GET https://localhost:SECURE/new, 0 bytes of body
+  response 200
+  body read, 8 bytes
+  text: new page
+times in order: true, local addresses: true, idle times: true

@@ -23,6 +23,8 @@ void tz_h2_reset(NetConn *s);
 void tz_h2_dropped(NetConn *s);
 void tz_h2_shutdown(NetConn *c);
 int tz_h2_idle(const NetConn *c);
+void tz_h2_too_slow(NetConn *s);
+void tz_h2_sweep(NetConn *c, double now);
 void tz_h2_release(NetConn *c);
 void tz_h2_consumed(NetConn *s, size_t length);
 void tz_h2_send_pending(NetConn *s);

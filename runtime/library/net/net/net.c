@@ -1059,10 +1059,17 @@ static int parse_literal(const char *host, int port, SOCKADDR_STORAGE *out, int 
     *length = sizeof(SOCKADDR_IN);
     return 1;
   }
+  unsigned long zone = 0;
+  char *percent = strchr(text, '%');
+  if (percent) {
+    *percent = 0;
+    zone = strtoul(percent + 1, NULL, 10);
+  }
   SOCKADDR_IN6 *v6 = (SOCKADDR_IN6 *)out;
   if (inet_pton(AF_INET6, text, &v6->sin6_addr) == 1) {
     v6->sin6_family = AF_INET6;
     v6->sin6_port = htons((u_short)port);
+    v6->sin6_scope_id = (ULONG)zone;
     *length = sizeof(SOCKADDR_IN6);
     return 1;
   }
@@ -1157,6 +1164,9 @@ static void sweep_fired(TzObject *env) {
   for (NetConn *c = l->conns; c; c = c->next) {
     conn_lock(c);
     if (c->h2) {
+      if (!c->closed) {
+        tz_h2_sweep(c, now);
+      }
       if (!c->closed && tz_h2_idle(c) && l->keep_alive > 0 &&
           now - c->last_active >= l->keep_alive) {
         tz_h2_shutdown(c);
@@ -1480,6 +1490,7 @@ void tz_net_listen_http2(void *listener, int64_t flags, int64_t streams, TzMaker
   l->h2 = (flags & 1) != 0;
   l->h2c = (flags & 2) != 0;
   l->h2only = (flags & 4) != 0;
+  l->h2_websocket = (flags & 8) != 0;
   l->h2_streams = streams > 0 ? (uint32_t)streams : 100;
   if (l->tls && l->tls_alpn) {
     l->tls_alpn(l);
@@ -1558,6 +1569,7 @@ typedef struct Connect {
   HANDLE cancel;
   int looking;
   int done;
+  int lookup_only;
 } Connect;
 
 static void connect_free(Connect *r) {
@@ -1593,6 +1605,29 @@ static void connect_fail(Connect *r, int32_t error) {
 
 static void connect_done(TzWork *w);
 static void connected(Connect *r, int32_t error);
+
+static void lookup_answer(Connect *r) {
+  char list[16 * 72];
+  size_t used = 0;
+  list[0] = 0;
+  for (int i = 0; i < r->count; ++i) {
+    char text[72];
+    const SOCKADDR_STORAGE *address = &r->addresses[i];
+    address_text((const SOCKADDR *)address, text, sizeof text);
+    ULONG zone =
+        address->ss_family == AF_INET6 ? ((const SOCKADDR_IN6 *)address)->sin6_scope_id : 0;
+    int n = zone ? snprintf(list + used, sizeof list - used, "%s%s%%%lu", i ? " " : "", text,
+                            (unsigned long)zone)
+                 : snprintf(list + used, sizeof list - used, "%s%s", i ? " " : "", text);
+    if (n < 0 || (size_t)n >= sizeof list - used) {
+      break;
+    }
+    used += (size_t)n;
+  }
+  TzStr found = tz_str_from_ascii(list, used);
+  net_fulfill(&r->promise, &found, sizeof found);
+  connect_free(r);
+}
 
 static void sort_addresses(Connect *r) {
   SOCKADDR_STORAGE sorted[16];
@@ -1732,6 +1767,10 @@ static void names_done(TzWork *w) {
     return;
   }
   sort_addresses(r);
+  if (r->lookup_only) {
+    lookup_answer(r);
+    return;
+  }
   connect_next(r);
 }
 
@@ -1759,9 +1798,8 @@ static void abort_connect(TzDeadlineListener *l) {
   }
 }
 
-void tz_net_connect(TzPromise *p, void *host_obj, uint64_t host_meta, int64_t port, void *deadline,
-                    TzMaker make) {
-  TZ_ORDERED();
+static void begin_connect(TzPromise *p, void *host_obj, uint64_t host_meta, int64_t port,
+                          void *deadline, TzMaker make, int lookup_only) {
   start();
   tz_net_make = make;
   Connect *r = (Connect *)tz_alloc(sizeof(Connect));
@@ -1770,6 +1808,7 @@ void tz_net_connect(TzPromise *p, void *host_obj, uint64_t host_meta, int64_t po
   r->promise = p;
   r->make = make;
   r->port = port;
+  r->lookup_only = lookup_only;
   if (!ascii_of(host_obj, host_meta, r->host, sizeof r->host)) {
     net_reject(&r->promise, net_failure("ERR_INVALID_ARG_VALUE", "the host name must be ASCII"));
     connect_free(r);
@@ -1790,6 +1829,10 @@ void tz_net_connect(TzPromise *p, void *host_obj, uint64_t host_meta, int64_t po
   if (parse_literal(r->host, port, &r->addresses[0], &length)) {
     r->lengths[0] = length;
     r->count = 1;
+    if (lookup_only) {
+      lookup_answer(r);
+      return;
+    }
     connect_next(r);
     return;
   }
@@ -1797,6 +1840,10 @@ void tz_net_connect(TzPromise *p, void *host_obj, uint64_t host_meta, int64_t po
     parse_literal("127.0.0.1", port, &r->addresses[0], &r->lengths[0]);
     parse_literal("::1", port, &r->addresses[1], &r->lengths[1]);
     r->count = 2;
+    if (lookup_only) {
+      lookup_answer(r);
+      return;
+    }
     connect_next(r);
     return;
   }
@@ -1817,6 +1864,44 @@ void tz_net_connect(TzPromise *p, void *host_obj, uint64_t host_meta, int64_t po
   }
   r->op.error = rc;
   names_done(&r->op.work);
+}
+
+void tz_net_connect(TzPromise *p, void *host_obj, uint64_t host_meta, int64_t port, void *deadline,
+                    TzMaker make) {
+  TZ_ORDERED();
+  begin_connect(p, host_obj, host_meta, port, deadline, make, 0);
+}
+
+void tz_net_lookup(TzPromise *p, void *host_obj, uint64_t host_meta, void *deadline, TzMaker make) {
+  TZ_ORDERED();
+  begin_connect(p, host_obj, host_meta, 0, deadline, make, 1);
+}
+
+void tz_net_local_address(TzStr *out, void *conn, TzMaker make) {
+  (void)make;
+  NetConn *c = (NetConn *)conn;
+  conn_lock(c);
+  SOCKADDR_STORAGE local;
+  int length = sizeof local;
+  char text[96];
+  text[0] = 0;
+  if (!c->h2parent && !c->closed && getsockname(c->s, (SOCKADDR *)&local, &length) == 0) {
+    char address[72];
+    address_text((SOCKADDR *)&local, address, sizeof address);
+    int port = address_port((SOCKADDR *)&local);
+    snprintf(text, sizeof text, local.ss_family == AF_INET6 ? "[%s]:%d" : "%s:%d", address, port);
+  }
+  conn_unlock(c);
+  *out = tz_str_from_ascii(text, strlen(text));
+}
+
+void tz_net_tls_version(TzStr *out, void *conn, TzMaker make) {
+  (void)make;
+  NetConn *c = (NetConn *)conn;
+  conn_lock(c);
+  const char *version = c->tls && c->tls_ops->version ? c->tls_ops->version(c) : "";
+  *out = tz_str_from_ascii(version, strlen(version));
+  conn_unlock(c);
 }
 
 #else
@@ -1956,6 +2041,27 @@ void tz_net_connect(TzPromise *p, void *host_obj, uint64_t host_meta, int64_t po
   (void)host_meta;
   (void)port;
   (void)deadline;
+  (void)make;
+  unsupported();
+}
+void tz_net_lookup(TzPromise *p, void *host_obj, uint64_t host_meta, void *deadline, TzMaker make) {
+  TZ_ORDERED();
+  (void)p;
+  (void)host_obj;
+  (void)host_meta;
+  (void)deadline;
+  (void)make;
+  unsupported();
+}
+void tz_net_local_address(TzStr *out, void *conn, TzMaker make) {
+  (void)out;
+  (void)conn;
+  (void)make;
+  unsupported();
+}
+void tz_net_tls_version(TzStr *out, void *conn, TzMaker make) {
+  (void)out;
+  (void)conn;
   (void)make;
   unsupported();
 }

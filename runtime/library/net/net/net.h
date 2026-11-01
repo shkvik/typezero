@@ -39,6 +39,7 @@ typedef struct NetTlsOps {
   void *(*error)(NetConn *c, TzMaker make);
   void (*release)(NetConn *c);
   int (*h2)(NetConn *c);
+  const char *(*version)(NetConn *c);
 } NetTlsOps;
 
 typedef struct NetOp {
@@ -193,7 +194,7 @@ struct NetListener {
   void (*tls_alpn)(NetListener *l);
   NetConn *ready_first, *ready_last;
   TzLock ready_lock;
-  uint8_t h2, h2c, h2only;
+  uint8_t h2, h2c, h2only, h2_websocket;
   uint32_t h2_streams;
 };
 

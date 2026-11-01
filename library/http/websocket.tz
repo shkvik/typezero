@@ -1,5 +1,5 @@
 import { EventEmitter } from "node:events";
-import { Connection, ProxyOption } from "tz:fetch";
+import { Connection, ProxyOption, openTunnel } from "tz:fetch";
 import { URL } from "tz:url";
 
 declare function wsRandom(bytes: Uint8Array): void;
@@ -11,6 +11,7 @@ export type WebSocketOptions = {
   timeout?: int;
   proxy?: ProxyOption;
   maxMessageSize?: int;
+  httpVersion?: "auto" | "1.1" | "2";
 };
 
 export type WebSocketConnectError =
@@ -35,7 +36,7 @@ export type WebSocketConnectError =
     }
   | {
       kind: "WEB_SOCKET_CONNECT_ERROR_REFUSED";
-      code: "ERR_NOT_UPGRADED";
+      code: "ERR_NOT_UPGRADED" | "ERR_NO_HTTP2" | "ERR_NO_EXTENDED_CONNECT";
       message: string;
       status: int;
     };
@@ -302,10 +303,12 @@ export class WebSocket extends EventEmitter<WebSocketEvents> {
   public readonly protocols: string[];
   public readonly timeout?: int;
   public readonly maxMessageSize: int;
+  public readonly httpVersion: "auto" | "1.1" | "2";
 
   private readonly headers: Record<string, string>;
   private conn?: Connection;
   private server: boolean;
+  private overHttp2: boolean;
   private state: int;
   private buffered: Uint8Array;
   private pieces: Uint8Array[];
@@ -318,9 +321,11 @@ export class WebSocket extends EventEmitter<WebSocketEvents> {
     this.protocols = options.protocols ?? [];
     this.timeout = options.timeout;
     this.maxMessageSize = options.maxMessageSize ?? 16 * 1024 * 1024;
+    this.httpVersion = options.httpVersion ?? "auto";
     this.headers = options.headers ?? {};
     this.conn = undefined;
     this.server = false;
+    this.overHttp2 = false;
     this.state = 3;
     this.buffered = new Uint8Array(0);
     this.pieces = [];
@@ -337,6 +342,7 @@ export class WebSocket extends EventEmitter<WebSocketEvents> {
   }
 
   public attach(conn: Connection): void {
+    this.overHttp2 = conn.protocol == "h2";
     this.start(conn, new Uint8Array(0));
   }
 
@@ -381,6 +387,36 @@ export class WebSocket extends EventEmitter<WebSocketEvents> {
     const host = hostname.startsWith("[") ? hostname.slice(1, hostname.length - 1) : hostname;
     const port = url.portNumber() ?? (secure ? 443 : 80);
     this.state = 0;
+    if (this.httpVersion != "1.1") {
+      const tunnelResult = await openTunnel(host, port, secure, this.httpVersion == "2");
+      if (tunnelResult.isErr()) {
+        this.state = 3;
+        const failure = tunnelResult.error;
+        const code = failure.code;
+        if (code == "ERR_NO_HTTP2" || code == "ERR_NO_EXTENDED_CONNECT") {
+          return err({
+            kind: "WEB_SOCKET_CONNECT_ERROR_REFUSED",
+            code: code,
+            message: failure.message,
+            status: 0,
+          });
+        }
+
+        return err({
+          kind: "WEB_SOCKET_CONNECT_ERROR_NETWORK",
+          code: failure.code,
+          message: `could not connect to ${host}:${port}: ${failure.message}`,
+          host: host,
+          port: port,
+        });
+      }
+      const stream = tunnelResult.value;
+      if (stream != undefined) {
+        const tunneled = await this.connectOverHttp2(stream, url, host, port);
+
+        return tunneled;
+      }
+    }
     const openedResult = await Connection.open(host, port, secure, undefined, false);
     if (openedResult.isErr()) {
       this.state = 3;
@@ -473,6 +509,56 @@ export class WebSocket extends EventEmitter<WebSocketEvents> {
     return ok(undefined);
   }
 
+  private async connectOverHttp2(stream: Connection, url: URL, host: string,
+                                 port: int): Promise<Result<void, WebSocketConnectError>> {
+    const path = (url.pathname() == "" ? "/" : url.pathname()) + url.search();
+    const head: string[] = ["host", url.host(), ":protocol", "websocket", "sec-websocket-version", "13"];
+    if (this.protocols.length > 0) {
+      head.push("sec-websocket-protocol");
+      head.push(this.protocols.join(", "));
+    }
+    for (const [name, value] of Object.entries(this.headers)) {
+      head.push(name.toLowerCase());
+      head.push(value);
+    }
+    stream.requestStream("CONNECT", path, head);
+    const answeredResult = await stream.responseStream();
+    if (answeredResult.isErr()) {
+      stream.close();
+      this.state = 3;
+
+      return err({
+        kind: "WEB_SOCKET_CONNECT_ERROR_NETWORK",
+        code: answeredResult.error.code,
+        message: `the HTTP/2 stream to ${host}:${port} broke during the handshake: ${answeredResult.error.message}`,
+        host: host,
+        port: port,
+      });
+    }
+    const status = answeredResult.value;
+    if (status != 200) {
+      stream.close();
+      this.state = 3;
+
+      return err({
+        kind: "WEB_SOCKET_CONNECT_ERROR_REFUSED",
+        code: "ERR_NOT_UPGRADED",
+        message: `${host}:${port} answered ${status} and did not open a WebSocket over HTTP/2`,
+        status: status,
+      });
+    }
+    const answer = stream.headerCopy();
+    for (let i = 0; i + 1 < answer.length; i += 2) {
+      if (answer[i] == "sec-websocket-protocol") {
+        this.chosen = answer[i + 1] ?? "";
+      }
+    }
+    this.overHttp2 = true;
+    this.start(stream, new Uint8Array(0));
+
+    return ok(undefined);
+  }
+
   public send(data: string | Uint8Array): Result<void, WebSocketSendError> {
     const conn = this.conn;
     if (conn == undefined || this.state != 1) {
@@ -506,7 +592,8 @@ export class WebSocket extends EventEmitter<WebSocketEvents> {
   }
 
   private async write(conn: Connection, bytes: Uint8Array): Promise<void> {
-    const wroteResult = await conn.write(bytes);
+    const writing = this.overHttp2 ? conn.writeStream(bytes) : conn.write(bytes);
+    const wroteResult = await writing;
     if (wroteResult.isErr()) {
       this.fail({ kind: "WEB_SOCKET_ERROR_NETWORK", code: "ERR_CLOSED", message: "the connection closed while sending" });
     }
@@ -527,6 +614,9 @@ export class WebSocket extends EventEmitter<WebSocketEvents> {
     }
     this.conn = undefined;
     this.state = 3;
+    if (this.overHttp2) {
+      conn.endStream([]);
+    }
     conn.close();
     this.emit("close", code, reason);
   }
@@ -564,7 +654,8 @@ export class WebSocket extends EventEmitter<WebSocketEvents> {
           return;
         }
       }
-      const readResult = await conn.readRaw(undefined);
+      const reading = this.overHttp2 ? conn.readStream() : conn.readRaw(undefined);
+      const readResult = await reading;
       const chunk = readResult.isOk() ? readResult.value : undefined;
       if (chunk == undefined) {
         if (this.conn != undefined) {

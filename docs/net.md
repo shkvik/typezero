@@ -120,8 +120,9 @@ const listening = new Server({ port: 3000 }, app.fetch).listen()
   остаётся таким же, как для node.
 - **HTTP/2** (сделано 31 октября, [tmp/spec/12-http2.md](../tmp/spec/12-http2.md)): с TLS сервер
   договаривается о нём сам (ALPN `h2`), старые клиенты получают HTTP/1.1; настройка
-  `http2?: { enabled: false } | { enabled: true; cleartext?: boolean; maxConcurrentStreams?: int }`
-  — без неё включено при `secure: true` и выключено без TLS; `cleartext: true` — HTTP/2 без TLS
+  `http2?: { enabled: false } | { enabled: true; cleartext?: boolean; maxConcurrentStreams?: int;
+  webSocket?: boolean }` — без неё включено при `secure: true` и выключено без TLS;
+  `webSocket: false` — не объявлять WebSocket поверх HTTP/2 (раздел 9); `cleartext: true` — HTTP/2 без TLS
   (h2c) только «с первого байта», переход `Upgrade: h2c` убран из стандарта и не делается.
   Обработчик тот же, `client.protocol` — `"http/1.1"` или `"h2"`. Каждый поток HTTP/2 — своя
   задача на любом ядре; поток в рантайме — то же соединение для `Request` и `Response`, так что
@@ -130,9 +131,20 @@ const listening = new Server({ port: 3000 }, app.fetch).listen()
   HPACK, окна, защита от Rapid Reset и CONTINUATION flood — его. Пределы: 100 потоков сразу,
   заголовки — 16 КБ, окно потока — 1 МБ, соединения — 16 МБ. Окно открывается, когда программа
   читает тело: не читает — клиент ждёт, память не растёт (31.10). Тело, которое обработчик не
-  дочитал, закрывает только поток (`RST_STREAM` с `NO_ERROR`, как Go). `stop()` шлёт GOAWAY
-  (сначала предупреждение, потом с последним принятым потоком) и ждёт начатых. Ещё нет:
-  `headersTimeout` и `requestTimeout` у потоков, WebSocket поверх HTTP/2. Потоки напрямую —
+  дочитал, закрывает только поток (`RST_STREAM` с `NO_ERROR`, как Go). Клиент закрыл свою
+  сторону TCP (FIN) — для HTTP/2 это «клиент ушёл»: соединение закрывается, ответы в работе не
+  уходят, обработчики доделывают своё (решено 1 ноября; так же Go и `h2` у hyper). «Я всё
+  отправил» в HTTP/2 — `END_STREAM` у потока; HTTP/1.1 после FIN клиента ещё отвечает.
+  `stop()` шлёт GOAWAY (сначала предупреждение, потом с последним принятым потоком) и ждёт
+  начатых. **Сроки у потоков** (1.11) — те же настройки. `headersTimeout` — столько может идти
+  блок заголовков потока (и трейлеров): дольше — 408 на этом потоке, `RST_STREAM` с `NO_ERROR`
+  и GOAWAY, потому что посреди блока заголовков соединение больше ничего не пропустит; начатые
+  потоки доотвечают, потом соединение закрывается. `requestTimeout` — столько может идти весь
+  запрос, от первого кадра до `END_STREAM`: дольше — обработчик, который читает тело, получает
+  `BODY_ERROR_TIMEOUT`, клиент — 408 и `RST_STREAM` с `NO_ERROR`; ответ уже идёт потоком —
+  поток сбрасывается с `CANCEL`; полный ответ уже отдан — только `RST_STREAM` с `NO_ERROR`.
+  Соединение и другие потоки живут дальше. Тест — `run/http2_timeouts`. WebSocket поверх
+  HTTP/2 — раздел 9. Потоки напрямую —
   `tz:http2` (раздел 11). Тест — `cli/http2_server` (клиент — `node:http2`).
 - **`node:http` нет** (решено 29 октября: «мы вообще его не повторяем»). Сервер — `tz:http`,
   клиент — `fetch`. Пакеты, написанные под `node:http` (express, koa, fastify, axios, got),
@@ -180,8 +192,25 @@ async function repo(name: string) {
   кода (в HTTP/2 его нет). Запрос в поток, который сервер не тронул (`REFUSED_STREAM`, GOAWAY
   ниже номера), — `FETCH_ERROR_NETWORK` `ERR_NOT_PROCESSED`: его можно смело отправить снова;
   сброс потока посреди ответа — `ERR_STREAM_RESET`. Простаивающее соединение HTTP/2 читает без
-  счёта (не держит программу). Тот же движок nghttp2, что у сервера. Ещё нет: HTTP/2 через
-  прокси, `trace` (H15). Тест — `run/fetch_http2`; с Rust hyper (h2c) проверено руками.
+  счёта (не держит программу). Тот же движок nghttp2, что у сервера. Через прокси `fetch` всегда
+  идёт туннелем `CONNECT` по HTTP/1.1, как Go и Rust (hyper-util): HTTP/2 к прокси не делаем
+  (решено 1 ноября). Тест — `run/fetch_http2`; с Rust hyper (h2c) проверено руками.
+- **Шаги запроса — `trace`** (сделано 1 ноября, H15; как `httptrace` в Go): `fetch(url, { trace:
+  step => … })` отдаёт функции каждый шаг — объект `FetchStep` с меткой `kind` и `elapsed`
+  (миллисекунды от вызова `fetch`). Шаги: `FETCH_STEP_LOOKUP_STARTED` / `_LOOKUP_DONE` (имя →
+  адреса; у адреса-числа их нет), `_CONNECTING`, `_CONNECT_FAILED` (адрес и код — и следующий
+  адрес), `_CONNECTED` (свой адрес), `_PROXY_TUNNEL_OPENED`, `_TLS_DONE` (протокол по ALPN и
+  версия TLS), `_CONNECTION_REUSED` (с `idle` — сколько соединение простояло),
+  `_CONNECTION_CLOSED_BY_SERVER` (соединение из пула оказалось закрыто — берётся новое),
+  `_CONNECTION_FULL` (у соединения HTTP/2 нет свободного потока — открывается второе),
+  `_REQUEST_SENT` (`bytes` — байты тела запроса: голова HTTP/2 сжимается HPACK только при
+  отправке кадра), `_RESPONSE_STARTED`, `_REDIRECTED`, `_BODY_RECEIVED` (байты тела, как
+  пришли, до распаковки), `_CONNECTION_RETURNED` (в пул), `_CONNECTION_CLOSED` (`SERVER_ASKED`,
+  `BODY_NOT_READ` — программа отменила тело, `ERROR`). Без `trace` ничего не создаётся.
+  Поиск адресов и попытки подключения теперь идут из `fetch` по одной (`netLookup`, потом
+  `netConnect` на каждый адрес): так шаги видны, а поведение то же — IPv4 раньше IPv6, ошибка —
+  первой неудачной попытки. Отмена тела ответа (`body().cancel()`) сразу закрывает соединение
+  (HTTP/1.1) или сбрасывает поток (HTTP/2). Тест — `run/fetch_trace`, туннель — `cli/proxy`.
 - Распаковка gzip, deflate и brotli, переходы по редиректам (до 20), соединения с keep-alive
   держатся в пуле — как в node. **`fetch` никогда не повторяет запрос сам** (H12, 31 октября):
   запрос уходит один раз, и `POST` тоже; повторять и писать в журнал — дело программы. Чтобы
@@ -200,7 +229,7 @@ async function repo(name: string) {
   прокси. Ошибки — `FetchError` вида `FETCH_ERROR_PROXY`: `ERR_INVALID_PROXY_URL`, `ERR_PROXY_AUTH_REQUIRED`
   (407), `ERR_PROXY_REFUSED` (403, 502…); поля `proxy` (адрес без пароля) и `status`. Прокси не
   отвечает — `FETCH_ERROR_NETWORK` с адресом прокси и словами «the proxy» в тексте. Ещё нет: SOCKS4/5,
-  Digest, прокси через HTTP/2, прокси у WebSocket.
+  Digest, прокси у WebSocket. Прокси через HTTP/2 не будет (1 ноября).
 - **Ошибки — `Result`** (переделано 29 октября): `fetch` отдаёт
   `Promise<Result<Response, FetchError>>`. `FetchError` — объект с меткой `kind` (что делать
   программе) и закрытым списком `code`. С 31 октября (Ф7, Ф9) `kind` уникален во всей
@@ -442,10 +471,20 @@ new Server({ port: 3000 }, request => {
   `WEB_SOCKET_SEND_ERROR` (`ERR_NOT_CONNECTED`, `ERR_CLOSING`); `UpgradeError` —
   `UPGRADE_ERROR` (`ERR_NOT_WEBSOCKET`, `ERR_UNSUPPORTED_VERSION`). С 29 октября `emit` в коде библиотеки
   сверяется с картой событий, как в программе.
+- **WebSocket поверх HTTP/2** (RFC 8441, сделано 1 ноября): сервер с HTTP/2 объявляет его сам
+  (`SETTINGS_ENABLE_CONNECT_PROTOCOL`; `http2: { webSocket: false }` — не объявлять), и
+  `upgradeWebSocket` принимает оба способа: HTTP/1.1 (ответ 101) и поток HTTP/2 (`CONNECT` с
+  `:protocol: websocket`, ответ 200) — обработчик тот же, `client.protocol` скажет, какой.
+  Клиент выбирает `httpVersion?: "auto" | "1.1" | "2"` в настройках `WebSocket`: `"auto"` (по
+  умолчанию) — потоком по соединению HTTP/2, уже открытому к этому серверу (например, `fetch`),
+  если сервер объявил, иначе отдельным HTTP/1.1, как раньше; `"2"` — всегда потоком HTTP/2
+  (`wss:` — HTTP/2 по ALPN, `ws:` — h2c), а сервер без HTTP/2 или без объявления —
+  `WEB_SOCKET_CONNECT_ERROR_REFUSED` с кодом `ERR_NO_HTTP2` или `ERR_NO_EXTENDED_CONNECT`;
+  `"1.1"` — всегда HTTP/1.1. У запроса `CONNECT` поле `request.connectProtocol` — его
+  `:protocol`. Тест — `run/websocket_http2`.
 - **Ещё не сделано** из решения ([tmp/spec/10-websocket.md](../tmp/spec/10-websocket.md)):
   `timeout` и `idleTimeout`, пинги рантайма, тип `CloseCode` (сейчас `close(code: int)`),
-  `bufferedAmount()`, прокси и `httpVersion`, WebSocket поверх HTTP/2, `TLS` и `PROXY` в
-  ошибках подключения, объявления для редактора.
+  `bufferedAmount()`, прокси, `TLS` и `PROXY` в ошибках подключения, объявления для редактора.
 
 ## 10. UDP: `node:dgram` (сделано 29 октября)
 
@@ -526,7 +565,8 @@ if (connected.isOk()) {
 
 - **Сервер** — `new Http2Server(options, handler).listen()` → `Result<Http2Listening,
   ListenError>`; настройки — как у `Server`: `port`, `hostname`, `transport`,
-  `maxConcurrentStreams` (100), `headersTimeout` (60 000), `keepAliveTimeout`. Только HTTP/2:
+  `maxConcurrentStreams` (100), `headersTimeout` (60 000, работает как у `Server`, раздел 1),
+  `keepAliveTimeout`. Только HTTP/2:
   без TLS — h2c «с первого байта», с TLS — ALPN только `h2`; клиент HTTP/1.1 получает `505 HTTP
   Version Not Supported`, по TLS без `h2` — отказ в рукопожатии. Общего срока на запрос и срока
   простоя соединения по умолчанию нет (как в node и Go): поток вроде «следить за ценой» живёт

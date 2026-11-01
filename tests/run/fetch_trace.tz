@@ -1,0 +1,180 @@
+// env: NODE_EXTRA_CA_CERTS=@TESTS@/tls/ca.pem
+// env: TLS_DIR=@TESTS@/tls
+// The steps of fetch for the program's log (docs/net.md, section 2):
+// fetch(url, { trace }) hands every step to the function. A request to
+// localhost looks the name up and connects; a redirect; the next request
+// reuses the connection; an answer with "connection: close" closes it; a body
+// the program cancels closes the connection; a server that closed the idle
+// connection; nobody listening - both addresses of localhost fail; HTTP/2
+// without TLS reuses its one connection, and opens a second one when the
+// first has no free stream; HTTPS tells the protocol and the TLS version.
+// Times, ports and the local address change from run to run, so they are
+// checked, not printed. Only 127.0.0.1 and ::1.
+import { readFileSync } from "node:fs"
+import { join } from "node:path"
+import { Server as TcpServer } from "node:net"
+import { setTimeout as sleep } from "node:timers/promises"
+import { Handler, Server } from "tz:http"
+
+const dir = process.env.TLS_DIR ?? "."
+const cert = readFileSync(join(dir, "localhost.pem"), "utf8")
+const key = readFileSync(join(dir, "key.pem"), "utf8")
+if (cert.isErr() || key.isErr()) process.exit(1)
+
+const handler: Handler = async request => {
+  const path = new URL(request.url).pathname()
+  if (path == "/old") return new Response("moved", { status: 301, headers: { location: "/new" } })
+  if (path == "/upload") {
+    const text = await request.text()
+    return new Response(text.isOk() ? `got ${text.value}` : "failed")
+  }
+  if (path == "/big") return new Response("x".repeat(1024 * 1024))
+  if (path == "/slow") {
+    await sleep(300)
+    return new Response("slow page")
+  }
+  return new Response("new page")
+}
+
+const closing = new TcpServer({ port: 0, hostname: "127.0.0.1" }, async socket => {
+  let asked = ""
+  for await (const chunkResult of socket) {
+    if (chunkResult.isErr()) break
+    asked += chunkResult.value.toString()
+    if (asked.includes("\r\n\r\n")) {
+      socket.write("HTTP/1.1 200 OK\r\nconnection: close\r\ncontent-length: 6\r\n\r\nclosed")
+      const ended = await socket.end()
+      if (ended.isErr()) console.log(`end: ${ended.error.message}`)
+      break
+    }
+  }
+}).listen()
+const plain = new Server({ port: 0, hostname: "127.0.0.1", http2: { enabled: true, cleartext: true } },
+                         handler).listen()
+const narrow = new Server({
+  port: 0,
+  hostname: "127.0.0.1",
+  http2: { enabled: true, cleartext: true, maxConcurrentStreams: 1 },
+}, handler).listen()
+const brief = new Server({ port: 0, hostname: "127.0.0.1", keepAliveTimeout: 100 }, handler).listen()
+const transport = { secure: true, cert: cert.value, key: key.value }
+const secure = new Server({ port: 0, hostname: "127.0.0.1", transport }, handler).listen()
+const gone = new Server({ port: 0, hostname: "127.0.0.1" }, handler).listen()
+if (closing.isErr() || plain.isErr() || narrow.isErr() || brief.isErr() || secure.isErr() ||
+    gone.isErr()) {
+  process.exit(1)
+}
+const ports: [int, string][] = [
+  [plain.value.port, "PLAIN"],
+  [closing.value.port, "CLOSING"],
+  [narrow.value.port, "NARROW"],
+  [brief.value.port, "BRIEF"],
+  [secure.value.port, "SECURE"],
+  [gone.value.port, "GONE"],
+]
+await gone.value.stop({ timeout: 0 })
+
+let inOrder = true
+let localSeen = true
+let idleSeen = true
+
+function shown(text: string): string {
+  let out = text
+  for (const [port, name] of ports) out = out.replaceAll(`:${port}`, `:${name}`)
+  return out
+}
+
+function describe(step: FetchStep): string {
+  switch (step.kind) {
+    case "FETCH_STEP_LOOKUP_STARTED":
+      return `looking up ${step.host}`
+    case "FETCH_STEP_LOOKUP_DONE":
+      return `${step.host} is ${step.addresses.join(", ")}`
+    case "FETCH_STEP_CONNECTION_REUSED":
+      if (step.idle < 0) idleSeen = false
+      return `reusing ${step.protocol} to ${shown(step.address)}`
+    case "FETCH_STEP_CONNECTION_CLOSED_BY_SERVER":
+      if (step.idle < 0) idleSeen = false
+      return `${shown(step.address)} closed the idle connection`
+    case "FETCH_STEP_CONNECTION_FULL":
+      return `all ${step.streams} streams to ${shown(step.address)} are busy`
+    case "FETCH_STEP_CONNECTING":
+      return `connecting to ${shown(step.address)}`
+    case "FETCH_STEP_CONNECT_FAILED":
+      return `${shown(step.address)} failed with ${step.code}`
+    case "FETCH_STEP_CONNECTED":
+      if (!step.localAddress.startsWith("127.0.0.1:") && !step.localAddress.startsWith("[::1]:")) {
+        localSeen = false
+      }
+      return `connected to ${shown(step.address)}`
+    case "FETCH_STEP_PROXY_TUNNEL_OPENED":
+      return `tunnel through ${step.proxy}`
+    case "FETCH_STEP_TLS_DONE":
+      return `${step.tlsVersion}, speaking ${step.protocol}`
+    case "FETCH_STEP_REQUEST_SENT":
+      return `sent ${step.method} ${shown(step.url)}, ${step.bytes} bytes of body`
+    case "FETCH_STEP_RESPONSE_STARTED":
+      return `response ${step.status}`
+    case "FETCH_STEP_REDIRECTED":
+      return `${step.status} to ${shown(step.location)}`
+    case "FETCH_STEP_BODY_RECEIVED":
+      return `body read, ${step.bytes} bytes`
+    case "FETCH_STEP_CONNECTION_RETURNED":
+      return `connection to ${shown(step.address)} back to the pool`
+    case "FETCH_STEP_CONNECTION_CLOSED":
+      return `connection to ${shown(step.address)} closed: ${step.reason}`
+  }
+}
+
+function logger(prefix: string): (step: FetchStep) => void {
+  let last = 0.0
+  return step => {
+    if (step.elapsed < last) inOrder = false
+    last = step.elapsed
+    console.log(`${prefix}${describe(step)}`)
+  }
+}
+
+async function ask(what: string, url: string, init: RequestInit) {
+  console.log(what)
+  const sent = await fetch(url, init)
+  if (sent.isErr()) {
+    console.log(`  error ${sent.error.code}`)
+    return
+  }
+  const text = await sent.value.text()
+  console.log(`  text: ${text.isOk() ? text.value.slice(0, 20) : text.error.code}`)
+}
+
+const local = `http://localhost:${plain.value.port}`
+await ask("redirect", `${local}/old`, { trace: logger("  ") })
+await ask("reused", `${local}/upload`, { method: "POST", body: "abc", trace: logger("  ") })
+console.log("cancelled")
+const big = await fetch(`${local}/big`, { trace: logger("  ") })
+if (big.isOk()) await big.value.body()?.cancel()
+await ask("server asked", `http://127.0.0.1:${closing.value.port}/`, { trace: logger("  ") })
+const briefUrl = `http://127.0.0.1:${brief.value.port}/new`
+await ask("brief", briefUrl, { trace: logger("  ") })
+await sleep(500)
+await ask("brief later", briefUrl, { trace: logger("  ") })
+await ask("nobody", `http://localhost:${gone.value.port}/`, { trace: logger("  ") })
+const h2c = `http://127.0.0.1:${plain.value.port}/new`
+await ask("h2c", h2c, { httpVersion: "2", trace: logger("  ") })
+await ask("h2c again", h2c, { httpVersion: "2", trace: logger("  ") })
+console.log("full")
+const narrowUrl = `http://127.0.0.1:${narrow.value.port}`
+const slow = fetch(`${narrowUrl}/slow`, { httpVersion: "2", trace: logger("  slow: ") })
+await sleep(100)
+await ask("  second", `${narrowUrl}/new`, { httpVersion: "2", trace: logger("  second: ") })
+const slowSent = await slow
+if (slowSent.isOk()) {
+  const text = await slowSent.value.text()
+  console.log(`  slow text: ${text.isOk() ? text.value : text.error.code}`)
+}
+await ask("https", `https://localhost:${secure.value.port}/new`, { trace: logger("  ") })
+console.log(`times in order: ${inOrder}, local addresses: ${localSeen}, idle times: ${idleSeen}`)
+await plain.value.stop({ timeout: 0 })
+await narrow.value.stop({ timeout: 0 })
+await brief.value.stop({ timeout: 0 })
+await secure.value.stop({ timeout: 0 })
+await closing.value.stop()
