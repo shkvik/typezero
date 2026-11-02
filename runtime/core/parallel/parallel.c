@@ -478,6 +478,20 @@ void *tz_pool_port_handle(void) {
   return tz_pool_port;
 }
 
+int32_t tz_pool_serving;
+
+void *tz_pool_serve_port(void) {
+  if (!tz_ahead_on) {
+    return NULL;
+  }
+  if (!__atomic_exchange_n(&tz_pool_serving, 1, __ATOMIC_ACQ_REL)) {
+    __atomic_add_fetch(&tz_pool_base, 1, __ATOMIC_RELAXED);
+    __atomic_add_fetch(&tz_pool_size, 1, __ATOMIC_RELAXED);
+  }
+
+  return tz_pool_port_handle();
+}
+
 void tz_parallel_init(void) { tz_ahead_on = pool_size() > 0; }
 
 Site *tz_ahead_sites;

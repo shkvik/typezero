@@ -649,6 +649,10 @@ static void raw_got(NetConn *c, uint32_t got) {
   c->raw_end += got;
 }
 
+#if TZ_PARALLEL
+static int net_raw_in_pool(NetConn *c);
+#endif
+
 void net_read(NetConn *c) {
   if (c->h2parent) {
     if (c->eof || c->error || c->closed) {
@@ -665,6 +669,11 @@ void net_read(NetConn *c) {
       return;
     }
     if (c->tls) {
+#if TZ_PARALLEL
+      if (net_raw_in_pool(c)) {
+        return;
+      }
+#endif
       int ready = c->tls_ops->open(c);
       net_flush(c);
       if (ready || c->error) {
@@ -947,6 +956,7 @@ static void write_done(TzWork *w) {
 
 #if TZ_PARALLEL
 void *tz_pool_port_handle(void);
+void *tz_pool_serve_port(void);
 void tz_io_due_remote(TzWork *w);
 void tz_io_done_remote(TzWork *w);
 
@@ -958,7 +968,7 @@ static void net_completed_pooled(OVERLAPPED_ENTRY *entry) {
   NetConn *c = reading ? CONTAINING_RECORD(op, NetConn, rop) : CONTAINING_RECORD(op, NetConn, wop);
   conn_lock(c);
   int here =
-      !c->orphan && !c->closed && !c->tls && !c->error && !op->error &&
+      !c->orphan && !c->closed && !c->error && !op->error &&
       (reading ? op->bytes > 0 && (tz_http_waits_request(c) || c->h2) : !c->closing && !c->drain);
   if (!here) {
     conn_unlock(c);
@@ -970,8 +980,13 @@ static void net_completed_pooled(OVERLAPPED_ENTRY *entry) {
     --c->ops;
     c->reading = 0;
     c->last_active = net_now();
-    c->in_end += op->bytes;
-    c->on_input(c);
+    if (c->tls) {
+      raw_got(c, op->bytes);
+      net_read(c);
+    } else {
+      c->in_end += op->bytes;
+      c->on_input(c);
+    }
   } else {
     --c->ops;
     c->writing = 0;
@@ -1009,6 +1024,38 @@ int net_input_in_pool(NetConn *c) {
   }
   ++c->ops;
   if (!PostQueuedCompletionStatus((HANDLE)pool, 0, (ULONG_PTR)input_pooled, (OVERLAPPED *)c)) {
+    --c->ops;
+    return 0;
+  }
+
+  return 1;
+}
+
+static void raw_pooled(OVERLAPPED_ENTRY *entry) {
+  NetConn *c = (NetConn *)entry->lpOverlapped;
+  conn_lock(c);
+  --c->ops;
+  if (c->orphan) {
+    conn_unlock_settle(c);
+    return;
+  }
+  tz_trigger_hold();
+  net_read(c);
+  conn_unlock(c);
+  tz_ahead_settle_held();
+}
+
+static int net_raw_in_pool(NetConn *c) {
+  if (!c->pooled || !c->listener || !c->listener->tls || c->raw_start == c->raw_end ||
+      (tz_thread.worker && !tz_thread.turn)) {
+    return 0;
+  }
+  void *pool = tz_pool_port_handle();
+  if (!pool) {
+    return 0;
+  }
+  ++c->ops;
+  if (!PostQueuedCompletionStatus((HANDLE)pool, 0, (ULONG_PTR)raw_pooled, (OVERLAPPED *)c)) {
     --c->ops;
     return 0;
   }
@@ -1568,9 +1615,7 @@ static void accepted(NetListener *l, int32_t error) {
   setsockopt(s, SOL_SOCKET, SO_UPDATE_ACCEPT_CONTEXT, (const char *)&l->s, sizeof l->s);
   void *pool = NULL;
 #if TZ_PARALLEL
-  if (!l->tls) {
-    pool = tz_pool_port_handle();
-  }
+  pool = tz_pool_serve_port();
 #endif
   int attached = 0;
 #if TZ_PARALLEL
