@@ -1,0 +1,9 @@
+list a b -
+list - b -
+list - b - (b is still in a variable)
+tick payload
+emitter payload (the listener is still in a variable)
+tick payload
+emitter - 1
+alone freed
+pair waits for the room

@@ -134,7 +134,6 @@ void tz_promise_drop(void *object) {
     TzReactor *next = r->next;
     if (r->source == TZ_REACTION_WITHIN) {
       r->source = NULL;
-    } else if (member && r->owner->rc < 0) {
       tz_group_unstore(p, r->owner);
     } else {
       tz_obj_release(r->owner);

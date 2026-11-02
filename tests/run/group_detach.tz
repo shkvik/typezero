@@ -1,0 +1,112 @@
+// A member of a group that nothing points at any more is freed at once, while
+// the rest of the group lives on (docs/objects.md, section 11); a WeakRef to it
+// gives undefined right away. Parts that point at each other in a cycle wait
+// for the whole group.
+import { EventEmitter } from "node:events"
+
+class List {
+  head?: Item
+  size = 0
+}
+
+class Item {
+  next?: Item
+  list?: List
+  constructor(public name: string) {}
+}
+
+function add(list: List, name: string): WeakRef<Item> {
+  const item = new Item(name)
+  item.list = list
+  item.next = list.head
+  list.head = item
+  list.size++
+  return new WeakRef(item)
+}
+
+function names(watched: WeakRef<Item>[]): string {
+  return watched.map((w) => w.deref()?.name ?? "-").join(" ")
+}
+
+function list() {
+  const items = new List()
+  const watched = [add(items, "a"), add(items, "b"), add(items, "c")]
+  items.head = items.head?.next
+  console.log("list", names(watched))
+  const b = items.head
+  if (b != undefined) b.next = undefined
+  console.log("list", names(watched))
+  items.head = undefined
+  console.log("list", names(watched), "(b is still in a variable)")
+}
+
+class Payload {
+  constructor(public name: string) {}
+}
+
+class Service {
+  events = new EventEmitter<{ tick: [] }>()
+  ticks = 0
+}
+
+function listen(service: Service): [() => void, WeakRef<Payload>] {
+  const payload = new Payload("payload")
+  const listener = () => {
+    service.ticks++
+    console.log("tick", payload.name)
+  }
+  service.events.on("tick", listener)
+  return [listener, new WeakRef(payload)]
+}
+
+function emitter() {
+  const service = new Service()
+  const [listener, watched] = listen(service)
+  service.events.emit("tick")
+  service.events.off("tick", listener)
+  console.log("emitter", watched.deref()?.name ?? "-", "(the listener is still in a variable)")
+}
+
+function emitterAfter() {
+  const service = new Service()
+  const watched = listen(service)[1]
+  service.events.emit("tick")
+  service.events.removeAllListeners("tick")
+  console.log("emitter", watched.deref()?.name ?? "-", service.ticks)
+}
+
+class Pair {
+  other?: Pair
+  room?: Room
+}
+
+class Room {
+  last?: Pair
+}
+
+function enter(room: Room, paired: boolean): WeakRef<Pair> {
+  const a = new Pair()
+  if (paired) {
+    const b = new Pair()
+    a.other = b
+    b.other = a
+  }
+  a.room = room
+  room.last = a
+  return new WeakRef(a)
+}
+
+function cycle() {
+  const room = new Room()
+  const alone = enter(room, false)
+  room.last = undefined
+  const paired = enter(room, true)
+  room.last = undefined
+  console.log("alone", alone.deref() != undefined ? "waits for the room" : "freed")
+  console.log("pair", paired.deref() != undefined ? "waits for the room" : "freed")
+}
+
+list()
+emitter()
+emitterAfter()
+cycle()

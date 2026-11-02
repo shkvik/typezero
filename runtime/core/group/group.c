@@ -109,10 +109,27 @@ static inline void provoke(int32_t where) {
 static TzObject *count_in_group(const void *member, int64_t n, int64_t *after) {
   for (;;) {
     TzObject *leader = leader_of(member);
-    int64_t now = rc_add(leader, n);
-    if (is_leader_count(now - n)) {
+    int64_t now = rc_add(leader, n * TZ_RC_UNIT);
+    if (is_leader_count(now - n * TZ_RC_UNIT)) {
       *after = now;
       return leader;
+    }
+    while (leader_of(member) == leader) {
+      tz_cpu_relax();
+    }
+  }
+}
+
+static inline int64_t own_add(void *member, int64_t n) {
+  return __atomic_add_fetch(&((TzObject *)member)->rc, n, __ATOMIC_ACQ_REL);
+}
+
+static int64_t leader_rc(const void *member) {
+  for (;;) {
+    TzObject *leader = leader_of(member);
+    int64_t rc = rc_load(leader);
+    if (is_leader_count(rc)) {
+      return rc;
     }
     while (leader_of(member) == leader) {
       tz_cpu_relax();
@@ -134,10 +151,12 @@ static inline int64_t rc_add(TzObject *leader, int64_t n) { return leader->rc +=
 
 static TzObject *count_in_group(const void *member, int64_t n, int64_t *after) {
   TzObject *leader = leader_of(member);
-  *after = rc_add(leader, n);
+  *after = rc_add(leader, n * TZ_RC_UNIT);
 
   return leader;
 }
+
+static inline int64_t own_add(void *member, int64_t n) { return ((TzObject *)member)->rc += n; }
 #endif
 
 static inline int lock_listing(void) {
@@ -155,11 +174,77 @@ static inline void unlock_listing(int locked) {
   }
 }
 
+static inline int lock_member(const void *member) {
+#if TZ_PARALLEL
+  if (tz_group_listing || member_published(member)) {
+    group_lock();
+    return 1;
+  }
+  return 0;
+#else
+  (void)member;
+  return lock_listing();
+#endif
+}
+
 static inline void *untagged(uintptr_t next) { return (void *)(next & ~TZ_GROUP_ARRAY); }
 
 static inline void *next_of(const void *member) { return untagged(tz_group_link(member)->next); }
 
 static inline int is_eternal(const TzObject *leader) { return rc_load(leader) >= TZ_RC_ETERNAL; }
+
+#define OWN_MASK (TZ_RC_UNIT - 1)
+#define OWN_GONE INT64_C(0x80000000)
+#define OWN_DROPPED (OWN_GONE + 1)
+
+static inline int64_t own_of(int64_t rc) { return rc & OWN_MASK; }
+
+static inline int64_t outside_of(int64_t rc) { return rc - own_of(rc); }
+
+static inline int is_alive(int64_t rc) {
+  return (uint64_t)(rc - TZ_RC_GROUP - TZ_RC_UNIT) <
+         (uint64_t)(TZ_RC_ETERNAL - TZ_RC_GROUP - TZ_RC_UNIT);
+}
+
+static inline int no_outside(int64_t rc) { return (uint64_t)(rc - TZ_RC_GROUP) < TZ_RC_UNIT; }
+
+static inline int one_outside(int64_t rc) {
+  return (uint64_t)(rc - TZ_RC_GROUP - TZ_RC_UNIT) < TZ_RC_UNIT;
+}
+
+static inline int own_broken(int64_t own) { return own >= OWN_GONE; }
+
+static inline int64_t own_load(const void *member) {
+  return own_of(rc_load((const TzObject *)member));
+}
+
+static inline int is_gone(const void *member) { return own_load(member) >= OWN_GONE; }
+
+#define LINK_SEEN ((uintptr_t)2)
+#define LINK_BITS (TZ_GROUP_ARRAY | LINK_SEEN)
+
+static inline uintptr_t own_tag(const void *member) {
+  return tz_group_link(member)->prev & TZ_GROUP_ARRAY;
+}
+
+static inline void set_prev(void *member, void *prev) {
+  TzGroupLink *link = tz_group_link(member);
+  link->prev = (uintptr_t)prev | (link->prev & LINK_BITS);
+}
+
+static void unlink_member(void *member) {
+  TzGroupLink *link = tz_group_link(member);
+  void *prev = (void *)(link->prev & ~LINK_BITS);
+  tz_group_link(prev)->next = link->next;
+  set_prev(untagged(link->next), prev);
+}
+
+static inline void link_init(void *member, uintptr_t tag) {
+  TzGroupLink *link = tz_group_link(member);
+  link->prev = (uintptr_t)member | tag;
+  link->leader = member;
+  link->next = (uintptr_t)member | tag;
+}
 
 static inline size_t front_size(void) {
   return sizeof(TzGroupLink) + (tz_group_listing ? sizeof(Listed) : 0);
@@ -177,10 +262,8 @@ TZ_NOINLINE void *tz_group_alloc_listed(size_t size, uintptr_t tag) {
 #if TZ_PARALLEL
   memset(member, 0, size);
 #endif
-  TzGroupLink *link = tz_group_link(member);
-  link->leader = member;
-  link->next = (uintptr_t)member | tag;
-  ((TzObject *)member)->rc = TZ_RC_GROUP + 1;
+  link_init(member, tag);
+  ((TzObject *)member)->rc = TZ_RC_GROUP + TZ_RC_UNIT + 1;
 
   return member;
 }
@@ -196,10 +279,8 @@ TZ_HOT void *tz_group_alloc_tagged(size_t size, uintptr_t tag) {
 #if TZ_PARALLEL
   memset(member, 0, size);
 #endif
-  TzGroupLink *link = tz_group_link(member);
-  link->leader = member;
-  link->next = (uintptr_t)member | tag;
-  ((TzObject *)member)->rc = TZ_RC_GROUP + 1;
+  link_init(member, tag);
+  ((TzObject *)member)->rc = TZ_RC_GROUP + TZ_RC_UNIT + 1;
 
   return member;
 }
@@ -231,11 +312,25 @@ TZ_HOT void tz_group_obj_free(void *object) {
   }
 }
 
+TZ_NOINLINE void tz_group_last_ref(void *member);
+TZ_NOINLINE void tz_group_detach(void *member);
+
+TZ_NOINLINE void tz_group_count_broken(const void *member) {
+  tz_panicf("internal error: a group member at %p is counted %lld times, which is below zero",
+            member, (long long)own_load(member));
+}
+
 #if TZ_PARALLEL
 TZ_NOINLINE void tz_group_retain_shared(void *member) {
   int locked = lock_listing();
   int64_t after;
   count_in_group(member, 1, &after);
+  if (after < TZ_RC_ETERNAL) {
+    int64_t own = own_of(own_add(member, 1));
+    if (tz_group_listing && (own <= 1 || own_broken(own))) {
+      tz_group_count_broken(member);
+    }
+  }
   if (tz_group_listing) {
     ++listed(member)->outside;
   }
@@ -244,13 +339,25 @@ TZ_NOINLINE void tz_group_retain_shared(void *member) {
 
 TZ_NOINLINE void tz_group_release_shared(void *member) {
   int locked = lock_listing();
-  int64_t after;
-  TzObject *leader = count_in_group(member, -1, &after);
   if (tz_group_listing) {
     --listed(member)->outside;
   }
+  TzObject *held = leader_of(member);
+  if (leader_rc(member) < TZ_RC_ETERNAL) {
+    int64_t own = own_of(own_add(member, -1));
+    if (own == 0 || own_broken(own)) {
+      unlock_listing(locked);
+      if (own) {
+        tz_group_count_broken(member);
+      }
+      tz_group_last_ref(member);
+      return;
+    }
+  }
+  int64_t after;
+  TzObject *leader = count_in_group(held, -1, &after);
   unlock_listing(locked);
-  if (after == TZ_RC_GROUP) {
+  if (no_outside(after)) {
     if (tz_weak_count) {
       provoke(1);
     }
@@ -263,7 +370,8 @@ TZ_HOT void tz_group_retain(void *member) {
   if (*rc >= TZ_RC_SHARED) {
     __atomic_fetch_add(rc, 1, __ATOMIC_RELAXED);
   } else if (!tz_group_listing && !member_published(member)) {
-    ++leader_of(member)->rc;
+    leader_of(member)->rc += TZ_RC_UNIT;
+    ++*rc;
   } else {
     tz_group_retain_shared(member);
   }
@@ -277,7 +385,12 @@ TZ_HOT void tz_group_release(void *member) {
     }
   } else if (!tz_group_listing && !member_published(member)) {
     TzObject *leader = leader_of(member);
-    if (--leader->rc == TZ_RC_GROUP) {
+    if (own_of(--o->rc) == 0 && !one_outside(leader->rc) && is_alive(leader->rc)) {
+      tz_group_detach(member);
+      return;
+    }
+    leader->rc -= TZ_RC_UNIT;
+    if (no_outside(leader->rc)) {
       tz_group_free(leader);
     }
   } else {
@@ -286,18 +399,48 @@ TZ_HOT void tz_group_release(void *member) {
 }
 #else
 TZ_HOT void tz_group_retain(void *member) {
-  ++leader_of(member)->rc;
+  leader_of(member)->rc += TZ_RC_UNIT;
+  int64_t own = own_of(++((TzObject *)member)->rc);
   if (tz_group_listing) {
+    if (own <= 1 || own_broken(own)) {
+      tz_group_count_broken(member);
+    }
     ++listed(member)->outside;
   }
 }
 
 TZ_HOT void tz_group_release(void *member) {
-  TzObject *leader = leader_of(member);
   if (tz_group_listing) {
     --listed(member)->outside;
+    if (own_load(member) == 0 || own_broken(own_load(member))) {
+      tz_group_count_broken(member);
+    }
   }
-  if (--leader->rc == TZ_RC_GROUP) {
+  TzObject *leader = leader_of(member);
+  if (own_of(--((TzObject *)member)->rc) == 0 && !one_outside(leader->rc) && is_alive(leader->rc)) {
+    tz_group_detach(member);
+    return;
+  }
+  leader->rc -= TZ_RC_UNIT;
+  if (no_outside(leader->rc)) {
+    tz_group_free(leader);
+  }
+}
+#endif
+
+#if TZ_PARALLEL
+TZ_NOINLINE void tz_group_last_ref(void *member) {
+  int64_t rc = leader_rc(member);
+  if (!one_outside(rc) && is_alive(rc)) {
+    tz_group_detach(member);
+    return;
+  }
+  int64_t after;
+  TzObject *leader = count_in_group(member, -1, &after);
+  if (no_outside(after)) {
+    if (tz_weak_count) {
+      provoke(1);
+    }
     tz_group_free(leader);
   }
 }
@@ -322,11 +465,15 @@ static void each_member(TzObject *leader, void (*each)(void *member, int32_t arr
 static void publish_member(void *member, int32_t array) {
   TzObject *leader = leader_of(member);
   set_leader(member, (void *)((uintptr_t)leader | LEADER_PUBLISHED));
-  tz_publish_contents(member, array);
+  if (!is_gone(member)) {
+    tz_publish_contents(member, array);
+  }
 }
 
 static void publish_ring(TzObject *leader) { each_member(leader, publish_member); }
 #endif
+
+static void free_member(uintptr_t at);
 
 static TzObject *merge(TzObject *a, TzObject *b) {
   void *x = a, *y = b;
@@ -354,26 +501,47 @@ static TzObject *merge(TzObject *a, TzObject *b) {
   }
 #endif
 #if TZ_PARALLEL
-  int64_t moved = __atomic_exchange_n(&a->rc, TZ_RC_MEMBER, __ATOMIC_ACQ_REL);
+  int64_t moved = rc_load(a);
+  while (!__atomic_compare_exchange_n(&a->rc, &moved, TZ_RC_MEMBER + own_of(moved), 1,
+                                      __ATOMIC_ACQ_REL, __ATOMIC_RELAXED)) {
+  }
   provoke(2);
 #else
   int64_t moved = a->rc;
-  a->rc = TZ_RC_MEMBER;
+  a->rc = TZ_RC_MEMBER + own_of(moved);
 #endif
-  rc_add(b, moved - TZ_RC_GROUP);
+  rc_add(b, outside_of(moved) - TZ_RC_GROUP);
   void *m = a;
   do {
     set_leader(m, joined);
     m = next_of(m);
   } while (m != a);
-  uintptr_t t = tz_group_link(a)->next;
-  tz_group_link(a)->next = tz_group_link(b)->next;
-  tz_group_link(b)->next = t;
+  uintptr_t after_a = tz_group_link(a)->next, after_b = tz_group_link(b)->next;
+  tz_group_link(a)->next = after_b;
+  tz_group_link(b)->next = after_a;
+  set_prev(untagged(after_b), a);
+  set_prev(untagged(after_a), b);
+  int64_t size = 0;
   if (tz_group_listing) {
-    listed(b)->size += listed(a)->size;
-    if (tz_group_debugging) {
-      tz_group_merged(b, listed(a)->size);
+    size = listed(a)->size;
+    listed(b)->size += size;
+  }
+  int private_a = 1;
+#if TZ_PARALLEL
+  private_a = !pa;
+  if (pa) {
+    tz_group_link(a)->prev |= LINK_SEEN;
+  }
+#endif
+  if (private_a && own_load(a) == OWN_DROPPED) {
+    unlink_member(a);
+    if (tz_group_listing) {
+      --listed(b)->size;
     }
+    free_member((uintptr_t)a | own_tag(a));
+  }
+  if (tz_group_listing && tz_group_debugging) {
+    tz_group_merged(b, size);
   }
 
   return b;
@@ -381,7 +549,7 @@ static TzObject *merge(TzObject *a, TzObject *b) {
 
 TZ_NOINLINE void tz_group_link_groups(TzObject *owner, TzObject *leader, void *ref) {
   if (is_eternal(leader)) {
-    rc_add(leader, -1);
+    rc_add(leader, -TZ_RC_UNIT);
     if (tz_group_listing) {
       --listed(ref)->outside;
     }
@@ -390,13 +558,34 @@ TZ_NOINLINE void tz_group_link_groups(TzObject *owner, TzObject *leader, void *r
   if (is_eternal(owner)) {
     return;
   }
-  rc_add(merge(owner, leader), -1);
+  rc_add(merge(owner, leader), -TZ_RC_UNIT);
   if (tz_group_listing) {
     --listed(ref)->outside;
   }
 }
 
 #if TZ_PARALLEL
+void tz_group_join(void *owner, void *ref) {
+  if (!ref || !tz_rc_is_member(((TzObject *)ref)->rc) || member_published(ref)) {
+    return;
+  }
+  group_lock();
+  TzObject *lo = leader_of(owner), *lr = leader_of(ref);
+  if (lo != lr && !is_eternal(lo) && !is_eternal(lr)) {
+    merge(lo, lr);
+  }
+  group_unlock();
+}
+
+static void join_one(void *owner, void *ref) { tz_group_join(owner, ref); }
+
+static void each_reference(const TzType *type, void *value, void *owner,
+                           void (*each)(void *owner, void *ref));
+
+void tz_group_join_value(void *owner, const TzType *type, void *value) {
+  each_reference(type, value, owner, join_one);
+}
+
 TZ_NOINLINE void tz_group_store_shared(void *owner, void *ref) {
   if (!tz_group_listing && leader_of(owner) == leader_of(ref)) {
     int64_t after;
@@ -406,7 +595,7 @@ TZ_NOINLINE void tz_group_store_shared(void *owner, void *ref) {
   group_lock();
   TzObject *lo = leader_of(owner), *lr = leader_of(ref);
   if (lo == lr) {
-    rc_add(lr, -1);
+    rc_add(lr, -TZ_RC_UNIT);
     if (tz_group_listing) {
       --listed(ref)->outside;
     }
@@ -416,26 +605,47 @@ TZ_NOINLINE void tz_group_store_shared(void *owner, void *ref) {
   group_unlock();
 }
 
+static void unstore_within_shared(void *ref) {
+  if (!is_alive(leader_rc(ref))) {
+    return;
+  }
+  int64_t own = own_of(own_add(ref, -1));
+  if (own > 0 && !own_broken(own)) {
+    return;
+  }
+  if (own) {
+    tz_group_count_broken(ref);
+  }
+  int64_t after;
+  count_in_group(ref, 1, &after);
+  tz_group_detach(ref);
+}
+
 TZ_NOINLINE void tz_group_unstore_shared(void *owner, void *ref, int32_t member) {
   int locked = lock_listing();
-  if (member && (leader_of(owner) == leader_of(ref) || is_eternal(leader_of(ref)))) {
+  if (member && leader_of(owner) == leader_of(ref)) {
+    unlock_listing(locked);
+    unstore_within_shared(ref);
+    return;
+  }
+  if (member && is_eternal(leader_of(ref))) {
     unlock_listing(locked);
     return;
   }
-  int64_t after;
-  TzObject *lr = count_in_group(ref, -1, &after);
-  if (tz_group_listing) {
-    --listed(ref)->outside;
-  }
   unlock_listing(locked);
-  if (after == TZ_RC_GROUP) {
-    if (tz_weak_count) {
-      provoke(1);
-    }
-    tz_group_free(lr);
-  }
+  tz_group_release_shared(ref);
 }
 #endif
+
+TZ_NOINLINE void tz_group_unstore_last(void *ref, TzObject *leader) {
+  if (own_load(ref)) {
+    tz_group_count_broken(ref);
+  }
+  leader->rc += TZ_RC_UNIT;
+  tz_group_detach(ref);
+}
+
+TZ_NOINLINE void tz_group_unstore_out(void *ref) { tz_group_release(ref); }
 
 TZ_HOT void tz_group_store(void *owner, void *ref) {
   if (!ref) {
@@ -458,7 +668,7 @@ TZ_HOT void tz_group_store(void *owner, void *ref) {
 #endif
   TzObject *lo = leader_of(owner), *lr = leader_of(ref);
   if (lo == lr) {
-    --lr->rc;
+    lr->rc -= TZ_RC_UNIT;
     if (tz_group_listing) {
       --listed(ref)->outside;
     }
@@ -482,15 +692,19 @@ TZ_HOT void tz_group_unstore(void *owner, void *ref) {
   }
 #endif
   TzObject *lr = leader_of(ref);
-  if (member && (leader_of(owner) == lr || is_eternal(lr))) {
-    return;
+  if (member) {
+    if (leader_of(owner) == lr) {
+      if (is_alive(lr->rc) &&
+          (uint64_t)(own_of(--((TzObject *)ref)->rc) - 1) >= (uint64_t)(OWN_GONE - 1)) {
+        tz_group_unstore_last(ref, lr);
+      }
+      return;
+    }
+    if (is_eternal(lr)) {
+      return;
+    }
   }
-  if (tz_group_listing) {
-    --listed(ref)->outside;
-  }
-  if (--lr->rc == TZ_RC_GROUP) {
-    tz_group_free(lr);
-  }
+  tz_group_unstore_out(ref);
 }
 
 int32_t tz_group_store_within(void *owner, void *ref) {
@@ -540,7 +754,9 @@ void tz_group_publish(void *member, void (*each)(void *member, int32_t array)) {
     void *m = untagged(at);
     uintptr_t following = tz_group_link(m)->next;
     set_leader(m, marked);
-    each(m, (at & TZ_GROUP_ARRAY) != 0);
+    if (!is_gone(m)) {
+      each(m, (at & TZ_GROUP_ARRAY) != 0);
+    }
     if (m == leader) {
       break;
     }
@@ -719,6 +935,14 @@ void *tz_weak_new(const TzLayout *layout, void *target) {
 
 #if TZ_PARALLEL
 static int retain_alive(void *member) {
+  int64_t *count = &((TzObject *)member)->rc;
+  int64_t seen = __atomic_load_n(count, __ATOMIC_RELAXED);
+  do {
+    if (own_of(seen) == 0 || own_broken(own_of(seen))) {
+      return 0;
+    }
+  } while (
+      !__atomic_compare_exchange_n(count, &seen, seen + 1, 1, __ATOMIC_ACQ_REL, __ATOMIC_RELAXED));
   for (;;) {
     TzObject *leader = leader_of(member);
     int64_t rc = rc_load(leader);
@@ -728,10 +952,11 @@ static int retain_alive(void *member) {
       }
       continue;
     }
-    if (rc <= TZ_RC_GROUP) {
+    if (outside_of(rc) <= TZ_RC_GROUP) {
+      __atomic_fetch_sub(count, 1, __ATOMIC_ACQ_REL);
       return 0;
     }
-    if (__atomic_compare_exchange_n(&leader->rc, &rc, rc + 1, 0, __ATOMIC_ACQ_REL,
+    if (__atomic_compare_exchange_n(&leader->rc, &rc, rc + TZ_RC_UNIT, 0, __ATOMIC_ACQ_REL,
                                     __ATOMIC_RELAXED)) {
       break;
     }
@@ -745,10 +970,12 @@ static int retain_alive(void *member) {
 #else
 static int retain_alive(void *member) {
   TzObject *leader = leader_of(member);
-  if (leader->rc <= TZ_RC_GROUP) {
+  int64_t own = own_load(member);
+  if (outside_of(leader->rc) <= TZ_RC_GROUP || own == 0 || own_broken(own)) {
     return 0;
   }
-  ++leader->rc;
+  leader->rc += TZ_RC_UNIT;
+  ++((TzObject *)member)->rc;
   if (tz_group_listing) {
     ++listed(member)->outside;
   }
@@ -849,6 +1076,17 @@ static void push(TzObject ***items, size_t *count, size_t *capacity, TzObject *l
 
 #define CHAINS 16
 
+TZ_THREAD_LOCAL TzObject **tz_group_gone;
+TZ_THREAD_LOCAL size_t tz_group_gone_count, tz_group_gone_capacity;
+
+static void drop_member(void *member, uintptr_t tag) {
+  if (tag & TZ_GROUP_ARRAY) {
+    tz_arr_drop_member((TzArray *)member);
+  } else {
+    ((TzObject *)member)->desc->drop(member);
+  }
+}
+
 static size_t drop_contents(TzObject *leader, uintptr_t *chains) {
   uintptr_t at = tz_group_link(leader)->next;
   if (tz_weak_count) {
@@ -878,10 +1116,8 @@ static size_t drop_contents(TzObject *leader, uintptr_t *chains) {
       last[chain] = at;
     }
     ++count;
-    if (at & TZ_GROUP_ARRAY) {
-      tz_arr_drop_member((TzArray *)m);
-    } else {
-      ((TzObject *)m)->desc->drop(m);
+    if (!is_gone(m)) {
+      drop_member(m, at & TZ_GROUP_ARRAY);
     }
     if (m == leader) {
       break;
@@ -924,21 +1160,70 @@ static void free_ring(TzObject *leader) {
   }
 }
 
-TZ_NOINLINE void tz_group_free(TzObject *leader) {
-  leader->rc = TZ_RC_DYING;
-  if (tz_group_freeing) {
-    push(&tz_group_dead, &tz_group_dead_count, &tz_group_dead_capacity, leader);
-    return;
+static void drop_gone(void *member) {
+  uintptr_t tag = own_tag(member);
+  if (tz_weak_count) {
+    tz_weak_forget(member);
   }
-  tz_group_freeing = 1;
+  drop_member(member, tag);
+  int locked = lock_member(member);
+  TzObject *leader = leader_of(member);
+  int loose = (void *)leader != member && !(tz_group_link(member)->prev & LINK_SEEN);
+  if (loose) {
+    unlink_member(member);
+    if (tz_group_listing) {
+      --listed(leader)->size;
+    }
+  } else {
+    own_add(member, OWN_DROPPED - OWN_GONE);
+  }
+  int64_t after = rc_add(leader, -TZ_RC_UNIT);
+  unlock_listing(locked);
+  if (loose) {
+    if (tz_group_debugging) {
+      tz_group_forget_unstored(member);
+    }
+    free_member((uintptr_t)member | tag);
+  }
+  if (no_outside(after)) {
+    tz_group_free(leader);
+  }
+}
+
+static void drain_lists(void) {
   uintptr_t chains[CHAINS];
   for (;;) {
-    free_memory(chains, drop_contents(leader, chains));
+    if (tz_group_gone_count) {
+      drop_gone(tz_group_gone[--tz_group_gone_count]);
+      continue;
+    }
     if (!tz_group_dead_count) {
       break;
     }
-    leader = tz_group_dead[--tz_group_dead_count];
+    TzObject *leader = tz_group_dead[--tz_group_dead_count];
+    free_memory(chains, drop_contents(leader, chains));
   }
+}
+
+TZ_NOINLINE void tz_group_free(TzObject *leader) {
+  leader->rc = TZ_RC_DYING + own_of(leader->rc);
+  push(&tz_group_dead, &tz_group_dead_count, &tz_group_dead_capacity, leader);
+  if (tz_group_freeing) {
+    return;
+  }
+  tz_group_freeing = 1;
+  drain_lists();
+  tz_group_freeing = 0;
+}
+
+TZ_NOINLINE void tz_group_detach(void *member) {
+  own_add(member, OWN_GONE);
+  push(&tz_group_gone, &tz_group_gone_count, &tz_group_gone_capacity, (TzObject *)member);
+  if (tz_group_freeing) {
+    return;
+  }
+  tz_group_freeing = 1;
+  drain_lists();
   tz_group_freeing = 0;
 }
 
@@ -951,16 +1236,12 @@ static void end_one(void *owner, void *ref) {
   if (!is_eternal(leader) || leader->rc >= TZ_RC_ZOMBIE - (INT64_C(1) << 58)) {
     return;
   }
-  leader->rc = TZ_RC_ZOMBIE;
+  leader->rc = TZ_RC_ZOMBIE + own_of(leader->rc);
   push(&tz_group_zombies, &tz_group_zombie_count, &tz_group_zombie_capacity, leader);
   int32_t freeing = tz_group_freeing;
   tz_group_freeing = 1;
   drop_contents(leader, NULL);
-  uintptr_t chains[CHAINS];
-  while (tz_group_dead_count) {
-    TzObject *dead = tz_group_dead[--tz_group_dead_count];
-    free_memory(chains, drop_contents(dead, chains));
-  }
+  drain_lists();
   tz_group_freeing = freeing;
 }
 
@@ -1322,7 +1603,9 @@ static void walk_group(TzObject *leader) {
     at = tz_group_link(leader)->next;
     for (;;) {
       void *m = untagged(at);
-      trace_member(&w, m, at);
+      if (!is_gone(m)) {
+        trace_member(&w, m, at);
+      }
       if (m == leader) {
         break;
       }
@@ -1518,6 +1801,9 @@ void tz_group_shutdown(void) {
   tz_free(tz_group_dead);
   tz_group_dead = NULL;
   tz_group_dead_capacity = 0;
+  tz_free(tz_group_gone);
+  tz_group_gone = NULL;
+  tz_group_gone_capacity = 0;
   tz_free(tz_weak_slots);
   tz_weak_slots = NULL;
   tz_weak_capacity = tz_weak_used = 0;

@@ -54,7 +54,7 @@ static FdRequest *fd_new(TzPromise *p, TzMaker make) {
   FdRequest *r = (FdRequest *)tz_alloc(sizeof(FdRequest));
   memset(r, 0, sizeof *r);
   r->promise = p;
-  tz_rc_inc(&p->rc);
+  tz_ref_retain(p);
   r->make = make;
   r->position = -1;
 

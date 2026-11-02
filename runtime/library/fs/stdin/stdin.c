@@ -181,7 +181,7 @@ void tz_stdin_chunk(TzPromise *p, int64_t max) {
     abort();
   }
   w->promise = p;
-  tz_rc_inc(&p->rc);
+  tz_ref_retain(p);
   w->max = max > 0 ? max : 65536;
   if (tz_chunk_tail) {
     tz_chunk_tail->next = w;

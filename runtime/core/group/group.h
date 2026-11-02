@@ -48,9 +48,12 @@ static inline int tz_rc_dec(int64_t *rc) {
   return --*rc == 0;
 }
 
+#define TZ_RC_UNIT (INT64_C(1) << 32)
+
 typedef struct TzGroupLink {
-  void *leader;
+  uintptr_t prev;
   uintptr_t next;
+  void *leader;
 } TzGroupLink;
 
 #define TZ_GROUP_ARRAY ((uintptr_t)1)
@@ -71,6 +74,8 @@ int32_t tz_group_store_within(void *owner, void *ref);
 void tz_group_obj_free(void *object);
 void tz_group_publish(void *member, void (*each)(void *member, int32_t array));
 int32_t tz_group_published(const void *member);
+void tz_group_join(void *owner, void *ref);
+void tz_group_join_value(void *owner, const TzType *type, void *value);
 void tz_group_store_value(void *owner, const TzType *type, void *value);
 void tz_group_take_value(void *owner, const TzType *type, void *value);
 void tz_value_release_in(void *owner, const TzType *type, void *value);

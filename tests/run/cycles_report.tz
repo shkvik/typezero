@@ -1,33 +1,35 @@
-// expect-stderr: tz: group of Player: 4094 of 4097 objects cannot be reached, held by Player.opponent at cycles_report.tz:21
+// expect-stderr: tz: group of Guest: 4092 of 4096 objects cannot be reached, held by Guest.friend at cycles_report.tz:23
 // A program compiled with TZ_CHECK_LEAKS set walks a group that has grown
-// large (docs/objects.md, section 11): players who played each other are in
-// one group, which only grows as long as one of them is still in the lobby,
-// and the report names the reference that holds the ones that have left.
-class Player {
-  opponent?: Player
-  wins = 0
+// large (docs/objects.md, section 11). Two guests who came together point at
+// each other, and the room points at the last guest who came, so all of them
+// are in the group of the room. A guest the room no longer points at is freed
+// at once, unless the guest is in a cycle: a pair that has left stays in the
+// group while the room lives, and the report names the reference that holds it.
+class Room {
+  last?: Guest
+  visits = 0
+}
+
+class Guest {
+  friend?: Guest
+  room?: Room
   constructor(public name: string) {}
 }
 
 function serve(days: int): int {
-  const lobby: Player[] = []
-  let made = 0
-  for (let i = 0; i < 10; i++) lobby.push(new Player(`p${made++}`))
-  let games = 0
+  const room = new Room()
   for (let day = 0; day < days; day++) {
-    if (lobby.length == 0) break
-    const a = lobby[day % lobby.length], b = lobby[(day * 7 + 3) % lobby.length]
-    if (a != undefined && b != undefined && a != b) {
-      a.opponent = b
-      b.opponent = a
-      a.wins++
-      games++
-    }
-    // One leaves, a new one comes.
-    lobby.splice(day % lobby.length, 1)
-    lobby.push(new Player(`p${made++}`))
+    const a = new Guest(`a${day}`), b = new Guest(`b${day}`)
+    a.friend = b
+    b.friend = a
+    a.room = room
+    room.last = a
+    room.visits++
+    const alone = new Guest(`c${day}`)
+    alone.room = room
+    room.last = alone
   }
-  return games
+  return room.visits
 }
 
 console.log(serve(20000))

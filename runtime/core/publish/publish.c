@@ -276,14 +276,20 @@ void tz_publish_object(void *object) {
 
 void tz_store_barrier(void *owner, const TzType *type, void *value) {
   int64_t rc = ((TzObject *)owner)->rc;
-  if (tz_rc_is_shared(rc) || (tz_rc_is_member(rc) && tz_group_published(owner))) {
+  if (tz_rc_is_shared(rc)) {
+    tz_publish_value(type, value);
+  } else if (tz_rc_is_member(rc) && tz_group_published(owner)) {
+    tz_group_join_value(owner, type, value);
     tz_publish_value(type, value);
   }
 }
 
 void tz_store_barrier_ref(void *owner, void *object) {
   int64_t rc = ((TzObject *)owner)->rc;
-  if (tz_rc_is_shared(rc) || (tz_rc_is_member(rc) && tz_group_published(owner))) {
+  if (tz_rc_is_shared(rc)) {
+    tz_publish_object(object);
+  } else if (tz_rc_is_member(rc) && tz_group_published(owner)) {
+    tz_group_join(owner, object);
     tz_publish_object(object);
   }
 }
