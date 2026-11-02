@@ -1,4 +1,5 @@
 #include "compiler/lower/module_builder/module_builder.h"
+#include "compiler/library/json/json_writers/json_writers.h"
 #include "compiler/library/reflect/reflect_lowerer/reflect_lowerer.h"
 #include "compiler/library/result/result_lowerer/result_lowerer.h"
 #include "compiler/lower/async/async_lowerer/async_lowerer.h"
@@ -142,6 +143,7 @@ std::unique_ptr<llvm::Module> ModuleBuilder::generate(SourceFile &file) {
   lowering_.decoratorLowerer().finishMetadata(file, mainInit_);
   lowering_.memoryDebug().finishGroupDebug(mainInit_);
   lowering_.publishLowerer().finishPublishTable(mainInit_);
+  lowering_.jsonWriters().finish();
   lowering_.debugInfo().finish();
 
   return std::move(lowering_.module_);

@@ -26,6 +26,7 @@
 #define HTTP_MAX_HEADERS 1000
 #define HTTP_MAX_LINE 4096
 #define HTTP_MAX_DISCARD 1048576
+#define STR_ASCII (1ull << 60)
 
 enum { WAIT_NONE, WAIT_REQUEST, WAIT_RESPONSE, WAIT_CHUNK, WAIT_ALL, WAIT_DRAIN, WAIT_RAW };
 
@@ -1803,6 +1804,18 @@ static size_t utf8_of(TzStr text, uint8_t *out) {
   size_t length = 0;
   if (!two) {
     const uint8_t *s = (const uint8_t *)units;
+    size_t wide = 0;
+    if (!(text.meta & STR_ASCII)) {
+      for (uint32_t i = 0; i < n; ++i) {
+        wide += s[i] >> 7;
+      }
+    }
+    if (!wide) {
+      if (out && n) {
+        memcpy(out, s, n);
+      }
+      return n;
+    }
     for (uint32_t i = 0; i < n; ++i) {
       if (s[i] < 0x80) {
         if (out) {

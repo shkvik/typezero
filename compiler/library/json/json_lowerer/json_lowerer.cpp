@@ -1,4 +1,5 @@
 #include "compiler/library/json/json_lowerer/json_lowerer.h"
+#include "compiler/library/json/json_writers/json_writers.h"
 #include "compiler/library/result/result_lowerer/result_lowerer.h"
 #include "compiler/lower/expr/assign_lowerer/assign_lowerer.h"
 #include "compiler/lower/expr/expr_lowerer/expr_lowerer.h"
@@ -412,6 +413,13 @@ llvm::Value *JsonLowerer::emitJsonCall(CallExpr *call) {
   case Builtin::JsonStringify: {
     bool fallible = call->type->isResult();
     const Type *textType = fallible ? call->type->okType() : call->type;
+    if (!fallible && call->args.size() == 1 && textType->isString() &&
+        lowering_.jsonWriters().writable(call->args[0]->type)) {
+      Lowering::Operand operand = lowering_.refCounts().emitOperand(call->args[0], true);
+      llvm::Value *text = lowering_.jsonWriters().emitStringify(operand.value, call->args[0]->type);
+      lowering_.refCounts().dropOperand(operand);
+      return text;
+    }
     if (fallible) {
       useErrors(call->type->errType());
     } else {

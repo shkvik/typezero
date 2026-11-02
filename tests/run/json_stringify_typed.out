@@ -1,0 +1,8 @@
+[{"id":1,"score":1.5,"tags":[]},{"id":2,"name":"two","score":0,"tags":["a"],"note":"n"},{"tags":["x","y"],"score":1e+21,"id":3,"inner":{"label":"in","on":true}},{"note":"first","id":4,"score":0.1,"tags":[]},{"id":5,"name":"two","score":0,"tags":["a"],"note":"n"}]
+{"tags":["x","y"],"score":1e+21,"id":3,"inner":{"label":"in","on":true}}
+[{},{"a":"x"},{"b":2},{"c":false},{"a":"x","c":true},{"c":true,"a":"y"}]
+{"i8":-128,"u8":255,"i16":-32768,"u16":65535,"i32":-2147483648,"u32":4294967295,"i64":-9007199254740991,"u64":9007199254740991,"d":2.5e-7}
+["a",null,"b"] [[1,2],[],[3]] [true,false] []
+{"name":"f","after":2}
+{"label":"жé😀\n\"\\\u0001 tail of a longer string","on":false} [{"label":"жé😀\n\"\\\u0001 tail of a longer string","on":false},{"label":"жé😀\n\"\\\u0001 tail of a longer string","on":false}]
+"t\"x" 42 true 1.5

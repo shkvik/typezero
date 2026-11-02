@@ -1,0 +1,48 @@
+// JSON.stringify writes strings as JavaScript does: every special character
+// at every place of strings of many lengths (short strings kept inside the
+// value, longer ones in memory, joined ones), keys with special characters,
+// Json values, gaps of Latin-1 and two-byte characters. The expected lines
+// come from node running the same code.
+const specials = ['"', "\\", "\n", "\u0000", "\u001f", "\u007f", "é", "ÿ", "ж", "😀", "\ud800", "\udc00", "\t", "\b", "\f", "\r", "/", " "]
+const lengths = [1, 2, 3, 7, 8, 9, 15, 16, 17, 23, 24, 25, 31, 32, 33, 64]
+
+function checksum(text: string): int {
+  let sum = 0
+  for (let i = 0; i < text.length; i++) {
+    sum = (sum * 31 + text.charCodeAt(i)) % 1000000007
+  }
+  return sum
+}
+
+for (const special of specials) {
+  const texts: string[] = []
+  for (const n of lengths) {
+    for (let at = 0; at < n; at++) {
+      const rest = n - at - 1
+      if (rest >= 0) texts.push("a".repeat(at) + special + "b".repeat(rest))
+    }
+  }
+  const json = JSON.stringify(texts)
+  console.log(json.length, checksum(json), JSON.stringify("x" + special + "y"))
+}
+
+const plain: string[] = []
+for (const n of lengths) if (n >= 0) plain.push("c".repeat(n))
+const plainJson = JSON.stringify(plain)
+console.log(plainJson.length, checksum(plainJson))
+
+const odd = { "a\"b": 1, "c\\d": 2, "e\nf": 3, "é": 4, "ж": 5, "😀": 6, plain: "ж😀é" }
+console.log(JSON.stringify(odd))
+
+const record: Record<string, string> = {}
+record["k\"1"] = "v\u0001"
+record["ключ"] = "значение"
+record["é"] = "ÿ"
+console.log(JSON.stringify(record))
+
+const parsed = JSON.parse('{"q\\"": "v\\u0000ж", "list": ["é", "\\ud83d\\ude00", 1.5, true, null]}').unwrapOr(null)
+console.log(JSON.stringify(parsed).unwrapOr(""))
+
+console.log(JSON.stringify({ a: [1, "ж"], b: { c: "é" } }, null, "→ "))
+console.log(JSON.stringify({ a: [1, "x"], b: { c: "é" } }, null, "é"))
+console.log(JSON.stringify(["é", "x"]), JSON.stringify(["ж"]), JSON.stringify("ÿ"))

@@ -12,6 +12,7 @@
 #include "compiler/library/intl/intl_call_lowerer/intl_call_lowerer.h"
 #include "compiler/library/intl/intl_lowerer/intl_lowerer.h"
 #include "compiler/library/json/json_lowerer/json_lowerer.h"
+#include "compiler/library/json/json_writers/json_writers.h"
 #include "compiler/library/math/math_lowerer/math_lowerer.h"
 #include "compiler/library/os/os_lowerer/os_lowerer.h"
 #include "compiler/library/path/path_lowerer/path_lowerer.h"
@@ -177,6 +178,7 @@ Lowering::Lowering(llvm::LLVMContext &ctx, llvm::StringRef moduleName,
   intlLowererPart_ = std::make_unique<IntlLowerer>(*this);
   intlCallLowererPart_ = std::make_unique<IntlCallLowerer>(*this);
   jsonLowererPart_ = std::make_unique<JsonLowerer>(*this);
+  jsonWritersPart_ = std::make_unique<JsonWriters>(*this);
   fsPromisesLowererPart_ = std::make_unique<FsPromisesLowerer>(*this);
   fsLowererPart_ = std::make_unique<FsLowerer>(*this);
   pathLowererPart_ = std::make_unique<PathLowerer>(*this);

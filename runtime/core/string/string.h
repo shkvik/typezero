@@ -38,6 +38,7 @@ void tz_str_retain_value(TzStr s);
 void tz_str_release_value(TzStr s);
 TzStr tz_str_from_utf16(const uint16_t *units, size_t length);
 TzStr tz_str_from_ascii(const char *text, size_t length);
+TzStr tz_str_from_latin1(const uint8_t *bytes, size_t length, int ascii);
 char *tz_str_ascii_units(size_t length, TzStr *out);
 int32_t tz_str_equal(void *a_obj, uint64_t a_meta, void *b_obj, uint64_t b_meta);
 int32_t tz_str_compare(void *a_obj, uint64_t a_meta, void *b_obj, uint64_t b_meta);

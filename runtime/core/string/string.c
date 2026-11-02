@@ -449,6 +449,21 @@ static TzStr string_from_ascii(const char *text, size_t len) {
 
 TzStr tz_str_from_ascii(const char *text, size_t length) { return string_from_ascii(text, length); }
 
+TzStr tz_str_from_latin1(const uint8_t *bytes, size_t length, int ascii) {
+  if (length <= INLINE_MAX) {
+    return length ? inline_str(bytes, (uint32_t)length) : kEmpty;
+  }
+  if (length > MAX_LENGTH) {
+    tz_panicf("string length %llu exceeds the maximum of %llu", (unsigned long long)length,
+              (unsigned long long)MAX_LENGTH);
+  }
+  Buffer *b = buffer_new((uint32_t)length, 0);
+  memcpy(buffer_units(b), bytes, length);
+  b->used = (uint32_t)length;
+
+  return make_str(b, make_meta((uint32_t)length, 0, 0, ascii, F_HEAP));
+}
+
 char *tz_str_ascii_units(size_t length, TzStr *out) {
   if (length <= INLINE_MAX) {
     return NULL;

@@ -97,6 +97,7 @@ class LibraryCallLowerer;
 class IntlLowerer;
 class IntlCallLowerer;
 class JsonLowerer;
+class JsonWriters;
 class FsPromisesLowerer;
 class FsLowerer;
 class PathLowerer;
@@ -519,6 +520,7 @@ public:
   IntlLowerer &intlLowerer() const { return *intlLowererPart_; }
   IntlCallLowerer &intlCallLowerer() const { return *intlCallLowererPart_; }
   JsonLowerer &jsonLowerer() const { return *jsonLowererPart_; }
+  JsonWriters &jsonWriters() const { return *jsonWritersPart_; }
   FsPromisesLowerer &fsPromisesLowerer() const { return *fsPromisesLowererPart_; }
   FsLowerer &fsLowerer() const { return *fsLowererPart_; }
   PathLowerer &pathLowerer() const { return *pathLowererPart_; }
@@ -616,6 +618,7 @@ private:
   friend class IntlLowerer;
   friend class IntlCallLowerer;
   friend class JsonLowerer;
+  friend class JsonWriters;
   friend class FsPromisesLowerer;
   friend class FsLowerer;
   friend class PathLowerer;
@@ -706,6 +709,7 @@ private:
   std::unique_ptr<IntlLowerer> intlLowererPart_;
   std::unique_ptr<IntlCallLowerer> intlCallLowererPart_;
   std::unique_ptr<JsonLowerer> jsonLowererPart_;
+  std::unique_ptr<JsonWriters> jsonWritersPart_;
   std::unique_ptr<FsPromisesLowerer> fsPromisesLowererPart_;
   std::unique_ptr<FsLowerer> fsLowererPart_;
   std::unique_ptr<PathLowerer> pathLowererPart_;

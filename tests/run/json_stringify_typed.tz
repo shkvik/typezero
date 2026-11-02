@@ -1,0 +1,64 @@
+// JSON.stringify of plain object types, which the compiler writes with code
+// made for the type: optional fields present and absent at every place, one
+// type made with different key orders and by spread, nested objects and
+// arrays, numbers of every width, booleans, skipped functions, strings that
+// need escapes. The expected lines come from node running the same code.
+type Inner = { label: string; on: boolean };
+type Row = {
+  id: int;
+  name?: string;
+  score: double;
+  inner?: Inner;
+  tags: string[];
+  note?: string;
+};
+const first: Row = { id: 1, score: 1.5, tags: [] };
+const second: Row = { id: 2, name: "two", score: -0, tags: ["a"], note: "n" };
+const third: Row = { tags: ["x", "y"], score: 1e21, id: 3, inner: { label: "in", on: true } };
+const fourth: Row = { note: "first", id: 4, score: 0.1, tags: [] };
+const fifth: Row = { ...second, id: 5 };
+const rows: Row[] = [first, second, third, fourth, fifth];
+console.log(JSON.stringify(rows));
+console.log(JSON.stringify(third));
+
+type Edge = { a?: string; b?: int; c?: boolean };
+const edges: Edge[] = [{}, { a: "x" }, { b: 2 }, { c: false }, { a: "x", c: true }, { c: true, a: "y" }];
+console.log(JSON.stringify(edges));
+
+type Numbers = {
+  i8: int8;
+  u8: uint8;
+  i16: int16;
+  u16: uint16;
+  i32: int32;
+  u32: uint32;
+  i64: int;
+  u64: uint64;
+  d: double;
+};
+const numbers: Numbers = {
+  i8: -128,
+  u8: 255,
+  i16: -32768,
+  u16: 65535,
+  i32: -2147483648,
+  u32: 4294967295,
+  i64: -9007199254740991,
+  u64: 9007199254740991,
+  d: 2.5e-7,
+};
+console.log(JSON.stringify(numbers));
+
+const maybe: (string | undefined)[] = ["a", undefined, "b"];
+const grid: int[][] = [[1, 2], [], [3]];
+const flags: boolean[] = [true, false];
+const none: string[] = [];
+console.log(JSON.stringify(maybe), JSON.stringify(grid), JSON.stringify(flags), JSON.stringify(none));
+
+type WithFn = { name: string; run: () => int; after: int };
+const withFn: WithFn = { name: "f", run: () => 1, after: 2 };
+console.log(JSON.stringify(withFn));
+
+const odd: Inner = { label: "жé😀\n\"\\\u0001 tail of a longer string", on: false };
+console.log(JSON.stringify(odd), JSON.stringify([odd, odd]));
+console.log(JSON.stringify("t\"x"), JSON.stringify(42), JSON.stringify(true), JSON.stringify(1.5));

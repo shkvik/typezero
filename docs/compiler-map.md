@@ -565,6 +565,7 @@ library/                       C++-часть тем библиотеки: пр�
     json_feature/              JsonFeature: тема
     json_lowerer/              JsonLowerer: IR Json
     json_static_checker/       JsonStaticChecker: JSON.parse литерала при сборке
+    json_writers/              JsonWriters: JSON.stringify — код записи под тип
   math/                        Math и Bit
     math_checker/              MathChecker: вызовы Math и Bit
     math_feature/              MathFeature: тема
