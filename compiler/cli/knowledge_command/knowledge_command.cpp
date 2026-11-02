@@ -141,7 +141,7 @@ int KnowledgeCommand::run(llvm::ArrayRef<const char *> args) const {
   }
   if (entry.empty()) {
     return Args::usageError("which program? name it with '--entry main.tz', or run in a "
-                            "directory with a tz.json whose \"main\" names it");
+                            "directory with a package.json whose \"main\" names it");
   }
   entry = SourcePlaces::absolute(entry);
 

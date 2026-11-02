@@ -12,6 +12,7 @@
 #include "compiler/cli/port_command/port_command.h"
 #include "compiler/cli/remove_command/remove_command.h"
 #include "compiler/cli/run_command/run_command.h"
+#include "compiler/cli/script_command/script_command.h"
 #include "compiler/cli/update_command/update_command.h"
 #include "compiler/cli/version_command/version_command.h"
 #include "compiler/pipeline/runtime_files/runtime_files.h"
@@ -71,6 +72,12 @@ int CommandLine::run(int argc, char **argv) const {
   if (args.command == Args::Command::Version) {
     VersionCommand version;
     return version.run();
+  }
+  if (args.command == Args::Command::Run && args.input.empty()) {
+    ScriptCommand script(argv[0]);
+    if (int code = script.run(args); code >= 0) {
+      return code;
+    }
   }
   EntryFile entry;
   if (int code = entry.find(args); code >= 0) {

@@ -4,7 +4,7 @@
 # written in tz (tz.exe's lib directory) found from any directory.
 include(${SOURCE}/../cli.cmake)
 
-write(libs/ticker/tz.json [[
+write(libs/ticker/package.json [[
 {
   "name": "ticker",
   "exports": { ".": "./mod.tz" }

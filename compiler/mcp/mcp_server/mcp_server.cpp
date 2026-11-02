@@ -21,7 +21,7 @@ namespace fs = llvm::sys::fs;
 namespace path = llvm::sys::path;
 
 const char kEntry[] = "The program's main .tz file. By default: the \"main\" of the nearest "
-                      "tz.json, or the file the target names.";
+                      "package.json, or the file the target names.";
 
 const char kTarget[] = "What to look at: 'name', 'Class.member', 'file.tz:line' or "
                        "'file.tz:line:column'.";
@@ -276,7 +276,8 @@ std::string McpServer::call(llvm::StringRef name, const llvm::json::Object &args
   }
   if (entry.empty()) {
     failed = true;
-    return "which program? give 'entry', its main .tz file, or work in a directory with a tz.json "
+    return "which program? give 'entry', its main .tz file, or work in a directory with a "
+           "package.json "
            "whose \"main\" names it";
   }
   if (target && target->isPlace() && target->hasColumn()) {

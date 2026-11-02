@@ -140,7 +140,7 @@ bool interpretAdd(const Manifest &project, llvm::StringRef arg, Dependency &out)
   }
   out.alias = package.name.empty() ? source.shortName() : package.name;
   if (!checkAlias(out.alias, error)) {
-    report(error + "; add the package to tz.json by hand, under the name its imports use");
+    report(error + "; add the package to package.json by hand, under the name its imports use");
     return false;
   }
 

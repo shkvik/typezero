@@ -56,7 +56,7 @@ std::vector<std::string> jsrDependencies(const std::string &dir, const JsrVersio
 void Resolver::reportSpec(const std::string &by, const Dependency *dep,
                           const std::string &message) {
   const Manifest *manifest = nullptr;
-  if (by == "tz.json") {
+  if (by == "package.json") {
     manifest = &root_;
   }
   for (const auto &[id, local] : locals) {
@@ -80,7 +80,7 @@ bool Resolver::collect(std::map<std::string, std::vector<Requirement>> &reqs) {
     const std::vector<Dependency> *deps;
     const std::vector<std::string> *specs;
   };
-  std::deque<Node> queue{{"tz.json", root_.dir, true, &root_.dependencies, nullptr}};
+  std::deque<Node> queue{{"package.json", root_.dir, true, &root_.dependencies, nullptr}};
   std::set<std::string> visited;
   while (!queue.empty()) {
     Node node = queue.front();
@@ -232,7 +232,7 @@ bool Resolver::chooseJsr(const std::string &id, const std::vector<Requirement> &
           (own ? " (newest: " + own->str() + ")" : std::string(" (there is none)"));
     }
     message += "\na program has each package in one version (docs/packages.md); change the range "
-               "in tz.json, or update the package that wants the older one";
+               "in package.json, or update the package that wants the older one";
     report(message);
     return false;
   }
@@ -325,7 +325,7 @@ bool Resolver::run(Lock &out) {
     }
   }
   report("the versions of the packages do not settle: each choice makes another package need a "
-         "different version; pin the versions in tz.json");
+         "different version; pin the versions in package.json");
 
   return false;
 }

@@ -350,7 +350,7 @@ int PortCommand::run(llvm::ArrayRef<const char *> args) const {
   }
   if (exports.empty()) {
     report("cannot tell which files " + name +
-           " exports: it has no tz.json, jsr.json or package.json that names .ts files, and no "
+           " exports: it has no package.json or jsr.json that names its .ts or .tz files, and no "
            "mod.ts, index.ts or src/index.ts; name them with --entry <file>");
     return kExitError;
   }
@@ -448,9 +448,9 @@ int PortCommand::run(llvm::ArrayRef<const char *> args) const {
       }
     }
   }
-  llvm::SmallString<256> tzJson(outDir);
-  path::append(tzJson, "tz.json");
-  if (!inPlace || !fs::exists(tzJson)) {
+  llvm::SmallString<256> packageJson(outDir);
+  path::append(packageJson, "package.json");
+  if (!inPlace || !fs::exists(packageJson) || !namesTzFiles(packageJson)) {
     std::string json = "{\n  \"name\": " + jsonQuote(name);
     if (!version.empty()) {
       json += ",\n  \"version\": " + jsonQuote(version);
@@ -471,7 +471,7 @@ int PortCommand::run(llvm::ArrayRef<const char *> args) const {
       json += (i++ ? ",\n    " : "\n    ") + jsonQuote(alias) + ": " + jsonQuote(spec);
     }
     json += i ? "\n  }\n}\n" : "}\n}\n";
-    if (!writeFile(tzJson, json)) {
+    if (!writeFile(packageJson, json)) {
       return kExitError;
     }
   }

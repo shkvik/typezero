@@ -145,14 +145,14 @@ Module *ModuleResolver::resolvePackage(Module *from, llvm::StringRef spec, llvm:
     return nullptr;
   }
   if (!loader_.packages_) {
-    loader_.diags_.error(loc,
-                         "'" + spec +
-                             "' is the name of a package, but there is no tz.json to list packages "
-                             "in; make one with 'tz init' and add the package with 'tz add " +
-                             spec +
-                             "' (a file of the program is imported by its relative path, e.g. "
-                             "'./" +
-                             spec + "')");
+    loader_.diags_.error(
+        loc, "'" + spec +
+                 "' is the name of a package, but there is no package.json to list packages "
+                 "in; make one with 'tz init' and add the package with 'tz add " +
+                 spec +
+                 "' (a file of the program is imported by its relative path, e.g. "
+                 "'./" +
+                 spec + "')");
     return nullptr;
   }
   int fromPackage = loader_.packageOf_[from];
@@ -168,7 +168,7 @@ Module *ModuleResolver::resolvePackage(Module *from, llvm::StringRef spec, llvm:
     subpath = "." + inside;
     if (!home.jsr) {
       loader_.diags_.error(
-          loc, "import a package by its name in tz.json: add it with 'tz add jsr:" + name +
+          loc, "import a package by its name in package.json: add it with 'tz add jsr:" + name +
                    "' and write 'from \"" + name +
                    (subpath == "." ? std::string() : subpath.substr(1)) + "\"'");
       return nullptr;
@@ -196,10 +196,10 @@ Module *ModuleResolver::resolvePackage(Module *from, llvm::StringRef spec, llvm:
       loader_.diags_.error(loc, "'" + name + "' is not a dependency of " + home.name +
                                     ": a JSR package imports another one as 'jsr:@scope/name@^1'");
     } else {
-      loader_.diags_.error(loc,
-                           "'" + name + "' is not a dependency of package " + home.name +
-                               (home.manifestPath.empty() ? std::string(", which has no tz.json")
-                                                          : " (" + home.manifestPath + ")"));
+      loader_.diags_.error(loc, "'" + name + "' is not a dependency of package " + home.name +
+                                    (home.manifestPath.empty()
+                                         ? std::string(", which has no package.json")
+                                         : " (" + home.manifestPath + ")"));
     }
     return nullptr;
   }
@@ -332,10 +332,11 @@ Module *ModuleResolver::load(llvm::StringRef baseDir, const std::vector<std::str
                                     candidates[0] + " or " + candidates[1] + " (in " + owner->dir +
                                     ")");
     } else {
-      loader_.diags_.error(loc, "package " + owner->name +
-                                    " names no file to import: it has no tz.json with \"main\" or "
-                                    "\"exports\", and none of " +
-                                    llvm::join(candidates, ", ") + " (in " + owner->dir + ")");
+      loader_.diags_.error(loc,
+                           "package " + owner->name +
+                               " names no file to import: it has no package.json with \"main\" or "
+                               "\"exports\", and none of " +
+                               llvm::join(candidates, ", ") + " (in " + owner->dir + ")");
     }
     return nullptr;
   }

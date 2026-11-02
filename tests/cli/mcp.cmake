@@ -8,7 +8,7 @@ if(NOT NODE)
   skip("node is not installed")
 endif()
 
-write(shapes/tz.json [[
+write(shapes/package.json [[
 {
   "name": "shapes",
   "main": "main.tz"

@@ -6,5 +6,6 @@
 namespace tz::pkg {
 
 std::string canonical(llvm::StringRef dir);
+std::string findAbove(llvm::StringRef dir, llvm::StringRef name);
 
 }

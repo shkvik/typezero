@@ -15,12 +15,13 @@ const char kUsage[] = R"(usage: tz <command> [options] [<file.tz>] [arguments]
 
 commands:
   build     compile a program into a native executable
-  run       compile a program and run it; arguments after the file go to it
-  init      start a project: tz.json, main.tz and .gitignore
-  add       add packages to tz.json: tz add zod, tz add jsr:@std/path@^1,
+  run       compile a program and run it; arguments after the file go to it;
+            tz run <name> runs "scripts" of package.json when it has that name
+  init      start a project: package.json, tzconfig.json, main.tz, .gitignore
+  add       add packages to package.json: tz add zod, tz add jsr:@std/path@^1,
             tz add github:user/repo@v1.2.0, tz add ../lib
-  remove    remove packages from tz.json
-  update    move packages to the newest versions tz.json allows
+  remove    remove packages from package.json
+  update    move packages to the newest versions package.json allows
   port      copy a TypeScript library and adapt it to tz
   licenses  print the licenses of the code of others an executable embeds,
             which go along with it: tz licenses app.exe > LICENSES.txt
@@ -35,8 +36,10 @@ commands:
   mcp       the tools above for AI agents (MCP over stdin and stdout)
   version   print the version
 
-Without a file, build and run take "main" of tz.json; map, context, query and
-impact take it too, or the program named by --entry <file.tz>.
+Without a file, build and run take "main" of package.json; map, context, query
+and impact take it too, or the program named by --entry <file.tz>. Without -o,
+build writes into "compilerOptions.outDir" of tzconfig.json when there is one
+(tz init sets "dist").
 
 options:
   -o <path>         where to write the output (build only)
@@ -92,6 +95,7 @@ int Args::parse(llvm::ArrayRef<const char *> args) {
       programArgs.push_back(arg.str());
     } else if (arg == "--" && command == Command::Run) {
       rest = true;
+      literalArgs = true;
     } else if (arg == "-o") {
       if (++i == args.size()) {
         return usageError("'-o' needs a path");
@@ -157,8 +161,13 @@ std::string Args::outputPath() const {
   } else if (llvm::Triple(llvm::sys::getDefaultTargetTriple()).isOSWindows()) {
     name += ".exe";
   }
+  if (outputDir.empty()) {
+    return std::string(name);
+  }
+  llvm::SmallString<256> path(outputDir);
+  llvm::sys::path::append(path, name);
 
-  return std::string(name);
+  return std::string(path);
 }
 
 }

@@ -21,11 +21,13 @@ public:
   std::string input;
   std::string output;
   std::string outputStem;
+  std::string outputDir;
   bool optimize = true;
   bool debug = false;
   bool emitLLVM = false;
   bool explainParallel = false;
   bool hints = false;
+  bool literalArgs = false;
   std::vector<std::string> programArgs;
 };
 

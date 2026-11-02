@@ -10,7 +10,7 @@
 - Чужие библиотеки как есть не компилируются. Самые популярные постепенно адаптируем под tz;
   механическую часть делает `tz port`.
 - Откуда: JSR и git. npm и своего реестра нет.
-- `import { z } from "zod"` — как в TS. Зависимости — в `tz.json`, точные версии — в `tz.lock`.
+- `import { z } from "zod"` — как в TS. Зависимости — в `package.json`, точные версии — в `package-lock.json`.
 
 ## 1. Почему не npm
 
@@ -81,8 +81,11 @@ hono, valibot, remeda, ts-pattern, стандартная библиотека D
 ## 4. Проект
 
 ```json
-// tz.json
+// package.json
 {
+  "name": "app",
+  "main": "main.tz",
+  "scripts": { "start": "tz run", "build": "tz build" },
   "dependencies": {
     "zod": "jsr:@tz/zod@^4",
     "uuid": "github:uuidjs/uuid@v14.0.3"
@@ -90,8 +93,24 @@ hono, valibot, remeda, ts-pattern, стандартная библиотека D
 }
 ```
 
-- `tz add zod`, `tz remove zod`, `tz update` — правят `tz.json` и `tz.lock`.
-- `tz.lock` — точные версии и хеши исходников: у всех собирается одно и то же.
+```json
+// tzconfig.json
+{ "compilerOptions": { "outDir": "dist" } }
+```
+
+- Файлы проекта — как у node (решено 2 ноября, вместо `tz.json` и `tz.lock`): `package.json` —
+  что за проект и пакет, `package-lock.json` — точные версии (формат свой), `tzconfig.json` — как
+  собирать. Поля npm, которых tz не знает, пропускаются молча. `npm install` в такой папке не
+  нужен и не сработает: npm не понимает `jsr:`, а `github:` поставит как пакет npm.
+- `scripts` — `tz run start` выполняет `"start"` (как `npm run`); имени нет среди скриптов — `tz
+  run` как раньше.
+- `outDir` — куда `tz build` без `-o` кладёт exe и `.pdb`, путь от `tzconfig.json`; `tz init`
+  пишет `"dist"`.
+- Пакет-зависимость описывает `package.json`, если тот называет файлы `.tz` (или не называет
+  никаких); `package.json` с `.js` — от npm, тогда берутся `jsr.json` или `deno.json`.
+
+- `tz add zod`, `tz remove zod`, `tz update` — правят `package.json` и `package-lock.json`.
+- `package-lock.json` — точные версии и хеши исходников: у всех собирается одно и то же.
 - Исходники скачиваются в общий кэш на машине; сборка без сети идёт из кэша. `node_modules` и
   `npm install` не нужны.
 - Каждый пакет — в одной версии на программу. Если двум зависимостям нужны несовместимые
@@ -125,8 +144,8 @@ hono, valibot, remeda, ts-pattern, стандартная библиотека D
 
 ## План реализации
 
-1. **`tz.json` и пакеты из каталога и git** (сделано) — после модулей ([modules.md](modules.md), шаг 1):
-   имена пакетов в `import`, поиск исходников, `tz.lock` с хешами, кэш.
+1. **`package.json` и пакеты из каталога и git** (сделано) — после модулей ([modules.md](modules.md), шаг 1):
+   имена пакетов в `import`, поиск исходников, `package-lock.json` с хешами, кэш.
 2. **JSR** (сделано) — скачивание, версии и диапазоны, `tz add` / `remove` / `update`, конфликты версий.
 3. **`tz port`** (сделано) — автоматические замены и список того, что править руками.
 4. **Первые адаптированные пакеты** (сделано: `ms` и `uuid`) — ms, потом uuid; дальше — по мере готовности языка

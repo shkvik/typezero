@@ -4,7 +4,7 @@
 # too), references, calls, imports; docs sections and tests are found by text.
 include(${SOURCE}/../cli.cmake)
 
-write(shapes/tz.json [[
+write(shapes/package.json [[
 {
   "name": "shapes",
   "main": "main.tz"

@@ -192,7 +192,7 @@ async function main() {
   errors = await waited
   expect("the syntax error is on line 1", errors[0].range.start.line, 0)
 
-  // A project: the open module is checked as part of tz.json's main, and the
+  // A project: the open module is checked as part of package.json's main, and the
   // errors of main.tz, which is not open, are published too.
   const util = file("project/util.tz")
   const main = file("project/main.tz")

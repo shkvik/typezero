@@ -1,4 +1,4 @@
-# Packages from git: tags, branches, what a git package depends on, tz.lock
+# Packages from git: tags, branches, what a git package depends on, package-lock.json
 # with commits and hashes, conflicts, builds without the repositories. The
 # repositories are bare ones the test makes in its directory.
 include(${SOURCE}/../cli.cmake)
@@ -7,7 +7,7 @@ if(NOT GIT)
 endif()
 
 # numbers: v1.0.0 and v2.0.0.
-write(src/numbers/tz.json [[
+write(src/numbers/package.json [[
 { "name": "numbers", "main": "numbers.tz" }
 ]])
 write(src/numbers/numbers.tz [[
@@ -25,8 +25,8 @@ git(tag v2.0.0 IN src/numbers)
 git(clone -q --bare src/numbers numbers.git IN .)
 
 # lib: v1.0.0 needs numbers v1.0.0, v1.1.0 needs numbers v2.0.0; its own files
-# import each other and numbers by the name in its tz.json.
-write(src/lib/tz.json "{
+# import each other and numbers by the name in its package.json.
+write(src/lib/package.json "{
   \"name\": \"lib\",
   \"version\": \"1.0.0\",
   \"main\": \"src/index.tz\",
@@ -45,9 +45,9 @@ git(init -q IN src/lib)
 git(add . IN src/lib)
 git(commit -qm one IN src/lib)
 git(tag v1.0.0 IN src/lib)
-file(READ ${WORK}/src/lib/tz.json manifest)
+file(READ ${WORK}/src/lib/package.json manifest)
 string(REPLACE "v1.0.0" "v2.0.0" manifest "${manifest}")
-write(src/lib/tz.json "${manifest}")
+write(src/lib/package.json "${manifest}")
 write(src/lib/src/label.tz [[
 export const label = "lib 1.1:"
 ]])
@@ -65,7 +65,7 @@ string(REGEX MATCH "^added lib: git:<work>/lib.git@v1.0.0 \\([0-9a-f]+\\)\n$" ok
 if(NOT ok)
   message(FATAL_ERROR "tz add printed:\n${TZ_STDOUT}")
 endif()
-expect_match(app/tz.lock [[^{
+expect_match(app/package-lock.json [[^{
   "lockVersion": 1,
   "packages": {
     "git:<work>/lib.git": {
@@ -86,21 +86,21 @@ tz(run IN app STDOUT "lib 1.0: 40\n")
 
 # Two tags of one repository in one program.
 tz(add git:${WORK}/numbers.git@v2.0.0 IN app EXIT 1 STDERR
-   "tz: the packages that need git:<work>/numbers.git want different versions of it:\n  tz.json wants 'v2.0.0'\n  git:<work>/lib.git v1.0.0 (")
+   "tz: the packages that need git:<work>/numbers.git want different versions of it:\n  package.json wants 'v2.0.0'\n  git:<work>/lib.git v1.0.0 (")
 
-# Another tag in tz.json: the next build takes it, and what it needs.
-file(READ ${WORK}/app/tz.json manifest)
+# Another tag in package.json: the next build takes it, and what it needs.
+file(READ ${WORK}/app/package.json manifest)
 string(REPLACE "@v1.0.0" "@v1.1.0" manifest "${manifest}")
-write(app/tz.json "${manifest}")
+write(app/package.json "${manifest}")
 tz(run IN app STDOUT "lib 1.1: 400\n")
-expect_match(app/tz.lock [["ref": "v1.1.0"]])
-expect_match(app/tz.lock [["ref": "v2.0.0"]])
+expect_match(app/package-lock.json [["ref": "v1.1.0"]])
+expect_match(app/package-lock.json [["ref": "v2.0.0"]])
 tz(add git:${WORK}/lib.git@v9 IN app EXIT 1 STDERR "tz: <work>/lib.git has no tag, branch or commit 'v9'")
 
 # A branch: tz update moves to its newest commit.
-file(READ ${WORK}/app/tz.json manifest)
+file(READ ${WORK}/app/package.json manifest)
 string(REPLACE "lib.git@v1.1.0" "lib.git@main" manifest "${manifest}")
-write(app/tz.json "${manifest}")
+write(app/package.json "${manifest}")
 tz(run IN app STDOUT "lib 1.1: 400\n")
 write(src/lib/src/label.tz [[
 export const label = "lib main:"
@@ -115,17 +115,17 @@ if(NOT ok)
 endif()
 tz(run IN app STDOUT "lib main: 400\n")
 
-# The sources in the cache are checked against tz.lock.
-file(READ ${WORK}/app/tz.lock lock)
+# The sources in the cache are checked against package-lock.json.
+file(READ ${WORK}/app/package-lock.json lock)
 string(REGEX MATCH "\"ref\": \"main\",\n      \"commit\": \"([0-9a-f]+)\"" ignored "${lock}")
 string(SUBSTRING "${CMAKE_MATCH_1}" 0 16 commit)
 file(GLOB label ${WORK}/cache/git/lib-*/${commit}/src/label.tz)
 file(READ ${label} saved)
 file(APPEND ${label} "// changed\n")
-tz(run IN app EXIT 1 STDERR "are not those tz.lock names")
+tz(run IN app EXIT 1 STDERR "are not those package-lock.json names")
 file(WRITE ${label} "${saved}")
 
-# What tz.lock names is in the cache: the repositories are not needed.
+# What package-lock.json names is in the cache: the repositories are not needed.
 file(REMOVE_RECURSE ${WORK}/lib.git ${WORK}/numbers.git)
 tz(run IN app STDOUT "lib main: 400\n")
 tz(add github:nobody IN app EXIT 1 STDERR

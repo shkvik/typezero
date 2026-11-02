@@ -1,6 +1,7 @@
 #include "compiler/knowledge/symbol_text/symbol_text.h"
 #include "compiler/program/ast/ast.h"
 #include "compiler/program/types/type/type.h"
+#include <cctype>
 
 namespace tz {
 
@@ -31,20 +32,42 @@ bool continues(char c) {
          c == '+' || c == '-' || c == '*' || c == '/' || c == '>';
 }
 
+bool word(char c) { return std::isalnum(static_cast<unsigned char>(c)) || c == '_' || c == '$'; }
+
+bool endsMember(const std::string &out) {
+  char last = out.back();
+  if (last == '>') {
+    return out.size() < 2 || out[out.size() - 2] != '=';
+  }
+
+  return word(last) || last == ')' || last == ']' || last == '"' || last == '\'' || last == '`';
+}
+
+bool startsMember(char c) {
+  return std::isalpha(static_cast<unsigned char>(c)) || c == '_' || c == '$' || c == '"' ||
+         c == '\'';
+}
+
 }
 
 std::string SymbolText::collapse(llvm::StringRef text, size_t limit) {
   std::string out;
   bool space = false;
+  bool broke = false;
   for (char c : text) {
     if (c == ' ' || c == '\t' || c == '\n' || c == '\r') {
       space = !out.empty();
+      broke = broke || (space && c == '\n');
       continue;
     }
     if (space) {
+      if (broke && endsMember(out) && startsMember(c)) {
+        out.push_back(';');
+      }
       out.push_back(' ');
       space = false;
     }
+    broke = false;
     out.push_back(c);
   }
   if (out.size() > limit) {

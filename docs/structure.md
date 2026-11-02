@@ -76,7 +76,7 @@ compiler/         весь C++ → tz.exe
   program/        что идёт по конвейеру
   load/ declare/ infer/ check/ instances/ whole_program/ overflow/ parallel/ memory/ lower/
   optimize/ emit/ link/                                                       проходы
-  packages/       tz.json, tz.lock, JSR, git, tz port
+  packages/       package.json, package-lock.json, JSR, git, tz port
   library/        C++-часть тем: feature/, feature_registry/, tz_modules/, <тема>/
 runtime/          весь C → tzrt.lib, tzrt.bc, tzcrypto.lib
   core/           рантайм языка: память, строки, массивы, async, потоки
@@ -691,8 +691,8 @@ HTTP/2), кладёт в список своего потока «гирю» (`T
 
 ```
 packages/
-  manifest/        Manifest: tz.json (← project.cpp, 1111)
-  lock/            Lock: tz.lock
+  manifest/        Manifest: package.json (← project.cpp, 1111)
+  lock/            Lock: package-lock.json
   package_graph/   PackageGraph: подготовка пакетов к сборке (← preparePackages)
   semver/          Semver, VersionRange
   jsr_client/      JsrClient (← fetch.cpp)

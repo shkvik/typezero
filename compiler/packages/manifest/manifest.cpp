@@ -20,28 +20,7 @@ namespace tz::pkg {
 namespace fs = llvm::sys::fs;
 namespace path = llvm::sys::path;
 
-std::string findManifest(llvm::StringRef dir) {
-  llvm::SmallString<256> current(dir);
-  if (current.empty()) {
-    fs::current_path(current);
-  }
-  fs::make_absolute(current);
-  path::remove_dots(current, true);
-  while (!current.empty()) {
-    llvm::SmallString<256> candidate(current);
-    path::append(candidate, "tz.json");
-    if (fs::is_regular_file(candidate)) {
-      return std::string(candidate);
-    }
-    llvm::StringRef parent = path::parent_path(current);
-    if (parent == current) {
-      break;
-    }
-    current = parent;
-  }
-
-  return "";
-}
+std::string findManifest(llvm::StringRef dir) { return findAbove(dir, "package.json"); }
 
 namespace {
 
@@ -93,7 +72,7 @@ bool parseManifest(Manifest &out) {
   }
   if (!root.isObject()) {
     reportAt(out.path, out.text, root.begin,
-             "tz.json holds an object: { \"name\": ..., "
+             "package.json holds an object: { \"name\": ..., "
              "\"dependencies\": { ... } }");
     return false;
   }
@@ -119,6 +98,21 @@ bool parseManifest(Manifest &out) {
       (key == "name" ? out.name : key == "version" ? out.version : out.main) = value.string;
       if (key == "main") {
         out.mainOffset = value.begin;
+      }
+    } else if (key == "scripts") {
+      if (!value.isObject()) {
+        reportAt(out.path, out.text, value.begin,
+                 "'scripts' is an object: { \"start\": \"tz run\", \"build\": \"tz build\" }");
+        return false;
+      }
+      for (size_t j = 0; j < value.keys.size(); ++j) {
+        const JsonValue &command = value.items[j];
+        if (!command.isString()) {
+          reportAt(out.path, out.text, command.begin,
+                   "a script is a command line, e.g. \"tz build\"");
+          return false;
+        }
+        out.scripts.push_back({value.keys[j], command.string});
       }
     } else if (key == "exports") {
       if (!readExports(out, value, out.exports)) {
@@ -146,11 +140,6 @@ bool parseManifest(Manifest &out) {
         }
         out.dependencies.push_back({value.keys[j], spec.string, spec.begin});
       }
-    } else {
-      reportAt(out.path, out.text, root.keyOffsets[i],
-               "unknown field '" + key +
-                   "' in tz.json; the fields are name, version, main, exports and dependencies");
-      return false;
     }
   }
 
@@ -169,16 +158,45 @@ bool readManifestText(llvm::StringRef file, std::string text, Manifest &out) {
   out = Manifest();
   out.path = file.str();
   out.dir = canonical(path::parent_path(file));
-  out.isTzJson = true;
+  out.isPackageJson = true;
   out.text = std::move(text);
 
   return parseManifest(out);
 }
 
+bool namesTzFiles(llvm::StringRef packageJson) {
+  std::string text;
+  if (!readText(packageJson, text)) {
+    return false;
+  }
+  JsonValue root;
+  size_t at;
+  std::string error;
+  if (!parseJson(text, root, at, error) || !root.isObject()) {
+    return true;
+  }
+  const JsonValue *main = root.get("main");
+  const JsonValue *exports = root.get("exports");
+  if (!main && !exports) {
+    return true;
+  }
+  auto tz = [](const JsonValue *value) {
+    return value && value->isString() && llvm::StringRef(value->string).ends_with(".tz");
+  };
+  if (tz(main) || tz(exports)) {
+    return true;
+  }
+  if (exports && exports->isObject()) {
+    return llvm::any_of(exports->items, [&](const JsonValue &target) { return tz(&target); });
+  }
+
+  return false;
+}
+
 bool readPackageDir(llvm::StringRef dir, Manifest &out) {
   llvm::SmallString<256> file(dir);
-  path::append(file, "tz.json");
-  if (fs::is_regular_file(file)) {
+  path::append(file, "package.json");
+  if (fs::is_regular_file(file) && namesTzFiles(file)) {
     return readManifest(file, out);
   }
   out = Manifest();

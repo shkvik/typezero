@@ -22,7 +22,7 @@ changed:
     2  imports of .ts and .js files name the .tz files of the copy
 then 'tz build lib/src/index.tz' reports what else tz does not accept
 ]])
-expect_file(lib/tz.json [[
+expect_file(lib/package.json [[
 {
   "name": "autofix",
   "version": "1.0.0",
@@ -109,7 +109,7 @@ export type Raw = Json
 export const nothing: Json = null
 ")
 expect_file(lib/LICENSE "MIT License\n\nA library for the tests of tz port.\n")
-if(EXISTS ${WORK}/lib/src/index.test.tz OR EXISTS ${WORK}/lib/package.json)
+if(EXISTS ${WORK}/lib/src/index.test.tz)
   message(FATAL_ERROR "tz port copied files that no export reaches")
 endif()
 
@@ -147,11 +147,11 @@ changed:
     1  'any' became 'unknown'
     1  'export default' became a named export
     1  'import * as' became named imports
-    1  'jsr:' imports became package names in tz.json
+    1  'jsr:' imports became package names in package.json
     2  imports of .ts and .js files name the .tz files of the copy
 to change by hand (14):
   manual/mod.tz:3:23: npm packages are not supported (docs/packages.md): take the package from JSR or git, adapted for tz, or do without it
-  manual/mod.tz:4:19: 'zod' is another package: add it to tz.json once it is adapted for tz (docs/packages.md), or do without it
+  manual/mod.tz:4:19: 'zod' is another package: add it to package.json once it is adapted for tz (docs/packages.md), or do without it
   manual/mod.tz:5:1: an import for side effects is not supported: import what the file uses by name
   manual/mod.tz:15:3: getters and setters are not supported (docs/objects.md): reading a field never runs code; make 'get size()' a method, or keep the value in a field
   manual/mod.tz:16:3: getters and setters are not supported (docs/objects.md): reading a field never runs code; make 'set size()' a method, or keep the value in a field
@@ -167,7 +167,7 @@ to change by hand (14):
 then 'tz build manual/mod.tz' reports what else tz does not accept
 ]])
 # jsr: imports become dependencies; the anonymous class gets the file's name.
-expect_file(manual/tz.json [[
+expect_file(manual/package.json [[
 {
   "name": "@x/manual",
   "version": "0.1.0",
@@ -211,7 +211,7 @@ endif()
 # In place, and with the entry named.
 file(COPY ${SOURCE}/port/autofix/src/units.ts DESTINATION ${WORK}/own)
 tz(port own --in-place EXIT 1 STDERR
-   "tz: cannot tell which files own exports: it has no tz.json, jsr.json or package.json that names .ts files, and no mod.ts, index.ts or src/index.ts; name them with --entry <file>")
+   "tz: cannot tell which files own exports: it has no package.json or jsr.json that names its .ts or .tz files, and no mod.ts, index.ts or src/index.ts; name them with --entry <file>")
 tz(port own --in-place --entry units.ts STDOUT [[
 ported own into own (1 file)
 changed:
@@ -225,7 +225,7 @@ expect_file(own/units.tz "${expected}")
 if(EXISTS ${WORK}/own/units.ts)
   message(FATAL_ERROR "tz port --in-place left units.ts next to units.tz")
 endif()
-expect_file(own/tz.json "{\n  \"name\": \"own\",\n  \"main\": \"units.tz\",\n  \"dependencies\": {}\n}\n")
+expect_file(own/package.json "{\n  \"name\": \"own\",\n  \"main\": \"units.tz\",\n  \"dependencies\": {}\n}\n")
 tz(port jsr:@x/manual --in-place EXIT 1 STDERR
    "tz: --in-place changes a directory of this machine; 'jsr:@x/manual' is not one")
 tz(port EXIT 2 STDERR "tz: 'tz port' needs a package")

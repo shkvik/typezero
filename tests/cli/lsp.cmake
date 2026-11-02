@@ -1,7 +1,7 @@
 # The language server, tz lsp (docs/lsp.md, step 1): lsp.cjs talks to it as
 # VS Code does. Errors appear where they are, columns in UTF-16 units, as the
 # text in the editor changes, saved or not; a module is checked as part of the
-# "main" of its tz.json, a file that main does not import is checked alone,
+# "main" of its package.json, a file that main does not import is checked alone,
 # notes go along with their error. A quick check comes first, then the whole
 # program (step 5). What the check learns answers hover,
 # definition, references, completion after a dot and rename (step 4). A file
@@ -24,7 +24,7 @@ console.log(n)
 write(broken/main.tz [[
 const = 1
 ]])
-write(project/tz.json [[
+write(project/package.json [[
 {
   "name": "project",
   "main": "main.tz"

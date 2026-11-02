@@ -1,10 +1,10 @@
-// Imports of packages: by the names in tz.json, and only what they export.
+// Imports of packages: by the names in package.json, and only what they export.
 import { isUnit } from "shapes"
 // expect-error: 'zod' is not a dependency in
 import { z } from "zod"
 // expect-error: cannot find 'shapes/missing': package shapes has no missing.tz or missing/index.tz
 import { y } from "shapes/missing"
-// expect-error: import a package by its name in tz.json: add it with 'tz add jsr:@std/path' and write 'from "@std/path/join"'
+// expect-error: import a package by its name in package.json: add it with 'tz add jsr:@std/path' and write 'from "@std/path/join"'
 import { join } from "jsr:@std/path@^1/join"
 // expect-error: npm packages are not supported
 import { parse } from "npm:yaml"

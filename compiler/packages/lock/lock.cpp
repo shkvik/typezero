@@ -35,13 +35,13 @@ bool readLock(llvm::StringRef file, Lock &out) {
   size_t at;
   std::string error;
   if (!parseJson(text, root, at, error)) {
-    reportAt(file, text, at, error + "; delete tz.lock to make it anew");
+    reportAt(file, text, at, error + "; delete package-lock.json to make it anew");
     return false;
   }
   const JsonValue *version = root.get("lockVersion");
   if (!version || version->kind != JsonValue::Kind::Number || version->number != kLockVersion) {
     reportAt(file, text, version ? version->begin : root.begin,
-             "tz.lock is not in the format of this tz (\"lockVersion\": 1)");
+             "package-lock.json is not in the format of this tz (\"lockVersion\": 1)");
     return false;
   }
   const JsonValue *packages = root.get("packages");
@@ -68,7 +68,8 @@ bool readLock(llvm::StringRef file, Lock &out) {
     if ((!jsr && !git) || (jsr && locked.version.empty()) || (git && locked.commit.empty()) ||
         locked.hash.empty()) {
       reportAt(file, text, packages->keyOffsets[i],
-               "tz.lock describes '" + locked.id + "' wrongly; delete tz.lock to make it anew");
+               "package-lock.json describes '" + locked.id +
+                   "' wrongly; delete package-lock.json to make it anew");
       return false;
     }
     out.packages[locked.id] = std::move(locked);

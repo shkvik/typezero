@@ -29,7 +29,7 @@ bool writeText(llvm::StringRef file, llvm::StringRef text) {
 bool currentProject(Manifest &out) {
   std::string file = findManifest("");
   if (file.empty()) {
-    report("there is no tz.json in this directory or above it; make one with 'tz init'");
+    report("there is no package.json in this directory or above it; make one with 'tz init'");
     return false;
   }
 

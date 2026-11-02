@@ -1,5 +1,5 @@
 // Paths that do not name a .tz file of the program.
-// expect-error: 'zod' is the name of a package, but there is no tz.json to list packages in; make one with 'tz init' and add the package with 'tz add zod' (a file of the program is imported by its relative path, e.g. './zod')
+// expect-error: 'zod' is the name of a package, but there is no package.json to list packages in; make one with 'tz init' and add the package with 'tz add zod' (a file of the program is imported by its relative path, e.g. './zod')
 import { z } from "zod"
 // expect-error: built-in module 'node:http' is not supported yet
 import { createServer } from "node:http"

@@ -403,7 +403,7 @@ void FilePort::importDecl(size_t i) {
   if (splitJsrImport(specRef, package, source, sub)) {
     char quote = toks_[from + 1].text.front();
     add(at(from + 1), endOf(from + 1), std::string(1, quote) + package + sub + quote,
-        "'jsr:' imports became package names in tz.json");
+        "'jsr:' imports became package names in package.json");
   }
 
   std::string defaultName, ns;
@@ -928,7 +928,7 @@ void FilePort::manual() {
                  s != "neverthrow" && splitPackageSpecifier(s, package, sub) &&
                  !ctx_.jsrDependencies.count(package) && notedPackages_.insert(package).second) {
         note(i + 1, "'" + package +
-                        "' is another package: add it to tz.json once it is adapted for tz "
+                        "' is another package: add it to package.json once it is adapted for tz "
                         "(docs/packages.md), or do without it");
       }
     }

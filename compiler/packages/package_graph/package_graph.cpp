@@ -126,7 +126,7 @@ bool ensureSources(const Locked &locked, std::string &dir, JsrVersion *jsrMeta) 
   llvm::StringRef id = locked.id;
   if (id.starts_with("jsr:")) {
     if (!parseSource(locked.id, "", source, error)) {
-      report("tz.lock: " + error);
+      report("package-lock.json: " + error);
       return false;
     }
     JsrVersion meta;
@@ -135,8 +135,9 @@ bool ensureSources(const Locked &locked, std::string &dir, JsrVersion *jsrMeta) 
       return false;
     }
     if (meta.hash != locked.hash) {
-      report("the files of " + locked.describe() + " are not those tz.lock names: their hash is " +
-             meta.hash + ", tz.lock has " + locked.hash);
+      report("the files of " + locked.describe() +
+             " are not those package-lock.json names: their hash is " + meta.hash +
+             ", package-lock.json has " + locked.hash);
       return false;
     }
     if (!jsrDownload(source.scope, source.name, locked.version, meta, dir, error)) {
@@ -159,8 +160,9 @@ bool ensureSources(const Locked &locked, std::string &dir, JsrVersion *jsrMeta) 
     return false;
   }
   if (hash != locked.hash) {
-    report("the files of " + locked.describe() + " are not those tz.lock names: their hash is " +
-           hash + ", tz.lock has " + locked.hash);
+    report("the files of " + locked.describe() +
+           " are not those package-lock.json names: their hash is " + hash +
+           ", package-lock.json has " + locked.hash);
     return false;
   }
 
@@ -172,7 +174,7 @@ bool ensureSources(const Locked &locked, std::string &dir, JsrVersion *jsrMeta) 
 bool preparePackages(const Manifest &manifest, const PrepareOptions &options, Graph &graph,
                      Lock *before, Lock *after) {
   llvm::SmallString<256> lockPath(manifest.dir);
-  path::append(lockPath, "tz.lock");
+  path::append(lockPath, "package-lock.json");
   Lock old;
   if (!readLock(lockPath, old)) {
     return false;

@@ -340,7 +340,7 @@ void LspServer::watched(const llvm::json::Object &params) {
       continue;
     }
     std::string file = FileUri::toPath(*uri);
-    if (path::filename(file) == "tz.json") {
+    if (path::filename(file) == "package.json") {
       manifests = true;
     }
     if (fields->getInteger("type").value_or(2) != 2) {

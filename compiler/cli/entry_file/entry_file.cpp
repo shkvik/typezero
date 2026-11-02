@@ -2,23 +2,49 @@
 #include "compiler/cli/args/args.h"
 #include "compiler/cli/exit_codes/exit_codes.h"
 #include "compiler/packages/manifest/manifest.h"
+#include "compiler/packages/tz_config/tz_config.h"
 #include "llvm/ADT/SmallString.h"
 #include "llvm/Support/Path.h"
 #include "llvm/Support/raw_ostream.h"
 
 namespace tz {
 
+namespace {
+
+int takeOutputDir(Args &args) {
+  if (args.command != Args::Command::Build || !args.output.empty()) {
+    return -1;
+  }
+  llvm::SmallString<256> dir(args.input);
+  llvm::sys::path::remove_filename(dir);
+  std::string configPath = pkg::findTzConfig(dir);
+  if (configPath.empty()) {
+    return -1;
+  }
+  pkg::TzConfig config;
+  if (!pkg::readTzConfig(configPath, config)) {
+    return kExitError;
+  }
+  args.outputDir = config.outDir;
+
+  return -1;
+}
+
+}
+
 int EntryFile::find(Args &args) const {
   if (!args.input.empty()) {
-    return -1;
+    return takeOutputDir(args);
   }
   std::string manifestPath = pkg::findManifest("");
   if (manifestPath.empty()) {
     return Args::usageError(args.programArgs.empty()
-                                ? "no source file given, and there is no tz.json here or above"
+                                ? "no source file given, and there is no package.json here or "
+                                  "above"
                                 : "'" + args.programArgs.front() +
-                                      "' is not a .tz file, and there is no tz.json here or above "
-                                      "whose \"main\" would run");
+                                      "' is not a .tz file nor a script of package.json, and "
+                                      "there is no package.json here or above whose \"main\" "
+                                      "would run");
   }
   pkg::Manifest manifest;
   if (!pkg::readManifest(manifestPath, manifest)) {
@@ -38,7 +64,7 @@ int EntryFile::find(Args &args) const {
     args.outputStem = name.str();
   }
 
-  return -1;
+  return takeOutputDir(args);
 }
 
 }

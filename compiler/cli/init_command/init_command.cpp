@@ -40,8 +40,8 @@ int InitCommand::run(llvm::ArrayRef<const char *> args) const {
 
     return std::string(result);
   };
-  if (fs::exists(file("tz.json"))) {
-    report("there is a tz.json already in " + dir);
+  if (fs::exists(file("package.json"))) {
+    report("there is a package.json already in " + dir);
     return kExitError;
   }
   std::string name = path::filename(dir).str();
@@ -49,10 +49,19 @@ int InitCommand::run(llvm::ArrayRef<const char *> args) const {
   if (!checkAlias(name, error)) {
     name = "app";
   }
-  std::vector<std::string> created{"tz.json"};
-  if (!writeText(file("tz.json"), "{\n  \"name\": " + jsonQuote(name) +
-                                      ",\n  \"main\": \"main.tz\",\n  \"dependencies\": {}\n}\n")) {
+  std::vector<std::string> created{"package.json"};
+  if (!writeText(file("package.json"),
+                 "{\n  \"name\": " + jsonQuote(name) +
+                     ",\n  \"main\": \"main.tz\",\n  \"scripts\": {\n    \"start\": \"tz run\",\n"
+                     "    \"build\": \"tz build\"\n  },\n  \"dependencies\": {}\n}\n")) {
     return kExitError;
+  }
+  if (!fs::exists(file("tzconfig.json"))) {
+    if (!writeText(file("tzconfig.json"),
+                   "{\n  \"compilerOptions\": {\n    \"outDir\": \"dist\"\n  }\n}\n")) {
+      return kExitError;
+    }
+    created.push_back("tzconfig.json");
   }
   if (!fs::exists(file("main.tz"))) {
     if (!writeText(file("main.tz"), "console.log(\"Hello, world!\")\n")) {
@@ -61,7 +70,7 @@ int InitCommand::run(llvm::ArrayRef<const char *> args) const {
     created.push_back("main.tz");
   }
   if (!fs::exists(file(".gitignore"))) {
-    if (!writeText(file(".gitignore"), "*.exe\n*.ll\n/" + name + "\n")) {
+    if (!writeText(file(".gitignore"), "/dist/\n*.exe\n*.pdb\n*.ll\n")) {
       return kExitError;
     }
     created.push_back(".gitignore");

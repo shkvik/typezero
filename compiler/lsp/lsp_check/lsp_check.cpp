@@ -60,7 +60,7 @@ int LspCheck::run(llvm::StringRef requestPath, llvm::StringRef responsePath) con
     options.overflow = object->getInteger("level").value_or(2) != 1;
     errors = checkProgram(program, options, &times);
   } else {
-    errors.tool("the packages of tz.json are not ready; run 'tz build' to see why");
+    errors.tool("the packages of package.json are not ready; run 'tz build' to see why");
   }
   CheckReport report(program.sourceMgr, *entry);
   llvm::json::Value result = report.build(errors, program.file.modules);

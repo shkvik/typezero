@@ -6,6 +6,9 @@
 #include "compiler/pipeline/build_options/build_options.h"
 #include "compiler/pipeline/pipeline/pipeline.h"
 #include "compiler/program/program/program.h"
+#include "llvm/Support/FileSystem.h"
+#include "llvm/Support/Path.h"
+#include "llvm/Support/raw_ostream.h"
 
 namespace tz {
 
@@ -28,6 +31,13 @@ int BuildCommand::run(const Args &args, llvm::StringRef output) const {
     return kExitError;
   }
 
+  llvm::StringRef dir = llvm::sys::path::parent_path(output);
+  if (!dir.empty()) {
+    if (std::error_code ec = llvm::sys::fs::create_directories(dir)) {
+      llvm::errs() << "tz: cannot create the directory " << dir << ": " << ec.message() << "\n";
+      return kExitError;
+    }
+  }
   Errors buildErrors = buildProgram(program, options);
   printer.print(buildErrors);
   if (buildErrors) {

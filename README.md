@@ -18,9 +18,10 @@ tz build fib.tz          # получить fib.exe
 tz build --debug fib.tz  # для отладчика: без оптимизаций, с переменными (см. «Редактор»)
 tz build --emit-llvm fib.tz   # посмотреть LLVM IR (fib.ll)
 tz build --explain-parallel app.tz   # что пойдёт параллельно и почему (см. «Async»)
-tz init                  # проект: tz.json, main.tz и .gitignore
+tz init                  # проект: package.json, tzconfig.json, main.tz и .gitignore
+tz run start             # скрипт "start" из package.json, как npm run
 tz add zod               # пакет (см. «Пакеты»)
-tz run                   # без файла — "main" из tz.json
+tz run                   # без файла — "main" из package.json
 ```
 
 Программа из нескольких файлов собирается так же, из главного: `tz build main.tz` сам находит
@@ -333,8 +334,8 @@ tz run                   # без файла — "main" из tz.json
   перед объявлением, `export { a, b as c }`, `export { a } from "./x"`, `export * from "./x"`;
   пути `"./math"` и `"./math.tz"`, каталог — его `index.tz`; циклические импорты. Файлы программ
   на tz — `.tz`; на `.ts` и `.js` — ошибка с подсказкой переименовать.
-- Пакеты (см. «Пакеты»): `import { ms } from "ms"` по имени из `tz.json`, пакеты из каталога, git
-  и JSR, `tz.lock` с версиями и хешами, общий кэш исходников, `tz init`, `tz add`, `tz remove`,
+- Пакеты (см. «Пакеты»): `import { ms } from "ms"` по имени из `package.json`, пакеты из каталога, git
+  и JSR, `package-lock.json` с версиями и хешами, общий кэш исходников, `tz init`, `tz add`, `tz remove`,
   `tz update`, `tz build` и `tz run` без файла; `tz port` переносит TS-библиотеку в файлы `.tz`.
 - Редактор (см. «Редактор»): ошибки по мере набора (`tz lsp`), подсветка и форматирование файлов
   `.tz` в VS Code.
@@ -2049,7 +2050,7 @@ const [user] = await once(bus, "user")
   (`b: typeof bus`), методы и файлы. Для этого компилятор проверяет программу в несколько проходов,
   пока находятся новые события (слушатель может слать другое событие с тем, что получил), а ошибки
   (и о переполнении) сообщает и компилирует только последний; пакеты
-  проекта читаются в каждом проходе, а `tz.json` и `tz.lock` — один раз. Слушатель события, которое никто не шлёт, — ошибка
+  проекта читаются в каждом проходе, а `package.json` и `package-lock.json` — один раз. Слушатель события, которое никто не шлёт, — ошибка
   (`no code of the program emits 'usr' on this emitter; it emits 'user'`); одно событие с разными
   типами — ошибка, которая называет оба места; `int` и `double` дают `double`.
 - **async-слушатель** разрешён: `emit` его не ждёт, его `Promise` отпускается; слушатель, который
@@ -2444,7 +2445,7 @@ import { area, Rect } from "./geometry"   // типы импортируются
 ## Пакеты
 
 Пакет — исходники на TS, которые компилируются вместе с программой
-([docs/packages.md](docs/packages.md)). Проект — каталог с `tz.json`:
+([docs/packages.md](docs/packages.md)). Проект — каталог с `package.json`:
 
 ```json
 {
@@ -2467,32 +2468,43 @@ import { red } from "@std/fmt/colors"   // путь внутри пакета �
   `"git:<адрес>@<тег>"` — git (тег, ветка или коммит; без него — ветка по умолчанию);
   `"file:../lib"` или `"../lib"` — каталог, как он есть. `npm:` и версия без источника (`"^4"`) —
   ошибки с подсказкой.
-- **tz.json**: `name`, `version`, `main` (что собирают `tz build` и `tz run` без файла и что
-  импортирует `"пакет"`), `exports` (`{ ".": "./mod.tz", "./mini": "./mini.tz" }`: импортировать
-  можно только эти пути) и `dependencies`. Комментарии и запятая в конце разрешены, неизвестное
-  поле — ошибка. Имя пакета — `zod` или `@scope/name`, но не имя встроенного модуля (`fs`, `path`,
-  `util`...). Пакет без `tz.json` говорит о себе в `jsr.json` или `deno.json`; если и их нет, его
+- **package.json** (с 2 ноября вместо `tz.json`, как у node): `name`, `version`, `main` (что
+  собирают `tz build` и `tz run` без файла и что импортирует `"пакет"`), `exports` (`{ ".":
+  "./mod.tz", "./mini": "./mini.tz" }`: импортировать можно только эти пути), `dependencies` и
+  `scripts`. Комментарии и запятая в конце разрешены; остальные поля npm (`description`,
+  `devDependencies`, `type`…) tz пропускает молча. Имя пакета — `zod` или `@scope/name`, но не имя встроенного модуля (`fs`, `path`,
+  `util`...). Пакет без `package.json` говорит о себе в `jsr.json` или `deno.json`; если и их нет, его
   вход — `mod.tz`, `index.tz` или `src/index.tz`.
-- **Команды.** `tz init [каталог]` — `tz.json`, `main.tz` и `.gitignore`. `tz add zod` — пакет,
+- **Команды.** `tz init [каталог]` — `package.json` (со скриптами `start` и `build`),
+  `tzconfig.json`, `main.tz` и `.gitignore`. `tz add zod` — пакет,
   адаптированный для tz (`jsr:@tz/zod`, импорт — `"zod"`), с диапазоном `^` от новейшей версии;
   `tz add @std/path@^1`, `tz add github:user/repo@v1.0.0`, `tz add ../lib` — остальные (имя для
-  импорта — `name` из `tz.json` пакета или имя репозитория). `tz remove zod`, `tz update [имя...]` —
-  новейшие версии, которые разрешает `tz.json`. Если версии не сходятся, `tz.json` остаётся как был.
+  импорта — `name` из `package.json` пакета или имя репозитория). `tz remove zod`, `tz update [имя...]` —
+  новейшие версии, которые разрешает `package.json`. Если версии не сходятся, `package.json` остаётся как был.
   `tz run` без файла запускает `main`; аргументы программы — всё, что не `.tz`, и всё после `--`.
+  `tz run <имя>` — скрипт из `"scripts"` с этим именем, если он есть (как `npm run` и `bun run`):
+  командная строка (`cmd.exe` в Windows, `sh` в Linux) в каталоге `package.json`, `tz` — в `PATH`,
+  остальные аргументы — за ней, код выхода — её; после `--` имя снова аргумент программы.
   `tz build` без файла называет exe по `name`.
-- **tz.lock** лежит рядом с `tz.json`: точная версия (у git — коммит) и хеш исходников каждого
-  пакета, с зависимостями зависимостей; локальных каталогов в нём нет. Если `tz.lock` подходит к
-  `tz.json`, сборка берёт ровно его и сеть не нужна; если нет (новый пакет, другой диапазон),
-  `tz build` сам выбирает версии и переписывает `tz.lock`, как cargo. Хеш — SHA-256 списка файлов
+- **tzconfig.json** — как собирать, вид как у `tsconfig.json`: `{ "compilerOptions": { "outDir":
+  "dist" } }`. `outDir` — каталог, куда `tz build` без `-o` кладёт exe и `.pdb` (и с файлом из
+  проекта, и без; создаётся сам), путь от `tzconfig.json`; ищется вверх от собираемого файла.
+  Неизвестный параметр — ошибка. `tz init` пишет `"dist"` и добавляет `/dist/` в `.gitignore`. `-o`
+  — куда сказано, каталоги создаются.
+- **package-lock.json** (с 2 ноября вместо `tz.lock`; формат свой, не npm) лежит рядом с
+  `package.json`: точная версия (у git — коммит) и хеш исходников каждого
+  пакета, с зависимостями зависимостей; локальных каталогов в нём нет. Если `package-lock.json` подходит к
+  `package.json`, сборка берёт ровно его и сеть не нужна; если нет (новый пакет, другой диапазон),
+  `tz build` сам выбирает версии и переписывает `package-lock.json`, как cargo. Хеш — SHA-256 списка файлов
   пакета с их SHA-256: каждый файл JSR сверяется с хешем из реестра при скачивании, а исходники в
-  кэше — с `tz.lock` при каждой сборке.
+  кэше — с `package-lock.json` при каждой сборке.
 - **Версии** — semver, диапазоны как в npm и JSR: `^1.2`, `~1.2.3`, `1.x`, `>=1 <2`, `1.2 - 1.4`,
   `||`. Пререлиз берётся, только если диапазон его называет, отозванная (yanked) версия — никогда.
   Каждый пакет — в одной версии на программу; несовместимые диапазоны — ошибка со списком, кто чего
   хочет:
   ```
   tz: no one version of jsr:@std/fmt fits every package that needs it:
-    tz.json wants ~1.0 (newest: 1.0.0)
+    package.json wants ~1.0 (newest: 1.0.0)
     jsr:@tz/old 1.0.0 wants ^2.0.0 (newest: 2.0.0)
   ```
 - **JSR** — как в его [API](https://jsr.io/docs/api): `meta.json`, `<версия>_meta.json` и файлы по
@@ -2512,12 +2524,12 @@ import { red } from "@std/fmt/colors"   // путь внутри пакета �
   зависимости. `"jsr:..."` в коде проекта — ошибка с подсказкой `tz add`. Правила tz для пакетов те
   же, что для программы.
 - **`tz port <пакет>`** — копия TS-библиотеки (каталог, `jsr:`, `github:` или `git:`) для
-  адаптации под tz: файлы, до которых доходят её экспорты, лицензия, README и новый `tz.json`. Сам
+  адаптации под tz: файлы, до которых доходят её экспорты, лицензия, README и новый `package.json`. Сам
   заменяет `===` / `!==` на `==` / `!=`, `null` и `void 0` на `undefined` (кроме `Json`, который
   держит `null` сам: `Json | null` становится `Json`), `var` на `let`, `any` на
   `unknown`, `export default` и импорт по умолчанию — на имена (безымянная функция получает имя
   файла), `import * as ns` — на имена, которые файл берёт из `ns`, `import type` — на обычный
-  импорт, `"jsr:@std/path@^1/join"` — на `"@std/path/join"` с зависимостью в `tz.json`, `+` со
+  импорт, `"jsr:@std/path@^1/join"` — на `"@std/path/join"` с зависимостью в `package.json`, `+` со
   строкой — на шаблон (`n + " items"` → `` `${n} items` ``, `a + b + "!"` → `` `${a + b}!` ``),
   `#x` — на `private x`.
   Остальное печатает списком `файл:строка:столбец: подсказка`: `as`, `satisfies`, геттеры и
@@ -3396,7 +3408,7 @@ tz query type main.tz:12:7      тип имени в точке, и у лока�
 tz impact Vec.add               что затронет правка: кто использует, кто использует тех, по уровням
 ```
 
-Программа — `"main"` ближайшего `tz.json`, файл из места (`main.tz:12`) или `--entry app.tz`;
+Программа — `"main"` ближайшего `package.json`, файл из места (`main.tz:12`) или `--entry app.tz`;
 `--json` — то же данными. `tz query records` печатает сами записи модулей. Для ИИ-агентов те же
 ответы и проверка правки без записи на диск — сервер MCP `tz mcp` (инструменты `map`, `context`,
 `query`, `impact`, `check_edit`, `language_card` — памятка [docs/ai.md](docs/ai.md)); в этом
@@ -4030,7 +4042,7 @@ CRT, без RTTI и исключений, поэтому `tz` собираетс
 | `compiler/optimize` | `OptimizePass`: машина под цель (`target/`), копирование быстрых путей из `tzrt.bc` (`runtime_linker/`), оптимизации |
 | `compiler/emit` | `EmitPass`: объектный файл; `--emit-llvm` (`ir_writer/`) |
 | `compiler/link` | `LinkPass`: встроенный LLD (`linker/`); какой OpenSSL нужен программе, список чужого кода в exe и `tz licenses` (`licenses/`, `licenses_pass/`) |
-| `compiler/packages` | проекты и пакеты, по классу на папку: `tz.json` (`manifest/`), `tz.lock` (`lock/`), выбор версий и граф пакетов (`resolver/`, `package_graph/`), semver (`version/`, `range/`), кэш, JSR и git (`jsr_client/`, `git_client/`, `package_cache/`), HTTP через WinHTTP (`http_client/`), JSON с позициями для ошибок и правок (`json_parser/`), импорты файла без парсера (`scanner/`), `tz port` (`port/`) |
+| `compiler/packages` | проекты и пакеты, по классу на папку: `package.json` (`manifest/`), `package-lock.json` (`lock/`), выбор версий и граф пакетов (`resolver/`, `package_graph/`), semver (`version/`, `range/`), кэш, JSR и git (`jsr_client/`, `git_client/`, `package_cache/`), HTTP через WinHTTP (`http_client/`), JSON с позициями для ошибок и правок (`json_parser/`), импорты файла без парсера (`scanner/`), `tz port` (`port/`) |
 | `compiler/library` | C++-часть тем библиотеки: крючки темы (`feature/`), список тем (`feature_registry/`), и по папке на тему, в каждой `<тема>_feature/` и классы проверки и IR. `bytes`: байтовые массивы, `Buffer`, `TextEncoder` / `TextDecoder`, `embedBytes` и доказательства, что значение влезает в элемент; вызовы по группам (`*_calls/`). `child_process`: `spawnSync`, `execFileSync` и `execSync`. `crypto`: `node:crypto`, имена алгоритмов и выбор слоя OpenSSL, `crypto.subtle`. `date`: даты и `Intl.DateTimeFormat`; разборщик дат рантайма, собранный и в `tz` (`date_syntax/`). `decimal`: литералы, операторы и методы. `events`: карты событий, эмиттеры и `EventTarget`, `once()`. `builtin_modules`: имена модулей `node:*` и `tz:io`, привязка импортов, `node:timers/promises` и объекты, которые делает рантайм; что делает модуль, решает его тема через крючки `exportProblem`, `checkModuleCall`, `checkModuleValue` и `checkModuleMember`. `fs`: `node:fs`, `node:fs/promises`, `node:readline` и `tz:io`. `path`: `node:path`. `os`: `node:os`. `intl`: `Intl`, `toLocaleString`, `localeCompare` и `normalize`. `json`: `Json` и `JSON`, проверка `JSON.parse` текста, известного при сборке. `console`, `math`, `process`. `reflect`: отражение и метаданные. `regex`: литералы, методы, машинный код литералов (`regex_native_lowerer/`, `matcher_*/`), компилятор регулярок рантайма, собранный и в `tz` (`regex_syntax/`). `result`: `Result` и место создания `Err` (`err_sites/`). `stream`: типы кусков `Readable<T>` и остальных классов `node:stream`. `tz_modules`: встроенные модули на tz, их `declare function` и `tz:intrinsics`. `weakref`: `WeakRef` |
 | `runtime/core` | рантайм языка, у каждого модуля свой заголовок: общее — `TZ_HOT`, дескрипторы типов, раскладки (`tzrt`); вывод в stdout и stderr, форматирование чисел, граница стека, сбой рантайма (`output`); аллокатор, куча на каждый поток (`alloc`); потоки программы, пул, очередь node и куски, которые идут заранее (`parallel`); общие объекты и атомарные счётчики (`publish`); исключение в полёте, места стека ошибки, текст `e.stack` (`error`); строки (`string`); массивы (`array`); разбор чисел и `toFixed` (`number`); окружения замыканий (`closure`); `Object.keys` / `values` / `entries` (`object`); регистр букв по таблицам Unicode, которые [gen_unicode_tables.mjs](runtime/core/unicode/gen_unicode_tables.mjs) берёт из самого Node.js (`unicode`); `Promise`, очередь микрозадач, таймеры и цикл событий, как в node (`async`); пул потоков и ожидание ввода-вывода — IOCP в Windows (`io`); хеш-таблица словарей (`map`); коробки `unknown` (`unknown`); группы объектов в циклах, `WeakRef` и отладочный режим памяти (`group`) |
 | `runtime/library` | C-часть тем, по папке на модуль. `console`: `console.log` для массивов, объектов, `Result`, итераторов, `Json` и объединений как в Node (`inspect`). `math`: `Math`. `decimal`: точные десятичные числа. `json`: значения `Json` (`json`, `json_values`), `JSON.parse` как в V8 (`json_parse`), `JSON.stringify` любого значения (`json_stringify`). `regex`: разбор и компиляция в программу (`regex_compile`, общий с `tz`) с таблицами Unicode от [gen_regex_tables.mjs](runtime/library/regex/regex_compile/gen_regex_tables.mjs), интерпретатор, методы и то, что зовёт машинный код регулярок (`regex`). `date`: поля, установка полей и строки (`date`), разбор строк, как в V8 (`date_parse`, общий с `tz`), местный пояс (`date_zone`) и языки (`date_format`). `intl`: ICU системы, которую `icu` загружает при первом обращении; языки, опции и части `formatToParts` (`intl`), числа и `PluralRules` (`intl_number`), `Collator`, `normalize` и `Segmenter` (`intl_text`), `RelativeTimeFormat`, `ListFormat` и `DisplayNames` (`intl_names`). `process`: аргументы, переменные окружения, код выхода и часы. `path`: `node:path` в обоих стилях. `fs`: общее функций файлов (`fs`), ошибки ОС: коды как в libuv и тексты (`fs_errors`), синхронные функции файлов и папок (`fs_sync`, `fs_dirs`), `node:fs/promises` (`fs_async`, `fs_async_dirs`), stdin и `readLine` (`stdin`), `node:readline` (`readline`), чтение и запись кусками для потоков файлов (`fs_stream`). `os`: `node:os`. `stream`: что просит `node:stream`: проверка куска, байты в stdout и stderr. `child_process`: подготовка вызова как в node, запуск как в libuv (кавычки аргументов, поиск в `PATH`, окружение, каналы с overlapped I/O, таймаут), в Linux — `posix_spawn` (`child`). `bytes`: `ArrayBuffer`, типизированные массивы и их методы (`bytes`); `Buffer`, кодировки node, `TextEncoder` / `TextDecoder` (`buffer`) с таблицами однобайтовых кодировок, которые [gen_encodings.mjs](runtime/library/bytes/encodings/gen_encodings.mjs) берёт у node (`encodings`), и многобайтовые кодировки (`cjk`). `reflect`: записи метаданных (`meta`); `Reflect.get`, `apply`, `construct`, `new` класса, известного при выполнении, и проверки `unknown` (`reflect`). `net`: сокеты TCP на порту завершения цикла (AcceptEx, ConnectEx, WSARecv, WSASend) и поиск имён (`net`), срок `timeout` у `fetch`, который обрывает ожидания соединения (`deadline`). `http`: HTTP/1.1: разбор голов и тел, ответы и запросы одной записью (`http`); распаковка тел `fetch` — inflate из zlib и декодер brotli из `third_party` (`decompress`). `tz_modules`: что просят встроенные модули на tz через `declare function` (`library`). Отдельно, в `tzcrypto.lib`: `crypto` — `node:crypto` поверх OpenSSL: общее без OpenSSL — объекты, HMAC, PBKDF2, HKDF, случайные числа, секретные ключи (`crypto`), хеши (`crypto_md`), AES (`crypto_aes`) и ChaCha20-Poly1305 (`crypto_chacha`), scrypt (`crypto_scrypt`) и Argon2 (`crypto_argon2`) прямого слоя, по объекту на алгоритм, и полный слой: имена из переменных и списки (`crypto_evp`), ключи, подписи и обмен ключами (`crypto_keys`), сертификаты (`crypto_x509`); Web Crypto (`crypto_subtle*`); `tls` — TLS соединений `net` для https: OpenSSL в памяти между сокетом и HTTP, проверка сервера как в node и корневые сертификаты Mozilla, которые [gen_tls_roots.mjs](runtime/library/tls/tls/gen_tls_roots.mjs) берёт у node |

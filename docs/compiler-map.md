@@ -640,26 +640,26 @@ library/                       C++-часть тем библиотеки: пр�
 ```
 
 ```
-packages/           пакеты: tz.json, tz.lock, JSR, git, tz port
-  dependency/       Dependency: зависимость из tz.json
+packages/           пакеты: package.json, package-lock.json, JSR, git, tz port
+  dependency/       Dependency: зависимость из package.json
   git_client/       скачивание пакета из git
   graph/            Graph: пакеты программы для загрузчика
   http_client/      HTTP для JSR
   import_ref/       ImportRef: импорт пакета в коде
-  json_parser/      разбор JSON для tz.json и ответов JSR
+  json_parser/      разбор JSON для package.json и ответов JSR
   json_text/        строгая проверка текста JSON (и для импорта JSON)
   json_value/       JsonValue: разобранный JSON
   jsr_client/       JSR: версии и файлы пакета
   jsr_version/      JsrVersion: версия пакета JSR
   jsr_versions/     JsrVersions: список версий JSR
-  lock/             Lock: tz.lock
-  locked/           Locked: запись о пакете в tz.lock
-  manifest/         Manifest: tz.json
+  lock/             Lock: package-lock.json
+  locked/           Locked: запись о пакете в package-lock.json
+  manifest/         Manifest: package.json
   package/          Package: пакет в графе
   package_cache/    кэш скачанных пакетов
-  package_graph/    граф пакетов программы из tz.json и tz.lock
+  package_graph/    граф пакетов программы из package.json и package-lock.json
   partial/          Partial: неполная версия (^1, ~1.2)
-  paths/            папки пакетов
+  paths/            папки пакетов, поиск файла вверх по папкам
   port/             tz port — перенос библиотеки TypeScript
     edit/           Edit: правка текста при переносе
     file_port/      FilePort: перенос одного файла
@@ -677,30 +677,32 @@ packages/           пакеты: tz.json, tz.lock, JSR, git, tz port
   specifier/        разбор jsr:… и npm:… в импорте
   staged_dir/       StagedDir: папка, которая появляется целиком или никак
   text_file/        чтение и запись текстовых файлов пакетов
+  tz_config/        TzConfig: tzconfig.json (compilerOptions.outDir)
   version/          Version: semver
 ```
 
 ```
 cli/                  команды tz: разбор аргументов, по классу на команду
-  add_command/        AddCommand: tz add — пакеты в tz.json
+  add_command/        AddCommand: tz add — пакеты в package.json
   args/               Args: разбор командной строки, текст справки
   build_command/      BuildCommand: tz build
   command_line/       CommandLine: выбирает команду по первому слову
   command_usage/      текст справки по командам
-  entry_file/         EntryFile: какой файл собирать (аргумент или main из tz.json)
+  entry_file/         EntryFile: какой файл собирать (аргумент или main из package.json)
   error_printer/      ErrorPrinter: печать ошибок сборки в терминал
   exit_codes/         коды выхода tz
   explain_command/    ExplainCommand: --explain-parallel — что идёт параллельно и почему
-  init_command/       InitCommand: tz init — tz.json, main.tz, .gitignore
+  init_command/       InitCommand: tz init — package.json, tzconfig.json, main.tz, .gitignore
   knowledge_command/  KnowledgeCommand: tz map / context / query / impact
   licenses_command/   LicensesCommand: tz licenses — лицензии чужого кода в exe
   lsp_command/        LspCommand: tz lsp — сервер редактора и tz lsp --check
   mcp_command/        McpCommand: tz mcp — инструменты для ИИ по MCP
   port_command/       PortCommand: tz port — перенос библиотеки TypeScript
-  project_file/       поиск tz.json от текущей папки
-  project_packages/   ProjectPackages: готовит пакеты tz.json перед проверкой
+  project_file/       поиск package.json от текущей папки
+  project_packages/   ProjectPackages: готовит пакеты package.json перед проверкой
   remove_command/     RemoveCommand: tz remove
   run_command/        RunCommand: tz run — собрать и запустить
+  script_command/     ScriptCommand: tz run <имя> — скрипт из "scripts" package.json
   update_command/     UpdateCommand: tz update
   version_command/    VersionCommand: tz version
 ```
