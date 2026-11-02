@@ -1,0 +1,28 @@
+// JSON.parse and JSON.stringify in tasks that run in parallel (docs/async.md,
+// section 8): each call reports its own errors, whatever the other threads
+// parse at the same time. The parallel stress runs (TZ_PARALLEL_STRESS) put
+// these pieces on different threads at once.
+type Problem = { code: string; message: string };
+
+async function parse(i: int): Promise<string> {
+  await Promise.resolve();
+  const text = i % 2 == 0 ? `{"n":${i}}` : `{n:${i}}`;
+  const data = JSON.parse(text);
+  if (data.isErr()) {
+    const problem: Problem = { code: data.error.code, message: "bad" };
+    return problem.code;
+  }
+  const again = JSON.stringify({ i, ok: true });
+  return again.length > 0 ? "ok" : "empty";
+}
+
+const tasks: Promise<string>[] = [];
+for (let i: int = 0; i < 200; i++) tasks.push(parse(i));
+const results = await Promise.all(tasks);
+let good = 0;
+let bad = 0;
+for (const r of results) {
+  if (r == "ok") good++;
+  else if (r == "ERR_INVALID_JSON") bad++;
+}
+console.log(good, bad);

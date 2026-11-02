@@ -124,6 +124,8 @@ private:
   std::vector<Target> targets_;
   unsigned loops_ = 0;
   llvm::StringRef label_;
+  std::vector<const Stmt *> anchors_;
+  llvm::DenseSet<const char *> partedAnchors_;
   struct OpenJoin {
     const AwaitExpr *await;
     Active active;
@@ -156,6 +158,9 @@ private:
     std::vector<Partner> partners;
     llvm::SMLoc from, to;
     std::vector<llvm::SMLoc> ats;
+    std::vector<WaitPlace> places;
+    std::vector<llvm::SMLoc> waits;
+    std::vector<std::pair<llvm::SMLoc, const FunctionDecl *>> inside;
   };
   std::vector<std::vector<Touch>> pieceTouches_;
   std::vector<Decision> decisions_;

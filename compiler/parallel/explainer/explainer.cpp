@@ -82,6 +82,9 @@ std::vector<std::string> Explainer::decisionLines(unsigned piece) const {
   } else {
     lines.push_back("in order: lines " + from + "-" + to);
   }
+  if (!d.inside.empty()) {
+    lines.push_back("waits for its turn inside: " + analysis_.explainNames().positions(d.inside));
+  }
 
   return lines;
 }

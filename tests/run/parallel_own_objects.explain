@@ -113,12 +113,14 @@ arrow, line 95
     in order with the top-level code after await at line 120: the length of kept
     in order with the top-level code after await at line 92: the length of kept
     in order: line 95
+    waits for its turn inside: lines 63 in keep, 64 in keep
 
 arrow, line 96
   start (in the callbacks at line 96)
     reads  entries of any Map<string, string> (line 96 in share)
     in order with the arrow at line 97: entries of any Map<string, string>
     in order: line 96
+    waits for its turn inside: line 68 in idOf
 
 arrow, line 97
   start (in the callbacks at line 97)
@@ -129,3 +131,4 @@ arrow, line 97
     in order with the arrow at line 96: entries of any Map<string, string>
     in order with the same piece in other tasks: entries of any Map<string, string>
     in order: line 97
+    waits for its turn inside: line 88 in race

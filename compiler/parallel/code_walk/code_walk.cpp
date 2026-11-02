@@ -76,11 +76,12 @@ void CodeWalk::walk(unsigned fi) {
   analysis_.openJoins_.clear();
   analysis_.loops_ = 0;
   analysis_.label_ = {};
+  analysis_.anchors_.clear();
   const FunctionDecl *decl = analysis_.fn_->decl;
   if (!decl) {
     for (const Stmt *item : analysis_.program_.items) {
       if (!isa<FunctionDecl>(item) && !analysis_.libraryEffects().inLibrary(item->loc())) {
-        stmt(item);
+        anchored(item);
       }
     }
     return;
@@ -138,6 +139,9 @@ void CodeWalk::touch(LocKind kind, Ref ref, const void *key, bool write, llvm::S
   a.loc.res = res;
   a.write = write;
   a.at = at;
+  if (!analysis_.anchors_.empty()) {
+    a.anchor = analysis_.anchors_.back()->loc();
+  }
   for (unsigned s : analysis_.cur_) {
     analysis_.fn_->segs[s].effects.insert(a);
   }
@@ -156,6 +160,9 @@ void CodeWalk::joinPoint() {
 }
 
 void CodeWalk::moveTo(unsigned seg) {
+  for (const Stmt *anchor : analysis_.anchors_) {
+    analysis_.partedAnchors_.insert(anchor->loc().getPointer());
+  }
   for (unsigned s : analysis_.cur_) {
     analysis_.fn_->succ.insert({s, seg});
   }
@@ -198,6 +205,15 @@ void CodeWalk::loop(llvm::StringRef label, llvm::function_ref<void()> head,
   analysis_.cur_ = std::move(exits);
 }
 
+void CodeWalk::anchored(const Stmt *s) {
+  if (!s) {
+    return;
+  }
+  analysis_.anchors_.push_back(s);
+  stmt(s);
+  analysis_.anchors_.pop_back();
+}
+
 void CodeWalk::stmt(const Stmt *s) {
   if (!s) {
     return;
@@ -205,7 +221,7 @@ void CodeWalk::stmt(const Stmt *s) {
   switch (s->kind()) {
   case Stmt::Kind::Block:
     for (const Stmt *x : cast<BlockStmt>(s)->body) {
-      stmt(x);
+      anchored(x);
     }
     return;
   case Stmt::Kind::VarDecl:
@@ -271,7 +287,7 @@ void CodeWalk::stmt(const Stmt *s) {
         hasDefault = true;
       }
       for (const Stmt *x : c.body) {
-        stmt(x);
+        anchored(x);
       }
       fall = analysis_.cur_;
     }

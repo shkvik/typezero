@@ -1,0 +1,119 @@
+declare function syncGuard(): object;
+declare function syncRead(guard: object): void;
+declare function syncReadDone(guard: object): void;
+declare function syncWrite(guard: object): void;
+declare function syncWriteDone(guard: object): void;
+
+export class ConcurrentMap<K, V> {
+  private table: Map<K, V>;
+  private guard: object;
+
+  public constructor() {
+    this.table = new Map();
+    this.guard = syncGuard();
+  }
+
+  public size(): int {
+    syncRead(this.guard);
+    const count = this.table.size;
+    syncReadDone(this.guard);
+
+    return count;
+  }
+
+  public get(key: K): V | undefined {
+    syncRead(this.guard);
+    const found = this.table.get(key);
+    syncReadDone(this.guard);
+
+    return found;
+  }
+
+  public has(key: K): boolean {
+    syncRead(this.guard);
+    const found = this.table.has(key);
+    syncReadDone(this.guard);
+
+    return found;
+  }
+
+  public set(key: K, value: V): void {
+    syncWrite(this.guard);
+    this.table.set(key, value);
+    syncWriteDone(this.guard);
+  }
+
+  public delete(key: K): boolean {
+    syncWrite(this.guard);
+    const deleted = this.table.delete(key);
+    syncWriteDone(this.guard);
+
+    return deleted;
+  }
+
+  public clear(): void {
+    syncWrite(this.guard);
+    this.table.clear();
+    syncWriteDone(this.guard);
+  }
+
+  public update(key: K, change: (old: V) => V): V | undefined {
+    syncWrite(this.guard);
+    const old = this.table.get(key);
+    if (old == undefined) {
+      syncWriteDone(this.guard);
+
+      return undefined;
+    }
+    const changed = change(old);
+    this.table.set(key, changed);
+    syncWriteDone(this.guard);
+
+    return changed;
+  }
+
+  public getOrSet(key: K, make: () => V): V {
+    syncRead(this.guard);
+    const found = this.table.get(key);
+    syncReadDone(this.guard);
+    if (found != undefined) {
+      return found;
+    }
+    syncWrite(this.guard);
+    const again = this.table.get(key);
+    if (again != undefined) {
+      syncWriteDone(this.guard);
+
+      return again;
+    }
+    const made = make();
+    this.table.set(key, made);
+    syncWriteDone(this.guard);
+
+    return made;
+  }
+
+  public keys(): K[] {
+    syncRead(this.guard);
+    const keys = Array.from(this.table.keys());
+    syncReadDone(this.guard);
+
+    return keys;
+  }
+
+  public values(): V[] {
+    syncRead(this.guard);
+    const values = Array.from(this.table.values());
+    syncReadDone(this.guard);
+
+    return values;
+  }
+
+  public entries(): [K, V][] {
+    syncRead(this.guard);
+    const entries = Array.from(this.table.entries());
+    syncReadDone(this.guard);
+
+    return entries;
+  }
+}

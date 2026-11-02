@@ -190,6 +190,12 @@ void LoopChecker::checkForOf(ForOfStmt *stmt) {
                           "'" + type->name() +
                               "' gives its values later: iterate it with 'for await "
                               "(const x of ...)'");
+  } else if (const ClassDecl *cls = type->classDecl();
+             cls && cls->library && cls->generic && cls->generic->name == "ConcurrentMap") {
+    checker_.diags_.error(stmt->iterable->loc(),
+                          "a ConcurrentMap is not iterated directly, as other tasks change it "
+                          "during the loop; iterate a snapshot: 'for (const [key, value] of "
+                          "map.entries())'");
   } else if (!type->isError()) {
     checker_.diags_.error(stmt->iterable->loc(),
                           "cannot iterate over a value of type '" + type->name() + "'");

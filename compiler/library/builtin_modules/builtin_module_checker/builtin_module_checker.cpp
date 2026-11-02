@@ -75,7 +75,7 @@ std::string missingModule(llvm::StringRef path) {
       return "built-in module " + quoted + " is not supported yet";
     }
     return "there is no built-in module " + quoted +
-           "; tz has 'tz:io', 'tz:fs', 'tz:http' and 'tz:http2'";
+           "; tz has 'tz:io', 'tz:fs', 'tz:http', 'tz:http2' and 'tz:sync'";
   }
   llvm::StringRef bare = path;
   bare.consume_front("node:");

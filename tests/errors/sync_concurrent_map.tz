@@ -1,0 +1,12 @@
+// A ConcurrentMap (docs/async.md, section 9) is read through its methods: a
+// loop goes over a snapshot, the size is a method, and the function given to
+// update cannot wait, as it runs while the map is locked.
+import { ConcurrentMap } from "tz:sync";
+
+const counts = new ConcurrentMap<string, int>();
+// expect-error: a ConcurrentMap is not iterated directly, as other tasks change it during the loop; iterate a snapshot: 'for (const [key, value] of map.entries())'
+for (const [key, value] of counts) console.log(key, value);
+// expect-error: type '() => int' is not assignable to type 'int'
+const size: int = counts.size;
+// expect-error: type '(int) => Promise<int>' is not assignable to type '(int) => int'
+counts.update("a", async (old) => old + 1);

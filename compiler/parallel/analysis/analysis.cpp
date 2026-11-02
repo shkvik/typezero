@@ -100,7 +100,7 @@ ParallelPlan Analysis::plan() const {
     }
     piece.orderedFrom = decisions_[i].from;
     piece.orderedTo = decisions_[i].to;
-    piece.orderedAt = decisions_[i].ats;
+    piece.orderedAt = decisions_[i].waits;
     plan.pieces.push_back(std::move(piece));
   }
   plan.ownedParams.assign(ownedParams_.begin(), ownedParams_.end());

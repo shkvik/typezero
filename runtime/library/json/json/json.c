@@ -175,7 +175,7 @@ TZ_HOT void tz_json_release_value(TzJson *j) {
   }
 }
 
-TzMaker tz_json_error_maker;
+TZ_THREAD_LOCAL TzMaker tz_json_error_maker;
 
 void tz_json_errors(TzMaker make) { tz_json_error_maker = make; }
 

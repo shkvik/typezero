@@ -1,0 +1,66 @@
+// ConcurrentMap from tz:sync (docs/async.md, section 9): each action is whole
+// on its own, so the tasks that use the map run in parallel instead of in
+// node's order; update and getOrSet read and write one key at once, so no
+// count is lost however the tasks meet. Iteration goes over a snapshot.
+import { ConcurrentMap } from "tz:sync";
+
+type Note = { readonly id: string; readonly title: string; readonly tags: string[] };
+
+const notes = new ConcurrentMap<string, Note>();
+const counts = new ConcurrentMap<string, int>();
+const seen: string[] = [];
+
+async function create(i: int): Promise<string> {
+  await Promise.resolve();
+  const id = `n${i}`;
+  notes.set(id, { id, title: `note ${i}`, tags: [`t${i % 2}`] });
+  counts.getOrSet("created", () => 0);
+  counts.update("created", (old) => old + 1);
+  return id;
+}
+
+async function work(i: int): Promise<int> {
+  await Promise.resolve();
+  let found = 0;
+  for (let k: int = 0; k < 40; k++) {
+    const key = `k${(i + k) % 8}`;
+    counts.getOrSet(key, () => 0);
+    counts.update(key, (old) => old + 1);
+    if (notes.get(`n${k % 6}`) != undefined) found++;
+  }
+  return found;
+}
+
+async function logged(i: int): Promise<void> {
+  await Promise.resolve();
+  counts.getOrSet("logged", () => 0);
+  counts.update("logged", (old) => {
+    seen.push(`task ${i}`);
+    return old + 1;
+  });
+}
+
+const ids = await Promise.all([create(1), create(2), create(3), create(4), create(5)]);
+console.log(ids.join(","));
+console.log(notes.size(), counts.get("created") ?? -1);
+
+const works: Promise<int>[] = [];
+for (let i: int = 0; i < 50; i++) works.push(work(i));
+const found = await Promise.all(works);
+let total = 0;
+for (const [key, n] of counts.entries()) {
+  if (key.startsWith("k")) total += n;
+}
+console.log(total, found.every((n) => n > 0));
+
+await Promise.all([logged(1), logged(2), logged(3)]);
+console.log(seen.join(","), counts.get("logged") ?? -1);
+
+console.log(notes.get("n3")?.title ?? "none", notes.get("n9")?.title ?? "none");
+console.log(notes.has("n2"), notes.delete("n2"), notes.has("n2"), notes.delete("n2"));
+console.log(notes.keys().sort().join(","));
+console.log(notes.values().map((note) => note.title).sort().join(","));
+console.log(counts.update("missing", (old) => old + 1) ?? "no key");
+console.log(counts.getOrSet("made", () => 7), counts.getOrSet("made", () => 8));
+notes.clear();
+console.log(notes.size(), notes.entries().length);

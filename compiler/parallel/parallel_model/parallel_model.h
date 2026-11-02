@@ -95,6 +95,9 @@ struct Access {
   bool write = false;
   llvm::SMLoc at;
   const FunctionDecl *via = nullptr;
+  llvm::SMLoc origin;
+  llvm::SMLoc anchor;
+  const FunctionDecl *home = nullptr;
   bool operator<(const Access &o) const {
     if (!(loc == o.loc)) {
       return loc < o.loc;
@@ -102,7 +105,19 @@ struct Access {
     if (write != o.write) {
       return write < o.write;
     }
-    return std::less<const char *>()(at.getPointer(), o.at.getPointer());
+    if (at.getPointer() != o.at.getPointer()) {
+      return std::less<const char *>()(at.getPointer(), o.at.getPointer());
+    }
+    return std::less<const char *>()(origin.getPointer(), o.origin.getPointer());
+  }
+};
+
+struct WaitPlace {
+  llvm::SMLoc at;
+  llvm::SMLoc anchor;
+  const FunctionDecl *home = nullptr;
+  bool operator==(const WaitPlace &o) const {
+    return at.getPointer() == o.at.getPointer() && anchor.getPointer() == o.anchor.getPointer();
   }
 };
 
@@ -237,6 +252,7 @@ struct Touch {
   Loc loc;
   bool read = false, write = false;
   std::vector<std::pair<llvm::SMLoc, const FunctionDecl *>> ats, readAts, writeAts;
+  std::vector<WaitPlace> places;
 };
 
 }

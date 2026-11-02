@@ -156,6 +156,16 @@ std::optional<Access> CallResolver::substitute(const Access &a, const FnInfo &ca
                                                const CallRec &rec) const {
   const std::optional<Ref> &self = call.self;
   Access b = a;
+  bool byLibrary = rec.kind == CallKind::Inline && rec.call &&
+                   analysis_.libraryEffects().libraryTarget(rec.call);
+  if (analysis_.isLibrary(callee.decl) || byLibrary) {
+    b.origin = llvm::SMLoc();
+    b.anchor = llvm::SMLoc();
+    b.home = nullptr;
+  } else if (!a.origin.isValid()) {
+    b.origin = a.at;
+    b.home = callee.decl;
+  }
   b.at = rec.loc;
   b.via = callee.decl;
   if (b.loc.ref.kind == RefKind::Owned) {

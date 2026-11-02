@@ -1,0 +1,63 @@
+top-level code
+  start
+    parallel
+  after await at line 43
+    writes stdout (lines 44, 45)
+    reads  everything in any string[] (line 44)
+    writes elements of works (line 48)
+    writes the length of works (line 48)
+    parallel
+  after await at line 49
+    reads  0 of any [string, int] (line 51)
+    reads  1 of any [string, int] (line 51)
+    reads  elements of any [string, int][] (line 51)
+    reads  total (lines 52, 54)
+    writes total (line 52)
+    writes stdout (line 54)
+    reads  elements of any int[] (line 54)
+    parallel
+  after await at line 56
+    writes stdout (lines 57, 59, 60, 61, 62, 63 and 2 more)
+    reads  everything in seen (line 57)
+    writes elements of any string[] (line 61)
+    reads  everything in any string[] (lines 61, 62)
+    reads  elements of any Note[] (line 62)
+    reads  the length of any [string, Note][] (line 66)
+    parallel
+
+async function create, line 13
+  start: runs inside its caller
+  after await at line 14
+    in the task create(1) at line 43:
+      parallel
+    in the task create(2) at line 43:
+      parallel
+    in the task create(3) at line 43:
+      parallel
+    in the task create(4) at line 43:
+      parallel
+    in the task create(5) at line 43:
+      parallel
+
+async function work, line 22
+  start: runs inside its caller
+  after await at line 23 (in the tasks work(i) at line 48)
+    parallel
+
+async function logged, line 34
+  start: runs inside its caller
+  after await at line 35
+    writes elements of seen (line 37 in the arrow at line 37)
+    writes the length of seen (line 37 in the arrow at line 37)
+    in the task logged(1) at line 56:
+      in order with logged after await at line 35 in the task logged(2) at line 56: elements of seen, the length of seen
+      in order with logged after await at line 35 in the task logged(3) at line 56: elements of seen, the length of seen
+      in order: line 37
+    in the task logged(2) at line 56:
+      in order with logged after await at line 35 in the task logged(1) at line 56: elements of seen, the length of seen
+      in order with logged after await at line 35 in the task logged(3) at line 56: elements of seen, the length of seen
+      in order: line 37
+    in the task logged(3) at line 56:
+      in order with logged after await at line 35 in the task logged(1) at line 56: elements of seen, the length of seen
+      in order with logged after await at line 35 in the task logged(2) at line 56: elements of seen, the length of seen
+      in order: line 37

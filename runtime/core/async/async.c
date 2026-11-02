@@ -282,7 +282,7 @@ void tz_promise_fulfill(TzPromise *p) {
 #endif
   const TzType *type = value_type(p);
 #if TZ_PARALLEL
-  if (type && !(p->flags & TZ_PROMISE_DONE)) {
+  if (type && !(p->flags & TZ_PROMISE_DONE) && !tz_ahead_private(p)) {
     tz_publish_value(type, value_of(p));
   }
 #endif

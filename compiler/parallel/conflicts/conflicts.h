@@ -14,6 +14,8 @@ public:
   std::vector<Touch> touches(const Effects &effects) const;
 
 private:
+  void placeWaits();
+  bool reachers(const FunctionDecl *home, std::vector<unsigned> &out) const;
   Analysis &analysis_;
 };
 

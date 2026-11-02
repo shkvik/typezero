@@ -11,6 +11,7 @@ public:
   unsigned discover(const FunctionDecl *fn);
   void walk(unsigned fi);
   void stmt(const Stmt *s);
+  void anchored(const Stmt *s);
   void declarator(const VarDeclarator &d);
   void forOf(const ForOfStmt *f, llvm::StringRef label);
   void iterate(const Expr *iterable, const Node *site);

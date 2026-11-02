@@ -156,8 +156,8 @@ bool Ownership::container(const Type *type) {
         containers_->insert(alias->resolved->nonOptional());
       }
     }
-    std::vector<const Type *> known(containers_->begin(), containers_->end());
-    for (const Type *t : known) {
+    std::vector<const Type *> candidates(containers_->begin(), containers_->end());
+    for (const Type *t : candidates) {
       for (const Type *other : library) {
         if (other->kind() == Type::Kind::Object && !other->isAnyObject() &&
             analysis_.aliasAnalysis().objectTypesMayAlias(other, t)) {

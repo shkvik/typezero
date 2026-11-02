@@ -5,11 +5,13 @@ top-level code
     in order with work after await at line 8 in the task work(2) at line 15: stdout
     in order with work after await at line 8 in the task work(3) at line 15: stdout
     in order: line 15
+    waits for its turn inside: line 7 in work
   after await at line 15
     reads  everything in any int[] (line 15)
     writes stdout (lines 15, 22 in work)
     in order with work after await at line 8 in the task work(4) at line 22: stdout
     in order: lines 15-22
+    waits for its turn inside: line 7 in work
   after await at line 22
     reads  everything in any int[] (line 22)
     writes stdout (line 22)

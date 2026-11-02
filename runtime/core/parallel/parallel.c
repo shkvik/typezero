@@ -1045,6 +1045,11 @@ TZ_NOINLINE void tz_order_wait(void) {
   if (tz_thread.conn_locks) {
     tz_panic("the parallel runtime: waits for the turn holding a connection", 61);
   }
+  if (tz_thread.sync_locks) {
+    tz_panic("the parallel runtime: the function given to update or getOrSet of a ConcurrentMap "
+             "waits for its turn",
+             100);
+  }
   tz_pendulum_swing();
   if (tz_thread.turn) {
     return;

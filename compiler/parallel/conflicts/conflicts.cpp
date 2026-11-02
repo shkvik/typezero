@@ -76,6 +76,7 @@ bool Conflicts::concurrent(unsigned a, unsigned b) const {
 std::vector<Touch> Conflicts::touches(const Effects &effects) const {
   std::vector<Touch> out;
   std::map<Loc, size_t> index;
+  std::set<std::tuple<size_t, bool, const char *>> seen;
   for (const Access &a : effects) {
     auto [it, inserted] = index.try_emplace(a.loc, out.size());
     if (inserted) {
@@ -84,13 +85,21 @@ std::vector<Touch> Conflicts::touches(const Effects &effects) const {
     }
     Touch &t = out[it->second];
     (a.write ? t.write : t.read) = true;
-    auto at = std::make_pair(a.at, a.via);
-    if (!llvm::is_contained(t.ats, at)) {
-      t.ats.push_back(at);
+    if (seen.insert({it->second, a.write, a.at.getPointer()}).second) {
+      auto at = std::make_pair(a.at, a.via);
+      if (!llvm::is_contained(t.ats, at)) {
+        t.ats.push_back(at);
+      }
+      auto &mine = a.write ? t.writeAts : t.readAts;
+      if (!llvm::is_contained(mine, at)) {
+        mine.push_back(at);
+      }
     }
-    auto &mine = a.write ? t.writeAts : t.readAts;
-    if (!llvm::is_contained(mine, at)) {
-      mine.push_back(at);
+    bool inner = a.origin.isValid() && a.anchor.isValid() &&
+                 !analysis_.partedAnchors_.contains(a.anchor.getPointer());
+    WaitPlace place{a.at, inner ? a.anchor : llvm::SMLoc(), inner ? a.home : nullptr};
+    if (!llvm::is_contained(t.places, place)) {
+      t.places.push_back(place);
     }
   }
 
@@ -214,6 +223,11 @@ void Conflicts::decide() {
               d.ats.push_back(at);
             }
           }
+          for (const WaitPlace &place : t->places) {
+            if (!llvm::is_contained(d.places, place)) {
+              d.places.push_back(place);
+            }
+          }
         }
       };
       analysis_.decisions_[i].partners.push_back({j, shared});
@@ -227,6 +241,93 @@ void Conflicts::decide() {
         }
         analysis_.decisions_[j].partners.push_back({i, theirs});
         extend(analysis_.decisions_[j], mineJ);
+      }
+    }
+  }
+  placeWaits();
+}
+
+bool Conflicts::reachers(const FunctionDecl *home, std::vector<unsigned> &out) const {
+  auto found = analysis_.fnIndex_.find(home);
+  if (found == analysis_.fnIndex_.end()) {
+    return false;
+  }
+  std::vector<bool> seen(analysis_.fns_.size(), false);
+  std::deque<unsigned> queue{found->second};
+  seen[found->second] = true;
+  auto add = [&](unsigned fn, unsigned seg) {
+    auto it = analysis_.segPieces_.find({fn, seg});
+    if (it != analysis_.segPieces_.end()) {
+      out.insert(out.end(), it->second.begin(), it->second.end());
+    }
+  };
+  const FnInfo &own = analysis_.fns_[found->second];
+  for (unsigned s = 0; s < own.segs.size(); ++s) {
+    if (own.isInline(s)) {
+      add(found->second, s);
+    }
+  }
+  while (!queue.empty()) {
+    unsigned g = queue.front();
+    queue.pop_front();
+    for (const auto &[caller, r] : analysis_.fns_[g].callers) {
+      const FnInfo &f = analysis_.fns_[caller];
+      for (unsigned s : f.calls[r].segs) {
+        add(caller, s);
+        if (f.isInline(s) && !seen[caller]) {
+          seen[caller] = true;
+          queue.push_back(caller);
+        }
+      }
+    }
+  }
+  std::sort(out.begin(), out.end());
+  out.erase(std::unique(out.begin(), out.end()), out.end());
+
+  return true;
+}
+
+void Conflicts::placeWaits() {
+  std::vector<Analysis::Decision> &decisions = analysis_.decisions_;
+  std::vector<llvm::DenseSet<const char *>> mine(decisions.size());
+  std::map<const FunctionDecl *, std::set<const char *>> byHome;
+  for (unsigned i = 0; i < decisions.size(); ++i) {
+    for (const WaitPlace &place : decisions[i].places) {
+      if (place.home) {
+        mine[i].insert(place.anchor.getPointer());
+        byHome[place.home].insert(place.anchor.getPointer());
+      }
+    }
+  }
+  llvm::DenseSet<const char *> inner;
+  for (const auto &[home, points] : byHome) {
+    std::vector<unsigned> reach;
+    if (!reachers(home, reach)) {
+      continue;
+    }
+    for (const char *anchor : points) {
+      bool everywhere = true;
+      for (unsigned r : reach) {
+        if (!decisions[r].alone && !mine[r].contains(anchor)) {
+          everywhere = false;
+          break;
+        }
+      }
+      if (everywhere) {
+        inner.insert(anchor);
+      }
+    }
+  }
+  for (Analysis::Decision &d : decisions) {
+    for (const WaitPlace &place : d.places) {
+      bool moved = place.home && inner.contains(place.anchor.getPointer());
+      llvm::SMLoc wait = moved ? place.anchor : place.at;
+      if (!llvm::is_contained(d.waits, wait)) {
+        d.waits.push_back(wait);
+      }
+      auto where = std::make_pair(place.anchor, place.home);
+      if (moved && !llvm::is_contained(d.inside, where)) {
+        d.inside.push_back(where);
       }
     }
   }

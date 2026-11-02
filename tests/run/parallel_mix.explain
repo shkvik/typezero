@@ -25,6 +25,7 @@ top-level code
     writes the state of any Listening (line 69)
     in order with the arrow at line 43 after await at line 45: entries of any Map<string, Session>, entries of counts, stats.served
     in order: lines 67-68
+    waits for its turn inside: line 67 in the arrow at line 67
   after await at line 69
     parallel
 
@@ -48,6 +49,7 @@ async arrow, line 43
     in order with the start of the top-level code: the listeners of stats
     in order with the top-level code after await at line 66: entries of any Map<string, Session>, entries of counts, stats.served
     in order: lines 46-49
+    waits for its turn inside: lines 14 in Stats.hit, 27 in Registry.open, 29 in Registry.open, 30 in Registry.open, 32 in Registry.open
 
 async function get, line 58
   start: runs inside its caller

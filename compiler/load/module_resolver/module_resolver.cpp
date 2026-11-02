@@ -76,6 +76,9 @@ Module *ModuleResolver::resolve(Module *from, llvm::StringRef spec, llvm::SMLoc 
   if (spec == "tz:socket") {
     return loader_.library().libraryModule("socket.tz", "tz:socket", loc);
   }
+  if (spec == "tz:sync") {
+    return loader_.library().libraryModule("sync.tz", "tz:sync", loc);
+  }
   if (from->builtin && (spec == "tz:web" || spec == "tz:url" || spec == "tz:fetch" ||
                         spec == "tz:intrinsics" || spec == "tz:websocket")) {
     return loader_.library().libraryModule(spec.drop_front(3).str() + ".tz", spec, loc);
@@ -280,8 +283,8 @@ Module *ModuleResolver::load(llvm::StringRef baseDir, const std::vector<std::str
                    "not build where names are case-sensitive");
       return nullptr;
     }
-    if (Module *known = loader_.byRealPath_.lookup(real)) {
-      return known;
+    if (Module *loaded = loader_.byRealPath_.lookup(real)) {
+      return loaded;
     }
     bool json = path::extension(real) == ".json";
     if (path::extension(real) != ".tz" && !json) {

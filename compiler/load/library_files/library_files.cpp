@@ -29,6 +29,7 @@ const KnownFile kKnownFiles[] = {
     {"url.tz", "url.tz", "tz:url"},
     {"websocket.tz", "websocket.tz", "tz:websocket"},
     {"intrinsics.tz", "intrinsics.tz", "tz:intrinsics"},
+    {"sync.tz", "sync.tz", "tz:sync"},
     {"net.tz", "net.tz", "node:net"},
     {"dgram.tz", "dgram.tz", "node:dgram"},
     {"packet.tz", "packet.tz", "tz:packet"},

@@ -18,6 +18,7 @@ top-level code
     writes the length of ids (line 55)
     in order with request after await at line 50: elements of routes
     in order: lines 22-34
+    waits for its turn inside: line 12 in Route
   after await at line 56
     writes stdout (line 57)
     reads  store.counts (line 57)
@@ -60,3 +61,4 @@ async function request, line 49
     in order with the same piece in other tasks: entries of any Map<string, int>
     in order with the start of the top-level code: elements of routes
     in order: line 51
+    waits for its turn inside: lines 24 in Counter.add, 25 in Counter.add, 31 in Counter.peek, 43 in dispatch

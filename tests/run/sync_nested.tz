@@ -1,0 +1,15 @@
+// The function given to update or getOrSet runs while the map is locked, so
+// it must not use a ConcurrentMap itself (docs/async.md, section 9): that
+// would wait for a lock it holds, or for one another task holds while it
+// waits for this one. The program stops with a panic instead of hanging.
+// expect-exit: 2
+// expect-stderr: panic: a ConcurrentMap is used inside the function given to update or getOrSet of a ConcurrentMap
+// expect-stderr: at ConcurrentMap.get (
+import { ConcurrentMap } from "tz:sync";
+
+const counts = new ConcurrentMap<string, int>();
+const bonus = new ConcurrentMap<string, int>();
+counts.set("a", 1);
+console.log("before");
+counts.update("a", (old) => old + (bonus.get("a") ?? 0));
+console.log("not reached");
