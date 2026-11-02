@@ -152,14 +152,19 @@ void CallResolver::resolve() {
 }
 
 std::optional<Access> CallResolver::substitute(const Access &a, const FnInfo &callee,
-                                               const FnInfo &caller, const Callee &call,
+                                               unsigned caller, const Callee &call,
                                                const CallRec &rec) const {
   const std::optional<Ref> &self = call.self;
   Access b = a;
   b.at = rec.loc;
   b.via = callee.decl;
   if (b.loc.ref.kind == RefKind::Owned) {
-    b.loc.ref = analysis_.ownership().substituted(b.loc.ref, callee, caller, rec, call.mode);
+    std::optional<Ref> ref =
+        analysis_.ownership().substituted(b.loc.ref, callee, caller, rec, call);
+    if (!ref) {
+      return std::nullopt;
+    }
+    b.loc.ref = *ref;
   }
   if (b.loc.ref.kind == RefKind::This) {
     auto *owner = static_cast<const FunctionDecl *>(b.loc.ref.ptr);
@@ -212,7 +217,7 @@ void CallResolver::fold() {
         const FnInfo &g = analysis_.fns_[c.fn];
         std::vector<Access> added;
         for (const Access &a : g.inlineEffects) {
-          if (std::optional<Access> b = substitute(a, g, f, c, rec)) {
+          if (std::optional<Access> b = substitute(a, g, fi, c, rec)) {
             added.push_back(*b);
           }
         }

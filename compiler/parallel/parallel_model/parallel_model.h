@@ -29,11 +29,6 @@ enum class RefKind : uint8_t {
   Owned,
 };
 
-struct OwnedRef {
-  const VarSymbol *root = nullptr;
-  const Type *type = nullptr;
-};
-
 struct Ref {
   RefKind kind = RefKind::Type;
   const void *ptr = nullptr;
@@ -42,6 +37,16 @@ struct Ref {
   bool operator<(const Ref &o) const {
     return kind != o.kind ? kind < o.kind : std::less<const void *>()(ptr, o.ptr);
   }
+};
+
+using FieldKey = std::pair<const Type *, const char *>;
+
+struct OwnedRef {
+  const VarSymbol *root = nullptr;
+  const Type *type = nullptr;
+  std::vector<FieldKey> needs;
+  bool whole = false;
+  Ref fallback;
 };
 
 enum class LocKind : uint8_t {
@@ -161,6 +166,7 @@ struct CallRec {
   std::optional<Ref> bySelf;
   const AwaitExpr *await = nullptr;
   bool returned = false;
+  bool tail = false;
   bool voided = false;
   const AwaitExpr *join = nullptr;
   bool repeated = false;
@@ -190,6 +196,7 @@ struct FnInfo {
 struct Use {
   const AwaitExpr *awaited = nullptr;
   bool returned = false;
+  bool tail = false;
   bool voided = false;
   const AwaitExpr *join = nullptr;
   bool lambda = false;

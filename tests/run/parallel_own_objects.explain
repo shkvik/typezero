@@ -1,0 +1,131 @@
+top-level code
+  start
+    writes entries of defaults (line 20)
+    reads  a variable the compiler made (line 34)
+    writes elements of routes (lines 34 in Get, 40 in Get)
+    writes the length of routes (lines 34 in Get, 40 in Get)
+    writes the metadata (lines 34, 40)
+    reads  the method Notes.one as decorated (line 34)
+    writes the method Notes.one as decorated (line 34)
+    reads  value of any MethodDescriptor<[Context], Promise<Response>> (lines 34, 40)
+    reads  a variable the compiler made (line 40)
+    reads  the method Notes.body as decorated (line 40)
+    writes the method Notes.body as decorated (line 40)
+    runs alone
+  after await at line 92
+    reads  elements of servers (lines 100, 107)
+    writes the state of any Server (line 101)
+    writes stdout (lines 103, 104, 122)
+    reads  message of any ListenError (line 103)
+    writes stderr (line 104)
+    writes the exit code and environment (line 104)
+    reads  elements of paths (line 107)
+    reads  elements of any string[] (line 108)
+    reads  the state of any Listening (line 109)
+    writes the state of any Listening (line 120)
+    reads  the length of kept (line 122)
+    in order with the arrow at line 95: the length of kept
+    in order: line 122
+  after await at line 109
+    writes stdout (lines 114, 115)
+    reads  message of any FetchError (line 114)
+    writes stderr (line 115)
+    writes the exit code and environment (line 115)
+    writes the state of any Response (line 117)
+    parallel
+  after await at line 117
+    reads  elements of any string[] (line 108)
+    reads  the state of any Listening (line 109)
+    writes the state of any Listening (line 120)
+    writes stdout (line 118)
+    reads  message of any BodyError (line 118)
+    parallel
+  after await at line 120
+    reads  elements of servers (lines 100, 107)
+    writes the state of any Server (line 101)
+    writes stdout (lines 103, 104, 122)
+    reads  message of any ListenError (line 103)
+    writes stderr (line 104)
+    writes the exit code and environment (line 104)
+    reads  elements of paths (line 107)
+    reads  elements of any string[] (line 108)
+    reads  the state of any Listening (line 109)
+    writes the state of any Listening (line 120)
+    reads  the length of kept (line 122)
+    in order with the arrow at line 95: the length of kept
+    in order: line 122
+
+async method Notes.one, line 35
+  start: runs inside its caller
+
+async method Notes.body, line 41
+  start: runs inside its caller
+  after await at line 42 (in the tasks method.call(controller, context) at line 30)
+    parallel
+
+async function dispatch, line 49
+  start: runs inside its caller
+    reads  elements of routes (line 53)
+    reads  name of any Route (line 54)
+    reads  call of any Route (line 56)
+
+async function keep, line 61
+  start: runs inside its caller
+    writes elements of kept (line 63)
+    writes the length of kept (line 63)
+    reads  context.params (line 64)
+    reads  entries of any Map<string, string> (line 64)
+
+async function share, line 71
+  start: runs inside its caller
+    reads  entries of any Map<string, string> (line 73 in idOf)
+
+async function read, line 80
+  start: runs inside its caller
+  after await at line 81 (in the task read(pending) at line 77)
+    reads  params of any Pending (line 82)
+    reads  entries of any Map<string, string> (line 82)
+    in order with the arrow at line 97: entries of any Map<string, string>
+    in order: line 82
+
+async function race, line 85
+  start: runs inside its caller
+    reads  pending.params (line 88)
+    writes entries of any Map<string, string> (line 88)
+  after await at line 89 (in the task race(request) at line 97)
+    parallel
+
+arrow, line 94
+  start (in the callbacks at line 94)
+    reads  call of any Route (line 94 in dispatch)
+    reads  elements of routes (line 94 in dispatch)
+    reads  name of any Route (line 94 in dispatch)
+    parallel
+
+arrow, line 95
+  start (in the callbacks at line 95)
+    reads  context.params (line 95 in keep)
+    writes elements of kept (line 95 in keep)
+    reads  entries of any Map<string, string> (line 95 in keep)
+    writes the length of kept (line 95 in keep)
+    in order with the arrow at line 97: entries of any Map<string, string>
+    in order with the same piece in other tasks: elements of kept, the length of kept
+    in order with the top-level code after await at line 120: the length of kept
+    in order with the top-level code after await at line 92: the length of kept
+    in order: line 95
+
+arrow, line 96
+  start (in the callbacks at line 96)
+    reads  entries of any Map<string, string> (line 96 in share)
+    in order with the arrow at line 97: entries of any Map<string, string>
+    in order: line 96
+
+arrow, line 97
+  start (in the callbacks at line 97)
+    writes entries of any Map<string, string> (line 97 in race)
+    reads  pending.params (line 97 in race)
+    in order with read after await at line 81: entries of any Map<string, string>
+    in order with the arrow at line 95: entries of any Map<string, string>
+    in order with the arrow at line 96: entries of any Map<string, string>
+    in order with the same piece in other tasks: entries of any Map<string, string>
+    in order: line 97

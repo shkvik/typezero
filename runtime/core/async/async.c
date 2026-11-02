@@ -454,6 +454,7 @@ typedef struct {
   TzReactor reactor;
   TzPromise *target, *origin;
   TzPromise *first;
+  int32_t site;
 } Follow;
 
 static void follow_drop(void *object) {
@@ -476,8 +477,14 @@ static void follow_settle(TzReactor *r, TzPromise *source) {
 static void follow_then(TzReactor *r, TzPromise *source) {
   (void)source;
   Follow *f = (Follow *)((char *)r - offsetof(Follow, reactor));
-  ++f->base.rc;
   r->run = follow_settle;
+#if TZ_PARALLEL
+  if (f->site && !tz_thread.turn && await_ahead(r, f->origin, f->site)) {
+    return;
+  }
+  r->ahead = 0;
+#endif
+  ++f->base.rc;
   tz_promise_react(f->origin, r);
 }
 
@@ -492,11 +499,29 @@ static Follow *new_follow(TzPromise *target, TzPromise *origin) {
   f->target = target;
   f->origin = origin;
   f->first = NULL;
+  f->site = 0;
 
   return f;
 }
 
-void tz_promise_follow(TzPromise *p, TzPromise *q) {
+void tz_promise_follow(TzPromise *p, TzPromise *q, int32_t ahead) {
+#if TZ_PARALLEL
+  if (ahead && !tz_thread.turn && tz_ahead_early() && tz_ahead_private(p)) {
+    retain(p);
+    Follow *f = new_follow(p, q);
+    f->site = ahead;
+    f->reactor.run = follow_then;
+    f->reactor.ahead = (uintptr_t)ahead;
+    if (tz_ahead_local(&f->reactor)) {
+      return;
+    }
+    f->reactor.ahead = 0;
+    tz_microtask(&f->reactor);
+    return;
+  }
+#else
+  (void)ahead;
+#endif
   TZ_ORDERED();
   retain(p);
   Follow *f = new_follow(p, q);

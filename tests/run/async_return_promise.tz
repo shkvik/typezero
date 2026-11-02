@@ -1,0 +1,39 @@
+// same-as-node
+// An async function that returns the promise of another (`return inner()`,
+// no await) settles a tick later than one that awaits it first, as in node;
+// tasks that do it run ahead on the threads like those that await
+// (docs/async.md, section 8), and their results and the order of the
+// reactions stay those of node.
+async function square(n: int): Promise<int> {
+  return n * n;
+}
+
+async function viaReturn(n: int): Promise<int> {
+  return square(n);
+}
+
+async function viaAwait(n: int): Promise<int> {
+  const squared = await square(n);
+  return squared;
+}
+
+async function chain(n: int): Promise<int> {
+  const parts: int[] = [];
+  for (let i: int = 0; i < 200; i++) parts.push((n * 31 + i) % 97);
+  return viaReturn(parts.reduce((a, b) => a + b, 0) % 1000);
+}
+
+const log: string[] = [];
+void viaReturn(2).then((v) => log.push(`return ${v}`));
+void viaAwait(3).then((v) => log.push(`await ${v}`));
+void Promise.resolve(0)
+  .then(() => log.push("tick 1"))
+  .then(() => log.push("tick 2"))
+  .then(() => log.push("tick 3"))
+  .then(() => log.push("tick 4"));
+
+const items: int[] = [];
+for (let i: int = 0; i < 64; i++) items.push(i);
+const results = await Promise.all(items.map((i) => chain(i)));
+console.log(log.join(", "));
+console.log(results.reduce((a, b) => a + b, 0), results[0], results[63]);

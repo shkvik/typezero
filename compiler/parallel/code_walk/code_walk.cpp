@@ -115,6 +115,7 @@ CallRec &CodeWalk::record(const void *key, CallKind kind, const Use &use, llvm::
     rec.loc = loc;
     rec.await = use.awaited;
     rec.returned = use.returned;
+    rec.tail = use.tail;
     rec.voided = use.voided;
     rec.join = use.join;
   }
@@ -303,6 +304,7 @@ void CodeWalk::stmt(const Stmt *s) {
     use.returned = analysis_.fn_->async;
     if (!analysis_.fn_->async && analysis_.fn_->decl) {
       use.join = analysis_.joinReturns_.lookup(analysis_.fn_->decl);
+      use.tail = !analysis_.fn_->syncGen && !analysis_.fn_->asyncGen;
     }
     analysis_.exprWalk().expr(r->value, use);
     analysis_.cur_.clear();
@@ -331,6 +333,11 @@ void CodeWalk::stmt(const Stmt *s) {
     for (const ClassField &f : cls->fields) {
       if (f.isStatic && f.init) {
         analysis_.exprWalk().expr(f.init);
+      }
+    }
+    for (const FunctionDecl *method : cls->methods) {
+      if (method->impl) {
+        analysis_.callWalk().registerValue(method, method->impl->type);
       }
     }
     for (const Stmt *x : cls->decorations) {

@@ -49,7 +49,14 @@ bool AliasAnalysis::isAllocation(const Expr *e) const {
   }
   if (auto *c = dyn_cast_or_null<CallExpr>(made)) {
     if (const FunctionDecl *lib = analysis_.libraryEffects().libraryTarget(c)) {
-      return made == e ? !lib->cls : lib->isAsync;
+      if (made != e) {
+        return lib->isAsync;
+      }
+      if (!lib->cls) {
+        return true;
+      }
+      return lib->isStatic && !lib->isAsync && !lib->isGenerator && !c->hasSpread() &&
+             llvm::all_of(c->args, Ownership::valueArgument);
     }
   }
   if (isa<ArrayLitExpr, ObjectLitExpr, RegexLitExpr>(e)) {
@@ -90,6 +97,9 @@ Ref AliasAnalysis::refOf(const Expr *e) {
     if (it != analysis_.declInit_.end() && !v->reassigned && isAllocation(it->second)) {
       if (isLocal(v)) {
         return Ref{RefKind::Local, nullptr};
+      }
+      if (std::optional<Ref> owned = analysis_.ownership().ownedRef(e)) {
+        return *owned;
       }
       return Ref{RefKind::Site, it->second};
     }

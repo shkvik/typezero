@@ -14,7 +14,7 @@ public:
   llvm::Constant *promiseLayout(const Type *value);
   llvm::Value *newPromise(const Type *value);
   void fulfillPromise(llvm::Value *promise, llvm::Value *value, const Type *type);
-  void followPromise(llvm::Value *promise, llvm::Value *other);
+  void followPromise(llvm::Value *promise, llvm::Value *other, uint32_t site = 0);
   llvm::Value *emitPromiseNew(CallExpr *call);
   llvm::Value *emitPromiseStatic(CallExpr *call);
   llvm::Constant *resolverInfo(const Type *value);

@@ -113,12 +113,12 @@ void PromiseLowerer::fulfillPromise(llvm::Value *promise, llvm::Value *value, co
       {promise});
 }
 
-void PromiseLowerer::followPromise(llvm::Value *promise, llvm::Value *other) {
+void PromiseLowerer::followPromise(llvm::Value *promise, llvm::Value *other, uint32_t site) {
   llvm::Type *ptr = lowering_.builder_.getPtrTy();
   lowering_.builder_.CreateCall(
       lowering_.asyncLowerer().asyncFunction("tz_promise_follow", lowering_.builder_.getVoidTy(),
-                                             {ptr, ptr}),
-      {promise, other});
+                                             {ptr, ptr, lowering_.builder_.getInt32Ty()}),
+      {promise, other, lowering_.builder_.getInt32(site)});
 }
 
 llvm::Value *PromiseLowerer::promiseField(llvm::Value *promise, unsigned field) {

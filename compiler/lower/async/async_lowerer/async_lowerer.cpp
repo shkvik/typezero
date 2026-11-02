@@ -283,7 +283,12 @@ void AsyncLowerer::emitAsyncReturnStmt(ReturnStmt *stmt) {
   if (value->type->isPromise()) {
     llvm::Value *other = lowering_.exprLowerer().emitExpr(value);
     lowering_.functionFrame().emitCleanups(0);
-    lowering_.promiseLowerer().followPromise(lowering_.async_->object, other);
+    uint32_t site = 0;
+    if (lowering_.parallel_) {
+      site = lowering_.aheadStarts_.try_emplace(stmt, uint32_t(lowering_.aheadStarts_.size() + 1))
+                 .first->second;
+    }
+    lowering_.promiseLowerer().followPromise(lowering_.async_->object, other, site);
     lowering_.builder_.CreateBr(lowering_.coro_->finalBlock);
     lowering_.functionFrame().startDeadBlock();
     return;

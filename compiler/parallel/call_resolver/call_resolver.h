@@ -10,7 +10,7 @@ public:
 
   void resolve();
   void fold();
-  std::optional<Access> substitute(const Access &a, const FnInfo &callee, const FnInfo &caller,
+  std::optional<Access> substitute(const Access &a, const FnInfo &callee, unsigned caller,
                                    const Callee &call, const CallRec &rec) const;
   std::optional<Ref> bind(const std::optional<Ref> &self, const Activation &caller) const;
 

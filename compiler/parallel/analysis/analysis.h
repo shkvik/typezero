@@ -89,7 +89,9 @@ private:
   llvm::DenseSet<const VarSymbol *> resolvers_;
   llvm::DenseSet<const VarSymbol *> ownIndex_;
   std::deque<OwnedRef> ownedRefs_;
-  std::map<std::pair<const VarSymbol *, const Type *>, const OwnedRef *> ownedRefIndex_;
+  std::map<std::tuple<const VarSymbol *, const Type *, std::vector<FieldKey>, bool>,
+           const OwnedRef *>
+      ownedRefIndex_;
   llvm::DenseSet<const VarSymbol *> ownedParams_;
   llvm::DenseMap<const FunctionDecl *, const AwaitExpr *> joinReturns_;
   struct AwaitInfo {

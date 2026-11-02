@@ -53,15 +53,10 @@ async function get, line 58
   start: runs inside its caller
     reads  the state of any Listening (line 59)
   after await at line 59
-    reads  message of any FetchError (line 60)
-    writes the state of any Response (line 61)
     in the tasks of get at line 64:
-      in order with get after await at line 59 in the top-level code: the state of any Response
-      in order with the same piece in other tasks: the state of any Response
-      in order: line 61
+      parallel
     in the top-level code:
-      in order with get after await at line 59 in the tasks of get at line 64: the state of any Response
-      in order: line 61
+      parallel
   after await at line 61
     in the tasks of get at line 64:
       parallel

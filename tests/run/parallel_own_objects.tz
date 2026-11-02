@@ -1,0 +1,122 @@
+// Objects that one call of a server handler makes for itself belong to that
+// call, like its request (docs/async.md, section 8): a Map that a helper
+// builds and returns, the URL it parses, a literal that carries them into a
+// method reached through a router of decorated methods. Handlers that touch
+// only such objects run in parallel. Once one goes where other calls can
+// reach it — a global array, a field of a type whose literals hold shared
+// data, a function that runs beside the handler — it is shared again, and the
+// handler keeps node's order.
+import { Server } from "tz:http"
+
+type Context = { request: Request; params: Map<string, string>; query: URLSearchParams }
+type Call = (controller: object, context: Context) => Promise<Response>
+type Route = { name: string; call: Call }
+type Shared = { params: Map<string, string> }
+type Pending = { path: string; params: Map<string, string> }
+
+const routes: Route[] = []
+const kept: Context[] = []
+const defaults = new Map<string, string>()
+defaults.set("id", "default")
+
+function paramsOf(path: string): Map<string, string> {
+  const params = new Map<string, string>()
+  params.set("id", path.slice(path.lastIndexOf("/") + 1))
+  return params
+}
+
+function Get(cls: Constructor, name: string, descriptor: MethodDescriptor<[Context], Promise<Response>>) {
+  const method = descriptor.value
+  routes.push({ name, call: (controller, context) => method.call(controller, context) })
+}
+
+class Notes {
+  @Get
+  async one(context: Context): Promise<Response> {
+    const id = context.params.get("id") ?? "?"
+    return new Response(`one ${id} ${context.query.get("tag") ?? "-"}`)
+  }
+
+  @Get
+  async body(context: Context): Promise<Response> {
+    const text = await context.request.text()
+    return new Response(`body ${text.isOk() ? text.value : "?"}`)
+  }
+}
+
+const notes = new Notes()
+
+async function dispatch(request: Request): Promise<Response> {
+  const url = URL.parse(request.url)
+  if (url.isErr()) return new Response("bad url")
+  const path = url.value.pathname()
+  for (const route of routes) {
+    if (!path.startsWith(`/${route.name}`)) continue
+    const context: Context = { request, params: paramsOf(path), query: url.value.searchParams }
+    return route.call(notes, context)
+  }
+  return new Response("none")
+}
+
+async function keep(request: Request): Promise<Response> {
+  const context: Context = { request, params: paramsOf("/kept"), query: new URLSearchParams() }
+  kept.push(context)
+  return new Response(`kept ${context.params.get("id") ?? "?"}`)
+}
+
+function idOf(shared: Shared): string {
+  return shared.params.get("id") ?? "?"
+}
+
+async function share(request: Request): Promise<Response> {
+  const shared: Shared = { params: request.method == "GET" ? paramsOf("/own") : defaults }
+  return new Response(`shared ${idOf(shared)}`)
+}
+
+function start(pending: Pending): Promise<string> {
+  return read(pending)
+}
+
+async function read(pending: Pending): Promise<string> {
+  await Promise.resolve()
+  return pending.params.get("id") ?? "?"
+}
+
+async function race(request: Request): Promise<Response> {
+  const pending: Pending = { path: request.url, params: paramsOf(request.url) }
+  const later = start(pending)
+  pending.params.set("id", "changed")
+  return new Response(`pending ${await later}`)
+}
+
+await Promise.resolve()
+const servers = [
+  new Server({ port: 0, hostname: "127.0.0.1" }, (request) => dispatch(request)),
+  new Server({ port: 0, hostname: "127.0.0.1" }, (request) => keep(request)),
+  new Server({ port: 0, hostname: "127.0.0.1" }, (request) => share(request)),
+  new Server({ port: 0, hostname: "127.0.0.1" }, (request) => race(request)),
+]
+const paths = ["/one/7?tag=red", "/body/1", "/kept", "/shared", "/race/3"]
+for (const server of servers) {
+  const started = server.listen()
+  if (started.isErr()) {
+    console.log("cannot listen:", started.error.message)
+    process.exit(1)
+  }
+  const listening = started.value
+  const asked = server == servers[0] ? ["/one/7?tag=red", "/body/1"] : [paths[servers.indexOf(server) + 1] ?? "/"]
+  for (const path of asked) {
+    const answered = await fetch(`http://127.0.0.1:${listening.port}${path}`, {
+      method: path.startsWith("/body") || path == "/shared" ? "POST" : "GET",
+      body: path.startsWith("/body") ? "hi" : undefined,
+    })
+    if (answered.isErr()) {
+      console.log(answered.error.message)
+      process.exit(1)
+    }
+    const text = await answered.value.text()
+    console.log(text.isOk() ? text.value : text.error.message)
+  }
+  await listening.stop({ timeout: 0 })
+}
+console.log(`kept ${kept.length}`)

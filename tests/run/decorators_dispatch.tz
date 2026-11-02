@@ -1,0 +1,57 @@
+// A router on decorators (docs/decorators.md, section 6) that keeps the
+// value of each decorated method and calls it through that value: the
+// parallel analysis (docs/async.md, section 8) sees what the methods do, so
+// the tasks that dispatch to them keep node's order where the methods share
+// the Map of the store, and the results are those of one thread.
+type Handler = (controller: object, n: int) => Promise<int>;
+type Route = { name: string; call: Handler };
+const routes: Route[] = [];
+
+function Route(cls: Constructor, name: string, descriptor: MethodDescriptor<[int], Promise<int>>) {
+  const method = descriptor.value;
+  routes.push({ name, call: (controller, n) => method.call(controller, n) });
+}
+
+class Store {
+  counts = new Map<string, int>();
+}
+
+const store = new Store();
+
+class Counter {
+  @Route
+  async add(n: int): Promise<int> {
+    const next = (store.counts.get("total") ?? 0) + n;
+    store.counts.set("total", next);
+    return next;
+  }
+
+  @Route
+  async peek(_n: int): Promise<int> {
+    return store.counts.get("total") ?? 0;
+  }
+
+  @Route
+  async echo(n: int): Promise<int> {
+    return n;
+  }
+}
+
+const counter = new Counter();
+
+async function dispatch(name: string, n: int): Promise<int> {
+  for (const route of routes) {
+    if (route.name == name) return route.call(counter, n);
+  }
+  return -1;
+}
+
+async function request(i: int): Promise<int> {
+  await Promise.resolve(0);
+  return dispatch(i % 3 == 0 ? "peek" : i % 3 == 1 ? "add" : "echo", i);
+}
+
+const ids: int[] = [];
+for (let i: int = 1; i <= 100; i++) ids.push(i);
+const results = await Promise.all(ids.map((i) => request(i)));
+console.log(store.counts.get("total"), results.reduce((a, b) => a + b, 0), results[98], results[99]);
