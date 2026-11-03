@@ -1,0 +1,50 @@
+// A server started after a setup that may wait (docs/async.md, section 8): the handler reads
+// what the setup wrote, and the setup runs before 'listen' on every path, so the handler does
+// not wait for its turn. Before 4 November the analysis took the whole first piece of the
+// top-level code as the place where the handler was made, and the setup that only waits on one
+// path looked like it could run after the server started.
+import { Server } from "tz:http"
+
+class Source {
+  public readonly name: string
+  public constructor(name: string) {
+    this.name = name
+  }
+}
+
+class Service {
+  private source?: Source
+  public constructor() {
+    this.source = undefined
+  }
+  public async connect(name: string): Promise<void> {
+    await Promise.resolve()
+    this.source = new Source(name)
+  }
+  public read(): string {
+    const source = this.source
+    return source == undefined ? "none" : source.name
+  }
+}
+
+const service = new Service()
+if (process.argv.length > 0) {
+  await service.connect("db")
+}
+
+const server = new Server({ port: 0, hostname: "127.0.0.1" }, async (request: Request) => {
+  const path = new URL(request.url).pathname()
+  return new Response(`${path} ${service.read()}`)
+})
+const started = server.listen()
+if (started.isErr()) {
+  console.log("cannot listen:", started.error.message)
+  process.exit(1)
+}
+const listening = started.value
+const answered = await fetch(`http://127.0.0.1:${listening.port}/a`)
+if (answered.isOk()) {
+  const text = await answered.value.text()
+  console.log(text.isOk() ? text.value : "no text")
+}
+await listening.stop()

@@ -62,6 +62,7 @@ llvm::Value *ObjectLowerer::emitObjectLiteral(ObjectLitExpr *lit) {
   bool member = lowering_.makesMember(lit, type);
   llvm::Value *object = lowering_.objectLayouts().allocObject(type, keys, member);
   lowering_.groupLowerer().noteUnstored(object, lit);
+  std::vector<llvm::Value *> values;
   for (size_t k = 0; k < keys.size(); ++k) {
     unsigned i = keys[k];
     llvm::Value *value = k < lit->props.size()
@@ -69,8 +70,11 @@ llvm::Value *ObjectLowerer::emitObjectLiteral(ObjectLitExpr *lit) {
                              : lowering_.optionalLowerer().undefinedValue(type->fields()[i].type);
     lowering_.builder_.CreateStore(
         value, lowering_.builder_.CreateStructGEP(layout.type, object, layout.elements[i]));
-    if (member) {
-      lowering_.storeLowerer().groupStore(object, value, type->fields()[i].type);
+    values.push_back(value);
+  }
+  if (member) {
+    for (size_t k = 0; k < keys.size(); ++k) {
+      lowering_.storeLowerer().groupStore(object, values[k], type->fields()[keys[k]].type);
     }
   }
 
@@ -180,12 +184,16 @@ llvm::Value *ObjectLowerer::emitTupleLiteral(ArrayLitExpr *lit) {
   bool member = lowering_.makesMember(lit, type);
   llvm::Value *object = lowering_.objectLayouts().allocObject(type, keys, member);
   lowering_.groupLowerer().noteUnstored(object, lit);
+  std::vector<llvm::Value *> values;
   for (size_t i = 0; i < lit->elements.size(); ++i) {
     llvm::Value *value = lowering_.exprLowerer().emitExpr(lit->elements[i].expr);
     lowering_.builder_.CreateStore(
         value, lowering_.objectLayouts().fieldAddress(object, type, type->fields()[i].name));
-    if (member) {
-      lowering_.storeLowerer().groupStore(object, value, type->fields()[i].type);
+    values.push_back(value);
+  }
+  if (member) {
+    for (size_t i = 0; i < values.size(); ++i) {
+      lowering_.storeLowerer().groupStore(object, values[i], type->fields()[i].type);
     }
   }
 

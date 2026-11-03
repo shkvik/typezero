@@ -308,6 +308,11 @@ void CallWalk::call(const CallExpr *c, const Use &use) {
     rec.byObject = m->object->type;
     rec.bySelf = analysis_.aliasAnalysis().receiverRef(m->object);
   }
+  const FunctionDecl *fn = analysis_.fn_->decl;
+  if (callee && callee->var && !callee->var->reassigned && fn &&
+      llvm::any_of(fn->params, [&](const Param &p) { return p.sym == callee->var; })) {
+    rec.viaParam = callee->var;
+  }
 }
 
 void CallWalk::builtinCall(const CallExpr *c, const Use &use) {

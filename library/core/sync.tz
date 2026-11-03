@@ -1,8 +1,13 @@
+import { ahead } from "tz:intrinsics";
+
 declare function syncGuard(): object;
 declare function syncRead(guard: object): void;
 declare function syncReadDone(guard: object): void;
 declare function syncWrite(guard: object): void;
 declare function syncWriteDone(guard: object): void;
+declare function syncWaiter(): object;
+declare function syncWait(waiter: object): Promise<void>;
+declare function syncWake(waiter: object): void;
 
 export class ConcurrentMap<K, V> {
   private table: Map<K, V>;
@@ -115,5 +120,133 @@ export class ConcurrentMap<K, V> {
     syncReadDone(this.guard);
 
     return entries;
+  }
+}
+
+export type PoolOptions<T, E> = {
+  max: int;
+  create: () => Promise<Result<T, E>>;
+  alive?: (item: T) => boolean;
+  reset?: (item: T) => void;
+};
+
+export type PoolStats = {
+  total: int;
+  idle: int;
+  waiting: int;
+};
+
+export class Pool<T, E = never> {
+  private max: int;
+  private create: () => Promise<Result<T, E>>;
+  private alive?: (item: T) => boolean;
+  private reset?: (item: T) => void;
+  private idle: T[];
+  private waiters: { waiter: object; item?: T }[];
+  private total: int;
+  private guard: object;
+
+  public constructor(options: PoolOptions<T, E>) {
+    this.max = options.max < 1 ? 1 : options.max;
+    this.create = options.create;
+    this.alive = options.alive;
+    this.reset = options.reset;
+    this.idle = [];
+    this.waiters = [];
+    this.total = 0;
+    this.guard = syncGuard();
+  }
+
+  public stats(): PoolStats {
+    syncRead(this.guard);
+    const stats = { total: this.total, idle: this.idle.length, waiting: this.waiters.length };
+    syncReadDone(this.guard);
+
+    return stats;
+  }
+
+  public async use<R, F>(fn: (item: T) => Promise<Result<R, F>>): Promise<Result<R, E | F>> {
+    const taking = this.take();
+    const taken = await ahead(taking);
+    if (taken.isErr()) {
+      return err(taken.error);
+    }
+    const item = taken.value;
+    const running = fn(item);
+    const result = await ahead(running);
+    this.give(item);
+    if (result.isErr()) {
+      return err(result.error);
+    }
+
+    return ok(result.value);
+  }
+
+  private async take(): Promise<Result<T, E>> {
+    syncWrite(this.guard);
+    const ready = this.idle.pop();
+    if (ready != undefined) {
+      syncWriteDone(this.guard);
+
+      return ok(ready);
+    }
+    if (this.total < this.max) {
+      this.total += 1;
+      syncWriteDone(this.guard);
+      const creating = this.create();
+      const created = await ahead(creating);
+      if (created.isErr()) {
+        this.free();
+
+        return err(created.error);
+      }
+
+      return ok(created.value);
+    }
+    const slot: { waiter: object; item?: T } = { waiter: syncWaiter(), item: undefined };
+    this.waiters.push(slot);
+    syncWriteDone(this.guard);
+    const waiting = syncWait(slot.waiter);
+    await ahead(waiting);
+    const handed = slot.item;
+    if (handed != undefined) {
+      return ok(handed);
+    }
+
+    return this.take();
+  }
+
+  private give(item: T): void {
+    const alive = this.alive;
+    if (alive != undefined && !alive(item)) {
+      this.free();
+
+      return;
+    }
+    const reset = this.reset;
+    if (reset != undefined) {
+      reset(item);
+    }
+    syncWrite(this.guard);
+    const slot = this.waiters.shift();
+    if (slot == undefined) {
+      this.idle.push(item);
+      syncWriteDone(this.guard);
+
+      return;
+    }
+    slot.item = item;
+    syncWriteDone(this.guard);
+    syncWake(slot.waiter);
+  }
+
+  private free(): void {
+    syncWrite(this.guard);
+    this.total -= 1;
+    const slot = this.waiters.shift();
+    syncWriteDone(this.guard);
+    if (slot != undefined) {
+      syncWake(slot.waiter);
+    }
   }
 }

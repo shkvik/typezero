@@ -93,8 +93,75 @@ int32_t tz_ahead_keep(int32_t site);
 extern int32_t tz_ahead_on;
 #endif
 
+#if TZ_PARALLEL
+TZ_THREAD_LOCAL TzAfterPiece *tz_after_head, *tz_after_tail;
+TZ_THREAD_LOCAL int32_t tz_after_running;
+
+int32_t tz_after_piece_wanted(void) { return tz_ahead_on; }
+
+void tz_after_piece(TzAfterPiece *a, const TzObjectDesc *desc,
+                    void (*run)(TzAfterPiece *self, int32_t pooled)) {
+  a->base.rc = 1;
+  a->base.desc = desc;
+  a->run = run;
+  a->next = NULL;
+  if (tz_after_tail) {
+    tz_after_tail->next = a;
+  } else {
+    tz_after_head = a;
+  }
+  tz_after_tail = a;
+}
+
+static void after_piece_ordered(TzReactor *r, TzPromise *source) {
+  (void)source;
+  TzAfterPiece *a = (TzAfterPiece *)((char *)r - offsetof(TzAfterPiece, reactor));
+  a->run(a, 0);
+}
+
+void tz_after_piece_order(void) {
+  TzAfterPiece *a = tz_after_head;
+  tz_after_head = tz_after_tail = NULL;
+  while (a) {
+    TzAfterPiece *next = a->next;
+    a->reactor.run = after_piece_ordered;
+    a->reactor.owner = &a->base;
+    a->reactor.source = NULL;
+    a->reactor.ahead = 0;
+    a->reactor.context = NULL;
+    tz_microtask(&a->reactor);
+    a = next;
+  }
+}
+
+void tz_after_piece_run(void) {
+  if (tz_after_running) {
+    return;
+  }
+  tz_after_running = 1;
+  while (tz_after_head) {
+    TzAfterPiece *a = tz_after_head;
+    tz_after_head = a->next;
+    if (!tz_after_head) {
+      tz_after_tail = NULL;
+    }
+    a->run(a, 1);
+    tz_obj_release(&a->base);
+  }
+  tz_after_running = 0;
+}
+#endif
+
 void tz_run_microtasks(void) {
-  while (tz_micro_head) {
+  for (;;) {
+#if TZ_PARALLEL
+    if (tz_after_head && !tz_thread.job) {
+      tz_after_piece_order();
+    }
+#endif
+    if (!tz_micro_head) {
+      break;
+    }
     TzReactor *r = tz_micro_head;
 #if TZ_PARALLEL
     if (tz_ahead_on) {
@@ -459,7 +526,8 @@ void tz_async_await(TzReactor *r, TzPromise *p, int32_t ahead) {
 #endif
   TZ_ORDERED();
 #if TZ_PARALLEL
-  r->ahead = ahead && tz_ahead_on ? (uintptr_t)tz_ahead_keep(ahead) : 0;
+  r->ahead =
+      ahead && tz_ahead_on ? (source ? (uintptr_t)ahead : (uintptr_t)tz_ahead_keep(ahead)) : 0;
 #else
   r->ahead = (uintptr_t)ahead;
 #endif
@@ -511,13 +579,17 @@ static void follow_settle(TzReactor *r, TzPromise *source) {
 static void follow_then(TzReactor *r, TzPromise *source) {
   (void)source;
   Follow *f = (Follow *)((char *)r - offsetof(Follow, reactor));
-  r->run = follow_settle;
 #if TZ_PARALLEL
-  if (f->site && !tz_thread.turn && await_ahead(r, f->origin, f->site)) {
-    return;
+  if (f->site && !tz_thread.turn && tz_ahead_early()) {
+    r->run = follow_settle;
+    if (await_ahead(r, f->origin, f->site)) {
+      return;
+    }
   }
+  TZ_ORDERED();
   r->ahead = 0;
 #endif
+  r->run = follow_settle;
   ++f->base.rc;
   tz_promise_react(f->origin, r);
 }

@@ -337,6 +337,7 @@ void AsyncLowerer::suspendAsync(llvm::Value *promise, llvm::SMLoc loc) {
         context, lowering_.builder_.CreateConstInBoundsGEP1_64(
                      lowering_.builder_.getInt8Ty(), lowering_.async_->reactor, kReactorContext));
   }
+  llvm::Value *save = lowering_.coroutineLowerer().emitSave();
   lowering_.builder_.CreateCall(asyncFunction("tz_async_await", lowering_.builder_.getVoidTy(),
                                               {ptr, ptr, lowering_.builder_.getInt32Ty()}),
                                 {lowering_.async_->reactor,
@@ -347,7 +348,7 @@ void AsyncLowerer::suspendAsync(llvm::Value *promise, llvm::SMLoc loc) {
         cast<llvm::GlobalVariable>(lowering_.module_->getOrInsertGlobal("tz_main_await", ptr));
     lowering_.builder_.CreateStore(lowering_.placeLowerer().frameDescriptor(loc), where);
   }
-  lowering_.coroutineLowerer().emitSuspend();
+  lowering_.coroutineLowerer().emitSuspend(save);
 }
 
 llvm::Value *AsyncLowerer::awaitPromise(llvm::Value *promise, const Type *type, llvm::SMLoc loc) {

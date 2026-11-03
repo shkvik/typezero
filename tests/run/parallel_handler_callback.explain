@@ -1,0 +1,42 @@
+top-level code
+  start
+    writes the state of server (line 18)
+    writes stdout (lines 20, 21)
+    reads  message of any ListenError (line 20)
+    writes stderr (line 21)
+    writes the exit code and environment (line 21)
+    reads  the state of any Listening (line 24)
+    reads  i (lines 26, 28 in the arrow at line 28)
+    writes i (line 26)
+    writes elements of calls (line 27)
+    writes the length of calls (line 27)
+    parallel
+  after await at line 34
+    writes stdout (line 35)
+    reads  elements of any boolean[] (line 35)
+    reads  counter (line 35)
+    writes the state of any Listening (line 36)
+    in order with the arrow at line 11: counter
+    in order: line 35
+  after await at line 36
+    parallel
+
+async arrow, line 9
+  start (in the callbacks at line 9)
+    parallel
+  after await at line 10 (in the callbacks at line 9)
+    parallel
+
+arrow, line 11
+  start (in the callbacks at line 11)
+    reads  counter (line 12)
+    writes counter (line 12)
+    in order with the same piece in other tasks: counter
+    in order with the top-level code after await at line 34: counter
+    in order: line 12
+
+async arrow, line 28
+  start: runs inside its caller
+    reads  i (line 29)
+  after await at line 29 (in the tasks () at line 28)
+    parallel

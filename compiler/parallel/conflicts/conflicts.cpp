@@ -136,6 +136,9 @@ void Conflicts::decide() {
     const FnInfo &f = analysis_.fns_[p.fn];
     Effects effects;
     for (const Access &a : f.segs[p.seg].effects) {
+      if (!analysis_.pieces().keeps(p, a)) {
+        continue;
+      }
       Access b = a;
       if (b.loc.ref.kind == RefKind::This) {
         auto *owner = static_cast<const FunctionDecl *>(b.loc.ref.ptr);

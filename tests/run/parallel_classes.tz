@@ -1,0 +1,123 @@
+// Objects of the program's own classes that one call makes belong to that call (docs/async.md,
+// section 4): their methods and fields run in parallel, also through closures that the call
+// passes to its helpers and that never leave it. What leaks is shared, and the pieces that touch
+// it keep node's order: 'this' kept in a module array, a shared array put into a field (then
+// that field is shared in every object of the class), a closure handed to a task nobody waits
+// for. A helper that calls the closure it gets carries only that closure, not every closure of
+// the same type.
+import { Server } from "tz:http"
+
+const registry: Counter[] = []
+const sharedItems: string[] = []
+let total = 0
+
+class Counter {
+  public n: int
+  public items: string[]
+  public constructor() {
+    this.n = 0
+    this.items = []
+  }
+  public add(text: string): void {
+    this.n += 1
+    this.items.push(text)
+  }
+  public remember(): void {
+    registry.push(this)
+  }
+}
+
+class Bag {
+  public items: string[]
+  public constructor() {
+    this.items = []
+  }
+  public add(text: string): void {
+    this.items.push(text)
+  }
+  public share(): void {
+    this.items = sharedItems
+  }
+}
+
+function each(items: string[], visit: (item: string) => void): void {
+  for (const item of items) visit(item)
+}
+
+async function afterTick(work: () => void): Promise<void> {
+  await Promise.resolve()
+  work()
+}
+
+async function later(work: () => void): Promise<void> {
+  await Promise.resolve()
+  work()
+}
+
+const own = new Server({ port: 0, hostname: "127.0.0.1" }, async (request: Request) => {
+  const counter = new Counter()
+  counter.add(request.method)
+  let seen = 0
+  each(["a", "b"], (item) => {
+    counter.add(item)
+    seen += 1
+  })
+  await afterTick(() => {
+    counter.n += 10
+  })
+  return new Response(`own ${counter.n} ${counter.items.length} ${seen}`)
+})
+
+const counted = new Server({ port: 0, hostname: "127.0.0.1" }, async (request: Request) => {
+  await afterTick(() => {
+    total += 1
+  })
+  return new Response(`counted ${request.method}`)
+})
+
+const remembered = new Server({ port: 0, hostname: "127.0.0.1" }, async (request: Request) => {
+  const counter = new Counter()
+  counter.add(request.method)
+  counter.remember()
+  return new Response(`remembered ${counter.n}`)
+})
+
+const shares = new Server({ port: 0, hostname: "127.0.0.1" }, async (request: Request) => {
+  const bag = new Bag()
+  bag.share()
+  bag.add(request.method)
+  return new Response(`shares ${bag.items.length > 0}`)
+})
+
+const spawns = new Server({ port: 0, hostname: "127.0.0.1" }, async (request: Request) => {
+  const counter = new Counter()
+  void later(() => {
+    counter.n += 1
+  })
+  return new Response(`spawns ${request.method}`)
+})
+
+const servers = [own, counted, remembered, shares, spawns]
+for (const server of servers) {
+  const started = server.listen()
+  if (started.isErr()) {
+    console.log("cannot listen:", started.error.message)
+    process.exit(1)
+  }
+  const listening = started.value
+  const answers: Promise<string>[] = []
+  for (let i = 0; i < 20; i++) {
+    answers.push(
+      (async () => {
+        const answered = await fetch(`http://127.0.0.1:${listening.port}/`)
+        if (answered.isErr()) return "no answer"
+        const text = await answered.value.text()
+        return text.isOk() ? text.value : "no text"
+      })(),
+    )
+  }
+  const texts = await Promise.all(answers)
+  console.log(texts[0] ?? "none", texts.every((text) => text == texts[0]))
+  await listening.stop()
+}
+console.log(`total ${total}, registry ${registry.length}, shared ${sharedItems.length}`)

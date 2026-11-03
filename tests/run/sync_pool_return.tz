@@ -1,0 +1,55 @@
+// 'return pool.use(...)' in an async function (docs/async.md, section 8, 'return f()'): the
+// promise that follows another one was re-armed by a task that did not have its turn yet,
+// while the main thread still had it queued, and the main thread then ran it with nothing to
+// copy from: an access violation on almost every run (found with Pool, 4 November).
+import { Server } from "tz:http"
+import { Pool } from "tz:sync"
+
+type Item = { n: int }
+const pool = new Pool<Item>({ max: 4, create: async () => ok({ n: 0 }) })
+
+let count = 0
+
+async function inner(id: string): Promise<string> {
+  await new Promise<void>((resolve) => setImmediate(resolve))
+  return id
+}
+
+async function viaPool(id: string): Promise<Result<string, never>> {
+  return pool.use(async (item) => {
+    item.n += 1
+    const got = await inner(id)
+    return ok(got)
+  })
+}
+
+async function outer(id: string): Promise<string> {
+  const r = await viaPool(id)
+  return r.value
+}
+
+const server = new Server({ port: 0, hostname: "127.0.0.1" }, async (request: Request) => {
+  const path = new URL(request.url).pathname()
+  const pending = outer(path)
+  count++
+  const got = await pending
+  return new Response(got == path ? "ok" : "wrong")
+})
+const started = server.listen()
+if (started.isErr()) process.exit(1)
+const listening = started.value
+const base = `http://127.0.0.1:${listening.port}`
+let right = 0
+for (let round = 0; round < 4; round++) {
+  const ids: string[] = []
+  for (let i = 0; i < 100; i++) ids.push(`/r${round * 100 + i}`)
+  const texts = await Promise.all(ids.map(async (id) => {
+    const answered = await fetch(base + id)
+    if (answered.isErr()) return "fail"
+    const text = await answered.value.text()
+    return text.isOk() ? text.value : "fail"
+  }))
+  for (const text of texts) if (text == "ok") right++
+}
+console.log(`answered ${right} of 400, counted ${count}`)
+await listening.stop()

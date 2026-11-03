@@ -1,0 +1,95 @@
+// Pool from tz:sync (docs/async.md, section 11): 'use' takes a free object, makes a new one
+// while there are fewer than 'max', or waits; it gives the object back when the function's
+// Promise ends. Errors of 'create' and of the function come in one Result. Which object a
+// waiting call gets depends on which call ends first, and calls run on the pool threads, so
+// the output counts objects instead of naming them.
+import { Pool } from "tz:sync"
+
+type OpenError = { kind: "OPEN_ERROR"; message: string }
+type QueryError = { kind: "QUERY_ERROR"; message: string }
+
+class Connection {
+  public readonly id: int
+  public used: int
+  public broken: boolean
+  public constructor(id: int) {
+    this.id = id
+    this.used = 0
+    this.broken = false
+  }
+  public async query(text: string): Promise<Result<string, QueryError>> {
+    await Promise.resolve()
+    this.used += 1
+    if (text == "bad") return err({ kind: "QUERY_ERROR", message: `bad query on ${this.id}` })
+    return ok(`${text}@${this.id}`)
+  }
+}
+
+let opened = 0
+let refuse = 0
+const resets: int[] = []
+
+const pool = new Pool<Connection, OpenError>({
+  max: 2,
+  create: async () => {
+    await Promise.resolve()
+    if (refuse > 0) {
+      refuse -= 1
+      return err({ kind: "OPEN_ERROR", message: "refused" })
+    }
+    opened += 1
+    return ok(new Connection(opened))
+  },
+  alive: (connection) => !connection.broken,
+  reset: (connection) => {
+    resets.push(connection.id)
+  },
+})
+
+function text(r: Result<string, OpenError | QueryError>): string {
+  if (r.isErr()) return `${r.error.kind}: ${r.error.message}`
+  return r.value
+}
+
+const first = await pool.use(async (connection) => connection.query("one"))
+console.log(text(first), JSON.stringify(pool.stats()))
+
+const many: Promise<Result<string, OpenError | QueryError>>[] = []
+for (let i = 0; i < 6; i++) many.push(pool.use(async (connection) => connection.query(`q${i}`)))
+const answers = await Promise.all(many)
+console.log(answers.map((r) => text(r).split("@")[0]).join(" "), "on", new Set(answers.map((r) => text(r).split("@")[1])).size, "connections")
+console.log("opened", opened, JSON.stringify(pool.stats()))
+
+const bad = await pool.use(async (connection) => connection.query("bad"))
+console.log(text(bad).split(" on ")[0])
+
+const broke = await pool.use(async (connection) => {
+  connection.broken = true
+  return ok(connection.id)
+})
+console.log(broke.isOk() ? "broke one" : "not broken", JSON.stringify(pool.stats()))
+
+refuse = 1
+const waiting: Promise<Result<string, OpenError | QueryError>>[] = []
+for (let i = 0; i < 4; i++) waiting.push(pool.use(async (connection) => connection.query(`w${i}`)))
+const waited = await Promise.all(waiting)
+const served = waited.filter((r) => r.isOk()).length
+console.log(`served ${served}, refused ${waited.length - served}`)
+const after = pool.stats()
+console.log(after.total <= 2 && after.idle == after.total ? "at most 2, all idle" : JSON.stringify(after))
+console.log("resets", resets.length)
+
+const buffers = new Pool<int[]>({
+  max: 1,
+  create: async () => ok([0, 0, 0]),
+  reset: (buffer) => {
+    buffer.fill(0)
+  },
+})
+const length = await buffers.use(async (buffer) => {
+  buffer[0] = 7
+  return ok(buffer.length)
+})
+console.log("length", length.value)
+const cleared = await buffers.use(async (buffer) => ok(buffer[0] ?? -1))
+console.log("cleared", cleared.value)

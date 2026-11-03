@@ -1,0 +1,10 @@
+one@1 {"total":1,"idle":1,"waiting":0}
+q0 q1 q2 q3 q4 q5 on 2 connections
+opened 2 {"total":2,"idle":2,"waiting":0}
+QUERY_ERROR: bad query
+broke one {"total":1,"idle":1,"waiting":0}
+served 3, refused 1
+at most 2, all idle
+resets 11
+length 3
+cleared 0

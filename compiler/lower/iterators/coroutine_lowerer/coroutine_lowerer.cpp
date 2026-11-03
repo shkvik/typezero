@@ -87,11 +87,19 @@ void CoroutineLowerer::beginCoroutine(unsigned layoutFlags, const Type *sent,
   c.returnBlock = lowering_.functionFrame().newBlock("coro.return");
 }
 
-void CoroutineLowerer::emitSuspend() {
+llvm::Value *CoroutineLowerer::emitSave() {
+  return lowering_.builder_.CreateCall(coroIntrinsic(llvm::Intrinsic::coro_save),
+                                       {lowering_.coro_->handle}, "save");
+}
+
+void CoroutineLowerer::emitSuspend(llvm::Value *save) {
   Lowering::Coroutine &c = *lowering_.coro_;
-  llvm::Value *state = lowering_.builder_.CreateCall(
-      coroIntrinsic(llvm::Intrinsic::coro_suspend),
-      {llvm::ConstantTokenNone::get(lowering_.ctx_), lowering_.builder_.getFalse()}, "suspend");
+  if (!save) {
+    save = llvm::ConstantTokenNone::get(lowering_.ctx_);
+  }
+  llvm::Value *state =
+      lowering_.builder_.CreateCall(coroIntrinsic(llvm::Intrinsic::coro_suspend),
+                                    {save, lowering_.builder_.getFalse()}, "suspend");
   llvm::BasicBlock *resumeBlock = lowering_.functionFrame().newBlock("coro.resume");
   llvm::BasicBlock *destroyBlock = lowering_.functionFrame().newBlock("coro.destroy");
   llvm::SwitchInst *next = lowering_.builder_.CreateSwitch(state, c.returnBlock, 2);

@@ -1,0 +1,71 @@
+// A server whose handlers take objects from a Pool (docs/async.md, section 11). Inside 'use'
+// the object belongs to the request: its fields change without waiting for the other
+// requests (--explain-parallel: the function given to 'use' runs in parallel), and no two
+// requests get one object at once. 'create' makes a new object, so the analysis may treat
+// the pool's objects as the request's own.
+import { Server } from "tz:http"
+import { Pool } from "tz:sync"
+
+type Session = { id: int; busy: boolean; served: int; seen: string[] }
+
+let made = 0
+
+const sessions = new Pool<Session>({
+  max: 8,
+  create: async () => {
+    made += 1
+    return ok({ id: made, busy: false, served: 0, seen: [] })
+  },
+  reset: (session) => {
+    session.seen.length = 0
+  },
+})
+
+const server = new Server({ port: 0, hostname: "127.0.0.1" }, async (request: Request) => {
+  const path = new URL(request.url).pathname()
+  const answer = await sessions.use(async (session) => {
+    const twice = session.busy
+    session.busy = true
+    session.seen.push(path)
+    await new Promise<void>((resolve) => setImmediate(resolve))
+    session.served += 1
+    const mine = session.seen.length == 1 && session.seen[0] == path
+    session.busy = false
+    return ok(twice || !mine ? `shared ${path}` : `ok ${path}`)
+  })
+  return new Response(answer.value)
+})
+const started = server.listen()
+if (started.isErr()) {
+  console.log("cannot listen:", started.error.message)
+  process.exit(1)
+}
+const listening = started.value
+
+const base = `http://127.0.0.1:${listening.port}`
+let right = 0
+const wrong: string[] = []
+for (let round = 0; round < 4; round++) {
+  const ids: string[] = []
+  for (let i = 0; i < 100; i++) ids.push(`/r${round * 100 + i}`)
+  const texts = await Promise.all(ids.map(async (id) => must(await (must(await fetch(base + id))).text())))
+  ids.forEach((id, i) => {
+    const text = texts[i] ?? "missing"
+    if (text == `ok ${id}`) right++
+    else wrong.push(text)
+  })
+}
+console.log(`own object in every request: ${right} of 400`)
+for (const text of wrong.slice(0, 5)) console.log(text)
+const stats = sessions.stats()
+console.log(`made ${made <= 8 ? "at most 8" : made}, idle ${stats.idle == stats.total ? "all" : stats.idle}, waiting ${stats.waiting}`)
+await listening.stop()
+console.log("stopped")
+
+function must<T, E>(r: Result<T, E>): T {
+  if (r.isErr()) {
+    console.log(r.error)
+    process.exit(1)
+  }
+  return r.value
+}

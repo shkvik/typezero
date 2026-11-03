@@ -315,9 +315,13 @@ TZ_HOT void tz_group_obj_free(void *object) {
 TZ_NOINLINE void tz_group_last_ref(void *member);
 TZ_NOINLINE void tz_group_detach(void *member);
 
+static void member_name(char *out, size_t size, void *m, uintptr_t tag);
+
 TZ_NOINLINE void tz_group_count_broken(const void *member) {
-  tz_panicf("internal error: a group member at %p is counted %lld times, which is below zero",
-            member, (long long)own_load(member));
+  char name[96];
+  member_name(name, sizeof name, (void *)member, tz_group_link((void *)member)->prev);
+  tz_panicf("internal error: a group member (%s) at %p is counted %lld times, which is below zero",
+            name, member, (long long)own_load(member));
 }
 
 #if TZ_PARALLEL

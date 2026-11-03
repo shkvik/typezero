@@ -1,0 +1,36 @@
+// A callback made inside a server handler runs once per request, so callbacks of different
+// requests run at the same time (docs/async.md, section 2): the one that changes a shared
+// counter waits for its turn. Before 4 November the analysis took such a callback for one that
+// runs once, and the counter changed from several threads at once.
+import { Server } from "tz:http"
+
+let counter = 0
+
+const server = new Server({ port: 0, hostname: "127.0.0.1" }, async (request: Request) => {
+  await new Promise<void>((resolve) =>
+    setImmediate(() => {
+      counter++
+      resolve()
+    }),
+  )
+  return new Response(request.method)
+})
+const started = server.listen()
+if (started.isErr()) {
+  console.log("cannot listen:", started.error.message)
+  process.exit(1)
+}
+const listening = started.value
+const base = `http://127.0.0.1:${listening.port}`
+const calls: Promise<boolean>[] = []
+for (let i = 0; i < 200; i++) {
+  calls.push(
+    (async () => {
+      const answered = await fetch(`${base}/${i}`)
+      return answered.isOk()
+    })(),
+  )
+}
+const answers = await Promise.all(calls)
+console.log(`answered ${answers.filter((ok) => ok).length}, counted ${counter}`)
+await listening.stop()

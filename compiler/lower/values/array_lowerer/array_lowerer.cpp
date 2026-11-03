@@ -101,6 +101,9 @@ void ArrayLowerer::emitPush(llvm::Value *array, llvm::ArrayRef<llvm::Value *> va
   lowering_.builder_.CreateBr(storeBlock);
 
   lowering_.functionFrame().switchTo(storeBlock);
+  for (llvm::Value *value : values) {
+    lowering_.storeLowerer().storeBarrier(array, value, element);
+  }
   llvm::Value *data = arrayData(array);
   llvm::Value *at = lowering_.builder_.CreateZExt(length, lowering_.builder_.getInt64Ty());
   for (size_t i = 0; i < values.size(); ++i) {
@@ -140,11 +143,15 @@ llvm::Value *ArrayLowerer::emitArrayLiteral(ArrayLitExpr *lit) {
       exprs.push_back(e.expr);
     }
     llvm::Value *data = arrayData(array);
+    std::vector<llvm::Value *> values;
     for (size_t i = 0; i < lit->elements.size(); ++i) {
       llvm::Value *value = lowering_.exprLowerer().emitExpr(lit->elements[i].expr);
       lowering_.builder_.CreateStore(value,
                                      elementAddress(data, element, lowering_.builder_.getInt64(i)));
-      if (member) {
+      values.push_back(value);
+    }
+    if (member) {
+      for (llvm::Value *value : values) {
         lowering_.storeLowerer().groupStore(array, value, element);
       }
     }

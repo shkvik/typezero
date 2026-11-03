@@ -1,0 +1,92 @@
+top-level code
+  start
+    writes the state of server (line 38)
+    writes stdout (lines 40, 41, 58, 59, 61)
+    reads  message of any ListenError (line 40)
+    writes stderr (line 41)
+    writes the exit code and environment (line 41)
+    reads  the state of any Listening (line 45)
+    writes the state of any Listening (line 62)
+    reads  right (line 58)
+    reads  elements of wrong (line 59)
+    reads  made (line 61)
+    reads  idle of any PoolStats (line 61)
+    reads  total of any PoolStats (line 61)
+    reads  waiting of any PoolStats (line 61)
+    in order with create: made
+    in order with the arrow at line 51 after await at line 51:62: stderr, stdout, the exit code and environment, the state of any Listening, the state of server
+    in order with the arrow at line 51 after await at line 51:74: stderr, stdout, the exit code and environment, the state of any Listening, the state of server
+    in order: lines 38-62
+  after await at line 51
+    reads  elements of any string[], each task its own (line 52 in the arrow at line 52)
+    reads  elements of wrong (line 59)
+    writes elements of wrong (line 52 in the arrow at line 52)
+    reads  right (lines 52 in the arrow at line 52, 58)
+    writes right (line 52 in the arrow at line 52)
+    writes the length of wrong (line 52 in the arrow at line 52)
+    writes stdout (lines 58, 59, 61)
+    reads  made (line 61)
+    reads  idle of any PoolStats (line 61)
+    reads  total of any PoolStats (line 61)
+    reads  waiting of any PoolStats (line 61)
+    writes the state of any Listening (line 62)
+    in order with create: made
+    in order with the arrow at line 51 after await at line 51:62: elements of wrong, stdout, the length of wrong, the state of any Listening
+    in order with the arrow at line 51 after await at line 51:74: elements of wrong, stdout, the length of wrong, the state of any Listening
+    in order: lines 52-62
+    waits for its turn inside: line 54 in the arrow at line 52
+  after await at line 62
+    writes stdout (line 63)
+    parallel
+
+async arrow create, line 15
+  start (in the callbacks at line 15)
+    reads  made (lines 16, 17)
+    writes made (line 16)
+    in order with the same piece in other tasks: made
+    in order with the start of the top-level code: made
+    in order with the top-level code after await at line 51: made
+    in order: lines 16-17
+
+arrow reset, line 19
+  start (in the callbacks at line 19)
+    parallel
+
+async arrow, line 24
+  start (in the callbacks at line 24)
+    reads  the state of the URL made at line 25 (line 25)
+    parallel
+  after await at line 26 (in the callbacks at line 24)
+    parallel
+
+async arrow, line 26
+  start (in the callbacks at line 26)
+    parallel
+  after await at line 30 (in the callbacks at line 26)
+    parallel
+
+async arrow, line 51
+  start: runs inside its caller
+  after await at line 51:62 (in the tasks of the arrow at line 51)
+    reads  everything in any object (line 51 in must<string, object>)
+    writes stderr (line 51 in must<string, object>)
+    writes stdout (line 51 in must<string, object>)
+    writes the exit code and environment (line 51 in must<string, object>)
+    in order with the arrow at line 51 after await at line 51:74: everything in any object, stderr, stdout, the exit code and environment
+    in order with the same piece in other tasks: stderr, stdout, the exit code and environment
+    in order with the start of the top-level code: everything in any object, stderr, stdout, the exit code and environment
+    in order with the top-level code after await at line 51: everything in any object, stderr, stdout
+    in order: line 51
+    waits for its turn inside: lines 67 in must<string, object>, 68 in must<string, object>
+  after await at line 51:74 (in the tasks of the arrow at line 51)
+    reads  everything in any object (line 51 in must<object, object>)
+    writes stderr (line 51 in must<object, object>)
+    writes stdout (line 51 in must<object, object>)
+    writes the exit code and environment (line 51 in must<object, object>)
+    writes the state of any Response (line 51)
+    in order with the arrow at line 51 after await at line 51:62: stderr, stdout, the exit code and environment, the state of any Response
+    in order with the same piece in other tasks: everything in any object, stderr, stdout, the exit code and environment, the state of any Response
+    in order with the start of the top-level code: everything in any object, stderr, stdout, the exit code and environment
+    in order with the top-level code after await at line 51: everything in any object, stderr, stdout
+    in order: line 51
+    waits for its turn inside: lines 67 in must<object, object>, 68 in must<object, object>

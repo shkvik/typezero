@@ -1,0 +1,122 @@
+top-level code
+  start
+    reads  elements of servers (line 101)
+    writes the state of any Server (line 102)
+    writes stdout (lines 104, 105, 123)
+    reads  message of any ListenError (line 104)
+    writes stderr (line 105)
+    writes the exit code and environment (line 105)
+    writes elements of answers (line 110)
+    writes the length of answers (line 110)
+    reads  the state of any Listening (line 111 in the arrow at line 111)
+    reads  total (line 123)
+    reads  the length of registry (line 123)
+    reads  the length of sharedItems (line 123)
+    in order with afterTick after await at line 48 in the callbacks at line 71: total
+    in order with the arrow at line 78: the length of registry, the length of sharedItems
+    in order with the arrow at line 85: the length of sharedItems
+    in order: line 123
+  after await at line 119
+    writes stdout (line 120)
+    reads  elements of any string[] (lines 120, 120 in the arrow at line 120)
+    writes the state of any Listening (line 121)
+    in order with the arrow at line 78: elements of any string[]
+    in order with the arrow at line 85: elements of any string[]
+    in order: line 120
+    waits for its turn inside: line 120 in the arrow at line 120
+  after await at line 121
+    reads  elements of servers (line 101)
+    writes the state of any Server (line 102)
+    writes stdout (lines 104, 105, 123)
+    reads  message of any ListenError (line 104)
+    writes stderr (line 105)
+    writes the exit code and environment (line 105)
+    writes elements of answers (line 110)
+    writes the length of answers (line 110)
+    reads  the state of any Listening (line 111 in the arrow at line 111)
+    reads  total (line 123)
+    reads  the length of registry (line 123)
+    reads  the length of sharedItems (line 123)
+    in order with afterTick after await at line 48 in the callbacks at line 71: total
+    in order with the arrow at line 78: the length of registry, the length of sharedItems
+    in order with the arrow at line 85: the length of sharedItems
+    in order: line 123
+
+async function afterTick, line 47
+  start: runs inside its caller
+  after await at line 48
+    reads  counter.n (line 49 in the arrow at line 94)
+    writes counter.n (line 49 in the arrow at line 94)
+    reads  total (line 49 in the arrow at line 72)
+    writes total (line 49 in the arrow at line 72)
+    in the callbacks at line 57:
+      parallel
+    in the callbacks at line 71:
+      in order with the same piece in other tasks: total
+      in order with the start of the top-level code: total
+      in order with the top-level code after await at line 121: total
+      in order: line 49
+
+async function later, line 52
+  start: runs inside its caller
+  after await at line 53 (in the tasks later() at line 94)
+    reads  counter.n (line 54 in the arrow at line 94)
+    writes counter.n (line 54 in the arrow at line 94)
+    reads  total (line 54 in the arrow at line 72)
+    writes total (line 54 in the arrow at line 72)
+    in order with the same piece in other tasks: counter.n
+    in order: line 54
+
+async arrow, line 57
+  start (in the callbacks at line 57)
+    parallel
+  after await at line 65 (in the callbacks at line 57)
+    parallel
+
+async arrow, line 71
+  start (in the callbacks at line 71)
+    parallel
+  after await at line 72 (in the callbacks at line 71)
+    parallel
+
+async arrow, line 78
+  start (in the callbacks at line 78)
+    reads  counter.items (line 80 in Counter.add)
+    reads  counter.n (lines 80 in Counter.add, 82)
+    writes counter.n (line 80 in Counter.add)
+    writes elements of any string[] (line 80 in Counter.add)
+    writes the length of any string[] (line 80 in Counter.add)
+    writes elements of registry (line 81 in Counter.remember)
+    writes the length of registry (line 81 in Counter.remember)
+    in order with the arrow at line 85: elements of any string[], the length of any string[]
+    in order with the same piece in other tasks: counter.n, elements of any string[], elements of registry, the length of any string[], the length of registry
+    in order with the start of the top-level code: the length of any string[], the length of registry
+    in order with the top-level code after await at line 119: elements of any string[]
+    in order with the top-level code after await at line 121: the length of any string[], the length of registry
+    in order: lines 80-82
+    waits for its turn inside: line 26 in Counter.remember
+
+async arrow, line 85
+  start (in the callbacks at line 85)
+    writes elements of any string[] (line 88 in Bag.add)
+    reads  the length of any string[] (line 89)
+    writes the length of any string[] (line 88 in Bag.add)
+    in order with the arrow at line 78: elements of any string[], the length of any string[]
+    in order with the same piece in other tasks: elements of any string[], the length of any string[]
+    in order with the start of the top-level code: the length of any string[]
+    in order with the top-level code after await at line 119: elements of any string[]
+    in order with the top-level code after await at line 121: the length of any string[]
+    in order: lines 88-89
+    waits for its turn inside: line 36 in Bag.add
+
+async arrow, line 92
+  start (in the callbacks at line 92)
+    parallel
+
+async arrow, line 111
+  start: runs inside its caller
+    reads  the state of any Listening (line 112)
+  after await at line 112 (in the tasks () at line 111)
+    parallel
+  after await at line 114 (in the tasks () at line 111)
+    parallel

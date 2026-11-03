@@ -60,6 +60,8 @@ typedef struct RawSocket {
   NetOp cop;
   TzPromise *connecting;
   char where[160];
+  TzLock lock;
+  uint8_t pooled, busy;
 } RawSocket;
 
 typedef struct RawSend {
@@ -68,6 +70,7 @@ typedef struct RawSend {
   TzPromise *promise;
   TzMaker make;
   char where[160];
+  uint32_t size;
   uint8_t data[];
 } RawSend;
 
@@ -83,9 +86,33 @@ static void raw_free(RawSocket *r) {
 }
 
 static void raw_settle(RawSocket *r) {
-  if (r->orphan && r->ops == 0) {
+  if (r->orphan && r->ops == 0 && !r->busy) {
     raw_free(r);
   }
+}
+
+static void raw_enter(RawSocket *r) {
+#if TZ_PARALLEL
+  if (r->pooled) {
+    tz_lock(&r->lock);
+    ++tz_thread.conn_locks;
+    return;
+  }
+#else
+  (void)r;
+#endif
+  TZ_ORDERED();
+}
+
+static void raw_leave(RawSocket *r) {
+#if TZ_PARALLEL
+  if (r->pooled) {
+    --tz_thread.conn_locks;
+    tz_unlock(&r->lock);
+  }
+#else
+  (void)r;
+#endif
 }
 
 static void raw_close(RawSocket *r) {
@@ -105,14 +132,43 @@ static void forget(TzPromise **p) {
 }
 
 static void raw_drop(void *object) {
-  TZ_ORDERED();
   RawSocket *r = (RawSocket *)object;
+  raw_enter(r);
   raw_close(r);
   forget(&r->received);
   forget(&r->accepted);
   forget(&r->connecting);
   r->orphan = 1;
-  raw_settle(r);
+  int dead = r->ops == 0 && !r->busy;
+  raw_leave(r);
+  if (dead) {
+    raw_free(r);
+  }
+}
+
+#if TZ_PARALLEL
+static void socket_completed_pooled(OVERLAPPED_ENTRY *entry);
+void *tz_pool_port_handle(void);
+void tz_trigger_hold(void);
+void tz_io_done_remote(TzWork *w);
+#endif
+
+static int raw_attach(SOCKET s, uint8_t *pooled) {
+  *pooled = 0;
+#if TZ_PARALLEL
+  HANDLE pool = (HANDLE)tz_pool_port_handle();
+  if (pool) {
+    if (!CreateIoCompletionPort((HANDLE)s, pool, (ULONG_PTR)socket_completed_pooled, 0)) {
+      return 0;
+    }
+    SetFileCompletionNotificationModes((HANDLE)s, FILE_SKIP_COMPLETION_PORT_ON_SUCCESS |
+                                                      FILE_SKIP_SET_EVENT_ON_HANDLE);
+    *pooled = 1;
+    return 1;
+  }
+#endif
+
+  return net_attach(s);
 }
 
 static RawSocket *raw_new(SOCKET s, int family, int type, int protocol) {
@@ -253,7 +309,8 @@ void *tz_socket_open(int64_t domain, int64_t type, int64_t protocol, TzMaker mak
     tz_failed = net_system_error(make, WSAGetLastError(), "socket", NULL, 1);
     return NULL;
   }
-  if (!net_attach(s)) {
+  uint8_t pooled = 0;
+  if (!raw_attach(s, &pooled)) {
     int32_t error = (int32_t)GetLastError();
     closesocket(s);
     tz_failed = net_system_error(make, error, "socket", NULL, 1);
@@ -264,8 +321,10 @@ void *tz_socket_open(int64_t domain, int64_t type, int64_t protocol, TzMaker mak
     DWORD bytes = 0;
     WSAIoctl(s, SIO_UDP_CONNRESET, &off, sizeof off, NULL, 0, &bytes, NULL, NULL);
   }
+  RawSocket *r = raw_new(s, family, kind, (int)protocol);
+  r->pooled = pooled;
 
-  return raw_new(s, family, kind, (int)protocol);
+  return r;
 }
 
 int64_t tz_socket_bind(void *sock, void *address_obj, uint64_t address_meta, int64_t port,
@@ -309,6 +368,141 @@ int64_t tz_socket_listen(void *sock, int64_t backlog, TzMaker make) {
   return 0;
 }
 
+static void accept_issue(RawSocket *r);
+static void connect_issue(RawSocket *r, SOCKADDR_STORAGE *address, int length);
+static void send_issue(RawSend *q, SOCKADDR_STORAGE *address, int length, DWORD how);
+static void receive_issue(RawSocket *r);
+static void accept_settle(RawSocket *r, int32_t error);
+static void connect_settle(RawSocket *r, int32_t error);
+static void send_settle(RawSend *q, int32_t error, uint32_t sent);
+static void receive_settle(RawSocket *r, int32_t error, uint32_t bytes);
+
+enum { LATER_ACCEPT, LATER_CONNECT, LATER_SEND, LATER_RECEIVE };
+
+#if TZ_PARALLEL
+void tz_work_ref_count(int32_t n);
+
+typedef struct SocketLater {
+  TzAfterPiece base;
+  RawSocket *r;
+  RawSend *q;
+  int32_t kind;
+  int32_t length;
+  DWORD how;
+  SOCKADDR_STORAGE address;
+} SocketLater;
+
+static void socket_later_drop(void *object) { tz_obj_free(object); }
+
+static const TzObjectDesc socket_later_desc = {socket_later_drop};
+
+static void socket_later_closed(SocketLater *later) {
+  RawSocket *r = later->r;
+  switch (later->kind) {
+  case LATER_ACCEPT:
+    accept_settle(r, ERROR_OPERATION_ABORTED);
+    break;
+  case LATER_CONNECT:
+    connect_settle(r, ERROR_OPERATION_ABORTED);
+    break;
+  case LATER_SEND:
+    send_settle(later->q, ERROR_OPERATION_ABORTED, 0);
+    break;
+  default:
+    receive_settle(r, ERROR_OPERATION_ABORTED, 0);
+    break;
+  }
+}
+
+static void socket_later_orphan(SocketLater *later) {
+  RawSocket *r = later->r;
+  if (later->kind == LATER_ACCEPT && r->accepting != INVALID_SOCKET) {
+    closesocket(r->accepting);
+    r->accepting = INVALID_SOCKET;
+  }
+  if (later->kind == LATER_SEND) {
+    forget(&later->q->promise);
+    tz_free(later->q);
+  }
+}
+
+static void socket_later_issue(SocketLater *later) {
+  RawSocket *r = later->r;
+  switch (later->kind) {
+  case LATER_ACCEPT:
+    accept_issue(r);
+    break;
+  case LATER_CONNECT:
+    connect_issue(r, &later->address, later->length);
+    break;
+  case LATER_SEND:
+    send_issue(later->q, &later->address, later->length, later->how);
+    break;
+  default:
+    receive_issue(r);
+    break;
+  }
+}
+
+static void socket_later_run(TzAfterPiece *a, int32_t pooled) {
+  SocketLater *later = (SocketLater *)a;
+  RawSocket *r = later->r;
+  raw_enter(r);
+  if (pooled) {
+    tz_trigger_hold();
+  }
+  if (r->orphan) {
+    socket_later_orphan(later);
+  } else if (r->closed) {
+    socket_later_closed(later);
+  } else {
+    socket_later_issue(later);
+  }
+  --r->ops;
+  int dead = r->orphan && r->ops == 0 && !r->busy;
+  raw_leave(r);
+  if (pooled) {
+    tz_ahead_settle_held();
+  }
+  tz_work_ref_count(-1);
+  if (dead) {
+    raw_free(r);
+  }
+}
+#endif
+
+static int socket_later(RawSocket *r, int32_t kind, RawSend *q, SOCKADDR_STORAGE *address,
+                        int length, DWORD how) {
+#if TZ_PARALLEL
+  if (!r->pooled) {
+    return 0;
+  }
+  SocketLater *later = (SocketLater *)tz_obj_alloc(sizeof(SocketLater));
+  later->r = r;
+  later->q = q;
+  later->kind = kind;
+  later->length = length;
+  later->how = how;
+  if (address && length > 0) {
+    memcpy(&later->address, address, sizeof later->address);
+  }
+  ++r->ops;
+  tz_work_ref_count(1);
+  tz_after_piece(&later->base, &socket_later_desc, socket_later_run);
+
+  return 1;
+#else
+  (void)r;
+  (void)kind;
+  (void)q;
+  (void)address;
+  (void)length;
+  (void)how;
+
+  return 0;
+#endif
+}
+
 static void accept_done(TzWork *w);
 
 static void accept_settle(RawSocket *r, int32_t error) {
@@ -322,7 +516,8 @@ static void accept_settle(RawSocket *r, int32_t error) {
     return;
   }
   setsockopt(s, SOL_SOCKET, SO_UPDATE_ACCEPT_CONTEXT, (const char *)&r->s, sizeof r->s);
-  if (!net_attach(s)) {
+  uint8_t pooled = 0;
+  if (!raw_attach(s, &pooled)) {
     int32_t attach_error = (int32_t)GetLastError();
     closesocket(s);
     net_reject(&r->accepted, net_system_error(r->make, attach_error, "accept", NULL, 1));
@@ -330,6 +525,7 @@ static void accept_settle(RawSocket *r, int32_t error) {
   }
   RawSocket *peer = raw_new(s, r->family, r->type, r->protocol);
   peer->bound = 1;
+  peer->pooled = pooled;
   net_fulfill(&r->accepted, &peer, sizeof peer);
 }
 
@@ -345,8 +541,7 @@ static void accept_done(TzWork *w) {
   accept_settle(r, net_op_error(&r->aop, r->s, r->closed));
 }
 
-void tz_socket_accept(TzPromise *p, void *sock, TzMaker make) {
-  TZ_ORDERED();
+static void accept_start(TzPromise *p, void *sock, TzMaker make) {
   RawSocket *r = (RawSocket *)sock;
   tz_ref_retain(p);
   TzPromise *promise = p;
@@ -379,6 +574,14 @@ void tz_socket_accept(TzPromise *p, void *sock, TzMaker make) {
   }
   r->accepted = promise;
   r->accepting = s;
+  if (socket_later(r, LATER_ACCEPT, NULL, NULL, 0, 0)) {
+    return;
+  }
+  accept_issue(r);
+}
+
+static void accept_issue(RawSocket *r) {
+  SOCKET s = r->accepting;
   DWORD got = 0;
   net_op_begin(&r->aop, accept_done, 0);
   ++r->ops;
@@ -413,9 +616,20 @@ static void connect_done(TzWork *w) {
   connect_settle(r, net_op_error(&r->cop, r->s, r->closed));
 }
 
-void tz_socket_connect(TzPromise *p, void *sock, void *address_obj, uint64_t address_meta,
-                       int64_t port, TzMaker make) {
-  TZ_ORDERED();
+static void connect_issue(RawSocket *r, SOCKADDR_STORAGE *address, int length) {
+  net_op_begin(&r->cop, connect_done, 0);
+  ++r->ops;
+  BOOL ok = tz_socket_connect_ex(r->s, (SOCKADDR *)address, length, NULL, 0, NULL, &r->cop.ov);
+  if (!ok && WSAGetLastError() == ERROR_IO_PENDING) {
+    net_op_wait(&r->cop);
+    return;
+  }
+  --r->ops;
+  connect_settle(r, ok ? 0 : WSAGetLastError());
+}
+
+static void connect_start(TzPromise *p, void *sock, void *address_obj, uint64_t address_meta,
+                          int64_t port, TzMaker make) {
   RawSocket *r = (RawSocket *)sock;
   tz_ref_retain(p);
   TzPromise *promise = p;
@@ -455,15 +669,10 @@ void tz_socket_connect(TzPromise *p, void *sock, void *address_obj, uint64_t add
       return;
     }
     r->connecting = promise;
-    net_op_begin(&r->cop, connect_done, 0);
-    ++r->ops;
-    BOOL ok = tz_socket_connect_ex(r->s, (SOCKADDR *)&address, length, NULL, 0, NULL, &r->cop.ov);
-    if (!ok && WSAGetLastError() == ERROR_IO_PENDING) {
-      net_op_wait(&r->cop);
+    if (socket_later(r, LATER_CONNECT, NULL, &address, length, 0)) {
       return;
     }
-    --r->ops;
-    connect_settle(r, ok ? 0 : WSAGetLastError());
+    connect_issue(r, &address, length);
     return;
   }
   if (connect(r->s, (SOCKADDR *)&address, length) == SOCKET_ERROR) {
@@ -496,9 +705,8 @@ static void send_done(TzWork *w) {
   send_settle(q, net_op_error(&q->op, r->s, r->closed), q->op.bytes);
 }
 
-void tz_socket_send(TzPromise *p, void *sock, void *data, void *address_obj, uint64_t address_meta,
-                    int64_t port, int64_t flags, TzMaker make) {
-  TZ_ORDERED();
+static void send_start(TzPromise *p, void *sock, void *data, void *address_obj,
+                       uint64_t address_meta, int64_t port, int64_t flags, TzMaker make) {
   RawSocket *r = (RawSocket *)sock;
   tz_ref_retain(p);
   TzPromise *promise = p;
@@ -533,16 +741,28 @@ void tz_socket_send(TzPromise *p, void *sock, void *data, void *address_obj, uin
   if (size) {
     memcpy(q->data, bytes->data, size);
   }
+  q->size = (uint32_t)size;
+  DWORD how = ((flags & 1) ? MSG_OOB : 0) | ((flags & 2) ? MSG_DONTROUTE : 0);
+  if (address_length == 0) {
+    length = 0;
+  }
+  if (socket_later(r, LATER_SEND, q, &address, length, how)) {
+    return;
+  }
+  send_issue(q, &address, length, how);
+}
+
+static void send_issue(RawSend *q, SOCKADDR_STORAGE *address, int length, DWORD how) {
+  RawSocket *r = q->r;
   WSABUF buffer;
-  buffer.len = (ULONG)size;
+  buffer.len = (ULONG)q->size;
   buffer.buf = (CHAR *)q->data;
   DWORD sent = 0;
-  DWORD how = ((flags & 1) ? MSG_OOB : 0) | ((flags & 2) ? MSG_DONTROUTE : 0);
   net_op_begin(&q->op, send_done, 0);
   ++r->ops;
-  int rc = address_length > 0 ? WSASendTo(r->s, &buffer, 1, &sent, how, (SOCKADDR *)&address,
-                                          length, &q->op.ov, NULL)
-                              : WSASend(r->s, &buffer, 1, &sent, how, &q->op.ov, NULL);
+  int rc = length > 0 ? WSASendTo(r->s, &buffer, 1, &sent, how, (SOCKADDR *)address, length,
+                                  &q->op.ov, NULL)
+                      : WSASend(r->s, &buffer, 1, &sent, how, &q->op.ov, NULL);
   int32_t error = rc == SOCKET_ERROR ? WSAGetLastError() : 0;
   if (error == WSA_IO_PENDING) {
     net_op_wait(&q->op);
@@ -583,8 +803,7 @@ static void receive_done(TzWork *w) {
   receive_settle(r, net_op_error(&r->rop, r->s, r->closed), r->rop.bytes);
 }
 
-void tz_socket_receive(TzPromise *p, void *sock, int64_t size, int64_t flags, TzMaker make) {
-  TZ_ORDERED();
+static void receive_start(TzPromise *p, void *sock, int64_t size, int64_t flags, TzMaker make) {
   RawSocket *r = (RawSocket *)sock;
   tz_ref_retain(p);
   TzPromise *promise = p;
@@ -609,6 +828,13 @@ void tz_socket_receive(TzPromise *p, void *sock, int64_t size, int64_t flags, Tz
   r->flags =
       ((flags & 1) ? MSG_PEEK : 0) | ((flags & 2) ? MSG_OOB : 0) | ((flags & 4) ? MSG_WAITALL : 0);
   r->received = promise;
+  if (socket_later(r, LATER_RECEIVE, NULL, NULL, 0, 0)) {
+    return;
+  }
+  receive_issue(r);
+}
+
+static void receive_issue(RawSocket *r) {
   DWORD got = 0;
   net_op_begin(&r->rop, receive_done, 0);
   ++r->ops;
@@ -837,10 +1063,81 @@ int64_t tz_socket_remote_port(void *sock, TzMaker make) {
   return port;
 }
 
+void tz_socket_accept(TzPromise *p, void *sock, TzMaker make) {
+  RawSocket *r = (RawSocket *)sock;
+  raw_enter(r);
+  accept_start(p, sock, make);
+  raw_leave(r);
+}
+
+void tz_socket_connect(TzPromise *p, void *sock, void *address_obj, uint64_t address_meta,
+                       int64_t port, TzMaker make) {
+  RawSocket *r = (RawSocket *)sock;
+  raw_enter(r);
+  connect_start(p, sock, address_obj, address_meta, port, make);
+  raw_leave(r);
+}
+
+void tz_socket_send(TzPromise *p, void *sock, void *data, void *address_obj, uint64_t address_meta,
+                    int64_t port, int64_t flags, TzMaker make) {
+  RawSocket *r = (RawSocket *)sock;
+  raw_enter(r);
+  send_start(p, sock, data, address_obj, address_meta, port, flags, make);
+  raw_leave(r);
+}
+
+void tz_socket_receive(TzPromise *p, void *sock, int64_t size, int64_t flags, TzMaker make) {
+  RawSocket *r = (RawSocket *)sock;
+  raw_enter(r);
+  receive_start(p, sock, size, flags, make);
+  raw_leave(r);
+}
+
+#if TZ_PARALLEL
+static RawSocket *op_owner(NetOp *op) {
+  void (*done)(TzWork *) = op->work.done;
+  if (done == receive_done) {
+    return CONTAINING_RECORD(op, RawSocket, rop);
+  }
+  if (done == connect_done) {
+    return CONTAINING_RECORD(op, RawSocket, cop);
+  }
+  if (done == accept_done) {
+    return CONTAINING_RECORD(op, RawSocket, aop);
+  }
+
+  return ((RawSend *)op)->r;
+}
+
+static void socket_completed_pooled(OVERLAPPED_ENTRY *entry) {
+  NetOp *op = CONTAINING_RECORD(entry->lpOverlapped, NetOp, ov);
+  op->bytes = entry->dwNumberOfBytesTransferred;
+  op->error = entry->Internal != 0 ? -1 : 0;
+  RawSocket *r = op_owner(op);
+  TzWork work = op->work;
+  tz_lock(&r->lock);
+  ++tz_thread.conn_locks;
+  r->busy = 1;
+  tz_trigger_hold();
+  op->work.done(&op->work);
+  r->busy = 0;
+  int dead = r->orphan && r->ops == 0;
+  --tz_thread.conn_locks;
+  tz_unlock(&r->lock);
+  tz_ahead_settle_held();
+  tz_io_done_remote(&work);
+  if (dead) {
+    raw_free(r);
+  }
+}
+#endif
+
 void tz_socket_close(void *sock, TzMaker make) {
-  TZ_ORDERED();
   (void)make;
-  raw_close((RawSocket *)sock);
+  RawSocket *r = (RawSocket *)sock;
+  raw_enter(r);
+  raw_close(r);
+  raw_leave(r);
 }
 
 #else

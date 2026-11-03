@@ -93,6 +93,8 @@ private:
            const OwnedRef *>
       ownedRefIndex_;
   llvm::DenseSet<const VarSymbol *> ownedParams_;
+  std::vector<std::pair<const Type *, const FunctionDecl *>> poolCreates_;
+  bool poolOpen_ = false;
   llvm::DenseMap<const FunctionDecl *, const AwaitExpr *> joinReturns_;
   struct AwaitInfo {
     unsigned fn = 0;
@@ -134,6 +136,9 @@ private:
   std::vector<Activation> acts_;
   std::map<std::tuple<unsigned, int, std::optional<Ref>, bool>, unsigned> actIndex_;
   std::vector<std::tuple<unsigned, unsigned, unsigned>> inlineEdges_;
+  std::vector<std::tuple<unsigned, unsigned, unsigned>> edges_;
+  std::vector<std::map<const VarSymbol *, std::set<const FunctionDecl *>>> bindings_;
+  std::vector<bool> reached_;
   std::vector<Root> roots_;
   std::vector<PieceInst> pieces_;
   std::map<std::tuple<unsigned, unsigned, int, std::optional<Ref>>, unsigned> pieceIndex_;
@@ -149,6 +154,13 @@ private:
   std::map<std::pair<unsigned, unsigned>, std::vector<unsigned>> segPieces_;
   std::map<std::tuple<unsigned, unsigned, int>, unsigned> sameTask_;
   std::vector<std::map<unsigned, std::vector<unsigned>>> flow_;
+  struct Entry {
+    llvm::SMLoc first, last;
+    bool open = false;
+  };
+  std::map<std::pair<unsigned, unsigned>, Entry> entries_;
+  std::vector<std::map<std::pair<unsigned, unsigned>, llvm::SMLoc>> flowFrom_;
+  std::map<unsigned, std::vector<Pos>> steps_;
   struct Partner {
     unsigned piece;
     std::vector<Loc> locs;

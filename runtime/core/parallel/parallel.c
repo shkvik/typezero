@@ -269,6 +269,12 @@ static void run_early(TzJob *job) {
 
 TZ_THREAD_LOCAL int64_t tz_run_spent;
 
+static void after_job(void) {
+  int64_t spent = tz_run_spent;
+  tz_after_piece_run();
+  tz_run_spent = spent;
+}
+
 static int run_job(TzJob *job) {
   TzReactor *r = job->reactor;
   job->started = ticks();
@@ -283,6 +289,9 @@ static int run_job(TzJob *job) {
     tz_pendulum_swing();
   }
   tz_io_start_held();
+  if (tz_thread.turn) {
+    tz_after_piece_order();
+  }
   if (job->counted) {
     job->counted = 0;
     tz_work_ref_count(-1);
@@ -296,12 +305,14 @@ static int run_job(TzJob *job) {
   int32_t early = job->early;
   if (early && !job->listed) {
     free(job);
+    after_job();
     return 0;
   }
   set_state(&job->state, JOB_DONE);
   if (early) {
     tz_io_wake_loop();
   }
+  after_job();
 
   return 1;
 }

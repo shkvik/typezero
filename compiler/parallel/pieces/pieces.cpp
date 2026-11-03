@@ -5,6 +5,7 @@
 #include "compiler/parallel/call_walk/call_walk.h"
 #include "compiler/parallel/code_walk/code_walk.h"
 #include "compiler/parallel/conflicts/conflicts.h"
+#include "compiler/parallel/explain_names/explain_names.h"
 #include "compiler/parallel/explainer/explainer.h"
 #include "compiler/parallel/expr_walk/expr_walk.h"
 #include "compiler/parallel/library_effects/library_effects.h"
@@ -131,12 +132,82 @@ void Pieces::explore() {
                           true, false);
           break;
         }
+        analysis_.edges_.push_back({ai, r, next});
         if (!done.contains(next)) {
           queue.push_back(next);
         }
       }
     }
   }
+}
+
+void Pieces::findBindings() {
+  auto &bindings = analysis_.bindings_;
+  bindings.assign(analysis_.acts_.size(), {});
+  std::vector<bool> reached(analysis_.acts_.size(), false);
+  for (const auto &[from, r, to] : analysis_.edges_) {
+    reached[to] = true;
+  }
+  bool changed = true;
+  while (changed) {
+    changed = false;
+    for (const auto &[from, r, to] : analysis_.edges_) {
+      const FunctionDecl *decl = analysis_.fns_[analysis_.acts_[to].fn].decl;
+      const FunctionDecl *caller = analysis_.fns_[analysis_.acts_[from].fn].decl;
+      if (!decl) {
+        continue;
+      }
+      const CallRec &rec = analysis_.fns_[analysis_.acts_[from].fn].calls[r];
+      for (size_t i = 0; i < decl->params.size(); ++i) {
+        const VarSymbol *param = decl->params[i].sym;
+        if (!param || !param->type || !param->type->nonOptional()->isFunction()) {
+          continue;
+        }
+        std::set<const FunctionDecl *> add;
+        const Expr *arg = CallResolver::argument(rec, i);
+        if (const FunctionDecl *passed = CallResolver::functionOf(arg)) {
+          add.insert(passed);
+        } else if (const VarSymbol *outer = CallResolver::callableParam(caller, arg)) {
+          if (!reached[from]) {
+            add.insert(nullptr);
+          } else if (auto found = bindings[from].find(outer); found != bindings[from].end()) {
+            add = found->second;
+          }
+        } else {
+          add.insert(nullptr);
+        }
+        std::set<const FunctionDecl *> &have = bindings[to][param];
+        for (const FunctionDecl *fn : add) {
+          changed |= have.insert(fn).second;
+        }
+      }
+    }
+  }
+  analysis_.reached_ = std::move(reached);
+}
+
+bool Pieces::keeps(const PieceInst &piece, const Access &a) const {
+  const FunctionDecl *decl = analysis_.fns_[piece.fn].decl;
+  if (!a.bound || !decl ||
+      llvm::none_of(decl->params, [&](const Param &p) { return p.sym == a.bound; })) {
+    return true;
+  }
+  for (unsigned ai : analysis_.actsOf(piece.fn, piece.root)) {
+    const Activation &act = analysis_.acts_[ai];
+    if (act.self != piece.self) {
+      continue;
+    }
+    if (!analysis_.reached_[ai]) {
+      return true;
+    }
+    auto found = analysis_.bindings_[ai].find(a.bound);
+    if (found != analysis_.bindings_[ai].end() &&
+        (found->second.count(nullptr) || found->second.count(a.through))) {
+      return true;
+    }
+  }
+
+  return false;
 }
 
 void Pieces::findPieces() {
@@ -161,18 +232,111 @@ void Pieces::findPieces() {
   }
 }
 
+bool Pieces::ownPiece(unsigned act, unsigned piece) const {
+  return piece < analysis_.pieces_.size() && llvm::is_contained(analysis_.actPieces_[act], piece);
+}
+
+void Pieces::addEntry(unsigned act, unsigned piece, const Analysis::Entry &add, bool &changed) {
+  auto [it, inserted] = analysis_.entries_.try_emplace({act, piece}, add);
+  if (inserted) {
+    changed = true;
+    return;
+  }
+  Analysis::Entry &cur = it->second;
+  if (cur.open) {
+    return;
+  }
+  if (add.open) {
+    cur.open = changed = true;
+    return;
+  }
+  const ExplainNames &names = analysis_.explainNames();
+  if (names.posOf(add.first) < names.posOf(cur.first)) {
+    cur.first = add.first;
+    changed = true;
+  }
+  if (names.posOf(cur.last) < names.posOf(add.last)) {
+    cur.last = add.last;
+    changed = true;
+  }
+}
+
 void Pieces::findHosts() {
   bool changed = true;
   while (changed) {
     changed = false;
     for (const auto &[caller, r, callee] : analysis_.inlineEdges_) {
       const Activation &from = analysis_.acts_[caller];
-      std::vector<unsigned> at = piecesAt(from, analysis_.fns_[from.fn].calls[r].segs);
+      const CallRec &rec = analysis_.fns_[from.fn].calls[r];
+      std::vector<unsigned> at = piecesAt(from, rec.segs);
       Activation &to = analysis_.acts_[callee];
       for (unsigned p : at) {
         changed |= to.hosts.insert(p).second;
+        Analysis::Entry add;
+        if (ownPiece(caller, p)) {
+          add.first = add.last = rec.loc;
+        } else if (auto e = analysis_.entries_.find({caller, p}); e != analysis_.entries_.end()) {
+          add = e->second;
+        } else {
+          add.open = true;
+        }
+        addEntry(callee, p, add, changed);
       }
     }
+  }
+}
+
+int Pieces::stepOf(unsigned fn, llvm::SMLoc loc) {
+  if (!loc.isValid()) {
+    return -1;
+  }
+  auto [it, inserted] = analysis_.steps_.try_emplace(fn);
+  std::vector<Analysis::Pos> &steps = it->second;
+  const ExplainNames &names = analysis_.explainNames();
+  if (inserted) {
+    const FunctionDecl *decl = analysis_.fns_[fn].decl;
+    if (decl && decl->body) {
+      for (const Stmt *s : decl->body->body) {
+        steps.push_back(names.posOf(s->loc()));
+      }
+    } else if (!decl) {
+      for (const Stmt *s : analysis_.program_.items) {
+        if (!isa<FunctionDecl>(s) && !analysis_.libraryEffects().inLibrary(s->loc())) {
+          steps.push_back(names.posOf(s->loc()));
+        }
+      }
+    }
+    llvm::sort(steps);
+  }
+  Analysis::Pos at = names.posOf(loc);
+  auto next = std::upper_bound(steps.begin(), steps.end(), at);
+  if (next == steps.begin() || std::prev(next)->buffer != at.buffer) {
+    return -1;
+  }
+
+  return int(next - steps.begin()) - 1;
+}
+
+bool Pieces::later(unsigned fn, llvm::SMLoc at, llvm::SMLoc origin) {
+  int from = stepOf(fn, at);
+  int to = stepOf(fn, origin);
+
+  return from < 0 || to < 0 || to >= from;
+}
+
+void Pieces::noteFlow(int root, unsigned from, unsigned to, llvm::SMLoc origin) {
+  auto &origins = analysis_.flowFrom_[root];
+  auto [it, inserted] = origins.try_emplace({from, to}, origin);
+  if (inserted || !it->second.isValid()) {
+    return;
+  }
+  if (!origin.isValid()) {
+    it->second = origin;
+    return;
+  }
+  const ExplainNames &names = analysis_.explainNames();
+  if (names.posOf(it->second) < names.posOf(origin)) {
+    it->second = origin;
   }
 }
 
@@ -294,7 +458,8 @@ void Pieces::findJoins() {
     const FnInfo &caller = analysis_.fns_[root.callerFn];
     const CallRec &rec = caller.calls[root.rec];
     int parentFn = root.parent >= 0 ? int(analysis_.roots_[root.parent].fn) : -1;
-    root.multi |= rec.interval || parentFn < 0 || !once(root.callerFn, root.rec, parentFn, 0);
+    root.multi |= rec.interval || parentFn < 0 || !once(root.callerFn, root.rec, parentFn, 0) ||
+                  (size_t(root.parent) < i && analysis_.roots_[root.parent].multi);
     const FunctionDecl *callee = analysis_.fns_[root.fn].decl;
     if (rec.kind == CallKind::Inline && rec.call && rec.call->builtin == Builtin::ArrMap &&
         callee && callee->params.size() > 1 && callee->params[1].sym &&
@@ -312,12 +477,29 @@ void Pieces::findJoins() {
       continue;
     }
     std::set<unsigned> spawnAt, interval;
+    std::map<unsigned, llvm::SMLoc> spawnFrom;
     for (unsigned ai : analysis_.actsOf(root.callerFn, root.parent)) {
       for (unsigned p : piecesAt(analysis_.acts_[ai], rec.segs)) {
         spawnAt.insert(p);
+        llvm::SMLoc at;
+        if (ownPiece(ai, p)) {
+          at = rec.loc;
+        } else if (auto e = analysis_.entries_.find({ai, p});
+                   e != analysis_.entries_.end() && !e->second.open) {
+          at = e->second.first;
+        }
+        auto [it, inserted] = spawnFrom.try_emplace(p, at);
+        if (inserted || !it->second.isValid()) {
+          continue;
+        }
+        if (!at.isValid() ||
+            analysis_.explainNames().posOf(at) < analysis_.explainNames().posOf(it->second)) {
+          it->second = at;
+        }
       }
     }
     root.spawnAt.assign(spawnAt.begin(), spawnAt.end());
+    root.spawnFrom.assign(spawnFrom.begin(), spawnFrom.end());
     if (root.mode != Mode::Spawn || !rec.join) {
       continue;
     }
@@ -349,7 +531,7 @@ void Pieces::findJoins() {
       root.chain.insert(root.chain.end(), parent.chain.begin(), parent.chain.end());
       continue;
     }
-    root.chain.push_back({root.parent, reach(root.parent, root.spawnAt)});
+    root.chain.push_back({root.parent, reachAfter(root.parent, root.spawnFrom)});
     for (const auto &[up, pieces] : parent.chain) {
       root.chain.push_back({up, reach(up, pieces)});
     }
@@ -358,12 +540,22 @@ void Pieces::findJoins() {
 
 void Pieces::buildFlow() {
   analysis_.flow_.assign(analysis_.roots_.size(), {});
-  for (const Activation &act : analysis_.acts_) {
+  analysis_.flowFrom_.assign(analysis_.roots_.size(), {});
+  for (unsigned ai = 0; ai < analysis_.acts_.size(); ++ai) {
+    const Activation &act = analysis_.acts_[ai];
     const FnInfo &f = analysis_.fns_[act.fn];
     for (const auto &[a, b] : f.succ) {
       for (unsigned x : piecesAt(act, {a})) {
+        llvm::SMLoc origin;
+        if (scheduled(act, a)) {
+          origin = f.segs[b].loc;
+        } else if (auto e = analysis_.entries_.find({ai, x});
+                   e != analysis_.entries_.end() && !e->second.open) {
+          origin = e->second.last;
+        }
         for (unsigned y : piecesAt(act, {b})) {
           analysis_.flow_[act.root][x].push_back(y);
+          noteFlow(act.root, x, y, origin);
         }
       }
     }
@@ -386,6 +578,9 @@ void Pieces::buildFlow() {
     for (unsigned p : analysis_.actPieces_[callee]) {
       std::vector<unsigned> &next = analysis_.flow_[x.root][p];
       next.insert(next.end(), after.begin(), after.end());
+      for (unsigned n : after) {
+        noteFlow(x.root, p, n, llvm::SMLoc());
+      }
     }
   }
   for (auto &graph : analysis_.flow_) {
@@ -417,4 +612,48 @@ std::vector<unsigned> Pieces::reach(int root, const std::vector<unsigned> &from)
   return std::vector<unsigned>(seen.begin(), seen.end());
 }
 
+std::vector<unsigned>
+Pieces::reachAfter(int root, const std::vector<std::pair<unsigned, llvm::SMLoc>> &from) {
+  const auto &graph = analysis_.flow_[root];
+  const auto &origins = analysis_.flowFrom_[root];
+  std::set<unsigned> seen, expanded;
+  std::vector<unsigned> pending;
+  auto visit = [&](unsigned n) {
+    seen.insert(n);
+    if (expanded.insert(n).second) {
+      pending.push_back(n);
+    }
+  };
+  for (const auto &[p, at] : from) {
+    seen.insert(p);
+  }
+  for (const auto &[p, at] : from) {
+    auto found = graph.find(p);
+    if (found == graph.end()) {
+      continue;
+    }
+    for (unsigned n : found->second) {
+      auto origin = origins.find({p, n});
+      bool after = !at.isValid() || origin == origins.end() || !origin->second.isValid() ||
+                   p >= analysis_.pieces_.size() ||
+                   later(analysis_.pieces_[p].fn, at, origin->second);
+      if (after) {
+        visit(n);
+      }
+    }
+  }
+  while (!pending.empty()) {
+    unsigned n = pending.back();
+    pending.pop_back();
+    auto found = graph.find(n);
+    if (found == graph.end()) {
+      continue;
+    }
+    for (unsigned m : found->second) {
+      visit(m);
+    }
+  }
+
+  return std::vector<unsigned>(seen.begin(), seen.end());
+}
 }

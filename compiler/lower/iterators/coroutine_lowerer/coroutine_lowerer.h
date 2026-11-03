@@ -12,7 +12,8 @@ public:
   void restoreContext(const Lowering::EmitContext &context);
   llvm::Value *emitResume(llvm::Value *it, llvm::Value *out, llvm::Value *in, llvm::Value *ret);
   void beginCoroutine(unsigned layoutFlags, const Type *sent, llvm::StructType *promise = nullptr);
-  void emitSuspend();
+  llvm::Value *emitSave();
+  void emitSuspend(llvm::Value *save = nullptr);
   llvm::Value *emitCoroutineYield(llvm::Value *value, const Type *resultType);
   void emitCoroutineReturn(llvm::Value *value, const Type *type);
   void finishCoroutine();

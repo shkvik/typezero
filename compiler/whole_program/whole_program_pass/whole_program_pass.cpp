@@ -8,6 +8,7 @@
 #include "compiler/library/events/emitter_checker/emitter_checker.h"
 #include "compiler/library/fs/fs_checker/fs_checker.h"
 #include "compiler/library/reflect/reflect_checker/reflect_checker.h"
+#include "compiler/library/sync/pool_checker/pool_checker.h"
 #include "compiler/program/program/program.h"
 #include "compiler/whole_program/load_order/load_order.h"
 #include "compiler/whole_program/unused/unused.h"
@@ -48,6 +49,7 @@ Errors WholeProgramPass::run(Program &program) const {
     }
   }
   ContextChecker(program).run();
+  PoolChecker(program).run();
   if (!checker.diags_.hasErrors()) {
     checker.wideWrites().checkWidenings(file);
   }

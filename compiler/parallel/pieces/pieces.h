@@ -23,9 +23,18 @@ public:
   bool fnRejectionEnds(unsigned fi, unsigned depth);
   void findJoins();
   void buildFlow();
+  void findBindings();
+  bool keeps(const PieceInst &piece, const Access &a) const;
   std::vector<unsigned> reach(int root, const std::vector<unsigned> &from) const;
+  std::vector<unsigned> reachAfter(int root,
+                                   const std::vector<std::pair<unsigned, llvm::SMLoc>> &from);
 
 private:
+  bool ownPiece(unsigned act, unsigned piece) const;
+  int stepOf(unsigned fn, llvm::SMLoc loc);
+  bool later(unsigned fn, llvm::SMLoc at, llvm::SMLoc origin);
+  void addEntry(unsigned act, unsigned piece, const Analysis::Entry &add, bool &changed);
+  void noteFlow(int root, unsigned from, unsigned to, llvm::SMLoc origin);
   Analysis &analysis_;
 };
 

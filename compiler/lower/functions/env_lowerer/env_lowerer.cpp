@@ -204,6 +204,7 @@ llvm::Value *EnvLowerer::createEnv(const Lowering::EnvLayout &layout, bool onSta
                                    lowering_.builder_.CreateStructGEP(type, env, 1));
   }
   member = member && layout.member && !onStack;
+  std::vector<std::pair<llvm::Value *, const VarSymbol *>> stored;
   for (size_t i = 0; i < layout.fields.size(); ++i) {
     const VarSymbol *var = layout.fields[i];
     llvm::Value *value;
@@ -212,23 +213,28 @@ llvm::Value *EnvLowerer::createEnv(const Lowering::EnvLayout &layout, bool onSta
       if (!onStack) {
         lowering_.builder_.CreateCall(lowering_.objRetainFn_, {value});
       }
-      if (member) {
+      stored.push_back({value, var});
+    } else if (lowering_.memory().uncounted.count({layout.key, var})) {
+      value = emitVarValue(var, true);
+    } else {
+      value = emitVarValue(var, onStack);
+      stored.push_back({value, var});
+    }
+    lowering_.builder_.CreateStore(value,
+                                   lowering_.builder_.CreateStructGEP(type, env, unsigned(i + 2)));
+  }
+  if (member) {
+    for (auto [value, var] : stored) {
+      if (var->boxed()) {
         lowering_.builder_.CreateCall(
             lowering_.groupLowerer().groupFunction(
                 "tz_group_store", lowering_.builder_.getVoidTy(),
                 {lowering_.builder_.getPtrTy(), lowering_.builder_.getPtrTy()}),
             {env, value});
-      }
-    } else if (lowering_.memory().uncounted.count({layout.key, var})) {
-      value = emitVarValue(var, true);
-    } else {
-      value = emitVarValue(var, onStack);
-      if (member) {
+      } else {
         lowering_.storeLowerer().groupStore(env, value, ClosureLowerer::typeOf(var));
       }
     }
-    lowering_.builder_.CreateStore(value,
-                                   lowering_.builder_.CreateStructGEP(type, env, unsigned(i + 2)));
   }
 
   return env;

@@ -38,7 +38,9 @@ bool isEmitterClass(llvm::StringRef cls) {
 
 bool isTargetClass(llvm::StringRef cls) { return cls == "EventTarget"; }
 
-bool isLockedClass(llvm::StringRef cls) { return cls == "ConcurrentMap"; }
+bool isPoolClass(llvm::StringRef cls) { return cls == "Pool"; }
+
+bool isLockedClass(llvm::StringRef cls) { return cls == "ConcurrentMap" || isPoolClass(cls); }
 
 bool isContextClass(llvm::StringRef cls) { return cls == "AsyncLocalStorage"; }
 
@@ -190,7 +192,9 @@ void LibraryEffects::libraryArg(const CallExpr *c, llvm::StringRef cls, llvm::St
                (name == "addEventListener" || name == "addFunctionListener")) {
       listen(f, TargetListeners);
     } else if ((cls == "Server" || cls == "Http2Server") && name == "constructor") {
-      libraryCallback(c, f, CallKind::Later, true, true, true);
+      libraryCallback(c, f, CallKind::Later, true, true, 2);
+    } else if (isPoolClass(cls) && name == "use") {
+      libraryCallback(c, f, CallKind::Later, false, true, 1, poolItemOf(f->type));
     } else if (isLockedClass(cls) || isContextClass(cls)) {
       libraryCallback(c, f, CallKind::Inline);
     } else {
@@ -202,6 +206,9 @@ void LibraryEffects::libraryArg(const CallExpr *c, llvm::StringRef cls, llvm::St
   if (auto *lit = dyn_cast<ObjectLitExpr>(f)) {
     for (const ObjectLitExpr::Property &p : lit->props) {
       const Expr *v = strip(p.value);
+      if (p.spread && isPoolClass(cls)) {
+        analysis_.poolOpen_ = true;
+      }
       if (p.spread || !v || !v->type || !v->type->nonOptional()->isFunction()) {
         analysis_.exprWalk().expr(p.value);
         libraryReads(v, at);
@@ -217,12 +224,22 @@ void LibraryEffects::libraryArg(const CallExpr *c, llvm::StringRef cls, llvm::St
                  (name == "addEventListener" || name == "addObjectListener") &&
                  p.name == "handleEvent") {
         listen(v, TargetListeners);
+      } else if (isPoolClass(cls) && name == "constructor") {
+        bool create = p.name == "create";
+        libraryCallback(c, v, CallKind::Later, true, true, create ? 0 : 1,
+                        create ? nullptr : poolItemOf(v->type));
+        if (create) {
+          poolCreate(v);
+        }
       } else {
         libraryCallback(c, v, CallKind::Inline);
         libraryCallback(c, v, CallKind::Later);
       }
     }
     return;
+  }
+  if (isPoolClass(cls) && name == "constructor") {
+    analysis_.poolOpen_ = true;
   }
   analysis_.exprWalk().expr(arg);
   libraryReads(f, at);
@@ -238,16 +255,48 @@ void LibraryEffects::libraryReads(const Expr *e, llvm::SMLoc at) {
 }
 
 void LibraryEffects::libraryCallback(const CallExpr *c, const Expr *f, CallKind kind, bool interval,
-                                     bool handled, bool served) {
+                                     bool handled, unsigned ownArgs, const Type *poolItem) {
   CallRec &rec = analysis_.codeWalk().record(f, kind, {}, f->loc());
   rec.call = c;
+  if (poolItem) {
+    rec.poolItem = poolItem;
+  }
   rec.interval |= interval;
   rec.handled |= handled;
-  rec.served |= served;
+  rec.ownArgs = std::max(rec.ownArgs, ownArgs);
   if (kind == CallKind::Inline) {
     rec.repeated = true;
   }
   analysis_.callWalk().addFunctionCallees(f, f, kind);
+}
+
+const Type *LibraryEffects::poolItemOf(const Type *fn) {
+  const Type *type = fn ? fn->nonOptional() : nullptr;
+  if (!type || !type->isFunction() || type->params().empty() || !type->params()[0]) {
+    return nullptr;
+  }
+
+  return type->params()[0]->nonOptional();
+}
+
+void LibraryEffects::poolCreate(const Expr *f) {
+  const Type *type = f->type ? f->type->nonOptional() : nullptr;
+  const Type *promised =
+      type && type->isFunction() && type->ret() ? type->ret()->promised() : nullptr;
+  const Type *result = promised ? promised->nonOptional() : nullptr;
+  const FunctionDecl *decl = nullptr;
+  if (auto *fe = dyn_cast<FunctionExpr>(f)) {
+    decl = fe->fn;
+  } else if (auto *n = dyn_cast<NameExpr>(f); n && n->func) {
+    decl = n->func->decl;
+  } else if (n && n->var && (n->var->function || n->var->lambda)) {
+    decl = n->var->function ? n->var->function : n->var->lambda;
+  }
+  if (!result || !result->isResult() || !result->okType() || !decl) {
+    analysis_.poolOpen_ = true;
+    return;
+  }
+  analysis_.poolCreates_.push_back({result->okType()->nonOptional(), decl});
 }
 
 void LibraryEffects::listen(const Expr *f, Channel channel) {

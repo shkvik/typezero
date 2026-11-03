@@ -68,6 +68,20 @@ void tz_promise_fail(TzPromise *p, void *error);
 TzPromise *tz_promise_new(const TzLayout *layout);
 void tz_async_await(TzReactor *r, TzPromise *p, int32_t ahead);
 void tz_after_callback(void);
+
+typedef struct TzAfterPiece TzAfterPiece;
+struct TzAfterPiece {
+  TzObject base;
+  TzReactor reactor;
+  TzAfterPiece *next;
+  void (*run)(TzAfterPiece *self, int32_t pooled);
+};
+
+int32_t tz_after_piece_wanted(void);
+void tz_after_piece(TzAfterPiece *a, const TzObjectDesc *desc,
+                    void (*run)(TzAfterPiece *self, int32_t pooled));
+void tz_after_piece_order(void);
+void tz_after_piece_run(void);
 extern const TzLayout tz_promise_void_layout;
 
 #define TZ_PROMISE_DONE 8

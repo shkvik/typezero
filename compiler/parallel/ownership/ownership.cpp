@@ -1,4 +1,5 @@
 #include "compiler/parallel/ownership/ownership.h"
+#include "compiler/library/crypto/crypto_api/crypto_api.h"
 #include "compiler/parallel/alias_analysis/alias_analysis.h"
 #include "compiler/parallel/escape_scan/escape_scan.h"
 #include "compiler/parallel/library_effects/library_effects.h"
@@ -57,17 +58,30 @@ Ref Ownership::interned(const VarSymbol *root, const Type *type, Needs needs, bo
 }
 
 bool Ownership::isParam(const FunctionDecl *fn, const VarSymbol *v) {
-  return fn && v && llvm::any_of(fn->params, [&](const Param &p) { return p.sym == v; });
+  return fn && v &&
+         (isSelf(fn, v) || llvm::any_of(fn->params, [&](const Param &p) { return p.sym == v; }));
+}
+
+bool Ownership::isSelf(const FunctionDecl *fn, const VarSymbol *v) {
+  return fn && v && fn->thisVar == v && fn->takesThis();
+}
+
+bool Ownership::builds(const FunctionDecl *fn) {
+  return fn && fn->cls && (fn->isConstructor || fn == fn->cls->init);
 }
 
 bool Ownership::candidate(const FunctionDecl *fn, const VarSymbol *v) const {
   if (!fn || !v || fn->isGenerator || analysis_.isLibrary(fn)) {
     return false;
   }
+  if (isSelf(fn, v)) {
+    return fn->body != nullptr;
+  }
   for (const Param &p : fn->params) {
     if (p.sym == v) {
-      return !p.rest && !p.defaultValue && !p.property && !v->reassigned && !v->captured &&
-             holdsReferences(v->type);
+      bool callable = v->type && v->type->nonOptional()->isFunction();
+      return !p.rest && !p.defaultValue && !p.property && !v->reassigned &&
+             (holdsReferences(v->type) || callable);
     }
   }
 
@@ -75,7 +89,61 @@ bool Ownership::candidate(const FunctionDecl *fn, const VarSymbol *v) const {
 }
 
 bool Ownership::tracked(const FunctionDecl *fn, const VarSymbol *v) {
-  return fn && v && v->owner == fn && !v->isGlobal && !v->captured && !v->reassigned;
+  return fn && v && v->owner == fn && !v->isGlobal && !v->reassigned;
+}
+
+const FunctionDecl *Ownership::homeOf(const FunctionDecl *fn, const VarSymbol *v) {
+  if (!fn || !v || !v->captured || v->isGlobal || !v->owner || v->owner == fn) {
+    return nullptr;
+  }
+  for (const FunctionDecl *up = fn->parent; up; up = up->parent) {
+    if (up == v->owner) {
+      return up;
+    }
+  }
+
+  return nullptr;
+}
+
+const std::vector<VarSymbol *> &Ownership::capturesOf(const FunctionDecl *fn) {
+  return fn->group ? fn->group->captures : fn->captures;
+}
+
+const FunctionDecl *Ownership::closureOf(const Expr *e) {
+  auto *fe = dyn_cast_or_null<FunctionExpr>(strip(e));
+
+  return fe ? fe->fn : nullptr;
+}
+
+void Ownership::closure(const FunctionDecl *fn, bool confined) {
+  if (confined && !fn->isAsync && !fn->isGenerator) {
+    goodClosures_.insert(fn);
+    return;
+  }
+  badClosures_.insert(fn);
+  for (const VarSymbol *v : capturesOf(fn)) {
+    Roots roots;
+    carriersOf(v, roots, 0);
+    for (const VarSymbol *root : roots) {
+      leaked_.insert(root);
+    }
+  }
+}
+
+bool Ownership::confined(const FunctionDecl *fn) const {
+  return goodClosures_.contains(fn) && !badClosures_.contains(fn);
+}
+
+bool Ownership::confinedVar(const VarSymbol *v) const {
+  if (!v || v->isGlobal || !v->captured || !v->owner) {
+    return false;
+  }
+  auto found = capturers_.find(v);
+  if (found == capturers_.end()) {
+    return false;
+  }
+
+  return llvm::all_of(found->second, [&](const FunctionDecl *fn) { return confined(fn); });
 }
 
 bool Ownership::freshCandidate(const FunctionDecl *fn, const VarSymbol *v) const {
@@ -142,6 +210,9 @@ bool Ownership::plainObject(const Type *type) {
 }
 
 bool Ownership::container(const Type *type) {
+  if (type && type->classDecl() && !type->classDecl()->library) {
+    return true;
+  }
   if (!containers_) {
     containers_.emplace();
     std::set<const Type *> library;
@@ -324,7 +395,7 @@ bool Ownership::derivable(const Type *type, unsigned depth) {
   case Type::Kind::Object: {
     const ClassDecl *cls = type->classDecl();
 
-    return cls && cls->library;
+    return (cls && cls->library) || type->isCrypto();
   }
   default:
     return false;
@@ -364,6 +435,9 @@ const VarSymbol *Ownership::rootOf(const FunctionDecl *fn, const Expr *e, Needs 
   }
   if (auto *n = dyn_cast<NameExpr>(e)) {
     const VarSymbol *v = n->var;
+    if (const FunctionDecl *home = homeOf(fn, v)) {
+      return rootOf(home, e, needs, depth + 1);
+    }
     if (isParam(fn, v)) {
       return candidate(fn, v) ? v : nullptr;
     }
@@ -400,6 +474,9 @@ const VarSymbol *Ownership::rootOf(const FunctionDecl *fn, const Expr *e, Needs 
     return rootOf(fn, m->object, needs, depth + 1);
   }
   if (auto *c = dyn_cast<CallExpr>(e)) {
+    if (const Expr *same = cryptoSelf(c)) {
+      return rootOf(fn, same, needs, depth + 1);
+    }
     const FunctionDecl *lib = analysis_.libraryEffects().libraryTarget(c);
     auto *m = dyn_cast<MemberExpr>(c->callee);
     if (!lib || !lib->cls || lib->isStatic || lib->isAsync || lib->isGenerator || !c->method ||
@@ -416,53 +493,120 @@ const VarSymbol *Ownership::rootOf(const FunctionDecl *fn, const Expr *e, Needs 
   return nullptr;
 }
 
+const Expr *Ownership::cryptoSelf(const CallExpr *c) {
+  if (c->builtin != Builtin::Crypto || c->args.empty()) {
+    return nullptr;
+  }
+  auto *number = dyn_cast<IntLitExpr>(strip(c->args[0]));
+  if (!number || number->value >= std::size(kCryptoFunctions) ||
+      kCryptoFunctions[size_t(number->value)].result != 'S') {
+    return nullptr;
+  }
+  llvm::StringRef kinds = kCryptoFunctions[size_t(number->value)].params;
+  for (size_t i = 1; i < c->args.size() && i - 1 < kinds.size(); ++i) {
+    if (kinds[i - 1] == 'o') {
+      return c->args[i];
+    }
+  }
+
+  return nullptr;
+}
+
 void Ownership::carriers(const Expr *e, Roots &out, unsigned depth) {
   e = strip(e);
   if (!e || depth > 64 || !holdsReferences(e->type)) {
     return;
   }
   switch (e->kind()) {
-  case Expr::Kind::Name: {
-    const VarSymbol *v = cast<NameExpr>(e)->var;
-    if (isParam(fn_, v)) {
-      if (candidate(fn_, v) && !llvm::is_contained(out, v)) {
-        out.push_back(v);
-      }
-      return;
-    }
-    if (!tracked(fn_, v)) {
-      return;
-    }
-    if (auto loop = loopInit_.find(v); loop != loopInit_.end()) {
-      carriers(loop->second, out, depth + 1);
-      return;
-    }
-    if (freshCandidate(fn_, v) && !llvm::is_contained(out, v)) {
-      out.push_back(v);
-    }
-    if (auto init = analysis_.declInit_.find(v); init != analysis_.declInit_.end()) {
-      carriers(init->second, out, depth + 1);
-    }
+  case Expr::Kind::Name:
+    carriersOf(cast<NameExpr>(e)->var, out, depth);
     return;
-  }
   case Expr::Kind::Member:
     carriers(cast<MemberExpr>(e)->object, out, depth + 1);
     return;
   case Expr::Kind::Index:
     carriers(cast<IndexExpr>(e)->object, out, depth + 1);
     return;
+  default:
+    carriersOther(e, out, depth);
+    return;
+  }
+}
+
+void Ownership::carriersOf(const VarSymbol *v, Roots &out, unsigned depth) {
+  if (!v || depth > 64) {
+    return;
+  }
+  if (const FunctionDecl *home = homeOf(fn_, v)) {
+    const FunctionDecl *saved = fn_;
+    fn_ = home;
+    carriersOf(v, out, depth + 1);
+    fn_ = saved;
+    return;
+  }
+  if (isParam(fn_, v)) {
+    if (candidate(fn_, v) && !llvm::is_contained(out, v)) {
+      out.push_back(v);
+    }
+    return;
+  }
+  if (!tracked(fn_, v)) {
+    return;
+  }
+  if (auto loop = loopInit_.find(v); loop != loopInit_.end()) {
+    carriers(loop->second, out, depth + 1);
+    return;
+  }
+  if (freshCandidate(fn_, v) && !llvm::is_contained(out, v)) {
+    out.push_back(v);
+  }
+  if (auto init = analysis_.declInit_.find(v); init != analysis_.declInit_.end()) {
+    carriers(init->second, out, depth + 1);
+  }
+}
+
+void Ownership::carriersOther(const Expr *e, Roots &out, unsigned depth) {
+  switch (e->kind()) {
   case Expr::Kind::Call: {
     auto *c = cast<CallExpr>(e);
+    switch (c->builtin) {
+    case Builtin::BufferConcat:
+    case Builtin::BytesFromArray:
+    case Builtin::BytesFromBytes:
+    case Builtin::BufferFromString:
+    case Builtin::TextEncode:
+      return;
+    case Builtin::Crypto: {
+      auto *number = c->args.empty() ? nullptr : dyn_cast<IntLitExpr>(strip(c->args[0]));
+      if (!number || number->value >= std::size(kCryptoFunctions)) {
+        break;
+      }
+      const CryptoFunction &fn = kCryptoFunctions[size_t(number->value)];
+      if (fn.result != 'S') {
+        return;
+      }
+      llvm::StringRef kinds = fn.params;
+      for (size_t i = 1; i < c->args.size() && i - 1 < kinds.size(); ++i) {
+        if (kinds[i - 1] == 'o') {
+          carriers(c->args[i], out, depth + 1);
+        }
+      }
+      return;
+    }
+    default:
+      break;
+    }
     if (analysis_.libraryEffects().libraryTarget(c) &&
         (plainValues(c->type, 0) || analysis_.aliasAnalysis().isAllocation(c))) {
       return;
     }
-    if (auto *m = dyn_cast<MemberExpr>(c->callee)) {
+    bool program = c->builtin == Builtin::None && !analysis_.libraryEffects().libraryTarget(c);
+    if (auto *m = dyn_cast<MemberExpr>(c->callee);
+        m && (!program || !passesOwnedSelf(c) || returnsBack(c, kSelf))) {
       carriers(m->object, out, depth + 1);
     }
-    bool program = c->builtin == Builtin::None && !analysis_.libraryEffects().libraryTarget(c);
     for (size_t i = 0; i < c->args.size(); ++i) {
-      if (!program || !passesOwned(c, i)) {
+      if (!program || !passesOwned(c, i) || returnsBack(c, i)) {
         carriers(c->args[i], out, depth + 1);
       }
     }
@@ -534,14 +678,39 @@ void Ownership::leak(const Expr *e) {
   }
 }
 
-void Ownership::leakParams(const Expr *e) {
+void Ownership::returnParams(const Expr *e) {
   Roots roots;
   carriers(e, roots, 0);
   for (const VarSymbol *v : roots) {
     if (isParam(fn_, v)) {
-      leaked_.insert(v);
+      returned_.insert(v);
     }
   }
+}
+
+bool Ownership::returnsBack(const CallExpr *c, size_t index) {
+  const CallRec *rec = recOf(c);
+  if (!rec) {
+    return true;
+  }
+  size_t shift = thisFirst(*rec) ? 1 : 0;
+  for (const Callee &callee : rec->callees) {
+    const FunctionDecl *g = analysis_.fns_[callee.fn].decl;
+    if (!g) {
+      return true;
+    }
+    const VarSymbol *v = nullptr;
+    if (index == kSelf) {
+      v = g->thisVar;
+    } else if (index >= shift && index - shift < g->params.size()) {
+      v = g->params[index - shift].sym;
+    }
+    if (!v || returned_.contains(v)) {
+      return true;
+    }
+  }
+
+  return false;
 }
 
 void Ownership::literal(const ObjectLitExpr *o) {
@@ -670,7 +839,7 @@ void Ownership::visitStmt(const Stmt *s) {
   case Stmt::Kind::Return: {
     const Expr *value = cast<ReturnStmt>(s)->value;
     visit(value);
-    leakParams(value);
+    returnParams(value);
     if (collecting_ && value) {
       returns_[fi_].push_back(value);
     }
@@ -699,6 +868,14 @@ void Ownership::visit(const Expr *e) {
     return;
   }
   switch (e->kind()) {
+  case Expr::Kind::Function:
+    closure(cast<FunctionExpr>(e)->fn, false);
+    return;
+  case Expr::Kind::Name:
+    if (auto *n = cast<NameExpr>(e); n->func && n->func->decl && n->func->decl->parent) {
+      closure(n->func->decl, false);
+    }
+    return;
   case Expr::Kind::Template:
     for (const Expr *x : cast<TemplateExpr>(e)->exprs) {
       visit(x);
@@ -754,8 +931,17 @@ void Ownership::visit(const Expr *e) {
   case Expr::Kind::Update: {
     const Expr *target =
         isa<AssignExpr>(e) ? cast<AssignExpr>(e)->target : cast<UpdateExpr>(e)->target;
+    auto *assigned = dyn_cast<AssignExpr>(e);
+    bool selfField = false;
     if (auto *m = dyn_cast<MemberExpr>(target)) {
-      if (collecting_) {
+      auto *self = dyn_cast<NameExpr>(strip(m->object));
+      selfField = assigned && !assigned->op && self && isSelf(fn_, self->var) && m->object->type &&
+                  m->object->type->nonOptional()->classDecl();
+      if (collecting_ && selfField) {
+        const ClassDecl *built = builds(fn_) ? fn_->cls : nullptr;
+        stores_[analysis_.intern(m->name)].push_back(
+            {m->object->type->nonOptional(), assigned->value, fi_, nullptr, built});
+      } else if (collecting_) {
         dirty(m->object, m->name);
       }
       visit(m->object);
@@ -770,9 +956,19 @@ void Ownership::visit(const Expr *e) {
     } else if (!isa<NameExpr>(target)) {
       visit(target);
     }
-    if (auto *a = dyn_cast<AssignExpr>(e)) {
-      visit(a->value);
-      leak(a->value);
+    if (assigned) {
+      visit(assigned->value);
+      bool kept = selfField && builds(fn_) && !leaking_.contains(fn_->thisVar) &&
+                  !analysis_.escapeScan().constructorLeaks(fn_->cls);
+      if (selfField && !builds(fn_) && candidate(fn_, fn_->thisVar)) {
+        kept = true;
+        if (collecting_) {
+          selfStores_.push_back({fn_->thisVar, assigned->value, fi_, {}});
+        }
+      }
+      if (!kept) {
+        leak(assigned->value);
+      }
     }
     return;
   }
@@ -781,9 +977,12 @@ void Ownership::visit(const Expr *e) {
     return;
   case Expr::Kind::New: {
     auto *n = cast<NewExpr>(e);
-    for (const Expr *arg : n->ctor ? n->ctor->args : n->args) {
-      visit(arg);
-      leak(arg);
+    const std::vector<Expr *> &args = n->ctor ? n->ctor->args : n->args;
+    for (size_t i = 0; i < args.size(); ++i) {
+      visit(args[i]);
+      if (!passesOwnedNew(n, i)) {
+        leak(args[i]);
+      }
     }
     return;
   }
@@ -827,8 +1026,32 @@ void Ownership::visitCall(const CallExpr *c) {
     if (m) {
       visit(m->object);
     }
-    bool reads = onlyReadsArgs(c->builtin);
+    bool reads = onlyReadsArgs(c->builtin) || c->builtin == Builtin::ResultOk ||
+                 c->builtin == Builtin::ResultErr || c->builtin == Builtin::Crypto;
+    Needs held;
+    const VarSymbol *holder = nullptr;
+    if (m && (c->builtin == Builtin::ArrPush || c->builtin == Builtin::ArrUnshift ||
+              c->builtin == Builtin::MapSet || c->builtin == Builtin::SetAdd)) {
+      holder = rootOf(fn_, m->object, held, 0);
+    }
+    if (holder) {
+      for (const Expr *arg : c->args) {
+        if (const FunctionDecl *fn = closureOf(arg)) {
+          closure(fn, false);
+          continue;
+        }
+        visit(arg);
+        if (collecting_) {
+          selfStores_.push_back({holder, arg, fi_, held});
+        }
+      }
+      return;
+    }
     for (const Expr *arg : c->args) {
+      if (const FunctionDecl *fn = closureOf(arg)) {
+        closure(fn, fn->nonEscaping);
+        continue;
+      }
       visit(arg);
       if (!reads) {
         leak(arg);
@@ -841,6 +1064,10 @@ void Ownership::visitCall(const CallExpr *c) {
       visit(m->object);
     }
     for (const Expr *arg : c->args) {
+      if (const FunctionDecl *fn = closureOf(arg)) {
+        closure(fn, false);
+        continue;
+      }
       visit(arg);
       leak(arg);
     }
@@ -848,11 +1075,17 @@ void Ownership::visitCall(const CallExpr *c) {
   }
   if (m && (c->method || !c->unionMethods.empty())) {
     visit(m->object);
-    leak(m->object);
+    if (!passesOwnedSelf(c)) {
+      leak(m->object);
+    }
   } else if (!c->func) {
     visit(c->callee);
   }
   for (size_t i = 0; i < c->args.size(); ++i) {
+    if (const FunctionDecl *fn = closureOf(c->args[i])) {
+      closure(fn, passesOwned(c, i) && !returnsBack(c, i));
+      continue;
+    }
     visit(c->args[i]);
     if (!passesOwned(c, i)) {
       leak(c->args[i]);
@@ -887,7 +1120,7 @@ bool Ownership::tailAwaited(unsigned fi) {
   for (const Site &site : sites_[fi]) {
     const FnInfo &caller = analysis_.fns_[site.fn];
     const CallRec &rec = caller.calls[site.rec];
-    if (rec.served) {
+    if (rec.ownArgs > 0) {
       continue;
     }
     bool direct = rec.kind == CallKind::Call && rec.reflect == CallRec::Reflect::None &&
@@ -911,32 +1144,96 @@ bool Ownership::handsOver(unsigned fi, const CallRec &rec, Mode mode, bool stric
   return mode == Mode::Spawn && !strict && rec.tail && tailAwaited(fi);
 }
 
+const std::vector<Expr *> *Ownership::argsOf(const CallRec &rec) {
+  if (rec.call) {
+    return rec.call->hasSpread() ? nullptr : &rec.call->args;
+  }
+  auto *n = dyn_cast_or_null<NewExpr>(static_cast<const Expr *>(rec.site));
+  if (!n || !n->cls || n->cls->library) {
+    return nullptr;
+  }
+  if (n->ctor) {
+    return n->ctor->hasSpread() ? nullptr : &n->ctor->args;
+  }
+
+  return &n->args;
+}
+
 int Ownership::argOf(unsigned fi, const CallRec &rec, const Callee &callee, size_t param,
                      bool strict) {
-  if (rec.served || rec.kind != CallKind::Call || rec.reflect != CallRec::Reflect::None ||
-      rec.channel >= 0 || !rec.call || rec.call->builtin != Builtin::None ||
-      rec.call->hasSpread() || !handsOver(fi, rec, callee.mode, strict)) {
+  const std::vector<Expr *> *args = argsOf(rec);
+  if (rec.ownArgs > 0 || rec.kind != CallKind::Call || rec.reflect != CallRec::Reflect::None ||
+      rec.channel >= 0 || !args || (rec.call && rec.call->builtin != Builtin::None) ||
+      !handsOver(fi, rec, callee.mode, strict)) {
     return -1;
   }
   size_t index = param + (thisFirst(rec) ? 1 : 0);
 
-  return index < rec.call->args.size() ? int(index) : -1;
+  return index < args->size() ? int(index) : -1;
+}
+
+const CallRec *Ownership::recOf(const void *site) const {
+  const FnInfo &f = analysis_.fns_[fi_];
+  auto found = f.callOf.find(std::make_pair(site, unsigned(CallKind::Call)));
+  if (found == f.callOf.end()) {
+    return nullptr;
+  }
+  const CallRec &rec = f.calls[found->second];
+  if (rec.reflect != CallRec::Reflect::None || rec.channel >= 0 || rec.callees.empty()) {
+    return nullptr;
+  }
+
+  return &rec;
+}
+
+bool Ownership::passesOwnedSelf(const CallExpr *c) {
+  const CallRec *rec = c->method && c->unionMethods.empty() ? recOf(c) : nullptr;
+  if (!rec) {
+    return false;
+  }
+  for (const Callee &callee : rec->callees) {
+    const FunctionDecl *g = analysis_.fns_[callee.fn].decl;
+    if (!handsOver(fi_, *rec, callee.mode, false) || !g || !candidate(g, g->thisVar) ||
+        leaking_.contains(g->thisVar)) {
+      return false;
+    }
+  }
+
+  return true;
+}
+
+bool Ownership::passesOwnedNew(const NewExpr *n, size_t index) {
+  const CallRec *rec = recOf(n);
+  const std::vector<Expr *> *args = rec ? argsOf(*rec) : nullptr;
+  if (!args || index >= args->size()) {
+    return false;
+  }
+  for (const Callee &callee : rec->callees) {
+    const FunctionDecl *g = analysis_.fns_[callee.fn].decl;
+    if (!g || !g->isConstructor) {
+      continue;
+    }
+    if (!handsOver(fi_, *rec, callee.mode, false) || index >= g->params.size()) {
+      return false;
+    }
+    const VarSymbol *param = g->params[index].sym;
+    if (!candidate(g, param) || leaking_.contains(param)) {
+      return false;
+    }
+  }
+
+  return true;
 }
 
 bool Ownership::passesOwned(const CallExpr *c, size_t index) {
   if (c->hasSpread()) {
     return false;
   }
-  const FnInfo &f = analysis_.fns_[fi_];
-  auto found =
-      f.callOf.find(std::make_pair(static_cast<const void *>(c), unsigned(CallKind::Call)));
-  if (found == f.callOf.end()) {
+  const CallRec *found = recOf(c);
+  if (!found) {
     return false;
   }
-  const CallRec &rec = f.calls[found->second];
-  if (rec.reflect != CallRec::Reflect::None || rec.channel >= 0 || rec.callees.empty()) {
-    return false;
-  }
+  const CallRec &rec = *found;
   size_t shift = thisFirst(rec) ? 1 : 0;
   if (index < shift) {
     return false;
@@ -966,16 +1263,67 @@ bool Ownership::callersOwned(unsigned fi, size_t index, bool strict) {
       if (callee.fn != fi) {
         continue;
       }
-      if (rec.served) {
-        if (index < 2) {
+      if (rec.ownArgs > 0) {
+        if (index < rec.ownArgs && (!rec.poolItem || poolFresh(rec.poolItem))) {
           continue;
         }
         return false;
       }
+      if (index == kSelf) {
+        if (!selfOwned(site.fn, rec, callee, strict)) {
+          return false;
+        }
+        continue;
+      }
       int arg = argOf(site.fn, rec, callee, index, strict);
-      if (arg < 0 || !valueOwn(site.fn, rec.call->args[size_t(arg)], true, 0)) {
+      if (arg < 0 || !valueOwn(site.fn, (*argsOf(rec))[size_t(arg)], true, 0)) {
         return false;
       }
+    }
+  }
+
+  return true;
+}
+
+const Expr *Ownership::receiverOf(const CallRec &rec) {
+  const CallExpr *c = rec.call;
+  if (!c || !c->method || c->superCall || !c->unionMethods.empty() || rec.ownArgs > 0 ||
+      rec.kind != CallKind::Call || rec.reflect != CallRec::Reflect::None || rec.channel >= 0) {
+    return nullptr;
+  }
+  auto *m = dyn_cast<MemberExpr>(c->callee);
+
+  return m ? m->object : nullptr;
+}
+
+bool Ownership::selfOwned(unsigned fi, const CallRec &rec, const Callee &callee, bool strict) {
+  const FunctionDecl *g = analysis_.fns_[callee.fn].decl;
+  if (!handsOver(fi, rec, callee.mode, strict)) {
+    return false;
+  }
+  if (builds(g) && llvm::isa_and_nonnull<NewExpr>(static_cast<const Expr *>(rec.site))) {
+    return true;
+  }
+  const FunctionDecl *caller = analysis_.fns_[fi].decl;
+  if (rec.call && rec.call->superCall && builds(g) && caller && caller->thisVar) {
+    return owned_.contains(caller->thisVar);
+  }
+  const Expr *receiver = receiverOf(rec);
+
+  return receiver && valueOwn(fi, receiver, true, 0);
+}
+
+bool Ownership::poolFresh(const Type *item) const {
+  if (analysis_.poolOpen_) {
+    return false;
+  }
+  for (const auto &[type, create] : analysis_.poolCreates_) {
+    if (!analysis_.aliasAnalysis().typesMayAlias(type, item)) {
+      continue;
+    }
+    auto found = analysis_.fnIndex_.find(create);
+    if (found == analysis_.fnIndex_.end() || !fresh_.contains(found->second)) {
+      return false;
     }
   }
 
@@ -1017,6 +1365,10 @@ bool Ownership::valueOwn(unsigned fi, const Expr *e, bool params, unsigned depth
   if (auto *b = dyn_cast<BinaryExpr>(e);
       b && (b->op == BinaryOp::LogAnd || b->op == BinaryOp::LogOr || b->op == BinaryOp::Nullish)) {
     return valueOwn(fi, b->lhs, params, depth + 1) && valueOwn(fi, b->rhs, params, depth + 1);
+  }
+  if (auto *c = dyn_cast<CallExpr>(e);
+      c && (c->builtin == Builtin::ResultOk || c->builtin == Builtin::ResultErr)) {
+    return c->args.empty() || valueOwn(fi, c->args[0], params, depth + 1);
   }
   const FunctionDecl *fn = analysis_.fns_[fi].decl;
   Needs needs;
@@ -1069,6 +1421,7 @@ bool Ownership::fieldOwn(const FieldKey &key) {
   }
   for (const Store &s : stores->second) {
     if ((s.holder && !owned_.contains(s.holder)) ||
+        (s.built && analysis_.escapeScan().constructorLeaks(s.built)) ||
         !analysis_.aliasAnalysis().typesMayAlias(s.type, key.first)) {
       continue;
     }
@@ -1104,14 +1457,37 @@ std::optional<Ref> Ownership::substituted(Ref r, const FnInfo &callee, unsigned 
   if (found == paramOf_.end()) {
     return freshOf_.count(owned->root) ? r : plain;
   }
-  if (found->second.first != callee.decl || leaking_.contains(owned->root)) {
+  if (leaking_.contains(owned->root)) {
     return plain;
   }
-  int arg = argOf(caller, rec, call, found->second.second, false);
-  if (arg < 0) {
+  if (found->second.first != callee.decl) {
+    return owned->root->captured ? r : plain;
+  }
+  const Expr *value = nullptr;
+  if (found->second.second == kSelf) {
+    if (!handsOver(caller, rec, call.mode, false)) {
+      return plain;
+    }
+    if (builds(callee.decl) &&
+        llvm::isa_and_nonnull<NewExpr>(static_cast<const Expr *>(rec.site))) {
+      bool fresh = !analysis_.escapeScan().constructorLeaks(callee.decl->cls);
+      return fresh && needsOwn(owned->needs) ? std::nullopt : std::optional<Ref>(plain);
+    }
+    const FunctionDecl *from = analysis_.fns_[caller].decl;
+    if (rec.call && rec.call->superCall && builds(callee.decl) && from &&
+        candidate(from, from->thisVar)) {
+      return interned(from->thisVar, owned->type, owned->needs, owned->whole);
+    }
+    value = receiverOf(rec);
+  } else {
+    int arg = argOf(caller, rec, call, found->second.second, false);
+    if (arg >= 0) {
+      value = (*argsOf(rec))[size_t(arg)];
+    }
+  }
+  if (!value) {
     return plain;
   }
-  const Expr *value = rec.call->args[size_t(arg)];
   Needs needs;
   if (const VarSymbol *root = rootOf(analysis_.fns_[caller].decl, value, needs, 0)) {
     auto *name = dyn_cast<NameExpr>(strip(value));
@@ -1134,15 +1510,30 @@ void Ownership::rewrite() {
     auto *owned = static_cast<const OwnedRef *>(r.ptr);
     return own(owned) ? Ref{RefKind::Local, nullptr} : owned->fallback;
   };
+  capturers_.clear();
+  for (const FnInfo &f : analysis_.fns_) {
+    if (f.decl && !analysis_.isLibrary(f.decl)) {
+      for (const VarSymbol *v : capturesOf(f.decl)) {
+        capturers_[v].push_back(f.decl);
+      }
+    }
+  }
+  auto taskVar = [&](const Access &a) {
+    return a.loc.kind == LocKind::Var && confinedVar(static_cast<const VarSymbol *>(a.loc.key));
+  };
   for (FnInfo &f : analysis_.fns_) {
     for (Segment &seg : f.segs) {
-      bool any = llvm::any_of(seg.effects,
-                              [](const Access &a) { return a.loc.ref.kind == RefKind::Owned; });
+      bool any = llvm::any_of(seg.effects, [&](const Access &a) {
+        return a.loc.ref.kind == RefKind::Owned || taskVar(a);
+      });
       if (!any) {
         continue;
       }
       Effects next;
       for (const Access &a : seg.effects) {
+        if (taskVar(a)) {
+          continue;
+        }
         if (a.loc.ref.kind != RefKind::Owned) {
           next.insert(a);
           continue;
@@ -1177,11 +1568,57 @@ void Ownership::rewrite() {
   }
 }
 
+void Ownership::loops(const FunctionDecl *fn, const Stmt *s) {
+  if (!s) {
+    return;
+  }
+  switch (s->kind()) {
+  case Stmt::Kind::Block:
+    for (const Stmt *x : cast<BlockStmt>(s)->body) {
+      loops(fn, x);
+    }
+    return;
+  case Stmt::Kind::If:
+    loops(fn, cast<IfStmt>(s)->thenStmt);
+    loops(fn, cast<IfStmt>(s)->elseStmt);
+    return;
+  case Stmt::Kind::While:
+    loops(fn, cast<WhileStmt>(s)->body);
+    return;
+  case Stmt::Kind::DoWhile:
+    loops(fn, cast<DoWhileStmt>(s)->body);
+    return;
+  case Stmt::Kind::For:
+    loops(fn, cast<ForStmt>(s)->init);
+    loops(fn, cast<ForStmt>(s)->body);
+    return;
+  case Stmt::Kind::ForOf: {
+    auto *f = cast<ForOfStmt>(s);
+    if (tracked(fn, f->binding.sym)) {
+      loopInit_[f->binding.sym] = f->iterable;
+    }
+    loops(fn, f->body);
+    return;
+  }
+  case Stmt::Kind::Switch:
+    for (const SwitchCase &c : cast<SwitchStmt>(s)->cases) {
+      for (const Stmt *x : c.body) {
+        loops(fn, x);
+      }
+    }
+    return;
+  case Stmt::Kind::Labeled:
+    loops(fn, cast<LabeledStmt>(s)->body);
+    return;
+  default:
+    return;
+  }
+}
+
 void Ownership::scan(unsigned fi) {
   fi_ = fi;
   fn_ = analysis_.fns_[fi].decl;
   leaked_.clear();
-  loopInit_.clear();
   if (!fn_) {
     if (collecting_) {
       for (const Stmt *item : analysis_.program_.items) {
@@ -1203,10 +1640,40 @@ void Ownership::scan(unsigned fi) {
 }
 
 void Ownership::decide() {
+  forced_.clear();
+  for (int round = 0; round < 32; ++round) {
+    decideOnce();
+    size_t before = forced_.size();
+    deciding_ = true;
+    for (const SelfStore &store : selfStores_) {
+      if (owned_.contains(store.self) && needsOwn(store.needs)) {
+        continue;
+      }
+      fi_ = store.fi;
+      fn_ = analysis_.fns_[store.fi].decl;
+      Roots roots;
+      carriers(store.value, roots, 0);
+      forced_.insert(roots.begin(), roots.end());
+    }
+    fn_ = nullptr;
+    deciding_ = false;
+    if (forced_.size() == before) {
+      return;
+    }
+  }
+}
+
+void Ownership::decideOnce() {
   size_t count = analysis_.fns_.size();
   analysis_.ownedParams_.clear();
   owned_.clear();
   leaking_.clear();
+  leaking_.insert(forced_.begin(), forced_.end());
+  selfStores_.clear();
+  returned_.clear();
+  goodClosures_.clear();
+  badClosures_.clear();
+  loopInit_.clear();
   paramOf_.clear();
   freshOf_.clear();
   stores_.clear();
@@ -1242,9 +1709,13 @@ void Ownership::decide() {
         paramOf_[v] = {decl, i};
       }
     }
+    if (candidate(decl, decl->thisVar)) {
+      paramOf_[decl->thisVar] = {decl, kSelf};
+    }
     if (!decl->isGenerator && decl->body) {
       fresh_.insert(fi);
     }
+    loops(decl, decl->body);
   }
   bool first = true;
   bool changed = true;
@@ -1338,5 +1809,4 @@ void Ownership::decide() {
     }
   }
 }
-
 }

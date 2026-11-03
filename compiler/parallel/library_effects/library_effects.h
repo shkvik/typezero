@@ -15,8 +15,10 @@ public:
   void libraryNew(const NewExpr *n);
   void libraryArg(const CallExpr *c, llvm::StringRef cls, llvm::StringRef name, const Expr *arg,
                   llvm::SMLoc at);
+  static const Type *poolItemOf(const Type *fn);
+  void poolCreate(const Expr *f);
   void libraryCallback(const CallExpr *c, const Expr *f, CallKind kind, bool interval = false,
-                       bool handled = false, bool served = false);
+                       bool handled = false, unsigned ownArgs = 0, const Type *poolItem = nullptr);
   void listen(const Expr *f, Channel channel);
   void libraryReads(const Expr *e, llvm::SMLoc at);
   void dispatch(const CallExpr *c, CallKind kind, Channel channel, const Use &use);

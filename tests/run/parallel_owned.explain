@@ -51,13 +51,14 @@ top-level code
 
 async function later, line 23
   start: runs inside its caller
-  after await at line 24 (in the task later(request) at line 40)
+  after await at line 24 (in the tasks later(request) at line 40)
     reads  the state of any Request (line 25)
     writes the state of any Headers (line 25)
     in order with the arrow at line 34: the state of any Headers
     in order with the arrow at line 39: the state of any Headers
     in order with the arrow at line 44: the state of any Headers
     in order with the arrow at line 45: the state of any Headers
+    in order with the same piece in other tasks: the state of any Headers
     in order with the start of the top-level code: the state of any Headers
     in order: line 25
 
@@ -108,13 +109,14 @@ arrow, line 44
     in order: line 46
 
 arrow, line 45
-  start (in the callback at line 45)
+  start (in the callbacks at line 45)
     reads  the state of any Request (line 45)
     writes the state of any Headers (line 45)
     in order with later after await at line 24: the state of any Headers
     in order with the arrow at line 34: the state of any Headers
     in order with the arrow at line 39: the state of any Headers
     in order with the arrow at line 44: the state of any Headers
+    in order with the same piece in other tasks: the state of any Headers
     in order with the start of the top-level code: the state of any Headers
     in order: line 45
 

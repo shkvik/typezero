@@ -71,6 +71,7 @@ void Analysis::run() {
   pieces().findHosts();
   pieces().buildFlow();
   pieces().findJoins();
+  pieces().findBindings();
   conflicts().decide();
 }
 

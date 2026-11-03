@@ -98,6 +98,8 @@ struct Access {
   llvm::SMLoc origin;
   llvm::SMLoc anchor;
   const FunctionDecl *home = nullptr;
+  const VarSymbol *bound = nullptr;
+  const FunctionDecl *through = nullptr;
   bool operator<(const Access &o) const {
     if (!(loc == o.loc)) {
       return loc < o.loc;
@@ -108,7 +110,13 @@ struct Access {
     if (at.getPointer() != o.at.getPointer()) {
       return std::less<const char *>()(at.getPointer(), o.at.getPointer());
     }
-    return std::less<const char *>()(origin.getPointer(), o.origin.getPointer());
+    if (origin.getPointer() != o.origin.getPointer()) {
+      return std::less<const char *>()(origin.getPointer(), o.origin.getPointer());
+    }
+    if (bound != o.bound) {
+      return std::less<const VarSymbol *>()(bound, o.bound);
+    }
+    return std::less<const FunctionDecl *>()(through, o.through);
   }
 };
 
@@ -188,7 +196,9 @@ struct CallRec {
   bool inLoop = false;
   bool interval = false;
   bool handled = false;
-  bool served = false;
+  unsigned ownArgs = 0;
+  const VarSymbol *viaParam = nullptr;
+  const Type *poolItem = nullptr;
   int channel = -1;
   enum class Reflect : uint8_t { None, Apply, Construct } reflect = Reflect::None;
 };
@@ -237,6 +247,7 @@ struct Root {
   bool recursive = false;
   const AwaitExpr *join = nullptr;
   std::vector<unsigned> spawnAt, interval;
+  std::vector<std::pair<unsigned, llvm::SMLoc>> spawnFrom;
   std::vector<std::pair<int, std::vector<unsigned>>> chain;
   const FunctionDecl *ownCell = nullptr;
 };

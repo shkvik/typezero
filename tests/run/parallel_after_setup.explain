@@ -1,0 +1,40 @@
+top-level code
+  start
+    reads  the length of any string[] (line 31)
+    writes the state of server (line 39)
+    writes stdout (lines 41, 42)
+    reads  message of any ListenError (line 41)
+    writes stderr (line 42)
+    writes the exit code and environment (line 42)
+    reads  the state of any Listening (line 45)
+    parallel
+  after await at line 32
+    writes the state of server (line 39)
+    writes stdout (lines 41, 42)
+    reads  message of any ListenError (line 41)
+    writes stderr (line 42)
+    writes the exit code and environment (line 42)
+    reads  the state of any Listening (line 45)
+    parallel
+  after await at line 45
+    writes the state of any Response (line 47)
+    writes the state of any Listening (line 50)
+    parallel
+  after await at line 47
+    writes stdout (line 48)
+    writes the state of any Listening (line 50)
+    parallel
+  after await at line 50
+    parallel
+
+async method Service.connect, line 20
+  start: runs inside its caller
+  after await at line 21
+    writes this.source (line 22)
+    runs alone
+
+async arrow, line 35
+  start (in the callbacks at line 35)
+    reads  the state of the URL made at line 36 (line 36)
+    reads  service.source (line 37 in Service.read)
+    parallel

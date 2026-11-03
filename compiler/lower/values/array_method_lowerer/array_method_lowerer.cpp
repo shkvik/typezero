@@ -88,6 +88,7 @@ llvm::Value *ArrayMethodLowerer::emitArrayMethod(CallExpr *call) {
     llvm::Value *slots = lowering_.builder_.CreateCall(
         lowering_.rt_.arrUnshiftSlots, {array.value, lowering_.builder_.getInt64(values.size())});
     for (size_t i = 0; i < values.size(); ++i) {
+      lowering_.storeLowerer().storeBarrier(array.value, values[i], element);
       lowering_.builder_.CreateStore(
           values[i],
           lowering_.arrayLowerer().elementAddress(slots, element, lowering_.builder_.getInt64(i)));

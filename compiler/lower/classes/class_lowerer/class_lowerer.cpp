@@ -279,6 +279,7 @@ llvm::Value *ClassLowerer::emitMethodLiteral(ObjectLitExpr *lit) {
   lowering_.builder_.CreateStore(lowering_.classDescriptors().classDescriptor(cls),
                                  lowering_.builder_.CreateStructGEP(layout.type, object, 1));
   lowering_.groupLowerer().noteUnstored(object, lit);
+  std::vector<std::pair<llvm::Value *, const Type *>> fields;
   for (const ObjectLitExpr::Property &prop : lit->props) {
     if (prop.method) {
       continue;
@@ -286,32 +287,35 @@ llvm::Value *ClassLowerer::emitMethodLiteral(ObjectLitExpr *lit) {
     llvm::Value *value = lowering_.exprLowerer().emitExpr(prop.value);
     lowering_.builder_.CreateStore(value,
                                    lowering_.objectLayouts().fieldAddress(object, type, prop.name));
-    if (member) {
-      lowering_.storeLowerer().groupStore(object, value, type->field(prop.name)->type);
-    }
+    fields.push_back({value, type->field(prop.name)->type});
   }
   const std::vector<VarSymbol *> &captures = cls->group->captures;
+  std::vector<llvm::Value *> boxes;
   for (size_t i = 0; i < captures.size(); ++i) {
     const VarSymbol *var = captures[i];
     llvm::Value *value;
     if (var->boxed()) {
       value = lowering_.envLowerer().boxPointer(var);
       lowering_.builder_.CreateCall(lowering_.objRetainFn_, {value});
-      if (member) {
-        lowering_.builder_.CreateCall(
-            lowering_.groupLowerer().groupFunction(
-                "tz_group_store", lowering_.builder_.getVoidTy(),
-                {lowering_.builder_.getPtrTy(), lowering_.builder_.getPtrTy()}),
-            {object, value});
-      }
+      boxes.push_back(value);
     } else {
       value = lowering_.envLowerer().emitVarValue(var, false);
-      if (member) {
-        lowering_.storeLowerer().groupStore(object, value, ClosureLowerer::typeOf(var));
-      }
+      fields.push_back({value, ClosureLowerer::typeOf(var)});
     }
     lowering_.builder_.CreateStore(value, lowering_.builder_.CreateStructGEP(
                                               layout.type, object, unsigned(layout.captures + i)));
+  }
+  if (member) {
+    for (auto [value, fieldType] : fields) {
+      lowering_.storeLowerer().groupStore(object, value, fieldType);
+    }
+    for (llvm::Value *box : boxes) {
+      lowering_.builder_.CreateCall(
+          lowering_.groupLowerer().groupFunction(
+              "tz_group_store", lowering_.builder_.getVoidTy(),
+              {lowering_.builder_.getPtrTy(), lowering_.builder_.getPtrTy()}),
+          {object, box});
+    }
   }
   for (FunctionDecl *fn : cls->methods) {
     lowering_.closureLowerer().closureCode(fn);

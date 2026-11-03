@@ -77,6 +77,13 @@ void CallResolver::resolve() {
               }
               continue;
             }
+            bool hidden = !cls->constructors.empty() &&
+                          llvm::all_of(cls->constructors, [](const FunctionDecl *ctor) {
+                            return ctor->access != tz::Access::Public;
+                          });
+            if (hidden) {
+              continue;
+            }
             std::optional<Ref> self = Ref{RefKind::Site, rec.site};
             for (const FunctionDecl *ctor : cls->constructors) {
               analysis_.callWalk().addCallee(rec, ctor, self, true);
@@ -156,6 +163,24 @@ std::optional<Access> CallResolver::substitute(const Access &a, const FnInfo &ca
                                                const CallRec &rec) const {
   const std::optional<Ref> &self = call.self;
   Access b = a;
+  if (b.bound && callee.decl) {
+    const std::vector<Param> &params = callee.decl->params;
+    auto it = llvm::find_if(params, [&](const Param &p) { return p.sym == b.bound; });
+    if (it != params.end()) {
+      const Expr *arg = argument(rec, size_t(it - params.begin()));
+      const FunctionDecl *passed = functionOf(arg);
+      const VarSymbol *param = callableParam(analysis_.fns_[caller].decl, arg);
+      if (passed && passed != b.through) {
+        return std::nullopt;
+      }
+      if (param && !passed) {
+        b.bound = param;
+      } else {
+        b.bound = nullptr;
+        b.through = nullptr;
+      }
+    }
+  }
   bool byLibrary = rec.kind == CallKind::Inline && rec.call &&
                    analysis_.libraryEffects().libraryTarget(rec.call);
   if (analysis_.isLibrary(callee.decl) || byLibrary) {
@@ -228,6 +253,10 @@ void CallResolver::fold() {
         std::vector<Access> added;
         for (const Access &a : g.inlineEffects) {
           if (std::optional<Access> b = substitute(a, g, fi, c, rec)) {
+            if (rec.viaParam && !b->bound) {
+              b->bound = rec.viaParam;
+              b->through = g.decl;
+            }
             added.push_back(*b);
           }
         }
@@ -250,6 +279,51 @@ void CallResolver::fold() {
       }
     }
   }
+}
+
+const Expr *CallResolver::argument(const CallRec &rec, size_t index) {
+  if (rec.ownArgs > 0 || rec.kind == CallKind::Later) {
+    return nullptr;
+  }
+  if (rec.call) {
+    if (rec.call->hasSpread() || index >= rec.call->args.size()) {
+      return nullptr;
+    }
+    return rec.call->args[index];
+  }
+  auto *n = dyn_cast_or_null<NewExpr>(static_cast<const Expr *>(rec.site));
+  if (!n) {
+    return nullptr;
+  }
+  const std::vector<Expr *> &args = n->ctor ? n->ctor->args : n->args;
+
+  return index < args.size() ? args[index] : nullptr;
+}
+
+const FunctionDecl *CallResolver::functionOf(const Expr *e) {
+  e = strip(e);
+  if (auto *fe = dyn_cast_or_null<FunctionExpr>(e)) {
+    return fe->fn;
+  }
+  auto *n = dyn_cast_or_null<NameExpr>(e);
+  if (n && n->func) {
+    return n->func->decl;
+  }
+  if (n && n->var && !n->var->reassigned && (n->var->lambda || n->var->function)) {
+    return n->var->lambda ? n->var->lambda : n->var->function;
+  }
+
+  return nullptr;
+}
+
+const VarSymbol *CallResolver::callableParam(const FunctionDecl *fn, const Expr *e) {
+  auto *n = dyn_cast_or_null<NameExpr>(strip(e));
+  if (!fn || !n || !n->var || n->var->reassigned) {
+    return nullptr;
+  }
+  bool param = llvm::any_of(fn->params, [&](const Param &p) { return p.sym == n->var; });
+
+  return param ? n->var : nullptr;
 }
 
 std::optional<Ref> CallResolver::bind(const std::optional<Ref> &self,

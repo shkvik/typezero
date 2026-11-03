@@ -21,6 +21,8 @@ public:
   std::optional<Ref> substituted(Ref r, const FnInfo &callee, unsigned caller, const CallRec &rec,
                                  const Callee &call);
   void rewrite();
+  bool confined(const FunctionDecl *fn) const;
+  bool confinedVar(const VarSymbol *v) const;
 
 private:
   using Roots = llvm::SmallVector<const VarSymbol *, 2>;
@@ -34,9 +36,19 @@ private:
     const Expr *value = nullptr;
     unsigned fn = 0;
     const VarSymbol *holder = nullptr;
+    const ClassDecl *built = nullptr;
   };
+  static constexpr unsigned kSelf = ~0u;
   const VarSymbol *rootOf(const FunctionDecl *fn, const Expr *e, Needs &needs, unsigned depth);
   static bool isParam(const FunctionDecl *fn, const VarSymbol *v);
+  static bool isSelf(const FunctionDecl *fn, const VarSymbol *v);
+  static bool builds(const FunctionDecl *fn);
+  static const std::vector<Expr *> *argsOf(const CallRec &rec);
+  static const Expr *receiverOf(const CallRec &rec);
+  const CallRec *recOf(const void *site) const;
+  bool passesOwnedSelf(const CallExpr *c);
+  bool passesOwnedNew(const NewExpr *n, size_t index);
+  bool selfOwned(unsigned fi, const CallRec &rec, const Callee &callee, bool strict);
   bool candidate(const FunctionDecl *fn, const VarSymbol *v) const;
   static bool tracked(const FunctionDecl *fn, const VarSymbol *v);
   bool freshCandidate(const FunctionDecl *fn, const VarSymbol *v) const;
@@ -49,8 +61,21 @@ private:
   static bool plainValues(const Type *type, unsigned depth);
   static bool derivable(const Type *type, unsigned depth);
   void carriers(const Expr *e, Roots &out, unsigned depth);
+  void carriersOf(const VarSymbol *v, Roots &out, unsigned depth);
+  void carriersOther(const Expr *e, Roots &out, unsigned depth);
+  static const FunctionDecl *homeOf(const FunctionDecl *fn, const VarSymbol *v);
+  static const std::vector<VarSymbol *> &capturesOf(const FunctionDecl *fn);
+  static const FunctionDecl *closureOf(const Expr *e);
+  static const Expr *cryptoSelf(const CallExpr *c);
+  void closure(const FunctionDecl *fn, bool confined);
+  void loops(const FunctionDecl *fn, const Stmt *s);
+  llvm::DenseSet<const FunctionDecl *> goodClosures_;
+  llvm::DenseSet<const FunctionDecl *> badClosures_;
+  llvm::DenseMap<const VarSymbol *, std::vector<const FunctionDecl *>> capturers_;
   void leak(const Expr *e);
-  void leakParams(const Expr *e);
+  void returnParams(const Expr *e);
+  bool returnsBack(const CallExpr *c, size_t index);
+  llvm::DenseSet<const VarSymbol *> returned_;
   void visitStmt(const Stmt *s);
   void visit(const Expr *e);
   void visitCall(const CallExpr *c);
@@ -63,6 +88,7 @@ private:
   int argOf(unsigned fi, const CallRec &rec, const Callee &callee, size_t param, bool strict);
   bool passesOwned(const CallExpr *c, size_t index);
   bool callersOwned(unsigned fi, size_t index, bool strict);
+  bool poolFresh(const Type *item) const;
   bool callFresh(unsigned fi, const CallExpr *c) const;
   bool valueOwn(unsigned fi, const Expr *e, bool params, unsigned depth);
   bool fieldOpen(const FieldKey &key);
@@ -71,6 +97,15 @@ private:
   bool own(const OwnedRef *owned);
   Ref interned(const VarSymbol *root, const Type *type, Needs needs, bool whole);
   void scan(unsigned fi);
+  void decideOnce();
+  struct SelfStore {
+    const VarSymbol *self = nullptr;
+    const Expr *value = nullptr;
+    unsigned fi = 0;
+    Needs needs;
+  };
+  std::vector<SelfStore> selfStores_;
+  llvm::DenseSet<const VarSymbol *> forced_;
   Analysis &analysis_;
   const FunctionDecl *fn_ = nullptr;
   unsigned fi_ = 0;

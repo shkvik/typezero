@@ -82,7 +82,7 @@ async function share, line 71
 
 async function read, line 80
   start: runs inside its caller
-  after await at line 81 (in the task read(pending) at line 77)
+  after await at line 81 (in the tasks read(pending) at line 77)
     reads  params of any Pending (line 82)
     reads  entries of any Map<string, string> (line 82)
     in order with the arrow at line 97: entries of any Map<string, string>
@@ -92,7 +92,7 @@ async function race, line 85
   start: runs inside its caller
     reads  pending.params (line 88)
     writes entries of any Map<string, string> (line 88)
-  after await at line 89 (in the task race(request) at line 97)
+  after await at line 89 (in the tasks race(request) at line 97)
     parallel
 
 arrow, line 94

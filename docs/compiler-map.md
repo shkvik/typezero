@@ -554,6 +554,8 @@ library/                       C++-часть тем библиотеки: пр�
     fs_promises_checker/       FsPromisesChecker: fs/promises
     fs_promises_lowerer/       FsPromisesLowerer: IR fs/promises и readline
     readline_checker/          ReadlineChecker: readline
+  held_values/                 значения, которые живут только внутри вызова (хранилище run, объект Pool.use)
+    held_value_checker/        HeldValueChecker: обход всей программы — куда уходит значение
   intl/                        Intl
     intl_call_lowerer/         IntlCallLowerer: IR вызовов Intl
     intl_check_helpers/        опции и службы Intl
@@ -628,6 +630,8 @@ library/                       C++-часть тем библиотеки: пр�
     stream_new_checker/        StreamNewChecker: new Readable и др.
     stream_pipeline/           StreamPipeline: pipeline, finished, compose
     stream_sources/            StreamSources: createReadStream, process.stdin как поток
+  sync/                        tz:sync: Pool
+    pool_checker/              PoolChecker: объект Pool живёт только внутри use (docs/async.md, раздел 11)
   tz_modules/                  модули на tz: tz:http, fetch, URL, мосты declare function
     http_checker/              HttpChecker: new Response, Request, Headers
     library_call_lowerer/      LibraryCallLowerer: IR вызовов библиотеки

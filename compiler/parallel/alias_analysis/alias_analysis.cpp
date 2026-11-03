@@ -91,6 +91,11 @@ Ref AliasAnalysis::refOf(const Expr *e) {
   if (auto *n = dyn_cast<NameExpr>(e); n && n->var) {
     const VarSymbol *v = n->var;
     if (v->owner && v->owner->thisVar == v) {
+      if (analysis_.fn_ && analysis_.fn_->decl != v->owner) {
+        if (std::optional<Ref> owned = analysis_.ownership().ownedRef(e)) {
+          return *owned;
+        }
+      }
       return Ref{RefKind::This, v->owner};
     }
     auto it = analysis_.declInit_.find(v);
