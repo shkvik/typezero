@@ -40,6 +40,8 @@ bool isTargetClass(llvm::StringRef cls) { return cls == "EventTarget"; }
 
 bool isLockedClass(llvm::StringRef cls) { return cls == "ConcurrentMap"; }
 
+bool isContextClass(llvm::StringRef cls) { return cls == "AsyncLocalStorage"; }
+
 bool readOnlyExpr(const Expr *e) {
   if (!e) {
     return true;
@@ -155,7 +157,7 @@ void LibraryEffects::libraryCall(const CallExpr *c, const FunctionDecl *decl, co
       analysis_.callWalk().addCallee(rec, fn, self);
     }
   }
-  if (self && !superCtor && !isLockedClass(cls)) {
+  if (self && !superCtor && !isLockedClass(cls) && !isContextClass(cls)) {
     libraryState(cls, name, self, !readsOnly(decl), at);
   }
   if (isEmitterClass(cls) && name == "emit") {
@@ -189,7 +191,7 @@ void LibraryEffects::libraryArg(const CallExpr *c, llvm::StringRef cls, llvm::St
       listen(f, TargetListeners);
     } else if ((cls == "Server" || cls == "Http2Server") && name == "constructor") {
       libraryCallback(c, f, CallKind::Later, true, true, true);
-    } else if (isLockedClass(cls)) {
+    } else if (isLockedClass(cls) || isContextClass(cls)) {
       libraryCallback(c, f, CallKind::Inline);
     } else {
       libraryCallback(c, f, CallKind::Inline);

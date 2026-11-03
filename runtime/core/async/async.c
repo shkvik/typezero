@@ -29,6 +29,38 @@ static void release(void *object) { tz_obj_release((TzObject *)object); }
 
 static void call(TzFunction fn) { ((void (*)(TzObject *))fn.info->code)(fn.env); }
 
+void *tz_context_hold(void) {
+  TzObject *context = (TzObject *)tz_thread.context;
+  if (context) {
+    retain(context);
+  }
+
+  return context;
+}
+
+void *tz_context_resume(void *context) {
+  void *outer = tz_thread.context;
+  tz_thread.context = context;
+
+  return outer;
+}
+
+void tz_context_done(void *outer, void *context) {
+  tz_thread.context = outer;
+  release(context);
+}
+
+static void call_in(TzFunction fn, TzObject *context) {
+  if (!context) {
+    call(fn);
+    return;
+  }
+  void *outer = tz_thread.context;
+  tz_thread.context = context;
+  call(fn);
+  tz_thread.context = outer;
+}
+
 TzReactor *tz_micro_head, *tz_micro_tail;
 
 #if TZ_PARALLEL
@@ -132,6 +164,9 @@ void tz_promise_drop(void *object) {
   }
   for (TzReactor *r = p->head; r;) {
     TzReactor *next = r->next;
+    TzObject *context = r->context;
+    r->context = NULL;
+    release(context);
     if (r->source == TZ_REACTION_WITHIN) {
       r->source = NULL;
       tz_group_unstore(p, r->owner);
@@ -495,6 +530,7 @@ static Follow *new_follow(TzPromise *target, TzPromise *origin) {
   f->reactor.owner = &f->base;
   f->reactor.source = NULL;
   f->reactor.ahead = 0;
+  f->reactor.context = NULL;
   f->target = target;
   f->origin = origin;
   f->first = NULL;
@@ -582,6 +618,7 @@ static void queue_later(TzPromise *p, TzReactor *reaction) {
   later->reactor.owner = &later->base;
   later->reactor.source = NULL;
   later->reactor.ahead = 0;
+  later->reactor.context = NULL;
   later->promise = p;
   later->reaction = reaction;
   retain(p);
@@ -787,6 +824,7 @@ TzPromise *tz_promise_combine(int32_t kind, TzArray *promises, const TzCombine *
     e->reactor.owner = &e->base;
     e->reactor.source = NULL;
     e->reactor.ahead = 0;
+    e->reactor.context = NULL;
     e->all = c;
     retain(c);
     e->index = i;
@@ -813,6 +851,7 @@ typedef struct {
 
 static void task_drop(void *object) {
   Task *t = (Task *)object;
+  release(t->reactor.context);
   tz_obj_release(t->callback.env);
   tz_obj_free(t);
 }
@@ -821,7 +860,11 @@ static const TzObjectDesc task_desc = {task_drop};
 
 static void task_run(TzReactor *r, TzPromise *source) {
   (void)source;
-  call(((Task *)((char *)r - offsetof(Task, reactor)))->callback);
+  Task *t = (Task *)((char *)r - offsetof(Task, reactor));
+  TzObject *context = r->context;
+  r->context = NULL;
+  call_in(t->callback, context);
+  release(context);
 }
 
 void tz_queue_microtask(const TzFunctionInfo *info, TzObject *env) {
@@ -833,6 +876,7 @@ void tz_queue_microtask(const TzFunctionInfo *info, TzObject *env) {
   t->reactor.owner = &t->base;
   t->reactor.source = NULL;
   t->reactor.ahead = 0;
+  t->reactor.context = (TzObject *)tz_context_hold();
   t->callback.info = info;
   t->callback.env = env;
   tz_microtask(&t->reactor);
@@ -841,6 +885,7 @@ void tz_queue_microtask(const TzFunctionInfo *info, TzObject *env) {
 typedef struct Tick {
   struct Tick *next;
   TzFunction callback;
+  TzObject *context;
 } Tick;
 
 Tick *tz_tick_head, *tz_tick_tail;
@@ -851,6 +896,7 @@ void tz_next_tick(const TzFunctionInfo *info, TzObject *env) {
   t->next = NULL;
   t->callback.info = info;
   t->callback.env = env;
+  t->context = (TzObject *)tz_context_hold();
   if (tz_tick_tail) {
     tz_tick_tail->next = t;
   } else {
@@ -868,8 +914,10 @@ void tz_after_callback(void) {
         tz_tick_tail = NULL;
       }
       TzFunction callback = t->callback;
+      TzObject *context = t->context;
       tz_free(t);
-      call(callback);
+      call_in(callback, context);
+      release(context);
       tz_obj_release(callback.env);
     }
     tz_run_microtasks();
@@ -991,6 +1039,7 @@ static void drop_list(TimerList *list) {
 
 static void timer_drop(void *object) {
   TzTimer *t = (TzTimer *)object;
+  release(t->context);
   tz_obj_release(t->callback.env);
   if (t->weak) {
     tz_obj_release((TzObject *)t->weak);
@@ -1058,7 +1107,7 @@ static void unlink_timer(TzTimer *t) {
   release(t);
 }
 
-TzTimer *tz_timer_new(const TzFunctionInfo *info, TzObject *env, double after, int32_t repeat) {
+static TzTimer *timer_new(const TzFunctionInfo *info, TzObject *env, double after, int32_t repeat) {
   TZ_ORDERED();
   if (!(after >= 1 && after <= TIMEOUT_MAX)) {
     after = 1;
@@ -1074,6 +1123,15 @@ TzTimer *tz_timer_new(const TzFunctionInfo *info, TzObject *env, double after, i
   t->refed = 1;
   ++tz_timer_refs;
   insert(t, after, loop_now());
+
+  return t;
+}
+
+TzTimer *tz_timer_new(const TzFunctionInfo *info, TzObject *env, double after, int32_t repeat) {
+  TzTimer *t = timer_new(info, env, after, repeat);
+  if (!repeat) {
+    t->context = (TzObject *)tz_context_hold();
+  }
 
   return t;
 }
@@ -1115,11 +1173,11 @@ TzTimer *tz_timer_new_owned(const TzFunctionInfo *info, TzObject *env, double af
     }
   }
   if (!receiver) {
-    TzTimer *t = tz_timer_new(info, env, after, repeat);
+    TzTimer *t = timer_new(info, env, after, repeat);
     t->shared = (flags & TZ_TIMER_DEDUPE) != 0;
     return t;
   }
-  TzTimer *t = tz_timer_new(info, NULL, after, repeat);
+  TzTimer *t = timer_new(info, NULL, after, repeat);
   t->weak = tz_weak_new(&timer_weak_layout, env);
   tz_obj_release(env);
 
@@ -1201,6 +1259,7 @@ TzTimer *tz_immediate_new(const TzFunctionInfo *info, TzObject *env) {
   t->layout = &tz_immediate_layout;
   t->callback.info = info;
   t->callback.env = env;
+  t->context = (TzObject *)tz_context_hold();
   t->immediate = 1;
   t->refed = 1;
   ++tz_immediate_refs;
@@ -1287,7 +1346,7 @@ static void list_on_timeout(TimerList *list, int64_t now) {
       call(bound);
       tz_obj_release(receiver);
     } else {
-      call(t->callback);
+      call_in(t->callback, t->context);
     }
     if (t->repeat && t->idle_timeout != -1) {
       t->idle_timeout = t->repeat;
@@ -1345,7 +1404,7 @@ static void run_immediates(void) {
     t->refed = 0;
     TzFunction callback = t->callback;
     t->callback.env = NULL;
-    call(callback);
+    call_in(callback, t->context);
     tz_obj_release(callback.env);
     if (prev) {
       release(prev);
@@ -1429,7 +1488,7 @@ void tz_timers_wait(TzPromise *p, double delay, int32_t immediate, int32_t ref) 
   w->promise = p;
   retain(p);
   TzTimer *timer = immediate ? tz_immediate_new(&wait_info, &w->base)
-                             : tz_timer_new(&wait_info, &w->base, delay, 0);
+                             : timer_new(&wait_info, &w->base, delay, 0);
   if (!ref) {
     tz_timer_ref(timer, 0);
   }
@@ -1489,6 +1548,7 @@ static void fulfill_after(TzPromise *p, int32_t turns) {
   t->reactor.owner = &t->base;
   t->reactor.source = NULL;
   t->reactor.ahead = 0;
+  t->reactor.context = NULL;
   t->promise = p;
   retain(p);
   t->turns = turns;
@@ -1496,7 +1556,7 @@ static void fulfill_after(TzPromise *p, int32_t turns) {
 }
 
 enum { AGEN_START, AGEN_YIELD, AGEN_RUNNING, AGEN_RETURNING, AGEN_DONE };
-_Static_assert(offsetof(TzAsyncGen, reactor) == 40 && sizeof(TzAsyncGen) == 80,
+_Static_assert(offsetof(TzAsyncGen, reactor) == 40 && sizeof(TzAsyncGen) == 88,
                "TzAsyncGen must match kAgenReactor and kAgenHeader of Lowering");
 
 static void agen_enqueue(TzAsyncGen *g, TzPromise *p, int32_t close) {
@@ -1570,6 +1630,7 @@ static void agen_await_return(TzAsyncGen *g) {
   job->reactor.owner = &job->base;
   job->reactor.source = NULL;
   job->reactor.ahead = 0;
+  job->reactor.context = NULL;
   job->generator = g;
   retain(g);
   tz_microtask(&job->reactor);

@@ -461,6 +461,7 @@ enum class Builtin {
   LibOrder,
   LibPanic,
   LibDefer,
+  LibWithContext,
   ClassName,
   ReflectGet,
   ReflectApply,
@@ -469,7 +470,7 @@ enum class Builtin {
 };
 
 inline bool isLibBuiltin(Builtin builtin) {
-  return builtin >= Builtin::LibListener && builtin <= Builtin::LibDefer;
+  return builtin >= Builtin::LibListener && builtin <= Builtin::LibWithContext;
 }
 
 inline bool isCryptoBuiltin(Builtin builtin) {

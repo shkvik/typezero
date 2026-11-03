@@ -125,6 +125,7 @@ public:
   void setSourceMgr(const llvm::SourceMgr *sourceMgr) { sourceMgr_ = sourceMgr; }
   const std::string &mismatch() const { return mismatch_; }
   void setFeatures(const FeatureRegistry *features) { features_ = features; }
+  void setContexts(bool contexts) { contexts_ = contexts; }
   void setParallelPlan(const ParallelPlan *plan);
   void setMemoryPlan(const MemoryPlan *memory) { memory_ = memory; }
   void setDebug(DebugLevel level, bool optimized, bool codeView) {
@@ -133,6 +134,7 @@ public:
     codeView_ = codeView;
   }
   bool parallel() const { return parallel_; }
+  bool contexts() const { return contexts_; }
   void orderAt(llvm::SMLoc loc);
 
 private:
@@ -290,6 +292,7 @@ private:
   const MemoryPlan *memory_ = nullptr;
   const FeatureRegistry *features_ = nullptr;
   bool parallel_ = false;
+  bool contexts_ = false;
   llvm::DenseMap<const Node *, uint32_t> aheadStarts_;
   llvm::DenseSet<const Node *> freeAwaits_;
   llvm::DenseSet<const Node *> movableAwaits_;

@@ -30,6 +30,7 @@ const KnownFile kKnownFiles[] = {
     {"websocket.tz", "websocket.tz", "tz:websocket"},
     {"intrinsics.tz", "intrinsics.tz", "tz:intrinsics"},
     {"sync.tz", "sync.tz", "tz:sync"},
+    {"async_hooks.tz", "async_hooks.tz", "node:async_hooks"},
     {"net.tz", "net.tz", "node:net"},
     {"dgram.tz", "dgram.tz", "node:dgram"},
     {"packet.tz", "packet.tz", "tz:packet"},

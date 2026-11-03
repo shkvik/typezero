@@ -79,6 +79,9 @@ Module *ModuleResolver::resolve(Module *from, llvm::StringRef spec, llvm::SMLoc 
   if (spec == "tz:sync") {
     return loader_.library().libraryModule("sync.tz", "tz:sync", loc);
   }
+  if (spec == "node:async_hooks" || spec == "async_hooks") {
+    return loader_.library().libraryModule("async_hooks.tz", "node:async_hooks", loc);
+  }
   if (from->builtin && (spec == "tz:web" || spec == "tz:url" || spec == "tz:fetch" ||
                         spec == "tz:intrinsics" || spec == "tz:websocket")) {
     return loader_.library().libraryModule(spec.drop_front(3).str() + ".tz", spec, loc);

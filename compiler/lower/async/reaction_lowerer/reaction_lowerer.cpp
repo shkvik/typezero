@@ -32,6 +32,7 @@ enum ReactionField : unsigned {
   kReactorOwner,
   kReactorSource,
   kReactorAhead,
+  kReactorContext,
   kReactionDerived,
   kReactionCallback,
 };
@@ -48,7 +49,7 @@ llvm::StructType *ReactionLowerer::reactionType() {
     reactionTy_ =
         llvm::StructType::create(lowering_.ctx_,
                                  {lowering_.builder_.getInt64Ty(), ptr, ptr, ptr, ptr, ptr,
-                                  lowering_.builder_.getInt64Ty(), ptr, lowering_.fnTy_},
+                                  lowering_.builder_.getInt64Ty(), ptr, ptr, lowering_.fnTy_},
                                  "tz.reaction");
   }
 
@@ -138,7 +139,23 @@ llvm::Function *ReactionLowerer::reactionHandler(const Type *value, const Type *
     } else if (given) {
       lowering_.refCounts().releaseValue(given, value);
     }
+    llvm::Value *context = nullptr, *outer = nullptr;
+    if (lowering_.contexts()) {
+      llvm::Value *slot = lowering_.builder_.CreateStructGEP(type, object, kReactorContext);
+      context = lowering_.builder_.CreateLoad(ptr, slot, "context");
+      lowering_.builder_.CreateStore(
+          llvm::ConstantPointerNull::get(llvm::cast<llvm::PointerType>(ptr)), slot);
+      outer = lowering_.builder_.CreateCall(
+          lowering_.asyncLowerer().asyncFunction("tz_context_resume", ptr, {ptr}), {context},
+          "outer");
+    }
     llvm::Value *gave = lowering_.closureLowerer().callFunctionValue(fn, callback, args);
+    if (context) {
+      lowering_.builder_.CreateCall(
+          lowering_.asyncLowerer().asyncFunction("tz_context_done", lowering_.builder_.getVoidTy(),
+                                                 {ptr, ptr}),
+          {outer, context});
+    }
     const Type *ret = callback->ret();
     if (ret->isPromise()) {
       lowering_.promiseLowerer().followPromise(derived, gave);
@@ -207,6 +224,14 @@ void ReactionLowerer::attachReaction(llvm::Value *source, llvm::Value *derived,
                                  lowering_.builder_.CreateStructGEP(type, object, kReactorSource));
   lowering_.builder_.CreateStore(lowering_.builder_.getInt64(0),
                                  lowering_.builder_.CreateStructGEP(type, object, kReactorAhead));
+  llvm::Value *context =
+      callback && lowering_.contexts()
+          ? lowering_.builder_.CreateCall(lowering_.asyncLowerer().asyncFunction(
+                                              "tz_context_hold", lowering_.builder_.getPtrTy(), {}),
+                                          {}, "context")
+          : null;
+  lowering_.builder_.CreateStore(context,
+                                 lowering_.builder_.CreateStructGEP(type, object, kReactorContext));
   lowering_.builder_.CreateCall(lowering_.objRetainFn_, {derived});
   lowering_.builder_.CreateStore(
       derived, lowering_.builder_.CreateStructGEP(type, object, kReactionDerived));

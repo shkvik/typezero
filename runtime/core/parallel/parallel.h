@@ -27,6 +27,7 @@ typedef struct TzThread {
   TzHeap heap;
   int32_t awaited_call;
   int32_t sync_locks;
+  void *context;
 } TzThread;
 
 enum { TZ_CACHE_INTL = 0, TZ_CACHE_DATE_FORMAT = 1 };

@@ -4,6 +4,7 @@
 #include "compiler/check/stmt/var_checker/var_checker.h"
 #include "compiler/declare/module_declarer/module_declarer.h"
 #include "compiler/declare/prelude/prelude.h"
+#include "compiler/library/async_hooks/context_checker/context_checker.h"
 #include "compiler/library/events/emitter_checker/emitter_checker.h"
 #include "compiler/library/fs/fs_checker/fs_checker.h"
 #include "compiler/library/reflect/reflect_checker/reflect_checker.h"
@@ -46,6 +47,7 @@ Errors WholeProgramPass::run(Program &program) const {
       file.items.push_back(cls);
     }
   }
+  ContextChecker(program).run();
   if (!checker.diags_.hasErrors()) {
     checker.wideWrites().checkWidenings(file);
   }

@@ -2,7 +2,9 @@
 #include "compiler/lower/lowering/lowering.h"
 #include "compiler/lower/module_builder/module_builder.h"
 #include "compiler/optimize/target/target.h"
+#include "compiler/program/module/module.h"
 #include "compiler/program/program/program.h"
+#include "llvm/ADT/STLExtras.h"
 #include "llvm/IR/Verifier.h"
 #include "llvm/Support/raw_ostream.h"
 
@@ -21,6 +23,9 @@ Result<Lowered, Errors> LowerPass::run(Program &program, const ParallelPlan &pla
   lowering.setParallelPlan(&plan);
   lowering.setMemoryPlan(&memory);
   lowering.setFeatures(&features_);
+  lowering.setContexts(llvm::any_of(program.file.modules, [](const Module *m) {
+    return m->builtin && m->name == "node:async_hooks";
+  }));
   lowering.setDebug(debug_, optimize_, target_.triple().isOSWindows());
   std::unique_ptr<llvm::Module> module = lowering.moduleBuilder().generate(program.file);
   std::string problems = lowering.mismatch();
@@ -40,5 +45,4 @@ Result<Lowered, Errors> LowerPass::run(Program &program, const ParallelPlan &pla
 
   return ok(Lowered{std::move(module), lowering.parallel()});
 }
-
 }

@@ -29,7 +29,7 @@ namespace {
 
 constexpr uint64_t kAgenReactor = 40;
 
-constexpr uint64_t kAgenHeader = 80;
+constexpr uint64_t kAgenHeader = 88;
 
 constexpr uint32_t kAgenFrameAlign = 8;
 

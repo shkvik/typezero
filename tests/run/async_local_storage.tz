@@ -1,0 +1,136 @@
+// same-as-node
+// AsyncLocalStorage: the store follows await, then, timers and microtasks, as in node
+// (docs/async.md, section 10).
+import { AsyncLocalStorage } from "node:async_hooks";
+import { EventEmitter } from "node:events";
+
+type RequestContext = {
+  requestId: string;
+  user?: string;
+};
+
+const requestContext = new AsyncLocalStorage<RequestContext>();
+const depth = new AsyncLocalStorage<int>();
+
+function log(message: string) {
+  const context = requestContext.getStore();
+  const id = context?.requestId ?? "-";
+  console.log(`[${id}] ${message}`);
+}
+
+function sleep(ms: int): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function handle(name: string, gate: Promise<void>) {
+  log(`start ${name}`);
+  await gate;
+  log(`after gate ${name}`);
+  const context = requestContext.getStore();
+  if (context != undefined) {
+    context.user = name.toUpperCase();
+  }
+  await Promise.resolve();
+  log(`user ${requestContext.getStore()?.user ?? "none"}`);
+  const value = await Promise.resolve(1).then((v) => {
+    log(`then ${name}`);
+    return v + 1;
+  });
+  log(`value ${value}`);
+}
+
+log("top");
+const gateA = Promise.withResolvers<void>();
+const gateB = Promise.withResolvers<void>();
+const a = requestContext.run({ requestId: "a" }, () => handle("a", gateA.promise));
+const b = requestContext.run({ requestId: "b" }, () => handle("b", gateB.promise));
+log("between");
+gateB.resolve();
+gateA.resolve();
+await Promise.all([a, b]);
+log("after both");
+
+await requestContext.run({ requestId: "timers" }, async () => {
+  await new Promise<void>((resolve) =>
+    setTimeout(() => {
+      log("timeout");
+      resolve();
+    }, 1),
+  );
+  await new Promise<void>((resolve) =>
+    setImmediate(() => {
+      log("immediate");
+      resolve();
+    }),
+  );
+  await new Promise<void>((resolve) =>
+    queueMicrotask(() => {
+      log("microtask");
+      resolve();
+    }),
+  );
+  await new Promise<void>((resolve) =>
+    process.nextTick(() => {
+      log("tick");
+      resolve();
+    }),
+  );
+});
+log("after timers");
+
+depth.run(1, () => {
+  console.log(`depth ${depth.getStore() ?? 0}`);
+  depth.run(2, () => {
+    console.log(`depth ${depth.getStore() ?? 0}`);
+  });
+  console.log(`depth ${depth.getStore() ?? 0}`);
+  requestContext.run({ requestId: "inner" }, () => {
+    log(`inner, depth ${depth.getStore() ?? 0}`);
+  });
+});
+console.log(`depth ${depth.getStore() ?? 0}`);
+const length = requestContext.run({ requestId: "sync" }, () => {
+  log("sync");
+  return 5;
+});
+console.log(`length ${length}`);
+
+async function* numbers() {
+  log("generator start");
+  await sleep(1);
+  log("generator after await");
+  yield 1;
+  log("generator resumed");
+  yield 2;
+}
+
+await requestContext.run({ requestId: "gen" }, async () => {
+  for await (const n of numbers()) {
+    log(`got ${n}`);
+  }
+});
+
+const bus = new EventEmitter<{ ping: [from: string] }>();
+requestContext.run({ requestId: "listener" }, () => {
+  bus.on("ping", (from) => log(`ping from ${from}`));
+});
+requestContext.run({ requestId: "emitter" }, () => bus.emit("ping", "emitter"));
+bus.emit("ping", "top");
+
+const { promise, resolve } = Promise.withResolvers<string>();
+const waiting = requestContext.run({ requestId: "waiter" }, () =>
+  promise.then((word) => log(`resolved with ${word}`)),
+);
+requestContext.run({ requestId: "resolver" }, () => resolve("hello"));
+await waiting;
+
+const parts = await requestContext.run({ requestId: "all" }, () =>
+  Promise.all(
+    [1, 2, 3].map(async (n) => {
+      await sleep(3 - n);
+      return `${requestContext.getStore()?.requestId ?? "-"}${n}`;
+    }),
+  ),
+);
+console.log(parts.join(" "));
+log("end");

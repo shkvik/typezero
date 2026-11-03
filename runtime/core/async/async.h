@@ -15,6 +15,7 @@ struct TzReactor {
   TzObject *owner;
   TzPromise *source;
   uintptr_t ahead;
+  TzObject *context;
 };
 
 #define TZ_REACTION_WITHIN ((TzPromise *)(uintptr_t)1)
@@ -50,8 +51,12 @@ typedef struct TzTimer {
   double repeat;
   uint8_t refed, destroyed, immediate, cleared, shared;
   void *weak;
+  TzObject *context;
 } TzTimer;
 
+void *tz_context_hold(void);
+void *tz_context_resume(void *context);
+void tz_context_done(void *outer, void *context);
 void tz_microtask(TzReactor *r);
 void tz_run_microtasks(void);
 void tz_promise_trigger(TzPromise *p);

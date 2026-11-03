@@ -148,8 +148,9 @@ runtime/
                      alloc/ group/ publish/ closure/ string/ unicode/ number/ array/ object/ map/
                      unknown/ error/ async/ io/ parallel/ — у каждого модуля свой заголовок, файл
                      подключает те, чьи имена берёт
-  library/           темы: bytes child_process console crypto date decimal events fs http intl
-                     json math net os path process reflect regex stream tls tz_modules;
+  library/           темы: async_hooks bytes child_process console crypto date decimal events fs
+                     http intl json math net os path process reflect regex stream sync tls
+                     tz_modules;
                      fs/ — fs, fs_errors, fs_sync, fs_dirs, fs_async, fs_async_dirs, stdin,
                      readline, fs_stream (← fs.c); json/ — json, json_values, json_parse,
                      json_stringify (← json.c)

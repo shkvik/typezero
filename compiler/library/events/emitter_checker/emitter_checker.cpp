@@ -750,7 +750,8 @@ std::string EmitterChecker::libraryExportHint(llvm::StringRef name) {
            "true })'";
   }
   if (name == "EventEmitterAsyncResource" || name == "usingDomains") {
-    return ": tz has neither async_hooks nor domains";
+    return ": tz has neither async resources nor domains; a store that follows a request is "
+           "AsyncLocalStorage of \"node:async_hooks\"";
   }
   if (name == "EventTarget" || name == "Event" || name == "CustomEvent") {
     return "; '" + name.str() + "' is global, as in node: use it without an import";

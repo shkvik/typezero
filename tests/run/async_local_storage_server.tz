@@ -1,0 +1,78 @@
+// A server whose handlers run on the threads of the parallel runtime, each request in its own
+// AsyncLocalStorage run (docs/async.md, section 10): after every await, timer and helper a
+// handler sees its own store, never the store of a request that ran on the same thread.
+import { AsyncLocalStorage } from "node:async_hooks"
+import { Server } from "tz:http"
+
+type RequestContext = { requestId: string; steps: int }
+
+const requestContext = new AsyncLocalStorage<RequestContext>()
+
+function currentId(): string {
+  return requestContext.getStore()?.requestId ?? "none"
+}
+
+function step(): int {
+  const context = requestContext.getStore()
+  if (context == undefined) return -1
+  context.steps++
+  return context.steps
+}
+
+async function deeper(id: string): Promise<boolean> {
+  await Promise.resolve()
+  const same = currentId() == id
+  step()
+  await new Promise<void>((resolve) => setTimeout(resolve, 1))
+  return same && currentId() == id
+}
+
+async function handle(id: string): Promise<Response> {
+  step()
+  const before = currentId() == id
+  await Promise.resolve(id.length)
+  const middle = await deeper(id)
+  await new Promise<void>((resolve) => setImmediate(resolve))
+  const after = currentId() == id
+  const steps = step()
+  const right = before && middle && after && steps == 3
+  return new Response(right ? `ok ${id}` : `wrong ${id}: ${currentId()} ${steps}`)
+}
+
+const server = new Server({ port: 0, hostname: "127.0.0.1" }, (request: Request) => {
+  const id = new URL(request.url).pathname()
+  return requestContext.run({ requestId: id, steps: 0 }, () => handle(id))
+})
+const started = server.listen()
+if (started.isErr()) {
+  console.log("cannot listen:", started.error.message)
+  process.exit(1)
+}
+const listening = started.value
+
+const base = `http://127.0.0.1:${listening.port}`
+let right = 0
+const wrong: string[] = []
+for (let round = 0; round < 4; round++) {
+  const ids: string[] = []
+  for (let i = 0; i < 150; i++) ids.push(`/r${round * 150 + i}`)
+  const texts = await Promise.all(ids.map(async (id) => must(await (must(await fetch(base + id))).text())))
+  ids.forEach((id, i) => {
+    const text = texts[i] ?? "missing"
+    if (text == `ok ${id}`) right++
+    else wrong.push(text)
+  })
+}
+console.log(`own store in every request: ${right} of 600`)
+for (const text of wrong.slice(0, 5)) console.log(text)
+console.log(`outside of run: ${currentId()}`)
+await listening.stop()
+console.log("stopped")
+
+function must<T, E>(r: Result<T, E>): T {
+  if (r.isErr()) {
+    console.log(r.error)
+    process.exit(1)
+  }
+  return r.value
+}

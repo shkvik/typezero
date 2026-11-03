@@ -471,6 +471,8 @@ link/             проход LinkPass: exe
 
 ```
 library/                       C++-часть тем библиотеки: проверка и IR; у темы — <тема>_feature/
+  async_hooks/                 node:async_hooks: AsyncLocalStorage
+    context_checker/           ContextChecker: правила AsyncLocalStorage по всей программе (docs/async.md, раздел 10)
   builtin_modules/             встроенные модули node:* и tz:io — имена и импорты
     builtin_module_checker/    BuiltinModuleChecker: импорт встроенного модуля, его имена
     builtin_module_types/      BuiltinModuleTypes: типы встроенных модулей (ошибки fs, child_process), видны по импорту из модуля

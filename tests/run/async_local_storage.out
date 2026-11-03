@@ -1,0 +1,35 @@
+[-] top
+[a] start a
+[b] start b
+[-] between
+[b] after gate b
+[a] after gate a
+[b] user B
+[a] user A
+[b] then b
+[a] then a
+[b] value 2
+[a] value 2
+[-] after both
+[timers] timeout
+[timers] immediate
+[timers] microtask
+[timers] tick
+[-] after timers
+depth 1
+depth 2
+depth 1
+[inner] inner, depth 1
+depth 0
+[sync] sync
+length 5
+[gen] generator start
+[gen] generator after await
+[gen] got 1
+[gen] generator resumed
+[gen] got 2
+[emitter] ping from emitter
+[-] ping from top
+[waiter] resolved with hello
+all1 all2 all3
+[-] end

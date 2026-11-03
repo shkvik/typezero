@@ -103,6 +103,7 @@ Expr *LibraryCalls::checkLibCall(CallExpr *call, NameExpr *name) {
                                          {"order", Builtin::LibOrder, 0, 0},
                                          {"panic", Builtin::LibPanic, 1, 0},
                                          {"defer", Builtin::LibDefer, 1, 0},
+                                         {"withContext", Builtin::LibWithContext, 2, 0},
                                          {"aheadMovable", Builtin::LibAheadMovable, 1, 0}};
   const Intrinsic *intrinsic =
       llvm::find_if(intrinsics, [&](const Intrinsic &i) { return i.name == intrinsicName; });
@@ -169,6 +170,16 @@ Expr *LibraryCalls::checkLibCall(CallExpr *call, NameExpr *name) {
     call->args[0] = checker_.argumentChecker().checkArg(
         call->args[0], Type::function({}, 0, false, Type::voidTy(), false));
     call->type = Type::anyObject();
+    break;
+  case Builtin::LibWithContext:
+    call->args[0] = checker_.argumentChecker().checkArg(call->args[0], Type::anyObject());
+    call->args[1] = checker_.exprChecker().checkExpr(call->args[1]);
+    call->type = call->args[1]->type->isFunction() && call->args[1]->type->params().empty()
+                     ? call->args[1]->type->ret()
+                     : Type::error();
+    if (call->type->isError() && !call->args[1]->type->isError()) {
+      checker_.diags_.error(name->loc(), "'withContext' takes a function without parameters");
+    }
     break;
   case Builtin::LibChunk:
   case Builtin::LibIsChunk:

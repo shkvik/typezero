@@ -36,7 +36,9 @@ namespace {
 
 constexpr uint64_t kPromiseHeader = 40;
 
-constexpr uint64_t kReactorSize = 40;
+constexpr uint64_t kReactorSize = 48;
+
+constexpr uint64_t kReactorContext = 40;
 
 constexpr uint32_t kAsyncFrameAlign = 8;
 
@@ -69,9 +71,29 @@ llvm::Function *AsyncLowerer::asyncResumeFunction() {
       llvm::GlobalValue::InternalLinkage, "tz.async.resume", lowering_.module_.get());
   asyncResumeFn_->addFnAttr(llvm::Attribute::NoUnwind);
   llvm::IRBuilder<> b(llvm::BasicBlock::Create(lowering_.ctx_, "entry", asyncResumeFn_));
-  llvm::Value *frame =
-      b.CreateConstInBoundsGEP1_64(b.getInt8Ty(), asyncResumeFn_->getArg(0), kReactorSize, "frame");
-  b.CreateCall(lowering_.coroutineLowerer().coroIntrinsic(llvm::Intrinsic::coro_resume), {frame});
+  llvm::Value *reactor = asyncResumeFn_->getArg(0);
+  llvm::Value *frame = b.CreateConstInBoundsGEP1_64(b.getInt8Ty(), reactor, kReactorSize, "frame");
+  llvm::Function *resume = lowering_.coroutineLowerer().coroIntrinsic(llvm::Intrinsic::coro_resume);
+  if (!lowering_.contexts()) {
+    b.CreateCall(resume, {frame});
+    b.CreateRetVoid();
+    return asyncResumeFn_;
+  }
+  llvm::Value *slot =
+      b.CreateConstInBoundsGEP1_64(b.getInt8Ty(), reactor, kReactorContext, "context.slot");
+  llvm::Value *context = b.CreateLoad(ptr, slot, "context");
+  auto *plain = llvm::BasicBlock::Create(lowering_.ctx_, "plain", asyncResumeFn_);
+  auto *within = llvm::BasicBlock::Create(lowering_.ctx_, "within", asyncResumeFn_);
+  b.CreateCondBr(b.CreateIsNull(context), plain, within);
+  b.SetInsertPoint(plain);
+  b.CreateCall(resume, {frame});
+  b.CreateRetVoid();
+  b.SetInsertPoint(within);
+  b.CreateStore(llvm::ConstantPointerNull::get(llvm::cast<llvm::PointerType>(ptr)), slot);
+  llvm::Value *outer =
+      b.CreateCall(asyncFunction("tz_context_resume", ptr, {ptr}), {context}, "outer");
+  b.CreateCall(resume, {frame});
+  b.CreateCall(asyncFunction("tz_context_done", b.getVoidTy(), {ptr, ptr}), {outer, context});
   b.CreateRetVoid();
 
   return asyncResumeFn_;
@@ -307,6 +329,13 @@ void AsyncLowerer::suspendAsync(llvm::Value *promise, llvm::SMLoc loc) {
   uint32_t site = awaiting_ ? lowering_.aheadStarts_.lookup(awaiting_) : 0;
   if (site && lowering_.movableAwaits_.contains(awaiting_)) {
     site |= 1u << 18;
+  }
+  if (lowering_.contexts()) {
+    llvm::Value *context =
+        lowering_.builder_.CreateCall(asyncFunction("tz_context_hold", ptr, {}), {}, "context");
+    lowering_.builder_.CreateStore(
+        context, lowering_.builder_.CreateConstInBoundsGEP1_64(
+                     lowering_.builder_.getInt8Ty(), lowering_.async_->reactor, kReactorContext));
   }
   lowering_.builder_.CreateCall(asyncFunction("tz_async_await", lowering_.builder_.getVoidTy(),
                                               {ptr, ptr, lowering_.builder_.getInt32Ty()}),

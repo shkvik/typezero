@@ -2,6 +2,7 @@
 #include "compiler/library/process/process_lowerer/process_lowerer.h"
 #include "compiler/library/stream/stream_lowerer/stream_lowerer.h"
 #include "compiler/lower/expr/expr_lowerer/expr_lowerer.h"
+#include "compiler/lower/functions/closure_lowerer/closure_lowerer.h"
 #include "compiler/lower/function_frame/function_frame.h"
 #include "compiler/lower/layouts/object_layouts/object_layouts.h"
 #include "compiler/lower/memory/ref_counts/ref_counts.h"
@@ -112,6 +113,21 @@ llvm::Value *LibraryCallLowerer::emitLibBuiltin(CallExpr *call) {
         {lowering_.builder_.CreateExtractValue(run, 0),
          lowering_.builder_.CreateExtractValue(run, 1)},
         "defer");
+  }
+  case Builtin::LibWithContext: {
+    Lowering::Operand frame = lowering_.refCounts().emitOperand(call->args[0], true);
+    Lowering::Operand callback = lowering_.refCounts().emitOperand(call->args[1], true);
+    llvm::Value *outer = lowering_.builder_.CreateCall(
+        lowering_.processLowerer().processFunction("tz_context_enter", ptr, {ptr}), {frame.value},
+        "outer");
+    llvm::Value *result =
+        lowering_.closureLowerer().callFunctionValue(callback.value, call->args[1]->type, {});
+    lowering_.builder_.CreateCall(lowering_.processLowerer().processFunction(
+                                      "tz_context_leave", lowering_.builder_.getVoidTy(), {ptr}),
+                                  {outer});
+    lowering_.refCounts().dropOperand(callback);
+    lowering_.refCounts().dropOperand(frame);
+    return result;
   }
   case Builtin::LibOrder:
     if (lowering_.parallel_) {

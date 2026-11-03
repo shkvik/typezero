@@ -1,0 +1,73 @@
+// AsyncLocalStorage has rules that keep a store inside its run (docs/async.md, section 10):
+// the storage is a top-level const, the store is a new object, it can't be kept elsewhere,
+// and an interval doesn't carry it.
+import { AsyncLocalStorage } from "node:async_hooks"
+
+type RequestContext = { requestId: string; user?: string }
+
+export const requestContext = new AsyncLocalStorage<RequestContext>()
+const ids = new AsyncLocalStorage<string>()
+
+function makeStorage() {
+  // expect-error: an AsyncLocalStorage is made only as a 'const' at the top level of a module, e.g. 'export const requestContext = new AsyncLocalStorage<RequestContext>()' (docs/async.md, section 10)
+  const local = new AsyncLocalStorage<string>()
+  return local
+}
+
+const common: RequestContext = { requestId: "boot" }
+
+function handle(id: string) {
+  // expect-error: the store given to 'run' is a new object written right here, e.g. 'run({ requestId }, ...)': an object that already exists could get into two runs at once (docs/async.md, section 10)
+  requestContext.run(common, () => work())
+  requestContext.run({ requestId: id }, () => work())
+  ids.run(id, () => work())
+}
+
+const recent: RequestContext[] = []
+let last: RequestContext | undefined = undefined
+
+class Holder {
+  context?: RequestContext
+}
+
+function current(): RequestContext | undefined {
+  return requestContext.getStore()
+}
+
+function remember(holder: Holder) {
+  const context = requestContext.getStore()
+  if (context == undefined) return
+  // expect-error: the store of an AsyncLocalStorage lives only inside 'run', so it can't be kept by 'push', which may store it: copy the fields you need instead (docs/async.md, section 10)
+  recent.push(context)
+  recent.push({ requestId: context.requestId })
+  // expect-error: the store of an AsyncLocalStorage lives only inside 'run', so it can't be kept in a module variable: copy the fields you need instead (docs/async.md, section 10)
+  last = context
+  // expect-error: the store of an AsyncLocalStorage lives only inside 'run', so it can't be kept in a field: copy the fields you need instead (docs/async.md, section 10)
+  holder.context = current()
+  audit(context)
+  context.user = "ann"
+  const copy = { ...context }
+  console.log(copy.requestId, context)
+}
+
+function audit(context: RequestContext) {
+  console.log(context.requestId)
+  // expect-error: the store of an AsyncLocalStorage lives only inside 'run', so it can't be kept in an array: copy the fields you need instead (docs/async.md, section 10)
+  const all = [context]
+  console.log(all.length)
+}
+
+function log(message: string) {
+  console.log(`[${requestContext.getStore()?.requestId ?? "-"}] ${message}`)
+}
+
+function work() {
+  log("work")
+  // expect-error: setInterval does not carry the store of an AsyncLocalStorage (an interval outlives 'run'), but this function reads it through 'log'; read what it needs before setInterval and keep it in the interval's object (docs/async.md, section 10)
+  setInterval(() => log("tick"), 1000)
+  setTimeout(() => log("later"), 10)
+}
+
+handle("a")
+console.log(makeStorage())
+remember(new Holder())

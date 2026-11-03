@@ -1,0 +1,38 @@
+import { chunkOf, withContext } from "tz:intrinsics";
+
+declare function contextCurrent(): ContextFrame | undefined;
+
+class ContextFrame {
+  public readonly storage: object;
+  public readonly store: unknown;
+  public readonly parent?: ContextFrame;
+
+  public constructor(storage: object, store: unknown, parent: ContextFrame | undefined) {
+    this.storage = storage;
+    this.store = store;
+    this.parent = parent;
+  }
+}
+
+export class AsyncLocalStorage<T> {
+  public constructor() {}
+
+  public run<R>(store: T, callback: () => R): R {
+    const outer = contextCurrent();
+    const frame = new ContextFrame(this, store, outer);
+
+    return withContext(frame, callback);
+  }
+
+  public getStore(): T | undefined {
+    let frame: ContextFrame | undefined = contextCurrent();
+    while (frame != undefined) {
+      if (frame.storage == this) {
+        return chunkOf<T>(frame.store);
+      }
+      frame = frame.parent;
+    }
+
+    return undefined;
+  }
+}
