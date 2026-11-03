@@ -91,7 +91,7 @@ if (head.isErr()) {
 
 ```ts
 const child = spawn("ffmpeg", ["-i", "in.mp4", "out.webm"], { stdio: "inherit" })
-child.on("close", code => console.log("готово", code))
+child.on("close", ({ code }) => console.log("готово", code))   // одно значение: { code, signal }
 ```
 
 Они держатся на `EventEmitter` и потоках node — это отдельная тема, она же нужна для `node:http`

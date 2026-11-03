@@ -282,7 +282,7 @@ void AsyncChecker::checkForAwait(ForOfStmt *stmt) {
   checker_.pushScope();
   stmt->binding.sym =
       checker_.scopes().declareVar(stmt->binding.name, stmt->binding.loc, element, stmt->isConst);
-  checker_.loopChecker().checkLoopBody(stmt->body);
+  checker_.loopChecker().checkLoopBody(stmt->body, true);
   checker_.popScope();
   checker_.flow_ = head;
   checker_.flowChecker().calledFunction();

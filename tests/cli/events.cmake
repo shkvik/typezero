@@ -18,7 +18,7 @@ export class Ticker extends EventEmitter {
   count = 0
   tick(by: string) {
     this.count++
-    this.emit("tick", this.count, by)
+    this.emit("tick", { n: this.count, by: by })
   }
 }
 ]])
@@ -30,11 +30,11 @@ import { Ticker } from "ticker"
 
 const ticker = new Ticker()
 let total = 0
-ticker.on("tick", (n, by) => {
-  const step: int = parseInt(by).unwrapOr(0)
+ticker.on("tick", (tick) => {
+  const step: int = parseInt(tick.by).unwrapOr(0)
   if (step >= 0 && step < 1000) total += step
-  console.log(`tick ${n} by ${by}`)
-  if (n == 2) ticker.emit("done", total)
+  console.log(`tick ${tick.n} by ${tick.by}`)
+  if (tick.n == 2) ticker.emit("done", total)
 })
 setTimeout(() => {
   ticker.tick("1")
@@ -57,12 +57,12 @@ write(app/sum.tz [[
 import { Ticker } from "ticker"
 const t = new Ticker()
 let total = 0
-t.on("tick", (n, by) => {
-  total += parseInt(by).unwrapOr(0)
+t.on("tick", (tick) => {
+  total += parseInt(tick.by).unwrapOr(0)
 })
 t.tick("1")
 ]])
-tz(build sum.tz IN app EXIT 1 STDERR "error: 'total += parseInt(by).unwrapOr(0)' may overflow int")
+tz(build sum.tz IN app EXIT 1 STDERR "error: 'total += parseInt(tick.by).unwrapOr(0)' may overflow int")
 string(REGEX MATCHALL "may overflow int" errors "${TZ_STDERR}")
 list(LENGTH errors count)
 if(NOT count EQUAL 1)

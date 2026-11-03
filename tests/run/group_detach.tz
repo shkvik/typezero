@@ -40,39 +40,41 @@ function list() {
   console.log("list", names(watched), "(b is still in a variable)")
 }
 
-class Payload {
-  constructor(public name: string) {}
-}
-
 class Service {
   events = new EventEmitter<{ tick: [] }>()
   ticks = 0
 }
 
-function listen(service: Service): [() => void, WeakRef<Payload>] {
-  const payload = new Payload("payload")
-  const listener = () => {
-    service.ticks++
-    console.log("tick", payload.name)
+class Payload {
+  constructor(
+    public name: string,
+    public service: Service,
+  ) {}
+  tick() {
+    this.service.ticks++
+    console.log("tick", this.name)
   }
-  service.events.on("tick", listener)
-  return [listener, new WeakRef(payload)]
+}
+
+function listen(service: Service): [Payload, WeakRef<Payload>] {
+  const payload = new Payload("payload", service)
+  service.events.on("tick", payload.tick)
+  return [payload, new WeakRef(payload)]
 }
 
 function emitter() {
   const service = new Service()
-  const [listener, watched] = listen(service)
+  const [payload, watched] = listen(service)
   service.events.emit("tick")
-  service.events.off("tick", listener)
-  console.log("emitter", watched.deref()?.name ?? "-", "(the listener is still in a variable)")
+  service.events.off("tick", payload.tick)
+  console.log("emitter", watched.deref()?.name ?? "-", "(the payload is still in a variable)")
 }
 
 function emitterAfter() {
   const service = new Service()
   const watched = listen(service)[1]
   service.events.emit("tick")
-  service.events.removeAllListeners("tick")
-  console.log("emitter", watched.deref()?.name ?? "-", service.ticks)
+  console.log("emitter", watched.deref()?.name ?? "-", service.ticks, service.events.listenerCount("tick"))
 }
 
 class Pair {

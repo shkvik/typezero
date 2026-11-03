@@ -215,7 +215,15 @@ Expr *EventTargetChecker::checkEventsFunction(CallExpr *call, llvm::StringRef fn
   if (fn != "once" && fn != "on") {
     return nullptr;
   }
-  unsigned most = fn == "on" ? 3 : 2;
+  unsigned most = 3;
+  bool timed = false;
+  if (call->args.size() == 3) {
+    if (auto *options = dyn_cast<ObjectLitExpr>(call->args[2])) {
+      timed = llvm::any_of(options->props, [](const ObjectLitExpr::Property &p) {
+        return !p.spread && p.name == "timeout";
+      });
+    }
+  }
   if (checker_.callChecker().rejectSpread(call) ||
       !checker_.argumentChecker().checkArity(call, loc, 2, most)) {
     return call;
@@ -260,6 +268,53 @@ Expr *EventTargetChecker::checkEventsFunction(CallExpr *call, llvm::StringRef fn
   const Type *errors = events->isRecord()       ? events->valueType()
                        : events->field("error") ? events->field("error")->type
                                                 : nullptr;
+  const ClassDecl *source = ClassDeclarer::classOf(type);
+  const ClassDecl *root = source && source->generic ? source->generic : source;
+  bool ends = root && root->library && root->name != "EventEmitter" &&
+              root->name != "EventEmitterBase";
+  bool runsOnce = (!checker_.currentDecl() && !checker_.awaitLoops_) ||
+              checker_.emitterChecker().ownsEmitter(call->args[0]);
+  if (!ends && !timed && !runsOnce) {
+    std::string name = isa<NameExpr>(call->args[0])
+                           ? "'" + cast<NameExpr>(call->args[0])->name.str() + "'"
+                           : "this emitter";
+    checker_.diags_.error(call->args[0]->loc(),
+                          name + " may never emit this event, so the wait may never end; give "
+                                 "it a time limit, e.g. '" +
+                              fn.str() + "(emitter, \"done\", { timeout: 5000 })' (docs/events.md, "
+                                         "section 6)");
+    checkArgsLoosely(2);
+    return call;
+  }
+  if (fn == "once" && call->args.size() == 3 && !timed) {
+    checker_.diags_.error(call->args[2]->loc(),
+                          "the options of 'once' have only 'timeout', e.g. '{ timeout: 5000 }'");
+    checkArgsLoosely(2);
+    return call;
+  }
+  if (timed) {
+    const Type *failure = Type::never();
+    if (errors) {
+      checker_.errorListenedMaps_.insert(events);
+      if (!errors->isTuple() || errors->fields().size() != 1) {
+        checker_.diags_.error(call->args[1]->loc(),
+                              "'" + fn.str() +
+                                  "' gives the error of the emitter as the Err, so its 'error' "
+                                  "event carries one value; this one carries '" +
+                                  errors->name().str() + "'");
+        return call;
+      }
+      failure = errors->fields().front().type;
+    }
+    call->args.push_back(checker_.exprChecker().checkExpr(
+        checker_.ctx_.make<BoolLitExpr>(call->loc(), errors != nullptr)));
+    given.resize(call->args.size(), false);
+    given.back() = true;
+    return callLibraryFunction(call, fn.str() + "Within", {args, failure}, given, loc);
+  }
+  if (fn == "once") {
+    most = 2;
+  }
   while (call->args.size() < most) {
     call->args.push_back(checker_.ctx_.make<UndefinedExpr>(call->loc()));
   }

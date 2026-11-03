@@ -432,7 +432,7 @@ function networkFailure(e: NativeError, stage: string): WebSocketError {
 
 export type WebSocketEvents = {
   message: [data: string | Uint8Array];
-  close: [code: int, reason: string];
+  close: [close: { code: int; reason: string }];
   error: [error: WebSocketError];
 };
 
@@ -826,7 +826,7 @@ export class WebSocket extends EventEmitter<WebSocketEvents> {
       conn.endStream([]);
     }
     conn.close();
-    this.emit("close", code, reason);
+    this.emit("close", { code: code, reason: reason });
   }
 
   private fail(error: WebSocketError): void {

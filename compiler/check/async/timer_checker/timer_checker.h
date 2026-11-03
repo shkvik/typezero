@@ -18,6 +18,8 @@ public:
   Expr *checkTimerMethod(CallExpr *call, MemberExpr *member);
 
 private:
+  bool rearms(const Expr *callback) const;
+
   Checker &checker_;
 };
 

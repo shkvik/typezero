@@ -1,0 +1,60 @@
+// A listener has to say how long it is needed (docs/events.md, section 6):
+// a method, or an arrow that uses one object, lives as long as that object.
+import { EventEmitter, once } from "node:events"
+
+type Message = { from: string; text: string }
+const room = new EventEmitter<{ message: [message: Message] }>()
+
+function countMessages() {
+  let count = 0
+  // expect-error: the listener keeps 'count', which nothing else holds, so nothing tells when its subscription ends
+  room.on("message", () => count++)
+}
+
+class Audit {
+  constructor(request: { url: string }) {
+    // expect-error: the listener captures 'this' and 'request', but it may depend on one object only, the one whose life it follows; store what it needs from 'request' in a field of 'this'
+    room.on("message", (message) => this.write(request.url, message.text))
+  }
+  write(url: string, text: string) {}
+}
+
+function subscribe(listener: (message: Message) => void) {
+  // expect-error: can't tell what this listener captures, so not when its subscription ends
+  room.on("message", listener)
+}
+
+class Ghost {
+  constructor() {
+    room.on("message", this.hear)
+  }
+  hear(message: Message) {}
+}
+
+function haunt() {
+  // expect-error: the new Ghost is held by nothing, so the listeners its constructor adds would stop at once; store it
+  new Ghost()
+}
+
+countMessages()
+new Audit({ url: "/" })
+subscribe((m) => console.log(m.text))
+haunt()
+
+async function waitForMessage() {
+  // expect-error: 'room' may never emit this event, so the wait may never end; give it a time limit
+  await once(room, "message")
+}
+void waitForMessage()
+
+function poll(url: string) {
+  // expect-error: the interval keeps 'url', which nothing else holds, so nothing tells when it should stop; keep the state in an object and pass its method
+  setInterval(() => console.log(url), 1000)
+}
+poll("/")
+
+// expect-error: an event carries one value: pass an object
+room.emit("message", { from: "a", text: "b" }, 1)
+// expect-error: event 'pair' carries '[int, int]', but an event carries one value: give it an object
+const pairs = new EventEmitter<{ pair: [a: int, b: int] }>()
+void pairs

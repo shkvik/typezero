@@ -1200,14 +1200,14 @@ export class Stream extends EventEmitterBase {
       const dests = state.pipes;
       state.pipes = [];
       this.pause();
-      for (const d of dests) d.emit("unpipe", this, { hasUnpiped: false });
+      for (const d of dests) d.emit("unpipe", { source: this, hasUnpiped: false });
       return this;
     }
     const index = state.pipes.indexOf(dest);
     if (index == -1) return this;
     state.pipes.splice(index, 1);
     if (state.pipes.length == 0) this.pause();
-    dest.emit("unpipe", this, { hasUnpiped: false });
+    dest.emit("unpipe", { source: this, hasUnpiped: false });
     return this;
   }
 
@@ -1868,8 +1868,8 @@ export class Stream extends EventEmitterBase {
     if ((state.bits & kEndEmitted) != 0) process.nextTick(unpipe);
     else src.once("end", unpipe);
     dest.on("unpipe", onunpipe);
-    function onunpipe(readable: Stream, unpipeInfo: { hasUnpiped: boolean }) {
-      if (readable == src && !unpipeInfo.hasUnpiped) {
+    function onunpipe(unpipeInfo: { source: Stream; hasUnpiped: boolean }) {
+      if (unpipeInfo.source == src && !unpipeInfo.hasUnpiped) {
         unpipeInfo.hasUnpiped = true;
         cleanup();
       }

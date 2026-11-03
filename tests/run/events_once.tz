@@ -7,12 +7,12 @@
 import { EventEmitter, once, getEventListeners, listenerCount } from "node:events"
 
 type Failure = { code: string; message: string }
-const server = new EventEmitter<{ listening: [port: double, host: string]; error: [err: Failure]; done: [] }>()
-setTimeout(() => server.emit("listening", 8080, "localhost"), 1)
+const server = new EventEmitter<{ listening: [address: { port: double; host: string }]; error: [err: Failure]; done: [] }>()
+setTimeout(() => server.emit("listening", { port: 8080, host: "localhost" }), 1)
 const listening = await once(server, "listening")
 if (listening.isOk()) {
-  const [port, host] = listening.value
-  console.log("listening", port, host, server.listenerCount("listening"), server.listenerCount("error"))
+  const [address] = listening.value
+  console.log("listening", address.port, address.host, server.listenerCount("listening"), server.listenerCount("error"))
 }
 
 const failing = once(server, "done")

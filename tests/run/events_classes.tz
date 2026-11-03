@@ -5,7 +5,7 @@
 // (docs/events.md).
 import { EventEmitter } from "node:events"
 
-class Store<T> extends EventEmitter<{ change: [value: T, old: T] }> {
+class Store<T> extends EventEmitter<{ change: [change: { value: T; old: T }] }> {
   value: T
   constructor(value: T) {
     super()
@@ -14,14 +14,14 @@ class Store<T> extends EventEmitter<{ change: [value: T, old: T] }> {
   set(value: T) {
     const old = this.value
     this.value = value
-    this.emit("change", value, old)
+    this.emit("change", { value: value, old: old })
   }
 }
 const s = new Store(1)
-s.on("change", (v, old) => console.log("change", old, "->", v))
+s.on("change", (c) => console.log("change", c.old, "->", c.value))
 s.set(2)
 const t = new Store("a")
-t.on("change", (v) => console.log("text", v.toUpperCase()))
+t.on("change", (c) => console.log("text", c.value.toUpperCase()))
 t.set("b")
 
 class Logged extends EventEmitter<{ data: [n: int] }> {

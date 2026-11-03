@@ -58,7 +58,7 @@ async function talk(what: string, url: string, httpVersion?: "auto" | "1.1" | "2
     answered.resolve()
   })
   socket.on("error", error => console.log(`${what}: error ${error.code}`))
-  socket.on("close", (code, reason) => {
+  socket.on("close", ({ code, reason }) => {
     console.log(`${what}: closed ${code} ${reason}`)
     closed.resolve()
   })

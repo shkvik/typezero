@@ -112,6 +112,9 @@ void LoopScanner::scanStmt(const Stmt *stmt, Checker::LoopScan &scan, unsigned d
   }
   case Stmt::Kind::ForOf: {
     auto *s = cast<ForOfStmt>(stmt);
+    if (s->isAwait && !scan.functionDepth) {
+      scan.awaits = true;
+    }
     scanExpr(s->iterable, scan, depth);
     if (namesIterator(s->iterable)) {
       scan.callsFunctions = true;
@@ -349,7 +352,9 @@ void LoopScanner::scanExpr(const Expr *expr, Checker::LoopScan &scan, unsigned d
     scanExpr(cast<OptionalChainExpr>(expr)->chain, scan, depth);
     break;
   case Expr::Kind::Function:
+    ++scan.functionDepth;
     scanStmt(cast<FunctionExpr>(expr)->fn->body, scan, depth + 1);
+    --scan.functionDepth;
     break;
   case Expr::Kind::Yield:
     if (const Expr *value = cast<YieldExpr>(expr)->value) {
@@ -358,6 +363,9 @@ void LoopScanner::scanExpr(const Expr *expr, Checker::LoopScan &scan, unsigned d
     scan.callsFunctions = true;
     break;
   case Expr::Kind::Await:
+    if (!scan.functionDepth) {
+      scan.awaits = true;
+    }
     scanExpr(cast<AwaitExpr>(expr)->value, scan, depth);
     scan.callsFunctions = true;
     break;

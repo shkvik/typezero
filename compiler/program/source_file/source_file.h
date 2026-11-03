@@ -26,6 +26,7 @@ struct SourceFile {
   std::vector<FunctionDecl *> instances;
   std::vector<const Type *> subtypes;
   std::vector<std::pair<const Type *, const Type *>> views;
+  std::vector<const Type *> listenerReceivers;
 };
 
 }

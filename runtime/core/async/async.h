@@ -48,7 +48,8 @@ typedef struct TzTimer {
   int64_t idle_start;
   double idle_timeout;
   double repeat;
-  uint8_t refed, destroyed, immediate, cleared;
+  uint8_t refed, destroyed, immediate, cleared, shared;
+  void *weak;
 } TzTimer;
 
 void tz_microtask(TzReactor *r);
@@ -88,6 +89,8 @@ typedef struct TzAsyncGen {
 } TzAsyncGen;
 
 TzTimer *tz_timer_new(const TzFunctionInfo *info, TzObject *env, double after, int32_t repeat);
+TzTimer *tz_timer_new_owned(const TzFunctionInfo *info, TzObject *env, double after,
+                            int32_t repeat, int32_t flags);
 void tz_timer_ref(TzTimer *t, int32_t ref);
 void tz_timer_clear(TzTimer *t);
 TzTimer *tz_immediate_new(const TzFunctionInfo *info, TzObject *env);

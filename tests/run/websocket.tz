@@ -26,7 +26,7 @@ const server = new Server({ port: 0, hostname: "127.0.0.1" }, request => {
     }
   })
   peer.on("error", error => console.log("server error:", error.code))
-  peer.on("close", (code, reason) => console.log("server close:", code, reason))
+  peer.on("close", ({ code, reason }) => console.log("server close:", code, reason))
   return upgradeResult.value.response
 })
 const startedResult = server.listen()
@@ -48,7 +48,7 @@ socket.on("message", data => {
   else console.log("got bytes:", data.length, data[0], data[data.length - 1])
 })
 socket.on("error", error => console.log("client error:", error.code))
-socket.on("close", (code, reason) => {
+socket.on("close", ({ code, reason }) => {
   console.log("client close:", code, reason)
   closed.resolve()
 })

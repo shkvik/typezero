@@ -4,6 +4,7 @@
 #include "runtime/core/map/map.h"
 #include "runtime/core/string/string.h"
 #include "runtime/core/tzrt/tzrt.h"
+#include "runtime/core/unknown/unknown.h"
 
 #ifdef _WIN32
 #define WIN32_LEAN_AND_MEAN
@@ -74,4 +75,61 @@ int64_t tz_lib_pid(TzMaker make) {
 
   return (int32_t)getpid();
 #endif
+}
+
+static const TzLayout listener_weak_layout = {tz_weak_drop, NULL, 0, 0, "WeakRef", 7, 0};
+
+static const TzFunction *boxed_function(const void *box) {
+  return (const TzFunction *)TZ_BOX_VALUE(box);
+}
+
+void *tz_listener_code(void *listener, TzMaker make) {
+  (void)make;
+  TzFunction f = *boxed_function(listener);
+  f.env = NULL;
+
+  return tz_unknown_box(((const TzBox *)listener)->type, &f);
+}
+
+void *tz_listener_weak(void *listener, TzMaker make) {
+  (void)make;
+
+  return tz_weak_new(&listener_weak_layout, boxed_function(listener)->env);
+}
+
+void *tz_bound_listener(void *code, void *weak, TzMaker make) {
+  (void)make;
+  void *target = tz_weak_deref(weak);
+  if (!target) {
+    return NULL;
+  }
+  TzFunction f = *boxed_function(code);
+  f.env = (TzObject *)target;
+
+  return tz_unknown_box(((const TzBox *)code)->type, &f);
+}
+
+void *tz_weak_target(void *weak, TzMaker make) {
+  (void)make;
+
+  return tz_weak_deref(weak);
+}
+
+int32_t tz_weak_is(void *weak, void *listener, TzMaker make) {
+  (void)make;
+  void *target = tz_weak_peek(weak);
+
+  return target && target == (void *)boxed_function(listener)->env;
+}
+
+int32_t tz_same_code(void *a, void *b, TzMaker make) {
+  (void)make;
+
+  return boxed_function(a)->info == boxed_function(b)->info;
+}
+
+int32_t tz_weak_alive(void *weak, TzMaker make) {
+  (void)make;
+
+  return tz_weak_peek(weak) != NULL;
 }

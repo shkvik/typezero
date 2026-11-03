@@ -151,7 +151,7 @@ Expr *StaticChecker::checkClassStaticCall(CallExpr *call, MemberExpr *member, Cl
                                           const Type *expected) {
   call->type = Type::error();
   static const llvm::StringLiteral eventsFunctions[] = {
-      "once", "on", "listenerCount", "getEventListeners", "getMaxListeners", "setMaxListeners"};
+      "once", "on", "listenerCount", "getEventListeners"};
   if (cls->library && cls->name == "EventEmitter" &&
       llvm::is_contained(eventsFunctions, member->name)) {
     if (Expr *events =

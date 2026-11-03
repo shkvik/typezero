@@ -9,7 +9,7 @@
 // not allowed).
 import { EventEmitter } from "node:events"
 
-type Events = { start: [id: int]; done: [id: int, ms: double] }
+type Events = { start: [id: int]; done: [done: { id: int; ms: double }] }
 type EventName = keyof Events
 type HandlerName = `on${Capitalize<EventName>}`
 type ArgsOf<K extends EventName> = Events[K]
@@ -22,7 +22,7 @@ type Handlers = { [K in EventName as `on${Capitalize<K>}`]: (id: First<ArgsOf<K>
 class Jobs extends EventEmitter<Events> {
   run(id: int) {
     this.emit("start", id)
-    this.emit("done", id, id.toDouble() * 1.5)
+    this.emit("done", { id: id, ms: id.toDouble() * 1.5 })
   }
 }
 
@@ -33,17 +33,17 @@ console.log(names.join(","), handlerNames.join(","))
 const log: string[] = []
 const handlers: Handlers = {
   onStart: (id) => log.push(`start ${id}`),
-  onDone: (id) => log.push(`done ${id}`),
+  onDone: (done) => log.push(`done ${done.id}`),
 }
 const jobs = new Jobs()
 jobs.on("start", (id) => handlers.onStart(id))
-jobs.on("done", (id, ms) => {
-  handlers.onDone(id)
-  log.push(`in ${ms}`)
+jobs.on("done", (done) => {
+  handlers.onDone(done)
+  log.push(`in ${done.ms}`)
 })
 jobs.run(2)
 console.log(log.join("; "))
-const firstId: First<ArgsOf<"done">> = 7
+const firstId: First<ArgsOf<"start">> = 7
 console.log(firstId + 1)
 
 // What fetch gives, by its type alone: no request is made.

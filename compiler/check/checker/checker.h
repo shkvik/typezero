@@ -310,6 +310,8 @@ private:
     llvm::StringSet<> fieldWrites;
     bool releasesElements = false;
     bool breaks = false;
+    bool awaits = false;
+    unsigned functionDepth = 0;
     unsigned switches = 0;
     llvm::SmallVector<llvm::StringRef, 2> innerLabels;
   };
@@ -547,12 +549,15 @@ private:
   std::vector<llvm::StringMap<ScopeEntry>> scopes_;
   std::vector<llvm::StringMap<Stmt *>> typeScopes_;
   FuncSymbol *currentFunction_ = nullptr;
+  unsigned awaitLoops_ = 0;
   std::vector<JumpTarget> targets_;
   llvm::SmallVector<llvm::StringRef, 1> pendingLabels_;
   llvm::SmallPtrSet<const VarSymbol *, 4> otherCaseVars_;
   Flow flow_;
   std::vector<std::pair<const Type *, llvm::SMLoc>> errorEmits_;
   llvm::SmallPtrSet<const Type *, 4> errorListenedMaps_;
+  llvm::SmallPtrSet<const ClassDecl *, 4> selfListeners_;
+  std::vector<std::pair<const ClassDecl *, llvm::SMLoc>> droppedNews_;
   llvm::DenseSet<const void *> reportedErrorSubscriptions_;
   llvm::StringSet<> namesInFunctions_;
   llvm::StringSet<> assignedFields_;

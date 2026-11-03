@@ -32,7 +32,7 @@ export function Counting<B extends Constructor<Bus>>(Base: B) {
     emitted = 0
     note(what: string) {
       this.emitted++
-      this.emit("note", what, this.emitted)
+      this.emit("note", { what: what, count: this.emitted })
     }
   }
 }

@@ -130,8 +130,7 @@ Expr *ClassMemberChecker::checkClassMember(MemberExpr *member, const Type *expec
   }
   checkAccess(methods[0]->cls, methods[0]->access, name, member->loc(), member->object);
   if (methods[0]->cls->library && checker_.eventMaps().isEmitterClass(cls) &&
-      !checker_.libraryCalls().inLibrary(member->loc()) && name != "getMaxListeners" &&
-      name != "eventNames") {
+      !checker_.libraryCalls().inLibrary(member->loc()) && name != "eventNames") {
     checker_.emitterChecker().reportEmitterMethodValue(member);
 
     return member;

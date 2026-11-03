@@ -49,9 +49,9 @@ if (started.isErr()) {
 }
 const listening = started.value
 
-class Checks extends EventEmitter<{ checked: [path: string, ok: boolean] }> {}
+class Checks extends EventEmitter<{ checked: [check: { path: string; ok: boolean }] }> {}
 const checks = new Checks()
-checks.on("checked", (path, ok) => console.log(`checked ${path}: ${ok}`))
+checks.on("checked", (check) => console.log(`checked ${check.path}: ${check.ok}`))
 
 async function fetchSigned(path: string, secret: string) {
   const url = URL.parse(path, `http://127.0.0.1:${listening.port}`)
@@ -60,7 +60,7 @@ async function fetchSigned(path: string, secret: string) {
   const body = must(await res.text())
   const sig = Buffer.from(res.headers.get("x-signature") ?? "", "hex")
   const ok = must(await crypto.subtle.verify("HMAC", await hmac(secret), sig, enc.encode(body)))
-  checks.emit("checked", path, ok)
+  checks.emit("checked", { path: path, ok: ok })
   return body
 }
 

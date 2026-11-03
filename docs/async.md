@@ -202,14 +202,17 @@ void saveOrLog("Ann")                // ок: Promise<void>
   `Result.combine(await Promise.all(ps))` — все значения или первая ошибка.
 - Лишний `return await x` в `async`-функции — ошибка: `async`-функция и так дождётся `Promise`.
 - Таймеры: `setTimeout`, `setInterval`, `clearTimeout`, `clearInterval`, `setImmediate`;
-  `await setTimeout(100)` из `"node:timers/promises"` — пауза.
+  `await setTimeout(100)` из `"node:timers/promises"` — пауза. `setInterval` подчиняется правилам
+  подписки: метод объекта или стрелка с одним объектом — интервал останавливается, когда объект
+  освобождён ([events.md](events.md), раздел 7).
 - `await` на верхнем уровне модуля — как в ES-модулях. Программа завершается, когда не осталось
   задач, таймеров и ожидающего ввода-вывода.
 - Не пойманных ошибок в задачах нет: `Result` нельзя выбросить (раздел 6).
 - Отмены нет: `AbortController` и `AbortSignal` убраны 28 октября — громоздкий костыль, который в
   сообществе не любят. Ожидание идёт до конца; время запроса `fetch` ограничивает опция `timeout`
   в миллисекундах (`Err` с кодом `"TIMEOUT_ERR"`, [net.md](net.md)), сервер останавливает
-  `listening.stop()`. `Promise.race` не отменяет проигравших.
+  `listening.stop()`. `Promise.race` не отменяет проигравших, но снимает с них свои ожидания:
+  тысяча гонок с одним долгим `Promise` не копит в нём тысячу записей.
 - `node:worker_threads` нет: параллельность и так есть.
 
 ## 8. Рантайм

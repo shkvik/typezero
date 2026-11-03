@@ -30,7 +30,7 @@ if (opened.isErr())
 const dir = must(await mkdtemp(join(tmpdir(), "tz-crypto-mix-")))
 const vault = new Vault(dir, key)
 const stored: string[] = []
-vault.on("stored", (name, hexLength) => stored.push(`${name}:${hexLength}`))
+vault.on("stored", (s) => stored.push(`${s.name}:${s.hexLength}`))
 await Promise.all([vault.put("a", { n: 1 }), vault.put("b", "two"), vault.put("c", [3, 3, 3])])
 console.log(stored.sort())
 const [a, b, c] = (await Promise.all([vault.get("a"), vault.get("b"), vault.get("c")])).map(r => must(r))

@@ -32,6 +32,17 @@ llvm::Value *LibraryCallLowerer::emitLibBuiltin(CallExpr *call) {
     lowering_.refCounts().dropOperand(box);
     return value;
   }
+  case Builtin::LibBoundListener: {
+    Lowering::Operand box = lowering_.refCounts().emitOperand(call->args[0], true);
+    llvm::Value *value =
+        lowering_.builder_.CreateLoad(lowering_.moduleBuilder().lower(call->type),
+                                      lowering_.builder_.CreateConstInBoundsGEP1_64(
+                                          lowering_.builder_.getInt8Ty(), box.value, 24),
+                                      "listener");
+    lowering_.refCounts().dropOperand(box);
+    llvm::Value *receiver = lowering_.exprLowerer().emitExpr(call->args[1]);
+    return lowering_.builder_.CreateInsertValue(value, receiver, 1);
+  }
   case Builtin::LibAs: {
     const Type *from = call->args[0]->type;
     const Type *wanted = call->type->nonOptional();

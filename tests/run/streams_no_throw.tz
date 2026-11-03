@@ -2,7 +2,7 @@
 // stream (its 'error' event, the Err of for await) or goes on (docs/errors.md,
 // step 5): undefined written to a stream of objects, undefined from the
 // iterator of Readable.from(), a start after the end of a file stream, an
-// 'error' emitted with no listener left, and setMaxListeners() below zero.
+// 'error' emitted with no listener left.
 import { EventEmitter } from "node:events"
 import { createReadStream } from "node:fs"
 import { Readable, Writable } from "node:stream"
@@ -46,4 +46,3 @@ bus.on("error", listener)
 log(`${bus.emit("error", { code: "E_ONE", message: "one" })}`)
 bus.off("error", listener)
 log(`${bus.emit("error", { code: "E_TWO", message: "two" })}`)
-log(`${bus.setMaxListeners(-1).getMaxListeners()}`)

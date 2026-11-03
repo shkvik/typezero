@@ -39,8 +39,7 @@ enum class EmitterMethod {
   Listeners,
   RawListeners,
   Count,
-  RemoveAll,
-  Chain
+  RemoveAll
 };
 
 EmitterMethod emitterMethod(llvm::StringRef name) {
@@ -65,9 +64,6 @@ EmitterMethod emitterMethod(llvm::StringRef name) {
   }
   if (name == "removeAllListeners") {
     return EmitterMethod::RemoveAll;
-  }
-  if (name == "setMaxListeners") {
-    return EmitterMethod::Chain;
   }
 
   return EmitterMethod::None;
@@ -106,6 +102,18 @@ std::string fileOfPlace(const std::string &place) {
       column == std::string::npos || column == 0 ? std::string::npos : place.rfind(':', column - 1);
 
   return line == std::string::npos ? place : place.substr(0, line);
+}
+
+constexpr int kReceiverBit = 16;
+constexpr int kDedupeBit = 32;
+
+std::string quotedList(const std::vector<const VarSymbol *> &vars) {
+  std::string out;
+  for (size_t i = 0; i < vars.size(); ++i) {
+    out += (i == 0 ? "" : i + 1 == vars.size() ? " and " : ", ") + ("'" + vars[i]->name.str() + "'");
+  }
+
+  return out;
 }
 
 std::string shortPlace(const std::string &place) {
@@ -153,6 +161,137 @@ void EmitterChecker::noteListener(MemberExpr *member, const Type *events, llvm::
       llvm::none_of(flow.errorPending, [&](const auto &p) { return p.first == key; })) {
     flow.errorPending.push_back({key, member->loc()});
   }
+}
+
+bool EmitterChecker::canReceive(const Type *type) {
+  return type && type->isObject() && !type->isAnyObject() && !type->isTuple() &&
+         !type->isWeakRef() && !type->isRegExp() && !type->isMatch() && !type->isDate() &&
+         !type->isIntl() && !type->isRuntimeObject() && !type->isCrypto() && !type->isTimer() &&
+         !type->isBytes();
+}
+
+bool EmitterChecker::ownsEmitter(const Expr *emitter) const {
+  while (true) {
+    if (auto *conv = dyn_cast<CastExpr>(emitter); conv && conv->isImplicit()) {
+      emitter = conv->operand;
+      continue;
+    }
+    auto *call = dyn_cast<CallExpr>(emitter);
+    auto *chained = call ? dyn_cast<MemberExpr>(call->callee) : nullptr;
+    if (chained && emitterMethod(chained->name) == EmitterMethod::Listen) {
+      emitter = chained->object;
+      continue;
+    }
+    break;
+  }
+  if (isa<NewExpr>(emitter)) {
+    return true;
+  }
+  auto *name = dyn_cast<NameExpr>(emitter);
+  const FunctionDecl *fn = checker_.currentDecl();
+  if (!name || !name->var || !fn || name->var->owner != fn || name->var->isGlobal ||
+      name->var == fn->thisVar) {
+    return false;
+  }
+
+  return llvm::none_of(fn->params, [&](const Param &p) { return p.sym == name->var; });
+}
+
+bool EmitterChecker::classifyListener(Expr *arg, const Expr *emitter, int &bits, bool timer) {
+  Expr *e = arg;
+  while (auto *conv = dyn_cast<CastExpr>(e)) {
+    if (!conv->isImplicit()) {
+      break;
+    }
+    e = conv->operand;
+  }
+  bool topLevel = (!checker_.currentDecl() && !checker_.awaitLoops_) ||
+                  (emitter && ownsEmitter(emitter));
+  std::string what = timer ? "interval" : "listener";
+  std::string ends = timer ? "it should stop" : "its subscription ends";
+  std::string section = timer ? "(docs/events.md, section 7)" : "(docs/events.md, section 6)";
+  auto receiver = [&](const Type *type, const VarSymbol *var) {
+    bits |= kReceiverBit | (topLevel ? 0 : kDedupeBit);
+    checker_.file_->listenerReceivers.push_back(type);
+    if (const FunctionDecl *fn = checker_.currentDecl();
+        fn && fn->isConstructor && fn->cls && var && var == fn->thisVar) {
+      checker_.selfListeners_.insert(fn->cls);
+    }
+    return true;
+  };
+  std::vector<const VarSymbol *> captured;
+  bool known = true;
+  if (auto *fe = dyn_cast<FunctionExpr>(e)) {
+    FunctionDecl *fn = fe->fn;
+    if (fn->captures.empty()) {
+      bits |= topLevel ? 0 : kDedupeBit;
+      return true;
+    }
+    if (const VarSymbol *only = fn->captures[0]; fn->captures.size() == 1 && !fn->group &&
+                                                 !fn->isGenerator && !only->boxed() &&
+                                                 canReceive(only->type)) {
+      fn->receiverEnv = only;
+      return receiver(only->type, only);
+    }
+    captured.assign(fn->captures.begin(), fn->captures.end());
+  } else if (auto *member = dyn_cast<MemberExpr>(e);
+             member && member->method && member->method->decl &&
+             !member->method->decl->isStatic && canReceive(member->object->type)) {
+    auto *self = dyn_cast<NameExpr>(member->object);
+    return receiver(member->object->type, self ? self->var : nullptr);
+  } else if (auto *name = dyn_cast<NameExpr>(e); name && name->func && name->func->decl) {
+    const FunctionDecl *fn = name->func->decl;
+    const std::vector<VarSymbol *> &captures = fn->group ? fn->group->captures : fn->captures;
+    if (captures.empty()) {
+      bits |= topLevel ? 0 : kDedupeBit;
+      return true;
+    }
+    captured.assign(captures.begin(), captures.end());
+  } else {
+    known = false;
+  }
+  if (topLevel) {
+    return true;
+  }
+  if (!known) {
+    checker_.diags_.error(arg->loc(), "can't tell what this " + what + " captures, so not when " +
+                                          ends + "; pass a method here, e.g. 'this.onData', or an "
+                                          "arrow that uses one object, e.g. '(chunk) => "
+                                          "this.add(chunk)' " + section);
+    return false;
+  }
+  auto bad = llvm::find_if(captured, [](const VarSymbol *var) {
+    return var->boxed() || !canReceive(var->type);
+  });
+  if (bad != captured.end()) {
+    std::string example =
+        timer ? "pass its method, e.g. 'setInterval(counter.tick, 1000)'"
+              : "subscribe its method, e.g. 'bus.on(\"data\", counter.add)'";
+    checker_.diags_.error(arg->loc(), "the " + what + " keeps '" + (*bad)->name.str() +
+                                          "', which nothing else holds, so nothing tells when " +
+                                          ends + "; keep the state in an object and " + example +
+                                          " " + section);
+    return false;
+  }
+  const VarSymbol *kept = captured[0];
+  for (const VarSymbol *var : captured) {
+    if (var->name == "this") {
+      kept = var;
+    }
+  }
+  std::vector<const VarSymbol *> others;
+  for (const VarSymbol *var : captured) {
+    if (var != kept) {
+      others.push_back(var);
+    }
+  }
+  checker_.diags_.error(arg->loc(), "the " + what + " captures " + quotedList(captured) +
+                                        ", but it may depend on one object only, the one whose "
+                                        "life it follows; store what it needs from " +
+                                        quotedList(others) + " in a field of '" +
+                                        kept->name.str() + "' " + section);
+
+  return false;
 }
 
 Checker::EmitterKey EmitterChecker::keyOf(const Expr *root) const {
@@ -226,6 +365,21 @@ void EmitterChecker::reportUnlistenedErrors() {
   checker_.flow_.errorPending.clear();
 }
 
+void EmitterChecker::checkDroppedListeners() {
+  for (const auto &[cls, loc] : checker_.droppedNews_) {
+    for (const ClassDecl *c = cls; c; c = c->parent) {
+      if (checker_.selfListeners_.contains(c)) {
+        checker_.diags_.error(loc, "the new " + cls->name.str() +
+                                       " is held by nothing, so the listeners its constructor "
+                                       "adds would stop at once; store it, e.g. 'const " +
+                                       llvm::StringRef(cls->name).lower() + " = new " +
+                                       cls->name.str() + "(...)' (docs/events.md, section 6)");
+        break;
+      }
+    }
+  }
+}
+
 void EmitterChecker::checkErrorListeners() {
   for (const auto &[events, loc] : checker_.errorEmits_) {
     if (!checker_.errorListenedMaps_.contains(events)) {
@@ -283,6 +437,15 @@ Expr *EmitterChecker::collectEmitterCall(CallExpr *call, MemberExpr *member,
   call->type = Type::boolTy();
   member->type = Type::error();
   llvm::SMLoc loc = call->args.empty() ? member->loc() : call->args[0]->loc();
+  if (call->args.size() > 2) {
+    checker_.diags_.error(call->args[2]->loc(),
+                          "an event carries one value: pass an object, e.g. 'emit(\"message\", { "
+                          "from, text })' (docs/events.md, section 2)");
+    for (Expr *&arg : call->args) {
+      arg = checker_.exprChecker().checkExpr(arg);
+    }
+    return call;
+  }
   std::vector<const Type *> elements;
   bool known = true;
   for (size_t i = 0; i < call->args.size(); ++i) {
@@ -432,6 +595,13 @@ Expr *EmitterChecker::checkEmitterCall(CallExpr *call, MemberExpr *member, Class
       return call;
     }
     size_t count = call->args.size() - 1;
+    if (count > 1) {
+      checker_.diags_.error(call->args[2]->loc(),
+                            "an event carries one value: pass an object, e.g. 'emit(\"" +
+                                event + "\", { from, text })' (docs/events.md, section 2)");
+      checkArgsLoosely(1);
+      return call;
+    }
     size_t min = args->tupleMin();
     size_t max = args->tupleRest() ? ~size_t(0) : args->fields().size();
     std::string first;
@@ -500,8 +670,12 @@ Expr *EmitterChecker::checkEmitterCall(CallExpr *call, MemberExpr *member, Class
     }
     if (kind == EmitterMethod::Listen) {
       noteListener(member, events, event);
+      int bits = int(listener);
+      if (!classifyListener(call->args[1], member->object, bits)) {
+        return call;
+      }
       call->args.push_back(checker_.exprChecker().checkExpr(
-          checker_.ctx_.make<IntLitExpr>(call->loc(), uint64_t(listener)), Type::intTy()));
+          checker_.ctx_.make<IntLitExpr>(call->loc(), uint64_t(bits)), Type::intTy()));
     } else {
       checker_.file_->comparesFunctions = true;
     }
@@ -559,12 +733,6 @@ Expr *EmitterChecker::checkEmitterCall(CallExpr *call, MemberExpr *member, Class
     call->type = receiver;
     return call;
   }
-  case EmitterMethod::Chain:
-    callLibraryMethod(call, member, cls, name, {}, nullptr, super);
-    if (!call->type->isError()) {
-      call->type = receiver;
-    }
-    return call;
   case EmitterMethod::None:
     break;
   }
@@ -576,9 +744,6 @@ std::string EmitterChecker::libraryExportHint(llvm::StringRef name) {
   if (name == "errorMonitor" || name == "captureRejectionSymbol") {
     return ": in node it is a symbol, and tz has no symbols of its own; the names of events are "
            "strings (docs/events.md, section 4)";
-  }
-  if (name == "defaultMaxListeners") {
-    return "; it is 'EventEmitter.defaultMaxListeners'";
   }
   if (name == "addAbortListener") {
     return " yet; listen to the signal: 'signal.addEventListener(\"abort\", listener, { once: "

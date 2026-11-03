@@ -85,6 +85,7 @@ Expr *LibraryCalls::checkLibCall(CallExpr *call, NameExpr *name) {
     unsigned args, typeArgs;
   };
   static const Intrinsic intrinsics[] = {{"asListener", Builtin::LibListener, 1, 1},
+                                         {"asBoundListener", Builtin::LibBoundListener, 2, 1},
                                          {"asClass", Builtin::LibAs, 1, 1},
                                          {"chunkOf", Builtin::LibChunk, 1, 1},
                                          {"isChunk", Builtin::LibIsChunk, 1, 1},
@@ -116,7 +117,8 @@ Expr *LibraryCalls::checkLibCall(CallExpr *call, NameExpr *name) {
       intrinsic->typeArgs ? checker_.typeResolver().resolveType(name->typeArgs[0], false) : nullptr;
   call->builtin = intrinsic->builtin;
   switch (intrinsic->builtin) {
-  case Builtin::LibListener: {
+  case Builtin::LibListener:
+  case Builtin::LibBoundListener: {
     const Type *fn = typeArg;
     std::vector<const Type *> flat;
     size_t minArgs = 0;
@@ -125,6 +127,9 @@ Expr *LibraryCalls::checkLibCall(CallExpr *call, NameExpr *name) {
       fn = Type::function(flat, minArgs, hasRest, fn->ret(), fn->hasThis());
     }
     call->args[0] = checker_.argumentChecker().checkArg(call->args[0], Type::unknown());
+    if (intrinsic->builtin == Builtin::LibBoundListener) {
+      call->args[1] = checker_.argumentChecker().checkArg(call->args[1], Type::anyObject());
+    }
     call->type = fn;
     if (!fn->isFunction() && !fn->isParam() && !fn->isError()) {
       checker_.diags_.error(name->loc(), "'asListener' gives a function");

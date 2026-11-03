@@ -150,6 +150,9 @@ llvm::Constant *ClosureLowerer::functionInfo(FunctionDecl *fn) {
 llvm::Value *ClosureLowerer::emitFunctionExpr(FunctionExpr *fe) {
   FunctionDecl *fn = fe->fn;
   llvm::Constant *info = functionInfo(fn);
+  if (const VarSymbol *var = fn->receiverEnv) {
+    return makeFunctionValue(info, lowering_.envLowerer().emitVarValue(var, false));
+  }
   const Lowering::EnvLayout &layout = lowering_.envLowerer().envLayout(fn);
   llvm::Value *env = llvm::ConstantPointerNull::get(lowering_.builder_.getPtrTy());
   if (!layout.fields.empty() || (lowering_.comparesFunctions_ && !fn->nonEscaping)) {

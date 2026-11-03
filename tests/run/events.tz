@@ -1,7 +1,7 @@
 // same-as-node
 // node:events (docs/events.md): EventEmitter with an event map, ported from
 // node's lib/events.js. The order listeners run in, once() and the prepend
-// methods, off(), removeAllListeners(), newListener and removeListener, the
+// methods, off(), removeAllListeners(), the
 // 'error' event, listener counts, classes that extend EventEmitter (how an
 // emitter prints is in library_print.tz).
 import { EventEmitter } from "node:events"
@@ -9,42 +9,26 @@ import { EventEmitter } from "node:events"
 interface User {
   name: string
 }
-const bus = new EventEmitter<{ user: [user: User]; count: [n: int, label: string] }>()
+const bus = new EventEmitter<{ user: [user: User]; count: [count: { n: int; label: string }] }>()
 console.log(bus.eventNames(), bus.listenerCount("user"))
 bus.on("user", (u) => console.log("user", u.name))
-bus.on("count", (n, label) => console.log("count", n + 1, label))
-console.log(bus.emit("user", { name: "ann" }), bus.emit("count", 1, "x"))
+bus.on("count", (c) => console.log("count", c.n + 1, c.label))
+console.log(bus.emit("user", { name: "ann" }), bus.emit("count", { n: 1, label: "x" }))
 console.log(bus.listenerCount("user"), bus.eventNames())
 console.log(bus.listeners("count").length)
 
-// on, once, prependListener; newListener before a listener is added, and
-// removeListener after one goes, also the listener of once() as it fires.
-type Events = { x: []; data: [chunk: string, n: int] }
-const e = new EventEmitter<Events>()
-const order: string[] = []
-e.on("newListener", (name, l) => order.push(`new ${name} ${typeof l}`))
-e.on("removeListener", (name, l) => order.push(`rm ${name} ${typeof l}`))
-const a = () => order.push("a")
-e.on("x", a)
-e.once("x", () => order.push("once"))
-e.prependListener("x", () => order.push("pre"))
-console.log(e.emit("x"), e.emit("x"))
-e.off("x", a)
-console.log(order, e.eventNames(), e.listenerCount("x"))
-e.removeAllListeners()
-console.log(order.slice(-6), e.eventNames())
-
 // A listener added while the event is emitted runs from the next emit on.
+type Events = { x: []; data: [data: { chunk: string; n: int }] }
 const f = new EventEmitter<Events>()
 const log: string[] = []
-f.on("data", (chunk, n) => {
-  log.push(`1 ${chunk} ${n}`)
-  f.on("data", (c) => log.push(`late ${c}`))
+f.on("data", (d) => {
+  log.push(`1 ${d.chunk} ${d.n}`)
+  if (d.chunk == "a") f.on("data", (c) => log.push(`late ${c.chunk}`))
 })
-f.prependOnceListener("data", (chunk) => log.push(`first ${chunk}`))
-f.once("data", (chunk, n) => log.push(`once ${chunk} ${n * 2}`))
-f.emit("data", "a", 1)
-f.emit("data", "b", 2)
+f.prependOnceListener("data", (d) => log.push(`first ${d.chunk}`))
+f.once("data", (d) => log.push(`once ${d.chunk} ${d.n * 2}`))
+f.emit("data", { chunk: "a", n: 1 })
+f.emit("data", { chunk: "b", n: 2 })
 console.log(log)
 console.log(f.listenerCount("data"), f.listeners("data").length, f.rawListeners("data").length)
 console.log(f.emit("x"), f.listenerCount("x"))
@@ -78,18 +62,6 @@ t.off("tick", ta)
 t.emit("tick", 2)
 console.log(seen, t.listeners("tick").length)
 
-// removeAllListeners(name) removes the last first, each with removeListener.
-const r = new EventEmitter<{ x: [] }>()
-const removed: string[] = []
-const first = () => {}
-const second = () => {}
-r.on("removeListener", (name, listener) =>
-  removed.push(`${name} ${listener == first ? "first" : listener == second ? "second" : "?"}`),
-)
-r.on("x", first).on("x", second)
-r.removeAllListeners("x")
-console.log(removed, r.eventNames())
-
 // emit('error') with a listener: the listener gets it.
 const h = new EventEmitter<{ error: [err: { code: string; message: string }] }>()
 h.once("error", (err) => console.log("handled", err.message))
@@ -109,8 +81,8 @@ const s = new Server()
 s.on("listening", (p) => console.log("listening on", p)).on("close", () => console.log("closed"))
 s.listen(8080).emit("close")
 console.log(s.port, s.listenerCount("close"), s instanceof EventEmitter)
-s.setMaxListeners(3).removeAllListeners("close")
-console.log(s.getMaxListeners(), s.eventNames(), EventEmitter.defaultMaxListeners)
+s.removeAllListeners("close")
+console.log(s.eventNames())
 
 // Names known only when the program runs: a map that takes any name.
 interface Message {
@@ -128,5 +100,3 @@ n.on("10", () => {})
 n.on("a", () => {})
 n.on("2", () => {})
 console.log(n.eventNames())
-EventEmitter.defaultMaxListeners = 20
-console.log(t.getMaxListeners(), new EventEmitter<{ y: [] }>().getMaxListeners())

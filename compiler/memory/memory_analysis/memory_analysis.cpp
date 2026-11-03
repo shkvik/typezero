@@ -83,6 +83,11 @@ void MemoryAnalysis::analyzeCycles(SourceFile &file) {
       }
     }
   }
+  for (const Type *t : file.listenerReceivers) {
+    for (const Type *s : finder.runtimeTypesOf(t)) {
+      plan_.weakTargets.insert(s);
+    }
+  }
 
   if (plan_.hasCycles) {
     findUnstored(file);
@@ -221,7 +226,7 @@ void MemoryAnalysis::findUnstored(SourceFile &file) {
     case Expr::Kind::Function: {
       const FunctionDecl *fn = cast<FunctionExpr>(e)->fn;
       const void *key = fn->group ? static_cast<const void *>(fn->group) : fn;
-      return !fn->nonEscaping && plan_.isCyclicEnv(key);
+      return !fn->nonEscaping && !fn->receiverEnv && plan_.isCyclicEnv(key);
     }
     default:
       return false;

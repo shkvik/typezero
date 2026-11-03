@@ -306,9 +306,9 @@ tz run                   # без файла — "main" из package.json
   же функции из `node:fs/promises` дают `Promise<Result>` (`await readFile(path, "utf8")`),
   `node:readline` поверх stdin
   (`rl.question(...)`, `for await (const line of rl)`) и `readLine` из `"tz:io"` — строка ввода.
-- События (см. «События»): `EventEmitter` из `node:events` со всеми методами node, тем же порядком
-  слушателей, `newListener` / `removeListener`, событием `error` и предупреждением о лишних
-  слушателях; карта событий пишется (`new EventEmitter<{ data: [chunk: string]; end: [] }>()`,
+- События (см. «События»): `EventEmitter` из `node:events` с методами node, тем же порядком
+  слушателей, `newListener` / `removeListener`, событием `error`, без утечек через подписки
+  (слушатель живёт, пока жив его объект); карта событий пишется (`new EventEmitter<{ data: [chunk: string]; end: [] }>()`,
   `class Server extends EventEmitter<Events>`) или выводится из всех `emit` программы;
   async-слушатели, `once(emitter, name)` — `Promise` (с `Result`, если эмиттер может испустить
   `error`), `on(emitter, name)` — async-итератор для `for await`; событие `error` без
@@ -2028,17 +2028,43 @@ server.listen(8080)
 const bus = new EventEmitter<{ user: [user: User]; done: [] }>()   // карта явно
 setTimeout(() => bus.emit("user", ann), 10)
 const [user] = await once(bus, "user")
+
+class Connection {
+  constructor(room: Room) {
+    room.on("message", this.send)          // слушатель живёт, пока жив Connection: off не нужен
+  }
+  send(message: Message) { ... }
+}
 ```
+
+- **Без утечек** ([events.md](docs/events.md), разделы 6–7). Слушатель — метод объекта
+  (`this.send`) или стрелка, которая захватывает один внешний объект (`() => this.bye()`), или
+  стрелка без захватов. Этот объект — получатель: эмиттер держит его слабо, и когда объект
+  освобождён (соединение убрали из списка), его подписки уходят сами — `off` можно, но не нужно.
+  Захват локальных переменных или двух объектов — ошибка компиляции с подсказкой («keep the state
+  in an object and subscribe its method»); `new X()` без записи, если конструктор `X` подписывает
+  `this`, — ошибка («held by nothing»). Та же пара «код + получатель» второй раз ничего не
+  добавляет (стрелка без захватов в обработчике запроса — одна подписка, а не по одной на
+  запрос). На верхнем уровне модуля и на своём эмиттере функции (`const socket = new
+  WebSocket(...)`) — как в node, с любыми захватами. Слушатель из параметра или переменной в
+  функции — пока ошибка «can't tell what this listener captures». `setInterval` — по тем же
+  правилам: интервал объекта останавливается, когда объект освобождён; `setTimeout`, который
+  ставит сам себя, — тоже. `once()` и `on()` на своём эмиттере в функции — только с
+  `{ timeout }` (`Err` — `EventTimeoutError`); `Promise.race` снимает свои ожидания с
+  проигравших. 1 млн соединений, подписанных на комнату и выброшенных без `off`, — 3,9 МБ;
+  `emit` слушателю-методу ~19 нс, стрелке без захватов ~15 нс (было 11 нс у обоих).
+- **Одно значение в событии**: `emit("message", { from, text })`; два и больше — ошибка, в карте
+  тоже (`pair: [a: int, b: int]`). Встроенные события, у которых в node несколько значений, несут
+  объект: `close` у WebSocket — `{ code, reason }`, `message` у UDP — `{ data, from }`,
+  `newListener` / `removeListener` — `{ event, listener }`.
 
 - **Код — node.** `EventEmitter` написан на tz ([library/events/events.tz](library/events/events.tz)) переносом
   `lib/events.js` из node 24: `_events` — один слушатель или массив, `newListener` — до добавления,
   `removeListener` — после удаления, обёртка `once()` снимает себя перед вызовом, слушатель,
   добавленный во время `emit`, работает со следующего; `emit("error")` без слушателя
-  возвращает `false` (в node — исключение `ERR_UNHANDLED_ERROR`); больше `getMaxListeners()` слушателей одного события — предупреждение
-  `MaxListenersExceededWarning` в stderr с текстом node, на следующем ходу. Печать — как в node:
-  `EventEmitter { _events: [Object: null prototype] { data: [Function (anonymous)] },
-  _eventsCount: 1, _maxListeners: undefined, Symbol(shapeMode): false, Symbol(kCapture): false }`,
-  у наследника его поля — перед символами; `Object.keys` и `JSON.stringify` — тоже как в node.
+  возвращает `false` (в node — исключение `ERR_UNHANDLED_ERROR`). Предупреждения о лишних
+  слушателях и `setMaxListeners` нет: утечки через подписку исключены. Печать показывает все поля
+  (записи слушателей тоже), как у любого объекта библиотеки.
 - **Карта событий** — тип: имя события → кортеж аргументов его слушателей (`end: []` — без них;
   `{ [name: string]: [msg: Msg] }` — любые имена, и имя может быть переменной). Каждый вызов
   программы проверяется по ней: событие, которого нет в карте, — ошибка с подсказкой похожего
@@ -2046,7 +2072,7 @@ const [user] = await once(bus, "user")
   получает типы параметров оттуда; функция с `this` (`function (this: Server, port) {...}`)
   получает эмиттер как `this`, как в node; `on`, `once` и другие возвращают сам объект его типом
   (`server.on(...).listen(80)`). `newListener` и `removeListener` есть у каждого эмиттера: их
-  слушатели получают `(eventName: string, listener: unknown)`. Код эмиттера видит слушателей как
+  слушатели получают `{ event: string; listener: unknown }`. Код эмиттера видит слушателей как
   `unknown`, как видит их JS: компилятор превращает вызовы программы в вызовы этого кода, а `emit`
   — в копию `emit<A>` для кортежа события, которая зовёт слушателей напрямую, без памяти на вызов;
   массив слушателей копируется, только если его меняют во время `emit`.
@@ -2071,8 +2097,8 @@ const [user] = await once(bus, "user")
 - **`once(emitter, name)`** — `Promise` кортежа аргументов следующего события; если эмиттер может
   испустить `error` — `Promise<Result<[...], E>>`, где `E` — тип ошибки события `error`: `Err`,
   если раньше пришло `error`. У `EventTarget` — `[event]`. Опции `signal` нет: `AbortSignal` в tz
-  убран. Есть `EventEmitter.once`, `getEventListeners`, `listenerCount`, `getMaxListeners`,
-  `setMaxListeners`, `EventEmitter.defaultMaxListeners`.
+  убран; есть `{ timeout }` — `Promise<Result<[...], E | EventTimeoutError>>`. Есть
+  `EventEmitter.once`, `getEventListeners`, `listenerCount`.
 - **`for await (const event of on(emitter, "data", { close }))`** — события по одному, каждое —
   кортеж аргументов его слушателей (у эмиттера с `error` — в `Result`), как `on()` node: слушает с
   вызова, а события, которых ещё никто не ждёт, ждут в очереди; событие `error` даёт `Err` после

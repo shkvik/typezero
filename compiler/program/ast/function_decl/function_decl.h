@@ -47,6 +47,7 @@ struct FunctionDecl : Stmt {
   VarSymbol *var = nullptr;
   unsigned creationSeq = 0;
   bool nonEscaping = false;
+  const VarSymbol *receiverEnv = nullptr;
   bool isClosure() const { return parent || isExpression || group; }
 
   ClassDecl *cls = nullptr;

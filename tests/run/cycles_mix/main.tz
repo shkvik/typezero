@@ -26,8 +26,8 @@ class Upper extends Handler {
 // 1. An emitter whose listeners capture it: the classic cycle of node:events.
 function chat(): WeakRef<Room> {
   const room = new Room("lobby")
-  room.on("say", (who, text) => {
-    room.lines.push(`${who}: ${text}`)
+  room.on("say", (said) => {
+    room.lines.push(`${said.who}: ${said.text}`)
   })
   room.once("close", () => room.say("bot", `bye from ${room.name}`))
   room.say("ann", "hi")

@@ -57,7 +57,6 @@ EventTarget {}
 EventEmitter {
   events: [Object: null prototype] {},
   eventsCount: 0,
-  maxListeners: undefined,
   Symbol(shapeMode): false,
   Symbol(kCapture): false
 }
@@ -65,22 +64,17 @@ user ann
 count 1
 EventEmitter {
   events: [Object: null prototype] {
-    user: [Function (anonymous)],
-    count: [Function (anonymous)]
+    user: [ [Listener] ],
+    count: [ [Listener] ]
   },
   eventsCount: 2,
-  maxListeners: undefined,
   Symbol(shapeMode): false,
   Symbol(kCapture): false
-} [ 'events', 'eventsCount', 'maxListeners' ] {"events":{},"eventsCount":2}
+} [ 'events', 'eventsCount' ] {"events":{"user":{"items":[{"kind":0,"once":false,"fired":false}],"emitting":0,"sweepAt":8},"count":{"items":[{"kind":0,"once":false,"fired":false}],"emitting":0,"sweepAt":8}},"eventsCount":2}
 [
   EventEmitter {
-    events: [Object: null prototype] {
-      user: [Function (anonymous)],
-      count: [Function (anonymous)]
-    },
+    events: [Object: null prototype] { user: [Array], count: [Array] },
     eventsCount: 2,
-    maxListeners: undefined,
     Symbol(shapeMode): false,
     Symbol(kCapture): false
   }
@@ -89,7 +83,6 @@ EventEmitter {
     emitter: EventEmitter {
       events: [Object: null prototype],
       eventsCount: 2,
-      maxListeners: undefined,
       Symbol(shapeMode): false,
       Symbol(kCapture): false
     }

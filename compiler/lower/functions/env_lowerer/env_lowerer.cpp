@@ -302,6 +302,15 @@ void EnvLowerer::bindCaptures(const FunctionDecl *fn) {
     }
     return;
   }
+  if (const VarSymbol *var = fn->receiverEnv) {
+    lowering_.envParam_->setName(var->name);
+    llvm::Value *slot = lowering_.functionFrame().createStackSlot(lowering_.builder_.getPtrTy(),
+                                                                  var->name);
+    lowering_.builder_.CreateStore(lowering_.envParam_, slot);
+    lowering_.addresses_[var] = slot;
+    lowering_.debugInfo().declare(var, slot);
+    return;
+  }
   lowering_.envParam_->setName("env");
   const Lowering::EnvLayout &layout = envLayout(fn);
   for (size_t i = 0; i < layout.fields.size(); ++i) {

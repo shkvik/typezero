@@ -38,7 +38,10 @@ bool isServiceEvent(llvm::StringRef name) {
   return name == "newListener" || name == "removeListener";
 }
 
-const Type *serviceEventArgs() { return Type::tuple({Type::string(), Type::unknown()}); }
+const Type *serviceEventArgs() {
+  return Type::tuple(
+      {Type::object({{"event", Type::string(), false}, {"listener", Type::unknown(), false}})});
+}
 
 std::string eventList(const Type *events) {
   std::string out;
@@ -102,12 +105,22 @@ bool EventMaps::checkEventMap(const Type *events, llvm::SMLoc loc) {
 
     return false;
   };
+  auto oneValue = [&](const std::string &event, const Type *args) {
+    if (args->fields().size() <= 1 && !args->tupleRest()) {
+      return true;
+    }
+    checker_.diags_.error(loc, event + " carries '" + args->name().str() +
+                                   "', but an event carries one value: give it an object, e.g. "
+                                   "'message: [message: { from: User; text: string }]' "
+                                   "(docs/events.md, section 2)");
+    return false;
+  };
   if (events->isRecord()) {
     if (!events->valueType()->isTuple()) {
       return bad("the arguments of each event are '" + events->valueType()->name().str() +
                  "' here, which is not a tuple");
     }
-    return true;
+    return oneValue("each event", events->valueType());
   }
   if (!events->isObject() || events->isClass() || events->isTuple() || events->isAnyObject() ||
       events->isBytes() || events->isDate() || events->isRegExp() || events->isMatch()) {
@@ -120,11 +133,15 @@ bool EventMaps::checkEventMap(const Type *events, llvm::SMLoc loc) {
     if (!f.type->isTuple()) {
       return bad("event '" + f.name + "' has '" + f.type->name().str() + "', which is not a tuple");
     }
+    if (!isServiceEvent(f.name) && !oneValue("event '" + f.name + "'", f.type)) {
+      return false;
+    }
     if (isServiceEvent(f.name) && f.type != serviceEventArgs()) {
       checker_.diags_.error(
           loc, "every emitter has the event '" + f.name +
                    "', whose listeners get the name of the event and the listener, "
-                   "'[eventName: string, listener: unknown]', but the event map gives it '" +
+                   "'[change: { event: string; listener: unknown }]', but the event map gives "
+                   "it '" +
                    f.type->name() + "'; leave it out of the map");
       return false;
     }

@@ -10,7 +10,7 @@ export type StreamEvents<T> = {
   finish: []
   prefinish: []
   pipe: [src: Stream]
-  unpipe: [src: Stream, info: { hasUnpiped: boolean }]
+  unpipe: [info: { source: Stream; hasUnpiped: boolean }]
   open: [fd: int]
   ready: []
 }

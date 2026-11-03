@@ -6,6 +6,7 @@
 #include "compiler/check/functions/function_value_checker/function_value_checker.h"
 #include "compiler/check/types/type_relations/type_relations.h"
 #include "compiler/declare/prelude/prelude.h"
+#include "compiler/library/events/emitter_checker/emitter_checker.h"
 #include "compiler/library/fs/fs_checker/fs_checker.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/Support/SaveAndRestore.h"
@@ -16,6 +17,12 @@ using llvm::dyn_cast_or_null;
 using llvm::isa;
 
 namespace tz {
+
+namespace {
+
+constexpr int kTimerReceiver = 16;
+
+}
 
 TimerChecker::TimerChecker(Checker &checker) : checker_(checker) {}
 
@@ -54,6 +61,36 @@ Expr *TimerChecker::checkTaskCallback(Expr *arg, llvm::StringRef fn) {
   return arg;
 }
 
+bool TimerChecker::rearms(const Expr *callback) const {
+  const FunctionDecl *current = checker_.currentDecl();
+  if (!current || !current->sym) {
+    return false;
+  }
+  while (auto *conv = dyn_cast<CastExpr>(callback)) {
+    if (!conv->isImplicit()) {
+      break;
+    }
+    callback = conv->operand;
+  }
+  if (auto *member = dyn_cast<MemberExpr>(callback)) {
+    return member->method == current->sym;
+  }
+  auto *fe = dyn_cast<FunctionExpr>(callback);
+  if (!fe || !fe->fn->body || fe->fn->body->body.size() != 1) {
+    return false;
+  }
+  const Stmt *only = fe->fn->body->body.front();
+  const Expr *value = nullptr;
+  if (auto *s = dyn_cast<ExprStmt>(only)) {
+    value = s->expr;
+  } else if (auto *r = dyn_cast<ReturnStmt>(only)) {
+    value = r->value;
+  }
+  auto *call = dyn_cast_or_null<CallExpr>(value);
+
+  return call && call->method == current->sym;
+}
+
 Expr *TimerChecker::checkAsyncGlobal(CallExpr *call, NameExpr *name) {
   static const llvm::StringLiteral names[] = {"setTimeout",    "setInterval",   "setImmediate",
                                               "clearTimeout",  "clearInterval", "clearImmediate",
@@ -87,6 +124,26 @@ Expr *TimerChecker::checkAsyncGlobal(CallExpr *call, NameExpr *name) {
       call->args[1] = checker_.argumentChecker().checkAnyNumber(call->args[1]);
     }
     call->type = Type::timeout();
+    if (call->args[0]->type->isError()) {
+      return call;
+    }
+    int bits = 0;
+    if (fn == "setInterval") {
+      if (!checker_.emitterChecker().classifyListener(call->args[0], nullptr, bits, true)) {
+        return call;
+      }
+    } else if (rearms(call->args[0])) {
+      checker_.emitterChecker().classifyListener(call->args[0], nullptr, bits, true);
+      bits &= kTimerReceiver;
+    }
+    if (bits) {
+      if (call->args.size() < 2) {
+        call->args.push_back(checker_.argumentChecker().checkAnyNumber(
+            checker_.ctx_.make<IntLitExpr>(call->loc(), uint64_t(1))));
+      }
+      call->args.push_back(checker_.exprChecker().checkExpr(
+          checker_.ctx_.make<IntLitExpr>(call->loc(), uint64_t(bits)), Type::intTy()));
+    }
     return call;
   }
   if (fn == "setImmediate" || fn == "queueMicrotask") {

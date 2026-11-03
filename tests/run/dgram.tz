@@ -13,7 +13,7 @@ async function echo(data: Buffer, from: RemoteInfo) {
   const sentResult = await server.send(data.toString().toUpperCase(), { address: from.address, port: from.port })
   if (sentResult.isErr()) console.log("echo:", sentResult.error.message)
 }
-server.on("message", (data, from) => {
+server.on("message", ({ data, from }) => {
   seen.push(`${data.toString()} from ${from.family} ${from.address} ${from.size}`)
   void echo(data, from)
   if (seen.length == 2) echoed.resolve()
@@ -31,7 +31,7 @@ const client = new Socket({ type: "udp4" })
 client.on("error", e => console.log("client error:", e.message))
 const answers = Promise.withResolvers<string[]>()
 const got: string[] = []
-client.on("message", (data: Buffer, from: RemoteInfo) => {
+client.on("message", ({ data, from }) => {
   got.push(`${data.toString()} ${from.port == port}`)
   if (got.length == 2) answers.resolve(got)
 })
@@ -62,7 +62,7 @@ connected.on("error", e => console.log("connected error:", e.message))
 const connectResult = await connected.connect({ address: "127.0.0.1", port: port })
 console.log("connected:", connectResult.isOk(), connected.remoteAddress()?.port == port)
 const viaConnection = Promise.withResolvers<string>()
-connected.on("message", data => viaConnection.resolve(data.toString()))
+connected.on("message", ({ data }) => viaConnection.resolve(data.toString()))
 const plainResult = await connected.send("ping")
 console.log("connected send:", plainResult.isOk(), await viaConnection.promise)
 const withAddress = await connected.send("x", { address: "127.0.0.1", port: port })
@@ -102,7 +102,7 @@ if (loudResult.isErr()) console.log(loudResult.error.kind, loudResult.error.code
 const dual = new Socket()
 dual.on("error", e => console.log("dual error:", e.message))
 const dualGot = Promise.withResolvers<string>()
-dual.on("message", (data, from) => dualGot.resolve(`${data.toString()} ${from.family} ${from.address}`))
+dual.on("message", ({ data, from }) => dualGot.resolve(`${data.toString()} ${from.family} ${from.address}`))
 const dualResult = await dual.bind()
 console.log("dual:", dualResult.isOk(), dual.address()?.address, dual.address()?.family)
 const mappedResult = await client.send("mapped", { address: "127.0.0.1", port: dual.address()?.port ?? 0 })

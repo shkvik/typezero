@@ -104,7 +104,7 @@ const echo = new Server({ port: 0, hostname: "127.0.0.1" }, request => {
     if (sent.isErr()) console.log("server send:", sent.error.code)
   })
   peer.on("error", error => console.log("server error:", error.code))
-  peer.on("close", (code, reason) => console.log("server close:", code, reason.length))
+  peer.on("close", ({ code, reason }) => console.log("server close:", code, reason.length))
   return upgradeResult.value.response
 })
 
@@ -132,7 +132,7 @@ const echoUrl = `ws://127.0.0.1:${echoResult.value.port}/`
 const idle = new WebSocket({ url: `ws://127.0.0.1:${rawPort}/idle`, idleTimeout: 400 })
 const idleClosed = Promise.withResolvers<void>()
 idle.on("error", error => console.log("idle error:", error.kind, error.code))
-idle.on("close", (code, reason) => {
+idle.on("close", ({ code }) => {
   console.log("idle close:", code)
   idleClosed.resolve()
 })
@@ -152,7 +152,7 @@ console.log("silent state:", silent.readyState())
 const resetting = new WebSocket({ url: `ws://127.0.0.1:${rawPort}/reset` })
 const resetClosed = Promise.withResolvers<void>()
 resetting.on("error", error => console.log("reset error:", error.kind, error.code))
-resetting.on("close", code => {
+resetting.on("close", ({ code }) => {
   console.log("reset close:", code)
   resetClosed.resolve()
 })
@@ -176,7 +176,7 @@ proxied.on("message", data => {
   answered.resolve()
 })
 proxied.on("error", error => console.log("proxied error:", error.code))
-proxied.on("close", (code, reason) => {
+proxied.on("close", ({ code, reason }) => {
   console.log("proxied close:", code, reason)
   proxiedClosed.resolve()
 })

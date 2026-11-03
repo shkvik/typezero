@@ -1,0 +1,23 @@
+true true
+[
+  'new removeListener function',
+  'new x function',
+  'new x function',
+  'new x function',
+  'pre',
+  'a',
+  'rm x function',
+  'once',
+  'pre',
+  'a',
+  'rm x function'
+] [ 'newListener', 'removeListener', 'x' ] 1
+[
+  'once',
+  'pre',
+  'a',
+  'rm x function',
+  'rm newListener function',
+  'rm x function'
+] []
+[ 'x second', 'x first' ] [ 'removeListener' ]

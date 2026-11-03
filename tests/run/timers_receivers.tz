@@ -1,0 +1,71 @@
+// setInterval follows the rules of listeners (docs/events.md, section 7): an
+// interval of a method, or of an arrow that uses one object, stops when that
+// object goes; the same interval twice is one, with the new period. A
+// setTimeout that sets itself again is an interval too.
+class Session {
+  ticks = 0
+  constructor(readonly name: string) {
+    setInterval(this.refresh, 5)
+  }
+  refresh() {
+    this.ticks++
+  }
+}
+
+const sessions = new Map<string, Session>()
+
+function login(name: string) {
+  sessions.set(name, new Session(name))
+}
+
+class Feed {
+  pulls = 0
+  start() {
+    setInterval(() => this.pull(), 5)
+  }
+  pull() {
+    this.pulls++
+  }
+}
+
+class Ticker {
+  ticks = 0
+  constructor() {
+    setTimeout(this.tick, 5)
+  }
+  tick() {
+    this.ticks++
+    setTimeout(this.tick, 5)
+  }
+}
+
+const tickers: Ticker[] = []
+
+function startTicker() {
+  tickers.push(new Ticker())
+}
+
+function sleep(ms: int): Promise<void> {
+  return new Promise<void>((resolve) => {
+    setTimeout(resolve, ms)
+  })
+}
+
+function startFeed(): Feed {
+  const feed = new Feed()
+  feed.start()
+  feed.start()
+  return feed
+}
+
+login("a")
+let feed: Feed | undefined = startFeed()
+startTicker()
+await sleep(100)
+const ticks = sessions.get("a")?.ticks ?? 0
+const pulls = feed?.pulls ?? 0
+console.log("ticking", ticks > 2, "one feed interval", pulls <= ticks + 1)
+feed = undefined
+sessions.clear()
+tickers.length = 0
+console.log("all gone: their timers stop, and the program ends")

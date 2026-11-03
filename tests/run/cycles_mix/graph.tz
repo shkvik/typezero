@@ -12,7 +12,7 @@ export class Room extends EventEmitter {
     super()
   }
   say(who: string, text: string) {
-    this.emit("say", who, text)
+    this.emit("say", { who: who, text: text })
   }
 }
 

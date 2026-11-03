@@ -74,7 +74,7 @@ void LoopChecker::checkWhile(WhileStmt *stmt) {
   Checker::Flow whenTrue, whenFalse;
   stmt->cond = checker_.truthChecker().checkCondition(stmt->cond, whenTrue, whenFalse);
   checker_.flow_ = whenTrue;
-  checkLoopBody(stmt->body);
+  checkLoopBody(stmt->body, scan.awaits);
   checker_.flow_ = scan.breaks ? FlowChecker::join(whenFalse, head) : whenFalse;
 }
 
@@ -82,7 +82,7 @@ void LoopChecker::checkDoWhile(DoWhileStmt *stmt) {
   Checker::LoopScan scan = checker_.loopScanner().scanLoop({stmt->body}, {stmt->cond});
   Checker::Flow head = checker_.loopBounds().loopHead(scan, nullptr, false);
   checker_.flow_ = head;
-  checkLoopBody(stmt->body);
+  checkLoopBody(stmt->body, scan.awaits);
   checker_.flow_ = FlowChecker::join(checker_.flow_, head);
   Checker::Flow whenTrue, whenFalse;
   stmt->cond = checker_.truthChecker().checkCondition(stmt->cond, whenTrue, whenFalse);
@@ -105,7 +105,7 @@ void LoopChecker::checkFor(ForStmt *stmt) {
     stmt->cond = checker_.truthChecker().checkCondition(stmt->cond, whenTrue, whenFalse);
   }
   checker_.flow_ = whenTrue;
-  checkLoopBody(stmt->body);
+  checkLoopBody(stmt->body, scan.awaits);
   if (stmt->step) {
     if (continuesTo(stmt->body, labels)) {
       checker_.flow_ = head;
@@ -242,14 +242,16 @@ void LoopChecker::checkForOf(ForOfStmt *stmt) {
       checker_.flow_.facts.add(Term::of(stmt->binding.sym), Term::zero(), saturatingAdd(*hi, 1));
     }
   }
-  checkLoopBody(stmt->body);
+  checkLoopBody(stmt->body, scan.awaits);
   checker_.popScope();
   checker_.flow_ = head;
 }
 
-void LoopChecker::checkLoopBody(Stmt *body) {
+void LoopChecker::checkLoopBody(Stmt *body, bool awaits) {
   checker_.jumpChecker().pushTarget(Checker::JumpTarget::Kind::Loop);
+  checker_.awaitLoops_ += awaits;
   checker_.stmtChecker().checkBody(body);
+  checker_.awaitLoops_ -= awaits;
   checker_.targets_.pop_back();
 }
 

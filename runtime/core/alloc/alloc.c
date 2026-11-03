@@ -39,6 +39,8 @@ typedef struct Page {
 
 struct Heap;
 
+#define WEAK_WORDS (SEGMENT_SIZE / 16 / 64)
+
 typedef struct Segment {
   uint32_t kind;
   uint32_t huge_units;
@@ -47,11 +49,15 @@ typedef struct Segment {
   size_t os_size;
   uint64_t free_units;
   struct Segment *next, *prev;
+  uint64_t huge_weak;
   uint8_t first_unit[UNITS];
   Page pages[UNITS];
+  uint64_t weak[WEAK_WORDS];
 } Segment;
 
 _Static_assert(sizeof(Segment) <= UNIT_SIZE, "segment metadata must fit in unit 0");
+_Static_assert(offsetof(Segment, huge_weak) + sizeof(uint64_t) <= HUGE_HEADER,
+               "the weak flag of a huge object must fit in its header");
 
 #define ALL_UNITS_FREE (~(uint64_t)1)
 
@@ -293,6 +299,7 @@ static void *huge_alloc(size_t size) {
     Segment *s = tz_heap.huge_spares[i];
     if (s && s->huge_units >= units && s->huge_units <= 2 * units) {
       tz_heap.huge_spares[i] = NULL;
+      s->huge_weak = 0;
       return (char *)s + HUGE_HEADER;
     }
   }
@@ -304,6 +311,7 @@ static void *huge_alloc(size_t size) {
   }
   s->kind = KIND_HUGE;
   s->owner = NULL;
+  s->huge_weak = 0;
   s->huge_units = units <= UINT32_MAX ? (uint32_t)units : UINT32_MAX;
   s->os_base = base;
   s->os_size = reserved;
@@ -438,4 +446,35 @@ void tz_heap_collect(void) {
     block = next;
   }
 #endif
+}
+
+static inline uint64_t *weak_word(void *p, uint64_t *bit) {
+  Segment *s = segment_of(p);
+  if (s->kind == KIND_HUGE) {
+    *bit = 1;
+    return &s->huge_weak;
+  }
+  size_t index = ((uintptr_t)p - (uintptr_t)s) >> 4;
+  *bit = (uint64_t)1 << (index & 63);
+
+  return &s->weak[index >> 6];
+}
+
+void tz_weak_mark(void *p) {
+  uint64_t bit;
+  uint64_t *word = weak_word(p, &bit);
+  __atomic_fetch_or(word, bit, __ATOMIC_RELEASE);
+}
+
+void tz_weak_unmark(void *p) {
+  uint64_t bit;
+  uint64_t *word = weak_word(p, &bit);
+  __atomic_fetch_and(word, ~bit, __ATOMIC_RELEASE);
+}
+
+int tz_weak_marked(void *p) {
+  uint64_t bit;
+  uint64_t *word = weak_word(p, &bit);
+
+  return (__atomic_load_n(word, __ATOMIC_ACQUIRE) & bit) != 0;
 }

@@ -21,9 +21,9 @@ class Animal {
 class Dog extends Animal {}
 const dogs: Dog[] = [new Dog("Rex", 4), new Dog("Ace", 3)]
 
-class Stages extends EventEmitter<{ stage: [name: string, count: int] }> {}
+class Stages extends EventEmitter<{ stage: [stage: { name: string; count: int }] }> {}
 const stages = new Stages()
-stages.on("stage", (name, count) => console.log(`stage ${name}: ${count}`))
+stages.on("stage", (stage) => console.log(`stage ${stage.name}: ${stage.count}`))
 
 async function* herd(all: Animal[]) {
   for (const a of all) yield a
@@ -41,7 +41,7 @@ class ToLine extends Transform<Animal, string> {
     callback(undefined, `${a.name} ${a.legs}\n`)
   }
   onFlush(callback) {
-    stages.emit("stage", "lines", records)
+    stages.emit("stage", { name: "lines", count: records })
     callback()
   }
 }
@@ -61,7 +61,7 @@ class Counter extends Writable {
 }
 const counter = new Counter()
 must(await pipeline(createReadStream(file), counter))
-stages.emit("stage", "counted", lines)
+stages.emit("stage", { name: "counted", count: lines })
 console.log("sha256", hash.digest("hex"))
 
 // A read stream joined to a Transform with pipeline(), and the text it gives.

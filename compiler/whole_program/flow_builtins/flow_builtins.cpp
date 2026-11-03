@@ -56,6 +56,13 @@ Refs FlowBuiltins::builtin(CallExpr *c, MemberExpr *member, const Refs &receiver
   case Builtin::LibChunk:
   case Builtin::LibListener:
     return args.empty() ? Refs() : args[0];
+  case Builtin::LibBoundListener: {
+    Refs both = args.empty() ? Refs() : args[0];
+    if (args.size() > 1) {
+      append(both, args[1]);
+    }
+    return both;
+  }
   case Builtin::LibIsChunk:
   case Builtin::LibChunkKind:
   case Builtin::LibTypeName:

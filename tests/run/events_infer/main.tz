@@ -18,14 +18,14 @@ class User {
 const bus = new EventEmitter()
 bus.on("user", (user) => console.log("user", user.name))
 bus.on("order", (order) => console.log("order", order.id, order.items.length, order.note ?? "-"))
-bus.on("total", (sum, currency) => console.log("total", sum.toFixed(2), currency))
-bus.once("count", (n, label) => console.log("count", n * 2, label))
+bus.on("total", (t) => console.log("total", t.sum.toFixed(2), t.currency))
+bus.once("count", (c) => console.log("count", c.n * 2, c.label))
 bus.on("chain", (n) => bus.emit("chained", `${n}!`))
 bus.on("chained", (text) => console.log("chained", text))
 
 function checkout(items: string[]) {
   bus.emit("order", { id: 7, items, note: items.length > 1 ? "many" : undefined })
-  bus.emit("total", items.length.toDouble() * 2.5, "EUR")
+  bus.emit("total", { sum: items.length.toDouble() * 2.5, currency: "EUR" })
 }
 // The emitter as a parameter: the type of the variable.
 function welcome(target: typeof bus, name: string) {
@@ -36,8 +36,8 @@ bus.emit("user", new User("ann"))
 welcome(bus, "bob")
 checkout(["tea", "cake"])
 // The event passes doubles: each emit gives one.
-bus.emit("count", 21.0, "x")
-bus.emit("count", 2.5, "y")
+bus.emit("count", { n: 21.0, label: "x" })
+bus.emit("count", { n: 2.5, label: "y" })
 bus.emit("chain", 3)
 console.log(bus.eventNames())
 
@@ -52,7 +52,7 @@ app.events.on("ready", (info) => console.log("ready at", info.at))
 app.start()
 
 const shop = new Shop()
-shop.on("sold", (what, count) => console.log("sold", what, count))
+shop.on("sold", (s) => console.log("sold", s.what, s.count))
 shop.sell("apple", 3)
 report(shop)
 setTimeout(() => shop.emit("closed"), 1)

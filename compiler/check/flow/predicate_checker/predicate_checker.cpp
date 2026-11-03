@@ -267,7 +267,8 @@ const Checker::Predicate *PredicateChecker::predicateOf(const FuncSymbol *fn) co
     return &found->second;
   }
   FunctionDecl *decl = fn->decl;
-  if (!decl || decl->checked || !decl->body || decl->isGenerator || decl->isInstance ||
+  if (!decl || decl->checked || !decl->body || decl->external || decl->isGenerator ||
+      decl->isInstance ||
       (fn->ret && !fn->ret->isBool()) || !summarizing_.insert(fn).second) {
     return nullptr;
   }

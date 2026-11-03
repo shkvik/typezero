@@ -599,6 +599,8 @@ TzPromise *tz_promise_resolved(const TzLayout *layout) {
   return p;
 }
 
+typedef struct Element Element;
+
 typedef struct {
   TzObject base;
   TzPromise *result;
@@ -606,18 +608,22 @@ typedef struct {
   int64_t remaining;
   int32_t kind;
   const TzCombine *shape;
+  Element **racers;
+  uint32_t count;
 } Combine;
 
-typedef struct {
+struct Element {
   TzObject base;
   TzReactor reactor;
   Combine *all;
   uint32_t index;
-} Element;
+  TzPromise *promise;
+};
 
 static void combine_drop(void *object) {
   Combine *c = (Combine *)object;
   release(c->result);
+  tz_free(c->racers);
   if (c->shape->tuple) {
     if (c->container) {
       release(c->container);
@@ -637,8 +643,48 @@ static const TzObjectDesc combine_desc = {combine_drop};
 
 static void element_drop(void *object) {
   Element *e = (Element *)object;
+  if (e->all->racers) {
+    e->all->racers[e->index] = NULL;
+  }
   release(e->all);
   tz_obj_free(e);
+}
+
+static int unreact(TzPromise *p, TzReactor *r) {
+  TzReactor *before = NULL;
+  for (TzReactor *at = p->head; at; before = at, at = at->next) {
+    if (at != r) {
+      continue;
+    }
+    if (before) {
+      before->next = at->next;
+    } else {
+      p->head = at->next;
+    }
+    if (p->tail == at) {
+      p->tail = before;
+    }
+    return 1;
+  }
+
+  return 0;
+}
+
+static void drop_losers(Combine *c, const Element *winner) {
+  TZ_ORDERED();
+  for (uint32_t i = 0; i < c->count; ++i) {
+    Element *e = c->racers[i];
+    if (!e || e == winner || e->promise->state != TZ_PROMISE_PENDING ||
+        !unreact(e->promise, &e->reactor)) {
+      continue;
+    }
+    if (e->reactor.source == TZ_REACTION_WITHIN) {
+      e->reactor.source = NULL;
+      tz_group_unstore(e->promise, &e->base);
+    } else {
+      tz_obj_release(&e->base);
+    }
+  }
 }
 
 static const TzObjectDesc element_desc = {element_drop};
@@ -685,6 +731,9 @@ static void element_run(TzReactor *r, TzPromise *source) {
   switch (c->kind) {
   case TZ_COMBINE_RACE:
     settle_from(c, e->index, source);
+    if (c->racers) {
+      drop_losers(c, e);
+    }
     return;
   case TZ_COMBINE_ALL:
     if (!c->container) {
@@ -712,7 +761,12 @@ TzPromise *tz_promise_combine(int32_t kind, TzArray *promises, const TzCombine *
   c->kind = kind;
   c->shape = shape;
   c->container = NULL;
+  c->racers = NULL;
   uint32_t count = promises->length;
+  c->count = count;
+  if (kind == TZ_COMBINE_RACE && count > 1) {
+    c->racers = (Element **)tz_alloc(count * sizeof(Element *));
+  }
   if (kind == TZ_COMBINE_ALL && (shape->tuple || shape->items)) {
     if (shape->tuple) {
       char *tuple = (char *)tz_obj_alloc(shape->tuple_size);
@@ -736,6 +790,10 @@ TzPromise *tz_promise_combine(int32_t kind, TzArray *promises, const TzCombine *
     e->all = c;
     retain(c);
     e->index = i;
+    e->promise = p;
+    if (c->racers) {
+      c->racers[i] = e;
+    }
     ++c->remaining;
     tz_promise_react(p, &e->reactor);
   }
@@ -934,8 +992,13 @@ static void drop_list(TimerList *list) {
 static void timer_drop(void *object) {
   TzTimer *t = (TzTimer *)object;
   tz_obj_release(t->callback.env);
+  if (t->weak) {
+    tz_obj_release((TzObject *)t->weak);
+  }
   tz_obj_free(t);
 }
+
+static const TzLayout timer_weak_layout = {tz_weak_drop, NULL, 0, 0, "WeakRef", 7, 0};
 
 const TzLayout tz_timeout_layout = {timer_drop, NULL, 0, TZ_LAYOUT_TIMER, "Timeout", 7, 0};
 const TzLayout tz_immediate_layout = {timer_drop, NULL, 0, TZ_LAYOUT_TIMER, "Immediate", 9, 0};
@@ -1011,6 +1074,54 @@ TzTimer *tz_timer_new(const TzFunctionInfo *info, TzObject *env, double after, i
   t->refed = 1;
   ++tz_timer_refs;
   insert(t, after, loop_now());
+
+  return t;
+}
+
+#define TZ_TIMER_RECEIVER 16
+#define TZ_TIMER_DEDUPE 32
+
+static int same_timer(const TzTimer *t, const TzFunctionInfo *info, const TzObject *env,
+                      int receiver) {
+  if (!t->repeat || t->callback.info != info) {
+    return 0;
+  }
+  if (receiver) {
+    return t->weak && tz_weak_peek(t->weak) == env;
+  }
+
+  return t->shared;
+}
+
+TzTimer *tz_timer_new_owned(const TzFunctionInfo *info, TzObject *env, double after,
+                            int32_t repeat, int32_t flags) {
+  TZ_ORDERED();
+  int receiver = (flags & TZ_TIMER_RECEIVER) != 0;
+  if ((flags & TZ_TIMER_DEDUPE) && repeat) {
+    double every = after >= 1 && after <= TIMEOUT_MAX ? after : 1;
+    for (size_t i = 0; i < tz_timer_list_count; ++i) {
+      for (TzTimer *t = tz_timer_lists[i]->head; t; t = t->next) {
+        if (!same_timer(t, info, env, receiver)) {
+          continue;
+        }
+        retain(t);
+        unlink_timer(t);
+        t->idle_timeout = every;
+        t->repeat = every;
+        insert(t, every, loop_now());
+        tz_obj_release(env);
+        return t;
+      }
+    }
+  }
+  if (!receiver) {
+    TzTimer *t = tz_timer_new(info, env, after, repeat);
+    t->shared = (flags & TZ_TIMER_DEDUPE) != 0;
+    return t;
+  }
+  TzTimer *t = tz_timer_new(info, NULL, after, repeat);
+  t->weak = tz_weak_new(&timer_weak_layout, env);
+  tz_obj_release(env);
 
   return t;
 }
@@ -1158,7 +1269,26 @@ static void list_on_timeout(TimerList *list, int64_t now) {
     retain(t);
     unlink_timer(t);
     int64_t start = t->repeat ? loop_now() : 0;
-    call(t->callback);
+    if (t->weak) {
+      TzObject *receiver = (TzObject *)tz_weak_deref(t->weak);
+      if (!receiver) {
+        t->repeat = 0;
+        t->cleared = 1;
+        if (!t->destroyed) {
+          t->destroyed = 1;
+          if (t->refed) {
+            --tz_timer_refs;
+          }
+        }
+        release(t);
+        continue;
+      }
+      TzFunction bound = {t->callback.info, receiver};
+      call(bound);
+      tz_obj_release(receiver);
+    } else {
+      call(t->callback);
+    }
     if (t->repeat && t->idle_timeout != -1) {
       t->idle_timeout = t->repeat;
       insert(t, t->idle_timeout, start);

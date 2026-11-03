@@ -18,7 +18,11 @@ public:
   Expr *collectEmitterCall(CallExpr *call, MemberExpr *member, const std::string &site);
   void reportUnlistenedErrors();
   void checkErrorListeners();
+  void checkDroppedListeners();
   void noteErrorsHandled(const Expr *emitter);
+  bool classifyListener(Expr *arg, const Expr *emitter, int &bits, bool timer = false);
+  bool ownsEmitter(const Expr *emitter) const;
+  static bool canReceive(const Type *type);
 
 private:
   void noteListener(MemberExpr *member, const Type *events, llvm::StringRef event);

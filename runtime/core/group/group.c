@@ -907,6 +907,11 @@ void *tz_weak_new(const TzLayout *layout, void *target) {
   w->rc = 1;
   w->layout = layout;
   w->target = target;
+  w->next = NULL;
+  int64_t count = ((TzObject *)target)->rc;
+  if (count >= TZ_RC_FOREVER) {
+    return w;
+  }
   group_lock();
   WeakSlot *s = weak_find(target);
   if (!s) {
@@ -928,6 +933,7 @@ void *tz_weak_new(const TzLayout *layout, void *target) {
   }
   w->next = s->first;
   s->first = w;
+  tz_weak_mark(target);
   group_unlock();
 
   return w;
@@ -1017,12 +1023,16 @@ void *tz_weak_deref(void *weak) {
 }
 
 TZ_NOINLINE void tz_weak_forget(void *target) {
+  if (!tz_weak_marked(target)) {
+    return;
+  }
   group_lock();
   WeakSlot *s = weak_find(target);
   if (!s) {
     group_unlock();
     return;
   }
+  tz_weak_unmark(target);
   for (TzWeak *w = s->first; w; w = w->next) {
     w->target = NULL;
   }
@@ -1032,17 +1042,22 @@ TZ_NOINLINE void tz_weak_forget(void *target) {
   group_unlock();
 }
 
+void *tz_weak_peek(void *weak) {
+  return __atomic_load_n(&((TzWeak *)weak)->target, __ATOMIC_ACQUIRE);
+}
+
 void tz_weak_drop(void *object) {
   TzWeak *w = (TzWeak *)object;
   group_lock();
-  if (w->target) {
-    WeakSlot *s = weak_find(w->target);
+  WeakSlot *s = w->target ? weak_find(w->target) : NULL;
+  if (s) {
     TzWeak **at = &s->first;
     while (*at != w) {
       at = &(*at)->next;
     }
     *at = w->next;
     if (!s->first) {
+      tz_weak_unmark(s->key);
       s->key = TOMBSTONE;
       --tz_weak_count;
     }

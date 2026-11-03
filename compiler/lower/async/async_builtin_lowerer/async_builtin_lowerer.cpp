@@ -35,6 +35,19 @@ llvm::Value *AsyncBuiltinLowerer::emitAsyncBuiltin(CallExpr *call) {
   case Builtin::SetInterval: {
     std::vector<llvm::Value *> args = lowering_.exprLowerer().emitExprs(call->args);
     llvm::Value *delay = args.size() > 1 ? args[1] : llvm::ConstantFP::get(f64, 1.0);
+    if (args.size() > 2) {
+      auto *owned = cast<llvm::Function>(
+          lowering_.asyncLowerer()
+              .asyncFunction("tz_timer_new_owned", ptr, {ptr, ptr, f64, i32, i32})
+              .getCallee());
+      return lowering_.builder_.CreateCall(
+          owned,
+          {lowering_.builder_.CreateExtractValue(args[0], 0),
+           lowering_.builder_.CreateExtractValue(args[0], 1), delay,
+           lowering_.builder_.getInt32(call->builtin == Builtin::SetInterval),
+           lowering_.builder_.CreateTrunc(args[2], i32)},
+          "timer");
+    }
     auto *fn = cast<llvm::Function>(lowering_.asyncLowerer()
                                         .asyncFunction("tz_timer_new", ptr, {ptr, ptr, f64, i32})
                                         .getCallee());

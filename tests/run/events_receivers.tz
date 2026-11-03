@@ -1,0 +1,82 @@
+// Listeners without leaks (docs/events.md, section 6): a listener that is a
+// method, or an arrow that uses one object, lives as long as that object; the
+// emitter does not hold it. The same listener of the same object twice is one
+// subscription. An emitter of the function's own, and code at the top level,
+// keep node's ways.
+import { EventEmitter } from "node:events"
+
+type Message = { from: string; text: string }
+
+class Room extends EventEmitter<{ message: [message: Message]; closed: [] }> {
+  say(from: string, text: string) {
+    this.emit("message", { from, text })
+  }
+}
+
+class Connection {
+  constructor(
+    readonly name: string,
+    room: Room,
+  ) {
+    room.on("message", this.send)
+    room.on("message", this.send)
+    room.on("closed", () => this.bye())
+  }
+  send(message: Message) {
+    console.log(`${this.name} got ${message.from}: ${message.text}`)
+  }
+  bye() {
+    console.log(`${this.name} saw the room close`)
+  }
+}
+
+const room = new Room()
+const connections = new Map<string, Connection>()
+
+function open(name: string) {
+  connections.set(name, new Connection(name, room))
+}
+
+function close(name: string) {
+  connections.delete(name)
+}
+
+open("a")
+open("b")
+room.say("ann", "hi")
+console.log(room.listenerCount("message"), room.listenerCount("closed"))
+close("a")
+room.say("bob", "after a left")
+console.log(room.listenerCount("message"), room.listenerCount("closed"))
+
+// off() still takes a subscription away early.
+function stopListening(name: string) {
+  const connection = connections.get(name)
+  if (connection != undefined) room.off("message", connection.send)
+}
+stopListening("b")
+room.say("cid", "b no longer listens")
+console.log(room.listenerCount("message"), room.listenerCount("closed"))
+room.emit("closed")
+close("b")
+console.log(room.eventNames())
+
+// An arrow with no captures in code that runs again and again is one
+// subscription, not one more on every call.
+function watch() {
+  room.on("message", (message) => console.log("watch", message.text))
+}
+for (let i = 0; i < 3; i++) watch()
+room.say("dan", "once")
+console.log(room.listenerCount("message"))
+
+// The function's own emitter: listeners may keep anything, as in node.
+function count(texts: string[]): int {
+  const local = new EventEmitter<{ text: [text: string] }>()
+  let seen = 0
+  local.on("text", () => seen++)
+  local.on("text", () => seen++)
+  for (const text of texts) local.emit("text", text)
+  return seen
+}
+console.log(count(["x", "y"]))

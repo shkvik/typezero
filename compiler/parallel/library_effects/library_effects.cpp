@@ -298,8 +298,7 @@ void LibraryEffects::libraryState(llvm::StringRef cls, llvm::StringRef name,
   }
   if (isEmitterClass(cls) || isTargetClass(cls)) {
     bool reads = name == "emit" || name == "dispatchEvent" || name == "listenerCount" ||
-                 name == "listeners" || name == "rawListeners" || name == "eventNames" ||
-                 name == "getMaxListeners";
+                 name == "listeners" || name == "rawListeners" || name == "eventNames";
     analysis_.codeWalk().touch(LocKind::Field, *self, analysis_.listenersKey_, write && !reads, at);
     return;
   }

@@ -1,0 +1,32 @@
+// Waiting for an event of an emitter of one's own takes a time limit
+// (docs/events.md, section 6): such an emitter may never send it, and the
+// wait would stay forever. The Err tells that the time is up.
+import { EventEmitter, on, once } from "node:events"
+
+const bus = new EventEmitter<{ ready: [port: int]; tick: [n: int] }>()
+
+setTimeout(() => bus.emit("ready", 8080), 10)
+const ready = await once(bus, "ready", { timeout: 1000 })
+if (ready.isOk()) console.log("ready on", ready.value[0])
+
+const late = await once(bus, "ready", { timeout: 20 })
+if (late.isErr()) console.log(late.error.code, late.error.message, late.error.timeout)
+console.log("listeners left", bus.listenerCount("ready"))
+
+setTimeout(() => {
+  bus.emit("tick", 1)
+  bus.emit("tick", 2)
+}, 5)
+for await (const tick of on(bus, "tick", { timeout: 50 })) {
+  if (tick.isErr()) {
+    console.log("ticks stopped:", tick.error.message)
+    break
+  }
+  console.log("tick", tick.value[0])
+}
+console.log("listeners left", bus.listenerCount("tick"))
+
+const failing = new EventEmitter<{ done: []; error: [error: { code: string; message: string }] }>()
+setTimeout(() => failing.emit("error", { code: "E_BAD", message: "bad" }), 5)
+const done = await once(failing, "done", { timeout: 1000 })
+if (done.isErr()) console.log("done failed:", done.error.code)

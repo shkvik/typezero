@@ -12,7 +12,7 @@ public:
   void checkDoWhile(DoWhileStmt *stmt);
   void checkFor(ForStmt *stmt);
   void checkForOf(ForOfStmt *stmt);
-  void checkLoopBody(Stmt *body);
+  void checkLoopBody(Stmt *body, bool awaits);
 
 private:
   Checker &checker_;

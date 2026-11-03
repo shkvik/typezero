@@ -17,21 +17,21 @@ for (const name of files) must(await writeFile(join(dir, name + ".txt"), name.re
 
 const jobs = new Jobs()
 // An async listener: emit does not wait for it.
-jobs.on("done", async (name, size) => {
+jobs.on("done", async (done) => {
   await undefined
-  log(`saved ${name}: ${size}`)
+  log(`saved ${done.name}: ${done.size}`)
 })
-jobs.on("failed", (name, why) => log(`failed ${name}: ${why}`))
+jobs.on("failed", (failed) => log(`failed ${failed.name}: ${failed.why}`))
 
 // 1. on() until "finished", which this file emits.
 const done = on(jobs, "done", { close: ["finished"] })
 for (const name of files) await jobs.read(name, join(dir, name + ".txt"))
 jobs.emit("finished")
 let total = 0
-for await (const [name, size] of done) {
-  const weight: int = parseInt(String(size)).unwrapOr(0)
+for await (const [job] of done) {
+  const weight: int = parseInt(String(job.size)).unwrapOr(0)
   if (weight >= 0 && weight < 1000000) total += weight
-  log(`done ${name} ${size}`)
+  log(`done ${job.name} ${job.size}`)
 }
 log(`total ${total}, started ${jobs.started}, listening ${jobs.listenerCount("done")}`)
 

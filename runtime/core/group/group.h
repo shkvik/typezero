@@ -138,6 +138,7 @@ void *tz_weak_new(const TzLayout *layout, void *target);
 void *tz_weak_deref(void *weak);
 void tz_weak_forget(void *target);
 void tz_weak_drop(void *object);
+void *tz_weak_peek(void *weak);
 void *tz_weak_private_target(void *weak);
 
 #endif

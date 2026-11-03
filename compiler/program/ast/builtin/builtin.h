@@ -442,6 +442,7 @@ enum class Builtin {
   MetaHasOwn,
   MetaDelete,
   LibListener,
+  LibBoundListener,
   LibAs,
   LibChunk,
   LibIsChunk,

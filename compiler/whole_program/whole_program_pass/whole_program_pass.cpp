@@ -30,6 +30,7 @@ Errors WholeProgramPass::run(Program &program) const {
   checker.unused().findUnused(file);
   checker.reflectChecker().finishReflection();
   checker.emitterChecker().checkErrorListeners();
+  checker.emitterChecker().checkDroppedListeners();
   for (Module *module : file.modules) {
     checker.moduleDeclarer().useModule(module);
     if (!checker.untyped_.empty()) {

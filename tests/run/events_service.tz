@@ -1,0 +1,35 @@
+// The service events of an emitter (docs/events.md, section 2): newListener
+// before a listener is added, removeListener after one goes, also the listener
+// of once() as it fires. Each carries one value, { event, listener }, where
+// node gives the two apart, so this test is tz's alone.
+import { EventEmitter } from "node:events"
+
+// on, once, prependListener; newListener before a listener is added, and
+// removeListener after one goes, also the listener of once() as it fires.
+type Events = { x: [] }
+const e = new EventEmitter<Events>()
+const order: string[] = []
+e.on("newListener", (c) => order.push(`new ${c.event} ${typeof c.listener}`))
+e.on("removeListener", (c) => order.push(`rm ${c.event} ${typeof c.listener}`))
+const a = () => order.push("a")
+e.on("x", a)
+e.once("x", () => order.push("once"))
+e.prependListener("x", () => order.push("pre"))
+console.log(e.emit("x"), e.emit("x"))
+e.off("x", a)
+console.log(order, e.eventNames(), e.listenerCount("x"))
+e.removeAllListeners()
+console.log(order.slice(-6), e.eventNames())
+
+// removeAllListeners(name) removes the last first, each with removeListener.
+const r = new EventEmitter<{ x: [] }>()
+const removed: string[] = []
+const first = () => {}
+const second = () => {}
+r.on("removeListener", (c) =>
+  removed.push(`${c.event} ${c.listener == first ? "first" : c.listener == second ? "second" : "?"}`),
+)
+r.on("x", first).on("x", second)
+r.removeAllListeners("x")
+console.log(removed, r.eventNames())
+

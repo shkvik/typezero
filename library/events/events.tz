@@ -1,48 +1,66 @@
 import { Event, EventTarget } from "tz:web"
-import { asListener, defer } from "tz:intrinsics"
+import { asBoundListener, asListener, defer } from "tz:intrinsics"
 
 declare function libBare(map: Record<string, unknown>): Record<string, unknown>
-declare function libClassName(object: object): string
-declare function libInspect(value: unknown): string
-declare function libPid(): int
-
-class OnceWrapper {
-  private wasFired = false
-  constructor(readonly listener: unknown) {}
-  fired() {
-    return this.wasFired
-  }
-  markFired() {
-    this.wasFired = true
-  }
-}
-
-class AsyncListener {
-  constructor(readonly listener: unknown) {}
-}
-
-class ThisListener {
-  constructor(readonly listener: unknown) {}
-}
-
-class UnknownArgListener {
-  constructor(readonly listener: unknown) {}
-}
+declare function listenerCode(listener: unknown): unknown
+declare function listenerWeak(listener: unknown): object
+declare function boundListener(code: unknown, weak: object): unknown
+declare function weakTarget(weak: object): object | undefined
+declare function weakIs(weak: object, listener: unknown): boolean
+declare function sameCode(a: unknown, b: unknown): boolean
+declare function weakAlive(weak: object): boolean
 
 const kPlain = 0
 const kAsync = 1
 const kThis = 2
 const kUnknownArg = 3
+const kAdapt = 15
+const kReceiver = 16
+const kDedupe = 32
+
+class Listener {
+  fired = false
+  constructor(
+    readonly code: unknown,
+    readonly weak: object | undefined,
+    readonly kind: int,
+    readonly once: boolean,
+  ) {}
+
+  alive(): boolean {
+    const weak = this.weak
+    return weak == undefined || weakAlive(weak)
+  }
+
+  matches(listener: unknown): boolean {
+    const weak = this.weak
+    if (weak == undefined) return this.code == listener
+    return sameCode(this.code, listener) && weakIs(weak, listener)
+  }
+
+  repeats(listener: unknown, kind: int, once: boolean): boolean {
+    if (this.once != once || (this.kind & kAdapt) != (kind & kAdapt)) return false
+    const weak = this.weak
+    if ((kind & kReceiver) == 0) return weak == undefined && sameCode(this.code, listener)
+    return weak != undefined && sameCode(this.code, listener) && weakIs(weak, listener)
+  }
+
+  function(): unknown {
+    const weak = this.weak
+    if (weak == undefined) return this.code
+    return boundListener(this.code, weak)
+  }
+}
 
 class ListenerList {
-  constructor(public items: unknown[]) {}
   private emitting = 0
-  warned = false
+  sweepAt = 8
+  constructor(public items: Listener[]) {}
   begin() {
     this.emitting++
     return this.items
   }
-  done(items: unknown[]) {
+  done(items: Listener[]) {
     if (items == this.items) this.emitting--
   }
   changing() {
@@ -57,164 +75,191 @@ class ListenerList {
 export class EventEmitterBase {
   private events: Record<string, unknown> = libBare({})
   private eventsCount = 0
-  private maxListeners?: double
   private shapeMode = false
   private capture = false
 
-  setMaxListeners(n: double) {
-    this.maxListeners = validNumber(n, 0)
-    return this
-  }
-
-  getMaxListeners() {
-    return this.maxListeners ?? EventEmitter.defaultMaxListeners
-  }
-
   emit<A extends unknown[]>(type: string, ...args: A): boolean {
-    const events = this.events
-    const handler = events[type]
-    if (handler == undefined) return false
-    if (handler instanceof ListenerList) {
-      const listeners = handler.begin()
-      for (const listener of listeners) this.run(type, listener, ...args)
-      handler.done(listeners)
-    } else {
-      this.run(type, handler, ...args)
+    const handler = this.events[type]
+    if (!(handler instanceof ListenerList)) return false
+    const listeners = handler.begin()
+    let called = false
+    let dead = false
+    for (const listener of listeners) {
+      if (this.run(type, listener, ...args)) called = true
+      else dead = true
     }
-    return true
+    handler.done(listeners)
+    if (dead) this.sweep(type)
+    return called
   }
 
   emitWithUnknown<A extends unknown[]>(type: string, boxed: unknown, ...args: A): boolean {
     const handler = this.events[type]
-    if (handler == undefined) return false
-    if (handler instanceof ListenerList) {
-      const listeners = handler.begin()
-      for (const listener of listeners) this.runWithUnknown(type, listener, boxed, ...args)
-      handler.done(listeners)
-    } else {
-      this.runWithUnknown(type, handler, boxed, ...args)
+    if (!(handler instanceof ListenerList)) return false
+    const listeners = handler.begin()
+    let called = false
+    let dead = false
+    for (const listener of listeners) {
+      if (this.runWithUnknown(type, listener, boxed, ...args)) called = true
+      else dead = true
     }
+    handler.done(listeners)
+    if (dead) this.sweep(type)
+    return called
+  }
+
+  private runWithUnknown<A extends unknown[]>(type: string, listener: Listener, boxed: unknown,
+                                       ...args: A): boolean {
+    if ((listener.kind & kAdapt) == kUnknownArg && !listener.once) {
+      const weak = listener.weak
+      if (weak == undefined) {
+        asListener<(arg: unknown) => void>(listener.code)(boxed)
+        return true
+      }
+      const receiver = weakTarget(weak)
+      if (receiver == undefined) return false
+      asBoundListener<(arg: unknown) => void>(listener.code, receiver)(boxed)
+      return true
+    }
+    return this.run(type, listener, ...args)
+  }
+
+  private run<A extends unknown[]>(type: string, listener: Listener, ...args: A): boolean {
+    if (listener.once) {
+      if (listener.fired) return true
+      listener.fired = true
+      this.removeRecord(type, listener)
+    }
+    const weak = listener.weak
+    const adapt = listener.kind & kAdapt
+    if (weak == undefined) {
+      if (adapt == kPlain) asListener<(...args: A) => void>(listener.code)(...args)
+      else this.call(listener.code, adapt, ...args)
+      return true
+    }
+    const receiver = weakTarget(weak)
+    if (receiver == undefined) return false
+    if (adapt == kPlain) asBoundListener<(...args: A) => void>(listener.code, receiver)(...args)
+    else this.callBound(listener.code, receiver, adapt, ...args)
     return true
   }
 
-  private runWithUnknown<A extends unknown[]>(type: string, listener: unknown, boxed: unknown,
-                                       ...args: A) {
-    if (listener instanceof UnknownArgListener) {
-      asListener<(arg: unknown) => void>(listener.listener)(boxed)
-      return
-    }
-    this.run(type, listener, ...args)
-  }
-
-  private run<A extends unknown[]>(type: string, listener: unknown, ...args: A) {
-    let fn = listener
-    if (fn instanceof OnceWrapper) {
-      if (fn.fired()) return
-      this.removeListener(type, fn)
-      fn.markFired()
-      fn = fn.listener
-    }
-    if (fn instanceof AsyncListener) {
-      const promise = asListener<(...args: A) => Promise<void>>(fn.listener)(...args)
+  private call<A extends unknown[]>(code: unknown, adapt: int, ...args: A) {
+    if (adapt == kPlain) {
+      asListener<(...args: A) => void>(code)(...args)
+    } else if (adapt == kAsync) {
+      const promise = asListener<(...args: A) => Promise<void>>(code)(...args)
       void promise
-      return
+    } else if (adapt == kThis) {
+      asListener<(this: unknown, ...args: A) => void>(code).call(this, ...args)
+    } else {
+      asListener<(arg: unknown) => void>(code)(firstArg(...args))
     }
-    if (fn instanceof ThisListener) {
-      asListener<(this: unknown, ...args: A) => void>(fn.listener).call(this, ...args)
-      return
-    }
-    if (fn instanceof UnknownArgListener) {
-      asListener<(arg: unknown) => void>(fn.listener)(firstArg(...args))
-      return
-    }
-    asListener<(...args: A) => void>(fn)(...args)
   }
 
-  private insertListener(type: string, listener: unknown, prepend: boolean) {
+  private callBound<A extends unknown[]>(code: unknown, receiver: object, adapt: int, ...args: A) {
+    if (adapt == kPlain) {
+      asBoundListener<(...args: A) => void>(code, receiver)(...args)
+    } else if (adapt == kAsync) {
+      const promise = asBoundListener<(...args: A) => Promise<void>>(code, receiver)(...args)
+      void promise
+    } else if (adapt == kThis) {
+      asBoundListener<(this: unknown, ...args: A) => void>(code, receiver).call(this, ...args)
+    } else {
+      asBoundListener<(arg: unknown) => void>(code, receiver)(firstArg(...args))
+    }
+  }
+
+  private sweep(type: string) {
+    const handler = this.events[type]
+    if (!(handler instanceof ListenerList)) return
+    const live = handler.changing().filter((listener) => listener.alive())
+    handler.items = live
+    handler.sweepAt = 2 * live.length + 8
+    if (live.length == 0) this.dropType(type)
+  }
+
+  private dropType(type: string) {
+    this.eventsCount -= 1
+    if (this.eventsCount == 0) this.events = libBare({})
+    else delete this.events[type]
+  }
+
+  private insertListener(type: string, listener: unknown, kind: int, once: boolean,
+                         prepend: boolean) {
+    const before = this.events[type]
+    if ((kind & kDedupe) != 0 && before instanceof ListenerList) {
+      for (const kept of before.items) {
+        if (kept.repeats(listener, kind, once) && kept.alive()) return this
+      }
+    }
     let events = this.events
     if (events["newListener"] != undefined) {
-      this.emit("newListener", type, original(listener))
+      this.emit("newListener", { event: type, listener: listener })
       events = this.events
     }
     const existing = events[type]
-    if (existing == undefined) {
-      events[type] = listener
+    const record =
+      (kind & kReceiver) != 0
+        ? new Listener(listenerCode(listener), listenerWeak(listener), kind, once)
+        : new Listener(listener, undefined, kind, once)
+    if (!(existing instanceof ListenerList)) {
+      events[type] = new ListenerList([record])
       ++this.eventsCount
       return this
     }
-    let holder: ListenerList
-    if (existing instanceof ListenerList) {
-      holder = existing
-      const list = existing.changing()
-      if (prepend) list.unshift(listener)
-      else list.push(listener)
-    } else {
-      holder = new ListenerList(prepend ? [listener, existing] : [existing, listener])
-      events[type] = holder
-    }
-    const list = holder.items
-    const m = this.getMaxListeners()
-    if (m > 0 && list.length.toDouble() > m && !holder.warned) {
-      holder.warned = true
-      emitWarning(
-        "MaxListenersExceededWarning",
-        `Possible EventEmitter memory leak detected. ${list.length} ${type} listeners added to ` +
-          `[${libClassName(this)}]. MaxListeners is ${m}. Use emitter.setMaxListeners() to ` +
-          `increase limit`,
-      )
-    }
+    const list = existing.changing()
+    if (prepend) list.unshift(record)
+    else list.push(record)
+    if (list.length >= existing.sweepAt) this.sweep(type)
     return this
   }
 
   addListener(type: string, listener: unknown, kind: int = kPlain) {
-    return this.insertListener(type, wrap(listener, kind), false)
+    return this.insertListener(type, listener, kind, false, false)
   }
 
   on(type: string, listener: unknown, kind: int = kPlain) {
-    return this.insertListener(type, wrap(listener, kind), false)
+    return this.insertListener(type, listener, kind, false, false)
   }
 
   prependListener(type: string, listener: unknown, kind: int = kPlain) {
-    return this.insertListener(type, wrap(listener, kind), true)
+    return this.insertListener(type, listener, kind, false, true)
   }
 
   once(type: string, listener: unknown, kind: int = kPlain) {
-    this.on(type, new OnceWrapper(wrap(listener, kind)))
-    return this
+    return this.insertListener(type, listener, kind, true, false)
   }
 
   prependOnceListener(type: string, listener: unknown, kind: int = kPlain) {
-    this.prependListener(type, new OnceWrapper(wrap(listener, kind)))
-    return this
+    return this.insertListener(type, listener, kind, true, true)
+  }
+
+  private removeRecord(type: string, record: Listener) {
+    const kept = this.events[type]
+    if (!(kept instanceof ListenerList)) return
+    const list = kept.changing()
+    const position = list.indexOf(record)
+    if (position < 0) return
+    list.splice(position, 1)
+    if (list.length == 0) this.dropType(type)
+    if (this.events["removeListener"] != undefined) {
+      const fn = record.function()
+      if (fn != undefined) this.emit("removeListener", { event: type, listener: fn })
+    }
   }
 
   removeListener(type: string, listener: unknown) {
-    const events = this.events
-    const kept = events[type]
-    if (kept == undefined) return this
-    if (!(kept instanceof ListenerList)) {
-      const list = kept
-      if (!same(list, listener)) return this
-      this.eventsCount -= 1
-      if (this.eventsCount == 0) this.events = libBare({})
-      else delete events[type]
-      if (events["removeListener"] != undefined)
-        this.emit("removeListener", type, original(list))
-      return this
-    }
-    const list = kept.changing()
-    let position = -1
-    for (let i = list.length - 1; i >= 0; i--) {
-      if (same(list[i], listener)) {
-        position = i
-        break
+    const kept = this.events[type]
+    if (!(kept instanceof ListenerList)) return this
+    const items = kept.items
+    for (let i = items.length - 1; i >= 0; i--) {
+      const record = items[i]
+      if (record != undefined && record.matches(listener)) {
+        this.removeRecord(type, record)
+        return this
       }
     }
-    if (position < 0) return this
-    if (position == 0) list.shift()
-    else list.splice(position, 1)
-    if (list.length == 1) events[type] = list[0]
-    if (events["removeListener"] != undefined) this.emit("removeListener", type, listener)
     return this
   }
 
@@ -229,8 +274,7 @@ export class EventEmitterBase {
         this.events = libBare({})
         this.eventsCount = 0
       } else if (events[type] != undefined) {
-        if (--this.eventsCount == 0) this.events = libBare({})
-        else delete events[type]
+        this.dropType(type)
       }
       this.shapeMode = false
       return this
@@ -248,57 +292,52 @@ export class EventEmitterBase {
     }
     const listeners = events[type]
     if (listeners instanceof ListenerList) {
-      const items = listeners.items
-      for (let i = items.length - 1; i >= 0; i--) this.removeListener(type, items[i])
-    } else if (listeners != undefined) {
-      this.removeListener(type, listeners)
+      const items = [...listeners.items]
+      for (let i = items.length - 1; i >= 0; i--) {
+        const record = items[i]
+        if (record != undefined) this.removeRecord(type, record)
+      }
     }
     return this
   }
 
-  private listeners(type: string, raw: boolean): unknown[] {
-    const evlistener = this.events[type]
-    if (evlistener == undefined) return []
-    if (!(evlistener instanceof ListenerList)) return [raw ? evlistener : original(evlistener)]
-    return raw ? [...evlistener.items] : evlistener.items.map((l) => original(l))
+  private records(type: string): Listener[] {
+    const handler = this.events[type]
+    if (!(handler instanceof ListenerList)) return []
+    return handler.items.filter((listener) => listener.alive())
   }
 
   private listenersOf<A extends unknown[]>(type: string, raw: boolean): ((...args: A) => void)[] {
     const out: ((...args: A) => void)[] = []
-    for (const listener of this.listeners(type, raw)) out.push(this.callable<A>(type, listener))
+    for (const listener of this.records(type)) {
+      const plain = (listener.kind & kAdapt) == kPlain
+      if (plain && (!raw || !listener.once)) {
+        const fn = listener.function()
+        if (fn != undefined) out.push(asListener<(...args: A) => void>(fn))
+        continue
+      }
+      out.push((...args: A) => {
+        this.run(type, listener, ...args)
+      })
+    }
     return out
   }
 
-  private callable<A extends unknown[]>(type: string, listener: unknown): (...args: A) => void {
-    if (listener instanceof OnceWrapper || listener instanceof AsyncListener ||
-        listener instanceof ThisListener || listener instanceof UnknownArgListener)
-      return (...args: A) => this.run(type, listener, ...args)
-    return asListener<(...args: A) => void>(listener)
-  }
-
   listenerCount(type: string, listener?: unknown): int {
-    const evlistener = this.events[type]
-    if (evlistener == undefined) return 0
-    if (!(evlistener instanceof ListenerList)) {
-      if (listener != undefined) return same(evlistener, listener) ? 1 : 0
-      return 1
+    let matching = 0
+    for (const kept of this.records(type)) {
+      if (listener == undefined || kept.matches(listener)) matching++
     }
-    if (listener != undefined) {
-      let matching = 0
-      for (const l of evlistener.items) if (same(l, listener)) matching++
-      return matching
-    }
-    return evlistener.items.length
+    return matching
   }
 
   eventNames(): string[] {
-    return this.eventsCount > 0 ? ownKeys(this.events) : []
+    if (this.eventsCount == 0) return []
+    return ownKeys(this.events).filter((name) => this.records(name).length > 0)
   }
 }
 
-export class EventEmitter<Events> extends EventEmitterBase {
-  static defaultMaxListeners: double = 10
-}
+export class EventEmitter<Events> extends EventEmitterBase {}
 
 export function once<A extends unknown[], R extends unknown[]>(
   emitter: EventEmitterBase,
@@ -330,6 +369,76 @@ function onceResult<A extends unknown[], E>(
     }
     emitter.once(name, resolver)
     if (errors && name != "error") emitter.once("error", errorListener)
+  })
+}
+
+export type EventTimeoutError = {
+  kind: "EVENT_TIMEOUT_ERROR"
+  code: "TIMEOUT_ERR"
+  message: string
+  event: string
+  timeout: int
+}
+
+function eventTimeoutError(name: string, timeout: int): EventTimeoutError {
+  return {
+    kind: "EVENT_TIMEOUT_ERROR",
+    code: "TIMEOUT_ERR",
+    message: `no '${name}' within ${timeout} ms`,
+    event: name,
+    timeout: timeout,
+  }
+}
+
+function onceWithin<A extends unknown[], E>(
+  emitter: EventEmitterBase,
+  name: string,
+  options: { timeout: int },
+  errors = false,
+): Promise<Result<A, E | EventTimeoutError>> {
+  const queue = new EventQueue<A, E | EventTimeoutError>()
+  const timeout = options.timeout
+  queue.within(timeout, () => eventTimeoutError(name, timeout))
+  function eventHandler(...args: A) {
+    queue.push(args)
+  }
+  function errorHandler(error: E) {
+    queue.fail(error)
+  }
+  emitter.once(name, eventHandler)
+  if (errors && name != "error") emitter.once("error", errorHandler)
+  return queue.next(() => {
+    emitter.removeListener(name, eventHandler)
+    emitter.removeListener("error", errorHandler)
+  })
+}
+
+function onWithin<A extends unknown[], E>(
+  emitter: EventEmitterBase,
+  name: string,
+  options: { close?: string[]; timeout: int },
+  errors = false,
+) {
+  const queue = new EventQueue<A, E | EventTimeoutError>()
+  const timeout = options.timeout
+  queue.within(timeout, () => eventTimeoutError(name, timeout))
+  const close = options.close ?? []
+  function eventHandler(...args: A) {
+    queue.push(args)
+  }
+  function errorHandler(error: E) {
+    queue.fail(error)
+  }
+  function closeHandler() {
+    queue.finish()
+  }
+  emitter.on(name, eventHandler)
+  if (errors && name != "error") emitter.on("error", errorHandler)
+  for (const closeName of close) emitter.on(closeName, closeHandler)
+  return queue.results(() => {
+    emitter.removeListener(name, eventHandler)
+    emitter.removeListener("error", errorHandler)
+    for (const closeName of close) emitter.removeListener(closeName, closeHandler)
   })
 }
 
@@ -388,6 +497,13 @@ class EventQueue<A extends unknown[], F> {
   private error?: F
   private finished = false
   private wake?: () => void
+  private limit = 0
+  private expired?: () => F
+
+  within(limit: int, expired: () => F) {
+    this.limit = limit
+    this.expired = expired
+  }
 
   push(args: A) {
     if (this.finished) return
@@ -413,6 +529,33 @@ class EventQueue<A extends unknown[], F> {
     if (wake != undefined) wake()
   }
 
+  private async idle() {
+    const expired = this.expired
+    if (expired == undefined) {
+      await new Promise<void>((resolve) => {
+        this.wake = resolve
+      })
+      return
+    }
+    const expire: () => F = expired
+    const timer = setTimeout(() => this.fail(expire()), this.limit)
+    await new Promise<void>((resolve) => {
+      this.wake = resolve
+    })
+    clearTimeout(timer)
+  }
+
+  async next(stop: () => void): Promise<Result<A, F>> {
+    const stopper = this.stopper(stop)
+    while (true) {
+      const next = this.events.shift()
+      if (next != undefined) return ok(next)
+      const error = this.error
+      if (error != undefined) return err(error)
+      await this.idle()
+    }
+  }
+
   private stopper(stop: () => void) {
     return defer(() => {
       this.finished = true
@@ -430,9 +573,7 @@ class EventQueue<A extends unknown[], F> {
         continue
       }
       if (this.finished) return
-      await new Promise<void>((resolve) => {
-        this.wake = resolve
-      })
+      await this.idle()
     }
   }
 
@@ -452,47 +593,13 @@ class EventQueue<A extends unknown[], F> {
         return
       }
       if (this.finished) return
-      await new Promise<void>((resolve) => {
-        this.wake = resolve
-      })
+      await this.idle()
     }
   }
 }
 
 export function listenerCount(emitter: EventEmitterBase, name: string) {
   return emitter.listenerCount(name)
-}
-
-export function getMaxListeners(emitter: EventEmitterBase) {
-  return emitter.getMaxListeners()
-}
-
-export function setMaxListeners(
-  n: double = EventEmitter.defaultMaxListeners,
-  ...targets: EventEmitterBase[]
-) {
-  const checked = validNumber(n, 0)
-  if (targets.length == 0) EventEmitter.defaultMaxListeners = checked
-  else for (const target of targets) target.setMaxListeners(checked)
-}
-
-function wrap(listener: unknown, kind: int): unknown {
-  if (kind == kAsync) return new AsyncListener(listener)
-  if (kind == kThis) return new ThisListener(listener)
-  if (kind == kUnknownArg) return new UnknownArgListener(listener)
-  return listener
-}
-
-function original(listener: unknown): unknown {
-  if (listener instanceof OnceWrapper) return original(listener.listener)
-  if (listener instanceof AsyncListener) return listener.listener
-  if (listener instanceof ThisListener) return listener.listener
-  if (listener instanceof UnknownArgListener) return listener.listener
-  return listener
-}
-
-function same(kept: unknown, listener: unknown) {
-  return kept == listener || original(kept) == listener
 }
 
 function firstArg(...args: unknown[]): unknown {
@@ -509,14 +616,6 @@ function ownKeys(events: Record<string, unknown>): string[] {
 
 function isArrayIndex(key: string) {
   return /^(0|[1-9][0-9]*)$/.test(key) && Number(key).unwrapOr(4294967295) < 4294967295
-}
-
-function validNumber(value: double, min: double): double {
-  return value < min ? min : value
-}
-
-function emitWarning(name: string, message: string) {
-  process.nextTick(() => console.error(`(node:${libPid()}) ${name}: ${message}`))
 }
 
 function onceTarget(target: EventTarget, name: string): Promise<[Event]> {

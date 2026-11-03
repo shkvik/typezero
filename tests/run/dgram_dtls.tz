@@ -25,7 +25,7 @@ async function echo(data: Buffer, from: RemoteInfo) {
   const sentResult = await server.send(data.toString().toUpperCase(), { address: from.address, port: from.port })
   if (sentResult.isErr()) console.log("echo:", sentResult.error.code)
 }
-server.on("message", (data, from) => {
+server.on("message", ({ data, from }) => {
   console.log("server got:", data.toString(), from.size)
   void echo(data, from)
 })
@@ -43,7 +43,7 @@ await early.close()
 
 const client = new Socket({ type: "udp4", transport: { secure: true, servername: "localhost" } })
 const answered = Promise.withResolvers<void>()
-client.on("message", data => {
+client.on("message", ({ data }) => {
   console.log("client got:", data.toString())
   answered.resolve()
 })

@@ -557,7 +557,7 @@ destination, protocol, segment)`. Ошибки — `Result` с `PacketError`: `k
 // Клиент: один объект, конструктор — настройки, connect() — Result.
 const socket = new WebSocket({ url: "ws://127.0.0.1:3000/chat", protocols: ["chat"] })
 socket.on("message", data => { ... })          // data: string | Uint8Array
-socket.on("close", (code, reason) => { ... })
+socket.on("close", ({ code, reason }) => { ... })   // одно значение в событии (events.md, раздел 2)
 socket.on("error", error => { ... })           // WebSocketError; без слушателя — ошибка сборки
 const connectedResult = await socket.connect()  // Result<void, WebSocketConnectError>
 const sentResult = socket.send("hello")         // Result<void, WebSocketSendError>
@@ -626,7 +626,7 @@ new Server({ port: 3000 }, request => {
 import { Socket } from "node:dgram"
 
 const socket = new Socket({ type: "udp4", port: 41234, address: "0.0.0.0" })  // настройки — тут
-socket.on("message", (data, from) => { ... })   // data: Buffer; from: { address, family, port, size }
+socket.on("message", ({ data, from }) => { ... })   // data: Buffer; from: { address, family, port, size }
 socket.on("error", error => { ... })
 const boundResult = await socket.bind()          // Result<void, UdpBindError>
 const sentResult = await socket.send("hi", { address: "127.0.0.1", port: 53 })  // Result<void, UdpSendError>

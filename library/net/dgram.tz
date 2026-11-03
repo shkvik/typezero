@@ -252,7 +252,7 @@ export type NetworkCode =
   | "UNKNOWN";
 
 export type SocketEvents = {
-  message: [data: Buffer, from: RemoteInfo];
+  message: [message: { data: Buffer; from: RemoteInfo }];
   listening: [];
   close: [];
   error: [error: UdpSocketError];
@@ -1024,7 +1024,7 @@ export class Socket extends EventEmitter<SocketEvents> {
       const family = familyOf(address);
       const bytes = Buffer.from(data);
       const from: RemoteInfo = { address: address, family: family, port: port, size: data.length };
-      this.emit("message", bytes, from);
+      this.emit("message", { data: bytes, from: from });
     }
   }
 }

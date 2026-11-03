@@ -11,8 +11,8 @@ export class Jobs extends EventEmitter {
     this.started++
     this.emit("start", name)
     const text = await readFile(path, { encoding: "utf8" })
-    if (text.isOk()) this.emit("done", name, text.value.trim().length)
-    else this.emit("failed", name, text.error.code)
+    if (text.isOk()) this.emit("done", { name: name, size: text.value.trim().length })
+    else this.emit("failed", { name: name, why: text.error.code })
   }
 }
 
