@@ -45,6 +45,7 @@ struct KnownType {
 struct KnownLocal {
   std::string name;
   std::string type;
+  std::string kind;
   size_t module = 0;
   size_t owner = static_cast<size_t>(-1);
   SourcePlace place;

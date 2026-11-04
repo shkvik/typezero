@@ -8,6 +8,7 @@
 #include "compiler/library/json/json_checker/json_checker.h"
 #include "compiler/library/result/result_checker/result_checker.h"
 #include "llvm/ADT/STLExtras.h"
+#include <functional>
 #include <limits>
 
 using llvm::cast;
@@ -46,6 +47,58 @@ void addLess(Facts &facts, const Linear &x, const Linear &y, bool orEqual) {
 
 ConditionFacts::ConditionFacts(Checker &checker) : checker_(checker) {}
 
+bool ConditionFacts::chainDefined(const Expr *e, Checker::Flow &flow) const {
+  while (auto *conv = dyn_cast<CastExpr>(e)) {
+    if (!conv->isImplicit()) {
+      break;
+    }
+    e = conv->operand;
+  }
+  auto *chain = dyn_cast<OptionalChainExpr>(e);
+  if (!chain) {
+    return false;
+  }
+  std::function<std::optional<Checker::FieldPath>(const Expr *)> walk =
+      [&](const Expr *x) -> std::optional<Checker::FieldPath> {
+    if (auto *link = dyn_cast<CastExpr>(x)) {
+      if (!link->shortCircuit && !link->isImplicit()) {
+        return std::nullopt;
+      }
+      std::optional<Checker::FieldPath> inner = walk(link->operand);
+      if (link->shortCircuit && inner) {
+        if (inner->names.empty()) {
+          flow.defined.insert(inner->var);
+        } else {
+          FieldFacts::defineField(flow, *inner);
+        }
+      }
+      return inner;
+    }
+    if (auto *name = dyn_cast<NameExpr>(x)) {
+      if (!name->var) {
+        return std::nullopt;
+      }
+      Checker::FieldPath path;
+      path.var = name->var;
+      return path;
+    }
+    if (auto *member = dyn_cast<MemberExpr>(x)) {
+      std::optional<Checker::FieldPath> path = walk(member->object);
+      if (path) {
+        path->names.push_back(member->name);
+      }
+      return path;
+    }
+    return std::nullopt;
+  };
+  std::optional<Checker::FieldPath> whole = walk(chain->chain);
+  if (whole && !whole->names.empty()) {
+    FieldFacts::defineField(flow, *whole);
+  }
+
+  return true;
+}
+
 void ConditionFacts::addConditionFacts(const Expr *cond, Checker::Flow &whenTrue,
                                        Checker::Flow &whenFalse) const {
   checker_.resultChecker().addResultFacts(cond, whenTrue, whenFalse);
@@ -71,11 +124,30 @@ void ConditionFacts::addConditionFacts(const Expr *cond, Checker::Flow &whenTrue
     FieldFacts::defineField(whenTrue, *path);
     return;
   }
+  if (chainDefined(cond, whenTrue)) {
+    return;
+  }
   auto *bin = dyn_cast<BinaryExpr>(cond);
   if (!bin) {
     return;
   }
   BinaryOp op = bin->op;
+  if (op == BinaryOp::Eq || op == BinaryOp::Ne) {
+    for (auto [side, other] : {std::pair{bin->lhs, bin->rhs}, std::pair{bin->rhs, bin->lhs}}) {
+      const Expr *given = other;
+      while (auto *conv = dyn_cast<CastExpr>(given)) {
+        if (!conv->isImplicit() || conv->shortCircuit) {
+          break;
+        }
+        given = conv->operand;
+      }
+      if (isa<UndefinedExpr>(given)) {
+        chainDefined(side, op == BinaryOp::Ne ? whenTrue : whenFalse);
+      } else if (given->type && !given->type->isOptional() && !given->type->isUndefined()) {
+        chainDefined(side, op == BinaryOp::Eq ? whenTrue : whenFalse);
+      }
+    }
+  }
 
   if (op == BinaryOp::InstanceOf) {
     if (const NameExpr *name = optionalVariable(bin->lhs)) {

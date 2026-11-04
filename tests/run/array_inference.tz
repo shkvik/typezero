@@ -1,0 +1,30 @@
+// Arrays the compiler follows: a local array that no call can reach keeps its length over
+// calls in a loop; map gives its callback the element type it should return; new Map takes
+// pairs from a map callback; Array(n) is new Array(n).
+function pick(n: int): int {
+  return n - 1
+}
+
+function shuffle(items: int[]): Result<int[], string> {
+  const result = [...items]
+  for (let i = result.length - 1; i > 0; i -= 1) {
+    const j = pick(i + 1)
+    if (j < 0 || j > i) {
+      return err("bad index")
+    }
+    ;[result[i], result[j]] = [result[j], result[i]]
+  }
+  return ok(result)
+}
+
+type Cell = { q: int }
+const cells: Cell[] = [{ q: 1 }, { q: 2 }, { q: 3 }]
+const neighbors: int[][] = cells.map(() => [])
+neighbors[0]?.push(5)
+const seats = [
+  { userId: "a", seat: 1 },
+  { userId: "b", seat: 2 },
+]
+const bySeat = new Map(seats.map((s) => [s.userId, s.seat]))
+const filled: string[] = Array<string>(2).fill("k")
+console.log(shuffle([1, 2, 3, 4]), neighbors, bySeat, filled)

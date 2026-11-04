@@ -21,7 +21,7 @@ constexpr llvm::StringLiteral kPrelude = R"(type Partial<T> = { [K in keyof T]?:
 type Required<T> = { [K in keyof T]-?: T[K] }
 type Readonly<T> = { readonly [K in keyof T]: T[K] }
 type Pick<T, K extends keyof T> = { [P in K]: T[P] }
-type Omit<T, K extends keyof T> = { [P in Exclude<keyof T, K>]: T[P] }
+type Omit<T, K extends string> = { [P in Exclude<keyof T, K>]: T[P] }
 type Awaited<T> = T extends Promise<infer U> ? Awaited<U> : T
 type JsonError = {
   kind: "JSON_ERROR"
@@ -320,7 +320,6 @@ type SubtleUnwrapKeyError =
   | { kind: "SUBTLE_UNWRAP_KEY_ERROR_DECRYPTION_FAILED"; code: "ERR_OPERATION_FAILED"; message: string }
   | { kind: "SUBTLE_UNWRAP_KEY_ERROR_SYSTEM"; code: "ERR_OPERATION_FAILED"; message: string }
 )";
-
 }
 
 Prelude::Prelude(Checker &checker) : checker_(checker) {}

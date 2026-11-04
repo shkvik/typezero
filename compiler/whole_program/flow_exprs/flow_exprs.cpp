@@ -69,7 +69,9 @@ Refs FlowExprs::exprRefs(Expr *e) {
         expr(p.key);
       }
       Refs value = expr(p.value);
-      if (!p.spread && !p.name.empty()) {
+      if (p.keyed) {
+        flows_.flow(value, flows_.unknown_);
+      } else if (!p.spread && !p.name.empty()) {
         flows_.flow(value, flows_.fieldNode(p.name));
       }
       append(out, p.spread ? copied(value) : holding(value));

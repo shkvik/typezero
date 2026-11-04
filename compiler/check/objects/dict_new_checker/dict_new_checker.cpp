@@ -8,6 +8,7 @@
 #include "compiler/library/decimal/decimal_checker/decimal_checker.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/Support/ConvertUTF.h"
+#include <functional>
 
 using llvm::cast;
 using llvm::dyn_cast;
@@ -18,7 +19,47 @@ namespace tz {
 
 DictNewChecker::DictNewChecker(Checker &checker) : checker_(checker) {}
 
+void DictNewChecker::markPairs(Expr *arg) {
+  auto *call = dyn_cast<CallExpr>(arg);
+  auto *member = call ? dyn_cast<MemberExpr>(call->callee) : nullptr;
+  auto *fe = call && call->args.size() == 1 ? dyn_cast<FunctionExpr>(call->args[0]) : nullptr;
+  if (!member || member->name != "map" || !fe || fe->fn->returnType || !fe->fn->body) {
+    return;
+  }
+  std::vector<const Expr *> returned;
+  bool plain = true;
+  std::function<void(const Stmt *)> walk = [&](const Stmt *s) {
+    if (!s) {
+      return;
+    }
+    if (auto *ret = dyn_cast<ReturnStmt>(s)) {
+      auto *pair = dyn_cast_or_null<ArrayLitExpr>(ret->value);
+      if (!pair || pair->elements.size() != 2 || pair->elements[0].spread ||
+          pair->elements[1].spread) {
+        plain = false;
+        return;
+      }
+      returned.push_back(pair);
+    } else if (auto *block = dyn_cast<BlockStmt>(s)) {
+      for (const Stmt *inner : block->body) {
+        walk(inner);
+      }
+    } else if (auto *branch = dyn_cast<IfStmt>(s)) {
+      walk(branch->thenStmt);
+      walk(branch->elseStmt);
+    }
+  };
+  walk(fe->fn->body);
+  if (!plain || returned.empty()) {
+    return;
+  }
+  for (const Expr *pair : returned) {
+    checker_.pairLiterals_.insert(pair);
+  }
+}
+
 bool DictNewChecker::inferPairs(Expr *arg, const Type *&key, const Type *&value) {
+  markPairs(arg);
   auto *lit = dyn_cast<ArrayLitExpr>(arg);
   if (!lit || lit->elements.empty()) {
     return false;

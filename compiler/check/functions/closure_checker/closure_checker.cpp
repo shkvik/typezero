@@ -249,6 +249,26 @@ void ClosureChecker::checkClosureBody(FunctionDecl *fn) {
       checker_.flow_.facts.add(f.lhs, f.rhs, f.offset);
     }
   }
+  for (const VarSymbol *var : saved.flow.defined) {
+    if (var->isConst) {
+      checker_.flow_.defined.insert(var);
+    }
+  }
+  for (const auto &[var, type] : saved.flow.narrowed) {
+    if (var->isConst) {
+      checker_.flow_.narrowed.push_back({var, type});
+    }
+  }
+  for (const VarSymbol *var : saved.flow.okResults) {
+    if (var->isConst) {
+      checker_.flow_.okResults.insert(var);
+    }
+  }
+  for (const VarSymbol *var : saved.flow.errResults) {
+    if (var->isConst) {
+      checker_.flow_.errResults.insert(var);
+    }
+  }
   bool ownScope = fn->isExpression && !fn->ownName.empty();
   if (ownScope) {
     declareOwnName(fn);

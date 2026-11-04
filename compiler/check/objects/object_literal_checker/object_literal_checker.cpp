@@ -86,8 +86,14 @@ Expr *ObjectLiteralChecker::checkObjectLit(ObjectLitExpr *lit, const Type *expec
       checker_.file_->fieldNames.insert(prop.name);
       continue;
     }
-    ok = false;
     named[i] = false;
+    llvm::ArrayRef<const Type *> keyNames =
+        keyType->isUnion() ? keyType->members() : llvm::ArrayRef<const Type *>(keyType);
+    if (llvm::all_of(keyNames, [](const Type *n) { return n->isStringLiteral(); })) {
+      prop.keyed = true;
+      continue;
+    }
+    ok = false;
     if (keyType->isError()) {
       continue;
     }
@@ -140,6 +146,95 @@ Expr *ObjectLiteralChecker::checkObjectLit(ObjectLitExpr *lit, const Type *expec
       }
     }
   }
+  bool inferred = false;
+  if (!target && !lit->props.empty() &&
+      llvm::all_of(lit->props, [](const ObjectLitExpr::Property &p) { return p.keyed; })) {
+    std::vector<Field> fields;
+    for (ObjectLitExpr::Property &prop : lit->props) {
+      prop.value = checker_.exprChecker().checkExpr(prop.value);
+      const Type *value = prop.value->type;
+      if (value->isError()) {
+        lit->type = Type::error();
+        return lit;
+      }
+      if (value->isVoid() || value->isUndefined()) {
+        checker_.diags_.error(prop.value->loc(),
+                              "cannot infer the type of the fields from '" + value->name() +
+                                  "'; declare the type of the object, e.g. 'const o: { a?: int "
+                                  "} = ...'");
+        lit->type = Type::error();
+        return lit;
+      }
+      const Type *keyType = prop.key->type;
+      for (const Type *n :
+           keyType->isUnion() ? keyType->members() : llvm::ArrayRef<const Type *>(keyType)) {
+        std::string name;
+        llvm::convertUTF16ToUTF8String(
+            llvm::ArrayRef<llvm::UTF16>(
+                reinterpret_cast<const llvm::UTF16 *>(n->literalText().data()),
+                n->literalText().size()),
+            name);
+        auto same = llvm::find_if(fields, [&](const Field &f) { return f.name == name; });
+        if (same == fields.end()) {
+          fields.push_back({name, Type::optional(value), false});
+        } else if (same->type != Type::optional(value)) {
+          checker_.diags_.error(prop.key->loc(), "field '" + name +
+                                                     "' gets values of different types; declare "
+                                                     "the type of the object");
+          lit->type = Type::error();
+          return lit;
+        }
+      }
+    }
+    target = Type::object(std::move(fields));
+    inferred = true;
+  }
+  for (ObjectLitExpr::Property &prop : lit->props) {
+    if (!prop.keyed) {
+      continue;
+    }
+    const Type *keyType = prop.key->type;
+    if (lit->hasSpread() ||
+        llvm::any_of(lit->props, [](const ObjectLitExpr::Property &p) { return p.method; })) {
+      checker_.diags_.error(prop.key->loc(),
+                            "a key of type '" + keyType->name() +
+                                "' in brackets works in an object literal without '...' "
+                                "and methods; assign it after: 'o[key] = value'");
+      return lit;
+    }
+    if (!target) {
+      checker_.diags_.error(prop.key->loc(),
+                            "a key of type '" + keyType->name() +
+                                "' in brackets needs the type of the object, which says "
+                                "the fields it may name; write it, e.g. 'const o: T = { [key]: "
+                                "value }'");
+      prop.value = checker_.exprChecker().checkExpr(prop.value);
+      lit->type = Type::error();
+      return lit;
+    }
+    const Type *field = KeyedFieldChecker::keyedFieldType(target, keyType);
+    if (!field) {
+      checker_.diags_.error(prop.key->loc(), "the fields that '" + keyType->name() +
+                                                 "' names must all be in '" + target->name() +
+                                                 "' and have one type");
+      prop.value = checker_.exprChecker().checkExpr(prop.value);
+      lit->type = Type::error();
+      return lit;
+    }
+    if (!field->isOptional()) {
+      checker_.diags_.error(prop.key->loc(),
+                            "the fields that '" + keyType->name() + "' names are of type '" +
+                                field->name() +
+                                "', not optional; the object gets only one of them, so the "
+                                "others would be missing");
+      prop.value = checker_.exprChecker().checkExpr(prop.value);
+      lit->type = Type::error();
+      return lit;
+    }
+    std::string what = "the field that '" + keyType->name().str() + "' names";
+    prop.value = checker_.typeRelations().coerce(
+        inferred ? prop.value : checker_.exprChecker().checkExpr(prop.value, field), field, what);
+  }
   if (llvm::any_of(lit->props, [](const ObjectLitExpr::Property &p) { return p.method; })) {
     return checker_.methodLiteralChecker().checkMethodLiteral(lit, target);
   }
@@ -150,6 +245,9 @@ Expr *ObjectLiteralChecker::checkObjectLit(ObjectLitExpr *lit, const Type *expec
   std::vector<Field> fields;
   for (size_t i = 0; i < lit->props.size(); ++i) {
     ObjectLitExpr::Property &prop = lit->props[i];
+    if (prop.keyed) {
+      continue;
+    }
     if (!named[i]) {
       prop.value = checker_.exprChecker().checkExpr(prop.value);
       continue;

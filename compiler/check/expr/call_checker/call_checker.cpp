@@ -9,6 +9,7 @@
 #include "compiler/check/expr/concat_checker/concat_checker.h"
 #include "compiler/check/expr/expr_checker/expr_checker.h"
 #include "compiler/check/expr/name_checker/name_checker.h"
+#include "compiler/check/expr/new_checker/new_checker.h"
 #include "compiler/check/functions/function_method_checker/function_method_checker.h"
 #include "compiler/check/functions/nested_functions/nested_functions.h"
 #include "compiler/check/generics/arg_list_checker/arg_list_checker.h"
@@ -228,7 +229,16 @@ Expr *CallChecker::checkCall(CallExpr *call, const Type *expected) {
     }
     rejectTypeArgs();
     if (receiver->isTuple()) {
-      return checker_.tupleChecker().checkTupleMethod(call, member);
+      static const char *const inPlace[] = {"push", "pop",     "shift", "unshift",    "splice",
+                                            "sort", "reverse", "fill",  "copyWithin", "join"};
+      Expr *copy = llvm::is_contained(inPlace, member->name)
+                       ? nullptr
+                       : checker_.tupleChecker().arrayCopy(member->object);
+      if (!copy) {
+        return checker_.tupleChecker().checkTupleMethod(call, member);
+      }
+      member->object = copy;
+      receiver = copy->type;
     }
     if (receiver->isObject()) {
       return checker_.objectChecker().checkFieldCall(call, member);
@@ -317,6 +327,11 @@ Expr *CallChecker::checkCall(CallExpr *call, const Type *expected) {
       checker_.nestedFunctions().noteUse(var, name->loc());
       name->type = checker_.scopes().varType(var);
       return checkDirectCall(call, known->sym, name->loc());
+    }
+    if (!entry.var && !entry.func && !entry.cls && name->name == "Array" && !call->hasSpread()) {
+      auto *made = checker_.ctx_.make<NewExpr>(call->loc(), name->name, name->typeArgs, call->args);
+
+      return checker_.newChecker().checkNew(made, expected);
     }
     if (!entry.var && !entry.func) {
       if (const char *why = !entry.cls ? whyUnsupported(name->name) : nullptr) {

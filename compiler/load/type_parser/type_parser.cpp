@@ -314,14 +314,7 @@ TypeRef TypeParser::parsePrimaryType() {
   }
   ref.name = parser_.tok_.text;
   parser_.cursor().advance();
-  if (ref.name == "NodeJS" && parser_.tok_.is(Tok::Dot) &&
-      parser_.cursor().peek().is(Tok::Identifier)) {
-    parser_.cursor().advance();
-    ref.name = parser_.ctx_.keepName(("NodeJS." + parser_.tok_.text).str());
-    parser_.cursor().advance();
-  }
-  if ((ref.name == "Intl" || ref.name == "Bit") && parser_.tok_.is(Tok::Dot) &&
-      parser_.cursor().peek().is(Tok::Identifier)) {
+  while (parser_.tok_.is(Tok::Dot) && parser_.cursor().peek().is(Tok::Identifier)) {
     parser_.cursor().advance();
     ref.name = parser_.ctx_.keepName(ref.name.str() + "." + parser_.tok_.text.str());
     parser_.cursor().advance();

@@ -26,6 +26,17 @@ namespace tz {
 ArrayLiteralChecker::ArrayLiteralChecker(Checker &checker) : checker_(checker) {}
 
 Expr *ArrayLiteralChecker::checkArrayLit(ArrayLitExpr *lit, const Type *expected) {
+  if (checker_.pairLiterals_.erase(lit) && !expected) {
+    std::vector<const Type *> parts;
+    for (ArrayLitExpr::Element &e : lit->elements) {
+      e.expr = checker_.exprChecker().checkExpr(e.expr);
+      parts.push_back(e.expr->type);
+    }
+    bool bad = llvm::any_of(
+        parts, [](const Type *t) { return t->isError() || t->isVoid() || t->isUndefined(); });
+    lit->type = bad ? Type::error() : Type::tuple(parts);
+    return lit;
+  }
   if (expected && expected->nonOptional()->isJson()) {
     return checker_.jsonChecker().checkJsonArrayLit(lit);
   }

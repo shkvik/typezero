@@ -4,7 +4,8 @@
 # "main" of its package.json, a file that main does not import is checked alone,
 # notes go along with their error. A quick check comes first, then the whole
 # program (step 5). What the check learns answers hover,
-# definition, references, completion after a dot and rename (step 4). A file
+# definition, references, completion after a dot and rename (step 4); colors
+# leave imports and this to the grammar, as TypeScript does. A file
 # of tz's own library is checked as the module it is, with the text of the
 # editor, so it shows only its real errors (D8). Needs node.
 include(${SOURCE}/../cli.cmake)
@@ -63,6 +64,24 @@ class Point {
 }
 const p = new Point(3, 4)
 console.log(p.length())
+]])
+write(colors/util.tz [[
+export class Box {
+  public readonly size: int
+  public constructor(size: int) {
+    this.size = size
+  }
+}
+]])
+write(colors/main.tz [[
+import { Box } from "./util.tz"
+function area(side: int): int {
+  const box = new Box(side)
+  let total = box.size
+  total += side
+  return total
+}
+console.log(area(3))
 ]])
 write(notes/main.tz [[
 function f() {

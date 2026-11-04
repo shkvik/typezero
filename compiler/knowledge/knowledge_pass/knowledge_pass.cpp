@@ -62,7 +62,8 @@ Knowledge KnowledgePass::run() {
   return std::move(out_);
 }
 
-void KnowledgePass::local(const VarSymbol *var, size_t module, size_t owner, llvm::SMLoc use) {
+void KnowledgePass::local(const VarSymbol *var, size_t module, size_t owner, llvm::SMLoc use,
+                          bool parameter) {
   if (!var || !var->loc.isValid() || var->name.empty() || var->name.starts_with("%") ||
       variables_.count(var) != 0) {
     return;
@@ -77,6 +78,7 @@ void KnowledgePass::local(const VarSymbol *var, size_t module, size_t owner, llv
     KnownLocal known;
     known.name = var->name.str();
     known.type = var->type ? var->type->name().str() : "";
+    known.kind = parameter ? "parameter" : var->isConst ? "const" : "let";
     known.module = module;
     known.owner = owner;
     known.place = *place;

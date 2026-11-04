@@ -449,10 +449,73 @@ const Type *ConditionalTypes::resolveIntersection(const TypeRef &ref) {
       }
     }
   }
+  auto plainObject = [](const Type *t) {
+    return t->isObject() && !t->isClass() && !t->isTuple() && !t->isAnyObject() &&
+           t->overloads().empty();
+  };
+  std::vector<std::vector<const Type *>> choices;
+  bool objects = true;
+  for (const Type *part : parts) {
+    llvm::ArrayRef<const Type *> members =
+        part->isUnion() ? part->members() : llvm::ArrayRef<const Type *>(part);
+    objects &= llvm::all_of(members, plainObject);
+    choices.emplace_back(members.begin(), members.end());
+  }
+  if (objects) {
+    std::vector<const Type *> merged{nullptr};
+    for (const std::vector<const Type *> &choice : choices) {
+      std::vector<const Type *> next;
+      for (const Type *left : merged) {
+        for (const Type *right : choice) {
+          std::vector<Field> fields;
+          if (left) {
+            fields.assign(left->fields().begin(), left->fields().end());
+          }
+          for (const Field &field : right->fields()) {
+            auto same = llvm::find_if(fields, [&](const Field &f) { return f.name == field.name; });
+            if (same == fields.end()) {
+              fields.push_back(field);
+              continue;
+            }
+            const Type *a = same->type, *b = field.type;
+            const Type *x = a->nonOptional(), *y = b->nonOptional();
+            const Type *both = nullptr;
+            if (x == y) {
+              both = x;
+            } else if (x->isLiteral() && x->literalBase() == y) {
+              both = x;
+            } else if (y->isLiteral() && y->literalBase() == x) {
+              both = y;
+            }
+            if (!both) {
+              checker_.diags_.error(ref.loc, "field '" + field.name + "' has type '" + x->name() +
+                                                 "' in one part of the intersection "
+                                                 "and '" +
+                                                 y->name() + "' in another; a field has one type");
+              return Type::error();
+            }
+            same->type = a->isOptional() && b->isOptional() ? Type::optional(both) : both;
+            same->readonly |= field.readonly;
+          }
+          next.push_back(Type::object(std::move(fields)));
+        }
+      }
+      merged = std::move(next);
+    }
+    return Type::unionOf(merged);
+  }
+  const Type *other = nullptr;
+  for (const std::vector<const Type *> &choice : choices) {
+    for (const Type *t : choice) {
+      if (!other && !plainObject(t)) {
+        other = t;
+      }
+    }
+  }
   checker_.diags_.error(
-      ref.loc, "intersection types are not supported: a value has exactly the fields of its one "
-               "type; of TypeScript's idioms with '&', 'K & string' (what of K is a string) and "
-               "'T & {}' (T without undefined) work");
+      ref.loc, "'&' joins object types into one with the fields of all, and '" + other->name() +
+                   "' is not an object type; of TypeScript's other idioms with '&', 'K & string' "
+                   "(what of K is a string) and 'T & {}' (T without undefined) work");
 
   return Type::error();
 }

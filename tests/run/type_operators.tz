@@ -39,12 +39,14 @@ type Draft = Partial<User>
 type Complete = Required<User>
 type Frozen = Readonly<User>
 type WithoutEmail = Omit<User, "email">
+type WithoutPhone = Omit<User, "phone">
 const preview: Preview = { id: 3, name: "pv" }
 const drafts: Draft[] = [{}, { name: "x" }, { email: "e" }]
 const complete: Complete = { id: 4, name: "c", email: "c@x" }
 const frozen: Frozen = { id: 5, name: "f" }
 const short: WithoutEmail = { id: 6, name: "s" }
-console.log(preview, drafts, complete, frozen, short)
+const same: WithoutPhone = { id: 7, name: "p" }
+console.log(preview, drafts, complete, frozen, short, same)
 type Status = "draft" | "live" | "gone"
 type Visible = Exclude<Status, "gone">
 type Final = Extract<Status, "gone" | "lost">

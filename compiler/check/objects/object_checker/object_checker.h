@@ -16,6 +16,8 @@ public:
   std::string objectMismatch(const Type *from, const Type *to, bool conflict = false) const;
 
 private:
+  Expr *enumMembers(CallExpr *call, EnumDecl *decl, llvm::StringRef fn);
+
   Checker &checker_;
 };
 

@@ -13,6 +13,7 @@ public:
   Stmt *lookupType(llvm::StringRef name) const;
   const Type *resolveAlias(TypeAliasDecl *alias);
   void resolveEnum(EnumDecl *decl);
+  const Type *enumType(EnumDecl *decl);
   Expr *checkEnumMember(EnumDecl *decl, MemberExpr *member, const Type *expected);
   Expr *checkEnumIndex(EnumDecl *decl, IndexExpr *index);
 

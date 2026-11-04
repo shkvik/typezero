@@ -1,0 +1,4 @@
+6 { wood: 3, ore: 3 } 12 { brick: 1 } ore ore!
+[ 'Wood', 'Brick', 'Ore' ] [ [ 'Wood', 'wood' ], [ 'Brick', 'brick' ], [ 'Ore', 'ore' ] ]
+true {"hand":{"wood":3,"ore":3},"current":"ore"}
+{ wood: 1, brick: 1 } true 3

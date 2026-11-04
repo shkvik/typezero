@@ -57,6 +57,12 @@ const char kRuntimeKeys[] =
 KeyedFieldChecker::KeyedFieldChecker(Checker &checker) : checker_(checker) {}
 
 std::optional<std::string> KeyedFieldChecker::constantKey(const Expr *key) const {
+  while (auto *conv = dyn_cast<CastExpr>(key)) {
+    if (!conv->isImplicit()) {
+      break;
+    }
+    key = conv->operand;
+  }
   if (auto *lit = dyn_cast<StringLitExpr>(key)) {
     return toUtf8(lit->value);
   }
@@ -175,14 +181,21 @@ Expr *KeyedFieldChecker::checkKeyedField(IndexExpr *index, bool write) {
       llvm::ArrayRef<const Type *> names =
           keyType->isUnion() ? keyType->members() : llvm::ArrayRef<const Type *>(keyType);
       if (write) {
-        if (field->isOptional() || field->isUnion() || field->isLiteral() ||
-            llvm::any_of(names, [&](const Type *n) {
+        bool known = llvm::all_of(names, [&](const Type *n) {
+          return checker_.assignedFields_.contains(toUtf8(n->literalText()));
+        });
+        if (llvm::any_of(names, [&](const Type *n) {
               return type->field(toUtf8(n->literalText()))->readonly;
             })) {
+          checker_.diags_.error(index->loc(), "a readonly field cannot be assigned through a key");
+          return index;
+        }
+        if ((field->isOptional() || field->isUnion() || field->isLiteral()) && !known) {
           checker_.diags_.error(index->loc(),
                                 "fields of type '" + field->name() +
                                     "' are assigned by name, as in 'o.name = v'; through a "
-                                    "key of literals only fields of a plain type are");
+                                    "key of literals only fields of a plain type are, or "
+                                    "fields named by the members of a string enum");
           return index;
         }
         for (const Type *n : names) {

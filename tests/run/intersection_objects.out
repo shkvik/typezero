@@ -1,0 +1,4 @@
+{ actorId: 1, seq: 2, timeout: false } { actorId: 1, seq: 3, timeout: true, dice: [ 3, 4 ] }
+#1 roll 1+6; #2 build 12
+{ id: 'a', count: 2 } no day
+{ kind: 'big', size: 9 } 4

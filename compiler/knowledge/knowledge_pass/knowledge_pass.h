@@ -35,7 +35,8 @@ public:
   size_t typeSymbol(size_t module, llvm::StringRef name) const;
   bool reference(size_t symbol, size_t from, size_t module, llvm::SMLoc loc, bool call);
   void typed(size_t module, llvm::SMLoc loc, llvm::StringRef name, const Type *type);
-  void local(const VarSymbol *var, size_t module, size_t owner, llvm::SMLoc use);
+  void local(const VarSymbol *var, size_t module, size_t owner, llvm::SMLoc use,
+             bool parameter = false);
   const SourcePlaces &places() const { return places_; }
 
 private:

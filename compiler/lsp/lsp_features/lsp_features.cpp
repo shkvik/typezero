@@ -292,12 +292,45 @@ llvm::json::Value LspFeatures::semanticTokens() const {
 
     return 6;
   };
+  std::vector<std::pair<size_t, size_t>> imports;
+  for (size_t start = 0; start < text_.size();) {
+    size_t end = text_.find('\n', start);
+    end = end == llvm::StringRef::npos ? text_.size() : end + 1;
+    llvm::StringRef line = text_.slice(start, end);
+    llvm::StringRef code = line.ltrim();
+    bool names = code.starts_with("import") && code.size() > 6 && !isWordChar(code[6]);
+    if (!names && code.starts_with("export") && code.size() > 6 && !isWordChar(code[6])) {
+      llvm::StringRef after = code.drop_front(6).ltrim();
+      names = after.starts_with("{") || after.starts_with("*") || after.starts_with("type {");
+    }
+    if (!names) {
+      start = end;
+      continue;
+    }
+    size_t from = start + (line.size() - code.size());
+    size_t quote = text_.find_first_of("'\";", from);
+    if (quote == llvm::StringRef::npos || text_[quote] == ';') {
+      imports.push_back({from, quote == llvm::StringRef::npos ? text_.size() : quote});
+      start = end;
+      continue;
+    }
+    size_t close = text_.find(text_[quote], quote + 1);
+    size_t stop = close == llvm::StringRef::npos ? text_.size() : close + 1;
+    imports.push_back({from, stop});
+    size_t next = text_.find('\n', stop);
+    start = next == llvm::StringRef::npos ? text_.size() : next + 1;
+  }
   std::map<std::pair<unsigned, unsigned>, Token> found;
   auto add = [&](const SourcePlace &place, llvm::StringRef name, int type, int modifiers) {
-    if (place.endLine != place.line || name.empty()) {
+    if (place.endLine != place.line || name.empty() || name == "this") {
       return;
     }
     size_t at = offset(place.line, place.character);
+    if (llvm::any_of(imports, [&](const std::pair<size_t, size_t> &span) {
+          return at >= span.first && at < span.second;
+        })) {
+      return;
+    }
     llvm::StringRef rest = text_.substr(at);
     if (!rest.starts_with(name) || (rest.size() > name.size() && isWordChar(rest[name.size()]))) {
       return;
@@ -338,9 +371,11 @@ llvm::json::Value LspFeatures::semanticTokens() const {
     if (local.module != module_) {
       continue;
     }
-    add(local.place, local.name, 6, 1);
+    int type = local.kind == "parameter" ? 7 : 6;
+    int readonly = local.kind == "const" ? 2 : 0;
+    add(local.place, local.name, type, 1 | readonly);
     for (const SourcePlace &use : local.uses) {
-      add(use, local.name, 6, 0);
+      add(use, local.name, type, readonly);
     }
   }
   llvm::json::Array data;

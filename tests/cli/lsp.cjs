@@ -292,6 +292,36 @@ async function main() {
     if (!tokens.includes(wanted)) throw new Error(`no token '${wanted}' in ${JSON.stringify(tokens)}`)
   }
 
+  // Imports and this keep the colors of the grammar, as in TypeScript; a const is
+  // readonly, a parameter is a parameter.
+  const colorsOf = async name => {
+    const colored = file(name)
+    const ready = server.errors(colored, none)
+    server.open(colored)
+    await ready
+    const reply = await server.request("textDocument/semanticTokens/full", { textDocument: { uri: uriOf(colored) } })
+    const modifierNames = init.result.capabilities.semanticTokensProvider.legend.tokenModifiers
+    const list = []
+    let at = 0
+    let column = 0
+    for (let i = 0; i < reply.result.data.length; i += 5) {
+      const [deltaLine, deltaColumn, , type, modifiers] = reply.result.data.slice(i, i + 5)
+      at += deltaLine
+      column = deltaLine ? deltaColumn : column + deltaColumn
+      const marks = modifierNames.filter((_, bit) => modifiers & (1 << bit) && bit < 2)
+      list.push([`${at}:${column}`, [legend[type], ...marks].join(" ")])
+    }
+    return list
+  }
+  const colors = await colorsOf("colors/main.tz")
+  const colorAt = place => (colors.find(([where]) => where == place) ?? [place, "none"])[1]
+  expect("the colors of names", ["0:9", "1:14", "2:8", "2:22", "3:6", "3:14", "4:11"].map(colorAt), [
+    "none", "parameter declaration", "variable declaration readonly", "parameter",
+    "variable declaration", "variable readonly", "parameter",
+  ])
+  const utilColors = await colorsOf("colors/util.tz")
+  if (utilColors.some(([where]) => where == "3:4")) throw new Error(`'this' is colored: ${JSON.stringify(utilColors)}`)
+
   // A file of tz's own library is checked as the module it is: no errors of a
   // program (declare, tz:intrinsics), and an error typed into it is shown in
   // it, on its line.

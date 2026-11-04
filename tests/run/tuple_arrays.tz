@@ -1,0 +1,14 @@
+// same-as-node
+// A tuple whose elements are all of one type reads like a readonly array: for...of and the
+// methods that do not change it in place.
+const ends: [int, int] = [3, 7]
+const dice: [int, int] = [2, 5]
+const names: [string, string, string] = ["ann", "bob", "cid"]
+for (const vertex of ends) {
+  console.log("end", vertex)
+}
+console.log(dice.every((d) => d >= 1 && d <= 6), dice.reduce((a, b) => a + b, 0))
+console.log(ends.includes(7), ends.indexOf(3), dice.map((d) => d * 2), ends.join("-"))
+console.log(names.filter((n) => n != "bob"), names.some((n) => n.startsWith("c")))
+const mixed: [int, string] = [1, "a"]
+console.log(mixed.join("/"), ends, dice)

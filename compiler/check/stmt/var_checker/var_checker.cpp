@@ -199,6 +199,14 @@ void VarChecker::checkVarDecl(VarDeclStmt *decl) {
           !checker_.severalVariants_.contains(got)) {
         d.sym->reflectMethod = got->method->decl;
       }
+      auto *made = llvm::dyn_cast_or_null<CallExpr>(value);
+      bool fresh =
+          llvm::isa_and_nonnull<ArrayLitExpr>(value) ||
+          (made && (made->builtin == Builtin::ArrMap || made->builtin == Builtin::ArrFilter ||
+                    made->builtin == Builtin::ArrSlice || made->builtin == Builtin::ArrConcat ||
+                    made->builtin == Builtin::ArrFlatMap || made->builtin == Builtin::ArrayFrom));
+      d.sym->unshared = fresh && !d.sym->isGlobal && type->isArray() &&
+                        FlowChecker::staysLocal(d.sym->owner, d.name);
     }
     if (decl->isConst && value &&
         (isa<ObjectLitExpr>(value) || isa<StringLitExpr>(value) ||

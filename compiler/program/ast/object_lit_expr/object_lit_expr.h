@@ -21,6 +21,7 @@ public:
     bool replaced = false;
     std::vector<llvm::StringRef> replacedFields;
     bool method = false;
+    bool keyed = false;
   };
 
   explicit ObjectLitExpr(llvm::SMLoc loc) : Expr(Kind::ObjectLit, loc) {}

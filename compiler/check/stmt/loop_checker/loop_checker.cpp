@@ -10,6 +10,7 @@
 #include "compiler/check/iterators/iterator_methods/iterator_methods.h"
 #include "compiler/check/objects/dict_checker/dict_checker.h"
 #include "compiler/check/objects/object_checker/object_checker.h"
+#include "compiler/check/objects/tuple_checker/tuple_checker.h"
 #include "compiler/check/scopes/scopes.h"
 #include "compiler/check/stmt/jump_checker/jump_checker.h"
 #include "compiler/check/stmt/stmt_checker/stmt_checker.h"
@@ -176,6 +177,9 @@ void LoopChecker::checkForOf(ForOfStmt *stmt) {
   } else if (type->isOptional() && GeneratorChecker::iteratedType(type->inner())) {
     checker_.diags_.error(stmt->iterable->loc(),
                           "'" + type->name() + "' may be undefined; check it before iterating");
+  } else if (Expr *copy = checker_.tupleChecker().arrayCopy(stmt->iterable)) {
+    stmt->iterable = copy;
+    element = copy->type->inner();
   } else if (type->isTuple()) {
     checker_.diags_.error(stmt->iterable->loc(),
                           "cannot iterate over a tuple, whose elements have types of their own; "

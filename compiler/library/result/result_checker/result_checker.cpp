@@ -245,10 +245,22 @@ Expr *ResultChecker::checkResultMember(MemberExpr *member) {
   const Type *type = member->object->type;
   llvm::StringRef name = member->name;
   std::string r = receiverText(member->object);
+  auto defined = [&](MemberExpr *half) -> Expr * {
+    if (Expr *narrowed = checker_.fieldFacts().narrowedField(half); narrowed != half) {
+      return narrowed;
+    }
+    if (half->type->isOptional()) {
+      if (std::optional<Checker::FieldPath> path = checker_.fieldFacts().fieldPath(half);
+          path && checker_.fieldFacts().isFieldDefined(*path)) {
+        return checker_.typeRelations().convert(half, half->type->inner());
+      }
+    }
+    return half;
+  };
   if (name == "value") {
     if (type->errType()->isNever()) {
       member->type = halfParam(type->okType());
-      return checker_.fieldFacts().narrowedField(member);
+      return defined(member);
     }
     checker_.diags_.error(member->loc(),
                           "'value' is there only when the Result is an Ok: check it first, 'if (" +
@@ -256,7 +268,7 @@ Expr *ResultChecker::checkResultMember(MemberExpr *member) {
   } else if (name == "error") {
     if (type->okType()->isNever()) {
       member->type = halfParam(type->errType());
-      return checker_.fieldFacts().narrowedField(member);
+      return defined(member);
     }
     checker_.diags_.error(member->loc(),
                           "'error' is there only when the Result is an Err: check it first, 'if (" +

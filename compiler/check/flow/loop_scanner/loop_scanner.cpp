@@ -18,8 +18,8 @@ const llvm::StringRef kGlobalFunctions[] = {"String",    "Number",
                                             "parseInt",  "parseFloat",
                                             "Boolean",   "encodeURIComponent",
                                             "encodeURI", "decodeURIComponent",
-                                            "decodeURI"};
-
+                                            "decodeURI", "ok",
+                                            "err"};
 }
 
 LoopScanner::LoopScanner(Checker &checker) : checker_(checker) {}
@@ -307,7 +307,8 @@ void LoopScanner::scanExpr(const Expr *expr, Checker::LoopScan &scan, unsigned d
           "map",     "filter", "forEach", "reduce",   "reduceRight",   "find",      "findIndex",
           "some",    "every",  "flatMap", "findLast", "findLastIndex", "sort",      "mapErr",
           "andThen", "orElse", "match",   "andTee",   "orTee",         "andThrough"};
-      if (llvm::is_contained(callbacks, method) && !call->args.empty()) {
+      if (llvm::is_contained(callbacks, method) && !call->args.empty() &&
+          !isa<FunctionExpr>(call->args.front())) {
         scan.callsFunctions = true;
       }
       if (method == "next" || method == "toArray" ||

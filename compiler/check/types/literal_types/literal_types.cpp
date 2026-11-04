@@ -3,6 +3,7 @@
 #include "compiler/check/types/conditional_types/conditional_types.h"
 #include "compiler/check/types/type_relations/type_relations.h"
 #include "compiler/check/types/union_check_helpers/union_check_helpers.h"
+#include "compiler/declare/type_declarer/type_declarer.h"
 #include "compiler/whole_program/flows/flows.h"
 #include "llvm/Support/ConvertUTF.h"
 
@@ -81,6 +82,23 @@ bool choiceTexts(const Expr *e, std::vector<std::u16string> &texts) {
 }
 
 LiteralTypes::LiteralTypes(Checker &checker) : checker_(checker) {}
+
+const Type *LiteralTypes::enumTag(const Expr *e) const {
+  auto *member = dyn_cast<MemberExpr>(e);
+  auto *owner = member ? dyn_cast<NameExpr>(member->object) : nullptr;
+  EnumDecl *decl = owner ? checker_.scopes().lookup(owner->name).enumDecl : nullptr;
+  if (!decl) {
+    return nullptr;
+  }
+  checker_.typeDeclarer().resolveEnum(decl);
+  const EnumMember *m = decl->find(member->name);
+  if (!m) {
+    return nullptr;
+  }
+
+  return m->isString ? Type::stringLiteral(m->text)
+                     : Type::numberLiteral(double(m->number), Type::intTy());
+}
 
 const Type *LiteralTypes::constTextType(const Expr *checked, const Type *expected) {
   auto *name = dyn_cast<NameExpr>(checked);
@@ -301,6 +319,9 @@ const Type *LiteralTypes::literalMember(const ObjectLitExpr *lit, const Type *ta
     for (const ObjectLitExpr::Property &p : lit->props) {
       const Field *f = m->field(p.name);
       const Type *tag = f && p.value ? writtenLiteral(p.value) : nullptr;
+      if (!tag && f && p.value) {
+        tag = enumTag(p.value);
+      }
       if (!tag) {
         continue;
       }

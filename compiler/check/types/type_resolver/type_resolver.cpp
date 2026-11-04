@@ -74,9 +74,19 @@ const Type *TypeResolver::resolveTypeInner(const TypeRef &ref) {
         }
         return ClassValueChecker::finalClass(cls)->type;
       }
-      auto *e = cast<EnumDecl>(decl);
-      checker_.typeDeclarer().resolveEnum(e);
-      return e->isString ? Type::string() : Type::intTy();
+      return checker_.typeDeclarer().enumType(cast<EnumDecl>(decl));
+    }
+    if (auto [owner, member] = ref.name.split('.'); !member.empty()) {
+      if (auto *e = dyn_cast_or_null<EnumDecl>(checker_.typeDeclarer().lookupType(owner))) {
+        checker_.typeDeclarer().resolveEnum(e);
+        const EnumMember *m = e->find(member);
+        if (!m) {
+          checker_.diags_.error(ref.loc, "enum '" + owner + "' has no member '" + member + "'");
+          return Type::error();
+        }
+        return m->isString ? Type::stringLiteral(m->text)
+                           : Type::numberLiteral(double(m->number), Type::intTy());
+      }
     }
     if (ref.name == "Intl.Locale") {
       if (auto *cls =

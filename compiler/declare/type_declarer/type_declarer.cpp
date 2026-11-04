@@ -4,6 +4,7 @@
 #include "compiler/check/flow/index_proofs/index_proofs.h"
 #include "compiler/check/generics/alias_instantiator/alias_instantiator.h"
 #include "compiler/check/scopes/scopes.h"
+#include "compiler/check/types/literal_types/literal_types.h"
 #include "compiler/check/types/type_relations/type_relations.h"
 #include "compiler/check/types/type_resolver/type_resolver.h"
 #include "compiler/declare/class_declarer/class_declarer.h"
@@ -11,6 +12,7 @@
 #include "compiler/declare/module_declarer/module_declarer.h"
 #include "compiler/library/builtin_modules/builtin_module_checker/builtin_module_checker.h"
 #include "compiler/library/builtin_modules/builtin_module_types/builtin_module_types.h"
+#include "compiler/load/to_utf8/to_utf8.h"
 #include "compiler/whole_program/flows/flows.h"
 #include "llvm/Support/CheckedArithmetic.h"
 #include "llvm/Support/ConvertUTF.h"
@@ -281,6 +283,31 @@ void TypeDeclarer::resolveEnum(EnumDecl *decl) {
   decl->isString = strings && !numbers;
   decl->resolving = false;
   decl->resolved = true;
+  if (decl->isString) {
+    for (const EnumMember &m : decl->members) {
+      checker_.assignedFields_.insert(toUtf8(m.text));
+    }
+  }
+}
+
+const Type *TypeDeclarer::enumType(EnumDecl *decl) {
+  resolveEnum(decl);
+  if (!decl->isString) {
+    return Type::intTy();
+  }
+  std::vector<const Type *> values;
+  for (const EnumMember &m : decl->members) {
+    if (m.isString) {
+      values.push_back(Type::stringLiteral(m.text));
+    }
+  }
+  if (values.empty()) {
+    return Type::string();
+  }
+  const Type *type = Type::unionOf(values);
+  Type::nameUnion(type, decl->name);
+
+  return type;
 }
 
 Expr *TypeDeclarer::checkEnumMember(EnumDecl *decl, MemberExpr *member, const Type *expected) {
@@ -294,8 +321,13 @@ Expr *TypeDeclarer::checkEnumMember(EnumDecl *decl, MemberExpr *member, const Ty
   }
   if (m->isString) {
     auto *lit = checker_.ctx_.make<StringLitExpr>(member->loc(), m->text);
-    lit->type = Type::string();
-    return lit;
+    const Type *literal = checker_.literalTypes().stringLiteralFor(expected, m->text);
+    lit->type = Type::stringLiteral(m->text);
+    if (literal) {
+      return lit;
+    }
+
+    return checker_.typeRelations().convert(lit, enumType(decl));
   }
   int64_t value = m->number;
   Expr *lit = checker_.ctx_.make<IntLitExpr>(member->loc(),

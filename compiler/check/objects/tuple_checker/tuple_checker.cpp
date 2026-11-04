@@ -19,6 +19,25 @@ namespace tz {
 
 TupleChecker::TupleChecker(Checker &checker) : checker_(checker) {}
 
+Expr *TupleChecker::arrayCopy(Expr *tuple) {
+  const Type *type = tuple->type;
+  if (!type || !type->isTuple() || type->tupleRest() || type->fields().empty() ||
+      type->tupleMin() != type->fields().size()) {
+    return nullptr;
+  }
+  const Type *element = type->fields().front().type;
+  for (const Field &f : type->fields()) {
+    if (f.type != element) {
+      return nullptr;
+    }
+  }
+  auto *copy = checker_.ctx_.make<ArrayLitExpr>(tuple->loc());
+  copy->elements.push_back({tuple, true});
+  copy->type = Type::array(element);
+
+  return copy;
+}
+
 Expr *TupleChecker::checkTupleJoin(CallExpr *call, MemberExpr *member) {
   call->type = Type::error();
   if (checker_.callChecker().rejectSpread(call) ||

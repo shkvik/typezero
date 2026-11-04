@@ -1,0 +1,59 @@
+// same-as-node --experimental-transform-types
+// A member of an enum as a type: the type of that one value, as a tag of a union.
+enum Kind {
+  None = "none",
+  Discard = "discard",
+  Trade = "trade",
+}
+enum Level {
+  Low,
+  High = 5,
+}
+type Interrupt =
+  | { kind: Kind.None }
+  | { kind: Kind.Discard; owed: int[] }
+  | { kind: Kind.Trade; offer: string }
+type Gauge = { level: Level.Low } | { level: Level.High; alarm: string }
+
+function describe(i: Interrupt): string {
+  if (i.kind == Kind.Discard) {
+    return `discard ${i.owed.join(",")}`
+  }
+  if (Kind.Trade == i.kind) {
+    return `trade ${i.offer}`
+  }
+  return "none"
+}
+
+function label(i: Interrupt): string {
+  switch (i.kind) {
+    case Kind.None:
+      return "-"
+    case Kind.Discard:
+      return `${i.owed.length} owed`
+    case Kind.Trade:
+      return i.offer
+  }
+}
+
+function gauge(g: Gauge): string {
+  if (g.level != Level.Low) {
+    return g.alarm
+  }
+  return "quiet"
+}
+
+const all: Interrupt[] = [
+  { kind: Kind.None },
+  { kind: Kind.Discard, owed: [1, 2] },
+  { kind: Kind.Trade, offer: "wood for ore" },
+]
+for (const i of all) {
+  console.log(describe(i), "|", label(i))
+}
+const loud: Gauge = { level: Level.High, alarm: "high!" }
+const calm: Gauge = { level: Level.Low }
+console.log(gauge(loud), gauge(calm))
+const picked: Kind.Discard | Kind.Trade = Kind.Trade
+const any: Kind = picked
+console.log(picked, any)

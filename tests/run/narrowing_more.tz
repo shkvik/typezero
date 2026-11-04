@@ -1,0 +1,54 @@
+// Narrowing through '?.' compared with a value, of an optional Result value, and of a const
+// inside a closure made after the check.
+type Trade = { initiator: int; status: "pending" | "done" }
+type State = { trade?: Trade }
+type Profile = { name: string; photoUrl?: string }
+
+function initiator(s: State): int {
+  if (s.trade?.status == "pending") {
+    return s.trade.initiator
+  }
+  const t = s.trade
+  if (t?.initiator != undefined) {
+    return t.initiator + 100
+  }
+  return -1
+}
+
+function photo(profiles: Map<string, Profile>, id: string): string {
+  const profile = profiles.get(id)
+  if (profile?.photoUrl) {
+    return profile.photoUrl
+  }
+  return "-"
+}
+
+function find(flag: boolean): Result<Trade | undefined, string> {
+  return ok(flag ? { initiator: 7, status: "done" } : undefined)
+}
+
+function collect(flag: boolean): Trade[] {
+  const found = find(flag)
+  if (found.isErr()) {
+    return []
+  }
+  const out: Trade[] = []
+  if (found.value != undefined) {
+    out.push(found.value)
+  }
+  return out
+}
+
+function above(lengths: int[], seat: int): boolean {
+  const held = lengths[seat]
+  if (held == undefined) {
+    return false
+  }
+  return lengths.every((length) => length <= held)
+}
+
+const profiles = new Map<string, Profile>([["a", { name: "Ann", photoUrl: "a.png" }]])
+console.log(initiator({ trade: { initiator: 3, status: "pending" } }), initiator({}))
+console.log(initiator({ trade: { initiator: 4, status: "done" } }))
+console.log(photo(profiles, "a"), photo(profiles, "b"), collect(true), collect(false))
+console.log(above([3, 5, 2], 1), above([3, 5, 2], 2), above([], 0))

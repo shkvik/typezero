@@ -231,8 +231,122 @@ void FlowChecker::incremented(const VarSymbol *var, int64_t delta) {
   }
 }
 
+bool FlowChecker::staysLocal(const FunctionDecl *fn, llvm::StringRef name) {
+  if (!fn || !fn->body) {
+    return false;
+  }
+  auto named = [&](const Expr *e) {
+    auto *n = dyn_cast_or_null<NameExpr>(e);
+
+    return n && n->name == name;
+  };
+  size_t all = 0, safe = 0;
+  visitExprs(fn->body, [&](const Expr *e) { all += named(e) ? 1 : 0; });
+  visitExprs(
+      fn->body,
+      [&](const Expr *e) {
+        if (auto *index = dyn_cast<IndexExpr>(e)) {
+          safe += named(index->object) ? 1 : 0;
+        } else if (auto *member = dyn_cast<MemberExpr>(e)) {
+          safe += named(member->object) && member->name == "length" ? 1 : 0;
+        } else if (auto *list = dyn_cast<ArrayLitExpr>(e)) {
+          for (const ArrayLitExpr::Element &el : list->elements) {
+            safe += el.spread && named(el.expr) ? 1 : 0;
+          }
+        } else if (auto *call = dyn_cast<CallExpr>(e)) {
+          for (size_t i = 0; i < call->args.size(); ++i) {
+            safe += call->spreads(i) && named(call->args[i]) ? 1 : 0;
+          }
+          auto *member = dyn_cast<MemberExpr>(call->callee);
+          if (!member || !named(member->object)) {
+            return;
+          }
+          static const char *const plain[] = {
+              "push",        "pop",      "shift",   "unshift",    "splice", "slice",   "indexOf",
+              "lastIndexOf", "includes", "join",    "at",         "fill",   "reverse", "concat",
+              "keys",        "values",   "entries", "toReversed", "with",   "flat"};
+          static const char *const callbacks[] = {
+              "map",       "filter",   "forEach",       "every",   "some", "find",
+              "findIndex", "findLast", "findLastIndex", "flatMap", "sort", "toSorted"};
+          bool reduce = member->name == "reduce" || member->name == "reduceRight";
+          bool calls = llvm::is_contained(callbacks, member->name) || reduce;
+          if (!calls && !llvm::is_contained(plain, member->name)) {
+            return;
+          }
+          if (calls && !llvm::all_of(call->args, [&](const Expr *arg) {
+                auto *fe = dyn_cast<FunctionExpr>(arg);
+                return !fe ? !reduce || arg != call->args.front()
+                           : fe->fn->params.size() < (reduce ? 4u : 3u);
+              })) {
+            return;
+          }
+          if (calls && !reduce && !call->args.empty() && !isa<FunctionExpr>(call->args.front())) {
+            return;
+          }
+          ++safe;
+        }
+      },
+      false);
+  std::function<void(const Stmt *)> loops = [&](const Stmt *s) {
+    if (!s) {
+      return;
+    }
+    switch (s->kind()) {
+    case Stmt::Kind::Block:
+      for (const Stmt *inner : cast<BlockStmt>(s)->body) {
+        loops(inner);
+      }
+      break;
+    case Stmt::Kind::If:
+      loops(cast<IfStmt>(s)->thenStmt);
+      loops(cast<IfStmt>(s)->elseStmt);
+      break;
+    case Stmt::Kind::While:
+      loops(cast<WhileStmt>(s)->body);
+      break;
+    case Stmt::Kind::DoWhile:
+      loops(cast<DoWhileStmt>(s)->body);
+      break;
+    case Stmt::Kind::For:
+      loops(cast<ForStmt>(s)->body);
+      break;
+    case Stmt::Kind::ForOf:
+      safe += named(cast<ForOfStmt>(s)->iterable) ? 1 : 0;
+      loops(cast<ForOfStmt>(s)->body);
+      break;
+    case Stmt::Kind::Switch:
+      for (const SwitchCase &c : cast<SwitchStmt>(s)->cases) {
+        for (const Stmt *inner : c.body) {
+          loops(inner);
+        }
+      }
+      break;
+    case Stmt::Kind::Labeled:
+      loops(cast<LabeledStmt>(s)->body);
+      break;
+    case Stmt::Kind::Return: {
+      const Expr *value = cast<ReturnStmt>(s)->value;
+      auto *wrap = dyn_cast_or_null<CallExpr>(value);
+      auto *callee = wrap ? dyn_cast<NameExpr>(wrap->callee) : nullptr;
+      if (callee && (callee->name == "ok" || callee->name == "err") && wrap->args.size() == 1) {
+        value = wrap->args[0];
+      }
+      safe += named(value) ? 1 : 0;
+      break;
+    }
+    default:
+      break;
+    }
+  };
+  loops(fn->body);
+
+  return safe == all;
+}
+
 void FlowChecker::forgetCallEffects(Checker::Flow &flow) const {
-  auto part = [&](const Term &t) { return t.var && (isArrayLength(t) || changedByCalls(t.var)); };
+  auto part = [&](const Term &t) {
+    return t.var && ((isArrayLength(t) && !t.var->unshared) || changedByCalls(t.var));
+  };
   auto changed = [&](const Term &t) { return part(t.first()) || part(t.second()); };
   flow.facts.forgetIf([&](const Facts::Fact &f) { return changed(f.lhs) || changed(f.rhs); });
   for (const VarSymbol *var : llvm::to_vector(flow.defined)) {

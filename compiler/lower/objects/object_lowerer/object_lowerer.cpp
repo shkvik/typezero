@@ -50,9 +50,13 @@ llvm::Value *ObjectLowerer::emitObjectLiteral(ObjectLitExpr *lit) {
   }
   const Type *type = lit->type;
   const Lowering::ObjectLayout &layout = lowering_.objectLayouts().objectLayout(type);
+  std::vector<const ObjectLitExpr::Property *> named;
   std::vector<unsigned> keys;
   for (const ObjectLitExpr::Property &prop : lit->props) {
-    keys.push_back(ObjectLayouts::fieldIndex(type, prop.name));
+    if (!prop.keyed) {
+      named.push_back(&prop);
+      keys.push_back(ObjectLayouts::fieldIndex(type, prop.name));
+    }
   }
   for (unsigned i = 0; i < type->fields().size(); ++i) {
     if (!llvm::is_contained(keys, i)) {
@@ -65,8 +69,8 @@ llvm::Value *ObjectLowerer::emitObjectLiteral(ObjectLitExpr *lit) {
   std::vector<llvm::Value *> values;
   for (size_t k = 0; k < keys.size(); ++k) {
     unsigned i = keys[k];
-    llvm::Value *value = k < lit->props.size()
-                             ? lowering_.exprLowerer().emitExpr(lit->props[k].value)
+    llvm::Value *value = k < named.size()
+                             ? lowering_.exprLowerer().emitExpr(named[k]->value)
                              : lowering_.optionalLowerer().undefinedValue(type->fields()[i].type);
     lowering_.builder_.CreateStore(
         value, lowering_.builder_.CreateStructGEP(layout.type, object, layout.elements[i]));
@@ -76,6 +80,15 @@ llvm::Value *ObjectLowerer::emitObjectLiteral(ObjectLitExpr *lit) {
     for (size_t k = 0; k < keys.size(); ++k) {
       lowering_.storeLowerer().groupStore(object, values[k], type->fields()[keys[k]].type);
     }
+  }
+  for (const ObjectLitExpr::Property &prop : lit->props) {
+    if (!prop.keyed) {
+      continue;
+    }
+    llvm::Value *value = lowering_.exprLowerer().emitExpr(prop.value);
+    llvm::Value *key = lowering_.exprLowerer().emitExpr(prop.key);
+    llvm::Value *address = keyedFieldAddress(object, type, key, prop.key->type);
+    lowering_.storeLowerer().storeIn(object, type, address, value, prop.value->type);
   }
 
   return object;

@@ -1,0 +1,12 @@
+// A tuple keeps its length and its elements in place; one with elements of different types
+// is not iterated.
+const ends: [int, int] = [3, 7]
+// expect-error: 'sort' is not supported on tuples
+ends.sort()
+// expect-error: a tuple has a fixed length, and 'push' would change it
+ends.push(1)
+const mixed: [int, string] = [1, "a"]
+// expect-error: cannot iterate over a tuple, whose elements have types of their own
+for (const m of mixed) {
+  console.log(m)
+}

@@ -7,8 +7,10 @@
 #include "compiler/check/flow/field_facts/field_facts.h"
 #include "compiler/check/objects/dict_methods/dict_methods.h"
 #include "compiler/check/objects/object_check_helpers/object_check_helpers.h"
+#include "compiler/check/scopes/scopes.h"
 #include "compiler/check/types/type_relations/type_relations.h"
 #include "compiler/declare/class_declarer/class_declarer.h"
+#include "compiler/declare/type_declarer/type_declarer.h"
 #include "compiler/library/events/event_maps/event_maps.h"
 #include "compiler/library/process/process_checker/process_checker.h"
 #include "compiler/whole_program/flows/flows.h"
@@ -24,6 +26,13 @@ using llvm::isa;
 namespace tz {
 
 namespace {
+
+std::u16string utf16(llvm::StringRef text) {
+  llvm::SmallVector<llvm::UTF16, 32> units;
+  llvm::convertUTF8ToUTF16String(text, units);
+
+  return std::u16string(units.begin(), units.end());
+}
 
 bool hasMethodFields(const ClassDecl *cls) {
   if (cls->literal) {
@@ -113,6 +122,11 @@ Expr *ObjectChecker::checkObjectCall(CallExpr *call, MemberExpr *member, const T
     return call;
   }
   Expr *&arg = call->args[0];
+  if (auto *name = dyn_cast<NameExpr>(arg)) {
+    if (EnumDecl *decl = checker_.scopes().lookup(name->name).enumDecl) {
+      return enumMembers(call, decl, fn);
+    }
+  }
   arg = checker_.exprChecker().checkExpr(arg);
   const Type *type = arg->type;
   if (type->isError()) {
@@ -207,6 +221,39 @@ Expr *ObjectChecker::checkObjectCall(CallExpr *call, MemberExpr *member, const T
   }
 
   return call;
+}
+
+Expr *ObjectChecker::enumMembers(CallExpr *call, EnumDecl *decl, llvm::StringRef fn) {
+  const Type *values = checker_.typeDeclarer().enumType(decl);
+  if (!decl->isString && fn != "keys") {
+    checker_.diags_.error(call->args[0]->loc(),
+                          "'Object." + fn + "' of numeric enum '" + decl->name +
+                              "' is not supported: in JavaScript it mixes the names of the "
+                              "members with their numbers; list the members you need, e.g. '[" +
+                              decl->name + "." +
+                              (decl->members.empty() ? "A" : decl->members.front().name.str()) +
+                              "]'");
+    return call;
+  }
+  auto *list = checker_.ctx_.make<ArrayLitExpr>(call->loc());
+  for (const EnumMember &m : decl->members) {
+    auto *name = checker_.ctx_.make<StringLitExpr>(call->loc(), utf16(m.name));
+    auto *member = checker_.ctx_.make<MemberExpr>(
+        call->loc(), checker_.ctx_.make<NameExpr>(call->loc(), decl->name), m.name);
+    Expr *element = fn == "keys" ? static_cast<Expr *>(name) : member;
+    if (fn == "entries") {
+      auto *pair = checker_.ctx_.make<ArrayLitExpr>(call->loc());
+      pair->elements.push_back({name, false});
+      pair->elements.push_back({member, false});
+      element = pair;
+    }
+    list->elements.push_back({element, false});
+  }
+  const Type *element = fn == "keys"     ? Type::string()
+                        : fn == "values" ? values
+                                         : Type::tuple({Type::string(), values});
+
+  return checker_.exprChecker().checkExpr(list, Type::array(element));
 }
 
 void ObjectChecker::checkForIn(ForOfStmt *stmt) {

@@ -14,6 +14,7 @@ public:
   void calledFunction();
   void forgetCallEffects(Checker::Flow &flow) const;
   bool changedByCalls(const VarSymbol *var) const;
+  static bool staysLocal(const FunctionDecl *fn, llvm::StringRef name);
   void arrayResized(const Type *type, bool grew, bool shrank, const VarSymbol *except = nullptr);
   void setDefined(const VarSymbol *var, bool defined);
 

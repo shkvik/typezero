@@ -23,7 +23,7 @@ void KnowledgeWalk::param(const Param &param) {
   }
   const Type *type = param.sym && param.sym->type ? param.sym->type : param.declaredType;
   pass_.typed(module_, param.loc, param.name, type);
-  pass_.local(param.sym, module_, from_, llvm::SMLoc());
+  pass_.local(param.sym, module_, from_, llvm::SMLoc(), true);
 }
 
 void KnowledgeWalk::function(const FunctionDecl *fn) {

@@ -1,0 +1,29 @@
+// A string enum as a type takes only its own values; keys from an enum need an object
+// type that names the fields; Object.values of a numeric enum would mix names and numbers.
+enum Resource {
+  Wood = "wood",
+  Ore = "ore",
+}
+enum Level {
+  Low,
+  High,
+}
+// expect-error: type '"wod"' is not assignable to type 'Resource'
+const typo: Resource = "wod"
+const text: string = "wood"
+// expect-error: type 'string' is not assignable to type 'Resource'
+const unchecked: Resource = text
+// expect-error: enum 'Resource' has no member 'Stone'
+type Stone = Resource.Stone
+function full(r: Resource) {
+  // expect-error: the fields that 'Resource' names are of type 'int', not optional
+  const all: Record<Resource, int> = { [r]: 1 }
+  return all
+}
+function mixed(r: Resource, n: int, s: string) {
+  // expect-error: field 'wood' gets values of different types
+  const o = { [r]: n, [r]: s }
+  return o
+}
+// expect-error: 'Object.values' of numeric enum 'Level' is not supported
+console.log(Object.values(Level), typo, unchecked, full, mixed)

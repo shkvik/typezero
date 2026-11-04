@@ -509,6 +509,7 @@ private:
   llvm::StringMap<TypeAliasDecl *> libTypes_;
   llvm::DenseMap<const VarSymbol *, const Expr *> constLiterals_;
   llvm::SmallPtrSet<const Expr *, 4> prechecked_;
+  llvm::SmallPtrSet<const Expr *, 4> pairLiterals_;
   std::vector<VarSymbol *> resultVars_;
   bool isDefined(const VarSymbol *var) const { return flow_.defined.contains(var); }
   struct Binding {

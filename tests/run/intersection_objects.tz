@@ -1,0 +1,30 @@
+// same-as-node
+// '&' of object types: one type with the fields of all parts; over a union, one per member.
+type Meta = { actorId: int; seq: int; timeout: boolean }
+type RollInput = Meta & { dice?: [int, int] }
+type Action = { kind: "roll"; dice: [int, int] } | { kind: "build"; vertex: int }
+type Logged = Action & { seq: int }
+type Row = { id: string } & { count: int } & { day?: string }
+type Narrowed = { kind: string; size: int } & { kind: "big" }
+type Settled = { note?: string } & { note: string }
+
+function show(a: Logged): string {
+  if (a.kind == "roll") {
+    return `#${a.seq} roll ${a.dice[0]}+${a.dice[1]}`
+  }
+  return `#${a.seq} build ${a.vertex}`
+}
+
+const input: RollInput = { actorId: 1, seq: 2, timeout: false }
+const withDice: RollInput = { actorId: 1, seq: 3, timeout: true, dice: [3, 4] }
+const log: Logged[] = [
+  { kind: "roll", dice: [1, 6], seq: 1 },
+  { kind: "build", vertex: 12, seq: 2 },
+]
+const row: Row = { id: "a", count: 2 }
+const big: Narrowed = { kind: "big", size: 9 }
+const settled: Settled = { note: "kept" }
+console.log(input, withDice)
+console.log(log.map(show).join("; "))
+console.log(row, row.day ?? "no day")
+console.log(big, settled.note.length)

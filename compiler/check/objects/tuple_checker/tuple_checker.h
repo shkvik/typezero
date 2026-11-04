@@ -12,6 +12,7 @@ public:
   Expr *checkTupleMethod(CallExpr *call, MemberExpr *member);
   Expr *checkTupleLit(ArrayLitExpr *lit, const Type *tuple);
   static const Type *tupleElement(const Type *tuple);
+  Expr *arrayCopy(Expr *tuple);
   Expr *checkTupleJoin(CallExpr *call, MemberExpr *member);
 
 private:

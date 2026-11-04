@@ -3,6 +3,7 @@
 #include "compiler/check/expr/binary_checker/binary_checker.h"
 #include "compiler/check/expr/expr_checker/expr_checker.h"
 #include "compiler/check/flow/index_proofs/index_proofs.h"
+#include "compiler/check/scopes/scopes.h"
 #include "compiler/check/types/literal_types/literal_types.h"
 #include "compiler/check/types/type_relations/type_relations.h"
 #include "compiler/declare/constant_folder/constant_folder.h"
@@ -156,7 +157,11 @@ void DecimalChecker::checkComparisonOperands(BinaryExpr *bin) {
       e = unary->operand;
     }
 
-    return isLiteralTree(e) || isa<StringLitExpr>(e) || isa<BoolLitExpr>(e);
+    auto *member = dyn_cast<MemberExpr>(e);
+    auto *owner = member ? dyn_cast<NameExpr>(member->object) : nullptr;
+
+    return isLiteralTree(e) || isa<StringLitExpr>(e) || isa<BoolLitExpr>(e) ||
+           (owner && checker_.scopes().lookup(owner->name).enumDecl);
   };
   auto hint = [&](const Expr *other, const Expr *self) {
     const Type *type = other->type ? other->type->nonOptional() : nullptr;

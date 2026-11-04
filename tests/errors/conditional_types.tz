@@ -9,8 +9,11 @@ type Outside<T> = infer U
 type Holed = `a${{ x: int }}`
 // expect-error: 'Uppercase' takes a string type, such as a string literal type, not 'int'
 type Loud = Uppercase<int>
-// expect-error: intersection types are not supported: a value has exactly the fields of its one type
-type Both = { a: int } & { b: int }
+// expect-error: field 'a' has type 'int' in one part of the intersection and 'string' in another; a field has one type
+type Both = { a: int } & { a: string }
+class Point { x: int = 0 }
+// expect-error: '&' joins object types into one with the fields of all, and 'Point' is not an object type
+type Placed = Point & { at: int }
 interface User { id: int; name: string }
 // expect-error: a mapped type renames its keys to names of fields, string literal types such as `get${Capitalize<K>}`, not '1'
 type Numbered = { [K in keyof User as 1]: User[K] }

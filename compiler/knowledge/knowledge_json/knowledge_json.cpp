@@ -103,6 +103,7 @@ llvm::json::Value KnowledgeJson::write(const Knowledge &knowledge, bool libraryB
     }
     locals[local.module].push_back(llvm::json::Object{{"name", local.name},
                                                       {"type", local.type},
+                                                      {"kind", local.kind},
                                                       {"owner", keyOf(knowledge, local.owner)},
                                                       {"range", range(local.place)},
                                                       {"uses", std::move(uses)}});
@@ -287,6 +288,7 @@ bool KnowledgeJson::read(const llvm::json::Value &value, Knowledge &out) {
         KnownLocal local;
         local.name = text(*fields, "name");
         local.type = text(*fields, "type");
+        local.kind = text(*fields, "kind");
         local.module = m;
         local.owner = symbolOf(*fields, "owner");
         local.place.path = module.path;

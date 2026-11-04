@@ -267,7 +267,8 @@ Expr *CallbackChecker::checkCallbackMethod(CallExpr *call, MemberExpr *member,
   case FlatMap:
     if (const Type *wanted = expected ? expected->nonOptional() : nullptr;
         wanted && wanted->isArray() &&
-        (Checker::holdsObjects(wanted->inner()) || Checker::holdsResults(wanted->inner()))) {
+        (Checker::holdsObjects(wanted->inner()) || Checker::holdsResults(wanted->inner()) ||
+         (kind == Map && wanted->inner()->nonOptional()->isArray()))) {
       sig.ret = kind == Map ? wanted->inner() : wanted;
     }
     if (typed) {

@@ -3,7 +3,7 @@ name cid 5
 { id: 1, name: 'anna' }
 [ 'anna', 'bob' ] [ 1, 2 ]
 [ undefined, 'b@x' ]
-{ id: 3, name: 'pv' } [ {}, { name: 'x' }, { email: 'e' } ] { id: 4, name: 'c', email: 'c@x' } { id: 5, name: 'f' } { id: 6, name: 's' }
+{ id: 3, name: 'pv' } [ {}, { name: 'x' }, { email: 'e' } ] { id: 4, name: 'c', email: 'c@x' } { id: 5, name: 'f' } { id: 6, name: 's' } { id: 7, name: 'p' }
 [ 'draft', 'live' ] gone here
 [ 2, 3.5 ] 7
 true false undefined

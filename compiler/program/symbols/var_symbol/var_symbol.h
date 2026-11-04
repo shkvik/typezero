@@ -34,6 +34,7 @@ struct VarSymbol {
   FunctionDecl *owner = nullptr;
   unsigned declSeq = 0;
   bool captured = false;
+  bool unshared = false;
   bool reassigned = false;
   bool capturedEarly = false;
   FunctionDecl *function = nullptr;
