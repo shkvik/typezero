@@ -1,4 +1,5 @@
 #include "compiler/declare/class_declarer/class_declarer.h"
+#include <limits>
 #include "compiler/check/classes/class_bases/class_bases.h"
 #include "compiler/check/classes/class_check_helpers/class_check_helpers.h"
 #include "compiler/check/classes/class_links/class_links.h"
@@ -170,6 +171,10 @@ void ClassDeclarer::resolveClass(ClassDecl *cls) {
       var->usedInFunction = true;
       var->declSeq = ++checker_.seq_;
       f.var = var;
+      if (auto *lit = f.readonly ? llvm::dyn_cast_or_null<IntLitExpr>(f.init) : nullptr;
+          lit && lit->value <= uint64_t(std::numeric_limits<int64_t>::max())) {
+        checker_.constVars_[var] = int64_t(lit->value);
+      }
       if (!f.init && !f.optional && type && !type->isError()) {
         checker_.diags_.error(f.loc, "static field '" + f.name + "' needs a value, e.g. 'static " +
                                          f.name + ": " + type->name() +

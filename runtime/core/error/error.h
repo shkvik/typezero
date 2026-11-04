@@ -14,6 +14,7 @@ typedef struct TzFrame {
 } TzFrame;
 
 TZ_COLD void tz_set_failed(void *error);
+void *tz_take_failed(void);
 
 typedef struct {
   TzStr message;

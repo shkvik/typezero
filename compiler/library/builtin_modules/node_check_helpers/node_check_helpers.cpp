@@ -37,6 +37,8 @@ std::string moduleLabel(NodeModule module) {
     return "node:child_process";
   case NodeModule::Crypto:
     return "node:crypto";
+  case NodeModule::Util:
+    return "node:util";
   }
 
   return "";

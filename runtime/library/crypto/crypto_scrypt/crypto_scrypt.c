@@ -1,9 +1,12 @@
 #include "runtime/library/crypto/crypto/crypto.h"
 #include "runtime/core/alloc/alloc.h"
+#include "runtime/core/async/async.h"
 #include "runtime/core/error/error.h"
+#include "runtime/core/output/output.h"
 #include "runtime/core/tzrt/tzrt.h"
 #include "runtime/library/bytes/bytes/bytes.h"
 #include <limits.h>
+#include <stdlib.h>
 #include <string.h>
 
 extern const TzMd tz_crypto_md_sha256;
@@ -136,22 +139,57 @@ static void explain(int ok, uint64_t n, uint64_t r, uint64_t p, uint64_t limit) 
                  (unsigned long long)n, (unsigned long long)r, (unsigned long long)p);
 }
 
-TzBytes *tz_crypto_scrypt(const TzType *pt, const void *pv, const TzType *st, const void *sv,
-                          double keylen, double cost, double block_size, double parallelization,
-                          double maxmem) {
+static void compute(const uint8_t *password, size_t password_length, const uint8_t *salt,
+                    size_t salt_length, uint64_t n, uint64_t r, uint64_t p, uint8_t *out,
+                    size_t keylen) {
+  if (keylen == 0) {
+    return;
+  }
+  size_t blen = (size_t)(p * 128 * r);
+  uint8_t *b = (uint8_t *)malloc(blen);
+  uint32_t *v = (uint32_t *)malloc((size_t)(32 * r * (n + 2) * sizeof(uint32_t)));
+  if (!b || !v) {
+    tz_panic("out of memory", -1);
+  }
+  uint32_t *x = v + 32 * r * n, *t = x + 32 * r;
+  tz_crypto_pbkdf2_raw(&tz_crypto_md_sha256, password, password_length, salt, salt_length, 1, b,
+                       blen);
+  for (uint64_t i = 0; i < p; ++i) {
+    ro_mix(b + i * 128 * r, r, n, v, x, t);
+  }
+  tz_crypto_pbkdf2_raw(&tz_crypto_md_sha256, password, password_length, b, blen, 1, out, keylen);
+  memset(b, 0, blen);
+  free(b);
+  free(v);
+}
+
+static int params(double keylen, double cost, double block_size, double parallelization,
+                  double maxmem, uint64_t *n, uint64_t *r, uint64_t *p) {
   if (!tz_crypto_check_integer(keylen, "keylen", 0, 2147483647) ||
       !tz_crypto_check_integer(cost, "N", 0, 4294967295.0) ||
       !tz_crypto_check_integer(block_size, "r", 0, 4294967295.0) ||
       !tz_crypto_check_integer(parallelization, "p", 0, 4294967295.0) ||
       !tz_crypto_check_integer(maxmem, "maxmem", 0, 9007199254740991.0)) {
-    return NULL;
+    return 0;
   }
-  uint64_t n = cost ? (uint64_t)cost : 16384, r = block_size ? (uint64_t)block_size : 8;
-  uint64_t p = parallelization ? (uint64_t)parallelization : 1;
+  *n = cost ? (uint64_t)cost : 16384;
+  *r = block_size ? (uint64_t)block_size : 8;
+  *p = parallelization ? (uint64_t)parallelization : 1;
   uint64_t limit = maxmem ? (uint64_t)maxmem : 32u << 20;
-  int ok = check(n, r, p, limit);
+  int ok = check(*n, *r, *p, limit);
   if (ok <= 0) {
-    explain(ok, n, r, p, limit);
+    explain(ok, *n, *r, *p, limit);
+    return 0;
+  }
+
+  return 1;
+}
+
+TzBytes *tz_crypto_scrypt(const TzType *pt, const void *pv, const TzType *st, const void *sv,
+                          double keylen, double cost, double block_size, double parallelization,
+                          double maxmem) {
+  uint64_t n, r, p;
+  if (!params(keylen, cost, block_size, parallelization, maxmem, &n, &r, &p)) {
     return NULL;
   }
   TzCryptoData password, salt;
@@ -163,24 +201,33 @@ TzBytes *tz_crypto_scrypt(const TzType *pt, const void *pv, const TzType *st, co
     return NULL;
   }
   TzBytes *result = tz_buffer_alloc((int64_t)keylen, 0);
-  if (result && keylen > 0) {
-    size_t blen = (size_t)(p * 128 * r);
-    uint8_t *b = (uint8_t *)tz_alloc(blen);
-    uint32_t *v = (uint32_t *)tz_alloc((size_t)(32 * r * (n + 2) * sizeof(uint32_t)));
-    uint32_t *x = v + 32 * r * n, *t = x + 32 * r;
-    tz_crypto_pbkdf2_raw(&tz_crypto_md_sha256, password.data, password.length, salt.data,
-                         salt.length, 1, b, blen);
-    for (uint64_t i = 0; i < p; ++i) {
-      ro_mix(b + i * 128 * r, r, n, v, x, t);
-    }
-    tz_crypto_pbkdf2_raw(&tz_crypto_md_sha256, password.data, password.length, b, blen, 1,
-                         result->data, (size_t)keylen);
-    memset(b, 0, blen);
-    tz_free(b);
-    tz_free(v);
-  }
+  compute(password.data, password.length, salt.data, salt.length, n, r, p, result->data,
+          (size_t)keylen);
   tz_crypto_data_done(&salt);
   tz_crypto_data_done(&password);
 
   return result;
+}
+
+static void scrypt_run(TzCryptoJob *j) {
+  TzBytes *b = (TzBytes *)j->made;
+  compute(j->bytes[0], j->lengths[0], j->bytes[1], j->lengths[1], (uint64_t)j->numbers[0],
+          (uint64_t)j->numbers[1], (uint64_t)j->numbers[2], b->data, (size_t)b->length);
+}
+
+void tz_crypto_scrypt_async(TzPromise *promise, const TzType *pt, const void *pv,
+                            const TzType *st, const void *sv, double keylen, double cost,
+                            double block_size, double parallelization, double maxmem) {
+  TzCryptoJob *j = tz_crypto_job_new(promise);
+  uint64_t n, r, p;
+  if (!params(keylen, cost, block_size, parallelization, maxmem, &n, &r, &p) ||
+      !tz_crypto_job_copy(j, 0, pt, pv, "password") || !tz_crypto_job_copy(j, 1, st, sv, "salt")) {
+    tz_crypto_job_refuse(j);
+    return;
+  }
+  j->numbers[0] = (double)n;
+  j->numbers[1] = (double)r;
+  j->numbers[2] = (double)p;
+  j->made = tz_buffer_alloc((int64_t)keylen, 0);
+  tz_crypto_job_queue(j, scrypt_run, tz_crypto_job_settle_made);
 }

@@ -112,14 +112,6 @@ std::string cryptoExportProblem(llvm::StringRef name, llvm::StringRef path) {
       name == "constants") {
     return "";
   }
-  for (const auto &[form, sync] : kCallbackForms) {
-    if (form == name) {
-      return what +
-             " takes a callback, which tz does not have (docs/crypto.md, section 5); "
-             "import '" +
-             sync.str() + "' and use what it returns";
-    }
-  }
   if (name == "webcrypto") {
     return what + " is the global crypto of Web Crypto, which needs no import: use "
                   "'crypto.subtle', 'crypto.getRandomValues' and 'crypto.randomUUID'";

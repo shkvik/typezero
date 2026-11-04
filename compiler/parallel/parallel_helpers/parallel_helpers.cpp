@@ -104,6 +104,7 @@ bool makesNewObject(Builtin builtin) {
   case Builtin::RegExpParse:
   case Builtin::WeakRefNew:
   case Builtin::CryptoKeyPair:
+  case Builtin::CryptoKeyPairAsync:
   case Builtin::ArrKeys:
   case Builtin::ArrValues:
   case Builtin::ArrEntries:
@@ -231,6 +232,7 @@ bool knownBuiltin(Builtin b) {
   case Builtin::ChildExecSync:
   case Builtin::Crypto:
   case Builtin::CryptoKeyPair:
+  case Builtin::CryptoKeyPairAsync:
   case Builtin::LibListener:
   case Builtin::LibBoundListener:
   case Builtin::LibAs:

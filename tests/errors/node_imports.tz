@@ -29,8 +29,8 @@ import { readFileSyncc } from "node:fs"
 import { matchesGlob } from "path"
 // expect-error: 'networkInterfaces' of 'node:os' is not supported yet
 import { networkInterfaces } from "node:os"
-// expect-error: 'pid' of 'node:process' is not supported yet
-import { pid } from "node:process"
+// expect-error: 'hrtime' of 'node:process' is not supported yet
+import { hrtime } from "node:process"
 // expect-error: 'tz:io' has no export named 'readLines'; it has readLine
 import { readLines } from "tz:io"
 // expect-error: import 'join' conflicts with the declaration of 'join' in this file

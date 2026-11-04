@@ -137,6 +137,13 @@ llvm::Value *ProcessLowerer::emitProcessBuiltin(CallExpr *call) {
         processFunction("tz_date_now", lowering_.builder_.getInt64Ty(), {}));
   case Builtin::PerformanceNow:
     return lowering_.builder_.CreateCall(processFunction("tz_performance_now", f64, {}));
+  case Builtin::ProcessPid:
+    return lowering_.builder_.CreateSExt(
+        lowering_.builder_.CreateCall(processFunction("tz_process_pid", i32, {})), i64);
+  case Builtin::ProcessUptime:
+    return lowering_.builder_.CreateFDiv(
+        lowering_.builder_.CreateCall(processFunction("tz_performance_now", f64, {})),
+        llvm::ConstantFP::get(f64, 1000.0), "uptime");
   default:
     llvm_unreachable("not a built-in of process");
   }

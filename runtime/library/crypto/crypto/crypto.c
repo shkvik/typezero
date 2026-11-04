@@ -1,5 +1,6 @@
 #include "runtime/library/crypto/crypto/crypto.h"
 #include "runtime/core/alloc/alloc.h"
+#include "runtime/core/async/async.h"
 #include "runtime/core/closure/closure.h"
 #include "runtime/core/error/error.h"
 #include "runtime/core/group/group.h"
@@ -101,6 +102,11 @@ typedef struct {
 } Notes;
 
 static TZ_THREAD_LOCAL Notes notes;
+static TZ_THREAD_LOCAL TzCryptoProblem *deferred;
+
+_Static_assert(sizeof(Notes) <= sizeof(((TzCryptoProblem *)0)->notes), "notes fit a problem");
+
+void tz_crypto_defer(TzCryptoProblem *problem) { deferred = problem; }
 
 void tz_crypto_note_algorithm(const char *name) {
   snprintf(notes.algorithm, sizeof notes.algorithm, "%s", name ? name : "");
@@ -158,6 +164,16 @@ void tz_crypto_fail(const char *code, const char *format, ...) {
       c->problem_length = notes.length;
       snprintf(c->problem_code, sizeof c->problem_code, "%s", code);
       snprintf(c->problem, sizeof c->problem, "%s", text);
+    }
+    memset(&notes, 0, sizeof notes);
+    return;
+  }
+  if (deferred) {
+    if (!deferred->failed) {
+      deferred->failed = 1;
+      snprintf(deferred->code, sizeof deferred->code, "%s", code);
+      snprintf(deferred->message, sizeof deferred->message, "%s", text);
+      memcpy(deferred->notes, &notes, sizeof notes);
     }
     memset(&notes, 0, sizeof notes);
     return;
@@ -1491,4 +1507,347 @@ int32_t tz_crypto_key_equals(const TzKey *a, const TzKey *b) {
   }
 
   return diff == 0;
+}
+
+static void replay(const TzCryptoProblem *problem) {
+  memcpy(&notes, problem->notes, sizeof notes);
+  tz_crypto_fail(problem->code, "%s", problem->message);
+}
+
+TzCryptoJob *tz_crypto_job_new(TzPromise *p) {
+  TzCryptoJob *j = (TzCryptoJob *)tz_alloc(sizeof(TzCryptoJob));
+  memset(j, 0, sizeof *j);
+  j->promise = p;
+  tz_ref_retain(p);
+  j->make = tz_crypto_maker;
+
+  return j;
+}
+
+int tz_crypto_job_copy(TzCryptoJob *j, int part, const TzType *type, const void *value,
+                       const char *what) {
+  TzCryptoData d;
+  if (!tz_crypto_data(&d, type, value, TZ_ENC_UTF8, what)) {
+    return 0;
+  }
+  j->bytes[part] = (uint8_t *)malloc(d.length ? d.length : 1);
+  if (!j->bytes[part]) {
+    tz_panic("out of memory", -1);
+  }
+  if (d.length) {
+    memcpy(j->bytes[part], d.data, d.length);
+  }
+  j->lengths[part] = d.length;
+  tz_crypto_data_done(&d);
+
+  return 1;
+}
+
+void tz_crypto_job_keep(TzCryptoJob *j, int slot, void *object) {
+  j->held[slot] = object;
+  tz_ref_retain(object);
+}
+
+uint8_t *tz_crypto_job_out(TzCryptoJob *j, size_t length) {
+  j->out = (uint8_t *)malloc(length ? length : 1);
+  if (!j->out) {
+    tz_panic("out of memory", -1);
+  }
+  j->out_length = length;
+
+  return j->out;
+}
+
+static void job_free(TzCryptoJob *j) {
+  for (int i = 0; i < 4; ++i) {
+    if (j->bytes[i]) {
+      memset(j->bytes[i], 0, j->lengths[i]);
+      free(j->bytes[i]);
+    }
+  }
+  if (j->out) {
+    memset(j->out, 0, j->out_length);
+    free(j->out);
+  }
+  if (j->drop) {
+    j->drop(j);
+  }
+  for (int i = 0; i < 2; ++i) {
+    tz_instance_release((TzInstance *)j->held[i]);
+  }
+  tz_instance_release((TzInstance *)j->made);
+  tz_obj_release((TzObject *)j->promise);
+  tz_free(j);
+}
+
+static void fail_promise(TzCryptoJob *j) {
+  void *failure = tz_take_failed();
+  if (!failure) {
+    tz_panicf("internal error: a crypto call failed without an error");
+  }
+  tz_promise_fail(j->promise, failure);
+}
+
+void tz_crypto_job_refuse(TzCryptoJob *j) {
+  fail_promise(j);
+  job_free(j);
+}
+
+void tz_crypto_job_settle(TzCryptoJob *j, const void *value, size_t size) {
+  tz_promise_succeed(j->promise, value, size);
+}
+
+int tz_crypto_job_settle_made(TzCryptoJob *j) {
+  void *made = j->made;
+  j->made = NULL;
+  tz_crypto_job_settle(j, &made, sizeof made);
+
+  return 1;
+}
+
+int tz_crypto_job_settle_bytes(TzCryptoJob *j) {
+  TzBytes *b = tz_crypto_buffer(j->out, j->out_length);
+  tz_crypto_job_settle(j, &b, sizeof b);
+
+  return 1;
+}
+
+static void job_work(TzWork *w) {
+  TzCryptoJob *j = (TzCryptoJob *)w;
+  tz_crypto_defer(&j->problem);
+  j->run(j);
+  tz_crypto_defer(NULL);
+}
+
+static void job_done(TzWork *w) {
+  TzCryptoJob *j = (TzCryptoJob *)w;
+  TzMaker before = tz_crypto_maker;
+  tz_crypto_maker = j->make;
+  int settled = 0;
+  if (j->problem.failed) {
+    replay(&j->problem);
+  } else {
+    settled = j->finish(j);
+  }
+  if (!settled) {
+    fail_promise(j);
+  }
+  tz_crypto_maker = before;
+  job_free(j);
+}
+
+void tz_crypto_job_queue(TzCryptoJob *j, TzCryptoRun run, TzCryptoFinish finish) {
+  j->run = run;
+  j->finish = finish;
+  j->work.work = job_work;
+  j->work.done = job_done;
+  j->work.turns = 1;
+  tz_work_queue_settles(&j->work, j->promise);
+}
+
+static void pbkdf2_run(TzCryptoJob *j) {
+  TzBytes *b = (TzBytes *)j->made;
+  tz_crypto_pbkdf2_raw((const TzMd *)j->md, j->bytes[0], j->lengths[0], j->bytes[1], j->lengths[1],
+                       j->numbers[0], b->data, (size_t)b->length);
+}
+
+void tz_crypto_pbkdf2_async(TzPromise *promise, const TzType *pt, const void *pv,
+                            const TzType *st, const void *sv, double iterations, double keylen,
+                            const TzMd *md) {
+  TzCryptoJob *j = tz_crypto_job_new(promise);
+  if (!md || !check_integer(iterations, "iterations", 1, 2147483647) ||
+      !check_integer(keylen, "keylen", 1, 2147483647)) {
+    tz_crypto_job_refuse(j);
+    return;
+  }
+  if (md->xof) {
+    fixed_hash_only(md, "pbkdf2");
+    tz_crypto_job_refuse(j);
+    return;
+  }
+  if (!tz_crypto_job_copy(j, 0, pt, pv, "password") || !tz_crypto_job_copy(j, 1, st, sv, "salt")) {
+    tz_crypto_job_refuse(j);
+    return;
+  }
+  j->md = md;
+  j->numbers[0] = iterations;
+  j->made = tz_buffer_alloc((int64_t)keylen, 0);
+  tz_crypto_job_queue(j, pbkdf2_run, tz_crypto_job_settle_made);
+}
+
+static void hkdf_run(TzCryptoJob *j) {
+  TzArrayBuffer *b = (TzArrayBuffer *)j->made;
+  tz_crypto_hkdf_raw((const TzMd *)j->md, j->bytes[0], j->lengths[0], j->bytes[1], j->lengths[1],
+                     j->bytes[2], j->lengths[2], b->data, (size_t)b->length);
+}
+
+void tz_crypto_hkdf_async(TzPromise *promise, const TzMd *md, const TzType *kt, const void *kv,
+                          const TzType *st, const void *sv, const TzType *it, const void *iv,
+                          double keylen) {
+  TzCryptoJob *j = tz_crypto_job_new(promise);
+  if (!md || !check_integer(keylen, "keylen", 1, 2147483647)) {
+    tz_crypto_job_refuse(j);
+    return;
+  }
+  if (md->xof) {
+    fixed_hash_only(md, "hkdf");
+    tz_crypto_job_refuse(j);
+    return;
+  }
+  if (keylen > 255.0 * md->size) {
+    char text[64];
+    number_text(text, sizeof text, keylen);
+    tz_crypto_note_parameter("keylen", keylen);
+    tz_crypto_fail("ERR_CRYPTO_INVALID_KEYLEN", "hkdf with %s makes at most %u bytes, not %s",
+                   md->name, 255 * md->size, text);
+    tz_crypto_job_refuse(j);
+    return;
+  }
+  if (!tz_crypto_job_copy(j, 0, kt, kv, "ikm") || !tz_crypto_job_copy(j, 1, st, sv, "salt") ||
+      !tz_crypto_job_copy(j, 2, it, iv, "info")) {
+    tz_crypto_job_refuse(j);
+    return;
+  }
+  if (j->lengths[2] > 1024) {
+    tz_crypto_note_parameter("info", (double)j->lengths[2]);
+    tz_crypto_fail("ERR_OUT_OF_RANGE", "info must be at most 1024 bytes, not %zu", j->lengths[2]);
+    tz_crypto_job_refuse(j);
+    return;
+  }
+  j->md = md;
+  j->made = tz_abuf_new((int64_t)keylen);
+  tz_crypto_job_queue(j, hkdf_run, tz_crypto_job_settle_made);
+}
+
+static void random_made_run(TzCryptoJob *j) {
+  TzBytes *b = (TzBytes *)j->made;
+  tz_crypto_random(b->data, (size_t)b->length);
+}
+
+void tz_crypto_random_bytes_async(TzPromise *promise, double size) {
+  TzCryptoJob *j = tz_crypto_job_new(promise);
+  if (isnan(size) || size < 0 || size > 2147483647) {
+    char text[64];
+    number_text(text, sizeof text, size);
+    tz_crypto_fail("ERR_OUT_OF_RANGE",
+                   "The value of \"size\" is out of range. It must be >= 0 && <= "
+                   "2147483647. Received %s",
+                   text);
+    tz_crypto_job_refuse(j);
+    return;
+  }
+  j->made = tz_buffer_alloc((int64_t)size, 0);
+  tz_crypto_job_queue(j, random_made_run, tz_crypto_job_settle_made);
+}
+
+static void random_out_run(TzCryptoJob *j) { tz_crypto_random(j->out, j->out_length); }
+
+static int random_fill_finish(TzCryptoJob *j) {
+  TzInstance *view = (TzInstance *)j->held[0];
+  uint8_t *data;
+  if (tz_bytes_kind(view) == TZ_BYTES_ARRAY_BUFFER) {
+    data = ((TzArrayBuffer *)view)->data;
+  } else {
+    data = ((TzBytes *)view)->data;
+  }
+  memcpy(data + (int64_t)j->numbers[0], j->out, j->out_length);
+  j->held[0] = NULL;
+  tz_crypto_job_settle(j, &view, sizeof view);
+
+  return 1;
+}
+
+void tz_crypto_random_fill_async(TzPromise *promise, TzInstance *view, double offset, double size,
+                                 int32_t has) {
+  TzCryptoJob *j = tz_crypto_job_new(promise);
+  int64_t length;
+  if (tz_bytes_kind(view) == TZ_BYTES_ARRAY_BUFFER) {
+    length = ((TzArrayBuffer *)view)->length;
+  } else {
+    length = tz_bytes_byte_length((TzBytes *)view);
+  }
+  double from = (has & 1) ? offset : 0;
+  double count = (has & 2) ? size : (double)length - from;
+  if (!check_integer(from, "offset", 0, (double)length) ||
+      !check_integer(count, "size", 0, 2147483647)) {
+    tz_crypto_job_refuse(j);
+    return;
+  }
+  if (from + count > (double)length) {
+    char total[64], text[64];
+    number_text(total, sizeof total, (double)length);
+    number_text(text, sizeof text, from + count);
+    tz_crypto_fail("ERR_OUT_OF_RANGE",
+                   "The value of \"size + offset\" is out of range. It must be <= %s. "
+                   "Received %s",
+                   total, text);
+    tz_crypto_job_refuse(j);
+    return;
+  }
+  tz_crypto_job_keep(j, 0, view);
+  j->numbers[0] = from;
+  tz_crypto_job_out(j, (size_t)count);
+  tz_crypto_job_queue(j, random_out_run, random_fill_finish);
+}
+
+static void random_int_run(TzCryptoJob *j) {
+  j->result = (int64_t)(j->numbers[0] + random_below(j->numbers[1] - j->numbers[0]));
+}
+
+static int random_int_finish(TzCryptoJob *j) {
+  int64_t value = j->result;
+  tz_crypto_job_settle(j, &value, sizeof value);
+
+  return 1;
+}
+
+void tz_crypto_random_int32_async(TzPromise *promise, int32_t min, int32_t max) {
+  TzCryptoJob *j = tz_crypto_job_new(promise);
+  if (max <= min) {
+    char low[64], text[64];
+    number_text(low, sizeof low, min);
+    number_text(text, sizeof text, max);
+    tz_crypto_fail("ERR_OUT_OF_RANGE",
+                   "The value of \"max\" is out of range. It must be greater than the "
+                   "value of \"min\" (%s). Received %s",
+                   low, text);
+    tz_crypto_job_refuse(j);
+    return;
+  }
+  j->numbers[0] = min;
+  j->numbers[1] = max;
+  tz_crypto_job_queue(j, random_int_run, random_int_finish);
+}
+
+static int secret_key_finish(TzCryptoJob *j) {
+  TzKey *key = (TzKey *)tz_obj_alloc(sizeof(TzKey));
+  memset(key, 0, sizeof *key);
+  key->rc = 1;
+  key->layout = &tz_crypto_secret_key_layout;
+  key->type = TZ_KEY_SECRET;
+  key->length = (int32_t)j->out_length;
+  key->secret = (uint8_t *)tz_alloc(j->out_length ? j->out_length : 1);
+  memcpy(key->secret, j->out, j->out_length);
+  tz_crypto_job_settle(j, &key, sizeof key);
+
+  return 1;
+}
+
+void tz_crypto_generate_secret_key_async(TzPromise *promise, int32_t aes, double bits) {
+  TzCryptoJob *j = tz_crypto_job_new(promise);
+  if (aes) {
+    if (bits != 128 && bits != 192 && bits != 256) {
+      char text[64];
+      number_text(text, sizeof text, bits);
+      tz_crypto_note_parameter("length", bits);
+      tz_crypto_fail("ERR_OUT_OF_RANGE", "length must be 128, 192 or 256, not %s", text);
+      tz_crypto_job_refuse(j);
+      return;
+    }
+  } else if (!check_integer(bits, "options.length", 8, 2147483647)) {
+    tz_crypto_job_refuse(j);
+    return;
+  }
+  tz_crypto_job_out(j, (size_t)bits / 8);
+  tz_crypto_job_queue(j, random_out_run, secret_key_finish);
 }

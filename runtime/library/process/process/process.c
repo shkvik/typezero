@@ -314,6 +314,14 @@ void tz_process_cwd(TzStr *out) {
 
 void tz_process_exec_path(TzStr *out) { *out = exec_path(); }
 
+int32_t tz_process_pid(void) {
+#ifdef _WIN32
+  return (int32_t)GetCurrentProcessId();
+#else
+  return (int32_t)getpid();
+#endif
+}
+
 void tz_process_platform(TzStr *out) {
 #if defined(_WIN32)
   *out = tz_str_from_ascii("win32", 5);

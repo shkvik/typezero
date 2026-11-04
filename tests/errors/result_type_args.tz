@@ -1,0 +1,7 @@
+// ok and err take both type arguments or none, and the value must fit the one it is for.
+// expect-error: 'err' takes two type arguments: 'err<T, E>(...)'
+const one = err<int>("x");
+// expect-error: type '"B"' is not assignable to type '"A"'
+const wrong = err<int, "A">("B");
+const right = ok<int, "A">(1);
+console.log(one, wrong, right);

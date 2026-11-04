@@ -1,0 +1,19 @@
+scrypt true 32
+promisify(scrypt) 16
+pbkdf2 true
+hkdf true
+argon2 true
+8 at once 8
+maxmem: ERR_OSSL_EVP_MEMORY_LIMIT_EXCEEDED
+randomFill 16 true
+randomBytes 24
+randomInt true
+generateKey 32
+generateKeyPair pem true true
+sign / verify 64 true false
+diffieHellman true 32
+generatePrimeSync 8 true
+generatePrime 16 true
+checkPrime 15 false
+add: ERR_OUT_OF_RANGE
+uptime true true

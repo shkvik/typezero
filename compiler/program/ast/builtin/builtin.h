@@ -32,6 +32,8 @@ enum class Builtin {
   ProcessStdoutWrite,
   ProcessStderrWrite,
   ProcessIsTTY,
+  ProcessUptime,
+  ProcessPid,
   DateNow,
   PerformanceNow,
   StringOf,
@@ -434,6 +436,7 @@ enum class Builtin {
   EmbedBytes,
   Crypto,
   CryptoKeyPair,
+  CryptoKeyPairAsync,
   TupleJoin,
   MetaDefine,
   MetaGet,
@@ -475,7 +478,8 @@ inline bool isLibBuiltin(Builtin builtin) {
 }
 
 inline bool isCryptoBuiltin(Builtin builtin) {
-  return builtin == Builtin::Crypto || builtin == Builtin::CryptoKeyPair;
+  return builtin == Builtin::Crypto || builtin == Builtin::CryptoKeyPair ||
+         builtin == Builtin::CryptoKeyPairAsync;
 }
 
 inline bool isMetaBuiltin(Builtin builtin) {

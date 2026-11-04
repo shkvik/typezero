@@ -381,7 +381,10 @@ Val BuiltinEvaluator::evalBuiltin(const CallExpr *call, State &st) {
     return check_.overflowWarnings().trusted(type);
   case Builtin::DateNow:
   case Builtin::PerformanceNow:
+  case Builtin::ProcessUptime:
     return numVal(range(0, kMaxTime, Origin::Trusted));
+  case Builtin::ProcessPid:
+    return numVal(range(0, 4294967295, Origin::Trusted));
   case Builtin::DateParse: {
     Val result;
     result.elem = share(numVal(range(-kMaxTime, kMaxTime, Origin::Trusted)));

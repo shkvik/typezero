@@ -15,6 +15,7 @@ public:
   Expr *checkNodeMember(MemberExpr *member);
   Expr *processAlias(Expr *expr);
   Expr *nodeValue(const Checker::NodeName &n, Expr *expr);
+  std::optional<llvm::StringRef> promisifyTarget(Expr *init);
 
 private:
   std::string exportProblem(NodeModule module, llvm::StringRef name, llvm::StringRef path) const;

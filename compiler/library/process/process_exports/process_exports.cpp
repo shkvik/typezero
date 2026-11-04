@@ -5,8 +5,9 @@ namespace tz {
 
 namespace {
 
-const llvm::StringLiteral kProcessNames[] = {"argv",     "env",      "exit",  "exitCode", "cwd",
-                                             "platform", "execPath", "stdin", "stdout",   "stderr"};
+const llvm::StringLiteral kProcessNames[] = {"argv",     "env",      "exit",   "exitCode",
+                                             "cwd",      "platform", "execPath", "stdin",
+                                             "stdout",   "stderr",   "uptime", "pid"};
 
 }
 
@@ -17,7 +18,7 @@ std::string processExportProblem(llvm::StringRef name, llvm::StringRef path) {
 
   return "'" + name.str() + "' of '" + path.str() +
          "' is not supported yet; tz has: argv, env, exit, exitCode, cwd, platform, "
-         "execPath, stdin, stdout and stderr";
+         "execPath, stdin, stdout, stderr, uptime and pid";
 }
 
 }

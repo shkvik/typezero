@@ -148,6 +148,14 @@ Expr *ProcessChecker::checkProcessCall(CallExpr *call, MemberExpr *member) {
     call->type = Type::string();
     return call;
   }
+  if (name == "uptime") {
+    if (!checker_.argumentChecker().checkArity(call, member->loc(), 0, 0)) {
+      return call;
+    }
+    call->builtin = Builtin::ProcessUptime;
+    call->type = Type::doubleTy();
+    return call;
+  }
   static const llvm::StringLiteral properties[] = {"argv",     "env",    "exitCode", "execPath",
                                                    "platform", "stdout", "stderr"};
   auto *event = call->args.empty() ? nullptr : dyn_cast<StringLitExpr>(call->args[0]);
@@ -279,12 +287,15 @@ Expr *ProcessChecker::checkProcessMember(MemberExpr *member) {
   if (name == "platform") {
     return builtinCall(member->loc(), member, Builtin::ProcessPlatform, {}, Type::string());
   }
+  if (name == "pid") {
+    return builtinCall(member->loc(), member, Builtin::ProcessPid, {}, Type::intTy());
+  }
   if (name == "env") {
     return builtinCall(member->loc(), member, Builtin::EnvMap, {},
                        Type::dict(Type::DictKind::Record, Type::string(), Type::string()));
   }
   member->type = Type::error();
-  if (name == "exit" || name == "cwd") {
+  if (name == "exit" || name == "cwd" || name == "uptime") {
     checker_.diags_.error(member->loc(), "'process." + name + "' can only be called: 'process." +
                                              name + (name == "exit" ? "(code)'" : "()'"));
   } else if (name == "stdout" || name == "stderr") {

@@ -1,8 +1,10 @@
 #include "runtime/library/crypto/crypto/crypto.h"
 #include "runtime/core/alloc/alloc.h"
+#include "runtime/core/async/async.h"
 #include "runtime/core/closure/closure.h"
 #include "runtime/core/error/error.h"
 #include "runtime/core/group/group.h"
+#include "runtime/core/output/output.h"
 #include "runtime/core/string/string.h"
 #include "runtime/core/tzrt/tzrt.h"
 #include "runtime/library/bytes/buffer/buffer.h"
@@ -21,6 +23,7 @@
 #include <openssl/pem.h>
 #include <openssl/rsa.h>
 #include <openssl/x509.h>
+#include <stdlib.h>
 #include <string.h>
 
 const TzMd *tz_openssl_md(void *obj, uint64_t meta, int32_t caller);
@@ -822,20 +825,23 @@ static int p1363_half(const EVP_PKEY *pkey) {
   return 0;
 }
 
-static TzBytes *der_to_p1363(unsigned char *sig, size_t length, int half) {
+static uint8_t *der_to_p1363(unsigned char *sig, size_t length, int half) {
   const unsigned char *p = sig;
   ECDSA_SIG *s = d2i_ECDSA_SIG(NULL, &p, (long)length);
-  TzBytes *b = NULL;
+  uint8_t *raw = NULL;
   if (s) {
-    b = tz_buffer_alloc(2 * half, 1);
+    raw = (uint8_t *)malloc((size_t)(2 * half));
+    if (!raw) {
+      tz_panic("out of memory", -1);
+    }
     const BIGNUM *r, *ss;
     ECDSA_SIG_get0(s, &r, &ss);
-    BN_bn2binpad(r, b->data, half);
-    BN_bn2binpad(ss, b->data + half, half);
+    BN_bn2binpad(r, raw, half);
+    BN_bn2binpad(ss, raw + half, half);
     ECDSA_SIG_free(s);
   }
 
-  return b;
+  return raw;
 }
 
 static unsigned char *p1363_to_der(const uint8_t *sig, size_t length, int half, size_t *out) {
@@ -852,8 +858,9 @@ static unsigned char *p1363_to_der(const uint8_t *sig, size_t length, int half, 
   return n > 0 ? der : NULL;
 }
 
-static TzBytes *sign_with(EVP_PKEY *pkey, const char *md_name, const EVP_MD *md,
-                          const uint8_t *data, size_t length, const SignOptions *o, int digested) {
+static int sign_raw(EVP_PKEY *pkey, const char *md_name, const EVP_MD *md, const uint8_t *data,
+                    size_t length, const SignOptions *o, int digested, uint8_t **out,
+                    size_t *out_length) {
   unsigned char *sig = NULL;
   size_t sig_length = 0;
   int ok;
@@ -882,12 +889,41 @@ static TzBytes *sign_with(EVP_PKEY *pkey, const char *md_name, const EVP_MD *md,
   if (!ok) {
     OPENSSL_free(sig);
     tz_openssl_fail("ERR_CRYPTO_OPERATION_FAILED", "could not sign");
+    return 0;
+  }
+  int half = o->p1363 ? p1363_half(pkey) : 0;
+  uint8_t *raw;
+  size_t n = sig_length;
+  if (half) {
+    raw = der_to_p1363(sig, sig_length, half);
+    n = (size_t)(2 * half);
+  } else {
+    raw = (uint8_t *)malloc(sig_length ? sig_length : 1);
+    if (!raw) {
+      tz_panic("out of memory", -1);
+    }
+    memcpy(raw, sig, sig_length);
+  }
+  OPENSSL_free(sig);
+  if (!raw) {
+    tz_crypto_fail("ERR_CRYPTO_OPERATION_FAILED", "could not sign");
+    return 0;
+  }
+  *out = raw;
+  *out_length = n;
+
+  return 1;
+}
+
+static TzBytes *sign_with(EVP_PKEY *pkey, const char *md_name, const EVP_MD *md,
+                          const uint8_t *data, size_t length, const SignOptions *o, int digested) {
+  uint8_t *raw;
+  size_t n;
+  if (!sign_raw(pkey, md_name, md, data, length, o, digested, &raw, &n)) {
     return NULL;
   }
-  TzBytes *b;
-  int half = o->p1363 ? p1363_half(pkey) : 0;
-  b = half ? der_to_p1363(sig, sig_length, half) : tz_crypto_buffer(sig, sig_length);
-  OPENSSL_free(sig);
+  TzBytes *b = tz_crypto_buffer(raw, n);
+  free(raw);
 
   return b;
 }
@@ -1120,9 +1156,9 @@ enum {
   PAIR_X448
 };
 
-TzKey *tz_openssl_generate_key_pair(int32_t type, void *name_obj, uint64_t name_meta,
-                                    double modulus_length, double exponent, int32_t has,
-                                    void *curve_obj, uint64_t curve_meta) {
+static EVP_PKEY_CTX *keygen_ctx(int32_t type, void *name_obj, uint64_t name_meta,
+                                double modulus_length, double exponent, int32_t has,
+                                void *curve_obj, uint64_t curve_meta) {
   if (type < 0) {
     char name[16];
     tz_crypto_cstr(name_obj, name_meta, name, sizeof name);
@@ -1173,10 +1209,19 @@ TzKey *tz_openssl_generate_key_pair(int32_t type, void *name_obj, uint64_t name_
     }
     ok = EVP_PKEY_CTX_set_group_name(ctx, OBJ_nid2sn(nid)) > 0;
   }
-  EVP_PKEY *pkey = NULL;
-  if (ok) {
-    ok = EVP_PKEY_generate(ctx, &pkey) > 0;
+  if (!ok) {
+    EVP_PKEY_CTX_free(ctx);
+    tz_crypto_note_parameter("modulusLength", modulus_length);
+    tz_openssl_fail("ERR_CRYPTO_OPERATION_FAILED", "could not generate the key pair");
+    return NULL;
   }
+
+  return ctx;
+}
+
+static EVP_PKEY *keygen(EVP_PKEY_CTX *ctx, double modulus_length, double exponent) {
+  EVP_PKEY *pkey = NULL;
+  int ok = EVP_PKEY_generate(ctx, &pkey) > 0;
   EVP_PKEY_CTX_free(ctx);
   if (!ok) {
     if (ERR_GET_REASON(ERR_peek_error()) == RSA_R_PUB_EXPONENT_OUT_OF_RANGE) {
@@ -1188,7 +1233,20 @@ TzKey *tz_openssl_generate_key_pair(int32_t type, void *name_obj, uint64_t name_
     return NULL;
   }
 
-  return tz_openssl_key_of(pkey, 1);
+  return pkey;
+}
+
+TzKey *tz_openssl_generate_key_pair(int32_t type, void *name_obj, uint64_t name_meta,
+                                    double modulus_length, double exponent, int32_t has,
+                                    void *curve_obj, uint64_t curve_meta) {
+  EVP_PKEY_CTX *ctx = keygen_ctx(type, name_obj, name_meta, modulus_length, exponent, has,
+                                 curve_obj, curve_meta);
+  if (!ctx) {
+    return NULL;
+  }
+  EVP_PKEY *pkey = keygen(ctx, modulus_length, exponent);
+
+  return pkey ? tz_openssl_key_of(pkey, 1) : NULL;
 }
 
 typedef struct {
@@ -1341,24 +1399,40 @@ void tz_openssl_ecdh_set_private_key(Ecdh *e, const TzType *kt, const void *kv, 
   e->key = key;
 }
 
-static TzBytes *derive(EVP_PKEY *mine, EVP_PKEY *theirs) {
+static uint8_t *derive_raw(EVP_PKEY *mine, EVP_PKEY *theirs, size_t *length) {
   EVP_PKEY_CTX *ctx = EVP_PKEY_CTX_new(mine, NULL);
   size_t n = 0;
-  TzBytes *b = NULL;
+  uint8_t *raw = NULL;
   if (ctx && EVP_PKEY_derive_init(ctx) > 0 && EVP_PKEY_derive_set_peer(ctx, theirs) > 0 &&
       EVP_PKEY_derive(ctx, NULL, &n) > 0) {
-    b = tz_buffer_alloc((int64_t)n, 0);
-    if (EVP_PKEY_derive(ctx, b->data, &n) > 0) {
-      b->length = (int32_t)n;
-    } else {
-      tz_instance_release((TzInstance *)b);
-      b = NULL;
+    raw = (uint8_t *)malloc(n ? n : 1);
+    if (!raw) {
+      tz_panic("out of memory", -1);
+    }
+    if (EVP_PKEY_derive(ctx, raw, &n) <= 0) {
+      free(raw);
+      raw = NULL;
     }
   }
   EVP_PKEY_CTX_free(ctx);
-  if (!b) {
+  if (!raw) {
     tz_openssl_fail("ERR_CRYPTO_OPERATION_FAILED", "could not compute the secret");
+    return NULL;
   }
+  *length = n;
+
+  return raw;
+}
+
+static TzBytes *derive(EVP_PKEY *mine, EVP_PKEY *theirs) {
+  size_t n;
+  uint8_t *raw = derive_raw(mine, theirs, &n);
+  if (!raw) {
+    return NULL;
+  }
+  TzBytes *b = tz_crypto_buffer(raw, n);
+  memset(raw, 0, n);
+  free(raw);
 
   return b;
 }
@@ -1394,19 +1468,19 @@ TzBytes *tz_openssl_ecdh_compute_secret(Ecdh *e, const TzType *kt, const void *k
   return secret;
 }
 
-TzBytes *tz_openssl_diffie_hellman(const TzKey *priv, const TzKey *pub) {
+static int dh_keys(const TzKey *priv, const TzKey *pub) {
   if (priv->type != TZ_KEY_PRIVATE) {
     const char *got = priv->type == TZ_KEY_SECRET ? "secret" : "public";
     tz_crypto_note_key_types(got, "private");
     tz_crypto_fail("ERR_CRYPTO_INVALID_KEY_OBJECT_TYPE",
                    "diffieHellman needs a private key as privateKey, but this one is %s", got);
-    return NULL;
+    return 0;
   }
   if (pub->type == TZ_KEY_SECRET) {
     tz_crypto_note_key_types("secret", "public");
     tz_crypto_fail("ERR_CRYPTO_INVALID_KEY_OBJECT_TYPE",
                    "diffieHellman needs a public key as publicKey, but this one is secret");
-    return NULL;
+    return 0;
   }
   const EVP_PKEY *a = (const EVP_PKEY *)priv->pkey, *b = (const EVP_PKEY *)pub->pkey;
   int id = EVP_PKEY_get_base_id(a);
@@ -1421,8 +1495,423 @@ TzBytes *tz_openssl_diffie_hellman(const TzKey *priv, const TzKey *pub) {
                      "diffieHellman works with dh, ec, x25519 and x448 keys, not %s",
                      key_type_name(a));
     }
+    return 0;
+  }
+
+  return 1;
+}
+
+TzBytes *tz_openssl_diffie_hellman(const TzKey *priv, const TzKey *pub) {
+  if (!dh_keys(priv, pub)) {
     return NULL;
   }
 
-  return derive((EVP_PKEY *)a, (EVP_PKEY *)b);
+  return derive((EVP_PKEY *)priv->pkey, (EVP_PKEY *)pub->pkey);
+}
+
+static void drop_pkey(TzCryptoJob *j) { EVP_PKEY_free((EVP_PKEY *)j->native); }
+
+static void own_pkey(TzCryptoJob *j, EVP_PKEY *pkey, int owned) {
+  if (!owned) {
+    EVP_PKEY_up_ref(pkey);
+  }
+  j->native = pkey;
+  j->drop = drop_pkey;
+}
+
+static void sign_run(TzCryptoJob *j) {
+  SignOptions o = {j->ints[0], j->ints[1], j->ints[2], j->ints[3]};
+  uint8_t *raw;
+  size_t n;
+  if (sign_raw((EVP_PKEY *)j->native, j->ints[4] ? j->texts[0] : NULL, NULL, j->bytes[0],
+               j->lengths[0], &o, 0, &raw, &n)) {
+    j->out = raw;
+    j->out_length = n;
+  }
+}
+
+static int sign_job(TzCryptoJob *j, const TzType *at, const void *av, const TzType *kt,
+                    const void *kv, int private_key, int32_t padding, int32_t salt_length,
+                    int32_t p1363, int32_t has) {
+  char name[64];
+  const char *md = algorithm(at, av, name, sizeof name);
+  if (!known_hash(md)) {
+    return 0;
+  }
+  int owned;
+  EVP_PKEY *pkey = signing_key(kt, kv, private_key, &owned);
+  if (!pkey) {
+    return 0;
+  }
+  own_pkey(j, pkey, owned);
+  if (md) {
+    snprintf(j->texts[0], sizeof j->texts[0], "%s", md);
+  }
+  j->ints[0] = padding;
+  j->ints[1] = salt_length;
+  j->ints[2] = p1363;
+  j->ints[3] = has;
+  j->ints[4] = md != NULL;
+
+  return 1;
+}
+
+void tz_openssl_sign_async(TzPromise *promise, const TzType *at, const void *av, const TzType *dt,
+                           const void *dv, const TzType *kt, const void *kv, int32_t padding,
+                           int32_t salt_length, int32_t p1363, int32_t has) {
+  TzCryptoJob *j = tz_crypto_job_new(promise);
+  if (!sign_job(j, at, av, kt, kv, 1, padding, salt_length, p1363, has) ||
+      !tz_crypto_job_copy(j, 0, dt, dv, "data")) {
+    tz_crypto_job_refuse(j);
+    return;
+  }
+  tz_crypto_job_queue(j, sign_run, tz_crypto_job_settle_bytes);
+}
+
+static void verify_run(TzCryptoJob *j) {
+  SignOptions o = {j->ints[0], j->ints[1], j->ints[2], j->ints[3]};
+  j->result = verify_with((EVP_PKEY *)j->native, j->ints[4] ? j->texts[0] : NULL, NULL,
+                          j->bytes[0], j->lengths[0], j->bytes[1], j->lengths[1], &o, 0);
+}
+
+static int bool_finish(TzCryptoJob *j) {
+  uint8_t value = j->result != 0;
+  tz_crypto_job_settle(j, &value, sizeof value);
+
+  return 1;
+}
+
+void tz_openssl_verify_async(TzPromise *promise, const TzType *at, const void *av,
+                             const TzType *dt, const void *dv, const TzType *kt, const void *kv,
+                             const TzType *st, const void *sv, int32_t padding,
+                             int32_t salt_length, int32_t p1363, int32_t has) {
+  TzCryptoJob *j = tz_crypto_job_new(promise);
+  if (!sign_job(j, at, av, kt, kv, 0, padding, salt_length, p1363, has) ||
+      !tz_crypto_job_copy(j, 0, dt, dv, "data") ||
+      !tz_crypto_job_copy(j, 1, st, sv, "signature")) {
+    tz_crypto_job_refuse(j);
+    return;
+  }
+  tz_crypto_job_queue(j, verify_run, bool_finish);
+}
+
+static void dh_run(TzCryptoJob *j) {
+  const TzKey *priv = (const TzKey *)j->held[0], *pub = (const TzKey *)j->held[1];
+  size_t n;
+  uint8_t *raw = derive_raw((EVP_PKEY *)priv->pkey, (EVP_PKEY *)pub->pkey, &n);
+  if (raw) {
+    j->out = raw;
+    j->out_length = n;
+  }
+}
+
+void tz_openssl_diffie_hellman_async(TzPromise *promise, TzKey *priv, TzKey *pub) {
+  TzCryptoJob *j = tz_crypto_job_new(promise);
+  if (!dh_keys(priv, pub)) {
+    tz_crypto_job_refuse(j);
+    return;
+  }
+  tz_crypto_job_keep(j, 0, priv);
+  tz_crypto_job_keep(j, 1, pub);
+  tz_crypto_job_queue(j, dh_run, tz_crypto_job_settle_bytes);
+}
+
+static void keygen_run(TzCryptoJob *j) {
+  EVP_PKEY_CTX *ctx = (EVP_PKEY_CTX *)j->native;
+  j->native = NULL;
+  j->drop = NULL;
+  EVP_PKEY *pkey = keygen(ctx, j->numbers[0], j->numbers[1]);
+  if (pkey) {
+    j->native = pkey;
+    j->drop = drop_pkey;
+  }
+}
+
+static void drop_ctx(TzCryptoJob *j) { EVP_PKEY_CTX_free((EVP_PKEY_CTX *)j->native); }
+
+typedef struct {
+  TzStr texts[2];
+  void *pointers[2];
+} PairValues;
+
+static void release_half(int32_t format, PairValues *values, int k) {
+  if (format == 0) {
+    tz_str_release_value(values->texts[k]);
+  } else if (format == 2) {
+    tz_json_release((TzJson *)values->pointers[k]);
+  } else {
+    tz_instance_release((TzInstance *)values->pointers[k]);
+  }
+}
+
+static int export_half(TzCryptoJob *j, TzKey *key, int k, PairValues *values) {
+  int32_t format = j->ints[2 * k], flags = j->ints[2 * k + 1];
+  if (format < 0) {
+    values->pointers[k] = key;
+    return 1;
+  }
+  const char *type = (flags & 1) ? j->texts[2 * k] : "";
+  const char *cipher = (flags & 2) ? j->texts[2 * k + 1] : "";
+  const uint8_t *passphrase = (flags & 4) ? j->bytes[k] : NULL;
+  size_t passphrase_length = (flags & 4) ? j->lengths[k] : 0;
+  int ok;
+  if (format == 0) {
+    values->texts[k] = tz_str_from_ascii("", 0);
+    key->ops->export_pem(&values->texts[k], key, type, cipher, passphrase, passphrase_length);
+    void *failure = tz_take_failed();
+    ok = failure == NULL;
+    if (failure) {
+      tz_str_release_value(values->texts[k]);
+      tz_set_failed(failure);
+    }
+  } else if (format == 1) {
+    values->pointers[k] = key->ops->export_der(key, type, cipher, passphrase, passphrase_length);
+    ok = values->pointers[k] != NULL;
+  } else {
+    values->pointers[k] = key->ops->export_jwk(key);
+    ok = values->pointers[k] != NULL;
+  }
+  tz_instance_release((TzInstance *)key);
+
+  return ok;
+}
+
+static int key_pair_finish(TzCryptoJob *j) {
+  EVP_PKEY *pkey = (EVP_PKEY *)j->native;
+  j->native = NULL;
+  j->drop = NULL;
+  TzKey *priv = tz_openssl_key_of(pkey, 1);
+  TzKey *pub = tz_openssl_public_of(priv);
+  if (!pub) {
+    tz_instance_release((TzInstance *)priv);
+    return 0;
+  }
+  PairValues values;
+  memset(&values, 0, sizeof values);
+  if (!export_half(j, pub, 0, &values)) {
+    tz_instance_release((TzInstance *)priv);
+    return 0;
+  }
+  if (!export_half(j, priv, 1, &values)) {
+    release_half(j->ints[0], &values, 0);
+    return 0;
+  }
+  void *pair = j->build(&values);
+  tz_crypto_job_settle(j, &pair, sizeof pair);
+
+  return 1;
+}
+
+void tz_openssl_generate_key_pair_async(
+    TzPromise *promise, TzMaker build, int32_t type, void *name_obj, uint64_t name_meta,
+    double modulus_length, double exponent, int32_t has, void *curve_obj, uint64_t curve_meta,
+    int32_t public_format, int32_t public_flags, void *public_type_obj, uint64_t public_type_meta,
+    void *public_cipher_obj, uint64_t public_cipher_meta, const TzType *public_pt,
+    const void *public_pv, int32_t private_format, int32_t private_flags, void *private_type_obj,
+    uint64_t private_type_meta, void *private_cipher_obj, uint64_t private_cipher_meta,
+    const TzType *private_pt, const void *private_pv) {
+  TzCryptoJob *j = tz_crypto_job_new(promise);
+  j->build = build;
+  j->ints[0] = public_format;
+  j->ints[1] = public_flags;
+  j->ints[2] = private_format;
+  j->ints[3] = private_flags;
+  if (public_flags & 1) {
+    tz_crypto_cstr(public_type_obj, public_type_meta, j->texts[0], sizeof j->texts[0]);
+  }
+  if (public_flags & 2) {
+    tz_crypto_cstr(public_cipher_obj, public_cipher_meta, j->texts[1], sizeof j->texts[1]);
+  }
+  if (private_flags & 1) {
+    tz_crypto_cstr(private_type_obj, private_type_meta, j->texts[2], sizeof j->texts[2]);
+  }
+  if (private_flags & 2) {
+    tz_crypto_cstr(private_cipher_obj, private_cipher_meta, j->texts[3], sizeof j->texts[3]);
+  }
+  if (!tz_crypto_job_copy(j, 0, (public_flags & 4) ? public_pt : NULL, public_pv, "passphrase") ||
+      !tz_crypto_job_copy(j, 1, (private_flags & 4) ? private_pt : NULL, private_pv,
+                          "passphrase")) {
+    tz_crypto_job_refuse(j);
+    return;
+  }
+  EVP_PKEY_CTX *ctx = keygen_ctx(type, name_obj, name_meta, modulus_length, exponent, has,
+                                 curve_obj, curve_meta);
+  if (!ctx) {
+    tz_crypto_job_refuse(j);
+    return;
+  }
+  j->native = ctx;
+  j->drop = drop_ctx;
+  j->numbers[0] = modulus_length;
+  j->numbers[1] = exponent;
+  tz_crypto_job_queue(j, keygen_run, key_pair_finish);
+}
+
+static BIGNUM *big_of(const TzType *type, const void *value, const char *what) {
+  TzCryptoData d;
+  if (!tz_crypto_data(&d, type, value, TZ_ENC_UTF8, what)) {
+    return NULL;
+  }
+  BIGNUM *n = BN_bin2bn(d.data, (int)d.length, NULL);
+  tz_crypto_data_done(&d);
+
+  return n;
+}
+
+static int prime_options(double size, const TzType *at, const void *av, const TzType *rt,
+                         const void *rv) {
+  if (!tz_crypto_check_integer(size, "size", 1, 2147483647)) {
+    return 0;
+  }
+  BIGNUM *add = at ? big_of(at, av, "options.add") : NULL;
+  BIGNUM *rem = rt ? big_of(rt, rv, "options.rem") : NULL;
+  int ok = 1;
+  if (add && BN_num_bits(add) > (int)size) {
+    tz_crypto_note_parameter("add", (double)BN_num_bits(add));
+    tz_crypto_fail("ERR_OUT_OF_RANGE", "invalid options.add: it has more bits than the prime");
+    ok = 0;
+  } else if (add && rem && BN_cmp(add, rem) != 1) {
+    tz_crypto_note_parameter("rem", (double)BN_num_bits(rem));
+    tz_crypto_fail("ERR_OUT_OF_RANGE", "invalid options.rem: it must be less than options.add");
+    ok = 0;
+  }
+  BN_free(add);
+  BN_free(rem);
+
+  return ok;
+}
+
+static uint8_t *prime_raw(int bits, int safe, const uint8_t *add, size_t add_length,
+                          const uint8_t *rem, size_t rem_length, size_t *length) {
+  BIGNUM *prime = BN_new();
+  BIGNUM *a = add ? BN_bin2bn(add, (int)add_length, NULL) : NULL;
+  BIGNUM *r = rem ? BN_bin2bn(rem, (int)rem_length, NULL) : NULL;
+  BN_CTX *ctx = BN_CTX_new();
+  uint8_t *raw = NULL;
+  if (prime && ctx && BN_generate_prime_ex2(prime, bits, safe, a, r, NULL, ctx)) {
+    int n = BN_num_bytes(prime);
+    raw = (uint8_t *)malloc(n ? (size_t)n : 1);
+    if (!raw) {
+      tz_panic("out of memory", -1);
+    }
+    BN_bn2bin(prime, raw);
+    *length = (size_t)n;
+  }
+  BN_CTX_free(ctx);
+  BN_free(r);
+  BN_free(a);
+  BN_free(prime);
+  if (!raw) {
+    tz_openssl_fail("ERR_CRYPTO_OPERATION_FAILED", "could not generate a prime");
+  }
+
+  return raw;
+}
+
+static TzArrayBuffer *array_buffer_of(const uint8_t *data, size_t length) {
+  TzArrayBuffer *b = tz_abuf_new((int64_t)length);
+  if (length) {
+    memcpy(b->data, data, length);
+  }
+
+  return b;
+}
+
+TzArrayBuffer *tz_openssl_generate_prime(double size, int32_t safe, const TzType *at,
+                                         const void *av, const TzType *rt, const void *rv) {
+  if (!prime_options(size, at, av, rt, rv)) {
+    return NULL;
+  }
+  TzCryptoData add, rem;
+  tz_crypto_data(&add, at, av, TZ_ENC_UTF8, "options.add");
+  tz_crypto_data(&rem, rt, rv, TZ_ENC_UTF8, "options.rem");
+  size_t n = 0;
+  uint8_t *raw = prime_raw((int)size, safe, at ? add.data : NULL, add.length,
+                           rt ? rem.data : NULL, rem.length, &n);
+  tz_crypto_data_done(&rem);
+  tz_crypto_data_done(&add);
+  if (!raw) {
+    return NULL;
+  }
+  TzArrayBuffer *b = array_buffer_of(raw, n);
+  free(raw);
+
+  return b;
+}
+
+static void prime_run(TzCryptoJob *j) {
+  size_t n = 0;
+  uint8_t *raw = prime_raw(j->ints[0], j->ints[1], j->ints[2] ? j->bytes[0] : NULL, j->lengths[0],
+                           j->ints[3] ? j->bytes[1] : NULL, j->lengths[1], &n);
+  if (raw) {
+    j->out = raw;
+    j->out_length = n;
+  }
+}
+
+static int array_buffer_finish(TzCryptoJob *j) {
+  TzArrayBuffer *b = array_buffer_of(j->out, j->out_length);
+  tz_crypto_job_settle(j, &b, sizeof b);
+
+  return 1;
+}
+
+void tz_openssl_generate_prime_async(TzPromise *promise, double size, int32_t safe,
+                                     const TzType *at, const void *av, const TzType *rt,
+                                     const void *rv) {
+  TzCryptoJob *j = tz_crypto_job_new(promise);
+  if (!prime_options(size, at, av, rt, rv) || !tz_crypto_job_copy(j, 0, at, av, "options.add") ||
+      !tz_crypto_job_copy(j, 1, rt, rv, "options.rem")) {
+    tz_crypto_job_refuse(j);
+    return;
+  }
+  j->ints[0] = (int32_t)size;
+  j->ints[1] = safe;
+  j->ints[2] = at != NULL;
+  j->ints[3] = rt != NULL;
+  tz_crypto_job_queue(j, prime_run, array_buffer_finish);
+}
+
+static int check_prime_raw(const uint8_t *data, size_t length) {
+  BIGNUM *n = BN_bin2bn(data, (int)length, NULL);
+  BN_CTX *ctx = BN_CTX_new();
+  int result = n && ctx ? BN_check_prime(n, ctx, NULL) : -1;
+  BN_CTX_free(ctx);
+  BN_free(n);
+  if (result < 0) {
+    tz_openssl_fail("ERR_CRYPTO_OPERATION_FAILED", "could not check the prime");
+    return 0;
+  }
+
+  return result;
+}
+
+static int checks_ok(double checks) {
+  return tz_crypto_check_integer(checks, "options.checks", 0, 2147483647);
+}
+
+int32_t tz_openssl_check_prime(const TzType *ct, const void *cv, double checks) {
+  if (!checks_ok(checks)) {
+    return 0;
+  }
+  TzCryptoData d;
+  if (!tz_crypto_data(&d, ct, cv, TZ_ENC_UTF8, "candidate")) {
+    return 0;
+  }
+  int result = check_prime_raw(d.data, d.length);
+  tz_crypto_data_done(&d);
+
+  return result;
+}
+
+static void check_prime_run(TzCryptoJob *j) { j->result = check_prime_raw(j->bytes[0], j->lengths[0]); }
+
+void tz_openssl_check_prime_async(TzPromise *promise, const TzType *ct, const void *cv,
+                                  double checks) {
+  TzCryptoJob *j = tz_crypto_job_new(promise);
+  if (!checks_ok(checks) || !tz_crypto_job_copy(j, 0, ct, cv, "candidate")) {
+    tz_crypto_job_refuse(j);
+    return;
+  }
+  tz_crypto_job_queue(j, check_prime_run, bool_finish);
 }

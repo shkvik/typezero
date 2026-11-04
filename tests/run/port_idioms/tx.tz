@@ -1,0 +1,19 @@
+type Rollback<E> = { kind: "ROLLBACK"; error: E };
+
+const holder: { calls: int } = { calls: 0 };
+
+export function callsSoFar(): int {
+  return holder.calls;
+}
+
+export const inTransaction = async <T, E>(
+  fn: () => Promise<Result<T, E>>,
+): Promise<Result<T, E | "UNKNOWN_TRANSACTION_ERROR">> => {
+  holder.calls = holder.calls + 1;
+  const result = await fn();
+  if (result.isErr()) {
+    const rollback: Rollback<E> = { kind: "ROLLBACK", error: result.error };
+    return err(rollback.error);
+  }
+  return ok(result.value);
+};

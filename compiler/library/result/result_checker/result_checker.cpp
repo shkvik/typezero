@@ -1,4 +1,5 @@
 #include "compiler/library/result/result_checker/result_checker.h"
+#include "compiler/check/types/type_resolver/type_resolver.h"
 #include "compiler/check/async/async_checker/async_checker.h"
 #include "compiler/check/expr/argument_checker/argument_checker.h"
 #include "compiler/check/expr/call_checker/call_checker.h"
@@ -74,6 +75,20 @@ Expr *ResultChecker::checkOkErr(CallExpr *call, NameExpr *name, bool isOk, const
   if (wanted && !wanted->isResult()) {
     wanted = nullptr;
   }
+  if (name->typeArgs.size() == 2) {
+    const Type *value = checker_.typeResolver().resolveType(name->typeArgs[0], true);
+    const Type *error = checker_.typeResolver().resolveType(name->typeArgs[1], true);
+    if (value->isError() || error->isError()) {
+      checkArgsLoosely(call);
+      call->type = Type::error();
+      return call;
+    }
+    wanted = Type::result(value, error);
+  } else if (!name->typeArgs.empty()) {
+    return reject(call, name->loc(),
+                  "'" + name->name.str() + "' takes two type arguments: '" + name->name.str() +
+                      "<T, E>(...)'");
+  }
   const Type *wantedHalf = wanted ? (isOk ? wanted->okType() : wanted->errType()) : nullptr;
   const Type *half = Type::voidTy();
   if (!call->args.empty()) {
@@ -88,6 +103,9 @@ Expr *ResultChecker::checkOkErr(CallExpr *call, NameExpr *name, bool isOk, const
       half = Type::error();
     } else if (hinted && TypeRelations::isImplicitlyConvertible(half, wantedHalf)) {
       arg = checker_.typeRelations().convert(arg, wantedHalf);
+      half = wantedHalf;
+    } else if (name->typeArgs.size() == 2 && !half->isError()) {
+      arg = checker_.typeRelations().coerce(arg, wantedHalf);
       half = wantedHalf;
     }
   }
@@ -330,7 +348,7 @@ void ResultChecker::addResultFacts(const Expr *cond, Checker::Flow &whenTrue,
     return;
   }
   auto *name = dyn_cast<NameExpr>(unconverted(cast<MemberExpr>(call->callee)->object));
-  if (!name || !name->var || !name->var->type || !name->var->type->isResult()) {
+  if (!name || !name->var || !name->var->type || !name->var->type->nonOptional()->isResult()) {
     return;
   }
   bool isOk = call->builtin == Builtin::ResultIsOk;

@@ -1,8 +1,11 @@
 #include "runtime/library/crypto/crypto/crypto.h"
 #include "runtime/core/alloc/alloc.h"
+#include "runtime/core/async/async.h"
 #include "runtime/core/error/error.h"
+#include "runtime/core/output/output.h"
 #include "runtime/core/tzrt/tzrt.h"
 #include "runtime/library/bytes/bytes/bytes.h"
+#include <stdlib.h>
 #include <string.h>
 
 typedef struct {
@@ -236,6 +239,68 @@ static void put_data(Blake2bCtx *c, const TzCryptoData *d) {
   }
 }
 
+static void compute(int32_t type, const TzCryptoData *message, const TzCryptoData *nonce,
+                    const TzCryptoData *secret, const TzCryptoData *data, uint32_t p,
+                    uint32_t tag, uint32_t m, uint32_t t, uint8_t *out) {
+  Blake2bCtx c;
+  uint8_t h0[72];
+  blake2b_start(&c, 64);
+  put32(&c, p);
+  put32(&c, tag);
+  put32(&c, m);
+  put32(&c, t);
+  put32(&c, 0x13);
+  put32(&c, (uint32_t)type);
+  put_data(&c, message);
+  put_data(&c, nonce);
+  put_data(&c, secret);
+  put_data(&c, data);
+  ossl_blake2b_final(h0, &c);
+
+  Instance in;
+  uint32_t blocks = m < 2 * SYNC_POINTS * p ? 2 * SYNC_POINTS * p : m;
+  in.segment_length = blocks / (p * SYNC_POINTS);
+  in.memory_blocks = in.segment_length * p * SYNC_POINTS;
+  in.lane_length = in.segment_length * SYNC_POINTS;
+  in.lanes = p;
+  in.passes = t;
+  in.type = (uint32_t)type;
+  in.memory = (Block *)malloc((size_t)in.memory_blocks * sizeof(Block));
+  if (!in.memory) {
+    tz_panic("out of memory", -1);
+  }
+  uint8_t bytes[BLOCK_BYTES];
+  for (uint32_t lane = 0; lane < p; ++lane) {
+    for (uint32_t k = 0; k < 2; ++k) {
+      for (int i = 0; i < 4; ++i) {
+        h0[64 + i] = (uint8_t)(k >> (8 * i));
+        h0[68 + i] = (uint8_t)(lane >> (8 * i));
+      }
+      hash_long(bytes, BLOCK_BYTES, h0, sizeof h0);
+      load_block(&in.memory[lane * in.lane_length + k], bytes);
+    }
+  }
+  for (uint32_t pass = 0; pass < t; ++pass) {
+    for (uint32_t slice = 0; slice < SYNC_POINTS; ++slice) {
+      for (uint32_t lane = 0; lane < p; ++lane) {
+        fill_segment(&in, pass, lane, slice);
+      }
+    }
+  }
+  Block final = in.memory[in.lane_length - 1];
+  for (uint32_t lane = 1; lane < p; ++lane) {
+    for (int i = 0; i < BLOCK_WORDS; ++i) {
+      final.v[i] ^= in.memory[lane * in.lane_length + in.lane_length - 1].v[i];
+    }
+  }
+  store_block(bytes, &final);
+  hash_long(out, tag, bytes, sizeof bytes);
+  memset(in.memory, 0, (size_t)in.memory_blocks * sizeof(Block));
+  free(in.memory);
+  memset(bytes, 0, sizeof bytes);
+  memset(h0, 0, sizeof h0);
+}
+
 TzBytes *tz_crypto_argon2(int32_t type, void *name_obj, uint64_t name_meta, const TzType *mt,
                           const void *mv, const TzType *nt, const void *nv, double parallelism,
                           double tag_length, double memory, double passes, const TzType *st,
@@ -284,64 +349,8 @@ TzBytes *tz_crypto_argon2(int32_t type, void *name_obj, uint64_t name_meta, cons
   if (!(result = tz_buffer_alloc((int64_t)tag_length, 0))) {
     goto done;
   }
-  {
-    uint32_t p = (uint32_t)parallelism, m = (uint32_t)memory, t = (uint32_t)passes;
-    uint32_t tag = (uint32_t)tag_length;
-    Blake2bCtx c;
-    uint8_t h0[72];
-    blake2b_start(&c, 64);
-    put32(&c, p);
-    put32(&c, tag);
-    put32(&c, m);
-    put32(&c, t);
-    put32(&c, 0x13);
-    put32(&c, (uint32_t)type);
-    put_data(&c, &message);
-    put_data(&c, &nonce);
-    put_data(&c, &secret);
-    put_data(&c, &data);
-    ossl_blake2b_final(h0, &c);
-
-    Instance in;
-    uint32_t blocks = m < 2 * SYNC_POINTS * p ? 2 * SYNC_POINTS * p : m;
-    in.segment_length = blocks / (p * SYNC_POINTS);
-    in.memory_blocks = in.segment_length * p * SYNC_POINTS;
-    in.lane_length = in.segment_length * SYNC_POINTS;
-    in.lanes = p;
-    in.passes = t;
-    in.type = (uint32_t)type;
-    in.memory = (Block *)tz_alloc((size_t)in.memory_blocks * sizeof(Block));
-    uint8_t bytes[BLOCK_BYTES];
-    for (uint32_t lane = 0; lane < p; ++lane) {
-      for (uint32_t k = 0; k < 2; ++k) {
-        for (int i = 0; i < 4; ++i) {
-          h0[64 + i] = (uint8_t)(k >> (8 * i));
-          h0[68 + i] = (uint8_t)(lane >> (8 * i));
-        }
-        hash_long(bytes, BLOCK_BYTES, h0, sizeof h0);
-        load_block(&in.memory[lane * in.lane_length + k], bytes);
-      }
-    }
-    for (uint32_t pass = 0; pass < t; ++pass) {
-      for (uint32_t slice = 0; slice < SYNC_POINTS; ++slice) {
-        for (uint32_t lane = 0; lane < p; ++lane) {
-          fill_segment(&in, pass, lane, slice);
-        }
-      }
-    }
-    Block final = in.memory[in.lane_length - 1];
-    for (uint32_t lane = 1; lane < p; ++lane) {
-      for (int i = 0; i < BLOCK_WORDS; ++i) {
-        final.v[i] ^= in.memory[lane * in.lane_length + in.lane_length - 1].v[i];
-      }
-    }
-    store_block(bytes, &final);
-    hash_long(result->data, tag, bytes, sizeof bytes);
-    memset(in.memory, 0, (size_t)in.memory_blocks * sizeof(Block));
-    tz_free(in.memory);
-    memset(bytes, 0, sizeof bytes);
-    memset(h0, 0, sizeof h0);
-  }
+  compute(type, &message, &nonce, &secret, &data, (uint32_t)parallelism, (uint32_t)tag_length,
+          (uint32_t)memory, (uint32_t)passes, result->data);
 done:
   tz_crypto_data_done(&data);
   tz_crypto_data_done(&secret);
@@ -349,4 +358,66 @@ done:
   tz_crypto_data_done(&message);
 
   return result;
+}
+
+static void argon2_run(TzCryptoJob *j) {
+  TzCryptoData parts[4];
+  for (int i = 0; i < 4; ++i) {
+    parts[i].data = j->bytes[i];
+    parts[i].length = j->lengths[i];
+    parts[i].made = NULL;
+  }
+  TzBytes *b = (TzBytes *)j->made;
+  compute(j->ints[0], &parts[0], &parts[1], &parts[2], &parts[3], (uint32_t)j->numbers[0],
+          (uint32_t)j->numbers[1], (uint32_t)j->numbers[2], (uint32_t)j->numbers[3], b->data);
+}
+
+void tz_crypto_argon2_async(TzPromise *promise, int32_t type, void *name_obj, uint64_t name_meta,
+                            const TzType *mt, const void *mv, const TzType *nt, const void *nv,
+                            double parallelism, double tag_length, double memory, double passes,
+                            const TzType *st, const void *sv, const TzType *at, const void *av) {
+  TzCryptoJob *j = tz_crypto_job_new(promise);
+  if (type < 0) {
+    char name[16];
+    tz_crypto_cstr(name_obj, name_meta, name, sizeof name);
+    type = strcmp(name, "argon2d") == 0    ? 0
+           : strcmp(name, "argon2i") == 0  ? 1
+           : strcmp(name, "argon2id") == 0 ? 2
+                                           : -1;
+    if (type < 0) {
+      tz_crypto_note_algorithm(name);
+      tz_crypto_fail("ERR_INVALID_ARG_VALUE",
+                     "there is no algorithm \"%s\"; use argon2d, argon2i or argon2id", name);
+      tz_crypto_job_refuse(j);
+      return;
+    }
+  }
+  if (!tz_crypto_job_copy(j, 0, mt, mv, "parameters.message") ||
+      !tz_crypto_job_copy(j, 1, nt, nv, "parameters.nonce") ||
+      !tz_crypto_job_copy(j, 2, st, sv, "parameters.secret") ||
+      !tz_crypto_job_copy(j, 3, at, av, "parameters.associatedData")) {
+    tz_crypto_job_refuse(j);
+    return;
+  }
+  if (j->lengths[1] < 8) {
+    tz_crypto_note_parameter("nonce", (double)j->lengths[1]);
+    tz_crypto_fail("ERR_OUT_OF_RANGE", "argon2: the nonce must have 8 bytes or more, not %zu",
+                   j->lengths[1]);
+    tz_crypto_job_refuse(j);
+    return;
+  }
+  if (!tz_crypto_check_integer(parallelism, "parameters.parallelism", 1, 16777215) ||
+      !tz_crypto_check_integer(tag_length, "parameters.tagLength", 4, 4294967295.0) ||
+      !tz_crypto_check_integer(memory, "parameters.memory", 8 * parallelism, 4294967295.0) ||
+      !tz_crypto_check_integer(passes, "parameters.passes", 1, 4294967295.0)) {
+    tz_crypto_job_refuse(j);
+    return;
+  }
+  j->ints[0] = type;
+  j->numbers[0] = parallelism;
+  j->numbers[1] = tag_length;
+  j->numbers[2] = memory;
+  j->numbers[3] = passes;
+  j->made = tz_buffer_alloc((int64_t)tag_length, 0);
+  tz_crypto_job_queue(j, argon2_run, tz_crypto_job_settle_made);
 }

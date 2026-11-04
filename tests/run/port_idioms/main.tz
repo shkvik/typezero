@@ -1,0 +1,55 @@
+// Idioms of a ported Nest backend: a generic async arrow kept in a const of another file sees the
+// names of its own file; ok/err take explicit type arguments; 'if (r == undefined || r.isErr())
+// return' leaves r an Ok; an object literal whose discriminant is a variable of literal types
+// picks its member of a union; 'static readonly' integers are constants for the proofs.
+import { randomBytes } from "node:crypto";
+import { callsSoFar, inTransaction } from "./tx.tz";
+
+type Code = "CREATE_FAILED" | "TOKEN_FAILED";
+type Ban = { until?: int; reason?: string };
+type AuthError = { code: "USER_BANNED"; details: Ban } | { code: Code; details: Record<string, never> };
+
+function resolveError(code: Code): AuthError {
+  return { code, details: {} };
+}
+
+async function create(fail: boolean): Promise<Result<string, AuthError>> {
+  let created: string | undefined;
+  const tx = await inTransaction(async () => {
+    if (fail) return err<string, Code>("CREATE_FAILED");
+    created = "user-1";
+    return ok<string, Code>("token");
+  });
+  if (tx.isErr()) {
+    if (tx.error == "UNKNOWN_TRANSACTION_ERROR") return err({ code: "USER_BANNED", details: {} });
+    return err(resolveError(tx.error));
+  }
+  console.log("created", created);
+  return ok(tx.value);
+}
+
+console.log(await create(false), await create(true), callsSoFar());
+
+function find(n: int): Result<string, string> | undefined {
+  if (n > 0) return ok("found");
+  if (n == 0) return undefined;
+  return err("broken");
+}
+
+function read(n: int): string {
+  const found = find(n);
+  if (found == undefined || found.isErr()) return "none";
+  return found.value;
+}
+
+console.log(read(1), read(0), read(-1));
+
+class Hash {
+  private static readonly SALT_LEN = 16;
+
+  static salt(): Buffer {
+    return randomBytes(Hash.SALT_LEN);
+  }
+}
+
+console.log(Hash.salt().length);

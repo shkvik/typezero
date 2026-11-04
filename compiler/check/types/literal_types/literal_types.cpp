@@ -322,12 +322,19 @@ const Type *LiteralTypes::literalMember(const ObjectLitExpr *lit, const Type *ta
       if (!tag && f && p.value) {
         tag = enumTag(p.value);
       }
+      if (auto *named = !tag && f ? dyn_cast_or_null<NameExpr>(p.value) : nullptr) {
+        const VarSymbol *var = checker_.scopes().lookup(named->name).var;
+        const Type *known = var && var->type ? typeIn(checker_.flow_, var) : nullptr;
+        if (known && isLiteralSet(known)) {
+          tag = known;
+        }
+      }
       if (!tag) {
         continue;
       }
       const Type *field = f->type->nonOptional();
       if (TypeRelations::isImplicitlyConvertible(tag, field) ||
-          (tag->literalBase()->isInt() &&
+          (tag->isLiteral() && tag->literalBase()->isInt() &&
            TypeRelations::isImplicitlyConvertible(tag->literalBase(), field))) {
         score +=
             isLiteralSet(field) || (field->isUnion() && field->slotPart(UnionSlot::Atom)) ? 1 : 0;

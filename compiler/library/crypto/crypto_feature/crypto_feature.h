@@ -22,6 +22,9 @@ public:
   Expr *checkModuleValue(Checker &checker, NodeModule module, llvm::StringRef exportName,
                          Expr *expr) const override;
   Expr *checkModuleMember(Checker &checker, MemberExpr *member) const override;
+  Expr *checkPromisifiedCall(Checker &checker, CallExpr *call, llvm::StringRef fn,
+                             llvm::SMLoc loc) const override;
+  bool promisifies(llvm::StringRef fn) const override;
   bool lowers(Builtin builtin) const override;
   llvm::Value *lowerCall(Lowering &lowering, CallExpr *call) const override;
 };

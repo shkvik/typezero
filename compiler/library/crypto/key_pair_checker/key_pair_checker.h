@@ -8,7 +8,7 @@ class KeyPairChecker {
 public:
   explicit KeyPairChecker(Checker &checker);
 
-  Expr *checkGenerateKeyPair(CallExpr *call, llvm::SMLoc loc);
+  Expr *checkGenerateKeyPair(CallExpr *call, llvm::SMLoc loc, llvm::StringRef shown);
 
 private:
   Checker &checker_;

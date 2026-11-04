@@ -429,7 +429,9 @@ bool CryptoArgs::rejectCryptoCallback(CallExpr *call, size_t index, llvm::String
                             "' with a callback is not supported: tz has no callback forms "
                             "of node:crypto (docs/crypto.md, section 5); call it without one "
                             "and use what it returns: " +
-                            hint);
+                            hint + ", or run it on the thread pool with 'promisify' of "
+                                   "node:util: 'const " +
+                            fn + "Async = promisify(" + fn + ")'");
   for (Expr *&a : call->args) {
     if (a != call->args[index]) {
       a = checker_.exprChecker().checkExpr(a);

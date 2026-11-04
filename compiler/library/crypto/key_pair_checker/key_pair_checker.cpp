@@ -44,7 +44,8 @@ std::optional<std::string> literalOf(const Expr *e) {
 
 KeyPairChecker::KeyPairChecker(Checker &checker) : checker_(checker) {}
 
-Expr *KeyPairChecker::checkGenerateKeyPair(CallExpr *call, llvm::SMLoc loc) {
+Expr *KeyPairChecker::checkGenerateKeyPair(CallExpr *call, llvm::SMLoc loc,
+                                           llvm::StringRef shown) {
   std::vector<Expr *> &args = call->args;
   if (!checker_.argumentChecker().checkArity(call, loc, 1, 2)) {
     return call;
@@ -62,7 +63,7 @@ Expr *KeyPairChecker::checkGenerateKeyPair(CallExpr *call, llvm::SMLoc loc) {
   }
   llvm::StringMap<Expr *> options;
   if (args.size() > 1 && !checker_.cryptoArgs().cryptoOptions(
-                             args[1], "generateKeyPairSync",
+                             args[1], shown,
                              {"modulusLength", "publicExponent", "namedCurve", "publicKeyEncoding",
                               "privateKeyEncoding", "divisorLength", "hashAlgorithm",
                               "mgf1HashAlgorithm", "saltLength"},

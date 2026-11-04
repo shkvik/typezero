@@ -1,4 +1,5 @@
 #include "compiler/check/stmt/var_checker/var_checker.h"
+#include "compiler/library/builtin_modules/builtin_module_checker/builtin_module_checker.h"
 #include "compiler/check/async/timer_checker/timer_checker.h"
 #include "compiler/check/expr/expr_checker/expr_checker.h"
 #include "compiler/check/flow/flow_checker/flow_checker.h"
@@ -68,6 +69,18 @@ void VarChecker::checkVarDecl(VarDeclStmt *decl) {
         continue;
       }
     }
+    if (std::optional<llvm::StringRef> target =
+            decl->isConst && !declared && !d.destructured
+                ? checker_.builtinModuleChecker().promisifyTarget(d.init)
+                : std::nullopt) {
+      VarSymbol *var = checker_.scopes().declareVar(
+          d.name, d.loc, target->empty() ? Type::error() : Type::undefinedTy(), true);
+      var->promisified = *target;
+      d.sym = var;
+      d.init = nullptr;
+      d.alias = true;
+      continue;
+    }
     if (auto *fe = llvm::dyn_cast_or_null<FunctionExpr>(d.init);
         fe && !fe->fn->typeParams.empty() && decl->isConst && !declared && !d.destructured &&
         checker_.scopes_.size() == 1) {
@@ -75,6 +88,9 @@ void VarChecker::checkVarDecl(VarDeclStmt *decl) {
       fn->isExpression = false;
       fn->lifted = true;
       fn->name = d.name;
+      if (checker_.module_) {
+        checker_.declModules_[fn] = checker_.module_;
+      }
       checker_.functionChecker().declareFunction(fn);
       checker_.callCycles().findCycles({fn});
       checker_.lifted_.push_back(fn);

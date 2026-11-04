@@ -34,6 +34,7 @@ enum class NodeModule {
   ReadlinePromises,
   ChildProcess,
   Crypto,
+  Util,
 };
 
 std::string cryptoExportProblem(llvm::StringRef name, llvm::StringRef path);

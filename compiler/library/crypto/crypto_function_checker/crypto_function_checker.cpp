@@ -52,7 +52,74 @@ std::optional<std::string> literalOf(const Expr *e) {
 
 CryptoFunctionChecker::CryptoFunctionChecker(Checker &checker) : checker_(checker) {}
 
-Expr *CryptoFunctionChecker::checkCryptoCall(CallExpr *call, llvm::StringRef fn, llvm::SMLoc loc) {
+Expr *CryptoFunctionChecker::checkCryptoCall(CallExpr *call, llvm::StringRef fn, llvm::SMLoc loc,
+                                             bool promisified) {
+  llvm::StringRef sync = fn;
+  bool async = promisified;
+  for (const auto &[form, syncName] : kAsyncForms) {
+    if (fn == form) {
+      async = true;
+      sync = syncName;
+    }
+  }
+  if (async && !promisified && !call->args.empty() && isa<FunctionExpr>(call->args.back())) {
+    checker_.diags_.error(call->args.back()->loc(),
+                          "'" + fn +
+                              "' with a callback is not supported: tz has no callbacks "
+                              "(docs/crypto.md, section 5); without one it returns a Promise: "
+                              "'const result = await " +
+                              fn + "(...)'");
+    for (Expr *&arg : call->args) {
+      arg = checker_.exprChecker().checkExpr(arg);
+    }
+    call->type = Type::error();
+    return call;
+  }
+  Expr *checked = checkSyncCall(call, sync, fn, loc);
+
+  return async ? asyncOf(checked) : checked;
+}
+
+Expr *CryptoFunctionChecker::rejectLoosePromisify(CallExpr *call, llvm::SMLoc loc) {
+  checker_.diags_.error(loc, "keep 'promisify(f)' in a const and call that: 'const fAsync = "
+                             "promisify(f)', then 'await fAsync(...)'");
+  for (Expr *&arg : call->args) {
+    if (!isa<NameExpr>(arg)) {
+      arg = checker_.exprChecker().checkExpr(arg);
+    }
+  }
+  call->type = Type::error();
+
+  return call;
+}
+
+Expr *CryptoFunctionChecker::asyncOf(Expr *checked) {
+  auto *call = dyn_cast<CallExpr>(checked);
+  if (!call || call->type->isError()) {
+    return checked;
+  }
+  if (call->builtin == Builtin::CryptoKeyPair) {
+    call->builtin = Builtin::CryptoKeyPairAsync;
+    call->type = Type::promise(call->type);
+    return call;
+  }
+  if (call->builtin != Builtin::Crypto) {
+    return checked;
+  }
+  auto *index = cast<IntLitExpr>(call->args[0]);
+  for (const auto &[from, to] : kAsyncCryptoFns) {
+    if (CryptoFn(index->value) == from) {
+      index->value = uint64_t(to);
+      call->type = Type::promise(call->type);
+      return call;
+    }
+  }
+
+  return checked;
+}
+
+Expr *CryptoFunctionChecker::checkSyncCall(CallExpr *call, llvm::StringRef fn,
+                                           llvm::StringRef shown, llvm::SMLoc loc) {
   call->type = Type::error();
   auto loosely = [&] {
     for (Expr *&arg : call->args) {
@@ -82,7 +149,7 @@ Expr *CryptoFunctionChecker::checkCryptoCall(CallExpr *call, llvm::StringRef fn,
   auto present = [&](size_t i) { return i < args.size() && !isa<UndefinedExpr>(args[i]); };
   llvm::StringMap<Expr *> options;
   auto optionsAt = [&](size_t i, llvm::ArrayRef<llvm::StringRef> allowed) {
-    return !present(i) || checker_.cryptoArgs().cryptoOptions(args[i], fn, allowed, options);
+    return !present(i) || checker_.cryptoArgs().cryptoOptions(args[i], shown, allowed, options);
   };
 
   if (fn == "createHash") {
@@ -215,8 +282,9 @@ Expr *CryptoFunctionChecker::checkCryptoCall(CallExpr *call, llvm::StringRef fn,
     }
     if (!type->isByteView() && type->bytes() != Type::Bytes::ArrayBuffer) {
       checker_.diags_.error(target->loc(),
-                            "'randomFillSync' fills bytes (a Buffer, a typed array, a "
-                            "DataView or an ArrayBuffer); found '" +
+                            "'" + shown +
+                                "' fills bytes (a Buffer, a typed array, a "
+                                "DataView or an ArrayBuffer); found '" +
                                 type->name() + "'");
       return call;
     }
@@ -362,7 +430,7 @@ Expr *CryptoFunctionChecker::checkCryptoCall(CallExpr *call, llvm::StringRef fn,
       type = checker_.cryptoArgs().cryptoInt(loc, 0xffffffff);
       name = checker_.argumentChecker().checkArg(args[0], Type::string());
     }
-    if (!checker_.cryptoArgs().cryptoOptions(args[1], fn,
+    if (!checker_.cryptoArgs().cryptoOptions(args[1], shown,
                                              {"message", "nonce", "parallelism", "tagLength",
                                               "memory", "passes", "secret", "associatedData"},
                                              options)) {
@@ -372,7 +440,7 @@ Expr *CryptoFunctionChecker::checkCryptoCall(CallExpr *call, llvm::StringRef fn,
          {"message", "nonce", "parallelism", "tagLength", "memory", "passes"}) {
       if (!options.lookup(required)) {
         checker_.diags_.error(args[1]->loc(),
-                              "the parameters of 'argon2Sync' need '" + required + "'");
+                              "the parameters of '" + shown + "' need '" + required + "'");
         return call;
       }
     }
@@ -516,20 +584,21 @@ Expr *CryptoFunctionChecker::checkCryptoCall(CallExpr *call, llvm::StringRef fn,
         keyObject);
   }
   if (fn == "generateKeyPairSync") {
-    return checker_.keyPairChecker().checkGenerateKeyPair(call, loc);
+    return checker_.keyPairChecker().checkGenerateKeyPair(call, loc, shown);
   }
   if (fn == "generateKeySync") {
     if (!checker_.argumentChecker().checkArity(call, loc, 2, 2)) {
       return call;
     }
     int which = checker_.cryptoArgs().cryptoChoice(args[0], "type of the key", {"hmac", "aes"});
-    if (which < 0 || !checker_.cryptoArgs().cryptoOptions(args[1], fn, {"length"}, options)) {
+    if (which < 0 || !checker_.cryptoArgs().cryptoOptions(args[1], shown, {"length"}, options)) {
       return call;
     }
     if (!options.lookup("length")) {
       checker_.diags_.error(args[1]->loc(),
-                            "'generateKeySync' needs the length of the key in bits: '{ "
-                            "length: 256 }'");
+                            "'" + shown +
+                                "' needs the length of the key in bits: '{ "
+                                "length: 256 }'");
       return call;
     }
     Expr *bits = checker_.exprChecker().checkExpr(options["length"], Type::intTy());
@@ -631,7 +700,49 @@ Expr *CryptoFunctionChecker::checkCryptoCall(CallExpr *call, llvm::StringRef fn,
     }
     return checker_.cryptoArgs().cryptoResult(call, CryptoFn::DiffieHellman, {priv, pub}, buffer);
   }
-  checker_.diags_.error(loc, cryptoExportProblem(fn, "node:crypto"));
+  if (fn == "generatePrimeSync") {
+    if (!checker_.argumentChecker().checkArity(call, loc, 1, 2) ||
+        !optionsAt(1, {"add", "rem", "safe", "bigint"})) {
+      return call;
+    }
+    if (Expr *big = options.lookup("bigint")) {
+      checker_.diags_.error(big->loc(), "'bigint' is not supported: tz has no bigint "
+                                        "(docs/numbers.md); the prime comes as an ArrayBuffer");
+      return call;
+    }
+    Expr *size = checker_.cryptoArgs().cryptoNumber(args[0]);
+    Expr *safe = options.lookup("safe")
+                     ? checker_.argumentChecker().checkArg(options["safe"], Type::boolTy())
+                     : checker_.cryptoArgs().cryptoBool(loc, false);
+    Expr *add = options.lookup("add")
+                    ? checker_.cryptoArgs().cryptoData(options["add"], "add", false, false, true)
+                    : checker_.cryptoArgs().cryptoUndefined(loc);
+    Expr *rem = options.lookup("rem")
+                    ? checker_.cryptoArgs().cryptoData(options["rem"], "rem", false, false, true)
+                    : checker_.cryptoArgs().cryptoUndefined(loc);
+    if (size->type->isError() || safe->type->isError() || add->type->isError() ||
+        rem->type->isError() || !checker_.cryptoArgs().checkWhole(size, "size", 1)) {
+      return call;
+    }
+    return checker_.cryptoArgs().cryptoResult(call, CryptoFn::GeneratePrime, {size, safe, add, rem},
+                                              Type::bytesType(Type::Bytes::ArrayBuffer));
+  }
+  if (fn == "checkPrimeSync") {
+    if (!checker_.argumentChecker().checkArity(call, loc, 1, 2) || !optionsAt(1, {"checks"})) {
+      return call;
+    }
+    Expr *candidate =
+        checker_.cryptoArgs().cryptoData(args[0], "candidate", false, false, true);
+    Expr *checks = options.lookup("checks") ? checker_.cryptoArgs().cryptoNumber(options["checks"])
+                                            : checker_.cryptoArgs().cryptoDouble(loc, 0);
+    if (candidate->type->isError() || checks->type->isError() ||
+        !checker_.cryptoArgs().checkWhole(checks, "checks", 0)) {
+      return call;
+    }
+    return checker_.cryptoArgs().cryptoResult(call, CryptoFn::CheckPrime, {candidate, checks},
+                                              Type::boolTy());
+  }
+  checker_.diags_.error(loc, cryptoExportProblem(shown, "node:crypto"));
 
   return loosely();
 }

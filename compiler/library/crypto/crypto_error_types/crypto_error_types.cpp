@@ -172,6 +172,12 @@ type CertificateCheckPrivateKeyError =
   | { kind: "CERTIFICATE_CHECK_PRIVATE_KEY_ERROR_WRONG_KEY_TYPE"; code: "ERR_CRYPTO_INVALID_KEY_OBJECT_TYPE"; message: string; got: "public" | "secret"; expected: "private" }
 type CertificateVerifyError =
   | { kind: "CERTIFICATE_VERIFY_ERROR_WRONG_KEY_TYPE"; code: "ERR_CRYPTO_INVALID_KEY_OBJECT_TYPE"; message: string; got: "private" | "secret"; expected: "public" }
+type GeneratePrimeError =
+  | { kind: "GENERATE_PRIME_ERROR_WRONG_PARAMETERS"; code: "ERR_OUT_OF_RANGE"; message: string; parameter: string; value: double }
+  | { kind: "GENERATE_PRIME_ERROR_SYSTEM"; code: "ERR_CRYPTO_OPERATION_FAILED" | "UNKNOWN"; message: string; openssl: string }
+type CheckPrimeError =
+  | { kind: "CHECK_PRIME_ERROR_WRONG_PARAMETERS"; code: "ERR_OUT_OF_RANGE"; message: string; parameter: string; value: double }
+  | { kind: "CHECK_PRIME_ERROR_SYSTEM"; code: "ERR_CRYPTO_OPERATION_FAILED" | "UNKNOWN"; message: string; openssl: string }
 )",
 };
 
@@ -206,7 +212,9 @@ const llvm::StringLiteral kCryptoTypeNames[] = {"CreateHashError",
                                                 "DiffieHellmanError",
                                                 "ParseCertificateError",
                                                 "CertificateCheckPrivateKeyError",
-                                                "CertificateVerifyError"};
+                                                "CertificateVerifyError",
+                                                "GeneratePrimeError",
+                                                "CheckPrimeError"};
 
 bool flag(llvm::ArrayRef<Expr *> args, size_t i) {
   auto *lit = i < args.size() ? dyn_cast<BoolLitExpr>(args[i]) : nullptr;
@@ -249,13 +257,23 @@ const Type *CryptoErrorTypes::ofCall(CryptoFn fn, llvm::ArrayRef<Expr *> args) {
   case CryptoFn::HmacNew:
     return named("CreateHmacError");
   case CryptoFn::Pbkdf2:
+  case CryptoFn::Pbkdf2Async:
     return named("Pbkdf2Error");
   case CryptoFn::Hkdf:
+  case CryptoFn::HkdfAsync:
     return named("HkdfError");
   case CryptoFn::Scrypt:
+  case CryptoFn::ScryptAsync:
     return named("ScryptError");
   case CryptoFn::Argon2:
+  case CryptoFn::Argon2Async:
     return named("Argon2Error");
+  case CryptoFn::GeneratePrime:
+  case CryptoFn::GeneratePrimeAsync:
+    return named("GeneratePrimeError");
+  case CryptoFn::CheckPrime:
+  case CryptoFn::CheckPrimeAsync:
+    return named("CheckPrimeError");
   case CryptoFn::CipherNew:
     return named(flag(args, 4) ? "CreateDecipherError" : "CreateCipherError");
   case CryptoFn::CipherFinal: {
@@ -275,8 +293,10 @@ const Type *CryptoErrorTypes::ofCall(CryptoFn fn, llvm::ArrayRef<Expr *> args) {
   case CryptoFn::KeyExportJwk:
     return named("KeyExportError");
   case CryptoFn::Sign:
+  case CryptoFn::SignAsync:
     return named("SignError");
   case CryptoFn::Verify:
+  case CryptoFn::VerifyAsync:
     return named("VerifyError");
   case CryptoFn::SignNew:
     return named(flag(args, 1) ? "CreateVerifyError" : "CreateSignError");
@@ -295,6 +315,7 @@ const Type *CryptoErrorTypes::ofCall(CryptoFn fn, llvm::ArrayRef<Expr *> args) {
   case CryptoFn::EcdhComputeSecret:
     return named("EcdhComputeSecretError");
   case CryptoFn::DiffieHellman:
+  case CryptoFn::DiffieHellmanAsync:
     return named("DiffieHellmanError");
   case CryptoFn::X509New:
     return named("ParseCertificateError");

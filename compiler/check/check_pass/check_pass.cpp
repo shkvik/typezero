@@ -72,6 +72,10 @@ Errors CheckPass::run(Program &program) const {
     if (checker.lateClasses().isTemplate(fn->sym)) {
       continue;
     }
+    if (Module *home = checker.declModules_.lookup(fn)) {
+      checker.moduleDeclarer().useModule(home);
+      checker.importBinder().bindImports();
+    }
     if (!fn->sym->ret) {
       checker.returnInferrer().inferReturnType(fn->sym);
     }

@@ -11,8 +11,10 @@ public:
 
   llvm::Value *emitCryptoCall(CallExpr *call);
   llvm::Value *emitCryptoKeyPair(CallExpr *call);
+  llvm::Value *emitCryptoKeyPairAsync(CallExpr *call);
 
 private:
+  llvm::Function *pairMaker(const Type *pair);
   void useErrors(const Type *errorType);
   llvm::StructType *partsType();
   llvm::Function *variantMaker(const Type *variant);

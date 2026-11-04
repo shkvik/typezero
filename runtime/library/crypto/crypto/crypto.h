@@ -1,6 +1,7 @@
 #pragma once
 
 #define TZ_NO_THREAD_STATE
+#include "runtime/core/io/io.h"
 #include "runtime/core/string/string.h"
 #include "runtime/core/tzrt/tzrt.h"
 #include "runtime/library/bytes/bytes/bytes.h"
@@ -192,6 +193,54 @@ TzJson *tz_json_string(void *obj, uint64_t meta);
 TzJson *tz_json_get(const TzJson *j, void *key_obj, uint64_t key_meta);
 
 void tz_crypto_random(uint8_t *out, size_t length);
+
+typedef struct TzCryptoProblem {
+  int32_t failed;
+  char code[64];
+  char message[512];
+  _Alignas(8) unsigned char notes[768];
+} TzCryptoProblem;
+
+void tz_crypto_defer(TzCryptoProblem *problem);
+
+struct TzPromise;
+typedef struct TzCryptoJob TzCryptoJob;
+typedef void (*TzCryptoRun)(TzCryptoJob *j);
+typedef int (*TzCryptoFinish)(TzCryptoJob *j);
+
+struct TzCryptoJob {
+  TzWork work;
+  struct TzPromise *promise;
+  TzMaker make;
+  TzMaker build;
+  TzCryptoRun run;
+  TzCryptoFinish finish;
+  TzCryptoProblem problem;
+  uint8_t *bytes[4];
+  size_t lengths[4];
+  double numbers[6];
+  int32_t ints[12];
+  const void *md;
+  void *held[2];
+  void *made;
+  void *native;
+  void (*drop)(TzCryptoJob *j);
+  uint8_t *out;
+  size_t out_length;
+  int64_t result;
+  char texts[4][64];
+};
+
+TzCryptoJob *tz_crypto_job_new(struct TzPromise *p);
+int tz_crypto_job_copy(TzCryptoJob *j, int part, const TzType *type, const void *value,
+                       const char *what);
+void tz_crypto_job_keep(TzCryptoJob *j, int slot, void *object);
+uint8_t *tz_crypto_job_out(TzCryptoJob *j, size_t length);
+void tz_crypto_job_queue(TzCryptoJob *j, TzCryptoRun run, TzCryptoFinish finish);
+void tz_crypto_job_refuse(TzCryptoJob *j);
+void tz_crypto_job_settle(TzCryptoJob *j, const void *value, size_t size);
+int tz_crypto_job_settle_made(TzCryptoJob *j);
+int tz_crypto_job_settle_bytes(TzCryptoJob *j);
 
 enum {
   TZ_ENC_UTF8 = 0,

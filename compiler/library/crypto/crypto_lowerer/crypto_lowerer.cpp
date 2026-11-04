@@ -238,6 +238,9 @@ llvm::Value *CryptoLowerer::emitCryptoCall(CallExpr *call) {
   if (call->builtin == Builtin::CryptoKeyPair) {
     return emitCryptoKeyPair(call);
   }
+  if (call->builtin == Builtin::CryptoKeyPairAsync) {
+    return emitCryptoKeyPairAsync(call);
+  }
   llvm::Type *ptr = lowering_.builder_.getPtrTy(), *i32 = lowering_.builder_.getInt32Ty(),
              *i64 = lowering_.builder_.getInt64Ty();
   llvm::Type *f64 = lowering_.builder_.getDoubleTy(), *voidTy = lowering_.builder_.getVoidTy();
@@ -278,13 +281,18 @@ llvm::Value *CryptoLowerer::emitCryptoCall(CallExpr *call) {
     args.push_back(out);
   }
   llvm::Value *promise = nullptr;
+  const Type *settled = fn.result == 'P' ? call->type->promised() : nullptr;
+  bool settlesResult = settled && settled->isResult();
   if (fn.result == 'P') {
-    promise = lowering_.promiseLowerer().newPromise(call->type->promised());
+    promise = lowering_.promiseLowerer().newPromise(settled);
     params.push_back(ptr);
     args.push_back(promise);
   }
   if (fallible) {
     useErrors(call->type->errType());
+  }
+  if (settlesResult) {
+    useErrors(settled->errType());
   }
   llvm::Value *null = llvm::ConstantPointerNull::get(lowering_.builder_.getPtrTy());
   for (size_t i = 0; i < exprs.size(); ++i) {
@@ -359,7 +367,7 @@ llvm::Value *CryptoLowerer::emitCryptoCall(CallExpr *call) {
                         : i32;
   llvm::Value *result = lowering_.builder_.CreateCall(
       lowering_.processLowerer().processFunction(fn.name, ret, params), args);
-  if (fallible) {
+  if (fallible || settlesResult) {
     useErrors(nullptr);
   }
   if (promise) {
@@ -595,6 +603,97 @@ llvm::Value *CryptoLowerer::emitCryptoKeyPair(CallExpr *call) {
   }
 
   return phi;
+}
+
+llvm::Function *CryptoLowerer::pairMaker(const Type *pair) {
+  llvm::Function *&made = makers_[pair];
+  if (made) {
+    return made;
+  }
+  llvm::Type *ptr = lowering_.builder_.getPtrTy();
+  made = llvm::Function::Create(llvm::FunctionType::get(ptr, {ptr}, false),
+                                llvm::GlobalValue::InternalLinkage, "tz.make.keypair",
+                                lowering_.module_.get());
+  llvm::Function *function = made;
+  lowering_.functionBuilder().setFunctionAttributes(function);
+  llvm::IRBuilderBase::InsertPoint point = lowering_.builder_.saveIP();
+  llvm::Function *outer = std::exchange(lowering_.function_, function);
+  lowering_.builder_.SetInsertPoint(llvm::BasicBlock::Create(lowering_.ctx_, "entry", function));
+  llvm::StructType *layout =
+      llvm::StructType::get(lowering_.ctx_, {lowering_.strTy_, lowering_.strTy_, ptr, ptr});
+  llvm::Value *values = function->getArg(0);
+  llvm::Value *object = lowering_.objectLayouts().allocObject(pair, {0, 1});
+  const char *names[2] = {"publicKey", "privateKey"};
+  for (unsigned k = 0; k < 2; ++k) {
+    bool text = pair->field(names[k])->type->isString();
+    llvm::Value *value = lowering_.builder_.CreateLoad(
+        text ? static_cast<llvm::Type *>(lowering_.strTy_) : ptr,
+        lowering_.builder_.CreateStructGEP(layout, values, text ? k : 2 + k));
+    lowering_.builder_.CreateStore(
+        value, lowering_.objectLayouts().fieldAddress(object, pair, names[k], true));
+  }
+  lowering_.builder_.CreateRet(object);
+  lowering_.function_ = outer;
+  lowering_.builder_.restoreIP(point);
+
+  return function;
+}
+
+llvm::Value *CryptoLowerer::emitCryptoKeyPairAsync(CallExpr *call) {
+  llvm::Type *ptr = lowering_.builder_.getPtrTy(), *i32 = lowering_.builder_.getInt32Ty(),
+             *i64 = lowering_.builder_.getInt64Ty(), *f64 = lowering_.builder_.getDoubleTy();
+  llvm::Value *null = llvm::ConstantPointerNull::get(lowering_.builder_.getPtrTy());
+  auto *generate = cast<CallExpr>(call->args[0]);
+  auto int32Of = [&](Expr *e) {
+    return lowering_.builder_.getInt32(uint32_t(cast<IntLitExpr>(e)->value));
+  };
+  llvm::Value *name = lowering_.exprLowerer().emitExpr(generate->args[2]);
+  llvm::Value *modulus = lowering_.exprLowerer().emitExpr(generate->args[3]);
+  llvm::Value *exponent = lowering_.exprLowerer().emitExpr(generate->args[4]);
+  llvm::Value *curve = lowering_.exprLowerer().emitExpr(generate->args[6]);
+  std::vector<llvm::Type *> params = {ptr, ptr, i32, ptr, i64, f64, f64, i32, ptr, i64};
+  std::vector<llvm::Value *> args;
+  const Type *settled = call->type->promised();
+  llvm::Value *promise = lowering_.promiseLowerer().newPromise(settled);
+  args.insert(args.end(),
+              {promise, pairMaker(settled->okType()), int32Of(generate->args[1]),
+               lowering_.stringLowerer().stringObj(name), lowering_.stringLowerer().stringMeta(name),
+               modulus, exponent, int32Of(generate->args[5]),
+               lowering_.stringLowerer().stringObj(curve),
+               lowering_.stringLowerer().stringMeta(curve)});
+  std::vector<std::pair<llvm::Value *, const Type *>> owned = {{name, Type::string()},
+                                                               {curve, Type::string()}};
+  for (int k = 0; k < 2; ++k) {
+    Expr **part = &call->args[1 + 5 * k];
+    llvm::Value *flags = lowering_.builder_.CreateTrunc(lowering_.exprLowerer().emitExpr(part[1]), i32);
+    llvm::Value *keyType = lowering_.exprLowerer().emitExpr(part[2]);
+    llvm::Value *cipher = lowering_.exprLowerer().emitExpr(part[3]);
+    llvm::Value *passType = null, *passValue = null;
+    if (!part[4]->type->isUndefined()) {
+      llvm::Value *pass = lowering_.exprLowerer().emitExpr(part[4]);
+      passType = lowering_.typeDescriptors().typeDescriptor(part[4]->type);
+      passValue = lowering_.functionFrame().spill(pass, "passphrase");
+      owned.push_back({pass, part[4]->type});
+    }
+    params.insert(params.end(), {i32, i32, ptr, i64, ptr, i64, ptr, ptr});
+    args.insert(args.end(), {int32Of(part[0]), flags, lowering_.stringLowerer().stringObj(keyType),
+                             lowering_.stringLowerer().stringMeta(keyType),
+                             lowering_.stringLowerer().stringObj(cipher),
+                             lowering_.stringLowerer().stringMeta(cipher), passType, passValue});
+    owned.push_back({keyType, Type::string()});
+    owned.push_back({cipher, Type::string()});
+  }
+  useErrors(settled->errType());
+  lowering_.builder_.CreateCall(
+      lowering_.processLowerer().processFunction("tz_openssl_generate_key_pair_async",
+                                                 lowering_.builder_.getVoidTy(), params),
+      args);
+  useErrors(nullptr);
+  for (const auto &[value, type] : owned) {
+    lowering_.refCounts().releaseValue(value, type);
+  }
+
+  return promise;
 }
 
 }

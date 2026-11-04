@@ -5,8 +5,8 @@
 process.env.HOME = 5
 // expect-error: 'process.env.PATH' may be undefined, as a key may be missing: give it a default with '??', e.g. 'process.env.PATH = (process.env.PATH ?? "") + s'
 process.env.PATH += ";x"
-// expect-error: 'process.pid' is not supported yet
-console.log(process.pid)
+// expect-error: 'process.hrtime' is not supported yet
+console.log(process.hrtime)
 // expect-error: 'process.argv' cannot be assigned to
 process.argv = ["a"]
 // expect-error: only '=' can set 'process.exitCode'

@@ -355,7 +355,8 @@ void BuiltinEffects::builtinEffects(const CallExpr *c, const Expr *recv) {
     }
     auto fn = CryptoFn(unsigned(number->value));
     llvm::StringRef kinds = kCryptoFunctions[size_t(number->value)].params;
-    bool fills = fn == CryptoFn::RandomFill || fn == CryptoFn::GetRandomValues;
+    bool fills = fn == CryptoFn::RandomFill || fn == CryptoFn::RandomFillAsync ||
+                 fn == CryptoFn::GetRandomValues;
     for (size_t i = 1; i < c->args.size(); ++i) {
       const Expr *a = c->args[i];
       char kind = i - 1 < kinds.size() ? kinds[i - 1] : 'd';
@@ -377,6 +378,7 @@ void BuiltinEffects::builtinEffects(const CallExpr *c, const Expr *recv) {
     return;
   }
   case Builtin::CryptoKeyPair:
+  case Builtin::CryptoKeyPairAsync:
     readArgs();
     return;
   case Builtin::ReflectGet:

@@ -56,7 +56,8 @@ tz run                   # без файла — "main" из package.json
 - Обобщённые функции, классы, интерфейсы и псевдонимы типов (см. «Generics»):
   `function first<T>(xs: T[])`, `class Stack<T>`, `interface Repo<T>`,
   `type Pair<A, B> = { first: A; second: B }`, `type Maybe<T> = T | undefined`,
-  `const id = <T>(x: T) => x` на верхнем уровне. Аргументы типа выводятся из аргументов (и из
+  `const id = <T>(x: T) => x` и `const run = async <T, E>(fn: ...) => ...` на верхнем уровне
+  (такая функция видит имена своего файла, откуда бы её ни вызвали). Аргументы типа выводятся из аргументов (и из
   аргументов конструктора: `new Box(1)` — `Box<int>`), затем из ожидаемого типа
   (`const names: string[] = emptyList()`), затем из стрелок (`mapAll(xs, x => x * 2)`); их можно
   написать (`first<int>(xs)`) или задать по умолчанию (`<T = int>`). Ограничения `T extends
@@ -296,7 +297,7 @@ tz run                   # без файла — "main" из package.json
   (аргументы — с индекса 2: `process.argv.slice(2)`), `process.env.HOME` и `process.env[name]` —
   `string | undefined`, `process.env` целиком — `Record<string, string>` (`Object.keys`, перебор,
   присваивание и `delete` меняют переменные процесса), `process.exit(code)`, `process.exitCode`,
-  `process.cwd()`,
+  `process.cwd()`, `process.uptime()` (секунды с запуска, `double`),
   `process.platform`, `process.execPath`, `process.stdout.write(s)` и `process.stderr.write(s)` (без
   перевода строки; строка, `Buffer` или `Uint8Array`), `process.stdout.isTTY`, `process.stdin` —
   `Readable`, а `process.stdout` и `process.stderr` — `Writable` (см. «Потоки»); `Date.now()` и
@@ -517,9 +518,9 @@ total += a[n] ?? 0
 
 Где JS бросает `RangeError` или `TypeError` от значения вне границ, tz требует, чтобы значение
 было доказано в границах при сборке ([errors.md](docs/errors.md), раздел 7). Доказательство —
-по тем же фактам, что у индексов: константы, проверки в `if`, длины, маски, `Math.min` /
-`Math.max`, индекс колбэка `map` и других (не меньше 0). Ошибка называет проверку, которой
-хватит:
+по тем же фактам, что у индексов: константы (и `static readonly SIZE = 16` класса), проверки в
+`if`, длины, маски, `Math.min` / `Math.max`, индекс колбэка `map` и других (не меньше 0). Ошибка
+называет проверку, которой хватит:
 
 ```ts
 function pad(text: string, width: int) {
@@ -1251,6 +1252,9 @@ function show(x: string | int) {
   (`int | boolean`, `Circle | int`) или 24, если среди членов строка, `decimal` или функция; куча
   не нужна. `undefined` в `A | B | undefined` — метка 0 (у ссылки — ноль, у литерала — номер 0),
   без отдельного флага.
+- **Литерал объекта в объединение** выбирает член по полям-меткам: `{ code: "A", details }`, а
+  если метка — переменная литерального типа (`{ code, details: {} }`, где `code: "A" | "B"`), то по
+  её типу.
 - **Сужение** — по метке объединения объектов (`s.kind == "circle"`, `switch (s.kind)`,
   `if (r.ok)` у меток `true` и `false`), `x == "up"`, `typeof x == "string"`, `"radius" in s`,
   `x instanceof Dog`, `Array.isArray(x)`, в обеих ветках, у переменных и у полей
@@ -1381,7 +1385,10 @@ const text = parseAge("42")
   (`Result<T, never>`) или `Err`.
 - **Сужение.** После `if (r.isOk())` (и после `if (r.isErr()) return ...`) у переменной `r` можно
   читать `r.value`, в другой ветке — `r.error`; без проверки это ошибка компиляции, как в TS.
-  Присваивание переменной и вызовы, которые могут её изменить, сужение снимают.
+  `Result | undefined` сужается так же: после `if (r == undefined || r.isErr()) return ...` в `r`
+  есть значение. Присваивание переменной и вызовы, которые могут её изменить, сужение снимают.
+- **Аргументы типа у `ok` / `err`**, как в neverthrow: `err<User, Code>("NOT_FOUND")` — сразу
+  `Result<User, Code>`; значение проверяется по своему аргументу, один аргумент — ошибка.
 - **Ранний выход** — только `if`:
   ```ts
   function doubled(s: string) {
@@ -1922,7 +1929,8 @@ for (const entry of readdirSync(".", { withFileTypes: true }).unwrapOr([]))
   `machine()`, `uptime()`, `endianness()`, `loadavg()`, `userInfo()` — из тех же источников, что у
   node (libuv): `release()` — настоящая версия Windows, `version()` — «Windows 11 Home».
 - **`node:process`** — `argv`, `env`, `exit`, `exitCode`, `cwd`, `platform`, `execPath`, `stdin`,
-  `stdout`, `stderr`: то же, что у глобального `process`.
+  `stdout`, `stderr`, `uptime`: то же, что у глобального `process`.
+- **`node:util`** — пока только `promisify` для функций `node:crypto` (см. «Криптография»).
 - **`node:buffer`** — `Buffer`: тот же, что глобальный.
 - **`node:fs`** — синхронные функции. Все, кроме `existsSync`, дают `Result` со своим типом
   ошибки: ошибка ОС — `Err`, а не исключение (`Result<void, UnlinkError>` у тех, что ничего не
@@ -2352,9 +2360,13 @@ if (pair.isOk()) console.log(sign(undefined, Buffer.from("message"), pair.value.
   бросил бы `ERR_OSSL_EVP_UNSUPPORTED` при работе), `createHmac("shake128", ...)` — у SHAKE нет
   длины для HMAC, `aes-*-ccm` без `authTagLength` — ошибка, `createECDH("P-999")` — «unknown
   curve». Имя из переменной проверяет OpenSSL при работе, и вызов даёт `Result`.
-- **Функции с колбэком** — ошибки с подсказкой: `import { scrypt }` → `scryptSync` (так же
-  `pbkdf2`, `hkdf`, `argon2`, `randomFill`, `generateKeyPair`, `generateKey`), `randomBytes(n, cb)` →
-  `randomBytes(n)`, так же `randomInt` и `sign` / `verify` с колбэком.
+- **Асинхронные функции идут в пул потоков** (4 потока, как у libuv; на нём же
+  `node:fs/promises`): `await scrypt(password, salt, 64)` — `Result<Buffer, ScryptError>`, так же
+  `pbkdf2`, `argon2`, `hkdf`, `randomFill`, `generateKey`, `generateKeyPair`, `generatePrime`,
+  `checkPrime`; `randomBytes`, `randomInt`, `sign`, `verify`, `diffieHellman` без колбэка
+  синхронные, как в node, а асинхронные — через `promisify` из `node:util`
+  (`const randomBytesAsync = promisify(randomBytes)`). Колбэк — ошибка с подсказкой
+  ([docs/crypto.md](docs/crypto.md), раздел 5). Есть и `generatePrimeSync` / `checkPrimeSync`.
 - **Объекты, которые в node ещё и потоки** (`Hash`, `Hmac`, `Cipheriv` / `Decipheriv`,
   `Sign` / `Verify`): `write`, `pipe`, `on` и другие методы потоков — ошибка «пока нет»
   с подсказкой `update()` и `digest()` / `final()`: потоков в tz ещё нет

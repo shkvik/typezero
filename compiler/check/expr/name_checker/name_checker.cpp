@@ -44,6 +44,14 @@ Expr *NameChecker::checkName(NameExpr *name) {
     checker_.diags_.error(
         name->loc(), "'" + name->name + "' is not a generic function; remove the type arguments");
   }
+  if (entry.var && !entry.var->promisified.empty()) {
+    checker_.diags_.error(name->loc(), "'" + name->name + "' is 'promisify(" +
+                                           entry.var->promisified +
+                                           ")', which can only be called: 'await " + name->name +
+                                           "(...)'");
+    name->type = Type::error();
+    return name;
+  }
   if (entry.var) {
     if (checker_.staticInit_ && checker_.currentClass_ && checker_.currentClass_->expression &&
         !entry.var->isGlobal && llvm::is_contained(checker_.currentClass_->locals, name->name)) {
@@ -72,16 +80,18 @@ Expr *NameChecker::checkName(NameExpr *name) {
       }
       return checker_.typeRelations().convert(name, narrowed);
     }
-    if (name->type->isOptional() && checker_.isDefined(entry.var)) {
-      return checker_.typeRelations().convert(name, name->type->inner());
-    }
-    if (const Type *type = name->type; type->isResult()) {
+    bool defined = name->type->isOptional() && checker_.isDefined(entry.var);
+    const Type *type = defined ? name->type->inner() : name->type;
+    if (type->isResult()) {
       if (checker_.flow_.okResults.contains(entry.var) && !type->errType()->isNever()) {
         return checker_.typeRelations().convert(name, Type::result(type->okType(), Type::never()));
       }
       if (checker_.flow_.errResults.contains(entry.var) && !type->okType()->isNever()) {
         return checker_.typeRelations().convert(name, Type::result(Type::never(), type->errType()));
       }
+    }
+    if (defined) {
+      return checker_.typeRelations().convert(name, type);
     }
     return name;
   }

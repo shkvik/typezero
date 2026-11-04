@@ -2,6 +2,7 @@
 
 #include "llvm/ADT/StringRef.h"
 #include <cstddef>
+#include <utility>
 
 namespace tz {
 
@@ -100,6 +101,21 @@ enum class CryptoFn : unsigned {
   SubtleRsaOaep,
   SubtleDerive,
   SubtleGenerate,
+  ScryptAsync,
+  Pbkdf2Async,
+  HkdfAsync,
+  Argon2Async,
+  RandomBytesAsync,
+  RandomFillAsync,
+  RandomInt32Async,
+  GenerateSecretKeyAsync,
+  SignAsync,
+  VerifyAsync,
+  DiffieHellmanAsync,
+  GeneratePrime,
+  GeneratePrimeAsync,
+  CheckPrime,
+  CheckPrimeAsync,
 };
 
 inline constexpr CryptoFunction kCryptoFunctions[] = {
@@ -191,6 +207,37 @@ inline constexpr CryptoFunction kCryptoFunctions[] = {
     {"tz_openssl_subtle_rsa_oaep", 'P', "osdbd"},
     {"tz_openssl_subtle_derive", 'P', "oo"},
     {"tz_openssl_subtle_generate", 'P', "iffs"},
+    {"tz_crypto_scrypt_async", 'P', "ddfffff"},
+    {"tz_crypto_pbkdf2_async", 'P', "ddffh"},
+    {"tz_crypto_hkdf_async", 'P', "hdddf"},
+    {"tz_crypto_argon2_async", 'P', "isddffffdd"},
+    {"tz_crypto_random_bytes_async", 'P', "f"},
+    {"tz_crypto_random_fill_async", 'P', "offi"},
+    {"tz_crypto_random_int32_async", 'P', "ii"},
+    {"tz_crypto_generate_secret_key_async", 'P', "bf"},
+    {"tz_openssl_sign_async", 'P', "dddiiii"},
+    {"tz_openssl_verify_async", 'P', "ddddiiii"},
+    {"tz_openssl_diffie_hellman_async", 'P', "oo"},
+    {"tz_openssl_generate_prime", 'o', "fbdd"},
+    {"tz_openssl_generate_prime_async", 'P', "fbdd"},
+    {"tz_openssl_check_prime", 'b', "df"},
+    {"tz_openssl_check_prime_async", 'P', "df"},
+};
+
+inline constexpr std::pair<CryptoFn, CryptoFn> kAsyncCryptoFns[] = {
+    {CryptoFn::Scrypt, CryptoFn::ScryptAsync},
+    {CryptoFn::Pbkdf2, CryptoFn::Pbkdf2Async},
+    {CryptoFn::Hkdf, CryptoFn::HkdfAsync},
+    {CryptoFn::Argon2, CryptoFn::Argon2Async},
+    {CryptoFn::RandomBytes, CryptoFn::RandomBytesAsync},
+    {CryptoFn::RandomFill, CryptoFn::RandomFillAsync},
+    {CryptoFn::RandomInt32, CryptoFn::RandomInt32Async},
+    {CryptoFn::GenerateSecretKey, CryptoFn::GenerateSecretKeyAsync},
+    {CryptoFn::Sign, CryptoFn::SignAsync},
+    {CryptoFn::Verify, CryptoFn::VerifyAsync},
+    {CryptoFn::DiffieHellman, CryptoFn::DiffieHellmanAsync},
+    {CryptoFn::GeneratePrime, CryptoFn::GeneratePrimeAsync},
+    {CryptoFn::CheckPrime, CryptoFn::CheckPrimeAsync},
 };
 
 struct DirectAlgorithm {

@@ -106,8 +106,23 @@ OpenSSL быстрее Go. В node те же функции идут через 
   bytes`), `iterations` и `keylen` у `pbkdf2Sync` / `hkdfSync` меньше 1, `N` у `scryptSync` —
   не степень двойки, `modulusLength` RSA меньше 512, длина AES-ключа у `generateKeySync`.
   `Result` при этом остаётся: OpenSSL может отказать и по другим причинам.
-- Функции с колбэком (`scrypt(…, cb)`, `pbkdf2(…, cb)`, `randomBytes(n, cb)`) — ошибка с
-  подсказкой: `…Sync` или `crypto.subtle`, как с `node:fs` ([io.md](io.md)).
+- **Асинхронные функции** (решено 4 ноября): то, что в node идёт с колбэком в пул потоков
+  libuv, в tz идёт в пул потоков рантайма — те же 4 потока (`UV_THREADPOOL_SIZE`), на которых
+  `node:fs/promises` и `crypto.subtle`. Колбэков нет, результат — `Promise<Result<…>>` с тем же
+  типом ошибки, что у синхронной функции, и те же проверки при сборке. Входные данные
+  копируются при вызове, так что менять буфер после вызова можно.
+  - Тот же вызов без колбэка (в node без колбэка это ошибка): `await scrypt(password, salt,
+    64)`, так же `pbkdf2`, `argon2`, `hkdf`, `randomFill`, `generateKey`, `generateKeyPair`,
+    `generatePrime`, `checkPrime`.
+  - У `randomBytes`, `randomInt`, `sign`, `verify` и `diffieHellman` вызов без колбэка в node
+    синхронный — это имя занято, поэтому они идут через `promisify` из `node:util`, как в
+    документации node: `const randomBytesAsync = promisify(randomBytes)`, затем
+    `await randomBytesAsync(32)`. `promisify` годится и для первых девяти. Его результат
+    держат в `const` и только вызывают; на другие функции `promisify` — ошибка.
+  - Вызов с колбэком — ошибка с подсказкой. Замер (32 потока, scrypt N = 2¹⁷): пока идут 64
+    хеша, сервер tz отвечает на простой запрос за 6 мс (с `scryptSync` — 820 мс).
+  - `generatePrimeSync` / `checkPrimeSync` — тоже есть; простое число — `ArrayBuffer`
+    (`bigint` в tz нет, `{ bigint: true }` — ошибка).
 - md5 и sha1 — есть, как в node: нужны для старых форматов и проверки файлов.
 
 ### Ошибки

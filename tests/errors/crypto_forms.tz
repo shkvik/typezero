@@ -4,8 +4,6 @@ import {
   createHash, createCipheriv, createDecipheriv, randomBytes, randomInt, getRandomValues,
   timingSafeEqual, generateKeyPairSync, createSecretKey, argon2Sync, sign, KeyObject, createECDH,
   X509Certificate,
-  // expect-error: 'scrypt' of 'node:crypto' takes a callback, which tz does not have (docs/crypto.md, section 5); import 'scryptSync' and use what it returns
-  scrypt,
   // expect-error: 'webcrypto' of 'node:crypto' is the global crypto of Web Crypto, which needs no import: use 'crypto.subtle'
   webcrypto,
   // expect-error: 'publicEncrypt' of 'node:crypto' is not supported yet
@@ -14,7 +12,7 @@ import {
   createSha,
 } from "node:crypto"
 
-// expect-error: 'randomBytes' with a callback is not supported: tz has no callback forms of node:crypto (docs/crypto.md, section 5); call it without one and use what it returns: 'const bytes = randomBytes(n)'
+// expect-error: 'randomBytes' with a callback is not supported: tz has no callback forms of node:crypto (docs/crypto.md, section 5); call it without one and use what it returns: 'const bytes = randomBytes(n)', or run it on the thread pool with 'promisify' of node:util: 'const randomBytesAsync = promisify(randomBytes)'
 randomBytes(16, (err: string | undefined, bytes: Buffer) => console.log(bytes))
 // expect-error: 'randomInt' with a callback is not supported
 randomInt(10, (err: string | undefined, n: int) => console.log(n))

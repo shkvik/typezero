@@ -178,29 +178,40 @@ inline const llvm::StringLiteral kFunctions[] = {"createHash",
                                                  "createSign",
                                                  "createVerify",
                                                  "createECDH",
-                                                 "diffieHellman"};
+                                                 "diffieHellman",
+                                                 "pbkdf2",
+                                                 "scrypt",
+                                                 "argon2",
+                                                 "hkdf",
+                                                 "randomFill",
+                                                 "generateKeyPair",
+                                                 "generateKey",
+                                                 "generatePrime",
+                                                 "generatePrimeSync",
+                                                 "checkPrime",
+                                                 "checkPrimeSync"};
 
 inline const llvm::StringLiteral kClasses[] = {"Hash",       "Hmac",      "Cipheriv",
                                                "Decipheriv", "KeyObject", "Sign",
                                                "Verify",     "ECDH",      "X509Certificate"};
 
-inline const std::pair<llvm::StringLiteral, llvm::StringLiteral> kCallbackForms[] = {
-    {"pbkdf2", "pbkdf2Sync"},          {"scrypt", "scryptSync"},
-    {"argon2", "argon2Sync"},          {"hkdf", "hkdfSync"},
-    {"randomFill", "randomFillSync"},  {"generateKeyPair", "generateKeyPairSync"},
-    {"generateKey", "generateKeySync"}};
+inline const std::pair<llvm::StringLiteral, llvm::StringLiteral> kAsyncForms[] = {
+    {"pbkdf2", "pbkdf2Sync"},           {"scrypt", "scryptSync"},
+    {"argon2", "argon2Sync"},           {"hkdf", "hkdfSync"},
+    {"randomFill", "randomFillSync"},   {"generateKeyPair", "generateKeyPairSync"},
+    {"generateKey", "generateKeySync"}, {"generatePrime", "generatePrimeSync"},
+    {"checkPrime", "checkPrimeSync"}};
+
+inline const llvm::StringLiteral kPromisified[] = {"randomBytes", "randomInt", "sign", "verify",
+                                                   "diffieHellman"};
 
 inline const llvm::StringLiteral kExports[] = {"Certificate",
                                                "DiffieHellman",
                                                "DiffieHellmanGroup",
-                                               "checkPrime",
-                                               "checkPrimeSync",
                                                "createDiffieHellman",
                                                "createDiffieHellmanGroup",
                                                "decapsulate",
                                                "encapsulate",
-                                               "generatePrime",
-                                               "generatePrimeSync",
                                                "getCipherInfo",
                                                "getDiffieHellman",
                                                "getFips",

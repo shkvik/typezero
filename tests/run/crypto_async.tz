@@ -1,0 +1,129 @@
+// The node:crypto functions that have a callback in node run on the thread pool of the runtime
+// (4 threads, UV_THREADPOOL_SIZE) and return a Promise: the callback form without a callback for
+// scrypt, pbkdf2, argon2, hkdf, randomFill, generateKey, generateKeyPair, generatePrime and
+// checkPrime, and promisify of node:util for randomBytes, randomInt, sign, verify and
+// diffieHellman, whose call without a callback stays synchronous. The result is the same as that
+// of the synchronous function; a wrong parameter is an Err of the same type.
+import {
+  argon2,
+  argon2Sync,
+  checkPrime,
+  checkPrimeSync,
+  diffieHellman,
+  generateKey,
+  generateKeyPair,
+  generateKeyPairSync,
+  generatePrime,
+  generatePrimeSync,
+  hkdf,
+  hkdfSync,
+  pbkdf2,
+  pbkdf2Sync,
+  randomBytes,
+  randomFill,
+  randomInt,
+  scrypt,
+  ScryptError,
+  scryptSync,
+  sign,
+  verify,
+} from "node:crypto";
+import { promisify } from "node:util";
+
+const randomBytesAsync = promisify(randomBytes);
+const randomIntAsync = promisify(randomInt);
+const signAsync = promisify(sign);
+const verifyAsync = promisify(verify);
+const diffieHellmanAsync = promisify(diffieHellman);
+const scryptAsync = promisify(scrypt);
+
+const salt = Buffer.from("0123456789abcdef");
+
+const key = await scrypt("password", salt, 32, { N: 16384 });
+const keySync = scryptSync("password", salt, 32, { N: 16384 });
+if (key.isOk() && keySync.isOk()) console.log("scrypt", key.value.equals(keySync.value), key.value.length);
+
+const viaPromisify = await scryptAsync("password", salt, 16);
+if (viaPromisify.isOk()) console.log("promisify(scrypt)", viaPromisify.value.length);
+
+const derived = await pbkdf2("password", salt, 1000, 32, "sha256");
+const derivedSync = pbkdf2Sync("password", salt, 1000, 32, "sha256");
+if (derived.isOk() && derivedSync.isOk()) console.log("pbkdf2", derived.value.equals(derivedSync.value));
+
+const expanded = await hkdf("sha256", "key", salt, "info", 42);
+const expandedSync = hkdfSync("sha256", "key", salt, "info", 42);
+if (expanded.isOk() && expandedSync.isOk()) {
+  console.log("hkdf", Buffer.from(expanded.value).equals(Buffer.from(expandedSync.value)));
+}
+
+const tag = await argon2("argon2id", { message: "password", nonce: salt, parallelism: 1, tagLength: 32, memory: 64, passes: 2 });
+const tagSync = argon2Sync("argon2id", { message: "password", nonce: salt, parallelism: 1, tagLength: 32, memory: 64, passes: 2 });
+if (tag.isOk() && tagSync.isOk()) console.log("argon2", tag.value.equals(tagSync.value));
+
+const many: Promise<Result<Buffer, ScryptError>>[] = [];
+for (let i = 0; i < 8; i++) many.push(scrypt(`password ${i}`, salt, 16, { N: 4096 }));
+const all = await Promise.all(many);
+let same = 0;
+for (let i = 0; i < all.length; i++) {
+  const one = all[i];
+  const sync = scryptSync(`password ${i}`, salt, 16, { N: 4096 });
+  if (one != undefined && one.isOk() && sync.isOk() && one.value.equals(sync.value)) same++;
+}
+console.log("8 at once", same);
+
+const tooBig = await scrypt("password", salt, 32, { N: 1024, maxmem: 1024 });
+if (tooBig.isErr()) console.log("maxmem:", tooBig.error.code);
+
+const filled = await randomFill(Buffer.alloc(16));
+console.log("randomFill", filled.length, filled.some((b) => b != 0));
+
+const bytes = await randomBytesAsync(24);
+console.log("randomBytes", bytes.length);
+
+const n = await randomIntAsync(10, 20);
+console.log("randomInt", n >= 10 && n < 20);
+
+const secret = await generateKey("hmac", { length: 256 });
+console.log("generateKey", secret.symmetricKeySize);
+
+const pem = await generateKeyPair("ec", {
+  namedCurve: "P-256",
+  publicKeyEncoding: { type: "spki", format: "pem" },
+  privateKeyEncoding: { type: "pkcs8", format: "pem" },
+});
+if (pem.isOk()) console.log("generateKeyPair pem", pem.value.publicKey.startsWith("-----BEGIN PUBLIC KEY-----"), pem.value.privateKey.startsWith("-----BEGIN PRIVATE KEY-----"));
+
+const pair = await generateKeyPair("ed25519");
+if (pair.isOk()) {
+  const signature = await signAsync(undefined, Buffer.from("hello"), pair.value.privateKey);
+  if (signature.isOk()) {
+    const good = await verifyAsync(undefined, Buffer.from("hello"), pair.value.publicKey, signature.value);
+    const bad = await verifyAsync(undefined, Buffer.from("hullo"), pair.value.publicKey, signature.value);
+    if (good.isOk() && bad.isOk()) console.log("sign / verify", signature.value.length, good.value, bad.value);
+  }
+}
+
+const alice = generateKeyPairSync("x25519");
+const bob = generateKeyPairSync("x25519");
+if (alice.isOk() && bob.isOk()) {
+  const one = await diffieHellmanAsync({ privateKey: alice.value.privateKey, publicKey: bob.value.publicKey });
+  const two = await diffieHellmanAsync({ privateKey: bob.value.privateKey, publicKey: alice.value.publicKey });
+  if (one.isOk() && two.isOk()) console.log("diffieHellman", one.value.equals(two.value), one.value.length);
+}
+
+const prime = generatePrimeSync(64);
+if (prime.isOk()) {
+  const checked = checkPrimeSync(prime.value);
+  if (checked.isOk()) console.log("generatePrimeSync", prime.value.byteLength, checked.value);
+}
+const primeAsync = await generatePrime(128, { safe: true });
+if (primeAsync.isOk()) {
+  const checked = await checkPrime(primeAsync.value);
+  if (checked.isOk()) console.log("generatePrime", primeAsync.value.byteLength, checked.value);
+}
+const composite = await checkPrime(Buffer.from([0x0f]));
+if (composite.isOk()) console.log("checkPrime 15", composite.value);
+const wrongAdd = await generatePrime(8, { add: Buffer.from([0x01, 0x00, 0x00]) });
+if (wrongAdd.isErr()) console.log("add:", wrongAdd.error.code);
+
+console.log("uptime", process.uptime() > 0, process.uptime() < 60);

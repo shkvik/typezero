@@ -218,11 +218,28 @@ Expr *FunctionParser::tryAsyncFunction() {
     return parser_.ctx_.make<FunctionExpr>(loc, parseFunction(true, true));
   }
   const Token &next = parser_.cursor().peek();
-  if (next.newlineBefore || !(next.is(Tok::Identifier) || next.is(Tok::LParen))) {
+  if (next.newlineBefore ||
+      !(next.is(Tok::Identifier) || next.is(Tok::LParen) || next.is(Tok::Less))) {
     return nullptr;
   }
   Parser::Snapshot start = parser_.cursor().snapshot();
   parser_.cursor().advance();
+  if (parser_.tok_.is(Tok::Less)) {
+    const char *text = parser_.tok_.text.data();
+    bool muted = parser_.diags_.setMuted(true);
+    parser_.recovering_ = false;
+    std::vector<TypeParamDecl> typeParams = parseTypeParams();
+    bool arrow = !parser_.recovering_ && parser_.tok_.is(Tok::LParen) && arrowAhead();
+    parser_.diags_.setMuted(muted);
+    if (!arrow) {
+      parser_.cursor().rewind(std::move(start));
+      return nullptr;
+    }
+    parser_.recovering_ = start.recovering;
+    FunctionExpr *fe = parseArrow(std::move(typeParams), text);
+    fe->fn->isAsync = true;
+    return fe;
+  }
   bool arrow = parser_.tok_.is(Tok::Identifier) ? parser_.cursor().peek().is(Tok::Arrow) &&
                                                       !parser_.cursor().peek().newlineBefore
                                                 : arrowAhead();
