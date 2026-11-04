@@ -1,5 +1,5 @@
 Dog { name: 'rex' } woof Dog 1 x
-Cat { name: 'tom' } function true
+Cat { name: 'tom' } class true
 Dog woof true true
 Cat meow false true
 Animal ... false true

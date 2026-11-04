@@ -38,7 +38,7 @@ const cache = new Map<string, unknown>()
 cache.set("n", 1)
 cache.set("s", "x")
 const n = cache.get("n")
-if (typeof n == "number") console.log(n + 0.5)
+if (typeof n == "int") console.log(n + 1)
 function maybe(flag: boolean): unknown {
   if (flag) return [flag]
 }
@@ -52,7 +52,7 @@ console.log(withDefault(), withDefault(3), withDefault(undefined))
 const parsed: unknown = must(JSON.parse('{"a": [1, "b"], "n": 2}'))
 console.log(typeof parsed, parsed)
 const two: unknown = must(JSON.parse("2"))
-if (typeof two == "number") console.log(two * 10)
+if (typeof two == "double") console.log(two * 10)
 
 // What a function would be in JavaScript: typeof says so, nothing more.
 const f: unknown = (x: int) => x + 1

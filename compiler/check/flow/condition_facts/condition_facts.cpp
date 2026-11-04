@@ -7,6 +7,7 @@
 #include "compiler/check/types/unknown_checker/unknown_checker.h"
 #include "compiler/library/json/json_checker/json_checker.h"
 #include "compiler/library/result/result_checker/result_checker.h"
+#include "compiler/load/to_utf8/to_utf8.h"
 #include "llvm/ADT/STLExtras.h"
 #include <functional>
 #include <limits>
@@ -207,13 +208,25 @@ void ConditionFacts::addConditionFacts(const Expr *cond, Checker::Flow &whenTrue
                             : alternatives.empty() || llvm::any_of(alternatives, test);
         };
         const Type *narrowed = nullptr;
+        std::string wanted = toUtf8(text->value);
+        auto numberNamed = [&](llvm::StringRef name) -> const Type * {
+          for (const Type *t : param->alternatives()) {
+            if (t->isNumeric() && name == typeOfName(t)) {
+              return checker_.genericChecker().numberParam(param, t);
+            }
+          }
+          const Type *named = UnknownChecker::typeOfNarrowed(std::u16string(name.begin(), name.end()));
+          if (param->alternatives().empty() && named && named->isNumeric()) {
+            return checker_.genericChecker().numberParam(param, named);
+          }
+          return nullptr;
+        };
         if (text->value == u"string" && admits([](const Type *t) { return t->isString(); })) {
           narrowed = Type::string();
         } else if (text->value == u"boolean" && admits([](const Type *t) { return t->isBool(); })) {
           narrowed = Type::boolTy();
-        } else if (text->value == u"number" && !param->constraint() &&
-                   admits([](const Type *t) { return t->isNumeric(); })) {
-          narrowed = checker_.genericChecker().numberParam(param);
+        } else if (!param->constraint()) {
+          narrowed = numberNamed(wanted);
         }
         Checker::Flow &holds = op == BinaryOp::Eq ? whenTrue : whenFalse;
         if (narrowed) {
@@ -235,8 +248,7 @@ void ConditionFacts::addConditionFacts(const Expr *cond, Checker::Flow &whenTrue
           const Type *rest = !same               ? nullptr
                              : kind == "string"  ? Type::string()
                              : kind == "boolean" ? Type::boolTy()
-                             : kind == "number"  ? checker_.genericChecker().numberParam(param)
-                                                 : nullptr;
+                                                 : numberNamed(kind);
           if (rest) {
             (op == BinaryOp::Eq ? whenFalse : whenTrue).narrowed.push_back({var, rest});
           }

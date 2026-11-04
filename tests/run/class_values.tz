@@ -1,4 +1,3 @@
-// same-as-node --experimental-transform-types
 // Classes as values (docs/decorators.md, section 5): `typeof C` is the class
 // itself, known when compiling, in a variable, a parameter, a field; `new` of
 // it and its static members are the class's. `Constructor<T>` is some class

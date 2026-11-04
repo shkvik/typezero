@@ -174,4 +174,4 @@ for (const p of items) handlers.push(() => p * 10)
 console.log(handlers.map(h => h()))
 const stretched = [half]
 stretched.length = 3
-console.log(stretched, `${decimal("-0.5")}`, typeof half == "object")
+console.log(stretched, `${decimal("-0.5")}`, typeof half == "decimal")

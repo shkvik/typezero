@@ -24,6 +24,8 @@ public:
   static void narrowJsonField(Checker::Flow &flow, const Checker::FieldPath &path,
                               const Type *type);
   Expr *checkArrayIsArray(CallExpr *call, MemberExpr *member);
+  Expr *checkJsonIsJson(CallExpr *call, MemberExpr *member);
+  void checkRedundantTests(const BinaryExpr *bin);
 
 private:
   Checker &checker_;

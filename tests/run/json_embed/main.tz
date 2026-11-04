@@ -12,7 +12,7 @@ console.log(page.length)
 console.log(page)
 
 type Config = { port: int; host: string; debug: boolean; users: { name: string; roles: string[] }[] }
-if (typeof config.port == "number" && Array.isArray(config.users) && typeof config.debug == "boolean")
+if (typeof config.port == "double" && Array.isArray(config.users) && typeof config.debug == "boolean")
   console.log(config.port + 1, config.users.length, config.debug)
 
 function must<T>(r: Result<T, JsonError>): T {

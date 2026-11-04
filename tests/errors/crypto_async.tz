@@ -19,4 +19,7 @@ const randomBytesAsync = promisify(randomBytes);
 // expect-error: 'randomBytesAsync' is 'promisify(randomBytes)', which can only be called: 'await randomBytesAsync(...)'
 const copy = randomBytesAsync;
 const ok = await randomBytesAsync(16);
-console.log(ok.length, big, nothing, later, copy, inspect);
+const length: double = 32;
+// expect-error: type 'double' is not assignable to type 'int'; round it first, then convert
+const derived = await scrypt("password", salt, length, { N: 1024 });
+console.log(ok.length, big, nothing, later, copy, inspect, derived);

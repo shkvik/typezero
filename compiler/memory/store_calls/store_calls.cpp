@@ -161,6 +161,7 @@ StoreScanner::Sources StoreCalls::builtin(const CallExpr *c, const StoreScanner:
   case Builtin::MapForEach:
   case Builtin::JsonStringify:
   case Builtin::ArrayIsArray:
+  case Builtin::JsonIsJson:
   case Builtin::WeakRefNew:
   case Builtin::WeakRefDeref:
     break;

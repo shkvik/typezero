@@ -620,6 +620,10 @@ Val Evaluator::evalCast(const CastExpr *conv, State &st, bool wraps) {
   if (from->nonOptional()->isJson() && isNumberType(to)) {
     return numVal(check_.overflowWarnings().input(to, conv->loc(), "JSON"));
   }
+  if (to->nonOptional()->isJson() && isIntegerType(from) && !v.num.empty()) {
+    check_.overflowWarnings().checkConversion(conv, conv->operand, v.num, to);
+    return Val();
+  }
   if (!isNumberType(to)) {
     return hasLength(to) || (from->isResult() && to->isResult()) ? v : Val();
   }

@@ -31,7 +31,7 @@ export function readSettings(text: string): Result<Settings, string> {
   const parsed = JSON.parse(text)
   if (parsed.isErr()) return err(parsed.error.message)
   const json = parsed.value
-  if (json == null || typeof json != "object" || Array.isArray(json))
+  if (typeof json != "object")
     return err("settings must be an object")
   if (!isSettingsJson(json)) return err("settings need a name, a limit, a price and tags")
   const tags: string[] = []
@@ -52,7 +52,7 @@ export function readSettings(text: string): Result<Settings, string> {
 }
 
 function isSettingsJson(json: Json): boolean {
-  return typeof json.name == "string" && typeof json.limit == "number" &&
+  return typeof json.name == "string" && typeof json.limit == "double" &&
     Number.isInteger(json.limit) &&
-    typeof json.price == "number" && Array.isArray(json.tags)
+    typeof json.price == "double" && Array.isArray(json.tags)
 }

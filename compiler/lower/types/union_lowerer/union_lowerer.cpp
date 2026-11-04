@@ -1,6 +1,7 @@
 #include "compiler/lower/types/union_lowerer/union_lowerer.h"
 #include "compiler/check/types/type_relations/type_relations.h"
 #include "compiler/library/json/json_lowerer/json_lowerer.h"
+#include "compiler/lower/types/unknown_lowerer/unknown_lowerer.h"
 #include "compiler/library/regex/matcher_builder/matcher_builder.h"
 #include "compiler/lower/expr/equality_lowerer/equality_lowerer.h"
 #include "compiler/lower/expr/expr_lowerer/expr_lowerer.h"
@@ -38,8 +39,9 @@ static UnionSlot targetSlot(UnionSlot slot, const Type *to) {
   if (slot == UnionSlot::Atom && has(UnionSlot::String)) {
     return UnionSlot::String;
   }
-  if (slot == UnionSlot::Int) {
-    for (UnionSlot s : {UnionSlot::Double, UnionSlot::Decimal}) {
+  bool integer = slot == UnionSlot::Int || (slot >= UnionSlot::Int8 && slot <= UnionSlot::Uint64);
+  if (integer) {
+    for (UnionSlot s : {UnionSlot::Int, UnionSlot::Double, UnionSlot::Decimal}) {
       if (has(s)) {
         return s;
       }
@@ -94,6 +96,9 @@ llvm::Value *UnionLowerer::emitUnionConversion(llvm::Value *value, const Type *f
     lowering_.refCounts().releaseString(value);
     return atom;
   }
+  if (from->isJson() && to->isTagged() && llvm::is_contained(to->slots(), UnionSlot::Json)) {
+    return lowering_.unionLayout().makeTagged(to, UnionSlot::Json, value);
+  }
   if (from->isJson() && to->isTagged()) {
     llvm::Value *kind = lowering_.builder_.CreateCall(
         lowering_.jsonLowerer().jsonFunction("tz_json_typeof", lowering_.builder_.getInt32Ty(),
@@ -105,8 +110,8 @@ llvm::Value *UnionLowerer::emitUnionConversion(llvm::Value *value, const Type *f
       llvm::BasicBlock *block = lowering_.functionFrame().newBlock("json.union.slot");
       llvm::BasicBlock *next = lowering_.functionFrame().newBlock("json.union.next");
       int code = slot == UnionSlot::Bool     ? 2
-                 : slot == UnionSlot::Double ? 3
-                 : slot == UnionSlot::String ? 4
+                 : slot == UnionSlot::Double ? 11
+                 : slot == UnionSlot::String ? 13
                                              : -1;
       if (code >= 0) {
         lowering_.builder_.CreateCondBr(
@@ -234,6 +239,28 @@ llvm::Value *UnionLowerer::emitUnionTypeOf(llvm::Value *value, const Type *type)
   llvm::Value *tag = lowering_.unionLayout().unionTag(value);
   llvm::Value *result = lowering_.stringLowerer().stringLiteral(u"undefined");
   for (UnionSlot slot : type->slots()) {
+    if (slot == UnionSlot::Json) {
+      llvm::Value *isJson =
+          lowering_.builder_.CreateICmpEQ(tag, lowering_.builder_.getInt32(unsigned(slot)));
+      llvm::BasicBlock *before = lowering_.builder_.GetInsertBlock();
+      llvm::BasicBlock *jsonBlock = lowering_.functionFrame().newBlock("typeof.json");
+      llvm::BasicBlock *endBlock = lowering_.functionFrame().newBlock("typeof.end");
+      lowering_.builder_.CreateCondBr(isJson, jsonBlock, endBlock);
+      lowering_.functionFrame().switchTo(jsonBlock);
+      llvm::Value *code = lowering_.builder_.CreateCall(
+          lowering_.jsonLowerer().jsonFunction("tz_json_typeof", lowering_.builder_.getInt32Ty(),
+                                               {lowering_.builder_.getPtrTy()}),
+          {lowering_.unionLayout().taggedPart(value, type, slot)});
+      llvm::Value *text = lowering_.unknownLowerer().typeOfText(code);
+      llvm::BasicBlock *jsonEnd = lowering_.builder_.GetInsertBlock();
+      lowering_.builder_.CreateBr(endBlock);
+      lowering_.functionFrame().switchTo(endBlock);
+      llvm::PHINode *phi = lowering_.builder_.CreatePHI(result->getType(), 2);
+      phi->addIncoming(result, before);
+      phi->addIncoming(text, jsonEnd);
+      result = phi;
+      continue;
+    }
     llvm::StringRef name = typeOfName(type->slotPart(slot));
     result = lowering_.builder_.CreateSelect(
         lowering_.builder_.CreateICmpEQ(tag, lowering_.builder_.getInt32(unsigned(slot))),

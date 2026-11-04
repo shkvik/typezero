@@ -16,11 +16,11 @@ public:
   Expr *forceConversion(Expr *expr, const Type *to);
   std::optional<bool> constantCondition(const Expr *cond) const;
   const Type *narrowedType(const VarSymbol *var) const;
-  const Type *numberParam(const Type *param) const;
+  const Type *numberParam(const Type *param, const Type *only = nullptr) const;
 
 private:
   Checker &checker_;
-  mutable llvm::DenseMap<const Type *, const Type *> numberParams_;
+  mutable llvm::DenseMap<std::pair<const Type *, const Type *>, const Type *> numberParams_;
 };
 
 }

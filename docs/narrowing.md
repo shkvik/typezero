@@ -52,7 +52,7 @@ function isCircle(s: Shape): s is Circle { return s.kind == "circle" }     // о
 function isDefined<T>(x: T | undefined): x is T { return x != undefined }  // ок
 
 function isUser(x: unknown): x is User {
-  return typeof x == "object" && x != null && "name" in x
+  return typeof x == "object" && "name" in x
 }
 // ошибка: x не доказан как User — проверки полей не дают тип объекта;
 // для Json — JSON.parse<User> / fromJson<User> (раздел 3), для класса — instanceof
@@ -82,7 +82,7 @@ type User = {
 };
 
 function isUserJson(data: Json): boolean {
-  return typeof data == "object" && typeof data.name == "string" && typeof data.age == "number";
+  return typeof data == "object" && typeof data.name == "string" && typeof data.age == "double";
 }
 
 const parsedResult = JSON.parse(text);              // Result<Json, JsonError>

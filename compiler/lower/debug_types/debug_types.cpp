@@ -32,6 +32,22 @@ const char *slotName(UnionSlot slot) {
     return "Function";
   case UnionSlot::Iterator:
     return "Iterator";
+  case UnionSlot::Json:
+    return "Json";
+  case UnionSlot::Int8:
+    return "Int8";
+  case UnionSlot::Int16:
+    return "Int16";
+  case UnionSlot::Int32:
+    return "Int32";
+  case UnionSlot::Uint8:
+    return "Uint8";
+  case UnionSlot::Uint16:
+    return "Uint16";
+  case UnionSlot::Uint32:
+    return "Uint32";
+  case UnionSlot::Uint64:
+    return "Uint64";
   case UnionSlot::Param:
     return "Param";
   case UnionSlot::Other:

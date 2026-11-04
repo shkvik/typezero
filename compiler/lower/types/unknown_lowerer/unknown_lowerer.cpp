@@ -11,6 +11,7 @@
 #include "compiler/lower/types/union_lowerer/union_lowerer.h"
 #include "compiler/lower/values/string_lowerer/string_lowerer.h"
 #include "compiler/memory/memory_plan/memory_plan.h"
+#include "compiler/program/types/type_spelling/type_spelling.h"
 #include "llvm/ADT/STLExtras.h"
 
 using llvm::BasicBlock;
@@ -22,9 +23,6 @@ using llvm::Value;
 namespace tz {
 
 namespace {
-
-const char16_t *const kKindNames[] = {u"undefined", u"number", u"string",
-                                      u"boolean",   u"object", u"function"};
 
 constexpr uint32_t kLayoutClass = 2097152;
 
@@ -75,6 +73,13 @@ llvm::Value *UnknownLowerer::boxValue(llvm::Value *value, const Type *type) {
   llvm::Type *ptr = lowering_.builder_.getPtrTy();
   if (type->isFunction()) {
     lowering_.unknownFunctionTypes_.insert(type);
+  }
+  if (type->isJson()) {
+    return lowering_.builder_.CreateCall(
+        unknownFunction("tz_unknown_json", ptr, {ptr, ptr, lowering_.builder_.getInt32Ty()}),
+        {lowering_.typeDescriptors().typeDescriptor(type), value,
+         lowering_.builder_.getInt32(lowering_.memory().mayHoldMember(type) ? 1 : 0)},
+        "box");
   }
   const char *box =
       lowering_.memory().mayHoldMember(type) ? "tz_unknown_box_member" : "tz_unknown_box";
@@ -138,6 +143,13 @@ llvm::Value *UnknownLowerer::emitUnknownConversion(llvm::Value *value, const Typ
   } else if (to->isArray()) {
     result = lowering_.builder_.CreateCall(unknownFunction("tz_unknown_array", ptr, {ptr, ptr}),
                                            {value, lowering_.typeDescriptors().typeDescriptor(to)});
+  } else if (to->isInteger() || to->isDecimal() || to->isJson()) {
+    llvm::Type *lowered = lowering_.moduleBuilder().lower(to);
+    llvm::AllocaInst *slot = lowering_.functionFrame().createStackSlot(lowered, "unboxed");
+    lowering_.builder_.CreateCall(
+        unknownFunction("tz_unknown_unbox", lowering_.builder_.getVoidTy(), {ptr, ptr, ptr}),
+        {value, lowering_.typeDescriptors().typeDescriptor(to), slot});
+    result = lowering_.builder_.CreateLoad(lowered, slot, "unboxed");
   } else {
     return value;
   }
@@ -146,21 +158,38 @@ llvm::Value *UnknownLowerer::emitUnknownConversion(llvm::Value *value, const Typ
   return result;
 }
 
-llvm::Value *UnknownLowerer::emitUnknownTypeOf(Expr *operand) {
-  Lowering::Operand value = lowering_.refCounts().emitOperand(operand, true);
-  llvm::Type *ptr = lowering_.builder_.getPtrTy();
-  llvm::Value *kind = lowering_.builder_.CreateCall(
-      unknownFunction("tz_unknown_kind", lowering_.builder_.getInt32Ty(), {ptr}), {value.value},
-      "kind");
-  lowering_.refCounts().dropOperand(value);
-  llvm::Value *text = lowering_.stringLowerer().stringLiteral(kKindNames[0]);
-  for (unsigned k = 1; k < std::size(kKindNames); ++k) {
+llvm::Value *UnknownLowerer::typeOfText(llvm::Value *code) {
+  auto text16 = [](llvm::StringRef name) { return std::u16string(name.begin(), name.end()); };
+  llvm::Value *text = lowering_.stringLowerer().stringLiteral(text16(kTypeOfNames[0]));
+  for (unsigned k = 1; k < std::size(kTypeOfNames); ++k) {
     text = lowering_.builder_.CreateSelect(
-        lowering_.builder_.CreateICmpEQ(kind, lowering_.builder_.getInt32(k)),
-        lowering_.stringLowerer().stringLiteral(kKindNames[k]), text);
+        lowering_.builder_.CreateICmpEQ(code, lowering_.builder_.getInt32(k)),
+        lowering_.stringLowerer().stringLiteral(text16(kTypeOfNames[k])), text);
   }
 
   return text;
+}
+
+llvm::Value *UnknownLowerer::emitUnknownTypeOf(Expr *operand) {
+  Lowering::Operand value = lowering_.refCounts().emitOperand(operand, true);
+  llvm::Type *ptr = lowering_.builder_.getPtrTy();
+  llvm::Value *code = lowering_.builder_.CreateCall(
+      unknownFunction("tz_unknown_typeof", lowering_.builder_.getInt32Ty(), {ptr}), {value.value},
+      "typeof");
+  lowering_.refCounts().dropOperand(value);
+
+  return typeOfText(code);
+}
+
+llvm::Value *UnknownLowerer::emitUnknownIsJson(Expr *arg) {
+  Lowering::Operand value = lowering_.refCounts().emitOperand(arg, true);
+  llvm::Type *ptr = lowering_.builder_.getPtrTy();
+  llvm::Value *json = lowering_.builder_.CreateCall(
+      unknownFunction("tz_unknown_is_json", lowering_.builder_.getInt32Ty(), {ptr}),
+      {value.value});
+  lowering_.refCounts().dropOperand(value);
+
+  return lowering_.builder_.CreateICmpNE(json, lowering_.builder_.getInt32(0));
 }
 
 llvm::Value *UnknownLowerer::emitUnknownIsArray(Expr *arg) {

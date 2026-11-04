@@ -37,7 +37,7 @@ console.log(marks, new Service().run());
 type DynamicModule = { module: Constructor; global?: boolean };
 
 function moduleName(entry: Constructor | DynamicModule): string {
-  const cls = typeof entry == "function" ? entry : entry.module;
+  const cls = typeof entry == "class" ? entry : entry.module;
   return `${typeof entry} ${cls.name}`;
 }
 console.log(moduleName(Service), moduleName({ module: Service }));

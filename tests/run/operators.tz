@@ -1,4 +1,3 @@
-// same-as-node
 // `**`, typeof and unary plus.
 console.log(2 ** 10, 3 ** 4, (-2) ** 3, 2 ** 3 ** 2, (2 ** 3) ** 2)
 console.log(2 ** 0.5, 2.0 ** -1, 10.0 ** -2, 4 ** 0.5, 8 ** (1.0 / 3))
@@ -20,7 +19,7 @@ function len(s?: string): int {
   return s.length
 }
 function size(n: int | undefined): int {
-  if (typeof n == "number") return n * 2
+  if (typeof n == "int") return n * 2
   return 0
 }
 console.log(len(), len("four"), size(21), size(undefined))

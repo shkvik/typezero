@@ -16,6 +16,9 @@ Expr *JsonFeature::checkStaticCall(Checker &checker, CallExpr *call, MemberExpr 
   if (checker.callChecker().isGlobalName(member->object, "Array") && member->name == "isArray") {
     return checker.jsonChecker().checkArrayIsArray(call, member);
   }
+  if (checker.callChecker().isGlobalName(member->object, "Json") && member->name == "isJson") {
+    return checker.jsonChecker().checkJsonIsJson(call, member);
+  }
 
   return nullptr;
 }

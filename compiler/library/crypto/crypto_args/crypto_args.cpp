@@ -314,7 +314,12 @@ Expr *CryptoArgs::cryptoCipher(Expr *arg) {
 }
 
 Expr *CryptoArgs::cryptoNumber(Expr *arg) {
-  return checker_.argumentChecker().checkArg(arg, Type::doubleTy());
+  Expr *checked = checker_.argumentChecker().checkArg(arg, Type::intTy());
+  if (!checked || checked->type->isError() || checked->type->isFloat()) {
+    return checked;
+  }
+
+  return checker_.typeRelations().convert(checked, Type::doubleTy());
 }
 
 std::string CryptoArgs::numberText(double value) {

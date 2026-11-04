@@ -7,7 +7,7 @@ import {
   createSign, createECDH, diffieHellman, X509Certificate,
 } from "node:crypto"
 
-function at(n: double): double {
+function at(n: int): int {
   return process.argv.length > 99 ? 0 : n
 }
 

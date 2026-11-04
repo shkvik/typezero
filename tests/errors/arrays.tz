@@ -26,5 +26,5 @@ const spread: double[] = [...ints]
 const size = ints.size
 // expect-error: 'sort' needs a function, found 'int'
 ints.sort(1)
-// expect-error: union 'int | double' is not supported: 'int' and 'double' cannot be told apart when the program runs: 'typeof' gives "number" for both
-let either: int | double = 1
+// expect-error: union 'uint32 | Bit.Wrap32' is not supported: 'uint32' and 'Bit.Wrap32' cannot be told apart when the program runs: 'typeof' gives "uint32" for both
+let either: uint32 | Bit.Wrap32 = 1

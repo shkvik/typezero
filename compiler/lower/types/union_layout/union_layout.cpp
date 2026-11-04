@@ -90,6 +90,12 @@ const Type *UnionLayout::storedType(const Type *type) {
     if (slot == UnionSlot::Int) {
       return Type::intTy();
     }
+    if (const Type *part = type->slotPart(slot); part && slot >= UnionSlot::Int8 &&
+                                                  slot <= UnionSlot::Uint64) {
+      return part->isLiteral() ? part->literalBase()
+             : part->isUnion() ? part->members().front()->literalBase()
+                               : part;
+    }
     if (slot == UnionSlot::Double) {
       return Type::doubleTy();
     }
@@ -189,7 +195,7 @@ llvm::Constant *UnionLayout::unionDescriptor(const Type *type) {
   if (llvm::Constant *found = lowering_.typeDescriptors_.lookup(type)) {
     return found;
   }
-  constexpr unsigned kSlots = 12;
+  constexpr unsigned kSlots = 20;
   auto *slotsType = llvm::ArrayType::get(lowering_.builder_.getPtrTy(), kSlots);
   std::vector<llvm::Constant *> slots(
       kSlots, llvm::ConstantPointerNull::get(lowering_.builder_.getPtrTy()));

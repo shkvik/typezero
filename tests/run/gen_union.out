@@ -12,7 +12,7 @@ Holder {
   bytes: <Buffer 68 69>,
   either: 1
 }
-number
+int
 3 7 11 7 1
 step 1
 step 2

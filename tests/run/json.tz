@@ -1,4 +1,3 @@
-// same-as-node
 // Json (docs/modules.md, section 5): what JSON.parse gives, read as
 // JavaScript reads it, narrowed by checks, compared, written back. JSON.parse
 // gives a Result; parse() takes its value.
@@ -13,7 +12,7 @@ console.log(user.tags[0], user.tags[5], user.address.city, user["address"]["city
 console.log(user.tags.length, user.name.length, user.age.length)
 console.log(user?.address?.city, user.nothing?.city, user.phone?.number)
 
-// null and a missing key: `== null` and `== undefined` are true for both.
+// null and a missing key: `== null` is true only for null, `== undefined` only for a missing key.
 console.log(user.phone == null, user.phone == undefined, user.email == null, user.age != null)
 console.log(user.phone ?? "no phone", user.email ?? "no email", user.age ?? 0)
 console.log(typeof user, typeof user.name, typeof user.age, typeof user.phone, typeof user.email,
@@ -28,7 +27,7 @@ console.log(flags[0] == true, flags[1] == false, flags[2] == 0, flags[3] == null
 function describe(x: Json | undefined): string {
   if (x == undefined) return "nothing"
   if (typeof x == "string") return `the string ${x.toUpperCase()}`
-  if (typeof x == "number") return `the number ${-x}`
+  if (typeof x == "double") return `the number ${-x}`
   if (typeof x == "boolean") return `the boolean ${!x}`
   if (Array.isArray(x)) return `an array of ${x.length}`
   if (x == null) return "null"

@@ -43,7 +43,7 @@ const parsed = JSON.parse(embedText("./config.json"))
 const loose = JSON.parse("[1, 2]").unwrapOr(null)
 if (parsed.isOk()) {
   const data = parsed.value
-  if (typeof data == "object" && data != null && !Array.isArray(data) && typeof data.port == "number" && Array.isArray(data.tags))
+  if (data != null && !Array.isArray(data) && typeof data == "object" && Array.isArray(data.tags))
     console.log(data.port, data.tags, Array.isArray(loose) ? loose[1] : 0, data.port, embedBytes("./note.txt").length)
 }
 

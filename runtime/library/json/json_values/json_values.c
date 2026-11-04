@@ -72,21 +72,27 @@ int32_t tz_json_kind(const TzJson *j) { return j ? (int32_t)j->kind : -1; }
 
 int32_t tz_json_typeof(const TzJson *j) {
   if (!j) {
-    return 0;
+    return TZ_TYPEOF_UNDEFINED;
   }
   switch (j->kind) {
+  case TZ_JSON_NULL:
+    return TZ_TYPEOF_NULL;
   case TZ_JSON_BOOL:
-    return 2;
+    return TZ_TYPEOF_BOOLEAN;
   case TZ_JSON_NUMBER:
-    return 3;
+    return TZ_TYPEOF_DOUBLE;
   case TZ_JSON_STRING:
-    return 4;
+    return TZ_TYPEOF_STRING;
+  case TZ_JSON_ARRAY:
+    return TZ_TYPEOF_ARRAY;
   default:
-    return 1;
+    return TZ_TYPEOF_OBJECT;
   }
 }
 
 TZ_HOT int32_t tz_json_is_nullish(const TzJson *j) { return !j || j->kind == TZ_JSON_NULL; }
+
+TZ_HOT int32_t tz_json_is_null(const TzJson *j) { return j && j->kind == TZ_JSON_NULL; }
 
 double tz_json_as_number(const TzJson *j) {
   return j && j->kind == TZ_JSON_NUMBER ? j->u.number.value : 0;

@@ -106,6 +106,11 @@ OpenSSL быстрее Go. В node те же функции идут через 
   bytes`), `iterations` и `keylen` у `pbkdf2Sync` / `hkdfSync` меньше 1, `N` у `scryptSync` —
   не степень двойки, `modulusLength` RSA меньше 512, длина AES-ключа у `generateKeySync`.
   `Result` при этом остаётся: OpenSSL может отказать и по другим причинам.
+- **Целые параметры — `int`** (решено 4 ноября): `keylen`, `iterations`, `N` / `cost`, `r` /
+  `blockSize`, `p` / `parallelization`, `maxmem`, у `argon2` — `parallelism`, `tagLength`,
+  `memory`, `passes`, `size` у `generatePrime`, `checks` у `checkPrime`, `modulusLength`,
+  `publicExponent`, `divisorLength`, `outputLength`, `authTagLength`. `double` туда — ошибка с
+  подсказкой `Math.trunc(x).toInt()`, как у `randomBytes(size)`; в node это `number`.
 - **Асинхронные функции** (решено 4 ноября): то, что в node идёт с колбэком в пул потоков
   libuv, в tz идёт в пул потоков рантайма — те же 4 потока (`UV_THREADPOOL_SIZE`), на которых
   `node:fs/promises` и `crypto.subtle`. Колбэков нет, результат — `Promise<Result<…>>` с тем же

@@ -11,7 +11,7 @@ entry two
 entry three
 [ 'since(1)' ]
 [ 1, 2 ]
-number 1
+int 1
 string two
 object 17
 42

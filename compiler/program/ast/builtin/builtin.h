@@ -221,6 +221,7 @@ enum class Builtin {
   JsonParse,
   JsonStringify,
   ArrayIsArray,
+  JsonIsJson,
   WeakRefNew,
   WeakRefDeref,
   DateNew,
@@ -554,7 +555,7 @@ inline bool isAsyncBuiltin(Builtin builtin) {
 }
 
 inline bool isJsonBuiltin(Builtin builtin) {
-  return builtin >= Builtin::JsonParse && builtin <= Builtin::ArrayIsArray;
+  return builtin >= Builtin::JsonParse && builtin <= Builtin::JsonIsJson;
 }
 
 inline bool isDateBuiltin(Builtin builtin) {

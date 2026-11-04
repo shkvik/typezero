@@ -27,7 +27,7 @@ Ann greets Bob warmly 1
   [class Admin extends User],
   [class Rules]
 ]
-function [Function: String] [Function: Number]
+class [Function: String] [Function: Number]
 evaluate area
 apply area to abstractArea
 class [class Shape]

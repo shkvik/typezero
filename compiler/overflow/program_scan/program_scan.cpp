@@ -46,6 +46,7 @@ bool onlyReads(Builtin builtin) {
   case Builtin::JsonStringify:
   case Builtin::ArrConcat:
   case Builtin::ArrayIsArray:
+  case Builtin::JsonIsJson:
   case Builtin::MathMin:
   case Builtin::MathMax:
   case Builtin::ArrayFrom:

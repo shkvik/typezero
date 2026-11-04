@@ -158,14 +158,22 @@ type Json = null | boolean | number | string | Json[] | { [key: string]: Json }
 
 - `JSON.parse(text)` возвращает `Result<Json, JsonError>` (в TS — `any`, а `any` у нас нет).
   Синтаксическая ошибка — `Err` с местом в тексте.
-- Числа в `Json` — `double` (JSON не различает целые и дробные, а объединение `int | double`
-  запрещено); в `int` переводят явно: `Math.trunc(port).toInt()` с доказательством, что влезает
+- Числа в `Json` — `double` (JSON не различает целые и дробные; `typeof` у них — `"double"`);
+  в `int` переводят явно: `Math.trunc(port).toInt()` с доказательством, что влезает
   ([numbers.md](numbers.md)), — или сразу `JSON.parse<Config>` с полем `port: int`: тогда
   целое и диапазон проверяет сгенерированный разбор.
 - **`null` бывает только в значениях `Json`.** `{"phone": null}` даёт `j["phone"] == null`,
-  а отсутствующий ключ — `undefined`; `JSON.stringify(j)` выдаёт исходный текст без потерь. Во
+  а отсутствующий ключ — `undefined`; с 5 ноября `== null` и `== undefined` у `Json` строгие:
+  первое верно только для `null`, второе — только для отсутствующего ключа
+  ([small.md](small.md), раздел 3). `JSON.stringify(j)` выдаёт исходный текст без потерь. Во
   всём остальном языке «ничего» одно — `undefined`: `let x: string | null` — ошибка с
-  подсказкой. Сравнивать с `null` можно только `Json`. `typeof null` — `"object"`, как в JS.
+  подсказкой. Сравнивать с `null` можно только `Json`. `typeof null` — `"null"`, а не
+  `"object"`, как в JS ([small.md](small.md), раздел 7). `null`, попав в `unknown`, становится
+  `undefined`.
+- **Целое в `Json`** — число JSON, то есть `double`: точно только в пределах ±2⁵³, поэтому
+  `const j: Json = n` требует доказательства |n| ≤ 2⁵³, как `n.toDouble()`
+  ([numbers.md](numbers.md)); `Record<string, int>` в `Json` не переходит. Больше — текстом,
+  `String(n)`.
 - `JSON.stringify` своего объекта пропускает поля со значением `undefined`, как JS. Нужен
   `null` в выводе — собрать `Json` явно: `const patch: Json = { phone: null }`.
 - **Перевод `Json` в свои типы пишет программа** (с 29 октября; раньше —

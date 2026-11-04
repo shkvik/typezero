@@ -22,12 +22,15 @@ export function abortError(): StreamFault {
 
 function received(value: unknown): string {
   if (value == undefined) return "Received undefined";
-  if (typeof value == "function") return "Received function";
+  if (typeof value == "function" || typeof value == "class") return "Received function";
+  if (typeof value == "array") return "Received an instance of Array";
   if (typeof value == "object")
     return `Received an instance of ${libClassName(value)}`;
   let shown = libInspect(value);
   if (shown.length > 28) shown = `${shown.slice(0, 25)}...`;
-  return `Received type ${typeof value} (${shown})`;
+  const kind = typeof value;
+  const named = kind == "string" || kind == "boolean" ? kind : "number";
+  return `Received type ${named} (${shown})`;
 }
 
 function invalidChunk(value: unknown) {

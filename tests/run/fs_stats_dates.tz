@@ -1,4 +1,3 @@
-// same-as-node
 // The dates of a Stats, as Node's getters make them: from the milliseconds
 // next to them, rounded; a new date each time, which console.log and
 // JSON.stringify do not show, as they are no fields.

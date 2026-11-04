@@ -35,7 +35,9 @@ function describe(u: unknown): string {
     return "another object"
   if (typeof u == "string")
     return `text "${u}"`
-  if (typeof u == "number")
+  if (typeof u == "int")
+    return `number ${u}`
+  if (typeof u == "double")
     return `number ${u}`
   return typeof u
 }

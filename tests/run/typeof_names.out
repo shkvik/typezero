@@ -1,0 +1,21 @@
+int 6 double 1.75 uint8 200 int32 -7 decimal 2 A
+array of 2 point 4 class function object nothing
+200 uint8 int32 array array class function
+null array double boolean undefined
+true false false true
+null in unknown: true undefined
+double,undefined,string
+4
+3
+a Json: object 3
+isJson: false
+int 2 double 2.5 int
+int 5 int32 5 s
+json null
+json double
+json string
+json array
+int 5
+string int null int
+int 42 double 3 string
+switch: int switch: double

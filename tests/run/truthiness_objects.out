@@ -15,4 +15,4 @@ no class undefined false
 [ 'z' ]
 [ 1, 2 ]
 ann ? c
-nothing empty text text t object number
+nothing empty text text t object int

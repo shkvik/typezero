@@ -13,6 +13,8 @@ public:
   llvm::Value *emitUnknownConversion(llvm::Value *value, const Type *from, const Type *to);
   llvm::Value *boxValue(llvm::Value *value, const Type *type);
   llvm::Value *emitUnknownTypeOf(Expr *operand);
+  llvm::Value *typeOfText(llvm::Value *code);
+  llvm::Value *emitUnknownIsJson(Expr *arg);
   llvm::Value *emitUnknownIsArray(Expr *arg);
   llvm::Constant *classObject(const ClassDecl *cls);
   llvm::Constant *staticFieldAddress(const ClassDecl *cls, const VarSymbol *var);

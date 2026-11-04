@@ -43,22 +43,90 @@ std::string objectTypeSpelling(llvm::ArrayRef<Field> fields) {
   return text + " }";
 }
 
+namespace {
+
+const char *integerName(const Type *type) {
+  uint64_t max = type->intMax();
+  if (type->isUnsigned()) {
+    return max == 255 ? "uint8" : max == 65535 ? "uint16" : max == 4294967295u ? "uint32" : "uint64";
+  }
+
+  return max == 127 ? "int8" : max == 32767 ? "int16" : max == 2147483647 ? "int32" : "int";
+}
+
+}
+
+bool isTypeOfName(llvm::StringRef name) { return llvm::is_contained(kTypeOfNames, name); }
+
+std::vector<llvm::StringRef> typeOfNames(const Type *type) {
+  std::vector<llvm::StringRef> names;
+  auto add = [&](llvm::StringRef name) {
+    if (!name.empty() && !llvm::is_contained(names, name)) {
+      names.push_back(name);
+    }
+  };
+  if (type->isOptional()) {
+    for (llvm::StringRef name : typeOfNames(type->inner())) {
+      add(name);
+    }
+    add("undefined");
+    return names;
+  }
+  if (type->isJson()) {
+    for (const char *name : {"null", "boolean", "double", "string", "array", "object"}) {
+      add(name);
+    }
+    return names;
+  }
+  if (type->isUnknown() || type->isParam()) {
+    for (const char *name : kTypeOfNames) {
+      if (llvm::StringRef(name) != "null" || type->isParam()) {
+        add(name);
+      }
+    }
+    return names;
+  }
+  if (type->isAnyObject()) {
+    add("object");
+    add("class");
+    return names;
+  }
+  if (type->isUnion()) {
+    for (const Type *m : type->members()) {
+      for (llvm::StringRef name : typeOfNames(m)) {
+        add(name);
+      }
+    }
+    return names;
+  }
+  add(typeOfName(type));
+
+  return names;
+}
+
 const char *typeOfName(const Type *type) {
   switch (type->kind()) {
   case Type::Kind::Int:
+    return integerName(type);
   case Type::Kind::Double:
-    return "number";
+    return "double";
+  case Type::Kind::Decimal:
+    return "decimal";
   case Type::Kind::String:
     return "string";
   case Type::Kind::Bool:
     return "boolean";
   case Type::Kind::Array:
+    return "array";
   case Type::Kind::Object:
+    if (type->isAnyObject()) {
+      return "";
+    }
+    return type->isTuple() ? "array" : "object";
   case Type::Kind::Result:
   case Type::Kind::Iterator:
   case Type::Kind::Dict:
   case Type::Kind::Promise:
-  case Type::Kind::Decimal:
     return "object";
   case Type::Kind::Function:
     return "function";
@@ -82,7 +150,7 @@ const char *typeOfName(const Type *type) {
   case Type::Kind::Unknown:
     return "";
   case Type::Kind::ClassRef:
-    return "function";
+    return "class";
   default:
     return "undefined";
   }

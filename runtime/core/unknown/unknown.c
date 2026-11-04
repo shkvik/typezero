@@ -52,8 +52,31 @@ void *tz_unknown_box_member(const TzType *type, const void *value) {
   return box;
 }
 
+void *tz_unknown_json(const TzType *type, void *json, int32_t member) {
+  const TzJson *j = (const TzJson *)json;
+  if (!j) {
+    return NULL;
+  }
+  if (j->kind == TZ_JSON_NULL) {
+    tz_value_release(type, &json);
+    return NULL;
+  }
+
+  return member ? tz_unknown_box_member(type, &json) : tz_unknown_box(type, &json);
+}
+
 void *tz_unknown_of(const TzType *type, const void *value) {
   type = tz_resolve(type, &value);
+  if (type->kind == TZ_T_JSON) {
+    const TzJson *j = *(const TzJson *const *)value;
+    if (!j) {
+      return NULL;
+    }
+    if (j->kind == TZ_JSON_NULL) {
+      tz_value_release(type, value);
+      return NULL;
+    }
+  }
   switch (type->kind) {
   case TZ_T_OBJECT:
   case TZ_T_UNKNOWN:
@@ -112,6 +135,80 @@ int32_t tz_unknown_kind(const void *u) {
   default:
     return TZ_KIND_OBJECT;
   }
+}
+
+static int32_t json_typeof(const TzJson *j) {
+  switch (j->kind) {
+  case TZ_JSON_NULL:
+    return TZ_TYPEOF_NULL;
+  case TZ_JSON_BOOL:
+    return TZ_TYPEOF_BOOLEAN;
+  case TZ_JSON_NUMBER:
+    return TZ_TYPEOF_DOUBLE;
+  case TZ_JSON_STRING:
+    return TZ_TYPEOF_STRING;
+  case TZ_JSON_ARRAY:
+    return TZ_TYPEOF_ARRAY;
+  default:
+    return TZ_TYPEOF_OBJECT;
+  }
+}
+
+int32_t tz_unknown_typeof(const void *u) {
+  if (!u) {
+    return TZ_TYPEOF_UNDEFINED;
+  }
+  const TzBox *box = as_box(u);
+  if (!box) {
+    int32_t kind = tz_unknown_kind(u);
+    if (kind == TZ_KIND_FUNCTION) {
+      const TzLayout *layout = ((const TzInstance *)u)->layout;
+      return layout->flags & TZ_LAYOUT_CLASS ? TZ_TYPEOF_CLASS : TZ_TYPEOF_FUNCTION;
+    }
+    return ((const TzInstance *)u)->layout->flags & TZ_LAYOUT_TUPLE ? TZ_TYPEOF_ARRAY
+                                                                    : TZ_TYPEOF_OBJECT;
+  }
+  switch (box->type->kind) {
+  case TZ_T_INT64:
+    return TZ_TYPEOF_INT;
+  case TZ_T_INT32:
+    return TZ_TYPEOF_INT32;
+  case TZ_T_INT16:
+    return TZ_TYPEOF_INT16;
+  case TZ_T_INT8:
+    return TZ_TYPEOF_INT8;
+  case TZ_T_UINT8:
+    return TZ_TYPEOF_UINT8;
+  case TZ_T_UINT16:
+    return TZ_TYPEOF_UINT16;
+  case TZ_T_UINT32:
+    return TZ_TYPEOF_UINT32;
+  case TZ_T_UINT64:
+    return TZ_TYPEOF_UINT64;
+  case TZ_T_DOUBLE:
+    return TZ_TYPEOF_DOUBLE;
+  case TZ_T_DECIMAL:
+    return TZ_TYPEOF_DECIMAL;
+  case TZ_T_STRING:
+  case TZ_T_ATOM:
+    return TZ_TYPEOF_STRING;
+  case TZ_T_BOOL:
+    return TZ_TYPEOF_BOOLEAN;
+  case TZ_T_FUNCTION:
+    return TZ_TYPEOF_FUNCTION;
+  case TZ_T_ARRAY:
+    return TZ_TYPEOF_ARRAY;
+  case TZ_T_JSON:
+    return json_typeof(*(const TzJson *const *)TZ_BOX_VALUE(box));
+  default:
+    return TZ_TYPEOF_OBJECT;
+  }
+}
+
+int32_t tz_unknown_is_json(const void *u) {
+  const TzBox *box = as_box(u);
+
+  return box && box->type->kind == TZ_T_JSON;
 }
 
 double tz_unknown_number(const void *u) {

@@ -348,7 +348,8 @@ tz run                   # без файла — "main" из package.json
   `tz query`, `tz impact` и сервер MCP `tz mcp` для ИИ-агентов, с проверкой правки без записи.
 - JSON (см. «JSON»): тип `Json` (`null` бывает только в нём), `JSON.parse(text)` с `Result`,
   `JSON.stringify(x, null, space)` любого значения, чтение и запись ключей (`j.users[0].name`),
-  сужение `typeof`, `Array.isArray` и `!= null` — и у полей (`data.name`), и через функцию-проверку;
+  сужение `typeof` (`"double"`, `"array"`, `"object"`, `"null"`) — и у полей (`data.name`), и через
+  функцию-проверку; `Json.isJson(x)` у `unknown`;
   свой тип из `Json` — проверкой и литералом; файлы, вшитые в exe: `embedText("./page.html")`,
   `JSON.parse(embedText("./config.json"))` (проверяется при сборке); импорт файла JSON —
   `import config from "./config.json" with { type: "json" }`: значение вшито как литерал, тип
@@ -1060,7 +1061,7 @@ if (typeof method == "function") Reflect.apply(method, controller, [])   // Resu
   реализует интерфейс `T`); `[Dog, Cat]` — `Constructor<Animal>[]`. Его хранят в массивах и
   ключах `Map`, сравнивают, печатают (`[class Dog extends Animal]`), берут `name`; `new k(...)` и
   `x instanceof k` (одно сравнение номеров классов; сужает `x` до `T`). `typeof` класса —
-  `"function"`, как в JS. `InstanceType<typeof K>` — тип объектов класса `K`. Обобщённый класс
+  `"class"` (в JS — `"function"`). `InstanceType<typeof K>` — тип объектов класса `K`. Обобщённый класс
   (`Box<T>`, `EventEmitter`) — не `Constructor`: каждый список аргументов типа делает свой класс, и
   `new` такого значения не сделал бы ни одного; подойдёт класс, который его расширяет
   (`class IntBox extends Box<int> {}`, `class Bus extends EventEmitter {}`), или `object`.
@@ -1146,12 +1147,20 @@ JSON; всё остальное — после проверки, которая 
 function describe(v: unknown): string {
   if (v == undefined) return "nothing"
   if (typeof v == "string") return v.toUpperCase()   // string
-  if (typeof v == "number") return `${v * 2}`         // double
+  if (typeof v == "int") return `${v * 2}`            // int
+  if (typeof v == "double") return `${v / 2}`         // double
   if (v instanceof Point) return `${v.length()}`      // Point
   if (Array.isArray(v)) return `${v.length} items`    // unknown[]
-  return typeof v                                     // "boolean", "object", "function"
+  return typeof v                                     // "boolean", "object", "class"…
 }
 ```
+
+- **`typeof`** отвечает именем типа tz (с 5 ноября, [small.md](docs/small.md), раздел 7):
+  `"int"`, `"int8"`…`"uint64"`, `"double"`, `"decimal"`, `"string"`, `"boolean"`, `"array"`,
+  `"object"`, `"function"`, `"class"`, `"undefined"`, у `Json` ещё `"null"`; `"number"` нет. Имя не
+  из этого списка или такое, которого тип не даёт никогда, — ошибка компиляции. `null` из `Json`,
+  попав в `unknown`, становится `undefined`; `Json.isJson(v)` говорит, лежит ли в `unknown`
+  значение типа `Json`, и сужает до `Json`.
 
 - В `unknown` превращается что угодно; условие, строка (`${v}`), арифметика, поля и методы до
   проверки — ошибки с подсказкой. `typeof v == "object"` даёт `object`, у которого потом
@@ -1259,7 +1268,7 @@ function show(x: string | int) {
   `if (r.ok)` у меток `true` и `false`), `x == "up"`, `typeof x == "string"`, `"radius" in s`,
   `x instanceof Dog`, `Array.isArray(x)`, в обеих ветках, у переменных и у полей
   (`slot.shape.kind == "circle"` — потом `slot.shape.r`). `||` объединяет: после
-  `typeof j == "string" || typeof j == "number"` у `Json` тип `string | double`. Строка и целое
+  `typeof j == "string" || typeof j == "double"` у `Json` тип `string | double`. Строка и целое
   сужаются сравнением с литералом: после `if (s == "decimal" || s == "percent")` у переменной
   типа `string` тип `"decimal" | "percent"`, после `if (code == 204)` у `int` — `204`; так
   значение из программы попадает туда, где ждут литеральный тип. Присваивание тоже
@@ -2367,6 +2376,9 @@ if (pair.isOk()) console.log(sign(undefined, Buffer.from("message"), pair.value.
   синхронные, как в node, а асинхронные — через `promisify` из `node:util`
   (`const randomBytesAsync = promisify(randomBytes)`). Колбэк — ошибка с подсказкой
   ([docs/crypto.md](docs/crypto.md), раздел 5). Есть и `generatePrimeSync` / `checkPrimeSync`.
+- **Целые параметры — `int`**: `keylen`, `iterations`, `N`, `r`, `p`, `maxmem`, параметры
+  `argon2`, `modulusLength`, `outputLength`, `authTagLength` и другие; `double` — ошибка с
+  подсказкой, как у `randomBytes(size)`.
 - **Объекты, которые в node ещё и потоки** (`Hash`, `Hmac`, `Cipheriv` / `Decipheriv`,
   `Sign` / `Verify`): `write`, `pipe`, `on` и другие методы потоков — ошибка «пока нет»
   с подсказкой `update()` и `digest()` / `final()`: потоков в tz ещё нет
@@ -2656,18 +2668,23 @@ const patch: Json = { phone: null, tags: ["a", 1] }               // null быв
   `Json | undefined` (ключа нет — `undefined`), и цепочка `j.users[0].name` пишется без `?.`.
   Ключ у `undefined`, `null` и у значения без ключей — `undefined` (в JS — `TypeError: Cannot
   read properties of undefined`), поэтому `?.` не нужен.
-- **Сужение**: у переменной или параметра типа `Json` проверка `typeof x == "string"`, `"number"`,
-  `"boolean"` даёт `string`, `double`, `boolean`, `Array.isArray(x)` — `Json[]` (тот же массив:
-  `push` виден через `x`), `x != null` и `x != undefined` убирают `undefined`. Методов у `Json`
-  нет, пока проверка не показала, что в нём: `j.items.map(...)` — ошибка с подсказкой.
-- **`null`** — значение только `Json`: `const j: Json = null`, `x == null`. `x == null` и
-  `x == undefined` правдивы для обоих, как в JS; `??` и `??=` заменяют и `null`. В остальном языке
-  `null` по-прежнему ошибка; `Json | null` — просто `Json`.
+- **Сужение**: у переменной или параметра типа `Json` проверка `typeof x == "string"`, `"double"`,
+  `"boolean"` даёт `string`, `double`, `boolean`, `"array"` и `Array.isArray(x)` — `Json[]` (тот
+  же массив: `push` виден через `x`), `"object"` — объект (не `null` и не массив: `x != null` и
+  `!Array.isArray(x)` после неё — ошибки «drop this check»), `x != undefined` убирает
+  `undefined`. Методов у `Json` нет, пока проверка не показала, что в нём: `j.items.map(...)` —
+  ошибка с подсказкой.
+- **`null`** — значение только `Json`: `const j: Json = null`, `x == null`, `typeof x == "null"`.
+  С 5 ноября `x == null` правдиво только для `null`, `x == undefined` — только для
+  отсутствующего ключа (в JS — для обоих): `{"phone": null}` отличается от `{}`. `??`, `??=` и
+  `?.` пропускают оба, как в JS. В остальном языке `null` по-прежнему ошибка; `Json | null` —
+  просто `Json`; в `unknown` `null` из `Json` становится `undefined`.
 - **`==`** — как `===`: `j.age == 30`, `j.role == "admin"`, `j.ok == true` правдивы только для
   `Json` того же вида и значения; два `Json` равны, если это одно значение (объект или массив — тот
   же самый). `switch` по `Json` сравнивает так же, `case null:` — только `null`.
 - **В `Json` превращаются** строки, числа, `boolean`, `Json[]` (тот же массив) и литералы там, где
-  ждут `Json`: `{ phone: null, tags: [1, "a"] }`; ключ в скобках — любая строка, значение
+  ждут `Json`: `{ phone: null, tags: [1, "a"] }`; целое — с доказательством |n| ≤ 2⁵³ (число
+  `Json` — `double`), `Record<string, int>` — ошибка; ключ в скобках — любая строка, значение
   `undefined` выбрасывает ключ. `int[]` или объект своего типа — ошибка: в JS `Json` был бы тем же
   значением, а здесь мог бы быть только копией. `decimal` — ошибка с подсказкой `String(x)`.
 - **Без проверки нельзя**: условие (`if (j.debug)` — там может быть `0`), строку (`` `${j}` ``,
@@ -2708,7 +2725,7 @@ const patch: Json = { phone: null, tags: ["a", 1] }               // null быв
   поля `Json` сужаются, как переменные, — и вложенные (`d.owner.name`), и массивы:
   ```ts
   function isUserJson(data: Json): boolean {
-    return typeof data == "object" && typeof data.name == "string" && typeof data.age == "number"
+    return typeof data == "object" && typeof data.name == "string" && typeof data.age == "double"
   }
   const parsedResult = JSON.parse(text)
   if (parsedResult.isErr()) return err(parsedResult.error.message)
@@ -3774,9 +3791,11 @@ tz impact Vec.add               что затронет правка: кто и�
   обобщённой функции для известного класса это ошибки компиляции.
 - `null` бывает только в значениях `Json` (см. «JSON»): в остальном и `null`, и `T | null` —
   ошибки с подсказкой `undefined`. Убрать `undefined` можно проверкой или `??`.
-- Объединение, члены которого нельзя различить при выполнении, — ошибка: `int | double`,
-  `int | uint8` (`typeof` у обоих даёт `"number"`), два массива (`int[] | string[]` — подсказка
-  `(int | string)[]`), две функции, два итератора; `Result` и `Json` в объединении — тоже ошибки.
+- Объединение, члены которого нельзя различить при выполнении, — ошибка: `uint32 | Bit.Wrap32`
+  (`typeof` у обоих даёт `"uint32"`), `Json | string`, `Json | Date`, два массива
+  (`int[] | string[]` — подсказка `(int | string)[]`), две функции, два итератора; `Result` в
+  объединении — тоже ошибка. `int | double`, `int | int32` и `Json | int` можно: у каждого
+  числа свой `typeof`.
   `==` у объединений — как `===`: `1` и `"1"` типа `string | int` не равны (в JS `==` их приводит).
 - Литерал получает литеральный тип только там, где его ждут (`const d: Dir = "up"`,
   `s.kind == "circle"`, `case "up":`). `const d = "up"` и `const e = fast ? "up" : "down"`
@@ -3923,7 +3942,7 @@ tz impact Vec.add               что затронет правка: кто и�
 - Чем `decimal` отличается от BigNumber.js: `==` сравнивает значения; `console.log`, `String(x)`
   и `x.toString()` печатают число без степени (`decimal(2) ** 100` — все 31 цифра), а не
   внутренности объекта; `-0` нет (но `toFixed(2)` отрицательного числа, которое округлилось до
-  нуля, — `"-0.00"`, как у BigNumber.js); `typeof x` — `"object"`, как у объекта BigNumber.js.
+  нуля, — `"-0.00"`, как у BigNumber.js); `typeof x` — `"decimal"` (у объекта BigNumber.js — `"object"`).
   Общей настройки (`BigNumber.config`) нет: знаки и округление деления — аргументы `div`; `round`
   заменяет `decimalPlaces(n, mode)` и `integerValue`; `toFraction()` даёт `decimal[]` из двух чисел
   (`const [n, d] = x.toFraction()` — оба `decimal`); у `toFormat` нет третьего аргумента. Литерал

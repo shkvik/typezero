@@ -1,8 +1,8 @@
 false true true
 [ 1, 2, 3, 'more' ] 4 [ 1, 2, 3 ]
 true [ 1, 'a', true ]
-Tom some object a number a undefined a function
-1.5
+Tom some object a int a undefined a class
+2
 [ true ] undefined Map(2) { 'n' => 1, 's' => 'x' }
 default 3 default
 object { a: [ 1, 'b' ], n: 2 }

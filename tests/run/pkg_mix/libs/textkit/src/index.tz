@@ -43,7 +43,7 @@ export async function slowJoin(dir: string, file: string): Promise<string> {
 }
 
 export function describe(x: int | string | Buffer): string {
-  if (typeof x == "number")
+  if (typeof x == "int")
     return `number ${x}`
   if (typeof x == "string")
     return `text ${x}`

@@ -32,6 +32,19 @@ namespace tz {
 
 TypeRelations::TypeRelations(Checker &checker) : checker_(checker) {}
 
+bool TypeRelations::holdsWideInteger(const Type *type) {
+  type = type->nonOptional();
+  if (type->isUnion()) {
+    return llvm::any_of(type->members(), [](const Type *m) { return holdsWideInteger(m); });
+  }
+  if (!type->isInteger()) {
+    return false;
+  }
+  constexpr double kExact = 9007199254740992.0;
+
+  return double(type->intMax()) > kExact || double(type->intMin()) < -kExact;
+}
+
 bool TypeRelations::copiesIntoRecord(const Type *from, const Type *to) {
   if (!to->isRecord() || !to->keyType()->isString() || !from->isObject() || from->isClass() ||
       from->isTuple() || from->isAnyObject() || from->isIncomplete() || !from->bases().empty() ||
@@ -78,6 +91,7 @@ bool TypeRelations::isImplicitlyConvertible(const Type *from, const Type *to) {
     return from->isString() || from->isNumeric() || from->isBool() || from->isLiteral() ||
            (from->isArray() && from->inner()->isJson()) ||
            (from->isRecord() && from->keyType()->isString() &&
+            !holdsWideInteger(from->valueType()) &&
             isImplicitlyConvertible(from->valueType()->nonOptional(), to));
   }
   if (to->isOptional()) {
@@ -636,6 +650,12 @@ Expr *TypeRelations::coerce(Expr *expr, const Type *to, llvm::StringRef what) {
              (fromObject->isObject() || from->nonOptional()->isArray())) {
     message += "; an array or an object becomes a Json only as a literal written where a Json is "
                "expected ('[...]', '{ ... }'), or as a 'Json[]', which stays the same array";
+  } else if (to->nonOptional()->isJson() && from->nonOptional()->isRecord() &&
+             holdsWideInteger(from->nonOptional()->valueType())) {
+    message += "; a number in a Json is a double, which holds every integer only within "
+               "±9007199254740992 (2^53), and nothing proves the values of this dictionary are "
+               "there: build a 'Record<string, Json>' and check each value as it goes in, or "
+               "keep them in a narrower type such as 'int32'";
   } else if (to->nonOptional()->isJson() && from->nonOptional()->isDecimal()) {
     message += "; JSON has no decimals: write it as text with 'String(x)', as JSON.stringify does";
   } else if (from->isFloat() && to->isDecimal()) {

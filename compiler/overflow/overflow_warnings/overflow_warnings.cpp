@@ -523,16 +523,17 @@ void OverflowWarnings::checkDate(const Num &time, double limit, llvm::ArrayRef<D
   }
 }
 
-bool OverflowWarnings::checkConversion(const CallExpr *call, const Expr *value, const Num &x,
+bool OverflowWarnings::checkConversion(const Expr *site, const Expr *value, const Num &x,
                                        const Type *to) {
-  bool toDouble = to->isFloat();
+  bool toJson = to->nonOptional()->isJson();
+  bool toDouble = to->isFloat() || toJson;
   constexpr double kExact = 9007199254740992.0;
   double lo = toDouble ? -kExact : limitsOf(to).lo, hi = toDouble ? kExact : limitsOf(to).hi;
   bool lowFits = toDouble ? x.lo >= lo : fitsLow(x.lo, to);
   bool highFits = toDouble ? x.hi <= hi : fitsHigh(x.hi, to);
   bool proven = lowFits && highFits;
   if (!toDouble) {
-    noteProof(call, proven);
+    noteProof(site, proven);
   }
   if (proven) {
     return true;
@@ -546,7 +547,7 @@ bool OverflowWarnings::checkConversion(const CallExpr *call, const Expr *value, 
     return false;
   }
   Bound culprit = blameHigh ? x.high() : x.low();
-  llvm::SMLoc loc = call->loc();
+  llvm::SMLoc loc = site->loc();
   std::string what = subject(value);
   std::string why;
   if (culprit.origin == Origin::Input) {
@@ -560,7 +561,13 @@ bool OverflowWarnings::checkConversion(const CallExpr *call, const Expr *value, 
   std::string low = toDouble ? numberText(lo) : std::to_string(to->intMin()),
               high = toDouble ? numberText(hi) : std::to_string(to->intMax());
   std::string message;
-  if (toDouble) {
+  if (toJson) {
+    message = "cannot prove that " + what +
+              " is within ±9007199254740992 (2^53): a number in a Json is a double, which holds "
+              "every integer only up to there: " +
+              why + "; check it first, e.g. 'if (" + text + " >= -9007199254740992 && " + text +
+              " <= 9007199254740992)', or put it in the Json as text, 'String(" + text + ")'";
+  } else if (toDouble) {
     message = "cannot prove that " + what +
               " is within ±9007199254740992 (2^53), where a double holds every integer "
               "exactly: " +

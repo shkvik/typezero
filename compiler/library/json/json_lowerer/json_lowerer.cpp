@@ -231,21 +231,28 @@ llvm::Value *JsonLowerer::emitJsonEquality(BinaryExpr *bin) {
   bool rhsNothing = rhs->type->isUndefined() || isNullLiteral(rhs);
   if (lhsNothing || rhsNothing) {
     if (lhsNothing && rhsNothing) {
+      bool same = isNullLiteral(lhs) == isNullLiteral(rhs);
       lowering_.stmtLowerer().emitDiscarded(lhs);
       lowering_.stmtLowerer().emitDiscarded(rhs);
-      return lowering_.builder_.getInt1(isEq);
+      return lowering_.builder_.getInt1(isEq == same);
     }
     if (lhs->type->isUndefined()) {
       lowering_.stmtLowerer().emitDiscarded(lhs);
     }
     Expr *other = lhsNothing ? rhs : lhs;
+    bool null = isNullLiteral(lhsNothing ? lhs : rhs);
     Lowering::Operand value = lowering_.refCounts().emitOperand(other, true);
     if (rhs->type->isUndefined()) {
       lowering_.stmtLowerer().emitDiscarded(rhs);
     }
-    llvm::Value *present = jsonPresent(value.value);
+    llvm::Value *matches =
+        null ? lowering_.builder_.CreateICmpNE(
+                   lowering_.builder_.CreateCall(
+                       jsonFunction("tz_json_is_null", i32, {ptr}), {value.value}),
+                   lowering_.builder_.getInt32(0))
+             : lowering_.builder_.CreateIsNull(value.value);
     lowering_.refCounts().dropOperand(value);
-    return isEq ? lowering_.builder_.CreateNot(present) : present;
+    return isEq ? matches : lowering_.builder_.CreateNot(matches);
   }
   Lowering::Operand a = lowering_.refCounts().emitOperand(lhs, AssignLowerer::cannotAssign(rhs));
   Lowering::Operand b = lowering_.refCounts().emitOperand(rhs, true);
@@ -318,16 +325,8 @@ llvm::Value *JsonLowerer::emitJsonTypeOf(Expr *operand) {
                                                  {lowering_.builder_.getPtrTy()}),
                                     {value.value});
   lowering_.refCounts().dropOperand(value);
-  static const std::pair<int32_t, const char16_t *> names[] = {
-      {0, u"undefined"}, {2, u"boolean"}, {3, u"number"}, {4, u"string"}};
-  llvm::Value *result = lowering_.stringLowerer().stringLiteral(u"object");
-  for (auto [kind, name] : names) {
-    result = lowering_.builder_.CreateSelect(
-        lowering_.builder_.CreateICmpEQ(code, lowering_.builder_.getInt32(kind)),
-        lowering_.stringLowerer().stringLiteral(name), result);
-  }
 
-  return result;
+  return lowering_.unknownLowerer().typeOfText(code);
 }
 
 llvm::Value *JsonLowerer::emitJsonFromRecord(llvm::Value *map, const Type *from) {
@@ -505,6 +504,12 @@ llvm::Value *JsonLowerer::emitJsonCall(CallExpr *call) {
     }
     return lowering_.resultLowerer().catchFailure(call->type, call->loc(), written);
   }
+  case Builtin::JsonIsJson:
+    if (!call->args[0]->type->isUnknown()) {
+      lowering_.stmtLowerer().emitDiscarded(call->args[0]);
+      return lowering_.builder_.getInt1(call->args[0]->type->nonOptional()->isJson());
+    }
+    return lowering_.unknownLowerer().emitUnknownIsJson(call->args[0]);
   case Builtin::ArrayIsArray: {
     Expr *arg = call->args[0];
     const Type *type = arg->type;

@@ -1,4 +1,3 @@
-// same-as-node
 // A function that returns a boolean narrows in a condition as its body
 // would (docs/narrowing.md): types, fields that hold a value, and facts
 // about numbers and lengths; on both branches.
@@ -100,7 +99,7 @@ function* tokens() {
   yield "two"
   yield 3
 }
-console.log(tokens().filter(x => typeof x == "number").map(x => x * 10).toArray())
+console.log(tokens().filter(x => typeof x == "int").map(x => x * 10).toArray())
 // A function that calls one that tests says what that one shows.
 function isCircular(s: Shape) { return isCircle(s) }
 console.log(shapes.filter(isCircular).map(c => c.r))

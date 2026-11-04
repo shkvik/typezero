@@ -52,13 +52,13 @@ function never2(s: Shape) {
 }
 
 // Members that cannot be told apart when the program runs.
-// expect-error: union 'int | double' is not supported: 'int' and 'double' cannot be told apart when the program runs: 'typeof' gives "number" for both
-let number: int | double = 1
+// expect-error: union 'uint32 | Bit.Wrap32' is not supported: 'uint32' and 'Bit.Wrap32' cannot be told apart when the program runs: 'typeof' gives "uint32" for both
+let number: uint32 | Bit.Wrap32 = 1
 // expect-error: 'int[]' and 'string[]' cannot be told apart when the program runs: both are arrays; use one array type, e.g. '(int | string)[]'
 let lists: int[] | string[] = [1]
 // expect-error: union 'Result<int, string> | string' is not supported: a Result cannot be part of a union
 let wrapped: Result<int, string> | string = "x"
-// expect-error: union 'Json | string' is not supported: a Json already holds strings
+// expect-error: union 'Json | string' is not supported: 'Json' and 'string' cannot be told apart when the program runs: typeof gives "string" for both
 let json: Json | string = "x"
 
 // What a value of a union needs a check for.

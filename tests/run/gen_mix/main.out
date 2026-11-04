@@ -2,7 +2,7 @@
 Map(1) { 'three' => 5 } true
 [ 'a', 'b' ] 1
 cache [ 'items' ] [Function: Map]
-number 200 ok
+int 200 ok
 string 200 ok
 object 200 ok
 Entry {

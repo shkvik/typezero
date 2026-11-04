@@ -1,0 +1,99 @@
+// typeof gives the name of the tz type (docs/small.md, section 7): every number type has its
+// own name, an array is "array", a class value is "class", a null of a Json is "null". Unknown
+// values, Json values and unions narrow by these names; Json.isJson tells a Json in an unknown.
+class Point {
+  public x: int;
+  public constructor(x: int) {
+    this.x = x;
+  }
+}
+
+function show(v: unknown): string {
+  if (v == undefined) return "nothing";
+  if (typeof v == "int") return `int ${v * 2}`;
+  if (typeof v == "double") return `double ${v / 2}`;
+  if (typeof v == "uint8") return `uint8 ${v}`;
+  if (typeof v == "int32") return `int32 ${v}`;
+  if (typeof v == "decimal") return `decimal ${v}`;
+  if (typeof v == "string") return v.toUpperCase();
+  if (typeof v == "array") return `array of ${v.length}`;
+  if (v instanceof Point) return `point ${v.x}`;
+  return typeof v;
+}
+const small: uint8 = 200;
+const mid: int32 = -7;
+console.log(show(3), show(3.5), show(small), show(mid), show((2).toDecimal()), show("a"));
+console.log(show([1, 2]), show(new Point(4)), show(Point), show(() => 1), show(new Map<string, int>()), show(undefined));
+console.log(`${small}`, typeof small, typeof mid, typeof [1], typeof ["a", 1], typeof Point, typeof show);
+
+const parsed = JSON.parse(`{"phone": null, "list": [1, null, "a"], "n": 3, "on": true}`);
+if (parsed.isOk()) {
+  const j = parsed.value;
+  if (typeof j == "object") {
+    console.log(typeof j.phone, typeof j.list, typeof j.n, typeof j.on, typeof j.missing);
+    console.log(j.phone == null, j.phone == undefined, j.missing == null, j.missing == undefined);
+    const phone: unknown = j.phone;
+    console.log("null in unknown:", phone == undefined, typeof phone);
+    const list: unknown = j.list;
+    if (Array.isArray(list)) console.log(list.map((x) => typeof x).join(","));
+    const n = j.n;
+    if (typeof n == "double") console.log(n + 1);
+    const items = j.list;
+    if (typeof items == "array") console.log(items.length);
+    const whole: unknown = j;
+    if (Json.isJson(whole)) console.log("a Json:", typeof whole, whole.n);
+    const text: unknown = "x";
+    console.log("isJson:", Json.isJson(text));
+  }
+}
+
+function num(x: int | double): string {
+  if (typeof x == "int") return `int ${x}`;
+  return `double ${x}`;
+}
+const either: int | double = 7;
+console.log(num(2), num(2.5), typeof either);
+
+function width(x: int | int32 | string): string {
+  if (typeof x == "int32") return `int32 ${x}`;
+  if (typeof x == "int") return `int ${x}`;
+  return x;
+}
+const narrow: int32 = 5;
+console.log(width(5), width(narrow), width("s"));
+
+function mixed(x: Json | int): string {
+  if (typeof x == "int") return `int ${x}`;
+  if (x == null) return "json null";
+  return `json ${typeof x}`;
+}
+const values = JSON.parse(`[null, 2, "s", [1]]`);
+if (values.isOk()) {
+  const array = values.value;
+  if (Array.isArray(array)) for (const e of array) console.log(mixed(e));
+}
+console.log(mixed(5));
+
+function kind<T>(x: T | int): string {
+  return typeof x;
+}
+const nothing = JSON.parse("null");
+if (nothing.isOk()) console.log(kind<string>("a"), kind<string>(1), kind<Json>(nothing.value), kind<Json>(7));
+
+function describe<T>(x: T): string {
+  if (typeof x == "int") return `int ${x * 2}`;
+  if (typeof x == "double") return `double ${x * 2}`;
+  return typeof x;
+}
+console.log(describe(21), describe(1.5), describe("s"));
+
+function which(x: int | double): string {
+  switch (typeof x) {
+    case "int":
+      return "switch: int";
+    case "double":
+      return "switch: double";
+  }
+  return "switch: none";
+}
+console.log(which(1), which(0.5));

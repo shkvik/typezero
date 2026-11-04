@@ -1,4 +1,3 @@
-// same-as-node
 // unknown holds a value of any type; a check shows what it holds.
 
 class Point {
@@ -16,7 +15,8 @@ class Point {
 function describe(v: unknown): string {
   if (v == undefined) return "nothing"
   if (typeof v == "string") return `a string of ${v.length}: ${v.toUpperCase()}`
-  if (typeof v == "number") return `a number, twice ${v * 2}`
+  if (typeof v == "int") return `a number, twice ${v * 2}`
+  if (typeof v == "double") return `a number, twice ${v * 2}`
   if (typeof v == "boolean") return v ? "yes" : "no"
   if (v instanceof Point) return `a point ${v.length()} away`
   if (Array.isArray(v)) return `an array of ${v.length}`
@@ -61,7 +61,7 @@ if (Array.isArray(nested)) {
 // A Record of unknowns, as libraries keep settings of any type.
 const settings: Record<string, unknown> = { port: 8080, host: "localhost", debug: true }
 const port = settings["port"]
-if (typeof port == "number") console.log(port + 1)
+if (typeof port == "int") console.log(port + 1)
 const host = settings.host
 if (typeof host == "string") console.log(host.length)
 console.log(settings)

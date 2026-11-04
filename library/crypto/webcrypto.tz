@@ -1638,14 +1638,12 @@ abstract class KeyHandle {
 }
 
 function jsonKind(value: Json): string {
-  if (value == null) {
-    return "null";
-  }
-  if (Array.isArray(value)) {
-    return "array";
+  const kind = typeof value;
+  if (kind == "double") {
+    return "number";
   }
 
-  return typeof value;
+  return kind;
 }
 
 function jwkText(
@@ -1669,7 +1667,7 @@ function jwkPrime(
   json: Json,
   at: string,
 ): Result<RsaOtherPrimesInfo, Problem> {
-  if (typeof json != "object" || json == null || Array.isArray(json)) {
+  if (typeof json != "object") {
     const kind = jsonKind(json);
 
     return err(typeError(`${at}: expected object, got ${kind}`));
@@ -1697,7 +1695,7 @@ function jwkPrime(
 }
 
 function jwkFromJson(json: Json): Result<JsonWebKey, Problem> {
-  if (typeof json != "object" || json == null || Array.isArray(json)) {
+  if (typeof json != "object") {
     const kind = jsonKind(json);
 
     return err(typeError(`expected JsonWebKey, got ${kind}`));

@@ -11,6 +11,33 @@ using llvm::isa;
 
 namespace tz {
 
+const Type *UnknownChecker::typeOfNarrowed(const std::u16string &name) {
+  static const std::pair<const char16_t *, const Type *(*)()> kinds[] = {
+      {u"string", [] { return Type::string(); }},
+      {u"double", [] { return Type::doubleTy(); }},
+      {u"boolean", [] { return Type::boolTy(); }},
+      {u"object", [] { return Type::anyObject(); }},
+      {u"class", [] { return Type::anyObject(); }},
+      {u"decimal", [] { return Type::decimalTy(); }},
+      {u"int", [] { return Type::intTy(); }},
+      {u"int8", [] { return Type::integer(8, false); }},
+      {u"int16", [] { return Type::integer(16, false); }},
+      {u"int32", [] { return Type::integer(32, false); }},
+      {u"uint8", [] { return Type::integer(8, true); }},
+      {u"uint16", [] { return Type::integer(16, true); }},
+      {u"uint32", [] { return Type::integer(32, true); }},
+      {u"uint64", [] { return Type::integer(64, true); }},
+      {u"array", [] { return Type::array(Type::unknown()); }},
+  };
+  for (auto [text, make] : kinds) {
+    if (name == text) {
+      return make();
+    }
+  }
+
+  return nullptr;
+}
+
 namespace {
 
 const VarSymbol *checkedVariable(const Expr *expr) {
@@ -172,6 +199,12 @@ void UnknownChecker::addUnknownFacts(const Expr *cond, Checker::Flow &whenTrue,
     }
     return;
   }
+  if (auto *call = dyn_cast<CallExpr>(cond); call && call->builtin == Builtin::JsonIsJson) {
+    if (const VarSymbol *var = checkedVariable(call->args[0])) {
+      narrow(whenTrue, var, Type::json());
+    }
+    return;
+  }
   auto *bin = dyn_cast<BinaryExpr>(cond);
   if (!bin) {
     return;
@@ -201,12 +234,7 @@ void UnknownChecker::addUnknownFacts(const Expr *cond, Checker::Flow &whenTrue,
     if (!var || !var->type->isUnknown()) {
       continue;
     }
-    const Type *narrowed = text->value == u"string"    ? Type::string()
-                           : text->value == u"number"  ? Type::doubleTy()
-                           : text->value == u"boolean" ? Type::boolTy()
-                           : text->value == u"object"  ? Type::anyObject()
-                                                       : nullptr;
-    if (narrowed) {
+    if (const Type *narrowed = typeOfNarrowed(text->value)) {
       narrow(equal, var, narrowed);
     }
   }

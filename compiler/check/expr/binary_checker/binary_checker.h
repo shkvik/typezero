@@ -17,6 +17,7 @@ public:
   void adaptLiterals(BinaryExpr *bin);
   Expr *checkBits(BinaryExpr *bin);
   Expr *checkWrapping(BinaryExpr *bin);
+  bool checkTypeOfName(const Expr *operand, const StringLitExpr *text);
 
 private:
   Checker &checker_;

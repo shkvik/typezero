@@ -50,7 +50,7 @@ console.log(count(tags, "a"), count(tags, 1), count(tags, "b"))
 const data = must(JSON.parse('{"id": 7, "name": "x", "list": [1]}'))
 for (const key of ["id", "name", "list"]) {
   const value = data[key]
-  if (typeof value == "string" || typeof value == "number") console.log(key, value, typeof value)
+  if (typeof value == "string" || typeof value == "double") console.log(key, value, typeof value)
   else console.log(key, "is something else")
 }
 

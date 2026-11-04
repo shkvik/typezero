@@ -1,0 +1,69 @@
+// typeof names checked when the program is built (docs/small.md, section 7), null only in a
+// Json, unions whose halves typeof cannot tell apart, Json.isJson on known types, integers that
+// a Json number (a double) cannot hold exactly.
+function pick(x: string | int, j: Json, u: unknown): void {
+  // expect-error: 'numbr' is not a name that typeof gives; the names are "undefined", "null"
+  const a = typeof x == "numbr";
+  // expect-error: typeof gives no "number": each number type has its own name, "int", "double", "decimal", "int32"...; the type 'number' is 'double', and its typeof is "double"; for a value of type 'string | int' it is "int"
+  const b = typeof x == "number";
+  // expect-error: for a value of type 'Json' it is "double"
+  const c = typeof j == "number";
+  // expect-error: typeof gives no "symbol": tz has no symbols as values
+  const d = typeof u == "symbol";
+  // expect-error: typeof of a value of type 'string | int' is "string" or "int", never "double"
+  const e = typeof x == "double";
+  // expect-error: typeof of a value of type 'unknown' is
+  const f = typeof u == "null";
+  switch (typeof x) {
+    case "string":
+      break;
+    // expect-error: 'nmbr' is not a name that typeof gives
+    case "nmbr":
+      break;
+  }
+  console.log(a, b, c, d, e, f);
+}
+
+function guard(j: Json): boolean {
+  // expect-error: after 'typeof j == "object"' j is never null here: the typeof of null is "null"; drop this check
+  return typeof j == "object" && j != null;
+}
+
+function guard2(j: Json): boolean {
+  // expect-error: after 'typeof j != "object"' j is never an array here: the typeof of an array is "array"; drop this check
+  if (typeof j != "object" || Array.isArray(j)) return false;
+  return true;
+}
+
+function strings(s: string): boolean {
+  // expect-error: 'null' exists only in Json values, and a value of type 'string' is never null
+  return s == null;
+}
+
+// expect-error: union 'Json | string' is not supported: 'Json' and 'string' cannot be told apart when the program runs: typeof gives "string" for both
+function both(v: Json | string): void {}
+
+// expect-error: union 'Json | Date' is not supported: 'Json' and 'Date' cannot be told apart when the program runs: typeof gives "object" for both
+function dated(v: Json | Date): void {}
+
+// expect-error: union 'uint32 | Bit.Wrap32' is not supported: 'uint32' and 'Bit.Wrap32' cannot be told apart when the program runs: 'typeof' gives "uint32" for both
+function wrapped(v: uint32 | Bit.Wrap32): void {}
+
+const text = "x";
+// expect-error: Json.isJson tells whether an 'unknown' value holds a Json; a value of type 'string' is known when the program is built
+const known = Json.isJson(text);
+
+const counts: Record<string, int> = {};
+// expect-error: a number in a Json is a double, which holds every integer only within ±9007199254740992 (2^53), and nothing proves the values of this dictionary are there
+const countsJson: Json = counts;
+
+const big: int = 1152921504606846976;
+// expect-error: cannot prove that 'big' is within ±9007199254740992 (2^53): a number in a Json is a double
+const bigJson: Json = big;
+
+const parsed = JSON.parse("{}");
+if (parsed.isOk()) {
+  pick(1, parsed.value, undefined);
+  console.log(guard(parsed.value), guard2(parsed.value));
+}
+console.log(strings("a"), both, dated, wrapped, known, countsJson, bigJson);

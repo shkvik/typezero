@@ -1,4 +1,3 @@
-// same-as-node
 // Unions of other values hold a tag: `string | int` is the string or the
 // int, unboxed, and typeof tells which.
 function describe(x: string | int | boolean) {
@@ -94,7 +93,7 @@ const switchState: [string | int, "on" | "off"] = ["x", "on"]
 console.log(switchState, switchState[1] == "on")
 let total: string | int = 0
 const add = (n: int) => {
-  if (typeof total == "number") total += n
+  if (typeof total == "int") total += n
 }
 add(2)
 add(3)

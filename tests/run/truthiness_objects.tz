@@ -1,4 +1,3 @@
-// same-as-node
 // Truthiness of objects (docs/small.md, section 1): an object, an instance of
 // a class, a class itself, a function or a dictionary that may be undefined
 // is tested for being there, and narrows; `filter(Boolean)` drops undefined

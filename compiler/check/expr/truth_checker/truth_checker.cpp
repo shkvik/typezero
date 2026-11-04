@@ -5,6 +5,7 @@
 #include "compiler/check/flow/flow_checker/flow_checker.h"
 #include "compiler/check/generics/generic_checker/generic_checker.h"
 #include "compiler/check/types/type_relations/type_relations.h"
+#include "compiler/library/json/json_checker/json_checker.h"
 
 using llvm::cast;
 using llvm::dyn_cast;
@@ -160,6 +161,7 @@ Expr *TruthChecker::checkBranching(Expr *expr, Checker::Flow &whenTrue, Checker:
     whenTrue = isAnd ? rhsTrue : FlowChecker::join(lhsTrue, rhsTrue);
     whenFalse = isAnd ? FlowChecker::join(lhsFalse, rhsFalse) : rhsFalse;
     checker_.flow_ = FlowChecker::join(whenTrue, whenFalse);
+    checker_.jsonChecker().checkRedundantTests(bin);
     bin->type = Type::boolTy();
     return bin;
   }
@@ -247,6 +249,9 @@ Expr *TruthChecker::checkLogical(BinaryExpr *bin, const Type *expected, Checker:
   whenTrue = isAnd ? rhsTrue : FlowChecker::join(lhsTrue, rhsTrue);
   whenFalse = isAnd ? FlowChecker::join(lhsFalse, rhsFalse) : rhsFalse;
   checker_.flow_ = FlowChecker::join(whenTrue, whenFalse);
+  if (!isAssign) {
+    checker_.jsonChecker().checkRedundantTests(bin);
+  }
 
   const Type *r = bin->rhs->type;
   bin->type = Type::error();

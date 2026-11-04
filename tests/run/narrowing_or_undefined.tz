@@ -1,4 +1,3 @@
-// same-as-node --experimental-transform-types
 // A check for undefined joined with a type check by || or && keeps both: the value is the
 // checked type or undefined. Promise.all over an array literal has its length, so
 // destructuring it gives the values without undefined. A typeof check after that drops the
@@ -16,7 +15,7 @@ function textAfterReturn(item: Item): string | undefined {
 }
 
 function numberOrNothing(item: Item): int | undefined {
-  if (typeof item == "undefined" || typeof item == "number") return item;
+  if (typeof item == "undefined" || typeof item == "int") return item;
   return -1;
 }
 
@@ -30,7 +29,7 @@ function texts(items: Item[]): (string | undefined)[] {
 }
 
 function textOfJson(data: Json): string {
-  if (typeof data != "object" || data == null || Array.isArray(data)) return "not an object";
+  if (typeof data != "object") return "not an object";
   const text = data.text;
   if (text != undefined && typeof text != "string") return "not a string";
   return typeof text == "string" ? text : "none";

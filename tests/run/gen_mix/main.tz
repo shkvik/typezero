@@ -58,7 +58,7 @@ const boxes: (Box<int> | Box<string> | Date)[] = [new Box(1), new Box("two"), ne
 for (const b of boxes) {
   if (b instanceof Box) {
     const v = b.value
-    console.log("box of", typeof v == "number" ? v + 1 : v.toUpperCase())
+    console.log("box of", typeof v == "int" ? v + 1 : v.toUpperCase())
   } else {
     console.log("date", b.getTime())
   }

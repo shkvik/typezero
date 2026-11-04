@@ -54,6 +54,27 @@ enum {
   TZ_T_UINT64 = 23,
 };
 
+enum {
+  TZ_TYPEOF_UNDEFINED = 0,
+  TZ_TYPEOF_NULL = 1,
+  TZ_TYPEOF_BOOLEAN = 2,
+  TZ_TYPEOF_INT = 3,
+  TZ_TYPEOF_INT8 = 4,
+  TZ_TYPEOF_INT16 = 5,
+  TZ_TYPEOF_INT32 = 6,
+  TZ_TYPEOF_UINT8 = 7,
+  TZ_TYPEOF_UINT16 = 8,
+  TZ_TYPEOF_UINT32 = 9,
+  TZ_TYPEOF_UINT64 = 10,
+  TZ_TYPEOF_DOUBLE = 11,
+  TZ_TYPEOF_DECIMAL = 12,
+  TZ_TYPEOF_STRING = 13,
+  TZ_TYPEOF_ARRAY = 14,
+  TZ_TYPEOF_OBJECT = 15,
+  TZ_TYPEOF_FUNCTION = 16,
+  TZ_TYPEOF_CLASS = 17,
+};
+
 static inline int tz_kind_integer(uint32_t kind) {
   return kind == TZ_T_INT32 || kind == TZ_T_INT64 || (kind >= TZ_T_INT8 && kind <= TZ_T_UINT64);
 }
@@ -168,7 +189,7 @@ typedef struct TzErrSite {
   uint32_t length;
 } TzErrSite;
 
-#define TZ_UNION_SLOTS 12
+#define TZ_UNION_SLOTS 20
 typedef struct TzUnionType {
   TzType base;
   const TzType *slots[TZ_UNION_SLOTS];

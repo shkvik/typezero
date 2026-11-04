@@ -21,7 +21,7 @@ a function
 ]
 text string
 undefined undefined
-5 number
+5 int
 true false true true
 true false
 default 1
@@ -40,6 +40,6 @@ Point other other
 }
 true 1
 true 2
-[ 'a' ] [ 'number', 'string', 'boolean', 'undefined' ]
+[ 'a' ] [ 'int', 'string', 'boolean', 'undefined' ]
 4 undefined [ 'a' ]
 two

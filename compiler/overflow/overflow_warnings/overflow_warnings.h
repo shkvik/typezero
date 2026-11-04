@@ -24,7 +24,7 @@ public:
   std::string line(llvm::SMLoc loc, llvm::SMLoc from) const;
   std::string inputText(const Reason *why, llvm::SMLoc from) const;
   std::string fixText(const Expr *site, const VarSymbol *accum) const;
-  bool checkConversion(const CallExpr *call, const Expr *value, const Num &x, const Type *to);
+  bool checkConversion(const Expr *site, const Expr *value, const Num &x, const Type *to);
   bool checkDivisor(const Expr *site, BinaryOp op, const Expr *divisor, const Num &l, const Num &r);
   void noteProof(const Expr *site, bool proven);
   void checkShiftCount(const Expr *count, const Num &n, unsigned width);

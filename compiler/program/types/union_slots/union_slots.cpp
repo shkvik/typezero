@@ -1,4 +1,5 @@
 #include "compiler/program/types/union_slots/union_slots.h"
+#include "compiler/program/types/type_spelling/type_spelling.h"
 #include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/SmallPtrSet.h"
@@ -23,8 +24,19 @@ UnionSlot unionSlot(const Type *type) {
   switch (type->kind()) {
   case Type::Kind::String:
     return UnionSlot::String;
-  case Type::Kind::Int:
-    return UnionSlot::Int;
+  case Type::Kind::Int: {
+    llvm::StringRef name = typeOfName(type);
+    return name == "int8"     ? UnionSlot::Int8
+           : name == "int16"  ? UnionSlot::Int16
+           : name == "int32"  ? UnionSlot::Int32
+           : name == "uint8"  ? UnionSlot::Uint8
+           : name == "uint16" ? UnionSlot::Uint16
+           : name == "uint32" ? UnionSlot::Uint32
+           : name == "uint64" ? UnionSlot::Uint64
+                              : UnionSlot::Int;
+  }
+  case Type::Kind::Json:
+    return UnionSlot::Json;
   case Type::Kind::Double:
     return UnionSlot::Double;
   case Type::Kind::Bool:
@@ -63,15 +75,27 @@ std::string unionProblem(const Type *type) {
   if (!type->isUnion()) {
     return "";
   }
-  const Type *number = nullptr, *array = nullptr, *function = nullptr, *iterator = nullptr,
-             *promise = nullptr, *intl = nullptr, *crypto = nullptr;
+  const Type *array = nullptr, *function = nullptr, *iterator = nullptr, *promise = nullptr,
+             *intl = nullptr, *crypto = nullptr;
+  std::map<std::string, const Type *> numbers;
+  const Type *json = nullptr;
+  for (const Type *m : type->members()) {
+    if (m->isJson()) {
+      json = m;
+    }
+  }
   for (const Type *m : type->members()) {
     if (m->isVoid()) {
       return "'void' cannot be part of a union";
     }
-    if (m->isJson()) {
-      return "a Json already holds strings, numbers, booleans, arrays and objects, which code "
-             "tells apart by checking it; use 'Json'";
+    if (json && m != json && !m->isUndefined()) {
+      for (const char *name : {"null", "boolean", "double", "string", "array", "object"}) {
+        if (llvm::is_contained(typeOfNames(m), llvm::StringRef(name))) {
+          return "'Json' and '" + m->name().str() +
+                 "' cannot be told apart when the program runs: typeof gives \"" + name +
+                 "\" for both; use 'Json', which holds that value too";
+        }
+      }
     }
     if (m->isResult()) {
       return "a Result cannot be part of a union: what it holds is told by its halves; make a "
@@ -88,12 +112,13 @@ std::string unionProblem(const Type *type) {
     };
     std::string problem;
     UnionSlot slot = unionSlot(m);
-    if (slot == UnionSlot::Int || slot == UnionSlot::Double) {
-      const Type *base = m->isLiteral() ? m->literalBase() : m;
+    if (const Type *base = m->isLiteral() ? m->literalBase() : m; base->isNumeric()) {
+      std::string name = typeOfName(base);
+      const Type *&number = numbers[name];
       const Type *seen = number && number->isLiteral() ? number->literalBase() : number;
       if (!number || seen != base) {
-        problem = clash(number, "'typeof' gives \"number\" for both",
-                        "use one number type, e.g. 'double'");
+        problem = clash(number, ("'typeof' gives \"" + name + "\" for both").c_str(),
+                        "use one of them");
       }
     } else if (slot == UnionSlot::Array) {
       problem = clash(array, "both are arrays",

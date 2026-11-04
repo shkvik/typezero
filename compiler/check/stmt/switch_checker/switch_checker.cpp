@@ -1,4 +1,5 @@
 #include "compiler/check/stmt/switch_checker/switch_checker.h"
+#include "compiler/check/expr/binary_checker/binary_checker.h"
 #include "compiler/check/expr/expr_checker/expr_checker.h"
 #include "compiler/check/flow/condition_facts/condition_facts.h"
 #include "compiler/check/flow/flow_checker/flow_checker.h"
@@ -59,6 +60,10 @@ void SwitchChecker::checkSwitch(SwitchStmt *stmt) {
     }
     checker_.flow_ = tests;
     c.test = checker_.exprChecker().checkExpr(c.test, hint);
+    if (auto *typeOf = dyn_cast<UnaryExpr>(stmt->discriminant);
+        typeOf && typeOf->op == UnaryOp::TypeOf && isa<StringLitExpr>(c.test)) {
+      checker_.binaryChecker().checkTypeOfName(typeOf->operand, cast<StringLitExpr>(c.test));
+    }
     const Type *testType = c.test->type;
     Checker::Flow whenTrue = checker_.flow_, whenFalse = checker_.flow_;
     bool generic = type->nonOptional()->isParam() || testType->nonOptional()->isParam();

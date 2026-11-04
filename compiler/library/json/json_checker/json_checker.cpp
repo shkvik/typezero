@@ -6,11 +6,13 @@
 #include "compiler/check/flow/field_facts/field_facts.h"
 #include "compiler/check/types/type_relations/type_relations.h"
 #include "compiler/check/values/array_literal_checker/array_literal_checker.h"
+#include "compiler/load/to_utf8/to_utf8.h"
 #include "llvm/ADT/SmallString.h"
 #include "llvm/ADT/StringExtras.h"
 #include "llvm/Support/ConvertUTF.h"
 #include "llvm/Support/MemoryBuffer.h"
 #include "llvm/Support/Path.h"
+#include <functional>
 
 using llvm::cast;
 using llvm::dyn_cast;
@@ -40,6 +42,106 @@ bool isNothing(const Expr *expr) {
   return nullName(expr) || (expr->type && expr->type->isUndefined());
 }
 
+const Expr *bare(const Expr *expr) {
+  while (auto *conv = dyn_cast_or_null<CastExpr>(expr)) {
+    if (!conv->isImplicit()) {
+      break;
+    }
+    expr = conv->operand;
+  }
+
+  return expr;
+}
+
+bool sameRef(const Expr *a, const Expr *b) {
+  a = bare(a);
+  b = bare(b);
+  auto *na = dyn_cast_or_null<NameExpr>(a), *nb = dyn_cast_or_null<NameExpr>(b);
+  if (na && nb) {
+    return na->var && na->var == nb->var;
+  }
+  auto *ma = dyn_cast_or_null<MemberExpr>(a), *mb = dyn_cast_or_null<MemberExpr>(b);
+
+  return ma && mb && ma->name == mb->name && sameRef(ma->object, mb->object);
+}
+
+std::string refText(const Expr *expr) {
+  expr = bare(expr);
+  if (auto *name = dyn_cast<NameExpr>(expr)) {
+    return name->name.str();
+  }
+  if (auto *member = dyn_cast<MemberExpr>(expr)) {
+    return refText(member->object) + "." + member->name.str();
+  }
+
+  return "x";
+}
+
+}
+
+void JsonChecker::checkRedundantTests(const BinaryExpr *bin) {
+  bool isAnd = bin->op == BinaryOp::LogAnd;
+  std::vector<const Expr *> terms;
+  std::function<void(const Expr *)> collect = [&](const Expr *e) {
+    if (auto *b = dyn_cast<BinaryExpr>(e); b && b->op == bin->op) {
+      collect(b->lhs);
+      collect(b->rhs);
+      return;
+    }
+    terms.push_back(e);
+  };
+  collect(bin->lhs);
+  const Expr *tested = nullptr;
+  bool nullTest = false;
+  const Expr *rhs = bare(bin->rhs);
+  if (auto *eq = dyn_cast<BinaryExpr>(rhs);
+      eq && (eq->op == BinaryOp::Eq || eq->op == BinaryOp::Ne) &&
+      (nullName(bare(eq->lhs)) || nullName(bare(eq->rhs)))) {
+    tested = nullName(bare(eq->lhs)) ? eq->rhs : eq->lhs;
+    nullTest = true;
+  } else {
+    const Expr *inner = rhs;
+    if (auto *unary = dyn_cast<UnaryExpr>(rhs); unary && unary->op == UnaryOp::Not) {
+      inner = bare(unary->operand);
+    }
+    if (auto *call = dyn_cast<CallExpr>(inner); call && call->builtin == Builtin::ArrayIsArray) {
+      tested = call->args[0];
+    }
+  }
+  if (!tested || !bare(tested)->type || !bare(tested)->type->nonOptional()->isJson()) {
+    return;
+  }
+  for (const Expr *term : terms) {
+    auto *cmp = dyn_cast<BinaryExpr>(bare(term));
+    if (!cmp || cmp->op != (isAnd ? BinaryOp::Eq : BinaryOp::Ne)) {
+      continue;
+    }
+    auto *typeOf = dyn_cast<UnaryExpr>(bare(cmp->lhs));
+    auto *text = dyn_cast<StringLitExpr>(bare(cmp->rhs));
+    if (!typeOf || !text) {
+      typeOf = dyn_cast<UnaryExpr>(bare(cmp->rhs));
+      text = dyn_cast<StringLitExpr>(bare(cmp->lhs));
+    }
+    if (!typeOf || typeOf->op != UnaryOp::TypeOf || !text || !sameRef(typeOf->operand, tested)) {
+      continue;
+    }
+    std::string name = toUtf8(text->value);
+    std::string x = refText(tested);
+    if (nullTest && name != "null" && name != "undefined") {
+      checker_.diags_.error(rhs->loc(), "after 'typeof " + x + (isAnd ? " ==" : " !=") + " \"" +
+                                            name + "\"' " + x +
+                                            " is never null here: the typeof of null is "
+                                            "\"null\"; drop this check");
+      return;
+    }
+    if (!nullTest && name != "array") {
+      checker_.diags_.error(rhs->loc(), "after 'typeof " + x + (isAnd ? " ==" : " !=") + " \"" +
+                                            name + "\"' " + x +
+                                            " is never an array here: the typeof of an array is "
+                                            "\"array\"; drop this check");
+      return;
+    }
+  }
 }
 
 JsonChecker::JsonChecker(Checker &checker) : checker_(checker) {}
@@ -272,13 +374,11 @@ void JsonChecker::addJsonFacts(const Expr *cond, Checker::Flow &whenTrue,
   Checker::Flow &different = bin->op == BinaryOp::Eq ? whenFalse : whenTrue;
   for (auto [side, other] : {std::pair{bin->lhs, bin->rhs}, std::pair{bin->rhs, bin->lhs}}) {
     if (isNothing(other)) {
+      bool null = nullName(other);
       if (const VarSymbol *var = jsonVariable(side); var && var->type->isOptional()) {
-        different.defined.insert(var);
+        (null ? equal : different).defined.insert(var);
       } else if (std::optional<Checker::FieldPath> path = jsonField(side)) {
-        if (nullName(other)) {
-          continue;
-        }
-        FieldFacts::defineField(different, *path);
+        FieldFacts::defineField(null ? equal : different, *path);
       }
       continue;
     }
@@ -288,9 +388,11 @@ void JsonChecker::addJsonFacts(const Expr *cond, Checker::Flow &whenTrue,
       continue;
     }
     const Type *narrowed = text->value == u"string"    ? Type::string()
-                           : text->value == u"number"  ? Type::doubleTy()
+                           : text->value == u"double"  ? Type::doubleTy()
                            : text->value == u"boolean" ? Type::boolTy()
+                           : text->value == u"array"   ? Type::array(Type::json())
                                                        : nullptr;
+    bool present = narrowed || text->value == u"object" || text->value == u"null";
     const VarSymbol *var = jsonVariable(typeOf->operand);
     if (!var) {
       std::optional<Checker::FieldPath> path = jsonField(typeOf->operand);
@@ -299,7 +401,7 @@ void JsonChecker::addJsonFacts(const Expr *cond, Checker::Flow &whenTrue,
       }
       if (narrowed) {
         narrowJsonField(equal, *path, narrowed);
-      } else if (text->value == u"object") {
+      } else if (present) {
         FieldFacts::defineField(equal, *path);
       } else if (text->value == u"undefined") {
         FieldFacts::defineField(different, *path);
@@ -310,13 +412,38 @@ void JsonChecker::addJsonFacts(const Expr *cond, Checker::Flow &whenTrue,
       equal.narrowed.push_back({var, narrowed});
     }
     if (var->type->isOptional()) {
-      if (narrowed || text->value == u"object") {
+      if (present) {
         equal.defined.insert(var);
       } else if (text->value == u"undefined") {
         different.defined.insert(var);
       }
     }
   }
+}
+
+Expr *JsonChecker::checkJsonIsJson(CallExpr *call, MemberExpr *member) {
+  call->type = Type::error();
+  if (checker_.callChecker().rejectSpread(call) ||
+      !checker_.argumentChecker().checkArity(call, member->loc(), 1, 1)) {
+    return call;
+  }
+  call->args[0] = checker_.exprChecker().checkExpr(call->args[0]);
+  const Type *type = call->args[0]->type;
+  if (type->isError()) {
+    return call;
+  }
+  if (!type->isUnknown() && !type->nonOptional()->isParam() && !checker_.checkingInstance_) {
+    checker_.diags_.error(call->args[0]->loc(),
+                          "Json.isJson tells whether an 'unknown' value holds a Json; a value of "
+                          "type '" +
+                              type->name() + "' is known when the program is built" +
+                              (type->nonOptional()->isJson() ? ", and it is a Json already" : ""));
+    return call;
+  }
+  call->builtin = Builtin::JsonIsJson;
+  call->type = Type::boolTy();
+
+  return call;
 }
 
 Expr *JsonChecker::checkArrayIsArray(CallExpr *call, MemberExpr *member) {

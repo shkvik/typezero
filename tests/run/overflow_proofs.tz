@@ -13,7 +13,7 @@ const prices: int[] = []
 const list = parsed.value
 if (Array.isArray(list)) {
   for (const item of list) {
-    if (typeof item != "number") continue
+    if (typeof item != "double") continue
     const value = item
     if (value >= 0 && value < 1000000) prices.push(Math.trunc(value).toInt())
   }

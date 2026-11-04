@@ -69,11 +69,11 @@ FuncSymbol *GenericChecker::genericNamed(const NameExpr *name) const {
   return entry.func && !entry.var && entry.func->isGeneric() ? entry.func : nullptr;
 }
 
-const Type *GenericChecker::numberParam(const Type *param) const {
-  const Type *&number = numberParams_[param];
+const Type *GenericChecker::numberParam(const Type *param, const Type *only) const {
+  const Type *&number = numberParams_[{param, only}];
   if (!number) {
-    const Type *constraint = nullptr;
-    for (const Type *t : param->alternatives()) {
+    const Type *constraint = only;
+    for (const Type *t : only ? llvm::ArrayRef<const Type *>() : param->alternatives()) {
       if (t->isNumeric()) {
         constraint = constraint ? TypeRelations::commonNumericType(constraint, t) : t;
       }
@@ -136,6 +136,13 @@ std::optional<bool> GenericChecker::constantCondition(const Expr *cond) const {
       return !*value;
     }
     return std::nullopt;
+  }
+  if (auto *call = dyn_cast<CallExpr>(cond); call && call->builtin == Builtin::JsonIsJson) {
+    const Type *type = call->args[0]->type;
+    if (type->isUnknown() || type->nonOptional()->isParam()) {
+      return std::nullopt;
+    }
+    return type->nonOptional()->isJson();
   }
   auto *bin = dyn_cast<BinaryExpr>(cond);
   if (!bin) {

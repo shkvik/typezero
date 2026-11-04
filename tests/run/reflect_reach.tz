@@ -37,7 +37,7 @@ async function make(factory: unknown, args: unknown[]): Promise<string> {
   const called = Reflect.apply(factory, undefined, args);
   if (called.isErr()) return called.error.message;
   const value = await called.value;
-  return typeof value == "number" ? String(value) : "not a number";
+  return typeof value == "int" ? String(value) : "not a number";
 }
 
 const factory: unknown = (n: int) => n * 2;

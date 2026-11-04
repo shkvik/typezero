@@ -1,4 +1,3 @@
-// same-as-node
 // fs.createReadStream() and fs.createWriteStream() (docs/streams.md, step
 // 3): their events, chunks of highWaterMark, start and end, an encoding
 // that gives strings, backpressure, the "a" flag, pipeline() from one file

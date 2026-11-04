@@ -3,6 +3,6 @@
 -512 0.25 1
 27 2.25 -4 18
 205891132094649
-number number string boolean object undefined string
+int double string boolean array undefined string
 -1 4 42 0
-number 1
+int 1

@@ -257,6 +257,7 @@ bool onlyReadsArgs(Builtin b) {
   case Builtin::ObjectValues:
   case Builtin::ObjectEntries:
   case Builtin::ArrayIsArray:
+  case Builtin::JsonIsJson:
   case Builtin::ArrIncludes:
   case Builtin::ArrIndexOf:
   case Builtin::ArrLastIndexOf:

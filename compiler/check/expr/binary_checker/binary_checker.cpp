@@ -14,6 +14,8 @@
 #include "compiler/library/json/json_checker/json_checker.h"
 #include "compiler/library/regex/match_checker/match_checker.h"
 #include "compiler/library/result/result_types/result_types.h"
+#include "compiler/program/types/type_spelling/type_spelling.h"
+#include "compiler/load/to_utf8/to_utf8.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/StringSet.h"
 #include "llvm/Support/ErrorHandling.h"
@@ -419,6 +421,61 @@ void BinaryChecker::reportMixedNumbers(const BinaryExpr *bin) {
   checker_.diags_.error(bin->loc(), message);
 }
 
+bool BinaryChecker::checkTypeOfName(const Expr *operand, const StringLitExpr *text) {
+  std::string name = toUtf8(text->value);
+  auto quoted = [](llvm::ArrayRef<llvm::StringRef> names) {
+    std::string list;
+    for (size_t i = 0; i < names.size(); ++i) {
+      list += (i == 0 ? "" : i + 1 == names.size() ? " or " : ", ") + ("\"" + names[i].str() + "\"");
+    }
+    return list;
+  };
+  if (name == "bigint") {
+    checker_.decimalChecker().reportBigInt(text->loc(), "'typeof x == \"bigint\"'");
+    return false;
+  }
+  if (!isTypeOfName(name)) {
+    std::vector<llvm::StringRef> all(std::begin(kTypeOfNames), std::end(kTypeOfNames));
+    if (name == "number") {
+      std::vector<llvm::StringRef> numbers;
+      if (operand->type && !operand->type->isError()) {
+        for (llvm::StringRef possible : typeOfNames(operand->type)) {
+          if (possible.starts_with("int") || possible.starts_with("uint") ||
+              possible == "double" || possible == "decimal") {
+            numbers.push_back(possible);
+          }
+        }
+      }
+      std::string here = numbers.empty() || numbers.size() > 3
+                             ? std::string()
+                             : "; for a value of type '" + operand->type->name().str() +
+                                   "' it is " + quoted(numbers);
+      checker_.diags_.error(text->loc(),
+                            "typeof gives no \"number\": each number type has its own name, "
+                            "\"int\", \"double\", \"decimal\", \"int32\"...; the type 'number' is "
+                            "'double', and its typeof is \"double\"" +
+                                here);
+      return false;
+    }
+    std::string why = name == "symbol" ? "typeof gives no \"symbol\": tz has no symbols as values"
+                                       : "'" + name + "' is not a name that typeof gives";
+    checker_.diags_.error(text->loc(), why + "; the names are " + quoted(all));
+    return false;
+  }
+  const Type *type = operand->type;
+  if (!type || type->isError() || checker_.checkingInstance_ || type->nonOptional()->isParam()) {
+    return true;
+  }
+  std::vector<llvm::StringRef> names = typeOfNames(type);
+  if (names.empty() || llvm::is_contained(names, llvm::StringRef(name))) {
+    return true;
+  }
+  checker_.diags_.error(text->loc(), "typeof of a value of type '" + type->name() + "' is " +
+                                         quoted(names) + ", never \"" + name + "\"");
+
+  return false;
+}
+
 Expr *BinaryChecker::checkEquality(BinaryExpr *bin) {
   if (Expr *null = checker_.jsonChecker().checkNullEquality(bin)) {
     return null;
@@ -429,8 +486,8 @@ Expr *BinaryChecker::checkEquality(BinaryExpr *bin) {
   for (auto [side, other] : {std::pair{bin->lhs, bin->rhs}, std::pair{bin->rhs, bin->lhs}}) {
     auto *typeOf = dyn_cast<UnaryExpr>(side);
     auto *text = dyn_cast<StringLitExpr>(other);
-    if (typeOf && typeOf->op == UnaryOp::TypeOf && text && text->value == u"bigint") {
-      checker_.decimalChecker().reportBigInt(text->loc(), "'typeof x == \"bigint\"'");
+    if (typeOf && typeOf->op == UnaryOp::TypeOf && text) {
+      checkTypeOfName(typeOf->operand, text);
     }
   }
   if (l->isError() || r->isError()) {

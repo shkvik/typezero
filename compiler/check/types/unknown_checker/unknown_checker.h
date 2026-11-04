@@ -10,6 +10,7 @@ public:
 
   static bool isObjectReference(const Type *type);
   static bool holdsUnknown(const Type *type);
+  static const Type *typeOfNarrowed(const std::u16string &name);
   std::string unknownHint(const Expr *expr, const Type *to);
   void reportUnknownUse(const Expr *object, const std::string &what);
   Expr *checkUnknownMember(MemberExpr *member);

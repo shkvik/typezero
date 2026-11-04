@@ -25,7 +25,7 @@ export function parseLine(line: string, n: int, separator: string): Result<Entry
 export type Config = { limit: decimal; rules: string[]; owner?: { name: string } }
 
 function isConfigJson(data: Json): boolean {
-  return typeof data == "object" && typeof data.limit == "number" && Array.isArray(data.rules)
+  return typeof data == "object" && typeof data.limit == "double" && Array.isArray(data.rules)
 }
 
 export function loadConfig(text: string): Result<Config, ConfigError> {

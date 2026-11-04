@@ -8,7 +8,7 @@ one 3
 three 5
 [ 'a', 'b', 'c' ] [ 'a', 'b', 'c' ] 1
 460
-7 number
+7 int
 true
 1 TWO
 b2 a1 c3

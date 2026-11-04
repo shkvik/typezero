@@ -1,4 +1,3 @@
-// same-as-node
 // A number changes its type only explicitly (docs/numbers.md, section 3):
 // both operands of an operator have one type, and so does the result.
 const a: int32 = 7

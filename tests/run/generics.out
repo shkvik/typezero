@@ -31,7 +31,7 @@ n: 5 b: true s: text 2.5
 n=5 d=0.5 b=false s=t
 2.3333333333333335 2 7 2.5 3000000000
 3.5 3.75 6 0.75
-text of 3 number 42 number 3 boolean object
+text of 3 number 42 number 3 boolean array
 AB #42
 1 2
 [ 1, 3 ]

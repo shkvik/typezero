@@ -15,7 +15,7 @@ console.log(word, seven, word.text.length + seven.value)
 type Kind<T> = T extends string ? "text" : T extends int ? "number" : "other"
 function kind<T>(x: T): Kind<T> {
   if (typeof x == "string") return "text"
-  if (typeof x == "number") return "number"
+  if (typeof x == "int") return "number"
   return "other"
 }
 const mixed: string | int = Math.random() < 2 ? "a" : 1

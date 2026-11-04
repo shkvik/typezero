@@ -129,7 +129,7 @@ llvm::Value *UnaryLowerer::emitTypeOf(Expr *operand) {
         lowering_.builder_.getInt32(0));
     lowering_.refCounts().dropOperand(value);
     return lowering_.builder_.CreateSelect(isClass,
-                                           lowering_.stringLowerer().stringLiteral(u"function"),
+                                           lowering_.stringLowerer().stringLiteral(u"class"),
                                            lowering_.stringLowerer().stringLiteral(u"object"));
   }
   if (!isa<NameExpr>(operand)) {

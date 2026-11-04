@@ -1,4 +1,3 @@
-// same-as-node --experimental-transform-types
 // Enums: numbers counting up, explicit values, strings.
 enum Color {
   Red,

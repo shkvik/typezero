@@ -1,4 +1,3 @@
-// same-as-node
 // Tuples: arrays of a fixed length with a type for each place. A tuple is a
 // reference, as an array is in JavaScript, and prints as one.
 function splitName(full: string): [string, string] {

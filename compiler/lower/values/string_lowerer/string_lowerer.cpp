@@ -125,13 +125,15 @@ llvm::Value *StringLowerer::emitConcat(BinaryExpr *bin) {
 Lowering::Operand StringLowerer::emitConcatPart(Expr *expr, bool canBorrow) {
   auto *conv = dyn_cast<CastExpr>(expr);
   const Type *from = conv && conv->isImplicit() ? conv->operand->type : nullptr;
-  if (!from || !(from->isInteger() || from->isFloat())) {
+  if (!from || !(from->isInteger() || from->isFloat()) ||
+      (from->isInteger() && from->isUnsigned() && from->intMax() > uint64_t(INT64_MAX))) {
     return lowering_.refCounts().emitOperand(expr, canBorrow);
   }
   llvm::Value *value = lowering_.exprLowerer().emitExpr(conv->operand);
-  llvm::Value *bits = from->isFloat()
-                          ? lowering_.builder_.CreateBitCast(value, lowering_.builder_.getInt64Ty())
-                          : lowering_.builder_.CreateSExt(value, lowering_.builder_.getInt64Ty());
+  llvm::Value *bits =
+      from->isFloat()      ? lowering_.builder_.CreateBitCast(value, lowering_.builder_.getInt64Ty())
+      : from->isUnsigned() ? lowering_.builder_.CreateZExt(value, lowering_.builder_.getInt64Ty())
+                           : lowering_.builder_.CreateSExt(value, lowering_.builder_.getInt64Ty());
   llvm::Value *part = llvm::UndefValue::get(lowering_.strTy_);
   part = lowering_.builder_.CreateInsertValue(
       part, lowering_.builder_.CreateIntToPtr(bits, lowering_.builder_.getPtrTy()), 0);
