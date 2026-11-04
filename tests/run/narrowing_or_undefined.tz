@@ -1,0 +1,49 @@
+// same-as-node --experimental-transform-types
+// A check for undefined joined with a type check by || or && keeps both: the value is the
+// checked type or undefined. Promise.all over an array literal has its length, so
+// destructuring it gives the values without undefined.
+type Item = string | int | undefined;
+
+function textOrNothing(reply: Item): string | undefined {
+  if (reply == undefined || typeof reply == "string") return reply;
+  return "number";
+}
+
+function textAfterReturn(item: Item): string | undefined {
+  if (item != undefined && typeof item != "string") return "number";
+  return item;
+}
+
+function numberOrNothing(item: Item): int | undefined {
+  if (typeof item == "undefined" || typeof item == "number") return item;
+  return -1;
+}
+
+function texts(items: Item[]): (string | undefined)[] {
+  const found: (string | undefined)[] = [];
+  for (const item of items) {
+    if (item != undefined && typeof item != "string") continue;
+    found.push(item);
+  }
+  return found;
+}
+
+let changed: Item = "x";
+if (changed == undefined || typeof changed == "string") {
+  changed = 5;
+  console.log("assigned", changed);
+}
+
+console.log(textOrNothing("a"), textOrNothing(1), textOrNothing(undefined));
+console.log(textAfterReturn("b"), textAfterReturn(2), textAfterReturn(undefined));
+console.log(numberOrNothing(3), numberOrNothing("c"), numberOrNothing(undefined));
+console.log(texts(["d", 4, undefined, "e"]));
+
+async function twice(n: int): Promise<int> {
+  return n * 2;
+}
+
+const [first, second] = await Promise.all([twice(1), twice(2)]);
+console.log(first + second);
+const [only] = await Promise.all([twice(5), twice(6), twice(7)]);
+console.log(only * 10);

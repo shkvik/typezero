@@ -287,6 +287,7 @@ private:
   struct Flow {
     Facts facts;
     llvm::SmallPtrSet<const VarSymbol *, 4> defined;
+    llvm::SmallPtrSet<const VarSymbol *, 2> undefinedVars;
     std::vector<FieldPath> definedFields;
     std::vector<std::pair<FieldPath, const Type *>> narrowedFields;
     std::vector<std::pair<const VarSymbol *, const Type *>> narrowed;

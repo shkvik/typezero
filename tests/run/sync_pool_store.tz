@@ -1,0 +1,93 @@
+// The object from a Pool may go into the store of AsyncLocalStorage.run when the run is
+// awaited inside 'use': code inside the run reads it with getStore() at any depth, so a
+// transaction needs no parameter. Outside such a run the same function takes its own object.
+import { AsyncLocalStorage } from "node:async_hooks"
+import { setTimeout as delay } from "node:timers/promises"
+import { Pool } from "tz:sync"
+
+class Connection {
+  public id: int
+  public log: string[]
+  public constructor(id: int) {
+    this.id = id
+    this.log = []
+  }
+  public async run(text: string): Promise<Result<int, never>> {
+    await Promise.resolve()
+    this.log.push(text)
+    return ok(this.id)
+  }
+}
+
+const pool = new Pool<Connection>({
+  max: 1,
+  create: async () => ok(new Connection(7)),
+})
+
+const transactions = new AsyncLocalStorage<{ connection: Connection }>()
+
+async function query(text: string): Promise<Result<int, never>> {
+  const scope = transactions.getStore()
+  if (scope != undefined) return scope.connection.run(text)
+  return pool.use(async (connection) => connection.run(text))
+}
+
+async function transaction<T, E>(fn: () => Promise<Result<T, E>>): Promise<Result<T, E>> {
+  return pool.use(async (connection) => {
+    const begun = await connection.run("begin")
+    const result = await transactions.run({ connection }, fn)
+    const ended = await connection.run(result.isErr() ? "rollback" : "commit")
+    console.log("ended on", begun.value, ended.value)
+    return result
+  })
+}
+
+async function inTransaction(connection: Connection, fn: () => Promise<Result<int, never>>) {
+  return transactions.run({ connection }, fn)
+}
+
+async function helper(): Promise<Result<int, never>> {
+  return query("helper")
+}
+
+function audit(connection: Connection): int {
+  return connection.log.length
+}
+
+async function publish(text: string): Promise<void> {
+  await Promise.resolve()
+  console.log("published", text)
+}
+
+async function note(text: string): Promise<void> {
+  const done = await query(text)
+  console.log("noted", text, done.value)
+}
+
+function background(): void {
+  void note("background")
+}
+
+const committed = await transaction(async () => {
+  const one = await query("one")
+  const [two, three] = await Promise.all([query("two"), helper()])
+  const scope = transactions.getStore()
+  const seen = scope == undefined ? -1 : audit(scope.connection)
+  void publish("inside")
+  return ok(one.value + two.value + three.value + seen)
+})
+console.log("committed", committed.isOk() ? committed.value : "error")
+
+const refused = await transaction(async () => {
+  const one = await query("doomed")
+  return one.value > 0 ? err("NOT_ALLOWED") : ok(one.value)
+})
+console.log("refused", refused.isErr() ? refused.error : "ok")
+
+const nested = await pool.use(async (connection) => inTransaction(connection, async () => query("helper run")))
+console.log("helper run", nested.value)
+
+background()
+await delay(20)
+const log = await pool.use(async (connection) => ok(connection.log.join(",")))
+console.log(log.value)

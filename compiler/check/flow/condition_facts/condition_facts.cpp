@@ -176,6 +176,7 @@ void ConditionFacts::addConditionFacts(const Expr *cond, Checker::Flow &whenTrue
       const Expr *side = isa<UndefinedExpr>(bin->rhs) ? bin->lhs : bin->rhs;
       if (const NameExpr *name = optionalVariable(side)) {
         (op == BinaryOp::Ne ? whenTrue : whenFalse).defined.insert(name->var);
+        (op == BinaryOp::Ne ? whenFalse : whenTrue).undefinedVars.insert(name->var);
       } else if (std::optional<Checker::FieldPath> path = optionalField(side)) {
         FieldFacts::defineField(op == BinaryOp::Ne ? whenTrue : whenFalse, *path);
       }
@@ -249,6 +250,7 @@ void ConditionFacts::addConditionFacts(const Expr *cond, Checker::Flow &whenTrue
       llvm::StringRef valueType = typeOfName(name->var->type->inner());
       if (text->value == u"undefined") {
         (op == BinaryOp::Eq ? whenFalse : whenTrue).defined.insert(name->var);
+        (op == BinaryOp::Eq ? whenTrue : whenFalse).undefinedVars.insert(name->var);
       } else if (std::u16string(valueType.begin(), valueType.end()) == text->value) {
         (op == BinaryOp::Eq ? whenTrue : whenFalse).defined.insert(name->var);
       }

@@ -90,6 +90,28 @@ Checker::Flow FlowChecker::join(const Checker::Flow &a, const Checker::Flow &b) 
     }
     result.narrowed.push_back({var, either});
   }
+  auto widenWithUndefined = [&](const Checker::Flow &empty, const Checker::Flow &other) {
+    for (const VarSymbol *var : empty.undefinedVars) {
+      auto narrowed = llvm::find_if(other.narrowed, [&](const auto &n) { return n.first == var; });
+      if (narrowed == other.narrowed.end() || var->type->nonOptional()->isParam() ||
+          narrowed->second->isParam() ||
+          llvm::any_of(result.narrowed, [&](const auto &n) { return n.first == var; })) {
+        continue;
+      }
+      const Type *either = Type::unionOf({narrowed->second, Type::undefinedTy()});
+      if (either->isError() || !unionProblem(either).empty() || either == var->type) {
+        continue;
+      }
+      result.narrowed.push_back({var, either});
+    }
+  };
+  widenWithUndefined(a, b);
+  widenWithUndefined(b, a);
+  for (const VarSymbol *var : a.undefinedVars) {
+    if (b.undefinedVars.contains(var)) {
+      result.undefinedVars.insert(var);
+    }
+  }
   for (const VarSymbol *var : a.okResults) {
     if (b.okResults.contains(var)) {
       result.okResults.insert(var);
@@ -136,6 +158,7 @@ void FlowChecker::assigned(const VarSymbol *var, const Expr *value) {
     return;
   }
   FieldFacts::forgetFieldsOf(checker_.flow_, var);
+  checker_.flow_.undefinedVars.erase(var);
   llvm::erase_if(checker_.flow_.narrowed,
                  [&](const auto &narrowed) { return narrowed.first == var; });
   if (const Type *base = type->nonOptional();
@@ -352,6 +375,11 @@ void FlowChecker::forgetCallEffects(Checker::Flow &flow) const {
   for (const VarSymbol *var : llvm::to_vector(flow.defined)) {
     if (changedByCalls(var)) {
       flow.defined.erase(var);
+    }
+  }
+  for (const VarSymbol *var : llvm::to_vector(flow.undefinedVars)) {
+    if (changedByCalls(var)) {
+      flow.undefinedVars.erase(var);
     }
   }
   llvm::erase_if(flow.narrowed,

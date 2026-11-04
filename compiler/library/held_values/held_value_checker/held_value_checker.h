@@ -24,6 +24,10 @@ protected:
   virtual bool takesOver(const CallExpr *c);
   virtual void sawNew(const NewExpr *n);
   virtual void sawVoid(const CallExpr *c);
+  virtual void sawCall(const CallExpr *c);
+  virtual bool heldMember(const MemberExpr *m) const;
+  virtual void spreadKept(const Expr *value);
+  virtual size_t extraKnown() const;
   virtual bool closuresCarry() const;
   virtual void kept(const Expr *value, bool closure, const llvm::Twine &where) = 0;
   virtual void finish();
@@ -39,6 +43,9 @@ protected:
   const FunctionDecl *programTarget(const CallExpr *c) const;
   static const Expr *bare(const Expr *e);
   static const FunctionDecl *callbackOf(const Expr *e);
+  static const ClassDecl *storageClass(const ClassDecl *cls);
+  static bool storageMethod(const CallExpr *c, llvm::StringRef name);
+  static const VarSymbol *storageOf(const CallExpr *c);
 
   Program &program_;
   const FunctionDecl *current_ = nullptr;
@@ -47,6 +54,9 @@ protected:
   llvm::DenseSet<const FunctionDecl *> returnsHeld_;
   llvm::DenseMap<const FunctionDecl *, std::vector<const FunctionDecl *>> callees_;
   llvm::DenseSet<const Expr *> allowedNews_;
+  llvm::DenseSet<const Expr *> awaited_;
+  llvm::DenseSet<const Expr *> allowedStores_;
+  llvm::DenseMap<const FunctionDecl *, std::vector<const CallExpr *>> callSites_;
 
 private:
   void walkProgram();

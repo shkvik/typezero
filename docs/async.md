@@ -623,6 +623,38 @@ console.log(length.value)                              // Result<int, never>: б
   (`ok(connection)`). Можно — читать и менять поля, звать его методы (правило проверяется в них,
   `this` метода — тот же объект), передать функции программы (правило проверяется в ней),
   `await`, `Promise.all` над его вызовами. Те же правила — у параметра `alive` и `reset`.
+- **Объект пула в хранилище `AsyncLocalStorage`** (4 ноября, для неявных транзакций базы, как
+  `typeorm-transactional`; примеры — `tmp/design/pool-in-store.tz`):
+
+  ```ts
+  const transactions = new AsyncLocalStorage<{ connection: PgConnection }>()
+
+  async function transaction<T, E>(fn: () => Promise<Result<T, E>>) {
+    return pool.use(async (connection) => {
+      ...
+      const result = await transactions.run({ connection }, fn)   // можно
+      ...
+    })
+  }
+
+  async function query(q: SqlQuery) {
+    const scope = transactions.getStore()                      // на любой глубине внутри run
+    if (scope != undefined) return scope.connection.execute(q)
+    return pool.use(async (connection) => connection.execute(q))
+  }
+  ```
+
+  Объект можно положить в хранилище `run`, если хранилище — литерал прямо в вызове, а `run`
+  ждут (`await` или `return`) внутри `use`. Тогда хранилище такого `AsyncLocalStorage` и объект
+  пула в его поле живут по правилам объекта пула: их нельзя сохранить (поле, переменная модуля,
+  массив, `Map`, копия `{ ...scope }`). В коде, до которого может дойти функция `run` (через
+  параметр — до функций, которые ей передают, и дальше по вызовам), нельзя таймер (`setTimeout`,
+  `setImmediate`, `queueMicrotask`, `process.nextTick`) и `void`-вызов с функцией, которая читает
+  хранилище — сама или через вызовы: она пошла бы после `use`. Функцию, которую зовут и в
+  транзакции, и вне её, проверка считает транзакционной. Ошибки: `run` без `await` или
+  `return`, хранилище не литералом (`run(new Scope(connection), fn)`), сохранение, копия, таймер,
+  `void`. Тесты: `run/sync_pool_store`, `errors/sync_pool_store`. Транзакция драйвера PostgreSQL
+  typezero-test-app на этом — 1,3 мс против 4,5 мс со своим соединением на каждую (замер 4 ноября).
 - **Параллельность.** Сам пул (кто свободен, кто ждёт) — под замком, как у `ConcurrentMap`:
   анализ не считает его действия общими данными. Функция в `use`, `create`, `alive` и `reset` —
   обратные вызовы библиотеки (своя задача на каждый вызов). Объект в функции `use` — **свой у

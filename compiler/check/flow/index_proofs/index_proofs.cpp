@@ -4,6 +4,7 @@
 #include "compiler/library/bytes/byte_proofs/byte_proofs.h"
 #include "compiler/library/bytes/bytes_check_helpers/bytes_check_helpers.h"
 #include "compiler/library/tz_modules/library_calls/library_calls.h"
+#include "compiler/program/ast/await_expr/await_expr.h"
 #include "llvm/ADT/STLExtras.h"
 #include <limits>
 
@@ -144,6 +145,12 @@ std::optional<Linear> IndexProofs::lengthOf(const Expr *object) const {
     if (type->isString() || type->isArray() || type->isByteView() ||
         type->bytes() == Type::Bytes::ArrayBuffer) {
       return Linear{Term::lengthOf(var), 0};
+    }
+  }
+  if (auto *wait = dyn_cast<AwaitExpr>(object)) {
+    if (auto *all = dyn_cast<CallExpr>(wait->value);
+        all && all->builtin == Builtin::PromiseAll && all->args.size() == 1) {
+      return lengthOf(all->args[0]);
     }
   }
   if (auto *call = dyn_cast<CallExpr>(object); call && call->builtin == Builtin::DecToFraction) {

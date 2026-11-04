@@ -1,0 +1,80 @@
+// The object from a Pool in the store of AsyncLocalStorage.run (docs/async.md, section 11):
+// the run must be awaited inside 'use', the store is an object literal, and inside the run
+// the store and the object in it live by the rules of the object from a Pool — nothing keeps
+// them, and no timer or 'void' call that reads the store may outlive 'use'.
+import { AsyncLocalStorage } from "node:async_hooks"
+import { Pool } from "tz:sync"
+
+class Connection {
+  public used: int
+  public constructor() {
+    this.used = 0
+  }
+  public async ping(): Promise<Result<int, never>> {
+    this.used += 1
+    return ok(this.used)
+  }
+}
+
+class Scope {
+  public connection: Connection
+  public constructor(connection: Connection) {
+    this.connection = connection
+  }
+}
+
+const pool = new Pool<Connection>({ max: 1, create: async () => ok(new Connection()) })
+const transactions = new AsyncLocalStorage<{ connection: Connection }>()
+const scopes = new AsyncLocalStorage<Scope>()
+const kept: Connection[] = []
+let last: Connection | undefined = undefined
+
+async function query(): Promise<Result<int, never>> {
+  const scope = transactions.getStore()
+  if (scope != undefined) return scope.connection.ping()
+  return pool.use(async (connection) => connection.ping())
+}
+
+function audit(connection: Connection | undefined): int {
+  return connection == undefined ? 0 : connection.used
+}
+
+function peek(): int {
+  return audit(transactions.getStore()?.connection)
+}
+
+async function touch(): Promise<void> {
+  const done = await query()
+  console.log(done.value)
+}
+
+async function work(): Promise<Result<int, never>> {
+  const scope = transactions.getStore()
+  if (scope == undefined) return ok(0)
+  // expect-error: the object from a Pool lives only inside 'use' (after it the pool gives it to another request), so it can't be kept in a module variable (docs/async.md, section 11)
+  last = scope.connection
+  // expect-error: the object from a Pool lives only inside 'use' (after it the pool gives it to another request), so it can't be kept by 'push', which may store it (docs/async.md, section 11)
+  kept.push(scope.connection)
+  // expect-error: this store holds the object from a Pool, so a copy of it would keep the object after 'use'; copy the fields you need instead (docs/async.md, section 11)
+  const copy = { ...scope }
+  // expect-error: this function runs later, but it reads the store through 'peek', and this code can run inside 'run' whose store holds the object from a Pool: by then 'use' may have given the object to another request; do the work before, or outside the transaction (docs/async.md, section 11)
+  setTimeout(() => peek(), 10)
+  // expect-error: this function runs later, but it reads the store with getStore(), and this code can run inside 'run' whose store holds the object from a Pool: by then 'use' may have given the object to another request; do the work before, or outside the transaction (docs/async.md, section 11)
+  setImmediate(() => audit(transactions.getStore()?.connection))
+  // expect-error: 'void' does not wait for this call, but it reads the store through 'query', and this code can run inside 'run' whose store holds the object from a Pool, which 'use' gives to another request as soon as its function ends; await the call instead (docs/async.md, section 11)
+  void touch()
+  return ok(copy.connection.used)
+}
+
+const finished = await pool.use(async (connection) => {
+  // expect-error: 'run' with the object from a Pool in its store must be awaited (or returned) inside 'use': after 'use' the pool gives the object to another request, while the code inside 'run' could still use it (docs/async.md, section 11)
+  void transactions.run({ connection }, touch)
+  // expect-error: 'run' with the object from a Pool in its store must be awaited (or returned) inside 'use': after 'use' the pool gives the object to another request, while the code inside 'run' could still use it (docs/async.md, section 11)
+  const pending = transactions.run({ connection }, work)
+  const waited = await pending
+  // expect-error: a store that holds the object from a Pool is written as an object literal right in 'run', e.g. 'run({ connection }, fn)': then the compiler sees where the object goes (docs/async.md, section 11)
+  const scoped = await scopes.run(new Scope(connection), work)
+  console.log(waited.value, scoped.value)
+  return transactions.run({ connection }, work)
+})
+console.log(finished.value)

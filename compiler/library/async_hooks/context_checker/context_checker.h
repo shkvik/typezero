@@ -22,9 +22,6 @@ private:
   void checkIntervals();
   const FunctionDecl *reader(const FunctionDecl *fn) const;
 
-  static const ClassDecl *storageClass(const ClassDecl *cls);
-  static bool storageMethod(const CallExpr *c, llvm::StringRef name);
-
   llvm::DenseSet<const FunctionDecl *> readsDirectly_;
   std::vector<const CallExpr *> intervals_;
   std::vector<const CallExpr *> runs_;

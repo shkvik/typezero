@@ -142,21 +142,4 @@ void ContextChecker::checkIntervals() {
   }
 }
 
-const ClassDecl *ContextChecker::storageClass(const ClassDecl *cls) {
-  for (; cls; cls = cls->parent) {
-    const ClassDecl *base = cls->generic ? cls->generic : cls;
-    if ((base->library || cls->library) && base->name == "AsyncLocalStorage") {
-      return base;
-    }
-  }
-
-  return nullptr;
-}
-
-bool ContextChecker::storageMethod(const CallExpr *c, llvm::StringRef name) {
-  const FunctionDecl *decl = c->method ? c->method->decl : nullptr;
-
-  return decl && decl->name == name && storageClass(decl->cls);
-}
-
 }

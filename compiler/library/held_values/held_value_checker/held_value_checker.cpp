@@ -97,6 +97,18 @@ void HeldValueChecker::sawNew(const NewExpr *n) { (void)n; }
 
 void HeldValueChecker::sawVoid(const CallExpr *c) { (void)c; }
 
+void HeldValueChecker::sawCall(const CallExpr *c) { (void)c; }
+
+bool HeldValueChecker::heldMember(const MemberExpr *m) const {
+  (void)m;
+
+  return false;
+}
+
+void HeldValueChecker::spreadKept(const Expr *value) { (void)value; }
+
+size_t HeldValueChecker::extraKnown() const { return 0; }
+
 bool HeldValueChecker::closuresCarry() const { return false; }
 
 void HeldValueChecker::finish() {}
@@ -130,7 +142,8 @@ void HeldValueChecker::run() {
     }
   }
   auto known = [&] {
-    return heldVars_.size() + heldParams_.size() + returnsHeld_.size() + heldThis_.size();
+    return heldVars_.size() + heldParams_.size() + returnsHeld_.size() + heldThis_.size() +
+           extraKnown();
   };
   for (int round = 0; round < 32; ++round) {
     size_t before = known();
@@ -148,6 +161,9 @@ void HeldValueChecker::walkProgram() {
   walked_.clear();
   callees_.clear();
   allowedNews_.clear();
+  awaited_.clear();
+  allowedStores_.clear();
+  callSites_.clear();
   startWalk();
   SourceFile &file = program_.file;
   for (Stmt *item : file.items) {
@@ -289,6 +305,7 @@ void HeldValueChecker::stmt(const Stmt *s) {
     break;
   case Stmt::Kind::Return: {
     const Expr *value = cast<ReturnStmt>(s)->value;
+    awaited_.insert(bare(value));
     expr(value);
     if (current_ && isHeld(value)) {
       returnsHeld_.insert(current_);
@@ -320,6 +337,10 @@ void HeldValueChecker::expr(const Expr *e) {
   case Expr::Kind::Function:
     function(cast<FunctionExpr>(e)->fn);
     return;
+  case Expr::Kind::Await:
+    awaited_.insert(bare(cast<AwaitExpr>(e)->value));
+    expr(cast<AwaitExpr>(e)->value);
+    return;
   case Expr::Kind::Call:
     call(cast<CallExpr>(e));
     return;
@@ -342,7 +363,9 @@ void HeldValueChecker::expr(const Expr *e) {
     for (const ObjectLitExpr::Property &p : cast<ObjectLitExpr>(e)->props) {
       expr(p.key);
       expr(p.value);
-      if (!p.spread && isHeld(p.value)) {
+      if (p.spread && isHeld(p.value)) {
+        spreadKept(p.value);
+      } else if (!p.spread && isHeld(p.value) && !allowedStores_.contains(e)) {
         keep(p.value, "in a new object");
       }
     }
@@ -362,6 +385,7 @@ void HeldValueChecker::expr(const Expr *e) {
 }
 
 void HeldValueChecker::call(const CallExpr *c) {
+  sawCall(c);
   expr(c->callee);
   for (const Expr *arg : c->args) {
     expr(arg);
@@ -369,6 +393,12 @@ void HeldValueChecker::call(const CallExpr *c) {
   const FunctionDecl *target = programTarget(c);
   if (current_ && target) {
     callees_[current_].push_back(target);
+  }
+  if (target) {
+    callSites_[target].push_back(c);
+    if (target->generic) {
+      callSites_[target->generic].push_back(c);
+    }
   }
   bool over = takesOver(c);
   if (current_ && !over) {
@@ -422,6 +452,9 @@ void HeldValueChecker::create(const NewExpr *n) {
   const FunctionDecl *target = n->ctor ? programTarget(n->ctor) : nullptr;
   if (current_ && target) {
     callees_[current_].push_back(target);
+  }
+  if (allowedStores_.contains(n)) {
+    return;
   }
   for (unsigned i = 0; i < args.size(); ++i) {
     if (!isHeld(args[i])) {
@@ -485,9 +518,14 @@ bool HeldValueChecker::isHeld(const Expr *e) const {
     auto *member = cast<MemberExpr>(e);
     const Type *object =
         member->object && member->object->type ? member->object->type->nonOptional() : nullptr;
+    if (heldMember(member)) {
+      return true;
+    }
     return object && object->isResult() && (member->name == "value" || member->name == "error") &&
            isHeld(member->object);
   }
+  case Expr::Kind::OptionalChain:
+    return isHeld(cast<OptionalChainExpr>(e)->chain);
   case Expr::Kind::Function:
     return closuresCarry() && carries(cast<FunctionExpr>(e)->fn);
   case Expr::Kind::Conditional:
@@ -585,6 +623,30 @@ const FunctionDecl *HeldValueChecker::callbackOf(const Expr *e) {
   }
 
   return nullptr;
+}
+
+const ClassDecl *HeldValueChecker::storageClass(const ClassDecl *cls) {
+  for (; cls; cls = cls->parent) {
+    const ClassDecl *base = cls->generic ? cls->generic : cls;
+    if ((base->library || cls->library) && base->name == "AsyncLocalStorage") {
+      return base;
+    }
+  }
+
+  return nullptr;
+}
+
+bool HeldValueChecker::storageMethod(const CallExpr *c, llvm::StringRef name) {
+  const FunctionDecl *decl = c->method ? c->method->decl : nullptr;
+
+  return decl && decl->name == name && storageClass(decl->cls);
+}
+
+const VarSymbol *HeldValueChecker::storageOf(const CallExpr *c) {
+  auto *member = dyn_cast_or_null<MemberExpr>(c->callee);
+  auto *name = member ? dyn_cast_or_null<NameExpr>(bare(member->object)) : nullptr;
+
+  return name ? name->var : nullptr;
 }
 
 const FunctionDecl *HeldValueChecker::programTarget(const CallExpr *c) const {
