@@ -1,0 +1,45 @@
+// Reflect.fill fills a class without a constructor; a class known when compiling that has one,
+// is abstract or is a class of JavaScript is an error here, and its Result has no error of the
+// class, so a case for it cannot be written.
+class Engine {
+  readonly turn: int;
+  constructor(turn: int) {
+    this.turn = turn;
+  }
+}
+
+abstract class Base {
+  readonly id: int;
+}
+
+class Dto {
+  readonly name: string;
+}
+
+const values = new Map<string, unknown>();
+// expect-error: Reflect.fill cannot fill 'Engine': it sets its fields in a constructor; make it with 'new Engine(...)' (Reflect.fill gives the fields of a class without a constructor their values)
+const a = Reflect.fill(Engine, values);
+// expect-error: Reflect.fill cannot fill 'Base': it is abstract; fill a class that extends it (Reflect.fill gives the fields of a class without a constructor their values)
+const b = Reflect.fill(Base, values);
+// expect-error: Reflect.fill cannot fill 'Map': it is a class of JavaScript (Reflect.fill gives the fields of a class without a constructor their values)
+const c = Reflect.fill(Map, values);
+// expect-error: Reflect.fill makes an object of a class, and this is a 'Dto'
+const d = Reflect.fill(new Dto(), values);
+// expect-error: type 'Map<string, string>' is not assignable to type 'Map<string, unknown>'
+const e = Reflect.fill(Dto, new Map<string, string>());
+const f = Reflect.fill(Dto, values);
+if (f.isErr()) {
+  switch (f.error.kind) {
+    case "REFLECT_FILL_ERROR_TYPE":
+      console.log(f.error.details.expected);
+      break;
+    case "REFLECT_FILL_ERROR_UNKNOWN_FIELD":
+      console.log(f.error.details.fields);
+      break;
+    // expect-error: a case of type '"REFLECT_FILL_ERROR_CLASS"' cannot be compared with a 'switch' value of type '"REFLECT_FILL_ERROR_TYPE" | "REFLECT_FILL_ERROR_UNKNOWN_FIELD"'
+    case "REFLECT_FILL_ERROR_CLASS":
+      console.log("never");
+      break;
+  }
+}
+console.log(a, b, c, d, e);

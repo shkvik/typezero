@@ -67,6 +67,9 @@ Expr *NameChecker::checkName(NameExpr *name) {
       }
     }
     if (const Type *narrowed = checker_.genericChecker().narrowedType(entry.var)) {
+      if (narrowed->isOptional() && checker_.isDefined(entry.var)) {
+        narrowed = narrowed->inner();
+      }
       return checker_.typeRelations().convert(name, narrowed);
     }
     if (name->type->isOptional() && checker_.isDefined(entry.var)) {

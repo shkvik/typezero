@@ -49,6 +49,9 @@ Expr *StaticChecker::checkStaticMember(MemberExpr *member, ClassDecl *cls, const
     checker_.classMemberChecker().checkAccess(owner, f.access, name, member->loc());
     auto *read = checker_.ctx_.make<NameExpr>(member->loc(), f.var->name);
     read->var = f.var;
+    if (member->object && member->object->loc() != member->loc()) {
+      checker_.file_->namedUses[read] = {cls, member->object->loc(), ""};
+    }
     if (!f.var->type) {
       if (!owner->declared && checker_.loading_ && checker_.functions_.empty()) {
         checker_.diags_.error(member->loc(), "'" + f.var->name + "' is used before class '" +

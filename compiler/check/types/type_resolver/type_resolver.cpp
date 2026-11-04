@@ -37,7 +37,14 @@ TypeResolver::TypeResolver(Checker &checker) : checker_(checker) {}
 const Type *TypeResolver::resolveType(const TypeRef &ref, bool allowVoid) {
   const Type *type = resolveTypeInner(ref);
   if (type->isVoid() && !allowVoid) {
-    checker_.diags_.error(ref.loc, "'void' can only be used as a return type");
+    auto *bound =
+        ref.kind == TypeRef::Kind::Name
+            ? dyn_cast_or_null<TypeAliasDecl>(checker_.typeDeclarer().lookupType(ref.name))
+            : nullptr;
+    if (bound && bound->boundParam) {
+      return Type::undefinedTy();
+    }
+    checker_.diags_.error(ref.loc, "'void' can only be used as a return type or a type argument");
     return Type::error();
   }
   if (type->isUndefined()) {
@@ -204,7 +211,7 @@ const Type *TypeResolver::resolveTypeInner(const TypeRef &ref) {
             llvm::dyn_cast_or_null<ClassDecl>(checker_.typeDeclarer().lookupType(ref.name))) {
       std::vector<const Type *> args;
       for (const TypeRef &arg : ref.args) {
-        args.push_back(resolveType(arg, false));
+        args.push_back(resolveType(arg, true));
         if (args.back()->isError()) {
           return args.back();
         }

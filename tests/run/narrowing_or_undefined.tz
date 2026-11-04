@@ -1,7 +1,8 @@
 // same-as-node --experimental-transform-types
 // A check for undefined joined with a type check by || or && keeps both: the value is the
 // checked type or undefined. Promise.all over an array literal has its length, so
-// destructuring it gives the values without undefined.
+// destructuring it gives the values without undefined. A typeof check after that drops the
+// undefined too, also of a field of Json.
 type Item = string | int | undefined;
 
 function textOrNothing(reply: Item): string | undefined {
@@ -28,6 +29,13 @@ function texts(items: Item[]): (string | undefined)[] {
   return found;
 }
 
+function textOfJson(data: Json): string {
+  if (typeof data != "object" || data == null || Array.isArray(data)) return "not an object";
+  const text = data.text;
+  if (text != undefined && typeof text != "string") return "not a string";
+  return typeof text == "string" ? text : "none";
+}
+
 let changed: Item = "x";
 if (changed == undefined || typeof changed == "string") {
   changed = 5;
@@ -38,6 +46,7 @@ console.log(textOrNothing("a"), textOrNothing(1), textOrNothing(undefined));
 console.log(textAfterReturn("b"), textAfterReturn(2), textAfterReturn(undefined));
 console.log(numberOrNothing(3), numberOrNothing("c"), numberOrNothing(undefined));
 console.log(texts(["d", 4, undefined, "e"]));
+console.log(textOfJson({ text: "f" }), textOfJson({}), textOfJson({ text: 5 }), textOfJson([]));
 
 async function twice(n: int): Promise<int> {
   return n * 2;

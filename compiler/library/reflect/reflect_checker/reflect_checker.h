@@ -24,6 +24,7 @@ private:
   llvm::SmallPtrSet<ClassDecl *, 8> escaped_;
   llvm::SmallPtrSet<ClassDecl *, 8> reflectedObjects_;
   bool reflectGetAny_ = false;
+  bool reflectFillAny_ = false;
 };
 
 }

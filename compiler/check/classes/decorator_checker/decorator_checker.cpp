@@ -109,7 +109,8 @@ const Type *DecoratorChecker::methodDescriptorType(const Type *args, const Type 
   return type;
 }
 
-bool DecoratorChecker::decoratorParams(Expr *callee, std::vector<const Type *> &params) {
+bool DecoratorChecker::decoratorParams(Expr *callee, std::vector<const Type *> &params,
+                                       size_t &required) {
   const FuncSymbol *sym = nullptr;
   if (auto *name = dyn_cast<NameExpr>(callee)) {
     Checker::ScopeEntry entry = checker_.scopes().lookup(name->name);
@@ -119,6 +120,7 @@ bool DecoratorChecker::decoratorParams(Expr *callee, std::vector<const Type *> &
         return false;
       }
       params.assign(type->params().begin(), type->params().end());
+      required = type->minArgs();
       return true;
     }
     sym = entry.func;
@@ -139,6 +141,7 @@ bool DecoratorChecker::decoratorParams(Expr *callee, std::vector<const Type *> &
     return false;
   }
   params = sym->params;
+  required = sym->minArgs;
 
   return true;
 }
@@ -299,6 +302,38 @@ void DecoratorChecker::decorate(ClassDecl *cls, ClassField *field, FunctionDecl 
     return member && member->name == "metadata" &&
            checker_.callChecker().isGlobalName(member->object, "Reflect");
   };
+  const Type *earlyDescriptor = nullptr;
+  auto methodDescriptor = [&]() -> const Type * {
+    if (earlyDescriptor || !method) {
+      return earlyDescriptor;
+    }
+    FuncSymbol *sym = method->sym;
+    checker_.returnInferrer().resolveParams(sym);
+    const Type *ret = checker_.returnInferrer().returnType(sym);
+    if (!ret || ret->isError() || llvm::is_contained(sym->params, nullptr)) {
+      return nullptr;
+    }
+    earlyDescriptor = methodDescriptorType(Type::tuple(sym->params), ret);
+    return earlyDescriptor;
+  };
+  auto factoryHint = [&](const Expr *expr) -> const Type * {
+    auto *call = dyn_cast<CallExpr>(expr);
+    auto *name = call ? dyn_cast<NameExpr>(call->callee) : nullptr;
+    if (!name || !name->typeArgs.empty() || own != Place::Method || cls->isGeneric()) {
+      return nullptr;
+    }
+    const FuncSymbol *factory = checker_.scopes().lookup(name->name).func;
+    if (!factory || !factory->decl || factory->decl->typeParams.empty()) {
+      return nullptr;
+    }
+    const Type *descriptorType = methodDescriptor();
+    if (!descriptorType) {
+      return nullptr;
+    }
+
+    return Type::function({Type::classRef(cls, cls->name), Type::string(), descriptorType}, 3,
+                          false, Type::voidTy());
+  };
   std::vector<Expr *> callees;
   for (const Checker::DecoratorUse &use : uses) {
     Expr *expr = use.decorator->expr;
@@ -316,8 +351,14 @@ void DecoratorChecker::decorate(ClassDecl *cls, ClassField *field, FunctionDecl 
     d.name = hidden;
     d.loc = use.decorator->loc;
     d.init = expr;
-    decl->decls.push_back(std::move(d));
-    checker_.stmtChecker().checkStmt(decl);
+    if (const Type *hint = use.param < 0 ? factoryHint(expr) : nullptr) {
+      d.init = checker_.exprChecker().checkExpr(expr, hint);
+      d.sym = checker_.scopes().declareVar(hidden, d.loc, d.init->type, true);
+      decl->decls.push_back(std::move(d));
+    } else {
+      decl->decls.push_back(std::move(d));
+      checker_.stmtChecker().checkStmt(decl);
+    }
     out.push_back(decl);
     callees.push_back(checker_.ctx_.make<NameExpr>(use.decorator->loc, hidden));
   }
@@ -332,15 +373,17 @@ void DecoratorChecker::decorate(ClassDecl *cls, ClassField *field, FunctionDecl 
       continue;
     }
     std::vector<const Type *> params;
-    bool known = decoratorParams(callees[i], params);
+    size_t required = 0;
+    bool known = decoratorParams(callees[i], params, required);
     size_t count = known ? params.size() : given;
+    size_t needs = known ? std::min(required, count) : given;
     std::string name = decoratorName(uses[i].decorator->expr);
     std::string label = name.empty() ? "the decorator" : "'" + name + "'";
     llvm::SMLoc loc = uses[i].decorator->loc;
     const Type *third = known && params.size() >= 3 ? params[2]->nonOptional() : nullptr;
-    if (count > given) {
+    if (needs > given) {
       checker_.diags_.error(loc, label + " cannot decorate " + placeText(place) + ": it takes " +
-                                     std::to_string(count) + " arguments, and a decorator of " +
+                                     std::to_string(needs) + " arguments, and a decorator of " +
                                      placeText(place) + " gets " + std::to_string(given) + ", " +
                                      argumentsText(place));
       ok = false;
@@ -380,7 +423,8 @@ void DecoratorChecker::decorate(ClassDecl *cls, ClassField *field, FunctionDecl 
     if (!ret || ret->isError() || llvm::is_contained(sym->params, nullptr)) {
       return;
     }
-    descType = methodDescriptorType(Type::tuple(sym->params), ret);
+    descType =
+        earlyDescriptor ? earlyDescriptor : methodDescriptorType(Type::tuple(sym->params), ret);
     VarSymbol *impl = checker_.ctx_.newVar();
     impl->name = checker_.ctx_.keepName("%" + cls->name.str() + "." + method->name.str() + "." +
                                         std::to_string(method->variant));

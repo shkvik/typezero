@@ -230,9 +230,10 @@ llvm::Constant *UnknownLowerer::classObject(const ClassDecl *cls) {
                                           llvm::GlobalValue::PrivateLinkage, layoutInit,
                                           "tz.classlayout." + name);
   layout->setUnnamedAddr(llvm::GlobalValue::UnnamedAddr::Global);
-  llvm::Constant *info = (cls->reflectNew || cls->reflectMethods) && !cls->builtin
-                             ? lowering_.classInfoLowerer().classInfoGlobal(cls)
-                             : llvm::ConstantPointerNull::get(lowering_.builder_.getPtrTy());
+  llvm::Constant *info =
+      (cls->reflectNew || cls->reflectMethods || cls->reflectFill) && !cls->builtin
+          ? lowering_.classInfoLowerer().classInfoGlobal(cls)
+          : llvm::ConstantPointerNull::get(lowering_.builder_.getPtrTy());
   std::vector<llvm::Constant *> init{lowering_.builder_.getInt64(kStaticRefCount),
                                      layout,
                                      parent,

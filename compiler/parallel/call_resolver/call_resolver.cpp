@@ -53,6 +53,17 @@ void CallResolver::resolve() {
     for (unsigned fi = 0; fi < analysis_.fns_.size(); ++fi) {
       FnInfo &caller = analysis_.fns_[fi];
       for (CallRec &rec : caller.calls) {
+        if (rec.reflect == CallRec::Reflect::Apply && rec.noSelf) {
+          const llvm::DenseSet<unsigned> &boxed =
+              analysis_.unknownAnyFn_ ? analysis_.valueFns_ : analysis_.unknownFns_;
+          std::vector<unsigned> values(boxed.begin(), boxed.end());
+          std::sort(values.begin(), values.end());
+          for (unsigned g : values) {
+            analysis_.callWalk().addCallee(rec, analysis_.fns_[g].decl,
+                                           analysis_.classRefOrNone(analysis_.fns_[g]), true);
+          }
+          continue;
+        }
         if (rec.reflect != CallRec::Reflect::None) {
           std::vector<const ClassDecl *> classes = analysis_.programClasses_;
           for (const ClassDecl *cls : analysis_.classes_) {
@@ -71,7 +82,8 @@ void CallResolver::resolve() {
                 continue;
               }
               for (const FunctionDecl *method : cls->methods) {
-                if (!method->isStatic) {
+                if (!method->isStatic && (rec.reflectNames.empty() ||
+                                          llvm::is_contained(rec.reflectNames, method->name))) {
                   analysis_.callWalk().addCallee(rec, method, rec.bySelf, true);
                 }
               }

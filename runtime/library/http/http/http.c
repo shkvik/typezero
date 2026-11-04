@@ -2047,7 +2047,12 @@ static void respond(NetConn *c, int32_t status, void *text_obj, uint64_t text_me
         (unsigned long long)((flags & RESPOND_NO_BODY) && given >= 0 ? (size_t)given : length));
     put(c, line);
   }
-  if (!h->keep_alive) {
+  int unread = c->server && h->keep_alive && !h->body_done &&
+               (h->body != BODY_LENGTH || h->body_read + h->remaining > HTTP_MAX_DISCARD);
+  if (unread) {
+    h->ending = 1;
+  }
+  if (!h->keep_alive || unread) {
     put(c, "connection: close\r\n");
   } else if (h->version == 10) {
     put(c, "connection: keep-alive\r\n");

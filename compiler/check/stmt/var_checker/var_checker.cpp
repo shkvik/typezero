@@ -18,6 +18,7 @@
 #include "compiler/infer/call_cycles/call_cycles.h"
 #include "compiler/library/regex/regex_checker/regex_checker.h"
 #include "compiler/library/tz_modules/tz_modules_checker/tz_modules_checker.h"
+#include "compiler/load/to_utf8/to_utf8.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/StringSet.h"
 #include "llvm/Support/ErrorHandling.h"
@@ -198,6 +199,37 @@ void VarChecker::checkVarDecl(VarDeclStmt *decl) {
           got && got->builtin == Builtin::ReflectMethod &&
           !checker_.severalVariants_.contains(got)) {
         d.sym->reflectMethod = got->method->decl;
+      }
+      if (auto *got = llvm::dyn_cast_or_null<CallExpr>(value);
+          got && got->builtin == Builtin::ReflectGet && got->args.size() == 2) {
+        const Expr *key = got->args[1];
+        while (auto *conv = llvm::dyn_cast<CastExpr>(key)) {
+          if (!conv->isImplicit()) {
+            break;
+          }
+          key = conv->operand;
+        }
+        std::vector<std::u16string> names;
+        if (auto *lit = llvm::dyn_cast<StringLitExpr>(key)) {
+          names.push_back(lit->value);
+        } else if (const Type *type = key->type ? key->type->nonOptional() : nullptr) {
+          std::vector<const Type *> members;
+          if (type->isUnion()) {
+            members.assign(type->members().begin(), type->members().end());
+          } else {
+            members.push_back(type);
+          }
+          for (const Type *m : members) {
+            if (!m->isLiteral() || !m->literalBase()->isString()) {
+              names.clear();
+              break;
+            }
+            names.push_back(m->literalText());
+          }
+        }
+        for (const std::u16string &name : names) {
+          d.sym->reflectNames.push_back(checker_.ctx_.keepName(toUtf8(name)));
+        }
       }
       auto *made = llvm::dyn_cast_or_null<CallExpr>(value);
       bool fresh =

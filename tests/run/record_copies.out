@@ -1,0 +1,10 @@
+[ 'online', 'ranked' ] [ '2', '4' ]
+{
+  authorization: 'Bearer x',
+  'content-type': 'application/json',
+  'x-extra': '1'
+} { authorization: 'Bearer x', 'content-type': 'application/json' }
+name,age name,nick,age
+{"a":1,"b":"two","c":[true]}
+{ x: '1' }
+2 -2 0

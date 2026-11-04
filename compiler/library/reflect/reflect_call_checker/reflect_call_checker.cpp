@@ -130,7 +130,7 @@ Expr *ReflectCallChecker::checkReflectCall(CallExpr *call, MemberExpr *member,
       {"getOwnMetadata", Builtin::MetaGetOwn, 2, 3}, {"hasMetadata", Builtin::MetaHas, 2, 3},
       {"hasOwnMetadata", Builtin::MetaHasOwn, 2, 3}, {"deleteMetadata", Builtin::MetaDelete, 2, 3}};
   llvm::StringRef fn = member->name;
-  if (fn == "get" || fn == "apply" || fn == "construct") {
+  if (fn == "get" || fn == "apply" || fn == "construct" || fn == "fill") {
     return checker_.reflectChecker().checkReflection(call, member, expected);
   }
   const Function *function =
@@ -150,7 +150,7 @@ Expr *ReflectCallChecker::checkReflectCall(CallExpr *call, MemberExpr *member,
       checker_.diags_.error(member->loc(),
                             "'Reflect." + fn +
                                 "' is not supported; Reflect has get, apply, "
-                                "construct, defineMetadata, getMetadata, getOwnMetadata, "
+                                "construct, fill, defineMetadata, getMetadata, getOwnMetadata, "
                                 "hasMetadata, hasOwnMetadata and deleteMetadata");
     }
     checkArgsLoosely();

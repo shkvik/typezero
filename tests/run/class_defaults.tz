@@ -1,0 +1,34 @@
+// A class without a constructor (its own or of a parent) gets one that sets every field without
+// a value to an empty one: "", 0, false, [], an empty Map or Set, the first member of an enum or
+// of a union of literals, an object of a class without a constructor, an object of the empty
+// values of its fields. A declared value stays; an optional field stays undefined.
+enum GameMode {
+  Classic = "classic",
+  Ranked = "ranked",
+}
+
+class Rules {
+  readonly victoryPoints: 8 | 10 | 12;
+  readonly bankLimited: boolean;
+}
+
+class Page {
+  readonly page: int;
+  readonly take: int = 10;
+}
+
+class ListReq extends Page {
+  readonly query: string;
+  readonly mode: GameMode;
+  readonly rules: Rules;
+  readonly tags: string[];
+  readonly seen: Map<string, int>;
+  readonly ids: Set<string>;
+  readonly rating: double;
+  readonly point: { x: int; y: double };
+  readonly note?: string;
+}
+
+const req = new ListReq();
+console.log(req);
+console.log(req.query.length, req.tags.length, req.seen.size, req.ids.size, req.rules.victoryPoints, req.mode == GameMode.Classic);

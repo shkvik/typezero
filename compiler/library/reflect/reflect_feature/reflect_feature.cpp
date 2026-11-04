@@ -30,6 +30,7 @@ bool ReflectFeature::lowers(Builtin builtin) const {
   case Builtin::ReflectApply:
   case Builtin::ReflectConstruct:
   case Builtin::ReflectMethod:
+  case Builtin::ReflectFill:
     return true;
   default:
     return false;

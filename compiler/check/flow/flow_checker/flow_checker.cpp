@@ -94,7 +94,7 @@ Checker::Flow FlowChecker::join(const Checker::Flow &a, const Checker::Flow &b) 
     for (const VarSymbol *var : empty.undefinedVars) {
       auto narrowed = llvm::find_if(other.narrowed, [&](const auto &n) { return n.first == var; });
       if (narrowed == other.narrowed.end() || var->type->nonOptional()->isParam() ||
-          narrowed->second->isParam() ||
+          var->type->nonOptional()->isJson() || narrowed->second->isParam() ||
           llvm::any_of(result.narrowed, [&](const auto &n) { return n.first == var; })) {
         continue;
       }

@@ -70,6 +70,7 @@ struct ClassDecl : Stmt {
   bool replaced = false;
   bool reflectNew = false;
   bool reflectMethods = false;
+  bool reflectFill = false;
 
   std::vector<TypeParamDecl> typeParams;
   llvm::StringRef source;

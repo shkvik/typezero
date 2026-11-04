@@ -150,26 +150,41 @@ void TypeParams::bindTypeParams(llvm::ArrayRef<TypeParamDecl> decls,
   for (size_t i = 0; i < decls.size() && i < types.size(); ++i) {
     auto *alias = checker_.ctx_.make<TypeAliasDecl>(decls[i].loc, decls[i].name, TypeRef());
     alias->resolved = types[i];
+    alias->boundParam = true;
     checker_.typeScopes_.back()[decls[i].name] = alias;
   }
 }
 
 const Type *TypeParams::substitute(const Type *type, llvm::ArrayRef<const Type *> params,
                                    llvm::ArrayRef<const Type *> args) {
+  return substituteAt(type, params, args, true);
+}
+
+const Type *TypeParams::substituteValue(const Type *type, llvm::ArrayRef<const Type *> params,
+                                        llvm::ArrayRef<const Type *> args) {
+  return substituteAt(type, params, args, false);
+}
+
+const Type *TypeParams::substituteAt(const Type *type, llvm::ArrayRef<const Type *> params,
+                                     llvm::ArrayRef<const Type *> args, bool voidOk) {
   if (!mentionsAnyOf(type, params)) {
     return type;
   }
-  auto sub = [&](const Type *t) { return substitute(t, params, args); };
+  auto sub = [&](const Type *t) { return substituteAt(t, params, args, false); };
+  auto held = [&](const Type *t) { return substituteAt(t, params, args, true); };
   switch (type->kind()) {
   case Type::Kind::Param: {
     if (type->typeOp() != TypeOp::None) {
       std::vector<const Type *> operands;
       for (const Type *t : type->operands()) {
-        operands.push_back(t ? sub(t) : nullptr);
+        operands.push_back(t ? held(t) : nullptr);
       }
       return checker_.typeOperators().evalTypeOp(type, operands);
     }
     const Type *arg = args[size_t(llvm::find(params, type) - params.begin())];
+    if (arg && arg->isVoid() && !voidOk) {
+      return Type::undefinedTy();
+    }
     return arg ? arg : type;
   }
   case Type::Kind::Optional:
@@ -177,16 +192,16 @@ const Type *TypeParams::substitute(const Type *type, llvm::ArrayRef<const Type *
   case Type::Kind::Array:
     return Type::array(sub(type->inner()));
   case Type::Kind::Result:
-    return Type::result(sub(type->okType()), sub(type->errType()));
+    return Type::result(held(type->okType()), held(type->errType()));
   case Type::Kind::Function: {
     std::vector<const Type *> ps;
     for (const Type *p : type->params()) {
       ps.push_back(sub(p));
     }
-    return Type::function(ps, type->minArgs(), type->hasRest(), sub(type->ret()), type->hasThis());
+    return Type::function(ps, type->minArgs(), type->hasRest(), held(type->ret()), type->hasThis());
   }
   case Type::Kind::Iterator:
-    return Type::iterator(sub(type->yielded()), sub(type->returned()), sub(type->sent()));
+    return Type::iterator(sub(type->yielded()), held(type->returned()), held(type->sent()));
   case Type::Kind::Dict:
     return Type::dict(type->dictKind(), sub(type->keyType()), sub(type->valueType()));
   case Type::Kind::Union: {
@@ -197,22 +212,22 @@ const Type *TypeParams::substitute(const Type *type, llvm::ArrayRef<const Type *
     return Type::unionOf(members);
   }
   case Type::Kind::Promise:
-    return Type::promise(sub(type->promised()));
+    return Type::promise(held(type->promised()));
   case Type::Kind::ClassRef:
     return type->isConstructor() ? Type::constructorOf(sub(type->constructed())) : type;
   case Type::Kind::Object: {
     if (type->isAsyncIterator()) {
-      return Type::asyncIterator(sub(type->yielded()), sub(type->returned()), sub(type->sent()));
+      return Type::asyncIterator(sub(type->yielded()), held(type->returned()), held(type->sent()));
     }
     if (auto origin = checker_.descriptorOrigins_.find(type);
         origin != checker_.descriptorOrigins_.end()) {
       auto [list, ret] = origin->second;
-      return checker_.decoratorChecker().methodDescriptorType(sub(list), sub(ret));
+      return checker_.decoratorChecker().methodDescriptorType(sub(list), held(ret));
     }
     if (const ClassDecl *cls = type->classDecl(); cls && !type->typeArgs().empty()) {
       std::vector<const Type *> newArgs;
       for (const Type *a : type->typeArgs()) {
-        newArgs.push_back(sub(a));
+        newArgs.push_back(held(a));
       }
       auto *generic = const_cast<ClassDecl *>(cls->generic ? cls->generic : cls);
       ClassDecl *inst = checker_.genericClassInstantiator().instantiateClass(
@@ -223,7 +238,7 @@ const Type *TypeParams::substitute(const Type *type, llvm::ArrayRef<const Type *
       auto [alias, oldArgs] = origin->second;
       std::vector<const Type *> newArgs;
       for (const Type *a : oldArgs) {
-        newArgs.push_back(sub(a));
+        newArgs.push_back(held(a));
       }
       return checker_.aliasInstantiator().instantiateAlias(alias, std::move(newArgs), alias->loc());
     }

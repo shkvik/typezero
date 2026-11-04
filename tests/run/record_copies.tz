@@ -1,0 +1,54 @@
+// An object with known fields goes where a Record<string, V> is expected when every field fits V:
+// it is copied into a new dictionary (a field left out stays out), so changing the dictionary
+// does not change the object. A Record whose values fit Json goes where a Json is expected, also
+// as a copy. The name of an enum goes where a Record is expected as the dictionary of its members,
+// like the object of an enum in TypeScript (class-validator's IsEnum(GameMode)).
+enum GameMode {
+  Online = "online",
+  Ranked = "ranked",
+}
+
+enum Seats {
+  Two = 2,
+  Four = 4,
+}
+
+function values(entity: Record<string, string | int>): string[] {
+  return Object.values(entity).map((v) => String(v));
+}
+
+console.log(values(GameMode), values(Seats));
+
+const headers = { authorization: "Bearer x", "content-type": "application/json" };
+const dict: Record<string, string> = headers;
+dict["x-extra"] = "1";
+console.log(dict, headers);
+
+type Profile = { name: string; nick?: string; age: int };
+const ann: Profile = { name: "Ann", age: 30 };
+const bob: Profile = { name: "Bob", nick: "b", age: 40 };
+
+function keys(d: Record<string, string | int>): string {
+  return Object.keys(d).join(",");
+}
+console.log(keys(ann), keys(bob));
+
+const fields: Record<string, Json> = {};
+fields["a"] = 1;
+fields["b"] = "two";
+fields["c"] = [true];
+const json: Json = fields;
+const text = JSON.stringify(json);
+if (text.isOk()) console.log(text.value);
+const texts: Record<string, string> = { x: "1" };
+const asJson: Json = texts;
+console.log(asJson);
+
+function headerCount(init: { headers?: Headers | [string, string][] | Record<string, string> }): int {
+  const h = init.headers;
+  if (h == undefined) return 0;
+  if (h instanceof Headers) return -1;
+  if (Array.isArray(h)) return -2;
+  return Object.keys(h).length;
+}
+console.log(headerCount({ headers }), headerCount({ headers: [["a", "b"]] }), headerCount({}));

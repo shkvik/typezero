@@ -72,9 +72,11 @@ void ClassChecker::checkClassBodies(ClassDecl *cls) {
           f.resolved->isError()) {
         continue;
       }
-      checker_.diags_.error(f.loc, "field '" + f.name +
-                                       "' never gets a value: give it one here, e.g. '" + f.name +
-                                       ": " + f.resolved->name() +
+      std::string why = ClassLinks::constructorsOf(cls).empty()
+                            ? "' has no value to start with: '" + f.resolved->name().str() +
+                                  "' has no empty value, like \"\" or 0; give it one here, e.g. '"
+                            : "' never gets a value: give it one here, e.g. '";
+      checker_.diags_.error(f.loc, "field '" + f.name + why + f.name + ": " + f.resolved->name() +
                                        " = ...', set it in a "
                                        "constructor, or make it optional: '" +
                                        f.name + "?: " + f.resolved->name() + "'");

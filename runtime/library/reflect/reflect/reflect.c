@@ -4,10 +4,12 @@
 #include "runtime/core/closure/closure.h"
 #include "runtime/core/error/error.h"
 #include "runtime/core/group/group.h"
+#include "runtime/core/map/map.h"
 #include "runtime/core/output/output.h"
 #include "runtime/core/string/string.h"
 #include "runtime/core/tzrt/tzrt.h"
 #include "runtime/core/unknown/unknown.h"
+#include "runtime/library/console/inspect/inspect.h"
 #include "runtime/library/json/json/json.h"
 #include <math.h>
 #include <stdarg.h>
@@ -220,6 +222,335 @@ void tz_class_name(TzStr *out, const TzClass *cls) {
     }
   }
   *out = tz_buf_take(&buf);
+}
+
+typedef struct {
+  const char *code;
+  struct {
+    TzStr message, class_name, field, expected, got, value;
+  } details;
+} FillTypeParts;
+
+typedef struct {
+  const char *code;
+  struct {
+    TzStr message, class_name, field;
+    TzArray *fields;
+  } details;
+} FillUnknownParts;
+
+typedef struct {
+  const char *code;
+  struct {
+    TzStr message, class_name;
+  } details;
+} FillClassParts;
+
+static TzStr utf8_text(const char *text, size_t length) {
+  TzBuf buf;
+  tz_buf_init(&buf);
+  tz_buf_utf8(&buf, text, length);
+
+  return tz_buf_take(&buf);
+}
+
+static TzStr format_text(const char *format, ...) {
+  char text[1024];
+  va_list args;
+  va_start(args, format);
+  int length = vsnprintf(text, sizeof text, format, args);
+  va_end(args);
+  if (length < 0) {
+    length = 0;
+  }
+  if ((size_t)length >= sizeof text) {
+    length = (int)sizeof text - 1;
+  }
+
+  return utf8_text(text, (size_t)length);
+}
+
+static size_t units_utf8(TzStr s, size_t limit, char *out, size_t size) {
+  uint32_t units;
+  int two;
+  const void *data = tz_str_units(&s, &units, &two);
+  size_t n = 0;
+  uint32_t shown = units < limit ? units : (uint32_t)limit;
+  for (uint32_t i = 0; i < shown && n + 4 < size; ++i) {
+    uint32_t c = two ? ((const uint16_t *)data)[i] : ((const uint8_t *)data)[i];
+    if (c < 0x80) {
+      out[n++] = (char)c;
+    } else if (c < 0x800) {
+      out[n++] = (char)(0xC0 | (c >> 6));
+      out[n++] = (char)(0x80 | (c & 0x3F));
+    } else {
+      out[n++] = (char)(0xE0 | (c >> 12));
+      out[n++] = (char)(0x80 | ((c >> 6) & 0x3F));
+      out[n++] = (char)(0x80 | (c & 0x3F));
+    }
+  }
+  if (shown < units && n + 4 < size) {
+    out[n++] = (char)0xE2;
+    out[n++] = (char)0x80;
+    out[n++] = (char)0xA6;
+  }
+  out[n] = 0;
+
+  return n;
+}
+
+static const char *kind_name(const void *u, char *out, size_t size) {
+  if (!u) {
+    return "undefined";
+  }
+  const TzBox *box = as_box(u);
+  if (box) {
+    uint32_t kind = box->type->kind;
+    if (tz_kind_integer(kind)) {
+      return "int";
+    }
+    switch (kind) {
+    case TZ_T_DOUBLE:
+      return "double";
+    case TZ_T_STRING:
+    case TZ_T_ATOM:
+      return "string";
+    case TZ_T_BOOL:
+      return "boolean";
+    case TZ_T_JSON:
+      return "Json";
+    case TZ_T_ARRAY:
+      return "array";
+    case TZ_T_FUNCTION:
+      return "function";
+    case TZ_T_DECIMAL:
+      return "decimal";
+    default:
+      return "value";
+    }
+  }
+  const TzLayout *layout = ((const TzInstance *)u)->layout;
+  if (layout->flags & TZ_LAYOUT_CLASS) {
+    return "class";
+  }
+  if (layout->name && layout->name_length) {
+    snprintf(out, size, "%.*s", (int)layout->name_length, layout->name);
+    return out;
+  }
+
+  return "object";
+}
+
+static void fill_set_failed(TzMaker make, void *parts) { tz_set_failed(make(parts)); }
+
+void tz_reflect_fill_mismatch(const char *cls, uint32_t cls_length, const char *field,
+                              uint32_t field_length, int32_t index, const char *expected,
+                              uint32_t expected_length, const void *got, TzMaker make) {
+  char got_name[128];
+  const char *got_kind = kind_name(got, got_name, sizeof got_name);
+  TzStr shown;
+  tz_lib_inspect(&shown, got, NULL);
+  char value[512];
+  units_utf8(shown, 80, value, sizeof value);
+  tz_str_release_value(shown);
+  char place[256];
+  char path[256];
+  if (index >= 0) {
+    snprintf(place, sizeof place, "element %d of field %.*s", (int)index, (int)field_length, field);
+    snprintf(path, sizeof path, "%.*s[%d]", (int)field_length, field, (int)index);
+  } else {
+    snprintf(place, sizeof place, "field %.*s", (int)field_length, field);
+    snprintf(path, sizeof path, "%.*s", (int)field_length, field);
+  }
+  FillTypeParts parts;
+  parts.code = "ERR_INVALID_FIELD_TYPE";
+  if (!got) {
+    parts.details.message =
+        format_text("could not fill %.*s: %s is %.*s, and the value given is undefined; leave "
+                    "the key out to keep the value the class starts with",
+                    (int)cls_length, cls, place, (int)expected_length, expected);
+  } else if (as_box(got)) {
+    parts.details.message =
+        format_text("could not fill %.*s: %s is %.*s, and the value given is the %s %s; check "
+                    "and convert the values before Reflect.fill",
+                    (int)cls_length, cls, place, (int)expected_length, expected, got_kind, value);
+  } else {
+    parts.details.message =
+        format_text("could not fill %.*s: %s is %.*s, and the value given is %s; check and "
+                    "convert the values before Reflect.fill",
+                    (int)cls_length, cls, place, (int)expected_length, expected, value);
+  }
+  parts.details.class_name = utf8_text(cls, cls_length);
+  parts.details.field = utf8_text(path, strlen(path));
+  parts.details.expected = utf8_text(expected, expected_length);
+  parts.details.got = utf8_text(got_kind, strlen(got_kind));
+  parts.details.value = utf8_text(value, strlen(value));
+  fill_set_failed(make, &parts);
+}
+
+int32_t tz_reflect_fill_keys(const void *values, const TzFillName *names, uint32_t count,
+                             const char *cls, uint32_t cls_length, TzMaker make) {
+  const TzMap *map = (const TzMap *)values;
+  uint32_t at = 0;
+  for (char *e = (char *)tz_map_next(map, &at); e; e = (char *)tz_map_next(map, &at)) {
+    TzStr key = *(const TzStr *)(e + map->layout->key_offset);
+    int known = 0;
+    for (uint32_t i = 0; i < count && !known; ++i) {
+      known = same_name(names[i].name, names[i].length, key);
+    }
+    if (known) {
+      continue;
+    }
+    char field[256];
+    units_utf8(key, 120, field, sizeof field);
+    char list[512];
+    size_t n = 0;
+    list[0] = 0;
+    for (uint32_t i = 0; i < count && n + 4 < sizeof list; ++i) {
+      int wrote = snprintf(list + n, sizeof list - n, "%s%.*s", i ? ", " : "", (int)names[i].length,
+                           names[i].name);
+      if (wrote < 0) {
+        break;
+      }
+      n += (size_t)wrote < sizeof list - n ? (size_t)wrote : sizeof list - n - 1;
+    }
+    FillUnknownParts parts;
+    parts.code = "ERR_UNKNOWN_FIELD";
+    parts.details.message =
+        count ? format_text("could not fill %.*s: it has no field %s; its fields are %s",
+                            (int)cls_length, cls, field, list)
+              : format_text("could not fill %.*s: it has no field %s, and no fields at all",
+                            (int)cls_length, cls, field);
+    parts.details.class_name = utf8_text(cls, cls_length);
+    parts.details.field = utf8_text(field, strlen(field));
+    parts.details.fields = tz_arr_new(&tz_string_type, 0, count);
+    for (uint32_t i = 0; i < count; ++i) {
+      TzStr name = utf8_text(names[i].name, names[i].length);
+      tz_arr_push_value(parts.details.fields, &name);
+    }
+    fill_set_failed(make, &parts);
+    return 0;
+  }
+
+  return 1;
+}
+
+void *tz_reflect_fill_value(const void *values, const char *name, uint32_t length, int32_t *found) {
+  const TzMap *map = (const TzMap *)values;
+  *found = 0;
+  uint32_t at = 0;
+  for (char *e = (char *)tz_map_next(map, &at); e; e = (char *)tz_map_next(map, &at)) {
+    if (same_name(name, length, *(const TzStr *)(e + map->layout->key_offset))) {
+      *found = 1;
+      return *(void *const *)(e + map->layout->value_offset);
+    }
+  }
+
+  return NULL;
+}
+
+int32_t tz_reflect_fill_exact(const void *u, uint32_t want) {
+  const TzBox *box = as_box(u);
+  if (!box) {
+    return 0;
+  }
+  uint32_t kind = box->type->kind;
+  if (tz_kind_integer(want)) {
+    return tz_kind_integer(kind);
+  }
+
+  return kind == want;
+}
+
+int32_t tz_reflect_fill_atom(const void *u, const TzFillName *texts, uint32_t count) {
+  const TzBox *box = as_box(u);
+  if (!box || box->type->kind != TZ_T_STRING) {
+    return -1;
+  }
+  TzStr text = *(const TzStr *)TZ_BOX_VALUE(box);
+  for (uint32_t i = 0; i < count; ++i) {
+    if (same_name(texts[i].name, texts[i].length, text)) {
+      return (int32_t)i;
+    }
+  }
+
+  return -1;
+}
+
+static const TzType fill_unknown_type = {TZ_T_UNKNOWN, sizeof(void *), NULL};
+static const TzType fill_unknown_array = {TZ_T_ARRAY, sizeof(void *), &fill_unknown_type};
+
+void *tz_reflect_fill_array(const void *u, const TzType *array_type,
+                            int32_t (*convert)(const void *u, void *out), const char *cls,
+                            uint32_t cls_length, const char *field, uint32_t field_length,
+                            const char *expected, uint32_t expected_length, TzMaker make) {
+  if (!u || !tz_unknown_is_array(u)) {
+    char wanted[256];
+    snprintf(wanted, sizeof wanted, "%.*s[]", (int)expected_length, expected);
+    tz_reflect_fill_mismatch(cls, cls_length, field, field_length, -1, wanted, strlen(wanted), u,
+                             make);
+    return NULL;
+  }
+  TzArray *items = (TzArray *)tz_unknown_array(u, &fill_unknown_array);
+  const TzType *element = array_type->inner;
+  TzArray *out = tz_arr_new(element, 0, items->length);
+  char small[64];
+  char *slot = element->size <= sizeof small ? small : (char *)tz_alloc(element->size);
+  for (uint32_t i = 0; i < items->length; ++i) {
+    void *item = ((void **)items->data)[i];
+    if (!convert(item, slot)) {
+      tz_reflect_fill_mismatch(cls, cls_length, field, field_length, (int32_t)i, expected,
+                               expected_length, item, make);
+      tz_value_release(array_type, &out);
+      tz_value_release(&fill_unknown_array, &items);
+      if (slot != small) {
+        tz_free(slot);
+      }
+      return NULL;
+    }
+    tz_arr_push_value(out, slot);
+  }
+  tz_value_release(&fill_unknown_array, &items);
+  if (slot != small) {
+    tz_free(slot);
+  }
+
+  return out;
+}
+
+void *tz_reflect_fill(const void *cls, const void *values, TzMaker make) {
+  const TzInstance *object = (const TzInstance *)cls;
+  const TzClass *klass = object && !as_box(cls) && (object->layout->flags & TZ_LAYOUT_CLASS)
+                             ? (const TzClass *)cls
+                             : NULL;
+  if (klass && klass->info && klass->info->fill) {
+    return klass->info->fill(values);
+  }
+  const TzLayout *layout = klass ? klass->layout : NULL;
+  int name_length = layout ? (int)layout->name_length : 5;
+  const char *name = layout ? layout->name : "value";
+  FillClassParts parts;
+  uint32_t problem = klass && klass->info ? klass->info->fill_problem : TZ_FILL_OK;
+  if (problem == TZ_FILL_CONSTRUCTOR) {
+    parts.code = "ERR_HAS_CONSTRUCTOR";
+    parts.details.message =
+        format_text("could not fill %.*s: it sets its fields in a constructor; make it with "
+                    "Reflect.construct(%.*s, [...])",
+                    name_length, name, name_length, name);
+  } else if (problem == TZ_FILL_ABSTRACT) {
+    parts.code = "ERR_ABSTRACT_CLASS";
+    parts.details.message = format_text(
+        "could not fill %.*s: it is abstract; fill a class that extends it", name_length, name);
+  } else {
+    parts.code = "ERR_NOT_REFLECTED";
+    parts.details.message = format_text(
+        "could not fill %.*s: it is not a class of the program, which Reflect.fill cannot make",
+        name_length, name);
+  }
+  parts.details.class_name = utf8_text(name, (size_t)name_length);
+  fill_set_failed(make, &parts);
+
+  return NULL;
 }
 
 static const TzClass *as_class(const void *u) {

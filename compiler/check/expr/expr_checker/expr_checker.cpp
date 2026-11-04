@@ -15,6 +15,7 @@
 #include "compiler/check/generics/generic_checker/generic_checker.h"
 #include "compiler/check/generics/generic_instantiator/generic_instantiator.h"
 #include "compiler/check/iterators/generator_checker/generator_checker.h"
+#include "compiler/check/objects/object_checker/object_checker.h"
 #include "compiler/check/objects/object_literal_checker/object_literal_checker.h"
 #include "compiler/check/types/destination/destination.h"
 #include "compiler/check/types/literal_types/literal_types.h"
@@ -118,6 +119,9 @@ Expr *ExprChecker::checkExprKind(Expr *expr, const Type *expected, bool wraps) {
   case Expr::Kind::Name:
     if (Expr *null = checker_.jsonChecker().checkNull(cast<NameExpr>(expr), expected)) {
       return null;
+    }
+    if (Expr *members = checker_.objectChecker().enumObject(cast<NameExpr>(expr), expected)) {
+      return members;
     }
     return checker_.literalTypes().constText(checker_.nameChecker().checkName(cast<NameExpr>(expr)),
                                              expected);

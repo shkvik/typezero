@@ -32,6 +32,25 @@ namespace tz {
 
 TypeRelations::TypeRelations(Checker &checker) : checker_(checker) {}
 
+bool TypeRelations::copiesIntoRecord(const Type *from, const Type *to) {
+  if (!to->isRecord() || !to->keyType()->isString() || !from->isObject() || from->isClass() ||
+      from->isTuple() || from->isAnyObject() || from->isIncomplete() || !from->bases().empty() ||
+      !from->overloads().empty() || from->isRegExp() || from->isMatch() || from->isDate() ||
+      from->isIntl() || from->isCrypto() || from->isWeakRef() || from->isBytes() ||
+      from->isAsyncIterator()) {
+    return false;
+  }
+  const Type *value = to->valueType();
+  for (const Field &f : from->fields()) {
+    const Type *type = f.type->isOptional() && !value->isOptional() ? f.type->inner() : f.type;
+    if (type->isFunction() || !isImplicitlyConvertible(type, value)) {
+      return false;
+    }
+  }
+
+  return true;
+}
+
 bool TypeRelations::isImplicitlyConvertible(const Type *from, const Type *to) {
   if (from == to) {
     return true;
@@ -57,7 +76,9 @@ bool TypeRelations::isImplicitlyConvertible(const Type *from, const Type *to) {
   }
   if (to->isJson()) {
     return from->isString() || from->isNumeric() || from->isBool() || from->isLiteral() ||
-           (from->isArray() && from->inner()->isJson());
+           (from->isArray() && from->inner()->isJson()) ||
+           (from->isRecord() && from->keyType()->isString() &&
+            isImplicitlyConvertible(from->valueType()->nonOptional(), to));
   }
   if (to->isOptional()) {
     return from->isUndefined() || isImplicitlyConvertible(from->nonOptional(), to->inner());
@@ -121,6 +142,9 @@ bool TypeRelations::isImplicitlyConvertible(const Type *from, const Type *to) {
         return false;
       }
     }
+    return true;
+  }
+  if (copiesIntoRecord(from, to)) {
     return true;
   }
   if (from->isResult() && to->isResult()) {

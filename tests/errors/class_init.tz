@@ -77,7 +77,8 @@ class Counter {
   }
 }
 class NoConstructor {
-  // expect-error: field 'size' never gets a value: give it one here, e.g. 'size: int = ...', set it in a constructor, or make it optional: 'size?: int'
+  // expect-error: field 'at' has no value to start with: 'Date' has no empty value, like "" or 0; give it one here, e.g. 'at: Date = ...', set it in a constructor, or make it optional: 'at?: Date'
+  at: Date
   size: int
   ok = 1
   maybe?: int

@@ -324,6 +324,45 @@ llvm::Value *DictLowerer::emitDictForEach(CallExpr *call) {
   return nullptr;
 }
 
+llvm::Value *DictLowerer::emitRecordFromObject(llvm::Value *object, const Type *from,
+                                               const Type *to) {
+  const Lowering::DictLayout &layout = dictLayout(to);
+  const Type *value = to->valueType(), *string = Type::string();
+  llvm::Type *ptr = lowering_.builder_.getPtrTy();
+  llvm::Value *map = lowering_.builder_.CreateCall(dictFunction("tz_map_new", ptr, {ptr}),
+                                                   {layout.plainDescriptor}, "record");
+  for (const Field &f : from->fields()) {
+    llvm::Value *v =
+        lowering_.builder_.CreateLoad(lowering_.moduleBuilder().lower(f.type),
+                                      lowering_.objectLayouts().fieldAddress(object, from, f.name));
+    llvm::Value *k = lowering_.stringLowerer().stringLiteral(utf16(f.name));
+    auto put = [&](llvm::Value *item, const Type *type) {
+      llvm::Value *entry = emitDictAdd(map, k, string);
+      lowering_.storeLowerer().storeIn(map, to, entryValue(entry, to),
+                                       lowering_.exprLowerer().emitConversion(item, type, value),
+                                       value);
+    };
+    if (!f.type->isOptional() || value->isOptional()) {
+      lowering_.refCounts().retainValue(v, f.type);
+      put(v, f.type);
+      continue;
+    }
+    llvm::BasicBlock *copyBlock = lowering_.functionFrame().newBlock("record.copy");
+    llvm::BasicBlock *nextBlock = lowering_.functionFrame().newBlock("record.next");
+    lowering_.builder_.CreateCondBr(lowering_.optionalLowerer().optionalHas(v, f.type), copyBlock,
+                                    nextBlock);
+    lowering_.functionFrame().switchTo(copyBlock);
+    llvm::Value *present = lowering_.optionalLowerer().optionalValue(v, f.type);
+    lowering_.refCounts().retainValue(present, f.type->inner());
+    put(present, f.type->inner());
+    lowering_.builder_.CreateBr(nextBlock);
+    lowering_.functionFrame().switchTo(nextBlock);
+  }
+  lowering_.refCounts().releaseValue(object, from);
+
+  return map;
+}
+
 llvm::Value *DictLowerer::emitRecordLiteral(ObjectLitExpr *lit) {
   const Type *type = lit->type;
   const Lowering::DictLayout &layout = dictLayout(type);

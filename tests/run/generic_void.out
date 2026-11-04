@@ -1,0 +1,9 @@
+1 [ undefined ]
+nothing 5
+undefined {"a":1} undefined
+undefined 2
+no body 7
+route delete function
+route get function
+[ 'delete Sources.remove', 'get Sources.find' ]
+true

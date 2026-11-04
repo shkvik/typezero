@@ -1,4 +1,5 @@
 #include "compiler/lower/expr/expr_lowerer/expr_lowerer.h"
+#include "compiler/check/types/type_relations/type_relations.h"
 #include "compiler/library/bytes/bytes_lowerer/bytes_lowerer.h"
 #include "compiler/library/decimal/decimal_lowerer/decimal_lowerer.h"
 #include "compiler/library/json/json_lowerer/json_lowerer.h"
@@ -24,6 +25,7 @@
 #include "compiler/lower/iterators/inline_generator_lowerer/inline_generator_lowerer.h"
 #include "compiler/lower/memory/ref_counts/ref_counts.h"
 #include "compiler/lower/module_builder/module_builder.h"
+#include "compiler/lower/objects/dict_lowerer/dict_lowerer.h"
 #include "compiler/lower/objects/object_lowerer/object_lowerer.h"
 #include "compiler/lower/stmt/stmt_lowerer/stmt_lowerer.h"
 #include "compiler/lower/types/optional_lowerer/optional_lowerer.h"
@@ -369,6 +371,9 @@ llvm::Value *ExprLowerer::emitConversion(llvm::Value *value, const Type *from, c
   if ((from->nonOptional()->isJson() || to->nonOptional()->isJson()) &&
       from->nonOptional() != to->nonOptional()) {
     return lowering_.jsonLowerer().emitJsonConversion(value, from, to);
+  }
+  if (TypeRelations::copiesIntoRecord(from, to)) {
+    return lowering_.dictLowerer().emitRecordFromObject(value, from, to);
   }
   if (from->isResult() && to->isResult()) {
     return lowering_.resultLowerer().makeResult(

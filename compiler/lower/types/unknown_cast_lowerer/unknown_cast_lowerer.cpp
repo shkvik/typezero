@@ -1,5 +1,6 @@
 #include "compiler/lower/types/unknown_cast_lowerer/unknown_cast_lowerer.h"
 #include "compiler/library/regex/matcher_builder/matcher_builder.h"
+#include "compiler/lower/async/promise_lowerer/promise_lowerer.h"
 #include "compiler/lower/expr/expr_lowerer/expr_lowerer.h"
 #include "compiler/lower/function_frame/function_frame.h"
 #include "compiler/lower/layouts/type_descriptors/type_descriptors.h"
@@ -7,6 +8,7 @@
 #include "compiler/lower/module_builder/module_builder.h"
 #include "compiler/lower/objects/dict_lowerer/dict_lowerer.h"
 #include "compiler/lower/types/optional_lowerer/optional_lowerer.h"
+#include "compiler/lower/types/union_lowerer/union_lowerer.h"
 #include "compiler/lower/types/unknown_lowerer/unknown_lowerer.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/IR/MDBuilder.h"
@@ -28,6 +30,13 @@ constexpr uint32_t kLayoutDate = 1024;
 enum : uint32_t { kBoxDouble = 3 };
 
 enum : uint32_t { kKindString = 2, kKindBoolean = 3 };
+
+bool plainObject(const Type *type) {
+  return type->isObject() && !type->isClass() && !type->isClassRef() && !type->isBase() &&
+         type->bases().empty() && type->overloads().empty() && !type->isIncomplete() &&
+         !type->isAnyObject() && !type->isDict() && !type->isDate() && !type->isRegExp() &&
+         !type->isMatch() && !type->isIntl() && !type->isCrypto() && !type->isWeakRef();
+}
 
 }
 
@@ -149,6 +158,14 @@ llvm::Value *UnknownCastLowerer::emitUnknownAs(llvm::Value *u, const Type *to,
     test(lowering_.builder_.CreateICmpNE(ok, lowering_.builder_.getInt32(0)));
     return lowering_.builder_.CreateLoad(lowering_.moduleBuilder().lower(to), slot);
   }
+  case Type::Kind::Promise: {
+    llvm::Value *layout = lowering_.builder_.CreateCall(
+        lowering_.unknownLowerer().unknownFunction("tz_unknown_layout", ptr, {ptr}), {u}, "layout");
+    test(lowering_.builder_.CreateICmpEQ(layout,
+                                         lowering_.promiseLowerer().promiseLayout(to->promised())));
+    lowering_.refCounts().retainValue(u, to);
+    return u;
+  }
   case Type::Kind::Object:
   case Type::Kind::Dict:
   case Type::Kind::ClassRef: {
@@ -187,13 +204,17 @@ llvm::Value *UnknownCastLowerer::emitUnknownAs(llvm::Value *u, const Type *to,
       std::vector<const ClassDecl *> classes = to->isClass() || to->isBase() || !to->bases().empty()
                                                    ? classesOfType(to)
                                                    : std::vector<const ClassDecl *>();
-      if (classes.empty()) {
+      test(lowering_.builder_.CreateNot(isClass));
+      if (!classes.empty()) {
+        test(classIdIn(loadLayout(6), classes));
+      } else if (plainObject(to)) {
+        test(lowering_.builder_.CreateICmpEQ(
+            loadLayout(6), lowering_.builder_.getInt32(lowering_.unionLowerer().plainTypeId(to))));
+      } else {
         lowering_.builder_.CreateBr(fail);
         lowering_.functionFrame().startDeadBlock();
         return llvm::Constant::getNullValue(lowering_.moduleBuilder().lower(to));
       }
-      test(lowering_.builder_.CreateNot(isClass));
-      test(classIdIn(loadLayout(6), classes));
     }
     lowering_.refCounts().retainValue(u, to);
     return u;
@@ -345,6 +366,11 @@ llvm::Value *UnknownCastLowerer::emitUnknownFit(llvm::Value *u, const Type *to) 
       }
       fit = pick(lowering_.builder_.CreateAnd(in, exact), 3, pick(in, 2, level(0)));
     }
+  } else if (plainObject(to)) {
+    llvm::Value *same = lowering_.builder_.CreateICmpEQ(
+        loadLayout(6), lowering_.builder_.getInt32(lowering_.unionLowerer().plainTypeId(to)));
+    fit = pick(lowering_.builder_.CreateAnd(lowering_.builder_.CreateNot(isClass), same), 3,
+               level(0));
   }
   llvm::BasicBlock *objectEnd = lowering_.builder_.GetInsertBlock();
   lowering_.builder_.CreateBr(endBlock);

@@ -1,0 +1,48 @@
+// What Reflect.apply can call, as the parallel analysis sees it: with undefined for this, a
+// function that was put into an unknown (a factory of a DI container), not every method of every
+// class; a hook found by a name from a union of string literals, only the methods with those
+// names. Following every method from such a call made the analysis of a small framework take
+// minutes.
+class Counter {
+  public count: int;
+
+  public constructor() {
+    this.count = 0;
+  }
+
+  public async onModuleInit(): Promise<void> {
+    await Promise.resolve();
+    this.count += 1;
+  }
+
+  public async other(): Promise<void> {
+    await Promise.resolve();
+    this.count += 100;
+  }
+}
+
+type Hook = "onModuleInit" | "onModuleDestroy";
+
+async function callHook(instance: unknown, name: Hook): Promise<string> {
+  const hook = Reflect.get(instance, name);
+  if (typeof hook != "function") return "none";
+  const called = Reflect.apply(hook, instance, []);
+  if (called.isErr()) return called.error.message;
+  await called.value;
+  return "done";
+}
+
+async function make(factory: unknown, args: unknown[]): Promise<string> {
+  if (typeof factory != "function") return "not a function";
+  const called = Reflect.apply(factory, undefined, args);
+  if (called.isErr()) return called.error.message;
+  const value = await called.value;
+  return typeof value == "number" ? String(value) : "not a number";
+}
+
+const factory: unknown = (n: int) => n * 2;
+const counter = new Counter();
+console.log(await callHook(counter, "onModuleInit"), counter.count);
+console.log(await callHook(counter, "onModuleDestroy"), counter.count);
+console.log(await make(factory, [21]));
+console.log(await make(factory, ["x"]));

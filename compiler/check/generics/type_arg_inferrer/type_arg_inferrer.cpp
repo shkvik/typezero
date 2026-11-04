@@ -256,7 +256,7 @@ bool TypeArgInferrer::bindGenericCall(CallExpr *call, FuncSymbol *generic, llvm:
       ok = false;
     }
     for (size_t k = 0; k < typeArgs.size() && k < typeParams.size(); ++k) {
-      bound[k] = checker_.typeResolver().resolveType(typeArgs[k], false);
+      bound[k] = checker_.typeResolver().resolveType(typeArgs[k], true);
     }
   } else {
     Inference inference(typeParams, checker_.aliasOrigins_, [this](const Type *t) {
@@ -307,6 +307,8 @@ bool TypeArgInferrer::bindGenericCall(CallExpr *call, FuncSymbol *generic, llvm:
       }
       if (type && inference.undefinedSeen[k]) {
         type = Type::optional(type);
+      } else if (!type && inference.undefinedSeen[k]) {
+        type = Type::voidTy();
       }
       bound[k] = type;
     };
@@ -515,11 +517,11 @@ bool TypeArgInferrer::bindGenericCall(CallExpr *call, FuncSymbol *generic, llvm:
   llvm::SMLoc outerLoc = std::exchange(checker_.instanceLoc_, loc);
   std::vector<const Type *> params;
   for (const Type *p : generic->params) {
-    params.push_back(checker_.typeParams().substitute(p, typeParams, bound));
+    params.push_back(checker_.typeParams().substituteValue(p, typeParams, bound));
   }
   for (size_t i : literals) {
     call->args[i] = checker_.exprChecker().checkExpr(
-        call->args[i], checker_.typeParams().substitute(paramOf(i), typeParams, bound));
+        call->args[i], checker_.typeParams().substituteValue(paramOf(i), typeParams, bound));
     checked[i] = true;
   }
   call->type = ret ? checker_.typeParams().substitute(ret, typeParams, bound) : Type::error();
@@ -569,6 +571,8 @@ bool TypeArgInferrer::inferFromArguments(FuncSymbol *generic, llvm::ArrayRef<Exp
     }
     if (type && inference.undefinedSeen[k]) {
       type = Type::optional(type);
+    } else if (!type && inference.undefinedSeen[k]) {
+      type = Type::voidTy();
     }
     bound[k] = type;
   }

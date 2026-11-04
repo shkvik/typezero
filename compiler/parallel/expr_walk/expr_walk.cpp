@@ -151,6 +151,10 @@ void ExprWalk::expr(const Expr *e, const Use &use) {
       expr(c->operand, use);
       return;
     }
+    if (c->type && c->type->isUnknown() && c->operand->type &&
+        c->operand->type->nonOptional()->isFunction()) {
+      analysis_.callWalk().unknownRef(c->operand);
+    }
     expr(c->operand, c->isImplicit() ? use : Use());
     if (c->type && c->type->isString() && holdsReferences(c->operand->type)) {
       contents(c->operand, false, c->loc());

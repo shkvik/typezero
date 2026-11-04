@@ -238,6 +238,7 @@ bool knownBuiltin(Builtin b) {
   case Builtin::ReflectGet:
   case Builtin::ReflectApply:
   case Builtin::ReflectConstruct:
+  case Builtin::ReflectFill:
     return true;
   default:
     return false;

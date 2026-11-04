@@ -41,6 +41,7 @@ struct VarSymbol {
   FunctionDecl *lambda = nullptr;
   const RegexLitExpr *regex = nullptr;
   const FunctionDecl *reflectMethod = nullptr;
+  std::vector<llvm::StringRef> reflectNames;
 
   bool boxed() const { return captured && (reassigned || capturedEarly); }
 };

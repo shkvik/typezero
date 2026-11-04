@@ -13,6 +13,8 @@ public:
   void bindTypeParams(llvm::ArrayRef<TypeParamDecl> decls, llvm::ArrayRef<const Type *> types);
   const Type *substitute(const Type *type, llvm::ArrayRef<const Type *> params,
                          llvm::ArrayRef<const Type *> args);
+  const Type *substituteValue(const Type *type, llvm::ArrayRef<const Type *> params,
+                              llvm::ArrayRef<const Type *> args);
   static const Type *representation(const Type *type);
   bool satisfies(const Type *arg, const Type *param, llvm::ArrayRef<const Type *> params = {},
                  llvm::ArrayRef<const Type *> args = {});
@@ -20,6 +22,9 @@ public:
   bool exactTypeParam(FuncSymbol *generic, size_t k);
 
 private:
+  const Type *substituteAt(const Type *type, llvm::ArrayRef<const Type *> params,
+                           llvm::ArrayRef<const Type *> args, bool voidOk);
+
   Checker &checker_;
   llvm::SmallPtrSet<const Type *, 4> substituting_;
 };

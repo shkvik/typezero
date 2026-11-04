@@ -16,6 +16,7 @@ public:
   llvm::Value *emitJsonIndex(IndexExpr *index);
   llvm::Value *emitJsonAssign(AssignExpr *assign, bool needResult);
   llvm::Value *emitJsonConversion(llvm::Value *value, const Type *from, const Type *to);
+  llvm::Value *emitJsonFromRecord(llvm::Value *map, const Type *from);
   llvm::Value *emitJsonEquality(BinaryExpr *bin);
   llvm::Value *emitJsonNullish(BinaryExpr *bin);
   llvm::Value *emitJsonChainLink(CastExpr *link);

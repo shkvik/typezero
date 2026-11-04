@@ -20,6 +20,11 @@ public:
                                                   bool isStatic);
 
 private:
+  Expr *defaultValue(const Type *type, const TypeRef *ref, llvm::SMLoc loc,
+                     llvm::SmallPtrSetImpl<const ClassDecl *> &visiting);
+  Expr *literalValue(const Type *literal, llvm::SMLoc loc);
+  bool startsEmpty(const ClassDecl *cls, llvm::SmallPtrSetImpl<const ClassDecl *> &visiting);
+
   Checker &checker_;
   llvm::SmallPtrSet<const ClassDecl *, 2> completing_;
 };

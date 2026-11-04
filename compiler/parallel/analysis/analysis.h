@@ -83,6 +83,8 @@ private:
   llvm::DenseMap<const Expr *, llvm::StringRef> siteName_;
   std::map<const Type *, std::vector<unsigned>> values_;
   llvm::DenseSet<unsigned> valueFns_;
+  llvm::DenseSet<unsigned> unknownFns_;
+  bool unknownAnyFn_ = false;
   std::vector<std::pair<const char *, const char *>> libRanges_;
   std::vector<unsigned> listeners_[ChannelCount];
   std::vector<const Type *> listenerTypes_[ChannelCount];

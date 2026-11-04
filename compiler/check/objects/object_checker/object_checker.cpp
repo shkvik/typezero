@@ -252,8 +252,35 @@ Expr *ObjectChecker::enumMembers(CallExpr *call, EnumDecl *decl, llvm::StringRef
   const Type *element = fn == "keys"     ? Type::string()
                         : fn == "values" ? values
                                          : Type::tuple({Type::string(), values});
+  Expr *checked = checker_.exprChecker().checkExpr(list, Type::array(element));
+  checker_.file_->namedUses[checked] = {decl, call->args[0]->loc(), ""};
 
-  return checker_.exprChecker().checkExpr(list, Type::array(element));
+  return checked;
+}
+
+Expr *ObjectChecker::enumObject(NameExpr *name, const Type *expected) {
+  const Type *target = expected ? expected->nonOptional() : nullptr;
+  if (!target || !target->isDict()) {
+    return nullptr;
+  }
+  EnumDecl *decl = checker_.scopes().lookup(name->name).enumDecl;
+  if (!decl) {
+    return nullptr;
+  }
+  checker_.typeDeclarer().resolveEnum(decl);
+  auto *object = checker_.ctx_.make<ObjectLitExpr>(name->loc());
+  for (const EnumMember &m : decl->members) {
+    ObjectLitExpr::Property p;
+    p.name = m.name;
+    p.loc = name->loc();
+    p.value = checker_.ctx_.make<MemberExpr>(
+        name->loc(), checker_.ctx_.make<NameExpr>(name->loc(), decl->name), m.name);
+    object->props.push_back(p);
+  }
+  Expr *checked = checker_.exprChecker().checkExpr(object, expected);
+  checker_.file_->namedUses[checked] = {decl, name->loc(), ""};
+
+  return checked;
 }
 
 void ObjectChecker::checkForIn(ForOfStmt *stmt) {

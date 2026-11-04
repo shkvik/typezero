@@ -1,0 +1,43 @@
+// Reflect.apply checks an argument of a plain object type by that type (it used to refuse every
+// one); a decorator whose second parameter is optional decorates both a class and a method, as
+// UseGuards of Nest does; typeof tells a class from an object in a union of the two.
+type JwtPayload = { userId: string; role: string };
+
+function greet(jwt: JwtPayload, times: int): string {
+  return `${jwt.userId}:${jwt.role}:${times}`;
+}
+
+const payload: JwtPayload = { userId: "u1", role: "admin" };
+const args: unknown[] = [payload, 2];
+const greeted = Reflect.apply(greet, undefined, args);
+if (greeted.isOk()) console.log(greeted.value);
+
+const other: { userId: string } = { userId: "u2" };
+const wrongArgs: unknown[] = [other, 2];
+const refused = Reflect.apply(greet, undefined, wrongArgs);
+if (refused.isErr()) console.log(refused.error.message);
+
+const marks: string[] = [];
+
+function Mark(label: string) {
+  return (cls: Constructor, method?: string) => {
+    marks.push(method == undefined ? `${label} ${cls.name}` : `${label} ${cls.name}.${method}`);
+  };
+}
+
+@Mark("class")
+class Service {
+  @Mark("method")
+  public run(): int {
+    return 1;
+  }
+}
+console.log(marks, new Service().run());
+
+type DynamicModule = { module: Constructor; global?: boolean };
+
+function moduleName(entry: Constructor | DynamicModule): string {
+  const cls = typeof entry == "function" ? entry : entry.module;
+  return `${typeof entry} ${cls.name}`;
+}
+console.log(moduleName(Service), moduleName({ module: Service }));

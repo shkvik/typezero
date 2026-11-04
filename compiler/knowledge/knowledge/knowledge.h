@@ -38,6 +38,7 @@ struct KnownType {
   std::string name;
   std::string type;
   std::string base;
+  std::string kind;
   size_t module = 0;
   SourcePlace place;
 };

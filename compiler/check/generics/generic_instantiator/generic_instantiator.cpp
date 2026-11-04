@@ -115,7 +115,7 @@ Expr *GenericInstantiator::checkGenericValue(NameExpr *name, FuncSymbol *generic
       return name;
     }
     for (size_t k = 0; k < name->typeArgs.size(); ++k) {
-      bound[k] = checker_.typeResolver().resolveType(name->typeArgs[k], false);
+      bound[k] = checker_.typeResolver().resolveType(name->typeArgs[k], true);
     }
   } else if (expected) {
     Inference fromParams(typeParams, checker_.aliasOrigins_, nullptr),
@@ -155,7 +155,7 @@ Expr *GenericInstantiator::checkGenericValue(NameExpr *name, FuncSymbol *generic
   }
   std::vector<const Type *> params;
   for (const Type *p : generic->params) {
-    params.push_back(checker_.typeParams().substitute(p, typeParams, bound));
+    params.push_back(checker_.typeParams().substituteValue(p, typeParams, bound));
   }
   name->func = generic;
   name->type =
@@ -322,7 +322,7 @@ FunctionDecl *GenericInstantiator::instanceDecl(FuncSymbol *generic,
   sym->loc = generic->loc;
   sym->decl = copy;
   for (const Type *p : generic->params) {
-    sym->params.push_back(checker_.typeParams().substitute(p, params, args));
+    sym->params.push_back(checker_.typeParams().substituteValue(p, params, args));
   }
   sym->minArgs = generic->minArgs;
   sym->hasRest = generic->hasRest;
@@ -333,7 +333,7 @@ FunctionDecl *GenericInstantiator::instanceDecl(FuncSymbol *generic,
   }
   for (size_t i = 0; i < copy->params.size() && i < original->params.size(); ++i) {
     copy->params[i].declaredType =
-        checker_.typeParams().substitute(original->params[i].declaredType, params, args);
+        checker_.typeParams().substituteValue(original->params[i].declaredType, params, args);
   }
   for (size_t i = 0; i < exact.size() && i < sym->params.size() && i < copy->params.size(); ++i) {
     if (exact[i]) {

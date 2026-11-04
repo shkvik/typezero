@@ -16,6 +16,7 @@ public:
   void addCallee(CallRec &rec, const FunctionDecl *decl, std::optional<Ref> self,
                  bool byType = false);
   std::vector<const FunctionDecl *> methodTargets(const FunctionDecl *method, bool virtualCall);
+  void unknownRef(const Expr *e);
   std::optional<Ref> closureSelf(const FunctionDecl *callee, const FnInfo &caller) const;
   void registerValue(const FunctionDecl *fn, const Type *type);
   bool functionRef(const Expr *e, const Use &use, const Type *type);

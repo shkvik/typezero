@@ -1,12 +1,33 @@
 #include "compiler/knowledge/knowledge_walk/knowledge_walk.h"
 #include "compiler/knowledge/knowledge_pass/knowledge_pass.h"
 #include "compiler/program/ast/ast.h"
+#include "compiler/program/program/program.h"
 #include "compiler/program/types/type/type.h"
 
 using llvm::cast;
 using llvm::dyn_cast;
 
 namespace tz {
+
+namespace {
+
+bool builtinClassName(llvm::StringRef name) {
+  static const llvm::StringRef names[] = {
+      "Map",          "Set",          "WeakMap",        "WeakSet",
+      "WeakRef",      "Promise",      "Date",           "Error",
+      "TypeError",    "RangeError",   "SyntaxError",    "ReferenceError",
+      "EvalError",    "URIError",     "AggregateError", "RegExp",
+      "Array",        "Object",       "ArrayBuffer",    "SharedArrayBuffer",
+      "DataView",     "Int8Array",    "Uint8Array",     "Uint8ClampedArray",
+      "Int16Array",   "Uint16Array",  "Int32Array",     "Uint32Array",
+      "Float32Array", "Float64Array", "BigInt64Array",  "BigUint64Array",
+      "Number",       "String",       "Boolean",        "Function",
+      "Proxy"};
+
+  return llvm::is_contained(names, name);
+}
+
+}
 
 KnowledgeWalk::KnowledgeWalk(KnowledgePass &pass, size_t module, size_t from)
     : pass_(pass), module_(module), from_(from) {}
@@ -109,9 +130,17 @@ void KnowledgeWalk::declarator(const VarDeclarator &declarator) {
 void KnowledgeWalk::typeRef(const TypeRef &ref) {
   if ((ref.kind == TypeRef::Kind::Name || ref.kind == TypeRef::Kind::Generic) &&
       !ref.name.empty()) {
-    size_t symbol = pass_.typeSymbol(module_, ref.name);
+    auto [head, member] = ref.name.split('.');
+    size_t symbol = pass_.typeSymbol(module_, head);
     if (symbol != Knowledge::kNone) {
       pass_.reference(symbol, from_, module_, ref.loc, false);
+    }
+    size_t own = symbol == Knowledge::kNone || member.empty()
+                     ? Knowledge::kNone
+                     : pass_.enumMemberSymbol(symbol, member);
+    if (own != Knowledge::kNone) {
+      pass_.reference(own, from_, module_,
+                      llvm::SMLoc::getFromPointer(ref.loc.getPointer() + head.size() + 1), false);
     }
   }
   for (const TypeRef &arg : ref.args) {
@@ -137,6 +166,14 @@ bool KnowledgeWalk::use(const Expr *e, bool call) {
     }
     if (symbol == Knowledge::kNone && name->cls) {
       symbol = pass_.classSymbol(name->cls);
+    }
+    if (symbol == Knowledge::kNone && !name->var && !name->func) {
+      size_t named = pass_.typeSymbol(module_, name->name);
+      if (named != Knowledge::kNone && pass_.symbolKind(named) == "class") {
+        symbol = named;
+      } else if (named == Knowledge::kNone && builtinClassName(name->name)) {
+        pass_.builtinClass(module_, name->loc(), name->name);
+      }
     }
     return symbol != Knowledge::kNone && pass_.reference(symbol, from_, module_, name->loc(), call);
   }
@@ -169,6 +206,20 @@ bool KnowledgeWalk::use(const Expr *e, bool call) {
 void KnowledgeWalk::expr(const Expr *e) {
   if (!e) {
     return;
+  }
+  const auto &namedUses = pass_.program().file.namedUses;
+  if (auto found = namedUses.find(e); found != namedUses.end()) {
+    const auto *cls = dyn_cast<ClassDecl>(found->second.decl);
+    size_t symbol = cls ? pass_.classSymbol(cls) : pass_.enumSymbol(found->second.decl);
+    if (symbol != Knowledge::kNone) {
+      pass_.reference(symbol, from_, module_, found->second.name, false);
+      size_t own = found->second.member.empty()
+                       ? Knowledge::kNone
+                       : pass_.enumMemberSymbol(symbol, found->second.member);
+      if (own != Knowledge::kNone) {
+        pass_.reference(own, from_, module_, e->loc(), false);
+      }
+    }
   }
   switch (e->kind()) {
   case Expr::Kind::IntLit:

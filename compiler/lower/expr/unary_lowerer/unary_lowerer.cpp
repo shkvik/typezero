@@ -107,6 +107,31 @@ llvm::Value *UnaryLowerer::emitTypeOf(Expr *operand) {
         has, lowering_.stringLowerer().stringLiteral(ascii16(typeOfName(type->inner()))),
         lowering_.stringLowerer().stringLiteral(u"undefined"));
   }
+  const Type *plain = type->nonOptional();
+  bool classes = plain->isUnion() && llvm::StringRef(typeOfName(plain)).empty() &&
+                 llvm::any_of(plain->members(), [](const Type *m) { return m->isClassRef(); }) &&
+                 llvm::all_of(plain->members(), [](const Type *m) {
+                   return m->isClassRef() || llvm::StringRef(typeOfName(m)) == "object";
+                 });
+  if (classes) {
+    constexpr uint32_t kLayoutClass = 2097152;
+    Lowering::Operand value = lowering_.refCounts().emitOperand(operand, true);
+    llvm::Value *layout =
+        lowering_.builder_.CreateLoad(lowering_.builder_.getPtrTy(),
+                                      lowering_.builder_.CreateConstInBoundsGEP1_64(
+                                          lowering_.builder_.getInt8Ty(), value.value, 8),
+                                      "layout");
+    llvm::Value *flags = lowering_.builder_.CreateLoad(
+        lowering_.builder_.getInt32Ty(),
+        lowering_.builder_.CreateStructGEP(lowering_.layoutDescTy_, layout, 3), "flags");
+    llvm::Value *isClass = lowering_.builder_.CreateICmpNE(
+        lowering_.builder_.CreateAnd(flags, lowering_.builder_.getInt32(kLayoutClass)),
+        lowering_.builder_.getInt32(0));
+    lowering_.refCounts().dropOperand(value);
+    return lowering_.builder_.CreateSelect(isClass,
+                                           lowering_.stringLowerer().stringLiteral(u"function"),
+                                           lowering_.stringLowerer().stringLiteral(u"object"));
+  }
   if (!isa<NameExpr>(operand)) {
     lowering_.stmtLowerer().emitDiscarded(operand);
   }

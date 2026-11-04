@@ -83,6 +83,28 @@ function area(side: int): int {
 }
 console.log(area(3))
 ]])
+write(colors/kinds.tz [[
+export enum Kind {
+  None = "none",
+  Discard = "discard",
+}
+]])
+write(colors/game.tz [[
+import { Kind } from "./kinds.tz"
+function owes(kind: Kind): boolean {
+  return kind == Kind.Discard
+}
+console.log(owes(Kind.None), Object.values(Kind))
+]])
+write(colors/statics.tz [[
+class Store {
+  private static readonly cache = new Map<string, int>()
+  public static size(): int {
+    return Store.cache.size
+  }
+}
+console.log(Store.size(), Date.now())
+]])
 write(notes/main.tz [[
 function f() {
   const a = 1

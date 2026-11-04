@@ -79,6 +79,11 @@ const listening = new Server({ port: 3000 }, request => app(request)).listen()
   закрывает сокет после клиента. Без этого остаток тела, пришедший после отказа, заставлял систему
   сбросить соединение, и клиент терял уже пришедший ответ. Пока без TLS. Тест —
   `run/http_refuse_late_body`.
+- **Непрочитанное тело** (4.11). Обработчик ответил, не дочитав тело больше 1 МБ (или тело
+  кусками): ответ несёт `connection: close`, и `fetch` идёт со следующим запросом в новое
+  соединение. Раньше сервер молча закрывал соединение после ответа, и следующий запрос по нему
+  падал с «closed the connection before the response». Малое тело сервер дочитывает сам, и
+  соединение остаётся. Тест — `run/http_unread_body`.
 - **Ошибка `listen()` — `ListenError`**: `kind: "LISTEN_ERROR"` (ошибка ядра сервера: сокет,
   сертификат), `code` — один из `ListenErrorCode` (`EADDRINUSE`, `EACCES`, `EADDRNOTAVAIL`,
   `ENOTFOUND`, `ERR_INVALID_ARG_VALUE`, `ERR_TLS_CERT`, `ERR_TLS_KEY`, `EMFILE`, `ENOBUFS`,

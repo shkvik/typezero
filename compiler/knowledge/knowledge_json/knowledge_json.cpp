@@ -90,6 +90,7 @@ llvm::json::Value KnowledgeJson::write(const Knowledge &knowledge, bool libraryB
       types[type.module].push_back(llvm::json::Object{{"name", type.name},
                                                       {"type", type.type},
                                                       {"base", type.base},
+                                                      {"kind", type.kind},
                                                       {"range", range(type.place)}});
     }
   }
@@ -259,6 +260,7 @@ bool KnowledgeJson::read(const llvm::json::Value &value, Knowledge &out) {
           type.name = text(*fields, "name");
           type.type = text(*fields, "type");
           type.base = text(*fields, "base");
+          type.kind = text(*fields, "kind");
           type.module = m;
           type.place.path = module.path;
           readRange(fields->getObject("range"), type.place);

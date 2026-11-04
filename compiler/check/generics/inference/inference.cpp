@@ -53,7 +53,13 @@ Inference::Inference(llvm::ArrayRef<const Type *> params, const Origins &origins
       elementOf(std::move(elementOf)) {}
 
 void Inference::from(const Type *pattern, const Type *actual) {
-  if (actual->isError() || actual->isVoid()) {
+  if (actual->isError()) {
+    return;
+  }
+  if (actual->isVoid()) {
+    if (auto at = llvm::find(params, pattern); at != params.end()) {
+      candidates[size_t(at - params.begin())].push_back(actual);
+    }
     return;
   }
   if (auto at = llvm::find(params, pattern); at != params.end()) {

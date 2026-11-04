@@ -12,7 +12,7 @@ public:
   void decorateClass(ClassDecl *cls);
   void decorate(ClassDecl *cls, ClassField *field, FunctionDecl *method,
                 llvm::ArrayRef<Checker::DecoratorUse> uses);
-  bool decoratorParams(Expr *callee, std::vector<const Type *> &params);
+  bool decoratorParams(Expr *callee, std::vector<const Type *> &params, size_t &required);
   void checkDecoratedNames(ClassDecl *cls);
 
 private:

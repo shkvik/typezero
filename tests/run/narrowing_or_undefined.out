@@ -3,5 +3,6 @@ a number undefined
 b number undefined
 3 -1 undefined
 [ 'd', undefined, 'e' ]
+f none not a string not an object
 6
 100

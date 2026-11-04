@@ -268,6 +268,9 @@ void KnowledgePass::declareClass(size_t module, const ClassDecl &cls, size_t par
     }
     out_.symbols[member].signature = SymbolText::field(field);
     fields_[{&cls, field.name.str(), field.isStatic}] = member;
+    if (field.isStatic && field.var) {
+      variables_[field.var] = member;
+    }
   }
   for (const auto *list : {&cls.constructors, &cls.methods}) {
     for (const FunctionDecl *method : *list) {
@@ -361,6 +364,19 @@ void KnowledgePass::declare(size_t module, const Module &source) {
       if (symbol != Knowledge::kNone) {
         out_.symbols[symbol].signature =
             SymbolText::collapse(llvm::StringRef(start, end - start), 400);
+        enums_[e] = symbol;
+        for (const EnumMember &member : e->members) {
+          llvm::StringRef text = places_.lineText(member.loc);
+          const char *from =
+              text.empty() ? nullptr : lineStart(member.loc.getPointer(), text.data());
+          size_t own =
+              add(module, "enumMember", member.name, member.loc, from, endOf(text), symbol);
+          if (own == Knowledge::kNone) {
+            continue;
+          }
+          out_.symbols[own].signature = SymbolText::collapse(text.trim(), 200);
+          enumMembers_[{symbol, member.name.str()}] = own;
+        }
       }
     }
   }
@@ -476,6 +492,18 @@ size_t KnowledgePass::typeSymbol(size_t module, llvm::StringRef name) const {
   return kind == "class" || kind == "type" || kind == "enum" ? found->second : Knowledge::kNone;
 }
 
+size_t KnowledgePass::enumSymbol(const void *decl) const {
+  auto found = enums_.find(decl);
+
+  return found == enums_.end() ? Knowledge::kNone : found->second;
+}
+
+size_t KnowledgePass::enumMemberSymbol(size_t enumSymbol, llvm::StringRef name) const {
+  auto found = enumMembers_.find({enumSymbol, name.str()});
+
+  return found == enumMembers_.end() ? Knowledge::kNone : found->second;
+}
+
 bool KnowledgePass::reference(size_t symbol, size_t from, size_t module, llvm::SMLoc loc,
                               bool call) {
   if (!seenReferences_.insert({symbol, loc.getPointer()}).second) {
@@ -514,8 +542,19 @@ void KnowledgePass::typed(size_t module, llvm::SMLoc loc, llvm::StringRef name, 
     return;
   }
   const Type *inner = type->nonOptional();
-  out_.types.push_back({name.str(), type->name().str(), inner->name().str(), module, *place});
+  out_.types.push_back({name.str(), type->name().str(), inner->name().str(), "", module, *place});
   memberTypes_.try_emplace(inner->name().str(), inner);
+}
+
+void KnowledgePass::builtinClass(size_t module, llvm::SMLoc loc, llvm::StringRef name) {
+  if (!seenBuiltins_.insert(loc.getPointer()).second) {
+    return;
+  }
+  std::optional<SourcePlace> place = places_.locate(loc);
+  if (!place) {
+    return;
+  }
+  out_.types.push_back({name.str(), name.str(), name.str(), "class", module, *place});
 }
 
 void KnowledgePass::walk() {

@@ -1,5 +1,6 @@
 #include "compiler/library/reflect/reflect_lowerer/reflect_lowerer.h"
 #include "compiler/library/json/json_lowerer/json_lowerer.h"
+#include "compiler/library/process/process_lowerer/process_lowerer.h"
 #include "compiler/library/reflect/class_info_lowerer/class_info_lowerer.h"
 #include "compiler/library/reflect/reflect_dispatch_lowerer/reflect_dispatch_lowerer.h"
 #include "compiler/library/result/result_lowerer/result_lowerer.h"
@@ -12,6 +13,7 @@
 #include "compiler/lower/memory/ref_counts/ref_counts.h"
 #include "compiler/lower/memory/store_lowerer/store_lowerer.h"
 #include "compiler/lower/stmt/stmt_lowerer/stmt_lowerer.h"
+#include "compiler/lower/types/unknown_cast_lowerer/unknown_cast_lowerer.h"
 #include "compiler/lower/types/unknown_lowerer/unknown_lowerer.h"
 #include "compiler/lower/values/string_lowerer/string_lowerer.h"
 #include "llvm/ADT/STLExtras.h"
@@ -63,11 +65,59 @@ llvm::Function *ReflectLowerer::constructFunction(const ClassDecl *cls) {
   return fn;
 }
 
+llvm::Function *ReflectLowerer::fillFunction(const ClassDecl *cls) {
+  if (llvm::Function *found = fillFunctions_.lookup(cls)) {
+    return found;
+  }
+  llvm::Type *ptr = lowering_.builder_.getPtrTy();
+  auto *fn = llvm::Function::Create(
+      llvm::FunctionType::get(ptr, {ptr}, false), llvm::GlobalValue::InternalLinkage,
+      "tz.fill." + lowering_.symbolPrefixes_.lookup(cls) + className(cls), lowering_.module_.get());
+  lowering_.functionBuilder().setFunctionAttributes(fn);
+  fillFunctions_[cls] = fn;
+
+  return fn;
+}
+
+void ReflectLowerer::noteFillErrors(const Type *errorType) {
+  std::vector<const Type *> variants;
+  if (errorType->isUnion()) {
+    variants.assign(errorType->members().begin(), errorType->members().end());
+  } else {
+    variants.push_back(errorType);
+  }
+  for (const Type *variant : variants) {
+    const Field *kind = variant->field("kind");
+    if (!kind || !kind->type->isStringLiteral()) {
+      continue;
+    }
+    const std::u16string &text = kind->type->literalText();
+    if (text == u"REFLECT_FILL_ERROR_TYPE") {
+      fillTypeError_ = variant;
+    } else if (text == u"REFLECT_FILL_ERROR_UNKNOWN_FIELD") {
+      fillUnknownError_ = variant;
+    } else if (text == u"REFLECT_FILL_ERROR_CLASS") {
+      fillClassError_ = variant;
+    }
+  }
+}
+
 void ReflectLowerer::finishReflection(SourceFile &file, llvm::Instruction *init) {
   auto described = [&](const ClassDecl *cls) {
     return cls->isEmitted() && !cls->literal && !cls->builtin &&
            ((lowering_.reflectsNew_ && cls->reflectNew) ||
-            (lowering_.reflectsGet_ && cls->reflectMethods));
+            (lowering_.reflectsGet_ && cls->reflectMethods) || (usesFillAny_ && cls->reflectFill));
+  };
+  auto fillProblem = [&](const ClassDecl *cls) -> uint32_t {
+    if (cls->isAbstract) {
+      return 2;
+    }
+    for (const ClassDecl *c = cls; c; c = c->parent) {
+      if (!c->constructors.empty()) {
+        return 1;
+      }
+    }
+    return 0;
   };
   llvm::Type *ptr = lowering_.builder_.getPtrTy(), *i32 = lowering_.builder_.getInt32Ty();
   llvm::Constant *null = llvm::ConstantPointerNull::get(lowering_.builder_.getPtrTy());
@@ -131,15 +181,28 @@ void ReflectLowerer::finishReflection(SourceFile &file, llvm::Instruction *init)
       global->setUnnamedAddr(llvm::GlobalValue::UnnamedAddr::Global);
       table = global;
     }
+    llvm::Constant *fill = null;
+    uint32_t problem = fillProblem(cls);
+    if (usesFillAny_ && cls->reflectFill && problem == 0) {
+      fill = fillFunction(cls);
+    }
     auto *info = cast<llvm::GlobalVariable>(lowering_.classInfoLowerer().classInfoGlobal(cls));
     info->setInitializer(llvm::ConstantStruct::get(
         lowering_.classInfoLowerer().classInfoType(),
-        {construct, table, lowering_.builder_.getInt32(uint32_t(methods.size()))}));
+        {construct, table, lowering_.builder_.getInt32(uint32_t(methods.size())), fill,
+         lowering_.builder_.getInt32(problem)}));
   }
   for (size_t i = 0; i < constructFunctions_.size(); ++i) {
     auto [cls, fn] = *(constructFunctions_.begin() + i);
     if (fn->empty()) {
       lowering_.classInfoLowerer().emitConstructThunk(cls, fn);
+    }
+  }
+  ClassInfoLowerer::FillErrors fillErrors{fillTypeError_, fillUnknownError_, fillClassError_};
+  for (size_t i = 0; i < fillFunctions_.size(); ++i) {
+    auto [cls, fn] = *(fillFunctions_.begin() + i);
+    if (fn->empty()) {
+      lowering_.classInfoLowerer().emitFillThunk(cls, fn, fillErrors);
     }
   }
   for (auto &[cls, global] : lowering_.classInfos_) {
@@ -149,7 +212,7 @@ void ReflectLowerer::finishReflection(SourceFile &file, llvm::Instruction *init)
       global = nullptr;
     }
   }
-  if (!lowering_.reflectsNew_ && !lowering_.reflectsGet_ && !usesApply_) {
+  if (!lowering_.reflectsNew_ && !lowering_.reflectsGet_ && !usesApply_ && !usesFillAny_) {
     return;
   }
 
@@ -258,7 +321,42 @@ llvm::Value *ReflectLowerer::emitReflectCall(CallExpr *call) {
     for (size_t i = 0; i < values.size(); ++i) {
       lowering_.refCounts().releaseValue(values[i], call->args[i]->type);
     }
-    return lowering_.resultLowerer().catchFailure(result, call->type, call->loc());
+    const Type *gives = call->type->okType();
+    if (gives->isUnknown()) {
+      return lowering_.resultLowerer().catchFailure(result, call->type, call->loc());
+    }
+    return lowering_.resultLowerer().catchFailure(call->type, call->loc(), [&]() -> llvm::Value * {
+      if (gives->isVoid()) {
+        lowering_.refCounts().releaseValue(result, Type::unknown());
+        return nullptr;
+      }
+      llvm::BasicBlock *mismatch = lowering_.functionFrame().newBlock("reflect.result.mismatch");
+      llvm::Value *value = lowering_.unknownCastLowerer().emitUnknownAs(result, gives, mismatch);
+      lowering_.refCounts().releaseValue(result, Type::unknown());
+      llvm::IRBuilderBase::InsertPoint point = lowering_.builder_.saveIP();
+      lowering_.functionFrame().switchTo(mismatch);
+      lowering_.processLowerer().emitPanic("internal error: Reflect.apply gave a value of "
+                                           "another type than the function returns");
+      lowering_.builder_.restoreIP(point);
+      return value;
+    });
+  }
+  case Builtin::ReflectFill: {
+    std::vector<llvm::Value *> values = lowering_.exprLowerer().emitExprs(call->args);
+    noteFillErrors(call->type->errType());
+    llvm::Value *object;
+    if (const ClassDecl *known = call->args[0]->type->classRef()) {
+      object = lowering_.builder_.CreateCall(fillFunction(known), {values[1]}, "filled");
+    } else {
+      usesFillAny_ = true;
+      object = lowering_.builder_.CreateCall(
+          lowering_.unknownLowerer().unknownFunction("tz_reflect_fill", ptr, {ptr, ptr, ptr}),
+          {values[0], values[1], lowering_.classInfoLowerer().fillMaker(fillClassError_)},
+          "filled");
+    }
+    lowering_.refCounts().releaseValue(values[0], call->args[0]->type);
+    lowering_.refCounts().releaseValue(values[1], call->args[1]->type);
+    return lowering_.resultLowerer().catchFailure(object, call->type, call->loc());
   }
   case Builtin::ReflectConstruct: {
     std::vector<llvm::Value *> values = lowering_.exprLowerer().emitExprs(call->args);

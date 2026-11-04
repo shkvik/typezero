@@ -201,6 +201,28 @@ void CallWalk::registerValue(const FunctionDecl *fn, const Type *type) {
   }
 }
 
+void CallWalk::unknownRef(const Expr *e) {
+  e = strip(e);
+  std::vector<const FunctionDecl *> fns;
+  if (auto *fe = dyn_cast_or_null<FunctionExpr>(e)) {
+    fns.push_back(fe->fn);
+  } else if (auto *n = dyn_cast_or_null<NameExpr>(e); n && n->func) {
+    fns.push_back(n->func->decl);
+  } else if (n && n->var && !n->var->reassigned && (n->var->function || n->var->lambda)) {
+    fns.push_back(n->var->function ? n->var->function : n->var->lambda);
+  } else if (auto *m = dyn_cast_or_null<MemberExpr>(e); m && m->method) {
+    fns = methodTargets(m->method->decl, m->virtualCall);
+  } else {
+    analysis_.unknownAnyFn_ = true;
+    return;
+  }
+  for (const FunctionDecl *fn : fns) {
+    if (fn && fn->body && !analysis_.isLibrary(fn)) {
+      analysis_.unknownFns_.insert(analysis_.codeWalk().discover(fn));
+    }
+  }
+}
+
 bool CallWalk::functionRef(const Expr *e, const Use &use, const Type *type) {
   e = strip(e);
   if (auto *fe = dyn_cast_or_null<FunctionExpr>(e)) {
@@ -338,6 +360,10 @@ void CallWalk::builtinCall(const CallExpr *c, const Use &use) {
       } else {
         functionArg(c, arg, *kind, use);
       }
+      continue;
+    }
+    if (b == Builtin::ReflectApply && i == 0) {
+      analysis_.exprWalk().expr(strip(arg));
       continue;
     }
     analysis_.exprWalk().expr(arg, i == 0 ? inner : Use());

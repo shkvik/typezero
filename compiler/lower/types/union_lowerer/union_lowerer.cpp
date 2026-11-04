@@ -1,4 +1,5 @@
 #include "compiler/lower/types/union_lowerer/union_lowerer.h"
+#include "compiler/check/types/type_relations/type_relations.h"
 #include "compiler/library/json/json_lowerer/json_lowerer.h"
 #include "compiler/library/regex/matcher_builder/matcher_builder.h"
 #include "compiler/lower/expr/equality_lowerer/equality_lowerer.h"
@@ -7,6 +8,7 @@
 #include "compiler/lower/function_frame/function_frame.h"
 #include "compiler/lower/memory/ref_counts/ref_counts.h"
 #include "compiler/lower/module_builder/module_builder.h"
+#include "compiler/lower/objects/dict_lowerer/dict_lowerer.h"
 #include "compiler/lower/types/optional_lowerer/optional_lowerer.h"
 #include "compiler/lower/types/union_layout/union_layout.h"
 #include "compiler/lower/values/string_lowerer/string_lowerer.h"
@@ -177,6 +179,13 @@ llvm::Value *UnionLowerer::emitUnionConversion(llvm::Value *value, const Type *f
     return lowering_.exprLowerer().emitConversion(
         lowering_.unionLayout().taggedPart(value, from, slot), from->slotPart(slot), to);
   }
+  if (!from->isUnion() && to->isUnion() && !llvm::is_contained(to->members(), from)) {
+    for (const Type *member : to->members()) {
+      if (TypeRelations::copiesIntoRecord(from, member)) {
+        return lowering_.dictLowerer().emitRecordFromObject(value, from, member);
+      }
+    }
+  }
 
   return value;
 }
@@ -315,6 +324,17 @@ llvm::Value *UnionLowerer::emitIsOneOf(llvm::Value *id, llvm::ArrayRef<const Typ
                     lowering_.builder_.CreateSub(id, lowering_.builder_.getInt32(cls->id)),
                     lowering_.builder_.getInt32(cls->lastId - cls->id));
       result = lowering_.builder_.CreateOr(result, in);
+      return;
+    }
+    if (t->isClassRef() && !t->classRef()) {
+      for (const ClassDecl *cls : lowering_.emittedClasses_) {
+        const Type *ref = Type::classRef(cls, cls->name);
+        if (!cls->literal && ref->isSubtypeOf(t)) {
+          result = lowering_.builder_.CreateOr(
+              result,
+              lowering_.builder_.CreateICmpEQ(id, lowering_.builder_.getInt32(plainTypeId(ref))));
+        }
+      }
       return;
     }
     uint32_t number =

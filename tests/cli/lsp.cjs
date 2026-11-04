@@ -321,6 +321,25 @@ async function main() {
   ])
   const utilColors = await colorsOf("colors/util.tz")
   if (utilColors.some(([where]) => where == "3:4")) throw new Error(`'this' is colored: ${JSON.stringify(utilColors)}`)
+  // An enum is colored as a type and its members as enum members, as in TypeScript, also
+  // where the compiler has turned Kind.Discard into its value.
+  const gameColors = await colorsOf("colors/game.tz")
+  const gameAt = place => (gameColors.find(([where]) => where == place) ?? [place, "none"])[1]
+  expect("the colors of an enum", ["1:20", "2:17", "2:22", "4:17", "4:22", "4:43"].map(gameAt), [
+    "enum", "enum", "enumMember", "enum", "enumMember", "enum",
+  ])
+  // A class before its static member and a class of JavaScript ('new Map', 'Date.now()')
+  // are classes too.
+  const staticColors = await colorsOf("colors/statics.tz")
+  const staticAt = place => (staticColors.find(([where]) => where == place) ?? [place, "none"])[1]
+  expect("the colors of classes", ["1:38", "3:11", "3:17", "6:12", "6:26"].map(staticAt), [
+    "class", "class", "property readonly", "class", "class",
+  ])
+  const kindColors = await colorsOf("colors/kinds.tz")
+  const kindAt = place => (kindColors.find(([where]) => where == place) ?? [place, "none"])[1]
+  expect("the colors of an enum declaration", ["0:12", "1:2"].map(kindAt), [
+    "enum declaration", "enumMember declaration",
+  ])
 
   // A file of tz's own library is checked as the module it is: no errors of a
   // program (declare, tz:intrinsics), and an error typed into it is shown in

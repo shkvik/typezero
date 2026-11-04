@@ -1,0 +1,81 @@
+// void is a type argument like any other. In the copy for T = void a value of T is undefined, as
+// the value of a Result<void, E> already is, and goes where undefined goes: into an array, a field,
+// JSON.stringify (which gives undefined, as in JavaScript). Inside Result and Promise T stays
+// void, so a decorator over a method that gives Promise<Result<void, E>> takes it as it is.
+function wrap<T>(value: T): T[] {
+  return [value];
+}
+
+function keep<T>(value: T): T {
+  return value;
+}
+
+function describe<T>(value: T): string {
+  if (value == undefined) return "nothing";
+  return `${JSON.stringify(value)}`;
+}
+
+function body<T>(result: Result<T, string>): string | undefined {
+  if (result.isErr()) return undefined;
+  return JSON.stringify(result.value);
+}
+
+class Box<T> {
+  readonly value: T;
+
+  constructor(value: T) {
+    this.value = value;
+  }
+}
+
+const r: Result<void, string> = ok();
+const items = wrap<void>(undefined);
+console.log(items.length, items);
+if (r.isOk()) {
+  keep(r.value);
+  console.log(describe(r.value), describe(5));
+}
+console.log(body(r), body(ok({ a: 1 })), body<void>(err("x")));
+console.log(new Box<void>(undefined).value, new Box(2).value);
+
+async function nothing(): Promise<Result<void, string>> {
+  return ok();
+}
+
+async function something(): Promise<Result<int, string>> {
+  return ok(7);
+}
+
+async function answer<T>(f: () => Promise<Result<T, string>>): Promise<string> {
+  const got = await f();
+  if (got.isErr()) return got.error;
+  const text = JSON.stringify(got.value);
+  return text == undefined ? "no body" : text;
+}
+console.log(await answer(nothing), await answer(something));
+
+const handlers: string[] = [];
+
+function Route<A extends unknown[], T>(path: string) {
+  return (cls: Constructor, name: string, descriptor: MethodDescriptor<A, Promise<Result<T, string>>>) => {
+    const handler = descriptor.value;
+    handlers.push(`${path} ${cls.name}.${name}`);
+    console.log("route", path, typeof handler);
+  };
+}
+
+class Sources {
+  @Route("delete")
+  async remove(id: string): Promise<Result<void, string>> {
+    if (id == "") return err("EMPTY");
+    return ok();
+  }
+
+  @Route("get")
+  async find(id: string): Promise<Result<{ id: string }, string>> {
+    return ok({ id });
+  }
+}
+console.log(handlers);
+const removed = await new Sources().remove("a");
+console.log(removed.isOk());

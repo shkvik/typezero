@@ -319,8 +319,12 @@ Expr *TypeDeclarer::checkEnumMember(EnumDecl *decl, MemberExpr *member, const Ty
     member->type = Type::error();
     return member;
   }
+  bool written = member->object && member->object->loc() != member->loc();
   if (m->isString) {
     auto *lit = checker_.ctx_.make<StringLitExpr>(member->loc(), m->text);
+    if (written) {
+      checker_.file_->namedUses[lit] = {decl, member->object->loc(), member->name};
+    }
     const Type *literal = checker_.literalTypes().stringLiteralFor(expected, m->text);
     lit->type = Type::stringLiteral(m->text);
     if (literal) {
@@ -332,6 +336,9 @@ Expr *TypeDeclarer::checkEnumMember(EnumDecl *decl, MemberExpr *member, const Ty
   int64_t value = m->number;
   Expr *lit = checker_.ctx_.make<IntLitExpr>(member->loc(),
                                              static_cast<uint64_t>(value < 0 ? -value : value));
+  if (written) {
+    checker_.file_->namedUses[lit] = {decl, member->object->loc(), member->name};
+  }
   if (value < 0) {
     lit = checker_.ctx_.make<UnaryExpr>(member->loc(), UnaryOp::Neg, lit);
   }

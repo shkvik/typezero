@@ -33,8 +33,13 @@ public:
   size_t variableSymbol(const VarSymbol *var) const;
   size_t fieldSymbol(const ClassDecl *cls, llvm::StringRef name, bool isStatic) const;
   size_t typeSymbol(size_t module, llvm::StringRef name) const;
+  size_t enumSymbol(const void *decl) const;
+  llvm::StringRef symbolKind(size_t symbol) const { return out_.symbols[symbol].kind; }
+  size_t enumMemberSymbol(size_t enumSymbol, llvm::StringRef name) const;
+  const Program &program() const { return program_; }
   bool reference(size_t symbol, size_t from, size_t module, llvm::SMLoc loc, bool call);
   void typed(size_t module, llvm::SMLoc loc, llvm::StringRef name, const Type *type);
+  void builtinClass(size_t module, llvm::SMLoc loc, llvm::StringRef name);
   void local(const VarSymbol *var, size_t module, size_t owner, llvm::SMLoc use,
              bool parameter = false);
   const SourcePlaces &places() const { return places_; }
@@ -59,9 +64,12 @@ private:
   llvm::DenseMap<const ClassDecl *, size_t> classes_;
   llvm::DenseMap<const VarSymbol *, size_t> variables_;
   std::map<std::tuple<const ClassDecl *, std::string, bool>, size_t> fields_;
+  llvm::DenseMap<const void *, size_t> enums_;
+  std::map<std::pair<size_t, std::string>, size_t> enumMembers_;
   std::vector<llvm::StringMap<size_t>> scopes_;
   llvm::DenseSet<std::pair<size_t, const char *>> seenReferences_;
   llvm::DenseSet<const char *> seenTypes_;
+  llvm::DenseSet<const char *> seenBuiltins_;
   llvm::DenseMap<const char *, size_t> locals_;
   llvm::DenseSet<const char *> seenLocalUses_;
   std::map<std::string, const Type *> memberTypes_;

@@ -1,0 +1,88 @@
+// Reflect.fill(cls, values) makes an object of a class without a constructor and gives its
+// fields the values by name, checking the type of each when the program runs: an int field
+// takes only an int, an enum field one of its members, an array field each element. A field
+// without a key keeps the value the class starts with. A class known when compiling has no
+// error of the class; a class from a Constructor has it too.
+enum GameMode {
+  Classic = "classic",
+  Ranked = "ranked",
+}
+
+class ItemDto {
+  readonly name: string;
+  readonly count: int;
+}
+
+class Page {
+  readonly page: int;
+  readonly take: int = 10;
+}
+
+class JoinReq extends Page {
+  readonly roomCode: string;
+  readonly seats: int;
+  readonly mode: GameMode;
+  readonly points: 8 | 10 | 12;
+  readonly items: ItemDto[];
+  readonly tags: string[];
+  readonly note?: string;
+  readonly rating: double;
+}
+
+class Engine {
+  readonly turn: int;
+  constructor(turn: int) {
+    this.turn = turn;
+  }
+}
+
+function show(label: string, result: Result<object, ReflectFillError>) {
+  if (result.isErr()) {
+    console.log(label, result.error.kind, result.error.code, result.error.details.message);
+    return;
+  }
+  console.log(label, result.value);
+}
+
+const item = Reflect.fill(ItemDto, new Map<string, unknown>([["name", "wood"], ["count", 2]]));
+if (item.isErr()) console.log(item.error.details.message);
+const items: unknown[] = [];
+if (item.isOk()) items.push(item.value);
+
+const good = Reflect.fill(
+  JoinReq,
+  new Map<string, unknown>([
+    ["roomCode", "AB12CD"],
+    ["seats", 3],
+    ["mode", "ranked"],
+    ["points", 10],
+    ["items", items],
+    ["tags", ["a", "b"]],
+    ["rating", 1500.5],
+  ]),
+);
+if (good.isOk()) console.log(good.value, good.value.mode == GameMode.Ranked, good.value.take);
+
+const cases: [string, Map<string, unknown>][] = [
+  ["double", new Map<string, unknown>([["seats", 3.5]])],
+  ["three", new Map<string, unknown>([["seats", "three"]])],
+  ["enum", new Map<string, unknown>([["mode", "turbo"]])],
+  ["points", new Map<string, unknown>([["points", 9]])],
+  ["element", new Map<string, unknown>([["tags", ["a", 2]]])],
+  ["undefined", new Map<string, unknown>([["roomCode", undefined]])],
+  ["unknown key", new Map<string, unknown>([["roomCod", "x"]])],
+  ["optional undefined", new Map<string, unknown>([["note", undefined]])],
+];
+for (const [label, values] of cases) {
+  const filled = Reflect.fill(JoinReq, values);
+  if (filled.isErr()) {
+    console.log(label, filled.error.kind, JSON.stringify(filled.error.details));
+  } else {
+    console.log(label, "ok", filled.value.note);
+  }
+}
+
+const classes: Constructor[] = [JoinReq, Engine, ItemDto];
+for (const cls of classes) {
+  show(cls.name, Reflect.fill(cls, new Map<string, unknown>([["count", 1]])));
+}

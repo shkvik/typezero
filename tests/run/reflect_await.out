@@ -1,0 +1,6 @@
+init ran
+hook done undefined 1
+not a promise 1
+typed a 3
+wrong Reflect.apply: argument 2: expected int, got a string
+SERVICE

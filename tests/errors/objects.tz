@@ -34,7 +34,7 @@ const unknown = { none: undefined }
 const nothing = { nothing: console.log() }
 // expect-error: duplicate field 'a'
 type Twice = { a: int; a: string }
-// expect-error: 'void' can only be used as a return type
+// expect-error: 'void' can only be used as a return type or a type argument
 type Empty = { v: void }
 
 // Fields that do not exist.

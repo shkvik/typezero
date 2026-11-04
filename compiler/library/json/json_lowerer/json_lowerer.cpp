@@ -8,6 +8,7 @@
 #include "compiler/lower/layouts/type_descriptors/type_descriptors.h"
 #include "compiler/lower/memory/ref_counts/ref_counts.h"
 #include "compiler/lower/module_builder/module_builder.h"
+#include "compiler/lower/objects/dict_lowerer/dict_lowerer.h"
 #include "compiler/lower/objects/object_maker/object_maker.h"
 #include "compiler/lower/stmt/stmt_lowerer/stmt_lowerer.h"
 #include "compiler/lower/types/optional_lowerer/optional_lowerer.h"
@@ -154,6 +155,9 @@ llvm::Value *JsonLowerer::emitJsonConversion(llvm::Value *value, const Type *fro
   if (isJsonish(to)) {
     if (from->isUndefined()) {
       return llvm::ConstantPointerNull::get(lowering_.builder_.getPtrTy());
+    }
+    if (from->isRecord()) {
+      return emitJsonFromRecord(value, from);
     }
     if (from->isOptional()) {
       llvm::BasicBlock *before = lowering_.builder_.GetInsertBlock();
@@ -324,6 +328,41 @@ llvm::Value *JsonLowerer::emitJsonTypeOf(Expr *operand) {
   }
 
   return result;
+}
+
+llvm::Value *JsonLowerer::emitJsonFromRecord(llvm::Value *map, const Type *from) {
+  llvm::Type *ptr = lowering_.builder_.getPtrTy();
+  llvm::FunctionCallee put = jsonFunction("tz_json_object_put", lowering_.builder_.getVoidTy(),
+                                          {ptr, ptr, lowering_.builder_.getInt64Ty(), ptr});
+  llvm::Value *object =
+      lowering_.builder_.CreateCall(jsonFunction("tz_json_object_new", ptr, {}), {}, "json");
+  const Type *value = from->valueType();
+  llvm::Value *slot = lowering_.functionFrame().spill(map, "record");
+  lowering_.dictLowerer().emitDictLoop(slot, from, nullptr, [&](llvm::Value *entry) {
+    llvm::Value *key =
+        lowering_.builder_.CreateLoad(lowering_.moduleBuilder().lower(Type::string()),
+                                      lowering_.dictLowerer().entryKey(entry, from));
+    llvm::Value *item = lowering_.builder_.CreateLoad(
+        lowering_.moduleBuilder().lower(value), lowering_.dictLowerer().entryValue(entry, from));
+    lowering_.refCounts().retainValue(item, value);
+    llvm::Value *json = emitJsonConversion(item, value, Type::json());
+    llvm::Value *args[] = {object, lowering_.stringLowerer().stringObj(key),
+                           lowering_.stringLowerer().stringMeta(key), json};
+    if (!value->isOptional()) {
+      lowering_.builder_.CreateCall(put, args);
+      return;
+    }
+    llvm::BasicBlock *putBlock = lowering_.functionFrame().newBlock("json.put");
+    llvm::BasicBlock *nextBlock = lowering_.functionFrame().newBlock("json.next");
+    lowering_.builder_.CreateCondBr(lowering_.builder_.CreateIsNotNull(json), putBlock, nextBlock);
+    lowering_.functionFrame().switchTo(putBlock);
+    lowering_.builder_.CreateCall(put, args);
+    lowering_.builder_.CreateBr(nextBlock);
+    lowering_.functionFrame().switchTo(nextBlock);
+  });
+  lowering_.refCounts().releaseValue(lowering_.builder_.CreateLoad(ptr, slot), from);
+
+  return object;
 }
 
 llvm::Value *JsonLowerer::emitJsonObjectLiteral(ObjectLitExpr *lit) {

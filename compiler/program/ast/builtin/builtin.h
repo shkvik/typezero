@@ -467,6 +467,7 @@ enum class Builtin {
   ReflectApply,
   ReflectConstruct,
   ReflectMethod,
+  ReflectFill,
 };
 
 inline bool isLibBuiltin(Builtin builtin) {

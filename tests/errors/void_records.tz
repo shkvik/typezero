@@ -1,0 +1,32 @@
+// void goes into results and type arguments only; an object becomes a dictionary only when every
+// field fits its values, and an object of a class or one with a method never does; the name of an
+// enum is a dictionary only where a dictionary is expected.
+enum GameMode {
+  Online = "online",
+}
+
+class User {
+  readonly name: string = "Ann";
+}
+
+function count(d: Record<string, string>): int {
+  return Object.keys(d).length;
+}
+
+function first(o: { Online: string }): string {
+  return o.Online;
+}
+
+// expect-error: 'void' can only be used as a return type or a type argument
+let nothing: void;
+const mixed = { name: "Ann", age: 3 };
+// expect-error: type '{ name: string; age: int }' is not assignable to type 'Record<string, string>'
+count(mixed);
+// expect-error: type 'User' is not assignable to type 'Record<string, string>'
+count(new User());
+const withMethod = { name: "Ann", greet: () => "hi" };
+// expect-error: type '{ name: string; greet: () => string }' is not assignable to type 'Record<string, string>'
+count(withMethod);
+// expect-error: enum 'GameMode' can only be used as 'GameMode.Member' or 'GameMode[value]'
+first(GameMode);
+console.log(nothing);

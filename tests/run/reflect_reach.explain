@@ -1,0 +1,59 @@
+top-level code
+  start
+    reads  message of any ReflectError (line 45 in callHook)
+    reads  the fields of any unknown (line 45 in callHook)
+    in order with Counter.onModuleInit after await at line 14: the fields of any unknown
+    in order: line 45
+    waits for its turn inside: line 27 in callHook
+  after await at line 45
+    writes stdout (line 45)
+    reads  counter.count (line 45)
+    reads  message of any ReflectError (line 46 in callHook)
+    reads  the fields of any unknown (line 46 in callHook)
+    in order with Counter.onModuleInit after await at line 14: counter.count, the fields of any unknown
+    in order: lines 45-46
+    waits for its turn inside: line 27 in callHook
+  after await at line 46
+    writes stdout (line 46)
+    reads  counter.count (line 46)
+    reads  everything in any unknown[] (line 47 in make)
+    reads  message of any ReflectError (line 47 in make)
+    in order with Counter.onModuleInit after await at line 14: counter.count, everything in any unknown[]
+    in order: lines 46-47
+    waits for its turn inside: line 37 in make
+  after await at line 47
+    writes stdout (line 47)
+    reads  everything in any unknown[] (line 48 in make)
+    reads  message of any ReflectError (line 48 in make)
+    in order with Counter.onModuleInit after await at line 14: everything in any unknown[]
+    in order: line 48
+    waits for its turn inside: line 37 in make
+  after await at line 48
+    writes stdout (line 48)
+    parallel
+
+async method Counter.onModuleInit, line 13
+  start: runs inside its caller
+  after await at line 14 (in the tasks Reflect.apply(hook, instance, []) at line 29)
+    reads  this.count (line 15)
+    writes this.count (line 15)
+    in order with the same piece in other tasks: count of any unknown
+    in order with the start of the top-level code: count of any unknown
+    in order with the top-level code after await at line 45: count of any unknown
+    in order with the top-level code after await at line 46: count of any unknown
+    in order with the top-level code after await at line 47: count of any unknown
+    in order: line 15
+
+async function callHook, line 26
+  start: runs inside its caller
+    reads  the fields of any unknown (line 27)
+    reads  message of any ReflectError (line 30)
+  after await at line 31
+    parallel
+
+async function make, line 35
+  start: runs inside its caller
+    reads  everything in any unknown[] (line 37)
+    reads  message of any ReflectError (line 38)
+  after await at line 39
+    parallel

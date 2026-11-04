@@ -400,8 +400,8 @@ void ReturnInferrer::resolveParams(FuncSymbol *fn) {
   if (FunctionDecl *generic = decl->generic; generic && decl->cls && decl->cls->generic) {
     resolveParams(generic->sym);
     auto sub = [&](const Type *t) {
-      return t ? checker_.typeParams().substitute(
-                     checker_.genericClassChecker().instanceType(decl->cls, t),
+      return t ? checker_.typeParams().substituteValue(
+                     checker_.genericClassChecker().instanceValueType(decl->cls, t),
                      generic->sym->typeParams, fn->typeParams)
                : nullptr;
     };

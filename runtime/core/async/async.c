@@ -12,6 +12,7 @@
 #include "runtime/core/publish/publish.h"
 #include "runtime/core/string/string.h"
 #include "runtime/core/tzrt/tzrt.h"
+#include "runtime/core/unknown/unknown.h"
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -634,6 +635,40 @@ void tz_promise_follow(TzPromise *p, TzPromise *q, int32_t ahead) {
   Follow *f = new_follow(p, q);
   f->reactor.run = follow_then;
   tz_microtask(&f->reactor);
+}
+
+static void unknown_settle(TzReactor *r, TzPromise *source) {
+  (void)source;
+  Follow *f = (Follow *)((char *)r - offsetof(Follow, reactor));
+  const TzType *type = value_type(f->origin);
+  void *u = NULL;
+  if (type) {
+    tz_value_retain(type, value_of(f->origin));
+    u = tz_unknown_of(type, value_of(f->origin));
+  }
+  *(void **)value_of(f->target) = u;
+  tz_promise_fulfill(f->target);
+}
+
+void *tz_unknown_await(void *u, const TzLayout *layout) {
+  TZ_ORDERED();
+  TzPromise *target = tz_promise_new(layout);
+  const TzInstance *object = (const TzInstance *)u;
+  if (object && object->layout && (object->layout->flags & TZ_LAYOUT_PROMISE)) {
+    TzPromise *origin = (TzPromise *)u;
+    retain(target);
+    retain(origin);
+    Follow *f = new_follow(target, origin);
+    f->reactor.run = unknown_settle;
+    tz_promise_react(origin, &f->reactor);
+    return target;
+  }
+  if (u) {
+    retain(u);
+  }
+  *(void **)value_of(target) = u;
+  tz_promise_fulfill(target);
+  return target;
 }
 
 const TzLayout tz_promise_void_layout = {tz_promise_drop, NULL, 0, TZ_LAYOUT_PROMISE, NULL, 0, 0};

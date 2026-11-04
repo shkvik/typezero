@@ -401,9 +401,14 @@ void BuiltinEffects::builtinEffects(const CallExpr *c, const Expr *recv) {
     rec.bySelf =
         self ? std::optional<Ref>(analysis_.aliasAnalysis().receiverRef(self)) : std::nullopt;
     rec.byObject = self ? self->type : nullptr;
+    rec.noSelf = self && self->type && self->type->isUndefined();
+    if (auto *name = dyn_cast_or_null<NameExpr>(fn); name && name->var) {
+      rec.reflectNames = name->var->reflectNames;
+    }
     return;
   }
-  case Builtin::ReflectConstruct: {
+  case Builtin::ReflectConstruct:
+  case Builtin::ReflectFill: {
     for (size_t i = 1; i < c->args.size(); ++i) {
       analysis_.exprWalk().contents(c->args[i], false, at);
     }

@@ -390,6 +390,13 @@ llvm::Value *AsyncLowerer::emitAwait(AwaitExpr *await) {
   llvm::Value *result;
   if (type->isPromise()) {
     result = awaitPromise(value, type, await->loc());
+  } else if (type->isUnknown()) {
+    llvm::Type *ptr = lowering_.builder_.getPtrTy();
+    llvm::Value *promise = lowering_.builder_.CreateCall(
+        asyncFunction("tz_unknown_await", ptr, {ptr, ptr}),
+        {value, lowering_.promiseLowerer().promiseLayout(type)}, "unknown.promise");
+    lowering_.refCounts().releaseValue(value, type);
+    result = awaitPromise(promise, Type::promise(type), await->loc());
   } else if (holdsPromise(type)) {
     bool outerReady = std::exchange(readyGoesOn_, ahead || lowering_.freeAwaits_.contains(await));
     result = awaitUnion(value, type, await->type, await->loc());

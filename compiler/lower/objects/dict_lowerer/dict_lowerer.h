@@ -25,6 +25,7 @@ public:
                     llvm::function_ref<void(llvm::Value *)> each);
   llvm::Value *emitDictForEach(CallExpr *call);
   llvm::Value *emitRecordLiteral(ObjectLitExpr *lit);
+  llvm::Value *emitRecordFromObject(llvm::Value *object, const Type *from, const Type *to);
 
 private:
   Lowering &lowering_;

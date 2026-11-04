@@ -247,11 +247,10 @@ void ConditionFacts::addConditionFacts(const Expr *cond, Checker::Flow &whenTrue
       if (!name) {
         continue;
       }
-      llvm::StringRef valueType = typeOfName(name->var->type->inner());
       if (text->value == u"undefined") {
         (op == BinaryOp::Eq ? whenFalse : whenTrue).defined.insert(name->var);
         (op == BinaryOp::Eq ? whenTrue : whenFalse).undefinedVars.insert(name->var);
-      } else if (std::u16string(valueType.begin(), valueType.end()) == text->value) {
+      } else {
         (op == BinaryOp::Eq ? whenTrue : whenFalse).defined.insert(name->var);
       }
     }

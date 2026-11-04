@@ -1,0 +1,54 @@
+// A handler that answers without reading a large body (a 413 of its own) ends the connection:
+// the answer says "connection: close", so fetch makes a new connection for the next request.
+// The server used to drop the connection after it without a word, and the next request on it
+// failed with "closed the connection before the response". A small body it reads and drops, and
+// the connection stays. Only 127.0.0.1.
+import { Socket } from "node:net";
+import { Server } from "tz:http";
+
+const server = new Server({ port: 0, hostname: "127.0.0.1" }, async (request) => {
+  if (request.headers.get("x-read") == "no") return new Response("skipped", { status: 413 });
+  const text = await request.text();
+  return new Response(`read ${text.unwrapOr("").length}`);
+});
+
+const listened = server.listen();
+if (listened.isErr()) {
+  console.log(listened.error.message);
+  process.exit(1);
+}
+const listening = listened.value;
+const base = `http://127.0.0.1:${listening.port}`;
+
+async function send(read: string, body: string): Promise<string> {
+  const sent = await fetch(base, { method: "POST", body, headers: { "x-read": read } });
+  if (sent.isErr()) return `error: ${sent.error.message}`;
+  const text = await sent.value.text();
+  return `${sent.value.status} ${text.unwrapOr("")} ${sent.value.headers.get("connection") ?? "keep"}`;
+}
+
+console.log(await send("yes", "small"));
+console.log(await send("no", "x".repeat(1100000)));
+console.log(await send("yes", "after a large body"));
+console.log(await send("no", "x".repeat(10)));
+console.log(await send("yes", "after a small body"));
+
+async function raw(): Promise<string> {
+  const socket = new Socket({ host: "127.0.0.1", port: listening.port, timeout: 5000 });
+  const connected = await socket.connect();
+  if (connected.isErr()) return connected.error.code;
+  socket.write("POST / HTTP/1.1\r\nhost: localhost\r\nx-read: no\r\ncontent-length: 2000000\r\n\r\n");
+  socket.write("x".repeat(100000));
+  let answer = "";
+  for await (const chunkResult of socket) {
+    if (chunkResult.isErr()) break;
+    answer += chunkResult.value.toString();
+    if (answer.includes("\r\n\r\n")) break;
+  }
+  socket.destroy();
+  const head = answer.split("\r\n\r\n")[0] ?? "";
+  return head.split("\r\n").filter((line) => !line.startsWith("date:")).join(" | ");
+}
+
+console.log(await raw());
+await listening.stop({ timeout: 0 });

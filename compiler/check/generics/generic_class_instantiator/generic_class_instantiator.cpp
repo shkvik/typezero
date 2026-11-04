@@ -75,7 +75,7 @@ ClassDecl *GenericClassInstantiator::instantiateClass(ClassDecl *generic,
     if (args[k]->isError()) {
       return nullptr;
     }
-    if (args[k]->isVoid() || args[k]->isUndefined()) {
+    if (args[k]->isUndefined()) {
       checker_.diags_.error(loc, "'" + args[k]->name() + "' cannot be a type argument of '" + name +
                                      "'");
 
@@ -210,21 +210,26 @@ void GenericClassInstantiator::declareInstanceMember(ClassDecl *inst, FunctionDe
   auto sub2 = [&](const Type *t) {
     return t ? checker_.typeParams().substitute(sub(t), own, mine) : nullptr;
   };
+  auto value = [&](const Type *t) {
+    return t ? checker_.typeParams().substituteValue(
+                   checker_.genericClassChecker().instanceValueType(inst, t), own, mine)
+             : nullptr;
+  };
   fn->typeArgs = mine;
   sym->typeParams = mine;
   for (const Type *d : of->typeDefaults) {
     sym->typeDefaults.push_back(sub2(d));
   }
   for (const Type *p : of->params) {
-    sym->params.push_back(sub2(p));
+    sym->params.push_back(value(p));
   }
   sym->pendingParams = of->pendingParams;
   for (size_t i = 0; i < fn->params.size() && i < generic->params.size(); ++i) {
-    fn->params[i].declaredType = sub2(generic->params[i].declaredType);
+    fn->params[i].declaredType = value(generic->params[i].declaredType);
   }
   for (size_t i = fn->params.size(); i < generic->params.size(); ++i) {
     fn->params.push_back(generic->params[i]);
-    fn->params.back().declaredType = sub2(generic->params[i].declaredType);
+    fn->params.back().declaredType = value(generic->params[i].declaredType);
   }
   for (size_t i = fn->typeParams.size(); i < generic->typeParams.size(); ++i) {
     fn->typeParams.push_back(generic->typeParams[i]);
@@ -272,7 +277,8 @@ void GenericClassInstantiator::fillInstance(ClassDecl *inst) {
     if (f.isStatic) {
       continue;
     }
-    f.resolved = sub(g.resolved);
+    f.resolved = g.method ? sub(g.resolved)
+                          : checker_.genericClassChecker().instanceValueType(inst, g.resolved);
     if (g.method) {
       FunctionDecl *fn = cast<FunctionExpr>(f.init)->fn;
       fn->name = g.method->name;

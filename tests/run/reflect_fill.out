@@ -1,0 +1,22 @@
+JoinReq {
+  page: 0,
+  take: 10,
+  roomCode: 'AB12CD',
+  seats: 3,
+  mode: 'ranked',
+  points: 10,
+  items: [ ItemDto { name: 'wood', count: 2 } ],
+  tags: [ 'a', 'b' ],
+  rating: 1500.5
+} true 10
+double REFLECT_FILL_ERROR_TYPE {"message":"could not fill JoinReq: field seats is int, and the value given is the double 3.5; check and convert the values before Reflect.fill","className":"JoinReq","field":"seats","expected":"int","got":"double","value":"3.5"}
+three REFLECT_FILL_ERROR_TYPE {"message":"could not fill JoinReq: field seats is int, and the value given is the string 'three'; check and convert the values before Reflect.fill","className":"JoinReq","field":"seats","expected":"int","got":"string","value":"'three'"}
+enum REFLECT_FILL_ERROR_TYPE {"message":"could not fill JoinReq: field mode is GameMode, and the value given is the string 'turbo'; check and convert the values before Reflect.fill","className":"JoinReq","field":"mode","expected":"GameMode","got":"string","value":"'turbo'"}
+points REFLECT_FILL_ERROR_TYPE {"message":"could not fill JoinReq: field points is 8 | 10 | 12, and the value given is the int 9; check and convert the values before Reflect.fill","className":"JoinReq","field":"points","expected":"8 | 10 | 12","got":"int","value":"9"}
+element REFLECT_FILL_ERROR_TYPE {"message":"could not fill JoinReq: element 1 of field tags is string, and the value given is the int 2; check and convert the values before Reflect.fill","className":"JoinReq","field":"tags[1]","expected":"string","got":"int","value":"2"}
+undefined REFLECT_FILL_ERROR_TYPE {"message":"could not fill JoinReq: field roomCode is string, and the value given is undefined; leave the key out to keep the value the class starts with","className":"JoinReq","field":"roomCode","expected":"string","got":"undefined","value":"undefined"}
+unknown key REFLECT_FILL_ERROR_UNKNOWN_FIELD {"message":"could not fill JoinReq: it has no field roomCod; its fields are page, take, roomCode, seats, mode, points, items, tags, note, rating","className":"JoinReq","field":"roomCod","fields":["page","take","roomCode","seats","mode","points","items","tags","note","rating"]}
+optional undefined ok undefined
+JoinReq REFLECT_FILL_ERROR_UNKNOWN_FIELD ERR_UNKNOWN_FIELD could not fill JoinReq: it has no field count; its fields are page, take, roomCode, seats, mode, points, items, tags, note, rating
+Engine REFLECT_FILL_ERROR_CLASS ERR_HAS_CONSTRUCTOR could not fill Engine: it sets its fields in a constructor; make it with Reflect.construct(Engine, [...])
+ItemDto ItemDto { name: '', count: 1 }

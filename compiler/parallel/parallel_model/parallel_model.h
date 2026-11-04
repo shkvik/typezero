@@ -187,6 +187,8 @@ struct CallRec {
   llvm::StringRef byName;
   const Type *byObject = nullptr;
   std::optional<Ref> bySelf;
+  bool noSelf = false;
+  std::vector<llvm::StringRef> reflectNames;
   const AwaitExpr *await = nullptr;
   bool returned = false;
   bool tail = false;

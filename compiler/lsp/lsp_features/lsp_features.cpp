@@ -125,7 +125,7 @@ llvm::json::Value LspFeatures::hover(unsigned line, unsigned character) const {
     value = code(known.name + ": " + known.type);
   } else if (const KnownType *type = knowledge_.typeAt(module_, line, character)) {
     at = &type->place;
-    value = code(type->name + ": " + type->type);
+    value = code(type->kind == "class" ? "class " + type->name : type->name + ": " + type->type);
   } else {
     return nullptr;
   }
@@ -254,8 +254,8 @@ llvm::json::Value LspFeatures::rename(unsigned line, unsigned character, llvm::S
 }
 
 llvm::json::Object LspFeatures::legend() {
-  llvm::json::Array types{"class",  "type",     "enum",     "function",
-                          "method", "property", "variable", "parameter"};
+  llvm::json::Array types{"class",    "type",     "enum",      "function",  "method",
+                          "property", "variable", "parameter", "enumMember"};
   llvm::json::Array modifiers{"declaration", "readonly", "defaultLibrary"};
 
   return llvm::json::Object{{"tokenTypes", std::move(types)},
@@ -288,6 +288,9 @@ llvm::json::Value LspFeatures::semanticTokens() const {
     }
     if (kind == "field") {
       return 5;
+    }
+    if (kind == "enumMember") {
+      return 8;
     }
 
     return 6;
@@ -366,6 +369,11 @@ llvm::json::Value LspFeatures::semanticTokens() const {
     const KnownSymbol &known = knowledge_.symbols[reference.symbol];
     llvm::StringRef name = known.kind == "constructor" ? known.container : known.name;
     add(reference.place, name, typeOf(known.kind), modifiersOf(reference.symbol, false));
+  }
+  for (const KnownType &builtin : knowledge_.types) {
+    if (builtin.module == module_ && builtin.kind == "class") {
+      add(builtin.place, builtin.name, 0, 4);
+    }
   }
   for (const KnownLocal &local : knowledge_.locals) {
     if (local.module != module_) {

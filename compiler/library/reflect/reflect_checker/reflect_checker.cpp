@@ -155,6 +155,11 @@ void ReflectChecker::finishReflection() {
   for (const auto &entry : checker_.constructorCasts_) {
     entry.second->reflectNew = true;
   }
+  if (reflectFillAny_) {
+    for (ClassDecl *cls : checker_.classes_) {
+      cls->reflectFill = !cls->builtin;
+    }
+  }
   if (!checker_.reflectionUsed_) {
     for (ClassDecl *cls : checker_.classes_) {
       cls->reflectNew = cls->reflectMethods = false;
@@ -392,6 +397,48 @@ Expr *ReflectChecker::checkReflection(CallExpr *call, MemberExpr *member, const 
     call->type = Type::unknown();
     return call;
   }
+  if (fn == "fill") {
+    if (!checker_.argumentChecker().checkArity(call, member->loc(), 2, 2)) {
+      return call;
+    }
+    Expr *&cls = call->args[0];
+    cls = checker_.exprChecker().checkExpr(cls);
+    call->args[1] = checker_.argumentChecker().checkArg(
+        call->args[1], Type::dict(Type::DictKind::Map, Type::string(), Type::unknown()));
+    const Type *type = cls->type;
+    if (type->isError() || call->args[1]->type->isError()) {
+      return call;
+    }
+    if (!type->isClassRef()) {
+      checker_.diags_.error(cls->loc(), "Reflect.fill makes an object of a class, and this is a '" +
+                                            type->name() + "'");
+      return call;
+    }
+    const Type *fails = checker_.prelude().builtinType("ReflectFillError");
+    if (ClassDecl *made = const_cast<ClassDecl *>(type->classRef())) {
+      std::string why = !made->type || made->builtin ? "it is a class of JavaScript"
+                        : made->isAbstract ? "it is abstract; fill a class that extends it"
+                        : !ClassLinks::constructorsOf(made).empty()
+                            ? "it sets its fields in a constructor; make it with 'new " +
+                                  made->name.str() + "(...)'"
+                            : "";
+      if (!why.empty()) {
+        checker_.diags_.error(cls->loc(), "Reflect.fill cannot fill '" + made->name + "': " + why +
+                                              " (Reflect.fill gives the fields of a class without "
+                                              "a constructor their values)");
+        return call;
+      }
+      made->reflectFill = true;
+      fails = checker_.prelude().builtinType("ReflectFillValueError");
+    } else if (!onlyChecked()) {
+      reflectFillAny_ = true;
+      checker_.reflectionUsed_ = true;
+    }
+    checker_.flowChecker().calledFunction();
+    call->builtin = Builtin::ReflectFill;
+    call->type = Type::result(ClassValueChecker::constructedBy(type), fails);
+    return call;
+  }
   if (fn == "apply") {
     if (!checker_.argumentChecker().checkArity(call, member->loc(), 3, 3)) {
       return call;
@@ -399,6 +446,9 @@ Expr *ReflectChecker::checkReflection(CallExpr *call, MemberExpr *member, const 
     Expr *&f = call->args[0];
     f = checker_.exprChecker().checkExpr(f);
     const FunctionDecl *held = checker_.reflectCallChecker().heldReflectMethod(f);
+    const Type *gives = f->type->isFunction() && f->type->ret() && !f->type->ret()->isError()
+                            ? f->type->ret()
+                            : Type::unknown();
     if (!f->type->isError() && !f->type->isUnknown() && !f->type->isFunction()) {
       checker_.diags_.error(f->loc(), "Reflect.apply calls a function, and this is a '" +
                                           f->type->name() + "'");
@@ -415,7 +465,8 @@ Expr *ReflectChecker::checkReflection(CallExpr *call, MemberExpr *member, const 
     }
     call->args[2] = checker_.reflectCallChecker().checkReflectArgs(call->args[2]);
     checker_.flowChecker().calledFunction();
-    if (held && !f->type->isError() && !self->type->isError() && !call->args[2]->type->isError()) {
+    if (held && gives->isUnknown() && !f->type->isError() && !self->type->isError() &&
+        !call->args[2]->type->isError()) {
       if (Expr *direct = checker_.reflectCallChecker().directReflectApply(call, held)) {
         return okOf(direct);
       }
@@ -425,7 +476,7 @@ Expr *ReflectChecker::checkReflection(CallExpr *call, MemberExpr *member, const 
       reflectGetAny_ = true;
     }
     call->builtin = Builtin::ReflectApply;
-    call->type = Type::result(Type::unknown(), reflectError());
+    call->type = Type::result(gives, reflectError());
     return call;
   }
   if (call->args.size() == 3) {

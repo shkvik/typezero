@@ -1,0 +1,45 @@
+// 'await' of an unknown that holds a Promise waits for it, as in JavaScript (a hook found
+// with Reflect.get), and of any other unknown gives it back. Reflect.apply of a function whose
+// type is known gives a Result of what it returns; the arguments are still checked when it runs.
+class Service {
+  public calls: int
+  public constructor() {
+    this.calls = 0
+  }
+  public async onModuleInit(): Promise<void> {
+    await Promise.resolve()
+    this.calls += 1
+    console.log("init ran")
+  }
+  public async load(id: string, n: int): Promise<Result<{ id: string; n: int }, string>> {
+    await Promise.resolve()
+    if (n < 0) return err("NEGATIVE")
+    return ok({ id, n })
+  }
+  public name(): string {
+    return "service"
+  }
+}
+
+const service = new Service()
+const hook = Reflect.get(service, "onModuleInit")
+if (typeof hook == "function") {
+  const called = Reflect.apply(hook, service, [])
+  if (called.isOk()) {
+    const done = await called.value
+    console.log("hook done", done, service.calls)
+  }
+}
+const plain = await Reflect.get(service, "calls")
+console.log("not a promise", plain)
+
+const load = service.load
+const typed = Reflect.apply(load, service, ["a", 2])
+if (typed.isOk()) {
+  const result = await typed.value
+  if (result.isOk()) console.log("typed", result.value.id, result.value.n + 1)
+}
+const wrong = Reflect.apply(load, service, ["a", "b"])
+if (wrong.isErr()) console.log("wrong", wrong.error.message)
+const nameOf = Reflect.apply(service.name, service, [])
+if (nameOf.isOk()) console.log(nameOf.value.toUpperCase())

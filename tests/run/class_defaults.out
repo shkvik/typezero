@@ -1,0 +1,13 @@
+ListReq {
+  page: 0,
+  take: 10,
+  query: '',
+  mode: 'classic',
+  rules: Rules { victoryPoints: 8, bankLimited: false },
+  tags: [],
+  seen: Map(0) {},
+  ids: Set(0) {},
+  rating: 0,
+  point: { x: 0, y: 0 }
+}
+0 0 0 0 8 true

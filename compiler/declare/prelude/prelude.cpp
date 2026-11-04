@@ -69,6 +69,38 @@ type ReflectError = {
     | "ERR_ABSTRACT_CLASS"
   message: string
 }
+type ReflectFillTypeError = {
+  kind: "REFLECT_FILL_ERROR_TYPE"
+  code: "ERR_INVALID_FIELD_TYPE"
+  details: {
+    message: string
+    className: string
+    field: string
+    expected: string
+    got: string
+    value: string
+  }
+}
+type ReflectFillUnknownFieldError = {
+  kind: "REFLECT_FILL_ERROR_UNKNOWN_FIELD"
+  code: "ERR_UNKNOWN_FIELD"
+  details: {
+    message: string
+    className: string
+    field: string
+    fields: string[]
+  }
+}
+type ReflectFillClassError = {
+  kind: "REFLECT_FILL_ERROR_CLASS"
+  code: "ERR_HAS_CONSTRUCTOR" | "ERR_ABSTRACT_CLASS" | "ERR_NOT_REFLECTED"
+  details: {
+    message: string
+    className: string
+  }
+}
+type ReflectFillValueError = ReflectFillTypeError | ReflectFillUnknownFieldError
+type ReflectFillError = ReflectFillTypeError | ReflectFillUnknownFieldError | ReflectFillClassError
 type TlsCode =
   | "UNABLE_TO_GET_ISSUER_CERT"
   | "UNABLE_TO_GET_CRL"

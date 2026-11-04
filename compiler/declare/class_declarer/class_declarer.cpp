@@ -252,6 +252,17 @@ void ClassDeclarer::declareMethods(ClassDecl *cls) {
     declareTyped(fn, declared);
   }
 
+  if (ClassLinks::constructorsOf(cls).empty()) {
+    for (ClassField &f : cls->fields) {
+      if (f.isStatic || f.init || f.method || f.optional || f.parameter || f.definite ||
+          !f.resolved) {
+        continue;
+      }
+      llvm::SmallPtrSet<const ClassDecl *, 4> visiting;
+      visiting.insert(cls);
+      f.init = defaultValue(f.resolved, f.type ? &*f.type : nullptr, f.loc, visiting);
+    }
+  }
   std::vector<Stmt *> sets;
   for (const ClassField &f : cls->fields) {
     if (f.isStatic || !f.init || f.method) {
@@ -284,6 +295,110 @@ void ClassDeclarer::declareMethods(ClassDecl *cls) {
   number(cls->methods);
   number(cls->constructors);
   checkVariants(cls);
+}
+
+Expr *ClassDeclarer::literalValue(const Type *literal, llvm::SMLoc loc) {
+  const Type *base = literal->inner();
+  if (base && base->isString()) {
+    return checker_.ctx_.make<StringLitExpr>(loc, literal->literalText());
+  }
+  if (base && base->isBool()) {
+    return checker_.ctx_.make<BoolLitExpr>(loc, literal->literalNumber() != 0);
+  }
+  double number = literal->literalNumber();
+  if (base && base->isFloat()) {
+    Expr *value = checker_.ctx_.make<FloatLitExpr>(loc, number < 0 ? -number : number);
+    return number < 0 ? checker_.ctx_.make<UnaryExpr>(loc, UnaryOp::Neg, value) : value;
+  }
+  auto magnitude = static_cast<uint64_t>(number < 0 ? -number : number);
+  Expr *value = checker_.ctx_.make<IntLitExpr>(loc, magnitude);
+
+  return number < 0 ? checker_.ctx_.make<UnaryExpr>(loc, UnaryOp::Neg, value) : value;
+}
+
+bool ClassDeclarer::startsEmpty(const ClassDecl *cls,
+                                llvm::SmallPtrSetImpl<const ClassDecl *> &visiting) {
+  if (cls->isAbstract || cls->builtin || cls->isGeneric() || cls->typeParams.size() ||
+      !ClassLinks::constructorsOf(cls).empty() || !visiting.insert(cls).second) {
+    return false;
+  }
+  for (const ClassDecl *c = cls; c; c = c->parent) {
+    resolveClass(const_cast<ClassDecl *>(c));
+    for (const ClassField &f : c->fields) {
+      if (f.isStatic || f.init || f.method || f.optional || !f.resolved) {
+        continue;
+      }
+      const Type *type = f.resolved;
+      if (const ClassDecl *inner = type->classDecl(); inner && !startsEmpty(inner, visiting)) {
+        return false;
+      }
+    }
+  }
+  visiting.erase(cls);
+
+  return true;
+}
+
+Expr *ClassDeclarer::defaultValue(const Type *type, const TypeRef *ref, llvm::SMLoc loc,
+                                  llvm::SmallPtrSetImpl<const ClassDecl *> &visiting) {
+  auto &ctx = checker_.ctx_;
+  if (!type || type->isError() || type->isParam()) {
+    return nullptr;
+  }
+  if (type->isString()) {
+    return ctx.make<StringLitExpr>(loc, u"");
+  }
+  if (type->isInteger() || type->isDecimal()) {
+    return ctx.make<IntLitExpr>(loc, uint64_t(0));
+  }
+  if (type->isFloat()) {
+    return ctx.make<FloatLitExpr>(loc, 0.0);
+  }
+  if (type->isBool()) {
+    return ctx.make<BoolLitExpr>(loc, false);
+  }
+  if (type->isArray() && !type->isTuple()) {
+    return ctx.make<ArrayLitExpr>(loc);
+  }
+  if ((type->isMap() || type->isSet()) && ref && ref->kind == TypeRef::Kind::Generic) {
+    return ctx.make<NewExpr>(loc, type->isMap() ? "Map" : "Set", ref->args, std::vector<Expr *>());
+  }
+  if (type->isLiteral()) {
+    return literalValue(type, loc);
+  }
+  if (type->isUnion() && !type->members().empty() &&
+      llvm::all_of(type->members(), [](const Type *m) { return m->isLiteral(); })) {
+    return literalValue(type->members().front(), loc);
+  }
+  if (const ClassDecl *cls = type->classDecl()) {
+    if (cls->name.empty() || !startsEmpty(cls, visiting)) {
+      return nullptr;
+    }
+    return ctx.make<NewExpr>(loc, cls->name, std::vector<TypeRef>(), std::vector<Expr *>());
+  }
+  if (type->isObject() && !type->isTuple() && !type->isAnyObject() && !type->isDate() &&
+      !type->isRegExp() && !type->isMatch() && !type->isIntl() && !type->isWeakRef() &&
+      !type->isRuntimeObject() && !type->isBytes() &&
+      llvm::none_of(type->fields(), [](const Field &f) { return f.name.starts_with("%"); })) {
+    auto *literal = ctx.make<ObjectLitExpr>(loc);
+    for (const Field &field : type->fields()) {
+      if (field.type && field.type->isOptional()) {
+        continue;
+      }
+      Expr *value = defaultValue(field.type, nullptr, loc, visiting);
+      if (!value) {
+        return nullptr;
+      }
+      ObjectLitExpr::Property property;
+      property.name = field.name;
+      property.loc = loc;
+      property.value = value;
+      literal->props.push_back(property);
+    }
+    return literal;
+  }
+
+  return nullptr;
 }
 
 void ClassDeclarer::checkVariants(ClassDecl *cls) {
@@ -354,7 +469,7 @@ void ClassDeclarer::completeClass(ClassDecl *cls) {
       if (!cls->fields[i].isStatic && !cls->fields[i].method && !cls->fields[i].resolved) {
         cls->fields[i].resolved =
             generic->fields[i].resolved
-                ? checker_.genericClassChecker().instanceType(cls, generic->fields[i].resolved)
+                ? checker_.genericClassChecker().instanceValueType(cls, generic->fields[i].resolved)
                 : Type::error();
       }
     }

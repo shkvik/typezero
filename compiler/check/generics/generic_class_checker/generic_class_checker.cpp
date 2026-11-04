@@ -101,6 +101,14 @@ const Type *GenericClassChecker::instanceType(const ClassDecl *inst, const Type 
   return checker_.typeParams().substitute(type, inst->generic->typeArgs, inst->typeArgs);
 }
 
+const Type *GenericClassChecker::instanceValueType(const ClassDecl *inst, const Type *type) {
+  if (!type || !inst->generic) {
+    return type;
+  }
+
+  return checker_.typeParams().substituteValue(type, inst->generic->typeArgs, inst->typeArgs);
+}
+
 void GenericClassChecker::checkClassInstance(Checker::Instance *instance) {
   ClassDecl *inst = instance->cls;
   if (instance->checked) {
@@ -194,7 +202,7 @@ Expr *GenericClassChecker::checkGenericNew(NewExpr *expr, ClassDecl *generic,
   if (!expr->typeArgs.empty()) {
     std::vector<const Type *> args;
     for (const TypeRef &ref : expr->typeArgs) {
-      args.push_back(checker_.typeResolver().resolveType(ref, false));
+      args.push_back(checker_.typeResolver().resolveType(ref, true));
       if (args.back()->isError()) {
         checkArgsLoosely(expr->args);
 

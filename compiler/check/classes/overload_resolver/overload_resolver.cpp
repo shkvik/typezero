@@ -277,7 +277,7 @@ FuncSymbol *OverloadResolver::chooseVariant(llvm::ArrayRef<FunctionDecl *> varia
     for (size_t i = 0; i < count && mismatch.empty(); ++i) {
       const Type *param = parameterAt(v->sym, i);
       if (v->sym->isGeneric()) {
-        param = checker_.typeParams().substitute(param, v->sym->typeParams, c.typeArgs);
+        param = checker_.typeParams().substituteValue(param, v->sym->typeParams, c.typeArgs);
       }
       int rank = conversionRank(args[i]->type, param);
       if (rank < 0 && checker_.typeRelations().literalAdapts(args[i], param)) {
@@ -353,7 +353,7 @@ Expr *OverloadResolver::callGenericVariant(CallExpr *call, FuncSymbol *sym,
   std::vector<const Type *> params;
   llvm::SMLoc outerLoc = std::exchange(checker_.instanceLoc_, loc);
   for (const Type *p : sym->params) {
-    params.push_back(checker_.typeParams().substitute(p, typeParams, bound));
+    params.push_back(checker_.typeParams().substituteValue(p, typeParams, bound));
   }
   const Type *ret = checker_.returnInferrer().returnType(sym);
   call->type = ret ? checker_.typeParams().substitute(ret, typeParams, bound) : Type::error();
