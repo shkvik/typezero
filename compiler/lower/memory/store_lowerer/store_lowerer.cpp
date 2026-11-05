@@ -69,7 +69,7 @@ static RefShape refShape(const Type *type) {
 StoreLowerer::StoreLowerer(Lowering &lowering) : lowering_(lowering) {}
 
 void StoreLowerer::groupStore(llvm::Value *owner, llvm::Value *value, const Type *type) {
-  if (!lowering_.memory().mayHoldMember(type) || isa<llvm::Constant>(value)) {
+  if (!lowering_.memory().mayCarryMember(type) || isa<llvm::Constant>(value)) {
     return;
   }
   llvm::Type *ptr = lowering_.builder_.getPtrTy();
@@ -110,7 +110,7 @@ void StoreLowerer::groupStore(llvm::Value *owner, llvm::Value *value, const Type
 }
 
 void StoreLowerer::releaseIn(llvm::Value *owner, llvm::Value *value, const Type *type) {
-  if (!lowering_.memory().mayHoldMember(type) || isa<llvm::Constant>(value)) {
+  if (!lowering_.memory().mayCarryMember(type) || isa<llvm::Constant>(value)) {
     lowering_.refCounts().releaseValue(value, type);
     return;
   }
@@ -163,7 +163,7 @@ void StoreLowerer::releaseIn(llvm::Value *owner, llvm::Value *value, const Type 
 }
 
 void StoreLowerer::takeFrom(llvm::Value *owner, llvm::Value *value, const Type *type) {
-  if (!lowering_.memory().mayHoldMember(type) || isa<llvm::Constant>(value)) {
+  if (!lowering_.memory().mayCarryMember(type) || isa<llvm::Constant>(value)) {
     return;
   }
   llvm::Type *ptr = lowering_.builder_.getPtrTy();
@@ -253,7 +253,7 @@ void StoreLowerer::publishValue(llvm::Value *value, const Type *type) {
 void StoreLowerer::storeIn(llvm::Value *owner, const Type *ownerType, llvm::Value *address,
                            llvm::Value *value, const Type *type) {
   storeBarrier(owner, value, type);
-  if (!type->isManaged() || !lowering_.memory().mayHoldMember(type) ||
+  if (!type->isManaged() || !lowering_.memory().mayCarryMember(type) ||
       (ownerType && !lowering_.ownerMayBeMember(ownerType))) {
     lowering_.stmtLowerer().storeReplacing(address, value, type);
     return;

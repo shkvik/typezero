@@ -161,7 +161,7 @@ void PublishLowerer::finishPublishTable(llvm::Instruction *init) {
 }
 
 void PublishLowerer::pinValue(llvm::Value *value, const Type *type) {
-  if (!lowering_.memory().mayHoldMember(type) || isa<llvm::Constant>(value)) {
+  if (!lowering_.memory().mayCarryMember(type) || isa<llvm::Constant>(value)) {
     return;
   }
   llvm::Type *ptr = lowering_.builder_.getPtrTy();
@@ -173,7 +173,7 @@ void PublishLowerer::pinValue(llvm::Value *value, const Type *type) {
 }
 
 void PublishLowerer::endValue(llvm::Value *value, const Type *type) {
-  if (!lowering_.memory().mayHoldMember(type)) {
+  if (!lowering_.memory().mayCarryMember(type)) {
     lowering_.refCounts().releaseValue(value, type);
     return;
   }

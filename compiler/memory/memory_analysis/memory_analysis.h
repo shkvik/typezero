@@ -19,6 +19,7 @@ private:
   void scanProgram(SourceFile &file, CycleScanner &scan);
   std::vector<OwnerScanner::BackRef> findBackRefs(SourceFile &file, OwnerScanner &owners);
   void findEternals(SourceFile &file);
+  void carry(const Type *concrete, const Type *rep, bool out, unsigned depth);
 
   MemoryPlan &plan_;
 };

@@ -37,6 +37,12 @@ struct CycleGraph {
   void edge(unsigned from, unsigned to, bool late) { nodes[from].edges.push_back({to, late}); }
 };
 
+struct InstanceFlow {
+  const Type *concrete;
+  const Type *rep;
+  bool out;
+};
+
 class CycleExprs;
 class CycleEscapes;
 
@@ -53,6 +59,7 @@ public:
   std::set<const Type *> reactionCallbacks;
   llvm::DenseSet<const Type *> mutated;
   llvm::DenseSet<const Type *> toUnknown;
+  std::vector<InstanceFlow> instanceFlows;
   void addType(const Type *type);
   void addVar(const VarSymbol *var);
   void function(const FunctionDecl *fn);

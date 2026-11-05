@@ -22,6 +22,8 @@ struct MemoryPlan {
   bool isEternal(const VarSymbol *var) const { return eternals.contains(var); }
   bool refMayBeMember(const Type *type) const;
   bool mayHoldMember(const Type *type) const;
+  bool refMayCarryMember(const Type *type) const;
+  bool mayCarryMember(const Type *type) const;
   bool promiseIsMember(const Type *value) const;
 
   bool hasCycles = false;
@@ -31,6 +33,7 @@ struct MemoryPlan {
   llvm::DenseSet<const void *> cyclicEnvs;
   llvm::DenseSet<const VarSymbol *> eternals;
   llvm::DenseSet<const Type *> cyclicArrayReps;
+  llvm::DenseSet<const Type *> carriedMembers;
   llvm::DenseSet<const Expr *> unstoredSites;
   std::set<std::pair<const void *, const VarSymbol *>> uncounted;
   std::set<std::pair<const Type *, std::string>> ownedFields, backRefFields;

@@ -78,11 +78,11 @@ llvm::Value *UnknownLowerer::boxValue(llvm::Value *value, const Type *type) {
     return lowering_.builder_.CreateCall(
         unknownFunction("tz_unknown_json", ptr, {ptr, ptr, lowering_.builder_.getInt32Ty()}),
         {lowering_.typeDescriptors().typeDescriptor(type), value,
-         lowering_.builder_.getInt32(lowering_.memory().mayHoldMember(type) ? 1 : 0)},
+         lowering_.builder_.getInt32(lowering_.memory().mayCarryMember(type) ? 1 : 0)},
         "box");
   }
   const char *box =
-      lowering_.memory().mayHoldMember(type) ? "tz_unknown_box_member" : "tz_unknown_box";
+      lowering_.memory().mayCarryMember(type) ? "tz_unknown_box_member" : "tz_unknown_box";
 
   return lowering_.builder_.CreateCall(unknownFunction(box, ptr, {ptr, ptr}),
                                        {lowering_.typeDescriptors().typeDescriptor(type),

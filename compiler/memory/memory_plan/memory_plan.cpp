@@ -62,6 +62,34 @@ bool MemoryPlan::mayHoldMember(const Type *type) const {
   }
 }
 
+bool MemoryPlan::refMayCarryMember(const Type *type) const {
+  if (refMayBeMember(type)) {
+    return true;
+  }
+  if (carriedMembers.empty()) {
+    return false;
+  }
+  if (type->isUnion()) {
+    return llvm::any_of(type->members(), [&](const Type *m) { return mayCarryMember(m); });
+  }
+
+  return carriedMembers.contains(type);
+}
+
+bool MemoryPlan::mayCarryMember(const Type *type) const {
+  if (!hasCycles) {
+    return false;
+  }
+  switch (type->kind()) {
+  case Type::Kind::Optional:
+    return mayCarryMember(type->inner());
+  case Type::Kind::Result:
+    return mayCarryMember(type->okType()) || mayCarryMember(type->errType());
+  default:
+    return refMayCarryMember(type);
+  }
+}
+
 bool MemoryPlan::promiseIsMember(const Type *value) const {
   return hasCycles && (anyCyclicObject || (value && mayHoldMember(value)));
 }

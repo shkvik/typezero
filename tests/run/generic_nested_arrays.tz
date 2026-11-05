@@ -1,0 +1,61 @@
+// One copy of a generic method serves every object type. When the program also
+// reads nested arrays through it, the copy makes its arrays group members, and a
+// caller that sees a type without cycles (Road[]) must still free them: each round
+// below used to leave the array and all its items behind. A closure that keeps an
+// object[] (as fetch keeps its decoders) makes object[] cyclic, as in a server.
+type Pipeline = { step: (value: int) => int }
+
+function pipeline(parts: object[]): Pipeline {
+  const kept: object[] = parts
+  return { step: (value) => value + kept.length }
+}
+
+class Reader {
+  private readonly value: Json
+
+  constructor(value: Json) {
+    this.value = value
+  }
+
+  list<T>(name: string, make: (item: Reader) => T): T[] {
+    const items: T[] = []
+    const value = this.value
+    if (typeof value != "object") return items
+    const found = value[name]
+    if (!Array.isArray(found)) return items
+    for (const item of found) items.push(make(new Reader(item)))
+    return items
+  }
+
+  int(name: string): int {
+    const value = this.value
+    if (typeof value != "object") return 0
+    const found = value[name]
+    const number: double = typeof found == "double" ? found : 0
+    return number >= 0 && number <= 1000000 ? Math.trunc(number).toInt() : 0
+  }
+}
+
+type Road = { owner: int; edge: int }
+
+function readRoad(read: Reader): Road {
+  return { owner: read.int("owner"), edge: read.int("edge") }
+}
+
+const parts: string[] = []
+for (let i = 0; i < 20; i++) parts.push(`{"owner":${i % 4},"edge":${i}}`)
+const source = JSON.parse(`{"roads":[${parts.join(",")}],"groups":[{"roads":[${parts.join(",")}]}]}`)
+if (source.isErr()) process.exit(1)
+
+let roads = 0
+let edges = 0
+for (let round = 0; round < 50; round++) {
+  const reader = new Reader(source.value)
+  const flat = reader.list("roads", readRoad)
+  roads += flat.length
+  for (const road of flat) edges += road.edge
+  const groups = reader.list("groups", (group) => ({ roads: group.list("roads", readRoad) }))
+  for (const group of groups) roads += group.roads.length
+}
+const none: object[] = []
+console.log(roads, edges, pipeline(none).step(1))

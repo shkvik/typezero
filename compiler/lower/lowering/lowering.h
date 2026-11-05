@@ -264,7 +264,7 @@ private:
   bool makesMember(const Expr *site, const Type *type) const {
     return memory_->makesMember(site, type);
   }
-  bool ownerMayBeMember(const Type *type) const { return memory_->refMayBeMember(type); }
+  bool ownerMayBeMember(const Type *type) const { return memory_->refMayCarryMember(type); }
   bool isEternal(const VarSymbol *var) const { return memory_->isEternal(var); }
   bool debugMemory_ = false;
   std::string storeField_;

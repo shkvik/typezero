@@ -114,7 +114,7 @@ llvm::Value *EnvLowerer::newBox(const Type *type, bool member) {
   llvm::StructType *box = boxType(type);
   llvm::Function *&drop = lowering_.boxDrops_[type];
   bool memberDrop =
-      (member || lowering_.isCyclicBox(type) || lowering_.memory().mayHoldMember(type)) &&
+      (member || lowering_.isCyclicBox(type) || lowering_.memory().mayCarryMember(type)) &&
       type->isManaged();
   member = (member || lowering_.isCyclicBox(type)) && type->isManaged();
   if (!drop) {

@@ -196,7 +196,7 @@ void ObjectLayouts::emitObjectDrop(const Type *type, Lowering::ObjectLayout &lay
   int next = -1;
   for (unsigned i = 0; i < fields.size(); ++i) {
     if (const Type *t = fields[i].type->nonOptional();
-        t->isObject() && type->isSubtypeOf(t) && !lowering_.memory().refMayBeMember(t)) {
+        t->isObject() && type->isSubtypeOf(t) && !lowering_.memory().refMayCarryMember(t)) {
       next = int(i);
     }
   }

@@ -5,6 +5,7 @@
 #include "compiler/memory/owner_scanner/owner_scanner.h"
 #include "compiler/memory/store_scanner/store_scanner.h"
 #include "llvm/ADT/STLExtras.h"
+#include <algorithm>
 
 using llvm::cast;
 using llvm::dyn_cast;
@@ -89,10 +90,73 @@ void MemoryAnalysis::analyzeCycles(SourceFile &file) {
     }
   }
 
+  plan_.carriedMembers.clear();
   if (plan_.hasCycles) {
+    for (const InstanceFlow &flow : scan.instanceFlows) {
+      carry(flow.concrete, flow.rep, flow.out, 0);
+    }
     findUnstored(file);
   }
   findEternals(file);
+}
+
+void MemoryAnalysis::carry(const Type *concrete, const Type *rep, bool out, unsigned depth) {
+  if (!concrete || !rep || concrete == rep || depth > 16 || concrete->kind() != rep->kind()) {
+    return;
+  }
+  switch (concrete->kind()) {
+  case Type::Kind::Optional:
+    carry(concrete->inner(), rep->inner(), out, depth + 1);
+    return;
+  case Type::Kind::Result:
+    carry(concrete->okType(), rep->okType(), out, depth + 1);
+    carry(concrete->errType(), rep->errType(), out, depth + 1);
+    return;
+  case Type::Kind::Promise:
+    carry(concrete->promised(), rep->promised(), out, depth + 1);
+    return;
+  case Type::Kind::Function: {
+    size_t count = std::min(concrete->params().size(), rep->params().size());
+    for (size_t i = 0; i < count; ++i) {
+      carry(concrete->params()[i], rep->params()[i], !out, depth + 1);
+    }
+    carry(concrete->ret(), rep->ret(), out, depth + 1);
+    return;
+  }
+  case Type::Kind::Union:
+    if (concrete->members().size() == rep->members().size()) {
+      for (size_t i = 0; i < concrete->members().size(); ++i) {
+        carry(concrete->members()[i], rep->members()[i], out, depth + 1);
+      }
+    }
+    return;
+  default:
+    break;
+  }
+  if (rep->isAnyObject()) {
+    return;
+  }
+  if (out && plan_.refMayBeMember(rep) && !plan_.refMayBeMember(concrete)) {
+    plan_.carriedMembers.insert(concrete);
+  }
+  switch (concrete->kind()) {
+  case Type::Kind::Array:
+    carry(concrete->inner(), rep->inner(), out, depth + 1);
+    break;
+  case Type::Kind::Dict:
+    carry(concrete->keyType(), rep->keyType(), out, depth + 1);
+    carry(concrete->valueType(), rep->valueType(), out, depth + 1);
+    break;
+  case Type::Kind::Object:
+    for (const Field &f : concrete->fields()) {
+      if (const Field *other = rep->field(f.name)) {
+        carry(f.type, other->type, out, depth + 1);
+      }
+    }
+    break;
+  default:
+    break;
+  }
 }
 
 void MemoryAnalysis::scanProgram(SourceFile &file, CycleScanner &scan) {

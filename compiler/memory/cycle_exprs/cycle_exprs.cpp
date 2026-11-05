@@ -89,6 +89,12 @@ void CycleExprs::expr(const Expr *expr) {
   case Expr::Kind::Name:
     if (auto *name = llvm::cast<NameExpr>(expr); name->var) {
       scanner_.addVar(name->var);
+    } else if (name->func && name->func->decl && name->func->decl->isInstance && name->type) {
+      const FuncSymbol *fn = name->func;
+      const Type *rep =
+          Type::function(fn->params, fn->minArgs, fn->hasRest,
+                         fn->ret ? fn->ret : Type::voidTy(), fn->hasThis);
+      scanner_.instanceFlows.push_back({name->type, rep, true});
     }
     break;
   case Expr::Kind::Member: {
@@ -134,6 +140,17 @@ void CycleExprs::expr(const Expr *expr) {
     auto *call = llvm::cast<CallExpr>(expr);
     scanner_.callee_.insert(call->callee);
     this->expr(call->callee);
+    if (const FuncSymbol *fn = call->func ? call->func : call->method;
+        fn && fn->decl && fn->decl->isInstance) {
+      if (fn->ret && call->type) {
+        scanner_.instanceFlows.push_back({call->type, fn->ret, true});
+      }
+      for (size_t i = 0; i < call->args.size() && i < fn->params.size(); ++i) {
+        if (call->args[i] && call->args[i]->type && fn->params[i]) {
+          scanner_.instanceFlows.push_back({call->args[i]->type, fn->params[i], false});
+        }
+      }
+    }
     bool drops = runsAndDrops(call->builtin);
     for (const Expr *arg : call->args) {
       if (const FunctionExpr *fn = drops ? closureLiteral(arg) : nullptr) {

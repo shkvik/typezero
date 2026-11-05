@@ -39,12 +39,12 @@ void RefCounts::retainValue(llvm::Value *value, const Type *type) {
     lowering_.builder_.CreateCall(lowering_.retainFn_, {value});
     break;
   case Type::Kind::Array:
-    lowering_.builder_.CreateCall(lowering_.memory().refMayBeMember(type) ? lowering_.refRetainFn_
+    lowering_.builder_.CreateCall(lowering_.memory().refMayCarryMember(type) ? lowering_.refRetainFn_
                                                                           : lowering_.arrRetainFn_,
                                   {value});
     break;
   case Type::Kind::Function:
-    lowering_.builder_.CreateCall(lowering_.memory().refMayBeMember(type)
+    lowering_.builder_.CreateCall(lowering_.memory().refMayCarryMember(type)
                                       ? lowering_.refRetainFn_
                                       : lowering_.plainObjRetainFn_,
                                   {lowering_.builder_.CreateExtractValue(value, 1)});
@@ -55,7 +55,7 @@ void RefCounts::retainValue(llvm::Value *value, const Type *type) {
   case Type::Kind::Dict:
   case Type::Kind::Promise:
   case Type::Kind::Unknown:
-    lowering_.builder_.CreateCall(lowering_.memory().refMayBeMember(type) ? lowering_.refRetainFn_
+    lowering_.builder_.CreateCall(lowering_.memory().refMayCarryMember(type) ? lowering_.refRetainFn_
                                                                           : lowering_.arrRetainFn_,
                                   {value});
     break;
@@ -65,7 +65,7 @@ void RefCounts::retainValue(llvm::Value *value, const Type *type) {
   case Type::Kind::Union:
     if (UnionLayout::isObjectUnion(type)) {
       lowering_.builder_.CreateCall(
-          lowering_.memory().refMayBeMember(type) ? lowering_.refRetainFn_ : lowering_.arrRetainFn_,
+          lowering_.memory().refMayCarryMember(type) ? lowering_.refRetainFn_ : lowering_.arrRetainFn_,
           {value});
     } else if (type->isTagged()) {
       lowering_.unionLayout().countTagged(value, type, true);
@@ -98,14 +98,14 @@ void RefCounts::releaseValue(llvm::Value *value, const Type *type) {
     break;
   case Type::Kind::Array:
     lowering_.builder_.CreateCall(
-        lowering_.memory().refMayBeMember(type)
+        lowering_.memory().refMayCarryMember(type)
             ? lowering_.groupLowerer().groupAwareRelease(lowering_.arrReleaseFn_)
             : lowering_.arrReleaseFn_,
         {value});
     break;
   case Type::Kind::Function:
     lowering_.builder_.CreateCall(
-        lowering_.memory().refMayBeMember(type)
+        lowering_.memory().refMayCarryMember(type)
             ? lowering_.groupLowerer().groupAwareRelease(lowering_.plainObjReleaseFn_)
             : lowering_.plainObjReleaseFn_,
         {lowering_.builder_.CreateExtractValue(value, 1)});
@@ -117,7 +117,7 @@ void RefCounts::releaseValue(llvm::Value *value, const Type *type) {
                                       (type->classDecl() && type->classDecl()->builtin)
                                   ? lowering_.plainInstanceReleaseFn_
                                   : lowering_.objectLayouts().objectLayout(type).release;
-    lowering_.builder_.CreateCall(lowering_.memory().refMayBeMember(type)
+    lowering_.builder_.CreateCall(lowering_.memory().refMayCarryMember(type)
                                       ? lowering_.groupLowerer().groupAwareRelease(release)
                                       : release,
                                   {value});
@@ -131,7 +131,7 @@ void RefCounts::releaseValue(llvm::Value *value, const Type *type) {
   case Type::Kind::Promise:
   case Type::Kind::Unknown:
     lowering_.builder_.CreateCall(
-        lowering_.memory().refMayBeMember(type)
+        lowering_.memory().refMayCarryMember(type)
             ? lowering_.groupLowerer().groupAwareRelease(lowering_.plainInstanceReleaseFn_)
             : lowering_.plainInstanceReleaseFn_,
         {value});
@@ -139,7 +139,7 @@ void RefCounts::releaseValue(llvm::Value *value, const Type *type) {
   case Type::Kind::Union:
     if (UnionLayout::isObjectUnion(type)) {
       lowering_.builder_.CreateCall(
-          lowering_.memory().refMayBeMember(type)
+          lowering_.memory().refMayCarryMember(type)
               ? lowering_.groupLowerer().groupAwareRelease(lowering_.plainInstanceReleaseFn_)
               : lowering_.plainInstanceReleaseFn_,
           {value});

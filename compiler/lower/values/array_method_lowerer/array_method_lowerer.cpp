@@ -92,7 +92,7 @@ llvm::Value *ArrayMethodLowerer::emitArrayMethod(CallExpr *call) {
       lowering_.builder_.CreateStore(
           values[i],
           lowering_.arrayLowerer().elementAddress(slots, element, lowering_.builder_.getInt64(i)));
-      if (lowering_.memory().refMayBeMember(arrayType)) {
+      if (lowering_.memory().refMayCarryMember(arrayType)) {
         lowering_.storeLowerer().groupStore(array.value, values[i], element);
       }
     }
@@ -110,7 +110,7 @@ llvm::Value *ArrayMethodLowerer::emitArrayMethod(CallExpr *call) {
       lowering_.builder_.CreateStore(
           lowering_.builder_.CreateTrunc(last, lowering_.builder_.getInt32Ty()),
           lowering_.arrayLowerer().arrayField(array.value, kLength));
-      if (lowering_.memory().refMayBeMember(arrayType)) {
+      if (lowering_.memory().refMayCarryMember(arrayType)) {
         lowering_.storeLowerer().takeFrom(array.value, value, element);
       }
 
@@ -129,7 +129,7 @@ llvm::Value *ArrayMethodLowerer::emitArrayMethod(CallExpr *call) {
     llvm::Value *has = lowering_.builder_.CreateCall(lowering_.rt_.arrShift, {array.value, slot});
     llvm::Value *value =
         lowering_.builder_.CreateLoad(lowering_.moduleBuilder().lower(element), slot);
-    if (lowering_.memory().refMayBeMember(arrayType)) {
+    if (lowering_.memory().refMayCarryMember(arrayType)) {
       lowering_.storeLowerer().takeFrom(array.value, value, element);
     }
     result = call->mayBeOutOfRange
@@ -267,7 +267,7 @@ llvm::Value *ArrayMethodLowerer::emitArrayMethod(CallExpr *call) {
       lowering_.builder_.CreateStore(
           values[i + 2],
           lowering_.arrayLowerer().elementAddress(slots, element, lowering_.builder_.getInt64(i)));
-      if (lowering_.memory().refMayBeMember(arrayType)) {
+      if (lowering_.memory().refMayCarryMember(arrayType)) {
         lowering_.storeLowerer().groupStore(array.value, values[i + 2], element);
       }
     }

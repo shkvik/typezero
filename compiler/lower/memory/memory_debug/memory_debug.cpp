@@ -85,7 +85,7 @@ MemoryDebug::traceFunction(const Type *type, llvm::StructType *layout,
       lowering_.groupLowerer().groupFunction("tz_group_trace_ref", lowering_.builder_.getVoidTy(),
                                              {ptr, ptr, ptr, lowering_.builder_.getInt32Ty()});
   auto one = [&](const Type *t, unsigned element, llvm::StringRef field) {
-    if (!lowering_.memory().mayHoldMember(t)) {
+    if (!lowering_.memory().mayCarryMember(t)) {
       return;
     }
     b.CreateCall(value, {walk, lowering_.typeDescriptors().typeDescriptor(t),
@@ -163,7 +163,7 @@ void MemoryDebug::finishGroupDebug(llvm::Instruction *init) {
   for (const auto &[descriptor, type] : lowering_.boxDescriptors_) {
     llvm::Function *trace = traceFunction(nullptr, lowering_.envLowerer().boxType(type), {}, "box");
     llvm::IRBuilder<> b(&trace->getEntryBlock(), trace->getEntryBlock().begin());
-    if (lowering_.memory().mayHoldMember(type)) {
+    if (lowering_.memory().mayCarryMember(type)) {
       b.CreateCall(lowering_.groupLowerer().groupFunction("tz_group_trace_value",
                                                           lowering_.builder_.getVoidTy(),
                                                           {ptr, ptr, ptr, ptr}),

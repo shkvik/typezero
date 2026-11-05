@@ -113,7 +113,7 @@ void ArrayLowerer::emitPush(llvm::Value *array, llvm::ArrayRef<llvm::Value *> va
                        lowering_.builder_.CreateAdd(at, lowering_.builder_.getInt64(i))));
   }
   lowering_.builder_.CreateStore(newLength, arrayField(array, kLength));
-  if (lowering_.memory().refMayBeMember(Type::array(element))) {
+  if (lowering_.memory().refMayCarryMember(Type::array(element))) {
     for (llvm::Value *value : values) {
       lowering_.storeLowerer().groupStore(array, value, element);
     }
