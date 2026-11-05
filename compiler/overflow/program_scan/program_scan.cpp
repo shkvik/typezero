@@ -71,7 +71,7 @@ void ProgramScan::addFunction(const FunctionDecl *fn) {
     return;
   }
   check_.functions_.push_back(fn);
-  if (fn->overrides || fn->overridden) {
+  if (fn->overrides() || fn->overridden()) {
     check_.unknownCallers_.insert(fn);
   }
 }

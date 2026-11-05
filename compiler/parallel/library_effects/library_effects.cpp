@@ -148,7 +148,7 @@ void LibraryEffects::libraryCall(const CallExpr *c, const FunctionDecl *decl, co
     analysis_.exprWalk.expr(m->object);
     self = analysis_.aliasAnalysis.receiverRef(m->object);
   }
-  llvm::StringRef cls = libraryClassName(decl->cls);
+  llvm::StringRef cls = libraryClassName(decl->cls());
   llvm::StringRef name = decl->name;
   llvm::SMLoc at = c->loc();
   for (const Expr *arg : c->args) {
@@ -157,7 +157,7 @@ void LibraryEffects::libraryCall(const CallExpr *c, const FunctionDecl *decl, co
   CallRec &rec = analysis_.codeWalk.record(c, CallKind::Call, use, at);
   rec.call = c;
   if (superCtor) {
-    for (const ClassDecl *k = analysis_.fn->decl->cls; k; k = k->parent) {
+    for (const ClassDecl *k = analysis_.fn->decl->cls(); k; k = k->parent) {
       if (k->init) {
         analysis_.callWalk.addCallee(rec, k->init, self);
       }

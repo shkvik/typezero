@@ -290,10 +290,10 @@ void EnvLowerer::emitGroupCreation(NestedGroup *group) {
 }
 
 void EnvLowerer::bindCaptures(const FunctionDecl *fn) {
-  if (fn->cls && fn->cls->literal) {
+  if (fn->cls() && fn->cls()->literal) {
     lowering_.envParam_->setName("this");
-    const Lowering::ObjectLayout &layout = lowering_.objectLayouts().objectLayout(fn->cls->type);
-    const std::vector<VarSymbol *> &captures = fn->cls->group->captures;
+    const Lowering::ObjectLayout &layout = lowering_.objectLayouts().objectLayout(fn->cls()->type);
+    const std::vector<VarSymbol *> &captures = fn->cls()->group->captures;
     for (size_t i = 0; i < captures.size(); ++i) {
       const VarSymbol *var = captures[i];
       llvm::Value *field = lowering_.builder_.CreateStructGEP(

@@ -46,11 +46,11 @@ void FunctionChecker::declareFunction(FunctionDecl *fn, VarSymbol *var, bool sco
   bool generic = !fn->typeParams.empty() || llvm::any_of(fn->params, [&](const Param &p) {
     return p.type && checker_.iterableChecker().isIterableRef(*p.type);
   });
-  bool classParams = fn->cls && !fn->isStatic && !fn->cls->typeParams.empty();
+  bool classParams = fn->cls() && !fn->isStatic() && !fn->cls()->typeParams.empty();
   if (generic || classParams) {
     checker_.typeScopes_.emplace_back();
     if (classParams) {
-      checker_.genericClassChecker().bindClassTypeParams(fn->cls);
+      checker_.genericClassChecker().bindClassTypeParams(fn->cls());
     }
   }
   if (generic) {
@@ -67,7 +67,7 @@ void FunctionChecker::declareFunction(FunctionDecl *fn, VarSymbol *var, bool sco
     }
   }
   std::optional<std::vector<const Type *>> hook =
-      fn->cls ? checker_.chunkTypes().streamHookParams(fn) : std::nullopt;
+      fn->cls() ? checker_.chunkTypes().streamHookParams(fn) : std::nullopt;
   if (hook && llvm::none_of(fn->params, [](const Param &p) { return p.rest; })) {
     for (size_t i = fn->params.size(); i < hook->size(); ++i) {
       Param hidden;
@@ -79,7 +79,7 @@ void FunctionChecker::declareFunction(FunctionDecl *fn, VarSymbol *var, bool sco
   bool afterOptional = false;
   for (size_t i = 0; i < fn->params.size(); ++i) {
     Param &param = fn->params[i];
-    if (!param.decorators.empty() && (!fn->cls || fn->cls->literal) && !fn->isInstance) {
+    if (!param.decorators.empty() && (!fn->cls() || fn->cls()->literal) && !fn->isInstance) {
       checker_.diags_.error(param.decorators[0].loc,
                             "a decorator of a parameter can decorate only a "
                             "parameter of a method or a constructor of a class");
@@ -116,7 +116,7 @@ void FunctionChecker::declareFunction(FunctionDecl *fn, VarSymbol *var, bool sco
         checker_.diags_.error(param.loc,
                               "an arrow function cannot have a 'this' parameter: it sees the "
                               "'this' of the function around it; write a 'function'");
-      } else if (fn->cls) {
+      } else if (fn->cls()) {
         checker_.diags_.error(param.loc,
                               "a method cannot have a 'this' parameter: its 'this' is its object");
       } else {
@@ -180,17 +180,17 @@ void FunctionChecker::checkFunctionBody(FunctionDecl *fn) {
   unsigned errors = checker_.diags_.errorCount();
   ClassDecl *outerClass = checker_.currentClass_;
   if (!fn->isClosure()) {
-    checker_.currentClass_ = fn->cls;
+    checker_.currentClass_ = fn->cls();
   }
   FunctionDecl *outerInit = checker_.initFn_;
   const VarSymbol *outerThis = checker_.initThis_;
   bool outerReady = checker_.closureThisReady_;
   checker_.pushScope();
-  if (fn->cls && !fn->isStatic) {
-    checker_.genericClassChecker().bindClassTypeParams(fn->cls);
+  if (fn->cls() && !fn->isStatic()) {
+    checker_.genericClassChecker().bindClassTypeParams(fn->cls());
   }
-  if (fn->cls) {
-    checker_.lateClasses().bindOuterTypeParams(fn->cls);
+  if (fn->cls()) {
+    checker_.lateClasses().bindOuterTypeParams(fn->cls());
   }
   if (!fn->typeArgs.empty()) {
     checker_.typeParams().bindTypeParams(fn->typeParams, fn->typeArgs);
@@ -201,19 +201,20 @@ void FunctionChecker::checkFunctionBody(FunctionDecl *fn) {
       checker_.diags_.error(fn->loc(), declared.error().message);
     }
     VarSymbol *self = declared.isOk() ? declared.value() : nullptr;
-    if (fn->isConstructor || fn == fn->cls->init) {
+    if (fn->isConstructor() || fn == fn->cls()->init) {
       checker_.initFn_ = fn;
       checker_.initThis_ = self;
       checker_.closureThisReady_ = true;
       checker_.flow_.setFields.clear();
-      bool derived = fn->cls->parent != nullptr;
-      for (const ClassField &f : fn->cls->fields) {
-        if (!f.isStatic && (f.optional || (fn->isConstructor && !derived && f.init && !f.method) ||
-                            (!fn->isConstructor && f.redeclared))) {
+      bool derived = fn->cls()->parent != nullptr;
+      for (const ClassField &f : fn->cls()->fields) {
+        if (!f.isStatic &&
+            (f.optional || (fn->isConstructor() && !derived && f.init && !f.method) ||
+             (!fn->isConstructor() && f.redeclared))) {
           checker_.flow_.setFields.push_back(f.name);
         }
       }
-      checker_.flow_.beforeSuper = derived && fn->isConstructor;
+      checker_.flow_.beforeSuper = derived && fn->isConstructor();
       if (checker_.flow_.beforeSuper) {
         unsigned supers = 0;
         for (Stmt *stmt : fn->body->body) {
@@ -226,9 +227,9 @@ void FunctionChecker::checkFunctionBody(FunctionDecl *fn) {
           }
         }
         if (supers == 0) {
-          checker_.diags_.error(fn->loc(), "the constructor of '" + fn->cls->name +
-                                               "' must call 'super(...)': '" + fn->cls->name +
-                                               "' extends '" + fn->cls->parent->name +
+          checker_.diags_.error(fn->loc(), "the constructor of '" + fn->cls()->name +
+                                               "' must call 'super(...)': '" + fn->cls()->name +
+                                               "' extends '" + fn->cls()->parent->name +
                                                "', whose constructor sets the fields it declares");
         }
       }
@@ -289,7 +290,7 @@ void FunctionChecker::checkFunctionBody(FunctionDecl *fn) {
   checker_.flow_.errorListened = std::move(outerListened);
   checker_.flow_.errorPending = std::move(outerPending);
   checker_.predicateChecker().endPredicate(fn);
-  if (fn->isConstructor && checker_.initFn_ == fn && !checker_.flow_.beforeSuper) {
+  if (fn->isConstructor() && checker_.initFn_ == fn && !checker_.flow_.beforeSuper) {
     ClassChecker::ResultEveryFieldSet fieldsSet = checker_.classChecker().checkFieldsSet();
     if (fieldsSet.isErr()) {
       checker_.diags_.error(fn->loc(), fieldsSet.error().message);
@@ -316,8 +317,8 @@ void FunctionChecker::checkFunctionBody(FunctionDecl *fn) {
   if (sym->isGeneric() && checker_.diags_.errorCount() > errors) {
     checker_.brokenGenerics_.insert(sym);
   }
-  if (fn->cls && fn->cls->isGeneric() && checker_.diags_.errorCount() > errors) {
-    checker_.brokenClasses_.insert(fn->cls);
+  if (fn->cls() && fn->cls()->isGeneric() && checker_.diags_.errorCount() > errors) {
+    checker_.brokenClasses_.insert(fn->cls());
   }
 }
 

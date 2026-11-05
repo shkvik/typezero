@@ -77,7 +77,7 @@ void CycleScanner::function(const FunctionDecl *fn) {
     addVar(param.sym);
     cycleExprs().expr(param.defaultValue);
   }
-  addVar(fn->thisVar);
+  addVar(fn->thisVar());
   for (const VarSymbol *var : fn->captures) {
     addVar(var);
   }

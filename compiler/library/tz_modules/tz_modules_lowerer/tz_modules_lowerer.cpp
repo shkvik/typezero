@@ -173,7 +173,7 @@ void TzModulesLowerer::appendPrintHooks(llvm::ArrayRef<const ClassDecl *> chain,
   std::vector<const FunctionDecl *> getters;
   for (const ClassDecl *c : chain) {
     for (const FunctionDecl *fn : c->methods) {
-      if (fn->isStatic || !fn->params.empty() || fn->name != "printed") {
+      if (fn->isStatic() || !fn->params.empty() || fn->name != "printed") {
         continue;
       }
       auto it = llvm::find_if(getters, [&](const FunctionDecl *g) { return g->name == fn->name; });
@@ -191,7 +191,7 @@ void TzModulesLowerer::appendPrintHooks(llvm::ArrayRef<const ClassDecl *> chain,
     if (!code) {
       continue;
     }
-    std::string name = (fn->cls->name + "." + fn->name).str();
+    std::string name = (fn->cls()->name + "." + fn->name).str();
     auto *get = llvm::Function::Create(
         llvm::FunctionType::get(lowering_.builder_.getVoidTy(), {ptr, ptr}, false),
         llvm::GlobalValue::InternalLinkage, "tz.get." + name, lowering_.module_.get());

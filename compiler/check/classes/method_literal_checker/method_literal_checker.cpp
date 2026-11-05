@@ -48,7 +48,11 @@ Expr *MethodLiteralChecker::checkMethodLiteral(ObjectLitExpr *lit, const Type *t
     if (prop.method) {
       FunctionDecl *fn = cast<FunctionExpr>(prop.value)->fn;
       fn->name = prop.name;
-      fn->cls = cls;
+      if (ClassMember *member = fn->member()) {
+        member->cls = cls;
+      } else {
+        fn->role = ClassMember{.cls = cls};
+      }
       if (!fn->typeParams.empty()) {
         checker_.diags_.error(fn->loc(),
                               "a method of an object literal cannot be generic; declare a class, "

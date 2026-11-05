@@ -115,9 +115,9 @@ llvm::Value *StreamLowerer::emitStreamBuiltin(CallExpr *call) {
     const FunctionDecl *method = call->method ? call->method->decl : nullptr;
     Lowering::Operand object = lowering_.refCounts().emitOperand(call->args[0], true);
     llvm::Value *result = lowering_.builder_.getFalse();
-    if (method && method->slot >= 0 && method->body) {
+    if (method && method->slot() >= 0 && method->body) {
       result = lowering_.builder_.CreateICmpNE(
-          lowering_.inheritLowerer().vtableEntry(object.value, method->slot, false),
+          lowering_.inheritLowerer().vtableEntry(object.value, method->slot(), false),
           lowering_.classDescriptors().methodCode(method), "overrides");
     }
     lowering_.refCounts().dropOperand(object);

@@ -285,7 +285,7 @@ FuncSymbol *GenericInstantiator::instantiate(FuncSymbol *generic, llvm::ArrayRef
   instance.requester = checker_.checkingInstance_;
   instance.decl = instanceDecl(generic, reps, exact);
   instances_[key] = &instance;
-  if (ClassDecl *cls = generic->decl->cls; cls && !generic->decl->isStatic) {
+  if (ClassDecl *cls = generic->decl->cls(); cls && !generic->decl->isStatic()) {
     cls->methodInstances.push_back(instance.decl);
   } else {
     checker_.file_->instances.push_back(instance.decl);

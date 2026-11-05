@@ -91,7 +91,7 @@ const ClassDecl *classWithToJson(const Type *type, llvm::SmallPtrSetImpl<const T
   }
   if (const ClassDecl *cls = type->classDecl()) {
     for (const FunctionDecl *fn : cls->methods) {
-      if (fn->name == "toJSON" && !fn->isStatic) {
+      if (fn->name == "toJSON" && !fn->isStatic()) {
         return cls;
       }
     }

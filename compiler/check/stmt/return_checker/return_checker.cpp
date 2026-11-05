@@ -176,7 +176,7 @@ void ReturnChecker::checkReturn(ReturnStmt *ret) {
 
   checker_.emitterChecker().reportUnlistenedErrors();
   const FuncSymbol *fn = checker_.currentFunction_;
-  if (fn->decl && fn->decl->isConstructor) {
+  if (fn->decl && fn->decl->isConstructor()) {
     if (ret->value) {
       ret->value = checker_.exprChecker().checkExpr(ret->value);
       checker_.diags_.error(ret->value->loc(),

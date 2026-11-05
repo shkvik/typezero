@@ -95,7 +95,7 @@ llvm::Value *ReflectArgsLowerer::emitChooseVariant(llvm::ArrayRef<const Function
     }
     if (selfId) {
       ok = lowering_.builder_.CreateAnd(
-          ok, lowering_.unknownCastLowerer().classIdIn(selfId, {fn->cls}));
+          ok, lowering_.unknownCastLowerer().classIdIn(selfId, {fn->cls()}));
     }
     for (size_t i = 0; i < compared; ++i) {
       const Type *param = v.param(i);

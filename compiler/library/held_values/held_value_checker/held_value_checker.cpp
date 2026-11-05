@@ -175,7 +175,7 @@ void HeldValueChecker::walkProgram() {
     }
     if (auto *cls = dyn_cast<ClassDecl>(item)) {
       for (const FunctionDecl *fn : cls->methods) {
-        if (fn->typeParams.empty() && (fn->isStatic ? !cls->generic : cls->isEmitted())) {
+        if (fn->typeParams.empty() && (fn->isStatic() ? !cls->generic : cls->isEmitted())) {
           function(fn);
         }
       }
@@ -205,8 +205,8 @@ void HeldValueChecker::function(const FunctionDecl *fn) {
   }
   const FunctionDecl *saved = current_;
   current_ = fn;
-  if (fn->thisVar && heldThis_.contains(fn)) {
-    heldVars_.insert(fn->thisVar);
+  if (fn->thisVar() && heldThis_.contains(fn)) {
+    heldVars_.insert(fn->thisVar());
   }
   for (unsigned i = 0; i < fn->params.size(); ++i) {
     const Param &param = fn->params[i];
@@ -573,19 +573,19 @@ void HeldValueChecker::markParam(const FunctionDecl *fn, unsigned index) {
 }
 
 void HeldValueChecker::markThis(const FunctionDecl *fn) {
-  if (!fn || !fn->thisVar || fn->isStatic) {
+  if (!fn || !fn->thisVar() || fn->isStatic()) {
     return;
   }
   heldThis_.insert(fn);
-  if (!fn->cls) {
+  if (!fn->cls()) {
     return;
   }
-  std::vector<const ClassDecl *> pending(fn->cls->children.begin(), fn->cls->children.end());
+  std::vector<const ClassDecl *> pending(fn->cls()->children.begin(), fn->cls()->children.end());
   while (!pending.empty()) {
     const ClassDecl *cls = pending.back();
     pending.pop_back();
     for (const FunctionDecl *method : cls->methods) {
-      for (const FunctionDecl *up = method->overrides; up; up = up->overrides) {
+      for (const FunctionDecl *up = method->overrides(); up; up = up->overrides()) {
         if (up == fn) {
           heldThis_.insert(method);
           break;
@@ -639,7 +639,7 @@ const ClassDecl *HeldValueChecker::storageClass(const ClassDecl *cls) {
 bool HeldValueChecker::storageMethod(const CallExpr *c, llvm::StringRef name) {
   const FunctionDecl *decl = c->method ? c->method->decl : nullptr;
 
-  return decl && decl->name == name && storageClass(decl->cls);
+  return decl && decl->name == name && storageClass(decl->cls());
 }
 
 const VarSymbol *HeldValueChecker::storageOf(const CallExpr *c) {

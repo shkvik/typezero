@@ -124,7 +124,7 @@ void GenericClassChecker::checkClassInstance(Checker::Instance *instance) {
     }
     bodies.insert(bodies.end(), inst->constructors.begin(), inst->constructors.end());
     for (FunctionDecl *fn : ClassLinks::ownMethods(inst)) {
-      if (!fn->isAbstract && fn->typeParams.empty()) {
+      if (!fn->isAbstract() && fn->typeParams.empty()) {
         bodies.push_back(fn);
       }
     }
@@ -293,7 +293,8 @@ Expr *GenericClassChecker::checkGenericNew(NewExpr *expr, ClassDecl *generic,
     if (size_t(at) < mine.size()) {
       call->func = mine[size_t(at)]->sym;
     }
-    checker_.classMemberChecker().checkAccess(ctor->cls, ctor->access, "constructor", expr->loc());
+    checker_.classMemberChecker().checkAccess(ctor->cls(), ctor->access(), "constructor",
+                                              expr->loc());
   }
   for (const ClassDecl *c = inst; c; c = c->parent) {
     if (c->init || !c->constructors.empty()) {

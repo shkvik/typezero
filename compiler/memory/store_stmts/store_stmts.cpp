@@ -123,7 +123,7 @@ void StoreStmts::stmt(const Stmt *stmt) {
 }
 
 void StoreStmts::bindArgs(const FunctionDecl *fn, const std::vector<StoreScanner::Sources> &args) {
-  if (!fn || fn->impl) {
+  if (!fn || fn->impl()) {
     for (const StoreScanner::Sources &a : args) {
       scanner_.store(a);
     }

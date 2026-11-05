@@ -303,10 +303,10 @@ bool EscapeScan::constructorLeaks(const ClassDecl *cls) {
       fns.push_back(k->init);
     }
     for (const FunctionDecl *fn : fns) {
-      if (!fn->thisVar) {
+      if (!fn->thisVar()) {
         continue;
       }
-      if (fn->thisVar->captured || escapes(fn).contains(fn->thisVar)) {
+      if (fn->thisVar()->captured || escapes(fn).contains(fn->thisVar())) {
         leaks = true;
         break;
       }

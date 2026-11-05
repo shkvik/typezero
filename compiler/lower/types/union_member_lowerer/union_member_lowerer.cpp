@@ -216,7 +216,7 @@ llvm::Value *UnionMemberLowerer::emitUnionMethodCall(CallExpr *call) {
                    ? lowering_.builder_.CreateCall(lowering_.closureLowerer().closureFnType(
                                                        ClosureLowerer::functionTypeOf(m.method)),
                                                    lowering_.inheritLowerer().vtableEntry(
-                                                       self.value, m.method->decl->slot, false),
+                                                       self.value, m.method->decl->slot(), false),
                                                    args)
                    : lowering_.builder_.CreateCall(
                          lowering_.classDescriptors().methodCode(m.method->decl), args);

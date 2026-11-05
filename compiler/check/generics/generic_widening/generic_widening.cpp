@@ -29,7 +29,7 @@ std::map<std::pair<const ClassDecl *, size_t>, bool> &knownVariance() {
 
 std::string writerOf(const ClassDecl *generic, llvm::StringRef name) {
   for (const FunctionDecl *fn : generic->methods) {
-    if (fn->isStatic || fn->access != Access::Public) {
+    if (fn->isStatic() || fn->access() != Access::Public) {
       continue;
     }
     for (const Param &param : fn->params) {
@@ -52,7 +52,7 @@ std::string writerOf(const ClassDecl *generic, llvm::StringRef name) {
 
 bool writtenFromOutside(const ClassDecl *generic, llvm::StringRef name) {
   for (const FunctionDecl *fn : generic->methods) {
-    if (fn->isStatic || fn->access != Access::Public) {
+    if (fn->isStatic() || fn->access() != Access::Public) {
       continue;
     }
     for (const Param &param : fn->params) {

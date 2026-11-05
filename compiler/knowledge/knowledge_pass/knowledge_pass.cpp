@@ -275,8 +275,8 @@ void KnowledgePass::declareClass(size_t module, const ClassDecl &cls, size_t par
   for (const auto *list : {&cls.constructors, &cls.methods}) {
     for (const FunctionDecl *method : *list) {
       const char *start = method->source.empty() ? nullptr : method->source.data();
-      size_t member = add(module, method->isConstructor ? "constructor" : "method",
-                          method->isConstructor ? llvm::StringRef("constructor") : method->name,
+      size_t member = add(module, method->isConstructor() ? "constructor" : "method",
+                          method->isConstructor() ? llvm::StringRef("constructor") : method->name,
                           method->loc(), start, endOf(method->source), own);
       if (member == Knowledge::kNone) {
         continue;
@@ -432,10 +432,11 @@ size_t KnowledgePass::functionSymbol(const FunctionDecl *fn) const {
   if (copied != declaredAt_.end()) {
     return copied->second;
   }
-  if (fn->cls && fn->cls->generic) {
-    const ClassDecl *original = fn->cls->generic;
-    for (const auto &[own, theirs] : {std::pair(&fn->cls->methods, &original->methods),
-                                      std::pair(&fn->cls->constructors, &original->constructors)}) {
+  if (fn->cls() && fn->cls()->generic) {
+    const ClassDecl *original = fn->cls()->generic;
+    for (const auto &[own, theirs] :
+         {std::pair(&fn->cls()->methods, &original->methods),
+          std::pair(&fn->cls()->constructors, &original->constructors)}) {
       auto at = std::find(own->begin(), own->end(), fn);
       size_t index = static_cast<size_t>(at - own->begin());
       if (at != own->end() && index < theirs->size()) {

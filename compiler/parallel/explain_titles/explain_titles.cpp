@@ -39,19 +39,19 @@ std::string ExplainTitles::fnName(const FnInfo &f) const {
     return "the top-level code";
   }
   std::string name = fn->name.str();
-  if (fn->cls) {
+  if (fn->cls()) {
     std::string owner =
-        fn->cls->literal
+        fn->cls()->literal
             ? "the object " +
-                  Analysis::atText(analysis_.explainNames.where(fn->cls->literal->loc()))
-            : fn->cls->name.str();
-    if (fn->isConstructor) {
+                  Analysis::atText(analysis_.explainNames.where(fn->cls()->literal->loc()))
+            : fn->cls()->name.str();
+    if (fn->isConstructor()) {
       return "constructor of " + owner;
     }
-    if (fn == fn->cls->init) {
+    if (fn == fn->cls()->init) {
       return "fields of " + owner;
     }
-    return fn->cls->literal ? name + " of " + owner : owner + "." + name;
+    return fn->cls()->literal ? name + " of " + owner : owner + "." + name;
   }
   if (fn->isInstance && !fn->typeArgs.empty()) {
     name += "<";
@@ -84,7 +84,7 @@ std::string ExplainTitles::fnTitle(const FnInfo &f) const {
     return "top-level code";
   }
   std::string kind = f.asyncGen ? "async generator" : f.async ? "async" : "";
-  std::string what = fn->cls            ? (fn->isConstructor ? "" : "method")
+  std::string what = fn->cls()          ? (fn->isConstructor() ? "" : "method")
                      : fn->isArrow      ? "arrow"
                      : fn->isExpression ? "function expression"
                                         : "function";

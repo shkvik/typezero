@@ -16,23 +16,23 @@ using llvm::dyn_cast;
 using llvm::isa;
 
 void forEachOverride(const FunctionDecl *fn, llvm::function_ref<void(const FunctionDecl *)> visit) {
-  if (!fn->isAbstract) {
+  if (!fn->isAbstract()) {
     visit(fn);
   }
-  if (!fn->cls || fn->slot < 0) {
+  if (!fn->cls() || fn->slot() < 0) {
     return;
   }
   std::function<void(const ClassDecl *)> down = [&](const ClassDecl *cls) {
     for (const ClassDecl *child : cls->children) {
-      if (size_t(fn->slot) < child->vtable.size()) {
-        if (const FunctionDecl *impl = child->vtable[size_t(fn->slot)]; impl && impl != fn) {
+      if (size_t(fn->slot()) < child->vtable.size()) {
+        if (const FunctionDecl *impl = child->vtable[size_t(fn->slot())]; impl && impl != fn) {
           visit(impl);
         }
       }
       down(child);
     }
   };
-  down(fn->cls);
+  down(fn->cls());
 }
 
 StoreScanner::StoreScanner(std::function<bool(const Expr *)> site) : isSite_(std::move(site)) {

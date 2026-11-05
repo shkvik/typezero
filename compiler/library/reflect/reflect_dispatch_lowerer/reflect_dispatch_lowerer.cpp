@@ -70,8 +70,8 @@ llvm::Constant *ReflectDispatchLowerer::reflectDispatchInfo(
   };
   const ClassDecl *top = nullptr;
   for (const FunctionDecl *fn : variants) {
-    if (!top || top->derivesFrom(fn->cls)) {
-      top = fn->cls;
+    if (!top || top->derivesFrom(fn->cls())) {
+      top = fn->cls();
     }
   }
   std::string what = className(cls) + "." + name.str();

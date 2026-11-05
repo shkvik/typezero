@@ -153,8 +153,8 @@ std::vector<const FunctionDecl *> CallWalk::methodTargets(const FunctionDecl *me
     return targets;
   }
   std::vector<const ClassDecl *> pending;
-  if (method->cls) {
-    for (const ClassDecl *child : method->cls->children) {
+  if (method->cls()) {
+    for (const ClassDecl *child : method->cls()->children) {
       pending.push_back(child);
     }
   }
@@ -163,7 +163,7 @@ std::vector<const FunctionDecl *> CallWalk::methodTargets(const FunctionDecl *me
     pending.pop_back();
     analysis_.codeWalk.noteClass(cls);
     for (const FunctionDecl *fn : cls->methods) {
-      for (const FunctionDecl *up = fn->overrides; up; up = up->overrides) {
+      for (const FunctionDecl *up = fn->overrides(); up; up = up->overrides()) {
         if (up == method) {
           targets.push_back(fn);
           break;
@@ -191,7 +191,7 @@ std::optional<Ref> CallWalk::closureSelf(const FunctionDecl *callee, const FnInf
 }
 
 Ref CallWalk::classRef(const FunctionDecl *owner) const {
-  return Ref{RefKind::Type, owner && owner->cls ? owner->cls->type : nullptr};
+  return Ref{RefKind::Type, owner && owner->cls() ? owner->cls()->type : nullptr};
 }
 
 void CallWalk::registerValue(const FunctionDecl *fn, const Type *type) {
@@ -290,7 +290,7 @@ void CallWalk::call(const CallExpr *c, const Use &use) {
     if (c->method) {
       addCallee(rec, c->method->decl, self);
     }
-    for (const ClassDecl *k = analysis_.fn->decl->cls; k; k = k->parent) {
+    for (const ClassDecl *k = analysis_.fn->decl->cls(); k; k = k->parent) {
       if (k->init) {
         addCallee(rec, k->init, self);
       }
@@ -300,8 +300,8 @@ void CallWalk::call(const CallExpr *c, const Use &use) {
   if (c->method) {
     for (const FunctionDecl *fn : methodTargets(c->method->decl, c->virtualCall)) {
       addCallee(rec, fn, self);
-      if (fn->impl && fn->impl->type && !rec.byType) {
-        rec.byType = fn->impl->type;
+      if (fn->impl() && fn->impl()->type && !rec.byType) {
+        rec.byType = fn->impl()->type;
       }
     }
     return;

@@ -31,10 +31,10 @@ void ConstructorCalls::checkConstructorCalls() {
 void ConstructorCalls::scanConstructorCalls(const FunctionDecl *fn, const ClassDecl *cls,
                                             const CallExpr *origin, const FunctionDecl *ctor,
                                             llvm::SmallPtrSetImpl<const FunctionDecl *> &seen) {
-  if (!fn->body || !fn->thisVar || !seen.insert(fn).second) {
+  if (!fn->body || !fn->thisVar() || !seen.insert(fn).second) {
     return;
   }
-  const VarSymbol *self = fn->thisVar;
+  const VarSymbol *self = fn->thisVar();
   visitExprs(
       fn->body,
       [&](const Expr *e) {
@@ -53,8 +53,8 @@ void ConstructorCalls::scanConstructorCalls(const FunctionDecl *fn, const ClassD
         }
         FunctionDecl *target = call->method->decl;
         const CallExpr *site = origin ? origin : call;
-        if (call->virtualCall || !cls->derivesFrom(target->cls)) {
-          const ClassDecl *by = target->cls;
+        if (call->virtualCall || !cls->derivesFrom(target->cls())) {
+          const ClassDecl *by = target->cls();
           if (call->virtualCall) {
             std::function<const ClassDecl *(const ClassDecl *)> find =
                 [&](const ClassDecl *c) -> const ClassDecl * {
@@ -75,7 +75,7 @@ void ConstructorCalls::scanConstructorCalls(const FunctionDecl *fn, const ClassD
               by = found;
             }
           }
-          std::string what = ctor->isConstructor
+          std::string what = ctor->isConstructor()
                                  ? "the constructor of '" + cls->name.str() + "'"
                                  : "the initializers of the fields of '" + cls->name.str() + "'";
           checker_.diags_.error(

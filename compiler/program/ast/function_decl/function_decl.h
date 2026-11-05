@@ -4,6 +4,7 @@
 #include "compiler/program/ast/block_stmt/block_stmt.h"
 #include "compiler/program/ast/builtin/builtin.h"
 #include "compiler/program/ast/decorator/decorator.h"
+#include "compiler/program/ast/function_decl/function_role.h"
 #include "compiler/program/ast/param/param.h"
 #include "compiler/program/ast/stmt/stmt.h"
 #include "compiler/program/ast/type_param_decl/type_param_decl.h"
@@ -57,25 +58,29 @@ struct FunctionDecl : Stmt {
     return parent || isExpression || group;
   }
 
-  ClassDecl *cls = nullptr;
-  bool isStatic = false;
-  bool isConstructor = false;
-  Access access = Access::Public;
-  VarSymbol *thisVar = nullptr;
-  unsigned variant = 0;
-  bool takesThis() const {
-    return cls && !isStatic;
-  }
+  Union<PlainFunction, ClassMember> role = PlainFunction{};
+  ClassMember *member();
+  const ClassMember *member() const;
+  Overriding *overriding();
+  const Overriding *overriding() const;
+  ClassDecl *cls() const;
+  bool isStatic() const;
+  bool isConstructor() const;
+  bool isAbstract() const;
+  Access access() const;
+  VarSymbol *thisVar() const;
+  unsigned variant() const;
+  bool isOverride() const;
+  FunctionDecl *overrides() const;
+  bool overridden() const;
+  int slot() const;
+  bool openToLate() const;
+  const std::vector<Decorator> &decorators() const;
+  VarSymbol *impl() const;
+  bool takesThis() const;
   bool hasThisParam() const;
   const FunctionDecl *thisSource() const;
-  bool isAbstract = false;
-  bool isOverride = false;
-  FunctionDecl *overrides = nullptr;
-  bool overridden = false;
-  int slot = -1;
-  bool openToLate = false;
-  std::vector<Decorator> decorators;
-  VarSymbol *impl = nullptr;
+
   FunctionDecl *generic = nullptr;
   llvm::StringRef listName;
   size_t listStart = 0;

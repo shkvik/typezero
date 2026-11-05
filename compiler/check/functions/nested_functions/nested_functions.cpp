@@ -209,7 +209,7 @@ void visitExprs(const Stmt *stmt, llvm::function_ref<void(const Expr *)> visit,
     }
     for (const auto *fns : {&cls->methods, &cls->constructors}) {
       for (const FunctionDecl *fn : *fns) {
-        for (const Decorator &d : fn->decorators) {
+        for (const Decorator &d : fn->decorators()) {
           expr(d.expr);
         }
         for (const Param &param : fn->params) {

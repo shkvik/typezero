@@ -9,7 +9,7 @@ using llvm::isa;
 namespace tz {
 
 std::string variantText(const FunctionDecl *fn) {
-  std::string text = (fn->isConstructor ? llvm::StringRef("constructor") : fn->name).str() + "(";
+  std::string text = (fn->isConstructor() ? llvm::StringRef("constructor") : fn->name).str() + "(";
   const FuncSymbol *sym = fn->sym;
   for (size_t i = 0; i < fn->params.size(); ++i) {
     if (i > 0) {

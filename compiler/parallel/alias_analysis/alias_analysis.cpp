@@ -53,10 +53,10 @@ bool AliasAnalysis::isAllocation(const Expr *e) const {
       if (made != e) {
         return lib->isAsync;
       }
-      if (!lib->cls) {
+      if (!lib->cls()) {
         return true;
       }
-      return lib->isStatic && !lib->isAsync && !lib->isGenerator && !c->hasSpread() &&
+      return lib->isStatic() && !lib->isAsync && !lib->isGenerator && !c->hasSpread() &&
              llvm::all_of(c->args, Ownership::valueArgument);
     }
   }
@@ -91,7 +91,7 @@ Ref AliasAnalysis::refOf(const Expr *e) {
   }
   if (auto *n = dyn_cast<NameExpr>(e); n && n->var) {
     const VarSymbol *v = n->var;
-    if (v->owner && v->owner->thisVar == v) {
+    if (v->owner && v->owner->thisVar() == v) {
       if (analysis_.fn && analysis_.fn->decl != v->owner) {
         if (std::optional<Ref> owned = analysis_.ownership.ownedRef(e)) {
           return *owned;
@@ -155,7 +155,7 @@ const Type *AliasAnalysis::typeOfRef(Ref r) const {
     return static_cast<const Type *>(r.ptr);
   case RefKind::This: {
     auto *owner = static_cast<const FunctionDecl *>(r.ptr);
-    return owner && owner->cls ? owner->cls->type : nullptr;
+    return owner && owner->cls() ? owner->cls()->type : nullptr;
   }
   case RefKind::Owned:
     return static_cast<const OwnedRef *>(r.ptr)->type;

@@ -282,20 +282,20 @@ void CycleExprs::assigned(const AssignExpr *assign) {
 
 bool CycleExprs::constructionWrite(const AssignExpr *assign) {
   const FunctionDecl *fn = scanner_.current_;
-  if (!fn || !fn->cls || !fn->thisVar || (!fn->isConstructor && fn != fn->cls->init)) {
+  if (!fn || !fn->cls() || !fn->thisVar() || (!fn->isConstructor() && fn != fn->cls()->init)) {
     return false;
   }
   auto [it, inserted] = scanner_.safeWrites_.try_emplace(fn);
   if (inserted) {
-    const ClassDecl *cls = fn->cls;
-    bool initEscapes = cls->init && cls->init->thisVar &&
-                       CycleScanner::thisEscapes(cls->init->body, cls->init->thisVar);
+    const ClassDecl *cls = fn->cls();
+    bool initEscapes = cls->init && cls->init->thisVar() &&
+                       CycleScanner::thisEscapes(cls->init->body, cls->init->thisVar());
     bool escaped = fn == cls->init
                        ? cls->parent && scanner_.cycleEscapes().constructionEscapes(cls->parent)
                        : !cls->parent && initEscapes;
     bool afterSuper =
         (cls->parent && scanner_.cycleEscapes().constructionEscapes(cls->parent)) || initEscapes;
-    CycleEscapes::ordered(fn->body, fn->thisVar, escaped, afterSuper, it->second);
+    CycleEscapes::ordered(fn->body, fn->thisVar(), escaped, afterSuper, it->second);
   }
 
   return it->second.contains(assign);

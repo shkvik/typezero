@@ -324,7 +324,7 @@ void DeclarationChecker::checkClass(const DeclaredClass &declared, const Exporte
     if (member.constructor) {
       const FunctionDecl *ctor = nullptr;
       for (const FunctionDecl *c : cls->constructors) {
-        if (c->access != Access::Private) {
+        if (c->access() != Access::Private) {
           ctor = c;
         }
       }
@@ -335,9 +335,9 @@ void DeclarationChecker::checkClass(const DeclaredClass &declared, const Exporte
                                               fileName() + "'");
         continue;
       }
-      if (member.access != ctor->access) {
+      if (member.access != ctor->access()) {
         checker_.diags_.error(member.loc, "the constructor of '" + cls->name + "' is " +
-                                              accessWord(ctor->access) + " in '" + fileName() +
+                                              accessWord(ctor->access()) + " in '" + fileName() +
                                               "'");
       }
       checkMethod(member, ctor, cls);
@@ -351,11 +351,11 @@ void DeclarationChecker::checkClass(const DeclaredClass &declared, const Exporte
     }
     const FunctionDecl *method = nullptr;
     for (const FunctionDecl *fn : cls->methods) {
-      if (fn->name == member.name && fn->isStatic == member.isStatic) {
+      if (fn->name == member.name && fn->isStatic() == member.isStatic) {
         method = fn;
       }
     }
-    Access access = field ? field->access : method ? method->access : Access::Public;
+    Access access = field ? field->access : method ? method->access() : Access::Public;
     if (!field && !method) {
       checker_.diags_.error(member.loc, "'" + cls->name + "' has no " +
                                             (member.isStatic ? "static member '" : "member '") +
@@ -392,13 +392,14 @@ void DeclarationChecker::checkClass(const DeclaredClass &declared, const Exporte
     }
   }
   for (const FunctionDecl *fn : cls->methods) {
-    std::string key = (fn->isStatic ? "static " : "") + fn->name.str();
-    if (fn->access != Access::Private && !seen.contains(key)) {
-      missing(fn->loc(), fn->name, fn->isStatic);
+    std::string key = (fn->isStatic() ? "static " : "") + fn->name.str();
+    if (fn->access() != Access::Private && !seen.contains(key)) {
+      missing(fn->loc(), fn->name, fn->isStatic());
     }
   }
   for (const FunctionDecl *ctor : cls->constructors) {
-    if (ctor->access != Access::Private && !seen.contains("constructor") && !mentionsHidden(ctor)) {
+    if (ctor->access() != Access::Private && !seen.contains("constructor") &&
+        !mentionsHidden(ctor)) {
       missing(ctor->loc(), "constructor", false);
     }
   }

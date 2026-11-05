@@ -51,7 +51,7 @@ void KnowledgeWalk::function(const FunctionDecl *fn) {
   if (!fn) {
     return;
   }
-  for (const Decorator &decorator : fn->decorators) {
+  for (const Decorator &decorator : fn->decorators()) {
     expr(decorator.expr);
   }
   for (const TypeParamDecl &typeParam : fn->typeParams) {

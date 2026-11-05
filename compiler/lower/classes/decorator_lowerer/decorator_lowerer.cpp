@@ -70,7 +70,7 @@ llvm::Constant *DecoratorLowerer::implAdapterInfo(FunctionDecl *fn) {
   if (llvm::Constant *found = adapterInfos_.lookup(fn)) {
     return found;
   }
-  const Type *implType = fn->impl->type;
+  const Type *implType = fn->impl()->type;
   llvm::Function *original = originalCode(fn);
   std::string name = lowering_.classDescriptors().methodCode(fn)->getName().str();
   auto *adapter = llvm::Function::Create(lowering_.closureLowerer().closureFnType(implType),
@@ -97,8 +97,8 @@ llvm::Constant *DecoratorLowerer::implAdapterInfo(FunctionDecl *fn) {
       lowering_.builder_.CreateRet(result);
     }
   };
-  const ClassDecl *cls = fn->cls;
-  if (!fn->isStatic) {
+  const ClassDecl *cls = fn->cls();
+  if (!fn->isStatic()) {
     auto *failBlock = llvm::BasicBlock::Create(lowering_.ctx_, "this.wrong", adapter);
     auto *testBlock = llvm::BasicBlock::Create(lowering_.ctx_, "this.test", adapter);
     auto *callBlock = llvm::BasicBlock::Create(lowering_.ctx_, "this.ok", adapter);
@@ -122,7 +122,7 @@ llvm::Constant *DecoratorLowerer::implAdapterInfo(FunctionDecl *fn) {
     lowering_.builder_.SetInsertPoint(callBlock);
   }
   std::vector<llvm::Value *> args;
-  if (!fn->isStatic) {
+  if (!fn->isStatic()) {
     args.push_back(self);
   }
   for (unsigned i = 2; i < adapter->arg_size(); ++i) {
@@ -169,19 +169,19 @@ void DecoratorLowerer::emitDecoratedMethod(FunctionDecl *fn) {
   }
 
   llvm::Function *stub = lowering_.classDescriptors().methodCode(fn);
-  const Type *implType = fn->impl->type;
+  const Type *implType = fn->impl()->type;
   llvm::IRBuilderBase::InsertPointGuard guard(lowering_.builder_);
   lowering_.builder_.SetInsertPoint(llvm::BasicBlock::Create(lowering_.ctx_, "entry", stub));
   unsigned first = fn->takesThis() ? 1 : 0;
   llvm::Value *self = fn->takesThis() ? static_cast<llvm::Value *>(stub->getArg(0))
-                                      : lowering_.unknownLowerer().classObject(fn->cls);
+                                      : lowering_.unknownLowerer().classObject(fn->cls());
   lowering_.groupLowerer().retainObject(self);
   std::vector<llvm::Value *> args{self};
   for (unsigned i = first; i < stub->arg_size(); ++i) {
     args.push_back(stub->getArg(i));
   }
   llvm::Value *impl = lowering_.builder_.CreateLoad(
-      lowering_.fnTy_, lowering_.functionFrame().addressOf(fn->impl), "impl");
+      lowering_.fnTy_, lowering_.functionFrame().addressOf(fn->impl()), "impl");
   llvm::Value *env = lowering_.builder_.CreateExtractValue(impl, 1);
   lowering_.builder_.CreateCall(lowering_.objRetainFn_, {env});
   llvm::Value *result = lowering_.closureLowerer().callFunctionValue(impl, implType, args);

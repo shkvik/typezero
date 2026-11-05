@@ -1,5 +1,6 @@
 #pragma once
 
+#include "llvm/ADT/StringRef.h"
 #include "llvm/Support/SMLoc.h"
 #include <string>
 
@@ -16,6 +17,11 @@ struct ClassCheckerCheckThisError {
   std::string message;
 };
 
+class ErrorTextThis {
+public:
+  static std::string undeclared(llvm::StringRef function);
+};
+
 enum class ClassCheckerCheckClassStmtErrorCode {
   NOT_TOP_LEVEL,
 };
@@ -25,6 +31,11 @@ struct ClassCheckerCheckClassStmtError {
   std::string message;
 };
 
+class ErrorTextClassStmt {
+public:
+  static std::string nested(llvm::StringRef className);
+};
+
 enum class ClassCheckerCheckFieldsSetErrorCode {
   FIELD_NOT_SET_ON_EVERY_PATH,
 };
@@ -32,6 +43,11 @@ enum class ClassCheckerCheckFieldsSetErrorCode {
 struct ClassCheckerCheckFieldsSetError {
   ClassCheckerCheckFieldsSetErrorCode code;
   std::string message;
+};
+
+class ErrorTextFieldsSet {
+public:
+  static std::string pathUnset(llvm::StringRef className, llvm::StringRef field);
 };
 
 enum class ClassCheckerCheckClassBodiesErrorCode {
@@ -55,6 +71,12 @@ struct ClassCheckerIsInitThisError {
   std::string message;
 };
 
+class ErrorTextInitThis {
+public:
+  static std::string outside();
+  static std::string notThis();
+};
+
 enum class ClassCheckerDeclareThisErrorCode {
   NOT_A_METHOD,
 };
@@ -64,6 +86,11 @@ struct ClassCheckerDeclareThisError {
   std::string message;
 };
 
+class ErrorTextDeclareThis {
+public:
+  static std::string notMethod(llvm::StringRef function);
+};
+
 enum class ClassCheckerHasDecoratorsErrorCode {
   NO_DECORATORS,
 };
@@ -71,6 +98,11 @@ enum class ClassCheckerHasDecoratorsErrorCode {
 struct ClassCheckerHasDecoratorsError {
   ClassCheckerHasDecoratorsErrorCode code;
   std::string message;
+};
+
+class ErrorTextDecorators {
+public:
+  static std::string none(llvm::StringRef className);
 };
 
 enum class ClassCheckerThisReadyErrorCode {
@@ -83,6 +115,12 @@ struct ClassCheckerThisReadyError {
   std::string message;
 };
 
+class ErrorTextThisReady {
+public:
+  static std::string noSuper();
+  static std::string unset(llvm::StringRef field);
+};
+
 enum class ClassCheckerFirstUnsetErrorCode {
   NOT_IN_CONSTRUCTOR,
   ALL_FIELDS_SET,
@@ -91,6 +129,12 @@ enum class ClassCheckerFirstUnsetErrorCode {
 struct ClassCheckerFirstUnsetError {
   ClassCheckerFirstUnsetErrorCode code;
   std::string message;
+};
+
+class ErrorTextFirstUnset {
+public:
+  static std::string outside();
+  static std::string allSet(llvm::StringRef className);
 };
 
 enum class ClassCheckerFieldStartValueErrorCode {
@@ -103,6 +147,12 @@ struct ClassCheckerFieldStartValueError {
   std::string message;
 };
 
+class ErrorTextStartValue {
+public:
+  static std::string noStart(llvm::StringRef field, llvm::StringRef type);
+  static std::string neverSet(llvm::StringRef field, llvm::StringRef type);
+};
+
 enum class ClassCheckerOverrideReturnErrorCode {
   RETURNS_OTHER_TYPE,
 };
@@ -110,6 +160,13 @@ enum class ClassCheckerOverrideReturnErrorCode {
 struct ClassCheckerOverrideReturnError {
   ClassCheckerOverrideReturnErrorCode code;
   std::string message;
+};
+
+class ErrorTextOverride {
+public:
+  static std::string otherType(llvm::StringRef method, llvm::StringRef mine,
+                               llvm::StringRef className, llvm::StringRef theirs,
+                               llvm::StringRef baseClass);
 };
 
 enum class ClassCheckerThisOfErrorCode {
@@ -124,6 +181,14 @@ struct ClassCheckerThisOfError {
   std::string message;
 };
 
+class ErrorTextThisOf {
+public:
+  static std::string outside();
+  static std::string inField(llvm::StringRef className, llvm::StringRef member);
+  static std::string inStatic(llvm::StringRef className, llvm::StringRef member);
+  static std::string inFunction();
+};
+
 enum class ClassCheckerReadyThisErrorCode {
   IN_CLOSURE_BEFORE_FIELDS_SET,
   BEFORE_SUPER,
@@ -133,6 +198,13 @@ enum class ClassCheckerReadyThisErrorCode {
 struct ClassCheckerReadyThisError {
   ClassCheckerReadyThisErrorCode code;
   std::string message;
+};
+
+class ErrorTextReadyThis {
+public:
+  static std::string inClosure();
+  static std::string noSuper(llvm::StringRef parentClass);
+  static std::string unset(llvm::StringRef field);
 };
 
 }

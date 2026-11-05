@@ -190,7 +190,7 @@ bool EmitterChecker::ownsEmitter(const Expr *emitter) const {
   auto *name = dyn_cast<NameExpr>(emitter);
   const FunctionDecl *fn = checker_.currentDecl();
   if (!name || !name->var || !fn || name->var->owner != fn || name->var->isGlobal ||
-      name->var == fn->thisVar) {
+      name->var == fn->thisVar()) {
     return false;
   }
 
@@ -214,8 +214,8 @@ bool EmitterChecker::classifyListener(Expr *arg, const Expr *emitter, int &bits,
     bits |= kReceiverBit | (topLevel ? 0 : kDedupeBit);
     checker_.file_->listenerReceivers.push_back(type);
     if (const FunctionDecl *fn = checker_.currentDecl();
-        fn && fn->isConstructor && fn->cls && var && var == fn->thisVar) {
-      checker_.selfListeners_.insert(fn->cls);
+        fn && fn->isConstructor() && fn->cls() && var && var == fn->thisVar()) {
+      checker_.selfListeners_.insert(fn->cls());
     }
     return true;
   };
@@ -236,7 +236,7 @@ bool EmitterChecker::classifyListener(Expr *arg, const Expr *emitter, int &bits,
     captured.assign(fn->captures.begin(), fn->captures.end());
   } else if (auto *member = dyn_cast<MemberExpr>(e);
              member && member->method && member->method->decl &&
-             !member->method->decl->isStatic && canReceive(member->object->type)) {
+             !member->method->decl->isStatic() && canReceive(member->object->type)) {
     auto *self = dyn_cast<NameExpr>(member->object);
     return receiver(member->object->type, self ? self->var : nullptr);
   } else if (auto *name = dyn_cast<NameExpr>(e); name && name->func && name->func->decl) {
@@ -550,7 +550,7 @@ Expr *EmitterChecker::checkEmitterCall(CallExpr *call, MemberExpr *member, Class
     return nullptr;
   }
   std::vector<FunctionDecl *> methods = ClassDeclarer::methodsNamed(cls, member->name, false);
-  if (!methods.empty() && !methods[0]->cls->library) {
+  if (!methods.empty() && !methods[0]->cls()->library) {
     return nullptr;
   }
   const Type *receiver = member->object->type;

@@ -157,7 +157,7 @@ Expr *AsyncChecker::checkAwait(AwaitExpr *await, const Type *expected) {
   if (fn && !(fn->decl && fn->decl->isAsync)) {
     FunctionDecl *decl = fn->decl;
     std::string hint = decl && decl->isArrow         ? "'async (...) => ...'"
-                       : decl && decl->cls           ? "'async " + decl->name.str() + "() { ... }'"
+                       : decl && decl->cls()         ? "'async " + decl->name.str() + "() { ... }'"
                        : decl && !decl->name.empty() ? "'async function " + decl->name.str() + "'"
                                                      : "'async function'";
     checker_.diags_.error(await->loc(),

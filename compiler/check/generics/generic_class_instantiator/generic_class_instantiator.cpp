@@ -192,9 +192,13 @@ void GenericClassInstantiator::declareInstanceMember(ClassDecl *inst, FunctionDe
   sym->decl = fn;
   fn->sym = sym;
   fn->generic = generic;
-  fn->variant = generic->variant;
-  fn->overridden = generic->overridden;
-  fn->openToLate = generic->openToLate;
+  if (ClassMember *member = fn->member()) {
+    member->variant = generic->variant();
+  }
+  if (Overriding *overriding = fn->overriding()) {
+    overriding->overridden = generic->overridden();
+    overriding->openToLate = generic->openToLate();
+  }
   if (!of) {
     return;
   }
@@ -282,15 +286,14 @@ void GenericClassInstantiator::fillInstance(ClassDecl *inst) {
     if (g.method) {
       FunctionDecl *fn = cast<FunctionExpr>(f.init)->fn;
       fn->name = g.method->name;
-      fn->cls = inst;
-      fn->access = g.method->access;
-      fn->isOverride = g.method->isOverride;
+      fn->role = ClassMember{
+          .cls = inst, .access = g.method->access(), .isOverride = g.method->isOverride()};
       fn->isExpression = false;
       f.method = fn;
     }
   }
   for (size_t i = 0; i < inst->methods.size() && i < generic->methods.size(); ++i) {
-    if (!generic->methods[i]->isStatic) {
+    if (!generic->methods[i]->isStatic()) {
       declareInstanceMember(inst, inst->methods[i], generic->methods[i]);
     }
   }
@@ -314,7 +317,7 @@ void GenericClassInstantiator::fillInstance(ClassDecl *inst) {
       sets.push_back(checker_.ctx_.make<ExprStmt>(f.loc, set));
     }
     auto *init = checker_.ctx_.make<FunctionDecl>(inst->loc(), "init");
-    init->cls = inst;
+    init->role = ClassMember{.cls = inst};
     init->body = checker_.ctx_.make<BlockStmt>(inst->loc());
     init->body->body = std::move(sets);
     declareInstanceMember(inst, init, generic->init);
@@ -342,17 +345,22 @@ void GenericClassInstantiator::linkInstance(ClassDecl *inst) {
 }
 
 void GenericClassInstantiator::markOverridden(FunctionDecl *fn) {
-  fn->overridden = true;
+  if (Overriding *overriding = fn->overriding()) {
+    overriding->overridden = true;
+  }
   FunctionDecl *generic = fn->generic ? fn->generic : fn;
-  ClassDecl *cls = generic->cls;
+  ClassDecl *cls = generic->cls();
   if (!cls || !cls->isGeneric()) {
     return;
   }
-  generic->overridden = true;
+  if (Overriding *overriding = generic->overriding()) {
+    overriding->overridden = true;
+  }
   for (ClassDecl *inst : cls->instances) {
     for (FunctionDecl *m : ClassLinks::ownMethods(inst)) {
-      if (m->generic == generic) {
-        m->overridden = true;
+      Overriding *overriding = m->overriding();
+      if (m->generic == generic && overriding) {
+        overriding->overridden = true;
       }
     }
   }

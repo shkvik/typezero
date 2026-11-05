@@ -31,7 +31,7 @@ bool PoolChecker::poolClass(const ClassDecl *cls) {
 
 bool PoolChecker::takesOver(const CallExpr *c) {
   const FunctionDecl *decl = c->method ? c->method->decl : nullptr;
-  if (!decl || decl->name != "use" || !poolClass(decl->cls) || c->args.empty()) {
+  if (!decl || decl->name != "use" || !poolClass(decl->cls()) || c->args.empty()) {
     return false;
   }
   const FunctionDecl *fn = callbackOf(c->args[0]);

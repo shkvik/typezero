@@ -44,9 +44,9 @@ void FunctionBuilder::declareFunction(FunctionDecl *fn) {
   }
   auto *type = llvm::FunctionType::get(lowering_.moduleBuilder().lower(sym->ret), params, false);
   std::string name = "tz." + lowering_.symbolPrefixes_.lookup(fn) + fn->name.str();
-  if (fn->cls) {
-    name = "tz." + lowering_.symbolPrefixes_.lookup(fn->cls) + fn->cls->name.str() + "." +
-           fn->name.str() + (fn->variant ? "." + std::to_string(fn->variant) : "");
+  if (fn->cls()) {
+    name = "tz." + lowering_.symbolPrefixes_.lookup(fn->cls()) + fn->cls()->name.str() + "." +
+           fn->name.str() + (fn->variant() ? "." + std::to_string(fn->variant()) : "");
   }
   if (fn->isInstance) {
     name += "<";
@@ -82,7 +82,7 @@ void FunctionBuilder::emitFunction(FunctionDecl *fn) {
     lowering_.tzModulesLowerer().emitExternal(fn);
     return;
   }
-  if (fn->impl) {
+  if (fn->impl()) {
     lowering_.decoratorLowerer().emitDecoratedMethod(fn);
     return;
   }
@@ -128,12 +128,12 @@ void FunctionBuilder::emitParamsAndBody(FunctionDecl *fn, llvm::ArrayRef<llvm::V
 }
 
 void FunctionBuilder::emitParams(FunctionDecl *fn, llvm::ArrayRef<llvm::Value *> args) {
-  if (fn->thisVar) {
+  if (fn->thisVar()) {
     llvm::Value *slot =
         lowering_.functionFrame().createStackSlot(lowering_.builder_.getPtrTy(), "this");
     lowering_.builder_.CreateStore(lowering_.envParam_, slot);
-    lowering_.addresses_[fn->thisVar] = slot;
-    lowering_.debugInfo().declare(fn->thisVar, slot);
+    lowering_.addresses_[fn->thisVar()] = slot;
+    lowering_.debugInfo().declare(fn->thisVar(), slot);
   }
   for (size_t i = 0; i < fn->params.size(); ++i) {
     const Param &param = fn->params[i];

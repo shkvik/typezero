@@ -66,11 +66,11 @@ bool Ownership::isParam(const FunctionDecl *fn, const VarSymbol *v) {
 }
 
 bool Ownership::isSelf(const FunctionDecl *fn, const VarSymbol *v) {
-  return fn && v && fn->thisVar == v && fn->takesThis();
+  return fn && v && fn->thisVar() == v && fn->takesThis();
 }
 
 bool Ownership::builds(const FunctionDecl *fn) {
-  return fn && fn->cls && (fn->isConstructor || fn == fn->cls->init);
+  return fn && fn->cls() && (fn->isConstructor() || fn == fn->cls()->init);
 }
 
 bool Ownership::candidate(const FunctionDecl *fn, const VarSymbol *v) const {
@@ -482,7 +482,7 @@ const VarSymbol *Ownership::rootOf(const FunctionDecl *fn, const Expr *e, Needs 
     }
     const FunctionDecl *lib = analysis_.libraryEffects.libraryTarget(c);
     auto *m = dyn_cast<MemberExpr>(c->callee);
-    if (!lib || !lib->cls || lib->isStatic || lib->isAsync || lib->isGenerator || !c->method ||
+    if (!lib || !lib->cls() || lib->isStatic() || lib->isAsync || lib->isGenerator || !c->method ||
         !m || c->hasSpread()) {
       return nullptr;
     }
@@ -708,7 +708,7 @@ bool Ownership::returnsBack(const CallExpr *c, size_t index) {
     }
     const VarSymbol *v = nullptr;
     if (index == kSelf) {
-      v = g->thisVar;
+      v = g->thisVar();
     } else if (index >= shift && index - shift < g->params.size()) {
       v = g->params[index - shift].sym;
     }
@@ -947,7 +947,7 @@ void Ownership::visit(const Expr *e) {
       selfField = assigned && !assigned->op && self && isSelf(fn_, self->var) && m->object->type &&
                   m->object->type->nonOptional()->classDecl();
       if (collecting_ && selfField) {
-        const ClassDecl *built = builds(fn_) ? fn_->cls : nullptr;
+        const ClassDecl *built = builds(fn_) ? fn_->cls() : nullptr;
         stores_[analysis_.intern(m->name)].push_back(
             {m->object->type->nonOptional(), assigned->value, fi_, nullptr, built});
       } else if (collecting_) {
@@ -967,12 +967,12 @@ void Ownership::visit(const Expr *e) {
     }
     if (assigned) {
       visit(assigned->value);
-      bool kept = selfField && builds(fn_) && !leaking_.contains(fn_->thisVar) &&
-                  !analysis_.escapeScan.constructorLeaks(fn_->cls);
-      if (selfField && !builds(fn_) && candidate(fn_, fn_->thisVar)) {
+      bool kept = selfField && builds(fn_) && !leaking_.contains(fn_->thisVar()) &&
+                  !analysis_.escapeScan.constructorLeaks(fn_->cls());
+      if (selfField && !builds(fn_) && candidate(fn_, fn_->thisVar())) {
         kept = true;
         if (collecting_) {
-          selfStores_.push_back({fn_->thisVar, assigned->value, fi_, {}});
+          selfStores_.push_back({fn_->thisVar(), assigned->value, fi_, {}});
         }
       }
       if (!kept) {
@@ -1220,8 +1220,8 @@ bool Ownership::passesOwnedSelf(const CallExpr *c) {
   for (int edgeIndex : rec->edges) {
     const CallEdge &callee = analysis_.callGraph.edge(edgeIndex);
     const FunctionDecl *g = analysis_.byFunction[callee.to]->decl;
-    if (!handsOver(fi_, *rec, callee.mode, false) || !g || !candidate(g, g->thisVar) ||
-        leaking_.contains(g->thisVar)) {
+    if (!handsOver(fi_, *rec, callee.mode, false) || !g || !candidate(g, g->thisVar()) ||
+        leaking_.contains(g->thisVar())) {
       return false;
     }
   }
@@ -1238,7 +1238,7 @@ bool Ownership::passesOwnedNew(const NewExpr *n, size_t index) {
   for (int edgeIndex : rec->edges) {
     const CallEdge &callee = analysis_.callGraph.edge(edgeIndex);
     const FunctionDecl *g = analysis_.byFunction[callee.to]->decl;
-    if (!g || !g->isConstructor) {
+    if (!g || !g->isConstructor()) {
       continue;
     }
     if (!handsOver(fi_, *rec, callee.mode, false) || index >= g->params.size()) {
@@ -1306,7 +1306,7 @@ bool Ownership::reflectKeepsArgs(const CallExpr *c, bool self) {
       return false;
     }
     if (self) {
-      if (!candidate(g, g->thisVar) || leaking_.contains(g->thisVar)) {
+      if (!candidate(g, g->thisVar()) || leaking_.contains(g->thisVar())) {
         return false;
       }
       continue;
@@ -1370,8 +1370,8 @@ bool Ownership::selfOwned(int fi, const CallRec &rec, const CallEdge &callee, bo
     return true;
   }
   const FunctionDecl *caller = analysis_.byFunction[fi]->decl;
-  if (rec.call && rec.call->superCall && builds(g) && caller && caller->thisVar) {
-    return owned_.contains(caller->thisVar);
+  if (rec.call && rec.call->superCall && builds(g) && caller && caller->thisVar()) {
+    return owned_.contains(caller->thisVar());
   }
   const Expr *receiver = receiverOf(rec);
 
@@ -1535,13 +1535,13 @@ std::optional<Ref> Ownership::substituted(Ref r, const FnInfo &callee, int calle
     }
     if (builds(callee.decl) &&
         llvm::isa_and_nonnull<NewExpr>(static_cast<const Expr *>(rec.site))) {
-      bool fresh = !analysis_.escapeScan.constructorLeaks(callee.decl->cls);
+      bool fresh = !analysis_.escapeScan.constructorLeaks(callee.decl->cls());
       return fresh && needsOwn(owned->needs) ? std::nullopt : std::optional<Ref>(plain);
     }
     const FunctionDecl *from = analysis_.byFunction[caller]->decl;
     if (rec.call && rec.call->superCall && builds(callee.decl) && from &&
-        candidate(from, from->thisVar)) {
-      return interned(from->thisVar, owned->type, owned->needs, owned->whole);
+        candidate(from, from->thisVar())) {
+      return interned(from->thisVar(), owned->type, owned->needs, owned->whole);
     }
     value = receiverOf(rec);
   } else {
@@ -1767,8 +1767,8 @@ void Ownership::decideOnce() {
         paramOf_[v] = {decl, i};
       }
     }
-    if (candidate(decl, decl->thisVar)) {
-      paramOf_[decl->thisVar] = {decl, kSelf};
+    if (candidate(decl, decl->thisVar())) {
+      paramOf_[decl->thisVar()] = {decl, kSelf};
     }
     if (!decl->isGenerator && decl->body) {
       fresh_.insert(decl->id);

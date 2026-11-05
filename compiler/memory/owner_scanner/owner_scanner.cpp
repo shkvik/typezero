@@ -324,14 +324,14 @@ void OwnerScanner::readFields(const Type *type) {
 void OwnerScanner::wrote(const MemberExpr *target, const AssignExpr *assign) {
   const FunctionDecl *fn = current_;
   auto *object = llvm::dyn_cast<NameExpr>(bare(target->object));
-  bool self = fn && fn->thisVar && object && object->var == fn->thisVar;
-  bool construction = self && fn->cls && (fn->isConstructor || fn == fn->cls->init);
+  bool self = fn && fn->thisVar() && object && object->var == fn->thisVar();
+  bool construction = self && fn->cls() && (fn->isConstructor() || fn == fn->cls()->init);
   const ClassDecl *made = nullptr;
   if (auto *create = llvm::dyn_cast<NewExpr>(bare(assign->value));
       create && create->cls && construction) {
     bool holdsSelf = false;
     for (const Expr *arg : create->ctor ? create->ctor->args : create->args) {
-      holdsSelf = holdsSelf || mentions(arg, fn->thisVar);
+      holdsSelf = holdsSelf || mentions(arg, fn->thisVar());
     }
     if (!holdsSelf) {
       made = create->cls;
@@ -340,16 +340,17 @@ void OwnerScanner::wrote(const MemberExpr *target, const AssignExpr *assign) {
   if (assign->op) {
     made = nullptr;
   }
-  writes_[target->name].push_back({construction ? fn->cls : nullptr, made});
+  writes_[target->name].push_back({construction ? fn->cls() : nullptr, made});
   auto *owned = llvm::dyn_cast<MemberExpr>(bare(target->object));
   auto *fe = llvm::dyn_cast<FunctionExpr>(bare(assign->value));
   if (!owned || !fe || fe->fn->nonEscaping || fe->fn->isAsync || fe->fn->isGenerator || !fn ||
-      !fn->thisVar || !fn->cls) {
+      !fn->thisVar() || !fn->cls()) {
     return;
   }
   auto *holder = llvm::dyn_cast<NameExpr>(bare(owned->object));
-  if (holder && holder->var == fn->thisVar && llvm::is_contained(fe->fn->captures, fn->thisVar)) {
-    candidates_.push_back({fn->cls, owned->name, target->name, fe->fn, fn->thisVar});
+  if (holder && holder->var == fn->thisVar() &&
+      llvm::is_contained(fe->fn->captures, fn->thisVar())) {
+    candidates_.push_back({fn->cls(), owned->name, target->name, fe->fn, fn->thisVar()});
   }
 }
 

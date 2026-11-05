@@ -151,7 +151,7 @@ void ReflectLowerer::finishReflection(SourceFile &file, llvm::Instruction *init)
         }
       }
       for (FunctionDecl *fn : own) {
-        if (fn->isStatic || named.contains(fn->name)) {
+        if (fn->isStatic() || named.contains(fn->name)) {
           continue;
         }
         std::vector<const FunctionDecl *> variants =

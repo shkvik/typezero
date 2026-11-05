@@ -71,7 +71,7 @@ const Type *PredicateChecker::resolveReturnType(FunctionDecl *fn, FuncSymbol *sy
       }
       std::string call = fn->name.str() + "(" + args + ")";
       if (fn->takesThis()) {
-        std::string object = fn->cls->name.str();
+        std::string object = fn->cls()->name.str();
         object[0] = llvm::toLower(object[0]);
         call = object + "." + call;
       }
@@ -82,7 +82,7 @@ const Type *PredicateChecker::resolveReturnType(FunctionDecl *fn, FuncSymbol *sy
   }
   int param = -2;
   if (ref.name == "this") {
-    if (fn->cls && !fn->isStatic && !fn->isConstructor) {
+    if (fn->cls() && !fn->isStatic() && !fn->isConstructor()) {
       param = -1;
     } else if (sym) {
       checker_.diags_.error(ref.loc, "'this is T' can only be the return type of a method");
@@ -153,7 +153,7 @@ bool PredicateChecker::looksBoolean(const Expr *expr) {
 void PredicateChecker::beginPredicate(FunctionDecl *fn) {
   const FuncSymbol *sym = fn->sym;
   bool boolean = !sym->ret || sym->ret->isBool();
-  if (!boolean || fn->isGenerator || fn->isConstructor) {
+  if (!boolean || fn->isGenerator || fn->isConstructor()) {
     checker_.predicateBuilds_.push_back({nullptr, fn, Checker::Flow(), Checker::Flow()});
     return;
   }
@@ -176,7 +176,7 @@ void PredicateChecker::notePredicateExit(const Checker::Flow &whenTrue,
     return;
   }
   const FunctionDecl *decl = build.decl;
-  const VarSymbol *var = sym->predicateParam == -1 ? decl->thisVar
+  const VarSymbol *var = sym->predicateParam == -1 ? decl->thisVar()
                          : size_t(sym->predicateParam) < decl->params.size()
                              ? decl->params[size_t(sym->predicateParam)].sym
                              : nullptr;
@@ -208,7 +208,7 @@ void PredicateChecker::endPredicate(FunctionDecl *fn) {
     if (!var || var->reassigned) {
       return -2;
     }
-    if (var == fn->thisVar) {
+    if (var == fn->thisVar()) {
       return -1;
     }
     for (size_t i = 0; i < fn->params.size(); ++i) {
@@ -258,7 +258,7 @@ void PredicateChecker::endPredicate(FunctionDecl *fn) {
   for (const Param &p : fn->params) {
     summary.params.push_back(p.sym);
   }
-  summary.self = fn->thisVar;
+  summary.self = fn->thisVar();
   predicates_[build.fn] = std::move(summary);
 }
 

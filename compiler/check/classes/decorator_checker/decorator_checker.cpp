@@ -175,7 +175,7 @@ void DecoratorChecker::checkDecoratedNames(ClassDecl *cls) {
     add(f.name, f.loc, f.isStatic, f.decorators, nullptr);
   }
   for (const FunctionDecl *fn : cls->methods) {
-    add(fn->name, fn->loc(), fn->isStatic, fn->decorators, fn);
+    add(fn->name, fn->loc(), fn->isStatic(), fn->decorators(), fn);
   }
   for (size_t i = 0; i < members.size(); ++i) {
     for (size_t j = 0; j < i; ++j) {
@@ -238,8 +238,8 @@ void DecoratorChecker::decorateClass(ClassDecl *cls) {
     }
   }
   for (FunctionDecl *fn : cls->methods) {
-    if (!fn->decorators.empty() || decoratedParams(fn)) {
-      members.push_back({nullptr, fn, fn->isStatic, fn->loc().getPointer()});
+    if (!fn->decorators().empty() || decoratedParams(fn)) {
+      members.push_back({nullptr, fn, fn->isStatic(), fn->loc().getPointer()});
     }
   }
   llvm::stable_sort(members, [](const Member &a, const Member &b) {
@@ -247,7 +247,7 @@ void DecoratorChecker::decorateClass(ClassDecl *cls) {
   });
   for (Member &m : members) {
     std::vector<Checker::DecoratorUse> uses;
-    for (const Decorator &d : m.field ? m.field->decorators : m.method->decorators) {
+    for (const Decorator &d : m.field ? m.field->decorators : m.method->decorators()) {
       uses.push_back({&d});
     }
     if (m.method) {
@@ -288,7 +288,7 @@ void DecoratorChecker::decorate(ClassDecl *cls, ClassField *field, FunctionDecl 
             "field, and reading or writing it never runs code");
     return;
   }
-  if (method && method->isAbstract) {
+  if (method && method->isAbstract()) {
     checker_.diags_.error(
         at, "a decorator cannot decorate an abstract method, which has no code; decorate "
             "the methods that implement it");
@@ -427,7 +427,7 @@ void DecoratorChecker::decorate(ClassDecl *cls, ClassField *field, FunctionDecl 
         earlyDescriptor ? earlyDescriptor : methodDescriptorType(Type::tuple(sym->params), ret);
     VarSymbol *impl = checker_.ctx_.newVar();
     impl->name = checker_.ctx_.keepName("%" + cls->name.str() + "." + method->name.str() + "." +
-                                        std::to_string(method->variant));
+                                        std::to_string(method->variant()));
     impl->loc = method->loc();
     impl->type = descType->field("value")->type;
     impl->isGlobal = true;
@@ -435,7 +435,7 @@ void DecoratorChecker::decorate(ClassDecl *cls, ClassField *field, FunctionDecl 
     impl->reassigned = true;
     impl->declSeq = ++checker_.seq_;
     checker_.scopes().declare(impl->name, impl->loc, {impl});
-    method->impl = impl;
+    method->member()->impl = impl;
     auto *lit = checker_.ctx_.make<ObjectLitExpr>(at);
     auto prop = [&](llvm::StringRef name, Expr *value) {
       ObjectLitExpr::Property p;
@@ -490,7 +490,7 @@ void DecoratorChecker::decorate(ClassDecl *cls, ClassField *field, FunctionDecl 
       std::vector<Expr *> args{metadata->args[0], metadata->args[1],
                                checker_.classValueChecker().classValueAt(cls, loc)};
       llvm::StringRef name = use.param >= 0 ? use.owner->name : memberName;
-      if (place != Place::Class && !(use.param >= 0 && use.owner->isConstructor)) {
+      if (place != Place::Class && !(use.param >= 0 && use.owner->isConstructor())) {
         args.push_back(
             checker_.ctx_.make<StringLitExpr>(loc, std::u16string(name.begin(), name.end())));
       }
@@ -502,7 +502,7 @@ void DecoratorChecker::decorate(ClassDecl *cls, ClassField *field, FunctionDecl 
         checker_.classValueChecker().classValueAt(place == Place::Class ? current : cls, loc)};
     if (place != Place::Class) {
       llvm::StringRef name = use.param >= 0 ? use.owner->name : memberName;
-      if (use.param >= 0 && use.owner->isConstructor) {
+      if (use.param >= 0 && use.owner->isConstructor()) {
         args.push_back(checker_.ctx_.make<UndefinedExpr>(loc));
       } else {
         args.push_back(
@@ -562,7 +562,7 @@ void DecoratorChecker::decorate(ClassDecl *cls, ClassField *field, FunctionDecl 
     out.push_back(checker_.ctx_.make<ExprStmt>(loc, applied));
   }
   if (descVar) {
-    auto *target = checker_.ctx_.make<NameExpr>(at, method->impl->name);
+    auto *target = checker_.ctx_.make<NameExpr>(at, method->impl()->name);
     auto *value = checker_.ctx_.make<MemberExpr>(
         at, checker_.ctx_.make<NameExpr>(at, descVar->name), "value");
     auto *assign = checker_.ctx_.make<AssignExpr>(at, std::nullopt, target, value);

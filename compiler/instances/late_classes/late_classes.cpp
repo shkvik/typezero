@@ -259,7 +259,7 @@ void LateClasses::checkLateClasses() {
 void LateClasses::markLateOverrides(SourceFile &program) {
   auto note = [&](const ClassDecl *cls) {
     for (const FunctionDecl *fn : cls->methods) {
-      if (!fn->isStatic) {
+      if (!fn->isStatic()) {
         lateMethodNames_.insert(fn->name);
       }
     }
@@ -289,9 +289,10 @@ void LateClasses::markLateOverrides(ClassDecl *cls) {
     return;
   }
   for (FunctionDecl *fn : ClassLinks::ownMethods(cls)) {
-    if (lateMethodNames_.contains(fn->name)) {
-      fn->overridden = true;
-      fn->openToLate = true;
+    Overriding *overriding = fn->overriding();
+    if (lateMethodNames_.contains(fn->name) && overriding) {
+      overriding->overridden = true;
+      overriding->openToLate = true;
     }
   }
 }

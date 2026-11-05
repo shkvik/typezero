@@ -27,7 +27,7 @@ constexpr uint32_t kMethodField = 0xFFFFFFFFu;
 std::vector<FunctionDecl *> instanceMethods(const ClassDecl *cls) {
   std::vector<FunctionDecl *> methods;
   for (FunctionDecl *fn : cls->methods) {
-    if (!fn->isStatic && !fn->isAbstract && fn->typeParams.empty()) {
+    if (!fn->isStatic() && !fn->isAbstract() && fn->typeParams.empty()) {
       methods.push_back(fn);
     }
   }
@@ -74,7 +74,7 @@ llvm::Constant *ClassDescriptors::dropDescriptor(llvm::Function *drop) {
 }
 
 llvm::Function *ClassDescriptors::methodCode(const FunctionDecl *fn) {
-  if (fn->cls->literal) {
+  if (fn->cls()->literal) {
     return lowering_.closureLowerer().closureCode(const_cast<FunctionDecl *>(fn));
   }
 
@@ -87,8 +87,8 @@ void ClassDescriptors::declareMethods(ClassDecl *cls) {
                        (cls->generic ? cls->type->name().str() : cls->name.str()) + ".";
   for (FunctionDecl *fn : instanceMethods(cls)) {
     std::string name = prefix + fn->name.str();
-    if (fn->variant) {
-      name += "." + std::to_string(fn->variant);
+    if (fn->variant()) {
+      name += "." + std::to_string(fn->variant());
     }
     if (fn->isInstance) {
       name += "<";
@@ -112,7 +112,7 @@ void ClassDescriptors::emitMethods(ClassDecl *cls) {
     return;
   }
   for (FunctionDecl *fn : instanceMethods(cls)) {
-    if (fn->impl) {
+    if (fn->impl()) {
       lowering_.decoratorLowerer().emitDecoratedMethod(fn);
       continue;
     }

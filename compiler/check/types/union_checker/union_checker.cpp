@@ -324,8 +324,8 @@ Expr *UnionChecker::checkUnionMethodCall(CallExpr *call, MemberExpr *member) {
                                                  "' cannot choose from; narrow it first");
         return loosely();
       } else if (!variants.empty()) {
-        if (!checker_.classMemberChecker().checkAccess(variants[0]->cls, variants[0]->access, name,
-                                                       member->loc())) {
+        if (!checker_.classMemberChecker().checkAccess(variants[0]->cls(), variants[0]->access(),
+                                                       name, member->loc())) {
           return loosely();
         }
         FuncSymbol *sym = variants[0]->sym;

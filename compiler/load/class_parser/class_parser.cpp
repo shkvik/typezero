@@ -317,28 +317,33 @@ void ClassParser::parseClassMember(ClassDecl *cls) {
 
   if (parser_.tok_.is(Tok::LParen) || parser_.tok_.is(Tok::Less)) {
     auto *fn = parser_.ctx_.make<FunctionDecl>(nameLoc, name);
-    fn->cls = cls;
-    fn->isStatic = isStatic;
+    bool constructor = plainName && name == "constructor" && !isStatic;
+    bool abstractMethod = isAbstract && !constructor;
     if (accessor) {
       parser_.cursor().report(loc, "'accessor' goes before a field, not a method");
     }
-    if (!decorators.empty() && plainName && name == "constructor" && !isStatic) {
+    ClassMember member{.cls = cls, .access = access, .isOverride = isOverride && !constructor};
+    if (!decorators.empty() && constructor) {
       parser_.cursor().report(decorators[0].loc,
                               "a decorator cannot decorate a constructor; decorate the class, "
                               "or a parameter of the constructor");
     } else {
-      fn->decorators = std::move(decorators);
+      member.decorators = std::move(decorators);
     }
-    fn->access = access;
-    fn->isConstructor = plainName && name == "constructor" && !isStatic;
-    fn->isGenerator = generator && !fn->isConstructor;
-    fn->isAsync = isAsync && !fn->isConstructor;
-    fn->isOverride = isOverride && !fn->isConstructor;
-    fn->isAbstract = isAbstract && !fn->isConstructor;
-    if (generator && fn->isConstructor) {
+    if (constructor) {
+      member.kind = Constructor{};
+    } else if (isStatic) {
+      member.kind = StaticMethod{};
+    } else if (abstractMethod) {
+      member.kind = AbstractMethod{};
+    }
+    fn->role = std::move(member);
+    fn->isGenerator = generator && !constructor;
+    fn->isAsync = isAsync && !constructor;
+    if (generator && fn->isConstructor()) {
       parser_.cursor().report(loc, "a constructor cannot be a generator: 'new' gives the object");
     }
-    if (isAsync && fn->isConstructor) {
+    if (isAsync && fn->isConstructor()) {
       parser_.cursor().report(
           loc, "a constructor cannot be 'async': 'new' gives the object, not a Promise");
     }
@@ -346,7 +351,7 @@ void ClassParser::parseClassMember(ClassDecl *cls) {
       parser_.cursor().report(loc,
                               "a method cannot be 'readonly': a method cannot be replaced anyway");
     }
-    if ((isOverride || isAbstract) && fn->isConstructor) {
+    if ((isOverride || isAbstract) && fn->isConstructor()) {
       parser_.cursor().report(loc, std::string("a constructor cannot be '") +
                                        (isOverride ? "override" : "abstract") + "'");
     }
@@ -358,7 +363,7 @@ void ClassParser::parseClassMember(ClassDecl *cls) {
     if (parser_.recovering_) {
       return;
     }
-    if (fn->isAbstract) {
+    if (abstractMethod) {
       if (fn->body) {
         parser_.cursor().report(nameLoc, "abstract method '" + name +
                                              "' cannot have a body: the classes that "
@@ -371,13 +376,13 @@ void ClassParser::parseClassMember(ClassDecl *cls) {
       return;
     }
     if (!fn->body) {
-      std::string what = fn->isConstructor ? "the constructor" : "method '" + name.str() + "'";
+      std::string what = fn->isConstructor() ? "the constructor" : "method '" + name.str() + "'";
       parser_.cursor().report(nameLoc,
                               what + " has no body; overload signatures over one body are not "
                                      "supported: give each variant a body of its own");
       return;
     }
-    if (!fn->isConstructor) {
+    if (!fn->isConstructor()) {
       cls->methods.push_back(fn);
       return;
     }

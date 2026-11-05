@@ -29,13 +29,13 @@ void TailCallLowerer::findTailGroups(llvm::ArrayRef<FunctionDecl *> functions) {
   std::vector<bool> self(functions.size(), false);
   for (size_t i = 0; i < functions.size(); ++i) {
     FunctionDecl *fn = functions[i];
-    if (!fn->body || !fn->sym || !fn->sym->ret || fn->isGenerator || fn->isAsync || fn->impl) {
+    if (!fn->body || !fn->sym || !fn->sym->ret || fn->isGenerator || fn->isAsync || fn->impl()) {
       continue;
     }
     for (CallExpr *call : tailCallsIn(fn)) {
       auto target = llvm::find(functions, call->func->decl);
       if (target == functions.end() || call->func->ret != fn->sym->ret ||
-          call->func->decl->isGenerator || call->func->decl->isAsync || call->func->decl->impl) {
+          call->func->decl->isGenerator || call->func->decl->isAsync || call->func->decl->impl()) {
         continue;
       }
       size_t j = size_t(target - functions.begin());

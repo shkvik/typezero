@@ -312,7 +312,7 @@ FunctionDecl *InheritLowerer::implementingMethod(const ClassDecl *cls, llvm::Str
   for (const ClassDecl *c = cls; c; c = c->parent) {
     std::vector<FunctionDecl *> methods;
     for (FunctionDecl *fn : c->methods) {
-      if (!fn->isStatic) {
+      if (!fn->isStatic()) {
         methods.push_back(fn);
       }
     }
@@ -322,7 +322,7 @@ FunctionDecl *InheritLowerer::implementingMethod(const ClassDecl *cls, llvm::Str
       }
     }
     for (FunctionDecl *fn : methods) {
-      if (fn->name != name || fn->isAbstract || !fn->sym) {
+      if (fn->name != name || fn->isAbstract() || !fn->sym) {
         continue;
       }
       const Type *type = ClosureLowerer::functionTypeOf(fn->sym);

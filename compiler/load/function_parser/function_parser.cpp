@@ -130,7 +130,7 @@ void FunctionParser::parseParams(FunctionDecl *fn, Parser::ParamPatterns *patter
             parser_.tok_.text == "protected" || parser_.tok_.text == "readonly" ||
             parser_.tok_.text == "override") &&
            parser_.cursor().peek().is(Tok::Identifier)) {
-      if (!fn->isConstructor) {
+      if (!fn->isConstructor()) {
         parser_.cursor().report(parser_.tok_.loc(),
                                 "'" + parser_.tok_.text +
                                     "' before a parameter makes it a field, which only "

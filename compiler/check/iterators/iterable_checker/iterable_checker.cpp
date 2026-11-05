@@ -278,7 +278,7 @@ const Type *IterableChecker::iterableParam(FunctionDecl *fn, FuncSymbol *sym, co
   if (element->isError()) {
     return element;
   }
-  if (fn->isConstructor) {
+  if (fn->isConstructor()) {
     checker_.diags_.error(ref.loc,
                           "a constructor cannot take an 'Iterable<" + element->name() +
                               ">' yet: it would make a copy of the constructor for each kind of "

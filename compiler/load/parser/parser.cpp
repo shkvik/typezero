@@ -159,7 +159,9 @@ FunctionDecl *Parser::parseMethodCopy() {
   bool constructor = tok_.is(Tok::Identifier) && name == "constructor";
   cursor().advance();
   auto *fn = ctx_.make<FunctionDecl>(loc, name);
-  fn->isConstructor = constructor;
+  if (constructor) {
+    fn->role = ClassMember{.kind = Constructor{}};
+  }
   fn->isGenerator = generator;
   classes().parseMethodRest(fn, start);
 

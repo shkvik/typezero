@@ -136,7 +136,8 @@ Checker::BodyState ReturnInferrer::enterBody(const FunctionDecl *fn) {
     }
     checker_.checkingInstance_ = nullptr;
     checker_.diags_.setCapture(nullptr);
-    if (Checker::Instance *owner = fn && fn->cls ? checker_.lateOwners_.lookup(fn->cls) : nullptr) {
+    if (Checker::Instance *owner =
+            fn && fn->cls() ? checker_.lateOwners_.lookup(fn->cls()) : nullptr) {
       checker_.checkingInstance_ = owner;
       checker_.diags_.setCapture(&checker_.lateErrors_[owner]);
     }
@@ -177,11 +178,11 @@ void ReturnInferrer::leaveBody(Checker::BodyState &saved) {
 }
 
 void ReturnInferrer::inferReturnType(FuncSymbol *fn) {
-  if (FunctionDecl *decl = fn->decl; decl && decl->generic && decl->cls && decl->cls->generic &&
+  if (FunctionDecl *decl = fn->decl; decl && decl->generic && decl->cls() && decl->cls()->generic &&
                                      !checker_.lateClasses().hasClassExpr(decl->generic)) {
     const Type *ret = returnType(decl->generic->sym);
     fn->ret = ret ? checker_.typeParams().substitute(
-                        checker_.genericClassChecker().instanceType(decl->cls, ret),
+                        checker_.genericClassChecker().instanceType(decl->cls(), ret),
                         decl->generic->sym->typeParams, fn->typeParams)
                   : Type::error();
     return;
@@ -397,11 +398,11 @@ void ReturnInferrer::resolveParams(FuncSymbol *fn) {
   }
   fn->pendingParams = false;
   FunctionDecl *decl = fn->decl;
-  if (FunctionDecl *generic = decl->generic; generic && decl->cls && decl->cls->generic) {
+  if (FunctionDecl *generic = decl->generic; generic && decl->cls() && decl->cls()->generic) {
     resolveParams(generic->sym);
     auto sub = [&](const Type *t) {
       return t ? checker_.typeParams().substituteValue(
-                     checker_.genericClassChecker().instanceValueType(decl->cls, t),
+                     checker_.genericClassChecker().instanceValueType(decl->cls(), t),
                      generic->sym->typeParams, fn->typeParams)
                : nullptr;
     };
@@ -430,7 +431,7 @@ void ReturnInferrer::resolveParams(FuncSymbol *fn) {
     }
     ClassDecl *outerClass = checker_.currentClass_;
     if (!copy->isClosure()) {
-      checker_.currentClass_ = copy->cls;
+      checker_.currentClass_ = copy->cls();
     }
     checker_.pushScope();
     for (size_t i = 0; i < decl->params.size() && i < copy->params.size(); ++i) {
@@ -466,18 +467,23 @@ void ReturnInferrer::resolveParams(FuncSymbol *fn) {
 
 FunctionDecl *ReturnInferrer::freshCopy(const FunctionDecl *fn) {
   Lexer lexer(fn->source, checker_.diags_);
-  Parser parser(lexer, checker_.ctx_, checker_.diags_, fn->cls && fn->cls->library);
-  FunctionDecl *copy = fn->isArrow || ((fn->isExpression || fn->lifted) && !fn->cls)
+  Parser parser(lexer, checker_.ctx_, checker_.diags_, fn->cls() && fn->cls()->library);
+  FunctionDecl *copy = fn->isArrow || ((fn->isExpression || fn->lifted) && !fn->cls())
                            ? parser.parseFunctionExprCopy()
-                       : fn->cls ? parser.parseMethodCopy()
-                                 : parser.parseFunctionCopy();
+                       : fn->cls() ? parser.parseMethodCopy()
+                                   : parser.parseFunctionCopy();
   copy->isExpression = fn->isExpression;
   copy->isAsync = fn->isAsync;
   copy->lifted = fn->lifted;
-  copy->cls = fn->cls;
-  copy->isStatic = fn->isStatic;
-  copy->isConstructor = fn->isConstructor;
-  copy->access = fn->access;
+  if (const ClassMember *original = fn->member()) {
+    ClassMember copied{.cls = original->cls, .access = original->access};
+    if (fn->isStatic()) {
+      copied.kind = StaticMethod{};
+    } else if (fn->isConstructor()) {
+      copied.kind = Constructor{};
+    }
+    copy->role = std::move(copied);
+  }
   copy->sym = fn->sym;
   copy->name = fn->name;
   copy->typeArgs = fn->typeArgs;

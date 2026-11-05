@@ -100,7 +100,7 @@ Expr *StaticChecker::checkStaticMember(MemberExpr *member, ClassDecl *cls, const
     }
     return member;
   }
-  checker_.classMemberChecker().checkAccess(methods[0]->cls, methods[0]->access, name,
+  checker_.classMemberChecker().checkAccess(methods[0]->cls(), methods[0]->access(), name,
                                             member->loc());
   FuncSymbol *sym = checker_.overloadResolver().variantForType(methods, expected, member);
   if (!sym) {
@@ -184,7 +184,7 @@ Expr *StaticChecker::checkClassStaticCall(CallExpr *call, MemberExpr *member, Cl
     }
     return call;
   }
-  checker_.classMemberChecker().checkAccess(methods[0]->cls, methods[0]->access, member->name,
+  checker_.classMemberChecker().checkAccess(methods[0]->cls(), methods[0]->access(), member->name,
                                             member->loc());
   bool checked = false;
   std::vector<const Type *> bound;

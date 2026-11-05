@@ -94,7 +94,7 @@ llvm::Value *ClassLowerer::emitNew(NewExpr *expr) {
 
 void ClassLowerer::emitConstruct(llvm::Value *object, const ClassDecl *cls, const FuncSymbol *ctor,
                                  llvm::ArrayRef<llvm::Value *> args) {
-  if (ctor && ctor->decl->cls == cls) {
+  if (ctor && ctor->decl->cls() == cls) {
     std::vector<llvm::Value *> all{object};
     if (!cls->parent && cls->init) {
       lowering_.builder_.CreateCall(lowering_.classDescriptors().methodCode(cls->init), {object});
@@ -112,7 +112,7 @@ void ClassLowerer::emitConstruct(llvm::Value *object, const ClassDecl *cls, cons
 }
 
 llvm::Value *ClassLowerer::emitSuperCall(CallExpr *call) {
-  const ClassDecl *cls = lowering_.currentFn_->cls;
+  const ClassDecl *cls = lowering_.currentFn_->cls();
   std::vector<llvm::Value *> args = lowering_.exprLowerer().emitExprs(call->args);
   if (const FuncSymbol *sym = call->method) {
     for (size_t i = args.size(); i < sym->params.size(); ++i) {
@@ -147,7 +147,8 @@ llvm::Value *ClassLowerer::emitMethodCall(CallExpr *call) {
       call->virtualCall
           ? lowering_.builder_.CreateCall(
                 lowering_.closureLowerer().closureFnType(ClosureLowerer::functionTypeOf(method)),
-                lowering_.inheritLowerer().vtableEntry(self.value, method->decl->slot, false), args)
+                lowering_.inheritLowerer().vtableEntry(self.value, method->decl->slot(), false),
+                args)
           : lowering_.builder_.CreateCall(lowering_.classDescriptors().methodCode(method->decl),
                                           args);
   lowering_.refCounts().dropOperand(self);
@@ -159,7 +160,7 @@ llvm::Value *ClassLowerer::emitBoundMethod(MemberExpr *member) {
   llvm::Value *object = lowering_.exprLowerer().emitExpr(member->object);
   llvm::Value *info =
       member->virtualCall
-          ? lowering_.inheritLowerer().vtableEntry(object, member->method->decl->slot, true)
+          ? lowering_.inheritLowerer().vtableEntry(object, member->method->decl->slot(), true)
           : lowering_.closureLowerer().functionInfo(member->method->decl);
 
   return lowering_.closureLowerer().makeFunctionValue(info, object);

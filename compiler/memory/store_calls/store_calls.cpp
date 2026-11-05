@@ -39,14 +39,14 @@ StoreScanner::Sources StoreCalls::call(const CallExpr *c) {
   auto methodCall = [&](const FunctionDecl *fn, bool virtualCall) {
     auto one = [&](const FunctionDecl *m) {
       scanner_.storeStmts().bindArgs(m, args);
-      if (m->thisVar) {
-        scanner_.flowInto(scanner_.var(m->thisVar), receiver);
+      if (m->thisVar()) {
+        scanner_.flowInto(scanner_.var(m->thisVar()), receiver);
       } else {
         scanner_.store(receiver);
       }
       out.push_back(scanner_.result(m));
     };
-    if (fn->impl) {
+    if (fn->impl()) {
       scanner_.store(receiver);
       scanner_.storeStmts().bindArgs(nullptr, args);
       return;
@@ -61,24 +61,25 @@ StoreScanner::Sources StoreCalls::call(const CallExpr *c) {
     const FunctionDecl *ctor = c->method ? c->method->decl : nullptr;
     scanner_.storeStmts().bindArgs(ctor, args);
     StoreScanner::Sources self =
-        scanner_.current_ && scanner_.current_->thisVar
-            ? StoreScanner::Sources{scanner_.var(scanner_.current_->thisVar)}
+        scanner_.current_ && scanner_.current_->thisVar()
+            ? StoreScanner::Sources{scanner_.var(scanner_.current_->thisVar())}
             : StoreScanner::Sources{};
-    for (const ClassDecl *cls =
-             scanner_.current_ && scanner_.current_->cls ? scanner_.current_->cls->parent : nullptr;
+    for (const ClassDecl *cls = scanner_.current_ && scanner_.current_->cls()
+                                    ? scanner_.current_->cls()->parent
+                                    : nullptr;
          cls; cls = cls->parent) {
-      if (cls->init && cls->init->thisVar) {
-        scanner_.flowInto(scanner_.var(cls->init->thisVar), self);
+      if (cls->init && cls->init->thisVar()) {
+        scanner_.flowInto(scanner_.var(cls->init->thisVar()), self);
       }
       for (const FunctionDecl *k : cls->constructors) {
-        if (k->thisVar) {
-          scanner_.flowInto(scanner_.var(k->thisVar), self);
+        if (k->thisVar()) {
+          scanner_.flowInto(scanner_.var(k->thisVar()), self);
         }
       }
     }
-    if (scanner_.current_ && scanner_.current_->cls && scanner_.current_->cls->init &&
-        scanner_.current_->cls->init->thisVar) {
-      scanner_.flowInto(scanner_.var(scanner_.current_->cls->init->thisVar), self);
+    if (scanner_.current_ && scanner_.current_->cls() && scanner_.current_->cls()->init &&
+        scanner_.current_->cls()->init->thisVar()) {
+      scanner_.flowInto(scanner_.var(scanner_.current_->cls()->init->thisVar()), self);
     }
     return out;
   }

@@ -268,7 +268,7 @@ FunctionDecl *ReflectCallChecker::knownReflectMethod(ClassDecl *cls, llvm::Strin
     return nullptr;
   }
   for (FunctionDecl *fn : methods) {
-    if (!fn->sym || fn->isAbstract || fn->access != Access::Public ||
+    if (!fn->sym || fn->isAbstract() || fn->access() != Access::Public ||
         ClassLinks::soleImplementation(cls, fn) != fn) {
       return nullptr;
     }
@@ -309,7 +309,7 @@ const FunctionDecl *ReflectCallChecker::heldReflectMethod(const Expr *f) {
 Expr *ReflectCallChecker::directReflectApply(CallExpr *call, const FunctionDecl *fn) {
   Expr *self = stripImplicit(call->args[1]);
   const ClassDecl *cls = self->type->isOptional() ? nullptr : self->type->classDecl();
-  if (!cls || cls->literal || !cls->derivesFrom(fn->cls)) {
+  if (!cls || cls->literal || !cls->derivesFrom(fn->cls())) {
     return nullptr;
   }
   auto *list = dyn_cast<ArrayLitExpr>(call->args[2]);

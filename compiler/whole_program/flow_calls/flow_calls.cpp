@@ -53,10 +53,10 @@ void FlowCalls::functionValue(const FunctionDecl *fn) {
 Refs FlowCalls::receiverConversion(const Expr *at, const Type *from, const FunctionDecl *method,
                                    const Refs &refs, const VarSymbol *initializes,
                                    std::string role) {
-  if (!method || !method->cls || !method->cls->type || !from) {
+  if (!method || !method->cls() || !method->cls()->type || !from) {
     return refs;
   }
-  const Type *to = method->cls->type;
+  const Type *to = method->cls()->type;
   from = from->nonOptional();
   if (from == to || !from->isObject()) {
     return refs;
@@ -122,8 +122,8 @@ void FlowCalls::passThis(const Refs &receiver, const FunctionDecl *method) {
     if (!done.insert(fn).second) {
       continue;
     }
-    if (fn->thisVar) {
-      flows_.flow(receiver, flows_.var(fn->thisVar));
+    if (fn->thisVar()) {
+      flows_.flow(receiver, flows_.var(fn->thisVar()));
     }
     for (const FunctionDecl *o : overridersOf(fn)) {
       todo.push_back(o);
@@ -133,13 +133,13 @@ void FlowCalls::passThis(const Refs &receiver, const FunctionDecl *method) {
 
 std::vector<const FunctionDecl *> FlowCalls::overridersOf(const FunctionDecl *fn) {
   std::vector<const FunctionDecl *> out;
-  if (fn->cls) {
-    for (const ClassDecl *child : fn->cls->children) {
+  if (fn->cls()) {
+    for (const ClassDecl *child : fn->cls()->children) {
       for (std::vector<const ClassDecl *> todo{child}; !todo.empty();) {
         const ClassDecl *c = todo.back();
         todo.pop_back();
         for (const FunctionDecl *m : c->methods) {
-          if (m->overrides == fn) {
+          if (m->overrides() == fn) {
             out.push_back(m);
           }
         }
@@ -214,10 +214,10 @@ Refs FlowCalls::call(CallExpr *c) {
   if (target->takesThis() && (member || superCtor)) {
     const VarSymbol *initializes = nullptr;
     std::string role =
-        "as 'this' of '" + (target->cls ? target->cls->name.str() + "." : std::string()) +
-        (target->isConstructor ? std::string("constructor") : target->name.str()) + "'";
-    if (superCtor && target->isConstructor) {
-      initializes = target->thisVar;
+        "as 'this' of '" + (target->cls() ? target->cls()->name.str() + "." : std::string()) +
+        (target->isConstructor() ? std::string("constructor") : target->name.str()) + "'";
+    if (superCtor && target->isConstructor()) {
+      initializes = target->thisVar();
     }
     Refs self = receiverConversion(c, receiverType, target, receiver, initializes, role);
     passThis(self, target);

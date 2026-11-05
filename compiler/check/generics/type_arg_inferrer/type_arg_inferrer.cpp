@@ -190,9 +190,9 @@ Expr *TypeArgInferrer::checkGenericCall(CallExpr *call, FuncSymbol *generic, llv
     return call;
   }
   call->func = generic;
-  const ClassDecl *cls = generic->decl ? generic->decl->cls : nullptr;
+  const ClassDecl *cls = generic->decl ? generic->decl->cls() : nullptr;
   bool concrete = llvm::none_of(bound, [](const Type *t) { return mentionsParam(t); }) &&
-                  (!cls || generic->decl->isStatic || cls->isEmitted());
+                  (!cls || generic->decl->isStatic() || cls->isEmitted());
   bool copiesReturn = checker_.lateClasses().isTemplate(generic) && !generic->ret;
   if (concrete && !checker_.trial_ && !generic->inferring && (generic->ret || copiesReturn)) {
     if (FuncSymbol *instance = checker_.genericInstantiator().instantiate(

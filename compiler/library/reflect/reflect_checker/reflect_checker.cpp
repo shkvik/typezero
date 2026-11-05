@@ -111,7 +111,7 @@ ReflectChecker::ReflectChecker(Checker &checker) : checker_(checker) {}
 bool ReflectChecker::onlyChecked() const {
   return checker_.trial_ || llvm::any_of(checker_.functions_, [](const FunctionDecl *fn) {
            return (!fn->typeParams.empty() && !fn->isInstance) ||
-                  (fn->cls && (fn->cls->isGeneric() || fn->cls->checkOnly));
+                  (fn->cls() && (fn->cls()->isGeneric() || fn->cls()->checkOnly));
          });
 }
 

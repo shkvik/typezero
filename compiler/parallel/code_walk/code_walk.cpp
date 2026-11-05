@@ -50,8 +50,8 @@ int CodeWalk::discover(const FunctionDecl *fn) {
   info.syncGen = !fn->isAsync && fn->isGenerator;
   info.thisOwner = analysis_.thisOwnerOf(fn);
 
-  if (fn->cls) {
-    noteClass(fn->cls);
+  if (fn->cls()) {
+    noteClass(fn->cls());
   }
   info.segs.emplace_back();
   info.segs[0].loc = fn->loc();
@@ -354,8 +354,8 @@ void CodeWalk::stmt(const Stmt *s) {
       }
     }
     for (const FunctionDecl *method : cls->methods) {
-      if (method->impl) {
-        analysis_.callWalk.registerValue(method, method->impl->type);
+      if (method->impl()) {
+        analysis_.callWalk.registerValue(method, method->impl()->type);
       }
     }
     for (const Stmt *x : cls->decorations) {
@@ -423,7 +423,7 @@ void CodeWalk::iterate(const Expr *iterable, const Node *site) {
       const FunctionDecl *lib = analysis_.libraryEffects.libraryTarget(c);
       auto *m = dyn_cast<MemberExpr>(c->callee);
       if (m && c->method) {
-        analysis_.libraryEffects.libraryState(libraryClassName(lib->cls), lib->name,
+        analysis_.libraryEffects.libraryState(libraryClassName(lib->cls()), lib->name,
                                               analysis_.aliasAnalysis.receiverRef(m->object), true,
                                               at);
       }

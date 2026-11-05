@@ -109,9 +109,9 @@ void DebugInfo::beginFunction(llvm::Function *function, const FunctionDecl *fn) 
     return;
   }
   std::string name = fn->name.empty() ? "<anonymous>" : fn->name.str();
-  if (fn->cls && !fn->cls->literal) {
-    name = fn->isConstructor || fn == fn->cls->init ? "new " + fn->cls->name.str()
-                                                    : (fn->cls->name + "." + name).str();
+  if (fn->cls() && !fn->cls()->literal) {
+    name = fn->isConstructor() || fn == fn->cls()->init ? "new " + fn->cls()->name.str()
+                                                        : (fn->cls()->name + "." + name).str();
   }
   describe(function, name, fn->loc());
   owners_[function] = fn;
@@ -191,8 +191,8 @@ unsigned DebugInfo::argumentOf(const VarSymbol *var) const {
   if (!fn) {
     return 0;
   }
-  unsigned first = fn->thisVar ? 2 : 1;
-  if (var == fn->thisVar) {
+  unsigned first = fn->thisVar() ? 2 : 1;
+  if (var == fn->thisVar()) {
     return 1;
   }
   for (size_t i = 0; i < fn->params.size(); ++i) {
@@ -233,7 +233,7 @@ void DebugInfo::declare(const VarSymbol *var, llvm::Value *address) {
     argument = 0;
   }
   llvm::DINode::DIFlags flags =
-      var == (lowering_.currentFn_ ? lowering_.currentFn_->thisVar : nullptr)
+      var == (lowering_.currentFn_ ? lowering_.currentFn_->thisVar() : nullptr)
           ? llvm::DINode::FlagArtificial | llvm::DINode::FlagObjectPointer
           : llvm::DINode::FlagZero;
   llvm::DILocalVariable *variable =

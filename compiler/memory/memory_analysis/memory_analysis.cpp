@@ -17,23 +17,23 @@ namespace {
 
 bool letsThisGo(const ClassDecl *cls) {
   for (const FunctionDecl *fn : cls->constructors) {
-    if (fn->thisVar && CycleScanner::thisEscapes(fn->body, fn->thisVar)) {
+    if (fn->thisVar() && CycleScanner::thisEscapes(fn->body, fn->thisVar())) {
       return true;
     }
   }
-  if (cls->init && cls->init->thisVar &&
-      CycleScanner::thisEscapes(cls->init->body, cls->init->thisVar)) {
+  if (cls->init && cls->init->thisVar() &&
+      CycleScanner::thisEscapes(cls->init->body, cls->init->thisVar())) {
     return true;
   }
   for (const FunctionDecl *fn : cls->methods) {
-    if (!fn->isStatic && fn->thisVar && fn->body &&
-        CycleScanner::thisEscapes(fn->body, fn->thisVar)) {
+    if (!fn->isStatic() && fn->thisVar() && fn->body &&
+        CycleScanner::thisEscapes(fn->body, fn->thisVar())) {
       return true;
     }
   }
   for (const ClassField &f : cls->fields) {
-    if (f.method && f.method->thisVar &&
-        CycleScanner::thisEscapes(f.method->body, f.method->thisVar)) {
+    if (f.method && f.method->thisVar() &&
+        CycleScanner::thisEscapes(f.method->body, f.method->thisVar())) {
       return true;
     }
   }
@@ -169,7 +169,7 @@ void MemoryAnalysis::scanProgram(SourceFile &file, CycleScanner &scan) {
     }
     if (auto *cls = dyn_cast<ClassDecl>(item)) {
       for (const FunctionDecl *fn : cls->methods) {
-        if (fn->typeParams.empty() && (fn->isStatic ? !cls->generic : cls->isEmitted())) {
+        if (fn->typeParams.empty() && (fn->isStatic() ? !cls->generic : cls->isEmitted())) {
           scan.function(fn);
         }
       }
@@ -213,7 +213,7 @@ std::vector<OwnerScanner::BackRef> MemoryAnalysis::findBackRefs(SourceFile &file
     }
     if (auto *cls = dyn_cast<ClassDecl>(item)) {
       for (const FunctionDecl *fn : cls->methods) {
-        if (fn->typeParams.empty() && (fn->isStatic ? !cls->generic : cls->isEmitted())) {
+        if (fn->typeParams.empty() && (fn->isStatic() ? !cls->generic : cls->isEmitted())) {
           owners.function(fn);
         }
       }
@@ -306,7 +306,7 @@ void MemoryAnalysis::findUnstored(SourceFile &file) {
     }
     if (auto *cls = dyn_cast<ClassDecl>(item)) {
       for (const FunctionDecl *fn : cls->methods) {
-        if (fn->typeParams.empty() && (fn->isStatic ? !cls->generic : cls->isEmitted())) {
+        if (fn->typeParams.empty() && (fn->isStatic() ? !cls->generic : cls->isEmitted())) {
           scan.function(fn);
         }
       }
@@ -325,7 +325,7 @@ void MemoryAnalysis::findUnstored(SourceFile &file) {
       if (cls->reflectMethods) {
         for (const ClassDecl *c = cls; c; c = c->parent) {
           for (const FunctionDecl *fn : c->methods) {
-            if (!fn->isStatic) {
+            if (!fn->isStatic()) {
               scan.escapes(fn);
             }
           }

@@ -143,18 +143,18 @@ const char *SymbolText::statementEnd(const char *at, const char *end) {
 
 std::string SymbolText::function(const FunctionDecl &fn) {
   std::string text;
-  if (fn.cls) {
-    text += modifiers(fn.access, fn.isStatic);
+  if (fn.cls()) {
+    text += modifiers(fn.access(), fn.isStatic());
   }
   if (fn.isAsync) {
     text += "async ";
   }
-  if (!fn.cls) {
+  if (!fn.cls()) {
     text += fn.isGenerator ? "function* " : "function ";
   } else if (fn.isGenerator) {
     text += "*";
   }
-  text += fn.isConstructor ? std::string("constructor") : fn.name.str();
+  text += fn.isConstructor() ? std::string("constructor") : fn.name.str();
   if (!fn.typeParams.empty()) {
     text += "<";
     for (size_t i = 0; i < fn.typeParams.size(); ++i) {
@@ -182,7 +182,7 @@ std::string SymbolText::function(const FunctionDecl &fn) {
     text += ": " + typeName(type);
   }
   text += ")";
-  if (!fn.isConstructor && sym && sym->ret) {
+  if (!fn.isConstructor() && sym && sym->ret) {
     text += ": " + typeName(sym->ret);
   }
 

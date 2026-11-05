@@ -34,7 +34,7 @@ std::vector<FunctionDecl *> ClassDeclarer::methodsNamed(const ClassDecl *cls, ll
   for (const ClassDecl *c = cls; c; c = c->parent) {
     std::vector<FunctionDecl *> own;
     for (FunctionDecl *fn : (isStatic ? c->staticOwner() : c)->methods) {
-      if (fn->name == name && fn->isStatic == isStatic) {
+      if (fn->name == name && fn->isStatic() == isStatic) {
         own.push_back(fn);
       }
     }
@@ -91,7 +91,7 @@ void ClassDeclarer::resolveClass(ClassDecl *cls) {
       }
     }
     for (FunctionDecl *fn : cls->methods) {
-      if (fn->name == f.name && fn->isStatic == f.isStatic) {
+      if (fn->name == f.name && fn->isStatic() == f.isStatic) {
         checker_.diags_.error(fn->loc(), "duplicate member '" + f.name + "' in class '" +
                                              cls->name +
                                              "': a field and a method cannot share a name");
@@ -147,9 +147,13 @@ void ClassDeclarer::resolveClass(ClassDecl *cls) {
         !checker_.assignedFields_.contains(f.name) && (!type || type->isFunction())) {
       FunctionDecl *fn = fe->fn;
       fn->name = f.name;
-      fn->cls = cls;
-      fn->access = f.access;
-      fn->isOverride = f.isOverride;
+      if (ClassMember *member = fn->member()) {
+        member->cls = cls;
+        member->access = f.access;
+        member->isOverride = f.isOverride;
+      } else {
+        fn->role = ClassMember{.cls = cls, .access = f.access, .isOverride = f.isOverride};
+      }
       fn->isExpression = false;
       f.method = fn;
       f.resolved = nullptr;
@@ -229,15 +233,15 @@ void ClassDeclarer::declareMethods(ClassDecl *cls) {
   }
   for (FunctionDecl *fn : cls->methods) {
     checker_.functionChecker().declareFunction(fn, nullptr, false);
-    if (fn->isAbstract && !fn->returnType && cls->isGeneric()) {
+    if (fn->isAbstract() && !fn->returnType && cls->isGeneric()) {
       checker_.diags_.error(fn->loc(), "abstract method '" + fn->name + "' of generic class '" +
                                            cls->name + "' needs a return type, e.g. '): T'");
-    } else if (fn->isAbstract && !fn->returnType) {
+    } else if (fn->isAbstract() && !fn->returnType) {
       fn->sym->ret = nullptr;
     }
-    if (!fn->typeParams.empty() && (fn->isAbstract || fn->isOverride)) {
+    if (!fn->typeParams.empty() && (fn->isAbstract() || fn->isOverride())) {
       checker_.diags_.error(fn->loc(), std::string("a generic method cannot be ") +
-                                           (fn->isAbstract ? "abstract" : "an override") +
+                                           (fn->isAbstract() ? "abstract" : "an override") +
                                            ": each call runs a copy of it made for its types");
     }
   }
@@ -280,7 +284,7 @@ void ClassDeclarer::declareMethods(ClassDecl *cls) {
   }
   if (!sets.empty()) {
     auto *init = checker_.ctx_.make<FunctionDecl>(cls->loc(), "init");
-    init->cls = cls;
+    init->role = ClassMember{.cls = cls};
     init->body = checker_.ctx_.make<BlockStmt>(cls->loc());
     init->body->body = std::move(sets);
     checker_.functionChecker().declareFunction(init, nullptr, false);
@@ -291,8 +295,8 @@ void ClassDeclarer::declareMethods(ClassDecl *cls) {
   auto number = [](llvm::ArrayRef<FunctionDecl *> fns) {
     for (size_t i = 0; i < fns.size(); ++i) {
       for (size_t j = 0; j < i; ++j) {
-        if (fns[j]->name == fns[i]->name && fns[j]->isStatic == fns[i]->isStatic) {
-          fns[i]->variant = fns[j]->variant + 1;
+        if (fns[j]->name == fns[i]->name && fns[j]->isStatic() == fns[i]->isStatic()) {
+          fns[i]->member()->variant = fns[j]->variant() + 1;
         }
       }
     }
@@ -410,7 +414,7 @@ void ClassDeclarer::checkVariants(ClassDecl *cls) {
   auto check = [&](llvm::ArrayRef<FunctionDecl *> fns) {
     for (size_t i = 0; i < fns.size(); ++i) {
       for (size_t j = 0; j < i; ++j) {
-        if (fns[j]->name == fns[i]->name && fns[j]->isStatic == fns[i]->isStatic) {
+        if (fns[j]->name == fns[i]->name && fns[j]->isStatic() == fns[i]->isStatic()) {
           checkVariantPair(fns[j], fns[i]);
         }
       }
@@ -428,7 +432,7 @@ void ClassDeclarer::checkVariantPair(FunctionDecl *a, FunctionDecl *b) {
   if (llvm::is_contained(x->params, nullptr) || llvm::is_contained(y->params, nullptr)) {
     return;
   }
-  std::string what = a->isConstructor ? "the constructor" : "'" + a->name.str() + "'";
+  std::string what = a->isConstructor() ? "the constructor" : "'" + a->name.str() + "'";
   if (x->params == y->params && x->minArgs == y->minArgs && x->hasRest == y->hasRest) {
     if (x->ret && y->ret && x->ret != y->ret) {
       checker_.diags_.error(b->loc(), "variants of " + what +

@@ -200,7 +200,7 @@ Expr *StreamChecker::checkStreamCall(CallExpr *call, MemberExpr *member, ClassDe
     return nullptr;
   }
   std::vector<FunctionDecl *> methods = ClassDeclarer::methodsNamed(cls, name, false);
-  if (!methods.empty() && !methods[0]->cls->library) {
+  if (!methods.empty() && !methods[0]->cls()->library) {
     return nullptr;
   }
   const Type *receiver = member->object->type;

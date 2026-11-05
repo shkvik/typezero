@@ -111,7 +111,7 @@ std::unique_ptr<llvm::Module> ModuleBuilder::generate(SourceFile &file) {
       }
       if (!cls->generic) {
         for (FunctionDecl *fn : cls->methods) {
-          if (fn->isStatic && fn->typeParams.empty()) {
+          if (fn->isStatic() && fn->typeParams.empty()) {
             functions.push_back(fn);
           }
         }
@@ -223,7 +223,7 @@ void ModuleBuilder::declareGlobals(SourceFile &file) {
         }
       }
       for (FunctionDecl *fn : cls->methods) {
-        if (const VarSymbol *impl = fn->impl) {
+        if (const VarSymbol *impl = fn->impl()) {
           llvm::Constant *adapter =
               cast<llvm::Constant>(lowering_.closureLowerer().makeFunctionValue(
                   lowering_.decoratorLowerer().implAdapterInfo(fn),

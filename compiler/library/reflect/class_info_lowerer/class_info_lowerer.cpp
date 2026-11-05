@@ -488,7 +488,7 @@ llvm::Constant *ClassInfoLowerer::reflectAdapterInfo(const FunctionDecl *fn, con
       lowering_.builder_.CreateRet(result);
     }
   };
-  const ClassDecl *cls = fn->cls;
+  const ClassDecl *cls = fn->cls();
   llvm::BasicBlock *failBlock = llvm::BasicBlock::Create(lowering_.ctx_, "this.wrong", adapter);
   llvm::BasicBlock *testBlock = llvm::BasicBlock::Create(lowering_.ctx_, "this.test", adapter);
   llvm::BasicBlock *callBlock = llvm::BasicBlock::Create(lowering_.ctx_, "this.ok", adapter);
@@ -530,7 +530,7 @@ llvm::Constant *ClassInfoLowerer::reflectAdapterInfo(const FunctionDecl *fn, con
 std::vector<const FunctionDecl *> ClassInfoLowerer::reflectVariants(const ClassDecl *cls,
                                                                     llvm::StringRef name) {
   auto overrides = [](const FunctionDecl *fn, const FunctionDecl *base) {
-    for (const FunctionDecl *p = fn; p; p = p->overrides) {
+    for (const FunctionDecl *p = fn; p; p = p->overrides()) {
       if (p == base) {
         return true;
       }
@@ -547,7 +547,7 @@ std::vector<const FunctionDecl *> ClassInfoLowerer::reflectVariants(const ClassD
       }
     }
     for (const FunctionDecl *fn : own) {
-      if (fn->name == name && !fn->isStatic && !fn->isAbstract && fn->typeParams.empty() &&
+      if (fn->name == name && !fn->isStatic() && !fn->isAbstract() && fn->typeParams.empty() &&
           fn->sym && fn->sym->ret &&
           llvm::none_of(found, [&](const FunctionDecl *v) { return overrides(v, fn); })) {
         found.push_back(fn);

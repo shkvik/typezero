@@ -86,8 +86,8 @@ void CallResolver::resolve() {
                 continue;
               }
               for (const FunctionDecl *method : cls->methods) {
-                if (!method->isStatic && (rec.reflectNames.empty() ||
-                                          llvm::is_contained(rec.reflectNames, method->name))) {
+                if (!method->isStatic() && (rec.reflectNames.empty() ||
+                                            llvm::is_contained(rec.reflectNames, method->name))) {
                   analysis_.callWalk.addCallee(rec, method, rec.bySelf, true);
                 }
               }
@@ -95,7 +95,7 @@ void CallResolver::resolve() {
             }
             bool hidden = !cls->constructors.empty() &&
                           llvm::all_of(cls->constructors, [](const FunctionDecl *ctor) {
-                            return ctor->access != tz::Access::Public;
+                            return ctor->access() != tz::Access::Public;
                           });
             if (hidden) {
               continue;
@@ -163,7 +163,7 @@ void CallResolver::resolve() {
               continue;
             }
             for (const FunctionDecl *method : cls->methods) {
-              if (method->name == rec.byName && !method->isStatic) {
+              if (method->name == rec.byName && !method->isStatic()) {
                 analysis_.callWalk.addCallee(rec, method, rec.bySelf, true);
               }
             }

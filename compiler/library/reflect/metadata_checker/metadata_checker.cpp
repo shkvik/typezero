@@ -101,7 +101,7 @@ void MetadataChecker::checkBodyEarly(FunctionDecl *fn) {
     checker_.returnInferrer().inferReturnType(fn->sym);
     return;
   }
-  if (fn->cls) {
+  if (fn->cls()) {
     return;
   }
   Checker::BodyState saved = checker_.returnInferrer().enterBody(fn);

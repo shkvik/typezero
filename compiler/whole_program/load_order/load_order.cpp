@@ -71,14 +71,14 @@ const CallExpr *constructorCall(const Expr *expr,
 }
 
 std::string calleeName(const FunctionDecl *fn) {
-  if (!fn->cls) {
+  if (!fn->cls()) {
     return quotedName(fn->name);
   }
-  if (fn == fn->cls->init || fn->isConstructor) {
-    return "'new " + fn->cls->name.str() + "()'";
+  if (fn == fn->cls()->init || fn->isConstructor()) {
+    return "'new " + fn->cls()->name.str() + "()'";
   }
 
-  return "'" + fn->cls->name.str() + "." + fn->name.str() + "'";
+  return "'" + fn->cls()->name.str() + "." + fn->name.str() + "'";
 }
 
 }

@@ -89,7 +89,7 @@ Expr *ClassMemberChecker::checkClassMember(MemberExpr *member, const Type *expec
   const ClassField *field = ClassBases::findField(cls, name, &owner);
   if (field && !field->method) {
     checkAccess(owner, field->access, name, member->loc(), member->object);
-    if (viaThis && owner == checker_.initFn_->cls &&
+    if (viaThis && owner == checker_.initFn_->cls() &&
         !llvm::is_contained(checker_.flow_.setFields, name)) {
       checker_.diags_.error(member->loc(), "field '" + name + "' is read before it is set");
       return member;
@@ -128,8 +128,8 @@ Expr *ClassMemberChecker::checkClassMember(MemberExpr *member, const Type *expec
     }
     return member;
   }
-  checkAccess(methods[0]->cls, methods[0]->access, name, member->loc(), member->object);
-  if (methods[0]->cls->library && checker_.eventMaps().isEmitterClass(cls) &&
+  checkAccess(methods[0]->cls(), methods[0]->access(), name, member->loc(), member->object);
+  if (methods[0]->cls()->library && checker_.eventMaps().isEmitterClass(cls) &&
       !checker_.libraryCalls().inLibrary(member->loc()) && name != "eventNames") {
     checker_.emitterChecker().reportEmitterMethodValue(member);
 
@@ -206,12 +206,12 @@ const Type *ClassMemberChecker::checkFieldTarget(MemberExpr *member, bool compou
   }
   checkAccess(owner, field->access, name, member->loc(), member->object);
   bool viaThis = checker_.classChecker().isInitThis(member->object).isOk();
-  if (compound && viaThis && owner == checker_.initFn_->cls &&
+  if (compound && viaThis && owner == checker_.initFn_->cls() &&
       !llvm::is_contained(checker_.flow_.setFields, name)) {
     checker_.diags_.error(member->loc(), "field '" + name + "' is read before it is set");
     return Type::error();
   }
-  if (field->readonly && !(viaThis && owner == checker_.initFn_->cls)) {
+  if (field->readonly && !(viaThis && owner == checker_.initFn_->cls())) {
     checker_.diags_.error(member->loc(), "cannot assign to '" + name +
                                              "' because it is a read-only field of '" +
                                              type->name() + "'; only its constructor can set it");

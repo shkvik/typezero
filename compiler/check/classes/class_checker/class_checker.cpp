@@ -35,11 +35,11 @@ ClassChecker::ResultClassDeclared ClassChecker::checkClassStmt(ClassDecl *cls) {
   bool topLevel =
       this->checker.scopes_.size() == 1 && this->checker.functions_.empty() && cls->type;
   if (!topLevel) {
+    std::string message = ErrorTextClassStmt::nested(cls->name);
+
     return err(ClassCheckerCheckClassStmtError{
         .code = ClassCheckerCheckClassStmtErrorCode::NOT_TOP_LEVEL,
-        .message = "a class can be declared only at the top level of a file; here, "
-                   "make it with a class expression, 'const " +
-                   cls->name.str() + " = class { ... }'",
+        .message = message,
     });
   }
 
@@ -58,7 +58,7 @@ ClassChecker::ResultClassDeclared ClassChecker::checkClassStmt(ClassDecl *cls) {
 
 ClassChecker::ResultHasDecorators ClassChecker::hasDecorators(const ClassDecl *cls) {
   auto decorated = [](const FunctionDecl *fn) {
-    return !fn->decorators.empty() ||
+    return !fn->decorators().empty() ||
            llvm::any_of(fn->params, [](const Param &p) { return !p.decorators.empty(); });
   };
 
@@ -68,9 +68,11 @@ ClassChecker::ResultHasDecorators ClassChecker::hasDecorators(const ClassDecl *c
       llvm::any_of(cls->fields, [](const ClassField &f) { return !f.decorators.empty(); });
 
   if (!decoratedAnywhere) {
+    std::string message = ErrorTextDecorators::none(cls->name);
+
     return err(ClassCheckerHasDecoratorsError{
         .code = ClassCheckerHasDecoratorsErrorCode::NO_DECORATORS,
-        .message = "class '" + cls->name.str() + "' has no decorators",
+        .message = message,
     });
   }
 
@@ -82,24 +84,19 @@ ClassChecker::ResultFieldHasValue ClassChecker::fieldStartValue(const ClassDecl 
   bool needsValue = !field.isStatic && !field.method && !field.optional && !field.init &&
                     !field.definite && field.resolved && !field.resolved->isError();
   if (needsValue && ClassLinks::constructorsOf(cls).empty()) {
-    std::string name = field.name.str();
-    std::string type = field.resolved->name().str();
+    std::string message = ErrorTextStartValue::noStart(field.name, field.resolved->name());
+
     return err(ClassCheckerFieldStartValueError{
         .code = ClassCheckerFieldStartValueErrorCode::NO_START_VALUE,
-        .message = "field '" + name + "' has no value to start with: '" + type +
-                   "' has no empty value, like \"\" or 0; give it one here, e.g. '" + name + ": " +
-                   type + " = ...', set it in a constructor, or make it optional: '" + name +
-                   "?: " + type + "'",
+        .message = message,
     });
   }
   if (needsValue) {
-    std::string name = field.name.str();
-    std::string type = field.resolved->name().str();
+    std::string message = ErrorTextStartValue::neverSet(field.name, field.resolved->name());
+
     return err(ClassCheckerFieldStartValueError{
         .code = ClassCheckerFieldStartValueErrorCode::NEVER_SET,
-        .message = "field '" + name + "' never gets a value: give it one here, e.g. '" + name +
-                   ": " + type + " = ...', set it in a constructor, or make it optional: '" + name +
-                   "?: " + type + "'",
+        .message = message,
     });
   }
 
@@ -108,7 +105,7 @@ ClassChecker::ResultFieldHasValue ClassChecker::fieldStartValue(const ClassDecl 
 
 ClassChecker::ResultReturnMatches ClassChecker::overrideReturn(const ClassDecl *cls,
                                                                const FunctionDecl *method) {
-  const FunctionDecl *overridden = method->overrides;
+  const FunctionDecl *overridden = method->overrides();
   const Type *mine = overridden ? this->checker.returnInferrer().returnType(method->sym) : nullptr;
   const Type *theirs =
       overridden ? this->checker.returnInferrer().returnType(overridden->sym) : nullptr;
@@ -119,13 +116,12 @@ ClassChecker::ResultReturnMatches ClassChecker::overrideReturn(const ClassDecl *
                         TypeRelations::isImplicitlyConvertible(mine, theirs);
 
   if (known && mine != theirs && !narrowerObject) {
+    std::string message = ErrorTextOverride::otherType(method->name, mine->name(), cls->name,
+                                                       theirs->name(), overridden->cls()->name);
+
     return err(ClassCheckerOverrideReturnError{
         .code = ClassCheckerOverrideReturnErrorCode::RETURNS_OTHER_TYPE,
-        .message = "'" + method->name.str() + "' returns '" + mine->name().str() + "' in '" +
-                   cls->name.str() + "', and '" + theirs->name().str() + "' in '" +
-                   overridden->cls->name.str() +
-                   "', which it overrides; an override returns what the method it "
-                   "overrides returns",
+        .message = message,
     });
   }
 
@@ -170,7 +166,7 @@ ClassChecker::ResultBodiesChecked ClassChecker::checkClassBodies(ClassDecl *cls)
     if (!fn->sym->ret) {
       this->checker.returnInferrer().inferReturnType(fn->sym);
     }
-    if (fn->checked || fn->isAbstract) {
+    if (fn->checked || fn->isAbstract()) {
       continue;
     }
     this->checker.flow_ = Checker::Flow();
@@ -197,21 +193,25 @@ ClassChecker::ResultBodiesChecked ClassChecker::checkClassBodies(ClassDecl *cls)
 
 ClassChecker::ResultNewThisSymbol ClassChecker::declareThis(FunctionDecl *fn) {
   if (!fn->takesThis()) {
+    std::string message = ErrorTextDeclareThis::notMethod(fn->name);
+
     return err(ClassCheckerDeclareThisError{
         .code = ClassCheckerDeclareThisErrorCode::NOT_A_METHOD,
-        .message = "internal error: 'this' is declared for '" + fn->name.str() +
-                   "', which is not a method",
+        .message = message,
     });
   }
 
   VarSymbol *self = this->checker.ctx_.newVar();
   self->name = "this";
   self->loc = fn->loc();
-  self->type = fn->cls->type;
+  self->type = fn->cls()->type;
   self->isConst = true;
   self->owner = fn;
   self->declSeq = ++this->checker.seq_;
-  fn->thisVar = self;
+  fn->member()->kind.match([&](InstanceMethod &method) { method.thisVar = self; },
+                           [](StaticMethod &) {},
+                           [&](Constructor &constructor) { constructor.thisVar = self; },
+                           [&](AbstractMethod &method) { method.thisVar = self; });
 
   return ok(self);
 }
@@ -228,15 +228,19 @@ ClassChecker::ResultInitThisFound ClassChecker::isInitThis(const Expr *expr) con
   bool inConstructor =
       this->checker.initThis_ && this->checker.currentDecl() == this->checker.initFn_;
   if (!inConstructor) {
+    std::string message = ErrorTextInitThis::outside();
+
     return err(ClassCheckerIsInitThisError{
         .code = ClassCheckerIsInitThisErrorCode::NOT_IN_CONSTRUCTOR,
-        .message = "the code is not in the body of the constructor being checked",
+        .message = message,
     });
   }
   if (!name || name->var != this->checker.initThis_) {
+    std::string message = ErrorTextInitThis::notThis();
+
     return err(ClassCheckerIsInitThisError{
         .code = ClassCheckerIsInitThisErrorCode::NOT_THIS,
-        .message = "the expression is not the 'this' of the constructor",
+        .message = message,
     });
   }
 
@@ -246,15 +250,19 @@ ClassChecker::ResultInitThisFound ClassChecker::isInitThis(const Expr *expr) con
 ClassChecker::ResultObjectIsReady ClassChecker::thisReady(const Checker::Flow &flow) const {
   ResultFieldUnsetYet unset = firstUnset(flow);
   if (flow.beforeSuper) {
+    std::string message = ErrorTextThisReady::noSuper();
+
     return err(ClassCheckerThisReadyError{
         .code = ClassCheckerThisReadyErrorCode::BEFORE_SUPER,
-        .message = "'super(...)' is not called yet",
+        .message = message,
     });
   }
   if (unset.isOk()) {
+    std::string message = ErrorTextThisReady::unset(unset.value());
+
     return err(ClassCheckerThisReadyError{
         .code = ClassCheckerThisReadyErrorCode::FIELD_NOT_SET,
-        .message = "field '" + unset.value() + "' is not set yet",
+        .message = message,
     });
   }
 
@@ -263,20 +271,24 @@ ClassChecker::ResultObjectIsReady ClassChecker::thisReady(const Checker::Flow &f
 
 ClassChecker::ResultFieldUnsetYet ClassChecker::firstUnset(const Checker::Flow &flow) const {
   if (!this->checker.initFn_) {
+    std::string message = ErrorTextFirstUnset::outside();
+
     return err(ClassCheckerFirstUnsetError{
         .code = ClassCheckerFirstUnsetErrorCode::NOT_IN_CONSTRUCTOR,
-        .message = "the code is not in a constructor",
+        .message = message,
     });
   }
 
-  const std::vector<ClassField> &fields = this->checker.initFn_->cls->fields;
+  const std::vector<ClassField> &fields = this->checker.initFn_->cls()->fields;
   auto unset = llvm::find_if(fields, [&](const ClassField &f) {
     return !f.isStatic && !f.method && !f.optional && !llvm::is_contained(flow.setFields, f.name);
   });
   if (unset == fields.end()) {
+    std::string message = ErrorTextFirstUnset::allSet(this->checker.initFn_->cls()->name);
+
     return err(ClassCheckerFirstUnsetError{
         .code = ClassCheckerFirstUnsetErrorCode::ALL_FIELDS_SET,
-        .message = "every field of '" + this->checker.initFn_->cls->name.str() + "' is set",
+        .message = message,
     });
   }
 
@@ -286,13 +298,12 @@ ClassChecker::ResultFieldUnsetYet ClassChecker::firstUnset(const Checker::Flow &
 ClassChecker::ResultEveryFieldSet ClassChecker::checkFieldsSet() const {
   ResultFieldUnsetYet unset = firstUnset(this->checker.flow_);
   if (!this->checker.flow_.unreachable && unset.isOk()) {
+    std::string message =
+        ErrorTextFieldsSet::pathUnset(this->checker.initFn_->cls()->name, unset.value());
+
     return err(ClassCheckerCheckFieldsSetError{
         .code = ClassCheckerCheckFieldsSetErrorCode::FIELD_NOT_SET_ON_EVERY_PATH,
-        .message = "the constructor of '" + this->checker.initFn_->cls->name.str() +
-                   "' does not set field '" + unset.value() +
-                   "' on every path; set it, give it a value where it is declared, or "
-                   "make it optional: '" +
-                   unset.value() + "?: T'",
+        .message = message,
     });
   }
 
@@ -303,35 +314,37 @@ ClassChecker::ResultThisComesFrom ClassChecker::thisOf(const FunctionDecl *curre
   std::string member = this->checker.thisMember_.empty() ? "x" : this->checker.thisMember_.str();
   const FunctionDecl *source = current ? current->thisSource() : nullptr;
   if (!source && this->checker.staticInit_ && this->checker.currentClass_) {
+    std::string message = ErrorTextThisOf::inField(this->checker.currentClass_->name, member);
+
     return err(ClassCheckerThisOfError{
         .code = ClassCheckerThisOfErrorCode::IN_STATIC_FIELD,
-        .message = "in a static field 'this' would be the class itself; use the "
-                   "class's name: '" +
-                   this->checker.currentClass_->name.str() + "." + member + "'",
+        .message = message,
     });
   }
   if (!source) {
+    std::string message = ErrorTextThisOf::outside();
+
     return err(ClassCheckerThisOfError{
         .code = ClassCheckerThisOfErrorCode::OUTSIDE_METHOD,
-        .message = "'this' is used outside of a method; it exists in the methods "
-                   "of classes and object literals",
+        .message = message,
     });
   }
 
   bool hasThis = source->takesThis() || source->hasThisParam();
-  if (!hasThis && source->cls && source->isStatic) {
+  if (!hasThis && source->cls() && source->isStatic()) {
+    std::string message = ErrorTextThisOf::inStatic(source->cls()->name, member);
+
     return err(ClassCheckerThisOfError{
         .code = ClassCheckerThisOfErrorCode::IN_STATIC_METHOD,
-        .message = "in a static method 'this' would be the class itself; use the "
-                   "class's name: '" +
-                   source->cls->name.str() + "." + member + "'",
+        .message = message,
     });
   }
   if (!hasThis) {
+    std::string message = ErrorTextThisOf::inFunction();
+
     return err(ClassCheckerThisOfError{
         .code = ClassCheckerThisOfErrorCode::IN_PLAIN_FUNCTION,
-        .message = "a 'function' has no 'this' of its own; use an arrow function, "
-                   "which sees the 'this' of the method around it",
+        .message = message,
     });
   }
 
@@ -343,29 +356,30 @@ ClassChecker::ResultThisReadiness ClassChecker::readyThis(VarSymbol *var) const 
   bool inConstructor = inInit && this->checker.currentDecl() == this->checker.initFn_;
   bool inClosure = inInit && this->checker.currentDecl() != this->checker.initFn_;
   if (inClosure && !this->checker.closureThisReady_) {
+    std::string message = ErrorTextReadyThis::inClosure();
+
     return err(ClassCheckerReadyThisError{
         .code = ClassCheckerReadyThisErrorCode::IN_CLOSURE_BEFORE_FIELDS_SET,
-        .message = "this function uses 'this', and it is created before every field "
-                   "is set; create it after the constructor sets them",
+        .message = message,
     });
   }
   if (inConstructor && this->checker.flow_.beforeSuper) {
+    std::string message = ErrorTextReadyThis::noSuper(this->checker.initFn_->cls()->parent->name);
+
     return err(ClassCheckerReadyThisError{
         .code = ClassCheckerReadyThisErrorCode::BEFORE_SUPER,
-        .message = "'this' cannot be used before 'super(...)': the object exists once "
-                   "the constructor of '" +
-                   this->checker.initFn_->cls->parent->name.str() + "' has run",
+        .message = message,
     });
   }
 
   bool fieldsMatter = inConstructor && this->checker.thisMember_.empty();
   ResultFieldUnsetYet unset = firstUnset(this->checker.flow_);
   if (fieldsMatter && unset.isOk()) {
+    std::string message = ErrorTextReadyThis::unset(unset.value());
+
     return err(ClassCheckerReadyThisError{
         .code = ClassCheckerReadyThisErrorCode::BEFORE_FIELDS_SET,
-        .message = "'this' is used before every field is set: field '" + unset.value() +
-                   "' is not set yet; until then 'this' can only set fields "
-                   "and read the ones set",
+        .message = message,
     });
   }
 
@@ -383,12 +397,13 @@ ClassChecker::ResultThisReference ClassChecker::checkThis(NameExpr *name) {
   }
 
   const FunctionDecl *source = found.value();
-  VarSymbol *var = source->takesThis() ? source->thisVar : source->params[0].sym;
+  VarSymbol *var = source->takesThis() ? source->thisVar() : source->params[0].sym;
   if (!var) {
+    std::string message = ErrorTextThis::undeclared(source->name);
+
     return err(ClassCheckerCheckThisError{
         .code = ClassCheckerCheckThisErrorCode::THIS_NOT_DECLARED,
-        .message = "internal error: 'this' of '" + source->name.str() +
-                   "' is used before the method is checked",
+        .message = message,
     });
   }
 

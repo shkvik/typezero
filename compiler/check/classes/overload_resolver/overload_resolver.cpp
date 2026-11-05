@@ -185,8 +185,9 @@ FuncSymbol *OverloadResolver::chooseVariant(llvm::ArrayRef<FunctionDecl *> varia
     return variants[0]->sym;
   }
   const FunctionDecl *first = variants[0];
-  std::string what = first->isConstructor ? "the constructor of '" + first->cls->name.str() + "'"
-                                          : "'" + first->name.str() + "'";
+  std::string what = first->isConstructor()
+                         ? "the constructor of '" + first->cls()->name.str() + "'"
+                         : "'" + first->name.str() + "'";
   for (FunctionDecl *v : variants) {
     checker_.returnInferrer().resolveParams(v->sym);
   }
@@ -359,9 +360,9 @@ Expr *OverloadResolver::callGenericVariant(CallExpr *call, FuncSymbol *sym,
   call->type = ret ? checker_.typeParams().substitute(ret, typeParams, bound) : Type::error();
   checker_.instanceLoc_ = outerLoc;
   FuncSymbol *callee = sym;
-  const ClassDecl *cls = sym->decl->cls;
+  const ClassDecl *cls = sym->decl->cls();
   if (!checker_.trial_ && !sym->inferring && sym->ret &&
-      (!cls || sym->decl->isStatic || cls->isEmitted())) {
+      (!cls || sym->decl->isStatic() || cls->isEmitted())) {
     if (FuncSymbol *instance = checker_.genericInstantiator().instantiate(sym, bound, loc)) {
       callee = instance;
     }

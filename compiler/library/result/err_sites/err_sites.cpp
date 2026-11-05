@@ -37,11 +37,11 @@ std::string ErrSites::functionName() const {
   if (!fn) {
     return "";
   }
-  if (fn->cls && !fn->cls->literal) {
-    if (fn->isConstructor || fn == fn->cls->init) {
-      return "new " + fn->cls->name.str();
+  if (fn->cls() && !fn->cls()->literal) {
+    if (fn->isConstructor() || fn == fn->cls()->init) {
+      return "new " + fn->cls()->name.str();
     }
-    return (fn->cls->name + "." + fn->name).str();
+    return (fn->cls()->name + "." + fn->name).str();
   }
 
   return fn->name.str();

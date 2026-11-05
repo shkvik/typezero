@@ -33,10 +33,10 @@ bool takesParams(const Type *fnType, const FuncSymbol *sym) {
 }
 
 bool isArrowMethod(const FunctionDecl *fn) {
-  if (!fn->cls) {
+  if (!fn->cls()) {
     return false;
   }
-  for (const ClassField &f : fn->cls->fields) {
+  for (const ClassField &f : fn->cls()->fields) {
     if (f.method == fn) {
       return true;
     }
@@ -67,7 +67,7 @@ void InheritChecker::checkAbstract(ClassDecl *cls) {
     return;
   }
   for (FunctionDecl *fn : ClassLinks::ownMethods(cls)) {
-    if (fn->isAbstract && !cls->isAbstract) {
+    if (fn->isAbstract() && !cls->isAbstract) {
       checker_.diags_.error(fn->loc(), "abstract method '" + fn->name +
                                            "' needs an abstract class: '" + cls->name +
                                            "' can be created with 'new', and the method would "
@@ -86,12 +86,12 @@ void InheritChecker::checkAbstract(ClassDecl *cls) {
     for (const ClassDecl *c = cls; c; c = c->parent) {
       FunctionDecl *found = nullptr;
       for (FunctionDecl *fn : ClassLinks::ownMethods(c)) {
-        if (fn->slot == int(slot)) {
+        if (fn->slot() == int(slot)) {
           found = fn;
         }
       }
       if (found) {
-        if (found->cls != cls) {
+        if (found->cls() != cls) {
           missing.push_back(found);
         }
         break;
@@ -101,7 +101,7 @@ void InheritChecker::checkAbstract(ClassDecl *cls) {
   for (FunctionDecl *fn : missing) {
     checker_.diags_.error(cls->loc(),
                           "class '" + cls->name + "' does not implement the abstract method " +
-                              variantText(fn) + " of '" + fn->cls->name +
+                              variantText(fn) + " of '" + fn->cls()->name +
                               "'; implement it, or make '" + cls->name + "' abstract too");
   }
 }
@@ -214,14 +214,14 @@ Expr *InheritChecker::checkSuperCall(CallExpr *call) {
     }
   };
   FunctionDecl *ctor = checker_.currentDecl();
-  if (!ctor || !ctor->isConstructor || !ctor->cls) {
+  if (!ctor || !ctor->isConstructor() || !ctor->cls()) {
     checker_.diags_.error(call->loc(),
                           "'super(...)' can be called only in the constructor of a class that "
                           "extends another");
     checkArgsLoosely();
     return call;
   }
-  ClassDecl *cls = ctor->cls;
+  ClassDecl *cls = ctor->cls();
   if (!cls->parent) {
     if (!cls->base) {
       checker_.diags_.error(call->loc(), "'super(...)' calls the constructor of the class that '" +
@@ -258,7 +258,7 @@ Expr *InheritChecker::checkSuperCall(CallExpr *call) {
     if (FuncSymbol *sym = checker_.overloadResolver().chooseVariant(ctors, call->args, call->spread,
                                                                     call->loc(), checked)) {
       const FunctionDecl *chosen = sym->decl ? sym->decl : ctors[0];
-      checker_.classMemberChecker().checkAccess(chosen->cls, chosen->access, "constructor",
+      checker_.classMemberChecker().checkAccess(chosen->cls(), chosen->access(), "constructor",
                                                 call->loc());
       checker_.returnInferrer().resolveParams(sym);
       call->method = sym;
@@ -292,13 +292,13 @@ Expr *InheritChecker::checkSuperMethodCall(CallExpr *call, MemberExpr *member) {
     if (fn->isArrow) {
       continue;
     }
-    if (fn->takesThis() && !fn->cls->literal) {
+    if (fn->takesThis() && !fn->cls()->literal) {
       method = fn;
     }
     break;
   }
-  if (!method || !method->cls->parent) {
-    if (!method || !method->cls->base) {
+  if (!method || !method->cls()->parent) {
+    if (!method || !method->cls()->base) {
       checker_.diags_.error(member->object->loc(),
                             "'super' is the class that the class of the method "
                             "extends; it exists in the methods of a class that "
@@ -307,7 +307,7 @@ Expr *InheritChecker::checkSuperMethodCall(CallExpr *call, MemberExpr *member) {
     checkArgsLoosely();
     return call;
   }
-  ClassDecl *parent = method->cls->parent;
+  ClassDecl *parent = method->cls()->parent;
   auto *self = checker_.ctx_.make<NameExpr>(member->object->loc(), "this");
   checker_.thisMember_ = member->name;
   ClassChecker::ResultThisReference reference = checker_.classChecker().checkThis(self);
@@ -341,7 +341,7 @@ Expr *InheritChecker::checkSuperMethodCall(CallExpr *call, MemberExpr *member) {
     checkArgsLoosely();
     return call;
   }
-  checker_.classMemberChecker().checkAccess(methods[0]->cls, methods[0]->access, member->name,
+  checker_.classMemberChecker().checkAccess(methods[0]->cls(), methods[0]->access(), member->name,
                                             member->loc());
   if (checker_.eventMaps().isEmitterClass(parent)) {
     if (Expr *checked = checker_.emitterChecker().checkEmitterCall(call, member, parent, true)) {
@@ -355,9 +355,9 @@ Expr *InheritChecker::checkSuperMethodCall(CallExpr *call, MemberExpr *member) {
   if (!sym) {
     return call;
   }
-  if (sym->decl->isAbstract) {
+  if (sym->decl->isAbstract()) {
     checker_.diags_.error(member->loc(), "'" + member->name + "' is abstract in '" +
-                                             sym->decl->cls->name + "': it has no body to call");
+                                             sym->decl->cls()->name + "': it has no body to call");
     checkArgsLoosely();
     return call;
   }

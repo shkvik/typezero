@@ -177,8 +177,8 @@ void FlowStmts::stmt(Stmt *s) {
 
 const VarSymbol *FlowStmts::currentThis() const {
   for (auto it = flows_.functions_.rbegin(); it != flows_.functions_.rend(); ++it) {
-    if ((*it)->thisVar) {
-      return (*it)->thisVar;
+    if ((*it)->thisVar()) {
+      return (*it)->thisVar();
     }
   }
 

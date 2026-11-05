@@ -91,7 +91,7 @@ Expr *MethodCallChecker::checkMethodCall(CallExpr *call, MemberExpr *member, con
     return call;
   }
   if (methods.size() == 1) {
-    checker_.classMemberChecker().checkAccess(methods[0]->cls, methods[0]->access, name,
+    checker_.classMemberChecker().checkAccess(methods[0]->cls(), methods[0]->access(), name,
                                               member->loc(), member->object);
   }
   if (checker_.classChecker().isInitThis(member->object).isOk() && !checker_.flow_.beforeSuper &&
@@ -109,7 +109,7 @@ Expr *MethodCallChecker::checkMethodCall(CallExpr *call, MemberExpr *member, con
     return call;
   }
   if (methods.size() > 1 && sym->decl) {
-    checker_.classMemberChecker().checkAccess(sym->decl->cls, sym->decl->access, name,
+    checker_.classMemberChecker().checkAccess(sym->decl->cls(), sym->decl->access(), name,
                                               member->loc(), member->object);
   }
   checker_.returnInferrer().resolveParams(sym);
@@ -196,7 +196,7 @@ Expr *MethodCallChecker::checkClassNew(NewExpr *expr, ClassDecl *cls, const Type
       return expr;
     }
     const FunctionDecl *chosen = sym->decl ? sym->decl : ctors[0];
-    checker_.classMemberChecker().checkAccess(chosen->cls, chosen->access, "constructor",
+    checker_.classMemberChecker().checkAccess(chosen->cls(), chosen->access(), "constructor",
                                               expr->loc());
     checker_.returnInferrer().resolveParams(sym);
     call->func = sym;

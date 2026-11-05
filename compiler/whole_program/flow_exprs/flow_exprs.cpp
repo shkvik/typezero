@@ -79,8 +79,8 @@ Refs FlowExprs::exprRefs(Expr *e) {
     if (lit->cls) {
       for (FunctionDecl *fn : lit->cls->methods) {
         flows_.flowStmts().function(fn);
-        if (fn->thisVar) {
-          flows_.flow(out, flows_.var(fn->thisVar));
+        if (fn->thisVar()) {
+          flows_.flow(out, flows_.var(fn->thisVar()));
         }
       }
     }
@@ -164,13 +164,13 @@ Refs FlowExprs::exprRefs(Expr *e) {
       return out;
     }
     flows_.flowCalls().passArguments(ctor, target, args);
-    if (target->thisVar) {
-      out.push_back({flows_.var(target->thisVar), 0, 0});
-      if (n->cls && target->cls && target->cls != n->cls) {
+    if (target->thisVar()) {
+      out.push_back({flows_.var(target->thisVar()), 0, 0});
+      if (n->cls && target->cls() && target->cls() != n->cls) {
         flows_.flowCalls().passThis(
-            flows_.flowCalls().receiverConversion(n, n->cls->type, target, {}, target->thisVar,
+            flows_.flowCalls().receiverConversion(n, n->cls->type, target, {}, target->thisVar(),
                                                   "as 'this' of the constructor of '" +
-                                                      target->cls->name.str() + "'"),
+                                                      target->cls()->name.str() + "'"),
             target);
       }
     }

@@ -42,7 +42,7 @@ void CallCycles::findCycles(
     collectMemberCalls(nodes[i]->body, members);
     for (const auto &member : members) {
       for (size_t j = 0; j < nodes.size(); ++j) {
-        if (nodes[j]->cls && nodes[j]->name == member.getKey()) {
+        if (nodes[j]->cls() && nodes[j]->name == member.getKey()) {
           calls[i].push_back(j);
         }
       }

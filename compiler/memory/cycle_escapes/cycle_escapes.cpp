@@ -96,10 +96,11 @@ bool CycleEscapes::constructionEscapes(const ClassDecl *cls) {
   }
   bool escapes = cls->parent && constructionEscapes(cls->parent);
   for (const FunctionDecl *ctor : cls->constructors) {
-    escapes = escapes || (ctor->thisVar && CycleScanner::thisEscapes(ctor->body, ctor->thisVar));
+    escapes =
+        escapes || (ctor->thisVar() && CycleScanner::thisEscapes(ctor->body, ctor->thisVar()));
   }
-  if (cls->init && cls->init->thisVar) {
-    escapes = escapes || CycleScanner::thisEscapes(cls->init->body, cls->init->thisVar);
+  if (cls->init && cls->init->thisVar()) {
+    escapes = escapes || CycleScanner::thisEscapes(cls->init->body, cls->init->thisVar());
   }
   scanner_.escapes_[cls] = escapes;
 

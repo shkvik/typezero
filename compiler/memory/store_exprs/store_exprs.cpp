@@ -73,8 +73,8 @@ StoreScanner::Sources StoreExprs::expr(const Expr *e) {
     if (lit->cls) {
       for (const FunctionDecl *fn : lit->cls->methods) {
         scanner_.function(fn);
-        if (fn->thisVar) {
-          scanner_.flowInto(scanner_.var(fn->thisVar), out);
+        if (fn->thisVar()) {
+          scanner_.flowInto(scanner_.var(fn->thisVar()), out);
         }
       }
       if (lit->cls->group) {
@@ -159,12 +159,12 @@ StoreScanner::Sources StoreExprs::expr(const Expr *e) {
           create->ctor && create->ctor->func ? create->ctor->func->decl : nullptr;
       scanner_.storeStmts().bindArgs(ctor, args);
       for (const ClassDecl *c = cls; c; c = c->parent) {
-        if (c->init && c->init->thisVar) {
-          scanner_.flowInto(scanner_.var(c->init->thisVar), out);
+        if (c->init && c->init->thisVar()) {
+          scanner_.flowInto(scanner_.var(c->init->thisVar()), out);
         }
         for (const FunctionDecl *k : c->constructors) {
-          if (k->thisVar) {
-            scanner_.flowInto(scanner_.var(k->thisVar), out);
+          if (k->thisVar()) {
+            scanner_.flowInto(scanner_.var(k->thisVar()), out);
           }
         }
       }
