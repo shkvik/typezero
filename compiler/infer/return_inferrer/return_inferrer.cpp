@@ -423,7 +423,10 @@ void ReturnInferrer::resolveParams(FuncSymbol *fn) {
     FunctionDecl *copy = freshCopy(decl);
     checker_.functions_.push_back(copy);
     if (copy->takesThis()) {
-      checker_.classChecker().declareThis(copy);
+      ClassChecker::ResultNewThisSymbol declared = checker_.classChecker().declareThis(copy);
+      if (declared.isErr()) {
+        checker_.diags_.error(copy->loc(), declared.error().message);
+      }
     }
     ClassDecl *outerClass = checker_.currentClass_;
     if (!copy->isClosure()) {

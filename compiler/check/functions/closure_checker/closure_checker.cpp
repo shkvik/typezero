@@ -218,7 +218,7 @@ Expr *ClosureChecker::checkFunctionExpr(FunctionExpr *fe, const Checker::Signatu
   }
   bool outerReady = checker_.closureThisReady_;
   if (checker_.initFn_ && checker_.currentDecl() == checker_.initFn_) {
-    checker_.closureThisReady_ = checker_.classChecker().thisReady(checker_.flow_);
+    checker_.closureThisReady_ = checker_.classChecker().thisReady(checker_.flow_).isOk();
   }
   checkClosureBody(fn);
   checker_.closureThisReady_ = outerReady;

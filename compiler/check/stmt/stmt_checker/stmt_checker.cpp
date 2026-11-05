@@ -40,9 +40,14 @@ void StmtChecker::checkStmt(Stmt *stmt) {
   case Stmt::Kind::TypeAlias:
   case Stmt::Kind::Enum:
     break;
-  case Stmt::Kind::Class:
-    checker_.classChecker().checkClassStmt(cast<ClassDecl>(stmt));
+  case Stmt::Kind::Class: {
+    auto *cls = cast<ClassDecl>(stmt);
+    ClassChecker::ResultClassDeclared declared = checker_.classChecker().checkClassStmt(cls);
+    if (declared.isErr()) {
+      checker_.diags_.error(cls->loc(), declared.error().message);
+    }
     break;
+  }
   case Stmt::Kind::Function:
     if (!cast<FunctionDecl>(stmt)->group) {
       checker_.diags_.error(stmt->loc(),

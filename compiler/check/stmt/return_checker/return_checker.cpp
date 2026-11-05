@@ -186,7 +186,10 @@ void ReturnChecker::checkReturn(ReturnStmt *ret) {
                             "the constructor returns before 'super(...)', which makes the "
                             "object (JavaScript throws a ReferenceError there)");
     } else if (checker_.initFn_ == fn->decl) {
-      checker_.classChecker().checkFieldsSet(ret->loc());
+      ClassChecker::ResultEveryFieldSet fieldsSet = checker_.classChecker().checkFieldsSet();
+      if (fieldsSet.isErr()) {
+        checker_.diags_.error(ret->loc(), fieldsSet.error().message);
+      }
     }
     return;
   }

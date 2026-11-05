@@ -31,7 +31,12 @@ NameChecker::NameChecker(Checker &checker) : checker_(checker) {}
 
 Expr *NameChecker::checkName(NameExpr *name) {
   if (name->name == "this") {
-    return checker_.classChecker().checkThis(name);
+    ClassChecker::ResultThisReference reference = checker_.classChecker().checkThis(name);
+    if (reference.isErr()) {
+      checker_.diags_.error(name->loc(), reference.error().message);
+      return name;
+    }
+    return reference.value();
   }
   if (name->cls && name->type) {
     return name;

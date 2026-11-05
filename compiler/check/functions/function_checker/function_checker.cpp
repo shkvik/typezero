@@ -196,7 +196,11 @@ void FunctionChecker::checkFunctionBody(FunctionDecl *fn) {
     checker_.typeParams().bindTypeParams(fn->typeParams, fn->typeArgs);
   }
   if (fn->takesThis()) {
-    VarSymbol *self = checker_.classChecker().declareThis(fn);
+    ClassChecker::ResultNewThisSymbol declared = checker_.classChecker().declareThis(fn);
+    if (declared.isErr()) {
+      checker_.diags_.error(fn->loc(), declared.error().message);
+    }
+    VarSymbol *self = declared.isOk() ? declared.value() : nullptr;
     if (fn->isConstructor || fn == fn->cls->init) {
       checker_.initFn_ = fn;
       checker_.initThis_ = self;
@@ -286,7 +290,10 @@ void FunctionChecker::checkFunctionBody(FunctionDecl *fn) {
   checker_.flow_.errorPending = std::move(outerPending);
   checker_.predicateChecker().endPredicate(fn);
   if (fn->isConstructor && checker_.initFn_ == fn && !checker_.flow_.beforeSuper) {
-    checker_.classChecker().checkFieldsSet(fn->loc());
+    ClassChecker::ResultEveryFieldSet fieldsSet = checker_.classChecker().checkFieldsSet();
+    if (fieldsSet.isErr()) {
+      checker_.diags_.error(fn->loc(), fieldsSet.error().message);
+    }
   }
   checker_.popScope();
   checker_.functions_.pop_back();

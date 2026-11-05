@@ -3,34 +3,41 @@
 #include "compiler/check/checker/checker.h"
 #include "compiler/check/classes/class_checker/class_checker_errors.h"
 #include "compiler/result/result/result.h"
+#include <vector>
 
 namespace tz {
 
 class ClassChecker {
 public:
+  using ResultThisReference = Result<Expr *, ClassCheckerCheckThisError>;
+  using ResultFieldUnsetYet = Result<std::string, ClassCheckerFirstUnsetError>;
+  using ResultNewThisSymbol = Result<VarSymbol *, ClassCheckerDeclareThisError>;
+  using ResultClassDeclared = Result<ClassDecl *, ClassCheckerCheckClassStmtError>;
+  using ResultInitThisFound = Result<const NameExpr *, ClassCheckerIsInitThisError>;
+  using ResultObjectIsReady = Result<const Checker::Flow *, ClassCheckerThisReadyError>;
+  using ResultHasDecorators = Result<const ClassDecl *, ClassCheckerHasDecoratorsError>;
+  using ResultEveryFieldSet = Result<const FunctionDecl *, ClassCheckerCheckFieldsSetError>;
+  using ResultBodiesChecked = Result<ClassDecl *, std::vector<ClassCheckerCheckClassBodiesError>>;
+
   explicit ClassChecker(Checker &owner);
 
-  Expr *checkThis(NameExpr *name);
-  void checkClassStmt(ClassDecl *cls);
-  void checkFieldsSet(llvm::SMLoc loc);
-  void checkClassBodies(ClassDecl *cls);
-  bool isInitThis(const Expr *expr) const;
-  VarSymbol *declareThis(FunctionDecl *fn);
-  static bool hasDecorators(const ClassDecl *cls);
-  bool thisReady(const Checker::Flow &flow) const;
-  std::string firstUnset(const Checker::Flow &flow) const;
+  ResultEveryFieldSet checkFieldsSet() const;
+  ResultThisReference checkThis(NameExpr *name);
+  ResultNewThisSymbol declareThis(FunctionDecl *fn);
+  ResultClassDeclared checkClassStmt(ClassDecl *cls);
+  ResultBodiesChecked checkClassBodies(ClassDecl *cls);
+  ResultInitThisFound isInitThis(const Expr *expr) const;
+  ResultObjectIsReady thisReady(const Checker::Flow &flow) const;
+  ResultFieldUnsetYet firstUnset(const Checker::Flow &flow) const;
+  static ResultHasDecorators hasDecorators(const ClassDecl *cls);
 
 private:
   using ResultThisReadiness = Result<VarSymbol *, ClassCheckerReadyThisError>;
-  using ResultTopLevelClass = Result<ClassDecl *, ClassCheckerTopLevelClassError>;
   using ResultThisComesFrom = Result<const FunctionDecl *, ClassCheckerThisOfError>;
-  using ResultEveryFieldSet = Result<const FunctionDecl *, ClassCheckerFieldsSetError>;
   using ResultFieldHasValue = Result<const ClassField *, ClassCheckerFieldStartValueError>;
   using ResultReturnMatches = Result<const FunctionDecl *, ClassCheckerOverrideReturnError>;
 
-  ResultEveryFieldSet fieldsSet() const;
   ResultThisReadiness readyThis(VarSymbol *var) const;
-  ResultTopLevelClass topLevelClass(ClassDecl *cls) const;
   ResultThisComesFrom thisOf(const FunctionDecl *current) const;
   ResultReturnMatches overrideReturn(const ClassDecl *cls, const FunctionDecl *method);
   ResultFieldHasValue fieldStartValue(const ClassDecl *cls, const ClassField &field) const;

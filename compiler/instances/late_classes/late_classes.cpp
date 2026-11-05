@@ -236,7 +236,12 @@ void LateClasses::checkLateClasses() {
       checker_.diags_.setCapture(&checker_.lateErrors_[owner]);
     }
     checker_.flow_ = Checker::Flow();
-    checker_.classChecker().checkClassBodies(cls);
+    ClassChecker::ResultBodiesChecked bodies = checker_.classChecker().checkClassBodies(cls);
+    if (bodies.isErr()) {
+      for (const ClassCheckerCheckClassBodiesError &error : bodies.error()) {
+        checker_.diags_.error(error.loc, error.message);
+      }
+    }
     checker_.checkingInstance_ = outerInstance;
     checker_.diags_.setCapture(outerCapture);
   }

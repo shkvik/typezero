@@ -310,18 +310,23 @@ Expr *InheritChecker::checkSuperMethodCall(CallExpr *call, MemberExpr *member) {
   ClassDecl *parent = method->cls->parent;
   auto *self = checker_.ctx_.make<NameExpr>(member->object->loc(), "this");
   checker_.thisMember_ = member->name;
-  member->object = checker_.classChecker().checkThis(self);
+  ClassChecker::ResultThisReference reference = checker_.classChecker().checkThis(self);
   checker_.thisMember_ = {};
+  if (reference.isErr()) {
+    checker_.diags_.error(self->loc(), reference.error().message);
+  }
+  member->object = reference.isOk() ? reference.value() : self;
   if (member->object->type->isError()) {
     checkArgsLoosely();
     return call;
   }
-  if (checker_.classChecker().isInitThis(member->object) && !checker_.flow_.beforeSuper &&
-      !checker_.classChecker().thisReady(checker_.flow_)) {
-    checker_.diags_.error(member->loc(), "'super." + member->name +
-                                             "()' is called before every field is set: field '" +
-                                             checker_.classChecker().firstUnset(checker_.flow_) +
-                                             "' is not set yet, and the method may read it");
+  if (checker_.classChecker().isInitThis(member->object).isOk() && !checker_.flow_.beforeSuper &&
+      checker_.classChecker().thisReady(checker_.flow_).isErr()) {
+    checker_.diags_.error(member->loc(),
+                          "'super." + member->name +
+                              "()' is called before every field is set: field '" +
+                              checker_.classChecker().firstUnset(checker_.flow_).value() +
+                              "' is not set yet, and the method may read it");
   }
   std::vector<FunctionDecl *> methods = ClassDeclarer::methodsNamed(parent, member->name, false);
   if (methods.empty()) {

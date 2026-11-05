@@ -84,7 +84,7 @@ Expr *ClassMemberChecker::checkClassMember(MemberExpr *member, const Type *expec
   if (Expr *date = checker_.fsDeclarer().checkStatsDate(member, cls)) {
     return date;
   }
-  bool viaThis = checker_.classChecker().isInitThis(member->object);
+  bool viaThis = checker_.classChecker().isInitThis(member->object).isOk();
   const ClassDecl *owner = nullptr;
   const ClassField *field = ClassBases::findField(cls, name, &owner);
   if (field && !field->method) {
@@ -136,10 +136,11 @@ Expr *ClassMemberChecker::checkClassMember(MemberExpr *member, const Type *expec
     return member;
   }
   if (viaThis && !checker_.flow_.beforeSuper &&
-      !checker_.classChecker().thisReady(checker_.flow_)) {
-    checker_.diags_.error(
-        member->loc(), "'this." + name + "' is used before every field is set: field '" +
-                           checker_.classChecker().firstUnset(checker_.flow_) + "' is not set yet");
+      checker_.classChecker().thisReady(checker_.flow_).isErr()) {
+    checker_.diags_.error(member->loc(),
+                          "'this." + name + "' is used before every field is set: field '" +
+                              checker_.classChecker().firstUnset(checker_.flow_).value() +
+                              "' is not set yet");
   }
   FuncSymbol *sym = checker_.overloadResolver().variantForType(methods, expected, member);
   if (!sym) {
@@ -204,7 +205,7 @@ const Type *ClassMemberChecker::checkFieldTarget(MemberExpr *member, bool compou
     return Type::error();
   }
   checkAccess(owner, field->access, name, member->loc(), member->object);
-  bool viaThis = checker_.classChecker().isInitThis(member->object);
+  bool viaThis = checker_.classChecker().isInitThis(member->object).isOk();
   if (compound && viaThis && owner == checker_.initFn_->cls &&
       !llvm::is_contained(checker_.flow_.setFields, name)) {
     checker_.diags_.error(member->loc(), "field '" + name + "' is read before it is set");

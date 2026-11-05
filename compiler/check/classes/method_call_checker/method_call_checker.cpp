@@ -94,12 +94,12 @@ Expr *MethodCallChecker::checkMethodCall(CallExpr *call, MemberExpr *member, con
     checker_.classMemberChecker().checkAccess(methods[0]->cls, methods[0]->access, name,
                                               member->loc(), member->object);
   }
-  if (checker_.classChecker().isInitThis(member->object) && !checker_.flow_.beforeSuper &&
-      !checker_.classChecker().thisReady(checker_.flow_)) {
-    checker_.diags_.error(member->loc(), "'this." + name +
-                                             "()' is called before every field is set: field '" +
-                                             checker_.classChecker().firstUnset(checker_.flow_) +
-                                             "' is not set yet, and the method may read it");
+  if (checker_.classChecker().isInitThis(member->object).isOk() && !checker_.flow_.beforeSuper &&
+      checker_.classChecker().thisReady(checker_.flow_).isErr()) {
+    checker_.diags_.error(member->loc(),
+                          "'this." + name + "()' is called before every field is set: field '" +
+                              checker_.classChecker().firstUnset(checker_.flow_).value() +
+                              "' is not set yet, and the method may read it");
   }
   bool checked = false;
   std::vector<const Type *> bound;

@@ -350,7 +350,7 @@ Expr *AssignChecker::checkAssign(AssignExpr *assign) {
         path && definite) {
       FieldFacts::defineField(checker_.flow_, *path);
     }
-    if (checker_.classChecker().isInitThis(member->object) &&
+    if (checker_.classChecker().isInitThis(member->object).isOk() &&
         !llvm::is_contained(checker_.flow_.setFields, member->name)) {
       checker_.flow_.setFields.push_back(member->name);
     }
