@@ -5,3 +5,4 @@ FixNamespaceComments: false
 IncludeBlocks: Merge
 PackConstructorInitializers: Never
 AllowShortFunctionsOnASingleLine: Empty
+IndentCaseLabels: true

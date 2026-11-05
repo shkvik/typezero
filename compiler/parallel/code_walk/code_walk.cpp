@@ -43,11 +43,13 @@ int CodeWalk::discover(const FunctionDecl *fn) {
   }
   FnInfo &info = analysis_.records.emplace_back();
   analysis_.byFunction[fn->id] = &info;
+  
   info.decl = fn;
   info.async = fn->isAsync && !fn->isGenerator;
   info.asyncGen = fn->isAsync && fn->isGenerator;
   info.syncGen = !fn->isAsync && fn->isGenerator;
   info.thisOwner = analysis_.thisOwnerOf(fn);
+
   if (fn->cls) {
     noteClass(fn->cls);
   }
