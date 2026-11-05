@@ -405,9 +405,9 @@ const Type *PredicateChecker::filteredType(const Expr *callback, const Type *ele
   if (auto *fe = dyn_cast<FunctionExpr>(callback)) {
     fn = fe->fn->sym;
   } else if (auto *name = dyn_cast<NameExpr>(callback)) {
-    fn = name->func                         ? name->func
-         : name->var && name->var->function ? name->var->function->sym
-                                            : nullptr;
+    fn = name->func                           ? name->func
+         : name->var && name->var->function() ? name->var->function()->sym
+                                              : nullptr;
   }
   if (!fn) {
     return nullptr;

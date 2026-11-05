@@ -49,14 +49,6 @@ Expr *NameChecker::checkName(NameExpr *name) {
     checker_.diags_.error(
         name->loc(), "'" + name->name + "' is not a generic function; remove the type arguments");
   }
-  if (entry.var && !entry.var->promisified.empty()) {
-    checker_.diags_.error(name->loc(), "'" + name->name + "' is 'promisify(" +
-                                           entry.var->promisified +
-                                           ")', which can only be called: 'await " + name->name +
-                                           "(...)'");
-    name->type = Type::error();
-    return name;
-  }
   if (entry.var) {
     if (checker_.staticInit_ && checker_.currentClass_ && checker_.currentClass_->expression &&
         !entry.var->isGlobal() && llvm::is_contained(checker_.currentClass_->locals, name->name)) {

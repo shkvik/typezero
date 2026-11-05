@@ -8,9 +8,7 @@ class CryptoFunctionChecker {
 public:
   explicit CryptoFunctionChecker(Checker &checker);
 
-  Expr *checkCryptoCall(CallExpr *call, llvm::StringRef fn, llvm::SMLoc loc,
-                        bool promisified = false);
-  Expr *rejectLoosePromisify(CallExpr *call, llvm::SMLoc loc);
+  Expr *checkCryptoCall(CallExpr *call, llvm::StringRef fn, llvm::SMLoc loc);
 
 private:
   Expr *checkSyncCall(CallExpr *call, llvm::StringRef fn, llvm::StringRef shown, llvm::SMLoc loc);

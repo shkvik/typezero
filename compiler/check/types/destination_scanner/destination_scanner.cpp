@@ -402,8 +402,8 @@ std::vector<const Type *> DestinationScanner::calleeParams(const CallExpr *call,
     }
     Checker::ScopeEntry entry = checker_.scopes().lookup(name->name);
     FuncSymbol *func = entry.func;
-    if (entry.var && entry.var->function) {
-      func = entry.var->function->sym;
+    if (entry.var && entry.var->function()) {
+      func = entry.var->function()->sym;
     }
     if (func && !func->pendingParams) {
       return spread(func->params, func->hasRest);

@@ -216,8 +216,8 @@ void CallWalk::unknownRef(const Expr *e) {
     fns.push_back(fe->fn);
   } else if (auto *n = dyn_cast_or_null<NameExpr>(e); n && n->func) {
     fns.push_back(n->func->decl);
-  } else if (n && n->var && !n->var->reassigned && (n->var->function || n->var->lambda)) {
-    fns.push_back(n->var->function ? n->var->function : n->var->lambda);
+  } else if (n && n->var && !n->var->reassigned && (n->var->function() || n->var->lambda())) {
+    fns.push_back(n->var->function() ? n->var->function() : n->var->lambda());
   } else if (auto *m = dyn_cast_or_null<MemberExpr>(e); m && m->method) {
     fns = methodTargets(m->method->decl, m->virtualCall);
   } else {
@@ -244,8 +244,8 @@ bool CallWalk::functionRef(const Expr *e, const Use &use, const Type *type) {
     registerValue(n->func->decl, type);
     return true;
   }
-  if (n && n->var && (n->var->function || n->var->lambda)) {
-    registerValue(n->var->function ? n->var->function : n->var->lambda, type);
+  if (n && n->var && (n->var->function() || n->var->lambda())) {
+    registerValue(n->var->function() ? n->var->function() : n->var->lambda(), type);
     return true;
   }
   auto *m = dyn_cast_or_null<MemberExpr>(e);
@@ -425,8 +425,8 @@ void CallWalk::addFunctionCallees(const Expr *f, const Expr *arg, CallKind kind)
     addCallee(rec, fe->fn, closureSelf(fe->fn, *analysis_.fn));
   } else if (auto *n = dyn_cast<NameExpr>(f); n && n->func) {
     addCallee(rec, n->func->decl, std::nullopt);
-  } else if (n && n->var && (n->var->function || n->var->lambda)) {
-    const FunctionDecl *decl = n->var->function ? n->var->function : n->var->lambda;
+  } else if (n && n->var && (n->var->function() || n->var->lambda())) {
+    const FunctionDecl *decl = n->var->function() ? n->var->function() : n->var->lambda();
     addCallee(rec, decl, closureSelf(decl, *analysis_.fn));
   } else if (n && n->var && analysis_.resolvers.contains(n->var)) {
   } else if (auto *mem = dyn_cast<MemberExpr>(f); mem && mem->method) {

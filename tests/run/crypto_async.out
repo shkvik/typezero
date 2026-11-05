@@ -1,5 +1,4 @@
 scrypt true 32
-promisify(scrypt) 16
 pbkdf2 true
 hkdf true
 argon2 true

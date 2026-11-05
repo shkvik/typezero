@@ -27,11 +27,11 @@ StoreScanner::Sources StoreExprs::expr(const Expr *e) {
     auto *name = llvm::cast<NameExpr>(e);
     if (name->var) {
       out.push_back(scanner_.var(name->var));
-      if (name->var->function && !scanner_.callee_.contains(e)) {
-        scanner_.escapes(name->var->function);
+      if (name->var->function() && !scanner_.callee_.contains(e)) {
+        scanner_.escapes(name->var->function());
       }
-      if (name->var->lambda && !scanner_.callee_.contains(e)) {
-        scanner_.escapes(name->var->lambda);
+      if (name->var->lambda() && !scanner_.callee_.contains(e)) {
+        scanner_.escapes(name->var->lambda());
       }
     }
     if (name->func && !scanner_.callee_.contains(e)) {

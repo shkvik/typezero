@@ -614,7 +614,7 @@ const FunctionDecl *HeldValueChecker::callbackOf(const Expr *e) {
       return name->func->decl;
     }
     if (name->var) {
-      return name->var->lambda ? name->var->lambda : name->var->function;
+      return name->var->lambda() ? name->var->lambda() : name->var->function();
     }
     return nullptr;
   }
@@ -657,7 +657,7 @@ const FunctionDecl *HeldValueChecker::programTarget(const CallExpr *c) const {
   if (!decl) {
     if (auto *name = dyn_cast_or_null<NameExpr>(c->callee);
         name && name->var && !name->var->reassigned) {
-      decl = name->var->lambda ? name->var->lambda : name->var->function;
+      decl = name->var->lambda() ? name->var->lambda() : name->var->function();
     }
   }
   if (!decl || !decl->body || inLibrary(decl->loc())) {

@@ -1,15 +1,14 @@
 // The node:crypto functions that have a callback in node run on the thread pool of the runtime
 // (4 threads, UV_THREADPOOL_SIZE) and return a Promise: the callback form without a callback for
 // scrypt, pbkdf2, argon2, hkdf, randomFill, generateKey, generateKeyPair, generatePrime and
-// checkPrime, and promisify of node:util for randomBytes, randomInt, sign, verify and
-// diffieHellman, whose call without a callback stays synchronous. The result is the same as that
-// of the synchronous function; a wrong parameter is an Err of the same type.
+// checkPrime, and the functions of tz:crypto with Async for randomBytes, randomInt, sign, verify
+// and diffieHellman, whose call without a callback stays synchronous. The result is the same as
+// that of the synchronous function; a wrong parameter is an Err of the same type.
 import {
   argon2,
   argon2Sync,
   checkPrime,
   checkPrimeSync,
-  diffieHellman,
   generateKey,
   generateKeyPair,
   generateKeyPairSync,
@@ -19,32 +18,18 @@ import {
   hkdfSync,
   pbkdf2,
   pbkdf2Sync,
-  randomBytes,
   randomFill,
-  randomInt,
   scrypt,
   ScryptError,
   scryptSync,
-  sign,
-  verify,
 } from "node:crypto";
-import { promisify } from "node:util";
-
-const randomBytesAsync = promisify(randomBytes);
-const randomIntAsync = promisify(randomInt);
-const signAsync = promisify(sign);
-const verifyAsync = promisify(verify);
-const diffieHellmanAsync = promisify(diffieHellman);
-const scryptAsync = promisify(scrypt);
+import { diffieHellmanAsync, randomBytesAsync, randomIntAsync, signAsync, verifyAsync } from "tz:crypto";
 
 const salt = Buffer.from("0123456789abcdef");
 
 const key = await scrypt("password", salt, 32, { N: 16384 });
 const keySync = scryptSync("password", salt, 32, { N: 16384 });
 if (key.isOk() && keySync.isOk()) console.log("scrypt", key.value.equals(keySync.value), key.value.length);
-
-const viaPromisify = await scryptAsync("password", salt, 16);
-if (viaPromisify.isOk()) console.log("promisify(scrypt)", viaPromisify.value.length);
 
 const derived = await pbkdf2("password", salt, 1000, 32, "sha256");
 const derivedSync = pbkdf2Sync("password", salt, 1000, 32, "sha256");

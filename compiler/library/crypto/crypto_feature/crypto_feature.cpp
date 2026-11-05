@@ -53,12 +53,8 @@ Expr *CryptoFeature::checkClassMethodCall(Checker &checker, CallExpr *call, Memb
 std::optional<std::string> CryptoFeature::exportProblem(NodeModule module,
                                                         llvm::StringRef exportName,
                                                         llvm::StringRef path) const {
-  if (module == NodeModule::Util) {
-    if (exportName == "promisify") {
-      return std::string();
-    }
-    return "'" + exportName.str() + "' of '" + path.str() +
-           "' is not supported yet; tz has 'promisify' for the functions of node:crypto";
+  if (module == NodeModule::TzCrypto) {
+    return tzCryptoExportProblem(exportName, path);
   }
   if (module != NodeModule::Crypto) {
     return std::nullopt;
@@ -69,10 +65,7 @@ std::optional<std::string> CryptoFeature::exportProblem(NodeModule module,
 
 Expr *CryptoFeature::checkModuleCall(Checker &checker, CallExpr *call, NodeModule module,
                                      llvm::StringRef fn, llvm::SMLoc loc, const Type *) const {
-  if (module == NodeModule::Util) {
-    return checker.cryptoFunctionChecker().rejectLoosePromisify(call, loc);
-  }
-  if (module != NodeModule::Crypto) {
+  if (module != NodeModule::Crypto && module != NodeModule::TzCrypto) {
     return nullptr;
   }
 
@@ -86,16 +79,6 @@ Expr *CryptoFeature::checkModuleValue(Checker &checker, NodeModule module,
   }
 
   return checker.cryptoChecker().checkCryptoValue(exportName, expr);
-}
-
-Expr *CryptoFeature::checkPromisifiedCall(Checker &checker, CallExpr *call, llvm::StringRef fn,
-                                           llvm::SMLoc loc) const {
-  return checker.cryptoFunctionChecker().checkCryptoCall(call, fn, loc, true);
-}
-
-bool CryptoFeature::promisifies(llvm::StringRef fn) const {
-  return llvm::is_contained(kPromisified, fn) ||
-         llvm::any_of(kAsyncForms, [&](const auto &form) { return form.first == fn; });
 }
 
 Expr *CryptoFeature::checkModuleMember(Checker &checker, MemberExpr *member) const {

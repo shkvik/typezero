@@ -201,7 +201,7 @@ VarSymbol *TargetChecker::checkVarTarget(NameExpr *name) {
   checker_.scopes().checkVisible(name, entry.var);
   if (entry.var->isConst) {
     checker_.diags_.error(name->loc(), "cannot assign to '" + name->name + "' because it is a " +
-                                           (entry.var->function ? "function" : "constant"));
+                                           (entry.var->function() ? "function" : "constant"));
   } else {
     checker_.topLevelChecker().reportImportAssign(name, entry.var);
   }

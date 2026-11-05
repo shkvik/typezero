@@ -52,17 +52,22 @@ std::optional<std::string> literalOf(const Expr *e) {
 
 CryptoFunctionChecker::CryptoFunctionChecker(Checker &checker) : checker_(checker) {}
 
-Expr *CryptoFunctionChecker::checkCryptoCall(CallExpr *call, llvm::StringRef fn, llvm::SMLoc loc,
-                                             bool promisified) {
+Expr *CryptoFunctionChecker::checkCryptoCall(CallExpr *call, llvm::StringRef fn, llvm::SMLoc loc) {
   llvm::StringRef sync = fn;
-  bool async = promisified;
+  bool async = false;
   for (const auto &[form, syncName] : kAsyncForms) {
     if (fn == form) {
       async = true;
       sync = syncName;
     }
   }
-  if (async && !promisified && !call->args.empty() && isa<FunctionExpr>(call->args.back())) {
+  for (const auto &[form, syncName] : kTzCryptoAsyncForms) {
+    if (fn == form) {
+      async = true;
+      sync = syncName;
+    }
+  }
+  if (async && !call->args.empty() && isa<FunctionExpr>(call->args.back())) {
     checker_.diags_.error(call->args.back()->loc(),
                           "'" + fn +
                               "' with a callback is not supported: tz has no callbacks "
@@ -78,19 +83,6 @@ Expr *CryptoFunctionChecker::checkCryptoCall(CallExpr *call, llvm::StringRef fn,
   Expr *checked = checkSyncCall(call, sync, fn, loc);
 
   return async ? asyncOf(checked) : checked;
-}
-
-Expr *CryptoFunctionChecker::rejectLoosePromisify(CallExpr *call, llvm::SMLoc loc) {
-  checker_.diags_.error(loc, "keep 'promisify(f)' in a const and call that: 'const fAsync = "
-                             "promisify(f)', then 'await fAsync(...)'");
-  for (Expr *&arg : call->args) {
-    if (!isa<NameExpr>(arg)) {
-      arg = checker_.exprChecker().checkExpr(arg);
-    }
-  }
-  call->type = Type::error();
-
-  return call;
 }
 
 Expr *CryptoFunctionChecker::asyncOf(Expr *checked) {

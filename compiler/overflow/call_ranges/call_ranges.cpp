@@ -410,7 +410,7 @@ Val CallRanges::evalCallback(const CallExpr *call, State &st) {
       if (name->func) {
         named = name->func->decl;
       } else if (name->var) {
-        named = name->var->function ? name->var->function : name->var->lambda;
+        named = name->var->function() ? name->var->function() : name->var->lambda();
       }
     }
     if (arg) {

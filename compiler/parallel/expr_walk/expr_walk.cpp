@@ -191,7 +191,7 @@ void ExprWalk::expr(const Expr *e, const Use &use) {
 }
 
 void ExprWalk::name(const NameExpr *n, const Use &use) {
-  if (n->func || (n->var && (n->var->function || n->var->lambda))) {
+  if (n->func || (n->var && (n->var->function() || n->var->lambda()))) {
     analysis_.callWalk.functionRef(n, use, n->type);
     return;
   }

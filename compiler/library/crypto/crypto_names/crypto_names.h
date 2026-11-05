@@ -202,8 +202,12 @@ inline const std::pair<llvm::StringLiteral, llvm::StringLiteral> kAsyncForms[] =
     {"generateKey", "generateKeySync"}, {"generatePrime", "generatePrimeSync"},
     {"checkPrime", "checkPrimeSync"}};
 
-inline const llvm::StringLiteral kPromisified[] = {"randomBytes", "randomInt", "sign", "verify",
-                                                   "diffieHellman"};
+inline const std::pair<llvm::StringLiteral, llvm::StringLiteral> kTzCryptoAsyncForms[] = {
+    {"randomBytesAsync", "randomBytes"},
+    {"randomIntAsync", "randomInt"},
+    {"signAsync", "sign"},
+    {"verifyAsync", "verify"},
+    {"diffieHellmanAsync", "diffieHellman"}};
 
 inline const llvm::StringLiteral kExports[] = {"Certificate",
                                                "DiffieHellman",
@@ -230,6 +234,8 @@ bool turnedOffCipher(llvm::StringRef name);
 llvm::StringRef methodsOf(Crypto kind);
 
 std::string cryptoExportProblem(llvm::StringRef name, llvm::StringRef path);
+
+std::string tzCryptoExportProblem(llvm::StringRef name, llvm::StringRef path);
 
 inline constexpr llvm::StringLiteral kCurveNames[] = {
     "Oakley-EC2N-3", "Oakley-EC2N-4", "SM2", "brainpoolP160r1", "brainpoolP160t1",

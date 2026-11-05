@@ -384,7 +384,7 @@ NestedGroup *NestedFunctions::declareNested(BlockStmt *block) {
     var->loc = fn->loc();
     var->isConst = true;
     var->place = VarSymbol::localPlace(checker_.currentDecl(), 0);
-    var->function = fn;
+    var->holds = DeclaredFunction{.function = fn};
     fn->var = var;
     checker_.functionChecker().declareFunction(fn, var);
     collectAssigned(fn->body, group->assignedNames);
@@ -461,18 +461,18 @@ void NestedFunctions::noteUse(VarSymbol *var, llvm::SMLoc loc) {
   if (!state) {
     return;
   }
-  if (FunctionDecl *member = var->function;
+  if (FunctionDecl *member = var->function();
       member && checker_.currentDecl() == member->group->owner) {
     member->group->uses.push_back({member, checker_.seq_, loc});
   }
   for (size_t i = checker_.functions_.size(); i-- > 0;) {
     FunctionDecl *fn = checker_.functions_[i];
-    if (fn == var->owner() || fn == var->lambda) {
+    if (fn == var->owner() || fn == var->lambda()) {
       break;
     }
-    if (var->function && fn->group && fn->group == var->function->group) {
-      if (fn != var->function && !llvm::is_contained(fn->siblings, var->function)) {
-        fn->siblings.push_back(var->function);
+    if (var->function() && fn->group && fn->group == var->function()->group) {
+      if (fn != var->function() && !llvm::is_contained(fn->siblings, var->function())) {
+        fn->siblings.push_back(var->function());
       }
       break;
     }
@@ -499,7 +499,7 @@ FunctionDecl *NestedFunctions::namedFunction(const Expr *expr) const {
     return name->func->decl;
   }
   if (VarSymbol *var = name->var) {
-    return var->function ? var->function : var->isConst ? var->lambda : nullptr;
+    return var->function() ? var->function() : var->isConst ? var->lambda() : nullptr;
   }
 
   return nullptr;

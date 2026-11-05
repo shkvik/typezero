@@ -319,8 +319,8 @@ const FunctionDecl *CallResolver::functionOf(const Expr *e) {
   if (n && n->func) {
     return n->func->decl;
   }
-  if (n && n->var && !n->var->reassigned && (n->var->lambda || n->var->function)) {
-    return n->var->lambda ? n->var->lambda : n->var->function;
+  if (n && n->var && !n->var->reassigned && (n->var->lambda() || n->var->function())) {
+    return n->var->lambda() ? n->var->lambda() : n->var->function();
   }
 
   return nullptr;

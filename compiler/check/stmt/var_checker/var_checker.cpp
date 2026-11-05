@@ -1,5 +1,4 @@
 #include "compiler/check/stmt/var_checker/var_checker.h"
-#include "compiler/library/builtin_modules/builtin_module_checker/builtin_module_checker.h"
 #include "compiler/check/async/timer_checker/timer_checker.h"
 #include "compiler/check/expr/expr_checker/expr_checker.h"
 #include "compiler/check/flow/flow_checker/flow_checker.h"
@@ -69,18 +68,6 @@ void VarChecker::checkVarDecl(VarDeclStmt *decl) {
         continue;
       }
     }
-    if (std::optional<llvm::StringRef> target =
-            decl->isConst && !declared && !d.destructured
-                ? checker_.builtinModuleChecker().promisifyTarget(d.init)
-                : std::nullopt) {
-      VarSymbol *var = checker_.scopes().declareVar(
-          d.name, d.loc, target->empty() ? Type::error() : Type::undefinedTy(), true);
-      var->promisified = *target;
-      d.sym = var;
-      d.init = nullptr;
-      d.alias = true;
-      continue;
-    }
     if (auto *fe = llvm::dyn_cast_or_null<FunctionExpr>(d.init);
         fe && !fe->fn->typeParams.empty() && decl->isConst && !declared && !d.destructured &&
         checker_.scopes_.size() == 1) {
@@ -103,7 +90,7 @@ void VarChecker::checkVarDecl(VarDeclStmt *decl) {
       }
       if (decl->isConst && !d.destructured) {
         VarSymbol *var = checker_.scopes().declareVar(d.name, d.loc, nullptr, true);
-        var->lambda = fe->fn;
+        var->holds = Lambda{.lambda = fe->fn};
         d.sym = var;
         const Type *function =
             declared && declared->nonOptional()->isFunction() ? declared->nonOptional() : nullptr;
@@ -114,7 +101,7 @@ void VarChecker::checkVarDecl(VarDeclStmt *decl) {
           d.init = checker_.typeRelations().coerce(d.init, declared);
         }
         if (auto *cast = dyn_cast<CastExpr>(d.init); cast && cast->adaptsResult) {
-          var->lambda = nullptr;
+          var->holds = OrdinaryValue{};
         }
         var->type = declared ? declared : d.init->type;
         continue;
@@ -218,7 +205,7 @@ void VarChecker::checkVarDecl(VarDeclStmt *decl) {
       if (auto *got = llvm::dyn_cast_or_null<CallExpr>(value);
           got && got->builtin == Builtin::ReflectMethod &&
           !checker_.severalVariants_.contains(got)) {
-        d.sym->reflectMethod = got->method->decl;
+        d.sym->holds = ReflectedMethod{.method = got->method->decl};
       }
       if (auto *got = llvm::dyn_cast_or_null<CallExpr>(value);
           got && got->builtin == Builtin::ReflectGet && got->args.size() == 2) {
@@ -247,8 +234,12 @@ void VarChecker::checkVarDecl(VarDeclStmt *decl) {
             names.push_back(m->literalText());
           }
         }
+        std::vector<llvm::StringRef> kept;
         for (const std::u16string &name : names) {
-          d.sym->reflectNames.push_back(checker_.ctx_.keepName(toUtf8(name)));
+          kept.push_back(checker_.ctx_.keepName(toUtf8(name)));
+        }
+        if (!kept.empty()) {
+          d.sym->holds = ReflectedNames{.names = std::move(kept)};
         }
       }
       auto *made = llvm::dyn_cast_or_null<CallExpr>(value);

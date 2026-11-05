@@ -119,7 +119,7 @@ const RegexLitExpr *RegexChecker::knownRegex(const Expr *expr) {
     return lit->program.empty() ? nullptr : lit;
   }
   if (auto *name = dyn_cast<NameExpr>(expr); name && name->var) {
-    return name->var->regex;
+    return name->var->regex();
   }
 
   return nullptr;
@@ -150,7 +150,7 @@ void RegexChecker::noteRegexVariable(VarSymbol *var, const Expr *init, bool isCo
       return;
     }
   }
-  var->regex = lit;
+  var->holds = RegexLiteral{.regex = lit};
 }
 
 const Type *RegexChecker::matchType(const RegexLitExpr *regex) {

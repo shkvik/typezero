@@ -295,7 +295,7 @@ FunctionDecl *ReflectCallChecker::knownReflectMethod(ClassDecl *cls, llvm::Strin
 const FunctionDecl *ReflectCallChecker::heldReflectMethod(const Expr *f) {
   f = stripImplicit(const_cast<Expr *>(f));
   if (auto *name = dyn_cast<NameExpr>(f)) {
-    return name->var ? name->var->reflectMethod : nullptr;
+    return name->var ? name->var->reflectMethod() : nullptr;
   }
   if (auto *got = dyn_cast<CallExpr>(f); got && got->builtin == Builtin::ReflectMethod &&
                                          !checker_.severalVariants_.contains(got) &&

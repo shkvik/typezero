@@ -1,5 +1,6 @@
 #pragma once
 
+#include "compiler/program/symbols/var_symbol/var_holds.h"
 #include "compiler/program/symbols/var_symbol/var_place.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/SmallPtrSet.h"
@@ -32,12 +33,7 @@ struct VarSymbol {
   bool reassigned = false;
 
   VarPlace place = TopLevelLocalVar{};
-  FunctionDecl *function = nullptr;
-  FunctionDecl *lambda = nullptr;
-  const RegexLitExpr *regex = nullptr;
-  const FunctionDecl *reflectMethod = nullptr;
-  std::vector<llvm::StringRef> reflectNames;
-  llvm::StringRef promisified;
+  VarHolds holds = OrdinaryValue{};
 
   static VarPlace localPlace(FunctionDecl *owner, unsigned declSeq);
 
@@ -51,6 +47,12 @@ struct VarSymbol {
   bool capturedEarly() const;
   bool unshared() const;
   bool boxed() const;
+
+  FunctionDecl *function() const;
+  FunctionDecl *lambda() const;
+  const RegexLitExpr *regex() const;
+  const FunctionDecl *reflectMethod() const;
+  const std::vector<llvm::StringRef> &reflectNames() const;
 };
 
 }

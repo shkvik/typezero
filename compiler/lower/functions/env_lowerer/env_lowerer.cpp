@@ -243,10 +243,10 @@ llvm::Value *EnvLowerer::createEnv(const Lowering::EnvLayout &layout, bool onSta
 llvm::Value *EnvLowerer::emitVarValue(const VarSymbol *var, bool borrow) {
   const FunctionDecl *fn = nullptr;
   llvm::Value *env = nullptr;
-  if (var->lambda && var->lambda == lowering_.currentFn_) {
-    fn = var->lambda;
+  if (var->lambda() && var->lambda() == lowering_.currentFn_) {
+    fn = var->lambda();
     env = lowering_.envParam_;
-  } else if (const FunctionDecl *member = var->function) {
+  } else if (const FunctionDecl *member = var->function()) {
     NestedGroup *group = member->group;
     if (lowering_.currentFn_ && lowering_.currentFn_->group == group) {
       fn = member;

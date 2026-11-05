@@ -39,7 +39,7 @@ const Type *CycleFinder::valueTypeOf(const VarSymbol *var) {
   if (var->type) {
     return var->type;
   }
-  const FunctionDecl *fn = var->function ? var->function : var->lambda;
+  const FunctionDecl *fn = var->function() ? var->function() : var->lambda();
   const FuncSymbol *sym = fn->sym;
 
   return Type::function(sym->params, sym->minArgs, sym->hasRest, sym->ret, sym->hasThis);

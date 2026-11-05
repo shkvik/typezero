@@ -87,4 +87,35 @@ bool VarSymbol::boxed() const {
   return this->captured() && (this->reassigned || this->capturedEarly());
 }
 
+FunctionDecl *VarSymbol::function() const {
+  const DeclaredFunction *declared = this->holds.as<DeclaredFunction>();
+
+  return declared ? declared->function : nullptr;
+}
+
+FunctionDecl *VarSymbol::lambda() const {
+  const Lambda *held = this->holds.as<Lambda>();
+
+  return held ? held->lambda : nullptr;
+}
+
+const RegexLitExpr *VarSymbol::regex() const {
+  const RegexLiteral *literal = this->holds.as<RegexLiteral>();
+
+  return literal ? literal->regex : nullptr;
+}
+
+const FunctionDecl *VarSymbol::reflectMethod() const {
+  const ReflectedMethod *reflected = this->holds.as<ReflectedMethod>();
+
+  return reflected ? reflected->method : nullptr;
+}
+
+const std::vector<llvm::StringRef> &VarSymbol::reflectNames() const {
+  static const std::vector<llvm::StringRef> none;
+  const ReflectedNames *reflected = this->holds.as<ReflectedNames>();
+
+  return reflected ? reflected->names : none;
+}
+
 }

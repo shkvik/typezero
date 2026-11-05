@@ -1,25 +1,22 @@
-// The asynchronous forms of node:crypto take no callback: the call without one returns a Promise,
-// and the functions whose call without a callback is synchronous in node go through promisify of
-// node:util, kept in a const and only called. tz has no bigint, so generatePrime gives an
+// The asynchronous forms of node:crypto take no callback: the call without one returns a Promise.
+// The functions whose call without a callback is synchronous in node have their asynchronous form
+// in tz:crypto, named with Async, and are only called. tz has no bigint, so generatePrime gives an
 // ArrayBuffer.
-import { generatePrime, randomBytes, scrypt } from "node:crypto";
-// expect-error: 'inspect' of 'node:util' is not supported yet; tz has 'promisify' for the functions of node:crypto
-import { inspect, promisify } from "node:util";
+import { generatePrime, scrypt } from "node:crypto";
+// expect-error: 'tz:crypto' has no export named 'scryptAsync'
+import { randomBytesAsync, scryptAsync } from "tz:crypto";
 
 const salt = Buffer.from("0123456789abcdef");
 // expect-error: 'scrypt' with a callback is not supported: tz has no callbacks (docs/crypto.md, section 5); without one it returns a Promise: 'const result = await scrypt(...)'
 scrypt("password", salt, 32, (err: string | undefined, key: Buffer) => console.log(key));
+// expect-error: 'randomBytesAsync' with a callback is not supported: tz has no callbacks (docs/crypto.md, section 5); without one it returns a Promise: 'const result = await randomBytesAsync(...)'
+randomBytesAsync(16, (err: string | undefined, bytes: Buffer) => console.log(bytes));
 // expect-error: 'bigint' is not supported: tz has no bigint (docs/numbers.md); the prime comes as an ArrayBuffer
 const big = await generatePrime(64, { bigint: true });
-// expect-error: 'promisify' in tz takes a function of node:crypto that has a callback form
-const nothing = promisify(console);
-// expect-error: keep 'promisify(f)' in a const and call that: 'const fAsync = promisify(f)', then 'await fAsync(...)'
-const later = await promisify(randomBytes)(16);
-const randomBytesAsync = promisify(randomBytes);
-// expect-error: 'randomBytesAsync' is 'promisify(randomBytes)', which can only be called: 'await randomBytesAsync(...)'
+// expect-error: 'randomBytesAsync' of 'tz:crypto' can only be called
 const copy = randomBytesAsync;
 const ok = await randomBytesAsync(16);
 const length: double = 32;
 // expect-error: type 'double' is not assignable to type 'int'; round it first, then convert
 const derived = await scrypt("password", salt, length, { N: 1024 });
-console.log(ok.length, big, nothing, later, copy, inspect, derived);
+console.log(ok.length, big, copy, scryptAsync, derived);

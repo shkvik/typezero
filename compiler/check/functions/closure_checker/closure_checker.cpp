@@ -199,7 +199,7 @@ Expr *ClosureChecker::checkFunctionExpr(FunctionExpr *fe, const Checker::Signatu
     bool recursive = !fn->ownName.empty() && names.contains(fn->ownName);
     for (const auto &entry : names) {
       VarSymbol *var = checker_.scopes().lookup(entry.getKey()).var;
-      recursive |= var && var->lambda == fn;
+      recursive |= var && var->lambda() == fn;
     }
     if (recursive) {
       checker_.cycleOf_[sym] = static_cast<unsigned>(checker_.cycles_.size());
@@ -233,7 +233,7 @@ void ClosureChecker::declareOwnName(FunctionDecl *fn) {
   self->name = fn->ownName;
   self->loc = fn->loc();
   self->isConst = true;
-  self->lambda = fn;
+  self->holds = Lambda{.lambda = fn};
   unsigned declSeq = ++checker_.seq_;
   self->place = FunctionLocalVar{.owner = fn, .state = {.declSeq = declSeq}};
   checker_.scopes().declare(fn->ownName, fn->loc(), {self, nullptr});

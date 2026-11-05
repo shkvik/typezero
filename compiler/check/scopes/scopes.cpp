@@ -70,12 +70,12 @@ const Type *Scopes::varType(VarSymbol *var) {
   if (var->type) {
     return var->type;
   }
-  FunctionDecl *fn = var->function ? var->function : var->lambda;
+  FunctionDecl *fn = var->function() ? var->function() : var->lambda();
   if (!fn || !fn->sym) {
     return Type::error();
   }
   const Type *type = checker_.returnInferrer().functionType(fn->sym);
-  if (var->function && fn->sym->ret) {
+  if (var->function() && fn->sym->ret) {
     var->type = type;
   }
 

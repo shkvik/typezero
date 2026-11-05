@@ -29,12 +29,12 @@ enum class NodeModule {
   Buffer,
   TzIo,
   TzFs,
+  TzCrypto,
   TimersPromises,
   Readline,
   ReadlinePromises,
   ChildProcess,
   Crypto,
-  Util,
 };
 
 std::string cryptoExportProblem(llvm::StringRef name, llvm::StringRef path);

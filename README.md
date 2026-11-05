@@ -1939,7 +1939,6 @@ for (const entry of readdirSync(".", { withFileTypes: true }).unwrapOr([]))
   node (libuv): `release()` — настоящая версия Windows, `version()` — «Windows 11 Home».
 - **`node:process`** — `argv`, `env`, `exit`, `exitCode`, `cwd`, `platform`, `execPath`, `stdin`,
   `stdout`, `stderr`, `uptime`: то же, что у глобального `process`.
-- **`node:util`** — пока только `promisify` для функций `node:crypto` (см. «Криптография»).
 - **`node:buffer`** — `Buffer`: тот же, что глобальный.
 - **`node:fs`** — синхронные функции. Все, кроме `existsSync`, дают `Result` со своим типом
   ошибки: ошибка ОС — `Err`, а не исключение (`Result<void, UnlinkError>` у тех, что ничего не
@@ -2373,8 +2372,8 @@ if (pair.isOk()) console.log(sign(undefined, Buffer.from("message"), pair.value.
   `node:fs/promises`): `await scrypt(password, salt, 64)` — `Result<Buffer, ScryptError>`, так же
   `pbkdf2`, `argon2`, `hkdf`, `randomFill`, `generateKey`, `generateKeyPair`, `generatePrime`,
   `checkPrime`; `randomBytes`, `randomInt`, `sign`, `verify`, `diffieHellman` без колбэка
-  синхронные, как в node, а асинхронные — через `promisify` из `node:util`
-  (`const randomBytesAsync = promisify(randomBytes)`). Колбэк — ошибка с подсказкой
+  синхронные, как в node, а асинхронные лежат в `tz:crypto`: `randomBytesAsync`,
+  `randomIntAsync`, `signAsync`, `verifyAsync`, `diffieHellmanAsync`. Колбэк — ошибка с подсказкой
   ([docs/crypto.md](docs/crypto.md), раздел 5). Есть и `generatePrimeSync` / `checkPrimeSync`.
 - **Целые параметры — `int`**: `keylen`, `iterations`, `N`, `r`, `p`, `maxmem`, параметры
   `argon2`, `modulusLength`, `outputLength`, `authTagLength` и другие; `double` — ошибка с

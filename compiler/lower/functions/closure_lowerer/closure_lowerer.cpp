@@ -52,7 +52,7 @@ FunctionDecl *knownFunction(const Expr *expr) {
     return name->func->decl;
   }
   if (VarSymbol *var = name->var) {
-    return var->function ? var->function : var->isConst ? var->lambda : nullptr;
+    return var->function() ? var->function() : var->isConst ? var->lambda() : nullptr;
   }
 
   return nullptr;
@@ -70,7 +70,7 @@ const Type *ClosureLowerer::typeOf(const VarSymbol *var) {
   if (var->type) {
     return var->type;
   }
-  const FunctionDecl *fn = var->function ? var->function : var->lambda;
+  const FunctionDecl *fn = var->function() ? var->function() : var->lambda();
 
   return functionTypeOf(fn->sym);
 }

@@ -63,10 +63,6 @@ public:
     return nullptr;
   }
   virtual Expr *checkModuleMember(Checker &, MemberExpr *) const { return nullptr; }
-  virtual Expr *checkPromisifiedCall(Checker &, CallExpr *, llvm::StringRef, llvm::SMLoc) const {
-    return nullptr;
-  }
-  virtual bool promisifies(llvm::StringRef) const { return false; }
 
   virtual bool lowers(Builtin) const { return false; }
   virtual llvm::Value *lowerCall(Lowering &, CallExpr *) const { return nullptr; }

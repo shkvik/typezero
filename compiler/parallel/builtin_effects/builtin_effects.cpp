@@ -406,7 +406,7 @@ void BuiltinEffects::builtinEffects(const CallExpr *c, const Expr *recv) {
     rec.byObject = self ? self->type : nullptr;
     rec.noSelf = self && self->type && self->type->isUndefined();
     if (auto *name = dyn_cast_or_null<NameExpr>(fn); name && name->var) {
-      rec.reflectNames = name->var->reflectNames;
+      rec.reflectNames = name->var->reflectNames();
     }
     return;
   }

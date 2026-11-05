@@ -23,6 +23,9 @@ std::optional<NodeModule> moduleOf(llvm::StringRef path) {
   if (path == "tz:fs") {
     return NodeModule::TzFs;
   }
+  if (path == "tz:crypto") {
+    return NodeModule::TzCrypto;
+  }
   llvm::StringRef bare = path;
   bare.consume_front("node:");
   if (bare == "fs") {
@@ -64,9 +67,6 @@ std::optional<NodeModule> moduleOf(llvm::StringRef path) {
   if (bare == "crypto") {
     return NodeModule::Crypto;
   }
-  if (bare == "util") {
-    return NodeModule::Util;
-  }
 
   return std::nullopt;
 }
@@ -78,7 +78,7 @@ std::string missingModule(llvm::StringRef path) {
       return "built-in module " + quoted + " is not supported yet";
     }
     return "there is no built-in module " + quoted +
-           "; tz has 'tz:io', 'tz:fs', 'tz:http', 'tz:http2' and 'tz:sync'";
+           "; tz has 'tz:io', 'tz:fs', 'tz:crypto', 'tz:http', 'tz:http2' and 'tz:sync'";
   }
   llvm::StringRef bare = path;
   bare.consume_front("node:");
@@ -137,12 +137,12 @@ llvm::StringRef typicalName(NodeModule module) {
     return "readLine";
   case NodeModule::TzFs:
     return "replaceSync";
+  case NodeModule::TzCrypto:
+    return "randomBytesAsync";
   case NodeModule::ChildProcess:
     return "execFileSync";
   case NodeModule::Crypto:
     return "createHash";
-  case NodeModule::Util:
-    return "promisify";
   }
 
   return "x";
@@ -379,31 +379,6 @@ Expr *BuiltinModuleChecker::checkNodeMember(MemberExpr *member) {
   return nodeValue(inner, member);
 }
 
-std::optional<llvm::StringRef> BuiltinModuleChecker::promisifyTarget(Expr *init) {
-  auto *call = dyn_cast_or_null<CallExpr>(init);
-  auto *callee = call ? dyn_cast<NameExpr>(call->callee) : nullptr;
-  const Checker::NodeName *n = callee ? nodeName(callee->name) : nullptr;
-  if (!n || n->module != NodeModule::Util || n->name != "promisify") {
-    return std::nullopt;
-  }
-  auto *fn = call->args.size() == 1 && !call->hasSpread() ? dyn_cast<NameExpr>(call->args[0])
-                                                           : nullptr;
-  const Checker::NodeName *target = fn ? nodeName(fn->name) : nullptr;
-  bool known = target && llvm::any_of(checker_.features_->all(), [&](const Feature *feature) {
-                 return feature->promisifies(target->name);
-               });
-  if (!target || target->module != NodeModule::Crypto || !known) {
-    checker_.diags_.error(call->loc(),
-                          "'promisify' in tz takes a function of node:crypto that has a "
-                          "callback form: scrypt, pbkdf2, argon2, hkdf, randomFill, randomBytes, "
-                          "randomInt, generateKey, generateKeyPair, generatePrime, checkPrime, "
-                          "sign, verify or diffieHellman");
-    return llvm::StringRef();
-  }
-
-  return target->name;
-}
-
 Expr *BuiltinModuleChecker::checkNodeCall(CallExpr *call, const Type *expected) {
   if (call->optional) {
     return nullptr;
@@ -411,15 +386,6 @@ Expr *BuiltinModuleChecker::checkNodeCall(CallExpr *call, const Type *expected) 
   Checker::NodeName target{NodeModule::Fs, {}};
   llvm::SMLoc loc;
   if (auto *name = dyn_cast<NameExpr>(call->callee)) {
-    Checker::ScopeEntry entry = checker_.scopes().lookup(name->name);
-    if (entry.var && !entry.var->promisified.empty()) {
-      for (const Feature *feature : checker_.features_->all()) {
-        if (Expr *checked =
-                feature->checkPromisifiedCall(checker_, call, entry.var->promisified, name->loc())) {
-          return checked;
-        }
-      }
-    }
     const Checker::NodeName *n = nodeName(name->name);
     if (!n) {
       return nullptr;

@@ -120,10 +120,12 @@ OpenSSL быстрее Go. В node те же функции идут через 
     64)`, так же `pbkdf2`, `argon2`, `hkdf`, `randomFill`, `generateKey`, `generateKeyPair`,
     `generatePrime`, `checkPrime`.
   - У `randomBytes`, `randomInt`, `sign`, `verify` и `diffieHellman` вызов без колбэка в node
-    синхронный — это имя занято, поэтому они идут через `promisify` из `node:util`, как в
-    документации node: `const randomBytesAsync = promisify(randomBytes)`, затем
-    `await randomBytesAsync(32)`. `promisify` годится и для первых девяти. Его результат
-    держат в `const` и только вызывают; на другие функции `promisify` — ошибка.
+    синхронный — это имя занято, поэтому асинхронная форма лежит в `tz:crypto` под своим
+    именем: `randomBytesAsync`, `randomIntAsync`, `signAsync`, `verifyAsync`,
+    `diffieHellmanAsync` (решено 6 ноября): `import { randomBytesAsync } from "tz:crypto"`, затем
+    `await randomBytesAsync(32)`. Это обычные функции, их только вызывают. `promisify` из
+    `node:util` в tz нет: колбэков нет, и `promisify` был бы формой, которую программист сам
+    написать не может.
   - Вызов с колбэком — ошибка с подсказкой. Замер (32 потока, scrypt N = 2¹⁷): пока идут 64
     хеша, сервер tz отвечает на простой запрос за 6 мс (с `scryptSync` — 820 мс).
   - `generatePrimeSync` / `checkPrimeSync` — тоже есть; простое число — `ArrayBuffer`

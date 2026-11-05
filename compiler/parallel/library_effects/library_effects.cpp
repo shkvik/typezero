@@ -297,8 +297,8 @@ void LibraryEffects::poolCreate(const Expr *f) {
     decl = fe->fn;
   } else if (auto *n = dyn_cast<NameExpr>(f); n && n->func) {
     decl = n->func->decl;
-  } else if (n && n->var && (n->var->function || n->var->lambda)) {
-    decl = n->var->function ? n->var->function : n->var->lambda;
+  } else if (n && n->var && (n->var->function() || n->var->lambda())) {
+    decl = n->var->function() ? n->var->function() : n->var->lambda();
   }
   if (!result || !result->isResult() || !result->okType() || !decl) {
     analysis_.poolOpen = true;
@@ -315,8 +315,8 @@ void LibraryEffects::listen(const Expr *f, Channel channel) {
     decl = fe->fn;
   } else if (auto *n = dyn_cast<NameExpr>(f); n && n->func) {
     decl = n->func->decl;
-  } else if (n && n->var && (n->var->function || n->var->lambda)) {
-    decl = n->var->function ? n->var->function : n->var->lambda;
+  } else if (n && n->var && (n->var->function() || n->var->lambda())) {
+    decl = n->var->function() ? n->var->function() : n->var->lambda();
   }
   if (decl && decl->body && !analysis_.isLibrary(decl)) {
     int fi = analysis_.codeWalk.discover(decl);

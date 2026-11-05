@@ -373,7 +373,7 @@ void CodeWalk::declarator(const VarDeclarator &d) {
     return;
   }
   Use use;
-  if (d.sym && d.sym->lambda) {
+  if (d.sym && d.sym->lambda()) {
     use.lambda = true;
   }
   analysis_.exprWalk.expr(d.init, use);

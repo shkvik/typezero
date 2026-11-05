@@ -176,7 +176,7 @@ Refs FlowCalls::call(CallExpr *c) {
     receiverType =
         flows_.flowStmts().currentThis() ? flows_.flowStmts().currentThis()->type : nullptr;
     superCtor = true;
-  } else if (!callee || !(callee->func || (callee->var && callee->var->lambda))) {
+  } else if (!callee || !(callee->func || (callee->var && callee->var->lambda()))) {
     flows_.flowExprs().expr(c->callee);
   }
   std::vector<Refs> args;
@@ -192,8 +192,8 @@ Refs FlowCalls::call(CallExpr *c) {
                                : c->method && c->method->decl ? c->method->decl
                                                               : nullptr;
   if (!target) {
-    if (callee && callee->var && callee->var->lambda) {
-      target = callee->var->lambda;
+    if (callee && callee->var && callee->var->lambda()) {
+      target = callee->var->lambda();
     }
   }
   if (!target) {
@@ -231,7 +231,7 @@ void FlowCalls::callback(const Expr *arg, const Refs &values) {
   if (auto *f = llvm::dyn_cast<FunctionExpr>(FlowExprs::ownExpr(arg))) {
     fn = f->fn;
   } else if (auto *n = llvm::dyn_cast<NameExpr>(FlowExprs::ownExpr(arg))) {
-    fn = n->func && n->func->decl ? n->func->decl : n->var ? n->var->lambda : nullptr;
+    fn = n->func && n->func->decl ? n->func->decl : n->var ? n->var->lambda() : nullptr;
   }
   if (!fn) {
     return;

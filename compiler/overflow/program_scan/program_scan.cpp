@@ -308,11 +308,11 @@ void ProgramScan::scanExpr(const Expr *expr, bool consumed) {
       if (name->func && name->func->decl) {
         check_.unknownCallers_.insert(name->func->decl);
       }
-      if (name->var && name->var->function) {
-        check_.unknownCallers_.insert(name->var->function);
+      if (name->var && name->var->function()) {
+        check_.unknownCallers_.insert(name->var->function());
       }
-      if (name->var && name->var->lambda) {
-        check_.unknownCallers_.insert(name->var->lambda);
+      if (name->var && name->var->lambda()) {
+        check_.unknownCallers_.insert(name->var->lambda());
       }
     }
     break;

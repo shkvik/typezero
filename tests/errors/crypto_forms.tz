@@ -12,7 +12,7 @@ import {
   createSha,
 } from "node:crypto"
 
-// expect-error: 'randomBytes' with a callback is not supported: tz has no callback forms of node:crypto (docs/crypto.md, section 5); call it without one and use what it returns: 'const bytes = randomBytes(n)', or run it on the thread pool with 'promisify' of node:util: 'const randomBytesAsync = promisify(randomBytes)'
+// expect-error: 'randomBytes' with a callback is not supported: tz has no callback forms of node:crypto (docs/crypto.md, section 5); call it without one and use what it returns: 'const bytes = randomBytes(n)', or run it on the thread pool with 'randomBytesAsync' of "tz:crypto": 'await randomBytesAsync(...)'
 randomBytes(16, (err: string | undefined, bytes: Buffer) => console.log(bytes))
 // expect-error: 'randomInt' with a callback is not supported
 randomInt(10, (err: string | undefined, n: int) => console.log(n))

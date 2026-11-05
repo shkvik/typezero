@@ -24,7 +24,7 @@ const FunctionDecl *directFunction(const Expr *expr) {
       return name->func->decl;
     }
     if (const VarSymbol *var = name->var) {
-      return var->function ? var->function : var->isConst ? var->lambda : nullptr;
+      return var->function() ? var->function() : var->isConst ? var->lambda() : nullptr;
     }
   }
 

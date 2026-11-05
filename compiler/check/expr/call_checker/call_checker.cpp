@@ -318,9 +318,9 @@ Expr *CallChecker::checkCall(CallExpr *call, const Type *expected) {
       return checked;
     }
     VarSymbol *var = entry.var;
-    FunctionDecl *known = var ? (var->function  ? var->function
-                                 : var->isConst ? var->lambda
-                                                : nullptr)
+    FunctionDecl *known = var ? (var->function() ? var->function()
+                                 : var->isConst  ? var->lambda()
+                                                 : nullptr)
                               : nullptr;
     if (known && known->sym) {
       name->var = var;
