@@ -1,6 +1,7 @@
 #pragma once
 
 #include "compiler/check/checker/checker.h"
+#include "compiler/result/result/result.h"
 
 namespace tz {
 
@@ -19,6 +20,9 @@ public:
   void checkFieldsSet(llvm::SMLoc loc);
 
 private:
+  Result<const FunctionDecl *, std::string> thisOf(const FunctionDecl *current) const;
+  void reportThis(llvm::SMLoc loc, llvm::StringRef code);
+
   Checker &checker_;
 };
 

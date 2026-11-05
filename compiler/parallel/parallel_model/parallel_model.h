@@ -215,7 +215,9 @@ struct CallRec {
 struct FnInfo {
   const FunctionDecl *decl = nullptr;
   const FunctionDecl *thisOwner = nullptr;
-  bool async = false, asyncGen = false, syncGen = false;
+  bool async = false;
+  bool asyncGen = false;
+  bool syncGen = false;
   std::vector<Segment> segs;
   std::vector<CallRec> calls;
   llvm::DenseMap<const Node *, unsigned> segOf;

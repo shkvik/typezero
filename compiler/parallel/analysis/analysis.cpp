@@ -43,13 +43,9 @@ using llvm::dyn_cast_or_null;
 using llvm::isa;
 
 const FunctionDecl *Analysis::thisOwnerOf(const FunctionDecl *function) const {
-  for (; function; function = function->parent) {
-    if (function->takesThis()) {
-      return function;
-    }
-    if (!function->isArrow) {
-      return nullptr;
-    }
+  const FunctionDecl *source = function ? function->thisSource() : nullptr;
+  if (source && source->takesThis()) {
+    return source;
   }
 
   return nullptr;

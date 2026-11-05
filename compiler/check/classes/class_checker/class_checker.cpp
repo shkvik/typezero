@@ -28,7 +28,8 @@ void collectMemberCalls(const Stmt *body, llvm::StringSet<> &names) {
   });
 }
 
-ClassChecker::ClassChecker(Checker &checker) : checker_(checker) {}
+ClassChecker::ClassChecker(Checker &checker)
+    : checker_(checker) {}
 
 void ClassChecker::checkClassStmt(ClassDecl *cls) {
   if (checker_.scopes_.size() != 1 || !checker_.functions_.empty() || !cls->type) {
@@ -189,55 +190,68 @@ void ClassChecker::checkFieldsSet(llvm::SMLoc loc) {
                unset + "?: T'");
 }
 
+Result<const FunctionDecl *, std::string> ClassChecker::thisOf(const FunctionDecl *current) const {
+  const FunctionDecl *source = current ? current->thisSource() : nullptr;
+  if (!source) {
+    return err("THIS_OUTSIDE_METHOD");
+  }
+
+  bool hasThis = source->takesThis() || source->hasThisParam();
+  if (!hasThis && source->cls && source->isStatic) {
+    return err("THIS_IN_STATIC_METHOD");
+  }
+  if (!hasThis) {
+    return err("THIS_IN_PLAIN_FUNCTION");
+  }
+
+  return ok(source);
+}
+
+void ClassChecker::reportThis(llvm::SMLoc loc, llvm::StringRef code) {
+  llvm::StringRef member = checker_.thisMember_.empty() ? "x" : checker_.thisMember_;
+  if (code == "THIS_IN_STATIC_METHOD") {
+    const ClassDecl *cls = checker_.currentDecl()->thisSource()->cls;
+    checker_.diags_.error(loc, "in a static method 'this' would be the class itself; use the "
+                               "class's name: '" +
+                                   cls->name + "." + member + "'");
+    return;
+  }
+  if (code == "THIS_IN_PLAIN_FUNCTION") {
+    checker_.diags_.error(loc, "a 'function' has no 'this' of its own; use an arrow function, "
+                               "which sees the 'this' of the method around it");
+    return;
+  }
+  if (checker_.staticInit_ && checker_.currentClass_) {
+    checker_.diags_.error(loc, "in a static field 'this' would be the class itself; use the "
+                               "class's name: '" +
+                                   checker_.currentClass_->name + "." + member + "'");
+    return;
+  }
+
+  checker_.diags_.error(loc, "'this' is used outside of a method; it exists in the methods "
+                             "of classes and object literals");
+}
+
 Expr *ClassChecker::checkThis(NameExpr *name) {
   name->type = Type::error();
-  FunctionDecl *method = nullptr;
-  for (FunctionDecl *fn : llvm::reverse(checker_.functions_)) {
-    if (fn->takesThis()) {
-      method = fn;
-      break;
-    }
-    if (fn->isArrow) {
-      continue;
-    }
-    if (fn->sym && fn->sym->hasThis && !fn->params.empty() && fn->params[0].sym) {
-      VarSymbol *var = fn->params[0].sym;
-      name->var = var;
-      checker_.nestedFunctions().noteUse(var, name->loc());
-      name->type = var->type;
-      if (const Type *narrowed = checker_.genericChecker().narrowedType(var)) {
-        return checker_.typeRelations().convert(name, narrowed);
-      }
-      return name;
-    }
-    if (fn->cls && fn->isStatic) {
-      checker_.diags_.error(name->loc(),
-                            "in a static method 'this' would be the class itself; use the "
-                            "class's name: '" +
-                                fn->cls->name + "." +
-                                (checker_.thisMember_.empty() ? "x" : checker_.thisMember_) + "'");
-    } else {
-      checker_.diags_.error(name->loc(),
-                            "a 'function' has no 'this' of its own; use an arrow function, "
-                            "which sees the 'this' of the method around it");
+  Result<const FunctionDecl *, std::string> found = thisOf(checker_.currentDecl());
+  if (found.isErr()) {
+    reportThis(name->loc(), found.error());
+    return name;
+  }
+
+  const FunctionDecl *source = found.value();
+  if (!source->takesThis()) {
+    VarSymbol *var = source->params[0].sym;
+    name->var = var;
+    checker_.nestedFunctions().noteUse(var, name->loc());
+    name->type = var->type;
+    if (const Type *narrowed = checker_.genericChecker().narrowedType(var)) {
+      return checker_.typeRelations().convert(name, narrowed);
     }
     return name;
   }
-  if (!method) {
-    if (checker_.staticInit_ && checker_.currentClass_) {
-      checker_.diags_.error(name->loc(),
-                            "in a static field 'this' would be the class itself; use the "
-                            "class's name: '" +
-                                checker_.currentClass_->name + "." +
-                                (checker_.thisMember_.empty() ? "x" : checker_.thisMember_) + "'");
-    } else {
-      checker_.diags_.error(name->loc(),
-                            "'this' is used outside of a method; it exists in the methods "
-                            "of classes and object literals");
-    }
-    return name;
-  }
-  VarSymbol *var = method->thisVar;
+  VarSymbol *var = source->thisVar;
   if (!var) {
     return name;
   }

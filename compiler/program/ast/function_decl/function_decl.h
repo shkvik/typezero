@@ -66,6 +66,8 @@ struct FunctionDecl : Stmt {
   bool takesThis() const {
     return cls && !isStatic;
   }
+  bool hasThisParam() const;
+  const FunctionDecl *thisSource() const;
   bool isAbstract = false;
   bool isOverride = false;
   FunctionDecl *overrides = nullptr;
