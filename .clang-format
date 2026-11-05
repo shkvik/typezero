@@ -4,3 +4,4 @@ InsertBraces: true
 FixNamespaceComments: false
 IncludeBlocks: Merge
 PackConstructorInitializers: Never
+AllowShortFunctionsOnASingleLine: Empty
