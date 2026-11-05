@@ -268,7 +268,7 @@ void StoreLowerer::storeIn(llvm::Value *owner, const Type *ownerType, llvm::Valu
 void StoreLowerer::storeVar(const VarSymbol *var, llvm::Value *address, llvm::Value *value,
                             bool replacing) {
   const Type *type = ClosureLowerer::typeOf(var);
-  if (var->isGlobal && var->usedInFunction) {
+  if (var->isGlobal() && var->usedInFunction()) {
     publishValue(value, type);
   } else if (var->boxed() &&
              !(lowering_.isCyclicBox(type) && lowering_.memory().mayHoldMember(type))) {

@@ -189,7 +189,7 @@ bool EmitterChecker::ownsEmitter(const Expr *emitter) const {
   }
   auto *name = dyn_cast<NameExpr>(emitter);
   const FunctionDecl *fn = checker_.currentDecl();
-  if (!name || !name->var || !fn || name->var->owner != fn || name->var->isGlobal ||
+  if (!name || !name->var || !fn || name->var->owner() != fn || name->var->isGlobal() ||
       name->var == fn->thisVar()) {
     return false;
   }

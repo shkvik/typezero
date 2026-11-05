@@ -383,7 +383,7 @@ NestedGroup *NestedFunctions::declareNested(BlockStmt *block) {
     var->name = fn->name;
     var->loc = fn->loc();
     var->isConst = true;
-    var->owner = checker_.currentDecl();
+    var->place = VarSymbol::localPlace(checker_.currentDecl(), 0);
     var->function = fn;
     fn->var = var;
     checker_.functionChecker().declareFunction(fn, var);
@@ -436,7 +436,7 @@ void NestedFunctions::finishGroup(NestedGroup *group) {
     }
     for (FunctionDecl *fn : reached) {
       for (VarSymbol *var : fn->captures) {
-        if (var->owner == group->owner && var->declSeq > use.seq) {
+        if (var->owner() == group->owner && var->declSeq() > use.seq) {
           return var;
         }
       }
@@ -457,7 +457,8 @@ void NestedFunctions::finishGroup(NestedGroup *group) {
 }
 
 void NestedFunctions::noteUse(VarSymbol *var, llvm::SMLoc loc) {
-  if (var->isGlobal) {
+  LocalVarState *state = var->local();
+  if (!state) {
     return;
   }
   if (FunctionDecl *member = var->function;
@@ -466,7 +467,7 @@ void NestedFunctions::noteUse(VarSymbol *var, llvm::SMLoc loc) {
   }
   for (size_t i = checker_.functions_.size(); i-- > 0;) {
     FunctionDecl *fn = checker_.functions_[i];
-    if (fn == var->owner || fn == var->lambda) {
+    if (fn == var->owner() || fn == var->lambda) {
       break;
     }
     if (var->function && fn->group && fn->group == var->function->group) {
@@ -481,10 +482,10 @@ void NestedFunctions::noteUse(VarSymbol *var, llvm::SMLoc loc) {
     if (fn->group && !llvm::is_contained(fn->group->captures, var)) {
       fn->group->captures.push_back(var);
     }
-    var->captured = true;
+    state->captured = true;
     unsigned created = fn->group ? fn->group->creationSeq : fn->creationSeq;
-    if (created <= var->declSeq) {
-      var->capturedEarly = true;
+    if (created <= state->declSeq) {
+      state->capturedEarly = true;
     }
   }
 }

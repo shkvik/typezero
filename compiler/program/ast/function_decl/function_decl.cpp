@@ -3,137 +3,168 @@
 namespace tz {
 
 ClassMember *FunctionDecl::member() {
-  return role.as<ClassMember>();
+  return this->role.as<ClassMember>();
 }
 
 const ClassMember *FunctionDecl::member() const {
-  return role.as<ClassMember>();
+  return this->role.as<ClassMember>();
 }
 
 Overriding *FunctionDecl::overriding() {
-  ClassMember *classMember = member();
+  ClassMember *classMember = this->member();
   if (!classMember) {
     return nullptr;
   }
 
-  return classMember->method.match(
-      [](InstanceMethod &method) -> Overriding * { return &method.overriding; },
-      [](StaticMethod &) -> Overriding * { return nullptr; },
-      [](Constructor &) -> Overriding * { return nullptr; },
-      [](AbstractMethod &method) -> Overriding * { return &method.overriding; });
+  Overriding *found = nullptr;
+  switch (classMember->method.kind()) {
+    case MethodKind::INSTANCE_METHOD:
+      found = &classMember->method.as<InstanceMethod>()->overriding;
+      break;
+    case MethodKind::STATIC_METHOD:
+      break;
+    case MethodKind::CONSTRUCTOR:
+      break;
+    case MethodKind::ABSTRACT_METHOD:
+      found = &classMember->method.as<AbstractMethod>()->overriding;
+      break;
+  }
+
+  return found;
 }
 
 const Overriding *FunctionDecl::overriding() const {
-  const ClassMember *classMember = member();
+  const ClassMember *classMember = this->member();
   if (!classMember) {
     return nullptr;
   }
 
-  return classMember->method.match(
-      [](const InstanceMethod &method) -> const Overriding * { return &method.overriding; },
-      [](const StaticMethod &) -> const Overriding * { return nullptr; },
-      [](const Constructor &) -> const Overriding * { return nullptr; },
-      [](const AbstractMethod &method) -> const Overriding * { return &method.overriding; });
+  const Overriding *found = nullptr;
+  switch (classMember->method.kind()) {
+    case MethodKind::INSTANCE_METHOD:
+      found = &classMember->method.as<InstanceMethod>()->overriding;
+      break;
+    case MethodKind::STATIC_METHOD:
+      break;
+    case MethodKind::CONSTRUCTOR:
+      break;
+    case MethodKind::ABSTRACT_METHOD:
+      found = &classMember->method.as<AbstractMethod>()->overriding;
+      break;
+  }
+
+  return found;
 }
 
 ClassDecl *FunctionDecl::cls() const {
-  const ClassMember *classMember = member();
+  const ClassMember *classMember = this->member();
 
   return classMember ? classMember->cls : nullptr;
 }
 
 bool FunctionDecl::isStatic() const {
-  const ClassMember *classMember = member();
+  const ClassMember *classMember = this->member();
 
   return classMember && classMember->method.is<StaticMethod>();
 }
 
 bool FunctionDecl::isConstructor() const {
-  const ClassMember *classMember = member();
+  const ClassMember *classMember = this->member();
 
   return classMember && classMember->method.is<Constructor>();
 }
 
 bool FunctionDecl::isAbstract() const {
-  const ClassMember *classMember = member();
+  const ClassMember *classMember = this->member();
 
   return classMember && classMember->method.is<AbstractMethod>();
 }
 
 Access FunctionDecl::access() const {
-  const ClassMember *classMember = member();
+  const ClassMember *classMember = this->member();
 
   return classMember ? classMember->access : Access::Public;
 }
 
 VarSymbol *FunctionDecl::thisVar() const {
-  const ClassMember *classMember = member();
+  const ClassMember *classMember = this->member();
   if (!classMember) {
     return nullptr;
   }
 
-  return classMember->method.match(
-      [](const InstanceMethod &method) { return method.thisVar; },
-      [](const StaticMethod &) -> VarSymbol * { return nullptr; },
-      [](const Constructor &constructor) { return constructor.thisVar; },
-      [](const AbstractMethod &method) { return method.thisVar; });
+  VarSymbol *found = nullptr;
+  switch (classMember->method.kind()) {
+    case MethodKind::INSTANCE_METHOD:
+      found = classMember->method.as<InstanceMethod>()->thisVar;
+      break;
+    case MethodKind::STATIC_METHOD:
+      break;
+    case MethodKind::CONSTRUCTOR:
+      found = classMember->method.as<Constructor>()->thisVar;
+      break;
+    case MethodKind::ABSTRACT_METHOD:
+      found = classMember->method.as<AbstractMethod>()->thisVar;
+      break;
+  }
+
+  return found;
 }
 
 unsigned FunctionDecl::variant() const {
-  const ClassMember *classMember = member();
+  const ClassMember *classMember = this->member();
 
   return classMember ? classMember->variant : 0;
 }
 
 bool FunctionDecl::isOverride() const {
-  const ClassMember *classMember = member();
+  const ClassMember *classMember = this->member();
 
   return classMember && classMember->isOverride;
 }
 
 FunctionDecl *FunctionDecl::overrides() const {
-  const Overriding *found = overriding();
+  const Overriding *found = this->overriding();
 
   return found ? found->overrides : nullptr;
 }
 
 bool FunctionDecl::overridden() const {
-  const Overriding *found = overriding();
+  const Overriding *found = this->overriding();
 
   return found && found->overridden;
 }
 
 int FunctionDecl::slot() const {
-  const Overriding *found = overriding();
+  const Overriding *found = this->overriding();
 
   return found ? found->slot : -1;
 }
 
 bool FunctionDecl::openToLate() const {
-  const Overriding *found = overriding();
+  const Overriding *found = this->overriding();
 
   return found && found->openToLate;
 }
 
 const std::vector<Decorator> &FunctionDecl::decorators() const {
   static const std::vector<Decorator> none;
-  const ClassMember *classMember = member();
+  const ClassMember *classMember = this->member();
 
   return classMember ? classMember->decorators : none;
 }
 
 VarSymbol *FunctionDecl::impl() const {
-  const ClassMember *classMember = member();
+  const ClassMember *classMember = this->member();
 
   return classMember ? classMember->impl : nullptr;
 }
 
 bool FunctionDecl::takesThis() const {
-  return cls() && !isStatic();
+  return this->cls() && !this->isStatic();
 }
 
 bool FunctionDecl::hasThisParam() const {
-  return sym && sym->hasThis && !params.empty() && params[0].sym;
+  return this->sym && this->sym->hasThis && !this->params.empty() && this->params[0].sym;
 }
 
 const FunctionDecl *FunctionDecl::thisSource() const {

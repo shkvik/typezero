@@ -171,9 +171,7 @@ void ClassDeclarer::resolveClass(ClassDecl *cls) {
       var->loc = f.loc;
       var->type = type;
       var->isConst = f.readonly;
-      var->isGlobal = true;
-      var->usedInFunction = true;
-      var->declSeq = ++checker_.seq_;
+      var->place = GlobalVar{.usedInFunction = true};
       f.var = var;
       if (auto *lit = f.readonly ? llvm::dyn_cast_or_null<IntLitExpr>(f.init) : nullptr;
           lit && lit->value <= uint64_t(std::numeric_limits<int64_t>::max())) {

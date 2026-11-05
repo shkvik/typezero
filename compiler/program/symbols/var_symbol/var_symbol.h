@@ -1,5 +1,6 @@
 #pragma once
 
+#include "compiler/program/symbols/var_symbol/var_place.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/SmallPtrSet.h"
 #include "llvm/ADT/StringMap.h"
@@ -26,17 +27,11 @@ struct VarSymbol {
   llvm::SMLoc loc;
   const Type *type = nullptr;
   bool isConst = false;
-  bool isGlobal = false;
-  bool usedInFunction = false;
   bool literalConst = false;
   bool read = false;
-
-  FunctionDecl *owner = nullptr;
-  unsigned declSeq = 0;
-  bool captured = false;
-  bool unshared = false;
   bool reassigned = false;
-  bool capturedEarly = false;
+
+  VarPlace place = TopLevelLocalVar{};
   FunctionDecl *function = nullptr;
   FunctionDecl *lambda = nullptr;
   const RegexLitExpr *regex = nullptr;
@@ -44,7 +39,18 @@ struct VarSymbol {
   std::vector<llvm::StringRef> reflectNames;
   llvm::StringRef promisified;
 
-  bool boxed() const { return captured && (reassigned || capturedEarly); }
+  static VarPlace localPlace(FunctionDecl *owner, unsigned declSeq);
+
+  LocalVarState *local();
+  const LocalVarState *local() const;
+  bool isGlobal() const;
+  bool usedInFunction() const;
+  FunctionDecl *owner() const;
+  unsigned declSeq() const;
+  bool captured() const;
+  bool capturedEarly() const;
+  bool unshared() const;
+  bool boxed() const;
 };
 
 }

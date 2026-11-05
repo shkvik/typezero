@@ -234,8 +234,8 @@ void ClosureChecker::declareOwnName(FunctionDecl *fn) {
   self->loc = fn->loc();
   self->isConst = true;
   self->lambda = fn;
-  self->owner = fn;
-  self->declSeq = ++checker_.seq_;
+  unsigned declSeq = ++checker_.seq_;
+  self->place = FunctionLocalVar{.owner = fn, .state = {.declSeq = declSeq}};
   checker_.scopes().declare(fn->ownName, fn->loc(), {self, nullptr});
 }
 
@@ -303,7 +303,9 @@ void ClosureChecker::checkStatements(BlockStmt *block) {
     if (group && i == group->firstUse) {
       group->creationSeq = ++checker_.seq_;
       for (FunctionDecl *fn : group->members) {
-        fn->var->declSeq = group->creationSeq;
+        if (LocalVarState *state = fn->var->local()) {
+          state->declSeq = group->creationSeq;
+        }
       }
     }
     checker_.block_ = block->body;

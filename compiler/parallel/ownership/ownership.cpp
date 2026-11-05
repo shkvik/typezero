@@ -92,15 +92,15 @@ bool Ownership::candidate(const FunctionDecl *fn, const VarSymbol *v) const {
 }
 
 bool Ownership::tracked(const FunctionDecl *fn, const VarSymbol *v) {
-  return fn && v && v->owner == fn && !v->isGlobal && !v->reassigned;
+  return fn && v && v->owner() == fn && !v->isGlobal() && !v->reassigned;
 }
 
 const FunctionDecl *Ownership::homeOf(const FunctionDecl *fn, const VarSymbol *v) {
-  if (!fn || !v || !v->captured || v->isGlobal || !v->owner || v->owner == fn) {
+  if (!fn || !v || !v->captured() || v->isGlobal() || !v->owner() || v->owner() == fn) {
     return nullptr;
   }
   for (const FunctionDecl *up = fn->parent; up; up = up->parent) {
-    if (up == v->owner) {
+    if (up == v->owner()) {
       return up;
     }
   }
@@ -138,7 +138,7 @@ bool Ownership::confined(const FunctionDecl *fn) const {
 }
 
 bool Ownership::confinedVar(const VarSymbol *v) const {
-  if (!v || v->isGlobal || !v->captured || !v->owner) {
+  if (!v || v->isGlobal() || !v->captured() || !v->owner()) {
     return false;
   }
   auto found = capturers_.find(v);
@@ -677,7 +677,7 @@ void Ownership::leak(const Expr *e) {
   Roots roots;
   carriers(e, roots, 0);
   for (const VarSymbol *v : roots) {
-    if (returningIn_ == fn_ && !v->captured && freshCandidate(fn_, v)) {
+    if (returningIn_ == fn_ && !v->captured() && freshCandidate(fn_, v)) {
       continue;
     }
     leaked_.insert(v);
@@ -1526,7 +1526,7 @@ std::optional<Ref> Ownership::substituted(Ref r, const FnInfo &callee, int calle
     return plain;
   }
   if (found->second.first != callee.decl) {
-    return owned->root->captured ? r : plain;
+    return owned->root->captured() ? r : plain;
   }
   const Expr *value = nullptr;
   if (found->second.second == kSelf) {

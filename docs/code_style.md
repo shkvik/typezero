@@ -23,7 +23,7 @@
 - **Ошибки — по enum и структуре на функцию**, коды в SCREAM_CASE, тексты в классах
   `ErrorText…` в `<имя>_errors.cpp`.
 - **Вид вместо флагов — `Union`**: противоречивое состояние нельзя записать; ветвление —
-  `switch` по `kind()` со всеми вариантами или `match`.
+  `switch` по `kind()` со всеми вариантами, без лямбд-обработчиков.
 - **Промежуточный результат — в переменной с именем**, лямбда — именованной переменной выше.
 - **Объявления в блоке — по длине строки**, псевдонимы `Result…` — одной длины.
 - **Комментариев нет.** Форматирует `.clang-format`.
@@ -233,11 +233,10 @@ struct ClassMember {
 - `is<T>()` — да или нет; `as<T>()` — указатель на поля этого вида или `nullptr`.
 - `switch (value.kind())` — со всеми вариантами и без `default`: забытый `case` ловит
   предупреждение C4062 (`/w44062` в CMake).
-- `match(...)` — по обработчику на каждый вид. Обработчик на два вида сразу или `auto`-лямбда
-  «на всё остальное» — ошибка компиляции, как и забытый вид.
 
 Чего нельзя: `std::get` и `std::visit` напрямую. Исключения выключены, и `std::get` на чужом
-виде роняет компилятор.
+виде роняет компилятор. Набора лямбд по одной на вид (`match`) тоже нет: ветвление читается
+сверху вниз только через `switch`.
 
 ```cpp
 ClassMember *member = fn->member();
@@ -254,6 +253,25 @@ switch (member->method.kind()) {
     member->method.as<AbstractMethod>()->thisVar = self;
     break;
 }
+```
+
+Если `switch` выбирает значение, `case` кладёт его в переменную, а `return` стоит после
+`switch`: `return` внутри каждого `case` MSVC считает путём без возврата (C4715).
+
+```cpp
+LocalVarState *state = nullptr;
+switch (this->place.kind()) {
+  case VarPlaceKind::GLOBAL_VAR:
+    break;
+  case VarPlaceKind::TOP_LEVEL_LOCAL_VAR:
+    state = &this->place.as<TopLevelLocalVar>()->state;
+    break;
+  case VarPlaceKind::FUNCTION_LOCAL_VAR:
+    state = &this->place.as<FunctionLocalVar>()->state;
+    break;
+}
+
+return state;
 ```
 
 ## Имена у промежуточных значений

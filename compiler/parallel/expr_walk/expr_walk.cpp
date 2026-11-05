@@ -281,7 +281,7 @@ void ExprWalk::indexAccess(const IndexExpr *ix, bool write) {
     if (index && index->var && analysis_.ownIndex.contains(index->var) && !index->var->reassigned &&
         !ix->mayAppend) {
       analysis_.codeWalk.touch(LocKind::OwnCell, analysis_.aliasAnalysis.refOf(ix->object),
-                               index->var->owner, write, ix->loc());
+                               index->var->owner(), write, ix->loc());
       return;
     }
     if (write && ix->mayAppend) {

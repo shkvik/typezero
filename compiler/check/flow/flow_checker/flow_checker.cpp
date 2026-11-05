@@ -34,10 +34,10 @@ bool FlowChecker::changedByCalls(const VarSymbol *var) const {
   if (var->isConst) {
     return false;
   }
-  if (var->isGlobal) {
-    return var->usedInFunction;
+  if (var->isGlobal()) {
+    return var->usedInFunction();
   }
-  if (var->captured) {
+  if (var->captured()) {
     return true;
   }
 
@@ -368,7 +368,7 @@ bool FlowChecker::staysLocal(const FunctionDecl *fn, llvm::StringRef name) {
 
 void FlowChecker::forgetCallEffects(Checker::Flow &flow) const {
   auto part = [&](const Term &t) {
-    return t.var && ((isArrayLength(t) && !t.var->unshared) || changedByCalls(t.var));
+    return t.var && ((isArrayLength(t) && !t.var->unshared()) || changedByCalls(t.var));
   };
   auto changed = [&](const Term &t) { return part(t.first()) || part(t.second()); };
   flow.facts.forgetIf([&](const Facts::Fact &f) { return changed(f.lhs) || changed(f.rhs); });

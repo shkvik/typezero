@@ -171,7 +171,7 @@ const char *Analysis::intern(llvm::StringRef name) {
 }
 
 bool Analysis::shared(const VarSymbol *v) const {
-  return (v->isGlobal || v->captured) && v->reassigned;
+  return (v->isGlobal() || v->captured()) && v->reassigned;
 }
 
 unsigned Analysis::startNode(int root) const {

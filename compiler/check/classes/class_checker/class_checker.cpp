@@ -206,8 +206,8 @@ ClassChecker::ResultNewThisSymbol ClassChecker::declareThis(FunctionDecl *fn) {
   self->loc = fn->loc();
   self->type = fn->cls()->type;
   self->isConst = true;
-  self->owner = fn;
-  self->declSeq = ++this->checker.seq_;
+  unsigned declSeq = ++this->checker.seq_;
+  self->place = FunctionLocalVar{.owner = fn, .state = {.declSeq = declSeq}};
   ClassMember *member = fn->member();
 
   switch (member->method.kind()) {

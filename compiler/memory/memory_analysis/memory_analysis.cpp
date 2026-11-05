@@ -244,7 +244,7 @@ void MemoryAnalysis::findEternals(SourceFile &file) {
     if (auto *decl = dyn_cast<VarDeclStmt>(item)) {
       for (const VarDeclarator &d : decl->decls) {
         if (d.sym && !d.alias && !d.sym->reassigned && plan_.mayHoldMember(d.sym->type) &&
-            (d.sym->usedInFunction || !file.topLevelAwait)) {
+            (d.sym->usedInFunction() || !file.topLevelAwait)) {
           plan_.eternals.insert(d.sym);
         }
       }

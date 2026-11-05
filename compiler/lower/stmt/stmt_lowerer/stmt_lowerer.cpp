@@ -130,7 +130,7 @@ void StmtLowerer::emitVarDecl(VarDeclStmt *decl) {
     }
     const VarSymbol *var = d.sym;
     llvm::Type *type = lowering_.moduleBuilder().lower(var->type);
-    bool global = var->isGlobal && var->usedInFunction;
+    bool global = var->isGlobal() && var->usedInFunction();
     llvm::Value *address = global ? lowering_.functionFrame().addressOf(var)
                                   : lowering_.functionFrame().createLocal(var, d.name);
     llvm::Value *value =

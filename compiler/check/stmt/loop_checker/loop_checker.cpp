@@ -138,7 +138,7 @@ void LoopChecker::checkForOf(ForOfStmt *stmt) {
     auto *name = dyn_cast<NameExpr>(stmt->iterable);
     bool list = name && name->var && name->type->isTuple() && !name->type->tupleRest() &&
                 llvm::any_of(checker_.functions_, [&](const FunctionDecl *fn) {
-                  return fn->listName == name->name && name->var->owner == fn;
+                  return fn->listName == name->name && name->var->owner() == fn;
                 });
     if (list) {
       auto *elements = checker_.ctx_.make<ArrayLitExpr>(name->loc());

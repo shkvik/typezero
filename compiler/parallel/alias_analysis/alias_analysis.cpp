@@ -91,13 +91,13 @@ Ref AliasAnalysis::refOf(const Expr *e) {
   }
   if (auto *n = dyn_cast<NameExpr>(e); n && n->var) {
     const VarSymbol *v = n->var;
-    if (v->owner && v->owner->thisVar() == v) {
-      if (analysis_.fn && analysis_.fn->decl != v->owner) {
+    if (v->owner() && v->owner()->thisVar() == v) {
+      if (analysis_.fn && analysis_.fn->decl != v->owner()) {
         if (std::optional<Ref> owned = analysis_.ownership.ownedRef(e)) {
           return *owned;
         }
       }
-      return Ref{RefKind::This, v->owner};
+      return Ref{RefKind::This, v->owner()};
     }
     auto it = analysis_.declInit.find(v);
     if (it != analysis_.declInit.end() && !v->reassigned && isAllocation(it->second)) {
@@ -130,7 +130,7 @@ Ref AliasAnalysis::receiverRef(const Expr *e) {
 }
 
 bool AliasAnalysis::isLocal(const VarSymbol *v) {
-  if (v->isGlobal || v->captured || v->reassigned || !holdsReferences(v->type)) {
+  if (v->isGlobal() || v->captured() || v->reassigned || !holdsReferences(v->type)) {
     return false;
   }
   auto it = analysis_.declInit.find(v);
@@ -142,7 +142,7 @@ bool AliasAnalysis::isLocal(const VarSymbol *v) {
     return false;
   }
 
-  return !analysis_.escapeScan.escapes(v->owner).contains(v);
+  return !analysis_.escapeScan.escapes(v->owner()).contains(v);
 }
 
 const Type *AliasAnalysis::typeOfRef(Ref r) const {

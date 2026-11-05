@@ -138,7 +138,9 @@ void VarChecker::checkVarDecl(VarDeclStmt *decl) {
             d.init && !d.destructured ? checker_.timerChecker().timerCallType(d.init) : nullptr) {
       early =
           checker_.scopes().declareVar(d.name, d.loc, declared ? declared : timer, decl->isConst);
-      early->declSeq = ~0u;
+      if (LocalVarState *state = early->local()) {
+        state->declSeq = ~0u;
+      }
     }
     if (d.init) {
       if (!early) {
@@ -204,7 +206,9 @@ void VarChecker::checkVarDecl(VarDeclStmt *decl) {
     }
 
     if (early) {
-      early->declSeq = ++checker_.seq_;
+      if (LocalVarState *state = early->local()) {
+        state->declSeq = ++checker_.seq_;
+      }
       d.sym = early;
     } else {
       d.sym = checker_.scopes().declareVar(d.name, d.loc, type, decl->isConst);
@@ -253,8 +257,10 @@ void VarChecker::checkVarDecl(VarDeclStmt *decl) {
           (made && (made->builtin == Builtin::ArrMap || made->builtin == Builtin::ArrFilter ||
                     made->builtin == Builtin::ArrSlice || made->builtin == Builtin::ArrConcat ||
                     made->builtin == Builtin::ArrFlatMap || made->builtin == Builtin::ArrayFrom));
-      d.sym->unshared = fresh && !d.sym->isGlobal && type->isArray() &&
-                        FlowChecker::staysLocal(d.sym->owner, d.name);
+      if (LocalVarState *state = d.sym->local()) {
+        state->unshared =
+            fresh && type->isArray() && FlowChecker::staysLocal(d.sym->owner(), d.name);
+      }
     }
     if (decl->isConst && value &&
         (isa<ObjectLitExpr>(value) || isa<StringLitExpr>(value) ||

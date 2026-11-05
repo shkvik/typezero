@@ -58,7 +58,7 @@ std::unique_ptr<llvm::Module> ModuleBuilder::generate(SourceFile &file) {
           for (VarDeclarator &d : decl->decls) {
             const Type *t = d.sym->type;
             bool value = t && (t->isNumeric() || t->isBool() || t->isString());
-            if (d.sym->usedInFunction && !(d.sym->isConst && value)) {
+            if (d.sym->usedInFunction() && !(d.sym->isConst && value)) {
               lowering_.libraryState_.insert(d.sym);
             }
           }
@@ -243,7 +243,7 @@ void ModuleBuilder::declareGlobals(SourceFile &file) {
       continue;
     }
     for (VarDeclarator &d : decl->decls) {
-      if (d.alias || !d.sym->usedInFunction) {
+      if (d.alias || !d.sym->usedInFunction()) {
         continue;
       }
       llvm::Type *type = lower(d.sym->type);

@@ -187,8 +187,8 @@ void PoolChecker::runRoots(const Expr *callback, unsigned depth,
     return;
   }
   if (auto *name = dyn_cast<NameExpr>(callback);
-      name && name->var && name->var->owner && !name->var->lambda && !name->var->function) {
-    const FunctionDecl *owner = name->var->owner;
+      name && name->var && name->var->owner() && !name->var->lambda && !name->var->function) {
+    const FunctionDecl *owner = name->var->owner();
     for (unsigned i = 0; i < owner->params.size(); ++i) {
       if (owner->params[i].sym != name->var) {
         continue;

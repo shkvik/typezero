@@ -430,10 +430,8 @@ void DecoratorChecker::decorate(ClassDecl *cls, ClassField *field, FunctionDecl 
                                         std::to_string(method->variant()));
     impl->loc = method->loc();
     impl->type = descType->field("value")->type;
-    impl->isGlobal = true;
-    impl->usedInFunction = true;
+    impl->place = GlobalVar{.usedInFunction = true};
     impl->reassigned = true;
-    impl->declSeq = ++checker_.seq_;
     checker_.scopes().declare(impl->name, impl->loc, {impl});
     method->member()->impl = impl;
     auto *lit = checker_.ctx_.make<ObjectLitExpr>(at);

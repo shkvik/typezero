@@ -54,10 +54,13 @@ VarSymbol *Scopes::declareVar(llvm::StringRef name, llvm::SMLoc loc, const Type 
   var->loc = loc;
   var->type = type;
   var->isConst = isConst;
-  var->isGlobal = checker_.scopes_.size() == 1;
-  var->usedInFunction = var->isGlobal && checker_.namesInFunctions_.contains(name);
-  var->owner = var->isGlobal ? nullptr : checker_.currentDecl();
-  var->declSeq = ++checker_.seq_;
+  if (checker_.scopes_.size() == 1) {
+    bool usedInFunction = checker_.namesInFunctions_.contains(name);
+    var->place = GlobalVar{.usedInFunction = usedInFunction};
+  } else {
+    unsigned declSeq = ++checker_.seq_;
+    var->place = VarSymbol::localPlace(checker_.currentDecl(), declSeq);
+  }
   declare(name, loc, {var, nullptr});
 
   return var;

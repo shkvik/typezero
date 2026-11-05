@@ -244,7 +244,7 @@ Expr *SetEncodingChecker::checkSetEncoding(CallExpr *call, MemberExpr *member, C
     }
   };
   std::vector<const Stmt *> body;
-  if (FunctionDecl *owner = stdinStream ? nullptr : root->owner; owner && owner->body) {
+  if (FunctionDecl *owner = stdinStream ? nullptr : root->owner(); owner && owner->body) {
     body.push_back(owner->body);
   } else if (checker_.module_) {
     for (const Stmt *item : checker_.module_->file.items) {

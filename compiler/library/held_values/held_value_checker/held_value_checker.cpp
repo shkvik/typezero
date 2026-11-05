@@ -255,7 +255,7 @@ void HeldValueChecker::stmt(const Stmt *s) {
       if (!d.sym || d.destructured || !isHeld(d.init)) {
         continue;
       }
-      if (d.sym->isGlobal) {
+      if (d.sym->isGlobal()) {
         keep(d.init, "in a module variable");
       } else {
         heldVars_.insert(d.sym);
@@ -477,9 +477,9 @@ void HeldValueChecker::assign(const AssignExpr *a) {
   const Expr *target = bare(a->target);
   if (auto *name = dyn_cast<NameExpr>(target); name && name->var) {
     const VarSymbol *var = name->var;
-    if (var->isGlobal) {
+    if (var->isGlobal()) {
       keep(a->value, "in a module variable");
-    } else if (var->owner && var->owner != current_) {
+    } else if (var->owner() && var->owner() != current_) {
       keep(a->value, "in a variable of an outer function");
     } else {
       heldVars_.insert(var);

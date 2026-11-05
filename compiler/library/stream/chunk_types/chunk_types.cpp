@@ -195,7 +195,7 @@ const Type *ChunkTypes::inferredChunkType(const std::string &site, llvm::SMLoc l
 
 void ChunkTypes::noteStreamCallback(CallExpr *call, const VarSymbol *var) {
   for (const Checker::StreamCallbackSite &site : checker_.streamCallbacks_) {
-    if (site.fn != var->owner || site.param != var->name || call->args.size() < 2) {
+    if (site.fn != var->owner() || site.param != var->name || call->args.size() < 2) {
       continue;
     }
     const Expr *data = call->args[1];

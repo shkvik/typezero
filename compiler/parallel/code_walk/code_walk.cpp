@@ -385,7 +385,7 @@ void CodeWalk::declarator(const VarDeclarator &d) {
   if (!d.sym->reassigned && analysis_.aliasAnalysis.isAllocation(init)) {
     analysis_.siteName.try_emplace(init, d.name);
   }
-  if (d.sym->capturedEarly) {
+  if (d.sym->capturedEarly()) {
     var(d.sym, true, d.loc);
   }
 }

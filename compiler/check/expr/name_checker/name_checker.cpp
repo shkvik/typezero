@@ -59,7 +59,7 @@ Expr *NameChecker::checkName(NameExpr *name) {
   }
   if (entry.var) {
     if (checker_.staticInit_ && checker_.currentClass_ && checker_.currentClass_->expression &&
-        !entry.var->isGlobal && llvm::is_contained(checker_.currentClass_->locals, name->name)) {
+        !entry.var->isGlobal() && llvm::is_contained(checker_.currentClass_->locals, name->name)) {
       checker_.diags_.error(name->loc(),
                             "a class expression cannot use '" + name->name +
                                 "', a variable of the function around it: the class is made "

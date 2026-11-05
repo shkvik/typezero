@@ -40,7 +40,7 @@ bool staysDuringCall(const Expr *expr) {
   }
   const VarSymbol *var = name->var;
 
-  return var->isConst || (!var->boxed() && !(var->isGlobal && var->usedInFunction));
+  return var->isConst || (!var->boxed() && !(var->isGlobal() && var->usedInFunction()));
 }
 
 ClassLowerer::ClassLowerer(Lowering &lowering) : lowering_(lowering) {}
