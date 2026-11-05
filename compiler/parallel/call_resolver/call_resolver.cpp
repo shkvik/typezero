@@ -1,6 +1,7 @@
 #include "compiler/parallel/call_resolver/call_resolver.h"
 #include "compiler/library/crypto/crypto_api/crypto_api.h"
 #include "compiler/parallel/alias_analysis/alias_analysis.h"
+#include "compiler/parallel/analysis/analysis.h"
 #include "compiler/parallel/call_walk/call_walk.h"
 #include "compiler/parallel/code_walk/code_walk.h"
 #include "compiler/parallel/conflicts/conflicts.h"
@@ -41,7 +42,7 @@ void CallResolver::resolve() {
     while (!analysis_.worklist.empty()) {
       unsigned fi = analysis_.worklist.front();
       analysis_.worklist.pop_front();
-      analysis_.codeWalk().walk(fi);
+      analysis_.codeWalk.walk(fi);
     }
     std::map<const Type *, std::vector<unsigned>> generators;
     for (unsigned fi = 0; fi < analysis_.fns.size(); ++fi) {
@@ -59,8 +60,8 @@ void CallResolver::resolve() {
           std::vector<unsigned> values(boxed.begin(), boxed.end());
           std::sort(values.begin(), values.end());
           for (unsigned g : values) {
-            analysis_.callWalk().addCallee(rec, analysis_.fns[g].decl,
-                                           analysis_.classRefOrNone(analysis_.fns[g]), true);
+            analysis_.callWalk.addCallee(rec, analysis_.fns[g].decl,
+                                         analysis_.classRefOrNone(analysis_.fns[g]), true);
           }
           continue;
         }
@@ -78,13 +79,13 @@ void CallResolver::resolve() {
             if (rec.reflect == CallRec::Reflect::Apply) {
               const Type *object = rec.byObject ? rec.byObject->nonOptional() : nullptr;
               if (object && object->isObject() && !object->isAnyObject() && cls->type &&
-                  !analysis_.aliasAnalysis().typesMayAlias(cls->type, object)) {
+                  !analysis_.aliasAnalysis.typesMayAlias(cls->type, object)) {
                 continue;
               }
               for (const FunctionDecl *method : cls->methods) {
                 if (!method->isStatic && (rec.reflectNames.empty() ||
                                           llvm::is_contained(rec.reflectNames, method->name))) {
-                  analysis_.callWalk().addCallee(rec, method, rec.bySelf, true);
+                  analysis_.callWalk.addCallee(rec, method, rec.bySelf, true);
                 }
               }
               continue;
@@ -98,11 +99,11 @@ void CallResolver::resolve() {
             }
             std::optional<Ref> self = Ref{RefKind::Site, rec.site};
             for (const FunctionDecl *ctor : cls->constructors) {
-              analysis_.callWalk().addCallee(rec, ctor, self, true);
+              analysis_.callWalk.addCallee(rec, ctor, self, true);
             }
             for (const ClassDecl *k = cls; k; k = k->parent) {
               if (k->init) {
-                analysis_.callWalk().addCallee(rec, k->init, self, true);
+                analysis_.callWalk.addCallee(rec, k->init, self, true);
               }
             }
           }
@@ -110,15 +111,15 @@ void CallResolver::resolve() {
         }
         if (rec.channel >= 0) {
           for (unsigned h : std::vector<unsigned>(analysis_.listeners[rec.channel])) {
-            analysis_.callWalk().addCallee(rec, analysis_.fns[h].decl,
-                                           analysis_.classRefOrNone(analysis_.fns[h]), true);
+            analysis_.callWalk.addCallee(rec, analysis_.fns[h].decl,
+                                         analysis_.classRefOrNone(analysis_.fns[h]), true);
           }
           for (const Type *t : analysis_.listenerTypes[rec.channel]) {
             auto found = analysis_.values.find(t->nonOptional());
             if (found != analysis_.values.end()) {
               for (unsigned g : std::vector<unsigned>(found->second)) {
-                analysis_.callWalk().addCallee(rec, analysis_.fns[g].decl,
-                                               analysis_.classRefOrNone(analysis_.fns[g]), true);
+                analysis_.callWalk.addCallee(rec, analysis_.fns[g].decl,
+                                             analysis_.classRefOrNone(analysis_.fns[g]), true);
               }
             }
           }
@@ -131,8 +132,8 @@ void CallResolver::resolve() {
           auto found = generators.find(rec.byType->nonOptional());
           if (found != generators.end()) {
             for (unsigned g : found->second) {
-              analysis_.callWalk().addCallee(rec, analysis_.fns[g].decl,
-                                             analysis_.classRefOrNone(analysis_.fns[g]), true);
+              analysis_.callWalk.addCallee(rec, analysis_.fns[g].decl,
+                                           analysis_.classRefOrNone(analysis_.fns[g]), true);
             }
           }
           continue;
@@ -142,9 +143,9 @@ void CallResolver::resolve() {
           for (unsigned g : std::vector<unsigned>(found->second)) {
             std::optional<Ref> self;
             if (analysis_.fns[g].thisOwner) {
-              self = analysis_.callWalk().classRef(analysis_.fns[g].thisOwner);
+              self = analysis_.callWalk.classRef(analysis_.fns[g].thisOwner);
             }
-            analysis_.callWalk().addCallee(rec, analysis_.fns[g].decl, self, true);
+            analysis_.callWalk.addCallee(rec, analysis_.fns[g].decl, self, true);
           }
         }
         if (!rec.byName.empty() && rec.byObject) {
@@ -152,12 +153,12 @@ void CallResolver::resolve() {
           for (size_t k = 0; k < analysis_.classes.size(); ++k) {
             const ClassDecl *cls = analysis_.classes[k];
             if (!cls->type ||
-                !(cls->literal || analysis_.aliasAnalysis().typesMayAlias(cls->type, object))) {
+                !(cls->literal || analysis_.aliasAnalysis.typesMayAlias(cls->type, object))) {
               continue;
             }
             for (const FunctionDecl *method : cls->methods) {
               if (method->name == rec.byName && !method->isStatic) {
-                analysis_.callWalk().addCallee(rec, method, rec.bySelf, true);
+                analysis_.callWalk.addCallee(rec, method, rec.bySelf, true);
               }
             }
           }
@@ -193,8 +194,8 @@ std::optional<Access> CallResolver::substitute(const Access &a, const FnInfo &ca
       }
     }
   }
-  bool byLibrary = rec.kind == CallKind::Inline && rec.call &&
-                   analysis_.libraryEffects().libraryTarget(rec.call);
+  bool byLibrary =
+      rec.kind == CallKind::Inline && rec.call && analysis_.libraryEffects.libraryTarget(rec.call);
   if (analysis_.isLibrary(callee.decl) || byLibrary) {
     b.origin = llvm::SMLoc();
     b.anchor = llvm::SMLoc();
@@ -206,8 +207,7 @@ std::optional<Access> CallResolver::substitute(const Access &a, const FnInfo &ca
   b.at = rec.loc;
   b.via = callee.decl;
   if (b.loc.ref.kind == RefKind::Owned) {
-    std::optional<Ref> ref =
-        analysis_.ownership().substituted(b.loc.ref, callee, caller, rec, call);
+    std::optional<Ref> ref = analysis_.ownership.substituted(b.loc.ref, callee, caller, rec, call);
     if (!ref) {
       return std::nullopt;
     }
@@ -221,7 +221,7 @@ std::optional<Access> CallResolver::substitute(const Access &a, const FnInfo &ca
       }
       b.loc.ref = *self;
     } else if (owner != callee.thisOwner || !self) {
-      b.loc.ref = analysis_.callWalk().classRef(owner);
+      b.loc.ref = analysis_.callWalk.classRef(owner);
     }
   }
 
@@ -348,7 +348,7 @@ std::optional<Ref> CallResolver::bind(const std::optional<Ref> &self,
     return caller.self;
   }
 
-  return analysis_.callWalk().classRef(owner);
+  return analysis_.callWalk.classRef(owner);
 }
 
 }

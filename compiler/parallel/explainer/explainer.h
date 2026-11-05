@@ -1,6 +1,9 @@
 #pragma once
 
-#include "compiler/parallel/analysis/analysis.h"
+#include "compiler/parallel/analysis/analysis_types.h"
+#include "llvm/Support/raw_ostream.h"
+#include <string>
+#include <vector>
 
 namespace tz::parallel {
 

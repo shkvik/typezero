@@ -61,18 +61,19 @@ void Analysis::run() {
   this->inner = intern("%inner");
   this->state = intern("%state");
   this->listenersKey = intern("%listeners");
-  codeWalk().discover(nullptr);
-  callResolver().resolve();
-  ownership().decide();
-  callResolver().fold();
-  ownership().rewrite();
-  pieces().explore();
-  pieces().findPieces();
-  pieces().findHosts();
-  pieces().buildFlow();
-  pieces().findJoins();
-  pieces().findBindings();
-  conflicts().decide();
+
+  this->codeWalk.discover(nullptr);
+  this->callResolver.resolve();
+  this->ownership.decide();
+  this->callResolver.fold();
+  this->ownership.rewrite();
+  this->pieces.explore();
+  this->pieces.findPieces();
+  this->pieces.findHosts();
+  this->pieces.buildFlow();
+  this->pieces.findJoins();
+  this->pieces.findBindings();
+  this->conflicts.decide();
 }
 
 ParallelPlan Analysis::plan() const {
@@ -109,22 +110,13 @@ ParallelPlan Analysis::plan() const {
   return plan;
 }
 
+void Analysis::explain(llvm::raw_ostream &out) { this->explainer.print(out); }
+
 Analysis::Analysis(const SourceFile &sourceFile, const llvm::SourceMgr &sourceManager)
-    : program(sourceFile), sources(sourceManager) {
-  this->codeWalkPart = std::make_unique<CodeWalk>(*this);
-  this->exprWalkPart = std::make_unique<ExprWalk>(*this);
-  this->callWalkPart = std::make_unique<CallWalk>(*this);
-  this->libraryEffectsPart = std::make_unique<LibraryEffects>(*this);
-  this->builtinCallsPart = std::make_unique<BuiltinEffects>(*this);
-  this->aliasAnalysisPart = std::make_unique<AliasAnalysis>(*this);
-  this->escapeScanPart = std::make_unique<EscapeScan>(*this);
-  this->callResolverPart = std::make_unique<CallResolver>(*this);
-  this->piecesPart = std::make_unique<Pieces>(*this);
-  this->conflictsPart = std::make_unique<Conflicts>(*this);
-  this->explainerPart = std::make_unique<Explainer>(*this);
-  this->explainNamesPart = std::make_unique<ExplainNames>(*this);
-  this->explainTitlesPart = std::make_unique<ExplainTitles>(*this);
-  this->ownershipPart = std::make_unique<Ownership>(*this);
+    : program(sourceFile), sources(sourceManager), codeWalk(*this), exprWalk(*this),
+      callWalk(*this), libraryEffects(*this), builtinCalls(*this), aliasAnalysis(*this),
+      escapeScan(*this), callResolver(*this), pieces(*this), conflicts(*this), explainer(*this),
+      explainNames(*this), explainTitles(*this), ownership(*this) {
   for (const Module *module : this->program.modules) {
     if (!module->builtin) {
       continue;
@@ -136,23 +128,53 @@ Analysis::Analysis(const SourceFile &sourceFile, const llvm::SourceMgr &sourceMa
   }
   for (const Stmt *item : this->program.items) {
     if (auto *cls = dyn_cast<ClassDecl>(item);
-        cls && !cls->builtin && !libraryEffects().inLibrary(cls->loc())) {
+        cls && !cls->builtin && !this->libraryEffects.inLibrary(cls->loc())) {
       this->programClasses.push_back(cls);
     }
   }
 }
 
 bool Analysis::isLibrary(const FunctionDecl *function) const {
-  return function && libraryEffects().inLibrary(function->loc());
+  return function && this->libraryEffects.inLibrary(function->loc());
 }
 
 void Analysis::resource(Res res, bool write, llvm::SMLoc at) {
-  codeWalk().touch(LocKind::Resource, Ref(), nullptr, write, at, res);
+  this->codeWalk.touch(LocKind::Resource, Ref(), nullptr, write, at, res);
 }
 
 std::optional<Ref> Analysis::classRefOrNone(const FnInfo &f) const {
-  return f.thisOwner ? std::optional<Ref>(callWalk().classRef(f.thisOwner)) : std::nullopt;
+  return f.thisOwner ? std::optional<Ref>(this->callWalk.classRef(f.thisOwner)) : std::nullopt;
 }
 
-Analysis::~Analysis() = default;
+const char *Analysis::intern(llvm::StringRef name) {
+  return this->names.insert(name).first->getKeyData();
+}
+
+bool Analysis::shared(const VarSymbol *v) const {
+  return (v->isGlobal || v->captured) && v->reassigned;
+}
+
+unsigned Analysis::startNode(int root) const {
+  return unsigned(this->pieceInstances.size()) + unsigned(root);
+}
+
+bool Analysis::inOtherFile(const std::string &where) {
+  return where.find(".tz:") != std::string::npos;
+}
+
+std::string Analysis::atText(const std::string &where) {
+  return inOtherFile(where) ? "at " + where : "at line " + where;
+}
+
+std::string Analysis::lineText(const std::string &where) {
+  return inOtherFile(where) ? where : "line " + where;
+}
+
+const std::vector<unsigned> &Analysis::actsOf(unsigned function, int root) const {
+  static const std::vector<unsigned> none;
+  auto found = this->actsByTask.find({function, root});
+
+  return found == this->actsByTask.end() ? none : found->second;
+}
+
 }

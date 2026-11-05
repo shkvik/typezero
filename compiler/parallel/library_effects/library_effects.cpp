@@ -1,6 +1,7 @@
 #include "compiler/parallel/library_effects/library_effects.h"
 #include "compiler/library/crypto/crypto_api/crypto_api.h"
 #include "compiler/parallel/alias_analysis/alias_analysis.h"
+#include "compiler/parallel/analysis/analysis.h"
 #include "compiler/parallel/call_resolver/call_resolver.h"
 #include "compiler/parallel/call_walk/call_walk.h"
 #include "compiler/parallel/code_walk/code_walk.h"
@@ -135,8 +136,8 @@ void LibraryEffects::libraryCall(const CallExpr *c, const FunctionDecl *decl, co
       self = Ref{RefKind::This, analysis_.fn->thisOwner};
     }
   } else if (m && c->method) {
-    analysis_.exprWalk().expr(m->object);
-    self = analysis_.aliasAnalysis().receiverRef(m->object);
+    analysis_.exprWalk.expr(m->object);
+    self = analysis_.aliasAnalysis.receiverRef(m->object);
   }
   llvm::StringRef cls = libraryClassName(decl->cls);
   llvm::StringRef name = decl->name;
@@ -144,18 +145,18 @@ void LibraryEffects::libraryCall(const CallExpr *c, const FunctionDecl *decl, co
   for (const Expr *arg : c->args) {
     libraryArg(c, cls, name, arg, at);
   }
-  CallRec &rec = analysis_.codeWalk().record(c, CallKind::Call, use, at);
+  CallRec &rec = analysis_.codeWalk.record(c, CallKind::Call, use, at);
   rec.call = c;
   if (superCtor) {
     for (const ClassDecl *k = analysis_.fn->decl ? analysis_.fn->decl->cls : nullptr; k;
          k = k->parent) {
       if (k->init) {
-        analysis_.callWalk().addCallee(rec, k->init, self);
+        analysis_.callWalk.addCallee(rec, k->init, self);
       }
     }
   } else if (c->method && c->virtualCall) {
-    for (const FunctionDecl *fn : analysis_.callWalk().methodTargets(decl, true)) {
-      analysis_.callWalk().addCallee(rec, fn, self);
+    for (const FunctionDecl *fn : analysis_.callWalk.methodTargets(decl, true)) {
+      analysis_.callWalk.addCallee(rec, fn, self);
     }
   }
   if (self && !superCtor && !isLockedClass(cls) && !isContextClass(cls)) {
@@ -209,7 +210,7 @@ void LibraryEffects::libraryArg(const CallExpr *c, llvm::StringRef cls, llvm::St
         analysis_.poolOpen = true;
       }
       if (p.spread || !v || !v->type || !v->type->nonOptional()->isFunction()) {
-        analysis_.exprWalk().expr(p.value);
+        analysis_.exprWalk.expr(p.value);
         libraryReads(v, at);
         continue;
       }
@@ -240,22 +241,22 @@ void LibraryEffects::libraryArg(const CallExpr *c, llvm::StringRef cls, llvm::St
   if (isPoolClass(cls) && name == "constructor") {
     analysis_.poolOpen = true;
   }
-  analysis_.exprWalk().expr(arg);
+  analysis_.exprWalk.expr(arg);
   libraryReads(f, at);
 }
 
 void LibraryEffects::libraryReads(const Expr *e, llvm::SMLoc at) {
   const Type *type = e && e->type ? e->type->nonOptional() : nullptr;
   if (const ClassDecl *cls = type ? type->classDecl() : nullptr; cls && cls->library) {
-    libraryState(libraryClassName(cls), "", analysis_.aliasAnalysis().refOf(e), false, at);
+    libraryState(libraryClassName(cls), "", analysis_.aliasAnalysis.refOf(e), false, at);
     return;
   }
-  analysis_.exprWalk().contents(e, false, at);
+  analysis_.exprWalk.contents(e, false, at);
 }
 
 void LibraryEffects::libraryCallback(const CallExpr *c, const Expr *f, CallKind kind, bool interval,
                                      bool handled, unsigned ownArgs, const Type *poolItem) {
-  CallRec &rec = analysis_.codeWalk().record(f, kind, {}, f->loc());
+  CallRec &rec = analysis_.codeWalk.record(f, kind, {}, f->loc());
   rec.call = c;
   if (poolItem) {
     rec.poolItem = poolItem;
@@ -266,7 +267,7 @@ void LibraryEffects::libraryCallback(const CallExpr *c, const Expr *f, CallKind 
   if (kind == CallKind::Inline) {
     rec.repeated = true;
   }
-  analysis_.callWalk().addFunctionCallees(f, f, kind);
+  analysis_.callWalk.addFunctionCallees(f, f, kind);
 }
 
 const Type *LibraryEffects::poolItemOf(const Type *fn) {
@@ -300,7 +301,7 @@ void LibraryEffects::poolCreate(const Expr *f) {
 
 void LibraryEffects::listen(const Expr *f, Channel channel) {
   f = strip(f);
-  analysis_.exprWalk().expr(f);
+  analysis_.exprWalk.expr(f);
   const FunctionDecl *decl = nullptr;
   if (auto *fe = dyn_cast<FunctionExpr>(f)) {
     decl = fe->fn;
@@ -310,7 +311,7 @@ void LibraryEffects::listen(const Expr *f, Channel channel) {
     decl = n->var->function ? n->var->function : n->var->lambda;
   }
   if (decl && decl->body && !analysis_.isLibrary(decl)) {
-    unsigned fi = analysis_.codeWalk().discover(decl);
+    unsigned fi = analysis_.codeWalk.discover(decl);
     if (!llvm::is_contained(analysis_.listeners[channel], fi)) {
       analysis_.listeners[channel].push_back(fi);
     }
@@ -324,7 +325,7 @@ void LibraryEffects::listen(const Expr *f, Channel channel) {
 
 void LibraryEffects::dispatch(const CallExpr *c, CallKind kind, Channel channel, const Use &use) {
   (void)use;
-  CallRec &rec = analysis_.codeWalk().record(c, kind, {}, c->loc());
+  CallRec &rec = analysis_.codeWalk.record(c, kind, {}, c->loc());
   rec.call = c;
   rec.channel = channel;
 }
@@ -349,10 +350,10 @@ void LibraryEffects::libraryState(llvm::StringRef cls, llvm::StringRef name,
   if (isEmitterClass(cls) || isTargetClass(cls)) {
     bool reads = name == "emit" || name == "dispatchEvent" || name == "listenerCount" ||
                  name == "listeners" || name == "rawListeners" || name == "eventNames";
-    analysis_.codeWalk().touch(LocKind::Field, *self, analysis_.listenersKey, write && !reads, at);
+    analysis_.codeWalk.touch(LocKind::Field, *self, analysis_.listenersKey, write && !reads, at);
     return;
   }
-  analysis_.codeWalk().touch(LocKind::Field, *self, analysis_.state, write, at);
+  analysis_.codeWalk.touch(LocKind::Field, *self, analysis_.state, write, at);
 }
 
 }

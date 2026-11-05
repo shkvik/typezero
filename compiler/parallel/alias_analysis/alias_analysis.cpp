@@ -1,5 +1,6 @@
 #include "compiler/parallel/alias_analysis/alias_analysis.h"
 #include "compiler/library/crypto/crypto_api/crypto_api.h"
+#include "compiler/parallel/analysis/analysis.h"
 #include "compiler/parallel/call_resolver/call_resolver.h"
 #include "compiler/parallel/call_walk/call_walk.h"
 #include "compiler/parallel/code_walk/code_walk.h"
@@ -48,7 +49,7 @@ bool AliasAnalysis::isAllocation(const Expr *e) const {
     made = strip(a->value);
   }
   if (auto *c = dyn_cast_or_null<CallExpr>(made)) {
-    if (const FunctionDecl *lib = analysis_.libraryEffects().libraryTarget(c)) {
+    if (const FunctionDecl *lib = analysis_.libraryEffects.libraryTarget(c)) {
       if (made != e) {
         return lib->isAsync;
       }
@@ -92,7 +93,7 @@ Ref AliasAnalysis::refOf(const Expr *e) {
     const VarSymbol *v = n->var;
     if (v->owner && v->owner->thisVar == v) {
       if (analysis_.fn && analysis_.fn->decl != v->owner) {
-        if (std::optional<Ref> owned = analysis_.ownership().ownedRef(e)) {
+        if (std::optional<Ref> owned = analysis_.ownership.ownedRef(e)) {
           return *owned;
         }
       }
@@ -103,7 +104,7 @@ Ref AliasAnalysis::refOf(const Expr *e) {
       if (isLocal(v)) {
         return Ref{RefKind::Local, nullptr};
       }
-      if (std::optional<Ref> owned = analysis_.ownership().ownedRef(e)) {
+      if (std::optional<Ref> owned = analysis_.ownership.ownedRef(e)) {
         return *owned;
       }
       return Ref{RefKind::Site, it->second};
@@ -112,7 +113,7 @@ Ref AliasAnalysis::refOf(const Expr *e) {
   if (isAllocation(e)) {
     return Ref{RefKind::Local, nullptr};
   }
-  if (std::optional<Ref> owned = analysis_.ownership().ownedRef(e)) {
+  if (std::optional<Ref> owned = analysis_.ownership.ownedRef(e)) {
     return *owned;
   }
 
@@ -137,11 +138,11 @@ bool AliasAnalysis::isLocal(const VarSymbol *v) {
     return false;
   }
   if (auto *n = dyn_cast<NewExpr>(it->second);
-      n && n->cls && analysis_.escapeScan().constructorLeaks(n->cls)) {
+      n && n->cls && analysis_.escapeScan.constructorLeaks(n->cls)) {
     return false;
   }
 
-  return !analysis_.escapeScan().escapes(v->owner).contains(v);
+  return !analysis_.escapeScan.escapes(v->owner).contains(v);
 }
 
 const Type *AliasAnalysis::typeOfRef(Ref r) const {

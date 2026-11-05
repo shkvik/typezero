@@ -1,6 +1,8 @@
 #pragma once
 
-#include "compiler/parallel/analysis/analysis.h"
+#include "compiler/parallel/analysis/analysis_types.h"
+#include "compiler/parallel/parallel_model/parallel_model.h"
+#include <string>
 
 namespace tz::parallel {
 

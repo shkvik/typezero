@@ -1,6 +1,7 @@
 #include "compiler/parallel/conflicts/conflicts.h"
 #include "compiler/library/crypto/crypto_api/crypto_api.h"
 #include "compiler/parallel/alias_analysis/alias_analysis.h"
+#include "compiler/parallel/analysis/analysis.h"
 #include "compiler/parallel/call_resolver/call_resolver.h"
 #include "compiler/parallel/call_walk/call_walk.h"
 #include "compiler/parallel/code_walk/code_walk.h"
@@ -136,7 +137,7 @@ void Conflicts::decide() {
     const FnInfo &f = analysis_.fns[p.fn];
     Effects effects;
     for (const Access &a : f.segs[p.seg].effects) {
-      if (!analysis_.pieces().keeps(p, a)) {
+      if (!analysis_.pieces.keeps(p, a)) {
         continue;
       }
       Access b = a;
@@ -148,7 +149,7 @@ void Conflicts::decide() {
           }
           b.loc.ref = *p.self;
         } else {
-          b.loc.ref = analysis_.callWalk().classRef(owner);
+          b.loc.ref = analysis_.callWalk.classRef(owner);
         }
       }
       effects.insert(b);
@@ -200,7 +201,7 @@ void Conflicts::decide() {
           if (ly.kind == LocKind::OwnCell) {
             ly.kind = LocKind::Elements;
           }
-          if (!analysis_.aliasAnalysis().locsMayMeet(lx, ly)) {
+          if (!analysis_.aliasAnalysis.locsMayMeet(lx, ly)) {
             continue;
           }
           if (!llvm::is_contained(shared, x.loc)) {
@@ -213,15 +214,15 @@ void Conflicts::decide() {
       if (shared.empty()) {
         continue;
       }
-      auto extend = [&](Analysis::Decision &d, const std::vector<const Touch *> &mine) {
+      auto extend = [&](Decision &d, const std::vector<const Touch *> &mine) {
         for (const Touch *t : mine) {
           for (const auto &[at, via] : t->ats) {
             if (!d.from.isValid() ||
-                analysis_.explainNames().posOf(at) < analysis_.explainNames().posOf(d.from)) {
+                analysis_.explainNames.posOf(at) < analysis_.explainNames.posOf(d.from)) {
               d.from = at;
             }
             if (!d.to.isValid() ||
-                analysis_.explainNames().posOf(d.to) < analysis_.explainNames().posOf(at)) {
+                analysis_.explainNames.posOf(d.to) < analysis_.explainNames.posOf(at)) {
               d.to = at;
             }
             if (!llvm::is_contained(d.ats, at)) {
@@ -293,7 +294,7 @@ bool Conflicts::reachers(const FunctionDecl *home, std::vector<unsigned> &out) c
 }
 
 void Conflicts::placeWaits() {
-  std::vector<Analysis::Decision> &decisions = analysis_.decisions;
+  std::vector<Decision> &decisions = analysis_.decisions;
   std::vector<llvm::DenseSet<const char *>> mine(decisions.size());
   std::map<const FunctionDecl *, std::set<const char *>> byHome;
   for (unsigned i = 0; i < decisions.size(); ++i) {
@@ -323,7 +324,7 @@ void Conflicts::placeWaits() {
       }
     }
   }
-  for (Analysis::Decision &d : decisions) {
+  for (Decision &d : decisions) {
     for (const WaitPlace &place : d.places) {
       bool moved = place.home && inner.contains(place.anchor.getPointer());
       llvm::SMLoc wait = moved ? place.anchor : place.at;

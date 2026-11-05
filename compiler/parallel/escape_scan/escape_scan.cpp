@@ -1,5 +1,6 @@
 #include "compiler/parallel/escape_scan/escape_scan.h"
 #include "compiler/library/crypto/crypto_api/crypto_api.h"
+#include "compiler/parallel/analysis/analysis.h"
 #include "compiler/parallel/call_resolver/call_resolver.h"
 #include "compiler/parallel/call_walk/call_walk.h"
 #include "compiler/parallel/code_walk/code_walk.h"
@@ -72,12 +73,12 @@ bool keepsReceiver(Builtin b, bool discarded) {
 
 EscapeScan::EscapeScan(Analysis &analysis) : analysis_(analysis) {}
 
-const Analysis::Escapes &EscapeScan::escapes(const FunctionDecl *owner) {
+const Escapes &EscapeScan::escapes(const FunctionDecl *owner) {
   auto found = analysis_.escapes.find(owner);
   if (found != analysis_.escapes.end()) {
     return found->second;
   }
-  Analysis::Escapes out;
+  Escapes out;
   if (owner) {
     for (const Param &p : owner->params) {
       scanUses(p.defaultValue, false, out);
@@ -94,7 +95,7 @@ const Analysis::Escapes &EscapeScan::escapes(const FunctionDecl *owner) {
   return analysis_.escapes[owner] = std::move(out);
 }
 
-void EscapeScan::scanStmt(const Stmt *s, Analysis::Escapes &out) {
+void EscapeScan::scanStmt(const Stmt *s, Escapes &out) {
   if (!s) {
     return;
   }
@@ -157,7 +158,7 @@ void EscapeScan::scanStmt(const Stmt *s, Analysis::Escapes &out) {
   }
 }
 
-void EscapeScan::scanUses(const Expr *e, bool safe, Analysis::Escapes &out, bool discarded) {
+void EscapeScan::scanUses(const Expr *e, bool safe, Escapes &out, bool discarded) {
   if (!e) {
     return;
   }

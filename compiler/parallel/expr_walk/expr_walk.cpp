@@ -1,6 +1,7 @@
 #include "compiler/parallel/expr_walk/expr_walk.h"
 #include "compiler/library/crypto/crypto_api/crypto_api.h"
 #include "compiler/parallel/alias_analysis/alias_analysis.h"
+#include "compiler/parallel/analysis/analysis.h"
 #include "compiler/parallel/call_resolver/call_resolver.h"
 #include "compiler/parallel/call_walk/call_walk.h"
 #include "compiler/parallel/code_walk/code_walk.h"
@@ -70,7 +71,7 @@ void ExprWalk::expr(const Expr *e, const Use &use) {
   case Expr::Kind::ObjectLit: {
     auto *o = cast<ObjectLitExpr>(e);
     if (o->cls) {
-      analysis_.codeWalk().noteClass(o->cls);
+      analysis_.codeWalk.noteClass(o->cls);
     }
     for (const ObjectLitExpr::Property &p : o->props) {
       if (p.key) {
@@ -128,10 +129,10 @@ void ExprWalk::expr(const Expr *e, const Use &use) {
     update(cast<UpdateExpr>(e)->target);
     return;
   case Expr::Kind::Call:
-    analysis_.callWalk().call(cast<CallExpr>(e), use);
+    analysis_.callWalk.call(cast<CallExpr>(e), use);
     return;
   case Expr::Kind::New:
-    analysis_.callWalk().newExpr(cast<NewExpr>(e));
+    analysis_.callWalk.newExpr(cast<NewExpr>(e));
     return;
   case Expr::Kind::Conditional: {
     auto *c = cast<ConditionalExpr>(e);
@@ -147,13 +148,13 @@ void ExprWalk::expr(const Expr *e, const Use &use) {
   case Expr::Kind::Cast: {
     auto *c = cast<CastExpr>(e);
     if (c->type && c->type->isFunction() &&
-        analysis_.callWalk().functionRef(c->operand, use, c->type)) {
+        analysis_.callWalk.functionRef(c->operand, use, c->type)) {
       expr(c->operand, use);
       return;
     }
     if (c->type && c->type->isUnknown() && c->operand->type &&
         c->operand->type->nonOptional()->isFunction()) {
-      analysis_.callWalk().unknownRef(c->operand);
+      analysis_.callWalk.unknownRef(c->operand);
     }
     expr(c->operand, c->isImplicit() ? use : Use());
     if (c->type && c->type->isString() && holdsReferences(c->operand->type)) {
@@ -176,8 +177,8 @@ void ExprWalk::expr(const Expr *e, const Use &use) {
   }
   case Expr::Kind::Function: {
     auto *fe = cast<FunctionExpr>(e);
-    analysis_.codeWalk().discover(fe->fn);
-    analysis_.callWalk().functionRef(fe, use, fe->type);
+    analysis_.codeWalk.discover(fe->fn);
+    analysis_.callWalk.functionRef(fe, use, fe->type);
     return;
   }
   case Expr::Kind::Yield:
@@ -191,16 +192,16 @@ void ExprWalk::expr(const Expr *e, const Use &use) {
 
 void ExprWalk::name(const NameExpr *n, const Use &use) {
   if (n->func || (n->var && (n->var->function || n->var->lambda))) {
-    analysis_.callWalk().functionRef(n, use, n->type);
+    analysis_.callWalk.functionRef(n, use, n->type);
     return;
   }
-  analysis_.codeWalk().var(n->var, false, n->loc());
+  analysis_.codeWalk.var(n->var, false, n->loc());
 }
 
 void ExprWalk::member(const MemberExpr *m) {
   expr(m->object);
   if (m->method) {
-    analysis_.callWalk().functionRef(m, {}, m->type);
+    analysis_.callWalk.functionRef(m, {}, m->type);
     return;
   }
   fieldAccess(m->object, m->name, false, m->loc());
@@ -213,11 +214,11 @@ void ExprWalk::fieldAccess(const Expr *object, llvm::StringRef name, bool write,
   }
   if (type->isArray()) {
     if (name == "length") {
-      analysis_.codeWalk().touch(LocKind::Field, analysis_.aliasAnalysis().refOf(object),
-                                 analysis_.length, write, at);
+      analysis_.codeWalk.touch(LocKind::Field, analysis_.aliasAnalysis.refOf(object),
+                               analysis_.length, write, at);
       if (write) {
-        analysis_.codeWalk().touch(LocKind::Elements, analysis_.aliasAnalysis().refOf(object),
-                                   nullptr, true, at);
+        analysis_.codeWalk.touch(LocKind::Elements, analysis_.aliasAnalysis.refOf(object), nullptr,
+                                 true, at);
       }
     }
     return;
@@ -226,8 +227,8 @@ void ExprWalk::fieldAccess(const Expr *object, llvm::StringRef name, bool write,
     return;
   }
   if (type->isJson()) {
-    analysis_.codeWalk().touch(LocKind::Elements, analysis_.aliasAnalysis().refOf(object), nullptr,
-                               write, at);
+    analysis_.codeWalk.touch(LocKind::Elements, analysis_.aliasAnalysis.refOf(object), nullptr,
+                             write, at);
     return;
   }
   const Field *field = nullptr;
@@ -246,16 +247,16 @@ void ExprWalk::fieldAccess(const Expr *object, llvm::StringRef name, bool write,
   for (const ClassDecl *k = type->classDecl(); k; k = k->parent) {
     if (k->library &&
         llvm::any_of(k->fields, [&](const ClassField &f) { return f.name == name; })) {
-      analysis_.libraryEffects().libraryState(
-          libraryClassName(k), name, analysis_.aliasAnalysis().receiverRef(object), write, at);
+      analysis_.libraryEffects.libraryState(libraryClassName(k), name,
+                                            analysis_.aliasAnalysis.receiverRef(object), write, at);
       return;
     }
   }
   if (!write && (field->readonly || (field->type && field->type->isLiteral()))) {
     return;
   }
-  analysis_.codeWalk().touch(LocKind::Field, analysis_.aliasAnalysis().refOf(object),
-                             analysis_.intern(name), write, at);
+  analysis_.codeWalk.touch(LocKind::Field, analysis_.aliasAnalysis.refOf(object),
+                           analysis_.intern(name), write, at);
 }
 
 void ExprWalk::indexAccess(const IndexExpr *ix, bool write) {
@@ -268,8 +269,8 @@ void ExprWalk::indexAccess(const IndexExpr *ix, bool write) {
   }
   const Type *type = ix->object->type->nonOptional();
   if (ix->keyed) {
-    analysis_.codeWalk().touch(LocKind::Field, analysis_.aliasAnalysis().refOf(ix->object),
-                               analysis_.star, write, ix->loc());
+    analysis_.codeWalk.touch(LocKind::Field, analysis_.aliasAnalysis.refOf(ix->object),
+                             analysis_.star, write, ix->loc());
     return;
   }
   if (type->isString()) {
@@ -279,23 +280,23 @@ void ExprWalk::indexAccess(const IndexExpr *ix, bool write) {
     auto *index = dyn_cast<NameExpr>(strip(ix->index));
     if (index && index->var && analysis_.ownIndex.contains(index->var) && !index->var->reassigned &&
         !ix->mayAppend) {
-      analysis_.codeWalk().touch(LocKind::OwnCell, analysis_.aliasAnalysis().refOf(ix->object),
-                                 index->var->owner, write, ix->loc());
+      analysis_.codeWalk.touch(LocKind::OwnCell, analysis_.aliasAnalysis.refOf(ix->object),
+                               index->var->owner, write, ix->loc());
       return;
     }
     if (write && ix->mayAppend) {
-      analysis_.codeWalk().touch(LocKind::Field, analysis_.aliasAnalysis().refOf(ix->object),
-                                 analysis_.length, true, ix->loc());
+      analysis_.codeWalk.touch(LocKind::Field, analysis_.aliasAnalysis.refOf(ix->object),
+                               analysis_.length, true, ix->loc());
     }
   }
-  analysis_.codeWalk().touch(LocKind::Elements, analysis_.aliasAnalysis().refOf(ix->object),
-                             nullptr, write, ix->loc());
+  analysis_.codeWalk.touch(LocKind::Elements, analysis_.aliasAnalysis.refOf(ix->object), nullptr,
+                           write, ix->loc());
 }
 
 void ExprWalk::elements(const Expr *e, bool write, llvm::SMLoc at) {
   if (e && holdsReferences(e->type)) {
-    analysis_.codeWalk().touch(LocKind::Elements, analysis_.aliasAnalysis().refOf(e), nullptr,
-                               write, at);
+    analysis_.codeWalk.touch(LocKind::Elements, analysis_.aliasAnalysis.refOf(e), nullptr, write,
+                             at);
   }
 }
 
@@ -320,15 +321,15 @@ void ExprWalk::contents(const Expr *e, bool write, llvm::SMLoc at) {
     }
     return;
   }
-  Ref ref = analysis_.aliasAnalysis().refOf(e);
+  Ref ref = analysis_.aliasAnalysis.refOf(e);
   if (ref.kind != RefKind::Local) {
-    analysis_.codeWalk().touch(LocKind::Contents, ref, nullptr, write, at);
+    analysis_.codeWalk.touch(LocKind::Contents, ref, nullptr, write, at);
     return;
   }
   const Type *type = e->type->nonOptional();
-  if (llvm::any_of(analysis_.aliasAnalysis().inside(type), holdsReferences)) {
-    analysis_.codeWalk().touch(LocKind::Contents, Ref{RefKind::Type, type}, analysis_.inner, write,
-                               at);
+  if (llvm::any_of(analysis_.aliasAnalysis.inside(type), holdsReferences)) {
+    analysis_.codeWalk.touch(LocKind::Contents, Ref{RefKind::Type, type}, analysis_.inner, write,
+                             at);
   }
 }
 
@@ -338,12 +339,12 @@ void ExprWalk::readSpread(const Expr *e, bool object, llvm::SMLoc at) {
     return;
   }
   if (type->isIterator() || type->isAsyncIterator()) {
-    analysis_.codeWalk().iterate(e, e);
+    analysis_.codeWalk.iterate(e, e);
     return;
   }
   if (object && type->isObject()) {
-    analysis_.codeWalk().touch(LocKind::Field, analysis_.aliasAnalysis().refOf(e), analysis_.star,
-                               false, at);
+    analysis_.codeWalk.touch(LocKind::Field, analysis_.aliasAnalysis.refOf(e), analysis_.star,
+                             false, at);
     return;
   }
   elements(e, false, at);
@@ -365,10 +366,10 @@ void ExprWalk::assign(const AssignExpr *a) {
   const Expr *target = a->target;
   if (auto *n = dyn_cast<NameExpr>(target)) {
     if (compound) {
-      analysis_.codeWalk().var(n->var, false, n->loc());
+      analysis_.codeWalk.var(n->var, false, n->loc());
     }
     value();
-    analysis_.codeWalk().var(n->var, true, n->loc());
+    analysis_.codeWalk.var(n->var, true, n->loc());
     return;
   }
   if (auto *m = dyn_cast<MemberExpr>(target)) {
@@ -396,8 +397,8 @@ void ExprWalk::assign(const AssignExpr *a) {
 
 void ExprWalk::update(const Expr *target) {
   if (auto *n = dyn_cast<NameExpr>(target)) {
-    analysis_.codeWalk().var(n->var, false, n->loc());
-    analysis_.codeWalk().var(n->var, true, n->loc());
+    analysis_.codeWalk.var(n->var, false, n->loc());
+    analysis_.codeWalk.var(n->var, true, n->loc());
   } else if (auto *m = dyn_cast<MemberExpr>(target)) {
     expr(m->object);
     fieldAccess(m->object, m->name, false, m->loc());
@@ -423,28 +424,28 @@ void ExprWalk::awaitExpr(const AwaitExpr *a) {
   expr(a->value, use);
   analysis_.awaits[a] = {analysis_.fi};
   if (join) {
-    Analysis::OpenJoin open = std::move(analysis_.openJoins.back());
+    OpenJoin open = std::move(analysis_.openJoins.back());
     analysis_.openJoins.pop_back();
     merge(open.active, analysis_.cur);
-    Analysis::JoinInfo &info = analysis_.joins[a];
+    JoinInfo &info = analysis_.joins[a];
     info.fn = analysis_.fi;
     merge(info.segs, open.active);
   }
-  analysis_.codeWalk().moveTo(analysis_.codeWalk().segment(a, SegKind::Await, a->loc()));
+  analysis_.codeWalk.moveTo(analysis_.codeWalk.segment(a, SegKind::Await, a->loc()));
 }
 
 void ExprWalk::yieldExpr(const YieldExpr *y) {
   expr(y->value);
   if (y->delegate && y->value) {
-    analysis_.codeWalk().iterate(y->value, y);
+    analysis_.codeWalk.iterate(y->value, y);
   }
   if (!analysis_.fn->asyncGen) {
     return;
   }
   unsigned seg =
-      analysis_.codeWalk().segment(y, y->delegate ? SegKind::Await : SegKind::Yield, y->loc());
+      analysis_.codeWalk.segment(y, y->delegate ? SegKind::Await : SegKind::Yield, y->loc());
   analysis_.fn->segs[seg].delegate = y->delegate;
-  analysis_.codeWalk().moveTo(seg);
+  analysis_.codeWalk.moveTo(seg);
 }
 
 }

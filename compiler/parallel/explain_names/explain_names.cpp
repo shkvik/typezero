@@ -1,6 +1,7 @@
 #include "compiler/parallel/explain_names/explain_names.h"
 #include "compiler/library/crypto/crypto_api/crypto_api.h"
 #include "compiler/parallel/alias_analysis/alias_analysis.h"
+#include "compiler/parallel/analysis/analysis.h"
 #include "compiler/parallel/call_resolver/call_resolver.h"
 #include "compiler/parallel/call_walk/call_walk.h"
 #include "compiler/parallel/code_walk/code_walk.h"
@@ -35,8 +36,8 @@ using llvm::dyn_cast_or_null;
 
 ExplainNames::ExplainNames(Analysis &analysis) : analysis_(analysis) {}
 
-Analysis::Pos ExplainNames::posOf(llvm::SMLoc loc) const {
-  Analysis::Pos pos;
+Pos ExplainNames::posOf(llvm::SMLoc loc) const {
+  Pos pos;
   if (!loc.isValid()) {
     return pos;
   }
@@ -213,7 +214,7 @@ std::string ExplainNames::locName(const Loc &loc) const {
     return object + "." + field.str();
   }
   case LocKind::Elements: {
-    const Type *t = analysis_.aliasAnalysis().typeOfRef(loc.ref);
+    const Type *t = analysis_.aliasAnalysis.typeOfRef(loc.ref);
     std::string what = t && t->isDict()                                 ? "entries"
                        : t && (t->isIterator() || t->isAsyncIterator()) ? "position"
                        : t && t->isBytes()                              ? "bytes"
@@ -225,7 +226,7 @@ std::string ExplainNames::locName(const Loc &loc) const {
     return "elements of " + refName(loc.ref) + ", each task its own";
   case LocKind::Contents:
     if (loc.key == analysis_.inner) {
-      return "the objects inside its own " + typeText(analysis_.aliasAnalysis().typeOfRef(loc.ref));
+      return "the objects inside its own " + typeText(analysis_.aliasAnalysis.typeOfRef(loc.ref));
     }
     return "everything in " + refName(loc.ref);
   case LocKind::Resource:
@@ -263,7 +264,7 @@ std::string ExplainNames::positions(
     if (via) {
       FnInfo info;
       info.decl = via;
-      text += " in " + analysis_.explainTitles().fnName(info);
+      text += " in " + analysis_.explainTitles.fnName(info);
     }
     if (!llvm::is_contained(parts, text)) {
       parts.push_back(text);

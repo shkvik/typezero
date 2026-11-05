@@ -1,6 +1,7 @@
 #include "compiler/parallel/explain_titles/explain_titles.h"
 #include "compiler/library/crypto/crypto_api/crypto_api.h"
 #include "compiler/parallel/alias_analysis/alias_analysis.h"
+#include "compiler/parallel/analysis/analysis.h"
 #include "compiler/parallel/call_resolver/call_resolver.h"
 #include "compiler/parallel/call_walk/call_walk.h"
 #include "compiler/parallel/code_walk/code_walk.h"
@@ -41,7 +42,7 @@ std::string ExplainTitles::fnName(const FnInfo &f) const {
     std::string owner =
         fn->cls->literal
             ? "the object " +
-                  Analysis::atText(analysis_.explainNames().where(fn->cls->literal->loc()))
+                  Analysis::atText(analysis_.explainNames.where(fn->cls->literal->loc()))
             : fn->cls->name.str();
     if (fn->isConstructor) {
       return "constructor of " + owner;
@@ -54,7 +55,7 @@ std::string ExplainTitles::fnName(const FnInfo &f) const {
   if (fn->isInstance && !fn->typeArgs.empty()) {
     name += "<";
     for (size_t i = 0; i < fn->typeArgs.size(); ++i) {
-      name += (i ? ", " : "") + analysis_.explainNames().typeText(fn->typeArgs[i]);
+      name += (i ? ", " : "") + analysis_.explainNames.typeText(fn->typeArgs[i]);
     }
     name += ">";
   }
@@ -63,7 +64,7 @@ std::string ExplainTitles::fnName(const FnInfo &f) const {
       return name;
     }
     name = (fn->isArrow ? "the arrow " : "the function ") +
-           Analysis::atText(analysis_.explainNames().where(fn->loc()));
+           Analysis::atText(analysis_.explainNames.where(fn->loc()));
     for (const FunctionDecl *up = fn->parent; up; up = up->parent) {
       if (up->isInstance) {
         FnInfo info;
@@ -100,7 +101,7 @@ std::string ExplainTitles::fnTitle(const FnInfo &f) const {
   } else {
     title += " " + fnName(f);
   }
-  title += ", " + Analysis::lineText(analysis_.explainNames().where(fn->loc()));
+  title += ", " + Analysis::lineText(analysis_.explainNames.where(fn->loc()));
   for (const FunctionDecl *up = fn->parent; up && (fn->isArrow || fn->isExpression);
        up = up->parent) {
     if (up->isInstance) {
@@ -118,12 +119,11 @@ std::string ExplainTitles::segTitle(const FnInfo &f, unsigned seg) const {
   if (s.kind == SegKind::Start) {
     return "start";
   }
-  std::string at = analysis_.explainNames().where(s.loc);
-  unsigned line = analysis_.explainNames().lineOf(s.loc), same = 0;
+  std::string at = analysis_.explainNames.where(s.loc);
+  unsigned line = analysis_.explainNames.lineOf(s.loc), same = 0;
   for (const Segment &o : f.segs) {
-    if (o.kind != SegKind::Start && analysis_.explainNames().lineOf(o.loc) == line &&
-        analysis_.explainNames().posOf(o.loc).buffer ==
-            analysis_.explainNames().posOf(s.loc).buffer) {
+    if (o.kind != SegKind::Start && analysis_.explainNames.lineOf(o.loc) == line &&
+        analysis_.explainNames.posOf(o.loc).buffer == analysis_.explainNames.posOf(s.loc).buffer) {
       ++same;
     }
   }
@@ -191,7 +191,7 @@ std::string ExplainTitles::rootTitleAt(int r, bool column) const {
     return "the top-level code";
   }
   const CallRec &rec = analysis_.fns[root.callerFn].calls[root.rec];
-  std::string place = analysis_.explainNames().where(rec.loc);
+  std::string place = analysis_.explainNames.where(rec.loc);
   if (column) {
     place += ":" + std::to_string(analysis_.sources.getLineAndColumn(rec.loc).second);
   }
@@ -208,8 +208,8 @@ std::string ExplainTitles::rootTitleAt(int r, bool column) const {
     }
     return text;
   }
-  std::string text = rec.call ? analysis_.explainNames().callText(rec.call)
-                              : fnName(analysis_.fns[root.fn]) + "()";
+  std::string text =
+      rec.call ? analysis_.explainNames.callText(rec.call) : fnName(analysis_.fns[root.fn]) + "()";
 
   return (root.multi ? "the tasks " : "the task ") + text + at;
 }
@@ -218,7 +218,7 @@ std::string ExplainTitles::contextOf(unsigned piece) const {
   const PieceInst &p = analysis_.pieceInstances[piece];
   std::string text = rootTitle(p.root);
   if (analysis_.sameTask.at(std::make_tuple(p.fn, p.seg, p.root)) > 1 && p.self) {
-    text += ", this = " + analysis_.explainNames().refName(*p.self);
+    text += ", this = " + analysis_.explainNames.refName(*p.self);
   }
 
   return text;

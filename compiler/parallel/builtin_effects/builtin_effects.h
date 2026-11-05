@@ -1,6 +1,7 @@
 #pragma once
 
-#include "compiler/parallel/analysis/analysis.h"
+#include "compiler/parallel/analysis/analysis_types.h"
+#include "compiler/program/ast/ast.h"
 
 namespace tz::parallel {
 

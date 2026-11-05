@@ -1,6 +1,7 @@
 #include "compiler/parallel/call_walk/call_walk.h"
 #include "compiler/library/crypto/crypto_api/crypto_api.h"
 #include "compiler/parallel/alias_analysis/alias_analysis.h"
+#include "compiler/parallel/analysis/analysis.h"
 #include "compiler/parallel/builtin_effects/builtin_effects.h"
 #include "compiler/parallel/call_resolver/call_resolver.h"
 #include "compiler/parallel/code_walk/code_walk.h"
@@ -96,7 +97,7 @@ void CallWalk::addCallee(CallRec &rec, const FunctionDecl *decl, std::optional<R
   if (!decl || !decl->body || analysis_.isLibrary(decl)) {
     return;
   }
-  unsigned fi = analysis_.codeWalk().discover(decl);
+  unsigned fi = analysis_.codeWalk.discover(decl);
   const FnInfo &callee = analysis_.fns[fi];
   Mode mode = Mode::Sync;
   switch (rec.kind) {
@@ -153,7 +154,7 @@ std::vector<const FunctionDecl *> CallWalk::methodTargets(const FunctionDecl *me
   while (!pending.empty()) {
     const ClassDecl *cls = pending.back();
     pending.pop_back();
-    analysis_.codeWalk().noteClass(cls);
+    analysis_.codeWalk.noteClass(cls);
     for (const FunctionDecl *fn : cls->methods) {
       for (const FunctionDecl *up = fn->overrides; up; up = up->overrides) {
         if (up == method) {
@@ -190,7 +191,7 @@ void CallWalk::registerValue(const FunctionDecl *fn, const Type *type) {
   if (!fn || !fn->body || analysis_.isLibrary(fn)) {
     return;
   }
-  unsigned fi = analysis_.codeWalk().discover(fn);
+  unsigned fi = analysis_.codeWalk.discover(fn);
   analysis_.valueFns.insert(fi);
   if (!type || !type->nonOptional()->isFunction()) {
     return;
@@ -218,7 +219,7 @@ void CallWalk::unknownRef(const Expr *e) {
   }
   for (const FunctionDecl *fn : fns) {
     if (fn && fn->body && !analysis_.isLibrary(fn)) {
-      analysis_.unknownFns.insert(analysis_.codeWalk().discover(fn));
+      analysis_.unknownFns.insert(analysis_.codeWalk.discover(fn));
     }
   }
 }
@@ -256,8 +257,8 @@ void CallWalk::call(const CallExpr *c, const Use &use) {
     builtinCall(c, use);
     return;
   }
-  if (const FunctionDecl *lib = analysis_.libraryEffects().libraryTarget(c)) {
-    analysis_.libraryEffects().libraryCall(c, lib, use);
+  if (const FunctionDecl *lib = analysis_.libraryEffects.libraryTarget(c)) {
+    analysis_.libraryEffects.libraryCall(c, lib, use);
     return;
   }
   auto *m = dyn_cast<MemberExpr>(c->callee);
@@ -268,15 +269,15 @@ void CallWalk::call(const CallExpr *c, const Use &use) {
       self = Ref{RefKind::This, analysis_.fn->thisOwner};
     }
   } else if (m && (c->method || !c->unionMethods.empty())) {
-    analysis_.exprWalk().expr(m->object);
-    self = analysis_.aliasAnalysis().receiverRef(m->object);
+    analysis_.exprWalk.expr(m->object);
+    self = analysis_.aliasAnalysis.receiverRef(m->object);
   } else if (!c->func) {
-    analysis_.exprWalk().expr(c->callee);
+    analysis_.exprWalk.expr(c->callee);
   }
   for (const Expr *arg : c->args) {
-    analysis_.exprWalk().expr(arg);
+    analysis_.exprWalk.expr(arg);
   }
-  CallRec &rec = analysis_.codeWalk().record(c, CallKind::Call, use, c->loc());
+  CallRec &rec = analysis_.codeWalk.record(c, CallKind::Call, use, c->loc());
   rec.call = c;
   if (superCtor) {
     if (c->method) {
@@ -328,7 +329,7 @@ void CallWalk::call(const CallExpr *c, const Use &use) {
   if (m) {
     rec.byName = m->name;
     rec.byObject = m->object->type;
-    rec.bySelf = analysis_.aliasAnalysis().receiverRef(m->object);
+    rec.bySelf = analysis_.aliasAnalysis.receiverRef(m->object);
   }
   const FunctionDecl *fn = analysis_.fn->decl;
   if (callee && callee->var && !callee->var->reassigned && fn &&
@@ -341,7 +342,7 @@ void CallWalk::builtinCall(const CallExpr *c, const Use &use) {
   auto *m = dyn_cast<MemberExpr>(c->callee);
   const Expr *recv = m ? m->object : nullptr;
   if (recv) {
-    analysis_.exprWalk().expr(recv);
+    analysis_.exprWalk.expr(recv);
   }
   Builtin b = c->builtin;
   Use inner;
@@ -363,12 +364,12 @@ void CallWalk::builtinCall(const CallExpr *c, const Use &use) {
       continue;
     }
     if (b == Builtin::ReflectApply && i == 0) {
-      analysis_.exprWalk().expr(strip(arg));
+      analysis_.exprWalk.expr(strip(arg));
       continue;
     }
-    analysis_.exprWalk().expr(arg, i == 0 ? inner : Use());
+    analysis_.exprWalk.expr(arg, i == 0 ? inner : Use());
   }
-  analysis_.builtinCalls().builtinEffects(c, recv);
+  analysis_.builtinCalls.builtinEffects(c, recv);
 }
 
 void CallWalk::functionArg(const CallExpr *c, const Expr *arg, CallKind kind, const Use &use) {
@@ -397,7 +398,7 @@ void CallWalk::functionArg(const CallExpr *c, const Expr *arg, CallKind kind, co
   if (b == Builtin::ArrMap && fe && fe->fn->isAsync) {
     recUse.join = use.join;
   }
-  CallRec &rec = analysis_.codeWalk().record(f, kind, recUse, f->loc());
+  CallRec &rec = analysis_.codeWalk.record(f, kind, recUse, f->loc());
   rec.call = c;
   if (kind == CallKind::Later) {
     rec.interval |= b == Builtin::SetInterval;
@@ -414,7 +415,7 @@ void CallWalk::addFunctionCallees(const Expr *f, const Expr *arg, CallKind kind)
       analysis_.fn
           ->calls[analysis_.fn->callOf.lookup(std::make_pair((const void *)f, unsigned(kind)))];
   if (auto *fe = dyn_cast<FunctionExpr>(f)) {
-    analysis_.codeWalk().discover(fe->fn);
+    analysis_.codeWalk.discover(fe->fn);
     addCallee(rec, fe->fn, closureSelf(fe->fn, *analysis_.fn));
   } else if (auto *n = dyn_cast<NameExpr>(f); n && n->func) {
     addCallee(rec, n->func->decl, std::nullopt);
@@ -423,15 +424,15 @@ void CallWalk::addFunctionCallees(const Expr *f, const Expr *arg, CallKind kind)
     addCallee(rec, decl, closureSelf(decl, *analysis_.fn));
   } else if (n && n->var && analysis_.resolvers.contains(n->var)) {
   } else if (auto *mem = dyn_cast<MemberExpr>(f); mem && mem->method) {
-    analysis_.exprWalk().expr(mem->object);
+    analysis_.exprWalk.expr(mem->object);
     CallRec &again =
         analysis_.fn
             ->calls[analysis_.fn->callOf.lookup(std::make_pair((const void *)f, unsigned(kind)))];
     for (const FunctionDecl *fn : methodTargets(mem->method->decl, mem->virtualCall)) {
-      addCallee(again, fn, analysis_.aliasAnalysis().receiverRef(mem->object));
+      addCallee(again, fn, analysis_.aliasAnalysis.receiverRef(mem->object));
     }
   } else {
-    analysis_.exprWalk().expr(arg);
+    analysis_.exprWalk.expr(arg);
     CallRec &again =
         analysis_.fn
             ->calls[analysis_.fn->callOf.lookup(std::make_pair((const void *)f, unsigned(kind)))];
@@ -441,7 +442,7 @@ void CallWalk::addFunctionCallees(const Expr *f, const Expr *arg, CallKind kind)
 
 void CallWalk::newExpr(const NewExpr *n) {
   if (n->cls && n->cls->library) {
-    analysis_.libraryEffects().libraryNew(n);
+    analysis_.libraryEffects.libraryNew(n);
     return;
   }
   if (!n->cls) {
@@ -449,17 +450,17 @@ void CallWalk::newExpr(const NewExpr *n) {
       call(n->ctor, {});
     } else {
       for (const Expr *arg : n->args) {
-        analysis_.exprWalk().expr(arg);
+        analysis_.exprWalk.expr(arg);
       }
     }
     return;
   }
-  analysis_.codeWalk().noteClass(n->cls);
+  analysis_.codeWalk.noteClass(n->cls);
   for (const Expr *arg : n->ctor ? n->ctor->args : n->args) {
-    analysis_.exprWalk().expr(arg);
+    analysis_.exprWalk.expr(arg);
   }
-  CallRec &rec = analysis_.codeWalk().record(n, CallKind::Call, {}, n->loc());
-  std::optional<Ref> self = analysis_.escapeScan().constructorLeaks(n->cls)
+  CallRec &rec = analysis_.codeWalk.record(n, CallKind::Call, {}, n->loc());
+  std::optional<Ref> self = analysis_.escapeScan.constructorLeaks(n->cls)
                                 ? Ref{RefKind::Site, n}
                                 : Ref{RefKind::Local, nullptr};
   if (n->ctor && n->ctor->func) {

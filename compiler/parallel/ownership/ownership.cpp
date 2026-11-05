@@ -1,6 +1,7 @@
 #include "compiler/parallel/ownership/ownership.h"
 #include "compiler/library/crypto/crypto_api/crypto_api.h"
 #include "compiler/parallel/alias_analysis/alias_analysis.h"
+#include "compiler/parallel/analysis/analysis.h"
 #include "compiler/parallel/escape_scan/escape_scan.h"
 #include "compiler/parallel/library_effects/library_effects.h"
 #include "compiler/parallel/parallel_helpers/parallel_helpers.h"
@@ -48,7 +49,7 @@ Ref Ownership::interned(const VarSymbol *root, const Type *type, Needs needs, bo
   made.fallback = Ref{RefKind::Type, type};
   if (whole) {
     auto init = analysis_.declInit.find(root);
-    if (init != analysis_.declInit.end() && analysis_.aliasAnalysis().isAllocation(init->second)) {
+    if (init != analysis_.declInit.end() && analysis_.aliasAnalysis.isAllocation(init->second)) {
       made.fallback = Ref{RefKind::Site, init->second};
     }
   }
@@ -161,12 +162,12 @@ bool Ownership::freshCandidate(const FunctionDecl *fn, const VarSymbol *v) const
 
 bool Ownership::freshAllocation(const Expr *e) const {
   e = strip(e);
-  if (!e || !analysis_.aliasAnalysis().isAllocation(e)) {
+  if (!e || !analysis_.aliasAnalysis.isAllocation(e)) {
     return false;
   }
   auto *n = dyn_cast<NewExpr>(e);
 
-  return !(n && n->cls && analysis_.escapeScan().constructorLeaks(n->cls));
+  return !(n && n->cls && analysis_.escapeScan.constructorLeaks(n->cls));
 }
 
 const CallExpr *Ownership::programCall(const Expr *e) const {
@@ -175,7 +176,7 @@ const CallExpr *Ownership::programCall(const Expr *e) const {
     e = strip(a->value);
   }
   auto *c = dyn_cast_or_null<CallExpr>(e);
-  if (!c || c->builtin != Builtin::None || analysis_.libraryEffects().libraryTarget(c)) {
+  if (!c || c->builtin != Builtin::None || analysis_.libraryEffects.libraryTarget(c)) {
     return nullptr;
   }
 
@@ -217,7 +218,7 @@ bool Ownership::container(const Type *type) {
     containers_.emplace();
     std::set<const Type *> library;
     for (const Stmt *item : analysis_.program.items) {
-      if (analysis_.libraryEffects().inLibrary(item->loc())) {
+      if (analysis_.libraryEffects.inLibrary(item->loc())) {
         libraryTypes(item, library);
         continue;
       }
@@ -231,7 +232,7 @@ bool Ownership::container(const Type *type) {
     for (const Type *t : candidates) {
       for (const Type *other : library) {
         if (other->kind() == Type::Kind::Object && !other->isAnyObject() &&
-            analysis_.aliasAnalysis().objectTypesMayAlias(other, t)) {
+            analysis_.aliasAnalysis.objectTypesMayAlias(other, t)) {
           containers_->erase(t);
           break;
         }
@@ -477,7 +478,7 @@ const VarSymbol *Ownership::rootOf(const FunctionDecl *fn, const Expr *e, Needs 
     if (const Expr *same = cryptoSelf(c)) {
       return rootOf(fn, same, needs, depth + 1);
     }
-    const FunctionDecl *lib = analysis_.libraryEffects().libraryTarget(c);
+    const FunctionDecl *lib = analysis_.libraryEffects.libraryTarget(c);
     auto *m = dyn_cast<MemberExpr>(c->callee);
     if (!lib || !lib->cls || lib->isStatic || lib->isAsync || lib->isGenerator || !c->method ||
         !m || c->hasSpread()) {
@@ -596,11 +597,11 @@ void Ownership::carriersOther(const Expr *e, Roots &out, unsigned depth) {
     default:
       break;
     }
-    if (analysis_.libraryEffects().libraryTarget(c) &&
-        (plainValues(c->type, 0) || analysis_.aliasAnalysis().isAllocation(c))) {
+    if (analysis_.libraryEffects.libraryTarget(c) &&
+        (plainValues(c->type, 0) || analysis_.aliasAnalysis.isAllocation(c))) {
       return;
     }
-    bool program = c->builtin == Builtin::None && !analysis_.libraryEffects().libraryTarget(c);
+    bool program = c->builtin == Builtin::None && !analysis_.libraryEffects.libraryTarget(c);
     if (auto *m = dyn_cast<MemberExpr>(c->callee);
         m && (!program || !passesOwnedSelf(c) || returnsBack(c, kSelf))) {
       carriers(m->object, out, depth + 1);
@@ -658,7 +659,7 @@ void Ownership::carriersOther(const Expr *e, Roots &out, unsigned depth) {
     carriers(cast<OptionalChainExpr>(e)->chain, out, depth + 1);
     return;
   case Expr::Kind::Await:
-    if (!analysis_.aliasAnalysis().isAllocation(e)) {
+    if (!analysis_.aliasAnalysis.isAllocation(e)) {
       carriers(cast<AwaitExpr>(e)->value, out, depth + 1);
     }
     return;
@@ -756,7 +757,7 @@ void Ownership::dirtyAll(const Expr *e) {
   const Type *type = e->type->nonOptional();
   std::vector<const Type *> &all = dirty_[analysis_.star];
   all.push_back(type);
-  for (const Type *inner : analysis_.aliasAnalysis().inside(type)) {
+  for (const Type *inner : analysis_.aliasAnalysis.inside(type)) {
     all.push_back(inner->nonOptional());
   }
 }
@@ -964,7 +965,7 @@ void Ownership::visit(const Expr *e) {
     if (assigned) {
       visit(assigned->value);
       bool kept = selfField && builds(fn_) && !leaking_.contains(fn_->thisVar) &&
-                  !analysis_.escapeScan().constructorLeaks(fn_->cls);
+                  !analysis_.escapeScan.constructorLeaks(fn_->cls);
       if (selfField && !builds(fn_) && candidate(fn_, fn_->thisVar)) {
         kept = true;
         if (collecting_) {
@@ -1078,7 +1079,7 @@ void Ownership::visitCall(const CallExpr *c) {
     }
     return;
   }
-  if (analysis_.libraryEffects().libraryTarget(c)) {
+  if (analysis_.libraryEffects.libraryTarget(c)) {
     if (m && c->method) {
       visit(m->object);
     }
@@ -1377,7 +1378,7 @@ bool Ownership::poolFresh(const Type *item) const {
     return false;
   }
   for (const auto &[type, create] : analysis_.poolCreates) {
-    if (!analysis_.aliasAnalysis().typesMayAlias(type, item)) {
+    if (!analysis_.aliasAnalysis.typesMayAlias(type, item)) {
       continue;
     }
     auto found = analysis_.fnIndex.find(create);
@@ -1461,7 +1462,7 @@ bool Ownership::fieldOpen(const FieldKey &key) {
       continue;
     }
     for (const Type *type : types->second) {
-      if (analysis_.aliasAnalysis().typesMayAlias(type, key.first)) {
+      if (analysis_.aliasAnalysis.typesMayAlias(type, key.first)) {
         return false;
       }
     }
@@ -1480,8 +1481,8 @@ bool Ownership::fieldOwn(const FieldKey &key) {
   }
   for (const Store &s : stores->second) {
     if ((s.holder && !owned_.contains(s.holder)) ||
-        (s.built && analysis_.escapeScan().constructorLeaks(s.built)) ||
-        !analysis_.aliasAnalysis().typesMayAlias(s.type, key.first)) {
+        (s.built && analysis_.escapeScan.constructorLeaks(s.built)) ||
+        !analysis_.aliasAnalysis.typesMayAlias(s.type, key.first)) {
       continue;
     }
     if (!valueOwn(s.fn, s.value, true, 0)) {
@@ -1529,7 +1530,7 @@ std::optional<Ref> Ownership::substituted(Ref r, const FnInfo &callee, unsigned 
     }
     if (builds(callee.decl) &&
         llvm::isa_and_nonnull<NewExpr>(static_cast<const Expr *>(rec.site))) {
-      bool fresh = !analysis_.escapeScan().constructorLeaks(callee.decl->cls);
+      bool fresh = !analysis_.escapeScan.constructorLeaks(callee.decl->cls);
       return fresh && needsOwn(owned->needs) ? std::nullopt : std::optional<Ref>(plain);
     }
     const FunctionDecl *from = analysis_.fns[caller].decl;
@@ -1605,7 +1606,7 @@ void Ownership::rewrite() {
           continue;
         }
         bool inner = a.loc.kind == LocKind::Contents &&
-                     llvm::any_of(analysis_.aliasAnalysis().inside(owned->type), holdsReferences);
+                     llvm::any_of(analysis_.aliasAnalysis.inside(owned->type), holdsReferences);
         if (inner) {
           b.loc.ref = Ref{RefKind::Type, owned->type};
           b.loc.key = analysis_.inner;
@@ -1681,7 +1682,7 @@ void Ownership::scan(unsigned fi) {
   if (!fn_) {
     if (collecting_) {
       for (const Stmt *item : analysis_.program.items) {
-        if (!isa<FunctionDecl>(item) && !analysis_.libraryEffects().inLibrary(item->loc())) {
+        if (!isa<FunctionDecl>(item) && !analysis_.libraryEffects.inLibrary(item->loc())) {
           visitStmt(item);
         }
       }

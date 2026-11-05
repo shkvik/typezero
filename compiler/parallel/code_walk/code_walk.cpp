@@ -1,6 +1,7 @@
 #include "compiler/parallel/code_walk/code_walk.h"
 #include "compiler/library/crypto/crypto_api/crypto_api.h"
 #include "compiler/parallel/alias_analysis/alias_analysis.h"
+#include "compiler/parallel/analysis/analysis.h"
 #include "compiler/parallel/call_resolver/call_resolver.h"
 #include "compiler/parallel/call_walk/call_walk.h"
 #include "compiler/parallel/conflicts/conflicts.h"
@@ -80,7 +81,7 @@ void CodeWalk::walk(unsigned fi) {
   const FunctionDecl *decl = analysis_.fn->decl;
   if (!decl) {
     for (const Stmt *item : analysis_.program.items) {
-      if (!isa<FunctionDecl>(item) && !analysis_.libraryEffects().inLibrary(item->loc())) {
+      if (!isa<FunctionDecl>(item) && !analysis_.libraryEffects.inLibrary(item->loc())) {
         anchored(item);
       }
     }
@@ -88,7 +89,7 @@ void CodeWalk::walk(unsigned fi) {
   }
   for (const Param &p : decl->params) {
     if (p.defaultValue) {
-      analysis_.exprWalk().expr(p.defaultValue);
+      analysis_.exprWalk.expr(p.defaultValue);
     }
   }
   stmt(decl->body);
@@ -154,7 +155,7 @@ void CodeWalk::var(const VarSymbol *v, bool write, llvm::SMLoc at) {
 }
 
 void CodeWalk::joinPoint() {
-  for (Analysis::OpenJoin &j : analysis_.openJoins) {
+  for (OpenJoin &j : analysis_.openJoins) {
     merge(j.active, analysis_.cur);
   }
 }
@@ -183,7 +184,7 @@ void CodeWalk::loop(llvm::StringRef label, llvm::function_ref<void()> head,
     }
     analysis_.targets.push_back({label, true, false, {}, {}});
     body();
-    Analysis::Target target = std::move(analysis_.targets.back());
+    Target target = std::move(analysis_.targets.back());
     analysis_.targets.pop_back();
     merge(analysis_.cur, target.continues);
     if (step) {
@@ -232,11 +233,11 @@ void CodeWalk::stmt(const Stmt *s) {
   case Stmt::Kind::Function:
     return;
   case Stmt::Kind::Expr:
-    analysis_.exprWalk().expr(cast<ExprStmt>(s)->expr);
+    analysis_.exprWalk.expr(cast<ExprStmt>(s)->expr);
     return;
   case Stmt::Kind::If: {
     auto *i = cast<IfStmt>(s);
-    analysis_.exprWalk().expr(i->cond);
+    analysis_.exprWalk.expr(i->cond);
     Active before = analysis_.cur;
     stmt(i->thenStmt);
     Active then = std::move(analysis_.cur);
@@ -248,14 +249,14 @@ void CodeWalk::stmt(const Stmt *s) {
   case Stmt::Kind::While: {
     auto *w = cast<WhileStmt>(s);
     loop(
-        std::exchange(analysis_.label, {}), [&] { analysis_.exprWalk().expr(w->cond); },
+        std::exchange(analysis_.label, {}), [&] { analysis_.exprWalk.expr(w->cond); },
         [&] { stmt(w->body); }, {}, true);
     return;
   }
   case Stmt::Kind::DoWhile: {
     auto *w = cast<DoWhileStmt>(s);
     loop(
-        std::exchange(analysis_.label, {}), [&] { analysis_.exprWalk().expr(w->cond); },
+        std::exchange(analysis_.label, {}), [&] { analysis_.exprWalk.expr(w->cond); },
         [&] { stmt(w->body); }, {}, false);
     return;
   }
@@ -264,8 +265,8 @@ void CodeWalk::stmt(const Stmt *s) {
     llvm::StringRef label = std::exchange(analysis_.label, {});
     stmt(f->init);
     loop(
-        label, [&] { analysis_.exprWalk().expr(f->cond); }, [&] { stmt(f->body); },
-        [&] { analysis_.exprWalk().expr(f->step); }, true);
+        label, [&] { analysis_.exprWalk.expr(f->cond); }, [&] { stmt(f->body); },
+        [&] { analysis_.exprWalk.expr(f->step); }, true);
     return;
   }
   case Stmt::Kind::ForOf:
@@ -274,7 +275,7 @@ void CodeWalk::stmt(const Stmt *s) {
   case Stmt::Kind::Switch: {
     auto *sw = cast<SwitchStmt>(s);
     llvm::StringRef label = std::exchange(analysis_.label, {});
-    analysis_.exprWalk().expr(sw->discriminant);
+    analysis_.exprWalk.expr(sw->discriminant);
     Active disc = analysis_.cur, fall;
     bool hasDefault = false;
     analysis_.targets.push_back({label, false, false, {}, {}});
@@ -282,7 +283,7 @@ void CodeWalk::stmt(const Stmt *s) {
       analysis_.cur = disc;
       merge(analysis_.cur, fall);
       if (c.test) {
-        analysis_.exprWalk().expr(c.test);
+        analysis_.exprWalk.expr(c.test);
       } else {
         hasDefault = true;
       }
@@ -291,7 +292,7 @@ void CodeWalk::stmt(const Stmt *s) {
       }
       fall = analysis_.cur;
     }
-    Analysis::Target target = std::move(analysis_.targets.back());
+    Target target = std::move(analysis_.targets.back());
     analysis_.targets.pop_back();
     analysis_.cur = std::move(fall);
     merge(analysis_.cur, target.breaks);
@@ -309,7 +310,7 @@ void CodeWalk::stmt(const Stmt *s) {
     }
     analysis_.targets.push_back({l->label, false, true, {}, {}});
     stmt(l->body);
-    Analysis::Target target = std::move(analysis_.targets.back());
+    Target target = std::move(analysis_.targets.back());
     analysis_.targets.pop_back();
     merge(analysis_.cur, target.breaks);
     return;
@@ -322,7 +323,7 @@ void CodeWalk::stmt(const Stmt *s) {
       use.join = analysis_.joinReturns.lookup(analysis_.fn->decl);
       use.tail = !analysis_.fn->syncGen && !analysis_.fn->asyncGen;
     }
-    analysis_.exprWalk().expr(r->value, use);
+    analysis_.exprWalk.expr(r->value, use);
     analysis_.cur.clear();
     return;
   }
@@ -348,12 +349,12 @@ void CodeWalk::stmt(const Stmt *s) {
     }
     for (const ClassField &f : cls->fields) {
       if (f.isStatic && f.init) {
-        analysis_.exprWalk().expr(f.init);
+        analysis_.exprWalk.expr(f.init);
       }
     }
     for (const FunctionDecl *method : cls->methods) {
       if (method->impl) {
-        analysis_.callWalk().registerValue(method, method->impl->type);
+        analysis_.callWalk.registerValue(method, method->impl->type);
       }
     }
     for (const Stmt *x : cls->decorations) {
@@ -374,13 +375,13 @@ void CodeWalk::declarator(const VarDeclarator &d) {
   if (d.sym && d.sym->lambda) {
     use.lambda = true;
   }
-  analysis_.exprWalk().expr(d.init, use);
+  analysis_.exprWalk.expr(d.init, use);
   if (!d.sym) {
     return;
   }
   const Expr *init = strip(d.init);
   analysis_.declInit[d.sym] = init;
-  if (!d.sym->reassigned && analysis_.aliasAnalysis().isAllocation(init)) {
+  if (!d.sym->reassigned && analysis_.aliasAnalysis.isAllocation(init)) {
     analysis_.siteName.try_emplace(init, d.name);
   }
   if (d.sym->capturedEarly) {
@@ -389,7 +390,7 @@ void CodeWalk::declarator(const VarDeclarator &d) {
 }
 
 void CodeWalk::forOf(const ForOfStmt *f, llvm::StringRef label) {
-  analysis_.exprWalk().expr(f->iterable);
+  analysis_.exprWalk.expr(f->iterable);
   loop(
       label,
       [&] {
@@ -417,13 +418,13 @@ void CodeWalk::iterate(const Expr *iterable, const Node *site) {
     bool asyncIter = type->isAsyncIterator();
     CallRec &rec = record(site, asyncIter ? CallKind::IterAsync : CallKind::IterSync, {}, at);
     auto *c = dyn_cast<CallExpr>(source);
-    if (c && analysis_.libraryEffects().libraryTarget(c)) {
-      const FunctionDecl *lib = analysis_.libraryEffects().libraryTarget(c);
+    if (c && analysis_.libraryEffects.libraryTarget(c)) {
+      const FunctionDecl *lib = analysis_.libraryEffects.libraryTarget(c);
       auto *m = dyn_cast<MemberExpr>(c->callee);
       if (m && c->method) {
-        analysis_.libraryEffects().libraryState(libraryClassName(lib->cls), lib->name,
-                                                analysis_.aliasAnalysis().receiverRef(m->object),
-                                                true, at);
+        analysis_.libraryEffects.libraryState(libraryClassName(lib->cls), lib->name,
+                                              analysis_.aliasAnalysis.receiverRef(m->object), true,
+                                              at);
       }
       return;
     }
@@ -431,15 +432,15 @@ void CodeWalk::iterate(const Expr *iterable, const Node *site) {
       auto *m = dyn_cast<MemberExpr>(c->callee);
       if (c->method) {
         for (const FunctionDecl *fn :
-             analysis_.callWalk().methodTargets(c->method->decl, c->virtualCall)) {
-          analysis_.callWalk().addCallee(
+             analysis_.callWalk.methodTargets(c->method->decl, c->virtualCall)) {
+          analysis_.callWalk.addCallee(
               rec, fn,
-              m ? std::optional<Ref>(analysis_.aliasAnalysis().receiverRef(m->object))
+              m ? std::optional<Ref>(analysis_.aliasAnalysis.receiverRef(m->object))
                 : std::nullopt);
         }
       } else {
-        analysis_.callWalk().addCallee(
-            rec, c->func->decl, analysis_.callWalk().closureSelf(c->func->decl, *analysis_.fn));
+        analysis_.callWalk.addCallee(rec, c->func->decl,
+                                     analysis_.callWalk.closureSelf(c->func->decl, *analysis_.fn));
       }
       return;
     }
@@ -447,11 +448,11 @@ void CodeWalk::iterate(const Expr *iterable, const Node *site) {
       return;
     }
     rec.byType = type;
-    analysis_.exprWalk().elements(iterable, true, at);
+    analysis_.exprWalk.elements(iterable, true, at);
     return;
   }
   if (type->isArray() || type->isDict() || type->isTypedArray() || type->isJson()) {
-    analysis_.exprWalk().elements(iterable, false, at);
+    analysis_.exprWalk.elements(iterable, false, at);
   }
 }
 

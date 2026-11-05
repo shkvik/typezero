@@ -1,12 +1,19 @@
 #pragma once
 
-#include "compiler/parallel/analysis/analysis.h"
+#include "compiler/parallel/analysis/analysis_types.h"
+#include "compiler/parallel/parallel_model/parallel_model.h"
+#include "compiler/program/ast/ast.h"
+#include "compiler/program/types/types.h"
 #include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/DenseSet.h"
 #include "llvm/ADT/SmallVector.h"
+#include "llvm/ADT/StringRef.h"
+#include <cstddef>
+#include <cstdint>
 #include <map>
 #include <optional>
 #include <set>
+#include <utility>
 #include <vector>
 
 namespace tz::parallel {

@@ -1,6 +1,13 @@
 #pragma once
 
-#include "compiler/parallel/analysis/analysis.h"
+#include "compiler/parallel/analysis/analysis_types.h"
+#include "compiler/parallel/parallel_model/parallel_model.h"
+#include "compiler/program/ast/ast.h"
+#include "llvm/ADT/ArrayRef.h"
+#include "llvm/Support/SMLoc.h"
+#include <optional>
+#include <utility>
+#include <vector>
 
 namespace tz::parallel {
 
@@ -33,7 +40,7 @@ private:
   bool ownPiece(unsigned act, unsigned piece) const;
   int stepOf(unsigned fn, llvm::SMLoc loc);
   bool later(unsigned fn, llvm::SMLoc at, llvm::SMLoc origin);
-  void addEntry(unsigned act, unsigned piece, const Analysis::Entry &add, bool &changed);
+  void addEntry(unsigned act, unsigned piece, const Entry &add, bool &changed);
   void noteFlow(int root, unsigned from, unsigned to, llvm::SMLoc origin);
   Analysis &analysis_;
 };

@@ -1,6 +1,7 @@
 #include "compiler/parallel/pieces/pieces.h"
 #include "compiler/library/crypto/crypto_api/crypto_api.h"
 #include "compiler/parallel/alias_analysis/alias_analysis.h"
+#include "compiler/parallel/analysis/analysis.h"
 #include "compiler/parallel/call_resolver/call_resolver.h"
 #include "compiler/parallel/call_walk/call_walk.h"
 #include "compiler/parallel/code_walk/code_walk.h"
@@ -114,7 +115,7 @@ void Pieces::explore() {
     for (unsigned r = 0; r < f.calls.size(); ++r) {
       const CallRec &rec = f.calls[r];
       for (const Callee &c : rec.callees) {
-        std::optional<Ref> self = analysis_.callResolver().bind(c.self, act);
+        std::optional<Ref> self = analysis_.callResolver.bind(c.self, act);
         unsigned next;
         switch (c.mode) {
         case Mode::Sync:
@@ -237,13 +238,13 @@ bool Pieces::ownPiece(unsigned act, unsigned piece) const {
          llvm::is_contained(analysis_.actPieces[act], piece);
 }
 
-void Pieces::addEntry(unsigned act, unsigned piece, const Analysis::Entry &add, bool &changed) {
+void Pieces::addEntry(unsigned act, unsigned piece, const Entry &add, bool &changed) {
   auto [it, inserted] = analysis_.entries.try_emplace({act, piece}, add);
   if (inserted) {
     changed = true;
     return;
   }
-  Analysis::Entry &cur = it->second;
+  Entry &cur = it->second;
   if (cur.open) {
     return;
   }
@@ -251,7 +252,7 @@ void Pieces::addEntry(unsigned act, unsigned piece, const Analysis::Entry &add, 
     cur.open = changed = true;
     return;
   }
-  const ExplainNames &names = analysis_.explainNames();
+  const ExplainNames &names = analysis_.explainNames;
   if (names.posOf(add.first) < names.posOf(cur.first)) {
     cur.first = add.first;
     changed = true;
@@ -273,7 +274,7 @@ void Pieces::findHosts() {
       Activation &to = analysis_.acts[callee];
       for (unsigned p : at) {
         changed |= to.hosts.insert(p).second;
-        Analysis::Entry add;
+        Entry add;
         if (ownPiece(caller, p)) {
           add.first = add.last = rec.loc;
         } else if (auto e = analysis_.entries.find({caller, p}); e != analysis_.entries.end()) {
@@ -292,8 +293,8 @@ int Pieces::stepOf(unsigned fn, llvm::SMLoc loc) {
     return -1;
   }
   auto [it, inserted] = analysis_.steps.try_emplace(fn);
-  std::vector<Analysis::Pos> &steps = it->second;
-  const ExplainNames &names = analysis_.explainNames();
+  std::vector<Pos> &steps = it->second;
+  const ExplainNames &names = analysis_.explainNames;
   if (inserted) {
     const FunctionDecl *decl = analysis_.fns[fn].decl;
     if (decl && decl->body) {
@@ -302,14 +303,14 @@ int Pieces::stepOf(unsigned fn, llvm::SMLoc loc) {
       }
     } else if (!decl) {
       for (const Stmt *s : analysis_.program.items) {
-        if (!isa<FunctionDecl>(s) && !analysis_.libraryEffects().inLibrary(s->loc())) {
+        if (!isa<FunctionDecl>(s) && !analysis_.libraryEffects.inLibrary(s->loc())) {
           steps.push_back(names.posOf(s->loc()));
         }
       }
     }
     llvm::sort(steps);
   }
-  Analysis::Pos at = names.posOf(loc);
+  Pos at = names.posOf(loc);
   auto next = std::upper_bound(steps.begin(), steps.end(), at);
   if (next == steps.begin() || std::prev(next)->buffer != at.buffer) {
     return -1;
@@ -335,7 +336,7 @@ void Pieces::noteFlow(int root, unsigned from, unsigned to, llvm::SMLoc origin) 
     it->second = origin;
     return;
   }
-  const ExplainNames &names = analysis_.explainNames();
+  const ExplainNames &names = analysis_.explainNames;
   if (names.posOf(it->second) < names.posOf(origin)) {
     it->second = origin;
   }
@@ -494,7 +495,7 @@ void Pieces::findJoins() {
           continue;
         }
         if (!at.isValid() ||
-            analysis_.explainNames().posOf(at) < analysis_.explainNames().posOf(it->second)) {
+            analysis_.explainNames.posOf(at) < analysis_.explainNames.posOf(it->second)) {
           it->second = at;
         }
       }
