@@ -27,9 +27,9 @@ public:
   ResultClassDeclared checkClassStmt(ClassDecl *cls);
   ResultBodiesChecked checkClassBodies(ClassDecl *cls);
   ResultInitThisFound isInitThis(const Expr *expr) const;
+  ResultHasDecorators hasDecorators(const ClassDecl *cls) const;
   ResultObjectIsReady thisReady(const Checker::Flow &flow) const;
   ResultFieldUnsetYet firstUnset(const Checker::Flow &flow) const;
-  static ResultHasDecorators hasDecorators(const ClassDecl *cls);
 
 private:
   using ResultThisReadiness = Result<VarSymbol *, ClassCheckerReadyThisError>;

@@ -478,9 +478,9 @@ FunctionDecl *ReturnInferrer::freshCopy(const FunctionDecl *fn) {
   if (const ClassMember *original = fn->member()) {
     ClassMember copied{.cls = original->cls, .access = original->access};
     if (fn->isStatic()) {
-      copied.kind = StaticMethod{};
+      copied.method = StaticMethod{};
     } else if (fn->isConstructor()) {
-      copied.kind = Constructor{};
+      copied.method = Constructor{};
     }
     copy->role = std::move(copied);
   }

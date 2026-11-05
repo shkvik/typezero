@@ -64,7 +64,7 @@ Expr *LateClasses::checkClassExpr(ClassExpr *expr, const Type *expected) {
   cls->usedAsValue = true;
   if (!cls->declared) {
     checkStaticFields(cls);
-    if (ClassChecker::hasDecorators(cls)) {
+    if (checker_.classChecker().hasDecorators(cls).isOk()) {
       ClassDecl *outer = std::exchange(checker_.currentClass_, cls);
       checker_.decoratorChecker().decorateClass(cls);
       checker_.currentClass_ = outer;

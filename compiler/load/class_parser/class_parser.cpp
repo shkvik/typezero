@@ -331,11 +331,11 @@ void ClassParser::parseClassMember(ClassDecl *cls) {
       member.decorators = std::move(decorators);
     }
     if (constructor) {
-      member.kind = Constructor{};
+      member.method = Constructor{};
     } else if (isStatic) {
-      member.kind = StaticMethod{};
+      member.method = StaticMethod{};
     } else if (abstractMethod) {
-      member.kind = AbstractMethod{};
+      member.method = AbstractMethod{};
     }
     fn->role = std::move(member);
     fn->isGenerator = generator && !constructor;

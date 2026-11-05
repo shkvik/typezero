@@ -160,7 +160,7 @@ FunctionDecl *Parser::parseMethodCopy() {
   cursor().advance();
   auto *fn = ctx_.make<FunctionDecl>(loc, name);
   if (constructor) {
-    fn->role = ClassMember{.kind = Constructor{}};
+    fn->role = ClassMember{.method = Constructor{}};
   }
   fn->isGenerator = generator;
   classes().parseMethodRest(fn, start);

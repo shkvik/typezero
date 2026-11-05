@@ -16,7 +16,7 @@ Overriding *FunctionDecl::overriding() {
     return nullptr;
   }
 
-  return classMember->kind.match(
+  return classMember->method.match(
       [](InstanceMethod &method) -> Overriding * { return &method.overriding; },
       [](StaticMethod &) -> Overriding * { return nullptr; },
       [](Constructor &) -> Overriding * { return nullptr; },
@@ -29,7 +29,7 @@ const Overriding *FunctionDecl::overriding() const {
     return nullptr;
   }
 
-  return classMember->kind.match(
+  return classMember->method.match(
       [](const InstanceMethod &method) -> const Overriding * { return &method.overriding; },
       [](const StaticMethod &) -> const Overriding * { return nullptr; },
       [](const Constructor &) -> const Overriding * { return nullptr; },
@@ -45,19 +45,19 @@ ClassDecl *FunctionDecl::cls() const {
 bool FunctionDecl::isStatic() const {
   const ClassMember *classMember = member();
 
-  return classMember && classMember->kind.is<StaticMethod>();
+  return classMember && classMember->method.is<StaticMethod>();
 }
 
 bool FunctionDecl::isConstructor() const {
   const ClassMember *classMember = member();
 
-  return classMember && classMember->kind.is<Constructor>();
+  return classMember && classMember->method.is<Constructor>();
 }
 
 bool FunctionDecl::isAbstract() const {
   const ClassMember *classMember = member();
 
-  return classMember && classMember->kind.is<AbstractMethod>();
+  return classMember && classMember->method.is<AbstractMethod>();
 }
 
 Access FunctionDecl::access() const {
@@ -72,10 +72,11 @@ VarSymbol *FunctionDecl::thisVar() const {
     return nullptr;
   }
 
-  return classMember->kind.match([](const InstanceMethod &method) { return method.thisVar; },
-                                 [](const StaticMethod &) -> VarSymbol * { return nullptr; },
-                                 [](const Constructor &constructor) { return constructor.thisVar; },
-                                 [](const AbstractMethod &method) { return method.thisVar; });
+  return classMember->method.match(
+      [](const InstanceMethod &method) { return method.thisVar; },
+      [](const StaticMethod &) -> VarSymbol * { return nullptr; },
+      [](const Constructor &constructor) { return constructor.thisVar; },
+      [](const AbstractMethod &method) { return method.thisVar; });
 }
 
 unsigned FunctionDecl::variant() const {
