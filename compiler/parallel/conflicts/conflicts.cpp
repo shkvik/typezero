@@ -37,27 +37,27 @@ namespace tz::parallel {
 Conflicts::Conflicts(Analysis &analysis) : analysis_(analysis) {}
 
 bool Conflicts::concurrent(unsigned a, unsigned b) const {
-  const PieceInst &pa = analysis_.pieces_[a], &pb = analysis_.pieces_[b];
+  const PieceInst &pa = analysis_.pieceInstances[a], &pb = analysis_.pieceInstances[b];
   if (pa.root == pb.root) {
-    return analysis_.roots_[pa.root].multi;
+    return analysis_.roots[pa.root].multi;
   }
   auto contains = [](const std::vector<unsigned> &v, unsigned x) {
     return std::binary_search(v.begin(), v.end(), x);
   };
-  for (const auto &[r, interval] : analysis_.roots_[pa.root].chain) {
+  for (const auto &[r, interval] : analysis_.roots[pa.root].chain) {
     if (r == pb.root) {
-      return analysis_.roots_[r].multi || contains(interval, b);
+      return analysis_.roots[r].multi || contains(interval, b);
     }
   }
-  for (const auto &[r, interval] : analysis_.roots_[pb.root].chain) {
+  for (const auto &[r, interval] : analysis_.roots[pb.root].chain) {
     if (r == pa.root) {
-      return analysis_.roots_[r].multi || contains(interval, a);
+      return analysis_.roots[r].multi || contains(interval, a);
     }
   }
-  for (const auto &[ra, ia] : analysis_.roots_[pa.root].chain) {
-    for (const auto &[rb, ib] : analysis_.roots_[pb.root].chain) {
+  for (const auto &[ra, ia] : analysis_.roots[pa.root].chain) {
+    for (const auto &[rb, ib] : analysis_.roots[pb.root].chain) {
       if (ra == rb) {
-        if (analysis_.roots_[ra].multi) {
+        if (analysis_.roots[ra].multi) {
           return true;
         }
         for (unsigned x : ia) {
@@ -96,7 +96,7 @@ std::vector<Touch> Conflicts::touches(const Effects &effects) const {
       }
     }
     bool inner = a.origin.isValid() && a.anchor.isValid() &&
-                 !analysis_.partedAnchors_.contains(a.anchor.getPointer());
+                 !analysis_.partedAnchors.contains(a.anchor.getPointer());
     WaitPlace place{a.at, inner ? a.anchor : llvm::SMLoc(), inner ? a.home : nullptr};
     if (!llvm::is_contained(t.places, place)) {
       t.places.push_back(place);
@@ -118,7 +118,7 @@ uint64_t Conflicts::maskOf(const Loc &loc) const {
   case LocKind::Var:
     return hash(loc.key, 10, 30);
   case LocKind::Field:
-    return loc.key == analysis_.star_ ? kAnyField | kFieldBits : hash(loc.key, 40, 24);
+    return loc.key == analysis_.star ? kAnyField | kFieldBits : hash(loc.key, 40, 24);
   case LocKind::Elements:
   case LocKind::OwnCell:
     return kElements;
@@ -130,10 +130,10 @@ uint64_t Conflicts::maskOf(const Loc &loc) const {
 }
 
 void Conflicts::decide() {
-  analysis_.pieceTouches_.resize(analysis_.pieces_.size());
-  for (unsigned i = 0; i < analysis_.pieces_.size(); ++i) {
-    const PieceInst &p = analysis_.pieces_[i];
-    const FnInfo &f = analysis_.fns_[p.fn];
+  analysis_.pieceTouches.resize(analysis_.pieceInstances.size());
+  for (unsigned i = 0; i < analysis_.pieceInstances.size(); ++i) {
+    const PieceInst &p = analysis_.pieceInstances[i];
+    const FnInfo &f = analysis_.fns[p.fn];
     Effects effects;
     for (const Access &a : f.segs[p.seg].effects) {
       if (!analysis_.pieces().keeps(p, a)) {
@@ -153,12 +153,13 @@ void Conflicts::decide() {
       }
       effects.insert(b);
     }
-    analysis_.pieceTouches_[i] = touches(effects);
+    analysis_.pieceTouches[i] = touches(effects);
   }
-  analysis_.decisions_.assign(analysis_.pieces_.size(), {});
-  std::vector<uint64_t> touched(analysis_.pieces_.size(), 0), written(analysis_.pieces_.size(), 0);
-  for (unsigned i = 0; i < analysis_.pieces_.size(); ++i) {
-    for (const Touch &t : analysis_.pieceTouches_[i]) {
+  analysis_.decisions.assign(analysis_.pieceInstances.size(), {});
+  std::vector<uint64_t> touched(analysis_.pieceInstances.size(), 0),
+      written(analysis_.pieceInstances.size(), 0);
+  for (unsigned i = 0; i < analysis_.pieceInstances.size(); ++i) {
+    for (const Touch &t : analysis_.pieceTouches[i]) {
       uint64_t bits = maskOf(t.loc);
       touched[i] |= bits;
       if (t.write) {
@@ -166,29 +167,30 @@ void Conflicts::decide() {
       }
     }
   }
-  for (unsigned i = 0; i < analysis_.pieces_.size(); ++i) {
-    for (unsigned j = i; j < analysis_.pieces_.size(); ++j) {
+  for (unsigned i = 0; i < analysis_.pieceInstances.size(); ++i) {
+    for (unsigned j = i; j < analysis_.pieceInstances.size(); ++j) {
       bool maybe = (written[i] & touched[j]) || (written[j] & touched[i]);
-      if (!maybe && !analysis_.decisions_[i].alone && !analysis_.decisions_[j].alone) {
+      if (!maybe && !analysis_.decisions[i].alone && !analysis_.decisions[j].alone) {
         continue;
       }
       if (!concurrent(i, j)) {
         continue;
       }
-      analysis_.decisions_[i].alone = analysis_.decisions_[j].alone = false;
+      analysis_.decisions[i].alone = analysis_.decisions[j].alone = false;
       if (!maybe) {
         continue;
       }
       std::vector<Loc> shared;
       std::vector<const Touch *> mineI, mineJ;
-      for (const Touch &x : analysis_.pieceTouches_[i]) {
-        for (const Touch &y : analysis_.pieceTouches_[j]) {
+      for (const Touch &x : analysis_.pieceTouches[i]) {
+        for (const Touch &y : analysis_.pieceTouches[j]) {
           if (!(x.write || y.write)) {
             continue;
           }
           if (x.loc.kind == LocKind::OwnCell && y.loc.kind == LocKind::OwnCell &&
-              x.loc.key == y.loc.key && analysis_.pieces_[i].root == analysis_.pieces_[j].root &&
-              analysis_.roots_[analysis_.pieces_[i].root].ownCell == x.loc.key) {
+              x.loc.key == y.loc.key &&
+              analysis_.pieceInstances[i].root == analysis_.pieceInstances[j].root &&
+              analysis_.roots[analysis_.pieceInstances[i].root].ownCell == x.loc.key) {
             continue;
           }
           Loc lx = x.loc, ly = y.loc;
@@ -233,8 +235,8 @@ void Conflicts::decide() {
           }
         }
       };
-      analysis_.decisions_[i].partners.push_back({j, shared});
-      extend(analysis_.decisions_[i], mineI);
+      analysis_.decisions[i].partners.push_back({j, shared});
+      extend(analysis_.decisions[i], mineI);
       if (j != i) {
         std::vector<Loc> theirs;
         for (const Touch *t : mineJ) {
@@ -242,8 +244,8 @@ void Conflicts::decide() {
             theirs.push_back(t->loc);
           }
         }
-        analysis_.decisions_[j].partners.push_back({i, theirs});
-        extend(analysis_.decisions_[j], mineJ);
+        analysis_.decisions[j].partners.push_back({i, theirs});
+        extend(analysis_.decisions[j], mineJ);
       }
     }
   }
@@ -251,20 +253,20 @@ void Conflicts::decide() {
 }
 
 bool Conflicts::reachers(const FunctionDecl *home, std::vector<unsigned> &out) const {
-  auto found = analysis_.fnIndex_.find(home);
-  if (found == analysis_.fnIndex_.end()) {
+  auto found = analysis_.fnIndex.find(home);
+  if (found == analysis_.fnIndex.end()) {
     return false;
   }
-  std::vector<bool> seen(analysis_.fns_.size(), false);
+  std::vector<bool> seen(analysis_.fns.size(), false);
   std::deque<unsigned> queue{found->second};
   seen[found->second] = true;
   auto add = [&](unsigned fn, unsigned seg) {
-    auto it = analysis_.segPieces_.find({fn, seg});
-    if (it != analysis_.segPieces_.end()) {
+    auto it = analysis_.segPieces.find({fn, seg});
+    if (it != analysis_.segPieces.end()) {
       out.insert(out.end(), it->second.begin(), it->second.end());
     }
   };
-  const FnInfo &own = analysis_.fns_[found->second];
+  const FnInfo &own = analysis_.fns[found->second];
   for (unsigned s = 0; s < own.segs.size(); ++s) {
     if (own.isInline(s)) {
       add(found->second, s);
@@ -273,8 +275,8 @@ bool Conflicts::reachers(const FunctionDecl *home, std::vector<unsigned> &out) c
   while (!queue.empty()) {
     unsigned g = queue.front();
     queue.pop_front();
-    for (const auto &[caller, r] : analysis_.fns_[g].callers) {
-      const FnInfo &f = analysis_.fns_[caller];
+    for (const auto &[caller, r] : analysis_.fns[g].callers) {
+      const FnInfo &f = analysis_.fns[caller];
       for (unsigned s : f.calls[r].segs) {
         add(caller, s);
         if (f.isInline(s) && !seen[caller]) {
@@ -291,7 +293,7 @@ bool Conflicts::reachers(const FunctionDecl *home, std::vector<unsigned> &out) c
 }
 
 void Conflicts::placeWaits() {
-  std::vector<Analysis::Decision> &decisions = analysis_.decisions_;
+  std::vector<Analysis::Decision> &decisions = analysis_.decisions;
   std::vector<llvm::DenseSet<const char *>> mine(decisions.size());
   std::map<const FunctionDecl *, std::set<const char *>> byHome;
   for (unsigned i = 0; i < decisions.size(); ++i) {

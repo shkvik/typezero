@@ -1,0 +1,178 @@
+top-level code
+  start
+    writes the state of server (line 89)
+    writes stdout (lines 91, 92, 106)
+    reads  message of any ListenError (line 91)
+    writes stderr (line 92)
+    writes the exit code and environment (line 92)
+    reads  the state of any Listening (line 96)
+    writes the state of any Listening (line 107)
+    reads  right (line 106)
+    in order with the arrow at line 101 after await at line 101:62: stderr, stdout, the exit code and environment, the state of any Listening, the state of server
+    in order with the arrow at line 101 after await at line 101:74: stderr, stdout, the exit code and environment, the state of any Listening, the state of server
+    in order: lines 89-107
+  after await at line 101
+    reads  elements of any string[], each task its own (line 102 in the arrow at line 102)
+    reads  everything in any string[] (line 102 in the arrow at line 102)
+    reads  right (lines 102 in the arrow at line 102, 106)
+    writes right (line 102 in the arrow at line 102)
+    writes stdout (line 106)
+    writes the state of any Listening (line 107)
+    in order with the arrow at line 101 after await at line 101:62: stdout, the state of any Listening
+    in order with the arrow at line 101 after await at line 101:74: stdout, the state of any Listening
+    in order: lines 106-107
+  after await at line 107
+    writes stdout (line 108)
+    parallel
+
+async method Connection.open, line 42
+  start: runs inside its caller
+  after await at line 44 (in the callbacks at line 68)
+    parallel
+
+async method Connection.run, line 53
+  start: runs inside its caller
+  after await at line 54
+    reads  this.reader (lines 55, 58)
+    reads  everything in any Buffer (line 55 in Reader.push)
+    reads  pending of any Reader (lines 55 in Reader.push, 58 in Reader.next)
+    writes pending of any Reader (lines 55 in Reader.push, 58 in Reader.next)
+    reads  bytes of any Buffer (line 58 in Reader.next)
+    in the callbacks at line 68:
+      in order with Connection.run after await at line 54 in the callbacks at line 77 from the callbacks at line 84: pending of any Reader
+      in order with Connection.run after await at line 54 in the callbacks at line 77 from the tasks of the arrow at line 81: pending of any Reader
+      in order with Connection.run after await at line 54 in the callbacks at line 84: pending of any Reader
+      in order with Connection.run after await at line 54 in the tasks of the arrow at line 81: pending of any Reader
+      in order with the arrow at line 101 after await at line 101:62: pending of any Reader
+      in order with the arrow at line 101 after await at line 101:74: pending of any Reader
+      in order with the arrow at line 81: pending of any Reader
+      in order with the same piece in other tasks: pending of any Reader
+      in order: lines 55-58
+      waits for its turn inside: lines 21 in Reader.push, 25 in Reader.next, 28 in Reader.next
+    in the callbacks at line 77 from the callbacks at line 84:
+      in order with Connection.run after await at line 54 in the callbacks at line 68: pending of any Reader
+      in order with Connection.run after await at line 54 in the callbacks at line 77 from the tasks of the arrow at line 81: pending of any Reader
+      in order with Connection.run after await at line 54 in the callbacks at line 84: pending of any Reader
+      in order with Connection.run after await at line 54 in the tasks of the arrow at line 81: pending of any Reader
+      in order with the arrow at line 101 after await at line 101:62: pending of any Reader
+      in order with the arrow at line 101 after await at line 101:74: pending of any Reader
+      in order with the arrow at line 81: pending of any Reader
+      in order with the same piece in other tasks: pending of any Reader
+      in order: lines 55-58
+      waits for its turn inside: lines 21 in Reader.push, 25 in Reader.next, 28 in Reader.next
+    in the callbacks at line 77 from the tasks of the arrow at line 81:
+      in order with Connection.run after await at line 54 in the callbacks at line 68: pending of any Reader
+      in order with Connection.run after await at line 54 in the callbacks at line 77 from the callbacks at line 84: pending of any Reader
+      in order with Connection.run after await at line 54 in the callbacks at line 84: pending of any Reader
+      in order with Connection.run after await at line 54 in the tasks of the arrow at line 81: pending of any Reader
+      in order with the arrow at line 101 after await at line 101:62: pending of any Reader
+      in order with the arrow at line 101 after await at line 101:74: pending of any Reader
+      in order with the arrow at line 81: pending of any Reader
+      in order with the same piece in other tasks: pending of any Reader
+      in order: lines 55-58
+      waits for its turn inside: lines 21 in Reader.push, 25 in Reader.next, 28 in Reader.next
+    in the callbacks at line 84:
+      in order with Connection.run after await at line 54 in the callbacks at line 68: pending of any Reader
+      in order with Connection.run after await at line 54 in the callbacks at line 77 from the callbacks at line 84: pending of any Reader
+      in order with Connection.run after await at line 54 in the callbacks at line 77 from the tasks of the arrow at line 81: pending of any Reader
+      in order with Connection.run after await at line 54 in the tasks of the arrow at line 81: pending of any Reader
+      in order with the arrow at line 101 after await at line 101:62: pending of any Reader
+      in order with the arrow at line 101 after await at line 101:74: pending of any Reader
+      in order with the arrow at line 81: pending of any Reader
+      in order with the same piece in other tasks: pending of any Reader
+      in order: lines 55-58
+      waits for its turn inside: lines 21 in Reader.push, 25 in Reader.next, 28 in Reader.next
+    in the tasks of the arrow at line 81:
+      in order with Connection.run after await at line 54 in the callbacks at line 68: pending of any Reader
+      in order with Connection.run after await at line 54 in the callbacks at line 77 from the callbacks at line 84: pending of any Reader
+      in order with Connection.run after await at line 54 in the callbacks at line 77 from the tasks of the arrow at line 81: pending of any Reader
+      in order with Connection.run after await at line 54 in the callbacks at line 84: pending of any Reader
+      in order with the arrow at line 101 after await at line 101:62: pending of any Reader
+      in order with the arrow at line 101 after await at line 101:74: pending of any Reader
+      in order with the arrow at line 81: pending of any Reader
+      in order with the same piece in other tasks: pending of any Reader
+      in order: lines 55-58
+      waits for its turn inside: lines 21 in Reader.push, 25 in Reader.next, 28 in Reader.next
+
+async arrow create, line 68
+  start (in the callbacks at line 68)
+    parallel
+
+arrow alive, line 69
+  start (in the callbacks at line 69)
+    parallel
+
+async function query, line 74
+  start: runs inside its caller
+    reads  connection of any { connection: Connection } (line 76)
+
+async arrow, line 77
+  start
+    in the callbacks at line 77 from the callbacks at line 84:
+      parallel
+    in the callbacks at line 77 from the tasks of the arrow at line 81:
+      parallel
+
+async function transaction, line 80
+  start: runs inside its caller
+
+async arrow, line 81
+  start (in the callbacks at line 81)
+    reads  everything in any Connection (line 81)
+    reads  connection of any { connection: Connection } (line 81 in the arrow at line 81)
+    in order with Connection.run after await at line 54 in the callbacks at line 68: everything in any Connection
+    in order with Connection.run after await at line 54 in the callbacks at line 77 from the callbacks at line 84: everything in any Connection
+    in order with Connection.run after await at line 54 in the callbacks at line 77 from the tasks of the arrow at line 81: everything in any Connection
+    in order with Connection.run after await at line 54 in the callbacks at line 84: everything in any Connection
+    in order with Connection.run after await at line 54 in the tasks of the arrow at line 81: everything in any Connection
+    in order: line 81
+
+async arrow, line 81
+  start: runs inside its caller
+    reads  connection of any { connection: Connection } (line 81 in query)
+
+async arrow, line 84
+  start (in the callbacks at line 84)
+    reads  the state of the URL made at line 85 (line 85)
+    reads  connection of any { connection: Connection } (line 86 in query)
+    parallel
+  after await at line 86:42 (in the callbacks at line 84)
+    parallel
+  after await at line 86:68 (in the callbacks at line 84)
+    parallel
+
+async arrow, line 101
+  start: runs inside its caller
+  after await at line 101:62 (in the tasks of the arrow at line 101)
+    reads  everything in any object (line 101 in must<string, object>)
+    writes stderr (line 101 in must<string, object>)
+    writes stdout (line 101 in must<string, object>)
+    writes the exit code and environment (line 101 in must<string, object>)
+    in order with Connection.run after await at line 54 in the callbacks at line 68: everything in any object
+    in order with Connection.run after await at line 54 in the callbacks at line 77 from the callbacks at line 84: everything in any object
+    in order with Connection.run after await at line 54 in the callbacks at line 77 from the tasks of the arrow at line 81: everything in any object
+    in order with Connection.run after await at line 54 in the callbacks at line 84: everything in any object
+    in order with Connection.run after await at line 54 in the tasks of the arrow at line 81: everything in any object
+    in order with the arrow at line 101 after await at line 101:74: everything in any object, stderr, stdout, the exit code and environment
+    in order with the same piece in other tasks: stderr, stdout, the exit code and environment
+    in order with the start of the top-level code: everything in any object, stderr, stdout, the exit code and environment
+    in order with the top-level code after await at line 101: everything in any object, stderr, stdout
+    in order: line 101
+    waits for its turn inside: lines 112 in must<string, object>, 113 in must<string, object>
+  after await at line 101:74 (in the tasks of the arrow at line 101)
+    reads  everything in any object (line 101 in must<object, object>)
+    writes stderr (line 101 in must<object, object>)
+    writes stdout (line 101 in must<object, object>)
+    writes the exit code and environment (line 101 in must<object, object>)
+    writes the state of any Response (line 101)
+    in order with Connection.run after await at line 54 in the callbacks at line 68: everything in any object
+    in order with Connection.run after await at line 54 in the callbacks at line 77 from the callbacks at line 84: everything in any object
+    in order with Connection.run after await at line 54 in the callbacks at line 77 from the tasks of the arrow at line 81: everything in any object
+    in order with Connection.run after await at line 54 in the callbacks at line 84: everything in any object
+    in order with Connection.run after await at line 54 in the tasks of the arrow at line 81: everything in any object
+    in order with the arrow at line 101 after await at line 101:62: stderr, stdout, the exit code and environment, the state of any Response
+    in order with the same piece in other tasks: everything in any object, stderr, stdout, the exit code and environment, the state of any Response
+    in order with the start of the top-level code: everything in any object, stderr, stdout, the exit code and environment
+    in order with the top-level code after await at line 101: everything in any object, stderr, stdout
+    in order: line 101
+    waits for its turn inside: lines 112 in must<object, object>, 113 in must<object, object>

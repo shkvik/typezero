@@ -110,10 +110,9 @@ LibraryEffects::LibraryEffects(Analysis &analysis) : analysis_(analysis) {}
 bool LibraryEffects::inLibrary(llvm::SMLoc loc) const {
   const char *at = loc.getPointer();
 
-  return llvm::any_of(analysis_.libRanges_,
-                      [&](const std::pair<const char *, const char *> &range) {
-                        return at >= range.first && at < range.second;
-                      });
+  return llvm::any_of(analysis_.libRanges, [&](const std::pair<const char *, const char *> &range) {
+    return at >= range.first && at < range.second;
+  });
 }
 
 const FunctionDecl *LibraryEffects::libraryTarget(const CallExpr *c) const {
@@ -132,8 +131,8 @@ void LibraryEffects::libraryCall(const CallExpr *c, const FunctionDecl *decl, co
   bool superCtor = c->superCall && !m;
   std::optional<Ref> self;
   if (superCtor) {
-    if (analysis_.fn_->thisOwner) {
-      self = Ref{RefKind::This, analysis_.fn_->thisOwner};
+    if (analysis_.fn->thisOwner) {
+      self = Ref{RefKind::This, analysis_.fn->thisOwner};
     }
   } else if (m && c->method) {
     analysis_.exprWalk().expr(m->object);
@@ -148,7 +147,7 @@ void LibraryEffects::libraryCall(const CallExpr *c, const FunctionDecl *decl, co
   CallRec &rec = analysis_.codeWalk().record(c, CallKind::Call, use, at);
   rec.call = c;
   if (superCtor) {
-    for (const ClassDecl *k = analysis_.fn_->decl ? analysis_.fn_->decl->cls : nullptr; k;
+    for (const ClassDecl *k = analysis_.fn->decl ? analysis_.fn->decl->cls : nullptr; k;
          k = k->parent) {
       if (k->init) {
         analysis_.callWalk().addCallee(rec, k->init, self);
@@ -207,7 +206,7 @@ void LibraryEffects::libraryArg(const CallExpr *c, llvm::StringRef cls, llvm::St
     for (const ObjectLitExpr::Property &p : lit->props) {
       const Expr *v = strip(p.value);
       if (p.spread && isPoolClass(cls)) {
-        analysis_.poolOpen_ = true;
+        analysis_.poolOpen = true;
       }
       if (p.spread || !v || !v->type || !v->type->nonOptional()->isFunction()) {
         analysis_.exprWalk().expr(p.value);
@@ -239,7 +238,7 @@ void LibraryEffects::libraryArg(const CallExpr *c, llvm::StringRef cls, llvm::St
     return;
   }
   if (isPoolClass(cls) && name == "constructor") {
-    analysis_.poolOpen_ = true;
+    analysis_.poolOpen = true;
   }
   analysis_.exprWalk().expr(arg);
   libraryReads(f, at);
@@ -293,10 +292,10 @@ void LibraryEffects::poolCreate(const Expr *f) {
     decl = n->var->function ? n->var->function : n->var->lambda;
   }
   if (!result || !result->isResult() || !result->okType() || !decl) {
-    analysis_.poolOpen_ = true;
+    analysis_.poolOpen = true;
     return;
   }
-  analysis_.poolCreates_.push_back({result->okType()->nonOptional(), decl});
+  analysis_.poolCreates.push_back({result->okType()->nonOptional(), decl});
 }
 
 void LibraryEffects::listen(const Expr *f, Channel channel) {
@@ -312,14 +311,14 @@ void LibraryEffects::listen(const Expr *f, Channel channel) {
   }
   if (decl && decl->body && !analysis_.isLibrary(decl)) {
     unsigned fi = analysis_.codeWalk().discover(decl);
-    if (!llvm::is_contained(analysis_.listeners_[channel], fi)) {
-      analysis_.listeners_[channel].push_back(fi);
+    if (!llvm::is_contained(analysis_.listeners[channel], fi)) {
+      analysis_.listeners[channel].push_back(fi);
     }
     return;
   }
   if (f->type && f->type->nonOptional()->isFunction() &&
-      !llvm::is_contained(analysis_.listenerTypes_[channel], f->type->nonOptional())) {
-    analysis_.listenerTypes_[channel].push_back(f->type->nonOptional());
+      !llvm::is_contained(analysis_.listenerTypes[channel], f->type->nonOptional())) {
+    analysis_.listenerTypes[channel].push_back(f->type->nonOptional());
   }
 }
 
@@ -350,10 +349,10 @@ void LibraryEffects::libraryState(llvm::StringRef cls, llvm::StringRef name,
   if (isEmitterClass(cls) || isTargetClass(cls)) {
     bool reads = name == "emit" || name == "dispatchEvent" || name == "listenerCount" ||
                  name == "listeners" || name == "rawListeners" || name == "eventNames";
-    analysis_.codeWalk().touch(LocKind::Field, *self, analysis_.listenersKey_, write && !reads, at);
+    analysis_.codeWalk().touch(LocKind::Field, *self, analysis_.listenersKey, write && !reads, at);
     return;
   }
-  analysis_.codeWalk().touch(LocKind::Field, *self, analysis_.state_, write, at);
+  analysis_.codeWalk().touch(LocKind::Field, *self, analysis_.state, write, at);
 }
 
 }

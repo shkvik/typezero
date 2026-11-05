@@ -73,8 +73,8 @@ bool keepsReceiver(Builtin b, bool discarded) {
 EscapeScan::EscapeScan(Analysis &analysis) : analysis_(analysis) {}
 
 const Analysis::Escapes &EscapeScan::escapes(const FunctionDecl *owner) {
-  auto found = analysis_.escapes_.find(owner);
-  if (found != analysis_.escapes_.end()) {
+  auto found = analysis_.escapes.find(owner);
+  if (found != analysis_.escapes.end()) {
     return found->second;
   }
   Analysis::Escapes out;
@@ -84,14 +84,14 @@ const Analysis::Escapes &EscapeScan::escapes(const FunctionDecl *owner) {
     }
     scanStmt(owner->body, out);
   } else {
-    for (const Stmt *item : analysis_.program_.items) {
+    for (const Stmt *item : analysis_.program.items) {
       if (!isa<FunctionDecl, ClassDecl>(item)) {
         scanStmt(item, out);
       }
     }
   }
 
-  return analysis_.escapes_[owner] = std::move(out);
+  return analysis_.escapes[owner] = std::move(out);
 }
 
 void EscapeScan::scanStmt(const Stmt *s, Analysis::Escapes &out) {
@@ -290,11 +290,11 @@ void EscapeScan::scanUses(const Expr *e, bool safe, Analysis::Escapes &out, bool
 }
 
 bool EscapeScan::constructorLeaks(const ClassDecl *cls) {
-  auto found = analysis_.leaks_.find(cls);
-  if (found != analysis_.leaks_.end()) {
+  auto found = analysis_.leaks.find(cls);
+  if (found != analysis_.leaks.end()) {
     return found->second;
   }
-  analysis_.leaks_[cls] = true;
+  analysis_.leaks[cls] = true;
   bool leaks = false;
   for (const ClassDecl *k = cls; k && !leaks; k = k->parent) {
     std::vector<const FunctionDecl *> fns(k->constructors.begin(), k->constructors.end());
@@ -312,7 +312,7 @@ bool EscapeScan::constructorLeaks(const ClassDecl *cls) {
     }
   }
 
-  return analysis_.leaks_[cls] = leaks;
+  return analysis_.leaks[cls] = leaks;
 }
 
 }

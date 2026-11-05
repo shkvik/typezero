@@ -1,0 +1,116 @@
+// An object from a Pool stays the request's own (its fields change without waiting
+// for other requests) even when another path reaches such objects through a field,
+// here the store of a transaction, as long as its methods only put a part of the
+// object back into itself (this.pending = pending.subarray(1)): that gives no one a
+// new way to reach it. Before, that path made 'open' (which greets through the same
+// methods) no longer give a new object, so every pooled connection was shared and
+// each request waited its turn (--explain-parallel: the functions given to 'use' and
+// 'alive' run in parallel).
+import { AsyncLocalStorage } from "node:async_hooks"
+import { Server } from "tz:http"
+import { Pool } from "tz:sync"
+
+class Reader {
+  private pending: Buffer
+
+  public constructor() {
+    this.pending = Buffer.alloc(0)
+  }
+
+  public push(chunk: Buffer): void {
+    this.pending = this.pending.length == 0 ? chunk : Buffer.concat([this.pending, chunk])
+  }
+
+  public next(): string | undefined {
+    const pending = this.pending
+    if (pending.length == 0) return undefined
+    const first = pending.toString("utf8", 0, 1)
+    this.pending = pending.subarray(1)
+    return first
+  }
+}
+
+class Connection {
+  private reader: Reader
+  private broken: boolean
+
+  public constructor() {
+    this.reader = new Reader()
+    this.broken = false
+  }
+
+  public static async open(): Promise<Result<Connection, never>> {
+    const connection = new Connection()
+    const greeted = await connection.run("hi")
+    if (greeted.value != "ih") connection.broken = true
+    return ok(connection)
+  }
+
+  public isBroken(): boolean {
+    return this.broken
+  }
+
+  public async run(text: string): Promise<Result<string, never>> {
+    await Promise.resolve()
+    this.reader.push(Buffer.from(text))
+    let out = ""
+    while (true) {
+      const c = this.reader.next()
+      if (c == undefined) break
+      out = c + out
+    }
+    return ok(out)
+  }
+}
+
+const pool = new Pool<Connection>({
+  max: 4,
+  create: async () => Connection.open(),
+  alive: (connection) => !connection.isBroken(),
+})
+
+const transactions = new AsyncLocalStorage<{ connection: Connection }>()
+
+async function query(text: string): Promise<Result<string, never>> {
+  const scope = transactions.getStore()
+  if (scope != undefined) return scope.connection.run(text)
+  return pool.use(async (connection) => connection.run(text))
+}
+
+async function transaction(text: string): Promise<Result<string, never>> {
+  return pool.use(async (connection) => transactions.run({ connection }, async () => query(text)))
+}
+
+const server = new Server({ port: 0, hostname: "127.0.0.1" }, async (request: Request) => {
+  const path = new URL(request.url).pathname()
+  const answer = path.startsWith("/t") ? await transaction(path) : await query(path)
+  return new Response(answer.value)
+})
+const started = server.listen()
+if (started.isErr()) {
+  console.log("cannot listen:", started.error.message)
+  process.exit(1)
+}
+const listening = started.value
+
+const base = `http://127.0.0.1:${listening.port}`
+let right = 0
+for (let round = 0; round < 2; round++) {
+  const ids: string[] = []
+  for (let i = 0; i < 20; i++) ids.push(i % 2 == 0 ? `/q${round}-${i}` : `/t${round}-${i}`)
+  const texts = await Promise.all(ids.map(async (id) => must(await (must(await fetch(base + id))).text())))
+  ids.forEach((id, i) => {
+    if (texts[i] == id.split("").reverse().join("")) right++
+  })
+}
+console.log(`reversed: ${right} of 40`)
+await listening.stop()
+console.log("stopped")
+
+function must<T, E>(r: Result<T, E>): T {
+  if (r.isErr()) {
+    console.log(r.error)
+    process.exit(1)
+  }
+  return r.value
+}

@@ -95,7 +95,7 @@ void BuiltinEffects::builtinEffects(const CallExpr *c, const Expr *recv) {
     analysis_.exprWalk().elements(recv, true, at);
     if (recv && holdsReferences(recv->type)) {
       analysis_.codeWalk().touch(LocKind::Field, analysis_.aliasAnalysis().refOf(recv),
-                                 analysis_.length_, true, at);
+                                 analysis_.length, true, at);
     }
     return;
   case Builtin::ArrReverse:
@@ -368,7 +368,7 @@ void BuiltinEffects::builtinEffects(const CallExpr *c, const Expr *recv) {
         analysis_.exprWalk().elements(a, fills, at);
       } else if (kind == 'o') {
         analysis_.codeWalk().touch(LocKind::Field, analysis_.aliasAnalysis().refOf(a),
-                                   analysis_.state_, true, at);
+                                   analysis_.state, true, at);
       } else if (bytes) {
         analysis_.exprWalk().elements(a, false, at);
       } else {
@@ -383,13 +383,13 @@ void BuiltinEffects::builtinEffects(const CallExpr *c, const Expr *recv) {
     return;
   case Builtin::ReflectGet:
     if (const Expr *a = arg(0); a && holdsReferences(a->type)) {
-      analysis_.codeWalk().touch(LocKind::Field, analysis_.aliasAnalysis().refOf(a),
-                                 analysis_.star_, false, at);
+      analysis_.codeWalk().touch(LocKind::Field, analysis_.aliasAnalysis().refOf(a), analysis_.star,
+                                 false, at);
     }
     return;
   case Builtin::ReflectApply: {
     for (size_t i = 2; i < c->args.size(); ++i) {
-      analysis_.exprWalk().contents(c->args[i], false, at);
+      analysis_.exprWalk().elements(c->args[i], false, at);
     }
     CallRec &rec = analysis_.codeWalk().record(c, CallKind::Call, {}, at);
     rec.call = c;

@@ -112,9 +112,9 @@ void ExprWalk::expr(const Expr *e, const Use &use) {
     auto *b = cast<BinaryExpr>(e);
     if (b->op == BinaryOp::LogAnd || b->op == BinaryOp::LogOr || b->op == BinaryOp::Nullish) {
       expr(b->lhs, use);
-      Active before = analysis_.cur_;
+      Active before = analysis_.cur;
       expr(b->rhs, use);
-      merge(analysis_.cur_, before);
+      merge(analysis_.cur, before);
       return;
     }
     expr(b->lhs);
@@ -136,12 +136,12 @@ void ExprWalk::expr(const Expr *e, const Use &use) {
   case Expr::Kind::Conditional: {
     auto *c = cast<ConditionalExpr>(e);
     expr(c->cond);
-    Active before = analysis_.cur_;
+    Active before = analysis_.cur;
     expr(c->thenExpr, use);
-    Active then = std::move(analysis_.cur_);
-    analysis_.cur_ = std::move(before);
+    Active then = std::move(analysis_.cur);
+    analysis_.cur = std::move(before);
     expr(c->elseExpr, use);
-    merge(analysis_.cur_, then);
+    merge(analysis_.cur, then);
     return;
   }
   case Expr::Kind::Cast: {
@@ -169,9 +169,9 @@ void ExprWalk::expr(const Expr *e, const Use &use) {
     return;
   }
   case Expr::Kind::OptionalChain: {
-    Active before = analysis_.cur_;
+    Active before = analysis_.cur;
     expr(cast<OptionalChainExpr>(e)->chain, use);
-    merge(analysis_.cur_, before);
+    merge(analysis_.cur, before);
     return;
   }
   case Expr::Kind::Function: {
@@ -214,7 +214,7 @@ void ExprWalk::fieldAccess(const Expr *object, llvm::StringRef name, bool write,
   if (type->isArray()) {
     if (name == "length") {
       analysis_.codeWalk().touch(LocKind::Field, analysis_.aliasAnalysis().refOf(object),
-                                 analysis_.length_, write, at);
+                                 analysis_.length, write, at);
       if (write) {
         analysis_.codeWalk().touch(LocKind::Elements, analysis_.aliasAnalysis().refOf(object),
                                    nullptr, true, at);
@@ -269,7 +269,7 @@ void ExprWalk::indexAccess(const IndexExpr *ix, bool write) {
   const Type *type = ix->object->type->nonOptional();
   if (ix->keyed) {
     analysis_.codeWalk().touch(LocKind::Field, analysis_.aliasAnalysis().refOf(ix->object),
-                               analysis_.star_, write, ix->loc());
+                               analysis_.star, write, ix->loc());
     return;
   }
   if (type->isString()) {
@@ -277,15 +277,15 @@ void ExprWalk::indexAccess(const IndexExpr *ix, bool write) {
   }
   if (type->isArray()) {
     auto *index = dyn_cast<NameExpr>(strip(ix->index));
-    if (index && index->var && analysis_.ownIndex_.contains(index->var) &&
-        !index->var->reassigned && !ix->mayAppend) {
+    if (index && index->var && analysis_.ownIndex.contains(index->var) && !index->var->reassigned &&
+        !ix->mayAppend) {
       analysis_.codeWalk().touch(LocKind::OwnCell, analysis_.aliasAnalysis().refOf(ix->object),
                                  index->var->owner, write, ix->loc());
       return;
     }
     if (write && ix->mayAppend) {
       analysis_.codeWalk().touch(LocKind::Field, analysis_.aliasAnalysis().refOf(ix->object),
-                                 analysis_.length_, true, ix->loc());
+                                 analysis_.length, true, ix->loc());
     }
   }
   analysis_.codeWalk().touch(LocKind::Elements, analysis_.aliasAnalysis().refOf(ix->object),
@@ -327,7 +327,7 @@ void ExprWalk::contents(const Expr *e, bool write, llvm::SMLoc at) {
   }
   const Type *type = e->type->nonOptional();
   if (llvm::any_of(analysis_.aliasAnalysis().inside(type), holdsReferences)) {
-    analysis_.codeWalk().touch(LocKind::Contents, Ref{RefKind::Type, type}, analysis_.inner_, write,
+    analysis_.codeWalk().touch(LocKind::Contents, Ref{RefKind::Type, type}, analysis_.inner, write,
                                at);
   }
 }
@@ -342,7 +342,7 @@ void ExprWalk::readSpread(const Expr *e, bool object, llvm::SMLoc at) {
     return;
   }
   if (object && type->isObject()) {
-    analysis_.codeWalk().touch(LocKind::Field, analysis_.aliasAnalysis().refOf(e), analysis_.star_,
+    analysis_.codeWalk().touch(LocKind::Field, analysis_.aliasAnalysis().refOf(e), analysis_.star,
                                false, at);
     return;
   }
@@ -358,9 +358,9 @@ void ExprWalk::assign(const AssignExpr *a) {
       expr(a->value);
       return;
     }
-    Active before = analysis_.cur_;
+    Active before = analysis_.cur;
     expr(a->value);
-    merge(analysis_.cur_, before);
+    merge(analysis_.cur, before);
   };
   const Expr *target = a->target;
   if (auto *n = dyn_cast<NameExpr>(target)) {
@@ -416,18 +416,18 @@ void ExprWalk::awaitExpr(const AwaitExpr *a) {
   auto *c = dyn_cast<CallExpr>(strip(a->value));
   bool join = c && c->builtin == Builtin::PromiseAll;
   if (join) {
-    analysis_.openJoins_.push_back({a, analysis_.cur_});
+    analysis_.openJoins.push_back({a, analysis_.cur});
   }
   Use use;
   use.awaited = a;
   expr(a->value, use);
-  analysis_.awaits_[a] = {analysis_.fi_};
+  analysis_.awaits[a] = {analysis_.fi};
   if (join) {
-    Analysis::OpenJoin open = std::move(analysis_.openJoins_.back());
-    analysis_.openJoins_.pop_back();
-    merge(open.active, analysis_.cur_);
-    Analysis::JoinInfo &info = analysis_.joins_[a];
-    info.fn = analysis_.fi_;
+    Analysis::OpenJoin open = std::move(analysis_.openJoins.back());
+    analysis_.openJoins.pop_back();
+    merge(open.active, analysis_.cur);
+    Analysis::JoinInfo &info = analysis_.joins[a];
+    info.fn = analysis_.fi;
     merge(info.segs, open.active);
   }
   analysis_.codeWalk().moveTo(analysis_.codeWalk().segment(a, SegKind::Await, a->loc()));
@@ -438,12 +438,12 @@ void ExprWalk::yieldExpr(const YieldExpr *y) {
   if (y->delegate && y->value) {
     analysis_.codeWalk().iterate(y->value, y);
   }
-  if (!analysis_.fn_->asyncGen) {
+  if (!analysis_.fn->asyncGen) {
     return;
   }
   unsigned seg =
       analysis_.codeWalk().segment(y, y->delegate ? SegKind::Await : SegKind::Yield, y->loc());
-  analysis_.fn_->segs[seg].delegate = y->delegate;
+  analysis_.fn->segs[seg].delegate = y->delegate;
   analysis_.codeWalk().moveTo(seg);
 }
 

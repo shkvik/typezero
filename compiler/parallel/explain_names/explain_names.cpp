@@ -40,10 +40,10 @@ Analysis::Pos ExplainNames::posOf(llvm::SMLoc loc) const {
   if (!loc.isValid()) {
     return pos;
   }
-  pos.buffer = analysis_.sources_.FindBufferContainingLoc(loc);
+  pos.buffer = analysis_.sources.FindBufferContainingLoc(loc);
   if (pos.buffer) {
     pos.offset = unsigned(loc.getPointer() -
-                          analysis_.sources_.getMemoryBuffer(pos.buffer)->getBufferStart());
+                          analysis_.sources.getMemoryBuffer(pos.buffer)->getBufferStart());
   }
 
   return pos;
@@ -54,20 +54,20 @@ unsigned ExplainNames::lineOf(llvm::SMLoc loc) const {
     return 0;
   }
 
-  return analysis_.sources_.FindLineNumber(loc);
+  return analysis_.sources.FindLineNumber(loc);
 }
 
 std::string ExplainNames::where(llvm::SMLoc loc) const {
   if (!loc.isValid()) {
     return "?";
   }
-  unsigned buffer = analysis_.sources_.FindBufferContainingLoc(loc);
-  std::string line = std::to_string(analysis_.sources_.FindLineNumber(loc, buffer));
+  unsigned buffer = analysis_.sources.FindBufferContainingLoc(loc);
+  std::string line = std::to_string(analysis_.sources.FindLineNumber(loc, buffer));
   if (!buffer) {
     return line;
   }
-  llvm::StringRef id = analysis_.sources_.getMemoryBuffer(buffer)->getBufferIdentifier();
-  for (const Module *module : analysis_.program_.modules) {
+  llvm::StringRef id = analysis_.sources.getMemoryBuffer(buffer)->getBufferIdentifier();
+  for (const Module *module : analysis_.program.modules) {
     if (module->path == id) {
       return module->isEntry ? line : module->name + ":" + line;
     }
@@ -152,8 +152,8 @@ std::string ExplainNames::refName(Ref r) const {
     return "its own object";
   case RefKind::Site: {
     auto *e = static_cast<const Expr *>(r.ptr);
-    auto found = analysis_.siteName_.find(e);
-    if (found != analysis_.siteName_.end()) {
+    auto found = analysis_.siteName.find(e);
+    if (found != analysis_.siteName.end()) {
       return found->second.str();
     }
     const Type *t = e->type ? e->type->nonOptional() : nullptr;
@@ -207,7 +207,7 @@ std::string ExplainNames::locName(const Loc &loc) const {
     }
     if (loc.ref.kind == RefKind::Type ||
         (loc.ref.kind == RefKind::Site &&
-         !analysis_.siteName_.count(static_cast<const Expr *>(loc.ref.ptr)))) {
+         !analysis_.siteName.count(static_cast<const Expr *>(loc.ref.ptr)))) {
       return field.str() + " of " + object;
     }
     return object + "." + field.str();
@@ -224,7 +224,7 @@ std::string ExplainNames::locName(const Loc &loc) const {
   case LocKind::OwnCell:
     return "elements of " + refName(loc.ref) + ", each task its own";
   case LocKind::Contents:
-    if (loc.key == analysis_.inner_) {
+    if (loc.key == analysis_.inner) {
       return "the objects inside its own " + typeText(analysis_.aliasAnalysis().typeOfRef(loc.ref));
     }
     return "everything in " + refName(loc.ref);

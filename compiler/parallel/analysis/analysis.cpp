@@ -42,12 +42,12 @@ using llvm::dyn_cast_or_null;
 
 using llvm::isa;
 
-const FunctionDecl *Analysis::thisOwnerOf(const FunctionDecl *fn) const {
-  for (; fn; fn = fn->parent) {
-    if (fn->takesThis()) {
-      return fn;
+const FunctionDecl *Analysis::thisOwnerOf(const FunctionDecl *function) const {
+  for (; function; function = function->parent) {
+    if (function->takesThis()) {
+      return function;
     }
-    if (!fn->isArrow) {
+    if (!function->isArrow) {
       return nullptr;
     }
   }
@@ -56,11 +56,11 @@ const FunctionDecl *Analysis::thisOwnerOf(const FunctionDecl *fn) const {
 }
 
 void Analysis::run() {
-  star_ = intern("*");
-  length_ = intern("%length");
-  inner_ = intern("%inner");
-  state_ = intern("%state");
-  listenersKey_ = intern("%listeners");
+  this->star = intern("*");
+  this->length = intern("%length");
+  this->inner = intern("%inner");
+  this->state = intern("%state");
+  this->listenersKey = intern("%listeners");
   codeWalk().discover(nullptr);
   callResolver().resolve();
   ownership().decide();
@@ -77,73 +77,73 @@ void Analysis::run() {
 
 ParallelPlan Analysis::plan() const {
   ParallelPlan plan;
-  for (size_t r = 0; r < roots_.size(); ++r) {
-    const Root &root = roots_[r];
+  for (size_t r = 0; r < this->roots.size(); ++r) {
+    const Root &root = this->roots[r];
     ParallelPlan::Task task;
-    task.fn = fns_[root.fn].decl;
+    task.fn = this->fns[root.fn].decl;
     task.parent = root.parent;
     task.several = root.multi;
     task.joinedAt = root.join;
     if (root.rec >= 0) {
-      task.site = fns_[root.callerFn].calls[root.rec].site;
+      task.site = this->fns[root.callerFn].calls[root.rec].site;
     }
     plan.tasks.push_back(task);
   }
-  for (unsigned i = 0; i < pieces_.size(); ++i) {
-    const PieceInst &p = pieces_[i];
+  for (unsigned i = 0; i < this->pieceInstances.size(); ++i) {
+    const PieceInst &p = this->pieceInstances[i];
     ParallelPlan::Piece piece;
-    piece.fn = fns_[p.fn].decl;
-    piece.start = fns_[p.fn].segs[p.seg].at;
+    piece.fn = this->fns[p.fn].decl;
+    piece.start = this->fns[p.fn].segs[p.seg].at;
     piece.task = unsigned(p.root);
-    piece.alone = decisions_[i].alone;
-    for (const Partner &partner : decisions_[i].partners) {
+    piece.alone = this->decisions[i].alone;
+    for (const Partner &partner : this->decisions[i].partners) {
       piece.inOrderWith.push_back(partner.piece);
     }
-    piece.orderedFrom = decisions_[i].from;
-    piece.orderedTo = decisions_[i].to;
-    piece.orderedAt = decisions_[i].waits;
+    piece.orderedFrom = this->decisions[i].from;
+    piece.orderedTo = this->decisions[i].to;
+    piece.orderedAt = this->decisions[i].waits;
     plan.pieces.push_back(std::move(piece));
   }
-  plan.ownedParams.assign(ownedParams_.begin(), ownedParams_.end());
+  plan.ownedParams.assign(this->ownedParams.begin(), this->ownedParams.end());
 
   return plan;
 }
 
-Analysis::Analysis(const SourceFile &program, const llvm::SourceMgr &sources)
-    : program_(program), sources_(sources) {
-  codeWalkPart_ = std::make_unique<CodeWalk>(*this);
-  exprWalkPart_ = std::make_unique<ExprWalk>(*this);
-  callWalkPart_ = std::make_unique<CallWalk>(*this);
-  libraryEffectsPart_ = std::make_unique<LibraryEffects>(*this);
-  builtinCallsPart_ = std::make_unique<BuiltinEffects>(*this);
-  aliasAnalysisPart_ = std::make_unique<AliasAnalysis>(*this);
-  escapeScanPart_ = std::make_unique<EscapeScan>(*this);
-  callResolverPart_ = std::make_unique<CallResolver>(*this);
-  piecesPart_ = std::make_unique<Pieces>(*this);
-  conflictsPart_ = std::make_unique<Conflicts>(*this);
-  explainerPart_ = std::make_unique<Explainer>(*this);
-  explainNamesPart_ = std::make_unique<ExplainNames>(*this);
-  explainTitlesPart_ = std::make_unique<ExplainTitles>(*this);
-  ownershipPart_ = std::make_unique<Ownership>(*this);
-  for (const Module *module : program.modules) {
+Analysis::Analysis(const SourceFile &sourceFile, const llvm::SourceMgr &sourceManager)
+    : program(sourceFile), sources(sourceManager) {
+  this->codeWalkPart = std::make_unique<CodeWalk>(*this);
+  this->exprWalkPart = std::make_unique<ExprWalk>(*this);
+  this->callWalkPart = std::make_unique<CallWalk>(*this);
+  this->libraryEffectsPart = std::make_unique<LibraryEffects>(*this);
+  this->builtinCallsPart = std::make_unique<BuiltinEffects>(*this);
+  this->aliasAnalysisPart = std::make_unique<AliasAnalysis>(*this);
+  this->escapeScanPart = std::make_unique<EscapeScan>(*this);
+  this->callResolverPart = std::make_unique<CallResolver>(*this);
+  this->piecesPart = std::make_unique<Pieces>(*this);
+  this->conflictsPart = std::make_unique<Conflicts>(*this);
+  this->explainerPart = std::make_unique<Explainer>(*this);
+  this->explainNamesPart = std::make_unique<ExplainNames>(*this);
+  this->explainTitlesPart = std::make_unique<ExplainTitles>(*this);
+  this->ownershipPart = std::make_unique<Ownership>(*this);
+  for (const Module *module : this->program.modules) {
     if (!module->builtin) {
       continue;
     }
     for (unsigned id : module->buffers) {
-      const llvm::MemoryBuffer *buffer = sources.getMemoryBuffer(id);
-      libRanges_.push_back({buffer->getBufferStart(), buffer->getBufferEnd()});
+      const llvm::MemoryBuffer *buffer = this->sources.getMemoryBuffer(id);
+      this->libRanges.push_back({buffer->getBufferStart(), buffer->getBufferEnd()});
     }
   }
-  for (const Stmt *item : program.items) {
+  for (const Stmt *item : this->program.items) {
     if (auto *cls = dyn_cast<ClassDecl>(item);
         cls && !cls->builtin && !libraryEffects().inLibrary(cls->loc())) {
-      programClasses_.push_back(cls);
+      this->programClasses.push_back(cls);
     }
   }
 }
 
-bool Analysis::isLibrary(const FunctionDecl *fn) const {
-  return fn && libraryEffects().inLibrary(fn->loc());
+bool Analysis::isLibrary(const FunctionDecl *function) const {
+  return function && libraryEffects().inLibrary(function->loc());
 }
 
 void Analysis::resource(Res res, bool write, llvm::SMLoc at) {

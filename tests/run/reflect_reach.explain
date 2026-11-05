@@ -16,18 +16,15 @@ top-level code
   after await at line 46
     writes stdout (line 46)
     reads  counter.count (line 46)
-    reads  everything in any unknown[] (line 47 in make)
+    reads  elements of any unknown[] (line 47 in make)
     reads  message of any ReflectError (line 47 in make)
-    in order with Counter.onModuleInit after await at line 14: counter.count, everything in any unknown[]
-    in order: lines 46-47
-    waits for its turn inside: line 37 in make
+    in order with Counter.onModuleInit after await at line 14: counter.count
+    in order: line 46
   after await at line 47
     writes stdout (line 47)
-    reads  everything in any unknown[] (line 48 in make)
+    reads  elements of any unknown[] (line 48 in make)
     reads  message of any ReflectError (line 48 in make)
-    in order with Counter.onModuleInit after await at line 14: everything in any unknown[]
-    in order: line 48
-    waits for its turn inside: line 37 in make
+    parallel
   after await at line 48
     writes stdout (line 48)
     parallel
@@ -41,7 +38,6 @@ async method Counter.onModuleInit, line 13
     in order with the start of the top-level code: count of any unknown
     in order with the top-level code after await at line 45: count of any unknown
     in order with the top-level code after await at line 46: count of any unknown
-    in order with the top-level code after await at line 47: count of any unknown
     in order: line 15
 
 async function callHook, line 26
@@ -53,7 +49,7 @@ async function callHook, line 26
 
 async function make, line 35
   start: runs inside its caller
-    reads  everything in any unknown[] (line 37)
+    reads  elements of any unknown[] (line 37)
     reads  message of any ReflectError (line 38)
   after await at line 39
     parallel

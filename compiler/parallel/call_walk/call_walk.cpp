@@ -97,7 +97,7 @@ void CallWalk::addCallee(CallRec &rec, const FunctionDecl *decl, std::optional<R
     return;
   }
   unsigned fi = analysis_.codeWalk().discover(decl);
-  const FnInfo &callee = analysis_.fns_[fi];
+  const FnInfo &callee = analysis_.fns[fi];
   Mode mode = Mode::Sync;
   switch (rec.kind) {
   case CallKind::Call:
@@ -191,11 +191,11 @@ void CallWalk::registerValue(const FunctionDecl *fn, const Type *type) {
     return;
   }
   unsigned fi = analysis_.codeWalk().discover(fn);
-  analysis_.valueFns_.insert(fi);
+  analysis_.valueFns.insert(fi);
   if (!type || !type->nonOptional()->isFunction()) {
     return;
   }
-  std::vector<unsigned> &list = analysis_.values_[type->nonOptional()];
+  std::vector<unsigned> &list = analysis_.values[type->nonOptional()];
   if (!llvm::is_contained(list, fi)) {
     list.push_back(fi);
   }
@@ -213,12 +213,12 @@ void CallWalk::unknownRef(const Expr *e) {
   } else if (auto *m = dyn_cast_or_null<MemberExpr>(e); m && m->method) {
     fns = methodTargets(m->method->decl, m->virtualCall);
   } else {
-    analysis_.unknownAnyFn_ = true;
+    analysis_.unknownAnyFn = true;
     return;
   }
   for (const FunctionDecl *fn : fns) {
     if (fn && fn->body && !analysis_.isLibrary(fn)) {
-      analysis_.unknownFns_.insert(analysis_.codeWalk().discover(fn));
+      analysis_.unknownFns.insert(analysis_.codeWalk().discover(fn));
     }
   }
 }
@@ -264,8 +264,8 @@ void CallWalk::call(const CallExpr *c, const Use &use) {
   bool superCtor = c->superCall && !m;
   std::optional<Ref> self;
   if (superCtor) {
-    if (analysis_.fn_->thisOwner) {
-      self = Ref{RefKind::This, analysis_.fn_->thisOwner};
+    if (analysis_.fn->thisOwner) {
+      self = Ref{RefKind::This, analysis_.fn->thisOwner};
     }
   } else if (m && (c->method || !c->unionMethods.empty())) {
     analysis_.exprWalk().expr(m->object);
@@ -282,7 +282,7 @@ void CallWalk::call(const CallExpr *c, const Use &use) {
     if (c->method) {
       addCallee(rec, c->method->decl, self);
     }
-    for (const ClassDecl *k = analysis_.fn_->decl ? analysis_.fn_->decl->cls : nullptr; k;
+    for (const ClassDecl *k = analysis_.fn->decl ? analysis_.fn->decl->cls : nullptr; k;
          k = k->parent) {
       if (k->init) {
         addCallee(rec, k->init, self);
@@ -312,11 +312,11 @@ void CallWalk::call(const CallExpr *c, const Use &use) {
     return;
   }
   if (c->func) {
-    addCallee(rec, c->func->decl, closureSelf(c->func->decl, *analysis_.fn_));
+    addCallee(rec, c->func->decl, closureSelf(c->func->decl, *analysis_.fn));
     return;
   }
   auto *callee = dyn_cast<NameExpr>(strip(c->callee));
-  if (callee && callee->var && analysis_.resolvers_.contains(callee->var)) {
+  if (callee && callee->var && analysis_.resolvers.contains(callee->var)) {
     return;
   }
   if (m && (m->name == "resolve" || m->name == "reject") && m->object->type &&
@@ -330,7 +330,7 @@ void CallWalk::call(const CallExpr *c, const Use &use) {
     rec.byObject = m->object->type;
     rec.bySelf = analysis_.aliasAnalysis().receiverRef(m->object);
   }
-  const FunctionDecl *fn = analysis_.fn_->decl;
+  const FunctionDecl *fn = analysis_.fn->decl;
   if (callee && callee->var && !callee->var->reassigned && fn &&
       llvm::any_of(fn->params, [&](const Param &p) { return p.sym == callee->var; })) {
     rec.viaParam = callee->var;
@@ -378,7 +378,7 @@ void CallWalk::functionArg(const CallExpr *c, const Expr *arg, CallKind kind, co
   if (fe && b == Builtin::PromiseNew) {
     for (size_t i = 0; i < fe->fn->params.size() && i < 2; ++i) {
       if (fe->fn->params[i].sym) {
-        analysis_.resolvers_.insert(fe->fn->params[i].sym);
+        analysis_.resolvers.insert(fe->fn->params[i].sym);
       }
     }
   }
@@ -387,10 +387,10 @@ void CallWalk::functionArg(const CallExpr *c, const Expr *arg, CallKind kind, co
                  cast<MemberExpr>(c->callee)->object->type->nonOptional()->isArray();
   if (fe && ofArray && (b == Builtin::ArrMap || b == Builtin::ArrForEach) &&
       fe->fn->params.size() > 1 && fe->fn->params[1].sym) {
-    analysis_.ownIndex_.insert(fe->fn->params[1].sym);
+    analysis_.ownIndex.insert(fe->fn->params[1].sym);
   }
   if (fe && b == Builtin::ArrMap && use.join && !fe->fn->isAsync) {
-    analysis_.joinReturns_[fe->fn] = use.join;
+    analysis_.joinReturns[fe->fn] = use.join;
   }
 
   Use recUse;
@@ -411,30 +411,30 @@ void CallWalk::functionArg(const CallExpr *c, const Expr *arg, CallKind kind, co
 
 void CallWalk::addFunctionCallees(const Expr *f, const Expr *arg, CallKind kind) {
   CallRec &rec =
-      analysis_.fn_
-          ->calls[analysis_.fn_->callOf.lookup(std::make_pair((const void *)f, unsigned(kind)))];
+      analysis_.fn
+          ->calls[analysis_.fn->callOf.lookup(std::make_pair((const void *)f, unsigned(kind)))];
   if (auto *fe = dyn_cast<FunctionExpr>(f)) {
     analysis_.codeWalk().discover(fe->fn);
-    addCallee(rec, fe->fn, closureSelf(fe->fn, *analysis_.fn_));
+    addCallee(rec, fe->fn, closureSelf(fe->fn, *analysis_.fn));
   } else if (auto *n = dyn_cast<NameExpr>(f); n && n->func) {
     addCallee(rec, n->func->decl, std::nullopt);
   } else if (n && n->var && (n->var->function || n->var->lambda)) {
     const FunctionDecl *decl = n->var->function ? n->var->function : n->var->lambda;
-    addCallee(rec, decl, closureSelf(decl, *analysis_.fn_));
-  } else if (n && n->var && analysis_.resolvers_.contains(n->var)) {
+    addCallee(rec, decl, closureSelf(decl, *analysis_.fn));
+  } else if (n && n->var && analysis_.resolvers.contains(n->var)) {
   } else if (auto *mem = dyn_cast<MemberExpr>(f); mem && mem->method) {
     analysis_.exprWalk().expr(mem->object);
     CallRec &again =
-        analysis_.fn_
-            ->calls[analysis_.fn_->callOf.lookup(std::make_pair((const void *)f, unsigned(kind)))];
+        analysis_.fn
+            ->calls[analysis_.fn->callOf.lookup(std::make_pair((const void *)f, unsigned(kind)))];
     for (const FunctionDecl *fn : methodTargets(mem->method->decl, mem->virtualCall)) {
       addCallee(again, fn, analysis_.aliasAnalysis().receiverRef(mem->object));
     }
   } else {
     analysis_.exprWalk().expr(arg);
     CallRec &again =
-        analysis_.fn_
-            ->calls[analysis_.fn_->callOf.lookup(std::make_pair((const void *)f, unsigned(kind)))];
+        analysis_.fn
+            ->calls[analysis_.fn->callOf.lookup(std::make_pair((const void *)f, unsigned(kind)))];
     again.byType = arg->type;
   }
 }

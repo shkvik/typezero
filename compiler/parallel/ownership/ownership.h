@@ -87,6 +87,7 @@ private:
   bool handsOver(unsigned fi, const CallRec &rec, Mode mode, bool strict);
   int argOf(unsigned fi, const CallRec &rec, const Callee &callee, size_t param, bool strict);
   bool passesOwned(const CallExpr *c, size_t index);
+  bool reflectKeepsArgs(const CallExpr *c, bool self);
   bool callersOwned(unsigned fi, size_t index, bool strict);
   bool poolFresh(const Type *item) const;
   bool callFresh(unsigned fi, const CallExpr *c) const;
@@ -112,6 +113,7 @@ private:
   bool collecting_ = false;
   const Expr *heldLiteral_ = nullptr;
   const VarSymbol *holder_ = nullptr;
+  const FunctionDecl *returningIn_ = nullptr;
   llvm::DenseSet<const VarSymbol *> leaked_;
   llvm::DenseSet<const VarSymbol *> leaking_;
   llvm::DenseSet<const VarSymbol *> owned_;

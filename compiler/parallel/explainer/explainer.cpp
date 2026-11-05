@@ -33,7 +33,7 @@ namespace tz::parallel {
 Explainer::Explainer(Analysis &analysis) : analysis_(analysis) {}
 
 std::vector<std::string> Explainer::decisionLines(unsigned piece) const {
-  const Analysis::Decision &d = analysis_.decisions_[piece];
+  const Analysis::Decision &d = analysis_.decisions[piece];
   std::vector<std::string> lines;
   if (d.alone) {
     return {"runs alone"};
@@ -47,9 +47,9 @@ std::vector<std::string> Explainer::decisionLines(unsigned piece) const {
     if (partner.piece == piece) {
       who = "the same piece in other tasks";
     } else {
-      const PieceInst &p = analysis_.pieces_[partner.piece];
+      const PieceInst &p = analysis_.pieceInstances[partner.piece];
       who = analysis_.explainTitles().pieceTitle(partner.piece,
-                                                 analysis_.segPieces_.at({p.fn, p.seg}).size() > 1);
+                                                 analysis_.segPieces.at({p.fn, p.seg}).size() > 1);
     }
     std::vector<std::string> names;
     for (const Loc &loc : partner.locs) {
@@ -90,36 +90,36 @@ std::vector<std::string> Explainer::decisionLines(unsigned piece) const {
 }
 
 void Explainer::print(llvm::raw_ostream &out) {
-  if (!analysis_.program_.usesAsync) {
+  if (!analysis_.program.usesAsync) {
     out << "no async code: the program runs as one piece\n";
     return;
   }
   std::vector<unsigned> order;
-  std::vector<bool> shown(analysis_.fns_.size(), false);
-  for (const PieceInst &p : analysis_.pieces_) {
+  std::vector<bool> shown(analysis_.fns.size(), false);
+  for (const PieceInst &p : analysis_.pieceInstances) {
     shown[p.fn] = true;
   }
-  for (const Activation &act : analysis_.acts_) {
-    if (analysis_.fns_[act.fn].async || analysis_.fns_[act.fn].asyncGen) {
+  for (const Activation &act : analysis_.acts) {
+    if (analysis_.fns[act.fn].async || analysis_.fns[act.fn].asyncGen) {
       shown[act.fn] = true;
     }
   }
-  for (unsigned fi = 0; fi < analysis_.fns_.size(); ++fi) {
+  for (unsigned fi = 0; fi < analysis_.fns.size(); ++fi) {
     if (shown[fi]) {
       order.push_back(fi);
     }
   }
   std::stable_sort(order.begin(), order.end(), [&](unsigned a, unsigned b) {
-    if (!analysis_.fns_[a].decl || !analysis_.fns_[b].decl) {
-      return !analysis_.fns_[a].decl && analysis_.fns_[b].decl;
+    if (!analysis_.fns[a].decl || !analysis_.fns[b].decl) {
+      return !analysis_.fns[a].decl && analysis_.fns[b].decl;
     }
 
-    return analysis_.explainNames().posOf(analysis_.fns_[a].decl->loc()) <
-           analysis_.explainNames().posOf(analysis_.fns_[b].decl->loc());
+    return analysis_.explainNames().posOf(analysis_.fns[a].decl->loc()) <
+           analysis_.explainNames().posOf(analysis_.fns[b].decl->loc());
   });
   bool first = true;
   for (unsigned fi : order) {
-    const FnInfo &f = analysis_.fns_[fi];
+    const FnInfo &f = analysis_.fns[fi];
     if (!first) {
       out << "\n";
     }
@@ -139,7 +139,7 @@ void Explainer::print(llvm::raw_ostream &out) {
     });
     for (unsigned s : segs) {
       std::vector<unsigned> mine;
-      if (auto found = analysis_.segPieces_.find({fi, s}); found != analysis_.segPieces_.end()) {
+      if (auto found = analysis_.segPieces.find({fi, s}); found != analysis_.segPieces.end()) {
         mine = found->second;
       }
       std::vector<std::pair<std::string, unsigned>> byContext;
@@ -157,7 +157,7 @@ void Explainer::print(llvm::raw_ostream &out) {
         }
         title +=
             f.asyncGen ? ": runs inside the loop that iterates it" : ": runs inside its caller";
-      } else if (mine.size() == 1 && analysis_.pieces_[mine[0]].root != 0) {
+      } else if (mine.size() == 1 && analysis_.pieceInstances[mine[0]].root != 0) {
         title += " (in " + analysis_.explainTitles().contextOf(mine[0]) + ")";
       }
       out << "  " << title << "\n";

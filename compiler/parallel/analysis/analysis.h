@@ -39,19 +39,21 @@ class Ownership;
 
 class Analysis {
 public:
-  Analysis(const SourceFile &program, const llvm::SourceMgr &sources);
+  Analysis(const SourceFile &sourceFile, const llvm::SourceMgr &sourceManager);
   void run();
   ParallelPlan plan() const;
 
 private:
-  bool isLibrary(const FunctionDecl *fn) const;
+  bool isLibrary(const FunctionDecl *function) const;
   void resource(Res res, bool write, llvm::SMLoc at);
-  const char *intern(llvm::StringRef name) { return names_.insert(name).first->getKeyData(); }
+  const char *intern(llvm::StringRef name) { return this->names.insert(name).first->getKeyData(); }
   bool shared(const VarSymbol *v) const { return (v->isGlobal || v->captured) && v->reassigned; }
   using Escapes = llvm::DenseSet<const VarSymbol *>;
-  const FunctionDecl *thisOwnerOf(const FunctionDecl *fn) const;
+  const FunctionDecl *thisOwnerOf(const FunctionDecl *function) const;
   std::optional<Ref> classRefOrNone(const FnInfo &f) const;
-  unsigned startNode(int root) const { return unsigned(pieces_.size()) + unsigned(root); }
+  unsigned startNode(int root) const {
+    return unsigned(this->pieceInstances.size()) + unsigned(root);
+  }
   struct Pos {
     unsigned buffer = 0;
     unsigned offset = 0;
@@ -68,101 +70,101 @@ private:
   static std::string lineText(const std::string &where) {
     return inOtherFile(where) ? where : "line " + where;
   }
-  const SourceFile &program_;
-  const llvm::SourceMgr &sources_;
-  std::deque<FnInfo> fns_;
-  llvm::DenseMap<const FunctionDecl *, unsigned> fnIndex_;
-  std::deque<unsigned> worklist_;
-  llvm::StringSet<> names_;
-  const char *star_ = nullptr;
-  const char *length_ = nullptr;
-  const char *inner_ = nullptr;
-  const char *state_ = nullptr;
-  const char *listenersKey_ = nullptr;
-  llvm::DenseMap<const VarSymbol *, const Expr *> declInit_;
-  llvm::DenseMap<const Expr *, llvm::StringRef> siteName_;
-  std::map<const Type *, std::vector<unsigned>> values_;
-  llvm::DenseSet<unsigned> valueFns_;
-  llvm::DenseSet<unsigned> unknownFns_;
-  bool unknownAnyFn_ = false;
-  std::vector<std::pair<const char *, const char *>> libRanges_;
-  std::vector<unsigned> listeners_[ChannelCount];
-  std::vector<const Type *> listenerTypes_[ChannelCount];
-  llvm::DenseSet<const VarSymbol *> resolvers_;
-  llvm::DenseSet<const VarSymbol *> ownIndex_;
-  std::deque<OwnedRef> ownedRefs_;
+  const SourceFile &program;
+  const llvm::SourceMgr &sources;
+  std::deque<FnInfo> fns;
+  llvm::DenseMap<const FunctionDecl *, unsigned> fnIndex;
+  std::deque<unsigned> worklist;
+  llvm::StringSet<> names;
+  const char *star = nullptr;
+  const char *length = nullptr;
+  const char *inner = nullptr;
+  const char *state = nullptr;
+  const char *listenersKey = nullptr;
+  llvm::DenseMap<const VarSymbol *, const Expr *> declInit;
+  llvm::DenseMap<const Expr *, llvm::StringRef> siteName;
+  std::map<const Type *, std::vector<unsigned>> values;
+  llvm::DenseSet<unsigned> valueFns;
+  llvm::DenseSet<unsigned> unknownFns;
+  bool unknownAnyFn = false;
+  std::vector<std::pair<const char *, const char *>> libRanges;
+  std::vector<unsigned> listeners[ChannelCount];
+  std::vector<const Type *> listenerTypes[ChannelCount];
+  llvm::DenseSet<const VarSymbol *> resolvers;
+  llvm::DenseSet<const VarSymbol *> ownIndex;
+  std::deque<OwnedRef> ownedRefs;
   std::map<std::tuple<const VarSymbol *, const Type *, std::vector<FieldKey>, bool>,
            const OwnedRef *>
-      ownedRefIndex_;
-  llvm::DenseSet<const VarSymbol *> ownedParams_;
-  std::vector<std::pair<const Type *, const FunctionDecl *>> poolCreates_;
-  bool poolOpen_ = false;
-  llvm::DenseMap<const FunctionDecl *, const AwaitExpr *> joinReturns_;
+      ownedRefIndex;
+  llvm::DenseSet<const VarSymbol *> ownedParams;
+  std::vector<std::pair<const Type *, const FunctionDecl *>> poolCreates;
+  bool poolOpen = false;
+  llvm::DenseMap<const FunctionDecl *, const AwaitExpr *> joinReturns;
   struct AwaitInfo {
     unsigned fn = 0;
   };
-  llvm::DenseMap<const AwaitExpr *, AwaitInfo> awaits_;
+  llvm::DenseMap<const AwaitExpr *, AwaitInfo> awaits;
   struct JoinInfo {
     unsigned fn = 0;
     Active segs;
   };
-  llvm::DenseMap<const AwaitExpr *, JoinInfo> joins_;
-  std::vector<const ClassDecl *> classes_;
-  std::vector<const ClassDecl *> programClasses_;
-  llvm::DenseSet<const ClassDecl *> classSeen_;
-  std::map<const FunctionDecl *, Escapes> escapes_;
-  llvm::DenseMap<const ClassDecl *, bool> leaks_;
-  std::map<std::pair<const Type *, const Type *>, bool> alias_;
-  std::map<const Type *, std::vector<const Type *>> reach_;
-  std::map<std::pair<unsigned, unsigned>, bool> fnOnce_;
-  std::map<unsigned, bool> rejectionEnds_;
-  unsigned fi_ = 0;
-  FnInfo *fn_ = nullptr;
-  Active cur_;
+  llvm::DenseMap<const AwaitExpr *, JoinInfo> joins;
+  std::vector<const ClassDecl *> classes;
+  std::vector<const ClassDecl *> programClasses;
+  llvm::DenseSet<const ClassDecl *> classSeen;
+  std::map<const FunctionDecl *, Escapes> escapes;
+  llvm::DenseMap<const ClassDecl *, bool> leaks;
+  std::map<std::pair<const Type *, const Type *>, bool> alias;
+  std::map<const Type *, std::vector<const Type *>> reach;
+  std::map<std::pair<unsigned, unsigned>, bool> fnOnce;
+  std::map<unsigned, bool> rejectionEnds;
+  unsigned fi = 0;
+  FnInfo *fn = nullptr;
+  Active cur;
   struct Target {
     llvm::StringRef label;
     bool loop = false;
     bool block = false;
     Active breaks, continues;
   };
-  std::vector<Target> targets_;
-  unsigned loops_ = 0;
-  llvm::StringRef label_;
-  std::vector<const Stmt *> anchors_;
-  llvm::DenseSet<const char *> partedAnchors_;
+  std::vector<Target> targets;
+  unsigned loops = 0;
+  llvm::StringRef label;
+  std::vector<const Stmt *> anchors;
+  llvm::DenseSet<const char *> partedAnchors;
   struct OpenJoin {
     const AwaitExpr *await;
     Active active;
   };
-  std::vector<OpenJoin> openJoins_;
-  std::vector<Activation> acts_;
-  std::map<std::tuple<unsigned, int, std::optional<Ref>, bool>, unsigned> actIndex_;
-  std::vector<std::tuple<unsigned, unsigned, unsigned>> inlineEdges_;
-  std::vector<std::tuple<unsigned, unsigned, unsigned>> edges_;
-  std::vector<std::map<const VarSymbol *, std::set<const FunctionDecl *>>> bindings_;
-  std::vector<bool> reached_;
-  std::vector<Root> roots_;
-  std::vector<PieceInst> pieces_;
-  std::map<std::tuple<unsigned, unsigned, int, std::optional<Ref>>, unsigned> pieceIndex_;
-  std::vector<std::vector<unsigned>> actPieces_;
-  std::map<std::pair<unsigned, int>, std::vector<unsigned>> actsByTask_;
-  const std::vector<unsigned> &actsOf(unsigned fn, int root) const {
+  std::vector<OpenJoin> openJoins;
+  std::vector<Activation> acts;
+  std::map<std::tuple<unsigned, int, std::optional<Ref>, bool>, unsigned> actIndex;
+  std::vector<std::tuple<unsigned, unsigned, unsigned>> inlineEdges;
+  std::vector<std::tuple<unsigned, unsigned, unsigned>> edges;
+  std::vector<std::map<const VarSymbol *, std::set<const FunctionDecl *>>> bindings;
+  std::vector<bool> reached;
+  std::vector<Root> roots;
+  std::vector<PieceInst> pieceInstances;
+  std::map<std::tuple<unsigned, unsigned, int, std::optional<Ref>>, unsigned> pieceIndex;
+  std::vector<std::vector<unsigned>> actPieces;
+  std::map<std::pair<unsigned, int>, std::vector<unsigned>> actsByTask;
+  const std::vector<unsigned> &actsOf(unsigned function, int root) const {
     static const std::vector<unsigned> none;
-    auto found = actsByTask_.find({fn, root});
+    auto found = this->actsByTask.find({function, root});
 
-    return found == actsByTask_.end() ? none : found->second;
+    return found == this->actsByTask.end() ? none : found->second;
   }
-  std::map<std::tuple<int, unsigned, std::optional<Ref>, unsigned, unsigned>, int> rootIndex_;
-  std::map<std::pair<unsigned, unsigned>, std::vector<unsigned>> segPieces_;
-  std::map<std::tuple<unsigned, unsigned, int>, unsigned> sameTask_;
-  std::vector<std::map<unsigned, std::vector<unsigned>>> flow_;
+  std::map<std::tuple<int, unsigned, std::optional<Ref>, unsigned, unsigned>, int> rootIndex;
+  std::map<std::pair<unsigned, unsigned>, std::vector<unsigned>> segPieces;
+  std::map<std::tuple<unsigned, unsigned, int>, unsigned> sameTask;
+  std::vector<std::map<unsigned, std::vector<unsigned>>> flow;
   struct Entry {
     llvm::SMLoc first, last;
     bool open = false;
   };
-  std::map<std::pair<unsigned, unsigned>, Entry> entries_;
-  std::vector<std::map<std::pair<unsigned, unsigned>, llvm::SMLoc>> flowFrom_;
-  std::map<unsigned, std::vector<Pos>> steps_;
+  std::map<std::pair<unsigned, unsigned>, Entry> entries;
+  std::vector<std::map<std::pair<unsigned, unsigned>, llvm::SMLoc>> flowFrom;
+  std::map<unsigned, std::vector<Pos>> steps;
   struct Partner {
     unsigned piece;
     std::vector<Loc> locs;
@@ -176,27 +178,27 @@ private:
     std::vector<llvm::SMLoc> waits;
     std::vector<std::pair<llvm::SMLoc, const FunctionDecl *>> inside;
   };
-  std::vector<std::vector<Touch>> pieceTouches_;
-  std::vector<Decision> decisions_;
-  mutable std::vector<std::string> rootTitles_;
+  std::vector<std::vector<Touch>> pieceTouches;
+  std::vector<Decision> decisions;
+  mutable std::vector<std::string> rootTitles;
 
 public:
   ~Analysis();
 
-  CodeWalk &codeWalk() const { return *codeWalkPart_; }
-  ExprWalk &exprWalk() const { return *exprWalkPart_; }
-  CallWalk &callWalk() const { return *callWalkPart_; }
-  LibraryEffects &libraryEffects() const { return *libraryEffectsPart_; }
-  BuiltinEffects &builtinCalls() const { return *builtinCallsPart_; }
-  AliasAnalysis &aliasAnalysis() const { return *aliasAnalysisPart_; }
-  EscapeScan &escapeScan() const { return *escapeScanPart_; }
-  CallResolver &callResolver() const { return *callResolverPart_; }
-  Pieces &pieces() const { return *piecesPart_; }
-  Conflicts &conflicts() const { return *conflictsPart_; }
-  Explainer &explainer() const { return *explainerPart_; }
-  ExplainNames &explainNames() const { return *explainNamesPart_; }
-  ExplainTitles &explainTitles() const { return *explainTitlesPart_; }
-  Ownership &ownership() const { return *ownershipPart_; }
+  CodeWalk &codeWalk() const { return *this->codeWalkPart; }
+  ExprWalk &exprWalk() const { return *this->exprWalkPart; }
+  CallWalk &callWalk() const { return *this->callWalkPart; }
+  LibraryEffects &libraryEffects() const { return *this->libraryEffectsPart; }
+  BuiltinEffects &builtinCalls() const { return *this->builtinCallsPart; }
+  AliasAnalysis &aliasAnalysis() const { return *this->aliasAnalysisPart; }
+  EscapeScan &escapeScan() const { return *this->escapeScanPart; }
+  CallResolver &callResolver() const { return *this->callResolverPart; }
+  Pieces &pieces() const { return *this->piecesPart; }
+  Conflicts &conflicts() const { return *this->conflictsPart; }
+  Explainer &explainer() const { return *this->explainerPart; }
+  ExplainNames &explainNames() const { return *this->explainNamesPart; }
+  ExplainTitles &explainTitles() const { return *this->explainTitlesPart; }
+  Ownership &ownership() const { return *this->ownershipPart; }
 
 private:
   friend class CodeWalk;
@@ -213,20 +215,20 @@ private:
   friend class ExplainNames;
   friend class ExplainTitles;
   friend class Ownership;
-  std::unique_ptr<CodeWalk> codeWalkPart_;
-  std::unique_ptr<ExprWalk> exprWalkPart_;
-  std::unique_ptr<CallWalk> callWalkPart_;
-  std::unique_ptr<LibraryEffects> libraryEffectsPart_;
-  std::unique_ptr<BuiltinEffects> builtinCallsPart_;
-  std::unique_ptr<AliasAnalysis> aliasAnalysisPart_;
-  std::unique_ptr<EscapeScan> escapeScanPart_;
-  std::unique_ptr<CallResolver> callResolverPart_;
-  std::unique_ptr<Pieces> piecesPart_;
-  std::unique_ptr<Conflicts> conflictsPart_;
-  std::unique_ptr<Explainer> explainerPart_;
-  std::unique_ptr<ExplainNames> explainNamesPart_;
-  std::unique_ptr<ExplainTitles> explainTitlesPart_;
-  std::unique_ptr<Ownership> ownershipPart_;
+  std::unique_ptr<CodeWalk> codeWalkPart;
+  std::unique_ptr<ExprWalk> exprWalkPart;
+  std::unique_ptr<CallWalk> callWalkPart;
+  std::unique_ptr<LibraryEffects> libraryEffectsPart;
+  std::unique_ptr<BuiltinEffects> builtinCallsPart;
+  std::unique_ptr<AliasAnalysis> aliasAnalysisPart;
+  std::unique_ptr<EscapeScan> escapeScanPart;
+  std::unique_ptr<CallResolver> callResolverPart;
+  std::unique_ptr<Pieces> piecesPart;
+  std::unique_ptr<Conflicts> conflictsPart;
+  std::unique_ptr<Explainer> explainerPart;
+  std::unique_ptr<ExplainNames> explainNamesPart;
+  std::unique_ptr<ExplainTitles> explainTitlesPart;
+  std::unique_ptr<Ownership> ownershipPart;
 };
 
 }

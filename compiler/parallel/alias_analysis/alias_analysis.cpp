@@ -91,15 +91,15 @@ Ref AliasAnalysis::refOf(const Expr *e) {
   if (auto *n = dyn_cast<NameExpr>(e); n && n->var) {
     const VarSymbol *v = n->var;
     if (v->owner && v->owner->thisVar == v) {
-      if (analysis_.fn_ && analysis_.fn_->decl != v->owner) {
+      if (analysis_.fn && analysis_.fn->decl != v->owner) {
         if (std::optional<Ref> owned = analysis_.ownership().ownedRef(e)) {
           return *owned;
         }
       }
       return Ref{RefKind::This, v->owner};
     }
-    auto it = analysis_.declInit_.find(v);
-    if (it != analysis_.declInit_.end() && !v->reassigned && isAllocation(it->second)) {
+    auto it = analysis_.declInit.find(v);
+    if (it != analysis_.declInit.end() && !v->reassigned && isAllocation(it->second)) {
       if (isLocal(v)) {
         return Ref{RefKind::Local, nullptr};
       }
@@ -132,8 +132,8 @@ bool AliasAnalysis::isLocal(const VarSymbol *v) {
   if (v->isGlobal || v->captured || v->reassigned || !holdsReferences(v->type)) {
     return false;
   }
-  auto it = analysis_.declInit_.find(v);
-  if (it == analysis_.declInit_.end() || !isAllocation(it->second)) {
+  auto it = analysis_.declInit.find(v);
+  if (it == analysis_.declInit.end() || !isAllocation(it->second)) {
     return false;
   }
   if (auto *n = dyn_cast<NewExpr>(it->second);
@@ -184,8 +184,8 @@ bool AliasAnalysis::typesMayAlias(const Type *a, const Type *b) {
   }
   auto key = std::make_pair(std::min(a, b, std::less<const Type *>()),
                             std::max(a, b, std::less<const Type *>()));
-  auto found = analysis_.alias_.find(key);
-  if (found != analysis_.alias_.end()) {
+  auto found = analysis_.alias.find(key);
+  if (found != analysis_.alias.end()) {
     return found->second;
   }
   bool result = false;
@@ -194,7 +194,7 @@ bool AliasAnalysis::typesMayAlias(const Type *a, const Type *b) {
     result = holdsReferences(a) && holdsReferences(b);
   } else if (a->isUnion() || b->isUnion()) {
     const Type *u = a->isUnion() ? a : b, *other = a->isUnion() ? b : a;
-    analysis_.alias_[key] = false;
+    analysis_.alias[key] = false;
     for (const Type *m : u->members()) {
       if (typesMayAlias(m, other)) {
         result = true;
@@ -214,19 +214,19 @@ bool AliasAnalysis::typesMayAlias(const Type *a, const Type *b) {
     result = objectTypesMayAlias(a, b);
   }
 
-  return analysis_.alias_[key] = result;
+  return analysis_.alias[key] = result;
 }
 
 bool AliasAnalysis::objectTypesMayAlias(const Type *a, const Type *b) {
   if (a == b || a->isSubtypeOf(b) || b->isSubtypeOf(a)) {
     return true;
   }
-  for (const Type *t : analysis_.program_.subtypes) {
+  for (const Type *t : analysis_.program.subtypes) {
     if (t->isSubtypeOf(a) && t->isSubtypeOf(b)) {
       return true;
     }
   }
-  for (const auto &[x, y] : analysis_.program_.views) {
+  for (const auto &[x, y] : analysis_.program.views) {
     if ((x == a && y == b) || (x == b && y == a)) {
       return true;
     }
@@ -236,8 +236,8 @@ bool AliasAnalysis::objectTypesMayAlias(const Type *a, const Type *b) {
 }
 
 const std::vector<const Type *> &AliasAnalysis::inside(const Type *type) {
-  auto found = analysis_.reach_.find(type);
-  if (found != analysis_.reach_.end()) {
+  auto found = analysis_.reach.find(type);
+  if (found != analysis_.reach.end()) {
     return found->second;
   }
   std::vector<const Type *> out;
@@ -295,7 +295,7 @@ const std::vector<const Type *> &AliasAnalysis::inside(const Type *type) {
         }
         down.insert(down.end(), cls->children.begin(), cls->children.end());
       }
-      for (const Type *sub : analysis_.program_.subtypes) {
+      for (const Type *sub : analysis_.program.subtypes) {
         if (sub != t && sub->isSubtypeOf(t)) {
           fieldsOf(sub);
         }
@@ -314,7 +314,7 @@ const std::vector<const Type *> &AliasAnalysis::inside(const Type *type) {
     parts(t);
   }
 
-  return analysis_.reach_[type] = std::move(out);
+  return analysis_.reach[type] = std::move(out);
 }
 
 bool AliasAnalysis::mayReach(Ref from, Ref to, bool innerOnly) {
@@ -348,14 +348,14 @@ bool AliasAnalysis::locsMayMeet(const Loc &a, const Loc &b) {
   if (a.kind == LocKind::Contents || b.kind == LocKind::Contents) {
     const Loc &c = a.kind == LocKind::Contents ? a : b;
     const Loc &o = a.kind == LocKind::Contents ? b : a;
-    return mayReach(c.ref, o.ref, c.key == analysis_.inner_) ||
-           (o.kind == LocKind::Contents && mayReach(o.ref, c.ref, o.key == analysis_.inner_));
+    return mayReach(c.ref, o.ref, c.key == analysis_.inner) ||
+           (o.kind == LocKind::Contents && mayReach(o.ref, c.ref, o.key == analysis_.inner));
   }
   if (a.kind == LocKind::Field || b.kind == LocKind::Field) {
     if (a.kind != b.kind) {
       return false;
     }
-    return (a.key == b.key || a.key == analysis_.star_ || b.key == analysis_.star_) &&
+    return (a.key == b.key || a.key == analysis_.star || b.key == analysis_.star) &&
            sameObject(a.ref, b.ref);
   }
 

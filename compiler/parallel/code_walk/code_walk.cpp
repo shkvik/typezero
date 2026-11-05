@@ -36,11 +36,11 @@ namespace tz::parallel {
 CodeWalk::CodeWalk(Analysis &analysis) : analysis_(analysis) {}
 
 unsigned CodeWalk::discover(const FunctionDecl *fn) {
-  auto [it, inserted] = analysis_.fnIndex_.try_emplace(fn, unsigned(analysis_.fns_.size()));
+  auto [it, inserted] = analysis_.fnIndex.try_emplace(fn, unsigned(analysis_.fns.size()));
   if (!inserted) {
     return it->second;
   }
-  FnInfo &info = analysis_.fns_.emplace_back();
+  FnInfo &info = analysis_.fns.emplace_back();
   info.decl = fn;
   if (fn) {
     info.async = fn->isAsync && !fn->isGenerator;
@@ -55,31 +55,31 @@ unsigned CodeWalk::discover(const FunctionDecl *fn) {
   if (fn) {
     info.segs[0].loc = fn->loc();
   }
-  analysis_.worklist_.push_back(it->second);
+  analysis_.worklist.push_back(it->second);
 
   return it->second;
 }
 
 void CodeWalk::noteClass(const ClassDecl *cls) {
   for (; cls; cls = cls->parent) {
-    if (analysis_.classSeen_.insert(cls).second) {
-      analysis_.classes_.push_back(cls);
+    if (analysis_.classSeen.insert(cls).second) {
+      analysis_.classes.push_back(cls);
     }
   }
 }
 
 void CodeWalk::walk(unsigned fi) {
-  analysis_.fi_ = fi;
-  analysis_.fn_ = &analysis_.fns_[fi];
-  analysis_.cur_ = {0};
-  analysis_.targets_.clear();
-  analysis_.openJoins_.clear();
-  analysis_.loops_ = 0;
-  analysis_.label_ = {};
-  analysis_.anchors_.clear();
-  const FunctionDecl *decl = analysis_.fn_->decl;
+  analysis_.fi = fi;
+  analysis_.fn = &analysis_.fns[fi];
+  analysis_.cur = {0};
+  analysis_.targets.clear();
+  analysis_.openJoins.clear();
+  analysis_.loops = 0;
+  analysis_.label = {};
+  analysis_.anchors.clear();
+  const FunctionDecl *decl = analysis_.fn->decl;
   if (!decl) {
-    for (const Stmt *item : analysis_.program_.items) {
+    for (const Stmt *item : analysis_.program.items) {
       if (!isa<FunctionDecl>(item) && !analysis_.libraryEffects().inLibrary(item->loc())) {
         anchored(item);
       }
@@ -95,9 +95,9 @@ void CodeWalk::walk(unsigned fi) {
 }
 
 unsigned CodeWalk::segment(const Node *at, SegKind kind, llvm::SMLoc loc) {
-  auto [it, inserted] = analysis_.fn_->segOf.try_emplace(at, unsigned(analysis_.fn_->segs.size()));
+  auto [it, inserted] = analysis_.fn->segOf.try_emplace(at, unsigned(analysis_.fn->segs.size()));
   if (inserted) {
-    Segment &seg = analysis_.fn_->segs.emplace_back();
+    Segment &seg = analysis_.fn->segs.emplace_back();
     seg.kind = kind;
     seg.at = at;
     seg.loc = loc;
@@ -107,10 +107,10 @@ unsigned CodeWalk::segment(const Node *at, SegKind kind, llvm::SMLoc loc) {
 }
 
 CallRec &CodeWalk::record(const void *key, CallKind kind, const Use &use, llvm::SMLoc loc) {
-  auto [it, inserted] = analysis_.fn_->callOf.try_emplace(std::make_pair(key, unsigned(kind)),
-                                                          unsigned(analysis_.fn_->calls.size()));
+  auto [it, inserted] = analysis_.fn->callOf.try_emplace(std::make_pair(key, unsigned(kind)),
+                                                         unsigned(analysis_.fn->calls.size()));
   if (inserted) {
-    CallRec &rec = analysis_.fn_->calls.emplace_back();
+    CallRec &rec = analysis_.fn->calls.emplace_back();
     rec.kind = kind;
     rec.site = static_cast<const Node *>(key);
     rec.loc = loc;
@@ -120,16 +120,16 @@ CallRec &CodeWalk::record(const void *key, CallKind kind, const Use &use, llvm::
     rec.voided = use.voided;
     rec.join = use.join;
   }
-  CallRec &rec = analysis_.fn_->calls[it->second];
-  rec.repeated |= analysis_.loops_ > 0;
-  rec.inLoop |= analysis_.loops_ > 0;
-  merge(rec.segs, analysis_.cur_);
+  CallRec &rec = analysis_.fn->calls[it->second];
+  rec.repeated |= analysis_.loops > 0;
+  rec.inLoop |= analysis_.loops > 0;
+  merge(rec.segs, analysis_.cur);
 
   return rec;
 }
 
 void CodeWalk::touch(LocKind kind, Ref ref, const void *key, bool write, llvm::SMLoc at, Res res) {
-  if (ref.kind == RefKind::Local || analysis_.cur_.empty()) {
+  if (ref.kind == RefKind::Local || analysis_.cur.empty()) {
     return;
   }
   Access a;
@@ -139,11 +139,11 @@ void CodeWalk::touch(LocKind kind, Ref ref, const void *key, bool write, llvm::S
   a.loc.res = res;
   a.write = write;
   a.at = at;
-  if (!analysis_.anchors_.empty()) {
-    a.anchor = analysis_.anchors_.back()->loc();
+  if (!analysis_.anchors.empty()) {
+    a.anchor = analysis_.anchors.back()->loc();
   }
-  for (unsigned s : analysis_.cur_) {
-    analysis_.fn_->segs[s].effects.insert(a);
+  for (unsigned s : analysis_.cur) {
+    analysis_.fn->segs[s].effects.insert(a);
   }
 }
 
@@ -154,64 +154,64 @@ void CodeWalk::var(const VarSymbol *v, bool write, llvm::SMLoc at) {
 }
 
 void CodeWalk::joinPoint() {
-  for (Analysis::OpenJoin &j : analysis_.openJoins_) {
-    merge(j.active, analysis_.cur_);
+  for (Analysis::OpenJoin &j : analysis_.openJoins) {
+    merge(j.active, analysis_.cur);
   }
 }
 
 void CodeWalk::moveTo(unsigned seg) {
-  for (const Stmt *anchor : analysis_.anchors_) {
-    analysis_.partedAnchors_.insert(anchor->loc().getPointer());
+  for (const Stmt *anchor : analysis_.anchors) {
+    analysis_.partedAnchors.insert(anchor->loc().getPointer());
   }
-  for (unsigned s : analysis_.cur_) {
-    analysis_.fn_->succ.insert({s, seg});
+  for (unsigned s : analysis_.cur) {
+    analysis_.fn->succ.insert({s, seg});
   }
-  analysis_.cur_ = {seg};
+  analysis_.cur = {seg};
   joinPoint();
 }
 
 void CodeWalk::loop(llvm::StringRef label, llvm::function_ref<void()> head,
                     llvm::function_ref<void()> body, llvm::function_ref<void()> step,
                     bool headFirst) {
-  Active entry = analysis_.cur_, exits;
-  ++analysis_.loops_;
+  Active entry = analysis_.cur, exits;
+  ++analysis_.loops;
   while (true) {
-    analysis_.cur_ = entry;
+    analysis_.cur = entry;
     if (headFirst) {
       head();
-      merge(exits, analysis_.cur_);
+      merge(exits, analysis_.cur);
     }
-    analysis_.targets_.push_back({label, true, false, {}, {}});
+    analysis_.targets.push_back({label, true, false, {}, {}});
     body();
-    Analysis::Target target = std::move(analysis_.targets_.back());
-    analysis_.targets_.pop_back();
-    merge(analysis_.cur_, target.continues);
+    Analysis::Target target = std::move(analysis_.targets.back());
+    analysis_.targets.pop_back();
+    merge(analysis_.cur, target.continues);
     if (step) {
       step();
     }
     if (!headFirst) {
       head();
-      merge(exits, analysis_.cur_);
+      merge(exits, analysis_.cur);
     }
     merge(exits, target.breaks);
     Active next = entry;
-    merge(next, analysis_.cur_);
+    merge(next, analysis_.cur);
     if (next == entry) {
       break;
     }
     entry = std::move(next);
   }
-  --analysis_.loops_;
-  analysis_.cur_ = std::move(exits);
+  --analysis_.loops;
+  analysis_.cur = std::move(exits);
 }
 
 void CodeWalk::anchored(const Stmt *s) {
   if (!s) {
     return;
   }
-  analysis_.anchors_.push_back(s);
+  analysis_.anchors.push_back(s);
   stmt(s);
-  analysis_.anchors_.pop_back();
+  analysis_.anchors.pop_back();
 }
 
 void CodeWalk::stmt(const Stmt *s) {
@@ -237,31 +237,31 @@ void CodeWalk::stmt(const Stmt *s) {
   case Stmt::Kind::If: {
     auto *i = cast<IfStmt>(s);
     analysis_.exprWalk().expr(i->cond);
-    Active before = analysis_.cur_;
+    Active before = analysis_.cur;
     stmt(i->thenStmt);
-    Active then = std::move(analysis_.cur_);
-    analysis_.cur_ = std::move(before);
+    Active then = std::move(analysis_.cur);
+    analysis_.cur = std::move(before);
     stmt(i->elseStmt);
-    merge(analysis_.cur_, then);
+    merge(analysis_.cur, then);
     return;
   }
   case Stmt::Kind::While: {
     auto *w = cast<WhileStmt>(s);
     loop(
-        std::exchange(analysis_.label_, {}), [&] { analysis_.exprWalk().expr(w->cond); },
+        std::exchange(analysis_.label, {}), [&] { analysis_.exprWalk().expr(w->cond); },
         [&] { stmt(w->body); }, {}, true);
     return;
   }
   case Stmt::Kind::DoWhile: {
     auto *w = cast<DoWhileStmt>(s);
     loop(
-        std::exchange(analysis_.label_, {}), [&] { analysis_.exprWalk().expr(w->cond); },
+        std::exchange(analysis_.label, {}), [&] { analysis_.exprWalk().expr(w->cond); },
         [&] { stmt(w->body); }, {}, false);
     return;
   }
   case Stmt::Kind::For: {
     auto *f = cast<ForStmt>(s);
-    llvm::StringRef label = std::exchange(analysis_.label_, {});
+    llvm::StringRef label = std::exchange(analysis_.label, {});
     stmt(f->init);
     loop(
         label, [&] { analysis_.exprWalk().expr(f->cond); }, [&] { stmt(f->body); },
@@ -269,18 +269,18 @@ void CodeWalk::stmt(const Stmt *s) {
     return;
   }
   case Stmt::Kind::ForOf:
-    forOf(cast<ForOfStmt>(s), std::exchange(analysis_.label_, {}));
+    forOf(cast<ForOfStmt>(s), std::exchange(analysis_.label, {}));
     return;
   case Stmt::Kind::Switch: {
     auto *sw = cast<SwitchStmt>(s);
-    llvm::StringRef label = std::exchange(analysis_.label_, {});
+    llvm::StringRef label = std::exchange(analysis_.label, {});
     analysis_.exprWalk().expr(sw->discriminant);
-    Active disc = analysis_.cur_, fall;
+    Active disc = analysis_.cur, fall;
     bool hasDefault = false;
-    analysis_.targets_.push_back({label, false, false, {}, {}});
+    analysis_.targets.push_back({label, false, false, {}, {}});
     for (const SwitchCase &c : sw->cases) {
-      analysis_.cur_ = disc;
-      merge(analysis_.cur_, fall);
+      analysis_.cur = disc;
+      merge(analysis_.cur, fall);
       if (c.test) {
         analysis_.exprWalk().expr(c.test);
       } else {
@@ -289,56 +289,56 @@ void CodeWalk::stmt(const Stmt *s) {
       for (const Stmt *x : c.body) {
         anchored(x);
       }
-      fall = analysis_.cur_;
+      fall = analysis_.cur;
     }
-    Analysis::Target target = std::move(analysis_.targets_.back());
-    analysis_.targets_.pop_back();
-    analysis_.cur_ = std::move(fall);
-    merge(analysis_.cur_, target.breaks);
+    Analysis::Target target = std::move(analysis_.targets.back());
+    analysis_.targets.pop_back();
+    analysis_.cur = std::move(fall);
+    merge(analysis_.cur, target.breaks);
     if (!hasDefault && !sw->exhaustive) {
-      merge(analysis_.cur_, disc);
+      merge(analysis_.cur, disc);
     }
     return;
   }
   case Stmt::Kind::Labeled: {
     auto *l = cast<LabeledStmt>(s);
     if (isa<WhileStmt, DoWhileStmt, ForStmt, ForOfStmt, SwitchStmt>(l->body)) {
-      analysis_.label_ = l->label;
+      analysis_.label = l->label;
       stmt(l->body);
       return;
     }
-    analysis_.targets_.push_back({l->label, false, true, {}, {}});
+    analysis_.targets.push_back({l->label, false, true, {}, {}});
     stmt(l->body);
-    Analysis::Target target = std::move(analysis_.targets_.back());
-    analysis_.targets_.pop_back();
-    merge(analysis_.cur_, target.breaks);
+    Analysis::Target target = std::move(analysis_.targets.back());
+    analysis_.targets.pop_back();
+    merge(analysis_.cur, target.breaks);
     return;
   }
   case Stmt::Kind::Return: {
     auto *r = cast<ReturnStmt>(s);
     Use use;
-    use.returned = analysis_.fn_->async;
-    if (!analysis_.fn_->async && analysis_.fn_->decl) {
-      use.join = analysis_.joinReturns_.lookup(analysis_.fn_->decl);
-      use.tail = !analysis_.fn_->syncGen && !analysis_.fn_->asyncGen;
+    use.returned = analysis_.fn->async;
+    if (!analysis_.fn->async && analysis_.fn->decl) {
+      use.join = analysis_.joinReturns.lookup(analysis_.fn->decl);
+      use.tail = !analysis_.fn->syncGen && !analysis_.fn->asyncGen;
     }
     analysis_.exprWalk().expr(r->value, use);
-    analysis_.cur_.clear();
+    analysis_.cur.clear();
     return;
   }
   case Stmt::Kind::Break:
   case Stmt::Kind::Continue: {
     bool isBreak = isa<BreakStmt>(s);
     llvm::StringRef label = isBreak ? cast<BreakStmt>(s)->label : cast<ContinueStmt>(s)->label;
-    for (auto it = analysis_.targets_.rbegin(); it != analysis_.targets_.rend(); ++it) {
+    for (auto it = analysis_.targets.rbegin(); it != analysis_.targets.rend(); ++it) {
       bool matches = !label.empty() ? it->label == label : isBreak ? !it->block : it->loop;
       if (!matches) {
         continue;
       }
-      merge(isBreak ? it->breaks : it->continues, analysis_.cur_);
+      merge(isBreak ? it->breaks : it->continues, analysis_.cur);
       break;
     }
-    analysis_.cur_.clear();
+    analysis_.cur.clear();
     return;
   }
   case Stmt::Kind::Class: {
@@ -379,9 +379,9 @@ void CodeWalk::declarator(const VarDeclarator &d) {
     return;
   }
   const Expr *init = strip(d.init);
-  analysis_.declInit_[d.sym] = init;
+  analysis_.declInit[d.sym] = init;
   if (!d.sym->reassigned && analysis_.aliasAnalysis().isAllocation(init)) {
-    analysis_.siteName_.try_emplace(init, d.name);
+    analysis_.siteName.try_emplace(init, d.name);
   }
   if (d.sym->capturedEarly) {
     var(d.sym, true, d.loc);
@@ -439,7 +439,7 @@ void CodeWalk::iterate(const Expr *iterable, const Node *site) {
         }
       } else {
         analysis_.callWalk().addCallee(
-            rec, c->func->decl, analysis_.callWalk().closureSelf(c->func->decl, *analysis_.fn_));
+            rec, c->func->decl, analysis_.callWalk().closureSelf(c->func->decl, *analysis_.fn));
       }
       return;
     }
