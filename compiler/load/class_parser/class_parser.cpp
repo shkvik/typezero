@@ -392,22 +392,23 @@ void ClassParser::parseClassMember(ClassDecl *cls) {
     std::vector<Stmt *> sets;
     size_t properties = 0;
     for (const ClassField &f : cls->fields) {
-      properties += f.parameter;
+      properties += f.parameter();
     }
     for (const Param &param : fn->params) {
       if (!param.property) {
         continue;
       }
       parser_.fieldNames_.insert(param.name);
-      if (!llvm::any_of(cls->fields,
-                        [&](const ClassField &f) { return f.parameter && f.name == param.name; })) {
+      if (!llvm::any_of(cls->fields, [&](const ClassField &f) {
+            return f.parameter() && f.name == param.name;
+          })) {
         ClassField field;
         field.name = param.name;
         field.loc = param.loc;
         field.type = param.type;
         field.readonly = param.property->readonly;
         field.access = param.property->access;
-        field.parameter = true;
+        field.form = ParameterField{};
         cls->fields.insert(cls->fields.begin() + std::ptrdiff_t(properties++), field);
       }
       auto *target = parser_.ctx_.make<MemberExpr>(
@@ -442,7 +443,9 @@ void ClassParser::parseClassMember(ClassDecl *cls) {
   ClassField field;
   field.name = name;
   field.loc = nameLoc;
-  field.isStatic = isStatic;
+  if (isStatic) {
+    field.form = StaticField{};
+  }
   field.readonly = readonly;
   field.access = access;
   field.isOverride = isOverride;
@@ -454,10 +457,10 @@ void ClassParser::parseClassMember(ClassDecl *cls) {
              "or give it a value here");
   }
   if (parser_.cursor().accept(Tok::Question)) {
-    field.optional = true;
+    field.presence = FieldPresence::OPTIONAL;
   } else if (parser_.tok_.is(Tok::Bang) && !parser_.tok_.newlineBefore) {
     parser_.cursor().advance();
-    field.definite = true;
+    field.presence = FieldPresence::DEFINITE;
   }
   if (parser_.cursor().accept(Tok::Colon)) {
     field.type = parser_.types().parseType();

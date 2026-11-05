@@ -32,8 +32,8 @@ bool letsThisGo(const ClassDecl *cls) {
     }
   }
   for (const ClassField &f : cls->fields) {
-    if (f.method && f.method->thisVar() &&
-        CycleScanner::thisEscapes(f.method->body, f.method->thisVar())) {
+    if (f.method() && f.method()->thisVar() &&
+        CycleScanner::thisEscapes(f.method()->body, f.method()->thisVar())) {
       return true;
     }
   }
@@ -182,7 +182,7 @@ void MemoryAnalysis::scanProgram(SourceFile &file, CycleScanner &scan) {
         }
         scan.function(cls->init);
         for (const ClassField &f : cls->fields) {
-          scan.function(f.method);
+          scan.function(f.method());
         }
         scan.classDecl(cls);
       }
@@ -226,7 +226,7 @@ std::vector<OwnerScanner::BackRef> MemoryAnalysis::findBackRefs(SourceFile &file
         }
         owners.function(cls->init);
         for (const ClassField &f : cls->fields) {
-          owners.function(f.method);
+          owners.function(f.method());
         }
       }
     }
@@ -251,9 +251,9 @@ void MemoryAnalysis::findEternals(SourceFile &file) {
     }
     if (auto *cls = dyn_cast<ClassDecl>(item)) {
       for (const ClassField &f : cls->fields) {
-        if (f.isStatic && f.var && f.init && !f.var->reassigned &&
-            plan_.mayHoldMember(f.var->type)) {
-          plan_.eternals.insert(f.var);
+        if (f.isStatic() && f.var() && f.init && !f.var()->reassigned &&
+            plan_.mayHoldMember(f.var()->type)) {
+          plan_.eternals.insert(f.var());
         }
       }
     }
@@ -319,7 +319,7 @@ void MemoryAnalysis::findUnstored(SourceFile &file) {
         }
         scan.function(cls->init);
         for (const ClassField &f : cls->fields) {
-          scan.function(f.method);
+          scan.function(f.method());
         }
       }
       if (cls->reflectMethods) {

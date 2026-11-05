@@ -40,8 +40,8 @@ std::vector<FunctionDecl *> ClassDeclarer::methodsNamed(const ClassDecl *cls, ll
     }
     if (!isStatic) {
       for (const ClassField &f : c->fields) {
-        if (f.method && f.name == name) {
-          own.push_back(f.method);
+        if (f.method() && f.name == name) {
+          own.push_back(f.method());
         }
       }
     }
@@ -83,7 +83,7 @@ void ClassDeclarer::resolveClass(ClassDecl *cls) {
   for (size_t i = 0; i < cls->fields.size(); ++i) {
     ClassField &f = cls->fields[i];
     for (size_t j = 0; j < i; ++j) {
-      if (cls->fields[j].name == f.name && cls->fields[j].isStatic == f.isStatic) {
+      if (cls->fields[j].name == f.name && cls->fields[j].isStatic() == f.isStatic()) {
         checker_.diags_.error(f.loc,
                               "duplicate member '" + f.name + "' in class '" + cls->name + "'");
         checker_.diags_.note(cls->fields[j].loc, "previously declared here");
@@ -91,7 +91,7 @@ void ClassDeclarer::resolveClass(ClassDecl *cls) {
       }
     }
     for (FunctionDecl *fn : cls->methods) {
-      if (fn->name == f.name && fn->isStatic() == f.isStatic) {
+      if (fn->name == f.name && fn->isStatic() == f.isStatic()) {
         checker_.diags_.error(fn->loc(), "duplicate member '" + f.name + "' in class '" +
                                              cls->name +
                                              "': a field and a method cannot share a name");
@@ -101,7 +101,7 @@ void ClassDeclarer::resolveClass(ClassDecl *cls) {
   }
 
   for (ClassField &f : cls->fields) {
-    if (f.definite) {
+    if (f.definite()) {
       checker_.diags_.error(f.loc,
                             "'" + f.name +
                                 "!' (\"set later\") is not supported: a field gets its "
@@ -110,7 +110,7 @@ void ClassDeclarer::resolveClass(ClassDecl *cls) {
                                 f.name + "?: T'");
     }
     const Type *type = nullptr;
-    if (f.parameter) {
+    if (f.parameter()) {
       const Param *param = nullptr;
       for (FunctionDecl *ctor : cls->constructors) {
         for (const Param &p : ctor->params) {
@@ -119,7 +119,9 @@ void ClassDeclarer::resolveClass(ClassDecl *cls) {
           }
         }
       }
-      f.optional = param->optional();
+      if (param->optional()) {
+        f.presence = FieldPresence::OPTIONAL;
+      }
       if (param->type) {
         type = checker_.typeResolver().resolveType(*param->type, false);
       } else if (param->defaultValue()) {
@@ -134,7 +136,7 @@ void ClassDeclarer::resolveClass(ClassDecl *cls) {
                             "field '" + f.name + "' needs a type, e.g. '" + f.name + ": int'");
       type = Type::error();
     }
-    if (type && f.optional) {
+    if (type && f.optional()) {
       type = Type::optional(type);
     }
     f.resolved = type;
@@ -143,8 +145,9 @@ void ClassDeclarer::resolveClass(ClassDecl *cls) {
     if (fe && fe->fn->name.empty()) {
       fe->fn->name = f.name;
     }
-    if (fe && fe->fn->isArrow && !f.isStatic && !f.parameter && !f.optional && !f.redeclared &&
-        !checker_.assignedFields_.contains(f.name) && (!type || type->isFunction())) {
+    if (fe && fe->fn->isArrow && !f.isStatic() && !f.parameter() && !f.optional() &&
+        !f.redeclared && !checker_.assignedFields_.contains(f.name) &&
+        (!type || type->isFunction())) {
       FunctionDecl *fn = fe->fn;
       fn->name = f.name;
       if (ClassMember *member = fn->member()) {
@@ -155,29 +158,29 @@ void ClassDeclarer::resolveClass(ClassDecl *cls) {
         fn->role = ClassMember{.cls = cls, .access = f.access, .isOverride = f.isOverride};
       }
       fn->isExpression = false;
-      f.method = fn;
+      f.form = ArrowMethodField{.method = fn};
       f.resolved = nullptr;
     }
 
-    if (f.isStatic && type && !cls->typeArgs.empty() && mentionsParam(type)) {
+    if (f.isStatic() && type && !cls->typeArgs.empty() && mentionsParam(type)) {
       checker_.diags_.error(f.loc, "static field '" + f.name +
                                        "' cannot use the type parameters of '" + cls->name +
                                        "': every instance of the class shares it");
       f.resolved = type = Type::error();
     }
-    if (f.isStatic) {
+    if (StaticField *shared = f.form.as<StaticField>()) {
       VarSymbol *var = checker_.ctx_.newVar();
       var->name = checker_.ctx_.keepName((cls->name + "." + f.name).str());
       var->loc = f.loc;
       var->type = type;
       var->isConst = f.readonly;
       var->place = GlobalVar{.usedInFunction = true};
-      f.var = var;
+      shared->var = var;
       if (auto *lit = f.readonly ? llvm::dyn_cast_or_null<IntLitExpr>(f.init) : nullptr;
           lit && lit->value <= uint64_t(std::numeric_limits<int64_t>::max())) {
         checker_.constVars_[var] = int64_t(lit->value);
       }
-      if (!f.init && !f.optional && type && !type->isError()) {
+      if (!f.init && !f.optional() && type && !type->isError()) {
         checker_.diags_.error(f.loc, "static field '" + f.name + "' needs a value, e.g. 'static " +
                                          f.name + ": " + type->name() +
                                          " = ...', or make it optional: 'static " + f.name +
@@ -244,10 +247,10 @@ void ClassDeclarer::declareMethods(ClassDecl *cls) {
     }
   }
   for (ClassField &f : cls->fields) {
-    if (!f.method) {
+    if (!f.method()) {
       continue;
     }
-    FunctionDecl *fn = f.method;
+    FunctionDecl *fn = f.method();
     checker_.typeScopes_.emplace_back();
     checker_.genericClassChecker().bindClassTypeParams(cls);
     const Type *declared = f.type ? checker_.typeResolver().resolveType(*f.type, false) : nullptr;
@@ -261,7 +264,7 @@ void ClassDeclarer::declareMethods(ClassDecl *cls) {
 
   if (ClassLinks::constructorsOf(cls).empty()) {
     for (ClassField &f : cls->fields) {
-      if (f.isStatic || f.init || f.method || f.optional || f.parameter || f.definite ||
+      if (f.isStatic() || f.init || f.method() || f.optional() || f.parameter() || f.definite() ||
           !f.resolved) {
         continue;
       }
@@ -272,7 +275,7 @@ void ClassDeclarer::declareMethods(ClassDecl *cls) {
   }
   std::vector<Stmt *> sets;
   for (const ClassField &f : cls->fields) {
-    if (f.isStatic || !f.init || f.method) {
+    if (f.isStatic() || !f.init || f.method()) {
       continue;
     }
     auto *target =
@@ -332,7 +335,7 @@ bool ClassDeclarer::startsEmpty(const ClassDecl *cls,
   for (const ClassDecl *c = cls; c; c = c->parent) {
     resolveClass(const_cast<ClassDecl *>(c));
     for (const ClassField &f : c->fields) {
-      if (f.isStatic || f.init || f.method || f.optional || !f.resolved) {
+      if (f.isStatic() || f.init || f.method() || f.optional() || !f.resolved) {
         continue;
       }
       const Type *type = f.resolved;
@@ -473,7 +476,7 @@ void ClassDeclarer::completeClass(ClassDecl *cls) {
   if (ClassDecl *generic = cls->generic) {
     completeClass(generic);
     for (size_t i = 0; i < cls->fields.size() && i < generic->fields.size(); ++i) {
-      if (!cls->fields[i].isStatic && !cls->fields[i].method && !cls->fields[i].resolved) {
+      if (!cls->fields[i].isStatic() && !cls->fields[i].method() && !cls->fields[i].resolved) {
         cls->fields[i].resolved =
             generic->fields[i].resolved
                 ? checker_.genericClassChecker().instanceValueType(cls, generic->fields[i].resolved)
@@ -483,7 +486,7 @@ void ClassDeclarer::completeClass(ClassDecl *cls) {
     muted = checker_.diags_.setMuted(true);
   }
   for (ClassField &f : cls->fields) {
-    if (!f.parameter || f.resolved) {
+    if (!f.parameter() || f.resolved) {
       continue;
     }
     for (FunctionDecl *ctor : cls->constructors) {
@@ -502,7 +505,7 @@ void ClassDeclarer::completeClass(ClassDecl *cls) {
     }
   }
   bool pending = llvm::any_of(
-      cls->fields, [](const ClassField &f) { return !f.isStatic && !f.method && !f.resolved; });
+      cls->fields, [](const ClassField &f) { return !f.isStatic() && !f.method() && !f.resolved; });
   if (pending && cls->init && !cls->init->checked) {
     Checker::BodyState saved = checker_.returnInferrer().enterBody(cls->init);
     checker_.flow_ = Checker::Flow();
@@ -514,7 +517,7 @@ void ClassDeclarer::completeClass(ClassDecl *cls) {
     fields = cls->parent->type->fields();
   }
   for (ClassField &f : cls->fields) {
-    if (f.isStatic || f.method) {
+    if (f.isStatic() || f.method()) {
       continue;
     }
     if (!f.resolved) {

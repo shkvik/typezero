@@ -39,7 +39,7 @@ std::string writerOf(const ClassDecl *generic, llvm::StringRef name) {
     }
   }
   for (const ClassField &field : generic->fields) {
-    if (field.isStatic || field.access != Access::Public || field.readonly) {
+    if (field.isStatic() || field.access != Access::Public || field.readonly) {
       continue;
     }
     if (field.type && mentions(*field.type, name)) {
@@ -62,7 +62,7 @@ bool writtenFromOutside(const ClassDecl *generic, llvm::StringRef name) {
     }
   }
   for (const ClassField &field : generic->fields) {
-    if (field.isStatic || field.access != Access::Public || field.readonly) {
+    if (field.isStatic() || field.access != Access::Public || field.readonly) {
       continue;
     }
     if (field.type && mentions(*field.type, name)) {

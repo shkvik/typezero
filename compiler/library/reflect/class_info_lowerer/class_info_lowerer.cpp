@@ -389,7 +389,7 @@ void ClassInfoLowerer::emitFillThunk(const ClassDecl *cls, llvm::Function *fn,
   std::vector<std::string> names;
   for (const ClassDecl *c : chain) {
     for (const ClassField &f : c->fields) {
-      if (!f.isStatic && !f.method && f.resolved && !f.resolved->isError()) {
+      if (!f.isStatic() && !f.method() && f.resolved && !f.resolved->isError()) {
         fields.push_back(&f);
         names.push_back(f.name.str());
       }
@@ -542,8 +542,8 @@ std::vector<const FunctionDecl *> ClassInfoLowerer::reflectVariants(const ClassD
   for (const ClassDecl *c = cls; c; c = c->parent) {
     std::vector<const FunctionDecl *> own(c->methods.begin(), c->methods.end());
     for (const ClassField &f : c->fields) {
-      if (f.method) {
-        own.push_back(f.method);
+      if (f.method()) {
+        own.push_back(f.method());
       }
     }
     for (const FunctionDecl *fn : own) {

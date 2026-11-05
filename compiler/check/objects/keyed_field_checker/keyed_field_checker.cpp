@@ -119,7 +119,7 @@ const Type *KeyedFieldChecker::keyedFieldType(const Type *type, const Type *keyT
     const Field *f = type->field(text);
     if (cls) {
       const ClassField *field = ClassBases::findField(cls, text, nullptr);
-      if (!field || field->isStatic || field->access != Access::Public) {
+      if (!field || field->isStatic() || field->access != Access::Public) {
         return nullptr;
       }
     }

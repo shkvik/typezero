@@ -108,8 +108,8 @@ void StoreStmts::stmt(const Stmt *stmt) {
   case Stmt::Kind::Class: {
     auto *cls = llvm::cast<ClassDecl>(stmt);
     for (const ClassField &f : cls->fields) {
-      if (f.isStatic && f.var) {
-        scanner_.flowInto(scanner_.var(f.var), scanner_.storeExprs().expr(f.init));
+      if (f.isStatic() && f.var()) {
+        scanner_.flowInto(scanner_.var(f.var()), scanner_.storeExprs().expr(f.init));
       }
     }
     for (const Stmt *s : cls->decorations) {

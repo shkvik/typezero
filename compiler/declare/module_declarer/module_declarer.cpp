@@ -102,8 +102,8 @@ std::vector<FunctionDecl *> ModuleDeclarer::declareModules(SourceFile &program) 
         methods.push_back(cls->init);
       }
       for (const ClassField &f : cls->fields) {
-        if (f.method) {
-          methods.push_back(f.method);
+        if (f.method()) {
+          methods.push_back(f.method());
         }
       }
       for (FunctionDecl *fn : methods) {

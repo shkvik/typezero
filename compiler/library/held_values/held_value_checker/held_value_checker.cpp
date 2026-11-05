@@ -188,7 +188,7 @@ void HeldValueChecker::walkProgram() {
         }
         function(cls->init);
         for (const ClassField &f : cls->fields) {
-          function(f.method);
+          function(f.method());
         }
       }
     }
@@ -315,7 +315,7 @@ void HeldValueChecker::stmt(const Stmt *s) {
   case Stmt::Kind::Class: {
     auto *cls = cast<ClassDecl>(s);
     for (const ClassField &f : cls->fields) {
-      if (f.isStatic) {
+      if (f.isStatic()) {
         expr(f.init);
       }
     }

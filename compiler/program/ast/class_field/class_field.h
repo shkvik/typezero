@@ -1,6 +1,7 @@
 #pragma once
 
 #include "compiler/program/ast/access/access.h"
+#include "compiler/program/ast/class_field/field_form.h"
 #include "compiler/program/ast/decorator/decorator.h"
 #include "compiler/program/ast/expr/expr.h"
 #include "compiler/program/ast/function_decl/function_decl.h"
@@ -16,19 +17,22 @@ struct ClassField {
   llvm::SMLoc loc;
   std::optional<TypeRef> type;
   Expr *init = nullptr;
-  bool optional = false;
-  bool definite = false;
+  FieldForm form = InstanceField{};
+  FieldPresence presence = FieldPresence::REQUIRED;
   bool readonly = false;
-  bool isStatic = false;
-  bool parameter = false;
   bool isOverride = false;
   Access access = Access::Public;
   const Type *resolved = nullptr;
-  VarSymbol *var = nullptr;
   bool redeclared = false;
-  FunctionDecl *method = nullptr;
   std::vector<Decorator> decorators;
   bool accessor = false;
+
+  bool isStatic() const;
+  bool parameter() const;
+  FunctionDecl *method() const;
+  VarSymbol *var() const;
+  bool optional() const;
+  bool definite() const;
 };
 
 }

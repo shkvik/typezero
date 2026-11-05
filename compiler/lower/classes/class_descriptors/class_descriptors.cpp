@@ -37,8 +37,8 @@ std::vector<FunctionDecl *> instanceMethods(const ClassDecl *cls) {
     methods.push_back(cls->init);
   }
   for (const ClassField &f : cls->fields) {
-    if (f.method) {
-      methods.push_back(f.method);
+    if (f.method()) {
+      methods.push_back(f.method());
     }
   }
 
@@ -194,14 +194,14 @@ llvm::Constant *ClassDescriptors::classDescriptor(const ClassDecl *cls) {
     };
     for (const ClassDecl *c : chain) {
       for (const ClassField &f : c->fields) {
-        if (f.isStatic || symbol(f.name)) {
+        if (f.isStatic() || symbol(f.name)) {
           continue;
         }
         auto it = llvm::find_if(keys, [&](const auto &key) { return key.first == f.name; });
         if (it == keys.end()) {
-          keys.push_back({f.name, f.method});
-        } else if (f.method) {
-          it->second = f.method;
+          keys.push_back({f.name, f.method()});
+        } else if (f.method()) {
+          it->second = f.method();
         }
       }
     }

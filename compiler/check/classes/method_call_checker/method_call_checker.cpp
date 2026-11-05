@@ -60,7 +60,7 @@ Expr *MethodCallChecker::checkMethodCall(CallExpr *call, MemberExpr *member, con
     }
   }
   const ClassField *field = ClassBases::findField(cls, name);
-  if (field && !field->method) {
+  if (field && !field->method()) {
     call->callee = checker_.classMemberChecker().checkClassMember(member, nullptr);
     const Type *type = call->callee->type;
     if (type->isFunction()) {

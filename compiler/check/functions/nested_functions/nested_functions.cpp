@@ -195,7 +195,7 @@ void visitExprs(const Stmt *stmt, llvm::function_ref<void(const Expr *)> visit,
     auto *cls = cast<ClassDecl>(stmt);
     expr(cls->baseExpr);
     for (const ClassField &f : cls->fields) {
-      if (f.init && (f.isStatic || intoFunctions)) {
+      if (f.init && (f.isStatic() || intoFunctions)) {
         expr(f.init);
       }
     }

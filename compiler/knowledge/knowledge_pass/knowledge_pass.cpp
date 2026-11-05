@@ -257,9 +257,6 @@ void KnowledgePass::declareClass(size_t module, const ClassDecl &cls, size_t par
   out_.symbols[own].signature = SymbolText::header(cls);
   classes_[&cls] = own;
   for (const ClassField &field : cls.fields) {
-    if (field.parameter && field.method) {
-      continue;
-    }
     llvm::StringRef line = places_.lineText(field.loc);
     const char *start = line.empty() ? nullptr : lineStart(field.loc.getPointer(), line.data());
     size_t member = add(module, "field", field.name, field.loc, start, endOf(line), own);
@@ -267,9 +264,9 @@ void KnowledgePass::declareClass(size_t module, const ClassDecl &cls, size_t par
       continue;
     }
     out_.symbols[member].signature = SymbolText::field(field);
-    fields_[{&cls, field.name.str(), field.isStatic}] = member;
-    if (field.isStatic && field.var) {
-      variables_[field.var] = member;
+    fields_[{&cls, field.name.str(), field.isStatic()}] = member;
+    if (field.isStatic() && field.var()) {
+      variables_[field.var()] = member;
     }
   }
   for (const auto *list : {&cls.constructors, &cls.methods}) {

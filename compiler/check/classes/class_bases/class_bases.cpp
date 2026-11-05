@@ -156,12 +156,12 @@ void ClassBases::resolveClassBases(ClassDecl *cls) {
   cls->resolvingBase = false;
 
   for (ClassField &f : cls->fields) {
-    if (f.isStatic) {
+    if (f.isStatic()) {
       continue;
     }
     const ClassDecl *owner = nullptr;
     const ClassField *inherited = cls->parent ? findField(cls->parent, f.name, &owner) : nullptr;
-    if (inherited && inherited->method) {
+    if (inherited && inherited->method()) {
       continue;
     }
     if (!inherited) {
@@ -185,7 +185,7 @@ void ClassBases::resolveClassBases(ClassDecl *cls) {
                                        " in '" + owner->name + "', so it cannot be " +
                                        accessName(f.access) + " in '" + cls->name + "'");
     }
-    if (!f.init && !f.parameter) {
+    if (!f.init && !f.parameter()) {
       checker_.diags_.error(f.loc,
                             "'" + f.name + "' is a field of '" + owner->name +
                                 "' already; declared again without a value, JavaScript would set "

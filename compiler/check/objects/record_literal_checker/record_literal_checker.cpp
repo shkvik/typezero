@@ -106,7 +106,7 @@ bool RecordLiteralChecker::checkRecordSpread(ObjectLitExpr::Property &prop, cons
     bool methods = false;
     for (const ClassDecl *c = ClassDeclarer::classOf(type); c; c = c->parent) {
       methods |=
-          c->literal || llvm::any_of(c->fields, [](const ClassField &f) { return f.method; });
+          c->literal || llvm::any_of(c->fields, [](const ClassField &f) { return f.method(); });
     }
     if (methods) {
       checker_.diags_.error(prop.value->loc(),

@@ -191,7 +191,7 @@ Expr *AssignChecker::checkAssign(AssignExpr *assign) {
     }
     ClassDecl *cls = ClassDeclarer::classOf(member->object->type);
     for (ClassField &f : cls->fields) {
-      if (f.name == member->name && !f.isStatic) {
+      if (f.name == member->name && !f.isStatic()) {
         f.resolved = type;
       }
     }

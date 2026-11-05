@@ -191,7 +191,7 @@ bool Ownership::libraryField(const Type *object, llvm::StringRef name) {
       continue;
     }
     for (const ClassField &f : k->fields) {
-      if (f.name == name && !f.isStatic) {
+      if (f.name == name && !f.isStatic()) {
         return f.readonly || f.access != tz::Access::Public;
       }
     }
@@ -857,7 +857,7 @@ void Ownership::visitStmt(const Stmt *s) {
   case Stmt::Kind::Class: {
     auto *cls = cast<ClassDecl>(s);
     for (const ClassField &f : cls->fields) {
-      if (f.isStatic && f.init) {
+      if (f.isStatic() && f.init) {
         visit(f.init);
         leak(f.init);
       }

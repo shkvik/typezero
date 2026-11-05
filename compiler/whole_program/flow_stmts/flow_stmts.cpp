@@ -58,7 +58,7 @@ void FlowStmts::classDecl(ClassDecl *cls) {
   for (ClassField &f : cls->fields) {
     if (f.init) {
       flows_.flow(flows_.flowExprs().expr(f.init),
-                  f.var ? flows_.var(f.var) : flows_.fieldNode(f.name));
+                  f.var() ? flows_.var(f.var()) : flows_.fieldNode(f.name));
     }
   }
   for (Stmt *s : cls->decorations) {

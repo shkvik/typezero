@@ -276,20 +276,20 @@ void GenericClassInstantiator::fillInstance(ClassDecl *inst) {
   for (size_t i = 0; i < inst->fields.size() && i < generic->fields.size(); ++i) {
     ClassField &f = inst->fields[i];
     const ClassField &g = generic->fields[i];
-    f.optional = g.optional;
+    f.presence = g.presence;
     f.redeclared = g.redeclared;
-    if (f.isStatic) {
+    if (f.isStatic()) {
       continue;
     }
-    f.resolved = g.method ? sub(g.resolved)
-                          : checker_.genericClassChecker().instanceValueType(inst, g.resolved);
-    if (g.method) {
+    f.resolved = g.method() ? sub(g.resolved)
+                            : checker_.genericClassChecker().instanceValueType(inst, g.resolved);
+    if (g.method()) {
       FunctionDecl *fn = cast<FunctionExpr>(f.init)->fn;
-      fn->name = g.method->name;
+      fn->name = g.method()->name;
       fn->role = ClassMember{
-          .cls = inst, .access = g.method->access(), .isOverride = g.method->isOverride()};
+          .cls = inst, .access = g.method()->access(), .isOverride = g.method()->isOverride()};
       fn->isExpression = false;
-      f.method = fn;
+      f.form = ArrowMethodField{.method = fn};
     }
   }
   for (size_t i = 0; i < inst->methods.size() && i < generic->methods.size(); ++i) {
@@ -301,14 +301,14 @@ void GenericClassInstantiator::fillInstance(ClassDecl *inst) {
     declareInstanceMember(inst, inst->constructors[i], generic->constructors[i]);
   }
   for (size_t i = 0; i < inst->fields.size() && i < generic->fields.size(); ++i) {
-    if (inst->fields[i].method && generic->fields[i].method) {
-      declareInstanceMember(inst, inst->fields[i].method, generic->fields[i].method);
+    if (inst->fields[i].method() && generic->fields[i].method()) {
+      declareInstanceMember(inst, inst->fields[i].method(), generic->fields[i].method());
     }
   }
   if (generic->init) {
     std::vector<Stmt *> sets;
     for (const ClassField &f : inst->fields) {
-      if (f.isStatic || !f.init || f.method) {
+      if (f.isStatic() || !f.init || f.method()) {
         continue;
       }
       auto *target = checker_.ctx_.make<MemberExpr>(

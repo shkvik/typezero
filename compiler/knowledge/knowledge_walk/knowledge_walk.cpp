@@ -88,10 +88,10 @@ void KnowledgeWalk::classDecl(const ClassDecl *cls) {
   }
   size_t outer = from_;
   for (const ClassField &field : cls->fields) {
-    if (field.parameter) {
+    if (field.parameter()) {
       continue;
     }
-    size_t own = pass_.fieldSymbol(cls, field.name, field.isStatic);
+    size_t own = pass_.fieldSymbol(cls, field.name, field.isStatic());
     from_ = own == Knowledge::kNone ? outer : own;
     for (const Decorator &decorator : field.decorators) {
       expr(decorator.expr);

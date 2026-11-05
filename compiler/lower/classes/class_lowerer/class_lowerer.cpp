@@ -327,13 +327,13 @@ llvm::Value *ClassLowerer::emitMethodLiteral(ObjectLitExpr *lit) {
 
 void ClassLowerer::emitStaticFields(ClassDecl *cls) {
   for (const ClassField &f : cls->fields) {
-    if (f.isStatic && f.var && f.init) {
+    if (f.isStatic() && f.var() && f.init) {
       llvm::Value *value = lowering_.exprLowerer().emitExpr(f.init);
-      lowering_.storeLowerer().publishValue(value, f.var->type);
-      lowering_.stmtLowerer().storeReplacing(lowering_.functionFrame().addressOf(f.var), value,
-                                             f.var->type);
-      if (lowering_.isEternal(f.var)) {
-        lowering_.publishLowerer().pinValue(value, f.var->type);
+      lowering_.storeLowerer().publishValue(value, f.var()->type);
+      lowering_.stmtLowerer().storeReplacing(lowering_.functionFrame().addressOf(f.var()), value,
+                                             f.var()->type);
+      if (lowering_.isEternal(f.var())) {
+        lowering_.publishLowerer().pinValue(value, f.var()->type);
       }
     }
   }

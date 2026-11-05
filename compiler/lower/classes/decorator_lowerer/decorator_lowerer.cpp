@@ -44,7 +44,7 @@ llvm::Value *DecoratorLowerer::emitClassExpr(ClassExpr *expr) {
   if (cls->baseExpr) {
     lowering_.stmtLowerer().emitDiscarded(cls->baseExpr);
   }
-  auto initialized = [](const ClassField &f) { return f.isStatic && f.var && f.init; };
+  auto initialized = [](const ClassField &f) { return f.isStatic() && f.var() && f.init; };
   if (!cls->decorations.empty() || llvm::any_of(cls->fields, initialized)) {
     auto *done = new llvm::GlobalVariable(*lowering_.module_, lowering_.builder_.getInt1Ty(), false,
                                           llvm::GlobalValue::InternalLinkage,

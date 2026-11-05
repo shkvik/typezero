@@ -39,7 +39,7 @@ bool hasMethodFields(const ClassDecl *cls) {
     return true;
   }
   for (const ClassDecl *c = cls; c; c = c->parent) {
-    if (llvm::any_of(c->fields, [](const ClassField &f) { return f.method; })) {
+    if (llvm::any_of(c->fields, [](const ClassField &f) { return f.method(); })) {
       return true;
     }
   }

@@ -37,7 +37,7 @@ bool isArrowMethod(const FunctionDecl *fn) {
     return false;
   }
   for (const ClassField &f : fn->cls()->fields) {
-    if (f.method == fn) {
+    if (f.method() == fn) {
       return true;
     }
   }
@@ -53,7 +53,7 @@ bool declaresReturn(const FunctionDecl *fn) {
     return false;
   }
   for (const ClassField &f : fn->cls()->fields) {
-    if (f.method == fn && f.type) {
+    if (f.method() == fn && f.type) {
       return true;
     }
   }
@@ -96,8 +96,8 @@ std::vector<FunctionDecl *> ClassLinks::ownMethods(const ClassDecl *cls) {
     }
   }
   for (const ClassField &f : cls->fields) {
-    if (f.method) {
-      methods.push_back(f.method);
+    if (f.method()) {
+      methods.push_back(f.method());
     }
   }
 
@@ -312,7 +312,7 @@ void ClassLinks::linkOverrides(ClassDecl *cls) {
     const ClassDecl *owner = nullptr;
     const ClassField *field =
         cls->parent ? ClassBases::findField(cls->parent, fn->name, &owner) : nullptr;
-    if (field && !field->method) {
+    if (field && !field->method()) {
       checker_.diags_.error(fn->loc(),
                             "'" + fn->name + "' is a field of '" + owner->name +
                                 "', so a class that extends it cannot have a method of that "

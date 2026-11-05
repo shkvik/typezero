@@ -349,7 +349,7 @@ void CodeWalk::stmt(const Stmt *s) {
       return;
     }
     for (const ClassField &f : cls->fields) {
-      if (f.isStatic && f.init) {
+      if (f.isStatic() && f.init) {
         analysis_.exprWalk.expr(f.init);
       }
     }

@@ -81,8 +81,8 @@ ClassChecker::ResultHasDecorators ClassChecker::hasDecorators(const ClassDecl *c
 
 ClassChecker::ResultFieldHasValue ClassChecker::fieldStartValue(const ClassDecl *cls,
                                                                 const ClassField &field) const {
-  bool needsValue = !field.isStatic && !field.method && !field.optional && !field.init &&
-                    !field.definite && field.resolved && !field.resolved->isError();
+  bool needsValue = !field.isStatic() && !field.method() && !field.optional() && !field.init &&
+                    !field.definite() && field.resolved && !field.resolved->isError();
   if (needsValue && ClassLinks::constructorsOf(cls).empty()) {
     std::string message = ErrorTextStartValue::noStart(field.name, field.resolved->name());
 
@@ -155,8 +155,8 @@ ClassChecker::ResultBodiesChecked ClassChecker::checkClassBodies(ClassDecl *cls)
   }
   std::vector<FunctionDecl *> methods = cls->methods;
   for (const ClassField &f : cls->fields) {
-    if (f.method) {
-      methods.push_back(f.method);
+    if (f.method()) {
+      methods.push_back(f.method());
     }
   }
   for (FunctionDecl *fn : methods) {
@@ -292,7 +292,8 @@ ClassChecker::ResultFieldUnsetYet ClassChecker::firstUnset(const Checker::Flow &
 
   const std::vector<ClassField> &fields = this->checker.initFn_->cls()->fields;
   auto unset = llvm::find_if(fields, [&](const ClassField &f) {
-    return !f.isStatic && !f.method && !f.optional && !llvm::is_contained(flow.setFields, f.name);
+    return !f.isStatic() && !f.method() && !f.optional() &&
+           !llvm::is_contained(flow.setFields, f.name);
   });
   if (unset == fields.end()) {
     std::string message = ErrorTextFirstUnset::allSet(this->checker.initFn_->cls()->name);

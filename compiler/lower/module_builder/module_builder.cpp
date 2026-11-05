@@ -48,8 +48,8 @@ std::unique_ptr<llvm::Module> ModuleBuilder::generate(SourceFile &file) {
       for (Stmt *item : module->file.items) {
         if (auto *cls = dyn_cast<ClassDecl>(item)) {
           for (const ClassField &f : cls->fields) {
-            if (f.isStatic && f.var) {
-              lowering_.libraryState_.insert(f.var);
+            if (f.isStatic() && f.var()) {
+              lowering_.libraryState_.insert(f.var());
             }
           }
           continue;
@@ -206,20 +206,20 @@ void ModuleBuilder::declareGlobals(SourceFile &file) {
   for (Stmt *item : file.items) {
     if (auto *cls = dyn_cast<ClassDecl>(item)) {
       for (const ClassField &f : cls->fields) {
-        if (!f.isStatic || !f.var) {
+        if (!f.isStatic() || !f.var()) {
           continue;
         }
-        llvm::Type *type = lower(f.var->type);
-        lowering_.globals_[f.var] =
+        llvm::Type *type = lower(f.var()->type);
+        lowering_.globals_[f.var()] =
             cls->usedAsValue
-                ? lowering_.unknownLowerer().staticFieldAddress(cls, f.var)
+                ? lowering_.unknownLowerer().staticFieldAddress(cls, f.var())
                 : new llvm::GlobalVariable(
                       *lowering_.module_, type, false, llvm::GlobalValue::InternalLinkage,
                       llvm::Constant::getNullValue(type),
-                      "tz." + lowering_.symbolPrefixes_.lookup(cls) + f.var->name);
-        lowering_.debugInfo().declareGlobal(f.var, lowering_.globals_[f.var]);
-        if (f.var->type->isManaged()) {
-          managedGlobals_.push_back(f.var);
+                      "tz." + lowering_.symbolPrefixes_.lookup(cls) + f.var()->name);
+        lowering_.debugInfo().declareGlobal(f.var(), lowering_.globals_[f.var()]);
+        if (f.var()->type->isManaged()) {
+          managedGlobals_.push_back(f.var());
         }
       }
       for (FunctionDecl *fn : cls->methods) {

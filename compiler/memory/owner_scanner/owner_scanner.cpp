@@ -156,7 +156,7 @@ void OwnerScanner::stmt(const Stmt *stmt) {
   case Stmt::Kind::Class: {
     auto *cls = llvm::cast<ClassDecl>(stmt);
     for (const ClassField &f : cls->fields) {
-      if (f.isStatic) {
+      if (f.isStatic()) {
         expr(f.init, Use::Value);
       }
     }

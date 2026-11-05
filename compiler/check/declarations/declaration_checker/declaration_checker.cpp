@@ -252,9 +252,9 @@ void DeclarationChecker::checkField(const DeclaredMember &member, const ClassFie
                                           (field.readonly ? " is readonly" : " is not readonly") +
                                           " in '" + fileName() + "'");
   }
-  if (member.optional != field.optional) {
+  if (member.optional != field.optional()) {
     checker_.diags_.error(member.loc, what +
-                                          (field.optional ? " is optional" : " is not optional") +
+                                          (field.optional() ? " is optional" : " is not optional") +
                                           " in '" + fileName() + "'");
   }
   const Type *here = resolve(member.type, false);
@@ -346,7 +346,7 @@ void DeclarationChecker::checkClass(const DeclaredClass &declared, const Exporte
     }
     const ClassField *field = nullptr;
     for (const ClassField &f : cls->fields) {
-      if (f.name == member.name && f.isStatic == member.isStatic && !f.method) {
+      if (f.name == member.name && f.isStatic() == member.isStatic && !f.method()) {
         field = &f;
       }
     }
@@ -387,9 +387,9 @@ void DeclarationChecker::checkClass(const DeclaredClass &declared, const Exporte
                                    "' does not declare it");
   };
   for (const ClassField &f : cls->fields) {
-    std::string key = (f.isStatic ? "static " : "") + f.name.str();
-    if (!f.method && f.access != Access::Private && !seen.contains(key)) {
-      missing(f.loc, f.name, f.isStatic);
+    std::string key = (f.isStatic() ? "static " : "") + f.name.str();
+    if (!f.method() && f.access != Access::Private && !seen.contains(key)) {
+      missing(f.loc, f.name, f.isStatic());
     }
   }
   for (const FunctionDecl *fn : cls->methods) {

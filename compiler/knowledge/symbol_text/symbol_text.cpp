@@ -190,13 +190,13 @@ std::string SymbolText::function(const FunctionDecl &fn) {
 }
 
 std::string SymbolText::field(const ClassField &field) {
-  std::string text = modifiers(field.access, field.isStatic);
+  std::string text = modifiers(field.access, field.isStatic());
   if (field.readonly) {
     text += "readonly ";
   }
   text += field.name.str();
-  text += field.optional ? "?" : "";
-  const Type *type = field.resolved ? field.resolved : field.var ? field.var->type : nullptr;
+  text += field.optional() ? "?" : "";
+  const Type *type = field.resolved ? field.resolved : field.var() ? field.var()->type : nullptr;
 
   return text + ": " + typeName(type);
 }

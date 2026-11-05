@@ -26,7 +26,7 @@ namespace {
 ClassField *staticField(ClassDecl *cls, llvm::StringRef name, ClassDecl **owner) {
   for (ClassDecl *c = cls; c; c = c->parent) {
     for (ClassField &f : c->staticOwner()->fields) {
-      if (f.isStatic && f.name == name && f.var) {
+      if (f.isStatic() && f.name == name && f.var()) {
         *owner = c->staticOwner();
         return &f;
       }
@@ -47,18 +47,18 @@ Expr *StaticChecker::checkStaticMember(MemberExpr *member, ClassDecl *cls, const
   if (ClassField *found = staticField(cls, name, &owner)) {
     ClassField &f = *found;
     checker_.classMemberChecker().checkAccess(owner, f.access, name, member->loc());
-    auto *read = checker_.ctx_.make<NameExpr>(member->loc(), f.var->name);
-    read->var = f.var;
+    auto *read = checker_.ctx_.make<NameExpr>(member->loc(), f.var()->name);
+    read->var = f.var();
     if (member->object && member->object->loc() != member->loc()) {
       checker_.file_->namedUses[read] = {cls, member->object->loc(), ""};
     }
-    if (!f.var->type) {
+    if (!f.var()->type) {
       if (!owner->declared && checker_.loading_ && checker_.functions_.empty()) {
-        checker_.diags_.error(member->loc(), "'" + f.var->name + "' is used before class '" +
+        checker_.diags_.error(member->loc(), "'" + f.var()->name + "' is used before class '" +
                                                  owner->name + "' is declared, which sets it");
       } else {
         checker_.diags_.error(member->loc(),
-                              "the type of '" + f.var->name +
+                              "the type of '" + f.var()->name +
                                   "' comes from its value, which is set later; declare "
                                   "it: 'static " +
                                   name + ": T = ...'");
@@ -68,16 +68,16 @@ Expr *StaticChecker::checkStaticMember(MemberExpr *member, ClassDecl *cls, const
     }
     if (!owner->declared && checker_.loading_ && checker_.functions_.empty() &&
         checker_.declModules_.lookup(owner) == checker_.loading_) {
-      checker_.diags_.error(member->loc(), "'" + f.var->name + "' is used before class '" +
+      checker_.diags_.error(member->loc(), "'" + f.var()->name + "' is used before class '" +
                                                owner->name + "' is declared, which sets it");
     } else if (checker_.staticInit_ && checker_.currentClass_ == owner &&
-               !checker_.staticsSet_.contains(f.var)) {
-      checker_.diags_.error(member->loc(), "'" + f.var->name +
+               !checker_.staticsSet_.contains(f.var())) {
+      checker_.diags_.error(member->loc(), "'" + f.var()->name +
                                                "' is read before it is set: the static "
                                                "fields are set in the order they are declared");
     }
-    read->type = f.var->type;
-    if (read->type->isOptional() && checker_.isDefined(f.var)) {
+    read->type = f.var()->type;
+    if (read->type->isOptional() && checker_.isDefined(f.var())) {
       return checker_.typeRelations().convert(read, read->type->inner());
     }
     return read;
@@ -120,24 +120,24 @@ const Type *StaticChecker::checkStaticTarget(Expr *&target, ClassDecl *cls) {
   if (ClassField *found = staticField(cls, member->name, &owner)) {
     ClassField &f = *found;
     checker_.classMemberChecker().checkAccess(owner, f.access, f.name, member->loc());
-    auto *name = checker_.ctx_.make<NameExpr>(member->loc(), f.var->name);
-    name->var = f.var;
-    name->type = f.var->type ? f.var->type : Type::error();
+    auto *name = checker_.ctx_.make<NameExpr>(member->loc(), f.var()->name);
+    name->var = f.var();
+    name->type = f.var()->type ? f.var()->type : Type::error();
     target = name;
-    if (f.var->isConst) {
-      checker_.diags_.error(member->loc(), "cannot assign to '" + f.var->name +
+    if (f.var()->isConst) {
+      checker_.diags_.error(member->loc(), "cannot assign to '" + f.var()->name +
                                                "' because it is a read-only static field");
     }
-    f.var->reassigned = true;
-    if (!f.var->type) {
+    f.var()->reassigned = true;
+    if (!f.var()->type) {
       checker_.diags_.error(member->loc(),
-                            "the type of '" + f.var->name +
+                            "the type of '" + f.var()->name +
                                 "' comes from its value, which is set later; declare it: "
                                 "'static " +
                                 f.name + ": T = ...'");
       return Type::error();
     }
-    return f.var->type;
+    return f.var()->type;
   }
   if (!ClassDeclarer::methodsNamed(cls, member->name, true).empty()) {
     checker_.diags_.error(member->loc(), "'" + member->name + "' is a static method of '" +

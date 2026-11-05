@@ -146,8 +146,8 @@ void ReflectLowerer::finishReflection(SourceFile &file, llvm::Instruction *init)
         own.push_back(fn);
       }
       for (const ClassField &f : c->fields) {
-        if (f.method) {
-          own.push_back(f.method);
+        if (f.method()) {
+          own.push_back(f.method());
         }
       }
       for (FunctionDecl *fn : own) {

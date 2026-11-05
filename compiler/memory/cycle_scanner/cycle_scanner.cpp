@@ -91,8 +91,8 @@ void CycleScanner::classDecl(const ClassDecl *cls) {
   addType(cls->type);
   for (const ClassField &f : cls->fields) {
     addType(f.resolved);
-    if (f.isStatic && f.var) {
-      addVar(f.var);
+    if (f.isStatic() && f.var()) {
+      addVar(f.var());
       cycleExprs().expr(f.init);
     }
   }

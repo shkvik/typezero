@@ -109,7 +109,7 @@ void collectNames(const Stmt *stmt, llvm::StringSet<> &names, bool inFunction) {
     }
     for (const ClassField &f : cls->fields) {
       if (f.init) {
-        collectNames(f.init, names, f.isStatic ? inFunction : true);
+        collectNames(f.init, names, f.isStatic() ? inFunction : true);
       }
     }
     break;

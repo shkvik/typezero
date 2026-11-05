@@ -37,7 +37,7 @@ bool isArrowMethod(const FunctionDecl *fn) {
     return false;
   }
   for (const ClassField &f : fn->cls()->fields) {
-    if (f.method == fn) {
+    if (f.method() == fn) {
       return true;
     }
   }
@@ -116,7 +116,7 @@ void InheritChecker::checkImplements(ClassDecl *cls) {
     std::string prefix = "class '" + cls->name.str() + "' implements '" + iface->name().str() + "'";
     for (const Field &member : iface->fields()) {
       const ClassField *field = ClassBases::findField(cls, member.name);
-      if (field && !field->method) {
+      if (field && !field->method()) {
         const Field *actual = cls->type->field(member.name);
         if (!actual || actual->type->isError() || member.type->isError()) {
           continue;
@@ -269,7 +269,7 @@ Expr *InheritChecker::checkSuperCall(CallExpr *call) {
   }
   checker_.flow_.beforeSuper = false;
   for (const ClassField &f : cls->fields) {
-    if (!f.isStatic && ((f.init && !f.method) || f.redeclared) &&
+    if (!f.isStatic() && ((f.init && !f.method()) || f.redeclared) &&
         !llvm::is_contained(checker_.flow_.setFields, f.name)) {
       checker_.flow_.setFields.push_back(f.name);
     }

@@ -105,8 +105,8 @@ void Executor::exec(const Stmt *stmt, State &st) {
       break;
     }
     for (const ClassField &f : cls->fields) {
-      if (f.isStatic && f.var && f.init) {
-        check_.slots().writeVar(f.var, check_.evaluator().eval(f.init, st), st);
+      if (f.isStatic() && f.var() && f.init) {
+        check_.slots().writeVar(f.var(), check_.evaluator().eval(f.init, st), st);
       }
     }
     break;

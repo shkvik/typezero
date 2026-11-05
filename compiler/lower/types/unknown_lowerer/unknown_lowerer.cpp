@@ -213,9 +213,9 @@ llvm::Constant *UnknownLowerer::classObject(const ClassDecl *cls) {
   std::vector<llvm::Type *> elements{i64, ptr, ptr, i32, i32, ptr};
   if (cls->usedAsValue) {
     for (const ClassField &f : cls->fields) {
-      if (f.isStatic && f.var) {
+      if (f.isStatic() && f.var()) {
         statics.push_back(&f);
-        elements.push_back(lowering_.moduleBuilder().lower(f.var->type));
+        elements.push_back(lowering_.moduleBuilder().lower(f.var()->type));
       }
     }
   }
@@ -236,7 +236,7 @@ llvm::Constant *UnknownLowerer::classObject(const ClassDecl *cls) {
         {lowering_.stringLowerer().utf8Constant(key),
          lowering_.builder_.getInt32(uint32_t(key.size())),
          lowering_.builder_.getInt32(uint32_t(offsets->getElementOffset(unsigned(6 + i)))),
-         lowering_.typeDescriptors().typeDescriptor(statics[i]->var->type)}));
+         lowering_.typeDescriptors().typeDescriptor(statics[i]->var()->type)}));
   }
   llvm::Constant *fields = llvm::ConstantPointerNull::get(lowering_.builder_.getPtrTy());
   if (!keys.empty()) {
@@ -284,8 +284,8 @@ llvm::Constant *UnknownLowerer::staticFieldAddress(const ClassDecl *cls, const V
   llvm::Constant *object = classObject(cls);
   unsigned element = 6;
   for (const ClassField &f : cls->fields) {
-    if (f.isStatic && f.var) {
-      if (f.var == var) {
+    if (f.isStatic() && f.var()) {
+      if (f.var() == var) {
         break;
       }
       ++element;

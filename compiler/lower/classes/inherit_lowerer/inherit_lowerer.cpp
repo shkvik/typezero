@@ -317,8 +317,8 @@ FunctionDecl *InheritLowerer::implementingMethod(const ClassDecl *cls, llvm::Str
       }
     }
     for (const ClassField &f : c->fields) {
-      if (f.method) {
-        methods.push_back(f.method);
+      if (f.method()) {
+        methods.push_back(f.method());
       }
     }
     for (FunctionDecl *fn : methods) {

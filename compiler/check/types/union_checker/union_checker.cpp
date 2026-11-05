@@ -183,7 +183,7 @@ const Type *UnionChecker::checkUnionFieldTarget(MemberExpr *member) {
     const ClassDecl *cls = ClassDeclarer::classOf(m);
     const ClassDecl *owner = nullptr;
     const ClassField *declared = cls ? ClassBases::findField(cls, member->name, &owner) : nullptr;
-    if (!f || (cls && (!declared || declared->method))) {
+    if (!f || (cls && (!declared || declared->method()))) {
       checker_.diags_.error(member->loc(), "property '" + member->name + "' does not exist on '" +
                                                m->name() + "', which '" + type->name() +
                                                "' may be; narrow it first");
@@ -309,7 +309,7 @@ Expr *UnionChecker::checkUnionMethodCall(CallExpr *call, MemberExpr *member) {
       checker_.classDeclarer().completeClass(cls);
       const ClassDecl *owner = nullptr;
       const ClassField *field = ClassBases::findField(cls, name, &owner);
-      if (field && !field->method) {
+      if (field && !field->method()) {
         if (field->access != Access::Public &&
             !checker_.classMemberChecker().checkAccess(owner, field->access, name, member->loc())) {
           return loosely();

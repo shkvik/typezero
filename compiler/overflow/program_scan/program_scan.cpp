@@ -137,16 +137,16 @@ void ProgramScan::scanClass(const ClassDecl *cls) {
   }
   addFunction(cls->init);
   for (const ClassField &f : cls->fields) {
-    if (f.method) {
-      addFunction(f.method);
+    if (f.method()) {
+      addFunction(f.method());
     }
-    if (f.isStatic) {
-      declareVar(f.var);
+    if (f.isStatic()) {
+      declareVar(f.var());
       if (f.init) {
         scanExpr(f.init, false);
       }
-      if (!check_.declaring_ && f.var) {
-        useVar(f.var, false, true);
+      if (!check_.declaring_ && f.var()) {
+        useVar(f.var(), false, true);
       }
     }
   }

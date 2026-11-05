@@ -158,8 +158,8 @@ void LateClasses::makeLateClass(ClassDecl *cls) {
     methods.push_back(cls->init);
   }
   for (const ClassField &f : cls->fields) {
-    if (f.method) {
-      methods.push_back(f.method);
+    if (f.method()) {
+      methods.push_back(f.method());
     }
   }
   if (Module *home = checker_.declModules_.lookup(cls)) {
@@ -184,23 +184,23 @@ void LateClasses::checkStaticFields(ClassDecl *cls) {
   cls->declared = true;
   checker_.staticsSet_.clear();
   for (ClassField &f : cls->fields) {
-    if (!f.isStatic || !f.var) {
+    if (!f.isStatic() || !f.var()) {
       continue;
     }
     if (!f.init) {
-      if (!f.var->type) {
-        f.var->type = Type::error();
+      if (!f.var()->type) {
+        f.var()->type = Type::error();
       }
-      checker_.staticsSet_.insert(f.var);
+      checker_.staticsSet_.insert(f.var());
       continue;
     }
-    const Type *declared = f.var->type;
-    if (declared && f.resolved && !f.type && !f.optional) {
+    const Type *declared = f.var()->type;
+    if (declared && f.resolved && !f.type && !f.optional()) {
       declared = nullptr;
     }
     f.init = checker_.exprChecker().checkExpr(f.init, declared && !declared->isError() ? declared
                                                                                        : nullptr);
-    checker_.staticsSet_.insert(f.var);
+    checker_.staticsSet_.insert(f.var());
     if (declared) {
       f.init =
           checker_.typeRelations().coerce(f.init, declared, "static field '" + f.name.str() + "'");
@@ -213,7 +213,7 @@ void LateClasses::checkStaticFields(ClassDecl *cls) {
                                                f.name + ": int | undefined = undefined'");
       type = Type::error();
     }
-    f.var->type = f.resolved = type;
+    f.var()->type = f.resolved = type;
   }
   checker_.staticInit_ = outerStatic;
   checker_.currentClass_ = outer;
@@ -264,7 +264,7 @@ void LateClasses::markLateOverrides(SourceFile &program) {
       }
     }
     for (const ClassField &f : cls->fields) {
-      if (!f.isStatic && f.init && isa<FunctionExpr>(f.init)) {
+      if (!f.isStatic() && f.init && isa<FunctionExpr>(f.init)) {
         lateMethodNames_.insert(f.name);
       }
     }
@@ -354,7 +354,7 @@ void LateClasses::replaceClass(ClassDecl *cls, ClassDecl *replacement, llvm::SML
   Type *mine = const_cast<Type *>(cls->type), *theirs = const_cast<Type *>(replacement->type);
   for (const ClassField &f : cls->fields) {
     llvm::SmallPtrSet<const Type *, 8> seen;
-    if (f.isStatic && f.var && f.var->type && holdsType(f.var->type, mine, seen)) {
+    if (f.isStatic() && f.var() && f.var()->type && holdsType(f.var()->type, mine, seen)) {
       checker_.diags_.error(f.loc,
                             "the decorator gives '" + cls->name +
                                 "' another class in its place, "
@@ -398,7 +398,7 @@ void LateClasses::replaceClass(ClassDecl *cls, ClassDecl *replacement, llvm::SML
   };
   for (ClassDecl *child : declared) {
     for (const ClassField &f : child->fields) {
-      if (!f.isStatic && replacement->field(f.name)) {
+      if (!f.isStatic() && replacement->field(f.name)) {
         checker_.diags_.error(f.loc, "'" + child->name + "' extends '" + cls->name +
                                          "', whose decorator "
                                          "gives a class with a field '" +

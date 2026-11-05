@@ -87,7 +87,7 @@ Expr *ClassMemberChecker::checkClassMember(MemberExpr *member, const Type *expec
   bool viaThis = checker_.classChecker().isInitThis(member->object).isOk();
   const ClassDecl *owner = nullptr;
   const ClassField *field = ClassBases::findField(cls, name, &owner);
-  if (field && !field->method) {
+  if (field && !field->method()) {
     checkAccess(owner, field->access, name, member->loc(), member->object);
     if (viaThis && owner == checker_.initFn_->cls() &&
         !llvm::is_contained(checker_.flow_.setFields, name)) {
@@ -118,7 +118,7 @@ Expr *ClassMemberChecker::checkClassMember(MemberExpr *member, const Type *expec
   if (methods.empty()) {
     if (!ClassDeclarer::methodsNamed(cls, name, true).empty() ||
         llvm::any_of(cls->fields,
-                     [&](const ClassField &f) { return f.isStatic && f.name == name; })) {
+                     [&](const ClassField &f) { return f.isStatic() && f.name == name; })) {
       checker_.diags_.error(member->loc(), "'" + name + "' is a static member of '" + cls->name +
                                                "': use it through the class, '" + cls->name + "." +
                                                name + "'");
@@ -181,7 +181,7 @@ const Type *ClassMemberChecker::checkFieldTarget(MemberExpr *member, bool compou
                               "Ms' when it is read; keep the date in a variable of its own");
     return Type::error();
   }
-  if (!field || field->method) {
+  if (!field || field->method()) {
     std::string setter = "set" + std::string(1, llvm::toUpper(name[0])) + name.drop_front().str();
     bool method = field || !ClassDeclarer::methodsNamed(cls, name, false).empty();
     if (method && cls->library && !ClassDeclarer::methodsNamed(cls, setter, false).empty()) {

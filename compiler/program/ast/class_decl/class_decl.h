@@ -20,7 +20,7 @@ struct ClassDecl : Stmt {
 
   const ClassField *field(llvm::StringRef member) const {
     for (const ClassField &f : fields) {
-      if (f.name == member && !f.isStatic) {
+      if (f.name == member && !f.isStatic()) {
         return &f;
       }
     }

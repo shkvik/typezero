@@ -208,8 +208,8 @@ void FunctionChecker::checkFunctionBody(FunctionDecl *fn) {
       checker_.flow_.setFields.clear();
       bool derived = fn->cls()->parent != nullptr;
       for (const ClassField &f : fn->cls()->fields) {
-        if (!f.isStatic &&
-            (f.optional || (fn->isConstructor() && !derived && f.init && !f.method) ||
+        if (!f.isStatic() &&
+            (f.optional() || (fn->isConstructor() && !derived && f.init && !f.method()) ||
              (!fn->isConstructor() && f.redeclared))) {
           checker_.flow_.setFields.push_back(f.name);
         }

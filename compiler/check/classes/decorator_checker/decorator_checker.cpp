@@ -172,7 +172,7 @@ void DecoratorChecker::checkDecoratedNames(ClassDecl *cls) {
     }
   };
   for (const ClassField &f : cls->fields) {
-    add(f.name, f.loc, f.isStatic, f.decorators, nullptr);
+    add(f.name, f.loc, f.isStatic(), f.decorators, nullptr);
   }
   for (const FunctionDecl *fn : cls->methods) {
     add(fn->name, fn->loc(), fn->isStatic(), fn->decorators(), fn);
@@ -234,7 +234,7 @@ void DecoratorChecker::decorateClass(ClassDecl *cls) {
   std::vector<Member> members;
   for (ClassField &f : cls->fields) {
     if (!f.decorators.empty()) {
-      members.push_back({&f, nullptr, f.isStatic, f.loc.getPointer()});
+      members.push_back({&f, nullptr, f.isStatic(), f.loc.getPointer()});
     }
   }
   for (FunctionDecl *fn : cls->methods) {
