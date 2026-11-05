@@ -209,8 +209,8 @@ void LoadOrder::checkLoadOrder(SourceFile &program) {
       }
     };
     for (const Param &param : fn->params) {
-      if (param.defaultValue) {
-        visitExprs(param.defaultValue, visit, false);
+      if (param.defaultValue()) {
+        visitExprs(param.defaultValue(), visit, false);
       }
     }
     visitExprs(fn->body, visit, false);

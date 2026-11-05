@@ -437,7 +437,7 @@ void ReturnInferrer::resolveParams(FuncSymbol *fn) {
     for (size_t i = 0; i < decl->params.size() && i < copy->params.size(); ++i) {
       const Type *type = decl->params[i].declaredType;
       if (!type) {
-        type = found[i] = checker_.exprChecker().checkExpr(copy->params[i].defaultValue)->type;
+        type = found[i] = checker_.exprChecker().checkExpr(copy->params[i].defaultValue())->type;
       }
       checker_.scopes().declareVar(copy->params[i].name, copy->params[i].loc, type, false);
     }

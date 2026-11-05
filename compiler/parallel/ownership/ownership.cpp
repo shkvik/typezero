@@ -83,7 +83,7 @@ bool Ownership::candidate(const FunctionDecl *fn, const VarSymbol *v) const {
   for (const Param &p : fn->params) {
     if (p.sym == v) {
       bool callable = v->type && v->type->nonOptional()->isFunction();
-      return !p.rest && !p.defaultValue && !p.property && !v->reassigned &&
+      return !p.rest() && !p.defaultValue() && !p.property && !v->reassigned &&
              (holdsReferences(v->type) || callable);
     }
   }
@@ -1696,9 +1696,9 @@ void Ownership::scan(int fi) {
     return;
   }
   for (const Param &p : fn_->params) {
-    if (p.defaultValue) {
-      visit(p.defaultValue);
-      leak(p.defaultValue);
+    if (p.defaultValue()) {
+      visit(p.defaultValue());
+      leak(p.defaultValue());
     }
   }
   visitStmt(fn_->body);

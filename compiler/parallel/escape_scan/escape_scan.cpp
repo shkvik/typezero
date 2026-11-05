@@ -81,7 +81,7 @@ const Escapes &EscapeScan::escapes(const FunctionDecl *owner) {
   Escapes out;
   if (owner) {
     for (const Param &p : owner->params) {
-      scanUses(p.defaultValue, false, out);
+      scanUses(p.defaultValue(), false, out);
     }
     scanStmt(owner->body, out);
   } else {

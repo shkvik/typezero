@@ -405,8 +405,8 @@ void ClassParser::parseClassMember(ClassDecl *cls) {
         field.name = param.name;
         field.loc = param.loc;
         field.type = param.type;
-        field.readonly = param.readonly;
-        field.access = param.access;
+        field.readonly = param.property->readonly;
+        field.access = param.property->access;
         field.parameter = true;
         cls->fields.insert(cls->fields.begin() + std::ptrdiff_t(properties++), field);
       }

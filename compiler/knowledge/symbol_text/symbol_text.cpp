@@ -172,13 +172,13 @@ std::string SymbolText::function(const FunctionDecl &fn) {
     if (!type && sym && i + offset < sym->params.size()) {
       type = sym->params[i + offset];
     }
-    if (type && param.optional && type->isOptional()) {
+    if (type && param.optional() && type->isOptional()) {
       type = type->nonOptional();
     }
     text += i ? ", " : "";
-    text += param.rest ? "..." : "";
+    text += param.rest() ? "..." : "";
     text += param.label().str();
-    text += param.optional || param.defaultValue ? "?" : "";
+    text += param.optional() || param.defaultValue() ? "?" : "";
     text += ": " + typeName(type);
   }
   text += ")";

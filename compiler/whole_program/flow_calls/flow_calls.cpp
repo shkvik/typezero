@@ -84,7 +84,7 @@ void FlowCalls::passArguments(const CallExpr *call, const FunctionDecl *target,
     return;
   }
   size_t count = target->params.size();
-  bool rest = count > 0 && target->params.back().rest;
+  bool rest = count > 0 && target->params.back().rest();
   for (size_t i = 0; i < args.size(); ++i) {
     bool spread = call->spreads(i);
     if (count == 0) {

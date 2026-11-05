@@ -33,8 +33,8 @@ void CallCycles::findCycles(
   for (size_t i = 0; i < nodes.size(); ++i) {
     llvm::StringSet<> names;
     for (const Param &param : nodes[i]->params) {
-      if (param.defaultValue) {
-        collectNames(param.defaultValue, names);
+      if (param.defaultValue()) {
+        collectNames(param.defaultValue(), names);
       }
     }
     collectNames(nodes[i]->body, names);

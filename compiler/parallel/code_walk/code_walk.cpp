@@ -87,8 +87,8 @@ void CodeWalk::walk(int fi) {
     return;
   }
   for (const Param &p : decl->params) {
-    if (p.defaultValue) {
-      analysis_.exprWalk.expr(p.defaultValue);
+    if (p.defaultValue()) {
+      analysis_.exprWalk.expr(p.defaultValue());
     }
   }
   stmt(decl->body);

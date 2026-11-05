@@ -68,7 +68,7 @@ void FunctionChecker::declareFunction(FunctionDecl *fn, VarSymbol *var, bool sco
   }
   std::optional<std::vector<const Type *>> hook =
       fn->cls() ? checker_.chunkTypes().streamHookParams(fn) : std::nullopt;
-  if (hook && llvm::none_of(fn->params, [](const Param &p) { return p.rest; })) {
+  if (hook && llvm::none_of(fn->params, [](const Param &p) { return p.rest(); })) {
     for (size_t i = fn->params.size(); i < hook->size(); ++i) {
       Param hidden;
       hidden.name = checker_.ctx_.hiddenName();
@@ -87,7 +87,7 @@ void FunctionChecker::declareFunction(FunctionDecl *fn, VarSymbol *var, bool sco
     const Type *type = nullptr;
     if (param.type) {
       type = checker_.iterableChecker().iterableParam(fn, sym, *param.type);
-      bool outerList = std::exchange(checker_.listContext_, param.rest);
+      bool outerList = std::exchange(checker_.listContext_, param.rest());
       if (!type) {
         type = checker_.typeResolver().resolveType(*param.type, false);
       }
@@ -95,10 +95,10 @@ void FunctionChecker::declareFunction(FunctionDecl *fn, VarSymbol *var, bool sco
       if (hook && i < hook->size() && type && type->isFloat() && (*hook)[i]->isInt()) {
         type = (*hook)[i];
       }
-    } else if (hook && i < hook->size() && !param.rest) {
+    } else if (hook && i < hook->size() && !param.rest()) {
       type = (*hook)[i];
-    } else if (param.defaultValue && (type = literalType(param.defaultValue))) {
-    } else if (param.defaultValue && !param.rest && !fn->source.empty()) {
+    } else if (param.defaultValue() && (type = literalType(param.defaultValue()))) {
+    } else if (param.defaultValue() && !param.rest() && !fn->source.empty()) {
       param.declaredType = nullptr;
       sym->params.push_back(nullptr);
       sym->pendingParams = true;
@@ -107,11 +107,11 @@ void FunctionChecker::declareFunction(FunctionDecl *fn, VarSymbol *var, bool sco
       checker_.diags_.error(param.loc, "parameter '" + param.label() + "' needs a type annotation");
       type = Type::error();
     }
-    if (param.optional) {
+    if (param.optional()) {
       type = Type::optional(type);
     }
     param.declaredType = type;
-    if (i == 0 && param.name == "this" && !param.rest && param.type) {
+    if (i == 0 && param.name == "this" && !param.rest() && param.type) {
       if (fn->isArrow) {
         checker_.diags_.error(param.loc,
                               "an arrow function cannot have a 'this' parameter: it sees the "
@@ -120,10 +120,10 @@ void FunctionChecker::declareFunction(FunctionDecl *fn, VarSymbol *var, bool sco
         checker_.diags_.error(param.loc,
                               "a method cannot have a 'this' parameter: its 'this' is its object");
       } else {
-        sym->hasThis = !param.optional && !param.defaultValue;
+        sym->hasThis = !param.optional() && !param.defaultValue();
       }
     }
-    if (param.rest) {
+    if (param.rest()) {
       if (!type->isArray() && !type->isListParam() && !type->isTuple() && !type->isError()) {
         checker_.diags_.error(param.loc, "a rest parameter must be an array, e.g. '..." +
                                              param.name + ": int[]'");
@@ -133,7 +133,7 @@ void FunctionChecker::declareFunction(FunctionDecl *fn, VarSymbol *var, bool sco
       sym->params.push_back(param.declaredType);
       continue;
     }
-    bool mayOmit = param.optional || param.defaultValue;
+    bool mayOmit = param.optional() || param.defaultValue();
     sym->params.push_back(mayOmit ? Type::optional(type) : type);
     if (!mayOmit) {
       if (afterOptional) {
@@ -141,7 +141,7 @@ void FunctionChecker::declareFunction(FunctionDecl *fn, VarSymbol *var, bool sco
       }
       sym->minArgs = i + 1;
     }
-    afterOptional |= param.optional;
+    afterOptional |= param.optional();
   }
   if (fn->returnType) {
     sym->ret = checker_.asyncChecker().asyncReturnType(
@@ -238,18 +238,18 @@ void FunctionChecker::checkFunctionBody(FunctionDecl *fn) {
   for (size_t i = 0; i < fn->params.size(); ++i) {
     Param &param = fn->params[i];
     const Type *type = param.declaredType;
-    if (param.defaultValue && type->isError() && !param.type) {
-      param.defaultValue->type = type;
+    if (param.defaultValue() && type->isError() && !param.type) {
+      param.defaultValue()->type = type;
       param.sym = checker_.scopes().declareVar(param.name, param.loc, type, false);
       continue;
     }
-    if (param.defaultValue) {
+    if (DefaultedParam *defaulted = param.form.as<DefaultedParam>()) {
       llvm::StringSet<> names;
-      collectNames(param.defaultValue, names);
+      collectNames(defaulted->defaultValue, names);
       bool forward = false;
       for (size_t j = i; j < fn->params.size() && !forward; ++j) {
         if (names.contains(fn->params[j].name)) {
-          checker_.diags_.error(param.defaultValue->loc(),
+          checker_.diags_.error(defaulted->defaultValue->loc(),
                                 "the default value of '" + param.label() + "' uses '" +
                                     fn->params[j].name +
                                     "', which is not set yet: a default value can "
@@ -258,20 +258,20 @@ void FunctionChecker::checkFunctionBody(FunctionDecl *fn) {
         }
       }
       if (forward) {
-        param.defaultValue->type = Type::error();
+        defaulted->defaultValue->type = Type::error();
         param.sym = checker_.scopes().declareVar(param.name, param.loc, type, false);
         continue;
       }
-      if (auto *fe = dyn_cast<FunctionExpr>(param.defaultValue); fe && fe->fn->name.empty()) {
+      if (auto *fe = dyn_cast<FunctionExpr>(defaulted->defaultValue); fe && fe->fn->name.empty()) {
         fe->fn->name = param.name;
       }
-      param.defaultValue =
-          checker_.exprChecker().checkExpr(param.defaultValue, type->isError() ? nullptr : type);
-      param.defaultValue = checker_.typeRelations().coerce(param.defaultValue, type);
+      Expr *checked = checker_.exprChecker().checkExpr(defaulted->defaultValue,
+                                                       type->isError() ? nullptr : type);
+      defaulted->defaultValue = checker_.typeRelations().coerce(checked, type);
     }
     param.sym = checker_.scopes().declareVar(param.name, param.loc, type, false);
-    if (param.defaultValue && type->isOptional() && !param.defaultValue->type->isOptional() &&
-        !param.defaultValue->type->isUndefined()) {
+    if (param.defaultValue() && type->isOptional() && !param.defaultValue()->type->isOptional() &&
+        !param.defaultValue()->type->isUndefined()) {
       checker_.flowChecker().setDefined(param.sym, true);
     }
   }

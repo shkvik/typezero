@@ -49,8 +49,8 @@ void StoreScanner::function(const FunctionDecl *fn) {
   const FunctionDecl *saved = current_;
   current_ = fn;
   for (const Param &param : fn->params) {
-    if (param.defaultValue) {
-      flowInto(var(param.sym), storeExprs().expr(param.defaultValue));
+    if (param.defaultValue()) {
+      flowInto(var(param.sym), storeExprs().expr(param.defaultValue()));
     }
   }
   if (fn->sym && fn->sym->hasRest && !fn->params.empty()) {

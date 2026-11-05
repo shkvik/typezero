@@ -295,9 +295,9 @@ const Type *Destination::declaredFunctionType(const FunctionDecl *fn) {
       return nullptr;
     }
     const Type *type = checker_.typeResolver().resolveType(*param.type, false);
-    params.push_back(param.optional || param.defaultValue ? Type::optional(type) : type);
+    params.push_back(param.optional() || param.defaultValue() ? Type::optional(type) : type);
   }
-  bool hasRest = !fn->params.empty() && fn->params.back().rest;
+  bool hasRest = !fn->params.empty() && fn->params.back().rest();
   const Type *type = Type::function(params, 0, hasRest, Type::voidTy());
 
   return type->isFunction() ? type : nullptr;

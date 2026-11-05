@@ -142,7 +142,7 @@ void FunctionBuilder::emitParams(FunctionDecl *fn, llvm::ArrayRef<llvm::Value *>
       arg->setName(param.name);
     }
     llvm::Value *slot = lowering_.functionFrame().createLocal(param.sym, param.name);
-    if (!param.defaultValue) {
+    if (!param.defaultValue()) {
       lowering_.storeLowerer().storeVar(param.sym, slot, arg, false);
       continue;
     }
@@ -158,7 +158,7 @@ void FunctionBuilder::emitParams(FunctionDecl *fn, llvm::ArrayRef<llvm::Value *>
                              : lowering_.optionalLowerer().optionalValue(arg, passed);
     lowering_.builder_.CreateBr(doneBlock);
     lowering_.functionFrame().switchTo(defaultBlock);
-    llvm::Value *fallback = lowering_.exprLowerer().emitExpr(param.defaultValue);
+    llvm::Value *fallback = lowering_.exprLowerer().emitExpr(param.defaultValue());
     llvm::BasicBlock *defaultEnd = lowering_.builder_.GetInsertBlock();
     lowering_.builder_.CreateBr(doneBlock);
     lowering_.functionFrame().switchTo(doneBlock);

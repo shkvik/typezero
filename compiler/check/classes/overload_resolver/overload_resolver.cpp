@@ -446,8 +446,12 @@ std::vector<FunctionDecl *> OverloadResolver::signatureVariants(const Type *ifac
     for (size_t i = 0; i < signature->params().size(); ++i) {
       Param param;
       param.name = checker_.ctx_.keepName(std::string(1, char('a' + i % 26)));
-      param.rest = sym->hasRest && i + 1 == signature->params().size();
-      param.optional = i >= sym->minArgs && !param.rest;
+      bool rest = sym->hasRest && i + 1 == signature->params().size();
+      if (rest) {
+        param.form = RestParam{};
+      } else if (i >= sym->minArgs) {
+        param.form = OptionalParam{};
+      }
       param.declaredType = signature->params()[i];
       fn->params.push_back(param);
     }

@@ -76,33 +76,33 @@ Expr *ClosureChecker::checkFunctionExpr(FunctionExpr *fe, const Checker::Signatu
   for (size_t i = 0; i < named; ++i) {
     Param &param = fn->params[i];
     const Type *given = sig && i < sig->params.size() ? sig->params[i] : nullptr;
-    bool mayOmit = param.optional || param.defaultValue;
+    bool mayOmit = param.optional() || param.defaultValue();
     const Type *type;
     const Type *passed;
     if (param.type) {
-      bool outerList = std::exchange(checker_.listContext_, param.rest);
+      bool outerList = std::exchange(checker_.listContext_, param.rest());
       type = checker_.typeResolver().resolveType(*param.type, false);
       checker_.listContext_ = outerList;
-      if (param.optional) {
+      if (param.optional()) {
         type = Type::optional(type);
       }
       passed = mayOmit ? Type::optional(type) : type;
-      if (given && passed != given && !passed->isError() && !given->isError() && !param.rest) {
+      if (given && passed != given && !passed->isError() && !given->isError() && !param.rest()) {
         checker_.diags_.error(param.loc, "parameter '" + param.label() + "' is declared as '" +
                                              passed->name() + "', but the function gets '" +
                                              given->name() + "' here");
         passed = given;
-        type = param.defaultValue ? given->nonOptional() : given;
+        type = param.defaultValue() ? given->nonOptional() : given;
       }
     } else if (given) {
       passed = given;
-      type = param.defaultValue ? given->nonOptional() : given;
-      if (param.defaultValue && !given->isOptional()) {
-        checker_.diags_.error(param.defaultValue->loc(),
+      type = param.defaultValue() ? given->nonOptional() : given;
+      if (param.defaultValue() && !given->isOptional()) {
+        checker_.diags_.error(param.defaultValue()->loc(),
                               "the default value of '" + param.label() +
                                   "' is never used: the function always gets a value here");
       }
-    } else if (param.defaultValue && (type = literalType(param.defaultValue))) {
+    } else if (param.defaultValue() && (type = literalType(param.defaultValue()))) {
       passed = Type::optional(type);
     } else {
       checker_.diags_.error(
@@ -112,7 +112,7 @@ Expr *ClosureChecker::checkFunctionExpr(FunctionExpr *fe, const Checker::Signatu
     }
     if (i == 0 && thisFromContext) {
       sym->hasThis = true;
-    } else if (i == 0 && param.name == "this" && param.type && !param.rest) {
+    } else if (i == 0 && param.name == "this" && param.type && !param.rest()) {
       if (fn->isArrow) {
         checker_.diags_.error(param.loc,
                               "an arrow function cannot have a 'this' parameter: it sees the "
@@ -121,7 +121,7 @@ Expr *ClosureChecker::checkFunctionExpr(FunctionExpr *fe, const Checker::Signatu
         sym->hasThis = !mayOmit;
       }
     }
-    if (param.rest) {
+    if (param.rest()) {
       if (!type->isArray() && !type->isListParam() && !type->isTuple() && !type->isError()) {
         checker_.diags_.error(param.loc, "a rest parameter must be an array, e.g. '..." +
                                              param.name + ": int[]'");

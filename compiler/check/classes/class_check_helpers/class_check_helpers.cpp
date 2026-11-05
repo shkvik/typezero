@@ -16,12 +16,12 @@ std::string variantText(const FunctionDecl *fn) {
       text += ", ";
     }
     const Param &param = fn->params[i];
-    text += (param.rest ? "..." : "") + param.label().str();
+    text += (param.rest() ? "..." : "") + param.label().str();
     const Type *type = sym && i < sym->params.size() ? sym->params[i] : nullptr;
     if (!type) {
       continue;
     }
-    if (type->isOptional() && !param.rest && (param.optional || param.defaultValue)) {
+    if (type->isOptional() && !param.rest() && (param.optional() || param.defaultValue())) {
       text += "?: " + type->inner()->name().str();
     } else {
       text += ": " + type->name().str();

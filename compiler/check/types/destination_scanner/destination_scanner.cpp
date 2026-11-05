@@ -73,10 +73,10 @@ void DestinationScanner::scanFunctionDestinations(const FunctionDecl *fn,
     const Type *type = param.type && !checker_.iterableChecker().isIterableRef(*param.type)
                            ? checker_.typeResolver().resolveType(*param.type, false)
                            : nullptr;
-    if (param.defaultValue) {
-      scanDestinations(param.defaultValue, type, scan);
+    if (param.defaultValue()) {
+      scanDestinations(param.defaultValue(), type, scan);
     }
-    scan.declare(param.name, type && param.optional ? Type::optional(type) : type);
+    scan.declare(param.name, type && param.optional() ? Type::optional(type) : type);
   }
   scanDestinations(fn->body->body, scan);
   scan.locals.pop_back();

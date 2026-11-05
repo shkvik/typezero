@@ -308,13 +308,13 @@ const Type *TypeOperators::resolveTypeOp(const TypeRef &ref) {
           break;
         }
         const Type *t = checker_.typeResolver().resolveType(*p.type, false);
-        params.push_back(p.optional || p.defaultValue ? Type::optional(t) : t);
-        if (!p.optional && !p.defaultValue && !p.rest) {
+        params.push_back(p.optional() || p.defaultValue() ? Type::optional(t) : t);
+        if (!p.optional() && !p.defaultValue() && !p.rest()) {
           minArgs = params.size();
         }
       }
       if (written) {
-        type = Type::function(params, minArgs, !fn->params.empty() && fn->params.back().rest,
+        type = Type::function(params, minArgs, !fn->params.empty() && fn->params.back().rest(),
                               checker_.typeResolver().resolveType(*fn->returnType, true));
       }
     }

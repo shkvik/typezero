@@ -126,7 +126,7 @@ const Type *ArgListChecker::memberType(const Type *object, const Type *key) {
 }
 
 void ArgListChecker::expandArgumentList(FunctionDecl *fn, FuncSymbol *sym) {
-  if (!sym->hasRest || fn->params.empty() || !fn->params.back().rest || !fn->listName.empty()) {
+  if (!sym->hasRest || fn->params.empty() || !fn->params.back().rest() || !fn->listName.empty()) {
     return;
   }
   const Type *list = sym->params.back();
@@ -145,7 +145,9 @@ void ArgListChecker::expandArgumentList(FunctionDecl *fn, FuncSymbol *sym) {
     Param param;
     param.name = checker_.ctx_.keepName("%" + rest.name.str() + "." + std::to_string(k));
     param.loc = rest.loc;
-    param.optional = k >= list->tupleMin();
+    if (k >= list->tupleMin()) {
+      param.form = OptionalParam{};
+    }
     param.declaredType = list->fields()[k].type;
     fn->params.push_back(param);
   }
@@ -153,7 +155,7 @@ void ArgListChecker::expandArgumentList(FunctionDecl *fn, FuncSymbol *sym) {
     Param param;
     param.name = checker_.ctx_.keepName("%" + rest.name.str() + ".rest");
     param.loc = rest.loc;
-    param.rest = true;
+    param.form = RestParam{};
     param.declaredType = more;
     fn->params.push_back(param);
   }
@@ -170,7 +172,7 @@ void ArgListChecker::declareArgumentList(FunctionDecl *fn) {
   std::vector<const Type *> elements;
   for (size_t k = fn->listStart; k < fn->params.size(); ++k) {
     parts.push_back(fn->params[k].name);
-    if (!fn->params[k].rest) {
+    if (!fn->params[k].rest()) {
       elements.push_back(fn->params[k].declaredType);
     }
   }

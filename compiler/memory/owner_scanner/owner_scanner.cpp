@@ -37,7 +37,7 @@ void OwnerScanner::function(const FunctionDecl *fn) {
   const FunctionDecl *saved = current_;
   current_ = fn;
   for (const Param &param : fn->params) {
-    expr(param.defaultValue, Use::Value);
+    expr(param.defaultValue(), Use::Value);
   }
   stmt(fn->body);
   current_ = saved;

@@ -36,8 +36,8 @@ void KnowledgeWalk::param(const Param &param) {
   if (param.type) {
     typeRef(*param.type);
   }
-  if (param.defaultValue) {
-    expr(param.defaultValue);
+  if (param.defaultValue()) {
+    expr(param.defaultValue());
   }
   for (const Decorator &decorator : param.decorators) {
     expr(decorator.expr);

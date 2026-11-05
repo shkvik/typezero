@@ -52,7 +52,7 @@ void TzModulesChecker::checkExternal(FunctionDecl *fn) {
   }
   for (size_t i = 0; i < fn->params.size(); ++i) {
     const Type *type = sym->params[i];
-    if (fn->params[i].defaultValue || fn->params[i].optional) {
+    if (fn->params[i].defaultValue() || fn->params[i].optional()) {
       checker_.diags_.error(fn->params[i].loc, "an intrinsic has no optional parameters");
     } else if (!type->isError() && !isExternalValue(type)) {
       checker_.diags_.error(fn->params[i].loc,

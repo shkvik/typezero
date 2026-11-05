@@ -205,8 +205,8 @@ void CallRanges::analyzeFunction(const FunctionDecl *fn) {
       continue;
     }
     Val v = paramValue(fn, i);
-    if (p.defaultValue) {
-      v = join(v, check_.evaluator().eval(p.defaultValue, st));
+    if (p.defaultValue()) {
+      v = join(v, check_.evaluator().eval(p.defaultValue(), st));
     }
     check_.slots().writeVar(p.sym, v, st);
   }
@@ -228,7 +228,7 @@ void CallRanges::passArgs(const FunctionDecl *fn, const CallExpr *call, llvm::Ar
       continue;
     }
     Val v;
-    if (p.rest) {
+    if (p.rest()) {
       Val element;
       for (size_t k = i; k < args.size(); ++k) {
         element = join(element, call && call->spreads(k) && args[k].elem ? *args[k].elem : args[k]);

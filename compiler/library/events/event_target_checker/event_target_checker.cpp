@@ -66,7 +66,7 @@ Expr *EventTargetChecker::checkEventTargetCall(CallExpr *call, MemberExpr *membe
   const Type *kind = nullptr;
   if (auto *fe = dyn_cast<FunctionExpr>(listener)) {
     kind = event;
-    if (!fe->fn->params.empty() && fe->fn->params[0].type && !fe->fn->params[0].rest) {
+    if (!fe->fn->params.empty() && fe->fn->params[0].type && !fe->fn->params[0].rest()) {
       kind = eventKind(checker_.typeResolver().resolveType(*fe->fn->params[0].type, false),
                        fe->fn->params[0].loc);
     }

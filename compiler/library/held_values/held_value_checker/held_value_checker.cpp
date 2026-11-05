@@ -213,7 +213,7 @@ void HeldValueChecker::function(const FunctionDecl *fn) {
     if (param.sym && heldParams_.count({fn, i})) {
       heldVars_.insert(param.sym);
     }
-    expr(param.defaultValue);
+    expr(param.defaultValue());
   }
   stmt(fn->body);
   current_ = saved;

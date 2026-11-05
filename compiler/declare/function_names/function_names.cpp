@@ -34,8 +34,8 @@ void collectNames(const Stmt *stmt, llvm::StringSet<> &names, bool inFunction) {
   case Stmt::Kind::Function: {
     auto *fn = cast<FunctionDecl>(stmt);
     for (const Param &param : fn->params) {
-      if (param.defaultValue) {
-        collectNames(param.defaultValue, names, true);
+      if (param.defaultValue()) {
+        collectNames(param.defaultValue(), names, true);
       }
     }
     collectNames(fn->body, names, true);

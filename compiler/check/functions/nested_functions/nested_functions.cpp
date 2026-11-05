@@ -139,7 +139,7 @@ void visitExprs(const Stmt *stmt, llvm::function_ref<void(const Expr *)> visit,
     }
     auto *fn = cast<FunctionDecl>(stmt);
     for (const Param &param : fn->params) {
-      expr(param.defaultValue);
+      expr(param.defaultValue());
     }
     sub(fn->body);
     break;

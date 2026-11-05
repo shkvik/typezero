@@ -119,11 +119,11 @@ void ClassDeclarer::resolveClass(ClassDecl *cls) {
           }
         }
       }
-      f.optional = param->optional;
+      f.optional = param->optional();
       if (param->type) {
         type = checker_.typeResolver().resolveType(*param->type, false);
-      } else if (param->defaultValue) {
-        type = literalType(param->defaultValue);
+      } else if (param->defaultValue()) {
+        type = literalType(param->defaultValue());
       }
     } else if (f.type) {
       type = checker_.typeResolver().resolveType(*f.type, false);
@@ -204,10 +204,10 @@ void ClassDeclarer::declareTyped(FunctionDecl *fn, const Type *declared) {
                                            "' passes");
       type = Type::error();
     }
-    if (param.optional && !type->isOptional()) {
+    if (param.optional() && !type->isOptional()) {
       type = Type::optional(type);
     }
-    param.declaredType = param.defaultValue ? type->nonOptional() : type;
+    param.declaredType = param.defaultValue() ? type->nonOptional() : type;
     sym->params.push_back(type);
   }
   for (size_t i = fn->params.size(); i < declared->params().size(); ++i) {

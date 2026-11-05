@@ -95,7 +95,7 @@ void Flows::walkProgram(SourceFile &file) {
   for (const ValueCall &call : valueCalls_) {
     for (const FunctionDecl *fn : functionValues_) {
       size_t count = fn->params.size();
-      bool rest = count > 0 && fn->params.back().rest;
+      bool rest = count > 0 && fn->params.back().rest();
       if (call.args.size() > count && !rest) {
         continue;
       }

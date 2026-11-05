@@ -136,22 +136,24 @@ void FunctionParser::parseParams(FunctionDecl *fn, Parser::ParamPatterns *patter
                                     "' before a parameter makes it a field, which only "
                                     "a constructor's parameter can be");
       }
-      param.property = true;
+      if (!param.property) {
+        param.property = ParamProperty{};
+      }
       if (parser_.tok_.text == "readonly") {
-        param.readonly = true;
+        param.property->readonly = true;
       } else if (parser_.tok_.text == "private") {
-        param.access = Access::Private;
+        param.property->access = Access::Private;
       } else if (parser_.tok_.text == "protected") {
-        param.access = Access::Protected;
+        param.property->access = Access::Protected;
       }
       parser_.cursor().advance();
     }
-    param.rest = parser_.cursor().accept(Tok::Ellipsis);
+    bool rest = parser_.cursor().accept(Tok::Ellipsis);
     param.loc = parser_.tok_.loc();
     if (parser_.tok_.is(Tok::Identifier)) {
       param.name = parser_.tok_.text;
       parser_.cursor().advance();
-    } else if ((parser_.tok_.is(Tok::LBrace) || parser_.tok_.is(Tok::LBracket)) && !param.rest) {
+    } else if ((parser_.tok_.is(Tok::LBrace) || parser_.tok_.is(Tok::LBracket)) && !rest) {
       const char *start = parser_.tok_.text.data();
       std::unique_ptr<Parser::Pattern> pattern = parser_.patterns().parseBindingPattern();
       param.name = parser_.ctx_.hiddenName();
@@ -160,35 +162,40 @@ void FunctionParser::parseParams(FunctionDecl *fn, Parser::ParamPatterns *patter
         patterns->emplace_back(param.name, std::move(pattern));
       }
     } else {
-      parser_.cursor().error(parser_.tok_.loc(), param.rest
-                                                     ? "expected a parameter name after '...'"
-                                                     : "expected a parameter name");
+      parser_.cursor().error(parser_.tok_.loc(), rest ? "expected a parameter name after '...'"
+                                                      : "expected a parameter name");
       break;
     }
-    if (parser_.cursor().accept(Tok::Question)) {
-      param.optional = true;
-    }
+    bool optional = parser_.cursor().accept(Tok::Question);
     if (parser_.cursor().accept(Tok::Colon)) {
       param.type = parser_.types().parseType();
     }
+    Expr *defaultValue = nullptr;
     if (parser_.tok_.is(Tok::Assign)) {
-      if (param.optional) {
+      if (optional) {
         parser_.cursor().report(
             parser_.tok_.loc(),
             "a parameter with a default value is optional already; remove the '?'");
       }
       parser_.cursor().advance();
-      param.defaultValue = parser_.exprs().parseExpr();
+      defaultValue = parser_.exprs().parseExpr();
     }
-    if (param.rest && (param.optional || param.defaultValue)) {
+    if (rest && (optional || defaultValue)) {
       parser_.cursor().report(param.loc,
                               "a rest parameter cannot be optional or have a default value");
+    }
+    if (rest) {
+      param.form = RestParam{};
+    } else if (defaultValue) {
+      param.form = DefaultedParam{.defaultValue = defaultValue};
+    } else if (optional) {
+      param.form = OptionalParam{};
     }
     fn->params.push_back(param);
     if (!parser_.cursor().accept(Tok::Comma)) {
       break;
     }
-    if (param.rest && !parser_.tok_.is(Tok::RParen)) {
+    if (rest && !parser_.tok_.is(Tok::RParen)) {
       parser_.cursor().report(param.loc, "a rest parameter must be the last parameter");
     }
   }

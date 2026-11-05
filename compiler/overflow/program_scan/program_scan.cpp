@@ -115,8 +115,8 @@ void ProgramScan::scanFunction(const FunctionDecl *fn) {
     if (!check_.declaring_ && p.sym && p.sym->type && p.sym->type->nonOptional()->isArray()) {
       check_.vars_[p.sym].aliased = true;
     }
-    if (p.defaultValue) {
-      scanExpr(p.defaultValue, false);
+    if (p.defaultValue()) {
+      scanExpr(p.defaultValue(), false);
     }
   }
   if (fn->body) {
@@ -392,8 +392,8 @@ void ProgramScan::scanExpr(const Expr *expr, bool consumed) {
           }
           for (const Param &p : fe->fn->params) {
             declareVar(p.sym);
-            if (p.defaultValue) {
-              scanExpr(p.defaultValue, false);
+            if (p.defaultValue()) {
+              scanExpr(p.defaultValue(), false);
             }
           }
           scanStmt(fe->fn->body);

@@ -71,7 +71,8 @@ bool writtenFromOutside(const ClassDecl *generic, llvm::StringRef name) {
   }
   for (const FunctionDecl *constructor : generic->constructors) {
     for (const Param &param : constructor->params) {
-      bool open = param.property && param.access == Access::Public && !param.readonly;
+      bool open =
+          param.property && param.property->access == Access::Public && !param.property->readonly;
       if (open && param.type && mentions(*param.type, name)) {
         return true;
       }

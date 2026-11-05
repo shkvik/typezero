@@ -165,8 +165,9 @@ bool DeclarationChecker::sameParams(const std::vector<Param> &declared, const Fu
   for (size_t i = 0; i < declared.size(); ++i) {
     const Param &mine = declared[i], &theirs = fn->params[i];
     std::string param = "parameter '" + mine.name.str() + "' of " + what;
-    if (mine.optional != (theirs.optional || theirs.defaultValue) || mine.rest != theirs.rest) {
-      checker_.diags_.error(mine.loc, param + " is " + (mine.optional ? "optional" : "required") +
+    if (mine.optional() != (theirs.optional() || theirs.defaultValue()) ||
+        mine.rest() != theirs.rest()) {
+      checker_.diags_.error(mine.loc, param + " is " + (mine.optional() ? "optional" : "required") +
                                           " here, and not in '" + fileName() + "'");
       return false;
     }

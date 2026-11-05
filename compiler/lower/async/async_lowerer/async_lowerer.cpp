@@ -234,7 +234,7 @@ void AsyncLowerer::emitAsyncFunction(FunctionDecl *fn, llvm::Function *function)
         continue;
       }
       lowering_.storeLowerer().publishValue(
-          args[i], param.defaultValue ? Type::optional(param.sym->type) : param.sym->type);
+          args[i], param.defaultValue() ? Type::optional(param.sym->type) : param.sym->type);
     }
     lowering_.builder_.CreateBr(doneBlock);
     lowering_.functionFrame().switchTo(doneBlock);

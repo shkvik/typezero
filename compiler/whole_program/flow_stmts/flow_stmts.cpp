@@ -24,8 +24,8 @@ void FlowStmts::function(FunctionDecl *fn) {
   }
   flows_.functions_.push_back(fn);
   for (Param &p : fn->params) {
-    if (p.defaultValue) {
-      Refs value = flows_.flowExprs().expr(p.defaultValue);
+    if (p.defaultValue()) {
+      Refs value = flows_.flowExprs().expr(p.defaultValue());
       if (p.sym) {
         flows_.flow(value, flows_.var(p.sym));
       }
