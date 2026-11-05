@@ -90,15 +90,16 @@ bool callsOnce(Builtin builtin) {
 
 }
 
-CallWalk::CallWalk(Analysis &analysis) : analysis_(analysis) {}
+CallWalk::CallWalk(Analysis &analysis)
+    : analysis_(analysis) {}
 
 void CallWalk::addCallee(CallRec &rec, const FunctionDecl *decl, std::optional<Ref> self,
                          bool byType) {
   if (!decl || !decl->body || analysis_.isLibrary(decl)) {
     return;
   }
-  FunctionId fi = analysis_.codeWalk.discover(decl);
-  const FnInfo &callee = analysis_.fns[fi];
+  int fi = analysis_.codeWalk.discover(decl);
+  const FnInfo &callee = *analysis_.byFunction[fi];
   Mode mode = Mode::Sync;
   switch (rec.kind) {
   case CallKind::Call:
@@ -129,14 +130,20 @@ void CallWalk::addCallee(CallRec &rec, const FunctionDecl *decl, std::optional<R
     mode = Mode::AsyncIter;
     break;
   }
-  Callee c;
-  c.fn = fi;
-  c.self = self;
-  c.mode = mode;
-  c.byType = byType;
-  if (!llvm::is_contained(rec.callees, c)) {
-    rec.callees.push_back(c);
+  for (int index : rec.edges) {
+    const CallEdge &existing = analysis_.callGraph.edge(index);
+    if (existing.to == fi && existing.self == self && existing.mode == mode) {
+      return;
+    }
   }
+  CallEdge edge;
+  edge.from = rec.function;
+  edge.call = rec.index;
+  edge.to = fi;
+  edge.self = self;
+  edge.mode = mode;
+  edge.byType = byType;
+  rec.edges.push_back(analysis_.callGraph.add(edge));
 }
 
 std::vector<const FunctionDecl *> CallWalk::methodTargets(const FunctionDecl *method,
@@ -191,12 +198,12 @@ void CallWalk::registerValue(const FunctionDecl *fn, const Type *type) {
   if (!fn || !fn->body || analysis_.isLibrary(fn)) {
     return;
   }
-  FunctionId fi = analysis_.codeWalk.discover(fn);
+  int fi = analysis_.codeWalk.discover(fn);
   analysis_.valueFns.insert(fi);
   if (!type || !type->nonOptional()->isFunction()) {
     return;
   }
-  std::vector<FunctionId> &list = analysis_.values[type->nonOptional()];
+  std::vector<int> &list = analysis_.values[type->nonOptional()];
   if (!llvm::is_contained(list, fi)) {
     list.push_back(fi);
   }
@@ -283,8 +290,7 @@ void CallWalk::call(const CallExpr *c, const Use &use) {
     if (c->method) {
       addCallee(rec, c->method->decl, self);
     }
-    for (const ClassDecl *k = analysis_.fn->decl ? analysis_.fn->decl->cls : nullptr; k;
-         k = k->parent) {
+    for (const ClassDecl *k = analysis_.fn->decl->cls; k; k = k->parent) {
       if (k->init) {
         addCallee(rec, k->init, self);
       }

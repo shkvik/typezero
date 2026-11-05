@@ -16,18 +16,16 @@ public:
   explicit Pieces(Analysis &analysis);
 
   void explore();
-  unsigned activate(FunctionId fn, int root, std::optional<Ref> self, bool callbackStart,
-                    bool rootStart);
-  int newRoot(int parent, FunctionId fn, std::optional<Ref> self, FunctionId callerFn, unsigned rec,
-              Mode mode);
+  unsigned activate(int fn, int root, std::optional<Ref> self, bool callbackStart, bool rootStart);
+  int newRoot(int parent, int fn, std::optional<Ref> self, int callerFn, unsigned rec, Mode mode);
   bool scheduled(const Activation &act, unsigned seg) const;
   void findPieces();
   void findHosts();
   std::vector<unsigned> piecesAt(const Activation &act, llvm::ArrayRef<unsigned> segs) const;
-  bool once(FunctionId fi, unsigned rec, FunctionId rootFn, unsigned depth);
-  bool fnOnce(FunctionId fi, FunctionId rootFn, unsigned depth);
+  bool once(int fi, unsigned rec, int rootFn, unsigned depth);
+  bool fnOnce(int fi, int rootFn, unsigned depth);
   bool rejectionEnds(const AwaitExpr *a, unsigned depth);
-  bool fnRejectionEnds(FunctionId fi, unsigned depth);
+  bool fnRejectionEnds(int fi, unsigned depth);
   void findJoins();
   void buildFlow();
   void findBindings();
@@ -38,8 +36,8 @@ public:
 
 private:
   bool ownPiece(unsigned act, unsigned piece) const;
-  int stepOf(FunctionId fn, llvm::SMLoc loc);
-  bool later(FunctionId fn, llvm::SMLoc at, llvm::SMLoc origin);
+  int stepOf(int fn, llvm::SMLoc loc);
+  bool later(int fn, llvm::SMLoc at, llvm::SMLoc origin);
   void addEntry(unsigned act, unsigned piece, const Entry &add, bool &changed);
   void noteFlow(int root, unsigned from, unsigned to, llvm::SMLoc origin);
   Analysis &analysis_;

@@ -62,7 +62,7 @@ void Analysis::run() {
   this->state = intern("%state");
   this->listenersKey = intern("%listeners");
 
-  this->codeWalk.discover(nullptr);
+  this->codeWalk.discover(this->module);
   this->callResolver.resolve();
   this->ownership.decide();
   this->callResolver.fold();
@@ -81,20 +81,20 @@ ParallelPlan Analysis::plan() const {
   for (size_t r = 0; r < this->roots.size(); ++r) {
     const Root &root = this->roots[r];
     ParallelPlan::Task task;
-    task.fn = this->fns[root.fn].decl;
+    task.fn = this->planFunction(root.fn);
     task.parent = root.parent;
     task.several = root.multi;
     task.joinedAt = root.join;
     if (root.rec >= 0) {
-      task.site = this->fns[root.callerFn].calls[root.rec].site;
+      task.site = this->byFunction[root.callerFn]->calls[root.rec].site;
     }
     plan.tasks.push_back(task);
   }
   for (unsigned i = 0; i < this->pieceInstances.size(); ++i) {
     const PieceInst &p = this->pieceInstances[i];
     ParallelPlan::Piece piece;
-    piece.fn = this->fns[p.fn].decl;
-    piece.start = this->fns[p.fn].segs[p.seg].at;
+    piece.fn = this->planFunction(p.fn);
+    piece.start = this->byFunction[p.fn]->segs[p.seg].at;
     piece.task = unsigned(p.root);
     piece.alone = this->decisions[i].alone;
     for (const Partner &partner : this->decisions[i].partners) {
@@ -110,11 +110,23 @@ ParallelPlan Analysis::plan() const {
   return plan;
 }
 
-void Analysis::explain(llvm::raw_ostream &out) { this->explainer.print(out); }
+void Analysis::explain(llvm::raw_ostream &out) {
+  this->explainer.print(out);
+}
 
-Analysis::Analysis(const SourceFile &sourceFile, const llvm::SourceMgr &sourceManager)
+const FunctionDecl *Analysis::planFunction(int function) const {
+  const FunctionDecl *decl = this->byFunction[function]->decl;
+
+  return decl == this->module ? nullptr : decl;
+}
+
+Analysis::Analysis(const SourceFile &sourceFile, const llvm::SourceMgr &sourceManager,
+                   const AstContext &ast)
     : program(sourceFile),
       sources(sourceManager),
+      module(ast.moduleFunction()),
+      byFunction(ast.functionCount(), nullptr),
+      callGraph(ast.functionCount()),
       codeWalk(*this),
       exprWalk(*this),
       callWalk(*this),
@@ -182,7 +194,7 @@ std::string Analysis::lineText(const std::string &where) {
   return inOtherFile(where) ? where : "line " + where;
 }
 
-const std::vector<unsigned> &Analysis::actsOf(FunctionId function, int root) const {
+const std::vector<unsigned> &Analysis::actsOf(int function, int root) const {
   static const std::vector<unsigned> none;
   auto found = this->actsByTask.find({function, root});
 

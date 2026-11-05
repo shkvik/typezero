@@ -21,11 +21,11 @@ struct Pos {
 };
 
 struct AwaitInfo {
-  FunctionId fn = kModuleFunction;
+  int fn = 0;
 };
 
 struct JoinInfo {
-  FunctionId fn = kModuleFunction;
+  int fn = 0;
   Active segs;
 };
 

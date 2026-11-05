@@ -35,7 +35,8 @@ using llvm::isa;
 
 namespace tz::parallel {
 
-Conflicts::Conflicts(Analysis &analysis) : analysis_(analysis) {}
+Conflicts::Conflicts(Analysis &analysis)
+    : analysis_(analysis) {}
 
 bool Conflicts::concurrent(unsigned a, unsigned b) const {
   const PieceInst &pa = analysis_.pieceInstances[a], &pb = analysis_.pieceInstances[b];
@@ -134,7 +135,7 @@ void Conflicts::decide() {
   analysis_.pieceTouches.resize(analysis_.pieceInstances.size());
   for (unsigned i = 0; i < analysis_.pieceInstances.size(); ++i) {
     const PieceInst &p = analysis_.pieceInstances[i];
-    const FnInfo &f = analysis_.fns[p.fn];
+    const FnInfo &f = *analysis_.byFunction[p.fn];
     Effects effects;
     for (const Access &a : f.segs[p.seg].effects) {
       if (!analysis_.pieces.keeps(p, a)) {
@@ -254,35 +255,38 @@ void Conflicts::decide() {
 }
 
 bool Conflicts::reachers(const FunctionDecl *home, std::vector<unsigned> &out) const {
-  auto found = analysis_.fnIndex.find(home);
-  if (found == analysis_.fnIndex.end()) {
+  if (analysis_.byFunction[home->id] == nullptr) {
     return false;
   }
-  std::vector<bool> seen(analysis_.fns.size(), false);
-  std::deque<FunctionId> queue{found->second};
-  seen[unsigned(found->second)] = true;
-  auto add = [&](FunctionId fn, unsigned seg) {
+  std::vector<bool> seen(analysis_.byFunction.size(), false);
+  std::deque<int> queue{home->id};
+  seen[home->id] = true;
+  auto add = [&](int fn, unsigned seg) {
     auto it = analysis_.segPieces.find({fn, seg});
     if (it != analysis_.segPieces.end()) {
       out.insert(out.end(), it->second.begin(), it->second.end());
     }
   };
-  const FnInfo &own = analysis_.fns[found->second];
+  const FnInfo &own = *analysis_.byFunction[home->id];
   for (unsigned s = 0; s < own.segs.size(); ++s) {
     if (own.isInline(s)) {
-      add(found->second, s);
+      add(home->id, s);
     }
   }
   while (!queue.empty()) {
-    FunctionId g = queue.front();
+    int g = queue.front();
     queue.pop_front();
-    for (const auto &[caller, r] : analysis_.fns[g].callers) {
-      const FnInfo &f = analysis_.fns[caller];
-      for (unsigned s : f.calls[r].segs) {
-        add(caller, s);
-        if (f.isInline(s) && !seen[unsigned(caller)]) {
-          seen[unsigned(caller)] = true;
-          queue.push_back(caller);
+    for (int edgeIndex : analysis_.callGraph.incoming(g)) {
+      const CallEdge &call = analysis_.callGraph.edge(edgeIndex);
+      if (call.mode == Mode::Callback) {
+        continue;
+      }
+      const FnInfo &f = *analysis_.byFunction[call.from];
+      for (unsigned s : f.calls[call.call].segs) {
+        add(call.from, s);
+        if (f.isInline(s) && !seen[call.from]) {
+          seen[call.from] = true;
+          queue.push_back(call.from);
         }
       }
     }

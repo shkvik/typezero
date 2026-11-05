@@ -30,9 +30,10 @@ struct ParallelPlan {
   std::vector<const VarSymbol *> ownedParams;
 };
 
-ParallelPlan planParallel(const SourceFile &program, const llvm::SourceMgr &sources);
+ParallelPlan planParallel(const SourceFile &program, const llvm::SourceMgr &sources,
+                          const AstContext &ast);
 
 void explainParallel(const SourceFile &program, const llvm::SourceMgr &sources,
-                     llvm::raw_ostream &out);
+                     const AstContext &ast, llvm::raw_ostream &out);
 
 }

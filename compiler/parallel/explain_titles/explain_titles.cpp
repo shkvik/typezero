@@ -30,11 +30,12 @@
 
 namespace tz::parallel {
 
-ExplainTitles::ExplainTitles(Analysis &analysis) : analysis_(analysis) {}
+ExplainTitles::ExplainTitles(Analysis &analysis)
+    : analysis_(analysis) {}
 
 std::string ExplainTitles::fnName(const FnInfo &f) const {
   const FunctionDecl *fn = f.decl;
-  if (!fn) {
+  if (fn == analysis_.module) {
     return "the top-level code";
   }
   std::string name = fn->name.str();
@@ -79,7 +80,7 @@ std::string ExplainTitles::fnName(const FnInfo &f) const {
 
 std::string ExplainTitles::fnTitle(const FnInfo &f) const {
   const FunctionDecl *fn = f.decl;
-  if (!fn) {
+  if (fn == analysis_.module) {
     return "top-level code";
   }
   std::string kind = f.asyncGen ? "async generator" : f.async ? "async" : "";
@@ -147,7 +148,7 @@ std::string ExplainTitles::segTitle(const FnInfo &f, unsigned seg) const {
 std::string ExplainTitles::rootTitle(int r) const {
   if (analysis_.rootTitles.empty()) {
     auto key = [&](size_t i, const std::string &title) {
-      return title + "|" + std::to_string(unsigned(analysis_.roots[i].fn));
+      return title + "|" + std::to_string(analysis_.roots[i].fn);
     };
     std::map<std::string, std::set<std::string>> columns;
     for (size_t i = 0; i < analysis_.roots.size(); ++i) {
@@ -190,7 +191,7 @@ std::string ExplainTitles::rootTitleAt(int r, bool column) const {
   if (r == 0) {
     return "the top-level code";
   }
-  const CallRec &rec = analysis_.fns[root.callerFn].calls[root.rec];
+  const CallRec &rec = analysis_.byFunction[root.callerFn]->calls[root.rec];
   std::string place = analysis_.explainNames.where(rec.loc);
   if (column) {
     place += ":" + std::to_string(analysis_.sources.getLineAndColumn(rec.loc).second);
@@ -200,16 +201,16 @@ std::string ExplainTitles::rootTitleAt(int r, bool column) const {
     return (root.multi ? "the callbacks" : "the callback") + at;
   }
   if (rec.kind == CallKind::Inline) {
-    const FunctionDecl *fn = analysis_.fns[root.fn].decl;
-    std::string text =
-        (root.multi ? "the tasks of " : "the task of ") + fnName(analysis_.fns[root.fn]);
+    const FnInfo &target = *analysis_.byFunction[root.fn];
+    const FunctionDecl *fn = target.decl;
+    std::string text = (root.multi ? "the tasks of " : "the task of ") + fnName(target);
     if (fn && !fn->name.empty()) {
       text += at;
     }
     return text;
   }
-  std::string text =
-      rec.call ? analysis_.explainNames.callText(rec.call) : fnName(analysis_.fns[root.fn]) + "()";
+  std::string text = rec.call ? analysis_.explainNames.callText(rec.call)
+                              : fnName(*analysis_.byFunction[root.fn]) + "()";
 
   return (root.multi ? "the tasks " : "the task ") + text + at;
 }
@@ -226,7 +227,7 @@ std::string ExplainTitles::contextOf(unsigned piece) const {
 
 std::string ExplainTitles::pieceTitle(unsigned piece, bool withContext) const {
   const PieceInst &p = analysis_.pieceInstances[piece];
-  const FnInfo &f = analysis_.fns[p.fn];
+  const FnInfo &f = *analysis_.byFunction[p.fn];
   std::string text = p.seg != 0          ? fnName(f) + " " + segTitle(f, p.seg)
                      : f.segs.size() > 1 ? "the start of " + fnName(f)
                                          : fnName(f);

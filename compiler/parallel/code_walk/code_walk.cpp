@@ -34,33 +34,28 @@ using llvm::isa;
 
 namespace tz::parallel {
 
-CodeWalk::CodeWalk(Analysis &analysis) : analysis_(analysis) {}
+CodeWalk::CodeWalk(Analysis &analysis)
+    : analysis_(analysis) {}
 
-FunctionId CodeWalk::discover(const FunctionDecl *fn) {
-  auto [it, inserted] =
-      analysis_.fnIndex.try_emplace(fn, FunctionId{unsigned(analysis_.fns.size())});
-
-  if (!inserted) {
-    return it->second;
+int CodeWalk::discover(const FunctionDecl *fn) {
+  if (analysis_.byFunction[fn->id] != nullptr) {
+    return fn->id;
   }
-  FnInfo &info = analysis_.fns.add();
+  FnInfo &info = analysis_.records.emplace_back();
+  analysis_.byFunction[fn->id] = &info;
   info.decl = fn;
-  if (fn) {
-    info.async = fn->isAsync && !fn->isGenerator;
-    info.asyncGen = fn->isAsync && fn->isGenerator;
-    info.syncGen = !fn->isAsync && fn->isGenerator;
-    info.thisOwner = analysis_.thisOwnerOf(fn);
-    if (fn->cls) {
-      noteClass(fn->cls);
-    }
+  info.async = fn->isAsync && !fn->isGenerator;
+  info.asyncGen = fn->isAsync && fn->isGenerator;
+  info.syncGen = !fn->isAsync && fn->isGenerator;
+  info.thisOwner = analysis_.thisOwnerOf(fn);
+  if (fn->cls) {
+    noteClass(fn->cls);
   }
   info.segs.emplace_back();
-  if (fn) {
-    info.segs[0].loc = fn->loc();
-  }
-  analysis_.worklist.push_back(it->second);
+  info.segs[0].loc = fn->loc();
+  analysis_.worklist.push_back(fn->id);
 
-  return it->second;
+  return fn->id;
 }
 
 void CodeWalk::noteClass(const ClassDecl *cls) {
@@ -71,9 +66,9 @@ void CodeWalk::noteClass(const ClassDecl *cls) {
   }
 }
 
-void CodeWalk::walk(FunctionId fi) {
+void CodeWalk::walk(int fi) {
   analysis_.fi = fi;
-  analysis_.fn = &analysis_.fns[fi];
+  analysis_.fn = analysis_.byFunction[fi];
   analysis_.cur = {0};
   analysis_.targets.clear();
   analysis_.openJoins.clear();
@@ -81,7 +76,7 @@ void CodeWalk::walk(FunctionId fi) {
   analysis_.label = {};
   analysis_.anchors.clear();
   const FunctionDecl *decl = analysis_.fn->decl;
-  if (!decl) {
+  if (decl == analysis_.module) {
     for (const Stmt *item : analysis_.program.items) {
       if (!isa<FunctionDecl>(item) && !analysis_.libraryEffects.inLibrary(item->loc())) {
         anchored(item);
@@ -114,6 +109,8 @@ CallRec &CodeWalk::record(const void *key, CallKind kind, const Use &use, llvm::
                                                          unsigned(analysis_.fn->calls.size()));
   if (inserted) {
     CallRec &rec = analysis_.fn->calls.emplace_back();
+    rec.function = analysis_.fi;
+    rec.index = int(it->second);
     rec.kind = kind;
     rec.site = static_cast<const Node *>(key);
     rec.loc = loc;
@@ -321,7 +318,7 @@ void CodeWalk::stmt(const Stmt *s) {
     auto *r = cast<ReturnStmt>(s);
     Use use;
     use.returned = analysis_.fn->async;
-    if (!analysis_.fn->async && analysis_.fn->decl) {
+    if (!analysis_.fn->async) {
       use.join = analysis_.joinReturns.lookup(analysis_.fn->decl);
       use.tail = !analysis_.fn->syncGen && !analysis_.fn->asyncGen;
     }

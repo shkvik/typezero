@@ -37,13 +37,21 @@ bool isEmitterClass(llvm::StringRef cls) {
   return cls == "EventEmitter" || cls == "EventEmitterBase";
 }
 
-bool isTargetClass(llvm::StringRef cls) { return cls == "EventTarget"; }
+bool isTargetClass(llvm::StringRef cls) {
+  return cls == "EventTarget";
+}
 
-bool isPoolClass(llvm::StringRef cls) { return cls == "Pool"; }
+bool isPoolClass(llvm::StringRef cls) {
+  return cls == "Pool";
+}
 
-bool isLockedClass(llvm::StringRef cls) { return cls == "ConcurrentMap" || isPoolClass(cls); }
+bool isLockedClass(llvm::StringRef cls) {
+  return cls == "ConcurrentMap" || isPoolClass(cls);
+}
 
-bool isContextClass(llvm::StringRef cls) { return cls == "AsyncLocalStorage"; }
+bool isContextClass(llvm::StringRef cls) {
+  return cls == "AsyncLocalStorage";
+}
 
 bool readOnlyExpr(const Expr *e) {
   if (!e) {
@@ -106,7 +114,8 @@ bool readOnlyStmt(const Stmt *s) {
 
 }
 
-LibraryEffects::LibraryEffects(Analysis &analysis) : analysis_(analysis) {}
+LibraryEffects::LibraryEffects(Analysis &analysis)
+    : analysis_(analysis) {}
 
 bool LibraryEffects::inLibrary(llvm::SMLoc loc) const {
   const char *at = loc.getPointer();
@@ -148,8 +157,7 @@ void LibraryEffects::libraryCall(const CallExpr *c, const FunctionDecl *decl, co
   CallRec &rec = analysis_.codeWalk.record(c, CallKind::Call, use, at);
   rec.call = c;
   if (superCtor) {
-    for (const ClassDecl *k = analysis_.fn->decl ? analysis_.fn->decl->cls : nullptr; k;
-         k = k->parent) {
+    for (const ClassDecl *k = analysis_.fn->decl->cls; k; k = k->parent) {
       if (k->init) {
         analysis_.callWalk.addCallee(rec, k->init, self);
       }
@@ -311,7 +319,7 @@ void LibraryEffects::listen(const Expr *f, Channel channel) {
     decl = n->var->function ? n->var->function : n->var->lambda;
   }
   if (decl && decl->body && !analysis_.isLibrary(decl)) {
-    FunctionId fi = analysis_.codeWalk.discover(decl);
+    int fi = analysis_.codeWalk.discover(decl);
     if (!llvm::is_contained(analysis_.listeners[channel], fi)) {
       analysis_.listeners[channel].push_back(fi);
     }

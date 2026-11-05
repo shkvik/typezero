@@ -35,10 +35,11 @@ using llvm::isa;
 
 namespace tz::parallel {
 
-Pieces::Pieces(Analysis &analysis) : analysis_(analysis) {}
+Pieces::Pieces(Analysis &analysis)
+    : analysis_(analysis) {}
 
 bool Pieces::scheduled(const Activation &act, unsigned seg) const {
-  const FnInfo &f = analysis_.fns[act.fn];
+  const FnInfo &f = *analysis_.byFunction[act.fn];
   if (seg == 0) {
     return act.callbackStart;
   }
@@ -46,7 +47,7 @@ bool Pieces::scheduled(const Activation &act, unsigned seg) const {
   return f.segs[seg].kind == SegKind::Await || f.segs[seg].kind == SegKind::ForAwait;
 }
 
-unsigned Pieces::activate(FunctionId fn, int root, std::optional<Ref> self, bool callbackStart,
+unsigned Pieces::activate(int fn, int root, std::optional<Ref> self, bool callbackStart,
                           bool rootStart) {
   auto key = std::make_tuple(fn, root, self, callbackStart);
   auto [it, inserted] = analysis_.actIndex.try_emplace(key, unsigned(analysis_.acts.size()));
@@ -63,8 +64,8 @@ unsigned Pieces::activate(FunctionId fn, int root, std::optional<Ref> self, bool
   return it->second;
 }
 
-int Pieces::newRoot(int parent, FunctionId fn, std::optional<Ref> self, FunctionId callerFn,
-                    unsigned rec, Mode mode) {
+int Pieces::newRoot(int parent, int fn, std::optional<Ref> self, int callerFn, unsigned rec,
+                    Mode mode) {
   for (int p = parent; p >= 0; p = analysis_.roots[p].parent) {
     Root &up = analysis_.roots[p];
     if (up.fn == fn && up.self == self && up.callerFn == callerFn && up.rec == int(rec)) {
@@ -101,8 +102,8 @@ int Pieces::newRoot(int parent, FunctionId fn, std::optional<Ref> self, Function
 
 void Pieces::explore() {
   Root &main = analysis_.roots.emplace_back();
-  main.fn = kModuleFunction;
-  std::deque<unsigned> queue{activate(kModuleFunction, 0, std::nullopt, true, false)};
+  main.fn = analysis_.module->id;
+  std::deque<unsigned> queue{activate(analysis_.module->id, 0, std::nullopt, true, false)};
   llvm::DenseSet<unsigned> done;
   while (!queue.empty()) {
     unsigned ai = queue.front();
@@ -111,25 +112,26 @@ void Pieces::explore() {
       continue;
     }
     Activation act = analysis_.acts[ai];
-    const FnInfo &f = analysis_.fns[act.fn];
+    const FnInfo &f = *analysis_.byFunction[act.fn];
     for (unsigned r = 0; r < f.calls.size(); ++r) {
       const CallRec &rec = f.calls[r];
-      for (const Callee &c : rec.callees) {
+      for (int edgeIndex : rec.edges) {
+        const CallEdge &c = analysis_.callGraph.edge(edgeIndex);
         std::optional<Ref> self = analysis_.callResolver.bind(c.self, act);
         unsigned next;
         switch (c.mode) {
         case Mode::Sync:
         case Mode::Await:
         case Mode::AsyncIter:
-          next = activate(c.fn, act.root, self, false, false);
+          next = activate(c.to, act.root, self, false, false);
           analysis_.inlineEdges.push_back({ai, r, next});
           break;
         case Mode::Spawn:
-          next = activate(c.fn, newRoot(act.root, c.fn, self, act.fn, r, Mode::Spawn), self, false,
+          next = activate(c.to, newRoot(act.root, c.to, self, act.fn, r, Mode::Spawn), self, false,
                           true);
           break;
         case Mode::Callback:
-          next = activate(c.fn, newRoot(act.root, c.fn, self, act.fn, r, Mode::Callback), self,
+          next = activate(c.to, newRoot(act.root, c.to, self, act.fn, r, Mode::Callback), self,
                           true, false);
           break;
         }
@@ -153,12 +155,9 @@ void Pieces::findBindings() {
   while (changed) {
     changed = false;
     for (const auto &[from, r, to] : analysis_.edges) {
-      const FunctionDecl *decl = analysis_.fns[analysis_.acts[to].fn].decl;
-      const FunctionDecl *caller = analysis_.fns[analysis_.acts[from].fn].decl;
-      if (!decl) {
-        continue;
-      }
-      const CallRec &rec = analysis_.fns[analysis_.acts[from].fn].calls[r];
+      const FunctionDecl *decl = analysis_.byFunction[analysis_.acts[to].fn]->decl;
+      const FunctionDecl *caller = analysis_.byFunction[analysis_.acts[from].fn]->decl;
+      const CallRec &rec = analysis_.byFunction[analysis_.acts[from].fn]->calls[r];
       for (size_t i = 0; i < decl->params.size(); ++i) {
         const VarSymbol *param = decl->params[i].sym;
         if (!param || !param->type || !param->type->nonOptional()->isFunction()) {
@@ -188,9 +187,8 @@ void Pieces::findBindings() {
 }
 
 bool Pieces::keeps(const PieceInst &piece, const Access &a) const {
-  const FunctionDecl *decl = analysis_.fns[piece.fn].decl;
-  if (!a.bound || !decl ||
-      llvm::none_of(decl->params, [&](const Param &p) { return p.sym == a.bound; })) {
+  const FunctionDecl *decl = analysis_.byFunction[piece.fn]->decl;
+  if (!a.bound || llvm::none_of(decl->params, [&](const Param &p) { return p.sym == a.bound; })) {
     return true;
   }
   for (unsigned ai : analysis_.actsOf(piece.fn, piece.root)) {
@@ -215,7 +213,7 @@ void Pieces::findPieces() {
   analysis_.actPieces.assign(analysis_.acts.size(), {});
   for (unsigned ai = 0; ai < analysis_.acts.size(); ++ai) {
     const Activation &act = analysis_.acts[ai];
-    const FnInfo &f = analysis_.fns[act.fn];
+    const FnInfo &f = *analysis_.byFunction[act.fn];
     for (unsigned s = 0; s < f.segs.size(); ++s) {
       if (!scheduled(act, s)) {
         continue;
@@ -269,7 +267,7 @@ void Pieces::findHosts() {
     changed = false;
     for (const auto &[caller, r, callee] : analysis_.inlineEdges) {
       const Activation &from = analysis_.acts[caller];
-      const CallRec &rec = analysis_.fns[from.fn].calls[r];
+      const CallRec &rec = analysis_.byFunction[from.fn]->calls[r];
       std::vector<unsigned> at = piecesAt(from, rec.segs);
       Activation &to = analysis_.acts[callee];
       for (unsigned p : at) {
@@ -288,7 +286,7 @@ void Pieces::findHosts() {
   }
 }
 
-int Pieces::stepOf(FunctionId fn, llvm::SMLoc loc) {
+int Pieces::stepOf(int fn, llvm::SMLoc loc) {
   if (!loc.isValid()) {
     return -1;
   }
@@ -296,16 +294,16 @@ int Pieces::stepOf(FunctionId fn, llvm::SMLoc loc) {
   std::vector<Pos> &steps = it->second;
   const ExplainNames &names = analysis_.explainNames;
   if (inserted) {
-    const FunctionDecl *decl = analysis_.fns[fn].decl;
-    if (decl && decl->body) {
-      for (const Stmt *s : decl->body->body) {
-        steps.push_back(names.posOf(s->loc()));
-      }
-    } else if (!decl) {
+    const FunctionDecl *decl = analysis_.byFunction[fn]->decl;
+    if (decl == analysis_.module) {
       for (const Stmt *s : analysis_.program.items) {
         if (!isa<FunctionDecl>(s) && !analysis_.libraryEffects.inLibrary(s->loc())) {
           steps.push_back(names.posOf(s->loc()));
         }
+      }
+    } else if (decl->body) {
+      for (const Stmt *s : decl->body->body) {
+        steps.push_back(names.posOf(s->loc()));
       }
     }
     llvm::sort(steps);
@@ -319,7 +317,7 @@ int Pieces::stepOf(FunctionId fn, llvm::SMLoc loc) {
   return int(next - steps.begin()) - 1;
 }
 
-bool Pieces::later(FunctionId fn, llvm::SMLoc at, llvm::SMLoc origin) {
+bool Pieces::later(int fn, llvm::SMLoc at, llvm::SMLoc origin) {
   int from = stepOf(fn, at);
   int to = stepOf(fn, origin);
 
@@ -344,7 +342,7 @@ void Pieces::noteFlow(int root, unsigned from, unsigned to, llvm::SMLoc origin) 
 
 std::vector<unsigned> Pieces::piecesAt(const Activation &act, llvm::ArrayRef<unsigned> segs) const {
   std::vector<unsigned> out;
-  const FnInfo &f = analysis_.fns[act.fn];
+  const FnInfo &f = *analysis_.byFunction[act.fn];
   for (unsigned s : segs) {
     if (scheduled(act, s)) {
       auto it = analysis_.pieceIndex.find(std::make_tuple(act.fn, s, act.root, act.self));
@@ -365,15 +363,15 @@ std::vector<unsigned> Pieces::piecesAt(const Activation &act, llvm::ArrayRef<uns
   return out;
 }
 
-bool Pieces::once(FunctionId fi, unsigned rec, FunctionId rootFn, unsigned depth) {
-  if (analysis_.fns[fi].calls[rec].repeated) {
+bool Pieces::once(int fi, unsigned rec, int rootFn, unsigned depth) {
+  if (analysis_.byFunction[fi]->calls[rec].repeated) {
     return false;
   }
 
   return fnOnce(fi, rootFn, depth);
 }
 
-bool Pieces::fnOnce(FunctionId fi, FunctionId rootFn, unsigned depth) {
+bool Pieces::fnOnce(int fi, int rootFn, unsigned depth) {
   if (fi == rootFn) {
     return true;
   }
@@ -386,16 +384,13 @@ bool Pieces::fnOnce(FunctionId fi, FunctionId rootFn, unsigned depth) {
     return found->second;
   }
   analysis_.fnOnce[key] = false;
-  const FnInfo &f = analysis_.fns[fi];
+  const std::vector<int> &incoming = analysis_.callGraph.incoming(fi);
   bool result = false;
-  if (f.named.size() == 1) {
-    auto [cf, cr] = f.named[0];
-    const CallRec &rec = analysis_.fns[cf].calls[cr];
-    bool direct = llvm::any_of(rec.callees, [&](const Callee &c) {
-      return c.fn == fi && !c.byType &&
-             (c.mode == Mode::Sync || c.mode == Mode::Await || c.mode == Mode::AsyncIter);
-    });
-    result = direct && once(cf, cr, rootFn, depth + 1);
+  if (incoming.size() == 1) {
+    const CallEdge &call = analysis_.callGraph.edge(incoming[0]);
+    bool direct = !call.byType && (call.mode == Mode::Sync || call.mode == Mode::Await ||
+                                   call.mode == Mode::AsyncIter);
+    result = direct && once(call.from, unsigned(call.call), rootFn, depth + 1);
   }
 
   return analysis_.fnOnce[key] = result;
@@ -410,11 +405,11 @@ bool Pieces::rejectionEnds(const AwaitExpr *a, unsigned depth) {
   return fnRejectionEnds(found->second.fn, depth);
 }
 
-bool Pieces::fnRejectionEnds(FunctionId fi, unsigned depth) {
-  if (fi == kModuleFunction) {
+bool Pieces::fnRejectionEnds(int fi, unsigned depth) {
+  if (fi == analysis_.module->id) {
     return true;
   }
-  if (depth > 32 || analysis_.valueFns.contains(fi) || !analysis_.fns[fi].async) {
+  if (depth > 32 || analysis_.valueFns.contains(fi) || !analysis_.byFunction[fi]->async) {
     return false;
   }
   auto found = analysis_.rejectionEnds.find(fi);
@@ -423,29 +418,25 @@ bool Pieces::fnRejectionEnds(FunctionId fi, unsigned depth) {
   }
   analysis_.rejectionEnds[fi] = false;
   bool result = true;
-  for (const auto &[cf, cr] : analysis_.fns[fi].named) {
-    const CallRec &rec = analysis_.fns[cf].calls[cr];
-    for (const Callee &c : rec.callees) {
-      if (c.fn != fi) {
-        continue;
-      }
-      bool ends = false;
-      switch (c.mode) {
-      case Mode::Await:
-        ends = rec.await ? rejectionEnds(rec.await, depth + 1)
-                         : rec.returned && fnRejectionEnds(cf, depth + 1);
-        break;
-      case Mode::Spawn:
-        ends = rec.voided || (rec.join && rejectionEnds(rec.join, depth + 1));
-        break;
-      case Mode::Callback:
-        ends = !rec.handled;
-        break;
-      default:
-        break;
-      }
-      result &= ends && !c.byType;
+  for (int edgeIndex : analysis_.callGraph.incoming(fi)) {
+    const CallEdge &c = analysis_.callGraph.edge(edgeIndex);
+    const CallRec &rec = analysis_.byFunction[c.from]->calls[c.call];
+    bool ends = false;
+    switch (c.mode) {
+    case Mode::Await:
+      ends = rec.await ? rejectionEnds(rec.await, depth + 1)
+                       : rec.returned && fnRejectionEnds(c.from, depth + 1);
+      break;
+    case Mode::Spawn:
+      ends = rec.voided || (rec.join && rejectionEnds(rec.join, depth + 1));
+      break;
+    case Mode::Callback:
+      ends = !rec.handled;
+      break;
+    default:
+      break;
     }
+    result &= ends && !c.byType;
   }
 
   return analysis_.rejectionEnds[fi] = result;
@@ -457,15 +448,15 @@ void Pieces::findJoins() {
     if (root.rec < 0) {
       continue;
     }
-    const FnInfo &caller = analysis_.fns[root.callerFn];
+    const FnInfo &caller = *analysis_.byFunction[root.callerFn];
     const CallRec &rec = caller.calls[root.rec];
-    std::optional<FunctionId> parentFn;
+    std::optional<int> parentFn;
     if (root.parent >= 0) {
       parentFn = analysis_.roots[root.parent].fn;
     }
     root.multi |= rec.interval || !parentFn || !once(root.callerFn, root.rec, *parentFn, 0) ||
                   (size_t(root.parent) < i && analysis_.roots[root.parent].multi);
-    const FunctionDecl *callee = analysis_.fns[root.fn].decl;
+    const FunctionDecl *callee = analysis_.byFunction[root.fn]->decl;
     if (rec.kind == CallKind::Inline && rec.call && rec.call->builtin == Builtin::ArrMap &&
         callee && callee->params.size() > 1 && callee->params[1].sym &&
         analysis_.ownIndex.contains(callee->params[1].sym) && !rec.inLoop && parentFn &&
@@ -548,7 +539,7 @@ void Pieces::buildFlow() {
   analysis_.flowFrom.assign(analysis_.roots.size(), {});
   for (unsigned ai = 0; ai < analysis_.acts.size(); ++ai) {
     const Activation &act = analysis_.acts[ai];
-    const FnInfo &f = analysis_.fns[act.fn];
+    const FnInfo &f = *analysis_.byFunction[act.fn];
     for (const auto &[a, b] : f.succ) {
       for (unsigned x : piecesAt(act, {a})) {
         llvm::SMLoc origin;
@@ -570,7 +561,7 @@ void Pieces::buildFlow() {
     if (analysis_.acts[callee].root != x.root || analysis_.actPieces[callee].empty()) {
       continue;
     }
-    const FnInfo &f = analysis_.fns[x.fn];
+    const FnInfo &f = *analysis_.byFunction[x.fn];
     const CallRec &rec = f.calls[r];
     std::vector<unsigned> after;
     for (const auto &[a, b] : f.succ) {

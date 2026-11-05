@@ -21,10 +21,6 @@
 
 namespace tz::parallel {
 
-enum class FunctionId : unsigned {};
-
-inline constexpr FunctionId kModuleFunction = FunctionId{0};
-
 enum class RefKind : uint8_t {
   Local,
   This,
@@ -36,8 +32,12 @@ enum class RefKind : uint8_t {
 struct Ref {
   RefKind kind = RefKind::Type;
   const void *ptr = nullptr;
-  bool operator==(const Ref &o) const { return kind == o.kind && ptr == o.ptr; }
-  bool operator!=(const Ref &o) const { return !(*this == o); }
+  bool operator==(const Ref &o) const {
+    return kind == o.kind && ptr == o.ptr;
+  }
+  bool operator!=(const Ref &o) const {
+    return !(*this == o);
+  }
   bool operator<(const Ref &o) const {
     return kind != o.kind ? kind < o.kind : std::less<const void *>()(ptr, o.ptr);
   }
@@ -172,21 +172,24 @@ enum class Mode : uint8_t {
   AsyncIter,
 };
 
-struct Callee {
-  FunctionId fn = kModuleFunction;
+struct CallEdge {
+  int from = 0;
+  int call = 0;
+  int to = 0;
   std::optional<Ref> self;
   Mode mode = Mode::Sync;
   bool byType = false;
-  bool operator==(const Callee &o) const { return fn == o.fn && self == o.self && mode == o.mode; }
 };
 
 struct CallRec {
+  int function = 0;
+  int index = 0;
   CallKind kind = CallKind::Call;
   const Node *site = nullptr;
   const CallExpr *call = nullptr;
   llvm::SMLoc loc;
   Active segs;
-  std::vector<Callee> callees;
+  std::vector<int> edges;
   const Type *byType = nullptr;
   llvm::StringRef byName;
   const Type *byObject = nullptr;
@@ -218,25 +221,27 @@ struct FnInfo {
   llvm::DenseMap<const Node *, unsigned> segOf;
   llvm::DenseMap<std::pair<const void *, unsigned>, unsigned> callOf;
   Effects inlineEffects;
-  std::vector<std::pair<FunctionId, unsigned>> callers;
-  std::vector<std::pair<FunctionId, unsigned>> named;
   std::set<std::pair<unsigned, unsigned>> succ;
-  bool isInline(unsigned seg) const { return seg == 0 || segs[seg].kind == SegKind::Yield; }
+  bool isInline(unsigned seg) const {
+    return seg == 0 || segs[seg].kind == SegKind::Yield;
+  }
 };
 
-class FunctionTable {
+class CallGraph {
 public:
-  FnInfo &operator[](FunctionId id);
-  const FnInfo &operator[](FunctionId id) const;
-  FnInfo &add();
-  size_t size() const;
-  std::deque<FnInfo>::iterator begin();
-  std::deque<FnInfo>::iterator end();
-  std::deque<FnInfo>::const_iterator begin() const;
-  std::deque<FnInfo>::const_iterator end() const;
+  explicit CallGraph(int functionCount);
+  int add(const CallEdge &edge);
+  CallEdge &edge(int index);
+  const CallEdge &edge(int index) const;
+  const std::vector<int> &outgoing(int function) const;
+  const std::vector<int> &incoming(int function) const;
+  std::vector<CallEdge>::iterator begin();
+  std::vector<CallEdge>::iterator end();
 
 private:
-  std::deque<FnInfo> items;
+  std::vector<CallEdge> edges;
+  std::vector<std::vector<int>> outgoingEdges;
+  std::vector<std::vector<int>> incomingEdges;
 };
 
 struct Use {
@@ -249,7 +254,7 @@ struct Use {
 };
 
 struct Activation {
-  FunctionId fn = kModuleFunction;
+  int fn = 0;
   int root = 0;
   std::optional<Ref> self;
   bool callbackStart = false;
@@ -258,10 +263,10 @@ struct Activation {
 };
 
 struct Root {
-  FunctionId fn = kModuleFunction;
+  int fn = 0;
   std::optional<Ref> self;
   int parent = -1;
-  FunctionId callerFn = kModuleFunction;
+  int callerFn = 0;
   int rec = -1;
   Mode mode = Mode::Callback;
   bool multi = false;
@@ -274,7 +279,7 @@ struct Root {
 };
 
 struct PieceInst {
-  FunctionId fn = kModuleFunction;
+  int fn = 0;
   unsigned seg = 0;
   int root = 0;
   std::optional<Ref> self;

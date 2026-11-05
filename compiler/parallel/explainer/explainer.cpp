@@ -31,7 +31,8 @@
 
 namespace tz::parallel {
 
-Explainer::Explainer(Analysis &analysis) : analysis_(analysis) {}
+Explainer::Explainer(Analysis &analysis)
+    : analysis_(analysis) {}
 
 std::vector<std::string> Explainer::decisionLines(unsigned piece) const {
   const Decision &d = analysis_.decisions[piece];
@@ -94,32 +95,35 @@ void Explainer::print(llvm::raw_ostream &out) {
     out << "no async code: the program runs as one piece\n";
     return;
   }
-  std::vector<FunctionId> order;
-  std::vector<bool> shown(analysis_.fns.size(), false);
+  std::vector<const FnInfo *> order;
+  std::vector<bool> shown(analysis_.byFunction.size(), false);
   for (const PieceInst &p : analysis_.pieceInstances) {
-    shown[unsigned(p.fn)] = true;
+    shown[p.fn] = true;
   }
   for (const Activation &act : analysis_.acts) {
-    if (analysis_.fns[act.fn].async || analysis_.fns[act.fn].asyncGen) {
-      shown[unsigned(act.fn)] = true;
+    const FnInfo &f = *analysis_.byFunction[act.fn];
+    if (f.async || f.asyncGen) {
+      shown[act.fn] = true;
     }
   }
-  for (unsigned i = 0; i < analysis_.fns.size(); ++i) {
-    if (shown[i]) {
-      order.push_back(FunctionId{i});
+  for (const FnInfo &f : analysis_.records) {
+    if (shown[f.decl->id]) {
+      order.push_back(&f);
     }
   }
-  std::stable_sort(order.begin(), order.end(), [&](FunctionId a, FunctionId b) {
-    if (!analysis_.fns[a].decl || !analysis_.fns[b].decl) {
-      return !analysis_.fns[a].decl && analysis_.fns[b].decl;
+  std::stable_sort(order.begin(), order.end(), [&](const FnInfo *a, const FnInfo *b) {
+    bool aModule = a->decl == analysis_.module;
+    bool bModule = b->decl == analysis_.module;
+    if (aModule || bModule) {
+      return aModule && !bModule;
     }
 
-    return analysis_.explainNames.posOf(analysis_.fns[a].decl->loc()) <
-           analysis_.explainNames.posOf(analysis_.fns[b].decl->loc());
+    return analysis_.explainNames.posOf(a->decl->loc()) <
+           analysis_.explainNames.posOf(b->decl->loc());
   });
   bool first = true;
-  for (FunctionId fi : order) {
-    const FnInfo &f = analysis_.fns[fi];
+  for (const FnInfo *function : order) {
+    const FnInfo &f = *function;
     if (!first) {
       out << "\n";
     }
@@ -139,7 +143,8 @@ void Explainer::print(llvm::raw_ostream &out) {
     });
     for (unsigned s : segs) {
       std::vector<unsigned> mine;
-      if (auto found = analysis_.segPieces.find({fi, s}); found != analysis_.segPieces.end()) {
+      if (auto found = analysis_.segPieces.find({f.decl->id, s});
+          found != analysis_.segPieces.end()) {
         mine = found->second;
       }
       std::vector<std::pair<std::string, unsigned>> byContext;

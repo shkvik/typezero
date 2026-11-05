@@ -18,10 +18,15 @@ struct NestedGroup;
 class Type;
 
 struct FunctionDecl : Stmt {
-  FunctionDecl(llvm::SMLoc loc, llvm::StringRef name) : Stmt(Kind::Function, loc), name(name) {}
-  static bool classof(const Stmt *s) { return s->kind() == Kind::Function; }
+  FunctionDecl(llvm::SMLoc loc, llvm::StringRef name)
+      : Stmt(Kind::Function, loc),
+        name(name) {}
+  static bool classof(const Stmt *s) {
+    return s->kind() == Kind::Function;
+  }
 
   llvm::StringRef name;
+  int id = -1;
   std::vector<TypeParamDecl> typeParams;
   std::vector<const Type *> typeArgs;
   bool isInstance = false;
@@ -48,7 +53,9 @@ struct FunctionDecl : Stmt {
   unsigned creationSeq = 0;
   bool nonEscaping = false;
   const VarSymbol *receiverEnv = nullptr;
-  bool isClosure() const { return parent || isExpression || group; }
+  bool isClosure() const {
+    return parent || isExpression || group;
+  }
 
   ClassDecl *cls = nullptr;
   bool isStatic = false;
@@ -56,7 +63,9 @@ struct FunctionDecl : Stmt {
   Access access = Access::Public;
   VarSymbol *thisVar = nullptr;
   unsigned variant = 0;
-  bool takesThis() const { return cls && !isStatic; }
+  bool takesThis() const {
+    return cls && !isStatic;
+  }
   bool isAbstract = false;
   bool isOverride = false;
   FunctionDecl *overrides = nullptr;

@@ -11,7 +11,8 @@
 
 namespace tz {
 
-ExplainCommand::ExplainCommand(const RuntimeFiles &runtime) : runtime_(runtime) {}
+ExplainCommand::ExplainCommand(const RuntimeFiles &runtime)
+    : runtime_(runtime) {}
 
 int ExplainCommand::run(const Args &args) const {
   ProjectPackages packages;
@@ -27,7 +28,7 @@ int ExplainCommand::run(const Args &args) const {
   if (checkErrors) {
     return kExitError;
   }
-  explainParallel(program.file, program.sourceMgr, llvm::outs());
+  explainParallel(program.file, program.sourceMgr, *program.asts.back(), llvm::outs());
 
   return 0;
 }

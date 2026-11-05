@@ -18,6 +18,7 @@
 #include "compiler/parallel/parallel_model/parallel_model.h"
 #include "compiler/parallel/pieces/pieces.h"
 #include "compiler/program/ast/ast.h"
+#include "compiler/program/ast/ast_context/ast_context.h"
 #include "compiler/program/source_file/source_file.h"
 #include "compiler/program/types/types.h"
 #include "llvm/ADT/DenseMap.h"
@@ -40,7 +41,8 @@ namespace tz::parallel {
 
 class Analysis {
 public:
-  Analysis(const SourceFile &sourceFile, const llvm::SourceMgr &sourceManager);
+  Analysis(const SourceFile &sourceFile, const llvm::SourceMgr &sourceManager,
+           const AstContext &ast);
   Analysis(const Analysis &) = delete;
   Analysis &operator=(const Analysis &) = delete;
   void run();
@@ -48,6 +50,7 @@ public:
   void explain(llvm::raw_ostream &out);
 
 private:
+  const FunctionDecl *planFunction(int function) const;
   bool isLibrary(const FunctionDecl *function) const;
   void resource(Res res, bool write, llvm::SMLoc at);
   const char *intern(llvm::StringRef name);
@@ -60,9 +63,11 @@ private:
   static std::string lineText(const std::string &where);
   const SourceFile &program;
   const llvm::SourceMgr &sources;
-  FunctionTable fns;
-  llvm::DenseMap<const FunctionDecl *, FunctionId> fnIndex;
-  std::deque<FunctionId> worklist;
+  const FunctionDecl *module;
+  std::vector<FnInfo *> byFunction;
+  std::deque<FnInfo> records;
+  CallGraph callGraph;
+  std::deque<int> worklist;
   llvm::StringSet<> names;
   const char *star = nullptr;
   const char *length = nullptr;
@@ -71,12 +76,12 @@ private:
   const char *listenersKey = nullptr;
   llvm::DenseMap<const VarSymbol *, const Expr *> declInit;
   llvm::DenseMap<const Expr *, llvm::StringRef> siteName;
-  std::map<const Type *, std::vector<FunctionId>> values;
-  llvm::DenseSet<FunctionId> valueFns;
-  llvm::DenseSet<FunctionId> unknownFns;
+  std::map<const Type *, std::vector<int>> values;
+  llvm::DenseSet<int> valueFns;
+  llvm::DenseSet<int> unknownFns;
   bool unknownAnyFn = false;
   std::vector<std::pair<const char *, const char *>> libRanges;
-  std::vector<FunctionId> listeners[ChannelCount];
+  std::vector<int> listeners[ChannelCount];
   std::vector<const Type *> listenerTypes[ChannelCount];
   llvm::DenseSet<const VarSymbol *> resolvers;
   llvm::DenseSet<const VarSymbol *> ownIndex;
@@ -97,9 +102,9 @@ private:
   llvm::DenseMap<const ClassDecl *, bool> leaks;
   std::map<std::pair<const Type *, const Type *>, bool> alias;
   std::map<const Type *, std::vector<const Type *>> reach;
-  std::map<std::pair<FunctionId, FunctionId>, bool> fnOnce;
-  std::map<FunctionId, bool> rejectionEnds;
-  FunctionId fi = kModuleFunction;
+  std::map<std::pair<int, int>, bool> fnOnce;
+  std::map<int, bool> rejectionEnds;
+  int fi = 0;
   FnInfo *fn = nullptr;
   Active cur;
   std::vector<Target> targets;
@@ -109,24 +114,24 @@ private:
   llvm::DenseSet<const char *> partedAnchors;
   std::vector<OpenJoin> openJoins;
   std::vector<Activation> acts;
-  std::map<std::tuple<FunctionId, int, std::optional<Ref>, bool>, unsigned> actIndex;
+  std::map<std::tuple<int, int, std::optional<Ref>, bool>, unsigned> actIndex;
   std::vector<std::tuple<unsigned, unsigned, unsigned>> inlineEdges;
   std::vector<std::tuple<unsigned, unsigned, unsigned>> edges;
   std::vector<std::map<const VarSymbol *, std::set<const FunctionDecl *>>> bindings;
   std::vector<bool> reached;
   std::vector<Root> roots;
   std::vector<PieceInst> pieceInstances;
-  std::map<std::tuple<FunctionId, unsigned, int, std::optional<Ref>>, unsigned> pieceIndex;
+  std::map<std::tuple<int, unsigned, int, std::optional<Ref>>, unsigned> pieceIndex;
   std::vector<std::vector<unsigned>> actPieces;
-  std::map<std::pair<FunctionId, int>, std::vector<unsigned>> actsByTask;
-  const std::vector<unsigned> &actsOf(FunctionId function, int root) const;
-  std::map<std::tuple<int, FunctionId, std::optional<Ref>, FunctionId, unsigned>, int> rootIndex;
-  std::map<std::pair<FunctionId, unsigned>, std::vector<unsigned>> segPieces;
-  std::map<std::tuple<FunctionId, unsigned, int>, unsigned> sameTask;
+  std::map<std::pair<int, int>, std::vector<unsigned>> actsByTask;
+  const std::vector<unsigned> &actsOf(int function, int root) const;
+  std::map<std::tuple<int, int, std::optional<Ref>, int, unsigned>, int> rootIndex;
+  std::map<std::pair<int, unsigned>, std::vector<unsigned>> segPieces;
+  std::map<std::tuple<int, unsigned, int>, unsigned> sameTask;
   std::vector<std::map<unsigned, std::vector<unsigned>>> flow;
   std::map<std::pair<unsigned, unsigned>, Entry> entries;
   std::vector<std::map<std::pair<unsigned, unsigned>, llvm::SMLoc>> flowFrom;
-  std::map<FunctionId, std::vector<Pos>> steps;
+  std::map<int, std::vector<Pos>> steps;
   std::vector<std::vector<Touch>> pieceTouches;
   std::vector<Decision> decisions;
   mutable std::vector<std::string> rootTitles;

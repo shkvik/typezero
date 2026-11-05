@@ -13,8 +13,8 @@ class CodeWalk {
 public:
   explicit CodeWalk(Analysis &analysis);
 
-  FunctionId discover(const FunctionDecl *fn);
-  void walk(FunctionId fi);
+  int discover(const FunctionDecl *fn);
+  void walk(int fi);
   void stmt(const Stmt *s);
   void anchored(const Stmt *s);
   void declarator(const VarDeclarator &d);

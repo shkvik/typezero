@@ -25,8 +25,8 @@ public:
   static bool valueArgument(const Expr *e);
   std::optional<Ref> ownedRef(const Expr *e);
   void decide();
-  std::optional<Ref> substituted(Ref r, const FnInfo &callee, FunctionId caller, const CallRec &rec,
-                                 const Callee &call);
+  std::optional<Ref> substituted(Ref r, const FnInfo &callee, int caller, const CallRec &rec,
+                                 const CallEdge &call);
   void rewrite();
   bool confined(const FunctionDecl *fn) const;
   bool confinedVar(const VarSymbol *v) const;
@@ -34,14 +34,10 @@ public:
 private:
   using Roots = llvm::SmallVector<const VarSymbol *, 2>;
   using Needs = std::vector<FieldKey>;
-  struct Site {
-    FunctionId fn = kModuleFunction;
-    unsigned rec = 0;
-  };
   struct Store {
     const Type *type = nullptr;
     const Expr *value = nullptr;
-    FunctionId fn = kModuleFunction;
+    int fn = 0;
     const VarSymbol *holder = nullptr;
     const ClassDecl *built = nullptr;
   };
@@ -55,7 +51,7 @@ private:
   const CallRec *recOf(const void *site) const;
   bool passesOwnedSelf(const CallExpr *c);
   bool passesOwnedNew(const NewExpr *n, size_t index);
-  bool selfOwned(FunctionId fi, const CallRec &rec, const Callee &callee, bool strict);
+  bool selfOwned(int fi, const CallRec &rec, const CallEdge &callee, bool strict);
   bool candidate(const FunctionDecl *fn, const VarSymbol *v) const;
   static bool tracked(const FunctionDecl *fn, const VarSymbol *v);
   bool freshCandidate(const FunctionDecl *fn, const VarSymbol *v) const;
@@ -90,33 +86,33 @@ private:
   void dirty(const Expr *object, llvm::StringRef field);
   void dirtyAll(const Expr *e);
   bool thisFirst(const CallRec &rec) const;
-  bool tailAwaited(FunctionId fi);
-  bool handsOver(FunctionId fi, const CallRec &rec, Mode mode, bool strict);
-  int argOf(FunctionId fi, const CallRec &rec, const Callee &callee, size_t param, bool strict);
+  bool tailAwaited(int fi);
+  bool handsOver(int fi, const CallRec &rec, Mode mode, bool strict);
+  int argOf(int fi, const CallRec &rec, const CallEdge &callee, size_t param, bool strict);
   bool passesOwned(const CallExpr *c, size_t index);
   bool reflectKeepsArgs(const CallExpr *c, bool self);
-  bool callersOwned(FunctionId fi, size_t index, bool strict);
+  bool callersOwned(int fi, size_t index, bool strict);
   bool poolFresh(const Type *item) const;
-  bool callFresh(FunctionId fi, const CallExpr *c) const;
-  bool valueOwn(FunctionId fi, const Expr *e, bool params, unsigned depth);
+  bool callFresh(int fi, const CallExpr *c) const;
+  bool valueOwn(int fi, const Expr *e, bool params, unsigned depth);
   bool fieldOpen(const FieldKey &key);
   bool fieldOwn(const FieldKey &key);
   bool needsOwn(const Needs &needs);
   bool own(const OwnedRef *owned);
   Ref interned(const VarSymbol *root, const Type *type, Needs needs, bool whole);
-  void scan(FunctionId fi);
+  void scan(int fi);
   void decideOnce();
   struct SelfStore {
     const VarSymbol *self = nullptr;
     const Expr *value = nullptr;
-    FunctionId fi = kModuleFunction;
+    int fi = 0;
     Needs needs;
   };
   std::vector<SelfStore> selfStores_;
   llvm::DenseSet<const VarSymbol *> forced_;
   Analysis &analysis_;
   const FunctionDecl *fn_ = nullptr;
-  FunctionId fi_ = kModuleFunction;
+  int fi_ = 0;
   bool collecting_ = false;
   const Expr *heldLiteral_ = nullptr;
   const VarSymbol *holder_ = nullptr;
@@ -125,9 +121,8 @@ private:
   llvm::DenseSet<const VarSymbol *> leaking_;
   llvm::DenseSet<const VarSymbol *> owned_;
   llvm::DenseMap<const VarSymbol *, std::pair<const FunctionDecl *, unsigned>> paramOf_;
-  llvm::DenseMap<const VarSymbol *, FunctionId> freshOf_;
+  llvm::DenseMap<const VarSymbol *, int> freshOf_;
   llvm::DenseMap<const VarSymbol *, const Expr *> loopInit_;
-  std::vector<std::vector<Site>> sites_;
   std::vector<std::vector<const Expr *>> returns_;
   std::map<const char *, std::vector<Store>> stores_;
   std::map<const char *, std::vector<const Type *>> dirty_;
@@ -136,7 +131,7 @@ private:
   std::set<FieldKey> evaluated_;
   std::set<FieldKey> notOwn_;
   bool deciding_ = false;
-  llvm::DenseSet<FunctionId> fresh_;
+  llvm::DenseSet<int> fresh_;
   std::vector<int8_t> tail_;
   std::optional<llvm::DenseSet<const Type *>> containers_;
 };

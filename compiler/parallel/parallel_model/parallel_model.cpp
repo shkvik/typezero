@@ -32,20 +32,41 @@ void merge(Active &into, llvm::ArrayRef<unsigned> from) {
   }
 }
 
-FnInfo &FunctionTable::operator[](FunctionId id) { return this->items[unsigned(id)]; }
+CallGraph::CallGraph(int functionCount)
+    : outgoingEdges(functionCount),
+      incomingEdges(functionCount) {}
 
-const FnInfo &FunctionTable::operator[](FunctionId id) const { return this->items[unsigned(id)]; }
+int CallGraph::add(const CallEdge &edge) {
+  int index = int(this->edges.size());
+  this->edges.push_back(edge);
+  this->outgoingEdges[edge.from].push_back(index);
+  this->incomingEdges[edge.to].push_back(index);
 
-FnInfo &FunctionTable::add() { return this->items.emplace_back(); }
+  return index;
+}
 
-size_t FunctionTable::size() const { return this->items.size(); }
+CallEdge &CallGraph::edge(int index) {
+  return this->edges[index];
+}
 
-std::deque<FnInfo>::iterator FunctionTable::begin() { return this->items.begin(); }
+const CallEdge &CallGraph::edge(int index) const {
+  return this->edges[index];
+}
 
-std::deque<FnInfo>::iterator FunctionTable::end() { return this->items.end(); }
+const std::vector<int> &CallGraph::outgoing(int function) const {
+  return this->outgoingEdges[function];
+}
 
-std::deque<FnInfo>::const_iterator FunctionTable::begin() const { return this->items.begin(); }
+const std::vector<int> &CallGraph::incoming(int function) const {
+  return this->incomingEdges[function];
+}
 
-std::deque<FnInfo>::const_iterator FunctionTable::end() const { return this->items.end(); }
+std::vector<CallEdge>::iterator CallGraph::begin() {
+  return this->edges.begin();
+}
+
+std::vector<CallEdge>::iterator CallGraph::end() {
+  return this->edges.end();
+}
 
 }
