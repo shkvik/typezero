@@ -259,9 +259,9 @@ bool Conflicts::reachers(const FunctionDecl *home, std::vector<unsigned> &out) c
     return false;
   }
   std::vector<bool> seen(analysis_.fns.size(), false);
-  std::deque<unsigned> queue{found->second};
-  seen[found->second] = true;
-  auto add = [&](unsigned fn, unsigned seg) {
+  std::deque<FunctionId> queue{found->second};
+  seen[unsigned(found->second)] = true;
+  auto add = [&](FunctionId fn, unsigned seg) {
     auto it = analysis_.segPieces.find({fn, seg});
     if (it != analysis_.segPieces.end()) {
       out.insert(out.end(), it->second.begin(), it->second.end());
@@ -274,14 +274,14 @@ bool Conflicts::reachers(const FunctionDecl *home, std::vector<unsigned> &out) c
     }
   }
   while (!queue.empty()) {
-    unsigned g = queue.front();
+    FunctionId g = queue.front();
     queue.pop_front();
     for (const auto &[caller, r] : analysis_.fns[g].callers) {
       const FnInfo &f = analysis_.fns[caller];
       for (unsigned s : f.calls[r].segs) {
         add(caller, s);
-        if (f.isInline(s) && !seen[caller]) {
-          seen[caller] = true;
+        if (f.isInline(s) && !seen[unsigned(caller)]) {
+          seen[unsigned(caller)] = true;
           queue.push_back(caller);
         }
       }

@@ -46,7 +46,7 @@ bool Pieces::scheduled(const Activation &act, unsigned seg) const {
   return f.segs[seg].kind == SegKind::Await || f.segs[seg].kind == SegKind::ForAwait;
 }
 
-unsigned Pieces::activate(unsigned fn, int root, std::optional<Ref> self, bool callbackStart,
+unsigned Pieces::activate(FunctionId fn, int root, std::optional<Ref> self, bool callbackStart,
                           bool rootStart) {
   auto key = std::make_tuple(fn, root, self, callbackStart);
   auto [it, inserted] = analysis_.actIndex.try_emplace(key, unsigned(analysis_.acts.size()));
@@ -63,7 +63,7 @@ unsigned Pieces::activate(unsigned fn, int root, std::optional<Ref> self, bool c
   return it->second;
 }
 
-int Pieces::newRoot(int parent, unsigned fn, std::optional<Ref> self, unsigned callerFn,
+int Pieces::newRoot(int parent, FunctionId fn, std::optional<Ref> self, FunctionId callerFn,
                     unsigned rec, Mode mode) {
   for (int p = parent; p >= 0; p = analysis_.roots[p].parent) {
     Root &up = analysis_.roots[p];
@@ -101,8 +101,8 @@ int Pieces::newRoot(int parent, unsigned fn, std::optional<Ref> self, unsigned c
 
 void Pieces::explore() {
   Root &main = analysis_.roots.emplace_back();
-  main.fn = 0;
-  std::deque<unsigned> queue{activate(0, 0, std::nullopt, true, false)};
+  main.fn = kModuleFunction;
+  std::deque<unsigned> queue{activate(kModuleFunction, 0, std::nullopt, true, false)};
   llvm::DenseSet<unsigned> done;
   while (!queue.empty()) {
     unsigned ai = queue.front();
@@ -288,7 +288,7 @@ void Pieces::findHosts() {
   }
 }
 
-int Pieces::stepOf(unsigned fn, llvm::SMLoc loc) {
+int Pieces::stepOf(FunctionId fn, llvm::SMLoc loc) {
   if (!loc.isValid()) {
     return -1;
   }
@@ -319,7 +319,7 @@ int Pieces::stepOf(unsigned fn, llvm::SMLoc loc) {
   return int(next - steps.begin()) - 1;
 }
 
-bool Pieces::later(unsigned fn, llvm::SMLoc at, llvm::SMLoc origin) {
+bool Pieces::later(FunctionId fn, llvm::SMLoc at, llvm::SMLoc origin) {
   int from = stepOf(fn, at);
   int to = stepOf(fn, origin);
 
@@ -365,7 +365,7 @@ std::vector<unsigned> Pieces::piecesAt(const Activation &act, llvm::ArrayRef<uns
   return out;
 }
 
-bool Pieces::once(unsigned fi, unsigned rec, unsigned rootFn, unsigned depth) {
+bool Pieces::once(FunctionId fi, unsigned rec, FunctionId rootFn, unsigned depth) {
   if (analysis_.fns[fi].calls[rec].repeated) {
     return false;
   }
@@ -373,7 +373,7 @@ bool Pieces::once(unsigned fi, unsigned rec, unsigned rootFn, unsigned depth) {
   return fnOnce(fi, rootFn, depth);
 }
 
-bool Pieces::fnOnce(unsigned fi, unsigned rootFn, unsigned depth) {
+bool Pieces::fnOnce(FunctionId fi, FunctionId rootFn, unsigned depth) {
   if (fi == rootFn) {
     return true;
   }
@@ -410,8 +410,8 @@ bool Pieces::rejectionEnds(const AwaitExpr *a, unsigned depth) {
   return fnRejectionEnds(found->second.fn, depth);
 }
 
-bool Pieces::fnRejectionEnds(unsigned fi, unsigned depth) {
-  if (fi == 0) {
+bool Pieces::fnRejectionEnds(FunctionId fi, unsigned depth) {
+  if (fi == kModuleFunction) {
     return true;
   }
   if (depth > 32 || analysis_.valueFns.contains(fi) || !analysis_.fns[fi].async) {
@@ -459,14 +459,17 @@ void Pieces::findJoins() {
     }
     const FnInfo &caller = analysis_.fns[root.callerFn];
     const CallRec &rec = caller.calls[root.rec];
-    int parentFn = root.parent >= 0 ? int(analysis_.roots[root.parent].fn) : -1;
-    root.multi |= rec.interval || parentFn < 0 || !once(root.callerFn, root.rec, parentFn, 0) ||
+    std::optional<FunctionId> parentFn;
+    if (root.parent >= 0) {
+      parentFn = analysis_.roots[root.parent].fn;
+    }
+    root.multi |= rec.interval || !parentFn || !once(root.callerFn, root.rec, *parentFn, 0) ||
                   (size_t(root.parent) < i && analysis_.roots[root.parent].multi);
     const FunctionDecl *callee = analysis_.fns[root.fn].decl;
     if (rec.kind == CallKind::Inline && rec.call && rec.call->builtin == Builtin::ArrMap &&
         callee && callee->params.size() > 1 && callee->params[1].sym &&
-        analysis_.ownIndex.contains(callee->params[1].sym) && !rec.inLoop && parentFn >= 0 &&
-        fnOnce(root.callerFn, unsigned(parentFn), 0)) {
+        analysis_.ownIndex.contains(callee->params[1].sym) && !rec.inLoop && parentFn &&
+        fnOnce(root.callerFn, *parentFn, 0)) {
       bool single = true;
       for (int p = root.parent; p >= 0; p = analysis_.roots[p].parent) {
         single &= !analysis_.roots[p].multi;

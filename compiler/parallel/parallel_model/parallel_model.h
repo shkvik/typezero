@@ -21,6 +21,10 @@
 
 namespace tz::parallel {
 
+enum class FunctionId : unsigned {};
+
+inline constexpr FunctionId kModuleFunction = FunctionId{0};
+
 enum class RefKind : uint8_t {
   Local,
   This,
@@ -169,7 +173,7 @@ enum class Mode : uint8_t {
 };
 
 struct Callee {
-  unsigned fn = 0;
+  FunctionId fn = kModuleFunction;
   std::optional<Ref> self;
   Mode mode = Mode::Sync;
   bool byType = false;
@@ -214,10 +218,25 @@ struct FnInfo {
   llvm::DenseMap<const Node *, unsigned> segOf;
   llvm::DenseMap<std::pair<const void *, unsigned>, unsigned> callOf;
   Effects inlineEffects;
-  std::vector<std::pair<unsigned, unsigned>> callers;
-  std::vector<std::pair<unsigned, unsigned>> named;
+  std::vector<std::pair<FunctionId, unsigned>> callers;
+  std::vector<std::pair<FunctionId, unsigned>> named;
   std::set<std::pair<unsigned, unsigned>> succ;
   bool isInline(unsigned seg) const { return seg == 0 || segs[seg].kind == SegKind::Yield; }
+};
+
+class FunctionTable {
+public:
+  FnInfo &operator[](FunctionId id);
+  const FnInfo &operator[](FunctionId id) const;
+  FnInfo &add();
+  size_t size() const;
+  std::deque<FnInfo>::iterator begin();
+  std::deque<FnInfo>::iterator end();
+  std::deque<FnInfo>::const_iterator begin() const;
+  std::deque<FnInfo>::const_iterator end() const;
+
+private:
+  std::deque<FnInfo> items;
 };
 
 struct Use {
@@ -230,7 +249,7 @@ struct Use {
 };
 
 struct Activation {
-  unsigned fn = 0;
+  FunctionId fn = kModuleFunction;
   int root = 0;
   std::optional<Ref> self;
   bool callbackStart = false;
@@ -239,10 +258,10 @@ struct Activation {
 };
 
 struct Root {
-  unsigned fn = 0;
+  FunctionId fn = kModuleFunction;
   std::optional<Ref> self;
   int parent = -1;
-  unsigned callerFn = 0;
+  FunctionId callerFn = kModuleFunction;
   int rec = -1;
   Mode mode = Mode::Callback;
   bool multi = false;
@@ -255,7 +274,7 @@ struct Root {
 };
 
 struct PieceInst {
-  unsigned fn = 0;
+  FunctionId fn = kModuleFunction;
   unsigned seg = 0;
   int root = 0;
   std::optional<Ref> self;

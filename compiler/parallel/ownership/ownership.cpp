@@ -847,7 +847,7 @@ void Ownership::visitStmt(const Stmt *s) {
     returningIn_ = outer;
     returnParams(value);
     if (collecting_ && value) {
-      returns_[fi_].push_back(value);
+      returns_[unsigned(fi_)].push_back(value);
     }
     return;
   }
@@ -1123,21 +1123,21 @@ bool Ownership::thisFirst(const CallRec &rec) const {
   return type->isFunction() && type->hasThis();
 }
 
-bool Ownership::tailAwaited(unsigned fi) {
-  if (tail_[fi] == 1) {
+bool Ownership::tailAwaited(FunctionId fi) {
+  if (tail_[unsigned(fi)] == 1) {
     return false;
   }
-  if (tail_[fi] > 1) {
-    return tail_[fi] == 2;
+  if (tail_[unsigned(fi)] > 1) {
+    return tail_[unsigned(fi)] == 2;
   }
   const FnInfo &f = analysis_.fns[fi];
   if (!f.decl || f.async || f.asyncGen || f.syncGen) {
-    tail_[fi] = 3;
+    tail_[unsigned(fi)] = 3;
     return false;
   }
-  tail_[fi] = 1;
-  bool awaited = !sites_[fi].empty();
-  for (const Site &site : sites_[fi]) {
+  tail_[unsigned(fi)] = 1;
+  bool awaited = !sites_[unsigned(fi)].empty();
+  for (const Site &site : sites_[unsigned(fi)]) {
     const FnInfo &caller = analysis_.fns[site.fn];
     const CallRec &rec = caller.calls[site.rec];
     if (rec.ownArgs > 0) {
@@ -1151,12 +1151,12 @@ bool Ownership::tailAwaited(unsigned fi) {
       break;
     }
   }
-  tail_[fi] = awaited ? 2 : 3;
+  tail_[unsigned(fi)] = awaited ? 2 : 3;
 
   return awaited;
 }
 
-bool Ownership::handsOver(unsigned fi, const CallRec &rec, Mode mode, bool strict) {
+bool Ownership::handsOver(FunctionId fi, const CallRec &rec, Mode mode, bool strict) {
   if (mode == Mode::Sync || mode == Mode::Await) {
     return true;
   }
@@ -1179,7 +1179,7 @@ const std::vector<Expr *> *Ownership::argsOf(const CallRec &rec) {
   return &n->args;
 }
 
-int Ownership::argOf(unsigned fi, const CallRec &rec, const Callee &callee, size_t param,
+int Ownership::argOf(FunctionId fi, const CallRec &rec, const Callee &callee, size_t param,
                      bool strict) {
   const std::vector<Expr *> *args = argsOf(rec);
   if (rec.ownArgs > 0 || rec.kind != CallKind::Call || rec.reflect != CallRec::Reflect::None ||
@@ -1315,8 +1315,8 @@ bool Ownership::reflectKeepsArgs(const CallExpr *c, bool self) {
   return true;
 }
 
-bool Ownership::callersOwned(unsigned fi, size_t index, bool strict) {
-  for (const Site &site : sites_[fi]) {
+bool Ownership::callersOwned(FunctionId fi, size_t index, bool strict) {
+  for (const Site &site : sites_[unsigned(fi)]) {
     const FnInfo &caller = analysis_.fns[site.fn];
     const CallRec &rec = caller.calls[site.rec];
     for (const Callee &callee : rec.callees) {
@@ -1356,7 +1356,7 @@ const Expr *Ownership::receiverOf(const CallRec &rec) {
   return m ? m->object : nullptr;
 }
 
-bool Ownership::selfOwned(unsigned fi, const CallRec &rec, const Callee &callee, bool strict) {
+bool Ownership::selfOwned(FunctionId fi, const CallRec &rec, const Callee &callee, bool strict) {
   const FunctionDecl *g = analysis_.fns[callee.fn].decl;
   if (!handsOver(fi, rec, callee.mode, strict)) {
     return false;
@@ -1390,7 +1390,7 @@ bool Ownership::poolFresh(const Type *item) const {
   return true;
 }
 
-bool Ownership::callFresh(unsigned fi, const CallExpr *c) const {
+bool Ownership::callFresh(FunctionId fi, const CallExpr *c) const {
   const FnInfo &f = analysis_.fns[fi];
   auto found =
       f.callOf.find(std::make_pair(static_cast<const void *>(c), unsigned(CallKind::Call)));
@@ -1407,7 +1407,7 @@ bool Ownership::callFresh(unsigned fi, const CallExpr *c) const {
   });
 }
 
-bool Ownership::valueOwn(unsigned fi, const Expr *e, bool params, unsigned depth) {
+bool Ownership::valueOwn(FunctionId fi, const Expr *e, bool params, unsigned depth) {
   e = strip(e);
   if (!e || !e->type || depth > 16) {
     return false;
@@ -1506,7 +1506,7 @@ bool Ownership::own(const OwnedRef *owned) {
   return owned_.contains(owned->root) && needsOwn(owned->needs);
 }
 
-std::optional<Ref> Ownership::substituted(Ref r, const FnInfo &callee, unsigned caller,
+std::optional<Ref> Ownership::substituted(Ref r, const FnInfo &callee, FunctionId caller,
                                           const CallRec &rec, const Callee &call) {
   if (r.kind != RefKind::Owned) {
     return r;
@@ -1675,7 +1675,7 @@ void Ownership::loops(const FunctionDecl *fn, const Stmt *s) {
   }
 }
 
-void Ownership::scan(unsigned fi) {
+void Ownership::scan(FunctionId fi) {
   fi_ = fi;
   fn_ = analysis_.fns[fi].decl;
   leaked_.clear();
@@ -1746,16 +1746,18 @@ void Ownership::decideOnce() {
   sites_.assign(count, {});
   returns_.assign(count, {});
   tail_.assign(count, 0);
-  for (unsigned fi = 0; fi < count; ++fi) {
+  for (unsigned index = 0; index < count; ++index) {
+    FunctionId fi{index};
     const FnInfo &f = analysis_.fns[fi];
     for (unsigned r = 0; r < f.calls.size(); ++r) {
       for (const Callee &callee : f.calls[r].callees) {
-        sites_[callee.fn].push_back({fi, r});
+        sites_[unsigned(callee.fn)].push_back({fi, r});
       }
     }
   }
-  std::vector<unsigned> scanned;
-  for (unsigned fi = 0; fi < count; ++fi) {
+  std::vector<FunctionId> scanned;
+  for (unsigned index = 0; index < count; ++index) {
+    FunctionId fi{index};
     const FunctionDecl *decl = analysis_.fns[fi].decl;
     if (decl && analysis_.isLibrary(decl)) {
       continue;
@@ -1783,7 +1785,7 @@ void Ownership::decideOnce() {
   while (changed) {
     changed = false;
     collecting_ = first;
-    for (unsigned fi : scanned) {
+    for (FunctionId fi : scanned) {
       scan(fi);
       for (const VarSymbol *v : leaked_) {
         changed |= leaking_.insert(v).second;
@@ -1802,7 +1804,7 @@ void Ownership::decideOnce() {
       owned_.insert(v);
     }
   }
-  for (unsigned fi : scanned) {
+  for (FunctionId fi : scanned) {
     const FnInfo &f = analysis_.fns[fi];
     for (const CallRec &rec : f.calls) {
       if (!rec.call || rec.call->builtin != Builtin::None) {
@@ -1835,11 +1837,11 @@ void Ownership::decideOnce() {
         changed = true;
       }
     }
-    for (unsigned fi : scanned) {
+    for (FunctionId fi : scanned) {
       if (!fresh_.contains(fi)) {
         continue;
       }
-      for (const Expr *value : returns_[fi]) {
+      for (const Expr *value : returns_[unsigned(fi)]) {
         if (!valueOwn(fi, value, false, 0)) {
           fresh_.erase(fi);
           changed = true;

@@ -40,26 +40,27 @@ CallResolver::CallResolver(Analysis &analysis) : analysis_(analysis) {}
 void CallResolver::resolve() {
   while (true) {
     while (!analysis_.worklist.empty()) {
-      unsigned fi = analysis_.worklist.front();
+      FunctionId fi = analysis_.worklist.front();
       analysis_.worklist.pop_front();
       analysis_.codeWalk.walk(fi);
     }
-    std::map<const Type *, std::vector<unsigned>> generators;
-    for (unsigned fi = 0; fi < analysis_.fns.size(); ++fi) {
+    std::map<const Type *, std::vector<FunctionId>> generators;
+    for (unsigned i = 0; i < analysis_.fns.size(); ++i) {
+      FunctionId fi{i};
       const FnInfo &f = analysis_.fns[fi];
       if ((f.syncGen || f.asyncGen) && f.decl->sym && f.decl->sym->ret) {
         generators[f.decl->sym->ret].push_back(fi);
       }
     }
-    for (unsigned fi = 0; fi < analysis_.fns.size(); ++fi) {
-      FnInfo &caller = analysis_.fns[fi];
+    for (unsigned i = 0; i < analysis_.fns.size(); ++i) {
+      FnInfo &caller = analysis_.fns[FunctionId{i}];
       for (CallRec &rec : caller.calls) {
         if (rec.reflect == CallRec::Reflect::Apply && rec.noSelf) {
-          const llvm::DenseSet<unsigned> &boxed =
+          const llvm::DenseSet<FunctionId> &boxed =
               analysis_.unknownAnyFn ? analysis_.valueFns : analysis_.unknownFns;
-          std::vector<unsigned> values(boxed.begin(), boxed.end());
+          std::vector<FunctionId> values(boxed.begin(), boxed.end());
           std::sort(values.begin(), values.end());
-          for (unsigned g : values) {
+          for (FunctionId g : values) {
             analysis_.callWalk.addCallee(rec, analysis_.fns[g].decl,
                                          analysis_.classRefOrNone(analysis_.fns[g]), true);
           }
@@ -110,14 +111,14 @@ void CallResolver::resolve() {
           continue;
         }
         if (rec.channel >= 0) {
-          for (unsigned h : std::vector<unsigned>(analysis_.listeners[rec.channel])) {
+          for (FunctionId h : std::vector<FunctionId>(analysis_.listeners[rec.channel])) {
             analysis_.callWalk.addCallee(rec, analysis_.fns[h].decl,
                                          analysis_.classRefOrNone(analysis_.fns[h]), true);
           }
           for (const Type *t : analysis_.listenerTypes[rec.channel]) {
             auto found = analysis_.values.find(t->nonOptional());
             if (found != analysis_.values.end()) {
-              for (unsigned g : std::vector<unsigned>(found->second)) {
+              for (FunctionId g : std::vector<FunctionId>(found->second)) {
                 analysis_.callWalk.addCallee(rec, analysis_.fns[g].decl,
                                              analysis_.classRefOrNone(analysis_.fns[g]), true);
               }
@@ -131,7 +132,7 @@ void CallResolver::resolve() {
         if (rec.kind == CallKind::IterSync || rec.kind == CallKind::IterAsync) {
           auto found = generators.find(rec.byType->nonOptional());
           if (found != generators.end()) {
-            for (unsigned g : found->second) {
+            for (FunctionId g : found->second) {
               analysis_.callWalk.addCallee(rec, analysis_.fns[g].decl,
                                            analysis_.classRefOrNone(analysis_.fns[g]), true);
             }
@@ -140,7 +141,7 @@ void CallResolver::resolve() {
         }
         auto found = analysis_.values.find(rec.byType->nonOptional());
         if (found != analysis_.values.end()) {
-          for (unsigned g : std::vector<unsigned>(found->second)) {
+          for (FunctionId g : std::vector<FunctionId>(found->second)) {
             std::optional<Ref> self;
             if (analysis_.fns[g].thisOwner) {
               self = analysis_.callWalk.classRef(analysis_.fns[g].thisOwner);
@@ -172,7 +173,7 @@ void CallResolver::resolve() {
 }
 
 std::optional<Access> CallResolver::substitute(const Access &a, const FnInfo &callee,
-                                               unsigned caller, const Callee &call,
+                                               FunctionId caller, const Callee &call,
                                                const CallRec &rec) const {
   const std::optional<Ref> &self = call.self;
   Access b = a;
@@ -229,7 +230,8 @@ std::optional<Access> CallResolver::substitute(const Access &a, const FnInfo &ca
 }
 
 void CallResolver::fold() {
-  for (unsigned fi = 0; fi < analysis_.fns.size(); ++fi) {
+  for (unsigned i = 0; i < analysis_.fns.size(); ++i) {
+    FunctionId fi{i};
     FnInfo &f = analysis_.fns[fi];
     for (unsigned s = 0; s < f.segs.size(); ++s) {
       if (f.isInline(s)) {
@@ -245,15 +247,15 @@ void CallResolver::fold() {
       }
     }
   }
-  std::deque<unsigned> queue;
+  std::deque<FunctionId> queue;
   std::vector<bool> queued(analysis_.fns.size(), true);
-  for (unsigned fi = 0; fi < analysis_.fns.size(); ++fi) {
-    queue.push_back(fi);
+  for (unsigned i = 0; i < analysis_.fns.size(); ++i) {
+    queue.push_back(FunctionId{i});
   }
   while (!queue.empty()) {
-    unsigned fi = queue.front();
+    FunctionId fi = queue.front();
     queue.pop_front();
-    queued[fi] = false;
+    queued[unsigned(fi)] = false;
     FnInfo &f = analysis_.fns[fi];
     bool grew = false;
     for (const CallRec &rec : f.calls) {
@@ -285,8 +287,8 @@ void CallResolver::fold() {
       continue;
     }
     for (const auto &[caller, r] : f.callers) {
-      if (!queued[caller]) {
-        queued[caller] = true;
+      if (!queued[unsigned(caller)]) {
+        queued[unsigned(caller)] = true;
         queue.push_back(caller);
       }
     }

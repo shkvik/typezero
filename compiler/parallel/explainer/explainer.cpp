@@ -94,22 +94,22 @@ void Explainer::print(llvm::raw_ostream &out) {
     out << "no async code: the program runs as one piece\n";
     return;
   }
-  std::vector<unsigned> order;
+  std::vector<FunctionId> order;
   std::vector<bool> shown(analysis_.fns.size(), false);
   for (const PieceInst &p : analysis_.pieceInstances) {
-    shown[p.fn] = true;
+    shown[unsigned(p.fn)] = true;
   }
   for (const Activation &act : analysis_.acts) {
     if (analysis_.fns[act.fn].async || analysis_.fns[act.fn].asyncGen) {
-      shown[act.fn] = true;
+      shown[unsigned(act.fn)] = true;
     }
   }
-  for (unsigned fi = 0; fi < analysis_.fns.size(); ++fi) {
-    if (shown[fi]) {
-      order.push_back(fi);
+  for (unsigned i = 0; i < analysis_.fns.size(); ++i) {
+    if (shown[i]) {
+      order.push_back(FunctionId{i});
     }
   }
-  std::stable_sort(order.begin(), order.end(), [&](unsigned a, unsigned b) {
+  std::stable_sort(order.begin(), order.end(), [&](FunctionId a, FunctionId b) {
     if (!analysis_.fns[a].decl || !analysis_.fns[b].decl) {
       return !analysis_.fns[a].decl && analysis_.fns[b].decl;
     }
@@ -118,7 +118,7 @@ void Explainer::print(llvm::raw_ostream &out) {
            analysis_.explainNames.posOf(analysis_.fns[b].decl->loc());
   });
   bool first = true;
-  for (unsigned fi : order) {
+  for (FunctionId fi : order) {
     const FnInfo &f = analysis_.fns[fi];
     if (!first) {
       out << "\n";

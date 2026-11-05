@@ -311,7 +311,7 @@ void LibraryEffects::listen(const Expr *f, Channel channel) {
     decl = n->var->function ? n->var->function : n->var->lambda;
   }
   if (decl && decl->body && !analysis_.isLibrary(decl)) {
-    unsigned fi = analysis_.codeWalk.discover(decl);
+    FunctionId fi = analysis_.codeWalk.discover(decl);
     if (!llvm::is_contained(analysis_.listeners[channel], fi)) {
       analysis_.listeners[channel].push_back(fi);
     }

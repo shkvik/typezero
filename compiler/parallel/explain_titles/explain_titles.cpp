@@ -147,7 +147,7 @@ std::string ExplainTitles::segTitle(const FnInfo &f, unsigned seg) const {
 std::string ExplainTitles::rootTitle(int r) const {
   if (analysis_.rootTitles.empty()) {
     auto key = [&](size_t i, const std::string &title) {
-      return title + "|" + std::to_string(analysis_.roots[i].fn);
+      return title + "|" + std::to_string(unsigned(analysis_.roots[i].fn));
     };
     std::map<std::string, std::set<std::string>> columns;
     for (size_t i = 0; i < analysis_.roots.size(); ++i) {

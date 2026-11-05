@@ -113,10 +113,22 @@ ParallelPlan Analysis::plan() const {
 void Analysis::explain(llvm::raw_ostream &out) { this->explainer.print(out); }
 
 Analysis::Analysis(const SourceFile &sourceFile, const llvm::SourceMgr &sourceManager)
-    : program(sourceFile), sources(sourceManager), codeWalk(*this), exprWalk(*this),
-      callWalk(*this), libraryEffects(*this), builtinCalls(*this), aliasAnalysis(*this),
-      escapeScan(*this), callResolver(*this), pieces(*this), conflicts(*this), explainer(*this),
-      explainNames(*this), explainTitles(*this), ownership(*this) {
+    : program(sourceFile),
+      sources(sourceManager),
+      codeWalk(*this),
+      exprWalk(*this),
+      callWalk(*this),
+      libraryEffects(*this),
+      builtinCalls(*this),
+      aliasAnalysis(*this),
+      escapeScan(*this),
+      callResolver(*this),
+      pieces(*this),
+      conflicts(*this),
+      explainer(*this),
+      explainNames(*this),
+      explainTitles(*this),
+      ownership(*this) {
   for (const Module *module : this->program.modules) {
     if (!module->builtin) {
       continue;
@@ -170,7 +182,7 @@ std::string Analysis::lineText(const std::string &where) {
   return inOtherFile(where) ? where : "line " + where;
 }
 
-const std::vector<unsigned> &Analysis::actsOf(unsigned function, int root) const {
+const std::vector<unsigned> &Analysis::actsOf(FunctionId function, int root) const {
   static const std::vector<unsigned> none;
   auto found = this->actsByTask.find({function, root});
 

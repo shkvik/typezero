@@ -32,4 +32,20 @@ void merge(Active &into, llvm::ArrayRef<unsigned> from) {
   }
 }
 
+FnInfo &FunctionTable::operator[](FunctionId id) { return this->items[unsigned(id)]; }
+
+const FnInfo &FunctionTable::operator[](FunctionId id) const { return this->items[unsigned(id)]; }
+
+FnInfo &FunctionTable::add() { return this->items.emplace_back(); }
+
+size_t FunctionTable::size() const { return this->items.size(); }
+
+std::deque<FnInfo>::iterator FunctionTable::begin() { return this->items.begin(); }
+
+std::deque<FnInfo>::iterator FunctionTable::end() { return this->items.end(); }
+
+std::deque<FnInfo>::const_iterator FunctionTable::begin() const { return this->items.begin(); }
+
+std::deque<FnInfo>::const_iterator FunctionTable::end() const { return this->items.end(); }
+
 }

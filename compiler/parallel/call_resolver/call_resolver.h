@@ -14,7 +14,7 @@ public:
 
   void resolve();
   void fold();
-  std::optional<Access> substitute(const Access &a, const FnInfo &callee, unsigned caller,
+  std::optional<Access> substitute(const Access &a, const FnInfo &callee, FunctionId caller,
                                    const Callee &call, const CallRec &rec) const;
   std::optional<Ref> bind(const std::optional<Ref> &self, const Activation &caller) const;
   static const Expr *argument(const CallRec &rec, size_t index);

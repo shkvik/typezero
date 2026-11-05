@@ -1,5 +1,11 @@
 {
   "C_Cpp.default.compileCommands": "${workspaceFolder}/build/dev/compile_commands.json",
+  "C_Cpp.formatting": "clangFormat",
+  "C_Cpp.clang_format_path": "D:/Programs/LLVM/bin/clang-format.exe",
+  "C_Cpp.clang_format_style": "file",
+  "[cpp]": {
+    "editor.defaultFormatter": "ms-vscode.cpptools"
+  },
   "cmake.useCMakePresets": "always",
   "files.associations": {
     "*.out": "plaintext"

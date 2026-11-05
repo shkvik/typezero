@@ -97,7 +97,7 @@ void CallWalk::addCallee(CallRec &rec, const FunctionDecl *decl, std::optional<R
   if (!decl || !decl->body || analysis_.isLibrary(decl)) {
     return;
   }
-  unsigned fi = analysis_.codeWalk.discover(decl);
+  FunctionId fi = analysis_.codeWalk.discover(decl);
   const FnInfo &callee = analysis_.fns[fi];
   Mode mode = Mode::Sync;
   switch (rec.kind) {
@@ -191,12 +191,12 @@ void CallWalk::registerValue(const FunctionDecl *fn, const Type *type) {
   if (!fn || !fn->body || analysis_.isLibrary(fn)) {
     return;
   }
-  unsigned fi = analysis_.codeWalk.discover(fn);
+  FunctionId fi = analysis_.codeWalk.discover(fn);
   analysis_.valueFns.insert(fi);
   if (!type || !type->nonOptional()->isFunction()) {
     return;
   }
-  std::vector<unsigned> &list = analysis_.values[type->nonOptional()];
+  std::vector<FunctionId> &list = analysis_.values[type->nonOptional()];
   if (!llvm::is_contained(list, fi)) {
     list.push_back(fi);
   }

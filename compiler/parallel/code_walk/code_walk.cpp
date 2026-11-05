@@ -36,12 +36,14 @@ namespace tz::parallel {
 
 CodeWalk::CodeWalk(Analysis &analysis) : analysis_(analysis) {}
 
-unsigned CodeWalk::discover(const FunctionDecl *fn) {
-  auto [it, inserted] = analysis_.fnIndex.try_emplace(fn, unsigned(analysis_.fns.size()));
+FunctionId CodeWalk::discover(const FunctionDecl *fn) {
+  auto [it, inserted] =
+      analysis_.fnIndex.try_emplace(fn, FunctionId{unsigned(analysis_.fns.size())});
+
   if (!inserted) {
     return it->second;
   }
-  FnInfo &info = analysis_.fns.emplace_back();
+  FnInfo &info = analysis_.fns.add();
   info.decl = fn;
   if (fn) {
     info.async = fn->isAsync && !fn->isGenerator;
@@ -69,7 +71,7 @@ void CodeWalk::noteClass(const ClassDecl *cls) {
   }
 }
 
-void CodeWalk::walk(unsigned fi) {
+void CodeWalk::walk(FunctionId fi) {
   analysis_.fi = fi;
   analysis_.fn = &analysis_.fns[fi];
   analysis_.cur = {0};
