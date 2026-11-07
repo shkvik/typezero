@@ -1,19 +1,19 @@
 #include "compiler/library/weakref/weakref_feature/weakref_feature.h"
-#include "compiler/check/checker/checker.h"
-#include "compiler/library/weakref/weak_ref_checker/weak_ref_checker.h"
 #include "compiler/library/weakref/weak_ref_lowerer/weak_ref_lowerer.h"
 #include "compiler/lower/lowering/lowering.h"
+#include "compiler/pipeline/check_program/check_state/check_state.h"
+#include "compiler/pipeline/check_program/topics/weakref/weak_ref_checker/weak_ref_checker.h"
 
 namespace tz {
 
-Expr *WeakRefFeature::checkMethodCall(Checker &checker, CallExpr *call, MemberExpr *member,
+Expr *WeakRefFeature::checkMethodCall(CheckState &state, CallExpr *call, MemberExpr *member,
                                       const Type *) const {
   const Type *receiver = member->object->type;
   if (!receiver->isWeakRef()) {
     return nullptr;
   }
 
-  return checker.weakRefChecker().checkWeakRefMethod(call, member);
+  return WeakRefChecker(state).checkWeakRefMethod(call, member);
 }
 
 bool WeakRefFeature::lowers(Builtin builtin) const {

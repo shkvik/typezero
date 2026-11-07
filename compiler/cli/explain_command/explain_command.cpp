@@ -5,6 +5,7 @@
 #include "compiler/cli/project_packages/project_packages.h"
 #include "compiler/parallel/parallel_analysis/parallel_analysis.h"
 #include "compiler/pipeline/build_options/build_options.h"
+#include "compiler/pipeline/check_program/check_program.h"
 #include "compiler/pipeline/pipeline/pipeline.h"
 #include "compiler/program/program/program.h"
 #include "llvm/Support/raw_ostream.h"

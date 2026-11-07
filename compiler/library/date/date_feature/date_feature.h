@@ -9,7 +9,7 @@ public:
   llvm::StringRef name() const override { return "date"; }
 
   llvm::ArrayRef<llvm::StringLiteral> typeArgFreeGlobals() const override;
-  Expr *checkMethodCall(Checker &checker, CallExpr *call, MemberExpr *member,
+  Expr *checkMethodCall(CheckState &state, CallExpr *call, MemberExpr *member,
                         const Type *expected) const override;
   bool lowers(Builtin builtin) const override;
   llvm::Value *lowerCall(Lowering &lowering, CallExpr *call) const override;

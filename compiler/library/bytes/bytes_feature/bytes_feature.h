@@ -8,9 +8,9 @@ class BytesFeature : public Feature {
 public:
   llvm::StringRef name() const override { return "bytes"; }
 
-  Expr *checkStaticCall(Checker &checker, CallExpr *call, MemberExpr *member,
+  Expr *checkStaticCall(CheckState &state, CallExpr *call, MemberExpr *member,
                         const Type *expected) const override;
-  Expr *checkMethodCall(Checker &checker, CallExpr *call, MemberExpr *member,
+  Expr *checkMethodCall(CheckState &state, CallExpr *call, MemberExpr *member,
                         const Type *expected) const override;
   std::optional<std::string> exportProblem(NodeModule module, llvm::StringRef exportName,
                                            llvm::StringRef path) const override;

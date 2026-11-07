@@ -1,5 +1,4 @@
 #include "compiler/lower/iterators/coroutine_lowerer/coroutine_lowerer.h"
-#include "compiler/check/checker/checker.h"
 #include "compiler/library/process/process_lowerer/process_lowerer.h"
 #include "compiler/lower/expr/expr_lowerer/expr_lowerer.h"
 #include "compiler/lower/function_frame/function_frame.h"
@@ -9,6 +8,8 @@
 #include "compiler/lower/module_builder/module_builder.h"
 #include "compiler/lower/stmt/exit_lowerer/exit_lowerer.h"
 #include "compiler/lower/types/optional_lowerer/optional_lowerer.h"
+#include "compiler/program/ast/ast.h"
+#include "compiler/program/types/types.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/IR/MDBuilder.h"
 

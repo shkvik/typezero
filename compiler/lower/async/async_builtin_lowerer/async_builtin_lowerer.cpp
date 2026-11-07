@@ -1,11 +1,12 @@
 #include "compiler/lower/async/async_builtin_lowerer/async_builtin_lowerer.h"
-#include "compiler/check/checker/checker.h"
 #include "compiler/library/fs/fs_promises_lowerer/fs_promises_lowerer.h"
 #include "compiler/lower/async/async_lowerer/async_lowerer.h"
 #include "compiler/lower/async/promise_lowerer/promise_lowerer.h"
 #include "compiler/lower/async/reaction_lowerer/reaction_lowerer.h"
 #include "compiler/lower/expr/expr_lowerer/expr_lowerer.h"
 #include "compiler/lower/memory/ref_counts/ref_counts.h"
+#include "compiler/program/ast/ast.h"
+#include "compiler/program/types/types.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/IR/MDBuilder.h"
 

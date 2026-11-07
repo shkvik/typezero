@@ -1,14 +1,14 @@
 #include "compiler/library/console/console_feature/console_feature.h"
-#include "compiler/check/checker/checker.h"
-#include "compiler/library/console/console_checker/console_checker.h"
 #include "compiler/library/console/console_lowerer/console_lowerer.h"
 #include "compiler/lower/lowering/lowering.h"
+#include "compiler/pipeline/check_program/check_state/check_state.h"
+#include "compiler/pipeline/check_program/topics/console/console_checker/console_checker.h"
 
 namespace tz {
 
-Expr *ConsoleFeature::checkStaticCall(Checker &checker, CallExpr *call, MemberExpr *member,
+Expr *ConsoleFeature::checkStaticCall(CheckState &state, CallExpr *call, MemberExpr *member,
                                       const Type *) const {
-  return checker.consoleChecker().checkConsoleCall(call, member);
+  return ConsoleChecker(state).checkConsoleCall(call, member);
 }
 
 llvm::ArrayRef<llvm::StringLiteral> ConsoleFeature::typeArgFreeGlobals() const {

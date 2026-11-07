@@ -1,5 +1,4 @@
 #include "compiler/lower/iterators/generator_lowerer/generator_lowerer.h"
-#include "compiler/check/checker/checker.h"
 #include "compiler/library/regex/regex_lowerer/regex_lowerer.h"
 #include "compiler/lower/function_builder/function_builder.h"
 #include "compiler/lower/function_frame/function_frame.h"
@@ -11,6 +10,8 @@
 #include "compiler/lower/module_builder/module_builder.h"
 #include "compiler/lower/objects/dict_lowerer/dict_lowerer.h"
 #include "compiler/lower/stmt/stmt_lowerer/stmt_lowerer.h"
+#include "compiler/program/ast/ast.h"
+#include "compiler/program/types/types.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/IR/MDBuilder.h"
 

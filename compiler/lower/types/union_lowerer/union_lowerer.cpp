@@ -1,7 +1,5 @@
 #include "compiler/lower/types/union_lowerer/union_lowerer.h"
-#include "compiler/check/types/type_relations/type_relations.h"
 #include "compiler/library/json/json_lowerer/json_lowerer.h"
-#include "compiler/lower/types/unknown_lowerer/unknown_lowerer.h"
 #include "compiler/library/regex/matcher_builder/matcher_builder.h"
 #include "compiler/lower/expr/equality_lowerer/equality_lowerer.h"
 #include "compiler/lower/expr/expr_lowerer/expr_lowerer.h"
@@ -12,7 +10,9 @@
 #include "compiler/lower/objects/dict_lowerer/dict_lowerer.h"
 #include "compiler/lower/types/optional_lowerer/optional_lowerer.h"
 #include "compiler/lower/types/union_layout/union_layout.h"
+#include "compiler/lower/types/unknown_lowerer/unknown_lowerer.h"
 #include "compiler/lower/values/string_lowerer/string_lowerer.h"
+#include "compiler/pipeline/check_program/types/type_relations/type_relations.h"
 #include "llvm/IR/MDBuilder.h"
 
 using llvm::cast;

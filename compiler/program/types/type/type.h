@@ -101,6 +101,11 @@ public:
   bool isResult() const {
     return kind() == Kind::Result;
   }
+  bool holdsFunctions() const;
+  bool holdsObjects() const;
+  bool holdsDates() const;
+  bool holdsResults() const;
+  bool holdsPromises() const;
   bool isNever() const {
     return kind() == Kind::Never;
   }

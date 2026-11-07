@@ -12,11 +12,276 @@
 пакеты, команды, редактор и ИИ.
 
 ```
-pipeline/         конвейер проходов
-  build_options/  BuildOptions: вход, выход, пакеты, текст редактора, уровень проверки
-  pass_times/     PassTimes: время каждого прохода для лога
-  pipeline/       checkProgram и buildProgram
-  runtime_files/  RuntimeFiles: где лежат tzrt.lib, tzrt.bc и lib/
+pipeline/                          конвейер проходов
+  build_options/                   BuildOptions: вход, выход, пакеты, текст редактора, уровень проверки
+  check_program/                   checkProgram: проверка программы — все проходы от declare до overflow, хранилище и темы
+    ast_walker/                    AstWalker: обходы дерева — имена, выражения, хвостовые вызовы
+    check/                         проход CheckPass: тип каждого выражения, чьи вызовы, ошибки в телах
+      check_pass/                  CheckPass: проверяет тела всех модулей по порядку загрузки
+      top_level_checker/           TopLevelChecker: код верхнего уровня, порядок загрузки модулей
+    check_state/                   CheckState: хранилище прохода на круг событий — группы данных с действиями
+      alias_store/                 AliasStore: копии псевдонимов типов, их параметры и откуда тип
+      block_position/              BlockPosition: место в блоке, метки, цели break / continue
+      bytes_store/                 BytesStore: разбор TextDecoder внутри проверки байтов
+      callback_facts/              CallbackFacts: пределы параметров колбэков методов массивов и байтов
+      class_context/               ClassContext: текущий класс, конструктор, статические поля, this.x
+      class_store/                 ClassStore: все классы, номера, связи переопределений
+      constant_store/              ConstantStore: константы при сборке, ключи и префиксы const
+      event_store/                 EventStore: карты событий по кругам, слушатели 'error'
+      expression_marks/            ExpressionMarks: отметки выражений — цепочки +, перепроверка, нетипизированные
+      file_system_store/           FileSystemStore: классы Stats и Dirent, вызов из fs/promises
+      flow_state/                  FlowState: текущий поток — факты, сужения, поля; Flow и FieldPath
+      function_stack/              FunctionStack: функции, что сейчас проверяются, сборщики return и yield
+      generic_store/               GenericStore: копии обобщённых функций и классов, InstanceRecord
+      late_class_store/            LateClassStore: поздние классы и их ошибки
+      library_declarations/        LibraryDeclarations: классы, функции и типы библиотеки, NodeModule
+      module_states/               ModuleStates: состояние каждого модуля, текущий и загружаемый модуль
+      predicate_store/             PredicateStore: сводки функций-предикатов
+      program_use/                 ProgramUse: что программа использует (async, TLS, подтипы) — в SourceFile
+      reflect_store/               ReflectStore: что нужно Reflect и метаданным
+      return_inference/            ReturnInference: выводимые функции, кольца вызовов, номера объявлений
+      scope_stack/                 ScopeStack: области видимости значений и типов, ветвления
+      stream_store/                StreamStore: виды потоков после setEncoding, process.stdin
+      type_context/                TypeContext: где сейчас разбор типа — extends, хвостовые вызовы, назначения
+      widening_store/              WideningStore: расширения типов, которые надо проверить по программе
+    declare/                       проход DeclarePass: классы, функции, типы, импорты
+      class_declarer/              ClassDeclarer: классы — поля, методы, перегрузки
+      constant_folder/             ConstantFolder: значения констант при сборке, переполнение в них
+      declare_pass/                DeclarePass: объявляет всё, что есть в модулях
+      import_binder/               ImportBinder: связывает импорты с экспортами
+      module_declarer/             ModuleDeclarer: модули, их экспорты, поиск имени
+      prelude/                     Prelude: встроенные типы (FetchError, Result…) — строка kPrelude
+      type_declarer/               TypeDeclarer: type, interface, enum
+    event_rounds/                  EventRounds: круги проверки, пока карты событий не перестанут меняться
+    facts/                         Facts: линейные факты о целых (a < b + 1) для доказательств индексов
+    flow/                          поток управления: сужение, факты, доказательства
+      condition_facts/             ConditionFacts: факты из условий if
+      field_facts/                 FieldFacts: сужение полей (obj.x, r.error) по путям
+      flow_checker/                FlowChecker: слияние веток, что сбивают присваивания и вызовы
+      index_proofs/                IndexProofs: доказательство, что индекс в границах массива
+      loop_bounds/                 LoopBounds: границы переменной цикла из условия
+      loop_scanner/                LoopScanner: что меняется в теле цикла
+      predicate_checker/           PredicateChecker: функции-проверки (x is T) и факты из них
+      union_narrowing/             UnionNarrowing: сужение объединений по kind, typeof, != undefined
+    generics/                      обобщения: параметры, вывод, копии
+      alias_instantiator/          AliasInstantiator: обобщённые type-алиасы
+      arg_list_checker/            ArgListChecker: вариативные параметры (...args: T)
+      generic_check_helpers/       общие помощники проверки обобщений
+      generic_checker/             GenericChecker: видимый тип внутри копии, мёртвые ветки копии
+      generic_class_checker/       GenericClassChecker: обобщённые классы и new с аргументами типа
+      generic_class_instantiator/  GenericClassInstantiator: копия обобщённого класса
+      generic_instantiator/        GenericInstantiator: копия обобщённой функции на представление
+      generic_widening/            GenericWidening: класс с более широким аргументом типа (ковариантный параметр)
+      inference/                   Inference: сопоставление типа параметра с типом аргумента
+      type_arg_inferrer/           TypeArgInferrer: вывод аргументов типа вызова
+      type_params/                 TypeParams: объявление, подстановка, ограничения extends
+    infer/                         проход InferPass: типы возврата без подписи
+      call_cycles/                 CallCycles: кольца взаимных вызовов
+      infer_pass/                  InferPass: выводит типы возврата
+      return_inferrer/             ReturnInferrer: тип возврата функции по её return
+    instances/                     проход InstancesPass: копии обобщений, поздние классы
+      constructor_calls/           ConstructorCalls: проверка вызовов конструкторов после копий
+      instances_pass/              InstancesPass
+      late_classes/                LateClasses: классы-выражения и вложенные классы
+    overflow/                      проход OverflowPass: пределы целых по всей программе
+      assign_evaluator/            AssignEvaluator: пределы при присваивании
+      builtin_evaluator/           BuiltinEvaluator: пределы результатов Math, Date и др.
+      call_ranges/                 CallRanges: пределы параметров по всем вызовам
+      evaluator/                   Evaluator: пределы выражения
+      executor/                    Executor: проход по инструкциям
+      loop_ranges/                 LoopRanges: пределы в циклах до неподвижной точки
+      narrowing/                   Narrowing: сужение пределов условиями
+      overflow_check/              OverflowCheck: весь анализ по шагам, бюджет
+      overflow_helpers/            общие помощники анализа
+      overflow_pass/               OverflowPass
+      overflow_warnings/           OverflowWarnings: ошибки «may overflow» и почему
+      program_scan/                ProgramScan: функции, классы и переменные программы
+      slots/                       Slots: пределы переменных, полей, элементов
+      value_range/                 Val, Bound: предел значения и откуда он
+    scopes/                        Scopes: области видимости имён
+    shared_helpers/                общие помощники всех классов проверки
+    topics/                        темы проверки: язык (async, classes, expr…) и библиотека (bytes, crypto…)
+      async/                       async, await, Promise, таймеры
+        async_checker/             AsyncChecker: await, for await, тип возврата async-функций, забытый Promise
+        promise_checker/           PromiseChecker: new Promise, then / catch / finally
+        promise_static_checker/    PromiseStaticChecker: Promise.all / allSettled / any / race / resolve
+        timer_checker/             TimerChecker: setTimeout, setInterval, node:timers/promises, scheduler, nextTick
+      builtin_modules/             встроенные модули node:* и tz:io — имена и импорты
+        builtin_module_checker/    BuiltinModuleChecker: импорт встроенного модуля, его имена
+        builtin_module_types/      BuiltinModuleTypes: типы встроенных модулей (ошибки fs, child_process), видны по импорту из модуля
+        runtime_object_checker/    RuntimeObjectChecker: объекты рантайма (Stats и др.) — члены
+      bytes/                       Buffer, Uint8Array, DataView, TextEncoder
+        buffer_checker/            BufferChecker: методы Buffer
+        buffer_static_checker/     BufferStaticChecker: Buffer.from / alloc / concat, embedBytes
+        byte_proofs/               ByteProofs: доказательство, что запись байта в границах
+        bytes_checker/             BytesChecker: индекс и запись элемента, кодировки
+        bytes_new_checker/         BytesNewChecker: new Uint8Array, new TextDecoder
+        typed_array_checker/       TypedArrayChecker: методы typed array и DataView
+      child_process/               node:child_process
+        child_checker/             ChildChecker: exec, execFile, spawn — аргументы и типы
+        child_error_types/         ChildErrorTypes: 10 типов ошибок и 2 результата spawnSync, тип по вызову
+      classes/                     классы: члены, наследование, перегрузки, декораторы
+        class_bases/               ClassBases: базовые классы и интерфейсы, поля от них
+        class_checker/             ClassChecker: тела классов, this до super(), неназначенные поля
+        class_links/               ClassLinks: номера классов, таблицы методов, переопределения
+        class_member_checker/      ClassMemberChecker: доступ к полю и методу, private / protected
+        class_value_checker/       ClassValueChecker: класс как значение, new по значению класса
+        decorator_checker/         DecoratorChecker: декораторы классов, методов и полей
+        inherit_checker/           InheritChecker: abstract, implements, super(…) и super.method()
+        instance_of_checker/       InstanceOfChecker: instanceof и сужение по нему
+        method_call_checker/       MethodCallChecker: вызов метода класса, new класса
+        method_literal_checker/    MethodLiteralChecker: объект-литерал с методами там, где ждут интерфейс
+        overload_resolver/         OverloadResolver: выбор перегрузки метода и конструктора
+        static_checker/            StaticChecker: статические поля и методы
+      console/                     console
+        console_checker/           ConsoleChecker: console.log и др.
+      crypto/                      node:crypto и crypto.subtle
+        crypto_args/               CryptoArgs: аргументы и результаты вызовов OpenSSL
+        crypto_checker/            CryptoChecker: члены и new у классов crypto, X509
+        crypto_error_types/        CryptoErrorTypes: 32 типа ошибок node:crypto, тип по вызову
+        crypto_function_checker/   CryptoFunctionChecker: функции node:crypto
+        crypto_method_checker/     CryptoMethodChecker: методы Hash, Hmac, Cipher и др.
+        key_pair_checker/          KeyPairChecker: generateKeyPair
+        subtle_call_checker/       SubtleCallChecker: вызовы crypto.subtle
+        web_crypto_checker/        WebCryptoChecker: мост tz:webcrypto к рантайму
+      date/                        Date и Intl.DateTimeFormat
+        date_checker/              DateChecker: new Date, Date.*, методы
+        date_format_checker/       DateFormatChecker: toLocale… и Intl.DateTimeFormat
+      decimal/                     decimal
+        decimal_checker/           DecimalChecker: литералы и операции decimal
+      declarations/                файлы объявлений .d.tz
+        declaration_checker/       DeclarationChecker: сверяет .d.tz с кодом модуля
+      events/                      node:events и EventTarget
+        emitter_checker/           EmitterChecker: on / emit у EventEmitter, правило «слушай error»
+        event_map_inference/       EventMapInference: карта событий из вызовов emit
+        event_maps/                EventMaps: карта событий класса, тип слушателя
+        event_target_checker/      EventTargetChecker: EventTarget, once / on из node:events
+      expr/                        выражения
+        argument_checker/          ArgumentChecker: число и типы аргументов вызова
+        assign_checker/            AssignChecker: =, +=, ??=, ++ и --
+        binary_checker/            BinaryChecker: арифметика, сравнения, ==, ??, битовые операции
+        call_checker/              CallChecker: вызов функции и значения-функции
+        concat_checker/            ConcatChecker: сложение со строкой, ошибка number + string
+        expr_checker/              ExprChecker: вход проверки выражения, ?., ?:, приведения
+        literal_checker/           LiteralChecker: целые литералы, шаблонные строки
+        member_checker/            MemberChecker: obj.x и a[i]
+        name_checker/              NameChecker: имя в выражении, чтение до объявления
+        new_checker/               NewChecker: new
+        target_checker/            TargetChecker: левая часть присваивания
+        truth_checker/             TruthChecker: условия if / while, &&, ||, правило истинности
+        unary_checker/             UnaryChecker: !, -, typeof, delete, in
+      fs/                          node:fs, fs/promises, readline, tz:io
+        fs_checker/                FsChecker: вызовы fs и tz:io
+        fs_declarer/               FsDeclarer: классы fs (Stats, Dirent…)
+        fs_error_types/            FsErrorTypes: 23 типа ошибок fs (ReadFileError…), тип по вызову, глагол для текста
+        fs_promises_checker/       FsPromisesChecker: fs/promises
+        readline_checker/          ReadlineChecker: readline
+      functions/                   функции и замыкания
+        callback_checker/          CallbackChecker: функция-аргумент против ожидаемого типа
+        closure_checker/           ClosureChecker: стрелки и function-выражения, их тела
+        function_checker/          FunctionChecker: объявления функций и их тела
+        function_method_checker/   FunctionMethodChecker: call / apply / bind
+        function_value_checker/    FunctionValueChecker: функция библиотеки как значение, async-колбэки
+        nested_functions/          NestedFunctions: вложенные функции, подъём, взаимные вызовы
+      intl/                        Intl
+        intl_checker/              IntlChecker: new Intl.*, статические, члены
+        intl_method_checker/       IntlMethodChecker: format и toLocaleString
+        intl_options_checker/      IntlOptionsChecker: объекты опций Intl
+      iterators/                   итераторы и генераторы
+        generator_checker/         GeneratorChecker: function*, yield, тип генератора
+        iterable_checker/          IterableChecker: Symbol.iterator, тип элемента for…of
+        iterator_methods/          IteratorMethods: map / filter / take… у итераторов, Array.from
+      json/                        JSON и тип Json
+        json_checker/              JsonChecker: Json — члены, индекс, сужение
+        json_static_checker/       JsonStaticChecker: JSON.parse литерала при сборке
+      math/                        Math и Bit
+        math_checker/              MathChecker: вызовы Math и Bit
+      objects/                     объекты, словари, кортежи
+        dict_check_helpers/        общие помощники проверки словарей
+        dict_checker/              DictChecker: Map и Record — ключи, члены, индекс
+        dict_methods/              DictMethods: методы Map, Object.fromEntries, groupBy
+        dict_new_checker/          DictNewChecker: new Map(пары)
+        keyed_field_checker/       KeyedFieldChecker: obj[ключ] с ключом-литералом или const
+        object_check_helpers/      общие помощники проверки объектов
+        object_checker/            ObjectChecker: Object.*, for…in, поле и вызов поля
+        object_literal_checker/    ObjectLiteralChecker: объект-литерал, ...spread
+        record_literal_checker/    RecordLiteralChecker: литерал там, где ждут Record
+        tuple_checker/             TupleChecker: кортежи — литерал, элемент, методы
+      os/                          node:os
+        os_checker/                OsChecker
+      path/                        node:path
+        path_checker/              PathChecker
+      process/                     process
+        process_checker/           ProcessChecker: process.*, env, argv, on / once / off
+      reflect/                     отражение: Reflect и метаданные декораторов
+        metadata_checker/          MetadataChecker: метаданные декораторов
+        reflect_call_checker/      ReflectCallChecker: Reflect.apply и вызовы методов по имени
+        reflect_checker/           ReflectChecker: вход проверки отражения
+      regex/                       регулярные выражения, собранные при сборке
+        match_checker/             MatchChecker: результат match — группы с типами
+        regex_checker/             RegexChecker: литералы, методы RegExp
+        string_regex_checker/      StringRegexChecker: replace / match / split строк с RegExp
+      result/                      Result: ok, err, isOk
+        result_checker/            ResultChecker: ok / err, члены Result, забытый Result
+        result_method_checker/     ResultMethodChecker: map, andThen и др.
+        result_types/              ResultTypes: тип Result, импорт neverthrow
+      stmt/                        инструкции
+        jump_checker/              JumpChecker: break, continue, метки
+        loop_checker/              LoopChecker: while, do, for, for…of
+        return_checker/            ReturnChecker: return, все ли пути возвращают
+        stmt_checker/              StmtChecker: вход проверки инструкции, if, блок
+        switch_checker/            SwitchChecker: switch, полнота по объединению
+        var_checker/               VarChecker: let / const, нужен ли тип, непрочитанный Result
+      stream/                      node:stream
+        chunk_types/               ChunkTypes: типы кусков потоков, крючки onRead…
+        set_encoding_checker/      SetEncodingChecker: setEncoding сужает тип потока
+        stream_checker/            StreamChecker: встроенные вызовы потоков
+        stream_new_checker/        StreamNewChecker: new Readable и др.
+        stream_pipeline/           StreamPipeline: pipeline, finished, compose
+        stream_sources/            StreamSources: createReadStream, process.stdin как поток
+      tz_modules/                  модули на tz: tz:http, fetch, URL, мосты declare function
+        http_checker/              HttpChecker: new Response, Request, Headers
+        library_calls/             LibraryCalls: вызовы библиотеки на tz
+        tz_modules_checker/        TzModulesChecker: declare function → tz_* рантайма, колбэки
+        url_checker/               UrlChecker: new URL с литералом при сборке
+      values/                      значения встроенных типов
+        array_literal_checker/     ArrayLiteralChecker: литерал массива
+        array_methods/             ArrayMethods: методы массивов
+        global_function_checker/   GlobalFunctionChecker: parseInt, encodeURI и др. глобальные функции
+        number_methods/            NumberMethods: методы чисел и Number.*, преобразования
+        string_methods/            StringMethods: методы строк
+      weakref/                     WeakRef
+        weak_ref_checker/          WeakRefChecker
+    types/                         типы: разрешение, отношения, вычисляемые типы
+      conditional_check_helpers/   общие помощники условных типов
+      conditional_types/           ConditionalTypes: T extends U ? A : B, infer
+      destination/                 Destination: тип, которого ждёт место, для литералов
+      destination_check_helpers/   общие помощники Destination
+      destination_scanner/         DestinationScanner: заранее ищет, куда идут литералы
+      extends_relation/            ExtendsRelation: отношение extends у типов
+      literal_types/               LiteralTypes: литеральные типы, const-литералы
+      template_types/              TemplateTypes: шаблонные типы строк, Uppercase…
+      type_operators/              TypeOperators: keyof, typeof, индексные типы
+      type_relations/              TypeRelations: приводимость, преобразование, общий тип
+      type_resolver/               TypeResolver: запись типа в коде → Type
+      typeops_check_helpers/       общие помощники операторов типов
+      union_check_helpers/         общие помощники объединений
+      union_checker/               UnionChecker: член, метод и запись у объединения
+      unknown_checker/             UnknownChecker: unknown — что с ним можно
+      utility_types/               UtilityTypes: Partial, ReturnType, Parameters…
+    whole_program/                 проход WholeProgramPass: по всей программе сразу
+      flow_builtins/               FlowBuiltins: потоки значений через встроенные вызовы
+      flow_calls/                  FlowCalls: потоки значений через вызовы
+      flow_exprs/                  FlowExprs: потоки значений в выражениях
+      flow_stmts/                  FlowStmts: потоки значений в инструкциях
+      flows/                       Flows: граф, куда идут значения (для записи через широкий тип)
+      load_order/                  LoadOrder: чтение до загрузки модуля
+      unused/                      Unused: неиспользуемые функции
+      whole_program_pass/          WholeProgramPass
+      wide_writes/                 WideWrites: запись чужого значения через более широкий тип
+  pass_times/                      PassTimes: время каждого прохода для лога
+  pipeline/                        checkProgram и buildProgram
+  runtime_files/                   RuntimeFiles: где лежат tzrt.lib, tzrt.bc и lib/
 ```
 
 ```
@@ -119,6 +384,11 @@ result/    Result как в neverthrow
 ```
 
 ```
+union/    Union: обёртка над std::variant, где вид нельзя перепутать
+  union/  Union<…>: kind(), as<T>(), is<T>()
+```
+
+```
 load/                    проход LoadPass: файлы, лексер, разбор
   call_parser/           CallParser: вызовы, члены, new
   class_parser/          ClassParser: классы, члены, декораторы
@@ -148,182 +418,6 @@ load/                    проход LoadPass: файлы, лексер, раз
   token_cursor/          TokenCursor: peek, accept, expect, восстановление после ошибки
   type_parser/           TypeParser: типы
   var_parser/            VarParser: let, const
-```
-
-```
-declare/            проход DeclarePass: классы, функции, типы, импорты
-  class_declarer/   ClassDeclarer: классы — поля, методы, перегрузки
-  constant_folder/  ConstantFolder: значения констант при сборке, переполнение в них
-  declare_pass/     DeclarePass: объявляет всё, что есть в модулях
-  function_names/   имена функций библиотеки и встроенных вызовов
-  import_binder/    ImportBinder: связывает импорты с экспортами
-  module_declarer/  ModuleDeclarer: модули, их экспорты, поиск имени
-  prelude/          Prelude: встроенные типы (FetchError, Result…) — строка kPrelude
-  type_declarer/    TypeDeclarer: type, interface, enum
-```
-
-```
-infer/              проход InferPass: типы возврата без подписи
-  call_cycles/      CallCycles: кольца взаимных вызовов
-  infer_pass/       InferPass: выводит типы возврата
-  return_inferrer/  ReturnInferrer: тип возврата функции по её return
-```
-
-```
-check/                           проход CheckPass: тип каждого выражения, чьи вызовы, ошибки в телах
-  async/                         async, await, Promise, таймеры
-    async_checker/               AsyncChecker: await, for await, тип возврата async-функций, забытый Promise
-    promise_checker/             PromiseChecker: new Promise, then / catch / finally
-    promise_static_checker/      PromiseStaticChecker: Promise.all / allSettled / any / race / resolve
-    timer_checker/               TimerChecker: setTimeout, setInterval, node:timers/promises, scheduler, nextTick
-  check_pass/                    CheckPass: проверяет тела всех модулей по порядку загрузки
-  checker/                       Checker: общее состояние прохода и ссылки на все его классы (хаб)
-  classes/                       классы: члены, наследование, перегрузки, декораторы
-    class_bases/                 ClassBases: базовые классы и интерфейсы, поля от них
-    class_check_helpers/         общие помощники классов проверки классов
-    class_checker/               ClassChecker: тела классов, this до super(), неназначенные поля
-    class_links/                 ClassLinks: номера классов, таблицы методов, переопределения
-    class_member_checker/        ClassMemberChecker: доступ к полю и методу, private / protected
-    class_value_checker/         ClassValueChecker: класс как значение, new по значению класса
-    decorator_checker/           DecoratorChecker: декораторы классов, методов и полей
-    inherit_checker/             InheritChecker: abstract, implements, super(…) и super.method()
-    instance_of_checker/         InstanceOfChecker: instanceof и сужение по нему
-    method_call_checker/         MethodCallChecker: вызов метода класса, new класса
-    method_literal_checker/      MethodLiteralChecker: объект-литерал с методами там, где ждут интерфейс
-    overload_resolver/           OverloadResolver: выбор перегрузки метода и конструктора
-    static_checker/              StaticChecker: статические поля и методы
-  declarations/                  файлы объявлений .d.tz
-    declaration_checker/         DeclarationChecker: сверяет .d.tz с кодом модуля
-  event_rounds/                  EventRounds: круги проверки, пока карты событий не перестанут меняться
-  expr/                          выражения
-    argument_checker/            ArgumentChecker: число и типы аргументов вызова
-    assign_checker/              AssignChecker: =, +=, ??=, ++ и --
-    binary_checker/              BinaryChecker: арифметика, сравнения, ==, ??, битовые операции
-    call_checker/                CallChecker: вызов функции и значения-функции
-    concat_checker/              ConcatChecker: сложение со строкой, ошибка number + string
-    expr_checker/                ExprChecker: вход проверки выражения, ?., ?:, приведения
-    literal_checker/             LiteralChecker: целые литералы, шаблонные строки
-    member_checker/              MemberChecker: obj.x и a[i]
-    name_checker/                NameChecker: имя в выражении, чтение до объявления
-    new_checker/                 NewChecker: new
-    target_checker/              TargetChecker: левая часть присваивания
-    truth_checker/               TruthChecker: условия if / while, &&, ||, правило истинности
-    unary_checker/               UnaryChecker: !, -, typeof, delete, in
-  facts/                         Facts: линейные факты о целых (a < b + 1) для доказательств индексов
-  flow/                          поток управления: сужение, факты, доказательства
-    condition_facts/             ConditionFacts: факты из условий if
-    field_facts/                 FieldFacts: сужение полей (obj.x, r.error) по путям
-    flow_checker/                FlowChecker: слияние веток, что сбивают присваивания и вызовы
-    index_proofs/                IndexProofs: доказательство, что индекс в границах массива
-    loop_bounds/                 LoopBounds: границы переменной цикла из условия
-    loop_scanner/                LoopScanner: что меняется в теле цикла
-    predicate_checker/           PredicateChecker: функции-проверки (x is T) и факты из них
-    union_narrowing/             UnionNarrowing: сужение объединений по kind, typeof, != undefined
-  functions/                     функции и замыкания
-    callback_checker/            CallbackChecker: функция-аргумент против ожидаемого типа
-    closure_checker/             ClosureChecker: стрелки и function-выражения, их тела
-    function_checker/            FunctionChecker: объявления функций и их тела
-    function_method_checker/     FunctionMethodChecker: call / apply / bind
-    function_value_checker/      FunctionValueChecker: функция библиотеки как значение, async-колбэки
-    nested_functions/            NestedFunctions: вложенные функции, подъём, взаимные вызовы
-  generics/                      обобщения: параметры, вывод, копии
-    alias_instantiator/          AliasInstantiator: обобщённые type-алиасы
-    arg_list_checker/            ArgListChecker: вариативные параметры (...args: T)
-    generic_check_helpers/       общие помощники проверки обобщений
-    generic_checker/             GenericChecker: видимый тип внутри копии, мёртвые ветки копии
-    generic_class_checker/       GenericClassChecker: обобщённые классы и new с аргументами типа
-    generic_class_instantiator/  GenericClassInstantiator: копия обобщённого класса
-    generic_widening/          GenericWidening: класс с более широким аргументом типа (ковариантный параметр)
-    generic_instantiator/        GenericInstantiator: копия обобщённой функции на представление
-    inference/                   Inference: сопоставление типа параметра с типом аргумента
-    type_arg_inferrer/           TypeArgInferrer: вывод аргументов типа вызова
-    type_params/                 TypeParams: объявление, подстановка, ограничения extends
-  iterators/                     итераторы и генераторы
-    generator_checker/           GeneratorChecker: function*, yield, тип генератора
-    iterable_checker/            IterableChecker: Symbol.iterator, тип элемента for…of
-    iterator_methods/            IteratorMethods: map / filter / take… у итераторов, Array.from
-  objects/                       объекты, словари, кортежи
-    dict_check_helpers/          общие помощники проверки словарей
-    dict_checker/                DictChecker: Map и Record — ключи, члены, индекс
-    dict_methods/                DictMethods: методы Map, Object.fromEntries, groupBy
-    dict_new_checker/            DictNewChecker: new Map(пары)
-    keyed_field_checker/         KeyedFieldChecker: obj[ключ] с ключом-литералом или const
-    object_check_helpers/        общие помощники проверки объектов
-    object_checker/              ObjectChecker: Object.*, for…in, поле и вызов поля
-    object_literal_checker/      ObjectLiteralChecker: объект-литерал, ...spread
-    record_literal_checker/      RecordLiteralChecker: литерал там, где ждут Record
-    tuple_checker/               TupleChecker: кортежи — литерал, элемент, методы
-  scopes/                        Scopes: области видимости имён
-  shared_helpers/                общие помощники всех классов проверки
-  stmt/                          инструкции
-    jump_checker/                JumpChecker: break, continue, метки
-    loop_checker/                LoopChecker: while, do, for, for…of
-    return_checker/              ReturnChecker: return, все ли пути возвращают
-    stmt_checker/                StmtChecker: вход проверки инструкции, if, блок
-    switch_checker/              SwitchChecker: switch, полнота по объединению
-    var_checker/                 VarChecker: let / const, нужен ли тип, непрочитанный Result
-  top_level_checker/             TopLevelChecker: код верхнего уровня, порядок загрузки модулей
-  types/                         типы: разрешение, отношения, вычисляемые типы
-    conditional_check_helpers/   общие помощники условных типов
-    conditional_types/           ConditionalTypes: T extends U ? A : B, infer
-    destination/                 Destination: тип, которого ждёт место, для литералов
-    destination_check_helpers/   общие помощники Destination
-    destination_scanner/         DestinationScanner: заранее ищет, куда идут литералы
-    extends_relation/            ExtendsRelation: отношение extends у типов
-    literal_types/               LiteralTypes: литеральные типы, const-литералы
-    template_types/              TemplateTypes: шаблонные типы строк, Uppercase…
-    type_operators/              TypeOperators: keyof, typeof, индексные типы
-    type_relations/              TypeRelations: приводимость, преобразование, общий тип
-    type_resolver/               TypeResolver: запись типа в коде → Type
-    typeops_check_helpers/       общие помощники операторов типов
-    union_check_helpers/         общие помощники объединений
-    union_checker/               UnionChecker: член, метод и запись у объединения
-    unknown_checker/             UnknownChecker: unknown — что с ним можно
-    utility_types/               UtilityTypes: Partial, ReturnType, Parameters…
-  values/                        значения встроенных типов
-    array_literal_checker/       ArrayLiteralChecker: литерал массива
-    array_methods/               ArrayMethods: методы массивов
-    global_function_checker/     GlobalFunctionChecker: parseInt, encodeURI и др. глобальные функции
-    number_methods/              NumberMethods: методы чисел и Number.*, преобразования
-    string_methods/              StringMethods: методы строк
-```
-
-```
-instances/            проход InstancesPass: копии обобщений, поздние классы
-  constructor_calls/  ConstructorCalls: проверка вызовов конструкторов после копий
-  instances_pass/     InstancesPass
-  late_classes/       LateClasses: классы-выражения и вложенные классы
-```
-
-```
-whole_program/         проход WholeProgramPass: по всей программе сразу
-  flow_builtins/       FlowBuiltins: потоки значений через встроенные вызовы
-  flow_calls/          FlowCalls: потоки значений через вызовы
-  flow_exprs/          FlowExprs: потоки значений в выражениях
-  flow_stmts/          FlowStmts: потоки значений в инструкциях
-  flows/               Flows: граф, куда идут значения (для записи через широкий тип)
-  load_order/          LoadOrder: чтение до загрузки модуля
-  unused/              Unused: неиспользуемые функции
-  whole_program_pass/  WholeProgramPass
-  wide_writes/         WideWrites: запись чужого значения через более широкий тип
-```
-
-```
-overflow/             проход OverflowPass: пределы целых по всей программе
-  assign_evaluator/   AssignEvaluator: пределы при присваивании
-  builtin_evaluator/  BuiltinEvaluator: пределы результатов Math, Date и др.
-  call_ranges/        CallRanges: пределы параметров по всем вызовам
-  evaluator/          Evaluator: пределы выражения
-  executor/           Executor: проход по инструкциям
-  loop_ranges/        LoopRanges: пределы в циклах до неподвижной точки
-  narrowing/          Narrowing: сужение пределов условиями
-  overflow_check/     OverflowCheck: весь анализ по шагам, бюджет
-  overflow_helpers/   общие помощники анализа
-  overflow_pass/      OverflowPass
-  overflow_warnings/  OverflowWarnings: ошибки «may overflow» и почему
-  program_scan/       ProgramScan: функции, классы и переменные программы
-  slots/              Slots: пределы переменных, полей, элементов
-  value_range/        Val, Bound: предел значения и откуда он
 ```
 
 ```
@@ -470,136 +564,91 @@ link/             проход LinkPass: exe
 ```
 
 ```
-library/                       C++-часть тем библиотеки: проверка и IR; у темы — <тема>_feature/
+library/                       C++-часть тем библиотеки: IR и помощники; у темы — <тема>_feature/; проверка — в pipeline/check_program/topics/
   async_hooks/                 node:async_hooks: AsyncLocalStorage
     context_checker/           ContextChecker: правила AsyncLocalStorage по всей программе (docs/async.md, раздел 10)
   builtin_modules/             встроенные модули node:* и tz:io — имена и импорты
-    builtin_module_checker/    BuiltinModuleChecker: импорт встроенного модуля, его имена
-    builtin_module_types/      BuiltinModuleTypes: типы встроенных модулей (ошибки fs, child_process), видны по импорту из модуля
     builtin_modules_feature/   BuiltinModulesFeature: тема
     node_check_helpers/        общие помощники модулей node:*
-    runtime_object_checker/    RuntimeObjectChecker: объекты рантайма (Stats и др.) — члены
     timers_exports/            что экспортирует node:timers
   bytes/                       Buffer, Uint8Array, DataView, TextEncoder
     buffer_calls/              BufferCalls: IR вызовов Buffer
-    buffer_checker/            BufferChecker: методы Buffer
     buffer_exports/            что экспортирует node:buffer
-    buffer_static_checker/     BufferStaticChecker: Buffer.from / alloc / concat, embedBytes
-    byte_proofs/               ByteProofs: доказательство, что запись байта в границах
     bytes_call_lowerer/        BytesCallLowerer: вход IR вызовов байтов
     bytes_call_site/           BytesCallSite: что за вызов байтов (функция, получатель, кодировка)
     bytes_callback_lowerer/    BytesCallbackLowerer: методы байтов с колбэком
     bytes_check_helpers/       общие помощники проверки байтов
-    bytes_checker/             BytesChecker: индекс и запись элемента, кодировки
     bytes_feature/             BytesFeature: тема
     bytes_lower_helpers/       общие помощники IR байтов
     bytes_lowerer/             BytesLowerer: элемент, длина, члены байтов
     bytes_make_calls/          BytesMakeCalls: IR создания байтов
-    bytes_new_checker/         BytesNewChecker: new Uint8Array, new TextDecoder
     number_access_calls/       NumberAccessCalls: IR readInt32LE и т. п.
     text_codec_calls/          TextCodecCalls: IR TextEncoder / TextDecoder
     typed_array_calls/         TypedArrayCalls: IR методов typed array
-    typed_array_checker/       TypedArrayChecker: методы typed array и DataView
   child_process/               node:child_process
-    child_checker/             ChildChecker: exec, execFile, spawn — аргументы и типы
-    child_error_types/         ChildErrorTypes: 10 типов ошибок и 2 результата spawnSync, тип по вызову
     child_exports/             что экспортирует node:child_process
     child_lowerer/             ChildLowerer: IR вызовов child_process
     child_process_feature/     ChildProcessFeature: тема
   console/                     console
-    console_checker/           ConsoleChecker: console.log и др.
     console_feature/           ConsoleFeature: тема
     console_lowerer/           ConsoleLowerer: IR console.log
   crypto/                      node:crypto и crypto.subtle
     crypto_api/                таблица функций и алгоритмов crypto
-    crypto_args/               CryptoArgs: аргументы и результаты вызовов OpenSSL
     crypto_check_helpers/      общие помощники проверки crypto
-    crypto_checker/            CryptoChecker: члены и new у классов crypto, X509
-    crypto_error_types/        CryptoErrorTypes: 32 типа ошибок node:crypto, тип по вызову
     crypto_feature/            CryptoFeature: тема
-    crypto_function_checker/   CryptoFunctionChecker: функции node:crypto
     crypto_lowerer/            CryptoLowerer: IR вызовов crypto
-    crypto_method_checker/     CryptoMethodChecker: методы Hash, Hmac, Cipher и др.
     crypto_names/              имена хешей и шифров
-    key_pair_checker/          KeyPairChecker: generateKeyPair
     subtle_algorithms/         алгоритмы crypto.subtle
-    subtle_call_checker/       SubtleCallChecker: вызовы crypto.subtle
-    web_crypto_checker/        WebCryptoChecker: мост tz:webcrypto к рантайму
   date/                        Date и Intl.DateTimeFormat
-    date_checker/              DateChecker: new Date, Date.*, методы
     date_feature/              DateFeature: тема
-    date_format_checker/       DateFormatChecker: toLocale… и Intl.DateTimeFormat
     date_lowerer/              DateLowerer: IR Date
     date_syntax/               разбор строк дат при сборке
   decimal/                     decimal
-    decimal_checker/           DecimalChecker: литералы и операции decimal
     decimal_feature/           DecimalFeature: тема
     decimal_literal/           DecimalLiteral: точное значение литерала
     decimal_lowerer/           DecimalLowerer: IR decimal
   events/                      node:events и EventTarget
-    emitter_checker/           EmitterChecker: on / emit у EventEmitter, правило «слушай error»
-    event_map_inference/       EventMapInference: карта событий из вызовов emit
-    event_maps/                EventMaps: карта событий класса, тип слушателя
-    event_target_checker/      EventTargetChecker: EventTarget, once / on из node:events
     events_feature/            EventsFeature: тема
   feature/                     Feature: крючки темы для проходов
   feature_registry/            FeatureRegistry: все темы
   fs/                          node:fs, fs/promises, readline, tz:io
-    fs_checker/                FsChecker: вызовы fs и tz:io
-    fs_declarer/               FsDeclarer: классы fs (Stats, Dirent…)
-    fs_error_types/            FsErrorTypes: 23 типа ошибок fs (ReadFileError…), тип по вызову, глагол для текста
     fs_exports/                что экспортирует node:fs
     fs_feature/                FsFeature: тема
     fs_lowerer/                FsLowerer: IR вызовов fs, объекты ошибок
-    fs_promises_checker/       FsPromisesChecker: fs/promises
     fs_promises_lowerer/       FsPromisesLowerer: IR fs/promises и readline
-    readline_checker/          ReadlineChecker: readline
   held_values/                 значения, которые живут только внутри вызова (хранилище run, объект Pool.use)
     held_value_checker/        HeldValueChecker: обход всей программы — куда уходит значение
   intl/                        Intl
     intl_call_lowerer/         IntlCallLowerer: IR вызовов Intl
     intl_check_helpers/        опции и службы Intl
-    intl_checker/              IntlChecker: new Intl.*, статические, члены
     intl_feature/              IntlFeature: тема
     intl_lowerer/              IntlLowerer: IR опций и чисел Intl
-    intl_method_checker/       IntlMethodChecker: format и toLocaleString
-    intl_options_checker/      IntlOptionsChecker: объекты опций Intl
   json/                        JSON и тип Json
-    json_checker/              JsonChecker: Json — члены, индекс, сужение
     json_feature/              JsonFeature: тема
     json_lowerer/              JsonLowerer: IR Json
-    json_static_checker/       JsonStaticChecker: JSON.parse литерала при сборке
     json_writers/              JsonWriters: JSON.stringify — код записи под тип
   math/                        Math и Bit
-    math_checker/              MathChecker: вызовы Math и Bit
     math_feature/              MathFeature: тема
     math_lowerer/              MathLowerer: IR Math
   os/                          node:os
-    os_checker/                OsChecker
     os_exports/                что экспортирует node:os
     os_feature/                OsFeature: тема
     os_lowerer/                OsLowerer
   path/                        node:path
-    path_checker/              PathChecker
     path_exports/              что экспортирует node:path
     path_feature/              PathFeature: тема
     path_lowerer/              PathLowerer
   process/                     process
-    process_checker/           ProcessChecker: process.*, env, argv, on / once / off
     process_exports/           что экспортирует node:process
     process_feature/           ProcessFeature: тема
     process_lowerer/           ProcessLowerer: IR process
   reflect/                     отражение: Reflect и метаданные декораторов
     class_info_lowerer/        ClassInfoLowerer: описание класса для отражения
-    metadata_checker/          MetadataChecker: метаданные декораторов
     reflect_args_lowerer/      ReflectArgsLowerer: аргументы вызовов через отражение
-    reflect_call_checker/      ReflectCallChecker: Reflect.apply и вызовы методов по имени
-    reflect_checker/           ReflectChecker: вход проверки отражения
     reflect_dispatch_lowerer/  ReflectDispatchLowerer: выбор метода при вызове по имени
     reflect_feature/           ReflectFeature: тема
     reflect_lowerer/           ReflectLowerer: IR Reflect
   regex/                       регулярные выражения, собранные при сборке
-    match_checker/             MatchChecker: результат match — группы с типами
     matcher_analysis/          MatcherAnalysis: план машины совпадений
     matcher_builder/           MatcherBuilder: IR машины совпадений
     matcher_chars/             MatcherChars: чтение и классы символов
@@ -607,41 +656,25 @@ library/                       C++-часть тем библиотеки: пр�
     matcher_instructions/      MatcherInstructions: инструкции машины
     matcher_memo/              MatcherMemo: память для защиты от взрыва перебора
     matcher_repeats/           MatcherRepeats: жадные и ленивые повторы
-    regex_checker/             RegexChecker: литералы, методы RegExp
     regex_feature/             RegexFeature: тема
     regex_lowerer/             RegexLowerer: IR вызовов RegExp
     regex_native_lowerer/      RegexNativeLowerer: машина совпадений в машинном коде
     regex_syntax/              разбор регулярного выражения
-    string_regex_checker/      StringRegexChecker: replace / match / split строк с RegExp
   result/                      Result: ok, err, isOk
     err_sites/                 ErrSites: где создана ошибка (файл, функция)
-    result_checker/            ResultChecker: ok / err, члены Result, забытый Result
     result_combine_lowerer/    ResultCombineLowerer: Result.combine
     result_feature/            ResultFeature: тема
     result_lowerer/            ResultLowerer: раскладка Result
-    result_method_checker/     ResultMethodChecker: map, andThen и др.
-    result_types/              ResultTypes: тип Result, импорт neverthrow
   stream/                      node:stream
-    chunk_types/               ChunkTypes: типы кусков потоков, крючки onRead…
-    set_encoding_checker/      SetEncodingChecker: setEncoding сужает тип потока
-    stream_checker/            StreamChecker: встроенные вызовы потоков
     stream_feature/            StreamFeature: тема
     stream_lowerer/            StreamLowerer: IR вызовов потоков
-    stream_new_checker/        StreamNewChecker: new Readable и др.
-    stream_pipeline/           StreamPipeline: pipeline, finished, compose
-    stream_sources/            StreamSources: createReadStream, process.stdin как поток
   sync/                        tz:sync: Pool
     pool_checker/              PoolChecker: объект Pool живёт только внутри use (docs/async.md, раздел 11)
   tz_modules/                  модули на tz: tz:http, fetch, URL, мосты declare function
-    http_checker/              HttpChecker: new Response, Request, Headers
     library_call_lowerer/      LibraryCallLowerer: IR вызовов библиотеки
-    library_calls/             LibraryCalls: вызовы библиотеки на tz
-    tz_modules_checker/        TzModulesChecker: declare function → tz_* рантайма, колбэки
     tz_modules_feature/        TzModulesFeature: тема
     tz_modules_lowerer/        TzModulesLowerer: IR вызовов рантайма из библиотеки
-    url_checker/               UrlChecker: new URL с литералом при сборке
   weakref/                     WeakRef
-    weak_ref_checker/          WeakRefChecker
     weak_ref_lowerer/          WeakRefLowerer
     weakref_feature/           WeakRefFeature: тема
 ```

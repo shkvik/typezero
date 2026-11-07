@@ -1,26 +1,26 @@
 #include "compiler/library/bytes/bytes_feature/bytes_feature.h"
-#include "compiler/check/checker/checker.h"
 #include "compiler/library/bytes/buffer_exports/buffer_exports.h"
-#include "compiler/library/bytes/buffer_static_checker/buffer_static_checker.h"
 #include "compiler/library/bytes/bytes_call_lowerer/bytes_call_lowerer.h"
-#include "compiler/library/bytes/bytes_checker/bytes_checker.h"
 #include "compiler/lower/lowering/lowering.h"
+#include "compiler/pipeline/check_program/check_state/check_state.h"
+#include "compiler/pipeline/check_program/topics/bytes/buffer_static_checker/buffer_static_checker.h"
+#include "compiler/pipeline/check_program/topics/bytes/bytes_checker/bytes_checker.h"
 
 namespace tz {
 
-Expr *BytesFeature::checkStaticCall(Checker &checker, CallExpr *call, MemberExpr *member,
+Expr *BytesFeature::checkStaticCall(CheckState &state, CallExpr *call, MemberExpr *member,
                                     const Type *) const {
-  return checker.bufferStaticChecker().checkBytesStatic(call, member);
+  return BufferStaticChecker(state).checkBytesStatic(call, member);
 }
 
-Expr *BytesFeature::checkMethodCall(Checker &checker, CallExpr *call, MemberExpr *member,
+Expr *BytesFeature::checkMethodCall(CheckState &state, CallExpr *call, MemberExpr *member,
                                     const Type *expected) const {
   const Type *receiver = member->object->type;
   if (!receiver->isBytes()) {
     return nullptr;
   }
 
-  return checker.bytesChecker().checkBytesMethod(call, member, expected);
+  return BytesChecker(state).checkBytesMethod(call, member, expected);
 }
 
 std::optional<std::string> BytesFeature::exportProblem(NodeModule module,

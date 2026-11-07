@@ -1,5 +1,4 @@
 #include "compiler/lower/iterators/inline_generator_lowerer/inline_generator_lowerer.h"
-#include "compiler/check/checker/checker.h"
 #include "compiler/library/regex/regex_lowerer/regex_lowerer.h"
 #include "compiler/lower/expr/expr_lowerer/expr_lowerer.h"
 #include "compiler/lower/function_builder/function_builder.h"
@@ -13,6 +12,9 @@
 #include "compiler/lower/objects/dict_lowerer/dict_lowerer.h"
 #include "compiler/lower/stmt/stmt_lowerer/stmt_lowerer.h"
 #include "compiler/lower/types/optional_lowerer/optional_lowerer.h"
+#include "compiler/pipeline/check_program/ast_walker/ast_walker.h"
+#include "compiler/program/ast/ast.h"
+#include "compiler/program/types/types.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/IR/MDBuilder.h"
 
@@ -34,7 +36,8 @@ constexpr unsigned kMaxInlineCopies = 16;
 
 unsigned InlineGeneratorLowerer::countYields(const FunctionDecl *fn) {
   unsigned count = 0;
-  visitExprs(fn->body, [&](const Expr *e) { count += isa<YieldExpr>(e) ? 1 : 0; }, false);
+  AstWalker::visitExprs(
+      fn->body, [&](const Expr *e) { count += isa<YieldExpr>(e) ? 1 : 0; }, false);
 
   return count;
 }

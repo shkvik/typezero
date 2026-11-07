@@ -1,7 +1,7 @@
 #pragma once
 
-#include "compiler/check/checker/checker.h"
 #include "compiler/library/crypto/crypto_check_helpers/crypto_check_helpers.h"
+#include "compiler/pipeline/check_program/check_state/check_state.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/StringExtras.h"
 #include "llvm/Support/ConvertUTF.h"

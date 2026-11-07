@@ -1,5 +1,6 @@
 #include "compiler/lower/iterators/iter_lower_helpers/iter_lower_helpers.h"
-#include "compiler/check/checker/checker.h"
+#include "compiler/program/ast/ast.h"
+#include "compiler/program/types/types.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/IR/MDBuilder.h"
 #include "llvm/Support/ErrorHandling.h"

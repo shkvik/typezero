@@ -8,8 +8,6 @@
 
 namespace tz {
 
-class Checker;
-
 struct Program {
   Program();
   ~Program();
@@ -18,7 +16,6 @@ struct Program {
   std::vector<std::unique_ptr<AstContext>> asts;
   std::unique_ptr<Diagnostics> diags;
   SourceFile file;
-  std::unique_ptr<Checker> checker;
 };
 
 }

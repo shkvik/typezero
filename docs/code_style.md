@@ -111,6 +111,16 @@ ResultThisComesFrom found = this->thisOf(this->checker.currentDecl());
   приведениями.
 - **Имя говорит, что лежит:** не `callees` для целей одного вызова, а `targets`; не `named` для
   списка мест вызова.
+- **Геттер — `get` + имя типа:** метод, который только отдаёт хранимый объект, —
+  `getScopeStack()`, `getDiagnostics()`, `getCurrentFunction()`; голое существительное
+  (`scopes()`, `program()`) непонятно. Поле при этом называется просто: `scopeStack`.
+- **`bool` — `is…`/`has…`/`can…`:** `isInsideFunction()`, а не `insideFunction()`.
+- **Остальные методы — действием по смыслу:** `rememberStatsClass`, `findClassNamed`,
+  `markUsesAsync`, `openScope`; флаг «мы сейчас внутри …» — парой `enterPromiseCall()` /
+  `leavePromiseCall()` над счётчиком глубины и проверкой `isInsidePromiseCall()`; метод, который
+  отдаёт `bool`, всегда что-то проверяет, поэтому `enter…` ничего не возвращает.
+- **Хранилище данных отдаёт действия, а не поля:** класс-хранилище (как `CheckState` и его группы)
+  держит поля закрытыми; снаружи только методы по смыслу, без доступа к своим контейнерам.
 
 ## Ошибки — `Result`
 

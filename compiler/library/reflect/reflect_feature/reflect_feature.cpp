@@ -1,20 +1,20 @@
 #include "compiler/library/reflect/reflect_feature/reflect_feature.h"
-#include "compiler/check/checker/checker.h"
-#include "compiler/check/expr/call_checker/call_checker.h"
-#include "compiler/library/reflect/reflect_call_checker/reflect_call_checker.h"
 #include "compiler/library/reflect/reflect_lowerer/reflect_lowerer.h"
 #include "compiler/lower/classes/decorator_lowerer/decorator_lowerer.h"
 #include "compiler/lower/lowering/lowering.h"
+#include "compiler/pipeline/check_program/check_state/check_state.h"
+#include "compiler/pipeline/check_program/topics/expr/call_checker/call_checker.h"
+#include "compiler/pipeline/check_program/topics/reflect/reflect_call_checker/reflect_call_checker.h"
 
 namespace tz {
 
-Expr *ReflectFeature::checkStaticCall(Checker &checker, CallExpr *call, MemberExpr *member,
+Expr *ReflectFeature::checkStaticCall(CheckState &state, CallExpr *call, MemberExpr *member,
                                       const Type *expected) const {
-  if (!checker.callChecker().isGlobalName(member->object, "Reflect")) {
+  if (!CallChecker(state).isGlobalName(member->object, "Reflect")) {
     return nullptr;
   }
 
-  return checker.reflectCallChecker().checkReflectCall(call, member, expected);
+  return ReflectCallChecker(state).checkReflectCall(call, member, expected);
 }
 
 bool ReflectFeature::lowers(Builtin builtin) const {

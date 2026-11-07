@@ -1,5 +1,4 @@
 #include "compiler/lower/iterators/lazy_chain_lowerer/lazy_chain_lowerer.h"
-#include "compiler/check/checker/checker.h"
 #include "compiler/library/bytes/bytes_lowerer/bytes_lowerer.h"
 #include "compiler/lower/expr/expr_lowerer/expr_lowerer.h"
 #include "compiler/lower/function_frame/function_frame.h"
@@ -11,6 +10,8 @@
 #include "compiler/lower/module_builder/module_builder.h"
 #include "compiler/lower/values/array_lowerer/array_lowerer.h"
 #include "compiler/lower/values/string_lowerer/string_lowerer.h"
+#include "compiler/program/ast/ast.h"
+#include "compiler/program/types/types.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/Support/ErrorHandling.h"
 

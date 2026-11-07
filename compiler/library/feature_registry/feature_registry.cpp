@@ -50,12 +50,6 @@ FeatureRegistry::FeatureRegistry() {
   }
 }
 
-const FeatureRegistry &FeatureRegistry::standard() {
-  static const FeatureRegistry registry;
-
-  return registry;
-}
-
 const Feature *FeatureRegistry::lowering(Builtin builtin) const {
   for (const Feature *feature : order_) {
     if (feature->lowers(builtin)) {

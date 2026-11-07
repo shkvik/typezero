@@ -1,24 +1,24 @@
 #include "compiler/library/math/math_feature/math_feature.h"
-#include "compiler/check/checker/checker.h"
-#include "compiler/check/expr/call_checker/call_checker.h"
-#include "compiler/library/math/math_checker/math_checker.h"
 #include "compiler/library/math/math_lowerer/math_lowerer.h"
 #include "compiler/lower/lowering/lowering.h"
+#include "compiler/pipeline/check_program/check_state/check_state.h"
+#include "compiler/pipeline/check_program/topics/expr/call_checker/call_checker.h"
+#include "compiler/pipeline/check_program/topics/math/math_checker/math_checker.h"
 
 namespace tz {
 
-Expr *MathFeature::checkStaticCall(Checker &checker, CallExpr *call, MemberExpr *member,
+Expr *MathFeature::checkStaticCall(CheckState &state, CallExpr *call, MemberExpr *member,
                                    const Type *expected) const {
   auto *inner = llvm::dyn_cast<MemberExpr>(member->object);
-  if (checker.callChecker().isGlobalName(member->object, "Bit") ||
-      (inner && checker.callChecker().isGlobalName(inner->object, "Bit"))) {
-    return checker.mathChecker().checkBitCall(call, member);
+  if (CallChecker(state).isGlobalName(member->object, "Bit") ||
+      (inner && CallChecker(state).isGlobalName(inner->object, "Bit"))) {
+    return MathChecker(state).checkBitCall(call, member);
   }
-  if (!checker.callChecker().isGlobalName(member->object, "Math")) {
+  if (!CallChecker(state).isGlobalName(member->object, "Math")) {
     return nullptr;
   }
 
-  return checker.mathChecker().checkMathCall(call, member, expected);
+  return MathChecker(state).checkMathCall(call, member, expected);
 }
 
 llvm::ArrayRef<llvm::StringLiteral> MathFeature::typeArgFreeGlobals() const {

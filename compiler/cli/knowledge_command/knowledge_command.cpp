@@ -9,6 +9,7 @@
 #include "compiler/lsp/program_entry/program_entry.h"
 #include "compiler/packages/manifest/manifest.h"
 #include "compiler/pipeline/build_options/build_options.h"
+#include "compiler/pipeline/check_program/check_program.h"
 #include "compiler/pipeline/pipeline/pipeline.h"
 #include "compiler/pipeline/runtime_files/runtime_files.h"
 #include "compiler/program/program/program.h"

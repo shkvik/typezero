@@ -1,9 +1,9 @@
 #include "compiler/library/path/path_feature/path_feature.h"
-#include "compiler/check/checker/checker.h"
-#include "compiler/library/path/path_checker/path_checker.h"
 #include "compiler/library/path/path_exports/path_exports.h"
 #include "compiler/library/path/path_lowerer/path_lowerer.h"
 #include "compiler/lower/lowering/lowering.h"
+#include "compiler/pipeline/check_program/check_state/check_state.h"
+#include "compiler/pipeline/check_program/topics/path/path_checker/path_checker.h"
 
 namespace tz {
 
@@ -25,22 +25,22 @@ std::optional<std::string> PathFeature::exportProblem(NodeModule module, llvm::S
   return pathExportProblem(exportName, path);
 }
 
-Expr *PathFeature::checkModuleCall(Checker &checker, CallExpr *call, NodeModule module,
+Expr *PathFeature::checkModuleCall(CheckState &state, CallExpr *call, NodeModule module,
                                    llvm::StringRef fn, llvm::SMLoc loc, const Type *) const {
   if (!isPathModule(module)) {
     return nullptr;
   }
 
-  return checker.pathChecker().checkPathCall(call, module, fn, loc);
+  return PathChecker(state).checkPathCall(call, module, fn, loc);
 }
 
-Expr *PathFeature::checkModuleValue(Checker &checker, NodeModule module, llvm::StringRef exportName,
-                                    Expr *expr) const {
+Expr *PathFeature::checkModuleValue(CheckState &state, NodeModule module,
+                                    llvm::StringRef exportName, Expr *expr) const {
   if (!isPathModule(module)) {
     return nullptr;
   }
 
-  return checker.pathChecker().checkPathValue(module, exportName, expr);
+  return PathChecker(state).checkPathValue(module, exportName, expr);
 }
 
 bool PathFeature::lowers(Builtin builtin) const { return isPathBuiltin(builtin); }

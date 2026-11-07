@@ -1,5 +1,4 @@
 #include "compiler/lower/functions/tail_call_lowerer/tail_call_lowerer.h"
-#include "compiler/check/checker/checker.h"
 #include "compiler/library/regex/matcher_builder/matcher_builder.h"
 #include "compiler/lower/expr/expr_lowerer/expr_lowerer.h"
 #include "compiler/lower/expr/truth_lowerer/truth_lowerer.h"
@@ -11,6 +10,9 @@
 #include "compiler/lower/module_builder/module_builder.h"
 #include "compiler/lower/stmt/stmt_lowerer/stmt_lowerer.h"
 #include "compiler/lower/types/optional_lowerer/optional_lowerer.h"
+#include "compiler/pipeline/check_program/ast_walker/ast_walker.h"
+#include "compiler/program/ast/ast.h"
+#include "compiler/program/types/types.h"
 #include "llvm/ADT/STLExtras.h"
 #include <functional>
 
@@ -30,7 +32,7 @@ void TailCallLowerer::findTailGroups(llvm::ArrayRef<FunctionDecl *> functions) {
     if (!fn->body || !fn->sym || !fn->sym->ret || fn->isGenerator || fn->isAsync || fn->impl()) {
       continue;
     }
-    for (CallExpr *call : tailCallsIn(fn)) {
+    for (CallExpr *call : AstWalker::tailCallsIn(fn)) {
       auto target = llvm::find(functions, call->func()->decl);
       if (target == functions.end() || call->func()->ret != fn->sym->ret ||
           call->func()->decl->isGenerator || call->func()->decl->isAsync ||
@@ -83,7 +85,7 @@ void TailCallLowerer::findTailGroups(llvm::ArrayRef<FunctionDecl *> functions) {
       this->lowering.tailGroupOf_[functions[member]] = &group;
     }
     for (FunctionDecl *member : group.members) {
-      for (CallExpr *call : tailCallsIn(member)) {
+      for (CallExpr *call : AstWalker::tailCallsIn(member)) {
         if (llvm::is_contained(group.members, call->func()->decl) &&
             call->func()->ret == member->sym->ret) {
           this->lowering.tailJumps_.insert(call);
@@ -181,7 +183,7 @@ void TailCallLowerer::emitTailGroup(Lowering::TailGroup &group) {
     this->lowering.tailStatements_.clear();
     if (this->lowering.returnType_->isVoid()) {
       std::vector<Stmt *> stmts;
-      tailStatementsOf(member->body, true, stmts);
+      AstWalker::tailStatementsOf(member->body, true, stmts);
       for (Stmt *stmt : stmts) {
         if (this->tailCall(cast<ExprStmt>(stmt)->expr)) {
           this->lowering.tailStatements_.insert(stmt);
@@ -246,7 +248,7 @@ CallExpr *TailCallLowerer::tailCall(Expr *value) const {
 
 bool TailCallLowerer::hasTailCall(Expr *value) const {
   std::vector<CallExpr *> calls;
-  tailCallsOf(value, calls);
+  AstWalker::tailCallsOf(value, calls);
 
   return llvm::any_of(calls, [&](CallExpr *call) { return this->tailCall(call) != nullptr; });
 }

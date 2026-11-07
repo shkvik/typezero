@@ -1,5 +1,4 @@
 #include "compiler/lower/async/promise_lowerer/promise_lowerer.h"
-#include "compiler/check/checker/checker.h"
 #include "compiler/library/process/process_lowerer/process_lowerer.h"
 #include "compiler/lower/async/async_lowerer/async_lowerer.h"
 #include "compiler/lower/async/promise_combine_lowerer/promise_combine_lowerer.h"
@@ -16,6 +15,8 @@
 #include "compiler/lower/types/union_lowerer/union_lowerer.h"
 #include "compiler/lower/values/string_lowerer/string_lowerer.h"
 #include "compiler/memory/memory_plan/memory_plan.h"
+#include "compiler/program/ast/ast.h"
+#include "compiler/program/types/types.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/IR/MDBuilder.h"
 

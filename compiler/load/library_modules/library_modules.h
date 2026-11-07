@@ -7,6 +7,9 @@
 
 namespace tz {
 
+inline constexpr llvm::StringLiteral kSubtleName = "%subtle";
+inline constexpr llvm::StringLiteral kIntlLocaleName = "%IntlLocale";
+
 class LibraryModules {
 public:
   explicit LibraryModules(Loader &loader);

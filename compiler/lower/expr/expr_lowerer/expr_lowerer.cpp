@@ -1,5 +1,4 @@
 #include "compiler/lower/expr/expr_lowerer/expr_lowerer.h"
-#include "compiler/check/types/type_relations/type_relations.h"
 #include "compiler/library/bytes/bytes_lowerer/bytes_lowerer.h"
 #include "compiler/library/decimal/decimal_lowerer/decimal_lowerer.h"
 #include "compiler/library/json/json_lowerer/json_lowerer.h"
@@ -36,6 +35,7 @@
 #include "compiler/lower/values/array_method_lowerer/array_method_lowerer.h"
 #include "compiler/lower/values/number_lowerer/number_lowerer.h"
 #include "compiler/lower/values/string_lowerer/string_lowerer.h"
+#include "compiler/pipeline/check_program/types/type_relations/type_relations.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/IR/Intrinsics.h"
 #include "llvm/IR/MDBuilder.h"

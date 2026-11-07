@@ -1,15 +1,15 @@
 #include "compiler/library/process/process_feature/process_feature.h"
-#include "compiler/check/checker/checker.h"
-#include "compiler/library/process/process_checker/process_checker.h"
 #include "compiler/library/process/process_exports/process_exports.h"
 #include "compiler/library/process/process_lowerer/process_lowerer.h"
 #include "compiler/lower/lowering/lowering.h"
+#include "compiler/pipeline/check_program/check_state/check_state.h"
+#include "compiler/pipeline/check_program/topics/process/process_checker/process_checker.h"
 
 namespace tz {
 
-Expr *ProcessFeature::checkStaticCall(Checker &checker, CallExpr *call, MemberExpr *member,
+Expr *ProcessFeature::checkStaticCall(CheckState &state, CallExpr *call, MemberExpr *member,
                                       const Type *) const {
-  return checker.processChecker().checkProcessCall(call, member);
+  return ProcessChecker(state).checkProcessCall(call, member);
 }
 
 llvm::ArrayRef<llvm::StringLiteral> ProcessFeature::typeArgFreeGlobals() const {

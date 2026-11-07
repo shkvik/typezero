@@ -1,0 +1,383 @@
+#include "compiler/pipeline/check_program/flow/loop_scanner/loop_scanner.h"
+#include "compiler/pipeline/check_program/scopes/scopes.h"
+#include "compiler/pipeline/check_program/topics/expr/call_checker/call_checker.h"
+#include "compiler/pipeline/check_program/topics/objects/keyed_field_checker/keyed_field_checker.h"
+#include "llvm/ADT/STLExtras.h"
+
+using llvm::cast;
+using llvm::dyn_cast;
+using llvm::isa;
+
+namespace tz {
+
+namespace {
+
+const llvm::StringRef kGlobalFunctions[] = {"String",    "Number",
+                                            "parseInt",  "parseFloat",
+                                            "Boolean",   "encodeURIComponent",
+                                            "encodeURI", "decodeURIComponent",
+                                            "decodeURI", "ok",
+                                            "err"};
+}
+
+LoopScanner::LoopScanner(CheckState &owner)
+    : state(owner) {}
+
+LoopScan LoopScanner::scanLoop(llvm::ArrayRef<const Stmt *> stmts,
+                               llvm::ArrayRef<const Expr *> exprs) const {
+  LoopScan scan;
+  for (const Stmt *stmt : stmts) {
+    if (stmt) {
+      this->scanStmt(stmt, scan, 0);
+    }
+  }
+  for (const Expr *expr : exprs) {
+    if (expr) {
+      this->scanExpr(expr, scan, 0);
+    }
+  }
+
+  return scan;
+}
+
+bool LoopScanner::namesIterator(const Expr *expr) const {
+  auto *name = dyn_cast<NameExpr>(expr);
+  const VarSymbol *var = name ? Scopes(this->state).lookup(name->name).var() : nullptr;
+
+  return var && var->type && var->type->nonOptional()->isIterator();
+}
+
+void LoopScanner::scanStmt(const Stmt *stmt, LoopScan &scan, unsigned depth) const {
+  switch (stmt->kind()) {
+  case Stmt::Kind::Block:
+    for (const Stmt *s : cast<BlockStmt>(stmt)->body) {
+      this->scanStmt(s, scan, depth);
+    }
+    break;
+  case Stmt::Kind::VarDecl:
+    for (const VarDeclarator &d : cast<VarDeclStmt>(stmt)->decls) {
+      if (d.init) {
+        this->scanExpr(d.init, scan, depth);
+      }
+      if (d.destructured() && d.init && this->namesIterator(d.init)) {
+        scan.callsFunctions = true;
+      }
+    }
+    break;
+  case Stmt::Kind::Function:
+    this->scanStmt(cast<FunctionDecl>(stmt)->body, scan, depth + 1);
+    break;
+  case Stmt::Kind::Continue:
+  case Stmt::Kind::Empty:
+  case Stmt::Kind::Debugger:
+    break;
+  case Stmt::Kind::Expr:
+    this->scanExpr(cast<ExprStmt>(stmt)->expr, scan, depth);
+    break;
+  case Stmt::Kind::If: {
+    auto *s = cast<IfStmt>(stmt);
+    this->scanExpr(s->cond, scan, depth);
+    this->scanStmt(s->thenStmt, scan, depth);
+    if (s->elseStmt) {
+      this->scanStmt(s->elseStmt, scan, depth);
+    }
+    break;
+  }
+  case Stmt::Kind::While: {
+    auto *s = cast<WhileStmt>(stmt);
+    this->scanExpr(s->cond, scan, depth + 1);
+    this->scanStmt(s->body, scan, depth + 1);
+    break;
+  }
+  case Stmt::Kind::DoWhile: {
+    auto *s = cast<DoWhileStmt>(stmt);
+    this->scanStmt(s->body, scan, depth + 1);
+    this->scanExpr(s->cond, scan, depth + 1);
+    break;
+  }
+  case Stmt::Kind::For: {
+    auto *s = cast<ForStmt>(stmt);
+    if (s->init) {
+      this->scanStmt(s->init, scan, depth + 1);
+    }
+    if (s->cond) {
+      this->scanExpr(s->cond, scan, depth + 1);
+    }
+    if (s->step) {
+      this->scanExpr(s->step, scan, depth + 1);
+    }
+    this->scanStmt(s->body, scan, depth + 1);
+    break;
+  }
+  case Stmt::Kind::ForOf: {
+    auto *s = cast<ForOfStmt>(stmt);
+    if (s->isAwait && !scan.functionDepth) {
+      scan.awaits = true;
+    }
+    this->scanExpr(s->iterable, scan, depth);
+    if (this->namesIterator(s->iterable)) {
+      scan.callsFunctions = true;
+    }
+    this->scanStmt(s->body, scan, depth + 1);
+    break;
+  }
+  case Stmt::Kind::Switch: {
+    auto *s = cast<SwitchStmt>(stmt);
+    this->scanExpr(s->discriminant, scan, depth);
+    for (const SwitchCase &c : s->cases) {
+      if (c.test) {
+        this->scanExpr(c.test, scan, depth);
+      }
+    }
+    ++scan.switches;
+    for (const SwitchCase &c : s->cases) {
+      for (const Stmt *body : c.body) {
+        this->scanStmt(body, scan, depth);
+      }
+    }
+    --scan.switches;
+    break;
+  }
+  case Stmt::Kind::Labeled: {
+    auto *s = cast<LabeledStmt>(stmt);
+    scan.innerLabels.push_back(s->label);
+    this->scanStmt(s->body, scan, depth);
+    scan.innerLabels.pop_back();
+    break;
+  }
+  case Stmt::Kind::Return:
+    if (auto *value = cast<ReturnStmt>(stmt)->value) {
+      this->scanExpr(value, scan, depth);
+    }
+    break;
+  case Stmt::Kind::Break: {
+    llvm::StringRef label = cast<BreakStmt>(stmt)->label;
+    if (label.empty() ? depth == 0 && scan.switches == 0
+                      : !llvm::is_contained(scan.innerLabels, label)) {
+      scan.breaks = true;
+    }
+    break;
+  }
+  case Stmt::Kind::TypeAlias:
+  case Stmt::Kind::Enum:
+  case Stmt::Kind::Class:
+    break;
+  }
+}
+
+void LoopScanner::scanExpr(const Expr *expr, LoopScan &scan, unsigned depth) const {
+  auto change = [&](const Expr *target, int64_t delta) {
+    auto *name = dyn_cast<NameExpr>(target);
+    if (!name) {
+      return;
+    }
+    LoopScan::Change &c = scan.changes[name->name];
+    c.delta = ++c.count == 1 ? delta : 0;
+    c.nested |= depth > 0;
+  };
+  auto step = [](const Expr *e) -> int64_t {
+    auto *lit = dyn_cast<IntLitExpr>(e);
+
+    return lit && lit->value >= 1 && lit->value <= uint64_t(kMaxLength) ? int64_t(lit->value) : 0;
+  };
+  auto isName = [](const Expr *e, const Expr *target) {
+    auto *a = dyn_cast<NameExpr>(e);
+    auto *b = dyn_cast<NameExpr>(target);
+
+    return a && b && a->name == b->name;
+  };
+  auto scanTarget = [&](const Expr *target) {
+    if (auto *index = dyn_cast<IndexExpr>(target)) {
+      this->scanExpr(index->object, scan, depth);
+      this->scanExpr(index->index, scan, depth);
+      scan.growsArrays = true;
+      scan.releasesElements = true;
+      KeyedFieldChecker(this->state).keyNames(index->index, [&](llvm::StringRef name) {
+        scan.fieldWrites.insert(name);
+      });
+    } else if (auto *member = dyn_cast<MemberExpr>(target)) {
+      this->scanExpr(member->object, scan, depth);
+      scan.fieldWrites.insert(member->name);
+      if (member->name == "length") {
+        scan.growsArrays = scan.shrinksArrays = true;
+        scan.releasesElements = true;
+      }
+    }
+  };
+
+  switch (expr->kind()) {
+  case Expr::Kind::IntLit:
+  case Expr::Kind::FloatLit:
+  case Expr::Kind::BoolLit:
+  case Expr::Kind::StringLit:
+  case Expr::Kind::Undefined:
+  case Expr::Kind::Name:
+    break;
+  case Expr::Kind::Template:
+    for (const Expr *e : cast<TemplateExpr>(expr)->exprs) {
+      this->scanExpr(e, scan, depth);
+    }
+    break;
+  case Expr::Kind::ArrayLit:
+    for (const ArrayLitExpr::Element &e : cast<ArrayLitExpr>(expr)->elements) {
+      this->scanExpr(e.expr, scan, depth);
+      if (e.spread && this->namesIterator(e.expr)) {
+        scan.callsFunctions = true;
+      }
+    }
+    break;
+  case Expr::Kind::ObjectLit:
+    for (const ObjectLitExpr::Property &p : cast<ObjectLitExpr>(expr)->props) {
+      if (p.key()) {
+        this->scanExpr(p.key(), scan, depth);
+      }
+      this->scanExpr(p.value, scan, depth);
+    }
+    break;
+  case Expr::Kind::Member:
+    this->scanExpr(cast<MemberExpr>(expr)->object, scan, depth);
+    break;
+  case Expr::Kind::Index: {
+    auto *index = cast<IndexExpr>(expr);
+    this->scanExpr(index->object, scan, depth);
+    this->scanExpr(index->index, scan, depth);
+    break;
+  }
+  case Expr::Kind::Unary:
+    this->scanExpr(cast<UnaryExpr>(expr)->operand, scan, depth);
+    break;
+  case Expr::Kind::Binary: {
+    auto *bin = cast<BinaryExpr>(expr);
+    this->scanExpr(bin->lhs, scan, depth);
+    this->scanExpr(bin->rhs, scan, depth);
+    break;
+  }
+  case Expr::Kind::Assign: {
+    auto *assign = cast<AssignExpr>(expr);
+    scanTarget(assign->target);
+    this->scanExpr(assign->value, scan, depth);
+    int64_t delta = 0;
+    if (assign->op && (*assign->op == BinaryOp::Add || *assign->op == BinaryOp::Sub)) {
+      delta = step(assign->value);
+      if (*assign->op == BinaryOp::Sub) {
+        delta = -delta;
+      }
+    } else if (auto *bin = dyn_cast<BinaryExpr>(assign->value); !assign->op && bin) {
+      if (bin->op == BinaryOp::Add && isName(bin->lhs, assign->target)) {
+        delta = step(bin->rhs);
+      } else if (bin->op == BinaryOp::Add && isName(bin->rhs, assign->target)) {
+        delta = step(bin->lhs);
+      } else if (bin->op == BinaryOp::Sub && isName(bin->lhs, assign->target)) {
+        delta = -step(bin->rhs);
+      }
+    }
+    change(assign->target, delta);
+    break;
+  }
+  case Expr::Kind::Update: {
+    auto *update = cast<UpdateExpr>(expr);
+    scanTarget(update->target);
+    change(update->target, update->increment ? 1 : -1);
+    break;
+  }
+  case Expr::Kind::Call: {
+    auto *call = cast<CallExpr>(expr);
+    for (const Expr *arg : call->args) {
+      this->scanExpr(arg, scan, depth);
+    }
+    if (auto *member = dyn_cast<MemberExpr>(call->callee)) {
+      if (CallChecker(this->state).isGlobalName(member->object, "console") ||
+          CallChecker(this->state).isGlobalName(member->object, "Math")) {
+        break;
+      }
+      this->scanExpr(member->object, scan, depth);
+      llvm::StringRef method = member->name;
+      if (this->state.getProgramUse().hasFieldName(method)) {
+        scan.callsFunctions = true;
+      }
+      if (method == "push" || method == "unshift") {
+        scan.growsArrays = true;
+      } else if (method == "pop" || method == "shift") {
+        scan.shrinksArrays = scan.releasesElements = true;
+      } else if (method == "splice") {
+        scan.growsArrays = scan.shrinksArrays = scan.releasesElements = true;
+      } else if (method == "fill") {
+        scan.releasesElements = true;
+      }
+      static const char *const callbacks[] = {
+          "map",     "filter", "forEach", "reduce",   "reduceRight",   "find",      "findIndex",
+          "some",    "every",  "flatMap", "findLast", "findLastIndex", "sort",      "mapErr",
+          "andThen", "orElse", "match",   "andTee",   "orTee",         "andThrough"};
+      if (llvm::is_contained(callbacks, method) && !call->args.empty() &&
+          !isa<FunctionExpr>(call->args.front())) {
+        scan.callsFunctions = true;
+      }
+      if (method == "next" || method == "toArray" ||
+          (method == "from" &&
+           (CallChecker(this->state).isGlobalName(member->object, "Array") ||
+            CallChecker(this->state).isGlobalName(member->object, "Iterator")))) {
+        scan.callsFunctions = true;
+      }
+    } else if (!llvm::any_of(kGlobalFunctions, [&](llvm::StringRef name) {
+                 return CallChecker(this->state).isGlobalName(call->callee, name);
+               })) {
+      scan.callsFunctions = true;
+    }
+    break;
+  }
+  case Expr::Kind::New:
+    if (const Expr *callee = cast<NewExpr>(expr)->callee) {
+      this->scanExpr(callee, scan, depth);
+    }
+    for (const Expr *arg : cast<NewExpr>(expr)->args) {
+      this->scanExpr(arg, scan, depth);
+    }
+    if (cast<NewExpr>(expr)->name != "Array") {
+      scan.callsFunctions = true;
+    }
+    break;
+  case Expr::Kind::Conditional: {
+    auto *cond = cast<ConditionalExpr>(expr);
+    this->scanExpr(cond->cond, scan, depth);
+    this->scanExpr(cond->thenExpr, scan, depth);
+    this->scanExpr(cond->elseExpr, scan, depth);
+    break;
+  }
+  case Expr::Kind::Cast:
+    this->scanExpr(cast<CastExpr>(expr)->operand, scan, depth);
+    break;
+  case Expr::Kind::Sequence:
+    for (const Expr *e : cast<SequenceExpr>(expr)->exprs) {
+      this->scanExpr(e, scan, depth);
+    }
+    break;
+  case Expr::Kind::OptionalChain:
+    this->scanExpr(cast<OptionalChainExpr>(expr)->chain, scan, depth);
+    break;
+  case Expr::Kind::Function:
+    ++scan.functionDepth;
+    this->scanStmt(cast<FunctionExpr>(expr)->fn->body, scan, depth + 1);
+    --scan.functionDepth;
+    break;
+  case Expr::Kind::Yield:
+    if (const Expr *value = cast<YieldExpr>(expr)->value) {
+      this->scanExpr(value, scan, depth);
+    }
+    scan.callsFunctions = true;
+    break;
+  case Expr::Kind::Await:
+    if (!scan.functionDepth) {
+      scan.awaits = true;
+    }
+    this->scanExpr(cast<AwaitExpr>(expr)->value, scan, depth);
+    scan.callsFunctions = true;
+    break;
+  case Expr::Kind::Class:
+    scan.callsFunctions = true;
+    break;
+  case Expr::Kind::RegexLit:
+    break;
+  }
+}
+
+}

@@ -74,7 +74,7 @@ compiler/         весь C++ → tz.exe
   cli/            команды tz: разбор аргументов, build, run, init, add, port, licenses
   pipeline/       конвейер проходов от .tz до exe
   program/        что идёт по конвейеру
-  load/ declare/ infer/ check/ instances/ whole_program/ overflow/ parallel/ memory/ lower/
+  load/ pipeline/check_program/ (declare … overflow) parallel/ memory/ lower/
   optimize/ emit/ link/                                                       проходы
   packages/       package.json, package-lock.json, JSR, git, tz port
   library/        C++-часть тем: feature/, feature_registry/, tz_modules/, <тема>/
@@ -97,7 +97,15 @@ tests/ docs/ bench/ examples/ third_party/
 ```
 compiler/
   CMakeLists.txt     все .cpp под compiler/ по маске
-  pipeline/          pipeline/ — checkProgram и buildProgram; build_options/, runtime_files/
+  pipeline/          pipeline/ — buildProgram; build_options/, runtime_files/, pass_times/;
+                     check_program/ — checkProgram и всё, что вызывает только он:
+                       check_state/ (CheckState — хранилище групп данных), ast_walker/, scopes/,
+                       facts/, flow/, types/, generics/, event_rounds/, shared_helpers/;
+                       проходы declare/ infer/ check/ (check_pass/, top_level_checker/)
+                       instances/ whole_program/ overflow/;
+                       topics/<тема>/<класс>/ — темы проверки: языка (async classes declarations
+                       expr functions iterators objects stmt values) и библиотеки (чекеры из
+                       library/: bytes crypto date events fs intl json …)
   cli/               main.cpp, args/, command_line/, *_command/ (build, run, init, add, remove,
                      update, port, licenses, version, explain), error_printer/
   program/           program/, module/, source_file/, ast/ (по папке на узел; ast.h — все разом),
@@ -110,17 +118,6 @@ compiler/
                      pattern_parser/, expr_parser/, call_parser/, primary_parser/, template_parser/,
                      function_parser/, class_parser/, decl_parser/, module_parser/, type_parser/,
                      object_type_parser/, function_type_parser/
-  declare/           declare_pass/, prelude/, module_declarer/, import_binder/, type_declarer/,
-                     constant_folder/, class_declarer/, function_names/
-  infer/             infer_pass/, call_cycles/, return_inferrer/
-  check/             check_pass/, checker/ (Checker), event_rounds/, scopes/, facts/,
-                     top_level_checker/; expr/ stmt/ flow/ types/ values/ objects/ functions/
-                     classes/ generics/ errors/ iterators/ async/ — по папке на класс
-  instances/         instances_pass/, late_classes/, constructor_calls/
-  whole_program/     whole_program_pass/, load_order/, unused/, wide_writes/, flows/, flow_*/
-  overflow/          overflow_pass/, overflow_check/ (общее), value_range/, program_scan/, slots/,
-                     executor/, evaluator/, assign_evaluator/, builtin_evaluator/, call_ranges/,
-                     loop_ranges/, narrowing/, overflow_warnings/
   parallel/          parallel_pass/, analysis/ (общее), pieces/, code_walk/, expr_walk/, call_walk/,
                      call_resolver/, alias_analysis/, escape_scan/, library_effects/,
                      builtin_effects/, conflicts/, parallel_analysis/, explainer/,
@@ -138,8 +135,8 @@ compiler/
                      git_client/, http_client/, json_parser/, scanner/, port/…
   library/           feature/, feature_registry/; темы: builtin_modules bytes child_process
                      console crypto date decimal events fs intl json math os path process
-                     reflect regex result stream tz_modules weakref — в каждой <тема>_feature/
-                     и классы проверки и IR
+                     reflect regex result stream tz_modules weakref — в каждой <тема>_feature/,
+                     классы IR и общие помощники; классы проверки — в pipeline/check_program/topics/
   knowledge/         записи о программе для редактора и ИИ: knowledge_pass/, knowledge_answers/…
   lsp/               tz lsp: lsp_server/, lsp_check/ (дочерняя проверка), lsp_features/…
   mcp/               tz mcp: mcp_server/

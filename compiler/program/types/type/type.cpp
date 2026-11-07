@@ -1663,4 +1663,49 @@ llvm::ArrayRef<const Type *> Type::patternHoles() const {
   return this->isPattern() ? llvm::ArrayRef<const Type *>(params_) : llvm::ArrayRef<const Type *>();
 }
 
+bool Type::holdsFunctions() const {
+  const Type *held = this;
+  while (held->isOptional() || held->isArray()) {
+    held = held->inner();
+  }
+
+  return held->isFunction();
+}
+
+bool Type::holdsObjects() const {
+  const Type *held = this;
+  while (held->isOptional() || held->isArray()) {
+    held = held->inner();
+  }
+
+  return held->isObject() || held->isDict();
+}
+
+bool Type::holdsDates() const {
+  const Type *held = this;
+  while (held->isOptional() || held->isArray()) {
+    held = held->inner();
+  }
+
+  return held->isDate();
+}
+
+bool Type::holdsResults() const {
+  const Type *held = this;
+  while (held->isOptional() || held->isArray()) {
+    held = held->inner();
+  }
+
+  return held->isResult();
+}
+
+bool Type::holdsPromises() const {
+  const Type *held = this;
+  while (held->isOptional() || held->isArray()) {
+    held = held->inner();
+  }
+
+  return held->isPromise();
+}
+
 }

@@ -1,6 +1,5 @@
 #include "compiler/library/fs/fs_lowerer/fs_lowerer.h"
 #include "compiler/library/date/date_lowerer/date_lowerer.h"
-#include "compiler/library/fs/fs_error_types/fs_error_types.h"
 #include "compiler/library/fs/fs_promises_lowerer/fs_promises_lowerer.h"
 #include "compiler/library/process/process_lowerer/process_lowerer.h"
 #include "compiler/library/result/result_lowerer/result_lowerer.h"
@@ -13,6 +12,7 @@
 #include "compiler/lower/objects/object_maker/object_maker.h"
 #include "compiler/lower/types/optional_lowerer/optional_lowerer.h"
 #include "compiler/lower/values/string_lowerer/string_lowerer.h"
+#include "compiler/pipeline/check_program/topics/fs/fs_error_types/fs_error_types.h"
 #include "llvm/Support/ErrorHandling.h"
 #include <vector>
 

@@ -4,6 +4,7 @@
 #include "compiler/cli/exit_codes/exit_codes.h"
 #include "compiler/cli/project_packages/project_packages.h"
 #include "compiler/pipeline/build_options/build_options.h"
+#include "compiler/pipeline/check_program/check_program.h"
 #include "compiler/pipeline/pipeline/pipeline.h"
 #include "compiler/program/program/program.h"
 #include "llvm/Support/FileSystem.h"

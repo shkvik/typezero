@@ -1,6 +1,5 @@
 #include "compiler/library/crypto/crypto_lowerer/crypto_lowerer.h"
 #include "compiler/library/crypto/crypto_api/crypto_api.h"
-#include "compiler/library/crypto/crypto_error_types/crypto_error_types.h"
 #include "compiler/library/date/date_lowerer/date_lowerer.h"
 #include "compiler/library/process/process_lowerer/process_lowerer.h"
 #include "compiler/library/result/err_sites/err_sites.h"
@@ -17,6 +16,7 @@
 #include "compiler/lower/types/optional_lowerer/optional_lowerer.h"
 #include "compiler/lower/types/union_layout/union_layout.h"
 #include "compiler/lower/values/string_lowerer/string_lowerer.h"
+#include "compiler/pipeline/check_program/topics/crypto/crypto_error_types/crypto_error_types.h"
 #include "llvm/Support/ErrorHandling.h"
 
 using llvm::cast;

@@ -8,7 +8,7 @@ class ConsoleFeature : public Feature {
 public:
   llvm::StringRef name() const override { return "console"; }
 
-  Expr *checkStaticCall(Checker &checker, CallExpr *call, MemberExpr *member,
+  Expr *checkStaticCall(CheckState &state, CallExpr *call, MemberExpr *member,
                         const Type *expected) const override;
   llvm::ArrayRef<llvm::StringLiteral> typeArgFreeGlobals() const override;
   bool lowers(Builtin builtin) const override;

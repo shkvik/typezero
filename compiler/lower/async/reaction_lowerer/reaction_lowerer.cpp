@@ -1,5 +1,4 @@
 #include "compiler/lower/async/reaction_lowerer/reaction_lowerer.h"
-#include "compiler/check/checker/checker.h"
 #include "compiler/lower/async/async_lowerer/async_lowerer.h"
 #include "compiler/lower/async/promise_lowerer/promise_lowerer.h"
 #include "compiler/lower/classes/class_descriptors/class_descriptors.h"
@@ -12,6 +11,8 @@
 #include "compiler/lower/memory/store_lowerer/store_lowerer.h"
 #include "compiler/lower/module_builder/module_builder.h"
 #include "compiler/memory/memory_plan/memory_plan.h"
+#include "compiler/program/ast/ast.h"
+#include "compiler/program/types/types.h"
 #include "llvm/ADT/STLExtras.h"
 
 using llvm::cast;

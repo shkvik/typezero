@@ -1,19 +1,19 @@
 #include "compiler/library/fs/fs_feature/fs_feature.h"
-#include "compiler/check/checker/checker.h"
-#include "compiler/library/fs/fs_checker/fs_checker.h"
-#include "compiler/library/fs/fs_declarer/fs_declarer.h"
-#include "compiler/library/fs/fs_error_types/fs_error_types.h"
 #include "compiler/library/fs/fs_exports/fs_exports.h"
 #include "compiler/library/fs/fs_lowerer/fs_lowerer.h"
-#include "compiler/library/fs/fs_promises_checker/fs_promises_checker.h"
-#include "compiler/library/fs/readline_checker/readline_checker.h"
 #include "compiler/lower/lowering/lowering.h"
+#include "compiler/pipeline/check_program/check_state/check_state.h"
+#include "compiler/pipeline/check_program/topics/fs/fs_checker/fs_checker.h"
+#include "compiler/pipeline/check_program/topics/fs/fs_declarer/fs_declarer.h"
+#include "compiler/pipeline/check_program/topics/fs/fs_error_types/fs_error_types.h"
+#include "compiler/pipeline/check_program/topics/fs/fs_promises_checker/fs_promises_checker.h"
+#include "compiler/pipeline/check_program/topics/fs/readline_checker/readline_checker.h"
 
 namespace tz {
 
-void FsFeature::declare(Checker &checker) const {
-  checker.fsDeclarer().declareFsClasses();
-  checker.fsErrorTypes().declare();
+void FsFeature::declare(CheckState &state) const {
+  FsDeclarer(state).declareFsClasses();
+  FsErrorTypes(state).declare();
 }
 
 std::optional<std::string> FsFeature::exportProblem(NodeModule module, llvm::StringRef exportName,
@@ -37,40 +37,40 @@ std::optional<std::string> FsFeature::exportProblem(NodeModule module, llvm::Str
   return std::nullopt;
 }
 
-Expr *FsFeature::checkModuleCall(Checker &checker, CallExpr *call, NodeModule module,
+Expr *FsFeature::checkModuleCall(CheckState &state, CallExpr *call, NodeModule module,
                                  llvm::StringRef fn, llvm::SMLoc loc, const Type *) const {
   if (module == NodeModule::Fs || (module == NodeModule::TzFs && fn == "replaceSync")) {
-    Expr *checked = checker.fsChecker().checkFsCall(call, fn, loc);
+    Expr *checked = FsChecker(state).checkFsCall(call, fn, loc);
     if (auto *done = llvm::dyn_cast<CallExpr>(checked);
         done && isFsBuiltin(done->builtin()) && !done->type->isError()) {
-      done->type = Type::result(done->type, checker.fsErrorTypes().ofCall(done));
+      done->type = Type::result(done->type, FsErrorTypes(state).ofCall(done));
     }
     return checked;
   }
   if (module == NodeModule::FsPromises || (module == NodeModule::TzFs && fn == "replace")) {
-    return checker.fsPromisesChecker().checkFsPromisesCall(call, fn, loc);
+    return FsPromisesChecker(state).checkFsPromisesCall(call, fn, loc);
   }
   if (module == NodeModule::Readline || module == NodeModule::ReadlinePromises) {
-    return checker.readlineChecker().checkReadlineCall(call, module, fn, loc);
+    return ReadlineChecker(state).checkReadlineCall(call, module, fn, loc);
   }
   if (module == NodeModule::TzIo) {
-    return checker.fsChecker().checkTzIoCall(call, loc);
+    return FsChecker(state).checkTzIoCall(call, loc);
   }
 
   return nullptr;
 }
 
-Expr *FsFeature::checkModuleValue(Checker &checker, NodeModule module, llvm::StringRef exportName,
+Expr *FsFeature::checkModuleValue(CheckState &state, NodeModule module, llvm::StringRef exportName,
                                   Expr *expr) const {
   if (module != NodeModule::Fs && module != NodeModule::FsPromises) {
     return nullptr;
   }
 
-  return checker.fsChecker().checkFsValue(exportName, expr);
+  return FsChecker(state).checkFsValue(exportName, expr);
 }
 
-Expr *FsFeature::checkModuleMember(Checker &checker, MemberExpr *member) const {
-  return checker.fsChecker().checkFsConstant(member);
+Expr *FsFeature::checkModuleMember(CheckState &state, MemberExpr *member) const {
+  return FsChecker(state).checkFsConstant(member);
 }
 
 bool FsFeature::lowers(Builtin builtin) const { return isFsModuleBuiltin(builtin); }

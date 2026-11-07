@@ -1,53 +1,55 @@
 #include "compiler/library/crypto/crypto_feature/crypto_feature.h"
-#include "compiler/check/checker/checker.h"
-#include "compiler/check/expr/call_checker/call_checker.h"
-#include "compiler/library/crypto/crypto_checker/crypto_checker.h"
-#include "compiler/library/crypto/crypto_error_types/crypto_error_types.h"
-#include "compiler/library/crypto/crypto_function_checker/crypto_function_checker.h"
 #include "compiler/library/crypto/crypto_lowerer/crypto_lowerer.h"
-#include "compiler/library/crypto/crypto_method_checker/crypto_method_checker.h"
 #include "compiler/library/crypto/crypto_names/crypto_names.h"
-#include "compiler/library/crypto/subtle_call_checker/subtle_call_checker.h"
-#include "compiler/library/crypto/web_crypto_checker/web_crypto_checker.h"
-#include "compiler/library/tz_modules/library_calls/library_calls.h"
 #include "compiler/lower/lowering/lowering.h"
+#include "compiler/pipeline/check_program/check_state/check_state.h"
+#include "compiler/pipeline/check_program/topics/crypto/crypto_checker/crypto_checker.h"
+#include "compiler/pipeline/check_program/topics/crypto/crypto_error_types/crypto_error_types.h"
+#include "compiler/pipeline/check_program/topics/crypto/crypto_function_checker/crypto_function_checker.h"
+#include "compiler/pipeline/check_program/topics/crypto/crypto_method_checker/crypto_method_checker.h"
+#include "compiler/pipeline/check_program/topics/crypto/subtle_call_checker/subtle_call_checker.h"
+#include "compiler/pipeline/check_program/topics/crypto/web_crypto_checker/web_crypto_checker.h"
+#include "compiler/pipeline/check_program/topics/expr/call_checker/call_checker.h"
+#include "compiler/pipeline/check_program/topics/tz_modules/library_calls/library_calls.h"
 #include "llvm/ADT/STLExtras.h"
 
 namespace tz {
 
-void CryptoFeature::declare(Checker &checker) const { checker.cryptoErrorTypes().declare(); }
+void CryptoFeature::declare(CheckState &state) const {
+  CryptoErrorTypes(state).declare();
+}
 
-Expr *CryptoFeature::checkStaticCall(Checker &checker, CallExpr *call, MemberExpr *member,
+Expr *CryptoFeature::checkStaticCall(CheckState &state, CallExpr *call, MemberExpr *member,
                                      const Type *) const {
-  if (checker.cryptoChecker().isX509Class(member->object)) {
-    return checker.cryptoChecker().checkX509Parse(call, member);
+  if (CryptoChecker(state).isX509Class(member->object)) {
+    return CryptoChecker(state).checkX509Parse(call, member);
   }
-  if (!checker.callChecker().isGlobalName(member->object, "crypto")) {
+  if (!CallChecker(state).isGlobalName(member->object, "crypto")) {
     return nullptr;
   }
 
-  return checker.cryptoChecker().checkWebCryptoCall(call, member);
+  return CryptoChecker(state).checkWebCryptoCall(call, member);
 }
 
-Expr *CryptoFeature::checkMethodCall(Checker &checker, CallExpr *call, MemberExpr *member,
+Expr *CryptoFeature::checkMethodCall(CheckState &state, CallExpr *call, MemberExpr *member,
                                      const Type *) const {
   const Type *receiver = member->object->type;
   if (!receiver->isCrypto()) {
     return nullptr;
   }
 
-  return checker.cryptoMethodChecker().checkCryptoMethod(call, member);
+  return CryptoMethodChecker(state).checkCryptoMethod(call, member);
 }
 
-Expr *CryptoFeature::checkClassMethodCall(Checker &checker, CallExpr *call, MemberExpr *member,
+Expr *CryptoFeature::checkClassMethodCall(CheckState &state, CallExpr *call, MemberExpr *member,
                                           const Type *expected) const {
   const Type *receiver = member->object->type;
-  if (!receiver->isClass() || !checker.webCryptoChecker().isSubtleClass(receiver, "SubtleCrypto") ||
-      checker.libraryCalls().inLibrary(call->loc())) {
+  if (!receiver->isClass() || !WebCryptoChecker(state).isSubtleClass(receiver, "SubtleCrypto") ||
+      LibraryCalls(state).inLibrary(call->loc())) {
     return nullptr;
   }
 
-  return checker.subtleCallChecker().checkSubtleCall(call, member, expected);
+  return SubtleCallChecker(state).checkSubtleCall(call, member, expected);
 }
 
 std::optional<std::string> CryptoFeature::exportProblem(NodeModule module,
@@ -63,26 +65,26 @@ std::optional<std::string> CryptoFeature::exportProblem(NodeModule module,
   return cryptoExportProblem(exportName, path);
 }
 
-Expr *CryptoFeature::checkModuleCall(Checker &checker, CallExpr *call, NodeModule module,
+Expr *CryptoFeature::checkModuleCall(CheckState &state, CallExpr *call, NodeModule module,
                                      llvm::StringRef fn, llvm::SMLoc loc, const Type *) const {
   if (module != NodeModule::Crypto && module != NodeModule::TzCrypto) {
     return nullptr;
   }
 
-  return checker.cryptoFunctionChecker().checkCryptoCall(call, fn, loc);
+  return CryptoFunctionChecker(state).checkCryptoCall(call, fn, loc);
 }
 
-Expr *CryptoFeature::checkModuleValue(Checker &checker, NodeModule module,
+Expr *CryptoFeature::checkModuleValue(CheckState &state, NodeModule module,
                                       llvm::StringRef exportName, Expr *expr) const {
   if (module != NodeModule::Crypto) {
     return nullptr;
   }
 
-  return checker.cryptoChecker().checkCryptoValue(exportName, expr);
+  return CryptoChecker(state).checkCryptoValue(exportName, expr);
 }
 
-Expr *CryptoFeature::checkModuleMember(Checker &checker, MemberExpr *member) const {
-  return checker.cryptoChecker().checkCryptoModuleMember(member);
+Expr *CryptoFeature::checkModuleMember(CheckState &state, MemberExpr *member) const {
+  return CryptoChecker(state).checkCryptoModuleMember(member);
 }
 
 bool CryptoFeature::lowers(Builtin builtin) const { return isCryptoBuiltin(builtin); }

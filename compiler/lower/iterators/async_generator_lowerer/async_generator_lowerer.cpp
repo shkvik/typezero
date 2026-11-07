@@ -1,5 +1,4 @@
 #include "compiler/lower/iterators/async_generator_lowerer/async_generator_lowerer.h"
-#include "compiler/check/checker/checker.h"
 #include "compiler/library/process/process_lowerer/process_lowerer.h"
 #include "compiler/lower/async/async_lowerer/async_lowerer.h"
 #include "compiler/lower/async/promise_lowerer/promise_lowerer.h"
@@ -15,6 +14,9 @@
 #include "compiler/lower/stmt/exit_lowerer/exit_lowerer.h"
 #include "compiler/lower/stmt/stmt_lowerer/stmt_lowerer.h"
 #include "compiler/lower/types/optional_lowerer/optional_lowerer.h"
+#include "compiler/pipeline/check_program/topics/async/async_checker/async_checker.h"
+#include "compiler/program/ast/ast.h"
+#include "compiler/program/types/types.h"
 #include "llvm/IR/MDBuilder.h"
 
 using llvm::cast;
@@ -175,7 +177,7 @@ void AsyncGeneratorLowerer::emitAsyncGeneratorReturn(ReturnStmt *stmt) {
     const Type *type = stmt->value->type;
     llvm::Value *value =
         this->awaitValueOf(this->lowering.exprLowerer().emitExpr(stmt->value), type, stmt->loc());
-    const Type *given = Checker::awaitedTypeOf(type);
+    const Type *given = AsyncChecker::awaitedType(type);
     if (value && !given->isVoid()) {
       this->lowering.refCounts().releaseValue(value, given);
     }
@@ -189,7 +191,8 @@ llvm::Value *AsyncGeneratorLowerer::awaitValueOf(llvm::Value *value, const Type 
     return this->lowering.asyncLowerer().awaitPromise(value, type, loc);
   }
   if (AsyncLowerer::holdsPromise(type)) {
-    return this->lowering.asyncLowerer().awaitUnion(value, type, Checker::awaitedTypeOf(type), loc);
+    return this->lowering.asyncLowerer().awaitUnion(value, type, AsyncChecker::awaitedType(type),
+                                                    loc);
   }
   this->lowering.asyncLowerer().suspendAsync(nullptr, loc);
 
@@ -255,7 +258,7 @@ llvm::Value *AsyncGeneratorLowerer::emitAsyncYield(YieldExpr *yield) {
     const Type *type = yield->value->type;
     value =
         this->awaitValueOf(this->lowering.exprLowerer().emitExpr(yield->value), type, yield->loc());
-    given = Checker::awaitedTypeOf(type);
+    given = AsyncChecker::awaitedType(type);
   } else {
     this->lowering.asyncLowerer().suspendAsync(nullptr, yield->loc());
   }
@@ -424,7 +427,7 @@ void AsyncGeneratorLowerer::emitForAwait(ForOfStmt *stmt) {
                    element](llvm::Value *value) -> llvm::Value * {
     llvm::Value *awaited = this->awaitValueOf(value, from, stmt->loc());
     this->lowering.asyncLowerer().suspendAsync(nullptr, stmt->loc());
-    const Type *given = Checker::awaitedTypeOf(from);
+    const Type *given = AsyncChecker::awaitedType(from);
     llvm::Value *converted =
         element->isUndefined() ? this->lowering.builder_.getFalse()
         : given->isVoid() ? this->lowering.optionalLowerer().undefinedValue(element)

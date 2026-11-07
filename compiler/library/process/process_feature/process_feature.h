@@ -8,7 +8,7 @@ class ProcessFeature : public Feature {
 public:
   llvm::StringRef name() const override { return "process"; }
 
-  Expr *checkStaticCall(Checker &checker, CallExpr *call, MemberExpr *member,
+  Expr *checkStaticCall(CheckState &state, CallExpr *call, MemberExpr *member,
                         const Type *expected) const override;
   llvm::ArrayRef<llvm::StringLiteral> typeArgFreeGlobals() const override;
   std::optional<std::string> exportProblem(NodeModule module, llvm::StringRef exportName,
