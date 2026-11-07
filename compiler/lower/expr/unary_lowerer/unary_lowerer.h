@@ -6,14 +6,14 @@ namespace tz {
 
 class UnaryLowerer {
 public:
-  explicit UnaryLowerer(Lowering &lowering);
+  explicit UnaryLowerer(Lowering &owner);
 
   llvm::Value *emitUnary(UnaryExpr *unary);
   llvm::Value *emitTypeOf(Expr *operand);
   llvm::Value *emitEnumName(IndexExpr *index);
 
 private:
-  Lowering &lowering_;
+  Lowering &lowering;
 };
 
 }

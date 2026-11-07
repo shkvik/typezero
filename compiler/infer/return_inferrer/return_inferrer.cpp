@@ -18,279 +18,363 @@
 #include "compiler/load/parser/parser.h"
 
 using llvm::cast;
-using llvm::dyn_cast;
-using llvm::dyn_cast_or_null;
-using llvm::isa;
 
 namespace tz {
 
-ReturnInferrer::ReturnInferrer(Checker &checker) : checker_(checker) {}
+ReturnInferrer::ReturnInferrer(Checker &owner)
+    : checker(owner) {}
 
 bool ReturnInferrer::returnsValue(const Stmt *stmt) {
   if (!stmt) {
     return false;
   }
+  auto caseReturns = [](const SwitchCase &c) {
+    return llvm::any_of(c.body, ReturnInferrer::returnsValue);
+  };
   switch (stmt->kind()) {
-  case Stmt::Kind::Return: {
-    const Expr *value = cast<ReturnStmt>(stmt)->value;
-    auto *unary = llvm::dyn_cast_or_null<UnaryExpr>(value);
-    return value && !(unary && unary->op == UnaryOp::Void);
+    case Stmt::Kind::Return: {
+      const Expr *value = cast<ReturnStmt>(stmt)->value;
+      auto *unary = llvm::dyn_cast_or_null<UnaryExpr>(value);
+      return value && !(unary && unary->op == UnaryOp::Void);
+    }
+    case Stmt::Kind::Block:
+      return llvm::any_of(cast<BlockStmt>(stmt)->body, ReturnInferrer::returnsValue);
+    case Stmt::Kind::If: {
+      const auto *branch = cast<IfStmt>(stmt);
+      return ReturnInferrer::returnsValue(branch->thenStmt) ||
+             ReturnInferrer::returnsValue(branch->elseStmt);
+    }
+    case Stmt::Kind::While:
+      return ReturnInferrer::returnsValue(cast<WhileStmt>(stmt)->body);
+    case Stmt::Kind::DoWhile:
+      return ReturnInferrer::returnsValue(cast<DoWhileStmt>(stmt)->body);
+    case Stmt::Kind::For:
+      return ReturnInferrer::returnsValue(cast<ForStmt>(stmt)->body);
+    case Stmt::Kind::ForOf:
+      return ReturnInferrer::returnsValue(cast<ForOfStmt>(stmt)->body);
+    case Stmt::Kind::Switch:
+      return llvm::any_of(cast<SwitchStmt>(stmt)->cases, caseReturns);
+    case Stmt::Kind::Labeled:
+      return ReturnInferrer::returnsValue(cast<LabeledStmt>(stmt)->body);
+    default:
+      return false;
   }
-  case Stmt::Kind::Block:
-    return llvm::any_of(cast<BlockStmt>(stmt)->body, returnsValue);
-  case Stmt::Kind::If:
-    return returnsValue(cast<IfStmt>(stmt)->thenStmt) || returnsValue(cast<IfStmt>(stmt)->elseStmt);
-  case Stmt::Kind::While:
-    return returnsValue(cast<WhileStmt>(stmt)->body);
-  case Stmt::Kind::DoWhile:
-    return returnsValue(cast<DoWhileStmt>(stmt)->body);
-  case Stmt::Kind::For:
-    return returnsValue(cast<ForStmt>(stmt)->body);
-  case Stmt::Kind::ForOf:
-    return returnsValue(cast<ForOfStmt>(stmt)->body);
-  case Stmt::Kind::Switch:
-    return llvm::any_of(cast<SwitchStmt>(stmt)->cases,
-                        [](const SwitchCase &c) { return llvm::any_of(c.body, returnsValue); });
-  case Stmt::Kind::Labeled:
-    return returnsValue(cast<LabeledStmt>(stmt)->body);
-  default:
-    return false;
+}
+
+ReturnInferrer::ResultNotCalledEarly ReturnInferrer::earlyCall(const FuncSymbol *fn) const {
+  bool calledWhileLoading = fn->inferring && this->checker.suspended_.contains(fn);
+  if (calledWhileLoading) {
+    std::string message = ErrorTextEarlyCall::importBack(fn->name);
+
+    return err(ReturnInferrerEarlyCallError{
+        .code = ReturnInferrerEarlyCallErrorCode::CALLED_WHILE_LOADING,
+        .message = message,
+    });
   }
+
+  return ok(fn);
 }
 
 const Type *ReturnInferrer::returnType(FuncSymbol *fn) {
   if (fn->ret) {
     return fn->ret;
   }
-  if (checker_.lateClasses().isTemplate(fn)) {
+  if (this->checker.lateClasses().isTemplate(fn)) {
     return Type::unknown();
   }
-  if (fn->inferring && checker_.suspended_.contains(fn)) {
-    checker_.diags_.error(fn->loc, "cannot tell what " + quotedName(fn->name) +
-                                       " returns: it uses a file that imports it back and calls it "
-                                       "while loading; declare its return type, e.g. '): int'");
-    checker_.suspended_.erase(fn);
+  ResultNotCalledEarly early = this->earlyCall(fn);
+  if (early.isErr()) {
+    this->checker.diags_.error(fn->loc, early.error().message);
+    this->checker.suspended_.erase(fn);
     return Type::error();
   }
   if (fn->inferring) {
     return fn->assumed ? fn->assumed : Type::error();
   }
-  inferReturnType(fn);
+  this->inferReturnType(fn);
 
   return fn->ret;
 }
 
 const Type *ReturnInferrer::functionType(FuncSymbol *fn) {
-  resolveParams(fn);
-  const Type *ret = returnType(fn);
+  this->resolveParams(fn);
+  const Type *ret = this->returnType(fn);
+  const Type *returned = ret ? ret : Type::error();
 
-  return Type::function(fn->params, fn->minArgs, fn->hasRest, ret ? ret : Type::error(),
-                        fn->hasThis);
+  return Type::function(fn->params, fn->minArgs, fn->hasRest, returned, fn->hasThis);
 }
 
 Checker::BodyState ReturnInferrer::enterBody(const FunctionDecl *fn) {
   Checker::BodyState saved;
-  saved.flow = std::move(checker_.flow_);
-  saved.scopes = checker_.scopes_;
-  saved.typeScopes = checker_.typeScopes_;
-  saved.functions = checker_.functions_;
-  saved.groups = checker_.groups_;
-  saved.blockNames = checker_.blockNames_;
-  saved.function = checker_.currentFunction_;
-  saved.targets = std::move(checker_.targets_);
-  saved.pendingLabels = std::move(checker_.pendingLabels_);
-  saved.otherCaseVars = checker_.otherCaseVars_;
-  saved.chainShortCircuits = checker_.chainShortCircuits_;
-  saved.returns = checker_.returns_;
-  saved.yields = checker_.yields_;
-  saved.trial = checker_.trial_;
-  saved.early = checker_.early_;
-  saved.module = checker_.module_;
-  saved.instance = checker_.checkingInstance_;
-  saved.capture = checker_.diags_.capture();
-  saved.scopeBranches = checker_.scopeBranches_;
-  saved.branchDepth = checker_.branchDepth_;
-  checker_.flow_ = Checker::Flow();
-  if (NestedGroup *group = fn ? fn->group : nullptr) {
-    checker_.scopes_.resize(group->scopeDepth);
-    checker_.typeScopes_.resize(group->scopeDepth);
-    checker_.functions_.resize(group->functionDepth);
-    while (!checker_.groups_.empty() && checker_.groups_.back() != group) {
-      checker_.groups_.pop_back();
+  saved.flow = std::move(this->checker.flow_);
+  saved.scopes = this->checker.scopes_;
+  saved.typeScopes = this->checker.typeScopes_;
+  saved.functions = this->checker.functions_;
+  saved.groups = this->checker.groups_;
+  saved.blockNames = this->checker.blockNames_;
+  saved.function = this->checker.currentFunction_;
+  saved.targets = std::move(this->checker.targets_);
+  saved.pendingLabels = std::move(this->checker.pendingLabels_);
+  saved.otherCaseVars = this->checker.otherCaseVars_;
+  saved.chainShortCircuits = this->checker.chainShortCircuits_;
+  saved.returns = this->checker.returns_;
+  saved.yields = this->checker.yields_;
+  saved.trial = this->checker.trial_;
+  saved.early = this->checker.early_;
+  saved.module = this->checker.module_;
+  saved.instance = this->checker.checkingInstance_;
+  saved.capture = this->checker.diags_.capture();
+  saved.scopeBranches = this->checker.scopeBranches_;
+  saved.branchDepth = this->checker.branchDepth_;
+  this->checker.flow_ = Checker::Flow();
+  NestedGroup *group = fn ? fn->group : nullptr;
+  if (group) {
+    this->checker.scopes_.resize(group->scopeDepth);
+    this->checker.typeScopes_.resize(group->scopeDepth);
+    this->checker.functions_.resize(group->functionDepth);
+    while (!this->checker.groups_.empty() && this->checker.groups_.back() != group) {
+      this->checker.groups_.pop_back();
     }
-    while (!checker_.blockNames_.empty() &&
-           checker_.blockNames_.back().functions > group->functionDepth) {
-      checker_.blockNames_.pop_back();
+    while (!this->checker.blockNames_.empty() &&
+           this->checker.blockNames_.back().functions > group->functionDepth) {
+      this->checker.blockNames_.pop_back();
     }
   } else if (!fn || !fn->isExpression()) {
-    checker_.scopes_.resize(1);
-    checker_.typeScopes_.resize(1);
-    checker_.functions_.clear();
-    checker_.groups_.clear();
-    checker_.blockNames_.clear();
-    checker_.otherCaseVars_.clear();
-    checker_.trial_ = false;
-    if (Module *home = fn ? checker_.declModules_.lookup(fn) : nullptr) {
-      checker_.moduleDeclarer().useModule(home);
-      checker_.importBinder().bindImports();
+    this->checker.scopes_.resize(1);
+    this->checker.typeScopes_.resize(1);
+    this->checker.functions_.clear();
+    this->checker.groups_.clear();
+    this->checker.blockNames_.clear();
+    this->checker.otherCaseVars_.clear();
+    this->checker.trial_ = false;
+    Module *home = fn ? this->checker.declModules_.lookup(fn) : nullptr;
+    if (home) {
+      this->checker.moduleDeclarer().useModule(home);
+      this->checker.importBinder().bindImports();
     }
-    checker_.checkingInstance_ = nullptr;
-    checker_.diags_.setCapture(nullptr);
-    if (Checker::Instance *owner =
-            fn && fn->cls() ? checker_.lateOwners_.lookup(fn->cls()) : nullptr) {
-      checker_.checkingInstance_ = owner;
-      checker_.diags_.setCapture(&checker_.lateErrors_[owner]);
+    this->checker.checkingInstance_ = nullptr;
+    this->checker.diags_.setCapture(nullptr);
+    Checker::Instance *owner =
+        fn && fn->cls() ? this->checker.lateOwners_.lookup(fn->cls()) : nullptr;
+    if (owner) {
+      this->checker.checkingInstance_ = owner;
+      this->checker.diags_.setCapture(&this->checker.lateErrors_[owner]);
     }
   }
-  checker_.scopeBranches_.resize(checker_.scopes_.size(), 0);
-  checker_.branchDepth_ = checker_.scopeBranches_.empty() ? 0 : checker_.scopeBranches_.back();
-  checker_.currentFunction_ = nullptr;
-  checker_.targets_.clear();
-  checker_.pendingLabels_.clear();
-  checker_.chainShortCircuits_ = false;
-  checker_.returns_ = nullptr;
-  checker_.yields_ = nullptr;
+  this->checker.scopeBranches_.resize(this->checker.scopes_.size(), 0);
+  this->checker.branchDepth_ =
+      this->checker.scopeBranches_.empty() ? 0 : this->checker.scopeBranches_.back();
+  this->checker.currentFunction_ = nullptr;
+  this->checker.targets_.clear();
+  this->checker.pendingLabels_.clear();
+  this->checker.chainShortCircuits_ = false;
+  this->checker.returns_ = nullptr;
+  this->checker.yields_ = nullptr;
 
   return saved;
 }
 
 void ReturnInferrer::leaveBody(Checker::BodyState &saved) {
-  checker_.flow_ = std::move(saved.flow);
-  checker_.scopeBranches_ = std::move(saved.scopeBranches);
-  checker_.branchDepth_ = saved.branchDepth;
-  checker_.scopes_ = std::move(saved.scopes);
-  checker_.typeScopes_ = std::move(saved.typeScopes);
-  checker_.functions_ = std::move(saved.functions);
-  checker_.groups_ = std::move(saved.groups);
-  checker_.blockNames_ = std::move(saved.blockNames);
-  checker_.currentFunction_ = saved.function;
-  checker_.targets_ = std::move(saved.targets);
-  checker_.pendingLabels_ = std::move(saved.pendingLabels);
-  checker_.otherCaseVars_ = std::move(saved.otherCaseVars);
-  checker_.chainShortCircuits_ = saved.chainShortCircuits;
-  checker_.returns_ = saved.returns;
-  checker_.yields_ = saved.yields;
-  checker_.trial_ = saved.trial;
-  checker_.early_ = saved.early;
-  checker_.module_ = saved.module;
-  checker_.checkingInstance_ = saved.instance;
-  checker_.diags_.setCapture(saved.capture);
+  this->checker.flow_ = std::move(saved.flow);
+  this->checker.scopeBranches_ = std::move(saved.scopeBranches);
+  this->checker.branchDepth_ = saved.branchDepth;
+  this->checker.scopes_ = std::move(saved.scopes);
+  this->checker.typeScopes_ = std::move(saved.typeScopes);
+  this->checker.functions_ = std::move(saved.functions);
+  this->checker.groups_ = std::move(saved.groups);
+  this->checker.blockNames_ = std::move(saved.blockNames);
+  this->checker.currentFunction_ = saved.function;
+  this->checker.targets_ = std::move(saved.targets);
+  this->checker.pendingLabels_ = std::move(saved.pendingLabels);
+  this->checker.otherCaseVars_ = std::move(saved.otherCaseVars);
+  this->checker.chainShortCircuits_ = saved.chainShortCircuits;
+  this->checker.returns_ = saved.returns;
+  this->checker.yields_ = saved.yields;
+  this->checker.trial_ = saved.trial;
+  this->checker.early_ = saved.early;
+  this->checker.module_ = saved.module;
+  this->checker.checkingInstance_ = saved.instance;
+  this->checker.diags_.setCapture(saved.capture);
+}
+
+const Type *ReturnInferrer::templateReturn(FuncSymbol *fn) {
+  FunctionDecl *decl = fn->decl;
+  FuncSymbol *generic = decl->generic->sym;
+  const Type *ret = this->returnType(generic);
+  if (!ret) {
+    return Type::error();
+  }
+  const Type *instance = this->checker.genericClassChecker().instanceType(decl->cls(), ret);
+
+  return this->checker.typeParams().substitute(instance, generic->typeParams, fn->typeParams);
 }
 
 void ReturnInferrer::inferReturnType(FuncSymbol *fn) {
-  if (FunctionDecl *decl = fn->decl; decl && decl->generic && decl->cls() &&
-                                     decl->cls()->generic() &&
-                                     !checker_.lateClasses().hasClassExpr(decl->generic)) {
-    const Type *ret = returnType(decl->generic->sym);
-    fn->ret = ret ? checker_.typeParams().substitute(
-                        checker_.genericClassChecker().instanceType(decl->cls(), ret),
-                        decl->generic->sym->typeParams, fn->typeParams)
-                  : Type::error();
+  FunctionDecl *decl = fn->decl;
+  bool fromTemplate = decl && decl->generic && decl->cls() && decl->cls()->generic() &&
+                      !this->checker.lateClasses().hasClassExpr(decl->generic);
+  if (fromTemplate) {
+    fn->ret = this->templateReturn(fn);
     return;
   }
-  if (const Type *inherited = checker_.classLinks().inheritedReturnType(fn)) {
+  const Type *inherited = this->checker.classLinks().inheritedReturnType(fn);
+  if (inherited) {
     fn->ret = inherited;
     return;
   }
-  FunctionDecl *decl = fn->decl;
-  Checker::BodyState saved = enterBody(decl);
-  bool muted = checker_.diags_.setMuted(decl->isClosure() && saved.trial);
-  if (!decl->isClosure() && !checker_.topLevelDone_) {
-    checker_.early_ = fn;
-  } else if (decl->group && !decl->group->finished) {
-    checker_.early_ = fn;
+
+  Checker::BodyState saved = this->enterBody(decl);
+  bool trialClosure = decl->isClosure() && saved.trial;
+  bool muted = this->checker.diags_.setMuted(trialClosure);
+  bool topLevelEarly = !decl->isClosure() && !this->checker.topLevelDone_;
+  bool groupEarly = decl->group && !decl->group->finished;
+  if (topLevelEarly || groupEarly) {
+    this->checker.early_ = fn;
   }
 
-  if (auto cycle = checker_.cycleOf_.find(fn); cycle != checker_.cycleOf_.end()) {
-    inferCycle(checker_.cycles_[cycle->second]);
+  auto cycle = this->checker.cycleOf_.find(fn);
+  if (cycle != this->checker.cycleOf_.end()) {
+    this->inferCycle(this->checker.cycles_[cycle->second]);
   } else {
-    checkAndInfer(decl);
+    this->checkAndInfer(decl);
   }
 
-  checker_.diags_.setMuted(muted);
-  leaveBody(saved);
+  this->checker.diags_.setMuted(muted);
+  this->leaveBody(saved);
 }
 
 void ReturnInferrer::checkAndInfer(FunctionDecl *decl) {
   FuncSymbol *fn = decl->sym;
   std::vector<ReturnStmt *> returns;
   std::vector<YieldExpr *> yields;
-  std::vector<ReturnStmt *> *outer = checker_.returns_;
-  std::vector<YieldExpr *> *outerYields = checker_.yields_;
-  checker_.returns_ = &returns;
-  checker_.yields_ = &yields;
+  std::vector<YieldExpr *> *outerYields = this->checker.yields_;
+  std::vector<ReturnStmt *> *outerReturns = this->checker.returns_;
+  this->checker.returns_ = &returns;
+  this->checker.yields_ = &yields;
   fn->inferring = true;
-  checker_.inferring_.push_back(fn);
-  checker_.functionChecker().checkFunctionBody(decl);
-  checker_.inferring_.pop_back();
+  this->checker.inferring_.push_back(fn);
+  this->checker.functionChecker().checkFunctionBody(decl);
+  this->checker.inferring_.pop_back();
   fn->inferring = false;
-  checker_.returns_ = outer;
-  checker_.yields_ = outerYields;
+  this->checker.returns_ = outerReturns;
+  this->checker.yields_ = outerYields;
+
   bool fallsOff = !ReturnChecker::alwaysReturns(decl->body);
-  const Type *type =
-      decl->isGenerator
-          ? checker_.generatorChecker().inferGeneratorType(fn, yields, returns, fallsOff, true)
-      : decl->isAsync ? checker_.asyncChecker().inferAsyncType(fn, returns, fallsOff, true)
-                      : unifyReturns(fn, returns, fallsOff, true);
+  const Type *type = nullptr;
+  if (decl->isGenerator) {
+    type = this->checker.generatorChecker().inferGeneratorType(fn, yields, returns, fallsOff, true);
+  } else if (decl->isAsync) {
+    type = this->checker.asyncChecker().inferAsyncType(fn, returns, fallsOff, true);
+  } else {
+    type = this->unifyReturns(fn, returns, fallsOff, true);
+  }
   fn->ret = type ? type : Type::error();
   if (decl->isAsync && !decl->isGenerator) {
-    checker_.asyncChecker().finishAsyncReturns(fn, returns);
+    this->checker.asyncChecker().finishAsyncReturns(fn, returns);
     return;
   }
+  this->convertReturns(decl, returns, yields);
+}
+
+void ReturnInferrer::convertReturns(const FunctionDecl *decl, llvm::ArrayRef<ReturnStmt *> returns,
+                                    llvm::ArrayRef<YieldExpr *> yields) {
+  FuncSymbol *fn = decl->sym;
   bool async = decl->isAsync;
-  const Type *returned = decl->isGenerator && (fn->ret->isIterator() || fn->ret->isAsyncIterator())
-                             ? fn->ret->returned()
-                             : fn->ret;
+  bool iterates = fn->ret->isIterator() || fn->ret->isAsyncIterator();
+  const Type *returned = decl->isGenerator && iterates ? fn->ret->returned() : fn->ret;
   if (!returned->isError() && !returned->isVoid()) {
     for (ReturnStmt *ret : returns) {
-      if (ret->value && !ret->value->type->isError() &&
-          (!async || (AsyncChecker::awaitedType(ret->value->type) == ret->value->type &&
-                      !ret->value->type->isUndefined()))) {
-        ret->value = checker_.typeRelations().convert(ret->value, returned);
+      bool typed = ret->value && !ret->value->type->isError();
+      bool settled = typed && async &&
+                     AsyncChecker::awaitedType(ret->value->type) == ret->value->type &&
+                     !ret->value->type->isUndefined();
+      if (typed && (!async || settled)) {
+        ret->value = this->checker.typeRelations().convert(ret->value, returned);
       }
     }
   }
-  if (fn->ret->isIterator() || fn->ret->isAsyncIterator()) {
+  if (iterates) {
+    const Type *yielded = fn->ret->yielded();
     for (YieldExpr *yield : yields) {
-      if (!yield->delegate && yield->value && !yield->value->type->isError() &&
-          (!async || AsyncChecker::awaitedType(yield->value->type) == yield->value->type)) {
-        yield->value = checker_.typeRelations().convert(yield->value, fn->ret->yielded());
+      bool typed = !yield->delegate && yield->value && !yield->value->type->isError();
+      bool settled =
+          typed && async && AsyncChecker::awaitedType(yield->value->type) == yield->value->type;
+      if (typed && (!async || settled)) {
+        yield->value = this->checker.typeRelations().convert(yield->value, yielded);
       }
     }
   }
+}
+
+const Type *ReturnInferrer::trialReturn(FuncSymbol *fn) {
+  FunctionDecl *copy = this->freshCopy(fn->decl);
+  std::vector<ReturnStmt *> returns;
+  std::vector<YieldExpr *> yields;
+  this->checker.returns_ = &returns;
+  this->checker.yields_ = &yields;
+  this->checker.trial_ = true;
+  this->checker.flow_ = Checker::Flow();
+  this->checker.functionChecker().checkFunctionBody(copy);
+  this->checker.trial_ = false;
+  this->checker.returns_ = nullptr;
+  this->checker.yields_ = nullptr;
+
+  bool fallsOff = !ReturnChecker::alwaysReturns(copy->body);
+  const Type *found = nullptr;
+  if (fn->decl->isGenerator) {
+    found =
+        this->checker.generatorChecker().inferGeneratorType(fn, yields, returns, fallsOff, false);
+  } else if (fn->decl->isAsync) {
+    found = this->checker.asyncChecker().inferAsyncType(fn, returns, fallsOff, false);
+  } else {
+    found = this->unifyReturns(fn, returns, fallsOff, false);
+  }
+
+  return found;
+}
+
+ReturnInferrer::ResultCycleTypeKnown ReturnInferrer::cycleType(const FuncSymbol *fn, int cycleSize,
+                                                               bool failed) const {
+  bool unknown = fn->ret->isError();
+  if (unknown && failed) {
+    std::string message = ErrorTextCycleType::differ(fn->name);
+
+    return err(ReturnInferrerCycleTypeError{
+        .code = ReturnInferrerCycleTypeErrorCode::DIFFERENT_TYPES,
+        .message = message,
+    });
+  }
+  if (unknown && cycleSize == 1) {
+    std::string message = ErrorTextCycleType::selfOnly(fn->name);
+
+    return err(ReturnInferrerCycleTypeError{
+        .code = ReturnInferrerCycleTypeErrorCode::ONLY_SELF_CALLS,
+        .message = message,
+    });
+  }
+  if (unknown) {
+    std::string message = ErrorTextCycleType::calledBack(fn->name);
+
+    return err(ReturnInferrerCycleTypeError{
+        .code = ReturnInferrerCycleTypeErrorCode::ONLY_CALLED_BACK,
+        .message = message,
+    });
+  }
+
+  return ok(fn->ret);
 }
 
 void ReturnInferrer::inferCycle(llvm::ArrayRef<FuncSymbol *> cycle) {
   for (FuncSymbol *fn : cycle) {
     fn->inferring = true;
   }
-  checker_.inferring_.insert(checker_.inferring_.end(), cycle.begin(), cycle.end());
-  bool muted = checker_.diags_.setMuted(true);
+  this->checker.inferring_.insert(this->checker.inferring_.end(), cycle.begin(), cycle.end());
+  bool muted = this->checker.diags_.setMuted(true);
   bool failed = false;
   for (int round = 0; round < 8 && !failed; ++round) {
     bool changed = false;
     for (FuncSymbol *fn : cycle) {
-      FunctionDecl *copy = freshCopy(fn->decl);
-      std::vector<ReturnStmt *> returns;
-      std::vector<YieldExpr *> yields;
-      checker_.returns_ = &returns;
-      checker_.yields_ = &yields;
-      checker_.trial_ = true;
-      checker_.flow_ = Checker::Flow();
-      checker_.functionChecker().checkFunctionBody(copy);
-      checker_.trial_ = false;
-      checker_.returns_ = nullptr;
-      checker_.yields_ = nullptr;
-      bool fallsOff = !ReturnChecker::alwaysReturns(copy->body);
-      const Type *found;
-      if (fn->decl->isGenerator) {
-        found =
-            checker_.generatorChecker().inferGeneratorType(fn, yields, returns, fallsOff, false);
-      } else if (fn->decl->isAsync) {
-        found = checker_.asyncChecker().inferAsyncType(fn, returns, fallsOff, false);
-      } else {
-        found = unifyReturns(fn, returns, fallsOff, false);
-      }
+      const Type *found = this->trialReturn(fn);
       if (!found) {
         continue;
       }
@@ -308,81 +392,113 @@ void ReturnInferrer::inferCycle(llvm::ArrayRef<FuncSymbol *> cycle) {
       break;
     }
   }
-  checker_.diags_.setMuted(muted);
-  checker_.inferring_.resize(checker_.inferring_.size() - cycle.size());
+  this->checker.diags_.setMuted(muted);
+  this->checker.inferring_.resize(this->checker.inferring_.size() - cycle.size());
 
   for (FuncSymbol *fn : cycle) {
     fn->inferring = false;
     fn->ret = fn->assumed && !failed ? fn->assumed : Type::error();
     fn->assumed = nullptr;
   }
+  int cycleSize = int(cycle.size());
   for (FuncSymbol *fn : cycle) {
-    if (!fn->ret->isError()) {
-      continue;
-    }
-    if (failed) {
-      checker_.diags_.error(fn->loc, quotedName(fn->name) +
-                                         " returns values of different types; a function "
-                                         "returns values of one type");
-    } else {
-      checker_.diags_.error(fn->loc, "cannot tell what " + quotedName(fn->name) +
-                                         " returns: every value it returns comes from " +
-                                         (cycle.size() == 1 ? "a call to itself"
-                                                            : "the functions that call it back") +
-                                         "; declare its return type, e.g. '): int'");
+    ResultCycleTypeKnown known = this->cycleType(fn, cycleSize, failed);
+    if (known.isErr()) {
+      this->checker.diags_.error(fn->loc, known.error().message);
     }
   }
+}
+
+std::vector<ReturnStmt *> ReturnInferrer::literalsLast(llvm::ArrayRef<ReturnStmt *> returns) {
+  std::vector<ReturnStmt *> ordered;
+  std::vector<ReturnStmt *> literals;
+  for (ReturnStmt *ret : returns) {
+    bool literal = ret->value && ret->value->type && ret->value->type->isInteger() &&
+                   TypeRelations::isIntLiteralTree(ret->value);
+    if (literal) {
+      literals.push_back(ret);
+    } else {
+      ordered.push_back(ret);
+    }
+  }
+  ordered.insert(ordered.end(), literals.begin(), literals.end());
+
+  return ordered;
+}
+
+ReturnInferrer::ResultReturnsUnified ReturnInferrer::commonReturn(const FuncSymbol *fn,
+                                                                  const Type *before,
+                                                                  const ReturnStmt *ret) const {
+  const Type *found = ret->value->type;
+  const Type *common = LiteralTypes::unionUnify(before, found);
+  if (!common || common->isError()) {
+    std::string message = ErrorTextCommonReturn::differ(fn->name, found->name(), before->name());
+
+    return err(ReturnInferrerCommonReturnError{
+        .code = ReturnInferrerCommonReturnErrorCode::DIFFERENT_TYPES,
+        .message = message,
+    });
+  }
+
+  return ok(common);
+}
+
+ReturnInferrer::ResultReturnsDefined
+ReturnInferrer::definedReturn(const FuncSymbol *fn, llvm::ArrayRef<ReturnStmt *> returns,
+                              bool undefined) const {
+  auto withValue = [](const ReturnStmt *ret) { return ret->value != nullptr; };
+  bool onlyUndefined = undefined && llvm::any_of(returns, withValue);
+  if (onlyUndefined) {
+    std::string message = ErrorTextDefinedReturn::undefined(fn->name);
+
+    return err(ReturnInferrerDefinedReturnError{
+        .code = ReturnInferrerDefinedReturnErrorCode::ONLY_UNDEFINED,
+        .message = message,
+    });
+  }
+
+  return ok(fn);
 }
 
 const Type *ReturnInferrer::unifyReturns(const FuncSymbol *fn, llvm::ArrayRef<ReturnStmt *> returns,
                                          bool fallsOff, bool report) {
   const Type *type = nullptr;
   bool undefined = fallsOff;
-  std::vector<ReturnStmt *> ordered, literals;
-  for (ReturnStmt *ret : returns) {
-    bool literal = ret->value && ret->value->type && ret->value->type->isInteger() &&
-                   TypeRelations::isIntLiteralTree(ret->value);
-    (literal ? literals : ordered).push_back(ret);
-  }
-  ordered.insert(ordered.end(), literals.begin(), literals.end());
+  std::vector<ReturnStmt *> ordered = ReturnInferrer::literalsLast(returns);
   for (ReturnStmt *ret : ordered) {
     if (!ret->value) {
       undefined = true;
       continue;
     }
-    const Type *t = ret->value->type;
-    if (t->isError()) {
+    const Type *found = ret->value->type;
+    if (found->isError()) {
       continue;
     }
-    if (t->isUndefined()) {
+    if (found->isUndefined()) {
       undefined = true;
       continue;
     }
     if (!type) {
-      type = t;
+      type = found;
       continue;
     }
-    if (type != t && checker_.typeRelations().literalAdapts(ret->value, type)) {
+    bool adapts = type != found && this->checker.typeRelations().literalAdapts(ret->value, type);
+    if (adapts) {
       continue;
     }
-    const Type *common = LiteralTypes::unionUnify(type, t);
-    if (!common || common->isError()) {
-      if (report) {
-        checker_.diags_.error(ret->value->loc(),
-                              quotedName(fn->name) + " returns '" + t->name() + "' here and '" +
-                                  type->name() +
-                                  "' elsewhere; a function returns values of one type");
-      }
+    ResultReturnsUnified common = this->commonReturn(fn, type, ret);
+    if (common.isErr() && report) {
+      this->checker.diags_.error(ret->value->loc(), common.error().message);
+    }
+    if (common.isErr()) {
       return Type::error();
     }
-    type = common;
+    type = common.value();
   }
   if (!type) {
-    if (report && undefined &&
-        llvm::any_of(returns, [](const ReturnStmt *r) { return r->value; })) {
-      checker_.diags_.error(fn->loc, quotedName(fn->name) +
-                                         " returns only undefined; declare the return type, "
-                                         "e.g. '): int | undefined'");
+    ResultReturnsDefined defined = this->definedReturn(fn, returns, undefined);
+    if (defined.isErr() && report) {
+      this->checker.diags_.error(fn->loc, defined.error().message);
     }
     return report ? Type::error() : nullptr;
   }
@@ -393,89 +509,120 @@ const Type *ReturnInferrer::unifyReturns(const FuncSymbol *fn, llvm::ArrayRef<Re
   return type;
 }
 
+const Type *ReturnInferrer::instanceParam(FuncSymbol *fn, const Type *type) {
+  if (!type) {
+    return nullptr;
+  }
+  FunctionDecl *decl = fn->decl;
+  FuncSymbol *generic = decl->generic->sym;
+  const Type *instance = this->checker.genericClassChecker().instanceValueType(decl->cls(), type);
+
+  return this->checker.typeParams().substituteValue(instance, generic->typeParams, fn->typeParams);
+}
+
+ReturnInferrer::ResultParamTypeKnown ReturnInferrer::defaultType(const Param &param,
+                                                                 const Type *found) const {
+  const Type *type = found ? found : Type::error();
+  if (type->isVoid() || type->isUndefined()) {
+    std::string message = ErrorTextDefaultType::unknown(param.label());
+
+    return err(ReturnInferrerDefaultTypeError{
+        .code = ReturnInferrerDefaultTypeErrorCode::UNKNOWN_FROM_DEFAULT,
+        .message = message,
+    });
+  }
+
+  return ok(type);
+}
+
 void ReturnInferrer::resolveParams(FuncSymbol *fn) {
   if (!fn->pendingParams) {
     return;
   }
   fn->pendingParams = false;
   FunctionDecl *decl = fn->decl;
-  if (FunctionDecl *generic = decl->generic; generic && decl->cls() && decl->cls()->generic()) {
-    resolveParams(generic->sym);
-    auto sub = [&](const Type *t) {
-      return t ? checker_.typeParams().substituteValue(
-                     checker_.genericClassChecker().instanceValueType(decl->cls(), t),
-                     generic->sym->typeParams, fn->typeParams)
-               : nullptr;
-    };
+  FunctionDecl *generic = decl->generic;
+  if (generic && decl->cls() && decl->cls()->generic()) {
+    this->resolveParams(generic->sym);
     for (size_t i = 0; i < fn->params.size() && i < generic->sym->params.size(); ++i) {
-      fn->params[i] = sub(generic->sym->params[i]);
+      fn->params[i] = this->instanceParam(fn, generic->sym->params[i]);
     }
     for (size_t i = 0; i < decl->params.size() && i < generic->params.size(); ++i) {
-      decl->params[i].declaredType = sub(generic->params[i].declaredType);
+      decl->params[i].declaredType = this->instanceParam(fn, generic->params[i].declaredType);
     }
     return;
   }
+
   std::vector<const Type *> found(decl->params.size(), nullptr);
+  auto failed = [](const Type *type) { return type && type->isError(); };
   for (bool report : {false, true}) {
-    if (report && llvm::none_of(found, [](const Type *t) { return t && t->isError(); })) {
+    if (report && llvm::none_of(found, failed)) {
       break;
     }
-    Checker::BodyState saved = enterBody(decl);
-    bool muted = checker_.diags_.setMuted(!report);
-    FunctionDecl *copy = freshCopy(decl);
-    checker_.functions_.push_back(copy);
+    Checker::BodyState saved = this->enterBody(decl);
+    bool muted = this->checker.diags_.setMuted(!report);
+    FunctionDecl *copy = this->freshCopy(decl);
+    this->checker.functions_.push_back(copy);
     if (copy->takesThis()) {
-      ClassChecker::ResultNewThisSymbol declared = checker_.classChecker().declareThis(copy);
+      ClassChecker::ResultNewThisSymbol declared = this->checker.classChecker().declareThis(copy);
       if (declared.isErr()) {
-        checker_.diags_.error(copy->loc(), declared.error().message);
+        this->checker.diags_.error(copy->loc(), declared.error().message);
       }
     }
-    ClassDecl *outerClass = checker_.currentClass_;
+    ClassDecl *outerClass = this->checker.currentClass_;
     if (!copy->isClosure()) {
-      checker_.currentClass_ = copy->cls();
+      this->checker.currentClass_ = copy->cls();
     }
-    checker_.pushScope();
+    this->checker.pushScope();
     for (size_t i = 0; i < decl->params.size() && i < copy->params.size(); ++i) {
+      Param &param = copy->params[i];
       const Type *type = decl->params[i].declaredType;
       if (!type) {
-        type = found[i] = checker_.exprChecker().checkExpr(copy->params[i].defaultValue())->type;
+        Expr *value = this->checker.exprChecker().checkExpr(param.defaultValue());
+        found[i] = value->type;
+        type = value->type;
       }
-      checker_.scopes().declareVar(copy->params[i].name, copy->params[i].loc, type, false);
+      this->checker.scopes().declareVar(param.name, param.loc, type, false);
     }
-    checker_.popScope();
-    checker_.functions_.pop_back();
-    checker_.currentClass_ = outerClass;
-    checker_.diags_.setMuted(muted);
-    leaveBody(saved);
+    this->checker.popScope();
+    this->checker.functions_.pop_back();
+    this->checker.currentClass_ = outerClass;
+    this->checker.diags_.setMuted(muted);
+    this->leaveBody(saved);
   }
+
   for (size_t i = 0; i < decl->params.size(); ++i) {
     Param &param = decl->params[i];
     if (param.declaredType) {
       continue;
     }
-    const Type *type = found[i] ? found[i] : Type::error();
-    if (type->isVoid() || type->isUndefined()) {
-      checker_.diags_.error(param.loc, "cannot tell the type of '" + param.label() +
-                                           "' from its default value; "
-                                           "add one, e.g. '" +
-                                           param.label() + ": int | undefined = undefined'");
-      type = Type::error();
+    ResultParamTypeKnown known = this->defaultType(param, found[i]);
+    if (known.isErr()) {
+      this->checker.diags_.error(param.loc, known.error().message);
     }
+    const Type *type = known.isOk() ? known.value() : Type::error();
     param.declaredType = type;
     fn->params[i] = Type::optional(type);
   }
 }
 
 FunctionDecl *ReturnInferrer::freshCopy(const FunctionDecl *fn) {
-  Lexer lexer(fn->source, checker_.diags_);
-  Parser parser(lexer, checker_.ctx_, checker_.diags_, fn->cls() && fn->cls()->library());
-  FunctionDecl *copy = fn->isArrow() || ((fn->isExpression() || fn->lifted()) && !fn->cls())
-                           ? parser.parseFunctionExprCopy()
-                       : fn->cls() ? parser.parseMethodCopy()
-                                   : parser.parseFunctionCopy();
+  Lexer lexer(fn->source, this->checker.diags_);
+  bool library = fn->cls() && fn->cls()->library();
+  Parser parser(lexer, this->checker.ctx_, this->checker.diags_, library);
+  bool expression = fn->isArrow() || ((fn->isExpression() || fn->lifted()) && !fn->cls());
+  FunctionDecl *copy = nullptr;
+  if (expression) {
+    copy = parser.parseFunctionExprCopy();
+  } else if (fn->cls()) {
+    copy = parser.parseMethodCopy();
+  } else {
+    copy = parser.parseFunctionCopy();
+  }
   copy->place = fn->place;
   copy->isAsync = fn->isAsync;
-  if (const ClassMember *original = fn->member()) {
+  const ClassMember *original = fn->member();
+  if (original) {
     ClassMember copied{.cls = original->cls, .access = original->access};
     if (fn->isStatic()) {
       copied.method = StaticMethod{};

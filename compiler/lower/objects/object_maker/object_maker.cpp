@@ -11,11 +11,11 @@
 
 namespace tz {
 
-namespace {
-
-const std::vector<llvm::StringRef> &orderOf(const Type *type, llvm::ArrayRef<MakerFields> orders) {
+const std::vector<llvm::StringRef> &ObjectMaker::orderOf(const Type *type,
+                                                         llvm::ArrayRef<MakerFields> orders) {
   for (const MakerFields &entry : orders) {
-    if (const ClassDecl *cls = type->classDecl()) {
+    const ClassDecl *cls = type->classDecl();
+    if (cls) {
       if (entry.cls && cls->name == entry.cls) {
         return entry.fields;
       }
@@ -35,9 +35,11 @@ const std::vector<llvm::StringRef> &orderOf(const Type *type, llvm::ArrayRef<Mak
   llvm_unreachable("no maker for this type");
 }
 
-bool isNestedPart(const Type *type) { return type->isObject() && !type->isClass(); }
+bool ObjectMaker::isNestedPart(const Type *type) {
+  return type->isObject() && !type->isClass();
+}
 
-std::vector<const Type *> literalsOf(const Type *type) {
+std::vector<const Type *> ObjectMaker::literalsOf(const Type *type) {
   if (type->isStringLiteral()) {
     return {type};
   }
@@ -45,16 +47,17 @@ std::vector<const Type *> literalsOf(const Type *type) {
   return std::vector<const Type *>(type->members().begin(), type->members().end());
 }
 
-}
-
-ObjectMaker::ObjectMaker(Lowering &lowering) : lowering_(lowering) {}
+ObjectMaker::ObjectMaker(Lowering &owner)
+    : lowering(owner) {}
 
 llvm::Value *ObjectMaker::atomOf(const Type *type, llvm::Value *text) {
-  llvm::Type *i32 = lowering_.builder_.getInt32Ty(), *ptr = lowering_.builder_.getPtrTy();
-  llvm::FunctionCallee compare = lowering_.module_->getOrInsertFunction(
+  llvm::Type *i32 = this->lowering.builder_.getInt32Ty();
+  llvm::Type *ptr = this->lowering.builder_.getPtrTy();
+  llvm::FunctionCallee compare = this->lowering.module_->getOrInsertFunction(
       "strcmp", llvm::FunctionType::get(i32, {ptr, ptr}, false));
-  std::vector<const Type *> literals = literalsOf(type);
-  llvm::Value *atom = lowering_.builder_.getInt32(literals.empty() ? 0 : literals.front()->atom());
+  std::vector<const Type *> literals = ObjectMaker::literalsOf(type);
+  llvm::Value *atom =
+      this->lowering.builder_.getInt32(literals.empty() ? 0 : literals.front()->atom());
   if (literals.size() == 1) {
     return atom;
   }
@@ -63,12 +66,12 @@ llvm::Value *ObjectMaker::atomOf(const Type *type, llvm::Value *text) {
     for (char16_t unit : literal->literalText()) {
       ascii.push_back(char(unit));
     }
-    llvm::Value *same = lowering_.builder_.CreateICmpEQ(
-        lowering_.builder_.CreateCall(compare,
-                                      {text, lowering_.stringLowerer().utf8Constant(ascii)}),
-        lowering_.builder_.getInt32(0));
-    atom =
-        lowering_.builder_.CreateSelect(same, lowering_.builder_.getInt32(literal->atom()), atom);
+    llvm::Value *same = this->lowering.builder_.CreateICmpEQ(
+        this->lowering.builder_.CreateCall(
+            compare, {text, this->lowering.stringLowerer().utf8Constant(ascii)}),
+        this->lowering.builder_.getInt32(0));
+    atom = this->lowering.builder_.CreateSelect(
+        same, this->lowering.builder_.getInt32(literal->atom()), atom);
   }
 
   return atom;
@@ -76,39 +79,41 @@ llvm::Value *ObjectMaker::atomOf(const Type *type, llvm::Value *text) {
 
 llvm::StructType *ObjectMaker::parts(const Type *type, llvm::ArrayRef<MakerFields> orders) {
   std::vector<llvm::Type *> elements;
-  for (llvm::StringRef name : orderOf(type, orders)) {
+  for (llvm::StringRef name : ObjectMaker::orderOf(type, orders)) {
     const Type *field = type->field(name)->type;
-    elements.push_back(isNestedPart(field)              ? parts(field, orders)
-                       : UnionLayout::isAtomType(field) ? lowering_.builder_.getPtrTy()
-                                                        : lowering_.moduleBuilder().lower(field));
+    elements.push_back(ObjectMaker::isNestedPart(field) ? this->parts(field, orders)
+                       : UnionLayout::isAtomType(field)
+                           ? this->lowering.builder_.getPtrTy()
+                           : this->lowering.moduleBuilder().lower(field));
   }
 
-  return llvm::StructType::get(lowering_.ctx_, elements);
+  return llvm::StructType::get(this->lowering.ctx_, elements);
 }
 
 llvm::Function *ObjectMaker::maker(const Type *type, llvm::ArrayRef<MakerFields> orders) {
-  llvm::Function *&made = makers_[type];
+  llvm::Function *&made = this->makers[type];
   if (made) {
     return made;
   }
-  llvm::Type *ptr = lowering_.builder_.getPtrTy();
+  llvm::Type *ptr = this->lowering.builder_.getPtrTy();
   const ClassDecl *cls = type->classDecl();
   std::string name = cls                             ? cls->name.str()
                      : type->name().starts_with("{") ? "object"
                                                      : type->name().str();
   made = llvm::Function::Create(llvm::FunctionType::get(ptr, {ptr}, false),
                                 llvm::GlobalValue::InternalLinkage, "tz.make." + name,
-                                lowering_.module_.get());
+                                this->lowering.module_.get());
   llvm::Function *function = made;
-  lowering_.functionBuilder().setFunctionAttributes(function);
-  llvm::IRBuilderBase::InsertPoint point = lowering_.builder_.saveIP();
-  llvm::Function *outer = std::exchange(lowering_.function_, function);
-  lowering_.builder_.SetInsertPoint(llvm::BasicBlock::Create(lowering_.ctx_, "entry", function));
+  this->lowering.functionBuilder().setFunctionAttributes(function);
+  llvm::IRBuilderBase::InsertPoint point = this->lowering.builder_.saveIP();
+  llvm::Function *outer = std::exchange(this->lowering.function_, function);
+  this->lowering.builder_.SetInsertPoint(
+      llvm::BasicBlock::Create(this->lowering.ctx_, "entry", function));
 
-  const std::vector<llvm::StringRef> &order = orderOf(type, orders);
+  const std::vector<llvm::StringRef> &order = ObjectMaker::orderOf(type, orders);
   llvm::Value *object;
   if (cls) {
-    object = lowering_.classLowerer().allocInstance(cls);
+    object = this->lowering.classLowerer().allocInstance(cls);
   } else {
     std::vector<unsigned> keys;
     for (const Field &field : type->fields()) {
@@ -119,34 +124,35 @@ llvm::Function *ObjectMaker::maker(const Type *type, llvm::ArrayRef<MakerFields>
     for (llvm::StringRef field : order) {
       keys.push_back(ObjectLayouts::fieldIndex(type, field));
     }
-    object = lowering_.objectLayouts().allocObject(type, keys);
+    object = this->lowering.objectLayouts().allocObject(type, keys);
   }
-  llvm::StructType *layout = parts(type, orders);
+  llvm::StructType *layout = this->parts(type, orders);
   for (size_t i = 0; i < order.size(); ++i) {
     const Type *field = type->field(order[i])->type;
     llvm::Value *address =
-        lowering_.builder_.CreateStructGEP(layout, function->getArg(0), unsigned(i));
-    llvm::Value *value = isNestedPart(field)
-                             ? static_cast<llvm::Value *>(
-                                   lowering_.builder_.CreateCall(maker(field, orders), {address}))
-                         : UnionLayout::isAtomType(field)
-                             ? atomOf(field, lowering_.builder_.CreateLoad(ptr, address, order[i]))
-                             : lowering_.builder_.CreateLoad(lowering_.moduleBuilder().lower(field),
-                                                             address, order[i]);
-    lowering_.builder_.CreateStore(
-        value, lowering_.objectLayouts().fieldAddress(object, type, order[i], true));
+        this->lowering.builder_.CreateStructGEP(layout, function->getArg(0), unsigned(i));
+    llvm::Value *value =
+        ObjectMaker::isNestedPart(field)
+            ? static_cast<llvm::Value *>(
+                  this->lowering.builder_.CreateCall(this->maker(field, orders), {address}))
+        : UnionLayout::isAtomType(field)
+            ? this->atomOf(field, this->lowering.builder_.CreateLoad(ptr, address, order[i]))
+            : this->lowering.builder_.CreateLoad(this->lowering.moduleBuilder().lower(field),
+                                                 address, order[i]);
+    this->lowering.builder_.CreateStore(
+        value, this->lowering.objectLayouts().fieldAddress(object, type, order[i], true));
   }
   for (const Field &field : type->fields()) {
     if (!llvm::is_contained(order, field.name)) {
-      lowering_.builder_.CreateStore(
-          lowering_.builder_.getInt32(field.type->atom()),
-          lowering_.objectLayouts().fieldAddress(object, type, field.name, true));
+      this->lowering.builder_.CreateStore(
+          this->lowering.builder_.getInt32(field.type->atom()),
+          this->lowering.objectLayouts().fieldAddress(object, type, field.name, true));
     }
   }
-  lowering_.groupLowerer().adoptFields(object, type);
-  lowering_.builder_.CreateRet(object);
-  lowering_.function_ = outer;
-  lowering_.builder_.restoreIP(point);
+  this->lowering.groupLowerer().adoptFields(object, type);
+  this->lowering.builder_.CreateRet(object);
+  this->lowering.function_ = outer;
+  this->lowering.builder_.restoreIP(point);
 
   return function;
 }

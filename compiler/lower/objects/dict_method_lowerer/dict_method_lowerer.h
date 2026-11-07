@@ -6,7 +6,7 @@ namespace tz {
 
 class DictMethodLowerer {
 public:
-  explicit DictMethodLowerer(Lowering &lowering);
+  explicit DictMethodLowerer(Lowering &owner);
 
   llvm::Value *emitDictCall(CallExpr *call);
   llvm::Value *emitDictNew(CallExpr *call);
@@ -14,7 +14,7 @@ public:
   llvm::Value *emitDictObjectCall(CallExpr *call);
 
 private:
-  Lowering &lowering_;
+  Lowering &lowering;
 };
 
 }

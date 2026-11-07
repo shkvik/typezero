@@ -14,15 +14,13 @@
 #include "llvm/ADT/STLExtras.h"
 #include <functional>
 
-using llvm::BasicBlock;
 using llvm::cast;
 using llvm::dyn_cast;
-using llvm::isa;
-using llvm::Value;
 
 namespace tz {
 
-TailCallLowerer::TailCallLowerer(Lowering &lowering) : lowering_(lowering) {}
+TailCallLowerer::TailCallLowerer(Lowering &owner)
+    : lowering(owner) {}
 
 void TailCallLowerer::findTailGroups(llvm::ArrayRef<FunctionDecl *> functions) {
   std::vector<std::vector<size_t>> calls(functions.size());
@@ -47,7 +45,8 @@ void TailCallLowerer::findTailGroups(llvm::ArrayRef<FunctionDecl *> functions) {
     }
   }
 
-  std::vector<int> index(functions.size(), -1), low(functions.size(), 0);
+  std::vector<int> index(functions.size(), -1);
+  std::vector<int> low(functions.size(), 0);
   std::vector<bool> onStack(functions.size(), false);
   std::vector<size_t> stack;
   int next = 0;
@@ -78,16 +77,16 @@ void TailCallLowerer::findTailGroups(llvm::ArrayRef<FunctionDecl *> functions) {
       return;
     }
     llvm::sort(cycle);
-    Lowering::TailGroup &group = tailGroups_.emplace_back();
+    Lowering::TailGroup &group = this->tailGroups.emplace_back();
     for (size_t member : cycle) {
       group.members.push_back(functions[member]);
-      lowering_.tailGroupOf_[functions[member]] = &group;
+      this->lowering.tailGroupOf_[functions[member]] = &group;
     }
     for (FunctionDecl *member : group.members) {
       for (CallExpr *call : tailCallsIn(member)) {
         if (llvm::is_contained(group.members, call->func()->decl) &&
             call->func()->ret == member->sym->ret) {
-          lowering_.tailJumps_.insert(call);
+          this->lowering.tailJumps_.insert(call);
         }
       }
     }
@@ -101,13 +100,13 @@ void TailCallLowerer::findTailGroups(llvm::ArrayRef<FunctionDecl *> functions) {
 
 void TailCallLowerer::findTailGroups(FunctionDecl *closure) {
   const void *key = closure->group ? static_cast<const void *>(closure->group) : closure;
-  if (!tailSearched_.insert(key).second) {
+  if (!this->tailSearched.insert(key).second) {
     return;
   }
   if (closure->group) {
-    findTailGroups(closure->group->members);
+    this->findTailGroups(closure->group->members);
   } else {
-    findTailGroups(llvm::ArrayRef<FunctionDecl *>(closure));
+    this->findTailGroups(llvm::ArrayRef<FunctionDecl *>(closure));
   }
 }
 
@@ -121,35 +120,35 @@ void TailCallLowerer::emitTailGroup(Lowering::TailGroup &group) {
   bool merged = group.members.size() > 1;
   llvm::Function *function;
   if (!merged) {
-    function = closure ? lowering_.closureLowerer().closureCode(first)
-                       : lowering_.functions_.lookup(first->sym);
+    function = closure ? this->lowering.closureLowerer().closureCode(first)
+                       : this->lowering.functions_.lookup(first->sym);
   } else {
     std::vector<llvm::Type *> params;
     if (closure) {
-      params.push_back(lowering_.builder_.getPtrTy());
+      params.push_back(this->lowering.builder_.getPtrTy());
     }
-    params.push_back(lowering_.builder_.getInt32Ty());
+    params.push_back(this->lowering.builder_.getInt32Ty());
     for (FunctionDecl *member : group.members) {
       for (const Type *param : member->sym->params) {
-        params.push_back(lowering_.moduleBuilder().lower(param));
+        params.push_back(this->lowering.moduleBuilder().lower(param));
       }
     }
-    auto *type =
-        llvm::FunctionType::get(lowering_.moduleBuilder().lower(first->sym->ret), params, false);
+    auto *type = llvm::FunctionType::get(this->lowering.moduleBuilder().lower(first->sym->ret),
+                                         params, false);
     std::string name = "tz";
     for (FunctionDecl *member : group.members) {
       name += "." + member->name.str();
     }
     function = llvm::Function::Create(type, llvm::GlobalValue::InternalLinkage, name + ".cycle",
-                                      lowering_.module_.get());
-    lowering_.functionBuilder().setFunctionAttributes(function);
+                                      this->lowering.module_.get());
+    this->lowering.functionBuilder().setFunctionAttributes(function);
   }
 
-  lowering_.functionBuilder().beginFunction(function, first);
+  this->lowering.functionBuilder().beginFunction(function, first);
   unsigned next = 0;
   if (closure) {
-    lowering_.envParam_ = function->getArg(next++);
-    lowering_.envLowerer().bindCaptures(first);
+    this->lowering.envParam_ = function->getArg(next++);
+    this->lowering.envLowerer().bindCaptures(first);
   }
   llvm::Value *which = merged ? function->getArg(next++) : nullptr;
   group.slots.assign(group.members.size(), {});
@@ -157,59 +156,59 @@ void TailCallLowerer::emitTailGroup(Lowering::TailGroup &group) {
   for (size_t k = 0; k < group.members.size(); ++k) {
     FunctionDecl *member = group.members[k];
     for (const Type *param : member->sym->params) {
-      llvm::AllocaInst *slot = lowering_.functionFrame().createStackSlot(
-          lowering_.moduleBuilder().lower(param), member->name + ".arg");
-      lowering_.builder_.CreateStore(function->getArg(next++), slot);
+      llvm::AllocaInst *slot = this->lowering.functionFrame().createStackSlot(
+          this->lowering.moduleBuilder().lower(param), member->name + ".arg");
+      this->lowering.builder_.CreateStore(function->getArg(next++), slot);
       group.slots[k].push_back(slot);
     }
-    group.starts.push_back(lowering_.functionFrame().newBlock(member->name + ".start"));
+    group.starts.push_back(this->lowering.functionFrame().newBlock(member->name + ".start"));
   }
   if (merged) {
-    llvm::SwitchInst *dispatch =
-        lowering_.builder_.CreateSwitch(which, group.starts[0], unsigned(group.members.size()));
+    llvm::SwitchInst *dispatch = this->lowering.builder_.CreateSwitch(
+        which, group.starts[0], unsigned(group.members.size()));
     for (size_t k = 1; k < group.members.size(); ++k) {
-      dispatch->addCase(lowering_.builder_.getInt32(uint32_t(k)), group.starts[k]);
+      dispatch->addCase(this->lowering.builder_.getInt32(uint32_t(k)), group.starts[k]);
     }
   } else {
-    lowering_.builder_.CreateBr(group.starts[0]);
+    this->lowering.builder_.CreateBr(group.starts[0]);
   }
 
   for (size_t k = 0; k < group.members.size(); ++k) {
     FunctionDecl *member = group.members[k];
-    lowering_.tailGroup_ = &group;
-    lowering_.currentFn_ = member;
-    lowering_.returnType_ = member->sym->ret;
-    lowering_.tailStatements_.clear();
-    if (lowering_.returnType_->isVoid()) {
+    this->lowering.tailGroup_ = &group;
+    this->lowering.currentFn_ = member;
+    this->lowering.returnType_ = member->sym->ret;
+    this->lowering.tailStatements_.clear();
+    if (this->lowering.returnType_->isVoid()) {
       std::vector<Stmt *> stmts;
       tailStatementsOf(member->body, true, stmts);
       for (Stmt *stmt : stmts) {
-        if (tailCall(cast<ExprStmt>(stmt)->expr)) {
-          lowering_.tailStatements_.insert(stmt);
+        if (this->tailCall(cast<ExprStmt>(stmt)->expr)) {
+          this->lowering.tailStatements_.insert(stmt);
         }
       }
     }
-    lowering_.functionFrame().switchTo(group.starts[k]);
+    this->lowering.functionFrame().switchTo(group.starts[k]);
     std::vector<llvm::Value *> args;
     for (size_t i = 0; i < group.slots[k].size(); ++i) {
-      args.push_back(lowering_.builder_.CreateLoad(
-          lowering_.moduleBuilder().lower(member->sym->params[i]), group.slots[k][i]));
+      args.push_back(this->lowering.builder_.CreateLoad(
+          this->lowering.moduleBuilder().lower(member->sym->params[i]), group.slots[k][i]));
     }
-    lowering_.functionBuilder().emitParamsAndBody(member, args);
-    lowering_.functionBuilder().closeBody();
+    this->lowering.functionBuilder().emitParamsAndBody(member, args);
+    this->lowering.functionBuilder().closeBody();
   }
-  lowering_.tailGroup_ = nullptr;
-  lowering_.tailStatements_.clear();
-  lowering_.function_ = nullptr;
+  this->lowering.tailGroup_ = nullptr;
+  this->lowering.tailStatements_.clear();
+  this->lowering.function_ = nullptr;
   if (!merged) {
     return;
   }
 
   for (size_t k = 0; k < group.members.size(); ++k) {
     FunctionDecl *member = group.members[k];
-    llvm::Function *own = closure ? lowering_.closureLowerer().closureCode(member)
-                                  : lowering_.functions_.lookup(member->sym);
-    llvm::IRBuilder<> b(llvm::BasicBlock::Create(lowering_.ctx_, "entry", own));
+    llvm::Function *own = closure ? this->lowering.closureLowerer().closureCode(member)
+                                  : this->lowering.functions_.lookup(member->sym);
+    llvm::IRBuilder<> b(llvm::BasicBlock::Create(this->lowering.ctx_, "entry", own));
     std::vector<llvm::Value *> args;
     unsigned arg = 0;
     if (closure) {
@@ -218,8 +217,9 @@ void TailCallLowerer::emitTailGroup(Lowering::TailGroup &group) {
     args.push_back(b.getInt32(uint32_t(k)));
     for (size_t j = 0; j < group.members.size(); ++j) {
       for (const Type *param : group.members[j]->sym->params) {
-        args.push_back(j == k ? static_cast<llvm::Value *>(own->getArg(arg++))
-                              : llvm::PoisonValue::get(lowering_.moduleBuilder().lower(param)));
+        args.push_back(j == k
+                           ? static_cast<llvm::Value *>(own->getArg(arg++))
+                           : llvm::PoisonValue::get(this->lowering.moduleBuilder().lower(param)));
       }
     }
     llvm::CallInst *result = b.CreateCall(function, args);
@@ -233,11 +233,11 @@ void TailCallLowerer::emitTailGroup(Lowering::TailGroup &group) {
 
 CallExpr *TailCallLowerer::tailCall(Expr *value) const {
   auto *call = dyn_cast<CallExpr>(value);
-  if (!call || !call->func() || call->builtin() != Builtin::None || !lowering_.tailGroup_) {
+  if (!call || !call->func() || call->builtin() != Builtin::None || !this->lowering.tailGroup_) {
     return nullptr;
   }
-  if (!llvm::is_contained(lowering_.tailGroup_->members, call->func()->decl) ||
-      call->func()->ret != lowering_.returnType_) {
+  if (!llvm::is_contained(this->lowering.tailGroup_->members, call->func()->decl) ||
+      call->func()->ret != this->lowering.returnType_) {
     return nullptr;
   }
 
@@ -248,87 +248,90 @@ bool TailCallLowerer::hasTailCall(Expr *value) const {
   std::vector<CallExpr *> calls;
   tailCallsOf(value, calls);
 
-  return llvm::any_of(calls, [&](CallExpr *call) { return tailCall(call) != nullptr; });
+  return llvm::any_of(calls, [&](CallExpr *call) { return this->tailCall(call) != nullptr; });
 }
 
 void TailCallLowerer::emitTailReturn(Expr *value) {
-  if (CallExpr *call = tailCall(value)) {
-    emitTailJump(call);
+  CallExpr *call = this->tailCall(value);
+  if (call) {
+    this->emitTailJump(call);
     return;
   }
-  if (!hasTailCall(value)) {
-    lowering_.stmtLowerer().emitReturnValue(value);
+  if (!this->hasTailCall(value)) {
+    this->lowering.stmtLowerer().emitReturnValue(value);
     return;
   }
-  if (auto *cond = dyn_cast<ConditionalExpr>(value)) {
-    llvm::Value *test = lowering_.exprLowerer().emitExpr(cond->cond);
-    llvm::BasicBlock *thenBlock = lowering_.functionFrame().newBlock("tail.then");
-    llvm::BasicBlock *elseBlock = lowering_.functionFrame().newBlock("tail.else");
-    lowering_.builder_.CreateCondBr(test, thenBlock, elseBlock);
-    lowering_.functionFrame().switchTo(thenBlock);
-    emitTailReturn(cond->thenExpr);
-    lowering_.builder_.CreateUnreachable();
-    lowering_.functionFrame().switchTo(elseBlock);
-    emitTailReturn(cond->elseExpr);
+  auto *cond = dyn_cast<ConditionalExpr>(value);
+  if (cond) {
+    llvm::Value *test = this->lowering.exprLowerer().emitExpr(cond->cond);
+    llvm::BasicBlock *thenBlock = this->lowering.functionFrame().newBlock("tail.then");
+    llvm::BasicBlock *elseBlock = this->lowering.functionFrame().newBlock("tail.else");
+    this->lowering.builder_.CreateCondBr(test, thenBlock, elseBlock);
+    this->lowering.functionFrame().switchTo(thenBlock);
+    this->emitTailReturn(cond->thenExpr);
+    this->lowering.builder_.CreateUnreachable();
+    this->lowering.functionFrame().switchTo(elseBlock);
+    this->emitTailReturn(cond->elseExpr);
     return;
   }
-  if (auto *seq = dyn_cast<SequenceExpr>(value)) {
+  auto *seq = dyn_cast<SequenceExpr>(value);
+  if (seq) {
     for (size_t i = 0; i + 1 < seq->exprs.size(); ++i) {
-      lowering_.stmtLowerer().emitDiscarded(seq->exprs[i]);
+      this->lowering.stmtLowerer().emitDiscarded(seq->exprs[i]);
     }
-    emitTailReturn(seq->exprs.back());
+    this->emitTailReturn(seq->exprs.back());
     return;
   }
   auto *bin = cast<BinaryExpr>(value);
-  llvm::BasicBlock *decidedBlock = lowering_.functionFrame().newBlock("tail.decided");
-  llvm::BasicBlock *restBlock = lowering_.functionFrame().newBlock("tail.rest");
+  llvm::BasicBlock *decidedBlock = this->lowering.functionFrame().newBlock("tail.decided");
+  llvm::BasicBlock *restBlock = this->lowering.functionFrame().newBlock("tail.rest");
   bool logical = bin->op == BinaryOp::LogAnd || bin->op == BinaryOp::LogOr;
   llvm::Value *lhs = nullptr;
   if (logical) {
     bool isAnd = bin->op == BinaryOp::LogAnd;
-    lhs = lowering_.exprLowerer().emitExpr(bin->lhs);
-    llvm::Value *truth = lowering_.truthLowerer().emitTruth(lhs, bin->lhs->type);
-    lowering_.builder_.CreateCondBr(truth, isAnd ? restBlock : decidedBlock,
-                                    isAnd ? decidedBlock : restBlock);
-    lowering_.functionFrame().switchTo(decidedBlock);
-    llvm::Value *result = lowering_.truthLowerer().decidedValue(bin, lhs);
-    lowering_.functionFrame().emitCleanups(0);
-    lowering_.builder_.CreateRet(result);
+    lhs = this->lowering.exprLowerer().emitExpr(bin->lhs);
+    llvm::Value *truth = this->lowering.truthLowerer().emitTruth(lhs, bin->lhs->type);
+    this->lowering.builder_.CreateCondBr(truth, isAnd ? restBlock : decidedBlock,
+                                         isAnd ? decidedBlock : restBlock);
+    this->lowering.functionFrame().switchTo(decidedBlock);
+    llvm::Value *result = this->lowering.truthLowerer().decidedValue(bin, lhs);
+    this->lowering.functionFrame().emitCleanups(0);
+    this->lowering.builder_.CreateRet(result);
   } else if (bin->lhs->type->isOptional()) {
-    lhs = lowering_.exprLowerer().emitExpr(bin->lhs);
-    lowering_.builder_.CreateCondBr(lowering_.optionalLowerer().optionalHas(lhs, bin->lhs->type),
-                                    decidedBlock, restBlock);
-    lowering_.functionFrame().switchTo(decidedBlock);
+    lhs = this->lowering.exprLowerer().emitExpr(bin->lhs);
+    this->lowering.builder_.CreateCondBr(
+        this->lowering.optionalLowerer().optionalHas(lhs, bin->lhs->type), decidedBlock, restBlock);
+    this->lowering.functionFrame().switchTo(decidedBlock);
     llvm::Value *result = bin->type->isOptional()
                               ? lhs
-                              : lowering_.optionalLowerer().optionalValue(lhs, bin->lhs->type);
-    lowering_.functionFrame().emitCleanups(0);
-    lowering_.builder_.CreateRet(result);
+                              : this->lowering.optionalLowerer().optionalValue(lhs, bin->lhs->type);
+    this->lowering.functionFrame().emitCleanups(0);
+    this->lowering.builder_.CreateRet(result);
   } else {
-    lowering_.stmtLowerer().emitReturnValue(value);
+    this->lowering.stmtLowerer().emitReturnValue(value);
     return;
   }
-  lowering_.functionFrame().switchTo(restBlock);
+  this->lowering.functionFrame().switchTo(restBlock);
   if (logical) {
-    lowering_.refCounts().releaseValue(lhs, bin->lhs->type);
+    this->lowering.refCounts().releaseValue(lhs, bin->lhs->type);
   }
-  emitTailReturn(bin->rhs);
+  this->emitTailReturn(bin->rhs);
 }
 
 void TailCallLowerer::emitTailJump(CallExpr *call) {
-  size_t k = size_t(llvm::find(lowering_.tailGroup_->members, call->func()->decl) -
-                    lowering_.tailGroup_->members.begin());
-  std::vector<llvm::Value *> args = lowering_.exprLowerer().emitExprs(call->args);
+  size_t k = size_t(llvm::find(this->lowering.tailGroup_->members, call->func()->decl) -
+                    this->lowering.tailGroup_->members.begin());
+  std::vector<llvm::Value *> args = this->lowering.exprLowerer().emitExprs(call->args);
   const FuncSymbol *func = call->func();
   for (size_t i = args.size(); i < func->params.size(); ++i) {
-    args.push_back(lowering_.optionalLowerer().undefinedValue(func->params[i]));
+    args.push_back(this->lowering.optionalLowerer().undefinedValue(func->params[i]));
   }
-  lowering_.functionFrame().emitCleanups(0);
+  this->lowering.functionFrame().emitCleanups(0);
   for (size_t i = 0; i < args.size(); ++i) {
-    lowering_.builder_.CreateStore(args[i], lowering_.tailGroup_->slots[k][i]);
+    this->lowering.builder_.CreateStore(args[i], this->lowering.tailGroup_->slots[k][i]);
   }
-  lowering_.builder_.CreateBr(lowering_.tailGroup_->starts[k]);
-  lowering_.functionFrame().startDeadBlock();
+  this->lowering.builder_.CreateBr(this->lowering.tailGroup_->starts[k]);
+  this->lowering.functionFrame().startDeadBlock();
 }
 
 }

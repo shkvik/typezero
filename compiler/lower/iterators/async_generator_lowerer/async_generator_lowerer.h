@@ -6,7 +6,7 @@ namespace tz {
 
 class AsyncGeneratorLowerer {
 public:
-  explicit AsyncGeneratorLowerer(Lowering &lowering);
+  explicit AsyncGeneratorLowerer(Lowering &owner);
 
   llvm::Constant *asyncGeneratorLayout();
   void emitAsyncGenerator(FunctionDecl *fn, llvm::Function *function);
@@ -22,8 +22,8 @@ public:
   void emitAsyncGeneratorReturn(ReturnStmt *stmt);
 
 private:
-  Lowering &lowering_;
-  llvm::Constant *agenLayout_ = nullptr;
+  Lowering &lowering;
+  llvm::Constant *agenLayout = nullptr;
 };
 
 }

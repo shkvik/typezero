@@ -6,10 +6,7 @@
 #include "compiler/whole_program/flows/flows.h"
 #include "llvm/Support/ConvertUTF.h"
 
-using llvm::cast;
 using llvm::dyn_cast;
-using llvm::dyn_cast_or_null;
-using llvm::isa;
 
 namespace tz {
 
@@ -60,7 +57,8 @@ static const Type *keepMembers(const Type *type, llvm::function_ref<bool(const T
   return keepsUndefined ? Type::optional(result) : result;
 }
 
-UnionNarrowing::UnionNarrowing(Checker &checker) : checker_(checker) {}
+UnionNarrowing::UnionNarrowing(Checker &owner)
+    : checker(owner) {}
 
 void UnionNarrowing::narrowVariable(Checker::Flow &flow, const VarSymbol *var, const Type *type) {
   llvm::erase_if(flow.narrowed, [&](const auto &narrowed) { return narrowed.first == var; });
@@ -97,7 +95,7 @@ std::optional<Checker::NarrowTarget> UnionNarrowing::narrowTarget(const Expr *ex
     }
     auto *member = dyn_cast<MemberExpr>(read);
     std::optional<Checker::FieldPath> path =
-        member ? checker_.fieldFacts().fieldPath(member) : std::nullopt;
+        member ? this->checker.fieldFacts().fieldPath(member) : std::nullopt;
     if (!path) {
       return std::nullopt;
     }
@@ -116,7 +114,7 @@ std::optional<Checker::NarrowTarget> UnionNarrowing::narrowTarget(const Expr *ex
 const Type *UnionNarrowing::targetType(const Checker::Flow &flow,
                                        const Checker::NarrowTarget &target) const {
   if (target.var) {
-    return checker_.literalTypes().typeIn(flow, target.var);
+    return this->checker.literalTypes().typeIn(flow, target.var);
   }
   for (const auto &[path, type] : flow.narrowedFields) {
     if (path == *target.path) {
@@ -133,7 +131,7 @@ const Type *UnionNarrowing::targetType(const Checker::Flow &flow,
 void UnionNarrowing::narrowTargetTo(Checker::Flow &flow, const Checker::NarrowTarget &target,
                                     const Type *type) const {
   if (target.var) {
-    narrowVariable(flow, target.var, type);
+    UnionNarrowing::narrowVariable(flow, target.var, type);
     return;
   }
   const Checker::FieldPath &path = *target.path;
@@ -152,15 +150,15 @@ void UnionNarrowing::addUnionFacts(const Expr *cond, Checker::Flow &whenTrue,
                                    Checker::Flow &whenFalse) const {
   auto narrow = [&](Checker::Flow &flow, const Checker::NarrowTarget &target,
                     llvm::function_ref<bool(const Type *)> keep) {
-    const Type *now = targetType(flow, target);
+    const Type *now = this->targetType(flow, target);
     if (now->isNever()) {
       return;
     }
-    narrowTargetTo(flow, target, keepMembers(now, keep));
+    this->narrowTargetTo(flow, target, keepMembers(now, keep));
   };
 
   if (auto *call = dyn_cast<CallExpr>(cond); call && call->builtin() == Builtin::ArrayIsArray) {
-    if (std::optional<Checker::NarrowTarget> target = narrowTarget(call->args[0])) {
+    if (std::optional<Checker::NarrowTarget> target = this->narrowTarget(call->args[0])) {
       narrow(whenTrue, *target, [](const Type *m) { return m->isArray(); });
       narrow(whenFalse, *target, [](const Type *m) { return !m->isArray(); });
     }
@@ -176,11 +174,11 @@ void UnionNarrowing::addUnionFacts(const Expr *cond, Checker::Flow &whenTrue,
       }
       object = link->operand;
     }
-    std::optional<Checker::NarrowTarget> target = narrowTarget(object);
+    std::optional<Checker::NarrowTarget> target = this->narrowTarget(object);
     if (!target || !target->declared->nonOptional()->isUnion()) {
       return false;
     }
-    const Type *now = targetType(flow, *target)->nonOptional();
+    const Type *now = this->targetType(flow, *target)->nonOptional();
     if (!now->isUnion() && !now->isObject()) {
       return false;
     }
@@ -218,7 +216,7 @@ void UnionNarrowing::addUnionFacts(const Expr *cond, Checker::Flow &whenTrue,
 
   if (bin->op == BinaryOp::InstanceOf) {
     const Type *cls = bin->rhs->type;
-    std::optional<Checker::NarrowTarget> target = narrowTarget(bin->lhs);
+    std::optional<Checker::NarrowTarget> target = this->narrowTarget(bin->lhs);
     if (!target || !cls) {
       return;
     }
@@ -229,14 +227,14 @@ void UnionNarrowing::addUnionFacts(const Expr *cond, Checker::Flow &whenTrue,
       }
     }
     if (cls->isBuffer()) {
-      const Type *now = targetType(whenTrue, *target)->nonOptional();
+      const Type *now = this->targetType(whenTrue, *target)->nonOptional();
       std::vector<const Type *> kept;
       for (const Type *m : membersOf(now)) {
         if (m->isBuffer() || m->bytes() == Type::Bytes::Uint8) {
           kept.push_back(cls);
         }
       }
-      narrowTargetTo(whenTrue, *target, kept.empty() ? nullptr : Type::unionOf(kept));
+      this->narrowTargetTo(whenTrue, *target, kept.empty() ? nullptr : Type::unionOf(kept));
       narrow(whenFalse, *target, [&](const Type *m) { return !m->isBuffer(); });
       return;
     }
@@ -247,7 +245,7 @@ void UnionNarrowing::addUnionFacts(const Expr *cond, Checker::Flow &whenTrue,
       narrow(whenFalse, *target, [&](const Type *m) { return !llvm::is_contained(matching, m); });
       return;
     }
-    const Type *now = targetType(whenTrue, *target)->nonOptional();
+    const Type *now = this->targetType(whenTrue, *target)->nonOptional();
     std::vector<const Type *> kept;
     for (const Type *m : membersOf(now)) {
       if (m->isObject() && m->isSubtypeOf(cls)) {
@@ -256,14 +254,14 @@ void UnionNarrowing::addUnionFacts(const Expr *cond, Checker::Flow &whenTrue,
         kept.push_back(cls);
       }
     }
-    narrowTargetTo(whenTrue, *target, kept.empty() ? nullptr : Type::unionOf(kept));
+    this->narrowTargetTo(whenTrue, *target, kept.empty() ? nullptr : Type::unionOf(kept));
     narrow(whenFalse, *target,
            [&](const Type *m) { return !(m->isObject() && m->isSubtypeOf(cls)); });
     return;
   }
 
   if (bin->op == BinaryOp::In) {
-    std::optional<Checker::NarrowTarget> target = narrowTarget(bin->rhs);
+    std::optional<Checker::NarrowTarget> target = this->narrowTarget(bin->rhs);
     auto *key = dyn_cast<StringLitExpr>(bin->lhs);
     if (!target || !key) {
       return;
@@ -284,7 +282,7 @@ void UnionNarrowing::addUnionFacts(const Expr *cond, Checker::Flow &whenTrue,
     if (auto *typeOf = dyn_cast<UnaryExpr>(side); typeOf && typeOf->op == UnaryOp::TypeOf) {
       auto *text = dyn_cast<StringLitExpr>(other);
       std::optional<Checker::NarrowTarget> target =
-          text ? narrowTarget(typeOf->operand) : std::nullopt;
+          text ? this->narrowTarget(typeOf->operand) : std::nullopt;
       if (!target || !target->declared->nonOptional()->isUnion()) {
         continue;
       }
@@ -315,20 +313,20 @@ void UnionNarrowing::addUnionFacts(const Expr *cond, Checker::Flow &whenTrue,
       narrowByTag(member, different, [&](const Type *t) { return t != literal; });
       continue;
     }
-    if (std::optional<Checker::NarrowTarget> target = narrowTarget(side)) {
-      const Type *now = targetType(equal, *target)->nonOptional();
+    if (std::optional<Checker::NarrowTarget> target = this->narrowTarget(side)) {
+      const Type *now = this->targetType(equal, *target)->nonOptional();
       if (llvm::is_contained(membersOf(now), literal)) {
-        narrowTargetTo(equal, *target, literal);
+        this->narrowTargetTo(equal, *target, literal);
         narrow(different, *target, [&](const Type *m) { return m != literal; });
       } else if (now->isBool() && literal->literalBase()->isBool()) {
-        narrowTargetTo(equal, *target, literal);
-        narrowTargetTo(different, *target, Type::boolLiteral(literal->literalNumber() == 0));
+        this->narrowTargetTo(equal, *target, literal);
+        this->narrowTargetTo(different, *target, Type::boolLiteral(literal->literalNumber() == 0));
       }
     } else if (const VarSymbol *var = readVariable(side);
                var && var->type && literal->literalBase() == var->type->nonOptional() &&
                (literal->isStringLiteral() || literal->literalBase()->isInt()) &&
-               checker_.literalTypes().typeIn(equal, var) == var->type) {
-      narrowVariable(equal, var, literal);
+               this->checker.literalTypes().typeIn(equal, var) == var->type) {
+      UnionNarrowing::narrowVariable(equal, var, literal);
     }
   }
 }

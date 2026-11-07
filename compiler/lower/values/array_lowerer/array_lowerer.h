@@ -6,7 +6,7 @@ namespace tz {
 
 class ArrayLowerer {
 public:
-  explicit ArrayLowerer(Lowering &lowering);
+  explicit ArrayLowerer(Lowering &owner);
 
   llvm::Value *emitElementAssign(AssignExpr *assign, bool needResult);
   llvm::Value *emitLengthAssign(AssignExpr *assign, bool needResult);
@@ -26,7 +26,7 @@ public:
                       llvm::BasicBlock *bodyBlock, llvm::BasicBlock *endBlock);
 
 private:
-  Lowering &lowering_;
+  Lowering &lowering;
 };
 
 }

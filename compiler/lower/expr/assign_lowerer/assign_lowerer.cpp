@@ -16,86 +16,82 @@
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/IR/Intrinsics.h"
 #include "llvm/IR/MDBuilder.h"
-#include "llvm/Support/ConvertUTF.h"
-#include "llvm/Support/ErrorHandling.h"
-#include <array>
 
-using llvm::BasicBlock;
 using llvm::cast;
 using llvm::dyn_cast;
 using llvm::isa;
-using llvm::Value;
 
 namespace tz {
 
-AssignLowerer::AssignLowerer(Lowering &lowering) : lowering_(lowering) {}
+AssignLowerer::AssignLowerer(Lowering &owner)
+    : lowering(owner) {}
 
 llvm::Value *AssignLowerer::emitAssign(AssignExpr *assign, bool needResult) {
-  lowering_.orderAt(assign->loc());
-  lowering_.orderAt(assign->target->loc());
+  this->lowering.orderAt(assign->loc());
+  this->lowering.orderAt(assign->target->loc());
   if (assign->op && *assign->op == BinaryOp::Nullish) {
-    return emitNullishAssign(assign, needResult);
+    return this->emitNullishAssign(assign, needResult);
   }
-  if (auto *index = dyn_cast<IndexExpr>(assign->target);
-      index && index->object->type->nonOptional()->isJson()) {
-    return lowering_.jsonLowerer().emitJsonAssign(assign, needResult);
+  auto *index = dyn_cast<IndexExpr>(assign->target);
+  auto *member = dyn_cast<MemberExpr>(assign->target);
+  if (index && index->object->type->nonOptional()->isJson()) {
+    return this->lowering.jsonLowerer().emitJsonAssign(assign, needResult);
   }
-  if (auto *member = dyn_cast<MemberExpr>(assign->target);
-      member && member->object->type->nonOptional()->isJson()) {
-    return lowering_.jsonLowerer().emitJsonAssign(assign, needResult);
+  if (member && member->object->type->nonOptional()->isJson()) {
+    return this->lowering.jsonLowerer().emitJsonAssign(assign, needResult);
   }
-  if (auto *index = dyn_cast<IndexExpr>(assign->target); index && index->keyed()) {
-    return lowering_.objectLowerer().emitFieldAssign(assign, needResult);
+  if (index && index->keyed()) {
+    return this->lowering.objectLowerer().emitFieldAssign(assign, needResult);
   }
-  if (auto *index = dyn_cast<IndexExpr>(assign->target);
-      index && index->object->type->isTypedArray()) {
-    return lowering_.bytesLowerer().emitBytesElementAssign(assign, needResult);
+  if (index && index->object->type->isTypedArray()) {
+    return this->lowering.bytesLowerer().emitBytesElementAssign(assign, needResult);
   }
-  if (isa<IndexExpr>(assign->target)) {
-    return lowering_.arrayLowerer().emitElementAssign(assign, needResult);
+  if (index) {
+    return this->lowering.arrayLowerer().emitElementAssign(assign, needResult);
   }
-  if (auto *member = dyn_cast<MemberExpr>(assign->target)) {
+  if (member) {
     return member->object->type->isObject() || member->object->type->isUnion()
-               ? lowering_.objectLowerer().emitFieldAssign(assign, needResult)
-               : lowering_.arrayLowerer().emitLengthAssign(assign, needResult);
+               ? this->lowering.objectLowerer().emitFieldAssign(assign, needResult)
+               : this->lowering.arrayLowerer().emitLengthAssign(assign, needResult);
   }
 
   const VarSymbol *var = cast<NameExpr>(assign->target)->var();
-  llvm::Value *address = lowering_.functionFrame().addressOf(var);
+  llvm::Value *address = this->lowering.functionFrame().addressOf(var);
   const Type *type = assign->type;
   llvm::Value *value;
   if (!assign->op) {
-    value = lowering_.exprLowerer().emitExpr(assign->value);
+    value = this->lowering.exprLowerer().emitExpr(assign->value);
   } else if (type->isString()) {
-    Lowering::Operand old{lowering_.builder_.CreateLoad(lowering_.strTy_, address), false, type};
-    if (!cannotAssign(assign->value)) {
-      lowering_.refCounts().retainString(old.value);
+    Lowering::Operand old{this->lowering.builder_.CreateLoad(this->lowering.strTy_, address), false,
+                          type};
+    if (!AssignLowerer::cannotAssign(assign->value)) {
+      this->lowering.refCounts().retainString(old.value);
       old.owned = true;
     }
-    Lowering::Operand rhs = lowering_.stringLowerer().emitConcatPart(assign->value, false);
-    value = lowering_.stringLowerer().concatOperands({old, rhs});
+    Lowering::Operand rhs = this->lowering.stringLowerer().emitConcatPart(assign->value, false);
+    value = this->lowering.stringLowerer().concatOperands({old, rhs});
   } else if (type->isDecimal()) {
-    llvm::Value *old = lowering_.builder_.CreateLoad(lowering_.decTy_, address);
-    bool hold = !cannotAssign(assign->value);
+    llvm::Value *old = this->lowering.builder_.CreateLoad(this->lowering.decTy_, address);
+    bool hold = !AssignLowerer::cannotAssign(assign->value);
     if (hold) {
-      lowering_.refCounts().retainValue(old, type);
+      this->lowering.refCounts().retainValue(old, type);
     }
-    value = lowering_.decimalLowerer().emitDecimalCompound(*assign->op, old, assign->value);
+    value = this->lowering.decimalLowerer().emitDecimalCompound(*assign->op, old, assign->value);
     if (hold) {
-      lowering_.refCounts().releaseValue(old, type);
+      this->lowering.refCounts().releaseValue(old, type);
     }
   } else {
     llvm::Value *old =
-        lowering_.builder_.CreateLoad(lowering_.moduleBuilder().lower(type), address);
-    llvm::Value *rhs = lowering_.exprLowerer().emitExpr(assign->value);
-    value =
-        lowering_.binaryLowerer().emitArithmetic(*assign->op, old, rhs, type, assign->rangeProven);
+        this->lowering.builder_.CreateLoad(this->lowering.moduleBuilder().lower(type), address);
+    llvm::Value *rhs = this->lowering.exprLowerer().emitExpr(assign->value);
+    value = this->lowering.binaryLowerer().emitArithmetic(*assign->op, old, rhs, type,
+                                                          assign->rangeProven);
   }
-  lowering_.storeLowerer().storeVar(var, address, value, true);
+  this->lowering.storeLowerer().storeVar(var, address, value, true);
   if (!needResult) {
     return nullptr;
   }
-  lowering_.refCounts().retainValue(value, type);
+  this->lowering.refCounts().retainValue(value, type);
 
   return value;
 }
@@ -103,50 +99,52 @@ llvm::Value *AssignLowerer::emitAssign(AssignExpr *assign, bool needResult) {
 llvm::Value *AssignLowerer::emitNullishAssign(AssignExpr *assign, bool needResult) {
   const VarSymbol *var = cast<NameExpr>(assign->target)->var();
   const Type *varType = var->type;
-  llvm::Value *address = lowering_.functionFrame().addressOf(var);
+  llvm::Value *address = this->lowering.functionFrame().addressOf(var);
   llvm::Value *old =
-      lowering_.builder_.CreateLoad(lowering_.moduleBuilder().lower(varType), address);
-  llvm::BasicBlock *keepBlock = lowering_.functionFrame().newBlock("nullish.keep");
-  llvm::BasicBlock *assignBlock = lowering_.functionFrame().newBlock("nullish.assign");
-  llvm::BasicBlock *endBlock = lowering_.functionFrame().newBlock("nullish.end");
+      this->lowering.builder_.CreateLoad(this->lowering.moduleBuilder().lower(varType), address);
+  llvm::BasicBlock *keepBlock = this->lowering.functionFrame().newBlock("nullish.keep");
+  llvm::BasicBlock *assignBlock = this->lowering.functionFrame().newBlock("nullish.assign");
+  llvm::BasicBlock *endBlock = this->lowering.functionFrame().newBlock("nullish.end");
   llvm::Value *has = varType->nonOptional()->isJson()
-                         ? lowering_.jsonLowerer().jsonPresent(old)
-                         : lowering_.optionalLowerer().optionalHas(old, varType);
-  lowering_.builder_.CreateCondBr(has, keepBlock, assignBlock);
+                         ? this->lowering.jsonLowerer().jsonPresent(old)
+                         : this->lowering.optionalLowerer().optionalHas(old, varType);
+  this->lowering.builder_.CreateCondBr(has, keepBlock, assignBlock);
 
   const Type *resultType = assign->type;
-  lowering_.functionFrame().switchTo(keepBlock);
+  this->lowering.functionFrame().switchTo(keepBlock);
   llvm::Value *kept = nullptr;
   if (needResult) {
-    lowering_.refCounts().retainValue(old, varType);
-    kept = resultType->isOptional() ? old : lowering_.optionalLowerer().optionalValue(old, varType);
+    this->lowering.refCounts().retainValue(old, varType);
+    kept = resultType->isOptional() ? old
+                                    : this->lowering.optionalLowerer().optionalValue(old, varType);
   }
-  llvm::BasicBlock *keepEnd = lowering_.builder_.GetInsertBlock();
-  lowering_.builder_.CreateBr(endBlock);
+  llvm::BasicBlock *keepEnd = this->lowering.builder_.GetInsertBlock();
+  this->lowering.builder_.CreateBr(endBlock);
 
-  lowering_.functionFrame().switchTo(assignBlock);
-  llvm::Value *value = lowering_.exprLowerer().emitExpr(assign->value);
+  this->lowering.functionFrame().switchTo(assignBlock);
+  llvm::Value *value = this->lowering.exprLowerer().emitExpr(assign->value);
   const Type *valueType = assign->value->type;
-  llvm::Value *stored =
-      valueType->isOptional()
-          ? value
-          : lowering_.optionalLowerer().makeOptional(value, lowering_.builder_.getTrue(), varType);
-  lowering_.storeLowerer().storeVar(var, address, stored, true);
+  llvm::Value *stored = valueType->isOptional()
+                            ? value
+                            : this->lowering.optionalLowerer().makeOptional(
+                                  value, this->lowering.builder_.getTrue(), varType);
+  this->lowering.storeLowerer().storeVar(var, address, stored, true);
   llvm::Value *assigned = nullptr;
   if (needResult) {
-    lowering_.refCounts().retainValue(stored, varType);
+    this->lowering.refCounts().retainValue(stored, varType);
     assigned = resultType->isOptional()
                    ? stored
-                   : lowering_.optionalLowerer().optionalValue(stored, varType);
+                   : this->lowering.optionalLowerer().optionalValue(stored, varType);
   }
-  llvm::BasicBlock *assignEnd = lowering_.builder_.GetInsertBlock();
-  lowering_.builder_.CreateBr(endBlock);
+  llvm::BasicBlock *assignEnd = this->lowering.builder_.GetInsertBlock();
+  this->lowering.builder_.CreateBr(endBlock);
 
-  lowering_.functionFrame().switchTo(endBlock);
+  this->lowering.functionFrame().switchTo(endBlock);
   if (!needResult) {
     return nullptr;
   }
-  llvm::PHINode *phi = lowering_.builder_.CreatePHI(lowering_.moduleBuilder().lower(resultType), 2);
+  llvm::PHINode *phi =
+      this->lowering.builder_.CreatePHI(this->lowering.moduleBuilder().lower(resultType), 2);
   phi->addIncoming(kept, keepEnd);
   phi->addIncoming(assigned, assignEnd);
 
@@ -154,53 +152,56 @@ llvm::Value *AssignLowerer::emitNullishAssign(AssignExpr *assign, bool needResul
 }
 
 llvm::Value *AssignLowerer::emitUpdate(UpdateExpr *update) {
-  lowering_.orderAt(update->loc());
-  lowering_.orderAt(update->target->loc());
+  this->lowering.orderAt(update->loc());
+  this->lowering.orderAt(update->target->loc());
   if (auto *index = dyn_cast<IndexExpr>(update->target);
       index && index->object->type->isTypedArray()) {
-    return lowering_.bytesLowerer().emitBytesUpdate(update);
+    return this->lowering.bytesLowerer().emitBytesUpdate(update);
   }
   llvm::Value *address;
   Lowering::Operand holder{nullptr, false, nullptr};
-  if (auto *keyed = dyn_cast<IndexExpr>(update->target); keyed && keyed->keyed()) {
-    holder = lowering_.refCounts().emitOperand(keyed->object, cannotAssign(keyed->index));
-    address = lowering_.objectLowerer().keyedFieldAddress(
-        holder.value, keyed->object->type, lowering_.exprLowerer().emitExpr(keyed->index),
+  auto *keyed = dyn_cast<IndexExpr>(update->target);
+  if (keyed && keyed->keyed()) {
+    holder = this->lowering.refCounts().emitOperand(keyed->object,
+                                                    AssignLowerer::cannotAssign(keyed->index));
+    address = this->lowering.objectLowerer().keyedFieldAddress(
+        holder.value, keyed->object->type, this->lowering.exprLowerer().emitExpr(keyed->index),
         keyed->index->type);
   } else if (auto *index = dyn_cast<IndexExpr>(update->target)) {
-    holder = lowering_.refCounts().emitOperand(index->object, cannotAssign(index->index));
-    llvm::Value *position = lowering_.exprLowerer().emitExpr(index->index);
-    address = lowering_.arrayLowerer().elementAddress(
-        lowering_.arrayLowerer().arrayData(holder.value), update->type, position);
+    holder = this->lowering.refCounts().emitOperand(index->object,
+                                                    AssignLowerer::cannotAssign(index->index));
+    llvm::Value *position = this->lowering.exprLowerer().emitExpr(index->index);
+    address = this->lowering.arrayLowerer().elementAddress(
+        this->lowering.arrayLowerer().arrayData(holder.value), update->type, position);
   } else if (auto *member = dyn_cast<MemberExpr>(update->target)) {
-    holder = lowering_.refCounts().emitOperand(member->object, true);
-    address =
-        lowering_.objectLayouts().fieldAddress(holder.value, member->object->type, member->name);
+    holder = this->lowering.refCounts().emitOperand(member->object, true);
+    address = this->lowering.objectLayouts().fieldAddress(holder.value, member->object->type,
+                                                          member->name);
   } else {
-    address = lowering_.functionFrame().addressOf(cast<NameExpr>(update->target)->var());
+    address = this->lowering.functionFrame().addressOf(cast<NameExpr>(update->target)->var());
   }
   if (update->type->isDecimal()) {
-    llvm::Value *result = lowering_.decimalLowerer().emitDecimalUpdate(update, address);
+    llvm::Value *result = this->lowering.decimalLowerer().emitDecimalUpdate(update, address);
     if (holder.value) {
-      lowering_.refCounts().dropOperand(holder);
+      this->lowering.refCounts().dropOperand(holder);
     }
     return result;
   }
-  llvm::Type *type = lowering_.moduleBuilder().lower(update->type);
-  llvm::Value *old = lowering_.builder_.CreateLoad(type, address);
+  llvm::Type *type = this->lowering.moduleBuilder().lower(update->type);
+  llvm::Value *old = this->lowering.builder_.CreateLoad(type, address);
   llvm::Value *updated;
   if (update->type->isFloat()) {
     llvm::Value *one = llvm::ConstantFP::get(type, 1.0);
-    updated = update->increment ? lowering_.builder_.CreateFAdd(old, one)
-                                : lowering_.builder_.CreateFSub(old, one);
+    updated = update->increment ? this->lowering.builder_.CreateFAdd(old, one)
+                                : this->lowering.builder_.CreateFSub(old, one);
   } else {
     llvm::Value *one = llvm::ConstantInt::get(type, 1);
-    updated = update->increment ? lowering_.builder_.CreateAdd(old, one)
-                                : lowering_.builder_.CreateSub(old, one);
+    updated = update->increment ? this->lowering.builder_.CreateAdd(old, one)
+                                : this->lowering.builder_.CreateSub(old, one);
   }
-  lowering_.builder_.CreateStore(updated, address);
+  this->lowering.builder_.CreateStore(updated, address);
   if (holder.value) {
-    lowering_.refCounts().dropOperand(holder);
+    this->lowering.refCounts().dropOperand(holder);
   }
 
   return update->prefix ? updated : old;
@@ -221,33 +222,35 @@ bool AssignLowerer::cannotAssign(const Expr *expr) {
     return llvm::all_of(cast<TemplateExpr>(expr)->exprs, cannotAssign);
   case Expr::Kind::ArrayLit:
     return llvm::all_of(cast<ArrayLitExpr>(expr)->elements, [](const ArrayLitExpr::Element &e) {
-      return cannotAssign(e.expr) && !(e.spread && e.expr->type->isIterator());
+      return AssignLowerer::cannotAssign(e.expr) && !(e.spread && e.expr->type->isIterator());
     });
   case Expr::Kind::ObjectLit:
-    return llvm::all_of(cast<ObjectLitExpr>(expr)->props,
-                        [](const ObjectLitExpr::Property &p) { return cannotAssign(p.value); });
+    return llvm::all_of(cast<ObjectLitExpr>(expr)->props, [](const ObjectLitExpr::Property &p) {
+      return AssignLowerer::cannotAssign(p.value);
+    });
   case Expr::Kind::Member:
-    return cannotAssign(cast<MemberExpr>(expr)->object);
+    return AssignLowerer::cannotAssign(cast<MemberExpr>(expr)->object);
   case Expr::Kind::Index: {
     auto *index = cast<IndexExpr>(expr);
-    return cannotAssign(index->object) && cannotAssign(index->index);
+    return AssignLowerer::cannotAssign(index->object) && AssignLowerer::cannotAssign(index->index);
   }
   case Expr::Kind::Unary:
-    return cannotAssign(cast<UnaryExpr>(expr)->operand);
+    return AssignLowerer::cannotAssign(cast<UnaryExpr>(expr)->operand);
   case Expr::Kind::Binary: {
     auto *bin = cast<BinaryExpr>(expr);
-    return cannotAssign(bin->lhs) && cannotAssign(bin->rhs);
+    return AssignLowerer::cannotAssign(bin->lhs) && AssignLowerer::cannotAssign(bin->rhs);
   }
   case Expr::Kind::Conditional: {
     auto *cond = cast<ConditionalExpr>(expr);
-    return cannotAssign(cond->cond) && cannotAssign(cond->thenExpr) && cannotAssign(cond->elseExpr);
+    return AssignLowerer::cannotAssign(cond->cond) && AssignLowerer::cannotAssign(cond->thenExpr) &&
+           AssignLowerer::cannotAssign(cond->elseExpr);
   }
   case Expr::Kind::Cast:
-    return cannotAssign(cast<CastExpr>(expr)->operand);
+    return AssignLowerer::cannotAssign(cast<CastExpr>(expr)->operand);
   case Expr::Kind::Sequence:
     return llvm::all_of(cast<SequenceExpr>(expr)->exprs, cannotAssign);
   case Expr::Kind::OptionalChain:
-    return cannotAssign(cast<OptionalChainExpr>(expr)->chain);
+    return AssignLowerer::cannotAssign(cast<OptionalChainExpr>(expr)->chain);
   case Expr::Kind::New:
     return !cast<NewExpr>(expr)->cls() && !cast<NewExpr>(expr)->reflect() &&
            llvm::all_of(cast<NewExpr>(expr)->args, cannotAssign);
@@ -268,7 +271,7 @@ bool AssignLowerer::cannotAssign(const Expr *expr) {
     }
     auto *member = dyn_cast<MemberExpr>(call->callee);
     return !member || call->builtin() == Builtin::ConsoleLog || isMathBuiltin(call->builtin()) ||
-           cannotAssign(member->object);
+           AssignLowerer::cannotAssign(member->object);
   }
   case Expr::Kind::Assign:
   case Expr::Kind::Update:

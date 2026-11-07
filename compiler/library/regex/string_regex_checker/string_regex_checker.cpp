@@ -82,7 +82,9 @@ Expr *StringRegexChecker::checkStringRegexMethod(CallExpr *call, MemberExpr *mem
   call->type = Type::error();
   bool replace = name == "replace" || name == "replaceAll";
   unsigned min = replace ? 2 : name == "split" ? 0 : 1, max = name == "split" ? 2 : replace ? 2 : 1;
-  if (!checker_.argumentChecker().checkArity(call, member->loc(), min, max)) {
+  ArgumentChecker::ResultArityMatches arity = checker_.argumentChecker().checkArity(call, min, max);
+  if (arity.isErr()) {
+    checker_.diags_.error(member->loc(), arity.error().message);
     return call;
   }
   auto restLoosely = [&] {

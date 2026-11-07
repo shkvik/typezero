@@ -6,7 +6,7 @@ namespace tz {
 
 class ClassLinks {
 public:
-  explicit ClassLinks(Checker &checker);
+  explicit ClassLinks(Checker &owner);
 
   void numberClasses();
   void buildVtable(ClassDecl *cls);
@@ -21,7 +21,14 @@ public:
   static const Type *commonClass(const Type *a, const Type *b);
 
 private:
-  Checker &checker_;
+  static bool sameParams(const FuncSymbol *a, const FuncSymbol *b);
+  static bool takesParams(const Type *fnType, const FuncSymbol *sym);
+  static const char *accessName(Access access);
+  static bool isArrowMethod(const FunctionDecl *fn);
+  static bool declaresReturn(const FunctionDecl *fn);
+  static void interfacesOf(const ClassDecl *cls, std::vector<const Type *> &out);
+
+  Checker &checker;
 };
 
 }

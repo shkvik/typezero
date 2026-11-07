@@ -6,7 +6,7 @@ namespace tz {
 
 class FunctionBuilder {
 public:
-  explicit FunctionBuilder(Lowering &lowering);
+  explicit FunctionBuilder(Lowering &owner);
 
   void declareFunction(FunctionDecl *fn);
   void emitFunction(FunctionDecl *fn);
@@ -18,7 +18,7 @@ public:
   void setFunctionAttributes(llvm::Function *fn);
 
 private:
-  Lowering &lowering_;
+  Lowering &lowering;
 };
 
 }

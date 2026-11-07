@@ -133,7 +133,7 @@ Expr *BytesNewChecker::checkBytesNew(NewExpr *expr, const Type *type) {
                           "make one with 'Buffer.from(values)' or 'Buffer.alloc(size)'");
     checkArgsLoosely();
     return expr;
-  case Bytes::ArrayBuffer:
+  case Bytes::ArrayBuffer: {
     if (args.size() == 2) {
       checker_.diags_.error(args[1]->loc(),
                             "an ArrayBuffer that can change its size is not supported yet "
@@ -141,15 +141,20 @@ Expr *BytesNewChecker::checkBytesNew(NewExpr *expr, const Type *type) {
       checkArgsLoosely();
       return expr;
     }
-    if (!checker_.argumentChecker().checkArity(call, loc, 1, 1)) {
+    ArgumentChecker::ResultArityMatches arity = checker_.argumentChecker().checkArity(call, 1, 1);
+    if (arity.isErr()) {
+      checker_.diags_.error(loc, arity.error().message);
       return call;
     }
     call->args[0] = checker_.memberChecker().checkPosition(call->args[0]);
     checker_.indexProofs().requireBetween(call->args[0], 0, std::nullopt,
                                           "the length of an ArrayBuffer");
     return made(Builtin::ArrayBufferNew, type);
+  }
   case Bytes::DataView: {
-    if (!checker_.argumentChecker().checkArity(call, loc, 1, 3)) {
+    ArgumentChecker::ResultArityMatches arity = checker_.argumentChecker().checkArity(call, 1, 3);
+    if (arity.isErr()) {
+      checker_.diags_.error(loc, arity.error().message);
       return call;
     }
     call->args[0] = checker_.exprChecker().checkExpr(call->args[0]);
@@ -171,13 +176,18 @@ Expr *BytesNewChecker::checkBytesNew(NewExpr *expr, const Type *type) {
                                     "the DataView");
     return made(Builtin::DataViewNew, type);
   }
-  case Bytes::TextEncoder:
-    if (!checker_.argumentChecker().checkArity(call, loc, 0, 0)) {
+  case Bytes::TextEncoder: {
+    ArgumentChecker::ResultArityMatches arity = checker_.argumentChecker().checkArity(call, 0, 0);
+    if (arity.isErr()) {
+      checker_.diags_.error(loc, arity.error().message);
       return call;
     }
     return made(Builtin::TextEncoderNew, type);
+  }
   case Bytes::TextDecoder: {
-    if (!checker_.argumentChecker().checkArity(call, loc, 0, 2)) {
+    ArgumentChecker::ResultArityMatches arity = checker_.argumentChecker().checkArity(call, 0, 2);
+    if (arity.isErr()) {
+      checker_.diags_.error(loc, arity.error().message);
       return call;
     }
     auto *resolved = checker_.ctx_.make<IntLitExpr>(loc, 1);
@@ -264,7 +274,10 @@ Expr *BytesNewChecker::checkBytesNew(NewExpr *expr, const Type *type) {
     return made(Builtin::BytesNew, type);
   }
   if (args.size() > 3) {
-    checker_.argumentChecker().checkArity(call, loc, 0, 3);
+    ArgumentChecker::ResultArityMatches arity = checker_.argumentChecker().checkArity(call, 0, 3);
+    if (arity.isErr()) {
+      checker_.diags_.error(loc, arity.error().message);
+    }
     return call;
   }
   Expr *&source = call->args[0];

@@ -25,53 +25,49 @@
 #include "compiler/library/tz_modules/tz_modules_checker/tz_modules_checker.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/StringSet.h"
-#include "llvm/Support/ErrorHandling.h"
 #include <cmath>
-#include <functional>
 
-using llvm::cast;
 using llvm::dyn_cast;
-using llvm::dyn_cast_or_null;
-using llvm::isa;
 
 namespace tz {
 
-FunctionChecker::FunctionChecker(Checker &checker) : checker_(checker) {}
+FunctionChecker::FunctionChecker(Checker &owner)
+    : checker(owner) {}
 
 void FunctionChecker::declareFunction(FunctionDecl *fn, VarSymbol *var, bool scoped) {
-  FuncSymbol *sym = checker_.ctx_.newFunc();
+  FuncSymbol *sym = this->checker.ctx_.newFunc();
   sym->name = fn->name;
   sym->loc = fn->loc();
   sym->decl = fn;
   bool generic = !fn->typeParams.empty() || llvm::any_of(fn->params, [&](const Param &p) {
-    return p.type && checker_.iterableChecker().isIterableRef(*p.type);
+    return p.type && this->checker.iterableChecker().isIterableRef(*p.type);
   });
   bool classParams = fn->cls() && !fn->isStatic() && !fn->cls()->typeParams.empty();
   if (generic || classParams) {
-    checker_.typeScopes_.emplace_back();
+    this->checker.typeScopes_.emplace_back();
     if (classParams) {
-      checker_.genericClassChecker().bindClassTypeParams(fn->cls());
+      this->checker.genericClassChecker().bindClassTypeParams(fn->cls());
     }
   }
   if (generic) {
     if (var) {
       if (!fn->typeParams.empty()) {
-        checker_.diags_.error(fn->loc(),
-                              "a generic function can be declared only at the top level for now");
+        this->checker.diags_.error(
+            fn->loc(), "a generic function can be declared only at the top level for now");
       }
       fn->typeArgs.assign(fn->typeParams.size(), Type::error());
-      checker_.typeParams().bindTypeParams(fn->typeParams, fn->typeArgs);
+      this->checker.typeParams().bindTypeParams(fn->typeParams, fn->typeArgs);
     } else {
       fn->typeArgs = sym->typeParams =
-          checker_.typeParams().declareTypeParams(fn->typeParams, &sym->typeDefaults);
+          this->checker.typeParams().declareTypeParams(fn->typeParams, &sym->typeDefaults);
     }
   }
   std::optional<std::vector<const Type *>> hook =
-      fn->cls() ? checker_.chunkTypes().streamHookParams(fn) : std::nullopt;
+      fn->cls() ? this->checker.chunkTypes().streamHookParams(fn) : std::nullopt;
   if (hook && llvm::none_of(fn->params, [](const Param &p) { return p.rest(); })) {
     for (size_t i = fn->params.size(); i < hook->size(); ++i) {
       Param hidden;
-      hidden.name = checker_.ctx_.hiddenName();
+      hidden.name = this->checker.ctx_.hiddenName();
       hidden.loc = fn->loc();
       fn->params.push_back(hidden);
     }
@@ -80,18 +76,18 @@ void FunctionChecker::declareFunction(FunctionDecl *fn, VarSymbol *var, bool sco
   for (size_t i = 0; i < fn->params.size(); ++i) {
     Param &param = fn->params[i];
     if (!param.decorators.empty() && (!fn->cls() || fn->cls()->literal()) && !fn->isInstance) {
-      checker_.diags_.error(param.decorators[0].loc,
-                            "a decorator of a parameter can decorate only a "
-                            "parameter of a method or a constructor of a class");
+      this->checker.diags_.error(param.decorators[0].loc,
+                                 "a decorator of a parameter can decorate only a "
+                                 "parameter of a method or a constructor of a class");
     }
     const Type *type = nullptr;
     if (param.type) {
-      type = checker_.iterableChecker().iterableParam(fn, sym, *param.type);
-      bool outerList = std::exchange(checker_.listContext_, param.rest());
+      type = this->checker.iterableChecker().iterableParam(fn, sym, *param.type);
+      bool outerList = std::exchange(this->checker.listContext_, param.rest());
       if (!type) {
-        type = checker_.typeResolver().resolveType(*param.type, false);
+        type = this->checker.typeResolver().resolveType(*param.type, false);
       }
-      checker_.listContext_ = outerList;
+      this->checker.listContext_ = outerList;
       if (hook && i < hook->size() && type && type->isFloat() && (*hook)[i]->isInt()) {
         type = (*hook)[i];
       }
@@ -104,7 +100,8 @@ void FunctionChecker::declareFunction(FunctionDecl *fn, VarSymbol *var, bool sco
       sym->pendingParams = true;
       continue;
     } else {
-      checker_.diags_.error(param.loc, "parameter '" + param.label() + "' needs a type annotation");
+      this->checker.diags_.error(param.loc,
+                                 "parameter '" + param.label() + "' needs a type annotation");
       type = Type::error();
     }
     if (param.optional()) {
@@ -113,20 +110,20 @@ void FunctionChecker::declareFunction(FunctionDecl *fn, VarSymbol *var, bool sco
     param.declaredType = type;
     if (i == 0 && param.name == "this" && !param.rest() && param.type) {
       if (fn->isArrow()) {
-        checker_.diags_.error(param.loc,
-                              "an arrow function cannot have a 'this' parameter: it sees the "
-                              "'this' of the function around it; write a 'function'");
+        this->checker.diags_.error(param.loc,
+                                   "an arrow function cannot have a 'this' parameter: it sees the "
+                                   "'this' of the function around it; write a 'function'");
       } else if (fn->cls()) {
-        checker_.diags_.error(param.loc,
-                              "a method cannot have a 'this' parameter: its 'this' is its object");
+        this->checker.diags_.error(
+            param.loc, "a method cannot have a 'this' parameter: its 'this' is its object");
       } else {
         sym->hasThis = !param.optional() && !param.defaultValue();
       }
     }
     if (param.rest()) {
       if (!type->isArray() && !type->isListParam() && !type->isTuple() && !type->isError()) {
-        checker_.diags_.error(param.loc, "a rest parameter must be an array, e.g. '..." +
-                                             param.name + ": int[]'");
+        this->checker.diags_.error(param.loc, "a rest parameter must be an array, e.g. '..." +
+                                                  param.name + ": int[]'");
         param.declaredType = Type::error();
       }
       sym->hasRest = true;
@@ -137,28 +134,28 @@ void FunctionChecker::declareFunction(FunctionDecl *fn, VarSymbol *var, bool sco
     sym->params.push_back(mayOmit ? Type::optional(type) : type);
     if (!mayOmit) {
       if (afterOptional) {
-        checker_.diags_.error(param.loc, "a required parameter cannot follow an optional one");
+        this->checker.diags_.error(param.loc, "a required parameter cannot follow an optional one");
       }
       sym->minArgs = i + 1;
     }
     afterOptional |= param.optional();
   }
   if (fn->returnType) {
-    sym->ret = checker_.asyncChecker().asyncReturnType(
-        fn, checker_.generatorChecker().generatorReturnType(
-                fn, checker_.predicateChecker().resolveReturnType(fn, sym)));
+    sym->ret = this->checker.asyncChecker().asyncReturnType(
+        fn, this->checker.generatorChecker().generatorReturnType(
+                fn, this->checker.predicateChecker().resolveReturnType(fn, sym)));
   } else if (!ReturnInferrer::returnsValue(fn->body) && fn->isAsync && !fn->isGenerator) {
     sym->ret = Type::promise(Type::voidTy());
   } else if (!ReturnInferrer::returnsValue(fn->body) && !fn->isGenerator) {
     sym->ret = Type::voidTy();
   }
   if (generic || classParams) {
-    checker_.typeScopes_.pop_back();
+    this->checker.typeScopes_.pop_back();
   }
-  checker_.argListChecker().expandArgumentList(fn, sym);
+  this->checker.argListChecker().expandArgumentList(fn, sym);
   fn->sym = sym;
   if (!fn->name.empty() && scoped) {
-    checker_.scopes().declare(fn->name, fn->loc(), {FunctionEntry{.func = sym, .var = var}});
+    this->checker.scopes().declare(fn->name, fn->loc(), {FunctionEntry{.func = sym, .var = var}});
   }
 }
 
@@ -168,69 +165,69 @@ void FunctionChecker::checkFunctionBody(FunctionDecl *fn) {
     return;
   }
   if (fn->external()) {
-    checker_.tzModulesChecker().checkExternal(fn);
+    this->checker.tzModulesChecker().checkExternal(fn);
     return;
   }
   FuncSymbol *sym = fn->sym;
-  checker_.returnInferrer().resolveParams(sym);
+  this->checker.returnInferrer().resolveParams(sym);
   fn->checked = true;
-  FuncSymbol *outer = checker_.currentFunction_;
-  checker_.currentFunction_ = sym;
-  checker_.functions_.push_back(fn);
-  unsigned errors = checker_.diags_.errorCount();
-  ClassDecl *outerClass = checker_.currentClass_;
+  FuncSymbol *outer = this->checker.currentFunction_;
+  this->checker.currentFunction_ = sym;
+  this->checker.functions_.push_back(fn);
+  unsigned errors = this->checker.diags_.errorCount();
+  ClassDecl *outerClass = this->checker.currentClass_;
   if (!fn->isClosure()) {
-    checker_.currentClass_ = fn->cls();
+    this->checker.currentClass_ = fn->cls();
   }
-  FunctionDecl *outerInit = checker_.initFn_;
-  const VarSymbol *outerThis = checker_.initThis_;
-  bool outerReady = checker_.closureThisReady_;
-  checker_.pushScope();
+  FunctionDecl *outerInit = this->checker.initFn_;
+  const VarSymbol *outerThis = this->checker.initThis_;
+  bool outerReady = this->checker.closureThisReady_;
+  this->checker.pushScope();
   if (fn->cls() && !fn->isStatic()) {
-    checker_.genericClassChecker().bindClassTypeParams(fn->cls());
+    this->checker.genericClassChecker().bindClassTypeParams(fn->cls());
   }
   if (fn->cls()) {
-    checker_.lateClasses().bindOuterTypeParams(fn->cls());
+    this->checker.lateClasses().bindOuterTypeParams(fn->cls());
   }
   if (!fn->typeArgs.empty()) {
-    checker_.typeParams().bindTypeParams(fn->typeParams, fn->typeArgs);
+    this->checker.typeParams().bindTypeParams(fn->typeParams, fn->typeArgs);
   }
   if (fn->takesThis()) {
-    ClassChecker::ResultNewThisSymbol declared = checker_.classChecker().declareThis(fn);
+    ClassChecker::ResultNewThisSymbol declared = this->checker.classChecker().declareThis(fn);
     if (declared.isErr()) {
-      checker_.diags_.error(fn->loc(), declared.error().message);
+      this->checker.diags_.error(fn->loc(), declared.error().message);
     }
     VarSymbol *self = declared.isOk() ? declared.value() : nullptr;
     if (fn->isConstructor() || fn == fn->cls()->init) {
-      checker_.initFn_ = fn;
-      checker_.initThis_ = self;
-      checker_.closureThisReady_ = true;
-      checker_.flow_.setFields.clear();
+      this->checker.initFn_ = fn;
+      this->checker.initThis_ = self;
+      this->checker.closureThisReady_ = true;
+      this->checker.flow_.setFields.clear();
       bool derived = fn->cls()->parent != nullptr;
       for (const ClassField &f : fn->cls()->fields) {
         if (!f.isStatic() &&
             (f.optional() || (fn->isConstructor() && !derived && f.init && !f.method()) ||
              (!fn->isConstructor() && f.redeclared))) {
-          checker_.flow_.setFields.push_back(f.name);
+          this->checker.flow_.setFields.push_back(f.name);
         }
       }
-      checker_.flow_.beforeSuper = derived && fn->isConstructor();
-      if (checker_.flow_.beforeSuper) {
+      this->checker.flow_.beforeSuper = derived && fn->isConstructor();
+      if (this->checker.flow_.beforeSuper) {
         unsigned supers = 0;
         for (Stmt *stmt : fn->body->body) {
           auto *expr = dyn_cast<ExprStmt>(stmt);
           auto *call = expr ? dyn_cast<CallExpr>(expr->expr) : nullptr;
           auto *callee = call ? dyn_cast<NameExpr>(call->callee) : nullptr;
           if (callee && callee->name == "super") {
-            checker_.rootSupers_.insert(call);
+            this->checker.rootSupers_.insert(call);
             ++supers;
           }
         }
         if (supers == 0) {
-          checker_.diags_.error(fn->loc(), "the constructor of '" + fn->cls()->name +
-                                               "' must call 'super(...)': '" + fn->cls()->name +
-                                               "' extends '" + fn->cls()->parent->name +
-                                               "', whose constructor sets the fields it declares");
+          this->checker.diags_.error(
+              fn->loc(), "the constructor of '" + fn->cls()->name + "' must call 'super(...)': '" +
+                             fn->cls()->name + "' extends '" + fn->cls()->parent->name +
+                             "', whose constructor sets the fields it declares");
         }
       }
     }
@@ -240,7 +237,7 @@ void FunctionChecker::checkFunctionBody(FunctionDecl *fn) {
     const Type *type = param.declaredType;
     if (param.defaultValue() && type->isError() && !param.type) {
       param.defaultValue()->type = type;
-      param.sym = checker_.scopes().declareVar(param.name, param.loc, type, false);
+      param.sym = this->checker.scopes().declareVar(param.name, param.loc, type, false);
       continue;
     }
     if (DefaultedParam *defaulted = param.form.as<DefaultedParam>()) {
@@ -249,60 +246,60 @@ void FunctionChecker::checkFunctionBody(FunctionDecl *fn) {
       bool forward = false;
       for (size_t j = i; j < fn->params.size() && !forward; ++j) {
         if (names.contains(fn->params[j].name)) {
-          checker_.diags_.error(defaulted->defaultValue->loc(),
-                                "the default value of '" + param.label() + "' uses '" +
-                                    fn->params[j].name +
-                                    "', which is not set yet: a default value can "
-                                    "use only the parameters before it");
+          this->checker.diags_.error(defaulted->defaultValue->loc(),
+                                     "the default value of '" + param.label() + "' uses '" +
+                                         fn->params[j].name +
+                                         "', which is not set yet: a default value can "
+                                         "use only the parameters before it");
           forward = true;
         }
       }
       if (forward) {
         defaulted->defaultValue->type = Type::error();
-        param.sym = checker_.scopes().declareVar(param.name, param.loc, type, false);
+        param.sym = this->checker.scopes().declareVar(param.name, param.loc, type, false);
         continue;
       }
       if (auto *fe = dyn_cast<FunctionExpr>(defaulted->defaultValue); fe && fe->fn->name.empty()) {
         fe->fn->name = param.name;
       }
-      Expr *checked = checker_.exprChecker().checkExpr(defaulted->defaultValue,
-                                                       type->isError() ? nullptr : type);
-      defaulted->defaultValue = checker_.typeRelations().coerce(checked, type);
+      Expr *checked = this->checker.exprChecker().checkExpr(defaulted->defaultValue,
+                                                            type->isError() ? nullptr : type);
+      defaulted->defaultValue = this->checker.typeRelations().coerce(checked, type);
     }
-    param.sym = checker_.scopes().declareVar(param.name, param.loc, type, false);
+    param.sym = this->checker.scopes().declareVar(param.name, param.loc, type, false);
     if (param.defaultValue() && type->isOptional() && !param.defaultValue()->type->isOptional() &&
         !param.defaultValue()->type->isUndefined()) {
-      checker_.flowChecker().setDefined(param.sym, true);
+      this->checker.flowChecker().setDefined(param.sym, true);
     }
   }
-  checker_.byteProofs().addByteCallbackFacts(fn);
-  checker_.indexProofs().addIndexCallbackFacts(fn);
-  checker_.argListChecker().declareArgumentList(fn);
-  checker_.predicateChecker().beginPredicate(fn);
-  auto outerListened = std::move(checker_.flow_.errorListened);
-  auto outerPending = std::move(checker_.flow_.errorPending);
-  checker_.flow_.errorListened.clear();
-  checker_.flow_.errorPending.clear();
-  checker_.closureChecker().checkStatements(fn->body);
-  if (!checker_.flow_.unreachable) {
-    checker_.emitterChecker().reportUnlistenedErrors();
+  this->checker.byteProofs().addByteCallbackFacts(fn);
+  this->checker.indexProofs().addIndexCallbackFacts(fn);
+  this->checker.argListChecker().declareArgumentList(fn);
+  this->checker.predicateChecker().beginPredicate(fn);
+  auto outerListened = std::move(this->checker.flow_.errorListened);
+  auto outerPending = std::move(this->checker.flow_.errorPending);
+  this->checker.flow_.errorListened.clear();
+  this->checker.flow_.errorPending.clear();
+  this->checker.closureChecker().checkStatements(fn->body);
+  if (!this->checker.flow_.unreachable) {
+    this->checker.emitterChecker().reportUnlistenedErrors();
   }
-  checker_.flow_.errorListened = std::move(outerListened);
-  checker_.flow_.errorPending = std::move(outerPending);
-  checker_.predicateChecker().endPredicate(fn);
-  if (fn->isConstructor() && checker_.initFn_ == fn && !checker_.flow_.beforeSuper) {
-    ClassChecker::ResultEveryFieldSet fieldsSet = checker_.classChecker().checkFieldsSet();
+  this->checker.flow_.errorListened = std::move(outerListened);
+  this->checker.flow_.errorPending = std::move(outerPending);
+  this->checker.predicateChecker().endPredicate(fn);
+  if (fn->isConstructor() && this->checker.initFn_ == fn && !this->checker.flow_.beforeSuper) {
+    ClassChecker::ResultEveryFieldSet fieldsSet = this->checker.classChecker().checkFieldsSet();
     if (fieldsSet.isErr()) {
-      checker_.diags_.error(fn->loc(), fieldsSet.error().message);
+      this->checker.diags_.error(fn->loc(), fieldsSet.error().message);
     }
   }
-  checker_.popScope();
-  checker_.functions_.pop_back();
-  checker_.currentFunction_ = outer;
-  checker_.currentClass_ = outerClass;
-  checker_.initFn_ = outerInit;
-  checker_.initThis_ = outerThis;
-  checker_.closureThisReady_ = outerReady;
+  this->checker.popScope();
+  this->checker.functions_.pop_back();
+  this->checker.currentFunction_ = outer;
+  this->checker.currentClass_ = outerClass;
+  this->checker.initFn_ = outerInit;
+  this->checker.initThis_ = outerThis;
+  this->checker.closureThisReady_ = outerReady;
 
   const Type *ret = fn->isAsync && sym->ret && sym->ret->isPromise() ? sym->ret->promised()
                     : !fn->isGenerator                               ? sym->ret
@@ -311,14 +308,15 @@ void FunctionChecker::checkFunctionBody(FunctionDecl *fn) {
                         : nullptr;
   if (ret && !ret->isVoid() && !ret->isError() && !ret->isOptional() && !ret->isUnknown() &&
       !ReturnChecker::alwaysReturns(fn->body)) {
-    checker_.diags_.error(fn->loc(), functionLabel(fn->name) + " must return a value of type '" +
-                                         ret->name() + "' on every path");
+    this->checker.diags_.error(fn->loc(), functionLabel(fn->name) +
+                                              " must return a value of type '" + ret->name() +
+                                              "' on every path");
   }
-  if (sym->isGeneric() && checker_.diags_.errorCount() > errors) {
-    checker_.brokenGenerics_.insert(sym);
+  if (sym->isGeneric() && this->checker.diags_.errorCount() > errors) {
+    this->checker.brokenGenerics_.insert(sym);
   }
-  if (fn->cls() && fn->cls()->isGeneric() && checker_.diags_.errorCount() > errors) {
-    checker_.brokenClasses_.insert(fn->cls());
+  if (fn->cls() && fn->cls()->isGeneric() && this->checker.diags_.errorCount() > errors) {
+    this->checker.brokenClasses_.insert(fn->cls());
   }
 }
 

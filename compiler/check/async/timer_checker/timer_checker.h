@@ -6,7 +6,7 @@ namespace tz {
 
 class TimerChecker {
 public:
-  explicit TimerChecker(Checker &checker);
+  explicit TimerChecker(Checker &owner);
 
   Expr *checkTimersPromisesCall(CallExpr *call, llvm::StringRef fn, llvm::SMLoc loc,
                                 const Type *expected = nullptr);
@@ -20,7 +20,7 @@ public:
 private:
   bool rearms(const Expr *callback) const;
 
-  Checker &checker_;
+  Checker &checker;
 };
 
 }

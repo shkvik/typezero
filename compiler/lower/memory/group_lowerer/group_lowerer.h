@@ -6,7 +6,7 @@ namespace tz {
 
 class GroupLowerer {
 public:
-  explicit GroupLowerer(Lowering &lowering);
+  explicit GroupLowerer(Lowering &owner);
 
   llvm::FunctionCallee groupFunction(llvm::StringRef name, llvm::Type *ret,
                                      llvm::ArrayRef<llvm::Type *> params);
@@ -23,9 +23,9 @@ public:
   void noteUnstored(llvm::Value *object, const Expr *site);
 
 private:
-  Lowering &lowering_;
-  std::map<std::pair<llvm::Constant *, std::string>, llvm::Constant *> groupSites_;
-  llvm::DenseMap<llvm::Function *, llvm::Function *> groupReleases_;
+  Lowering &lowering;
+  std::map<std::pair<llvm::Constant *, std::string>, llvm::Constant *> groupSites;
+  llvm::DenseMap<llvm::Function *, llvm::Function *> groupReleases;
 };
 
 }

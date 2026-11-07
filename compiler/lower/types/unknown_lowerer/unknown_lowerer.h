@@ -6,7 +6,7 @@ namespace tz {
 
 class UnknownLowerer {
 public:
-  explicit UnknownLowerer(Lowering &lowering);
+  explicit UnknownLowerer(Lowering &owner);
 
   llvm::FunctionCallee unknownFunction(llvm::StringRef name, llvm::Type *ret,
                                        llvm::ArrayRef<llvm::Type *> params);
@@ -21,9 +21,12 @@ public:
   llvm::Value *emitTupleJoin(CallExpr *call);
 
 private:
-  Lowering &lowering_;
-  llvm::DenseMap<const ClassDecl *, llvm::StructType *> classObjectTypes_;
-  llvm::DenseMap<const ClassDecl *, llvm::Constant *> classObjects_;
+  static bool hasCall(const Expr *expr);
+  static bool isObjectHeaded(const Type *type);
+
+  Lowering &lowering;
+  llvm::DenseMap<const ClassDecl *, llvm::StructType *> classObjectTypes;
+  llvm::DenseMap<const ClassDecl *, llvm::Constant *> classObjects;
 };
 
 }

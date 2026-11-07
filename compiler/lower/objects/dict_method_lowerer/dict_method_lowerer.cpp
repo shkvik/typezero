@@ -17,13 +17,9 @@
 #include "compiler/lower/values/string_lowerer/string_lowerer.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/IR/MDBuilder.h"
-#include "llvm/Support/ConvertUTF.h"
 
-using llvm::BasicBlock;
 using llvm::cast;
 using llvm::dyn_cast;
-using llvm::isa;
-using llvm::Value;
 
 namespace tz {
 
@@ -45,44 +41,48 @@ enum MapField : unsigned {
 
 }
 
-DictMethodLowerer::DictMethodLowerer(Lowering &lowering) : lowering_(lowering) {}
+DictMethodLowerer::DictMethodLowerer(Lowering &owner)
+    : lowering(owner) {}
 
 llvm::Value *DictMethodLowerer::emitDictCall(CallExpr *call) {
-  llvm::Type *ptr = lowering_.builder_.getPtrTy(), *i32 = lowering_.builder_.getInt32Ty();
+  llvm::Type *ptr = this->lowering.builder_.getPtrTy();
+  llvm::Type *i32 = this->lowering.builder_.getInt32Ty();
   switch (call->builtin()) {
     case Builtin::DictNew:
-      return emitDictNew(call);
+      return this->emitDictNew(call);
     case Builtin::DictGroupBy:
-      return emitGroupBy(call);
+      return this->emitGroupBy(call);
     case Builtin::MapForEach:
-      return lowering_.dictLowerer().emitDictForEach(call);
+      return this->lowering.dictLowerer().emitDictForEach(call);
     case Builtin::EnvMap:
-      return lowering_.builder_.CreateCall(
-          lowering_.dictLowerer().dictFunction("tz_process_env_map", ptr, {ptr}),
-          {lowering_.dictLowerer().dictLayout(call->type).descriptor}, "env");
+      return this->lowering.builder_.CreateCall(
+          this->lowering.dictLowerer().dictFunction("tz_process_env_map", ptr, {ptr}),
+          {this->lowering.dictLowerer().dictLayout(call->type).descriptor}, "env");
     default:
       break;
   }
   if (isDictIterator(call->builtin())) {
-    return lowering_.iteratorLowerer().emitIteratorBuiltin(call);
+    return this->lowering.iteratorLowerer().emitIteratorBuiltin(call);
   }
   Expr *receiver = cast<MemberExpr>(call->callee)->object;
   const Type *type = receiver->type;
-  const Type *key = type->keyType(), *value = type->valueType();
+  const Type *key = type->keyType();
+  const Type *value = type->valueType();
   switch (call->builtin()) {
     case Builtin::MapSize: {
-      Lowering::Operand map = lowering_.refCounts().emitOperand(receiver, true);
-      llvm::Value *size = lowering_.builder_.CreateLoad(
-          i32, lowering_.dictLowerer().dictField(map.value, kMapCount), "size");
-      lowering_.refCounts().dropOperand(map);
-      return lowering_.builder_.CreateZExt(size, lowering_.builder_.getInt64Ty());
+      Lowering::Operand map = this->lowering.refCounts().emitOperand(receiver, true);
+      llvm::Value *size = this->lowering.builder_.CreateLoad(
+          i32, this->lowering.dictLowerer().dictField(map.value, kMapCount), "size");
+      this->lowering.refCounts().dropOperand(map);
+      return this->lowering.builder_.CreateZExt(size, this->lowering.builder_.getInt64Ty());
     }
     case Builtin::MapClear: {
-      Lowering::Operand map = lowering_.refCounts().emitOperand(receiver, true);
-      lowering_.builder_.CreateCall(lowering_.dictLowerer().dictFunction(
-                                        "tz_map_clear", lowering_.builder_.getVoidTy(), {ptr}),
-                                    {map.value});
-      lowering_.refCounts().dropOperand(map);
+      Lowering::Operand map = this->lowering.refCounts().emitOperand(receiver, true);
+      this->lowering.builder_.CreateCall(
+          this->lowering.dictLowerer().dictFunction("tz_map_clear",
+                                                    this->lowering.builder_.getVoidTy(), {ptr}),
+          {map.value});
+      this->lowering.refCounts().dropOperand(map);
       return nullptr;
     }
     case Builtin::MapGet:
@@ -90,40 +90,40 @@ llvm::Value *DictMethodLowerer::emitDictCall(CallExpr *call) {
     case Builtin::MapDelete: {
       Expr *keyExpr = call->args[0];
       Lowering::Operand map =
-          lowering_.refCounts().emitOperand(receiver, AssignLowerer::cannotAssign(keyExpr));
-      Lowering::Operand k = lowering_.refCounts().emitOperand(keyExpr, true);
+          this->lowering.refCounts().emitOperand(receiver, AssignLowerer::cannotAssign(keyExpr));
+      Lowering::Operand k = this->lowering.refCounts().emitOperand(keyExpr, true);
       llvm::Value *result;
       if (call->builtin() == Builtin::MapDelete) {
         llvm::Value *removed;
         if (key->isString()) {
-          removed = lowering_.builder_.CreateCall(
-              lowering_.dictLowerer().dictFunction("tz_map_delete_str", i32,
-                                                   {ptr, ptr, lowering_.builder_.getInt64Ty()}),
-              {map.value, lowering_.stringLowerer().stringObj(k.value),
-               lowering_.stringLowerer().stringMeta(k.value)});
+          removed = this->lowering.builder_.CreateCall(
+              this->lowering.dictLowerer().dictFunction(
+                  "tz_map_delete_str", i32, {ptr, ptr, this->lowering.builder_.getInt64Ty()}),
+              {map.value, this->lowering.stringLowerer().stringObj(k.value),
+               this->lowering.stringLowerer().stringMeta(k.value)});
         } else {
-          removed = lowering_.builder_.CreateCall(
-              lowering_.dictLowerer().dictFunction("tz_map_delete", i32, {ptr, ptr}),
-              {map.value, lowering_.functionFrame().spill(k.value, "key")});
+          removed = this->lowering.builder_.CreateCall(
+              this->lowering.dictLowerer().dictFunction("tz_map_delete", i32, {ptr, ptr}),
+              {map.value, this->lowering.functionFrame().spill(k.value, "key")});
         }
-        result = lowering_.builder_.CreateICmpNE(removed, lowering_.builder_.getInt32(0));
+        result = this->lowering.builder_.CreateICmpNE(removed, this->lowering.builder_.getInt32(0));
       } else {
-        llvm::Value *entry = lowering_.dictLowerer().emitDictFind(map.value, k.value, key);
-        llvm::Value *found = lowering_.builder_.CreateIsNotNull(entry, "found");
+        llvm::Value *entry = this->lowering.dictLowerer().emitDictFind(map.value, k.value, key);
+        llvm::Value *found = this->lowering.builder_.CreateIsNotNull(entry, "found");
         if (call->builtin() == Builtin::MapHas) {
           result = found;
         } else {
-          result = lowering_.arrayLowerer().emitCheckedRead(found, call->type, [&] {
-            llvm::Value *v =
-                lowering_.builder_.CreateLoad(lowering_.moduleBuilder().lower(value),
-                                              lowering_.dictLowerer().entryValue(entry, type));
-            lowering_.refCounts().retainValue(v, value);
+          result = this->lowering.arrayLowerer().emitCheckedRead(found, call->type, [&] {
+            llvm::Value *v = this->lowering.builder_.CreateLoad(
+                this->lowering.moduleBuilder().lower(value),
+                this->lowering.dictLowerer().entryValue(entry, type));
+            this->lowering.refCounts().retainValue(v, value);
             return v;
           });
         }
       }
-      lowering_.refCounts().dropOperand(k);
-      lowering_.refCounts().dropOperand(map);
+      this->lowering.refCounts().dropOperand(k);
+      this->lowering.refCounts().dropOperand(map);
       return result;
     }
     case Builtin::MapSet:
@@ -132,78 +132,80 @@ llvm::Value *DictMethodLowerer::emitDictCall(CallExpr *call) {
       Expr *keyExpr = call->args[0];
       Expr *valueExpr = call->args.size() > 1 ? call->args[1] : nullptr;
       bool later = valueExpr && !AssignLowerer::cannotAssign(valueExpr);
-      Lowering::Operand map = lowering_.refCounts().emitOperand(
+      Lowering::Operand map = this->lowering.refCounts().emitOperand(
           receiver, AssignLowerer::cannotAssign(keyExpr) && !later);
-      Lowering::Operand k = lowering_.refCounts().emitOperand(keyExpr, !later);
-      llvm::Value *v = valueExpr ? lowering_.exprLowerer().emitExpr(valueExpr) : nullptr;
-      llvm::Value *entry = lowering_.dictLowerer().emitDictAdd(map.value, k.value, key);
+      Lowering::Operand k = this->lowering.refCounts().emitOperand(keyExpr, !later);
+      llvm::Value *v = valueExpr ? this->lowering.exprLowerer().emitExpr(valueExpr) : nullptr;
+      llvm::Value *entry = this->lowering.dictLowerer().emitDictAdd(map.value, k.value, key);
       if (v) {
-        lowering_.storeLowerer().storeIn(map.value, type,
-                                         lowering_.dictLowerer().entryValue(entry, type), v, value);
+        this->lowering.storeLowerer().storeIn(
+            map.value, type, this->lowering.dictLowerer().entryValue(entry, type), v, value);
       }
-      lowering_.refCounts().dropOperand(k);
+      this->lowering.refCounts().dropOperand(k);
       if (call->builtin() == Builtin::RecordSet) {
-        lowering_.dictLowerer().emitEntryStored(map.value, entry);
-        llvm::Value *result =
-            lowering_.builder_.CreateLoad(lowering_.moduleBuilder().lower(value),
-                                          lowering_.dictLowerer().entryValue(entry, type));
-        lowering_.refCounts().retainValue(result, value);
-        lowering_.refCounts().dropOperand(map);
+        this->lowering.dictLowerer().emitEntryStored(map.value, entry);
+        llvm::Value *result = this->lowering.builder_.CreateLoad(
+            this->lowering.moduleBuilder().lower(value),
+            this->lowering.dictLowerer().entryValue(entry, type));
+        this->lowering.refCounts().retainValue(result, value);
+        this->lowering.refCounts().dropOperand(map);
         return result;
       }
       if (!map.owned) {
-        lowering_.refCounts().retainValue(map.value, type);
+        this->lowering.refCounts().retainValue(map.value, type);
       }
       return map.value;
     }
     case Builtin::RecordNullishSet: {
-      Expr *keyExpr = call->args[0], *valueExpr = call->args[1];
+      Expr *keyExpr = call->args[0];
+      Expr *valueExpr = call->args[1];
       const Type *resultType = call->type;
-      llvm::Value *m = lowering_.exprLowerer().emitExpr(receiver);
-      llvm::Value *kv = lowering_.exprLowerer().emitExpr(keyExpr);
-      llvm::Value *entry = lowering_.dictLowerer().emitDictFind(m, kv, key);
-      llvm::BasicBlock *lookBlock = lowering_.functionFrame().newBlock("nullish.look");
-      llvm::BasicBlock *keepBlock = lowering_.functionFrame().newBlock("nullish.keep");
-      llvm::BasicBlock *assignBlock = lowering_.functionFrame().newBlock("nullish.assign");
-      llvm::BasicBlock *endBlock = lowering_.functionFrame().newBlock("nullish.end");
-      lowering_.builder_.CreateCondBr(lowering_.builder_.CreateIsNotNull(entry), lookBlock,
-                                      assignBlock);
-      lowering_.functionFrame().switchTo(lookBlock);
-      llvm::Value *old = lowering_.builder_.CreateLoad(
-          lowering_.moduleBuilder().lower(value), lowering_.dictLowerer().entryValue(entry, type));
-      lowering_.builder_.CreateCondBr(value->isOptional()
-                                          ? lowering_.optionalLowerer().optionalHas(old, value)
-                                          : lowering_.builder_.getTrue(),
-                                      keepBlock, assignBlock);
-      lowering_.functionFrame().switchTo(keepBlock);
-      lowering_.refCounts().retainValue(old, value);
-      llvm::Value *kept = lowering_.exprLowerer().emitConversion(old, value, resultType);
-      llvm::BasicBlock *keepEnd = lowering_.builder_.GetInsertBlock();
-      lowering_.builder_.CreateBr(endBlock);
-      lowering_.functionFrame().switchTo(assignBlock);
-      llvm::Value *v = lowering_.exprLowerer().emitExpr(valueExpr);
-      llvm::Value *added = lowering_.dictLowerer().emitDictAdd(m, kv, key);
-      lowering_.storeLowerer().storeIn(m, type, lowering_.dictLowerer().entryValue(added, type), v,
-                                       value);
-      lowering_.dictLowerer().emitEntryStored(m, added);
-      lowering_.refCounts().retainValue(v, value);
-      llvm::Value *assigned = lowering_.exprLowerer().emitConversion(v, value, resultType);
-      llvm::BasicBlock *assignEnd = lowering_.builder_.GetInsertBlock();
-      lowering_.builder_.CreateBr(endBlock);
-      lowering_.functionFrame().switchTo(endBlock);
+      llvm::Value *m = this->lowering.exprLowerer().emitExpr(receiver);
+      llvm::Value *kv = this->lowering.exprLowerer().emitExpr(keyExpr);
+      llvm::Value *entry = this->lowering.dictLowerer().emitDictFind(m, kv, key);
+      llvm::BasicBlock *lookBlock = this->lowering.functionFrame().newBlock("nullish.look");
+      llvm::BasicBlock *keepBlock = this->lowering.functionFrame().newBlock("nullish.keep");
+      llvm::BasicBlock *assignBlock = this->lowering.functionFrame().newBlock("nullish.assign");
+      llvm::BasicBlock *endBlock = this->lowering.functionFrame().newBlock("nullish.end");
+      this->lowering.builder_.CreateCondBr(this->lowering.builder_.CreateIsNotNull(entry),
+                                           lookBlock, assignBlock);
+      this->lowering.functionFrame().switchTo(lookBlock);
+      llvm::Value *old =
+          this->lowering.builder_.CreateLoad(this->lowering.moduleBuilder().lower(value),
+                                             this->lowering.dictLowerer().entryValue(entry, type));
+      this->lowering.builder_.CreateCondBr(
+          value->isOptional() ? this->lowering.optionalLowerer().optionalHas(old, value)
+                              : this->lowering.builder_.getTrue(),
+          keepBlock, assignBlock);
+      this->lowering.functionFrame().switchTo(keepBlock);
+      this->lowering.refCounts().retainValue(old, value);
+      llvm::Value *kept = this->lowering.exprLowerer().emitConversion(old, value, resultType);
+      llvm::BasicBlock *keepEnd = this->lowering.builder_.GetInsertBlock();
+      this->lowering.builder_.CreateBr(endBlock);
+      this->lowering.functionFrame().switchTo(assignBlock);
+      llvm::Value *v = this->lowering.exprLowerer().emitExpr(valueExpr);
+      llvm::Value *added = this->lowering.dictLowerer().emitDictAdd(m, kv, key);
+      this->lowering.storeLowerer().storeIn(
+          m, type, this->lowering.dictLowerer().entryValue(added, type), v, value);
+      this->lowering.dictLowerer().emitEntryStored(m, added);
+      this->lowering.refCounts().retainValue(v, value);
+      llvm::Value *assigned = this->lowering.exprLowerer().emitConversion(v, value, resultType);
+      llvm::BasicBlock *assignEnd = this->lowering.builder_.GetInsertBlock();
+      this->lowering.builder_.CreateBr(endBlock);
+      this->lowering.functionFrame().switchTo(endBlock);
       llvm::PHINode *result =
-          lowering_.builder_.CreatePHI(lowering_.moduleBuilder().lower(resultType), 2);
+          this->lowering.builder_.CreatePHI(this->lowering.moduleBuilder().lower(resultType), 2);
       result->addIncoming(kept, keepEnd);
       result->addIncoming(assigned, assignEnd);
-      lowering_.refCounts().releaseValue(kv, key);
-      lowering_.refCounts().releaseValue(m, type);
+      this->lowering.refCounts().releaseValue(kv, key);
+      this->lowering.refCounts().releaseValue(m, type);
       return result;
     }
     default: {
       Expr *other = call->args[0];
       Lowering::Operand a =
-          lowering_.refCounts().emitOperand(receiver, AssignLowerer::cannotAssign(other));
-      Lowering::Operand b = lowering_.refCounts().emitOperand(other, true);
+          this->lowering.refCounts().emitOperand(receiver, AssignLowerer::cannotAssign(other));
+      Lowering::Operand b = this->lowering.refCounts().emitOperand(other, true);
       llvm::Value *result;
       switch (call->builtin()) {
         case Builtin::SetUnion:
@@ -211,27 +213,28 @@ llvm::Value *DictMethodLowerer::emitDictCall(CallExpr *call) {
         case Builtin::SetDifference:
         case Builtin::SetSymmetricDifference: {
           int op = int(call->builtin()) - int(Builtin::SetUnion);
-          result = lowering_.builder_.CreateCall(
-              lowering_.dictLowerer().dictFunction("tz_map_set_op", ptr, {ptr, ptr, i32}),
-              {a.value, b.value, lowering_.builder_.getInt32(uint32_t(op))}, "set");
+          result = this->lowering.builder_.CreateCall(
+              this->lowering.dictLowerer().dictFunction("tz_map_set_op", ptr, {ptr, ptr, i32}),
+              {a.value, b.value, this->lowering.builder_.getInt32(uint32_t(op))}, "set");
           break;
         }
         case Builtin::SetIsSubsetOf:
         case Builtin::SetIsSupersetOf:
         case Builtin::SetIsDisjointFrom: {
           int op = int(call->builtin()) - int(Builtin::SetIsSubsetOf);
-          result = lowering_.builder_.CreateICmpNE(
-              lowering_.builder_.CreateCall(
-                  lowering_.dictLowerer().dictFunction("tz_map_set_test", i32, {ptr, ptr, i32}),
-                  {a.value, b.value, lowering_.builder_.getInt32(uint32_t(op))}),
-              lowering_.builder_.getInt32(0));
+          result = this->lowering.builder_.CreateICmpNE(
+              this->lowering.builder_.CreateCall(
+                  this->lowering.dictLowerer().dictFunction("tz_map_set_test", i32,
+                                                            {ptr, ptr, i32}),
+                  {a.value, b.value, this->lowering.builder_.getInt32(uint32_t(op))}),
+              this->lowering.builder_.getInt32(0));
           break;
         }
         default:
           llvm_unreachable("not a method of a dictionary");
       }
-      lowering_.refCounts().dropOperand(b);
-      lowering_.refCounts().dropOperand(a);
+      this->lowering.refCounts().dropOperand(b);
+      this->lowering.refCounts().dropOperand(a);
       return result;
     }
   }
@@ -239,14 +242,14 @@ llvm::Value *DictMethodLowerer::emitDictCall(CallExpr *call) {
 
 llvm::Value *DictMethodLowerer::emitDictNew(CallExpr *call) {
   const Type *type = call->type;
-  const Lowering::DictLayout &layout = lowering_.dictLowerer().dictLayout(type);
-  llvm::Type *ptr = lowering_.builder_.getPtrTy();
-  llvm::FunctionCallee create = lowering_.dictLowerer().dictFunction("tz_map_new", ptr, {ptr});
+  const Lowering::DictLayout &layout = this->lowering.dictLowerer().dictLayout(type);
+  llvm::Type *ptr = this->lowering.builder_.getPtrTy();
+  llvm::FunctionCallee create = this->lowering.dictLowerer().dictFunction("tz_map_new", ptr, {ptr});
   llvm::Constant *descriptor =
-      lowering_.makesMember(call, type) ? layout.descriptor : layout.plainDescriptor;
+      this->lowering.makesMember(call, type) ? layout.descriptor : layout.plainDescriptor;
   if (call->args.empty()) {
-    llvm::Value *map = lowering_.builder_.CreateCall(create, {descriptor}, "map");
-    lowering_.groupLowerer().noteUnstored(map, call);
+    llvm::Value *map = this->lowering.builder_.CreateCall(create, {descriptor}, "map");
+    this->lowering.groupLowerer().noteUnstored(map, call);
     return map;
   }
   Expr *source = call->args[0];
@@ -255,154 +258,161 @@ llvm::Value *DictMethodLowerer::emitDictNew(CallExpr *call) {
       (iterator->builtin() == Builtin::MapEntries || iterator->builtin() == Builtin::SetValues)) {
     Expr *from = cast<MemberExpr>(iterator->callee)->object;
     if (from->type == type) {
-      Lowering::Operand map = lowering_.refCounts().emitOperand(from, true);
-      llvm::Value *copy = lowering_.builder_.CreateCall(
-          lowering_.dictLowerer().dictFunction("tz_map_copy", ptr, {ptr, ptr}),
+      Lowering::Operand map = this->lowering.refCounts().emitOperand(from, true);
+      llvm::Value *copy = this->lowering.builder_.CreateCall(
+          this->lowering.dictLowerer().dictFunction("tz_map_copy", ptr, {ptr, ptr}),
           {map.value, descriptor}, "map");
-      lowering_.refCounts().dropOperand(map);
+      this->lowering.refCounts().dropOperand(map);
       return copy;
     }
   }
   const Type *element = source->type->isArray()    ? source->type->inner()
                         : source->type->isString() ? source->type
                                                    : source->type->yielded();
-  lowering_.functionFrame().pushScope();
-  Lowering::Producer producer = lowering_.inlineGeneratorLowerer().prepare(source);
-  llvm::Value *map = lowering_.builder_.CreateCall(create, {descriptor}, "map");
-  lowering_.groupLowerer().noteUnstored(map, call);
-  size_t depth = lowering_.scopes_.size();
-  llvm::BasicBlock *endBlock = lowering_.functionFrame().newBlock("dict.filled");
-  const Type *key = type->keyType(), *value = type->valueType();
+  this->lowering.functionFrame().pushScope();
+  Lowering::Producer producer = this->lowering.inlineGeneratorLowerer().prepare(source);
+  llvm::Value *map = this->lowering.builder_.CreateCall(create, {descriptor}, "map");
+  this->lowering.groupLowerer().noteUnstored(map, call);
+  size_t depth = this->lowering.scopes_.size();
+  llvm::BasicBlock *endBlock = this->lowering.functionFrame().newBlock("dict.filled");
+  const Type *key = type->keyType();
+  const Type *value = type->valueType();
   Lowering::Consumer consumer;
   consumer.stop = [this, depth, endBlock] {
-    lowering_.functionFrame().emitCleanups(depth);
-    lowering_.builder_.CreateBr(endBlock);
+    this->lowering.functionFrame().emitCleanups(depth);
+    this->lowering.builder_.CreateBr(endBlock);
   };
   consumer.each = [&](llvm::Value *given) -> llvm::Value * {
     if (type->isSet()) {
-      llvm::Value *k = lowering_.exprLowerer().emitConversion(given, element, key);
-      lowering_.dictLowerer().emitDictAdd(map, k, key);
-      lowering_.refCounts().releaseValue(k, key);
+      llvm::Value *k = this->lowering.exprLowerer().emitConversion(given, element, key);
+      this->lowering.dictLowerer().emitDictAdd(map, k, key);
+      this->lowering.refCounts().releaseValue(k, key);
       return nullptr;
     }
-    const Type *kType = element->fields()[0].type, *vType = element->fields()[1].type;
-    llvm::Value *k =
-        lowering_.builder_.CreateLoad(lowering_.moduleBuilder().lower(kType),
-                                      lowering_.objectLayouts().fieldAddress(given, element, "0"));
-    llvm::Value *v =
-        lowering_.builder_.CreateLoad(lowering_.moduleBuilder().lower(vType),
-                                      lowering_.objectLayouts().fieldAddress(given, element, "1"));
-    lowering_.refCounts().retainValue(k, kType);
-    lowering_.refCounts().retainValue(v, vType);
-    lowering_.refCounts().releaseValue(given, element);
-    k = lowering_.exprLowerer().emitConversion(k, kType, key);
-    v = lowering_.exprLowerer().emitConversion(v, vType, value);
-    llvm::Value *entry = lowering_.dictLowerer().emitDictAdd(map, k, key);
-    lowering_.storeLowerer().storeIn(map, type, lowering_.dictLowerer().entryValue(entry, type), v,
-                                     value);
-    lowering_.refCounts().releaseValue(k, key);
+    const Type *kType = element->fields()[0].type;
+    const Type *vType = element->fields()[1].type;
+    llvm::Value *k = this->lowering.builder_.CreateLoad(
+        this->lowering.moduleBuilder().lower(kType),
+        this->lowering.objectLayouts().fieldAddress(given, element, "0"));
+    llvm::Value *v = this->lowering.builder_.CreateLoad(
+        this->lowering.moduleBuilder().lower(vType),
+        this->lowering.objectLayouts().fieldAddress(given, element, "1"));
+    this->lowering.refCounts().retainValue(k, kType);
+    this->lowering.refCounts().retainValue(v, vType);
+    this->lowering.refCounts().releaseValue(given, element);
+    k = this->lowering.exprLowerer().emitConversion(k, kType, key);
+    v = this->lowering.exprLowerer().emitConversion(v, vType, value);
+    llvm::Value *entry = this->lowering.dictLowerer().emitDictAdd(map, k, key);
+    this->lowering.storeLowerer().storeIn(
+        map, type, this->lowering.dictLowerer().entryValue(entry, type), v, value);
+    this->lowering.refCounts().releaseValue(k, key);
 
     return nullptr;
   };
   producer.run(consumer);
-  lowering_.functionFrame().emitBlock(endBlock);
+  this->lowering.functionFrame().emitBlock(endBlock);
   llvm::Value *result = map;
-  lowering_.functionFrame().popScope();
+  this->lowering.functionFrame().popScope();
 
   return result;
 }
 
 llvm::Value *DictMethodLowerer::emitGroupBy(CallExpr *call) {
   const Type *type = call->type;
-  const Lowering::DictLayout &layout = lowering_.dictLowerer().dictLayout(type);
-  llvm::Type *ptr = lowering_.builder_.getPtrTy();
+  const Lowering::DictLayout &layout = this->lowering.dictLowerer().dictLayout(type);
+  llvm::Type *ptr = this->lowering.builder_.getPtrTy();
   Expr *source = call->args[0];
   const Type *element = source->type->isArray()    ? source->type->inner()
                         : source->type->isString() ? source->type
                                                    : source->type->yielded();
   const Type *callbackType = call->args[1]->type;
-  const Type *key = type->keyType(), *group = type->valueType();
-  lowering_.functionFrame().pushScope();
-  Lowering::Producer producer = lowering_.inlineGeneratorLowerer().prepare(source);
-  llvm::Value *callback = lowering_.functionFrame().createManagedSlot(callbackType, "callback");
-  lowering_.builder_.CreateStore(lowering_.exprLowerer().emitExpr(call->args[1]), callback);
-  llvm::Value *map = lowering_.builder_.CreateCall(
-      lowering_.dictLowerer().dictFunction("tz_map_new", ptr, {ptr}), {layout.descriptor}, "map");
+  const Type *key = type->keyType();
+  const Type *group = type->valueType();
+  this->lowering.functionFrame().pushScope();
+  Lowering::Producer producer = this->lowering.inlineGeneratorLowerer().prepare(source);
+  llvm::Value *callback =
+      this->lowering.functionFrame().createManagedSlot(callbackType, "callback");
+  this->lowering.builder_.CreateStore(this->lowering.exprLowerer().emitExpr(call->args[1]),
+                                      callback);
+  llvm::Value *map = this->lowering.builder_.CreateCall(
+      this->lowering.dictLowerer().dictFunction("tz_map_new", ptr, {ptr}), {layout.descriptor},
+      "map");
   if (type->isRecord()) {
-    lowering_.builder_.CreateStore(lowering_.builder_.getInt32(4),
-                                   lowering_.dictLowerer().dictField(map, kMapFlags));
+    this->lowering.builder_.CreateStore(this->lowering.builder_.getInt32(4),
+                                        this->lowering.dictLowerer().dictField(map, kMapFlags));
   }
-  llvm::Value *counter =
-      lowering_.functionFrame().createStackSlot(lowering_.builder_.getInt64Ty(), "counter");
-  lowering_.builder_.CreateStore(lowering_.builder_.getInt64(0), counter);
-  size_t depth = lowering_.scopes_.size();
-  llvm::BasicBlock *endBlock = lowering_.functionFrame().newBlock("group.done");
+  llvm::Value *counter = this->lowering.functionFrame().createStackSlot(
+      this->lowering.builder_.getInt64Ty(), "counter");
+  this->lowering.builder_.CreateStore(this->lowering.builder_.getInt64(0), counter);
+  size_t depth = this->lowering.scopes_.size();
+  llvm::BasicBlock *endBlock = this->lowering.functionFrame().newBlock("group.done");
   Lowering::Consumer consumer;
   consumer.stop = [this, depth, endBlock] {
-    lowering_.functionFrame().emitCleanups(depth);
-    lowering_.builder_.CreateBr(endBlock);
+    this->lowering.functionFrame().emitCleanups(depth);
+    this->lowering.builder_.CreateBr(endBlock);
   };
   consumer.each = [&](llvm::Value *item) -> llvm::Value * {
-    llvm::Value *count = lowering_.builder_.CreateLoad(lowering_.builder_.getInt64Ty(), counter);
-    lowering_.builder_.CreateStore(
-        lowering_.builder_.CreateAdd(count, lowering_.builder_.getInt64(1)), counter);
-    lowering_.refCounts().retainValue(item, element);
-    llvm::Value *k = lowering_.lazyChainLowerer().callCallback(
+    llvm::Value *count =
+        this->lowering.builder_.CreateLoad(this->lowering.builder_.getInt64Ty(), counter);
+    this->lowering.builder_.CreateStore(
+        this->lowering.builder_.CreateAdd(count, this->lowering.builder_.getInt64(1)), counter);
+    this->lowering.refCounts().retainValue(item, element);
+    llvm::Value *k = this->lowering.lazyChainLowerer().callCallback(
         callback, callbackType, {item, count}, {element, Type::intTy()});
     llvm::Value *added;
-    llvm::Value *entry = lowering_.dictLowerer().emitDictAdd(map, k, key, &added);
-    lowering_.refCounts().releaseValue(k, key);
-    llvm::Value *slot = lowering_.dictLowerer().entryValue(entry, type);
-    llvm::BasicBlock *newBlock_ = lowering_.functionFrame().newBlock("group.new");
-    llvm::BasicBlock *pushBlock = lowering_.functionFrame().newBlock("group.push");
-    lowering_.builder_.CreateCondBr(added, newBlock_, pushBlock);
-    lowering_.functionFrame().switchTo(newBlock_);
-    llvm::Value *fresh = lowering_.groupLowerer().newArray(group, lowering_.builder_.getInt64(0),
-                                                           lowering_.builder_.getInt64(0));
-    lowering_.builder_.CreateStore(fresh, slot);
-    if (lowering_.isCyclic(type)) {
-      lowering_.storeLowerer().groupStore(map, fresh, group);
+    llvm::Value *entry = this->lowering.dictLowerer().emitDictAdd(map, k, key, &added);
+    this->lowering.refCounts().releaseValue(k, key);
+    llvm::Value *slot = this->lowering.dictLowerer().entryValue(entry, type);
+    llvm::BasicBlock *newBlock_ = this->lowering.functionFrame().newBlock("group.new");
+    llvm::BasicBlock *pushBlock = this->lowering.functionFrame().newBlock("group.push");
+    this->lowering.builder_.CreateCondBr(added, newBlock_, pushBlock);
+    this->lowering.functionFrame().switchTo(newBlock_);
+    llvm::Value *fresh = this->lowering.groupLowerer().newArray(
+        group, this->lowering.builder_.getInt64(0), this->lowering.builder_.getInt64(0));
+    this->lowering.builder_.CreateStore(fresh, slot);
+    if (this->lowering.isCyclic(type)) {
+      this->lowering.storeLowerer().groupStore(map, fresh, group);
     }
-    lowering_.builder_.CreateBr(pushBlock);
-    lowering_.functionFrame().switchTo(pushBlock);
-    lowering_.arrayLowerer().emitPush(lowering_.builder_.CreateLoad(ptr, slot, "group"), {item},
-                                      group->inner());
+    this->lowering.builder_.CreateBr(pushBlock);
+    this->lowering.functionFrame().switchTo(pushBlock);
+    this->lowering.arrayLowerer().emitPush(this->lowering.builder_.CreateLoad(ptr, slot, "group"),
+                                           {item}, group->inner());
 
     return nullptr;
   };
   producer.run(consumer);
-  lowering_.functionFrame().emitBlock(endBlock);
+  this->lowering.functionFrame().emitBlock(endBlock);
   llvm::Value *result = map;
-  lowering_.functionFrame().popScope();
+  this->lowering.functionFrame().popScope();
 
   return result;
 }
 
 llvm::Value *DictMethodLowerer::emitDictObjectCall(CallExpr *call) {
-  Lowering::Operand map = lowering_.refCounts().emitOperand(call->args[0], true);
+  Lowering::Operand map = this->lowering.refCounts().emitOperand(call->args[0], true);
   const Type *element = call->type->inner();
-  llvm::Type *ptr = lowering_.builder_.getPtrTy();
+  llvm::Type *ptr = this->lowering.builder_.getPtrTy();
   llvm::Value *result;
   if (call->builtin() == Builtin::ObjectKeys) {
-    result = lowering_.builder_.CreateCall(
-        lowering_.dictLowerer().dictFunction("tz_map_keys", ptr, {ptr, ptr}),
-        {map.value, lowering_.typeDescriptors().typeDescriptor(element)}, "keys");
+    result = this->lowering.builder_.CreateCall(
+        this->lowering.dictLowerer().dictFunction("tz_map_keys", ptr, {ptr, ptr}),
+        {map.value, this->lowering.typeDescriptors().typeDescriptor(element)}, "keys");
   } else if (call->builtin() == Builtin::ObjectValues) {
-    result = lowering_.builder_.CreateCall(
-        lowering_.dictLowerer().dictFunction("tz_map_values", ptr, {ptr, ptr}),
-        {map.value, lowering_.typeDescriptors().typeDescriptor(element)}, "values");
+    result = this->lowering.builder_.CreateCall(
+        this->lowering.dictLowerer().dictFunction("tz_map_values", ptr, {ptr, ptr}),
+        {map.value, this->lowering.typeDescriptors().typeDescriptor(element)}, "values");
   } else {
-    uint64_t size = lowering_.module_->getDataLayout().getTypeAllocSize(
-        lowering_.objectLayouts().objectLayout(element).type);
-    result = lowering_.builder_.CreateCall(
-        lowering_.dictLowerer().dictFunction("tz_map_entries", ptr,
-                                             {ptr, ptr, ptr, lowering_.builder_.getInt64Ty()}),
-        {map.value, lowering_.typeDescriptors().typeDescriptor(element),
-         lowering_.objectLayouts().layoutDescriptor(element, {0, 1}),
-         lowering_.builder_.getInt64(size)},
+    uint64_t size = this->lowering.module_->getDataLayout().getTypeAllocSize(
+        this->lowering.objectLayouts().objectLayout(element).type);
+    result = this->lowering.builder_.CreateCall(
+        this->lowering.dictLowerer().dictFunction(
+            "tz_map_entries", ptr, {ptr, ptr, ptr, this->lowering.builder_.getInt64Ty()}),
+        {map.value, this->lowering.typeDescriptors().typeDescriptor(element),
+         this->lowering.objectLayouts().layoutDescriptor(element, {0, 1}),
+         this->lowering.builder_.getInt64(size)},
         "entries");
   }
-  lowering_.refCounts().dropOperand(map);
+  this->lowering.refCounts().dropOperand(map);
 
   return result;
 }

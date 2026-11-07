@@ -6,12 +6,12 @@ namespace tz {
 
 class NameChecker {
 public:
-  explicit NameChecker(Checker &checker);
+  explicit NameChecker(Checker &owner);
 
   Expr *checkName(NameExpr *name);
 
 private:
-  Checker &checker_;
+  Checker &checker;
 };
 
 }

@@ -284,14 +284,18 @@ Expr *StreamChecker::checkStreamCall(CallExpr *call, MemberExpr *member, ClassDe
     return call;
   }
   if (reading) {
-    if (!checker_.argumentChecker().checkArity(call, member->loc(), 1, 2)) {
+    ArgumentChecker::ResultArityMatches arity = checker_.argumentChecker().checkArity(call, 1, 2);
+    if (arity.isErr()) {
+      checker_.diags_.error(member->loc(), arity.error().message);
       return call;
     }
     args.push_back(streamChunkArg(call->args[0], chunk, true, false, name, false));
     args.push_back(call->args.size() > 1 ? encodingArg(call->args[1]) : undefinedOf(encodingType));
     impl = name == "push" ? "pushTyped" : "unshiftTyped";
   } else if (name == "write") {
-    if (!checker_.argumentChecker().checkArity(call, member->loc(), 1, 3)) {
+    ArgumentChecker::ResultArityMatches arity = checker_.argumentChecker().checkArity(call, 1, 3);
+    if (arity.isErr()) {
+      checker_.diags_.error(member->loc(), arity.error().message);
       return call;
     }
     args.push_back(streamChunkArg(call->args[0], chunk, false, true, name, false));
@@ -319,7 +323,9 @@ Expr *StreamChecker::checkStreamCall(CallExpr *call, MemberExpr *member, ClassDe
     args.push_back(cb ? checkedAs(cb, written) : undefinedOf(written));
     impl = "writeTyped";
   } else {
-    if (!checker_.argumentChecker().checkArity(call, member->loc(), 0, 3)) {
+    ArgumentChecker::ResultArityMatches arity = checker_.argumentChecker().checkArity(call, 0, 3);
+    if (arity.isErr()) {
+      checker_.diags_.error(member->loc(), arity.error().message);
       return call;
     }
     Expr *chunkArg = nullptr;

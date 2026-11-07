@@ -11,16 +11,9 @@
 #include "compiler/memory/memory_plan/memory_plan.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/IR/MDBuilder.h"
-#include "llvm/Support/ConvertUTF.h"
-#include <functional>
 #include <map>
 #include <set>
 
-using llvm::BasicBlock;
-using llvm::cast;
-using llvm::dyn_cast;
-using llvm::isa;
-using llvm::Value;
 
 namespace tz {
 
@@ -30,11 +23,12 @@ enum class RefShape { None, Pointer, Function, Optional, Other };
 
 }
 
-MemoryDebug::MemoryDebug(Lowering &lowering) : lowering_(lowering) {}
+MemoryDebug::MemoryDebug(Lowering &owner)
+    : lowering(owner) {}
 
 void MemoryDebug::checkOwned(const Type *type, llvm::StringRef name, llvm::Value *value,
                              const Type *fieldType) {
-  if (!lowering_.debugMemory_) {
+  if (!this->lowering.debugMemory_) {
     return;
   }
   auto held = [&](const std::set<std::pair<const Type *, std::string>> &fields) -> const Type * {
@@ -46,54 +40,56 @@ void MemoryDebug::checkOwned(const Type *type, llvm::StringRef name, llvm::Value
 
     return nullptr;
   };
-  const Type *owner = held(lowering_.memory().ownedFields);
-  bool callback = !owner && (owner = held(lowering_.memory().backRefFields)) != nullptr;
+  const Type *owner = held(this->lowering.memory().ownedFields);
+  bool callback = !owner && (owner = held(this->lowering.memory().backRefFields)) != nullptr;
   if (!owner) {
     return;
   }
   llvm::Value *object = value;
   if (fieldType->isOptional() && !UnionLayout::zeroIsUndefined(fieldType->inner())) {
-    object = lowering_.optionalLowerer().optionalValue(value, fieldType);
+    object = this->lowering.optionalLowerer().optionalValue(value, fieldType);
   }
   if (callback || fieldType->nonOptional()->isFunction()) {
-    object = lowering_.builder_.CreateExtractValue(object, 1);
+    object = this->lowering.builder_.CreateExtractValue(object, 1);
   }
   std::string text = owner->name().str() + "." + name.str();
-  llvm::Type *ptr = lowering_.builder_.getPtrTy();
-  lowering_.builder_.CreateCall(
-      lowering_.groupLowerer().groupFunction("tz_group_check_owned", lowering_.builder_.getVoidTy(),
-                                             {ptr, ptr, ptr, lowering_.builder_.getInt32Ty()}),
-      {object, lowering_.placeLowerer().frameDescriptor(lowering_.loc_),
-       lowering_.stringLowerer().utf8Constant(text),
-       lowering_.builder_.getInt32(uint32_t(text.size()))});
+  llvm::Type *ptr = this->lowering.builder_.getPtrTy();
+  this->lowering.builder_.CreateCall(
+      this->lowering.groupLowerer().groupFunction(
+          "tz_group_check_owned", this->lowering.builder_.getVoidTy(),
+          {ptr, ptr, ptr, this->lowering.builder_.getInt32Ty()}),
+      {object, this->lowering.placeLowerer().frameDescriptor(this->lowering.loc_),
+       this->lowering.stringLowerer().utf8Constant(text),
+       this->lowering.builder_.getInt32(uint32_t(text.size()))});
 }
 
 llvm::Function *
 MemoryDebug::traceFunction(const Type *type, llvm::StructType *layout,
                            llvm::ArrayRef<std::pair<const VarSymbol *, unsigned>> captures,
                            llvm::StringRef name) {
-  llvm::Type *ptr = lowering_.builder_.getPtrTy();
-  auto *fnType = llvm::FunctionType::get(lowering_.builder_.getVoidTy(), {ptr, ptr}, false);
+  llvm::Type *ptr = this->lowering.builder_.getPtrTy();
+  auto *fnType = llvm::FunctionType::get(this->lowering.builder_.getVoidTy(), {ptr, ptr}, false);
   auto *fn = llvm::Function::Create(fnType, llvm::GlobalValue::InternalLinkage, "tz.trace." + name,
-                                    lowering_.module_.get());
+                                    this->lowering.module_.get());
   fn->addFnAttr(llvm::Attribute::NoUnwind);
-  llvm::IRBuilder<> b(llvm::BasicBlock::Create(lowering_.ctx_, "entry", fn));
-  llvm::Value *object = fn->getArg(0), *walk = fn->getArg(1);
-  llvm::FunctionCallee value = lowering_.groupLowerer().groupFunction(
-      "tz_group_trace_value", lowering_.builder_.getVoidTy(), {ptr, ptr, ptr, ptr});
-  llvm::FunctionCallee ref =
-      lowering_.groupLowerer().groupFunction("tz_group_trace_ref", lowering_.builder_.getVoidTy(),
-                                             {ptr, ptr, ptr, lowering_.builder_.getInt32Ty()});
+  llvm::IRBuilder<> b(llvm::BasicBlock::Create(this->lowering.ctx_, "entry", fn));
+  llvm::Value *object = fn->getArg(0);
+  llvm::Value *walk = fn->getArg(1);
+  llvm::FunctionCallee value = this->lowering.groupLowerer().groupFunction(
+      "tz_group_trace_value", this->lowering.builder_.getVoidTy(), {ptr, ptr, ptr, ptr});
+  llvm::FunctionCallee ref = this->lowering.groupLowerer().groupFunction(
+      "tz_group_trace_ref", this->lowering.builder_.getVoidTy(),
+      {ptr, ptr, ptr, this->lowering.builder_.getInt32Ty()});
   auto one = [&](const Type *t, unsigned element, llvm::StringRef field) {
-    if (!lowering_.memory().mayCarryMember(t)) {
+    if (!this->lowering.memory().mayCarryMember(t)) {
       return;
     }
-    b.CreateCall(value, {walk, lowering_.typeDescriptors().typeDescriptor(t),
+    b.CreateCall(value, {walk, this->lowering.typeDescriptors().typeDescriptor(t),
                          b.CreateStructGEP(layout, object, element),
-                         lowering_.stringLowerer().utf8Constant(field)});
+                         this->lowering.stringLowerer().utf8Constant(field)});
   };
   if (type) {
-    const Lowering::ObjectLayout &l = lowering_.objectLayouts().objectLayout(type);
+    const Lowering::ObjectLayout &l = this->lowering.objectLayouts().objectLayout(type);
     for (unsigned i = 0; i < type->fields().size(); ++i) {
       one(type->fields()[i].type, l.elements[i], type->fields()[i].name);
     }
@@ -101,7 +97,7 @@ MemoryDebug::traceFunction(const Type *type, llvm::StructType *layout,
   for (auto [var, element] : captures) {
     if (var->boxed()) {
       b.CreateCall(ref, {walk, b.CreateLoad(ptr, b.CreateStructGEP(layout, object, element)),
-                         lowering_.stringLowerer().utf8Constant(var->name),
+                         this->lowering.stringLowerer().utf8Constant(var->name),
                          b.getInt32(uint32_t(var->name.size()))});
     } else {
       one(ClosureLowerer::typeOf(var), element, var->name);
@@ -113,12 +109,12 @@ MemoryDebug::traceFunction(const Type *type, llvm::StructType *layout,
 }
 
 void MemoryDebug::finishGroupDebug(llvm::Instruction *init) {
-  if (!lowering_.debugMemory_ || !lowering_.memory().hasCycles) {
+  if (!this->lowering.debugMemory_ || !this->lowering.memory().hasCycles) {
     return;
   }
-  llvm::Type *ptr = lowering_.builder_.getPtrTy();
+  llvm::Type *ptr = this->lowering.builder_.getPtrTy();
   std::vector<llvm::Constant *> entries;
-  auto *entryType = llvm::StructType::get(lowering_.ctx_, {ptr, ptr});
+  auto *entryType = llvm::StructType::get(this->lowering.ctx_, {ptr, ptr});
   auto add = [&](llvm::Constant *descriptor, llvm::Function *trace) {
     entries.push_back(llvm::ConstantStruct::get(entryType, {descriptor, trace}));
   };
@@ -126,61 +122,63 @@ void MemoryDebug::finishGroupDebug(llvm::Instruction *init) {
   auto objectTrace = [&](const Type *type) {
     llvm::Function *&trace = traces[type];
     if (!trace) {
-      const Lowering::ObjectLayout &l = lowering_.objectLayouts().objectLayout(type);
+      const Lowering::ObjectLayout &l = this->lowering.objectLayouts().objectLayout(type);
       std::vector<std::pair<const VarSymbol *, unsigned>> captures;
-      if (const ClassDecl *cls = type->classDecl(); cls && cls->group) {
+      const ClassDecl *cls = type->classDecl();
+      if (cls && cls->group) {
         for (size_t i = 0; i < cls->group->captures.size(); ++i) {
           captures.push_back({cls->group->captures[i], unsigned(l.captures + i)});
         }
       }
-      trace = traceFunction(type, l.type, captures, "object");
+      trace = this->traceFunction(type, l.type, captures, "object");
     }
 
     return trace;
   };
-  for (const auto &[key, descriptor] : lowering_.layoutDescriptors_) {
-    if (lowering_.isCyclic(key.first)) {
+  for (const auto &[key, descriptor] : this->lowering.layoutDescriptors_) {
+    if (this->lowering.isCyclic(key.first)) {
       add(descriptor, objectTrace(key.first));
     }
   }
-  for (const auto &[cls, descriptor] : lowering_.classDescriptors_) {
-    if (lowering_.isCyclic(cls->type)) {
+  for (const auto &[cls, descriptor] : this->lowering.classDescriptors_) {
+    if (this->lowering.isCyclic(cls->type)) {
       add(descriptor, objectTrace(cls->type));
     }
   }
-  for (const auto &[key, layout] : lowering_.envLayouts_) {
+  for (const auto &[key, layout] : this->lowering.envLayouts_) {
     if (!layout.member) {
       continue;
     }
     std::vector<std::pair<const VarSymbol *, unsigned>> captures;
     for (size_t i = 0; i < layout.fields.size(); ++i) {
-      if (!lowering_.memory().uncounted.count({key, layout.fields[i]})) {
+      if (!this->lowering.memory().uncounted.count({key, layout.fields[i]})) {
         captures.push_back({layout.fields[i], unsigned(i + 2)});
       }
     }
-    add(layout.descriptor, traceFunction(nullptr, layout.type, captures, "env"));
+    add(layout.descriptor, this->traceFunction(nullptr, layout.type, captures, "env"));
   }
-  for (const auto &[descriptor, type] : lowering_.boxDescriptors_) {
-    llvm::Function *trace = traceFunction(nullptr, lowering_.envLowerer().boxType(type), {}, "box");
+  for (const auto &[descriptor, type] : this->lowering.boxDescriptors_) {
+    llvm::Function *trace =
+        this->traceFunction(nullptr, this->lowering.envLowerer().boxType(type), {}, "box");
     llvm::IRBuilder<> b(&trace->getEntryBlock(), trace->getEntryBlock().begin());
-    if (lowering_.memory().mayCarryMember(type)) {
-      b.CreateCall(lowering_.groupLowerer().groupFunction("tz_group_trace_value",
-                                                          lowering_.builder_.getVoidTy(),
-                                                          {ptr, ptr, ptr, ptr}),
-                   {trace->getArg(1), lowering_.typeDescriptors().typeDescriptor(type),
-                    b.CreateStructGEP(lowering_.envLowerer().boxType(type), trace->getArg(0), 2),
-                    lowering_.stringLowerer().utf8Constant("value")});
+    if (this->lowering.memory().mayCarryMember(type)) {
+      b.CreateCall(
+          this->lowering.groupLowerer().groupFunction(
+              "tz_group_trace_value", this->lowering.builder_.getVoidTy(), {ptr, ptr, ptr, ptr}),
+          {trace->getArg(1), this->lowering.typeDescriptors().typeDescriptor(type),
+           b.CreateStructGEP(this->lowering.envLowerer().boxType(type), trace->getArg(0), 2),
+           this->lowering.stringLowerer().utf8Constant("value")});
     }
     add(descriptor, trace);
   }
   auto *arrayType = llvm::ArrayType::get(entryType, entries.size());
   auto *table = new llvm::GlobalVariable(
-      *lowering_.module_, arrayType, true, llvm::GlobalValue::PrivateLinkage,
+      *this->lowering.module_, arrayType, true, llvm::GlobalValue::PrivateLinkage,
       llvm::ConstantArray::get(arrayType, entries), "tz.group.traces");
   llvm::IRBuilder<> b(init->getNextNode());
-  b.CreateCall(lowering_.groupLowerer().groupFunction("tz_group_debug_init",
-                                                      lowering_.builder_.getVoidTy(),
-                                                      {ptr, lowering_.builder_.getInt32Ty()}),
+  b.CreateCall(this->lowering.groupLowerer().groupFunction(
+                   "tz_group_debug_init", this->lowering.builder_.getVoidTy(),
+                   {ptr, this->lowering.builder_.getInt32Ty()}),
                {table, b.getInt32(uint32_t(entries.size()))});
 }
 

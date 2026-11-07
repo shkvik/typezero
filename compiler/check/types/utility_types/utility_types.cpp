@@ -12,46 +12,41 @@
 #include "compiler/load/lexer/lexer.h"
 #include "compiler/load/parser/parser.h"
 #include "llvm/ADT/STLExtras.h"
-#include "llvm/Support/ConvertUTF.h"
 #include "llvm/Support/MemoryBuffer.h"
 
 using llvm::cast;
 using llvm::dyn_cast;
-using llvm::dyn_cast_or_null;
 using llvm::isa;
 
 namespace tz {
 
-namespace {
-
-llvm::ArrayRef<const Type *> membersOf(const Type *&type) {
+llvm::ArrayRef<const Type *> UtilityTypes::membersOf(const Type *&type) {
   return type->isUnion() ? type->members() : llvm::ArrayRef<const Type *>(type);
 }
 
-}
-
-UtilityTypes::UtilityTypes(Checker &checker) : checker_(checker) {}
+UtilityTypes::UtilityTypes(Checker &owner)
+    : checker(owner) {}
 
 const Type *UtilityTypes::functionValueType(FuncSymbol *fn) {
   if (!fn->isGeneric()) {
-    return checker_.returnInferrer().functionType(fn);
+    return this->checker.returnInferrer().functionType(fn);
   }
   if (fn->typeDefaults.size() != fn->typeParams.size() ||
       llvm::is_contained(fn->typeDefaults, nullptr)) {
     return nullptr;
   }
-  const Type *type = checker_.returnInferrer().functionType(fn);
+  const Type *type = this->checker.returnInferrer().functionType(fn);
 
-  return checker_.typeParams().substitute(type, fn->typeParams, fn->typeDefaults);
+  return this->checker.typeParams().substitute(type, fn->typeParams, fn->typeDefaults);
 }
 
 const Type *UtilityTypes::importedValueType(Module *from, llvm::StringRef name) {
   for (Stmt *item : from->file.items) {
     if (auto *fn = dyn_cast<FunctionDecl>(item); fn && fn->name == name) {
-      return fn->sym ? functionValueType(fn->sym) : nullptr;
+      return fn->sym ? this->functionValueType(fn->sym) : nullptr;
     }
     if (auto *cls = dyn_cast<ClassDecl>(item); cls && cls->name == name) {
-      return cls->isGeneric() ? nullptr : checker_.classValueChecker().classValueType(cls);
+      return cls->isGeneric() ? nullptr : this->checker.classValueChecker().classValueType(cls);
     }
     if (auto *decl = dyn_cast<VarDeclStmt>(item)) {
       for (const VarDeclarator &d : decl->decls) {
@@ -78,12 +73,12 @@ const Type *UtilityTypes::resolveUtilityType(const TypeRef &ref) {
       {"Uncapitalize", TypeOp::Uncapitalize, 1},
   };
   for (const auto &u : utilities) {
-    if (ref.name != u.name || checker_.typeDeclarer().lookupType(ref.name)) {
+    if (ref.name != u.name || this->checker.typeDeclarer().lookupType(ref.name)) {
       continue;
     }
     if (ref.args.size() != u.count) {
-      checker_.diags_.error(ref.loc, "'" + ref.name + "' takes " + std::to_string(u.count) +
-                                         " type argument" + (u.count == 1 ? "" : "s"));
+      this->checker.diags_.error(ref.loc, "'" + ref.name + "' takes " + std::to_string(u.count) +
+                                              " type argument" + (u.count == 1 ? "" : "s"));
       return Type::error();
     }
     bool function = u.op == TypeOp::ReturnType || u.op == TypeOp::Parameters;
@@ -92,32 +87,32 @@ const Type *UtilityTypes::resolveUtilityType(const TypeRef &ref) {
     std::vector<const Type *> operands;
     for (const TypeRef &arg : ref.args) {
       const Type *signature =
-          function ? checker_.conditionalTypes().signatureForUtility(arg) : nullptr;
+          function ? this->checker.conditionalTypes().signatureForUtility(arg) : nullptr;
       operands.push_back(signature ? signature
-                                   : checker_.conditionalTypes().resolveTypeArgument(arg));
+                                   : this->checker.conditionalTypes().resolveTypeArgument(arg));
       if (operands.back()->isError()) {
         return operands.back();
       }
     }
     if (function && !mentionsParam(operands[0]) && !operands[0]->nonOptional()->isFunction()) {
-      checker_.diags_.error(ref.loc, "'" + ref.name + "' takes a function type, not '" +
-                                         operands[0]->name() + "'");
+      this->checker.diags_.error(ref.loc, "'" + ref.name + "' takes a function type, not '" +
+                                              operands[0]->name() + "'");
 
       return Type::error();
     }
     if (text && !mentionsParam(operands[0])) {
       for (const Type *m : distributedMembers(operands[0])) {
         if (!m->isString() && !m->isStringLiteral()) {
-          checker_.diags_.error(ref.loc,
-                                "'" + ref.name +
-                                    "' takes a string type, such as a string literal type, "
-                                    "not '" +
-                                    m->name() + "'");
+          this->checker.diags_.error(ref.loc,
+                                     "'" + ref.name +
+                                         "' takes a string type, such as a string literal type, "
+                                         "not '" +
+                                         m->name() + "'");
           return Type::error();
         }
       }
     }
-    return checker_.typeOperators().evalTypeOp(Type::typeOp(u.op, operands), operands);
+    return this->checker.typeOperators().evalTypeOp(Type::typeOp(u.op, operands), operands);
   }
 
   return nullptr;
@@ -126,7 +121,7 @@ const Type *UtilityTypes::resolveUtilityType(const TypeRef &ref) {
 Expr *UtilityTypes::checkGenericIndex(IndexExpr *index) {
   const Type *object = index->object->type;
   auto genericKey = [&](const Type *key) {
-    return key->isParam() && !key->isListParam() && wantsLiteral(key);
+    return key->isParam() && !key->isListParam() && this->wantsLiteral(key);
   };
   bool open = object->isParam() && !object->isListParam() && !object->iterated();
   if (!open && !(object->isObject() && isa<NameExpr>(index->index))) {
@@ -134,26 +129,26 @@ Expr *UtilityTypes::checkGenericIndex(IndexExpr *index) {
   }
   if (!open) {
     auto *name = cast<NameExpr>(index->index);
-    VarSymbol *var = checker_.scopes().lookup(name->name).var();
+    VarSymbol *var = this->checker.scopes().lookup(name->name).var();
     if (!var || !var->type || !genericKey(var->type)) {
       return nullptr;
     }
   }
-  index->index = checker_.exprChecker().checkExpr(index->index);
+  index->index = this->checker.exprChecker().checkExpr(index->index);
   const Type *key = index->index->type;
   if (key->isError()) {
     return index;
   }
   if (!key->isStringLiteral() && !genericKey(key)) {
-    checker_.diags_.error(index->index->loc(),
-                          "'" + object->name() +
-                              "' is indexed by its keys, such as 'k: K' with 'K "
-                              "extends keyof " +
-                              object->name() + "', not by '" + key->name() + "'");
+    this->checker.diags_.error(index->index->loc(),
+                               "'" + object->name() +
+                                   "' is indexed by its keys, such as 'k: K' with 'K "
+                                   "extends keyof " +
+                                   object->name() + "', not by '" + key->name() + "'");
     return index;
   }
   index->type =
-      checker_.typeOperators().evalTypeOp(Type::indexedAccess(object, key), {object, key});
+      this->checker.typeOperators().evalTypeOp(Type::indexedAccess(object, key), {object, key});
 
   return index;
 }
@@ -168,7 +163,8 @@ bool UtilityTypes::wantsLiteral(const Type *param) const {
   }
   const Type *c = constraint;
 
-  return llvm::all_of(membersOf(c), [](const Type *m) { return m->isStringLiteral(); });
+  return llvm::all_of(UtilityTypes::membersOf(c),
+                      [](const Type *m) { return m->isStringLiteral(); });
 }
 
 }

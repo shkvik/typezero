@@ -6,7 +6,7 @@ namespace tz {
 
 class IteratorMethods {
 public:
-  explicit IteratorMethods(Checker &checker);
+  explicit IteratorMethods(Checker &owner);
 
   void markFused(Expr *expr) const;
   Expr *checkIteratorMethod(CallExpr *call, MemberExpr *member);
@@ -15,7 +15,7 @@ public:
   Expr *checkArrayFrom(CallExpr *call, MemberExpr *member);
 
 private:
-  Checker &checker_;
+  Checker &checker;
 };
 
 }

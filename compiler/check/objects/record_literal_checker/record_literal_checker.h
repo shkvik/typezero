@@ -6,14 +6,14 @@ namespace tz {
 
 class RecordLiteralChecker {
 public:
-  explicit RecordLiteralChecker(Checker &checker);
+  explicit RecordLiteralChecker(Checker &owner);
 
   Expr *checkRecordLit(ObjectLitExpr *lit, const Type *record);
   bool checkRecordSpread(ObjectLitExpr::Property &prop, const Type *value);
   Expr *recordFromSpreads(ObjectLitExpr *lit);
 
 private:
-  Checker &checker_;
+  Checker &checker;
 };
 
 }

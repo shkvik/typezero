@@ -6,7 +6,7 @@ namespace tz {
 
 class DictMethods {
 public:
-  explicit DictMethods(Checker &checker);
+  explicit DictMethods(Checker &owner);
 
   Expr *checkDictMethod(CallExpr *call, MemberExpr *member);
   Expr *checkFromEntries(CallExpr *call, MemberExpr *member, const Type *expected);
@@ -15,7 +15,7 @@ public:
   Expr *checkDictObjectCall(CallExpr *call, llvm::StringRef fn);
 
 private:
-  Checker &checker_;
+  Checker &checker;
 };
 
 }

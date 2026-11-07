@@ -7,7 +7,6 @@
 #include "compiler/check/types/type_relations/type_relations.h"
 #include "compiler/library/decimal/decimal_checker/decimal_checker.h"
 #include "llvm/ADT/STLExtras.h"
-#include "llvm/Support/ConvertUTF.h"
 #include <functional>
 
 using llvm::cast;
@@ -17,7 +16,8 @@ using llvm::isa;
 
 namespace tz {
 
-DictNewChecker::DictNewChecker(Checker &checker) : checker_(checker) {}
+DictNewChecker::DictNewChecker(Checker &owner)
+    : checker(owner) {}
 
 void DictNewChecker::markPairs(Expr *arg) {
   auto *call = dyn_cast<CallExpr>(arg);
@@ -54,12 +54,12 @@ void DictNewChecker::markPairs(Expr *arg) {
     return;
   }
   for (const Expr *pair : returned) {
-    checker_.pairLiterals_.insert(pair);
+    this->checker.pairLiterals_.insert(pair);
   }
 }
 
 bool DictNewChecker::inferPairs(Expr *arg, const Type *&key, const Type *&value) {
-  markPairs(arg);
+  this->markPairs(arg);
   auto *lit = dyn_cast<ArrayLitExpr>(arg);
   if (!lit || lit->elements.empty()) {
     return false;
@@ -78,7 +78,7 @@ bool DictNewChecker::inferPairs(Expr *arg, const Type *&key, const Type *&value)
     for (size_t i = 0; i < 2; ++i) {
       Expr *&part = pair->elements[i].expr;
       const Type *&common = i == 0 ? key : value;
-      part = checker_.exprChecker().checkExpr(
+      part = this->checker.exprChecker().checkExpr(
           part, common && DecimalChecker::isLiteralTree(part) ? common : nullptr);
       const Type *t = part->type;
       if (t->isError()) {
@@ -87,9 +87,9 @@ bool DictNewChecker::inferPairs(Expr *arg, const Type *&key, const Type *&value)
       }
       const Type *next = common ? TypeRelations::unify(common, t) : t;
       if (!next) {
-        checker_.diags_.error(part->loc(), std::string("the ") + (i == 0 ? "keys" : "values") +
-                                               " of a Map have one type; found '" + common->name() +
-                                               "' and '" + t->name() + "'");
+        this->checker.diags_.error(part->loc(), std::string("the ") + (i == 0 ? "keys" : "values") +
+                                                    " of a Map have one type; found '" +
+                                                    common->name() + "' and '" + t->name() + "'");
         ok = false;
         continue;
       }
@@ -101,17 +101,17 @@ bool DictNewChecker::inferPairs(Expr *arg, const Type *&key, const Type *&value)
     return true;
   }
   if (key->isUndefined() || value->isUndefined() || key->isVoid() || value->isVoid()) {
-    checker_.diags_.error(arg->loc(),
-                          "cannot infer the types of the Map from 'undefined'; give them, e.g. "
-                          "'new Map<string, int | undefined>(...)'");
+    this->checker.diags_.error(
+        arg->loc(), "cannot infer the types of the Map from 'undefined'; give them, e.g. "
+                    "'new Map<string, int | undefined>(...)'");
     key = value = Type::error();
     return true;
   }
   const Type *pairType = Type::tuple({key, value});
   for (const ArrayLitExpr::Element &e : lit->elements) {
     auto *pair = cast<ArrayLitExpr>(e.expr);
-    pair->elements[0].expr = checker_.typeRelations().coerce(pair->elements[0].expr, key);
-    pair->elements[1].expr = checker_.typeRelations().coerce(pair->elements[1].expr, value);
+    pair->elements[0].expr = this->checker.typeRelations().coerce(pair->elements[0].expr, key);
+    pair->elements[1].expr = this->checker.typeRelations().coerce(pair->elements[1].expr, value);
     pair->type = pairType;
   }
   lit->type = Type::array(pairType);
@@ -121,9 +121,9 @@ bool DictNewChecker::inferPairs(Expr *arg, const Type *&key, const Type *&value)
 
 Expr *DictNewChecker::checkDictSource(Expr *arg, bool pairs, const Type *&element,
                                       llvm::StringRef what) {
-  checker_.iteratorMethods().markFused(arg);
-  arg = checker_.dictChecker().iterableOf(
-      checker_.exprChecker().checkExpr(arg, element ? Type::array(element) : nullptr));
+  this->checker.iteratorMethods().markFused(arg);
+  arg = this->checker.dictChecker().iterableOf(
+      this->checker.exprChecker().checkExpr(arg, element ? Type::array(element) : nullptr));
   const Type *type = arg->type;
   const Type *wanted = element;
   element = Type::error();
@@ -132,17 +132,17 @@ Expr *DictNewChecker::checkDictSource(Expr *arg, bool pairs, const Type *&elemen
   }
   const Type *given = GeneratorChecker::iteratedType(type);
   if (!given) {
-    checker_.diags_.error(arg->loc(),
-                          what + " needs an array, a string, an iterator, a Map or a Set, found '" +
-                              type->name() + "'" +
-                              (type->isRecord() ? "; for the entries of a Record, pass "
-                                                  "'Object.entries(r)'"
-                                                : ""));
+    this->checker.diags_.error(
+        arg->loc(), what + " needs an array, a string, an iterator, a Map or a Set, found '" +
+                        type->name() + "'" +
+                        (type->isRecord() ? "; for the entries of a Record, pass "
+                                            "'Object.entries(r)'"
+                                          : ""));
     return arg;
   }
   if (type->isIterator()) {
-    checker_.generatorChecker().checkSendsNothing(type, arg->loc(), what);
-    checker_.flowChecker().calledFunction();
+    this->checker.generatorChecker().checkSendsNothing(type, arg->loc(), what);
+    this->checker.flowChecker().calledFunction();
   }
   if (pairs) {
     bool pair = given->isTuple() && given->fields().size() == 2;
@@ -150,19 +150,19 @@ Expr *DictNewChecker::checkDictSource(Expr *arg, bool pairs, const Type *&elemen
                                                                      wanted->fields()[0].type) ||
                              !TypeRelations::isImplicitlyConvertible(given->fields()[1].type,
                                                                      wanted->fields()[1].type)))) {
-      checker_.diags_.error(arg->loc(),
-                            what + " takes [key, value] pairs" +
-                                (wanted ? " of '" + wanted->name().str() + "'" : std::string()) +
-                                ", found '" + given->name() + "'" +
-                                (given->isArray() ? "; an array literal is a pair only where one "
-                                                    "is expected: give the callback its type, "
-                                                    "e.g. '(x): [string, int] => [x.name, x.n]'"
-                                                  : ""));
+      this->checker.diags_.error(
+          arg->loc(), what + " takes [key, value] pairs" +
+                          (wanted ? " of '" + wanted->name().str() + "'" : std::string()) +
+                          ", found '" + given->name() + "'" +
+                          (given->isArray() ? "; an array literal is a pair only where one "
+                                              "is expected: give the callback its type, "
+                                              "e.g. '(x): [string, int] => [x.name, x.n]'"
+                                            : ""));
       return arg;
     }
   } else if (wanted && !TypeRelations::isImplicitlyConvertible(given, wanted)) {
-    checker_.diags_.error(arg->loc(), what + " takes values of type '" + wanted->name() +
-                                          "', found '" + given->name() + "'");
+    this->checker.diags_.error(arg->loc(), what + " takes values of type '" + wanted->name() +
+                                               "', found '" + given->name() + "'");
     return arg;
   }
   element = given;
@@ -177,16 +177,16 @@ Expr *DictNewChecker::checkDictNew(NewExpr *expr, const Type *expected) {
     TypeRef ref;
     ref.name = expr->name;
     ref.loc = loc;
-    checker_.dictChecker().resolveDictType(ref);
+    this->checker.dictChecker().resolveDictType(ref);
     for (Expr *&arg : expr->args) {
-      arg = checker_.exprChecker().checkExpr(arg);
+      arg = this->checker.exprChecker().checkExpr(arg);
     }
     expr->type = Type::error();
     return expr;
   }
   auto fail = [&] {
     for (Expr *&arg : expr->args) {
-      arg = checker_.exprChecker().checkExpr(arg);
+      arg = this->checker.exprChecker().checkExpr(arg);
     }
     expr->type = Type::error();
 
@@ -210,7 +210,7 @@ Expr *DictNewChecker::checkDictNew(NewExpr *expr, const Type *expected) {
     ref.name = expr->name;
     ref.loc = loc;
     ref.args = expr->typeArgs;
-    type = checker_.dictChecker().resolveDictType(ref);
+    type = this->checker.dictChecker().resolveDictType(ref);
     if (type->isError()) {
       return fail();
     }
@@ -219,32 +219,33 @@ Expr *DictNewChecker::checkDictNew(NewExpr *expr, const Type *expected) {
     type = wanted;
   }
   if (expr->args.size() > 1) {
-    checker_.diags_.error(expr->args[1]->loc(),
-                          "'new " + expr->name + "' takes one argument, the " +
-                              (isMap ? "entries" : "values") + " to start with");
+    this->checker.diags_.error(expr->args[1]->loc(),
+                               "'new " + expr->name + "' takes one argument, the " +
+                                   (isMap ? "entries" : "values") + " to start with");
     return fail();
   }
   std::vector<Expr *> args;
   if (expr->args.empty()) {
     if (!type) {
-      checker_.diags_.error(loc,
-                            isMap ? "'new Map()' needs the types of its keys and values, e.g. 'new "
-                                    "Map<string, int>()'"
-                                  : "'new Set()' needs the type of its elements, e.g. 'new "
-                                    "Set<int>()'");
+      this->checker.diags_.error(
+          loc, isMap ? "'new Map()' needs the types of its keys and values, e.g. 'new "
+                       "Map<string, int>()'"
+                     : "'new Set()' needs the type of its elements, e.g. 'new "
+                       "Set<int>()'");
       return fail();
     }
   } else if (Expr *arg = expr->args[0]; isa<UndefinedExpr>(arg)) {
     if (!type) {
-      checker_.diags_.error(
+      this->checker.diags_.error(
           loc, "'new " + expr->name + "(undefined)' needs the types of the " +
                    (isMap ? "Map, e.g. 'new Map<string, int>()'" : "Set, e.g. 'new Set<int>()'"));
       return fail();
     }
   } else {
-    const Type *key = nullptr, *value = nullptr;
-    if (!type && isMap && inferPairs(arg, key, value)) {
-      if (key->isError() || !checker_.dictChecker().checkKeyType(key, arg->loc())) {
+    const Type *key = nullptr;
+    const Type *value = nullptr;
+    if (!type && isMap && this->inferPairs(arg, key, value)) {
+      if (key->isError() || !this->checker.dictChecker().checkKeyType(key, arg->loc())) {
         expr->type = Type::error();
         return expr;
       }
@@ -254,26 +255,27 @@ Expr *DictNewChecker::checkDictNew(NewExpr *expr, const Type *expected) {
       const Type *element =
           type ? (isMap ? Type::tuple({type->keyType(), type->valueType()}) : type->keyType())
                : nullptr;
-      arg = checkDictSource(arg, isMap, element, "'new " + expr->name.str() + "'");
+      arg = this->checkDictSource(arg, isMap, element, "'new " + expr->name.str() + "'");
       if (element->isError()) {
         expr->type = Type::error();
         return expr;
       }
       if (!type) {
         if (isMap && (!element->isTuple() || element->fields().size() != 2)) {
-          checker_.diags_.error(arg->loc(), "'new Map' takes [key, value] pairs, found '" +
-                                                element->name() + "'");
+          this->checker.diags_.error(arg->loc(), "'new Map' takes [key, value] pairs, found '" +
+                                                     element->name() + "'");
           expr->type = Type::error();
           return expr;
         }
         const Type *k = isMap ? element->fields()[0].type : element;
-        if (!checker_.dictChecker().checkKeyType(k, arg->loc())) {
+        if (!this->checker.dictChecker().checkKeyType(k, arg->loc())) {
           expr->type = Type::error();
           return expr;
         }
         if (k->isUndefined() || (isMap && element->fields()[1].type->isUndefined())) {
-          checker_.diags_.error(arg->loc(), "cannot infer the types of the " + expr->name.str() +
-                                                " from 'undefined'; give them");
+          this->checker.diags_.error(arg->loc(), "cannot infer the types of the " +
+                                                     expr->name.str() +
+                                                     " from 'undefined'; give them");
           expr->type = Type::error();
           return expr;
         }
@@ -283,11 +285,11 @@ Expr *DictNewChecker::checkDictNew(NewExpr *expr, const Type *expected) {
       args.push_back(arg);
     }
   }
-  if (!checker_.dictChecker().checkKeyType(type->keyType(), loc)) {
+  if (!this->checker.dictChecker().checkKeyType(type->keyType(), loc)) {
     return fail();
   }
-  auto *call = checker_.ctx_.make<CallExpr>(loc, checker_.ctx_.make<NameExpr>(loc, expr->name),
-                                            std::move(args));
+  auto *call = this->checker.ctx_.make<CallExpr>(
+      loc, this->checker.ctx_.make<NameExpr>(loc, expr->name), std::move(args));
   call->callee->type = type;
   call->target = BuiltinCall{.builtin = Builtin::DictNew};
   call->type = type;

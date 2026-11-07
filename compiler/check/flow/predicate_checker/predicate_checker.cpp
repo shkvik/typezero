@@ -9,16 +9,12 @@
 #include "compiler/infer/return_inferrer/return_inferrer.h"
 #include "llvm/ADT/StringExtras.h"
 
-using llvm::cast;
 using llvm::dyn_cast;
-using llvm::dyn_cast_or_null;
 using llvm::isa;
 
 namespace tz {
 
-namespace {
-
-const VarSymbol *argumentVariable(const Expr *expr) {
+const VarSymbol *PredicateChecker::argumentVariable(const Expr *expr) {
   while (auto *conv = dyn_cast<CastExpr>(expr)) {
     if (!conv->isImplicit() || conv->shortCircuit) {
       return nullptr;
@@ -30,7 +26,7 @@ const VarSymbol *argumentVariable(const Expr *expr) {
   return name ? name->var() : nullptr;
 }
 
-std::optional<Linear> argumentTerm(const Expr *expr) {
+std::optional<Linear> PredicateChecker::argumentTerm(const Expr *expr) {
   while (auto *conv = dyn_cast<CastExpr>(expr)) {
     if (!conv->isImplicit()) {
       return std::nullopt;
@@ -52,19 +48,18 @@ std::optional<Linear> argumentTerm(const Expr *expr) {
   return std::nullopt;
 }
 
-}
-
-PredicateChecker::PredicateChecker(Checker &checker) : checker_(checker) {}
+PredicateChecker::PredicateChecker(Checker &owner)
+    : checker(owner) {}
 
 const Type *PredicateChecker::resolveReturnType(FunctionDecl *fn, FuncSymbol *sym) {
   const TypeRef &ref = *fn->returnType;
   if (ref.kind() != TypeRefKind::PREDICATE_REF) {
-    return checker_.typeResolver().resolveType(ref, true);
+    return this->checker.typeResolver().resolveType(ref, true);
   }
   if (ref.asserts()) {
     if (sym) {
       const Type *type =
-          ref.args.empty() ? nullptr : checker_.typeResolver().resolveType(ref.args[0], false);
+          ref.args.empty() ? nullptr : this->checker.typeResolver().resolveType(ref.args[0], false);
       std::string args;
       for (const Param &p : fn->params) {
         args += (args.empty() ? "" : ", ") + p.name.str();
@@ -76,7 +71,7 @@ const Type *PredicateChecker::resolveReturnType(FunctionDecl *fn, FuncSymbol *sy
         call = object + "." + call;
       }
       std::string shown = ref.name.str() + (type ? " is " + type->name().str() : "");
-      checker_.diags_.error(ref.loc, assertsError(shown, type, call));
+      this->checker.diags_.error(ref.loc, PredicateChecker::assertsError(shown, type, call));
     }
     return Type::voidTy();
   }
@@ -85,7 +80,7 @@ const Type *PredicateChecker::resolveReturnType(FunctionDecl *fn, FuncSymbol *sy
     if (fn->cls() && !fn->isStatic() && !fn->isConstructor()) {
       param = -1;
     } else if (sym) {
-      checker_.diags_.error(ref.loc, "'this is T' can only be the return type of a method");
+      this->checker.diags_.error(ref.loc, "'this is T' can only be the return type of a method");
     }
   } else {
     for (size_t i = 0; i < fn->params.size(); ++i) {
@@ -94,12 +89,13 @@ const Type *PredicateChecker::resolveReturnType(FunctionDecl *fn, FuncSymbol *sy
       }
     }
     if (param == -2 && sym) {
-      checker_.diags_.error(ref.loc, "a type predicate names a parameter of the function, and '" +
-                                         ref.name + "' is none");
+      this->checker.diags_.error(ref.loc,
+                                 "a type predicate names a parameter of the function, and '" +
+                                     ref.name + "' is none");
     }
   }
   const Type *type =
-      ref.args.empty() ? nullptr : checker_.typeResolver().resolveType(ref.args[0], false);
+      ref.args.empty() ? nullptr : this->checker.typeResolver().resolveType(ref.args[0], false);
   if (sym && param != -2 && type && !type->isError()) {
     sym->predicate = TypePredicate{.param = param, .type = type};
   }
@@ -143,7 +139,7 @@ bool PredicateChecker::looksBoolean(const Expr *expr) {
     return true;
   case BinaryOp::LogAnd:
   case BinaryOp::LogOr:
-    return looksBoolean(bin->lhs) && looksBoolean(bin->rhs);
+    return PredicateChecker::looksBoolean(bin->lhs) && PredicateChecker::looksBoolean(bin->rhs);
   default:
     return false;
   }
@@ -153,21 +149,21 @@ void PredicateChecker::beginPredicate(FunctionDecl *fn) {
   const FuncSymbol *sym = fn->sym;
   bool boolean = !sym->ret || sym->ret->isBool();
   if (!boolean || fn->isGenerator || fn->isConstructor()) {
-    checker_.predicateBuilds_.push_back({nullptr, fn, Checker::Flow(), Checker::Flow()});
+    this->checker.predicateBuilds_.push_back({nullptr, fn, Checker::Flow(), Checker::Flow()});
     return;
   }
   Checker::PredicateBuild build{sym, fn, Checker::Flow(), Checker::Flow()};
   build.whenTrue.unreachable = true;
   build.whenFalse.unreachable = true;
-  checker_.predicateBuilds_.push_back(std::move(build));
+  this->checker.predicateBuilds_.push_back(std::move(build));
 }
 
 void PredicateChecker::notePredicateExit(const Checker::Flow &whenTrue,
                                          const Checker::Flow &whenFalse, llvm::SMLoc loc) {
-  if (checker_.predicateBuilds_.empty() || !checker_.predicateBuilds_.back().fn) {
+  if (this->checker.predicateBuilds_.empty() || !this->checker.predicateBuilds_.back().fn) {
     return;
   }
-  Checker::PredicateBuild &build = checker_.predicateBuilds_.back();
+  Checker::PredicateBuild &build = this->checker.predicateBuilds_.back();
   const FuncSymbol *sym = build.fn;
   build.whenTrue = FlowChecker::join(build.whenTrue, whenTrue);
   build.whenFalse = FlowChecker::join(build.whenFalse, whenFalse);
@@ -183,12 +179,12 @@ void PredicateChecker::notePredicateExit(const Checker::Flow &whenTrue,
   if (!var) {
     return;
   }
-  const Type *shown = checker_.literalTypes().typeIn(whenTrue, var);
+  const Type *shown = this->checker.literalTypes().typeIn(whenTrue, var);
   if (shown->isError() || shown->isNever() ||
       TypeRelations::isImplicitlyConvertible(shown, predicate.type)) {
     return;
   }
-  checker_.diags_.error(
+  this->checker.diags_.error(
       loc, functionLabel(sym->name) + " says '" + var->name.str() + " is " +
                predicate.type->name().str() + "', but this may give true while '" +
                var->name.str() + "' is only known to be '" + shown->name().str() +
@@ -198,8 +194,8 @@ void PredicateChecker::notePredicateExit(const Checker::Flow &whenTrue,
 }
 
 void PredicateChecker::endPredicate(FunctionDecl *fn) {
-  Checker::PredicateBuild build = std::move(checker_.predicateBuilds_.back());
-  checker_.predicateBuilds_.pop_back();
+  Checker::PredicateBuild build = std::move(this->checker.predicateBuilds_.back());
+  this->checker.predicateBuilds_.pop_back();
   if (!build.fn) {
     return;
   }
@@ -259,27 +255,27 @@ void PredicateChecker::endPredicate(FunctionDecl *fn) {
     summary.params.push_back(p.sym);
   }
   summary.self = fn->thisVar();
-  predicates_[build.fn] = std::move(summary);
+  this->predicates[build.fn] = std::move(summary);
 }
 
 const Checker::Predicate *PredicateChecker::predicateOf(const FuncSymbol *fn) const {
-  if (auto found = predicates_.find(fn); found != predicates_.end()) {
+  if (auto found = this->predicates.find(fn); found != this->predicates.end()) {
     return &found->second;
   }
   FunctionDecl *decl = fn->decl;
   if (!decl || decl->checked || !decl->body || decl->external() || decl->isGenerator ||
-      decl->isInstance || (fn->ret && !fn->ret->isBool()) || !summarizing_.insert(fn).second) {
+      decl->isInstance || (fn->ret && !fn->ret->isBool()) || !this->summarizing.insert(fn).second) {
     return nullptr;
   }
-  Checker::BodyState saved = checker_.returnInferrer().enterBody(decl);
-  bool muted = checker_.diags_.setMuted(true);
-  FunctionDecl *copy = checker_.returnInferrer().freshCopy(decl);
-  checker_.functionChecker().checkFunctionBody(copy);
-  checker_.diags_.setMuted(muted);
-  checker_.returnInferrer().leaveBody(saved);
-  auto found = predicates_.find(fn);
+  Checker::BodyState saved = this->checker.returnInferrer().enterBody(decl);
+  bool muted = this->checker.diags_.setMuted(true);
+  FunctionDecl *copy = this->checker.returnInferrer().freshCopy(decl);
+  this->checker.functionChecker().checkFunctionBody(copy);
+  this->checker.diags_.setMuted(muted);
+  this->checker.returnInferrer().leaveBody(saved);
+  auto found = this->predicates.find(fn);
 
-  return found == predicates_.end() ? nullptr : &found->second;
+  return found == this->predicates.end() ? nullptr : &found->second;
 }
 
 void PredicateChecker::applyPredicate(const CallExpr *call, Checker::Flow &whenTrue,
@@ -298,12 +294,12 @@ void PredicateChecker::applyPredicate(const CallExpr *call, Checker::Flow &whenT
   };
   auto variable = [&](int i) -> const VarSymbol * {
     const Expr *arg = argument(i);
-    const VarSymbol *var = arg ? argumentVariable(arg) : nullptr;
+    const VarSymbol *var = arg ? PredicateChecker::argumentVariable(arg) : nullptr;
 
-    return var && !checker_.flowChecker().changedByCalls(var) ? var : nullptr;
+    return var && !this->checker.flowChecker().changedByCalls(var) ? var : nullptr;
   };
   auto narrowTo = [&](Checker::Flow &flow, const VarSymbol *var, const Type *type) {
-    const Type *now = checker_.literalTypes().typeIn(flow, var);
+    const Type *now = this->checker.literalTypes().typeIn(flow, var);
     if (TypeRelations::isImplicitlyConvertible(now, type)) {
       return;
     }
@@ -322,7 +318,7 @@ void PredicateChecker::applyPredicate(const CallExpr *call, Checker::Flow &whenT
     }
   };
 
-  const Checker::Predicate *summary = predicateOf(fn);
+  const Checker::Predicate *summary = this->predicateOf(fn);
   auto apply = [&](const Checker::PredicateSide &side, Checker::Flow &flow) {
     if (side.unreachable) {
       flow.unreachable = true;
@@ -374,15 +370,16 @@ void PredicateChecker::applyPredicate(const CallExpr *call, Checker::Flow &whenT
         }
         return Linear{Term::lengthOf(var), 0};
       }
-      std::optional<Linear> value = argumentTerm(arg);
-      if (value && value->term.var && checker_.flowChecker().changedByCalls(value->term.var)) {
+      std::optional<Linear> value = PredicateChecker::argumentTerm(arg);
+      if (value && value->term.var && this->checker.flowChecker().changedByCalls(value->term.var)) {
         return std::nullopt;
       }
 
       return value;
     };
     for (const Facts::Fact &fact : side.facts) {
-      std::optional<Linear> l = term(fact.lhs), r = term(fact.rhs);
+      std::optional<Linear> l = term(fact.lhs);
+      std::optional<Linear> r = term(fact.rhs);
       if (l && r) {
         flow.facts.add(l->term, r->term, fact.offset + r->offset - l->offset);
       }
@@ -415,7 +412,7 @@ const Type *PredicateChecker::filteredType(const Expr *callback, const Type *ele
   if (fn->predicate && fn->predicate->param == 0) {
     kept = fn->predicate->type;
   }
-  if (const Checker::Predicate *summary = predicateOf(fn); summary && !kept) {
+  if (const Checker::Predicate *summary = this->predicateOf(fn); summary && !kept) {
     const Checker::PredicateSide &side = summary->whenTrue;
     if (side.unreachable) {
       return nullptr;

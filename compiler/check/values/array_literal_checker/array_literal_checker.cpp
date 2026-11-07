@@ -16,20 +16,17 @@
 #include "llvm/ADT/STLExtras.h"
 #include <cstring>
 
-using llvm::cast;
-using llvm::dyn_cast;
-using llvm::dyn_cast_or_null;
-using llvm::isa;
 
 namespace tz {
 
-ArrayLiteralChecker::ArrayLiteralChecker(Checker &checker) : checker_(checker) {}
+ArrayLiteralChecker::ArrayLiteralChecker(Checker &owner)
+    : checker(owner) {}
 
 Expr *ArrayLiteralChecker::checkArrayLit(ArrayLitExpr *lit, const Type *expected) {
-  if (checker_.pairLiterals_.erase(lit) && !expected) {
+  if (this->checker.pairLiterals_.erase(lit) && !expected) {
     std::vector<const Type *> parts;
     for (ArrayLitExpr::Element &e : lit->elements) {
-      e.expr = checker_.exprChecker().checkExpr(e.expr);
+      e.expr = this->checker.exprChecker().checkExpr(e.expr);
       parts.push_back(e.expr->type);
     }
     bool bad = llvm::any_of(
@@ -38,7 +35,7 @@ Expr *ArrayLiteralChecker::checkArrayLit(ArrayLitExpr *lit, const Type *expected
     return lit;
   }
   if (expected && expected->nonOptional()->isJson()) {
-    return checker_.jsonChecker().checkJsonArrayLit(lit);
+    return this->checker.jsonChecker().checkJsonArrayLit(lit);
   }
   if (expected && expected->isUnknown()) {
     expected = Type::array(Type::unknown());
@@ -57,16 +54,16 @@ Expr *ArrayLiteralChecker::checkArrayLit(ArrayLitExpr *lit, const Type *expected
   if (auto hole =
           llvm::find_if(lit->elements, [](const ArrayLitExpr::Element &e) { return e.hole; });
       hole != lit->elements.end()) {
-    checker_.diags_.error(hole->expr->loc(),
-                          "arrays cannot have holes; write the element explicitly");
+    this->checker.diags_.error(hole->expr->loc(),
+                               "arrays cannot have holes; write the element explicitly");
     for (ArrayLitExpr::Element &e : lit->elements) {
-      e.expr = checker_.exprChecker().checkExpr(e.expr);
+      e.expr = this->checker.exprChecker().checkExpr(e.expr);
     }
     lit->type = Type::error();
     return lit;
   }
   if (expected && expected->nonOptional()->isTuple()) {
-    return checker_.tupleChecker().checkTupleLit(lit, expected->nonOptional());
+    return this->checker.tupleChecker().checkTupleLit(lit, expected->nonOptional());
   }
 
   std::vector<const Type *> types(lit->elements.size());
@@ -82,7 +79,7 @@ Expr *ArrayLiteralChecker::checkArrayLit(ArrayLitExpr *lit, const Type *expected
       if (!hint && seen && Checker::holdsObjects(seen) && Destination::literalShaped(e.expr)) {
         hint = seen;
       }
-      e.expr = checker_.exprChecker().checkExpr(e.expr, hint);
+      e.expr = this->checker.exprChecker().checkExpr(e.expr, hint);
       types[i] = e.expr->type;
       someDecimal |= types[i]->nonOptional()->isDecimal();
       if (!e.expr->type->isError() && seen != Type::error()) {
@@ -93,11 +90,11 @@ Expr *ArrayLiteralChecker::checkArrayLit(ArrayLitExpr *lit, const Type *expected
       }
       continue;
     }
-    checker_.iteratorMethods().markFused(e.expr);
-    e.expr = checker_.dictChecker().iterableOf(checker_.exprChecker().checkExpr(
+    this->checker.iteratorMethods().markFused(e.expr);
+    e.expr = this->checker.dictChecker().iterableOf(this->checker.exprChecker().checkExpr(
         e.expr, expectedElement ? Type::array(expectedElement) : nullptr));
     if (e.expr->type->isMatch()) {
-      e.expr = checker_.matchChecker().matchItems(e.expr);
+      e.expr = this->checker.matchChecker().matchItems(e.expr);
     }
     const Type *type = e.expr->type;
     if (type->isString()) {
@@ -105,8 +102,8 @@ Expr *ArrayLiteralChecker::checkArrayLit(ArrayLitExpr *lit, const Type *expected
       continue;
     }
     if (type->isIterator()) {
-      checker_.generatorChecker().checkSendsNothing(type, e.expr->loc(), "a spread");
-      checker_.flowChecker().calledFunction();
+      this->checker.generatorChecker().checkSendsNothing(type, e.expr->loc(), "a spread");
+      this->checker.flowChecker().calledFunction();
       types[i] = type->yielded();
       someDecimal |= types[i]->nonOptional()->isDecimal();
       continue;
@@ -114,7 +111,7 @@ Expr *ArrayLiteralChecker::checkArrayLit(ArrayLitExpr *lit, const Type *expected
     if (type->isTuple()) {
       const Type *element = TupleChecker::tupleElement(type);
       if (!element) {
-        checker_.diags_.error(
+        this->checker.diags_.error(
             e.expr->loc(), "the elements of '" + type->name() +
                                "' have different types, and an array holds elements of one type");
       }
@@ -126,13 +123,13 @@ Expr *ArrayLiteralChecker::checkArrayLit(ArrayLitExpr *lit, const Type *expected
       continue;
     }
     if (!type->isArray() && !type->isError()) {
-      checker_.diags_.error(e.expr->loc(),
-                            "only arrays, strings, iterators, Maps and Sets can be spread "
-                            "here, found '" +
-                                type->name() + "'" +
-                                (type->isRecord() ? "; for the entries of a Record, spread "
-                                                    "'Object.entries(r)'"
-                                                  : ""));
+      this->checker.diags_.error(e.expr->loc(),
+                                 "only arrays, strings, iterators, Maps and Sets can be spread "
+                                 "here, found '" +
+                                     type->name() + "'" +
+                                     (type->isRecord() ? "; for the entries of a Record, spread "
+                                                         "'Object.entries(r)'"
+                                                       : ""));
       type = Type::error();
     }
     types[i] = type->isError() ? type : type->inner();
@@ -159,7 +156,7 @@ Expr *ArrayLiteralChecker::checkArrayLit(ArrayLitExpr *lit, const Type *expected
     if (types[i]) {
       continue;
     }
-    e.expr = checker_.exprChecker().checkExpr(e.expr, literalHint);
+    e.expr = this->checker.exprChecker().checkExpr(e.expr, literalHint);
     types[i] = e.expr->type;
   }
 
@@ -167,9 +164,9 @@ Expr *ArrayLiteralChecker::checkArrayLit(ArrayLitExpr *lit, const Type *expected
   const Type *element = expectedElement;
   if (!element) {
     if (lit->elements.empty()) {
-      checker_.diags_.error(lit->loc(),
-                            "cannot infer the element type of an empty array; add a type, "
-                            "e.g. 'let a: int[] = []'");
+      this->checker.diags_.error(lit->loc(),
+                                 "cannot infer the element type of an empty array; add a type, "
+                                 "e.g. 'let a: int[] = []'");
       return lit;
     }
     for (size_t i = 0; i < types.size(); ++i) {
@@ -200,15 +197,15 @@ Expr *ArrayLiteralChecker::checkArrayLit(ArrayLitExpr *lit, const Type *expected
                      "'const t: [" +
                      tuple + "] = ...'";
         }
-        checker_.diags_.error(lit->elements[i].expr->loc(), message);
+        this->checker.diags_.error(lit->elements[i].expr->loc(), message);
         return lit;
       }
       element = next;
     }
     if (element->isUndefined() || element->isVoid()) {
-      checker_.diags_.error(lit->loc(),
-                            "cannot infer the element type from '" + element->name() +
-                                "' alone; add a type, e.g. 'let a: (int | undefined)[] = ...'");
+      this->checker.diags_.error(
+          lit->loc(), "cannot infer the element type from '" + element->name() +
+                          "' alone; add a type, e.g. 'let a: (int | undefined)[] = ...'");
       return lit;
     }
   }
@@ -219,7 +216,7 @@ Expr *ArrayLiteralChecker::checkArrayLit(ArrayLitExpr *lit, const Type *expected
   const Type *arrayType = Type::array(element);
   for (ArrayLitExpr::Element &e : lit->elements) {
     if (!e.spread) {
-      e.expr = checker_.typeRelations().coerce(e.expr, element);
+      e.expr = this->checker.typeRelations().coerce(e.expr, element);
     } else if (e.expr->type != arrayType && !e.expr->type->isError() &&
                !(e.expr->type->isString() && element->isString()) &&
                !(e.expr->type->isArray() &&
@@ -236,8 +233,8 @@ Expr *ArrayLiteralChecker::checkArrayLit(ArrayLitExpr *lit, const Type *expected
                  llvm::all_of(e.expr->type->fields(), [&](const Field &f) {
                    return TypeRelations::isImplicitlyConvertible(f.type, element);
                  }))) {
-      checker_.diags_.error(e.expr->loc(), "cannot spread '" + e.expr->type->name() + "' into '" +
-                                               arrayType->name() + "'");
+      this->checker.diags_.error(e.expr->loc(), "cannot spread '" + e.expr->type->name() +
+                                                    "' into '" + arrayType->name() + "'");
     }
   }
   lit->type = arrayType;

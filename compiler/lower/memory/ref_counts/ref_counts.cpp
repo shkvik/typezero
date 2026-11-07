@@ -16,19 +16,14 @@
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/IR/Intrinsics.h"
 #include "llvm/IR/MDBuilder.h"
-#include "llvm/Support/ConvertUTF.h"
-#include "llvm/Support/ErrorHandling.h"
-#include <array>
 
-using llvm::BasicBlock;
-using llvm::cast;
 using llvm::dyn_cast;
 using llvm::isa;
-using llvm::Value;
 
 namespace tz {
 
-RefCounts::RefCounts(Lowering &lowering) : lowering_(lowering) {}
+RefCounts::RefCounts(Lowering &owner)
+    : lowering(owner) {}
 
 void RefCounts::retainValue(llvm::Value *value, const Type *type) {
   if (isa<llvm::Constant>(value)) {
@@ -36,18 +31,19 @@ void RefCounts::retainValue(llvm::Value *value, const Type *type) {
   }
   switch (type->kind()) {
   case Type::Kind::String:
-    lowering_.builder_.CreateCall(lowering_.retainFn_, {value});
+    this->lowering.builder_.CreateCall(this->lowering.retainFn_, {value});
     break;
   case Type::Kind::Array:
-    lowering_.builder_.CreateCall(lowering_.memory().refMayCarryMember(type) ? lowering_.refRetainFn_
-                                                                          : lowering_.arrRetainFn_,
-                                  {value});
+    this->lowering.builder_.CreateCall(this->lowering.memory().refMayCarryMember(type)
+                                           ? this->lowering.refRetainFn_
+                                           : this->lowering.arrRetainFn_,
+                                       {value});
     break;
   case Type::Kind::Function:
-    lowering_.builder_.CreateCall(lowering_.memory().refMayCarryMember(type)
-                                      ? lowering_.refRetainFn_
-                                      : lowering_.plainObjRetainFn_,
-                                  {lowering_.builder_.CreateExtractValue(value, 1)});
+    this->lowering.builder_.CreateCall(this->lowering.memory().refMayCarryMember(type)
+                                           ? this->lowering.refRetainFn_
+                                           : this->lowering.plainObjRetainFn_,
+                                       {this->lowering.builder_.CreateExtractValue(value, 1)});
     break;
   case Type::Kind::Object:
   case Type::Kind::Iterator:
@@ -55,33 +51,38 @@ void RefCounts::retainValue(llvm::Value *value, const Type *type) {
   case Type::Kind::Dict:
   case Type::Kind::Promise:
   case Type::Kind::Unknown:
-    lowering_.builder_.CreateCall(lowering_.memory().refMayCarryMember(type) ? lowering_.refRetainFn_
-                                                                          : lowering_.arrRetainFn_,
-                                  {value});
+    this->lowering.builder_.CreateCall(this->lowering.memory().refMayCarryMember(type)
+                                           ? this->lowering.refRetainFn_
+                                           : this->lowering.arrRetainFn_,
+                                       {value});
     break;
   case Type::Kind::Decimal:
-    lowering_.builder_.CreateCall(lowering_.decimalLowerer().decimalRefCount(true), {value});
+    this->lowering.builder_.CreateCall(this->lowering.decimalLowerer().decimalRefCount(true),
+                                       {value});
     break;
   case Type::Kind::Union:
     if (UnionLayout::isObjectUnion(type)) {
-      lowering_.builder_.CreateCall(
-          lowering_.memory().refMayCarryMember(type) ? lowering_.refRetainFn_ : lowering_.arrRetainFn_,
-          {value});
+      this->lowering.builder_.CreateCall(this->lowering.memory().refMayCarryMember(type)
+                                             ? this->lowering.refRetainFn_
+                                             : this->lowering.arrRetainFn_,
+                                         {value});
     } else if (type->isTagged()) {
-      lowering_.unionLayout().countTagged(value, type, true);
+      this->lowering.unionLayout().countTagged(value, type, true);
     }
     break;
   case Type::Kind::Optional:
     if (type->inner()->isManaged()) {
-      retainValue(lowering_.optionalLowerer().optionalValue(value, type), type->inner());
+      this->retainValue(this->lowering.optionalLowerer().optionalValue(value, type), type->inner());
     }
     break;
   case Type::Kind::Result:
     if (!type->isManaged()) {
       break;
     }
-    retainValue(lowering_.resultLowerer().resultHalf(value, type, false), type->okType());
-    retainValue(lowering_.resultLowerer().resultHalf(value, type, true), type->errType());
+    this->retainValue(this->lowering.resultLowerer().resultHalf(value, type, false),
+                      type->okType());
+    this->retainValue(this->lowering.resultLowerer().resultHalf(value, type, true),
+                      type->errType());
     break;
   default:
     break;
@@ -94,161 +95,175 @@ void RefCounts::releaseValue(llvm::Value *value, const Type *type) {
   }
   switch (type->kind()) {
   case Type::Kind::String:
-    lowering_.builder_.CreateCall(lowering_.releaseFn_, {value});
+    this->lowering.builder_.CreateCall(this->lowering.releaseFn_, {value});
     break;
   case Type::Kind::Array:
-    lowering_.builder_.CreateCall(
-        lowering_.memory().refMayCarryMember(type)
-            ? lowering_.groupLowerer().groupAwareRelease(lowering_.arrReleaseFn_)
-            : lowering_.arrReleaseFn_,
+    this->lowering.builder_.CreateCall(
+        this->lowering.memory().refMayCarryMember(type)
+            ? this->lowering.groupLowerer().groupAwareRelease(this->lowering.arrReleaseFn_)
+            : this->lowering.arrReleaseFn_,
         {value});
     break;
   case Type::Kind::Function:
-    lowering_.builder_.CreateCall(
-        lowering_.memory().refMayCarryMember(type)
-            ? lowering_.groupLowerer().groupAwareRelease(lowering_.plainObjReleaseFn_)
-            : lowering_.plainObjReleaseFn_,
-        {lowering_.builder_.CreateExtractValue(value, 1)});
+    this->lowering.builder_.CreateCall(
+        this->lowering.memory().refMayCarryMember(type)
+            ? this->lowering.groupLowerer().groupAwareRelease(this->lowering.plainObjReleaseFn_)
+            : this->lowering.plainObjReleaseFn_,
+        {this->lowering.builder_.CreateExtractValue(value, 1)});
     break;
   case Type::Kind::Object: {
-    llvm::Function *release = type->isAnyObject() || lowering_.hasSubtypes(type) ||
+    llvm::Function *release = type->isAnyObject() || this->lowering.hasSubtypes(type) ||
                                       type->isTimer() || type->isRuntimeObject() ||
                                       type->isCrypto() ||
                                       (type->classDecl() && type->classDecl()->builtin())
-                                  ? lowering_.plainInstanceReleaseFn_
-                                  : lowering_.objectLayouts().objectLayout(type).release;
-    lowering_.builder_.CreateCall(lowering_.memory().refMayCarryMember(type)
-                                      ? lowering_.groupLowerer().groupAwareRelease(release)
-                                      : release,
-                                  {value});
+                                  ? this->lowering.plainInstanceReleaseFn_
+                                  : this->lowering.objectLayouts().objectLayout(type).release;
+    this->lowering.builder_.CreateCall(
+        this->lowering.memory().refMayCarryMember(type)
+            ? this->lowering.groupLowerer().groupAwareRelease(release)
+            : release,
+        {value});
     break;
   }
   case Type::Kind::Decimal:
-    lowering_.builder_.CreateCall(lowering_.decimalLowerer().decimalRefCount(false), {value});
+    this->lowering.builder_.CreateCall(this->lowering.decimalLowerer().decimalRefCount(false),
+                                       {value});
     break;
   case Type::Kind::Iterator:
   case Type::Kind::Dict:
   case Type::Kind::Promise:
   case Type::Kind::Unknown:
-    lowering_.builder_.CreateCall(
-        lowering_.memory().refMayCarryMember(type)
-            ? lowering_.groupLowerer().groupAwareRelease(lowering_.plainInstanceReleaseFn_)
-            : lowering_.plainInstanceReleaseFn_,
-        {value});
+    this->lowering.builder_.CreateCall(this->lowering.memory().refMayCarryMember(type)
+                                           ? this->lowering.groupLowerer().groupAwareRelease(
+                                                 this->lowering.plainInstanceReleaseFn_)
+                                           : this->lowering.plainInstanceReleaseFn_,
+                                       {value});
     break;
   case Type::Kind::Union:
     if (UnionLayout::isObjectUnion(type)) {
-      lowering_.builder_.CreateCall(
-          lowering_.memory().refMayCarryMember(type)
-              ? lowering_.groupLowerer().groupAwareRelease(lowering_.plainInstanceReleaseFn_)
-              : lowering_.plainInstanceReleaseFn_,
-          {value});
+      this->lowering.builder_.CreateCall(this->lowering.memory().refMayCarryMember(type)
+                                             ? this->lowering.groupLowerer().groupAwareRelease(
+                                                   this->lowering.plainInstanceReleaseFn_)
+                                             : this->lowering.plainInstanceReleaseFn_,
+                                         {value});
     } else if (type->isTagged()) {
-      lowering_.unionLayout().countTagged(value, type, false);
+      this->lowering.unionLayout().countTagged(value, type, false);
     }
     break;
   case Type::Kind::Json:
-    lowering_.builder_.CreateCall(lowering_.jsonLowerer().jsonFunction(
-                                      "tz_json_release_value", lowering_.builder_.getVoidTy(),
-                                      {lowering_.builder_.getPtrTy()}),
-                                  {value});
+    this->lowering.builder_.CreateCall(
+        this->lowering.jsonLowerer().jsonFunction("tz_json_release_value",
+                                                  this->lowering.builder_.getVoidTy(),
+                                                  {this->lowering.builder_.getPtrTy()}),
+        {value});
     break;
   case Type::Kind::Optional:
     if (type->inner()->isManaged()) {
-      releaseValue(lowering_.optionalLowerer().optionalValue(value, type), type->inner());
+      this->releaseValue(this->lowering.optionalLowerer().optionalValue(value, type),
+                         type->inner());
     }
     break;
   case Type::Kind::Result:
     if (!type->isManaged()) {
       break;
     }
-    releaseValue(lowering_.resultLowerer().resultHalf(value, type, false), type->okType());
-    releaseValue(lowering_.resultLowerer().resultHalf(value, type, true), type->errType());
+    this->releaseValue(this->lowering.resultLowerer().resultHalf(value, type, false),
+                       type->okType());
+    this->releaseValue(this->lowering.resultLowerer().resultHalf(value, type, true),
+                       type->errType());
     break;
   default:
     break;
   }
 }
 
-void RefCounts::retainString(llvm::Value *str) { retainValue(str, Type::string()); }
+void RefCounts::retainString(llvm::Value *str) {
+  this->retainValue(str, Type::string());
+}
 
-void RefCounts::releaseString(llvm::Value *str) { releaseValue(str, Type::string()); }
+void RefCounts::releaseString(llvm::Value *str) {
+  this->releaseValue(str, Type::string());
+}
 
 Lowering::Operand RefCounts::emitOperand(Expr *expr, bool canBorrow) {
   if (canBorrow) {
-    if (llvm::Value *value = emitBorrowed(expr)) {
+    llvm::Value *value = this->emitBorrowed(expr);
+    if (value) {
       return {value, false, expr->type};
     }
   }
 
-  return {lowering_.exprLowerer().emitExpr(expr), true, expr->type};
+  return {this->lowering.exprLowerer().emitExpr(expr), true, expr->type};
 }
 
 llvm::Value *RefCounts::emitBorrowed(Expr *expr) {
-  if (auto *name = dyn_cast<NameExpr>(expr); name && name->var()) {
-    return lowering_.envLowerer().emitVarValue(name->var(), true);
+  auto *name = dyn_cast<NameExpr>(expr);
+  if (name && name->var()) {
+    return this->lowering.envLowerer().emitVarValue(name->var(), true);
   }
   if (auto *conv = dyn_cast<CastExpr>(expr); conv && conv->isImplicit() && !conv->shortCircuit &&
                                              conv->operand->type->isOptional() &&
                                              conv->type == conv->operand->type->inner()) {
-    llvm::Value *value = emitBorrowed(conv->operand);
+    llvm::Value *value = this->emitBorrowed(conv->operand);
     if (!value) {
       return nullptr;
     }
     if (conv->type->isString()) {
-      return lowering_.builder_.CreateSelect(
-          lowering_.optionalLowerer().optionalHas(value, conv->operand->type),
-          lowering_.optionalLowerer().optionalValue(value, conv->operand->type),
-          lowering_.stringLowerer().stringLiteral(u"undefined"));
+      return this->lowering.builder_.CreateSelect(
+          this->lowering.optionalLowerer().optionalHas(value, conv->operand->type),
+          this->lowering.optionalLowerer().optionalValue(value, conv->operand->type),
+          this->lowering.stringLowerer().stringLiteral(u"undefined"));
     }
-    return lowering_.optionalLowerer().optionalValue(value, conv->operand->type);
+    return this->lowering.optionalLowerer().optionalValue(value, conv->operand->type);
   }
   if (auto *conv = dyn_cast<CastExpr>(expr); conv && conv->isImplicit() && !conv->shortCircuit &&
                                              conv->type->isObject() &&
                                              conv->operand->type->nonOptional()->isObject()) {
-    llvm::Value *value = emitBorrowed(conv->operand);
+    llvm::Value *value = this->emitBorrowed(conv->operand);
     if (value && conv->operand->type->isOptional()) {
-      value = lowering_.optionalLowerer().optionalValue(value, conv->operand->type);
+      value = this->lowering.optionalLowerer().optionalValue(value, conv->operand->type);
     }
     return value;
   }
   if (auto *conv = dyn_cast<CastExpr>(expr);
       conv && conv->isImplicit() && !conv->shortCircuit &&
       UnionLowerer::narrowsUnion(conv->operand->type, conv->type)) {
-    llvm::Value *value = emitBorrowed(conv->operand);
-    return value ? lowering_.exprLowerer().emitConversion(value, conv->operand->type, conv->type)
-                 : nullptr;
+    llvm::Value *value = this->emitBorrowed(conv->operand);
+    return value
+               ? this->lowering.exprLowerer().emitConversion(value, conv->operand->type, conv->type)
+               : nullptr;
   }
   if (auto *conv = dyn_cast<CastExpr>(expr);
       conv && conv->isImplicit() && conv->type->isResult() && conv->operand->type->isResult()) {
-    llvm::Value *value = emitBorrowed(conv->operand);
-    return value ? lowering_.exprLowerer().emitConversion(value, conv->operand->type, conv->type)
-                 : nullptr;
+    llvm::Value *value = this->emitBorrowed(conv->operand);
+    return value
+               ? this->lowering.exprLowerer().emitConversion(value, conv->operand->type, conv->type)
+               : nullptr;
   }
   auto *member = dyn_cast<MemberExpr>(expr);
   if (!member || !member->object->type->isObject() || member->object->type->isBytes() ||
       member->method()) {
     return nullptr;
   }
-  if (const Lowering::InterfaceMember *method = lowering_.inheritLowerer().dispatchedMember(
+  if (const Lowering::InterfaceMember *method = this->lowering.inheritLowerer().dispatchedMember(
           member->object->type, member->name, member->signature());
       method && method->callable) {
     return nullptr;
   }
-  llvm::Value *object = emitBorrowed(member->object);
+  llvm::Value *object = this->emitBorrowed(member->object);
   if (!object) {
     return nullptr;
   }
 
-  return lowering_.builder_.CreateLoad(
-      lowering_.moduleBuilder().lower(member->type),
-      lowering_.objectLayouts().fieldAddress(object, member->object->type, member->name),
+  return this->lowering.builder_.CreateLoad(
+      this->lowering.moduleBuilder().lower(member->type),
+      this->lowering.objectLayouts().fieldAddress(object, member->object->type, member->name),
       member->name);
 }
 
 void RefCounts::dropOperand(const Lowering::Operand &operand) {
   if (operand.owned) {
-    releaseValue(operand.value, operand.type);
+    this->releaseValue(operand.value, operand.type);
   }
 }
 

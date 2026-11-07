@@ -6,7 +6,7 @@ namespace tz {
 
 class PromiseChecker {
 public:
-  explicit PromiseChecker(Checker &checker);
+  explicit PromiseChecker(Checker &owner);
 
   static const Type *resolverType(const Type *value);
   const Type *executorValueType(const Expr *executor);
@@ -14,7 +14,9 @@ public:
   Expr *checkPromiseMethod(CallExpr *call, MemberExpr *member, const Type *expected);
 
 private:
-  Checker &checker_;
+  static const Type *awaited(const Type *type);
+
+  Checker &checker;
 };
 
 }

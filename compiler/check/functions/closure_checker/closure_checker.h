@@ -6,7 +6,7 @@ namespace tz {
 
 class ClosureChecker {
 public:
-  explicit ClosureChecker(Checker &checker);
+  explicit ClosureChecker(Checker &owner);
 
   static Checker::Signature signatureOf(const Type *fnType);
   Expr *checkFunctionExpr(FunctionExpr *fe, const Checker::Signature *expected);
@@ -15,7 +15,7 @@ public:
   void checkStatements(BlockStmt *block);
 
 private:
-  Checker &checker_;
+  Checker &checker;
 };
 
 }

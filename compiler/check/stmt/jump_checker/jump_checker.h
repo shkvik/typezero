@@ -6,14 +6,14 @@ namespace tz {
 
 class JumpChecker {
 public:
-  explicit JumpChecker(Checker &checker);
+  explicit JumpChecker(Checker &owner);
 
   void checkLabeled(LabeledStmt *stmt);
   void checkJump(Stmt *stmt);
   void pushTarget(Checker::JumpTarget::Kind kind);
 
 private:
-  Checker &checker_;
+  Checker &checker;
 };
 
 }

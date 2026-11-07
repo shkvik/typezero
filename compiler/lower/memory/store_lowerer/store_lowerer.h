@@ -6,7 +6,7 @@ namespace tz {
 
 class StoreLowerer {
 public:
-  explicit StoreLowerer(Lowering &lowering);
+  explicit StoreLowerer(Lowering &owner);
 
   void groupStore(llvm::Value *owner, llvm::Value *value, const Type *type);
   void storeBarrier(llvm::Value *owner, llvm::Value *value, const Type *type);
@@ -21,7 +21,10 @@ public:
   void releaseObjectIn(llvm::Value *owner, llvm::Value *object);
 
 private:
-  Lowering &lowering_;
+  static llvm::BasicBlock *blockHere(llvm::IRBuilder<> &b, const char *name);
+  static llvm::Value *spillHere(llvm::IRBuilder<> &b, llvm::Value *value, const char *name);
+
+  Lowering &lowering;
 };
 
 }

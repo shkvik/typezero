@@ -6,7 +6,7 @@ namespace tz {
 
 class GeneratorChecker {
 public:
-  explicit GeneratorChecker(Checker &checker);
+  explicit GeneratorChecker(Checker &owner);
 
   const Type *resolveIteratorType(const TypeRef &ref);
   const Type *generatorReturnType(const FunctionDecl *fn, const Type *declared);
@@ -19,7 +19,7 @@ public:
   const Type *asyncIteratedType(const Type *type);
 
 private:
-  Checker &checker_;
+  Checker &checker;
 };
 
 }

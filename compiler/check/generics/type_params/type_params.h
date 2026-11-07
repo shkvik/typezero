@@ -6,7 +6,7 @@ namespace tz {
 
 class TypeParams {
 public:
-  explicit TypeParams(Checker &checker);
+  explicit TypeParams(Checker &owner);
 
   std::vector<const Type *> declareTypeParams(llvm::ArrayRef<TypeParamDecl> decls,
                                               std::vector<const Type *> *defaults);
@@ -22,11 +22,14 @@ public:
   bool exactTypeParam(FuncSymbol *generic, size_t k);
 
 private:
+  static bool mentionsInObject(const Type *type, llvm::ArrayRef<const Type *> params,
+                               llvm::SmallPtrSetImpl<const Type *> &seen);
+
   const Type *substituteAt(const Type *type, llvm::ArrayRef<const Type *> params,
                            llvm::ArrayRef<const Type *> args, bool voidOk);
 
-  Checker &checker_;
-  llvm::SmallPtrSet<const Type *, 4> substituting_;
+  Checker &checker;
+  llvm::SmallPtrSet<const Type *, 4> substituting;
 };
 
 }

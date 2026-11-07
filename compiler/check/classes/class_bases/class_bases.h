@@ -6,7 +6,7 @@ namespace tz {
 
 class ClassBases {
 public:
-  explicit ClassBases(Checker &checker);
+  explicit ClassBases(Checker &owner);
 
   void resolveClassBases(ClassDecl *cls);
   std::vector<Field> interfaceFields(TypeAliasDecl *alias, std::vector<const Type *> &bases,
@@ -16,7 +16,10 @@ public:
                                      const ClassDecl **owner = nullptr);
 
 private:
-  Checker &checker_;
+  static bool isErrorClass(llvm::StringRef name);
+  static const char *accessName(Access access);
+
+  Checker &checker;
 };
 
 }

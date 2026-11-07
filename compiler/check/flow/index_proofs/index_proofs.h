@@ -6,7 +6,7 @@ namespace tz {
 
 class IndexProofs {
 public:
-  explicit IndexProofs(Checker &checker);
+  explicit IndexProofs(Checker &owner);
 
   std::optional<Linear> linear(const Expr *expr) const;
   std::optional<Linear> lengthOf(const Expr *object) const;
@@ -35,7 +35,9 @@ public:
   bool provesSumUpTo(std::optional<Linear> a, std::optional<Linear> b, const Expr *object) const;
 
 private:
-  Checker &checker_;
+  static const VarSymbol *variableOf(const Expr *expr);
+
+  Checker &checker;
 };
 
 }

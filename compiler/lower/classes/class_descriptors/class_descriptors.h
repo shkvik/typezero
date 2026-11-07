@@ -6,7 +6,7 @@ namespace tz {
 
 class ClassDescriptors {
 public:
-  explicit ClassDescriptors(Lowering &lowering);
+  explicit ClassDescriptors(Lowering &owner);
 
   void declareMethods(ClassDecl *cls);
   void emitMethods(ClassDecl *cls);
@@ -15,7 +15,9 @@ public:
   llvm::Constant *dropDescriptor(llvm::Function *drop);
 
 private:
-  Lowering &lowering_;
+  static std::vector<FunctionDecl *> instanceMethods(const ClassDecl *cls);
+
+  Lowering &lowering;
 };
 
 }

@@ -13,14 +13,10 @@
 #include "compiler/library/events/emitter_checker/emitter_checker.h"
 #include "compiler/library/result/result_checker/result_checker.h"
 #include "llvm/ADT/STLExtras.h"
-#include "llvm/ADT/StringSet.h"
-#include "llvm/Support/ErrorHandling.h"
 #include <cmath>
-#include <functional>
 
 using llvm::cast;
 using llvm::dyn_cast;
-using llvm::dyn_cast_or_null;
 using llvm::isa;
 
 namespace tz {
@@ -104,10 +100,13 @@ private:
   bool isLoop_;
   llvm::ArrayRef<llvm::StringRef> labels_;
   llvm::SmallVector<llvm::StringRef, 4> inner_;
-  unsigned loops_ = 0, breakables_ = 0;
+  unsigned loops_ = 0;
+  unsigned breakables_ = 0;
 };
 
-bool breaksTo(const Stmt *stmt, llvm::ArrayRef<llvm::StringRef> labels) {
+}
+
+bool ReturnChecker::breaksTo(const Stmt *stmt, llvm::ArrayRef<llvm::StringRef> labels) {
   if (labels.empty()) {
     return false;
   }
@@ -116,91 +115,93 @@ bool breaksTo(const Stmt *stmt, llvm::ArrayRef<llvm::StringRef> labels) {
     return llvm::is_contained(labels, cast<BreakStmt>(stmt)->label);
   case Stmt::Kind::Block:
     return llvm::any_of(cast<BlockStmt>(stmt)->body,
-                        [&](const Stmt *s) { return breaksTo(s, labels); });
+                        [&](const Stmt *s) { return ReturnChecker::breaksTo(s, labels); });
   case Stmt::Kind::If: {
     auto *s = cast<IfStmt>(stmt);
-    return breaksTo(s->thenStmt, labels) || (s->elseStmt && breaksTo(s->elseStmt, labels));
+    return ReturnChecker::breaksTo(s->thenStmt, labels) ||
+           (s->elseStmt && ReturnChecker::breaksTo(s->elseStmt, labels));
   }
   case Stmt::Kind::While:
-    return breaksTo(cast<WhileStmt>(stmt)->body, labels);
+    return ReturnChecker::breaksTo(cast<WhileStmt>(stmt)->body, labels);
   case Stmt::Kind::DoWhile:
-    return breaksTo(cast<DoWhileStmt>(stmt)->body, labels);
+    return ReturnChecker::breaksTo(cast<DoWhileStmt>(stmt)->body, labels);
   case Stmt::Kind::For:
-    return breaksTo(cast<ForStmt>(stmt)->body, labels);
+    return ReturnChecker::breaksTo(cast<ForStmt>(stmt)->body, labels);
   case Stmt::Kind::ForOf:
-    return breaksTo(cast<ForOfStmt>(stmt)->body, labels);
+    return ReturnChecker::breaksTo(cast<ForOfStmt>(stmt)->body, labels);
   case Stmt::Kind::Switch:
     return llvm::any_of(cast<SwitchStmt>(stmt)->cases, [&](const SwitchCase &c) {
-      return llvm::any_of(c.body, [&](const Stmt *s) { return breaksTo(s, labels); });
+      return llvm::any_of(c.body,
+                          [&](const Stmt *s) { return ReturnChecker::breaksTo(s, labels); });
     });
   case Stmt::Kind::Labeled:
-    return breaksTo(cast<LabeledStmt>(stmt)->body, labels);
+    return ReturnChecker::breaksTo(cast<LabeledStmt>(stmt)->body, labels);
   default:
     return false;
   }
 }
 
-}
-
-ReturnChecker::ReturnChecker(Checker &checker) : checker_(checker) {}
+ReturnChecker::ReturnChecker(Checker &owner)
+    : checker(owner) {}
 
 Expr *ReturnChecker::checkReturnValue(ReturnStmt *ret, const Type *hint, bool tested) {
-  if (checker_.predicateBuilds_.empty() || !checker_.predicateBuilds_.back().fn) {
-    return checker_.exprChecker().checkExpr(ret->value, hint);
+  if (this->checker.predicateBuilds_.empty() || !this->checker.predicateBuilds_.back().fn) {
+    return this->checker.exprChecker().checkExpr(ret->value, hint);
   }
   if (!tested) {
-    Expr *value = checker_.exprChecker().checkExpr(ret->value, hint);
+    Expr *value = this->checker.exprChecker().checkExpr(ret->value, hint);
     if (value->type->isBool()) {
-      Checker::Flow whenTrue = checker_.flow_, whenFalse = checker_.flow_;
-      checker_.conditionFacts().addConditionFacts(value, whenTrue, whenFalse);
-      checker_.predicateChecker().notePredicateExit(whenTrue, whenFalse, ret->value->loc());
+      Checker::Flow whenTrue = this->checker.flow_;
+      Checker::Flow whenFalse = this->checker.flow_;
+      this->checker.conditionFacts().addConditionFacts(value, whenTrue, whenFalse);
+      this->checker.predicateChecker().notePredicateExit(whenTrue, whenFalse, ret->value->loc());
     }
     return value;
   }
   Checker::Flow whenTrue, whenFalse;
-  Expr *value = checker_.truthChecker().checkBranching(ret->value, whenTrue, whenFalse);
-  checker_.flow_ = FlowChecker::join(whenTrue, whenFalse);
-  checker_.predicateChecker().notePredicateExit(whenTrue, whenFalse, ret->value->loc());
+  Expr *value = this->checker.truthChecker().checkBranching(ret->value, whenTrue, whenFalse);
+  this->checker.flow_ = FlowChecker::join(whenTrue, whenFalse);
+  this->checker.predicateChecker().notePredicateExit(whenTrue, whenFalse, ret->value->loc());
 
   return value;
 }
 
 void ReturnChecker::checkReturn(ReturnStmt *ret) {
-  if (!checker_.currentFunction_) {
-    checker_.diags_.error(ret->loc(), "'return' can only be used inside a function");
+  if (!this->checker.currentFunction_) {
+    this->checker.diags_.error(ret->loc(), "'return' can only be used inside a function");
     if (ret->value) {
-      ret->value = checker_.exprChecker().checkExpr(ret->value);
+      ret->value = this->checker.exprChecker().checkExpr(ret->value);
     }
     return;
   }
 
-  checker_.emitterChecker().reportUnlistenedErrors();
-  const FuncSymbol *fn = checker_.currentFunction_;
+  this->checker.emitterChecker().reportUnlistenedErrors();
+  const FuncSymbol *fn = this->checker.currentFunction_;
   if (fn->decl && fn->decl->isConstructor()) {
     if (ret->value) {
-      ret->value = checker_.exprChecker().checkExpr(ret->value);
-      checker_.diags_.error(ret->value->loc(),
-                            "a constructor cannot return a value: 'new' gives the object");
-    } else if (checker_.initFn_ == fn->decl && checker_.flow_.beforeSuper) {
-      checker_.diags_.error(ret->loc(),
-                            "the constructor returns before 'super(...)', which makes the "
-                            "object (JavaScript throws a ReferenceError there)");
-    } else if (checker_.initFn_ == fn->decl) {
-      ClassChecker::ResultEveryFieldSet fieldsSet = checker_.classChecker().checkFieldsSet();
+      ret->value = this->checker.exprChecker().checkExpr(ret->value);
+      this->checker.diags_.error(ret->value->loc(),
+                                 "a constructor cannot return a value: 'new' gives the object");
+    } else if (this->checker.initFn_ == fn->decl && this->checker.flow_.beforeSuper) {
+      this->checker.diags_.error(ret->loc(),
+                                 "the constructor returns before 'super(...)', which makes the "
+                                 "object (JavaScript throws a ReferenceError there)");
+    } else if (this->checker.initFn_ == fn->decl) {
+      ClassChecker::ResultEveryFieldSet fieldsSet = this->checker.classChecker().checkFieldsSet();
       if (fieldsSet.isErr()) {
-        checker_.diags_.error(ret->loc(), fieldsSet.error().message);
+        this->checker.diags_.error(ret->loc(), fieldsSet.error().message);
       }
     }
     return;
   }
   if (fn->decl && fn->decl->isAsync && !fn->decl->isGenerator && ret->value &&
       isa<AwaitExpr>(ret->value)) {
-    checker_.diags_.error(ret->value->loc(),
-                          fn->decl->concise()
-                              ? "'await' here changes nothing: an async function waits for the "
-                                "Promise it returns; leave out 'await'"
-                              : "'return await' changes nothing: an async function waits for the "
-                                "Promise it returns; write 'return' without 'await'");
+    this->checker.diags_.error(
+        ret->value->loc(), fn->decl->concise()
+                               ? "'await' here changes nothing: an async function waits for the "
+                                 "Promise it returns; leave out 'await'"
+                               : "'return await' changes nothing: an async function waits for the "
+                                 "Promise it returns; write 'return' without 'await'");
   }
   const Type *returned = fn->ret && fn->decl && fn->decl->isGenerator &&
                                  (fn->ret->isIterator() || fn->ret->isAsyncIterator())
@@ -211,7 +212,7 @@ void ReturnChecker::checkReturn(ReturnStmt *ret) {
   if (!fn->ret) {
     const Type *hint = nullptr;
     if (ret->value && Destination::literalShaped(ret->value)) {
-      for (const ReturnStmt *earlier : *checker_.returns_) {
+      for (const ReturnStmt *earlier : *this->checker.returns_) {
         if (earlier->value && !earlier->value->type->isError() &&
             (Checker::holdsObjects(earlier->value->type) || earlier->value->type->isResult())) {
           hint = earlier->value->type;
@@ -220,62 +221,64 @@ void ReturnChecker::checkReturn(ReturnStmt *ret) {
       }
     }
     if (ret->value) {
-      ret->value = checkReturnValue(ret, hint, PredicateChecker::looksBoolean(ret->value));
+      ret->value = this->checkReturnValue(ret, hint, PredicateChecker::looksBoolean(ret->value));
     }
-    checker_.returns_->push_back(ret);
+    this->checker.returns_->push_back(ret);
     return;
   }
   if (!ret->value) {
     if (!returned->isVoid() && !returned->isError() && !returned->isOptional()) {
-      checker_.diags_.error(ret->loc(), functionLabel(fn->name) + " must return a value of type '" +
-                                            returned->name() + "'");
+      this->checker.diags_.error(ret->loc(), functionLabel(fn->name) +
+                                                 " must return a value of type '" +
+                                                 returned->name() + "'");
     }
     return;
   }
 
   if (fn->decl && fn->decl->isAsync && fn->decl->isGenerator) {
     ret->value =
-        checker_.exprChecker().checkExpr(ret->value, returned->isVoid() ? nullptr : returned);
+        this->checker.exprChecker().checkExpr(ret->value, returned->isVoid() ? nullptr : returned);
     const Type *given =
         ret->value->type->isError() ? nullptr : AsyncChecker::awaitedType(ret->value->type);
     if (given && !given->isUndefined() && !given->isVoid() &&
         (returned->isVoid() || !TypeRelations::isImplicitlyConvertible(given, returned))) {
-      checker_.diags_.error(ret->value->loc(), functionLabel(fn->name) + " returns '" +
-                                                   returned->name() + "', found '" + given->name() +
-                                                   "'");
+      this->checker.diags_.error(ret->value->loc(), functionLabel(fn->name) + " returns '" +
+                                                        returned->name() + "', found '" +
+                                                        given->name() + "'");
     }
     return;
   }
-  ret->value = checkReturnValue(ret, returned->isVoid() ? nullptr : returned, returned->isBool());
+  ret->value =
+      this->checkReturnValue(ret, returned->isVoid() ? nullptr : returned, returned->isBool());
   if (fn->decl && fn->decl->isAsync && fn->ret->isPromise() && ret->value->type->isPromise()) {
     const Type *given = ret->value->type->promised();
     if (given != returned && !given->isNever()) {
-      checker_.diags_.error(ret->value->loc(), "this Promise gives '" + given->name() + "', but " +
-                                                   functionLabel(fn->name) + " gives '" +
-                                                   returned->name() +
-                                                   "'; await it and convert the value");
+      this->checker.diags_.error(ret->value->loc(), "this Promise gives '" + given->name() +
+                                                        "', but " + functionLabel(fn->name) +
+                                                        " gives '" + returned->name() +
+                                                        "'; await it and convert the value");
     }
     return;
   }
   if (returned->isVoid()) {
     const Type *type = ret->value->type;
     if (!type->isVoid() && !type->isError() && !type->isUndefined() && !fn->discardsResult) {
-      checker_.diags_.error(ret->value->loc(), functionLabel(fn->name) +
-                                                   " is declared to return 'void', "
-                                                   "but returns '" +
-                                                   type->name() + "'");
-      checker_.classLinks().noteInheritedReturn(fn->decl);
+      this->checker.diags_.error(ret->value->loc(), functionLabel(fn->name) +
+                                                        " is declared to return 'void', "
+                                                        "but returns '" +
+                                                        type->name() + "'");
+      this->checker.classLinks().noteInheritedReturn(fn->decl);
     } else if (fn->discardsResult) {
-      checker_.resultChecker().checkDiscarded(ret->value, true);
+      this->checker.resultChecker().checkDiscarded(ret->value, true);
     }
     return;
   }
-  unsigned errors = checker_.diags_.errorCount();
-  ret->value = checker_.typeRelations().coerce(ret->value, returned);
-  if (checker_.diags_.errorCount() > errors) {
-    checker_.classLinks().noteInheritedReturn(fn->decl);
+  unsigned errors = this->checker.diags_.errorCount();
+  ret->value = this->checker.typeRelations().coerce(ret->value, returned);
+  if (this->checker.diags_.errorCount() > errors) {
+    this->checker.classLinks().noteInheritedReturn(fn->decl);
   } else if (fn->decl) {
-    checker_.byteProofs().checkByteCallbackResult(fn->decl, ret->value);
+    this->checker.byteProofs().checkByteCallbackResult(fn->decl, ret->value);
   }
 }
 
@@ -287,26 +290,28 @@ bool ReturnChecker::isExit(const Stmt *stmt) {
 }
 
 bool ReturnChecker::alwaysReturns(const Stmt *stmt, llvm::ArrayRef<llvm::StringRef> labels) {
-  auto returns = [](const Stmt *s) { return alwaysReturns(s); };
+  auto returns = [](const Stmt *s) { return ReturnChecker::alwaysReturns(s); };
   switch (stmt->kind()) {
   case Stmt::Kind::Return:
     return true;
   case Stmt::Kind::Expr:
-    return isExit(stmt);
+    return ReturnChecker::isExit(stmt);
   case Stmt::Kind::Block:
-    return llvm::any_of(cast<BlockStmt>(stmt)->body, returns) && !breaksTo(stmt, labels);
+    return llvm::any_of(cast<BlockStmt>(stmt)->body, returns) &&
+           !ReturnChecker::breaksTo(stmt, labels);
   case Stmt::Kind::If: {
     auto *s = cast<IfStmt>(stmt);
     if (auto *lit = dyn_cast<BoolLitExpr>(s->cond)) {
       if (lit->value && !s->elseStmt) {
-        return alwaysReturns(s->thenStmt) && !breaksTo(stmt, labels);
+        return ReturnChecker::alwaysReturns(s->thenStmt) && !ReturnChecker::breaksTo(stmt, labels);
       }
       if (!lit->value && isa<EmptyStmt>(s->thenStmt)) {
-        return s->elseStmt && alwaysReturns(s->elseStmt) && !breaksTo(stmt, labels);
+        return s->elseStmt && ReturnChecker::alwaysReturns(s->elseStmt) &&
+               !ReturnChecker::breaksTo(stmt, labels);
       }
     }
-    return s->elseStmt && alwaysReturns(s->thenStmt) && alwaysReturns(s->elseStmt) &&
-           !breaksTo(stmt, labels);
+    return s->elseStmt && ReturnChecker::alwaysReturns(s->thenStmt) &&
+           ReturnChecker::alwaysReturns(s->elseStmt) && !ReturnChecker::breaksTo(stmt, labels);
   }
   case Stmt::Kind::While: {
     auto *s = cast<WhileStmt>(stmt);
@@ -339,7 +344,7 @@ bool ReturnChecker::alwaysReturns(const Stmt *stmt, llvm::ArrayRef<llvm::StringR
       all.push_back(labeled->label);
       stmt = labeled->body;
     }
-    return alwaysReturns(stmt, all);
+    return ReturnChecker::alwaysReturns(stmt, all);
   }
   default:
     return false;

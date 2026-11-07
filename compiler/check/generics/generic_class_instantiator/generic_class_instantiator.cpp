@@ -11,9 +11,6 @@
 #include "llvm/ADT/STLExtras.h"
 
 using llvm::cast;
-using llvm::dyn_cast;
-using llvm::dyn_cast_or_null;
-using llvm::isa;
 
 namespace tz {
 
@@ -21,7 +18,9 @@ namespace {
 
 constexpr unsigned kMaxClassChain = 16;
 
-std::string typeNames(llvm::ArrayRef<const Type *> types) {
+}
+
+std::string GenericClassInstantiator::typeNames(llvm::ArrayRef<const Type *> types) {
   std::string text;
   for (const Type *t : types) {
     text += (text.empty() ? "" : ", ") + t->name().str();
@@ -30,31 +29,30 @@ std::string typeNames(llvm::ArrayRef<const Type *> types) {
   return text;
 }
 
-}
-
-GenericClassInstantiator::GenericClassInstantiator(Checker &checker) : checker_(checker) {}
+GenericClassInstantiator::GenericClassInstantiator(Checker &owner)
+    : checker(owner) {}
 
 ClassDecl *GenericClassInstantiator::instantiateClass(ClassDecl *generic,
                                                       std::vector<const Type *> args,
                                                       llvm::SMLoc use) {
-  checker_.genericClassChecker().declareClassTypeParams(generic);
+  this->checker.genericClassChecker().declareClassTypeParams(generic);
   llvm::SMLoc loc = use.isValid() ? use : generic->loc();
   std::vector<const Type *> params = generic->typeArgs;
-  std::vector<const Type *> defaults = checker_.classDefaults_.lookup(generic);
+  std::vector<const Type *> defaults = this->checker.classDefaults_.lookup(generic);
   std::string name = generic->name.str();
   if (args.size() > params.size()) {
-    checker_.diags_.error(loc, "'" + name + "' takes " + std::to_string(params.size()) +
-                                   " type argument" + (params.size() == 1 ? "" : "s") +
-                                   ", but got " + std::to_string(args.size()));
+    this->checker.diags_.error(loc, "'" + name + "' takes " + std::to_string(params.size()) +
+                                        " type argument" + (params.size() == 1 ? "" : "s") +
+                                        ", but got " + std::to_string(args.size()));
     return nullptr;
   }
   bool emitter = generic->library() && generic->name == "EventEmitter";
   for (size_t k = args.size(); k < params.size(); ++k) {
     if (emitter) {
-      checker_.diags_.error(loc,
-                            "'EventEmitter' needs its event map here, e.g. 'EventEmitter<{ data: "
-                            "[chunk: string]; end: [] }>', or the type of an emitter, e.g. 'typeof "
-                            "bus'");
+      this->checker.diags_.error(
+          loc, "'EventEmitter' needs its event map here, e.g. 'EventEmitter<{ data: "
+               "[chunk: string]; end: [] }>', or the type of an emitter, e.g. 'typeof "
+               "bus'");
       return nullptr;
     }
     if (k >= defaults.size() || !defaults[k]) {
@@ -62,26 +60,26 @@ ClassDecl *GenericClassInstantiator::instantiateClass(ClassDecl *generic,
       for (size_t i = 0; i < params.size(); ++i) {
         ints += i == 0 ? "int" : ", int";
       }
-      checker_.diags_.error(loc, "'" + name + "' needs " + std::to_string(params.size()) +
-                                     " type argument" + (params.size() == 1 ? "" : "s") +
-                                     ", e.g. '" + name + "<" + ints + ">'");
+      this->checker.diags_.error(loc, "'" + name + "' needs " + std::to_string(params.size()) +
+                                          " type argument" + (params.size() == 1 ? "" : "s") +
+                                          ", e.g. '" + name + "<" + ints + ">'");
       return nullptr;
     }
     std::vector<const Type *> known = args;
     known.resize(params.size(), nullptr);
-    args.push_back(checker_.typeParams().substitute(defaults[k], params, known));
+    args.push_back(this->checker.typeParams().substitute(defaults[k], params, known));
   }
   for (size_t k = 0; k < params.size(); ++k) {
     if (args[k]->isError()) {
       return nullptr;
     }
     if (args[k]->isUndefined()) {
-      checker_.diags_.error(loc, "'" + args[k]->name() + "' cannot be a type argument of '" + name +
-                                     "'");
+      this->checker.diags_.error(loc, "'" + args[k]->name() + "' cannot be a type argument of '" +
+                                          name + "'");
 
       return nullptr;
     }
-    if (!checker_.typeParams().satisfies(args[k], params[k], params, args)) {
+    if (!this->checker.typeParams().satisfies(args[k], params[k], params, args)) {
       const TypeParamDecl &decl = generic->typeParams[k];
       std::string constraint = params[k]->constraint() ? params[k]->constraint()->name().str() : "";
       for (const Type *t : params[k]->alternatives()) {
@@ -90,42 +88,43 @@ ClassDecl *GenericClassInstantiator::instantiateClass(ClassDecl *generic,
       if (decl.constraint && decl.constraint->kind() == TypeRefKind::NAME_REF) {
         constraint = decl.constraint->name.str();
       }
-      checker_.diags_.error(loc, "type '" + args[k]->name() +
-                                     "' does not satisfy the constraint '" + constraint + "' of '" +
-                                     params[k]->name() + "' in '" + name + "'");
+      this->checker.diags_.error(loc, "type '" + args[k]->name() +
+                                          "' does not satisfy the constraint '" + constraint +
+                                          "' of '" + params[k]->name() + "' in '" + name + "'");
       return nullptr;
     }
   }
-  if (emitter && !checker_.eventMaps().checkEventMap(args[0], loc)) {
+  if (emitter && !this->checker.eventMaps().checkEventMap(args[0], loc)) {
     return nullptr;
   }
   auto key = std::make_pair(static_cast<const ClassDecl *>(generic), args);
-  if (auto found = checker_.classInstances_.find(key); found != checker_.classInstances_.end()) {
-    if (Checker::Instance *check = classChecks_.lookup(found->second);
+  if (auto found = this->checker.classInstances_.find(key);
+      found != this->checker.classInstances_.end()) {
+    if (Checker::Instance *check = this->classChecks.lookup(found->second);
         check && !check->callLoc.isValid()) {
       check->callLoc = use;
     }
     return found->second;
   }
-  if (llvm::count_if(checker_.filling_, [&](const ClassDecl *c) {
+  if (llvm::count_if(this->checker.filling_, [&](const ClassDecl *c) {
         return c->generic() == generic;
       }) >= kMaxClassChain) {
-    if (endless_.insert(generic).second) {
-      checker_.diags_.error(generic->loc(),
-                            "generic class '" + name +
-                                "' uses itself with type arguments that keep "
-                                "growing, so each instance of it needs another, without end; a "
-                                "generic class can use itself only with its own type parameters");
+    if (this->endless.insert(generic).second) {
+      this->checker.diags_.error(
+          generic->loc(), "generic class '" + name +
+                              "' uses itself with type arguments that keep "
+                              "growing, so each instance of it needs another, without end; a "
+                              "generic class can use itself only with its own type parameters");
     }
 
     return nullptr;
   }
 
-  bool muted = checker_.diags_.setMuted(true);
-  Lexer lexer(generic->source, checker_.diags_);
-  Parser parser(lexer, checker_.ctx_, checker_.diags_, generic->library());
+  bool muted = this->checker.diags_.setMuted(true);
+  Lexer lexer(generic->source, this->checker.diags_);
+  Parser parser(lexer, this->checker.ctx_, this->checker.diags_, generic->library());
   ClassDecl *inst = parser.parseClassCopy();
-  checker_.diags_.setMuted(muted);
+  this->checker.diags_.setMuted(muted);
   inst->generics = GenericInstance{.generic = generic};
   inst->typeArgs = args;
   inst->isAbstract = generic->isAbstract;
@@ -133,7 +132,7 @@ ClassDecl *GenericClassInstantiator::instantiateClass(ClassDecl *generic,
   inst->checkOnly = llvm::any_of(args, [](const Type *t) { return mentionsParam(t); });
   inst->stage = ClassStage::RESOLVED;
   inst->declared = true;
-  inst->id = ++checker_.classCount_;
+  inst->id = ++this->checker.classCount_;
   size_t shown = args.size();
   while (shown > 0 && shown - 1 < defaults.size() && defaults[shown - 1] &&
          (defaults[shown - 1] == args[shown - 1] ||
@@ -141,43 +140,46 @@ ClassDecl *GenericClassInstantiator::instantiateClass(ClassDecl *generic,
     --shown;
   }
   std::string display =
-      shown == 0 ? name : name + "<" + typeNames(llvm::ArrayRef(args).take_front(shown)) + ">";
+      shown == 0
+          ? name
+          : name + "<" +
+                GenericClassInstantiator::typeNames(llvm::ArrayRef(args).take_front(shown)) + ">";
   Type *type = Type::classType(display, inst);
   type->setTypeArgs(args);
   inst->type = type;
-  checker_.classes_.push_back(inst);
+  this->checker.classes_.push_back(inst);
   generic->generics.as<GenericTemplate>()->instances.push_back(inst);
-  checker_.classInstances_[key] = inst;
-  if (Module *home = checker_.declModules_.lookup(generic)) {
-    checker_.declModules_[inst] = home;
+  this->checker.classInstances_[key] = inst;
+  if (Module *home = this->checker.declModules_.lookup(generic)) {
+    this->checker.declModules_[inst] = home;
   }
 
   Checker::Instance *check = nullptr;
   if (!inst->checkOnly) {
-    check = &checker_.instanceStore_.emplace_back();
+    check = &this->checker.instanceStore_.emplace_back();
     check->cls = inst;
     check->callLoc = use;
-    check->requester = checker_.checkingInstance_;
-    classChecks_[inst] = check;
+    check->requester = this->checker.checkingInstance_;
+    this->classChecks[inst] = check;
   }
-  if (!checker_.methodsDeclared_) {
-    checker_.unfilled_.push_back(inst);
+  if (!this->checker.methodsDeclared_) {
+    this->checker.unfilled_.push_back(inst);
   } else {
-    checker_.filling_.push_back(inst);
-    fillInstance(inst);
-    checker_.filling_.pop_back();
-    if (checker_.classesLinked_) {
-      linkInstance(inst);
+    this->checker.filling_.push_back(inst);
+    this->fillInstance(inst);
+    this->checker.filling_.pop_back();
+    if (this->checker.classesLinked_) {
+      this->linkInstance(inst);
     }
   }
   if (check) {
-    if (checker_.checkingInstance_) {
-      checker_.genericClassChecker().checkClassInstance(check);
+    if (this->checker.checkingInstance_) {
+      this->checker.genericClassChecker().checkClassInstance(check);
       if (check->failed) {
-        checker_.genericClassChecker().reportClassInstance(check, loc);
+        this->checker.genericClassChecker().reportClassInstance(check, loc);
       }
     } else {
-      checker_.pendingInstances_.push_back(check);
+      this->checker.pendingInstances_.push_back(check);
     }
   }
 
@@ -187,7 +189,7 @@ ClassDecl *GenericClassInstantiator::instantiateClass(ClassDecl *generic,
 void GenericClassInstantiator::declareInstanceMember(ClassDecl *inst, FunctionDecl *fn,
                                                      FunctionDecl *generic) {
   FuncSymbol *of = generic->sym;
-  FuncSymbol *sym = checker_.ctx_.newFunc();
+  FuncSymbol *sym = this->checker.ctx_.newFunc();
   sym->name = fn->name;
   sym->loc = fn->loc();
   sym->decl = fn;
@@ -203,8 +205,11 @@ void GenericClassInstantiator::declareInstanceMember(ClassDecl *inst, FunctionDe
   if (!of) {
     return;
   }
-  auto sub = [&](const Type *t) { return checker_.genericClassChecker().instanceType(inst, t); };
-  std::vector<const Type *> own = of->typeParams, mine = of->typeParams;
+  auto sub = [&](const Type *t) {
+    return this->checker.genericClassChecker().instanceType(inst, t);
+  };
+  std::vector<const Type *> own = of->typeParams;
+  std::vector<const Type *> mine = of->typeParams;
   for (const Type *&p : mine) {
     if (p->iterated() && typeMentions(p->iterated(), inst->generic()->typeArgs)) {
       Type *param = Type::param("Iterable<" + sub(p->iterated())->name().str() + ">");
@@ -213,11 +218,11 @@ void GenericClassInstantiator::declareInstanceMember(ClassDecl *inst, FunctionDe
     }
   }
   auto sub2 = [&](const Type *t) {
-    return t ? checker_.typeParams().substitute(sub(t), own, mine) : nullptr;
+    return t ? this->checker.typeParams().substitute(sub(t), own, mine) : nullptr;
   };
   auto value = [&](const Type *t) {
-    return t ? checker_.typeParams().substituteValue(
-                   checker_.genericClassChecker().instanceValueType(inst, t), own, mine)
+    return t ? this->checker.typeParams().substituteValue(
+                   this->checker.genericClassChecker().instanceValueType(inst, t), own, mine)
              : nullptr;
   };
   fn->typeArgs = mine;
@@ -247,18 +252,20 @@ void GenericClassInstantiator::declareInstanceMember(ClassDecl *inst, FunctionDe
     const Type *type = sub2(of->predicate->type);
     sym->predicate = TypePredicate{.param = of->predicate->param, .type = type};
   }
-  if (Module *home = checker_.declModules_.lookup(generic)) {
-    checker_.declModules_[fn] = home;
+  if (Module *home = this->checker.declModules_.lookup(generic)) {
+    this->checker.declModules_[fn] = home;
   }
 }
 
 void GenericClassInstantiator::fillInstance(ClassDecl *inst) {
   ClassDecl *generic = inst->generic();
-  auto sub = [&](const Type *t) { return checker_.genericClassChecker().instanceType(inst, t); };
+  auto sub = [&](const Type *t) {
+    return this->checker.genericClassChecker().instanceType(inst, t);
+  };
   auto addInstanceBase = [&](const Type *base) {
-    checker_.classBases().addBase(inst->type, base);
-    if (inst->isEmitted() && !llvm::is_contained(checker_.file_->subtypes, inst->type)) {
-      checker_.file_->subtypes.push_back(inst->type);
+    this->checker.classBases().addBase(inst->type, base);
+    if (inst->isEmitted() && !llvm::is_contained(this->checker.file_->subtypes, inst->type)) {
+      this->checker.file_->subtypes.push_back(inst->type);
     }
   };
   if (const ClassDecl *parent = generic->parent) {
@@ -275,7 +282,7 @@ void GenericClassInstantiator::fillInstance(ClassDecl *inst) {
       addInstanceBase(type);
     }
   }
-  checker_.chunkTypes().addStreamBases(inst, inst->loc());
+  this->checker.chunkTypes().addStreamBases(inst, inst->loc());
   for (size_t i = 0; i < inst->fields.size() && i < generic->fields.size(); ++i) {
     ClassField &f = inst->fields[i];
     const ClassField &g = generic->fields[i];
@@ -284,8 +291,9 @@ void GenericClassInstantiator::fillInstance(ClassDecl *inst) {
     if (f.isStatic()) {
       continue;
     }
-    f.resolved = g.method() ? sub(g.resolved)
-                            : checker_.genericClassChecker().instanceValueType(inst, g.resolved);
+    f.resolved = g.method()
+                     ? sub(g.resolved)
+                     : this->checker.genericClassChecker().instanceValueType(inst, g.resolved);
     if (g.method()) {
       FunctionDecl *fn = cast<FunctionExpr>(f.init)->fn;
       fn->name = g.method()->name;
@@ -297,15 +305,15 @@ void GenericClassInstantiator::fillInstance(ClassDecl *inst) {
   }
   for (size_t i = 0; i < inst->methods.size() && i < generic->methods.size(); ++i) {
     if (!generic->methods[i]->isStatic()) {
-      declareInstanceMember(inst, inst->methods[i], generic->methods[i]);
+      this->declareInstanceMember(inst, inst->methods[i], generic->methods[i]);
     }
   }
   for (size_t i = 0; i < inst->constructors.size() && i < generic->constructors.size(); ++i) {
-    declareInstanceMember(inst, inst->constructors[i], generic->constructors[i]);
+    this->declareInstanceMember(inst, inst->constructors[i], generic->constructors[i]);
   }
   for (size_t i = 0; i < inst->fields.size() && i < generic->fields.size(); ++i) {
     if (inst->fields[i].method() && generic->fields[i].method()) {
-      declareInstanceMember(inst, inst->fields[i].method(), generic->fields[i].method());
+      this->declareInstanceMember(inst, inst->fields[i].method(), generic->fields[i].method());
     }
   }
   if (generic->init) {
@@ -314,25 +322,25 @@ void GenericClassInstantiator::fillInstance(ClassDecl *inst) {
       if (f.isStatic() || !f.init || f.method()) {
         continue;
       }
-      auto *target = checker_.ctx_.make<MemberExpr>(
-          f.loc, checker_.ctx_.make<NameExpr>(f.loc, "this"), f.name);
-      auto *set = checker_.ctx_.make<AssignExpr>(f.loc, std::nullopt, target, f.init);
-      sets.push_back(checker_.ctx_.make<ExprStmt>(f.loc, set));
+      auto *target = this->checker.ctx_.make<MemberExpr>(
+          f.loc, this->checker.ctx_.make<NameExpr>(f.loc, "this"), f.name);
+      auto *set = this->checker.ctx_.make<AssignExpr>(f.loc, std::nullopt, target, f.init);
+      sets.push_back(this->checker.ctx_.make<ExprStmt>(f.loc, set));
     }
-    auto *init = checker_.ctx_.make<FunctionDecl>(inst->loc(), "init");
+    auto *init = this->checker.ctx_.make<FunctionDecl>(inst->loc(), "init");
     init->role = ClassMember{.cls = inst};
-    init->body = checker_.ctx_.make<BlockStmt>(inst->loc());
+    init->body = this->checker.ctx_.make<BlockStmt>(inst->loc());
     init->body->body = std::move(sets);
-    declareInstanceMember(inst, init, generic->init);
+    this->declareInstanceMember(inst, init, generic->init);
     init->sym->ret = Type::voidTy();
     inst->init = init;
   }
   std::vector<Diagnostics::Captured> errors;
-  std::vector<Diagnostics::Captured> *outer = checker_.diags_.setCapture(&errors);
-  checker_.classDeclarer().checkVariants(inst);
-  checker_.diags_.setCapture(outer);
+  std::vector<Diagnostics::Captured> *outer = this->checker.diags_.setCapture(&errors);
+  this->checker.classDeclarer().checkVariants(inst);
+  this->checker.diags_.setCapture(outer);
   if (!errors.empty()) {
-    if (Checker::Instance *check = classChecks_.lookup(inst); check && !check->failed) {
+    if (Checker::Instance *check = this->classChecks.lookup(inst); check && !check->failed) {
       check->failed = true;
       check->message = errors.front().message;
       check->errorLoc = errors.front().loc;
@@ -341,10 +349,10 @@ void GenericClassInstantiator::fillInstance(ClassDecl *inst) {
 }
 
 void GenericClassInstantiator::linkInstance(ClassDecl *inst) {
-  bool muted = checker_.diags_.setMuted(true);
-  checker_.classLinks().linkOverrides(inst);
-  checker_.diags_.setMuted(muted);
-  checker_.classLinks().buildVtable(inst);
+  bool muted = this->checker.diags_.setMuted(true);
+  this->checker.classLinks().linkOverrides(inst);
+  this->checker.diags_.setMuted(muted);
+  this->checker.classLinks().buildVtable(inst);
 }
 
 void GenericClassInstantiator::markOverridden(FunctionDecl *fn) {

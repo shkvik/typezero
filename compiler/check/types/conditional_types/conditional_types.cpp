@@ -11,13 +11,8 @@
 #include "compiler/infer/return_inferrer/return_inferrer.h"
 #include "compiler/whole_program/flows/flows.h"
 #include "llvm/ADT/STLExtras.h"
-#include "llvm/Support/ConvertUTF.h"
 #include <cmath>
 
-using llvm::cast;
-using llvm::dyn_cast;
-using llvm::dyn_cast_or_null;
-using llvm::isa;
 
 namespace tz {
 
@@ -178,24 +173,25 @@ bool mentionsParamBesides(const Type *type, llvm::ArrayRef<const Type *> allowed
   return mentionsOtherParams(type, allowed, seen);
 }
 
-ConditionalTypes::ConditionalTypes(Checker &checker) : checker_(checker) {}
+ConditionalTypes::ConditionalTypes(Checker &owner)
+    : checker(owner) {}
 
 void ConditionalTypes::bindType(llvm::StringRef name, const Type *type, llvm::SMLoc loc) {
-  auto *alias = checker_.ctx_.make<TypeAliasDecl>(loc, name, TypeRef());
+  auto *alias = this->checker.ctx_.make<TypeAliasDecl>(loc, name, TypeRef());
   alias->resolved = type;
-  checker_.typeScopes_.back()[name] = alias;
+  this->checker.typeScopes_.back()[name] = alias;
 }
 
 const Type *ConditionalTypes::resolveTypeArgument(const TypeRef &ref) {
-  return checker_.typeResolver().resolveTypeInner(ref);
+  return this->checker.typeResolver().resolveTypeInner(ref);
 }
 
 const Type *ConditionalTypes::resolveConditional(const TypeRef &ref) {
-  bool tail = std::exchange(checker_.tailAllowed_, false);
+  bool tail = std::exchange(this->checker.tailAllowed_, false);
   if (ref.args.size() != 4) {
     return Type::error();
   }
-  const Type *check = checker_.typeResolver().resolveTypeInner(ref.args[0]);
+  const Type *check = this->checker.typeResolver().resolveTypeInner(ref.args[0]);
   if (check->isError()) {
     return check;
   }
@@ -203,46 +199,46 @@ const Type *ConditionalTypes::resolveConditional(const TypeRef &ref) {
   std::vector<bool> lists;
   collectInfers(ref.args[1], inferRefs, lists);
   std::vector<const Type *> infers;
-  checker_.typeScopes_.emplace_back();
+  this->checker.typeScopes_.emplace_back();
   for (size_t i = 0; i < inferRefs.size(); ++i) {
     Type *param = Type::param(inferRefs[i]->name);
     if (lists[i]) {
       param->setList();
     }
     infers.push_back(param);
-    bindType(inferRefs[i]->name, param, inferRefs[i]->loc);
+    this->bindType(inferRefs[i]->name, param, inferRefs[i]->loc);
   }
   for (size_t i = 0; i < inferRefs.size(); ++i) {
     if (inferRefs[i]->args.empty()) {
       continue;
     }
-    const Type *constraint = checker_.typeResolver().resolveTypeInner(inferRefs[i]->args[0]);
+    const Type *constraint = this->checker.typeResolver().resolveTypeInner(inferRefs[i]->args[0]);
     if (constraint->isError()) {
-      checker_.typeScopes_.pop_back();
+      this->checker.typeScopes_.pop_back();
       return constraint;
     }
     const_cast<Type *>(infers[i])->setConstraint(constraint, {});
   }
-  ++checker_.extendsClause_;
-  const Type *pattern = checker_.typeResolver().resolveTypeInner(ref.args[1]);
-  --checker_.extendsClause_;
-  checker_.typeScopes_.pop_back();
+  ++this->checker.extendsClause_;
+  const Type *pattern = this->checker.typeResolver().resolveTypeInner(ref.args[1]);
+  --this->checker.extendsClause_;
+  this->checker.typeScopes_.pop_back();
   if (pattern->isError()) {
     return pattern;
   }
   if (mentionsParam(check) || mentionsParamBesides(pattern, infers)) {
-    return deferConditional(ref);
+    return this->deferConditional(ref);
   }
   if (ref.args[0].kind() == TypeRefKind::NAME_REF &&
-      isBinding(checker_.typeDeclarer().lookupType(ref.args[0].name))) {
+      isBinding(this->checker.typeDeclarer().lookupType(ref.args[0].name))) {
     std::vector<const Type *> members = distributed(check);
     if (members.size() != 1) {
       std::vector<const Type *> results;
       for (const Type *m : members) {
-        checker_.typeScopes_.emplace_back();
-        bindType(ref.args[0].name, m, ref.loc);
-        const Type *result = resolveConditional(ref);
-        checker_.typeScopes_.pop_back();
+        this->checker.typeScopes_.emplace_back();
+        this->bindType(ref.args[0].name, m, ref.loc);
+        const Type *result = this->resolveConditional(ref);
+        this->checker.typeScopes_.pop_back();
         if (result->isError()) {
           return result;
         }
@@ -252,45 +248,45 @@ const Type *ConditionalTypes::resolveConditional(const TypeRef &ref) {
     }
   }
   Checker::InferMatch inference{infers, std::vector<const Type *>(infers.size(), nullptr)};
-  bool yes = checker_.extendsRelation().extendsType(check, pattern, &inference);
-  checker_.typeScopes_.emplace_back();
+  bool yes = this->checker.extendsRelation().extendsType(check, pattern, &inference);
+  this->checker.typeScopes_.emplace_back();
   for (size_t i = 0; yes && i < infers.size(); ++i) {
     const Type *bound = inference.bound[i];
     if (!bound) {
       bound = infers[i]->constraint() ? infers[i]->constraint() : Type::unknown();
     }
-    bindType(inferRefs[i]->name, bound, inferRefs[i]->loc);
+    this->bindType(inferRefs[i]->name, bound, inferRefs[i]->loc);
   }
   const TypeRef &branch = ref.args[yes ? 2 : 3];
   const Type *result = nullptr;
   if (tail && branch.kind() == TypeRefKind::CONDITIONAL_REF) {
-    checker_.tailAllowed_ = true;
-    result = checker_.typeResolver().resolveTypeInner(branch);
+    this->checker.tailAllowed_ = true;
+    result = this->checker.typeResolver().resolveTypeInner(branch);
   } else if (auto *alias = tail && branch.kind() == TypeRefKind::GENERIC_REF
                                ? llvm::dyn_cast_or_null<TypeAliasDecl>(
-                                     checker_.typeDeclarer().lookupType(branch.name))
+                                     this->checker.typeDeclarer().lookupType(branch.name))
                                : nullptr;
              alias && !alias->typeParams.empty()) {
     std::vector<const Type *> args;
     for (const TypeRef &arg : branch.args) {
-      args.push_back(resolveTypeArgument(arg));
+      args.push_back(this->resolveTypeArgument(arg));
       if (args.back()->isError()) {
-        checker_.typeScopes_.pop_back();
+        this->checker.typeScopes_.pop_back();
 
         return args.back();
       }
     }
-    checker_.tailCall_ = Checker::TailCall{alias, std::move(args)};
+    this->checker.tailCall_ = Checker::TailCall{alias, std::move(args)};
   } else {
-    result = checker_.typeResolver().resolveTypeInner(branch);
+    result = this->checker.typeResolver().resolveTypeInner(branch);
   }
-  checker_.typeScopes_.pop_back();
+  this->checker.typeScopes_.pop_back();
 
   return result;
 }
 
 const Type *ConditionalTypes::deferConditional(const TypeRef &ref) {
-  Checker::ConditionalInfo &info = conditionals_[&ref];
+  Checker::ConditionalInfo &info = this->conditionals[&ref];
   if (!info.tag) {
     info.ref = &ref;
     std::string spelling;
@@ -307,11 +303,11 @@ const Type *ConditionalTypes::deferConditional(const TypeRef &ref) {
       spelling.pop_back();
     }
     info.tag = Type::param(spelling.empty() ? "conditional type" : spelling);
-    conditionalTags_[info.tag] = &info;
+    this->conditionalTags[info.tag] = &info;
     std::vector<llvm::StringRef> names;
     collectNames(ref, names);
     for (llvm::StringRef name : names) {
-      Stmt *decl = checker_.typeDeclarer().lookupType(name);
+      Stmt *decl = this->checker.typeDeclarer().lookupType(name);
       if (!decl) {
         continue;
       }
@@ -324,7 +320,8 @@ const Type *ConditionalTypes::deferConditional(const TypeRef &ref) {
   }
   std::vector<const Type *> operands{info.tag};
   for (llvm::StringRef name : info.bound) {
-    auto *alias = llvm::dyn_cast_or_null<TypeAliasDecl>(checker_.typeDeclarer().lookupType(name));
+    auto *alias =
+        llvm::dyn_cast_or_null<TypeAliasDecl>(this->checker.typeDeclarer().lookupType(name));
     operands.push_back(alias && alias->resolved ? alias->resolved : Type::error());
   }
 
@@ -332,7 +329,7 @@ const Type *ConditionalTypes::deferConditional(const TypeRef &ref) {
 }
 
 const Type *ConditionalTypes::evalConditional(llvm::ArrayRef<const Type *> operands) {
-  const Checker::ConditionalInfo *info = conditionalTags_.lookup(operands[0]);
+  const Checker::ConditionalInfo *info = this->conditionalTags.lookup(operands[0]);
   if (!info) {
     return Type::error();
   }
@@ -341,17 +338,17 @@ const Type *ConditionalTypes::evalConditional(llvm::ArrayRef<const Type *> opera
       return t;
     }
   }
-  checker_.typeScopes_.emplace_back();
+  this->checker.typeScopes_.emplace_back();
   for (const auto &[name, decl] : info->decls) {
-    checker_.typeScopes_.back()[name] = decl;
+    this->checker.typeScopes_.back()[name] = decl;
   }
   for (size_t i = 0; i < info->bound.size() && i + 1 < operands.size(); ++i) {
-    bindType(info->bound[i], operands[i + 1], info->ref->loc);
+    this->bindType(info->bound[i], operands[i + 1], info->ref->loc);
   }
-  bool tail = std::exchange(checker_.tailAllowed_, false);
-  const Type *result = resolveConditional(*info->ref);
-  checker_.tailAllowed_ = tail;
-  checker_.typeScopes_.pop_back();
+  bool tail = std::exchange(this->checker.tailAllowed_, false);
+  const Type *result = this->resolveConditional(*info->ref);
+  this->checker.tailAllowed_ = tail;
+  this->checker.typeScopes_.pop_back();
 
   return result ? result : Type::error();
 }
@@ -361,16 +358,16 @@ std::vector<const Type *> ConditionalTypes::conditionalBranches(const Type *cond
     return {};
   }
   llvm::ArrayRef<const Type *> operands = conditional->operands();
-  const Checker::ConditionalInfo *info = conditionalTags_.lookup(operands[0]);
+  const Checker::ConditionalInfo *info = this->conditionalTags.lookup(operands[0]);
   if (!info) {
     return {};
   }
-  checker_.typeScopes_.emplace_back();
+  this->checker.typeScopes_.emplace_back();
   for (const auto &[name, decl] : info->decls) {
-    checker_.typeScopes_.back()[name] = decl;
+    this->checker.typeScopes_.back()[name] = decl;
   }
   for (size_t i = 0; i < info->bound.size() && i + 1 < operands.size(); ++i) {
-    bindType(info->bound[i], operands[i + 1], info->ref->loc);
+    this->bindType(info->bound[i], operands[i + 1], info->ref->loc);
   }
   std::vector<const TypeRef *> inferRefs;
   std::vector<bool> lists;
@@ -380,18 +377,18 @@ std::vector<const Type *> ConditionalTypes::conditionalBranches(const Type *cond
     if (lists[i]) {
       param->setList();
     }
-    bindType(inferRefs[i]->name, param, inferRefs[i]->loc);
+    this->bindType(inferRefs[i]->name, param, inferRefs[i]->loc);
   }
-  bool muted = checker_.diags_.setMuted(true);
+  bool muted = this->checker.diags_.setMuted(true);
   std::vector<const Type *> branches;
   for (size_t i : {2, 3}) {
-    const Type *branch = checker_.typeResolver().resolveTypeInner(info->ref->args[i]);
+    const Type *branch = this->checker.typeResolver().resolveTypeInner(info->ref->args[i]);
     if (branch && !branch->isError()) {
       branches.push_back(branch);
     }
   }
-  checker_.diags_.setMuted(muted);
-  checker_.typeScopes_.pop_back();
+  this->checker.diags_.setMuted(muted);
+  this->checker.typeScopes_.pop_back();
 
   return branches;
 }
@@ -402,18 +399,18 @@ bool ConditionalTypes::fitsConditional(const Type *from, const Type *to, unsigne
   }
   if (from->isUnion()) {
     return llvm::all_of(from->members(),
-                        [&](const Type *m) { return fitsConditional(m, to, depth + 1); });
+                        [&](const Type *m) { return this->fitsConditional(m, to, depth + 1); });
   }
-  for (const Type *branch : conditionalBranches(to)) {
+  for (const Type *branch : this->conditionalBranches(to)) {
     if (TypeRelations::isImplicitlyConvertible(from, branch) ||
-        fitsConditional(from, branch, depth + 1)) {
+        this->fitsConditional(from, branch, depth + 1)) {
       return true;
     }
     std::vector<const Type *> params;
     llvm::SmallPtrSet<const Type *, 8> seen;
     collectParams(branch, params, seen);
     Checker::InferMatch match{params, std::vector<const Type *>(params.size(), nullptr)};
-    if (!params.empty() && checker_.extendsRelation().extendsType(from, branch, &match)) {
+    if (!params.empty() && this->checker.extendsRelation().extendsType(from, branch, &match)) {
       return true;
     }
   }
@@ -424,7 +421,7 @@ bool ConditionalTypes::fitsConditional(const Type *from, const Type *to, unsigne
 const Type *ConditionalTypes::resolveIntersection(const TypeRef &ref) {
   std::vector<const Type *> parts;
   for (const TypeRef &arg : ref.args) {
-    parts.push_back(checker_.typeResolver().resolveTypeInner(arg));
+    parts.push_back(this->checker.typeResolver().resolveTypeInner(arg));
     if (parts.back()->isError()) {
       return parts.back();
     }
@@ -440,12 +437,12 @@ const Type *ConditionalTypes::resolveIntersection(const TypeRef &ref) {
     for (size_t i : {0, 1}) {
       const Type *other = parts[1 - i];
       if (primitive(parts[i])) {
-        return checker_.typeOperators().evalTypeOp(Type::typeOp(TypeOp::Extract, {other, parts[i]}),
-                                                   {other, parts[i]});
+        return this->checker.typeOperators().evalTypeOp(
+            Type::typeOp(TypeOp::Extract, {other, parts[i]}), {other, parts[i]});
       }
       if (emptyObject(parts[i])) {
-        return checker_.typeOperators().evalTypeOp(Type::typeOp(TypeOp::NonNullable, {other}),
-                                                   {other});
+        return this->checker.typeOperators().evalTypeOp(Type::typeOp(TypeOp::NonNullable, {other}),
+                                                        {other});
       }
     }
   }
@@ -477,8 +474,10 @@ const Type *ConditionalTypes::resolveIntersection(const TypeRef &ref) {
               fields.push_back(field);
               continue;
             }
-            const Type *a = same->type, *b = field.type;
-            const Type *x = a->nonOptional(), *y = b->nonOptional();
+            const Type *a = same->type;
+            const Type *b = field.type;
+            const Type *x = a->nonOptional();
+            const Type *y = b->nonOptional();
             const Type *both = nullptr;
             if (x == y) {
               both = x;
@@ -488,10 +487,11 @@ const Type *ConditionalTypes::resolveIntersection(const TypeRef &ref) {
               both = y;
             }
             if (!both) {
-              checker_.diags_.error(ref.loc, "field '" + field.name + "' has type '" + x->name() +
-                                                 "' in one part of the intersection "
-                                                 "and '" +
-                                                 y->name() + "' in another; a field has one type");
+              this->checker.diags_.error(ref.loc,
+                                         "field '" + field.name + "' has type '" + x->name() +
+                                             "' in one part of the intersection "
+                                             "and '" +
+                                             y->name() + "' in another; a field has one type");
               return Type::error();
             }
             same->type = a->isOptional() && b->isOptional() ? Type::optional(both) : both;
@@ -512,7 +512,7 @@ const Type *ConditionalTypes::resolveIntersection(const TypeRef &ref) {
       }
     }
   }
-  checker_.diags_.error(
+  this->checker.diags_.error(
       ref.loc, "'&' joins object types into one with the fields of all, and '" + other->name() +
                    "' is not an object type; of TypeScript's other idioms with '&', 'K & string' "
                    "(what of K is a string) and 'T & {}' (T without undefined) work");
@@ -525,7 +525,7 @@ const Type *ConditionalTypes::signatureForUtility(const TypeRef &ref) {
     return nullptr;
   }
   auto erased = [&](FuncSymbol *fn) {
-    const Type *type = checker_.returnInferrer().functionType(fn);
+    const Type *type = this->checker.returnInferrer().functionType(fn);
     std::vector<const Type *> args;
     for (const Type *p : fn->typeParams) {
       if (p->constraint()) {
@@ -539,10 +539,10 @@ const Type *ConditionalTypes::signatureForUtility(const TypeRef &ref) {
       }
     }
 
-    return checker_.typeParams().substitute(type, fn->typeParams, args);
+    return this->checker.typeParams().substitute(type, fn->typeParams, args);
   };
   if (ref.names().size() == 1) {
-    ScopeEntry entry = checker_.topLevelChecker().lookupValue(ref.names().front());
+    ScopeEntry entry = this->checker.topLevelChecker().lookupValue(ref.names().front());
     if (entry.func() && entry.func()->isGeneric()) {
       return erased(entry.func());
     }
@@ -551,7 +551,7 @@ const Type *ConditionalTypes::signatureForUtility(const TypeRef &ref) {
   if (ref.names().size() != 2) {
     return nullptr;
   }
-  VarSymbol *var = checker_.topLevelChecker().lookupValue(ref.names().front()).var();
+  VarSymbol *var = this->checker.topLevelChecker().lookupValue(ref.names().front()).var();
   if (!var || !var->type) {
     return nullptr;
   }
@@ -563,7 +563,7 @@ const Type *ConditionalTypes::signatureForUtility(const TypeRef &ref) {
   if (!cls || object->field(ref.names()[1])) {
     return nullptr;
   }
-  checker_.classDeclarer().completeClass(cls);
+  this->checker.classDeclarer().completeClass(cls);
   std::vector<FunctionDecl *> methods = ClassDeclarer::methodsNamed(cls, ref.names()[1], false);
   if (methods.empty() || !methods.back()->sym) {
     return nullptr;

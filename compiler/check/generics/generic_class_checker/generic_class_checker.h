@@ -6,7 +6,7 @@ namespace tz {
 
 class GenericClassChecker {
 public:
-  explicit GenericClassChecker(Checker &checker);
+  explicit GenericClassChecker(Checker &owner);
 
   void declareClassTypeParams(ClassDecl *cls);
   void bindClassTypeParams(const ClassDecl *cls);
@@ -17,8 +17,12 @@ public:
   Expr *checkGenericNew(NewExpr *expr, ClassDecl *generic, const Type *expected);
 
 private:
-  Checker &checker_;
-  std::map<std::pair<const ClassDecl *, const FunctionDecl *>, FuncSymbol *> constructorFunctions_;
+  static std::string typeNames(llvm::ArrayRef<const Type *> types);
+  static std::string bindings(llvm::ArrayRef<const Type *> params,
+                              llvm::ArrayRef<const Type *> args);
+
+  Checker &checker;
+  std::map<std::pair<const ClassDecl *, const FunctionDecl *>, FuncSymbol *> constructorFunctions;
 };
 
 }

@@ -6,7 +6,7 @@ namespace tz {
 
 class DecoratorChecker {
 public:
-  explicit DecoratorChecker(Checker &checker);
+  explicit DecoratorChecker(Checker &owner);
 
   const Type *methodDescriptorType(const Type *args, const Type *ret);
   void decorateClass(ClassDecl *cls);
@@ -16,7 +16,11 @@ public:
   void checkDecoratedNames(ClassDecl *cls);
 
 private:
-  Checker &checker_;
+  static std::string decoratorName(const Expr *expr);
+  static bool isPlainReference(const Expr *expr);
+  static bool decoratedParams(const FunctionDecl *fn);
+
+  Checker &checker;
 };
 
 }

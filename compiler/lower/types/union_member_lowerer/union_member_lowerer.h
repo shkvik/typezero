@@ -6,7 +6,7 @@ namespace tz {
 
 class UnionMemberLowerer {
 public:
-  explicit UnionMemberLowerer(Lowering &lowering);
+  explicit UnionMemberLowerer(Lowering &owner);
 
   llvm::Value *emitUnionFieldRead(MemberExpr *member);
   llvm::Value *unionFieldAddress(llvm::Value *object, const Type *type, llvm::StringRef name);
@@ -14,7 +14,7 @@ public:
   llvm::Value *emitUnionMethodCall(CallExpr *call);
 
 private:
-  Lowering &lowering_;
+  Lowering &lowering;
 };
 
 }

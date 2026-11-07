@@ -6,7 +6,7 @@ namespace tz {
 
 class GenericInstantiator {
 public:
-  explicit GenericInstantiator(Checker &checker);
+  explicit GenericInstantiator(Checker &owner);
 
   Expr *checkGenericValue(NameExpr *name, FuncSymbol *generic, const Checker::Signature *expected);
   bool returnsOwnClass(const FuncSymbol *generic, const Type *ret);
@@ -21,10 +21,15 @@ public:
   void checkInstances();
 
 private:
-  Checker &checker_;
-  std::map<std::pair<const FuncSymbol *, std::vector<const Type *>>, Checker::Instance *>
-      instances_;
-  llvm::SmallPtrSet<const FuncSymbol *, 2> ownClassReturns_;
+  static const ClassDecl *literalClassIn(const Type *type,
+                                         llvm::SmallPtrSetImpl<const Type *> &seen);
+  static std::string typeList(llvm::ArrayRef<const Type *> types);
+  static std::string bindingList(llvm::ArrayRef<const Type *> params,
+                                 llvm::ArrayRef<const Type *> args);
+
+  Checker &checker;
+  std::map<std::pair<const FuncSymbol *, std::vector<const Type *>>, Checker::Instance *> instances;
+  llvm::SmallPtrSet<const FuncSymbol *, 2> ownClassReturns;
 };
 
 }

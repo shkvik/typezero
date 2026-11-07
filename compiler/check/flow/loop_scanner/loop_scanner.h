@@ -6,7 +6,7 @@ namespace tz {
 
 class LoopScanner {
 public:
-  explicit LoopScanner(Checker &checker);
+  explicit LoopScanner(Checker &owner);
 
   Checker::LoopScan scanLoop(llvm::ArrayRef<const Stmt *> stmts,
                              llvm::ArrayRef<const Expr *> exprs) const;
@@ -15,7 +15,7 @@ public:
   void scanExpr(const Expr *expr, Checker::LoopScan &scan, unsigned depth) const;
 
 private:
-  Checker &checker_;
+  Checker &checker;
 };
 
 }

@@ -14,7 +14,6 @@
 
 using llvm::cast;
 using llvm::dyn_cast;
-using llvm::dyn_cast_or_null;
 using llvm::isa;
 
 namespace tz {
@@ -28,7 +27,8 @@ static bool isResultLiteral(const CallExpr *call) {
          !call->hasSpread() && !call->optional;
 }
 
-DestinationScanner::DestinationScanner(Checker &checker) : checker_(checker) {}
+DestinationScanner::DestinationScanner(Checker &owner)
+    : checker(owner) {}
 
 bool DestinationScanner::scanDestinations(llvm::ArrayRef<Stmt *> stmts,
                                           Checker::DestinationScan &scan) {
@@ -40,12 +40,12 @@ bool DestinationScanner::scanDestinations(llvm::ArrayRef<Stmt *> stmts,
   scan.locals.emplace_back();
   for (const Stmt *stmt : stmts) {
     if (auto *fn = dyn_cast<FunctionDecl>(stmt)) {
-      scan.declare(fn->name, checker_.destination().declaredFunctionType(fn));
+      scan.declare(fn->name, this->checker.destination().declaredFunctionType(fn));
     }
   }
   bool visible = true;
   for (const Stmt *stmt : stmts) {
-    scanDestinations(stmt, scan);
+    this->scanDestinations(stmt, scan);
     if (auto *decl = dyn_cast<VarDeclStmt>(stmt);
         decl &&
         llvm::any_of(decl->decls, [&](const VarDeclarator &v) { return v.name == scan.name; })) {
@@ -64,21 +64,20 @@ void DestinationScanner::scanFunctionDestinations(const FunctionDecl *fn,
     return;
   }
   const Type *outer = scan.returns;
-  scan.returns =
-      fn->returnType
-          ? checker_.predicateChecker().resolveReturnType(const_cast<FunctionDecl *>(fn), nullptr)
-          : nullptr;
+  scan.returns = fn->returnType ? this->checker.predicateChecker().resolveReturnType(
+                                      const_cast<FunctionDecl *>(fn), nullptr)
+                                : nullptr;
   scan.locals.emplace_back();
   for (const Param &param : fn->params) {
-    const Type *type = param.type && !checker_.iterableChecker().isIterableRef(*param.type)
-                           ? checker_.typeResolver().resolveType(*param.type, false)
+    const Type *type = param.type && !this->checker.iterableChecker().isIterableRef(*param.type)
+                           ? this->checker.typeResolver().resolveType(*param.type, false)
                            : nullptr;
     if (param.defaultValue()) {
-      scanDestinations(param.defaultValue(), type, scan);
+      this->scanDestinations(param.defaultValue(), type, scan);
     }
     scan.declare(param.name, type && param.optional() ? Type::optional(type) : type);
   }
-  scanDestinations(fn->body->body, scan);
+  this->scanDestinations(fn->body->body, scan);
   scan.locals.pop_back();
   scan.returns = outer;
 }
@@ -89,25 +88,25 @@ void DestinationScanner::scanDestinations(const Stmt *stmt, Checker::Destination
   }
   auto expr = [&](const Expr *e) {
     if (e) {
-      scanDestinations(e, nullptr, scan);
+      this->scanDestinations(e, nullptr, scan);
     }
   };
   switch (stmt->kind()) {
   case Stmt::Kind::Block:
-    scanDestinations(cast<BlockStmt>(stmt)->body, scan);
+    this->scanDestinations(cast<BlockStmt>(stmt)->body, scan);
     break;
   case Stmt::Kind::VarDecl:
     for (const VarDeclarator &d : cast<VarDeclStmt>(stmt)->decls) {
       const Type *type =
-          d.typeAnn ? checker_.typeResolver().resolveType(*d.typeAnn, false) : nullptr;
+          d.typeAnn ? this->checker.typeResolver().resolveType(*d.typeAnn, false) : nullptr;
       if (d.init) {
-        scanDestinations(d.init, type, scan);
+        this->scanDestinations(d.init, type, scan);
       }
       scan.declare(d.name, type);
     }
     break;
   case Stmt::Kind::Function:
-    scanFunctionDestinations(cast<FunctionDecl>(stmt), scan);
+    this->scanFunctionDestinations(cast<FunctionDecl>(stmt), scan);
     break;
   case Stmt::Kind::Expr:
     expr(cast<ExprStmt>(stmt)->expr);
@@ -115,26 +114,26 @@ void DestinationScanner::scanDestinations(const Stmt *stmt, Checker::Destination
   case Stmt::Kind::If: {
     auto *s = cast<IfStmt>(stmt);
     expr(s->cond);
-    scanDestinations(s->thenStmt, scan);
-    scanDestinations(s->elseStmt, scan);
+    this->scanDestinations(s->thenStmt, scan);
+    this->scanDestinations(s->elseStmt, scan);
     break;
   }
   case Stmt::Kind::While:
     expr(cast<WhileStmt>(stmt)->cond);
-    scanDestinations(cast<WhileStmt>(stmt)->body, scan);
+    this->scanDestinations(cast<WhileStmt>(stmt)->body, scan);
     break;
   case Stmt::Kind::DoWhile:
-    scanDestinations(cast<DoWhileStmt>(stmt)->body, scan);
+    this->scanDestinations(cast<DoWhileStmt>(stmt)->body, scan);
     expr(cast<DoWhileStmt>(stmt)->cond);
     break;
   case Stmt::Kind::For: {
     auto *s = cast<ForStmt>(stmt);
     scan.locals.emplace_back();
-    scanDestinations(s->init, scan);
+    this->scanDestinations(s->init, scan);
     if (!scan.locals.back().contains(scan.name)) {
       expr(s->cond);
       expr(s->step);
-      scanDestinations(s->body, scan);
+      this->scanDestinations(s->body, scan);
     }
     scan.locals.pop_back();
     break;
@@ -147,7 +146,7 @@ void DestinationScanner::scanDestinations(const Stmt *stmt, Checker::Destination
     }
     scan.locals.emplace_back();
     scan.declare(s->binding.name, nullptr);
-    scanDestinations(s->body, scan);
+    this->scanDestinations(s->body, scan);
     scan.locals.pop_back();
     break;
   }
@@ -159,16 +158,16 @@ void DestinationScanner::scanDestinations(const Stmt *stmt, Checker::Destination
       expr(c.test);
       all.insert(all.end(), c.body.begin(), c.body.end());
     }
-    scanDestinations(all, scan);
+    this->scanDestinations(all, scan);
     break;
   }
   case Stmt::Kind::Labeled:
-    scanDestinations(cast<LabeledStmt>(stmt)->body, scan);
+    this->scanDestinations(cast<LabeledStmt>(stmt)->body, scan);
     break;
   case Stmt::Kind::Return:
     if (const Expr *value = cast<ReturnStmt>(stmt)->value) {
-      scanDestinations(value, scan.returns && !scan.returns->isVoid() ? scan.returns : nullptr,
-                       scan);
+      this->scanDestinations(
+          value, scan.returns && !scan.returns->isVoid() ? scan.returns : nullptr, scan);
     }
     break;
   default:
@@ -180,7 +179,7 @@ void DestinationScanner::scanDestinations(const Expr *expr, const Type *sink,
                                           Checker::DestinationScan &scan) {
   auto sub = [&](const Expr *e, const Type *to = nullptr) {
     if (e) {
-      scanDestinations(e, to, scan);
+      this->scanDestinations(e, to, scan);
     }
   };
   if (sink && sink->isError()) {
@@ -243,7 +242,7 @@ void DestinationScanner::scanDestinations(const Expr *expr, const Type *sink,
     auto *assign = cast<AssignExpr>(expr);
     auto *target = dyn_cast<NameExpr>(assign->target);
     if (target && target->name == scan.name && !scan.hidden(target->name)) {
-      if (const Type *type = assign->op ? nullptr : peekType(assign->value, scan)) {
+      if (const Type *type = assign->op ? nullptr : this->peekType(assign->value, scan)) {
         scan.found.push_back({type, assign->loc()});
       }
       sub(assign->value);
@@ -252,12 +251,12 @@ void DestinationScanner::scanDestinations(const Expr *expr, const Type *sink,
     if (!isa<NameExpr>(assign->target)) {
       sub(assign->target);
     }
-    sub(assign->value, assign->op ? nullptr : peekType(assign->target, scan));
+    sub(assign->value, assign->op ? nullptr : this->peekType(assign->target, scan));
     break;
   }
   case Expr::Kind::Call: {
     auto *call = cast<CallExpr>(expr);
-    std::vector<const Type *> params = calleeParams(call, scan);
+    std::vector<const Type *> params = this->calleeParams(call, scan);
     sub(call->callee);
     for (size_t i = 0; i < call->args.size(); ++i) {
       sub(call->args[i], i < params.size() && !call->spreads(i) ? params[i] : nullptr);
@@ -265,7 +264,7 @@ void DestinationScanner::scanDestinations(const Expr *expr, const Type *sink,
     break;
   }
   case Expr::Kind::Function:
-    scanFunctionDestinations(cast<FunctionExpr>(expr)->fn, scan);
+    this->scanFunctionDestinations(cast<FunctionExpr>(expr)->fn, scan);
     break;
   case Expr::Kind::Template:
     for (const Expr *e : cast<TemplateExpr>(expr)->exprs) {
@@ -288,8 +287,9 @@ void DestinationScanner::scanDestinations(const Expr *expr, const Type *sink,
   case Expr::Kind::New: {
     auto *create = cast<NewExpr>(expr);
     const FuncSymbol *ctor = nullptr;
-    if (ClassDecl *cls =
-            scan.hidden(create->name) ? nullptr : checker_.scopes().lookup(create->name).cls()) {
+    if (ClassDecl *cls = scan.hidden(create->name)
+                             ? nullptr
+                             : this->checker.scopes().lookup(create->name).cls()) {
       if (cls->constructors.size() == 1 && cls->constructors[0]->sym &&
           !cls->constructors[0]->sym->pendingParams) {
         ctor = cls->constructors[0]->sym;
@@ -327,7 +327,7 @@ const Type *DestinationScanner::peekName(llvm::StringRef name,
       return found->second;
     }
   }
-  VarSymbol *var = checker_.scopes().lookup(name).var();
+  VarSymbol *var = this->checker.scopes().lookup(name).var();
 
   return var ? var->type : nullptr;
 }
@@ -335,14 +335,15 @@ const Type *DestinationScanner::peekName(llvm::StringRef name,
 const Type *DestinationScanner::peekType(const Expr *expr,
                                          const Checker::DestinationScan &scan) const {
   if (auto *name = dyn_cast<NameExpr>(expr)) {
-    return name->name == scan.name ? nullptr : peekName(name->name, scan);
+    return name->name == scan.name ? nullptr : this->peekName(name->name, scan);
   }
   if (auto *member = dyn_cast<MemberExpr>(expr)) {
-    if (member->name == "subtle" && checker_.callChecker().isGlobalName(member->object, "crypto")) {
-      VarSymbol *subtle = checker_.scopes().lookup(kSubtleName).var();
+    if (member->name == "subtle" &&
+        this->checker.callChecker().isGlobalName(member->object, "crypto")) {
+      VarSymbol *subtle = this->checker.scopes().lookup(kSubtleName).var();
       return subtle ? subtle->type : nullptr;
     }
-    const Type *object = peekType(member->object, scan);
+    const Type *object = this->peekType(member->object, scan);
     object = object ? object->nonOptional() : nullptr;
     if (object && object->isRecord()) {
       return object->valueType();
@@ -351,21 +352,22 @@ const Type *DestinationScanner::peekType(const Expr *expr,
     return field ? field->type : nullptr;
   }
   if (auto *index = dyn_cast<IndexExpr>(expr)) {
-    const Type *object = peekType(index->object, scan);
+    const Type *object = this->peekType(index->object, scan);
     if (object && object->isRecord()) {
       return object->valueType();
     }
     return object && object->isArray() ? object->inner() : nullptr;
   }
   if (auto *cond = dyn_cast<ConditionalExpr>(expr); cond && Destination::literalShaped(cond)) {
-    const Type *a = peekType(cond->thenExpr, scan), *b = peekType(cond->elseExpr, scan);
+    const Type *a = this->peekType(cond->thenExpr, scan);
+    const Type *b = this->peekType(cond->elseExpr, scan);
     const Type *common = a && b ? TypeRelations::unify(a, b) : nullptr;
     return common && !common->isError() ? common : nullptr;
   }
   if (auto *call = dyn_cast<CallExpr>(expr); call && isResultLiteral(call)) {
     const Type *half = Type::voidTy();
     if (!call->args.empty()) {
-      half = peekType(call->args[0], scan);
+      half = this->peekType(call->args[0], scan);
       if (!half) {
         half = literalType(call->args[0]);
       }
@@ -396,11 +398,11 @@ std::vector<const Type *> DestinationScanner::calleeParams(const CallExpr *call,
   };
   if (auto *name = dyn_cast<NameExpr>(call->callee)) {
     if (scan.hidden(name->name)) {
-      const Type *type = peekName(name->name, scan);
+      const Type *type = this->peekName(name->name, scan);
       return type && type->isFunction() ? spread(type->params(), type->hasRest())
                                         : std::vector<const Type *>{};
     }
-    ScopeEntry entry = checker_.scopes().lookup(name->name);
+    ScopeEntry entry = this->checker.scopes().lookup(name->name);
     FuncSymbol *func = entry.func();
     if (entry.var() && entry.var()->function()) {
       func = entry.var()->function()->sym;
@@ -424,11 +426,11 @@ std::vector<const Type *> DestinationScanner::calleeParams(const CallExpr *call,
       return spread(methods[0]->sym->params, methods[0]->sym->hasRest);
     };
     if (auto *name = dyn_cast<NameExpr>(member->object); name && !scan.hidden(name->name)) {
-      if (ClassDecl *cls = checker_.scopes().lookup(name->name).cls()) {
+      if (ClassDecl *cls = this->checker.scopes().lookup(name->name).cls()) {
         return variant(cls, true);
       }
     }
-    const Type *object = peekType(member->object, scan);
+    const Type *object = this->peekType(member->object, scan);
     if (!object) {
       return {};
     }

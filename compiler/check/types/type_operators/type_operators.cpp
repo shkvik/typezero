@@ -21,23 +21,18 @@
 #include "llvm/Support/ConvertUTF.h"
 #include "llvm/Support/MemoryBuffer.h"
 
-using llvm::cast;
 using llvm::dyn_cast;
-using llvm::dyn_cast_or_null;
-using llvm::isa;
 
 namespace tz {
 
-namespace {
-
-std::u16string utf16(llvm::StringRef text) {
+std::u16string TypeOperators::utf16(llvm::StringRef text) {
   llvm::SmallVector<llvm::UTF16, 32> units;
   llvm::convertUTF8ToUTF16String(text, units);
 
   return std::u16string(units.begin(), units.end());
 }
 
-std::string utf8(const std::u16string &text) {
+std::string TypeOperators::utf8(const std::u16string &text) {
   std::string out;
   llvm::convertUTF16ToUTF8String(
       llvm::ArrayRef<llvm::UTF16>(reinterpret_cast<const llvm::UTF16 *>(text.data()), text.size()),
@@ -46,13 +41,12 @@ std::string utf8(const std::u16string &text) {
   return out;
 }
 
-llvm::ArrayRef<const Type *> membersOf(const Type *&type) {
+llvm::ArrayRef<const Type *> TypeOperators::membersOf(const Type *&type) {
   return type->isUnion() ? type->members() : llvm::ArrayRef<const Type *>(type);
 }
 
-}
-
-TypeOperators::TypeOperators(Checker &checker) : checker_(checker) {}
+TypeOperators::TypeOperators(Checker &owner)
+    : checker(owner) {}
 
 const Type *TypeOperators::keysOf(const Type *type) {
   type = type->nonOptional();
@@ -60,12 +54,12 @@ const Type *TypeOperators::keysOf(const Type *type) {
     std::vector<const Type *> common;
     bool first = true;
     for (const Type *m : type->members()) {
-      const Type *keys = keysOf(m);
+      const Type *keys = this->keysOf(m);
       if (!keys) {
         return nullptr;
       }
       std::vector<const Type *> mine;
-      for (const Type *k : membersOf(keys)) {
+      for (const Type *k : TypeOperators::membersOf(keys)) {
         if (first || llvm::is_contained(common, k)) {
           mine.push_back(k);
         }
@@ -83,7 +77,7 @@ const Type *TypeOperators::keysOf(const Type *type) {
   }
   ClassDecl *cls = ClassDeclarer::classOf(type);
   if (cls) {
-    checker_.classDeclarer().completeClass(cls);
+    this->checker.classDeclarer().completeClass(cls);
   }
   std::vector<const Type *> keys;
   for (const Field &f : type->fields()) {
@@ -94,7 +88,7 @@ const Type *TypeOperators::keysOf(const Type *type) {
         field && field->access != Access::Public) {
       continue;
     }
-    keys.push_back(Type::stringLiteral(utf16(f.name)));
+    keys.push_back(Type::stringLiteral(TypeOperators::utf16(f.name)));
   }
 
   return keys.empty() ? Type::never() : Type::unionOf(keys);
@@ -103,10 +97,13 @@ const Type *TypeOperators::keysOf(const Type *type) {
 const Type *TypeOperators::evalTypeOp(const Type *op, llvm::ArrayRef<const Type *> operands) {
   TypeOp kind = op->typeOp();
   if (kind == TypeOp::Conditional) {
-    return checker_.conditionalTypes().evalConditional(operands);
+    return this->checker.conditionalTypes().evalConditional(operands);
   }
   if (kind == TypeOp::Mapped) {
-    const Type *key = operands[0], *keys = operands[1], *value = operands[2], *source = operands[3];
+    const Type *key = operands[0];
+    const Type *keys = operands[1];
+    const Type *value = operands[2];
+    const Type *source = operands[3];
     const Type *rename = operands.size() > 4 ? operands[4] : nullptr;
     bool open = mentionsParam(keys) || (source && mentionsParam(source)) ||
                 mentionsParamBesides(value, {key}) ||
@@ -119,12 +116,12 @@ const Type *TypeOperators::evalTypeOp(const Type *op, llvm::ArrayRef<const Type 
       return Type::object({});
     }
     std::vector<Field> fields;
-    for (const Type *name : membersOf(keys)) {
+    for (const Type *name : TypeOperators::membersOf(keys)) {
       if (!name->isStringLiteral()) {
         return Type::error();
       }
-      std::string text = utf8(name->literalText());
-      const Type *type = checker_.typeParams().substitute(value, {key}, {name});
+      std::string text = TypeOperators::utf8(name->literalText());
+      const Type *type = this->checker.typeParams().substitute(value, {key}, {name});
       if (type->isError()) {
         return type;
       }
@@ -138,7 +135,7 @@ const Type *TypeOperators::evalTypeOp(const Type *op, llvm::ArrayRef<const Type 
           op->mappedReadonly() > 0 || (op->mappedReadonly() == 0 && from && from->readonly);
       std::vector<std::string> names{text};
       if (rename) {
-        const Type *renamed = checker_.typeParams().substitute(rename, {key}, {name});
+        const Type *renamed = this->checker.typeParams().substitute(rename, {key}, {name});
         if (renamed->isError()) {
           return renamed;
         }
@@ -147,7 +144,7 @@ const Type *TypeOperators::evalTypeOp(const Type *op, llvm::ArrayRef<const Type 
           if (!n->isStringLiteral()) {
             return Type::error();
           }
-          names.push_back(utf8(n->literalText()));
+          names.push_back(TypeOperators::utf8(n->literalText()));
         }
       }
       for (const std::string &field : names) {
@@ -171,7 +168,7 @@ const Type *TypeOperators::evalTypeOp(const Type *op, llvm::ArrayRef<const Type 
   }
   switch (kind) {
   case TypeOp::KeyOf: {
-    const Type *keys = keysOf(operands[0]);
+    const Type *keys = this->keysOf(operands[0]);
     return keys ? keys : Type::error();
   }
   case TypeOp::Index: {
@@ -185,21 +182,22 @@ const Type *TypeOperators::evalTypeOp(const Type *op, llvm::ArrayRef<const Type 
 
       return Type::intTy();
     }
-    const Type *member = checker_.argListChecker().memberType(operands[0], operands[1]);
+    const Type *member = this->checker.argListChecker().memberType(operands[0], operands[1]);
     return member ? member : Type::error();
   }
   case TypeOp::Exclude:
   case TypeOp::Extract: {
     std::vector<const Type *> kept;
     for (const Type *m : distributedMembers(operands[0])) {
-      if (checker_.extendsRelation().extendsType(m, operands[1]) == (kind == TypeOp::Extract)) {
+      if (this->checker.extendsRelation().extendsType(m, operands[1]) ==
+          (kind == TypeOp::Extract)) {
         kept.push_back(m);
       }
     }
     return kept.empty() ? Type::never() : Type::unionOf(kept);
   }
   case TypeOp::Template:
-    return checker_.templateTypes().evalTemplate(operands);
+    return this->checker.templateTypes().evalTemplate(operands);
   case TypeOp::Spread: {
     std::vector<const Type *> elements;
     std::vector<bool> spread;
@@ -215,7 +213,7 @@ const Type *TypeOperators::evalTypeOp(const Type *op, llvm::ArrayRef<const Type 
   case TypeOp::Lowercase:
   case TypeOp::Capitalize:
   case TypeOp::Uncapitalize:
-    return checker_.templateTypes().evalStringCase(kind, operands[0]);
+    return this->checker.templateTypes().evalStringCase(kind, operands[0]);
   case TypeOp::NonNullable:
     return operands[0]->nonOptional();
   case TypeOp::ReturnType:
@@ -240,50 +238,51 @@ const Type *TypeOperators::evalTypeOp(const Type *op, llvm::ArrayRef<const Type 
 const Type *TypeOperators::resolveTypeOp(const TypeRef &ref) {
   switch (ref.kind()) {
     case TypeRefKind::KEY_OF_REF: {
-      const Type *type = checker_.typeResolver().resolveType(ref.args[0], false);
+      const Type *type = this->checker.typeResolver().resolveType(ref.args[0], false);
       if (type->isError()) {
         return type;
       }
-      const Type *keys = evalTypeOp(Type::typeOp(TypeOp::KeyOf, {type}), {type});
+      const Type *keys = this->evalTypeOp(Type::typeOp(TypeOp::KeyOf, {type}), {type});
       if (keys->isError()) {
-        checker_.diags_.error(ref.loc,
-                              "'keyof' takes an object type, whose fields it names, not '" +
-                                  type->name() + "'");
+        this->checker.diags_.error(ref.loc,
+                                   "'keyof' takes an object type, whose fields it names, not '" +
+                                       type->name() + "'");
       }
       return keys;
     }
     case TypeRefKind::INDEXED_REF: {
-      const Type *object = checker_.typeResolver().resolveType(ref.args[0], false);
-      const Type *key = checker_.typeResolver().resolveType(ref.args[1], false);
+      const Type *object = this->checker.typeResolver().resolveType(ref.args[0], false);
+      const Type *key = this->checker.typeResolver().resolveType(ref.args[1], false);
       if (object->isError() || key->isError()) {
         return Type::error();
       }
-      const Type *member = evalTypeOp(Type::indexedAccess(object, key), {object, key});
+      const Type *member = this->evalTypeOp(Type::indexedAccess(object, key), {object, key});
       if (member->isError()) {
-        checker_.diags_.error(ref.loc,
-                              "'" + object->name() + "' has no member '" + key->name() + "'");
+        this->checker.diags_.error(ref.loc,
+                                   "'" + object->name() + "' has no member '" + key->name() + "'");
       }
       return member;
     }
     case TypeRefKind::TYPE_OF_REF: {
       llvm::StringRef name = ref.names().front();
       const Type *type = nullptr;
-      ScopeEntry entry = checker_.topLevelChecker().lookupValue(name);
+      ScopeEntry entry = this->checker.topLevelChecker().lookupValue(name);
       if (VarSymbol *var = entry.var()) {
         type = var->type;
       } else if (entry.cls() && !entry.cls()->isGeneric()) {
-        type = checker_.classValueChecker().classValueType(entry.cls());
+        type = this->checker.classValueChecker().classValueType(entry.cls());
       } else if (entry.func()) {
-        type = checker_.utilityTypes().functionValueType(entry.func());
+        type = this->checker.utilityTypes().functionValueType(entry.func());
       }
-      for (Stmt *item : checker_.module_ ? checker_.module_->file.items : std::vector<Stmt *>()) {
+      for (Stmt *item :
+           this->checker.module_ ? this->checker.module_->file.items : std::vector<Stmt *>()) {
         if (type) {
           break;
         }
         if (auto *decl = dyn_cast<VarDeclStmt>(item)) {
           for (const VarDeclarator &d : decl->decls) {
             if (d.name == name && !type) {
-              type = d.typeAnn ? checker_.typeResolver().resolveType(*d.typeAnn, false)
+              type = d.typeAnn ? this->checker.typeResolver().resolveType(*d.typeAnn, false)
                      : d.init  ? GenericChecker::literalShape(d.init)
                                : nullptr;
             }
@@ -292,7 +291,7 @@ const Type *TypeOperators::resolveTypeOp(const TypeRef &ref) {
         if (auto *decl = dyn_cast<VarDeclStmt>(item); decl && !type) {
           for (const VarDeclarator &d : decl->decls) {
             if (auto *create = d.name == name ? llvm::dyn_cast_or_null<NewExpr>(d.init) : nullptr) {
-              type = checker_.eventMaps().createdType(create);
+              type = this->checker.eventMaps().createdType(create);
             }
           }
         }
@@ -308,7 +307,7 @@ const Type *TypeOperators::resolveTypeOp(const TypeRef &ref) {
             written = false;
             break;
           }
-          const Type *t = checker_.typeResolver().resolveType(*p.type, false);
+          const Type *t = this->checker.typeResolver().resolveType(*p.type, false);
           params.push_back(p.optional() || p.defaultValue() ? Type::optional(t) : t);
           if (!p.optional() && !p.defaultValue() && !p.rest()) {
             minArgs = params.size();
@@ -316,37 +315,39 @@ const Type *TypeOperators::resolveTypeOp(const TypeRef &ref) {
         }
         if (written) {
           type = Type::function(params, minArgs, !fn->params.empty() && fn->params.back().rest(),
-                                checker_.typeResolver().resolveType(*fn->returnType, true));
+                                this->checker.typeResolver().resolveType(*fn->returnType, true));
         }
       }
-      for (const ImportDecl &decl :
-           checker_.module_ && !type ? checker_.module_->file.imports : std::vector<ImportDecl>()) {
+      for (const ImportDecl &decl : this->checker.module_ && !type
+                                        ? this->checker.module_->file.imports
+                                        : std::vector<ImportDecl>()) {
         for (const ModuleName &imported : decl.names) {
           if (imported.as == name && decl.from && !type) {
-            type = checker_.utilityTypes().importedValueType(decl.from, imported.name);
+            type = this->checker.utilityTypes().importedValueType(decl.from, imported.name);
           }
         }
       }
       if (!type) {
-        checker_.diags_.error(ref.loc, "'typeof " + name + "' needs the type of '" + name +
-                                           "', which is not known here; declare it, e.g. 'const " +
-                                           name + ": T = ...'");
+        this->checker.diags_.error(ref.loc,
+                                   "'typeof " + name + "' needs the type of '" + name +
+                                       "', which is not known here; declare it, e.g. 'const " +
+                                       name + ": T = ...'");
         return Type::error();
       }
       for (size_t i = 1; i < ref.names().size(); ++i) {
         const Field *field = type->isObject() ? type->field(ref.names()[i]) : nullptr;
         if (ClassDecl *cls = field ? nullptr : ClassDeclarer::classOf(type)) {
-          checker_.classDeclarer().completeClass(cls);
+          this->checker.classDeclarer().completeClass(cls);
           std::vector<FunctionDecl *> methods =
               ClassDeclarer::methodsNamed(cls, ref.names()[i], false);
           if (methods.size() == 1 && methods[0]->sym && methods[0]->typeParams.empty()) {
-            type = checker_.returnInferrer().functionType(methods[0]->sym);
+            type = this->checker.returnInferrer().functionType(methods[0]->sym);
             continue;
           }
         }
         if (!field) {
-          checker_.diags_.error(ref.loc,
-                                "'" + type->name() + "' has no field '" + ref.names()[i] + "'");
+          this->checker.diags_.error(ref.loc, "'" + type->name() + "' has no field '" +
+                                                  ref.names()[i] + "'");
           return Type::error();
         }
         type = field->type;
@@ -354,13 +355,13 @@ const Type *TypeOperators::resolveTypeOp(const TypeRef &ref) {
       return type;
     }
     case TypeRefKind::MAPPED_REF: {
-      const Type *keys = checker_.typeResolver().resolveType(ref.args[0], false);
+      const Type *keys = this->checker.typeResolver().resolveType(ref.args[0], false);
       if (keys->isError()) {
         return keys;
       }
       const Type *source = nullptr;
       if (ref.args[0].kind() == TypeRefKind::KEY_OF_REF) {
-        source = checker_.typeResolver().resolveType(ref.args[0].args[0], false);
+        source = this->checker.typeResolver().resolveType(ref.args[0].args[0], false);
       }
       for (const Type *k = keys; !source && k;) {
         if (k->typeOp() == TypeOp::KeyOf) {
@@ -375,15 +376,15 @@ const Type *TypeOperators::resolveTypeOp(const TypeRef &ref) {
       }
       Type *key = Type::param(ref.name);
       key->setConstraint(keys, {});
-      checker_.typeScopes_.emplace_back();
-      auto *alias = checker_.ctx_.make<TypeAliasDecl>(ref.loc, ref.name, TypeRef());
+      this->checker.typeScopes_.emplace_back();
+      auto *alias = this->checker.ctx_.make<TypeAliasDecl>(ref.loc, ref.name, TypeRef());
       alias->resolved = key;
-      checker_.typeScopes_.back()[ref.name] = alias;
-      const Type *value = checker_.typeResolver().resolveType(ref.args[1], false);
+      this->checker.typeScopes_.back()[ref.name] = alias;
+      const Type *value = this->checker.typeResolver().resolveType(ref.args[1], false);
       const Type *rename = ref.args.size() > 2
-                               ? checker_.conditionalTypes().resolveTypeArgument(ref.args[2])
+                               ? this->checker.conditionalTypes().resolveTypeArgument(ref.args[2])
                                : nullptr;
-      checker_.typeScopes_.pop_back();
+      this->checker.typeScopes_.pop_back();
       if (value->isError()) {
         return value;
       }
@@ -393,7 +394,7 @@ const Type *TypeOperators::resolveTypeOp(const TypeRef &ref) {
       if (rename && !mentionsParam(rename)) {
         for (const Type *n : distributedMembers(rename)) {
           if (!n->isStringLiteral()) {
-            checker_.diags_.error(
+            this->checker.diags_.error(
                 ref.args[2].loc,
                 "a mapped type renames its keys to names of fields, string literal "
                 "types such as `get${Capitalize<K>}`, not '" +
@@ -402,9 +403,10 @@ const Type *TypeOperators::resolveTypeOp(const TypeRef &ref) {
           }
         }
       }
-      for (const Type *k : mentionsParam(keys) ? llvm::ArrayRef<const Type *>() : membersOf(keys)) {
+      for (const Type *k :
+           mentionsParam(keys) ? llvm::ArrayRef<const Type *>() : TypeOperators::membersOf(keys)) {
         if (!k->isStringLiteral() && !k->isNever()) {
-          checker_.diags_.error(
+          this->checker.diags_.error(
               ref.args[0].loc,
               "the keys of a mapped type are names of fields, string literal types "
               "such as '\"id\" | \"name\"' or 'keyof T', not '" +
@@ -414,7 +416,7 @@ const Type *TypeOperators::resolveTypeOp(const TypeRef &ref) {
       }
       const Type *mapped = Type::mapped(key, keys, value, ref.mappedOptional(),
                                         ref.mappedReadonly(), source, rename);
-      return evalTypeOp(mapped, mapped->operands());
+      return this->evalTypeOp(mapped, mapped->operands());
     }
     default:
       return nullptr;

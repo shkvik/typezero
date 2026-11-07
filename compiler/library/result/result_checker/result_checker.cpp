@@ -66,8 +66,13 @@ Expr *ResultChecker::checkResultCall(CallExpr *call, NameExpr *name, const Type 
 }
 
 Expr *ResultChecker::checkOkErr(CallExpr *call, NameExpr *name, bool isOk, const Type *expected) {
-  if (checker_.callChecker().rejectSpread(call) ||
-      !checker_.argumentChecker().checkArity(call, name->loc(), 0, 1)) {
+  bool rejected = checker_.callChecker().rejectSpread(call);
+  ArgumentChecker::ResultArityMatches arity =
+      rejected ? ok(call) : checker_.argumentChecker().checkArity(call, 0, 1);
+  if (arity.isErr()) {
+    checker_.diags_.error(name->loc(), arity.error().message);
+  }
+  if (rejected || arity.isErr()) {
     return call;
   }
 
@@ -151,8 +156,13 @@ Expr *ResultChecker::checkResultStatic(CallExpr *call, MemberExpr *member) {
                       "' does not exist; Result has 'combine' and "
                       "'combineWithAllErrors'");
   }
-  if (checker_.callChecker().rejectSpread(call) ||
-      !checker_.argumentChecker().checkArity(call, member->loc(), 1, 1)) {
+  bool rejected = checker_.callChecker().rejectSpread(call);
+  ArgumentChecker::ResultArityMatches arity =
+      rejected ? ok(call) : checker_.argumentChecker().checkArity(call, 1, 1);
+  if (arity.isErr()) {
+    checker_.diags_.error(member->loc(), arity.error().message);
+  }
+  if (rejected || arity.isErr()) {
     return call;
   }
   bool all = method == "combineWithAllErrors";

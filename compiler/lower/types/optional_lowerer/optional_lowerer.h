@@ -6,7 +6,7 @@ namespace tz {
 
 class OptionalLowerer {
 public:
-  explicit OptionalLowerer(Lowering &lowering);
+  explicit OptionalLowerer(Lowering &owner);
 
   llvm::Value *makeOptional(llvm::Value *value, llvm::Value *has, const Type *type);
   llvm::Value *undefinedValue(const Type *optionalType);
@@ -14,7 +14,9 @@ public:
   llvm::Value *optionalValue(llvm::Value *value, const Type *optionalType);
 
 private:
-  Lowering &lowering_;
+  static bool isReference(const Type *type);
+
+  Lowering &lowering;
 };
 
 }

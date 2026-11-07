@@ -4,9 +4,7 @@
 #include "compiler/check/expr/expr_checker/expr_checker.h"
 #include "llvm/ADT/STLExtras.h"
 
-using llvm::cast;
 using llvm::dyn_cast;
-using llvm::dyn_cast_or_null;
 using llvm::isa;
 
 namespace tz {
@@ -38,9 +36,7 @@ const Type *UnknownChecker::typeOfNarrowed(const std::u16string &name) {
   return nullptr;
 }
 
-namespace {
-
-const VarSymbol *checkedVariable(const Expr *expr) {
+const VarSymbol *UnknownChecker::checkedVariable(const Expr *expr) {
   while (auto *conv = dyn_cast<CastExpr>(expr)) {
     if (!conv->isImplicit()) {
       break;
@@ -56,7 +52,7 @@ const VarSymbol *checkedVariable(const Expr *expr) {
   return type->isUnknown() || type->nonOptional()->isAnyObject() ? name->var() : nullptr;
 }
 
-std::string hintName(const Expr *expr) {
+std::string UnknownChecker::hintName(const Expr *expr) {
   while (auto *conv = dyn_cast<CastExpr>(expr)) {
     if (!conv->isImplicit()) {
       break;
@@ -70,9 +66,8 @@ std::string hintName(const Expr *expr) {
   return "x";
 }
 
-}
-
-UnknownChecker::UnknownChecker(Checker &checker) : checker_(checker) {}
+UnknownChecker::UnknownChecker(Checker &owner)
+    : checker(owner) {}
 
 bool UnknownChecker::isObjectReference(const Type *type) {
   return type->isObject() || type->isIterator() || type->isDict() || type->isClassRef() ||
@@ -89,7 +84,7 @@ bool UnknownChecker::holdsUnknown(const Type *type) {
 }
 
 std::string UnknownChecker::unknownHint(const Expr *expr, const Type *to) {
-  std::string x = hintName(expr);
+  std::string x = UnknownChecker::hintName(expr);
   const Type *target = to ? to->nonOptional() : nullptr;
   bool object = expr->type && expr->type->isAnyObject();
   std::string check;
@@ -120,33 +115,33 @@ std::string UnknownChecker::unknownHint(const Expr *expr, const Type *to) {
 
 void UnknownChecker::reportUnknownUse(const Expr *object, const std::string &what) {
   const Type *type = object->type;
-  std::string x = hintName(object);
+  std::string x = UnknownChecker::hintName(object);
   if (type->isAnyObject()) {
-    checker_.diags_.error(object->loc(),
-                          "an object " + (what.empty() ? "cannot be indexed" : "has no " + what) +
-                              " until 'instanceof' shows its class, e.g. 'if (" + x +
-                              " instanceof C) ...'");
+    this->checker.diags_.error(
+        object->loc(), "an object " + (what.empty() ? "cannot be indexed" : "has no " + what) +
+                           " until 'instanceof' shows its class, e.g. 'if (" + x +
+                           " instanceof C) ...'");
     return;
   }
   std::string example = what.empty() ? "Array.isArray(" + x + ")" : x + " instanceof C";
-  checker_.diags_.error(object->loc(), "an unknown value " +
-                                           (what.empty() ? "cannot be indexed" : "has no " + what) +
-                                           " until a check shows what it holds, e.g. 'if (" +
-                                           example + ") ...' or 'typeof " + x + " == \"string\"'");
+  this->checker.diags_.error(
+      object->loc(), "an unknown value " + (what.empty() ? "cannot be indexed" : "has no " + what) +
+                         " until a check shows what it holds, e.g. 'if (" + example +
+                         ") ...' or 'typeof " + x + " == \"string\"'");
 }
 
 Expr *UnknownChecker::checkUnknownMember(MemberExpr *member) {
   member->type = Type::error();
   if (member->object->type->isClassRef()) {
-    return checker_.classValueChecker().checkClassRefMember(member);
+    return this->checker.classValueChecker().checkClassRefMember(member);
   }
   if (member->name == "constructor") {
-    checker_.diags_.error(member->loc(),
-                          "'constructor' is not supported: an object has no prototype in tz; "
-                          "a decorator gets the class itself, use it as it is");
+    this->checker.diags_.error(member->loc(),
+                               "'constructor' is not supported: an object has no prototype in tz; "
+                               "a decorator gets the class itself, use it as it is");
     return member;
   }
-  reportUnknownUse(member->object, "property '" + member->name.str() + "'");
+  this->reportUnknownUse(member->object, "property '" + member->name.str() + "'");
 
   return member;
 }
@@ -159,29 +154,30 @@ Expr *UnknownChecker::checkUnknownMethod(CallExpr *call, MemberExpr *member) {
   call->type = Type::error();
   if (ClassDecl *cls = const_cast<ClassDecl *>(receiver->classRef()); cls && cls->type) {
     Expr *object = member->object;
-    Expr *result = checker_.staticChecker().checkClassStaticCall(call, member, cls);
+    Expr *result = this->checker.staticChecker().checkClassStaticCall(call, member, cls);
     if (isa<NameExpr>(object)) {
       return result;
     }
-    auto *seq = checker_.ctx_.make<SequenceExpr>(call->loc(), std::vector<Expr *>{object, result});
+    auto *seq =
+        this->checker.ctx_.make<SequenceExpr>(call->loc(), std::vector<Expr *>{object, result});
     seq->type = result->type;
     return seq;
   }
   if (receiver->isConstructor()) {
-    checker_.diags_.error(member->loc(),
-                          "'" + receiver->name() +
-                              "' is some class known only when the "
-                              "program runs, whose static members are not known; call its "
-                              "methods through reflection (docs/decorators.md, section 6)");
+    this->checker.diags_.error(member->loc(),
+                               "'" + receiver->name() +
+                                   "' is some class known only when the "
+                                   "program runs, whose static members are not known; call its "
+                                   "methods through reflection (docs/decorators.md, section 6)");
   } else if (receiver->isClassRef()) {
-    checker_.diags_.error(member->loc(), "'" + receiver->classRef()->name +
-                                             "' as a value has no methods "
-                                             "in tz");
+    this->checker.diags_.error(member->loc(), "'" + receiver->classRef()->name +
+                                                  "' as a value has no methods "
+                                                  "in tz");
   } else {
-    reportUnknownUse(member->object, "method '" + member->name.str() + "'");
+    this->reportUnknownUse(member->object, "method '" + member->name.str() + "'");
   }
   for (Expr *&arg : call->args) {
-    arg = checker_.exprChecker().checkExpr(arg);
+    arg = this->checker.exprChecker().checkExpr(arg);
   }
 
   return call;
@@ -194,13 +190,13 @@ void UnknownChecker::addUnknownFacts(const Expr *cond, Checker::Flow &whenTrue,
     flow.narrowed.push_back({var, type});
   };
   if (auto *call = dyn_cast<CallExpr>(cond); call && call->builtin() == Builtin::ArrayIsArray) {
-    if (const VarSymbol *var = checkedVariable(call->args[0])) {
+    if (const VarSymbol *var = UnknownChecker::checkedVariable(call->args[0])) {
       narrow(whenTrue, var, Type::array(Type::unknown()));
     }
     return;
   }
   if (auto *call = dyn_cast<CallExpr>(cond); call && call->builtin() == Builtin::JsonIsJson) {
-    if (const VarSymbol *var = checkedVariable(call->args[0])) {
+    if (const VarSymbol *var = UnknownChecker::checkedVariable(call->args[0])) {
       narrow(whenTrue, var, Type::json());
     }
     return;
@@ -214,7 +210,7 @@ void UnknownChecker::addUnknownFacts(const Expr *cond, Checker::Flow &whenTrue,
     if (cls && cls->isConstructor()) {
       cls = cls->constructed();
     }
-    if (const VarSymbol *var = checkedVariable(bin->lhs);
+    if (const VarSymbol *var = UnknownChecker::checkedVariable(bin->lhs);
         var && cls && (cls->isObject() || cls->isParam() || cls->isDate() || cls->isBytes())) {
       narrow(whenTrue, var, cls);
     }
@@ -230,11 +226,11 @@ void UnknownChecker::addUnknownFacts(const Expr *cond, Checker::Flow &whenTrue,
     if (!typeOf || typeOf->op != UnaryOp::TypeOf || !text) {
       continue;
     }
-    const VarSymbol *var = checkedVariable(typeOf->operand);
+    const VarSymbol *var = UnknownChecker::checkedVariable(typeOf->operand);
     if (!var || !var->type->isUnknown()) {
       continue;
     }
-    if (const Type *narrowed = typeOfNarrowed(text->value)) {
+    if (const Type *narrowed = UnknownChecker::typeOfNarrowed(text->value)) {
       narrow(equal, var, narrowed);
     }
   }

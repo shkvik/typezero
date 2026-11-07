@@ -6,7 +6,7 @@ namespace tz {
 
 class ConditionalTypes {
 public:
-  explicit ConditionalTypes(Checker &checker);
+  explicit ConditionalTypes(Checker &owner);
 
   const Type *resolveConditional(const TypeRef &ref);
   const Type *deferConditional(const TypeRef &ref);
@@ -19,9 +19,9 @@ public:
   const Type *signatureForUtility(const TypeRef &ref);
 
 private:
-  Checker &checker_;
-  std::map<const TypeRef *, Checker::ConditionalInfo> conditionals_;
-  llvm::DenseMap<const Type *, const Checker::ConditionalInfo *> conditionalTags_;
+  Checker &checker;
+  std::map<const TypeRef *, Checker::ConditionalInfo> conditionals;
+  llvm::DenseMap<const Type *, const Checker::ConditionalInfo *> conditionalTags;
 };
 
 }

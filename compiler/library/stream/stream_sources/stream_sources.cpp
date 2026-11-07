@@ -32,8 +32,13 @@ Expr *StreamSources::checkFsStreamFunction(CallExpr *call, FunctionDecl *decl, l
     return nullptr;
   }
   call->type = Type::error();
-  if (checker_.callChecker().rejectSpread(call) ||
-      !checker_.argumentChecker().checkArity(call, loc, 1, 2)) {
+  bool rejected = checker_.callChecker().rejectSpread(call);
+  ArgumentChecker::ResultArityMatches arity =
+      rejected ? ok(call) : checker_.argumentChecker().checkArity(call, 1, 2);
+  if (arity.isErr()) {
+    checker_.diags_.error(loc, arity.error().message);
+  }
+  if (rejected || arity.isErr()) {
     return call;
   }
   TypeAliasDecl *alias =
@@ -148,8 +153,13 @@ const Type *StreamSources::streamFromOptionsType() {
 
 Expr *StreamSources::checkStreamFrom(CallExpr *call, MemberExpr *member) {
   call->type = Type::error();
-  if (checker_.callChecker().rejectSpread(call) ||
-      !checker_.argumentChecker().checkArity(call, member->loc(), 1, 2)) {
+  bool rejected = checker_.callChecker().rejectSpread(call);
+  ArgumentChecker::ResultArityMatches arity =
+      rejected ? ok(call) : checker_.argumentChecker().checkArity(call, 1, 2);
+  if (arity.isErr()) {
+    checker_.diags_.error(member->loc(), arity.error().message);
+  }
+  if (rejected || arity.isErr()) {
     return call;
   }
   llvm::SMLoc loc = member->loc();

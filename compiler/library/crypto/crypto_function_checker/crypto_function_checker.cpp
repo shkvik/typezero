@@ -145,7 +145,9 @@ Expr *CryptoFunctionChecker::checkSyncCall(CallExpr *call, llvm::StringRef fn,
   };
 
   if (fn == "createHash") {
-    if (!checker_.argumentChecker().checkArity(call, loc, 1, 2)) {
+    ArgumentChecker::ResultArityMatches arity = checker_.argumentChecker().checkArity(call, 1, 2);
+    if (arity.isErr()) {
+      checker_.diags_.error(loc, arity.error().message);
       return call;
     }
     Expr *md = checker_.cryptoArgs().cryptoMd(args[0], false);
@@ -159,7 +161,9 @@ Expr *CryptoFunctionChecker::checkSyncCall(CallExpr *call, llvm::StringRef fn,
                                               Type::cryptoType(Crypto::Hash));
   }
   if (fn == "createHmac") {
-    if (!checker_.argumentChecker().checkArity(call, loc, 2, 2)) {
+    ArgumentChecker::ResultArityMatches arity = checker_.argumentChecker().checkArity(call, 2, 2);
+    if (arity.isErr()) {
+      checker_.diags_.error(loc, arity.error().message);
       return call;
     }
     Expr *md = checker_.cryptoArgs().cryptoMd(args[0], true);
@@ -172,7 +176,9 @@ Expr *CryptoFunctionChecker::checkSyncCall(CallExpr *call, llvm::StringRef fn,
                                               Type::cryptoType(Crypto::Hmac));
   }
   if (fn == "hash") {
-    if (!checker_.argumentChecker().checkArity(call, loc, 2, 3)) {
+    ArgumentChecker::ResultArityMatches arity = checker_.argumentChecker().checkArity(call, 2, 3);
+    if (arity.isErr()) {
+      checker_.diags_.error(loc, arity.error().message);
       return call;
     }
     Expr *md = checker_.cryptoArgs().cryptoMd(args[0], false);
@@ -197,7 +203,11 @@ Expr *CryptoFunctionChecker::checkSyncCall(CallExpr *call, llvm::StringRef fn,
     return e->type->isFloat() ? e : checker_.typeRelations().convert(e, Type::doubleTy());
   };
   if (fn == "randomBytes") {
-    if (!checker_.argumentChecker().checkArity(call, loc, 1, 2) ||
+    ArgumentChecker::ResultArityMatches arity = checker_.argumentChecker().checkArity(call, 1, 2);
+    if (arity.isErr()) {
+      checker_.diags_.error(loc, arity.error().message);
+    }
+    if (arity.isErr() ||
         checker_.cryptoArgs().rejectCryptoCallback(call, 1, fn, "'const bytes = randomBytes(n)'")) {
       return call;
     }
@@ -208,8 +218,11 @@ Expr *CryptoFunctionChecker::checkSyncCall(CallExpr *call, llvm::StringRef fn,
     return checker_.cryptoArgs().cryptoCall(call, CryptoFn::RandomBytes, {size}, buffer);
   }
   if (fn == "randomUUID") {
-    if (!checker_.argumentChecker().checkArity(call, loc, 0, 1) ||
-        !optionsAt(0, {"disableEntropyCache"})) {
+    ArgumentChecker::ResultArityMatches arity = checker_.argumentChecker().checkArity(call, 0, 1);
+    if (arity.isErr()) {
+      checker_.diags_.error(loc, arity.error().message);
+    }
+    if (arity.isErr() || !optionsAt(0, {"disableEntropyCache"})) {
       return call;
     }
     if (Expr *cache = options.lookup("disableEntropyCache")) {
@@ -218,7 +231,9 @@ Expr *CryptoFunctionChecker::checkSyncCall(CallExpr *call, llvm::StringRef fn,
     return checker_.cryptoArgs().cryptoCall(call, CryptoFn::RandomUuid, {}, Type::string());
   }
   if (fn == "randomInt") {
-    if (!checker_.argumentChecker().checkArity(call, loc, 1, 3)) {
+    ArgumentChecker::ResultArityMatches arity = checker_.argumentChecker().checkArity(call, 1, 3);
+    if (arity.isErr()) {
+      checker_.diags_.error(loc, arity.error().message);
       return call;
     }
     size_t last = args.size() - 1;
@@ -252,7 +267,10 @@ Expr *CryptoFunctionChecker::checkSyncCall(CallExpr *call, llvm::StringRef fn,
     return checker_.cryptoArgs().cryptoCall(call, CryptoFn::RandomInt32, {min, max}, Type::intTy());
   }
   if (fn == "randomFillSync" || fn == "getRandomValues") {
-    if (!checker_.argumentChecker().checkArity(call, loc, 1, fn == "randomFillSync" ? 3 : 1)) {
+    ArgumentChecker::ResultArityMatches arity =
+        checker_.argumentChecker().checkArity(call, 1, fn == "randomFillSync" ? 3 : 1);
+    if (arity.isErr()) {
+      checker_.diags_.error(loc, arity.error().message);
       return call;
     }
     Expr *target = checker_.exprChecker().checkExpr(args[0]);
@@ -318,7 +336,9 @@ Expr *CryptoFunctionChecker::checkSyncCall(CallExpr *call, llvm::StringRef fn,
         {target, offset, size, checker_.cryptoArgs().cryptoInt(loc, has)}, type);
   }
   if (fn == "timingSafeEqual") {
-    if (!checker_.argumentChecker().checkArity(call, loc, 2, 2)) {
+    ArgumentChecker::ResultArityMatches arity = checker_.argumentChecker().checkArity(call, 2, 2);
+    if (arity.isErr()) {
+      checker_.diags_.error(loc, arity.error().message);
       return call;
     }
     Expr *a = checker_.cryptoArgs().cryptoData(args[0], "first argument", false, false, true);
@@ -330,7 +350,9 @@ Expr *CryptoFunctionChecker::checkSyncCall(CallExpr *call, llvm::StringRef fn,
                                             Type::boolTy());
   }
   if (fn == "pbkdf2Sync") {
-    if (!checker_.argumentChecker().checkArity(call, loc, 5, 5)) {
+    ArgumentChecker::ResultArityMatches arity = checker_.argumentChecker().checkArity(call, 5, 5);
+    if (arity.isErr()) {
+      checker_.diags_.error(loc, arity.error().message);
       return call;
     }
     Expr *password = checker_.cryptoArgs().cryptoData(args[0], "password", true, true, true);
@@ -347,7 +369,9 @@ Expr *CryptoFunctionChecker::checkSyncCall(CallExpr *call, llvm::StringRef fn,
                                               {password, salt, iterations, keylen, md}, buffer);
   }
   if (fn == "hkdfSync") {
-    if (!checker_.argumentChecker().checkArity(call, loc, 5, 5)) {
+    ArgumentChecker::ResultArityMatches arity = checker_.argumentChecker().checkArity(call, 5, 5);
+    if (arity.isErr()) {
+      checker_.diags_.error(loc, arity.error().message);
       return call;
     }
     Expr *md = checker_.cryptoArgs().cryptoMd(args[0], true);
@@ -363,7 +387,9 @@ Expr *CryptoFunctionChecker::checkSyncCall(CallExpr *call, llvm::StringRef fn,
                                               Type::bytesType(Type::Bytes::ArrayBuffer));
   }
   if (fn == "scryptSync") {
-    if (!checker_.argumentChecker().checkArity(call, loc, 3, 4)) {
+    ArgumentChecker::ResultArityMatches arity = checker_.argumentChecker().checkArity(call, 3, 4);
+    if (arity.isErr()) {
+      checker_.diags_.error(loc, arity.error().message);
       return call;
     }
     Expr *password = checker_.cryptoArgs().cryptoData(args[0], "password", true, true, true);
@@ -406,7 +432,9 @@ Expr *CryptoFunctionChecker::checkSyncCall(CallExpr *call, llvm::StringRef fn,
                                               buffer);
   }
   if (fn == "argon2Sync") {
-    if (!checker_.argumentChecker().checkArity(call, loc, 2, 2)) {
+    ArgumentChecker::ResultArityMatches arity = checker_.argumentChecker().checkArity(call, 2, 2);
+    if (arity.isErr()) {
+      checker_.diags_.error(loc, arity.error().message);
       return call;
     }
     Expr *type, *name;
@@ -461,7 +489,9 @@ Expr *CryptoFunctionChecker::checkSyncCall(CallExpr *call, llvm::StringRef fn,
         {type, name, message, nonce, parallelism, tagLength, memory, passes, secret, data}, buffer);
   }
   if (fn == "createCipheriv" || fn == "createDecipheriv") {
-    if (!checker_.argumentChecker().checkArity(call, loc, 3, 4)) {
+    ArgumentChecker::ResultArityMatches arity = checker_.argumentChecker().checkArity(call, 3, 4);
+    if (arity.isErr()) {
+      checker_.diags_.error(loc, arity.error().message);
       return call;
     }
     std::optional<std::string> name = literalOf(args[0]);
@@ -489,7 +519,9 @@ Expr *CryptoFunctionChecker::checkSyncCall(CallExpr *call, llvm::StringRef fn,
         Type::cryptoType(decrypt ? Crypto::Decipheriv : Crypto::Cipheriv));
   }
   if (fn == "getHashes" || fn == "getCiphers" || fn == "getCurves") {
-    if (!checker_.argumentChecker().checkArity(call, loc, 0, 0)) {
+    ArgumentChecker::ResultArityMatches arity = checker_.argumentChecker().checkArity(call, 0, 0);
+    if (arity.isErr()) {
+      checker_.diags_.error(loc, arity.error().message);
       return call;
     }
     return checker_.cryptoArgs().cryptoCall(call,
@@ -499,7 +531,9 @@ Expr *CryptoFunctionChecker::checkSyncCall(CallExpr *call, llvm::StringRef fn,
                                             {}, Type::array(Type::string()));
   }
   if (fn == "createSecretKey") {
-    if (!checker_.argumentChecker().checkArity(call, loc, 1, 2)) {
+    ArgumentChecker::ResultArityMatches arity = checker_.argumentChecker().checkArity(call, 1, 2);
+    if (arity.isErr()) {
+      checker_.diags_.error(loc, arity.error().message);
       return call;
     }
     Expr *key = checker_.cryptoArgs().cryptoData(args[0], "key", true, false, true);
@@ -513,7 +547,9 @@ Expr *CryptoFunctionChecker::checkSyncCall(CallExpr *call, llvm::StringRef fn,
     return checker_.cryptoArgs().cryptoCall(call, CryptoFn::SecretKey, {key, encoding}, keyObject);
   }
   if (fn == "createPublicKey" || fn == "createPrivateKey") {
-    if (!checker_.argumentChecker().checkArity(call, loc, 1, 1)) {
+    ArgumentChecker::ResultArityMatches arity = checker_.argumentChecker().checkArity(call, 1, 1);
+    if (arity.isErr()) {
+      checker_.diags_.error(loc, arity.error().message);
       return call;
     }
     bool priv = fn == "createPrivateKey";
@@ -579,7 +615,9 @@ Expr *CryptoFunctionChecker::checkSyncCall(CallExpr *call, llvm::StringRef fn,
     return checker_.keyPairChecker().checkGenerateKeyPair(call, loc, shown);
   }
   if (fn == "generateKeySync") {
-    if (!checker_.argumentChecker().checkArity(call, loc, 2, 2)) {
+    ArgumentChecker::ResultArityMatches arity = checker_.argumentChecker().checkArity(call, 2, 2);
+    if (arity.isErr()) {
+      checker_.diags_.error(loc, arity.error().message);
       return call;
     }
     int which = checker_.cryptoArgs().cryptoChoice(args[0], "type of the key", {"hmac", "aes"});
@@ -617,11 +655,15 @@ Expr *CryptoFunctionChecker::checkSyncCall(CallExpr *call, llvm::StringRef fn,
   if (fn == "sign" || fn == "verify") {
     bool verify = fn == "verify";
     size_t count = verify ? 4 : 3;
-    if (!checker_.argumentChecker().checkArity(call, loc, unsigned(count), unsigned(count + 1)) ||
-        checker_.cryptoArgs().rejectCryptoCallback(
-            call, count, fn,
-            verify ? "'const ok = verify(algorithm, data, key, signature)'"
-                   : "'const signature = sign(algorithm, data, key)'")) {
+    ArgumentChecker::ResultArityMatches arity =
+        checker_.argumentChecker().checkArity(call, unsigned(count), unsigned(count + 1));
+    if (arity.isErr()) {
+      checker_.diags_.error(loc, arity.error().message);
+    }
+    if (arity.isErr() || checker_.cryptoArgs().rejectCryptoCallback(
+                             call, count, fn,
+                             verify ? "'const ok = verify(algorithm, data, key, signature)'"
+                                    : "'const signature = sign(algorithm, data, key)'")) {
       return call;
     }
     Expr *algorithm = isa<UndefinedExpr>(args[0])
@@ -647,7 +689,9 @@ Expr *CryptoFunctionChecker::checkSyncCall(CallExpr *call, llvm::StringRef fn,
                                               verify ? Type::boolTy() : buffer);
   }
   if (fn == "createSign" || fn == "createVerify") {
-    if (!checker_.argumentChecker().checkArity(call, loc, 1, 1)) {
+    ArgumentChecker::ResultArityMatches arity = checker_.argumentChecker().checkArity(call, 1, 1);
+    if (arity.isErr()) {
+      checker_.diags_.error(loc, arity.error().message);
       return call;
     }
     Expr *name = args[0];
@@ -662,7 +706,9 @@ Expr *CryptoFunctionChecker::checkSyncCall(CallExpr *call, llvm::StringRef fn,
     return checker_.cryptoArgs().cryptoResult(call, CryptoFn::SignNew, std::move(signArgs), made);
   }
   if (fn == "createECDH") {
-    if (!checker_.argumentChecker().checkArity(call, loc, 1, 1)) {
+    ArgumentChecker::ResultArityMatches arity = checker_.argumentChecker().checkArity(call, 1, 1);
+    if (arity.isErr()) {
+      checker_.diags_.error(loc, arity.error().message);
       return call;
     }
     std::optional<std::string> curve = literalOf(args[0]);
@@ -677,7 +723,11 @@ Expr *CryptoFunctionChecker::checkSyncCall(CallExpr *call, llvm::StringRef fn,
                                               Type::cryptoType(Crypto::Ecdh));
   }
   if (fn == "diffieHellman") {
-    if (!checker_.argumentChecker().checkArity(call, loc, 1, 1) ||
+    ArgumentChecker::ResultArityMatches arity = checker_.argumentChecker().checkArity(call, 1, 1);
+    if (arity.isErr()) {
+      checker_.diags_.error(loc, arity.error().message);
+    }
+    if (arity.isErr() ||
         !checker_.cryptoArgs().cryptoOptions(args[0], fn, {"privateKey", "publicKey"}, options)) {
       return call;
     }
@@ -693,8 +743,11 @@ Expr *CryptoFunctionChecker::checkSyncCall(CallExpr *call, llvm::StringRef fn,
     return checker_.cryptoArgs().cryptoResult(call, CryptoFn::DiffieHellman, {priv, pub}, buffer);
   }
   if (fn == "generatePrimeSync") {
-    if (!checker_.argumentChecker().checkArity(call, loc, 1, 2) ||
-        !optionsAt(1, {"add", "rem", "safe", "bigint"})) {
+    ArgumentChecker::ResultArityMatches arity = checker_.argumentChecker().checkArity(call, 1, 2);
+    if (arity.isErr()) {
+      checker_.diags_.error(loc, arity.error().message);
+    }
+    if (arity.isErr() || !optionsAt(1, {"add", "rem", "safe", "bigint"})) {
       return call;
     }
     if (Expr *big = options.lookup("bigint")) {
@@ -720,7 +773,11 @@ Expr *CryptoFunctionChecker::checkSyncCall(CallExpr *call, llvm::StringRef fn,
                                               Type::bytesType(Type::Bytes::ArrayBuffer));
   }
   if (fn == "checkPrimeSync") {
-    if (!checker_.argumentChecker().checkArity(call, loc, 1, 2) || !optionsAt(1, {"checks"})) {
+    ArgumentChecker::ResultArityMatches arity = checker_.argumentChecker().checkArity(call, 1, 2);
+    if (arity.isErr()) {
+      checker_.diags_.error(loc, arity.error().message);
+    }
+    if (arity.isErr() || !optionsAt(1, {"checks"})) {
       return call;
     }
     Expr *candidate =

@@ -6,12 +6,12 @@ namespace tz {
 
 class SwitchChecker {
 public:
-  explicit SwitchChecker(Checker &checker);
+  explicit SwitchChecker(Checker &owner);
 
   void checkSwitch(SwitchStmt *stmt);
 
 private:
-  Checker &checker_;
+  Checker &checker;
 };
 
 }

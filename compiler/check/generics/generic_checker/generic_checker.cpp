@@ -7,12 +7,9 @@
 #include "compiler/check/types/type_relations/type_relations.h"
 #include "compiler/whole_program/flows/flows.h"
 #include "llvm/ADT/STLExtras.h"
-#include <functional>
-#include <set>
 
 using llvm::cast;
 using llvm::dyn_cast;
-using llvm::dyn_cast_or_null;
 using llvm::isa;
 
 namespace tz {
@@ -23,7 +20,8 @@ bool typeMentions(const Type *type, llvm::ArrayRef<const Type *> params) {
   return mentionsAnyOf(type, params);
 }
 
-GenericChecker::GenericChecker(Checker &checker) : checker_(checker) {}
+GenericChecker::GenericChecker(Checker &owner)
+    : checker(owner) {}
 
 const Type *GenericChecker::apparentType(const Type *type) {
   if (type->isParam() && type->constraint() && !type->isListParam()) {
@@ -58,19 +56,19 @@ const Type *GenericChecker::apparentType(const Type *type) {
 }
 
 Expr *GenericChecker::apparent(Expr *expr) {
-  const Type *type = apparentType(expr->type);
+  const Type *type = GenericChecker::apparentType(expr->type);
 
-  return type == expr->type ? expr : checker_.typeRelations().convert(expr, type);
+  return type == expr->type ? expr : this->checker.typeRelations().convert(expr, type);
 }
 
 FuncSymbol *GenericChecker::genericNamed(const NameExpr *name) const {
-  ScopeEntry entry = checker_.scopes().lookup(name->name);
+  ScopeEntry entry = this->checker.scopes().lookup(name->name);
 
   return entry.func() && !entry.var() && entry.func()->isGeneric() ? entry.func() : nullptr;
 }
 
 const Type *GenericChecker::numberParam(const Type *param, const Type *only) const {
-  const Type *&number = numberParams_[{param, only}];
+  const Type *&number = this->numberParams[{param, only}];
   if (!number) {
     const Type *constraint = only;
     for (const Type *t : only ? llvm::ArrayRef<const Type *>() : param->alternatives()) {
@@ -87,7 +85,7 @@ const Type *GenericChecker::numberParam(const Type *param, const Type *only) con
 }
 
 const Type *GenericChecker::narrowedType(const VarSymbol *var) const {
-  for (const auto &[narrowed, type] : checker_.flow_.narrowed) {
+  for (const auto &[narrowed, type] : this->checker.flow_.narrowed) {
     if (narrowed == var) {
       return type;
     }
@@ -103,7 +101,7 @@ void GenericChecker::noteForced(const Expr *expr, const Type *to) {
     }
     expr = conv->operand;
   }
-  checker_.forced_[{expr->loc().getPointer(), unsigned(expr->kind())}] = to;
+  this->checker.forced_[{expr->loc().getPointer(), unsigned(expr->kind())}] = to;
 }
 
 Expr *GenericChecker::forceConversion(Expr *expr, const Type *to) {
@@ -112,10 +110,10 @@ Expr *GenericChecker::forceConversion(Expr *expr, const Type *to) {
     return expr;
   }
   if (to->isString()) {
-    return checker_.concatChecker().toStringOperand(expr);
+    return this->checker.concatChecker().toStringOperand(expr);
   }
   if (TypeRelations::isImplicitlyConvertible(type, to)) {
-    return checker_.typeRelations().convert(expr, to);
+    return this->checker.typeRelations().convert(expr, to);
   }
 
   return expr;
@@ -132,7 +130,7 @@ std::optional<bool> GenericChecker::constantCondition(const Expr *cond) const {
     return lit->value;
   }
   if (auto *unary = dyn_cast<UnaryExpr>(cond); unary && unary->op == UnaryOp::Not) {
-    if (std::optional<bool> value = constantCondition(unary->operand)) {
+    if (std::optional<bool> value = this->constantCondition(unary->operand)) {
       return !*value;
     }
     return std::nullopt;
@@ -150,12 +148,12 @@ std::optional<bool> GenericChecker::constantCondition(const Expr *cond) const {
   }
   if (bin->op == BinaryOp::LogAnd || bin->op == BinaryOp::LogOr) {
     bool isAnd = bin->op == BinaryOp::LogAnd;
-    std::optional<bool> l = constantCondition(bin->lhs);
+    std::optional<bool> l = this->constantCondition(bin->lhs);
     if (l && *l != isAnd) {
       return l;
     }
     if (l) {
-      return constantCondition(bin->rhs);
+      return this->constantCondition(bin->rhs);
     }
     return std::nullopt;
   }
@@ -217,7 +215,7 @@ const Type *GenericChecker::literalShape(const Expr *expr) {
   if (auto *lit = dyn_cast<ArrayLitExpr>(expr)) {
     const Type *element = nullptr;
     for (const ArrayLitExpr::Element &e : lit->elements) {
-      const Type *type = e.spread || e.hole ? nullptr : literalShape(e.expr);
+      const Type *type = e.spread || e.hole ? nullptr : GenericChecker::literalShape(e.expr);
       element = type && element ? TypeRelations::unify(element, type) : type;
       if (!element) {
         return nullptr;
@@ -228,7 +226,7 @@ const Type *GenericChecker::literalShape(const Expr *expr) {
   if (auto *lit = dyn_cast<ObjectLitExpr>(expr)) {
     std::vector<Field> fields;
     for (const ObjectLitExpr::Property &p : lit->props) {
-      const Type *type = literalShape(p.value);
+      const Type *type = GenericChecker::literalShape(p.value);
       if (!type || type->isUndefined() ||
           llvm::any_of(fields, [&](const Field &f) { return f.name == p.name; })) {
         return nullptr;

@@ -471,7 +471,9 @@ Expr *IntlChecker::checkIntlFunction(CallExpr *call, MemberExpr *member) {
     return call;
   }
   if (member->name == "getCanonicalLocales") {
-    if (!checker_.argumentChecker().checkArity(call, member->loc(), 0, 1)) {
+    ArgumentChecker::ResultArityMatches arity = checker_.argumentChecker().checkArity(call, 0, 1);
+    if (arity.isErr()) {
+      checker_.diags_.error(member->loc(), arity.error().message);
       return call;
     }
     if (!call->args.empty()) {
@@ -518,7 +520,9 @@ Expr *IntlChecker::checkIntlStatic(CallExpr *call, MemberExpr *member) {
     }
     return call;
   }
-  if (!checker_.argumentChecker().checkArity(call, member->loc(), 1, 2)) {
+  ArgumentChecker::ResultArityMatches arity = checker_.argumentChecker().checkArity(call, 1, 2);
+  if (arity.isErr()) {
+    checker_.diags_.error(member->loc(), arity.error().message);
     return call;
   }
   call->args[0] = checkLocaleList(call->args[0], what);

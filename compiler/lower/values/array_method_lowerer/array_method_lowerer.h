@@ -6,13 +6,13 @@ namespace tz {
 
 class ArrayMethodLowerer {
 public:
-  explicit ArrayMethodLowerer(Lowering &lowering);
+  explicit ArrayMethodLowerer(Lowering &owner);
 
   llvm::Value *emitArrayMethod(CallExpr *call);
   llvm::Value *emitValueToString(llvm::Value *value, const Type *type);
 
 private:
-  Lowering &lowering_;
+  Lowering &lowering;
 };
 
 }

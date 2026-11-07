@@ -6,12 +6,12 @@ namespace tz {
 
 class CallLowerer {
 public:
-  explicit CallLowerer(Lowering &lowering);
+  explicit CallLowerer(Lowering &owner);
 
   llvm::Value *emitCall(CallExpr *call);
 
 private:
-  Lowering &lowering_;
+  Lowering &lowering;
 };
 
 }

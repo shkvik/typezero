@@ -6,7 +6,7 @@ namespace tz {
 
 class CallbackMethodLowerer {
 public:
-  explicit CallbackMethodLowerer(Lowering &lowering);
+  explicit CallbackMethodLowerer(Lowering &owner);
 
   llvm::Value *emitCallbackMethod(CallExpr *call);
   llvm::Function *sortComparator(CallExpr *call);
@@ -17,7 +17,7 @@ public:
                             const Type *accType);
 
 private:
-  Lowering &lowering_;
+  Lowering &lowering;
 };
 
 }

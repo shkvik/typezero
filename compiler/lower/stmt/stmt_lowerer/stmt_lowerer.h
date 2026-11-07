@@ -6,7 +6,7 @@ namespace tz {
 
 class StmtLowerer {
 public:
-  explicit StmtLowerer(Lowering &lowering);
+  explicit StmtLowerer(Lowering &owner);
 
   void emitStmt(Stmt *stmt);
   void emitStatements(BlockStmt *block);
@@ -18,7 +18,7 @@ public:
   void storeReplacing(llvm::Value *address, llvm::Value *value, const Type *type);
 
 private:
-  Lowering &lowering_;
+  Lowering &lowering;
 };
 
 }

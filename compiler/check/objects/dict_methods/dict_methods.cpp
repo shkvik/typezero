@@ -8,16 +8,12 @@
 #include "compiler/check/objects/dict_checker/dict_checker.h"
 #include "compiler/check/objects/dict_new_checker/dict_new_checker.h"
 #include "llvm/ADT/STLExtras.h"
-#include "llvm/Support/ConvertUTF.h"
 
-using llvm::cast;
-using llvm::dyn_cast;
-using llvm::dyn_cast_or_null;
-using llvm::isa;
 
 namespace tz {
 
-DictMethods::DictMethods(Checker &checker) : checker_(checker) {}
+DictMethods::DictMethods(Checker &owner)
+    : checker(owner) {}
 
 Expr *DictMethods::checkDictMethod(CallExpr *call, MemberExpr *member) {
   const Type *type = member->object->type;
@@ -25,32 +21,33 @@ Expr *DictMethods::checkDictMethod(CallExpr *call, MemberExpr *member) {
   std::string text = dictText(member->object, type);
   auto checkArgsLoosely = [&] {
     for (Expr *&arg : call->args) {
-      arg = checker_.exprChecker().checkExpr(arg);
+      arg = this->checker.exprChecker().checkExpr(arg);
     }
   };
   call->type = Type::error();
   if (type->isRecord()) {
     std::string key = text + "." + name.str();
     if (name == "hasOwnProperty" && call->args.size() == 1) {
-      checker_.diags_.error(
+      this->checker.diags_.error(
           member->loc(), "a Record inherits nothing from Object.prototype, and '" + key +
                              "' is a key like any other; ask for a key with 'key in " + text + "'");
     } else if (type->valueType()->isFunction()) {
-      checker_.diags_.error(member->loc(),
-                            "'" + key +
-                                "' may be undefined, as a key may be missing; call it with "
-                                "'" +
-                                key + "?.(...)'");
+      this->checker.diags_.error(member->loc(),
+                                 "'" + key +
+                                     "' may be undefined, as a key may be missing; call it with "
+                                     "'" +
+                                     key + "?.(...)'");
     } else {
-      checker_.diags_.error(member->loc(), "a Record has no methods, only keys, and '" + key +
-                                               "' is a '" + type->valueType()->name() +
-                                               " | undefined'; for the keys use 'Object.keys(" +
-                                               text + ")'");
+      this->checker.diags_.error(member->loc(),
+                                 "a Record has no methods, only keys, and '" + key + "' is a '" +
+                                     type->valueType()->name() +
+                                     " | undefined'; for the keys use 'Object.keys(" + text + ")'");
     }
     checkArgsLoosely();
     return call;
   }
-  const Type *key = type->keyType(), *value = type->valueType();
+  const Type *key = type->keyType();
+  const Type *value = type->valueType();
   bool isMap = type->isMap();
   auto set = [&](Builtin builtin, const Type *result) {
     call->target = BuiltinCall{.builtin = builtin};
@@ -59,10 +56,16 @@ Expr *DictMethods::checkDictMethod(CallExpr *call, MemberExpr *member) {
     return call;
   };
   auto arity = [&](unsigned min, unsigned max) {
-    return checker_.argumentChecker().checkArity(call, member->loc(), min, max);
+    ArgumentChecker::ResultArityMatches matches =
+        this->checker.argumentChecker().checkArity(call, min, max);
+    if (matches.isErr()) {
+      this->checker.diags_.error(member->loc(), matches.error().message);
+    }
+
+    return matches.isOk();
   };
   auto keyArg = [&](size_t i) {
-    call->args[i] = checker_.argumentChecker().checkArg(call->args[i], key);
+    call->args[i] = this->checker.argumentChecker().checkArg(call->args[i], key);
   };
 
   if (name == "get" && isMap) {
@@ -77,7 +80,7 @@ Expr *DictMethods::checkDictMethod(CallExpr *call, MemberExpr *member) {
       return call;
     }
     keyArg(0);
-    call->args[1] = checker_.argumentChecker().checkArg(call->args[1], value);
+    call->args[1] = this->checker.argumentChecker().checkArg(call->args[1], value);
     return set(Builtin::MapSet, type);
   }
   if (name == "add" && !isMap) {
@@ -114,7 +117,7 @@ Expr *DictMethods::checkDictMethod(CallExpr *call, MemberExpr *member) {
   }
   if (name == "forEach") {
     if (call->args.size() == 2) {
-      checker_.diags_.error(
+      this->checker.diags_.error(
           call->args[1]->loc(),
           "the second argument of 'forEach' sets 'this' for the callback, which is not "
           "supported");
@@ -128,9 +131,9 @@ Expr *DictMethods::checkDictMethod(CallExpr *call, MemberExpr *member) {
     sig.pad = false;
     sig.voidResult = true;
     sig.params = {isMap ? value : key, key, type};
-    call->args[0] =
-        checker_.callbackChecker().checkFunctionArg(call->args[0], sig, isMap ? 2 : 1, "forEach");
-    checker_.flowChecker().calledFunction();
+    call->args[0] = this->checker.callbackChecker().checkFunctionArg(call->args[0], sig,
+                                                                     isMap ? 2 : 1, "forEach");
+    this->checker.flowChecker().calledFunction();
     return set(Builtin::MapForEach, Type::voidTy());
   }
   struct Combine {
@@ -155,16 +158,16 @@ Expr *DictMethods::checkDictMethod(CallExpr *call, MemberExpr *member) {
       return call;
     }
     Expr *&other = call->args[0];
-    other = checker_.exprChecker().checkExpr(other, type);
+    other = this->checker.exprChecker().checkExpr(other, type);
     const Type *otherType = other->type;
     if (otherType->isError()) {
       return call;
     }
     if (!otherType->isDict() || otherType->isRecord() || otherType->keyType() != key) {
-      checker_.diags_.error(other->loc(), "'" + name + "' needs a 'Set<" + key->name() +
-                                              ">' or a 'Map<" + key->name() + ", ...>', found '" +
-                                              otherType->name() +
-                                              "'; make a Set first, e.g. 'new Set(xs)'");
+      this->checker.diags_.error(other->loc(), "'" + name + "' needs a 'Set<" + key->name() +
+                                                   ">' or a 'Map<" + key->name() +
+                                                   ", ...>', found '" + otherType->name() +
+                                                   "'; make a Set first, e.g. 'new Set(xs)'");
       return call;
     }
     return set(c.builtin, c.test ? Type::boolTy() : type);
@@ -184,36 +187,42 @@ Expr *DictMethods::checkDictMethod(CallExpr *call, MemberExpr *member) {
                "." + name.str() + "(...)', or on an array, '[..." + text + "]." + name.str() +
                "(...)'";
   }
-  checker_.diags_.error(member->loc(), message);
+  this->checker.diags_.error(member->loc(), message);
   checkArgsLoosely();
 
   return call;
 }
 
 Expr *DictMethods::checkFromEntries(CallExpr *call, MemberExpr *member, const Type *expected) {
-  if (checker_.callChecker().rejectSpread(call) ||
-      !checker_.argumentChecker().checkArity(call, member->loc(), 1, 1)) {
+  bool rejected = this->checker.callChecker().rejectSpread(call);
+  ArgumentChecker::ResultArityMatches arity =
+      rejected ? ok(call) : this->checker.argumentChecker().checkArity(call, 1, 1);
+  if (arity.isErr()) {
+    this->checker.diags_.error(member->loc(), arity.error().message);
+  }
+  if (rejected || arity.isErr()) {
     return call;
   }
   const Type *wanted = expected ? expected->nonOptional() : nullptr;
   const Type *type = wanted && wanted->isRecord() ? wanted : nullptr;
   const Type *element = type ? Type::tuple({Type::string(), type->valueType()}) : nullptr;
-  const Type *key = nullptr, *value = nullptr;
-  if (!type && checker_.dictNewChecker().inferPairs(call->args[0], key, value)) {
+  const Type *key = nullptr;
+  const Type *value = nullptr;
+  if (!type && this->checker.dictNewChecker().inferPairs(call->args[0], key, value)) {
     if (key->isError()) {
       return call;
     }
     element = call->args[0]->type->inner();
   } else {
-    call->args[0] = checker_.dictNewChecker().checkDictSource(call->args[0], true, element,
-                                                              "'Object.fromEntries'");
+    call->args[0] = this->checker.dictNewChecker().checkDictSource(call->args[0], true, element,
+                                                                   "'Object.fromEntries'");
   }
   if (element->isError()) {
     return call;
   }
   if (!type) {
     if (!element->fields()[0].type->isString()) {
-      checker_.diags_.error(
+      this->checker.diags_.error(
           call->args[0]->loc(),
           "the keys of an object are strings, and JavaScript would turn '" +
               element->fields()[0].type->name() +
@@ -222,10 +231,10 @@ Expr *DictMethods::checkFromEntries(CallExpr *call, MemberExpr *member, const Ty
     }
     const Type *values = element->fields()[1].type;
     if (values->isUndefined()) {
-      checker_.diags_.error(call->args[0]->loc(),
-                            "cannot infer the type of the values from 'undefined'; "
-                            "declare it, e.g. 'const r: Record<string, int | "
-                            "undefined> = Object.fromEntries(...)'");
+      this->checker.diags_.error(call->args[0]->loc(),
+                                 "cannot infer the type of the values from 'undefined'; "
+                                 "declare it, e.g. 'const r: Record<string, int | "
+                                 "undefined> = Object.fromEntries(...)'");
       return call;
     }
     type = Type::dict(Type::DictKind::Record, Type::string(), values);
@@ -238,40 +247,45 @@ Expr *DictMethods::checkFromEntries(CallExpr *call, MemberExpr *member, const Ty
 
 Expr *DictMethods::checkGroupBy(CallExpr *call, MemberExpr *member, bool map) {
   std::string fn = map ? "Map.groupBy" : "Object.groupBy";
-  if (checker_.callChecker().rejectSpread(call) ||
-      !checker_.argumentChecker().checkArity(call, member->loc(), 2, 2)) {
+  bool rejected = this->checker.callChecker().rejectSpread(call);
+  ArgumentChecker::ResultArityMatches arity =
+      rejected ? ok(call) : this->checker.argumentChecker().checkArity(call, 2, 2);
+  if (arity.isErr()) {
+    this->checker.diags_.error(member->loc(), arity.error().message);
+  }
+  if (rejected || arity.isErr()) {
     return call;
   }
   const Type *element = nullptr;
   call->args[0] =
-      checker_.dictNewChecker().checkDictSource(call->args[0], false, element, "'" + fn + "'");
+      this->checker.dictNewChecker().checkDictSource(call->args[0], false, element, "'" + fn + "'");
   if (element->isError()) {
-    call->args[1] = checker_.exprChecker().checkExpr(call->args[1]);
+    call->args[1] = this->checker.exprChecker().checkExpr(call->args[1]);
     return call;
   }
   Checker::Signature sig;
   sig.pad = false;
   sig.params = {element, Type::intTy()};
-  call->args[1] = checker_.callbackChecker().checkFunctionArg(call->args[1], sig, 1, fn);
-  checker_.flowChecker().calledFunction();
+  call->args[1] = this->checker.callbackChecker().checkFunctionArg(call->args[1], sig, 1, fn);
+  this->checker.flowChecker().calledFunction();
   const Type *callback = call->args[1]->type;
   if (!callback->isFunction()) {
     return call;
   }
   const Type *key = callback->ret();
   if (key->isVoid() || key->isUndefined()) {
-    checker_.diags_.error(call->args[1]->loc(),
-                          "the callback of '" + fn + "' must return the key of a group");
+    this->checker.diags_.error(call->args[1]->loc(),
+                               "the callback of '" + fn + "' must return the key of a group");
     return call;
   }
   if (!map && !key->isString()) {
-    checker_.diags_.error(
+    this->checker.diags_.error(
         call->args[1]->loc(),
         "the keys of an object are strings, and JavaScript would turn '" + key->name() +
             "' keys into them; return a string, or group into a Map: 'Map.groupBy(...)'");
     return call;
   }
-  if (!checker_.dictChecker().checkKeyType(key, call->args[1]->loc())) {
+  if (!this->checker.dictChecker().checkKeyType(key, call->args[1]->loc())) {
     return call;
   }
   call->target = BuiltinCall{.builtin = Builtin::DictGroupBy};
@@ -283,13 +297,13 @@ Expr *DictMethods::checkGroupBy(CallExpr *call, MemberExpr *member, bool map) {
 
 Expr *DictMethods::checkMapStatic(CallExpr *call, MemberExpr *member) {
   if (member->name == "groupBy") {
-    return checkGroupBy(call, member, true);
+    return this->checkGroupBy(call, member, true);
   }
-  checker_.diags_.error(member->loc(), "'Map." + member->name +
-                                           "' is not supported; of Map only "
-                                           "'Map.groupBy' and 'new Map' are");
+  this->checker.diags_.error(member->loc(), "'Map." + member->name +
+                                                "' is not supported; of Map only "
+                                                "'Map.groupBy' and 'new Map' are");
   for (Expr *&arg : call->args) {
-    arg = checker_.exprChecker().checkExpr(arg);
+    arg = this->checker.exprChecker().checkExpr(arg);
   }
 
   return call;
@@ -300,7 +314,7 @@ Expr *DictMethods::checkDictObjectCall(CallExpr *call, llvm::StringRef fn) {
   const Type *type = arg->type;
   if (!type->isRecord()) {
     std::string text = dictText(arg, type);
-    checker_.diags_.error(
+    this->checker.diags_.error(
         arg->loc(), "'Object." + fn + "' of a " + (type->isMap() ? "Map" : "Set") +
                         " is always empty in JavaScript: its entries are no properties; "
                         "use '[..." +

@@ -6,7 +6,7 @@ namespace tz {
 
 class LoopBounds {
 public:
-  explicit LoopBounds(Checker &checker);
+  explicit LoopBounds(Checker &owner);
 
   Checker::Flow loopHead(const Checker::LoopScan &scan, const Expr *cond, bool induction) const;
   std::optional<int64_t> condBoundsAbove(const Expr *cond, const VarSymbol *var,
@@ -18,7 +18,9 @@ public:
   std::optional<std::pair<int64_t, int64_t>> syntacticIntRange(const Expr *expr) const;
 
 private:
-  Checker &checker_;
+  static bool isArrayLength(const Term &t);
+
+  Checker &checker;
 };
 
 }

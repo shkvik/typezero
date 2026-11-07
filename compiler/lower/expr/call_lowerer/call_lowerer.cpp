@@ -34,28 +34,24 @@
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/IR/Intrinsics.h"
 #include "llvm/IR/MDBuilder.h"
-#include "llvm/Support/ConvertUTF.h"
-#include "llvm/Support/ErrorHandling.h"
-#include <array>
 
-using llvm::BasicBlock;
 using llvm::cast;
-using llvm::dyn_cast;
 using llvm::isa;
-using llvm::Value;
 
 namespace tz {
 
-CallLowerer::CallLowerer(Lowering &lowering) : lowering_(lowering) {}
+CallLowerer::CallLowerer(Lowering &owner)
+    : lowering(owner) {}
 
 llvm::Value *CallLowerer::emitCall(CallExpr *call) {
-  if (const Feature *feature = lowering_.features_->lowering(call->builtin())) {
-    return feature->lowerCall(lowering_, call);
+  const Feature *feature = this->lowering.features_->lowering(call->builtin());
+  if (feature) {
+    return feature->lowerCall(this->lowering, call);
   }
   switch (call->builtin()) {
     case Builtin::StringOf:
-      return call->args.empty() ? lowering_.stringLowerer().stringLiteral(u"")
-                                : lowering_.exprLowerer().emitExpr(call->args[0]);
+      return call->args.empty() ? this->lowering.stringLowerer().stringLiteral(u"")
+                                : this->lowering.exprLowerer().emitExpr(call->args[0]);
     case Builtin::NumberOf:
     case Builtin::ParseInt:
     case Builtin::ParseFloat:
@@ -70,11 +66,11 @@ llvm::Value *CallLowerer::emitCall(CallExpr *call) {
     case Builtin::NumToFixed:
     case Builtin::NumToRadix:
     case Builtin::NumConvert:
-      return lowering_.numberLowerer().emitNumberBuiltin(call);
+      return this->lowering.numberLowerer().emitNumberBuiltin(call);
     case Builtin::None:
       break;
     case Builtin::TupleJoin:
-      return lowering_.unknownLowerer().emitTupleJoin(call);
+      return this->lowering.unknownLowerer().emitTupleJoin(call);
     case Builtin::ArrForEach:
     case Builtin::ArrMap:
     case Builtin::ArrFilter:
@@ -88,11 +84,11 @@ llvm::Value *CallLowerer::emitCall(CallExpr *call) {
     case Builtin::ArrSome:
     case Builtin::ArrEvery:
     case Builtin::ArrSortWith:
-      return lowering_.callbackMethodLowerer().emitCallbackMethod(call);
+      return this->lowering.callbackMethodLowerer().emitCallbackMethod(call);
     case Builtin::ObjectKeys:
     case Builtin::ObjectValues:
     case Builtin::ObjectEntries:
-      return lowering_.objectLowerer().emitObjectCall(call);
+      return this->lowering.objectLowerer().emitObjectCall(call);
     case Builtin::ArrKeys:
     case Builtin::ArrValues:
     case Builtin::ArrEntries:
@@ -110,45 +106,45 @@ llvm::Value *CallLowerer::emitCall(CallExpr *call) {
     case Builtin::IterSome:
     case Builtin::IterEvery:
     case Builtin::IterFind:
-      return lowering_.iteratorLowerer().emitIteratorBuiltin(call);
+      return this->lowering.iteratorLowerer().emitIteratorBuiltin(call);
     default:
       if (isAsyncBuiltin(call->builtin())) {
-        return lowering_.asyncBuiltinLowerer().emitAsyncBuiltin(call);
+        return this->lowering.asyncBuiltinLowerer().emitAsyncBuiltin(call);
       }
       if (isDictBuiltin(call->builtin())) {
-        return lowering_.dictMethodLowerer().emitDictCall(call);
+        return this->lowering.dictMethodLowerer().emitDictCall(call);
       }
       if (cast<MemberExpr>(call->callee)->object->type->isArray()) {
-        return lowering_.arrayMethodLowerer().emitArrayMethod(call);
+        return this->lowering.arrayMethodLowerer().emitArrayMethod(call);
       }
-      return lowering_.stringMethodLowerer().emitStringMethod(call);
+      return this->lowering.stringMethodLowerer().emitStringMethod(call);
   }
 
   if (call->superCall() && !isa<MemberExpr>(call->callee)) {
-    return lowering_.classLowerer().emitSuperCall(call);
+    return this->lowering.classLowerer().emitSuperCall(call);
   }
   if (call->method()) {
-    return lowering_.classLowerer().emitMethodCall(call);
+    return this->lowering.classLowerer().emitMethodCall(call);
   }
   if (!call->unionMethods().empty()) {
-    return lowering_.unionMemberLowerer().emitUnionMethodCall(call);
+    return this->lowering.unionMemberLowerer().emitUnionMethodCall(call);
   }
   if (!call->func()) {
-    return lowering_.closureLowerer().emitValueCall(call);
+    return this->lowering.closureLowerer().emitValueCall(call);
   }
   const FuncSymbol *func = call->func();
-  std::vector<llvm::Value *> args = lowering_.exprLowerer().emitExprs(call->args);
+  std::vector<llvm::Value *> args = this->lowering.exprLowerer().emitExprs(call->args);
   for (size_t i = args.size(); i < func->params.size(); ++i) {
-    args.push_back(lowering_.optionalLowerer().undefinedValue(func->params[i]));
+    args.push_back(this->lowering.optionalLowerer().undefinedValue(func->params[i]));
   }
   llvm::CallInst *result;
-  lowering_.markAwaitedCall(call, func->decl);
+  this->lowering.markAwaitedCall(call, func->decl);
   if (func->decl->isClosure()) {
-    args.insert(args.begin(), lowering_.closureLowerer().closureEnv(call));
-    result =
-        lowering_.builder_.CreateCall(lowering_.closureLowerer().closureCode(func->decl), args);
+    args.insert(args.begin(), this->lowering.closureLowerer().closureEnv(call));
+    result = this->lowering.builder_.CreateCall(
+        this->lowering.closureLowerer().closureCode(func->decl), args);
   } else {
-    result = lowering_.builder_.CreateCall(lowering_.functions_.lookup(func), args);
+    result = this->lowering.builder_.CreateCall(this->lowering.functions_.lookup(func), args);
   }
 
   return result->getType()->isVoidTy() ? nullptr : result;

@@ -6,7 +6,7 @@ namespace tz {
 
 class UtilityTypes {
 public:
-  explicit UtilityTypes(Checker &checker);
+  explicit UtilityTypes(Checker &owner);
 
   const Type *functionValueType(FuncSymbol *fn);
   const Type *importedValueType(Module *from, llvm::StringRef name);
@@ -15,7 +15,9 @@ public:
   Expr *checkGenericIndex(IndexExpr *index);
 
 private:
-  Checker &checker_;
+  static llvm::ArrayRef<const Type *> membersOf(const Type *&type);
+
+  Checker &checker;
 };
 
 }

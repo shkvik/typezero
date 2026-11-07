@@ -6,7 +6,7 @@ namespace tz {
 
 class UnionChecker {
 public:
-  explicit UnionChecker(Checker &checker);
+  explicit UnionChecker(Checker &owner);
 
   Expr *checkUnionMember(MemberExpr *member);
   const Type *checkUnionFieldTarget(MemberExpr *member);
@@ -15,7 +15,10 @@ public:
   std::optional<std::vector<const Type *>> unhandledCases(const SwitchStmt *stmt) const;
 
 private:
-  Checker &checker_;
+  static llvm::ArrayRef<const Type *> membersOf(const Type *&type);
+  static bool isLiteralSet(const Type *type);
+
+  Checker &checker;
 };
 
 }

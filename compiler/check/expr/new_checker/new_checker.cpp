@@ -26,10 +26,7 @@
 #include "llvm/ADT/STLExtras.h"
 #include <cstring>
 
-using llvm::cast;
 using llvm::dyn_cast;
-using llvm::dyn_cast_or_null;
-using llvm::isa;
 
 namespace tz {
 
@@ -63,154 +60,158 @@ const char *whyUnsupported(llvm::StringRef name) {
   return nullptr;
 }
 
-NewChecker::NewChecker(Checker &checker) : checker_(checker) {}
+NewChecker::NewChecker(Checker &owner)
+    : checker(owner) {}
 
 Expr *NewChecker::checkNew(NewExpr *expr, const Type *expected) {
   expr->type = Type::error();
   auto checkArgsLoosely = [&] {
     for (Expr *&arg : expr->args) {
-      arg = checker_.exprChecker().checkExpr(arg);
+      arg = this->checker.exprChecker().checkExpr(arg);
     }
   };
   if (!expr->callee && !expr->name.empty() &&
-      checker_.topLevelChecker().lookupValue(expr->name).var()) {
-    expr->callee = checker_.ctx_.make<NameExpr>(expr->loc(), expr->name);
+      this->checker.topLevelChecker().lookupValue(expr->name).var()) {
+    expr->callee = this->checker.ctx_.make<NameExpr>(expr->loc(), expr->name);
     if (!expr->member.empty()) {
-      expr->callee = checker_.ctx_.make<MemberExpr>(expr->loc(), expr->callee, expr->member);
+      expr->callee = this->checker.ctx_.make<MemberExpr>(expr->loc(), expr->callee, expr->member);
     }
   }
   if (expr->callee) {
-    return checker_.classValueChecker().checkValueNew(expr, expected);
+    return this->checker.classValueChecker().checkValueNew(expr, expected);
   }
   if (!expr->member.empty()) {
-    ScopeEntry intl = checker_.scopes().lookup("Intl");
+    ScopeEntry intl = this->checker.scopes().lookup("Intl");
     if (expr->name == "Intl" && !intl.var() && !intl.func() && !intl.cls() &&
         expr->member == "Locale") {
-      return checker_.intlChecker().checkLocaleNew(expr, expected);
+      return this->checker.intlChecker().checkLocaleNew(expr, expected);
     }
     if (expr->name == "Intl" && !intl.var() && !intl.func() && !intl.cls()) {
       return expr->member == "DateTimeFormat"
-                 ? checker_.dateFormatChecker().checkDateFormatNew(expr->loc(), expr->args)
-                 : checker_.intlChecker().checkIntlNew(expr->loc(), expr->member, expr->args, true);
+                 ? this->checker.dateFormatChecker().checkDateFormatNew(expr->loc(), expr->args)
+                 : this->checker.intlChecker().checkIntlNew(expr->loc(), expr->member, expr->args,
+                                                            true);
     }
-    checker_.diags_.error(expr->loc(),
-                          "'" + expr->name + "." + expr->member +
-                              "' is not supported; of namespaces, only the classes of 'Intl' "
-                              "can be made with 'new'");
+    this->checker.diags_.error(expr->loc(),
+                               "'" + expr->name + "." + expr->member +
+                                   "' is not supported; of namespaces, only the classes of 'Intl' "
+                                   "can be made with 'new'");
     checkArgsLoosely();
     return expr;
   }
-  if (ClassDecl *cls = checker_.topLevelChecker().lookupValue(expr->name).cls()) {
-    if (cls->library() && !checker_.libraryCalls().inLibrary(expr->loc()) &&
-        (cls == checker_.libraryClass("CryptoKey") ||
-         cls == checker_.libraryClass("SubtleCrypto"))) {
-      checker_.diags_.error(expr->loc(),
-                            cls->name == "CryptoKey"
-                                ? std::string("a CryptoKey is made by crypto.subtle: "
-                                              "importKey, generateKey, deriveKey or "
-                                              "unwrapKey")
-                                : std::string("there is one SubtleCrypto: crypto.subtle"));
+  if (ClassDecl *cls = this->checker.topLevelChecker().lookupValue(expr->name).cls()) {
+    if (cls->library() && !this->checker.libraryCalls().inLibrary(expr->loc()) &&
+        (cls == this->checker.libraryClass("CryptoKey") ||
+         cls == this->checker.libraryClass("SubtleCrypto"))) {
+      this->checker.diags_.error(expr->loc(),
+                                 cls->name == "CryptoKey"
+                                     ? std::string("a CryptoKey is made by crypto.subtle: "
+                                                   "importKey, generateKey, deriveKey or "
+                                                   "unwrapKey")
+                                     : std::string("there is one SubtleCrypto: crypto.subtle"));
       checkArgsLoosely();
       return expr;
     }
-    Expr *checked = checker_.methodCallChecker().checkClassNew(
+    Expr *checked = this->checker.methodCallChecker().checkClassNew(
         expr, ClassValueChecker::finalClass(cls), expected);
     if (auto *made = dyn_cast<NewExpr>(checked); made && cls->library() && cls->name == "URL") {
-      checker_.urlChecker().checkUrlNew(made);
+      this->checker.urlChecker().checkUrlNew(made);
     }
     if (auto *made = dyn_cast<NewExpr>(checked); made && cls->library()) {
       if (cls->name == "Server" || cls->name == "Socket") {
-        checker_.tzModulesChecker().noteServer(made);
+        this->checker.tzModulesChecker().noteServer(made);
       }
       if (cls->name == "Response") {
-        checker_.httpChecker().checkResponseNew(made);
+        this->checker.httpChecker().checkResponseNew(made);
       } else if (cls->name == "Request") {
-        checker_.httpChecker().checkRequestNew(made);
+        this->checker.httpChecker().checkRequestNew(made);
       } else if (cls->name == "Headers") {
-        checker_.httpChecker().checkHeadersNew(made);
+        this->checker.httpChecker().checkHeadersNew(made);
       }
     }
     return checked;
   }
-  if (const Checker::NodeName *n = checker_.builtinModuleChecker().nodeName(expr->name);
+  if (const Checker::NodeName *n = this->checker.builtinModuleChecker().nodeName(expr->name);
       n && n->module == NodeModule::Crypto) {
-    return checker_.cryptoChecker().checkCryptoNew(expr, n->name);
+    return this->checker.cryptoChecker().checkCryptoNew(expr, n->name);
   }
   if (const char *why = whyUnsupported(expr->name)) {
-    checker_.diags_.error(expr->loc(), "'new " + expr->name + "' is not supported: " + why);
+    this->checker.diags_.error(expr->loc(), "'new " + expr->name + "' is not supported: " + why);
     checkArgsLoosely();
     return expr;
   }
-  if (expr->name == "RegExp" && !checker_.scopes().lookup("RegExp").var() &&
-      !checker_.scopes().lookup("RegExp").func()) {
+  if (expr->name == "RegExp" && !this->checker.scopes().lookup("RegExp").var() &&
+      !this->checker.scopes().lookup("RegExp").func()) {
     if (!expr->typeArgs.empty()) {
-      checker_.diags_.error(expr->loc(), "'RegExp' takes no type arguments");
+      this->checker.diags_.error(expr->loc(), "'RegExp' takes no type arguments");
     }
-    return checker_.regexChecker().checkRegExpConstructor(expr->loc(), expr->args);
+    return this->checker.regexChecker().checkRegExpConstructor(expr->loc(), expr->args);
   }
-  if (expr->name == "Date" && !checker_.scopes().lookup("Date").var() &&
-      !checker_.scopes().lookup("Date").func()) {
+  if (expr->name == "Date" && !this->checker.scopes().lookup("Date").var() &&
+      !this->checker.scopes().lookup("Date").func()) {
     if (!expr->typeArgs.empty()) {
-      checker_.diags_.error(expr->loc(), "'Date' takes no type arguments");
+      this->checker.diags_.error(expr->loc(), "'Date' takes no type arguments");
     }
-    return checker_.dateChecker().checkDateNew(expr->loc(), expr->args);
+    return this->checker.dateChecker().checkDateNew(expr->loc(), expr->args);
   }
   if ((expr->name == "Map" || expr->name == "Set" || expr->name == "WeakMap" ||
        expr->name == "WeakSet") &&
-      !checker_.scopes().lookup(expr->name).var() && !checker_.scopes().lookup(expr->name).func()) {
-    return checker_.dictNewChecker().checkDictNew(expr, expected);
+      !this->checker.scopes().lookup(expr->name).var() &&
+      !this->checker.scopes().lookup(expr->name).func()) {
+    return this->checker.dictNewChecker().checkDictNew(expr, expected);
   }
-  if (expr->name == "Promise" && !checker_.scopes().lookup("Promise").var() &&
-      !checker_.scopes().lookup("Promise").func()) {
-    return checker_.promiseChecker().checkPromiseNew(expr, expected);
+  if (expr->name == "Promise" && !this->checker.scopes().lookup("Promise").var() &&
+      !this->checker.scopes().lookup("Promise").func()) {
+    return this->checker.promiseChecker().checkPromiseNew(expr, expected);
   }
-  if (expr->name == "WeakRef" && !checker_.scopes().lookup("WeakRef").var() &&
-      !checker_.scopes().lookup("WeakRef").func()) {
-    return checker_.weakRefChecker().checkWeakRefNew(expr, expected);
+  if (expr->name == "WeakRef" && !this->checker.scopes().lookup("WeakRef").var() &&
+      !this->checker.scopes().lookup("WeakRef").func()) {
+    return this->checker.weakRefChecker().checkWeakRefNew(expr, expected);
   }
   if (const Type *bytes = BytesChecker::bytesTypeNamed(expr->name);
-      bytes && !checker_.scopes().lookup(expr->name).var() &&
-      !checker_.scopes().lookup(expr->name).func()) {
-    return checker_.bytesNewChecker().checkBytesNew(expr, bytes);
+      bytes && !this->checker.scopes().lookup(expr->name).var() &&
+      !this->checker.scopes().lookup(expr->name).func()) {
+    return this->checker.bytesNewChecker().checkBytesNew(expr, bytes);
   }
   if (expr->name == "BigInt64Array" || expr->name == "BigUint64Array") {
-    checker_.decimalChecker().reportBigInt(expr->loc(), "'" + expr->name.str() + "'");
+    this->checker.decimalChecker().reportBigInt(expr->loc(), "'" + expr->name.str() + "'");
     checkArgsLoosely();
     return expr;
   }
   if (expr->name != "Array") {
-    checker_.diags_.error(expr->loc(), "cannot find class '" + expr->name + "'");
+    this->checker.diags_.error(expr->loc(), "cannot find class '" + expr->name + "'");
     checkArgsLoosely();
     return expr;
   }
 
   const Type *element = nullptr;
   if (expr->typeArgs.size() == 1) {
-    element = checker_.typeResolver().resolveType(expr->typeArgs[0], false);
+    element = this->checker.typeResolver().resolveType(expr->typeArgs[0], false);
   } else if (expr->typeArgs.size() > 1) {
-    checker_.diags_.error(expr->loc(), "'Array' takes one type argument");
+    this->checker.diags_.error(expr->loc(), "'Array' takes one type argument");
     element = Type::error();
   } else if (expected && expected->nonOptional()->isArray()) {
     element = expected->nonOptional()->inner();
   } else {
-    checker_.diags_.error(expr->loc(),
-                          "'new Array' needs an element type, e.g. 'new Array<int>(n)'");
+    this->checker.diags_.error(expr->loc(),
+                               "'new Array' needs an element type, e.g. 'new Array<int>(n)'");
     element = Type::error();
   }
 
   if (expr->args.size() > 1) {
-    checker_.diags_.error(expr->loc(), "to create an array from values, use a literal: [a, b, c]");
+    this->checker.diags_.error(expr->loc(),
+                               "to create an array from values, use a literal: [a, b, c]");
     checkArgsLoosely();
     return expr;
   }
   if (expr->args.size() == 1) {
-    expr->args[0] = checker_.memberChecker().checkPosition(expr->args[0]);
+    expr->args[0] = this->checker.memberChecker().checkPosition(expr->args[0]);
     if (!element->isError() && !element->hasZeroValue()) {
-      checker_.diags_.error(expr->loc(),
-                            "'new Array<T>(n)' fills the array with a default value, and '" +
-                                element->name() + "' has none; start from '[]' and use push()");
+      this->checker.diags_.error(
+          expr->loc(), "'new Array<T>(n)' fills the array with a default value, and '" +
+                           element->name() + "' has none; start from '[]' and use push()");
     }
-    checker_.indexProofs().requireBetween(expr->args[0], 0, std::nullopt, "an array length");
+    this->checker.indexProofs().requireBetween(expr->args[0], 0, std::nullopt, "an array length");
   }
   if (!element->isError()) {
     expr->type = Type::array(element);

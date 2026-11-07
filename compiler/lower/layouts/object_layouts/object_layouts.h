@@ -6,7 +6,7 @@ namespace tz {
 
 class ObjectLayouts {
 public:
-  explicit ObjectLayouts(Lowering &lowering);
+  explicit ObjectLayouts(Lowering &owner);
 
   const Lowering::ObjectLayout &objectLayout(const Type *type);
   const Lowering::ObjectLayout *builtLayout(const Type *type) const;
@@ -20,8 +20,10 @@ public:
   static unsigned fieldIndex(const Type *type, llvm::StringRef name);
 
 private:
-  Lowering &lowering_;
-  std::map<const Type *, Lowering::ObjectLayout> objectLayouts_;
+  static std::string layoutName(const Type *type);
+
+  Lowering &lowering;
+  std::map<const Type *, Lowering::ObjectLayout> objectLayouts;
 };
 
 }

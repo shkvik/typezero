@@ -138,7 +138,9 @@ Expr *JsonStaticChecker::checkJsonStatic(CallExpr *call, MemberExpr *member) {
       checkArgsLoosely();
       return call;
     }
-    if (!checker_.argumentChecker().checkArity(call, member->loc(), 1, 1)) {
+    ArgumentChecker::ResultArityMatches arity = checker_.argumentChecker().checkArity(call, 1, 1);
+    if (arity.isErr()) {
+      checker_.diags_.error(member->loc(), arity.error().message);
       return call;
     }
     call->args[0] = checker_.argumentChecker().checkArg(call->args[0], Type::string());
@@ -156,7 +158,9 @@ Expr *JsonStaticChecker::checkJsonStatic(CallExpr *call, MemberExpr *member) {
     checkArgsLoosely();
     return call;
   }
-  if (!checker_.argumentChecker().checkArity(call, member->loc(), 1, 3)) {
+  ArgumentChecker::ResultArityMatches arity = checker_.argumentChecker().checkArity(call, 1, 3);
+  if (arity.isErr()) {
+    checker_.diags_.error(member->loc(), arity.error().message);
     return call;
   }
   Expr *value = call->args[0] = checker_.exprChecker().checkExpr(call->args[0]);
@@ -332,7 +336,9 @@ Expr *JsonStaticChecker::checkJsonGlobal(CallExpr *call, NameExpr *name) {
   if (fn == "embedBytes") {
     return checker_.bufferStaticChecker().checkEmbedBytes(call, name);
   }
-  if (!checker_.argumentChecker().checkArity(call, name->loc(), 1, 1)) {
+  ArgumentChecker::ResultArityMatches arity = checker_.argumentChecker().checkArity(call, 1, 1);
+  if (arity.isErr()) {
+    checker_.diags_.error(name->loc(), arity.error().message);
     return call;
   }
   std::string bytes, shown, full;

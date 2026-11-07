@@ -244,7 +244,10 @@ Expr *StreamPipeline::checkStreamFunction(CallExpr *call, FunctionDecl *decl, ll
   };
   if (fn == "finished") {
     unsigned most = promises ? 2 : 3;
-    if (!checker_.argumentChecker().checkArity(call, loc, most - 1, most)) {
+    ArgumentChecker::ResultArityMatches arity =
+        checker_.argumentChecker().checkArity(call, most - 1, most);
+    if (arity.isErr()) {
+      checker_.diags_.error(loc, arity.error().message);
       return call;
     }
     TypeAliasDecl *alias = checker_.libTypes_.lookup("FinishedOptions");

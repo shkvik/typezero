@@ -6,7 +6,7 @@ namespace tz {
 
 class OverloadResolver {
 public:
-  explicit OverloadResolver(Checker &checker);
+  explicit OverloadResolver(Checker &owner);
 
   FuncSymbol *chooseVariant(llvm::ArrayRef<FunctionDecl *> variants, std::vector<Expr *> &args,
                             const std::vector<bool> &spread, llvm::SMLoc loc, bool &checked,
@@ -20,7 +20,11 @@ public:
   std::vector<FunctionDecl *> signatureVariants(const Type *iface, const Overload &overload);
 
 private:
-  Checker &checker_;
+  static int conversionRank(const Type *from, const Type *to);
+  static const Type *parameterAt(const FuncSymbol *sym, size_t i);
+  static bool hasFloatLiteral(const Expr *expr);
+
+  Checker &checker;
   std::map<std::pair<const Type *, std::string>, std::vector<FunctionDecl *>> signatureVariants_;
 };
 

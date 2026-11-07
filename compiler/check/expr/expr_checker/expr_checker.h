@@ -6,7 +6,7 @@ namespace tz {
 
 class ExprChecker {
 public:
-  explicit ExprChecker(Checker &checker);
+  explicit ExprChecker(Checker &owner);
 
   Expr *checkExpr(Expr *expr, const Type *expected = nullptr, bool wraps = false);
   Expr *checkExprKind(Expr *expr, const Type *expected, bool wraps);
@@ -17,7 +17,7 @@ public:
   Expr *checkCast(CastExpr *cast);
 
 private:
-  Checker &checker_;
+  Checker &checker;
 };
 
 }

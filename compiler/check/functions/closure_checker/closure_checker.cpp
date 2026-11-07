@@ -16,18 +16,16 @@
 #include "compiler/infer/return_inferrer/return_inferrer.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/StringSet.h"
-#include <functional>
 
-using llvm::cast;
 using llvm::dyn_cast;
-using llvm::dyn_cast_or_null;
 using llvm::isa;
 
 namespace tz {
 
 const Type *literalType(const Expr *value);
 
-ClosureChecker::ClosureChecker(Checker &checker) : checker_(checker) {}
+ClosureChecker::ClosureChecker(Checker &owner)
+    : checker(owner) {}
 
 Checker::Signature ClosureChecker::signatureOf(const Type *fnType) {
   Checker::Signature sig;
@@ -42,30 +40,30 @@ Checker::Signature ClosureChecker::signatureOf(const Type *fnType) {
 
 Expr *ClosureChecker::checkFunctionExpr(FunctionExpr *fe, const Checker::Signature *sig) {
   FunctionDecl *fn = fe->fn;
-  FuncSymbol *sym = checker_.ctx_.newFunc();
+  FuncSymbol *sym = this->checker.ctx_.newFunc();
   sym->name = fn->name;
   sym->loc = fn->loc();
   sym->decl = fn;
   fn->sym = sym;
-  fn->parent = checker_.currentDecl();
-  fn->creationSeq = ++checker_.seq_;
+  fn->parent = this->checker.currentDecl();
+  fn->creationSeq = ++this->checker.seq_;
   bool generic = !fn->typeParams.empty();
   if (generic) {
-    checker_.diags_.error(
+    this->checker.diags_.error(
         fe->loc(),
         "a generic arrow or function expression can only be the value of a top-level "
         "constant for now, e.g. 'const f = <T>(x: T) => x'; or declare a generic function "
         "at the top level: 'function f<T>(x: T) { ... }'");
     fn->typeArgs.assign(fn->typeParams.size(), Type::error());
-    checker_.typeScopes_.emplace_back();
-    checker_.typeParams().bindTypeParams(fn->typeParams, fn->typeArgs);
+    this->checker.typeScopes_.emplace_back();
+    this->checker.typeParams().bindTypeParams(fn->typeParams, fn->typeArgs);
   }
 
   bool thisFromContext = false;
   if (sig && sig->hasThis && !sig->params.empty() &&
       (fn->params.empty() || fn->params[0].name != "this" || fn->isArrow())) {
     Param self;
-    self.name = fn->isArrow() ? checker_.ctx_.hiddenName() : llvm::StringRef("this");
+    self.name = fn->isArrow() ? this->checker.ctx_.hiddenName() : llvm::StringRef("this");
     self.loc = fe->loc();
     fn->params.insert(fn->params.begin(), self);
     thisFromContext = true;
@@ -80,17 +78,17 @@ Expr *ClosureChecker::checkFunctionExpr(FunctionExpr *fe, const Checker::Signatu
     const Type *type;
     const Type *passed;
     if (param.type) {
-      bool outerList = std::exchange(checker_.listContext_, param.rest());
-      type = checker_.typeResolver().resolveType(*param.type, false);
-      checker_.listContext_ = outerList;
+      bool outerList = std::exchange(this->checker.listContext_, param.rest());
+      type = this->checker.typeResolver().resolveType(*param.type, false);
+      this->checker.listContext_ = outerList;
       if (param.optional()) {
         type = Type::optional(type);
       }
       passed = mayOmit ? Type::optional(type) : type;
       if (given && passed != given && !passed->isError() && !given->isError() && !param.rest()) {
-        checker_.diags_.error(param.loc, "parameter '" + param.label() + "' is declared as '" +
-                                             passed->name() + "', but the function gets '" +
-                                             given->name() + "' here");
+        this->checker.diags_.error(param.loc, "parameter '" + param.label() + "' is declared as '" +
+                                                  passed->name() + "', but the function gets '" +
+                                                  given->name() + "' here");
         passed = given;
         type = param.defaultValue() ? given->nonOptional() : given;
       }
@@ -98,14 +96,14 @@ Expr *ClosureChecker::checkFunctionExpr(FunctionExpr *fe, const Checker::Signatu
       passed = given;
       type = param.defaultValue() ? given->nonOptional() : given;
       if (param.defaultValue() && !given->isOptional()) {
-        checker_.diags_.error(param.defaultValue()->loc(),
-                              "the default value of '" + param.label() +
-                                  "' is never used: the function always gets a value here");
+        this->checker.diags_.error(param.defaultValue()->loc(),
+                                   "the default value of '" + param.label() +
+                                       "' is never used: the function always gets a value here");
       }
     } else if (param.defaultValue() && (type = literalType(param.defaultValue()))) {
       passed = Type::optional(type);
     } else {
-      checker_.diags_.error(
+      this->checker.diags_.error(
           param.loc, "parameter '" + param.label() +
                          "' needs a type: nothing here says what the function is called with");
       type = passed = Type::error();
@@ -114,23 +112,23 @@ Expr *ClosureChecker::checkFunctionExpr(FunctionExpr *fe, const Checker::Signatu
       sym->hasThis = true;
     } else if (i == 0 && param.name == "this" && param.type && !param.rest()) {
       if (fn->isArrow()) {
-        checker_.diags_.error(param.loc,
-                              "an arrow function cannot have a 'this' parameter: it sees the "
-                              "'this' of the function around it; write a 'function'");
+        this->checker.diags_.error(param.loc,
+                                   "an arrow function cannot have a 'this' parameter: it sees the "
+                                   "'this' of the function around it; write a 'function'");
       } else {
         sym->hasThis = !mayOmit;
       }
     }
     if (param.rest()) {
       if (!type->isArray() && !type->isListParam() && !type->isTuple() && !type->isError()) {
-        checker_.diags_.error(param.loc, "a rest parameter must be an array, e.g. '..." +
-                                             param.name + ": int[]'");
+        this->checker.diags_.error(param.loc, "a rest parameter must be an array, e.g. '..." +
+                                                  param.name + ": int[]'");
       }
       sym->hasRest = true;
       passed = type;
     } else if (!mayOmit) {
       if (afterOptional) {
-        checker_.diags_.error(param.loc, "a required parameter cannot follow an optional one");
+        this->checker.diags_.error(param.loc, "a required parameter cannot follow an optional one");
       }
       sym->minArgs = i + 1;
     }
@@ -142,7 +140,7 @@ Expr *ClosureChecker::checkFunctionExpr(FunctionExpr *fe, const Checker::Signatu
   if (sig && sig->pad && !sym->hasRest) {
     for (size_t i = named; i < sig->params.size(); ++i) {
       Param hidden;
-      hidden.name = checker_.ctx_.hiddenName();
+      hidden.name = this->checker.ctx_.hiddenName();
       hidden.loc = fe->loc();
       hidden.declaredType = sig->params[i];
       fn->params.push_back(hidden);
@@ -150,12 +148,12 @@ Expr *ClosureChecker::checkFunctionExpr(FunctionExpr *fe, const Checker::Signatu
     }
     sym->minArgs = sig->minArgs;
   }
-  checker_.argListChecker().expandArgumentList(fn, sym);
+  this->checker.argListChecker().expandArgumentList(fn, sym);
 
   if (fn->isGenerator) {
     if (fn->returnType) {
-      sym->ret = checker_.generatorChecker().generatorReturnType(
-          fn, checker_.typeResolver().resolveType(*fn->returnType, true));
+      sym->ret = this->checker.generatorChecker().generatorReturnType(
+          fn, this->checker.typeResolver().resolveType(*fn->returnType, true));
     } else if (sig && sig->ret &&
                (fn->isAsync ? sig->ret->isAsyncIterator() : sig->ret->isIterator())) {
       sym->ret = sig->ret;
@@ -163,17 +161,17 @@ Expr *ClosureChecker::checkFunctionExpr(FunctionExpr *fe, const Checker::Signatu
   } else if (fn->isAsync) {
     if (sig && sig->voidResult) {
       if (!sig->asyncVoid) {
-        checker_.diags_.error(fe->loc(),
-                              "the Promise of this async function is dropped here, so nothing "
-                              "waits for it to finish; loop with 'for (const x of xs) await "
-                              "f(x)', or wait for all with 'await Promise.all(xs.map(async x "
-                              "=> ...))'");
+        this->checker.diags_.error(fe->loc(),
+                                   "the Promise of this async function is dropped here, so nothing "
+                                   "waits for it to finish; loop with 'for (const x of xs) await "
+                                   "f(x)', or wait for all with 'await Promise.all(xs.map(async x "
+                                   "=> ...))'");
       }
       sym->ret = Type::voidTy();
       sym->discardsResult = true;
     } else if (fn->returnType) {
-      sym->ret = checker_.asyncChecker().asyncReturnType(
-          fn, checker_.typeResolver().resolveType(*fn->returnType, true));
+      sym->ret = this->checker.asyncChecker().asyncReturnType(
+          fn, this->checker.typeResolver().resolveType(*fn->returnType, true));
     } else if (sig && sig->ret && sig->ret->isPromise()) {
       sym->ret = sig->ret;
     } else if (!ReturnInferrer::returnsValue(fn->body)) {
@@ -183,14 +181,14 @@ Expr *ClosureChecker::checkFunctionExpr(FunctionExpr *fe, const Checker::Signatu
     sym->ret = Type::voidTy();
     sym->discardsResult = true;
   } else if (fn->returnType) {
-    sym->ret = checker_.predicateChecker().resolveReturnType(fn, sym);
+    sym->ret = this->checker.predicateChecker().resolveReturnType(fn, sym);
   } else if (sig && sig->ret) {
     sym->ret = sig->ret;
   } else if (!ReturnInferrer::returnsValue(fn->body)) {
     sym->ret = Type::voidTy();
   }
   if (generic) {
-    checker_.typeScopes_.pop_back();
+    this->checker.typeScopes_.pop_back();
   }
 
   if (!sym->ret) {
@@ -198,99 +196,100 @@ Expr *ClosureChecker::checkFunctionExpr(FunctionExpr *fe, const Checker::Signatu
     collectNames(fn->body, names);
     bool recursive = !fn->ownName().empty() && names.contains(fn->ownName());
     for (const auto &entry : names) {
-      VarSymbol *var = checker_.scopes().lookup(entry.getKey()).var();
+      VarSymbol *var = this->checker.scopes().lookup(entry.getKey()).var();
       recursive |= var && var->lambda() == fn;
     }
     if (recursive) {
-      checker_.cycleOf_[sym] = static_cast<unsigned>(checker_.cycles_.size());
-      checker_.cycles_.push_back({sym});
-      Checker::BodyState saved = checker_.returnInferrer().enterBody(fn);
+      this->checker.cycleOf_[sym] = static_cast<unsigned>(this->checker.cycles_.size());
+      this->checker.cycles_.push_back({sym});
+      Checker::BodyState saved = this->checker.returnInferrer().enterBody(fn);
       bool ownScope = !fn->ownName().empty();
       if (ownScope) {
-        declareOwnName(fn);
+        this->declareOwnName(fn);
       }
-      checker_.returnInferrer().inferCycle(checker_.cycles_.back());
+      this->checker.returnInferrer().inferCycle(this->checker.cycles_.back());
       if (ownScope) {
-        checker_.popScope();
+        this->checker.popScope();
       }
-      checker_.returnInferrer().leaveBody(saved);
+      this->checker.returnInferrer().leaveBody(saved);
     }
   }
-  bool outerReady = checker_.closureThisReady_;
-  if (checker_.initFn_ && checker_.currentDecl() == checker_.initFn_) {
-    checker_.closureThisReady_ = checker_.classChecker().thisReady(checker_.flow_).isOk();
+  bool outerReady = this->checker.closureThisReady_;
+  if (this->checker.initFn_ && this->checker.currentDecl() == this->checker.initFn_) {
+    this->checker.closureThisReady_ =
+        this->checker.classChecker().thisReady(this->checker.flow_).isOk();
   }
-  checkClosureBody(fn);
-  checker_.closureThisReady_ = outerReady;
-  fe->type = checker_.returnInferrer().functionType(sym);
+  this->checkClosureBody(fn);
+  this->checker.closureThisReady_ = outerReady;
+  fe->type = this->checker.returnInferrer().functionType(sym);
 
   return fe;
 }
 
 void ClosureChecker::declareOwnName(FunctionDecl *fn) {
-  checker_.pushScope();
-  VarSymbol *self = checker_.ctx_.newVar();
+  this->checker.pushScope();
+  VarSymbol *self = this->checker.ctx_.newVar();
   self->name = fn->ownName();
   self->loc = fn->loc();
   self->isConst = true;
   self->holds = Lambda{.lambda = fn};
-  unsigned declSeq = ++checker_.seq_;
+  unsigned declSeq = ++this->checker.seq_;
   self->place = FunctionLocalVar{.owner = fn, .state = {.declSeq = declSeq}};
-  checker_.scopes().declare(fn->ownName(), fn->loc(), {VarEntry{.var = self}});
+  this->checker.scopes().declare(fn->ownName(), fn->loc(), {VarEntry{.var = self}});
 }
 
 void ClosureChecker::checkClosureBody(FunctionDecl *fn) {
-  Checker::BodyState saved = checker_.returnInferrer().enterBody(fn);
+  Checker::BodyState saved = this->checker.returnInferrer().enterBody(fn);
   auto fixed = [](Term t) {
     return (!t.var || (t.var->isConst && !t.length)) && (!t.var2 || (t.var2->isConst && !t.length2));
   };
   for (const Facts::Fact &f : saved.flow.facts.all()) {
     if (fixed(f.lhs) && fixed(f.rhs)) {
-      checker_.flow_.facts.add(f.lhs, f.rhs, f.offset);
+      this->checker.flow_.facts.add(f.lhs, f.rhs, f.offset);
     }
   }
   for (const VarSymbol *var : saved.flow.defined) {
     if (var->isConst) {
-      checker_.flow_.defined.insert(var);
+      this->checker.flow_.defined.insert(var);
     }
   }
   for (const auto &[var, type] : saved.flow.narrowed) {
     if (var->isConst) {
-      checker_.flow_.narrowed.push_back({var, type});
+      this->checker.flow_.narrowed.push_back({var, type});
     }
   }
   for (const VarSymbol *var : saved.flow.okResults) {
     if (var->isConst) {
-      checker_.flow_.okResults.insert(var);
+      this->checker.flow_.okResults.insert(var);
     }
   }
   for (const VarSymbol *var : saved.flow.errResults) {
     if (var->isConst) {
-      checker_.flow_.errResults.insert(var);
+      this->checker.flow_.errResults.insert(var);
     }
   }
   bool ownScope = fn->isExpression() && !fn->ownName().empty();
   if (ownScope) {
-    declareOwnName(fn);
+    this->declareOwnName(fn);
   }
   if (fn->sym->ret) {
-    checker_.functionChecker().checkFunctionBody(fn);
+    this->checker.functionChecker().checkFunctionBody(fn);
   } else {
-    checker_.returnInferrer().checkAndInfer(fn);
+    this->checker.returnInferrer().checkAndInfer(fn);
   }
   if (ownScope) {
-    checker_.popScope();
+    this->checker.popScope();
   }
-  checker_.returnInferrer().leaveBody(saved);
+  this->checker.returnInferrer().leaveBody(saved);
 }
 
 void ClosureChecker::checkStatements(BlockStmt *block) {
-  checker_.typeDeclarer().declareTypes(block->body);
-  NestedGroup *group = checker_.nestedFunctions().declareNested(block);
+  this->checker.typeDeclarer().declareTypes(block->body);
+  NestedGroup *group = this->checker.nestedFunctions().declareNested(block);
   if (group) {
-    checker_.groups_.push_back(group);
+    this->checker.groups_.push_back(group);
   }
-  Checker::BlockNames names{checker_.functions_.size(), {}};
+  Checker::BlockNames names{this->checker.functions_.size(), {}};
   for (Stmt *stmt : block->body) {
     if (auto *decl = dyn_cast<VarDeclStmt>(stmt)) {
       for (const VarDeclarator &d : decl->decls) {
@@ -298,32 +297,32 @@ void ClosureChecker::checkStatements(BlockStmt *block) {
       }
     }
   }
-  checker_.blockNames_.push_back(std::move(names));
+  this->checker.blockNames_.push_back(std::move(names));
   for (size_t i = 0; i < block->body.size(); ++i) {
     if (group && i == group->firstUse) {
-      group->creationSeq = ++checker_.seq_;
+      group->creationSeq = ++this->checker.seq_;
       for (FunctionDecl *fn : group->members) {
         if (LocalVarState *state = fn->var->local()) {
           state->declSeq = group->creationSeq;
         }
       }
     }
-    checker_.block_ = block->body;
-    checker_.blockIndex_ = i;
-    checker_.stmtChecker().checkStmt(block->body[i]);
+    this->checker.block_ = block->body;
+    this->checker.blockIndex_ = i;
+    this->checker.stmtChecker().checkStmt(block->body[i]);
     auto *decided = dyn_cast<IfStmt>(block->body[i]);
-    if (checker_.checkingInstance_ && decided && isa<BoolLitExpr>(decided->cond) &&
-        checker_.flow_.unreachable && (!group || group->firstUse <= i) &&
+    if (this->checker.checkingInstance_ && decided && isa<BoolLitExpr>(decided->cond) &&
+        this->checker.flow_.unreachable && (!group || group->firstUse <= i) &&
         llvm::none_of(llvm::ArrayRef<Stmt *>(block->body).drop_front(i + 1),
                       [](const Stmt *s) { return isa<FunctionDecl>(s) || isa<ClassDecl>(s); })) {
       block->body.resize(i + 1);
       break;
     }
   }
-  checker_.blockNames_.pop_back();
+  this->checker.blockNames_.pop_back();
   if (group) {
-    checker_.nestedFunctions().finishGroup(group);
-    checker_.groups_.pop_back();
+    this->checker.nestedFunctions().finishGroup(group);
+    this->checker.groups_.pop_back();
   }
 }
 

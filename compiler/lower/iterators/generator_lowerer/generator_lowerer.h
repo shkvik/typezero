@@ -6,7 +6,7 @@ namespace tz {
 
 class GeneratorLowerer {
 public:
-  explicit GeneratorLowerer(Lowering &lowering);
+  explicit GeneratorLowerer(Lowering &owner);
 
   llvm::Constant *iteratorLayout(unsigned flags);
   void emitGenerator(FunctionDecl *fn, llvm::Function *function);
@@ -15,11 +15,11 @@ public:
                                    const Type *result);
 
 private:
-  Lowering &lowering_;
+  Lowering &lowering;
   std::map<std::tuple<Builtin, const Type *, const Type *, const Type *>, llvm::Function *>
-      iteratorFunctions_;
-  llvm::Function *iterDropFn_ = nullptr;
-  std::map<unsigned, llvm::Constant *> iteratorLayouts_;
+      iteratorFunctions;
+  llvm::Function *iterDropFn = nullptr;
+  std::map<unsigned, llvm::Constant *> iteratorLayouts;
 };
 
 }

@@ -6,13 +6,13 @@ namespace tz {
 
 class ExitLowerer {
 public:
-  explicit ExitLowerer(Lowering &lowering);
+  explicit ExitLowerer(Lowering &owner);
 
   void emitReturnOf(llvm::Value *value);
   void emitJumpTo(size_t target, bool isBreak);
 
 private:
-  Lowering &lowering_;
+  Lowering &lowering;
 };
 
 }

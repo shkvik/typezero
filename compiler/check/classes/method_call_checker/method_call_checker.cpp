@@ -21,58 +21,57 @@
 #include "compiler/library/tz_modules/tz_modules_checker/tz_modules_checker.h"
 #include "llvm/ADT/STLExtras.h"
 
-using llvm::cast;
-using llvm::dyn_cast;
-using llvm::dyn_cast_or_null;
-using llvm::isa;
 
 namespace tz {
 
-MethodCallChecker::MethodCallChecker(Checker &checker) : checker_(checker) {}
+MethodCallChecker::MethodCallChecker(Checker &owner)
+    : checker(owner) {}
 
 Expr *MethodCallChecker::checkMethodCall(CallExpr *call, MemberExpr *member, const Type *expected) {
   ClassDecl *cls = ClassDeclarer::classOf(member->object->type);
-  checker_.classDeclarer().completeClass(cls);
-  checker_.tzModulesChecker().noteTlsMethod(member, cls);
+  this->checker.classDeclarer().completeClass(cls);
+  this->checker.tzModulesChecker().noteTlsMethod(member, cls);
   call->type = Type::error();
   member->type = Type::error();
   llvm::StringRef name = member->name;
   auto checkArgsLoosely = [&] {
     for (Expr *&arg : call->args) {
-      arg = checker_.exprChecker().checkExpr(arg);
+      arg = this->checker.exprChecker().checkExpr(arg);
     }
   };
-  if (Expr *checked = checker_.fsDeclarer().checkFsClassMethod(call, member, cls)) {
+  if (Expr *checked = this->checker.fsDeclarer().checkFsClassMethod(call, member, cls)) {
     return checked;
   }
-  if (Expr *checked = checker_.streamChecker().checkStreamCall(call, member, cls)) {
+  if (Expr *checked = this->checker.streamChecker().checkStreamCall(call, member, cls)) {
     return checked;
   }
-  if (checker_.eventMaps().isEmitterClass(cls)) {
-    if (Expr *checked = checker_.emitterChecker().checkEmitterCall(call, member, cls, false)) {
+  if (this->checker.eventMaps().isEmitterClass(cls)) {
+    if (Expr *checked = this->checker.emitterChecker().checkEmitterCall(call, member, cls, false)) {
       return checked;
     }
   }
-  if (ClassDecl *target = checker_.libraryClass("EventTarget");
+  if (ClassDecl *target = this->checker.libraryClass("EventTarget");
       target && cls->derivesFrom(target)) {
-    if (Expr *checked = checker_.eventTargetChecker().checkEventTargetCall(call, member, cls)) {
+    if (Expr *checked =
+            this->checker.eventTargetChecker().checkEventTargetCall(call, member, cls)) {
       return checked;
     }
   }
   const ClassField *field = ClassBases::findField(cls, name);
   if (field && !field->method()) {
-    call->callee = checker_.classMemberChecker().checkClassMember(member, nullptr);
+    call->callee = this->checker.classMemberChecker().checkClassMember(member, nullptr);
     const Type *type = call->callee->type;
     if (type->isFunction()) {
-      return checker_.callChecker().checkValueCall(call, type);
+      return this->checker.callChecker().checkValueCall(call, type);
     }
     if (type->isOptional() && type->inner()->isFunction()) {
-      checker_.diags_.error(member->loc(),
-                            "the function may be undefined; check it first, or call it with "
-                            "'?.()', which gives undefined then");
+      this->checker.diags_.error(member->loc(),
+                                 "the function may be undefined; check it first, or call it with "
+                                 "'?.()', which gives undefined then");
     } else if (!type->isError()) {
-      checker_.diags_.error(member->loc(), "field '" + name + "' is not a function; it has type '" +
-                                               type->name() + "'");
+      this->checker.diags_.error(member->loc(), "field '" + name +
+                                                    "' is not a function; it has type '" +
+                                                    type->name() + "'");
     }
     checkArgsLoosely();
     return call;
@@ -80,52 +79,54 @@ Expr *MethodCallChecker::checkMethodCall(CallExpr *call, MemberExpr *member, con
   std::vector<FunctionDecl *> methods = ClassDeclarer::methodsNamed(cls, name, false);
   if (methods.empty()) {
     if (!ClassDeclarer::methodsNamed(cls, name, true).empty()) {
-      checker_.diags_.error(member->loc(), "'" + name + "' is a static method of '" + cls->name +
-                                               "': call it through the class, '" + cls->name + "." +
-                                               name + "(...)'");
+      this->checker.diags_.error(member->loc(), "'" + name + "' is a static method of '" +
+                                                    cls->name + "': call it through the class, '" +
+                                                    cls->name + "." + name + "(...)'");
     } else {
-      checker_.diags_.error(member->loc(), "property '" + name + "' does not exist on type '" +
-                                               cls->type->name() + "'");
+      this->checker.diags_.error(member->loc(), "property '" + name + "' does not exist on type '" +
+                                                    cls->type->name() + "'");
     }
     checkArgsLoosely();
     return call;
   }
   if (methods.size() == 1) {
-    checker_.classMemberChecker().checkAccess(methods[0]->cls(), methods[0]->access(), name,
-                                              member->loc(), member->object);
+    this->checker.classMemberChecker().checkAccess(methods[0]->cls(), methods[0]->access(), name,
+                                                   member->loc(), member->object);
   }
-  if (checker_.classChecker().isInitThis(member->object).isOk() && !checker_.flow_.beforeSuper &&
-      checker_.classChecker().thisReady(checker_.flow_).isErr()) {
-    checker_.diags_.error(member->loc(),
-                          "'this." + name + "()' is called before every field is set: field '" +
-                              checker_.classChecker().firstUnset(checker_.flow_).value() +
-                              "' is not set yet, and the method may read it");
+  if (this->checker.classChecker().isInitThis(member->object).isOk() &&
+      !this->checker.flow_.beforeSuper &&
+      this->checker.classChecker().thisReady(this->checker.flow_).isErr()) {
+    this->checker.diags_.error(
+        member->loc(), "'this." + name + "()' is called before every field is set: field '" +
+                           this->checker.classChecker().firstUnset(this->checker.flow_).value() +
+                           "' is not set yet, and the method may read it");
   }
   bool checked = false;
   std::vector<const Type *> bound;
-  FuncSymbol *sym = checker_.overloadResolver().chooseVariant(methods, call->args, call->spread,
-                                                              member->loc(), checked, &bound);
+  FuncSymbol *sym = this->checker.overloadResolver().chooseVariant(
+      methods, call->args, call->spread, member->loc(), checked, &bound);
   if (!sym) {
     return call;
   }
   if (methods.size() > 1 && sym->decl) {
-    checker_.classMemberChecker().checkAccess(sym->decl->cls(), sym->decl->access(), name,
-                                              member->loc(), member->object);
+    this->checker.classMemberChecker().checkAccess(sym->decl->cls(), sym->decl->access(), name,
+                                                   member->loc(), member->object);
   }
-  checker_.returnInferrer().resolveParams(sym);
+  this->checker.returnInferrer().resolveParams(sym);
   if (!sym->isGeneric() && !member->typeArgs.empty()) {
-    checker_.diags_.error(member->loc(),
-                          "'" + name + "' is not a generic method; remove the type arguments");
+    this->checker.diags_.error(member->loc(),
+                               "'" + name + "' is not a generic method; remove the type arguments");
   }
   if (sym->isGeneric() && checked) {
-    return checker_.overloadResolver().callGenericVariant(call, sym, bound, member->loc(), true);
+    return this->checker.overloadResolver().callGenericVariant(call, sym, bound, member->loc(),
+                                                               true);
   }
   if (sym->isGeneric()) {
-    checker_.typeArgInferrer().checkGenericCall(call, sym, member->loc(), expected,
-                                                member->typeArgs);
+    this->checker.typeArgInferrer().checkGenericCall(call, sym, member->loc(), expected,
+                                                     member->typeArgs);
     call->target = MethodCall{.method = call->func()};
     if (call->method()) {
-      member->type = checker_.returnInferrer().functionType(call->method());
+      member->type = this->checker.returnInferrer().functionType(call->method());
     }
     return call;
   }
@@ -134,77 +135,78 @@ Expr *MethodCallChecker::checkMethodCall(CallExpr *call, MemberExpr *member, con
   } else {
     call->target = MethodCall{.method = sym, .virtualCall = true};
   }
-  member->type = checker_.returnInferrer().functionType(sym);
-  call->type = checker_.returnInferrer().returnType(sym);
+  member->type = this->checker.returnInferrer().functionType(sym);
+  call->type = this->checker.returnInferrer().returnType(sym);
   std::vector<bool> given(checked ? call->args.size() : 0, true);
 
-  return checker_.argumentChecker().checkArguments(call, sym->params, sym->minArgs, sym->hasRest,
-                                                   member->loc(), &given);
+  return this->checker.argumentChecker().checkArguments(call, sym->params, sym->minArgs,
+                                                        sym->hasRest, member->loc(), &given);
 }
 
 Expr *MethodCallChecker::checkClassNew(NewExpr *expr, ClassDecl *cls, const Type *expected) {
   expr->type = Type::error();
   if (cls->isGeneric()) {
-    return checker_.genericClassChecker().checkGenericNew(expr, cls, expected);
+    return this->checker.genericClassChecker().checkGenericNew(expr, cls, expected);
   }
-  if (checker_.fsDeclarer().isRuntimeClass(cls)) {
-    checker_.diags_.error(expr->loc(),
-                          "'new " + cls->name +
-                              "' is not possible: only the functions of node:fs make " + cls->name);
+  if (this->checker.fsDeclarer().isRuntimeClass(cls)) {
+    this->checker.diags_.error(
+        expr->loc(),
+        "'new " + cls->name + "' is not possible: only the functions of node:fs make " + cls->name);
     for (Expr *&arg : expr->args) {
-      arg = checker_.exprChecker().checkExpr(arg);
+      arg = this->checker.exprChecker().checkExpr(arg);
     }
     return expr;
   }
   if (!expr->typeArgs.empty()) {
-    checker_.diags_.error(expr->loc(),
-                          "class '" + cls->name + "' is not generic; remove the type arguments");
+    this->checker.diags_.error(expr->loc(), "class '" + cls->name +
+                                                "' is not generic; remove the type arguments");
   }
-  if (!cls->staticOwner()->declared && checker_.loading_ && checker_.functions_.empty() &&
-      checker_.declModules_.lookup(cls) == checker_.loading_) {
-    checker_.diags_.error(expr->loc(),
-                          "class '" + cls->name +
-                              "' is used before its declaration, which JavaScript has not run "
-                              "yet here (a ReferenceError); move the class up");
+  if (!cls->staticOwner()->declared && this->checker.loading_ && this->checker.functions_.empty() &&
+      this->checker.declModules_.lookup(cls) == this->checker.loading_) {
+    this->checker.diags_.error(expr->loc(),
+                               "class '" + cls->name +
+                                   "' is used before its declaration, which JavaScript has not run "
+                                   "yet here (a ReferenceError); move the class up");
   }
   if (cls->isAbstract) {
-    checker_.diags_.error(expr->loc(), "class '" + cls->name +
-                                           "' is abstract and cannot be created: create "
-                                           "an object of a class that extends it");
+    this->checker.diags_.error(expr->loc(), "class '" + cls->name +
+                                                "' is abstract and cannot be created: create "
+                                                "an object of a class that extends it");
   }
-  checker_.classDeclarer().completeClass(cls);
-  auto *call = checker_.ctx_.make<CallExpr>(expr->loc(), nullptr, std::move(expr->args));
+  this->checker.classDeclarer().completeClass(cls);
+  auto *call = this->checker.ctx_.make<CallExpr>(expr->loc(), nullptr, std::move(expr->args));
   expr->form = ClassNew{.cls = cls, .ctor = call};
   call->type = Type::voidTy();
   std::vector<FunctionDecl *> ctors = ClassLinks::constructorsOf(cls);
   if (ctors.empty()) {
     if (!call->args.empty()) {
-      checker_.diags_.error(expr->loc(), "class '" + cls->name + "' has no constructor, so 'new " +
-                                             cls->name + "()' takes no arguments");
+      this->checker.diags_.error(expr->loc(), "class '" + cls->name +
+                                                  "' has no constructor, so 'new " + cls->name +
+                                                  "()' takes no arguments");
       for (Expr *&arg : call->args) {
-        arg = checker_.exprChecker().checkExpr(arg);
+        arg = this->checker.exprChecker().checkExpr(arg);
       }
       return expr;
     }
   } else {
     bool checked = false;
     FuncSymbol *sym =
-        checker_.overloadResolver().chooseVariant(ctors, call->args, {}, expr->loc(), checked);
+        this->checker.overloadResolver().chooseVariant(ctors, call->args, {}, expr->loc(), checked);
     if (!sym) {
       return expr;
     }
     const FunctionDecl *chosen = sym->decl ? sym->decl : ctors[0];
-    checker_.classMemberChecker().checkAccess(chosen->cls(), chosen->access(), "constructor",
-                                              expr->loc());
-    checker_.returnInferrer().resolveParams(sym);
+    this->checker.classMemberChecker().checkAccess(chosen->cls(), chosen->access(), "constructor",
+                                                   expr->loc());
+    this->checker.returnInferrer().resolveParams(sym);
     call->target = FunctionCall{.func = sym};
     std::vector<bool> given(checked ? call->args.size() : 0, true);
-    checker_.argumentChecker().checkArguments(call, sym->params, sym->minArgs, sym->hasRest,
-                                              expr->loc(), &given);
+    this->checker.argumentChecker().checkArguments(call, sym->params, sym->minArgs, sym->hasRest,
+                                                   expr->loc(), &given);
   }
   for (const ClassDecl *c = cls; c; c = c->parent) {
     if (c->init || !c->constructors.empty()) {
-      checker_.flowChecker().calledFunction();
+      this->checker.flowChecker().calledFunction();
       break;
     }
   }

@@ -313,7 +313,9 @@ Expr *ReflectChecker::checkReflection(CallExpr *call, MemberExpr *member, const 
     return call;
   }
   if (fn == "get") {
-    if (!checker_.argumentChecker().checkArity(call, member->loc(), 2, 2)) {
+    ArgumentChecker::ResultArityMatches arity = checker_.argumentChecker().checkArity(call, 2, 2);
+    if (arity.isErr()) {
+      checker_.diags_.error(member->loc(), arity.error().message);
       return call;
     }
     auto *object = dyn_cast<NameExpr>(call->args[0]);
@@ -397,7 +399,9 @@ Expr *ReflectChecker::checkReflection(CallExpr *call, MemberExpr *member, const 
     return call;
   }
   if (fn == "fill") {
-    if (!checker_.argumentChecker().checkArity(call, member->loc(), 2, 2)) {
+    ArgumentChecker::ResultArityMatches arity = checker_.argumentChecker().checkArity(call, 2, 2);
+    if (arity.isErr()) {
+      checker_.diags_.error(member->loc(), arity.error().message);
       return call;
     }
     Expr *&cls = call->args[0];
@@ -439,7 +443,9 @@ Expr *ReflectChecker::checkReflection(CallExpr *call, MemberExpr *member, const 
     return call;
   }
   if (fn == "apply") {
-    if (!checker_.argumentChecker().checkArity(call, member->loc(), 3, 3)) {
+    ArgumentChecker::ResultArityMatches arity = checker_.argumentChecker().checkArity(call, 3, 3);
+    if (arity.isErr()) {
+      checker_.diags_.error(member->loc(), arity.error().message);
       return call;
     }
     Expr *&f = call->args[0];
@@ -486,7 +492,9 @@ Expr *ReflectChecker::checkReflection(CallExpr *call, MemberExpr *member, const 
     checkArgsLoosely();
     return call;
   }
-  if (!checker_.argumentChecker().checkArity(call, member->loc(), 2, 2)) {
+  ArgumentChecker::ResultArityMatches arity = checker_.argumentChecker().checkArity(call, 2, 2);
+  if (arity.isErr()) {
+    checker_.diags_.error(member->loc(), arity.error().message);
     return call;
   }
   auto *name = dyn_cast<NameExpr>(call->args[0]);

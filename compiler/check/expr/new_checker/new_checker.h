@@ -6,12 +6,12 @@ namespace tz {
 
 class NewChecker {
 public:
-  explicit NewChecker(Checker &checker);
+  explicit NewChecker(Checker &owner);
 
   Expr *checkNew(NewExpr *expr, const Type *expected);
 
 private:
-  Checker &checker_;
+  Checker &checker;
 };
 
 }

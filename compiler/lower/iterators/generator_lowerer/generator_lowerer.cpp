@@ -13,13 +13,7 @@
 #include "compiler/lower/stmt/stmt_lowerer/stmt_lowerer.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/IR/MDBuilder.h"
-#include "llvm/Support/ErrorHandling.h"
 
-using llvm::BasicBlock;
-using llvm::cast;
-using llvm::dyn_cast;
-using llvm::isa;
-using llvm::Value;
 
 namespace tz {
 
@@ -45,34 +39,36 @@ enum PromiseField : unsigned { kOut, kIn, kRet, kRunning };
 
 }
 
-GeneratorLowerer::GeneratorLowerer(Lowering &lowering) : lowering_(lowering) {}
+GeneratorLowerer::GeneratorLowerer(Lowering &owner)
+    : lowering(owner) {}
 
 llvm::Constant *GeneratorLowerer::iteratorLayout(unsigned flags) {
-  llvm::Constant *&layout = iteratorLayouts_[flags];
+  llvm::Constant *&layout = this->iteratorLayouts[flags];
   if (layout) {
     return layout;
   }
-  if (!iterDropFn_) {
-    auto *type = llvm::FunctionType::get(lowering_.builder_.getVoidTy(),
-                                         {lowering_.builder_.getPtrTy()}, false);
-    iterDropFn_ = llvm::Function::Create(type, llvm::GlobalValue::InternalLinkage,
-                                         "tz.iter.destroy", lowering_.module_.get());
-    iterDropFn_->addFnAttr(llvm::Attribute::NoUnwind);
-    llvm::IRBuilder<> b(llvm::BasicBlock::Create(lowering_.ctx_, "entry", iterDropFn_));
-    llvm::Value *frame =
-        b.CreateConstInBoundsGEP1_64(b.getInt8Ty(), iterDropFn_->getArg(0), kHeaderSize, "frame");
-    b.CreateCall(lowering_.coroutineLowerer().coroIntrinsic(llvm::Intrinsic::coro_destroy),
+  if (!this->iterDropFn) {
+    auto *type = llvm::FunctionType::get(this->lowering.builder_.getVoidTy(),
+                                         {this->lowering.builder_.getPtrTy()}, false);
+    this->iterDropFn = llvm::Function::Create(type, llvm::GlobalValue::InternalLinkage,
+                                              "tz.iter.destroy", this->lowering.module_.get());
+    this->iterDropFn->addFnAttr(llvm::Attribute::NoUnwind);
+    llvm::IRBuilder<> b(llvm::BasicBlock::Create(this->lowering.ctx_, "entry", this->iterDropFn));
+    llvm::Value *frame = b.CreateConstInBoundsGEP1_64(b.getInt8Ty(), this->iterDropFn->getArg(0),
+                                                      kHeaderSize, "frame");
+    b.CreateCall(this->lowering.coroutineLowerer().coroIntrinsic(llvm::Intrinsic::coro_destroy),
                  {frame});
     b.CreateRetVoid();
   }
   auto *global = new llvm::GlobalVariable(
-      *lowering_.module_, lowering_.layoutDescTy_, true, llvm::GlobalValue::PrivateLinkage,
-      llvm::ConstantStruct::get(lowering_.layoutDescTy_,
-                                {iterDropFn_,
-                                 llvm::ConstantPointerNull::get(lowering_.builder_.getPtrTy()),
-                                 lowering_.builder_.getInt32(0), lowering_.builder_.getInt32(flags),
-                                 llvm::ConstantPointerNull::get(lowering_.builder_.getPtrTy()),
-                                 lowering_.builder_.getInt32(0), lowering_.builder_.getInt32(0)}),
+      *this->lowering.module_, this->lowering.layoutDescTy_, true,
+      llvm::GlobalValue::PrivateLinkage,
+      llvm::ConstantStruct::get(
+          this->lowering.layoutDescTy_,
+          {this->iterDropFn, llvm::ConstantPointerNull::get(this->lowering.builder_.getPtrTy()),
+           this->lowering.builder_.getInt32(0), this->lowering.builder_.getInt32(flags),
+           llvm::ConstantPointerNull::get(this->lowering.builder_.getPtrTy()),
+           this->lowering.builder_.getInt32(0), this->lowering.builder_.getInt32(0)}),
       "tz.layout.iterator");
   global->setUnnamedAddr(llvm::GlobalValue::UnnamedAddr::Global);
   layout = global;
@@ -82,58 +78,58 @@ llvm::Constant *GeneratorLowerer::iteratorLayout(unsigned flags) {
 
 void GeneratorLowerer::emitGenerator(FunctionDecl *fn, llvm::Function *function) {
   if (fn->isAsync) {
-    lowering_.asyncGeneratorLowerer().emitAsyncGenerator(fn, function);
+    this->lowering.asyncGeneratorLowerer().emitAsyncGenerator(fn, function);
     return;
   }
-  lowering_.functionBuilder().beginFunction(function, fn);
+  this->lowering.functionBuilder().beginFunction(function, fn);
   Lowering::Coroutine coroutine{};
-  lowering_.coro_ = &coroutine;
+  this->lowering.coro_ = &coroutine;
   const Type *type = fn->sym->ret;
-  lowering_.coroutineLowerer().beginCoroutine(
+  this->lowering.coroutineLowerer().beginCoroutine(
       kLayoutGenerator, type->isIterator() && !type->sent()->isVoid() ? type->sent() : nullptr);
   coroutine.yielded = type->isIterator() ? type->yielded() : nullptr;
-  lowering_.functionFrame().pushScope();
+  this->lowering.functionFrame().pushScope();
   std::vector<llvm::Value *> args;
   unsigned first = 0;
   if (fn->isClosure() || fn->takesThis()) {
-    lowering_.envParam_ = lowering_.function_->getArg(0);
+    this->lowering.envParam_ = this->lowering.function_->getArg(0);
     if (fn->isClosure()) {
-      lowering_.envLowerer().bindCaptures(fn);
+      this->lowering.envLowerer().bindCaptures(fn);
     } else {
-      lowering_.envParam_->setName("this");
+      this->lowering.envParam_->setName("this");
     }
-    llvm::Value *slot = lowering_.functionFrame().createObjectSlot("env");
-    lowering_.builder_.CreateCall(lowering_.objRetainFn_, {lowering_.envParam_});
-    lowering_.builder_.CreateStore(lowering_.envParam_, slot);
+    llvm::Value *slot = this->lowering.functionFrame().createObjectSlot("env");
+    this->lowering.builder_.CreateCall(this->lowering.objRetainFn_, {this->lowering.envParam_});
+    this->lowering.builder_.CreateStore(this->lowering.envParam_, slot);
     first = 1;
   }
-  for (unsigned i = first; i < lowering_.function_->arg_size(); ++i) {
-    args.push_back(lowering_.function_->getArg(i));
+  for (unsigned i = first; i < this->lowering.function_->arg_size(); ++i) {
+    args.push_back(this->lowering.function_->getArg(i));
   }
-  lowering_.functionBuilder().emitParams(fn, args);
-  lowering_.coroutineLowerer().emitSuspend();
-  lowering_.stmtLowerer().emitStmt(fn->body);
-  if (lowering_.functionFrame().blockIsOpen()) {
-    lowering_.coroutineLowerer().emitCoroutineReturn(nullptr, nullptr);
+  this->lowering.functionBuilder().emitParams(fn, args);
+  this->lowering.coroutineLowerer().emitSuspend();
+  this->lowering.stmtLowerer().emitStmt(fn->body);
+  if (this->lowering.functionFrame().blockIsOpen()) {
+    this->lowering.coroutineLowerer().emitCoroutineReturn(nullptr, nullptr);
   }
-  lowering_.scopes_.pop_back();
-  lowering_.coroutineLowerer().finishCoroutine();
-  lowering_.coro_ = nullptr;
-  lowering_.function_ = nullptr;
+  this->lowering.scopes_.pop_back();
+  this->lowering.coroutineLowerer().finishCoroutine();
+  this->lowering.coro_ = nullptr;
+  this->lowering.function_ = nullptr;
 }
 
 llvm::Function *GeneratorLowerer::iteratorFunction(Builtin builtin, const Type *source,
                                                    const Type *operand, const Type *result) {
-  llvm::Function *&fn = iteratorFunctions_[{builtin, source, operand, result}];
+  llvm::Function *&fn = this->iteratorFunctions[{builtin, source, operand, result}];
   if (fn) {
     return fn;
   }
-  std::vector<llvm::Type *> params{lowering_.moduleBuilder().lower(source)};
+  std::vector<llvm::Type *> params{this->lowering.moduleBuilder().lower(source)};
   if (operand) {
-    params.push_back(lowering_.moduleBuilder().lower(operand));
+    params.push_back(this->lowering.moduleBuilder().lower(operand));
   }
   if (builtin == Builtin::StrMatchAll) {
-    params.push_back(lowering_.builder_.getPtrTy());
+    params.push_back(this->lowering.builder_.getPtrTy());
   }
   const char *name = "tz.iter";
   switch (builtin) {
@@ -185,115 +181,122 @@ llvm::Function *GeneratorLowerer::iteratorFunction(Builtin builtin, const Type *
   default:
     break;
   }
-  fn = llvm::Function::Create(llvm::FunctionType::get(lowering_.builder_.getPtrTy(), params, false),
-                              llvm::GlobalValue::InternalLinkage, name, lowering_.module_.get());
-  lowering_.functionBuilder().setFunctionAttributes(fn);
-  lowering_.pendingIterators_.push_back({fn, builtin, source, operand, result});
+  fn = llvm::Function::Create(
+      llvm::FunctionType::get(this->lowering.builder_.getPtrTy(), params, false),
+      llvm::GlobalValue::InternalLinkage, name, this->lowering.module_.get());
+  this->lowering.functionBuilder().setFunctionAttributes(fn);
+  this->lowering.pendingIterators_.push_back({fn, builtin, source, operand, result});
 
   return fn;
 }
 
 void GeneratorLowerer::emitPendingIterators() {
-  while (!lowering_.pendingIterators_.empty()) {
-    Lowering::IteratorJob job = lowering_.pendingIterators_.back();
-    lowering_.pendingIterators_.pop_back();
-    lowering_.functionBuilder().beginFunction(job.function, nullptr);
+  while (!this->lowering.pendingIterators_.empty()) {
+    Lowering::IteratorJob job = this->lowering.pendingIterators_.back();
+    this->lowering.pendingIterators_.pop_back();
+    this->lowering.functionBuilder().beginFunction(job.function, nullptr);
     Lowering::Coroutine coroutine{};
-    lowering_.coro_ = &coroutine;
+    this->lowering.coro_ = &coroutine;
     bool stage = isIteratorStage(job.builtin);
     bool matches = job.builtin == Builtin::StrMatchAll;
     bool dict = isDictIterator(job.builtin);
     llvm::StructType *dictPromise = nullptr;
     unsigned flags = 0;
     if (dict) {
-      llvm::Type *ptr = lowering_.builder_.getPtrTy(), *i32 = lowering_.builder_.getInt32Ty();
-      dictPromise = llvm::StructType::get(lowering_.ctx_, {ptr, ptr, ptr, i32, i32, ptr, i32, i32});
+      llvm::Type *ptr = this->lowering.builder_.getPtrTy();
+      llvm::Type *i32 = this->lowering.builder_.getInt32Ty();
+      dictPromise =
+          llvm::StructType::get(this->lowering.ctx_, {ptr, ptr, ptr, i32, i32, ptr, i32, i32});
       flags = kLayoutDictIterator | (job.builtin == Builtin::MapValues ? kLayoutDictValues : 0) |
               (job.builtin == Builtin::MapEntries || job.builtin == Builtin::SetEntries
                    ? kLayoutDictEntries
                    : 0) |
               (job.source->isSet() ? kLayoutDictOfSet : 0);
     }
-    lowering_.coroutineLowerer().beginCoroutine(stage                    ? kLayoutHelper
-                                                : matches                ? kLayoutRegexIterator
-                                                : dict                   ? flags
-                                                : job.source->isString() ? kLayoutStringIterator
-                                                                         : kLayoutArrayIterator,
-                                                nullptr, dictPromise);
-    lowering_.functionFrame().pushScope();
+    this->lowering.coroutineLowerer().beginCoroutine(stage     ? kLayoutHelper
+                                                     : matches ? kLayoutRegexIterator
+                                                     : dict    ? flags
+                                                     : job.source->isString()
+                                                         ? kLayoutStringIterator
+                                                         : kLayoutArrayIterator,
+                                                     nullptr, dictPromise);
+    this->lowering.functionFrame().pushScope();
     auto hold = [&](llvm::Value *value, const Type *type, const char *name) {
       llvm::Value *slot = type->isManaged()
-                              ? lowering_.functionFrame().createManagedSlot(type, name)
-                              : lowering_.functionFrame().createStackSlot(
-                                    lowering_.moduleBuilder().lower(type), name);
-      lowering_.builder_.CreateStore(value, slot);
+                              ? this->lowering.functionFrame().createManagedSlot(type, name)
+                              : this->lowering.functionFrame().createStackSlot(
+                                    this->lowering.moduleBuilder().lower(type), name);
+      this->lowering.builder_.CreateStore(value, slot);
 
       return slot;
     };
-    llvm::Value *source = hold(lowering_.function_->getArg(0), job.source, "source");
+    llvm::Value *source = hold(this->lowering.function_->getArg(0), job.source, "source");
     llvm::Value *operand =
-        job.operand ? hold(lowering_.function_->getArg(1), job.operand, "operand") : nullptr;
+        job.operand ? hold(this->lowering.function_->getArg(1), job.operand, "operand") : nullptr;
     llvm::Value *lastSlot = nullptr;
     if (matches) {
-      lastSlot =
-          lowering_.functionFrame().createStackSlot(lowering_.builder_.getInt32Ty(), "lastIndex");
+      lastSlot = this->lowering.functionFrame().createStackSlot(
+          this->lowering.builder_.getInt32Ty(), "lastIndex");
       llvm::Value *regex =
-          lowering_.builder_.CreateLoad(lowering_.builder_.getPtrTy(), operand, "regex");
-      lowering_.builder_.CreateStore(
-          lowering_.builder_.CreateCall(
-              lowering_.regexLowerer().regexFunction("tz_re_match_all_begin",
-                                                     lowering_.builder_.getInt32Ty(),
-                                                     {lowering_.builder_.getPtrTy()}),
+          this->lowering.builder_.CreateLoad(this->lowering.builder_.getPtrTy(), operand, "regex");
+      this->lowering.builder_.CreateStore(
+          this->lowering.builder_.CreateCall(
+              this->lowering.regexLowerer().regexFunction("tz_re_match_all_begin",
+                                                          this->lowering.builder_.getInt32Ty(),
+                                                          {this->lowering.builder_.getPtrTy()}),
               {regex}),
           lastSlot);
     }
     llvm::Value *mapField = nullptr;
     if (dict) {
-      mapField = lowering_.builder_.CreateStructGEP(dictPromise, coroutine.promise, 5);
-      lowering_.builder_.CreateStore(
-          lowering_.builder_.CreateLoad(lowering_.builder_.getPtrTy(), source), mapField);
+      mapField = this->lowering.builder_.CreateStructGEP(dictPromise, coroutine.promise, 5);
+      this->lowering.builder_.CreateStore(
+          this->lowering.builder_.CreateLoad(this->lowering.builder_.getPtrTy(), source), mapField);
     }
-    lowering_.coroutineLowerer().emitSuspend();
+    this->lowering.coroutineLowerer().emitSuspend();
     Lowering::Consumer yield;
     yield.each = [&](llvm::Value *value) {
-      return lowering_.coroutineLowerer().emitCoroutineYield(value, nullptr);
+      return this->lowering.coroutineLowerer().emitCoroutineYield(value, nullptr);
     };
     yield.stop = [&] {
-      lowering_.coroutineLowerer().emitCoroutineReturn(nullptr, nullptr);
-      lowering_.builder_.CreateUnreachable();
+      this->lowering.coroutineLowerer().emitCoroutineReturn(nullptr, nullptr);
+      this->lowering.builder_.CreateUnreachable();
     };
     if (matches) {
-      lowering_.regexLowerer()
-          .matchAllProducer(source, operand, lastSlot, lowering_.function_->getArg(2))
+      this->lowering.regexLowerer()
+          .matchAllProducer(source, operand, lastSlot, this->lowering.function_->getArg(2))
           .run(yield);
     } else if (dict) {
-      lowering_.dictLowerer().beginDictIteration(source);
-      llvm::Value *position = lowering_.builder_.CreateStructGEP(dictPromise, coroutine.promise, 6);
-      lowering_.dictLowerer().dictProducer(mapField, job.source, job.builtin, position).run(yield);
-      if (lowering_.functionFrame().blockIsOpen()) {
-        lowering_.builder_.CreateStore(
-            llvm::ConstantPointerNull::get(lowering_.builder_.getPtrTy()), mapField);
+      this->lowering.dictLowerer().beginDictIteration(source);
+      llvm::Value *position =
+          this->lowering.builder_.CreateStructGEP(dictPromise, coroutine.promise, 6);
+      this->lowering.dictLowerer()
+          .dictProducer(mapField, job.source, job.builtin, position)
+          .run(yield);
+      if (this->lowering.functionFrame().blockIsOpen()) {
+        this->lowering.builder_.CreateStore(
+            llvm::ConstantPointerNull::get(this->lowering.builder_.getPtrTy()), mapField);
       }
     } else if (!stage) {
       Lowering::Producer producer =
           job.source->isArray()
-              ? lowering_.lazyChainLowerer().arrayProducer(source, job.source, job.builtin)
-              : lowering_.lazyChainLowerer().valueProducer(source, job.source);
+              ? this->lowering.lazyChainLowerer().arrayProducer(source, job.source, job.builtin)
+              : this->lowering.lazyChainLowerer().valueProducer(source, job.source);
       producer.run(yield);
     } else {
       const Type *callback = job.operand->isFunction() ? job.operand : nullptr;
-      lowering_.lazyChainLowerer()
+      this->lowering.lazyChainLowerer()
           .valueProducer(source, job.source)
-          .run(lowering_.lazyChainLowerer().stageConsumer(
+          .run(this->lowering.lazyChainLowerer().stageConsumer(
               job.builtin, callback, job.source->yielded(), job.result->yielded(), operand, yield));
     }
-    if (lowering_.functionFrame().blockIsOpen()) {
-      lowering_.coroutineLowerer().emitCoroutineReturn(nullptr, nullptr);
+    if (this->lowering.functionFrame().blockIsOpen()) {
+      this->lowering.coroutineLowerer().emitCoroutineReturn(nullptr, nullptr);
     }
-    lowering_.scopes_.pop_back();
-    lowering_.coroutineLowerer().finishCoroutine();
-    lowering_.coro_ = nullptr;
-    lowering_.function_ = nullptr;
+    this->lowering.scopes_.pop_back();
+    this->lowering.coroutineLowerer().finishCoroutine();
+    this->lowering.coro_ = nullptr;
+    this->lowering.function_ = nullptr;
   }
 }
 

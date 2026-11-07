@@ -411,7 +411,9 @@ Expr *BytesChecker::checkBytesMethod(CallExpr *call, MemberExpr *member, const T
   case Bytes::ArrayBuffer: {
     llvm::StringRef name = member->name;
     if (name == "slice") {
-      if (!checker_.argumentChecker().checkArity(call, member->loc(), 0, 2)) {
+      ArgumentChecker::ResultArityMatches arity = checker_.argumentChecker().checkArity(call, 0, 2);
+      if (arity.isErr()) {
+        checker_.diags_.error(member->loc(), arity.error().message);
         return call;
       }
       for (Expr *&arg : call->args) {

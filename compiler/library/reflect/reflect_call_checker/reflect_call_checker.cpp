@@ -156,8 +156,14 @@ Expr *ReflectCallChecker::checkReflectCall(CallExpr *call, MemberExpr *member,
     checkArgsLoosely();
     return call;
   }
-  if (checker_.callChecker().rejectSpread(call) ||
-      !checker_.argumentChecker().checkArity(call, member->loc(), function->min, function->max)) {
+  bool rejected = checker_.callChecker().rejectSpread(call);
+  ArgumentChecker::ResultArityMatches arity =
+      rejected ? ok(call)
+               : checker_.argumentChecker().checkArity(call, function->min, function->max);
+  if (arity.isErr()) {
+    checker_.diags_.error(member->loc(), arity.error().message);
+  }
+  if (rejected || arity.isErr()) {
     return call;
   }
   bool define = function->builtin == Builtin::MetaDefine;

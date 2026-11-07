@@ -9,7 +9,6 @@
 
 using llvm::cast;
 using llvm::dyn_cast;
-using llvm::dyn_cast_or_null;
 using llvm::isa;
 
 namespace tz {
@@ -52,7 +51,8 @@ std::string sourceText(const Expr *expr) {
   }
   case Expr::Kind::Index: {
     auto *index = cast<IndexExpr>(expr);
-    std::string object = sourceText(index->object), position = sourceText(index->index);
+    std::string object = sourceText(index->object);
+    std::string position = sourceText(index->index);
     if (object.empty() || position.empty()) {
       return "";
     }
@@ -133,10 +133,11 @@ const Type *falsyType(const Type *type) {
 
 }
 
-TruthChecker::TruthChecker(Checker &checker) : checker_(checker) {}
+TruthChecker::TruthChecker(Checker &owner)
+    : checker(owner) {}
 
 Expr *TruthChecker::checkCondition(Expr *cond, Checker::Flow &whenTrue, Checker::Flow &whenFalse) {
-  return checkBranching(cond, whenTrue, whenFalse, Checker::TruthUse::Condition);
+  return this->checkBranching(cond, whenTrue, whenFalse, Checker::TruthUse::Condition);
 }
 
 Expr *TruthChecker::checkBranching(Expr *expr, Checker::Flow &whenTrue, Checker::Flow &whenFalse,
@@ -145,80 +146,81 @@ Expr *TruthChecker::checkBranching(Expr *expr, Checker::Flow &whenTrue, Checker:
       bin && (bin->op == BinaryOp::LogAnd || bin->op == BinaryOp::LogOr)) {
     bool isAnd = bin->op == BinaryOp::LogAnd;
     Checker::Flow lhsTrue, lhsFalse, rhsTrue, rhsFalse;
-    bin->lhs = checkBranching(bin->lhs, lhsTrue, lhsFalse);
-    if (std::optional<bool> constant = checker_.checkingInstance_
-                                           ? checker_.genericChecker().constantCondition(bin->lhs)
-                                           : std::nullopt;
+    bin->lhs = this->checkBranching(bin->lhs, lhsTrue, lhsFalse);
+    if (std::optional<bool> constant =
+            this->checker.checkingInstance_
+                ? this->checker.genericChecker().constantCondition(bin->lhs)
+                : std::nullopt;
         constant && *constant != isAnd) {
       whenTrue = lhsTrue;
       whenFalse = lhsFalse;
-      checker_.flow_ = FlowChecker::join(whenTrue, whenFalse);
+      this->checker.flow_ = FlowChecker::join(whenTrue, whenFalse);
 
       return bin->lhs;
     }
-    checker_.flow_ = isAnd ? lhsTrue : lhsFalse;
-    bin->rhs = checkBranching(bin->rhs, rhsTrue, rhsFalse);
+    this->checker.flow_ = isAnd ? lhsTrue : lhsFalse;
+    bin->rhs = this->checkBranching(bin->rhs, rhsTrue, rhsFalse);
     whenTrue = isAnd ? rhsTrue : FlowChecker::join(lhsTrue, rhsTrue);
     whenFalse = isAnd ? FlowChecker::join(lhsFalse, rhsFalse) : rhsFalse;
-    checker_.flow_ = FlowChecker::join(whenTrue, whenFalse);
-    checker_.jsonChecker().checkRedundantTests(bin);
+    this->checker.flow_ = FlowChecker::join(whenTrue, whenFalse);
+    this->checker.jsonChecker().checkRedundantTests(bin);
     bin->type = Type::boolTy();
     return bin;
   }
   if (auto *unary = dyn_cast<UnaryExpr>(expr); unary && unary->op == UnaryOp::Not) {
     Checker::Flow operandTrue, operandFalse;
     unary->operand =
-        checkBranching(unary->operand, operandTrue, operandFalse, Checker::TruthUse::Not);
+        this->checkBranching(unary->operand, operandTrue, operandFalse, Checker::TruthUse::Not);
     whenTrue = operandFalse;
     whenFalse = operandTrue;
     unary->type = Type::boolTy();
     return unary;
   }
-  if (isBooleanCall(expr)) {
-    return checkBooleanCall(cast<CallExpr>(expr), whenTrue, whenFalse);
+  if (this->isBooleanCall(expr)) {
+    return this->checkBooleanCall(cast<CallExpr>(expr), whenTrue, whenFalse);
   }
   if (auto *assign = dyn_cast<AssignExpr>(expr); assign && !assign->op) {
-    expr = checker_.exprChecker().checkExpr(assign);
-    whenTrue = checker_.flow_;
-    whenFalse = checker_.flow_;
-    reportAssignmentCondition(assign, use);
-    return checker_.typeRelations().convert(expr, Type::boolTy());
+    expr = this->checker.exprChecker().checkExpr(assign);
+    whenTrue = this->checker.flow_;
+    whenFalse = this->checker.flow_;
+    this->reportAssignmentCondition(assign, use);
+    return this->checker.typeRelations().convert(expr, Type::boolTy());
   }
 
-  expr = checker_.exprChecker().checkExpr(expr, Type::boolTy());
-  whenTrue = checker_.flow_;
-  whenFalse = checker_.flow_;
+  expr = this->checker.exprChecker().checkExpr(expr, Type::boolTy());
+  whenTrue = this->checker.flow_;
+  whenFalse = this->checker.flow_;
   if (auto *lit = dyn_cast<BoolLitExpr>(expr)) {
     (lit->value ? whenFalse : whenTrue).unreachable = true;
   } else {
-    checker_.conditionFacts().addConditionFacts(expr, whenTrue, whenFalse);
+    this->checker.conditionFacts().addConditionFacts(expr, whenTrue, whenFalse);
   }
   if (!expr->type->isBool()) {
-    checkTruthy(expr, use);
+    this->checkTruthy(expr, use);
   }
 
-  return checker_.typeRelations().convert(expr, Type::boolTy());
+  return this->checker.typeRelations().convert(expr, Type::boolTy());
 }
 
 Expr *TruthChecker::checkTestedValue(Expr *expr, const Type *expected, Checker::Flow &whenTrue,
                                      Checker::Flow &whenFalse, Checker::TruthUse use) {
   if (auto *bin = dyn_cast<BinaryExpr>(expr);
       bin && (bin->op == BinaryOp::LogAnd || bin->op == BinaryOp::LogOr)) {
-    return checkLogical(bin, expected, whenTrue, whenFalse, true,
-                        bin->op == BinaryOp::LogAnd ? Checker::TruthUse::And
-                                                    : Checker::TruthUse::Or);
+    return this->checkLogical(bin, expected, whenTrue, whenFalse, true,
+                              bin->op == BinaryOp::LogAnd ? Checker::TruthUse::And
+                                                          : Checker::TruthUse::Or);
   }
   if (auto *unary = dyn_cast<UnaryExpr>(expr);
-      (unary && unary->op == UnaryOp::Not) || isBooleanCall(expr)) {
-    return checkBranching(expr, whenTrue, whenFalse, use);
+      (unary && unary->op == UnaryOp::Not) || this->isBooleanCall(expr)) {
+    return this->checkBranching(expr, whenTrue, whenFalse, use);
   }
-  expr = checker_.exprChecker().checkExpr(expr, expected);
-  whenTrue = checker_.flow_;
-  whenFalse = checker_.flow_;
+  expr = this->checker.exprChecker().checkExpr(expr, expected);
+  whenTrue = this->checker.flow_;
+  whenFalse = this->checker.flow_;
   if (auto *lit = dyn_cast<BoolLitExpr>(expr)) {
     (lit->value ? whenFalse : whenTrue).unreachable = true;
   } else {
-    checker_.conditionFacts().addConditionFacts(expr, whenTrue, whenFalse);
+    this->checker.conditionFacts().addConditionFacts(expr, whenTrue, whenFalse);
   }
 
   return expr;
@@ -232,25 +234,26 @@ Expr *TruthChecker::checkLogical(BinaryExpr *bin, const Type *expected, Checker:
   const Expr *other = isAssign ? cast<AssignExpr>(bin->rhs)->value : bin->rhs;
 
   Checker::Flow lhsTrue, lhsFalse, rhsTrue, rhsFalse;
-  bin->lhs = checker_.genericChecker().apparent(
-      checkTestedValue(bin->lhs, expected, lhsTrue, lhsFalse, use));
-  bool ok = checkTruthy(bin->lhs, use, other);
+  bin->lhs = this->checker.genericChecker().apparent(
+      this->checkTestedValue(bin->lhs, expected, lhsTrue, lhsFalse, use));
+  bool ok = this->checkTruthy(bin->lhs, use, other);
   const Type *l = bin->lhs->type;
-  checker_.flow_ = isAnd ? lhsTrue : lhsFalse;
+  this->checker.flow_ = isAnd ? lhsTrue : lhsFalse;
   const Type *hint = isAnd || l->isError() || l->isUndefined() ? expected : l->nonOptional();
   if (tested) {
-    bin->rhs = checkTestedValue(bin->rhs, hint, rhsTrue, rhsFalse, Checker::TruthUse::Condition);
-    ok &= checkTruthy(bin->rhs, Checker::TruthUse::Condition);
+    bin->rhs =
+        this->checkTestedValue(bin->rhs, hint, rhsTrue, rhsFalse, Checker::TruthUse::Condition);
+    ok &= this->checkTruthy(bin->rhs, Checker::TruthUse::Condition);
   } else {
-    bin->rhs = checker_.exprChecker().checkExpr(bin->rhs, hint);
-    rhsTrue = checker_.flow_;
-    rhsFalse = checker_.flow_;
+    bin->rhs = this->checker.exprChecker().checkExpr(bin->rhs, hint);
+    rhsTrue = this->checker.flow_;
+    rhsFalse = this->checker.flow_;
   }
   whenTrue = isAnd ? rhsTrue : FlowChecker::join(lhsTrue, rhsTrue);
   whenFalse = isAnd ? FlowChecker::join(lhsFalse, rhsFalse) : rhsFalse;
-  checker_.flow_ = FlowChecker::join(whenTrue, whenFalse);
+  this->checker.flow_ = FlowChecker::join(whenTrue, whenFalse);
   if (!isAssign) {
-    checker_.jsonChecker().checkRedundantTests(bin);
+    this->checker.jsonChecker().checkRedundantTests(bin);
   }
 
   const Type *r = bin->rhs->type;
@@ -260,7 +263,7 @@ Expr *TruthChecker::checkLogical(BinaryExpr *bin, const Type *expected, Checker:
   }
   const Type *kept = l->isError() ? l : isAnd ? falsyType(l) : l->nonOptional();
   if (l->isError() || r->isError()) {
-    if (checker_.trial_ && l->isError() != r->isError()) {
+    if (this->checker.trial_ && l->isError() != r->isError()) {
       bin->type = l->isError() ? r : kept;
     }
     return bin;
@@ -271,7 +274,7 @@ Expr *TruthChecker::checkLogical(BinaryExpr *bin, const Type *expected, Checker:
   }
   if (r->isVoid()) {
     std::string test = hintText(bin->lhs);
-    checker_.diags_.error(
+    this->checker.diags_.error(
         bin->loc(),
         llvm::Twine("the right side of '") + op +
             "' returns nothing, so there is no value to give; call it with 'if': 'if (" +
@@ -280,21 +283,22 @@ Expr *TruthChecker::checkLogical(BinaryExpr *bin, const Type *expected, Checker:
   }
   const Type *result = TypeRelations::unify(kept, r);
   if (!result) {
-    checker_.diags_.error(
+    this->checker.diags_.error(
         bin->loc(), llvm::Twine("'") + op + "' gives '" + kept->name() +
                         "' when its left side is " + (isAnd ? "falsy" : "truthy") + " and '" +
                         r->name() +
                         "' otherwise, and no type holds both; say what each case gives with '?:'");
     return bin;
   }
-  bin->rhs = checker_.typeRelations().convert(bin->rhs, result);
+  bin->rhs = this->checker.typeRelations().convert(bin->rhs, result);
   bin->type = result;
 
   return bin;
 }
 
 bool TruthChecker::checkTruthy(const Expr *expr, Checker::TruthUse use, const Expr *other) {
-  const Type *type = expr->type, *base = GenericChecker::apparentType(type->nonOptional());
+  const Type *type = expr->type;
+  const Type *base = GenericChecker::apparentType(type->nonOptional());
   if (type->isUndefined() || base->isNever()) {
     return true;
   }
@@ -328,16 +332,17 @@ bool TruthChecker::checkTruthy(const Expr *expr, Checker::TruthUse use, const Ex
       return true;
     }
     if (!number) {
-      checker_.diags_.error(expr->loc(), "a value of type '" + type->name().str() +
-                                             "' is always truthy, so the condition is always true");
+      this->checker.diags_.error(expr->loc(),
+                                 "a value of type '" + type->name().str() +
+                                     "' is always truthy, so the condition is always true");
       return false;
     }
-    checker_.diags_.error(expr->loc(),
-                          "a value of type '" + type->name().str() + "' cannot be a condition: '" +
-                              number->name().str() +
-                              "' is a number, and 0 would count as false; check what it "
-                              "holds, e.g. 'typeof " +
-                              hintText(expr) + " == \"string\"'");
+    this->checker.diags_.error(expr->loc(),
+                               "a value of type '" + type->name().str() +
+                                   "' cannot be a condition: '" + number->name().str() +
+                                   "' is a number, and 0 would count as false; check what it "
+                                   "holds, e.g. 'typeof " +
+                                   hintText(expr) + " == \"string\"'");
     return false;
   }
 
@@ -362,7 +367,8 @@ bool TruthChecker::checkTruthy(const Expr *expr, Checker::TruthUse use, const Ex
     break;
   }
   bool negated = use == Checker::TruthUse::Not;
-  std::string x = hintText(expr), y = hintText(other, "...");
+  std::string x = hintText(expr);
+  std::string y = hintText(other, "...");
   std::string message;
 
   if (type->isVoid() || type->isUndefined()) {
@@ -511,14 +517,15 @@ bool TruthChecker::checkTruthy(const Expr *expr, Checker::TruthUse use, const Ex
       message += "; call it: '" + call + "'";
     }
   }
-  checker_.diags_.error(expr->loc(), message);
+  this->checker.diags_.error(expr->loc(), message);
 
   return false;
 }
 
 void TruthChecker::reportAssignmentCondition(const AssignExpr *assign, Checker::TruthUse use) {
   bool negated = use == Checker::TruthUse::Not;
-  std::string target = hintText(assign->target), value = hintText(assign->value, "...");
+  std::string target = hintText(assign->target);
+  std::string value = hintText(assign->value, "...");
   const Type *type = assign->type;
   std::string message = "an assignment cannot be a condition; ";
   if (isLiteral(assign->value) || type->isError() ||
@@ -531,19 +538,19 @@ void TruthChecker::reportAssignmentCondition(const AssignExpr *assign, Checker::
     message += "to test the assigned value, compare it: '(" + target + " = " + value + ") " +
                (negated ? "== " : "!= ") + empty + "'";
   }
-  checker_.diags_.error(assign->loc(), message);
+  this->checker.diags_.error(assign->loc(), message);
 }
 
 bool TruthChecker::isBooleanCall(const Expr *expr) const {
   auto *call = dyn_cast<CallExpr>(expr);
 
   return call && !call->optional && call->args.size() == 1 && !call->hasSpread() &&
-         checker_.callChecker().isGlobalName(call->callee, "Boolean");
+         this->checker.callChecker().isGlobalName(call->callee, "Boolean");
 }
 
 Expr *TruthChecker::checkBooleanCall(CallExpr *call, Checker::Flow &whenTrue,
                                      Checker::Flow &whenFalse) {
-  return checkBranching(call->args[0], whenTrue, whenFalse);
+  return this->checkBranching(call->args[0], whenTrue, whenFalse);
 }
 
 }

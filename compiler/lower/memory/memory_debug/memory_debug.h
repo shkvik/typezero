@@ -6,7 +6,7 @@ namespace tz {
 
 class MemoryDebug {
 public:
-  explicit MemoryDebug(Lowering &lowering);
+  explicit MemoryDebug(Lowering &owner);
 
   void checkOwned(const Type *type, llvm::StringRef name, llvm::Value *value,
                   const Type *fieldType);
@@ -16,7 +16,7 @@ public:
                                 llvm::StringRef name);
 
 private:
-  Lowering &lowering_;
+  Lowering &lowering;
 };
 
 }

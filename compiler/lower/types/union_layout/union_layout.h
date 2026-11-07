@@ -6,7 +6,7 @@ namespace tz {
 
 class UnionLayout {
 public:
-  explicit UnionLayout(Lowering &lowering);
+  explicit UnionLayout(Lowering &owner);
 
   static bool isAtomType(const Type *type);
   static bool isObjectUnion(const Type *type);
@@ -26,9 +26,12 @@ public:
   void countTagged(llvm::Value *value, const Type *type, bool retain);
 
 private:
-  Lowering &lowering_;
-  llvm::GlobalVariable *atomTable_ = nullptr;
-  llvm::Constant *atomDescriptor_ = nullptr;
+  static unsigned slotWords(UnionSlot slot);
+  static bool isReferenceLike(const Type *type);
+
+  Lowering &lowering;
+  llvm::GlobalVariable *atomTableVariable = nullptr;
+  llvm::Constant *atomDescriptorConstant = nullptr;
 };
 
 }

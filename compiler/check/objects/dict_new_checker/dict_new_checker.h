@@ -6,7 +6,7 @@ namespace tz {
 
 class DictNewChecker {
 public:
-  explicit DictNewChecker(Checker &checker);
+  explicit DictNewChecker(Checker &owner);
 
   void markPairs(Expr *arg);
   bool inferPairs(Expr *arg, const Type *&key, const Type *&value);
@@ -14,7 +14,7 @@ public:
   Expr *checkDictNew(NewExpr *expr, const Type *expected);
 
 private:
-  Checker &checker_;
+  Checker &checker;
 };
 
 }

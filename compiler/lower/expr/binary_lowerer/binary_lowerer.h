@@ -6,7 +6,7 @@ namespace tz {
 
 class BinaryLowerer {
 public:
-  explicit BinaryLowerer(Lowering &lowering);
+  explicit BinaryLowerer(Lowering &owner);
 
   llvm::Value *emitBinary(BinaryExpr *bin);
   llvm::Value *emitArithmetic(BinaryOp op, llvm::Value *lhs, llvm::Value *rhs, const Type *type,
@@ -18,7 +18,7 @@ public:
                              bool proven);
 
 private:
-  Lowering &lowering_;
+  Lowering &lowering;
 };
 
 }

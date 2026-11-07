@@ -6,7 +6,7 @@ namespace tz {
 
 class EnvLowerer {
 public:
-  explicit EnvLowerer(Lowering &lowering);
+  explicit EnvLowerer(Lowering &owner);
 
   const Lowering::EnvLayout &envLayout(const FunctionDecl *fn);
   llvm::StructType *boxType(const Type *type);
@@ -18,8 +18,10 @@ public:
   void bindCaptures(const FunctionDecl *fn);
 
 private:
-  Lowering &lowering_;
-  llvm::DenseMap<const Type *, llvm::StructType *> boxTypes_;
+  static std::string qualifiedName(const FunctionDecl *fn);
+
+  Lowering &lowering;
+  llvm::DenseMap<const Type *, llvm::StructType *> boxTypes;
 };
 
 }

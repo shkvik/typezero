@@ -6,7 +6,7 @@ namespace tz {
 
 class UnknownChecker {
 public:
-  explicit UnknownChecker(Checker &checker);
+  explicit UnknownChecker(Checker &owner);
 
   static bool isObjectReference(const Type *type);
   static bool holdsUnknown(const Type *type);
@@ -18,7 +18,10 @@ public:
   void addUnknownFacts(const Expr *cond, Checker::Flow &whenTrue, Checker::Flow &whenFalse) const;
 
 private:
-  Checker &checker_;
+  static const VarSymbol *checkedVariable(const Expr *expr);
+  static std::string hintName(const Expr *expr);
+
+  Checker &checker;
 };
 
 }

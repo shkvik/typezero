@@ -100,7 +100,10 @@ Expr *MathChecker::checkMathCall(CallExpr *call, MemberExpr *member, const Type 
   if (fn->kind != MinMax && checker_.callChecker().rejectSpread(call)) {
     return call;
   }
-  if (!checker_.argumentChecker().checkArity(call, member->loc(), fn->minArgs, fn->maxArgs)) {
+  ArgumentChecker::ResultArityMatches arity =
+      checker_.argumentChecker().checkArity(call, fn->minArgs, fn->maxArgs);
+  if (arity.isErr()) {
+    checker_.diags_.error(member->loc(), arity.error().message);
     return call;
   }
   if (fn->kind == MinMax && call->args.empty()) {
@@ -276,7 +279,9 @@ Expr *MathChecker::checkBitCall(CallExpr *call, MemberExpr *member) {
                                                inner->name + ".from(x)'");
       return loosely();
     }
-    if (!checker_.argumentChecker().checkArity(call, member->loc(), 1, 1)) {
+    ArgumentChecker::ResultArityMatches arity = checker_.argumentChecker().checkArity(call, 1, 1);
+    if (arity.isErr()) {
+      checker_.diags_.error(member->loc(), arity.error().message);
       return call;
     }
     Expr *&arg = call->args[0];
@@ -326,8 +331,13 @@ Expr *MathChecker::checkBitCall(CallExpr *call, MemberExpr *member) {
     checker_.diags_.error(member->loc(), "property '" + member->name + "' does not exist on 'Bit'");
     return loosely();
   }
-  if (checker_.callChecker().rejectSpread(call) ||
-      !checker_.argumentChecker().checkArity(call, member->loc(), fn->args, fn->args)) {
+  bool rejected = checker_.callChecker().rejectSpread(call);
+  ArgumentChecker::ResultArityMatches arity =
+      rejected ? ok(call) : checker_.argumentChecker().checkArity(call, fn->args, fn->args);
+  if (arity.isErr()) {
+    checker_.diags_.error(member->loc(), arity.error().message);
+  }
+  if (rejected || arity.isErr()) {
     return call;
   }
   std::string what = "Bit." + member->name.str();

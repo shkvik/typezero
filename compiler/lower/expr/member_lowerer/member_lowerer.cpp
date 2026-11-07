@@ -10,44 +10,37 @@
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/IR/Intrinsics.h"
 #include "llvm/IR/MDBuilder.h"
-#include "llvm/Support/ConvertUTF.h"
-#include "llvm/Support/ErrorHandling.h"
-#include <array>
 
-using llvm::BasicBlock;
-using llvm::cast;
-using llvm::dyn_cast;
-using llvm::isa;
-using llvm::Value;
 
 namespace tz {
 
-MemberLowerer::MemberLowerer(Lowering &lowering) : lowering_(lowering) {}
+MemberLowerer::MemberLowerer(Lowering &owner)
+    : lowering(owner) {}
 
 llvm::Value *MemberLowerer::emitMember(MemberExpr *member) {
   if (member->method()) {
-    return lowering_.classLowerer().emitBoundMethod(member);
+    return this->lowering.classLowerer().emitBoundMethod(member);
   }
   if (member->object->type->nonOptional()->isJson()) {
-    return lowering_.jsonLowerer().emitJsonMember(member);
+    return this->lowering.jsonLowerer().emitJsonMember(member);
   }
   const Type *objectType = member->object->type;
   if (objectType->isBytes() ||
       (objectType->isUnion() &&
        llvm::all_of(objectType->members(), [](const Type *m) { return m->isBytes(); }))) {
-    return lowering_.bytesLowerer().emitBytesMember(member);
+    return this->lowering.bytesLowerer().emitBytesMember(member);
   }
   if (member->object->type->isObject() || member->object->type->isUnion()) {
-    return lowering_.objectLowerer().emitFieldRead(member);
+    return this->lowering.objectLowerer().emitFieldRead(member);
   }
   if (member->object->type->isResult()) {
-    return lowering_.resultLowerer().emitResultMember(member);
+    return this->lowering.resultLowerer().emitResultMember(member);
   }
-  Lowering::Operand object = lowering_.refCounts().emitOperand(member->object, true);
+  Lowering::Operand object = this->lowering.refCounts().emitOperand(member->object, true);
   llvm::Value *length = object.type->isArray()
-                            ? lowering_.arrayLowerer().arrayLength(object.value)
-                            : lowering_.stringLowerer().stringLength(object.value);
-  lowering_.refCounts().dropOperand(object);
+                            ? this->lowering.arrayLowerer().arrayLength(object.value)
+                            : this->lowering.stringLowerer().stringLength(object.value);
+  this->lowering.refCounts().dropOperand(object);
 
   return length;
 }

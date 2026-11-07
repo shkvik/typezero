@@ -116,8 +116,13 @@ Expr *FsDeclarer::checkFsClassMethod(CallExpr *call, MemberExpr *member, ClassDe
   if (!kind) {
     return nullptr;
   }
-  if (checker_.callChecker().rejectSpread(call) ||
-      !checker_.argumentChecker().checkArity(call, member->loc(), 0, 0)) {
+  bool rejected = checker_.callChecker().rejectSpread(call);
+  ArgumentChecker::ResultArityMatches arity =
+      rejected ? ok(call) : checker_.argumentChecker().checkArity(call, 0, 0);
+  if (arity.isErr()) {
+    checker_.diags_.error(member->loc(), arity.error().message);
+  }
+  if (rejected || arity.isErr()) {
     return call;
   }
   auto *lit = checker_.ctx_.make<IntLitExpr>(member->loc(), uint64_t(*kind));

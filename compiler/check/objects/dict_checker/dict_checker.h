@@ -6,7 +6,7 @@ namespace tz {
 
 class DictChecker {
 public:
-  explicit DictChecker(Checker &checker);
+  explicit DictChecker(Checker &owner);
 
   const Type *resolveDictType(const TypeRef &ref);
   bool checkKeyType(const Type *type, llvm::SMLoc loc);
@@ -24,7 +24,9 @@ public:
   Expr *checkDictIn(BinaryExpr *bin);
 
 private:
-  Checker &checker_;
+  static std::u16string toUtf16(llvm::StringRef text);
+
+  Checker &checker;
 };
 
 }

@@ -6,13 +6,13 @@ namespace tz {
 
 class TypeDescriptors {
 public:
-  explicit TypeDescriptors(Lowering &lowering);
+  explicit TypeDescriptors(Lowering &owner);
 
   llvm::Constant *typeDescriptor(const Type *type);
   static uint32_t descriptorKind(const Type *type);
 
 private:
-  Lowering &lowering_;
+  Lowering &lowering;
 };
 
 }

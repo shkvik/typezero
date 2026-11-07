@@ -6,7 +6,7 @@ namespace tz {
 
 class LoopChecker {
 public:
-  explicit LoopChecker(Checker &checker);
+  explicit LoopChecker(Checker &owner);
 
   void checkWhile(WhileStmt *stmt);
   void checkDoWhile(DoWhileStmt *stmt);
@@ -15,7 +15,7 @@ public:
   void checkLoopBody(Stmt *body, bool awaits);
 
 private:
-  Checker &checker_;
+  Checker &checker;
 };
 
 }

@@ -6,7 +6,7 @@ namespace tz {
 
 class NumberLowerer {
 public:
-  explicit NumberLowerer(Lowering &lowering);
+  explicit NumberLowerer(Lowering &owner);
 
   llvm::Value *emitNumberBuiltin(CallExpr *call);
   llvm::Value *emitStringToNumber(llvm::Value *str);
@@ -18,7 +18,7 @@ public:
   llvm::Value *fromDouble(llvm::Value *value, const Type *to);
 
 private:
-  Lowering &lowering_;
+  Lowering &lowering;
 };
 
 }

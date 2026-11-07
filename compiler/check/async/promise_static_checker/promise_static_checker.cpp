@@ -13,20 +13,17 @@
 #include "compiler/whole_program/flows/flows.h"
 #include "llvm/ADT/STLExtras.h"
 
-using llvm::cast;
 using llvm::dyn_cast;
-using llvm::dyn_cast_or_null;
 using llvm::isa;
 
 namespace tz {
 
-namespace {
-
-const Type *awaited(const Type *type) { return type->isPromise() ? type->promised() : type; }
-
+const Type *PromiseStaticChecker::awaited(const Type *type) {
+  return type->isPromise() ? type->promised() : type;
 }
 
-PromiseStaticChecker::PromiseStaticChecker(Checker &checker) : checker_(checker) {}
+PromiseStaticChecker::PromiseStaticChecker(Checker &owner)
+    : checker(owner) {}
 
 bool PromiseStaticChecker::checkPromiseList(Expr *&arg, const Type *wantedElement,
                                             const Type *&element, std::vector<const Type *> &tuple,
@@ -35,9 +32,9 @@ bool PromiseStaticChecker::checkPromiseList(Expr *&arg, const Type *wantedElemen
     if (t->isPromise() || AsyncChecker::awaitedType(t) == t) {
       return false;
     }
-    checker_.diags_.error(loc,
-                          "'" + fn + "' of values that may be promises ('" + t->name() +
-                              "') is not supported yet; await each first, or make each a Promise");
+    this->checker.diags_.error(
+        loc, "'" + fn + "' of values that may be promises ('" + t->name() +
+                 "') is not supported yet; await each first, or make each a Promise");
 
     return true;
   };
@@ -46,10 +43,10 @@ bool PromiseStaticChecker::checkPromiseList(Expr *&arg, const Type *wantedElemen
                            [](const ArrayLitExpr::Element &e) { return e.spread || e.hole; })) {
     if (lit->elements.empty()) {
       if (!wantedElement) {
-        checker_.diags_.error(lit->loc(),
-                              "'" + fn +
-                                  "' of no promises needs the type of their values; "
-                                  "give the array a type, e.g. 'const ps: Promise<int>[] = []'");
+        this->checker.diags_.error(
+            lit->loc(), "'" + fn +
+                            "' of no promises needs the type of their values; "
+                            "give the array a type, e.g. 'const ps: Promise<int>[] = []'");
         return false;
       }
       lit->type = Type::array(Type::promise(wantedElement));
@@ -59,14 +56,14 @@ bool PromiseStaticChecker::checkPromiseList(Expr *&arg, const Type *wantedElemen
     std::vector<const Type *> types;
     bool same = true;
     for (ArrayLitExpr::Element &e : lit->elements) {
-      e.expr = checker_.exprChecker().checkExpr(
+      e.expr = this->checker.exprChecker().checkExpr(
           e.expr, wantedElement && Destination::literalShaped(e.expr) ? wantedElement : nullptr);
       if (e.expr->type->isError()) {
         return false;
       }
       if (e.expr->type->isVoid()) {
-        checker_.diags_.error(e.expr->loc(),
-                              "a value of type 'void' cannot be given to '" + fn + "'");
+        this->checker.diags_.error(e.expr->loc(),
+                                   "a value of type 'void' cannot be given to '" + fn + "'");
         return false;
       }
       if (mayBePromise(e.expr->type, e.expr->loc())) {
@@ -85,23 +82,23 @@ bool PromiseStaticChecker::checkPromiseList(Expr *&arg, const Type *wantedElemen
     }
     if (!same && common && !common->isError()) {
       for (ArrayLitExpr::Element &e : lit->elements) {
-        e.expr = checker_.typeRelations().convert(e.expr, common);
+        e.expr = this->checker.typeRelations().convert(e.expr, common);
       }
       types.assign(types.size(), common);
       same = true;
     }
     if (same) {
       lit->type = Type::array(types.front());
-      element = awaited(types.front());
+      element = PromiseStaticChecker::awaited(types.front());
       return true;
     }
     lit->type = Type::tuple(types);
     for (const Type *t : types) {
-      tuple.push_back(awaited(t));
+      tuple.push_back(PromiseStaticChecker::awaited(t));
     }
     return true;
   }
-  arg = checker_.exprChecker().checkExpr(arg);
+  arg = this->checker.exprChecker().checkExpr(arg);
   const Type *type = arg->type;
   if (type->isError()) {
     return false;
@@ -110,7 +107,7 @@ bool PromiseStaticChecker::checkPromiseList(Expr *&arg, const Type *wantedElemen
     if (mayBePromise(type->inner(), arg->loc())) {
       return false;
     }
-    element = awaited(type->inner());
+    element = PromiseStaticChecker::awaited(type->inner());
     return true;
   }
   if (type->isTuple()) {
@@ -118,7 +115,7 @@ bool PromiseStaticChecker::checkPromiseList(Expr *&arg, const Type *wantedElemen
       if (mayBePromise(f.type, arg->loc())) {
         return false;
       }
-      tuple.push_back(awaited(f.type));
+      tuple.push_back(PromiseStaticChecker::awaited(f.type));
     }
     return true;
   }
@@ -127,8 +124,8 @@ bool PromiseStaticChecker::checkPromiseList(Expr *&arg, const Type *wantedElemen
                            ? "; make an array of them: '" + fn.str() + "([..." +
                                  (name ? name->name.str() : std::string("values")) + "])'"
                            : "";
-  checker_.diags_.error(arg->loc(), "'" + fn + "' needs an array of promises, found '" +
-                                        type->name() + "'" + spread);
+  this->checker.diags_.error(arg->loc(), "'" + fn + "' needs an array of promises, found '" +
+                                             type->name() + "'" + spread);
 
   return false;
 }
@@ -136,21 +133,21 @@ bool PromiseStaticChecker::checkPromiseList(Expr *&arg, const Type *wantedElemen
 Expr *PromiseStaticChecker::checkPromiseStatic(CallExpr *call, MemberExpr *member,
                                                const Type *expected) {
   llvm::StringRef name = member->name;
-  checker_.file_->usesAsync = true;
+  this->checker.file_->usesAsync = true;
   call->type = Type::error();
   auto checkArgsLoosely = [&] {
     for (Expr *&arg : call->args) {
-      arg = checker_.exprChecker().checkExpr(arg);
+      arg = this->checker.exprChecker().checkExpr(arg);
     }
   };
-  if (checker_.callChecker().rejectSpread(call)) {
+  if (this->checker.callChecker().rejectSpread(call)) {
     return call;
   }
   if (!member->typeArgs.empty() && name != "withResolvers") {
-    checker_.diags_.error(member->loc(),
-                          "type arguments can be given to 'Promise.withResolvers<T>()'; "
-                          "the other functions of Promise take their types from what they "
-                          "get");
+    this->checker.diags_.error(member->loc(),
+                               "type arguments can be given to 'Promise.withResolvers<T>()'; "
+                               "the other functions of Promise take their types from what they "
+                               "get");
     member->typeArgs.clear();
   }
   const Type *wanted = expected && expected->nonOptional()->isPromise()
@@ -162,7 +159,10 @@ Expr *PromiseStaticChecker::checkPromiseStatic(CallExpr *call, MemberExpr *membe
   std::string fn = "Promise." + name.str();
 
   if (name == "resolve") {
-    if (!checker_.argumentChecker().checkArity(call, member->loc(), 0, 1)) {
+    ArgumentChecker::ResultArityMatches arity =
+        this->checker.argumentChecker().checkArity(call, 0, 1);
+    if (arity.isErr()) {
+      this->checker.diags_.error(member->loc(), arity.error().message);
       return call;
     }
     call->target = BuiltinCall{.builtin = Builtin::PromiseResolve};
@@ -171,8 +171,8 @@ Expr *PromiseStaticChecker::checkPromiseStatic(CallExpr *call, MemberExpr *membe
       return call;
     }
     Expr *&arg = call->args[0];
-    arg = checker_.exprChecker().checkExpr(arg,
-                                           wanted && !isa<UndefinedExpr>(arg) ? wanted : nullptr);
+    arg = this->checker.exprChecker().checkExpr(arg, wanted && !isa<UndefinedExpr>(arg) ? wanted
+                                                                                        : nullptr);
     const Type *type = arg->type;
     if (type->isError()) {
       return call;
@@ -186,15 +186,15 @@ Expr *PromiseStaticChecker::checkPromiseStatic(CallExpr *call, MemberExpr *membe
       return call;
     }
     if (type->isVoid()) {
-      checker_.diags_.error(arg->loc(),
-                            "a value of type 'void' cannot be given to 'Promise.resolve'");
+      this->checker.diags_.error(arg->loc(),
+                                 "a value of type 'void' cannot be given to 'Promise.resolve'");
       return call;
     }
     call->type = Type::promise(type);
     return call;
   }
   if (name == "reject" || name == "allSettled" || name == "any") {
-    return checker_.resultChecker().reject(
+    return this->checker.resultChecker().reject(
         call, member->loc(),
         name == "reject"
             ? std::string("a Promise is not rejected in tz: an operation that may fail gives a "
@@ -209,19 +209,23 @@ Expr *PromiseStaticChecker::checkPromiseStatic(CallExpr *call, MemberExpr *membe
                           "to settle gives the first value, 'Promise.race(ps)'"));
   }
   if (name == "withResolvers") {
-    if (!checker_.argumentChecker().checkArity(call, member->loc(), 0, 0)) {
+    ArgumentChecker::ResultArityMatches arity =
+        this->checker.argumentChecker().checkArity(call, 0, 0);
+    if (arity.isErr()) {
+      this->checker.diags_.error(member->loc(), arity.error().message);
       return call;
     }
     call->target = BuiltinCall{.builtin = Builtin::PromiseWithResolvers};
     const Type *value = nullptr;
     if (member->typeArgs.size() > 1) {
-      checker_.diags_.error(member->loc(),
-                            "'Promise.withResolvers' takes one type argument, the type of "
-                            "the value");
+      this->checker.diags_.error(member->loc(),
+                                 "'Promise.withResolvers' takes one type argument, the type of "
+                                 "the value");
       return call;
     }
     if (member->typeArgs.size() == 1) {
-      value = awaited(checker_.typeResolver().resolveType(member->typeArgs[0], true));
+      value = PromiseStaticChecker::awaited(
+          this->checker.typeResolver().resolveType(member->typeArgs[0], true));
     } else if (expected && expected->isObject()) {
       if (const Field *promise = expected->field("promise");
           promise && promise->type->isPromise()) {
@@ -230,9 +234,9 @@ Expr *PromiseStaticChecker::checkPromiseStatic(CallExpr *call, MemberExpr *membe
     }
     member->typeArgs.clear();
     if (!value) {
-      checker_.diags_.error(member->loc(),
-                            "'Promise.withResolvers' needs the type of the value; write it, "
-                            "e.g. 'Promise.withResolvers<int>()'");
+      this->checker.diags_.error(member->loc(),
+                                 "'Promise.withResolvers' needs the type of the value; write it, "
+                                 "e.g. 'Promise.withResolvers<int>()'");
       return call;
     }
     if (value->isError()) {
@@ -248,7 +252,10 @@ Expr *PromiseStaticChecker::checkPromiseStatic(CallExpr *call, MemberExpr *membe
     if (name != listName) {
       continue;
     }
-    if (!checker_.argumentChecker().checkArity(call, member->loc(), 1, 1)) {
+    ArgumentChecker::ResultArityMatches arity =
+        this->checker.argumentChecker().checkArity(call, 1, 1);
+    if (arity.isErr()) {
+      this->checker.diags_.error(member->loc(), arity.error().message);
       return call;
     }
     call->target = BuiltinCall{.builtin = builtin};
@@ -260,7 +267,7 @@ Expr *PromiseStaticChecker::checkPromiseStatic(CallExpr *call, MemberExpr *membe
     }
     const Type *element = nullptr;
     std::vector<const Type *> tuple;
-    if (!checkPromiseList(call->args[0], wantedElement, element, tuple, fn)) {
+    if (!this->checkPromiseList(call->args[0], wantedElement, element, tuple, fn)) {
       return call;
     }
     if (!tuple.empty() && builtin == Builtin::PromiseRace) {
@@ -268,11 +275,12 @@ Expr *PromiseStaticChecker::checkPromiseStatic(CallExpr *call, MemberExpr *membe
       for (const Type *t : tuple) {
         const Type *common = LiteralTypes::unionUnify(element, t);
         if (!common || common->isError()) {
-          checker_.diags_.error(call->args[0]->loc(), "'" + fn +
-                                                          "' gives a value of one of the promises, "
-                                                          "but they give '" +
-                                                          element->name() + "' and '" + t->name() +
-                                                          "'; make them give one type");
+          this->checker.diags_.error(call->args[0]->loc(),
+                                     "'" + fn +
+                                         "' gives a value of one of the promises, "
+                                         "but they give '" +
+                                         element->name() + "' and '" + t->name() +
+                                         "'; make them give one type");
           return call;
         }
         element = common;
@@ -286,9 +294,9 @@ Expr *PromiseStaticChecker::checkPromiseStatic(CallExpr *call, MemberExpr *membe
       if (!tuple.empty()) {
         for (const Type *t : tuple) {
           if (t->isVoid()) {
-            checker_.diags_.error(call->args[0]->loc(),
-                                  "'Promise.all' collects the values, and a "
-                                  "Promise<void> has none; await it on its own");
+            this->checker.diags_.error(call->args[0]->loc(),
+                                       "'Promise.all' collects the values, and a "
+                                       "Promise<void> has none; await it on its own");
             return call;
           }
         }
@@ -305,9 +313,9 @@ Expr *PromiseStaticChecker::checkPromiseStatic(CallExpr *call, MemberExpr *membe
     }
     return call;
   }
-  checker_.diags_.error(member->loc(), "'Promise." + name +
-                                           "' is not supported; the functions of Promise "
-                                           "are 'resolve', 'all', 'race' and 'withResolvers'");
+  this->checker.diags_.error(member->loc(), "'Promise." + name +
+                                                "' is not supported; the functions of Promise "
+                                                "are 'resolve', 'all', 'race' and 'withResolvers'");
   checkArgsLoosely();
 
   return call;

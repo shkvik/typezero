@@ -6,7 +6,7 @@ namespace tz {
 
 class ExprLowerer {
 public:
-  explicit ExprLowerer(Lowering &lowering);
+  explicit ExprLowerer(Lowering &owner);
 
   llvm::Value *emitExpr(Expr *expr);
   std::vector<llvm::Value *> emitExprs(llvm::ArrayRef<Expr *> exprs);
@@ -17,7 +17,9 @@ public:
   llvm::Value *emitConversion(llvm::Value *value, const Type *from, const Type *to);
 
 private:
-  Lowering &lowering_;
+  static bool isReference(const Type *type);
+
+  Lowering &lowering;
 };
 
 }

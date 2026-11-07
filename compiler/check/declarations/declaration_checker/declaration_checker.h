@@ -7,10 +7,12 @@ namespace tz {
 
 class DeclarationChecker {
 public:
-  explicit DeclarationChecker(Checker &checker);
+  explicit DeclarationChecker(Checker &owner);
   void check(Module *module);
 
 private:
+  static const char *accessWord(Access access);
+
   struct Exported {
     llvm::StringRef local;
     llvm::SMLoc loc;
@@ -26,9 +28,9 @@ private:
   bool mentionsHidden(const FunctionDecl *fn) const;
   void mismatch(llvm::SMLoc loc, const std::string &what, const Type *here, const Type *there);
   std::string fileName() const;
-  Checker &checker_;
-  Module *module_ = nullptr;
-  llvm::StringMap<Exported> exported_;
+  Checker &checker;
+  Module *checkedModule = nullptr;
+  llvm::StringMap<Exported> exportedNames;
 };
 
 }

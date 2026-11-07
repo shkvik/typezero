@@ -6,7 +6,7 @@ namespace tz {
 
 class DestinationScanner {
 public:
-  explicit DestinationScanner(Checker &checker);
+  explicit DestinationScanner(Checker &owner);
 
   void scanDestinations(const Stmt *stmt, Checker::DestinationScan &scan);
   bool scanDestinations(llvm::ArrayRef<Stmt *> stmts, Checker::DestinationScan &scan);
@@ -18,7 +18,7 @@ public:
                                          const Checker::DestinationScan &scan);
 
 private:
-  Checker &checker_;
+  Checker &checker;
 };
 
 }

@@ -6,7 +6,7 @@ namespace tz {
 
 class ObjectChecker {
 public:
-  explicit ObjectChecker(Checker &checker);
+  explicit ObjectChecker(Checker &owner);
 
   Expr *checkObjectCall(CallExpr *call, MemberExpr *member, const Type *expected);
   void checkForIn(ForOfStmt *stmt);
@@ -19,7 +19,7 @@ public:
 private:
   Expr *enumMembers(CallExpr *call, EnumDecl *decl, llvm::StringRef fn);
 
-  Checker &checker_;
+  Checker &checker;
 };
 
 }

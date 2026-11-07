@@ -6,7 +6,7 @@ namespace tz {
 
 class InheritLowerer {
 public:
-  explicit InheritLowerer(Lowering &lowering);
+  explicit InheritLowerer(Lowering &owner);
 
   void prepareDispatch(SourceFile &file);
   const Lowering::InterfaceMember *dispatchedMember(const Type *type, llvm::StringRef name,
@@ -21,13 +21,16 @@ public:
   const Type *layoutPrefix(const Type *type) const;
 
 private:
-  Lowering &lowering_;
-  std::map<const Type *, std::vector<const Type *>> tablesOf_;
-  unsigned colors_ = 0;
-  std::map<const Type *, llvm::Constant *> itables_;
-  std::map<std::pair<const Type *, const Type *>, llvm::Constant *> itableConstants_;
+  static llvm::LoadInst *invariant(llvm::LoadInst *load);
+  static std::string typeName(const Type *type);
+
+  Lowering &lowering;
+  std::map<const Type *, std::vector<const Type *>> tablesOf;
+  unsigned colors = 0;
+  std::map<const Type *, llvm::Constant *> itables;
+  std::map<std::pair<const Type *, const Type *>, llvm::Constant *> itableConstants;
   std::map<std::pair<const Type *, std::string>, std::pair<llvm::Function *, llvm::Constant *>>
-      fieldStubs_;
+      fieldStubs;
 };
 
 }

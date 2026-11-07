@@ -654,7 +654,9 @@ Expr *EmitterChecker::checkEmitterCall(CallExpr *call, MemberExpr *member, Class
   }
   case EmitterMethod::Listen:
   case EmitterMethod::Remove: {
-    if (!checker_.argumentChecker().checkArity(call, member->loc(), 2, 2)) {
+    ArgumentChecker::ResultArityMatches arity = checker_.argumentChecker().checkArity(call, 2, 2);
+    if (arity.isErr()) {
+      checker_.diags_.error(member->loc(), arity.error().message);
       return call;
     }
     const Type *args = checker_.eventMaps().eventArgs(events, call->args[0], name, &event);
@@ -686,7 +688,9 @@ Expr *EmitterChecker::checkEmitterCall(CallExpr *call, MemberExpr *member, Class
   }
   case EmitterMethod::Listeners:
   case EmitterMethod::RawListeners: {
-    if (!checker_.argumentChecker().checkArity(call, member->loc(), 1, 1)) {
+    ArgumentChecker::ResultArityMatches arity = checker_.argumentChecker().checkArity(call, 1, 1);
+    if (arity.isErr()) {
+      checker_.diags_.error(member->loc(), arity.error().message);
       return call;
     }
     const Type *args = checker_.eventMaps().eventArgs(events, call->args[0], name, &event);
@@ -700,7 +704,9 @@ Expr *EmitterChecker::checkEmitterCall(CallExpr *call, MemberExpr *member, Class
     return call;
   }
   case EmitterMethod::Count: {
-    if (!checker_.argumentChecker().checkArity(call, member->loc(), 1, 2)) {
+    ArgumentChecker::ResultArityMatches arity = checker_.argumentChecker().checkArity(call, 1, 2);
+    if (arity.isErr()) {
+      checker_.diags_.error(member->loc(), arity.error().message);
       return call;
     }
     const Type *args = checker_.eventMaps().eventArgs(events, call->args[0], name, &event);
@@ -721,7 +727,9 @@ Expr *EmitterChecker::checkEmitterCall(CallExpr *call, MemberExpr *member, Class
     return callLibraryMethod(call, member, cls, name, {}, &given, super);
   }
   case EmitterMethod::RemoveAll: {
-    if (!checker_.argumentChecker().checkArity(call, member->loc(), 0, 1)) {
+    ArgumentChecker::ResultArityMatches arity = checker_.argumentChecker().checkArity(call, 0, 1);
+    if (arity.isErr()) {
+      checker_.diags_.error(member->loc(), arity.error().message);
       return call;
     }
     if (!call->args.empty() &&

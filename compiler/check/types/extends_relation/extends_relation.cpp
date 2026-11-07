@@ -7,30 +7,22 @@
 #include "compiler/infer/return_inferrer/return_inferrer.h"
 #include "compiler/whole_program/flows/flows.h"
 #include "llvm/ADT/STLExtras.h"
-#include "llvm/Support/ConvertUTF.h"
 #include <cmath>
 
-using llvm::cast;
-using llvm::dyn_cast;
-using llvm::dyn_cast_or_null;
-using llvm::isa;
 
 namespace tz {
 
 bool typeMentions(const Type *type, llvm::ArrayRef<const Type *> params);
 
-namespace {
-
-std::vector<const Type *> distributed(const Type *type) {
+std::vector<const Type *> ExtendsRelation::distributed(const Type *type) {
   std::vector<const Type *> out;
   distribute(type, out);
 
   return out;
 }
 
-}
-
-ExtendsRelation::ExtendsRelation(Checker &checker) : checker_(checker) {}
+ExtendsRelation::ExtendsRelation(Checker &owner)
+    : checker(owner) {}
 
 bool ExtendsRelation::extendsType(const Type *type, const Type *pattern,
                                   Checker::InferMatch *inference) {
@@ -38,7 +30,7 @@ bool ExtendsRelation::extendsType(const Type *type, const Type *pattern,
     auto found = llvm::find(inference->params, pattern);
     if (found != inference->params.end()) {
       if (const Type *constraint = pattern->constraint();
-          constraint && !extendsType(type, constraint, inference)) {
+          constraint && !this->extendsType(type, constraint, inference)) {
         return false;
       }
       const Type *&bound = inference->bound[size_t(found - inference->params.begin())];
@@ -56,11 +48,11 @@ bool ExtendsRelation::extendsType(const Type *type, const Type *pattern,
     return false;
   }
   if (type->isUnion() || type->isOptional()) {
-    return llvm::all_of(distributed(type),
-                        [&](const Type *m) { return extendsType(m, pattern, inference); });
+    return llvm::all_of(ExtendsRelation::distributed(type),
+                        [&](const Type *m) { return this->extendsType(m, pattern, inference); });
   }
   if (pattern->isOptional()) {
-    return type->isUndefined() || extendsType(type, pattern->inner(), inference);
+    return type->isUndefined() || this->extendsType(type, pattern->inner(), inference);
   }
   if (type->isUndefined()) {
     return false;
@@ -68,7 +60,7 @@ bool ExtendsRelation::extendsType(const Type *type, const Type *pattern,
   if (pattern->isUnion()) {
     for (const Type *m : pattern->members()) {
       std::vector<const Type *> saved = inference ? inference->bound : std::vector<const Type *>();
-      if (extendsType(type, m, inference)) {
+      if (this->extendsType(type, m, inference)) {
         return true;
       }
       if (inference) {
@@ -78,7 +70,7 @@ bool ExtendsRelation::extendsType(const Type *type, const Type *pattern,
     return false;
   }
   if (pattern->typeOp() == TypeOp::Template) {
-    return type->isStringLiteral() && checker_.templateTypes().matchTemplate(
+    return type->isStringLiteral() && this->checker.templateTypes().matchTemplate(
                                           type->literalText(), pattern->operands(), inference);
   }
   if (pattern->isPattern()) {
@@ -88,7 +80,7 @@ bool ExtendsRelation::extendsType(const Type *type, const Type *pattern,
     return pattern == Type::string();
   }
   if (type->isLiteral()) {
-    return !pattern->isLiteral() && extendsType(type->literalBase(), pattern, inference);
+    return !pattern->isLiteral() && this->extendsType(type->literalBase(), pattern, inference);
   }
   if (pattern->isLiteral() || type->isParam() || pattern->isParam()) {
     return false;
@@ -97,42 +89,44 @@ bool ExtendsRelation::extendsType(const Type *type, const Type *pattern,
     return UnknownChecker::isObjectReference(type);
   }
   if (type->isArray()) {
-    return pattern->isArray() && extendsType(type->inner(), pattern->inner(), inference);
+    return pattern->isArray() && this->extendsType(type->inner(), pattern->inner(), inference);
   }
   if (type->isTuple()) {
     if (pattern->isArray()) {
       for (const Field &f : type->fields()) {
-        if (!extendsType(f.type, pattern->inner(), inference)) {
+        if (!this->extendsType(f.type, pattern->inner(), inference)) {
           return false;
         }
       }
       return !type->tupleRest() ||
-             extendsType(type->tupleRest()->inner(), pattern->inner(), inference);
+             this->extendsType(type->tupleRest()->inner(), pattern->inner(), inference);
     }
-    return pattern->isTuple() && extendsTuple(type, pattern, inference);
+    return pattern->isTuple() && this->extendsTuple(type, pattern, inference);
   }
   if (type->isFunction()) {
-    return pattern->isFunction() && extendsFunction(type, pattern, inference);
+    return pattern->isFunction() && this->extendsFunction(type, pattern, inference);
   }
   if (type->isPromise()) {
-    return pattern->isPromise() && extendsType(type->promised(), pattern->promised(), inference);
+    return pattern->isPromise() &&
+           this->extendsType(type->promised(), pattern->promised(), inference);
   }
   if (type->isIterator()) {
-    return pattern->isIterator() && extendsType(type->yielded(), pattern->yielded(), inference) &&
-           extendsType(type->returned(), pattern->returned(), inference) &&
-           extendsType(type->sent(), pattern->sent(), inference);
+    return pattern->isIterator() &&
+           this->extendsType(type->yielded(), pattern->yielded(), inference) &&
+           this->extendsType(type->returned(), pattern->returned(), inference) &&
+           this->extendsType(type->sent(), pattern->sent(), inference);
   }
   if (type->isDict()) {
     return pattern->isDict() && type->dictKind() == pattern->dictKind() &&
-           extendsType(type->keyType(), pattern->keyType(), inference) &&
-           extendsType(type->valueType(), pattern->valueType(), inference);
+           this->extendsType(type->keyType(), pattern->keyType(), inference) &&
+           this->extendsType(type->valueType(), pattern->valueType(), inference);
   }
   if (type->isResult()) {
-    return pattern->isResult() && extendsType(type->okType(), pattern->okType(), inference) &&
-           extendsType(type->errType(), pattern->errType(), inference);
+    return pattern->isResult() && this->extendsType(type->okType(), pattern->okType(), inference) &&
+           this->extendsType(type->errType(), pattern->errType(), inference);
   }
   if (type->isObject() && pattern->isObject()) {
-    return extendsObject(type, pattern, inference);
+    return this->extendsObject(type, pattern, inference);
   }
 
   return !pattern->isObject() && !type->isObject() &&
@@ -158,7 +152,7 @@ bool ExtendsRelation::extendsTuple(const Type *type, const Type *pattern,
     }
   }
   if (type->tupleRest() || type->tupleMin() < mine.size()) {
-    return spread == 0 && theirs.size() == 1 && extendsType(type, theirs[0], inference);
+    return spread == 0 && theirs.size() == 1 && this->extendsType(type, theirs[0], inference);
   }
   if (spread == theirs.size()) {
     if (pattern->tupleRest()) {
@@ -166,8 +160,9 @@ bool ExtendsRelation::extendsTuple(const Type *type, const Type *pattern,
         return false;
       }
       for (size_t i = 0; i < mine.size(); ++i) {
-        if (!extendsType(mine[i], i < theirs.size() ? theirs[i] : pattern->tupleRest()->inner(),
-                         inference)) {
+        if (!this->extendsType(mine[i],
+                               i < theirs.size() ? theirs[i] : pattern->tupleRest()->inner(),
+                               inference)) {
           return false;
         }
       }
@@ -177,7 +172,7 @@ bool ExtendsRelation::extendsTuple(const Type *type, const Type *pattern,
       return false;
     }
     for (size_t i = 0; i < mine.size(); ++i) {
-      if (!extendsType(mine[i], theirs[i], inference)) {
+      if (!this->extendsType(mine[i], theirs[i], inference)) {
         return false;
       }
     }
@@ -188,26 +183,27 @@ bool ExtendsRelation::extendsTuple(const Type *type, const Type *pattern,
     return false;
   }
   for (size_t i = 0; i < spread; ++i) {
-    if (!extendsType(mine[i], theirs[i], inference)) {
+    if (!this->extendsType(mine[i], theirs[i], inference)) {
       return false;
     }
   }
   for (size_t k = 0; k < after; ++k) {
-    if (!extendsType(mine[mine.size() - after + k], theirs[spread + 1 + k], inference)) {
+    if (!this->extendsType(mine[mine.size() - after + k], theirs[spread + 1 + k], inference)) {
       return false;
     }
   }
   std::vector<const Type *> middle(mine.begin() + long(spread), mine.end() - long(after));
 
-  return extendsType(Type::tuple(middle), theirs[spread], inference);
+  return this->extendsType(Type::tuple(middle), theirs[spread], inference);
 }
 
 bool ExtendsRelation::extendsFunction(const Type *type, const Type *pattern,
                                       Checker::InferMatch *inference) {
-  if (!pattern->ret()->isVoid() && !extendsType(type->ret(), pattern->ret(), inference)) {
+  if (!pattern->ret()->isVoid() && !this->extendsType(type->ret(), pattern->ret(), inference)) {
     return false;
   }
-  llvm::ArrayRef<const Type *> mine = type->params(), theirs = pattern->params();
+  llvm::ArrayRef<const Type *> mine = type->params();
+  llvm::ArrayRef<const Type *> theirs = pattern->params();
   size_t myFixed = mine.size() - (type->hasRest() ? 1 : 0);
   size_t theirFixed = theirs.size() - (pattern->hasRest() ? 1 : 0);
   if (!pattern->hasRest() && type->minArgs() > theirs.size()) {
@@ -222,10 +218,10 @@ bool ExtendsRelation::extendsFunction(const Type *type, const Type *pattern,
   };
   auto fits = [&](const Type *my, const Type *their) {
     if (inference && typeMentions(their, inference->params)) {
-      return extendsType(my, their, inference);
+      return this->extendsType(my, their, inference);
     }
 
-    return TypeRelations::isImplicitlyConvertible(their, my) || extendsType(their, my);
+    return TypeRelations::isImplicitlyConvertible(their, my) || this->extendsType(their, my);
   };
   for (size_t i = 0; i < theirFixed; ++i) {
     if (const Type *my = mineAt(i); my && !fits(my, theirs[i])) {
@@ -242,7 +238,7 @@ bool ExtendsRelation::extendsFunction(const Type *type, const Type *pattern,
     size_t min = type->minArgs() > from ? type->minArgs() - from : 0;
     const Type *list = Type::argumentList(elements, std::min(min, elements.size()),
                                           type->hasRest() ? mine.back() : nullptr);
-    return extendsType(list, rest, inference);
+    return this->extendsType(list, rest, inference);
   }
   const Type *element = rest->isArray() ? rest->inner() : nullptr;
   if (!element || element->isUnknown() || element->isNever()) {
@@ -277,7 +273,7 @@ bool ExtendsRelation::extendsObject(const Type *type, const Type *pattern,
           t->typeArgs().size() == pattern->typeArgs().size()) {
         bool all = true;
         for (size_t k = 0; all && k < t->typeArgs().size(); ++k) {
-          all = extendsType(t->typeArgs()[k], pattern->typeArgs()[k], inference);
+          all = this->extendsType(t->typeArgs()[k], pattern->typeArgs()[k], inference);
         }
         if (all) {
           return true;
@@ -293,7 +289,7 @@ bool ExtendsRelation::extendsObject(const Type *type, const Type *pattern,
   }
   ClassDecl *cls = ClassDeclarer::classOf(type);
   if (cls) {
-    checker_.classDeclarer().completeClass(cls);
+    this->checker.classDeclarer().completeClass(cls);
   }
   for (const Field &f : pattern->fields()) {
     const Type *own = nullptr;
@@ -302,7 +298,7 @@ bool ExtendsRelation::extendsObject(const Type *type, const Type *pattern,
     } else if (cls) {
       if (std::vector<FunctionDecl *> methods = ClassDeclarer::methodsNamed(cls, f.name, false);
           !methods.empty() && methods.back()->sym && methods.back()->typeParams.empty()) {
-        own = checker_.returnInferrer().functionType(methods.back()->sym);
+        own = this->checker.returnInferrer().functionType(methods.back()->sym);
       }
     }
     if (!own) {
@@ -311,7 +307,7 @@ bool ExtendsRelation::extendsObject(const Type *type, const Type *pattern,
       }
       return false;
     }
-    if (!extendsType(own, f.type, inference)) {
+    if (!this->extendsType(own, f.type, inference)) {
       return false;
     }
   }

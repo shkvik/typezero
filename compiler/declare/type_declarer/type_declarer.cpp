@@ -14,160 +14,236 @@
 #include "compiler/library/builtin_modules/builtin_module_types/builtin_module_types.h"
 #include "compiler/load/to_utf8/to_utf8.h"
 #include "compiler/whole_program/flows/flows.h"
-#include "llvm/Support/CheckedArithmetic.h"
 #include "llvm/Support/ConvertUTF.h"
 #include <cmath>
 #include <cstdio>
-#include <functional>
-#include <limits>
 #include <string>
 
 using llvm::cast;
 using llvm::dyn_cast;
-using llvm::dyn_cast_or_null;
-using llvm::isa;
 
 namespace tz {
 
-namespace {
+TypeDeclarer::TypeDeclarer(Checker &owner)
+    : checker(owner) {}
 
-std::u16string toUtf16(llvm::StringRef text) {
+std::u16string TypeDeclarer::toUtf16(llvm::StringRef text) {
   llvm::SmallVector<llvm::UTF16, 32> units;
   llvm::convertUTF8ToUTF16String(text, units);
 
   return std::u16string(units.begin(), units.end());
 }
 
-std::string formatNumber(double value) {
+std::string TypeDeclarer::formatNumber(double value) {
   char text[32];
   std::snprintf(text, sizeof text, "%.15g", value);
 
   return text;
 }
 
+TypeDeclarer::ResultAliasIsOwnType TypeDeclarer::builtinAlias(const TypeAliasDecl *alias) {
+  llvm::StringRef name = alias->name;
+  bool builtin = Type::fromName(name) || name == "Array";
+  bool integer = builtin && Type::fromName(name)->isNumeric();
+  bool forTsc =
+      integer && alias->type.kind() == TypeRefKind::NAME_REF && alias->type.name == "number";
+  forTsc |= builtin && name == "Json" && alias->type.kind() == TypeRefKind::UNION_REF;
+  if (forTsc) {
+    return err(TypeDeclarerBuiltinAliasError{
+        .code = TypeDeclarerBuiltinAliasErrorCode::DECLARED_FOR_TSC,
+        .message = "",
+    });
+  }
+  if (integer) {
+    std::string message = ErrorTextBuiltinAlias::number(name);
+
+    return err(TypeDeclarerBuiltinAliasError{
+        .code = TypeDeclarerBuiltinAliasErrorCode::REDEFINES_NUMBER,
+        .message = message,
+    });
+  }
+  if (builtin) {
+    std::string message = ErrorTextBuiltinAlias::builtin(name);
+
+    return err(TypeDeclarerBuiltinAliasError{
+        .code = TypeDeclarerBuiltinAliasErrorCode::REDEFINES_BUILTIN,
+        .message = message,
+    });
+  }
+
+  return ok(alias);
 }
 
-TypeDeclarer::TypeDeclarer(Checker &checker) : checker_(checker) {}
+TypeDeclarer::ResultTypeNameIsFree TypeDeclarer::freeTypeName(llvm::StringRef name) const {
+  if (this->checker.typeScopes_.back().count(name)) {
+    std::string message = ErrorTextFreeTypeName::duplicate(name);
+
+    return err(TypeDeclarerFreeTypeNameError{
+        .code = TypeDeclarerFreeTypeNameErrorCode::DUPLICATE_TYPE,
+        .message = message,
+    });
+  }
+
+  return ok(name);
+}
 
 std::vector<Stmt *> TypeDeclarer::declareTypes(llvm::ArrayRef<Stmt *> stmts, bool resolve) {
   std::vector<Stmt *> declared;
   for (Stmt *stmt : stmts) {
     llvm::StringRef name;
-    if (auto *alias = dyn_cast<TypeAliasDecl>(stmt)) {
+    auto *alias = dyn_cast<TypeAliasDecl>(stmt);
+    auto *decl = dyn_cast<EnumDecl>(stmt);
+    auto *cls = dyn_cast<ClassDecl>(stmt);
+    if (alias) {
       name = alias->name;
-      if (Type::fromName(name) || name == "Array") {
-        bool integer = Type::fromName(name)->isNumeric();
-        bool forTsc =
-            integer && alias->type.kind() == TypeRefKind::NAME_REF && alias->type.name == "number";
-        forTsc |= name == "Json" && alias->type.kind() == TypeRefKind::UNION_REF;
-        if (!forTsc) {
-          checker_.diags_.error(
-              alias->loc(),
-              "'" + name + "' is a built-in type and cannot be redefined" +
-                  (integer ? "; only 'type " + name.str() + " = number', for tsc, may declare it"
-                           : std::string()));
-        }
+      ResultAliasIsOwnType own = TypeDeclarer::builtinAlias(alias);
+      bool forTsc =
+          own.isErr() && own.error().code == TypeDeclarerBuiltinAliasErrorCode::DECLARED_FOR_TSC;
+      if (own.isErr() && !forTsc) {
+        this->checker.diags_.error(alias->loc(), own.error().message);
+      }
+      if (own.isErr()) {
         continue;
       }
-    } else if (auto *decl = dyn_cast<EnumDecl>(stmt)) {
+    } else if (decl) {
       name = decl->name;
-      checker_.scopes().declare(name, decl->loc(), {EnumEntry{.enumDecl = decl}});
-    } else if (auto *cls = dyn_cast<ClassDecl>(stmt); cls && checker_.scopes_.size() == 1) {
+      this->checker.scopes().declare(name, decl->loc(), {EnumEntry{.enumDecl = decl}});
+    } else if (cls && this->checker.scopes_.size() == 1) {
       name = cls->name;
-      checker_.classDeclarer().declareClass(cls);
+      this->checker.classDeclarer().declareClass(cls);
     } else {
       continue;
     }
-    auto [it, inserted] = checker_.typeScopes_.back().try_emplace(name, stmt);
-    if (!inserted) {
-      checker_.diags_.error(stmt->loc(), "duplicate declaration of type '" + name + "'");
-      checker_.diags_.note(it->second->loc(), "previously declared here");
+    ResultTypeNameIsFree unused = this->freeTypeName(name);
+    if (unused.isErr()) {
+      Stmt *previous = this->checker.typeScopes_.back().find(name)->second;
+      std::string previousText = ErrorTextFreeTypeName::previous();
+      this->checker.diags_.error(stmt->loc(), unused.error().message);
+      this->checker.diags_.note(previous->loc(), previousText);
       continue;
     }
+    this->checker.typeScopes_.back().try_emplace(name, stmt);
     declared.push_back(stmt);
   }
   if (resolve) {
-    resolveTypes(declared);
+    this->resolveTypes(declared);
   }
 
   return declared;
 }
 
+bool TypeDeclarer::mentionsTypeOf(const TypeRef &ref) {
+  return ref.kind() == TypeRefKind::TYPE_OF_REF ||
+         llvm::any_of(ref.args, TypeDeclarer::mentionsTypeOf);
+}
+
 void TypeDeclarer::resolveTypes(llvm::ArrayRef<Stmt *> declared) {
-  std::function<bool(const TypeRef &)> typeOf = [&](const TypeRef &ref) {
-    return ref.kind() == TypeRefKind::TYPE_OF_REF || llvm::any_of(ref.args, typeOf);
-  };
   for (Stmt *stmt : declared) {
-    if (auto *alias = dyn_cast<TypeAliasDecl>(stmt); alias && typeOf(alias->type)) {
+    auto *alias = dyn_cast<TypeAliasDecl>(stmt);
+    auto *cls = dyn_cast<ClassDecl>(stmt);
+    if (alias && TypeDeclarer::mentionsTypeOf(alias->type)) {
       continue;
     }
-    if (auto *alias = dyn_cast<TypeAliasDecl>(stmt); alias && !alias->typeParams.empty()) {
-      checker_.aliasInstantiator().instantiateAlias(
-          alias, checker_.aliasInstantiator().aliasTypeParams(alias), alias->loc());
+    if (alias && !alias->typeParams.empty()) {
+      std::vector<const Type *> params = this->checker.aliasInstantiator().aliasTypeParams(alias);
+      this->checker.aliasInstantiator().instantiateAlias(alias, std::move(params), alias->loc());
     } else if (alias) {
-      resolveAlias(alias);
-    } else if (auto *cls = dyn_cast<ClassDecl>(stmt)) {
+      this->resolveAlias(alias);
+    } else if (cls) {
       if (!cls->baseExpr) {
-        checker_.classDeclarer().resolveClass(cls);
+        this->checker.classDeclarer().resolveClass(cls);
       }
     } else {
-      resolveEnum(cast<EnumDecl>(stmt));
+      this->resolveEnum(cast<EnumDecl>(stmt));
     }
   }
 }
 
 Stmt *TypeDeclarer::lookupType(llvm::StringRef name) const {
-  for (auto scope = checker_.typeScopes_.rbegin(); scope != checker_.typeScopes_.rend(); ++scope) {
+  for (auto scope = this->checker.typeScopes_.rbegin(); scope != this->checker.typeScopes_.rend();
+       ++scope) {
     auto found = scope->find(name);
     if (found != scope->end()) {
       return found->second;
     }
   }
-  if (TypeAliasDecl *alias = checker_.builtinAliases_.lookup(name)) {
+  TypeAliasDecl *alias = this->checker.builtinAliases_.lookup(name);
+  if (alias) {
     return alias;
   }
-  if (const Checker::NodeName *imported = checker_.builtinModuleChecker().nodeName(name)) {
-    return checker_.builtinModuleTypes().exported(imported->module, imported->name);
+  const Checker::NodeName *imported = this->checker.builtinModuleChecker().nodeName(name);
+  if (imported) {
+    return this->checker.builtinModuleTypes().exported(imported->module, imported->name);
   }
-  if (builtinDepth_ > 0) {
-    return checker_.builtinModuleTypes().alias(name);
+  if (this->builtinDepth > 0) {
+    return this->checker.builtinModuleTypes().alias(name);
   }
 
   return nullptr;
+}
+
+TypeDeclarer::ResultAliasNotCyclic TypeDeclarer::aliasCycle(const TypeAliasDecl *alias) {
+  if (alias->resolving && !alias->self) {
+    std::string message = ErrorTextAliasCycle::itself(alias->name);
+
+    return err(TypeDeclarerAliasCycleError{
+        .code = TypeDeclarerAliasCycleErrorCode::REFERS_TO_ITSELF,
+        .message = message,
+    });
+  }
+
+  return ok(alias);
+}
+
+TypeDeclarer::ResultUnionRecursion TypeDeclarer::recursiveUnion(const TypeAliasDecl *alias,
+                                                                const Type *type) {
+  if (alias->recursive && !type->isError() && !type->isUnion()) {
+    std::string message = ErrorTextRecursiveUnion::notUnion(alias->name);
+
+    return err(TypeDeclarerRecursiveUnionError{
+        .code = TypeDeclarerRecursiveUnionErrorCode::NOT_A_UNION,
+        .message = message,
+    });
+  }
+
+  return ok(type);
 }
 
 const Type *TypeDeclarer::resolveAlias(TypeAliasDecl *alias) {
   if (alias->resolved) {
     return alias->resolved;
   }
-  if (Module *home = checker_.declModules_.lookup(alias);
-      home && home != checker_.module_ && checker_.scopes_.size() == 1) {
-    Module *here = checker_.module_;
-    checker_.moduleDeclarer().useModule(home);
-    const Type *type = resolveAlias(alias);
-    checker_.moduleDeclarer().useModule(here);
+  Module *home = this->checker.declModules_.lookup(alias);
+  bool elsewhere = home && home != this->checker.module_ && this->checker.scopes_.size() == 1;
+  if (elsewhere) {
+    Module *here = this->checker.module_;
+    this->checker.moduleDeclarer().useModule(home);
+    const Type *type = this->resolveAlias(alias);
+    this->checker.moduleDeclarer().useModule(here);
     return type;
   }
-  if (alias->resolving) {
-    if (alias->self) {
-      alias->recursive = true;
-      return alias->self;
-    }
-    checker_.diags_.error(alias->loc(), "type alias '" + alias->name + "' refers to itself");
+  if (alias->resolving && alias->self) {
+    alias->recursive = true;
+    return alias->self;
+  }
+  ResultAliasNotCyclic cycle = TypeDeclarer::aliasCycle(alias);
+  if (cycle.isErr()) {
+    this->checker.diags_.error(alias->loc(), cycle.error().message);
     alias->resolved = Type::error();
     return alias->resolved;
   }
+
   alias->resolving = true;
-  bool builtinModule = checker_.builtinModuleTypes().alias(alias->name) == alias;
-  builtinDepth_ += builtinModule ? 1 : 0;
-  const Type *type;
+  bool builtinModule = this->checker.builtinModuleTypes().alias(alias->name) == alias;
+  this->builtinDepth += builtinModule ? 1 : 0;
+  const Type *type = nullptr;
   if (alias->type.kind() == TypeRefKind::OBJECT_REF) {
     alias->self = Type::declareObject(alias->name);
     std::vector<const Type *> bases;
     std::vector<Overload> overloads;
     std::vector<Field> fields =
-        alias->bases.empty() ? checker_.typeResolver().resolveFields(alias->type, &overloads)
-                             : checker_.classBases().interfaceFields(alias, bases, overloads);
+        alias->bases.empty() ? this->checker.typeResolver().resolveFields(alias->type, &overloads)
+                             : this->checker.classBases().interfaceFields(alias, bases, overloads);
     if (alias->recursive) {
       alias->self->defineFields(std::move(fields), std::move(overloads));
       type = alias->self;
@@ -176,36 +252,30 @@ const Type *TypeDeclarer::resolveAlias(TypeAliasDecl *alias) {
     }
     for (const Type *base : bases) {
       if (!type->isError()) {
-        checker_.classBases().addBase(type, base);
+        this->checker.classBases().addBase(type, base);
       }
     }
   } else if (alias->type.kind() == TypeRefKind::UNION_REF) {
     alias->self = Type::declareUnion(alias->name);
-    type = checker_.typeResolver().resolveTypeInner(alias->type);
-    if (alias->recursive && !type->isError()) {
-      if (type->isUnion()) {
-        alias->self->defineMembers(type);
-        type = alias->self;
-      } else {
-        checker_.diags_.error(alias->loc(),
-                              "type alias '" + alias->name +
-                                  "' refers to itself, and only a union of several types "
-                                  "without undefined can: make a field optional instead, "
-                                  "e.g. 'next?: " +
-                                  alias->name + "'");
-        type = Type::error();
-      }
+    type = this->checker.typeResolver().resolveTypeInner(alias->type);
+    ResultUnionRecursion recursion = TypeDeclarer::recursiveUnion(alias, type);
+    if (recursion.isErr()) {
+      this->checker.diags_.error(alias->loc(), recursion.error().message);
+      type = Type::error();
+    } else if (alias->recursive && !type->isError()) {
+      alias->self->defineMembers(type);
+      type = alias->self;
     }
   } else {
-    type = checker_.typeResolver().resolveTypeInner(alias->type);
+    type = this->checker.typeResolver().resolveTypeInner(alias->type);
   }
   alias->resolving = false;
-  builtinDepth_ -= builtinModule ? 1 : 0;
+  this->builtinDepth -= builtinModule ? 1 : 0;
   if (!alias->resolved) {
     alias->resolved = type;
   }
-  bool builtin = checker_.builtinAliases_.lookup(alias->name) == alias ||
-                 checker_.builtinModuleTypes().alias(alias->name) == alias;
+  bool builtin = this->checker.builtinAliases_.lookup(alias->name) == alias ||
+                 this->checker.builtinModuleTypes().alias(alias->name) == alias;
   if (builtin && alias->type.kind() == TypeRefKind::UNION_REF) {
     Type::nameUnion(alias->resolved, alias->name);
   }
@@ -213,62 +283,147 @@ const Type *TypeDeclarer::resolveAlias(TypeAliasDecl *alias) {
   return alias->resolved;
 }
 
+TypeDeclarer::ResultEnumIsResolved TypeDeclarer::enumCycle(const EnumDecl *decl) {
+  if (decl->stage == EnumStage::RESOLVING) {
+    std::string message = ErrorTextEnumCycle::itself(decl->name);
+
+    return err(TypeDeclarerEnumCycleError{
+        .code = TypeDeclarerEnumCycleErrorCode::DEPENDS_ON_ITSELF,
+        .message = message,
+    });
+  }
+
+  return ok(decl);
+}
+
+TypeDeclarer::ResultMemberIsUnique TypeDeclarer::uniqueMember(const EnumMember &m,
+                                                              const EnumMember &other) {
+  if (other.name == m.name) {
+    std::string message = ErrorTextUniqueMember::duplicate(m.name);
+
+    return err(TypeDeclarerUniqueMemberError{
+        .code = TypeDeclarerUniqueMemberErrorCode::DUPLICATE_MEMBER,
+        .message = message,
+    });
+  }
+
+  return ok(&m);
+}
+
+TypeDeclarer::ResultMemberConstant
+TypeDeclarer::memberConstant(std::optional<Checker::Constant> constant) {
+  if (!constant) {
+    std::string message = ErrorTextMemberConstant::notConst();
+
+    return err(TypeDeclarerMemberConstantError{
+        .code = TypeDeclarerMemberConstantErrorCode::NOT_CONSTANT,
+        .message = message,
+    });
+  }
+
+  return ok(*constant);
+}
+
+TypeDeclarer::ResultMemberHasValue TypeDeclarer::countedMember(const EnumMember &m, bool counting) {
+  if (!m.init && !counting) {
+    std::string message = ErrorTextCountedMember::noValue(m.name);
+
+    return err(TypeDeclarerCountedMemberError{
+        .code = TypeDeclarerCountedMemberErrorCode::NO_VALUE,
+        .message = message,
+    });
+  }
+
+  return ok(&m);
+}
+
+TypeDeclarer::ResultMemberIntValue TypeDeclarer::wholeMember(const EnumMember &m, double value) {
+  if (value != std::trunc(value) || std::fabs(value) > 9007199254740992.0) {
+    std::string shown = TypeDeclarer::formatNumber(value);
+    std::string message = ErrorTextWholeMember::notWhole(m.name, shown);
+
+    return err(TypeDeclarerWholeMemberError{
+        .code = TypeDeclarerWholeMemberErrorCode::NOT_WHOLE,
+        .message = message,
+    });
+  }
+
+  return ok(value);
+}
+
+TypeDeclarer::ResultEnumKindIsSame TypeDeclarer::enumKinds(const EnumDecl *decl, bool numbers,
+                                                           bool strings) {
+  if (numbers && strings) {
+    std::string message = ErrorTextEnumKinds::mixed(decl->name);
+
+    return err(TypeDeclarerEnumKindsError{
+        .code = TypeDeclarerEnumKindsErrorCode::MIXED,
+        .message = message,
+    });
+  }
+
+  return ok(decl);
+}
+
 void TypeDeclarer::resolveEnum(EnumDecl *decl) {
   if (decl->stage != EnumStage::UNRESOLVED) {
-    if (decl->stage == EnumStage::RESOLVING) {
-      checker_.diags_.error(decl->loc(),
-                            "the members of enum '" + decl->name + "' depend on themselves");
+    ResultEnumIsResolved resolved = TypeDeclarer::enumCycle(decl);
+    if (resolved.isErr()) {
+      this->checker.diags_.error(decl->loc(), resolved.error().message);
     }
     return;
   }
-  if (Module *home = checker_.declModules_.lookup(decl);
-      home && home != checker_.module_ && checker_.scopes_.size() == 1) {
-    Module *here = checker_.module_;
-    checker_.moduleDeclarer().useModule(home);
-    resolveEnum(decl);
-    checker_.moduleDeclarer().useModule(here);
+  Module *home = this->checker.declModules_.lookup(decl);
+  bool elsewhere = home && home != this->checker.module_ && this->checker.scopes_.size() == 1;
+  if (elsewhere) {
+    Module *here = this->checker.module_;
+    this->checker.moduleDeclarer().useModule(home);
+    this->resolveEnum(decl);
+    this->checker.moduleDeclarer().useModule(here);
     return;
   }
   decl->stage = EnumStage::RESOLVING;
   double next = 0;
   bool counting = true;
-  bool numbers = false, strings = false;
+  bool numbers = false;
+  bool strings = false;
   for (size_t i = 0; i < decl->members.size(); ++i) {
     EnumMember &m = decl->members[i];
     for (size_t j = 0; j < i; ++j) {
-      if (decl->members[j].name == m.name) {
-        checker_.diags_.error(m.loc, "duplicate enum member '" + m.name + "'");
+      ResultMemberIsUnique unique = TypeDeclarer::uniqueMember(m, decl->members[j]);
+      if (unique.isErr()) {
+        this->checker.diags_.error(m.loc, unique.error().message);
       }
     }
     double value = next;
     if (m.init) {
-      std::optional<Checker::Constant> c = checker_.constantFolder().evalConstant(m.init, decl, i);
-      if (!c) {
-        checker_.diags_.error(m.init->loc(),
-                              "the value of an enum member must be a constant: a number, a "
-                              "string, or an expression of them and of other members");
+      std::optional<Checker::Constant> found =
+          this->checker.constantFolder().evalConstant(m.init, decl, i);
+      ResultMemberConstant constant = TypeDeclarer::memberConstant(found);
+      if (constant.isErr()) {
+        this->checker.diags_.error(m.init->loc(), constant.error().message);
         counting = false;
         continue;
       }
-      if (c->isString) {
+      const Checker::Constant &c = constant.value();
+      if (c.isString) {
         m.isString = true;
-        m.text = c->text;
+        m.text = c.text;
         strings = true;
         counting = false;
         continue;
       }
-      value = c->number;
-    } else if (!counting) {
-      checker_.diags_.error(m.loc,
-                            "enum member '" + m.name +
-                                "' needs a value, since the member before it is not a number");
+      value = c.number;
+    }
+    ResultMemberHasValue valued = TypeDeclarer::countedMember(m, counting);
+    if (valued.isErr()) {
+      this->checker.diags_.error(m.loc, valued.error().message);
       continue;
     }
-    if (value != std::trunc(value) || std::fabs(value) > 9007199254740992.0) {
-      checker_.diags_.error(m.init ? m.init->loc() : m.loc,
-                            "the value of enum member '" + m.name +
-                                "' must be a whole number from -2^53 to 2^53, found " +
-                                formatNumber(value));
+    ResultMemberIntValue whole = TypeDeclarer::wholeMember(m, value);
+    if (whole.isErr()) {
+      llvm::SMLoc at = m.init ? m.init->loc() : m.loc;
+      this->checker.diags_.error(at, whole.error().message);
       counting = false;
       continue;
     }
@@ -277,20 +432,21 @@ void TypeDeclarer::resolveEnum(EnumDecl *decl) {
     next = value + 1;
     counting = true;
   }
-  if (numbers && strings) {
-    checker_.diags_.error(decl->loc(), "enum '" + decl->name + "' cannot mix numbers and strings");
+  ResultEnumKindIsSame same = TypeDeclarer::enumKinds(decl, numbers, strings);
+  if (same.isErr()) {
+    this->checker.diags_.error(decl->loc(), same.error().message);
   }
   decl->isString = strings && !numbers;
   decl->stage = EnumStage::RESOLVED;
   if (decl->isString) {
     for (const EnumMember &m : decl->members) {
-      checker_.assignedFields_.insert(toUtf8(m.text));
+      this->checker.assignedFields_.insert(toUtf8(m.text));
     }
   }
 }
 
 const Type *TypeDeclarer::enumType(EnumDecl *decl) {
-  resolveEnum(decl);
+  this->resolveEnum(decl);
   if (!decl->isString) {
     return Type::intTy();
   }
@@ -309,65 +465,80 @@ const Type *TypeDeclarer::enumType(EnumDecl *decl) {
   return type;
 }
 
-Expr *TypeDeclarer::checkEnumMember(EnumDecl *decl, MemberExpr *member, const Type *expected) {
-  resolveEnum(decl);
+TypeDeclarer::ResultEnumMemberRead TypeDeclarer::checkEnumMember(EnumDecl *decl, MemberExpr *member,
+                                                                 const Type *expected) {
+  this->resolveEnum(decl);
   const EnumMember *m = decl->find(member->name);
   if (!m) {
-    checker_.diags_.error(member->loc(), "property '" + member->name +
-                                             "' does not exist on enum '" + decl->name + "'");
-    member->type = Type::error();
-    return member;
+    std::string message = ErrorTextEnumMember::missing(member->name, decl->name);
+
+    return err(TypeDeclarerCheckEnumMemberError{
+        .code = TypeDeclarerCheckEnumMemberErrorCode::NO_SUCH_MEMBER,
+        .message = message,
+    });
   }
+
   bool written = member->object && member->object->loc() != member->loc();
   if (m->isString) {
-    auto *lit = checker_.ctx_.make<StringLitExpr>(member->loc(), m->text);
+    auto *lit = this->checker.ctx_.make<StringLitExpr>(member->loc(), m->text);
     if (written) {
-      checker_.file_->namedUses[lit] = {decl, member->object->loc(), member->name};
+      this->checker.file_->namedUses[lit] = {decl, member->object->loc(), member->name};
     }
-    const Type *literal = checker_.literalTypes().stringLiteralFor(expected, m->text);
+    const Type *literal = this->checker.literalTypes().stringLiteralFor(expected, m->text);
     lit->type = Type::stringLiteral(m->text);
     if (literal) {
-      return lit;
+      return ok(lit);
     }
+    const Type *type = this->enumType(decl);
+    Expr *converted = this->checker.typeRelations().convert(lit, type);
 
-    return checker_.typeRelations().convert(lit, enumType(decl));
+    return ok(converted);
   }
   int64_t value = m->number;
-  Expr *lit = checker_.ctx_.make<IntLitExpr>(member->loc(),
-                                             static_cast<uint64_t>(value < 0 ? -value : value));
+  auto magnitude = static_cast<uint64_t>(value < 0 ? -value : value);
+  Expr *lit = this->checker.ctx_.make<IntLitExpr>(member->loc(), magnitude);
   if (written) {
-    checker_.file_->namedUses[lit] = {decl, member->object->loc(), member->name};
+    this->checker.file_->namedUses[lit] = {decl, member->object->loc(), member->name};
   }
   if (value < 0) {
-    lit = checker_.ctx_.make<UnaryExpr>(member->loc(), UnaryOp::Neg, lit);
+    lit = this->checker.ctx_.make<UnaryExpr>(member->loc(), UnaryOp::Neg, lit);
   }
+  Expr *checked = this->checker.exprChecker().checkExpr(lit, expected);
 
-  return checker_.exprChecker().checkExpr(lit, expected);
+  return ok(checked);
 }
 
-Expr *TypeDeclarer::checkEnumIndex(EnumDecl *decl, IndexExpr *index) {
-  resolveEnum(decl);
+TypeDeclarer::ResultEnumIndexValue TypeDeclarer::checkEnumIndex(EnumDecl *decl, IndexExpr *index) {
+  this->resolveEnum(decl);
   index->type = Type::error();
-  index->index = checker_.exprChecker().checkExpr(index->index, Type::intTy());
+  index->index = this->checker.exprChecker().checkExpr(index->index, Type::intTy());
   const Type *type = index->index->type;
   if (type->isError()) {
-    return index;
+    return err(TypeDeclarerCheckEnumIndexError{
+        .code = TypeDeclarerCheckEnumIndexErrorCode::ALREADY_REPORTED,
+        .message = "",
+    });
   }
   if (decl->isString) {
-    checker_.diags_.error(index->loc(),
-                          "enum '" + decl->name +
-                              "' has string values, and only numbers map back to names");
-    return index;
+    std::string message = ErrorTextEnumIndex::strings(decl->name);
+
+    return err(TypeDeclarerCheckEnumIndexError{
+        .code = TypeDeclarerCheckEnumIndexErrorCode::STRING_ENUM,
+        .message = message,
+    });
   }
   if (!type->isInteger()) {
-    checker_.diags_.error(index->index->loc(),
-                          "the value of an enum member is an integer, found '" + type->name() +
-                              "'");
-    return index;
+    std::string message = ErrorTextEnumIndex::notInteger(type->name());
+
+    return err(TypeDeclarerCheckEnumIndexError{
+        .code = TypeDeclarerCheckEnumIndexErrorCode::NOT_AN_INTEGER,
+        .message = message,
+    });
   }
-  index->index = checker_.typeRelations().convert(index->index, Type::intTy());
-  if (std::optional<Linear> value = checker_.indexProofs().linear(index->index);
-      value && value->term.isZero()) {
+
+  index->index = this->checker.typeRelations().convert(index->index, Type::intTy());
+  std::optional<Linear> value = this->checker.indexProofs().linear(index->index);
+  if (value && value->term.isZero()) {
     const EnumMember *found = nullptr;
     for (const EnumMember &m : decl->members) {
       if (m.number == value->offset) {
@@ -375,18 +546,19 @@ Expr *TypeDeclarer::checkEnumIndex(EnumDecl *decl, IndexExpr *index) {
       }
     }
     if (!found) {
-      auto *undefined = checker_.ctx_.make<UndefinedExpr>(index->loc());
+      auto *undefined = this->checker.ctx_.make<UndefinedExpr>(index->loc());
       undefined->type = Type::undefinedTy();
-      return undefined;
+      return ok(undefined);
     }
-    auto *lit = checker_.ctx_.make<StringLitExpr>(index->loc(), toUtf16(found->name));
+    std::u16string name = TypeDeclarer::toUtf16(found->name);
+    auto *lit = this->checker.ctx_.make<StringLitExpr>(index->loc(), name);
     lit->type = Type::string();
-    return lit;
+    return ok(lit);
   }
   index->form = EnumNameIndex{.enumDecl = decl};
   index->type = Type::optional(Type::string());
 
-  return index;
+  return ok(index);
 }
 
 }

@@ -12,167 +12,172 @@
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/IR/Intrinsics.h"
 #include "llvm/IR/MDBuilder.h"
-#include "llvm/Support/ConvertUTF.h"
-#include "llvm/Support/ErrorHandling.h"
-#include <array>
 
-using llvm::BasicBlock;
-using llvm::cast;
-using llvm::dyn_cast;
-using llvm::isa;
-using llvm::Value;
 
 namespace tz {
 
-FunctionFrame::FunctionFrame(Lowering &lowering) : lowering_(lowering) {}
+FunctionFrame::FunctionFrame(Lowering &owner)
+    : lowering(owner) {}
 
 llvm::BasicBlock *FunctionFrame::newBlock(const llvm::Twine &name) {
-  return llvm::BasicBlock::Create(lowering_.ctx_, name);
+  return llvm::BasicBlock::Create(this->lowering.ctx_, name);
 }
 
 void FunctionFrame::switchTo(llvm::BasicBlock *block) {
-  lowering_.function_->insert(lowering_.function_->end(), block);
-  lowering_.builder_.SetInsertPoint(block);
+  this->lowering.function_->insert(this->lowering.function_->end(), block);
+  this->lowering.builder_.SetInsertPoint(block);
 }
 
 void FunctionFrame::emitBlock(llvm::BasicBlock *block) {
-  branchTo(block);
-  switchTo(block);
+  this->branchTo(block);
+  this->switchTo(block);
 }
 
-bool FunctionFrame::blockIsOpen() { return !lowering_.builder_.GetInsertBlock()->hasTerminator(); }
+bool FunctionFrame::blockIsOpen() {
+  return !this->lowering.builder_.GetInsertBlock()->hasTerminator();
+}
 
 void FunctionFrame::branchTo(llvm::BasicBlock *block) {
-  if (blockIsOpen()) {
-    lowering_.builder_.CreateBr(block);
+  if (this->blockIsOpen()) {
+    this->lowering.builder_.CreateBr(block);
   }
 }
 
-void FunctionFrame::startDeadBlock() { switchTo(newBlock("dead")); }
+void FunctionFrame::startDeadBlock() {
+  this->switchTo(this->newBlock("dead"));
+}
 
-void FunctionFrame::pushScope() { lowering_.scopes_.emplace_back(); }
+void FunctionFrame::pushScope() {
+  this->lowering.scopes_.emplace_back();
+}
 
 void FunctionFrame::popScope() {
-  if (blockIsOpen()) {
-    emitScopeCleanup(lowering_.scopes_.back());
+  if (this->blockIsOpen()) {
+    this->emitScopeCleanup(this->lowering.scopes_.back());
   }
-  lowering_.scopes_.pop_back();
+  this->lowering.scopes_.pop_back();
 }
 
 void FunctionFrame::emitCleanups(size_t depth) {
-  for (size_t i = lowering_.scopes_.size(); i > depth; --i) {
-    emitScopeCleanup(lowering_.scopes_[i - 1]);
+  for (size_t i = this->lowering.scopes_.size(); i > depth; --i) {
+    this->emitScopeCleanup(this->lowering.scopes_[i - 1]);
   }
 }
 
 void FunctionFrame::emitScopeCleanup(const Lowering::Scope &scope) {
   for (llvm::Value *slot : llvm::reverse(scope.dicts)) {
-    llvm::Value *map = lowering_.builder_.CreateLoad(lowering_.builder_.getPtrTy(), slot, "map");
-    llvm::BasicBlock *endBlock = newBlock("dict.iterated");
-    llvm::BasicBlock *nextBlock = newBlock("dict.iteration.end");
-    lowering_.builder_.CreateCondBr(lowering_.builder_.CreateIsNotNull(map), endBlock, nextBlock);
-    switchTo(endBlock);
-    llvm::Value *count = lowering_.dictLowerer().dictField(map, 8);
-    lowering_.builder_.CreateStore(
-        lowering_.builder_.CreateSub(
-            lowering_.builder_.CreateLoad(lowering_.builder_.getInt32Ty(), count),
-            lowering_.builder_.getInt32(1)),
+    llvm::Value *map =
+        this->lowering.builder_.CreateLoad(this->lowering.builder_.getPtrTy(), slot, "map");
+    llvm::BasicBlock *endBlock = this->newBlock("dict.iterated");
+    llvm::BasicBlock *nextBlock = this->newBlock("dict.iteration.end");
+    this->lowering.builder_.CreateCondBr(this->lowering.builder_.CreateIsNotNull(map), endBlock,
+                                         nextBlock);
+    this->switchTo(endBlock);
+    llvm::Value *count = this->lowering.dictLowerer().dictField(map, 8);
+    this->lowering.builder_.CreateStore(
+        this->lowering.builder_.CreateSub(
+            this->lowering.builder_.CreateLoad(this->lowering.builder_.getInt32Ty(), count),
+            this->lowering.builder_.getInt32(1)),
         count);
-    lowering_.builder_.CreateBr(nextBlock);
-    switchTo(nextBlock);
+    this->lowering.builder_.CreateBr(nextBlock);
+    this->switchTo(nextBlock);
   }
   for (llvm::Value *slot : llvm::reverse(scope.asyncIterators)) {
-    lowering_.asyncGeneratorLowerer().closeAsyncIterator(slot);
+    this->lowering.asyncGeneratorLowerer().closeAsyncIterator(slot);
   }
   for (const auto &[slot, type] : llvm::reverse(scope.slots)) {
     if (!type) {
-      llvm::Value *object = lowering_.builder_.CreateLoad(lowering_.builder_.getPtrTy(), slot);
-      lowering_.builder_.CreateStore(llvm::ConstantPointerNull::get(lowering_.builder_.getPtrTy()),
-                                     slot);
-      lowering_.builder_.CreateCall(lowering_.objReleaseFn_, {object});
+      llvm::Value *object =
+          this->lowering.builder_.CreateLoad(this->lowering.builder_.getPtrTy(), slot);
+      this->lowering.builder_.CreateStore(
+          llvm::ConstantPointerNull::get(this->lowering.builder_.getPtrTy()), slot);
+      this->lowering.builder_.CreateCall(this->lowering.objReleaseFn_, {object});
       continue;
     }
-    llvm::Type *lowered = lowering_.moduleBuilder().lower(type);
-    llvm::Value *value = lowering_.builder_.CreateLoad(lowered, slot);
-    lowering_.builder_.CreateStore(llvm::Constant::getNullValue(lowered), slot);
-    if (lowering_.eternalSlots_.contains(slot)) {
-      lowering_.publishLowerer().endValue(value, type);
+    llvm::Type *lowered = this->lowering.moduleBuilder().lower(type);
+    llvm::Value *value = this->lowering.builder_.CreateLoad(lowered, slot);
+    this->lowering.builder_.CreateStore(llvm::Constant::getNullValue(lowered), slot);
+    if (this->lowering.eternalSlots_.contains(slot)) {
+      this->lowering.publishLowerer().endValue(value, type);
     } else {
-      lowering_.refCounts().releaseValue(value, type);
+      this->lowering.refCounts().releaseValue(value, type);
     }
   }
 }
 
 llvm::AllocaInst *FunctionFrame::createStackSlot(llvm::Type *type, const llvm::Twine &name) {
-  llvm::BasicBlock &entry = lowering_.function_->getEntryBlock();
+  llvm::BasicBlock &entry = this->lowering.function_->getEntryBlock();
   llvm::IRBuilder<> entryBuilder(&entry, entry.begin());
 
   return entryBuilder.CreateAlloca(type, nullptr, name);
 }
 
 llvm::Value *FunctionFrame::createManagedSlot(const Type *type, const llvm::Twine &name) {
-  llvm::Type *lowered = lowering_.moduleBuilder().lower(type);
-  llvm::AllocaInst *slot = createStackSlot(lowered, name);
+  llvm::Type *lowered = this->lowering.moduleBuilder().lower(type);
+  llvm::AllocaInst *slot = this->createStackSlot(lowered, name);
   llvm::IRBuilder<> init(slot->getParent(), std::next(slot->getIterator()));
   init.CreateStore(llvm::Constant::getNullValue(lowered), slot);
-  lowering_.scopes_.back().slots.push_back({slot, type});
+  this->lowering.scopes_.back().slots.push_back({slot, type});
 
   return slot;
 }
 
 llvm::Value *FunctionFrame::createObjectSlot(const llvm::Twine &name) {
-  llvm::AllocaInst *slot = createStackSlot(lowering_.builder_.getPtrTy(), name);
+  llvm::AllocaInst *slot = this->createStackSlot(this->lowering.builder_.getPtrTy(), name);
   llvm::IRBuilder<> init(slot->getParent(), std::next(slot->getIterator()));
-  init.CreateStore(llvm::ConstantPointerNull::get(lowering_.builder_.getPtrTy()), slot);
-  lowering_.scopes_.back().slots.push_back({slot, nullptr});
+  init.CreateStore(llvm::ConstantPointerNull::get(this->lowering.builder_.getPtrTy()), slot);
+  this->lowering.scopes_.back().slots.push_back({slot, nullptr});
 
   return slot;
 }
 
 llvm::Value *FunctionFrame::createLocal(const VarSymbol *var, llvm::StringRef name) {
   if (var->boxed()) {
-    llvm::Value *slot = createObjectSlot(name + ".box");
-    lowering_.boxSlots_[var] = slot;
-    llvm::Value *box = lowering_.envLowerer().newBox(ClosureLowerer::typeOf(var));
-    llvm::Value *old = lowering_.builder_.CreateLoad(lowering_.builder_.getPtrTy(), slot);
-    lowering_.builder_.CreateStore(box, slot);
-    lowering_.builder_.CreateCall(lowering_.objReleaseFn_, {old});
-    llvm::Value *value = lowering_.builder_.CreateStructGEP(
-        lowering_.envLowerer().boxType(ClosureLowerer::typeOf(var)), box, 2, name);
-    lowering_.debugInfo().declare(var, value);
+    llvm::Value *slot = this->createObjectSlot(name + ".box");
+    this->lowering.boxSlots_[var] = slot;
+    llvm::Value *box = this->lowering.envLowerer().newBox(ClosureLowerer::typeOf(var));
+    llvm::Value *old = this->lowering.builder_.CreateLoad(this->lowering.builder_.getPtrTy(), slot);
+    this->lowering.builder_.CreateStore(box, slot);
+    this->lowering.builder_.CreateCall(this->lowering.objReleaseFn_, {old});
+    llvm::Value *value = this->lowering.builder_.CreateStructGEP(
+        this->lowering.envLowerer().boxType(ClosureLowerer::typeOf(var)), box, 2, name);
+    this->lowering.debugInfo().declare(var, value);
     return value;
   }
-  llvm::Value *slot = var->type->isManaged()
-                          ? createManagedSlot(var->type, name)
-                          : createStackSlot(lowering_.moduleBuilder().lower(var->type), name);
-  lowering_.addresses_[var] = slot;
-  lowering_.debugInfo().declare(var, slot);
+  llvm::Value *slot =
+      var->type->isManaged()
+          ? this->createManagedSlot(var->type, name)
+          : this->createStackSlot(this->lowering.moduleBuilder().lower(var->type), name);
+  this->lowering.addresses_[var] = slot;
+  this->lowering.debugInfo().declare(var, slot);
 
   return slot;
 }
 
 llvm::Value *FunctionFrame::addressOf(const VarSymbol *var) {
   if (var->boxed()) {
-    return lowering_.builder_.CreateStructGEP(
-        lowering_.envLowerer().boxType(ClosureLowerer::typeOf(var)),
-        lowering_.envLowerer().boxPointer(var), 2);
+    return this->lowering.builder_.CreateStructGEP(
+        this->lowering.envLowerer().boxType(ClosureLowerer::typeOf(var)),
+        this->lowering.envLowerer().boxPointer(var), 2);
   }
-  if (llvm::Value *address = lowering_.addresses_.lookup(var)) {
+  llvm::Value *address = this->lowering.addresses_.lookup(var);
+  if (address) {
     return address;
   }
-  llvm::Value *global = lowering_.globals_.lookup(var);
+  llvm::Value *global = this->lowering.globals_.lookup(var);
   assert(global && "variable used before its declaration was emitted");
-  if (lowering_.parallel_ && lowering_.function_ && lowering_.libraryState_.contains(var)) {
-    lowering_.builder_.CreateCall(lowering_.processLowerer().processFunction(
-        "tz_order_enter", lowering_.builder_.getVoidTy(), {}));
+  if (this->lowering.parallel_ && this->lowering.function_ &&
+      this->lowering.libraryState_.contains(var)) {
+    this->lowering.builder_.CreateCall(this->lowering.processLowerer().processFunction(
+        "tz_order_enter", this->lowering.builder_.getVoidTy(), {}));
   }
 
   return global;
 }
 
 llvm::Value *FunctionFrame::spill(llvm::Value *value, const llvm::Twine &name) {
-  llvm::AllocaInst *slot = createStackSlot(value->getType(), name);
-  lowering_.builder_.CreateStore(value, slot);
+  llvm::AllocaInst *slot = this->createStackSlot(value->getType(), name);
+  this->lowering.builder_.CreateStore(value, slot);
 
   return slot;
 }

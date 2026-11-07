@@ -6,12 +6,12 @@ namespace tz {
 
 class MemberLowerer {
 public:
-  explicit MemberLowerer(Lowering &lowering);
+  explicit MemberLowerer(Lowering &owner);
 
   llvm::Value *emitMember(MemberExpr *member);
 
 private:
-  Lowering &lowering_;
+  Lowering &lowering;
 };
 
 }

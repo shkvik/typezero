@@ -6,7 +6,7 @@ namespace tz {
 
 class ModuleBuilder {
 public:
-  explicit ModuleBuilder(Lowering &lowering);
+  explicit ModuleBuilder(Lowering &owner);
 
   std::unique_ptr<llvm::Module> generate(SourceFile &file);
   llvm::Type *lower(const Type *type);
@@ -14,9 +14,9 @@ public:
   void emitMain(SourceFile &file);
 
 private:
-  Lowering &lowering_;
-  llvm::Instruction *mainInit_ = nullptr;
-  std::vector<const VarSymbol *> managedGlobals_;
+  Lowering &lowering;
+  llvm::Instruction *mainInit = nullptr;
+  std::vector<const VarSymbol *> managedGlobals;
 };
 
 }

@@ -47,7 +47,9 @@ KeyPairChecker::KeyPairChecker(Checker &checker) : checker_(checker) {}
 Expr *KeyPairChecker::checkGenerateKeyPair(CallExpr *call, llvm::SMLoc loc,
                                            llvm::StringRef shown) {
   std::vector<Expr *> &args = call->args;
-  if (!checker_.argumentChecker().checkArity(call, loc, 1, 2)) {
+  ArgumentChecker::ResultArityMatches arity = checker_.argumentChecker().checkArity(call, 1, 2);
+  if (arity.isErr()) {
+    checker_.diags_.error(loc, arity.error().message);
     return call;
   }
   static const llvm::StringRef types[] = {"rsa",     "rsa-pss", "dsa",    "ec",

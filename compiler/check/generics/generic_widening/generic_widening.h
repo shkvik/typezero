@@ -6,7 +6,7 @@ namespace tz {
 
 class GenericWidening {
 public:
-  explicit GenericWidening(Checker &checker);
+  explicit GenericWidening(Checker &owner);
 
   static bool widens(const Type *from, const Type *to);
   static bool covariant(const ClassDecl *generic, size_t index);
@@ -15,7 +15,14 @@ public:
   Expr *joined(Expr *expr);
 
 private:
-  Checker &checker_;
+  static bool mentions(const TypeRef &ref, llvm::StringRef name);
+  static std::map<std::pair<const ClassDecl *, size_t>, bool> &knownVariance();
+  static std::string writerOf(const ClassDecl *generic, llvm::StringRef name);
+  static bool writtenFromOutside(const ClassDecl *generic, llvm::StringRef name);
+  static bool passedOnSafely(const ClassDecl *generic, llvm::StringRef name);
+  static bool referenceFits(const Type *own, const Type *wide);
+
+  Checker &checker;
 };
 
 }

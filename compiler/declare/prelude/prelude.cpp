@@ -8,16 +8,13 @@
 #include "llvm/Support/MemoryBuffer.h"
 #include <cassert>
 
-using llvm::cast;
 using llvm::dyn_cast;
-using llvm::dyn_cast_or_null;
-using llvm::isa;
 
 namespace tz {
 
 namespace {
 
-constexpr llvm::StringLiteral kPrelude = R"(type Partial<T> = { [K in keyof T]?: T[K] }
+constexpr llvm::StringLiteral preludeTypes = R"(type Partial<T> = { [K in keyof T]?: T[K] }
 type Required<T> = { [K in keyof T]-?: T[K] }
 type Readonly<T> = { readonly [K in keyof T]: T[K] }
 type Pick<T, K extends keyof T> = { [P in K]: T[P] }
@@ -354,12 +351,14 @@ type SubtleUnwrapKeyError =
 )";
 }
 
-Prelude::Prelude(Checker &checker) : checker_(checker) {}
+Prelude::Prelude(Checker &owner)
+    : checker(owner) {}
 
 void Prelude::declarePrelude() {
-  std::string source = kPrelude.str() + "type HttpStatus =";
+  std::string source = preludeTypes.str() + "type HttpStatus =";
   for (int status = 200; status <= 599; ++status) {
-    source += (status == 200 ? " " : " | ") + std::to_string(status);
+    const char *separator = status == 200 ? " " : " | ";
+    source += separator + std::to_string(status);
   }
   source += "\ntype CloseCode = 1000";
   for (int code = 3000; code <= 4999; ++code) {
@@ -368,29 +367,30 @@ void Prelude::declarePrelude() {
   source += "\n";
   std::unique_ptr<llvm::MemoryBuffer> buffer = llvm::MemoryBuffer::getMemBufferCopy(source, "<tz>");
   llvm::StringRef text = buffer->getBuffer();
-  checker_.diags_.sourceMgr().AddNewSourceBuffer(std::move(buffer), llvm::SMLoc());
-  Lexer lexer(text, checker_.diags_);
-  Parser parser(lexer, checker_.ctx_, checker_.diags_);
+  this->checker.diags_.sourceMgr().AddNewSourceBuffer(std::move(buffer), llvm::SMLoc());
+  Lexer lexer(text, this->checker.diags_);
+  Parser parser(lexer, this->checker.ctx_, this->checker.diags_);
   SourceFile prelude = parser.parseSourceFile();
   for (Stmt *item : prelude.items) {
-    if (auto *alias = dyn_cast<TypeAliasDecl>(item)) {
-      checker_.builtinAliases_[alias->name] = alias;
+    auto *alias = dyn_cast<TypeAliasDecl>(item);
+    if (alias) {
+      this->checker.builtinAliases_[alias->name] = alias;
     }
   }
 }
 
 const Type *Prelude::builtinType(llvm::StringRef name) {
-  TypeAliasDecl *alias = checker_.builtinAliases_.lookup(name);
+  TypeAliasDecl *alias = this->checker.builtinAliases_.lookup(name);
   assert(alias && "the prelude declares the type");
 
-  return checker_.typeDeclarer().resolveAlias(alias);
+  return this->checker.typeDeclarer().resolveAlias(alias);
 }
 
 const Type *Prelude::builtinType(llvm::StringRef name, std::vector<const Type *> args) {
-  TypeAliasDecl *alias = checker_.builtinAliases_.lookup(name);
+  TypeAliasDecl *alias = this->checker.builtinAliases_.lookup(name);
   assert(alias && "the prelude declares the type");
 
-  return checker_.aliasInstantiator().instantiateAlias(alias, std::move(args), alias->loc());
+  return this->checker.aliasInstantiator().instantiateAlias(alias, std::move(args), alias->loc());
 }
 
 }

@@ -74,7 +74,9 @@ Expr *RuntimeObjectChecker::checkRuntimeMethod(CallExpr *call, MemberExpr *membe
   case Type::Runtime::ReadlinePromises: {
     bool promises = type->runtimeKind() == Type::Runtime::ReadlinePromises;
     if (name == "close") {
-      if (!checker_.argumentChecker().checkArity(call, member->loc(), 0, 0)) {
+      ArgumentChecker::ResultArityMatches arity = checker_.argumentChecker().checkArity(call, 0, 0);
+      if (arity.isErr()) {
+        checker_.diags_.error(member->loc(), arity.error().message);
         return call;
       }
       call->target = BuiltinCall{.builtin = Builtin::RlClose};
@@ -82,7 +84,10 @@ Expr *RuntimeObjectChecker::checkRuntimeMethod(CallExpr *call, MemberExpr *membe
       return call;
     }
     if (name == "question") {
-      if (!checker_.argumentChecker().checkArity(call, member->loc(), 1, promises ? 1 : 3)) {
+      ArgumentChecker::ResultArityMatches arity =
+          checker_.argumentChecker().checkArity(call, 1, promises ? 1 : 3);
+      if (arity.isErr()) {
+        checker_.diags_.error(member->loc(), arity.error().message);
         return call;
       }
       Expr *query = checker_.argumentChecker().checkArg(call->args[0], Type::string());

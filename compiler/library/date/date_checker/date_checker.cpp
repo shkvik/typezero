@@ -376,7 +376,9 @@ Expr *DateChecker::checkDateStatic(CallExpr *call, MemberExpr *member) {
   }
   llvm::StringRef name = member->name;
   if (name == "UTC") {
-    if (!checker_.argumentChecker().checkArity(call, member->loc(), 1, 7)) {
+    ArgumentChecker::ResultArityMatches arity = checker_.argumentChecker().checkArity(call, 1, 7);
+    if (arity.isErr()) {
+      checker_.diags_.error(member->loc(), arity.error().message);
       return call;
     }
     checkDateFields(call->args);
@@ -385,7 +387,9 @@ Expr *DateChecker::checkDateStatic(CallExpr *call, MemberExpr *member) {
     return call;
   }
   if (name == "parse") {
-    if (!checker_.argumentChecker().checkArity(call, member->loc(), 1, 1)) {
+    ArgumentChecker::ResultArityMatches arity = checker_.argumentChecker().checkArity(call, 1, 1);
+    if (arity.isErr()) {
+      checker_.diags_.error(member->loc(), arity.error().message);
       return call;
     }
     checkDateLiteral(call->args[0]);
@@ -453,7 +457,10 @@ Expr *DateChecker::checkDateMethod(CallExpr *call, MemberExpr *member) {
     }
     return loosely();
   }
-  if (!checker_.argumentChecker().checkArity(call, member->loc(), method->min, method->max)) {
+  ArgumentChecker::ResultArityMatches arity =
+      checker_.argumentChecker().checkArity(call, method->min, method->max);
+  if (arity.isErr()) {
+    checker_.diags_.error(member->loc(), arity.error().message);
     return call;
   }
   auto field = [&](int value) {

@@ -37,8 +37,13 @@ Expr *ReadlineChecker::checkReadlineCall(CallExpr *call, NodeModule module, llvm
                                    "' can only be used as a type; call 'createInterface'");
     return loosely();
   }
-  if (checker_.callChecker().rejectSpread(call) ||
-      !checker_.argumentChecker().checkArity(call, loc, 1, 2)) {
+  bool rejected = checker_.callChecker().rejectSpread(call);
+  ArgumentChecker::ResultArityMatches arity =
+      rejected ? ok(call) : checker_.argumentChecker().checkArity(call, 1, 2);
+  if (arity.isErr()) {
+    checker_.diags_.error(loc, arity.error().message);
+  }
+  if (rejected || arity.isErr()) {
     return call;
   }
   Expr *input = nullptr, *output = nullptr;

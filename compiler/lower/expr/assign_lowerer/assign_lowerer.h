@@ -6,7 +6,7 @@ namespace tz {
 
 class AssignLowerer {
 public:
-  explicit AssignLowerer(Lowering &lowering);
+  explicit AssignLowerer(Lowering &owner);
 
   llvm::Value *emitAssign(AssignExpr *assign, bool needResult);
   llvm::Value *emitNullishAssign(AssignExpr *assign, bool needResult);
@@ -14,7 +14,7 @@ public:
   static bool cannotAssign(const Expr *expr);
 
 private:
-  Lowering &lowering_;
+  Lowering &lowering;
 };
 
 }

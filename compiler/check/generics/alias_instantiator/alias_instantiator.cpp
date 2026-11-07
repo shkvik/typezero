@@ -5,13 +5,7 @@
 #include "compiler/check/types/type_resolver/type_resolver.h"
 #include "compiler/whole_program/flows/flows.h"
 #include "llvm/ADT/STLExtras.h"
-#include <functional>
-#include <set>
 
-using llvm::cast;
-using llvm::dyn_cast;
-using llvm::dyn_cast_or_null;
-using llvm::isa;
 
 namespace tz {
 
@@ -21,7 +15,9 @@ constexpr unsigned kMaxAliasDepth = 50;
 
 constexpr unsigned kMaxTailCalls = 1000;
 
-std::string typeList(llvm::ArrayRef<const Type *> types) {
+}
+
+std::string AliasInstantiator::typeList(llvm::ArrayRef<const Type *> types) {
   std::string text;
   for (const Type *t : types) {
     text += (text.empty() ? "" : ", ") + t->name().str();
@@ -30,19 +26,18 @@ std::string typeList(llvm::ArrayRef<const Type *> types) {
   return text;
 }
 
-}
-
-AliasInstantiator::AliasInstantiator(Checker &checker) : checker_(checker) {}
+AliasInstantiator::AliasInstantiator(Checker &owner)
+    : checker(owner) {}
 
 std::vector<const Type *> AliasInstantiator::aliasTypeParams(TypeAliasDecl *alias) {
-  auto found = aliasParams_.find(alias);
-  if (found == aliasParams_.end()) {
-    checker_.typeScopes_.emplace_back();
+  auto found = this->aliasParams.find(alias);
+  if (found == this->aliasParams.end()) {
+    this->checker.typeScopes_.emplace_back();
     std::vector<const Type *> defaults;
     std::vector<const Type *> params =
-        checker_.typeParams().declareTypeParams(alias->typeParams, &defaults);
-    checker_.typeScopes_.pop_back();
-    found = aliasParams_.try_emplace(alias, std::move(params), std::move(defaults)).first;
+        this->checker.typeParams().declareTypeParams(alias->typeParams, &defaults);
+    this->checker.typeScopes_.pop_back();
+    found = this->aliasParams.try_emplace(alias, std::move(params), std::move(defaults)).first;
   }
 
   return found->second.first;
@@ -51,41 +46,41 @@ std::vector<const Type *> AliasInstantiator::aliasTypeParams(TypeAliasDecl *alia
 const Type *AliasInstantiator::instantiateAlias(TypeAliasDecl *alias,
                                                 std::vector<const Type *> args, llvm::SMLoc loc) {
   std::vector<Checker::AliasInstance *> chain;
-  if (aliasDepth_ == 0) {
-    aliasUse_ = loc;
+  if (this->aliasDepth == 0) {
+    this->aliasUse = loc;
   }
   const Type *type = nullptr;
   for (unsigned calls = 0; !type; ++calls) {
-    aliasTypeParams(alias);
-    std::vector<const Type *> params = aliasParams_[alias].first,
-                              defaults = aliasParams_[alias].second;
+    this->aliasTypeParams(alias);
+    std::vector<const Type *> params = this->aliasParams[alias].first,
+                              defaults = this->aliasParams[alias].second;
     if (args.size() > params.size()) {
-      checker_.diags_.error(loc, "'" + alias->name + "' takes " + std::to_string(params.size()) +
-                                     " type argument" + (params.size() == 1 ? "" : "s") +
-                                     ", but got " + std::to_string(args.size()));
+      this->checker.diags_.error(
+          loc, "'" + alias->name + "' takes " + std::to_string(params.size()) + " type argument" +
+                   (params.size() == 1 ? "" : "s") + ", but got " + std::to_string(args.size()));
       type = Type::error();
       break;
     }
     for (size_t k = args.size(); k < params.size() && !type; ++k) {
       if (!defaults[k]) {
-        checker_.diags_.error(loc, "'" + alias->name + "' needs " + std::to_string(params.size()) +
-                                       " type argument" + (params.size() == 1 ? "" : "s") +
-                                       ", e.g. '" + alias->name + "<int>'");
+        this->checker.diags_.error(
+            loc, "'" + alias->name + "' needs " + std::to_string(params.size()) + " type argument" +
+                     (params.size() == 1 ? "" : "s") + ", e.g. '" + alias->name + "<int>'");
         type = Type::error();
         break;
       }
-      args.push_back(checker_.typeParams().substitute(defaults[k], params, args));
+      args.push_back(this->checker.typeParams().substitute(defaults[k], params, args));
     }
     for (size_t k = 0; k < params.size() && !type; ++k) {
       if (args[k]->isError()) {
         type = args[k];
         break;
       }
-      if (!checker_.typeParams().satisfies(args[k], params[k], params, args)) {
-        checker_.diags_.error(loc, "type '" + args[k]->name() +
-                                       "' does not satisfy the constraint '" +
-                                       constraintSpelling(params[k], &alias->typeParams[k]) +
-                                       "' of '" + params[k]->name() + "' in '" + alias->name + "'");
+      if (!this->checker.typeParams().satisfies(args[k], params[k], params, args)) {
+        this->checker.diags_.error(
+            loc, "type '" + args[k]->name() + "' does not satisfy the constraint '" +
+                     constraintSpelling(params[k], &alias->typeParams[k]) + "' of '" +
+                     params[k]->name() + "' in '" + alias->name + "'");
         type = Type::error();
       }
     }
@@ -93,7 +88,7 @@ const Type *AliasInstantiator::instantiateAlias(TypeAliasDecl *alias,
       break;
     }
 
-    Checker::AliasInstance &entry = aliasInstances_[{alias, args}];
+    Checker::AliasInstance &entry = this->aliasInstances[{alias, args}];
     if (entry.type) {
       type = entry.type;
       break;
@@ -104,24 +99,25 @@ const Type *AliasInstantiator::instantiateAlias(TypeAliasDecl *alias,
         type = entry.self;
         break;
       }
-      checker_.diags_.error(alias->loc(), "type alias '" + alias->name + "' refers to itself");
+      this->checker.diags_.error(alias->loc(), "type alias '" + alias->name + "' refers to itself");
       type = Type::error();
       break;
     }
     bool conditional = alias->type.kind() == TypeRefKind::CONDITIONAL_REF;
-    if (aliasDepth_ >= kMaxAliasDepth || calls > kMaxTailCalls) {
+    if (this->aliasDepth >= kMaxAliasDepth || calls > kMaxTailCalls) {
       if (!conditional) {
-        checker_.diags_.error(alias->loc(), "type alias '" + alias->name +
-                                                "' refers to itself with other type arguments, "
-                                                "so it never ends");
+        this->checker.diags_.error(alias->loc(),
+                                   "type alias '" + alias->name +
+                                       "' refers to itself with other type arguments, "
+                                       "so it never ends");
       } else if (calls > kMaxTailCalls) {
-        checker_.diags_.error(alias->loc(), "type alias '" + alias->name +
-                                                "' calls itself more than " +
-                                                std::to_string(kMaxTailCalls) +
-                                                " times, so it may never end; "
-                                                "TypeScript stops there too");
+        this->checker.diags_.error(alias->loc(), "type alias '" + alias->name +
+                                                     "' calls itself more than " +
+                                                     std::to_string(kMaxTailCalls) +
+                                                     " times, so it may never end; "
+                                                     "TypeScript stops there too");
       } else {
-        checker_.diags_.error(
+        this->checker.diags_.error(
             alias->loc(),
             "type alias '" + alias->name + "' nests more than " + std::to_string(kMaxAliasDepth) +
                 " instances of itself, so it may never "
@@ -129,8 +125,8 @@ const Type *AliasInstantiator::instantiateAlias(TypeAliasDecl *alias,
                 "itself, '... ? " +
                 alias->name + "<...> : ...', may go " + std::to_string(kMaxTailCalls) + " deep");
       }
-      if (conditional && aliasUse_.isValid() && aliasUse_ != alias->loc()) {
-        checker_.diags_.note(aliasUse_, "the instance needed here");
+      if (conditional && this->aliasUse.isValid() && this->aliasUse != alias->loc()) {
+        this->checker.diags_.note(this->aliasUse, "the instance needed here");
       }
       type = Type::error();
       break;
@@ -141,28 +137,30 @@ const Type *AliasInstantiator::instantiateAlias(TypeAliasDecl *alias,
             (defaults[shown - 1]->isNever() && args[shown - 1]->isNever()))) {
       --shown;
     }
-    std::string display = shown == 0 ? alias->name.str()
-                                     : alias->name.str() + "<" +
-                                           typeList(llvm::ArrayRef(args).take_front(shown)) + ">";
+    std::string display =
+        shown == 0 ? alias->name.str()
+                   : alias->name.str() + "<" +
+                         AliasInstantiator::typeList(llvm::ArrayRef(args).take_front(shown)) + ">";
     entry.resolving = true;
     chain.push_back(&entry);
-    ++aliasDepth_;
+    ++this->aliasDepth;
     std::vector<llvm::StringMap<Stmt *>> outerTypes;
-    Module *home = checker_.declModules_.lookup(alias);
-    bool moved = home && home != checker_.module_;
+    Module *home = this->checker.declModules_.lookup(alias);
+    bool moved = home && home != this->checker.module_;
     if (moved) {
-      outerTypes = std::move(checker_.typeScopes_);
-      checker_.typeScopes_ = {checker_.state(home).types};
+      outerTypes = std::move(this->checker.typeScopes_);
+      this->checker.typeScopes_ = {this->checker.state(home).types};
     }
-    checker_.typeScopes_.emplace_back();
-    checker_.typeParams().bindTypeParams(alias->typeParams, args);
+    this->checker.typeScopes_.emplace_back();
+    this->checker.typeParams().bindTypeParams(alias->typeParams, args);
     if (alias->type.kind() == TypeRefKind::OBJECT_REF) {
       entry.self = Type::declareObject(display);
       std::vector<const Type *> bases;
       std::vector<Overload> overloads;
       std::vector<Field> fields =
-          alias->bases.empty() ? checker_.typeResolver().resolveFields(alias->type, &overloads)
-                               : checker_.classBases().interfaceFields(alias, bases, overloads);
+          alias->bases.empty()
+              ? this->checker.typeResolver().resolveFields(alias->type, &overloads)
+              : this->checker.classBases().interfaceFields(alias, bases, overloads);
       if (entry.recursive) {
         entry.self->defineFields(std::move(fields), std::move(overloads));
         type = entry.self;
@@ -171,33 +169,33 @@ const Type *AliasInstantiator::instantiateAlias(TypeAliasDecl *alias,
       }
       for (const Type *base : bases) {
         if (!type->isError()) {
-          checker_.classBases().addBase(type, base);
+          this->checker.classBases().addBase(type, base);
         }
       }
     } else {
-      checker_.tailAllowed_ = conditional;
-      type = checker_.typeResolver().resolveTypeInner(alias->type);
-      checker_.tailAllowed_ = false;
+      this->checker.tailAllowed_ = conditional;
+      type = this->checker.typeResolver().resolveTypeInner(alias->type);
+      this->checker.tailAllowed_ = false;
     }
-    checker_.typeScopes_.pop_back();
+    this->checker.typeScopes_.pop_back();
     if (moved) {
-      checker_.typeScopes_ = std::move(outerTypes);
+      this->checker.typeScopes_ = std::move(outerTypes);
     }
-    --aliasDepth_;
-    if (!type && checker_.tailCall_) {
-      alias = checker_.tailCall_->alias;
-      args = std::move(checker_.tailCall_->args);
+    --this->aliasDepth;
+    if (!type && this->checker.tailCall_) {
+      alias = this->checker.tailCall_->alias;
+      args = std::move(this->checker.tailCall_->args);
       loc = alias->loc();
-      checker_.tailCall_.reset();
+      this->checker.tailCall_.reset();
       continue;
     }
     if (!type) {
       type = Type::error();
     }
-    if (type->isObject() && !type->isError() && !checker_.aliasOrigins_.count(type)) {
-      checker_.aliasOrigins_[type] = {alias, args};
+    if (type->isObject() && !type->isError() && !this->checker.aliasOrigins_.count(type)) {
+      this->checker.aliasOrigins_[type] = {alias, args};
     }
-    if (type->isUnion() && checker_.builtinAliases_.lookup(alias->name) == alias) {
+    if (type->isUnion() && this->checker.builtinAliases_.lookup(alias->name) == alias) {
       Type::nameUnion(type, display);
     }
   }

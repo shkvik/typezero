@@ -6,7 +6,7 @@ namespace tz {
 
 class ClassValueChecker {
 public:
-  explicit ClassValueChecker(Checker &checker);
+  explicit ClassValueChecker(Checker &owner);
 
   Expr *checkClassRefMember(MemberExpr *member);
   static const Type *constructedBy(const Type *classValue);
@@ -19,7 +19,7 @@ public:
   Expr *classValueAt(ClassDecl *cls, llvm::SMLoc loc);
 
 private:
-  Checker &checker_;
+  Checker &checker;
 };
 
 }

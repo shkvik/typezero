@@ -6,7 +6,7 @@ namespace tz {
 
 class ReturnChecker {
 public:
-  explicit ReturnChecker(Checker &checker);
+  explicit ReturnChecker(Checker &owner);
 
   void checkReturn(ReturnStmt *ret);
   Expr *checkReturnValue(ReturnStmt *ret, const Type *hint, bool tested);
@@ -14,7 +14,9 @@ public:
   static bool isExit(const Stmt *stmt);
 
 private:
-  Checker &checker_;
+  static bool breaksTo(const Stmt *stmt, llvm::ArrayRef<llvm::StringRef> labels);
+
+  Checker &checker;
 };
 
 }

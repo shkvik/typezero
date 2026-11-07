@@ -14,14 +14,8 @@
 #include "compiler/lower/types/union_layout/union_layout.h"
 #include "compiler/lower/values/string_lowerer/string_lowerer.h"
 #include "llvm/IR/MDBuilder.h"
-#include "llvm/Support/ConvertUTF.h"
-#include "llvm/Support/ErrorHandling.h"
 
-using llvm::BasicBlock;
 using llvm::cast;
-using llvm::dyn_cast;
-using llvm::isa;
-using llvm::Value;
 
 namespace tz {
 
@@ -51,7 +45,8 @@ static UnionSlot targetSlot(UnionSlot slot, const Type *to) {
   return UnionSlot::None;
 }
 
-UnionLowerer::UnionLowerer(Lowering &lowering) : lowering_(lowering) {}
+UnionLowerer::UnionLowerer(Lowering &owner)
+    : lowering(owner) {}
 
 llvm::Value *UnionLowerer::emitUnionConversion(llvm::Value *value, const Type *from,
                                                const Type *to) {
@@ -60,77 +55,81 @@ llvm::Value *UnionLowerer::emitUnionConversion(llvm::Value *value, const Type *f
   }
   if (to->isOptional()) {
     if (from->isUndefined()) {
-      return lowering_.optionalLowerer().undefinedValue(to);
+      return this->lowering.optionalLowerer().undefinedValue(to);
     }
     if (from->isOptional()) {
-      return lowering_.optionalLowerer().makeOptional(
-          lowering_.exprLowerer().emitConversion(
-              lowering_.optionalLowerer().optionalValue(value, from), from->inner(), to->inner()),
-          lowering_.optionalLowerer().optionalHas(value, from), to);
+      return this->lowering.optionalLowerer().makeOptional(
+          this->lowering.exprLowerer().emitConversion(
+              this->lowering.optionalLowerer().optionalValue(value, from), from->inner(),
+              to->inner()),
+          this->lowering.optionalLowerer().optionalHas(value, from), to);
     }
-    return lowering_.optionalLowerer().makeOptional(
-        lowering_.exprLowerer().emitConversion(value, from, to->inner()),
-        lowering_.builder_.getTrue(), to);
+    return this->lowering.optionalLowerer().makeOptional(
+        this->lowering.exprLowerer().emitConversion(value, from, to->inner()),
+        this->lowering.builder_.getTrue(), to);
   }
   if (from->isOptional()) {
-    return lowering_.exprLowerer().emitConversion(
-        lowering_.optionalLowerer().optionalValue(value, from), from->inner(), to);
+    return this->lowering.exprLowerer().emitConversion(
+        this->lowering.optionalLowerer().optionalValue(value, from), from->inner(), to);
   }
 
   if (UnionLayout::isAtomType(from) && (to->isString() || to->isJson())) {
-    return lowering_.exprLowerer().emitConversion(lowering_.unionLayout().atomString(value),
-                                                  Type::string(), to);
+    return this->lowering.exprLowerer().emitConversion(
+        this->lowering.unionLayout().atomString(value), Type::string(), to);
   }
   if (from->isString() && UnionLayout::isAtomType(to)) {
     std::vector<const Type *> literals =
         to->isStringLiteral()
             ? std::vector<const Type *>{to}
             : std::vector<const Type *>(to->members().begin(), to->members().end());
-    llvm::Value *atom = lowering_.builder_.getInt32(literals.front()->atom());
+    llvm::Value *atom = this->lowering.builder_.getInt32(literals.front()->atom());
     for (const Type *literal : llvm::ArrayRef<const Type *>(literals).drop_front()) {
-      llvm::Value *same = lowering_.equalityLowerer().emitValuesEqual(
-          value, lowering_.stringLowerer().stringLiteral(literal->literalText()), Type::string());
-      atom =
-          lowering_.builder_.CreateSelect(same, lowering_.builder_.getInt32(literal->atom()), atom);
+      llvm::Value *same = this->lowering.equalityLowerer().emitValuesEqual(
+          value, this->lowering.stringLowerer().stringLiteral(literal->literalText()),
+          Type::string());
+      atom = this->lowering.builder_.CreateSelect(
+          same, this->lowering.builder_.getInt32(literal->atom()), atom);
     }
-    lowering_.refCounts().releaseString(value);
+    this->lowering.refCounts().releaseString(value);
     return atom;
   }
   if (from->isJson() && to->isTagged() && llvm::is_contained(to->slots(), UnionSlot::Json)) {
-    return lowering_.unionLayout().makeTagged(to, UnionSlot::Json, value);
+    return this->lowering.unionLayout().makeTagged(to, UnionSlot::Json, value);
   }
   if (from->isJson() && to->isTagged()) {
-    llvm::Value *kind = lowering_.builder_.CreateCall(
-        lowering_.jsonLowerer().jsonFunction("tz_json_typeof", lowering_.builder_.getInt32Ty(),
-                                             {lowering_.builder_.getPtrTy()}),
+    llvm::Value *kind = this->lowering.builder_.CreateCall(
+        this->lowering.jsonLowerer().jsonFunction("tz_json_typeof",
+                                                  this->lowering.builder_.getInt32Ty(),
+                                                  {this->lowering.builder_.getPtrTy()}),
         {value});
-    llvm::BasicBlock *endBlock = lowering_.functionFrame().newBlock("json.union.end");
+    llvm::BasicBlock *endBlock = this->lowering.functionFrame().newBlock("json.union.end");
     std::vector<std::pair<llvm::Value *, llvm::BasicBlock *>> incoming;
     for (UnionSlot slot : to->slots()) {
-      llvm::BasicBlock *block = lowering_.functionFrame().newBlock("json.union.slot");
-      llvm::BasicBlock *next = lowering_.functionFrame().newBlock("json.union.next");
+      llvm::BasicBlock *block = this->lowering.functionFrame().newBlock("json.union.slot");
+      llvm::BasicBlock *next = this->lowering.functionFrame().newBlock("json.union.next");
       int code = slot == UnionSlot::Bool     ? 2
                  : slot == UnionSlot::Double ? 11
                  : slot == UnionSlot::String ? 13
                                              : -1;
       if (code >= 0) {
-        lowering_.builder_.CreateCondBr(
-            lowering_.builder_.CreateICmpEQ(kind, lowering_.builder_.getInt32(code)), block, next);
+        this->lowering.builder_.CreateCondBr(
+            this->lowering.builder_.CreateICmpEQ(kind, this->lowering.builder_.getInt32(code)),
+            block, next);
       } else {
-        lowering_.builder_.CreateBr(block);
+        this->lowering.builder_.CreateBr(block);
       }
-      lowering_.functionFrame().switchTo(block);
+      this->lowering.functionFrame().switchTo(block);
       llvm::Value *part =
-          lowering_.jsonLowerer().emitJsonConversion(value, from, to->slotPart(slot));
-      incoming.push_back({lowering_.unionLayout().makeTagged(to, slot, part),
-                          lowering_.builder_.GetInsertBlock()});
-      lowering_.builder_.CreateBr(endBlock);
-      lowering_.functionFrame().switchTo(next);
+          this->lowering.jsonLowerer().emitJsonConversion(value, from, to->slotPart(slot));
+      incoming.push_back({this->lowering.unionLayout().makeTagged(to, slot, part),
+                          this->lowering.builder_.GetInsertBlock()});
+      this->lowering.builder_.CreateBr(endBlock);
+      this->lowering.functionFrame().switchTo(next);
     }
-    lowering_.builder_.CreateUnreachable();
-    lowering_.functionFrame().switchTo(endBlock);
-    llvm::PHINode *phi = lowering_.builder_.CreatePHI(lowering_.moduleBuilder().lower(to),
-                                                      unsigned(incoming.size()));
+    this->lowering.builder_.CreateUnreachable();
+    this->lowering.functionFrame().switchTo(endBlock);
+    llvm::PHINode *phi = this->lowering.builder_.CreatePHI(this->lowering.moduleBuilder().lower(to),
+                                                           unsigned(incoming.size()));
     for (auto [v, block] : incoming) {
       phi->addIncoming(v, block);
     }
@@ -147,47 +146,48 @@ llvm::Value *UnionLowerer::emitUnionConversion(llvm::Value *value, const Type *f
           continue;
         }
         possible.push_back(slot);
-        same &= target == slot && lowering_.moduleBuilder().lower(to->slotPart(slot)) ==
-                                      lowering_.moduleBuilder().lower(from->slotPart(slot));
+        same &= target == slot && this->lowering.moduleBuilder().lower(to->slotPart(slot)) ==
+                                      this->lowering.moduleBuilder().lower(from->slotPart(slot));
       }
       if (same) {
-        llvm::Value *result = llvm::Constant::getNullValue(lowering_.moduleBuilder().lower(to));
+        llvm::Value *result =
+            llvm::Constant::getNullValue(this->lowering.moduleBuilder().lower(to));
         unsigned words =
-            cast<llvm::StructType>(lowering_.moduleBuilder().lower(to))->getNumElements();
+            cast<llvm::StructType>(this->lowering.moduleBuilder().lower(to))->getNumElements();
         unsigned have = cast<llvm::StructType>(value->getType())->getNumElements();
         for (unsigned i = 0; i < words && i < have; ++i) {
-          result = lowering_.builder_.CreateInsertValue(
-              result, lowering_.builder_.CreateExtractValue(value, i), i);
+          result = this->lowering.builder_.CreateInsertValue(
+              result, this->lowering.builder_.CreateExtractValue(value, i), i);
         }
         return result;
       }
-      return lowering_.unionLayout().forEachSlot(
+      return this->lowering.unionLayout().forEachSlot(
           value, possible,
           [&](UnionSlot slot) {
             UnionSlot target = targetSlot(slot, to);
-            llvm::Value *part = lowering_.exprLowerer().emitConversion(
-                lowering_.unionLayout().taggedPart(value, from, slot), from->slotPart(slot),
+            llvm::Value *part = this->lowering.exprLowerer().emitConversion(
+                this->lowering.unionLayout().taggedPart(value, from, slot), from->slotPart(slot),
                 to->slotPart(target));
 
-            return lowering_.unionLayout().makeTagged(to, target, part);
+            return this->lowering.unionLayout().makeTagged(to, target, part);
           },
-          lowering_.moduleBuilder().lower(to),
-          llvm::Constant::getNullValue(lowering_.moduleBuilder().lower(to)));
+          this->lowering.moduleBuilder().lower(to),
+          llvm::Constant::getNullValue(this->lowering.moduleBuilder().lower(to)));
     }
     UnionSlot slot = targetSlot(unionSlot(from), to);
     assert(slot != UnionSlot::None && "Checker converts a member into its union");
-    return lowering_.unionLayout().makeTagged(
-        to, slot, lowering_.exprLowerer().emitConversion(value, from, to->slotPart(slot)));
+    return this->lowering.unionLayout().makeTagged(
+        to, slot, this->lowering.exprLowerer().emitConversion(value, from, to->slotPart(slot)));
   }
   if (from->isTagged()) {
     UnionSlot slot = unionSlot(to);
-    return lowering_.exprLowerer().emitConversion(
-        lowering_.unionLayout().taggedPart(value, from, slot), from->slotPart(slot), to);
+    return this->lowering.exprLowerer().emitConversion(
+        this->lowering.unionLayout().taggedPart(value, from, slot), from->slotPart(slot), to);
   }
   if (!from->isUnion() && to->isUnion() && !llvm::is_contained(to->members(), from)) {
     for (const Type *member : to->members()) {
       if (TypeRelations::copiesIntoRecord(from, member)) {
-        return lowering_.dictLowerer().emitRecordFromObject(value, from, member);
+        return this->lowering.dictLowerer().emitRecordFromObject(value, from, member);
       }
     }
   }
@@ -210,61 +210,63 @@ bool UnionLowerer::narrowsUnion(const Type *from, const Type *to) {
 }
 
 llvm::Value *UnionLowerer::emitUnionEqual(llvm::Value *a, llvm::Value *b, const Type *type) {
-  llvm::Value *sameTag = lowering_.builder_.CreateICmpEQ(lowering_.unionLayout().unionTag(a),
-                                                         lowering_.unionLayout().unionTag(b));
-  llvm::BasicBlock *before = lowering_.builder_.GetInsertBlock();
-  llvm::BasicBlock *compareBlock = lowering_.functionFrame().newBlock("union.compare");
-  llvm::BasicBlock *endBlock = lowering_.functionFrame().newBlock("union.equal");
-  lowering_.builder_.CreateCondBr(sameTag, compareBlock, endBlock);
-  lowering_.functionFrame().switchTo(compareBlock);
-  llvm::Value *equal = lowering_.unionLayout().forEachSlot(
+  llvm::Value *sameTag = this->lowering.builder_.CreateICmpEQ(
+      this->lowering.unionLayout().unionTag(a), this->lowering.unionLayout().unionTag(b));
+  llvm::BasicBlock *before = this->lowering.builder_.GetInsertBlock();
+  llvm::BasicBlock *compareBlock = this->lowering.functionFrame().newBlock("union.compare");
+  llvm::BasicBlock *endBlock = this->lowering.functionFrame().newBlock("union.equal");
+  this->lowering.builder_.CreateCondBr(sameTag, compareBlock, endBlock);
+  this->lowering.functionFrame().switchTo(compareBlock);
+  llvm::Value *equal = this->lowering.unionLayout().forEachSlot(
       a, type->slots(),
       [&](UnionSlot slot) {
-        return lowering_.equalityLowerer().emitValuesEqual(
-            lowering_.unionLayout().taggedPart(a, type, slot),
-            lowering_.unionLayout().taggedPart(b, type, slot), type->slotPart(slot));
+        return this->lowering.equalityLowerer().emitValuesEqual(
+            this->lowering.unionLayout().taggedPart(a, type, slot),
+            this->lowering.unionLayout().taggedPart(b, type, slot), type->slotPart(slot));
       },
-      lowering_.builder_.getInt1Ty(), lowering_.builder_.getTrue());
-  llvm::BasicBlock *compareEnd = lowering_.builder_.GetInsertBlock();
-  lowering_.builder_.CreateBr(endBlock);
-  lowering_.functionFrame().switchTo(endBlock);
-  llvm::PHINode *phi = lowering_.builder_.CreatePHI(lowering_.builder_.getInt1Ty(), 2);
-  phi->addIncoming(lowering_.builder_.getFalse(), before);
+      this->lowering.builder_.getInt1Ty(), this->lowering.builder_.getTrue());
+  llvm::BasicBlock *compareEnd = this->lowering.builder_.GetInsertBlock();
+  this->lowering.builder_.CreateBr(endBlock);
+  this->lowering.functionFrame().switchTo(endBlock);
+  llvm::PHINode *phi = this->lowering.builder_.CreatePHI(this->lowering.builder_.getInt1Ty(), 2);
+  phi->addIncoming(this->lowering.builder_.getFalse(), before);
   phi->addIncoming(equal, compareEnd);
 
   return phi;
 }
 
 llvm::Value *UnionLowerer::emitUnionTypeOf(llvm::Value *value, const Type *type) {
-  llvm::Value *tag = lowering_.unionLayout().unionTag(value);
-  llvm::Value *result = lowering_.stringLowerer().stringLiteral(u"undefined");
+  llvm::Value *tag = this->lowering.unionLayout().unionTag(value);
+  llvm::Value *result = this->lowering.stringLowerer().stringLiteral(u"undefined");
   for (UnionSlot slot : type->slots()) {
     if (slot == UnionSlot::Json) {
-      llvm::Value *isJson =
-          lowering_.builder_.CreateICmpEQ(tag, lowering_.builder_.getInt32(unsigned(slot)));
-      llvm::BasicBlock *before = lowering_.builder_.GetInsertBlock();
-      llvm::BasicBlock *jsonBlock = lowering_.functionFrame().newBlock("typeof.json");
-      llvm::BasicBlock *endBlock = lowering_.functionFrame().newBlock("typeof.end");
-      lowering_.builder_.CreateCondBr(isJson, jsonBlock, endBlock);
-      lowering_.functionFrame().switchTo(jsonBlock);
-      llvm::Value *code = lowering_.builder_.CreateCall(
-          lowering_.jsonLowerer().jsonFunction("tz_json_typeof", lowering_.builder_.getInt32Ty(),
-                                               {lowering_.builder_.getPtrTy()}),
-          {lowering_.unionLayout().taggedPart(value, type, slot)});
-      llvm::Value *text = lowering_.unknownLowerer().typeOfText(code);
-      llvm::BasicBlock *jsonEnd = lowering_.builder_.GetInsertBlock();
-      lowering_.builder_.CreateBr(endBlock);
-      lowering_.functionFrame().switchTo(endBlock);
-      llvm::PHINode *phi = lowering_.builder_.CreatePHI(result->getType(), 2);
+      llvm::Value *isJson = this->lowering.builder_.CreateICmpEQ(
+          tag, this->lowering.builder_.getInt32(unsigned(slot)));
+      llvm::BasicBlock *before = this->lowering.builder_.GetInsertBlock();
+      llvm::BasicBlock *jsonBlock = this->lowering.functionFrame().newBlock("typeof.json");
+      llvm::BasicBlock *endBlock = this->lowering.functionFrame().newBlock("typeof.end");
+      this->lowering.builder_.CreateCondBr(isJson, jsonBlock, endBlock);
+      this->lowering.functionFrame().switchTo(jsonBlock);
+      llvm::Value *code = this->lowering.builder_.CreateCall(
+          this->lowering.jsonLowerer().jsonFunction("tz_json_typeof",
+                                                    this->lowering.builder_.getInt32Ty(),
+                                                    {this->lowering.builder_.getPtrTy()}),
+          {this->lowering.unionLayout().taggedPart(value, type, slot)});
+      llvm::Value *text = this->lowering.unknownLowerer().typeOfText(code);
+      llvm::BasicBlock *jsonEnd = this->lowering.builder_.GetInsertBlock();
+      this->lowering.builder_.CreateBr(endBlock);
+      this->lowering.functionFrame().switchTo(endBlock);
+      llvm::PHINode *phi = this->lowering.builder_.CreatePHI(result->getType(), 2);
       phi->addIncoming(result, before);
       phi->addIncoming(text, jsonEnd);
       result = phi;
       continue;
     }
     llvm::StringRef name = typeOfName(type->slotPart(slot));
-    result = lowering_.builder_.CreateSelect(
-        lowering_.builder_.CreateICmpEQ(tag, lowering_.builder_.getInt32(unsigned(slot))),
-        lowering_.stringLowerer().stringLiteral(std::u16string(name.begin(), name.end())), result);
+    result = this->lowering.builder_.CreateSelect(
+        this->lowering.builder_.CreateICmpEQ(tag, this->lowering.builder_.getInt32(unsigned(slot))),
+        this->lowering.stringLowerer().stringLiteral(std::u16string(name.begin(), name.end())),
+        result);
   }
 
   return result;
@@ -272,28 +274,29 @@ llvm::Value *UnionLowerer::emitUnionTypeOf(llvm::Value *value, const Type *type)
 
 llvm::Value *UnionLowerer::emitUnionTruth(llvm::Value *value, const Type *type) {
   if (UnionLayout::isAtomType(type)) {
-    return lowering_.truthLowerer().emitTruth(lowering_.unionLayout().atomString(value),
-                                              Type::string());
+    return this->lowering.truthLowerer().emitTruth(this->lowering.unionLayout().atomString(value),
+                                                   Type::string());
   }
-  if (const Type *stored = UnionLayout::storedType(type); stored != type) {
-    return lowering_.truthLowerer().emitTruth(value, stored);
+  const Type *stored = UnionLayout::storedType(type);
+  if (stored != type) {
+    return this->lowering.truthLowerer().emitTruth(value, stored);
   }
   if (UnionLayout::isObjectUnion(type)) {
-    return lowering_.builder_.getTrue();
+    return this->lowering.builder_.getTrue();
   }
 
-  return lowering_.unionLayout().forEachSlot(
+  return this->lowering.unionLayout().forEachSlot(
       value, type->slots(),
       [&](UnionSlot slot) -> llvm::Value * {
         const Type *part = type->slotPart(slot);
         if (part->isString() || part->isBool() || UnionLayout::isAtomType(part) ||
             part->isLiteral()) {
-          return lowering_.truthLowerer().emitTruth(
-              lowering_.unionLayout().taggedPart(value, type, slot), part);
+          return this->lowering.truthLowerer().emitTruth(
+              this->lowering.unionLayout().taggedPart(value, type, slot), part);
         }
-        return lowering_.builder_.getTrue();
+        return this->lowering.builder_.getTrue();
       },
-      lowering_.builder_.getInt1Ty(), lowering_.builder_.getFalse());
+      this->lowering.builder_.getInt1Ty(), this->lowering.builder_.getFalse());
 }
 
 uint32_t UnionLowerer::plainTypeId(const Type *type) {
@@ -320,63 +323,68 @@ uint32_t UnionLowerer::plainTypeId(const Type *type) {
              type->bases().empty() && type->overloads().empty()) {
     canonical = Type::object(std::move(fields));
   }
-  auto [it, inserted] = plainIds_.try_emplace(canonical, 0);
+  auto [it, inserted] = this->plainIds.try_emplace(canonical, 0);
   if (inserted) {
-    it->second = kPlainIdBase + uint32_t(plainIds_.size());
+    it->second = kPlainIdBase + uint32_t(this->plainIds.size());
   }
 
   return it->second;
 }
 
 llvm::Value *UnionLowerer::objectClassId(llvm::Value *object) {
-  llvm::Value *descriptor = lowering_.builder_.CreateLoad(
-      lowering_.builder_.getPtrTy(),
-      lowering_.builder_.CreateConstInBoundsGEP1_64(lowering_.builder_.getInt8Ty(), object, 8),
-      "descriptor");
+  llvm::Value *descriptor =
+      this->lowering.builder_.CreateLoad(this->lowering.builder_.getPtrTy(),
+                                         this->lowering.builder_.CreateConstInBoundsGEP1_64(
+                                             this->lowering.builder_.getInt8Ty(), object, 8),
+                                         "descriptor");
 
-  return lowering_.builder_.CreateLoad(
-      lowering_.builder_.getInt32Ty(),
-      lowering_.builder_.CreateStructGEP(lowering_.layoutDescTy_, descriptor, kDescriptorClass),
+  return this->lowering.builder_.CreateLoad(
+      this->lowering.builder_.getInt32Ty(),
+      this->lowering.builder_.CreateStructGEP(this->lowering.layoutDescTy_, descriptor,
+                                              kDescriptorClass),
       "class");
 }
 
 llvm::Value *UnionLowerer::emitIsOneOf(llvm::Value *id, llvm::ArrayRef<const Type *> types) {
-  llvm::Value *result = lowering_.builder_.getFalse();
+  llvm::Value *result = this->lowering.builder_.getFalse();
   auto test = [&](const Type *t) {
-    if (const ClassDecl *cls = t->classDecl()) {
+    const ClassDecl *cls = t->classDecl();
+    if (cls) {
       llvm::Value *in =
           cls->lastId <= cls->id
-              ? lowering_.builder_.CreateICmpEQ(id, lowering_.builder_.getInt32(cls->id))
-              : lowering_.builder_.CreateICmpULE(
-                    lowering_.builder_.CreateSub(id, lowering_.builder_.getInt32(cls->id)),
-                    lowering_.builder_.getInt32(cls->lastId - cls->id));
-      result = lowering_.builder_.CreateOr(result, in);
+              ? this->lowering.builder_.CreateICmpEQ(id, this->lowering.builder_.getInt32(cls->id))
+              : this->lowering.builder_.CreateICmpULE(
+                    this->lowering.builder_.CreateSub(id,
+                                                      this->lowering.builder_.getInt32(cls->id)),
+                    this->lowering.builder_.getInt32(cls->lastId - cls->id));
+      result = this->lowering.builder_.CreateOr(result, in);
       return;
     }
     if (t->isClassRef() && !t->classRef()) {
-      for (const ClassDecl *cls : lowering_.emittedClasses_) {
-        const Type *ref = Type::classRef(cls, cls->name);
-        if (!cls->literal() && ref->isSubtypeOf(t)) {
-          result = lowering_.builder_.CreateOr(
-              result,
-              lowering_.builder_.CreateICmpEQ(id, lowering_.builder_.getInt32(plainTypeId(ref))));
+      for (const ClassDecl *emitted : this->lowering.emittedClasses_) {
+        const Type *ref = Type::classRef(emitted, emitted->name);
+        if (!emitted->literal() && ref->isSubtypeOf(t)) {
+          result = this->lowering.builder_.CreateOr(
+              result, this->lowering.builder_.CreateICmpEQ(
+                          id, this->lowering.builder_.getInt32(this->plainTypeId(ref))));
         }
       }
       return;
     }
     uint32_t number =
-        t->isRegExp() || t->isMatch() || t->isIntl() || t->isCrypto() ? 0 : plainTypeId(t);
-    result = lowering_.builder_.CreateOr(
-        result, lowering_.builder_.CreateICmpEQ(id, lowering_.builder_.getInt32(number)));
+        t->isRegExp() || t->isMatch() || t->isIntl() || t->isCrypto() ? 0 : this->plainTypeId(t);
+    result = this->lowering.builder_.CreateOr(
+        result, this->lowering.builder_.CreateICmpEQ(id, this->lowering.builder_.getInt32(number)));
     if (t->bytes() == Type::Bytes::Uint8) {
-      result = lowering_.builder_.CreateOr(
-          result, lowering_.builder_.CreateICmpEQ(id, lowering_.builder_.getInt32(plainTypeId(
-                                                          Type::bytesType(Type::Bytes::Buffer)))));
+      result = this->lowering.builder_.CreateOr(
+          result, this->lowering.builder_.CreateICmpEQ(
+                      id, this->lowering.builder_.getInt32(
+                              this->plainTypeId(Type::bytesType(Type::Bytes::Buffer)))));
     }
   };
   for (const Type *t : types) {
     test(t);
-    for (const Type *sub : lowering_.subtypes_) {
+    for (const Type *sub : this->lowering.subtypes_) {
       if (sub != t && sub->isSubtypeOf(t) && !(sub->classDecl() && t->classDecl())) {
         test(sub);
       }

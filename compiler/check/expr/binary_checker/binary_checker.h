@@ -6,7 +6,7 @@ namespace tz {
 
 class BinaryChecker {
 public:
-  explicit BinaryChecker(Checker &checker);
+  explicit BinaryChecker(Checker &owner);
 
   Expr *checkBinary(BinaryExpr *binary, const Type *expected, bool wraps);
   Expr *checkEquality(BinaryExpr *bin);
@@ -20,7 +20,11 @@ public:
   bool checkTypeOfName(const Expr *operand, const StringLitExpr *text);
 
 private:
-  Checker &checker_;
+  static bool onlyIntLiterals(const Expr *expr);
+  static const Type *integerHint(const Expr *literal, const Expr *other, const Type *hint,
+                                 bool bitwise);
+
+  Checker &checker;
 };
 
 }

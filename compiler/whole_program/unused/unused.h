@@ -6,12 +6,12 @@ namespace tz {
 
 class Unused {
 public:
-  explicit Unused(Checker &checker);
+  explicit Unused(Checker &owner);
 
   void findUnused(SourceFile &program);
 
 private:
-  Checker &checker_;
+  Checker &checker;
 };
 
 }

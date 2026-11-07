@@ -17,35 +17,37 @@ static const Type *returnedType(const FunctionDecl *fn, const Type *returnType) 
   return returnType;
 }
 
-ExitLowerer::ExitLowerer(Lowering &lowering) : lowering_(lowering) {}
+ExitLowerer::ExitLowerer(Lowering &owner)
+    : lowering(owner) {}
 
 void ExitLowerer::emitJumpTo(size_t target, bool isBreak) {
-  const Lowering::JumpTarget &jt = lowering_.targets_[target];
+  const Lowering::JumpTarget &jt = this->lowering.targets_[target];
   bool inGenerator = !isBreak && jt.continueDepth != ~size_t(0);
-  lowering_.functionFrame().emitCleanups(inGenerator ? jt.continueDepth : jt.scopeDepth);
-  lowering_.builder_.CreateBr(isBreak ? jt.breakTarget : jt.continueTarget);
-  lowering_.functionFrame().startDeadBlock();
+  this->lowering.functionFrame().emitCleanups(inGenerator ? jt.continueDepth : jt.scopeDepth);
+  this->lowering.builder_.CreateBr(isBreak ? jt.breakTarget : jt.continueTarget);
+  this->lowering.functionFrame().startDeadBlock();
 }
 
 void ExitLowerer::emitReturnOf(llvm::Value *value) {
-  if (lowering_.coro_ && lowering_.currentFn_ && lowering_.currentFn_->isGenerator) {
-    const Type *type = returnedType(lowering_.currentFn_, lowering_.returnType_);
-    lowering_.coroutineLowerer().emitCoroutineReturn(value, value ? type : nullptr);
+  if (this->lowering.coro_ && this->lowering.currentFn_ && this->lowering.currentFn_->isGenerator) {
+    const Type *type = returnedType(this->lowering.currentFn_, this->lowering.returnType_);
+    this->lowering.coroutineLowerer().emitCoroutineReturn(value, value ? type : nullptr);
     return;
   }
-  if (lowering_.async_) {
-    lowering_.asyncLowerer().emitAsyncReturn(value);
+  if (this->lowering.async_) {
+    this->lowering.asyncLowerer().emitAsyncReturn(value);
     return;
   }
-  lowering_.functionFrame().emitCleanups(0);
+  this->lowering.functionFrame().emitCleanups(0);
   if (value) {
-    lowering_.builder_.CreateRet(value);
-  } else if (lowering_.returnType_ && lowering_.returnType_->isOptional()) {
-    lowering_.builder_.CreateRet(lowering_.optionalLowerer().undefinedValue(lowering_.returnType_));
+    this->lowering.builder_.CreateRet(value);
+  } else if (this->lowering.returnType_ && this->lowering.returnType_->isOptional()) {
+    this->lowering.builder_.CreateRet(
+        this->lowering.optionalLowerer().undefinedValue(this->lowering.returnType_));
   } else {
-    lowering_.builder_.CreateRetVoid();
+    this->lowering.builder_.CreateRetVoid();
   }
-  lowering_.functionFrame().startDeadBlock();
+  this->lowering.functionFrame().startDeadBlock();
 }
 
 }

@@ -6,13 +6,13 @@ namespace tz {
 
 class InstanceOfChecker {
 public:
-  explicit InstanceOfChecker(Checker &checker);
+  explicit InstanceOfChecker(Checker &owner);
 
   Expr *checkInstanceOf(BinaryExpr *bin);
   Expr *checkBytesInstanceOf(BinaryExpr *bin, const Type *bytes);
 
 private:
-  Checker &checker_;
+  Checker &checker;
 };
 
 }

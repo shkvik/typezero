@@ -6,7 +6,7 @@ namespace tz {
 
 class LoopLowerer {
 public:
-  explicit LoopLowerer(Lowering &lowering);
+  explicit LoopLowerer(Lowering &owner);
 
   void emitWhile(WhileStmt *stmt);
   void emitDoWhile(DoWhileStmt *stmt);
@@ -17,7 +17,7 @@ public:
   void pushLoop(llvm::BasicBlock *breakTarget, llvm::BasicBlock *continueTarget, size_t scopeDepth);
 
 private:
-  Lowering &lowering_;
+  Lowering &lowering;
 };
 
 }

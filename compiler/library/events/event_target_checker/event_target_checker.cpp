@@ -40,8 +40,13 @@ Expr *EventTargetChecker::checkEventTargetCall(CallExpr *call, MemberExpr *membe
   }
   call->type = Type::error();
   member->type = Type::error();
-  if (checker_.callChecker().rejectSpread(call) ||
-      !checker_.argumentChecker().checkArity(call, member->loc(), 2, 3)) {
+  bool rejected = checker_.callChecker().rejectSpread(call);
+  ArgumentChecker::ResultArityMatches arity =
+      rejected ? ok(call) : checker_.argumentChecker().checkArity(call, 2, 3);
+  if (arity.isErr()) {
+    checker_.diags_.error(member->loc(), arity.error().message);
+  }
+  if (rejected || arity.isErr()) {
     return call;
   }
   call->args[0] = checker_.argumentChecker().checkArg(call->args[0], Type::string());
@@ -174,8 +179,13 @@ Expr *EventTargetChecker::checkEventsFunction(CallExpr *call, llvm::StringRef fn
     }
   };
   if (fn == "getEventListeners" || fn == "listenerCount") {
-    if (checker_.callChecker().rejectSpread(call) ||
-        !checker_.argumentChecker().checkArity(call, loc, 2, 2)) {
+    bool rejected = checker_.callChecker().rejectSpread(call);
+    ArgumentChecker::ResultArityMatches arity =
+        rejected ? ok(call) : checker_.argumentChecker().checkArity(call, 2, 2);
+    if (arity.isErr()) {
+      checker_.diags_.error(loc, arity.error().message);
+    }
+    if (rejected || arity.isErr()) {
       return call;
     }
     Expr *object = checker_.exprChecker().checkExpr(call->args[0]);
@@ -224,8 +234,13 @@ Expr *EventTargetChecker::checkEventsFunction(CallExpr *call, llvm::StringRef fn
       });
     }
   }
-  if (checker_.callChecker().rejectSpread(call) ||
-      !checker_.argumentChecker().checkArity(call, loc, 2, most)) {
+  bool rejected = checker_.callChecker().rejectSpread(call);
+  ArgumentChecker::ResultArityMatches arity =
+      rejected ? ok(call) : checker_.argumentChecker().checkArity(call, 2, most);
+  if (arity.isErr()) {
+    checker_.diags_.error(loc, arity.error().message);
+  }
+  if (rejected || arity.isErr()) {
     return call;
   }
   call->args[0] = checker_.exprChecker().checkExpr(call->args[0]);

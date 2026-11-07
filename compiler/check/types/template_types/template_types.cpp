@@ -7,10 +7,6 @@
 #include "llvm/Support/ConvertUTF.h"
 #include <cmath>
 
-using llvm::cast;
-using llvm::dyn_cast;
-using llvm::dyn_cast_or_null;
-using llvm::isa;
 
 namespace tz {
 
@@ -18,7 +14,9 @@ namespace {
 
 constexpr size_t kMaxTemplateStrings = 100000;
 
-std::string utf8(const std::u16string &text) {
+}
+
+std::string TemplateTypes::utf8(const std::u16string &text) {
   std::string out;
   llvm::convertUTF16ToUTF8String(
       llvm::ArrayRef<llvm::UTF16>(reinterpret_cast<const llvm::UTF16 *>(text.data()), text.size()),
@@ -27,26 +25,26 @@ std::string utf8(const std::u16string &text) {
   return out;
 }
 
-std::u16string utf16(llvm::StringRef text) {
+std::u16string TemplateTypes::utf16(llvm::StringRef text) {
   llvm::SmallVector<llvm::UTF16, 32> units;
   llvm::convertUTF8ToUTF16String(text, units);
 
   return std::u16string(units.begin(), units.end());
 }
 
-std::vector<const Type *> distributed(const Type *type) {
+std::vector<const Type *> TemplateTypes::distributed(const Type *type) {
   std::vector<const Type *> out;
   distribute(type, out);
 
   return out;
 }
 
-bool templateHole(const Type *type) {
+bool TemplateTypes::templateHole(const Type *type) {
   return type->isString() || type->isNumeric() || type->isBool() || type->isLiteral() ||
          type->isUndefined() || type->isParam();
 }
 
-std::u16string upperCase(char16_t c) {
+std::u16string TemplateTypes::upperCase(char16_t c) {
   if (c >= u'a' && c <= u'z') {
     return std::u16string(1, char16_t(c - 32));
   }
@@ -99,7 +97,7 @@ std::u16string upperCase(char16_t c) {
   return std::u16string(1, c);
 }
 
-std::u16string lowerCase(char16_t c) {
+std::u16string TemplateTypes::lowerCase(char16_t c) {
   if (c >= u'A' && c <= u'Z') {
     return std::u16string(1, char16_t(c + 32));
   }
@@ -143,14 +141,14 @@ std::u16string lowerCase(char16_t c) {
   return std::u16string(1, c);
 }
 
-std::u16string changeCase(TypeOp op, const std::u16string &text) {
+std::u16string TemplateTypes::changeCase(TypeOp op, const std::u16string &text) {
   std::u16string out;
   for (size_t i = 0; i < text.size(); ++i) {
     bool first = i == 0;
     if (op == TypeOp::Uppercase || (op == TypeOp::Capitalize && first)) {
-      out += upperCase(text[i]);
+      out += TemplateTypes::upperCase(text[i]);
     } else if (op == TypeOp::Lowercase || (op == TypeOp::Uncapitalize && first)) {
-      out += lowerCase(text[i]);
+      out += TemplateTypes::lowerCase(text[i]);
     } else {
       out += text[i];
     }
@@ -159,9 +157,8 @@ std::u16string changeCase(TypeOp op, const std::u16string &text) {
   return out;
 }
 
-}
-
-TemplateTypes::TemplateTypes(Checker &checker) : checker_(checker) {}
+TemplateTypes::TemplateTypes(Checker &owner)
+    : checker(owner) {}
 
 bool TemplateTypes::matchTemplate(const std::u16string &text, llvm::ArrayRef<const Type *> parts,
                                   Checker::InferMatch *inference) {
@@ -196,10 +193,11 @@ bool TemplateTypes::matchTemplate(const std::u16string &text, llvm::ArrayRef<con
         }
         bool whole = value == std::trunc(value) && std::fabs(value) <= 9007199254740992.0;
         const Type *number = Type::numberLiteral(value, whole ? Type::intTy() : Type::doubleTy());
-        piece = number->name() == utf8(pieces[k]) ? number : constraint->nonOptional();
+        piece =
+            number->name() == TemplateTypes::utf8(pieces[k]) ? number : constraint->nonOptional();
       }
     }
-    if (!checker_.extendsRelation().extendsType(piece, hole, inference)) {
+    if (!this->checker.extendsRelation().extendsType(piece, hole, inference)) {
       return false;
     }
   }
@@ -214,25 +212,25 @@ const Type *TemplateTypes::resolveTemplate(const TypeRef &ref) {
     if (i >= ref.args.size()) {
       break;
     }
-    const Type *hole = checker_.typeResolver().resolveTypeInner(ref.args[i]);
+    const Type *hole = this->checker.typeResolver().resolveTypeInner(ref.args[i]);
     if (hole->isError()) {
       return hole;
     }
-    for (const Type *m : distributed(hole)) {
-      if (!templateHole(m)) {
-        checker_.diags_.error(ref.args[i].loc,
-                              "a template literal type holds strings, numbers, booleans and "
-                              "undefined, not '" +
-                                  m->name() + "'");
+    for (const Type *m : TemplateTypes::distributed(hole)) {
+      if (!TemplateTypes::templateHole(m)) {
+        this->checker.diags_.error(ref.args[i].loc,
+                                   "a template literal type holds strings, numbers, booleans and "
+                                   "undefined, not '" +
+                                       m->name() + "'");
         return Type::error();
       }
     }
     operands.push_back(hole);
   }
-  templateLoc_ = ref.loc;
+  this->templateLoc = ref.loc;
   const Type *type =
-      checker_.typeOperators().evalTypeOp(Type::typeOp(TypeOp::Template, operands), operands);
-  templateLoc_ = llvm::SMLoc();
+      this->checker.typeOperators().evalTypeOp(Type::typeOp(TypeOp::Template, operands), operands);
+  this->templateLoc = llvm::SMLoc();
 
   return type;
 }
@@ -244,7 +242,7 @@ const Type *TemplateTypes::evalTemplate(llvm::ArrayRef<const Type *> operands) {
   };
   std::vector<Part> parts{{{operands[0]->literalText()}, {}}};
   for (size_t i = 1; i + 1 < operands.size(); i += 2) {
-    std::vector<const Type *> members = distributed(operands[i]);
+    std::vector<const Type *> members = TemplateTypes::distributed(operands[i]);
     const std::u16string &after = operands[i + 1]->literalText();
     std::vector<Part> next;
     for (const Part &part : parts) {
@@ -253,7 +251,7 @@ const Type *TemplateTypes::evalTemplate(llvm::ArrayRef<const Type *> operands) {
         if (m->isStringLiteral()) {
           made.texts.back() += m->literalText();
         } else if (m->isLiteral()) {
-          made.texts.back() += utf16(m->name());
+          made.texts.back() += TemplateTypes::utf16(m->name());
         } else if (m->isUndefined()) {
           made.texts.back() += u"undefined";
         } else if (m->isPattern()) {
@@ -271,9 +269,11 @@ const Type *TemplateTypes::evalTemplate(llvm::ArrayRef<const Type *> operands) {
         made.texts.back() += after;
         next.push_back(std::move(made));
         if (next.size() > kMaxTemplateStrings) {
-          llvm::SMLoc loc = templateLoc_.isValid() ? templateLoc_ : checker_.instanceLoc_;
+          llvm::SMLoc loc =
+              this->templateLoc.isValid() ? this->templateLoc : this->checker.instanceLoc_;
           if (loc.isValid()) {
-            checker_.diags_.error(loc, "this template literal type makes more than " +
+            this->checker.diags_.error(loc,
+                                       "this template literal type makes more than " +
                                            std::to_string(kMaxTemplateStrings) +
                                            " strings, the most TypeScript allows; use 'string'");
           }
@@ -294,17 +294,17 @@ const Type *TemplateTypes::evalTemplate(llvm::ArrayRef<const Type *> operands) {
 
 const Type *TemplateTypes::evalStringCase(TypeOp op, const Type *type) {
   std::vector<const Type *> results;
-  for (const Type *m : distributed(type)) {
+  for (const Type *m : TemplateTypes::distributed(type)) {
     if (m->isStringLiteral()) {
-      results.push_back(Type::stringLiteral(changeCase(op, m->literalText())));
+      results.push_back(Type::stringLiteral(TemplateTypes::changeCase(op, m->literalText())));
     } else if (m->isPattern()) {
       std::vector<std::u16string> texts(m->patternTexts().begin(), m->patternTexts().end());
       if (op == TypeOp::Uppercase || op == TypeOp::Lowercase) {
         for (std::u16string &text : texts) {
-          text = changeCase(op, text);
+          text = TemplateTypes::changeCase(op, text);
         }
       } else {
-        texts[0] = changeCase(op, texts[0]);
+        texts[0] = TemplateTypes::changeCase(op, texts[0]);
       }
       results.push_back(Type::stringPattern(
           texts, std::vector<const Type *>(m->patternHoles().begin(), m->patternHoles().end())));

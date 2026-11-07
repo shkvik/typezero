@@ -6,47 +6,48 @@
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/Support/Path.h"
 #include "llvm/Support/SourceMgr.h"
-#include <cctype>
-#include <functional>
-#include <map>
-#include <set>
 #include <tuple>
-
-using llvm::cast;
-using llvm::dyn_cast;
-using llvm::dyn_cast_or_null;
-using llvm::isa;
 
 namespace tz {
 
-namespace {
+WideWrites::WideWrites(Checker &owner)
+    : checker(owner) {}
 
-constexpr int kMaxDepth = 6;
-
-void collectNarrowings(const Type *from, const Type *to, int depth, std::vector<Narrowing> &out,
-                       std::set<std::pair<const Type *, const Type *>> &seen) {
+void WideWrites::collectNarrowings(const Type *from, const Type *to, int depth,
+                                   std::vector<Narrowing> &out, TypePairs &seen) {
   from = from->nonOptional();
   to = to->nonOptional();
-  if (from == to || depth > kMaxDepth || !seen.insert({from, to}).second) {
+  if (from == to || depth > WideWrites::maxDepth) {
+    return;
+  }
+  bool firstVisit = seen.insert({from, to}).second;
+  if (!firstVisit) {
     return;
   }
   if (from->isArray() && to->isArray()) {
     if (from->inner() != to->inner()) {
-      out.push_back({depth, true, "", from->inner(), from});
+      out.push_back(Narrowing{
+          .depth = depth,
+          .element = true,
+          .name = "",
+          .narrow = from->inner(),
+          .owner = from,
+      });
     }
-    collectNarrowings(from->inner(), to->inner(), depth + 1, out, seen);
+    WideWrites::collectNarrowings(from->inner(), to->inner(), depth + 1, out, seen);
     return;
   }
   if (from->isUnion()) {
     if (llvm::is_contained(from->members(), to)) {
       return;
     }
-    for (const Type *m : from->members()) {
-      collectNarrowings(m, to, depth, out, seen);
+    for (const Type *member : from->members()) {
+      WideWrites::collectNarrowings(member, to, depth, out, seen);
     }
     return;
   }
-  if (!from->isObject() || !to->isObject() || from->isAnyObject() || to->isAnyObject()) {
+  bool objects = from->isObject() && to->isObject() && !from->isAnyObject() && !to->isAnyObject();
+  if (!objects) {
     return;
   }
   for (const Field &wide : to->fields()) {
@@ -55,228 +56,364 @@ void collectNarrowings(const Type *from, const Type *to, int depth, std::vector<
       continue;
     }
     if (own->readonly && !wide.readonly) {
-      out.push_back({depth, false, wide.name, nullptr, from});
+      out.push_back(Narrowing{
+          .depth = depth,
+          .element = false,
+          .name = wide.name,
+          .narrow = nullptr,
+          .owner = from,
+      });
     } else if (own->type != wide.type) {
-      out.push_back({depth, false, wide.name, own->type, from});
+      out.push_back(Narrowing{
+          .depth = depth,
+          .element = false,
+          .name = wide.name,
+          .narrow = own->type,
+          .owner = from,
+      });
     }
     if (own->type != wide.type) {
-      collectNarrowings(own->type, wide.type, depth + 1, out, seen);
+      WideWrites::collectNarrowings(own->type, wide.type, depth + 1, out, seen);
     }
   }
 }
 
+std::vector<Narrowing> WideWrites::narrowingsOf(const Type *from, const Type *to) {
+  std::vector<Narrowing> out;
+  TypePairs seen;
+  WideWrites::collectNarrowings(from, to, 0, out, seen);
+
+  return out;
 }
 
-WideWrites::WideWrites(Checker &checker) : checker_(checker) {}
-
 bool WideWrites::widensWrites(const Type *from, const Type *to) {
-  const Type *a = from->nonOptional(), *b = to->nonOptional();
-  if (a == b || GenericWidening::widens(a, b)) {
+  const Type *bareFrom = from->nonOptional();
+  const Type *bareTo = to->nonOptional();
+  if (bareFrom == bareTo || GenericWidening::widens(bareFrom, bareTo)) {
     return false;
   }
-  bool arrays = a->isArray() && b->isArray();
-  bool objects = a->isObject() && b->isObject() && !a->isAnyObject() && !b->isAnyObject();
-  if (!arrays && !objects && !(a->isUnion() && b->isObject())) {
+  bool arrays = bareFrom->isArray() && bareTo->isArray();
+  bool objects = bareFrom->isObject() && bareTo->isObject() && !bareFrom->isAnyObject() &&
+                 !bareTo->isAnyObject();
+  bool unionToObject = bareFrom->isUnion() && bareTo->isObject();
+  if (!arrays && !objects && !unionToObject) {
     return false;
   }
-  auto key = std::make_pair(a, b);
-  if (auto found = widens_.find(key); found != widens_.end()) {
+  auto key = std::make_pair(bareFrom, bareTo);
+  auto found = this->widens.find(key);
+  if (found != this->widens.end()) {
     return found->second;
   }
-  std::vector<Narrowing> out;
-  std::set<std::pair<const Type *, const Type *>> seen;
-  collectNarrowings(a, b, 0, out, seen);
+  std::vector<Narrowing> narrowings = WideWrites::narrowingsOf(bareFrom, bareTo);
+  bool narrowed = !narrowings.empty();
+  this->widens[key] = narrowed;
 
-  return widens_[key] = !out.empty();
+  return narrowed;
+}
+
+bool WideWrites::breaks(const Write &write, const Narrowing &narrowing, int depth) {
+  bool otherDepth = depth >= 0 && narrowing.depth != depth;
+  if (otherDepth || write.element != narrowing.element) {
+    return false;
+  }
+  bool otherName = !write.element && write.name != "*" && write.name != narrowing.name;
+  if (otherName) {
+    return false;
+  }
+
+  return !narrowing.narrow || !write.value ||
+         !TypeRelations::isImplicitlyConvertible(write.value, narrowing.narrow);
+}
+
+bool WideWrites::mayBe(const Write &write, const Narrowing &narrowing) {
+  const Type *through = write.through ? write.through->nonOptional() : nullptr;
+  bool open = !through || !narrowing.owner || mentionsParam(through) || through->isUnknown() ||
+              through->isAnyObject();
+  if (open) {
+    return true;
+  }
+  if (narrowing.element) {
+    return !through->isArray() || !narrowing.narrow || mentionsParam(through->inner()) ||
+           TypeRelations::isImplicitlyConvertible(narrowing.narrow, through->inner());
+  }
+
+  return TypeRelations::isImplicitlyConvertible(narrowing.owner, through);
+}
+
+bool WideWrites::mayHold(const Type *type, const Type *value, int depth) {
+  if (!type) {
+    return true;
+  }
+  type = type->nonOptional();
+  bool open = type->isUnknown() || type->isAnyObject() || type->isError() || mentionsParam(type);
+  if (open) {
+    return true;
+  }
+  if (depth == 0) {
+    return TypeRelations::isImplicitlyConvertible(value, type);
+  }
+  if (!holdsReferences(type)) {
+    return false;
+  }
+  if (type->isArray()) {
+    return WideWrites::mayHold(type->inner(), value, depth - 1);
+  }
+  if (type->isDict()) {
+    return WideWrites::mayHold(type->keyType(), value, depth - 1) ||
+           WideWrites::mayHold(type->valueType(), value, depth - 1);
+  }
+  auto memberHolds = [&](const Type *member) { return WideWrites::mayHold(member, value, depth); };
+  auto fieldHolds = [&](const Field &field) {
+    return WideWrites::mayHold(field.type, value, depth - 1);
+  };
+  if (type->isUnion()) {
+    return llvm::any_of(type->members(), memberHolds);
+  }
+  if (type->isTuple()) {
+    return llvm::any_of(type->fields(), fieldHolds);
+  }
+
+  return true;
+}
+
+bool WideWrites::mayBePart(const Type *type, const Type *whole, int depth) {
+  if (!type || !whole) {
+    return true;
+  }
+  type = type->nonOptional();
+  whole = whole->nonOptional();
+  if (depth == 0) {
+    return WideWrites::mayHold(type, whole, 0) || WideWrites::mayHold(whole, type, 0);
+  }
+  bool open =
+      whole->isUnknown() || whole->isAnyObject() || whole->isError() || mentionsParam(whole);
+  if (open) {
+    return true;
+  }
+  if (!holdsReferences(whole)) {
+    return false;
+  }
+  if (whole->isArray()) {
+    return WideWrites::mayBePart(type, whole->inner(), depth - 1);
+  }
+  if (whole->isDict()) {
+    return WideWrites::mayBePart(type, whole->keyType(), depth - 1) ||
+           WideWrites::mayBePart(type, whole->valueType(), depth - 1);
+  }
+  auto memberPart = [&](const Type *member) { return WideWrites::mayBePart(type, member, depth); };
+  auto fieldPart = [&](const Field &field) {
+    return WideWrites::mayBePart(type, field.type, depth - 1);
+  };
+  if (whole->isUnion()) {
+    return llvm::any_of(whole->members(), memberPart);
+  }
+  const ClassDecl *cls = whole->classDecl();
+  bool closed = whole->isTuple() || (cls && cls->children.empty());
+  if (closed) {
+    return llvm::any_of(whole->fields(), fieldPart);
+  }
+
+  return true;
+}
+
+WideWrites::WritesAt WideWrites::writesByNode(const Flows &flows) {
+  WritesAt writesAt(flows.edges.size());
+  for (size_t w = 0; w < flows.writes.size(); ++w) {
+    const Refs &targets = flows.writes[w].target;
+    for (size_t r = 0; r < targets.size(); ++r) {
+      writesAt[size_t(targets[r].node)].push_back(WriteAt{.write = w, .target = r});
+    }
+  }
+
+  return writesAt;
+}
+
+bool WideWrites::nodeMayHold(const Flows &flows, const Conversion &conv, int node, int off) {
+  const Type *type = size_t(node) < flows.types.size() ? flows.types[size_t(node)] : nullptr;
+  if (!type) {
+    return true;
+  }
+  if (off <= 0) {
+    return WideWrites::mayHold(type, conv.from, -off) || WideWrites::mayHold(type, conv.to, -off);
+  }
+
+  return WideWrites::mayBePart(type, conv.from, off);
+}
+
+WideWrites::WriteBreak WideWrites::breakingNarrowing(const Write &write, const Conversion &conv,
+                                                     int depth) {
+  for (const Narrowing &narrowing : conv.narrowings) {
+    bool broken =
+        WideWrites::breaks(write, narrowing, depth) && WideWrites::mayBe(write, narrowing);
+    if (broken) {
+      return WriteBreak{.write = &write, .narrowing = &narrowing};
+    }
+  }
+
+  return WriteBreak{};
+}
+
+WideWrites::WriteBreak WideWrites::breakingAt(const Flows &flows, const WritesAt &writesAt,
+                                              const Conversion &conv, int node, int off, int md) {
+  for (const WriteAt &at : writesAt[size_t(node)]) {
+    const Write &write = flows.writes[at.write];
+    const Ref &target = write.target[at.target];
+    if (target.md != 0 || target.off < md) {
+      continue;
+    }
+    int depth = target.off + off;
+    if (node == conv.initializes && depth == 0) {
+      continue;
+    }
+    WriteBreak found = WideWrites::breakingNarrowing(write, conv, depth);
+    if (found.write) {
+      return found;
+    }
+  }
+
+  return WriteBreak{};
+}
+
+WideWrites::WriteBreak WideWrites::breakingAnywhere(const Flows &flows,
+                                                    const Conversion &conv) const {
+  for (const Write &write : flows.writes) {
+    if (this->checker.libraryCalls().inLibrary(write.loc)) {
+      continue;
+    }
+    WriteBreak found = WideWrites::breakingNarrowing(write, conv, -1);
+    if (found.write) {
+      return found;
+    }
+  }
+
+  return WriteBreak{};
+}
+
+WideWrites::WriteBreak WideWrites::breakingWrite(const Flows &flows, const WritesAt &writesAt,
+                                                 const Conversion &conv) const {
+  std::set<std::tuple<int, int, int>> seen;
+  std::vector<std::tuple<int, int, int>> todo{{conv.node, 0, 0}};
+  WriteBreak found;
+  bool unknown = false;
+  while (!todo.empty() && !found.write) {
+    auto [node, off, md] = todo.back();
+    todo.pop_back();
+    bool outside = off > WideWrites::maxDepth || off < -16 || md > 16;
+    if (outside) {
+      continue;
+    }
+    bool firstVisit = seen.insert({node, off, md}).second;
+    if (!firstVisit || !WideWrites::nodeMayHold(flows, conv, node, off)) {
+      continue;
+    }
+    if (node == flows.unknown_) {
+      unknown = true;
+      continue;
+    }
+    found = WideWrites::breakingAt(flows, writesAt, conv, node, off, md);
+    for (const Edge &edge : flows.edges[size_t(node)]) {
+      int nextMd = std::max({edge.md, md - edge.off, 0});
+      todo.push_back({edge.to, off + edge.off, nextMd});
+    }
+  }
+  if (!found.write && unknown) {
+    found = this->breakingAnywhere(flows, conv);
+  }
+
+  return found;
+}
+
+std::string WideWrites::writeLine(llvm::SMLoc write, llvm::SMLoc at) const {
+  llvm::SourceMgr &sources = this->checker.diags_.sourceMgr();
+  unsigned id = sources.FindBufferContainingLoc(write);
+  if (!id) {
+    return ErrorTextWidening::someLine();
+  }
+  int number = int(sources.getLineAndColumn(write, id).first);
+  if (id == sources.FindBufferContainingLoc(at)) {
+    return ErrorTextWidening::line(number);
+  }
+  llvm::StringRef identifier = sources.getMemoryBuffer(id)->getBufferIdentifier();
+  llvm::StringRef file = llvm::sys::path::filename(identifier);
+
+  return ErrorTextWidening::lineOf(number, file);
+}
+
+WideWrites::ResultWideningSafe WideWrites::widening(const Conversion &conv,
+                                                    const WriteBreak &breaking) const {
+  const Write *write = breaking.write;
+  const Narrowing *narrowing = breaking.narrowing;
+  std::string line = write ? this->writeLine(write->loc, conv.loc) : std::string();
+  std::string head = write ? ErrorTextWidening::head(conv.from, conv.to, conv.role, line) : line;
+  if (write && narrowing->element && narrowing->depth == 0) {
+    std::string message =
+        ErrorTextWidening::intoArray(head, write->value, narrowing->narrow, conv.name);
+
+    return err(WideWritesWideningError{
+        .code = WideWritesWideningErrorCode::PUTS_INTO_ARRAY,
+        .message = message,
+    });
+  }
+  if (write && narrowing->element) {
+    std::string message = ErrorTextWidening::intoInner(head, write->value, narrowing->narrow);
+
+    return err(WideWritesWideningError{
+        .code = WideWritesWideningErrorCode::PUTS_INTO_INNER_ARRAY,
+        .message = message,
+    });
+  }
+  if (write && !narrowing->narrow) {
+    std::string message =
+        ErrorTextWidening::readOnly(head, narrowing->owner, narrowing->name, narrowing->depth);
+
+    return err(WideWritesWideningError{
+        .code = WideWritesWideningErrorCode::WRITES_READ_ONLY,
+        .message = message,
+    });
+  }
+  if (write) {
+    std::string message = ErrorTextWidening::otherType(
+        head, write->value, narrowing->owner, narrowing->name, narrowing->narrow, narrowing->depth);
+
+    return err(WideWritesWideningError{
+        .code = WideWritesWideningErrorCode::WRITES_OTHER_TYPE,
+        .message = message,
+    });
+  }
+
+  return ok(&conv);
 }
 
 void WideWrites::checkWidenings(SourceFile &file) {
-  if (checker_.widenings_.empty() && !checker_.narrowedFields_) {
+  if (this->checker.widenings_.empty() && !this->checker.narrowedFields_) {
     return;
   }
   auto narrowings = [](const Type *from, const Type *to) {
-    std::vector<Narrowing> out;
-    std::set<std::pair<const Type *, const Type *>> seen;
-    collectNarrowings(from, to, 0, out, seen);
-
-    return out;
+    return WideWrites::narrowingsOf(from, to);
   };
   auto convertible = [](const Type *from, const Type *to) {
     return TypeRelations::isImplicitlyConvertible(from, to);
   };
-  Flows flows(checker_.widenings_, narrowings, convertible);
+  Flows flows(this->checker.widenings_, narrowings, convertible);
   flows.walkProgram(file);
 
-  std::vector<std::vector<std::pair<size_t, size_t>>> writesAt(flows.edges.size());
-  for (size_t w = 0; w < flows.writes.size(); ++w) {
-    for (size_t r = 0; r < flows.writes[w].target.size(); ++r) {
-      writesAt[size_t(flows.writes[w].target[r].node)].push_back({w, r});
-    }
-  }
-
-  auto breaks = [](const Write &w, const Narrowing &n, int depth) {
-    if ((depth >= 0 && n.depth != depth) || w.element != n.element) {
-      return false;
-    }
-    if (!w.element && w.name != "*" && w.name != n.name) {
-      return false;
-    }
-
-    return !n.narrow || !w.value || !TypeRelations::isImplicitlyConvertible(w.value, n.narrow);
-  };
-  auto mayBe = [](const Write &w, const Narrowing &n) {
-    const Type *through = w.through ? w.through->nonOptional() : nullptr;
-    if (!through || !n.owner || mentionsParam(through) || through->isUnknown() ||
-        through->isAnyObject()) {
-      return true;
-    }
-    if (n.element) {
-      return !through->isArray() || !n.narrow || mentionsParam(through->inner()) ||
-             TypeRelations::isImplicitlyConvertible(n.narrow, through->inner());
-    }
-
-    return TypeRelations::isImplicitlyConvertible(n.owner, through);
-  };
-  std::function<bool(const Type *, const Type *, int)> mayHold =
-      [&](const Type *type, const Type *value, int depth) -> bool {
-    if (!type) {
-      return true;
-    }
-    type = type->nonOptional();
-    if (type->isUnknown() || type->isAnyObject() || type->isError() || mentionsParam(type)) {
-      return true;
-    }
-    if (depth == 0) {
-      return TypeRelations::isImplicitlyConvertible(value, type);
-    }
-    if (!holdsReferences(type)) {
-      return false;
-    }
-    if (type->isArray()) {
-      return mayHold(type->inner(), value, depth - 1);
-    }
-    if (type->isDict()) {
-      return mayHold(type->keyType(), value, depth - 1) ||
-             mayHold(type->valueType(), value, depth - 1);
-    }
-    if (type->isUnion()) {
-      return llvm::any_of(type->members(), [&](const Type *m) { return mayHold(m, value, depth); });
-    }
-    if (type->isTuple()) {
-      return llvm::any_of(type->fields(),
-                          [&](const Field &f) { return mayHold(f.type, value, depth - 1); });
-    }
-
-    return true;
-  };
-  std::function<bool(const Type *, const Type *, int)> mayBePart =
-      [&](const Type *type, const Type *whole, int depth) -> bool {
-    if (!type || !whole) {
-      return true;
-    }
-    type = type->nonOptional();
-    whole = whole->nonOptional();
-    if (depth == 0) {
-      return mayHold(type, whole, 0) || mayHold(whole, type, 0);
-    }
-    if (whole->isUnknown() || whole->isAnyObject() || whole->isError() || mentionsParam(whole)) {
-      return true;
-    }
-    if (!holdsReferences(whole)) {
-      return false;
-    }
-    if (whole->isArray()) {
-      return mayBePart(type, whole->inner(), depth - 1);
-    }
-    if (whole->isDict()) {
-      return mayBePart(type, whole->keyType(), depth - 1) ||
-             mayBePart(type, whole->valueType(), depth - 1);
-    }
-    if (whole->isUnion()) {
-      return llvm::any_of(whole->members(),
-                          [&](const Type *m) { return mayBePart(type, m, depth); });
-    }
-    const ClassDecl *cls = whole->classDecl();
-    if (whole->isTuple() || (cls && cls->children.empty())) {
-      return llvm::any_of(whole->fields(),
-                          [&](const Field &f) { return mayBePart(type, f.type, depth - 1); });
-    }
-
-    return true;
-  };
+  WritesAt writesAt = WideWrites::writesByNode(flows);
   std::set<const char *> reported;
   for (const Conversion &conv : flows.conversions) {
-    if (conv.narrowings.empty() || !reported.insert(conv.loc.getPointer()).second) {
+    if (conv.narrowings.empty()) {
       continue;
     }
-    std::set<std::tuple<int, int, int>> seen;
-    std::vector<std::tuple<int, int, int>> todo{{conv.node, 0, 0}};
-    const Write *found = nullptr;
-    const Narrowing *broken = nullptr;
-    bool unknown = false;
-    while (!todo.empty() && !found) {
-      auto [node, off, md] = todo.back();
-      todo.pop_back();
-      if (off > kMaxDepth || off < -16 || md > 16 || !seen.insert({node, off, md}).second) {
-        continue;
-      }
-      if (size_t(node) < flows.types.size()) {
-        if (const Type *type = flows.types[size_t(node)];
-            type && (off <= 0 ? !mayHold(type, conv.from, -off) && !mayHold(type, conv.to, -off)
-                              : !mayBePart(type, conv.from, off))) {
-          continue;
-        }
-      }
-      if (node == flows.unknown_) {
-        unknown = true;
-        continue;
-      }
-      for (auto [w, r] : writesAt[size_t(node)]) {
-        const Write &write = flows.writes[w];
-        const Ref &target = write.target[size_t(r)];
-        if (target.md != 0 || target.off < md) {
-          continue;
-        }
-        int depth = target.off + off;
-        if (node == conv.initializes && depth == 0) {
-          continue;
-        }
-        for (const Narrowing &n : conv.narrowings) {
-          if (breaks(write, n, depth) && mayBe(write, n)) {
-            found = &write;
-            broken = &n;
-            break;
-          }
-        }
-        if (found) {
-          break;
-        }
-      }
-      for (const Edge &e : flows.edges[size_t(node)]) {
-        todo.push_back({e.to, off + e.off, std::max({e.md, md - e.off, 0})});
-      }
+    bool firstReport = reported.insert(conv.loc.getPointer()).second;
+    if (!firstReport) {
+      continue;
     }
-    if (!found && unknown) {
-      for (const Write &write : flows.writes) {
-        if (checker_.libraryCalls().inLibrary(write.loc)) {
-          continue;
-        }
-        for (const Narrowing &n : conv.narrowings) {
-          if (breaks(write, n, -1) && mayBe(write, n)) {
-            found = &write;
-            broken = &n;
-            break;
-          }
-        }
-        if (found) {
-          break;
-        }
-      }
-    }
-    if (found) {
-      reportWidening(conv.from, conv.to, conv.loc, conv.role, conv.name, found->loc, found->value,
-                     found->through, broken->element, broken->name, broken->narrow, broken->owner,
-                     broken->depth);
+    WriteBreak breaking = this->breakingWrite(flows, writesAt, conv);
+    ResultWideningSafe safe = this->widening(conv, breaking);
+    if (safe.isErr()) {
+      const Type *through = breaking.write->through ? breaking.write->through : conv.to;
+      std::string note = ErrorTextWidening::through(through);
+      this->checker.diags_.error(conv.loc, safe.error().message);
+      this->checker.diags_.note(breaking.write->loc, note);
     }
   }
 }
@@ -287,79 +424,41 @@ bool WideWrites::sameReference(const Type *from, const Type *to) {
   }
   if (to->isOptional()) {
     const Type *inner = to->inner();
-    return (inner->isObject() || inner->isArray()) && sameReference(from->nonOptional(), inner);
+    bool reference = inner->isObject() || inner->isArray();
+    return reference && WideWrites::sameReference(from->nonOptional(), inner);
   }
   if (from->isOptional()) {
     return false;
   }
   if (from->isArray() && to->isArray()) {
-    return sameReference(from->inner(), to->inner());
+    return WideWrites::sameReference(from->inner(), to->inner());
   }
+  auto sameObject = [&](const Type *member) {
+    return member->isObject() && WideWrites::sameReference(member, to);
+  };
   if (from->isUnion()) {
-    return !from->isTagged() && llvm::all_of(from->members(), [&](const Type *m) {
-      return m->isObject() && sameReference(m, to);
-    });
+    return !from->isTagged() && llvm::all_of(from->members(), sameObject);
   }
-  if (!from->isObject() || !to->isObject() || from->isAnyObject() || to->isAnyObject()) {
+  bool objects = from->isObject() && to->isObject() && !from->isAnyObject() && !to->isAnyObject();
+  if (!objects) {
     return false;
   }
   if (from->isSubtypeOf(to) || GenericWidening::widens(from, to)) {
     return true;
   }
-  if (from->isClass() || to->isClass() || from->isTuple() != to->isTuple() ||
-      from->fields().size() != to->fields().size() || !from->overloads().empty() ||
-      !to->overloads().empty() || from->isBytes() || to->isBytes() || from->isRuntimeObject() ||
-      to->isRuntimeObject()) {
+  bool otherShape = from->isClass() || to->isClass() || from->isTuple() != to->isTuple() ||
+                    from->fields().size() != to->fields().size() || !from->overloads().empty() ||
+                    !to->overloads().empty() || from->isBytes() || to->isBytes() ||
+                    from->isRuntimeObject() || to->isRuntimeObject();
+  if (otherShape) {
     return false;
   }
-
-  return llvm::all_of(from->fields(), [&](const Field &f) {
-    const Field *t = to->field(f.name);
-    return t && t->type == f.type;
-  });
-}
-
-void WideWrites::reportWidening(const Type *from, const Type *to, llvm::SMLoc at,
-                                llvm::StringRef role, llvm::StringRef name, llvm::SMLoc write,
-                                const Type *value, const Type *through, bool element,
-                                llvm::StringRef field, const Type *narrow, const Type *owner,
-                                int depth) {
-  llvm::SourceMgr &sources = checker_.diags_.sourceMgr();
-  unsigned id = sources.FindBufferContainingLoc(write);
-  std::string line =
-      id ? "line " + std::to_string(sources.getLineAndColumn(write, id).first) : "a line";
-  if (id && id != sources.FindBufferContainingLoc(at)) {
-    line += " of " +
-            llvm::sys::path::filename(sources.getMemoryBuffer(id)->getBufferIdentifier()).str();
-  }
-  std::string message = "'" + from->name().str() + "' cannot go where '" + to->name().str() +
-                        "' is expected here" + (role.empty() ? std::string() : ", " + role.str()) +
-                        ": " + line;
-  auto article = [](const Type *t) {
-    char c = t->name().empty() ? 'x' : char(std::tolower(static_cast<unsigned char>(t->name()[0])));
-
-    return std::string(llvm::StringRef("aeiou").contains(c) ? "an '" : "a '") + t->name().str() +
-           "'";
+  auto sameField = [&](const Field &field) {
+    const Field *other = to->field(field.name);
+    return other && other->type == field.type;
   };
-  std::string what = value ? article(value) : std::string("a value");
-  if (element) {
-    message += " puts " + what + " into " + (depth == 0 ? std::string("it") : "an array in it") +
-               ", and an array of '" + narrow->name().str() + "' cannot hold one";
-    if (depth == 0) {
-      message += "; pass a copy, '[..." + (name.empty() ? std::string("xs") : name.str()) + "]'";
-    }
-  } else {
-    std::string slot = owner->isTuple() ? "element " + field.str() : "field '" + field.str() + "'";
-    std::string place = depth == 0 ? "its " + slot : slot + " of " + article(owner) + " in it";
-    if (!narrow) {
-      message += " writes to " + place + ", which is read-only in '" + owner->name().str() + "'";
-    } else {
-      message += " writes " + what + " to " + place + ", which is " + article(narrow) + " in '" +
-                 owner->name().str() + "'";
-    }
-  }
-  checker_.diags_.error(at, message);
-  checker_.diags_.note(write, "the write, through '" + (through ? through : to)->name() + "'");
+
+  return llvm::all_of(from->fields(), sameField);
 }
 
 }

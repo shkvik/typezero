@@ -24,11 +24,9 @@
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/IR/MDBuilder.h"
 
-using llvm::BasicBlock;
 using llvm::cast;
 using llvm::dyn_cast;
 using llvm::isa;
-using llvm::Value;
 
 namespace tz {
 
@@ -42,7 +40,9 @@ constexpr uint64_t kReactorContext = 40;
 
 constexpr uint32_t kAsyncFrameAlign = 8;
 
-const Expr *resolvedValue(const Expr *expr) {
+}
+
+const Expr *AsyncLowerer::resolvedValue(const Expr *expr) {
   auto *call = dyn_cast<CallExpr>(expr);
   if (!call || call->builtin() != Builtin::PromiseResolve || call->args.size() != 1 ||
       call->args[0]->type->isPromise()) {
@@ -52,38 +52,38 @@ const Expr *resolvedValue(const Expr *expr) {
   return call->args[0];
 }
 
-}
-
-AsyncLowerer::AsyncLowerer(Lowering &lowering) : lowering_(lowering) {}
+AsyncLowerer::AsyncLowerer(Lowering &owner)
+    : lowering(owner) {}
 
 llvm::FunctionCallee AsyncLowerer::asyncFunction(llvm::StringRef name, llvm::Type *ret,
                                                  llvm::ArrayRef<llvm::Type *> params) {
-  return lowering_.processLowerer().processFunction(name, ret, params);
+  return this->lowering.processLowerer().processFunction(name, ret, params);
 }
 
 llvm::Function *AsyncLowerer::asyncResumeFunction() {
-  if (asyncResumeFn_) {
-    return asyncResumeFn_;
+  if (this->asyncResumeFn) {
+    return this->asyncResumeFn;
   }
-  llvm::Type *ptr = lowering_.builder_.getPtrTy();
-  asyncResumeFn_ = llvm::Function::Create(
-      llvm::FunctionType::get(lowering_.builder_.getVoidTy(), {ptr, ptr}, false),
-      llvm::GlobalValue::InternalLinkage, "tz.async.resume", lowering_.module_.get());
-  asyncResumeFn_->addFnAttr(llvm::Attribute::NoUnwind);
-  llvm::IRBuilder<> b(llvm::BasicBlock::Create(lowering_.ctx_, "entry", asyncResumeFn_));
-  llvm::Value *reactor = asyncResumeFn_->getArg(0);
+  llvm::Type *ptr = this->lowering.builder_.getPtrTy();
+  this->asyncResumeFn = llvm::Function::Create(
+      llvm::FunctionType::get(this->lowering.builder_.getVoidTy(), {ptr, ptr}, false),
+      llvm::GlobalValue::InternalLinkage, "tz.async.resume", this->lowering.module_.get());
+  this->asyncResumeFn->addFnAttr(llvm::Attribute::NoUnwind);
+  llvm::IRBuilder<> b(llvm::BasicBlock::Create(this->lowering.ctx_, "entry", this->asyncResumeFn));
+  llvm::Value *reactor = this->asyncResumeFn->getArg(0);
   llvm::Value *frame = b.CreateConstInBoundsGEP1_64(b.getInt8Ty(), reactor, kReactorSize, "frame");
-  llvm::Function *resume = lowering_.coroutineLowerer().coroIntrinsic(llvm::Intrinsic::coro_resume);
-  if (!lowering_.contexts()) {
+  llvm::Function *resume =
+      this->lowering.coroutineLowerer().coroIntrinsic(llvm::Intrinsic::coro_resume);
+  if (!this->lowering.contexts()) {
     b.CreateCall(resume, {frame});
     b.CreateRetVoid();
-    return asyncResumeFn_;
+    return this->asyncResumeFn;
   }
   llvm::Value *slot =
       b.CreateConstInBoundsGEP1_64(b.getInt8Ty(), reactor, kReactorContext, "context.slot");
   llvm::Value *context = b.CreateLoad(ptr, slot, "context");
-  auto *plain = llvm::BasicBlock::Create(lowering_.ctx_, "plain", asyncResumeFn_);
-  auto *within = llvm::BasicBlock::Create(lowering_.ctx_, "within", asyncResumeFn_);
+  auto *plain = llvm::BasicBlock::Create(this->lowering.ctx_, "plain", this->asyncResumeFn);
+  auto *within = llvm::BasicBlock::Create(this->lowering.ctx_, "within", this->asyncResumeFn);
   b.CreateCondBr(b.CreateIsNull(context), plain, within);
   b.SetInsertPoint(plain);
   b.CreateCall(resume, {frame});
@@ -91,277 +91,290 @@ llvm::Function *AsyncLowerer::asyncResumeFunction() {
   b.SetInsertPoint(within);
   b.CreateStore(llvm::ConstantPointerNull::get(llvm::cast<llvm::PointerType>(ptr)), slot);
   llvm::Value *outer =
-      b.CreateCall(asyncFunction("tz_context_resume", ptr, {ptr}), {context}, "outer");
+      b.CreateCall(this->asyncFunction("tz_context_resume", ptr, {ptr}), {context}, "outer");
   b.CreateCall(resume, {frame});
-  b.CreateCall(asyncFunction("tz_context_done", b.getVoidTy(), {ptr, ptr}), {outer, context});
+  b.CreateCall(this->asyncFunction("tz_context_done", b.getVoidTy(), {ptr, ptr}), {outer, context});
   b.CreateRetVoid();
 
-  return asyncResumeFn_;
+  return this->asyncResumeFn;
 }
 
 void AsyncLowerer::beginAsync() {
-  lowering_.function_->addFnAttr(llvm::Attribute::PresplitCoroutine);
-  Lowering::Coroutine &c = *lowering_.coro_;
-  Lowering::AsyncState &a = *lowering_.async_;
-  llvm::Type *i8 = lowering_.builder_.getInt8Ty(), *i64 = lowering_.builder_.getInt64Ty();
-  llvm::Value *null = llvm::ConstantPointerNull::get(lowering_.builder_.getPtrTy());
-  uint64_t reactorOffset = kPromiseHeader + lowering_.promiseLowerer().promiseValueSize(a.value);
+  this->lowering.function_->addFnAttr(llvm::Attribute::PresplitCoroutine);
+  Lowering::Coroutine &c = *this->lowering.coro_;
+  Lowering::AsyncState &a = *this->lowering.async_;
+  llvm::Type *i8 = this->lowering.builder_.getInt8Ty();
+  llvm::Type *i64 = this->lowering.builder_.getInt64Ty();
+  llvm::Value *null = llvm::ConstantPointerNull::get(this->lowering.builder_.getPtrTy());
+  uint64_t reactorOffset =
+      kPromiseHeader + this->lowering.promiseLowerer().promiseValueSize(a.value);
   uint64_t frameOffset = reactorOffset + kReactorSize;
-  c.id = lowering_.builder_.CreateCall(
-      lowering_.coroutineLowerer().coroIntrinsic(llvm::Intrinsic::coro_id),
-      {lowering_.builder_.getInt32(kAsyncFrameAlign), null, null, null}, "id");
-  llvm::Value *size = lowering_.builder_.CreateCall(
-      lowering_.coroutineLowerer().coroIntrinsic(llvm::Intrinsic::coro_size, {i64}), {}, "size");
-  bool member = lowering_.memory().promiseIsMember(a.value);
-  llvm::Value *total = lowering_.builder_.CreateAdd(size, lowering_.builder_.getInt64(frameOffset));
+  c.id = this->lowering.builder_.CreateCall(
+      this->lowering.coroutineLowerer().coroIntrinsic(llvm::Intrinsic::coro_id),
+      {this->lowering.builder_.getInt32(kAsyncFrameAlign), null, null, null}, "id");
+  llvm::Value *size = this->lowering.builder_.CreateCall(
+      this->lowering.coroutineLowerer().coroIntrinsic(llvm::Intrinsic::coro_size, {i64}), {},
+      "size");
+  bool member = this->lowering.memory().promiseIsMember(a.value);
+  llvm::Value *total =
+      this->lowering.builder_.CreateAdd(size, this->lowering.builder_.getInt64(frameOffset));
   llvm::Value *memory =
-      member ? lowering_.builder_.CreateCall(
-                   lowering_.groupLowerer().groupFunction("tz_group_alloc",
-                                                          lowering_.builder_.getPtrTy(), {i64}),
+      member ? this->lowering.builder_.CreateCall(
+                   this->lowering.groupLowerer().groupFunction(
+                       "tz_group_alloc", this->lowering.builder_.getPtrTy(), {i64}),
                    {total}, "memory")
-             : lowering_.builder_.CreateCall(lowering_.rt_.objAlloc, {total}, "memory");
-  lowering_.builder_.CreateMemSet(lowering_.builder_.CreateConstInBoundsGEP1_64(i8, memory, 8),
-                                  lowering_.builder_.getInt8(0), frameOffset - 8,
-                                  llvm::MaybeAlign(8));
+             : this->lowering.builder_.CreateCall(this->lowering.rt_.objAlloc, {total}, "memory");
+  this->lowering.builder_.CreateMemSet(
+      this->lowering.builder_.CreateConstInBoundsGEP1_64(i8, memory, 8),
+      this->lowering.builder_.getInt8(0), frameOffset - 8, llvm::MaybeAlign(8));
   if (!member) {
-    lowering_.builder_.CreateStore(lowering_.builder_.getInt64(1), memory);
+    this->lowering.builder_.CreateStore(this->lowering.builder_.getInt64(1), memory);
   }
-  lowering_.builder_.CreateStore(lowering_.promiseLowerer().promiseLayout(a.value),
-                                 lowering_.builder_.CreateConstInBoundsGEP1_64(i8, memory, 8));
-  llvm::Value *reactor = lowering_.builder_.CreateConstInBoundsGEP1_64(i8, memory, reactorOffset);
-  lowering_.builder_.CreateStore(asyncResumeFunction(),
-                                 lowering_.builder_.CreateConstInBoundsGEP1_64(i8, reactor, 8));
-  lowering_.builder_.CreateStore(memory,
-                                 lowering_.builder_.CreateConstInBoundsGEP1_64(i8, reactor, 16));
+  this->lowering.builder_.CreateStore(
+      this->lowering.promiseLowerer().promiseLayout(a.value),
+      this->lowering.builder_.CreateConstInBoundsGEP1_64(i8, memory, 8));
+  llvm::Value *reactor =
+      this->lowering.builder_.CreateConstInBoundsGEP1_64(i8, memory, reactorOffset);
+  this->lowering.builder_.CreateStore(
+      this->asyncResumeFunction(),
+      this->lowering.builder_.CreateConstInBoundsGEP1_64(i8, reactor, 8));
+  this->lowering.builder_.CreateStore(
+      memory, this->lowering.builder_.CreateConstInBoundsGEP1_64(i8, reactor, 16));
   llvm::Value *frame =
-      lowering_.builder_.CreateConstInBoundsGEP1_64(i8, memory, frameOffset, "frame");
-  c.handle = lowering_.builder_.CreateCall(
-      lowering_.coroutineLowerer().coroIntrinsic(llvm::Intrinsic::coro_begin), {c.id, frame},
+      this->lowering.builder_.CreateConstInBoundsGEP1_64(i8, memory, frameOffset, "frame");
+  c.handle = this->lowering.builder_.CreateCall(
+      this->lowering.coroutineLowerer().coroIntrinsic(llvm::Intrinsic::coro_begin), {c.id, frame},
       "handle");
-  c.object = lowering_.builder_.CreateGEP(
+  c.object = this->lowering.builder_.CreateGEP(
       i8, c.handle, llvm::ConstantInt::getSigned(i64, -int64_t(frameOffset)), "promise");
   a.object = c.object;
-  a.reactor = lowering_.builder_.CreateConstInBoundsGEP1_64(i8, c.object, reactorOffset, "reactor");
-  c.finalBlock = lowering_.functionFrame().newBlock("coro.final");
-  c.freeBlock = lowering_.functionFrame().newBlock("coro.free");
-  c.returnBlock = lowering_.functionFrame().newBlock("coro.return");
+  a.reactor =
+      this->lowering.builder_.CreateConstInBoundsGEP1_64(i8, c.object, reactorOffset, "reactor");
+  c.finalBlock = this->lowering.functionFrame().newBlock("coro.final");
+  c.freeBlock = this->lowering.functionFrame().newBlock("coro.free");
+  c.returnBlock = this->lowering.functionFrame().newBlock("coro.return");
 }
 
 void AsyncLowerer::finishAsync() {
-  Lowering::Coroutine &c = *lowering_.coro_;
-  if (lowering_.functionFrame().blockIsOpen()) {
-    lowering_.builder_.CreateUnreachable();
+  Lowering::Coroutine &c = *this->lowering.coro_;
+  if (this->lowering.functionFrame().blockIsOpen()) {
+    this->lowering.builder_.CreateUnreachable();
   }
-  llvm::Value *none = llvm::ConstantTokenNone::get(lowering_.ctx_);
-  lowering_.functionFrame().switchTo(c.finalBlock);
-  llvm::Value *state = lowering_.builder_.CreateCall(
-      lowering_.coroutineLowerer().coroIntrinsic(llvm::Intrinsic::coro_suspend),
-      {none, lowering_.builder_.getTrue()}, "final");
-  llvm::BasicBlock *resumedBlock = lowering_.functionFrame().newBlock("coro.resumed.done");
-  llvm::SwitchInst *next = lowering_.builder_.CreateSwitch(state, c.returnBlock, 2);
-  next->addCase(lowering_.builder_.getInt8(0), resumedBlock);
-  next->addCase(lowering_.builder_.getInt8(1), c.freeBlock);
-  lowering_.functionFrame().switchTo(resumedBlock);
-  lowering_.builder_.CreateUnreachable();
-  lowering_.functionFrame().switchTo(c.freeBlock);
-  lowering_.builder_.CreateBr(c.returnBlock);
-  lowering_.functionFrame().switchTo(c.returnBlock);
-  lowering_.builder_.CreateCall(
-      lowering_.coroutineLowerer().coroIntrinsic(llvm::Intrinsic::coro_end),
-      {c.handle, lowering_.builder_.getFalse(), none});
-  if (lowering_.async_->dropsPromise) {
-    lowering_.builder_.CreateCall(lowering_.instanceReleaseFn_, {c.object});
-    lowering_.builder_.CreateRetVoid();
+  llvm::Value *none = llvm::ConstantTokenNone::get(this->lowering.ctx_);
+  this->lowering.functionFrame().switchTo(c.finalBlock);
+  llvm::Value *state = this->lowering.builder_.CreateCall(
+      this->lowering.coroutineLowerer().coroIntrinsic(llvm::Intrinsic::coro_suspend),
+      {none, this->lowering.builder_.getTrue()}, "final");
+  llvm::BasicBlock *resumedBlock = this->lowering.functionFrame().newBlock("coro.resumed.done");
+  llvm::SwitchInst *next = this->lowering.builder_.CreateSwitch(state, c.returnBlock, 2);
+  next->addCase(this->lowering.builder_.getInt8(0), resumedBlock);
+  next->addCase(this->lowering.builder_.getInt8(1), c.freeBlock);
+  this->lowering.functionFrame().switchTo(resumedBlock);
+  this->lowering.builder_.CreateUnreachable();
+  this->lowering.functionFrame().switchTo(c.freeBlock);
+  this->lowering.builder_.CreateBr(c.returnBlock);
+  this->lowering.functionFrame().switchTo(c.returnBlock);
+  this->lowering.builder_.CreateCall(
+      this->lowering.coroutineLowerer().coroIntrinsic(llvm::Intrinsic::coro_end),
+      {c.handle, this->lowering.builder_.getFalse(), none});
+  if (this->lowering.async_->dropsPromise) {
+    this->lowering.builder_.CreateCall(this->lowering.instanceReleaseFn_, {c.object});
+    this->lowering.builder_.CreateRetVoid();
   } else {
-    lowering_.builder_.CreateRet(c.object);
+    this->lowering.builder_.CreateRet(c.object);
   }
 }
 
 void AsyncLowerer::emitAsyncFunction(FunctionDecl *fn, llvm::Function *function) {
-  lowering_.functionBuilder().beginFunction(function, fn);
+  this->lowering.functionBuilder().beginFunction(function, fn);
   Lowering::Coroutine coroutine{};
-  lowering_.coro_ = &coroutine;
+  this->lowering.coro_ = &coroutine;
   Lowering::AsyncState state{};
-  lowering_.async_ = &state;
+  this->lowering.async_ = &state;
   const Type *ret = fn->sym->ret;
   state.value = ret->isPromise() ? ret->promised() : Type::voidTy();
   state.dropsPromise = !ret->isPromise();
-  beginAsync();
-  lowering_.functionFrame().pushScope();
-  bool publishes = lowering_.publishesFrame(fn);
+  this->beginAsync();
+  this->lowering.functionFrame().pushScope();
+  bool publishes = this->lowering.publishesFrame(fn);
   llvm::Value *awaited = nullptr;
   if (publishes) {
-    awaited =
-        lowering_.builder_.CreateCall(lowering_.processLowerer().processFunction(
-                                          "tz_take_awaited", lowering_.builder_.getInt32Ty(), {}),
-                                      {}, "awaited");
+    awaited = this->lowering.builder_.CreateCall(
+        this->lowering.processLowerer().processFunction("tz_take_awaited",
+                                                        this->lowering.builder_.getInt32Ty(), {}),
+        {}, "awaited");
   }
   std::vector<llvm::Value *> args;
   unsigned first = 0;
   if (fn->isClosure() || fn->takesThis()) {
-    lowering_.envParam_ = lowering_.function_->getArg(0);
+    this->lowering.envParam_ = this->lowering.function_->getArg(0);
     if (fn->isClosure()) {
-      lowering_.envLowerer().bindCaptures(fn);
+      this->lowering.envLowerer().bindCaptures(fn);
     } else {
-      lowering_.envParam_->setName("this");
+      this->lowering.envParam_->setName("this");
     }
-    llvm::Value *slot = lowering_.functionFrame().createObjectSlot("env");
-    lowering_.builder_.CreateCall(lowering_.objRetainFn_, {lowering_.envParam_});
-    lowering_.builder_.CreateStore(lowering_.envParam_, slot);
+    llvm::Value *slot = this->lowering.functionFrame().createObjectSlot("env");
+    this->lowering.builder_.CreateCall(this->lowering.objRetainFn_, {this->lowering.envParam_});
+    this->lowering.builder_.CreateStore(this->lowering.envParam_, slot);
     first = 1;
   }
-  for (unsigned i = first; i < lowering_.function_->arg_size(); ++i) {
-    args.push_back(lowering_.function_->getArg(i));
+  for (unsigned i = first; i < this->lowering.function_->arg_size(); ++i) {
+    args.push_back(this->lowering.function_->getArg(i));
   }
-  lowering_.functionBuilder().emitParams(fn, args);
+  this->lowering.functionBuilder().emitParams(fn, args);
   if (publishes) {
-    llvm::FunctionCallee publishObject = lowering_.processLowerer().processFunction(
-        "tz_publish_object", lowering_.builder_.getVoidTy(), {lowering_.builder_.getPtrTy()});
+    llvm::FunctionCallee publishObject = this->lowering.processLowerer().processFunction(
+        "tz_publish_object", this->lowering.builder_.getVoidTy(),
+        {this->lowering.builder_.getPtrTy()});
     if (fn->isClosure()) {
-      lowering_.builder_.CreateCall(publishObject, {lowering_.envParam_});
+      this->lowering.builder_.CreateCall(publishObject, {this->lowering.envParam_});
     }
-    llvm::BasicBlock *publishBlock = lowering_.functionFrame().newBlock("publish");
-    llvm::BasicBlock *doneBlock = lowering_.functionFrame().newBlock("publish.done");
-    llvm::Value *shared = lowering_.builder_.CreateICmpEQ(awaited, lowering_.builder_.getInt32(0));
-    lowering_.builder_.CreateCondBr(shared, publishBlock, doneBlock);
-    lowering_.functionFrame().switchTo(publishBlock);
+    llvm::BasicBlock *publishBlock = this->lowering.functionFrame().newBlock("publish");
+    llvm::BasicBlock *doneBlock = this->lowering.functionFrame().newBlock("publish.done");
+    llvm::Value *shared =
+        this->lowering.builder_.CreateICmpEQ(awaited, this->lowering.builder_.getInt32(0));
+    this->lowering.builder_.CreateCondBr(shared, publishBlock, doneBlock);
+    this->lowering.functionFrame().switchTo(publishBlock);
     if (fn->takesThis() && !fn->isClosure()) {
-      lowering_.builder_.CreateCall(publishObject, {lowering_.envParam_});
+      this->lowering.builder_.CreateCall(publishObject, {this->lowering.envParam_});
     }
     for (size_t i = 0; i < fn->params.size(); ++i) {
       const Param &param = fn->params[i];
-      if (lowering_.ownedParams_.contains(param.sym)) {
+      if (this->lowering.ownedParams_.contains(param.sym)) {
         continue;
       }
-      lowering_.storeLowerer().publishValue(
+      this->lowering.storeLowerer().publishValue(
           args[i], param.defaultValue() ? Type::optional(param.sym->type) : param.sym->type);
     }
-    lowering_.builder_.CreateBr(doneBlock);
-    lowering_.functionFrame().switchTo(doneBlock);
+    this->lowering.builder_.CreateBr(doneBlock);
+    this->lowering.functionFrame().switchTo(doneBlock);
   }
-  lowering_.stmtLowerer().emitStmt(fn->body);
-  if (lowering_.functionFrame().blockIsOpen()) {
-    emitAsyncReturn(nullptr);
+  this->lowering.stmtLowerer().emitStmt(fn->body);
+  if (this->lowering.functionFrame().blockIsOpen()) {
+    this->emitAsyncReturn(nullptr);
   }
-  lowering_.scopes_.pop_back();
-  finishAsync();
-  lowering_.coro_ = nullptr;
-  lowering_.async_ = nullptr;
-  lowering_.function_ = nullptr;
+  this->lowering.scopes_.pop_back();
+  this->finishAsync();
+  this->lowering.coro_ = nullptr;
+  this->lowering.async_ = nullptr;
+  this->lowering.function_ = nullptr;
 }
 
 llvm::Function *AsyncLowerer::emitAsyncMain(SourceFile &file) {
-  auto *body = llvm::Function::Create(llvm::FunctionType::get(lowering_.builder_.getPtrTy(), false),
-                                      llvm::GlobalValue::InternalLinkage, "tz.main.async",
-                                      lowering_.module_.get());
-  lowering_.functionBuilder().setFunctionAttributes(body);
-  lowering_.functionBuilder().beginFunction(body, nullptr);
-  lowering_.debugInfo().beginTopLevel(body);
+  auto *body = llvm::Function::Create(
+      llvm::FunctionType::get(this->lowering.builder_.getPtrTy(), false),
+      llvm::GlobalValue::InternalLinkage, "tz.main.async", this->lowering.module_.get());
+  this->lowering.functionBuilder().setFunctionAttributes(body);
+  this->lowering.functionBuilder().beginFunction(body, nullptr);
+  this->lowering.debugInfo().beginTopLevel(body);
   Lowering::Coroutine coroutine{};
-  lowering_.coro_ = &coroutine;
+  this->lowering.coro_ = &coroutine;
   Lowering::AsyncState state{};
-  lowering_.async_ = &state;
+  this->lowering.async_ = &state;
   state.value = Type::voidTy();
-  beginAsync();
-  lowering_.functionFrame().pushScope();
+  this->beginAsync();
+  this->lowering.functionFrame().pushScope();
   for (Stmt *item : file.items) {
     if (!isa<FunctionDecl>(item)) {
-      lowering_.stmtLowerer().emitStmt(item);
+      this->lowering.stmtLowerer().emitStmt(item);
     }
   }
-  if (lowering_.functionFrame().blockIsOpen()) {
-    emitAsyncReturn(nullptr);
+  if (this->lowering.functionFrame().blockIsOpen()) {
+    this->emitAsyncReturn(nullptr);
   }
-  lowering_.scopes_.pop_back();
-  finishAsync();
-  lowering_.coro_ = nullptr;
-  lowering_.async_ = nullptr;
-  lowering_.function_ = nullptr;
+  this->lowering.scopes_.pop_back();
+  this->finishAsync();
+  this->lowering.coro_ = nullptr;
+  this->lowering.async_ = nullptr;
+  this->lowering.function_ = nullptr;
 
   return body;
 }
 
 void AsyncLowerer::emitAsyncReturn(llvm::Value *value) {
-  Lowering::AsyncState &a = *lowering_.async_;
+  Lowering::AsyncState &a = *this->lowering.async_;
   llvm::Value *object = a.object;
-  if (value && !lowering_.promiseLowerer().promiseValueSize(a.value)) {
+  if (value && !this->lowering.promiseLowerer().promiseValueSize(a.value)) {
     value = nullptr;
   }
   if (value) {
-    lowering_.builder_.CreateStore(value, lowering_.promiseLowerer().promiseValueAddress(object));
+    this->lowering.builder_.CreateStore(
+        value, this->lowering.promiseLowerer().promiseValueAddress(object));
   }
-  lowering_.functionFrame().emitCleanups(0);
-  lowering_.promiseLowerer().fulfillPromise(object, nullptr, a.value);
-  lowering_.builder_.CreateBr(lowering_.coro_->finalBlock);
-  lowering_.functionFrame().startDeadBlock();
+  this->lowering.functionFrame().emitCleanups(0);
+  this->lowering.promiseLowerer().fulfillPromise(object, nullptr, a.value);
+  this->lowering.builder_.CreateBr(this->lowering.coro_->finalBlock);
+  this->lowering.functionFrame().startDeadBlock();
 }
 
 void AsyncLowerer::emitAsyncReturnStmt(ReturnStmt *stmt) {
   Expr *value = stmt->value;
   if (!value) {
-    lowering_.exitLowerer().emitReturnOf(nullptr);
+    this->lowering.exitLowerer().emitReturnOf(nullptr);
     return;
   }
   if (value->type->isPromise()) {
-    llvm::Value *other = lowering_.exprLowerer().emitExpr(value);
-    lowering_.functionFrame().emitCleanups(0);
+    llvm::Value *other = this->lowering.exprLowerer().emitExpr(value);
+    this->lowering.functionFrame().emitCleanups(0);
     uint32_t site = 0;
-    if (lowering_.parallel_) {
-      site = lowering_.aheadStarts_.try_emplace(stmt, uint32_t(lowering_.aheadStarts_.size() + 1))
+    if (this->lowering.parallel_) {
+      site = this->lowering.aheadStarts_
+                 .try_emplace(stmt, uint32_t(this->lowering.aheadStarts_.size() + 1))
                  .first->second;
     }
-    lowering_.promiseLowerer().followPromise(lowering_.async_->object, other, site);
-    lowering_.builder_.CreateBr(lowering_.coro_->finalBlock);
-    lowering_.functionFrame().startDeadBlock();
+    this->lowering.promiseLowerer().followPromise(this->lowering.async_->object, other, site);
+    this->lowering.builder_.CreateBr(this->lowering.coro_->finalBlock);
+    this->lowering.functionFrame().startDeadBlock();
     return;
   }
-  llvm::Value *result = lowering_.exprLowerer().emitExpr(value);
-  if (!lowering_.promiseLowerer().promiseValueSize(lowering_.async_->value) &&
+  llvm::Value *result = this->lowering.exprLowerer().emitExpr(value);
+  if (!this->lowering.promiseLowerer().promiseValueSize(this->lowering.async_->value) &&
       !value->type->isVoid()) {
-    lowering_.refCounts().releaseValue(result, value->type);
+    this->lowering.refCounts().releaseValue(result, value->type);
     result = nullptr;
   }
-  lowering_.exitLowerer().emitReturnOf(value->type->isVoid() ? nullptr : result);
+  this->lowering.exitLowerer().emitReturnOf(value->type->isVoid() ? nullptr : result);
 }
 
 void AsyncLowerer::suspendAsync(llvm::Value *promise, llvm::SMLoc loc) {
-  llvm::Type *ptr = lowering_.builder_.getPtrTy();
-  uint32_t site = awaiting_ ? lowering_.aheadStarts_.lookup(awaiting_) : 0;
-  if (site && lowering_.movableAwaits_.contains(awaiting_)) {
+  llvm::Type *ptr = this->lowering.builder_.getPtrTy();
+  uint32_t site = this->awaiting ? this->lowering.aheadStarts_.lookup(this->awaiting) : 0;
+  if (site && this->lowering.movableAwaits_.contains(this->awaiting)) {
     site |= 1u << 18;
   }
-  if (lowering_.contexts()) {
-    llvm::Value *context =
-        lowering_.builder_.CreateCall(asyncFunction("tz_context_hold", ptr, {}), {}, "context");
-    lowering_.builder_.CreateStore(
-        context, lowering_.builder_.CreateConstInBoundsGEP1_64(
-                     lowering_.builder_.getInt8Ty(), lowering_.async_->reactor, kReactorContext));
+  if (this->lowering.contexts()) {
+    llvm::Value *context = this->lowering.builder_.CreateCall(
+        this->asyncFunction("tz_context_hold", ptr, {}), {}, "context");
+    this->lowering.builder_.CreateStore(
+        context,
+        this->lowering.builder_.CreateConstInBoundsGEP1_64(
+            this->lowering.builder_.getInt8Ty(), this->lowering.async_->reactor, kReactorContext));
   }
-  llvm::Value *save = lowering_.coroutineLowerer().emitSave();
-  lowering_.builder_.CreateCall(asyncFunction("tz_async_await", lowering_.builder_.getVoidTy(),
-                                              {ptr, ptr, lowering_.builder_.getInt32Ty()}),
-                                {lowering_.async_->reactor,
-                                 promise ? promise : llvm::ConstantPointerNull::get(ptr),
-                                 lowering_.builder_.getInt32(site)});
-  if (!lowering_.currentFn_) {
+  llvm::Value *save = this->lowering.coroutineLowerer().emitSave();
+  this->lowering.builder_.CreateCall(
+      this->asyncFunction("tz_async_await", this->lowering.builder_.getVoidTy(),
+                          {ptr, ptr, this->lowering.builder_.getInt32Ty()}),
+      {this->lowering.async_->reactor, promise ? promise : llvm::ConstantPointerNull::get(ptr),
+       this->lowering.builder_.getInt32(site)});
+  if (!this->lowering.currentFn_) {
     auto *where =
-        cast<llvm::GlobalVariable>(lowering_.module_->getOrInsertGlobal("tz_main_await", ptr));
-    lowering_.builder_.CreateStore(lowering_.placeLowerer().frameDescriptor(loc), where);
+        cast<llvm::GlobalVariable>(this->lowering.module_->getOrInsertGlobal("tz_main_await", ptr));
+    this->lowering.builder_.CreateStore(this->lowering.placeLowerer().frameDescriptor(loc), where);
   }
-  lowering_.coroutineLowerer().emitSuspend(save);
+  this->lowering.coroutineLowerer().emitSuspend(save);
 }
 
 llvm::Value *AsyncLowerer::awaitPromise(llvm::Value *promise, const Type *type, llvm::SMLoc loc) {
   const Type *value = type->promised();
-  suspendAsync(promise, loc);
+  this->suspendAsync(promise, loc);
   llvm::Value *result = nullptr;
-  if (lowering_.promiseLowerer().promiseValueSize(value)) {
-    result = lowering_.builder_.CreateLoad(lowering_.moduleBuilder().lower(value),
-                                           lowering_.promiseLowerer().promiseValueAddress(promise),
-                                           "awaited");
-    lowering_.refCounts().retainValue(result, value);
+  if (this->lowering.promiseLowerer().promiseValueSize(value)) {
+    result = this->lowering.builder_.CreateLoad(
+        this->lowering.moduleBuilder().lower(value),
+        this->lowering.promiseLowerer().promiseValueAddress(promise), "awaited");
+    this->lowering.refCounts().retainValue(result, value);
   }
-  lowering_.refCounts().releaseValue(promise, type);
+  this->lowering.refCounts().releaseValue(promise, type);
 
   return result;
 }
@@ -372,41 +385,44 @@ llvm::Value *AsyncLowerer::emitAwait(AwaitExpr *await) {
   if (auto *call = dyn_cast<CallExpr>(operand);
       call &&
       (call->builtin() == Builtin::LibAhead || call->builtin() == Builtin::LibAheadMovable)) {
-    if (lowering_.parallel_) {
-      lowering_.aheadStarts_.try_emplace(await, uint32_t(lowering_.aheadStarts_.size() + 1));
+    if (this->lowering.parallel_) {
+      this->lowering.aheadStarts_.try_emplace(await,
+                                              uint32_t(this->lowering.aheadStarts_.size() + 1));
       if (call->builtin() == Builtin::LibAheadMovable) {
-        lowering_.movableAwaits_.insert(await);
+        this->lowering.movableAwaits_.insert(await);
       }
     }
     operand = call->args[0];
     ahead = true;
   }
-  if (const Expr *inner = resolvedValue(operand)) {
+  const Expr *inner = AsyncLowerer::resolvedValue(operand);
+  if (inner) {
     operand = const_cast<Expr *>(inner);
   }
-  lowering_.noteAwaited(operand);
+  this->lowering.noteAwaited(operand);
   const Type *type = operand->type;
-  llvm::Value *value = lowering_.exprLowerer().emitExpr(operand);
-  const AwaitExpr *outer = std::exchange(awaiting_, await);
+  llvm::Value *value = this->lowering.exprLowerer().emitExpr(operand);
+  const AwaitExpr *outer = std::exchange(this->awaiting, await);
   llvm::Value *result;
   if (type->isPromise()) {
-    result = awaitPromise(value, type, await->loc());
+    result = this->awaitPromise(value, type, await->loc());
   } else if (type->isUnknown()) {
-    llvm::Type *ptr = lowering_.builder_.getPtrTy();
-    llvm::Value *promise = lowering_.builder_.CreateCall(
-        asyncFunction("tz_unknown_await", ptr, {ptr, ptr}),
-        {value, lowering_.promiseLowerer().promiseLayout(type)}, "unknown.promise");
-    lowering_.refCounts().releaseValue(value, type);
-    result = awaitPromise(promise, Type::promise(type), await->loc());
-  } else if (holdsPromise(type)) {
-    bool outerReady = std::exchange(readyGoesOn_, ahead || lowering_.freeAwaits_.contains(await));
-    result = awaitUnion(value, type, await->type, await->loc());
-    readyGoesOn_ = outerReady;
+    llvm::Type *ptr = this->lowering.builder_.getPtrTy();
+    llvm::Value *promise = this->lowering.builder_.CreateCall(
+        this->asyncFunction("tz_unknown_await", ptr, {ptr, ptr}),
+        {value, this->lowering.promiseLowerer().promiseLayout(type)}, "unknown.promise");
+    this->lowering.refCounts().releaseValue(value, type);
+    result = this->awaitPromise(promise, Type::promise(type), await->loc());
+  } else if (AsyncLowerer::holdsPromise(type)) {
+    bool outerReady =
+        std::exchange(this->readyGoesOn, ahead || this->lowering.freeAwaits_.contains(await));
+    result = this->awaitUnion(value, type, await->type, await->loc());
+    this->readyGoesOn = outerReady;
   } else {
-    suspendAsync(nullptr, await->loc());
+    this->suspendAsync(nullptr, await->loc());
     result = type->isVoid() ? nullptr : value;
   }
-  awaiting_ = outer;
+  this->awaiting = outer;
 
   return result;
 }
@@ -423,81 +439,84 @@ bool AsyncLowerer::holdsPromise(const Type *type) {
 
 llvm::Value *AsyncLowerer::awaitUnion(llvm::Value *value, const Type *type, const Type *result,
                                       llvm::SMLoc loc) {
-  llvm::Type *resultType = result->isVoid() ? nullptr : lowering_.moduleBuilder().lower(result);
+  llvm::Type *resultType =
+      result->isVoid() ? nullptr : this->lowering.moduleBuilder().lower(result);
   auto plain = [&](llvm::Value *v, const Type *t) -> llvm::Value * {
-    if (!readyGoesOn_) {
-      suspendAsync(nullptr, loc);
+    if (!this->readyGoesOn) {
+      this->suspendAsync(nullptr, loc);
     }
     if (!resultType) {
       if (v) {
-        lowering_.refCounts().releaseValue(v, t);
+        this->lowering.refCounts().releaseValue(v, t);
       }
       return nullptr;
     }
 
-    return v ? lowering_.exprLowerer().emitConversion(v, t, result)
-             : lowering_.optionalLowerer().undefinedValue(result);
+    return v ? this->lowering.exprLowerer().emitConversion(v, t, result)
+             : this->lowering.optionalLowerer().undefinedValue(result);
   };
   auto promise = [&](llvm::Value *v, const Type *t) -> llvm::Value * {
-    llvm::Value *got = awaitPromise(v, t, loc);
+    llvm::Value *got = this->awaitPromise(v, t, loc);
     if (!resultType) {
       if (got) {
-        lowering_.refCounts().releaseValue(got, t->promised());
+        this->lowering.refCounts().releaseValue(got, t->promised());
       }
       return nullptr;
     }
 
-    return lowering_.exprLowerer().emitConversion(got, t->promised(), result);
+    return this->lowering.exprLowerer().emitConversion(got, t->promised(), result);
   };
   auto part = [&](llvm::Value *v, const Type *t) -> llvm::Value * {
     if (t->isPromise()) {
       return promise(v, t);
     }
-    if (holdsPromise(t)) {
-      return awaitUnion(v, t, result, loc);
+    if (AsyncLowerer::holdsPromise(t)) {
+      return this->awaitUnion(v, t, result, loc);
     }
 
     return plain(v, t);
   };
   if (type->isTagged()) {
-    return lowering_.unionLayout().forEachSlot(
+    return this->lowering.unionLayout().forEachSlot(
         value, type->slots(),
         [&](UnionSlot slot) {
-          return part(lowering_.unionLayout().taggedPart(value, type, slot), type->slotPart(slot));
+          return part(this->lowering.unionLayout().taggedPart(value, type, slot),
+                      type->slotPart(slot));
         },
         resultType, resultType ? llvm::Constant::getNullValue(resultType) : nullptr);
   }
-  llvm::BasicBlock *endBlock = lowering_.functionFrame().newBlock("await.end");
+  llvm::BasicBlock *endBlock = this->lowering.functionFrame().newBlock("await.end");
   std::vector<std::pair<llvm::Value *, llvm::BasicBlock *>> incoming;
   auto finish = [&](llvm::Value *v) {
-    incoming.push_back({v, lowering_.builder_.GetInsertBlock()});
-    lowering_.builder_.CreateBr(endBlock);
+    incoming.push_back({v, this->lowering.builder_.GetInsertBlock()});
+    this->lowering.builder_.CreateBr(endBlock);
   };
-  llvm::BasicBlock *promiseBlock = lowering_.functionFrame().newBlock("await.promise");
-  llvm::BasicBlock *otherBlock = lowering_.functionFrame().newBlock("await.other");
+  llvm::BasicBlock *promiseBlock = this->lowering.functionFrame().newBlock("await.promise");
+  llvm::BasicBlock *otherBlock = this->lowering.functionFrame().newBlock("await.other");
   if (type->isOptional()) {
-    lowering_.builder_.CreateCondBr(lowering_.optionalLowerer().optionalHas(value, type),
-                                    promiseBlock, otherBlock);
-    lowering_.functionFrame().switchTo(otherBlock);
+    this->lowering.builder_.CreateCondBr(this->lowering.optionalLowerer().optionalHas(value, type),
+                                         promiseBlock, otherBlock);
+    this->lowering.functionFrame().switchTo(otherBlock);
     finish(plain(nullptr, type));
-    lowering_.functionFrame().switchTo(promiseBlock);
-    finish(part(lowering_.optionalLowerer().optionalValue(value, type), type->inner()));
+    this->lowering.functionFrame().switchTo(promiseBlock);
+    finish(part(this->lowering.optionalLowerer().optionalValue(value, type), type->inner()));
   } else {
     const Type *promiseType =
         *llvm::find_if(type->members(), [](const Type *m) { return m->isPromise(); });
-    lowering_.builder_.CreateCondBr(lowering_.unionLowerer().emitIsOneOf(
-                                        lowering_.unionLowerer().objectClassId(value), promiseType),
-                                    promiseBlock, otherBlock);
-    lowering_.functionFrame().switchTo(promiseBlock);
+    this->lowering.builder_.CreateCondBr(
+        this->lowering.unionLowerer().emitIsOneOf(
+            this->lowering.unionLowerer().objectClassId(value), promiseType),
+        promiseBlock, otherBlock);
+    this->lowering.functionFrame().switchTo(promiseBlock);
     finish(promise(value, promiseType));
-    lowering_.functionFrame().switchTo(otherBlock);
+    this->lowering.functionFrame().switchTo(otherBlock);
     finish(plain(value, unionWithout(type, promiseType)));
   }
-  lowering_.functionFrame().switchTo(endBlock);
+  this->lowering.functionFrame().switchTo(endBlock);
   if (!resultType) {
     return nullptr;
   }
-  llvm::PHINode *phi = lowering_.builder_.CreatePHI(resultType, unsigned(incoming.size()));
+  llvm::PHINode *phi = this->lowering.builder_.CreatePHI(resultType, unsigned(incoming.size()));
   for (auto [v, block] : incoming) {
     phi->addIncoming(v, block);
   }

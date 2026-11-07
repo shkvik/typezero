@@ -6,7 +6,7 @@ namespace tz {
 
 class IteratorLowerer {
 public:
-  explicit IteratorLowerer(Lowering &lowering);
+  explicit IteratorLowerer(Lowering &owner);
 
   void emitIteratorForOf(ForOfStmt *stmt);
   void emitIteratorSpread(llvm::Value *array, Expr *source, const Type *element);
@@ -16,7 +16,9 @@ public:
   llvm::Value *emitIteratorObject(CallExpr *call);
 
 private:
-  Lowering &lowering_;
+  static const Type *iteratedType(const Type *type);
+
+  Lowering &lowering;
 };
 
 }

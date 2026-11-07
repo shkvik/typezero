@@ -28,57 +28,56 @@
 #include "compiler/library/regex/regex_checker/regex_checker.h"
 #include "compiler/library/result/result_checker/result_checker.h"
 #include "llvm/ADT/STLExtras.h"
-#include "llvm/ADT/StringSet.h"
 #include "llvm/Support/ErrorHandling.h"
 #include <cmath>
-#include <functional>
 
 using llvm::cast;
 using llvm::dyn_cast;
-using llvm::dyn_cast_or_null;
 using llvm::isa;
 
 namespace tz {
 
-ExprChecker::ExprChecker(Checker &checker) : checker_(checker) {}
+ExprChecker::ExprChecker(Checker &owner)
+    : checker(owner) {}
 
 Expr *ExprChecker::checkExpr(Expr *expr, const Type *expected, bool wraps) {
-  if (checker_.checkingInstance_ && !checker_.forced_.empty()) {
-    auto found = checker_.forced_.find({expr->loc().getPointer(), unsigned(expr->kind())});
-    if (found != checker_.forced_.end()) {
+  if (this->checker.checkingInstance_ && !this->checker.forced_.empty()) {
+    auto found = this->checker.forced_.find({expr->loc().getPointer(), unsigned(expr->kind())});
+    if (found != this->checker.forced_.end()) {
       const Type *to = found->second;
-      return checker_.genericChecker().forceConversion(checkExprKind(expr, expected, wraps), to);
+      return this->checker.genericChecker().forceConversion(
+          this->checkExprKind(expr, expected, wraps), to);
     }
   }
 
-  return checkExprKind(expr, expected, wraps);
+  return this->checkExprKind(expr, expected, wraps);
 }
 
 Expr *ExprChecker::checkExprKind(Expr *expr, const Type *expected, bool wraps) {
   if (auto *name = dyn_cast<NameExpr>(expr)) {
-    if (FuncSymbol *generic = checker_.genericChecker().genericNamed(name)) {
+    if (FuncSymbol *generic = this->checker.genericChecker().genericNamed(name)) {
       const Type *function = expected ? expected->nonOptional() : nullptr;
       Checker::Signature sig = function && function->isFunction()
                                    ? ClosureChecker::signatureOf(function)
                                    : Checker::Signature();
-      return checker_.genericInstantiator().checkGenericValue(
+      return this->checker.genericInstantiator().checkGenericValue(
           name, generic, function && function->isFunction() ? &sig : nullptr);
     }
   }
   if (expected && (isa<NameExpr>(expr) || isa<MemberExpr>(expr))) {
     if (const Type *function = expected->nonOptional(); function->isFunction()) {
       Checker::Signature sig = ClosureChecker::signatureOf(function);
-      if (FunctionExpr *wrapper = checker_.functionValueChecker().builtinFunctionValue(
+      if (FunctionExpr *wrapper = this->checker.functionValueChecker().builtinFunctionValue(
               expr, sig, unsigned(sig.params.size()), {})) {
-        return checker_.closureChecker().checkFunctionExpr(wrapper, &sig);
+        return this->checker.closureChecker().checkFunctionExpr(wrapper, &sig);
       }
     }
   }
   switch (expr->kind()) {
   case Expr::Kind::IntLit:
-    return checker_.literalChecker().checkIntLit(cast<IntLitExpr>(expr), expected, false);
+    return this->checker.literalChecker().checkIntLit(cast<IntLitExpr>(expr), expected, false);
   case Expr::Kind::FloatLit: {
-    if (const Type *literal = checker_.literalTypes().numberLiteralFor(
+    if (const Type *literal = this->checker.literalTypes().numberLiteralFor(
             expected, cast<FloatLitExpr>(expr)->value, true)) {
       expr->type = literal;
 
@@ -87,7 +86,7 @@ Expr *ExprChecker::checkExprKind(Expr *expr, const Type *expected, bool wraps) {
     const Type *member = LiteralTypes::numberMemberOf(expected, true);
     if (expected && (expected->nonOptional()->isDecimal() || (member && member->isDecimal()))) {
       expr->type = Type::decimalTy();
-      checker_.decimalChecker().checkDecimalLiteralRange(expr);
+      this->checker.decimalChecker().checkDecimalLiteralRange(expr);
       return expr;
     }
     expr->type = Type::doubleTy();
@@ -95,102 +94,102 @@ Expr *ExprChecker::checkExprKind(Expr *expr, const Type *expected, bool wraps) {
   }
   case Expr::Kind::BoolLit: {
     const Type *literal =
-        checker_.literalTypes().boolLiteralFor(expected, cast<BoolLitExpr>(expr)->value);
+        this->checker.literalTypes().boolLiteralFor(expected, cast<BoolLitExpr>(expr)->value);
     expr->type = literal ? literal : Type::boolTy();
     return expr;
   }
   case Expr::Kind::StringLit: {
     const Type *literal =
-        checker_.literalTypes().stringLiteralFor(expected, cast<StringLitExpr>(expr)->value);
+        this->checker.literalTypes().stringLiteralFor(expected, cast<StringLitExpr>(expr)->value);
     expr->type = literal ? literal : Type::string();
     return expr;
   }
   case Expr::Kind::RegexLit:
-    return checker_.regexChecker().checkRegexLit(cast<RegexLitExpr>(expr));
+    return this->checker.regexChecker().checkRegexLit(cast<RegexLitExpr>(expr));
   case Expr::Kind::Undefined:
     expr->type = Type::undefinedTy();
     return expr;
   case Expr::Kind::Template:
-    return checker_.literalChecker().checkTemplate(cast<TemplateExpr>(expr), expected);
+    return this->checker.literalChecker().checkTemplate(cast<TemplateExpr>(expr), expected);
   case Expr::Kind::ArrayLit:
-    return checker_.arrayLiteralChecker().checkArrayLit(cast<ArrayLitExpr>(expr), expected);
+    return this->checker.arrayLiteralChecker().checkArrayLit(cast<ArrayLitExpr>(expr), expected);
   case Expr::Kind::ObjectLit:
-    return checker_.objectLiteralChecker().checkObjectLit(cast<ObjectLitExpr>(expr), expected);
+    return this->checker.objectLiteralChecker().checkObjectLit(cast<ObjectLitExpr>(expr), expected);
   case Expr::Kind::Name:
-    if (Expr *null = checker_.jsonChecker().checkNull(cast<NameExpr>(expr), expected)) {
+    if (Expr *null = this->checker.jsonChecker().checkNull(cast<NameExpr>(expr), expected)) {
       return null;
     }
-    if (Expr *members = checker_.objectChecker().enumObject(cast<NameExpr>(expr), expected)) {
+    if (Expr *members = this->checker.objectChecker().enumObject(cast<NameExpr>(expr), expected)) {
       return members;
     }
-    return checker_.literalTypes().constText(checker_.nameChecker().checkName(cast<NameExpr>(expr)),
-                                             expected);
+    return this->checker.literalTypes().constText(
+        this->checker.nameChecker().checkName(cast<NameExpr>(expr)), expected);
   case Expr::Kind::Member:
-    return checker_.memberChecker().checkMember(cast<MemberExpr>(expr), expected);
+    return this->checker.memberChecker().checkMember(cast<MemberExpr>(expr), expected);
   case Expr::Kind::Index:
-    return checker_.memberChecker().checkIndex(cast<IndexExpr>(expr));
+    return this->checker.memberChecker().checkIndex(cast<IndexExpr>(expr));
   case Expr::Kind::Unary:
-    return checker_.unaryChecker().checkUnary(cast<UnaryExpr>(expr), expected, wraps);
+    return this->checker.unaryChecker().checkUnary(cast<UnaryExpr>(expr), expected, wraps);
   case Expr::Kind::Binary:
-    return checker_.binaryChecker().checkBinary(cast<BinaryExpr>(expr), expected, wraps);
+    return this->checker.binaryChecker().checkBinary(cast<BinaryExpr>(expr), expected, wraps);
   case Expr::Kind::Assign:
-    return checker_.assignChecker().checkAssign(cast<AssignExpr>(expr));
+    return this->checker.assignChecker().checkAssign(cast<AssignExpr>(expr));
   case Expr::Kind::Update:
-    return checker_.assignChecker().checkUpdate(cast<UpdateExpr>(expr));
+    return this->checker.assignChecker().checkUpdate(cast<UpdateExpr>(expr));
   case Expr::Kind::Call:
-    return checker_.callChecker().checkCall(cast<CallExpr>(expr), expected);
+    return this->checker.callChecker().checkCall(cast<CallExpr>(expr), expected);
   case Expr::Kind::New:
-    return checker_.newChecker().checkNew(cast<NewExpr>(expr), expected);
+    return this->checker.newChecker().checkNew(cast<NewExpr>(expr), expected);
   case Expr::Kind::Class:
-    return checker_.lateClasses().checkClassExpr(cast<ClassExpr>(expr), expected);
+    return this->checker.lateClasses().checkClassExpr(cast<ClassExpr>(expr), expected);
   case Expr::Kind::Conditional:
-    return checkConditional(cast<ConditionalExpr>(expr), expected);
+    return this->checkConditional(cast<ConditionalExpr>(expr), expected);
   case Expr::Kind::Cast:
-    return checkCast(cast<CastExpr>(expr));
+    return this->checkCast(cast<CastExpr>(expr));
   case Expr::Kind::Sequence:
-    return checkSequence(cast<SequenceExpr>(expr), expected, wraps);
+    return this->checkSequence(cast<SequenceExpr>(expr), expected, wraps);
   case Expr::Kind::OptionalChain:
-    return checkOptionalChain(cast<OptionalChainExpr>(expr));
+    return this->checkOptionalChain(cast<OptionalChainExpr>(expr));
   case Expr::Kind::Function: {
     const Type *function = expected ? expected->nonOptional() : nullptr;
     if (function && function->isFunction()) {
       Checker::Signature sig = ClosureChecker::signatureOf(function);
-      return checker_.closureChecker().checkFunctionExpr(cast<FunctionExpr>(expr), &sig);
+      return this->checker.closureChecker().checkFunctionExpr(cast<FunctionExpr>(expr), &sig);
     }
-    return checker_.closureChecker().checkFunctionExpr(cast<FunctionExpr>(expr), nullptr);
+    return this->checker.closureChecker().checkFunctionExpr(cast<FunctionExpr>(expr), nullptr);
   }
   case Expr::Kind::Yield:
-    return checker_.generatorChecker().checkYield(cast<YieldExpr>(expr));
+    return this->checker.generatorChecker().checkYield(cast<YieldExpr>(expr));
   case Expr::Kind::Await:
-    return checker_.asyncChecker().checkAwait(cast<AwaitExpr>(expr), expected);
+    return this->checker.asyncChecker().checkAwait(cast<AwaitExpr>(expr), expected);
   }
   llvm_unreachable("unknown expression kind");
 }
 
 Expr *ExprChecker::checkSequence(SequenceExpr *seq, const Type *expected, bool wraps) {
   for (size_t i = 0; i + 1 < seq->exprs.size(); ++i) {
-    seq->exprs[i] = checkExpr(seq->exprs[i]);
-    checker_.resultChecker().checkDiscarded(seq->exprs[i]);
+    seq->exprs[i] = this->checkExpr(seq->exprs[i]);
+    this->checker.resultChecker().checkDiscarded(seq->exprs[i]);
   }
   Expr *&last = seq->exprs.back();
-  last = checkExpr(last, expected, wraps);
+  last = this->checkExpr(last, expected, wraps);
   seq->type = last->type;
 
   return seq;
 }
 
 Expr *ExprChecker::checkOptionalChain(OptionalChainExpr *chain) {
-  bool outer = std::exchange(checker_.chainShortCircuits_, false);
-  Checker::Flow before = checker_.flow_;
-  chain->chain = checkExpr(chain->chain);
-  chain->mayShortCircuit = checker_.chainShortCircuits_;
-  checker_.chainShortCircuits_ = outer;
+  bool outer = std::exchange(this->checker.chainShortCircuits_, false);
+  Checker::Flow before = this->checker.flow_;
+  chain->chain = this->checkExpr(chain->chain);
+  chain->mayShortCircuit = this->checker.chainShortCircuits_;
+  this->checker.chainShortCircuits_ = outer;
   const Type *type = chain->chain->type;
   chain->type = type;
   if (!chain->mayShortCircuit || type->isError()) {
     return chain;
   }
-  checker_.flow_ = FlowChecker::join(before, checker_.flow_);
+  this->checker.flow_ = FlowChecker::join(before, this->checker.flow_);
   if (!type->isVoid()) {
     chain->type = Type::optional(type);
   }
@@ -201,31 +200,32 @@ Expr *ExprChecker::checkOptionalChain(OptionalChainExpr *chain) {
 Expr *ExprChecker::chainLink(Expr *object) {
   const Type *type = object->type;
   if (type->nonOptional()->isJson()) {
-    auto *link = checker_.ctx_.make<CastExpr>(object->loc(), object, std::nullopt);
+    auto *link = this->checker.ctx_.make<CastExpr>(object->loc(), object, std::nullopt);
     link->type = Type::json();
     link->shortCircuit = true;
-    checker_.chainShortCircuits_ = true;
+    this->checker.chainShortCircuits_ = true;
     return link;
   }
   if (!type->isOptional()) {
     return object;
   }
-  auto *link = checker_.ctx_.make<CastExpr>(object->loc(), object, std::nullopt);
+  auto *link = this->checker.ctx_.make<CastExpr>(object->loc(), object, std::nullopt);
   link->type = type->inner();
   link->shortCircuit = true;
-  checker_.chainShortCircuits_ = true;
+  this->checker.chainShortCircuits_ = true;
 
   return link;
 }
 
 Expr *ExprChecker::checkConditional(ConditionalExpr *cond, const Type *expected) {
   Checker::Flow whenTrue, whenFalse;
-  cond->cond = checker_.truthChecker().checkCondition(cond->cond, whenTrue, whenFalse);
-  if (std::optional<bool> constant = checker_.checkingInstance_
-                                         ? checker_.genericChecker().constantCondition(cond->cond)
-                                         : std::nullopt) {
-    checker_.flow_ = *constant ? whenTrue : whenFalse;
-    return checkExpr(*constant ? cond->thenExpr : cond->elseExpr, expected);
+  cond->cond = this->checker.truthChecker().checkCondition(cond->cond, whenTrue, whenFalse);
+  if (std::optional<bool> constant =
+          this->checker.checkingInstance_
+              ? this->checker.genericChecker().constantCondition(cond->cond)
+              : std::nullopt) {
+    this->checker.flow_ = *constant ? whenTrue : whenFalse;
+    return this->checkExpr(*constant ? cond->thenExpr : cond->elseExpr, expected);
   }
   auto waits = [&](const Expr *branch) {
     return Destination::literalShaped(branch) || DecimalChecker::isLiteralTree(branch);
@@ -237,33 +237,35 @@ Expr *ExprChecker::checkConditional(ConditionalExpr *cond, const Type *expected)
 
     return expected ? expected : other->type->isError() ? nullptr : other->type;
   };
-  bool thenWaits = waits(cond->thenExpr), elseWaits = waits(cond->elseExpr);
+  bool thenWaits = waits(cond->thenExpr);
+  bool elseWaits = waits(cond->elseExpr);
   if (thenWaits && !elseWaits) {
-    checker_.flow_ = whenFalse;
-    cond->elseExpr = checkExpr(cond->elseExpr, expected);
-    Checker::Flow afterElse = checker_.flow_;
-    checker_.flow_ = whenTrue;
-    cond->thenExpr = checkExpr(cond->thenExpr, hint(cond->thenExpr, cond->elseExpr));
-    checker_.flow_ = FlowChecker::join(checker_.flow_, afterElse);
+    this->checker.flow_ = whenFalse;
+    cond->elseExpr = this->checkExpr(cond->elseExpr, expected);
+    Checker::Flow afterElse = this->checker.flow_;
+    this->checker.flow_ = whenTrue;
+    cond->thenExpr = this->checkExpr(cond->thenExpr, hint(cond->thenExpr, cond->elseExpr));
+    this->checker.flow_ = FlowChecker::join(this->checker.flow_, afterElse);
   } else {
-    checker_.flow_ = whenTrue;
-    cond->thenExpr = checkExpr(cond->thenExpr, expected);
-    Checker::Flow afterThen = checker_.flow_;
-    checker_.flow_ = whenFalse;
+    this->checker.flow_ = whenTrue;
+    cond->thenExpr = this->checkExpr(cond->thenExpr, expected);
+    Checker::Flow afterThen = this->checker.flow_;
+    this->checker.flow_ = whenFalse;
     const Type *elseHint = expected;
     if (elseWaits && !thenWaits) {
       elseHint = hint(cond->elseExpr, cond->thenExpr);
     } else if (DecimalChecker::isLiteralTree(cond->elseExpr)) {
       elseHint = DecimalChecker::literalHint(cond->thenExpr, expected);
     }
-    cond->elseExpr = checkExpr(cond->elseExpr, elseHint);
-    checker_.flow_ = FlowChecker::join(afterThen, checker_.flow_);
+    cond->elseExpr = this->checkExpr(cond->elseExpr, elseHint);
+    this->checker.flow_ = FlowChecker::join(afterThen, this->checker.flow_);
   }
 
-  const Type *a = cond->thenExpr->type, *b = cond->elseExpr->type;
+  const Type *a = cond->thenExpr->type;
+  const Type *b = cond->elseExpr->type;
   cond->type = Type::error();
   if (a->isError() || b->isError()) {
-    if (checker_.trial_ && a->isError() != b->isError()) {
+    if (this->checker.trial_ && a->isError() != b->isError()) {
       cond->type = a->isError() ? b : a;
     }
     return cond;
@@ -272,30 +274,30 @@ Expr *ExprChecker::checkConditional(ConditionalExpr *cond, const Type *expected)
     cond->type = a;
     return cond;
   }
-  if (a != b && checker_.typeRelations().literalAdapts(cond->thenExpr, b)) {
-    cond->thenExpr = checker_.typeRelations().adaptLiteral(cond->thenExpr, b);
+  if (a != b && this->checker.typeRelations().literalAdapts(cond->thenExpr, b)) {
+    cond->thenExpr = this->checker.typeRelations().adaptLiteral(cond->thenExpr, b);
     a = b;
-  } else if (a != b && checker_.typeRelations().literalAdapts(cond->elseExpr, a)) {
-    cond->elseExpr = checker_.typeRelations().adaptLiteral(cond->elseExpr, a);
+  } else if (a != b && this->checker.typeRelations().literalAdapts(cond->elseExpr, a)) {
+    cond->elseExpr = this->checker.typeRelations().adaptLiteral(cond->elseExpr, a);
     b = a;
   }
   const Type *common = LiteralTypes::unionUnify(a, b);
   if (!common) {
-    checker_.diags_.error(cond->loc(), "the branches of '?:' have incompatible types '" +
-                                           a->name() + "' and '" + b->name() + "'");
+    this->checker.diags_.error(cond->loc(), "the branches of '?:' have incompatible types '" +
+                                                a->name() + "' and '" + b->name() + "'");
     return cond;
   }
-  cond->thenExpr = checker_.typeRelations().convert(cond->thenExpr, common);
-  cond->elseExpr = checker_.typeRelations().convert(cond->elseExpr, common);
+  cond->thenExpr = this->checker.typeRelations().convert(cond->thenExpr, common);
+  cond->elseExpr = this->checker.typeRelations().convert(cond->elseExpr, common);
   cond->type = common;
 
   return cond;
 }
 
 Expr *ExprChecker::checkCast(CastExpr *cast) {
-  const Type *to = checker_.typeResolver().resolveType(*cast->target, false);
+  const Type *to = this->checker.typeResolver().resolveType(*cast->target, false);
   bool arrayLiteral = isa<ArrayLitExpr>(cast->operand);
-  cast->operand = checkExpr(cast->operand, arrayLiteral && !to->isError() ? to : nullptr);
+  cast->operand = this->checkExpr(cast->operand, arrayLiteral && !to->isError() ? to : nullptr);
   const Type *from = cast->operand->type;
   cast->type = to;
   std::string message = "'as' is not supported";
@@ -321,7 +323,7 @@ Expr *ExprChecker::checkCast(CastExpr *cast) {
   } else {
     message += ", and type '" + from->name().str() + "' cannot become '" + to->name().str() + "'";
   }
-  checker_.diags_.error(cast->loc(), message);
+  this->checker.diags_.error(cast->loc(), message);
 
   return cast;
 }

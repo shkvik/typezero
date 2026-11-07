@@ -6,7 +6,7 @@ namespace tz {
 
 class UnionLowerer {
 public:
-  explicit UnionLowerer(Lowering &lowering);
+  explicit UnionLowerer(Lowering &owner);
 
   llvm::Value *emitUnionConversion(llvm::Value *value, const Type *from, const Type *to);
   static bool narrowsUnion(const Type *from, const Type *to);
@@ -18,10 +18,10 @@ public:
   llvm::Value *emitIsOneOf(llvm::Value *id, llvm::ArrayRef<const Type *> types);
 
 private:
-  Lowering &lowering_;
+  Lowering &lowering;
   static constexpr uint32_t kPlainIdBase = 0x40000000;
   static constexpr uint32_t kBytesIdBase = 0x3FFFFF00;
-  llvm::DenseMap<const Type *, uint32_t> plainIds_;
+  llvm::DenseMap<const Type *, uint32_t> plainIds;
 };
 
 }

@@ -6,7 +6,7 @@ namespace tz {
 
 class AsyncChecker {
 public:
-  explicit AsyncChecker(Checker &checker);
+  explicit AsyncChecker(Checker &owner);
 
   void checkForAwait(ForOfStmt *stmt);
   const Type *resolvePromiseType(const TypeRef &ref);
@@ -19,7 +19,10 @@ public:
   void checkDiscardedPromise(const Expr *expr, bool callback, llvm::SMLoc at);
 
 private:
-  Checker &checker_;
+  static const Type *awaited(const Type *type);
+  static std::string statementText(llvm::SMLoc at);
+
+  Checker &checker;
 };
 
 }

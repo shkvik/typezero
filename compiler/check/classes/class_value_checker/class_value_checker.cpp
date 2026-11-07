@@ -10,11 +10,7 @@
 #include "compiler/infer/return_inferrer/return_inferrer.h"
 #include "compiler/library/reflect/reflect_checker/reflect_checker.h"
 #include "llvm/ADT/STLExtras.h"
-#include <functional>
 
-using llvm::cast;
-using llvm::dyn_cast;
-using llvm::dyn_cast_or_null;
 using llvm::isa;
 
 namespace tz {
@@ -29,7 +25,8 @@ static Expr *afterClassValue(AstContext &ctx, Expr *object, Expr *result) {
   return seq;
 }
 
-ClassValueChecker::ClassValueChecker(Checker &checker) : checker_(checker) {}
+ClassValueChecker::ClassValueChecker(Checker &owner)
+    : checker(owner) {}
 
 const Type *ClassValueChecker::constructedBy(const Type *type) {
   if (type->isConstructor()) {
@@ -49,27 +46,27 @@ ClassDecl *ClassValueChecker::finalClass(ClassDecl *cls) {
 }
 
 const Type *ClassValueChecker::classValueType(ClassDecl *cls) {
-  cls = finalClass(cls);
+  cls = ClassValueChecker::finalClass(cls);
 
   return Type::classRef(cls, cls->name.empty() && cls->type ? cls->type->name() : cls->name);
 }
 
 const Type *ClassValueChecker::resolveConstructorType(const TypeRef &ref) {
   if (ref.args.size() != 1) {
-    checker_.diags_.error(ref.loc,
-                          "'Constructor' takes the type of the objects the class makes, e.g. "
-                          "'Constructor<User>', or nothing for any class");
+    this->checker.diags_.error(ref.loc,
+                               "'Constructor' takes the type of the objects the class makes, e.g. "
+                               "'Constructor<User>', or nothing for any class");
     return Type::error();
   }
-  const Type *made = checker_.typeResolver().resolveType(ref.args[0], false);
+  const Type *made = this->checker.typeResolver().resolveType(ref.args[0], false);
   if (made->isError()) {
     return made;
   }
   if ((!made->isObject() || made->isTuple()) && !made->isParam()) {
-    checker_.diags_.error(ref.args[0].loc,
-                          "a class makes objects, and '" + made->name() +
-                              "' is not an object type; give the type of its objects, "
-                              "e.g. 'Constructor<User>'");
+    this->checker.diags_.error(ref.args[0].loc,
+                               "a class makes objects, and '" + made->name() +
+                                   "' is not an object type; give the type of its objects, "
+                                   "e.g. 'Constructor<User>'");
     return Type::error();
   }
 
@@ -77,9 +74,9 @@ const Type *ClassValueChecker::resolveConstructorType(const TypeRef &ref) {
 }
 
 const Type *ClassValueChecker::constructorArgs(llvm::SMLoc loc) {
-  const ClassDecl *cls = checker_.declaringClass_;
+  const ClassDecl *cls = this->checker.declaringClass_;
   if (!cls || !cls->parent) {
-    checker_.diags_.error(
+    this->checker.diags_.error(
         loc, "'ConstructorArgs' is the list of the parameters of the constructor of the "
              "class extended, for the constructor of a class that extends another: "
              "'constructor(...args: ConstructorArgs) { super(...args) }'");
@@ -91,7 +88,7 @@ const Type *ClassValueChecker::constructorArgs(llvm::SMLoc loc) {
   }
   const std::string parent = cls->parent->type->name().str();
   if (ctors.size() > 1) {
-    checker_.diags_.error(
+    this->checker.diags_.error(
         loc, "'ConstructorArgs' is the list of the parameters of the constructor of '" + parent +
                  "', which has several; write the parameters of the one to "
                  "call");
@@ -99,12 +96,12 @@ const Type *ClassValueChecker::constructorArgs(llvm::SMLoc loc) {
   }
   FuncSymbol *sym = ctors[0]->sym;
   if (!sym) {
-    checker_.diags_.error(loc, "'ConstructorArgs' needs the constructor of '" + parent +
-                                   "', which is declared after this class; move '" + parent +
-                                   "' up");
+    this->checker.diags_.error(loc, "'ConstructorArgs' needs the constructor of '" + parent +
+                                        "', which is declared after this class; move '" + parent +
+                                        "' up");
     return Type::error();
   }
-  checker_.returnInferrer().resolveParams(sym);
+  this->checker.returnInferrer().resolveParams(sym);
   if (llvm::is_contained(sym->params, nullptr)) {
     return Type::error();
   }
@@ -122,67 +119,70 @@ Expr *ClassValueChecker::checkValueNew(NewExpr *expr, const Type *expected) {
   expr->type = Type::error();
   auto checkArgsLoosely = [&] {
     for (Expr *&arg : expr->args) {
-      arg = checker_.exprChecker().checkExpr(arg);
+      arg = this->checker.exprChecker().checkExpr(arg);
     }
   };
-  expr->callee = checker_.exprChecker().checkExpr(expr->callee);
+  expr->callee = this->checker.exprChecker().checkExpr(expr->callee);
   const Type *type = expr->callee->type;
   if (type->isError()) {
     checkArgsLoosely();
     return expr;
   }
   if (!type->isClassRef()) {
-    checker_.diags_.error(expr->callee->loc(),
-                          "'new' makes an object of a class, and this is a '" + type->name() + "'");
+    this->checker.diags_.error(expr->callee->loc(),
+                               "'new' makes an object of a class, and this is a '" + type->name() +
+                                   "'");
     checkArgsLoosely();
     return expr;
   }
   if (ClassDecl *cls = const_cast<ClassDecl *>(type->classRef())) {
     if (!cls->type) {
-      checker_.diags_.error(expr->callee->loc(), "'new' of '" + cls->name +
-                                                     "' as a value is not supported; write 'new " +
-                                                     cls->name + "(...)' or a literal");
+      this->checker.diags_.error(expr->callee->loc(),
+                                 "'new' of '" + cls->name +
+                                     "' as a value is not supported; write 'new " + cls->name +
+                                     "(...)' or a literal");
       checkArgsLoosely();
       return expr;
     }
-    return checker_.methodCallChecker().checkClassNew(expr, cls, expected);
+    return this->checker.methodCallChecker().checkClassNew(expr, cls, expected);
   }
   if (!expr->typeArgs.empty()) {
-    checker_.diags_.error(expr->loc(), "a class known only when the program runs takes no type "
-                                       "arguments");
+    this->checker.diags_.error(expr->loc(),
+                               "a class known only when the program runs takes no type "
+                               "arguments");
   }
   expr->form = ReflectNew{};
   std::vector<const Type *> argTypes;
   for (Expr *&arg : expr->args) {
-    arg = checker_.exprChecker().checkExpr(arg);
+    arg = this->checker.exprChecker().checkExpr(arg);
     argTypes.push_back(arg->type);
     if (arg->type->isVoid()) {
-      checker_.diags_.error(arg->loc(), "an expression of type 'void' has no value to pass");
+      this->checker.diags_.error(arg->loc(), "an expression of type 'void' has no value to pass");
     } else {
-      arg = checker_.typeRelations().convert(arg, Type::unknown());
+      arg = this->checker.typeRelations().convert(arg, Type::unknown());
     }
   }
-  if (!checker_.reflectChecker().onlyChecked()) {
-    checker_.reflectNews_.push_back({expr, std::move(argTypes)});
+  if (!this->checker.reflectChecker().onlyChecked()) {
+    this->checker.reflectNews_.push_back({expr, std::move(argTypes)});
   }
-  checker_.flowChecker().calledFunction();
-  checker_.reflectionUsed_ |= !checker_.reflectChecker().onlyChecked();
+  this->checker.flowChecker().calledFunction();
+  this->checker.reflectionUsed_ |= !this->checker.reflectChecker().onlyChecked();
   expr->type = type->constructed();
 
   return expr;
 }
 
 Expr *ClassValueChecker::checkClassValue(NameExpr *name, ClassDecl *cls) {
-  if (!cls->declared && checker_.loading_ && checker_.functions_.empty() &&
-      checker_.declModules_.lookup(cls) == checker_.loading_) {
-    checker_.diags_.error(name->loc(),
-                          "class '" + cls->name +
-                              "' is used before its declaration, which JavaScript has not run "
-                              "yet here (a ReferenceError); move the class up");
+  if (!cls->declared && this->checker.loading_ && this->checker.functions_.empty() &&
+      this->checker.declModules_.lookup(cls) == this->checker.loading_) {
+    this->checker.diags_.error(name->loc(),
+                               "class '" + cls->name +
+                                   "' is used before its declaration, which JavaScript has not run "
+                                   "yet here (a ReferenceError); move the class up");
   }
-  cls = finalClass(cls);
+  cls = ClassValueChecker::finalClass(cls);
   name->binding = NamedClass{.cls = cls};
-  name->type = classValueType(cls);
+  name->type = this->classValueType(cls);
   cls->usedAsValue = true;
 
   return name;
@@ -193,47 +193,47 @@ Expr *ClassValueChecker::checkClassRefMember(MemberExpr *member) {
   const ClassDecl *cls = type->classRef();
   member->type = Type::error();
   if (member->name == "prototype") {
-    checker_.diags_.error(member->loc(),
-                          "there are no prototypes in tz: the methods belong to the class "
-                          "itself, and a decorator gets the class; use it as it is");
+    this->checker.diags_.error(member->loc(),
+                               "there are no prototypes in tz: the methods belong to the class "
+                               "itself, and a decorator gets the class; use it as it is");
     return member;
   }
   if (!cls) {
     if (member->name == "name") {
-      auto *call =
-          checker_.ctx_.make<CallExpr>(member->loc(), member, std::vector<Expr *>{member->object});
+      auto *call = this->checker.ctx_.make<CallExpr>(member->loc(), member,
+                                                     std::vector<Expr *>{member->object});
       call->target = BuiltinCall{.builtin = Builtin::ClassName};
       call->type = Type::string();
       return call;
     }
-    checker_.diags_.error(member->loc(),
-                          "'" + type->name() +
-                              "' is some class known only when the program "
-                              "runs, which has only its 'name'; make an object of it with 'new', "
-                              "or use reflection (docs/decorators.md, section 6)");
+    this->checker.diags_.error(
+        member->loc(), "'" + type->name() +
+                           "' is some class known only when the program "
+                           "runs, which has only its 'name'; make an object of it with 'new', "
+                           "or use reflection (docs/decorators.md, section 6)");
     return member;
   }
   if (member->name == "name" &&
       (!cls->type || ClassDeclarer::methodsNamed(cls, "name", true).empty())) {
-    auto *text = checker_.ctx_.make<StringLitExpr>(
+    auto *text = this->checker.ctx_.make<StringLitExpr>(
         member->loc(), std::u16string(cls->name.begin(), cls->name.end()));
     text->type = Type::string();
-    return afterClassValue(checker_.ctx_, member->object, text);
+    return afterClassValue(this->checker.ctx_, member->object, text);
   }
   if (!cls->type) {
-    checker_.diags_.error(member->loc(),
-                          "'" + cls->name + "' as a value has only its 'name' in tz");
+    this->checker.diags_.error(member->loc(),
+                               "'" + cls->name + "' as a value has only its 'name' in tz");
     return member;
   }
   Expr *object = member->object;
 
-  return afterClassValue(
-      checker_.ctx_, object,
-      checker_.staticChecker().checkStaticMember(member, const_cast<ClassDecl *>(cls), nullptr));
+  return afterClassValue(this->checker.ctx_, object,
+                         this->checker.staticChecker().checkStaticMember(
+                             member, const_cast<ClassDecl *>(cls), nullptr));
 }
 
 Expr *ClassValueChecker::classValueAt(ClassDecl *cls, llvm::SMLoc loc) {
-  auto *name = checker_.ctx_.make<NameExpr>(loc, cls->name);
+  auto *name = this->checker.ctx_.make<NameExpr>(loc, cls->name);
   name->binding = NamedClass{.cls = cls};
   name->type = Type::classRef(cls, cls->name.empty() && cls->type ? cls->type->name() : cls->name);
   cls->usedAsValue = true;

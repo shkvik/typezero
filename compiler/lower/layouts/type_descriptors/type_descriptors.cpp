@@ -4,11 +4,6 @@
 #include "llvm/IR/MDBuilder.h"
 #include "llvm/Support/ErrorHandling.h"
 
-using llvm::BasicBlock;
-using llvm::cast;
-using llvm::dyn_cast;
-using llvm::isa;
-using llvm::Value;
 
 namespace tz {
 
@@ -60,33 +55,36 @@ uint32_t TypeDescriptors::descriptorKind(const Type *type) {
   }
 }
 
-TypeDescriptors::TypeDescriptors(Lowering &lowering) : lowering_(lowering) {}
+TypeDescriptors::TypeDescriptors(Lowering &owner)
+    : lowering(owner) {}
 
 llvm::Constant *TypeDescriptors::typeDescriptor(const Type *type) {
-  if (llvm::Constant *found = lowering_.typeDescriptors_.lookup(type)) {
+  llvm::Constant *found = this->lowering.typeDescriptors_.lookup(type);
+  if (found) {
     return found;
   }
   if (type->isResult()) {
-    return lowering_.resultLowerer().resultDescriptor(type);
+    return this->lowering.resultLowerer().resultDescriptor(type);
   }
   if (type->isUnion() || type->isLiteral()) {
-    return lowering_.unionLayout().unionDescriptor(type);
+    return this->lowering.unionLayout().unionDescriptor(type);
   }
   llvm::Constant *inner = type->isArray() || type->isOptional()
-                              ? typeDescriptor(type->inner())
-                              : llvm::ConstantPointerNull::get(lowering_.builder_.getPtrTy());
-  uint64_t size = lowering_.module_->getDataLayout().getTypeAllocSize(
-      lowering_.resultLowerer().lowerHalf(type));
+                              ? this->typeDescriptor(type->inner())
+                              : llvm::ConstantPointerNull::get(this->lowering.builder_.getPtrTy());
+  uint64_t size = this->lowering.module_->getDataLayout().getTypeAllocSize(
+      this->lowering.resultLowerer().lowerHalf(type));
   llvm::Constant *init = llvm::ConstantStruct::get(
-      lowering_.typeDescTy_, {lowering_.builder_.getInt32(descriptorKind(type)),
-                              lowering_.builder_.getInt32(static_cast<uint32_t>(size)), inner});
+      this->lowering.typeDescTy_,
+      {this->lowering.builder_.getInt32(TypeDescriptors::descriptorKind(type)),
+       this->lowering.builder_.getInt32(static_cast<uint32_t>(size)), inner});
   auto *global =
-      new llvm::GlobalVariable(*lowering_.module_, lowering_.typeDescTy_, true,
+      new llvm::GlobalVariable(*this->lowering.module_, this->lowering.typeDescTy_, true,
                                llvm::GlobalValue::PrivateLinkage, init, "tz.type." + type->name());
   if (!type->isFunction() && !type->isArray()) {
     global->setUnnamedAddr(llvm::GlobalValue::UnnamedAddr::Global);
   }
-  lowering_.typeDescriptors_[type] = global;
+  this->lowering.typeDescriptors_[type] = global;
 
   return global;
 }

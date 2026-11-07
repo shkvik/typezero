@@ -6,7 +6,7 @@ namespace tz {
 
 class RefCounts {
 public:
-  explicit RefCounts(Lowering &lowering);
+  explicit RefCounts(Lowering &owner);
 
   void retainValue(llvm::Value *value, const Type *type);
   void releaseValue(llvm::Value *value, const Type *type);
@@ -17,7 +17,7 @@ public:
   void releaseString(llvm::Value *str);
 
 private:
-  Lowering &lowering_;
+  Lowering &lowering;
 };
 
 }

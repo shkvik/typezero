@@ -383,7 +383,9 @@ Expr *DateFormatChecker::checkDateFormatMethod(CallExpr *call, MemberExpr *membe
     return call;
   }
   if (name == "format" || name == "formatToParts") {
-    if (!checker_.argumentChecker().checkArity(call, member->loc(), 0, 1)) {
+    ArgumentChecker::ResultArityMatches arity = checker_.argumentChecker().checkArity(call, 0, 1);
+    if (arity.isErr()) {
+      checker_.diags_.error(member->loc(), arity.error().message);
       return call;
     }
     if (!call->args.empty()) {
@@ -404,7 +406,9 @@ Expr *DateFormatChecker::checkDateFormatMethod(CallExpr *call, MemberExpr *membe
     return call;
   }
   if (name == "resolvedOptions") {
-    if (!checker_.argumentChecker().checkArity(call, member->loc(), 0, 0)) {
+    ArgumentChecker::ResultArityMatches arity = checker_.argumentChecker().checkArity(call, 0, 0);
+    if (arity.isErr()) {
+      checker_.diags_.error(member->loc(), arity.error().message);
       return call;
     }
     call->target = BuiltinCall{.builtin = Builtin::DtfResolvedOptions};

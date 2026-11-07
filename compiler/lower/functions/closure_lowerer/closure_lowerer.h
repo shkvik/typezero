@@ -6,7 +6,7 @@ namespace tz {
 
 class ClosureLowerer {
 public:
-  explicit ClosureLowerer(Lowering &lowering);
+  explicit ClosureLowerer(Lowering &owner);
 
   static const Type *typeOf(const VarSymbol *var);
   static const Type *functionTypeOf(const FuncSymbol *fn);
@@ -24,10 +24,14 @@ public:
   void emitPendingClosures();
 
 private:
-  Lowering &lowering_;
-  llvm::DenseMap<const FunctionDecl *, llvm::Function *> closureCode_;
-  llvm::DenseMap<const FunctionDecl *, llvm::Constant *> infos_;
-  std::map<std::pair<const FunctionDecl *, const Type *>, llvm::Constant *> adapters_;
+  static std::u16string utf16(llvm::StringRef text);
+  static std::string qualifiedName(const FunctionDecl *fn);
+  static FunctionDecl *knownFunction(const Expr *expr);
+
+  Lowering &lowering;
+  llvm::DenseMap<const FunctionDecl *, llvm::Function *> closureCodes;
+  llvm::DenseMap<const FunctionDecl *, llvm::Constant *> infos;
+  std::map<std::pair<const FunctionDecl *, const Type *>, llvm::Constant *> adapters;
 };
 
 }

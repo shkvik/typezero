@@ -10,35 +10,33 @@
 #include "llvm/ADT/STLExtras.h"
 #include <cassert>
 
-using llvm::cast;
 using llvm::dyn_cast;
-using llvm::dyn_cast_or_null;
-using llvm::isa;
 
 namespace tz {
 
-ModuleDeclarer::ModuleDeclarer(Checker &checker) : checker_(checker) {}
+ModuleDeclarer::ModuleDeclarer(Checker &owner)
+    : checker(owner) {}
 
 void ModuleDeclarer::useModule(Module *module) {
-  if (module == checker_.module_) {
+  if (module == this->checker.module_) {
     return;
   }
-  assert(checker_.scopes_.size() == 1 && checker_.typeScopes_.size() == 1 &&
+  assert(this->checker.scopes_.size() == 1 && this->checker.typeScopes_.size() == 1 &&
          "a file changes only at the top level");
-  if (checker_.module_) {
-    Checker::ModuleState &old = checker_.state(checker_.module_);
-    old.values = checker_.scopes_[0];
-    old.types = checker_.typeScopes_[0];
+  if (this->checker.module_) {
+    Checker::ModuleState &old = this->checker.state(this->checker.module_);
+    old.values = this->checker.scopes_[0];
+    old.types = this->checker.typeScopes_[0];
   }
-  checker_.module_ = module;
-  checker_.scopes_[0] = checker_.state(module).values;
-  checker_.typeScopes_[0] = checker_.state(module).types;
+  this->checker.module_ = module;
+  this->checker.scopes_[0] = this->checker.state(module).values;
+  this->checker.typeScopes_[0] = this->checker.state(module).types;
 }
 
 std::vector<FunctionDecl *> ModuleDeclarer::declareModules(SourceFile &program) {
-  checker_.moduleStates_.resize(program.modules.size());
+  this->checker.moduleStates_.resize(program.modules.size());
   for (Module *module : program.modules) {
-    Checker::ModuleState &here = checker_.state(module);
+    Checker::ModuleState &here = this->checker.state(module);
     auto declared = [&](llvm::StringRef name, llvm::SMLoc loc) {
       if (!name.empty()) {
         here.declared.try_emplace(name, loc);
@@ -64,38 +62,38 @@ std::vector<FunctionDecl *> ModuleDeclarer::declareModules(SourceFile &program) 
 
   std::vector<std::vector<Stmt *>> types(program.modules.size());
   for (Module *module : program.modules) {
-    useModule(module);
-    types[module->order] = checker_.typeDeclarer().declareTypes(module->file.items, false);
+    this->useModule(module);
+    types[module->order] = this->checker.typeDeclarer().declareTypes(module->file.items, false);
     for (Stmt *type : types[module->order]) {
-      checker_.declModules_[type] = module;
+      this->checker.declModules_[type] = module;
     }
   }
   for (Module *module : program.modules) {
-    checker_.importBinder().resolveImports(module);
+    this->checker.importBinder().resolveImports(module);
   }
   for (Module *module : program.modules) {
-    useModule(module);
-    checker_.importBinder().bindImports();
+    this->useModule(module);
+    this->checker.importBinder().bindImports();
   }
   for (Module *module : program.modules) {
-    useModule(module);
-    checker_.typeDeclarer().resolveTypes(types[module->order]);
+    this->useModule(module);
+    this->checker.typeDeclarer().resolveTypes(types[module->order]);
   }
 
   std::vector<FunctionDecl *> functions;
   for (Module *module : program.modules) {
-    useModule(module);
+    this->useModule(module);
     for (Stmt *item : module->file.items) {
       if (auto *fn = dyn_cast<FunctionDecl>(item)) {
-        checker_.functionChecker().declareFunction(fn);
-        checker_.declModules_[fn] = module;
+        this->checker.functionChecker().declareFunction(fn);
+        this->checker.declModules_[fn] = module;
         functions.push_back(fn);
       }
       auto *cls = dyn_cast<ClassDecl>(item);
       if (!cls || !cls->type || cls->baseExpr) {
         continue;
       }
-      checker_.classDeclarer().declareMethods(cls);
+      this->checker.classDeclarer().declareMethods(cls);
       std::vector<FunctionDecl *> methods = cls->methods;
       methods.insert(methods.end(), cls->constructors.begin(), cls->constructors.end());
       if (cls->init) {
@@ -107,33 +105,158 @@ std::vector<FunctionDecl *> ModuleDeclarer::declareModules(SourceFile &program) 
         }
       }
       for (FunctionDecl *fn : methods) {
-        checker_.declModules_[fn] = module;
+        this->checker.declModules_[fn] = module;
         functions.push_back(fn);
       }
     }
   }
   for (Module *module : program.modules) {
-    useModule(module);
-    checker_.importBinder().bindImports();
+    this->useModule(module);
+    this->checker.importBinder().bindImports();
   }
-  checker_.methodsDeclared_ = true;
-  for (size_t i = 0; i < checker_.unfilled_.size(); ++i) {
-    checker_.filling_.push_back(checker_.unfilled_[i]);
-    checker_.genericClassInstantiator().fillInstance(checker_.unfilled_[i]);
-    checker_.filling_.pop_back();
+  this->checker.methodsDeclared_ = true;
+  for (size_t i = 0; i < this->checker.unfilled_.size(); ++i) {
+    ClassDecl *instance = this->checker.unfilled_[i];
+    this->checker.filling_.push_back(instance);
+    this->checker.genericClassInstantiator().fillInstance(instance);
+    this->checker.filling_.pop_back();
   }
-  checker_.unfilled_.clear();
-  checker_.lateClasses().markLateOverrides(program);
-  checker_.classLinks().linkClasses();
+  this->checker.unfilled_.clear();
+  this->checker.lateClasses().markLateOverrides(program);
+  this->checker.classLinks().linkClasses();
   for (Module *module : program.modules) {
-    exportsOf(module);
+    this->exportsOf(module);
   }
 
   return functions;
 }
 
+ModuleDeclarer::ResultSourceIsLocal ModuleDeclarer::exportSource(const ExportSource *source) {
+  if (source && source->path == "neverthrow") {
+    std::string message = ErrorTextExportSource::neverthrow();
+
+    return err(ModuleDeclarerExportSourceError{
+        .code = ModuleDeclarerExportSourceErrorCode::NEVERTHROW,
+        .message = message,
+    });
+  }
+  if (source && isBuiltinModule(source->path)) {
+    std::string message = ErrorTextExportSource::builtin(source->path);
+
+    return err(ModuleDeclarerExportSourceError{
+        .code = ModuleDeclarerExportSourceErrorCode::BUILTIN_MODULE,
+        .message = message,
+    });
+  }
+
+  return ok(source);
+}
+
+ModuleDeclarer::ResultLocalIsKnown ModuleDeclarer::localExport(const Module *module,
+                                                               const ModuleName &name, bool found) {
+  auto sameAlias = [&](const ModuleName &n) { return n.as == name.name; };
+  auto fromBuiltin = [&](const ImportDecl &i) {
+    return isBuiltinModule(i.path) && (i.whole == name.name || llvm::any_of(i.names, sameAlias));
+  };
+  auto importsName = [&](const ImportDecl &i) { return llvm::any_of(i.names, sameAlias); };
+  bool builtin = llvm::any_of(module->file.imports, fromBuiltin);
+  if (!found && builtin) {
+    std::string message = ErrorTextLocalExport::builtin(name.name);
+
+    return err(ModuleDeclarerLocalExportError{
+        .code = ModuleDeclarerLocalExportErrorCode::FROM_BUILTIN_MODULE,
+        .message = message,
+    });
+  }
+  bool imported = llvm::any_of(module->file.imports, importsName);
+  if (!found && !imported) {
+    std::string message = ErrorTextLocalExport::notFound(name.name);
+
+    return err(ModuleDeclarerLocalExportError{
+        .code = ModuleDeclarerLocalExportErrorCode::NOT_FOUND,
+        .message = message,
+    });
+  }
+  if (!found) {
+    return err(ModuleDeclarerLocalExportError{
+        .code = ModuleDeclarerLocalExportErrorCode::ALREADY_REPORTED,
+        .message = "",
+    });
+  }
+
+  return ok(&name);
+}
+
+ModuleDeclarer::ResultExportUnique ModuleDeclarer::freeExport(const Checker::ModuleState &here,
+                                                              const ModuleName &name) {
+  if (here.exports.count(name.as)) {
+    std::string message = ErrorTextFreeExport::duplicate(name.as);
+
+    return err(ModuleDeclarerFreeExportError{
+        .code = ModuleDeclarerFreeExportErrorCode::DUPLICATE_EXPORT,
+        .message = message,
+    });
+  }
+
+  return ok(&name);
+}
+
+void ModuleDeclarer::exportName(Checker::ModuleState &here, Module *module,
+                                const ExportSource *source, const ModuleName &name) {
+  if (source && !source->from) {
+    return;
+  }
+  std::optional<Checker::Binding> target;
+  if (source) {
+    ResultExportFound found = this->findExport(source->from, source->path, name);
+    if (found.isErr()) {
+      this->checker.diags_.error(name.loc, found.error().message);
+      return;
+    }
+    target = found.value();
+  } else {
+    target = this->resolveLocal(module, name.name);
+    ResultLocalIsKnown known = ModuleDeclarer::localExport(module, name, target.has_value());
+    bool reported =
+        known.isErr() && known.error().code == ModuleDeclarerLocalExportErrorCode::ALREADY_REPORTED;
+    if (known.isErr() && !reported) {
+      this->checker.diags_.error(name.loc, known.error().message);
+    }
+    if (known.isErr()) {
+      return;
+    }
+  }
+  ResultExportUnique unique = ModuleDeclarer::freeExport(here, name);
+  if (unique.isErr()) {
+    llvm::SMLoc exportedAt = here.exports.find(name.as)->second.loc;
+    std::string previous = ErrorTextFreeExport::previous();
+    this->checker.diags_.error(name.asLoc, unique.error().message);
+    this->checker.diags_.note(exportedAt, previous);
+    return;
+  }
+  here.exports.try_emplace(name.as, Checker::Export{*target, name.asLoc, nullptr});
+}
+
+ModuleDeclarer::ResultStarIsUnique ModuleDeclarer::starExport(llvm::StringRef name,
+                                                              const Checker::Export *ours,
+                                                              const ExportAll *all,
+                                                              const Checker::Binding &target) {
+  bool clash = ours && ours->all && !(ours->target == target);
+  if (clash) {
+    std::string message =
+        ErrorTextStarExport::twice(name, ours->all->source.path, all->source.path);
+
+    return err(ModuleDeclarerStarExportError{
+        .code = ModuleDeclarerStarExportErrorCode::EXPORTED_BY_TWO,
+        .message = message,
+    });
+  }
+
+  return ok(all);
+}
+
 const llvm::StringMap<Checker::Export> &ModuleDeclarer::exportsOf(Module *module) {
-  Checker::ModuleState &here = checker_.state(module);
+  Checker::ModuleState &here = this->checker.state(module);
   if (here.exportsDone || here.exportsBusy) {
     return here.exports;
   }
@@ -141,60 +264,13 @@ const llvm::StringMap<Checker::Export> &ModuleDeclarer::exportsOf(Module *module
 
   for (const ExportDecl &decl : module->file.exports) {
     const ExportSource *source = decl.source();
-    if (source && source->path == "neverthrow") {
-      checker_.diags_.error(source->pathLoc, "Result, ok and err are built in: remove the export "
-                                             "from 'neverthrow'");
-      continue;
-    }
-    if (source && isBuiltinModule(source->path)) {
-      checker_.diags_.error(source->pathLoc,
-                            "a built-in module is not re-exported: import what a file needs "
-                            "from '" +
-                                source->path + "' in that file");
+    ResultSourceIsLocal local = ModuleDeclarer::exportSource(source);
+    if (local.isErr()) {
+      this->checker.diags_.error(source->pathLoc, local.error().message);
       continue;
     }
     for (const ModuleName &name : decl.names()) {
-      std::optional<Checker::Binding> target;
-      if (source) {
-        if (!source->from) {
-          continue;
-        }
-        target = findExport(source->from, source->path, name);
-        if (!target) {
-          continue;
-        }
-      } else {
-        target = resolveLocal(module, name.name);
-        bool builtin = llvm::any_of(module->file.imports, [&](const ImportDecl &i) {
-          return isBuiltinModule(i.path) &&
-                 (i.whole == name.name ||
-                  llvm::any_of(i.names, [&](const ModuleName &n) { return n.as == name.name; }));
-        });
-        if (!target && builtin) {
-          checker_.diags_.error(name.loc,
-                                "'" + name.name +
-                                    "' comes from a built-in module, which is not "
-                                    "re-exported: import it from there in the file that uses it");
-          continue;
-        }
-        bool imported = llvm::any_of(module->file.imports, [&](const ImportDecl &i) {
-          return llvm::any_of(i.names, [&](const ModuleName &n) { return n.as == name.name; });
-        });
-        if (!target && !imported) {
-          checker_.diags_.error(name.loc,
-                                "cannot find '" + name.name +
-                                    "' to export: this file neither declares nor imports it");
-        }
-        if (!target) {
-          continue;
-        }
-      }
-      auto [it, inserted] =
-          here.exports.try_emplace(name.as, Checker::Export{*target, name.asLoc, nullptr});
-      if (!inserted) {
-        checker_.diags_.error(name.asLoc, "duplicate export of '" + name.as + "'");
-        checker_.diags_.note(it->second.loc, "previously exported here");
-      }
+      this->exportName(here, module, source, name);
     }
   }
 
@@ -203,20 +279,16 @@ const llvm::StringMap<Checker::Export> &ModuleDeclarer::exportsOf(Module *module
     if (!all || !all->source.from || all->source.from == module) {
       continue;
     }
-    for (const auto &entry : exportsOf(all->source.from)) {
+    for (const auto &entry : this->exportsOf(all->source.from)) {
       llvm::StringRef name = entry.getKey();
       const Checker::Binding &target = entry.getValue().target;
-      auto [it, inserted] = here.exports.try_emplace(name, Checker::Export{target, decl.loc, all});
-      const Checker::Export &ours = it->second;
-      if (inserted || !ours.all || ours.target == target) {
-        continue;
+      auto existing = here.exports.find(name);
+      const Checker::Export *ours = existing != here.exports.end() ? &existing->second : nullptr;
+      ResultStarIsUnique unique = ModuleDeclarer::starExport(name, ours, all, target);
+      if (unique.isErr()) {
+        this->checker.diags_.error(decl.loc, unique.error().message);
       }
-      checker_.diags_.error(decl.loc,
-                            "'" + name + "' is exported both by '" + ours.all->source.path +
-                                "' and by '" + all->source.path +
-                                "' through 'export *'; re-export the one you mean by name, e.g. "
-                                "'export { " +
-                                name + " } from \"" + ours.all->source.path + "\"'");
+      here.exports.try_emplace(name, Checker::Export{target, decl.loc, all});
     }
   }
   here.exportsBusy = false;
@@ -225,25 +297,43 @@ const llvm::StringMap<Checker::Export> &ModuleDeclarer::exportsOf(Module *module
   return here.exports;
 }
 
-std::optional<Checker::Binding> ModuleDeclarer::findExport(Module *from, llvm::StringRef path,
-                                                           const ModuleName &name) {
-  const llvm::StringMap<Checker::Export> &theirs = exportsOf(from);
-  if (auto found = theirs.find(name.name); found != theirs.end()) {
-    return found->second.target;
-  }
-  std::string message = "'" + path.str() + "' has no export named '" + name.name.str() + "'";
-  if (from->builtin) {
-    message += EmitterChecker::libraryExportHint(name.name);
-  } else if (checker_.state(from).declared.count(name.name)) {
-    message += "; add 'export' to its declaration in " + from->name;
-  }
-  checker_.diags_.error(name.loc, message);
+ModuleDeclarer::ResultExportFound ModuleDeclarer::findExport(Module *from, llvm::StringRef path,
+                                                             const ModuleName &name) {
+  const llvm::StringMap<Checker::Export> &theirs = this->exportsOf(from);
+  auto found = theirs.find(name.name);
+  bool missing = found == theirs.end();
+  if (missing && from->builtin) {
+    std::string hint = EmitterChecker::libraryExportHint(name.name);
+    std::string message = ErrorTextFindExport::library(path, name.name, hint);
 
-  return std::nullopt;
+    return err(ModuleDeclarerFindExportError{
+        .code = ModuleDeclarerFindExportErrorCode::NOT_EXPORTED_BY_LIBRARY,
+        .message = message,
+    });
+  }
+  bool declared = missing && this->checker.state(from).declared.count(name.name);
+  if (declared) {
+    std::string message = ErrorTextFindExport::unmarked(path, name.name, from->name);
+
+    return err(ModuleDeclarerFindExportError{
+        .code = ModuleDeclarerFindExportErrorCode::DECLARED_WITHOUT_EXPORT,
+        .message = message,
+    });
+  }
+  if (missing) {
+    std::string message = ErrorTextFindExport::missing(path, name.name);
+
+    return err(ModuleDeclarerFindExportError{
+        .code = ModuleDeclarerFindExportErrorCode::NOT_EXPORTED,
+        .message = message,
+    });
+  }
+
+  return ok(found->second.target);
 }
 
 std::optional<Checker::Binding> ModuleDeclarer::resolveLocal(Module *module, llvm::StringRef name) {
-  if (checker_.state(module).declared.count(name)) {
+  if (this->checker.state(module).declared.count(name)) {
     return Checker::Binding{module, name};
   }
   for (const ImportDecl &decl : module->file.imports) {
@@ -254,7 +344,7 @@ std::optional<Checker::Binding> ModuleDeclarer::resolveLocal(Module *module, llv
       if (!decl.from) {
         return std::nullopt;
       }
-      const llvm::StringMap<Checker::Export> &theirs = exportsOf(decl.from);
+      const llvm::StringMap<Checker::Export> &theirs = this->exportsOf(decl.from);
       auto found = theirs.find(imported.name);
       if (found == theirs.end()) {
         return std::nullopt;

@@ -6,7 +6,7 @@ namespace tz {
 
 class TruthChecker {
 public:
-  explicit TruthChecker(Checker &checker);
+  explicit TruthChecker(Checker &owner);
 
   Expr *checkCondition(Expr *cond, Checker::Flow &whenTrue, Checker::Flow &whenFalse);
   Expr *checkBranching(Expr *expr, Checker::Flow &whenTrue, Checker::Flow &whenFalse,
@@ -21,7 +21,7 @@ public:
   bool isBooleanCall(const Expr *expr) const;
 
 private:
-  Checker &checker_;
+  Checker &checker;
 };
 
 }

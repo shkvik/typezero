@@ -9,18 +9,12 @@
 #include "compiler/whole_program/flows/flows.h"
 #include "compiler/whole_program/wide_writes/wide_writes.h"
 #include "llvm/ADT/STLExtras.h"
-#include <functional>
 
-using llvm::cast;
-using llvm::dyn_cast;
-using llvm::dyn_cast_or_null;
 using llvm::isa;
 
 namespace tz {
 
-namespace {
-
-bool isErrorClass(llvm::StringRef name) {
+bool ClassBases::isErrorClass(llvm::StringRef name) {
   static const char *const names[] = {"Error",       "TypeError",      "RangeError",
                                       "SyntaxError", "ReferenceError", "EvalError",
                                       "URIError",    "AggregateError"};
@@ -28,23 +22,23 @@ bool isErrorClass(llvm::StringRef name) {
   return llvm::is_contained(names, name);
 }
 
-const char *accessName(Access access) {
+const char *ClassBases::accessName(Access access) {
   return access == Access::Public      ? "public"
          : access == Access::Protected ? "protected"
                                        : "private";
 }
 
-}
-
-ClassBases::ClassBases(Checker &checker) : checker_(checker) {}
+ClassBases::ClassBases(Checker &owner)
+    : checker(owner) {}
 
 void ClassBases::addBase(const Type *type, const Type *base) {
   const_cast<Type *>(type)->addBase(base);
-  bool emitted = !checker_.trial_ && llvm::none_of(checker_.functions_, [](const FunctionDecl *fn) {
-    return !fn->typeParams.empty() && !fn->isInstance;
-  });
-  if (checker_.file_ && emitted && !llvm::is_contained(checker_.file_->subtypes, type)) {
-    checker_.file_->subtypes.push_back(type);
+  bool emitted =
+      !this->checker.trial_ && llvm::none_of(this->checker.functions_, [](const FunctionDecl *fn) {
+        return !fn->typeParams.empty() && !fn->isInstance;
+      });
+  if (this->checker.file_ && emitted && !llvm::is_contained(this->checker.file_->subtypes, type)) {
+    this->checker.file_->subtypes.push_back(type);
   }
 }
 
@@ -53,26 +47,27 @@ void ClassBases::resolveClassBases(ClassDecl *cls) {
   if (cls->base) {
     const TypeRef &ref = *cls->base;
     bool named = ref.kind() == TypeRefKind::NAME_REF || ref.kind() == TypeRefKind::GENERIC_REF;
-    Stmt *found = named ? checker_.typeDeclarer().lookupType(ref.name) : nullptr;
+    Stmt *found = named ? this->checker.typeDeclarer().lookupType(ref.name) : nullptr;
     auto *parent = llvm::dyn_cast_or_null<ClassDecl>(found);
     bool instance = false;
     if (parent && parent->library() && parent->name == "EventEmitter" &&
         ref.kind() == TypeRefKind::NAME_REF) {
-      const Type *events = checker_.eventMapInference().inferredEventMap(
-          "class " + checker_.eventMapInference().placeOf(cls->loc()) + " " + cls->name.str());
-      parent = events
-                   ? checker_.genericClassInstantiator().instantiateClass(parent, {events}, ref.loc)
-                   : nullptr;
+      const Type *events = this->checker.eventMapInference().inferredEventMap(
+          "class " + this->checker.eventMapInference().placeOf(cls->loc()) + " " + cls->name.str());
+      parent = events ? this->checker.genericClassInstantiator().instantiateClass(parent, {events},
+                                                                                  ref.loc)
+                      : nullptr;
       instance = true;
       if (!events) {
-        checker_.diags_.error(ref.loc, "'EventEmitter' needs its event map here, e.g. 'extends "
-                                       "EventEmitter<{ data: [chunk: string]; end: [] }>'");
+        this->checker.diags_.error(ref.loc,
+                                   "'EventEmitter' needs its event map here, e.g. 'extends "
+                                   "EventEmitter<{ data: [chunk: string]; end: [] }>'");
       }
       if (!parent) {
         found = nullptr;
       }
     } else if (parent && (parent->isGeneric() || ref.kind() == TypeRefKind::GENERIC_REF)) {
-      const Type *type = checker_.typeResolver().resolveType(ref, false);
+      const Type *type = this->checker.typeResolver().resolveType(ref, false);
       parent = ClassDeclarer::classOf(type);
       instance = true;
       if (!parent) {
@@ -80,42 +75,43 @@ void ClassBases::resolveClassBases(ClassDecl *cls) {
       }
     }
     if (!named) {
-      checker_.diags_.error(ref.loc, "a class can extend only a class, by its name");
+      this->checker.diags_.error(ref.loc, "a class can extend only a class, by its name");
     } else if (instance && !parent) {
     } else if (parent && (parent == cls || parent->stage == ClassStage::RESOLVING_BASE)) {
-      checker_.diags_.error(
+      this->checker.diags_.error(
           ref.loc, "class '" + cls->name + "' cannot extend itself" +
                        (parent == cls ? std::string() : " through '" + parent->name.str() + "'"));
-    } else if (checker_.fsDeclarer().isRuntimeClass(parent)) {
-      checker_.diags_.error(ref.loc, "class '" + cls->name + "' cannot extend '" + parent->name +
-                                         "': only the functions of node:fs make its objects");
+    } else if (this->checker.fsDeclarer().isRuntimeClass(parent)) {
+      this->checker.diags_.error(ref.loc, "class '" + cls->name + "' cannot extend '" +
+                                              parent->name +
+                                              "': only the functions of node:fs make its objects");
     } else if (parent && parent->baseExpr && parent->stage == ClassStage::UNRESOLVED) {
-      checker_.diags_.error(ref.loc,
-                            "class '" + cls->name + "' cannot extend '" + parent->name +
-                                "', whose base is a value, made where its declaration runs; "
-                                "write it as an expression there: 'const " +
-                                cls->name + " = class extends " + parent->name + " { ... }'");
+      this->checker.diags_.error(ref.loc,
+                                 "class '" + cls->name + "' cannot extend '" + parent->name +
+                                     "', whose base is a value, made where its declaration runs; "
+                                     "write it as an expression there: 'const " +
+                                     cls->name + " = class extends " + parent->name + " { ... }'");
     } else if (parent) {
-      std::vector<llvm::StringMap<Stmt *>> outer = checker_.typeScopes_;
-      checker_.typeScopes_.resize(1);
-      if (Module *home = checker_.declModules_.lookup(parent);
-          home && home != checker_.module_ && checker_.scopes_.size() == 1) {
-        Module *here = checker_.module_;
-        checker_.moduleDeclarer().useModule(home);
-        checker_.classDeclarer().resolveClass(parent);
-        checker_.moduleDeclarer().useModule(here);
+      std::vector<llvm::StringMap<Stmt *>> outer = this->checker.typeScopes_;
+      this->checker.typeScopes_.resize(1);
+      if (Module *home = this->checker.declModules_.lookup(parent);
+          home && home != this->checker.module_ && this->checker.scopes_.size() == 1) {
+        Module *here = this->checker.module_;
+        this->checker.moduleDeclarer().useModule(home);
+        this->checker.classDeclarer().resolveClass(parent);
+        this->checker.moduleDeclarer().useModule(here);
       } else {
-        checker_.classDeclarer().resolveClass(parent);
+        this->checker.classDeclarer().resolveClass(parent);
       }
-      checker_.typeScopes_ = std::move(outer);
+      this->checker.typeScopes_ = std::move(outer);
       cls->parent = parent;
       parent->children.push_back(cls);
-      addBase(cls->type, parent->type);
-    } else if (!found && isErrorClass(ref.name)) {
-      checker_.diags_.error(ref.loc, "there is no '" + ref.name +
-                                         "' in tz: an error is a value; make '" + cls->name +
-                                         "' a type of object with a tag, e.g. 'type " + cls->name +
-                                         " = { code: \"" + cls->name + "\"; message: string }'");
+      this->addBase(cls->type, parent->type);
+    } else if (!found && ClassBases::isErrorClass(ref.name)) {
+      this->checker.diags_.error(
+          ref.loc, "there is no '" + ref.name + "' in tz: an error is a value; make '" + cls->name +
+                       "' a type of object with a tag, e.g. 'type " + cls->name + " = { code: \"" +
+                       cls->name + "\"; message: string }'");
     } else if (found) {
       std::string message =
           "'" + ref.name.str() + "' is not a class, and a class can extend only a class";
@@ -125,32 +121,32 @@ void ClassBases::resolveClassBases(ClassDecl *cls) {
                    "'implements " +
                    ref.name.str() + "'";
       }
-      checker_.diags_.error(ref.loc, message);
+      this->checker.diags_.error(ref.loc, message);
     } else {
-      checker_.diags_.error(ref.loc, "cannot find class '" + ref.name + "'");
+      this->checker.diags_.error(ref.loc, "cannot find class '" + ref.name + "'");
     }
   }
   for (const TypeRef &ref : cls->interfaces) {
-    const Type *type = checker_.typeResolver().resolveType(ref, false);
+    const Type *type = this->checker.typeResolver().resolveType(ref, false);
     if (type->isError()) {
       continue;
     }
     if (type->isClass()) {
-      checker_.diags_.error(ref.loc,
-                            "'" + type->name() +
-                                "' is a class, and a class implements only "
-                                "interfaces" +
-                                (cls->base ? std::string()
-                                           : "; to take its fields and methods, write 'extends " +
-                                                 type->name().str() + "'"));
+      this->checker.diags_.error(
+          ref.loc, "'" + type->name() +
+                       "' is a class, and a class implements only "
+                       "interfaces" +
+                       (cls->base ? std::string()
+                                  : "; to take its fields and methods, write 'extends " +
+                                        type->name().str() + "'"));
     } else if (!type->isObject() || type->isTuple() || type->isAnyObject() ||
                type->isIncomplete()) {
-      checker_.diags_.error(ref.loc, "'" + type->name() +
-                                         "' is not an interface; a class implements object "
-                                         "types, such as 'interface Named { name: string }'");
+      this->checker.diags_.error(ref.loc, "'" + type->name() +
+                                              "' is not an interface; a class implements object "
+                                              "types, such as 'interface Named { name: string }'");
     } else if (!llvm::is_contained(cls->implemented, type)) {
       cls->implemented.push_back(type);
-      addBase(cls->type, type);
+      this->addBase(cls->type, type);
     }
   }
   cls->stage = ClassStage::RESOLVED;
@@ -160,37 +156,40 @@ void ClassBases::resolveClassBases(ClassDecl *cls) {
       continue;
     }
     const ClassDecl *owner = nullptr;
-    const ClassField *inherited = cls->parent ? findField(cls->parent, f.name, &owner) : nullptr;
+    const ClassField *inherited =
+        cls->parent ? ClassBases::findField(cls->parent, f.name, &owner) : nullptr;
     if (inherited && inherited->method()) {
       continue;
     }
     if (!inherited) {
       if (f.isOverride) {
-        checker_.diags_.error(f.loc, cls->parent
-                                         ? "'" + f.name + "' is marked 'override', but '" +
-                                               cls->parent->name + "' has no field '" + f.name + "'"
-                                         : "'override' says that '" + f.name +
-                                               "' is a field of the class that '" + cls->name +
-                                               "' extends, and it extends none");
+        this->checker.diags_.error(
+            f.loc, cls->parent
+                       ? "'" + f.name + "' is marked 'override', but '" + cls->parent->name +
+                             "' has no field '" + f.name + "'"
+                       : "'override' says that '" + f.name + "' is a field of the class that '" +
+                             cls->name + "' extends, and it extends none");
       }
       continue;
     }
     if (inherited->access == Access::Private) {
-      checker_.diags_.error(f.loc, "'" + f.name + "' is private in class '" + owner->name +
-                                       "', so a class that extends it cannot declare it again");
+      this->checker.diags_.error(f.loc,
+                                 "'" + f.name + "' is private in class '" + owner->name +
+                                     "', so a class that extends it cannot declare it again");
       continue;
     }
     if (f.access > inherited->access) {
-      checker_.diags_.error(f.loc, "'" + f.name + "' is " + accessName(inherited->access) +
-                                       " in '" + owner->name + "', so it cannot be " +
-                                       accessName(f.access) + " in '" + cls->name + "'");
+      this->checker.diags_.error(
+          f.loc, "'" + f.name + "' is " + ClassBases::accessName(inherited->access) + " in '" +
+                     owner->name + "', so it cannot be " + ClassBases::accessName(f.access) +
+                     " in '" + cls->name + "'");
     }
     if (!f.init && !f.parameter()) {
-      checker_.diags_.error(f.loc,
-                            "'" + f.name + "' is a field of '" + owner->name +
-                                "' already; declared again without a value, JavaScript would set "
-                                "it to undefined after the constructor of '" +
-                                owner->name + "' set it: drop the declaration, or give it a value");
+      this->checker.diags_.error(
+          f.loc, "'" + f.name + "' is a field of '" + owner->name +
+                     "' already; declared again without a value, JavaScript would set "
+                     "it to undefined after the constructor of '" +
+                     owner->name + "' set it: drop the declaration, or give it a value");
     }
     f.redeclared = true;
   }
@@ -202,30 +201,31 @@ std::vector<Field> ClassBases::interfaceFields(TypeAliasDecl *alias,
   std::vector<Field> fields;
   std::vector<std::string> origins;
   for (const TypeRef &ref : alias->bases) {
-    Stmt *found = ref.kind() == TypeRefKind::NAME_REF ? checker_.typeDeclarer().lookupType(ref.name)
-                                                      : nullptr;
+    Stmt *found = ref.kind() == TypeRefKind::NAME_REF
+                      ? this->checker.typeDeclarer().lookupType(ref.name)
+                      : nullptr;
     if (auto *other = llvm::dyn_cast_or_null<TypeAliasDecl>(found);
         other && (other == alias || other->resolving)) {
-      checker_.diags_.error(
+      this->checker.diags_.error(
           ref.loc, "interface '" + alias->name + "' cannot extend itself" +
                        (other == alias ? std::string() : " through '" + other->name.str() + "'"));
       continue;
     }
-    const Type *base = checker_.typeResolver().resolveType(ref, false);
+    const Type *base = this->checker.typeResolver().resolveType(ref, false);
     if (base->isError()) {
       continue;
     }
     if (base->isClass()) {
-      checker_.diags_.error(ref.loc, "'" + base->name() +
-                                         "' is a class, and an interface extends only "
-                                         "interfaces");
+      this->checker.diags_.error(ref.loc, "'" + base->name() +
+                                              "' is a class, and an interface extends only "
+                                              "interfaces");
       continue;
     }
     if (!base->isObject() || base->isTuple() || base->isIncomplete() || base->isAnyObject()) {
-      checker_.diags_.error(ref.loc,
-                            "'" + base->name() +
-                                "' is not an interface; an interface extends "
-                                "object types, such as 'interface Named { name: string }'");
+      this->checker.diags_.error(ref.loc,
+                                 "'" + base->name() +
+                                     "' is not an interface; an interface extends "
+                                     "object types, such as 'interface Named { name: string }'");
       continue;
     }
     if (llvm::is_contained(bases, base)) {
@@ -237,8 +237,9 @@ std::vector<Field> ClassBases::interfaceFields(TypeAliasDecl *alias,
       if (it == overloads.end()) {
         overloads.push_back(o);
       } else if (it->signatures != o.signatures) {
-        checker_.diags_.error(ref.loc, "interface '" + alias->name + "' gets method '" + o.name +
-                                           "' from two interfaces with different signatures");
+        this->checker.diags_.error(ref.loc, "interface '" + alias->name + "' gets method '" +
+                                                o.name +
+                                                "' from two interfaces with different signatures");
       }
     }
     std::string baseName = ref.name.str();
@@ -248,10 +249,11 @@ std::vector<Field> ClassBases::interfaceFields(TypeAliasDecl *alias,
         fields.push_back(f);
         origins.push_back(baseName);
       } else if (it->type != f.type) {
-        checker_.diags_.error(ref.loc, "interface '" + alias->name + "' gets field '" + f.name +
-                                           "' from '" + origins[size_t(it - fields.begin())] +
-                                           "' as '" + it->type->name() + "' and from '" + baseName +
-                                           "' as '" + f.type->name() + "'; a field has one type");
+        this->checker.diags_.error(ref.loc,
+                                   "interface '" + alias->name + "' gets field '" + f.name +
+                                       "' from '" + origins[size_t(it - fields.begin())] +
+                                       "' as '" + it->type->name() + "' and from '" + baseName +
+                                       "' as '" + f.type->name() + "'; a field has one type");
       } else {
         it->readonly = it->readonly && f.readonly;
       }
@@ -259,25 +261,25 @@ std::vector<Field> ClassBases::interfaceFields(TypeAliasDecl *alias,
   }
   const TypeRef &own = alias->type;
   std::vector<Overload> ownOverloads;
-  std::vector<Field> ownFields = checker_.typeResolver().resolveFields(own, &ownOverloads);
+  std::vector<Field> ownFields = this->checker.typeResolver().resolveFields(own, &ownOverloads);
   for (const Overload &o : ownOverloads) {
     bool clash = llvm::any_of(fields, [&](const Field &f) { return f.name == o.name; }) ||
                  llvm::any_of(overloads, [&](const Overload &p) { return p.name == o.name; });
     if (clash) {
-      checker_.diags_.error(alias->loc(),
-                            "interface '" + alias->name + "' declares method '" + o.name +
-                                "' again; an interface cannot change the members of one "
-                                "it extends");
+      this->checker.diags_.error(alias->loc(),
+                                 "interface '" + alias->name + "' declares method '" + o.name +
+                                     "' again; an interface cannot change the members of one "
+                                     "it extends");
     } else {
       overloads.push_back(o);
     }
   }
   for (Field &f : ownFields) {
     if (llvm::any_of(overloads, [&](const Overload &o) { return o.name == f.name; })) {
-      checker_.diags_.error(alias->loc(),
-                            "interface '" + alias->name + "' declares '" + f.name +
-                                "' again; an interface cannot change the members of one "
-                                "it extends");
+      this->checker.diags_.error(alias->loc(),
+                                 "interface '" + alias->name + "' declares '" + f.name +
+                                     "' again; an interface cannot change the members of one "
+                                     "it extends");
       continue;
     }
     llvm::SMLoc loc = alias->loc();
@@ -295,7 +297,7 @@ std::vector<Field> ClassBases::interfaceFields(TypeAliasDecl *alias,
     const std::string &origin = origins[size_t(it - fields.begin())];
     if (it->type != f.type && !f.type->isError() && !it->type->isError() &&
         !WideWrites::sameReference(f.type, it->type)) {
-      checker_.diags_.error(
+      this->checker.diags_.error(
           loc, "field '" + f.name + "' of '" + alias->name + "' is '" + f.type->name() +
                    "', and '" + origin + "' declares it as '" + it->type->name() +
                    "'; an interface can narrow a field of one it extends only to objects "
@@ -303,7 +305,7 @@ std::vector<Field> ClassBases::interfaceFields(TypeAliasDecl *alias,
                    "which lie in memory as they do");
       continue;
     }
-    checker_.narrowedFields_ |= it->type != f.type || (f.readonly && !it->readonly);
+    this->checker.narrowedFields_ |= it->type != f.type || (f.readonly && !it->readonly);
     it->type = f.type;
     it->readonly = f.readonly;
   }

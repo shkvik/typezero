@@ -6,7 +6,7 @@ namespace tz {
 
 class TypeRelations {
 public:
-  explicit TypeRelations(Checker &checker);
+  explicit TypeRelations(Checker &owner);
 
   Expr *convert(Expr *expr, const Type *to);
   Expr *coerce(Expr *expr, const Type *to, llvm::StringRef what = {});
@@ -25,7 +25,7 @@ public:
   static std::string conversionMethod(const Type *to);
 
 private:
-  Checker &checker_;
+  Checker &checker;
 };
 
 }

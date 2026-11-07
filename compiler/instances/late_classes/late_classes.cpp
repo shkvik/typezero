@@ -16,83 +16,139 @@
 #include "compiler/library/reflect/reflect_checker/reflect_checker.h"
 #include "compiler/whole_program/flows/flows.h"
 #include "llvm/ADT/STLExtras.h"
-#include <functional>
 
-using llvm::cast;
 using llvm::dyn_cast;
-using llvm::dyn_cast_or_null;
 using llvm::isa;
 
 namespace tz {
 
-namespace {
+LateClasses::LateClasses(Checker &owner)
+    : checker(owner) {}
 
-bool holdsType(const Type *type, const Type *target, llvm::SmallPtrSetImpl<const Type *> &seen) {
+bool LateClasses::holdsType(const Type *type, const Type *target,
+                            llvm::SmallPtrSetImpl<const Type *> &seen) {
   if (type == target) {
     return true;
   }
-  if (!seen.insert(type).second) {
+  bool firstVisit = seen.insert(type).second;
+  if (!firstVisit) {
     return false;
   }
+  auto memberHolds = [&](const Type *member) {
+    return LateClasses::holdsType(member, target, seen);
+  };
+  auto fieldHolds = [&](const Field &field) {
+    return LateClasses::holdsType(field.type, target, seen);
+  };
   switch (type->kind()) {
-  case Type::Kind::Optional:
-  case Type::Kind::Array:
-  case Type::Kind::Promise:
-    return holdsType(type->inner(), target, seen);
-  case Type::Kind::Union:
-    return llvm::any_of(type->members(), [&](const Type *m) { return holdsType(m, target, seen); });
-  case Type::Kind::Dict:
-    return holdsType(type->keyType(), target, seen) || holdsType(type->valueType(), target, seen);
-  case Type::Kind::Object:
-    return llvm::any_of(type->fields(),
-                        [&](const Field &f) { return holdsType(f.type, target, seen); });
-  default:
-    return false;
+    case Type::Kind::Optional:
+    case Type::Kind::Array:
+    case Type::Kind::Promise:
+      return LateClasses::holdsType(type->inner(), target, seen);
+    case Type::Kind::Union:
+      return llvm::any_of(type->members(), memberHolds);
+    case Type::Kind::Dict:
+      return LateClasses::holdsType(type->keyType(), target, seen) ||
+             LateClasses::holdsType(type->valueType(), target, seen);
+    case Type::Kind::Object:
+      return llvm::any_of(type->fields(), fieldHolds);
+    default:
+      return false;
   }
 }
-
-}
-
-LateClasses::LateClasses(Checker &checker) : checker_(checker) {}
 
 Expr *LateClasses::checkClassExpr(ClassExpr *expr, const Type *expected) {
   (void)expected;
   ClassDecl *cls = expr->decl;
   if (!cls->type) {
-    makeLateClass(cls);
+    this->makeLateClass(cls);
   }
   cls->usedAsValue = true;
   if (!cls->declared) {
-    checkStaticFields(cls);
-    if (checker_.classChecker().hasDecorators(cls).isOk()) {
-      ClassDecl *outer = std::exchange(checker_.currentClass_, cls);
-      checker_.decoratorChecker().decorateClass(cls);
-      checker_.currentClass_ = outer;
+    this->checkStaticFields(cls);
+    ClassChecker::ResultHasDecorators decorated = this->checker.classChecker().hasDecorators(cls);
+    if (decorated.isOk()) {
+      ClassDecl *outer = std::exchange(this->checker.currentClass_, cls);
+      this->checker.decoratorChecker().decorateClass(cls);
+      this->checker.currentClass_ = outer;
     }
   }
-  expr->type = checker_.classValueChecker().classValueType(cls);
+  expr->type = this->checker.classValueChecker().classValueType(cls);
 
   return expr;
 }
 
+LateClasses::ResultBaseClassUsable LateClasses::baseClass(const Type *type) const {
+  ClassDecl *parent = const_cast<ClassDecl *>(type->classRef());
+  if (type->isError()) {
+    return err(LateClassesBaseClassError{
+        .code = LateClassesBaseClassErrorCode::ALREADY_REPORTED,
+        .message = "",
+    });
+  }
+  if (type->isConstructor()) {
+    std::string message = ErrorTextBaseClass::atRun(type->name());
+
+    return err(LateClassesBaseClassError{
+        .code = LateClassesBaseClassErrorCode::KNOWN_ONLY_AT_RUN,
+        .message = message,
+    });
+  }
+  if (!type->isClassRef()) {
+    std::string message = ErrorTextBaseClass::notClass(type->name());
+
+    return err(LateClassesBaseClassError{
+        .code = LateClassesBaseClassErrorCode::NOT_A_CLASS,
+        .message = message,
+    });
+  }
+  if (!parent->type) {
+    std::string message = ErrorTextBaseClass::javascript(parent->name);
+
+    return err(LateClassesBaseClassError{
+        .code = LateClassesBaseClassErrorCode::JAVASCRIPT_CLASS,
+        .message = message,
+    });
+  }
+  if (parent->isGeneric()) {
+    std::string message = ErrorTextBaseClass::generic(parent->name);
+
+    return err(LateClassesBaseClassError{
+        .code = LateClassesBaseClassErrorCode::GENERIC_CLASS,
+        .message = message,
+    });
+  }
+  if (this->checker.fsDeclarer().isRuntimeClass(parent)) {
+    std::string message = ErrorTextBaseClass::madeByFs(parent->name);
+
+    return err(LateClassesBaseClassError{
+        .code = LateClassesBaseClassErrorCode::MADE_BY_FS,
+        .message = message,
+    });
+  }
+
+  return ok(parent);
+}
+
 void LateClasses::makeLateClass(ClassDecl *cls) {
-  cls->checkOnly = checker_.reflectChecker().onlyChecked();
+  cls->checkOnly = this->checker.reflectChecker().onlyChecked();
   if (!cls->type) {
-    cls->id = ++checker_.classCount_;
-    cls->type = Type::classType(cls->name.empty() ? "(anonymous class)" : cls->name, cls);
-    checker_.classes_.push_back(cls);
+    cls->id = ++this->checker.classCount_;
+    llvm::StringRef typeName = cls->name.empty() ? "(anonymous class)" : cls->name;
+    cls->type = Type::classType(typeName, cls);
+    this->checker.classes_.push_back(cls);
   }
-  if (checker_.module_ && !checker_.declModules_.count(cls)) {
-    checker_.declModules_[cls] = checker_.module_;
+  if (this->checker.module_ && !this->checker.declModules_.count(cls)) {
+    this->checker.declModules_[cls] = this->checker.module_;
   }
-  for (FunctionDecl *fn : llvm::reverse(checker_.functions_)) {
+  for (FunctionDecl *fn : llvm::reverse(this->checker.functions_)) {
     if (fn->isInstance && !fn->typeArgs.empty()) {
       cls->outer = fn;
       break;
     }
   }
-  for (size_t i = 1; i < checker_.scopes_.size(); ++i) {
-    for (const auto &entry : checker_.scopes_[i]) {
+  for (size_t i = 1; i < this->checker.scopes_.size(); ++i) {
+    for (const auto &entry : this->checker.scopes_[i]) {
       if (entry.second.var()) {
         cls->locals.push_back(entry.second.var()->name);
       }
@@ -100,58 +156,35 @@ void LateClasses::makeLateClass(ClassDecl *cls) {
   }
 
   if (cls->baseExpr) {
-    cls->baseExpr = checker_.exprChecker().checkExpr(cls->baseExpr);
-    const Type *type = cls->baseExpr->type;
-    ClassDecl *parent = const_cast<ClassDecl *>(type->classRef());
-    llvm::SMLoc loc = cls->baseExpr->loc();
-    if (type->isError()) {
-    } else if (type->isConstructor()) {
-      checker_.diags_.error(
-          loc, "the class extended must be known when compiling: the fields of an object "
-               "lie at places fixed then, and '" +
-                   type->name().str() +
-                   "' is some class known only when the program runs (docs/decorators.md, "
-                   "section 5); extend a class by its name, or take it in a generic "
-                   "function, 'function Mixin<B extends Constructor>(Base: B)'");
-    } else if (!type->isClassRef()) {
-      checker_.diags_.error(loc, "a class can extend only a class, and this is a '" + type->name() +
-                                     "'");
-    } else if (!parent->type) {
-      checker_.diags_.error(loc, "a class cannot extend '" + parent->name +
-                                     "' of JavaScript; extend a class of the program");
-      parent = nullptr;
-    } else if (parent->isGeneric()) {
-      checker_.diags_.error(loc, "'" + parent->name +
-                                     "' is generic; extend one of its instances, e.g. '" +
-                                     parent->name + "<int>'");
-      parent = nullptr;
-    } else if (checker_.fsDeclarer().isRuntimeClass(parent)) {
-      checker_.diags_.error(loc, "a class cannot extend '" + parent->name +
-                                     "': only the functions of node:fs make its objects");
-      parent = nullptr;
+    cls->baseExpr = this->checker.exprChecker().checkExpr(cls->baseExpr);
+    ResultBaseClassUsable base = this->baseClass(cls->baseExpr->type);
+    bool reported =
+        base.isErr() && base.error().code == LateClassesBaseClassErrorCode::ALREADY_REPORTED;
+    if (base.isErr() && !reported) {
+      this->checker.diags_.error(cls->baseExpr->loc(), base.error().message);
     }
-    if (parent) {
+    ClassDecl *parent = base.isOk() ? base.value() : nullptr;
+    if (parent && cls->checkOnly) {
       cls->parent = parent;
-      if (cls->checkOnly) {
-        const_cast<Type *>(cls->type)->addBase(parent->type);
-      } else {
-        parent->children.push_back(cls);
-        checker_.classBases().addBase(cls->type, parent->type);
-      }
+      const_cast<Type *>(cls->type)->addBase(parent->type);
+    } else if (parent) {
+      cls->parent = parent;
+      parent->children.push_back(cls);
+      this->checker.classBases().addBase(cls->type, parent->type);
     }
     cls->base.reset();
   }
   if (cls->name.empty() && cls->parent) {
-    const_cast<Type *>(cls->type)->rename("(class extends " + cls->parent->type->name().str() +
-                                          ")");
+    std::string extendsName = "(class extends " + cls->parent->type->name().str() + ")";
+    const_cast<Type *>(cls->type)->rename(extendsName);
   }
 
-  ClassDecl *outerDeclaring = std::exchange(checker_.declaringClass_, cls);
-  ClassDecl *outerClass = std::exchange(checker_.currentClass_, cls);
-  checker_.classDeclarer().resolveClass(cls);
-  checker_.classDeclarer().declareMethods(cls);
-  checker_.currentClass_ = outerClass;
-  checker_.declaringClass_ = outerDeclaring;
+  ClassDecl *outerDeclaring = std::exchange(this->checker.declaringClass_, cls);
+  ClassDecl *outerClass = std::exchange(this->checker.currentClass_, cls);
+  this->checker.classDeclarer().resolveClass(cls);
+  this->checker.classDeclarer().declareMethods(cls);
+  this->checker.currentClass_ = outerClass;
+  this->checker.declaringClass_ = outerDeclaring;
   std::vector<FunctionDecl *> methods = cls->methods;
   methods.insert(methods.end(), cls->constructors.begin(), cls->constructors.end());
   if (cls->init) {
@@ -162,27 +195,43 @@ void LateClasses::makeLateClass(ClassDecl *cls) {
       methods.push_back(f.method());
     }
   }
-  if (Module *home = checker_.declModules_.lookup(cls)) {
+  Module *home = this->checker.declModules_.lookup(cls);
+  if (home) {
     for (FunctionDecl *fn : methods) {
-      checker_.declModules_[fn] = home;
+      this->checker.declModules_[fn] = home;
     }
   }
-  markLateOverrides(cls);
-  if (checker_.classesLinked_) {
-    checker_.classLinks().linkOverrides(cls);
-    checker_.classLinks().buildVtable(cls);
+  this->markLateOverrides(cls);
+  if (this->checker.classesLinked_) {
+    this->checker.classLinks().linkOverrides(cls);
+    this->checker.classLinks().buildVtable(cls);
   }
-  if (checker_.checkingInstance_ && checker_.checkingInstance_->generic) {
-    checker_.lateOwners_[cls] = checker_.checkingInstance_;
+  Checker::Instance *instance = this->checker.checkingInstance_;
+  if (instance && instance->generic) {
+    this->checker.lateOwners_[cls] = instance;
   }
-  checker_.lateClasses_.push_back(cls);
+  this->checker.lateClasses_.push_back(cls);
+}
+
+LateClasses::ResultStaticTypeKnown LateClasses::staticType(const ClassField &field,
+                                                           const Type *type) {
+  if (type->isVoid() || type->isUndefined()) {
+    std::string message = ErrorTextStaticType::unknown(field.name);
+
+    return err(LateClassesStaticTypeError{
+        .code = LateClassesStaticTypeErrorCode::UNKNOWN_FROM_VALUE,
+        .message = message,
+    });
+  }
+
+  return ok(type);
 }
 
 void LateClasses::checkStaticFields(ClassDecl *cls) {
-  ClassDecl *outer = std::exchange(checker_.currentClass_, cls);
-  bool outerStatic = std::exchange(checker_.staticInit_, true);
+  ClassDecl *outer = std::exchange(this->checker.currentClass_, cls);
+  bool outerStatic = std::exchange(this->checker.staticInit_, true);
   cls->declared = true;
-  checker_.staticsSet_.clear();
+  this->checker.staticsSet_.clear();
   for (ClassField &f : cls->fields) {
     if (!f.isStatic() || !f.var()) {
       continue;
@@ -191,106 +240,114 @@ void LateClasses::checkStaticFields(ClassDecl *cls) {
       if (!f.var()->type) {
         f.var()->type = Type::error();
       }
-      checker_.staticsSet_.insert(f.var());
+      this->checker.staticsSet_.insert(f.var());
       continue;
     }
     const Type *declared = f.var()->type;
     if (declared && f.resolved && !f.type && !f.optional()) {
       declared = nullptr;
     }
-    f.init = checker_.exprChecker().checkExpr(f.init, declared && !declared->isError() ? declared
-                                                                                       : nullptr);
-    checker_.staticsSet_.insert(f.var());
+    const Type *expected = declared && !declared->isError() ? declared : nullptr;
+    f.init = this->checker.exprChecker().checkExpr(f.init, expected);
+    this->checker.staticsSet_.insert(f.var());
     if (declared) {
-      f.init =
-          checker_.typeRelations().coerce(f.init, declared, "static field '" + f.name.str() + "'");
+      std::string label = "static field '" + f.name.str() + "'";
+      f.init = this->checker.typeRelations().coerce(f.init, declared, label);
       continue;
     }
-    const Type *type = f.init->type;
-    if (type->isVoid() || type->isUndefined()) {
-      checker_.diags_.error(f.init->loc(), "cannot infer the type of static field '" + f.name +
-                                               "' from this value; declare it, e.g. 'static " +
-                                               f.name + ": int | undefined = undefined'");
-      type = Type::error();
+    ResultStaticTypeKnown known = LateClasses::staticType(f, f.init->type);
+    if (known.isErr()) {
+      this->checker.diags_.error(f.init->loc(), known.error().message);
     }
-    f.var()->type = f.resolved = type;
+    const Type *type = known.isOk() ? known.value() : Type::error();
+    f.resolved = type;
+    f.var()->type = type;
   }
-  checker_.staticInit_ = outerStatic;
-  checker_.currentClass_ = outer;
+  this->checker.staticInit_ = outerStatic;
+  this->checker.currentClass_ = outer;
 }
 
 void LateClasses::checkLateClasses() {
-  for (; checker_.lateChecked_ < checker_.lateClasses_.size(); ++checker_.lateChecked_) {
-    ClassDecl *cls = checker_.lateClasses_[checker_.lateChecked_];
+  for (; this->checker.lateChecked_ < this->checker.lateClasses_.size();
+       ++this->checker.lateChecked_) {
+    ClassDecl *cls = this->checker.lateClasses_[this->checker.lateChecked_];
     if (cls->checkOnly) {
       continue;
     }
-    if (Module *home = checker_.declModules_.lookup(cls); home && checker_.scopes_.size() == 1) {
-      checker_.moduleDeclarer().useModule(home);
+    Module *home = this->checker.declModules_.lookup(cls);
+    if (home && this->checker.scopes_.size() == 1) {
+      this->checker.moduleDeclarer().useModule(home);
     }
-    Checker::Instance *owner = checker_.lateOwners_.lookup(cls);
-    Checker::Instance *outerInstance = checker_.checkingInstance_;
-    std::vector<Diagnostics::Captured> *outerCapture = checker_.diags_.capture();
+    Checker::Instance *owner = this->checker.lateOwners_.lookup(cls);
+    Checker::Instance *outerInstance = this->checker.checkingInstance_;
+    std::vector<Diagnostics::Captured> *outerCapture = this->checker.diags_.capture();
     if (owner) {
-      checker_.checkingInstance_ = owner;
-      checker_.diags_.setCapture(&checker_.lateErrors_[owner]);
+      this->checker.checkingInstance_ = owner;
+      this->checker.diags_.setCapture(&this->checker.lateErrors_[owner]);
     }
-    checker_.flow_ = Checker::Flow();
-    ClassChecker::ResultBodiesChecked bodies = checker_.classChecker().checkClassBodies(cls);
+    this->checker.flow_ = Checker::Flow();
+    ClassChecker::ResultBodiesChecked bodies = this->checker.classChecker().checkClassBodies(cls);
     if (bodies.isErr()) {
       for (const ClassCheckerCheckClassBodiesError &error : bodies.error()) {
-        checker_.diags_.error(error.loc, error.message);
+        this->checker.diags_.error(error.loc, error.message);
       }
     }
-    checker_.checkingInstance_ = outerInstance;
-    checker_.diags_.setCapture(outerCapture);
+    this->checker.checkingInstance_ = outerInstance;
+    this->checker.diags_.setCapture(outerCapture);
   }
-  for (auto &[instance, errors] : checker_.lateErrors_) {
+  for (auto &[instance, errors] : this->checker.lateErrors_) {
     if (errors.empty() || instance->failed) {
       continue;
     }
     instance->failed = true;
     instance->message = errors.front().message;
     instance->errorLoc = errors.front().loc;
-    checker_.genericInstantiator().reportInstance(instance, instance->callLoc, instance->concrete);
+    this->checker.genericInstantiator().reportInstance(instance, instance->callLoc,
+                                                       instance->concrete);
+  }
+}
+
+void LateClasses::noteMethodNames(const ClassDecl *cls) {
+  for (const FunctionDecl *fn : cls->methods) {
+    if (!fn->isStatic()) {
+      this->lateMethodNames.insert(fn->name);
+    }
+  }
+  for (const ClassField &f : cls->fields) {
+    bool arrowMethod = !f.isStatic() && f.init && isa<FunctionExpr>(f.init);
+    if (arrowMethod) {
+      this->lateMethodNames.insert(f.name);
+    }
   }
 }
 
 void LateClasses::markLateOverrides(SourceFile &program) {
-  auto note = [&](const ClassDecl *cls) {
-    for (const FunctionDecl *fn : cls->methods) {
-      if (!fn->isStatic()) {
-        lateMethodNames_.insert(fn->name);
-      }
-    }
-    for (const ClassField &f : cls->fields) {
-      if (!f.isStatic() && f.init && isa<FunctionExpr>(f.init)) {
-        lateMethodNames_.insert(f.name);
-      }
+  auto noteClassExpr = [&](const Expr *e) {
+    auto *classExpr = dyn_cast<ClassExpr>(e);
+    bool extends = classExpr && (classExpr->decl->baseExpr || classExpr->decl->base);
+    if (extends) {
+      this->noteMethodNames(classExpr->decl);
     }
   };
   for (Stmt *item : program.items) {
-    if (auto *cls = dyn_cast<ClassDecl>(item); cls && cls->baseExpr) {
-      note(cls);
+    auto *cls = dyn_cast<ClassDecl>(item);
+    if (cls && cls->baseExpr) {
+      this->noteMethodNames(cls);
     }
-    visitExprs(item, [&](const Expr *e) {
-      if (auto *ce = dyn_cast<ClassExpr>(e); ce && (ce->decl->baseExpr || ce->decl->base)) {
-        note(ce->decl);
-      }
-    });
+    visitExprs(item, noteClassExpr);
   }
-  for (ClassDecl *cls : checker_.classes_) {
-    markLateOverrides(cls);
+  for (ClassDecl *cls : this->checker.classes_) {
+    this->markLateOverrides(cls);
   }
 }
 
 void LateClasses::markLateOverrides(ClassDecl *cls) {
-  if (lateMethodNames_.empty() || cls->literal()) {
+  if (this->lateMethodNames.empty() || cls->literal()) {
     return;
   }
   for (FunctionDecl *fn : ClassLinks::ownMethods(cls)) {
     Overriding *overriding = fn->overriding();
-    if (lateMethodNames_.contains(fn->name) && overriding) {
+    if (this->lateMethodNames.contains(fn->name) && overriding) {
       overriding->overridden = true;
       overriding->openToLate = true;
     }
@@ -298,8 +355,9 @@ void LateClasses::markLateOverrides(ClassDecl *cls) {
 }
 
 void LateClasses::bindOuterTypeParams(const ClassDecl *cls) {
-  if (const FunctionDecl *outer = cls ? cls->outer : nullptr) {
-    checker_.typeParams().bindTypeParams(outer->typeParams, outer->typeArgs);
+  const FunctionDecl *outer = cls ? cls->outer : nullptr;
+  if (outer) {
+    this->checker.typeParams().bindTypeParams(outer->typeParams, outer->typeArgs);
   }
 }
 
@@ -307,39 +365,40 @@ bool LateClasses::hasClassExpr(const FunctionDecl *fn) {
   if (!fn || !fn->body) {
     return false;
   }
-  auto found = templates_.find(fn);
-  if (found != templates_.end()) {
+  auto found = this->templates.find(fn);
+  if (found != this->templates.end()) {
     return found->second;
   }
   bool has = false;
-  visitExprs(fn->body, [&](const Expr *e) { has |= isa<ClassExpr>(e); });
-  templates_[fn] = has;
+  auto spotClassExpr = [&](const Expr *e) { has |= isa<ClassExpr>(e); };
+  visitExprs(fn->body, spotClassExpr);
+  this->templates[fn] = has;
 
   return has;
 }
 
 bool LateClasses::isTemplate(const FuncSymbol *generic) {
   return generic && generic->isGeneric() && generic->decl && !generic->decl->isInstance &&
-         hasClassExpr(generic->decl);
+         this->hasClassExpr(generic->decl);
 }
 
 void LateClasses::checkTemplateInstance(Checker::Instance *instance) {
   instance->checking = true;
   std::vector<Diagnostics::Captured> errors;
   FunctionDecl *decl = instance->decl;
-  Checker::BodyState saved = checker_.returnInferrer().enterBody(decl);
-  checker_.checkingInstance_ = instance;
-  checker_.diags_.setCapture(&errors);
-  if (!checker_.topLevelDone_) {
-    checker_.early_ = decl->sym;
+  Checker::BodyState saved = this->checker.returnInferrer().enterBody(decl);
+  this->checker.checkingInstance_ = instance;
+  this->checker.diags_.setCapture(&errors);
+  if (!this->checker.topLevelDone_) {
+    this->checker.early_ = decl->sym;
   }
-  checker_.flow_ = Checker::Flow();
+  this->checker.flow_ = Checker::Flow();
   if (decl->sym->ret) {
-    checker_.functionChecker().checkFunctionBody(decl);
+    this->checker.functionChecker().checkFunctionBody(decl);
   } else {
-    checker_.returnInferrer().checkAndInfer(decl);
+    this->checker.returnInferrer().checkAndInfer(decl);
   }
-  checker_.returnInferrer().leaveBody(saved);
+  this->checker.returnInferrer().leaveBody(saved);
   instance->checking = false;
   instance->checked = true;
   if (errors.empty()) {
@@ -350,30 +409,71 @@ void LateClasses::checkTemplateInstance(Checker::Instance *instance) {
   instance->errorLoc = errors.front().loc;
 }
 
+LateClasses::ResultNoOldObjectHeld LateClasses::oldObject(const ClassDecl *cls,
+                                                          const ClassField &field) {
+  llvm::SmallPtrSet<const Type *, 8> seen;
+  bool typed = field.isStatic() && field.var() && field.var()->type;
+  bool holds = typed && LateClasses::holdsType(field.var()->type, cls->type, seen);
+  if (holds) {
+    std::string message = ErrorTextOldObject::held(cls->name, field.name);
+
+    return err(LateClassesOldObjectError{
+        .code = LateClassesOldObjectErrorCode::HOLDS_OLD_OBJECT,
+        .message = message,
+    });
+  }
+
+  return ok(&field);
+}
+
+LateClasses::ResultFieldNameIsFree LateClasses::replacedField(const ClassDecl *cls,
+                                                              const ClassDecl *replacement,
+                                                              const ClassDecl *child,
+                                                              const ClassField &field) {
+  bool clash = !field.isStatic() && replacement->field(field.name);
+  if (clash) {
+    std::string message = ErrorTextReplacedField::clash(child->name, cls->name, field.name);
+
+    return err(LateClassesReplacedFieldError{
+        .code = LateClassesReplacedFieldErrorCode::FIELD_IN_REPLACEMENT,
+        .message = message,
+    });
+  }
+
+  return ok(&field);
+}
+
+void LateClasses::relink(ClassDecl *cls) {
+  const_cast<Type *>(cls->type)->forgetFields();
+  bool muted = this->checker.diags_.setMuted(true);
+  this->checker.classLinks().linkOverrides(cls);
+  this->checker.diags_.setMuted(muted);
+  this->checker.classLinks().buildVtable(cls);
+  for (ClassDecl *child : cls->children) {
+    this->relink(child);
+  }
+}
+
 void LateClasses::replaceClass(ClassDecl *cls, ClassDecl *replacement, llvm::SMLoc loc) {
-  Type *mine = const_cast<Type *>(cls->type), *theirs = const_cast<Type *>(replacement->type);
   for (const ClassField &f : cls->fields) {
-    llvm::SmallPtrSet<const Type *, 8> seen;
-    if (f.isStatic() && f.var() && f.var()->type && holdsType(f.var()->type, mine, seen)) {
-      checker_.diags_.error(f.loc,
-                            "the decorator gives '" + cls->name +
-                                "' another class in its place, "
-                                "and static field '" +
-                                f.name +
-                                "' holds an object made before, of the "
-                                "class as declared; make that object where it is used, or keep it "
-                                "outside the class");
-      checker_.diags_.note(loc, "the decorator is here");
+    ResultNoOldObjectHeld kept = LateClasses::oldObject(cls, f);
+    if (kept.isErr()) {
+      std::string here = ErrorTextOldObject::decorator();
+      this->checker.diags_.error(f.loc, kept.error().message);
+      this->checker.diags_.note(loc, here);
       return;
     }
   }
+
+  Type *mine = const_cast<Type *>(cls->type);
+  Type *theirs = const_cast<Type *>(replacement->type);
   std::string name = mine->name().str();
   Type::swapClasses(mine, theirs);
   cls->type = theirs;
   replacement->type = mine;
   theirs->rename(name + " (as declared)");
-  if (!llvm::is_contained(checker_.file_->subtypes, mine)) {
-    checker_.file_->subtypes.push_back(mine);
+  if (!llvm::is_contained(this->checker.file_->subtypes, mine)) {
+    this->checker.file_->subtypes.push_back(mine);
   }
   std::vector<ClassDecl *> declared;
   for (ClassDecl *child : cls->children) {
@@ -386,32 +486,18 @@ void LateClasses::replaceClass(ClassDecl *cls, ClassDecl *replacement, llvm::SML
     }
     declared.push_back(child);
   }
-  std::function<void(ClassDecl *)> again = [&](ClassDecl *c) {
-    const_cast<Type *>(c->type)->forgetFields();
-    bool muted = checker_.diags_.setMuted(true);
-    checker_.classLinks().linkOverrides(c);
-    checker_.diags_.setMuted(muted);
-    checker_.classLinks().buildVtable(c);
-    for (ClassDecl *child : c->children) {
-      again(child);
-    }
-  };
   for (ClassDecl *child : declared) {
     for (const ClassField &f : child->fields) {
-      if (!f.isStatic() && replacement->field(f.name)) {
-        checker_.diags_.error(f.loc, "'" + child->name + "' extends '" + cls->name +
-                                         "', whose decorator "
-                                         "gives a class with a field '" +
-                                         f.name +
-                                         "' of its own in its "
-                                         "place; give this field another name");
+      ResultFieldNameIsFree unique = LateClasses::replacedField(cls, replacement, child, f);
+      if (unique.isErr()) {
+        this->checker.diags_.error(f.loc, unique.error().message);
         return;
       }
     }
     llvm::erase(cls->children, child);
     replacement->children.push_back(child);
     child->parent = replacement;
-    again(child);
+    this->relink(child);
   }
   cls->replacement = replacement;
   replacement->usedAsValue = true;

@@ -93,7 +93,9 @@ Expr *TypedArrayChecker::checkTypedArrayMethod(CallExpr *call, MemberExpr *membe
     return call;
   }
   if (name == "at") {
-    if (!checker_.argumentChecker().checkArity(call, member->loc(), 1, 1)) {
+    ArgumentChecker::ResultArityMatches arity = checker_.argumentChecker().checkArity(call, 1, 1);
+    if (arity.isErr()) {
+      checker_.diags_.error(member->loc(), arity.error().message);
       return call;
     }
     positions(0);
@@ -102,7 +104,9 @@ Expr *TypedArrayChecker::checkTypedArrayMethod(CallExpr *call, MemberExpr *membe
     return made(Builtin::BytesAt, inRange ? element : Type::optional(element));
   }
   if (name == "indexOf" || name == "lastIndexOf" || name == "includes") {
-    if (!checker_.argumentChecker().checkArity(call, member->loc(), 1, 2)) {
+    ArgumentChecker::ResultArityMatches arity = checker_.argumentChecker().checkArity(call, 1, 2);
+    if (arity.isErr()) {
+      checker_.diags_.error(member->loc(), arity.error().message);
       return call;
     }
     Expr *value = checker_.mathChecker().numericArg(call->args[0], element);
@@ -120,7 +124,10 @@ Expr *TypedArrayChecker::checkTypedArrayMethod(CallExpr *call, MemberExpr *membe
     return made(Builtin::BytesIndexOf, name == "includes" ? Type::boolTy() : Type::intTy());
   }
   if (name == "join" || name == "toString") {
-    if (!checker_.argumentChecker().checkArity(call, member->loc(), 0, name == "join" ? 1 : 0)) {
+    ArgumentChecker::ResultArityMatches arity =
+        checker_.argumentChecker().checkArity(call, 0, name == "join" ? 1 : 0);
+    if (arity.isErr()) {
+      checker_.diags_.error(member->loc(), arity.error().message);
       return call;
     }
     if (!call->args.empty()) {
@@ -129,7 +136,9 @@ Expr *TypedArrayChecker::checkTypedArrayMethod(CallExpr *call, MemberExpr *membe
     return made(Builtin::BytesJoin, Type::string());
   }
   if (name == "reverse" || name == "sort" || name == "toReversed" || name == "toSorted") {
-    if (!checker_.argumentChecker().checkArity(call, member->loc(), 0, 0)) {
+    ArgumentChecker::ResultArityMatches arity = checker_.argumentChecker().checkArity(call, 0, 0);
+    if (arity.isErr()) {
+      checker_.diags_.error(member->loc(), arity.error().message);
       return call;
     }
     if (name == "reverse") {
@@ -141,7 +150,9 @@ Expr *TypedArrayChecker::checkTypedArrayMethod(CallExpr *call, MemberExpr *membe
     return made(name == "toReversed" ? Builtin::BytesToReversed : Builtin::BytesToSorted, copy);
   }
   if (name == "fill") {
-    if (!checker_.argumentChecker().checkArity(call, member->loc(), 1, 3)) {
+    ArgumentChecker::ResultArityMatches arity = checker_.argumentChecker().checkArity(call, 1, 3);
+    if (arity.isErr()) {
+      checker_.diags_.error(member->loc(), arity.error().message);
       return call;
     }
     call->args[0] = checker_.argumentChecker().checkArg(call->args[0], element);
@@ -151,7 +162,9 @@ Expr *TypedArrayChecker::checkTypedArrayMethod(CallExpr *call, MemberExpr *membe
     return made(Builtin::BytesFill, type);
   }
   if (name == "set") {
-    if (!checker_.argumentChecker().checkArity(call, member->loc(), 1, 2)) {
+    ArgumentChecker::ResultArityMatches arity = checker_.argumentChecker().checkArity(call, 1, 2);
+    if (arity.isErr()) {
+      checker_.diags_.error(member->loc(), arity.error().message);
       return call;
     }
     Expr *&source = call->args[0];
@@ -184,21 +197,27 @@ Expr *TypedArrayChecker::checkTypedArrayMethod(CallExpr *call, MemberExpr *membe
     return made(Builtin::BytesSet, Type::voidTy());
   }
   if (name == "subarray" || name == "slice") {
-    if (!checker_.argumentChecker().checkArity(call, member->loc(), 0, 2)) {
+    ArgumentChecker::ResultArityMatches arity = checker_.argumentChecker().checkArity(call, 0, 2);
+    if (arity.isErr()) {
+      checker_.diags_.error(member->loc(), arity.error().message);
       return call;
     }
     positions(0);
     return made(name == "subarray" ? Builtin::BytesSubarray : Builtin::BytesSlice, type);
   }
   if (name == "copyWithin") {
-    if (!checker_.argumentChecker().checkArity(call, member->loc(), 2, 3)) {
+    ArgumentChecker::ResultArityMatches arity = checker_.argumentChecker().checkArity(call, 2, 3);
+    if (arity.isErr()) {
+      checker_.diags_.error(member->loc(), arity.error().message);
       return call;
     }
     positions(0);
     return made(Builtin::BytesCopyWithin, type);
   }
   if (name == "with") {
-    if (!checker_.argumentChecker().checkArity(call, member->loc(), 2, 2)) {
+    ArgumentChecker::ResultArityMatches arity = checker_.argumentChecker().checkArity(call, 2, 2);
+    if (arity.isErr()) {
+      checker_.diags_.error(member->loc(), arity.error().message);
       return call;
     }
     call->args[0] = checker_.memberChecker().checkPosition(call->args[0]);
@@ -216,7 +235,9 @@ Expr *TypedArrayChecker::checkTypedArrayMethod(CallExpr *call, MemberExpr *membe
     return made(Builtin::BytesWith, copy);
   }
   if (name == "keys" || name == "values" || name == "entries") {
-    if (!checker_.argumentChecker().checkArity(call, member->loc(), 0, 0)) {
+    ArgumentChecker::ResultArityMatches arity = checker_.argumentChecker().checkArity(call, 0, 0);
+    if (arity.isErr()) {
+      checker_.diags_.error(member->loc(), arity.error().message);
       return call;
     }
     auto *arrayName = checker_.ctx_.make<NameExpr>(member->loc(), "Array");
@@ -266,7 +287,9 @@ Expr *TypedArrayChecker::checkDataViewMethod(CallExpr *call, MemberExpr *member)
   const Type *element = kindType->accessType();
   bool oneByte = kindType->elementSize() == 1;
   unsigned min = m.write ? 2 : 1, max = min + (oneByte ? 0 : 1);
-  if (!checker_.argumentChecker().checkArity(call, member->loc(), min, max)) {
+  ArgumentChecker::ResultArityMatches arity = checker_.argumentChecker().checkArity(call, min, max);
+  if (arity.isErr()) {
+    checker_.diags_.error(member->loc(), arity.error().message);
     return call;
   }
   auto *kind = checker_.ctx_.make<IntLitExpr>(call->loc(), uint64_t(m.kind));

@@ -14,11 +14,9 @@
 #include "compiler/program/types/type_spelling/type_spelling.h"
 #include "llvm/ADT/STLExtras.h"
 
-using llvm::BasicBlock;
 using llvm::cast;
 using llvm::dyn_cast;
 using llvm::isa;
-using llvm::Value;
 
 namespace tz {
 
@@ -30,258 +28,275 @@ constexpr uint32_t kLayoutBuiltin = 4194304;
 
 constexpr int64_t kStaticRefCount = int64_t(1) << 62;
 
-bool hasCall(const Expr *expr) {
+}
+
+bool UnknownLowerer::hasCall(const Expr *expr) {
   if (!expr) {
     return false;
   }
   if (isa<CallExpr>(expr)) {
     return true;
   }
-  if (auto *member = dyn_cast<MemberExpr>(expr)) {
-    return hasCall(member->object);
+  auto *member = dyn_cast<MemberExpr>(expr);
+  if (member) {
+    return UnknownLowerer::hasCall(member->object);
   }
-  if (auto *index = dyn_cast<IndexExpr>(expr)) {
-    return hasCall(index->object) || hasCall(index->index);
+  auto *index = dyn_cast<IndexExpr>(expr);
+  if (index) {
+    return UnknownLowerer::hasCall(index->object) || UnknownLowerer::hasCall(index->index);
   }
-  if (auto *conv = dyn_cast<CastExpr>(expr)) {
-    return hasCall(conv->operand);
+  auto *conv = dyn_cast<CastExpr>(expr);
+  if (conv) {
+    return UnknownLowerer::hasCall(conv->operand);
   }
 
   return false;
 }
 
-bool isObjectHeaded(const Type *type) {
+bool UnknownLowerer::isObjectHeaded(const Type *type) {
   return type->isObject() || type->isIterator() || type->isDict() || type->isClassRef() ||
          type->isPromise() ||
          (type->isUnion() && !type->isTagged() && type->slots().front() == UnionSlot::Object);
 }
 
-}
-
-UnknownLowerer::UnknownLowerer(Lowering &lowering) : lowering_(lowering) {}
+UnknownLowerer::UnknownLowerer(Lowering &owner)
+    : lowering(owner) {}
 
 llvm::FunctionCallee UnknownLowerer::unknownFunction(llvm::StringRef name, llvm::Type *ret,
                                                      llvm::ArrayRef<llvm::Type *> params) {
-  llvm::FunctionCallee callee =
-      lowering_.module_->getOrInsertFunction(name, llvm::FunctionType::get(ret, params, false));
+  llvm::FunctionCallee callee = this->lowering.module_->getOrInsertFunction(
+      name, llvm::FunctionType::get(ret, params, false));
   cast<llvm::Function>(callee.getCallee())->addFnAttr(llvm::Attribute::NoUnwind);
 
   return callee;
 }
 
 llvm::Value *UnknownLowerer::boxValue(llvm::Value *value, const Type *type) {
-  llvm::Type *ptr = lowering_.builder_.getPtrTy();
+  llvm::Type *ptr = this->lowering.builder_.getPtrTy();
   if (type->isFunction()) {
-    lowering_.unknownFunctionTypes_.insert(type);
+    this->lowering.unknownFunctionTypes_.insert(type);
   }
   if (type->isJson()) {
-    return lowering_.builder_.CreateCall(
-        unknownFunction("tz_unknown_json", ptr, {ptr, ptr, lowering_.builder_.getInt32Ty()}),
-        {lowering_.typeDescriptors().typeDescriptor(type), value,
-         lowering_.builder_.getInt32(lowering_.memory().mayCarryMember(type) ? 1 : 0)},
+    return this->lowering.builder_.CreateCall(
+        this->unknownFunction("tz_unknown_json", ptr,
+                              {ptr, ptr, this->lowering.builder_.getInt32Ty()}),
+        {this->lowering.typeDescriptors().typeDescriptor(type), value,
+         this->lowering.builder_.getInt32(this->lowering.memory().mayCarryMember(type) ? 1 : 0)},
         "box");
   }
   const char *box =
-      lowering_.memory().mayCarryMember(type) ? "tz_unknown_box_member" : "tz_unknown_box";
+      this->lowering.memory().mayCarryMember(type) ? "tz_unknown_box_member" : "tz_unknown_box";
 
-  return lowering_.builder_.CreateCall(unknownFunction(box, ptr, {ptr, ptr}),
-                                       {lowering_.typeDescriptors().typeDescriptor(type),
-                                        lowering_.functionFrame().spill(value, "box.value")},
-                                       "box");
+  return this->lowering.builder_.CreateCall(
+      this->unknownFunction(box, ptr, {ptr, ptr}),
+      {this->lowering.typeDescriptors().typeDescriptor(type),
+       this->lowering.functionFrame().spill(value, "box.value")},
+      "box");
 }
 
 llvm::Value *UnknownLowerer::emitUnknownConversion(llvm::Value *value, const Type *from,
                                                    const Type *to) {
-  llvm::Type *ptr = lowering_.builder_.getPtrTy();
+  llvm::Type *ptr = this->lowering.builder_.getPtrTy();
   if (to->isUnknown()) {
-    if (from->isUnknown() || isObjectHeaded(from)) {
+    if (from->isUnknown() || UnknownLowerer::isObjectHeaded(from)) {
       return value;
     }
     if (from->isUndefined()) {
-      return llvm::ConstantPointerNull::get(lowering_.builder_.getPtrTy());
+      return llvm::ConstantPointerNull::get(this->lowering.builder_.getPtrTy());
     }
     if (from->nonOptional()->isUnion() || from->nonOptional()->isLiteral()) {
-      return lowering_.builder_.CreateCall(unknownFunction("tz_unknown_of", ptr, {ptr, ptr}),
-                                           {lowering_.typeDescriptors().typeDescriptor(from),
-                                            lowering_.functionFrame().spill(value, "union.value")},
-                                           "unknown");
+      return this->lowering.builder_.CreateCall(
+          this->unknownFunction("tz_unknown_of", ptr, {ptr, ptr}),
+          {this->lowering.typeDescriptors().typeDescriptor(from),
+           this->lowering.functionFrame().spill(value, "union.value")},
+          "unknown");
     }
     if (!from->isOptional()) {
-      return boxValue(value, from);
+      return this->boxValue(value, from);
     }
     const Type *inner = from->inner();
-    if (isObjectHeaded(inner)) {
+    if (UnknownLowerer::isObjectHeaded(inner)) {
       return value;
     }
-    llvm::BasicBlock *boxBlock = lowering_.functionFrame().newBlock("unknown.box");
-    llvm::BasicBlock *endBlock = lowering_.functionFrame().newBlock("unknown.end");
-    llvm::BasicBlock *entry = lowering_.builder_.GetInsertBlock();
-    lowering_.builder_.CreateCondBr(lowering_.optionalLowerer().optionalHas(value, from), boxBlock,
-                                    endBlock);
-    lowering_.functionFrame().switchTo(boxBlock);
-    llvm::Value *box =
-        emitUnknownConversion(lowering_.optionalLowerer().optionalValue(value, from), inner, to);
-    llvm::BasicBlock *boxEnd = lowering_.builder_.GetInsertBlock();
-    lowering_.builder_.CreateBr(endBlock);
-    lowering_.functionFrame().switchTo(endBlock);
-    llvm::PHINode *phi = lowering_.builder_.CreatePHI(ptr, 2);
-    phi->addIncoming(llvm::ConstantPointerNull::get(lowering_.builder_.getPtrTy()), entry);
+    llvm::BasicBlock *boxBlock = this->lowering.functionFrame().newBlock("unknown.box");
+    llvm::BasicBlock *endBlock = this->lowering.functionFrame().newBlock("unknown.end");
+    llvm::BasicBlock *entry = this->lowering.builder_.GetInsertBlock();
+    this->lowering.builder_.CreateCondBr(this->lowering.optionalLowerer().optionalHas(value, from),
+                                         boxBlock, endBlock);
+    this->lowering.functionFrame().switchTo(boxBlock);
+    llvm::Value *box = this->emitUnknownConversion(
+        this->lowering.optionalLowerer().optionalValue(value, from), inner, to);
+    llvm::BasicBlock *boxEnd = this->lowering.builder_.GetInsertBlock();
+    this->lowering.builder_.CreateBr(endBlock);
+    this->lowering.functionFrame().switchTo(endBlock);
+    llvm::PHINode *phi = this->lowering.builder_.CreatePHI(ptr, 2);
+    phi->addIncoming(llvm::ConstantPointerNull::get(this->lowering.builder_.getPtrTy()), entry);
     phi->addIncoming(box, boxEnd);
     return phi;
   }
   llvm::Value *result;
   if (to->isString()) {
-    result = lowering_.stringLowerer().callReturningString(
-        unknownFunction("tz_unknown_string", lowering_.builder_.getVoidTy(), {ptr, ptr}), {value});
+    result = this->lowering.stringLowerer().callReturningString(
+        this->unknownFunction("tz_unknown_string", this->lowering.builder_.getVoidTy(), {ptr, ptr}),
+        {value});
   } else if (to->isFloat()) {
-    result = lowering_.builder_.CreateCall(
-        unknownFunction("tz_unknown_number", lowering_.builder_.getDoubleTy(), {ptr}), {value});
+    result = this->lowering.builder_.CreateCall(
+        this->unknownFunction("tz_unknown_number", this->lowering.builder_.getDoubleTy(), {ptr}),
+        {value});
   } else if (to->isBool()) {
-    llvm::Value *flag = lowering_.builder_.CreateCall(
-        unknownFunction("tz_unknown_bool", lowering_.builder_.getInt32Ty(), {ptr}), {value});
-    result = lowering_.builder_.CreateICmpNE(flag, lowering_.builder_.getInt32(0));
+    llvm::Value *flag = this->lowering.builder_.CreateCall(
+        this->unknownFunction("tz_unknown_bool", this->lowering.builder_.getInt32Ty(), {ptr}),
+        {value});
+    result = this->lowering.builder_.CreateICmpNE(flag, this->lowering.builder_.getInt32(0));
   } else if (to->isArray()) {
-    result = lowering_.builder_.CreateCall(unknownFunction("tz_unknown_array", ptr, {ptr, ptr}),
-                                           {value, lowering_.typeDescriptors().typeDescriptor(to)});
+    result = this->lowering.builder_.CreateCall(
+        this->unknownFunction("tz_unknown_array", ptr, {ptr, ptr}),
+        {value, this->lowering.typeDescriptors().typeDescriptor(to)});
   } else if (to->isInteger() || to->isDecimal() || to->isJson()) {
-    llvm::Type *lowered = lowering_.moduleBuilder().lower(to);
-    llvm::AllocaInst *slot = lowering_.functionFrame().createStackSlot(lowered, "unboxed");
-    lowering_.builder_.CreateCall(
-        unknownFunction("tz_unknown_unbox", lowering_.builder_.getVoidTy(), {ptr, ptr, ptr}),
-        {value, lowering_.typeDescriptors().typeDescriptor(to), slot});
-    result = lowering_.builder_.CreateLoad(lowered, slot, "unboxed");
+    llvm::Type *lowered = this->lowering.moduleBuilder().lower(to);
+    llvm::AllocaInst *slot = this->lowering.functionFrame().createStackSlot(lowered, "unboxed");
+    this->lowering.builder_.CreateCall(
+        this->unknownFunction("tz_unknown_unbox", this->lowering.builder_.getVoidTy(),
+                              {ptr, ptr, ptr}),
+        {value, this->lowering.typeDescriptors().typeDescriptor(to), slot});
+    result = this->lowering.builder_.CreateLoad(lowered, slot, "unboxed");
   } else {
     return value;
   }
-  lowering_.refCounts().releaseValue(value, from);
+  this->lowering.refCounts().releaseValue(value, from);
 
   return result;
 }
 
 llvm::Value *UnknownLowerer::typeOfText(llvm::Value *code) {
   auto text16 = [](llvm::StringRef name) { return std::u16string(name.begin(), name.end()); };
-  llvm::Value *text = lowering_.stringLowerer().stringLiteral(text16(kTypeOfNames[0]));
+  llvm::Value *text = this->lowering.stringLowerer().stringLiteral(text16(kTypeOfNames[0]));
   for (unsigned k = 1; k < std::size(kTypeOfNames); ++k) {
-    text = lowering_.builder_.CreateSelect(
-        lowering_.builder_.CreateICmpEQ(code, lowering_.builder_.getInt32(k)),
-        lowering_.stringLowerer().stringLiteral(text16(kTypeOfNames[k])), text);
+    text = this->lowering.builder_.CreateSelect(
+        this->lowering.builder_.CreateICmpEQ(code, this->lowering.builder_.getInt32(k)),
+        this->lowering.stringLowerer().stringLiteral(text16(kTypeOfNames[k])), text);
   }
 
   return text;
 }
 
 llvm::Value *UnknownLowerer::emitUnknownTypeOf(Expr *operand) {
-  Lowering::Operand value = lowering_.refCounts().emitOperand(operand, true);
-  llvm::Type *ptr = lowering_.builder_.getPtrTy();
-  llvm::Value *code = lowering_.builder_.CreateCall(
-      unknownFunction("tz_unknown_typeof", lowering_.builder_.getInt32Ty(), {ptr}), {value.value},
-      "typeof");
-  lowering_.refCounts().dropOperand(value);
+  Lowering::Operand value = this->lowering.refCounts().emitOperand(operand, true);
+  llvm::Type *ptr = this->lowering.builder_.getPtrTy();
+  llvm::Value *code = this->lowering.builder_.CreateCall(
+      this->unknownFunction("tz_unknown_typeof", this->lowering.builder_.getInt32Ty(), {ptr}),
+      {value.value}, "typeof");
+  this->lowering.refCounts().dropOperand(value);
 
-  return typeOfText(code);
+  return this->typeOfText(code);
 }
 
 llvm::Value *UnknownLowerer::emitUnknownIsJson(Expr *arg) {
-  Lowering::Operand value = lowering_.refCounts().emitOperand(arg, true);
-  llvm::Type *ptr = lowering_.builder_.getPtrTy();
-  llvm::Value *json = lowering_.builder_.CreateCall(
-      unknownFunction("tz_unknown_is_json", lowering_.builder_.getInt32Ty(), {ptr}),
+  Lowering::Operand value = this->lowering.refCounts().emitOperand(arg, true);
+  llvm::Type *ptr = this->lowering.builder_.getPtrTy();
+  llvm::Value *json = this->lowering.builder_.CreateCall(
+      this->unknownFunction("tz_unknown_is_json", this->lowering.builder_.getInt32Ty(), {ptr}),
       {value.value});
-  lowering_.refCounts().dropOperand(value);
+  this->lowering.refCounts().dropOperand(value);
 
-  return lowering_.builder_.CreateICmpNE(json, lowering_.builder_.getInt32(0));
+  return this->lowering.builder_.CreateICmpNE(json, this->lowering.builder_.getInt32(0));
 }
 
 llvm::Value *UnknownLowerer::emitUnknownIsArray(Expr *arg) {
-  Lowering::Operand value = lowering_.refCounts().emitOperand(arg, true);
-  llvm::Type *ptr = lowering_.builder_.getPtrTy();
-  llvm::Value *array = lowering_.builder_.CreateCall(
-      unknownFunction("tz_unknown_is_array", lowering_.builder_.getInt32Ty(), {ptr}),
+  Lowering::Operand value = this->lowering.refCounts().emitOperand(arg, true);
+  llvm::Type *ptr = this->lowering.builder_.getPtrTy();
+  llvm::Value *array = this->lowering.builder_.CreateCall(
+      this->unknownFunction("tz_unknown_is_array", this->lowering.builder_.getInt32Ty(), {ptr}),
       {value.value});
-  lowering_.refCounts().dropOperand(value);
+  this->lowering.refCounts().dropOperand(value);
 
-  return lowering_.builder_.CreateICmpNE(array, lowering_.builder_.getInt32(0));
+  return this->lowering.builder_.CreateICmpNE(array, this->lowering.builder_.getInt32(0));
 }
 
 llvm::Constant *UnknownLowerer::classObject(const ClassDecl *cls) {
-  if (llvm::Constant *found = classObjects_.lookup(cls)) {
+  llvm::Constant *found = this->classObjects.lookup(cls);
+  if (found) {
     return found;
   }
-  llvm::Type *ptr = lowering_.builder_.getPtrTy(), *i32 = lowering_.builder_.getInt32Ty(),
-             *i64 = lowering_.builder_.getInt64Ty();
+  llvm::Type *ptr = this->lowering.builder_.getPtrTy(), *i32 = this->lowering.builder_.getInt32Ty(),
+             *i64 = this->lowering.builder_.getInt64Ty();
   std::vector<const ClassField *> statics;
   std::vector<llvm::Type *> elements{i64, ptr, ptr, i32, i32, ptr};
   if (cls->usedAsValue) {
     for (const ClassField &f : cls->fields) {
       if (f.isStatic() && f.var()) {
         statics.push_back(&f);
-        elements.push_back(lowering_.moduleBuilder().lower(f.var()->type));
+        elements.push_back(this->lowering.moduleBuilder().lower(f.var()->type));
       }
     }
   }
-  std::string name = lowering_.symbolPrefixes_.lookup(cls) + cls->name.str();
-  auto *type = llvm::StructType::create(lowering_.ctx_, elements, "tz.class." + name);
-  classObjectTypes_[cls] = type;
+  std::string name = this->lowering.symbolPrefixes_.lookup(cls) + cls->name.str();
+  auto *type = llvm::StructType::create(this->lowering.ctx_, elements, "tz.class." + name);
+  this->classObjectTypes[cls] = type;
   llvm::Constant *parent = cls->parent
-                               ? classObject(cls->parent)
-                               : llvm::ConstantPointerNull::get(lowering_.builder_.getPtrTy());
+                               ? this->classObject(cls->parent)
+                               : llvm::ConstantPointerNull::get(this->lowering.builder_.getPtrTy());
   auto *drop = cast<llvm::Function>(
-      unknownFunction("tz_static_drop", lowering_.builder_.getVoidTy(), {ptr}).getCallee());
-  const llvm::StructLayout *offsets = lowering_.module_->getDataLayout().getStructLayout(type);
+      this->unknownFunction("tz_static_drop", this->lowering.builder_.getVoidTy(), {ptr})
+          .getCallee());
+  const llvm::StructLayout *offsets = this->lowering.module_->getDataLayout().getStructLayout(type);
   std::vector<llvm::Constant *> keys;
   for (size_t i = 0; i < statics.size(); ++i) {
     llvm::StringRef key = statics[i]->name;
     keys.push_back(llvm::ConstantStruct::get(
-        lowering_.fieldDescTy_,
-        {lowering_.stringLowerer().utf8Constant(key),
-         lowering_.builder_.getInt32(uint32_t(key.size())),
-         lowering_.builder_.getInt32(uint32_t(offsets->getElementOffset(unsigned(6 + i)))),
-         lowering_.typeDescriptors().typeDescriptor(statics[i]->var()->type)}));
+        this->lowering.fieldDescTy_,
+        {this->lowering.stringLowerer().utf8Constant(key),
+         this->lowering.builder_.getInt32(uint32_t(key.size())),
+         this->lowering.builder_.getInt32(uint32_t(offsets->getElementOffset(unsigned(6 + i)))),
+         this->lowering.typeDescriptors().typeDescriptor(statics[i]->var()->type)}));
   }
-  llvm::Constant *fields = llvm::ConstantPointerNull::get(lowering_.builder_.getPtrTy());
+  llvm::Constant *fields = llvm::ConstantPointerNull::get(this->lowering.builder_.getPtrTy());
   if (!keys.empty()) {
-    auto *arrayType = llvm::ArrayType::get(lowering_.fieldDescTy_, keys.size());
+    auto *arrayType = llvm::ArrayType::get(this->lowering.fieldDescTy_, keys.size());
     auto *global = new llvm::GlobalVariable(
-        *lowering_.module_, arrayType, true, llvm::GlobalValue::PrivateLinkage,
+        *this->lowering.module_, arrayType, true, llvm::GlobalValue::PrivateLinkage,
         llvm::ConstantArray::get(arrayType, keys), "tz.classfields." + name);
     global->setUnnamedAddr(llvm::GlobalValue::UnnamedAddr::Global);
     fields = global;
   }
-  uint32_t flags = kLayoutClass | (cls->builtin() || hasCall(cls->baseExpr) ? kLayoutBuiltin : 0);
+  uint32_t flags = kLayoutClass |
+                   (cls->builtin() || UnknownLowerer::hasCall(cls->baseExpr) ? kLayoutBuiltin : 0);
   llvm::Constant *layoutInit = llvm::ConstantStruct::get(
-      lowering_.layoutDescTy_,
-      {drop, fields, lowering_.builder_.getInt32(uint32_t(keys.size())),
-       lowering_.builder_.getInt32(flags), lowering_.stringLowerer().utf8Constant(cls->name),
-       lowering_.builder_.getInt32(uint32_t(cls->name.size())),
-       lowering_.builder_.getInt32(
-           lowering_.unionLowerer().plainTypeId(Type::classRef(cls, cls->name)))});
-  auto *layout = new llvm::GlobalVariable(*lowering_.module_, lowering_.layoutDescTy_, true,
-                                          llvm::GlobalValue::PrivateLinkage, layoutInit,
+      this->lowering.layoutDescTy_,
+      {drop, fields, this->lowering.builder_.getInt32(uint32_t(keys.size())),
+       this->lowering.builder_.getInt32(flags),
+       this->lowering.stringLowerer().utf8Constant(cls->name),
+       this->lowering.builder_.getInt32(uint32_t(cls->name.size())),
+       this->lowering.builder_.getInt32(
+           this->lowering.unionLowerer().plainTypeId(Type::classRef(cls, cls->name)))});
+  auto *layout = new llvm::GlobalVariable(*this->lowering.module_, this->lowering.layoutDescTy_,
+                                          true, llvm::GlobalValue::PrivateLinkage, layoutInit,
                                           "tz.classlayout." + name);
   layout->setUnnamedAddr(llvm::GlobalValue::UnnamedAddr::Global);
   llvm::Constant *info =
       (cls->reflectNew || cls->reflectMethods || cls->reflectFill) && !cls->builtin()
-          ? lowering_.classInfoLowerer().classInfoGlobal(cls)
-          : llvm::ConstantPointerNull::get(lowering_.builder_.getPtrTy());
-  std::vector<llvm::Constant *> init{lowering_.builder_.getInt64(kStaticRefCount),
-                                     layout,
-                                     parent,
-                                     lowering_.builder_.getInt32(cls->id),
-                                     lowering_.builder_.getInt32(std::max(cls->id, cls->lastId)),
-                                     info};
+          ? this->lowering.classInfoLowerer().classInfoGlobal(cls)
+          : llvm::ConstantPointerNull::get(this->lowering.builder_.getPtrTy());
+  std::vector<llvm::Constant *> init{
+      this->lowering.builder_.getInt64(kStaticRefCount),
+      layout,
+      parent,
+      this->lowering.builder_.getInt32(cls->id),
+      this->lowering.builder_.getInt32(std::max(cls->id, cls->lastId)),
+      info};
   for (size_t i = 6; i < elements.size(); ++i) {
     init.push_back(llvm::Constant::getNullValue(elements[i]));
   }
-  auto *object =
-      new llvm::GlobalVariable(*lowering_.module_, type, false, llvm::GlobalValue::InternalLinkage,
-                               llvm::ConstantStruct::get(type, init), "tz.class." + name);
-  classObjects_[cls] = object;
+  auto *object = new llvm::GlobalVariable(
+      *this->lowering.module_, type, false, llvm::GlobalValue::InternalLinkage,
+      llvm::ConstantStruct::get(type, init), "tz.class." + name);
+  this->classObjects[cls] = object;
 
   return object;
 }
 
 llvm::Constant *UnknownLowerer::staticFieldAddress(const ClassDecl *cls, const VarSymbol *var) {
-  llvm::Constant *object = classObject(cls);
+  llvm::Constant *object = this->classObject(cls);
   unsigned element = 6;
   for (const ClassField &f : cls->fields) {
     if (f.isStatic() && f.var()) {
@@ -293,59 +308,61 @@ llvm::Constant *UnknownLowerer::staticFieldAddress(const ClassDecl *cls, const V
   }
 
   return llvm::ConstantExpr::getInBoundsGetElementPtr(
-      classObjectTypes_.lookup(cls), object,
-      llvm::ArrayRef<llvm::Constant *>{lowering_.builder_.getInt32(0),
-                                       lowering_.builder_.getInt32(element)});
+      this->classObjectTypes.lookup(cls), object,
+      llvm::ArrayRef<llvm::Constant *>{this->lowering.builder_.getInt32(0),
+                                       this->lowering.builder_.getInt32(element)});
 }
 
 llvm::Value *UnknownLowerer::emitTupleJoin(CallExpr *call) {
   auto *member = cast<MemberExpr>(call->callee);
   const Type *tuple = member->object->type;
   bool hasSeparator = !call->args.empty();
-  Lowering::Operand object = lowering_.refCounts().emitOperand(
+  Lowering::Operand object = this->lowering.refCounts().emitOperand(
       member->object, !hasSeparator || AssignLowerer::cannotAssign(call->args[0]));
   Lowering::Operand separator =
-      hasSeparator
-          ? lowering_.refCounts().emitOperand(call->args[0], true)
-          : Lowering::Operand{lowering_.stringLowerer().stringLiteral(u","), false, Type::string()};
+      hasSeparator ? this->lowering.refCounts().emitOperand(call->args[0], true)
+                   : Lowering::Operand{this->lowering.stringLowerer().stringLiteral(u","), false,
+                                       Type::string()};
   std::vector<Lowering::Operand> parts;
   for (size_t i = 0; i < tuple->fields().size(); ++i) {
     if (i > 0) {
       parts.push_back({separator.value, false, Type::string()});
     }
     const Type *type = tuple->fields()[i].type;
-    llvm::Value *element = lowering_.builder_.CreateLoad(
-        lowering_.moduleBuilder().lower(type),
-        lowering_.objectLayouts().fieldAddress(object.value, tuple, std::to_string(i)), "element");
-    lowering_.refCounts().retainValue(element, type);
+    llvm::Value *element = this->lowering.builder_.CreateLoad(
+        this->lowering.moduleBuilder().lower(type),
+        this->lowering.objectLayouts().fieldAddress(object.value, tuple, std::to_string(i)),
+        "element");
+    this->lowering.refCounts().retainValue(element, type);
     llvm::Value *text;
     if (type->isUndefined()) {
-      text = lowering_.stringLowerer().stringLiteral(u"");
+      text = this->lowering.stringLowerer().stringLiteral(u"");
     } else if (type->isOptional()) {
-      llvm::BasicBlock *valueBlock = lowering_.functionFrame().newBlock("join.value");
-      llvm::BasicBlock *endBlock = lowering_.functionFrame().newBlock("join.end");
-      llvm::BasicBlock *entry = lowering_.builder_.GetInsertBlock();
-      lowering_.builder_.CreateCondBr(lowering_.optionalLowerer().optionalHas(element, type),
-                                      valueBlock, endBlock);
-      lowering_.functionFrame().switchTo(valueBlock);
-      llvm::Value *shown = lowering_.exprLowerer().emitConversion(
-          lowering_.optionalLowerer().optionalValue(element, type), type->inner(), Type::string());
-      llvm::BasicBlock *valueEnd = lowering_.builder_.GetInsertBlock();
-      lowering_.builder_.CreateBr(endBlock);
-      lowering_.functionFrame().switchTo(endBlock);
-      llvm::PHINode *phi = lowering_.builder_.CreatePHI(lowering_.strTy_, 2);
-      phi->addIncoming(lowering_.stringLowerer().stringLiteral(u""), entry);
+      llvm::BasicBlock *valueBlock = this->lowering.functionFrame().newBlock("join.value");
+      llvm::BasicBlock *endBlock = this->lowering.functionFrame().newBlock("join.end");
+      llvm::BasicBlock *entry = this->lowering.builder_.GetInsertBlock();
+      this->lowering.builder_.CreateCondBr(
+          this->lowering.optionalLowerer().optionalHas(element, type), valueBlock, endBlock);
+      this->lowering.functionFrame().switchTo(valueBlock);
+      llvm::Value *shown = this->lowering.exprLowerer().emitConversion(
+          this->lowering.optionalLowerer().optionalValue(element, type), type->inner(),
+          Type::string());
+      llvm::BasicBlock *valueEnd = this->lowering.builder_.GetInsertBlock();
+      this->lowering.builder_.CreateBr(endBlock);
+      this->lowering.functionFrame().switchTo(endBlock);
+      llvm::PHINode *phi = this->lowering.builder_.CreatePHI(this->lowering.strTy_, 2);
+      phi->addIncoming(this->lowering.stringLowerer().stringLiteral(u""), entry);
       phi->addIncoming(shown, valueEnd);
       text = phi;
     } else {
-      text = lowering_.exprLowerer().emitConversion(element, type, Type::string());
+      text = this->lowering.exprLowerer().emitConversion(element, type, Type::string());
     }
     parts.push_back({text, true, Type::string()});
   }
-  llvm::Value *result = parts.empty() ? lowering_.stringLowerer().stringLiteral(u"")
-                                      : lowering_.stringLowerer().concatOperands(parts);
-  lowering_.refCounts().dropOperand(separator);
-  lowering_.refCounts().dropOperand(object);
+  llvm::Value *result = parts.empty() ? this->lowering.stringLowerer().stringLiteral(u"")
+                                      : this->lowering.stringLowerer().concatOperands(parts);
+  this->lowering.refCounts().dropOperand(separator);
+  this->lowering.refCounts().dropOperand(object);
 
   return result;
 }

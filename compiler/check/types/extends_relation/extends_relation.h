@@ -6,7 +6,7 @@ namespace tz {
 
 class ExtendsRelation {
 public:
-  explicit ExtendsRelation(Checker &checker);
+  explicit ExtendsRelation(Checker &owner);
 
   bool extendsType(const Type *type, const Type *pattern, Checker::InferMatch *inference = nullptr);
   bool extendsTuple(const Type *type, const Type *pattern, Checker::InferMatch *inference);
@@ -14,7 +14,9 @@ public:
   bool extendsObject(const Type *type, const Type *pattern, Checker::InferMatch *inference);
 
 private:
-  Checker &checker_;
+  static std::vector<const Type *> distributed(const Type *type);
+
+  Checker &checker;
 };
 
 }

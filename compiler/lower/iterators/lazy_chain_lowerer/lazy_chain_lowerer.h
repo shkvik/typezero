@@ -6,7 +6,7 @@ namespace tz {
 
 class LazyChainLowerer {
 public:
-  explicit LazyChainLowerer(Lowering &lowering);
+  explicit LazyChainLowerer(Lowering &owner);
 
   Lowering::Producer valueProducer(llvm::Value *slot, const Type *type,
                                    llvm::Value *returnSlot = nullptr);
@@ -18,7 +18,7 @@ public:
                             llvm::ArrayRef<const Type *> types);
 
 private:
-  Lowering &lowering_;
+  Lowering &lowering;
 };
 
 }

@@ -14,7 +14,6 @@
 
 using llvm::cast;
 using llvm::dyn_cast;
-using llvm::dyn_cast_or_null;
 using llvm::isa;
 
 namespace tz {
@@ -61,39 +60,40 @@ const char *argumentsText(Place place) {
   }
 }
 
-std::string decoratorName(const Expr *expr) {
+}
+
+std::string DecoratorChecker::decoratorName(const Expr *expr) {
   if (auto *call = dyn_cast<CallExpr>(expr)) {
-    return decoratorName(call->callee);
+    return DecoratorChecker::decoratorName(call->callee);
   }
   if (auto *name = dyn_cast<NameExpr>(expr)) {
     return name->name.starts_with("%") ? "" : name->name.str();
   }
   if (auto *member = dyn_cast<MemberExpr>(expr)) {
-    std::string object = decoratorName(member->object);
+    std::string object = DecoratorChecker::decoratorName(member->object);
     return object.empty() ? "" : object + "." + member->name.str();
   }
 
   return "";
 }
 
-bool isPlainReference(const Expr *expr) {
+bool DecoratorChecker::isPlainReference(const Expr *expr) {
   if (isa<NameExpr>(expr)) {
     return true;
   }
   if (auto *member = dyn_cast<MemberExpr>(expr)) {
-    return isPlainReference(member->object);
+    return DecoratorChecker::isPlainReference(member->object);
   }
 
   return false;
 }
 
-bool decoratedParams(const FunctionDecl *fn) {
+bool DecoratorChecker::decoratedParams(const FunctionDecl *fn) {
   return llvm::any_of(fn->params, [](const Param &p) { return !p.decorators.empty(); });
 }
 
-}
-
-DecoratorChecker::DecoratorChecker(Checker &checker) : checker_(checker) {}
+DecoratorChecker::DecoratorChecker(Checker &owner)
+    : checker(owner) {}
 
 const Type *DecoratorChecker::methodDescriptorType(const Type *args, const Type *ret) {
   const Type *value = Type::function({Type::unknown(), args}, 1, true, ret, true);
@@ -104,7 +104,7 @@ const Type *DecoratorChecker::methodDescriptorType(const Type *args, const Type 
                     {"enumerable", flag, false},
                     {"configurable", flag, false}},
                    "MethodDescriptor<" + args->name().str() + ", " + ret->name().str() + ">");
-  checker_.descriptorOrigins_.try_emplace(type, args, ret);
+  this->checker.descriptorOrigins_.try_emplace(type, args, ret);
 
   return type;
 }
@@ -113,7 +113,7 @@ bool DecoratorChecker::decoratorParams(Expr *callee, std::vector<const Type *> &
                                        size_t &required) {
   const FuncSymbol *sym = nullptr;
   if (auto *name = dyn_cast<NameExpr>(callee)) {
-    ScopeEntry entry = checker_.scopes().lookup(name->name);
+    ScopeEntry entry = this->checker.scopes().lookup(name->name);
     if (entry.var()) {
       const Type *type = entry.var()->type;
       if (!type || !type->isFunction() || type->hasRest()) {
@@ -126,7 +126,7 @@ bool DecoratorChecker::decoratorParams(Expr *callee, std::vector<const Type *> &
     sym = entry.func();
   } else if (auto *member = dyn_cast<MemberExpr>(callee)) {
     auto *object = dyn_cast<NameExpr>(member->object);
-    if (ClassDecl *cls = object ? checker_.scopes().lookup(object->name).cls() : nullptr) {
+    if (ClassDecl *cls = object ? this->checker.scopes().lookup(object->name).cls() : nullptr) {
       std::vector<FunctionDecl *> methods = ClassDeclarer::methodsNamed(cls, member->name, true);
       if (methods.size() == 1) {
         sym = methods[0]->sym;
@@ -136,7 +136,7 @@ bool DecoratorChecker::decoratorParams(Expr *callee, std::vector<const Type *> &
   if (!sym) {
     return false;
   }
-  checker_.returnInferrer().resolveParams(const_cast<FuncSymbol *>(sym));
+  this->checker.returnInferrer().resolveParams(const_cast<FuncSymbol *>(sym));
   if (sym->hasRest || llvm::is_contained(sym->params, nullptr)) {
     return false;
   }
@@ -158,12 +158,12 @@ void DecoratorChecker::checkDecoratedNames(ClassDecl *cls) {
                  llvm::ArrayRef<Decorator> decorators, const FunctionDecl *fn) {
     Member m{name, loc, isStatic, {}};
     for (const Decorator &d : decorators) {
-      m.decorators.push_back(decoratorName(d.expr));
+      m.decorators.push_back(DecoratorChecker::decoratorName(d.expr));
     }
     if (fn) {
       for (const Param &p : fn->params) {
         for (const Decorator &d : p.decorators) {
-          m.decorators.push_back(decoratorName(d.expr));
+          m.decorators.push_back(DecoratorChecker::decoratorName(d.expr));
         }
       }
     }
@@ -179,7 +179,8 @@ void DecoratorChecker::checkDecoratedNames(ClassDecl *cls) {
   }
   for (size_t i = 0; i < members.size(); ++i) {
     for (size_t j = 0; j < i; ++j) {
-      const Member &a = members[j], &b = members[i];
+      const Member &a = members[j];
+      const Member &b = members[i];
       if (a.name != b.name) {
         continue;
       }
@@ -194,37 +195,37 @@ void DecoratorChecker::checkDecoratedNames(ClassDecl *cls) {
       }
       std::string records = shared.empty() ? "the records 'design:*' the compiler writes"
                                            : "the records of '@" + shared + "'";
-      checker_.diags_.error(b.loc,
-                            what + " of '" + cls->name.str() + "' are decorated, and " + records +
-                                " for both would be one: metadata is kept on the class "
-                                "itself, by the member's name (docs/decorators.md, section 3); "
-                                "give one of them another name");
-      checker_.diags_.note(a.loc, "the other one is here");
+      this->checker.diags_.error(
+          b.loc, what + " of '" + cls->name.str() + "' are decorated, and " + records +
+                     " for both would be one: metadata is kept on the class "
+                     "itself, by the member's name (docs/decorators.md, section 3); "
+                     "give one of them another name");
+      this->checker.diags_.note(a.loc, "the other one is here");
       break;
     }
   }
   const FunctionDecl *first = nullptr;
   for (const FunctionDecl *ctor : cls->constructors) {
-    if (!decoratedParams(ctor)) {
+    if (!DecoratorChecker::decoratedParams(ctor)) {
       continue;
     }
     if (!first) {
       first = ctor;
       continue;
     }
-    checker_.diags_.error(ctor->loc(),
-                          "two constructors of '" + cls->name.str() +
-                              "' have decorated parameters, and the record "
-                              "'design:paramtypes' the compiler writes for the class would be "
-                              "one: metadata is kept on the class itself (docs/decorators.md, "
-                              "section 3); decorate the parameters of one of them");
-    checker_.diags_.note(first->loc(), "the other one is here");
+    this->checker.diags_.error(ctor->loc(),
+                               "two constructors of '" + cls->name.str() +
+                                   "' have decorated parameters, and the record "
+                                   "'design:paramtypes' the compiler writes for the class would be "
+                                   "one: metadata is kept on the class itself (docs/decorators.md, "
+                                   "section 3); decorate the parameters of one of them");
+    this->checker.diags_.note(first->loc(), "the other one is here");
     break;
   }
 }
 
 void DecoratorChecker::decorateClass(ClassDecl *cls) {
-  checkDecoratedNames(cls);
+  this->checkDecoratedNames(cls);
   struct Member {
     ClassField *field;
     FunctionDecl *method;
@@ -238,7 +239,7 @@ void DecoratorChecker::decorateClass(ClassDecl *cls) {
     }
   }
   for (FunctionDecl *fn : cls->methods) {
-    if (!fn->decorators().empty() || decoratedParams(fn)) {
+    if (!fn->decorators().empty() || DecoratorChecker::decoratedParams(fn)) {
       members.push_back({nullptr, fn, fn->isStatic(), fn->loc().getPointer()});
     }
   }
@@ -257,7 +258,7 @@ void DecoratorChecker::decorateClass(ClassDecl *cls) {
         }
       }
     }
-    decorate(cls, m.field, m.method, uses);
+    this->decorate(cls, m.field, m.method, uses);
   }
   std::vector<Checker::DecoratorUse> uses;
   for (const Decorator &d : cls->decorators) {
@@ -270,7 +271,7 @@ void DecoratorChecker::decorateClass(ClassDecl *cls) {
       }
     }
   }
-  decorate(cls, nullptr, nullptr, uses);
+  this->decorate(cls, nullptr, nullptr, uses);
 }
 
 void DecoratorChecker::decorate(ClassDecl *cls, ClassField *field, FunctionDecl *method,
@@ -283,13 +284,13 @@ void DecoratorChecker::decorate(ClassDecl *cls, ClassField *field, FunctionDecl 
   llvm::StringRef memberName = field ? field->name : method ? method->name : llvm::StringRef();
   llvm::SMLoc at = uses[0].decorator->loc;
   if (field && field->accessor) {
-    checker_.diags_.error(
+    this->checker.diags_.error(
         at, "a decorator cannot decorate an 'accessor' field: in tz it is an ordinary "
             "field, and reading or writing it never runs code");
     return;
   }
   if (method && method->isAbstract()) {
-    checker_.diags_.error(
+    this->checker.diags_.error(
         at, "a decorator cannot decorate an abstract method, which has no code; decorate "
             "the methods that implement it");
     return;
@@ -300,7 +301,7 @@ void DecoratorChecker::decorate(ClassDecl *cls, ClassField *field, FunctionDecl 
     auto *member = call ? dyn_cast<MemberExpr>(call->callee) : nullptr;
 
     return member && member->name == "metadata" &&
-           checker_.callChecker().isGlobalName(member->object, "Reflect");
+           this->checker.callChecker().isGlobalName(member->object, "Reflect");
   };
   const Type *earlyDescriptor = nullptr;
   auto methodDescriptor = [&]() -> const Type * {
@@ -308,12 +309,12 @@ void DecoratorChecker::decorate(ClassDecl *cls, ClassField *field, FunctionDecl 
       return earlyDescriptor;
     }
     FuncSymbol *sym = method->sym;
-    checker_.returnInferrer().resolveParams(sym);
-    const Type *ret = checker_.returnInferrer().returnType(sym);
+    this->checker.returnInferrer().resolveParams(sym);
+    const Type *ret = this->checker.returnInferrer().returnType(sym);
     if (!ret || ret->isError() || llvm::is_contained(sym->params, nullptr)) {
       return nullptr;
     }
-    earlyDescriptor = methodDescriptorType(Type::tuple(sym->params), ret);
+    earlyDescriptor = this->methodDescriptorType(Type::tuple(sym->params), ret);
     return earlyDescriptor;
   };
   auto factoryHint = [&](const Expr *expr) -> const Type * {
@@ -322,7 +323,7 @@ void DecoratorChecker::decorate(ClassDecl *cls, ClassField *field, FunctionDecl 
     if (!name || !name->typeArgs.empty() || own != Place::Method || cls->isGeneric()) {
       return nullptr;
     }
-    const FuncSymbol *factory = checker_.scopes().lookup(name->name).func();
+    const FuncSymbol *factory = this->checker.scopes().lookup(name->name).func();
     if (!factory || !factory->decl || factory->decl->typeParams.empty()) {
       return nullptr;
     }
@@ -341,30 +342,31 @@ void DecoratorChecker::decorate(ClassDecl *cls, ClassField *field, FunctionDecl 
       callees.push_back(nullptr);
       continue;
     }
-    if (isPlainReference(expr)) {
+    if (DecoratorChecker::isPlainReference(expr)) {
       callees.push_back(expr);
       continue;
     }
-    llvm::StringRef hidden = checker_.ctx_.hiddenName();
-    auto *decl = checker_.ctx_.make<VarDeclStmt>(use.decorator->loc, true);
+    llvm::StringRef hidden = this->checker.ctx_.hiddenName();
+    auto *decl = this->checker.ctx_.make<VarDeclStmt>(use.decorator->loc, true);
     VarDeclarator d;
     d.name = hidden;
     d.loc = use.decorator->loc;
     d.init = expr;
     if (const Type *hint = use.param < 0 ? factoryHint(expr) : nullptr) {
-      d.init = checker_.exprChecker().checkExpr(expr, hint);
-      d.sym = checker_.scopes().declareVar(hidden, d.loc, d.init->type, true);
+      d.init = this->checker.exprChecker().checkExpr(expr, hint);
+      d.sym = this->checker.scopes().declareVar(hidden, d.loc, d.init->type, true);
       decl->decls.push_back(std::move(d));
     } else {
       decl->decls.push_back(std::move(d));
-      checker_.stmtChecker().checkStmt(decl);
+      this->checker.stmtChecker().checkStmt(decl);
     }
     out.push_back(decl);
-    callees.push_back(checker_.ctx_.make<NameExpr>(use.decorator->loc, hidden));
+    callees.push_back(this->checker.ctx_.make<NameExpr>(use.decorator->loc, hidden));
   }
 
   std::vector<size_t> takes;
-  bool descriptor = false, ok = true;
+  bool descriptor = false;
+  bool ok = true;
   for (size_t i = 0; i < uses.size(); ++i) {
     Place place = uses[i].param >= 0 ? Place::Parameter : own;
     size_t given = argumentsOf(place);
@@ -374,26 +376,26 @@ void DecoratorChecker::decorate(ClassDecl *cls, ClassField *field, FunctionDecl 
     }
     std::vector<const Type *> params;
     size_t required = 0;
-    bool known = decoratorParams(callees[i], params, required);
+    bool known = this->decoratorParams(callees[i], params, required);
     size_t count = known ? params.size() : given;
     size_t needs = known ? std::min(required, count) : given;
-    std::string name = decoratorName(uses[i].decorator->expr);
+    std::string name = DecoratorChecker::decoratorName(uses[i].decorator->expr);
     std::string label = name.empty() ? "the decorator" : "'" + name + "'";
     llvm::SMLoc loc = uses[i].decorator->loc;
     const Type *third = known && params.size() >= 3 ? params[2]->nonOptional() : nullptr;
     if (needs > given) {
-      checker_.diags_.error(loc, label + " cannot decorate " + placeText(place) + ": it takes " +
-                                     std::to_string(needs) + " arguments, and a decorator of " +
-                                     placeText(place) + " gets " + std::to_string(given) + ", " +
-                                     argumentsText(place));
+      this->checker.diags_.error(
+          loc, label + " cannot decorate " + placeText(place) + ": it takes " +
+                   std::to_string(needs) + " arguments, and a decorator of " + placeText(place) +
+                   " gets " + std::to_string(given) + ", " + argumentsText(place));
       ok = false;
     } else if (third && place == Place::Parameter && third->isObject() && third->field("value")) {
-      checker_.diags_.error(loc, label +
-                                     " takes the descriptor of a method: it decorates methods, not "
-                                     "parameters");
+      this->checker.diags_.error(
+          loc, label + " takes the descriptor of a method: it decorates methods, not "
+                       "parameters");
       ok = false;
     } else if (third && place == Place::Method && third->isNumeric()) {
-      checker_.diags_.error(
+      this->checker.diags_.error(
           loc, label + " takes the position of a parameter: it decorates parameters, not "
                        "methods");
       ok = false;
@@ -405,7 +407,7 @@ void DecoratorChecker::decorate(ClassDecl *cls, ClassField *field, FunctionDecl 
     return;
   }
   if (descriptor && cls->isGeneric()) {
-    checker_.diags_.error(
+    this->checker.diags_.error(
         at, "a decorator that takes the descriptor of a method of a generic class is not "
             "supported yet: each instance of '" +
                 cls->name +
@@ -418,23 +420,23 @@ void DecoratorChecker::decorate(ClassDecl *cls, ClassField *field, FunctionDecl 
   const Type *descType = nullptr;
   if (descriptor) {
     FuncSymbol *sym = method->sym;
-    checker_.returnInferrer().resolveParams(sym);
-    const Type *ret = checker_.returnInferrer().returnType(sym);
+    this->checker.returnInferrer().resolveParams(sym);
+    const Type *ret = this->checker.returnInferrer().returnType(sym);
     if (!ret || ret->isError() || llvm::is_contained(sym->params, nullptr)) {
       return;
     }
-    descType =
-        earlyDescriptor ? earlyDescriptor : methodDescriptorType(Type::tuple(sym->params), ret);
-    VarSymbol *impl = checker_.ctx_.newVar();
-    impl->name = checker_.ctx_.keepName("%" + cls->name.str() + "." + method->name.str() + "." +
-                                        std::to_string(method->variant()));
+    descType = earlyDescriptor ? earlyDescriptor
+                               : this->methodDescriptorType(Type::tuple(sym->params), ret);
+    VarSymbol *impl = this->checker.ctx_.newVar();
+    impl->name = this->checker.ctx_.keepName("%" + cls->name.str() + "." + method->name.str() +
+                                             "." + std::to_string(method->variant()));
     impl->loc = method->loc();
     impl->type = descType->field("value")->type;
     impl->place = GlobalVar{.usedInFunction = true};
     impl->reassigned = true;
-    checker_.scopes().declare(impl->name, impl->loc, {VarEntry{.var = impl}});
+    this->checker.scopes().declare(impl->name, impl->loc, {VarEntry{.var = impl}});
     method->member()->impl = impl;
-    auto *lit = checker_.ctx_.make<ObjectLitExpr>(at);
+    auto *lit = this->checker.ctx_.make<ObjectLitExpr>(at);
     auto prop = [&](llvm::StringRef name, Expr *value) {
       ObjectLitExpr::Property p;
       p.name = name;
@@ -442,15 +444,16 @@ void DecoratorChecker::decorate(ClassDecl *cls, ClassField *field, FunctionDecl 
       p.value = value;
       lit->props.push_back(p);
     };
-    prop("value", checker_.ctx_.make<NameExpr>(at, impl->name));
-    prop("writable", checker_.ctx_.make<BoolLitExpr>(at, true));
-    prop("enumerable", checker_.ctx_.make<BoolLitExpr>(at, false));
-    prop("configurable", checker_.ctx_.make<BoolLitExpr>(at, true));
-    Expr *init =
-        checker_.typeRelations().coerce(checker_.exprChecker().checkExpr(lit, descType), descType);
-    descVar = checker_.scopes().declareVar(checker_.ctx_.hiddenName(), at, descType, false);
+    prop("value", this->checker.ctx_.make<NameExpr>(at, impl->name));
+    prop("writable", this->checker.ctx_.make<BoolLitExpr>(at, true));
+    prop("enumerable", this->checker.ctx_.make<BoolLitExpr>(at, false));
+    prop("configurable", this->checker.ctx_.make<BoolLitExpr>(at, true));
+    Expr *init = this->checker.typeRelations().coerce(
+        this->checker.exprChecker().checkExpr(lit, descType), descType);
+    descVar =
+        this->checker.scopes().declareVar(this->checker.ctx_.hiddenName(), at, descType, false);
     descVar->reassigned = true;
-    auto *decl = checker_.ctx_.make<VarDeclStmt>(at, false);
+    auto *decl = this->checker.ctx_.make<VarDeclStmt>(at, false);
     VarDeclarator d;
     d.name = descVar->name;
     d.loc = at;
@@ -463,12 +466,12 @@ void DecoratorChecker::decorate(ClassDecl *cls, ClassField *field, FunctionDecl 
   const FunctionDecl *ctor = nullptr;
   if (own == Place::Class) {
     for (const FunctionDecl *c : cls->constructors) {
-      if (decoratedParams(c) || cls->constructors.size() == 1) {
+      if (DecoratorChecker::decoratedParams(c) || cls->constructors.size() == 1) {
         ctor = ctor ? nullptr : c;
       }
     }
   }
-  checker_.metadataChecker().writeDesignRecords(cls, field, method, ctor, at);
+  this->checker.metadataChecker().writeDesignRecords(cls, field, method, ctor, at);
 
   ClassDecl *current = cls;
   for (size_t i = uses.size(); i-- > 0;) {
@@ -478,62 +481,63 @@ void DecoratorChecker::decorate(ClassDecl *cls, ClassField *field, FunctionDecl 
     if (!callees[i]) {
       auto *metadata = cast<CallExpr>(use.decorator->expr);
       if (metadata->args.size() != 2 || metadata->hasSpread()) {
-        checker_.diags_.error(loc,
-                              "'Reflect.metadata' takes the key and the value of the record, e.g. "
-                              "'@Reflect.metadata(Role, \"admin\")'");
+        this->checker.diags_.error(
+            loc, "'Reflect.metadata' takes the key and the value of the record, e.g. "
+                 "'@Reflect.metadata(Role, \"admin\")'");
         continue;
       }
-      auto *callee = checker_.ctx_.make<MemberExpr>(
-          loc, checker_.ctx_.make<NameExpr>(loc, "Reflect"), "defineMetadata");
+      auto *callee = this->checker.ctx_.make<MemberExpr>(
+          loc, this->checker.ctx_.make<NameExpr>(loc, "Reflect"), "defineMetadata");
       std::vector<Expr *> args{metadata->args[0], metadata->args[1],
-                               checker_.classValueChecker().classValueAt(cls, loc)};
+                               this->checker.classValueChecker().classValueAt(cls, loc)};
       llvm::StringRef name = use.param >= 0 ? use.owner->name : memberName;
       if (place != Place::Class && !(use.param >= 0 && use.owner->isConstructor())) {
         args.push_back(
-            checker_.ctx_.make<StringLitExpr>(loc, std::u16string(name.begin(), name.end())));
+            this->checker.ctx_.make<StringLitExpr>(loc, std::u16string(name.begin(), name.end())));
       }
-      out.push_back(checker_.ctx_.make<ExprStmt>(
-          loc, checker_.exprChecker().checkExpr(checker_.ctx_.make<CallExpr>(loc, callee, args))));
+      out.push_back(this->checker.ctx_.make<ExprStmt>(
+          loc, this->checker.exprChecker().checkExpr(
+                   this->checker.ctx_.make<CallExpr>(loc, callee, args))));
       continue;
     }
     std::vector<Expr *> args{
-        checker_.classValueChecker().classValueAt(place == Place::Class ? current : cls, loc)};
+        this->checker.classValueChecker().classValueAt(place == Place::Class ? current : cls, loc)};
     if (place != Place::Class) {
       llvm::StringRef name = use.param >= 0 ? use.owner->name : memberName;
       if (use.param >= 0 && use.owner->isConstructor()) {
-        args.push_back(checker_.ctx_.make<UndefinedExpr>(loc));
+        args.push_back(this->checker.ctx_.make<UndefinedExpr>(loc));
       } else {
         args.push_back(
-            checker_.ctx_.make<StringLitExpr>(loc, std::u16string(name.begin(), name.end())));
+            this->checker.ctx_.make<StringLitExpr>(loc, std::u16string(name.begin(), name.end())));
       }
     }
     if (place == Place::Parameter) {
-      args.push_back(checker_.ctx_.make<IntLitExpr>(loc, uint64_t(use.param)));
+      args.push_back(this->checker.ctx_.make<IntLitExpr>(loc, uint64_t(use.param)));
     } else if (place == Place::Method && descVar) {
-      args.push_back(checker_.ctx_.make<NameExpr>(loc, descVar->name));
+      args.push_back(this->checker.ctx_.make<NameExpr>(loc, descVar->name));
     }
     args.resize(std::min(args.size(), takes[i]));
-    auto *call = checker_.ctx_.make<CallExpr>(loc, callees[i], std::move(args));
-    Expr *applied = checker_.exprChecker().checkExpr(call);
+    auto *call = this->checker.ctx_.make<CallExpr>(loc, callees[i], std::move(args));
+    Expr *applied = this->checker.exprChecker().checkExpr(call);
     const Type *result = applied->type;
     if (descVar && place == Place::Method && result == descType) {
-      auto *target = checker_.ctx_.make<NameExpr>(loc, descVar->name);
+      auto *target = this->checker.ctx_.make<NameExpr>(loc, descVar->name);
       target->binding = NamedVar{.var = descVar};
       target->type = descType;
-      auto *assign = checker_.ctx_.make<AssignExpr>(loc, std::nullopt, target, applied);
+      auto *assign = this->checker.ctx_.make<AssignExpr>(loc, std::nullopt, target, applied);
       assign->type = descType;
       applied = assign;
     } else if (place == Place::Class && result->classRef() &&
                result->classRef()->derivesFrom(current)) {
       if (ClassDecl *given = const_cast<ClassDecl *>(result->classRef()); given != current) {
-        checker_.lateClasses().replaceClass(current, given, loc);
+        this->checker.lateClasses().replaceClass(current, given, loc);
         current = given;
       }
     } else if (!result->isVoid() && !result->isUndefined() && !result->isError()) {
-      std::string name = decoratorName(use.decorator->expr);
+      std::string name = DecoratorChecker::decoratorName(use.decorator->expr);
       std::string label = name.empty() ? "the decorator" : "'" + name + "'";
       if (place == Place::Class && result->isConstructor()) {
-        checker_.diags_.error(
+        this->checker.diags_.error(
             loc, label + " returns '" + result->name().str() +
                      "', some class known only when the program runs, and the class it "
                      "gives in place of '" +
@@ -542,29 +546,30 @@ void DecoratorChecker::decorate(ClassDecl *cls, ClassField *field, FunctionDecl 
                      "'<T extends Constructor>(cls: T)', and return 'cls' or a class "
                      "that extends it");
       } else if (place == Place::Class) {
-        checker_.diags_.error(loc,
-                              label + " returns '" + result->name().str() +
-                                  "': a class decorator gives back nothing, the class it got, or a "
-                                  "class that extends it, which then replaces it");
+        this->checker.diags_.error(
+            loc, label + " returns '" + result->name().str() +
+                     "': a class decorator gives back nothing, the class it got, or a "
+                     "class that extends it, which then replaces it");
       } else if (place == Place::Method && descVar) {
-        checker_.diags_.error(loc,
-                              label + " returns '" + result->name().str() +
-                                  "': a decorator of a method returns nothing, or the descriptor "
-                                  "it got");
+        this->checker.diags_.error(
+            loc, label + " returns '" + result->name().str() +
+                     "': a decorator of a method returns nothing, or the descriptor "
+                     "it got");
       } else {
-        checker_.diags_.error(loc, label + " returns '" + result->name().str() +
-                                       "', which a decorator of " + placeText(place) +
-                                       " cannot give back; return nothing");
+        this->checker.diags_.error(loc, label + " returns '" + result->name().str() +
+                                            "', which a decorator of " + placeText(place) +
+                                            " cannot give back; return nothing");
       }
     }
-    out.push_back(checker_.ctx_.make<ExprStmt>(loc, applied));
+    out.push_back(this->checker.ctx_.make<ExprStmt>(loc, applied));
   }
   if (descVar) {
-    auto *target = checker_.ctx_.make<NameExpr>(at, method->impl()->name);
-    auto *value = checker_.ctx_.make<MemberExpr>(
-        at, checker_.ctx_.make<NameExpr>(at, descVar->name), "value");
-    auto *assign = checker_.ctx_.make<AssignExpr>(at, std::nullopt, target, value);
-    out.push_back(checker_.ctx_.make<ExprStmt>(at, checker_.exprChecker().checkExpr(assign)));
+    auto *target = this->checker.ctx_.make<NameExpr>(at, method->impl()->name);
+    auto *value = this->checker.ctx_.make<MemberExpr>(
+        at, this->checker.ctx_.make<NameExpr>(at, descVar->name), "value");
+    auto *assign = this->checker.ctx_.make<AssignExpr>(at, std::nullopt, target, value);
+    out.push_back(
+        this->checker.ctx_.make<ExprStmt>(at, this->checker.exprChecker().checkExpr(assign)));
   }
 }
 

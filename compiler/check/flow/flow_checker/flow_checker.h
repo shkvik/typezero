@@ -6,7 +6,7 @@ namespace tz {
 
 class FlowChecker {
 public:
-  explicit FlowChecker(Checker &checker);
+  explicit FlowChecker(Checker &owner);
 
   static Checker::Flow join(const Checker::Flow &a, const Checker::Flow &b);
   void assigned(const VarSymbol *var, const Expr *value);
@@ -19,7 +19,10 @@ public:
   void setDefined(const VarSymbol *var, bool defined);
 
 private:
-  Checker &checker_;
+  static void addLess(Facts &facts, const Linear &x, const Linear &y, bool orEqual);
+  static bool isArrayLength(const Term &t);
+
+  Checker &checker;
 };
 
 }

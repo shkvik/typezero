@@ -6,7 +6,7 @@ namespace tz {
 
 class UnknownCastLowerer {
 public:
-  explicit UnknownCastLowerer(Lowering &lowering);
+  explicit UnknownCastLowerer(Lowering &owner);
 
   llvm::Value *emitUnknownAs(llvm::Value *u, const Type *to, llvm::BasicBlock *fail);
   std::vector<const ClassDecl *> classesOfType(const Type *type);
@@ -14,7 +14,9 @@ public:
   llvm::Value *emitUnknownFit(llvm::Value *u, const Type *to);
 
 private:
-  Lowering &lowering_;
+  static bool plainObject(const Type *type);
+
+  Lowering &lowering;
 };
 
 }

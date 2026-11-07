@@ -199,7 +199,9 @@ Expr *RegexChecker::checkRegexMethod(CallExpr *call, MemberExpr *member) {
     return call;
   }
   if (name == "test" || name == "exec") {
-    if (!checker_.argumentChecker().checkArity(call, member->loc(), 1, 1)) {
+    ArgumentChecker::ResultArityMatches arity = checker_.argumentChecker().checkArity(call, 1, 1);
+    if (arity.isErr()) {
+      checker_.diags_.error(member->loc(), arity.error().message);
       return call;
     }
     call->args[0] = checker_.argumentChecker().checkArg(call->args[0], Type::string());
@@ -217,7 +219,9 @@ Expr *RegexChecker::checkRegexMethod(CallExpr *call, MemberExpr *member) {
     return call;
   }
   if (name == "toString") {
-    if (!checker_.argumentChecker().checkArity(call, member->loc(), 0, 0)) {
+    ArgumentChecker::ResultArityMatches arity = checker_.argumentChecker().checkArity(call, 0, 0);
+    if (arity.isErr()) {
+      checker_.diags_.error(member->loc(), arity.error().message);
       return call;
     }
     call->args.push_back(regexToString(member->object));
@@ -332,8 +336,13 @@ Expr *RegexChecker::checkRegExpConstructor(llvm::SMLoc loc, std::vector<Expr *> 
 Expr *RegexChecker::checkRegExpStatic(CallExpr *call, MemberExpr *member) {
   call->type = Type::error();
   if (member->name == "parse") {
-    if (checker_.callChecker().rejectSpread(call) ||
-        !checker_.argumentChecker().checkArity(call, member->loc(), 1, 2)) {
+    bool rejected = checker_.callChecker().rejectSpread(call);
+    ArgumentChecker::ResultArityMatches arity =
+        rejected ? ok(call) : checker_.argumentChecker().checkArity(call, 1, 2);
+    if (arity.isErr()) {
+      checker_.diags_.error(member->loc(), arity.error().message);
+    }
+    if (rejected || arity.isErr()) {
       return call;
     }
     for (Expr *&arg : call->args) {
@@ -350,8 +359,13 @@ Expr *RegexChecker::checkRegExpStatic(CallExpr *call, MemberExpr *member) {
     }
     return call;
   }
-  if (checker_.callChecker().rejectSpread(call) ||
-      !checker_.argumentChecker().checkArity(call, member->loc(), 1, 1)) {
+  bool rejected = checker_.callChecker().rejectSpread(call);
+  ArgumentChecker::ResultArityMatches arity =
+      rejected ? ok(call) : checker_.argumentChecker().checkArity(call, 1, 1);
+  if (arity.isErr()) {
+    checker_.diags_.error(member->loc(), arity.error().message);
+  }
+  if (rejected || arity.isErr()) {
     return call;
   }
   call->args[0] = checker_.argumentChecker().checkArg(call->args[0], Type::string());

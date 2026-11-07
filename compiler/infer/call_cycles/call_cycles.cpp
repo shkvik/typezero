@@ -2,104 +2,137 @@
 #include "compiler/declare/function_names/function_names.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/StringSet.h"
-#include "llvm/Support/ErrorHandling.h"
-#include <cmath>
-#include <functional>
-
-using llvm::cast;
-using llvm::dyn_cast;
-using llvm::dyn_cast_or_null;
-using llvm::isa;
 
 namespace tz {
 
-CallCycles::CallCycles(Checker &checker) : checker_(checker) {}
+CallCycles::CallCycles(Checker &owner)
+    : checker(owner) {}
 
-void CallCycles::findCycles(
-    llvm::ArrayRef<FunctionDecl *> functions,
-    llvm::function_ref<FunctionDecl *(FunctionDecl *, llvm::StringRef)> resolve) {
+void CallCycles::findCycles(llvm::ArrayRef<FunctionDecl *> functions, ResolveCall resolve) {
+  CycleSearch search;
+  search.nodes = this->unknownReturns(functions);
+  search.calls = this->callsBetween(search.nodes, resolve);
+  search.index.assign(search.nodes.size(), -1);
+  search.low.assign(search.nodes.size(), 0);
+  search.onStack.assign(search.nodes.size(), false);
+  int count = int(search.nodes.size());
+  for (int node = 0; node < count; ++node) {
+    if (search.index[node] < 0) {
+      this->visit(node, search);
+    }
+  }
+}
+
+std::vector<FunctionDecl *>
+CallCycles::unknownReturns(llvm::ArrayRef<FunctionDecl *> functions) const {
   std::vector<FunctionDecl *> nodes;
-  llvm::StringMap<size_t> byName;
-  llvm::DenseMap<const FunctionDecl *, size_t> byDecl;
   for (FunctionDecl *fn : functions) {
-    if (fn->sym && !fn->sym->ret && !checker_.inheritsReturn_.count(fn) &&
-        !checker_.returnSources_.count(fn)) {
-      byName[fn->name] = nodes.size();
-      byDecl[fn] = nodes.size();
+    bool unknown = fn->sym && !fn->sym->ret && !this->checker.inheritsReturn_.count(fn) &&
+                   !this->checker.returnSources_.count(fn);
+    if (unknown) {
       nodes.push_back(fn);
     }
   }
-  std::vector<std::vector<size_t>> calls(nodes.size());
-  for (size_t i = 0; i < nodes.size(); ++i) {
-    llvm::StringSet<> names;
-    for (const Param &param : nodes[i]->params) {
-      if (param.defaultValue()) {
-        collectNames(param.defaultValue(), names);
-      }
+
+  return nodes;
+}
+
+llvm::StringSet<> CallCycles::namesUsed(const FunctionDecl *fn) {
+  llvm::StringSet<> names;
+  for (const Param &param : fn->params) {
+    if (param.defaultValue()) {
+      collectNames(param.defaultValue(), names);
     }
-    collectNames(nodes[i]->body, names);
+  }
+  collectNames(fn->body, names);
+
+  return names;
+}
+
+std::vector<std::vector<int>> CallCycles::callsBetween(llvm::ArrayRef<FunctionDecl *> nodes,
+                                                       ResolveCall resolve) const {
+  int count = int(nodes.size());
+  llvm::StringMap<int> byName;
+  llvm::DenseMap<const FunctionDecl *, int> byDecl;
+  for (int node = 0; node < count; ++node) {
+    byName[nodes[node]->name] = node;
+    byDecl[nodes[node]] = node;
+  }
+
+  std::vector<std::vector<int>> calls(nodes.size());
+  for (int from = 0; from < count; ++from) {
+    FunctionDecl *fn = nodes[from];
+    llvm::StringSet<> names = CallCycles::namesUsed(fn);
     llvm::StringSet<> members;
-    collectMemberCalls(nodes[i]->body, members);
+    collectMemberCalls(fn->body, members);
     for (const auto &member : members) {
-      for (size_t j = 0; j < nodes.size(); ++j) {
-        if (nodes[j]->cls() && nodes[j]->name == member.getKey()) {
-          calls[i].push_back(j);
+      for (int to = 0; to < count; ++to) {
+        if (nodes[to]->cls() && nodes[to]->name == member.getKey()) {
+          calls[from].push_back(to);
         }
       }
     }
     for (const auto &name : names) {
+      llvm::StringRef key = name.getKey();
       if (!resolve) {
-        if (auto found = byName.find(name.getKey()); found != byName.end()) {
-          calls[i].push_back(found->second);
+        auto sameName = byName.find(key);
+        if (sameName != byName.end()) {
+          calls[from].push_back(sameName->second);
         }
-      } else if (FunctionDecl *callee = resolve(nodes[i], name.getKey())) {
-        if (auto found = byDecl.find(callee); found != byDecl.end()) {
-          calls[i].push_back(found->second);
-        }
+        continue;
+      }
+      FunctionDecl *target = resolve(fn, key);
+      auto sameDecl = target ? byDecl.find(target) : byDecl.end();
+      if (sameDecl != byDecl.end()) {
+        calls[from].push_back(sameDecl->second);
       }
     }
   }
 
-  std::vector<int> index(nodes.size(), -1), low(nodes.size(), 0);
-  std::vector<bool> onStack(nodes.size(), false);
-  std::vector<size_t> stack;
-  int next = 0;
-  std::function<void(size_t)> visit = [&](size_t v) {
-    index[v] = low[v] = next++;
-    stack.push_back(v);
-    onStack[v] = true;
-    for (size_t w : calls[v]) {
-      if (index[w] < 0) {
-        visit(w);
-        low[v] = std::min(low[v], low[w]);
-      } else if (onStack[w]) {
-        low[v] = std::min(low[v], index[w]);
-      }
-    }
-    if (low[v] != index[v]) {
-      return;
-    }
-    std::vector<FuncSymbol *> cycle;
-    size_t w;
-    do {
-      w = stack.back();
-      stack.pop_back();
-      onStack[w] = false;
-      cycle.push_back(nodes[w]->sym);
-    } while (w != v);
-    if (cycle.size() == 1 && !llvm::is_contained(calls[v], v)) {
-      return;
-    }
-    for (FuncSymbol *fn : cycle) {
-      checker_.cycleOf_[fn] = static_cast<unsigned>(checker_.cycles_.size());
-    }
-    checker_.cycles_.push_back(std::move(cycle));
-  };
-  for (size_t v = 0; v < nodes.size(); ++v) {
-    if (index[v] < 0) {
-      visit(v);
+  return calls;
+}
+
+void CallCycles::visit(int node, CycleSearch &search) {
+  search.index[node] = search.next;
+  search.low[node] = search.next;
+  ++search.next;
+  search.stack.push_back(node);
+  search.onStack[node] = true;
+  for (int to : search.calls[node]) {
+    if (search.index[to] < 0) {
+      this->visit(to, search);
+      search.low[node] = std::min(search.low[node], search.low[to]);
+    } else if (search.onStack[to]) {
+      search.low[node] = std::min(search.low[node], search.index[to]);
     }
   }
+  if (search.low[node] != search.index[node]) {
+    return;
+  }
+
+  std::vector<FuncSymbol *> cycle = CallCycles::popCycle(node, search);
+  bool callsItself = llvm::is_contained(search.calls[node], node);
+  if (cycle.size() == 1 && !callsItself) {
+    return;
+  }
+  unsigned id = static_cast<unsigned>(this->checker.cycles_.size());
+  for (FuncSymbol *fn : cycle) {
+    this->checker.cycleOf_[fn] = id;
+  }
+  this->checker.cycles_.push_back(std::move(cycle));
+}
+
+std::vector<FuncSymbol *> CallCycles::popCycle(int node, CycleSearch &search) {
+  std::vector<FuncSymbol *> cycle;
+  int member = -1;
+  do {
+    member = search.stack.back();
+    search.stack.pop_back();
+    search.onStack[member] = false;
+    cycle.push_back(search.nodes[member]->sym);
+  } while (member != node);
+
+  return cycle;
 }
 
 }

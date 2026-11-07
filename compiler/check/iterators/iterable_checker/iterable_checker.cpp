@@ -16,10 +16,6 @@
 #include "compiler/whole_program/flows/flows.h"
 #include "llvm/Support/MemoryBuffer.h"
 
-using llvm::cast;
-using llvm::dyn_cast;
-using llvm::dyn_cast_or_null;
-using llvm::isa;
 
 namespace tz {
 

@@ -6,7 +6,7 @@ namespace tz {
 
 class InheritChecker {
 public:
-  explicit InheritChecker(Checker &checker);
+  explicit InheritChecker(Checker &owner);
 
   void checkAbstract(ClassDecl *cls);
   void checkImplements(ClassDecl *cls);
@@ -14,7 +14,11 @@ public:
   Expr *checkSuperMethodCall(CallExpr *call, MemberExpr *member);
 
 private:
-  Checker &checker_;
+  static bool takesParams(const Type *fnType, const FuncSymbol *sym);
+  static bool isArrowMethod(const FunctionDecl *fn);
+  static void interfacesOf(const ClassDecl *cls, std::vector<const Type *> &out);
+
+  Checker &checker;
 };
 
 }

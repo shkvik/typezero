@@ -96,7 +96,9 @@ Expr *BufferStaticChecker::checkBytesStatic(CallExpr *call, MemberExpr *member) 
     return call;
   };
   if (type->bytes() == Bytes::ArrayBuffer && name == "isView") {
-    if (!checker_.argumentChecker().checkArity(call, member->loc(), 1, 1)) {
+    ArgumentChecker::ResultArityMatches arity = checker_.argumentChecker().checkArity(call, 1, 1);
+    if (arity.isErr()) {
+      checker_.diags_.error(member->loc(), arity.error().message);
       return call;
     }
     call->args[0] = checker_.exprChecker().checkExpr(call->args[0]);
@@ -127,7 +129,9 @@ Expr *BufferStaticChecker::checkBytesStatic(CallExpr *call, MemberExpr *member) 
                                              " there are 'from' and 'of'");
     return call;
   }
-  if (!checker_.argumentChecker().checkArity(call, member->loc(), 1, 2)) {
+  ArgumentChecker::ResultArityMatches arity = checker_.argumentChecker().checkArity(call, 1, 2);
+  if (arity.isErr()) {
+    checker_.diags_.error(member->loc(), arity.error().message);
     return call;
   }
   Expr *&source = call->args[0];
@@ -233,7 +237,9 @@ Expr *BufferStaticChecker::checkBufferStatic(CallExpr *call, MemberExpr *member)
     return lit;
   };
   if (name == "from") {
-    if (!checker_.argumentChecker().checkArity(call, member->loc(), 1, 3)) {
+    ArgumentChecker::ResultArityMatches arity = checker_.argumentChecker().checkArity(call, 1, 3);
+    if (arity.isErr()) {
+      checker_.diags_.error(member->loc(), arity.error().message);
       return call;
     }
     Expr *&source = call->args[0];
@@ -248,7 +254,11 @@ Expr *BufferStaticChecker::checkBufferStatic(CallExpr *call, MemberExpr *member)
     }
     if (from->isString()) {
       if (call->args.size() > 2) {
-        checker_.argumentChecker().checkArity(call, member->loc(), 1, 2);
+        ArgumentChecker::ResultArityMatches encoded =
+            checker_.argumentChecker().checkArity(call, 1, 2);
+        if (encoded.isErr()) {
+          checker_.diags_.error(member->loc(), encoded.error().message);
+        }
         return call;
       }
       call->args.resize(2, nullptr);
@@ -278,7 +288,9 @@ Expr *BufferStaticChecker::checkBufferStatic(CallExpr *call, MemberExpr *member)
     return made(from->isTypedArray() ? Builtin::BytesFromBytes : Builtin::BytesFromArray, buffer);
   }
   if (name == "alloc") {
-    if (!checker_.argumentChecker().checkArity(call, member->loc(), 1, 3)) {
+    ArgumentChecker::ResultArityMatches arity = checker_.argumentChecker().checkArity(call, 1, 3);
+    if (arity.isErr()) {
+      checker_.diags_.error(member->loc(), arity.error().message);
       return call;
     }
     call->args[0] = checker_.memberChecker().checkPosition(call->args[0]);
@@ -315,7 +327,9 @@ Expr *BufferStaticChecker::checkBufferStatic(CallExpr *call, MemberExpr *member)
     return made(Builtin::BufferAllocFill, buffer);
   }
   if (name == "allocUnsafe" || name == "allocUnsafeSlow") {
-    if (!checker_.argumentChecker().checkArity(call, member->loc(), 1, 1)) {
+    ArgumentChecker::ResultArityMatches arity = checker_.argumentChecker().checkArity(call, 1, 1);
+    if (arity.isErr()) {
+      checker_.diags_.error(member->loc(), arity.error().message);
       return call;
     }
     call->args[0] = checker_.memberChecker().checkPosition(call->args[0]);
@@ -324,7 +338,9 @@ Expr *BufferStaticChecker::checkBufferStatic(CallExpr *call, MemberExpr *member)
     return made(Builtin::BytesNew, buffer);
   }
   if (name == "concat") {
-    if (!checker_.argumentChecker().checkArity(call, member->loc(), 1, 2)) {
+    ArgumentChecker::ResultArityMatches arity = checker_.argumentChecker().checkArity(call, 1, 2);
+    if (arity.isErr()) {
+      checker_.diags_.error(member->loc(), arity.error().message);
       return call;
     }
     Expr *&list = call->args[0];
@@ -347,7 +363,9 @@ Expr *BufferStaticChecker::checkBufferStatic(CallExpr *call, MemberExpr *member)
     return made(Builtin::BufferConcat, buffer);
   }
   if (name == "byteLength") {
-    if (!checker_.argumentChecker().checkArity(call, member->loc(), 1, 2)) {
+    ArgumentChecker::ResultArityMatches arity = checker_.argumentChecker().checkArity(call, 1, 2);
+    if (arity.isErr()) {
+      checker_.diags_.error(member->loc(), arity.error().message);
       return call;
     }
     call->args[0] = checker_.exprChecker().checkExpr(call->args[0]);
@@ -369,7 +387,9 @@ Expr *BufferStaticChecker::checkBufferStatic(CallExpr *call, MemberExpr *member)
     return made(Builtin::BufferByteLength, Type::intTy());
   }
   if (name == "compare") {
-    if (!checker_.argumentChecker().checkArity(call, member->loc(), 2, 2)) {
+    ArgumentChecker::ResultArityMatches arity = checker_.argumentChecker().checkArity(call, 2, 2);
+    if (arity.isErr()) {
+      checker_.diags_.error(member->loc(), arity.error().message);
       return call;
     }
     for (Expr *&arg : call->args) {
@@ -378,7 +398,9 @@ Expr *BufferStaticChecker::checkBufferStatic(CallExpr *call, MemberExpr *member)
     return made(Builtin::BufferCompare, Type::intTy());
   }
   if (name == "isBuffer") {
-    if (!checker_.argumentChecker().checkArity(call, member->loc(), 1, 1)) {
+    ArgumentChecker::ResultArityMatches arity = checker_.argumentChecker().checkArity(call, 1, 1);
+    if (arity.isErr()) {
+      checker_.diags_.error(member->loc(), arity.error().message);
       return call;
     }
     call->args[0] = checker_.exprChecker().checkExpr(call->args[0]);
@@ -399,7 +421,9 @@ Expr *BufferStaticChecker::checkBufferStatic(CallExpr *call, MemberExpr *member)
     return made(Builtin::BufferIsBuffer, Type::boolTy());
   }
   if (name == "isEncoding") {
-    if (!checker_.argumentChecker().checkArity(call, member->loc(), 1, 1)) {
+    ArgumentChecker::ResultArityMatches arity = checker_.argumentChecker().checkArity(call, 1, 1);
+    if (arity.isErr()) {
+      checker_.diags_.error(member->loc(), arity.error().message);
       return call;
     }
     if (std::optional<std::u16string> text = literalText(call->args[0])) {
@@ -422,7 +446,9 @@ Expr *BufferStaticChecker::checkBufferStatic(CallExpr *call, MemberExpr *member)
 
 Expr *BufferStaticChecker::checkEmbedBytes(CallExpr *call, NameExpr *name) {
   call->type = Type::error();
-  if (!checker_.argumentChecker().checkArity(call, name->loc(), 1, 1)) {
+  ArgumentChecker::ResultArityMatches arity = checker_.argumentChecker().checkArity(call, 1, 1);
+  if (arity.isErr()) {
+    checker_.diags_.error(name->loc(), arity.error().message);
     return call;
   }
   std::string bytes, shown, full;

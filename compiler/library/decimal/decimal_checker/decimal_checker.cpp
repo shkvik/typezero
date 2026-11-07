@@ -346,7 +346,9 @@ void DecimalChecker::checkDecimalDivisor(BinaryOp op, const Expr *divisor) {
 
 Expr *DecimalChecker::checkDecimalCall(CallExpr *call, llvm::SMLoc loc) {
   call->type = Type::error();
-  if (!checker_.argumentChecker().checkArity(call, loc, 1, 1)) {
+  ArgumentChecker::ResultArityMatches arity = checker_.argumentChecker().checkArity(call, 1, 1);
+  if (arity.isErr()) {
+    checker_.diags_.error(loc, arity.error().message);
     return call;
   }
   Expr *&arg = call->args[0];
@@ -559,8 +561,10 @@ Expr *DecimalChecker::checkDecimalMethod(CallExpr *call, MemberExpr *member) {
     checkArgsLoosely();
     return call;
   }
-  if (!checker_.argumentChecker().checkArity(call, member->loc(), method->minArgs,
-                                             method->maxArgs)) {
+  ArgumentChecker::ResultArityMatches arity =
+      checker_.argumentChecker().checkArity(call, method->minArgs, method->maxArgs);
+  if (arity.isErr()) {
+    checker_.diags_.error(member->loc(), arity.error().message);
     return call;
   }
   for (size_t i = 0; i < call->args.size(); ++i) {

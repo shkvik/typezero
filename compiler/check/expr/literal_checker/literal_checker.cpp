@@ -5,33 +5,43 @@
 #include "compiler/check/types/type_operators/type_operators.h"
 #include "compiler/check/types/type_relations/type_relations.h"
 #include "llvm/ADT/STLExtras.h"
-#include "llvm/ADT/StringSet.h"
-#include "llvm/Support/ErrorHandling.h"
 #include <cmath>
-#include <functional>
 
-using llvm::cast;
 using llvm::dyn_cast;
-using llvm::dyn_cast_or_null;
 using llvm::isa;
 
 namespace tz {
 
-LiteralChecker::LiteralChecker(Checker &checker) : checker_(checker) {}
+LiteralChecker::LiteralChecker(Checker &owner)
+    : checker(owner) {}
+
+bool LiteralChecker::fitsIn(const IntLitExpr *lit, const Type *type, bool negated) {
+  if (negated) {
+    return lit->value == 0 ||
+           (!type->isUnsigned() && lit->value <= uint64_t(0) - uint64_t(type->intMin()));
+  }
+
+  return lit->value <= type->intMax();
+}
+
+LiteralChecker::ResultIntLiteralFits LiteralChecker::intFits(const IntLitExpr *lit,
+                                                             const Type *type, bool negated) {
+  if (type->isInteger() && !LiteralChecker::fitsIn(lit, type, negated)) {
+    std::string message = ErrorTextIntFits::tooBig(type->name());
+
+    return err(LiteralCheckerIntFitsError{
+        .code = LiteralCheckerIntFitsErrorCode::DOES_NOT_FIT,
+        .message = message,
+    });
+  }
+
+  return ok(type);
+}
 
 Expr *LiteralChecker::checkIntLit(IntLitExpr *lit, const Type *expected, bool negated) {
-  auto fits = [&](const Type *type) {
-    if (negated) {
-      return lit->value == 0 ||
-             (!type->isUnsigned() && lit->value <= uint64_t(0) - uint64_t(type->intMin()));
-    }
-
-    return lit->value <= type->intMax();
-  };
-
   if (expected) {
     double value = negated ? -double(lit->value) : double(lit->value);
-    if (const Type *literal = checker_.literalTypes().numberLiteralFor(expected, value, false);
+    if (const Type *literal = this->checker.literalTypes().numberLiteralFor(expected, value, false);
         literal && (!negated || value != 0)) {
       lit->type = literal;
       return lit;
@@ -43,21 +53,21 @@ Expr *LiteralChecker::checkIntLit(IntLitExpr *lit, const Type *expected, bool ne
   }
   if (expected && (expected->isNumeric() || expected->isDecimal())) {
     lit->type = expected;
-    if (expected->isInteger() && !fits(expected)) {
-      checker_.diags_.error(lit->loc(),
-                            "integer literal does not fit in type '" + expected->name() + "'");
+    ResultIntLiteralFits fits = LiteralChecker::intFits(lit, expected, negated);
+    if (fits.isErr()) {
+      this->checker.diags_.error(lit->loc(), fits.error().message);
     }
-  } else if (fits(Type::intTy())) {
+  } else if (LiteralChecker::fitsIn(lit, Type::intTy(), negated)) {
     lit->type = Type::intTy();
   } else {
     lit->type = Type::doubleTy();
   }
   std::pair<const char *, unsigned> key{lit->loc().getPointer(), unsigned(Expr::Kind::IntLit)};
-  if (!checker_.functions_.empty() && checker_.functions_.front()->sym &&
-      checker_.functions_.front()->sym->isGeneric()) {
-    checker_.forced_[key] = lit->type;
-  } else if (checker_.checkingInstance_) {
-    if (const Type *type = checker_.forced_.lookup(key);
+  if (!this->checker.functions_.empty() && this->checker.functions_.front()->sym &&
+      this->checker.functions_.front()->sym->isGeneric()) {
+    this->checker.forced_[key] = lit->type;
+  } else if (this->checker.checkingInstance_) {
+    if (const Type *type = this->checker.forced_.lookup(key);
         type && TypeRelations::isImplicitlyConvertible(lit->type, type)) {
       lit->type = type;
     }
@@ -70,7 +80,7 @@ Expr *LiteralChecker::checkTemplate(TemplateExpr *tmpl, const Type *expected) {
   std::vector<const Type *> parts;
   bool constant = true;
   for (Expr *&e : tmpl->exprs) {
-    e = checker_.exprChecker().checkExpr(e);
+    e = this->checker.exprChecker().checkExpr(e);
     const Expr *part = e;
     if (auto *conv = dyn_cast<CastExpr>(e); conv && conv->isImplicit() && conv->type->isString()) {
       part = conv->operand;
@@ -78,7 +88,7 @@ Expr *LiteralChecker::checkTemplate(TemplateExpr *tmpl, const Type *expected) {
     parts.push_back(part->type);
     constant &= isa<NameExpr>(part) || isa<StringLitExpr>(part) || isa<IntLitExpr>(part) ||
                 isa<BoolLitExpr>(part);
-    e = checker_.concatChecker().toStringOperand(e);
+    e = this->checker.concatChecker().toStringOperand(e);
   }
   tmpl->type = Type::string();
   const Type *want = expected ? expected->nonOptional() : nullptr;
@@ -102,12 +112,12 @@ Expr *LiteralChecker::checkTemplate(TemplateExpr *tmpl, const Type *expected) {
     }
   }
   const Type *type =
-      checker_.typeOperators().evalTypeOp(Type::typeOp(TypeOp::Template, operands), operands);
+      this->checker.typeOperators().evalTypeOp(Type::typeOp(TypeOp::Template, operands), operands);
   if (type->isPattern() ||
       (type->typeOp() == TypeOp::Template && TypeRelations::isImplicitlyConvertible(type, want))) {
     tmpl->type = type;
   } else if (type->isStringLiteral() && constant) {
-    auto *literal = checker_.ctx_.make<StringLitExpr>(tmpl->loc(), type->literalText());
+    auto *literal = this->checker.ctx_.make<StringLitExpr>(tmpl->loc(), type->literalText());
     literal->type = type;
     return literal;
   }

@@ -6,7 +6,7 @@ namespace tz {
 
 class Scopes {
 public:
-  explicit Scopes(Checker &checker);
+  explicit Scopes(Checker &owner);
 
   void declare(llvm::StringRef name, llvm::SMLoc loc, ScopeEntry entry);
   ScopeEntry lookup(llvm::StringRef name) const;
@@ -15,7 +15,7 @@ public:
   void checkVisible(NameExpr *name, const VarSymbol *var);
 
 private:
-  Checker &checker_;
+  Checker &checker;
 };
 
 }

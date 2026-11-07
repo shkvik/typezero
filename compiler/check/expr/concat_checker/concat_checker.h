@@ -6,13 +6,13 @@ namespace tz {
 
 class ConcatChecker {
 public:
-  explicit ConcatChecker(Checker &checker);
+  explicit ConcatChecker(Checker &owner);
 
   Expr *toStringOperand(Expr *expr);
   void reportMixedConcat(const BinaryExpr *root, const BinaryExpr *mixed);
 
 private:
-  Checker &checker_;
+  Checker &checker;
 };
 
 }

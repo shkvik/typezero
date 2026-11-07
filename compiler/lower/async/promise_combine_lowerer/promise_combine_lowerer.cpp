@@ -13,11 +13,8 @@
 #include "compiler/memory/memory_plan/memory_plan.h"
 #include "llvm/ADT/STLExtras.h"
 
-using llvm::BasicBlock;
 using llvm::cast;
 using llvm::dyn_cast;
-using llvm::isa;
-using llvm::Value;
 
 namespace tz {
 
@@ -27,10 +24,12 @@ enum CombineKind : int32_t { kAll, kRace };
 
 }
 
-PromiseCombineLowerer::PromiseCombineLowerer(Lowering &lowering) : lowering_(lowering) {}
+PromiseCombineLowerer::PromiseCombineLowerer(Lowering &owner)
+    : lowering(owner) {}
 
 llvm::Value *PromiseCombineLowerer::emitPromiseCombine(CallExpr *call) {
-  llvm::Type *ptr = lowering_.builder_.getPtrTy(), *i32 = lowering_.builder_.getInt32Ty();
+  llvm::Type *ptr = this->lowering.builder_.getPtrTy();
+  llvm::Type *i32 = this->lowering.builder_.getInt32Ty();
   const Type *anyPromise = Type::promise(Type::voidTy());
   Expr *arg = call->args[0];
   const Type *argType = arg->type;
@@ -39,26 +38,28 @@ llvm::Value *PromiseCombineLowerer::emitPromiseCombine(CallExpr *call) {
       return value;
     }
     auto *fn = cast<llvm::Function>(
-        lowering_.asyncLowerer().asyncFunction("tz_promise_resolved", ptr, {ptr}).getCallee());
-    llvm::Value *promise = lowering_.builder_.CreateCall(
-        fn, {lowering_.promiseLowerer().promiseLayout(type)}, "promise");
-    if (lowering_.promiseLowerer().promiseValueSize(type)) {
-      lowering_.builder_.CreateStore(value,
-                                     lowering_.promiseLowerer().promiseValueAddress(promise));
+        this->lowering.asyncLowerer().asyncFunction("tz_promise_resolved", ptr, {ptr}).getCallee());
+    llvm::Value *promise = this->lowering.builder_.CreateCall(
+        fn, {this->lowering.promiseLowerer().promiseLayout(type)}, "promise");
+    if (this->lowering.promiseLowerer().promiseValueSize(type)) {
+      this->lowering.builder_.CreateStore(
+          value, this->lowering.promiseLowerer().promiseValueAddress(promise));
     }
 
     return promise;
   };
   auto arrayOf = [&](std::vector<llvm::Value *> values, llvm::ArrayRef<const Type *> types) {
-    llvm::Value *array = lowering_.builder_.CreateCall(
-        lowering_.rt_.arrNew,
-        {lowering_.typeDescriptors().typeDescriptor(anyPromise),
-         lowering_.builder_.getInt64(values.size()), lowering_.builder_.getInt64(values.size())},
+    llvm::Value *array = this->lowering.builder_.CreateCall(
+        this->lowering.rt_.arrNew,
+        {this->lowering.typeDescriptors().typeDescriptor(anyPromise),
+         this->lowering.builder_.getInt64(values.size()),
+         this->lowering.builder_.getInt64(values.size())},
         "promises");
-    llvm::Value *data = lowering_.arrayLowerer().arrayData(array);
+    llvm::Value *data = this->lowering.arrayLowerer().arrayData(array);
     for (size_t i = 0; i < values.size(); ++i) {
-      lowering_.builder_.CreateStore(toPromise(values[i], types[i]),
-                                     lowering_.builder_.CreateConstInBoundsGEP1_64(ptr, data, i));
+      this->lowering.builder_.CreateStore(
+          toPromise(values[i], types[i]),
+          this->lowering.builder_.CreateConstInBoundsGEP1_64(ptr, data, i));
     }
 
     return array;
@@ -80,116 +81,120 @@ llvm::Value *PromiseCombineLowerer::emitPromiseCombine(CallExpr *call) {
     if (argType->isTuple()) {
       given = types;
     }
-    promises = arrayOf(lowering_.exprLowerer().emitExprs(exprs), types);
+    promises = arrayOf(this->lowering.exprLowerer().emitExprs(exprs), types);
   } else if (argType->isTuple()) {
-    llvm::Value *tuple = lowering_.exprLowerer().emitExpr(arg);
+    llvm::Value *tuple = this->lowering.exprLowerer().emitExpr(arg);
     std::vector<llvm::Value *> values;
     std::vector<const Type *> types;
     for (const Field &f : argType->fields()) {
       given.push_back(f.type);
     }
     for (const Field &f : argType->fields()) {
-      llvm::Value *v = lowering_.builder_.CreateLoad(
-          lowering_.moduleBuilder().lower(f.type),
-          lowering_.objectLayouts().fieldAddress(tuple, argType, f.name));
-      lowering_.refCounts().retainValue(v, f.type);
+      llvm::Value *v = this->lowering.builder_.CreateLoad(
+          this->lowering.moduleBuilder().lower(f.type),
+          this->lowering.objectLayouts().fieldAddress(tuple, argType, f.name));
+      this->lowering.refCounts().retainValue(v, f.type);
       values.push_back(v);
       types.push_back(f.type);
     }
-    lowering_.refCounts().releaseValue(tuple, argType);
+    this->lowering.refCounts().releaseValue(tuple, argType);
     promises = arrayOf(values, types);
   } else if (argType->inner()->isPromise()) {
-    promises = lowering_.exprLowerer().emitExpr(arg);
+    promises = this->lowering.exprLowerer().emitExpr(arg);
   } else {
     const Type *element = argType->inner();
-    llvm::Value *values = lowering_.exprLowerer().emitExpr(arg);
-    promises = lowering_.builder_.CreateCall(
-        lowering_.asyncLowerer().asyncFunction("tz_promise_resolve_all", ptr, {ptr, ptr, ptr}),
-        {values, lowering_.promiseLowerer().promiseLayout(element),
-         lowering_.typeDescriptors().typeDescriptor(anyPromise)},
+    llvm::Value *values = this->lowering.exprLowerer().emitExpr(arg);
+    promises = this->lowering.builder_.CreateCall(
+        this->lowering.asyncLowerer().asyncFunction("tz_promise_resolve_all", ptr, {ptr, ptr, ptr}),
+        {values, this->lowering.promiseLowerer().promiseLayout(element),
+         this->lowering.typeDescriptors().typeDescriptor(anyPromise)},
         "promises");
-    lowering_.refCounts().releaseValue(values, argType);
+    this->lowering.refCounts().releaseValue(values, argType);
   }
 
   const Type *result = call->type->promised();
   int32_t kind = call->builtin() == Builtin::PromiseAll ? kAll : kRace;
-  llvm::Constant *null = llvm::ConstantPointerNull::get(lowering_.builder_.getPtrTy());
-  llvm::Constant *items = null, *tuple = null, *convert = null;
+  llvm::Constant *null = llvm::ConstantPointerNull::get(this->lowering.builder_.getPtrTy());
+  llvm::Constant *items = null;
+  llvm::Constant *tuple = null;
+  llvm::Constant *convert = null;
   uint32_t tupleSize = 0;
-  const llvm::DataLayout &dl = lowering_.module_->getDataLayout();
+  const llvm::DataLayout &dl = this->lowering.module_->getDataLayout();
   if (result->isTuple()) {
     std::vector<unsigned> keys(result->fields().size());
     for (unsigned i = 0; i < keys.size(); ++i) {
       keys[i] = i;
     }
-    tuple = lowering_.objectLayouts().layoutDescriptor(result, keys);
-    tupleSize = uint32_t(dl.getTypeAllocSize(lowering_.objectLayouts().objectLayout(result).type));
+    tuple = this->lowering.objectLayouts().layoutDescriptor(result, keys);
+    tupleSize =
+        uint32_t(dl.getTypeAllocSize(this->lowering.objectLayouts().objectLayout(result).type));
   } else if (result->isArray()) {
-    items = lowering_.typeDescriptors().typeDescriptor(result->inner());
+    items = this->lowering.typeDescriptors().typeDescriptor(result->inner());
   }
-  if (kind == kRace && lowering_.promiseLowerer().promiseValueSize(result)) {
+  if (kind == kRace && this->lowering.promiseLowerer().promiseValueSize(result)) {
     std::vector<llvm::Constant *> fns;
     bool converts = false;
     for (const Type *t : given) {
       const Type *value = t->isPromise() ? t->promised() : t;
       if (value == result || value->isNever() ||
-          !lowering_.promiseLowerer().promiseValueSize(value)) {
+          !this->lowering.promiseLowerer().promiseValueSize(value)) {
         fns.push_back(null);
         continue;
       }
-      fns.push_back(combineConverter(value, result));
+      fns.push_back(this->combineConverter(value, result));
       converts = true;
     }
     if (converts) {
       auto *fnsType = llvm::ArrayType::get(ptr, fns.size());
       auto *global = new llvm::GlobalVariable(
-          *lowering_.module_, fnsType, true, llvm::GlobalValue::PrivateLinkage,
+          *this->lowering.module_, fnsType, true, llvm::GlobalValue::PrivateLinkage,
           llvm::ConstantArray::get(fnsType, fns), "tz.promise.convert");
       global->setUnnamedAddr(llvm::GlobalValue::UnnamedAddr::Global);
       convert = global;
     }
   }
-  auto *shapeType = llvm::StructType::get(lowering_.ctx_, {ptr, ptr, ptr, i32, ptr});
+  auto *shapeType = llvm::StructType::get(this->lowering.ctx_, {ptr, ptr, ptr, i32, ptr});
   auto *shape = new llvm::GlobalVariable(
-      *lowering_.module_, shapeType, true, llvm::GlobalValue::PrivateLinkage,
+      *this->lowering.module_, shapeType, true, llvm::GlobalValue::PrivateLinkage,
       llvm::ConstantStruct::get(shapeType,
-                                {lowering_.promiseLowerer().promiseLayout(result), items, tuple,
-                                 lowering_.builder_.getInt32(tupleSize), convert}),
+                                {this->lowering.promiseLowerer().promiseLayout(result), items,
+                                 tuple, this->lowering.builder_.getInt32(tupleSize), convert}),
       "tz.promise.combine");
   shape->setUnnamedAddr(llvm::GlobalValue::UnnamedAddr::Global);
-  llvm::Value *promise = lowering_.builder_.CreateCall(
-      lowering_.asyncLowerer().asyncFunction("tz_promise_combine", ptr, {i32, ptr, ptr}),
-      {lowering_.builder_.getInt32(uint32_t(kind)), promises, shape}, "promise");
-  lowering_.builder_.CreateCall(
-      lowering_.memory().hasCycles
-          ? lowering_.groupLowerer().groupAwareRelease(lowering_.arrReleaseFn_)
-          : lowering_.arrReleaseFn_,
+  llvm::Value *promise = this->lowering.builder_.CreateCall(
+      this->lowering.asyncLowerer().asyncFunction("tz_promise_combine", ptr, {i32, ptr, ptr}),
+      {this->lowering.builder_.getInt32(uint32_t(kind)), promises, shape}, "promise");
+  this->lowering.builder_.CreateCall(
+      this->lowering.memory().hasCycles
+          ? this->lowering.groupLowerer().groupAwareRelease(this->lowering.arrReleaseFn_)
+          : this->lowering.arrReleaseFn_,
       {promises});
 
   return promise;
 }
 
 llvm::Function *PromiseCombineLowerer::combineConverter(const Type *from, const Type *to) {
-  llvm::Function *&fn = combineConverters_[{from, to}];
+  llvm::Function *&fn = this->combineConverters[{from, to}];
   if (fn) {
     return fn;
   }
-  llvm::Type *ptr = lowering_.builder_.getPtrTy();
+  llvm::Type *ptr = this->lowering.builder_.getPtrTy();
   fn = llvm::Function::Create(
-      llvm::FunctionType::get(lowering_.builder_.getVoidTy(), {ptr, ptr}, false),
-      llvm::GlobalValue::InternalLinkage, "tz.promise.convert", lowering_.module_.get());
-  lowering_.functionBuilder().setFunctionAttributes(fn);
-  llvm::IRBuilderBase::InsertPoint point = lowering_.builder_.saveIP();
-  llvm::Function *outer = std::exchange(lowering_.function_, fn);
-  lowering_.builder_.SetInsertPoint(llvm::BasicBlock::Create(lowering_.ctx_, "entry", fn));
-  llvm::Value *value =
-      lowering_.builder_.CreateLoad(lowering_.moduleBuilder().lower(from), fn->getArg(1), "value");
-  lowering_.refCounts().retainValue(value, from);
-  lowering_.builder_.CreateStore(lowering_.exprLowerer().emitConversion(value, from, to),
-                                 fn->getArg(0));
-  lowering_.builder_.CreateRetVoid();
-  lowering_.function_ = outer;
-  lowering_.builder_.restoreIP(point);
+      llvm::FunctionType::get(this->lowering.builder_.getVoidTy(), {ptr, ptr}, false),
+      llvm::GlobalValue::InternalLinkage, "tz.promise.convert", this->lowering.module_.get());
+  this->lowering.functionBuilder().setFunctionAttributes(fn);
+  llvm::IRBuilderBase::InsertPoint point = this->lowering.builder_.saveIP();
+  llvm::Function *outer = std::exchange(this->lowering.function_, fn);
+  this->lowering.builder_.SetInsertPoint(
+      llvm::BasicBlock::Create(this->lowering.ctx_, "entry", fn));
+  llvm::Value *value = this->lowering.builder_.CreateLoad(
+      this->lowering.moduleBuilder().lower(from), fn->getArg(1), "value");
+  this->lowering.refCounts().retainValue(value, from);
+  this->lowering.builder_.CreateStore(this->lowering.exprLowerer().emitConversion(value, from, to),
+                                      fn->getArg(0));
+  this->lowering.builder_.CreateRetVoid();
+  this->lowering.function_ = outer;
+  this->lowering.builder_.restoreIP(point);
 
   return fn;
 }

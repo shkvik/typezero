@@ -7,14 +7,16 @@ namespace tz {
 
 class DebugTypes {
 public:
-  DebugTypes(Lowering &lowering, llvm::DIBuilder &builder, llvm::DICompileUnit *unit);
+  DebugTypes(Lowering &owner, llvm::DIBuilder &debugBuilder, llvm::DICompileUnit *compileUnit);
 
   llvm::DIType *of(const Type *type);
   llvm::DIType *referenceTo(llvm::DIType *type);
   void finish();
-  bool usesAtoms() const { return atom_ != nullptr; }
+  bool usesAtoms() const;
 
 private:
+  static const char *slotName(UnionSlot slot);
+
   llvm::DIType *make(const Type *type);
   llvm::DIType *basic(llvm::StringRef name, unsigned bits, unsigned encoding);
   llvm::DIType *pointer(llvm::DIType *to);
@@ -37,17 +39,17 @@ private:
   std::string unique(llvm::StringRef name, const void *owner);
   void completeObject(const Type *type, llvm::DICompositeType *temporary);
 
-  Lowering &lowering_;
-  llvm::DIBuilder &builder_;
-  llvm::DICompileUnit *unit_;
-  llvm::DenseMap<const Type *, llvm::DIType *> types_;
-  std::vector<std::pair<const Type *, llvm::DICompositeType *>> pending_;
-  llvm::StringMap<const void *> names_;
-  llvm::DIType *header_ = nullptr;
-  llvm::DIType *string_ = nullptr;
-  llvm::DIType *function_ = nullptr;
-  llvm::DIType *atom_ = nullptr;
-  llvm::DIType *voidPointer_ = nullptr;
+  Lowering &lowering;
+  llvm::DIBuilder &builder;
+  llvm::DICompileUnit *unit;
+  llvm::DenseMap<const Type *, llvm::DIType *> types;
+  std::vector<std::pair<const Type *, llvm::DICompositeType *>> pending;
+  llvm::StringMap<const void *> names;
+  llvm::DIType *headerType = nullptr;
+  llvm::DIType *stringType = nullptr;
+  llvm::DIType *functionType = nullptr;
+  llvm::DIType *atomType = nullptr;
+  llvm::DIType *voidPointerType = nullptr;
 };
 
 }

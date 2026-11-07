@@ -12,13 +12,8 @@
 #include "compiler/instances/late_classes/late_classes.h"
 #include "compiler/whole_program/flows/flows.h"
 #include "llvm/ADT/STLExtras.h"
-#include <functional>
-#include <set>
 
-using llvm::cast;
 using llvm::dyn_cast;
-using llvm::dyn_cast_or_null;
-using llvm::isa;
 
 namespace tz {
 
@@ -26,36 +21,39 @@ namespace {
 
 constexpr unsigned kMaxInstanceChain = 16;
 
-const ClassDecl *literalClassIn(const Type *type, llvm::SmallPtrSetImpl<const Type *> &seen) {
+}
+
+const ClassDecl *GenericInstantiator::literalClassIn(const Type *type,
+                                                     llvm::SmallPtrSetImpl<const Type *> &seen) {
   switch (type->kind()) {
   case Type::Kind::Optional:
   case Type::Kind::Array:
   case Type::Kind::Promise:
-    return literalClassIn(type->inner(), seen);
+    return GenericInstantiator::literalClassIn(type->inner(), seen);
   case Type::Kind::Result:
-    if (const ClassDecl *cls = literalClassIn(type->okType(), seen)) {
+    if (const ClassDecl *cls = GenericInstantiator::literalClassIn(type->okType(), seen)) {
       return cls;
     }
-    return literalClassIn(type->errType(), seen);
+    return GenericInstantiator::literalClassIn(type->errType(), seen);
   case Type::Kind::Function:
     for (const Type *p : type->params()) {
-      if (const ClassDecl *cls = literalClassIn(p, seen)) {
+      if (const ClassDecl *cls = GenericInstantiator::literalClassIn(p, seen)) {
         return cls;
       }
     }
-    return literalClassIn(type->ret(), seen);
+    return GenericInstantiator::literalClassIn(type->ret(), seen);
   case Type::Kind::Iterator:
     for (const Type *t : {type->yielded(), type->returned(), type->sent()}) {
-      if (const ClassDecl *cls = literalClassIn(t, seen)) {
+      if (const ClassDecl *cls = GenericInstantiator::literalClassIn(t, seen)) {
         return cls;
       }
     }
     return nullptr;
   case Type::Kind::Dict:
-    if (const ClassDecl *cls = literalClassIn(type->keyType(), seen)) {
+    if (const ClassDecl *cls = GenericInstantiator::literalClassIn(type->keyType(), seen)) {
       return cls;
     }
-    return literalClassIn(type->valueType(), seen);
+    return GenericInstantiator::literalClassIn(type->valueType(), seen);
   case Type::Kind::Object:
     if (!seen.insert(type).second) {
       return nullptr;
@@ -64,7 +62,7 @@ const ClassDecl *literalClassIn(const Type *type, llvm::SmallPtrSetImpl<const Ty
       return cls->literal() ? cls : nullptr;
     }
     for (const Field &f : type->fields()) {
-      if (const ClassDecl *cls = literalClassIn(f.type, seen)) {
+      if (const ClassDecl *cls = GenericInstantiator::literalClassIn(f.type, seen)) {
         return cls;
       }
     }
@@ -74,7 +72,7 @@ const ClassDecl *literalClassIn(const Type *type, llvm::SmallPtrSetImpl<const Ty
   }
 }
 
-std::string typeList(llvm::ArrayRef<const Type *> types) {
+std::string GenericInstantiator::typeList(llvm::ArrayRef<const Type *> types) {
   std::string text;
   for (const Type *t : types) {
     text += (text.empty() ? "" : ", ") + t->name().str();
@@ -83,7 +81,8 @@ std::string typeList(llvm::ArrayRef<const Type *> types) {
   return text;
 }
 
-std::string bindingList(llvm::ArrayRef<const Type *> params, llvm::ArrayRef<const Type *> args) {
+std::string GenericInstantiator::bindingList(llvm::ArrayRef<const Type *> params,
+                                             llvm::ArrayRef<const Type *> args) {
   std::string text;
   for (size_t i = 0; i < params.size() && i < args.size(); ++i) {
     text += (text.empty() ? "" : ", ") + params[i]->name().str() + " = " + args[i]->name().str();
@@ -92,34 +91,33 @@ std::string bindingList(llvm::ArrayRef<const Type *> params, llvm::ArrayRef<cons
   return text;
 }
 
-}
-
-GenericInstantiator::GenericInstantiator(Checker &checker) : checker_(checker) {}
+GenericInstantiator::GenericInstantiator(Checker &owner)
+    : checker(owner) {}
 
 Expr *GenericInstantiator::checkGenericValue(NameExpr *name, FuncSymbol *generic,
                                              const Checker::Signature *expected) {
   name->type = Type::error();
-  checker_.returnInferrer().resolveParams(generic);
-  const Type *ret = checker_.returnInferrer().returnType(generic);
-  if (returnsOwnClass(generic, ret)) {
+  this->checker.returnInferrer().resolveParams(generic);
+  const Type *ret = this->checker.returnInferrer().returnType(generic);
+  if (this->returnsOwnClass(generic, ret)) {
     ret = nullptr;
   }
   llvm::ArrayRef<const Type *> typeParams = generic->typeParams;
   std::vector<const Type *> bound(typeParams.size(), nullptr);
   if (!name->typeArgs.empty()) {
     if (name->typeArgs.size() > typeParams.size()) {
-      checker_.diags_.error(name->loc(), "'" + generic->name + "' takes " +
-                                             std::to_string(typeParams.size()) + " type argument" +
-                                             (typeParams.size() == 1 ? "" : "s") + ", but got " +
-                                             std::to_string(name->typeArgs.size()));
+      this->checker.diags_.error(
+          name->loc(), "'" + generic->name + "' takes " + std::to_string(typeParams.size()) +
+                           " type argument" + (typeParams.size() == 1 ? "" : "s") + ", but got " +
+                           std::to_string(name->typeArgs.size()));
       return name;
     }
     for (size_t k = 0; k < name->typeArgs.size(); ++k) {
-      bound[k] = checker_.typeResolver().resolveType(name->typeArgs[k], true);
+      bound[k] = this->checker.typeResolver().resolveType(name->typeArgs[k], true);
     }
   } else if (expected) {
-    Inference fromParams(typeParams, checker_.aliasOrigins_, nullptr),
-        fromResult(typeParams, checker_.aliasOrigins_, nullptr);
+    Inference fromParams(typeParams, this->checker.aliasOrigins_, nullptr),
+        fromResult(typeParams, this->checker.aliasOrigins_, nullptr);
     for (size_t i = 0; i < generic->params.size() && i < expected->params.size(); ++i) {
       if (expected->params[i]) {
         fromParams.from(generic->params[i], expected->params[i]);
@@ -143,27 +141,27 @@ Expr *GenericInstantiator::checkGenericValue(NameExpr *name, FuncSymbol *generic
       }
     }
   } else {
-    checker_.diags_.error(name->loc(),
-                          "'" + generic->name +
-                              "' is generic, so a value of it needs its type arguments, "
-                              "e.g. '" +
-                              generic->name + "<int>', or a function type where it goes");
+    this->checker.diags_.error(name->loc(),
+                               "'" + generic->name +
+                                   "' is generic, so a value of it needs its type arguments, "
+                                   "e.g. '" +
+                                   generic->name + "<int>', or a function type where it goes");
     return name;
   }
-  if (!checker_.typeArgInferrer().finishTypeArgs(generic, bound, name->loc(), false) || !ret) {
+  if (!this->checker.typeArgInferrer().finishTypeArgs(generic, bound, name->loc(), false) || !ret) {
     return name;
   }
   std::vector<const Type *> params;
   for (const Type *p : generic->params) {
-    params.push_back(checker_.typeParams().substituteValue(p, typeParams, bound));
+    params.push_back(this->checker.typeParams().substituteValue(p, typeParams, bound));
   }
   name->binding = NamedFunction{.func = generic};
-  name->type =
-      Type::function(params, generic->minArgs, generic->hasRest,
-                     checker_.typeParams().substitute(ret, typeParams, bound), generic->hasThis);
+  name->type = Type::function(params, generic->minArgs, generic->hasRest,
+                              this->checker.typeParams().substitute(ret, typeParams, bound),
+                              generic->hasThis);
   bool concrete = llvm::none_of(bound, [](const Type *t) { return mentionsParam(t); });
-  if (concrete && !checker_.trial_ && !generic->inferring) {
-    if (FuncSymbol *instance = instantiate(generic, bound, name->loc())) {
+  if (concrete && !this->checker.trial_ && !generic->inferring) {
+    if (FuncSymbol *instance = this->instantiate(generic, bound, name->loc())) {
       name->binding = NamedFunction{.func = instance};
     }
   }
@@ -173,16 +171,17 @@ Expr *GenericInstantiator::checkGenericValue(NameExpr *name, FuncSymbol *generic
 
 bool GenericInstantiator::returnsOwnClass(const FuncSymbol *generic, const Type *ret) {
   llvm::SmallPtrSet<const Type *, 4> seen;
-  const ClassDecl *cls = ret ? literalClassIn(ret, seen) : nullptr;
+  const ClassDecl *cls = ret ? GenericInstantiator::literalClassIn(ret, seen) : nullptr;
   if (!cls) {
     return false;
   }
-  if (ownClassReturns_.insert(generic).second) {
-    checker_.diags_.error(cls->literal()->loc(),
-                          "generic function '" + generic->name +
-                              "' cannot return an object literal with methods yet: each copy of "
-                              "it makes a class of its own; declare a class, or give the "
-                              "object function fields, 'f: () => ...'");
+  if (this->ownClassReturns.insert(generic).second) {
+    this->checker.diags_.error(
+        cls->literal()->loc(),
+        "generic function '" + generic->name +
+            "' cannot return an object literal with methods yet: each copy of "
+            "it makes a class of its own; declare a class, or give the "
+            "object function fields, 'f: () => ...'");
   }
 
   return true;
@@ -216,7 +215,7 @@ std::vector<const Type *> GenericInstantiator::exactClassArgs(CallExpr *call,
     exact[i] = arg->type;
     call->args[i] = arg;
     for (const CastExpr *conv : dropped) {
-      checker_.constructorCasts_.erase(conv);
+      this->checker.constructorCasts_.erase(conv);
     }
   }
 
@@ -230,7 +229,7 @@ FuncSymbol *GenericInstantiator::instantiate(FuncSymbol *generic, llvm::ArrayRef
   }
   std::vector<const Type *> reps;
   for (size_t k = 0; k < args.size(); ++k) {
-    reps.push_back(checker_.typeParams().exactTypeParam(generic, k)
+    reps.push_back(this->checker.typeParams().exactTypeParam(generic, k)
                        ? args[k]
                        : TypeParams::representation(args[k]));
   }
@@ -240,70 +239,71 @@ FuncSymbol *GenericInstantiator::instantiate(FuncSymbol *generic, llvm::ArrayRef
     keyTypes.insert(keyTypes.end(), exact.begin(), exact.end());
   }
   auto key = std::make_pair(static_cast<const FuncSymbol *>(generic), keyTypes);
-  if (auto found = instances_.find(key); found != instances_.end()) {
+  if (auto found = this->instances.find(key); found != this->instances.end()) {
     Checker::Instance *instance = found->second;
-    if (checker_.checkingInstance_ && !instance->checked && !instance->checking) {
-      checkInstance(instance);
+    if (this->checker.checkingInstance_ && !instance->checked && !instance->checking) {
+      this->checkInstance(instance);
     }
-    if (checker_.checkingInstance_ && instance->failed) {
-      reportInstance(instance, loc, args);
+    if (this->checker.checkingInstance_ && instance->failed) {
+      this->reportInstance(instance, loc, args);
     }
     return instance->decl->sym;
   }
   unsigned chain = 0;
-  for (const Checker::Instance *i = checker_.checkingInstance_; i; i = i->requester) {
+  for (const Checker::Instance *i = this->checker.checkingInstance_; i; i = i->requester) {
     chain += i->generic == generic;
   }
   if (chain >= kMaxInstanceChain) {
-    checker_.diags_.error(
+    this->checker.diags_.error(
         loc, "calling '" + generic->name +
                  "' here needs another copy of it for each copy of the "
                  "functions that lead here, without end: its type arguments keep growing ('" +
-                 typeList(args) +
+                 GenericInstantiator::typeList(args) +
                  "' by now); generic functions that call each other must pass "
                  "their type parameters on unchanged");
     return nullptr;
   }
 
   for (const Type *t : generic->params) {
-    if (t && checker_.typeParams().substitute(t, generic->typeParams, reps)->isError()) {
-      if (!checker_.checkingInstance_) {
-        checker_.diags_.error(loc, "cannot call '" + generic->name + "' with " +
-                                       bindingList(generic->typeParams, args) +
+    if (t && this->checker.typeParams().substitute(t, generic->typeParams, reps)->isError()) {
+      if (!this->checker.checkingInstance_) {
+        this->checker.diags_.error(loc,
+                                   "cannot call '" + generic->name + "' with " +
+                                       GenericInstantiator::bindingList(generic->typeParams, args) +
                                        ": the types of its parameters, '" + t->name() +
                                        "', mean nothing for these types");
       }
       return nullptr;
     }
   }
-  Checker::Instance &instance = checker_.instanceStore_.emplace_back();
+  Checker::Instance &instance = this->checker.instanceStore_.emplace_back();
   instance.generic = generic;
   instance.args = reps;
   instance.concrete.assign(args.begin(), args.end());
   instance.exact.assign(exact.begin(), exact.end());
   instance.callLoc = loc;
-  instance.requester = checker_.checkingInstance_;
-  instance.decl = instanceDecl(generic, reps, exact);
-  instances_[key] = &instance;
+  instance.requester = this->checker.checkingInstance_;
+  instance.decl = this->instanceDecl(generic, reps, exact);
+  this->instances[key] = &instance;
   if (ClassDecl *cls = generic->decl->cls(); cls && !generic->decl->isStatic()) {
     cls->methodInstances.push_back(instance.decl);
   } else {
-    checker_.file_->instances.push_back(instance.decl);
+    this->checker.file_->instances.push_back(instance.decl);
   }
-  if (checker_.lateClasses().isTemplate(generic)) {
-    checker_.lateClasses().checkTemplateInstance(&instance);
+  if (this->checker.lateClasses().isTemplate(generic)) {
+    this->checker.lateClasses().checkTemplateInstance(&instance);
     if (instance.failed) {
-      reportInstance(&instance, loc, args);
+      this->reportInstance(&instance, loc, args);
     }
     return instance.decl->sym;
   }
-  if (checker_.checkingInstance_) {
-    checkInstance(&instance);
+  if (this->checker.checkingInstance_) {
+    this->checkInstance(&instance);
     if (instance.failed) {
-      reportInstance(&instance, loc, args);
+      this->reportInstance(&instance, loc, args);
     }
   } else {
-    checker_.pendingInstances_.push_back(&instance);
+    this->checker.pendingInstances_.push_back(&instance);
   }
 
   return instance.decl->sym;
@@ -313,27 +313,29 @@ FunctionDecl *GenericInstantiator::instanceDecl(FuncSymbol *generic,
                                                 llvm::ArrayRef<const Type *> args,
                                                 llvm::ArrayRef<const Type *> exact) {
   FunctionDecl *original = generic->decl;
-  FunctionDecl *copy = checker_.returnInferrer().freshCopy(original);
+  FunctionDecl *copy = this->checker.returnInferrer().freshCopy(original);
   copy->isInstance = true;
   copy->typeArgs.assign(args.begin(), args.end());
   llvm::ArrayRef<const Type *> params = generic->typeParams;
-  FuncSymbol *sym = checker_.ctx_.newFunc();
+  FuncSymbol *sym = this->checker.ctx_.newFunc();
   sym->name = generic->name;
   sym->loc = generic->loc;
   sym->decl = copy;
   for (const Type *p : generic->params) {
-    sym->params.push_back(checker_.typeParams().substituteValue(p, params, args));
+    sym->params.push_back(this->checker.typeParams().substituteValue(p, params, args));
   }
   sym->minArgs = generic->minArgs;
   sym->hasRest = generic->hasRest;
-  sym->ret = generic->ret ? checker_.typeParams().substitute(generic->ret, params, args) : nullptr;
+  sym->ret =
+      generic->ret ? this->checker.typeParams().substitute(generic->ret, params, args) : nullptr;
   if (generic->predicate) {
-    const Type *type = checker_.typeParams().substitute(generic->predicate->type, params, args);
+    const Type *type =
+        this->checker.typeParams().substitute(generic->predicate->type, params, args);
     sym->predicate = TypePredicate{.param = generic->predicate->param, .type = type};
   }
   for (size_t i = 0; i < copy->params.size() && i < original->params.size(); ++i) {
     copy->params[i].declaredType =
-        checker_.typeParams().substituteValue(original->params[i].declaredType, params, args);
+        this->checker.typeParams().substituteValue(original->params[i].declaredType, params, args);
   }
   for (size_t i = 0; i < exact.size() && i < sym->params.size() && i < copy->params.size(); ++i) {
     if (exact[i]) {
@@ -341,9 +343,9 @@ FunctionDecl *GenericInstantiator::instanceDecl(FuncSymbol *generic,
     }
   }
   copy->sym = sym;
-  checker_.argListChecker().expandArgumentList(copy, sym);
-  if (Module *home = checker_.declModules_.lookup(original)) {
-    checker_.declModules_[copy] = home;
+  this->checker.argListChecker().expandArgumentList(copy, sym);
+  if (Module *home = this->checker.declModules_.lookup(original)) {
+    this->checker.declModules_[copy] = home;
   }
 
   return copy;
@@ -352,13 +354,13 @@ FunctionDecl *GenericInstantiator::instanceDecl(FuncSymbol *generic,
 void GenericInstantiator::checkInstance(Checker::Instance *instance) {
   instance->checking = true;
   std::vector<Diagnostics::Captured> errors;
-  if (!checker_.brokenGenerics_.contains(instance->generic)) {
-    Checker::BodyState saved = checker_.returnInferrer().enterBody(instance->decl);
-    checker_.checkingInstance_ = instance;
-    checker_.diags_.setCapture(&errors);
-    checker_.flow_ = Checker::Flow();
-    checker_.functionChecker().checkFunctionBody(instance->decl);
-    checker_.returnInferrer().leaveBody(saved);
+  if (!this->checker.brokenGenerics_.contains(instance->generic)) {
+    Checker::BodyState saved = this->checker.returnInferrer().enterBody(instance->decl);
+    this->checker.checkingInstance_ = instance;
+    this->checker.diags_.setCapture(&errors);
+    this->checker.flow_ = Checker::Flow();
+    this->checker.functionChecker().checkFunctionBody(instance->decl);
+    this->checker.returnInferrer().leaveBody(saved);
   }
   instance->checking = false;
   instance->checked = true;
@@ -372,13 +374,13 @@ void GenericInstantiator::checkInstance(Checker::Instance *instance) {
     return;
   }
   std::vector<Diagnostics::Captured> precise;
-  FunctionDecl *copy = instanceDecl(instance->generic, instance->concrete, instance->exact);
-  Checker::BodyState saved = checker_.returnInferrer().enterBody(copy);
-  checker_.checkingInstance_ = instance;
-  checker_.diags_.setCapture(&precise);
-  checker_.flow_ = Checker::Flow();
-  checker_.functionChecker().checkFunctionBody(copy);
-  checker_.returnInferrer().leaveBody(saved);
+  FunctionDecl *copy = this->instanceDecl(instance->generic, instance->concrete, instance->exact);
+  Checker::BodyState saved = this->checker.returnInferrer().enterBody(copy);
+  this->checker.checkingInstance_ = instance;
+  this->checker.diags_.setCapture(&precise);
+  this->checker.flow_ = Checker::Flow();
+  this->checker.functionChecker().checkFunctionBody(copy);
+  this->checker.returnInferrer().leaveBody(saved);
   if (!precise.empty()) {
     instance->message = precise.front().message;
     instance->errorLoc = precise.front().loc;
@@ -387,50 +389,51 @@ void GenericInstantiator::checkInstance(Checker::Instance *instance) {
 
 void GenericInstantiator::reportInstance(Checker::Instance *instance, llvm::SMLoc callLoc,
                                          llvm::ArrayRef<const Type *> concrete) {
-  if (checker_.diags_.capture()) {
-    checker_.failedCalls_[callLoc.getPointer()] = instance;
-    checker_.diags_.error(callLoc, instance->message);
+  if (this->checker.diags_.capture()) {
+    this->checker.failedCalls_[callLoc.getPointer()] = instance;
+    this->checker.diags_.error(callLoc, instance->message);
     return;
   }
   const FuncSymbol *generic = instance->generic;
-  checker_.diags_.error(callLoc, "cannot call '" + generic->name + "' with " +
-                                     bindingList(generic->typeParams, concrete) + ": " +
-                                     instance->message);
+  this->checker.diags_.error(callLoc,
+                             "cannot call '" + generic->name + "' with " +
+                                 GenericInstantiator::bindingList(generic->typeParams, concrete) +
+                                 ": " + instance->message);
   auto nameOf = [](const Checker::Instance *i) { return i->cls ? i->cls->name : i->generic->name; };
   const Checker::Instance *at = instance;
   llvm::SmallPtrSet<const char *, 8> shown;
   while (at && at->errorLoc.isValid() && shown.insert(at->errorLoc.getPointer()).second) {
-    const Checker::Instance *next = checker_.failedCalls_.lookup(at->errorLoc.getPointer());
+    const Checker::Instance *next = this->checker.failedCalls_.lookup(at->errorLoc.getPointer());
     if (next) {
-      checker_.diags_.note(at->errorLoc, "in '" + nameOf(at) + "', which " +
-                                             (next->cls ? "uses '" : "calls '") + nameOf(next) +
-                                             "' here");
+      this->checker.diags_.note(at->errorLoc, "in '" + nameOf(at) + "', which " +
+                                                  (next->cls ? "uses '" : "calls '") +
+                                                  nameOf(next) + "' here");
     } else {
-      checker_.diags_.note(at->errorLoc, "in '" + nameOf(at) + "', here");
+      this->checker.diags_.note(at->errorLoc, "in '" + nameOf(at) + "', here");
     }
     at = next;
   }
 }
 
 void GenericInstantiator::checkInstances() {
-  for (size_t i = 0; i < checker_.pendingInstances_.size(); ++i) {
-    Checker::Instance *instance = checker_.pendingInstances_[i];
+  for (size_t i = 0; i < this->checker.pendingInstances_.size(); ++i) {
+    Checker::Instance *instance = this->checker.pendingInstances_[i];
     if (instance->checked) {
       continue;
     }
     if (instance->cls) {
-      checker_.genericClassChecker().checkClassInstance(instance);
+      this->checker.genericClassChecker().checkClassInstance(instance);
       if (instance->failed) {
-        checker_.genericClassChecker().reportClassInstance(instance, instance->callLoc);
+        this->checker.genericClassChecker().reportClassInstance(instance, instance->callLoc);
       }
       continue;
     }
-    checkInstance(instance);
+    this->checkInstance(instance);
     if (instance->failed) {
-      reportInstance(instance, instance->callLoc, instance->concrete);
+      this->reportInstance(instance, instance->callLoc, instance->concrete);
     }
   }
-  checker_.pendingInstances_.clear();
+  this->checker.pendingInstances_.clear();
 }
 
 }

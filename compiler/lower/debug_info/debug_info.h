@@ -9,7 +9,7 @@ class DebugTypes;
 
 class DebugInfo {
 public:
-  explicit DebugInfo(Lowering &lowering);
+  explicit DebugInfo(Lowering &owner);
   ~DebugInfo();
 
   void start(const SourceFile &file);
@@ -29,17 +29,17 @@ private:
   void repair(llvm::Function &function);
   unsigned argumentOf(const VarSymbol *var) const;
 
-  Lowering &lowering_;
-  std::unique_ptr<llvm::DIBuilder> builder_;
-  std::unique_ptr<DebugTypes> types_;
-  llvm::DenseSet<std::pair<const llvm::Function *, const VarSymbol *>> declared_;
-  llvm::DenseMap<const llvm::Function *, const FunctionDecl *> owners_;
-  llvm::DICompileUnit *unit_ = nullptr;
-  llvm::DISubroutineType *signature_ = nullptr;
-  llvm::DenseMap<unsigned, std::string> paths_;
-  llvm::DenseMap<unsigned, llvm::DIFile *> files_;
-  llvm::DenseMap<std::pair<llvm::DISubprogram *, llvm::DIFile *>, llvm::DIScope *> scopes_;
-  unsigned entryBuffer_ = 0;
+  Lowering &lowering;
+  std::unique_ptr<llvm::DIBuilder> builder;
+  std::unique_ptr<DebugTypes> types;
+  llvm::DenseSet<std::pair<const llvm::Function *, const VarSymbol *>> declared;
+  llvm::DenseMap<const llvm::Function *, const FunctionDecl *> owners;
+  llvm::DICompileUnit *unit = nullptr;
+  llvm::DISubroutineType *signature = nullptr;
+  llvm::DenseMap<unsigned, std::string> paths;
+  llvm::DenseMap<unsigned, llvm::DIFile *> files;
+  llvm::DenseMap<std::pair<llvm::DISubprogram *, llvm::DIFile *>, llvm::DIScope *> scopes;
+  unsigned entryBuffer = 0;
 };
 
 }

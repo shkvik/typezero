@@ -6,7 +6,7 @@ namespace tz {
 
 class VarChecker {
 public:
-  explicit VarChecker(Checker &checker);
+  explicit VarChecker(Checker &owner);
 
   void checkVarDecl(VarDeclStmt *decl);
   void noteUntyped(VarSymbol *var, bool initUndefined);
@@ -15,8 +15,10 @@ public:
   void reportUncheckedResults();
 
 private:
+  static bool isTextChoice(const Expr *expr);
+
   bool exported(llvm::StringRef name) const;
-  Checker &checker_;
+  Checker &checker;
 };
 
 }

@@ -25,31 +25,28 @@
 #include "llvm/Support/ConvertUTF.h"
 #include <numeric>
 
-using llvm::BasicBlock;
-using llvm::cast;
 using llvm::dyn_cast;
-using llvm::isa;
-using llvm::Value;
 
 namespace tz {
 
-ObjectLowerer::ObjectLowerer(Lowering &lowering) : lowering_(lowering) {}
+ObjectLowerer::ObjectLowerer(Lowering &owner)
+    : lowering(owner) {}
 
 llvm::Value *ObjectLowerer::emitObjectLiteral(ObjectLitExpr *lit) {
   if (lit->type->isJson()) {
-    return lowering_.jsonLowerer().emitJsonObjectLiteral(lit);
+    return this->lowering.jsonLowerer().emitJsonObjectLiteral(lit);
   }
   if (lit->type->isRecord()) {
-    return lowering_.dictLowerer().emitRecordLiteral(lit);
+    return this->lowering.dictLowerer().emitRecordLiteral(lit);
   }
   if (lit->cls) {
-    return lowering_.classLowerer().emitMethodLiteral(lit);
+    return this->lowering.classLowerer().emitMethodLiteral(lit);
   }
   if (lit->hasSpread()) {
-    return emitSpreadLiteral(lit);
+    return this->emitSpreadLiteral(lit);
   }
   const Type *type = lit->type;
-  const Lowering::ObjectLayout &layout = lowering_.objectLayouts().objectLayout(type);
+  const Lowering::ObjectLayout &layout = this->lowering.objectLayouts().objectLayout(type);
   std::vector<const ObjectLitExpr::Property *> named;
   std::vector<unsigned> keys;
   for (const ObjectLitExpr::Property &prop : lit->props) {
@@ -63,32 +60,32 @@ llvm::Value *ObjectLowerer::emitObjectLiteral(ObjectLitExpr *lit) {
       keys.push_back(i);
     }
   }
-  bool member = lowering_.makesMember(lit, type);
-  llvm::Value *object = lowering_.objectLayouts().allocObject(type, keys, member);
-  lowering_.groupLowerer().noteUnstored(object, lit);
+  bool member = this->lowering.makesMember(lit, type);
+  llvm::Value *object = this->lowering.objectLayouts().allocObject(type, keys, member);
+  this->lowering.groupLowerer().noteUnstored(object, lit);
   std::vector<llvm::Value *> values;
   for (size_t k = 0; k < keys.size(); ++k) {
     unsigned i = keys[k];
-    llvm::Value *value = k < named.size()
-                             ? lowering_.exprLowerer().emitExpr(named[k]->value)
-                             : lowering_.optionalLowerer().undefinedValue(type->fields()[i].type);
-    lowering_.builder_.CreateStore(
-        value, lowering_.builder_.CreateStructGEP(layout.type, object, layout.elements[i]));
+    llvm::Value *value =
+        k < named.size() ? this->lowering.exprLowerer().emitExpr(named[k]->value)
+                         : this->lowering.optionalLowerer().undefinedValue(type->fields()[i].type);
+    this->lowering.builder_.CreateStore(
+        value, this->lowering.builder_.CreateStructGEP(layout.type, object, layout.elements[i]));
     values.push_back(value);
   }
   if (member) {
     for (size_t k = 0; k < keys.size(); ++k) {
-      lowering_.storeLowerer().groupStore(object, values[k], type->fields()[keys[k]].type);
+      this->lowering.storeLowerer().groupStore(object, values[k], type->fields()[keys[k]].type);
     }
   }
   for (const ObjectLitExpr::Property &prop : lit->props) {
     if (!prop.keyed()) {
       continue;
     }
-    llvm::Value *value = lowering_.exprLowerer().emitExpr(prop.value);
-    llvm::Value *key = lowering_.exprLowerer().emitExpr(prop.key());
-    llvm::Value *address = keyedFieldAddress(object, type, key, prop.key()->type);
-    lowering_.storeLowerer().storeIn(object, type, address, value, prop.value->type);
+    llvm::Value *value = this->lowering.exprLowerer().emitExpr(prop.value);
+    llvm::Value *key = this->lowering.exprLowerer().emitExpr(prop.key());
+    llvm::Value *address = this->keyedFieldAddress(object, type, key, prop.key()->type);
+    this->lowering.storeLowerer().storeIn(object, type, address, value, prop.value->type);
   }
 
   return object;
@@ -122,69 +119,73 @@ llvm::Value *ObjectLowerer::emitSpreadLiteral(ObjectLitExpr *lit) {
   }
 
   llvm::Value *object =
-      lowering_.objectLayouts().allocObject(type, keys, lowering_.makesMember(lit, type));
-  lowering_.groupLowerer().noteUnstored(object, lit);
+      this->lowering.objectLayouts().allocObject(type, keys, this->lowering.makesMember(lit, type));
+  this->lowering.groupLowerer().noteUnstored(object, lit);
   for (const Field &f : fields) {
-    lowering_.builder_.CreateStore(
-        llvm::Constant::getNullValue(lowering_.moduleBuilder().lower(f.type)),
-        lowering_.objectLayouts().fieldAddress(object, type, f.name, true));
+    this->lowering.builder_.CreateStore(
+        llvm::Constant::getNullValue(this->lowering.moduleBuilder().lower(f.type)),
+        this->lowering.objectLayouts().fieldAddress(object, type, f.name, true));
   }
   for (const ObjectLitExpr::Property &prop : lit->props) {
     if (!prop.spread()) {
       if (prop.replaced) {
-        lowering_.stmtLowerer().emitDiscarded(prop.value);
+        this->lowering.stmtLowerer().emitDiscarded(prop.value);
         continue;
       }
       const Type *to = type->field(prop.name)->type;
-      lowering_.storeLowerer().storeIn(
-          object, type, lowering_.objectLayouts().fieldAddress(object, type, prop.name, true),
-          lowering_.exprLowerer().emitExpr(prop.value), to);
+      this->lowering.storeLowerer().storeIn(
+          object, type, this->lowering.objectLayouts().fieldAddress(object, type, prop.name, true),
+          this->lowering.exprLowerer().emitExpr(prop.value), to);
       continue;
     }
     const Type *source = prop.value->type;
-    Lowering::Operand from = lowering_.refCounts().emitOperand(prop.value, true);
+    Lowering::Operand from = this->lowering.refCounts().emitOperand(prop.value, true);
     for (const Field &f : source->fields()) {
       if (llvm::is_contained(prop.omit(), f.name) ||
           llvm::is_contained(prop.replacedFields(), f.name)) {
         continue;
       }
       const Type *to = type->field(f.name)->type;
-      llvm::Value *address = lowering_.objectLayouts().fieldAddress(object, type, f.name, true);
+      llvm::Value *address =
+          this->lowering.objectLayouts().fieldAddress(object, type, f.name, true);
       if (const Lowering::InterfaceMember *method =
-              lowering_.inheritLowerer().dispatchedMember(source, f.name);
+              this->lowering.inheritLowerer().dispatchedMember(source, f.name);
           method && method->callable) {
-        llvm::Value *info = lowering_.builder_.CreateLoad(
-            lowering_.builder_.getPtrTy(),
-            lowering_.inheritLowerer().tableEntry(from.value, source, unsigned(method->entry + 1)));
-        lowering_.refCounts().retainValue(from.value, source);
-        lowering_.storeLowerer().storeIn(
-            object, type, address, lowering_.closureLowerer().makeFunctionValue(info, from.value),
+        llvm::Value *info = this->lowering.builder_.CreateLoad(
+            this->lowering.builder_.getPtrTy(),
+            this->lowering.inheritLowerer().tableEntry(from.value, source,
+                                                       unsigned(method->entry + 1)));
+        this->lowering.refCounts().retainValue(from.value, source);
+        this->lowering.storeLowerer().storeIn(
+            object, type, address,
+            this->lowering.closureLowerer().makeFunctionValue(info, from.value), to);
+        continue;
+      }
+      llvm::Value *value = this->lowering.builder_.CreateLoad(
+          this->lowering.moduleBuilder().lower(f.type),
+          this->lowering.objectLayouts().fieldAddress(from.value, source, f.name), f.name);
+      if (!f.type->isOptional()) {
+        this->lowering.refCounts().retainValue(value, f.type);
+        this->lowering.storeLowerer().storeIn(
+            object, type, address, this->lowering.exprLowerer().emitConversion(value, f.type, to),
             to);
         continue;
       }
-      llvm::Value *value = lowering_.builder_.CreateLoad(
-          lowering_.moduleBuilder().lower(f.type),
-          lowering_.objectLayouts().fieldAddress(from.value, source, f.name), f.name);
-      if (!f.type->isOptional()) {
-        lowering_.refCounts().retainValue(value, f.type);
-        lowering_.storeLowerer().storeIn(
-            object, type, address, lowering_.exprLowerer().emitConversion(value, f.type, to), to);
-        continue;
-      }
-      llvm::BasicBlock *copyBlock = lowering_.functionFrame().newBlock("spread.copy");
-      llvm::BasicBlock *nextBlock = lowering_.functionFrame().newBlock("spread.next");
-      lowering_.builder_.CreateCondBr(lowering_.optionalLowerer().optionalHas(value, f.type),
-                                      copyBlock, nextBlock);
-      lowering_.functionFrame().switchTo(copyBlock);
+      llvm::BasicBlock *copyBlock = this->lowering.functionFrame().newBlock("spread.copy");
+      llvm::BasicBlock *nextBlock = this->lowering.functionFrame().newBlock("spread.next");
+      this->lowering.builder_.CreateCondBr(
+          this->lowering.optionalLowerer().optionalHas(value, f.type), copyBlock, nextBlock);
+      this->lowering.functionFrame().switchTo(copyBlock);
       const Type *inner = f.type->inner();
-      llvm::Value *present = lowering_.optionalLowerer().optionalValue(value, f.type);
-      lowering_.refCounts().retainValue(present, inner);
-      lowering_.storeLowerer().storeIn(
-          object, type, address, lowering_.exprLowerer().emitConversion(present, inner, to), to);
-      lowering_.builder_.CreateBr(nextBlock);
-      lowering_.functionFrame().switchTo(nextBlock);
+      llvm::Value *present = this->lowering.optionalLowerer().optionalValue(value, f.type);
+      this->lowering.refCounts().retainValue(present, inner);
+      this->lowering.storeLowerer().storeIn(
+          object, type, address, this->lowering.exprLowerer().emitConversion(present, inner, to),
+          to);
+      this->lowering.builder_.CreateBr(nextBlock);
+      this->lowering.functionFrame().switchTo(nextBlock);
     }
-    lowering_.refCounts().dropOperand(from);
+    this->lowering.refCounts().dropOperand(from);
   }
 
   return object;
@@ -194,19 +195,19 @@ llvm::Value *ObjectLowerer::emitTupleLiteral(ArrayLitExpr *lit) {
   const Type *type = lit->type;
   std::vector<unsigned> keys(type->fields().size());
   std::iota(keys.begin(), keys.end(), 0u);
-  bool member = lowering_.makesMember(lit, type);
-  llvm::Value *object = lowering_.objectLayouts().allocObject(type, keys, member);
-  lowering_.groupLowerer().noteUnstored(object, lit);
+  bool member = this->lowering.makesMember(lit, type);
+  llvm::Value *object = this->lowering.objectLayouts().allocObject(type, keys, member);
+  this->lowering.groupLowerer().noteUnstored(object, lit);
   std::vector<llvm::Value *> values;
   for (size_t i = 0; i < lit->elements.size(); ++i) {
-    llvm::Value *value = lowering_.exprLowerer().emitExpr(lit->elements[i].expr);
-    lowering_.builder_.CreateStore(
-        value, lowering_.objectLayouts().fieldAddress(object, type, type->fields()[i].name));
+    llvm::Value *value = this->lowering.exprLowerer().emitExpr(lit->elements[i].expr);
+    this->lowering.builder_.CreateStore(
+        value, this->lowering.objectLayouts().fieldAddress(object, type, type->fields()[i].name));
     values.push_back(value);
   }
   if (member) {
     for (size_t i = 0; i < values.size(); ++i) {
-      lowering_.storeLowerer().groupStore(object, values[i], type->fields()[i].type);
+      this->lowering.storeLowerer().groupStore(object, values[i], type->fields()[i].type);
     }
   }
 
@@ -216,77 +217,77 @@ llvm::Value *ObjectLowerer::emitTupleLiteral(ArrayLitExpr *lit) {
 void ObjectLowerer::emitTupleSpread(llvm::Value *array, llvm::Value *tuple, const Type *tupleType,
                                     const Type *element) {
   for (const Field &f : tupleType->fields()) {
-    llvm::Value *value = lowering_.builder_.CreateLoad(
-        lowering_.moduleBuilder().lower(f.type),
-        lowering_.objectLayouts().fieldAddress(tuple, tupleType, f.name));
-    lowering_.refCounts().retainValue(value, f.type);
-    lowering_.arrayLowerer().emitPush(
-        array, {lowering_.exprLowerer().emitConversion(value, f.type, element)}, element);
+    llvm::Value *value = this->lowering.builder_.CreateLoad(
+        this->lowering.moduleBuilder().lower(f.type),
+        this->lowering.objectLayouts().fieldAddress(tuple, tupleType, f.name));
+    this->lowering.refCounts().retainValue(value, f.type);
+    this->lowering.arrayLowerer().emitPush(
+        array, {this->lowering.exprLowerer().emitConversion(value, f.type, element)}, element);
   }
 }
 
 llvm::Value *ObjectLowerer::emitObjectCall(CallExpr *call) {
   if (call->args[0]->type->nonOptional()->isJson()) {
-    return lowering_.jsonLowerer().emitJsonObjectCall(call);
+    return this->lowering.jsonLowerer().emitJsonObjectCall(call);
   }
   if (call->args[0]->type->isDict()) {
-    return lowering_.dictMethodLowerer().emitDictObjectCall(call);
+    return this->lowering.dictMethodLowerer().emitDictObjectCall(call);
   }
-  Lowering::Operand object = lowering_.refCounts().emitOperand(call->args[0], true);
+  Lowering::Operand object = this->lowering.refCounts().emitOperand(call->args[0], true);
   const Type *element = call->type->inner();
   llvm::Value *result;
   if (call->builtin() == Builtin::ObjectKeys) {
-    result = lowering_.builder_.CreateCall(
-        lowering_.rt_.objKeys, {object.value, lowering_.typeDescriptors().typeDescriptor(element)},
-        "keys");
+    result = this->lowering.builder_.CreateCall(
+        this->lowering.rt_.objKeys,
+        {object.value, this->lowering.typeDescriptors().typeDescriptor(element)}, "keys");
   } else if (call->builtin() == Builtin::ObjectValues) {
-    result = lowering_.builder_.CreateCall(
-        lowering_.rt_.objValues,
-        {object.value, lowering_.typeDescriptors().typeDescriptor(element)}, "values");
+    result = this->lowering.builder_.CreateCall(
+        this->lowering.rt_.objValues,
+        {object.value, this->lowering.typeDescriptors().typeDescriptor(element)}, "values");
   } else {
-    uint64_t size = lowering_.module_->getDataLayout().getTypeAllocSize(
-        lowering_.objectLayouts().objectLayout(element).type);
-    result = lowering_.builder_.CreateCall(
-        lowering_.rt_.objEntries,
-        {object.value, lowering_.typeDescriptors().typeDescriptor(element),
-         lowering_.objectLayouts().layoutDescriptor(element, {0, 1}),
-         lowering_.builder_.getInt64(size)},
+    uint64_t size = this->lowering.module_->getDataLayout().getTypeAllocSize(
+        this->lowering.objectLayouts().objectLayout(element).type);
+    result = this->lowering.builder_.CreateCall(
+        this->lowering.rt_.objEntries,
+        {object.value, this->lowering.typeDescriptors().typeDescriptor(element),
+         this->lowering.objectLayouts().layoutDescriptor(element, {0, 1}),
+         this->lowering.builder_.getInt64(size)},
         "entries");
   }
-  lowering_.refCounts().dropOperand(object);
+  this->lowering.refCounts().dropOperand(object);
 
   return result;
 }
 
 llvm::Value *ObjectLowerer::emitFieldRead(MemberExpr *member) {
   if (member->object->type->isUnion()) {
-    return lowering_.unionMemberLowerer().emitUnionFieldRead(member);
+    return this->lowering.unionMemberLowerer().emitUnionFieldRead(member);
   }
-  if (member->signature() >= 0 && !lowering_.inheritLowerer().dispatchedMember(
+  if (member->signature() >= 0 && !this->lowering.inheritLowerer().dispatchedMember(
                                       member->object->type, member->name, member->signature())) {
-    lowering_.stmtLowerer().emitDiscarded(member->object);
-    lowering_.builder_.CreateCall(
-        llvm::Intrinsic::getOrInsertDeclaration(lowering_.module_.get(), llvm::Intrinsic::trap));
-    return llvm::PoisonValue::get(lowering_.fnTy_);
+    this->lowering.stmtLowerer().emitDiscarded(member->object);
+    this->lowering.builder_.CreateCall(llvm::Intrinsic::getOrInsertDeclaration(
+        this->lowering.module_.get(), llvm::Intrinsic::trap));
+    return llvm::PoisonValue::get(this->lowering.fnTy_);
   }
-  if (const Lowering::InterfaceMember *method = lowering_.inheritLowerer().dispatchedMember(
+  if (const Lowering::InterfaceMember *method = this->lowering.inheritLowerer().dispatchedMember(
           member->object->type, member->name, member->signature());
       method && method->callable) {
-    llvm::Value *object = lowering_.exprLowerer().emitExpr(member->object);
-    llvm::Value *info = lowering_.builder_.CreateLoad(
-        lowering_.builder_.getPtrTy(),
-        lowering_.inheritLowerer().tableEntry(object, member->object->type,
-                                              unsigned(method->entry + 1)),
+    llvm::Value *object = this->lowering.exprLowerer().emitExpr(member->object);
+    llvm::Value *info = this->lowering.builder_.CreateLoad(
+        this->lowering.builder_.getPtrTy(),
+        this->lowering.inheritLowerer().tableEntry(object, member->object->type,
+                                                   unsigned(method->entry + 1)),
         member->name + ".info");
-    return lowering_.closureLowerer().makeFunctionValue(info, object);
+    return this->lowering.closureLowerer().makeFunctionValue(info, object);
   }
-  Lowering::Operand object = lowering_.refCounts().emitOperand(member->object, true);
-  llvm::Value *value = lowering_.builder_.CreateLoad(
-      lowering_.moduleBuilder().lower(member->type),
-      lowering_.objectLayouts().fieldAddress(object.value, object.type, member->name),
+  Lowering::Operand object = this->lowering.refCounts().emitOperand(member->object, true);
+  llvm::Value *value = this->lowering.builder_.CreateLoad(
+      this->lowering.moduleBuilder().lower(member->type),
+      this->lowering.objectLayouts().fieldAddress(object.value, object.type, member->name),
       member->name);
-  lowering_.refCounts().retainValue(value, member->type);
-  lowering_.refCounts().dropOperand(object);
+  this->lowering.refCounts().retainValue(value, member->type);
+  this->lowering.refCounts().dropOperand(object);
 
   return value;
 }
@@ -303,12 +304,12 @@ llvm::Value *ObjectLowerer::keyedFieldAddress(llvm::Value *object, const Type *t
         llvm::ArrayRef<llvm::UTF16>(reinterpret_cast<const llvm::UTF16 *>(text.data()),
                                     text.size()),
         name);
-    llvm::Value *field = lowering_.objectLayouts().fieldAddress(object, type, name);
-    address =
-        address ? lowering_.builder_.CreateSelect(
-                      lowering_.builder_.CreateICmpEQ(key, lowering_.builder_.getInt32(n->atom())),
-                      field, address)
-                : field;
+    llvm::Value *field = this->lowering.objectLayouts().fieldAddress(object, type, name);
+    address = address ? this->lowering.builder_.CreateSelect(
+                            this->lowering.builder_.CreateICmpEQ(
+                                key, this->lowering.builder_.getInt32(n->atom())),
+                            field, address)
+                      : field;
   }
 
   return address;
@@ -321,42 +322,43 @@ llvm::Value *ObjectLowerer::emitFieldAssign(AssignExpr *assign, bool needResult)
   Expr *objectExpr = index ? index->object : member->object;
   bool calm = AssignLowerer::cannotAssign(assign->value) &&
               (!index || AssignLowerer::cannotAssign(index->index));
-  Lowering::Operand object = lowering_.refCounts().emitOperand(objectExpr, calm);
+  Lowering::Operand object = this->lowering.refCounts().emitOperand(objectExpr, calm);
   llvm::Value *address =
-      index ? keyedFieldAddress(object.value, object.type,
-                                lowering_.exprLowerer().emitExpr(index->index), index->index->type)
-            : lowering_.objectLayouts().fieldAddress(object.value, object.type, member->name);
+      index ? this->keyedFieldAddress(object.value, object.type,
+                                      this->lowering.exprLowerer().emitExpr(index->index),
+                                      index->index->type)
+            : this->lowering.objectLayouts().fieldAddress(object.value, object.type, member->name);
   llvm::Value *value;
   if (!assign->op) {
-    value = lowering_.exprLowerer().emitExpr(assign->value);
+    value = this->lowering.exprLowerer().emitExpr(assign->value);
   } else if (type->isString()) {
-    llvm::Value *old = lowering_.builder_.CreateLoad(lowering_.strTy_, address);
-    lowering_.refCounts().retainString(old);
-    Lowering::Operand rhs = lowering_.stringLowerer().emitConcatPart(assign->value, false);
-    value = lowering_.stringLowerer().concatOperands({{old, true, type}, rhs});
+    llvm::Value *old = this->lowering.builder_.CreateLoad(this->lowering.strTy_, address);
+    this->lowering.refCounts().retainString(old);
+    Lowering::Operand rhs = this->lowering.stringLowerer().emitConcatPart(assign->value, false);
+    value = this->lowering.stringLowerer().concatOperands({{old, true, type}, rhs});
   } else if (type->isDecimal()) {
     llvm::Value *old =
-        lowering_.builder_.CreateLoad(lowering_.moduleBuilder().lower(type), address);
-    lowering_.refCounts().retainValue(old, type);
-    value = lowering_.decimalLowerer().emitDecimalCompound(*assign->op, old, assign->value);
-    lowering_.refCounts().releaseValue(old, type);
+        this->lowering.builder_.CreateLoad(this->lowering.moduleBuilder().lower(type), address);
+    this->lowering.refCounts().retainValue(old, type);
+    value = this->lowering.decimalLowerer().emitDecimalCompound(*assign->op, old, assign->value);
+    this->lowering.refCounts().releaseValue(old, type);
   } else {
     llvm::Value *old =
-        lowering_.builder_.CreateLoad(lowering_.moduleBuilder().lower(type), address);
-    value = lowering_.binaryLowerer().emitArithmetic(
-        *assign->op, old, lowering_.exprLowerer().emitExpr(assign->value), type,
+        this->lowering.builder_.CreateLoad(this->lowering.moduleBuilder().lower(type), address);
+    value = this->lowering.binaryLowerer().emitArithmetic(
+        *assign->op, old, this->lowering.exprLowerer().emitExpr(assign->value), type,
         assign->rangeProven);
   }
-  lowering_.storeField_ = index ? index->field().str() : member->name.str();
-  lowering_.storeLoc_ = assign->loc();
-  lowering_.storeLowerer().storeIn(object.value, object.type, address, value, type);
-  lowering_.storeField_.clear();
-  lowering_.storeLoc_ = llvm::SMLoc();
-  lowering_.refCounts().dropOperand(object);
+  this->lowering.storeField_ = index ? index->field().str() : member->name.str();
+  this->lowering.storeLoc_ = assign->loc();
+  this->lowering.storeLowerer().storeIn(object.value, object.type, address, value, type);
+  this->lowering.storeField_.clear();
+  this->lowering.storeLoc_ = llvm::SMLoc();
+  this->lowering.refCounts().dropOperand(object);
   if (!needResult) {
     return nullptr;
   }
-  lowering_.refCounts().retainValue(value, type);
+  this->lowering.refCounts().retainValue(value, type);
 
   return value;
 }

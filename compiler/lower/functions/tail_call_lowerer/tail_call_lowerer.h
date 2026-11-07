@@ -6,7 +6,7 @@ namespace tz {
 
 class TailCallLowerer {
 public:
-  explicit TailCallLowerer(Lowering &lowering);
+  explicit TailCallLowerer(Lowering &owner);
 
   void findTailGroups(llvm::ArrayRef<FunctionDecl *> functions);
   void findTailGroups(FunctionDecl *closure);
@@ -17,9 +17,9 @@ public:
   void emitTailJump(CallExpr *call);
 
 private:
-  Lowering &lowering_;
-  std::deque<Lowering::TailGroup> tailGroups_;
-  llvm::DenseSet<const void *> tailSearched_;
+  Lowering &lowering;
+  std::deque<Lowering::TailGroup> tailGroups;
+  llvm::DenseSet<const void *> tailSearched;
 };
 
 }

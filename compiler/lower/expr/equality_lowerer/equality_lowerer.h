@@ -6,14 +6,16 @@ namespace tz {
 
 class EqualityLowerer {
 public:
-  explicit EqualityLowerer(Lowering &lowering);
+  explicit EqualityLowerer(Lowering &owner);
 
   llvm::Value *emitEquality(BinaryExpr *bin);
   llvm::Value *emitNullish(BinaryExpr *bin);
   llvm::Value *emitValuesEqual(llvm::Value *a, llvm::Value *b, const Type *type);
 
 private:
-  Lowering &lowering_;
+  static bool isReference(const Type *type);
+
+  Lowering &lowering;
 };
 
 }

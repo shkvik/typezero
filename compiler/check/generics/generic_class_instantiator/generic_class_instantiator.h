@@ -6,7 +6,7 @@ namespace tz {
 
 class GenericClassInstantiator {
 public:
-  explicit GenericClassInstantiator(Checker &checker);
+  explicit GenericClassInstantiator(Checker &owner);
 
   ClassDecl *instantiateClass(ClassDecl *generic, std::vector<const Type *> args, llvm::SMLoc loc);
   void fillInstance(ClassDecl *inst);
@@ -15,9 +15,11 @@ public:
   void markOverridden(FunctionDecl *fn);
 
 private:
-  Checker &checker_;
-  llvm::SmallPtrSet<const ClassDecl *, 2> endless_;
-  llvm::DenseMap<const ClassDecl *, Checker::Instance *> classChecks_;
+  static std::string typeNames(llvm::ArrayRef<const Type *> types);
+
+  Checker &checker;
+  llvm::SmallPtrSet<const ClassDecl *, 2> endless;
+  llvm::DenseMap<const ClassDecl *, Checker::Instance *> classChecks;
 };
 
 }

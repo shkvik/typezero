@@ -19,107 +19,110 @@
 #include "compiler/lower/values/string_lowerer/string_lowerer.h"
 #include "llvm/ADT/STLExtras.h"
 
-using llvm::BasicBlock;
-using llvm::cast;
 using llvm::dyn_cast;
-using llvm::isa;
-using llvm::Value;
 
 namespace tz {
 
-DecoratorLowerer::DecoratorLowerer(Lowering &lowering) : lowering_(lowering) {}
+DecoratorLowerer::DecoratorLowerer(Lowering &owner)
+    : lowering(owner) {}
 
 void DecoratorLowerer::emitClassDeclaration(ClassDecl *cls) {
   if (cls->baseExpr) {
-    lowering_.stmtLowerer().emitDiscarded(cls->baseExpr);
+    this->lowering.stmtLowerer().emitDiscarded(cls->baseExpr);
   }
-  lowering_.classLowerer().emitStaticFields(cls);
+  this->lowering.classLowerer().emitStaticFields(cls);
   for (Stmt *stmt : cls->decorations) {
-    lowering_.stmtLowerer().emitStmt(stmt);
+    this->lowering.stmtLowerer().emitStmt(stmt);
   }
 }
 
 llvm::Value *DecoratorLowerer::emitClassExpr(ClassExpr *expr) {
   ClassDecl *cls = expr->decl;
   if (cls->baseExpr) {
-    lowering_.stmtLowerer().emitDiscarded(cls->baseExpr);
+    this->lowering.stmtLowerer().emitDiscarded(cls->baseExpr);
   }
   auto initialized = [](const ClassField &f) { return f.isStatic() && f.var() && f.init; };
   if (!cls->decorations.empty() || llvm::any_of(cls->fields, initialized)) {
-    auto *done = new llvm::GlobalVariable(*lowering_.module_, lowering_.builder_.getInt1Ty(), false,
-                                          llvm::GlobalValue::InternalLinkage,
-                                          lowering_.builder_.getFalse(), "tz.classinit");
-    llvm::BasicBlock *initBlock = lowering_.functionFrame().newBlock("class.init");
-    llvm::BasicBlock *doneBlock = lowering_.functionFrame().newBlock("class.ready");
-    lowering_.builder_.CreateCondBr(
-        lowering_.builder_.CreateLoad(lowering_.builder_.getInt1Ty(), done), doneBlock, initBlock);
-    lowering_.functionFrame().switchTo(initBlock);
-    lowering_.builder_.CreateStore(lowering_.builder_.getTrue(), done);
-    lowering_.classLowerer().emitStaticFields(cls);
+    auto *done = new llvm::GlobalVariable(
+        *this->lowering.module_, this->lowering.builder_.getInt1Ty(), false,
+        llvm::GlobalValue::InternalLinkage, this->lowering.builder_.getFalse(), "tz.classinit");
+    llvm::BasicBlock *initBlock = this->lowering.functionFrame().newBlock("class.init");
+    llvm::BasicBlock *doneBlock = this->lowering.functionFrame().newBlock("class.ready");
+    this->lowering.builder_.CreateCondBr(
+        this->lowering.builder_.CreateLoad(this->lowering.builder_.getInt1Ty(), done), doneBlock,
+        initBlock);
+    this->lowering.functionFrame().switchTo(initBlock);
+    this->lowering.builder_.CreateStore(this->lowering.builder_.getTrue(), done);
+    this->lowering.classLowerer().emitStaticFields(cls);
     for (Stmt *stmt : cls->decorations) {
-      lowering_.stmtLowerer().emitStmt(stmt);
+      this->lowering.stmtLowerer().emitStmt(stmt);
     }
-    lowering_.builder_.CreateBr(doneBlock);
-    lowering_.functionFrame().switchTo(doneBlock);
+    this->lowering.builder_.CreateBr(doneBlock);
+    this->lowering.functionFrame().switchTo(doneBlock);
   }
 
-  return lowering_.unknownLowerer().classObject(cls);
+  return this->lowering.unknownLowerer().classObject(cls);
 }
 
 llvm::Constant *DecoratorLowerer::implAdapterInfo(FunctionDecl *fn) {
-  if (llvm::Constant *found = adapterInfos_.lookup(fn)) {
+  llvm::Constant *found = this->adapterInfos.lookup(fn);
+  if (found) {
     return found;
   }
   const Type *implType = fn->impl()->type;
-  llvm::Function *original = originalCode(fn);
-  std::string name = lowering_.classDescriptors().methodCode(fn)->getName().str();
-  auto *adapter = llvm::Function::Create(lowering_.closureLowerer().closureFnType(implType),
+  llvm::Function *original = this->originalCode(fn);
+  std::string name = this->lowering.classDescriptors().methodCode(fn)->getName().str();
+  auto *adapter = llvm::Function::Create(this->lowering.closureLowerer().closureFnType(implType),
                                          llvm::GlobalValue::InternalLinkage, name + ".adapter",
-                                         lowering_.module_.get());
-  lowering_.functionBuilder().setFunctionAttributes(adapter);
+                                         this->lowering.module_.get());
+  this->lowering.functionBuilder().setFunctionAttributes(adapter);
   llvm::Constant *info = llvm::ConstantStruct::get(
-      lowering_.fnInfoTy_, {adapter, lowering_.stringLowerer().stringLiteral(
-                                         std::u16string(fn->name.begin(), fn->name.end()))});
-  auto *global = new llvm::GlobalVariable(*lowering_.module_, lowering_.fnInfoTy_, true,
+      this->lowering.fnInfoTy_, {adapter, this->lowering.stringLowerer().stringLiteral(
+                                              std::u16string(fn->name.begin(), fn->name.end()))});
+  auto *global = new llvm::GlobalVariable(*this->lowering.module_, this->lowering.fnInfoTy_, true,
                                           llvm::GlobalValue::PrivateLinkage, info, name + ".info");
-  adapterInfos_[fn] = global;
+  this->adapterInfos[fn] = global;
 
-  llvm::IRBuilderBase::InsertPointGuard guard(lowering_.builder_);
-  lowering_.builder_.SetInsertPoint(llvm::BasicBlock::Create(lowering_.ctx_, "entry", adapter));
-  llvm::Type *ptr = lowering_.builder_.getPtrTy();
+  llvm::IRBuilderBase::InsertPointGuard guard(this->lowering.builder_);
+  this->lowering.builder_.SetInsertPoint(
+      llvm::BasicBlock::Create(this->lowering.ctx_, "entry", adapter));
+  llvm::Type *ptr = this->lowering.builder_.getPtrTy();
   llvm::Value *self = adapter->getArg(1);
   const Type *ret = implType->ret();
   auto finish = [&](llvm::Value *result) {
-    lowering_.builder_.CreateCall(lowering_.instanceReleaseFn_, {self});
+    this->lowering.builder_.CreateCall(this->lowering.instanceReleaseFn_, {self});
     if (ret->isVoid()) {
-      lowering_.builder_.CreateRetVoid();
+      this->lowering.builder_.CreateRetVoid();
     } else {
-      lowering_.builder_.CreateRet(result);
+      this->lowering.builder_.CreateRet(result);
     }
   };
   const ClassDecl *cls = fn->cls();
   if (!fn->isStatic()) {
-    auto *failBlock = llvm::BasicBlock::Create(lowering_.ctx_, "this.wrong", adapter);
-    auto *testBlock = llvm::BasicBlock::Create(lowering_.ctx_, "this.test", adapter);
-    auto *callBlock = llvm::BasicBlock::Create(lowering_.ctx_, "this.ok", adapter);
-    lowering_.builder_.CreateCondBr(lowering_.builder_.CreateIsNotNull(self), testBlock, failBlock);
-    lowering_.builder_.SetInsertPoint(testBlock);
-    llvm::Value *layout = lowering_.builder_.CreateLoad(
-        ptr, lowering_.builder_.CreateConstInBoundsGEP1_64(lowering_.builder_.getInt8Ty(), self, 8),
-        "layout");
-    llvm::Value *id = lowering_.builder_.CreateLoad(
-        lowering_.builder_.getInt32Ty(),
-        lowering_.builder_.CreateStructGEP(lowering_.layoutDescTy_, layout, 6), "class");
+    auto *failBlock = llvm::BasicBlock::Create(this->lowering.ctx_, "this.wrong", adapter);
+    auto *testBlock = llvm::BasicBlock::Create(this->lowering.ctx_, "this.test", adapter);
+    auto *callBlock = llvm::BasicBlock::Create(this->lowering.ctx_, "this.ok", adapter);
+    this->lowering.builder_.CreateCondBr(this->lowering.builder_.CreateIsNotNull(self), testBlock,
+                                         failBlock);
+    this->lowering.builder_.SetInsertPoint(testBlock);
+    llvm::Value *layout =
+        this->lowering.builder_.CreateLoad(ptr,
+                                           this->lowering.builder_.CreateConstInBoundsGEP1_64(
+                                               this->lowering.builder_.getInt8Ty(), self, 8),
+                                           "layout");
+    llvm::Value *id = this->lowering.builder_.CreateLoad(
+        this->lowering.builder_.getInt32Ty(),
+        this->lowering.builder_.CreateStructGEP(this->lowering.layoutDescTy_, layout, 6), "class");
     unsigned last = std::max(cls->id, cls->lastId);
-    llvm::Value *matches = lowering_.builder_.CreateICmpULE(
-        lowering_.builder_.CreateSub(id, lowering_.builder_.getInt32(cls->id)),
-        lowering_.builder_.getInt32(last - cls->id));
-    lowering_.builder_.CreateCondBr(matches, callBlock, failBlock);
-    lowering_.builder_.SetInsertPoint(failBlock);
-    lowering_.processLowerer().emitPanic("TypeError: " + cls->name.str() + "." + fn->name.str() +
-                                         " was called with a 'this' that is not an instance of " +
-                                         cls->name.str());
-    lowering_.builder_.SetInsertPoint(callBlock);
+    llvm::Value *matches = this->lowering.builder_.CreateICmpULE(
+        this->lowering.builder_.CreateSub(id, this->lowering.builder_.getInt32(cls->id)),
+        this->lowering.builder_.getInt32(last - cls->id));
+    this->lowering.builder_.CreateCondBr(matches, callBlock, failBlock);
+    this->lowering.builder_.SetInsertPoint(failBlock);
+    this->lowering.processLowerer().emitPanic(
+        "TypeError: " + cls->name.str() + "." + fn->name.str() +
+        " was called with a 'this' that is not an instance of " + cls->name.str());
+    this->lowering.builder_.SetInsertPoint(callBlock);
   }
   std::vector<llvm::Value *> args;
   if (!fn->isStatic()) {
@@ -128,125 +131,126 @@ llvm::Constant *DecoratorLowerer::implAdapterInfo(FunctionDecl *fn) {
   for (unsigned i = 2; i < adapter->arg_size(); ++i) {
     args.push_back(adapter->getArg(i));
   }
-  llvm::CallInst *result = lowering_.builder_.CreateCall(original, args);
+  llvm::CallInst *result = this->lowering.builder_.CreateCall(original, args);
   finish(ret->isVoid() ? nullptr : result);
 
   return global;
 }
 
 llvm::Function *DecoratorLowerer::originalCode(FunctionDecl *fn) {
-  llvm::Function *&original = originals_[fn];
+  llvm::Function *&original = this->originals[fn];
   if (!original) {
-    llvm::Function *stub = lowering_.classDescriptors().methodCode(fn);
+    llvm::Function *stub = this->lowering.classDescriptors().methodCode(fn);
     original = llvm::Function::Create(stub->getFunctionType(), llvm::GlobalValue::InternalLinkage,
-                                      stub->getName() + ".original", lowering_.module_.get());
-    lowering_.functionBuilder().setFunctionAttributes(original);
+                                      stub->getName() + ".original", this->lowering.module_.get());
+    this->lowering.functionBuilder().setFunctionAttributes(original);
   }
 
   return original;
 }
 
 void DecoratorLowerer::emitDecoratedMethod(FunctionDecl *fn) {
-  llvm::Function *original = originalCode(fn);
+  llvm::Function *original = this->originalCode(fn);
   if (fn->isGenerator) {
-    lowering_.generatorLowerer().emitGenerator(fn, original);
+    this->lowering.generatorLowerer().emitGenerator(fn, original);
   } else if (fn->isAsync) {
-    lowering_.asyncLowerer().emitAsyncFunction(fn, original);
+    this->lowering.asyncLowerer().emitAsyncFunction(fn, original);
   } else {
-    lowering_.functionBuilder().beginFunction(original, fn);
+    this->lowering.functionBuilder().beginFunction(original, fn);
     std::vector<llvm::Value *> args;
     unsigned first = 0;
     if (fn->takesThis()) {
-      lowering_.envParam_ = original->getArg(0);
-      lowering_.envParam_->setName("this");
+      this->lowering.envParam_ = original->getArg(0);
+      this->lowering.envParam_->setName("this");
       first = 1;
     }
     for (unsigned i = first; i < original->arg_size(); ++i) {
       args.push_back(original->getArg(i));
     }
-    lowering_.functionBuilder().emitParamsAndBody(fn, args);
-    lowering_.functionBuilder().finishFunction();
+    this->lowering.functionBuilder().emitParamsAndBody(fn, args);
+    this->lowering.functionBuilder().finishFunction();
   }
 
-  llvm::Function *stub = lowering_.classDescriptors().methodCode(fn);
+  llvm::Function *stub = this->lowering.classDescriptors().methodCode(fn);
   const Type *implType = fn->impl()->type;
-  llvm::IRBuilderBase::InsertPointGuard guard(lowering_.builder_);
-  lowering_.builder_.SetInsertPoint(llvm::BasicBlock::Create(lowering_.ctx_, "entry", stub));
+  llvm::IRBuilderBase::InsertPointGuard guard(this->lowering.builder_);
+  this->lowering.builder_.SetInsertPoint(
+      llvm::BasicBlock::Create(this->lowering.ctx_, "entry", stub));
   unsigned first = fn->takesThis() ? 1 : 0;
   llvm::Value *self = fn->takesThis() ? static_cast<llvm::Value *>(stub->getArg(0))
-                                      : lowering_.unknownLowerer().classObject(fn->cls());
-  lowering_.groupLowerer().retainObject(self);
+                                      : this->lowering.unknownLowerer().classObject(fn->cls());
+  this->lowering.groupLowerer().retainObject(self);
   std::vector<llvm::Value *> args{self};
   for (unsigned i = first; i < stub->arg_size(); ++i) {
     args.push_back(stub->getArg(i));
   }
-  llvm::Value *impl = lowering_.builder_.CreateLoad(
-      lowering_.fnTy_, lowering_.functionFrame().addressOf(fn->impl()), "impl");
-  llvm::Value *env = lowering_.builder_.CreateExtractValue(impl, 1);
-  lowering_.builder_.CreateCall(lowering_.objRetainFn_, {env});
-  llvm::Value *result = lowering_.closureLowerer().callFunctionValue(impl, implType, args);
-  lowering_.builder_.CreateCall(lowering_.objReleaseFn_, {env});
+  llvm::Value *impl = this->lowering.builder_.CreateLoad(
+      this->lowering.fnTy_, this->lowering.functionFrame().addressOf(fn->impl()), "impl");
+  llvm::Value *env = this->lowering.builder_.CreateExtractValue(impl, 1);
+  this->lowering.builder_.CreateCall(this->lowering.objRetainFn_, {env});
+  llvm::Value *result = this->lowering.closureLowerer().callFunctionValue(impl, implType, args);
+  this->lowering.builder_.CreateCall(this->lowering.objReleaseFn_, {env});
   if (result) {
-    lowering_.builder_.CreateRet(result);
+    this->lowering.builder_.CreateRet(result);
   } else {
-    lowering_.builder_.CreateRetVoid();
+    this->lowering.builder_.CreateRetVoid();
   }
 }
 
 llvm::Value *DecoratorLowerer::emitMetaCall(CallExpr *call) {
-  usesMetadata_ = true;
-  llvm::Type *ptr = lowering_.builder_.getPtrTy(), *i32 = lowering_.builder_.getInt32Ty(),
-             *i64 = lowering_.builder_.getInt64Ty();
+  this->usesMetadata = true;
+  llvm::Type *ptr = this->lowering.builder_.getPtrTy(), *i32 = this->lowering.builder_.getInt32Ty(),
+             *i64 = this->lowering.builder_.getInt64Ty();
   bool define = call->builtin() == Builtin::MetaDefine;
-  std::vector<llvm::Value *> values = lowering_.exprLowerer().emitExprs(call->args);
+  std::vector<llvm::Value *> values = this->lowering.exprLowerer().emitExprs(call->args);
   llvm::Value *key = values[0];
   llvm::Value *target = values[define ? 2 : 1];
   llvm::Value *property = values[define ? 3 : 2];
   const Type *propertyType = call->args[define ? 3 : 2]->type;
   llvm::Value *keyId = call->metaKey
-                           ? metaKeyConstant(call->metaKey)
-                           : llvm::ConstantPointerNull::get(lowering_.builder_.getPtrTy());
-  llvm::Value *has = lowering_.optionalLowerer().optionalHas(property, propertyType);
-  llvm::Value *text = lowering_.optionalLowerer().optionalValue(property, propertyType);
-  std::vector<llvm::Value *> args{keyId, lowering_.stringLowerer().stringObj(key),
-                                  lowering_.stringLowerer().stringMeta(key)};
+                           ? this->metaKeyConstant(call->metaKey)
+                           : llvm::ConstantPointerNull::get(this->lowering.builder_.getPtrTy());
+  llvm::Value *has = this->lowering.optionalLowerer().optionalHas(property, propertyType);
+  llvm::Value *text = this->lowering.optionalLowerer().optionalValue(property, propertyType);
+  std::vector<llvm::Value *> args{keyId, this->lowering.stringLowerer().stringObj(key),
+                                  this->lowering.stringLowerer().stringMeta(key)};
   llvm::Value *result = nullptr;
   switch (call->builtin()) {
     case Builtin::MetaDefine:
-      args.insert(args.end(), {values[1], target, lowering_.stringLowerer().stringObj(text),
-                               lowering_.stringLowerer().stringMeta(text),
-                               lowering_.builder_.CreateZExt(has, i32),
-                               lowering_.builder_.getInt32(call->designRecord)});
-      lowering_.builder_.CreateCall(lowering_.unknownLowerer().unknownFunction(
-                                        "tz_meta_define", lowering_.builder_.getVoidTy(),
-                                        {ptr, ptr, i64, ptr, ptr, ptr, i64, i32, i32}),
-                                    args);
+      args.insert(args.end(), {values[1], target, this->lowering.stringLowerer().stringObj(text),
+                               this->lowering.stringLowerer().stringMeta(text),
+                               this->lowering.builder_.CreateZExt(has, i32),
+                               this->lowering.builder_.getInt32(call->designRecord)});
+      this->lowering.builder_.CreateCall(this->lowering.unknownLowerer().unknownFunction(
+                                             "tz_meta_define", this->lowering.builder_.getVoidTy(),
+                                             {ptr, ptr, i64, ptr, ptr, ptr, i64, i32, i32}),
+                                         args);
       break;
     case Builtin::MetaDelete:
-      args.insert(args.end(), {target, lowering_.stringLowerer().stringObj(text),
-                               lowering_.stringLowerer().stringMeta(text),
-                               lowering_.builder_.CreateZExt(has, i32)});
-      result = lowering_.builder_.CreateICmpNE(
-          lowering_.builder_.CreateCall(
-              lowering_.unknownLowerer().unknownFunction("tz_meta_delete", i32,
-                                                         {ptr, ptr, i64, ptr, ptr, i64, i32}),
+      args.insert(args.end(), {target, this->lowering.stringLowerer().stringObj(text),
+                               this->lowering.stringLowerer().stringMeta(text),
+                               this->lowering.builder_.CreateZExt(has, i32)});
+      result = this->lowering.builder_.CreateICmpNE(
+          this->lowering.builder_.CreateCall(
+              this->lowering.unknownLowerer().unknownFunction("tz_meta_delete", i32,
+                                                              {ptr, ptr, i64, ptr, ptr, i64, i32}),
               args),
-          lowering_.builder_.getInt32(0));
+          this->lowering.builder_.getInt32(0));
       break;
     default: {
       bool own = call->builtin() == Builtin::MetaGetOwn || call->builtin() == Builtin::MetaHasOwn;
-      args.insert(args.end(),
-                  {target, lowering_.stringLowerer().stringObj(text),
-                   lowering_.stringLowerer().stringMeta(text),
-                   lowering_.builder_.CreateZExt(has, i32), lowering_.builder_.getInt32(own)});
+      args.insert(args.end(), {target, this->lowering.stringLowerer().stringObj(text),
+                               this->lowering.stringLowerer().stringMeta(text),
+                               this->lowering.builder_.CreateZExt(has, i32),
+                               this->lowering.builder_.getInt32(own)});
       bool get = call->builtin() == Builtin::MetaGet || call->builtin() == Builtin::MetaGetOwn;
-      llvm::Value *found =
-          lowering_.builder_.CreateCall(lowering_.unknownLowerer().unknownFunction(
-                                            get ? "tz_meta_get" : "tz_meta_has", get ? ptr : i32,
-                                            {ptr, ptr, i64, ptr, ptr, i64, i32, i32}),
-                                        args, "record");
+      llvm::Value *found = this->lowering.builder_.CreateCall(
+          this->lowering.unknownLowerer().unknownFunction(get ? "tz_meta_get" : "tz_meta_has",
+                                                          get ? ptr : i32,
+                                                          {ptr, ptr, i64, ptr, ptr, i64, i32, i32}),
+          args, "record");
       if (!get) {
-        result = lowering_.builder_.CreateICmpNE(found, lowering_.builder_.getInt32(0));
+        result = this->lowering.builder_.CreateICmpNE(found, this->lowering.builder_.getInt32(0));
         break;
       }
       if (call->type->isUnknown()) {
@@ -254,78 +258,79 @@ llvm::Value *DecoratorLowerer::emitMetaCall(CallExpr *call) {
         break;
       }
       const Type *type = call->type->nonOptional();
-      llvm::BasicBlock *readBlock = lowering_.functionFrame().newBlock("record.read");
-      llvm::BasicBlock *endBlock = lowering_.functionFrame().newBlock("record.end");
-      llvm::BasicBlock *entry = lowering_.builder_.GetInsertBlock();
-      lowering_.builder_.CreateCondBr(lowering_.builder_.CreateIsNotNull(found), readBlock,
-                                      endBlock);
-      lowering_.functionFrame().switchTo(readBlock);
-      llvm::Value *slot = lowering_.functionFrame().createStackSlot(
-          lowering_.moduleBuilder().lower(type), "record.value");
-      lowering_.builder_.CreateCall(
-          lowering_.unknownLowerer().unknownFunction(
-              "tz_unknown_unbox", lowering_.builder_.getVoidTy(), {ptr, ptr, ptr}),
-          {found, lowering_.typeDescriptors().typeDescriptor(type), slot});
-      llvm::Value *value = lowering_.optionalLowerer().makeOptional(
-          lowering_.builder_.CreateLoad(lowering_.moduleBuilder().lower(type), slot),
-          lowering_.builder_.getTrue(), call->type);
-      lowering_.builder_.CreateCall(lowering_.instanceReleaseFn_, {found});
-      llvm::BasicBlock *readEnd = lowering_.builder_.GetInsertBlock();
-      lowering_.builder_.CreateBr(endBlock);
-      lowering_.functionFrame().switchTo(endBlock);
+      llvm::BasicBlock *readBlock = this->lowering.functionFrame().newBlock("record.read");
+      llvm::BasicBlock *endBlock = this->lowering.functionFrame().newBlock("record.end");
+      llvm::BasicBlock *entry = this->lowering.builder_.GetInsertBlock();
+      this->lowering.builder_.CreateCondBr(this->lowering.builder_.CreateIsNotNull(found),
+                                           readBlock, endBlock);
+      this->lowering.functionFrame().switchTo(readBlock);
+      llvm::Value *slot = this->lowering.functionFrame().createStackSlot(
+          this->lowering.moduleBuilder().lower(type), "record.value");
+      this->lowering.builder_.CreateCall(
+          this->lowering.unknownLowerer().unknownFunction(
+              "tz_unknown_unbox", this->lowering.builder_.getVoidTy(), {ptr, ptr, ptr}),
+          {found, this->lowering.typeDescriptors().typeDescriptor(type), slot});
+      llvm::Value *value = this->lowering.optionalLowerer().makeOptional(
+          this->lowering.builder_.CreateLoad(this->lowering.moduleBuilder().lower(type), slot),
+          this->lowering.builder_.getTrue(), call->type);
+      this->lowering.builder_.CreateCall(this->lowering.instanceReleaseFn_, {found});
+      llvm::BasicBlock *readEnd = this->lowering.builder_.GetInsertBlock();
+      this->lowering.builder_.CreateBr(endBlock);
+      this->lowering.functionFrame().switchTo(endBlock);
       llvm::PHINode *phi =
-          lowering_.builder_.CreatePHI(lowering_.moduleBuilder().lower(call->type), 2);
-      phi->addIncoming(lowering_.optionalLowerer().undefinedValue(call->type), entry);
+          this->lowering.builder_.CreatePHI(this->lowering.moduleBuilder().lower(call->type), 2);
+      phi->addIncoming(this->lowering.optionalLowerer().undefinedValue(call->type), entry);
       phi->addIncoming(value, readEnd);
       result = phi;
       break;
     }
   }
-  lowering_.refCounts().releaseValue(key, Type::string());
-  lowering_.refCounts().releaseValue(target, Type::anyObject());
-  lowering_.refCounts().releaseValue(property, propertyType);
+  this->lowering.refCounts().releaseValue(key, Type::string());
+  this->lowering.refCounts().releaseValue(target, Type::anyObject());
+  this->lowering.refCounts().releaseValue(property, propertyType);
 
   return result;
 }
 
 llvm::Constant *DecoratorLowerer::metaKeyConstant(const void *key) {
-  llvm::Constant *&global = metaKeys_[key];
+  llvm::Constant *&global = this->metaKeys[key];
   if (!global) {
-    global = new llvm::GlobalVariable(*lowering_.module_, lowering_.builder_.getInt8Ty(), true,
-                                      llvm::GlobalValue::PrivateLinkage,
-                                      lowering_.builder_.getInt8(0), "tz.meta.key");
+    global = new llvm::GlobalVariable(*this->lowering.module_, this->lowering.builder_.getInt8Ty(),
+                                      true, llvm::GlobalValue::PrivateLinkage,
+                                      this->lowering.builder_.getInt8(0), "tz.meta.key");
   }
 
   return global;
 }
 
 void DecoratorLowerer::finishMetadata(SourceFile &file, llvm::Instruction *init) {
-  if (!usesMetadata_) {
+  if (!this->usesMetadata) {
     return;
   }
   std::vector<const ClassDecl *> classes;
   unsigned count = 1;
   for (Stmt *item : file.items) {
-    if (auto *cls = dyn_cast<ClassDecl>(item); cls && !cls->literal()) {
+    auto *cls = dyn_cast<ClassDecl>(item);
+    if (cls && !cls->literal()) {
       classes.push_back(cls);
       count = std::max(count, cls->id + 1);
     }
   }
   std::vector<llvm::Constant *> table(
-      count, llvm::ConstantPointerNull::get(lowering_.builder_.getPtrTy()));
+      count, llvm::ConstantPointerNull::get(this->lowering.builder_.getPtrTy()));
   for (const ClassDecl *cls : classes) {
     if (cls->id) {
-      table[cls->id] = lowering_.unknownLowerer().classObject(cls);
+      table[cls->id] = this->lowering.unknownLowerer().classObject(cls);
     }
   }
-  auto *type = llvm::ArrayType::get(lowering_.builder_.getPtrTy(), count);
-  auto *global =
-      new llvm::GlobalVariable(*lowering_.module_, type, true, llvm::GlobalValue::PrivateLinkage,
-                               llvm::ConstantArray::get(type, table), "tz.classes");
+  auto *type = llvm::ArrayType::get(this->lowering.builder_.getPtrTy(), count);
+  auto *global = new llvm::GlobalVariable(*this->lowering.module_, type, true,
+                                          llvm::GlobalValue::PrivateLinkage,
+                                          llvm::ConstantArray::get(type, table), "tz.classes");
   llvm::IRBuilder<> b(init->getNextNode());
-  b.CreateCall(lowering_.unknownLowerer().unknownFunction(
-                   "tz_meta_init", lowering_.builder_.getVoidTy(),
-                   {lowering_.builder_.getPtrTy(), lowering_.builder_.getInt32Ty()}),
+  b.CreateCall(this->lowering.unknownLowerer().unknownFunction(
+                   "tz_meta_init", this->lowering.builder_.getVoidTy(),
+                   {this->lowering.builder_.getPtrTy(), this->lowering.builder_.getInt32Ty()}),
                {global, b.getInt32(count)});
 }
 

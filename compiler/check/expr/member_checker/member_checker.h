@@ -6,14 +6,14 @@ namespace tz {
 
 class MemberChecker {
 public:
-  explicit MemberChecker(Checker &checker);
+  explicit MemberChecker(Checker &owner);
 
   Expr *checkMember(MemberExpr *member, const Type *expected);
   Expr *checkIndex(IndexExpr *index);
   Expr *checkPosition(Expr *expr);
 
 private:
-  Checker &checker_;
+  Checker &checker;
 };
 
 }

@@ -8,9 +8,7 @@
 
 namespace tz {
 
-namespace {
-
-const char *slotName(UnionSlot slot) {
+const char *DebugTypes::slotName(UnionSlot slot) {
   switch (slot) {
   case UnionSlot::String:
     return "String";
@@ -59,43 +57,51 @@ const char *slotName(UnionSlot slot) {
   return "None";
 }
 
+DebugTypes::DebugTypes(Lowering &owner, llvm::DIBuilder &debugBuilder,
+                       llvm::DICompileUnit *compileUnit)
+    : lowering(owner),
+      builder(debugBuilder),
+      unit(compileUnit) {}
+
+bool DebugTypes::usesAtoms() const {
+  return this->atomType != nullptr;
 }
 
-DebugTypes::DebugTypes(Lowering &lowering, llvm::DIBuilder &builder, llvm::DICompileUnit *unit)
-    : lowering_(lowering), builder_(builder), unit_(unit) {}
-
 llvm::DIType *DebugTypes::of(const Type *type) {
-  if (auto found = types_.find(type); found != types_.end()) {
+  auto found = this->types.find(type);
+  if (found != this->types.end()) {
     return found->second;
   }
-  llvm::DIType *made = make(type);
-  types_[type] = made;
+  llvm::DIType *made = this->make(type);
+  this->types[type] = made;
 
   return made;
 }
 
 llvm::DIType *DebugTypes::referenceTo(llvm::DIType *type) {
-  return builder_.createReferenceType(llvm::dwarf::DW_TAG_reference_type, type, 64);
+  return this->builder.createReferenceType(llvm::dwarf::DW_TAG_reference_type, type, 64);
 }
 
 llvm::DIType *DebugTypes::basic(llvm::StringRef name, unsigned bits, unsigned encoding) {
-  return builder_.createBasicType(name, bits, encoding);
+  return this->builder.createBasicType(name, bits, encoding);
 }
 
-llvm::DIType *DebugTypes::pointer(llvm::DIType *to) { return builder_.createPointerType(to, 64); }
+llvm::DIType *DebugTypes::pointer(llvm::DIType *to) {
+  return this->builder.createPointerType(to, 64);
+}
 
 llvm::DIType *DebugTypes::voidPointer() {
-  if (!voidPointer_) {
-    voidPointer_ = builder_.createPointerType(nullptr, 64);
+  if (!this->voidPointerType) {
+    this->voidPointerType = this->builder.createPointerType(nullptr, 64);
   }
 
-  return voidPointer_;
+  return this->voidPointerType;
 }
 
 std::string DebugTypes::unique(llvm::StringRef name, const void *owner) {
   std::string candidate = name.str();
   for (unsigned n = 2;; ++n) {
-    auto [it, inserted] = names_.try_emplace(candidate, owner);
+    auto [it, inserted] = this->names.try_emplace(candidate, owner);
     if (inserted || it->second == owner) {
       return candidate;
     }
@@ -107,13 +113,14 @@ llvm::DICompositeType *
 DebugTypes::structure(llvm::StringRef name, llvm::StructType *layout,
                       llvm::ArrayRef<std::pair<llvm::StringRef, llvm::DIType *>> fields,
                       llvm::DIType *base, llvm::ArrayRef<unsigned> order) {
-  const llvm::DataLayout &data = lowering_.module_->getDataLayout();
+  const llvm::DataLayout &data = this->lowering.module_->getDataLayout();
   const llvm::StructLayout *offsets = data.getStructLayout(layout);
-  auto *temporary = builder_.createReplaceableCompositeType(llvm::dwarf::DW_TAG_structure_type,
-                                                            name, unit_, nullptr, 0);
+  auto *temporary = this->builder.createReplaceableCompositeType(llvm::dwarf::DW_TAG_structure_type,
+                                                                 name, this->unit, nullptr, 0);
   std::vector<llvm::Metadata *> members;
   if (base) {
-    members.push_back(builder_.createInheritance(temporary, base, 0, 0, llvm::DINode::FlagPublic));
+    members.push_back(
+        this->builder.createInheritance(temporary, base, 0, 0, llvm::DINode::FlagPublic));
   }
   std::vector<unsigned> indices(order.begin(), order.end());
   if (indices.empty()) {
@@ -127,168 +134,183 @@ DebugTypes::structure(llvm::StringRef name, llvm::StructType *layout,
       continue;
     }
     uint64_t size = data.getTypeAllocSizeInBits(layout->getElementType(i));
-    members.push_back(builder_.createMemberType(temporary, fields[i].first, nullptr, 0, size, 0,
-                                                offsets->getElementOffsetInBits(i),
-                                                llvm::DINode::FlagPublic, fields[i].second));
+    members.push_back(this->builder.createMemberType(temporary, fields[i].first, nullptr, 0, size,
+                                                     0, offsets->getElementOffsetInBits(i),
+                                                     llvm::DINode::FlagPublic, fields[i].second));
   }
-  llvm::DICompositeType *made = builder_.createStructType(
-      unit_, name, nullptr, 0, offsets->getSizeInBits(), offsets->getAlignment().value() * 8,
-      llvm::DINode::FlagZero, nullptr, builder_.getOrCreateArray(members));
+  llvm::DICompositeType *made = this->builder.createStructType(
+      this->unit, name, nullptr, 0, offsets->getSizeInBits(), offsets->getAlignment().value() * 8,
+      llvm::DINode::FlagZero, nullptr, this->builder.getOrCreateArray(members));
 
-  return builder_.replaceTemporary(llvm::TempDICompositeType(temporary), made);
+  return this->builder.replaceTemporary(llvm::TempDICompositeType(temporary), made);
 }
 
 llvm::DIType *DebugTypes::header() {
-  if (!header_) {
-    llvm::Type *ptr = lowering_.builder_.getPtrTy(), *i64 = lowering_.builder_.getInt64Ty();
-    header_ =
-        structure("tz_object", llvm::StructType::get(lowering_.ctx_, {i64, ptr}),
-                  {{"rc", basic("int", 64, llvm::dwarf::DW_ATE_signed)}, {"type", voidPointer()}});
+  if (!this->headerType) {
+    llvm::Type *ptr = this->lowering.builder_.getPtrTy();
+    llvm::Type *i64 = this->lowering.builder_.getInt64Ty();
+    this->headerType =
+        this->structure("tz_object", llvm::StructType::get(this->lowering.ctx_, {i64, ptr}),
+                        {{"rc", this->basic("int", 64, llvm::dwarf::DW_ATE_signed)},
+                         {"type", this->voidPointer()}});
   }
 
-  return header_;
+  return this->headerType;
 }
 
 llvm::DIType *DebugTypes::string() {
-  if (!string_) {
-    llvm::DIType *meta = basic("uint64", 64, llvm::dwarf::DW_ATE_unsigned);
-    string_ = structure("string", lowering_.strTy_, {{"obj", voidPointer()}, {"meta", meta}});
-    llvm::Type *i64 = lowering_.builder_.getInt64Ty();
-    llvm::DICompositeType *rope =
-        structure("tz_rope",
-                  llvm::StructType::get(lowering_.ctx_, {i64, i64, lowering_.strTy_,
-                                                         lowering_.strTy_, lowering_.strTy_}),
-                  {{"rc", basic("int", 64, llvm::dwarf::DW_ATE_signed)},
-                   {"kind", meta},
-                   {"left", string_},
-                   {"right", string_},
-                   {"flat", string_}});
-    builder_.retainType(rope);
+  if (!this->stringType) {
+    llvm::DIType *meta = this->basic("uint64", 64, llvm::dwarf::DW_ATE_unsigned);
+    this->stringType = this->structure("string", this->lowering.strTy_,
+                                       {{"obj", this->voidPointer()}, {"meta", meta}});
+    llvm::Type *i64 = this->lowering.builder_.getInt64Ty();
+    llvm::DICompositeType *rope = this->structure(
+        "tz_rope",
+        llvm::StructType::get(this->lowering.ctx_, {i64, i64, this->lowering.strTy_,
+                                                    this->lowering.strTy_, this->lowering.strTy_}),
+        {{"rc", this->basic("int", 64, llvm::dwarf::DW_ATE_signed)},
+         {"kind", meta},
+         {"left", this->stringType},
+         {"right", this->stringType},
+         {"flat", this->stringType}});
+    this->builder.retainType(rope);
   }
 
-  return string_;
+  return this->stringType;
 }
 
 llvm::DIType *DebugTypes::function() {
-  if (!function_) {
+  if (!this->functionType) {
     llvm::DISubroutineType *signature =
-        builder_.createSubroutineType(builder_.getOrCreateTypeArray({nullptr}));
-    llvm::DIType *info =
-        structure("FunctionInfo", lowering_.fnInfoTy_,
-                  {{"code", builder_.createPointerType(signature, 64)}, {"name", string()}});
-    function_ =
-        structure("Function", lowering_.fnTy_, {{"info", pointer(info)}, {"env", voidPointer()}});
+        this->builder.createSubroutineType(this->builder.getOrCreateTypeArray({nullptr}));
+    llvm::DIType *info = this->structure(
+        "FunctionInfo", this->lowering.fnInfoTy_,
+        {{"code", this->builder.createPointerType(signature, 64)}, {"name", this->string()}});
+    this->functionType =
+        this->structure("Function", this->lowering.fnTy_,
+                        {{"info", this->pointer(info)}, {"env", this->voidPointer()}});
   }
 
-  return function_;
+  return this->functionType;
 }
 
 llvm::DIType *DebugTypes::atom() {
-  if (!atom_) {
-    llvm::Type *index = lowering_.builder_.getInt32Ty();
-    atom_ = structure("atom", llvm::StructType::get(lowering_.ctx_, llvm::ArrayRef(index)),
-                      {{"index", basic("int32", 32, llvm::dwarf::DW_ATE_signed)}});
+  if (!this->atomType) {
+    llvm::Type *index = this->lowering.builder_.getInt32Ty();
+    this->atomType =
+        this->structure("atom", llvm::StructType::get(this->lowering.ctx_, llvm::ArrayRef(index)),
+                        {{"index", this->basic("int32", 32, llvm::dwarf::DW_ATE_signed)}});
   }
 
-  return atom_;
+  return this->atomType;
 }
 
 llvm::DIType *DebugTypes::opaque(const Type *type) {
-  std::string name = unique(type->name(), type);
-  llvm::Type *ptr = lowering_.builder_.getPtrTy(), *i64 = lowering_.builder_.getInt64Ty();
+  std::string name = this->unique(type->name(), type);
+  llvm::Type *ptr = this->lowering.builder_.getPtrTy();
+  llvm::Type *i64 = this->lowering.builder_.getInt64Ty();
 
-  return structure(name, llvm::StructType::get(lowering_.ctx_, {i64, ptr}), {});
+  return this->structure(name, llvm::StructType::get(this->lowering.ctx_, {i64, ptr}), {});
 }
 
 llvm::DIType *DebugTypes::array(const Type *type) {
-  llvm::DIType *element = of(type->inner());
+  llvm::DIType *element = this->of(type->inner());
   if (element->getTag() == llvm::dwarf::DW_TAG_reference_type) {
-    element = pointer(llvm::cast<llvm::DIDerivedType>(element)->getBaseType());
+    element = this->pointer(llvm::cast<llvm::DIDerivedType>(element)->getBaseType());
   }
-  llvm::DIType *u32 = basic("uint32", 32, llvm::dwarf::DW_ATE_unsigned);
+  llvm::DIType *u32 = this->basic("uint32", 32, llvm::dwarf::DW_ATE_unsigned);
 
-  return structure(unique("Array<" + type->inner()->name().str() + ">", type), lowering_.arrayTy_,
-                   {{"rc", basic("int", 64, llvm::dwarf::DW_ATE_signed)},
-                    {"type", voidPointer()},
-                    {"data", pointer(element)},
-                    {"length", u32},
-                    {"capacity", u32},
-                    {"alloc", voidPointer()}});
+  return this->structure(this->unique("Array<" + type->inner()->name().str() + ">", type),
+                         this->lowering.arrayTy_,
+                         {{"rc", this->basic("int", 64, llvm::dwarf::DW_ATE_signed)},
+                          {"type", this->voidPointer()},
+                          {"data", this->pointer(element)},
+                          {"length", u32},
+                          {"capacity", u32},
+                          {"alloc", this->voidPointer()}});
 }
 
 llvm::DIType *DebugTypes::optional(const Type *type) {
   const Type *inner = type->inner();
-  llvm::DIType *value = of(inner);
+  llvm::DIType *value = this->of(inner);
   if (UnionLayout::zeroIsUndefined(inner)) {
     if (value->getTag() == llvm::dwarf::DW_TAG_reference_type) {
-      return pointer(llvm::cast<llvm::DIDerivedType>(value)->getBaseType());
+      return this->pointer(llvm::cast<llvm::DIDerivedType>(value)->getBaseType());
     }
     return value;
   }
-  auto *layout = llvm::cast<llvm::StructType>(lowering_.moduleBuilder().lower(type));
+  auto *layout = llvm::cast<llvm::StructType>(this->lowering.moduleBuilder().lower(type));
 
-  return structure(unique("Optional<" + inner->name().str() + ">", type), layout,
-                   {{"value", value}, {"has", basic("bool", 8, llvm::dwarf::DW_ATE_boolean)}});
+  return this->structure(
+      this->unique("Optional<" + inner->name().str() + ">", type), layout,
+      {{"value", value}, {"has", this->basic("bool", 8, llvm::dwarf::DW_ATE_boolean)}});
 }
 
 llvm::DIType *DebugTypes::object(const Type *type) {
   const ClassDecl *cls = type->classDecl();
-  std::string name = unique(cls && !cls->literal() ? cls->name : llvm::StringRef("object"), type);
-  auto *temporary = builder_.createReplaceableCompositeType(llvm::dwarf::DW_TAG_structure_type,
-                                                            name, unit_, nullptr, 0);
-  pending_.push_back({type, temporary});
+  std::string name =
+      this->unique(cls && !cls->literal() ? cls->name : llvm::StringRef("object"), type);
+  auto *temporary = this->builder.createReplaceableCompositeType(llvm::dwarf::DW_TAG_structure_type,
+                                                                 name, this->unit, nullptr, 0);
+  this->pending.push_back({type, temporary});
 
   return temporary;
 }
 
 void DebugTypes::completeObject(const Type *type, llvm::DICompositeType *temporary) {
-  const Lowering::ObjectLayout *layout =
-      lowering_.interfaces_.count(type) ? nullptr : lowering_.objectLayouts().builtLayout(type);
+  const Lowering::ObjectLayout *layout = this->lowering.interfaces_.count(type)
+                                             ? nullptr
+                                             : this->lowering.objectLayouts().builtLayout(type);
   llvm::DICompositeType *made;
   if (!layout) {
-    llvm::Type *ptr = lowering_.builder_.getPtrTy(), *i64 = lowering_.builder_.getInt64Ty();
-    made =
-        structure(temporary->getName(), llvm::StructType::get(lowering_.ctx_, {i64, ptr}),
-                  {{"rc", basic("int", 64, llvm::dwarf::DW_ATE_signed)}, {"type", voidPointer()}});
+    llvm::Type *ptr = this->lowering.builder_.getPtrTy();
+    llvm::Type *i64 = this->lowering.builder_.getInt64Ty();
+    made = this->structure(temporary->getName(),
+                           llvm::StructType::get(this->lowering.ctx_, {i64, ptr}),
+                           {{"rc", this->basic("int", 64, llvm::dwarf::DW_ATE_signed)},
+                            {"type", this->voidPointer()}});
   } else {
     llvm::ArrayRef<Field> fields = type->fields();
     std::vector<std::pair<llvm::StringRef, llvm::DIType *>> named(layout->type->getNumElements());
     for (unsigned i = 0; i < fields.size() && i < layout->elements.size(); ++i) {
-      named[layout->elements[i]] = {fields[i].name, of(fields[i].type)};
+      named[layout->elements[i]] = {fields[i].name, this->of(fields[i].type)};
     }
     std::vector<unsigned> order;
     for (unsigned i = 0; i < fields.size() && i < layout->elements.size(); ++i) {
       order.push_back(layout->elements[i]);
     }
-    made = structure(temporary->getName(), layout->type, named, nullptr, order);
+    made = this->structure(temporary->getName(), layout->type, named, nullptr, order);
   }
-  builder_.replaceTemporary(llvm::TempDICompositeType(temporary), made);
+  this->builder.replaceTemporary(llvm::TempDICompositeType(temporary), made);
 }
 
 llvm::DIType *DebugTypes::result(const Type *type) {
-  Lowering::ResultLayout layout = lowering_.resultLowerer().resultLayout(type);
-  const Type *okType = type->okType(), *errType = type->errType();
+  Lowering::ResultLayout layout = this->lowering.resultLowerer().resultLayout(type);
+  const Type *okType = type->okType();
+  const Type *errType = type->errType();
   std::vector<std::pair<llvm::StringRef, llvm::DIType *>> named(4);
-  named[layout.value] = {"value", okType->isVoid() ? nullptr : of(okType)};
-  named[layout.error] = {"error", errType->isVoid() ? nullptr : of(errType)};
-  named[layout.ok] = {"ok", basic("bool", 8, llvm::dwarf::DW_ATE_boolean)};
-  named[layout.site] = {"site", voidPointer()};
+  named[layout.value] = {"value", okType->isVoid() ? nullptr : this->of(okType)};
+  named[layout.error] = {"error", errType->isVoid() ? nullptr : this->of(errType)};
+  named[layout.ok] = {"ok", this->basic("bool", 8, llvm::dwarf::DW_ATE_boolean)};
+  named[layout.site] = {"site", this->voidPointer()};
   std::string name = "Result<" + (okType->isVoid() ? std::string("void") : okType->name().str()) +
                      ", " + errType->name().str() + ">";
 
-  return structure(unique(name, type), layout.type, named);
+  return this->structure(this->unique(name, type), layout.type, named);
 }
 
 llvm::DIType *DebugTypes::dict(const Type *type) {
-  const Type *key = type->keyType(), *value = type->valueType();
-  llvm::Type *i32 = lowering_.builder_.getInt32Ty(), *ptr = lowering_.builder_.getPtrTy();
-  llvm::Type *i64 = lowering_.builder_.getInt64Ty();
-  std::vector<llvm::Type *> elements{i32, i32, lowering_.moduleBuilder().lower(key)};
-  llvm::DIType *u32 = basic("uint32", 32, llvm::dwarf::DW_ATE_unsigned);
+  const Type *key = type->keyType();
+  const Type *value = type->valueType();
+  llvm::Type *i32 = this->lowering.builder_.getInt32Ty();
+  llvm::Type *ptr = this->lowering.builder_.getPtrTy();
+  llvm::Type *i64 = this->lowering.builder_.getInt64Ty();
+  std::vector<llvm::Type *> elements{i32, i32, this->lowering.moduleBuilder().lower(key)};
+  llvm::DIType *u32 = this->basic("uint32", 32, llvm::dwarf::DW_ATE_unsigned);
   auto stored = [&](const Type *part) {
-    llvm::DIType *made = of(part);
+    llvm::DIType *made = this->of(part);
     if (made->getTag() == llvm::dwarf::DW_TAG_reference_type) {
-      return pointer(llvm::cast<llvm::DIDerivedType>(made)->getBaseType());
+      return this->pointer(llvm::cast<llvm::DIDerivedType>(made)->getBaseType());
     }
     return made;
   };
@@ -297,62 +319,63 @@ llvm::DIType *DebugTypes::dict(const Type *type) {
   std::string kind = type->isSet() ? "Set" : type->isMap() ? "Map" : "Record";
   std::string name = kind + "<" + key->name().str();
   if (!type->isSet()) {
-    elements.push_back(lowering_.moduleBuilder().lower(value));
+    elements.push_back(this->lowering.moduleBuilder().lower(value));
     entryFields.push_back({"value", stored(value)});
     name += ", " + value->name().str();
   }
   name += ">";
-  name = unique(name, type);
-  llvm::DIType *entry =
-      structure(name + "::Entry", llvm::StructType::get(lowering_.ctx_, elements), entryFields);
+  name = this->unique(name, type);
+  llvm::DIType *entry = this->structure(
+      name + "::Entry", llvm::StructType::get(this->lowering.ctx_, elements), entryFields);
   llvm::StructType *map = llvm::StructType::get(
-      lowering_.ctx_, {i64, ptr, ptr, ptr, i32, i32, i32, i32, i32, i32, ptr});
+      this->lowering.ctx_, {i64, ptr, ptr, ptr, i32, i32, i32, i32, i32, i32, ptr});
 
-  return structure(name, map,
-                   {{"rc", basic("int", 64, llvm::dwarf::DW_ATE_signed)},
-                    {"layout", voidPointer()},
-                    {"entries", pointer(entry)},
-                    {"index", voidPointer()},
-                    {"count", u32},
-                    {"used", u32},
-                    {"capacity", u32},
-                    {"index_mask", u32},
-                    {"iterating", u32},
-                    {"flags", u32},
-                    {"next_dead", voidPointer()}});
+  return this->structure(name, map,
+                         {{"rc", this->basic("int", 64, llvm::dwarf::DW_ATE_signed)},
+                          {"layout", this->voidPointer()},
+                          {"entries", this->pointer(entry)},
+                          {"index", this->voidPointer()},
+                          {"count", u32},
+                          {"used", u32},
+                          {"capacity", u32},
+                          {"index_mask", u32},
+                          {"iterating", u32},
+                          {"flags", u32},
+                          {"next_dead", this->voidPointer()}});
 }
 
 llvm::DIType *DebugTypes::tagged(const Type *type) {
-  auto *layout = llvm::cast<llvm::StructType>(lowering_.moduleBuilder().lower(type));
-  const llvm::DataLayout &data = lowering_.module_->getDataLayout();
+  auto *layout = llvm::cast<llvm::StructType>(this->lowering.moduleBuilder().lower(type));
+  const llvm::DataLayout &data = this->lowering.module_->getDataLayout();
   uint64_t payloadBits = data.getTypeAllocSizeInBits(layout) - 64;
-  std::string name = unique("Union<" + type->name().str() + ">", type);
-  auto *payload = builder_.createReplaceableCompositeType(llvm::dwarf::DW_TAG_union_type,
-                                                          name + "::Payload", unit_, nullptr, 0);
+  std::string name = this->unique("Union<" + type->name().str() + ">", type);
+  auto *payload = this->builder.createReplaceableCompositeType(
+      llvm::dwarf::DW_TAG_union_type, name + "::Payload", this->unit, nullptr, 0);
   std::vector<llvm::Metadata *> members;
   for (UnionSlot slot : type->slots()) {
     const Type *part = type->slotPart(slot);
     if (!part) {
       continue;
     }
-    llvm::DIType *partType = of(part);
+    llvm::DIType *partType = this->of(part);
     if (partType->getTag() == llvm::dwarf::DW_TAG_reference_type) {
-      partType = pointer(llvm::cast<llvm::DIDerivedType>(partType)->getBaseType());
+      partType = this->pointer(llvm::cast<llvm::DIDerivedType>(partType)->getBaseType());
     }
-    uint64_t size = data.getTypeAllocSizeInBits(lowering_.moduleBuilder().lower(part));
-    members.push_back(builder_.createMemberType(payload, slotName(slot), nullptr, 0, size, 0, 0,
-                                                llvm::DINode::FlagPublic, partType));
+    uint64_t size = data.getTypeAllocSizeInBits(this->lowering.moduleBuilder().lower(part));
+    members.push_back(this->builder.createMemberType(payload, DebugTypes::slotName(slot), nullptr,
+                                                     0, size, 0, 0, llvm::DINode::FlagPublic,
+                                                     partType));
   }
-  llvm::DICompositeType *union_ =
-      builder_.createUnionType(unit_, name + "::Payload", nullptr, 0, payloadBits, 64,
-                               llvm::DINode::FlagZero, builder_.getOrCreateArray(members));
-  union_ = builder_.replaceTemporary(llvm::TempDICompositeType(payload), union_);
-  llvm::Type *i32 = lowering_.builder_.getInt32Ty();
-  llvm::Type *words = llvm::ArrayType::get(lowering_.builder_.getInt64Ty(), payloadBits / 64);
+  llvm::DICompositeType *union_ = this->builder.createUnionType(
+      this->unit, name + "::Payload", nullptr, 0, payloadBits, 64, llvm::DINode::FlagZero,
+      this->builder.getOrCreateArray(members));
+  union_ = this->builder.replaceTemporary(llvm::TempDICompositeType(payload), union_);
+  llvm::Type *i32 = this->lowering.builder_.getInt32Ty();
+  llvm::Type *words = llvm::ArrayType::get(this->lowering.builder_.getInt64Ty(), payloadBits / 64);
 
-  return structure(
-      name, llvm::StructType::get(lowering_.ctx_, {i32, words}),
-      {{"tag", basic("uint32", 32, llvm::dwarf::DW_ATE_unsigned)}, {"payload", union_}});
+  return this->structure(
+      name, llvm::StructType::get(this->lowering.ctx_, {i32, words}),
+      {{"tag", this->basic("uint32", 32, llvm::dwarf::DW_ATE_unsigned)}, {"payload", union_}});
 }
 
 llvm::DIType *DebugTypes::make(const Type *type) {
@@ -361,44 +384,47 @@ llvm::DIType *DebugTypes::make(const Type *type) {
   case Type::Kind::Undefined:
   case Type::Kind::Never:
   case Type::Kind::Error:
-    return basic("undefined", 8, llvm::dwarf::DW_ATE_boolean);
+    return this->basic("undefined", 8, llvm::dwarf::DW_ATE_boolean);
   case Type::Kind::Bool:
-    return basic("bool", 8, llvm::dwarf::DW_ATE_boolean);
+    return this->basic("bool", 8, llvm::dwarf::DW_ATE_boolean);
   case Type::Kind::Int:
-    return basic(type->name(), type->bitWidth(),
-                 type->isUnsigned() ? llvm::dwarf::DW_ATE_unsigned : llvm::dwarf::DW_ATE_signed);
+    return this->basic(type->name(), type->bitWidth(),
+                       type->isUnsigned() ? llvm::dwarf::DW_ATE_unsigned
+                                          : llvm::dwarf::DW_ATE_signed);
   case Type::Kind::Double:
-    return basic("double", 64, llvm::dwarf::DW_ATE_float);
+    return this->basic("double", 64, llvm::dwarf::DW_ATE_float);
   case Type::Kind::Decimal:
-    return structure("decimal", lowering_.decTy_,
-                     {{"coef", basic("int", 64, llvm::dwarf::DW_ATE_signed)},
-                      {"meta", basic("uint64", 64, llvm::dwarf::DW_ATE_unsigned)}});
+    return this->structure("decimal", this->lowering.decTy_,
+                           {{"coef", this->basic("int", 64, llvm::dwarf::DW_ATE_signed)},
+                            {"meta", this->basic("uint64", 64, llvm::dwarf::DW_ATE_unsigned)}});
   case Type::Kind::String:
-    return string();
+    return this->string();
   case Type::Kind::Array:
-    return referenceTo(array(type));
+    return this->referenceTo(this->array(type));
   case Type::Kind::Optional:
-    return optional(type);
+    return this->optional(type);
   case Type::Kind::Function:
-    return function();
+    return this->function();
   case Type::Kind::Object:
-    return referenceTo(object(type));
+    return this->referenceTo(this->object(type));
   case Type::Kind::Result:
-    return result(type);
+    return this->result(type);
   case Type::Kind::Dict:
-    return referenceTo(dict(type));
+    return this->referenceTo(this->dict(type));
   case Type::Kind::Literal:
-  case Type::Kind::Union:
+  case Type::Kind::Union: {
     if (UnionLayout::isAtomType(type)) {
-      return atom();
+      return this->atom();
     }
     if (UnionLayout::isObjectUnion(type)) {
-      return pointer(header());
+      return this->pointer(this->header());
     }
-    if (const Type *stored = UnionLayout::storedType(type); stored != type) {
-      return of(stored);
+    const Type *stored = UnionLayout::storedType(type);
+    if (stored != type) {
+      return this->of(stored);
     }
-    return tagged(type);
+    return this->tagged(type);
+  }
   case Type::Kind::Param:
   case Type::Kind::Iterator:
   case Type::Kind::Json:
@@ -408,14 +434,14 @@ llvm::DIType *DebugTypes::make(const Type *type) {
     break;
   }
 
-  return pointer(opaque(type));
+  return this->pointer(this->opaque(type));
 }
 
 void DebugTypes::finish() {
-  while (!pending_.empty()) {
-    auto [type, temporary] = pending_.back();
-    pending_.pop_back();
-    completeObject(type, temporary);
+  while (!this->pending.empty()) {
+    auto [type, temporary] = this->pending.back();
+    this->pending.pop_back();
+    this->completeObject(type, temporary);
   }
 }
 

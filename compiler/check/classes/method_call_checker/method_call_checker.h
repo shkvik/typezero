@@ -6,13 +6,13 @@ namespace tz {
 
 class MethodCallChecker {
 public:
-  explicit MethodCallChecker(Checker &checker);
+  explicit MethodCallChecker(Checker &owner);
 
   Expr *checkMethodCall(CallExpr *call, MemberExpr *member, const Type *expected = nullptr);
   Expr *checkClassNew(NewExpr *expr, ClassDecl *cls, const Type *expected = nullptr);
 
 private:
-  Checker &checker_;
+  Checker &checker;
 };
 
 }

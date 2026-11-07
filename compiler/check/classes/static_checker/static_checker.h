@@ -6,7 +6,7 @@ namespace tz {
 
 class StaticChecker {
 public:
-  explicit StaticChecker(Checker &checker);
+  explicit StaticChecker(Checker &owner);
 
   Expr *checkStaticMember(MemberExpr *member, ClassDecl *cls, const Type *expected);
   const Type *checkStaticTarget(Expr *&target, ClassDecl *cls);
@@ -14,7 +14,9 @@ public:
                              const Type *expected = nullptr);
 
 private:
-  Checker &checker_;
+  static ClassField *staticField(ClassDecl *cls, llvm::StringRef name, ClassDecl **owner);
+
+  Checker &checker;
 };
 
 }

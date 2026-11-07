@@ -59,7 +59,9 @@ Expr *CryptoMethodChecker::checkCryptoMethod(CallExpr *call, MemberExpr *member)
   bool cipher = kind == Crypto::Cipheriv || kind == Crypto::Decipheriv;
 
   if (hash && name == "update") {
-    if (!checker_.argumentChecker().checkArity(call, loc, 1, 2)) {
+    ArgumentChecker::ResultArityMatches arity = checker_.argumentChecker().checkArity(call, 1, 2);
+    if (arity.isErr()) {
+      checker_.diags_.error(loc, arity.error().message);
       return call;
     }
     Expr *data = checker_.cryptoArgs().cryptoData(args[0], "data", true, false, false);
@@ -74,7 +76,9 @@ Expr *CryptoMethodChecker::checkCryptoMethod(CallExpr *call, MemberExpr *member)
                                             type);
   }
   if ((kind == Crypto::Hash || kind == Crypto::Hmac) && name == "digest") {
-    if (!checker_.argumentChecker().checkArity(call, loc, 0, 1)) {
+    ArgumentChecker::ResultArityMatches arity = checker_.argumentChecker().checkArity(call, 0, 1);
+    if (arity.isErr()) {
+      checker_.diags_.error(loc, arity.error().message);
       return call;
     }
     Expr *encoding = checker_.cryptoArgs().cryptoEncoding(call, 0, name, -1);
@@ -88,7 +92,9 @@ Expr *CryptoMethodChecker::checkCryptoMethod(CallExpr *call, MemberExpr *member)
                                             Type::string());
   }
   if (kind == Crypto::Hash && name == "copy") {
-    if (!checker_.argumentChecker().checkArity(call, loc, 0, 1)) {
+    ArgumentChecker::ResultArityMatches arity = checker_.argumentChecker().checkArity(call, 0, 1);
+    if (arity.isErr()) {
+      checker_.diags_.error(loc, arity.error().message);
       return call;
     }
     llvm::StringMap<Expr *> options;
@@ -106,7 +112,9 @@ Expr *CryptoMethodChecker::checkCryptoMethod(CallExpr *call, MemberExpr *member)
                                             type);
   }
   if (kind == Crypto::Sign && name == "sign") {
-    if (!checker_.argumentChecker().checkArity(call, loc, 1, 2)) {
+    ArgumentChecker::ResultArityMatches arity = checker_.argumentChecker().checkArity(call, 1, 2);
+    if (arity.isErr()) {
+      checker_.diags_.error(loc, arity.error().message);
       return call;
     }
     std::vector<Expr *> signArgs = {self};
@@ -116,7 +124,9 @@ Expr *CryptoMethodChecker::checkCryptoMethod(CallExpr *call, MemberExpr *member)
     return bytesOrText(CryptoFn::SignFinal, std::move(signArgs), 1, true);
   }
   if (kind == Crypto::Verify && name == "verify") {
-    if (!checker_.argumentChecker().checkArity(call, loc, 2, 3)) {
+    ArgumentChecker::ResultArityMatches arity = checker_.argumentChecker().checkArity(call, 2, 3);
+    if (arity.isErr()) {
+      checker_.diags_.error(loc, arity.error().message);
       return call;
     }
     std::vector<Expr *> verifyArgs = {self};
@@ -136,7 +146,9 @@ Expr *CryptoMethodChecker::checkCryptoMethod(CallExpr *call, MemberExpr *member)
                                               Type::boolTy());
   }
   if (cipher && name == "update") {
-    if (!checker_.argumentChecker().checkArity(call, loc, 1, 3)) {
+    ArgumentChecker::ResultArityMatches arity = checker_.argumentChecker().checkArity(call, 1, 3);
+    if (arity.isErr()) {
+      checker_.diags_.error(loc, arity.error().message);
       return call;
     }
     Expr *data = checker_.cryptoArgs().cryptoData(args[0], "data", true, false, true);
@@ -150,13 +162,17 @@ Expr *CryptoMethodChecker::checkCryptoMethod(CallExpr *call, MemberExpr *member)
     return bytesOrText(CryptoFn::CipherUpdate, {self, data, encoding}, 2, false);
   }
   if (cipher && name == "final") {
-    if (!checker_.argumentChecker().checkArity(call, loc, 0, 1)) {
+    ArgumentChecker::ResultArityMatches arity = checker_.argumentChecker().checkArity(call, 0, 1);
+    if (arity.isErr()) {
+      checker_.diags_.error(loc, arity.error().message);
       return call;
     }
     return bytesOrText(CryptoFn::CipherFinal, {self}, 0, true);
   }
   if (cipher && name == "setAAD") {
-    if (!checker_.argumentChecker().checkArity(call, loc, 1, 2)) {
+    ArgumentChecker::ResultArityMatches arity = checker_.argumentChecker().checkArity(call, 1, 2);
+    if (arity.isErr()) {
+      checker_.diags_.error(loc, arity.error().message);
       return call;
     }
     Expr *data = checker_.cryptoArgs().cryptoData(args[0], "AAD", false, false, true);
@@ -176,13 +192,17 @@ Expr *CryptoMethodChecker::checkCryptoMethod(CallExpr *call, MemberExpr *member)
                                             type);
   }
   if (kind == Crypto::Cipheriv && name == "getAuthTag") {
-    if (!checker_.argumentChecker().checkArity(call, loc, 0, 0)) {
+    ArgumentChecker::ResultArityMatches arity = checker_.argumentChecker().checkArity(call, 0, 0);
+    if (arity.isErr()) {
+      checker_.diags_.error(loc, arity.error().message);
       return call;
     }
     return checker_.cryptoArgs().cryptoResult(call, CryptoFn::CipherGetAuthTag, {self}, buffer);
   }
   if (kind == Crypto::Decipheriv && name == "setAuthTag") {
-    if (!checker_.argumentChecker().checkArity(call, loc, 1, 2)) {
+    ArgumentChecker::ResultArityMatches arity = checker_.argumentChecker().checkArity(call, 1, 2);
+    if (arity.isErr()) {
+      checker_.diags_.error(loc, arity.error().message);
       return call;
     }
     Expr *tag = checker_.cryptoArgs().cryptoData(args[0], "tag", true, false, true);
@@ -197,7 +217,9 @@ Expr *CryptoMethodChecker::checkCryptoMethod(CallExpr *call, MemberExpr *member)
                                             type);
   }
   if (cipher && name == "setAutoPadding") {
-    if (!checker_.argumentChecker().checkArity(call, loc, 0, 1)) {
+    ArgumentChecker::ResultArityMatches arity = checker_.argumentChecker().checkArity(call, 0, 1);
+    if (arity.isErr()) {
+      checker_.diags_.error(loc, arity.error().message);
       return call;
     }
     Expr *padding = present(0) ? checker_.argumentChecker().checkArg(args[0], Type::boolTy())
@@ -206,7 +228,9 @@ Expr *CryptoMethodChecker::checkCryptoMethod(CallExpr *call, MemberExpr *member)
                                             type);
   }
   if (kind == Crypto::KeyObject && name == "export") {
-    if (!checker_.argumentChecker().checkArity(call, loc, 0, 1)) {
+    ArgumentChecker::ResultArityMatches arity = checker_.argumentChecker().checkArity(call, 0, 1);
+    if (arity.isErr()) {
+      checker_.diags_.error(loc, arity.error().message);
       return call;
     }
     if (!present(0)) {
@@ -262,7 +286,9 @@ Expr *CryptoMethodChecker::checkCryptoMethod(CallExpr *call, MemberExpr *member)
         format == 0 ? Type::string() : buffer);
   }
   if (kind == Crypto::KeyObject && name == "equals") {
-    if (!checker_.argumentChecker().checkArity(call, loc, 1, 1)) {
+    ArgumentChecker::ResultArityMatches arity = checker_.argumentChecker().checkArity(call, 1, 1);
+    if (arity.isErr()) {
+      checker_.diags_.error(loc, arity.error().message);
       return call;
     }
     Expr *other = checker_.cryptoArgs().cryptoKeyObject(args[0], "other key");
@@ -283,7 +309,9 @@ Expr *CryptoMethodChecker::checkCryptoMethod(CallExpr *call, MemberExpr *member)
       return which < 0 ? nullptr : checker_.cryptoArgs().cryptoInt(loc, which);
     };
     if (name == "generateKeys" || name == "getPublicKey") {
-      if (!checker_.argumentChecker().checkArity(call, loc, 0, 2)) {
+      ArgumentChecker::ResultArityMatches arity = checker_.argumentChecker().checkArity(call, 0, 2);
+      if (arity.isErr()) {
+        checker_.diags_.error(loc, arity.error().message);
         return call;
       }
       Expr *f = format(1);
@@ -295,13 +323,17 @@ Expr *CryptoMethodChecker::checkCryptoMethod(CallExpr *call, MemberExpr *member)
                          {self, f}, 0, name == "getPublicKey");
     }
     if (name == "getPrivateKey") {
-      if (!checker_.argumentChecker().checkArity(call, loc, 0, 1)) {
+      ArgumentChecker::ResultArityMatches arity = checker_.argumentChecker().checkArity(call, 0, 1);
+      if (arity.isErr()) {
+        checker_.diags_.error(loc, arity.error().message);
         return call;
       }
       return bytesOrText(CryptoFn::EcdhGetPrivateKey, {self}, 0, true);
     }
     if (name == "setPrivateKey") {
-      if (!checker_.argumentChecker().checkArity(call, loc, 1, 2)) {
+      ArgumentChecker::ResultArityMatches arity = checker_.argumentChecker().checkArity(call, 1, 2);
+      if (arity.isErr()) {
+        checker_.diags_.error(loc, arity.error().message);
         return call;
       }
       Expr *key = checker_.cryptoArgs().cryptoData(args[0], "private key", true, false, true);
@@ -316,7 +348,9 @@ Expr *CryptoMethodChecker::checkCryptoMethod(CallExpr *call, MemberExpr *member)
                                                 {self, key, encoding}, Type::voidTy());
     }
     if (name == "computeSecret") {
-      if (!checker_.argumentChecker().checkArity(call, loc, 1, 3)) {
+      ArgumentChecker::ResultArityMatches arity = checker_.argumentChecker().checkArity(call, 1, 3);
+      if (arity.isErr()) {
+        checker_.diags_.error(loc, arity.error().message);
         return call;
       }
       Expr *key = checker_.cryptoArgs().cryptoData(args[0], "public key", true, false, true);
@@ -332,13 +366,18 @@ Expr *CryptoMethodChecker::checkCryptoMethod(CallExpr *call, MemberExpr *member)
   }
   if (kind == Crypto::X509) {
     if (name == "toString" || name == "toJSON") {
-      if (!checker_.argumentChecker().checkArity(call, loc, 0, 0)) {
+      ArgumentChecker::ResultArityMatches arity = checker_.argumentChecker().checkArity(call, 0, 0);
+      if (arity.isErr()) {
+        checker_.diags_.error(loc, arity.error().message);
         return call;
       }
       return checker_.cryptoArgs().cryptoCall(call, CryptoFn::X509Pem, {self}, Type::string());
     }
     if (name == "checkHost" || name == "checkEmail" || name == "checkIP") {
-      if (!checker_.argumentChecker().checkArity(call, loc, 1, name == "checkIP" ? 1 : 2)) {
+      ArgumentChecker::ResultArityMatches arity =
+          checker_.argumentChecker().checkArity(call, 1, name == "checkIP" ? 1 : 2);
+      if (arity.isErr()) {
+        checker_.diags_.error(loc, arity.error().message);
         return call;
       }
       Expr *value = checker_.argumentChecker().checkArg(args[0], Type::string());
@@ -385,7 +424,9 @@ Expr *CryptoMethodChecker::checkCryptoMethod(CallExpr *call, MemberExpr *member)
                                               optional);
     }
     if (name == "checkIssued" || name == "checkPrivateKey" || name == "verify") {
-      if (!checker_.argumentChecker().checkArity(call, loc, 1, 1)) {
+      ArgumentChecker::ResultArityMatches arity = checker_.argumentChecker().checkArity(call, 1, 1);
+      if (arity.isErr()) {
+        checker_.diags_.error(loc, arity.error().message);
         return call;
       }
       Expr *other = name == "checkIssued" ? checker_.exprChecker().checkExpr(args[0])

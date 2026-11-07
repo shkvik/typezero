@@ -6,7 +6,7 @@ namespace tz {
 
 class PromiseLowerer {
 public:
-  explicit PromiseLowerer(Lowering &lowering);
+  explicit PromiseLowerer(Lowering &owner);
 
   uint64_t promiseValueSize(const Type *value);
   llvm::Value *promiseValueAddress(llvm::Value *promise);
@@ -20,7 +20,7 @@ public:
   llvm::Constant *resolverInfo(const Type *value);
 
 private:
-  Lowering &lowering_;
+  Lowering &lowering;
 };
 
 }

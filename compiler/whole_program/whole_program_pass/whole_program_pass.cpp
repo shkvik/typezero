@@ -13,16 +13,6 @@
 #include "compiler/whole_program/load_order/load_order.h"
 #include "compiler/whole_program/unused/unused.h"
 #include "compiler/whole_program/wide_writes/wide_writes.h"
-#include "llvm/ADT/STLExtras.h"
-#include "llvm/ADT/StringSet.h"
-#include "llvm/Support/ErrorHandling.h"
-#include <cmath>
-#include <functional>
-
-using llvm::cast;
-using llvm::dyn_cast;
-using llvm::isa;
-
 namespace tz {
 
 Errors WholeProgramPass::run(Program &program) const {
@@ -44,7 +34,8 @@ Errors WholeProgramPass::run(Program &program) const {
   file.nativeError = native->isError() ? nullptr : native;
   checker.classLinks().numberClasses();
   for (ClassDecl *cls : checker.classes_) {
-    if ((cls->generic() || (cls->expression() && cls->type)) && cls->isEmitted()) {
+    bool emittedLate = (cls->generic() || (cls->expression() && cls->type)) && cls->isEmitted();
+    if (emittedLate) {
       file.items.push_back(cls);
     }
   }

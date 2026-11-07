@@ -6,7 +6,7 @@ namespace tz {
 
 class LiteralTypes {
 public:
-  explicit LiteralTypes(Checker &checker);
+  explicit LiteralTypes(Checker &owner);
 
   static const Type *unionMemberFor(const Type *from, const Type *to);
   static const Type *unionUnify(const Type *a, const Type *b);
@@ -25,7 +25,14 @@ public:
   const Type *literalExpectation(const Type *expected, unsigned depth = 0);
 
 private:
-  Checker &checker_;
+  static llvm::ArrayRef<const Type *> membersOf(const Type *&type);
+  static bool isLiteralSet(const Type *type);
+  static const Type *literalPart(const Type *expected, UnionSlot slot);
+  static std::string utf8Text(const std::u16string &text);
+  static std::optional<std::u16string> writtenText(const Expr *e);
+  static bool choiceTexts(const Expr *e, std::vector<std::u16string> &texts);
+
+  Checker &checker;
 };
 
 }

@@ -12,10 +12,7 @@
 #include "llvm/ADT/StringExtras.h"
 #include "llvm/Support/ConvertUTF.h"
 
-using llvm::cast;
 using llvm::dyn_cast;
-using llvm::dyn_cast_or_null;
-using llvm::isa;
 
 namespace tz {
 
@@ -54,7 +51,8 @@ const char kRuntimeKeys[] =
 
 }
 
-KeyedFieldChecker::KeyedFieldChecker(Checker &checker) : checker_(checker) {}
+KeyedFieldChecker::KeyedFieldChecker(Checker &owner)
+    : checker(owner) {}
 
 std::optional<std::string> KeyedFieldChecker::constantKey(const Expr *key) const {
   while (auto *conv = dyn_cast<CastExpr>(key)) {
@@ -70,7 +68,8 @@ std::optional<std::string> KeyedFieldChecker::constantKey(const Expr *key) const
     return toUtf8(tmpl->quasis[0]);
   }
   if (auto *name = dyn_cast<NameExpr>(key); name && name->var()) {
-    if (auto found = checker_.constKeys_.find(name->var()); found != checker_.constKeys_.end()) {
+    if (auto found = this->checker.constKeys_.find(name->var());
+        found != this->checker.constKeys_.end()) {
       return found->second;
     }
   }
@@ -87,13 +86,13 @@ void KeyedFieldChecker::keyNames(const Expr *key,
   } else if (auto *number = dyn_cast<IntLitExpr>(key)) {
     each(std::to_string(number->value));
   } else if (auto *name = dyn_cast<NameExpr>(key)) {
-    for (const std::string &text : checker_.file_->stringConstants.lookup(name->name)) {
+    for (const std::string &text : this->checker.file_->stringConstants.lookup(name->name)) {
       each(text);
     }
   } else if (auto *member = dyn_cast<MemberExpr>(key)) {
     if (auto *object = dyn_cast<NameExpr>(member->object)) {
       for (const std::string &text :
-           checker_.file_->stringConstants.lookup((object->name + "." + member->name).str())) {
+           this->checker.file_->stringConstants.lookup((object->name + "." + member->name).str())) {
         each(text);
       }
     }
@@ -137,69 +136,72 @@ Expr *KeyedFieldChecker::checkKeyedField(IndexExpr *index, bool write) {
   index->type = Type::error();
   std::string name;
   if (type->isTuple()) {
-    index->index = checker_.exprChecker().checkExpr(index->index, Type::intTy());
+    index->index = this->checker.exprChecker().checkExpr(index->index, Type::intTy());
     const Type *keyType = index->index->type;
     if (keyType->isError()) {
       return index;
     }
-    std::optional<int64_t> position =
-        keyType->isInteger() ? checker_.constantFolder().intConstant(index->index) : std::nullopt;
+    std::optional<int64_t> position = keyType->isInteger()
+                                          ? this->checker.constantFolder().intConstant(index->index)
+                                          : std::nullopt;
     size_t count = type->fields().size();
     if (!keyType->isInteger()) {
-      checker_.diags_.error(index->index->loc(),
-                            "a tuple is indexed by a number, found '" + keyType->name() + "'");
+      this->checker.diags_.error(index->index->loc(),
+                                 "a tuple is indexed by a number, found '" + keyType->name() + "'");
       return index;
     }
     if (!position) {
-      checker_.diags_.error(
+      this->checker.diags_.error(
           index->loc(),
           "a tuple can be indexed only by a constant, such as '[0]': each element has "
           "its own type; or destructure it: 'const [a, b] = t'");
       return index;
     }
     if (*position < 0 || uint64_t(*position) >= count) {
-      checker_.diags_.error(index->index->loc(),
-                            "tuple '" + type->name() + "' has " + std::to_string(count) +
-                                " element" + (count == 1 ? "" : "s") + "; there is no element " +
-                                std::to_string(*position));
+      this->checker.diags_.error(index->index->loc(),
+                                 "tuple '" + type->name() + "' has " + std::to_string(count) +
+                                     " element" + (count == 1 ? "" : "s") +
+                                     "; there is no element " + std::to_string(*position));
       return index;
     }
     name = std::to_string(*position);
   } else {
-    index->index = checker_.exprChecker().checkExpr(index->index);
-    std::optional<std::string> key = constantKey(index->index);
+    index->index = this->checker.exprChecker().checkExpr(index->index);
+    std::optional<std::string> key = this->constantKey(index->index);
     if (const Type *texts =
-            key ? nullptr : checker_.literalTypes().constTextType(index->index, nullptr);
-        texts && keyedFieldType(type, texts)) {
-      index->index = checker_.typeRelations().convert(index->index, texts);
+            key ? nullptr : this->checker.literalTypes().constTextType(index->index, nullptr);
+        texts && KeyedFieldChecker::keyedFieldType(type, texts)) {
+      index->index = this->checker.typeRelations().convert(index->index, texts);
     }
     const Type *keyType = index->index->type;
     if (keyType->isError()) {
       return index;
     }
-    if (const Type *field = key ? nullptr : keyedFieldType(type, keyType)) {
+    if (const Type *field = key ? nullptr : KeyedFieldChecker::keyedFieldType(type, keyType)) {
       llvm::ArrayRef<const Type *> names =
           keyType->isUnion() ? keyType->members() : llvm::ArrayRef<const Type *>(keyType);
       if (write) {
         bool known = llvm::all_of(names, [&](const Type *n) {
-          return checker_.assignedFields_.contains(toUtf8(n->literalText()));
+          return this->checker.assignedFields_.contains(toUtf8(n->literalText()));
         });
         if (llvm::any_of(names, [&](const Type *n) {
               return type->field(toUtf8(n->literalText()))->readonly;
             })) {
-          checker_.diags_.error(index->loc(), "a readonly field cannot be assigned through a key");
+          this->checker.diags_.error(index->loc(),
+                                     "a readonly field cannot be assigned through a key");
           return index;
         }
         if ((field->isOptional() || field->isUnion() || field->isLiteral()) && !known) {
-          checker_.diags_.error(index->loc(),
-                                "fields of type '" + field->name() +
-                                    "' are assigned by name, as in 'o.name = v'; through a "
-                                    "key of literals only fields of a plain type are, or "
-                                    "fields named by the members of a string enum");
+          this->checker.diags_.error(index->loc(),
+                                     "fields of type '" + field->name() +
+                                         "' are assigned by name, as in 'o.name = v'; through a "
+                                         "key of literals only fields of a plain type are, or "
+                                         "fields named by the members of a string enum");
           return index;
         }
         for (const Type *n : names) {
-          checker_.fieldFacts().fieldsAssigned(checker_.ctx_.keepName(toUtf8(n->literalText())));
+          this->checker.fieldFacts().fieldsAssigned(
+              this->checker.ctx_.keepName(toUtf8(n->literalText())));
         }
       }
       index->form = KeyedFieldIndex{};
@@ -208,45 +210,46 @@ Expr *KeyedFieldChecker::checkKeyedField(IndexExpr *index, bool write) {
     }
     if (!key) {
       if (keyType->nonOptional()->isNumeric()) {
-        checker_.diags_.error(index->loc(), "type '" + type->name() +
-                                                "' has no numbered fields; read a field by its "
-                                                "name, e.g. 'o.name'");
+        this->checker.diags_.error(index->loc(),
+                                   "type '" + type->name() +
+                                       "' has no numbered fields; read a field by its "
+                                       "name, e.g. 'o.name'");
       } else if (keyType->isString()) {
-        checker_.diags_.error(
+        this->checker.diags_.error(
             index->loc(),
             "type '" + type->name() +
                 "' can be indexed only by a key known when compiling: a string literal, "
                 "or a constant declared with one, such as 'const key = \"name\"'; " +
                 kRuntimeKeys);
       } else {
-        checker_.diags_.error(index->index->loc(),
-                              "a key must be a string, found '" + keyType->name() + "'");
+        this->checker.diags_.error(index->index->loc(),
+                                   "a key must be a string, found '" + keyType->name() + "'");
       }
       return index;
     }
     if (!type->isClass() && !type->field(*key)) {
-      checker_.diags_.error(index->loc(), noField(type, *key));
+      this->checker.diags_.error(index->loc(), noField(type, *key));
       return index;
     }
     name = std::move(*key);
   }
-  if (write && !checker_.assignedFields_.contains(name)) {
-    checker_.diags_.error(index->index->loc(),
-                          type->isTuple()
-                              ? "an element of a tuple is assigned by its number: 't[0] = ...'"
-                              : "a field assigned through a key in brackets must be "
-                                "named by a string literal, or a constant declared with "
-                                "one, such as 'const key = \"name\"'");
+  if (write && !this->checker.assignedFields_.contains(name)) {
+    this->checker.diags_.error(index->index->loc(),
+                               type->isTuple()
+                                   ? "an element of a tuple is assigned by its number: 't[0] = ...'"
+                                   : "a field assigned through a key in brackets must be "
+                                     "named by a string literal, or a constant declared with "
+                                     "one, such as 'const key = \"name\"'");
     return index;
   }
-  llvm::StringRef field = checker_.ctx_.keepName(name);
+  llvm::StringRef field = this->checker.ctx_.keepName(name);
   index->form = NamedFieldIndex{.field = field};
-  auto *member = checker_.ctx_.make<MemberExpr>(index->loc(), index->object, field);
+  auto *member = this->checker.ctx_.make<MemberExpr>(index->loc(), index->object, field);
   if (write) {
     return member;
   }
 
-  return checker_.objectChecker().checkField(member);
+  return this->checker.objectChecker().checkField(member);
 }
 
 }

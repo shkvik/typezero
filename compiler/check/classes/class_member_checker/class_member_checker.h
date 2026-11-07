@@ -6,7 +6,7 @@ namespace tz {
 
 class ClassMemberChecker {
 public:
-  explicit ClassMemberChecker(Checker &checker);
+  explicit ClassMemberChecker(Checker &owner);
 
   bool checkAccess(const ClassDecl *cls, Access access, llvm::StringRef name, llvm::SMLoc loc,
                    const Expr *receiver = nullptr);
@@ -14,7 +14,9 @@ public:
   const Type *checkFieldTarget(MemberExpr *member, bool compound = false);
 
 private:
-  Checker &checker_;
+  static const char *accessWord(Access access);
+
+  Checker &checker;
 };
 
 }

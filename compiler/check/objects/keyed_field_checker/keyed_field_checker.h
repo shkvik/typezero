@@ -6,7 +6,7 @@ namespace tz {
 
 class KeyedFieldChecker {
 public:
-  explicit KeyedFieldChecker(Checker &checker);
+  explicit KeyedFieldChecker(Checker &owner);
 
   std::optional<std::string> constantKey(const Expr *key) const;
   void keyNames(const Expr *key, llvm::function_ref<void(llvm::StringRef)> each) const;
@@ -14,7 +14,7 @@ public:
   static const Type *keyedFieldType(const Type *type, const Type *keyType);
 
 private:
-  Checker &checker_;
+  Checker &checker;
 };
 
 }

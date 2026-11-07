@@ -6,7 +6,7 @@ namespace tz {
 
 class ClassLowerer {
 public:
-  explicit ClassLowerer(Lowering &lowering);
+  explicit ClassLowerer(Lowering &owner);
 
   llvm::Value *allocInstance(const ClassDecl *cls);
   llvm::Value *allocInstance(const ClassDecl *cls, bool member);
@@ -21,7 +21,7 @@ public:
   llvm::Value *emitSuperCall(CallExpr *call);
 
 private:
-  Lowering &lowering_;
+  Lowering &lowering;
 };
 
 }

@@ -15,43 +15,42 @@
 
 using llvm::cast;
 using llvm::dyn_cast;
-using llvm::dyn_cast_or_null;
-using llvm::isa;
 
 namespace tz {
 
-NumberMethods::NumberMethods(Checker &checker) : checker_(checker) {}
+NumberMethods::NumberMethods(Checker &owner)
+    : checker(owner) {}
 
 Expr *NumberMethods::checkStaticCall(CallExpr *call, MemberExpr *member) {
-  bool isString = checker_.callChecker().isGlobalName(member->object, "String");
+  bool isString = this->checker.callChecker().isGlobalName(member->object, "String");
   llvm::StringRef fn = member->name;
   call->type = Type::error();
   if (isString && fn == "raw") {
     if (!call->tagged) {
-      checker_.diags_.error(member->loc(),
-                            "String.raw can only tag a template, e.g. String.raw`C:\\dir`");
+      this->checker.diags_.error(member->loc(),
+                                 "String.raw can only tag a template, e.g. String.raw`C:\\dir`");
       for (Expr *&arg : call->args) {
-        arg = checker_.exprChecker().checkExpr(arg);
+        arg = this->checker.exprChecker().checkExpr(arg);
       }
       return call;
     }
     auto *texts = cast<ArrayLitExpr>(call->args[0]);
-    auto *tmpl = checker_.ctx_.make<TemplateExpr>(texts->loc());
+    auto *tmpl = this->checker.ctx_.make<TemplateExpr>(texts->loc());
     for (const ArrayLitExpr::Element &e : texts->elements) {
       tmpl->quasis.push_back(cast<StringLitExpr>(e.expr)->value);
     }
     tmpl->exprs.assign(call->args.begin() + 1, call->args.end());
-    return checker_.literalChecker().checkTemplate(tmpl);
+    return this->checker.literalChecker().checkTemplate(tmpl);
   }
   if (isString && (fn == "fromCharCode" || fn == "fromCodePoint")) {
     bool codeUnits = fn == "fromCharCode";
     for (Expr *&arg : call->args) {
-      arg = checker_.mathChecker().numericArg(arg);
+      arg = this->checker.mathChecker().numericArg(arg);
       if (!codeUnits && arg->type->isNumeric()) {
-        checker_.indexProofs().requireBetween(arg, 0, 0x10FFFF, "a code point");
+        this->checker.indexProofs().requireBetween(arg, 0, 0x10FFFF, "a code point");
       }
-      arg = codeUnits ? checker_.binaryChecker().toInt32(arg)
-                      : checker_.typeRelations().convert(arg, Type::doubleTy());
+      arg = codeUnits ? this->checker.binaryChecker().toInt32(arg)
+                      : this->checker.typeRelations().convert(arg, Type::doubleTy());
     }
     call->target =
         BuiltinCall{.builtin = codeUnits ? Builtin::FromCharCode : Builtin::FromCodePoint};
@@ -59,7 +58,7 @@ Expr *NumberMethods::checkStaticCall(CallExpr *call, MemberExpr *member) {
     return call;
   }
   if (!isString && (fn == "parseInt" || fn == "parseFloat")) {
-    return checker_.globalFunctionChecker().checkGlobalFunction(call, fn, member->loc());
+    return this->checker.globalFunctionChecker().checkGlobalFunction(call, fn, member->loc());
   }
   static const std::pair<llvm::StringLiteral, Builtin> predicates[] = {
       {"isInteger", Builtin::IsInteger},
@@ -70,19 +69,22 @@ Expr *NumberMethods::checkStaticCall(CallExpr *call, MemberExpr *member) {
       if (fn != name) {
         continue;
       }
-      if (!checker_.argumentChecker().checkArity(call, member->loc(), 1, 1)) {
+      ArgumentChecker::ResultArityMatches arity =
+          this->checker.argumentChecker().checkArity(call, 1, 1);
+      if (arity.isErr()) {
+        this->checker.diags_.error(member->loc(), arity.error().message);
         return call;
       }
-      call->args[0] = checker_.mathChecker().numericArg(call->args[0]);
+      call->args[0] = this->checker.mathChecker().numericArg(call->args[0]);
       call->target = BuiltinCall{.builtin = builtin};
       call->type = Type::boolTy();
       return call;
     }
   }
-  checker_.diags_.error(member->loc(), "property '" + fn + "' does not exist on '" +
-                                           (isString ? "String" : "Number") + "'");
+  this->checker.diags_.error(member->loc(), "property '" + fn + "' does not exist on '" +
+                                                (isString ? "String" : "Number") + "'");
   for (Expr *&arg : call->args) {
-    arg = checker_.exprChecker().checkExpr(arg);
+    arg = this->checker.exprChecker().checkExpr(arg);
   }
 
   return call;
@@ -105,7 +107,10 @@ Expr *NumberMethods::checkConversion(CallExpr *call, MemberExpr *member) {
     return nullptr;
   }
   call->type = Type::error();
-  if (!checker_.argumentChecker().checkArity(call, member->loc(), 0, 0)) {
+  ArgumentChecker::ResultArityMatches arity =
+      this->checker.argumentChecker().checkArity(call, 0, 0);
+  if (arity.isErr()) {
+    this->checker.diags_.error(member->loc(), arity.error().message);
     return call;
   }
   const Type *from = member->object->type;
@@ -114,20 +119,20 @@ Expr *NumberMethods::checkConversion(CallExpr *call, MemberExpr *member) {
     text = name->name.str();
   }
   if (from->isFloat() && to->isDecimal()) {
-    checker_.diags_.error(member->loc(),
-                          "a double is inexact already, so it becomes a decimal through "
-                          "'decimal(" +
-                              text + ")', which says so");
+    this->checker.diags_.error(member->loc(),
+                               "a double is inexact already, so it becomes a decimal through "
+                               "'decimal(" +
+                                   text + ")', which says so");
     return call;
   }
   if (from->isFloat() && to->isInteger()) {
     auto *rounding = dyn_cast<CallExpr>(member->object);
     if (!rounding || !isRoundingBuiltin(rounding->builtin())) {
-      checker_.diags_.error(member->loc(),
-                            "a double becomes an integer only after rounding, which says what "
-                            "happens to the fraction: 'Math.trunc(" +
-                                text + ")." + member->name +
-                                "()' (or Math.round, Math.floor, Math.ceil)");
+      this->checker.diags_.error(member->loc(),
+                                 "a double becomes an integer only after rounding, which says what "
+                                 "happens to the fraction: 'Math.trunc(" +
+                                     text + ")." + member->name +
+                                     "()' (or Math.round, Math.floor, Math.ceil)");
       return call;
     }
   }
@@ -138,44 +143,51 @@ Expr *NumberMethods::checkConversion(CallExpr *call, MemberExpr *member) {
 }
 
 Expr *NumberMethods::checkNumberMethod(CallExpr *call, MemberExpr *member) {
-  if (Expr *converted = checkConversion(call, member)) {
+  if (Expr *converted = this->checkConversion(call, member)) {
     return converted;
   }
   if (member->name == "toString" && call->args.size() == 1) {
-    member->object = checker_.typeRelations().convert(member->object, Type::doubleTy());
-    call->args[0] = checker_.memberChecker().checkPosition(call->args[0]);
-    checker_.indexProofs().requireBetween(call->args[0], 2, 36, "the radix of 'toString'");
+    member->object = this->checker.typeRelations().convert(member->object, Type::doubleTy());
+    call->args[0] = this->checker.memberChecker().checkPosition(call->args[0]);
+    this->checker.indexProofs().requireBetween(call->args[0], 2, 36, "the radix of 'toString'");
     call->target = BuiltinCall{.builtin = Builtin::NumToRadix};
     call->type = Type::string();
     return call;
   }
   if (member->name == "toString") {
-    if (!checker_.argumentChecker().checkArity(call, member->loc(), 0, 0)) {
+    ArgumentChecker::ResultArityMatches arity =
+        this->checker.argumentChecker().checkArity(call, 0, 0);
+    if (arity.isErr()) {
+      this->checker.diags_.error(member->loc(), arity.error().message);
       return call;
     }
-    call->args.push_back(checker_.concatChecker().toStringOperand(member->object));
+    call->args.push_back(this->checker.concatChecker().toStringOperand(member->object));
     call->target = BuiltinCall{.builtin = Builtin::StringOf};
     call->type = Type::string();
     return call;
   }
   if (member->name == "toFixed") {
-    if (!checker_.argumentChecker().checkArity(call, member->loc(), 0, 1)) {
+    ArgumentChecker::ResultArityMatches arity =
+        this->checker.argumentChecker().checkArity(call, 0, 1);
+    if (arity.isErr()) {
+      this->checker.diags_.error(member->loc(), arity.error().message);
       return call;
     }
-    member->object = checker_.typeRelations().convert(member->object, Type::doubleTy());
+    member->object = this->checker.typeRelations().convert(member->object, Type::doubleTy());
     if (!call->args.empty()) {
-      call->args[0] = checker_.memberChecker().checkPosition(call->args[0]);
-      checker_.indexProofs().requireBetween(call->args[0], 0, 100,
-                                            "the number of digits of 'toFixed'");
+      call->args[0] = this->checker.memberChecker().checkPosition(call->args[0]);
+      this->checker.indexProofs().requireBetween(call->args[0], 0, 100,
+                                                 "the number of digits of 'toFixed'");
     }
     call->target = BuiltinCall{.builtin = Builtin::NumToFixed};
     call->type = Type::string();
     return call;
   }
-  checker_.diags_.error(member->loc(), "property '" + member->name + "' does not exist on type '" +
-                                           member->object->type->name() + "'");
+  this->checker.diags_.error(member->loc(), "property '" + member->name +
+                                                "' does not exist on type '" +
+                                                member->object->type->name() + "'");
   for (Expr *&arg : call->args) {
-    arg = checker_.exprChecker().checkExpr(arg);
+    arg = this->checker.exprChecker().checkExpr(arg);
   }
 
   return call;

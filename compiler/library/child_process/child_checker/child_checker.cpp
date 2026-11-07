@@ -66,8 +66,13 @@ Expr *ChildChecker::checkChildCall(CallExpr *call, llvm::StringRef fn, llvm::SML
     return call;
   }
   bool exec = fn == "execSync";
-  if (checker_.callChecker().rejectSpread(call) ||
-      !checker_.argumentChecker().checkArity(call, loc, 1, exec ? 2 : 3)) {
+  bool rejected = checker_.callChecker().rejectSpread(call);
+  ArgumentChecker::ResultArityMatches arity =
+      rejected ? ok(call) : checker_.argumentChecker().checkArity(call, 1, exec ? 2 : 3);
+  if (arity.isErr()) {
+    checker_.diags_.error(loc, arity.error().message);
+  }
+  if (rejected || arity.isErr()) {
     return call;
   }
   const Type *string = Type::string();

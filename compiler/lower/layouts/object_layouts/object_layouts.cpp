@@ -13,28 +13,20 @@
 #include "compiler/lower/values/string_lowerer/string_lowerer.h"
 #include "compiler/memory/memory_plan/memory_plan.h"
 #include "llvm/ADT/STLExtras.h"
-#include "llvm/Support/ConvertUTF.h"
 #include <numeric>
 
-using llvm::BasicBlock;
 using llvm::cast;
-using llvm::dyn_cast;
-using llvm::isa;
-using llvm::Value;
 
 namespace tz {
 
-namespace {
-
-std::string layoutName(const Type *type) {
+std::string ObjectLayouts::layoutName(const Type *type) {
   llvm::StringRef name = type->name();
 
   return name.starts_with("{") ? "object" : name.str();
 }
 
-}
-
-ObjectLayouts::ObjectLayouts(Lowering &lowering) : lowering_(lowering) {}
+ObjectLayouts::ObjectLayouts(Lowering &owner)
+    : lowering(owner) {}
 
 unsigned ObjectLayouts::fieldIndex(const Type *type, llvm::StringRef name) {
   llvm::ArrayRef<Field> fields = type->fields();
@@ -47,24 +39,25 @@ unsigned ObjectLayouts::fieldIndex(const Type *type, llvm::StringRef name) {
 }
 
 const Lowering::ObjectLayout *ObjectLayouts::builtLayout(const Type *type) const {
-  auto found = objectLayouts_.find(type);
+  auto found = this->objectLayouts.find(type);
 
-  return found == objectLayouts_.end() || !found->second.type ? nullptr : &found->second;
+  return found == this->objectLayouts.end() || !found->second.type ? nullptr : &found->second;
 }
 
 const Lowering::ObjectLayout &ObjectLayouts::objectLayout(const Type *type) {
-  auto [it, inserted] = objectLayouts_.try_emplace(type);
+  auto [it, inserted] = this->objectLayouts.try_emplace(type);
   Lowering::ObjectLayout &layout = it->second;
   if (!inserted) {
     return layout;
   }
 
   llvm::ArrayRef<Field> fields = type->fields();
-  const llvm::DataLayout &data = lowering_.module_->getDataLayout();
+  const llvm::DataLayout &data = this->lowering.module_->getDataLayout();
   std::vector<unsigned> order;
   std::vector<bool> placed(fields.size(), false);
-  if (const Type *prefix = lowering_.inheritLowerer().layoutPrefix(type)) {
-    const Lowering::ObjectLayout &base = objectLayout(prefix);
+  const Type *prefix = this->lowering.inheritLowerer().layoutPrefix(type);
+  if (prefix) {
+    const Lowering::ObjectLayout &base = this->objectLayout(prefix);
     llvm::ArrayRef<Field> baseFields = prefix->fields();
     std::vector<unsigned> baseOrder(baseFields.size());
     std::iota(baseOrder.begin(), baseOrder.end(), 0u);
@@ -74,8 +67,8 @@ const Lowering::ObjectLayout &ObjectLayouts::objectLayout(const Type *type) {
       for (unsigned i = 0; i < fields.size(); ++i) {
         if (!placed[i] && fields[i].name == baseFields[b].name &&
             (fields[i].type == baseFields[b].type ||
-             lowering_.moduleBuilder().lower(fields[i].type) ==
-                 lowering_.moduleBuilder().lower(baseFields[b].type))) {
+             this->lowering.moduleBuilder().lower(fields[i].type) ==
+                 this->lowering.moduleBuilder().lower(baseFields[b].type))) {
           placed[i] = true;
           order.push_back(i);
         }
@@ -89,7 +82,8 @@ const Lowering::ObjectLayout &ObjectLayouts::objectLayout(const Type *type) {
     }
   }
   llvm::stable_sort(rest, [&](unsigned a, unsigned b) {
-    bool tagA = fields[a].type->isLiteral(), tagB = fields[b].type->isLiteral();
+    bool tagA = fields[a].type->isLiteral();
+    bool tagB = fields[b].type->isLiteral();
     if (tagA != tagB) {
       return tagA;
     }
@@ -98,32 +92,33 @@ const Lowering::ObjectLayout &ObjectLayouts::objectLayout(const Type *type) {
     if (f != g) {
       return g;
     }
-    uint64_t x = data.getABITypeAlign(lowering_.moduleBuilder().lower(fields[a].type)).value();
-    uint64_t y = data.getABITypeAlign(lowering_.moduleBuilder().lower(fields[b].type)).value();
+    uint64_t x = data.getABITypeAlign(this->lowering.moduleBuilder().lower(fields[a].type)).value();
+    uint64_t y = data.getABITypeAlign(this->lowering.moduleBuilder().lower(fields[b].type)).value();
 
     return x != y ? x > y : fields[a].name < fields[b].name;
   });
   order.insert(order.end(), rest.begin(), rest.end());
-  std::vector<llvm::Type *> elements{lowering_.builder_.getInt64Ty(),
-                                     lowering_.builder_.getPtrTy()};
+  std::vector<llvm::Type *> elements{this->lowering.builder_.getInt64Ty(),
+                                     this->lowering.builder_.getPtrTy()};
   layout.elements.resize(fields.size());
   for (unsigned i : order) {
     layout.elements[i] = unsigned(elements.size());
-    elements.push_back(lowering_.moduleBuilder().lower(fields[i].type));
+    elements.push_back(this->lowering.moduleBuilder().lower(fields[i].type));
   }
   layout.captures = unsigned(elements.size());
-  if (const ClassDecl *cls = type->classDecl(); cls && cls->group) {
+  const ClassDecl *cls = type->classDecl();
+  if (cls && cls->group) {
     for (const VarSymbol *var : cls->group->captures) {
       elements.push_back(var->boxed()
-                             ? lowering_.builder_.getPtrTy()
-                             : lowering_.moduleBuilder().lower(ClosureLowerer::typeOf(var)));
+                             ? this->lowering.builder_.getPtrTy()
+                             : this->lowering.moduleBuilder().lower(ClosureLowerer::typeOf(var)));
     }
   }
-  layout.type = llvm::StructType::get(lowering_.ctx_, elements);
+  layout.type = llvm::StructType::get(this->lowering.ctx_, elements);
 
-  auto *fnType = llvm::FunctionType::get(lowering_.builder_.getVoidTy(),
-                                         {lowering_.builder_.getPtrTy()}, false);
-  std::string name = layoutName(type);
+  auto *fnType = llvm::FunctionType::get(this->lowering.builder_.getVoidTy(),
+                                         {this->lowering.builder_.getPtrTy()}, false);
+  std::string name = ObjectLayouts::layoutName(type);
   llvm::StringRef runtimeDrop = type->isRegExp()                            ? "tz_re_drop"
                                 : type->isWeakRef()                         ? "tz_weak_drop"
                                 : type->isDateFormat()                      ? "tz_dtf_drop"
@@ -135,27 +130,28 @@ const Lowering::ObjectLayout &ObjectLayouts::objectLayout(const Type *type) {
                                                                             : "";
   if (!runtimeDrop.empty()) {
     layout.drop = cast<llvm::Function>(
-        lowering_.module_->getOrInsertFunction(runtimeDrop, fnType).getCallee());
+        this->lowering.module_->getOrInsertFunction(runtimeDrop, fnType).getCallee());
   } else {
     layout.drop = llvm::Function::Create(fnType, llvm::GlobalValue::InternalLinkage,
-                                         "tz." + name + ".drop", lowering_.module_.get());
+                                         "tz." + name + ".drop", this->lowering.module_.get());
   }
   layout.drop->addFnAttr(llvm::Attribute::NoUnwind);
 
   layout.release = llvm::Function::Create(fnType, llvm::GlobalValue::InternalLinkage,
-                                          "tz." + name + ".release", lowering_.module_.get());
+                                          "tz." + name + ".release", this->lowering.module_.get());
   layout.release->addFnAttr(llvm::Attribute::AlwaysInline);
   layout.release->addFnAttr(llvm::Attribute::NoUnwind);
-  llvm::IRBuilder<> b(llvm::BasicBlock::Create(lowering_.ctx_, "entry", layout.release));
-  auto *countedBlock = llvm::BasicBlock::Create(lowering_.ctx_, "counted", layout.release);
-  auto *dropBlock = llvm::BasicBlock::Create(lowering_.ctx_, "drop", layout.release);
-  auto *doneBlock = llvm::BasicBlock::Create(lowering_.ctx_, "done", layout.release);
+  llvm::IRBuilder<> b(llvm::BasicBlock::Create(this->lowering.ctx_, "entry", layout.release));
+  auto *countedBlock = llvm::BasicBlock::Create(this->lowering.ctx_, "counted", layout.release);
+  auto *dropBlock = llvm::BasicBlock::Create(this->lowering.ctx_, "drop", layout.release);
+  auto *doneBlock = llvm::BasicBlock::Create(this->lowering.ctx_, "done", layout.release);
   llvm::Value *object = layout.release->getArg(0);
   b.CreateCondBr(b.CreateIsNotNull(object), countedBlock, doneBlock);
   b.SetInsertPoint(countedBlock);
   llvm::Value *objectCount = b.CreateLoad(b.getInt64Ty(), object, "rc");
-  if (lowering_.parallel_) {
-    lowering_.runtimeFunctions().countShared(b, object, objectCount, false, dropBlock, doneBlock);
+  if (this->lowering.parallel_) {
+    this->lowering.runtimeFunctions().countShared(b, object, objectCount, false, dropBlock,
+                                                  doneBlock);
   }
   llvm::Value *left = b.CreateSub(objectCount, b.getInt64(1));
   b.CreateStore(left, object);
@@ -167,41 +163,42 @@ const Lowering::ObjectLayout &ObjectLayouts::objectLayout(const Type *type) {
   b.CreateRetVoid();
 
   if (runtimeDrop.empty()) {
-    emitObjectDrop(type, layout);
+    this->emitObjectDrop(type, layout);
   }
 
   return layout;
 }
 
 void ObjectLayouts::emitObjectDrop(const Type *type, Lowering::ObjectLayout &layout) {
-  llvm::IRBuilderBase::InsertPoint point = lowering_.builder_.saveIP();
+  llvm::IRBuilderBase::InsertPoint point = this->lowering.builder_.saveIP();
   llvm::Function *drop = layout.drop;
-  if (lowering_.isCyclic(type)) {
-    lowering_.storeLowerer().emitMemberDrop(type, layout);
-    lowering_.builder_.restoreIP(point);
+  if (this->lowering.isCyclic(type)) {
+    this->lowering.storeLowerer().emitMemberDrop(type, layout);
+    this->lowering.builder_.restoreIP(point);
     return;
   }
-  auto *entry = llvm::BasicBlock::Create(lowering_.ctx_, "entry", drop);
-  auto *loopBlock = llvm::BasicBlock::Create(lowering_.ctx_, "object", drop);
-  lowering_.builder_.SetInsertPoint(entry);
-  lowering_.builder_.CreateBr(loopBlock);
-  lowering_.builder_.SetInsertPoint(loopBlock);
-  llvm::PHINode *object = lowering_.builder_.CreatePHI(lowering_.builder_.getPtrTy(), 2, "object");
+  auto *entry = llvm::BasicBlock::Create(this->lowering.ctx_, "entry", drop);
+  auto *loopBlock = llvm::BasicBlock::Create(this->lowering.ctx_, "object", drop);
+  this->lowering.builder_.SetInsertPoint(entry);
+  this->lowering.builder_.CreateBr(loopBlock);
+  this->lowering.builder_.SetInsertPoint(loopBlock);
+  llvm::PHINode *object =
+      this->lowering.builder_.CreatePHI(this->lowering.builder_.getPtrTy(), 2, "object");
   object->addIncoming(drop->getArg(0), entry);
-  if (lowering_.isWeakTarget(type)) {
-    lowering_.storeLowerer().forgetWeakRefs(object);
+  if (this->lowering.isWeakTarget(type)) {
+    this->lowering.storeLowerer().forgetWeakRefs(object);
   }
 
   llvm::ArrayRef<Field> fields = type->fields();
   int next = -1;
   for (unsigned i = 0; i < fields.size(); ++i) {
     if (const Type *t = fields[i].type->nonOptional();
-        t->isObject() && type->isSubtypeOf(t) && !lowering_.memory().refMayCarryMember(t)) {
+        t->isObject() && type->isSubtypeOf(t) && !this->lowering.memory().refMayCarryMember(t)) {
       next = int(i);
     }
   }
   bool exact = next >= 0 && fields[unsigned(next)].type->nonOptional() == type &&
-               !lowering_.hasSubtypes(type);
+               !this->lowering.hasSubtypes(type);
   std::vector<std::pair<llvm::Value *, const Type *>> values;
   llvm::Value *nextValue = nullptr;
   for (unsigned i = 0; i < fields.size(); ++i) {
@@ -210,14 +207,14 @@ void ObjectLayouts::emitObjectDrop(const Type *type, Lowering::ObjectLayout &lay
       continue;
     }
     llvm::Value *address =
-        lowering_.builder_.CreateStructGEP(layout.type, object, layout.elements[i]);
-    llvm::Value *value = lowering_.builder_.CreateLoad(lowering_.moduleBuilder().lower(fieldType),
-                                                       address, fields[i].name);
-    if (lowering_.debugMemory_) {
-      llvm::Function *saved = lowering_.function_;
-      lowering_.function_ = drop;
-      lowering_.memoryDebug().checkOwned(type, fields[i].name, value, fieldType);
-      lowering_.function_ = saved;
+        this->lowering.builder_.CreateStructGEP(layout.type, object, layout.elements[i]);
+    llvm::Value *value = this->lowering.builder_.CreateLoad(
+        this->lowering.moduleBuilder().lower(fieldType), address, fields[i].name);
+    if (this->lowering.debugMemory_) {
+      llvm::Function *saved = this->lowering.function_;
+      this->lowering.function_ = drop;
+      this->lowering.memoryDebug().checkOwned(type, fields[i].name, value, fieldType);
+      this->lowering.function_ = saved;
     }
     if (int(i) == next) {
       nextValue = value;
@@ -226,134 +223,140 @@ void ObjectLayouts::emitObjectDrop(const Type *type, Lowering::ObjectLayout &lay
     }
   }
   std::vector<llvm::Value *> boxes;
-  if (const ClassDecl *cls = type->classDecl(); cls && cls->group) {
+  const ClassDecl *cls = type->classDecl();
+  if (cls && cls->group) {
     const std::vector<VarSymbol *> &captures = cls->group->captures;
     for (size_t i = 0; i < captures.size(); ++i) {
       const VarSymbol *var = captures[i];
-      llvm::Value *address =
-          lowering_.builder_.CreateStructGEP(layout.type, object, unsigned(layout.captures + i));
+      llvm::Value *address = this->lowering.builder_.CreateStructGEP(layout.type, object,
+                                                                     unsigned(layout.captures + i));
       if (var->boxed()) {
-        boxes.push_back(lowering_.builder_.CreateLoad(lowering_.builder_.getPtrTy(), address,
-                                                      var->name + ".box"));
+        boxes.push_back(this->lowering.builder_.CreateLoad(this->lowering.builder_.getPtrTy(),
+                                                           address, var->name + ".box"));
       } else if (ClosureLowerer::typeOf(var)->isManaged()) {
         const Type *varType = ClosureLowerer::typeOf(var);
-        values.push_back({lowering_.builder_.CreateLoad(lowering_.moduleBuilder().lower(varType),
-                                                        address, var->name),
+        values.push_back({this->lowering.builder_.CreateLoad(
+                              this->lowering.moduleBuilder().lower(varType), address, var->name),
                           varType});
       }
     }
   }
-  lowering_.builder_.CreateCall(lowering_.rt_.objFree, {object});
+  this->lowering.builder_.CreateCall(this->lowering.rt_.objFree, {object});
   for (auto [value, fieldType] : values) {
-    lowering_.refCounts().releaseValue(value, fieldType);
+    this->lowering.refCounts().releaseValue(value, fieldType);
   }
   for (llvm::Value *box : boxes) {
-    lowering_.builder_.CreateCall(lowering_.objReleaseFn_, {box});
+    this->lowering.builder_.CreateCall(this->lowering.objReleaseFn_, {box});
   }
   if (nextValue) {
-    auto *countedBlock = llvm::BasicBlock::Create(lowering_.ctx_, "next", drop);
-    auto *doneBlock = llvm::BasicBlock::Create(lowering_.ctx_, "done", drop);
-    lowering_.builder_.CreateCondBr(lowering_.builder_.CreateIsNotNull(nextValue), countedBlock,
-                                    doneBlock);
-    lowering_.builder_.SetInsertPoint(countedBlock);
+    auto *countedBlock = llvm::BasicBlock::Create(this->lowering.ctx_, "next", drop);
+    auto *doneBlock = llvm::BasicBlock::Create(this->lowering.ctx_, "done", drop);
+    this->lowering.builder_.CreateCondBr(this->lowering.builder_.CreateIsNotNull(nextValue),
+                                         countedBlock, doneBlock);
+    this->lowering.builder_.SetInsertPoint(countedBlock);
     llvm::Value *count =
-        lowering_.builder_.CreateLoad(lowering_.builder_.getInt64Ty(), nextValue, "rc");
-    auto *deadBlock = llvm::BasicBlock::Create(lowering_.ctx_, "next.dead", drop);
-    if (lowering_.parallel_) {
-      llvm::IRBuilder<> b(lowering_.builder_.GetInsertBlock());
-      lowering_.runtimeFunctions().countShared(b, nextValue, count, false, deadBlock, doneBlock);
-      lowering_.builder_.SetInsertPoint(b.GetInsertBlock());
+        this->lowering.builder_.CreateLoad(this->lowering.builder_.getInt64Ty(), nextValue, "rc");
+    auto *deadBlock = llvm::BasicBlock::Create(this->lowering.ctx_, "next.dead", drop);
+    if (this->lowering.parallel_) {
+      llvm::IRBuilder<> b(this->lowering.builder_.GetInsertBlock());
+      this->lowering.runtimeFunctions().countShared(b, nextValue, count, false, deadBlock,
+                                                    doneBlock);
+      this->lowering.builder_.SetInsertPoint(b.GetInsertBlock());
     }
-    llvm::Value *left = lowering_.builder_.CreateSub(count, lowering_.builder_.getInt64(1));
-    lowering_.builder_.CreateStore(left, nextValue);
-    lowering_.builder_.CreateCondBr(
-        lowering_.builder_.CreateICmpEQ(left, lowering_.builder_.getInt64(0)), deadBlock,
+    llvm::Value *left =
+        this->lowering.builder_.CreateSub(count, this->lowering.builder_.getInt64(1));
+    this->lowering.builder_.CreateStore(left, nextValue);
+    this->lowering.builder_.CreateCondBr(
+        this->lowering.builder_.CreateICmpEQ(left, this->lowering.builder_.getInt64(0)), deadBlock,
         doneBlock);
-    lowering_.builder_.SetInsertPoint(deadBlock);
+    this->lowering.builder_.SetInsertPoint(deadBlock);
     if (exact) {
       object->addIncoming(nextValue, deadBlock);
-      lowering_.builder_.CreateBr(loopBlock);
+      this->lowering.builder_.CreateBr(loopBlock);
     } else {
-      auto *otherBlock = llvm::BasicBlock::Create(lowering_.ctx_, "next.other", drop);
-      llvm::Value *descriptor = lowering_.builder_.CreateLoad(
-          lowering_.builder_.getPtrTy(), lowering_.builder_.CreateConstInBoundsGEP1_64(
-                                             lowering_.builder_.getInt8Ty(), nextValue, 8));
-      llvm::Value *nextDrop =
-          lowering_.builder_.CreateLoad(lowering_.builder_.getPtrTy(), descriptor, "drop");
+      auto *otherBlock = llvm::BasicBlock::Create(this->lowering.ctx_, "next.other", drop);
+      llvm::Value *descriptor = this->lowering.builder_.CreateLoad(
+          this->lowering.builder_.getPtrTy(),
+          this->lowering.builder_.CreateConstInBoundsGEP1_64(this->lowering.builder_.getInt8Ty(),
+                                                             nextValue, 8));
+      llvm::Value *nextDrop = this->lowering.builder_.CreateLoad(this->lowering.builder_.getPtrTy(),
+                                                                 descriptor, "drop");
       object->addIncoming(nextValue, deadBlock);
-      lowering_.builder_.CreateCondBr(lowering_.builder_.CreateICmpEQ(nextDrop, drop), loopBlock,
-                                      otherBlock);
-      lowering_.builder_.SetInsertPoint(otherBlock);
-      llvm::CallInst *call = lowering_.builder_.CreateCall(
-          llvm::FunctionType::get(lowering_.builder_.getVoidTy(), {lowering_.builder_.getPtrTy()},
-                                  false),
+      this->lowering.builder_.CreateCondBr(this->lowering.builder_.CreateICmpEQ(nextDrop, drop),
+                                           loopBlock, otherBlock);
+      this->lowering.builder_.SetInsertPoint(otherBlock);
+      llvm::CallInst *call = this->lowering.builder_.CreateCall(
+          llvm::FunctionType::get(this->lowering.builder_.getVoidTy(),
+                                  {this->lowering.builder_.getPtrTy()}, false),
           nextDrop, {nextValue});
       call->setTailCallKind(llvm::CallInst::TCK_MustTail);
-      lowering_.builder_.CreateRetVoid();
+      this->lowering.builder_.CreateRetVoid();
     }
-    lowering_.builder_.SetInsertPoint(doneBlock);
+    this->lowering.builder_.SetInsertPoint(doneBlock);
   }
-  lowering_.builder_.CreateRetVoid();
-  lowering_.builder_.restoreIP(point);
+  this->lowering.builder_.CreateRetVoid();
+  this->lowering.builder_.restoreIP(point);
 }
 
 llvm::Constant *ObjectLayouts::layoutDescriptor(const Type *type, llvm::ArrayRef<unsigned> keys) {
-  return layoutDescriptor(type, keys,
-                          type->isTuple()   ? 1
-                          : type->isMatch() ? 64
-                          : type->isDate()  ? 1024
-                                            : 0);
+  return this->layoutDescriptor(type, keys,
+                                type->isTuple()   ? 1
+                                : type->isMatch() ? 64
+                                : type->isDate()  ? 1024
+                                                  : 0);
 }
 
 llvm::Constant *ObjectLayouts::layoutDescriptor(const Type *type, llvm::ArrayRef<unsigned> keys,
                                                 uint32_t flags) {
   std::vector<unsigned> key(keys.begin(), keys.end());
   key.push_back(~flags);
-  llvm::Constant *&descriptor = lowering_.layoutDescriptors_[{type, std::move(key)}];
+  llvm::Constant *&descriptor = this->lowering.layoutDescriptors_[{type, std::move(key)}];
   if (descriptor) {
     return descriptor;
   }
-  const Lowering::ObjectLayout &layout = objectLayout(type);
+  const Lowering::ObjectLayout &layout = this->objectLayout(type);
   const llvm::StructLayout *offsets =
-      lowering_.module_->getDataLayout().getStructLayout(layout.type);
+      this->lowering.module_->getDataLayout().getStructLayout(layout.type);
   std::vector<llvm::Constant *> entries;
   for (unsigned k : keys) {
     const Field &field = type->fields()[k];
     uint64_t offset = offsets->getElementOffset(layout.elements[k]);
-    entries.push_back(llvm::ConstantStruct::get(
-        lowering_.fieldDescTy_, {lowering_.stringLowerer().utf8Constant(field.name),
-                                 lowering_.builder_.getInt32(uint32_t(field.name.size())),
-                                 lowering_.builder_.getInt32(uint32_t(offset)),
-                                 lowering_.typeDescriptors().typeDescriptor(field.type)}));
+    entries.push_back(
+        llvm::ConstantStruct::get(this->lowering.fieldDescTy_,
+                                  {this->lowering.stringLowerer().utf8Constant(field.name),
+                                   this->lowering.builder_.getInt32(uint32_t(field.name.size())),
+                                   this->lowering.builder_.getInt32(uint32_t(offset)),
+                                   this->lowering.typeDescriptors().typeDescriptor(field.type)}));
   }
-  llvm::Constant *fields = llvm::ConstantPointerNull::get(lowering_.builder_.getPtrTy());
+  llvm::Constant *fields = llvm::ConstantPointerNull::get(this->lowering.builder_.getPtrTy());
   if (!entries.empty()) {
-    auto *arrayType = llvm::ArrayType::get(lowering_.fieldDescTy_, entries.size());
-    auto *global = new llvm::GlobalVariable(
-        *lowering_.module_, arrayType, true, llvm::GlobalValue::PrivateLinkage,
-        llvm::ConstantArray::get(arrayType, entries), "tz.fields." + layoutName(type));
+    auto *arrayType = llvm::ArrayType::get(this->lowering.fieldDescTy_, entries.size());
+    auto *global = new llvm::GlobalVariable(*this->lowering.module_, arrayType, true,
+                                            llvm::GlobalValue::PrivateLinkage,
+                                            llvm::ConstantArray::get(arrayType, entries),
+                                            "tz.fields." + ObjectLayouts::layoutName(type));
     global->setUnnamedAddr(llvm::GlobalValue::UnnamedAddr::Global);
     fields = global;
   }
   llvm::Constant *name = type->isWeakRef()
-                             ? lowering_.stringLowerer().utf8Constant("WeakRef")
-                             : llvm::ConstantPointerNull::get(lowering_.builder_.getPtrTy());
+                             ? this->lowering.stringLowerer().utf8Constant("WeakRef")
+                             : llvm::ConstantPointerNull::get(this->lowering.builder_.getPtrTy());
   llvm::Constant *init = llvm::ConstantStruct::get(
-      lowering_.layoutDescTy_,
-      {layout.drop, fields, lowering_.builder_.getInt32(uint32_t(entries.size())),
-       lowering_.builder_.getInt32(flags), name,
-       lowering_.builder_.getInt32(type->isWeakRef() ? 7 : 0),
-       lowering_.builder_.getInt32(type->isClass() ? 0
-                                                   : lowering_.unionLowerer().plainTypeId(type))});
-  llvm::Constant *itables = lowering_.inheritLowerer().itablesOf(type);
+      this->lowering.layoutDescTy_,
+      {layout.drop, fields, this->lowering.builder_.getInt32(uint32_t(entries.size())),
+       this->lowering.builder_.getInt32(flags), name,
+       this->lowering.builder_.getInt32(type->isWeakRef() ? 7 : 0),
+       this->lowering.builder_.getInt32(
+           type->isClass() ? 0 : this->lowering.unionLowerer().plainTypeId(type))});
+  llvm::Constant *itables = this->lowering.inheritLowerer().itablesOf(type);
   if (!itables->isNullValue()) {
     auto *descType = llvm::StructType::get(
-        lowering_.ctx_, {lowering_.layoutDescTy_, lowering_.builder_.getPtrTy()});
+        this->lowering.ctx_, {this->lowering.layoutDescTy_, this->lowering.builder_.getPtrTy()});
     init = llvm::ConstantStruct::get(descType, {init, itables});
   }
-  auto *global = new llvm::GlobalVariable(*lowering_.module_, init->getType(), true,
+  auto *global = new llvm::GlobalVariable(*this->lowering.module_, init->getType(), true,
                                           llvm::GlobalValue::PrivateLinkage, init,
-                                          "tz.layout." + layoutName(type));
+                                          "tz.layout." + ObjectLayouts::layoutName(type));
   global->setUnnamedAddr(llvm::GlobalValue::UnnamedAddr::Global);
   descriptor = global;
 
@@ -363,44 +366,45 @@ llvm::Constant *ObjectLayouts::layoutDescriptor(const Type *type, llvm::ArrayRef
 llvm::Value *ObjectLayouts::fieldAddress(llvm::Value *object, const Type *type,
                                          llvm::StringRef name, bool exact) {
   if (type->isUnion()) {
-    return lowering_.unionMemberLowerer().unionFieldAddress(object, type, name);
+    return this->lowering.unionMemberLowerer().unionFieldAddress(object, type, name);
   }
   if (const Lowering::InterfaceMember *member =
-          exact ? nullptr : lowering_.inheritLowerer().dispatchedMember(type, name)) {
+          exact ? nullptr : this->lowering.inheritLowerer().dispatchedMember(type, name)) {
     assert(!member->callable && "a method is called or bound, not read");
-    llvm::Value *offset = lowering_.builder_.CreateLoad(
-        lowering_.builder_.getInt64Ty(),
-        lowering_.inheritLowerer().tableEntry(object, type, unsigned(member->entry)),
+    llvm::Value *offset = this->lowering.builder_.CreateLoad(
+        this->lowering.builder_.getInt64Ty(),
+        this->lowering.inheritLowerer().tableEntry(object, type, unsigned(member->entry)),
         name + ".offset");
-    return lowering_.builder_.CreateInBoundsGEP(lowering_.builder_.getInt8Ty(), object, offset,
-                                                name + ".addr");
+    return this->lowering.builder_.CreateInBoundsGEP(this->lowering.builder_.getInt8Ty(), object,
+                                                     offset, name + ".addr");
   }
-  const Lowering::ObjectLayout &layout = objectLayout(type);
+  const Lowering::ObjectLayout &layout = this->objectLayout(type);
 
-  return lowering_.builder_.CreateStructGEP(
-      layout.type, object, layout.elements[fieldIndex(type, name)], name + ".addr");
+  return this->lowering.builder_.CreateStructGEP(
+      layout.type, object, layout.elements[ObjectLayouts::fieldIndex(type, name)], name + ".addr");
 }
 
 llvm::Value *ObjectLayouts::allocObject(const Type *type, llvm::ArrayRef<unsigned> keys) {
-  return allocObject(type, keys, lowering_.isCyclic(type));
+  return this->allocObject(type, keys, this->lowering.isCyclic(type));
 }
 
 llvm::Value *ObjectLayouts::allocObject(const Type *type, llvm::ArrayRef<unsigned> keys,
                                         bool member) {
-  const Lowering::ObjectLayout &layout = objectLayout(type);
-  llvm::Constant *descriptor = layoutDescriptor(type, keys);
-  uint64_t size = lowering_.module_->getDataLayout().getTypeAllocSize(layout.type);
+  const Lowering::ObjectLayout &layout = this->objectLayout(type);
+  llvm::Constant *descriptor = this->layoutDescriptor(type, keys);
+  uint64_t size = this->lowering.module_->getDataLayout().getTypeAllocSize(layout.type);
   llvm::Value *object;
   if (member) {
-    object = lowering_.groupLowerer().allocMember(size, "object");
+    object = this->lowering.groupLowerer().allocMember(size, "object");
   } else {
-    object = lowering_.builder_.CreateCall(lowering_.rt_.objAlloc,
-                                           {lowering_.builder_.getInt64(size)}, "object");
-    lowering_.builder_.CreateStore(lowering_.builder_.getInt64(1),
-                                   lowering_.builder_.CreateStructGEP(layout.type, object, 0));
+    object = this->lowering.builder_.CreateCall(this->lowering.rt_.objAlloc,
+                                                {this->lowering.builder_.getInt64(size)}, "object");
+    this->lowering.builder_.CreateStore(
+        this->lowering.builder_.getInt64(1),
+        this->lowering.builder_.CreateStructGEP(layout.type, object, 0));
   }
-  lowering_.builder_.CreateStore(descriptor,
-                                 lowering_.builder_.CreateStructGEP(layout.type, object, 1));
+  this->lowering.builder_.CreateStore(
+      descriptor, this->lowering.builder_.CreateStructGEP(layout.type, object, 1));
 
   return object;
 }

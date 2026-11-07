@@ -18,70 +18,65 @@
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/IR/Intrinsics.h"
 #include "llvm/IR/MDBuilder.h"
-#include "llvm/Support/ConvertUTF.h"
-#include "llvm/Support/ErrorHandling.h"
-#include <array>
 
-using llvm::BasicBlock;
 using llvm::cast;
 using llvm::dyn_cast;
-using llvm::isa;
-using llvm::Value;
 
 namespace tz {
 
-StmtLowerer::StmtLowerer(Lowering &lowering) : lowering_(lowering) {}
+StmtLowerer::StmtLowerer(Lowering &owner)
+    : lowering(owner) {}
 
 void StmtLowerer::emitStmt(Stmt *stmt) {
-  lowering_.orderAt(stmt->loc());
-  llvm::DebugLoc outer = lowering_.debugInfo().here();
-  lowering_.debugInfo().at(stmt->loc());
+  this->lowering.orderAt(stmt->loc());
+  llvm::DebugLoc outer = this->lowering.debugInfo().here();
+  this->lowering.debugInfo().at(stmt->loc());
   switch (stmt->kind()) {
   case Stmt::Kind::Block:
-    lowering_.functionFrame().pushScope();
-    emitStatements(cast<BlockStmt>(stmt));
-    lowering_.debugInfo().at(cast<BlockStmt>(stmt)->end);
-    lowering_.functionFrame().popScope();
+    this->lowering.functionFrame().pushScope();
+    this->emitStatements(cast<BlockStmt>(stmt));
+    this->lowering.debugInfo().at(cast<BlockStmt>(stmt)->end);
+    this->lowering.functionFrame().popScope();
     return;
   case Stmt::Kind::VarDecl:
-    emitVarDecl(cast<VarDeclStmt>(stmt));
+    this->emitVarDecl(cast<VarDeclStmt>(stmt));
     break;
   case Stmt::Kind::Function:
     break;
   case Stmt::Kind::Expr:
-    if (lowering_.tailStatements_.contains(stmt)) {
-      lowering_.tailCallLowerer().emitTailJump(cast<CallExpr>(cast<ExprStmt>(stmt)->expr));
+    if (this->lowering.tailStatements_.contains(stmt)) {
+      this->lowering.tailCallLowerer().emitTailJump(cast<CallExpr>(cast<ExprStmt>(stmt)->expr));
     } else {
-      emitDiscarded(cast<ExprStmt>(stmt)->expr);
+      this->emitDiscarded(cast<ExprStmt>(stmt)->expr);
     }
     break;
   case Stmt::Kind::If:
-    emitIf(cast<IfStmt>(stmt));
+    this->emitIf(cast<IfStmt>(stmt));
     break;
   case Stmt::Kind::While:
-    lowering_.loopLowerer().emitWhile(cast<WhileStmt>(stmt));
+    this->lowering.loopLowerer().emitWhile(cast<WhileStmt>(stmt));
     break;
   case Stmt::Kind::DoWhile:
-    lowering_.loopLowerer().emitDoWhile(cast<DoWhileStmt>(stmt));
+    this->lowering.loopLowerer().emitDoWhile(cast<DoWhileStmt>(stmt));
     break;
   case Stmt::Kind::For:
-    lowering_.loopLowerer().emitFor(cast<ForStmt>(stmt));
+    this->lowering.loopLowerer().emitFor(cast<ForStmt>(stmt));
     break;
   case Stmt::Kind::ForOf:
-    lowering_.loopLowerer().emitForOf(cast<ForOfStmt>(stmt));
+    this->lowering.loopLowerer().emitForOf(cast<ForOfStmt>(stmt));
     break;
   case Stmt::Kind::Switch:
-    lowering_.switchLowerer().emitSwitch(cast<SwitchStmt>(stmt));
+    this->lowering.switchLowerer().emitSwitch(cast<SwitchStmt>(stmt));
     break;
   case Stmt::Kind::Labeled:
-    lowering_.loopLowerer().emitLabeled(cast<LabeledStmt>(stmt));
+    this->lowering.loopLowerer().emitLabeled(cast<LabeledStmt>(stmt));
     break;
   case Stmt::Kind::Return:
-    emitReturn(cast<ReturnStmt>(stmt));
+    this->emitReturn(cast<ReturnStmt>(stmt));
     break;
   case Stmt::Kind::Break:
   case Stmt::Kind::Continue:
-    lowering_.loopLowerer().emitJump(stmt);
+    this->lowering.loopLowerer().emitJump(stmt);
     break;
   case Stmt::Kind::Empty:
   case Stmt::Kind::TypeAlias:
@@ -89,38 +84,38 @@ void StmtLowerer::emitStmt(Stmt *stmt) {
     break;
   case Stmt::Kind::Class:
     if (!cast<ClassDecl>(stmt)->expression()) {
-      lowering_.decoratorLowerer().emitClassDeclaration(cast<ClassDecl>(stmt));
+      this->lowering.decoratorLowerer().emitClassDeclaration(cast<ClassDecl>(stmt));
     }
     break;
   case Stmt::Kind::Debugger:
-    lowering_.builder_.CreateCall(lowering_.rt_.debugger);
+    this->lowering.builder_.CreateCall(this->lowering.rt_.debugger);
     break;
   }
-  lowering_.debugInfo().restore(outer);
+  this->lowering.debugInfo().restore(outer);
 }
 
 void StmtLowerer::emitStatements(BlockStmt *block) {
   NestedGroup *group = block->group;
   for (size_t i = 0; i < block->body.size(); ++i) {
     if (group && i == group->firstUse) {
-      lowering_.envLowerer().emitGroupCreation(group);
+      this->lowering.envLowerer().emitGroupCreation(group);
     }
     if (i + 1 < block->body.size()) {
-      lowering_.noteAwaitedNext(block->body[i], block->body[i + 1]);
+      this->lowering.noteAwaitedNext(block->body[i], block->body[i + 1]);
     }
-    emitStmt(block->body[i]);
+    this->emitStmt(block->body[i]);
   }
 }
 
 void StmtLowerer::storeReplacing(llvm::Value *address, llvm::Value *value, const Type *type) {
   if (!type->isManaged()) {
-    lowering_.builder_.CreateStore(value, address);
+    this->lowering.builder_.CreateStore(value, address);
     return;
   }
   llvm::Value *previous =
-      lowering_.builder_.CreateLoad(lowering_.moduleBuilder().lower(type), address);
-  lowering_.builder_.CreateStore(value, address);
-  lowering_.refCounts().releaseValue(previous, type);
+      this->lowering.builder_.CreateLoad(this->lowering.moduleBuilder().lower(type), address);
+  this->lowering.builder_.CreateStore(value, address);
+  this->lowering.refCounts().releaseValue(previous, type);
 }
 
 void StmtLowerer::emitVarDecl(VarDeclStmt *decl) {
@@ -129,99 +124,103 @@ void StmtLowerer::emitVarDecl(VarDeclStmt *decl) {
       continue;
     }
     const VarSymbol *var = d.sym;
-    llvm::Type *type = lowering_.moduleBuilder().lower(var->type);
+    llvm::Type *type = this->lowering.moduleBuilder().lower(var->type);
     bool global = var->isGlobal() && var->usedInFunction();
-    llvm::Value *address = global ? lowering_.functionFrame().addressOf(var)
-                                  : lowering_.functionFrame().createLocal(var, d.name);
+    llvm::Value *address = global ? this->lowering.functionFrame().addressOf(var)
+                                  : this->lowering.functionFrame().createLocal(var, d.name);
     llvm::Value *value =
-        d.init ? lowering_.exprLowerer().emitExpr(d.init) : llvm::Constant::getNullValue(type);
-    lowering_.storeLowerer().storeVar(var, address, value, true);
-    if (lowering_.isEternal(var)) {
-      lowering_.publishLowerer().pinValue(value, var->type);
+        d.init ? this->lowering.exprLowerer().emitExpr(d.init) : llvm::Constant::getNullValue(type);
+    this->lowering.storeLowerer().storeVar(var, address, value, true);
+    if (this->lowering.isEternal(var)) {
+      this->lowering.publishLowerer().pinValue(value, var->type);
       if (!global) {
-        lowering_.eternalSlots_.insert(address);
+        this->lowering.eternalSlots_.insert(address);
       }
     }
   }
 }
 
 void StmtLowerer::emitIf(IfStmt *stmt) {
-  llvm::Value *cond = lowering_.exprLowerer().emitExpr(stmt->cond);
-  llvm::BasicBlock *thenBlock = lowering_.functionFrame().newBlock("if.then");
-  llvm::BasicBlock *endBlock = lowering_.functionFrame().newBlock("if.end");
+  llvm::Value *cond = this->lowering.exprLowerer().emitExpr(stmt->cond);
+  llvm::BasicBlock *thenBlock = this->lowering.functionFrame().newBlock("if.then");
+  llvm::BasicBlock *endBlock = this->lowering.functionFrame().newBlock("if.end");
   llvm::BasicBlock *elseBlock =
-      stmt->elseStmt ? lowering_.functionFrame().newBlock("if.else") : endBlock;
-  lowering_.builder_.CreateCondBr(cond, thenBlock, elseBlock);
+      stmt->elseStmt ? this->lowering.functionFrame().newBlock("if.else") : endBlock;
+  this->lowering.builder_.CreateCondBr(cond, thenBlock, elseBlock);
 
-  lowering_.functionFrame().switchTo(thenBlock);
-  emitStmt(stmt->thenStmt);
-  lowering_.functionFrame().branchTo(endBlock);
+  this->lowering.functionFrame().switchTo(thenBlock);
+  this->emitStmt(stmt->thenStmt);
+  this->lowering.functionFrame().branchTo(endBlock);
 
   if (stmt->elseStmt) {
-    lowering_.functionFrame().switchTo(elseBlock);
-    emitStmt(stmt->elseStmt);
-    lowering_.functionFrame().branchTo(endBlock);
+    this->lowering.functionFrame().switchTo(elseBlock);
+    this->emitStmt(stmt->elseStmt);
+    this->lowering.functionFrame().branchTo(endBlock);
   }
-  lowering_.functionFrame().switchTo(endBlock);
+  this->lowering.functionFrame().switchTo(endBlock);
 }
 
 void StmtLowerer::emitReturn(ReturnStmt *stmt) {
-  if (lowering_.inline_) {
-    llvm::Value *value = stmt->value ? lowering_.exprLowerer().emitExpr(stmt->value) : nullptr;
-    if (value && lowering_.inline_->returnSlot) {
-      storeReplacing(lowering_.inline_->returnSlot, value, stmt->value->type);
+  if (this->lowering.inline_) {
+    llvm::Value *value = stmt->value ? this->lowering.exprLowerer().emitExpr(stmt->value) : nullptr;
+    if (value && this->lowering.inline_->returnSlot) {
+      this->storeReplacing(this->lowering.inline_->returnSlot, value, stmt->value->type);
     } else if (value) {
-      lowering_.refCounts().releaseValue(value, stmt->value->type);
+      this->lowering.refCounts().releaseValue(value, stmt->value->type);
     }
-    lowering_.functionFrame().emitCleanups(lowering_.inline_->scopeDepth);
-    lowering_.builder_.CreateBr(lowering_.inline_->exit);
-    lowering_.functionFrame().startDeadBlock();
+    this->lowering.functionFrame().emitCleanups(this->lowering.inline_->scopeDepth);
+    this->lowering.builder_.CreateBr(this->lowering.inline_->exit);
+    this->lowering.functionFrame().startDeadBlock();
     return;
   }
-  if (lowering_.coro_ && lowering_.currentFn_ && lowering_.currentFn_->isGenerator &&
-      lowering_.async_) {
-    lowering_.asyncGeneratorLowerer().emitAsyncGeneratorReturn(stmt);
+  if (this->lowering.coro_ && this->lowering.currentFn_ && this->lowering.currentFn_->isGenerator &&
+      this->lowering.async_) {
+    this->lowering.asyncGeneratorLowerer().emitAsyncGeneratorReturn(stmt);
     return;
   }
-  if (lowering_.coro_ && lowering_.currentFn_ && lowering_.currentFn_->isGenerator) {
-    lowering_.exitLowerer().emitReturnOf(stmt->value ? lowering_.exprLowerer().emitExpr(stmt->value)
-                                                     : nullptr);
+  if (this->lowering.coro_ && this->lowering.currentFn_ && this->lowering.currentFn_->isGenerator) {
+    this->lowering.exitLowerer().emitReturnOf(
+        stmt->value ? this->lowering.exprLowerer().emitExpr(stmt->value) : nullptr);
     return;
   }
-  if (lowering_.async_) {
-    lowering_.asyncLowerer().emitAsyncReturnStmt(stmt);
+  if (this->lowering.async_) {
+    this->lowering.asyncLowerer().emitAsyncReturnStmt(stmt);
     return;
   }
-  if (stmt->value && lowering_.tailGroup_ && lowering_.tailCallLowerer().hasTailCall(stmt->value)) {
-    lowering_.tailCallLowerer().emitTailReturn(stmt->value);
+  if (stmt->value && this->lowering.tailGroup_ &&
+      this->lowering.tailCallLowerer().hasTailCall(stmt->value)) {
+    this->lowering.tailCallLowerer().emitTailReturn(stmt->value);
     return;
   }
-  emitReturnValue(stmt->value);
+  this->emitReturnValue(stmt->value);
 }
 
 void StmtLowerer::emitReturnValue(Expr *expr) {
-  llvm::Value *value = expr ? lowering_.exprLowerer().emitExpr(expr) : nullptr;
-  if (value && lowering_.returnType_ && lowering_.returnType_->isVoid() && !expr->type->isVoid()) {
-    lowering_.refCounts().releaseValue(value, expr->type);
+  llvm::Value *value = expr ? this->lowering.exprLowerer().emitExpr(expr) : nullptr;
+  if (value && this->lowering.returnType_ && this->lowering.returnType_->isVoid() &&
+      !expr->type->isVoid()) {
+    this->lowering.refCounts().releaseValue(value, expr->type);
     value = nullptr;
   }
-  lowering_.exitLowerer().emitReturnOf(value && !expr->type->isVoid() ? value : nullptr);
+  this->lowering.exitLowerer().emitReturnOf(value && !expr->type->isVoid() ? value : nullptr);
 }
 
 void StmtLowerer::emitDiscarded(Expr *expr) {
-  if (auto *assign = dyn_cast<AssignExpr>(expr)) {
-    lowering_.assignLowerer().emitAssign(assign, false);
+  auto *assign = dyn_cast<AssignExpr>(expr);
+  if (assign) {
+    this->lowering.assignLowerer().emitAssign(assign, false);
     return;
   }
-  if (auto *seq = dyn_cast<SequenceExpr>(expr)) {
+  auto *seq = dyn_cast<SequenceExpr>(expr);
+  if (seq) {
     for (Expr *e : seq->exprs) {
-      emitDiscarded(e);
+      this->emitDiscarded(e);
     }
     return;
   }
-  llvm::Value *value = lowering_.exprLowerer().emitExpr(expr);
+  llvm::Value *value = this->lowering.exprLowerer().emitExpr(expr);
   if (expr->type->isManaged()) {
-    lowering_.refCounts().releaseValue(value, expr->type);
+    this->lowering.refCounts().releaseValue(value, expr->type);
   }
 }
 

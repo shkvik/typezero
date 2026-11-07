@@ -423,8 +423,13 @@ void JsonChecker::addJsonFacts(const Expr *cond, Checker::Flow &whenTrue,
 
 Expr *JsonChecker::checkJsonIsJson(CallExpr *call, MemberExpr *member) {
   call->type = Type::error();
-  if (checker_.callChecker().rejectSpread(call) ||
-      !checker_.argumentChecker().checkArity(call, member->loc(), 1, 1)) {
+  bool rejected = checker_.callChecker().rejectSpread(call);
+  ArgumentChecker::ResultArityMatches arity =
+      rejected ? ok(call) : checker_.argumentChecker().checkArity(call, 1, 1);
+  if (arity.isErr()) {
+    checker_.diags_.error(member->loc(), arity.error().message);
+  }
+  if (rejected || arity.isErr()) {
     return call;
   }
   call->args[0] = checker_.exprChecker().checkExpr(call->args[0]);
@@ -448,8 +453,13 @@ Expr *JsonChecker::checkJsonIsJson(CallExpr *call, MemberExpr *member) {
 
 Expr *JsonChecker::checkArrayIsArray(CallExpr *call, MemberExpr *member) {
   call->type = Type::error();
-  if (checker_.callChecker().rejectSpread(call) ||
-      !checker_.argumentChecker().checkArity(call, member->loc(), 1, 1)) {
+  bool rejected = checker_.callChecker().rejectSpread(call);
+  ArgumentChecker::ResultArityMatches arity =
+      rejected ? ok(call) : checker_.argumentChecker().checkArity(call, 1, 1);
+  if (arity.isErr()) {
+    checker_.diags_.error(member->loc(), arity.error().message);
+  }
+  if (rejected || arity.isErr()) {
     return call;
   }
   call->args[0] = checker_.exprChecker().checkExpr(call->args[0]);

@@ -10,18 +10,13 @@
 #include "compiler/load/to_utf8/to_utf8.h"
 #include "llvm/ADT/STLExtras.h"
 #include <functional>
-#include <limits>
 
-using llvm::cast;
 using llvm::dyn_cast;
-using llvm::dyn_cast_or_null;
 using llvm::isa;
 
 namespace tz {
 
-namespace {
-
-const VarSymbol *variableOf(const Expr *expr) {
+const VarSymbol *ConditionFacts::variableOf(const Expr *expr) {
   if (auto *conv = dyn_cast<CastExpr>(expr);
       conv && conv->isImplicit() && conv->operand->type->isOptional()) {
     expr = conv->operand;
@@ -31,7 +26,7 @@ const VarSymbol *variableOf(const Expr *expr) {
   return name ? name->var() : nullptr;
 }
 
-const NameExpr *optionalVariable(const Expr *expr) {
+const NameExpr *ConditionFacts::optionalVariable(const Expr *expr) {
   if (auto *assign = dyn_cast<AssignExpr>(expr); assign && !assign->op) {
     expr = assign->target;
   }
@@ -40,13 +35,13 @@ const NameExpr *optionalVariable(const Expr *expr) {
   return name && name->var() && name->var()->type->isOptional() ? name : nullptr;
 }
 
-void addLess(Facts &facts, const Linear &x, const Linear &y, bool orEqual) {
+void ConditionFacts::addLess(Facts &facts, const Linear &x, const Linear &y, bool orEqual) {
   facts.add(x.term, y.term, y.offset - x.offset + (orEqual ? 1 : 0));
 }
 
-}
 
-ConditionFacts::ConditionFacts(Checker &checker) : checker_(checker) {}
+ConditionFacts::ConditionFacts(Checker &owner)
+    : checker(owner) {}
 
 bool ConditionFacts::chainDefined(const Expr *e, Checker::Flow &flow) const {
   while (auto *conv = dyn_cast<CastExpr>(e)) {
@@ -102,15 +97,15 @@ bool ConditionFacts::chainDefined(const Expr *e, Checker::Flow &flow) const {
 
 void ConditionFacts::addConditionFacts(const Expr *cond, Checker::Flow &whenTrue,
                                        Checker::Flow &whenFalse) const {
-  checker_.resultChecker().addResultFacts(cond, whenTrue, whenFalse);
-  checker_.jsonChecker().addJsonFacts(cond, whenTrue, whenFalse);
-  checker_.unionNarrowing().addUnionFacts(cond, whenTrue, whenFalse);
-  checker_.unknownChecker().addUnknownFacts(cond, whenTrue, whenFalse);
+  this->checker.resultChecker().addResultFacts(cond, whenTrue, whenFalse);
+  this->checker.jsonChecker().addJsonFacts(cond, whenTrue, whenFalse);
+  this->checker.unionNarrowing().addUnionFacts(cond, whenTrue, whenFalse);
+  this->checker.unknownChecker().addUnknownFacts(cond, whenTrue, whenFalse);
   if (auto *call = dyn_cast<CallExpr>(cond); call && call->builtin() == Builtin::None) {
-    checker_.predicateChecker().applyPredicate(call, whenTrue, whenFalse);
+    this->checker.predicateChecker().applyPredicate(call, whenTrue, whenFalse);
     return;
   }
-  if (const NameExpr *name = optionalVariable(cond)) {
+  if (const NameExpr *name = ConditionFacts::optionalVariable(cond)) {
     whenTrue.defined.insert(name->var());
     return;
   }
@@ -119,13 +114,13 @@ void ConditionFacts::addConditionFacts(const Expr *cond, Checker::Flow &whenTrue
       return std::nullopt;
     }
 
-    return checker_.fieldFacts().fieldPath(expr);
+    return this->checker.fieldFacts().fieldPath(expr);
   };
   if (std::optional<Checker::FieldPath> path = optionalField(cond)) {
     FieldFacts::defineField(whenTrue, *path);
     return;
   }
-  if (chainDefined(cond, whenTrue)) {
+  if (this->chainDefined(cond, whenTrue)) {
     return;
   }
   auto *bin = dyn_cast<BinaryExpr>(cond);
@@ -143,15 +138,15 @@ void ConditionFacts::addConditionFacts(const Expr *cond, Checker::Flow &whenTrue
         given = conv->operand;
       }
       if (isa<UndefinedExpr>(given)) {
-        chainDefined(side, op == BinaryOp::Ne ? whenTrue : whenFalse);
+        this->chainDefined(side, op == BinaryOp::Ne ? whenTrue : whenFalse);
       } else if (given->type && !given->type->isOptional() && !given->type->isUndefined()) {
-        chainDefined(side, op == BinaryOp::Eq ? whenTrue : whenFalse);
+        this->chainDefined(side, op == BinaryOp::Eq ? whenTrue : whenFalse);
       }
     }
   }
 
   if (op == BinaryOp::InstanceOf) {
-    if (const NameExpr *name = optionalVariable(bin->lhs)) {
+    if (const NameExpr *name = ConditionFacts::optionalVariable(bin->lhs)) {
       whenTrue.defined.insert(name->var());
     } else if (std::optional<Checker::FieldPath> path = optionalField(bin->lhs)) {
       FieldFacts::defineField(whenTrue, *path);
@@ -160,12 +155,12 @@ void ConditionFacts::addConditionFacts(const Expr *cond, Checker::Flow &whenTrue
     if (cls && cls->isConstructor()) {
       cls = cls->constructed();
     }
-    if (const VarSymbol *var = variableOf(bin->lhs);
+    if (const VarSymbol *var = ConditionFacts::variableOf(bin->lhs);
         var && cls && cls->isClass() && var->type->nonOptional()->isObject() &&
         cls != var->type->nonOptional() && cls->isSubtypeOf(var->type->nonOptional())) {
       whenTrue.narrowed.push_back({var, cls});
     }
-    if (const VarSymbol *var = variableOf(bin->lhs);
+    if (const VarSymbol *var = ConditionFacts::variableOf(bin->lhs);
         var && cls && cls->isBuffer() && var->type->nonOptional()->bytes() == Type::Bytes::Uint8) {
       whenTrue.narrowed.push_back({var, cls});
     }
@@ -175,7 +170,7 @@ void ConditionFacts::addConditionFacts(const Expr *cond, Checker::Flow &whenTrue
   if (op == BinaryOp::Eq || op == BinaryOp::Ne) {
     if (isa<UndefinedExpr>(bin->lhs) || isa<UndefinedExpr>(bin->rhs)) {
       const Expr *side = isa<UndefinedExpr>(bin->rhs) ? bin->lhs : bin->rhs;
-      if (const NameExpr *name = optionalVariable(side)) {
+      if (const NameExpr *name = ConditionFacts::optionalVariable(side)) {
         (op == BinaryOp::Ne ? whenTrue : whenFalse).defined.insert(name->var());
         (op == BinaryOp::Ne ? whenFalse : whenTrue).undefinedVars.insert(name->var());
       } else if (std::optional<Checker::FieldPath> path = optionalField(side)) {
@@ -185,7 +180,7 @@ void ConditionFacts::addConditionFacts(const Expr *cond, Checker::Flow &whenTrue
     }
     for (auto [side, other] : {std::pair{bin->lhs, bin->rhs}, std::pair{bin->rhs, bin->lhs}}) {
       auto *conv = dyn_cast<CastExpr>(other);
-      const NameExpr *name = optionalVariable(side);
+      const NameExpr *name = ConditionFacts::optionalVariable(side);
       if (name && conv && conv->isImplicit() && !conv->operand->type->isOptional() &&
           !conv->operand->type->isUndefined()) {
         (op == BinaryOp::Eq ? whenTrue : whenFalse).defined.insert(name->var());
@@ -197,7 +192,7 @@ void ConditionFacts::addConditionFacts(const Expr *cond, Checker::Flow &whenTrue
       if (!typeOf || typeOf->op != UnaryOp::TypeOf || !text) {
         continue;
       }
-      if (const VarSymbol *var = variableOf(typeOf->operand);
+      if (const VarSymbol *var = ConditionFacts::variableOf(typeOf->operand);
           var && var->type->nonOptional()->isParam()) {
         const Type *param = var->type->nonOptional();
         auto admits = [&](auto test) {
@@ -212,12 +207,12 @@ void ConditionFacts::addConditionFacts(const Expr *cond, Checker::Flow &whenTrue
         auto numberNamed = [&](llvm::StringRef name) -> const Type * {
           for (const Type *t : param->alternatives()) {
             if (t->isNumeric() && name == typeOfName(t)) {
-              return checker_.genericChecker().numberParam(param, t);
+              return this->checker.genericChecker().numberParam(param, t);
             }
           }
           const Type *named = UnknownChecker::typeOfNarrowed(std::u16string(name.begin(), name.end()));
           if (param->alternatives().empty() && named && named->isNumeric()) {
-            return checker_.genericChecker().numberParam(param, named);
+            return this->checker.genericChecker().numberParam(param, named);
           }
           return nullptr;
         };
@@ -255,7 +250,7 @@ void ConditionFacts::addConditionFacts(const Expr *cond, Checker::Flow &whenTrue
         }
         continue;
       }
-      const NameExpr *name = optionalVariable(typeOf->operand);
+      const NameExpr *name = ConditionFacts::optionalVariable(typeOf->operand);
       if (!name) {
         continue;
       }
@@ -279,14 +274,16 @@ void ConditionFacts::addConditionFacts(const Expr *cond, Checker::Flow &whenTrue
   default:
     return;
   }
-  std::optional<Linear> l = checker_.indexProofs().linear(bin->lhs),
-                        r = checker_.indexProofs().linear(bin->rhs);
+  std::optional<Linear> l = this->checker.indexProofs().linear(bin->lhs),
+                        r = this->checker.indexProofs().linear(bin->rhs);
   if (!l || !r) {
     return;
   }
-  Facts &t = whenTrue.facts, &f = whenFalse.facts;
+  Facts &t = whenTrue.facts;
+  Facts &f = whenFalse.facts;
   if (l->term.isZero() && r->term.isZero()) {
-    int64_t a = l->offset, b = r->offset;
+    int64_t a = l->offset;
+    int64_t b = r->offset;
     bool holds = op == BinaryOp::Lt   ? a < b
                  : op == BinaryOp::Le ? a <= b
                  : op == BinaryOp::Gt ? a > b
@@ -298,38 +295,39 @@ void ConditionFacts::addConditionFacts(const Expr *cond, Checker::Flow &whenTrue
   }
 
   if ((op == BinaryOp::Ne || op == BinaryOp::Eq) && (l->term.isZero() || r->term.isZero())) {
-    const Linear &x = l->term.isZero() ? *r : *l, &c = l->term.isZero() ? *l : *r;
+    const Linear &x = l->term.isZero() ? *r : *l;
+    const Linear &c = l->term.isZero() ? *l : *r;
     Facts &differ = op == BinaryOp::Ne ? t : f;
-    if (checker_.flow_.facts.proves(c.term, x.term, x.offset - c.offset + 1)) {
-      addLess(differ, c, x, false);
-    } else if (checker_.flow_.facts.proves(x.term, c.term, c.offset - x.offset + 1)) {
-      addLess(differ, x, c, false);
+    if (this->checker.flow_.facts.proves(c.term, x.term, x.offset - c.offset + 1)) {
+      ConditionFacts::addLess(differ, c, x, false);
+    } else if (this->checker.flow_.facts.proves(x.term, c.term, c.offset - x.offset + 1)) {
+      ConditionFacts::addLess(differ, x, c, false);
     }
   }
   switch (op) {
   case BinaryOp::Lt:
-    addLess(t, *l, *r, false);
-    addLess(f, *r, *l, true);
+    ConditionFacts::addLess(t, *l, *r, false);
+    ConditionFacts::addLess(f, *r, *l, true);
     break;
   case BinaryOp::Le:
-    addLess(t, *l, *r, true);
-    addLess(f, *r, *l, false);
+    ConditionFacts::addLess(t, *l, *r, true);
+    ConditionFacts::addLess(f, *r, *l, false);
     break;
   case BinaryOp::Gt:
-    addLess(t, *r, *l, false);
-    addLess(f, *l, *r, true);
+    ConditionFacts::addLess(t, *r, *l, false);
+    ConditionFacts::addLess(f, *l, *r, true);
     break;
   case BinaryOp::Ge:
-    addLess(t, *r, *l, true);
-    addLess(f, *l, *r, false);
+    ConditionFacts::addLess(t, *r, *l, true);
+    ConditionFacts::addLess(f, *l, *r, false);
     break;
   case BinaryOp::Eq:
-    addLess(t, *l, *r, true);
-    addLess(t, *r, *l, true);
+    ConditionFacts::addLess(t, *l, *r, true);
+    ConditionFacts::addLess(t, *r, *l, true);
     break;
   case BinaryOp::Ne:
-    addLess(f, *l, *r, true);
-    addLess(f, *r, *l, true);
+    ConditionFacts::addLess(f, *l, *r, true);
+    ConditionFacts::addLess(f, *r, *l, true);
     break;
   default:
     break;

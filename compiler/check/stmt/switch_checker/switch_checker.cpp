@@ -9,14 +9,10 @@
 #include "compiler/check/types/union_checker/union_checker.h"
 #include "compiler/declare/type_declarer/type_declarer.h"
 #include "llvm/ADT/STLExtras.h"
-#include "llvm/ADT/StringSet.h"
-#include "llvm/Support/ErrorHandling.h"
 #include <cmath>
-#include <functional>
 
 using llvm::cast;
 using llvm::dyn_cast;
-using llvm::dyn_cast_or_null;
 using llvm::isa;
 
 namespace tz {
@@ -30,78 +26,81 @@ static bool isConstantTest(const Expr *test) {
          isa<BoolLitExpr>(test) || isa<UndefinedExpr>(test);
 }
 
-SwitchChecker::SwitchChecker(Checker &checker) : checker_(checker) {}
+SwitchChecker::SwitchChecker(Checker &owner)
+    : checker(owner) {}
 
 void SwitchChecker::checkSwitch(SwitchStmt *stmt) {
-  stmt->discriminant = checker_.exprChecker().checkExpr(stmt->discriminant);
+  stmt->discriminant = this->checker.exprChecker().checkExpr(stmt->discriminant);
   const Type *type = stmt->discriminant->type;
   if (type->isVoid()) {
-    checker_.diags_.error(stmt->discriminant->loc(),
-                          "an expression of type 'void' cannot be compared");
+    this->checker.diags_.error(stmt->discriminant->loc(),
+                               "an expression of type 'void' cannot be compared");
     type = Type::error();
   }
-  checker_.pushScope();
+  this->checker.pushScope();
   std::vector<Stmt *> all;
   for (SwitchCase &c : stmt->cases) {
     all.insert(all.end(), c.body.begin(), c.body.end());
   }
-  checker_.typeDeclarer().declareTypes(all);
+  this->checker.typeDeclarer().declareTypes(all);
 
   const Type *base = type->nonOptional();
   const Type *hint = base->isNumeric() || base->isDecimal() || base->isJson() ? base
                      : base->isLiteral() || base->isUnion()                   ? type
                                                                               : nullptr;
-  Checker::Flow tests = checker_.flow_;
+  Checker::Flow tests = this->checker.flow_;
   std::vector<Checker::Flow> matched(stmt->cases.size());
   for (size_t i = 0; i < stmt->cases.size(); ++i) {
     SwitchCase &c = stmt->cases[i];
     if (!c.test) {
       continue;
     }
-    checker_.flow_ = tests;
-    c.test = checker_.exprChecker().checkExpr(c.test, hint);
+    this->checker.flow_ = tests;
+    c.test = this->checker.exprChecker().checkExpr(c.test, hint);
     if (auto *typeOf = dyn_cast<UnaryExpr>(stmt->discriminant);
         typeOf && typeOf->op == UnaryOp::TypeOf && isa<StringLitExpr>(c.test)) {
-      checker_.binaryChecker().checkTypeOfName(typeOf->operand, cast<StringLitExpr>(c.test));
+      this->checker.binaryChecker().checkTypeOfName(typeOf->operand, cast<StringLitExpr>(c.test));
     }
     const Type *testType = c.test->type;
-    Checker::Flow whenTrue = checker_.flow_, whenFalse = checker_.flow_;
+    Checker::Flow whenTrue = this->checker.flow_;
+    Checker::Flow whenFalse = this->checker.flow_;
     bool generic = type->nonOptional()->isParam() || testType->nonOptional()->isParam();
     if (!generic && !type->isError() && !testType->isError() && !testType->isUndefined()) {
       const Type *common = TypeRelations::comparisonType(type, testType);
       if (!common) {
-        checker_.diags_.error(c.test->loc(),
-                              "a case of type '" + testType->name() +
-                                  "' cannot be compared with a 'switch' value of type '" +
-                                  type->name() + "'" +
-                                  (Checker::holdsResults(type) || Checker::holdsResults(testType)
-                                       ? "; two Results are never equal, as they are two "
-                                         "objects in JavaScript: switch on what they hold"
-                                       : ""));
+        this->checker.diags_.error(
+            c.test->loc(), "a case of type '" + testType->name() +
+                               "' cannot be compared with a 'switch' value of type '" +
+                               type->name() + "'" +
+                               (Checker::holdsResults(type) || Checker::holdsResults(testType)
+                                    ? "; two Results are never equal, as they are two "
+                                      "objects in JavaScript: switch on what they hold"
+                                    : ""));
       } else if (!common->isError()) {
         if (common->nonOptional()->isFunction()) {
-          checker_.file_->comparesFunctions = true;
+          this->checker.file_->comparesFunctions = true;
         }
         bool constant = isConstantTest(c.test) && !isConstantTest(stmt->discriminant);
-        c.test = checker_.typeRelations().convert(c.test, common);
+        c.test = this->checker.typeRelations().convert(c.test, common);
         c.compareType = common;
         if (constant) {
           BinaryExpr equal(c.loc, BinaryOp::Eq,
-                           checker_.typeRelations().convert(stmt->discriminant, common), c.test);
+                           this->checker.typeRelations().convert(stmt->discriminant, common),
+                           c.test);
           equal.type = Type::boolTy();
-          checker_.conditionFacts().addConditionFacts(&equal, whenTrue, whenFalse);
+          this->checker.conditionFacts().addConditionFacts(&equal, whenTrue, whenFalse);
         }
       }
     } else if (testType->isUndefined() && isa<UndefinedExpr>(c.test)) {
       BinaryExpr equal(c.loc, BinaryOp::Eq, stmt->discriminant, c.test);
       equal.type = Type::boolTy();
-      checker_.conditionFacts().addConditionFacts(&equal, whenTrue, whenFalse);
+      this->checker.conditionFacts().addConditionFacts(&equal, whenTrue, whenFalse);
     }
     matched[i] = whenTrue;
     tests = whenFalse;
   }
   if (std::optional<std::vector<const Type *>> left =
-          checker_.unionChecker().unhandledCases(stmt)) {
+          this->checker.unionChecker().unhandledCases(stmt)) {
     if (left->empty()) {
       stmt->exhaustive = true;
       tests.unreachable = true;
@@ -110,14 +109,14 @@ void SwitchChecker::checkSwitch(SwitchStmt *stmt) {
       for (size_t i = 0; i < left->size(); ++i) {
         names += (i == 0 ? "" : i + 1 == left->size() ? " and " : ", ") + (*left)[i]->name().str();
       }
-      checker_.diags_.error(stmt->discriminant->loc(),
-                            "the switch does not handle " + names + "; add 'case " +
-                                left->front()->name().str() +
-                                ":', or 'default: break' if leaving it out is meant");
+      this->checker.diags_.error(stmt->discriminant->loc(),
+                                 "the switch does not handle " + names + "; add 'case " +
+                                     left->front()->name().str() +
+                                     ":', or 'default: break' if leaving it out is meant");
     }
   }
 
-  checker_.jumpChecker().pushTarget(Checker::JumpTarget::Kind::Switch);
+  this->checker.jumpChecker().pushTarget(Checker::JumpTarget::Kind::Switch);
   size_t position = 0;
   Checker::Flow fallthrough;
   fallthrough.unreachable = true;
@@ -125,18 +124,18 @@ void SwitchChecker::checkSwitch(SwitchStmt *stmt) {
   for (size_t i = 0; i < stmt->cases.size(); ++i) {
     SwitchCase &c = stmt->cases[i];
     hasDefault |= !c.test;
-    checker_.flow_ = FlowChecker::join(fallthrough, c.test ? matched[i] : tests);
+    this->checker.flow_ = FlowChecker::join(fallthrough, c.test ? matched[i] : tests);
     for (Stmt *s : c.body) {
-      checker_.block_ = all;
-      checker_.blockIndex_ = position++;
-      checker_.stmtChecker().checkStmt(s);
+      this->checker.block_ = all;
+      this->checker.blockIndex_ = position++;
+      this->checker.stmtChecker().checkStmt(s);
     }
-    fallthrough = checker_.flow_;
+    fallthrough = this->checker.flow_;
     for (Stmt *s : c.body) {
       if (auto *decl = dyn_cast<VarDeclStmt>(s)) {
         for (const VarDeclarator &d : decl->decls) {
           if (d.sym) {
-            checker_.otherCaseVars_.insert(d.sym);
+            this->checker.otherCaseVars_.insert(d.sym);
           }
         }
       }
@@ -146,19 +145,19 @@ void SwitchChecker::checkSwitch(SwitchStmt *stmt) {
   if (!hasDefault) {
     exit = FlowChecker::join(exit, tests);
   }
-  exit = FlowChecker::join(exit, checker_.targets_.back().breaks);
-  checker_.targets_.pop_back();
+  exit = FlowChecker::join(exit, this->checker.targets_.back().breaks);
+  this->checker.targets_.pop_back();
   for (SwitchCase &c : stmt->cases) {
     for (Stmt *s : c.body) {
       if (auto *decl = dyn_cast<VarDeclStmt>(s)) {
         for (const VarDeclarator &d : decl->decls) {
-          checker_.otherCaseVars_.erase(d.sym);
+          this->checker.otherCaseVars_.erase(d.sym);
         }
       }
     }
   }
-  checker_.popScope();
-  checker_.flow_ = exit;
+  this->checker.popScope();
+  this->checker.flow_ = exit;
 }
 
 }

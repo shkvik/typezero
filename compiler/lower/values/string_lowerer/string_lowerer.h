@@ -6,7 +6,7 @@ namespace tz {
 
 class StringLowerer {
 public:
-  explicit StringLowerer(Lowering &lowering);
+  explicit StringLowerer(Lowering &owner);
 
   llvm::Value *stringObj(llvm::Value *str);
   llvm::Value *stringMeta(llvm::Value *str);
@@ -22,9 +22,11 @@ public:
   llvm::Constant *utf8Constant(llvm::StringRef text);
 
 private:
-  Lowering &lowering_;
-  llvm::StringMap<llvm::Constant *> utf8Constants_;
-  std::map<std::u16string, llvm::Constant *> literals_;
+  static void collectConcat(Expr *expr, std::vector<Expr *> &parts);
+
+  Lowering &lowering;
+  llvm::StringMap<llvm::Constant *> utf8Constants;
+  std::map<std::u16string, llvm::Constant *> literals;
 };
 
 }

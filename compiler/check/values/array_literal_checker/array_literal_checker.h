@@ -6,12 +6,12 @@ namespace tz {
 
 class ArrayLiteralChecker {
 public:
-  explicit ArrayLiteralChecker(Checker &checker);
+  explicit ArrayLiteralChecker(Checker &owner);
 
   Expr *checkArrayLit(ArrayLitExpr *lit, const Type *expected);
 
 private:
-  Checker &checker_;
+  Checker &checker;
 };
 
 }

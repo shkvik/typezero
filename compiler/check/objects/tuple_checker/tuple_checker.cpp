@@ -8,16 +8,14 @@
 #include "compiler/whole_program/flows/flows.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/StringExtras.h"
-#include "llvm/Support/ConvertUTF.h"
 
-using llvm::cast;
 using llvm::dyn_cast;
-using llvm::dyn_cast_or_null;
 using llvm::isa;
 
 namespace tz {
 
-TupleChecker::TupleChecker(Checker &checker) : checker_(checker) {}
+TupleChecker::TupleChecker(Checker &owner)
+    : checker(owner) {}
 
 Expr *TupleChecker::arrayCopy(Expr *tuple) {
   const Type *type = tuple->type;
@@ -31,7 +29,7 @@ Expr *TupleChecker::arrayCopy(Expr *tuple) {
       return nullptr;
     }
   }
-  auto *copy = checker_.ctx_.make<ArrayLitExpr>(tuple->loc());
+  auto *copy = this->checker.ctx_.make<ArrayLitExpr>(tuple->loc());
   copy->elements.push_back({tuple, true});
   copy->type = Type::array(element);
 
@@ -40,12 +38,17 @@ Expr *TupleChecker::arrayCopy(Expr *tuple) {
 
 Expr *TupleChecker::checkTupleJoin(CallExpr *call, MemberExpr *member) {
   call->type = Type::error();
-  if (checker_.callChecker().rejectSpread(call) ||
-      !checker_.argumentChecker().checkArity(call, member->loc(), 0, 1)) {
+  bool rejected = this->checker.callChecker().rejectSpread(call);
+  ArgumentChecker::ResultArityMatches arity =
+      rejected ? ok(call) : this->checker.argumentChecker().checkArity(call, 0, 1);
+  if (arity.isErr()) {
+    this->checker.diags_.error(member->loc(), arity.error().message);
+  }
+  if (rejected || arity.isErr()) {
     return call;
   }
   if (!call->args.empty()) {
-    call->args[0] = checker_.argumentChecker().checkArg(call->args[0], Type::string());
+    call->args[0] = this->checker.argumentChecker().checkArg(call->args[0], Type::string());
   }
   const Type *tuple = member->object->type;
   for (size_t i = 0; i < tuple->fields().size(); ++i) {
@@ -54,7 +57,7 @@ Expr *TupleChecker::checkTupleJoin(CallExpr *call, MemberExpr *member) {
         element->isUndefined()) {
       continue;
     }
-    checker_.diags_.error(
+    this->checker.diags_.error(
         member->loc(), "'join' turns each element into a string, and element " + std::to_string(i) +
                            " of '" + tuple->name() + "' is '" + element->name() +
                            "', which cannot be one; build the text from the elements");
@@ -82,18 +85,19 @@ const Type *TupleChecker::tupleElement(const Type *tuple) {
 Expr *TupleChecker::checkTupleMember(MemberExpr *member) {
   const Type *type = member->object->type;
   if (member->name != "length") {
-    checker_.diags_.error(member->loc(), "property '" + member->name +
-                                             "' does not exist on type '" + type->name() + "'");
+    this->checker.diags_.error(member->loc(), "property '" + member->name +
+                                                  "' does not exist on type '" + type->name() +
+                                                  "'");
     member->type = Type::error();
     return member;
   }
-  auto *length = checker_.ctx_.make<IntLitExpr>(member->loc(), type->fields().size());
+  auto *length = this->checker.ctx_.make<IntLitExpr>(member->loc(), type->fields().size());
   length->type = Type::intTy();
   if (isa<NameExpr>(member->object)) {
     return length;
   }
-  auto *seq =
-      checker_.ctx_.make<SequenceExpr>(member->loc(), std::vector<Expr *>{member->object, length});
+  auto *seq = this->checker.ctx_.make<SequenceExpr>(member->loc(),
+                                                    std::vector<Expr *>{member->object, length});
   seq->type = Type::intTy();
 
   return seq;
@@ -108,26 +112,26 @@ Expr *TupleChecker::checkTupleMethod(CallExpr *call, MemberExpr *member) {
   }
   static const char *const resizing[] = {"push", "pop", "shift", "unshift", "splice"};
   if (name == "join") {
-    return checkTupleJoin(call, member);
+    return this->checkTupleJoin(call, member);
   }
   if (llvm::is_contained(resizing, name)) {
-    checker_.diags_.error(
+    this->checker.diags_.error(
         member->loc(), "a tuple has a fixed length, and '" + name +
                            "' would change it; to change the length, copy it into an array: '[..." +
                            text + "]'");
-  } else if (tupleElement(type)) {
-    checker_.diags_.error(
+  } else if (TupleChecker::tupleElement(type)) {
+    this->checker.diags_.error(
         member->loc(),
         "'" + name + "' is not supported on tuples; copy the tuple into an array first: '[..." +
             text + "]." + name + "(...)'");
   } else {
-    checker_.diags_.error(
+    this->checker.diags_.error(
         member->loc(),
         "'" + name + "' is not supported on tuples; destructure it instead, e.g. 'const [a, b] = " +
             text + "'");
   }
   for (Expr *&arg : call->args) {
-    arg = checker_.exprChecker().checkExpr(arg);
+    arg = this->checker.exprChecker().checkExpr(arg);
   }
   call->type = Type::error();
 
@@ -141,24 +145,25 @@ Expr *TupleChecker::checkTupleLit(ArrayLitExpr *lit, const Type *tuple) {
       llvm::find_if(lit->elements, [](const ArrayLitExpr::Element &e) { return e.spread; });
   if (spread != lit->elements.end() || lit->elements.size() != fields.size()) {
     if (spread != lit->elements.end()) {
-      checker_.diags_.error(spread->expr->loc(), "a tuple cannot take spread values: type '" +
-                                                     tuple->name() +
-                                                     "' has a fixed length; write each element");
+      this->checker.diags_.error(spread->expr->loc(),
+                                 "a tuple cannot take spread values: type '" + tuple->name() +
+                                     "' has a fixed length; write each element");
     } else {
-      checker_.diags_.error(lit->loc(), "type '" + tuple->name() + "' has " +
-                                            std::to_string(fields.size()) +
-                                            " elements, and this literal has " +
-                                            std::to_string(lit->elements.size()));
+      this->checker.diags_.error(lit->loc(), "type '" + tuple->name() + "' has " +
+                                                 std::to_string(fields.size()) +
+                                                 " elements, and this literal has " +
+                                                 std::to_string(lit->elements.size()));
     }
     for (ArrayLitExpr::Element &e : lit->elements) {
-      e.expr = checker_.exprChecker().checkExpr(e.expr);
+      e.expr = this->checker.exprChecker().checkExpr(e.expr);
     }
     return lit;
   }
   for (size_t i = 0; i < fields.size(); ++i) {
     Expr *&e = lit->elements[i].expr;
-    e = checker_.typeRelations().coerce(checker_.exprChecker().checkExpr(e, fields[i].type),
-                                        fields[i].type, "element " + std::to_string(i));
+    e = this->checker.typeRelations().coerce(
+        this->checker.exprChecker().checkExpr(e, fields[i].type), fields[i].type,
+        "element " + std::to_string(i));
   }
   lit->type = tuple;
 

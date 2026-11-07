@@ -8,7 +8,7 @@ struct Inference;
 
 class TypeArgInferrer {
 public:
-  explicit TypeArgInferrer(Checker &checker);
+  explicit TypeArgInferrer(Checker &owner);
 
   bool bindGenericCall(CallExpr *call, FuncSymbol *generic, llvm::SMLoc loc, const Type *expected,
                        llvm::ArrayRef<TypeRef> typeArgs, std::vector<const Type *> &bound);
@@ -20,9 +20,12 @@ public:
                           std::vector<const Type *> &bound);
 
 private:
+  static bool grows(const Type *type, llvm::ArrayRef<const Type *> params, bool inside);
+  static bool isContextSensitive(const Expr *arg);
+
   void precheckFields(ObjectLitExpr *lit, const Type *pattern,
                       llvm::ArrayRef<const Type *> typeParams, Inference &inference);
-  Checker &checker_;
+  Checker &checker;
 };
 
 }

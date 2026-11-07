@@ -17,25 +17,23 @@
 #include "compiler/whole_program/flows/flows.h"
 #include "compiler/whole_program/wide_writes/wide_writes.h"
 #include "llvm/ADT/STLExtras.h"
-#include "llvm/ADT/StringSet.h"
-#include "llvm/Support/ErrorHandling.h"
 #include <cctype>
 #include <cmath>
-#include <functional>
 
 using llvm::cast;
 using llvm::dyn_cast;
-using llvm::dyn_cast_or_null;
 using llvm::isa;
 
 namespace tz {
 
-TypeRelations::TypeRelations(Checker &checker) : checker_(checker) {}
+TypeRelations::TypeRelations(Checker &owner)
+    : checker(owner) {}
 
 bool TypeRelations::holdsWideInteger(const Type *type) {
   type = type->nonOptional();
   if (type->isUnion()) {
-    return llvm::any_of(type->members(), [](const Type *m) { return holdsWideInteger(m); });
+    return llvm::any_of(type->members(),
+                        [](const Type *m) { return TypeRelations::holdsWideInteger(m); });
   }
   if (!type->isInteger()) {
     return false;
@@ -56,7 +54,7 @@ bool TypeRelations::copiesIntoRecord(const Type *from, const Type *to) {
   const Type *value = to->valueType();
   for (const Field &f : from->fields()) {
     const Type *type = f.type->isOptional() && !value->isOptional() ? f.type->inner() : f.type;
-    if (type->isFunction() || !isImplicitlyConvertible(type, value)) {
+    if (type->isFunction() || !TypeRelations::isImplicitlyConvertible(type, value)) {
       return false;
     }
   }
@@ -77,25 +75,26 @@ bool TypeRelations::isImplicitlyConvertible(const Type *from, const Type *to) {
   if (to->isAnyObject()) {
     return UnknownChecker::isObjectReference(from) ||
            (from->isParam() && from->constraint() &&
-            isImplicitlyConvertible(from->constraint(), to));
+            TypeRelations::isImplicitlyConvertible(from->constraint(), to));
   }
   if (to->isConstructor() && from->isClassRef()) {
     if (from->classRef() && from->classRef()->isGeneric()) {
       return false;
     }
     const Type *made = ClassValueChecker::constructedBy(from);
-    return made ? isImplicitlyConvertible(made, to->constructed())
+    return made ? TypeRelations::isImplicitlyConvertible(made, to->constructed())
                 : to->constructed()->isAnyObject();
   }
   if (to->isJson()) {
     return from->isString() || from->isNumeric() || from->isBool() || from->isLiteral() ||
            (from->isArray() && from->inner()->isJson()) ||
            (from->isRecord() && from->keyType()->isString() &&
-            !holdsWideInteger(from->valueType()) &&
-            isImplicitlyConvertible(from->valueType()->nonOptional(), to));
+            !TypeRelations::holdsWideInteger(from->valueType()) &&
+            TypeRelations::isImplicitlyConvertible(from->valueType()->nonOptional(), to));
   }
   if (to->isOptional()) {
-    return from->isUndefined() || isImplicitlyConvertible(from->nonOptional(), to->inner());
+    return from->isUndefined() ||
+           TypeRelations::isImplicitlyConvertible(from->nonOptional(), to->inner());
   }
   if (to->isUnion()) {
     if (from->isUnion()) {
@@ -106,8 +105,9 @@ bool TypeRelations::isImplicitlyConvertible(const Type *from, const Type *to) {
   }
   if (from->isUnion()) {
     return !from->isTagged() && !hasParamMember(from) &&
-           llvm::all_of(from->members(),
-                        [&](const Type *m) { return isImplicitlyConvertible(m, to); });
+           llvm::all_of(from->members(), [&](const Type *m) {
+             return TypeRelations::isImplicitlyConvertible(m, to);
+           });
   }
   if (to->isPattern()) {
     return from->isStringLiteral() && matchesPattern(from->literalText(), to);
@@ -116,10 +116,10 @@ bool TypeRelations::isImplicitlyConvertible(const Type *from, const Type *to) {
     return to == Type::string();
   }
   if (from->isLiteral()) {
-    return !to->isLiteral() && isImplicitlyConvertible(from->literalBase(), to);
+    return !to->isLiteral() && TypeRelations::isImplicitlyConvertible(from->literalBase(), to);
   }
   if (from->isParam() && from->constraint()) {
-    return isImplicitlyConvertible(from->constraint(), to);
+    return TypeRelations::isImplicitlyConvertible(from->constraint(), to);
   }
   if (from->isArray() && to->isArray()) {
     return WideWrites::sameReference(from->inner(), to->inner());
@@ -158,13 +158,13 @@ bool TypeRelations::isImplicitlyConvertible(const Type *from, const Type *to) {
     }
     return true;
   }
-  if (copiesIntoRecord(from, to)) {
+  if (TypeRelations::copiesIntoRecord(from, to)) {
     return true;
   }
   if (from->isResult() && to->isResult()) {
     auto half = [](const Type *a, const Type *b) {
       return a == b || a->isNever() ||
-             (!a->isVoid() && !b->isVoid() && isImplicitlyConvertible(a, b));
+             (!a->isVoid() && !b->isVoid() && TypeRelations::isImplicitlyConvertible(a, b));
     };
     return half(from->okType(), to->okType()) && half(from->errType(), to->errType());
   }
@@ -173,10 +173,10 @@ bool TypeRelations::isImplicitlyConvertible(const Type *from, const Type *to) {
 }
 
 const Type *TypeRelations::commonNumericType(const Type *a, const Type *b) {
-  if (isImplicitlyConvertible(a, b)) {
+  if (TypeRelations::isImplicitlyConvertible(a, b)) {
     return b;
   }
-  if (isImplicitlyConvertible(b, a)) {
+  if (TypeRelations::isImplicitlyConvertible(b, a)) {
     return a;
   }
 
@@ -192,12 +192,12 @@ bool TypeRelations::isIntLiteralTree(const Expr *expr) {
   }
   if (auto *unary = dyn_cast<UnaryExpr>(expr)) {
     return (unary->op == UnaryOp::Neg || unary->op == UnaryOp::Plus) &&
-           isIntLiteralTree(unary->operand);
+           TypeRelations::isIntLiteralTree(unary->operand);
   }
   if (auto *bin = dyn_cast<BinaryExpr>(expr)) {
     return (bin->op == BinaryOp::Add || bin->op == BinaryOp::Sub || bin->op == BinaryOp::Mul ||
             bin->op == BinaryOp::Rem || bin->op == BinaryOp::Pow) &&
-           isIntLiteralTree(bin->lhs) && isIntLiteralTree(bin->rhs);
+           TypeRelations::isIntLiteralTree(bin->lhs) && TypeRelations::isIntLiteralTree(bin->rhs);
   }
 
   return false;
@@ -209,7 +209,7 @@ const Type *TypeRelations::literalTarget(const Expr *expr, const Type *to) {
     target = LiteralTypes::numberMemberOf(target, false);
   }
   if (!target || !expr->type || !expr->type->isInteger() || expr->type == target ||
-      !isIntLiteralTree(expr)) {
+      !TypeRelations::isIntLiteralTree(expr)) {
     return nullptr;
   }
   if (target->isFloat() || target->isDecimal()) {
@@ -218,7 +218,7 @@ const Type *TypeRelations::literalTarget(const Expr *expr, const Type *to) {
   if (!target->isInteger()) {
     return nullptr;
   }
-  std::optional<int64_t> value = checker_.constantFolder().intConstant(expr);
+  std::optional<int64_t> value = this->checker.constantFolder().intConstant(expr);
   if (!value) {
     return nullptr;
   }
@@ -230,17 +230,17 @@ const Type *TypeRelations::literalTarget(const Expr *expr, const Type *to) {
 }
 
 bool TypeRelations::literalAdapts(const Expr *expr, const Type *to) {
-  return literalTarget(expr, to) != nullptr;
+  return this->literalTarget(expr, to) != nullptr;
 }
 
 Expr *TypeRelations::adaptLiteral(Expr *expr, const Type *to) {
-  const Type *target = literalTarget(expr, to);
+  const Type *target = this->literalTarget(expr, to);
   if (!target) {
     return expr;
   }
-  Expr *adapted = convert(expr, target);
+  Expr *adapted = this->convert(expr, target);
 
-  return target == to ? adapted : convert(adapted, to);
+  return target == to ? adapted : this->convert(adapted, to);
 }
 
 std::string TypeRelations::operandText(llvm::StringRef text) {
@@ -288,7 +288,8 @@ std::string TypeRelations::conversionHint(const Expr *expr, const Type *to) {
     text = cast<NameExpr>(member->object)->name.str() + "." + member->name.str();
   }
   if (from->isInteger() && target->isInteger()) {
-    return "; convert it explicitly: '" + text + "." + conversionMethod(target) + "()'";
+    return "; convert it explicitly: '" + text + "." + TypeRelations::conversionMethod(target) +
+           "()'";
   }
   if (from->isInteger() && target->isFloat()) {
     return "; convert it explicitly: '" + text + ".toDouble()'";
@@ -297,8 +298,8 @@ std::string TypeRelations::conversionHint(const Expr *expr, const Type *to) {
     return "; convert it explicitly: '" + text + ".toDecimal()'";
   }
   if (from->isFloat() && target->isInteger()) {
-    return "; round it first, then convert: 'Math.trunc(" + text + ")." + conversionMethod(target) +
-           "()' (or Math.round, Math.floor, Math.ceil)";
+    return "; round it first, then convert: 'Math.trunc(" + text + ")." +
+           TypeRelations::conversionMethod(target) + "()' (or Math.round, Math.floor, Math.ceil)";
   }
 
   return "";
@@ -345,11 +346,12 @@ const Type *TypeRelations::unify(const Type *a, const Type *b) {
   if (a->isUnknown() || b->isUnknown()) {
     return Type::unknown();
   }
-  const Type *x = a->nonOptional(), *y = b->nonOptional();
+  const Type *x = a->nonOptional();
+  const Type *y = b->nonOptional();
   if (x->isLiteral() || y->isLiteral() || x->isUnion() || y->isUnion()) {
-    const Type *wider = isImplicitlyConvertible(x, y)   ? y
-                        : isImplicitlyConvertible(y, x) ? x
-                                                        : nullptr;
+    const Type *wider = TypeRelations::isImplicitlyConvertible(x, y)   ? y
+                        : TypeRelations::isImplicitlyConvertible(y, x) ? x
+                                                                       : nullptr;
     if (!wider) {
       return nullptr;
     }
@@ -361,25 +363,31 @@ const Type *TypeRelations::unify(const Type *a, const Type *b) {
   auto number = [](const Type *t) { return t->isNumeric() || t->isDecimal(); };
   bool related = (number(x) && number(y)) || (x->isObject() && y->isObject()) ||
                  (x->isIterator() && y->isIterator());
-  const Type *base = x == y ? x : related ? commonNumericType(x, y) : nullptr;
+  const Type *base = x == y ? x : related ? TypeRelations::commonNumericType(x, y) : nullptr;
   if (!base && (x->isJson() || y->isJson())) {
-    base = isImplicitlyConvertible(y, x) ? x : isImplicitlyConvertible(x, y) ? y : nullptr;
+    base = TypeRelations::isImplicitlyConvertible(y, x)   ? x
+           : TypeRelations::isImplicitlyConvertible(x, y) ? y
+                                                          : nullptr;
   }
   if (!base && x->isClass() && y->isClass()) {
     base = ClassLinks::commonClass(x, y);
   }
   if (!base && x->isArray() && y->isArray()) {
-    base = isImplicitlyConvertible(x, y) ? y : isImplicitlyConvertible(y, x) ? x : nullptr;
+    base = TypeRelations::isImplicitlyConvertible(x, y)   ? y
+           : TypeRelations::isImplicitlyConvertible(y, x) ? x
+                                                          : nullptr;
   }
   if (!base && x->isPromise() && y->isPromise()) {
     base = x->promised()->isNever() ? y : y->promised()->isNever() ? x : nullptr;
   }
   if (!base && x->isClassRef() && y->isClassRef()) {
-    const Type *p = ClassValueChecker::constructedBy(x), *q = ClassValueChecker::constructedBy(y);
-    const Type *made = !p || !q                        ? nullptr
-                       : isImplicitlyConvertible(p, q) ? q
-                       : isImplicitlyConvertible(q, p) ? p
-                                                       : ClassLinks::commonClass(p, q);
+    const Type *p = ClassValueChecker::constructedBy(x);
+    const Type *q = ClassValueChecker::constructedBy(y);
+    const Type *made = !p || !q                                       ? nullptr
+                       : TypeRelations::isImplicitlyConvertible(p, q) ? q
+                       : TypeRelations::isImplicitlyConvertible(q, p)
+                           ? p
+                           : ClassLinks::commonClass(p, q);
     base = Type::constructorOf(made ? made : Type::anyObject());
   }
   if (!base && (x->isAnyObject() || y->isAnyObject()) && UnknownChecker::isObjectReference(x) &&
@@ -407,7 +415,7 @@ Expr *TypeRelations::convert(Expr *expr, const Type *to) {
                   reflected->isUnknown() ||
                   (reflected->isArray() && reflected->inner()->isUnknown());
   if (expr->type->isParam() && !mentionsParam(to)) {
-    checker_.genericChecker().noteForced(expr, to);
+    this->checker.genericChecker().noteForced(expr, to);
   }
   if ((to->isNumeric() || to->isDecimal()) && expr->type->isInteger()) {
     auto *unary = dyn_cast<UnaryExpr>(expr);
@@ -420,7 +428,8 @@ Expr *TypeRelations::convert(Expr *expr, const Type *to) {
       return expr;
     }
   }
-  const Type *from = expr->type->nonOptional(), *target = to->nonOptional();
+  const Type *from = expr->type->nonOptional();
+  const Type *target = to->nonOptional();
   while (from->isArray() && target->isArray()) {
     from = from->inner()->nonOptional();
     target = target->inner()->nonOptional();
@@ -428,19 +437,19 @@ Expr *TypeRelations::convert(Expr *expr, const Type *to) {
   if (from->isObject() && target->isObject() && from != target && !from->isClass() &&
       !target->isClass() && !from->isAnyObject() && !target->isAnyObject() && !from->isBytes() &&
       !from->isSubtypeOf(target) &&
-      !llvm::is_contained(checker_.file_->views,
+      !llvm::is_contained(this->checker.file_->views,
                           std::pair<const Type *, const Type *>(from, target))) {
-    checker_.file_->views.push_back({from, target});
+    this->checker.file_->views.push_back({from, target});
   }
-  auto *cast = checker_.ctx_.make<CastExpr>(expr->loc(), expr, std::nullopt);
+  auto *cast = this->checker.ctx_.make<CastExpr>(expr->loc(), expr, std::nullopt);
   cast->type = to;
-  if (checker_.wideWrites().widensWrites(expr->type, to)) {
-    checker_.widenings_.insert(cast);
+  if (this->checker.wideWrites().widensWrites(expr->type, to)) {
+    this->checker.widenings_.insert(cast);
   }
   if (reflects) {
-    checker_.reflectChecker().noteReflectedConversion(expr->type, to, cast);
+    this->checker.reflectChecker().noteReflectedConversion(expr->type, to, cast);
   }
-  checker_.reflectChecker().noteConstructorFlow(expr->type, to);
+  this->checker.reflectChecker().noteConstructorFlow(expr->type, to);
 
   return cast;
 }
@@ -450,38 +459,39 @@ Expr *TypeRelations::coerce(Expr *expr, const Type *to, llvm::StringRef what) {
   if (from == to || from->isError() || to->isError()) {
     return expr;
   }
-  if (isImplicitlyConvertible(from, to)) {
-    return convert(expr, to);
+  if (TypeRelations::isImplicitlyConvertible(from, to)) {
+    return this->convert(expr, to);
   }
-  if (literalAdapts(expr, to)) {
-    return adaptLiteral(expr, to);
+  if (this->literalAdapts(expr, to)) {
+    return this->adaptLiteral(expr, to);
   }
-  if (checker_.conditionalTypes().fitsConditional(from, to)) {
-    return convert(expr, to);
+  if (this->checker.conditionalTypes().fitsConditional(from, to)) {
+    return this->convert(expr, to);
   }
   if (to->nonOptional()->isIterator() && from->isObject()) {
-    Expr *iterator = checker_.iterableChecker().iteratorOf(expr);
+    Expr *iterator = this->checker.iterableChecker().iteratorOf(expr);
     if (!iterator) {
-      iterator = checker_.iterableChecker().userIterator(expr);
+      iterator = this->checker.iterableChecker().userIterator(expr);
     }
-    if (iterator && iterator->type->isIterator() && isImplicitlyConvertible(iterator->type, to)) {
-      return convert(iterator, to);
+    if (iterator && iterator->type->isIterator() &&
+        TypeRelations::isImplicitlyConvertible(iterator->type, to)) {
+      return this->convert(iterator, to);
     }
   }
   if (to->nonOptional()->isAsyncIterator() && from->isObject() && !from->isAsyncIterator()) {
-    if (Expr *iterator = checker_.iterableChecker().asyncUserIterator(expr);
+    if (Expr *iterator = this->checker.iterableChecker().asyncUserIterator(expr);
         iterator && iterator->type->isAsyncIterator() &&
-        isImplicitlyConvertible(iterator->type, to)) {
-      return convert(iterator, to);
+        TypeRelations::isImplicitlyConvertible(iterator->type, to)) {
+      return this->convert(iterator, to);
     }
   }
   const Type *function = to->isOptional() && to->inner()->isFunction() ? to->inner() : to;
   if (from->isFunction() && function->isFunction()) {
-    if (Expr *adapted = checker_.functionValueChecker().adaptFunction(expr, function)) {
-      return function == to ? adapted : convert(adapted, to);
+    if (Expr *adapted = this->checker.functionValueChecker().adaptFunction(expr, function)) {
+      return function == to ? adapted : this->convert(adapted, to);
     }
-    if (Expr *adapted = checker_.tzModulesChecker().adaptResult(expr, function)) {
-      return function == to ? adapted : convert(adapted, to);
+    if (Expr *adapted = this->checker.tzModulesChecker().adaptResult(expr, function)) {
+      return function == to ? adapted : this->convert(adapted, to);
     }
   }
 
@@ -493,9 +503,9 @@ Expr *TypeRelations::coerce(Expr *expr, const Type *to, llvm::StringRef what) {
     intervals = LiteralTypes::intIntervals(target);
   }
   if (from->isInt() && llvm::any_of(intervals, [&](const std::pair<int64_t, int64_t> &interval) {
-        return checker_.byteProofs().provesFits(expr, interval.first, interval.second);
+        return this->checker.byteProofs().provesFits(expr, interval.first, interval.second);
       })) {
-    return convert(expr, to);
+    return this->convert(expr, to);
   }
 
   std::string message =
@@ -520,7 +530,8 @@ Expr *TypeRelations::coerce(Expr *expr, const Type *to, llvm::StringRef what) {
                                            const std::pair<int64_t, int64_t> &b) {
             return a.second - a.first < b.second - b.first;
           });
-      std::string lo = std::to_string(widest.first), hi = std::to_string(widest.second);
+      std::string lo = std::to_string(widest.first);
+      std::string hi = std::to_string(widest.second);
       std::string text = "x";
       if (auto *name = dyn_cast<NameExpr>(expr)) {
         text = name->name.str();
@@ -531,10 +542,11 @@ Expr *TypeRelations::coerce(Expr *expr, const Type *to, llvm::StringRef what) {
                                           : text + " >= " + lo + " && " + text + " <= " + hi) +
           ")'";
     }
-    checker_.diags_.error(expr->loc(), message);
+    this->checker.diags_.error(expr->loc(), message);
     return expr;
   }
-  const Type *fromObject = from->nonOptional(), *toObject = to->nonOptional();
+  const Type *fromObject = from->nonOptional();
+  const Type *toObject = to->nonOptional();
   while (fromObject->isArray() && toObject->isArray()) {
     fromObject = fromObject->inner()->nonOptional();
     toObject = toObject->inner()->nonOptional();
@@ -575,8 +587,8 @@ Expr *TypeRelations::coerce(Expr *expr, const Type *to, llvm::StringRef what) {
   const std::vector<std::pair<const Type *, llvm::SMLoc>> *places = nullptr;
   const Type *otherPlace = nullptr;
   if (auto *name = dyn_cast<NameExpr>(expr); name && name->var()) {
-    if (auto found = checker_.destinations_.find(name->var());
-        found != checker_.destinations_.end()) {
+    if (auto found = this->checker.destinations_.find(name->var());
+        found != this->checker.destinations_.end()) {
       places = &found->second;
       for (auto [type, loc] : *places) {
         if (type->nonOptional() != toObject && !otherPlace) {
@@ -596,7 +608,7 @@ Expr *TypeRelations::coerce(Expr *expr, const Type *to, llvm::StringRef what) {
                "give a class that extends it, e.g. '" +
                example + "', or take the class as an 'object'";
   } else if (from->isUnknown() || from->isAnyObject()) {
-    message += checker_.unknownChecker().unknownHint(expr, to);
+    message += this->checker.unknownChecker().unknownHint(expr, to);
   } else if (fromObject->isObject() && toObject->isClass() &&
              (!fromClass || fromClass->literal())) {
     message += "; an object literal is never an instance of a class: create one with 'new " +
@@ -632,13 +644,13 @@ Expr *TypeRelations::coerce(Expr *expr, const Type *to, llvm::StringRef what) {
         "; a tuple is not an array, though it is written like one: copy it into an array with "
         "'[...t]'";
   } else if (fromObject->isObject() && toObject->isObject() &&
-             !isImplicitlyConvertible(fromObject, toObject)) {
+             !TypeRelations::isImplicitlyConvertible(fromObject, toObject)) {
     message +=
-        checker_.objectChecker().objectMismatch(fromObject, toObject, otherPlace != nullptr) +
+        this->checker.objectChecker().objectMismatch(fromObject, toObject, otherPlace != nullptr) +
         (otherPlace ? "; the same object also goes where '" + otherPlace->name().str() +
                           "' is expected, and one object cannot be both"
                     : "");
-  } else if (from->isOptional() && isImplicitlyConvertible(from->inner(), to)) {
+  } else if (from->isOptional() && TypeRelations::isImplicitlyConvertible(from->inner(), to)) {
     message += "; the value may be undefined: check it first (e.g. 'x != undefined') or give a "
                "default with '??'";
   } else if (from->nonOptional()->isJson()) {
@@ -652,7 +664,7 @@ Expr *TypeRelations::coerce(Expr *expr, const Type *to, llvm::StringRef what) {
     message += "; an array or an object becomes a Json only as a literal written where a Json is "
                "expected ('[...]', '{ ... }'), or as a 'Json[]', which stays the same array";
   } else if (to->nonOptional()->isJson() && from->nonOptional()->isRecord() &&
-             holdsWideInteger(from->nonOptional()->valueType())) {
+             TypeRelations::holdsWideInteger(from->nonOptional()->valueType())) {
     message += "; a number in a Json is a double, which holds every integer only within "
                "±9007199254740992 (2^53), and nothing proves the values of this dictionary are "
                "there: build a 'Record<string, Json>' and check each value as it goes in, or "
@@ -665,13 +677,14 @@ Expr *TypeRelations::coerce(Expr *expr, const Type *to, llvm::StringRef what) {
   } else if (from->isDecimal() && (to->isNumeric() || to->nonOptional()->isNumeric())) {
     message += "; a decimal becomes a number only explicitly: 'Number(x)' gives the nearest double";
   } else {
-    message += conversionHint(expr, to);
+    message += TypeRelations::conversionHint(expr, to);
   }
-  checker_.diags_.error(expr->loc(), message);
+  this->checker.diags_.error(expr->loc(), message);
   if (otherPlace) {
     for (auto [type, loc] : *places) {
       if (type->nonOptional() == otherPlace) {
-        checker_.diags_.note(loc, "the object also goes here, as '" + otherPlace->name() + "'");
+        this->checker.diags_.note(loc,
+                                  "the object also goes here, as '" + otherPlace->name() + "'");
         break;
       }
     }
@@ -681,7 +694,7 @@ Expr *TypeRelations::coerce(Expr *expr, const Type *to, llvm::StringRef what) {
 }
 
 const Type *TypeRelations::comparisonType(const Type *a, const Type *b) {
-  const Type *common = a->isVoid() || b->isVoid() ? nullptr : unify(a, b);
+  const Type *common = a->isVoid() || b->isVoid() ? nullptr : TypeRelations::unify(a, b);
   if (common && common->isError()) {
     return common;
   }

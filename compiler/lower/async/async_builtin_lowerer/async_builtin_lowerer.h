@@ -6,12 +6,12 @@ namespace tz {
 
 class AsyncBuiltinLowerer {
 public:
-  explicit AsyncBuiltinLowerer(Lowering &lowering);
+  explicit AsyncBuiltinLowerer(Lowering &owner);
 
   llvm::Value *emitAsyncBuiltin(CallExpr *call);
 
 private:
-  Lowering &lowering_;
+  Lowering &lowering;
 };
 
 }

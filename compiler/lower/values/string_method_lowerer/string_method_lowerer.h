@@ -6,12 +6,12 @@ namespace tz {
 
 class StringMethodLowerer {
 public:
-  explicit StringMethodLowerer(Lowering &lowering);
+  explicit StringMethodLowerer(Lowering &owner);
 
   llvm::Value *emitStringMethod(CallExpr *call);
 
 private:
-  Lowering &lowering_;
+  Lowering &lowering;
 };
 
 }

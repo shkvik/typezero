@@ -6,7 +6,7 @@ namespace tz {
 
 class AssignChecker {
 public:
-  explicit AssignChecker(Checker &checker);
+  explicit AssignChecker(Checker &owner);
 
   Expr *checkAssign(AssignExpr *assign);
   Expr *checkLogicalAssign(AssignExpr *assign);
@@ -14,8 +14,11 @@ public:
   Expr *checkFieldLogicalAssign(AssignExpr *assign);
 
 private:
-  Checker &checker_;
-  bool logicalAssign_ = false;
+  static std::pair<llvm::StringRef, llvm::StringRef> operandTexts(llvm::StringRef source,
+                                                                  llvm::SMLoc op, size_t length);
+
+  Checker &checker;
+  bool logicalAssign = false;
 };
 
 }

@@ -60,8 +60,13 @@ Expr *OsChecker::checkOsCall(CallExpr *call, llvm::StringRef fn, llvm::SMLoc loc
     }
     return call;
   }
-  if (checker_.callChecker().rejectSpread(call) ||
-      !checker_.argumentChecker().checkArity(call, loc, 0, 0)) {
+  bool rejected = checker_.callChecker().rejectSpread(call);
+  ArgumentChecker::ResultArityMatches arity =
+      rejected ? ok(call) : checker_.argumentChecker().checkArity(call, 0, 0);
+  if (arity.isErr()) {
+    checker_.diags_.error(loc, arity.error().message);
+  }
+  if (rejected || arity.isErr()) {
     return call;
   }
   auto which = [&](int value) {

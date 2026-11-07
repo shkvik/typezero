@@ -12,16 +12,11 @@
 #include "llvm/ADT/STLExtras.h"
 #include <cstring>
 
-using llvm::cast;
 using llvm::dyn_cast;
-using llvm::dyn_cast_or_null;
-using llvm::isa;
 
 namespace tz {
 
-namespace {
-
-const VarSymbol *arrayVariable(const Expr *object) {
+const VarSymbol *ArrayMethods::arrayVariable(const Expr *object) {
   if (auto *conv = dyn_cast<CastExpr>(object);
       conv && conv->isImplicit() && conv->operand->type->isOptional()) {
     object = conv->operand;
@@ -34,8 +29,6 @@ const VarSymbol *arrayVariable(const Expr *object) {
   return name->var();
 }
 
-}
-
 std::string argumentCount(unsigned min, unsigned max) {
   std::string text = std::to_string(min);
   if (max != min) {
@@ -45,37 +38,38 @@ std::string argumentCount(unsigned min, unsigned max) {
   return text + (max == 1 && min == 1 ? " argument" : " arguments");
 }
 
-ArrayMethods::ArrayMethods(Checker &checker) : checker_(checker) {}
+ArrayMethods::ArrayMethods(Checker &owner)
+    : checker(owner) {}
 
 Expr *ArrayMethods::checkArrayMethod(CallExpr *call, MemberExpr *member, const Type *expected) {
   const Type *arrayType = member->object->type;
   const Type *element = arrayType->inner();
-  const VarSymbol *self = arrayVariable(member->object);
+  const VarSymbol *self = ArrayMethods::arrayVariable(member->object);
   llvm::StringRef name = member->name;
   size_t count = call->args.size();
 
   auto checkArgsLoosely = [&] {
     for (Expr *&arg : call->args) {
-      arg = checker_.exprChecker().checkExpr(arg);
+      arg = this->checker.exprChecker().checkExpr(arg);
     }
   };
   auto arity = [&](unsigned min, unsigned max) {
     if (count >= min && count <= max) {
       return true;
     }
-    checker_.diags_.error(member->loc(), "expected " + argumentCount(min, max) + ", but got " +
-                                             llvm::Twine(count));
+    this->checker.diags_.error(member->loc(), "expected " + argumentCount(min, max) + ", but got " +
+                                                  llvm::Twine(count));
     checkArgsLoosely();
 
     return false;
   };
   auto elementArg = [&](size_t i) {
-    call->args[i] = checker_.typeRelations().coerce(
-        checker_.exprChecker().checkExpr(call->args[i], element), element);
+    call->args[i] = this->checker.typeRelations().coerce(
+        this->checker.exprChecker().checkExpr(call->args[i], element), element);
   };
   auto positionArgs = [&](size_t from) {
     for (size_t i = from; i < count; ++i) {
-      call->args[i] = checker_.memberChecker().checkPosition(call->args[i]);
+      call->args[i] = this->checker.memberChecker().checkPosition(call->args[i]);
     }
   };
 
@@ -83,18 +77,18 @@ Expr *ArrayMethods::checkArrayMethod(CallExpr *call, MemberExpr *member, const T
                                           "reduceRight", "find",    "findIndex", "some",
                                           "every",       "flatMap", "findLast",  "findLastIndex"};
   if (llvm::is_contained(callbacks, name) || (name == "sort" && count != 0)) {
-    return checker_.callbackChecker().checkCallbackMethod(call, member, expected);
+    return this->checker.callbackChecker().checkCallbackMethod(call, member, expected);
   }
   if (name == "keys" || name == "values" || name == "entries") {
-    return checker_.iteratorMethods().checkArrayIterator(call, member);
+    return this->checker.iteratorMethods().checkArrayIterator(call, member);
   }
 
   if (name == "push" || name == "unshift") {
     bool spreads = call->hasSpread();
     for (size_t i = 0; i < count; ++i) {
       if (call->spreads(i)) {
-        call->args[i] = checker_.typeRelations().coerce(
-            checker_.exprChecker().checkExpr(call->args[i], arrayType), arrayType);
+        call->args[i] = this->checker.typeRelations().coerce(
+            this->checker.exprChecker().checkExpr(call->args[i], arrayType), arrayType);
       } else {
         elementArg(i);
       }
@@ -102,9 +96,9 @@ Expr *ArrayMethods::checkArrayMethod(CallExpr *call, MemberExpr *member, const T
     call->target = BuiltinCall{.builtin = name == "push" ? Builtin::ArrPush : Builtin::ArrUnshift};
     call->type = Type::intTy();
     if (self && !spreads) {
-      checker_.flow_.facts.shift(Term::lengthOf(self), static_cast<int64_t>(count));
+      this->checker.flow_.facts.shift(Term::lengthOf(self), static_cast<int64_t>(count));
     }
-    checker_.flowChecker().arrayResized(arrayType, true, false, spreads ? nullptr : self);
+    this->checker.flowChecker().arrayResized(arrayType, true, false, spreads ? nullptr : self);
     return call;
   }
 
@@ -113,18 +107,18 @@ Expr *ArrayMethods::checkArrayMethod(CallExpr *call, MemberExpr *member, const T
       return call;
     }
     call->target = BuiltinCall{.builtin = name == "pop" ? Builtin::ArrPop : Builtin::ArrShift};
-    bool notEmpty = checker_.indexProofs().provesNotEmpty(member->object);
+    bool notEmpty = this->checker.indexProofs().provesNotEmpty(member->object);
     call->mayBeOutOfRange = !notEmpty;
     call->type = notEmpty ? element : Type::optional(element);
     if (self) {
       if (notEmpty) {
-        checker_.flow_.facts.shift(Term::lengthOf(self), -1);
+        this->checker.flow_.facts.shift(Term::lengthOf(self), -1);
       } else {
-        checker_.flow_.facts.forgetIf(
+        this->checker.flow_.facts.forgetIf(
             [&](const Facts::Fact &f) { return f.rhs == Term::lengthOf(self); });
       }
     }
-    checker_.flowChecker().arrayResized(arrayType, false, true, self);
+    this->checker.flowChecker().arrayResized(arrayType, false, true, self);
     return call;
   }
 
@@ -134,7 +128,8 @@ Expr *ArrayMethods::checkArrayMethod(CallExpr *call, MemberExpr *member, const T
     }
     positionArgs(0);
     call->target = BuiltinCall{.builtin = Builtin::ArrAt};
-    call->mayBeOutOfRange = !checker_.indexProofs().provesAtInBounds(member->object, call->args[0]);
+    call->mayBeOutOfRange =
+        !this->checker.indexProofs().provesAtInBounds(member->object, call->args[0]);
     call->type = call->mayBeOutOfRange ? Type::optional(element) : element;
     return call;
   }
@@ -151,9 +146,9 @@ Expr *ArrayMethods::checkArrayMethod(CallExpr *call, MemberExpr *member, const T
 
   if (name == "concat") {
     for (size_t i = 0; i < count; ++i) {
-      call->args[i] = checker_.exprChecker().checkExpr(call->args[i], arrayType);
+      call->args[i] = this->checker.exprChecker().checkExpr(call->args[i], arrayType);
       if (call->args[i]->type != arrayType) {
-        call->args[i] = checker_.typeRelations().coerce(call->args[i], element);
+        call->args[i] = this->checker.typeRelations().coerce(call->args[i], element);
       }
     }
     call->target = BuiltinCall{.builtin = Builtin::ArrConcat};
@@ -166,16 +161,16 @@ Expr *ArrayMethods::checkArrayMethod(CallExpr *call, MemberExpr *member, const T
       return call;
     }
     if (Checker::holdsResults(element)) {
-      checker_.diags_.error(member->loc(),
-                            "'" + name +
-                                "' cannot compare Results: in JavaScript each Result is an "
-                                "object of its own, equal to no other; search with a "
-                                "function, e.g. 'some' or 'findIndex'");
+      this->checker.diags_.error(member->loc(),
+                                 "'" + name +
+                                     "' cannot compare Results: in JavaScript each Result is an "
+                                     "object of its own, equal to no other; search with a "
+                                     "function, e.g. 'some' or 'findIndex'");
       checkArgsLoosely();
       return call;
     }
     if (element->nonOptional()->isFunction()) {
-      checker_.file_->comparesFunctions = true;
+      this->checker.file_->comparesFunctions = true;
     }
     elementArg(0);
     positionArgs(1);
@@ -187,43 +182,43 @@ Expr *ArrayMethods::checkArrayMethod(CallExpr *call, MemberExpr *member, const T
   }
 
   if ((name == "join" || name == "toString") && Checker::holdsFunctions(element)) {
-    checker_.diags_.error(member->loc(), "functions cannot be converted to strings");
+    this->checker.diags_.error(member->loc(), "functions cannot be converted to strings");
     checkArgsLoosely();
     return call;
   }
   if ((name == "join" || name == "toString") && Checker::holdsResults(element)) {
-    checker_.diags_.error(member->loc(),
-                          "Results cannot be converted to strings: JavaScript would give "
-                          "'[object Object]'; make the text of each first, e.g. 'a.map(r => "
-                          "r.match(...))." +
-                              name + "()'");
+    this->checker.diags_.error(member->loc(),
+                               "Results cannot be converted to strings: JavaScript would give "
+                               "'[object Object]'; make the text of each first, e.g. 'a.map(r => "
+                               "r.match(...))." +
+                                   name + "()'");
     checkArgsLoosely();
     return call;
   }
   if ((name == "join" || name == "toString") && UnknownChecker::holdsUnknown(element)) {
-    checker_.diags_.error(member->loc(),
-                          "unknown values cannot be converted to strings: one may hold an "
-                          "object; map them to text first, e.g. 'a.map(x => typeof x == "
-                          "\"string\" ? x : \"?\")." +
-                              name + "()'");
+    this->checker.diags_.error(member->loc(),
+                               "unknown values cannot be converted to strings: one may hold an "
+                               "object; map them to text first, e.g. 'a.map(x => typeof x == "
+                               "\"string\" ? x : \"?\")." +
+                                   name + "()'");
     checkArgsLoosely();
     return call;
   }
   if ((name == "join" || name == "toString") && JsonChecker::holdsJson(element)) {
-    checker_.diags_.error(member->loc(),
-                          "Json values cannot be converted to strings: an object would be "
-                          "'[object Object]'; map them to text first, e.g. 'a.map(x => "
-                          "JSON.stringify(x))." +
-                              name + "()'");
+    this->checker.diags_.error(member->loc(),
+                               "Json values cannot be converted to strings: an object would be "
+                               "'[object Object]'; map them to text first, e.g. 'a.map(x => "
+                               "JSON.stringify(x))." +
+                                   name + "()'");
     checkArgsLoosely();
     return call;
   }
   if ((name == "join" || name == "toString") && Checker::holdsObjects(element) &&
       !Checker::holdsDates(element)) {
-    checker_.diags_.error(member->loc(),
-                          "objects cannot be converted to strings: JavaScript would give "
-                          "'[object Object]'; map them to text first, e.g. 'a.map(o => o.name)." +
-                              name + "()'");
+    this->checker.diags_.error(
+        member->loc(), "objects cannot be converted to strings: JavaScript would give "
+                       "'[object Object]'; map them to text first, e.g. 'a.map(o => o.name)." +
+                           name + "()'");
     checkArgsLoosely();
     return call;
   }
@@ -232,8 +227,8 @@ Expr *ArrayMethods::checkArrayMethod(CallExpr *call, MemberExpr *member, const T
       return call;
     }
     if (count == 1) {
-      call->args[0] = checker_.typeRelations().coerce(
-          checker_.exprChecker().checkExpr(call->args[0], Type::string()), Type::string());
+      call->args[0] = this->checker.typeRelations().coerce(
+          this->checker.exprChecker().checkExpr(call->args[0], Type::string()), Type::string());
     }
     call->target = BuiltinCall{.builtin = Builtin::ArrJoin};
     call->type = Type::string();
@@ -263,38 +258,38 @@ Expr *ArrayMethods::checkArrayMethod(CallExpr *call, MemberExpr *member, const T
 
   if (name == "sort") {
     if (Checker::holdsFunctions(element)) {
-      checker_.diags_.error(member->loc(),
-                            "sorting functions needs a comparison function: 'sort()' "
-                            "without one compares their source code");
+      this->checker.diags_.error(member->loc(),
+                                 "sorting functions needs a comparison function: 'sort()' "
+                                 "without one compares their source code");
       return call;
     }
     if (UnknownChecker::holdsUnknown(element)) {
-      checker_.diags_.error(member->loc(),
-                            "sorting unknown values needs a comparison function: 'sort()' "
-                            "without one compares them as strings, objects as '[object "
-                            "Object]'; pass one, e.g. 'sort((a, b) => ...)'");
+      this->checker.diags_.error(member->loc(),
+                                 "sorting unknown values needs a comparison function: 'sort()' "
+                                 "without one compares them as strings, objects as '[object "
+                                 "Object]'; pass one, e.g. 'sort((a, b) => ...)'");
       return call;
     }
     if (JsonChecker::holdsJson(element)) {
-      checker_.diags_.error(member->loc(),
-                            "sorting Json values needs a comparison function: 'sort()' "
-                            "without one compares them as strings, objects as '[object "
-                            "Object]'; pass one, e.g. 'sort((a, b) => ...)'");
+      this->checker.diags_.error(member->loc(),
+                                 "sorting Json values needs a comparison function: 'sort()' "
+                                 "without one compares them as strings, objects as '[object "
+                                 "Object]'; pass one, e.g. 'sort((a, b) => ...)'");
       return call;
     }
     if (Checker::holdsDates(element)) {
-      checker_.diags_.error(member->loc(),
-                            "sorting dates needs a comparison function: 'sort()' without one "
-                            "compares the texts of toString(), 'Thu Feb 29 2024 ...', which "
-                            "puts them in the order of the names of the days; pass one: "
-                            "'sort((a, b) => a.getTime() - b.getTime())'");
+      this->checker.diags_.error(member->loc(),
+                                 "sorting dates needs a comparison function: 'sort()' without one "
+                                 "compares the texts of toString(), 'Thu Feb 29 2024 ...', which "
+                                 "puts them in the order of the names of the days; pass one: "
+                                 "'sort((a, b) => a.getTime() - b.getTime())'");
       return call;
     }
     if (Checker::holdsObjects(element) || Checker::holdsResults(element)) {
-      checker_.diags_.error(member->loc(),
-                            "sorting objects needs a comparison function: 'sort()' without one "
-                            "compares them all as '[object Object]'; pass one, e.g. 'sort((a, b) "
-                            "=> a.x - b.x)'");
+      this->checker.diags_.error(
+          member->loc(), "sorting objects needs a comparison function: 'sort()' without one "
+                         "compares them all as '[object Object]'; pass one, e.g. 'sort((a, b) "
+                         "=> a.x - b.x)'");
       return call;
     }
     auto textual = [](const Type *m) {
@@ -304,21 +299,21 @@ Expr *ArrayMethods::checkArrayMethod(CallExpr *call, MemberExpr *member, const T
     };
     if (const Type *u = element->nonOptional();
         u->isUnion() && !llvm::all_of(u->members(), textual)) {
-      checker_.diags_.error(member->loc(),
-                            "'sort()' without a comparison function compares the values "
-                            "of '" +
-                                u->name() +
-                                "' as strings, numbers and objects among "
-                                "them; pass one, e.g. 'sort((a, b) => ...)'");
+      this->checker.diags_.error(member->loc(),
+                                 "'sort()' without a comparison function compares the values "
+                                 "of '" +
+                                     u->name() +
+                                     "' as strings, numbers and objects among "
+                                     "them; pass one, e.g. 'sort((a, b) => ...)'");
       return call;
     }
     if (element->nonOptional()->isNumeric() || element->nonOptional()->isDecimal() ||
         GenericChecker::apparentType(element->nonOptional())->isNumeric()) {
-      checker_.diags_.error(member->loc(),
-                            llvm::Twine("'sort()' without a comparison function compares "
-                                        "numbers as strings, as in JavaScript: [2, 10, 1] "
-                                        "becomes [1, 10, 2]; pass one: 'sort((x, y) => ") +
-                                (element->isOptional() ? "(x ?? 0) - (y ?? 0)" : "x - y") + ")'");
+      this->checker.diags_.error(
+          member->loc(), llvm::Twine("'sort()' without a comparison function compares "
+                                     "numbers as strings, as in JavaScript: [2, 10, 1] "
+                                     "becomes [1, 10, 2]; pass one: 'sort((x, y) => ") +
+                             (element->isOptional() ? "(x ?? 0) - (y ?? 0)" : "x - y") + ")'");
       return call;
     }
     call->target = BuiltinCall{.builtin = Builtin::ArrSort};
@@ -332,18 +327,18 @@ Expr *ArrayMethods::checkArrayMethod(CallExpr *call, MemberExpr *member, const T
     }
     for (size_t i = 0; i < count; ++i) {
       if (i < 2) {
-        call->args[i] = checker_.memberChecker().checkPosition(call->args[i]);
+        call->args[i] = this->checker.memberChecker().checkPosition(call->args[i]);
       } else {
         elementArg(i);
       }
     }
     call->target = BuiltinCall{.builtin = Builtin::ArrSplice};
     call->type = arrayType;
-    checker_.flowChecker().arrayResized(arrayType, true, true);
+    this->checker.flowChecker().arrayResized(arrayType, true, true);
     return call;
   }
-  checker_.diags_.error(member->loc(), "property '" + name + "' does not exist on type '" +
-                                           arrayType->name() + "'");
+  this->checker.diags_.error(member->loc(), "property '" + name + "' does not exist on type '" +
+                                                arrayType->name() + "'");
   checkArgsLoosely();
 
   return call;

@@ -18,9 +18,7 @@
 #include "llvm/ADT/StringExtras.h"
 #include "llvm/Support/ConvertUTF.h"
 
-using llvm::cast;
 using llvm::dyn_cast;
-using llvm::dyn_cast_or_null;
 using llvm::isa;
 
 namespace tz {
@@ -93,41 +91,47 @@ std::string fieldText(const Expr *object, llvm::StringRef field) {
   return identifier ? text + "." + field.str() : text + "[\"" + field.str() + "\"]";
 }
 
-ObjectChecker::ObjectChecker(Checker &checker) : checker_(checker) {}
+ObjectChecker::ObjectChecker(Checker &owner)
+    : checker(owner) {}
 
 Expr *ObjectChecker::checkObjectCall(CallExpr *call, MemberExpr *member, const Type *expected) {
   llvm::StringRef fn = member->name;
   call->type = Type::error();
   auto checkArgsLoosely = [&] {
     for (Expr *&arg : call->args) {
-      arg = checker_.exprChecker().checkExpr(arg);
+      arg = this->checker.exprChecker().checkExpr(arg);
     }
   };
   if (fn == "groupBy") {
-    return checker_.dictMethods().checkGroupBy(call, member, false);
+    return this->checker.dictMethods().checkGroupBy(call, member, false);
   }
   if (fn == "fromEntries") {
-    return checker_.dictMethods().checkFromEntries(call, member, expected);
+    return this->checker.dictMethods().checkFromEntries(call, member, expected);
   }
   if (fn != "keys" && fn != "values" && fn != "entries") {
-    checker_.diags_.error(member->loc(),
-                          "'Object." + fn +
-                              "' is not supported; only Object.keys, Object.values, "
-                              "Object.entries, Object.fromEntries and Object.groupBy are");
+    this->checker.diags_.error(member->loc(),
+                               "'Object." + fn +
+                                   "' is not supported; only Object.keys, Object.values, "
+                                   "Object.entries, Object.fromEntries and Object.groupBy are");
     checkArgsLoosely();
     return call;
   }
-  if (checker_.callChecker().rejectSpread(call) ||
-      !checker_.argumentChecker().checkArity(call, member->loc(), 1, 1)) {
+  bool rejected = this->checker.callChecker().rejectSpread(call);
+  ArgumentChecker::ResultArityMatches arity =
+      rejected ? ok(call) : this->checker.argumentChecker().checkArity(call, 1, 1);
+  if (arity.isErr()) {
+    this->checker.diags_.error(member->loc(), arity.error().message);
+  }
+  if (rejected || arity.isErr()) {
     return call;
   }
   Expr *&arg = call->args[0];
   if (auto *name = dyn_cast<NameExpr>(arg)) {
-    if (EnumDecl *decl = checker_.scopes().lookup(name->name).enumDecl()) {
-      return enumMembers(call, decl, fn);
+    if (EnumDecl *decl = this->checker.scopes().lookup(name->name).enumDecl()) {
+      return this->enumMembers(call, decl, fn);
     }
   }
-  arg = checker_.exprChecker().checkExpr(arg);
+  arg = this->checker.exprChecker().checkExpr(arg);
   const Type *type = arg->type;
   if (type->isError()) {
     return call;
@@ -143,16 +147,16 @@ Expr *ObjectChecker::checkObjectCall(CallExpr *call, MemberExpr *member, const T
     return call;
   }
   if (type->isOptional() && (type->inner()->isObject() || type->inner()->isDict())) {
-    checker_.diags_.error(arg->loc(), "the object may be undefined; check it first");
+    this->checker.diags_.error(arg->loc(), "the object may be undefined; check it first");
     return call;
   }
   if (type->isDict()) {
-    return checker_.dictMethods().checkDictObjectCall(call, fn);
+    return this->checker.dictMethods().checkDictObjectCall(call, fn);
   }
   if (!type->isObject() || type->isTuple() || type->isRegExp() || type->isMatch() ||
       type->isDate() || type->isIntl() || type->isBytes() || type->isCrypto()) {
-    checker_.diags_.error(arg->loc(),
-                          "'Object." + fn + "' needs an object, found '" + type->name() + "'");
+    this->checker.diags_.error(arg->loc(),
+                               "'Object." + fn + "' needs an object, found '" + type->name() + "'");
     return call;
   }
   if (fn == "keys") {
@@ -161,18 +165,18 @@ Expr *ObjectChecker::checkObjectCall(CallExpr *call, MemberExpr *member, const T
     return call;
   }
   if (ClassDecl *cls = ClassDeclarer::classOf(type)) {
-    checker_.classDeclarer().completeClass(cls);
-    if (checker_.eventMaps().isEmitterClass(cls)) {
-      checker_.diags_.error(arg->loc(),
-                            "'Object." + fn +
-                                "' of an emitter is not supported: its fields are the "
-                                "listeners it keeps; read the fields of its class by name");
+    this->checker.classDeclarer().completeClass(cls);
+    if (this->checker.eventMaps().isEmitterClass(cls)) {
+      this->checker.diags_.error(arg->loc(),
+                                 "'Object." + fn +
+                                     "' of an emitter is not supported: its fields are the "
+                                     "listeners it keeps; read the fields of its class by name");
       return call;
     }
     if (hasMethodFields(cls)) {
-      checker_.diags_.error(arg->loc(), "'Object." + fn +
-                                            "' of an object with methods is not supported; "
-                                            "read the fields by name");
+      this->checker.diags_.error(arg->loc(), "'Object." + fn +
+                                                 "' of an object with methods is not supported; "
+                                                 "read the fields by name");
       return call;
     }
   }
@@ -181,12 +185,12 @@ Expr *ObjectChecker::checkObjectCall(CallExpr *call, MemberExpr *member, const T
   for (const Field &f : type->fields()) {
     fields.push_back({type, &f});
   }
-  for (const Type *t : checker_.file_->subtypes) {
+  for (const Type *t : this->checker.file_->subtypes) {
     if (t == type || !t->isSubtypeOf(type)) {
       continue;
     }
     if (ClassDecl *sub = ClassDeclarer::classOf(t)) {
-      checker_.classDeclarer().completeClass(sub);
+      this->checker.classDeclarer().completeClass(sub);
     }
     for (const Field &f : t->fields()) {
       fields.push_back({t, &f});
@@ -197,19 +201,19 @@ Expr *ObjectChecker::checkObjectCall(CallExpr *call, MemberExpr *member, const T
     const Type *t = f.type->nonOptional();
     const Type *both = element ? Type::unionOf({element, t}) : t;
     if (std::string problem = unionProblem(both); !problem.empty()) {
-      checker_.diags_.error(arg->loc(),
-                            "'Object." + fn +
-                                "' puts the values of all the fields in one array, of the "
-                                "union of their types, and the fields of '" +
-                                t0->name() + "' have types that no union holds: " + problem +
-                                "; read the fields by name");
+      this->checker.diags_.error(arg->loc(),
+                                 "'Object." + fn +
+                                     "' puts the values of all the fields in one array, of the "
+                                     "union of their types, and the fields of '" +
+                                     t0->name() + "' have types that no union holds: " + problem +
+                                     "; read the fields by name");
       return call;
     }
     element = both;
   }
   if (!element) {
-    checker_.diags_.error(arg->loc(), "'" + type->name() + "' has no fields, so 'Object." + fn +
-                                          "' would always be empty");
+    this->checker.diags_.error(arg->loc(), "'" + type->name() + "' has no fields, so 'Object." +
+                                               fn + "' would always be empty");
     return call;
   }
   if (fn == "values") {
@@ -224,25 +228,25 @@ Expr *ObjectChecker::checkObjectCall(CallExpr *call, MemberExpr *member, const T
 }
 
 Expr *ObjectChecker::enumMembers(CallExpr *call, EnumDecl *decl, llvm::StringRef fn) {
-  const Type *values = checker_.typeDeclarer().enumType(decl);
+  const Type *values = this->checker.typeDeclarer().enumType(decl);
   if (!decl->isString && fn != "keys") {
-    checker_.diags_.error(call->args[0]->loc(),
-                          "'Object." + fn + "' of numeric enum '" + decl->name +
-                              "' is not supported: in JavaScript it mixes the names of the "
-                              "members with their numbers; list the members you need, e.g. '[" +
-                              decl->name + "." +
-                              (decl->members.empty() ? "A" : decl->members.front().name.str()) +
-                              "]'");
+    this->checker.diags_.error(
+        call->args[0]->loc(), "'Object." + fn + "' of numeric enum '" + decl->name +
+                                  "' is not supported: in JavaScript it mixes the names of the "
+                                  "members with their numbers; list the members you need, e.g. '[" +
+                                  decl->name + "." +
+                                  (decl->members.empty() ? "A" : decl->members.front().name.str()) +
+                                  "]'");
     return call;
   }
-  auto *list = checker_.ctx_.make<ArrayLitExpr>(call->loc());
+  auto *list = this->checker.ctx_.make<ArrayLitExpr>(call->loc());
   for (const EnumMember &m : decl->members) {
-    auto *name = checker_.ctx_.make<StringLitExpr>(call->loc(), utf16(m.name));
-    auto *member = checker_.ctx_.make<MemberExpr>(
-        call->loc(), checker_.ctx_.make<NameExpr>(call->loc(), decl->name), m.name);
+    auto *name = this->checker.ctx_.make<StringLitExpr>(call->loc(), utf16(m.name));
+    auto *member = this->checker.ctx_.make<MemberExpr>(
+        call->loc(), this->checker.ctx_.make<NameExpr>(call->loc(), decl->name), m.name);
     Expr *element = fn == "keys" ? static_cast<Expr *>(name) : member;
     if (fn == "entries") {
-      auto *pair = checker_.ctx_.make<ArrayLitExpr>(call->loc());
+      auto *pair = this->checker.ctx_.make<ArrayLitExpr>(call->loc());
       pair->elements.push_back({name, false});
       pair->elements.push_back({member, false});
       element = pair;
@@ -252,8 +256,8 @@ Expr *ObjectChecker::enumMembers(CallExpr *call, EnumDecl *decl, llvm::StringRef
   const Type *element = fn == "keys"     ? Type::string()
                         : fn == "values" ? values
                                          : Type::tuple({Type::string(), values});
-  Expr *checked = checker_.exprChecker().checkExpr(list, Type::array(element));
-  checker_.file_->namedUses[checked] = {decl, call->args[0]->loc(), ""};
+  Expr *checked = this->checker.exprChecker().checkExpr(list, Type::array(element));
+  this->checker.file_->namedUses[checked] = {decl, call->args[0]->loc(), ""};
 
   return checked;
 }
@@ -263,45 +267,46 @@ Expr *ObjectChecker::enumObject(NameExpr *name, const Type *expected) {
   if (!target || !target->isDict()) {
     return nullptr;
   }
-  EnumDecl *decl = checker_.scopes().lookup(name->name).enumDecl();
+  EnumDecl *decl = this->checker.scopes().lookup(name->name).enumDecl();
   if (!decl) {
     return nullptr;
   }
-  checker_.typeDeclarer().resolveEnum(decl);
-  auto *object = checker_.ctx_.make<ObjectLitExpr>(name->loc());
+  this->checker.typeDeclarer().resolveEnum(decl);
+  auto *object = this->checker.ctx_.make<ObjectLitExpr>(name->loc());
   for (const EnumMember &m : decl->members) {
     ObjectLitExpr::Property p;
     p.name = m.name;
     p.loc = name->loc();
-    p.value = checker_.ctx_.make<MemberExpr>(
-        name->loc(), checker_.ctx_.make<NameExpr>(name->loc(), decl->name), m.name);
+    p.value = this->checker.ctx_.make<MemberExpr>(
+        name->loc(), this->checker.ctx_.make<NameExpr>(name->loc(), decl->name), m.name);
     object->props.push_back(p);
   }
-  Expr *checked = checker_.exprChecker().checkExpr(object, expected);
-  checker_.file_->namedUses[checked] = {decl, name->loc(), ""};
+  Expr *checked = this->checker.exprChecker().checkExpr(object, expected);
+  this->checker.file_->namedUses[checked] = {decl, name->loc(), ""};
 
   return checked;
 }
 
 void ObjectChecker::checkForIn(ForOfStmt *stmt) {
   auto *variable = dyn_cast<NameExpr>(stmt->iterable);
-  bool env = checker_.processChecker().isProcessMember(stmt->iterable, "env");
-  Expr *object = checker_.exprChecker().checkExpr(stmt->iterable);
+  bool env = this->checker.processChecker().isProcessMember(stmt->iterable, "env");
+  Expr *object = this->checker.exprChecker().checkExpr(stmt->iterable);
   const Type *type = object->type;
   if (type->isRecord() && (variable || env) && !isa<VarDeclStmt>(stmt->body) &&
       !isa<FunctionDecl>(stmt->body)) {
     llvm::SMLoc loc = stmt->body->loc();
-    Expr *again = variable ? static_cast<Expr *>(checker_.ctx_.make<NameExpr>(loc, variable->name))
-                           : checker_.ctx_.make<MemberExpr>(
-                                 loc, checker_.ctx_.make<NameExpr>(loc, "process"), "env");
-    auto *has = checker_.ctx_.make<BinaryExpr>(
-        loc, BinaryOp::In, checker_.ctx_.make<NameExpr>(loc, stmt->binding.name), again);
-    auto *skip =
-        checker_.ctx_.make<IfStmt>(loc, checker_.ctx_.make<UnaryExpr>(loc, UnaryOp::Not, has),
-                                   checker_.ctx_.make<ContinueStmt>(loc, ""), nullptr);
+    Expr *again = variable
+                      ? static_cast<Expr *>(this->checker.ctx_.make<NameExpr>(loc, variable->name))
+                      : this->checker.ctx_.make<MemberExpr>(
+                            loc, this->checker.ctx_.make<NameExpr>(loc, "process"), "env");
+    auto *has = this->checker.ctx_.make<BinaryExpr>(
+        loc, BinaryOp::In, this->checker.ctx_.make<NameExpr>(loc, stmt->binding.name), again);
+    auto *skip = this->checker.ctx_.make<IfStmt>(
+        loc, this->checker.ctx_.make<UnaryExpr>(loc, UnaryOp::Not, has),
+        this->checker.ctx_.make<ContinueStmt>(loc, ""), nullptr);
     auto *block = dyn_cast<BlockStmt>(stmt->body);
     if (!block) {
-      block = checker_.ctx_.make<BlockStmt>(loc);
+      block = this->checker.ctx_.make<BlockStmt>(loc);
       block->body.push_back(stmt->body);
       stmt->body = block;
     }
@@ -314,7 +319,7 @@ void ObjectChecker::checkForIn(ForOfStmt *stmt) {
   bool ok = false;
   if (type->isArray() || type->isString() || type->isTuple()) {
     const char *what = type->isArray() ? "an array" : type->isString() ? "a string" : "a tuple";
-    checker_.diags_.error(
+    this->checker.diags_.error(
         object->loc(),
         std::string("'for...in' over ") + what +
             " gives its indices as strings ('0', '1'...), so 'i + 1' would be '01'; walk "
@@ -322,33 +327,33 @@ void ObjectChecker::checkForIn(ForOfStmt *stmt) {
             text + ")', or the indices with 'for (let i = 0; i < " + text + ".length; i++)'" +
             (type->isArray() ? " or '" + text + ".forEach((x, i) => ...)'" : ""));
   } else if (type->isOptional() && type->inner()->isObject()) {
-    checker_.diags_.error(object->loc(),
-                          "the object may be undefined; check it before walking its keys");
+    this->checker.diags_.error(object->loc(),
+                               "the object may be undefined; check it before walking its keys");
   } else if (type->nonOptional()->isJson()) {
     ok = true;
   } else if (type->isRecord()) {
     ok = true;
   } else if (type->isDict()) {
-    checker_.diags_.error(
+    this->checker.diags_.error(
         object->loc(), std::string("'for...in' walks the properties of an object, and a ") +
                            (type->isMap() ? "Map" : "Set") + " has none in JavaScript; walk its " +
                            (type->isMap() ? "keys" : "values") + " with 'for (const x of " + text +
                            (type->isMap() ? ".keys()" : "") + ")'");
   } else if (type->isOptional() && type->inner()->isRecord()) {
-    checker_.diags_.error(object->loc(),
-                          "the object may be undefined; check it before walking its keys");
+    this->checker.diags_.error(object->loc(),
+                               "the object may be undefined; check it before walking its keys");
   } else if ((!type->isObject() || type->isRegExp() || type->isMatch() || type->isDate() ||
               type->isIntl() || type->isBytes() || type->isCrypto()) &&
              !type->isError()) {
-    checker_.diags_.error(object->loc(),
-                          "'for...in' walks the keys of an object, found '" + type->name() + "'");
+    this->checker.diags_.error(object->loc(), "'for...in' walks the keys of an object, found '" +
+                                                  type->name() + "'");
   } else {
     ok = !type->isError();
   }
   llvm::SMLoc loc = object->loc();
-  auto *callee =
-      checker_.ctx_.make<MemberExpr>(loc, checker_.ctx_.make<NameExpr>(loc, "Object"), "keys");
-  auto *keys = checker_.ctx_.make<CallExpr>(loc, callee, std::vector<Expr *>{object});
+  auto *callee = this->checker.ctx_.make<MemberExpr>(
+      loc, this->checker.ctx_.make<NameExpr>(loc, "Object"), "keys");
+  auto *keys = this->checker.ctx_.make<CallExpr>(loc, callee, std::vector<Expr *>{object});
   keys->target = BuiltinCall{.builtin = Builtin::ObjectKeys};
   keys->type = ok ? Type::array(Type::string()) : Type::error();
   keys->forIn = true;
@@ -358,22 +363,22 @@ void ObjectChecker::checkForIn(ForOfStmt *stmt) {
 Expr *ObjectChecker::checkField(MemberExpr *member) {
   const Type *type = member->object->type;
   if (type->isClass()) {
-    return checker_.classMemberChecker().checkClassMember(member, nullptr);
+    return this->checker.classMemberChecker().checkClassMember(member, nullptr);
   }
   const Field *field = type->field(member->name);
   if (!field) {
-    checker_.diags_.error(member->loc(), noField(type, member->name));
+    this->checker.diags_.error(member->loc(), noField(type, member->name));
     member->type = Type::error();
     return member;
   }
   member->type = field->type;
-  if (Expr *narrowed = checker_.fieldFacts().narrowedField(member); narrowed != member) {
+  if (Expr *narrowed = this->checker.fieldFacts().narrowedField(member); narrowed != member) {
     return narrowed;
   }
   if (field->type->isOptional()) {
-    if (std::optional<Checker::FieldPath> path = checker_.fieldFacts().fieldPath(member);
-        path && checker_.fieldFacts().isFieldDefined(*path)) {
-      return checker_.typeRelations().convert(member, field->type->inner());
+    if (std::optional<Checker::FieldPath> path = this->checker.fieldFacts().fieldPath(member);
+        path && this->checker.fieldFacts().isFieldDefined(*path)) {
+      return this->checker.typeRelations().convert(member, field->type->inner());
     }
   }
 
@@ -382,24 +387,24 @@ Expr *ObjectChecker::checkField(MemberExpr *member) {
 
 Expr *ObjectChecker::checkFieldCall(CallExpr *call, MemberExpr *member) {
   if (member->object->type->overload(member->name)) {
-    return checker_.overloadResolver().checkOverloadCall(call, member);
+    return this->checker.overloadResolver().checkOverloadCall(call, member);
   }
-  call->callee = checkField(member);
+  call->callee = this->checkField(member);
   const Type *type = call->callee->type;
   if (type->isFunction()) {
-    return checker_.callChecker().checkValueCall(call, type);
+    return this->checker.callChecker().checkValueCall(call, type);
   }
   if (type->isOptional() && type->inner()->isFunction()) {
-    checker_.diags_.error(member->loc(),
-                          "the function may be undefined; check it first, or call it with '?.()', "
-                          "which gives undefined then");
+    this->checker.diags_.error(
+        member->loc(), "the function may be undefined; check it first, or call it with '?.()', "
+                       "which gives undefined then");
   } else if (!type->isError()) {
-    checker_.diags_.error(member->loc(), "field '" + member->name +
-                                             "' is not a function; it has type '" + type->name() +
-                                             "'");
+    this->checker.diags_.error(member->loc(), "field '" + member->name +
+                                                  "' is not a function; it has type '" +
+                                                  type->name() + "'");
   }
   for (Expr *&arg : call->args) {
-    arg = checker_.exprChecker().checkExpr(arg);
+    arg = this->checker.exprChecker().checkExpr(arg);
   }
   call->type = Type::error();
 
@@ -409,30 +414,31 @@ Expr *ObjectChecker::checkFieldCall(CallExpr *call, MemberExpr *member) {
 const Type *ObjectChecker::checkObjectFieldTarget(MemberExpr *member) {
   const Type *type = member->object->type;
   if (type->isOptional()) {
-    checker_.diags_.error(member->object->loc(),
-                          "the value may be undefined; check it before assigning to '" +
-                              member->name + "'");
+    this->checker.diags_.error(member->object->loc(),
+                               "the value may be undefined; check it before assigning to '" +
+                                   member->name + "'");
     return Type::error();
   }
   if (type->isTuple() && member->name == "length") {
-    checker_.diags_.error(member->loc(), "a tuple has a fixed length, which cannot be changed");
+    this->checker.diags_.error(member->loc(),
+                               "a tuple has a fixed length, which cannot be changed");
     return Type::error();
   }
   const Field *field = type->field(member->name);
   if (!field) {
     if (type->overload(member->name)) {
-      checker_.diags_.error(member->loc(), "'" + member->name + "' is a method of '" +
-                                               type->name() +
-                                               "' with several signatures and cannot be replaced");
+      this->checker.diags_.error(member->loc(),
+                                 "'" + member->name + "' is a method of '" + type->name() +
+                                     "' with several signatures and cannot be replaced");
     } else {
-      checker_.diags_.error(member->loc(), noField(type, member->name));
+      this->checker.diags_.error(member->loc(), noField(type, member->name));
     }
     return Type::error();
   }
   if (field->readonly) {
-    checker_.diags_.error(member->loc(), "cannot assign to '" + member->name +
-                                             "' because it is a read-only field of '" +
-                                             type->name() + "'");
+    this->checker.diags_.error(member->loc(), "cannot assign to '" + member->name +
+                                                  "' because it is a read-only field of '" +
+                                                  type->name() + "'");
   }
   member->type = field->type;
 

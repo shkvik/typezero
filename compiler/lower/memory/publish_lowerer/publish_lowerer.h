@@ -6,7 +6,7 @@ namespace tz {
 
 class PublishLowerer {
 public:
-  explicit PublishLowerer(Lowering &lowering);
+  explicit PublishLowerer(Lowering &owner);
 
   void pinValue(llvm::Value *value, const Type *type);
   void endValue(llvm::Value *value, const Type *type);
@@ -17,7 +17,9 @@ public:
                                   llvm::StringRef name);
 
 private:
-  Lowering &lowering_;
+  static llvm::Value *spillHere(llvm::IRBuilder<> &b, llvm::Value *value, const char *name);
+
+  Lowering &lowering;
 };
 
 }

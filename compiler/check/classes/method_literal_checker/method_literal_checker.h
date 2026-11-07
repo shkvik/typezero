@@ -6,13 +6,13 @@ namespace tz {
 
 class MethodLiteralChecker {
 public:
-  explicit MethodLiteralChecker(Checker &checker);
+  explicit MethodLiteralChecker(Checker &owner);
 
   Expr *checkMethodLiteral(ObjectLitExpr *lit, const Type *target);
   bool implementsLiteral(ObjectLitExpr *lit, const Type *target);
 
 private:
-  Checker &checker_;
+  Checker &checker;
 };
 
 }

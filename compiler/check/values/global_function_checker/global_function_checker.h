@@ -6,14 +6,14 @@ namespace tz {
 
 class GlobalFunctionChecker {
 public:
-  explicit GlobalFunctionChecker(Checker &checker);
+  explicit GlobalFunctionChecker(Checker &owner);
 
   Expr *checkGlobalCall(CallExpr *call, NameExpr *name);
   Expr *checkGlobalFunction(CallExpr *call, llvm::StringRef fn, llvm::SMLoc loc);
   Expr *reportLegacyEscape(CallExpr *call, llvm::StringRef fn, llvm::SMLoc loc);
 
 private:
-  Checker &checker_;
+  Checker &checker;
 };
 
 }

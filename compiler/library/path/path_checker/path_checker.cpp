@@ -121,7 +121,10 @@ Expr *PathChecker::checkPathCall(CallExpr *call, NodeModule module, llvm::String
                           "'" + fn + "' of '" + moduleLabel(module) + "' is not supported yet");
     return loosely();
   }
-  if (!checker_.argumentChecker().checkArity(call, loc, shape->min, shape->max)) {
+  ArgumentChecker::ResultArityMatches arity =
+      checker_.argumentChecker().checkArity(call, shape->min, shape->max);
+  if (arity.isErr()) {
+    checker_.diags_.error(loc, arity.error().message);
     return call;
   }
   if (shape->builtin == Builtin::PathFormat) {

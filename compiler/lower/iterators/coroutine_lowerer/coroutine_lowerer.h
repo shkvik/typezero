@@ -6,7 +6,7 @@ namespace tz {
 
 class CoroutineLowerer {
 public:
-  explicit CoroutineLowerer(Lowering &lowering);
+  explicit CoroutineLowerer(Lowering &owner);
 
   Lowering::EmitContext saveContext();
   void restoreContext(const Lowering::EmitContext &context);
@@ -20,7 +20,7 @@ public:
   llvm::Function *coroIntrinsic(llvm::Intrinsic::ID id, llvm::ArrayRef<llvm::Type *> types = {});
 
 private:
-  Lowering &lowering_;
+  Lowering &lowering;
 };
 
 }

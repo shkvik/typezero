@@ -4,9 +4,7 @@
 #include "llvm/ADT/STLExtras.h"
 #include <limits>
 
-using llvm::cast;
 using llvm::dyn_cast;
-using llvm::dyn_cast_or_null;
 using llvm::isa;
 
 namespace tz {
@@ -19,8 +17,10 @@ constexpr int64_t kIntMax = std::numeric_limits<int64_t>::max();
 
 constexpr uint64_t kMaxConstant = uint64_t(1) << 40;
 
-bool isArrayLength(const Term &t) { return t.length && t.var->type->nonOptional()->isArray(); }
+}
 
+bool LoopBounds::isArrayLength(const Term &t) {
+  return t.length && t.var->type->nonOptional()->isArray();
 }
 
 static std::optional<int64_t>
@@ -47,7 +47,8 @@ varPlus(const Expr *expr, const VarSymbol *var,
   return static_cast<int64_t>(lit->value);
 }
 
-LoopBounds::LoopBounds(Checker &checker) : checker_(checker) {}
+LoopBounds::LoopBounds(Checker &owner)
+    : checker(owner) {}
 
 std::optional<std::pair<int64_t, int64_t>> LoopBounds::syntacticIntRange(const Expr *expr) const {
   if (auto *lit = dyn_cast<IntLitExpr>(expr)) {
@@ -66,7 +67,7 @@ std::optional<std::pair<int64_t, int64_t>> LoopBounds::syntacticIntRange(const E
     return std::pair{v, v};
   }
   if (auto *name = dyn_cast<NameExpr>(expr)) {
-    const VarSymbol *var = checker_.scopes().lookup(name->name).var();
+    const VarSymbol *var = this->checker.scopes().lookup(name->name).var();
     if (var && var->type->isInt()) {
       return std::pair{kIntMin, kIntMax};
     }
@@ -74,7 +75,7 @@ std::optional<std::pair<int64_t, int64_t>> LoopBounds::syntacticIntRange(const E
   }
   if (auto *member = dyn_cast<MemberExpr>(expr)) {
     auto *name = dyn_cast<NameExpr>(member->object);
-    const VarSymbol *var = name ? checker_.scopes().lookup(name->name).var() : nullptr;
+    const VarSymbol *var = name ? this->checker.scopes().lookup(name->name).var() : nullptr;
     if (member->name == "byteLength" && var && var->type->isBytes()) {
       return std::pair{int64_t(0), kMaxLength};
     }
@@ -95,7 +96,7 @@ std::optional<std::pair<int64_t, int64_t>> LoopBounds::syntacticIntRange(const E
         lit->value > kMaxConstant) {
       return std::nullopt;
     }
-    std::optional<std::pair<int64_t, int64_t>> length = syntacticIntRange(bin->lhs);
+    std::optional<std::pair<int64_t, int64_t>> length = this->syntacticIntRange(bin->lhs);
     if (!length) {
       return std::nullopt;
     }
@@ -108,30 +109,30 @@ std::optional<std::pair<int64_t, int64_t>> LoopBounds::syntacticIntRange(const E
 
 bool LoopBounds::boundedAbove(const Expr *expr, int64_t limit,
                               const Checker::LoopScan &scan) const {
-  if (std::optional<std::pair<int64_t, int64_t>> range = syntacticIntRange(expr)) {
+  if (std::optional<std::pair<int64_t, int64_t>> range = this->syntacticIntRange(expr)) {
     if (range->second <= limit) {
       return true;
     }
   }
   auto *name = dyn_cast<NameExpr>(expr);
-  const VarSymbol *var = name ? checker_.scopes().lookup(name->name).var() : nullptr;
+  const VarSymbol *var = name ? this->checker.scopes().lookup(name->name).var() : nullptr;
 
   return var && var->type->isInt() && !scan.changes.count(name->name) &&
-         checker_.flow_.facts.proves(Term::of(var), Term::zero(), saturatingAdd(limit, 1));
+         this->checker.flow_.facts.proves(Term::of(var), Term::zero(), saturatingAdd(limit, 1));
 }
 
 bool LoopBounds::boundedBelow(const Expr *expr, int64_t limit,
                               const Checker::LoopScan &scan) const {
-  if (std::optional<std::pair<int64_t, int64_t>> range = syntacticIntRange(expr)) {
+  if (std::optional<std::pair<int64_t, int64_t>> range = this->syntacticIntRange(expr)) {
     if (range->first >= limit) {
       return true;
     }
   }
   auto *name = dyn_cast<NameExpr>(expr);
-  const VarSymbol *var = name ? checker_.scopes().lookup(name->name).var() : nullptr;
+  const VarSymbol *var = name ? this->checker.scopes().lookup(name->name).var() : nullptr;
 
   return var && var->type->isInt() && !scan.changes.count(name->name) &&
-         checker_.flow_.facts.proves(Term::zero(), Term::of(var), saturatingSub(1, limit));
+         this->checker.flow_.facts.proves(Term::zero(), Term::of(var), saturatingSub(1, limit));
 }
 
 std::optional<int64_t> LoopBounds::condBoundsAbove(const Expr *cond, const VarSymbol *var,
@@ -142,15 +143,16 @@ std::optional<int64_t> LoopBounds::condBoundsAbove(const Expr *cond, const VarSy
     return std::nullopt;
   }
   if (bin->op == BinaryOp::LogAnd) {
-    if (std::optional<int64_t> k = condBoundsAbove(bin->lhs, var, scan, step)) {
+    if (std::optional<int64_t> k = this->condBoundsAbove(bin->lhs, var, scan, step)) {
       return k;
     }
-    return condBoundsAbove(bin->rhs, var, scan, step);
+    return this->condBoundsAbove(bin->rhs, var, scan, step);
   }
   auto lookupVar = [&](llvm::StringRef name) -> const VarSymbol * {
-    return checker_.scopes().lookup(name).var();
+    return this->checker.scopes().lookup(name).var();
   };
-  const Expr *small = nullptr, *large = nullptr;
+  const Expr *small = nullptr;
+  const Expr *large = nullptr;
   bool strict = false;
   switch (bin->op) {
   case BinaryOp::Lt:
@@ -175,7 +177,7 @@ std::optional<int64_t> LoopBounds::condBoundsAbove(const Expr *cond, const VarSy
     return std::nullopt;
   }
   std::optional<int64_t> k = varPlus(small, var, lookupVar);
-  if (k && boundedAbove(large, strict ? kIntMax - (step - 1) : kIntMax - step, scan)) {
+  if (k && this->boundedAbove(large, strict ? kIntMax - (step - 1) : kIntMax - step, scan)) {
     return k;
   }
 
@@ -189,22 +191,23 @@ bool LoopBounds::condBoundsBelow(const Expr *cond, const VarSymbol *var,
     return false;
   }
   if (bin->op == BinaryOp::LogAnd) {
-    return condBoundsBelow(bin->lhs, var, scan, step) || condBoundsBelow(bin->rhs, var, scan, step);
+    return this->condBoundsBelow(bin->lhs, var, scan, step) ||
+           this->condBoundsBelow(bin->rhs, var, scan, step);
   }
   auto isVar = [&](const Expr *e) {
     auto *name = dyn_cast<NameExpr>(e);
 
-    return name && checker_.scopes().lookup(name->name).var() == var;
+    return name && this->checker.scopes().lookup(name->name).var() == var;
   };
   switch (bin->op) {
   case BinaryOp::Gt:
-    return isVar(bin->lhs) && boundedBelow(bin->rhs, kIntMin + step - 1, scan);
+    return isVar(bin->lhs) && this->boundedBelow(bin->rhs, kIntMin + step - 1, scan);
   case BinaryOp::Lt:
-    return isVar(bin->rhs) && boundedBelow(bin->lhs, kIntMin + step - 1, scan);
+    return isVar(bin->rhs) && this->boundedBelow(bin->lhs, kIntMin + step - 1, scan);
   case BinaryOp::Ge:
-    return isVar(bin->lhs) && boundedBelow(bin->rhs, kIntMin + step, scan);
+    return isVar(bin->lhs) && this->boundedBelow(bin->rhs, kIntMin + step, scan);
   case BinaryOp::Le:
-    return isVar(bin->rhs) && boundedBelow(bin->lhs, kIntMin + step, scan);
+    return isVar(bin->rhs) && this->boundedBelow(bin->lhs, kIntMin + step, scan);
   default:
     return false;
   }
@@ -212,34 +215,36 @@ bool LoopBounds::condBoundsBelow(const Expr *cond, const VarSymbol *var,
 
 Checker::Flow LoopBounds::loopHead(const Checker::LoopScan &scan, const Expr *cond,
                                    bool induction) const {
-  Checker::Flow head = checker_.flow_;
+  Checker::Flow head = this->checker.flow_;
   head.unreachable = false;
   for (const auto &entry : scan.changes) {
     llvm::StringRef name = entry.first();
     const Checker::LoopScan::Change &change = entry.second;
-    const VarSymbol *var = checker_.scopes().lookup(name).var();
+    const VarSymbol *var = this->checker.scopes().lookup(name).var();
 
-    bool keepLower = false, keepUpper = false;
+    bool keepLower = false;
+    bool keepUpper = false;
     std::optional<int64_t> invariant;
     if (induction && var && var->type->isInt() && change.count == 1 && !change.nested) {
       if (change.delta > 0) {
-        if (std::optional<int64_t> k = condBoundsAbove(cond, var, scan, change.delta)) {
+        if (std::optional<int64_t> k = this->condBoundsAbove(cond, var, scan, change.delta)) {
           if (*k == 0) {
             keepLower = true;
-          } else if (checker_.flow_.facts.proves(Term::of(var), Term::zero(),
-                                                 saturatingAdd(kIntMax - *k, 1))) {
+          } else if (this->checker.flow_.facts.proves(Term::of(var), Term::zero(),
+                                                      saturatingAdd(kIntMax - *k, 1))) {
             keepLower = true;
             invariant = *k;
           }
         }
       }
-      keepUpper = change.delta < 0 && condBoundsBelow(cond, var, scan, -change.delta);
+      keepUpper = change.delta < 0 && this->condBoundsBelow(cond, var, scan, -change.delta);
     }
     head.facts.forgetIf([&](const Facts::Fact &f) {
       auto hits = [&](const Term &t) {
         return (t.var && t.var->name == name) || (t.var2 && t.var2->name == name);
       };
-      bool lhsHit = hits(f.lhs), rhsHit = hits(f.rhs);
+      bool lhsHit = hits(f.lhs);
+      bool rhsHit = hits(f.rhs);
       if (!lhsHit && !rhsHit) {
         return false;
       }
@@ -281,10 +286,11 @@ Checker::Flow LoopBounds::loopHead(const Checker::LoopScan &scan, const Expr *co
   llvm::erase_if(head.definedFields, written);
   llvm::erase_if(head.narrowedFields, [&](const auto &entry) { return written(entry.first); });
   if (scan.callsFunctions) {
-    checker_.flowChecker().forgetCallEffects(head);
+    this->checker.flowChecker().forgetCallEffects(head);
   }
   auto arrayPart = [](const Term &t) {
-    return (t.length && isArrayLength(t.first())) || (t.length2 && isArrayLength(t.second()));
+    return (t.length && LoopBounds::isArrayLength(t.first())) ||
+           (t.length2 && LoopBounds::isArrayLength(t.second()));
   };
   head.facts.forgetIf([&](const Facts::Fact &f) {
     return (scan.growsArrays && arrayPart(f.lhs)) || (scan.shrinksArrays && arrayPart(f.rhs));

@@ -6,7 +6,7 @@ namespace tz {
 
 class ObjectLowerer {
 public:
-  explicit ObjectLowerer(Lowering &lowering);
+  explicit ObjectLowerer(Lowering &owner);
 
   llvm::Value *emitObjectLiteral(ObjectLitExpr *lit);
   llvm::Value *emitSpreadLiteral(ObjectLitExpr *lit);
@@ -20,7 +20,7 @@ public:
                                  const Type *keyType);
 
 private:
-  Lowering &lowering_;
+  Lowering &lowering;
 };
 
 }

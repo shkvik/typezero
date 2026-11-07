@@ -1,29 +1,49 @@
 #pragma once
 
 #include "compiler/check/checker/checker.h"
+#include "compiler/declare/constant_folder/constant_folder_errors.h"
+#include "compiler/result/result/result.h"
 
 namespace tz {
 
 class ConstantFolder {
 public:
-  explicit ConstantFolder(Checker &checker);
+  using ResultDivisorNotZero = Result<const Expr *, ConstantFolderCheckDivisorError>;
 
-  std::optional<Checker::Constant> evalConstant(const Expr *expr, EnumDecl *self, size_t defined);
-  std::optional<int64_t> intConstant(const Expr *expr) const;
-  std::optional<uint64_t> unsignedConstant(const Expr *expr) const;
-  void noteUnsignedVar(const VarSymbol *var, const Expr *init);
+  explicit ConstantFolder(Checker &owner);
+
   void foldUnary(UnaryExpr *unary, bool wraps);
   void foldBinary(BinaryExpr *bin, bool wraps);
-  void checkDivisor(BinaryOp op, const Expr *divisor);
-  void reportOverflow(const Expr *expr, const Type *type, const std::string &value, int64_t wrapped,
-                      bool wraps);
+  std::optional<int64_t> intConstant(const Expr *expr) const;
+  void noteUnsignedVar(const VarSymbol *var, const Expr *init);
+  std::optional<uint64_t> unsignedConstant(const Expr *expr) const;
+  ResultDivisorNotZero checkDivisor(BinaryOp op, const Expr *divisor) const;
   Expr *globalConstant(llvm::StringRef object, llvm::StringRef name, llvm::SMLoc loc);
+  std::optional<Checker::Constant> evalConstant(const Expr *expr, EnumDecl *self, size_t defined);
 
 private:
-  Checker &checker_;
-  llvm::DenseMap<const Expr *, int64_t> constants_;
-  llvm::DenseMap<const Expr *, uint64_t> bigUnsigned_;
-  llvm::DenseMap<const VarSymbol *, uint64_t> bigUnsignedVars_;
+  using ResultShiftCountFits = Result<const Type *, ConstantFolderShiftCountError>;
+
+  static constexpr int64_t maxExact = int64_t(1) << 53;
+
+  static double power(double x, double y);
+  static int32_t jsToInt32(double x);
+  static std::string formatNumber(double value);
+  static bool fitsIn(const Type *type, int64_t value);
+  static int64_t wrapTo(const Type *type, int64_t value);
+  static std::string wideText(int64_t a, int64_t b, BinaryOp op);
+  static bool exactEnough(const Type *type, int64_t value, bool wraps);
+  static ResultShiftCountFits shiftCount(const Type *shifted, int64_t count);
+  static std::string constantText(std::optional<int64_t> exact, double value);
+  static std::pair<int64_t, std::optional<int64_t>> intPower(int64_t base, int64_t exponent);
+
+  void reportOverflow(const Expr *expr, const Type *type, const std::string &value, int64_t wrapped,
+                      bool wraps);
+
+  Checker &checker;
+  llvm::DenseMap<const Expr *, int64_t> constants;
+  llvm::DenseMap<const Expr *, uint64_t> bigUnsigned;
+  llvm::DenseMap<const VarSymbol *, uint64_t> bigUnsignedVars;
 };
 
 }

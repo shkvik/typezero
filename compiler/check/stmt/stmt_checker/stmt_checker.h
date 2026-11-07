@@ -6,14 +6,14 @@ namespace tz {
 
 class StmtChecker {
 public:
-  explicit StmtChecker(Checker &checker);
+  explicit StmtChecker(Checker &owner);
 
   void checkStmt(Stmt *stmt);
   void checkIf(IfStmt *stmt);
   void checkBody(Stmt *body);
 
 private:
-  Checker &checker_;
+  Checker &checker;
 };
 
 }

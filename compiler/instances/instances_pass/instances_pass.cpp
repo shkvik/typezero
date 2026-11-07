@@ -5,15 +5,6 @@
 #include "compiler/instances/constructor_calls/constructor_calls.h"
 #include "compiler/instances/late_classes/late_classes.h"
 #include "compiler/program/program/program.h"
-#include "llvm/ADT/STLExtras.h"
-#include "llvm/ADT/StringSet.h"
-#include "llvm/Support/ErrorHandling.h"
-#include <cmath>
-#include <functional>
-
-using llvm::cast;
-using llvm::dyn_cast;
-using llvm::isa;
 
 namespace tz {
 

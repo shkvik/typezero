@@ -17,24 +17,20 @@
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/Support/ConvertUTF.h"
 
-using llvm::BasicBlock;
 using llvm::cast;
 using llvm::dyn_cast;
 using llvm::isa;
-using llvm::Value;
 
 namespace tz {
 
-namespace {
-
-std::u16string utf16(llvm::StringRef text) {
+std::u16string ClosureLowerer::utf16(llvm::StringRef text) {
   llvm::SmallVector<llvm::UTF16, 32> units;
   llvm::convertUTF8ToUTF16String(text, units);
 
   return std::u16string(units.begin(), units.end());
 }
 
-std::string qualifiedName(const FunctionDecl *fn) {
+std::string ClosureLowerer::qualifiedName(const FunctionDecl *fn) {
   std::string name = fn->name.empty() ? "lambda" : fn->name.str();
   for (const FunctionDecl *p = fn->parent; p; p = p->parent) {
     name = (p->name.empty() ? "lambda" : p->name.str()) + "." + name;
@@ -43,7 +39,7 @@ std::string qualifiedName(const FunctionDecl *fn) {
   return "tz." + name;
 }
 
-FunctionDecl *knownFunction(const Expr *expr) {
+FunctionDecl *ClosureLowerer::knownFunction(const Expr *expr) {
   auto *name = dyn_cast<NameExpr>(expr);
   if (!name) {
     return nullptr;
@@ -51,16 +47,16 @@ FunctionDecl *knownFunction(const Expr *expr) {
   if (name->func()) {
     return name->func()->decl;
   }
-  if (VarSymbol *var = name->var()) {
+  VarSymbol *var = name->var();
+  if (var) {
     return var->function() ? var->function() : var->isConst ? var->lambda() : nullptr;
   }
 
   return nullptr;
 }
 
-}
-
-ClosureLowerer::ClosureLowerer(Lowering &lowering) : lowering_(lowering) {}
+ClosureLowerer::ClosureLowerer(Lowering &owner)
+    : lowering(owner) {}
 
 const Type *ClosureLowerer::functionTypeOf(const FuncSymbol *fn) {
   return Type::function(fn->params, fn->minArgs, fn->hasRest, fn->ret, fn->hasThis);
@@ -72,60 +68,65 @@ const Type *ClosureLowerer::typeOf(const VarSymbol *var) {
   }
   const FunctionDecl *fn = var->function() ? var->function() : var->lambda();
 
-  return functionTypeOf(fn->sym);
+  return ClosureLowerer::functionTypeOf(fn->sym);
 }
 
 llvm::FunctionType *ClosureLowerer::closureFnType(const Type *fnType) {
-  std::vector<llvm::Type *> params{lowering_.builder_.getPtrTy()};
+  std::vector<llvm::Type *> params{this->lowering.builder_.getPtrTy()};
   for (const Type *param : fnType->params()) {
-    params.push_back(lowering_.moduleBuilder().lower(param));
+    params.push_back(this->lowering.moduleBuilder().lower(param));
   }
 
-  return llvm::FunctionType::get(lowering_.moduleBuilder().lower(fnType->ret()), params, false);
+  return llvm::FunctionType::get(this->lowering.moduleBuilder().lower(fnType->ret()), params,
+                                 false);
 }
 
 llvm::Value *ClosureLowerer::makeFunctionValue(llvm::Value *info, llvm::Value *env) {
-  if (auto *infoConst = dyn_cast<llvm::Constant>(info)) {
-    if (auto *envConst = dyn_cast<llvm::Constant>(env)) {
-      return llvm::ConstantStruct::get(lowering_.fnTy_, {infoConst, envConst});
+  auto *infoConst = dyn_cast<llvm::Constant>(info);
+  if (infoConst) {
+    auto *envConst = dyn_cast<llvm::Constant>(env);
+    if (envConst) {
+      return llvm::ConstantStruct::get(this->lowering.fnTy_, {infoConst, envConst});
     }
   }
-  llvm::Value *value = llvm::UndefValue::get(lowering_.fnTy_);
-  value = lowering_.builder_.CreateInsertValue(value, info, 0);
+  llvm::Value *value = llvm::UndefValue::get(this->lowering.fnTy_);
+  value = this->lowering.builder_.CreateInsertValue(value, info, 0);
 
-  return lowering_.builder_.CreateInsertValue(value, env, 1);
+  return this->lowering.builder_.CreateInsertValue(value, env, 1);
 }
 
 llvm::Function *ClosureLowerer::closureCode(FunctionDecl *fn) {
-  if (llvm::Function *code = closureCode_.lookup(fn)) {
+  llvm::Function *code = this->closureCodes.lookup(fn);
+  if (code) {
     return code;
   }
-  auto *code = llvm::Function::Create(closureFnType(functionTypeOf(fn->sym)),
-                                      llvm::GlobalValue::InternalLinkage, qualifiedName(fn),
-                                      lowering_.module_.get());
-  lowering_.functionBuilder().setFunctionAttributes(code);
-  closureCode_[fn] = code;
-  lowering_.pendingClosures_.push_back(fn);
+  code = llvm::Function::Create(this->closureFnType(ClosureLowerer::functionTypeOf(fn->sym)),
+                                llvm::GlobalValue::InternalLinkage,
+                                ClosureLowerer::qualifiedName(fn), this->lowering.module_.get());
+  this->lowering.functionBuilder().setFunctionAttributes(code);
+  this->closureCodes[fn] = code;
+  this->lowering.pendingClosures_.push_back(fn);
 
   return code;
 }
 
 llvm::Constant *ClosureLowerer::functionInfo(FunctionDecl *fn) {
-  if (llvm::Constant *info = infos_.lookup(fn)) {
+  llvm::Constant *info = this->infos.lookup(fn);
+  if (info) {
     return info;
   }
   llvm::Function *code;
   if (fn->takesThis()) {
-    code = lowering_.classDescriptors().methodCode(fn);
+    code = this->lowering.classDescriptors().methodCode(fn);
   } else if (fn->isClosure()) {
-    code = closureCode(fn);
+    code = this->closureCode(fn);
   } else {
-    llvm::Function *target = lowering_.functions_.lookup(fn->sym);
-    code = llvm::Function::Create(closureFnType(functionTypeOf(fn->sym)),
+    llvm::Function *target = this->lowering.functions_.lookup(fn->sym);
+    code = llvm::Function::Create(this->closureFnType(ClosureLowerer::functionTypeOf(fn->sym)),
                                   llvm::GlobalValue::InternalLinkage, "tz." + fn->name + ".value",
-                                  lowering_.module_.get());
-    lowering_.functionBuilder().setFunctionAttributes(code);
-    llvm::IRBuilder<> b(llvm::BasicBlock::Create(lowering_.ctx_, "entry", code));
+                                  this->lowering.module_.get());
+    this->lowering.functionBuilder().setFunctionAttributes(code);
+    llvm::IRBuilder<> b(llvm::BasicBlock::Create(this->lowering.ctx_, "entry", code));
     std::vector<llvm::Value *> args;
     for (unsigned i = 1; i < code->arg_size(); ++i) {
       args.push_back(code->getArg(i));
@@ -138,174 +139,185 @@ llvm::Constant *ClosureLowerer::functionInfo(FunctionDecl *fn) {
     }
   }
   auto *global = new llvm::GlobalVariable(
-      *lowering_.module_, lowering_.fnInfoTy_, true, llvm::GlobalValue::PrivateLinkage,
-      llvm::ConstantStruct::get(lowering_.fnInfoTy_,
-                                {code, lowering_.stringLowerer().stringLiteral(utf16(fn->name))}),
+      *this->lowering.module_, this->lowering.fnInfoTy_, true, llvm::GlobalValue::PrivateLinkage,
+      llvm::ConstantStruct::get(
+          this->lowering.fnInfoTy_,
+          {code, this->lowering.stringLowerer().stringLiteral(ClosureLowerer::utf16(fn->name))}),
       "tz.fninfo." + fn->name);
-  infos_[fn] = global;
+  this->infos[fn] = global;
 
   return global;
 }
 
 llvm::Value *ClosureLowerer::emitFunctionExpr(FunctionExpr *fe) {
   FunctionDecl *fn = fe->fn;
-  llvm::Constant *info = functionInfo(fn);
-  if (const VarSymbol *var = fn->receiverEnv) {
-    return makeFunctionValue(info, lowering_.envLowerer().emitVarValue(var, false));
+  llvm::Constant *info = this->functionInfo(fn);
+  const VarSymbol *var = fn->receiverEnv;
+  if (var) {
+    return this->makeFunctionValue(info, this->lowering.envLowerer().emitVarValue(var, false));
   }
-  const Lowering::EnvLayout &layout = lowering_.envLowerer().envLayout(fn);
-  llvm::Value *env = llvm::ConstantPointerNull::get(lowering_.builder_.getPtrTy());
-  if (!layout.fields.empty() || (lowering_.comparesFunctions_ && !fn->nonEscaping)) {
-    env = lowering_.envLowerer().createEnv(layout, fn->nonEscaping,
-                                           !lowering_.memory().unstoredSites.contains(fe));
-    lowering_.groupLowerer().noteUnstored(env, fe);
+  const Lowering::EnvLayout &layout = this->lowering.envLowerer().envLayout(fn);
+  llvm::Value *env = llvm::ConstantPointerNull::get(this->lowering.builder_.getPtrTy());
+  if (!layout.fields.empty() || (this->lowering.comparesFunctions_ && !fn->nonEscaping)) {
+    env = this->lowering.envLowerer().createEnv(
+        layout, fn->nonEscaping, !this->lowering.memory().unstoredSites.contains(fe));
+    this->lowering.groupLowerer().noteUnstored(env, fe);
   }
 
-  return makeFunctionValue(info, env);
+  return this->makeFunctionValue(info, env);
 }
 
 llvm::Value *ClosureLowerer::closureEnv(CallExpr *call) {
   FunctionDecl *fn = call->func()->decl;
-  llvm::Value *null = llvm::ConstantPointerNull::get(lowering_.builder_.getPtrTy());
-  if (lowering_.currentFn_ &&
-      (lowering_.currentFn_ == fn || (fn->group && lowering_.currentFn_->group == fn->group))) {
-    return lowering_.envParam_ ? lowering_.envParam_ : null;
+  llvm::Value *null = llvm::ConstantPointerNull::get(this->lowering.builder_.getPtrTy());
+  if (this->lowering.currentFn_ && (this->lowering.currentFn_ == fn ||
+                                    (fn->group && this->lowering.currentFn_->group == fn->group))) {
+    return this->lowering.envParam_ ? this->lowering.envParam_ : null;
   }
-  if (fn->group && fn->group->owner == lowering_.currentFn_) {
-    return lowering_.builder_.CreateLoad(lowering_.builder_.getPtrTy(),
-                                         lowering_.groupEnvs_.lookup(fn->group));
+  if (fn->group && fn->group->owner == this->lowering.currentFn_) {
+    return this->lowering.builder_.CreateLoad(this->lowering.builder_.getPtrTy(),
+                                              this->lowering.groupEnvs_.lookup(fn->group));
   }
   const VarSymbol *var = cast<NameExpr>(call->callee)->var();
 
-  return lowering_.builder_.CreateExtractValue(lowering_.envLowerer().emitVarValue(var, true), 1);
+  return this->lowering.builder_.CreateExtractValue(
+      this->lowering.envLowerer().emitVarValue(var, true), 1);
 }
 
 llvm::Value *ClosureLowerer::callFunctionValue(llvm::Value *fn, const Type *fnType,
                                                llvm::ArrayRef<llvm::Value *> args) {
-  std::vector<llvm::Value *> all{lowering_.builder_.CreateExtractValue(fn, 1)};
+  std::vector<llvm::Value *> all{this->lowering.builder_.CreateExtractValue(fn, 1)};
   all.insert(all.end(), args.begin(), args.end());
   for (size_t i = args.size(); i < fnType->params().size(); ++i) {
-    all.push_back(lowering_.optionalLowerer().undefinedValue(fnType->params()[i]));
+    all.push_back(this->lowering.optionalLowerer().undefinedValue(fnType->params()[i]));
   }
-  llvm::Value *info = lowering_.builder_.CreateExtractValue(fn, 0);
-  llvm::Value *code = lowering_.builder_.CreateLoad(
-      lowering_.builder_.getPtrTy(),
-      lowering_.builder_.CreateStructGEP(lowering_.fnInfoTy_, info, 0), "code");
-  llvm::CallInst *result = lowering_.builder_.CreateCall(closureFnType(fnType), code, all);
+  llvm::Value *info = this->lowering.builder_.CreateExtractValue(fn, 0);
+  llvm::Value *code = this->lowering.builder_.CreateLoad(
+      this->lowering.builder_.getPtrTy(),
+      this->lowering.builder_.CreateStructGEP(this->lowering.fnInfoTy_, info, 0), "code");
+  llvm::CallInst *result =
+      this->lowering.builder_.CreateCall(this->closureFnType(fnType), code, all);
 
   return result->getType()->isVoidTy() ? nullptr : result;
 }
 
 llvm::Value *ClosureLowerer::emitValueCall(CallExpr *call) {
-  if (auto *member = dyn_cast<MemberExpr>(call->callee)) {
-    if (const Lowering::InterfaceMember *method = lowering_.inheritLowerer().dispatchedMember(
+  auto *member = dyn_cast<MemberExpr>(call->callee);
+  if (member) {
+    if (const Lowering::InterfaceMember *method = this->lowering.inheritLowerer().dispatchedMember(
             member->object->type, member->name, call->signature());
         (method && method->callable) || call->signature() >= 0) {
-      return lowering_.inheritLowerer().emitInterfaceCall(call);
+      return this->lowering.inheritLowerer().emitInterfaceCall(call);
     }
   }
   const Type *type = call->callee->type;
-  Lowering::Operand callee = lowering_.refCounts().emitOperand(
+  Lowering::Operand callee = this->lowering.refCounts().emitOperand(
       call->callee,
       isa<NameExpr>(call->callee) && llvm::all_of(call->args, AssignLowerer::cannotAssign));
-  std::vector<llvm::Value *> args = lowering_.exprLowerer().emitExprs(call->args);
-  llvm::Value *result = callFunctionValue(callee.value, type, args);
-  lowering_.refCounts().dropOperand(callee);
+  std::vector<llvm::Value *> args = this->lowering.exprLowerer().emitExprs(call->args);
+  llvm::Value *result = this->callFunctionValue(callee.value, type, args);
+  this->lowering.refCounts().dropOperand(callee);
 
   return result;
 }
 
 llvm::Value *ClosureLowerer::emitFunctionAdapter(CastExpr *cast) {
-  FunctionDecl *fn = knownFunction(cast->operand);
+  FunctionDecl *fn = ClosureLowerer::knownFunction(cast->operand);
   assert(fn && "Checker adapts only functions known by name");
-  const Type *from = cast->operand->type, *to = cast->type;
-  llvm::Value *value = lowering_.exprLowerer().emitExpr(cast->operand);
-  llvm::Constant *&info = adapters_[{fn, to}];
+  const Type *from = cast->operand->type;
+  const Type *to = cast->type;
+  llvm::Value *value = this->lowering.exprLowerer().emitExpr(cast->operand);
+  llvm::Constant *&info = this->adapters[{fn, to}];
   if (!info) {
-    auto *code = llvm::Function::Create(closureFnType(to), llvm::GlobalValue::InternalLinkage,
-                                        qualifiedName(fn) + ".adapter", lowering_.module_.get());
-    lowering_.functionBuilder().setFunctionAttributes(code);
-    llvm::IRBuilderBase::InsertPoint point = lowering_.builder_.saveIP();
-    llvm::Function *outer = lowering_.function_;
-    lowering_.function_ = code;
-    lowering_.builder_.SetInsertPoint(llvm::BasicBlock::Create(lowering_.ctx_, "entry", code));
+    auto *code = llvm::Function::Create(this->closureFnType(to), llvm::GlobalValue::InternalLinkage,
+                                        ClosureLowerer::qualifiedName(fn) + ".adapter",
+                                        this->lowering.module_.get());
+    this->lowering.functionBuilder().setFunctionAttributes(code);
+    llvm::IRBuilderBase::InsertPoint point = this->lowering.builder_.saveIP();
+    llvm::Function *outer = this->lowering.function_;
+    this->lowering.function_ = code;
+    this->lowering.builder_.SetInsertPoint(
+        llvm::BasicBlock::Create(this->lowering.ctx_, "entry", code));
     std::vector<llvm::Value *> args;
-    llvm::ArrayRef<const Type *> params = from->params(), given = to->params();
+    llvm::ArrayRef<const Type *> params = from->params();
+    llvm::ArrayRef<const Type *> given = to->params();
     for (size_t i = 0; i < params.size(); ++i) {
       if (i >= given.size()) {
-        args.push_back(lowering_.optionalLowerer().undefinedValue(params[i]));
+        args.push_back(this->lowering.optionalLowerer().undefinedValue(params[i]));
         continue;
       }
       llvm::Value *arg = code->getArg(unsigned(i + 1));
       if (params[i] == given[i]) {
         args.push_back(arg);
       } else if (params[i]->nonOptional()->isUnknown()) {
-        args.push_back(lowering_.exprLowerer().emitConversion(arg, given[i], params[i]));
+        args.push_back(this->lowering.exprLowerer().emitConversion(arg, given[i], params[i]));
       } else {
-        args.push_back(
-            lowering_.optionalLowerer().makeOptional(arg, lowering_.builder_.getTrue(), params[i]));
+        args.push_back(this->lowering.optionalLowerer().makeOptional(
+            arg, this->lowering.builder_.getTrue(), params[i]));
       }
     }
     for (size_t i = params.size(); i < given.size(); ++i) {
-      lowering_.refCounts().releaseValue(code->getArg(unsigned(i + 1)), given[i]);
+      this->lowering.refCounts().releaseValue(code->getArg(unsigned(i + 1)), given[i]);
     }
     llvm::CallInst *result;
     if (fn->isClosure()) {
       args.insert(args.begin(), code->getArg(0));
-      result = lowering_.builder_.CreateCall(closureCode(fn), args);
+      result = this->lowering.builder_.CreateCall(this->closureCode(fn), args);
     } else {
-      result = lowering_.builder_.CreateCall(lowering_.functions_.lookup(fn->sym), args);
+      result = this->lowering.builder_.CreateCall(this->lowering.functions_.lookup(fn->sym), args);
     }
     if (to->ret()->isVoid()) {
       if (!from->ret()->isVoid()) {
-        lowering_.refCounts().releaseValue(result, from->ret());
+        this->lowering.refCounts().releaseValue(result, from->ret());
       }
-      lowering_.builder_.CreateRetVoid();
+      this->lowering.builder_.CreateRetVoid();
     } else {
-      lowering_.builder_.CreateRet(result);
+      this->lowering.builder_.CreateRet(result);
     }
-    lowering_.function_ = outer;
-    lowering_.builder_.restoreIP(point);
+    this->lowering.function_ = outer;
+    this->lowering.builder_.restoreIP(point);
     info = new llvm::GlobalVariable(
-        *lowering_.module_, lowering_.fnInfoTy_, true, llvm::GlobalValue::PrivateLinkage,
-        llvm::ConstantStruct::get(lowering_.fnInfoTy_,
-                                  {code, lowering_.stringLowerer().stringLiteral(utf16(fn->name))}),
+        *this->lowering.module_, this->lowering.fnInfoTy_, true, llvm::GlobalValue::PrivateLinkage,
+        llvm::ConstantStruct::get(
+            this->lowering.fnInfoTy_,
+            {code, this->lowering.stringLowerer().stringLiteral(ClosureLowerer::utf16(fn->name))}),
         "tz.fninfo." + fn->name);
   }
 
-  return makeFunctionValue(info, lowering_.builder_.CreateExtractValue(value, 1));
+  return this->makeFunctionValue(info, this->lowering.builder_.CreateExtractValue(value, 1));
 }
 
 void ClosureLowerer::emitClosure(FunctionDecl *fn) {
   if (fn->isGenerator) {
-    lowering_.generatorLowerer().emitGenerator(fn, closureCode(fn));
+    this->lowering.generatorLowerer().emitGenerator(fn, this->closureCode(fn));
     return;
   }
   if (fn->isAsync) {
-    lowering_.asyncLowerer().emitAsyncFunction(fn, closureCode(fn));
+    this->lowering.asyncLowerer().emitAsyncFunction(fn, this->closureCode(fn));
     return;
   }
-  lowering_.tailCallLowerer().findTailGroups(fn);
-  if (Lowering::TailGroup *group = lowering_.tailGroupOf_.lookup(fn)) {
-    lowering_.tailCallLowerer().emitTailGroup(*group);
+  this->lowering.tailCallLowerer().findTailGroups(fn);
+  Lowering::TailGroup *group = this->lowering.tailGroupOf_.lookup(fn);
+  if (group) {
+    this->lowering.tailCallLowerer().emitTailGroup(*group);
     return;
   }
-  lowering_.functionBuilder().beginFunction(closureCode(fn), fn);
-  lowering_.envParam_ = lowering_.function_->getArg(0);
-  lowering_.envLowerer().bindCaptures(fn);
+  this->lowering.functionBuilder().beginFunction(this->closureCode(fn), fn);
+  this->lowering.envParam_ = this->lowering.function_->getArg(0);
+  this->lowering.envLowerer().bindCaptures(fn);
   std::vector<llvm::Value *> args;
-  for (unsigned i = 1; i < lowering_.function_->arg_size(); ++i) {
-    args.push_back(lowering_.function_->getArg(i));
+  for (unsigned i = 1; i < this->lowering.function_->arg_size(); ++i) {
+    args.push_back(this->lowering.function_->getArg(i));
   }
-  lowering_.functionBuilder().emitParamsAndBody(fn, args);
-  lowering_.functionBuilder().finishFunction();
+  this->lowering.functionBuilder().emitParamsAndBody(fn, args);
+  this->lowering.functionBuilder().finishFunction();
 }
 
 void ClosureLowerer::emitPendingClosures() {
-  while (!lowering_.pendingClosures_.empty()) {
-    FunctionDecl *fn = lowering_.pendingClosures_.back();
-    lowering_.pendingClosures_.pop_back();
-    emitClosure(fn);
+  while (!this->lowering.pendingClosures_.empty()) {
+    FunctionDecl *fn = this->lowering.pendingClosures_.back();
+    this->lowering.pendingClosures_.pop_back();
+    this->emitClosure(fn);
   }
 }
 

@@ -11,7 +11,6 @@
 
 using llvm::cast;
 using llvm::dyn_cast;
-using llvm::dyn_cast_or_null;
 using llvm::isa;
 
 namespace tz {
@@ -90,14 +89,15 @@ static const Type *writable(const Type *type) {
   return Type::object(std::move(fields));
 }
 
-Destination::Destination(Checker &checker) : checker_(checker) {}
+Destination::Destination(Checker &owner)
+    : checker(owner) {}
 
 bool Destination::literalShaped(const Expr *expr) {
   if (isa<ObjectLitExpr>(expr) || isa<ArrayLitExpr>(expr)) {
     return true;
   }
   if (auto *cond = dyn_cast<ConditionalExpr>(expr)) {
-    return literalShaped(cond->thenExpr) || literalShaped(cond->elseExpr);
+    return Destination::literalShaped(cond->thenExpr) || Destination::literalShaped(cond->elseExpr);
   }
   if (auto *call = dyn_cast<CallExpr>(expr)) {
     if (isResultLiteral(call)) {
@@ -110,8 +110,9 @@ bool Destination::literalShaped(const Expr *expr) {
     auto *fe = dyn_cast<FunctionExpr>(call->args[0]);
     bool returnsLiteral = false;
     if (fe) {
-      forEachReturn(fe->fn->body,
-                    [&](const Expr *value) { returnsLiteral |= literalShaped(value); });
+      forEachReturn(fe->fn->body, [&](const Expr *value) {
+        returnsLiteral |= Destination::literalShaped(value);
+      });
     }
     return returnsLiteral;
   }
@@ -123,12 +124,12 @@ bool Destination::literalFits(const Expr *expr, const Type *type) const {
   type = type->nonOptional();
   if (type->isUnion()) {
     if (auto *lit = dyn_cast<ObjectLitExpr>(expr)) {
-      if (const Type *member = checker_.literalTypes().literalMember(lit, type)) {
-        return literalFits(expr, member);
+      if (const Type *member = this->checker.literalTypes().literalMember(lit, type)) {
+        return this->literalFits(expr, member);
       }
     }
     if (const Type *array = type->slotPart(UnionSlot::Array); array && isa<ArrayLitExpr>(expr)) {
-      return literalFits(expr, array);
+      return this->literalFits(expr, array);
     }
     return false;
   }
@@ -140,7 +141,7 @@ bool Destination::literalFits(const Expr *expr, const Type *type) const {
     for (const ObjectLitExpr::Property &prop : lit->props) {
       if (prop.spread()) {
         auto *name = dyn_cast<NameExpr>(prop.value);
-        const VarSymbol *var = name ? checker_.scopes().lookup(name->name).var() : nullptr;
+        const VarSymbol *var = name ? this->checker.scopes().lookup(name->name).var() : nullptr;
         if (!var || !var->type || !var->type->isObject() || var->type->isTuple()) {
           return false;
         }
@@ -156,7 +157,8 @@ bool Destination::literalFits(const Expr *expr, const Type *type) const {
       }
       llvm::StringRef name = prop.name;
       const Field *field = type->field(name);
-      if (!field || (literalShaped(prop.value) && !literalFits(prop.value, field->type))) {
+      if (!field ||
+          (Destination::literalShaped(prop.value) && !this->literalFits(prop.value, field->type))) {
         return false;
       }
       names.push_back(name);
@@ -177,7 +179,8 @@ bool Destination::literalFits(const Expr *expr, const Type *type) const {
       }
       for (size_t i = 0; i < lit->elements.size(); ++i) {
         const ArrayLitExpr::Element &e = lit->elements[i];
-        if (e.spread || (literalShaped(e.expr) && !literalFits(e.expr, type->fields()[i].type))) {
+        if (e.spread || (Destination::literalShaped(e.expr) &&
+                         !this->literalFits(e.expr, type->fields()[i].type))) {
           return false;
         }
       }
@@ -187,12 +190,14 @@ bool Destination::literalFits(const Expr *expr, const Type *type) const {
       return false;
     }
     return llvm::all_of(lit->elements, [&](const ArrayLitExpr::Element &e) {
-      return e.spread || !literalShaped(e.expr) || literalFits(e.expr, type->inner());
+      return e.spread || !Destination::literalShaped(e.expr) ||
+             this->literalFits(e.expr, type->inner());
     });
   }
   if (auto *cond = dyn_cast<ConditionalExpr>(expr)) {
-    return (!literalShaped(cond->thenExpr) || literalFits(cond->thenExpr, type)) &&
-           (!literalShaped(cond->elseExpr) || literalFits(cond->elseExpr, type));
+    return (!Destination::literalShaped(cond->thenExpr) ||
+            this->literalFits(cond->thenExpr, type)) &&
+           (!Destination::literalShaped(cond->elseExpr) || this->literalFits(cond->elseExpr, type));
   }
   if (auto *call = dyn_cast<CallExpr>(expr)) {
     if (isResultLiteral(call)) {
@@ -201,8 +206,8 @@ bool Destination::literalFits(const Expr *expr, const Type *type) const {
       }
       bool isOk = cast<NameExpr>(call->callee)->name == "ok";
       const Type *half = isOk ? type->okType() : type->errType();
-      return call->args.empty() || !literalShaped(call->args[0]) ||
-             literalFits(call->args[0], half);
+      return call->args.empty() || !Destination::literalShaped(call->args[0]) ||
+             this->literalFits(call->args[0], half);
     }
     if (!type->isArray()) {
       return false;
@@ -211,7 +216,7 @@ bool Destination::literalFits(const Expr *expr, const Type *type) const {
     const Type *element = cast<MemberExpr>(call->callee)->name == "map" ? type->inner() : type;
     bool fits = true;
     forEachReturn(fe->fn->body, [&](const Expr *value) {
-      fits &= !literalShaped(value) || literalFits(value, element);
+      fits &= !Destination::literalShaped(value) || this->literalFits(value, element);
     });
     return fits;
   }
@@ -223,24 +228,26 @@ const Type *Destination::literalDestination(const VarDeclarator &d,
                                             llvm::ArrayRef<VarDeclarator> later) {
   Checker::DestinationScan scan;
   scan.name = d.name;
-  scan.returns = checker_.currentFunction_ ? checker_.currentFunction_->ret : nullptr;
+  scan.returns = this->checker.currentFunction_ ? this->checker.currentFunction_->ret : nullptr;
   scan.locals.emplace_back();
-  bool muted = checker_.diags_.setMuted(true);
+  bool muted = this->checker.diags_.setMuted(true);
   bool visible = true;
   for (const VarDeclarator &next : later) {
     if (next.init) {
-      checker_.destinationScanner().scanDestinations(
+      this->checker.destinationScanner().scanDestinations(
           next.init,
-          next.typeAnn ? checker_.typeResolver().resolveType(*next.typeAnn, false) : nullptr, scan);
+          next.typeAnn ? this->checker.typeResolver().resolveType(*next.typeAnn, false) : nullptr,
+          scan);
     }
     if (next.name == d.name) {
       visible = false;
     }
-    scan.declare(next.name, next.typeAnn ? checker_.typeResolver().resolveType(*next.typeAnn, false)
-                                         : nullptr);
+    scan.declare(next.name, next.typeAnn
+                                ? this->checker.typeResolver().resolveType(*next.typeAnn, false)
+                                : nullptr);
   }
-  std::vector<const Stmt *> following = std::move(checker_.following_);
-  checker_.following_.clear();
+  std::vector<const Stmt *> following = std::move(this->checker.following_);
+  this->checker.following_.clear();
   for (const Stmt *stmt : following) {
     if (!visible && !isa<FunctionDecl>(stmt)) {
       continue;
@@ -250,13 +257,14 @@ const Type *Destination::literalDestination(const VarDeclarator &d,
         llvm::any_of(decl->decls, [&](const VarDeclarator &v) { return v.name == d.name; })) {
       visible = false;
     }
-    checker_.destinationScanner().scanDestinations(stmt, scan);
+    this->checker.destinationScanner().scanDestinations(stmt, scan);
   }
-  checker_.diags_.setMuted(muted);
+  this->checker.diags_.setMuted(muted);
 
   std::vector<std::pair<const Type *, llvm::SMLoc>> places;
   for (auto [type, loc] : scan.found) {
-    if (!type->isError() && !type->isVoid() && !mentionsParam(type) && literalFits(d.init, type)) {
+    if (!type->isError() && !type->isVoid() && !mentionsParam(type) &&
+        this->literalFits(d.init, type)) {
       places.push_back({type, loc});
     }
   }
@@ -282,7 +290,7 @@ const Type *Destination::literalDestination(const VarDeclarator &d,
     }
   }
   if (!chosen && !places.empty()) {
-    checker_.destinationConflict_ = std::move(places);
+    this->checker.destinationConflict_ = std::move(places);
   }
 
   return chosen;
@@ -291,10 +299,10 @@ const Type *Destination::literalDestination(const VarDeclarator &d,
 const Type *Destination::declaredFunctionType(const FunctionDecl *fn) {
   std::vector<const Type *> params;
   for (const Param &param : fn->params) {
-    if (!param.type || checker_.iterableChecker().isIterableRef(*param.type)) {
+    if (!param.type || this->checker.iterableChecker().isIterableRef(*param.type)) {
       return nullptr;
     }
-    const Type *type = checker_.typeResolver().resolveType(*param.type, false);
+    const Type *type = this->checker.typeResolver().resolveType(*param.type, false);
     params.push_back(param.optional() || param.defaultValue() ? Type::optional(type) : type);
   }
   bool hasRest = !fn->params.empty() && fn->params.back().rest();

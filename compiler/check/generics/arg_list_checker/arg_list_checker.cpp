@@ -9,16 +9,12 @@
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/Support/ConvertUTF.h"
 
-using llvm::cast;
 using llvm::dyn_cast;
-using llvm::dyn_cast_or_null;
 using llvm::isa;
 
 namespace tz {
 
-namespace {
-
-std::string utf8(const std::u16string &text) {
+std::string ArgListChecker::utf8(const std::u16string &text) {
   std::string out;
   llvm::convertUTF16ToUTF8String(
       llvm::ArrayRef<llvm::UTF16>(reinterpret_cast<const llvm::UTF16 *>(text.data()), text.size()),
@@ -27,7 +23,7 @@ std::string utf8(const std::u16string &text) {
   return out;
 }
 
-bool usedAsValue(const Stmt *body, llvm::StringRef name, bool known) {
+bool ArgListChecker::usedAsValue(const Stmt *body, llvm::StringRef name, bool known) {
   llvm::SmallPtrSet<const Expr *, 4> spreads;
   bool value = false;
   visitExprs(body, [&](const Expr *e) {
@@ -60,14 +56,13 @@ bool usedAsValue(const Stmt *body, llvm::StringRef name, bool known) {
   return value;
 }
 
-}
-
 bool spreadsLists(const Type *type) {
   return type->isTuple() &&
          llvm::any_of(type->fields(), [](const Field &f) { return f.type->isListParam(); });
 }
 
-ArgListChecker::ArgListChecker(Checker &checker) : checker_(checker) {}
+ArgListChecker::ArgListChecker(Checker &owner)
+    : checker(owner) {}
 
 const Type *ArgListChecker::listElement(const Type *list) {
   return Type::indexedAccess(list, Type::intTy());
@@ -101,7 +96,7 @@ const Type *ArgListChecker::memberType(const Type *object, const Type *key) {
   }
   if (object->isObject() && !object->isTuple()) {
     if (ClassDecl *cls = ClassDeclarer::classOf(object)) {
-      checker_.classDeclarer().completeClass(cls);
+      this->checker.classDeclarer().completeClass(cls);
     }
     llvm::ArrayRef<const Type *> names =
         key->isUnion() ? key->members() : llvm::ArrayRef<const Type *>(key);
@@ -110,7 +105,7 @@ const Type *ArgListChecker::memberType(const Type *object, const Type *key) {
       if (!name->isStringLiteral()) {
         return nullptr;
       }
-      const Field *field = object->field(utf8(name->literalText()));
+      const Field *field = object->field(ArgListChecker::utf8(name->literalText()));
       if (!field) {
         return nullptr;
       }
@@ -143,7 +138,7 @@ void ArgListChecker::expandArgumentList(FunctionDecl *fn, FuncSymbol *sym) {
   fn->listType = list;
   for (size_t k = 0; k < list->fields().size(); ++k) {
     Param param;
-    param.name = checker_.ctx_.keepName("%" + rest.name.str() + "." + std::to_string(k));
+    param.name = this->checker.ctx_.keepName("%" + rest.name.str() + "." + std::to_string(k));
     param.loc = rest.loc;
     if (k >= list->tupleMin()) {
       param.form = OptionalParam{};
@@ -153,7 +148,7 @@ void ArgListChecker::expandArgumentList(FunctionDecl *fn, FuncSymbol *sym) {
   }
   if (const Type *more = list->tupleRest()) {
     Param param;
-    param.name = checker_.ctx_.keepName("%" + rest.name.str() + ".rest");
+    param.name = this->checker.ctx_.keepName("%" + rest.name.str() + ".rest");
     param.loc = rest.loc;
     param.form = RestParam{};
     param.declaredType = more;
@@ -177,24 +172,27 @@ void ArgListChecker::declareArgumentList(FunctionDecl *fn) {
     }
   }
   llvm::SMLoc loc = fn->params.size() > fn->listStart ? fn->params[fn->listStart].loc : fn->loc();
-  if (!usedAsValue(fn->body, fn->listName, !fn->listType->tupleRest())) {
-    VarSymbol *var = checker_.scopes().declareVar(fn->listName, loc, Type::tuple(elements), true);
-    argumentLists_[var] = std::move(parts);
+  if (!ArgListChecker::usedAsValue(fn->body, fn->listName, !fn->listType->tupleRest())) {
+    VarSymbol *var =
+        this->checker.scopes().declareVar(fn->listName, loc, Type::tuple(elements), true);
+    this->argumentLists[var] = std::move(parts);
     return;
   }
   if (fn->listType->tupleRest()) {
-    checker_.diags_.error(loc, "'" + fn->listName + "' of the parameters '" + fn->listType->name() +
+    this->checker.diags_.error(loc,
+                               "'" + fn->listName + "' of the parameters '" + fn->listType->name() +
                                    "', which end with a rest parameter, can only be spread, '..." +
                                    fn->listName + "'");
-    checker_.scopes().declareVar(fn->listName, loc, Type::error(), true);
+    this->checker.scopes().declareVar(fn->listName, loc, Type::error(), true);
     return;
   }
-  auto *alias = checker_.ctx_.make<TypeAliasDecl>(loc, checker_.ctx_.hiddenName(), TypeRef());
+  auto *alias =
+      this->checker.ctx_.make<TypeAliasDecl>(loc, this->checker.ctx_.hiddenName(), TypeRef());
   alias->resolved = Type::tuple(elements);
-  checker_.typeScopes_.back()[alias->name] = alias;
-  auto *tuple = checker_.ctx_.make<ArrayLitExpr>(loc);
+  this->checker.typeScopes_.back()[alias->name] = alias;
+  auto *tuple = this->checker.ctx_.make<ArrayLitExpr>(loc);
   for (llvm::StringRef part : parts) {
-    tuple->elements.push_back({checker_.ctx_.make<NameExpr>(loc, part), false});
+    tuple->elements.push_back({this->checker.ctx_.make<NameExpr>(loc, part), false});
   }
   VarDeclarator d;
   d.name = fn->listName;
@@ -204,7 +202,7 @@ void ArgListChecker::declareArgumentList(FunctionDecl *fn) {
   ref.loc = loc;
   d.typeAnn = ref;
   d.init = tuple;
-  auto *decl = checker_.ctx_.make<VarDeclStmt>(loc, true);
+  auto *decl = this->checker.ctx_.make<VarDeclStmt>(loc, true);
   decl->decls.push_back(d);
   fn->body->body.insert(fn->body->body.begin(), decl);
 }
@@ -219,12 +217,12 @@ void ArgListChecker::expandListSpreads(std::vector<Expr *> &args, std::vector<bo
   for (size_t i = 0; i < args.size(); ++i) {
     bool spreads = i < spread.size() && spread[i];
     auto *name = dyn_cast<NameExpr>(args[i]);
-    VarSymbol *var = spreads && name ? checker_.scopes().lookup(name->name).var() : nullptr;
-    auto found = var ? argumentLists_.find(var) : argumentLists_.end();
-    if (found != argumentLists_.end()) {
+    VarSymbol *var = spreads && name ? this->checker.scopes().lookup(name->name).var() : nullptr;
+    auto found = var ? this->argumentLists.find(var) : this->argumentLists.end();
+    if (found != this->argumentLists.end()) {
       changed = true;
       for (llvm::StringRef part : found->second) {
-        out.push_back(checker_.ctx_.make<NameExpr>(name->loc(), part));
+        out.push_back(this->checker.ctx_.make<NameExpr>(name->loc(), part));
         outSpread.push_back(part.ends_with(".rest"));
       }
       continue;
@@ -233,9 +231,9 @@ void ArgListChecker::expandListSpreads(std::vector<Expr *> &args, std::vector<bo
         llvm::none_of(var->type->fields(), [](const Field &f) { return f.type->isListParam(); })) {
       changed = true;
       for (size_t k = 0; k < var->type->fields().size(); ++k) {
-        auto *index = checker_.ctx_.make<IntLitExpr>(name->loc(), k);
-        out.push_back(checker_.ctx_.make<IndexExpr>(
-            name->loc(), checker_.ctx_.make<NameExpr>(name->loc(), name->name), index));
+        auto *index = this->checker.ctx_.make<IntLitExpr>(name->loc(), k);
+        out.push_back(this->checker.ctx_.make<IndexExpr>(
+            name->loc(), this->checker.ctx_.make<NameExpr>(name->loc(), name->name), index));
         outSpread.push_back(false);
       }
       continue;
@@ -254,14 +252,15 @@ Expr *ArgListChecker::listPart(Expr *expr) {
   auto *member = dyn_cast<MemberExpr>(expr);
   auto *index = dyn_cast<IndexExpr>(expr);
   auto *name = dyn_cast<NameExpr>(member ? member->object : index ? index->object : expr);
-  VarSymbol *var = name && (member || index) ? checker_.scopes().lookup(name->name).var() : nullptr;
-  auto found = var ? argumentLists_.find(var) : argumentLists_.end();
-  if (found == argumentLists_.end()) {
+  VarSymbol *var =
+      name && (member || index) ? this->checker.scopes().lookup(name->name).var() : nullptr;
+  auto found = var ? this->argumentLists.find(var) : this->argumentLists.end();
+  if (found == this->argumentLists.end()) {
     return nullptr;
   }
   const std::vector<llvm::StringRef> &parts = found->second;
   if (member && member->name == "length") {
-    auto *count = checker_.ctx_.make<IntLitExpr>(member->loc(), parts.size());
+    auto *count = this->checker.ctx_.make<IntLitExpr>(member->loc(), parts.size());
     count->type = Type::intTy();
     return count;
   }
@@ -270,8 +269,8 @@ Expr *ArgListChecker::listPart(Expr *expr) {
     return nullptr;
   }
 
-  return checker_.exprChecker().checkExpr(
-      checker_.ctx_.make<NameExpr>(index->loc(), parts[size_t(k->value)]));
+  return this->checker.exprChecker().checkExpr(
+      this->checker.ctx_.make<NameExpr>(index->loc(), parts[size_t(k->value)]));
 }
 
 bool ArgListChecker::checkListArguments(CallExpr *call, size_t fixed, const Type *list,
@@ -289,7 +288,7 @@ bool ArgListChecker::checkListArguments(CallExpr *call, size_t fixed, const Type
   for (size_t i = fixed; i < call->args.size(); ++i) {
     Expr *&arg = call->args[i];
     if (!checked || i >= checked->size() || !(*checked)[i]) {
-      arg = checker_.exprChecker().checkExpr(
+      arg = this->checker.exprChecker().checkExpr(
           arg,
           !call->spreads(i) && k < parts.size() && !parts[k]->isListParam() ? parts[k] : nullptr);
     }
@@ -298,39 +297,39 @@ bool ArgListChecker::checkListArguments(CallExpr *call, size_t fixed, const Type
       continue;
     }
     if (k >= parts.size()) {
-      checker_.diags_.error(arg->loc(),
-                            "too many arguments for the parameters '" + list->name() + "'");
+      this->checker.diags_.error(arg->loc(),
+                                 "too many arguments for the parameters '" + list->name() + "'");
       return false;
     }
     if (call->spreads(i)) {
       if (arg->type != parts[k]) {
-        checker_.diags_.error(arg->loc(), "'..." + arg->type->name() +
-                                              "' is spread where the parameters '" + list->name() +
-                                              "' take " + (parts[k]->isListParam() ? "'..." : "'") +
-                                              parts[k]->name() + "'");
+        this->checker.diags_.error(
+            arg->loc(), "'..." + arg->type->name() + "' is spread where the parameters '" +
+                            list->name() + "' take " + (parts[k]->isListParam() ? "'..." : "'") +
+                            parts[k]->name() + "'");
         return false;
       }
       ++k;
       continue;
     }
     if (parts[k]->isListParam()) {
-      checker_.diags_.error(arg->loc(),
-                            "the arguments for the parameters '" + parts[k]->name() +
-                                "' of some function are spread from a list of them, e.g. "
-                                "'...args'");
+      this->checker.diags_.error(arg->loc(),
+                                 "the arguments for the parameters '" + parts[k]->name() +
+                                     "' of some function are spread from a list of them, e.g. "
+                                     "'...args'");
 
       return false;
     }
-    arg = checker_.typeRelations().coerce(arg, parts[k]);
+    arg = this->checker.typeRelations().coerce(arg, parts[k]);
     ++k;
   }
   if (ok && k < parts.size()) {
-    checker_.diags_.error(loc, "the parameters '" + list->name() + "' take " +
-                                   (parts[k]->isListParam() ? "'..." : "'") + parts[k]->name() +
-                                   "' too, after these arguments");
+    this->checker.diags_.error(loc, "the parameters '" + list->name() + "' take " +
+                                        (parts[k]->isListParam() ? "'..." : "'") +
+                                        parts[k]->name() + "' too, after these arguments");
     return false;
   }
-  checker_.flowChecker().calledFunction();
+  this->checker.flowChecker().calledFunction();
 
   return ok;
 }

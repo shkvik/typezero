@@ -6,12 +6,10 @@
 #include "compiler/library/tz_modules/library_calls/library_calls.h"
 #include "compiler/program/ast/await_expr/await_expr.h"
 #include "llvm/ADT/STLExtras.h"
-#include <limits>
 
 using llvm::cast;
 using llvm::dyn_cast;
 using llvm::dyn_cast_or_null;
-using llvm::isa;
 
 namespace tz {
 
@@ -19,7 +17,9 @@ namespace {
 
 constexpr uint64_t kMaxConstant = uint64_t(1) << 40;
 
-const VarSymbol *variableOf(const Expr *expr) {
+}
+
+const VarSymbol *IndexProofs::variableOf(const Expr *expr) {
   while (auto *conv = dyn_cast<CastExpr>(expr)) {
     if (!conv->isImplicit()) {
       return nullptr;
@@ -31,9 +31,8 @@ const VarSymbol *variableOf(const Expr *expr) {
   return name ? name->var() : nullptr;
 }
 
-}
-
-IndexProofs::IndexProofs(Checker &checker) : checker_(checker) {}
+IndexProofs::IndexProofs(Checker &owner)
+    : checker(owner) {}
 
 std::optional<Linear> IndexProofs::linear(const Expr *expr) const {
   switch (expr->kind()) {
@@ -63,19 +62,19 @@ std::optional<Linear> IndexProofs::linear(const Expr *expr) const {
   case Expr::Kind::Member: {
     auto *member = cast<MemberExpr>(expr);
     if (member->name == "length" && expr->type->isInt()) {
-      return lengthOf(member->object);
+      return this->lengthOf(member->object);
     }
     if (member->name == "byteLength" && expr->type->isInt() && member->object->type &&
         (member->object->type->bytes() == Type::Bytes::ArrayBuffer ||
          member->object->type->bytes() == Type::Bytes::DataView)) {
-      return lengthOf(member->object);
+      return this->lengthOf(member->object);
     }
     return std::nullopt;
   }
   case Expr::Kind::Cast: {
     auto *conv = cast<CastExpr>(expr);
     if (conv->isImplicit() && conv->operand->type->isInt() && conv->type->isInteger()) {
-      return linear(conv->operand);
+      return this->linear(conv->operand);
     }
     return std::nullopt;
   }
@@ -84,7 +83,7 @@ std::optional<Linear> IndexProofs::linear(const Expr *expr) const {
     auto *member = dyn_cast<MemberExpr>(call->callee);
     if (call->builtin() == Builtin::BytesByteLength && member && member->object->type &&
         member->object->type->isTypedArray() && member->object->type->elementSize() == 1) {
-      return lengthOf(member->object);
+      return this->lengthOf(member->object);
     }
     return std::nullopt;
   }
@@ -93,7 +92,8 @@ std::optional<Linear> IndexProofs::linear(const Expr *expr) const {
     if ((bin->op != BinaryOp::Add && bin->op != BinaryOp::Sub) || !expr->type->isInteger()) {
       return std::nullopt;
     }
-    std::optional<Linear> l = linear(bin->lhs), r = linear(bin->rhs);
+    std::optional<Linear> l = this->linear(bin->lhs);
+    std::optional<Linear> r = this->linear(bin->rhs);
     if (!l || !r) {
       return std::nullopt;
     }
@@ -112,7 +112,7 @@ std::optional<Linear> IndexProofs::linear(const Expr *expr) const {
       return std::nullopt;
     }
     if (expr->type->isInt() && !result.term.isZero()) {
-      const Facts &facts = checker_.flow_.facts;
+      const Facts &facts = this->checker.flow_.facts;
       if ((result.offset > 0 &&
            !facts.proves(result.term, Term::zero(), kIntMax - (result.offset - 1))) ||
           (result.offset < 0 &&
@@ -137,8 +137,9 @@ std::optional<Linear> IndexProofs::lengthOf(const Expr *object) const {
     }
     return Linear{Term::zero(), static_cast<int64_t>(lit->elements.size())};
   }
-  if (const VarSymbol *var = variableOf(object)) {
-    if (auto fixed = checker_.fixedLengths_.find(var); fixed != checker_.fixedLengths_.end()) {
+  if (const VarSymbol *var = IndexProofs::variableOf(object)) {
+    if (auto fixed = this->checker.fixedLengths_.find(var);
+        fixed != this->checker.fixedLengths_.end()) {
       return Linear{Term::zero(), fixed->second};
     }
     const Type *type = GenericChecker::apparentType(var->type->nonOptional());
@@ -150,7 +151,7 @@ std::optional<Linear> IndexProofs::lengthOf(const Expr *object) const {
   if (auto *wait = dyn_cast<AwaitExpr>(object)) {
     if (auto *all = dyn_cast<CallExpr>(wait->value);
         all && all->builtin() == Builtin::PromiseAll && all->args.size() == 1) {
-      return lengthOf(all->args[0]);
+      return this->lengthOf(all->args[0]);
     }
   }
   if (auto *call = dyn_cast<CallExpr>(object); call && call->builtin() == Builtin::DecToFraction) {
@@ -171,17 +172,17 @@ std::optional<Linear> IndexProofs::lengthOf(const Expr *object) const {
     case Builtin::BytesNew:
     case Builtin::ArrayBufferNew:
     case Builtin::BufferAllocFill:
-      if (std::optional<Linear> n = linear(call->args[0]); n && n->term.isZero()) {
+      if (std::optional<Linear> n = this->linear(call->args[0]); n && n->term.isZero()) {
         return n;
       }
       return std::nullopt;
     case Builtin::BytesFromArray:
     case Builtin::BytesFromBytes:
-      return lengthOf(call->args[0]);
+      return this->lengthOf(call->args[0]);
     case Builtin::BufferFromString:
-      return utf8Length(call);
+      return this->utf8Length(call);
     case Builtin::BytesBuffer:
-      return freshBufferLength(call);
+      return this->freshBufferLength(call);
     default:
       return std::nullopt;
   }
@@ -202,7 +203,7 @@ std::optional<Linear> IndexProofs::freshBufferLength(const CallExpr *call) const
     default:
       return std::nullopt;
   }
-  std::optional<Linear> count = lengthOf(made);
+  std::optional<Linear> count = this->lengthOf(made);
   if (!count || !count->term.isZero()) {
     return std::nullopt;
   }
@@ -237,41 +238,44 @@ std::optional<Linear> IndexProofs::utf8Length(const CallExpr *call) const {
 }
 
 bool IndexProofs::provesInBounds(const Expr *object, const Expr *index, bool allowEnd) const {
-  std::optional<Linear> at = linear(index), length = lengthOf(object);
+  std::optional<Linear> at = this->linear(index);
+  std::optional<Linear> length = this->lengthOf(object);
   if (!length) {
     return false;
   }
-  if (at && checker_.flow_.facts.proves(Term::zero(), at->term, at->offset + 1) &&
-      checker_.flow_.facts.proves(at->term, length->term,
-                                  length->offset - at->offset + (allowEnd ? 1 : 0))) {
+  if (at && this->checker.flow_.facts.proves(Term::zero(), at->term, at->offset + 1) &&
+      this->checker.flow_.facts.proves(at->term, length->term,
+                                       length->offset - at->offset + (allowEnd ? 1 : 0))) {
     return true;
   }
-  ValueRange range = checker_.byteProofs().valueRange(index);
+  ValueRange range = this->checker.byteProofs().valueRange(index);
 
   return range.lo && range.hi && *range.lo >= 0 &&
-         checker_.flow_.facts.proves(Term::zero(), length->term,
-                                     length->offset - *range.hi + (allowEnd ? 1 : 0));
+         this->checker.flow_.facts.proves(Term::zero(), length->term,
+                                          length->offset - *range.hi + (allowEnd ? 1 : 0));
 }
 
 bool IndexProofs::provesAtInBounds(const Expr *object, const Expr *index) const {
-  std::optional<Linear> at = linear(index), length = lengthOf(object);
+  std::optional<Linear> at = this->linear(index);
+  std::optional<Linear> length = this->lengthOf(object);
   if (at && length && at->term.isZero() && at->offset < 0) {
-    return checker_.flow_.facts.proves(Term::zero(), length->term, length->offset + at->offset + 1);
+    return this->checker.flow_.facts.proves(Term::zero(), length->term,
+                                            length->offset + at->offset + 1);
   }
 
-  return provesInBounds(object, index, false);
+  return this->provesInBounds(object, index, false);
 }
 
 bool IndexProofs::provesNonNegative(const Expr *expr) const {
-  std::optional<Linear> value = linear(expr);
+  std::optional<Linear> value = this->linear(expr);
 
-  return value && checker_.flow_.facts.proves(Term::zero(), value->term, value->offset + 1);
+  return value && this->checker.flow_.facts.proves(Term::zero(), value->term, value->offset + 1);
 }
 
 bool IndexProofs::provesNotEmpty(const Expr *object) const {
-  std::optional<Linear> length = lengthOf(object);
+  std::optional<Linear> length = this->lengthOf(object);
 
-  return length && checker_.flow_.facts.proves(Term::zero(), length->term, length->offset);
+  return length && this->checker.flow_.facts.proves(Term::zero(), length->term, length->offset);
 }
 
 bool IndexProofs::provesBetween(const Expr *expr, int64_t lo, std::optional<int64_t> hi) const {
@@ -285,14 +289,16 @@ bool IndexProofs::provesBetween(const Expr *expr, int64_t lo, std::optional<int6
     expr = conv->operand;
   }
   if (auto *cond = dyn_cast<ConditionalExpr>(expr)) {
-    return provesBetween(cond->thenExpr, lo, hi) && provesBetween(cond->elseExpr, lo, hi);
+    return this->provesBetween(cond->thenExpr, lo, hi) &&
+           this->provesBetween(cond->elseExpr, lo, hi);
   }
   if (!expr->type || !expr->type->nonOptional()->isInteger()) {
     return false;
   }
-  const Facts &facts = checker_.flow_.facts;
-  bool lower = false, upper = !hi;
-  if (std::optional<Linear> l = linear(expr)) {
+  const Facts &facts = this->checker.flow_.facts;
+  bool lower = false;
+  bool upper = !hi;
+  if (std::optional<Linear> l = this->linear(expr)) {
     if (l->term.isZero()) {
       lower = l->offset >= lo;
       upper |= hi && l->offset <= *hi;
@@ -301,7 +307,7 @@ bool IndexProofs::provesBetween(const Expr *expr, int64_t lo, std::optional<int6
       upper |= hi && facts.proves(l->term, Term::zero(), *hi - l->offset + 1);
     }
   }
-  ValueRange range = checker_.byteProofs().valueRange(expr);
+  ValueRange range = this->checker.byteProofs().valueRange(expr);
   lower |= range.lo && *range.lo >= lo;
   upper |= hi && range.hi && *range.hi <= *hi;
 
@@ -315,33 +321,34 @@ bool IndexProofs::exempt(llvm::SMLoc loc, const Expr *object) const {
   if (object && never(object->type)) {
     return true;
   }
-  if (const VarSymbol *var = object ? variableOf(object) : nullptr; var && never(var->type)) {
+  if (const VarSymbol *var = object ? IndexProofs::variableOf(object) : nullptr;
+      var && never(var->type)) {
     return true;
   }
 
-  return checker_.flow_.unreachable || checker_.libraryCalls().inLibrary(loc);
+  return this->checker.flow_.unreachable || this->checker.libraryCalls().inLibrary(loc);
 }
 
 bool IndexProofs::requireBetween(const Expr *expr, int64_t lo, std::optional<int64_t> hi,
                                  llvm::StringRef what) {
-  if (!expr->type || expr->type->isError() || provesBetween(expr, lo, hi)) {
+  if (!expr->type || expr->type->isError() || this->provesBetween(expr, lo, hi)) {
     return true;
   }
-  if (exempt(expr->loc())) {
+  if (this->exempt(expr->loc())) {
     return false;
   }
   std::string range = hi        ? "from " + std::to_string(lo) + " to " + std::to_string(*hi)
                       : lo == 0 ? std::string("not negative")
                                 : "at least " + std::to_string(lo);
-  if (std::optional<int64_t> c = checker_.constantFolder().intConstant(expr)) {
-    checker_.diags_.error(expr->loc(), (!hi && lo == 0 ? what.str() + " cannot be negative"
-                                                       : what.str() + " must be " + range) +
-                                           ", found " + std::to_string(*c));
+  if (std::optional<int64_t> c = this->checker.constantFolder().intConstant(expr)) {
+    this->checker.diags_.error(expr->loc(), (!hi && lo == 0 ? what.str() + " cannot be negative"
+                                                            : what.str() + " must be " + range) +
+                                                ", found " + std::to_string(*c));
     return false;
   }
   if (!expr->type->isInteger()) {
-    checker_.diags_.error(expr->loc(), what.str() + " must be a whole number " + range +
-                                           ", found '" + expr->type->name().str() + "'");
+    this->checker.diags_.error(expr->loc(), what.str() + " must be a whole number " + range +
+                                                ", found '" + expr->type->name().str() + "'");
     return false;
   }
   std::string text = valueText(expr);
@@ -349,16 +356,17 @@ bool IndexProofs::requireBetween(const Expr *expr, int64_t lo, std::optional<int
   if (hi) {
     test += " && " + text + " <= " + std::to_string(*hi);
   }
-  checker_.diags_.error(expr->loc(), "cannot prove that " + what.str() + " is " + range +
-                                         ", and JavaScript would throw a RangeError; check it "
-                                         "first, e.g. 'if (" +
-                                         test + ")'");
+  this->checker.diags_.error(expr->loc(), "cannot prove that " + what.str() + " is " + range +
+                                              ", and JavaScript would throw a RangeError; check it "
+                                              "first, e.g. 'if (" +
+                                              test + ")'");
 
   return false;
 }
 
 bool IndexProofs::provesLess(const Expr *a, const Expr *b) const {
-  std::optional<Linear> la = linear(a), lb = linear(b);
+  std::optional<Linear> la = this->linear(a);
+  std::optional<Linear> lb = this->linear(b);
   if (!la || !lb) {
     return false;
   }
@@ -366,25 +374,26 @@ bool IndexProofs::provesLess(const Expr *a, const Expr *b) const {
     return la->offset < lb->offset;
   }
 
-  return checker_.flow_.facts.proves(la->term, lb->term, lb->offset - la->offset);
+  return this->checker.flow_.facts.proves(la->term, lb->term, lb->offset - la->offset);
 }
 
 bool IndexProofs::requireLess(const Expr *a, const Expr *b, llvm::StringRef what) {
-  if (!a->type || !b->type || a->type->isError() || b->type->isError() || provesLess(a, b) ||
-      exempt(b->loc())) {
+  if (!a->type || !b->type || a->type->isError() || b->type->isError() || this->provesLess(a, b) ||
+      this->exempt(b->loc())) {
     return true;
   }
-  std::string left = valueText(a), right = valueText(b);
-  checker_.diags_.error(b->loc(), "cannot prove that " + what.str() +
-                                      ", and JavaScript would throw a RangeError; check it "
-                                      "first, e.g. 'if (" +
-                                      left + " < " + right + ")'");
+  std::string left = valueText(a);
+  std::string right = valueText(b);
+  this->checker.diags_.error(b->loc(), "cannot prove that " + what.str() +
+                                           ", and JavaScript would throw a RangeError; check it "
+                                           "first, e.g. 'if (" +
+                                           left + " < " + right + ")'");
 
   return false;
 }
 
 bool IndexProofs::provesLinearUpTo(Linear value, const Expr *object, int64_t less) const {
-  std::optional<Linear> length = lengthOf(object);
+  std::optional<Linear> length = this->lengthOf(object);
   const Expr *owner = object;
   if (auto *call = dyn_cast<CallExpr>(object); call && call->builtin() == Builtin::BytesBuffer) {
     owner = call->callee;
@@ -393,9 +402,9 @@ bool IndexProofs::provesLinearUpTo(Linear value, const Expr *object, int64_t les
                                                   member->object->type &&
                                                   member->object->type->isByteView()) {
     int64_t size = member->object->type->elementSize();
-    std::optional<Linear> view = lengthOf(member->object);
+    std::optional<Linear> view = this->lengthOf(member->object);
     if (view) {
-      view = settled(*view);
+      view = this->settled(*view);
     }
     if (view && size == 1) {
       length = view;
@@ -407,31 +416,33 @@ bool IndexProofs::provesLinearUpTo(Linear value, const Expr *object, int64_t les
     return false;
   }
 
-  return checker_.flow_.facts.proves(value.term, length->term,
-                                     length->offset - less - value.offset + 1);
+  return this->checker.flow_.facts.proves(value.term, length->term,
+                                          length->offset - less - value.offset + 1);
 }
 
 bool IndexProofs::provesUpTo(const Expr *value, const Expr *object, int64_t less) const {
   if (!value) {
-    return provesLinearUpTo(Linear{Term::zero(), 0}, object, less);
+    return this->provesLinearUpTo(Linear{Term::zero(), 0}, object, less);
   }
-  if (!provesBetween(value, 0, std::nullopt)) {
+  if (!this->provesBetween(value, 0, std::nullopt)) {
     return false;
   }
-  if (std::optional<Linear> at = linear(value); at && provesLinearUpTo(*at, object, less)) {
+  if (std::optional<Linear> at = this->linear(value);
+      at && this->provesLinearUpTo(*at, object, less)) {
     return true;
   }
-  ValueRange range = checker_.byteProofs().valueRange(value);
+  ValueRange range = this->checker.byteProofs().valueRange(value);
 
-  return range.hi && provesLinearUpTo(Linear{Term::zero(), *range.hi}, object, less);
+  return range.hi && this->provesLinearUpTo(Linear{Term::zero(), *range.hi}, object, less);
 }
 
 bool IndexProofs::requireUpTo(const Expr *value, const Expr *object, int64_t less,
                               llvm::StringRef what) {
-  if ((value && (!value->type || value->type->isError())) || provesUpTo(value, object, less)) {
+  if ((value && (!value->type || value->type->isError())) ||
+      this->provesUpTo(value, object, less)) {
     return true;
   }
-  if (exempt(object->loc(), object)) {
+  if (this->exempt(object->loc(), object)) {
     return false;
   }
   std::string text = value ? valueText(value) : "0";
@@ -440,24 +451,25 @@ bool IndexProofs::requireUpTo(const Expr *value, const Expr *object, int64_t les
   std::string limit = valueText(object) + (bytes ? ".byteLength" : ".length") +
                       (less ? " - " + std::to_string(less) : "");
   std::string place = value ? "'" + text + "'" : "0";
-  checker_.diags_.error(value ? value->loc() : object->loc(),
-                        "cannot prove that " + what.str() + " " + place + " is from 0 to " + limit +
-                            ", and JavaScript would throw a RangeError; check it first, e.g. "
-                            "'if (" +
-                            (value ? text + " >= 0 && " + text : "0") + " <= " + limit + ")'");
+  this->checker.diags_.error(value ? value->loc() : object->loc(),
+                             "cannot prove that " + what.str() + " " + place + " is from 0 to " +
+                                 limit +
+                                 ", and JavaScript would throw a RangeError; check it first, e.g. "
+                                 "'if (" +
+                                 (value ? text + " >= 0 && " + text : "0") + " <= " + limit + ")'");
 
   return false;
 }
 
 std::optional<int64_t> IndexProofs::exactLength(const Expr *object) const {
-  std::optional<Linear> length = knownLength(object);
+  std::optional<Linear> length = this->knownLength(object);
   if (!length) {
     return std::nullopt;
   }
   if (length->term.isZero()) {
     return length->offset;
   }
-  const Facts &facts = checker_.flow_.facts;
+  const Facts &facts = this->checker.flow_.facts;
   std::optional<int64_t> above = facts.bound(length->term, Term::zero());
   std::optional<int64_t> below = facts.bound(Term::zero(), length->term);
   if (!above || !below || *above - 1 != 1 - *below) {
@@ -470,18 +482,18 @@ std::optional<int64_t> IndexProofs::exactLength(const Expr *object) const {
 std::optional<Linear> IndexProofs::viewLength(const CallExpr *call) const {
   int64_t size = call->type ? call->type->elementSize() : 1;
   if (call->args.size() > 2) {
-    return linear(call->args[2]);
+    return this->linear(call->args[2]);
   }
-  std::optional<Linear> whole = knownLength(call->args[0]);
+  std::optional<Linear> whole = this->knownLength(call->args[0]);
   std::optional<Linear> from =
-      call->args.size() > 1 ? linear(call->args[1]) : Linear{Term::zero(), 0};
+      call->args.size() > 1 ? this->linear(call->args[1]) : Linear{Term::zero(), 0};
   if (!whole || !from || !from->term.isZero()) {
     return std::nullopt;
   }
   if (size == 1) {
     return Linear{whole->term, whole->offset - from->offset};
   }
-  std::optional<int64_t> exact = exactLength(call->args[0]);
+  std::optional<int64_t> exact = this->exactLength(call->args[0]);
   if (!exact || (*exact - from->offset) % size != 0) {
     return std::nullopt;
   }
@@ -490,7 +502,7 @@ std::optional<Linear> IndexProofs::viewLength(const CallExpr *call) const {
 }
 
 std::optional<Linear> IndexProofs::lengthAtMost(const Expr *expr) const {
-  if (std::optional<Linear> exact = lengthOf(expr)) {
+  if (std::optional<Linear> exact = this->lengthOf(expr)) {
     return exact;
   }
   auto *call = dyn_cast<CallExpr>(expr);
@@ -498,8 +510,8 @@ std::optional<Linear> IndexProofs::lengthAtMost(const Expr *expr) const {
       (call->builtin() != Builtin::BytesSubarray && call->builtin() != Builtin::BytesSlice)) {
     return std::nullopt;
   }
-  std::optional<int64_t> from = checker_.constantFolder().intConstant(call->args[0]);
-  std::optional<int64_t> to = checker_.constantFolder().intConstant(call->args[1]);
+  std::optional<int64_t> from = this->checker.constantFolder().intConstant(call->args[0]);
+  std::optional<int64_t> to = this->checker.constantFolder().intConstant(call->args[1]);
   if (!from || !to || *from < 0 || *to < *from) {
     return std::nullopt;
   }
@@ -511,7 +523,7 @@ Linear IndexProofs::settled(Linear value) const {
   if (value.term.isZero()) {
     return value;
   }
-  const Facts &facts = checker_.flow_.facts;
+  const Facts &facts = this->checker.flow_.facts;
   std::optional<int64_t> above = facts.bound(value.term, Term::zero());
   std::optional<int64_t> below = facts.bound(Term::zero(), value.term);
   if (above && below && *above - 1 == 1 - *below) {
@@ -526,7 +538,8 @@ bool IndexProofs::provesSumUpTo(std::optional<Linear> a, std::optional<Linear> b
   if (!a || !b) {
     return false;
   }
-  Linear x = settled(*a), y = settled(*b);
+  Linear x = this->settled(*a);
+  Linear y = this->settled(*b);
   Term term = x.term.isZero() ? y.term : x.term;
   if (!x.term.isZero() && !y.term.isZero()) {
     std::optional<Term> both = Term::sum(x.term, y.term);
@@ -536,27 +549,27 @@ bool IndexProofs::provesSumUpTo(std::optional<Linear> a, std::optional<Linear> b
     term = *both;
   }
 
-  return provesLinearUpTo(Linear{term, x.offset + y.offset}, object, 0);
+  return this->provesLinearUpTo(Linear{term, x.offset + y.offset}, object, 0);
 }
 
 void IndexProofs::addIndexCallbackFacts(const FunctionDecl *fn) {
-  auto element = checker_.elementCallbacks_.find(fn);
-  if (element != checker_.elementCallbacks_.end()) {
+  auto element = this->checker.elementCallbacks_.find(fn);
+  if (element != this->checker.elementCallbacks_.end()) {
     auto [param, lo, hi] = element->second;
     const VarSymbol *value = param < fn->params.size() ? fn->params[param].sym : nullptr;
     if (value && value->type->isInt()) {
-      checker_.flow_.facts.add(Term::zero(), Term::of(value), saturatingSub(1, lo));
-      checker_.flow_.facts.add(Term::of(value), Term::zero(), saturatingAdd(hi, 1));
+      this->checker.flow_.facts.add(Term::zero(), Term::of(value), saturatingSub(1, lo));
+      this->checker.flow_.facts.add(Term::of(value), Term::zero(), saturatingAdd(hi, 1));
     }
   }
-  auto it = checker_.indexCallbacks_.find(fn);
-  if (it == checker_.indexCallbacks_.end() || it->second >= fn->params.size()) {
+  auto it = this->checker.indexCallbacks_.find(fn);
+  if (it == this->checker.indexCallbacks_.end() || it->second >= fn->params.size()) {
     return;
   }
   const VarSymbol *var = fn->params[it->second].sym;
   if (var && var->type->isInt()) {
-    checker_.flow_.facts.add(Term::zero(), Term::of(var), 1);
-    checker_.flow_.facts.add(Term::of(var), Term::zero(), kMaxLength);
+    this->checker.flow_.facts.add(Term::zero(), Term::of(var), 1);
+    this->checker.flow_.facts.add(Term::of(var), Term::zero(), kMaxLength);
   }
 }
 
@@ -570,11 +583,11 @@ ValueRange IndexProofs::lengthRange(const Expr *value) const {
     case Builtin::ArrayBufferNew:
     case Builtin::BufferAllocFill:
       return call->args.empty() ? ValueRange{0, 0}
-                                : checker_.byteProofs().valueRange(call->args[0]);
+                                : this->checker.byteProofs().valueRange(call->args[0]);
     case Builtin::DataViewNew:
     case Builtin::BytesView:
       if (call->args.size() == 1 && call->type && call->type->elementSize() == 1) {
-        return lengthRange(call->args[0]);
+        return this->lengthRange(call->args[0]);
       }
       return {};
     default:
@@ -585,7 +598,7 @@ ValueRange IndexProofs::lengthRange(const Expr *value) const {
 std::optional<Linear> IndexProofs::knownLength(const Expr *value) const {
   if (auto *create = dyn_cast<NewExpr>(value)) {
     if (create->args.size() == 1) {
-      return linear(create->args[0]);
+      return this->linear(create->args[0]);
     }
     return Linear{Term::zero(), 0};
   }
@@ -594,22 +607,22 @@ std::optional<Linear> IndexProofs::knownLength(const Expr *value) const {
       case Builtin::BytesNew:
       case Builtin::ArrayBufferNew:
       case Builtin::BufferAllocFill:
-        return call->args.empty() ? Linear{Term::zero(), 0} : linear(call->args[0]);
+        return call->args.empty() ? Linear{Term::zero(), 0} : this->linear(call->args[0]);
       case Builtin::BytesOf:
       case Builtin::EmbedBytes:
-        return lengthOf(call);
+        return this->lengthOf(call);
       case Builtin::BytesFromArray:
       case Builtin::BytesFromBytes:
-        return lengthOf(call->args[0]);
+        return this->lengthOf(call->args[0]);
       case Builtin::DataViewNew:
       case Builtin::BytesView:
-        return viewLength(call);
+        return this->viewLength(call);
       default:
         break;
     }
   }
 
-  return lengthOf(value);
+  return this->lengthOf(value);
 }
 
 }

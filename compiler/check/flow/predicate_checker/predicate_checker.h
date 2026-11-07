@@ -6,7 +6,7 @@ namespace tz {
 
 class PredicateChecker {
 public:
-  explicit PredicateChecker(Checker &checker);
+  explicit PredicateChecker(Checker &owner);
 
   const Type *resolveReturnType(FunctionDecl *fn, FuncSymbol *sym);
   static std::string assertsError(const std::string &shown, bool typed, const std::string &call);
@@ -21,9 +21,12 @@ public:
   const Type *filteredType(const Expr *callback, const Type *element) const;
 
 private:
-  Checker &checker_;
-  mutable llvm::DenseMap<const FuncSymbol *, Checker::Predicate> predicates_;
-  mutable llvm::SmallPtrSet<const FuncSymbol *, 8> summarizing_;
+  static const VarSymbol *argumentVariable(const Expr *expr);
+  static std::optional<Linear> argumentTerm(const Expr *expr);
+
+  Checker &checker;
+  mutable llvm::DenseMap<const FuncSymbol *, Checker::Predicate> predicates;
+  mutable llvm::SmallPtrSet<const FuncSymbol *, 8> summarizing;
 };
 
 }

@@ -6,7 +6,7 @@ namespace tz {
 
 class ReactionLowerer {
 public:
-  explicit ReactionLowerer(Lowering &lowering);
+  explicit ReactionLowerer(Lowering &owner);
 
   llvm::Value *emitPromiseReaction(CallExpr *call);
   llvm::StructType *reactionType();
@@ -16,9 +16,9 @@ public:
                       llvm::Value *callback, bool later = false);
 
 private:
-  Lowering &lowering_;
-  llvm::StructType *reactionTy_ = nullptr;
-  llvm::Function *reactionDropFn_ = nullptr;
+  Lowering &lowering;
+  llvm::StructType *reactionTy = nullptr;
+  llvm::Function *reactionDropFn = nullptr;
 };
 
 }

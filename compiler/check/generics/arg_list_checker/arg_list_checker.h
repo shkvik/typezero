@@ -6,7 +6,7 @@ namespace tz {
 
 class ArgListChecker {
 public:
-  explicit ArgListChecker(Checker &checker);
+  explicit ArgListChecker(Checker &owner);
 
   void expandArgumentList(FunctionDecl *fn, FuncSymbol *sym);
   void declareArgumentList(FunctionDecl *fn);
@@ -18,8 +18,11 @@ public:
   const Type *memberType(const Type *object, const Type *key);
 
 private:
-  Checker &checker_;
-  llvm::DenseMap<const VarSymbol *, std::vector<llvm::StringRef>> argumentLists_;
+  static std::string utf8(const std::u16string &text);
+  static bool usedAsValue(const Stmt *body, llvm::StringRef name, bool known);
+
+  Checker &checker;
+  llvm::DenseMap<const VarSymbol *, std::vector<llvm::StringRef>> argumentLists;
 };
 
 }

@@ -225,7 +225,9 @@ Expr *FsChecker::checkFsCall(CallExpr *call, llvm::StringRef fn, llvm::SMLoc loc
   };
 
   if (op == "readFileSync") {
-    if (!checker_.argumentChecker().checkArity(call, loc, 1, 2)) {
+    ArgumentChecker::ResultArityMatches arity = checker_.argumentChecker().checkArity(call, 1, 2);
+    if (arity.isErr()) {
+      checker_.diags_.error(loc, arity.error().message);
       return call;
     }
     Expr *file = path(call->args[0], true);
@@ -251,7 +253,9 @@ Expr *FsChecker::checkFsCall(CallExpr *call, llvm::StringRef fn, llvm::SMLoc loc
     return call;
   }
   if (op == "writeFileSync" || op == "appendFileSync") {
-    if (!checker_.argumentChecker().checkArity(call, loc, 2, 3)) {
+    ArgumentChecker::ResultArityMatches arity = checker_.argumentChecker().checkArity(call, 2, 3);
+    if (arity.isErr()) {
+      checker_.diags_.error(loc, arity.error().message);
       return call;
     }
     Expr *file = path(call->args[0], true);
@@ -301,7 +305,9 @@ Expr *FsChecker::checkFsCall(CallExpr *call, llvm::StringRef fn, llvm::SMLoc loc
   }
   if (op == "existsSync" || op == "unlinkSync" || op == "realpathSync" || op == "mkdtempSync") {
     unsigned max = op == "existsSync" || op == "unlinkSync" ? 1 : 2;
-    if (!checker_.argumentChecker().checkArity(call, loc, 1, max)) {
+    ArgumentChecker::ResultArityMatches arity = checker_.argumentChecker().checkArity(call, 1, max);
+    if (arity.isErr()) {
+      checker_.diags_.error(loc, arity.error().message);
       return call;
     }
     Expr *file = path(call->args[0], false);
@@ -322,7 +328,10 @@ Expr *FsChecker::checkFsCall(CallExpr *call, llvm::StringRef fn, llvm::SMLoc loc
     return call;
   }
   if (op == "accessSync" || op == "chmodSync" || op == "truncateSync") {
-    if (!checker_.argumentChecker().checkArity(call, loc, op == "chmodSync" ? 2 : 1, 2)) {
+    ArgumentChecker::ResultArityMatches arity =
+        checker_.argumentChecker().checkArity(call, op == "chmodSync" ? 2 : 1, 2);
+    if (arity.isErr()) {
+      checker_.diags_.error(loc, arity.error().message);
       return call;
     }
     Expr *file = path(call->args[0], false);
@@ -359,7 +368,9 @@ Expr *FsChecker::checkFsCall(CallExpr *call, llvm::StringRef fn, llvm::SMLoc loc
     return call;
   }
   if (op == "statSync" || op == "lstatSync") {
-    if (!checker_.argumentChecker().checkArity(call, loc, 1, 2)) {
+    ArgumentChecker::ResultArityMatches arity = checker_.argumentChecker().checkArity(call, 1, 2);
+    if (arity.isErr()) {
+      checker_.diags_.error(loc, arity.error().message);
       return call;
     }
     Expr *file = path(call->args[0], false);
@@ -391,7 +402,9 @@ Expr *FsChecker::checkFsCall(CallExpr *call, llvm::StringRef fn, llvm::SMLoc loc
     return call;
   }
   if (op == "readdirSync") {
-    if (!checker_.argumentChecker().checkArity(call, loc, 1, 2)) {
+    ArgumentChecker::ResultArityMatches arity = checker_.argumentChecker().checkArity(call, 1, 2);
+    if (arity.isErr()) {
+      checker_.diags_.error(loc, arity.error().message);
       return call;
     }
     Expr *dir = path(call->args[0], false);
@@ -416,7 +429,9 @@ Expr *FsChecker::checkFsCall(CallExpr *call, llvm::StringRef fn, llvm::SMLoc loc
     return call;
   }
   if (op == "mkdirSync") {
-    if (!checker_.argumentChecker().checkArity(call, loc, 1, 2)) {
+    ArgumentChecker::ResultArityMatches arity = checker_.argumentChecker().checkArity(call, 1, 2);
+    if (arity.isErr()) {
+      checker_.diags_.error(loc, arity.error().message);
       return call;
     }
     Expr *dir = path(call->args[0], false);
@@ -442,7 +457,9 @@ Expr *FsChecker::checkFsCall(CallExpr *call, llvm::StringRef fn, llvm::SMLoc loc
     return call;
   }
   if (op == "rmdirSync") {
-    if (!checker_.argumentChecker().checkArity(call, loc, 1, 2)) {
+    ArgumentChecker::ResultArityMatches arity = checker_.argumentChecker().checkArity(call, 1, 2);
+    if (arity.isErr()) {
+      checker_.diags_.error(loc, arity.error().message);
       return call;
     }
     Expr *dir = path(call->args[0], false);
@@ -459,7 +476,9 @@ Expr *FsChecker::checkFsCall(CallExpr *call, llvm::StringRef fn, llvm::SMLoc loc
     return call;
   }
   if (op == "rmSync") {
-    if (!checker_.argumentChecker().checkArity(call, loc, 1, 2)) {
+    ArgumentChecker::ResultArityMatches arity = checker_.argumentChecker().checkArity(call, 1, 2);
+    if (arity.isErr()) {
+      checker_.diags_.error(loc, arity.error().message);
       return call;
     }
     Expr *target = path(call->args[0], false);
@@ -491,7 +510,9 @@ Expr *FsChecker::checkFsCall(CallExpr *call, llvm::StringRef fn, llvm::SMLoc loc
                                 "from \"tz:fs\"");
       return loosely();
     }
-    if (!checker_.argumentChecker().checkArity(call, loc, 2, 2)) {
+    ArgumentChecker::ResultArityMatches arity = checker_.argumentChecker().checkArity(call, 2, 2);
+    if (arity.isErr()) {
+      checker_.diags_.error(loc, arity.error().message);
       return call;
     }
     Expr *from = path(call->args[0], false);
@@ -509,8 +530,13 @@ Expr *FsChecker::checkFsCall(CallExpr *call, llvm::StringRef fn, llvm::SMLoc loc
 }
 
 Expr *FsChecker::checkTzIoCall(CallExpr *call, llvm::SMLoc loc) {
-  if (checker_.callChecker().rejectSpread(call) ||
-      !checker_.argumentChecker().checkArity(call, loc, 0, 1)) {
+  bool rejected = checker_.callChecker().rejectSpread(call);
+  ArgumentChecker::ResultArityMatches arity =
+      rejected ? ok(call) : checker_.argumentChecker().checkArity(call, 0, 1);
+  if (arity.isErr()) {
+    checker_.diags_.error(loc, arity.error().message);
+  }
+  if (rejected || arity.isErr()) {
     return call;
   }
   if (!call->args.empty()) {

@@ -6,7 +6,7 @@ namespace tz {
 
 class CallChecker {
 public:
-  explicit CallChecker(Checker &checker);
+  explicit CallChecker(Checker &owner);
 
   Expr *checkValueCall(CallExpr *call, const Type *fnType);
   Expr *checkCall(CallExpr *call, const Type *expected);
@@ -16,7 +16,7 @@ public:
   bool isGlobalName(const Expr *expr, llvm::StringRef name) const;
 
 private:
-  Checker &checker_;
+  Checker &checker;
 };
 
 }

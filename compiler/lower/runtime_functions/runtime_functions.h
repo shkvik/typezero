@@ -6,7 +6,7 @@ namespace tz {
 
 class RuntimeFunctions {
 public:
-  explicit RuntimeFunctions(Lowering &lowering);
+  explicit RuntimeFunctions(Lowering &owner);
 
   void declareRuntime();
   void defineRefCountHelpers();
@@ -14,7 +14,7 @@ public:
                    llvm::BasicBlock *freeBlock, llvm::BasicBlock *doneBlock);
 
 private:
-  Lowering &lowering_;
+  Lowering &lowering;
 };
 
 }

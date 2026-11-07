@@ -63,165 +63,161 @@
 #include "compiler/library/tz_modules/url_checker/url_checker.h"
 #include "compiler/library/weakref/weak_ref_checker/weak_ref_checker.h"
 #include "llvm/ADT/STLExtras.h"
-#include "llvm/ADT/StringSet.h"
-#include "llvm/Support/ErrorHandling.h"
 #include <cmath>
-#include <functional>
 
-using llvm::cast;
 using llvm::dyn_cast;
-using llvm::dyn_cast_or_null;
-using llvm::isa;
 
 namespace tz {
 
-CallChecker::CallChecker(Checker &checker) : checker_(checker) {}
+CallChecker::CallChecker(Checker &owner)
+    : checker(owner) {}
 
 Expr *CallChecker::checkCall(CallExpr *call, const Type *expected) {
   call->type = Type::error();
   auto checkArgsLoosely = [&] {
     for (Expr *&arg : call->args) {
-      arg = checker_.exprChecker().checkExpr(arg);
+      arg = this->checker.exprChecker().checkExpr(arg);
     }
   };
-  checker_.argListChecker().expandListSpreads(call->args, call->spread);
+  this->checker.argListChecker().expandListSpreads(call->args, call->spread);
   if (auto *index = dyn_cast<IndexExpr>(call->callee); index && !index->optional) {
     if (auto *key = dyn_cast<MemberExpr>(index->index);
         key && (key->name == "iterator" || key->name == "asyncIterator") &&
-        isGlobalName(key->object, "Symbol")) {
-      call->callee = checker_.ctx_.make<MemberExpr>(
+        this->isGlobalName(key->object, "Symbol")) {
+      call->callee = this->checker.ctx_.make<MemberExpr>(
           index->loc(), index->object,
           key->name == "iterator" ? "[Symbol.iterator]" : "[Symbol.asyncIterator]");
     }
   }
 
   if (auto *name = dyn_cast<NameExpr>(call->callee); name && name->name == "super") {
-    return checker_.inheritChecker().checkSuperCall(call);
+    return this->checker.inheritChecker().checkSuperCall(call);
   }
-  for (const Feature *feature : checker_.features_->all()) {
-    if (Expr *checked = feature->checkAnyCall(checker_, call, expected)) {
+  for (const Feature *feature : this->checker.features_->all()) {
+    if (Expr *checked = feature->checkAnyCall(this->checker, call, expected)) {
       return checked;
     }
   }
   if (auto *member = dyn_cast<MemberExpr>(call->callee); member && !call->optional) {
-    if (isGlobalName(member->object, "Promise")) {
-      return checker_.promiseStaticChecker().checkPromiseStatic(call, member, expected);
+    if (this->isGlobalName(member->object, "Promise")) {
+      return this->checker.promiseStaticChecker().checkPromiseStatic(call, member, expected);
     }
     auto rejectTypeArgs = [&] {
       if (member->typeArgs.empty()) {
         return;
       }
-      checker_.diags_.error(member->loc(),
-                            "type arguments can be given only to a generic function");
+      this->checker.diags_.error(member->loc(),
+                                 "type arguments can be given only to a generic function");
       member->typeArgs.clear();
     };
     if (auto *object = dyn_cast<NameExpr>(member->object);
-        !object || !checker_.scopes().lookup(object->name).cls()) {
+        !object || !this->checker.scopes().lookup(object->name).cls()) {
       static const llvm::StringLiteral globals[] = {"String", "Number", "Object", "Iterator",
                                                     "Array",  "Map",    "Symbol"};
-      auto named = [&](llvm::StringRef g) { return isGlobalName(object, g); };
+      auto named = [&](llvm::StringRef g) { return this->isGlobalName(object, g); };
       if (object && (llvm::any_of(globals, named) ||
-                     llvm::any_of(checker_.features_->all(), [&](const Feature *feature) {
+                     llvm::any_of(this->checker.features_->all(), [&](const Feature *feature) {
                        return llvm::any_of(feature->typeArgFreeGlobals(), named);
                      }))) {
         rejectTypeArgs();
       }
     }
     if (auto *object = dyn_cast<NameExpr>(member->object); object && object->name == "super") {
-      return checker_.inheritChecker().checkSuperMethodCall(call, member);
+      return this->checker.inheritChecker().checkSuperMethodCall(call, member);
     }
-    for (const Feature *feature : checker_.features_->all()) {
-      if (Expr *checked = feature->checkStaticCall(checker_, call, member, expected)) {
+    for (const Feature *feature : this->checker.features_->all()) {
+      if (Expr *checked = feature->checkStaticCall(this->checker, call, member, expected)) {
         return checked;
       }
     }
-    if (isGlobalName(member->object, "String") || isGlobalName(member->object, "Number")) {
-      if (rejectSpread(call)) {
+    if (this->isGlobalName(member->object, "String") ||
+        this->isGlobalName(member->object, "Number")) {
+      if (this->rejectSpread(call)) {
         return call;
       }
-      return checker_.numberMethods().checkStaticCall(call, member);
+      return this->checker.numberMethods().checkStaticCall(call, member);
     }
-    if (isGlobalName(member->object, "Object")) {
-      return checker_.objectChecker().checkObjectCall(call, member, expected);
+    if (this->isGlobalName(member->object, "Object")) {
+      return this->checker.objectChecker().checkObjectCall(call, member, expected);
     }
     auto *object = dyn_cast<NameExpr>(member->object);
-    if (ClassDecl *cls = object ? checker_.scopes().lookup(object->name).cls() : nullptr) {
-      return checker_.staticChecker().checkClassStaticCall(call, member, cls, expected);
+    if (ClassDecl *cls = object ? this->checker.scopes().lookup(object->name).cls() : nullptr) {
+      return this->checker.staticChecker().checkClassStaticCall(call, member, cls, expected);
     }
     if (object && object->name == "this") {
-      checker_.thisMember_ = member->name;
+      this->checker.thisMember_ = member->name;
     }
-    if (isGlobalName(member->object, "Iterator")) {
-      return checker_.iteratorMethods().checkIteratorFrom(call, member);
+    if (this->isGlobalName(member->object, "Iterator")) {
+      return this->checker.iteratorMethods().checkIteratorFrom(call, member);
     }
-    if (isGlobalName(member->object, "Array")) {
-      return checker_.iteratorMethods().checkArrayFrom(call, member);
+    if (this->isGlobalName(member->object, "Array")) {
+      return this->checker.iteratorMethods().checkArrayFrom(call, member);
     }
-    if (isGlobalName(member->object, "Map")) {
-      return checker_.dictMethods().checkMapStatic(call, member);
+    if (this->isGlobalName(member->object, "Map")) {
+      return this->checker.dictMethods().checkMapStatic(call, member);
     }
     static const llvm::StringLiteral consumers[] = {"toArray", "forEach", "reduce",
                                                     "some",    "every",   "find"};
     if (llvm::is_contained(consumers, member->name)) {
-      checker_.iteratorMethods().markFused(member->object);
+      this->checker.iteratorMethods().markFused(member->object);
     }
-    member->object =
-        checker_.genericChecker().apparent(checker_.exprChecker().checkExpr(member->object));
-    checker_.thisMember_ = {};
+    member->object = this->checker.genericChecker().apparent(
+        this->checker.exprChecker().checkExpr(member->object));
+    this->checker.thisMember_ = {};
     if (member->optional) {
-      member->object = checker_.exprChecker().chainLink(member->object);
+      member->object = this->checker.exprChecker().chainLink(member->object);
     }
     const Type *receiver = member->object->type;
     if (!receiver->isClass() && !receiver->isUnion()) {
       rejectTypeArgs();
     }
-    for (const Feature *feature : checker_.features_->all()) {
-      if (Expr *checked = feature->checkMethodCall(checker_, call, member, expected)) {
+    for (const Feature *feature : this->checker.features_->all()) {
+      if (Expr *checked = feature->checkMethodCall(this->checker, call, member, expected)) {
         return checked;
       }
     }
-    if (Expr *checked = checker_.unknownChecker().checkUnknownMethod(call, member)) {
+    if (Expr *checked = this->checker.unknownChecker().checkUnknownMethod(call, member)) {
       return checked;
     }
     if (receiver->isFunction() && receiver->hasThis()) {
-      return checker_.functionMethodChecker().checkThisCall(call, member);
+      return this->checker.functionMethodChecker().checkThisCall(call, member);
     }
     if (receiver->isListParam()) {
-      return checker_.functionMethodChecker().checkListMethod(call, member);
+      return this->checker.functionMethodChecker().checkListMethod(call, member);
     }
     if (receiver->isPromise()) {
-      return checker_.promiseChecker().checkPromiseMethod(call, member, expected);
+      return this->checker.promiseChecker().checkPromiseMethod(call, member, expected);
     }
     if (receiver->isTimer()) {
-      return checker_.timerChecker().checkTimerMethod(call, member);
+      return this->checker.timerChecker().checkTimerMethod(call, member);
     }
-    for (const Feature *feature : checker_.features_->all()) {
-      if (Expr *values = feature->methodReceiver(checker_, member->object)) {
+    for (const Feature *feature : this->checker.features_->all()) {
+      if (Expr *values = feature->methodReceiver(this->checker, member->object)) {
         member->object = values;
         receiver = values->type;
         break;
       }
     }
     if (receiver->isUnion()) {
-      const Type *common = checker_.unionChecker().commonBaseWith(receiver, member->name);
+      const Type *common = this->checker.unionChecker().commonBaseWith(receiver, member->name);
       if (!common) {
         rejectTypeArgs();
-        return checker_.unionChecker().checkUnionMethodCall(call, member);
+        return this->checker.unionChecker().checkUnionMethodCall(call, member);
       }
-      member->object = checker_.typeRelations().convert(member->object, common);
+      member->object = this->checker.typeRelations().convert(member->object, common);
       receiver = common;
     }
-    for (const Feature *feature : checker_.features_->all()) {
-      if (Expr *checked = feature->checkClassMethodCall(checker_, call, member, expected)) {
+    for (const Feature *feature : this->checker.features_->all()) {
+      if (Expr *checked = feature->checkClassMethodCall(this->checker, call, member, expected)) {
         return checked;
       }
     }
     if (receiver->isClass()) {
-      bool proven = checker_.urlChecker().checkUrlSetter(member, call);
-      Expr *checked = checker_.methodCallChecker().checkMethodCall(call, member, expected);
-      checker_.httpChecker().checkHeadersCall(call, member);
+      bool proven = this->checker.urlChecker().checkUrlSetter(member, call);
+      Expr *checked = this->checker.methodCallChecker().checkMethodCall(call, member, expected);
+      this->checker.httpChecker().checkHeadersCall(call, member);
       if (proven && checked->type->isResult()) {
-        auto *dropped = checker_.ctx_.make<UnaryExpr>(call->loc(), UnaryOp::Void, checked);
+        auto *dropped = this->checker.ctx_.make<UnaryExpr>(call->loc(), UnaryOp::Void, checked);
         dropped->type = Type::undefinedTy();
         return dropped;
       }
@@ -233,88 +229,88 @@ Expr *CallChecker::checkCall(CallExpr *call, const Type *expected) {
                                             "sort", "reverse", "fill",  "copyWithin", "join"};
       Expr *copy = llvm::is_contained(inPlace, member->name)
                        ? nullptr
-                       : checker_.tupleChecker().arrayCopy(member->object);
+                       : this->checker.tupleChecker().arrayCopy(member->object);
       if (!copy) {
-        return checker_.tupleChecker().checkTupleMethod(call, member);
+        return this->checker.tupleChecker().checkTupleMethod(call, member);
       }
       member->object = copy;
       receiver = copy->type;
     }
     if (receiver->isObject()) {
-      return checker_.objectChecker().checkFieldCall(call, member);
+      return this->checker.objectChecker().checkFieldCall(call, member);
     }
-    if (!(receiver->isArray() && member->name == "push") && rejectSpread(call)) {
+    if (!(receiver->isArray() && member->name == "push") && this->rejectSpread(call)) {
       return call;
     }
-    for (const Feature *feature : checker_.features_->all()) {
-      if (Expr *checked = feature->checkValueMethodCall(checker_, call, member, expected)) {
+    for (const Feature *feature : this->checker.features_->all()) {
+      if (Expr *checked = feature->checkValueMethodCall(this->checker, call, member, expected)) {
         return checked;
       }
     }
     if (receiver->isIterator()) {
-      return checker_.iteratorMethods().checkIteratorMethod(call, member);
+      return this->checker.iteratorMethods().checkIteratorMethod(call, member);
     }
     if (receiver->isDict()) {
-      return checker_.dictMethods().checkDictMethod(call, member);
+      return this->checker.dictMethods().checkDictMethod(call, member);
     }
     if (receiver->isString()) {
-      return checker_.stringMethods().checkStringMethod(call, member);
+      return this->checker.stringMethods().checkStringMethod(call, member);
     }
     if (receiver->isArray()) {
-      return checker_.arrayMethods().checkArrayMethod(call, member, expected);
+      return this->checker.arrayMethods().checkArrayMethod(call, member, expected);
     }
     if (receiver->isNumeric()) {
-      return checker_.numberMethods().checkNumberMethod(call, member);
+      return this->checker.numberMethods().checkNumberMethod(call, member);
     }
     if (receiver->isBool() && member->name == "toString" && call->args.empty()) {
-      call->args.push_back(checker_.concatChecker().toStringOperand(member->object));
+      call->args.push_back(this->checker.concatChecker().toStringOperand(member->object));
       call->target = BuiltinCall{.builtin = Builtin::StringOf};
       call->type = Type::string();
       return call;
     }
     if (receiver->isOptional()) {
-      checker_.diags_.error(member->object->loc(),
-                            "the value may be undefined; check it before calling '" + member->name +
-                                "'");
+      this->checker.diags_.error(member->object->loc(),
+                                 "the value may be undefined; check it before calling '" +
+                                     member->name + "'");
     } else if (receiver->isFunction() &&
                (member->name == "call" || member->name == "apply" || member->name == "bind")) {
-      checker_.diags_.error(member->loc(), "'" + member->name +
-                                               "' is not supported: it sets 'this', and a "
-                                               "method taken as a value is bound to its "
-                                               "object already; call the function "
-                                               "directly");
+      this->checker.diags_.error(member->loc(), "'" + member->name +
+                                                    "' is not supported: it sets 'this', and a "
+                                                    "method taken as a value is bound to its "
+                                                    "object already; call the function "
+                                                    "directly");
     } else if (!receiver->isError()) {
-      checker_.diags_.error(member->loc(), "property '" + member->name +
-                                               "' does not exist on type '" + receiver->name() +
-                                               "'");
+      this->checker.diags_.error(member->loc(), "property '" + member->name +
+                                                    "' does not exist on type '" +
+                                                    receiver->name() + "'");
     }
     checkArgsLoosely();
     return call;
   }
 
   if (auto *name = dyn_cast<NameExpr>(call->callee); name && !call->optional) {
-    for (const Feature *feature : checker_.features_->all()) {
-      if (Expr *checked = feature->checkFunctionCall(checker_, call, name, expected)) {
+    for (const Feature *feature : this->checker.features_->all()) {
+      if (Expr *checked = feature->checkFunctionCall(this->checker, call, name, expected)) {
         return checked;
       }
     }
-    if (Expr *task = checker_.timerChecker().checkAsyncGlobal(call, name)) {
+    if (Expr *task = this->checker.timerChecker().checkAsyncGlobal(call, name)) {
       return task;
     }
-    if (Expr *builtin = checker_.globalFunctionChecker().checkGlobalCall(call, name)) {
+    if (Expr *builtin = this->checker.globalFunctionChecker().checkGlobalCall(call, name)) {
       return builtin;
     }
-    ScopeEntry entry = checker_.topLevelChecker().lookupValue(name->name);
+    ScopeEntry entry = this->checker.topLevelChecker().lookupValue(name->name);
     if (entry.func() && !entry.var()) {
-      for (const Feature *feature : checker_.features_->all()) {
-        if (Expr *checked = feature->checkLibraryCall(checker_, call, name, entry.func())) {
+      for (const Feature *feature : this->checker.features_->all()) {
+        if (Expr *checked = feature->checkLibraryCall(this->checker, call, name, entry.func())) {
           return checked;
         }
       }
     }
     if (entry.func() && !entry.var()) {
-      Expr *checked = checkDirectCall(call, entry.func(), name->loc(), expected);
-      checker_.tzModulesChecker().noteHttpsCall(call, entry.func()->decl);
+      Expr *checked = this->checkDirectCall(call, entry.func(), name->loc(), expected);
+      this->checker.tzModulesChecker().noteHttpsCall(call, entry.func()->decl);
       return checked;
     }
     VarSymbol *var = entry.var();
@@ -324,21 +320,22 @@ Expr *CallChecker::checkCall(CallExpr *call, const Type *expected) {
                               : nullptr;
     if (known && known->sym) {
       name->binding = NamedVar{.var = var};
-      checker_.nestedFunctions().noteUse(var, name->loc());
-      name->type = checker_.scopes().varType(var);
-      return checkDirectCall(call, known->sym, name->loc());
+      this->checker.nestedFunctions().noteUse(var, name->loc());
+      name->type = this->checker.scopes().varType(var);
+      return this->checkDirectCall(call, known->sym, name->loc());
     }
     if (!entry.var() && !entry.func() && !entry.cls() && name->name == "Array" &&
         !call->hasSpread()) {
-      auto *made = checker_.ctx_.make<NewExpr>(call->loc(), name->name, name->typeArgs, call->args);
+      auto *made =
+          this->checker.ctx_.make<NewExpr>(call->loc(), name->name, name->typeArgs, call->args);
 
-      return checker_.newChecker().checkNew(made, expected);
+      return this->checker.newChecker().checkNew(made, expected);
     }
     if (!entry.var() && !entry.func()) {
       if (const char *why = !entry.cls() ? whyUnsupported(name->name) : nullptr) {
-        checker_.diags_.error(name->loc(), "'" + name->name + "' is not supported: " + why);
-      } else if (!checker_.nameChecker().checkName(name)->type->isError()) {
-        checker_.diags_.error(name->loc(), "'" + name->name + "' is not a function");
+        this->checker.diags_.error(name->loc(), "'" + name->name + "' is not supported: " + why);
+      } else if (!this->checker.nameChecker().checkName(name)->type->isError()) {
+        this->checker.diags_.error(name->loc(), "'" + name->name + "' is not a function");
       }
       checkArgsLoosely();
       return call;
@@ -346,29 +343,29 @@ Expr *CallChecker::checkCall(CallExpr *call, const Type *expected) {
   }
 
   auto *calleeName = dyn_cast<NameExpr>(call->callee);
-  call->callee = checker_.exprChecker().checkExpr(call->callee);
+  call->callee = this->checker.exprChecker().checkExpr(call->callee);
   if (call->optional) {
-    call->callee = checker_.exprChecker().chainLink(call->callee);
+    call->callee = this->checker.exprChecker().chainLink(call->callee);
   }
   const Type *type = call->callee->type;
   if (type->isFunction()) {
-    Expr *checked = checkValueCall(call, type);
-    if (calleeName && calleeName->var() && !checker_.streamCallbacks_.empty()) {
-      checker_.chunkTypes().noteStreamCallback(call, calleeName->var());
+    Expr *checked = this->checkValueCall(call, type);
+    if (calleeName && calleeName->var() && !this->checker.streamCallbacks_.empty()) {
+      this->checker.chunkTypes().noteStreamCallback(call, calleeName->var());
     }
     return checked;
   }
   if (type->isOptional() && type->inner()->isFunction()) {
-    checker_.diags_.error(call->callee->loc(),
-                          "the function may be undefined; check it first, or call it with "
-                          "'?.()', which gives undefined then");
+    this->checker.diags_.error(call->callee->loc(),
+                               "the function may be undefined; check it first, or call it with "
+                               "'?.()', which gives undefined then");
   } else if (calleeName && !type->isError()) {
-    checker_.diags_.error(call->callee->loc(), "'" + calleeName->name +
-                                                   "' is not a function; it has type '" +
-                                                   type->name() + "'");
+    this->checker.diags_.error(call->callee->loc(), "'" + calleeName->name +
+                                                        "' is not a function; it has type '" +
+                                                        type->name() + "'");
   } else if (!type->isError()) {
-    checker_.diags_.error(call->callee->loc(),
-                          "a value of type '" + type->name() + "' cannot be called");
+    this->checker.diags_.error(call->callee->loc(),
+                               "a value of type '" + type->name() + "' cannot be called");
   }
   checkArgsLoosely();
 
@@ -381,35 +378,35 @@ Expr *CallChecker::checkDirectCall(CallExpr *call, FuncSymbol *func, llvm::SMLoc
   llvm::ArrayRef<TypeRef> typeArgs =
       name ? llvm::ArrayRef<TypeRef>(name->typeArgs) : llvm::ArrayRef<TypeRef>();
   if (func->isGeneric()) {
-    return checker_.typeArgInferrer().checkGenericCall(call, func, loc, expected, typeArgs);
+    return this->checker.typeArgInferrer().checkGenericCall(call, func, loc, expected, typeArgs);
   }
   if (!typeArgs.empty()) {
-    checker_.diags_.error(loc, "'" + func->name +
-                                   "' is not a generic function; remove the type arguments");
+    this->checker.diags_.error(loc, "'" + func->name +
+                                        "' is not a generic function; remove the type arguments");
   }
-  checker_.returnInferrer().resolveParams(func);
+  this->checker.returnInferrer().resolveParams(func);
   call->target = FunctionCall{.func = func};
-  call->type = checker_.returnInferrer().returnType(func);
+  call->type = this->checker.returnInferrer().returnType(func);
 
-  return checker_.argumentChecker().checkArguments(call, func->params, func->minArgs, func->hasRest,
-                                                   loc);
+  return this->checker.argumentChecker().checkArguments(call, func->params, func->minArgs,
+                                                        func->hasRest, loc);
 }
 
 Expr *CallChecker::checkValueCall(CallExpr *call, const Type *type) {
   call->type = type->ret();
   if (type->hasThis()) {
-    checker_.diags_.error(call->callee->loc(),
-                          "the function takes its 'this' first, which a plain call "
-                          "does not pass; call it with '.call(obj, ...)' or "
-                          "'.apply(obj, args)'");
+    this->checker.diags_.error(call->callee->loc(),
+                               "the function takes its 'this' first, which a plain call "
+                               "does not pass; call it with '.call(obj, ...)' or "
+                               "'.apply(obj, args)'");
     for (Expr *&arg : call->args) {
-      arg = checker_.exprChecker().checkExpr(arg);
+      arg = this->checker.exprChecker().checkExpr(arg);
     }
     return call;
   }
 
-  return checker_.argumentChecker().checkArguments(call, type->params(), type->minArgs(),
-                                                   type->hasRest(), call->callee->loc());
+  return this->checker.argumentChecker().checkArguments(call, type->params(), type->minArgs(),
+                                                        type->hasRest(), call->callee->loc());
 }
 
 bool CallChecker::rejectSpread(CallExpr *call) {
@@ -417,11 +414,11 @@ bool CallChecker::rejectSpread(CallExpr *call) {
     if (!call->spreads(i)) {
       continue;
     }
-    checker_.diags_.error(call->args[i]->loc(),
-                          "a spread argument can only be passed to a rest parameter, "
-                          "Math.min, Math.max or push");
+    this->checker.diags_.error(call->args[i]->loc(),
+                               "a spread argument can only be passed to a rest parameter, "
+                               "Math.min, Math.max or push");
     for (Expr *&arg : call->args) {
-      arg = checker_.exprChecker().checkExpr(arg);
+      arg = this->checker.exprChecker().checkExpr(arg);
     }
     call->type = Type::error();
 
@@ -433,17 +430,18 @@ bool CallChecker::rejectSpread(CallExpr *call) {
 
 bool CallChecker::isGlobalName(const Expr *expr, llvm::StringRef name) const {
   if (auto *m = dyn_cast<MemberExpr>(expr); m && name == "crypto" && m->name == "crypto" &&
-                                            !m->optional && isGlobalName(m->object, "globalThis")) {
+                                            !m->optional &&
+                                            this->isGlobalName(m->object, "globalThis")) {
     return true;
   }
   auto *n = dyn_cast<NameExpr>(expr);
   if (!n || n->name != name) {
     return false;
   }
-  if (checker_.builtinModuleChecker().nodeName(name)) {
+  if (this->checker.builtinModuleChecker().nodeName(name)) {
     return false;
   }
-  ScopeEntry shadow = checker_.scopes().lookup(name);
+  ScopeEntry shadow = this->checker.scopes().lookup(name);
 
   return !shadow.var() && !shadow.func() && !shadow.cls();
 }

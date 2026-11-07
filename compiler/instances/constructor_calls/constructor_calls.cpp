@@ -1,100 +1,140 @@
 #include "compiler/instances/constructor_calls/constructor_calls.h"
 #include "compiler/check/classes/class_links/class_links.h"
 #include "llvm/ADT/STLExtras.h"
-#include <functional>
 
-using llvm::cast;
 using llvm::dyn_cast;
-using llvm::dyn_cast_or_null;
-using llvm::isa;
 
 namespace tz {
 
-ConstructorCalls::ConstructorCalls(Checker &checker) : checker_(checker) {}
+ConstructorCalls::ConstructorCalls(Checker &owner)
+    : checker(owner) {}
 
 void ConstructorCalls::checkConstructorCalls() {
-  for (ClassDecl *cls : checker_.classes_) {
-    if (cls->literal() || cls->children.empty() || cls->generic()) {
+  for (ClassDecl *cls : this->checker.classes_) {
+    bool skipped = cls->literal() || cls->children.empty() || cls->generic();
+    if (skipped) {
       continue;
     }
-    std::vector<FunctionDecl *> fns = cls->constructors;
+    std::vector<FunctionDecl *> functions = cls->constructors;
     if (cls->init) {
-      fns.push_back(cls->init);
+      functions.push_back(cls->init);
     }
-    for (FunctionDecl *ctor : fns) {
+    for (FunctionDecl *ctor : functions) {
       llvm::SmallPtrSet<const FunctionDecl *, 8> seen;
-      scanConstructorCalls(ctor, cls, nullptr, ctor, seen);
+      this->scanConstructorCalls(ctor, cls, nullptr, ctor, seen);
     }
   }
+}
+
+const NameExpr *ConstructorCalls::receiverName(const CallExpr *call) {
+  auto *member = dyn_cast<MemberExpr>(call->callee);
+  const Expr *object = member ? member->object : nullptr;
+  while (auto *conv = llvm::dyn_cast_or_null<CastExpr>(object)) {
+    object = conv->operand;
+  }
+
+  return llvm::dyn_cast_or_null<NameExpr>(object);
+}
+
+const ClassDecl *ConstructorCalls::overridingChild(const ClassDecl *cls,
+                                                   const FunctionDecl *method) {
+  for (const ClassDecl *child : cls->children) {
+    for (FunctionDecl *other : ClassLinks::ownMethods(child)) {
+      if (ClassLinks::overridesTransitively(other, method)) {
+        return child;
+      }
+    }
+    const ClassDecl *found = ConstructorCalls::overridingChild(child, method);
+    if (found) {
+      return found;
+    }
+  }
+
+  return nullptr;
+}
+
+ConstructorCalls::ResultNotOverridden ConstructorCalls::overriddenCall(const ClassDecl *cls,
+                                                                       const FunctionDecl *ctor,
+                                                                       const CallExpr *call,
+                                                                       const CallExpr *site) {
+  FunctionDecl *target = call->method()->decl;
+  bool overridable = call->virtualCall() || !cls->derivesFrom(target->cls());
+  const ClassDecl *child =
+      call->virtualCall() ? ConstructorCalls::overridingChild(cls, target) : nullptr;
+  const ClassDecl *by = child ? child : target->cls();
+  bool direct = site == call;
+  if (overridable && ctor->isConstructor() && direct) {
+    std::string message = ErrorTextOverriddenCall::ctorCall(cls->name, target->name, by->name);
+
+    return err(ConstructorCallsOverriddenCallError{
+        .code = ConstructorCallsOverriddenCallErrorCode::CONSTRUCTOR_CALLS_OVERRIDE,
+        .message = message,
+    });
+  }
+  if (overridable && ctor->isConstructor()) {
+    std::string message = ErrorTextOverriddenCall::ctorReach(cls->name, target->name, by->name);
+
+    return err(ConstructorCallsOverriddenCallError{
+        .code = ConstructorCallsOverriddenCallErrorCode::CONSTRUCTOR_REACHES_OVERRIDE,
+        .message = message,
+    });
+  }
+  if (overridable && direct) {
+    std::string message = ErrorTextOverriddenCall::fieldsCall(cls->name, target->name, by->name);
+
+    return err(ConstructorCallsOverriddenCallError{
+        .code = ConstructorCallsOverriddenCallErrorCode::INITIALIZERS_CALL_OVERRIDE,
+        .message = message,
+    });
+  }
+  if (overridable) {
+    std::string message = ErrorTextOverriddenCall::fieldsReach(cls->name, target->name, by->name);
+
+    return err(ConstructorCallsOverriddenCallError{
+        .code = ConstructorCallsOverriddenCallErrorCode::INITIALIZERS_REACH_OVERRIDE,
+        .message = message,
+    });
+  }
+
+  return ok(target);
 }
 
 void ConstructorCalls::scanConstructorCalls(const FunctionDecl *fn, const ClassDecl *cls,
                                             const CallExpr *origin, const FunctionDecl *ctor,
                                             llvm::SmallPtrSetImpl<const FunctionDecl *> &seen) {
-  if (!fn->body || !fn->thisVar() || !seen.insert(fn).second) {
+  if (!fn->body || !fn->thisVar()) {
     return;
   }
-  const VarSymbol *self = fn->thisVar();
-  visitExprs(
-      fn->body,
-      [&](const Expr *e) {
-        auto *call = dyn_cast<CallExpr>(e);
-        if (!call || !call->method() || (origin && reportedCalls_.contains(origin))) {
-          return;
-        }
-        auto *member = dyn_cast<MemberExpr>(call->callee);
-        const Expr *object = member ? member->object : nullptr;
-        while (auto *conv = llvm::dyn_cast_or_null<CastExpr>(object)) {
-          object = conv->operand;
-        }
-        auto *name = llvm::dyn_cast_or_null<NameExpr>(object);
-        if (!name || name->var() != self) {
-          return;
-        }
-        FunctionDecl *target = call->method()->decl;
-        const CallExpr *site = origin ? origin : call;
-        if (call->virtualCall() || !cls->derivesFrom(target->cls())) {
-          const ClassDecl *by = target->cls();
-          if (call->virtualCall()) {
-            std::function<const ClassDecl *(const ClassDecl *)> find =
-                [&](const ClassDecl *c) -> const ClassDecl * {
-              for (const ClassDecl *child : c->children) {
-                for (FunctionDecl *other : ClassLinks::ownMethods(child)) {
-                  if (ClassLinks::overridesTransitively(other, target)) {
-                    return child;
-                  }
-                }
-                if (const ClassDecl *found = find(child)) {
-                  return found;
-                }
-              }
+  bool firstVisit = seen.insert(fn).second;
+  if (!firstVisit) {
+    return;
+  }
 
-              return nullptr;
-            };
-            if (const ClassDecl *found = find(cls)) {
-              by = found;
-            }
-          }
-          std::string what = ctor->isConstructor()
-                                 ? "the constructor of '" + cls->name.str() + "'"
-                                 : "the initializers of the fields of '" + cls->name.str() + "'";
-          checker_.diags_.error(
-              site->loc(), what + " calls '" + target->name.str() + "'" +
-                               (site == call ? std::string() : " (through the methods it calls)") +
-                               ", which '" + by->name +
-                               "' overrides: it would run "
-                               "before the fields of '" +
-                               by->name + "' are set; call it once the object is made");
-          reportedCalls_.insert(site);
-          return;
-        }
-        if (!origin) {
-          seen.clear();
-        }
-        seen.insert(fn);
-        scanConstructorCalls(target, cls, site, ctor, seen);
-      },
-      false);
+  const VarSymbol *self = fn->thisVar();
+  auto scanCall = [&](const Expr *e) {
+    auto *call = dyn_cast<CallExpr>(e);
+    bool originReported = origin && this->reportedCalls.contains(origin);
+    if (!call || !call->method() || originReported) {
+      return;
+    }
+    const NameExpr *name = ConstructorCalls::receiverName(call);
+    if (!name || name->var() != self) {
+      return;
+    }
+    const CallExpr *site = origin ? origin : call;
+    ResultNotOverridden target = ConstructorCalls::overriddenCall(cls, ctor, call, site);
+    if (target.isErr()) {
+      this->checker.diags_.error(site->loc(), target.error().message);
+      this->reportedCalls.insert(site);
+      return;
+    }
+    if (!origin) {
+      seen.clear();
+    }
+    seen.insert(fn);
+    this->scanConstructorCalls(target.value(), cls, site, ctor, seen);
+  };
+  visitExprs(fn->body, scanCall, false);
 }
 
 }

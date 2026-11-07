@@ -115,7 +115,9 @@ Expr *IntlMethodChecker::checkIntlMethod(CallExpr *call, MemberExpr *member) {
   };
   std::string service = member->object->type->name().str();
   if (name == "resolvedOptions" && kind != IntlKind::Segments) {
-    if (!checker_.argumentChecker().checkArity(call, member->loc(), 0, 0)) {
+    ArgumentChecker::ResultArityMatches arity = checker_.argumentChecker().checkArity(call, 0, 0);
+    if (arity.isErr()) {
+      checker_.diags_.error(member->loc(), arity.error().message);
       return call;
     }
     return done(Builtin::IntlResolvedOptions, IntlChecker::resolvedIntlOptionsType(kind));
@@ -123,7 +125,9 @@ Expr *IntlMethodChecker::checkIntlMethod(CallExpr *call, MemberExpr *member) {
   switch (kind) {
   case IntlKind::NumberFormat:
     if (name == "format" || name == "formatToParts") {
-      if (!checker_.argumentChecker().checkArity(call, member->loc(), 1, 1)) {
+      ArgumentChecker::ResultArityMatches arity = checker_.argumentChecker().checkArity(call, 1, 1);
+      if (arity.isErr()) {
+        checker_.diags_.error(member->loc(), arity.error().message);
         return call;
       }
       call->args[0] = checkIntlNumber(call->args[0], name);
@@ -139,7 +143,9 @@ Expr *IntlMethodChecker::checkIntlMethod(CallExpr *call, MemberExpr *member) {
     break;
   case IntlKind::Collator:
     if (name == "compare") {
-      if (!checker_.argumentChecker().checkArity(call, member->loc(), 2, 2)) {
+      ArgumentChecker::ResultArityMatches arity = checker_.argumentChecker().checkArity(call, 2, 2);
+      if (arity.isErr()) {
+        checker_.diags_.error(member->loc(), arity.error().message);
         return call;
       }
       for (Expr *&arg : call->args) {
@@ -150,7 +156,9 @@ Expr *IntlMethodChecker::checkIntlMethod(CallExpr *call, MemberExpr *member) {
     break;
   case IntlKind::PluralRules:
     if (name == "select") {
-      if (!checker_.argumentChecker().checkArity(call, member->loc(), 1, 1)) {
+      ArgumentChecker::ResultArityMatches arity = checker_.argumentChecker().checkArity(call, 1, 1);
+      if (arity.isErr()) {
+        checker_.diags_.error(member->loc(), arity.error().message);
         return call;
       }
       call->args[0] = checkIntlNumber(call->args[0], name);
@@ -164,7 +172,9 @@ Expr *IntlMethodChecker::checkIntlMethod(CallExpr *call, MemberExpr *member) {
     break;
   case IntlKind::RelativeTimeFormat:
     if (name == "format" || name == "formatToParts") {
-      if (!checker_.argumentChecker().checkArity(call, member->loc(), 2, 2)) {
+      ArgumentChecker::ResultArityMatches arity = checker_.argumentChecker().checkArity(call, 2, 2);
+      if (arity.isErr()) {
+        checker_.diags_.error(member->loc(), arity.error().message);
         return call;
       }
       call->args[0] = checker_.mathChecker().numericArg(call->args[0]);
@@ -197,7 +207,9 @@ Expr *IntlMethodChecker::checkIntlMethod(CallExpr *call, MemberExpr *member) {
     break;
   case IntlKind::ListFormat:
     if (name == "format" || name == "formatToParts") {
-      if (!checker_.argumentChecker().checkArity(call, member->loc(), 1, 1)) {
+      ArgumentChecker::ResultArityMatches arity = checker_.argumentChecker().checkArity(call, 1, 1);
+      if (arity.isErr()) {
+        checker_.diags_.error(member->loc(), arity.error().message);
         return call;
       }
       call->args[0] =
@@ -209,7 +221,9 @@ Expr *IntlMethodChecker::checkIntlMethod(CallExpr *call, MemberExpr *member) {
     break;
   case IntlKind::DisplayNames:
     if (name == "of") {
-      if (!checker_.argumentChecker().checkArity(call, member->loc(), 1, 1)) {
+      ArgumentChecker::ResultArityMatches arity = checker_.argumentChecker().checkArity(call, 1, 1);
+      if (arity.isErr()) {
+        checker_.diags_.error(member->loc(), arity.error().message);
         return call;
       }
       call->args[0] = checker_.argumentChecker().checkArg(call->args[0], Type::string());
@@ -218,7 +232,9 @@ Expr *IntlMethodChecker::checkIntlMethod(CallExpr *call, MemberExpr *member) {
     break;
   case IntlKind::Segmenter:
     if (name == "segment") {
-      if (!checker_.argumentChecker().checkArity(call, member->loc(), 1, 1)) {
+      ArgumentChecker::ResultArityMatches arity = checker_.argumentChecker().checkArity(call, 1, 1);
+      if (arity.isErr()) {
+        checker_.diags_.error(member->loc(), arity.error().message);
         return call;
       }
       call->args[0] = checker_.argumentChecker().checkArg(call->args[0], Type::string());
@@ -227,7 +243,9 @@ Expr *IntlMethodChecker::checkIntlMethod(CallExpr *call, MemberExpr *member) {
     break;
   case IntlKind::Segments:
     if (name == "containing") {
-      if (!checker_.argumentChecker().checkArity(call, member->loc(), 0, 1)) {
+      ArgumentChecker::ResultArityMatches arity = checker_.argumentChecker().checkArity(call, 0, 1);
+      if (arity.isErr()) {
+        checker_.diags_.error(member->loc(), arity.error().message);
         return call;
       }
       if (!call->args.empty()) {
@@ -250,8 +268,13 @@ Expr *IntlMethodChecker::checkIntlMethod(CallExpr *call, MemberExpr *member) {
 
 Expr *IntlMethodChecker::checkNumberLocale(CallExpr *call, MemberExpr *member) {
   call->type = Type::error();
-  if (checker_.callChecker().rejectSpread(call) ||
-      !checker_.argumentChecker().checkArity(call, member->loc(), 0, 2)) {
+  bool rejected = checker_.callChecker().rejectSpread(call);
+  ArgumentChecker::ResultArityMatches arity =
+      rejected ? ok(call) : checker_.argumentChecker().checkArity(call, 0, 2);
+  if (arity.isErr()) {
+    checker_.diags_.error(member->loc(), arity.error().message);
+  }
+  if (rejected || arity.isErr()) {
     return call;
   }
   if (!checker_.intlOptionsChecker().checkIntlArgs(call->args, 0, IntlKind::NumberFormat,
@@ -270,7 +293,9 @@ Expr *IntlMethodChecker::checkStringLocale(CallExpr *call, MemberExpr *member) {
     return call;
   }
   if (member->name == "normalize") {
-    if (!checker_.argumentChecker().checkArity(call, member->loc(), 0, 1)) {
+    ArgumentChecker::ResultArityMatches arity = checker_.argumentChecker().checkArity(call, 0, 1);
+    if (arity.isErr()) {
+      checker_.diags_.error(member->loc(), arity.error().message);
       return call;
     }
     if (!call->args.empty()) {
@@ -295,7 +320,9 @@ Expr *IntlMethodChecker::checkStringLocale(CallExpr *call, MemberExpr *member) {
     call->type = Type::string();
     return call;
   }
-  if (!checker_.argumentChecker().checkArity(call, member->loc(), 1, 3)) {
+  ArgumentChecker::ResultArityMatches arity = checker_.argumentChecker().checkArity(call, 1, 3);
+  if (arity.isErr()) {
+    checker_.diags_.error(member->loc(), arity.error().message);
     return call;
   }
   call->args[0] = checker_.argumentChecker().checkArg(call->args[0], Type::string());

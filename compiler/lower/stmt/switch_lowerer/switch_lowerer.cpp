@@ -10,39 +10,33 @@
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/IR/Intrinsics.h"
 #include "llvm/IR/MDBuilder.h"
-#include "llvm/Support/ConvertUTF.h"
-#include "llvm/Support/ErrorHandling.h"
-#include <array>
 
-using llvm::BasicBlock;
-using llvm::cast;
-using llvm::dyn_cast;
-using llvm::isa;
-using llvm::Value;
 
 namespace tz {
 
-SwitchLowerer::SwitchLowerer(Lowering &lowering) : lowering_(lowering) {}
+SwitchLowerer::SwitchLowerer(Lowering &owner)
+    : lowering(owner) {}
 
 void SwitchLowerer::emitSwitch(SwitchStmt *stmt) {
   const Type *type = stmt->discriminant->type;
-  llvm::SmallVector<llvm::StringRef, 1> labels = std::move(lowering_.pendingLabels_);
-  lowering_.pendingLabels_.clear();
-  size_t depth = lowering_.scopes_.size();
-  lowering_.functionFrame().pushScope();
-  llvm::Value *value = lowering_.exprLowerer().emitExpr(stmt->discriminant);
+  llvm::SmallVector<llvm::StringRef, 1> labels = std::move(this->lowering.pendingLabels_);
+  this->lowering.pendingLabels_.clear();
+  size_t depth = this->lowering.scopes_.size();
+  this->lowering.functionFrame().pushScope();
+  llvm::Value *value = this->lowering.exprLowerer().emitExpr(stmt->discriminant);
   llvm::Value *slot = nullptr;
   if (type->isManaged()) {
-    slot = lowering_.functionFrame().createManagedSlot(type, "switch.value");
-    lowering_.builder_.CreateStore(value, slot);
+    slot = this->lowering.functionFrame().createManagedSlot(type, "switch.value");
+    this->lowering.builder_.CreateStore(value, slot);
   }
 
-  llvm::BasicBlock *exitBlock = lowering_.functionFrame().newBlock("switch.exit");
-  llvm::BasicBlock *endBlock = lowering_.functionFrame().newBlock("switch.end");
+  llvm::BasicBlock *exitBlock = this->lowering.functionFrame().newBlock("switch.exit");
+  llvm::BasicBlock *endBlock = this->lowering.functionFrame().newBlock("switch.end");
   std::vector<llvm::BasicBlock *> bodies;
   llvm::BasicBlock *defaultBody = exitBlock;
   for (const SwitchCase &c : stmt->cases) {
-    bodies.push_back(lowering_.functionFrame().newBlock(c.test ? "switch.case" : "switch.default"));
+    bodies.push_back(
+        this->lowering.functionFrame().newBlock(c.test ? "switch.case" : "switch.default"));
     if (!c.test) {
       defaultBody = bodies.back();
     }
@@ -53,40 +47,40 @@ void SwitchLowerer::emitSwitch(SwitchStmt *stmt) {
     if (!c.test) {
       continue;
     }
-    llvm::Value *test = lowering_.exprLowerer().emitExpr(c.test);
+    llvm::Value *test = this->lowering.exprLowerer().emitExpr(c.test);
     llvm::Value *current =
-        slot ? lowering_.builder_.CreateLoad(lowering_.moduleBuilder().lower(type), slot) : value;
+        slot ? this->lowering.builder_.CreateLoad(this->lowering.moduleBuilder().lower(type), slot)
+             : value;
     llvm::Value *equal;
     if (!c.compareType) {
-      equal =
-          type->isOptional()
-              ? lowering_.builder_.CreateNot(lowering_.optionalLowerer().optionalHas(current, type))
-          : type->isUndefined() ? lowering_.builder_.getTrue()
-                                : lowering_.builder_.getFalse();
+      equal = type->isOptional()    ? this->lowering.builder_.CreateNot(
+                                          this->lowering.optionalLowerer().optionalHas(current, type))
+              : type->isUndefined() ? this->lowering.builder_.getTrue()
+                                    : this->lowering.builder_.getFalse();
     } else {
-      equal = lowering_.equalityLowerer().emitValuesEqual(
-          lowering_.exprLowerer().emitConversion(current, type, c.compareType), test,
+      equal = this->lowering.equalityLowerer().emitValuesEqual(
+          this->lowering.exprLowerer().emitConversion(current, type, c.compareType), test,
           c.compareType);
     }
-    lowering_.refCounts().releaseValue(test, c.test->type);
-    llvm::BasicBlock *next = lowering_.functionFrame().newBlock("switch.test");
-    lowering_.builder_.CreateCondBr(equal, bodies[i], next);
-    lowering_.functionFrame().switchTo(next);
+    this->lowering.refCounts().releaseValue(test, c.test->type);
+    llvm::BasicBlock *next = this->lowering.functionFrame().newBlock("switch.test");
+    this->lowering.builder_.CreateCondBr(equal, bodies[i], next);
+    this->lowering.functionFrame().switchTo(next);
   }
-  lowering_.builder_.CreateBr(defaultBody);
+  this->lowering.builder_.CreateBr(defaultBody);
 
-  lowering_.targets_.push_back({labels, false, true, endBlock, nullptr, depth});
+  this->lowering.targets_.push_back({labels, false, true, endBlock, nullptr, depth});
   for (size_t i = 0; i < stmt->cases.size(); ++i) {
-    lowering_.functionFrame().switchTo(bodies[i]);
+    this->lowering.functionFrame().switchTo(bodies[i]);
     for (Stmt *s : stmt->cases[i].body) {
-      lowering_.stmtLowerer().emitStmt(s);
+      this->lowering.stmtLowerer().emitStmt(s);
     }
-    lowering_.functionFrame().branchTo(i + 1 < bodies.size() ? bodies[i + 1] : exitBlock);
+    this->lowering.functionFrame().branchTo(i + 1 < bodies.size() ? bodies[i + 1] : exitBlock);
   }
-  lowering_.targets_.pop_back();
-  lowering_.functionFrame().switchTo(exitBlock);
-  lowering_.functionFrame().popScope();
-  lowering_.functionFrame().emitBlock(endBlock);
+  this->lowering.targets_.pop_back();
+  this->lowering.functionFrame().switchTo(exitBlock);
+  this->lowering.functionFrame().popScope();
+  this->lowering.functionFrame().emitBlock(endBlock);
 }
 
 }

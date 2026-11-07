@@ -5,11 +5,9 @@
 #include "compiler/infer/return_inferrer/return_inferrer.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/StringSet.h"
-#include <functional>
 
 using llvm::cast;
 using llvm::dyn_cast;
-using llvm::dyn_cast_or_null;
 using llvm::isa;
 
 namespace tz {
@@ -336,9 +334,7 @@ std::vector<CallExpr *> tailCallsIn(FunctionDecl *fn) {
   return calls;
 }
 
-namespace {
-
-void collectAssigned(const Stmt *stmt, std::vector<llvm::StringRef> &names) {
+void NestedFunctions::collectAssigned(const Stmt *stmt, std::vector<llvm::StringRef> &names) {
   visitExprs(stmt, [&](const Expr *e) {
     const Expr *target = nullptr;
     if (auto *assign = dyn_cast<AssignExpr>(e)) {
@@ -354,9 +350,9 @@ void collectAssigned(const Stmt *stmt, std::vector<llvm::StringRef> &names) {
   });
 }
 
-}
 
-NestedFunctions::NestedFunctions(Checker &checker) : checker_(checker) {}
+NestedFunctions::NestedFunctions(Checker &owner)
+    : checker(owner) {}
 
 NestedGroup *NestedFunctions::declareNested(BlockStmt *block) {
   std::vector<FunctionDecl *> members;
@@ -368,26 +364,26 @@ NestedGroup *NestedFunctions::declareNested(BlockStmt *block) {
   if (members.empty()) {
     return nullptr;
   }
-  NestedGroup *group = checker_.ctx_.newGroup();
+  NestedGroup *group = this->checker.ctx_.newGroup();
   block->group = group;
-  group->owner = checker_.currentDecl();
-  group->scopeDepth = checker_.scopes_.size();
-  group->functionDepth = checker_.functions_.size();
+  group->owner = this->checker.currentDecl();
+  group->scopeDepth = this->checker.scopes_.size();
+  group->functionDepth = this->checker.functions_.size();
   llvm::StringSet<> names;
   for (FunctionDecl *fn : members) {
     fn->group = group;
-    fn->parent = checker_.currentDecl();
+    fn->parent = this->checker.currentDecl();
     group->members.push_back(fn);
     names.insert(fn->name);
-    VarSymbol *var = checker_.ctx_.newVar();
+    VarSymbol *var = this->checker.ctx_.newVar();
     var->name = fn->name;
     var->loc = fn->loc();
     var->isConst = true;
-    var->place = VarSymbol::localPlace(checker_.currentDecl(), 0);
+    var->place = VarSymbol::localPlace(this->checker.currentDecl(), 0);
     var->holds = DeclaredFunction{.function = fn};
     fn->var = var;
-    checker_.functionChecker().declareFunction(fn, var);
-    collectAssigned(fn->body, group->assignedNames);
+    this->checker.functionChecker().declareFunction(fn, var);
+    NestedFunctions::collectAssigned(fn->body, group->assignedNames);
   }
   for (Stmt *stmt : block->body) {
     if (auto *decl = dyn_cast<VarDeclStmt>(stmt)) {
@@ -406,7 +402,7 @@ NestedGroup *NestedFunctions::declareNested(BlockStmt *block) {
       group->firstUse = i;
     }
   }
-  checker_.callCycles().findCycles(group->members);
+  this->checker.callCycles().findCycles(group->members);
 
   return group;
 }
@@ -415,14 +411,14 @@ void NestedFunctions::finishGroup(NestedGroup *group) {
   group->finished = true;
   for (FunctionDecl *fn : group->members) {
     if (!fn->sym->ret) {
-      checker_.returnInferrer().inferReturnType(fn->sym);
+      this->checker.returnInferrer().inferReturnType(fn->sym);
     }
     if (fn->checked) {
       continue;
     }
-    Checker::BodyState saved = checker_.returnInferrer().enterBody(fn);
-    checker_.functionChecker().checkFunctionBody(fn);
-    checker_.returnInferrer().leaveBody(saved);
+    Checker::BodyState saved = this->checker.returnInferrer().enterBody(fn);
+    this->checker.functionChecker().checkFunctionBody(fn);
+    this->checker.returnInferrer().leaveBody(saved);
   }
 
   auto declaredAfter = [&](const NestedGroup::Use &use) -> VarSymbol * {
@@ -446,12 +442,12 @@ void NestedFunctions::finishGroup(NestedGroup *group) {
   };
   for (const NestedGroup::Use &use : group->uses) {
     if (VarSymbol *var = declaredAfter(use)) {
-      checker_.diags_.error(
+      this->checker.diags_.error(
           use.loc, "'" + use.fn->name + "' uses '" + var->name +
                        "' before it is declared: JavaScript would throw a ReferenceError when it "
                        "runs here; move the declaration of '" +
                        var->name + "' up");
-      checker_.diags_.note(var->loc, "'" + var->name + "' is declared here");
+      this->checker.diags_.note(var->loc, "'" + var->name + "' is declared here");
     }
   }
 }
@@ -462,11 +458,11 @@ void NestedFunctions::noteUse(VarSymbol *var, llvm::SMLoc loc) {
     return;
   }
   if (FunctionDecl *member = var->function();
-      member && checker_.currentDecl() == member->group->owner) {
-    member->group->uses.push_back({member, checker_.seq_, loc});
+      member && this->checker.currentDecl() == member->group->owner) {
+    member->group->uses.push_back({member, this->checker.seq_, loc});
   }
-  for (size_t i = checker_.functions_.size(); i-- > 0;) {
-    FunctionDecl *fn = checker_.functions_[i];
+  for (size_t i = this->checker.functions_.size(); i-- > 0;) {
+    FunctionDecl *fn = this->checker.functions_[i];
     if (fn == var->owner() || fn == var->lambda()) {
       break;
     }

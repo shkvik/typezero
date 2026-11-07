@@ -6,14 +6,12 @@
 
 namespace tz {
 
-namespace {
-
-bool mentions(const TypeRef &ref, llvm::StringRef name) {
+bool GenericWidening::mentions(const TypeRef &ref, llvm::StringRef name) {
   if (ref.kind() == TypeRefKind::NAME_REF && ref.name == name) {
     return true;
   }
   for (const TypeRef &arg : ref.args) {
-    if (mentions(arg, name)) {
+    if (GenericWidening::mentions(arg, name)) {
       return true;
     }
   }
@@ -21,19 +19,19 @@ bool mentions(const TypeRef &ref, llvm::StringRef name) {
   return false;
 }
 
-std::map<std::pair<const ClassDecl *, size_t>, bool> &knownVariance() {
+std::map<std::pair<const ClassDecl *, size_t>, bool> &GenericWidening::knownVariance() {
   static std::map<std::pair<const ClassDecl *, size_t>, bool> known;
 
   return known;
 }
 
-std::string writerOf(const ClassDecl *generic, llvm::StringRef name) {
+std::string GenericWidening::writerOf(const ClassDecl *generic, llvm::StringRef name) {
   for (const FunctionDecl *fn : generic->methods) {
     if (fn->isStatic() || fn->access() != Access::Public) {
       continue;
     }
     for (const Param &param : fn->params) {
-      if (param.type && mentions(*param.type, name)) {
+      if (param.type && GenericWidening::mentions(*param.type, name)) {
         return "its public method '" + fn->name.str() + "' takes " + name.str();
       }
     }
@@ -42,7 +40,7 @@ std::string writerOf(const ClassDecl *generic, llvm::StringRef name) {
     if (field.isStatic() || field.access != Access::Public || field.readonly) {
       continue;
     }
-    if (field.type && mentions(*field.type, name)) {
+    if (field.type && GenericWidening::mentions(*field.type, name)) {
       return "its public field '" + field.name.str() + "' can be set";
     }
   }
@@ -50,13 +48,13 @@ std::string writerOf(const ClassDecl *generic, llvm::StringRef name) {
   return "";
 }
 
-bool writtenFromOutside(const ClassDecl *generic, llvm::StringRef name) {
+bool GenericWidening::writtenFromOutside(const ClassDecl *generic, llvm::StringRef name) {
   for (const FunctionDecl *fn : generic->methods) {
     if (fn->isStatic() || fn->access() != Access::Public) {
       continue;
     }
     for (const Param &param : fn->params) {
-      if (param.type && mentions(*param.type, name)) {
+      if (param.type && GenericWidening::mentions(*param.type, name)) {
         return true;
       }
     }
@@ -65,7 +63,7 @@ bool writtenFromOutside(const ClassDecl *generic, llvm::StringRef name) {
     if (field.isStatic() || field.access != Access::Public || field.readonly) {
       continue;
     }
-    if (field.type && mentions(*field.type, name)) {
+    if (field.type && GenericWidening::mentions(*field.type, name)) {
       return true;
     }
   }
@@ -73,7 +71,7 @@ bool writtenFromOutside(const ClassDecl *generic, llvm::StringRef name) {
     for (const Param &param : constructor->params) {
       bool open =
           param.property && param.property->access == Access::Public && !param.property->readonly;
-      if (open && param.type && mentions(*param.type, name)) {
+      if (open && param.type && GenericWidening::mentions(*param.type, name)) {
         return true;
       }
     }
@@ -82,8 +80,8 @@ bool writtenFromOutside(const ClassDecl *generic, llvm::StringRef name) {
   return false;
 }
 
-bool passedOnSafely(const ClassDecl *generic, llvm::StringRef name) {
-  if (!generic->base || !mentions(*generic->base, name)) {
+bool GenericWidening::passedOnSafely(const ClassDecl *generic, llvm::StringRef name) {
+  if (!generic->base || !GenericWidening::mentions(*generic->base, name)) {
     return true;
   }
   const ClassDecl *parent = generic->parent;
@@ -93,7 +91,7 @@ bool passedOnSafely(const ClassDecl *generic, llvm::StringRef name) {
   }
   const std::vector<TypeRef> &args = generic->base->args;
   for (size_t i = 0; i < args.size(); ++i) {
-    if (!mentions(args[i], name)) {
+    if (!GenericWidening::mentions(args[i], name)) {
       continue;
     }
     bool direct = args[i].kind() == TypeRefKind::NAME_REF && args[i].name == name;
@@ -105,36 +103,38 @@ bool passedOnSafely(const ClassDecl *generic, llvm::StringRef name) {
   return true;
 }
 
-bool referenceFits(const Type *own, const Type *wide) {
+bool GenericWidening::referenceFits(const Type *own, const Type *wide) {
   if (own == wide || own->isNever()) {
     return true;
   }
   if (own->isUnion() && !own->isTagged()) {
-    return llvm::all_of(own->members(), [&](const Type *m) { return referenceFits(m, wide); });
+    return llvm::all_of(own->members(),
+                        [&](const Type *m) { return GenericWidening::referenceFits(m, wide); });
   }
   if (wide->isUnion() && !wide->isTagged()) {
-    return llvm::any_of(wide->members(), [&](const Type *m) { return referenceFits(own, m); });
+    return llvm::any_of(wide->members(),
+                        [&](const Type *m) { return GenericWidening::referenceFits(own, m); });
   }
 
   return WideWrites::sameReference(own, wide);
 }
 
-}
-
-GenericWidening::GenericWidening(Checker &checker) : checker_(checker) {}
+GenericWidening::GenericWidening(Checker &owner)
+    : checker(owner) {}
 
 bool GenericWidening::covariant(const ClassDecl *generic, size_t index) {
   if (index >= generic->typeParams.size()) {
     return false;
   }
   auto key = std::make_pair(generic, index);
-  std::map<std::pair<const ClassDecl *, size_t>, bool> &known = knownVariance();
+  std::map<std::pair<const ClassDecl *, size_t>, bool> &known = GenericWidening::knownVariance();
   if (auto found = known.find(key); found != known.end()) {
     return found->second;
   }
   known[key] = false;
   llvm::StringRef name = generic->typeParams[index].name;
-  bool safe = !writtenFromOutside(generic, name) && passedOnSafely(generic, name);
+  bool safe = !GenericWidening::writtenFromOutside(generic, name) &&
+              GenericWidening::passedOnSafely(generic, name);
   known[key] = safe;
 
   return safe;
@@ -159,16 +159,18 @@ bool GenericWidening::widens(const Type *from, const Type *to) {
   if (!target || !source || !target->generic()) {
     return false;
   }
-  const ClassDecl *instance = instanceOf(source, target->generic());
+  const ClassDecl *instance = GenericWidening::instanceOf(source, target->generic());
   if (!instance || instance == target || instance->typeArgs.size() != target->typeArgs.size()) {
     return false;
   }
   for (size_t i = 0; i < target->typeArgs.size(); ++i) {
-    const Type *own = instance->typeArgs[i], *wide = target->typeArgs[i];
+    const Type *own = instance->typeArgs[i];
+    const Type *wide = target->typeArgs[i];
     if (own == wide) {
       continue;
     }
-    if (!covariant(target->generic(), i) || !referenceFits(own, wide)) {
+    if (!GenericWidening::covariant(target->generic(), i) ||
+        !GenericWidening::referenceFits(own, wide)) {
       return false;
     }
   }
@@ -182,20 +184,22 @@ std::string GenericWidening::whyNot(const Type *from, const Type *to) {
     return "";
   }
   const ClassDecl *target = to->classDecl();
-  const ClassDecl *instance = instanceOf(from->classDecl(), target->generic());
+  const ClassDecl *instance = GenericWidening::instanceOf(from->classDecl(), target->generic());
   if (!instance || instance->typeArgs.size() != target->typeArgs.size()) {
     return "";
   }
   for (size_t i = 0; i < target->typeArgs.size(); ++i) {
-    const Type *own = instance->typeArgs[i], *wide = target->typeArgs[i];
+    const Type *own = instance->typeArgs[i];
+    const Type *wide = target->typeArgs[i];
     if (own == wide) {
       continue;
     }
-    if (covariant(target->generic(), i)) {
-      if (referenceFits(own, wide)) {
+    if (GenericWidening::covariant(target->generic(), i)) {
+      if (GenericWidening::referenceFits(own, wide)) {
         continue;
       }
-      std::string ownName = own->name().str(), wideName = wide->name().str();
+      std::string ownName = own->name().str();
+      std::string wideName = wide->name().str();
       bool named = !ownName.empty() && ownName.front() != '{' && !own->isUnion();
       std::string example = named ? ownName : "MyError";
 
@@ -205,7 +209,7 @@ std::string GenericWidening::whyNot(const Type *from, const Type *to) {
              example + " extends " + wideName + " { ... }'";
     }
     llvm::StringRef name = target->generic()->typeParams[i].name;
-    std::string writer = writerOf(target->generic(), name);
+    std::string writer = GenericWidening::writerOf(target->generic(), name);
     if (writer.empty()) {
       writer = "its base class takes " + name.str() + " in";
     }
@@ -235,7 +239,7 @@ Expr *GenericWidening::joined(Expr *expr) {
     std::vector<const ClassDecl *> instances;
     for (const Type *member : members) {
       const ClassDecl *cls = member->isClass() ? member->classDecl() : nullptr;
-      const ClassDecl *instance = cls ? instanceOf(cls, generic) : nullptr;
+      const ClassDecl *instance = cls ? GenericWidening::instanceOf(cls, generic) : nullptr;
       if (!instance || instance->typeArgs.size() != generic->typeParams.size()) {
         break;
       }
@@ -257,19 +261,19 @@ Expr *GenericWidening::joined(Expr *expr) {
         args.push_back(seen.front());
         continue;
       }
-      joinable = covariant(generic, i);
+      joinable = GenericWidening::covariant(generic, i);
       args.push_back(Type::unionOf(seen));
     }
     if (!joinable) {
       return expr;
     }
     ClassDecl *made =
-        checker_.genericClassInstantiator().instantiateClass(generic, args, expr->loc());
+        this->checker.genericClassInstantiator().instantiateClass(generic, args, expr->loc());
     if (!made || !TypeRelations::isImplicitlyConvertible(type, made->type)) {
       return expr;
     }
 
-    return checker_.typeRelations().convert(expr, made->type);
+    return this->checker.typeRelations().convert(expr, made->type);
   }
 
   return expr;

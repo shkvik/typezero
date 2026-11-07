@@ -6,7 +6,7 @@ namespace tz {
 
 class Destination {
 public:
-  explicit Destination(Checker &checker);
+  explicit Destination(Checker &owner);
 
   const Type *literalDestination(const VarDeclarator &d, llvm::ArrayRef<VarDeclarator> later);
   static bool literalShaped(const Expr *expr);
@@ -14,7 +14,7 @@ public:
   const Type *declaredFunctionType(const FunctionDecl *fn);
 
 private:
-  Checker &checker_;
+  Checker &checker;
 };
 
 }

@@ -6,7 +6,7 @@ namespace tz {
 
 class FieldFacts {
 public:
-  explicit FieldFacts(Checker &checker);
+  explicit FieldFacts(Checker &owner);
 
   std::optional<Checker::FieldPath> fieldPath(const Expr *expr) const;
   bool isFieldDefined(const Checker::FieldPath &path) const;
@@ -16,7 +16,7 @@ public:
   Expr *narrowedField(MemberExpr *member);
 
 private:
-  Checker &checker_;
+  Checker &checker;
 };
 
 }

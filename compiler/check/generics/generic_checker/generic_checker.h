@@ -6,7 +6,7 @@ namespace tz {
 
 class GenericChecker {
 public:
-  explicit GenericChecker(Checker &checker);
+  explicit GenericChecker(Checker &owner);
 
   static const Type *apparentType(const Type *type);
   Expr *apparent(Expr *expr);
@@ -19,8 +19,8 @@ public:
   const Type *numberParam(const Type *param, const Type *only = nullptr) const;
 
 private:
-  Checker &checker_;
-  mutable llvm::DenseMap<std::pair<const Type *, const Type *>, const Type *> numberParams_;
+  Checker &checker;
+  mutable llvm::DenseMap<std::pair<const Type *, const Type *>, const Type *> numberParams;
 };
 
 }

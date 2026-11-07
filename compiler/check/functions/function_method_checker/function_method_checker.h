@@ -6,13 +6,13 @@ namespace tz {
 
 class FunctionMethodChecker {
 public:
-  explicit FunctionMethodChecker(Checker &checker);
+  explicit FunctionMethodChecker(Checker &owner);
 
   Expr *checkThisCall(CallExpr *call, MemberExpr *member);
   Expr *checkListMethod(CallExpr *call, MemberExpr *member);
 
 private:
-  Checker &checker_;
+  Checker &checker;
 };
 
 }

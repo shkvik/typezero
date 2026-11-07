@@ -6,7 +6,7 @@ namespace tz {
 
 class FunctionFrame {
 public:
-  explicit FunctionFrame(Lowering &lowering);
+  explicit FunctionFrame(Lowering &owner);
 
   llvm::BasicBlock *newBlock(const llvm::Twine &name);
   void switchTo(llvm::BasicBlock *block);
@@ -26,7 +26,7 @@ public:
   llvm::AllocaInst *createStackSlot(llvm::Type *type, const llvm::Twine &name);
 
 private:
-  Lowering &lowering_;
+  Lowering &lowering;
 };
 
 }

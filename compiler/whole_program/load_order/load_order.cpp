@@ -1,61 +1,68 @@
 #include "compiler/whole_program/load_order/load_order.h"
 #include "compiler/check/top_level_checker/top_level_checker.h"
 #include "llvm/ADT/STLExtras.h"
-#include <cassert>
 
-using llvm::cast;
 using llvm::dyn_cast;
-using llvm::dyn_cast_or_null;
 using llvm::isa;
 
 namespace tz {
 
-namespace {
+LoadOrder::LoadOrder(Checker &owner)
+    : checker(owner) {}
 
-const FunctionDecl *directFunction(const Expr *expr) {
-  while (auto *cast = dyn_cast<CastExpr>(expr)) {
-    expr = cast->operand;
+const FunctionDecl *LoadOrder::directFunction(const Expr *expr) {
+  while (auto *conv = dyn_cast<CastExpr>(expr)) {
+    expr = conv->operand;
   }
-  if (auto *fe = dyn_cast<FunctionExpr>(expr)) {
-    return fe->fn;
+  auto *function = dyn_cast<FunctionExpr>(expr);
+  if (function) {
+    return function->fn;
   }
-  if (auto *name = dyn_cast<NameExpr>(expr)) {
-    if (name->func()) {
-      return name->func()->decl;
-    }
-    if (const VarSymbol *var = name->var()) {
-      return var->function() ? var->function() : var->isConst ? var->lambda() : nullptr;
-    }
+  auto *name = dyn_cast<NameExpr>(expr);
+  if (name && name->func()) {
+    return name->func()->decl;
+  }
+  const VarSymbol *var = name ? name->var() : nullptr;
+  if (var && var->function()) {
+    return var->function();
+  }
+  if (var && var->isConst) {
+    return var->lambda();
   }
 
   return nullptr;
 }
 
-void calledFunctions(const CallExpr *call, llvm::SmallVectorImpl<const FunctionDecl *> &called) {
+void LoadOrder::calledFunctions(const CallExpr *call,
+                                llvm::SmallVectorImpl<const FunctionDecl *> &called) {
   if (call->func() && call->func()->decl) {
     called.push_back(call->func()->decl);
   } else if (call->method()) {
     called.push_back(call->method()->decl);
   }
   for (const UnionMethod &m : call->unionMethods()) {
+    const FunctionDecl *direct =
+        !m.method && call->callee ? LoadOrder::directFunction(call->callee) : nullptr;
     if (m.method) {
       called.push_back(m.method->decl);
-    } else if (const FunctionDecl *fn = call->callee ? directFunction(call->callee) : nullptr) {
-      called.push_back(fn);
+    } else if (direct) {
+      called.push_back(direct);
     }
   }
-  if ((call->builtin() >= Builtin::ArrForEach && call->builtin() <= Builtin::ArrSortWith) ||
-      isResultCallback(call->builtin())) {
+  bool arrayCallback =
+      call->builtin() >= Builtin::ArrForEach && call->builtin() <= Builtin::ArrSortWith;
+  if (arrayCallback || isResultCallback(call->builtin())) {
     for (const Expr *arg : call->args) {
-      if (const FunctionDecl *fn = directFunction(arg)) {
+      const FunctionDecl *fn = LoadOrder::directFunction(arg);
+      if (fn) {
         called.push_back(fn);
       }
     }
   }
 }
 
-const CallExpr *constructorCall(const Expr *expr,
-                                llvm::SmallVectorImpl<const FunctionDecl *> &called) {
+const CallExpr *LoadOrder::constructorCall(const Expr *expr,
+                                           llvm::SmallVectorImpl<const FunctionDecl *> &called) {
   auto *create = dyn_cast<NewExpr>(expr);
   if (!create || !create->cls() || !create->ctor()) {
     return nullptr;
@@ -70,105 +77,104 @@ const CallExpr *constructorCall(const Expr *expr,
   return called.empty() ? nullptr : create->ctor();
 }
 
-std::string calleeName(const FunctionDecl *fn) {
-  if (!fn->cls()) {
-    return quotedName(fn->name);
+std::string LoadOrder::calleeName(const FunctionDecl *fn) {
+  const ClassDecl *cls = fn->cls();
+  if (!cls) {
+    return ErrorTextLateUse::function(fn->name);
   }
-  if (fn == fn->cls()->init || fn->isConstructor()) {
-    return "'new " + fn->cls()->name.str() + "()'";
+  if (fn == cls->init || fn->isConstructor()) {
+    return ErrorTextLateUse::creation(cls->name);
   }
 
-  return "'" + fn->cls()->name.str() + "." + fn->name.str() + "'";
+  return ErrorTextLateUse::method(cls->name, fn->name);
 }
 
+void LoadOrder::need(const FunctionDecl *fn, LoadState &state) {
+  bool added = state.effects.try_emplace(fn).second;
+  if (added) {
+    state.queue.push_back(fn);
+  }
 }
 
-LoadOrder::LoadOrder(Checker &checker) : checker_(checker) {}
-
-void LoadOrder::checkLoadOrder(SourceFile &program) {
-  llvm::DenseMap<const VarSymbol *, unsigned> setAt;
-  llvm::DenseMap<const VarSymbol *, Module *> homes;
-  unsigned count = 0;
+void LoadOrder::declarationOrder(SourceFile &program, LoadState &state) {
+  int count = 0;
   for (Module *module : program.modules) {
     for (Stmt *item : module->file.items) {
-      if (auto *decl = dyn_cast<VarDeclStmt>(item)) {
-        for (const VarDeclarator &d : decl->decls) {
-          if (d.sym) {
-            setAt[d.sym] = ++count;
-            homes[d.sym] = module;
-          }
+      auto *decl = dyn_cast<VarDeclStmt>(item);
+      if (!decl) {
+        continue;
+      }
+      for (const VarDeclarator &d : decl->decls) {
+        if (d.sym) {
+          ++count;
+          state.setAt[d.sym] = count;
+          state.homes[d.sym] = module;
         }
       }
     }
   }
+}
 
-  struct Use {
-    const VarSymbol *var = nullptr;
-    unsigned setAt = 0;
-    llvm::SMLoc loc;
-  };
-  struct Effects {
-    Use latest;
-    std::vector<const FunctionDecl *> calls;
-  };
-  llvm::DenseMap<const FunctionDecl *, Effects> effects;
-  std::vector<const FunctionDecl *> queue;
-  auto need = [&](const FunctionDecl *fn) {
-    if (effects.try_emplace(fn).second) {
-      queue.push_back(fn);
+LoadOrder::ResultReadAfterSet LoadOrder::earlyRead(const NameExpr *name, const Module *module,
+                                                   int time, const LoadState &state) {
+  const VarSymbol *var = name->var();
+  auto found = var ? state.setAt.find(var) : state.setAt.end();
+  bool early = found != state.setAt.end() && found->second > time;
+  Module *home = early ? state.homes.lookup(var) : nullptr;
+  if (early && home == module) {
+    std::string message = ErrorTextEarlyRead::sameFile(name->name);
+
+    return err(LoadOrderEarlyReadError{
+        .code = LoadOrderEarlyReadErrorCode::USED_BEFORE_DECLARED,
+        .message = message,
+    });
+  }
+  if (early) {
+    std::string what = ErrorTextEarlyRead::label(name->name, var->name, home->name);
+    std::string message = TopLevelChecker::readBeforeLoad(module, what, home, var->name);
+
+    return err(LoadOrderEarlyReadError{
+        .code = LoadOrderEarlyReadErrorCode::READ_BEFORE_LOADED,
+        .message = message,
+    });
+  }
+
+  return ok(name);
+}
+
+void LoadOrder::visitTopLevel(const Expr *e, Module *module, int time, LoadState &state) {
+  auto *name = dyn_cast<NameExpr>(e);
+  if (name) {
+    ResultReadAfterSet read = LoadOrder::earlyRead(name, module, time, state);
+    if (read.isErr()) {
+      this->checker.diags_.error(name->loc(), read.error().message);
     }
-  };
+    return;
+  }
 
-  struct Site {
-    const CallExpr *call;
-    llvm::SmallVector<const FunctionDecl *, 2> called;
-    unsigned time;
-    Module *module;
-  };
-  std::vector<Site> sites;
-  unsigned time = 0;
+  llvm::SmallVector<const FunctionDecl *, 2> constructed;
+  const CallExpr *ctor = LoadOrder::constructorCall(e, constructed);
+  const CallExpr *call = ctor ? ctor : dyn_cast<CallExpr>(e);
+  if (!call) {
+    return;
+  }
+  Site site{.time = time, .module = module, .call = call, .called = constructed};
+  if (constructed.empty()) {
+    LoadOrder::calledFunctions(call, site.called);
+  }
+  if (site.called.empty()) {
+    return;
+  }
+  for (const FunctionDecl *fn : site.called) {
+    LoadOrder::need(fn, state);
+  }
+  state.sites.push_back(std::move(site));
+}
+
+void LoadOrder::topLevelUses(SourceFile &program, LoadState &state) {
+  int time = 0;
   for (Module *module : program.modules) {
-    auto visit = [&](const Expr *e) {
-      if (auto *name = dyn_cast<NameExpr>(e)) {
-        auto found = name->var() ? setAt.find(name->var()) : setAt.end();
-        if (found == setAt.end() || found->second <= time) {
-          return;
-        }
-        Module *home = homes.lookup(name->var());
-        std::string what = "'" + name->name.str() + "'";
-        if (name->name != name->var()->name) {
-          what += " ('" + name->var()->name.str() + "' of " + home->name + ")";
-        } else {
-          what += " of " + home->name;
-        }
-        if (home == module) {
-          checker_.diags_.error(name->loc(), "'" + name->name + "' is used before it is declared");
-        } else {
-          checker_.diags_.error(
-              name->loc(), TopLevelChecker::readBeforeLoad(module, what, home, name->var()->name));
-        }
-        return;
-      }
-      llvm::SmallVector<const FunctionDecl *, 2> constructed;
-      auto *call = dyn_cast<CallExpr>(e);
-      if (const CallExpr *ctor = constructorCall(e, constructed)) {
-        call = const_cast<CallExpr *>(ctor);
-      }
-      if (!call) {
-        return;
-      }
-      Site site{call, constructed, time, module};
-      if (constructed.empty()) {
-        calledFunctions(call, site.called);
-      }
-      if (site.called.empty()) {
-        return;
-      }
-      for (const FunctionDecl *fn : site.called) {
-        need(fn);
-      }
-      sites.push_back(std::move(site));
-    };
+    auto visit = [&](const Expr *e) { this->visitTopLevel(e, module, time, state); };
     for (Stmt *item : module->file.items) {
       if (isa<FunctionDecl>(item)) {
         continue;
@@ -188,42 +194,48 @@ void LoadOrder::checkLoadOrder(SourceFile &program) {
       }
     }
   }
+}
 
-  for (size_t i = 0; i < queue.size(); ++i) {
-    const FunctionDecl *fn = queue[i];
-    Effects own;
-    auto visit = [&](const Expr *e) {
-      if (auto *name = dyn_cast<NameExpr>(e)) {
-        auto found = name->var() ? setAt.find(name->var()) : setAt.end();
-        if (found != setAt.end() && found->second > own.latest.setAt) {
-          own.latest = {name->var(), found->second, name->loc()};
-        }
-      } else if (auto *call = dyn_cast<CallExpr>(e)) {
-        llvm::SmallVector<const FunctionDecl *, 2> called;
-        calledFunctions(call, called);
-        own.calls.insert(own.calls.end(), called.begin(), called.end());
-      } else {
-        llvm::SmallVector<const FunctionDecl *, 2> called;
-        constructorCall(e, called);
-        own.calls.insert(own.calls.end(), called.begin(), called.end());
+void LoadOrder::functionEffects(const FunctionDecl *fn, LoadState &state) {
+  Effects own;
+  auto visit = [&](const Expr *e) {
+    auto *name = dyn_cast<NameExpr>(e);
+    auto *call = dyn_cast<CallExpr>(e);
+    if (name) {
+      auto found = name->var() ? state.setAt.find(name->var()) : state.setAt.end();
+      bool later = found != state.setAt.end() && found->second > own.latest.setAt;
+      if (later) {
+        own.latest = Use{.setAt = found->second, .loc = name->loc(), .var = name->var()};
       }
-    };
-    for (const Param &param : fn->params) {
-      if (param.defaultValue()) {
-        visitExprs(param.defaultValue(), visit, false);
-      }
+      return;
     }
-    visitExprs(fn->body, visit, false);
-    for (const FunctionDecl *callee : own.calls) {
-      need(callee);
+    llvm::SmallVector<const FunctionDecl *, 2> called;
+    if (call) {
+      LoadOrder::calledFunctions(call, called);
+    } else {
+      LoadOrder::constructorCall(e, called);
     }
-    effects[fn] = std::move(own);
+    own.calls.insert(own.calls.end(), called.begin(), called.end());
+  };
+  for (const Param &param : fn->params) {
+    if (param.defaultValue()) {
+      visitExprs(param.defaultValue(), visit, false);
+    }
   }
-  for (bool changed = true; changed;) {
+  visitExprs(fn->body, visit, false);
+  for (const FunctionDecl *callee : own.calls) {
+    LoadOrder::need(callee, state);
+  }
+  state.effects[fn] = std::move(own);
+}
+
+void LoadOrder::spreadEffects(LoadState &state) {
+  bool changed = true;
+  while (changed) {
     changed = false;
-    for (auto &entry : effects) {
+    for (auto &entry : state.effects) {
       for (const FunctionDecl *callee : entry.second.calls) {
-        const Use &theirs = effects.find(callee)->second.latest;
+        const Use &theirs = state.effects.find(callee)->second.latest;
         if (theirs.setAt > entry.second.latest.setAt) {
           entry.second.latest = theirs;
           changed = true;
@@ -231,35 +243,64 @@ void LoadOrder::checkLoadOrder(SourceFile &program) {
       }
     }
   }
+}
 
-  for (const Site &site : sites) {
+LoadOrder::ResultSetBeforeRun LoadOrder::lateUse(const Site &site, const FunctionDecl *fn,
+                                                 const Use &use, const LoadState &state) {
+  bool late = use.var && use.setAt > site.time;
+  Module *home = late ? state.homes.lookup(use.var) : nullptr;
+  if (late && home == site.module) {
+    std::string callee = LoadOrder::calleeName(fn);
+    std::string message = ErrorTextLateUse::sameFile(callee, use.var->name);
+
+    return err(LoadOrderLateUseError{
+        .code = LoadOrderLateUseErrorCode::USED_BEFORE_DECLARED,
+        .message = message,
+    });
+  }
+  if (late) {
+    std::string callee = LoadOrder::calleeName(fn);
+    std::string chain = TopLevelChecker::loadChain(site.module, home);
+    std::string message =
+        ErrorTextLateUse::otherFile(site.module->name, callee, use.var->name, home->name, chain);
+
+    return err(LoadOrderLateUseError{
+        .code = LoadOrderLateUseErrorCode::READ_BEFORE_LOADED,
+        .message = message,
+    });
+  }
+
+  return ok(fn);
+}
+
+void LoadOrder::reportSites(const LoadState &state) {
+  for (const Site &site : state.sites) {
     for (const FunctionDecl *fn : site.called) {
-      const Use &use = effects.find(fn)->second.latest;
-      if (!use.var || use.setAt <= site.time) {
+      const Use &use = state.effects.find(fn)->second.latest;
+      ResultSetBeforeRun used = LoadOrder::lateUse(site, fn, use, state);
+      if (used.isOk()) {
         continue;
       }
-      Module *home = homes.lookup(use.var);
-      std::string var = use.var->name.str();
-      if (home == site.module) {
-        checker_.diags_.error(site.call->loc(),
-                              calleeName(fn) + " uses '" + var +
-                                  "' before it is declared: JavaScript would throw a "
-                                  "ReferenceError when it runs here; move the declaration of '" +
-                                  var + "' up");
-      } else {
-        checker_.diags_.error(
-            site.call->loc(),
-            site.module->name + " calls " + calleeName(fn) + " while it loads, and it reads '" +
-                var + "' of " + home->name +
-                ", which is not loaded yet: " + TopLevelChecker::loadChain(site.module, home) +
-                "; make the call inside a function, or move '" + var +
-                "' to a file outside the cycle");
-      }
-      checker_.diags_.note(use.loc, "'" + var + "' is used here");
-      checker_.diags_.note(use.var->loc, "'" + var + "' is declared here");
+      std::string usedHere = ErrorTextLateUse::usedHere(use.var->name);
+      std::string declared = ErrorTextLateUse::declared(use.var->name);
+      this->checker.diags_.error(site.call->loc(), used.error().message);
+      this->checker.diags_.note(use.loc, usedHere);
+      this->checker.diags_.note(use.var->loc, declared);
       break;
     }
   }
+}
+
+void LoadOrder::checkLoadOrder(SourceFile &program) {
+  LoadState state;
+  LoadOrder::declarationOrder(program, state);
+  this->topLevelUses(program, state);
+  for (size_t i = 0; i < state.queue.size(); ++i) {
+    const FunctionDecl *fn = state.queue[i];
+    LoadOrder::functionEffects(fn, state);
+  }
+  LoadOrder::spreadEffects(state);
+  this->reportSites(state);
 }
 
 }

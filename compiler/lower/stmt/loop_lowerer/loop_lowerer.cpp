@@ -14,37 +14,34 @@
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/IR/Intrinsics.h"
 #include "llvm/IR/MDBuilder.h"
-#include "llvm/Support/ConvertUTF.h"
 #include "llvm/Support/ErrorHandling.h"
-#include <array>
 
-using llvm::BasicBlock;
 using llvm::cast;
 using llvm::dyn_cast;
 using llvm::isa;
-using llvm::Value;
 
 namespace tz {
 
-LoopLowerer::LoopLowerer(Lowering &lowering) : lowering_(lowering) {}
+LoopLowerer::LoopLowerer(Lowering &owner)
+    : lowering(owner) {}
 
 void LoopLowerer::pushLoop(llvm::BasicBlock *breakTarget, llvm::BasicBlock *continueTarget,
                            size_t scopeDepth) {
-  lowering_.targets_.push_back(
-      {std::move(lowering_.pendingLabels_), true, false, breakTarget, continueTarget, scopeDepth});
-  lowering_.pendingLabels_.clear();
+  this->lowering.targets_.push_back({std::move(this->lowering.pendingLabels_), true, false,
+                                     breakTarget, continueTarget, scopeDepth});
+  this->lowering.pendingLabels_.clear();
 }
 
 void LoopLowerer::emitJump(Stmt *stmt) {
   bool isBreak = isa<BreakStmt>(stmt);
   llvm::StringRef label = isBreak ? cast<BreakStmt>(stmt)->label : cast<ContinueStmt>(stmt)->label;
-  for (size_t i = lowering_.targets_.size(); i > 0; --i) {
-    const Lowering::JumpTarget &t = lowering_.targets_[i - 1];
+  for (size_t i = this->lowering.targets_.size(); i > 0; --i) {
+    const Lowering::JumpTarget &t = this->lowering.targets_[i - 1];
     bool matches = !label.empty() ? llvm::is_contained(t.labels, label)
                    : isBreak      ? t.isLoop || t.isSwitch
                                   : t.isLoop;
     if (matches) {
-      lowering_.exitLowerer().emitJumpTo(i - 1, isBreak);
+      this->lowering.exitLowerer().emitJumpTo(i - 1, isBreak);
       return;
     }
   }
@@ -60,129 +57,135 @@ void LoopLowerer::emitLabeled(LabeledStmt *stmt) {
   }
   if (isa<WhileStmt>(body) || isa<DoWhileStmt>(body) || isa<ForStmt>(body) ||
       isa<ForOfStmt>(body) || isa<SwitchStmt>(body)) {
-    lowering_.pendingLabels_ = labels;
-    lowering_.stmtLowerer().emitStmt(body);
+    this->lowering.pendingLabels_ = labels;
+    this->lowering.stmtLowerer().emitStmt(body);
     return;
   }
-  llvm::BasicBlock *endBlock = lowering_.functionFrame().newBlock("label.end");
-  lowering_.targets_.push_back({labels, false, false, endBlock, nullptr, lowering_.scopes_.size()});
-  lowering_.stmtLowerer().emitStmt(body);
-  lowering_.targets_.pop_back();
-  lowering_.functionFrame().emitBlock(endBlock);
+  llvm::BasicBlock *endBlock = this->lowering.functionFrame().newBlock("label.end");
+  this->lowering.targets_.push_back(
+      {labels, false, false, endBlock, nullptr, this->lowering.scopes_.size()});
+  this->lowering.stmtLowerer().emitStmt(body);
+  this->lowering.targets_.pop_back();
+  this->lowering.functionFrame().emitBlock(endBlock);
 }
 
 void LoopLowerer::emitWhile(WhileStmt *stmt) {
-  llvm::BasicBlock *condBlock = lowering_.functionFrame().newBlock("while.cond");
-  llvm::BasicBlock *bodyBlock = lowering_.functionFrame().newBlock("while.body");
-  llvm::BasicBlock *endBlock = lowering_.functionFrame().newBlock("while.end");
+  llvm::BasicBlock *condBlock = this->lowering.functionFrame().newBlock("while.cond");
+  llvm::BasicBlock *bodyBlock = this->lowering.functionFrame().newBlock("while.body");
+  llvm::BasicBlock *endBlock = this->lowering.functionFrame().newBlock("while.end");
 
-  lowering_.functionFrame().emitBlock(condBlock);
-  llvm::Value *cond = lowering_.exprLowerer().emitExpr(stmt->cond);
-  lowering_.builder_.CreateCondBr(cond, bodyBlock, endBlock);
+  this->lowering.functionFrame().emitBlock(condBlock);
+  llvm::Value *cond = this->lowering.exprLowerer().emitExpr(stmt->cond);
+  this->lowering.builder_.CreateCondBr(cond, bodyBlock, endBlock);
 
-  lowering_.functionFrame().switchTo(bodyBlock);
-  pushLoop(endBlock, condBlock, lowering_.scopes_.size());
-  lowering_.stmtLowerer().emitStmt(stmt->body);
-  lowering_.targets_.pop_back();
-  lowering_.functionFrame().branchTo(condBlock);
+  this->lowering.functionFrame().switchTo(bodyBlock);
+  this->pushLoop(endBlock, condBlock, this->lowering.scopes_.size());
+  this->lowering.stmtLowerer().emitStmt(stmt->body);
+  this->lowering.targets_.pop_back();
+  this->lowering.functionFrame().branchTo(condBlock);
 
-  lowering_.functionFrame().switchTo(endBlock);
+  this->lowering.functionFrame().switchTo(endBlock);
 }
 
 void LoopLowerer::emitDoWhile(DoWhileStmt *stmt) {
-  llvm::BasicBlock *bodyBlock = lowering_.functionFrame().newBlock("do.body");
-  llvm::BasicBlock *condBlock = lowering_.functionFrame().newBlock("do.cond");
-  llvm::BasicBlock *endBlock = lowering_.functionFrame().newBlock("do.end");
+  llvm::BasicBlock *bodyBlock = this->lowering.functionFrame().newBlock("do.body");
+  llvm::BasicBlock *condBlock = this->lowering.functionFrame().newBlock("do.cond");
+  llvm::BasicBlock *endBlock = this->lowering.functionFrame().newBlock("do.end");
 
-  lowering_.functionFrame().emitBlock(bodyBlock);
-  pushLoop(endBlock, condBlock, lowering_.scopes_.size());
-  lowering_.stmtLowerer().emitStmt(stmt->body);
-  lowering_.targets_.pop_back();
+  this->lowering.functionFrame().emitBlock(bodyBlock);
+  this->pushLoop(endBlock, condBlock, this->lowering.scopes_.size());
+  this->lowering.stmtLowerer().emitStmt(stmt->body);
+  this->lowering.targets_.pop_back();
 
-  lowering_.functionFrame().emitBlock(condBlock);
-  llvm::Value *cond = lowering_.exprLowerer().emitExpr(stmt->cond);
-  lowering_.builder_.CreateCondBr(cond, bodyBlock, endBlock);
+  this->lowering.functionFrame().emitBlock(condBlock);
+  llvm::Value *cond = this->lowering.exprLowerer().emitExpr(stmt->cond);
+  this->lowering.builder_.CreateCondBr(cond, bodyBlock, endBlock);
 
-  lowering_.functionFrame().switchTo(endBlock);
+  this->lowering.functionFrame().switchTo(endBlock);
 }
 
 void LoopLowerer::emitFor(ForStmt *stmt) {
-  lowering_.functionFrame().pushScope();
+  this->lowering.functionFrame().pushScope();
   if (stmt->init) {
-    lowering_.stmtLowerer().emitStmt(stmt->init);
+    this->lowering.stmtLowerer().emitStmt(stmt->init);
   }
 
-  llvm::BasicBlock *condBlock = lowering_.functionFrame().newBlock("for.cond");
-  llvm::BasicBlock *bodyBlock = lowering_.functionFrame().newBlock("for.body");
-  llvm::BasicBlock *stepBlock = lowering_.functionFrame().newBlock("for.step");
-  llvm::BasicBlock *endBlock = lowering_.functionFrame().newBlock("for.end");
+  llvm::BasicBlock *condBlock = this->lowering.functionFrame().newBlock("for.cond");
+  llvm::BasicBlock *bodyBlock = this->lowering.functionFrame().newBlock("for.body");
+  llvm::BasicBlock *stepBlock = this->lowering.functionFrame().newBlock("for.step");
+  llvm::BasicBlock *endBlock = this->lowering.functionFrame().newBlock("for.end");
 
-  lowering_.functionFrame().emitBlock(condBlock);
+  this->lowering.functionFrame().emitBlock(condBlock);
   if (stmt->cond) {
-    llvm::Value *cond = lowering_.exprLowerer().emitExpr(stmt->cond);
-    lowering_.builder_.CreateCondBr(cond, bodyBlock, endBlock);
+    llvm::Value *cond = this->lowering.exprLowerer().emitExpr(stmt->cond);
+    this->lowering.builder_.CreateCondBr(cond, bodyBlock, endBlock);
   } else {
-    lowering_.builder_.CreateBr(bodyBlock);
+    this->lowering.builder_.CreateBr(bodyBlock);
   }
 
-  lowering_.functionFrame().switchTo(bodyBlock);
-  pushLoop(endBlock, stepBlock, lowering_.scopes_.size());
-  lowering_.stmtLowerer().emitStmt(stmt->body);
-  lowering_.targets_.pop_back();
+  this->lowering.functionFrame().switchTo(bodyBlock);
+  this->pushLoop(endBlock, stepBlock, this->lowering.scopes_.size());
+  this->lowering.stmtLowerer().emitStmt(stmt->body);
+  this->lowering.targets_.pop_back();
 
-  lowering_.functionFrame().emitBlock(stepBlock);
-  if (auto *decl = llvm::dyn_cast_or_null<VarDeclStmt>(stmt->init)) {
+  this->lowering.functionFrame().emitBlock(stepBlock);
+  auto *decl = llvm::dyn_cast_or_null<VarDeclStmt>(stmt->init);
+  if (decl) {
     for (VarDeclarator &d : decl->decls) {
       if (d.alias || !d.sym->boxed()) {
         continue;
       }
       const Type *type = ClosureLowerer::typeOf(d.sym);
-      llvm::Value *slot = lowering_.boxSlots_.lookup(d.sym);
-      llvm::Value *old = lowering_.builder_.CreateLoad(lowering_.builder_.getPtrTy(), slot);
-      llvm::Value *box = lowering_.envLowerer().newBox(type);
-      llvm::Value *value = lowering_.builder_.CreateLoad(
-          lowering_.moduleBuilder().lower(type),
-          lowering_.builder_.CreateStructGEP(lowering_.envLowerer().boxType(type), old, 2));
-      lowering_.refCounts().retainValue(value, type);
-      lowering_.builder_.CreateStore(
-          value, lowering_.builder_.CreateStructGEP(lowering_.envLowerer().boxType(type), box, 2));
-      if (lowering_.isCyclicBox(type)) {
-        lowering_.storeLowerer().groupStore(box, value, type);
+      llvm::Value *slot = this->lowering.boxSlots_.lookup(d.sym);
+      llvm::Value *old =
+          this->lowering.builder_.CreateLoad(this->lowering.builder_.getPtrTy(), slot);
+      llvm::Value *box = this->lowering.envLowerer().newBox(type);
+      llvm::Value *value = this->lowering.builder_.CreateLoad(
+          this->lowering.moduleBuilder().lower(type),
+          this->lowering.builder_.CreateStructGEP(this->lowering.envLowerer().boxType(type), old,
+                                                  2));
+      this->lowering.refCounts().retainValue(value, type);
+      this->lowering.builder_.CreateStore(
+          value, this->lowering.builder_.CreateStructGEP(this->lowering.envLowerer().boxType(type),
+                                                         box, 2));
+      if (this->lowering.isCyclicBox(type)) {
+        this->lowering.storeLowerer().groupStore(box, value, type);
       }
-      lowering_.builder_.CreateStore(box, slot);
-      lowering_.builder_.CreateCall(lowering_.objReleaseFn_, {old});
+      this->lowering.builder_.CreateStore(box, slot);
+      this->lowering.builder_.CreateCall(this->lowering.objReleaseFn_, {old});
     }
   }
   if (stmt->step) {
-    lowering_.stmtLowerer().emitDiscarded(stmt->step);
+    this->lowering.stmtLowerer().emitDiscarded(stmt->step);
   }
-  lowering_.builder_.CreateBr(condBlock);
+  this->lowering.builder_.CreateBr(condBlock);
 
-  lowering_.functionFrame().switchTo(endBlock);
-  lowering_.functionFrame().popScope();
+  this->lowering.functionFrame().switchTo(endBlock);
+  this->lowering.functionFrame().popScope();
 }
 
 void LoopLowerer::emitForOf(ForOfStmt *stmt) {
   if (stmt->isAwait) {
-    lowering_.asyncGeneratorLowerer().emitForAwait(stmt);
+    this->lowering.asyncGeneratorLowerer().emitForAwait(stmt);
     return;
   }
   if (stmt->iterable->type->isIterator() || stmt->iterable->type->isTypedArray()) {
-    lowering_.iteratorLowerer().emitIteratorForOf(stmt);
+    this->lowering.iteratorLowerer().emitIteratorForOf(stmt);
     return;
   }
-  lowering_.functionFrame().pushScope();
+  this->lowering.functionFrame().pushScope();
   const Type *iterableType = stmt->iterable->type;
   llvm::Value *iterableSlot =
-      lowering_.functionFrame().createManagedSlot(iterableType, "for.iterable");
-  lowering_.builder_.CreateStore(lowering_.exprLowerer().emitExpr(stmt->iterable), iterableSlot);
+      this->lowering.functionFrame().createManagedSlot(iterableType, "for.iterable");
+  this->lowering.builder_.CreateStore(this->lowering.exprLowerer().emitExpr(stmt->iterable),
+                                      iterableSlot);
 
-  llvm::BasicBlock *condBlock = lowering_.functionFrame().newBlock("for.of.cond");
-  llvm::BasicBlock *bodyBlock = lowering_.functionFrame().newBlock("for.of.body");
-  llvm::BasicBlock *endBlock = lowering_.functionFrame().newBlock("for.of.end");
-  lowering_.arrayLowerer().emitArrayForOf(stmt, iterableSlot, condBlock, bodyBlock, endBlock);
-  lowering_.functionFrame().switchTo(endBlock);
-  lowering_.functionFrame().popScope();
+  llvm::BasicBlock *condBlock = this->lowering.functionFrame().newBlock("for.of.cond");
+  llvm::BasicBlock *bodyBlock = this->lowering.functionFrame().newBlock("for.of.body");
+  llvm::BasicBlock *endBlock = this->lowering.functionFrame().newBlock("for.of.end");
+  this->lowering.arrayLowerer().emitArrayForOf(stmt, iterableSlot, condBlock, bodyBlock, endBlock);
+  this->lowering.functionFrame().switchTo(endBlock);
+  this->lowering.functionFrame().popScope();
 }
 
 }

@@ -6,7 +6,7 @@ namespace tz {
 
 class DictLowerer {
 public:
-  explicit DictLowerer(Lowering &lowering);
+  explicit DictLowerer(Lowering &owner);
 
   const Lowering::DictLayout &dictLayout(const Type *type);
   llvm::FunctionCallee dictFunction(llvm::StringRef name, llvm::Type *ret,
@@ -28,10 +28,12 @@ public:
   llvm::Value *emitRecordFromObject(llvm::Value *object, const Type *from, const Type *to);
 
 private:
-  Lowering &lowering_;
-  std::map<const Type *, Lowering::DictLayout> dictLayouts_;
-  llvm::StructType *mapTy_ = nullptr;
-  llvm::StructType *mapDescTy_ = nullptr;
+  static std::u16string utf16(llvm::StringRef text);
+
+  Lowering &lowering;
+  std::map<const Type *, Lowering::DictLayout> dictLayouts;
+  llvm::StructType *mapTy = nullptr;
+  llvm::StructType *mapDescTy = nullptr;
 };
 
 }

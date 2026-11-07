@@ -20,15 +20,18 @@ constexpr int64_t kIntMin = std::numeric_limits<int64_t>::min();
 
 constexpr int64_t kIntMax = std::numeric_limits<int64_t>::max();
 
-void addLess(Facts &facts, const Linear &x, const Linear &y, bool orEqual) {
+}
+
+void FlowChecker::addLess(Facts &facts, const Linear &x, const Linear &y, bool orEqual) {
   facts.add(x.term, y.term, y.offset - x.offset + (orEqual ? 1 : 0));
 }
 
-bool isArrayLength(const Term &t) { return t.length && t.var->type->nonOptional()->isArray(); }
-
+bool FlowChecker::isArrayLength(const Term &t) {
+  return t.length && t.var->type->nonOptional()->isArray();
 }
 
-FlowChecker::FlowChecker(Checker &checker) : checker_(checker) {}
+FlowChecker::FlowChecker(Checker &owner)
+    : checker(owner) {}
 
 bool FlowChecker::changedByCalls(const VarSymbol *var) const {
   if (var->isConst) {
@@ -41,7 +44,7 @@ bool FlowChecker::changedByCalls(const VarSymbol *var) const {
     return true;
   }
 
-  return llvm::any_of(checker_.groups_, [&](const NestedGroup *g) {
+  return llvm::any_of(this->checker.groups_, [&](const NestedGroup *g) {
     return llvm::is_contained(g->assignedNames, var->name);
   });
 }
@@ -146,9 +149,9 @@ Checker::Flow FlowChecker::join(const Checker::Flow &a, const Checker::Flow &b) 
 
 void FlowChecker::setDefined(const VarSymbol *var, bool defined) {
   if (defined) {
-    checker_.flow_.defined.insert(var);
+    this->checker.flow_.defined.insert(var);
   } else {
-    checker_.flow_.defined.erase(var);
+    this->checker.flow_.defined.erase(var);
   }
 }
 
@@ -157,56 +160,56 @@ void FlowChecker::assigned(const VarSymbol *var, const Expr *value) {
   if (type->isError()) {
     return;
   }
-  FieldFacts::forgetFieldsOf(checker_.flow_, var);
-  checker_.flow_.undefinedVars.erase(var);
-  llvm::erase_if(checker_.flow_.narrowed,
+  FieldFacts::forgetFieldsOf(this->checker.flow_, var);
+  this->checker.flow_.undefinedVars.erase(var);
+  llvm::erase_if(this->checker.flow_.narrowed,
                  [&](const auto &narrowed) { return narrowed.first == var; });
   if (const Type *base = type->nonOptional();
       base->isUnion() && value->type && !value->type->isError() && value->type != type &&
       TypeRelations::isImplicitlyConvertible(value->type, base)) {
-    UnionNarrowing::narrowVariable(checker_.flow_, var, value->type);
+    UnionNarrowing::narrowVariable(this->checker.flow_, var, value->type);
   }
   if (type->isOptional()) {
-    setDefined(var, !value->type->isOptional() && !value->type->isUndefined());
+    this->setDefined(var, !value->type->isOptional() && !value->type->isUndefined());
   }
   if (type->isResult()) {
     const Type *given = value->type;
-    checker_.flow_.okResults.erase(var);
-    checker_.flow_.errResults.erase(var);
+    this->checker.flow_.okResults.erase(var);
+    this->checker.flow_.errResults.erase(var);
     if (given->isResult() && given->errType()->isNever()) {
-      checker_.flow_.okResults.insert(var);
+      this->checker.flow_.okResults.insert(var);
     } else if (given->isResult() && given->okType()->isNever()) {
-      checker_.flow_.errResults.insert(var);
+      this->checker.flow_.errResults.insert(var);
     }
     return;
   }
 
   if (type->isInteger() && !type->isWrapping()) {
-    std::optional<Linear> v = checker_.indexProofs().linear(value);
+    std::optional<Linear> v = this->checker.indexProofs().linear(value);
     if (v && v->term == Term::of(var)) {
-      incremented(var, v->offset);
+      this->incremented(var, v->offset);
       return;
     }
-    ValueRange range = v ? ValueRange{} : checker_.byteProofs().valueRange(value);
-    checker_.flow_.facts.forget(var);
+    ValueRange range = v ? ValueRange{} : this->checker.byteProofs().valueRange(value);
+    this->checker.flow_.facts.forget(var);
     if (v) {
-      checker_.flow_.facts.addEqual(Term::of(var), v->term, v->offset);
+      this->checker.flow_.facts.addEqual(Term::of(var), v->term, v->offset);
     }
     if (range.lo) {
-      checker_.flow_.facts.add(Term::zero(), Term::of(var), saturatingSub(1, *range.lo));
+      this->checker.flow_.facts.add(Term::zero(), Term::of(var), saturatingSub(1, *range.lo));
     }
     if (range.hi) {
-      checker_.flow_.facts.add(Term::of(var), Term::zero(), saturatingAdd(*range.hi, 1));
+      this->checker.flow_.facts.add(Term::of(var), Term::zero(), saturatingAdd(*range.hi, 1));
     }
     if (auto *call = dyn_cast<CallExpr>(value);
         call && (call->builtin() == Builtin::MathMin || call->builtin() == Builtin::MathMax) &&
         !call->hasSpread()) {
       for (const Expr *arg : call->args) {
-        if (std::optional<Linear> bound = checker_.indexProofs().linear(arg)) {
+        if (std::optional<Linear> bound = this->checker.indexProofs().linear(arg)) {
           if (call->builtin() == Builtin::MathMin) {
-            addLess(checker_.flow_.facts, Linear{Term::of(var), 0}, *bound, true);
+            FlowChecker::addLess(this->checker.flow_.facts, Linear{Term::of(var), 0}, *bound, true);
           } else {
-            addLess(checker_.flow_.facts, *bound, Linear{Term::of(var), 0}, true);
+            FlowChecker::addLess(this->checker.flow_.facts, *bound, Linear{Term::of(var), 0}, true);
           }
         }
       }
@@ -214,7 +217,7 @@ void FlowChecker::assigned(const VarSymbol *var, const Expr *value) {
     return;
   }
 
-  checker_.flow_.facts.forget(var);
+  this->checker.flow_.facts.forget(var);
   const Type *base = type->nonOptional();
   if (!base->isString() && !base->isArray() && !base->isByteView() &&
       base->bytes() != Type::Bytes::ArrayBuffer) {
@@ -223,18 +226,18 @@ void FlowChecker::assigned(const VarSymbol *var, const Expr *value) {
   if (value->type->isOptional() || value->type->isUndefined()) {
     return;
   }
-  if (std::optional<Linear> length = checker_.indexProofs().knownLength(value)) {
+  if (std::optional<Linear> length = this->checker.indexProofs().knownLength(value)) {
     if (length->term != Term::lengthOf(var)) {
-      checker_.flow_.facts.addEqual(Term::lengthOf(var), length->term, length->offset);
+      this->checker.flow_.facts.addEqual(Term::lengthOf(var), length->term, length->offset);
     }
     return;
   }
-  ValueRange range = checker_.indexProofs().lengthRange(value);
+  ValueRange range = this->checker.indexProofs().lengthRange(value);
   if (range.lo) {
-    checker_.flow_.facts.add(Term::zero(), Term::lengthOf(var), saturatingSub(1, *range.lo));
+    this->checker.flow_.facts.add(Term::zero(), Term::lengthOf(var), saturatingSub(1, *range.lo));
   }
   if (range.hi) {
-    checker_.flow_.facts.add(Term::lengthOf(var), Term::zero(), saturatingAdd(*range.hi, 1));
+    this->checker.flow_.facts.add(Term::lengthOf(var), Term::zero(), saturatingAdd(*range.hi, 1));
   }
 }
 
@@ -243,14 +246,14 @@ void FlowChecker::incremented(const VarSymbol *var, int64_t delta) {
     return;
   }
   Term t = Term::of(var);
-  bool safe =
-      delta == 0 ||
-      (delta > 0 ? checker_.flow_.facts.proves(t, Term::zero(), kIntMax - (delta - 1))
-                 : checker_.flow_.facts.proves(Term::zero(), t, saturatingSub(delta + 1, kIntMin)));
+  bool safe = delta == 0 ||
+              (delta > 0 ? this->checker.flow_.facts.proves(t, Term::zero(), kIntMax - (delta - 1))
+                         : this->checker.flow_.facts.proves(Term::zero(), t,
+                                                            saturatingSub(delta + 1, kIntMin)));
   if (safe) {
-    checker_.flow_.facts.shift(t, delta);
+    this->checker.flow_.facts.shift(t, delta);
   } else {
-    checker_.flow_.facts.forget(var);
+    this->checker.flow_.facts.forget(var);
   }
 }
 
@@ -263,7 +266,8 @@ bool FlowChecker::staysLocal(const FunctionDecl *fn, llvm::StringRef name) {
 
     return n && n->name == name;
   };
-  size_t all = 0, safe = 0;
+  size_t all = 0;
+  size_t safe = 0;
   visitExprs(fn->body, [&](const Expr *e) { all += named(e) ? 1 : 0; });
   visitExprs(
       fn->body,
@@ -280,8 +284,8 @@ bool FlowChecker::staysLocal(const FunctionDecl *fn, llvm::StringRef name) {
           for (size_t i = 0; i < call->args.size(); ++i) {
             safe += call->spreads(i) && named(call->args[i]) ? 1 : 0;
           }
-          auto *member = dyn_cast<MemberExpr>(call->callee);
-          if (!member || !named(member->object)) {
+          auto *callee = dyn_cast<MemberExpr>(call->callee);
+          if (!callee || !named(callee->object)) {
             return;
           }
           static const char *const plain[] = {
@@ -291,9 +295,9 @@ bool FlowChecker::staysLocal(const FunctionDecl *fn, llvm::StringRef name) {
           static const char *const callbacks[] = {
               "map",       "filter",   "forEach",       "every",   "some", "find",
               "findIndex", "findLast", "findLastIndex", "flatMap", "sort", "toSorted"};
-          bool reduce = member->name == "reduce" || member->name == "reduceRight";
-          bool calls = llvm::is_contained(callbacks, member->name) || reduce;
-          if (!calls && !llvm::is_contained(plain, member->name)) {
+          bool reduce = callee->name == "reduce" || callee->name == "reduceRight";
+          bool calls = llvm::is_contained(callbacks, callee->name) || reduce;
+          if (!calls && !llvm::is_contained(plain, callee->name)) {
             return;
           }
           if (calls && !llvm::all_of(call->args, [&](const Expr *arg) {
@@ -368,39 +372,42 @@ bool FlowChecker::staysLocal(const FunctionDecl *fn, llvm::StringRef name) {
 
 void FlowChecker::forgetCallEffects(Checker::Flow &flow) const {
   auto part = [&](const Term &t) {
-    return t.var && ((isArrayLength(t) && !t.var->unshared()) || changedByCalls(t.var));
+    return t.var &&
+           ((FlowChecker::isArrayLength(t) && !t.var->unshared()) || this->changedByCalls(t.var));
   };
   auto changed = [&](const Term &t) { return part(t.first()) || part(t.second()); };
   flow.facts.forgetIf([&](const Facts::Fact &f) { return changed(f.lhs) || changed(f.rhs); });
   for (const VarSymbol *var : llvm::to_vector(flow.defined)) {
-    if (changedByCalls(var)) {
+    if (this->changedByCalls(var)) {
       flow.defined.erase(var);
     }
   }
   for (const VarSymbol *var : llvm::to_vector(flow.undefinedVars)) {
-    if (changedByCalls(var)) {
+    if (this->changedByCalls(var)) {
       flow.undefinedVars.erase(var);
     }
   }
   llvm::erase_if(flow.narrowed,
-                 [&](const auto &narrowed) { return changedByCalls(narrowed.first); });
+                 [&](const auto &narrowed) { return this->changedByCalls(narrowed.first); });
   for (auto *results : {&flow.okResults, &flow.errResults}) {
     for (const VarSymbol *var : llvm::to_vector(*results)) {
-      if (changedByCalls(var)) {
+      if (this->changedByCalls(var)) {
         results->erase(var);
       }
     }
   }
   auto fieldChanged = [&](const Checker::FieldPath &path) {
-    return changedByCalls(path.var) || llvm::any_of(path.names, [&](llvm::StringRef field) {
-             return checker_.assignedFields_.contains(field);
+    return this->changedByCalls(path.var) || llvm::any_of(path.names, [&](llvm::StringRef field) {
+             return this->checker.assignedFields_.contains(field);
            });
   };
   llvm::erase_if(flow.definedFields, fieldChanged);
   llvm::erase_if(flow.narrowedFields, [&](const auto &entry) { return fieldChanged(entry.first); });
 }
 
-void FlowChecker::calledFunction() { forgetCallEffects(checker_.flow_); }
+void FlowChecker::calledFunction() {
+  this->forgetCallEffects(this->checker.flow_);
+}
 
 void FlowChecker::arrayResized(const Type *type, bool grew, bool shrank, const VarSymbol *except) {
   type = type->nonOptional();
@@ -408,7 +415,7 @@ void FlowChecker::arrayResized(const Type *type, bool grew, bool shrank, const V
     return t.length && t.var != except && t.var->type->nonOptional() == type;
   };
   auto affected = [&](const Term &t) { return part(t.first()) || part(t.second()); };
-  checker_.flow_.facts.forgetIf([&](const Facts::Fact &f) {
+  this->checker.flow_.facts.forgetIf([&](const Facts::Fact &f) {
     return (grew && affected(f.lhs)) || (shrank && affected(f.rhs));
   });
 }

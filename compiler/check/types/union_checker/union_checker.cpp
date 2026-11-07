@@ -10,22 +10,15 @@
 #include "compiler/infer/return_inferrer/return_inferrer.h"
 #include "compiler/library/bytes/bytes_checker/bytes_checker.h"
 #include "compiler/whole_program/flows/flows.h"
-#include "llvm/Support/ConvertUTF.h"
 
-using llvm::cast;
-using llvm::dyn_cast;
-using llvm::dyn_cast_or_null;
-using llvm::isa;
 
 namespace tz {
 
-namespace {
-
-llvm::ArrayRef<const Type *> membersOf(const Type *&type) {
+llvm::ArrayRef<const Type *> UnionChecker::membersOf(const Type *&type) {
   return type->isUnion() ? type->members() : llvm::ArrayRef<const Type *>(type);
 }
 
-bool isLiteralSet(const Type *type) {
+bool UnionChecker::isLiteralSet(const Type *type) {
   if (type->isLiteral()) {
     return true;
   }
@@ -34,40 +27,39 @@ bool isLiteralSet(const Type *type) {
          llvm::all_of(type->members(), [](const Type *m) { return m->isLiteral(); });
 }
 
-}
-
 bool hasParamMember(const Type *type) {
   return type->isUnion() &&
          llvm::any_of(type->members(), [](const Type *m) { return m->isParam(); });
 }
 
-UnionChecker::UnionChecker(Checker &checker) : checker_(checker) {}
+UnionChecker::UnionChecker(Checker &owner)
+    : checker(owner) {}
 
 Expr *UnionChecker::checkUnionMember(MemberExpr *member) {
   const Type *type = member->object->type;
   if (type->isTagged()) {
-    checker_.diags_.error(member->loc(), "property '" + member->name + "' does not exist on '" +
-                                             type->name() +
-                                             "': check what it holds first, e.g. 'typeof x == \"" +
-                                             typeOfName(type->members().front()) + "\"'");
+    this->checker.diags_.error(
+        member->loc(), "property '" + member->name + "' does not exist on '" + type->name() +
+                           "': check what it holds first, e.g. 'typeof x == \"" +
+                           typeOfName(type->members().front()) + "\"'");
     return member;
   }
   if (llvm::all_of(type->members(), [](const Type *m) { return m->isBytes(); })) {
-    return checker_.bytesChecker().checkBytesUnionMember(member);
+    return this->checker.bytesChecker().checkBytesUnionMember(member);
   }
   std::vector<const Type *> fieldTypes;
   const Type *lacking = nullptr;
   for (const Type *m : type->members()) {
     if (ClassDecl *cls = ClassDeclarer::classOf(m)) {
-      checker_.classDeclarer().completeClass(cls);
+      this->checker.classDeclarer().completeClass(cls);
     }
     const Field *f = m->isObject() ? m->field(member->name) : nullptr;
     if (const ClassDecl *cls = ClassDeclarer::classOf(m)) {
       const ClassDecl *owner = nullptr;
       const ClassField *field = ClassBases::findField(cls, member->name, &owner);
       if (field && field->access != Access::Public &&
-          !checker_.classMemberChecker().checkAccess(owner, field->access, member->name,
-                                                     member->loc())) {
+          !this->checker.classMemberChecker().checkAccess(owner, field->access, member->name,
+                                                          member->loc())) {
         return member;
       }
       if (!field) {
@@ -91,7 +83,7 @@ Expr *UnionChecker::checkUnionMember(MemberExpr *member) {
     if (member->name == "errno") {
       message += ": tz gives no errno; the reason is in 'kind', the system's code in 'code'";
     }
-    checker_.diags_.error(member->loc(), message);
+    this->checker.diags_.error(member->loc(), message);
     member->type = Type::error();
     return member;
   }
@@ -156,15 +148,15 @@ Expr *UnionChecker::checkUnionMember(MemberExpr *member) {
         message += ", e.g. 'if (\"" + member->name.str() + "\" in x)'";
       }
     }
-    checker_.diags_.error(member->loc(), message);
+    this->checker.diags_.error(member->loc(), message);
     return member;
   }
   const Type *result = Type::unionOf(fieldTypes);
   if (std::string problem = unionProblem(result); !problem.empty()) {
-    checker_.diags_.error(member->loc(), "the members of '" + type->name() + "' have fields '" +
-                                             member->name +
-                                             "' of types that one value cannot hold: " + problem +
-                                             "; narrow it first");
+    this->checker.diags_.error(
+        member->loc(), "the members of '" + type->name() + "' have fields '" + member->name +
+                           "' of types that one value cannot hold: " + problem +
+                           "; narrow it first");
     return member;
   }
   member->type = result;
@@ -177,39 +169,39 @@ const Type *UnionChecker::checkUnionFieldTarget(MemberExpr *member) {
   const Type *field = nullptr;
   for (const Type *m : type->members()) {
     if (ClassDecl *incomplete = ClassDeclarer::classOf(m)) {
-      checker_.classDeclarer().completeClass(incomplete);
+      this->checker.classDeclarer().completeClass(incomplete);
     }
     const Field *f = m->isObject() ? m->field(member->name) : nullptr;
     const ClassDecl *cls = ClassDeclarer::classOf(m);
     const ClassDecl *owner = nullptr;
     const ClassField *declared = cls ? ClassBases::findField(cls, member->name, &owner) : nullptr;
     if (!f || (cls && (!declared || declared->method()))) {
-      checker_.diags_.error(member->loc(), "property '" + member->name + "' does not exist on '" +
-                                               m->name() + "', which '" + type->name() +
-                                               "' may be; narrow it first");
+      this->checker.diags_.error(member->loc(),
+                                 "property '" + member->name + "' does not exist on '" + m->name() +
+                                     "', which '" + type->name() + "' may be; narrow it first");
       return Type::error();
     }
     if (declared && declared->access != Access::Public &&
-        !checker_.classMemberChecker().checkAccess(owner, declared->access, member->name,
-                                                   member->loc())) {
+        !this->checker.classMemberChecker().checkAccess(owner, declared->access, member->name,
+                                                        member->loc())) {
       return Type::error();
     }
     if (f->readonly) {
-      checker_.diags_.error(member->loc(), "cannot assign to '" + member->name +
-                                               "' because it is a read-only field of '" +
-                                               m->name() + "'");
+      this->checker.diags_.error(member->loc(), "cannot assign to '" + member->name +
+                                                    "' because it is a read-only field of '" +
+                                                    m->name() + "'");
       return Type::error();
     }
     if (field && f->type != field) {
-      checker_.diags_.error(member->loc(), "the members of '" + type->name() + "' have fields '" +
-                                               member->name + "' of different types, '" +
-                                               field->name() + "' and '" + f->type->name() +
-                                               "', so no value fits them all; narrow it first");
+      this->checker.diags_.error(
+          member->loc(), "the members of '" + type->name() + "' have fields '" + member->name +
+                             "' of different types, '" + field->name() + "' and '" +
+                             f->type->name() + "', so no value fits them all; narrow it first");
       return Type::error();
     }
     field = f->type;
   }
-  checker_.fieldFacts().fieldsAssigned(member->name);
+  this->checker.fieldFacts().fieldsAssigned(member->name);
   member->type = field;
 
   return field;
@@ -262,10 +254,11 @@ UnionChecker::unhandledCases(const SwitchStmt *stmt) const {
   if (!type || type->isError() || type->isOptional()) {
     return std::nullopt;
   }
-  if (!isLiteralSet(type)) {
+  if (!UnionChecker::isLiteralSet(type)) {
     return std::nullopt;
   }
-  std::vector<const Type *> left(membersOf(type).begin(), membersOf(type).end());
+  std::vector<const Type *> left(UnionChecker::membersOf(type).begin(),
+                                 UnionChecker::membersOf(type).end());
   for (const SwitchCase &c : stmt->cases) {
     if (!c.test) {
       return std::nullopt;
@@ -287,17 +280,17 @@ Expr *UnionChecker::checkUnionMethodCall(CallExpr *call, MemberExpr *member) {
   member->type = Type::error();
   auto loosely = [&] {
     for (Expr *&arg : call->args) {
-      arg = checker_.exprChecker().checkExpr(arg);
+      arg = this->checker.exprChecker().checkExpr(arg);
     }
 
     return call;
   };
   if (receiver->isTagged() ||
       llvm::any_of(receiver->members(), [](const Type *m) { return !m->isObject(); })) {
-    checker_.diags_.error(member->loc(), "property '" + name + "' does not exist on '" +
-                                             receiver->name() +
-                                             "': check what it holds first, e.g. 'typeof x == \"" +
-                                             typeOfName(receiver->members().front()) + "\"'");
+    this->checker.diags_.error(member->loc(),
+                               "property '" + name + "' does not exist on '" + receiver->name() +
+                                   "': check what it holds first, e.g. 'typeof x == \"" +
+                                   typeOfName(receiver->members().front()) + "\"'");
     return loosely();
   }
   const Type *fnType = nullptr;
@@ -306,61 +299,61 @@ Expr *UnionChecker::checkUnionMethodCall(CallExpr *call, MemberExpr *member) {
     const Type *type = nullptr;
     UnionMethod entry{m, nullptr, false};
     if (ClassDecl *cls = ClassDeclarer::classOf(m)) {
-      checker_.classDeclarer().completeClass(cls);
+      this->checker.classDeclarer().completeClass(cls);
       const ClassDecl *owner = nullptr;
       const ClassField *field = ClassBases::findField(cls, name, &owner);
       if (field && !field->method()) {
-        if (field->access != Access::Public &&
-            !checker_.classMemberChecker().checkAccess(owner, field->access, name, member->loc())) {
+        if (field->access != Access::Public && !this->checker.classMemberChecker().checkAccess(
+                                                   owner, field->access, name, member->loc())) {
           return loosely();
         }
         type = m->field(name) ? m->field(name)->type : nullptr;
       } else if (std::vector<FunctionDecl *> variants =
                      ClassDeclarer::methodsNamed(cls, name, false);
                  variants.size() > 1) {
-        checker_.diags_.error(member->loc(), "'" + name + "' of '" + m->name() +
-                                                 "' has several variants, which a call on '" +
-                                                 receiver->name() +
-                                                 "' cannot choose from; narrow it first");
+        this->checker.diags_.error(member->loc(), "'" + name + "' of '" + m->name() +
+                                                      "' has several variants, which a call on '" +
+                                                      receiver->name() +
+                                                      "' cannot choose from; narrow it first");
         return loosely();
       } else if (!variants.empty()) {
-        if (!checker_.classMemberChecker().checkAccess(variants[0]->cls(), variants[0]->access(),
-                                                       name, member->loc())) {
+        if (!this->checker.classMemberChecker().checkAccess(
+                variants[0]->cls(), variants[0]->access(), name, member->loc())) {
           return loosely();
         }
         FuncSymbol *sym = variants[0]->sym;
-        checker_.returnInferrer().resolveParams(sym);
+        this->checker.returnInferrer().resolveParams(sym);
         if (FunctionDecl *impl = ClassLinks::soleImplementation(cls, sym->decl)) {
           entry.method = impl->sym;
         } else {
           entry.method = sym, entry.virtualCall = true;
         }
-        type = checker_.returnInferrer().functionType(sym);
+        type = this->checker.returnInferrer().functionType(sym);
       }
     } else if (const Field *f = m->field(name); f && m->isBase()) {
-      checker_.diags_.error(member->loc(),
-                            "'" + name + "' is called on '" + receiver->name() + "', and '" +
-                                m->name() +
-                                "' is an interface that classes implement; narrow it "
-                                "first, or declare the members to be one type with '" +
-                                name + "'");
+      this->checker.diags_.error(member->loc(),
+                                 "'" + name + "' is called on '" + receiver->name() + "', and '" +
+                                     m->name() +
+                                     "' is an interface that classes implement; narrow it "
+                                     "first, or declare the members to be one type with '" +
+                                     name + "'");
       return loosely();
     } else if (f) {
       type = f->type;
     }
     if (!type || !type->isFunction()) {
-      checker_.diags_.error(member->loc(),
-                            "'" + receiver->name() + "' may be a '" + m->name() + "', " +
-                                (type ? "whose '" + name.str() + "' is not a function"
-                                      : "which has no method '" + name.str() + "'") +
-                                "; narrow it first");
+      this->checker.diags_.error(member->loc(),
+                                 "'" + receiver->name() + "' may be a '" + m->name() + "', " +
+                                     (type ? "whose '" + name.str() + "' is not a function"
+                                           : "which has no method '" + name.str() + "'") +
+                                     "; narrow it first");
       return loosely();
     }
     if (fnType && type != fnType) {
-      checker_.diags_.error(member->loc(), "the members of '" + receiver->name() +
-                                               "' have methods '" + name +
-                                               "' of different types, '" + fnType->name() +
-                                               "' and '" + type->name() + "'; narrow it first");
+      this->checker.diags_.error(member->loc(),
+                                 "the members of '" + receiver->name() + "' have methods '" + name +
+                                     "' of different types, '" + fnType->name() + "' and '" +
+                                     type->name() + "'; narrow it first");
       return loosely();
     }
     fnType = type;
@@ -368,8 +361,8 @@ Expr *UnionChecker::checkUnionMethodCall(CallExpr *call, MemberExpr *member) {
   }
   call->target = UnionMethodCall{.unionMethods = std::move(methods)};
   member->type = fnType;
-  checker_.argumentChecker().checkArguments(call, fnType->params(), fnType->minArgs(),
-                                            fnType->hasRest(), member->loc());
+  this->checker.argumentChecker().checkArguments(call, fnType->params(), fnType->minArgs(),
+                                                 fnType->hasRest(), member->loc());
   call->type = fnType->ret();
 
   return call;

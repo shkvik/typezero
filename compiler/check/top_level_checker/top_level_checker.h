@@ -6,7 +6,7 @@ namespace tz {
 
 class TopLevelChecker {
 public:
-  explicit TopLevelChecker(Checker &checker);
+  explicit TopLevelChecker(Checker &owner);
 
   void checkTopLevel(Module *module, llvm::StringRef until = {});
   ScopeEntry lookupValue(llvm::StringRef name);
@@ -19,7 +19,7 @@ public:
   static std::string loadChain(const Module *reader, const Module *source);
 
 private:
-  Checker &checker_;
+  Checker &checker;
 };
 
 }

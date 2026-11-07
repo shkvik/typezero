@@ -6,7 +6,7 @@ namespace tz {
 
 class NestedFunctions {
 public:
-  explicit NestedFunctions(Checker &checker);
+  explicit NestedFunctions(Checker &owner);
 
   NestedGroup *declareNested(BlockStmt *block);
   void finishGroup(NestedGroup *group);
@@ -14,7 +14,9 @@ public:
   FunctionDecl *namedFunction(const Expr *expr) const;
 
 private:
-  Checker &checker_;
+  static void collectAssigned(const Stmt *stmt, std::vector<llvm::StringRef> &names);
+
+  Checker &checker;
 };
 
 }

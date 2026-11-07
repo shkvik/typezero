@@ -6,7 +6,7 @@ namespace tz {
 
 class TruthLowerer {
 public:
-  explicit TruthLowerer(Lowering &lowering);
+  explicit TruthLowerer(Lowering &owner);
 
   llvm::Value *emitLogical(BinaryExpr *bin);
   llvm::Value *decidedValue(BinaryExpr *bin, llvm::Value *lhs);
@@ -14,7 +14,9 @@ public:
   llvm::Value *emitTruthOf(Expr *expr);
 
 private:
-  Lowering &lowering_;
+  static bool isReference(const Type *type);
+
+  Lowering &lowering;
 };
 
 }

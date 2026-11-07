@@ -6,7 +6,7 @@ namespace tz {
 
 class DecoratorLowerer {
 public:
-  explicit DecoratorLowerer(Lowering &lowering);
+  explicit DecoratorLowerer(Lowering &owner);
 
   void emitClassDeclaration(ClassDecl *cls);
   void emitDecoratedMethod(FunctionDecl *fn);
@@ -18,11 +18,11 @@ public:
   llvm::Value *emitClassExpr(ClassExpr *expr);
 
 private:
-  Lowering &lowering_;
-  llvm::DenseMap<const FunctionDecl *, llvm::Function *> originals_;
-  llvm::DenseMap<const FunctionDecl *, llvm::Constant *> adapterInfos_;
-  llvm::DenseMap<const void *, llvm::Constant *> metaKeys_;
-  bool usesMetadata_ = false;
+  Lowering &lowering;
+  llvm::DenseMap<const FunctionDecl *, llvm::Function *> originals;
+  llvm::DenseMap<const FunctionDecl *, llvm::Constant *> adapterInfos;
+  llvm::DenseMap<const void *, llvm::Constant *> metaKeys;
+  bool usesMetadata = false;
 };
 
 }

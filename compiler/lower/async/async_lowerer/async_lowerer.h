@@ -6,7 +6,7 @@ namespace tz {
 
 class AsyncLowerer {
 public:
-  explicit AsyncLowerer(Lowering &lowering);
+  explicit AsyncLowerer(Lowering &owner);
 
   llvm::FunctionCallee asyncFunction(llvm::StringRef name, llvm::Type *ret,
                                      llvm::ArrayRef<llvm::Type *> params);
@@ -25,10 +25,12 @@ public:
   llvm::Value *emitAwait(AwaitExpr *await);
 
 private:
-  Lowering &lowering_;
-  llvm::Function *asyncResumeFn_ = nullptr;
-  const AwaitExpr *awaiting_ = nullptr;
-  bool readyGoesOn_ = false;
+  static const Expr *resolvedValue(const Expr *expr);
+
+  Lowering &lowering;
+  llvm::Function *asyncResumeFn = nullptr;
+  const AwaitExpr *awaiting = nullptr;
+  bool readyGoesOn = false;
 };
 
 }

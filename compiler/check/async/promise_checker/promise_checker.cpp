@@ -17,18 +17,16 @@
 
 using llvm::cast;
 using llvm::dyn_cast;
-using llvm::dyn_cast_or_null;
 using llvm::isa;
 
 namespace tz {
 
-namespace {
-
-const Type *awaited(const Type *type) { return type->isPromise() ? type->promised() : type; }
-
+const Type *PromiseChecker::awaited(const Type *type) {
+  return type->isPromise() ? type->promised() : type;
 }
 
-PromiseChecker::PromiseChecker(Checker &checker) : checker_(checker) {}
+PromiseChecker::PromiseChecker(Checker &owner)
+    : checker(owner) {}
 
 const Type *PromiseChecker::resolverType(const Type *value) {
   std::vector<const Type *> params;
@@ -60,19 +58,19 @@ const Type *PromiseChecker::executorValueType(const Expr *executor) {
   if (fe->fn->source.empty()) {
     return nullptr;
   }
-  FunctionDecl *copy = checker_.returnInferrer().freshCopy(fe->fn);
+  FunctionDecl *copy = this->checker.returnInferrer().freshCopy(fe->fn);
   copy->sym = nullptr;
-  auto *trial = checker_.ctx_.make<FunctionExpr>(fe->loc(), copy);
-  Checker::Flow saved = checker_.flow_;
-  bool muted = checker_.diags_.setMuted(true);
+  auto *trial = this->checker.ctx_.make<FunctionExpr>(fe->loc(), copy);
+  Checker::Flow saved = this->checker.flow_;
+  bool muted = this->checker.diags_.setMuted(true);
   Checker::Signature sig;
   sig.params = {Type::error(), Type::error()};
   sig.ret = Type::voidTy();
   sig.voidResult = true;
   sig.pad = false;
-  checker_.closureChecker().checkFunctionExpr(trial, &sig);
-  checker_.diags_.setMuted(muted);
-  checker_.flow_ = std::move(saved);
+  this->checker.closureChecker().checkFunctionExpr(trial, &sig);
+  this->checker.diags_.setMuted(muted);
+  this->checker.flow_ = std::move(saved);
   const Type *found = nullptr;
   bool unknown = false;
   visitExprs(copy->body, [&](const Expr *e) {
@@ -98,58 +96,64 @@ const Type *PromiseChecker::executorValueType(const Expr *executor) {
 }
 
 Expr *PromiseChecker::checkPromiseNew(NewExpr *expr, const Type *expected) {
-  checker_.file_->usesAsync = true;
-  auto *call = checker_.ctx_.make<CallExpr>(expr->loc(), expr, expr->args);
+  this->checker.file_->usesAsync = true;
+  auto *call = this->checker.ctx_.make<CallExpr>(expr->loc(), expr, expr->args);
   call->target = BuiltinCall{.builtin = Builtin::PromiseNew};
   call->type = Type::error();
   const Type *value = nullptr;
   if (expr->typeArgs.size() > 1) {
-    checker_.diags_.error(expr->loc(), "'Promise' takes one type argument, the type of its value");
+    this->checker.diags_.error(expr->loc(),
+                               "'Promise' takes one type argument, the type of its value");
     value = Type::error();
   } else if (expr->typeArgs.size() == 1) {
-    value = awaited(checker_.typeResolver().resolveType(expr->typeArgs[0], true));
+    value =
+        PromiseChecker::awaited(this->checker.typeResolver().resolveType(expr->typeArgs[0], true));
   } else if (expected && expected->nonOptional()->isPromise() &&
              !expected->nonOptional()->promised()->isNever()) {
     value = expected->nonOptional()->promised();
   } else if (call->args.size() == 1) {
-    value = executorValueType(call->args[0]);
+    value = this->executorValueType(call->args[0]);
     if (!value) {
-      checker_.diags_.error(expr->loc(),
-                            "cannot tell the type of the Promise's value from what is given "
-                            "to 'resolve'; write it, e.g. 'new Promise<int>(...)'");
+      this->checker.diags_.error(expr->loc(),
+                                 "cannot tell the type of the Promise's value from what is given "
+                                 "to 'resolve'; write it, e.g. 'new Promise<int>(...)'");
       value = Type::error();
     }
   }
-  if (!checker_.argumentChecker().checkArity(call, expr->loc(), 1, 1)) {
+  ArgumentChecker::ResultArityMatches arity =
+      this->checker.argumentChecker().checkArity(call, 1, 1);
+  if (arity.isErr()) {
+    this->checker.diags_.error(expr->loc(), arity.error().message);
     return call;
   }
   if (value->isError()) {
     Checker::Signature loose;
     loose.params = {Type::error(), Type::error()};
     loose.pad = false;
-    call->args[0] =
-        isa<FunctionExpr>(call->args[0])
-            ? checker_.closureChecker().checkFunctionExpr(cast<FunctionExpr>(call->args[0]), &loose)
-            : checker_.exprChecker().checkExpr(call->args[0]);
+    call->args[0] = isa<FunctionExpr>(call->args[0])
+                        ? this->checker.closureChecker().checkFunctionExpr(
+                              cast<FunctionExpr>(call->args[0]), &loose)
+                        : this->checker.exprChecker().checkExpr(call->args[0]);
     return call;
   }
   Checker::Signature sig;
-  sig.params = {resolverType(value)};
+  sig.params = {PromiseChecker::resolverType(value)};
   if (auto *executor = dyn_cast<FunctionExpr>(call->args[0]);
       executor && executor->fn->params.size() > 1) {
-    checker_.diags_.error(executor->fn->params[1].loc,
-                          "a Promise is not rejected in tz, so its function gets only "
-                          "'resolve'; an operation that may fail gives a Promise<Result<T, E>>: "
-                          "'resolve(err(e))'");
+    this->checker.diags_.error(
+        executor->fn->params[1].loc,
+        "a Promise is not rejected in tz, so its function gets only "
+        "'resolve'; an operation that may fail gives a Promise<Result<T, E>>: "
+        "'resolve(err(e))'");
     sig.params.push_back(Type::error());
   }
   sig.minArgs = sig.params.size();
   sig.ret = Type::voidTy();
   sig.voidResult = true;
   sig.pad = false;
-  call->args[0] = checker_.callbackChecker().checkFunctionArg(
+  call->args[0] = this->checker.callbackChecker().checkFunctionArg(
       call->args[0], sig, unsigned(sig.params.size()), "new Promise");
-  checker_.flowChecker().calledFunction();
+  this->checker.flowChecker().calledFunction();
   call->type = Type::promise(value);
 
   return call;
@@ -164,30 +168,30 @@ Expr *PromiseChecker::checkPromiseMethod(CallExpr *call, MemberExpr *member, con
                                                       "andTee",  "orTee",  "andThrough"};
   auto checkArgsLoosely = [&] {
     for (Expr *&arg : call->args) {
-      arg = checker_.exprChecker().checkExpr(arg);
+      arg = this->checker.exprChecker().checkExpr(arg);
     }
   };
   if (value->isResult() && llvm::is_contained(resultMethods, name)) {
     auto *object = dyn_cast<NameExpr>(member->object);
     std::string promise = object ? object->name.str() : "p";
-    return checker_.resultChecker().reject(
+    return this->checker.resultChecker().reject(
         call, member->loc(),
         "'" + name.str() +
             "' is a method of Result, not of Promise; await the Promise first: "
             "'(await " +
             promise + ")." + name.str() + "(...)'");
   }
-  if (checker_.callChecker().rejectSpread(call)) {
+  if (this->checker.callChecker().rejectSpread(call)) {
     return call;
   }
-  checker_.file_->usesAsync = true;
+  this->checker.file_->usesAsync = true;
   const Type *wanted = expected && expected->nonOptional()->isPromise()
                            ? expected->nonOptional()->promised()
                            : nullptr;
   bool failed = false;
   auto callback = [&](Expr *&arg, const Type *param) -> const Type * {
     if (isa<UndefinedExpr>(arg)) {
-      arg = checker_.exprChecker().checkExpr(arg);
+      arg = this->checker.exprChecker().checkExpr(arg);
       return nullptr;
     }
     Checker::Signature sig;
@@ -199,7 +203,7 @@ Expr *PromiseChecker::checkPromiseMethod(CallExpr *call, MemberExpr *member, con
     if (wanted && isa<FunctionExpr>(arg) && Destination::literalShaped(arg)) {
       sig.ret = wanted;
     }
-    arg = checker_.callbackChecker().checkFunctionArg(arg, sig, 1, name);
+    arg = this->checker.callbackChecker().checkFunctionArg(arg, sig, 1, name);
     if (!arg->type->isFunction()) {
       failed = true;
       return nullptr;
@@ -208,11 +212,11 @@ Expr *PromiseChecker::checkPromiseMethod(CallExpr *call, MemberExpr *member, con
       fe->fn->nonEscaping = false;
     }
 
-    return awaited(arg->type->ret());
+    return PromiseChecker::awaited(arg->type->ret());
   };
   const Type *result = nullptr;
   if (name == "catch" || name == "finally" || (name == "then" && call->args.size() == 2)) {
-    return checker_.resultChecker().reject(
+    return this->checker.resultChecker().reject(
         call, name == "then" ? call->args[1]->loc() : member->loc(),
         name == "catch"
             ? std::string("a Promise is not rejected in tz, so it has no 'catch': an operation "
@@ -224,7 +228,10 @@ Expr *PromiseChecker::checkPromiseMethod(CallExpr *call, MemberExpr *member, con
             : std::string("'then' takes one function: a Promise is not rejected in tz"));
   }
   if (name == "then") {
-    if (!checker_.argumentChecker().checkArity(call, member->loc(), 1, 1)) {
+    ArgumentChecker::ResultArityMatches arity =
+        this->checker.argumentChecker().checkArity(call, 1, 1);
+    if (arity.isErr()) {
+      this->checker.diags_.error(member->loc(), arity.error().message);
       return call;
     }
     call->target = BuiltinCall{.builtin = Builtin::PromiseThen};
@@ -234,10 +241,10 @@ Expr *PromiseChecker::checkPromiseMethod(CallExpr *call, MemberExpr *member, con
     }
     result = onFulfilled ? onFulfilled : value;
   } else {
-    checker_.diags_.error(member->loc(), "property '" + name + "' does not exist on type '" +
-                                             type->name() +
-                                             "'; a Promise has 'then', and its value is "
-                                             "read with 'await'");
+    this->checker.diags_.error(member->loc(), "property '" + name + "' does not exist on type '" +
+                                                  type->name() +
+                                                  "'; a Promise has 'then', and its value is "
+                                                  "read with 'await'");
     checkArgsLoosely();
     return call;
   }

@@ -6,13 +6,13 @@ namespace tz {
 
 class FunctionChecker {
 public:
-  explicit FunctionChecker(Checker &checker);
+  explicit FunctionChecker(Checker &owner);
 
   void declareFunction(FunctionDecl *fn, VarSymbol *var = nullptr, bool scoped = true);
   void checkFunctionBody(FunctionDecl *fn);
 
 private:
-  Checker &checker_;
+  Checker &checker;
 };
 
 }

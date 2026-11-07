@@ -6,14 +6,14 @@ namespace tz {
 
 class NumberMethods {
 public:
-  explicit NumberMethods(Checker &checker);
+  explicit NumberMethods(Checker &owner);
 
   Expr *checkStaticCall(CallExpr *call, MemberExpr *member);
   Expr *checkNumberMethod(CallExpr *call, MemberExpr *member);
   Expr *checkConversion(CallExpr *call, MemberExpr *member);
 
 private:
-  Checker &checker_;
+  Checker &checker;
 };
 
 }

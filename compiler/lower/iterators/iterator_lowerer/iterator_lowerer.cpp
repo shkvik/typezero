@@ -18,11 +18,7 @@
 #include "llvm/IR/MDBuilder.h"
 #include "llvm/Support/ErrorHandling.h"
 
-using llvm::BasicBlock;
 using llvm::cast;
-using llvm::dyn_cast;
-using llvm::isa;
-using llvm::Value;
 
 namespace tz {
 
@@ -30,7 +26,9 @@ namespace {
 
 constexpr uint64_t kHeaderSize = 16;
 
-const Type *iteratedType(const Type *type) {
+}
+
+const Type *IteratorLowerer::iteratedType(const Type *type) {
   if (type->isTypedArray()) {
     return type->elementType();
   }
@@ -38,68 +36,68 @@ const Type *iteratedType(const Type *type) {
   return type->isArray() ? type->inner() : type->isString() ? type : type->yielded();
 }
 
-}
-
-IteratorLowerer::IteratorLowerer(Lowering &lowering) : lowering_(lowering) {}
+IteratorLowerer::IteratorLowerer(Lowering &owner)
+    : lowering(owner) {}
 
 void IteratorLowerer::emitIteratorForOf(ForOfStmt *stmt) {
-  llvm::SmallVector<llvm::StringRef, 1> labels = std::move(lowering_.pendingLabels_);
-  lowering_.pendingLabels_.clear();
-  lowering_.functionFrame().pushScope();
-  Lowering::Producer producer = lowering_.inlineGeneratorLowerer().prepare(stmt->iterable);
-  size_t depth = lowering_.scopes_.size();
-  llvm::BasicBlock *endBlock = lowering_.functionFrame().newBlock("for.of.end");
+  llvm::SmallVector<llvm::StringRef, 1> labels = std::move(this->lowering.pendingLabels_);
+  this->lowering.pendingLabels_.clear();
+  this->lowering.functionFrame().pushScope();
+  Lowering::Producer producer = this->lowering.inlineGeneratorLowerer().prepare(stmt->iterable);
+  size_t depth = this->lowering.scopes_.size();
+  llvm::BasicBlock *endBlock = this->lowering.functionFrame().newBlock("for.of.end");
   Lowering::Consumer consumer;
   consumer.stop = [this, depth, endBlock] {
-    lowering_.functionFrame().emitCleanups(depth);
-    lowering_.builder_.CreateBr(endBlock);
+    this->lowering.functionFrame().emitCleanups(depth);
+    this->lowering.builder_.CreateBr(endBlock);
   };
   consumer.each = [this, stmt, labels, depth, endBlock](llvm::Value *value) -> llvm::Value * {
-    llvm::BasicBlock *nextBlock = lowering_.functionFrame().newBlock("for.of.next");
-    size_t here = lowering_.scopes_.size();
-    lowering_.functionFrame().pushScope();
-    lowering_.storeLowerer().storeVar(
+    llvm::BasicBlock *nextBlock = this->lowering.functionFrame().newBlock("for.of.next");
+    size_t here = this->lowering.scopes_.size();
+    this->lowering.functionFrame().pushScope();
+    this->lowering.storeLowerer().storeVar(
         stmt->binding.sym,
-        lowering_.functionFrame().createLocal(stmt->binding.sym, stmt->binding.name), value, true);
-    lowering_.targets_.push_back({labels, true, false, endBlock, nextBlock, depth, here});
-    lowering_.stmtLowerer().emitStmt(stmt->body);
-    lowering_.targets_.pop_back();
-    lowering_.functionFrame().popScope();
-    lowering_.functionFrame().emitBlock(nextBlock);
+        this->lowering.functionFrame().createLocal(stmt->binding.sym, stmt->binding.name), value,
+        true);
+    this->lowering.targets_.push_back({labels, true, false, endBlock, nextBlock, depth, here});
+    this->lowering.stmtLowerer().emitStmt(stmt->body);
+    this->lowering.targets_.pop_back();
+    this->lowering.functionFrame().popScope();
+    this->lowering.functionFrame().emitBlock(nextBlock);
 
     return nullptr;
   };
   producer.run(consumer);
-  lowering_.functionFrame().emitBlock(endBlock);
-  lowering_.functionFrame().popScope();
+  this->lowering.functionFrame().emitBlock(endBlock);
+  this->lowering.functionFrame().popScope();
 }
 
 void IteratorLowerer::emitIteratorSpread(llvm::Value *array, Expr *source, const Type *element) {
-  lowering_.functionFrame().pushScope();
-  Lowering::Producer producer = lowering_.inlineGeneratorLowerer().prepare(source);
-  size_t depth = lowering_.scopes_.size();
-  llvm::BasicBlock *endBlock = lowering_.functionFrame().newBlock("spread.end");
-  const Type *yielded = iteratedType(source->type);
+  this->lowering.functionFrame().pushScope();
+  Lowering::Producer producer = this->lowering.inlineGeneratorLowerer().prepare(source);
+  size_t depth = this->lowering.scopes_.size();
+  llvm::BasicBlock *endBlock = this->lowering.functionFrame().newBlock("spread.end");
+  const Type *yielded = IteratorLowerer::iteratedType(source->type);
   Lowering::Consumer consumer;
   consumer.each = [this, array, yielded, element](llvm::Value *value) -> llvm::Value * {
-    lowering_.arrayLowerer().emitPush(
-        array, {lowering_.exprLowerer().emitConversion(value, yielded, element)}, element);
+    this->lowering.arrayLowerer().emitPush(
+        array, {this->lowering.exprLowerer().emitConversion(value, yielded, element)}, element);
 
     return nullptr;
   };
   consumer.stop = [this, depth, endBlock] {
-    lowering_.functionFrame().emitCleanups(depth);
-    lowering_.builder_.CreateBr(endBlock);
+    this->lowering.functionFrame().emitCleanups(depth);
+    this->lowering.builder_.CreateBr(endBlock);
   };
   producer.run(consumer);
-  lowering_.functionFrame().emitBlock(endBlock);
-  lowering_.functionFrame().popScope();
+  this->lowering.functionFrame().emitBlock(endBlock);
+  this->lowering.functionFrame().popScope();
 }
 
 llvm::Value *IteratorLowerer::emitIteratorBuiltin(CallExpr *call) {
   switch (call->builtin()) {
     case Builtin::IterNext:
-      return emitNext(call);
+      return this->emitNext(call);
     case Builtin::ArrayFrom:
     case Builtin::IterToArray:
     case Builtin::IterForEach:
@@ -107,9 +105,9 @@ llvm::Value *IteratorLowerer::emitIteratorBuiltin(CallExpr *call) {
     case Builtin::IterSome:
     case Builtin::IterEvery:
     case Builtin::IterFind:
-      return emitIteratorSink(call);
+      return this->emitIteratorSink(call);
     default:
-      return emitIteratorObject(call);
+      return this->emitIteratorObject(call);
   }
 }
 
@@ -117,52 +115,57 @@ llvm::Value *IteratorLowerer::emitIteratorSink(CallExpr *call) {
   Builtin method = call->builtin();
   bool from = method == Builtin::ArrayFrom;
   Expr *source = from ? call->args[0] : cast<MemberExpr>(call->callee)->object;
-  const Type *element = iteratedType(source->type);
-  lowering_.functionFrame().pushScope();
-  Lowering::Producer producer = lowering_.inlineGeneratorLowerer().prepare(source);
+  const Type *element = IteratorLowerer::iteratedType(source->type);
+  this->lowering.functionFrame().pushScope();
+  Lowering::Producer producer = this->lowering.inlineGeneratorLowerer().prepare(source);
   Expr *callbackExpr = from ? (call->args.size() > 1 ? call->args[1] : nullptr)
                        : method == Builtin::IterToArray ? nullptr
                                                         : call->args[0];
   const Type *callbackType = callbackExpr ? callbackExpr->type : nullptr;
   llvm::Value *callback = nullptr;
   if (callbackExpr) {
-    callback = lowering_.functionFrame().createManagedSlot(callbackType, "callback");
-    lowering_.builder_.CreateStore(lowering_.exprLowerer().emitExpr(callbackExpr), callback);
+    callback = this->lowering.functionFrame().createManagedSlot(callbackType, "callback");
+    this->lowering.builder_.CreateStore(this->lowering.exprLowerer().emitExpr(callbackExpr),
+                                        callback);
   }
-  llvm::Type *i64 = lowering_.builder_.getInt64Ty();
-  llvm::Value *counter = lowering_.functionFrame().createStackSlot(i64, "counter");
-  lowering_.builder_.CreateStore(lowering_.builder_.getInt64(0), counter);
+  llvm::Type *i64 = this->lowering.builder_.getInt64Ty();
+  llvm::Value *counter = this->lowering.functionFrame().createStackSlot(i64, "counter");
+  this->lowering.builder_.CreateStore(this->lowering.builder_.getInt64(0), counter);
   auto nextCount = [this, counter, i64] {
-    llvm::Value *count = lowering_.builder_.CreateLoad(i64, counter, "count");
-    lowering_.builder_.CreateStore(
-        lowering_.builder_.CreateAdd(count, lowering_.builder_.getInt64(1)), counter);
+    llvm::Value *count = this->lowering.builder_.CreateLoad(i64, counter, "count");
+    this->lowering.builder_.CreateStore(
+        this->lowering.builder_.CreateAdd(count, this->lowering.builder_.getInt64(1)), counter);
 
     return count;
   };
-  size_t depth = lowering_.scopes_.size();
-  llvm::BasicBlock *endBlock = lowering_.functionFrame().newBlock("iter.end");
+  size_t depth = this->lowering.scopes_.size();
+  llvm::BasicBlock *endBlock = this->lowering.functionFrame().newBlock("iter.end");
   Lowering::Consumer consumer;
   consumer.stop = [this, depth, endBlock] {
-    lowering_.functionFrame().emitCleanups(depth);
-    lowering_.builder_.CreateBr(endBlock);
+    this->lowering.functionFrame().emitCleanups(depth);
+    this->lowering.builder_.CreateBr(endBlock);
   };
 
-  llvm::Value *array = nullptr, *resultSlot = nullptr, *hasAcc = nullptr;
-  const Type *resultType = call->type, *accType = call->type;
+  llvm::Value *array = nullptr;
+  llvm::Value *resultSlot = nullptr;
+  llvm::Value *hasAcc = nullptr;
+  const Type *resultType = call->type;
+  const Type *accType = call->type;
   switch (method) {
   case Builtin::ArrayFrom:
   case Builtin::IterToArray: {
     const Type *stored = resultType->inner();
-    array = lowering_.groupLowerer().newArray(Type::array(stored), lowering_.builder_.getInt64(0),
-                                              lowering_.builder_.getInt64(0));
+    array = this->lowering.groupLowerer().newArray(Type::array(stored),
+                                                   this->lowering.builder_.getInt64(0),
+                                                   this->lowering.builder_.getInt64(0));
     consumer.each = [=, this](llvm::Value *value) -> llvm::Value * {
       if (callback) {
-        value = lowering_.lazyChainLowerer().callCallback(
+        value = this->lowering.lazyChainLowerer().callCallback(
             callback, callbackType, {value, nextCount()}, {element, Type::intTy()});
       } else {
-        value = lowering_.exprLowerer().emitConversion(value, element, stored);
+        value = this->lowering.exprLowerer().emitConversion(value, element, stored);
       }
-      lowering_.arrayLowerer().emitPush(array, {value}, stored);
+      this->lowering.arrayLowerer().emitPush(array, {value}, stored);
 
       return nullptr;
     };
@@ -170,9 +173,9 @@ llvm::Value *IteratorLowerer::emitIteratorSink(CallExpr *call) {
   }
   case Builtin::IterForEach:
     consumer.each = [=, this](llvm::Value *value) -> llvm::Value * {
-      if (llvm::Value *result = lowering_.lazyChainLowerer().callCallback(
+      if (llvm::Value *result = this->lowering.lazyChainLowerer().callCallback(
               callback, callbackType, {value, nextCount()}, {element, Type::intTy()})) {
-        lowering_.refCounts().releaseValue(result, callbackType->ret());
+        this->lowering.refCounts().releaseValue(result, callbackType->ret());
       }
 
       return nullptr;
@@ -180,40 +183,43 @@ llvm::Value *IteratorLowerer::emitIteratorSink(CallExpr *call) {
     break;
   case Builtin::IterReduce: {
     accType = call->args.size() > 1 ? resultType : element;
-    resultSlot =
-        lowering_.functionFrame().createStackSlot(lowering_.moduleBuilder().lower(accType), "acc");
+    resultSlot = this->lowering.functionFrame().createStackSlot(
+        this->lowering.moduleBuilder().lower(accType), "acc");
     if (call->args.size() > 1) {
-      lowering_.builder_.CreateStore(lowering_.exprLowerer().emitExpr(call->args[1]), resultSlot);
+      this->lowering.builder_.CreateStore(this->lowering.exprLowerer().emitExpr(call->args[1]),
+                                          resultSlot);
     } else {
-      lowering_.builder_.CreateStore(
-          llvm::Constant::getNullValue(lowering_.moduleBuilder().lower(accType)), resultSlot);
-      hasAcc = lowering_.functionFrame().createStackSlot(lowering_.builder_.getInt1Ty(), "has.acc");
-      lowering_.builder_.CreateStore(lowering_.builder_.getFalse(), hasAcc);
+      this->lowering.builder_.CreateStore(
+          llvm::Constant::getNullValue(this->lowering.moduleBuilder().lower(accType)), resultSlot);
+      hasAcc = this->lowering.functionFrame().createStackSlot(this->lowering.builder_.getInt1Ty(),
+                                                              "has.acc");
+      this->lowering.builder_.CreateStore(this->lowering.builder_.getFalse(), hasAcc);
     }
     consumer.each = [=, this](llvm::Value *value) -> llvm::Value * {
-      llvm::BasicBlock *firstBlock = nullptr, *nextBlock = nullptr;
+      llvm::BasicBlock *firstBlock = nullptr;
+      llvm::BasicBlock *nextBlock = nullptr;
       if (hasAcc) {
-        firstBlock = lowering_.functionFrame().newBlock("reduce.first");
-        nextBlock = lowering_.functionFrame().newBlock("reduce.next");
-        llvm::BasicBlock *combineBlock = lowering_.functionFrame().newBlock("reduce.combine");
-        lowering_.builder_.CreateCondBr(
-            lowering_.builder_.CreateLoad(lowering_.builder_.getInt1Ty(), hasAcc), combineBlock,
-            firstBlock);
-        lowering_.functionFrame().switchTo(firstBlock);
-        lowering_.builder_.CreateStore(value, resultSlot);
-        lowering_.builder_.CreateStore(lowering_.builder_.getTrue(), hasAcc);
+        firstBlock = this->lowering.functionFrame().newBlock("reduce.first");
+        nextBlock = this->lowering.functionFrame().newBlock("reduce.next");
+        llvm::BasicBlock *combineBlock = this->lowering.functionFrame().newBlock("reduce.combine");
+        this->lowering.builder_.CreateCondBr(
+            this->lowering.builder_.CreateLoad(this->lowering.builder_.getInt1Ty(), hasAcc),
+            combineBlock, firstBlock);
+        this->lowering.functionFrame().switchTo(firstBlock);
+        this->lowering.builder_.CreateStore(value, resultSlot);
+        this->lowering.builder_.CreateStore(this->lowering.builder_.getTrue(), hasAcc);
         nextCount();
-        lowering_.builder_.CreateBr(nextBlock);
-        lowering_.functionFrame().switchTo(combineBlock);
+        this->lowering.builder_.CreateBr(nextBlock);
+        this->lowering.functionFrame().switchTo(combineBlock);
       }
-      llvm::Value *acc =
-          lowering_.builder_.CreateLoad(lowering_.moduleBuilder().lower(accType), resultSlot);
-      lowering_.builder_.CreateStore(
-          lowering_.lazyChainLowerer().callCallback(
+      llvm::Value *acc = this->lowering.builder_.CreateLoad(
+          this->lowering.moduleBuilder().lower(accType), resultSlot);
+      this->lowering.builder_.CreateStore(
+          this->lowering.lazyChainLowerer().callCallback(
               callback, callbackType, {acc, value, nextCount()}, {accType, element, Type::intTy()}),
           resultSlot);
       if (nextBlock) {
-        lowering_.functionFrame().emitBlock(nextBlock);
+        this->lowering.functionFrame().emitBlock(nextBlock);
       }
 
       return nullptr;
@@ -223,35 +229,37 @@ llvm::Value *IteratorLowerer::emitIteratorSink(CallExpr *call) {
   case Builtin::IterSome:
   case Builtin::IterEvery:
   case Builtin::IterFind: {
-    resultSlot = lowering_.functionFrame().createStackSlot(
-        lowering_.moduleBuilder().lower(resultType), "result");
-    lowering_.builder_.CreateStore(method == Builtin::IterSome ? lowering_.builder_.getFalse()
-                                   : method == Builtin::IterEvery
-                                       ? lowering_.builder_.getTrue()
-                                       : lowering_.optionalLowerer().undefinedValue(resultType),
-                                   resultSlot);
+    resultSlot = this->lowering.functionFrame().createStackSlot(
+        this->lowering.moduleBuilder().lower(resultType), "result");
+    this->lowering.builder_.CreateStore(
+        method == Builtin::IterSome ? this->lowering.builder_.getFalse()
+        : method == Builtin::IterEvery
+            ? this->lowering.builder_.getTrue()
+            : this->lowering.optionalLowerer().undefinedValue(resultType),
+        resultSlot);
     consumer.each = [=, this](llvm::Value *value) -> llvm::Value * {
       bool find = method == Builtin::IterFind;
       if (find) {
-        lowering_.refCounts().retainValue(value, element);
+        this->lowering.refCounts().retainValue(value, element);
       }
-      llvm::Value *decides = lowering_.lazyChainLowerer().callCallback(
+      llvm::Value *decides = this->lowering.lazyChainLowerer().callCallback(
           callback, callbackType, {value, nextCount()}, {element, Type::intTy()});
       if (method == Builtin::IterEvery) {
-        decides = lowering_.builder_.CreateNot(decides);
+        decides = this->lowering.builder_.CreateNot(decides);
       }
-      llvm::BasicBlock *foundBlock = lowering_.functionFrame().newBlock("iter.found");
-      llvm::BasicBlock *otherBlock = lowering_.functionFrame().newBlock("iter.other");
-      lowering_.builder_.CreateCondBr(decides, foundBlock, otherBlock);
-      lowering_.functionFrame().switchTo(foundBlock);
-      lowering_.builder_.CreateStore(find ? lowering_.optionalLowerer().makeOptional(
-                                                value, lowering_.builder_.getTrue(), resultType)
-                                          : lowering_.builder_.getInt1(method == Builtin::IterSome),
-                                     resultSlot);
+      llvm::BasicBlock *foundBlock = this->lowering.functionFrame().newBlock("iter.found");
+      llvm::BasicBlock *otherBlock = this->lowering.functionFrame().newBlock("iter.other");
+      this->lowering.builder_.CreateCondBr(decides, foundBlock, otherBlock);
+      this->lowering.functionFrame().switchTo(foundBlock);
+      this->lowering.builder_.CreateStore(
+          find ? this->lowering.optionalLowerer().makeOptional(
+                     value, this->lowering.builder_.getTrue(), resultType)
+               : this->lowering.builder_.getInt1(method == Builtin::IterSome),
+          resultSlot);
       consumer.stop();
-      lowering_.functionFrame().switchTo(otherBlock);
+      this->lowering.functionFrame().switchTo(otherBlock);
       if (find) {
-        lowering_.refCounts().releaseValue(value, element);
+        this->lowering.refCounts().releaseValue(value, element);
       }
 
       return nullptr;
@@ -262,21 +270,23 @@ llvm::Value *IteratorLowerer::emitIteratorSink(CallExpr *call) {
     llvm_unreachable("not a consumer of an iterator");
   }
   producer.run(consumer);
-  lowering_.functionFrame().emitBlock(endBlock);
+  this->lowering.functionFrame().emitBlock(endBlock);
   llvm::Value *result = nullptr;
   if (array) {
     result = array;
   } else if (resultSlot) {
-    result = lowering_.builder_.CreateLoad(lowering_.moduleBuilder().lower(accType), resultSlot);
+    result = this->lowering.builder_.CreateLoad(this->lowering.moduleBuilder().lower(accType),
+                                                resultSlot);
     if (hasAcc) {
-      llvm::Value *has = lowering_.builder_.CreateLoad(lowering_.builder_.getInt1Ty(), hasAcc);
+      llvm::Value *has =
+          this->lowering.builder_.CreateLoad(this->lowering.builder_.getInt1Ty(), hasAcc);
       result = accType == resultType
-                   ? lowering_.builder_.CreateSelect(
-                         has, result, lowering_.optionalLowerer().undefinedValue(resultType))
-                   : lowering_.optionalLowerer().makeOptional(result, has, resultType);
+                   ? this->lowering.builder_.CreateSelect(
+                         has, result, this->lowering.optionalLowerer().undefinedValue(resultType))
+                   : this->lowering.optionalLowerer().makeOptional(result, has, resultType);
     }
   }
-  lowering_.functionFrame().popScope();
+  this->lowering.functionFrame().popScope();
 
   return result;
 }
@@ -284,60 +294,64 @@ llvm::Value *IteratorLowerer::emitIteratorSink(CallExpr *call) {
 llvm::Value *IteratorLowerer::emitNext(CallExpr *call) {
   auto *member = cast<MemberExpr>(call->callee);
   const Type *type = member->object->type;
-  const Type *element = type->yielded(), *returned = type->returned(), *sent = type->sent();
-  llvm::Value *it = lowering_.exprLowerer().emitExpr(member->object);
-  llvm::Value *sentValue = nullptr, *in = nullptr;
+  const Type *element = type->yielded();
+  const Type *returned = type->returned();
+  const Type *sent = type->sent();
+  llvm::Value *it = this->lowering.exprLowerer().emitExpr(member->object);
+  llvm::Value *sentValue = nullptr;
+  llvm::Value *in = nullptr;
   if (!call->args.empty()) {
-    sentValue = lowering_.exprLowerer().emitExpr(call->args[0]);
+    sentValue = this->lowering.exprLowerer().emitExpr(call->args[0]);
     if (sent->isVoid()) {
-      lowering_.refCounts().releaseValue(sentValue, call->args[0]->type);
+      this->lowering.refCounts().releaseValue(sentValue, call->args[0]->type);
       sentValue = nullptr;
     } else {
-      in = lowering_.functionFrame().spill(sentValue, "sent");
+      in = this->lowering.functionFrame().spill(sentValue, "sent");
     }
   }
-  llvm::Value *out = lowering_.functionFrame().createStackSlot(
-      lowering_.moduleBuilder().lower(element), "next.value");
-  lowering_.builder_.CreateStore(
-      llvm::Constant::getNullValue(lowering_.moduleBuilder().lower(element)), out);
+  llvm::Value *out = this->lowering.functionFrame().createStackSlot(
+      this->lowering.moduleBuilder().lower(element), "next.value");
+  this->lowering.builder_.CreateStore(
+      llvm::Constant::getNullValue(this->lowering.moduleBuilder().lower(element)), out);
   llvm::Value *ret = nullptr;
   if (!returned->isVoid()) {
-    ret = lowering_.functionFrame().createStackSlot(lowering_.moduleBuilder().lower(returned),
-                                                    "next.return");
-    lowering_.builder_.CreateStore(
-        llvm::Constant::getNullValue(lowering_.moduleBuilder().lower(returned)), ret);
+    ret = this->lowering.functionFrame().createStackSlot(
+        this->lowering.moduleBuilder().lower(returned), "next.return");
+    this->lowering.builder_.CreateStore(
+        llvm::Constant::getNullValue(this->lowering.moduleBuilder().lower(returned)), ret);
   }
-  llvm::Value *frame = lowering_.builder_.CreateConstInBoundsGEP1_64(lowering_.builder_.getInt8Ty(),
-                                                                     it, kHeaderSize, "frame");
-  llvm::Value *wasDone = lowering_.builder_.CreateCall(
-      lowering_.coroutineLowerer().coroIntrinsic(llvm::Intrinsic::coro_done), {frame}, "was.done");
-  llvm::Value *has = lowering_.coroutineLowerer().emitResume(it, out, in, ret);
+  llvm::Value *frame = this->lowering.builder_.CreateConstInBoundsGEP1_64(
+      this->lowering.builder_.getInt8Ty(), it, kHeaderSize, "frame");
+  llvm::Value *wasDone = this->lowering.builder_.CreateCall(
+      this->lowering.coroutineLowerer().coroIntrinsic(llvm::Intrinsic::coro_done), {frame},
+      "was.done");
+  llvm::Value *has = this->lowering.coroutineLowerer().emitResume(it, out, in, ret);
   if (sentValue) {
-    lowering_.refCounts().releaseValue(sentValue, sent);
+    this->lowering.refCounts().releaseValue(sentValue, sent);
   }
   const Type *valueType = call->type->field("value")->type;
-  llvm::Value *given = lowering_.exprLowerer().emitConversion(
-      lowering_.builder_.CreateLoad(lowering_.moduleBuilder().lower(element), out), element,
-      valueType);
-  llvm::Value *value = lowering_.builder_.CreateSelect(
-      has, given, lowering_.optionalLowerer().undefinedValue(valueType));
+  llvm::Value *given = this->lowering.exprLowerer().emitConversion(
+      this->lowering.builder_.CreateLoad(this->lowering.moduleBuilder().lower(element), out),
+      element, valueType);
+  llvm::Value *value = this->lowering.builder_.CreateSelect(
+      has, given, this->lowering.optionalLowerer().undefinedValue(valueType));
   if (ret) {
-    llvm::Value *returnedValue = lowering_.exprLowerer().emitConversion(
-        lowering_.builder_.CreateLoad(lowering_.moduleBuilder().lower(returned), ret), returned,
-        valueType);
-    returnedValue = lowering_.builder_.CreateSelect(
-        wasDone, lowering_.optionalLowerer().undefinedValue(valueType), returnedValue);
-    value = lowering_.builder_.CreateSelect(has, value, returnedValue);
+    llvm::Value *returnedValue = this->lowering.exprLowerer().emitConversion(
+        this->lowering.builder_.CreateLoad(this->lowering.moduleBuilder().lower(returned), ret),
+        returned, valueType);
+    returnedValue = this->lowering.builder_.CreateSelect(
+        wasDone, this->lowering.optionalLowerer().undefinedValue(valueType), returnedValue);
+    value = this->lowering.builder_.CreateSelect(has, value, returnedValue);
   }
   const Type *resultType = call->type;
-  llvm::Value *result = lowering_.objectLayouts().allocObject(resultType, {0, 1});
-  lowering_.builder_.CreateStore(
-      value, lowering_.objectLayouts().fieldAddress(result, resultType, "value"));
-  lowering_.builder_.CreateStore(
-      lowering_.builder_.CreateNot(has),
-      lowering_.objectLayouts().fieldAddress(result, resultType, "done"));
-  lowering_.groupLowerer().adoptFields(result, resultType);
-  lowering_.refCounts().releaseValue(it, type);
+  llvm::Value *result = this->lowering.objectLayouts().allocObject(resultType, {0, 1});
+  this->lowering.builder_.CreateStore(
+      value, this->lowering.objectLayouts().fieldAddress(result, resultType, "value"));
+  this->lowering.builder_.CreateStore(
+      this->lowering.builder_.CreateNot(has),
+      this->lowering.objectLayouts().fieldAddress(result, resultType, "done"));
+  this->lowering.groupLowerer().adoptFields(result, resultType);
+  this->lowering.refCounts().releaseValue(it, type);
 
   return result;
 }
@@ -348,12 +362,12 @@ llvm::Value *IteratorLowerer::emitIteratorObject(CallExpr *call) {
     case Builtin::IterFrom: {
       Expr *arg = call->args[0];
       if (arg->type->isIterator()) {
-        return lowering_.exprLowerer().emitExpr(arg);
+        return this->lowering.exprLowerer().emitExpr(arg);
       }
       Builtin kind = arg->type->isString() ? Builtin::IterFrom : Builtin::ArrValues;
-      return lowering_.builder_.CreateCall(
-          lowering_.generatorLowerer().iteratorFunction(kind, arg->type, nullptr, result),
-          {lowering_.exprLowerer().emitExpr(arg)});
+      return this->lowering.builder_.CreateCall(
+          this->lowering.generatorLowerer().iteratorFunction(kind, arg->type, nullptr, result),
+          {this->lowering.exprLowerer().emitExpr(arg)});
     }
     case Builtin::ArrKeys:
     case Builtin::ArrValues:
@@ -364,17 +378,18 @@ llvm::Value *IteratorLowerer::emitIteratorObject(CallExpr *call) {
     case Builtin::SetValues:
     case Builtin::SetEntries: {
       Expr *array = cast<MemberExpr>(call->callee)->object;
-      return lowering_.builder_.CreateCall(lowering_.generatorLowerer().iteratorFunction(
-                                               call->builtin(), array->type, nullptr, result),
-                                           {lowering_.exprLowerer().emitExpr(array)});
+      return this->lowering.builder_.CreateCall(this->lowering.generatorLowerer().iteratorFunction(
+                                                    call->builtin(), array->type, nullptr, result),
+                                                {this->lowering.exprLowerer().emitExpr(array)});
     }
     default: {
       Expr *receiver = cast<MemberExpr>(call->callee)->object;
       Expr *arg = call->args[0];
-      llvm::Function *fn = lowering_.generatorLowerer().iteratorFunction(
+      llvm::Function *fn = this->lowering.generatorLowerer().iteratorFunction(
           call->builtin(), receiver->type, arg->type, result);
-      llvm::Value *source = lowering_.exprLowerer().emitExpr(receiver);
-      return lowering_.builder_.CreateCall(fn, {source, lowering_.exprLowerer().emitExpr(arg)});
+      llvm::Value *source = this->lowering.exprLowerer().emitExpr(receiver);
+      return this->lowering.builder_.CreateCall(
+          fn, {source, this->lowering.exprLowerer().emitExpr(arg)});
     }
   }
 }

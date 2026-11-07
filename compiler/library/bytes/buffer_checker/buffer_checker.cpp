@@ -107,7 +107,9 @@ Expr *BufferChecker::checkBufferMethod(CallExpr *call, MemberExpr *member) {
     return call;
   }
   if (name == "toString" || name == "toLocaleString") {
-    if (!checker_.argumentChecker().checkArity(call, member->loc(), 0, 3)) {
+    ArgumentChecker::ResultArityMatches arity = checker_.argumentChecker().checkArity(call, 0, 3);
+    if (arity.isErr()) {
+      checker_.diags_.error(member->loc(), arity.error().message);
       return call;
     }
     std::vector<Expr *> args{call->args.empty()
@@ -120,21 +122,27 @@ Expr *BufferChecker::checkBufferMethod(CallExpr *call, MemberExpr *member) {
     return made(Builtin::BufferToString, Type::string());
   }
   if (name == "toJSON") {
-    if (!checker_.argumentChecker().checkArity(call, member->loc(), 0, 0)) {
+    ArgumentChecker::ResultArityMatches arity = checker_.argumentChecker().checkArity(call, 0, 0);
+    if (arity.isErr()) {
+      checker_.diags_.error(member->loc(), arity.error().message);
       return call;
     }
     return made(Builtin::BufferToJSON, Type::object({{"type", Type::string(), false},
                                                      {"data", Type::array(Type::intTy()), false}}));
   }
   if (name == "equals") {
-    if (!checker_.argumentChecker().checkArity(call, member->loc(), 1, 1)) {
+    ArgumentChecker::ResultArityMatches arity = checker_.argumentChecker().checkArity(call, 1, 1);
+    if (arity.isErr()) {
+      checker_.diags_.error(member->loc(), arity.error().message);
       return call;
     }
     call->args[0] = bytesArg(call->args[0]);
     return made(Builtin::BufferEquals, Type::boolTy());
   }
   if (name == "compare") {
-    if (!checker_.argumentChecker().checkArity(call, member->loc(), 1, 5)) {
+    ArgumentChecker::ResultArityMatches arity = checker_.argumentChecker().checkArity(call, 1, 5);
+    if (arity.isErr()) {
+      checker_.diags_.error(member->loc(), arity.error().message);
       return call;
     }
     call->args[0] = bytesArg(call->args[0]);
@@ -154,7 +162,9 @@ Expr *BufferChecker::checkBufferMethod(CallExpr *call, MemberExpr *member) {
     return made(Builtin::BufferCompareTo, Type::intTy());
   }
   if (name == "copy") {
-    if (!checker_.argumentChecker().checkArity(call, member->loc(), 1, 4)) {
+    ArgumentChecker::ResultArityMatches arity = checker_.argumentChecker().checkArity(call, 1, 4);
+    if (arity.isErr()) {
+      checker_.diags_.error(member->loc(), arity.error().message);
       return call;
     }
     call->args[0] = bytesArg(call->args[0]);
@@ -174,7 +184,9 @@ Expr *BufferChecker::checkBufferMethod(CallExpr *call, MemberExpr *member) {
     return made(Builtin::BufferCopy, Type::intTy());
   }
   if (name == "write") {
-    if (!checker_.argumentChecker().checkArity(call, member->loc(), 1, 4)) {
+    ArgumentChecker::ResultArityMatches arity = checker_.argumentChecker().checkArity(call, 1, 4);
+    if (arity.isErr()) {
+      checker_.diags_.error(member->loc(), arity.error().message);
       return call;
     }
     Expr *text = checker_.argumentChecker().checkArg(call->args[0], Type::string());
@@ -208,7 +220,10 @@ Expr *BufferChecker::checkBufferMethod(CallExpr *call, MemberExpr *member) {
   }
   if (name == "fill" || name == "indexOf" || name == "lastIndexOf" || name == "includes") {
     bool fill = name == "fill";
-    if (!checker_.argumentChecker().checkArity(call, member->loc(), 1, fill ? 4 : 3)) {
+    ArgumentChecker::ResultArityMatches arity =
+        checker_.argumentChecker().checkArity(call, 1, fill ? 4 : 3);
+    if (arity.isErr()) {
+      checker_.diags_.error(member->loc(), arity.error().message);
       return call;
     }
     Expr *value = valueArg(call->args[0]);
@@ -255,7 +270,9 @@ Expr *BufferChecker::checkBufferMethod(CallExpr *call, MemberExpr *member) {
     return made(Builtin::BufferIndexOf, name == "includes" ? Type::boolTy() : Type::intTy());
   }
   if (name == "swap16" || name == "swap32" || name == "swap64") {
-    if (!checker_.argumentChecker().checkArity(call, member->loc(), 0, 0)) {
+    ArgumentChecker::ResultArityMatches arity = checker_.argumentChecker().checkArity(call, 0, 0);
+    if (arity.isErr()) {
+      checker_.diags_.error(member->loc(), arity.error().message);
       return call;
     }
     call->args = {intLit(name == "swap16" ? 2 : name == "swap32" ? 4 : 8)};
@@ -272,8 +289,10 @@ Expr *BufferChecker::checkBufferMethod(CallExpr *call, MemberExpr *member) {
   }
   Bytes kind = m.kind;
   if (m.variable) {
-    if (!checker_.argumentChecker().checkArity(call, member->loc(), m.write ? 3 : 2,
-                                               m.write ? 3 : 2)) {
+    ArgumentChecker::ResultArityMatches arity =
+        checker_.argumentChecker().checkArity(call, m.write ? 3 : 2, m.write ? 3 : 2);
+    if (arity.isErr()) {
+      checker_.diags_.error(member->loc(), arity.error().message);
       return call;
     }
     std::vector<Expr *> args{boolLit(m.isSigned), boolLit(m.big)};
@@ -311,8 +330,10 @@ Expr *BufferChecker::checkBufferMethod(CallExpr *call, MemberExpr *member) {
   }
   const Type *element = Type::bytesType(kind)->accessType();
   int64_t size = Type::bytesType(kind)->elementSize();
-  if (!checker_.argumentChecker().checkArity(call, member->loc(), m.write ? 1 : 0,
-                                             m.write ? 2 : 1)) {
+  ArgumentChecker::ResultArityMatches arity =
+      checker_.argumentChecker().checkArity(call, m.write ? 1 : 0, m.write ? 2 : 1);
+  if (arity.isErr()) {
+    checker_.diags_.error(member->loc(), arity.error().message);
     return call;
   }
   std::vector<Expr *> args{intLit(int64_t(kind)), boolLit(m.big)};
@@ -345,7 +366,9 @@ Expr *BufferChecker::checkTextMethod(CallExpr *call, MemberExpr *member) {
   const Type *type = member->object->type;
   llvm::StringRef name = member->name;
   if (type->bytes() == Bytes::TextEncoder && name == "encode") {
-    if (!checker_.argumentChecker().checkArity(call, member->loc(), 0, 1)) {
+    ArgumentChecker::ResultArityMatches arity = checker_.argumentChecker().checkArity(call, 0, 1);
+    if (arity.isErr()) {
+      checker_.diags_.error(member->loc(), arity.error().message);
       return call;
     }
     if (!call->args.empty()) {
@@ -356,7 +379,9 @@ Expr *BufferChecker::checkTextMethod(CallExpr *call, MemberExpr *member) {
     return call;
   }
   if (type->bytes() == Bytes::TextEncoder && name == "encodeInto") {
-    if (!checker_.argumentChecker().checkArity(call, member->loc(), 2, 2)) {
+    ArgumentChecker::ResultArityMatches arity = checker_.argumentChecker().checkArity(call, 2, 2);
+    if (arity.isErr()) {
+      checker_.diags_.error(member->loc(), arity.error().message);
       return call;
     }
     call->args[0] = checker_.argumentChecker().checkArg(call->args[0], Type::string());
@@ -368,7 +393,9 @@ Expr *BufferChecker::checkTextMethod(CallExpr *call, MemberExpr *member) {
   }
   if ((type->bytes() == Bytes::TextDecoder || type->bytes() == Bytes::FatalTextDecoder) &&
       name == "decode") {
-    if (!checker_.argumentChecker().checkArity(call, member->loc(), 0, 2)) {
+    ArgumentChecker::ResultArityMatches arity = checker_.argumentChecker().checkArity(call, 0, 2);
+    if (arity.isErr()) {
+      checker_.diags_.error(member->loc(), arity.error().message);
       return call;
     }
     if (!call->args.empty()) {

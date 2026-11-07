@@ -8,27 +8,14 @@
 #include "llvm/ADT/STLExtras.h"
 #include <cstring>
 
-using llvm::cast;
-using llvm::dyn_cast;
-using llvm::dyn_cast_or_null;
-using llvm::isa;
 
 namespace tz {
 
-StringMethods::StringMethods(Checker &checker) : checker_(checker) {}
+StringMethods::StringMethods(Checker &owner)
+    : checker(owner) {}
 
-Expr *StringMethods::checkStringMethod(CallExpr *call, MemberExpr *member) {
-  if (Expr *regex = checker_.stringRegexChecker().checkStringRegexMethod(call, member)) {
-    return regex;
-  }
-  struct Method {
-    llvm::StringRef name;
-    Builtin builtin;
-    unsigned minArgs, maxArgs;
-    const char *args;
-    const Type *ret;
-  };
-  constexpr unsigned kAny = ~0u;
+StringMethods::ResultStringMethod StringMethods::stringMethod(llvm::StringRef name) {
+  constexpr unsigned any = ~0u;
   static const Method methods[] = {
       {"charCodeAt", Builtin::StrCharCodeAt, 1, 1, "p", Type::intTy()},
       {"charAt", Builtin::StrCharAt, 0, 1, "p", Type::string()},
@@ -43,7 +30,7 @@ Expr *StringMethods::checkStringMethod(CallExpr *call, MemberExpr *member) {
       {"endsWith", Builtin::StrEndsWith, 1, 2, "sp", Type::boolTy()},
       {"repeat", Builtin::StrRepeat, 1, 1, "p", Type::string()},
       {"toString", Builtin::StrToString, 0, 0, "", Type::string()},
-      {"concat", Builtin::StrConcat, 0, kAny, "*", Type::string()},
+      {"concat", Builtin::StrConcat, 0, any, "*", Type::string()},
       {"split", Builtin::StrSplit, 0, 2, "sp", Type::array(Type::string())},
       {"trim", Builtin::StrTrim, 0, 0, "", Type::string()},
       {"trimStart", Builtin::StrTrimStart, 0, 0, "", Type::string()},
@@ -58,20 +45,37 @@ Expr *StringMethods::checkStringMethod(CallExpr *call, MemberExpr *member) {
 
   const Method *method = nullptr;
   for (const Method &m : methods) {
-    if (m.name == member->name) {
+    if (m.name == name) {
       method = &m;
     }
   }
   if (!method) {
-    checker_.diags_.error(member->loc(),
-                          "property '" + member->name + "' does not exist on type 'string'");
-    for (Expr *&arg : call->args) {
-      arg = checker_.exprChecker().checkExpr(arg);
-    }
+    std::string message = ErrorTextStringMethod::missing(name);
+
+    return err(StringMethodsStringMethodError{
+        .code = StringMethodsStringMethodErrorCode::NO_SUCH_METHOD,
+        .message = message,
+    });
+  }
+
+  return ok(method);
+}
+
+Expr *StringMethods::checkStringMethod(CallExpr *call, MemberExpr *member) {
+  if (Expr *regex = this->checker.stringRegexChecker().checkStringRegexMethod(call, member)) {
+    return regex;
+  }
+  ResultStringMethod found = StringMethods::stringMethod(member->name);
+  if (found.isErr()) {
+    this->checker.diags_.error(member->loc(), found.error().message);
+    this->checker.argumentChecker().checkArgsLoosely(call);
     return call;
   }
-  if (!checker_.argumentChecker().checkArity(call, member->loc(), method->minArgs,
-                                             method->maxArgs)) {
+  const Method *method = found.value();
+  ArgumentChecker::ResultArityMatches arity =
+      this->checker.argumentChecker().checkArity(call, method->minArgs, method->maxArgs);
+  if (arity.isErr()) {
+    this->checker.diags_.error(member->loc(), arity.error().message);
     return call;
   }
 
@@ -80,13 +84,14 @@ Expr *StringMethods::checkStringMethod(CallExpr *call, MemberExpr *member) {
     Expr *&arg = call->args[i];
     switch (method->args[std::min(i, kinds - 1)]) {
     case 's':
-      arg = checker_.argumentChecker().checkArg(arg, Type::string());
+      arg = this->checker.argumentChecker().checkArg(arg, Type::string());
       break;
     case 'p':
-      arg = checker_.memberChecker().checkPosition(arg);
+      arg = this->checker.memberChecker().checkPosition(arg);
       break;
     default:
-      arg = checker_.concatChecker().toStringOperand(checker_.exprChecker().checkExpr(arg));
+      arg =
+          this->checker.concatChecker().toStringOperand(this->checker.exprChecker().checkExpr(arg));
       break;
     }
   }
@@ -94,17 +99,19 @@ Expr *StringMethods::checkStringMethod(CallExpr *call, MemberExpr *member) {
   call->type = method->ret;
 
   if (method->builtin == Builtin::StrRepeat) {
-    checker_.indexProofs().requireBetween(call->args[0], 0, std::nullopt, "the count of 'repeat'");
+    this->checker.indexProofs().requireBetween(call->args[0], 0, std::nullopt,
+                                               "the count of 'repeat'");
   } else if (method->builtin == Builtin::StrCharCodeAt) {
     call->mayBeOutOfRange =
-        !checker_.indexProofs().provesInBounds(member->object, call->args[0], false);
+        !this->checker.indexProofs().provesInBounds(member->object, call->args[0], false);
     call->type = call->mayBeOutOfRange ? Type::optional(Type::intTy()) : Type::intTy();
   } else if (method->builtin == Builtin::StrCodePointAt) {
     call->mayBeOutOfRange =
-        !checker_.indexProofs().provesInBounds(member->object, call->args[0], false);
+        !this->checker.indexProofs().provesInBounds(member->object, call->args[0], false);
     call->type = call->mayBeOutOfRange ? Type::optional(Type::intTy()) : Type::intTy();
   } else if (method->builtin == Builtin::StrAt) {
-    call->mayBeOutOfRange = !checker_.indexProofs().provesAtInBounds(member->object, call->args[0]);
+    call->mayBeOutOfRange =
+        !this->checker.indexProofs().provesAtInBounds(member->object, call->args[0]);
     call->type = call->mayBeOutOfRange ? Type::optional(Type::string()) : Type::string();
   }
 

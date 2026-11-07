@@ -6,7 +6,7 @@ namespace tz {
 
 class InlineGeneratorLowerer {
 public:
-  explicit InlineGeneratorLowerer(Lowering &lowering);
+  explicit InlineGeneratorLowerer(Lowering &owner);
 
   Lowering::Producer prepare(Expr *source, llvm::Value *returnSlot = nullptr);
   bool isInlinable(const FunctionDecl *decl) const;
@@ -16,8 +16,10 @@ public:
   llvm::Value *emitYieldValue(llvm::Value *value, const Type *resultType);
 
 private:
-  Lowering &lowering_;
-  unsigned inlineCopies_ = 1;
+  static unsigned countYields(const FunctionDecl *fn);
+
+  Lowering &lowering;
+  unsigned inlineCopies = 1;
 };
 
 }

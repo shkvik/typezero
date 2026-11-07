@@ -5,73 +5,100 @@
 #include "compiler/check/generics/arg_list_checker/arg_list_checker.h"
 #include "compiler/check/types/type_relations/type_relations.h"
 #include "llvm/ADT/STLExtras.h"
-#include "llvm/ADT/StringSet.h"
-#include "llvm/Support/ErrorHandling.h"
-#include <cmath>
-#include <functional>
-
-using llvm::cast;
-using llvm::dyn_cast;
-using llvm::dyn_cast_or_null;
-using llvm::isa;
 
 namespace tz {
 
-ArgumentChecker::ArgumentChecker(Checker &checker) : checker_(checker) {}
+ArgumentChecker::ArgumentChecker(Checker &owner)
+    : checker(owner) {}
+
+ArgumentChecker::ResultSpreadRestFits ArgumentChecker::spreadRest(const Expr *arg, const Type *to) {
+  if (arg->type != to && !arg->type->isError() && !to->isError()) {
+    std::string message = ErrorTextSpreadRest::otherType(arg->type->name(), to->name());
+
+    return err(ArgumentCheckerSpreadRestError{
+        .code = ArgumentCheckerSpreadRestErrorCode::OTHER_TYPE,
+        .message = message,
+    });
+  }
+
+  return ok(arg);
+}
+
+ArgumentChecker::ResultTupleRestCount ArgumentChecker::tupleRest(const ArrayLitExpr *rest,
+                                                                 const Type *listRest, size_t fixed,
+                                                                 size_t count) {
+  bool tuple = listRest && listRest->isTuple();
+  if (tuple && rest->elements.size() != listRest->fields().size()) {
+    std::string message = ErrorTextTupleRest::count(fixed + listRest->fields().size(), count);
+
+    return err(ArgumentCheckerTupleRestError{
+        .code = ArgumentCheckerTupleRestErrorCode::WRONG_COUNT,
+        .message = message,
+    });
+  }
+
+  return ok(rest);
+}
 
 Expr *ArgumentChecker::checkArguments(CallExpr *call, llvm::ArrayRef<const Type *> params,
                                       size_t minArgs, bool hasRest, llvm::SMLoc loc,
                                       const std::vector<bool> *checked) {
   if (!checked) {
-    checker_.argListChecker().expandListSpreads(call->args, call->spread);
+    this->checker.argListChecker().expandListSpreads(call->args, call->spread);
   }
   size_t fixed = params.size() - (hasRest ? 1 : 0);
-  if (hasRest && (params.back()->isListParam() || spreadsLists(params.back()))) {
+  unsigned least = static_cast<unsigned>(minArgs);
+  bool listParam = hasRest && (params.back()->isListParam() || spreadsLists(params.back()));
+  if (listParam) {
     for (size_t i = 0; i < call->args.size() && i < fixed; ++i) {
-      if (call->spreads(i) && checker_.callChecker().rejectSpread(call)) {
+      if (call->spreads(i) && this->checker.callChecker().rejectSpread(call)) {
         return call;
       }
     }
-    if (!checkArity(call, loc, static_cast<unsigned>(minArgs), ~0u)) {
+    ResultArityMatches arity = this->checkArity(call, least, ~0u);
+    if (arity.isErr()) {
+      this->checker.diags_.error(loc, arity.error().message);
       return call;
     }
     for (size_t i = 0; i < fixed; ++i) {
       bool given = checked && i < checked->size() && (*checked)[i];
-      call->args[i] = given ? checker_.typeRelations().coerce(call->args[i], params[i])
-                            : checkArg(call->args[i], params[i]);
+      call->args[i] = given ? this->checker.typeRelations().coerce(call->args[i], params[i])
+                            : this->checkArg(call->args[i], params[i]);
     }
-    checker_.argListChecker().checkListArguments(call, fixed, params.back(), loc, checked);
+    this->checker.argListChecker().checkListArguments(call, fixed, params.back(), loc, checked);
 
     return call;
   }
-  for (size_t i = 0; i < call->args.size() && i < (hasRest ? fixed : call->args.size()); ++i) {
-    if (call->spreads(i) && checker_.callChecker().rejectSpread(call)) {
+  size_t spreadLimit = hasRest ? fixed : call->args.size();
+  for (size_t i = 0; i < call->args.size() && i < spreadLimit; ++i) {
+    if (call->spreads(i) && this->checker.callChecker().rejectSpread(call)) {
       return call;
     }
   }
-  if (!checkArity(call, loc, static_cast<unsigned>(minArgs),
-                  hasRest ? ~0u : static_cast<unsigned>(params.size()))) {
+  unsigned most = hasRest ? ~0u : static_cast<unsigned>(params.size());
+  ResultArityMatches arity = this->checkArity(call, least, most);
+  if (arity.isErr()) {
+    this->checker.diags_.error(loc, arity.error().message);
     return call;
   }
   auto isChecked = [&](size_t i) { return checked && i < checked->size() && (*checked)[i]; };
   Expr *checkedRest = nullptr;
-  const Type *listRest = hasRest && (params.back()->isTuple() || params.back()->isListParam())
-                             ? params.back()
-                             : nullptr;
+  bool listRestParam = hasRest && (params.back()->isTuple() || params.back()->isListParam());
+  const Type *listRest = listRestParam ? params.back() : nullptr;
   if (listRest && call->args.size() == fixed + 1 && call->spreads(fixed)) {
     Expr *&arg = call->args[fixed];
     if (!isChecked(fixed)) {
-      arg = checker_.exprChecker().checkExpr(arg, listRest);
+      arg = this->checker.exprChecker().checkExpr(arg, listRest);
     }
-    if (arg->type != listRest && !arg->type->isError() && !listRest->isError()) {
-      checker_.diags_.error(arg->loc(), "cannot spread '" + arg->type->name() + "' into '" +
-                                            listRest->name() + "'");
+    ResultSpreadRestFits fits = ArgumentChecker::spreadRest(arg, listRest);
+    if (fits.isErr()) {
+      this->checker.diags_.error(arg->loc(), fits.error().message);
     }
     checkedRest = arg;
     call->spread.clear();
   } else if (hasRest) {
     llvm::SMLoc restLoc = call->args.size() > fixed ? call->args[fixed]->loc() : call->loc();
-    auto *rest = checker_.ctx_.make<ArrayLitExpr>(restLoc);
+    auto *rest = this->checker.ctx_.make<ArrayLitExpr>(restLoc);
     const Type *restType = params.back();
     for (size_t i = fixed; i < call->args.size(); ++i) {
       Expr *arg = call->args[i];
@@ -82,26 +109,27 @@ Expr *ArgumentChecker::checkArguments(CallExpr *call, llvm::ArrayRef<const Type 
           element = listRest->fields()[i - fixed].type;
         }
         if (!call->spreads(i)) {
-          arg = checker_.typeRelations().coerce(arg, element);
-        } else if (arg->type != restType && !arg->type->isError() && !restType->isError()) {
-          checker_.diags_.error(arg->loc(), "cannot spread '" + arg->type->name() + "' into '" +
-                                                restType->name() + "'");
+          arg = this->checker.typeRelations().coerce(arg, element);
+        } else {
+          ResultSpreadRestFits fits = ArgumentChecker::spreadRest(arg, restType);
+          if (fits.isErr()) {
+            this->checker.diags_.error(arg->loc(), fits.error().message);
+          }
         }
       }
       rest->elements.push_back({arg, call->spreads(i)});
     }
-    if (checkedRest && listRest && listRest->isTuple() &&
-        rest->elements.size() != listRest->fields().size()) {
-      checker_.diags_.error(rest->loc(),
-                            "expected " + std::to_string(fixed + listRest->fields().size()) +
-                                " arguments, but got " + std::to_string(call->args.size()));
+    ResultTupleRestCount counted =
+        ArgumentChecker::tupleRest(rest, listRest, fixed, call->args.size());
+    if (checkedRest && counted.isErr()) {
+      this->checker.diags_.error(rest->loc(), counted.error().message);
       rest->type = Type::error();
     } else if (checkedRest) {
       rest->type = restType;
     }
     call->args.resize(std::min(call->args.size(), fixed));
     while (call->args.size() < fixed) {
-      call->args.push_back(checker_.ctx_.make<UndefinedExpr>(call->loc()));
+      call->args.push_back(this->checker.ctx_.make<UndefinedExpr>(call->loc()));
     }
     call->args.push_back(rest);
     call->spread.clear();
@@ -110,49 +138,60 @@ Expr *ArgumentChecker::checkArguments(CallExpr *call, llvm::ArrayRef<const Type 
     if (call->args[i] == checkedRest) {
       continue;
     }
-    call->args[i] = isChecked(i) ? checker_.typeRelations().coerce(call->args[i], params[i])
-                                 : checkArg(call->args[i], params[i]);
+    call->args[i] = isChecked(i) ? this->checker.typeRelations().coerce(call->args[i], params[i])
+                                 : this->checkArg(call->args[i], params[i]);
   }
-  checker_.flowChecker().calledFunction();
+  this->checker.flowChecker().calledFunction();
 
   return call;
 }
 
-bool ArgumentChecker::checkArity(CallExpr *call, llvm::SMLoc loc, unsigned min, unsigned max) {
-  size_t count = call->args.size();
-  if (count >= min && count <= max) {
-    return true;
-  }
-  if (call->tagged) {
-    checker_.diags_.error(
-        loc, "expected " + argumentCount(min, max) + ", but the tagged template passes " +
-                 llvm::Twine(count) + ": the array of its texts" +
-                 (count == 1   ? ""
-                  : count == 2 ? " and 1 value"
-                               : " and " + std::to_string(count - 1) + " values"));
-  } else {
-    checker_.diags_.error(loc, "expected " + argumentCount(min, max) + ", but got " +
-                                   llvm::Twine(count));
-  }
+void ArgumentChecker::checkArgsLoosely(CallExpr *call) {
   for (Expr *&arg : call->args) {
-    arg = checker_.exprChecker().checkExpr(arg);
+    arg = this->checker.exprChecker().checkExpr(arg);
+  }
+}
+
+ArgumentChecker::ResultArityMatches ArgumentChecker::checkArity(CallExpr *call, unsigned min,
+                                                                unsigned max) {
+  size_t count = call->args.size();
+  bool fits = count >= min && count <= max;
+  if (!fits && call->tagged) {
+    this->checkArgsLoosely(call);
+    std::string message = ErrorTextArity::tagged(min, max, count);
+
+    return err(ArgumentCheckerCheckArityError{
+        .code = ArgumentCheckerCheckArityErrorCode::WRONG_COUNT_TAGGED,
+        .message = message,
+    });
+  }
+  if (!fits) {
+    this->checkArgsLoosely(call);
+    std::string message = ErrorTextArity::count(min, max, count);
+
+    return err(ArgumentCheckerCheckArityError{
+        .code = ArgumentCheckerCheckArityErrorCode::WRONG_COUNT,
+        .message = message,
+    });
   }
 
-  return false;
+  return ok(call);
 }
 
 Expr *ArgumentChecker::checkArg(Expr *arg, const Type *to) {
-  return checker_.typeRelations().coerce(
-      checker_.exprChecker().checkExpr(arg, to->isError() ? nullptr : to), to);
+  const Type *expected = to->isError() ? nullptr : to;
+  Expr *checked = this->checker.exprChecker().checkExpr(arg, expected);
+
+  return this->checker.typeRelations().coerce(checked, to);
 }
 
 Expr *ArgumentChecker::checkAnyNumber(Expr *arg) {
-  arg = checker_.exprChecker().checkExpr(arg);
+  arg = this->checker.exprChecker().checkExpr(arg);
   if (arg->type->isInteger()) {
-    return checker_.typeRelations().convert(arg, Type::doubleTy());
+    return this->checker.typeRelations().convert(arg, Type::doubleTy());
   }
 
-  return checker_.typeRelations().coerce(arg, Type::doubleTy());
+  return this->checker.typeRelations().coerce(arg, Type::doubleTy());
 }
 
 }

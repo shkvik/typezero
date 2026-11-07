@@ -8,31 +8,25 @@
 #include "llvm/ADT/STLExtras.h"
 #include <functional>
 
-using llvm::cast;
-using llvm::dyn_cast;
-using llvm::dyn_cast_or_null;
-using llvm::isa;
 
 namespace tz {
 
-namespace {
-
-bool sameParams(const FuncSymbol *a, const FuncSymbol *b) {
+bool ClassLinks::sameParams(const FuncSymbol *a, const FuncSymbol *b) {
   return a->params == b->params && a->minArgs == b->minArgs && a->hasRest == b->hasRest;
 }
 
-bool takesParams(const Type *fnType, const FuncSymbol *sym) {
+bool ClassLinks::takesParams(const Type *fnType, const FuncSymbol *sym) {
   return fnType->isFunction() && fnType->params() == llvm::ArrayRef<const Type *>(sym->params) &&
          fnType->minArgs() == sym->minArgs && fnType->hasRest() == sym->hasRest;
 }
 
-const char *accessName(Access access) {
+const char *ClassLinks::accessName(Access access) {
   return access == Access::Public      ? "public"
          : access == Access::Protected ? "protected"
                                        : "private";
 }
 
-bool isArrowMethod(const FunctionDecl *fn) {
+bool ClassLinks::isArrowMethod(const FunctionDecl *fn) {
   if (!fn->cls()) {
     return false;
   }
@@ -45,7 +39,7 @@ bool isArrowMethod(const FunctionDecl *fn) {
   return false;
 }
 
-bool declaresReturn(const FunctionDecl *fn) {
+bool ClassLinks::declaresReturn(const FunctionDecl *fn) {
   if (fn->returnType) {
     return true;
   }
@@ -61,7 +55,7 @@ bool declaresReturn(const FunctionDecl *fn) {
   return false;
 }
 
-void interfacesOf(const ClassDecl *cls, std::vector<const Type *> &out) {
+void ClassLinks::interfacesOf(const ClassDecl *cls, std::vector<const Type *> &out) {
   std::vector<const Type *> queue(cls->implemented.begin(), cls->implemented.end());
   for (size_t i = 0; i < queue.size(); ++i) {
     if (llvm::is_contained(out, queue[i])) {
@@ -74,9 +68,8 @@ void interfacesOf(const ClassDecl *cls, std::vector<const Type *> &out) {
   }
 }
 
-}
-
-ClassLinks::ClassLinks(Checker &checker) : checker_(checker) {}
+ClassLinks::ClassLinks(Checker &owner)
+    : checker(owner) {}
 
 std::vector<FunctionDecl *> ClassLinks::constructorsOf(const ClassDecl *cls) {
   for (const ClassDecl *c = cls; c; c = c->parent) {
@@ -128,8 +121,8 @@ FunctionDecl *ClassLinks::soleImplementation(const ClassDecl *cls, FunctionDecl 
   unsigned count = only ? 1 : 0;
   std::function<void(const ClassDecl *)> walk = [&](const ClassDecl *c) {
     for (const ClassDecl *child : c->children) {
-      for (FunctionDecl *fn : ownMethods(child)) {
-        if (!fn->isAbstract() && fn != variant && overridesTransitively(fn, variant)) {
+      for (FunctionDecl *fn : ClassLinks::ownMethods(child)) {
+        if (!fn->isAbstract() && fn != variant && ClassLinks::overridesTransitively(fn, variant)) {
           only = fn;
           count += child->isEmitted() ? 1 : 2;
         }
@@ -145,7 +138,8 @@ FunctionDecl *ClassLinks::soleImplementation(const ClassDecl *cls, FunctionDecl 
 }
 
 const Type *ClassLinks::commonClass(const Type *a, const Type *b) {
-  const ClassDecl *x = a->classDecl(), *y = b->classDecl();
+  const ClassDecl *x = a->classDecl();
+  const ClassDecl *y = b->classDecl();
   if (!x || !y) {
     return nullptr;
   }
@@ -166,37 +160,37 @@ void ClassLinks::linkClasses() {
       visit(child);
     }
   };
-  for (ClassDecl *cls : checker_.classes_) {
+  for (ClassDecl *cls : this->checker.classes_) {
     if (!cls->parent && !cls->literal()) {
       visit(cls);
     }
   }
 
   for (ClassDecl *cls : order) {
-    linkOverrides(cls);
+    this->linkOverrides(cls);
   }
-  numberClasses();
+  this->numberClasses();
 
   for (ClassDecl *cls : order) {
-    buildVtable(cls);
+    this->buildVtable(cls);
   }
-  checker_.classesLinked_ = true;
+  this->checker.classesLinked_ = true;
 
   llvm::SmallPtrSet<const FunctionDecl *, 4> sources;
   for (ClassDecl *cls : order) {
     if (cls->generic()) {
       continue;
     }
-    for (FunctionDecl *fn : ownMethods(cls)) {
-      if (!fn->sym || declaresReturn(fn) || sources.contains(fn)) {
+    for (FunctionDecl *fn : ClassLinks::ownMethods(cls)) {
+      if (!fn->sym || ClassLinks::declaresReturn(fn) || sources.contains(fn)) {
         continue;
       }
       if (fn->isAbstract() && !fn->overrides()) {
         FunctionDecl *source = nullptr;
         std::function<void(const ClassDecl *)> find = [&](const ClassDecl *c) {
           for (const ClassDecl *child : c->children) {
-            for (FunctionDecl *impl : ownMethods(child)) {
-              if (!source && !impl->isAbstract() && overridesTransitively(impl, fn)) {
+            for (FunctionDecl *impl : ClassLinks::ownMethods(child)) {
+              if (!source && !impl->isAbstract() && ClassLinks::overridesTransitively(impl, fn)) {
                 source = impl;
               }
             }
@@ -205,7 +199,7 @@ void ClassLinks::linkClasses() {
         };
         find(cls);
         fn->sym->ret = nullptr;
-        checker_.returnSources_[fn] = source;
+        this->checker.returnSources_[fn] = source;
         if (source) {
           sources.insert(source);
         }
@@ -213,27 +207,27 @@ void ClassLinks::linkClasses() {
       }
       if (fn->overrides()) {
         FunctionDecl *base = fn->overrides();
-        if (declaresReturn(base) && base->sym && base->sym->ret) {
+        if (ClassLinks::declaresReturn(base) && base->sym && base->sym->ret) {
           fn->sym->ret = base->sym->ret;
         } else {
           fn->sym->ret = nullptr;
-          checker_.inheritsReturn_[fn] = base;
+          this->checker.inheritsReturn_[fn] = base;
         }
         continue;
       }
       std::vector<const Type *> interfaces;
       for (const ClassDecl *c = cls; c; c = c->parent) {
-        interfacesOf(c, interfaces);
+        ClassLinks::interfacesOf(c, interfaces);
       }
       for (const Type *iface : interfaces) {
         const Field *member = iface->field(fn->name);
-        if (member && takesParams(member->type, fn->sym)) {
+        if (member && ClassLinks::takesParams(member->type, fn->sym)) {
           fn->sym->ret = member->type->ret();
           break;
         }
         if (const Overload *overload = iface->overload(fn->name)) {
           for (const Type *signature : overload->signatures) {
-            if (takesParams(signature, fn->sym)) {
+            if (ClassLinks::takesParams(signature, fn->sym)) {
               fn->sym->ret = signature->ret();
             }
           }
@@ -251,7 +245,7 @@ void ClassLinks::numberClasses() {
       visit(child);
     }
   };
-  for (ClassDecl *cls : checker_.classes_) {
+  for (ClassDecl *cls : this->checker.classes_) {
     if (!cls->parent && !cls->literal()) {
       visit(cls);
     }
@@ -266,17 +260,17 @@ void ClassLinks::numberClasses() {
       cls->lastId = std::max(cls->lastId, child->lastId);
     }
   }
-  for (ClassDecl *cls : checker_.classes_) {
+  for (ClassDecl *cls : this->checker.classes_) {
     if (cls->literal()) {
       cls->id = cls->lastId = ++next;
     }
   }
-  checker_.classCount_ = next;
+  this->checker.classCount_ = next;
 }
 
 void ClassLinks::buildVtable(ClassDecl *cls) {
   cls->vtable = cls->parent ? cls->parent->vtable : std::vector<FunctionDecl *>();
-  for (FunctionDecl *fn : ownMethods(cls)) {
+  for (FunctionDecl *fn : ClassLinks::ownMethods(cls)) {
     Overriding *overriding = fn->overriding();
     if (fn->overrides()) {
       overriding->slot = fn->overrides()->slot();
@@ -293,9 +287,9 @@ void ClassLinks::buildVtable(ClassDecl *cls) {
 }
 
 void ClassLinks::linkOverrides(ClassDecl *cls) {
-  bool muted = checker_.diags_.setMuted(false);
-  checker_.diags_.setMuted(muted || cls->generic() != nullptr);
-  for (FunctionDecl *fn : ownMethods(cls)) {
+  bool muted = this->checker.diags_.setMuted(false);
+  this->checker.diags_.setMuted(muted || cls->generic() != nullptr);
+  for (FunctionDecl *fn : ClassLinks::ownMethods(cls)) {
     if (!fn->sym) {
       continue;
     }
@@ -304,7 +298,7 @@ void ClassLinks::linkOverrides(ClassDecl *cls) {
     if (cls->parent) {
       inherited = ClassDeclarer::methodsNamed(cls->parent, fn->name, false);
       for (FunctionDecl *v : inherited) {
-        if (v->sym && sameParams(v->sym, fn->sym)) {
+        if (v->sym && ClassLinks::sameParams(v->sym, fn->sym)) {
           base = v;
         }
       }
@@ -313,81 +307,81 @@ void ClassLinks::linkOverrides(ClassDecl *cls) {
     const ClassField *field =
         cls->parent ? ClassBases::findField(cls->parent, fn->name, &owner) : nullptr;
     if (field && !field->method()) {
-      checker_.diags_.error(fn->loc(),
-                            "'" + fn->name + "' is a field of '" + owner->name +
-                                "', so a class that extends it cannot have a method of that "
-                                "name");
+      this->checker.diags_.error(fn->loc(),
+                                 "'" + fn->name + "' is a field of '" + owner->name +
+                                     "', so a class that extends it cannot have a method of that "
+                                     "name");
       continue;
     }
     if (!base) {
       if (fn->isOverride()) {
         if (!cls->parent) {
-          checker_.diags_.error(fn->loc(), "'override' says that '" + fn->name +
-                                               "' replaces a method of the class that '" +
-                                               cls->name + "' extends, and it extends none");
+          this->checker.diags_.error(fn->loc(), "'override' says that '" + fn->name +
+                                                    "' replaces a method of the class that '" +
+                                                    cls->name + "' extends, and it extends none");
         } else if (inherited.empty()) {
-          checker_.diags_.error(fn->loc(), "'" + fn->name + "' is marked 'override', but '" +
-                                               cls->parent->name + "' has no method '" + fn->name +
-                                               "'");
+          this->checker.diags_.error(fn->loc(), "'" + fn->name + "' is marked 'override', but '" +
+                                                    cls->parent->name + "' has no method '" +
+                                                    fn->name + "'");
         } else {
-          checker_.diags_.error(
+          this->checker.diags_.error(
               fn->loc(), "'" + fn->name + "' is marked 'override', but no method of '" +
                              cls->parent->name + "' has its parameters: there " +
                              (inherited.size() == 1 ? "is " : "are ") + variantList(inherited) +
                              "; an override takes the same parameters");
         }
       }
-      if (!inherited.empty() && checker_.chunkTypes().isStreamHook(fn, true)) {
-        checker_.chunkTypes().reportStreamHook(fn, inherited);
+      if (!inherited.empty() && this->checker.chunkTypes().isStreamHook(fn, true)) {
+        this->checker.chunkTypes().reportStreamHook(fn, inherited);
         continue;
       }
       for (FunctionDecl *v : inherited) {
-        checker_.classDeclarer().checkVariantPair(v, fn);
+        this->checker.classDeclarer().checkVariantPair(v, fn);
       }
       continue;
     }
-    if (isArrowMethod(base) && !isArrowMethod(fn)) {
-      checker_.diags_.error(fn->loc(),
-                            "'" + fn->name + "' is an arrow in a field of '" + base->cls()->name +
-                                "', which each object holds itself in JavaScript, so a method of "
-                                "a class that extends it would never run; override it with a "
-                                "field too: '" +
-                                fn->name + " = (...) => ...'");
+    if (ClassLinks::isArrowMethod(base) && !ClassLinks::isArrowMethod(fn)) {
+      this->checker.diags_.error(
+          fn->loc(), "'" + fn->name + "' is an arrow in a field of '" + base->cls()->name +
+                         "', which each object holds itself in JavaScript, so a method of "
+                         "a class that extends it would never run; override it with a "
+                         "field too: '" +
+                         fn->name + " = (...) => ...'");
       continue;
     }
     if (base->access() == Access::Private) {
-      checker_.diags_.error(fn->loc(), "'" + fn->name + "' is private in class '" +
-                                           base->cls()->name +
-                                           "', so a class that extends it cannot override it");
+      this->checker.diags_.error(fn->loc(), "'" + fn->name + "' is private in class '" +
+                                                base->cls()->name +
+                                                "', so a class that extends it cannot override it");
       continue;
     }
     if (fn->access() > base->access()) {
-      checker_.diags_.error(fn->loc(), "'" + fn->name + "' is " + accessName(base->access()) +
-                                           " in '" + base->cls()->name +
-                                           "', so its override cannot be " +
-                                           accessName(fn->access()));
+      this->checker.diags_.error(fn->loc(),
+                                 "'" + fn->name + "' is " + ClassLinks::accessName(base->access()) +
+                                     " in '" + base->cls()->name + "', so its override cannot be " +
+                                     ClassLinks::accessName(fn->access()));
     }
     if (fn->isAbstract() && !base->isAbstract()) {
-      checker_.diags_.error(fn->loc(), "'" + fn->name + "' has a body in '" + base->cls()->name +
-                                           "', so it cannot be abstract again in '" + cls->name +
-                                           "'");
+      this->checker.diags_.error(fn->loc(),
+                                 "'" + fn->name + "' has a body in '" + base->cls()->name +
+                                     "', so it cannot be abstract again in '" + cls->name + "'");
     }
     fn->overriding()->overrides = base;
     for (FunctionDecl *p = base; p; p = p->overrides()) {
-      if (checker_.classesLinked_ && !p->overridden() && p->slot() < 0) {
-        bool outer = checker_.diags_.setMuted(false);
-        checker_.diags_.error(fn->loc(),
-                              "'" + fn->name + "' of '" + cls->type->name() + "' overrides '" +
-                                  p->cls()->type->name() + "." + p->name +
-                                  "' only with these type arguments, which is not supported; give "
-                                  "the method the same parameters in '" +
-                                  p->cls()->name + "'");
-        checker_.diags_.setMuted(outer);
+      if (this->checker.classesLinked_ && !p->overridden() && p->slot() < 0) {
+        bool outer = this->checker.diags_.setMuted(false);
+        this->checker.diags_.error(
+            fn->loc(), "'" + fn->name + "' of '" + cls->type->name() + "' overrides '" +
+                           p->cls()->type->name() + "." + p->name +
+                           "' only with these type arguments, which is not supported; give "
+                           "the method the same parameters in '" +
+                           p->cls()->name + "'");
+        this->checker.diags_.setMuted(outer);
       }
-      checker_.genericClassInstantiator().markOverridden(p);
+      this->checker.genericClassInstantiator().markOverridden(p);
     }
   }
-  checker_.diags_.setMuted(muted);
+  this->checker.diags_.setMuted(muted);
 }
 
 const Type *ClassLinks::inheritedReturnType(FuncSymbol *fn) {
@@ -395,12 +389,14 @@ const Type *ClassLinks::inheritedReturnType(FuncSymbol *fn) {
   if (!decl) {
     return nullptr;
   }
-  if (auto found = checker_.returnSources_.find(decl); found != checker_.returnSources_.end()) {
-    return found->second ? checker_.returnInferrer().returnType(found->second->sym)
+  if (auto found = this->checker.returnSources_.find(decl);
+      found != this->checker.returnSources_.end()) {
+    return found->second ? this->checker.returnInferrer().returnType(found->second->sym)
                          : Type::voidTy();
   }
-  if (auto found = checker_.inheritsReturn_.find(decl); found != checker_.inheritsReturn_.end()) {
-    return checker_.returnInferrer().returnType(found->second->sym);
+  if (auto found = this->checker.inheritsReturn_.find(decl);
+      found != this->checker.inheritsReturn_.end()) {
+    return this->checker.returnInferrer().returnType(found->second->sym);
   }
 
   return nullptr;
@@ -412,11 +408,11 @@ void ClassLinks::noteInheritedReturn(const FunctionDecl *fn) {
   }
   std::string type = fn->sym->ret->name().str();
   if (const FunctionDecl *base = fn->overrides()) {
-    checker_.diags_.note(base->loc(), "'" + fn->name + "' overrides '" + base->cls()->name + "." +
-                                          fn->name + "', so it returns '" + type +
-                                          "' too; to return another type, "
-                                          "declare it in '" +
-                                          base->cls()->name + "'");
+    this->checker.diags_.note(base->loc(), "'" + fn->name + "' overrides '" + base->cls()->name +
+                                               "." + fn->name + "', so it returns '" + type +
+                                               "' too; to return another type, "
+                                               "declare it in '" +
+                                               base->cls()->name + "'");
   }
 }
 

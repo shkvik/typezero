@@ -6,7 +6,7 @@ namespace tz {
 
 class TupleChecker {
 public:
-  explicit TupleChecker(Checker &checker);
+  explicit TupleChecker(Checker &owner);
 
   Expr *checkTupleMember(MemberExpr *member);
   Expr *checkTupleMethod(CallExpr *call, MemberExpr *member);
@@ -16,7 +16,7 @@ public:
   Expr *checkTupleJoin(CallExpr *call, MemberExpr *member);
 
 private:
-  Checker &checker_;
+  Checker &checker;
 };
 
 }

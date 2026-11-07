@@ -10,13 +10,8 @@
 #include "compiler/lower/module_builder/module_builder.h"
 #include "compiler/memory/memory_plan/memory_plan.h"
 #include "llvm/ADT/STLExtras.h"
-#include "llvm/Support/ConvertUTF.h"
 
-using llvm::BasicBlock;
 using llvm::cast;
-using llvm::dyn_cast;
-using llvm::isa;
-using llvm::Value;
 
 namespace tz {
 
@@ -24,7 +19,9 @@ namespace {
 
 constexpr uint64_t kStackObjectCount = uint64_t(1) << 62;
 
-std::string qualifiedName(const FunctionDecl *fn) {
+}
+
+std::string EnvLowerer::qualifiedName(const FunctionDecl *fn) {
   std::string name = fn->name.empty() ? "lambda" : fn->name.str();
   for (const FunctionDecl *p = fn->parent; p; p = p->parent) {
     name = (p->name.empty() ? "lambda" : p->name.str()) + "." + name;
@@ -33,13 +30,12 @@ std::string qualifiedName(const FunctionDecl *fn) {
   return "tz." + name;
 }
 
-}
-
-EnvLowerer::EnvLowerer(Lowering &lowering) : lowering_(lowering) {}
+EnvLowerer::EnvLowerer(Lowering &owner)
+    : lowering(owner) {}
 
 const Lowering::EnvLayout &EnvLowerer::envLayout(const FunctionDecl *fn) {
   const void *key = fn->group ? static_cast<const void *>(fn->group) : fn;
-  auto [it, inserted] = lowering_.envLayouts_.try_emplace(key);
+  auto [it, inserted] = this->lowering.envLayouts_.try_emplace(key);
   Lowering::EnvLayout &layout = it->second;
   if (!inserted) {
     return layout;
@@ -47,161 +43,172 @@ const Lowering::EnvLayout &EnvLowerer::envLayout(const FunctionDecl *fn) {
   const std::vector<VarSymbol *> &captures = fn->group ? fn->group->captures : fn->captures;
   layout.fields.assign(captures.begin(), captures.end());
   layout.key = key;
-  layout.member = lowering_.isCyclicEnv(key);
-  std::vector<llvm::Type *> types{lowering_.builder_.getInt64Ty(), lowering_.builder_.getPtrTy()};
+  layout.member = this->lowering.isCyclicEnv(key);
+  std::vector<llvm::Type *> types{this->lowering.builder_.getInt64Ty(),
+                                  this->lowering.builder_.getPtrTy()};
   for (const VarSymbol *var : layout.fields) {
-    types.push_back(var->boxed() ? lowering_.builder_.getPtrTy()
-                                 : lowering_.moduleBuilder().lower(ClosureLowerer::typeOf(var)));
+    types.push_back(var->boxed()
+                        ? this->lowering.builder_.getPtrTy()
+                        : this->lowering.moduleBuilder().lower(ClosureLowerer::typeOf(var)));
   }
-  layout.type = llvm::StructType::get(lowering_.ctx_, types);
+  layout.type = llvm::StructType::get(this->lowering.ctx_, types);
 
-  auto *dropType = llvm::FunctionType::get(lowering_.builder_.getVoidTy(),
-                                           {lowering_.builder_.getPtrTy()}, false);
+  auto *dropType = llvm::FunctionType::get(this->lowering.builder_.getVoidTy(),
+                                           {this->lowering.builder_.getPtrTy()}, false);
   layout.drop = llvm::Function::Create(dropType, llvm::GlobalValue::InternalLinkage,
-                                       qualifiedName(fn) + ".env.drop", lowering_.module_.get());
+                                       EnvLowerer::qualifiedName(fn) + ".env.drop",
+                                       this->lowering.module_.get());
   layout.drop->addFnAttr(llvm::Attribute::NoUnwind);
-  llvm::IRBuilderBase::InsertPoint point = lowering_.builder_.saveIP();
-  lowering_.builder_.SetInsertPoint(llvm::BasicBlock::Create(lowering_.ctx_, "entry", layout.drop));
+  llvm::IRBuilderBase::InsertPoint point = this->lowering.builder_.saveIP();
+  this->lowering.builder_.SetInsertPoint(
+      llvm::BasicBlock::Create(this->lowering.ctx_, "entry", layout.drop));
   llvm::Value *env = layout.drop->getArg(0);
   for (size_t i = 0; i < layout.fields.size(); ++i) {
     const VarSymbol *var = layout.fields[i];
-    if (lowering_.memory().uncounted.count({key, var})) {
+    if (this->lowering.memory().uncounted.count({key, var})) {
       continue;
     }
-    llvm::Value *field = lowering_.builder_.CreateStructGEP(layout.type, env, unsigned(i + 2));
-    llvm::Value *value = lowering_.builder_.CreateLoad(
-        var->boxed() ? lowering_.builder_.getPtrTy()
-                     : lowering_.moduleBuilder().lower(ClosureLowerer::typeOf(var)),
+    llvm::Value *field = this->lowering.builder_.CreateStructGEP(layout.type, env, unsigned(i + 2));
+    llvm::Value *value = this->lowering.builder_.CreateLoad(
+        var->boxed() ? this->lowering.builder_.getPtrTy()
+                     : this->lowering.moduleBuilder().lower(ClosureLowerer::typeOf(var)),
         field);
     if (var->boxed()) {
-      layout.member ? lowering_.storeLowerer().releaseObjectIn(env, value)
-                    : (void)lowering_.builder_.CreateCall(lowering_.objReleaseFn_, {value});
+      layout.member
+          ? this->lowering.storeLowerer().releaseObjectIn(env, value)
+          : (void)this->lowering.builder_.CreateCall(this->lowering.objReleaseFn_, {value});
     } else if (layout.member) {
-      lowering_.storeLowerer().releaseIn(env, value, ClosureLowerer::typeOf(var));
+      this->lowering.storeLowerer().releaseIn(env, value, ClosureLowerer::typeOf(var));
     } else {
-      lowering_.refCounts().releaseValue(value, ClosureLowerer::typeOf(var));
+      this->lowering.refCounts().releaseValue(value, ClosureLowerer::typeOf(var));
     }
   }
   if (layout.member) {
-    lowering_.builder_.CreateCall(
-        lowering_.groupLowerer().groupFunction("tz_group_obj_free", lowering_.builder_.getVoidTy(),
-                                               {lowering_.builder_.getPtrTy()}),
-        {env});
-    layout.descriptor = lowering_.groupLowerer().memberDescriptor(
-        layout.drop, "closure " + qualifiedName(fn).substr(3));
+    this->lowering.builder_.CreateCall(this->lowering.groupLowerer().groupFunction(
+                                           "tz_group_obj_free", this->lowering.builder_.getVoidTy(),
+                                           {this->lowering.builder_.getPtrTy()}),
+                                       {env});
+    layout.descriptor = this->lowering.groupLowerer().memberDescriptor(
+        layout.drop, "closure " + EnvLowerer::qualifiedName(fn).substr(3));
   } else {
-    lowering_.builder_.CreateCall(lowering_.rt_.objFree, {env});
-    layout.descriptor = lowering_.classDescriptors().dropDescriptor(layout.drop);
+    this->lowering.builder_.CreateCall(this->lowering.rt_.objFree, {env});
+    layout.descriptor = this->lowering.classDescriptors().dropDescriptor(layout.drop);
   }
-  lowering_.builder_.CreateRetVoid();
-  lowering_.builder_.restoreIP(point);
+  this->lowering.builder_.CreateRetVoid();
+  this->lowering.builder_.restoreIP(point);
 
   return layout;
 }
 
 llvm::StructType *EnvLowerer::boxType(const Type *type) {
-  llvm::StructType *&box = boxTypes_[type];
+  llvm::StructType *&box = this->boxTypes[type];
   if (!box) {
-    box = llvm::StructType::get(lowering_.ctx_,
-                                {lowering_.builder_.getInt64Ty(), lowering_.builder_.getPtrTy(),
-                                 lowering_.moduleBuilder().lower(type)});
+    box = llvm::StructType::get(this->lowering.ctx_, {this->lowering.builder_.getInt64Ty(),
+                                                      this->lowering.builder_.getPtrTy(),
+                                                      this->lowering.moduleBuilder().lower(type)});
   }
 
   return box;
 }
 
 llvm::Value *EnvLowerer::newBox(const Type *type, bool member) {
-  llvm::StructType *box = boxType(type);
-  llvm::Function *&drop = lowering_.boxDrops_[type];
-  bool memberDrop =
-      (member || lowering_.isCyclicBox(type) || lowering_.memory().mayCarryMember(type)) &&
-      type->isManaged();
-  member = (member || lowering_.isCyclicBox(type)) && type->isManaged();
+  llvm::StructType *box = this->boxType(type);
+  llvm::Function *&drop = this->lowering.boxDrops_[type];
+  bool memberDrop = (member || this->lowering.isCyclicBox(type) ||
+                     this->lowering.memory().mayCarryMember(type)) &&
+                    type->isManaged();
+  member = (member || this->lowering.isCyclicBox(type)) && type->isManaged();
   if (!drop) {
-    auto *dropType = llvm::FunctionType::get(lowering_.builder_.getVoidTy(),
-                                             {lowering_.builder_.getPtrTy()}, false);
+    auto *dropType = llvm::FunctionType::get(this->lowering.builder_.getVoidTy(),
+                                             {this->lowering.builder_.getPtrTy()}, false);
     if (!type->isManaged()) {
-      drop = cast<llvm::Function>(lowering_.rt_.objFree.getCallee());
+      drop = cast<llvm::Function>(this->lowering.rt_.objFree.getCallee());
     } else {
       drop = llvm::Function::Create(dropType, llvm::GlobalValue::InternalLinkage, "tz.box.drop",
-                                    lowering_.module_.get());
+                                    this->lowering.module_.get());
       drop->addFnAttr(llvm::Attribute::NoUnwind);
-      llvm::IRBuilderBase::InsertPoint point = lowering_.builder_.saveIP();
-      lowering_.builder_.SetInsertPoint(llvm::BasicBlock::Create(lowering_.ctx_, "entry", drop));
+      llvm::IRBuilderBase::InsertPoint point = this->lowering.builder_.saveIP();
+      this->lowering.builder_.SetInsertPoint(
+          llvm::BasicBlock::Create(this->lowering.ctx_, "entry", drop));
       llvm::Value *object = drop->getArg(0);
-      llvm::Value *value =
-          lowering_.builder_.CreateLoad(lowering_.moduleBuilder().lower(type),
-                                        lowering_.builder_.CreateStructGEP(box, object, 2));
+      llvm::Value *value = this->lowering.builder_.CreateLoad(
+          this->lowering.moduleBuilder().lower(type),
+          this->lowering.builder_.CreateStructGEP(box, object, 2));
       if (memberDrop) {
-        lowering_.storeLowerer().releaseIn(object, value, type);
-        lowering_.builder_.CreateCall(lowering_.groupLowerer().groupFunction(
-                                          "tz_group_obj_free", lowering_.builder_.getVoidTy(),
-                                          {lowering_.builder_.getPtrTy()}),
-                                      {object});
+        this->lowering.storeLowerer().releaseIn(object, value, type);
+        this->lowering.builder_.CreateCall(
+            this->lowering.groupLowerer().groupFunction("tz_group_obj_free",
+                                                        this->lowering.builder_.getVoidTy(),
+                                                        {this->lowering.builder_.getPtrTy()}),
+            {object});
       } else {
-        lowering_.refCounts().releaseValue(value, type);
-        lowering_.builder_.CreateCall(lowering_.rt_.objFree, {object});
+        this->lowering.refCounts().releaseValue(value, type);
+        this->lowering.builder_.CreateCall(this->lowering.rt_.objFree, {object});
       }
-      lowering_.builder_.CreateRetVoid();
-      lowering_.builder_.restoreIP(point);
+      this->lowering.builder_.CreateRetVoid();
+      this->lowering.builder_.restoreIP(point);
     }
   }
-  uint64_t size = lowering_.module_->getDataLayout().getTypeAllocSize(box);
+  uint64_t size = this->lowering.module_->getDataLayout().getTypeAllocSize(box);
   llvm::Value *object;
   if (member) {
-    object = lowering_.groupLowerer().allocMember(size, "box");
-    llvm::Constant *descriptor = lowering_.groupLowerer().memberDescriptor(drop, "box");
-    if (!llvm::is_contained(lowering_.boxDescriptors_, std::make_pair(descriptor, type))) {
-      lowering_.boxDescriptors_.push_back({descriptor, type});
+    object = this->lowering.groupLowerer().allocMember(size, "box");
+    llvm::Constant *descriptor = this->lowering.groupLowerer().memberDescriptor(drop, "box");
+    if (!llvm::is_contained(this->lowering.boxDescriptors_, std::make_pair(descriptor, type))) {
+      this->lowering.boxDescriptors_.push_back({descriptor, type});
     }
-    lowering_.builder_.CreateStore(descriptor, lowering_.builder_.CreateStructGEP(box, object, 1));
+    this->lowering.builder_.CreateStore(descriptor,
+                                        this->lowering.builder_.CreateStructGEP(box, object, 1));
   } else {
-    object = lowering_.builder_.CreateCall(lowering_.rt_.objAlloc,
-                                           {lowering_.builder_.getInt64(size)}, "box");
-    lowering_.builder_.CreateStore(lowering_.builder_.getInt64(1),
-                                   lowering_.builder_.CreateStructGEP(box, object, 0));
-    lowering_.builder_.CreateStore(lowering_.classDescriptors().dropDescriptor(drop),
-                                   lowering_.builder_.CreateStructGEP(box, object, 1));
+    object = this->lowering.builder_.CreateCall(this->lowering.rt_.objAlloc,
+                                                {this->lowering.builder_.getInt64(size)}, "box");
+    this->lowering.builder_.CreateStore(this->lowering.builder_.getInt64(1),
+                                        this->lowering.builder_.CreateStructGEP(box, object, 0));
+    this->lowering.builder_.CreateStore(this->lowering.classDescriptors().dropDescriptor(drop),
+                                        this->lowering.builder_.CreateStructGEP(box, object, 1));
   }
-  lowering_.builder_.CreateStore(
-      llvm::Constant::getNullValue(lowering_.moduleBuilder().lower(type)),
-      lowering_.builder_.CreateStructGEP(box, object, 2));
+  this->lowering.builder_.CreateStore(
+      llvm::Constant::getNullValue(this->lowering.moduleBuilder().lower(type)),
+      this->lowering.builder_.CreateStructGEP(box, object, 2));
 
   return object;
 }
 
 llvm::Value *EnvLowerer::boxPointer(const VarSymbol *var) {
-  if (llvm::Value *box = lowering_.envBoxes_.lookup(var)) {
+  llvm::Value *box = this->lowering.envBoxes_.lookup(var);
+  if (box) {
     return box;
   }
-  llvm::Value *slot = lowering_.boxSlots_.lookup(var);
+  llvm::Value *slot = this->lowering.boxSlots_.lookup(var);
   assert(slot && "a boxed variable used before its declaration was emitted");
 
-  return lowering_.builder_.CreateLoad(lowering_.builder_.getPtrTy(), slot, var->name + ".box");
+  return this->lowering.builder_.CreateLoad(this->lowering.builder_.getPtrTy(), slot,
+                                            var->name + ".box");
 }
 
 llvm::Value *EnvLowerer::createEnv(const Lowering::EnvLayout &layout, bool onStack, bool member) {
   llvm::StructType *type = layout.type;
   llvm::Value *env;
   if (onStack) {
-    env = lowering_.functionFrame().createStackSlot(type, "env");
-    lowering_.builder_.CreateStore(lowering_.builder_.getInt64(kStackObjectCount),
-                                   lowering_.builder_.CreateStructGEP(type, env, 0));
-    lowering_.builder_.CreateStore(llvm::ConstantPointerNull::get(lowering_.builder_.getPtrTy()),
-                                   lowering_.builder_.CreateStructGEP(type, env, 1));
+    env = this->lowering.functionFrame().createStackSlot(type, "env");
+    this->lowering.builder_.CreateStore(this->lowering.builder_.getInt64(kStackObjectCount),
+                                        this->lowering.builder_.CreateStructGEP(type, env, 0));
+    this->lowering.builder_.CreateStore(
+        llvm::ConstantPointerNull::get(this->lowering.builder_.getPtrTy()),
+        this->lowering.builder_.CreateStructGEP(type, env, 1));
   } else {
-    uint64_t size = lowering_.module_->getDataLayout().getTypeAllocSize(type);
+    uint64_t size = this->lowering.module_->getDataLayout().getTypeAllocSize(type);
     member = member && layout.member;
     if (member) {
-      env = lowering_.groupLowerer().allocMember(size, "env");
+      env = this->lowering.groupLowerer().allocMember(size, "env");
     } else {
-      env = lowering_.builder_.CreateCall(lowering_.rt_.objAlloc,
-                                          {lowering_.builder_.getInt64(size)}, "env");
-      lowering_.builder_.CreateStore(lowering_.builder_.getInt64(1),
-                                     lowering_.builder_.CreateStructGEP(type, env, 0));
+      env = this->lowering.builder_.CreateCall(this->lowering.rt_.objAlloc,
+                                               {this->lowering.builder_.getInt64(size)}, "env");
+      this->lowering.builder_.CreateStore(this->lowering.builder_.getInt64(1),
+                                          this->lowering.builder_.CreateStructGEP(type, env, 0));
     }
-    lowering_.builder_.CreateStore(layout.descriptor,
-                                   lowering_.builder_.CreateStructGEP(type, env, 1));
+    this->lowering.builder_.CreateStore(layout.descriptor,
+                                        this->lowering.builder_.CreateStructGEP(type, env, 1));
   }
   member = member && layout.member && !onStack;
   std::vector<std::pair<llvm::Value *, const VarSymbol *>> stored;
@@ -209,30 +216,30 @@ llvm::Value *EnvLowerer::createEnv(const Lowering::EnvLayout &layout, bool onSta
     const VarSymbol *var = layout.fields[i];
     llvm::Value *value;
     if (var->boxed()) {
-      value = boxPointer(var);
+      value = this->boxPointer(var);
       if (!onStack) {
-        lowering_.builder_.CreateCall(lowering_.objRetainFn_, {value});
+        this->lowering.builder_.CreateCall(this->lowering.objRetainFn_, {value});
       }
       stored.push_back({value, var});
-    } else if (lowering_.memory().uncounted.count({layout.key, var})) {
-      value = emitVarValue(var, true);
+    } else if (this->lowering.memory().uncounted.count({layout.key, var})) {
+      value = this->emitVarValue(var, true);
     } else {
-      value = emitVarValue(var, onStack);
+      value = this->emitVarValue(var, onStack);
       stored.push_back({value, var});
     }
-    lowering_.builder_.CreateStore(value,
-                                   lowering_.builder_.CreateStructGEP(type, env, unsigned(i + 2)));
+    this->lowering.builder_.CreateStore(
+        value, this->lowering.builder_.CreateStructGEP(type, env, unsigned(i + 2)));
   }
   if (member) {
     for (auto [value, var] : stored) {
       if (var->boxed()) {
-        lowering_.builder_.CreateCall(
-            lowering_.groupLowerer().groupFunction(
-                "tz_group_store", lowering_.builder_.getVoidTy(),
-                {lowering_.builder_.getPtrTy(), lowering_.builder_.getPtrTy()}),
+        this->lowering.builder_.CreateCall(
+            this->lowering.groupLowerer().groupFunction(
+                "tz_group_store", this->lowering.builder_.getVoidTy(),
+                {this->lowering.builder_.getPtrTy(), this->lowering.builder_.getPtrTy()}),
             {env, value});
       } else {
-        lowering_.storeLowerer().groupStore(env, value, ClosureLowerer::typeOf(var));
+        this->lowering.storeLowerer().groupStore(env, value, ClosureLowerer::typeOf(var));
       }
     }
   }
@@ -243,93 +250,96 @@ llvm::Value *EnvLowerer::createEnv(const Lowering::EnvLayout &layout, bool onSta
 llvm::Value *EnvLowerer::emitVarValue(const VarSymbol *var, bool borrow) {
   const FunctionDecl *fn = nullptr;
   llvm::Value *env = nullptr;
-  if (var->lambda() && var->lambda() == lowering_.currentFn_) {
+  if (var->lambda() && var->lambda() == this->lowering.currentFn_) {
     fn = var->lambda();
-    env = lowering_.envParam_;
+    env = this->lowering.envParam_;
   } else if (const FunctionDecl *member = var->function()) {
     NestedGroup *group = member->group;
-    if (lowering_.currentFn_ && lowering_.currentFn_->group == group) {
+    if (this->lowering.currentFn_ && this->lowering.currentFn_->group == group) {
       fn = member;
-      env = lowering_.envParam_;
-    } else if (group->owner == lowering_.currentFn_) {
+      env = this->lowering.envParam_;
+    } else if (group->owner == this->lowering.currentFn_) {
       fn = member;
-      env = lowering_.builder_.CreateLoad(lowering_.builder_.getPtrTy(),
-                                          lowering_.groupEnvs_.lookup(group));
+      env = this->lowering.builder_.CreateLoad(this->lowering.builder_.getPtrTy(),
+                                               this->lowering.groupEnvs_.lookup(group));
     }
   }
   if (fn) {
     if (!env) {
-      env = llvm::ConstantPointerNull::get(lowering_.builder_.getPtrTy());
+      env = llvm::ConstantPointerNull::get(this->lowering.builder_.getPtrTy());
     }
     if (!borrow) {
-      lowering_.builder_.CreateCall(lowering_.objRetainFn_, {env});
+      this->lowering.builder_.CreateCall(this->lowering.objRetainFn_, {env});
     }
-    return lowering_.closureLowerer().makeFunctionValue(
-        lowering_.closureLowerer().functionInfo(const_cast<FunctionDecl *>(fn)), env);
+    return this->lowering.closureLowerer().makeFunctionValue(
+        this->lowering.closureLowerer().functionInfo(const_cast<FunctionDecl *>(fn)), env);
   }
   const Type *type = ClosureLowerer::typeOf(var);
-  llvm::Value *value = lowering_.builder_.CreateLoad(
-      lowering_.moduleBuilder().lower(type), lowering_.functionFrame().addressOf(var), var->name);
+  llvm::Value *value =
+      this->lowering.builder_.CreateLoad(this->lowering.moduleBuilder().lower(type),
+                                         this->lowering.functionFrame().addressOf(var), var->name);
   if (!borrow) {
-    lowering_.refCounts().retainValue(value, type);
+    this->lowering.refCounts().retainValue(value, type);
   }
 
   return value;
 }
 
 void EnvLowerer::emitGroupCreation(NestedGroup *group) {
-  const Lowering::EnvLayout &layout = envLayout(group->members.front());
-  llvm::Value *slot = lowering_.functionFrame().createObjectSlot("group.env");
-  lowering_.groupEnvs_[group] = slot;
-  if (!layout.fields.empty() || lowering_.comparesFunctions_) {
-    lowering_.builder_.CreateStore(createEnv(layout, false), slot);
+  const Lowering::EnvLayout &layout = this->envLayout(group->members.front());
+  llvm::Value *slot = this->lowering.functionFrame().createObjectSlot("group.env");
+  this->lowering.groupEnvs_[group] = slot;
+  if (!layout.fields.empty() || this->lowering.comparesFunctions_) {
+    this->lowering.builder_.CreateStore(this->createEnv(layout, false), slot);
   }
   for (FunctionDecl *member : group->members) {
-    lowering_.closureLowerer().closureCode(member);
+    this->lowering.closureLowerer().closureCode(member);
   }
 }
 
 void EnvLowerer::bindCaptures(const FunctionDecl *fn) {
   if (fn->cls() && fn->cls()->literal()) {
-    lowering_.envParam_->setName("this");
-    const Lowering::ObjectLayout &layout = lowering_.objectLayouts().objectLayout(fn->cls()->type);
+    this->lowering.envParam_->setName("this");
+    const Lowering::ObjectLayout &layout =
+        this->lowering.objectLayouts().objectLayout(fn->cls()->type);
     const std::vector<VarSymbol *> &captures = fn->cls()->group->captures;
     for (size_t i = 0; i < captures.size(); ++i) {
       const VarSymbol *var = captures[i];
-      llvm::Value *field = lowering_.builder_.CreateStructGEP(
-          layout.type, lowering_.envParam_, unsigned(layout.captures + i), var->name);
+      llvm::Value *field = this->lowering.builder_.CreateStructGEP(
+          layout.type, this->lowering.envParam_, unsigned(layout.captures + i), var->name);
       if (var->boxed()) {
-        lowering_.envBoxes_[var] =
-            lowering_.builder_.CreateLoad(lowering_.builder_.getPtrTy(), field, var->name + ".box");
+        this->lowering.envBoxes_[var] = this->lowering.builder_.CreateLoad(
+            this->lowering.builder_.getPtrTy(), field, var->name + ".box");
       } else {
-        lowering_.addresses_[var] = field;
+        this->lowering.addresses_[var] = field;
       }
-      lowering_.debugInfo().declare(var, lowering_.functionFrame().addressOf(var));
+      this->lowering.debugInfo().declare(var, this->lowering.functionFrame().addressOf(var));
     }
     return;
   }
-  if (const VarSymbol *var = fn->receiverEnv) {
-    lowering_.envParam_->setName(var->name);
-    llvm::Value *slot = lowering_.functionFrame().createStackSlot(lowering_.builder_.getPtrTy(),
-                                                                  var->name);
-    lowering_.builder_.CreateStore(lowering_.envParam_, slot);
-    lowering_.addresses_[var] = slot;
-    lowering_.debugInfo().declare(var, slot);
+  const VarSymbol *receiver = fn->receiverEnv;
+  if (receiver) {
+    this->lowering.envParam_->setName(receiver->name);
+    llvm::Value *slot = this->lowering.functionFrame().createStackSlot(
+        this->lowering.builder_.getPtrTy(), receiver->name);
+    this->lowering.builder_.CreateStore(this->lowering.envParam_, slot);
+    this->lowering.addresses_[receiver] = slot;
+    this->lowering.debugInfo().declare(receiver, slot);
     return;
   }
-  lowering_.envParam_->setName("env");
-  const Lowering::EnvLayout &layout = envLayout(fn);
+  this->lowering.envParam_->setName("env");
+  const Lowering::EnvLayout &layout = this->envLayout(fn);
   for (size_t i = 0; i < layout.fields.size(); ++i) {
     const VarSymbol *var = layout.fields[i];
-    llvm::Value *field = lowering_.builder_.CreateStructGEP(layout.type, lowering_.envParam_,
-                                                            unsigned(i + 2), var->name);
+    llvm::Value *field = this->lowering.builder_.CreateStructGEP(
+        layout.type, this->lowering.envParam_, unsigned(i + 2), var->name);
     if (var->boxed()) {
-      lowering_.envBoxes_[var] =
-          lowering_.builder_.CreateLoad(lowering_.builder_.getPtrTy(), field, var->name + ".box");
+      this->lowering.envBoxes_[var] = this->lowering.builder_.CreateLoad(
+          this->lowering.builder_.getPtrTy(), field, var->name + ".box");
     } else {
-      lowering_.addresses_[var] = field;
+      this->lowering.addresses_[var] = field;
     }
-    lowering_.debugInfo().declare(var, lowering_.functionFrame().addressOf(var));
+    this->lowering.debugInfo().declare(var, this->lowering.functionFrame().addressOf(var));
   }
 }
 

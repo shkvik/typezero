@@ -6,12 +6,14 @@ namespace tz {
 
 class ArrayMethods {
 public:
-  explicit ArrayMethods(Checker &checker);
+  explicit ArrayMethods(Checker &owner);
 
   Expr *checkArrayMethod(CallExpr *call, MemberExpr *member, const Type *expected);
 
 private:
-  Checker &checker_;
+  static const VarSymbol *arrayVariable(const Expr *object);
+
+  Checker &checker;
 };
 
 }

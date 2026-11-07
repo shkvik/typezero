@@ -88,7 +88,10 @@ Expr *ResultMethodChecker::checkResultMethod(CallExpr *call, MemberExpr *member,
     checkArgsLoosely();
     return call;
   }
-  if (!checker_.argumentChecker().checkArity(call, member->loc(), method->args, method->args)) {
+  ArgumentChecker::ResultArityMatches arity =
+      checker_.argumentChecker().checkArity(call, method->args, method->args);
+  if (arity.isErr()) {
+    checker_.diags_.error(member->loc(), arity.error().message);
     return call;
   }
   Builtin builtin = method->builtin;
