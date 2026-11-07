@@ -226,32 +226,34 @@ bool fetchSource(llvm::StringRef arg, std::string &dir, std::string &name, std::
     report(error);
     return false;
   }
-  if (source.kind == Source::Kind::Jsr) {
+  if (source.form.is<JsrSource>()) {
     JsrVersions versions;
-    if (!jsrVersions(source.scope, source.name, versions, error)) {
+    if (!jsrVersions(source.scope(), source.name(), versions, error)) {
       report(error.empty()
                  ? "there is no package " + source.id() + " in the registry (" + jsrBaseUrl() + ")"
                  : error);
       return false;
     }
     Range range;
-    Range::parse(source.range, range, error);
+    Range::parse(source.range(), range, error);
     const Version *best = nullptr;
     for (const JsrVersions::Entry &entry : versions.versions) {
       if (!entry.yanked &&
-          (source.range.empty() ? !entry.version.isPrerelease() : range.satisfies(entry.version)) &&
+          (source.range().empty() ? !entry.version.isPrerelease()
+                                  : range.satisfies(entry.version)) &&
           (!best || *best < entry.version)) {
         best = &entry.version;
       }
     }
     if (!best) {
-      report("the registry has no version of " + source.id() + " that fits '" + source.range + "'");
+      report("the registry has no version of " + source.id() + " that fits '" + source.range() +
+             "'");
       return false;
     }
     JsrVersion meta;
     version = best->str();
-    if (!jsrVersion(source.scope, source.name, version, meta, error) ||
-        !jsrDownload(source.scope, source.name, version, meta, dir, error)) {
+    if (!jsrVersion(source.scope(), source.name(), version, meta, error) ||
+        !jsrDownload(source.scope(), source.name(), version, meta, dir, error)) {
       report(error);
       return false;
     }
@@ -259,17 +261,17 @@ bool fetchSource(llvm::StringRef arg, std::string &dir, std::string &name, std::
     exports = meta.exports;
     return true;
   }
-  if (source.kind == Source::Kind::Git) {
+  if (source.form.is<GitSource>()) {
     std::string commit;
-    if (!gitResolve(source.url, source.ref, true, commit, error) ||
-        !gitCheckout(source.url, commit, dir, error)) {
+    if (!gitResolve(source.url(), source.ref(), true, commit, error) ||
+        !gitCheckout(source.url(), commit, dir, error)) {
       report(error);
       return false;
     }
-    version = llvm::StringRef(source.ref).ltrim("v").str();
+    version = llvm::StringRef(source.ref()).ltrim("v").str();
     return true;
   }
-  dir = source.dir;
+  dir = source.dir();
   local = true;
 
   return true;

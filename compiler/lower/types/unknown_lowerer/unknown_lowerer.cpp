@@ -247,7 +247,7 @@ llvm::Constant *UnknownLowerer::classObject(const ClassDecl *cls) {
     global->setUnnamedAddr(llvm::GlobalValue::UnnamedAddr::Global);
     fields = global;
   }
-  uint32_t flags = kLayoutClass | (cls->builtin || hasCall(cls->baseExpr) ? kLayoutBuiltin : 0);
+  uint32_t flags = kLayoutClass | (cls->builtin() || hasCall(cls->baseExpr) ? kLayoutBuiltin : 0);
   llvm::Constant *layoutInit = llvm::ConstantStruct::get(
       lowering_.layoutDescTy_,
       {drop, fields, lowering_.builder_.getInt32(uint32_t(keys.size())),
@@ -260,7 +260,7 @@ llvm::Constant *UnknownLowerer::classObject(const ClassDecl *cls) {
                                           "tz.classlayout." + name);
   layout->setUnnamedAddr(llvm::GlobalValue::UnnamedAddr::Global);
   llvm::Constant *info =
-      (cls->reflectNew || cls->reflectMethods || cls->reflectFill) && !cls->builtin
+      (cls->reflectNew || cls->reflectMethods || cls->reflectFill) && !cls->builtin()
           ? lowering_.classInfoLowerer().classInfoGlobal(cls)
           : llvm::ConstantPointerNull::get(lowering_.builder_.getPtrTy());
   std::vector<llvm::Constant *> init{lowering_.builder_.getInt64(kStaticRefCount),

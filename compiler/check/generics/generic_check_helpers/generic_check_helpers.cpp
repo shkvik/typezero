@@ -68,12 +68,12 @@ bool mentionsAnyOf(const Type *type, llvm::ArrayRef<const Type *> params,
 }
 
 std::string constraintSpelling(const Type *param, const TypeParamDecl *decl) {
-  if (decl && decl->constraint && decl->constraint->kind == TypeRef::Kind::Name) {
+  if (decl && decl->constraint && decl->constraint->kind() == TypeRefKind::NAME_REF) {
     return decl->constraint->name.str();
   }
-  if (decl && decl->constraint && decl->constraint->kind == TypeRef::Kind::Union &&
+  if (decl && decl->constraint && decl->constraint->kind() == TypeRefKind::UNION_REF &&
       llvm::all_of(decl->constraint->args,
-                   [](const TypeRef &t) { return t.kind == TypeRef::Kind::Name; })) {
+                   [](const TypeRef &t) { return t.kind() == TypeRefKind::NAME_REF; })) {
     std::string text;
     for (const TypeRef &t : decl->constraint->args) {
       text += (text.empty() ? "" : " | ") + t.name.str();

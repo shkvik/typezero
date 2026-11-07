@@ -209,8 +209,8 @@ bool TemplateTypes::matchTemplate(const std::u16string &text, llvm::ArrayRef<con
 
 const Type *TemplateTypes::resolveTemplate(const TypeRef &ref) {
   std::vector<const Type *> operands;
-  for (size_t i = 0; i < ref.texts.size(); ++i) {
-    operands.push_back(Type::stringLiteral(ref.texts[i]));
+  for (size_t i = 0; i < ref.texts().size(); ++i) {
+    operands.push_back(Type::stringLiteral(ref.texts()[i]));
     if (i >= ref.args.size()) {
       break;
     }

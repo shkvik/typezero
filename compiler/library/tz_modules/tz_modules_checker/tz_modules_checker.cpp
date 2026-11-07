@@ -134,15 +134,15 @@ std::string TzModulesChecker::knownPrefix(const Expr *expr) const {
   if (auto *bin = dyn_cast<BinaryExpr>(expr); bin && bin->op == BinaryOp::Add) {
     return knownPrefix(bin->lhs);
   }
-  if (auto *name = dyn_cast<NameExpr>(expr); name && name->var) {
-    auto it = checker_.constPrefixes_.find(name->var);
+  if (auto *name = dyn_cast<NameExpr>(expr); name && name->var()) {
+    auto it = checker_.constPrefixes_.find(name->var());
     return it == checker_.constPrefixes_.end() ? std::string() : it->second;
   }
   if (auto *made = dyn_cast<NewExpr>(expr);
-      made && made->cls && made->cls->library &&
-      (made->cls->name == "URL" || made->cls->name == "Request")) {
-    const std::vector<Expr *> &args = made->ctor ? made->ctor->args : made->args;
-    if (!args.empty() && (made->cls->name == "Request" || args.size() == 1)) {
+      made && made->cls() && made->cls()->library() &&
+      (made->cls()->name == "URL" || made->cls()->name == "Request")) {
+    const std::vector<Expr *> &args = made->ctor() ? made->ctor()->args : made->args;
+    if (!args.empty() && (made->cls()->name == "Request" || args.size() == 1)) {
       return knownPrefix(args[0]);
     }
   }
@@ -165,7 +165,7 @@ void TzModulesChecker::noteHttpsCall(CallExpr *call, const FunctionDecl *fn) {
 }
 
 void TzModulesChecker::noteServer(const NewExpr *made) {
-  const std::vector<Expr *> &args = made->ctor ? made->ctor->args : made->args;
+  const std::vector<Expr *> &args = made->ctor() ? made->ctor()->args : made->args;
   if (checker_.file_->usesTls || args.empty() || checker_.libraryCalls().inLibrary(made->loc())) {
     return;
   }
@@ -186,7 +186,7 @@ static bool plainTransport(const Expr *transport) {
     return false;
   }
   for (const ObjectLitExpr::Property &p : lit->props) {
-    if (p.spread) {
+    if (p.spread()) {
       return false;
     }
     if (p.name == "secure") {
@@ -202,7 +202,7 @@ void TzModulesChecker::noteServeOptions(const Expr *options) {
   options = uncast(options);
   if (auto *lit = dyn_cast<ObjectLitExpr>(options)) {
     checker_.file_->usesTls = llvm::any_of(lit->props, [](const ObjectLitExpr::Property &p) {
-      return p.spread || (p.name == "transport" && !plainTransport(p.value));
+      return p.spread() || (p.name == "transport" && !plainTransport(p.value));
     });
   } else {
     checker_.file_->usesTls = !options->type || !options->type->isObject() ||
@@ -216,7 +216,7 @@ void TzModulesChecker::noteTlsMethod(const MemberExpr *member, const ClassDecl *
     return;
   }
   for (; cls; cls = cls->parent) {
-    if (cls->library && cls->name == "Socket") {
+    if (cls->library() && cls->name == "Socket") {
       checker_.file_->usesTls = true;
       return;
     }

@@ -22,7 +22,7 @@ WeakRefLowerer::WeakRefLowerer(Lowering &lowering) : lowering_(lowering) {}
 
 llvm::Value *WeakRefLowerer::emitWeakRefCall(CallExpr *call) {
   llvm::Type *ptr = lowering_.builder_.getPtrTy();
-  if (call->builtin == Builtin::WeakRefNew) {
+  if (call->builtin() == Builtin::WeakRefNew) {
     Expr *arg = call->args[0];
     llvm::Value *target = lowering_.exprLowerer().emitExpr(arg);
     llvm::Value *weak = lowering_.builder_.CreateCall(

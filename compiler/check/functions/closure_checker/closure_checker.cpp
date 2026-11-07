@@ -63,9 +63,9 @@ Expr *ClosureChecker::checkFunctionExpr(FunctionExpr *fe, const Checker::Signatu
 
   bool thisFromContext = false;
   if (sig && sig->hasThis && !sig->params.empty() &&
-      (fn->params.empty() || fn->params[0].name != "this" || fn->isArrow)) {
+      (fn->params.empty() || fn->params[0].name != "this" || fn->isArrow())) {
     Param self;
-    self.name = fn->isArrow ? checker_.ctx_.hiddenName() : llvm::StringRef("this");
+    self.name = fn->isArrow() ? checker_.ctx_.hiddenName() : llvm::StringRef("this");
     self.loc = fe->loc();
     fn->params.insert(fn->params.begin(), self);
     thisFromContext = true;
@@ -113,7 +113,7 @@ Expr *ClosureChecker::checkFunctionExpr(FunctionExpr *fe, const Checker::Signatu
     if (i == 0 && thisFromContext) {
       sym->hasThis = true;
     } else if (i == 0 && param.name == "this" && param.type && !param.rest()) {
-      if (fn->isArrow) {
+      if (fn->isArrow()) {
         checker_.diags_.error(param.loc,
                               "an arrow function cannot have a 'this' parameter: it sees the "
                               "'this' of the function around it; write a 'function'");
@@ -196,16 +196,16 @@ Expr *ClosureChecker::checkFunctionExpr(FunctionExpr *fe, const Checker::Signatu
   if (!sym->ret) {
     llvm::StringSet<> names;
     collectNames(fn->body, names);
-    bool recursive = !fn->ownName.empty() && names.contains(fn->ownName);
+    bool recursive = !fn->ownName().empty() && names.contains(fn->ownName());
     for (const auto &entry : names) {
-      VarSymbol *var = checker_.scopes().lookup(entry.getKey()).var;
+      VarSymbol *var = checker_.scopes().lookup(entry.getKey()).var();
       recursive |= var && var->lambda() == fn;
     }
     if (recursive) {
       checker_.cycleOf_[sym] = static_cast<unsigned>(checker_.cycles_.size());
       checker_.cycles_.push_back({sym});
       Checker::BodyState saved = checker_.returnInferrer().enterBody(fn);
-      bool ownScope = !fn->ownName.empty();
+      bool ownScope = !fn->ownName().empty();
       if (ownScope) {
         declareOwnName(fn);
       }
@@ -230,13 +230,13 @@ Expr *ClosureChecker::checkFunctionExpr(FunctionExpr *fe, const Checker::Signatu
 void ClosureChecker::declareOwnName(FunctionDecl *fn) {
   checker_.pushScope();
   VarSymbol *self = checker_.ctx_.newVar();
-  self->name = fn->ownName;
+  self->name = fn->ownName();
   self->loc = fn->loc();
   self->isConst = true;
   self->holds = Lambda{.lambda = fn};
   unsigned declSeq = ++checker_.seq_;
   self->place = FunctionLocalVar{.owner = fn, .state = {.declSeq = declSeq}};
-  checker_.scopes().declare(fn->ownName, fn->loc(), {self, nullptr});
+  checker_.scopes().declare(fn->ownName(), fn->loc(), {VarEntry{.var = self}});
 }
 
 void ClosureChecker::checkClosureBody(FunctionDecl *fn) {
@@ -269,7 +269,7 @@ void ClosureChecker::checkClosureBody(FunctionDecl *fn) {
       checker_.flow_.errResults.insert(var);
     }
   }
-  bool ownScope = fn->isExpression && !fn->ownName.empty();
+  bool ownScope = fn->isExpression() && !fn->ownName().empty();
   if (ownScope) {
     declareOwnName(fn);
   }

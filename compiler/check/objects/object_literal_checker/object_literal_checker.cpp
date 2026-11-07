@@ -22,7 +22,7 @@ namespace tz {
 namespace {
 
 bool hasMethodFields(const ClassDecl *cls) {
-  if (cls->literal) {
+  if (cls->literal()) {
     return true;
   }
   for (const ClassDecl *c = cls; c; c = c->parent) {
@@ -64,8 +64,8 @@ Expr *ObjectLiteralChecker::checkObjectLit(ObjectLitExpr *lit, const Type *expec
   llvm::SmallVector<bool, 8> named(lit->props.size(), true);
   for (size_t i = 0; i < lit->props.size(); ++i) {
     ObjectLitExpr::Property &prop = lit->props[i];
-    named[i] = !prop.spread;
-    if (prop.defaulted) {
+    named[i] = !prop.spread();
+    if (prop.defaulted()) {
       checker_.diags_.error(prop.loc,
                             "'" + prop.name +
                                 " = ...' gives a default value, which only a destructuring "
@@ -73,15 +73,16 @@ Expr *ObjectLiteralChecker::checkObjectLit(ObjectLitExpr *lit, const Type *expec
                                 prop.name + " = 1 } = o)' has; in an object literal write '" +
                                 prop.name + ": ...'");
       prop.value = cast<AssignExpr>(prop.value)->value;
-      prop.defaulted = false;
+      prop.form = ValueProperty{};
       ok = false;
     }
-    if (!prop.key) {
+    ComputedProperty *computed = prop.form.as<ComputedProperty>();
+    if (!computed) {
       continue;
     }
-    prop.key = checker_.exprChecker().checkExpr(prop.key);
-    const Type *keyType = prop.key->type;
-    if (std::optional<std::string> name = checker_.keyedFieldChecker().constantKey(prop.key)) {
+    computed->key = checker_.exprChecker().checkExpr(computed->key);
+    const Type *keyType = prop.key()->type;
+    if (std::optional<std::string> name = checker_.keyedFieldChecker().constantKey(prop.key())) {
       prop.name = checker_.ctx_.keepName(std::move(*name));
       checker_.file_->fieldNames.insert(prop.name);
       continue;
@@ -90,7 +91,7 @@ Expr *ObjectLiteralChecker::checkObjectLit(ObjectLitExpr *lit, const Type *expec
     llvm::ArrayRef<const Type *> keyNames =
         keyType->isUnion() ? keyType->members() : llvm::ArrayRef<const Type *>(keyType);
     if (llvm::all_of(keyNames, [](const Type *n) { return n->isStringLiteral(); })) {
-      prop.keyed = true;
+      computed->keyed = true;
       continue;
     }
     ok = false;
@@ -99,17 +100,17 @@ Expr *ObjectLiteralChecker::checkObjectLit(ObjectLitExpr *lit, const Type *expec
     }
     if (keyType->nonOptional()->isNumeric()) {
       checker_.diags_.error(
-          prop.key->loc(),
+          prop.key()->loc(),
           "a number cannot name a field; an object with numbered entries is an array");
     } else if (keyType->isString()) {
       checker_.diags_.error(
-          prop.key->loc(),
+          prop.key()->loc(),
           std::string("a key in brackets must be known when compiling: a string "
                       "literal, or a constant declared with one, such as 'const key = "
                       "\"name\"'; ") +
               kRuntimeKeys);
     } else {
-      checker_.diags_.error(prop.key->loc(),
+      checker_.diags_.error(prop.key()->loc(),
                             "a key must be a string, found '" + keyType->name() + "'");
     }
   }
@@ -139,16 +140,16 @@ Expr *ObjectLiteralChecker::checkObjectLit(ObjectLitExpr *lit, const Type *expec
   }
   if (target) {
     for (ObjectLitExpr::Property &prop : lit->props) {
-      if (const Field *wanted = prop.method ? target->field(prop.name) : nullptr;
+      if (const Field *wanted = prop.method() ? target->field(prop.name) : nullptr;
           wanted && wanted->type->nonOptional()->isFunction() &&
           wanted->type->nonOptional()->hasThis()) {
-        prop.method = false;
+        prop.form = ValueProperty{};
       }
     }
   }
   bool inferred = false;
   if (!target && !lit->props.empty() &&
-      llvm::all_of(lit->props, [](const ObjectLitExpr::Property &p) { return p.keyed; })) {
+      llvm::all_of(lit->props, [](const ObjectLitExpr::Property &p) { return p.keyed(); })) {
     std::vector<Field> fields;
     for (ObjectLitExpr::Property &prop : lit->props) {
       prop.value = checker_.exprChecker().checkExpr(prop.value);
@@ -165,7 +166,7 @@ Expr *ObjectLiteralChecker::checkObjectLit(ObjectLitExpr *lit, const Type *expec
         lit->type = Type::error();
         return lit;
       }
-      const Type *keyType = prop.key->type;
+      const Type *keyType = prop.key()->type;
       for (const Type *n :
            keyType->isUnion() ? keyType->members() : llvm::ArrayRef<const Type *>(keyType)) {
         std::string name;
@@ -178,9 +179,9 @@ Expr *ObjectLiteralChecker::checkObjectLit(ObjectLitExpr *lit, const Type *expec
         if (same == fields.end()) {
           fields.push_back({name, Type::optional(value), false});
         } else if (same->type != Type::optional(value)) {
-          checker_.diags_.error(prop.key->loc(), "field '" + name +
-                                                     "' gets values of different types; declare "
-                                                     "the type of the object");
+          checker_.diags_.error(prop.key()->loc(), "field '" + name +
+                                                       "' gets values of different types; declare "
+                                                       "the type of the object");
           lit->type = Type::error();
           return lit;
         }
@@ -190,20 +191,20 @@ Expr *ObjectLiteralChecker::checkObjectLit(ObjectLitExpr *lit, const Type *expec
     inferred = true;
   }
   for (ObjectLitExpr::Property &prop : lit->props) {
-    if (!prop.keyed) {
+    if (!prop.keyed()) {
       continue;
     }
-    const Type *keyType = prop.key->type;
+    const Type *keyType = prop.key()->type;
     if (lit->hasSpread() ||
-        llvm::any_of(lit->props, [](const ObjectLitExpr::Property &p) { return p.method; })) {
-      checker_.diags_.error(prop.key->loc(),
+        llvm::any_of(lit->props, [](const ObjectLitExpr::Property &p) { return p.method(); })) {
+      checker_.diags_.error(prop.key()->loc(),
                             "a key of type '" + keyType->name() +
                                 "' in brackets works in an object literal without '...' "
                                 "and methods; assign it after: 'o[key] = value'");
       return lit;
     }
     if (!target) {
-      checker_.diags_.error(prop.key->loc(),
+      checker_.diags_.error(prop.key()->loc(),
                             "a key of type '" + keyType->name() +
                                 "' in brackets needs the type of the object, which says "
                                 "the fields it may name; write it, e.g. 'const o: T = { [key]: "
@@ -214,15 +215,15 @@ Expr *ObjectLiteralChecker::checkObjectLit(ObjectLitExpr *lit, const Type *expec
     }
     const Type *field = KeyedFieldChecker::keyedFieldType(target, keyType);
     if (!field) {
-      checker_.diags_.error(prop.key->loc(), "the fields that '" + keyType->name() +
-                                                 "' names must all be in '" + target->name() +
-                                                 "' and have one type");
+      checker_.diags_.error(prop.key()->loc(), "the fields that '" + keyType->name() +
+                                                   "' names must all be in '" + target->name() +
+                                                   "' and have one type");
       prop.value = checker_.exprChecker().checkExpr(prop.value);
       lit->type = Type::error();
       return lit;
     }
     if (!field->isOptional()) {
-      checker_.diags_.error(prop.key->loc(),
+      checker_.diags_.error(prop.key()->loc(),
                             "the fields that '" + keyType->name() + "' names are of type '" +
                                 field->name() +
                                 "', not optional; the object gets only one of them, so the "
@@ -235,7 +236,7 @@ Expr *ObjectLiteralChecker::checkObjectLit(ObjectLitExpr *lit, const Type *expec
     prop.value = checker_.typeRelations().coerce(
         inferred ? prop.value : checker_.exprChecker().checkExpr(prop.value, field), field, what);
   }
-  if (llvm::any_of(lit->props, [](const ObjectLitExpr::Property &p) { return p.method; })) {
+  if (llvm::any_of(lit->props, [](const ObjectLitExpr::Property &p) { return p.method(); })) {
     return checker_.methodLiteralChecker().checkMethodLiteral(lit, target);
   }
   if (lit->hasSpread()) {
@@ -245,7 +246,7 @@ Expr *ObjectLiteralChecker::checkObjectLit(ObjectLitExpr *lit, const Type *expec
   std::vector<Field> fields;
   for (size_t i = 0; i < lit->props.size(); ++i) {
     ObjectLitExpr::Property &prop = lit->props[i];
-    if (prop.keyed) {
+    if (prop.keyed()) {
       continue;
     }
     if (!named[i]) {
@@ -341,7 +342,7 @@ Expr *ObjectLiteralChecker::checkSpreadLit(ObjectLitExpr *lit, const Type *targe
   };
   for (size_t i = 0; i < lit->props.size(); ++i) {
     ObjectLitExpr::Property &prop = lit->props[i];
-    if (!prop.spread) {
+    if (!prop.spread()) {
       if (!named[i]) {
         prop.value = checker_.exprChecker().checkExpr(prop.value);
         continue;
@@ -411,12 +412,13 @@ Expr *ObjectLiteralChecker::checkSpreadLit(ObjectLitExpr *lit, const Type *targe
       ok = false;
       continue;
     }
-    for (const IndexExpr *read : prop.omitKeys) {
-      if (!read->field.empty()) {
-        prop.omit.push_back(read->field);
+    SpreadProperty *spread = prop.form.as<SpreadProperty>();
+    for (const IndexExpr *read : spread->omitKeys) {
+      if (!read->field().empty()) {
+        spread->omit.push_back(read->field());
       }
     }
-    prop.omitKeys.clear();
+    spread->omitKeys.clear();
     if (ClassDecl *cls = ClassDeclarer::classOf(type)) {
       checker_.classDeclarer().completeClass(cls);
       if (hasMethodFields(cls)) {
@@ -428,7 +430,7 @@ Expr *ObjectLiteralChecker::checkSpreadLit(ObjectLitExpr *lit, const Type *targe
       }
     }
     for (const Field &f : type->fields()) {
-      if (llvm::is_contained(prop.omit, f.name)) {
+      if (llvm::is_contained(prop.omit(), f.name)) {
         continue;
       }
       Field *field = slot(f.name);
@@ -478,11 +480,11 @@ Expr *ObjectLiteralChecker::checkSpreadLit(ObjectLitExpr *lit, const Type *targe
     auto replacedLater = [&](llvm::StringRef name) {
       for (size_t j = i + 1; j < lit->props.size(); ++j) {
         const ObjectLitExpr::Property &later = lit->props[j];
-        if (!later.spread) {
+        if (!later.spread()) {
           if (later.name == name) {
             return true;
           }
-        } else if (!llvm::is_contained(later.omit, name)) {
+        } else if (!llvm::is_contained(later.omit(), name)) {
           if (const Field *f = later.value->type->field(name); f && !f->type->isOptional()) {
             return true;
           }
@@ -491,7 +493,7 @@ Expr *ObjectLiteralChecker::checkSpreadLit(ObjectLitExpr *lit, const Type *targe
 
       return false;
     };
-    if (!prop.spread) {
+    if (!prop.spread()) {
       if (replacedLater(prop.name)) {
         prop.replaced = true;
       } else {
@@ -499,9 +501,10 @@ Expr *ObjectLiteralChecker::checkSpreadLit(ObjectLitExpr *lit, const Type *targe
       }
       continue;
     }
+    SpreadProperty *spread = prop.form.as<SpreadProperty>();
     for (const Field &f : prop.value->type->fields()) {
-      if (!llvm::is_contained(prop.omit, f.name) && replacedLater(f.name)) {
-        prop.replacedFields.push_back(f.name);
+      if (!llvm::is_contained(spread->omit, f.name) && replacedLater(f.name)) {
+        spread->replacedFields.push_back(f.name);
       }
     }
   }

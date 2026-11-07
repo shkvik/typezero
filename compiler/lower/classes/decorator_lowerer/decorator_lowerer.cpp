@@ -197,7 +197,7 @@ llvm::Value *DecoratorLowerer::emitMetaCall(CallExpr *call) {
   usesMetadata_ = true;
   llvm::Type *ptr = lowering_.builder_.getPtrTy(), *i32 = lowering_.builder_.getInt32Ty(),
              *i64 = lowering_.builder_.getInt64Ty();
-  bool define = call->builtin == Builtin::MetaDefine;
+  bool define = call->builtin() == Builtin::MetaDefine;
   std::vector<llvm::Value *> values = lowering_.exprLowerer().emitExprs(call->args);
   llvm::Value *key = values[0];
   llvm::Value *target = values[define ? 2 : 1];
@@ -211,74 +211,75 @@ llvm::Value *DecoratorLowerer::emitMetaCall(CallExpr *call) {
   std::vector<llvm::Value *> args{keyId, lowering_.stringLowerer().stringObj(key),
                                   lowering_.stringLowerer().stringMeta(key)};
   llvm::Value *result = nullptr;
-  switch (call->builtin) {
-  case Builtin::MetaDefine:
-    args.insert(args.end(), {values[1], target, lowering_.stringLowerer().stringObj(text),
-                             lowering_.stringLowerer().stringMeta(text),
-                             lowering_.builder_.CreateZExt(has, i32),
-                             lowering_.builder_.getInt32(call->designRecord)});
-    lowering_.builder_.CreateCall(
-        lowering_.unknownLowerer().unknownFunction("tz_meta_define", lowering_.builder_.getVoidTy(),
-                                                   {ptr, ptr, i64, ptr, ptr, ptr, i64, i32, i32}),
-        args);
-    break;
-  case Builtin::MetaDelete:
-    args.insert(args.end(), {target, lowering_.stringLowerer().stringObj(text),
-                             lowering_.stringLowerer().stringMeta(text),
-                             lowering_.builder_.CreateZExt(has, i32)});
-    result = lowering_.builder_.CreateICmpNE(
-        lowering_.builder_.CreateCall(
-            lowering_.unknownLowerer().unknownFunction("tz_meta_delete", i32,
-                                                       {ptr, ptr, i64, ptr, ptr, i64, i32}),
-            args),
-        lowering_.builder_.getInt32(0));
-    break;
-  default: {
-    bool own = call->builtin == Builtin::MetaGetOwn || call->builtin == Builtin::MetaHasOwn;
-    args.insert(args.end(),
-                {target, lowering_.stringLowerer().stringObj(text),
-                 lowering_.stringLowerer().stringMeta(text),
-                 lowering_.builder_.CreateZExt(has, i32), lowering_.builder_.getInt32(own)});
-    bool get = call->builtin == Builtin::MetaGet || call->builtin == Builtin::MetaGetOwn;
-    llvm::Value *found =
-        lowering_.builder_.CreateCall(lowering_.unknownLowerer().unknownFunction(
-                                          get ? "tz_meta_get" : "tz_meta_has", get ? ptr : i32,
-                                          {ptr, ptr, i64, ptr, ptr, i64, i32, i32}),
-                                      args, "record");
-    if (!get) {
-      result = lowering_.builder_.CreateICmpNE(found, lowering_.builder_.getInt32(0));
+  switch (call->builtin()) {
+    case Builtin::MetaDefine:
+      args.insert(args.end(), {values[1], target, lowering_.stringLowerer().stringObj(text),
+                               lowering_.stringLowerer().stringMeta(text),
+                               lowering_.builder_.CreateZExt(has, i32),
+                               lowering_.builder_.getInt32(call->designRecord)});
+      lowering_.builder_.CreateCall(lowering_.unknownLowerer().unknownFunction(
+                                        "tz_meta_define", lowering_.builder_.getVoidTy(),
+                                        {ptr, ptr, i64, ptr, ptr, ptr, i64, i32, i32}),
+                                    args);
+      break;
+    case Builtin::MetaDelete:
+      args.insert(args.end(), {target, lowering_.stringLowerer().stringObj(text),
+                               lowering_.stringLowerer().stringMeta(text),
+                               lowering_.builder_.CreateZExt(has, i32)});
+      result = lowering_.builder_.CreateICmpNE(
+          lowering_.builder_.CreateCall(
+              lowering_.unknownLowerer().unknownFunction("tz_meta_delete", i32,
+                                                         {ptr, ptr, i64, ptr, ptr, i64, i32}),
+              args),
+          lowering_.builder_.getInt32(0));
+      break;
+    default: {
+      bool own = call->builtin() == Builtin::MetaGetOwn || call->builtin() == Builtin::MetaHasOwn;
+      args.insert(args.end(),
+                  {target, lowering_.stringLowerer().stringObj(text),
+                   lowering_.stringLowerer().stringMeta(text),
+                   lowering_.builder_.CreateZExt(has, i32), lowering_.builder_.getInt32(own)});
+      bool get = call->builtin() == Builtin::MetaGet || call->builtin() == Builtin::MetaGetOwn;
+      llvm::Value *found =
+          lowering_.builder_.CreateCall(lowering_.unknownLowerer().unknownFunction(
+                                            get ? "tz_meta_get" : "tz_meta_has", get ? ptr : i32,
+                                            {ptr, ptr, i64, ptr, ptr, i64, i32, i32}),
+                                        args, "record");
+      if (!get) {
+        result = lowering_.builder_.CreateICmpNE(found, lowering_.builder_.getInt32(0));
+        break;
+      }
+      if (call->type->isUnknown()) {
+        result = found;
+        break;
+      }
+      const Type *type = call->type->nonOptional();
+      llvm::BasicBlock *readBlock = lowering_.functionFrame().newBlock("record.read");
+      llvm::BasicBlock *endBlock = lowering_.functionFrame().newBlock("record.end");
+      llvm::BasicBlock *entry = lowering_.builder_.GetInsertBlock();
+      lowering_.builder_.CreateCondBr(lowering_.builder_.CreateIsNotNull(found), readBlock,
+                                      endBlock);
+      lowering_.functionFrame().switchTo(readBlock);
+      llvm::Value *slot = lowering_.functionFrame().createStackSlot(
+          lowering_.moduleBuilder().lower(type), "record.value");
+      lowering_.builder_.CreateCall(
+          lowering_.unknownLowerer().unknownFunction(
+              "tz_unknown_unbox", lowering_.builder_.getVoidTy(), {ptr, ptr, ptr}),
+          {found, lowering_.typeDescriptors().typeDescriptor(type), slot});
+      llvm::Value *value = lowering_.optionalLowerer().makeOptional(
+          lowering_.builder_.CreateLoad(lowering_.moduleBuilder().lower(type), slot),
+          lowering_.builder_.getTrue(), call->type);
+      lowering_.builder_.CreateCall(lowering_.instanceReleaseFn_, {found});
+      llvm::BasicBlock *readEnd = lowering_.builder_.GetInsertBlock();
+      lowering_.builder_.CreateBr(endBlock);
+      lowering_.functionFrame().switchTo(endBlock);
+      llvm::PHINode *phi =
+          lowering_.builder_.CreatePHI(lowering_.moduleBuilder().lower(call->type), 2);
+      phi->addIncoming(lowering_.optionalLowerer().undefinedValue(call->type), entry);
+      phi->addIncoming(value, readEnd);
+      result = phi;
       break;
     }
-    if (call->type->isUnknown()) {
-      result = found;
-      break;
-    }
-    const Type *type = call->type->nonOptional();
-    llvm::BasicBlock *readBlock = lowering_.functionFrame().newBlock("record.read");
-    llvm::BasicBlock *endBlock = lowering_.functionFrame().newBlock("record.end");
-    llvm::BasicBlock *entry = lowering_.builder_.GetInsertBlock();
-    lowering_.builder_.CreateCondBr(lowering_.builder_.CreateIsNotNull(found), readBlock, endBlock);
-    lowering_.functionFrame().switchTo(readBlock);
-    llvm::Value *slot = lowering_.functionFrame().createStackSlot(
-        lowering_.moduleBuilder().lower(type), "record.value");
-    lowering_.builder_.CreateCall(
-        lowering_.unknownLowerer().unknownFunction("tz_unknown_unbox",
-                                                   lowering_.builder_.getVoidTy(), {ptr, ptr, ptr}),
-        {found, lowering_.typeDescriptors().typeDescriptor(type), slot});
-    llvm::Value *value = lowering_.optionalLowerer().makeOptional(
-        lowering_.builder_.CreateLoad(lowering_.moduleBuilder().lower(type), slot),
-        lowering_.builder_.getTrue(), call->type);
-    lowering_.builder_.CreateCall(lowering_.instanceReleaseFn_, {found});
-    llvm::BasicBlock *readEnd = lowering_.builder_.GetInsertBlock();
-    lowering_.builder_.CreateBr(endBlock);
-    lowering_.functionFrame().switchTo(endBlock);
-    llvm::PHINode *phi =
-        lowering_.builder_.CreatePHI(lowering_.moduleBuilder().lower(call->type), 2);
-    phi->addIncoming(lowering_.optionalLowerer().undefinedValue(call->type), entry);
-    phi->addIncoming(value, readEnd);
-    result = phi;
-    break;
-  }
   }
   lowering_.refCounts().releaseValue(key, Type::string());
   lowering_.refCounts().releaseValue(target, Type::anyObject());
@@ -305,7 +306,7 @@ void DecoratorLowerer::finishMetadata(SourceFile &file, llvm::Instruction *init)
   std::vector<const ClassDecl *> classes;
   unsigned count = 1;
   for (Stmt *item : file.items) {
-    if (auto *cls = dyn_cast<ClassDecl>(item); cls && !cls->literal) {
+    if (auto *cls = dyn_cast<ClassDecl>(item); cls && !cls->literal()) {
       classes.push_back(cls);
       count = std::max(count, cls->id + 1);
     }

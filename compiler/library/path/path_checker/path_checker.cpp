@@ -92,7 +92,7 @@ Expr *PathChecker::checkPathCall(CallExpr *call, NodeModule module, llvm::String
     Expr *array = checker_.argumentChecker().checkArg(paths, Type::array(string));
     call->args = {style, array};
     call->spread.clear();
-    call->builtin = fn == "join" ? Builtin::PathJoin : Builtin::PathResolve;
+    call->target = BuiltinCall{.builtin = fn == "join" ? Builtin::PathJoin : Builtin::PathResolve};
     call->type = string;
     return call;
   }
@@ -136,7 +136,7 @@ Expr *PathChecker::checkPathCall(CallExpr *call, NodeModule module, llvm::String
       arg = checker_.typeRelations().coerce(arg, formatInputType());
     }
     call->args = {style, arg};
-    call->builtin = Builtin::PathFormat;
+    call->target = BuiltinCall{.builtin = Builtin::PathFormat};
     call->type = string;
     return call;
   }
@@ -144,7 +144,7 @@ Expr *PathChecker::checkPathCall(CallExpr *call, NodeModule module, llvm::String
     arg = checker_.argumentChecker().checkArg(arg, string);
   }
   call->args.insert(call->args.begin(), style);
-  call->builtin = shape->builtin;
+  call->target = BuiltinCall{.builtin = shape->builtin};
   call->type = shape->builtin == Builtin::PathIsAbsolute ? Type::boolTy()
                : shape->builtin == Builtin::PathParse    ? parsedPathType()
                                                          : string;

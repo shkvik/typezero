@@ -74,14 +74,14 @@ void ExprWalk::expr(const Expr *e, const Use &use) {
       analysis_.codeWalk.noteClass(o->cls);
     }
     for (const ObjectLitExpr::Property &p : o->props) {
-      if (p.key) {
-        expr(p.key);
+      if (p.key()) {
+        expr(p.key());
       }
-      if (p.method) {
+      if (p.method()) {
         continue;
       }
       expr(p.value);
-      if (p.spread) {
+      if (p.spread()) {
         readSpread(p.value, true, p.loc);
       }
     }
@@ -187,20 +187,22 @@ void ExprWalk::expr(const Expr *e, const Use &use) {
   case Expr::Kind::Await:
     awaitExpr(cast<AwaitExpr>(e));
     return;
+  case Expr::Kind::Class:
+    break;
   }
 }
 
 void ExprWalk::name(const NameExpr *n, const Use &use) {
-  if (n->func || (n->var && (n->var->function() || n->var->lambda()))) {
+  if (n->func() || (n->var() && (n->var()->function() || n->var()->lambda()))) {
     analysis_.callWalk.functionRef(n, use, n->type);
     return;
   }
-  analysis_.codeWalk.var(n->var, false, n->loc());
+  analysis_.codeWalk.var(n->var(), false, n->loc());
 }
 
 void ExprWalk::member(const MemberExpr *m) {
   expr(m->object);
-  if (m->method) {
+  if (m->method()) {
     analysis_.callWalk.functionRef(m, {}, m->type);
     return;
   }
@@ -245,7 +247,7 @@ void ExprWalk::fieldAccess(const Expr *object, llvm::StringRef name, bool write,
     return;
   }
   for (const ClassDecl *k = type->classDecl(); k; k = k->parent) {
-    if (k->library &&
+    if (k->library() &&
         llvm::any_of(k->fields, [&](const ClassField &f) { return f.name == name; })) {
       analysis_.libraryEffects.libraryState(libraryClassName(k), name,
                                             analysis_.aliasAnalysis.receiverRef(object), write, at);
@@ -260,15 +262,15 @@ void ExprWalk::fieldAccess(const Expr *object, llvm::StringRef name, bool write,
 }
 
 void ExprWalk::indexAccess(const IndexExpr *ix, bool write) {
-  if (ix->enumDecl || !ix->object->type) {
+  if (ix->enumDecl() || !ix->object->type) {
     return;
   }
-  if (!ix->field.empty()) {
-    fieldAccess(ix->object, ix->field, write, ix->loc());
+  if (!ix->field().empty()) {
+    fieldAccess(ix->object, ix->field(), write, ix->loc());
     return;
   }
   const Type *type = ix->object->type->nonOptional();
-  if (ix->keyed) {
+  if (ix->keyed()) {
     analysis_.codeWalk.touch(LocKind::Field, analysis_.aliasAnalysis.refOf(ix->object),
                              analysis_.star, write, ix->loc());
     return;
@@ -278,13 +280,13 @@ void ExprWalk::indexAccess(const IndexExpr *ix, bool write) {
   }
   if (type->isArray()) {
     auto *index = dyn_cast<NameExpr>(strip(ix->index));
-    if (index && index->var && analysis_.ownIndex.contains(index->var) && !index->var->reassigned &&
-        !ix->mayAppend) {
+    if (index && index->var() && analysis_.ownIndex.contains(index->var()) &&
+        !index->var()->reassigned && !ix->mayAppend()) {
       analysis_.codeWalk.touch(LocKind::OwnCell, analysis_.aliasAnalysis.refOf(ix->object),
-                               index->var->owner(), write, ix->loc());
+                               index->var()->owner(), write, ix->loc());
       return;
     }
-    if (write && ix->mayAppend) {
+    if (write && ix->mayAppend()) {
       analysis_.codeWalk.touch(LocKind::Field, analysis_.aliasAnalysis.refOf(ix->object),
                                analysis_.length, true, ix->loc());
     }
@@ -315,7 +317,7 @@ void ExprWalk::contents(const Expr *e, bool write, llvm::SMLoc at) {
   }
   if (auto *lit = dyn_cast<ObjectLitExpr>(made)) {
     for (const ObjectLitExpr::Property &p : lit->props) {
-      if (!p.method) {
+      if (!p.method()) {
         contents(p.value, write, at);
       }
     }
@@ -366,10 +368,10 @@ void ExprWalk::assign(const AssignExpr *a) {
   const Expr *target = a->target;
   if (auto *n = dyn_cast<NameExpr>(target)) {
     if (compound) {
-      analysis_.codeWalk.var(n->var, false, n->loc());
+      analysis_.codeWalk.var(n->var(), false, n->loc());
     }
     value();
-    analysis_.codeWalk.var(n->var, true, n->loc());
+    analysis_.codeWalk.var(n->var(), true, n->loc());
     return;
   }
   if (auto *m = dyn_cast<MemberExpr>(target)) {
@@ -397,8 +399,8 @@ void ExprWalk::assign(const AssignExpr *a) {
 
 void ExprWalk::update(const Expr *target) {
   if (auto *n = dyn_cast<NameExpr>(target)) {
-    analysis_.codeWalk.var(n->var, false, n->loc());
-    analysis_.codeWalk.var(n->var, true, n->loc());
+    analysis_.codeWalk.var(n->var(), false, n->loc());
+    analysis_.codeWalk.var(n->var(), true, n->loc());
   } else if (auto *m = dyn_cast<MemberExpr>(target)) {
     expr(m->object);
     fieldAccess(m->object, m->name, false, m->loc());
@@ -415,7 +417,7 @@ void ExprWalk::update(const Expr *target) {
 
 void ExprWalk::awaitExpr(const AwaitExpr *a) {
   auto *c = dyn_cast<CallExpr>(strip(a->value));
-  bool join = c && c->builtin == Builtin::PromiseAll;
+  bool join = c && c->builtin() == Builtin::PromiseAll;
   if (join) {
     analysis_.openJoins.push_back({a, analysis_.cur});
   }

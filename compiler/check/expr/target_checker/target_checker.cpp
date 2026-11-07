@@ -66,7 +66,7 @@ const Type *TargetChecker::checkAssignTarget(Expr *&target, bool compound) {
     }
     if (type->isObject()) {
       Expr *checked = checker_.keyedFieldChecker().checkKeyedField(index, true);
-      if (index->keyed) {
+      if (index->keyed()) {
         return index->type;
       }
       auto *member = dyn_cast<MemberExpr>(checked);
@@ -103,7 +103,7 @@ const Type *TargetChecker::checkAssignTarget(Expr *&target, bool compound) {
 
   if (auto *member = dyn_cast<MemberExpr>(target)) {
     auto *name = dyn_cast<NameExpr>(member->object);
-    if (ClassDecl *cls = name ? checker_.scopes().lookup(name->name).cls : nullptr) {
+    if (ClassDecl *cls = name ? checker_.scopes().lookup(name->name).cls() : nullptr) {
       return checker_.staticChecker().checkStaticTarget(target, cls);
     }
     if (name && name->name == "this") {
@@ -191,24 +191,24 @@ VarSymbol *TargetChecker::checkVarTarget(NameExpr *name) {
     checker_.diags_.error(name->loc(), "cannot assign to 'this'");
     return nullptr;
   }
-  Checker::ScopeEntry entry = checker_.topLevelChecker().lookupValue(name->name);
-  if (!entry.var) {
+  ScopeEntry entry = checker_.topLevelChecker().lookupValue(name->name);
+  if (!entry.var()) {
     checker_.nameChecker().checkName(name);
     return nullptr;
   }
-  name->var = entry.var;
-  name->type = checker_.scopes().varType(entry.var);
-  checker_.scopes().checkVisible(name, entry.var);
-  if (entry.var->isConst) {
+  name->binding = NamedVar{.var = entry.var()};
+  name->type = checker_.scopes().varType(entry.var());
+  checker_.scopes().checkVisible(name, entry.var());
+  if (entry.var()->isConst) {
     checker_.diags_.error(name->loc(), "cannot assign to '" + name->name + "' because it is a " +
-                                           (entry.var->function() ? "function" : "constant"));
+                                           (entry.var()->function() ? "function" : "constant"));
   } else {
-    checker_.topLevelChecker().reportImportAssign(name, entry.var);
+    checker_.topLevelChecker().reportImportAssign(name, entry.var());
   }
-  entry.var->reassigned = true;
-  checker_.nestedFunctions().noteUse(entry.var, name->loc());
+  entry.var()->reassigned = true;
+  checker_.nestedFunctions().noteUse(entry.var(), name->loc());
 
-  return entry.var;
+  return entry.var();
 }
 
 }

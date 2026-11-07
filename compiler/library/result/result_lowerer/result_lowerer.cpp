@@ -216,25 +216,25 @@ llvm::Function *ResultLowerer::failureMaker(const Type *errorType) {
 }
 
 llvm::Value *ResultLowerer::emitResultCall(CallExpr *call) {
-  switch (call->builtin) {
-  case Builtin::ResultOk:
-  case Builtin::ResultErr: {
-    bool isOk = call->builtin == Builtin::ResultOk;
-    const Type *type = call->type;
-    llvm::Value *half =
-        call->args.empty() ? nullptr : lowering_.exprLowerer().emitExpr(call->args[0]);
-    if ((isOk ? type->okType() : type->errType())->isVoid()) {
-      half = nullptr;
+  switch (call->builtin()) {
+    case Builtin::ResultOk:
+    case Builtin::ResultErr: {
+      bool isOk = call->builtin() == Builtin::ResultOk;
+      const Type *type = call->type;
+      llvm::Value *half =
+          call->args.empty() ? nullptr : lowering_.exprLowerer().emitExpr(call->args[0]);
+      if ((isOk ? type->okType() : type->errType())->isVoid()) {
+        half = nullptr;
+      }
+      return makeResult(type, lowering_.builder_.getInt1(isOk), isOk ? half : nullptr,
+                        isOk ? nullptr : half,
+                        isOk ? nullptr : lowering_.errSites().site(call->loc()));
     }
-    return makeResult(type, lowering_.builder_.getInt1(isOk), isOk ? half : nullptr,
-                      isOk ? nullptr : half,
-                      isOk ? nullptr : lowering_.errSites().site(call->loc()));
-  }
-  case Builtin::ResultCombine:
-  case Builtin::ResultCombineWithAllErrors:
-    return lowering_.resultCombineLowerer().emitCombine(call);
-  default:
-    return emitResultMethod(call);
+    case Builtin::ResultCombine:
+    case Builtin::ResultCombineWithAllErrors:
+      return lowering_.resultCombineLowerer().emitCombine(call);
+    default:
+      return emitResultMethod(call);
   }
 }
 
@@ -243,7 +243,7 @@ llvm::Value *ResultLowerer::emitResultMethod(CallExpr *call) {
   const Type *type = member->object->type;
   const Type *valueType = type->okType(), *errorType = type->errType();
   const Type *resultType = call->type;
-  Builtin method = call->builtin;
+  Builtin method = call->builtin();
   if (method == Builtin::ResultIsOk || method == Builtin::ResultIsErr) {
     Lowering::Operand result = lowering_.refCounts().emitOperand(member->object, true);
     llvm::Value *ok = resultIsOk(result.value, type);

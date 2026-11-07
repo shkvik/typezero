@@ -51,9 +51,9 @@ Expr *FsPromisesChecker::checkFsPromisesCall(CallExpr *call, llvm::StringRef fn,
       {Builtin::FsRename, Builtin::FspRename},     {Builtin::FsCopyFile, Builtin::FspCopyFile},
       {Builtin::FsReplace, Builtin::FspReplace},   {Builtin::FsRealpath, Builtin::FspRealpath}};
   for (const auto &[sync, async] : waiting) {
-    if (call->builtin == sync) {
+    if (call->builtin() == sync) {
       const Type *error = checker_.fsErrorTypes().ofCall(call);
-      call->builtin = async;
+      call->target = BuiltinCall{.builtin = async};
       call->type = Type::promise(Type::result(call->type, error));
       return call;
     }

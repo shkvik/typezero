@@ -49,190 +49,191 @@ DictMethodLowerer::DictMethodLowerer(Lowering &lowering) : lowering_(lowering) {
 
 llvm::Value *DictMethodLowerer::emitDictCall(CallExpr *call) {
   llvm::Type *ptr = lowering_.builder_.getPtrTy(), *i32 = lowering_.builder_.getInt32Ty();
-  switch (call->builtin) {
-  case Builtin::DictNew:
-    return emitDictNew(call);
-  case Builtin::DictGroupBy:
-    return emitGroupBy(call);
-  case Builtin::MapForEach:
-    return lowering_.dictLowerer().emitDictForEach(call);
-  case Builtin::EnvMap:
-    return lowering_.builder_.CreateCall(
-        lowering_.dictLowerer().dictFunction("tz_process_env_map", ptr, {ptr}),
-        {lowering_.dictLowerer().dictLayout(call->type).descriptor}, "env");
-  default:
-    break;
+  switch (call->builtin()) {
+    case Builtin::DictNew:
+      return emitDictNew(call);
+    case Builtin::DictGroupBy:
+      return emitGroupBy(call);
+    case Builtin::MapForEach:
+      return lowering_.dictLowerer().emitDictForEach(call);
+    case Builtin::EnvMap:
+      return lowering_.builder_.CreateCall(
+          lowering_.dictLowerer().dictFunction("tz_process_env_map", ptr, {ptr}),
+          {lowering_.dictLowerer().dictLayout(call->type).descriptor}, "env");
+    default:
+      break;
   }
-  if (isDictIterator(call->builtin)) {
+  if (isDictIterator(call->builtin())) {
     return lowering_.iteratorLowerer().emitIteratorBuiltin(call);
   }
   Expr *receiver = cast<MemberExpr>(call->callee)->object;
   const Type *type = receiver->type;
   const Type *key = type->keyType(), *value = type->valueType();
-  switch (call->builtin) {
-  case Builtin::MapSize: {
-    Lowering::Operand map = lowering_.refCounts().emitOperand(receiver, true);
-    llvm::Value *size = lowering_.builder_.CreateLoad(
-        i32, lowering_.dictLowerer().dictField(map.value, kMapCount), "size");
-    lowering_.refCounts().dropOperand(map);
-    return lowering_.builder_.CreateZExt(size, lowering_.builder_.getInt64Ty());
-  }
-  case Builtin::MapClear: {
-    Lowering::Operand map = lowering_.refCounts().emitOperand(receiver, true);
-    lowering_.builder_.CreateCall(
-        lowering_.dictLowerer().dictFunction("tz_map_clear", lowering_.builder_.getVoidTy(), {ptr}),
-        {map.value});
-    lowering_.refCounts().dropOperand(map);
-    return nullptr;
-  }
-  case Builtin::MapGet:
-  case Builtin::MapHas:
-  case Builtin::MapDelete: {
-    Expr *keyExpr = call->args[0];
-    Lowering::Operand map =
-        lowering_.refCounts().emitOperand(receiver, AssignLowerer::cannotAssign(keyExpr));
-    Lowering::Operand k = lowering_.refCounts().emitOperand(keyExpr, true);
-    llvm::Value *result;
-    if (call->builtin == Builtin::MapDelete) {
-      llvm::Value *removed;
-      if (key->isString()) {
-        removed = lowering_.builder_.CreateCall(
-            lowering_.dictLowerer().dictFunction("tz_map_delete_str", i32,
-                                                 {ptr, ptr, lowering_.builder_.getInt64Ty()}),
-            {map.value, lowering_.stringLowerer().stringObj(k.value),
-             lowering_.stringLowerer().stringMeta(k.value)});
-      } else {
-        removed = lowering_.builder_.CreateCall(
-            lowering_.dictLowerer().dictFunction("tz_map_delete", i32, {ptr, ptr}),
-            {map.value, lowering_.functionFrame().spill(k.value, "key")});
-      }
-      result = lowering_.builder_.CreateICmpNE(removed, lowering_.builder_.getInt32(0));
-    } else {
-      llvm::Value *entry = lowering_.dictLowerer().emitDictFind(map.value, k.value, key);
-      llvm::Value *found = lowering_.builder_.CreateIsNotNull(entry, "found");
-      if (call->builtin == Builtin::MapHas) {
-        result = found;
-      } else {
-        result = lowering_.arrayLowerer().emitCheckedRead(found, call->type, [&] {
-          llvm::Value *v =
-              lowering_.builder_.CreateLoad(lowering_.moduleBuilder().lower(value),
-                                            lowering_.dictLowerer().entryValue(entry, type));
-          lowering_.refCounts().retainValue(v, value);
-          return v;
-        });
-      }
+  switch (call->builtin()) {
+    case Builtin::MapSize: {
+      Lowering::Operand map = lowering_.refCounts().emitOperand(receiver, true);
+      llvm::Value *size = lowering_.builder_.CreateLoad(
+          i32, lowering_.dictLowerer().dictField(map.value, kMapCount), "size");
+      lowering_.refCounts().dropOperand(map);
+      return lowering_.builder_.CreateZExt(size, lowering_.builder_.getInt64Ty());
     }
-    lowering_.refCounts().dropOperand(k);
-    lowering_.refCounts().dropOperand(map);
-    return result;
-  }
-  case Builtin::MapSet:
-  case Builtin::SetAdd:
-  case Builtin::RecordSet: {
-    Expr *keyExpr = call->args[0];
-    Expr *valueExpr = call->args.size() > 1 ? call->args[1] : nullptr;
-    bool later = valueExpr && !AssignLowerer::cannotAssign(valueExpr);
-    Lowering::Operand map =
-        lowering_.refCounts().emitOperand(receiver, AssignLowerer::cannotAssign(keyExpr) && !later);
-    Lowering::Operand k = lowering_.refCounts().emitOperand(keyExpr, !later);
-    llvm::Value *v = valueExpr ? lowering_.exprLowerer().emitExpr(valueExpr) : nullptr;
-    llvm::Value *entry = lowering_.dictLowerer().emitDictAdd(map.value, k.value, key);
-    if (v) {
-      lowering_.storeLowerer().storeIn(map.value, type,
-                                       lowering_.dictLowerer().entryValue(entry, type), v, value);
+    case Builtin::MapClear: {
+      Lowering::Operand map = lowering_.refCounts().emitOperand(receiver, true);
+      lowering_.builder_.CreateCall(lowering_.dictLowerer().dictFunction(
+                                        "tz_map_clear", lowering_.builder_.getVoidTy(), {ptr}),
+                                    {map.value});
+      lowering_.refCounts().dropOperand(map);
+      return nullptr;
     }
-    lowering_.refCounts().dropOperand(k);
-    if (call->builtin == Builtin::RecordSet) {
-      lowering_.dictLowerer().emitEntryStored(map.value, entry);
-      llvm::Value *result = lowering_.builder_.CreateLoad(
-          lowering_.moduleBuilder().lower(value), lowering_.dictLowerer().entryValue(entry, type));
-      lowering_.refCounts().retainValue(result, value);
+    case Builtin::MapGet:
+    case Builtin::MapHas:
+    case Builtin::MapDelete: {
+      Expr *keyExpr = call->args[0];
+      Lowering::Operand map =
+          lowering_.refCounts().emitOperand(receiver, AssignLowerer::cannotAssign(keyExpr));
+      Lowering::Operand k = lowering_.refCounts().emitOperand(keyExpr, true);
+      llvm::Value *result;
+      if (call->builtin() == Builtin::MapDelete) {
+        llvm::Value *removed;
+        if (key->isString()) {
+          removed = lowering_.builder_.CreateCall(
+              lowering_.dictLowerer().dictFunction("tz_map_delete_str", i32,
+                                                   {ptr, ptr, lowering_.builder_.getInt64Ty()}),
+              {map.value, lowering_.stringLowerer().stringObj(k.value),
+               lowering_.stringLowerer().stringMeta(k.value)});
+        } else {
+          removed = lowering_.builder_.CreateCall(
+              lowering_.dictLowerer().dictFunction("tz_map_delete", i32, {ptr, ptr}),
+              {map.value, lowering_.functionFrame().spill(k.value, "key")});
+        }
+        result = lowering_.builder_.CreateICmpNE(removed, lowering_.builder_.getInt32(0));
+      } else {
+        llvm::Value *entry = lowering_.dictLowerer().emitDictFind(map.value, k.value, key);
+        llvm::Value *found = lowering_.builder_.CreateIsNotNull(entry, "found");
+        if (call->builtin() == Builtin::MapHas) {
+          result = found;
+        } else {
+          result = lowering_.arrayLowerer().emitCheckedRead(found, call->type, [&] {
+            llvm::Value *v =
+                lowering_.builder_.CreateLoad(lowering_.moduleBuilder().lower(value),
+                                              lowering_.dictLowerer().entryValue(entry, type));
+            lowering_.refCounts().retainValue(v, value);
+            return v;
+          });
+        }
+      }
+      lowering_.refCounts().dropOperand(k);
       lowering_.refCounts().dropOperand(map);
       return result;
     }
-    if (!map.owned) {
-      lowering_.refCounts().retainValue(map.value, type);
+    case Builtin::MapSet:
+    case Builtin::SetAdd:
+    case Builtin::RecordSet: {
+      Expr *keyExpr = call->args[0];
+      Expr *valueExpr = call->args.size() > 1 ? call->args[1] : nullptr;
+      bool later = valueExpr && !AssignLowerer::cannotAssign(valueExpr);
+      Lowering::Operand map = lowering_.refCounts().emitOperand(
+          receiver, AssignLowerer::cannotAssign(keyExpr) && !later);
+      Lowering::Operand k = lowering_.refCounts().emitOperand(keyExpr, !later);
+      llvm::Value *v = valueExpr ? lowering_.exprLowerer().emitExpr(valueExpr) : nullptr;
+      llvm::Value *entry = lowering_.dictLowerer().emitDictAdd(map.value, k.value, key);
+      if (v) {
+        lowering_.storeLowerer().storeIn(map.value, type,
+                                         lowering_.dictLowerer().entryValue(entry, type), v, value);
+      }
+      lowering_.refCounts().dropOperand(k);
+      if (call->builtin() == Builtin::RecordSet) {
+        lowering_.dictLowerer().emitEntryStored(map.value, entry);
+        llvm::Value *result =
+            lowering_.builder_.CreateLoad(lowering_.moduleBuilder().lower(value),
+                                          lowering_.dictLowerer().entryValue(entry, type));
+        lowering_.refCounts().retainValue(result, value);
+        lowering_.refCounts().dropOperand(map);
+        return result;
+      }
+      if (!map.owned) {
+        lowering_.refCounts().retainValue(map.value, type);
+      }
+      return map.value;
     }
-    return map.value;
-  }
-  case Builtin::RecordNullishSet: {
-    Expr *keyExpr = call->args[0], *valueExpr = call->args[1];
-    const Type *resultType = call->type;
-    llvm::Value *m = lowering_.exprLowerer().emitExpr(receiver);
-    llvm::Value *kv = lowering_.exprLowerer().emitExpr(keyExpr);
-    llvm::Value *entry = lowering_.dictLowerer().emitDictFind(m, kv, key);
-    llvm::BasicBlock *lookBlock = lowering_.functionFrame().newBlock("nullish.look");
-    llvm::BasicBlock *keepBlock = lowering_.functionFrame().newBlock("nullish.keep");
-    llvm::BasicBlock *assignBlock = lowering_.functionFrame().newBlock("nullish.assign");
-    llvm::BasicBlock *endBlock = lowering_.functionFrame().newBlock("nullish.end");
-    lowering_.builder_.CreateCondBr(lowering_.builder_.CreateIsNotNull(entry), lookBlock,
-                                    assignBlock);
-    lowering_.functionFrame().switchTo(lookBlock);
-    llvm::Value *old = lowering_.builder_.CreateLoad(
-        lowering_.moduleBuilder().lower(value), lowering_.dictLowerer().entryValue(entry, type));
-    lowering_.builder_.CreateCondBr(value->isOptional()
-                                        ? lowering_.optionalLowerer().optionalHas(old, value)
-                                        : lowering_.builder_.getTrue(),
-                                    keepBlock, assignBlock);
-    lowering_.functionFrame().switchTo(keepBlock);
-    lowering_.refCounts().retainValue(old, value);
-    llvm::Value *kept = lowering_.exprLowerer().emitConversion(old, value, resultType);
-    llvm::BasicBlock *keepEnd = lowering_.builder_.GetInsertBlock();
-    lowering_.builder_.CreateBr(endBlock);
-    lowering_.functionFrame().switchTo(assignBlock);
-    llvm::Value *v = lowering_.exprLowerer().emitExpr(valueExpr);
-    llvm::Value *added = lowering_.dictLowerer().emitDictAdd(m, kv, key);
-    lowering_.storeLowerer().storeIn(m, type, lowering_.dictLowerer().entryValue(added, type), v,
-                                     value);
-    lowering_.dictLowerer().emitEntryStored(m, added);
-    lowering_.refCounts().retainValue(v, value);
-    llvm::Value *assigned = lowering_.exprLowerer().emitConversion(v, value, resultType);
-    llvm::BasicBlock *assignEnd = lowering_.builder_.GetInsertBlock();
-    lowering_.builder_.CreateBr(endBlock);
-    lowering_.functionFrame().switchTo(endBlock);
-    llvm::PHINode *result =
-        lowering_.builder_.CreatePHI(lowering_.moduleBuilder().lower(resultType), 2);
-    result->addIncoming(kept, keepEnd);
-    result->addIncoming(assigned, assignEnd);
-    lowering_.refCounts().releaseValue(kv, key);
-    lowering_.refCounts().releaseValue(m, type);
-    return result;
-  }
-  default: {
-    Expr *other = call->args[0];
-    Lowering::Operand a =
-        lowering_.refCounts().emitOperand(receiver, AssignLowerer::cannotAssign(other));
-    Lowering::Operand b = lowering_.refCounts().emitOperand(other, true);
-    llvm::Value *result;
-    switch (call->builtin) {
-    case Builtin::SetUnion:
-    case Builtin::SetIntersection:
-    case Builtin::SetDifference:
-    case Builtin::SetSymmetricDifference: {
-      int op = int(call->builtin) - int(Builtin::SetUnion);
-      result = lowering_.builder_.CreateCall(
-          lowering_.dictLowerer().dictFunction("tz_map_set_op", ptr, {ptr, ptr, i32}),
-          {a.value, b.value, lowering_.builder_.getInt32(uint32_t(op))}, "set");
-      break;
+    case Builtin::RecordNullishSet: {
+      Expr *keyExpr = call->args[0], *valueExpr = call->args[1];
+      const Type *resultType = call->type;
+      llvm::Value *m = lowering_.exprLowerer().emitExpr(receiver);
+      llvm::Value *kv = lowering_.exprLowerer().emitExpr(keyExpr);
+      llvm::Value *entry = lowering_.dictLowerer().emitDictFind(m, kv, key);
+      llvm::BasicBlock *lookBlock = lowering_.functionFrame().newBlock("nullish.look");
+      llvm::BasicBlock *keepBlock = lowering_.functionFrame().newBlock("nullish.keep");
+      llvm::BasicBlock *assignBlock = lowering_.functionFrame().newBlock("nullish.assign");
+      llvm::BasicBlock *endBlock = lowering_.functionFrame().newBlock("nullish.end");
+      lowering_.builder_.CreateCondBr(lowering_.builder_.CreateIsNotNull(entry), lookBlock,
+                                      assignBlock);
+      lowering_.functionFrame().switchTo(lookBlock);
+      llvm::Value *old = lowering_.builder_.CreateLoad(
+          lowering_.moduleBuilder().lower(value), lowering_.dictLowerer().entryValue(entry, type));
+      lowering_.builder_.CreateCondBr(value->isOptional()
+                                          ? lowering_.optionalLowerer().optionalHas(old, value)
+                                          : lowering_.builder_.getTrue(),
+                                      keepBlock, assignBlock);
+      lowering_.functionFrame().switchTo(keepBlock);
+      lowering_.refCounts().retainValue(old, value);
+      llvm::Value *kept = lowering_.exprLowerer().emitConversion(old, value, resultType);
+      llvm::BasicBlock *keepEnd = lowering_.builder_.GetInsertBlock();
+      lowering_.builder_.CreateBr(endBlock);
+      lowering_.functionFrame().switchTo(assignBlock);
+      llvm::Value *v = lowering_.exprLowerer().emitExpr(valueExpr);
+      llvm::Value *added = lowering_.dictLowerer().emitDictAdd(m, kv, key);
+      lowering_.storeLowerer().storeIn(m, type, lowering_.dictLowerer().entryValue(added, type), v,
+                                       value);
+      lowering_.dictLowerer().emitEntryStored(m, added);
+      lowering_.refCounts().retainValue(v, value);
+      llvm::Value *assigned = lowering_.exprLowerer().emitConversion(v, value, resultType);
+      llvm::BasicBlock *assignEnd = lowering_.builder_.GetInsertBlock();
+      lowering_.builder_.CreateBr(endBlock);
+      lowering_.functionFrame().switchTo(endBlock);
+      llvm::PHINode *result =
+          lowering_.builder_.CreatePHI(lowering_.moduleBuilder().lower(resultType), 2);
+      result->addIncoming(kept, keepEnd);
+      result->addIncoming(assigned, assignEnd);
+      lowering_.refCounts().releaseValue(kv, key);
+      lowering_.refCounts().releaseValue(m, type);
+      return result;
     }
-    case Builtin::SetIsSubsetOf:
-    case Builtin::SetIsSupersetOf:
-    case Builtin::SetIsDisjointFrom: {
-      int op = int(call->builtin) - int(Builtin::SetIsSubsetOf);
-      result = lowering_.builder_.CreateICmpNE(
-          lowering_.builder_.CreateCall(
-              lowering_.dictLowerer().dictFunction("tz_map_set_test", i32, {ptr, ptr, i32}),
-              {a.value, b.value, lowering_.builder_.getInt32(uint32_t(op))}),
-          lowering_.builder_.getInt32(0));
-      break;
+    default: {
+      Expr *other = call->args[0];
+      Lowering::Operand a =
+          lowering_.refCounts().emitOperand(receiver, AssignLowerer::cannotAssign(other));
+      Lowering::Operand b = lowering_.refCounts().emitOperand(other, true);
+      llvm::Value *result;
+      switch (call->builtin()) {
+        case Builtin::SetUnion:
+        case Builtin::SetIntersection:
+        case Builtin::SetDifference:
+        case Builtin::SetSymmetricDifference: {
+          int op = int(call->builtin()) - int(Builtin::SetUnion);
+          result = lowering_.builder_.CreateCall(
+              lowering_.dictLowerer().dictFunction("tz_map_set_op", ptr, {ptr, ptr, i32}),
+              {a.value, b.value, lowering_.builder_.getInt32(uint32_t(op))}, "set");
+          break;
+        }
+        case Builtin::SetIsSubsetOf:
+        case Builtin::SetIsSupersetOf:
+        case Builtin::SetIsDisjointFrom: {
+          int op = int(call->builtin()) - int(Builtin::SetIsSubsetOf);
+          result = lowering_.builder_.CreateICmpNE(
+              lowering_.builder_.CreateCall(
+                  lowering_.dictLowerer().dictFunction("tz_map_set_test", i32, {ptr, ptr, i32}),
+                  {a.value, b.value, lowering_.builder_.getInt32(uint32_t(op))}),
+              lowering_.builder_.getInt32(0));
+          break;
+        }
+        default:
+          llvm_unreachable("not a method of a dictionary");
+      }
+      lowering_.refCounts().dropOperand(b);
+      lowering_.refCounts().dropOperand(a);
+      return result;
     }
-    default:
-      llvm_unreachable("not a method of a dictionary");
-    }
-    lowering_.refCounts().dropOperand(b);
-    lowering_.refCounts().dropOperand(a);
-    return result;
-  }
   }
 }
 
@@ -251,7 +252,7 @@ llvm::Value *DictMethodLowerer::emitDictNew(CallExpr *call) {
   Expr *source = call->args[0];
   if (auto *iterator = dyn_cast<CallExpr>(source);
       iterator &&
-      (iterator->builtin == Builtin::MapEntries || iterator->builtin == Builtin::SetValues)) {
+      (iterator->builtin() == Builtin::MapEntries || iterator->builtin() == Builtin::SetValues)) {
     Expr *from = cast<MemberExpr>(iterator->callee)->object;
     if (from->type == type) {
       Lowering::Operand map = lowering_.refCounts().emitOperand(from, true);
@@ -382,11 +383,11 @@ llvm::Value *DictMethodLowerer::emitDictObjectCall(CallExpr *call) {
   const Type *element = call->type->inner();
   llvm::Type *ptr = lowering_.builder_.getPtrTy();
   llvm::Value *result;
-  if (call->builtin == Builtin::ObjectKeys) {
+  if (call->builtin() == Builtin::ObjectKeys) {
     result = lowering_.builder_.CreateCall(
         lowering_.dictLowerer().dictFunction("tz_map_keys", ptr, {ptr, ptr}),
         {map.value, lowering_.typeDescriptors().typeDescriptor(element)}, "keys");
-  } else if (call->builtin == Builtin::ObjectValues) {
+  } else if (call->builtin() == Builtin::ObjectValues) {
     result = lowering_.builder_.CreateCall(
         lowering_.dictLowerer().dictFunction("tz_map_values", ptr, {ptr, ptr}),
         {map.value, lowering_.typeDescriptors().typeDescriptor(element)}, "values");

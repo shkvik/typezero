@@ -123,17 +123,16 @@ Expr *MethodCallChecker::checkMethodCall(CallExpr *call, MemberExpr *member, con
   if (sym->isGeneric()) {
     checker_.typeArgInferrer().checkGenericCall(call, sym, member->loc(), expected,
                                                 member->typeArgs);
-    call->method = call->func;
-    call->func = nullptr;
-    if (call->method) {
-      member->type = checker_.returnInferrer().functionType(call->method);
+    call->target = MethodCall{.method = call->func()};
+    if (call->method()) {
+      member->type = checker_.returnInferrer().functionType(call->method());
     }
     return call;
   }
   if (FunctionDecl *impl = ClassLinks::soleImplementation(cls, sym->decl)) {
-    call->method = impl->sym;
+    call->target = MethodCall{.method = impl->sym};
   } else {
-    call->method = sym, call->virtualCall = true;
+    call->target = MethodCall{.method = sym, .virtualCall = true};
   }
   member->type = checker_.returnInferrer().functionType(sym);
   call->type = checker_.returnInferrer().returnType(sym);
@@ -157,7 +156,6 @@ Expr *MethodCallChecker::checkClassNew(NewExpr *expr, ClassDecl *cls, const Type
     }
     return expr;
   }
-  expr->cls = cls;
   if (!expr->typeArgs.empty()) {
     checker_.diags_.error(expr->loc(),
                           "class '" + cls->name + "' is not generic; remove the type arguments");
@@ -176,7 +174,7 @@ Expr *MethodCallChecker::checkClassNew(NewExpr *expr, ClassDecl *cls, const Type
   }
   checker_.classDeclarer().completeClass(cls);
   auto *call = checker_.ctx_.make<CallExpr>(expr->loc(), nullptr, std::move(expr->args));
-  expr->ctor = call;
+  expr->form = ClassNew{.cls = cls, .ctor = call};
   call->type = Type::voidTy();
   std::vector<FunctionDecl *> ctors = ClassLinks::constructorsOf(cls);
   if (ctors.empty()) {
@@ -199,7 +197,7 @@ Expr *MethodCallChecker::checkClassNew(NewExpr *expr, ClassDecl *cls, const Type
     checker_.classMemberChecker().checkAccess(chosen->cls(), chosen->access(), "constructor",
                                               expr->loc());
     checker_.returnInferrer().resolveParams(sym);
-    call->func = sym;
+    call->target = FunctionCall{.func = sym};
     std::vector<bool> given(checked ? call->args.size() : 0, true);
     checker_.argumentChecker().checkArguments(call, sym->params, sym->minArgs, sym->hasRest,
                                               expr->loc(), &given);

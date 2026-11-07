@@ -95,7 +95,7 @@ bool Resolver::collect(std::map<std::string, std::vector<Requirement>> &reqs) {
         reportSpec(node.by, dep, error);
         return false;
       }
-      if (source.kind == Source::Kind::Local && !node.allowLocal) {
+      if (source.form.is<LocalSource>() && !node.allowLocal) {
         reportSpec(node.by, dep,
                    "a package from JSR or git cannot depend on a directory of this machine ('" +
                        spec + "')");
@@ -106,17 +106,17 @@ bool Resolver::collect(std::map<std::string, std::vector<Requirement>> &reqs) {
       if (!visited.insert(id).second) {
         continue;
       }
-      if (source.kind == Source::Kind::Local) {
+      if (source.form.is<LocalSource>()) {
         auto it = locals.find(id);
         if (it == locals.end()) {
           Manifest local;
-          if (!readPackageDir(source.dir, local)) {
+          if (!readPackageDir(source.dir(), local)) {
             return false;
           }
           it = locals.emplace(id, std::move(local)).first;
         }
         const Manifest &local = it->second;
-        std::string by = local.path.empty() ? source.dir : local.path;
+        std::string by = local.path.empty() ? source.dir() : local.path;
         queue.push_back({by, local.dir, true, &local.dependencies, nullptr});
       } else if (auto it = chosen_.find(id); it != chosen_.end()) {
         queue.push_back({it->second.describe(), "", false, nullptr, &it->second.dependencies});
@@ -129,16 +129,16 @@ bool Resolver::collect(std::map<std::string, std::vector<Requirement>> &reqs) {
 
 bool Resolver::fits(const Locked &locked, const std::vector<Requirement> &reqs) const {
   for (const Requirement &req : reqs) {
-    if (req.source.kind == Source::Kind::Jsr) {
+    if (req.source.form.is<JsrSource>()) {
       Range range;
       Version version;
       std::string ignored;
-      if (!Range::parse(req.source.range, range, ignored) ||
+      if (!Range::parse(req.source.range(), range, ignored) ||
           !Version::parse(locked.version, version) || !range.satisfies(version)) {
         return false;
       }
-    } else if (req.source.kind == Source::Kind::Git) {
-      if (req.source.ref != locked.ref) {
+    } else if (req.source.form.is<GitSource>()) {
+      if (req.source.ref() != locked.ref) {
         return false;
       }
     }
@@ -150,7 +150,7 @@ bool Resolver::fits(const Locked &locked, const std::vector<Requirement> &reqs) 
 bool Resolver::choose(const std::string &id, const std::vector<Requirement> &reqs, Locked &out) {
   out = Locked();
   out.id = id;
-  if (reqs.front().source.kind == Source::Kind::Jsr) {
+  if (reqs.front().source.form.is<JsrSource>()) {
     return chooseJsr(id, reqs, out);
   }
 
@@ -163,7 +163,7 @@ bool Resolver::chooseJsr(const std::string &id, const std::vector<Requirement> &
   if (it == versions_.end()) {
     JsrVersions versions;
     std::string error;
-    if (!jsrVersions(source.scope, source.name, versions, error)) {
+    if (!jsrVersions(source.scope(), source.name(), versions, error)) {
       if (error.empty()) {
         error = "there is no package " + id + " in the registry (" + jsrBaseUrl() + ")";
       }
@@ -178,7 +178,7 @@ bool Resolver::chooseJsr(const std::string &id, const std::vector<Requirement> &
   for (const Requirement &req : reqs) {
     Range range;
     std::string ignored;
-    Range::parse(req.source.range, range, ignored);
+    Range::parse(req.source.range(), range, ignored);
     ranges.push_back(std::move(range));
   }
   auto best = [&](const std::vector<const Range *> &rs) -> const Version * {
@@ -218,7 +218,7 @@ bool Resolver::chooseJsr(const std::string &id, const std::vector<Requirement> &
       for (size_t i = available.size() > 8 ? available.size() - 8 : 0; i < available.size(); ++i) {
         listed += (listed.empty() ? "" : ", ") + available[i].str();
       }
-      report(reqs.front().by + " needs " + id + "@" + reqs.front().source.range +
+      report(reqs.front().by + " needs " + id + "@" + reqs.front().source.range() +
              ", and the registry has no such version" +
              (listed.empty() ? std::string(" (it has none)") : "; it has " + listed));
       return false;
@@ -228,7 +228,7 @@ bool Resolver::chooseJsr(const std::string &id, const std::vector<Requirement> &
       const Version *own = best({&ranges[i]});
       message +=
           "\n  " + reqs[i].by + " wants " +
-          (reqs[i].source.range.empty() ? std::string("any version") : reqs[i].source.range) +
+          (reqs[i].source.range().empty() ? std::string("any version") : reqs[i].source.range()) +
           (own ? " (newest: " + own->str() + ")" : std::string(" (there is none)"));
     }
     message += "\na program has each package in one version (docs/packages.md); change the range "
@@ -240,8 +240,8 @@ bool Resolver::chooseJsr(const std::string &id, const std::vector<Requirement> &
   out.version = version->str();
   JsrVersion meta;
   std::string error, dir;
-  if (!jsrVersion(source.scope, source.name, out.version, meta, error) ||
-      !jsrDownload(source.scope, source.name, out.version, meta, dir, error)) {
+  if (!jsrVersion(source.scope(), source.name(), out.version, meta, error) ||
+      !jsrDownload(source.scope(), source.name(), out.version, meta, dir, error)) {
     report(error);
     return false;
   }
@@ -254,14 +254,14 @@ bool Resolver::chooseJsr(const std::string &id, const std::vector<Requirement> &
 bool Resolver::chooseGit(const std::string &id, const std::vector<Requirement> &reqs, Locked &out) {
   const Source &source = reqs.front().source;
   for (const Requirement &req : reqs) {
-    if (req.source.ref == source.ref) {
+    if (req.source.ref() == source.ref()) {
       continue;
     }
     std::string message = "the packages that need " + id + " want different versions of it:";
     for (const Requirement &r : reqs) {
       message +=
           "\n  " + r.by + " wants " +
-          (r.source.ref.empty() ? std::string("its default branch") : "'" + r.source.ref + "'");
+          (r.source.ref().empty() ? std::string("its default branch") : "'" + r.source.ref() + "'");
     }
     message += "\na program has each package in one version (docs/packages.md); name the same "
                "tag everywhere";
@@ -269,9 +269,9 @@ bool Resolver::chooseGit(const std::string &id, const std::vector<Requirement> &
     return false;
   }
   std::string error, dir;
-  out.ref = source.ref;
-  if (!gitResolve(source.url, source.ref, updating(id), out.commit, error) ||
-      !gitCheckout(source.url, out.commit, dir, error) || !hashDirectory(dir, out.hash, error)) {
+  out.ref = source.ref();
+  if (!gitResolve(source.url(), source.ref(), updating(id), out.commit, error) ||
+      !gitCheckout(source.url(), out.commit, dir, error) || !hashDirectory(dir, out.hash, error)) {
     report(error);
     return false;
   }
@@ -294,7 +294,7 @@ bool Resolver::run(Lock &out) {
     }
     bool changed = false;
     for (const auto &[id, list] : reqs) {
-      if (list.front().source.kind == Source::Kind::Local) {
+      if (list.front().source.form.is<LocalSource>()) {
         continue;
       }
       auto current = chosen_.find(id);

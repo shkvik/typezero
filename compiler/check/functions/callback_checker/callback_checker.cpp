@@ -351,7 +351,7 @@ Expr *CallbackChecker::checkCallbackMethod(CallExpr *call, MemberExpr *member,
   }
   call->args[0] = checkFunctionArg(call->args[0], sig, primary, name);
   const Type *callback = call->args[0]->type;
-  call->builtin = method ? method->builtin : Builtin::ArrSortWith;
+  call->target = BuiltinCall{.builtin = method ? method->builtin : Builtin::ArrSortWith};
   checker_.flowChecker().calledFunction();
   if (!callback->isFunction()) {
     return call;

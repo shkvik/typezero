@@ -40,7 +40,7 @@ void classesIn(const Type *type, llvm::SmallPtrSetImpl<ClassDecl *> &out) {
     }
     return;
   }
-  if (ClassDecl *cls = const_cast<ClassDecl *>(type->classDecl()); cls && !cls->literal) {
+  if (ClassDecl *cls = const_cast<ClassDecl *>(type->classDecl()); cls && !cls->literal()) {
     out.insert(cls);
   }
 }
@@ -157,7 +157,7 @@ void ReflectChecker::finishReflection() {
   }
   if (reflectFillAny_) {
     for (ClassDecl *cls : checker_.classes_) {
-      cls->reflectFill = !cls->builtin;
+      cls->reflectFill = !cls->builtin();
     }
   }
   if (!checker_.reflectionUsed_) {
@@ -201,7 +201,7 @@ Expr *ReflectChecker::okOf(Expr *value) {
   }
   auto *call = checker_.ctx_.make<CallExpr>(
       value->loc(), checker_.ctx_.make<NameExpr>(value->loc(), "ok"), std::vector<Expr *>{value});
-  call->builtin = Builtin::ResultOk;
+  call->target = BuiltinCall{.builtin = Builtin::ResultOk};
   call->type = Type::result(value->type, reflectError());
 
   return call;
@@ -287,9 +287,9 @@ void ReflectChecker::checkReflectNews() {
       if (!cls->type || !reachable(entry).contains(made) || !checked.insert(cls).second) {
         continue;
       }
-      std::string problem = cls->builtin ? "it is a class of JavaScript, which only "
-                                           "Reflect.construct tries to make"
-                                         : constructProblem(cls, args);
+      std::string problem = cls->builtin() ? "it is a class of JavaScript, which only "
+                                             "Reflect.construct tries to make"
+                                           : constructProblem(cls, args);
       if (!problem.empty()) {
         checker_.diags_.error(expr->loc(),
                               "'new' of a class known only when the program runs may fail: '" +
@@ -363,20 +363,19 @@ Expr *ReflectChecker::checkReflection(CallExpr *call, MemberExpr *member, const 
         return checker_.typeRelations().convert(checker_.exprChecker().checkExpr(read),
                                                 Type::unknown());
       }
-      if (cls && !cls->literal && seenType->field(name) && open) {
+      if (cls && !cls->literal() && seenType->field(name) && open) {
         auto *read = checker_.ctx_.make<MemberExpr>(key->loc(), seen, checker_.ctx_.keepName(name));
         return checker_.typeRelations().convert(
             checker_.classMemberChecker().checkClassMember(read, nullptr), Type::unknown());
       }
       bool several = false;
       if (FunctionDecl *method =
-              cls && !cls->literal && !seenType->field(name)
+              cls && !cls->literal() && !seenType->field(name)
                   ? checker_.reflectCallChecker().knownReflectMethod(cls, name, several)
                   : nullptr) {
         call->args.resize(1);
         target = seen;
-        call->builtin = Builtin::ReflectMethod;
-        call->method = method->sym;
+        call->target = BuiltinCall{.builtin = Builtin::ReflectMethod, .method = method->sym};
         call->type = Type::unknown();
         if (several) {
           checker_.severalVariants_.insert(call);
@@ -393,7 +392,7 @@ Expr *ReflectChecker::checkReflection(CallExpr *call, MemberExpr *member, const 
     }
     target = checker_.typeRelations().convert(target, Type::unknown());
     checker_.reflectionUsed_ |= !onlyChecked();
-    call->builtin = Builtin::ReflectGet;
+    call->target = BuiltinCall{.builtin = Builtin::ReflectGet};
     call->type = Type::unknown();
     return call;
   }
@@ -416,7 +415,7 @@ Expr *ReflectChecker::checkReflection(CallExpr *call, MemberExpr *member, const 
     }
     const Type *fails = checker_.prelude().builtinType("ReflectFillError");
     if (ClassDecl *made = const_cast<ClassDecl *>(type->classRef())) {
-      std::string why = !made->type || made->builtin ? "it is a class of JavaScript"
+      std::string why = !made->type || made->builtin() ? "it is a class of JavaScript"
                         : made->isAbstract ? "it is abstract; fill a class that extends it"
                         : !ClassLinks::constructorsOf(made).empty()
                             ? "it sets its fields in a constructor; make it with 'new " +
@@ -435,7 +434,7 @@ Expr *ReflectChecker::checkReflection(CallExpr *call, MemberExpr *member, const 
       checker_.reflectionUsed_ = true;
     }
     checker_.flowChecker().calledFunction();
-    call->builtin = Builtin::ReflectFill;
+    call->target = BuiltinCall{.builtin = Builtin::ReflectFill};
     call->type = Type::result(ClassValueChecker::constructedBy(type), fails);
     return call;
   }
@@ -475,7 +474,7 @@ Expr *ReflectChecker::checkReflection(CallExpr *call, MemberExpr *member, const 
       checker_.reflectionUsed_ = true;
       reflectGetAny_ = true;
     }
-    call->builtin = Builtin::ReflectApply;
+    call->target = BuiltinCall{.builtin = Builtin::ReflectApply};
     call->type = Type::result(gives, reflectError());
     return call;
   }
@@ -537,7 +536,7 @@ Expr *ReflectChecker::checkReflection(CallExpr *call, MemberExpr *member, const 
   call->args[1] = checker_.reflectCallChecker().checkReflectArgs(call->args[1]);
   checker_.flowChecker().calledFunction();
   checker_.reflectionUsed_ |= !known && !onlyChecked();
-  call->builtin = Builtin::ReflectConstruct;
+  call->target = BuiltinCall{.builtin = Builtin::ReflectConstruct};
   call->type = Type::result(ClassValueChecker::constructedBy(cls->type), reflectError());
 
   return call;

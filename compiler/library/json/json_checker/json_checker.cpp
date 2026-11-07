@@ -29,13 +29,13 @@ const VarSymbol *jsonVariable(const Expr *expr) {
   }
   auto *name = dyn_cast<NameExpr>(expr);
 
-  return name && name->var && name->var->type->nonOptional()->isJson() ? name->var : nullptr;
+  return name && name->var() && name->var()->type->nonOptional()->isJson() ? name->var() : nullptr;
 }
 
 bool nullName(const Expr *expr) {
   auto *name = dyn_cast<NameExpr>(expr);
 
-  return name && name->name == "null" && !name->var && !name->func;
+  return name && name->name == "null" && !name->var() && !name->func();
 }
 
 bool isNothing(const Expr *expr) {
@@ -58,7 +58,7 @@ bool sameRef(const Expr *a, const Expr *b) {
   b = bare(b);
   auto *na = dyn_cast_or_null<NameExpr>(a), *nb = dyn_cast_or_null<NameExpr>(b);
   if (na && nb) {
-    return na->var && na->var == nb->var;
+    return na->var() && na->var() == nb->var();
   }
   auto *ma = dyn_cast_or_null<MemberExpr>(a), *mb = dyn_cast_or_null<MemberExpr>(b);
 
@@ -104,7 +104,7 @@ void JsonChecker::checkRedundantTests(const BinaryExpr *bin) {
     if (auto *unary = dyn_cast<UnaryExpr>(rhs); unary && unary->op == UnaryOp::Not) {
       inner = bare(unary->operand);
     }
-    if (auto *call = dyn_cast<CallExpr>(inner); call && call->builtin == Builtin::ArrayIsArray) {
+    if (auto *call = dyn_cast<CallExpr>(inner); call && call->builtin() == Builtin::ArrayIsArray) {
       tested = call->args[0];
     }
   }
@@ -216,7 +216,7 @@ Expr *JsonChecker::reportJsonMethod(CallExpr *call, MemberExpr *member) {
   std::string message =
       "a Json has no method '" + member->name.str() + "' until a check shows what it holds";
   std::string call_ = "." + member->name.str() + "(...)";
-  if (auto *name = dyn_cast<NameExpr>(object); name && name->var) {
+  if (auto *name = dyn_cast<NameExpr>(object); name && name->var()) {
     std::string x = name->name.str();
     message += ", e.g. 'if (Array.isArray(" + x + ")) " + x + call_ + "' or 'if (typeof " + x +
                " == \"string\") " + x + call_ + "'";
@@ -236,27 +236,27 @@ Expr *JsonChecker::reportJsonMethod(CallExpr *call, MemberExpr *member) {
 Expr *JsonChecker::checkJsonObjectLit(ObjectLitExpr *lit) {
   const Type *json = Type::json();
   for (ObjectLitExpr::Property &prop : lit->props) {
-    if (prop.spread || prop.method) {
-      checker_.diags_.error(prop.loc,
-                            prop.spread ? "a spread is not supported in a Json literal; write the "
-                                          "keys one by one"
-                                        : "a Json holds no functions");
+    if (prop.spread() || prop.method()) {
+      checker_.diags_.error(
+          prop.loc, prop.spread() ? "a spread is not supported in a Json literal; write the "
+                                    "keys one by one"
+                                  : "a Json holds no functions");
       prop.value = checker_.exprChecker().checkExpr(prop.value);
       continue;
     }
-    if (prop.defaulted) {
+    if (prop.defaulted()) {
       checker_.diags_.error(prop.loc, "'" + prop.name +
                                           " = ...' belongs to a destructuring pattern; write '" +
                                           prop.name + ": ...'");
       prop.value = checker_.exprChecker().checkExpr(cast<AssignExpr>(prop.value)->value);
-      prop.defaulted = false;
+      prop.form = ValueProperty{};
       continue;
     }
-    if (prop.key) {
-      prop.key = checker_.exprChecker().checkExpr(prop.key);
-      if (!prop.key->type->isString() && !prop.key->type->isError()) {
-        checker_.diags_.error(prop.key->loc(), "a key of a Json is a string, found '" +
-                                                   prop.key->type->name() + "'");
+    if (ComputedProperty *computed = prop.form.as<ComputedProperty>()) {
+      computed->key = checker_.exprChecker().checkExpr(computed->key);
+      if (!prop.key()->type->isString() && !prop.key()->type->isError()) {
+        checker_.diags_.error(prop.key()->loc(), "a key of a Json is a string, found '" +
+                                                     prop.key()->type->name() + "'");
       }
     }
     Expr *value = checker_.exprChecker().checkExpr(prop.value, json);
@@ -355,7 +355,7 @@ void JsonChecker::narrowJsonField(Checker::Flow &flow, const Checker::FieldPath 
 
 void JsonChecker::addJsonFacts(const Expr *cond, Checker::Flow &whenTrue,
                                Checker::Flow &whenFalse) const {
-  if (auto *call = dyn_cast<CallExpr>(cond); call && call->builtin == Builtin::ArrayIsArray) {
+  if (auto *call = dyn_cast<CallExpr>(cond); call && call->builtin() == Builtin::ArrayIsArray) {
     if (const VarSymbol *var = jsonVariable(call->args[0])) {
       whenTrue.narrowed.push_back({var, Type::array(Type::json())});
       if (var->type->isOptional()) {
@@ -440,7 +440,7 @@ Expr *JsonChecker::checkJsonIsJson(CallExpr *call, MemberExpr *member) {
                               (type->nonOptional()->isJson() ? ", and it is a Json already" : ""));
     return call;
   }
-  call->builtin = Builtin::JsonIsJson;
+  call->target = BuiltinCall{.builtin = Builtin::JsonIsJson};
   call->type = Type::boolTy();
 
   return call;
@@ -458,7 +458,7 @@ Expr *JsonChecker::checkArrayIsArray(CallExpr *call, MemberExpr *member) {
                           "an expression of type 'void' has no value to test");
     return call;
   }
-  call->builtin = Builtin::ArrayIsArray;
+  call->target = BuiltinCall{.builtin = Builtin::ArrayIsArray};
   call->type = Type::boolTy();
 
   return call;

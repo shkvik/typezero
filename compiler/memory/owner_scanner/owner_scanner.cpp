@@ -68,7 +68,7 @@ OwnerScanner::proven(const std::function<bool(const ClassDecl *)> &escapes) cons
       }
       made = w.made;
     }
-    if (!fresh || !made || made->builtin || !made->type->field(b.callback)) {
+    if (!fresh || !made || made->builtin() || !made->type->field(b.callback)) {
       continue;
     }
     bool keeps = true;
@@ -195,17 +195,17 @@ void OwnerScanner::expr(const Expr *e, Use use) {
     if (use == Use::Value) {
       valueReads_.insert(member->name);
     }
-    bool binds = member->method ||
+    bool binds = member->method() ||
                  (member->type && member->type->nonOptional()->isFunction() && use == Use::Value);
     expr(member->object, binds ? Use::Value : Use::Receiver);
     return;
   }
   case Expr::Kind::Index: {
     auto *index = llvm::cast<IndexExpr>(e);
-    if (!index->field.empty()) {
-      readAll(index->field);
+    if (!index->field().empty()) {
+      readAll(index->field());
     }
-    if (index->keyed && index->index->type) {
+    if (index->keyed() && index->index->type) {
       const Type *key = index->index->type;
       for (const Type *n : key->isUnion() ? key->members() : llvm::ArrayRef<const Type *>(key)) {
         if (n->isStringLiteral()) {
@@ -213,15 +213,15 @@ void OwnerScanner::expr(const Expr *e, Use use) {
         }
       }
     }
-    expr(index->object, index->field.empty() && !index->keyed ? Use::Receiver : Use::Value);
+    expr(index->object, index->field().empty() && !index->keyed() ? Use::Receiver : Use::Value);
     expr(index->index, Use::Value);
     return;
   }
   case Expr::Kind::Call: {
     auto *call = llvm::cast<CallExpr>(e);
     auto *member = llvm::dyn_cast<MemberExpr>(bare(call->callee));
-    if (member && (call->method || call->builtin != Builtin::None || call->superCall ||
-                   !call->unionMethods.empty())) {
+    if (member && (call->method() || call->builtin() != Builtin::None || call->superCall() ||
+                   !call->unionMethods().empty())) {
       expr(member->object, Use::Receiver);
     } else {
       expr(call->callee, Use::Callee);
@@ -229,7 +229,7 @@ void OwnerScanner::expr(const Expr *e, Use use) {
     for (const Expr *arg : call->args) {
       expr(arg, Use::Value);
     }
-    if ((call->builtin == Builtin::ObjectValues || call->builtin == Builtin::ObjectEntries) &&
+    if ((call->builtin() == Builtin::ObjectValues || call->builtin() == Builtin::ObjectEntries) &&
         !call->args.empty()) {
       readFields(call->args[0]->type);
     }
@@ -245,8 +245,8 @@ void OwnerScanner::expr(const Expr *e, Use use) {
         nonCallReads_.insert(member->name), valueReads_.insert(member->name);
       }
     } else if (auto *index = llvm::dyn_cast<IndexExpr>(assign->target)) {
-      if (!index->field.empty()) {
-        bad_.insert(index->field);
+      if (!index->field().empty()) {
+        bad_.insert(index->field());
       }
       expr(index->object, Use::Receiver);
       expr(index->index, Use::Value);
@@ -270,11 +270,11 @@ void OwnerScanner::expr(const Expr *e, Use use) {
   case Expr::Kind::ObjectLit: {
     auto *lit = llvm::cast<ObjectLitExpr>(e);
     for (const ObjectLitExpr::Property &p : lit->props) {
-      expr(p.key, Use::Value);
-      if (!p.method) {
+      expr(p.key(), Use::Value);
+      if (!p.method()) {
         expr(p.value, Use::Value);
       }
-      if (p.spread && p.value) {
+      if (p.spread() && p.value) {
         readFields(p.value->type);
       }
     }
@@ -287,7 +287,7 @@ void OwnerScanner::expr(const Expr *e, Use use) {
   }
   case Expr::Kind::New: {
     auto *create = llvm::cast<NewExpr>(e);
-    for (const Expr *arg : create->ctor ? create->ctor->args : create->args) {
+    for (const Expr *arg : create->ctor() ? create->ctor()->args : create->args) {
       expr(arg, Use::Value);
     }
     return;
@@ -324,17 +324,17 @@ void OwnerScanner::readFields(const Type *type) {
 void OwnerScanner::wrote(const MemberExpr *target, const AssignExpr *assign) {
   const FunctionDecl *fn = current_;
   auto *object = llvm::dyn_cast<NameExpr>(bare(target->object));
-  bool self = fn && fn->thisVar() && object && object->var == fn->thisVar();
+  bool self = fn && fn->thisVar() && object && object->var() == fn->thisVar();
   bool construction = self && fn->cls() && (fn->isConstructor() || fn == fn->cls()->init);
   const ClassDecl *made = nullptr;
   if (auto *create = llvm::dyn_cast<NewExpr>(bare(assign->value));
-      create && create->cls && construction) {
+      create && create->cls() && construction) {
     bool holdsSelf = false;
-    for (const Expr *arg : create->ctor ? create->ctor->args : create->args) {
+    for (const Expr *arg : create->ctor() ? create->ctor()->args : create->args) {
       holdsSelf = holdsSelf || mentions(arg, fn->thisVar());
     }
     if (!holdsSelf) {
-      made = create->cls;
+      made = create->cls();
     }
   }
   if (assign->op) {
@@ -348,7 +348,7 @@ void OwnerScanner::wrote(const MemberExpr *target, const AssignExpr *assign) {
     return;
   }
   auto *holder = llvm::dyn_cast<NameExpr>(bare(owned->object));
-  if (holder && holder->var == fn->thisVar() &&
+  if (holder && holder->var() == fn->thisVar() &&
       llvm::is_contained(fe->fn->captures, fn->thisVar())) {
     candidates_.push_back({fn->cls(), owned->name, target->name, fe->fn, fn->thisVar()});
   }
@@ -361,7 +361,7 @@ bool OwnerScanner::mentions(const Expr *e, const VarSymbol *self) {
       return;
     }
     if (auto *name = llvm::dyn_cast<NameExpr>(x)) {
-      found = name->var == self;
+      found = name->var() == self;
       return;
     }
     if (auto *fe = llvm::dyn_cast<FunctionExpr>(x)) {
@@ -389,7 +389,7 @@ void OwnerScanner::visitChildren(const Expr *e, const std::function<void(const E
     break;
   case Expr::Kind::ObjectLit:
     for (const ObjectLitExpr::Property &p : llvm::cast<ObjectLitExpr>(e)->props) {
-      visit(p.key);
+      visit(p.key());
       visit(p.value);
     }
     break;
@@ -422,7 +422,7 @@ void OwnerScanner::visitChildren(const Expr *e, const std::function<void(const E
     break;
   case Expr::Kind::New: {
     auto *create = llvm::cast<NewExpr>(e);
-    for (const Expr *x : create->ctor ? create->ctor->args : create->args) {
+    for (const Expr *x : create->ctor() ? create->ctor()->args : create->args) {
       visit(x);
     }
     break;

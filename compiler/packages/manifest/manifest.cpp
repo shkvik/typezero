@@ -31,7 +31,7 @@ bool readExports(const Manifest &out, const JsonValue &value,
       reportAt(out.path, out.text, target.begin, "an export names a .tz file of the package");
       return false;
     }
-    llvm::StringRef file = target.string;
+    llvm::StringRef file = target.string();
     file.consume_front("./");
     exports.push_back({key.str(), file.str()});
 
@@ -46,15 +46,15 @@ bool readExports(const Manifest &out, const JsonValue &value,
              "\"./mini.tz\" }");
     return false;
   }
-  for (size_t i = 0; i < value.keys.size(); ++i) {
-    llvm::StringRef key = value.keys[i];
+  for (size_t i = 0; i < value.keys().size(); ++i) {
+    llvm::StringRef key = value.keys()[i];
     if (key != "." && !key.starts_with("./")) {
-      reportAt(out.path, out.text, value.keyOffsets[i],
+      reportAt(out.path, out.text, value.keyOffsets()[i],
                "an export is named '.' or './name', as imports write it after the package's "
                "name");
       return false;
     }
-    if (!add(key, value.items[i])) {
+    if (!add(key, value.items()[i])) {
       return false;
     }
   }
@@ -78,24 +78,24 @@ bool parseManifest(Manifest &out) {
   }
   out.rootBegin = root.begin;
   out.rootEnd = root.end;
-  if (!root.keys.empty()) {
-    out.lastMemberEnd = root.items.back().end;
-    size_t lineStart = out.text.rfind('\n', root.keyOffsets[0]);
+  if (!root.keys().empty()) {
+    out.lastMemberEnd = root.items().back().end;
+    size_t lineStart = out.text.rfind('\n', root.keyOffsets()[0]);
     lineStart = lineStart == std::string::npos ? 0 : lineStart + 1;
-    llvm::StringRef lead = llvm::StringRef(out.text).slice(lineStart, root.keyOffsets[0]);
+    llvm::StringRef lead = llvm::StringRef(out.text).slice(lineStart, root.keyOffsets()[0]);
     if (!lead.empty() && llvm::all_of(lead, [](char c) { return c == ' ' || c == '\t'; })) {
       out.indent = lead.str();
     }
   }
-  for (size_t i = 0; i < root.keys.size(); ++i) {
-    llvm::StringRef key = root.keys[i];
-    const JsonValue &value = root.items[i];
+  for (size_t i = 0; i < root.keys().size(); ++i) {
+    llvm::StringRef key = root.keys()[i];
+    const JsonValue &value = root.items()[i];
     if (key == "name" || key == "version" || key == "main") {
       if (!value.isString()) {
         reportAt(out.path, out.text, value.begin, "'" + key + "' is a string");
         return false;
       }
-      (key == "name" ? out.name : key == "version" ? out.version : out.main) = value.string;
+      (key == "name" ? out.name : key == "version" ? out.version : out.main) = value.string();
       if (key == "main") {
         out.mainOffset = value.begin;
       }
@@ -105,14 +105,14 @@ bool parseManifest(Manifest &out) {
                  "'scripts' is an object: { \"start\": \"tz run\", \"build\": \"tz build\" }");
         return false;
       }
-      for (size_t j = 0; j < value.keys.size(); ++j) {
-        const JsonValue &command = value.items[j];
+      for (size_t j = 0; j < value.keys().size(); ++j) {
+        const JsonValue &command = value.items()[j];
         if (!command.isString()) {
           reportAt(out.path, out.text, command.begin,
                    "a script is a command line, e.g. \"tz build\"");
           return false;
         }
-        out.scripts.push_back({value.keys[j], command.string});
+        out.scripts.push_back({value.keys()[j], command.string()});
       }
     } else if (key == "exports") {
       if (!readExports(out, value, out.exports)) {
@@ -126,19 +126,19 @@ bool parseManifest(Manifest &out) {
       }
       out.depsBegin = value.begin;
       out.depsEnd = value.end;
-      for (size_t j = 0; j < value.keys.size(); ++j) {
-        if (!checkAlias(value.keys[j], error)) {
-          reportAt(out.path, out.text, value.keyOffsets[j], error);
+      for (size_t j = 0; j < value.keys().size(); ++j) {
+        if (!checkAlias(value.keys()[j], error)) {
+          reportAt(out.path, out.text, value.keyOffsets()[j], error);
           return false;
         }
-        const JsonValue &spec = value.items[j];
+        const JsonValue &spec = value.items()[j];
         if (!spec.isString()) {
           reportAt(out.path, out.text, spec.begin,
                    "a dependency is a string that says where the package comes from, e.g. "
                    "\"jsr:@std/path@^1\"");
           return false;
         }
-        out.dependencies.push_back({value.keys[j], spec.string, spec.begin});
+        out.dependencies.push_back({value.keys()[j], spec.string(), spec.begin});
       }
     }
   }
@@ -181,13 +181,13 @@ bool namesTzFiles(llvm::StringRef packageJson) {
     return true;
   }
   auto tz = [](const JsonValue *value) {
-    return value && value->isString() && llvm::StringRef(value->string).ends_with(".tz");
+    return value && value->isString() && llvm::StringRef(value->string()).ends_with(".tz");
   };
   if (tz(main) || tz(exports)) {
     return true;
   }
   if (exports && exports->isObject()) {
-    return llvm::any_of(exports->items, [&](const JsonValue &target) { return tz(&target); });
+    return llvm::any_of(exports->items(), [&](const JsonValue &target) { return tz(&target); });
   }
 
   return false;

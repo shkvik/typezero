@@ -21,25 +21,25 @@ bool readOptions(TzConfig &out, llvm::StringRef text, const JsonValue &options) 
              "'compilerOptions' is an object: { \"outDir\": \"dist\" }");
     return false;
   }
-  for (size_t i = 0; i < options.keys.size(); ++i) {
-    llvm::StringRef key = options.keys[i];
-    const JsonValue &value = options.items[i];
+  for (size_t i = 0; i < options.keys().size(); ++i) {
+    llvm::StringRef key = options.keys()[i];
+    const JsonValue &value = options.items()[i];
     if (key != "outDir") {
-      reportAt(out.path, text, options.keyOffsets[i],
+      reportAt(out.path, text, options.keyOffsets()[i],
                "unknown compiler option '" + key + "' in tzconfig.json; the options are outDir");
       return false;
     }
-    if (!value.isString() || value.string.empty()) {
+    if (!value.isString() || value.string().empty()) {
       reportAt(out.path, text, value.begin,
                "'outDir' is the directory tz build writes to, e.g. \"dist\"");
       return false;
     }
-    if (path::is_absolute(value.string)) {
-      out.outDir = value.string;
+    if (path::is_absolute(value.string())) {
+      out.outDir = value.string();
       continue;
     }
     llvm::SmallString<256> dir(out.dir);
-    path::append(dir, value.string);
+    path::append(dir, value.string());
     out.outDir = std::string(dir);
   }
 
@@ -68,14 +68,14 @@ bool readTzConfig(llvm::StringRef file, TzConfig &out) {
              "tzconfig.json holds an object: { \"compilerOptions\": { \"outDir\": \"dist\" } }");
     return false;
   }
-  for (size_t i = 0; i < root.keys.size(); ++i) {
-    llvm::StringRef key = root.keys[i];
+  for (size_t i = 0; i < root.keys().size(); ++i) {
+    llvm::StringRef key = root.keys()[i];
     if (key != "compilerOptions") {
-      reportAt(out.path, text, root.keyOffsets[i],
+      reportAt(out.path, text, root.keyOffsets()[i],
                "unknown field '" + key + "' in tzconfig.json; the fields are compilerOptions");
       return false;
     }
-    if (!readOptions(out, text, root.items[i])) {
+    if (!readOptions(out, text, root.items()[i])) {
       return false;
     }
   }

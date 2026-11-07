@@ -423,7 +423,7 @@ Expr *IntlChecker::checkLocaleList(Expr *arg, llvm::StringRef what) {
 }
 
 Expr *IntlChecker::checkLocaleNew(NewExpr *expr, const Type *expected) {
-  if (!checker_.topLevelChecker().lookupValue(kIntlLocaleName).cls) {
+  if (!checker_.topLevelChecker().lookupValue(kIntlLocaleName).cls()) {
     checker_.diags_.error(expr->loc(), "'Intl.Locale' is not available here");
     for (Expr *&arg : expr->args) {
       arg = checker_.exprChecker().checkExpr(arg);
@@ -443,7 +443,7 @@ Expr *IntlChecker::checkLocaleNew(NewExpr *expr, const Type *expected) {
   expr->member = "";
   Expr *checked = checker_.newChecker().checkNew(expr, expected);
   auto *made = dyn_cast<NewExpr>(checked);
-  std::vector<Expr *> *args = made ? (made->ctor ? &made->ctor->args : &made->args) : nullptr;
+  std::vector<Expr *> *args = made ? (made->ctor() ? &made->ctor()->args : &made->args) : nullptr;
   if (args && args->size() == 1 && args->front()->type && !args->front()->type->isError()) {
     checkTags(args->front(), "Intl.Locale", true);
   }
@@ -452,7 +452,7 @@ Expr *IntlChecker::checkLocaleNew(NewExpr *expr, const Type *expected) {
 }
 
 Expr *IntlChecker::checkLocaleStatic(CallExpr *call, MemberExpr *member, const Type *expected) {
-  if (!checker_.topLevelChecker().lookupValue(kIntlLocaleName).cls) {
+  if (!checker_.topLevelChecker().lookupValue(kIntlLocaleName).cls()) {
     checker_.diags_.error(member->loc(), "'Intl.Locale' is not available here");
     call->type = Type::error();
     for (Expr *&arg : call->args) {
@@ -477,7 +477,7 @@ Expr *IntlChecker::checkIntlFunction(CallExpr *call, MemberExpr *member) {
     if (!call->args.empty()) {
       call->args[0] = checkLocaleList(call->args[0], "Intl.getCanonicalLocales");
     }
-    call->builtin = Builtin::IntlCanonicalLocales;
+    call->target = BuiltinCall{.builtin = Builtin::IntlCanonicalLocales};
     call->type = Type::array(Type::string());
     return call;
   }
@@ -535,7 +535,7 @@ Expr *IntlChecker::checkIntlStatic(CallExpr *call, MemberExpr *member) {
   call->args.insert(call->args.begin(),
                     checker_.ctx_.make<StringLitExpr>(member->loc(), utf16(what)));
   call->args[0]->type = Type::string();
-  call->builtin = Builtin::IntlSupportedLocales;
+  call->target = BuiltinCall{.builtin = Builtin::IntlSupportedLocales};
   call->type = Type::array(Type::string());
 
   return call;

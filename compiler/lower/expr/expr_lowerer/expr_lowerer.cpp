@@ -132,18 +132,18 @@ llvm::Value *ExprLowerer::emitExprKind(Expr *expr) {
     return lowering_.objectLowerer().emitObjectLiteral(cast<ObjectLitExpr>(expr));
   case Expr::Kind::Name: {
     auto *name = cast<NameExpr>(expr);
-    if (name->func) {
+    if (name->func()) {
       return lowering_.closureLowerer().makeFunctionValue(
-          lowering_.closureLowerer().functionInfo(name->func->decl),
+          lowering_.closureLowerer().functionInfo(name->func()->decl),
           llvm::ConstantPointerNull::get(lowering_.builder_.getPtrTy()));
     }
-    if (!name->var && name->type->isJson()) {
+    if (!name->var() && name->type->isJson()) {
       return lowering_.jsonLowerer().emitJsonNull();
     }
-    if (name->cls) {
-      return lowering_.unknownLowerer().classObject(name->cls);
+    if (name->cls()) {
+      return lowering_.unknownLowerer().classObject(name->cls());
     }
-    return lowering_.envLowerer().emitVarValue(name->var, false);
+    return lowering_.envLowerer().emitVarValue(name->var(), false);
   }
   case Expr::Kind::Function:
     return lowering_.closureLowerer().emitFunctionExpr(cast<FunctionExpr>(expr));
@@ -151,7 +151,7 @@ llvm::Value *ExprLowerer::emitExprKind(Expr *expr) {
     return lowering_.memberLowerer().emitMember(cast<MemberExpr>(expr));
   case Expr::Kind::Index: {
     auto *index = cast<IndexExpr>(expr);
-    if (index->enumDecl) {
+    if (index->enumDecl()) {
       return lowering_.unaryLowerer().emitEnumName(index);
     }
     if (index->object->type->nonOptional()->isJson()) {
@@ -160,7 +160,7 @@ llvm::Value *ExprLowerer::emitExprKind(Expr *expr) {
     if (index->object->type->isString()) {
       return lowering_.stringLowerer().emitStringIndex(index);
     }
-    if (index->keyed) {
+    if (index->keyed()) {
       Lowering::Operand object = lowering_.refCounts().emitOperand(
           index->object, AssignLowerer::cannotAssign(index->index));
       llvm::Value *key = emitExpr(index->index);
@@ -189,7 +189,7 @@ llvm::Value *ExprLowerer::emitExprKind(Expr *expr) {
   case Expr::Kind::Call: {
     auto *call = cast<CallExpr>(expr);
     llvm::Value *value = lowering_.callLowerer().emitCall(call);
-    const FuncSymbol *callee = call->func ? call->func : call->method;
+    const FuncSymbol *callee = call->func() ? call->func() : call->method();
     if (value && call->type && call->type->isResult() && callee && callee->decl &&
         lowering_.errSites().inLibrary(callee->decl->loc()) &&
         !lowering_.errSites().inLibrary(call->loc())) {
@@ -199,10 +199,10 @@ llvm::Value *ExprLowerer::emitExprKind(Expr *expr) {
   }
   case Expr::Kind::New: {
     auto *create = cast<NewExpr>(expr);
-    if (create->reflect) {
+    if (create->reflect()) {
       return lowering_.reflectLowerer().emitReflectNew(create);
     }
-    if (create->cls) {
+    if (create->cls()) {
       return lowering_.classLowerer().emitNew(create);
     }
     return lowering_.arrayLowerer().emitNewArray(create);

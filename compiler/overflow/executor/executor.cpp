@@ -101,7 +101,7 @@ void Executor::exec(const Stmt *stmt, State &st) {
     break;
   case Stmt::Kind::Class: {
     auto *cls = cast<ClassDecl>(stmt);
-    if (cls->builtin) {
+    if (cls->builtin()) {
       break;
     }
     for (const ClassField &f : cls->fields) {

@@ -96,7 +96,7 @@ Expr *ReadlineChecker::checkReadlineCall(CallExpr *call, NodeModule module, llvm
   auto *where = checker_.ctx_.make<IntLitExpr>(loc, uint64_t(written));
   where->type = Type::intTy();
   call->args = {where};
-  call->builtin = Builtin::RlCreate;
+  call->target = BuiltinCall{.builtin = Builtin::RlCreate};
   call->type = Type::runtimeObject(
       module == NodeModule::Readline ? Type::Runtime::Readline : Type::Runtime::ReadlinePromises);
 

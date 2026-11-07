@@ -78,7 +78,7 @@ void FunctionBuilder::beginFunction(llvm::Function *function, FunctionDecl *fn) 
 }
 
 void FunctionBuilder::emitFunction(FunctionDecl *fn) {
-  if (fn->external) {
+  if (fn->external()) {
     lowering_.tzModulesLowerer().emitExternal(fn);
     return;
   }

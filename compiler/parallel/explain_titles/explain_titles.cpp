@@ -41,9 +41,9 @@ std::string ExplainTitles::fnName(const FnInfo &f) const {
   std::string name = fn->name.str();
   if (fn->cls()) {
     std::string owner =
-        fn->cls()->literal
+        fn->cls()->literal()
             ? "the object " +
-                  Analysis::atText(analysis_.explainNames.where(fn->cls()->literal->loc()))
+                  Analysis::atText(analysis_.explainNames.where(fn->cls()->literal()->loc()))
             : fn->cls()->name.str();
     if (fn->isConstructor()) {
       return "constructor of " + owner;
@@ -51,7 +51,7 @@ std::string ExplainTitles::fnName(const FnInfo &f) const {
     if (fn == fn->cls()->init) {
       return "fields of " + owner;
     }
-    return fn->cls()->literal ? name + " of " + owner : owner + "." + name;
+    return fn->cls()->literal() ? name + " of " + owner : owner + "." + name;
   }
   if (fn->isInstance && !fn->typeArgs.empty()) {
     name += "<";
@@ -60,11 +60,11 @@ std::string ExplainTitles::fnName(const FnInfo &f) const {
     }
     name += ">";
   }
-  if (fn->isArrow || fn->isExpression) {
+  if (fn->isArrow() || fn->isExpression()) {
     if (!name.empty()) {
       return name;
     }
-    name = (fn->isArrow ? "the arrow " : "the function ") +
+    name = (fn->isArrow() ? "the arrow " : "the function ") +
            Analysis::atText(analysis_.explainNames.where(fn->loc()));
     for (const FunctionDecl *up = fn->parent; up; up = up->parent) {
       if (up->isInstance) {
@@ -84,10 +84,10 @@ std::string ExplainTitles::fnTitle(const FnInfo &f) const {
     return "top-level code";
   }
   std::string kind = f.asyncGen ? "async generator" : f.async ? "async" : "";
-  std::string what = fn->cls()          ? (fn->isConstructor() ? "" : "method")
-                     : fn->isArrow      ? "arrow"
-                     : fn->isExpression ? "function expression"
-                                        : "function";
+  std::string what = fn->cls()            ? (fn->isConstructor() ? "" : "method")
+                     : fn->isArrow()      ? "arrow"
+                     : fn->isExpression() ? "function expression"
+                                          : "function";
   std::string title = kind;
   if (!what.empty()) {
     title += (title.empty() ? "" : " ") + what;
@@ -95,7 +95,7 @@ std::string ExplainTitles::fnTitle(const FnInfo &f) const {
   if (title.empty()) {
     title = "callback";
   }
-  if (fn->isArrow || fn->isExpression) {
+  if (fn->isArrow() || fn->isExpression()) {
     if (!fn->name.empty()) {
       title += " " + fn->name.str();
     }
@@ -103,7 +103,7 @@ std::string ExplainTitles::fnTitle(const FnInfo &f) const {
     title += " " + fnName(f);
   }
   title += ", " + Analysis::lineText(analysis_.explainNames.where(fn->loc()));
-  for (const FunctionDecl *up = fn->parent; up && (fn->isArrow || fn->isExpression);
+  for (const FunctionDecl *up = fn->parent; up && (fn->isArrow() || fn->isExpression());
        up = up->parent) {
     if (up->isInstance) {
       FnInfo info;

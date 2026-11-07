@@ -34,8 +34,8 @@ llvm::StringRef findName(llvm::ArrayRef<llvm::StringLiteral> names, llvm::String
 ResultTypes::ResultTypes(Checker &checker) : checker_(checker) {}
 
 llvm::StringRef ResultTypes::resultName(llvm::StringRef name) const {
-  Checker::ScopeEntry entry = checker_.scopes().lookup(name);
-  if (entry.var || entry.func || entry.enumDecl || entry.cls) {
+  ScopeEntry entry = checker_.scopes().lookup(name);
+  if (entry.found()) {
     return {};
   }
 
@@ -63,7 +63,7 @@ const Type *ResultTypes::resolveResultType(const TypeRef &ref, llvm::StringRef n
     return Type::error();
   }
   auto half = [&](const TypeRef &arg) -> const Type * {
-    if (arg.kind == TypeRef::Kind::Name && arg.name == "never") {
+    if (arg.kind() == TypeRefKind::NAME_REF && arg.name == "never") {
       return Type::never();
     }
 

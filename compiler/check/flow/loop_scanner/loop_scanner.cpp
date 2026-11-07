@@ -43,7 +43,7 @@ Checker::LoopScan LoopScanner::scanLoop(llvm::ArrayRef<const Stmt *> stmts,
 
 bool LoopScanner::namesIterator(const Expr *expr) const {
   auto *name = dyn_cast<NameExpr>(expr);
-  const VarSymbol *var = name ? checker_.scopes().lookup(name->name).var : nullptr;
+  const VarSymbol *var = name ? checker_.scopes().lookup(name->name).var() : nullptr;
 
   return var && var->type && var->type->nonOptional()->isIterator();
 }
@@ -60,7 +60,7 @@ void LoopScanner::scanStmt(const Stmt *stmt, Checker::LoopScan &scan, unsigned d
       if (d.init) {
         scanExpr(d.init, scan, depth);
       }
-      if (d.destructured && d.init && namesIterator(d.init)) {
+      if (d.destructured() && d.init && namesIterator(d.init)) {
         scan.callsFunctions = true;
       }
     }
@@ -227,8 +227,8 @@ void LoopScanner::scanExpr(const Expr *expr, Checker::LoopScan &scan, unsigned d
     break;
   case Expr::Kind::ObjectLit:
     for (const ObjectLitExpr::Property &p : cast<ObjectLitExpr>(expr)->props) {
-      if (p.key) {
-        scanExpr(p.key, scan, depth);
+      if (p.key()) {
+        scanExpr(p.key(), scan, depth);
       }
       scanExpr(p.value, scan, depth);
     }
@@ -372,6 +372,8 @@ void LoopScanner::scanExpr(const Expr *expr, Checker::LoopScan &scan, unsigned d
     break;
   case Expr::Kind::Class:
     scan.callsFunctions = true;
+    break;
+  case Expr::Kind::RegexLit:
     break;
   }
 }

@@ -41,7 +41,7 @@ const Type *ClassValueChecker::constructedBy(const Type *type) {
 }
 
 ClassDecl *ClassValueChecker::finalClass(ClassDecl *cls) {
-  while (cls && cls->replaced && cls->replacement) {
+  while (cls && cls->replacement) {
     cls = cls->replacement;
   }
 
@@ -151,7 +151,7 @@ Expr *ClassValueChecker::checkValueNew(NewExpr *expr, const Type *expected) {
     checker_.diags_.error(expr->loc(), "a class known only when the program runs takes no type "
                                        "arguments");
   }
-  expr->reflect = true;
+  expr->form = ReflectNew{};
   std::vector<const Type *> argTypes;
   for (Expr *&arg : expr->args) {
     arg = checker_.exprChecker().checkExpr(arg);
@@ -181,7 +181,7 @@ Expr *ClassValueChecker::checkClassValue(NameExpr *name, ClassDecl *cls) {
                               "yet here (a ReferenceError); move the class up");
   }
   cls = finalClass(cls);
-  name->cls = cls;
+  name->binding = NamedClass{.cls = cls};
   name->type = classValueType(cls);
   cls->usedAsValue = true;
 
@@ -202,7 +202,7 @@ Expr *ClassValueChecker::checkClassRefMember(MemberExpr *member) {
     if (member->name == "name") {
       auto *call =
           checker_.ctx_.make<CallExpr>(member->loc(), member, std::vector<Expr *>{member->object});
-      call->builtin = Builtin::ClassName;
+      call->target = BuiltinCall{.builtin = Builtin::ClassName};
       call->type = Type::string();
       return call;
     }
@@ -234,7 +234,7 @@ Expr *ClassValueChecker::checkClassRefMember(MemberExpr *member) {
 
 Expr *ClassValueChecker::classValueAt(ClassDecl *cls, llvm::SMLoc loc) {
   auto *name = checker_.ctx_.make<NameExpr>(loc, cls->name);
-  name->cls = cls;
+  name->binding = NamedClass{.cls = cls};
   name->type = Type::classRef(cls, cls->name.empty() && cls->type ? cls->type->name() : cls->name);
   cls->usedAsValue = true;
 

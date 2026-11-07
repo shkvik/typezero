@@ -29,184 +29,187 @@ using llvm::Value;
 namespace tz {
 
 llvm::Value *TypedArrayCalls::emit() {
-  switch (call->builtin) {
-  case Builtin::BytesByteLength: {
-    Lowering::Operand self = lowering_.refCounts().emitOperand(member->object, true);
-    llvm::Value *length = lowering_.bytesLowerer().bytesLength(self.value);
-    auto sizeOf = [](const Type *t) { return t->isTypedArray() ? t->elementSize() : 1u; };
-    llvm::Value *size = lowering_.builder_.getInt64(sizeOf(self.type));
-    if (self.type->isUnion()) {
-      llvm::Value *id = nullptr;
-      for (const Type *m : self.type->members()) {
-        if (sizeOf(m) == 1) {
-          continue;
+  switch (call->builtin()) {
+    case Builtin::BytesByteLength: {
+      Lowering::Operand self = lowering_.refCounts().emitOperand(member->object, true);
+      llvm::Value *length = lowering_.bytesLowerer().bytesLength(self.value);
+      auto sizeOf = [](const Type *t) { return t->isTypedArray() ? t->elementSize() : 1u; };
+      llvm::Value *size = lowering_.builder_.getInt64(sizeOf(self.type));
+      if (self.type->isUnion()) {
+        llvm::Value *id = nullptr;
+        for (const Type *m : self.type->members()) {
+          if (sizeOf(m) == 1) {
+            continue;
+          }
+          if (!id) {
+            id = lowering_.unionLowerer().objectClassId(self.value);
+          }
+          size = lowering_.builder_.CreateSelect(
+              lowering_.builder_.CreateICmpEQ(
+                  id, lowering_.builder_.getInt32(lowering_.unionLowerer().plainTypeId(m))),
+              lowering_.builder_.getInt64(sizeOf(m)), size);
         }
-        if (!id) {
-          id = lowering_.unionLowerer().objectClassId(self.value);
-        }
-        size = lowering_.builder_.CreateSelect(
-            lowering_.builder_.CreateICmpEQ(
-                id, lowering_.builder_.getInt32(lowering_.unionLowerer().plainTypeId(m))),
-            lowering_.builder_.getInt64(sizeOf(m)), size);
       }
+      lowering_.refCounts().dropOperand(self);
+      return lowering_.builder_.CreateMul(length, size);
     }
-    lowering_.refCounts().dropOperand(self);
-    return lowering_.builder_.CreateMul(length, size);
-  }
-  case Builtin::BytesByteOffset: {
-    Lowering::Operand self = lowering_.refCounts().emitOperand(member->object, true);
-    if (!lowering_.bytesTy_) {
-      lowering_.bytesTy_ = bytesStruct(lowering_.ctx_);
+    case Builtin::BytesByteOffset: {
+      Lowering::Operand self = lowering_.refCounts().emitOperand(member->object, true);
+      if (!lowering_.bytesTy_) {
+        lowering_.bytesTy_ = bytesStruct(lowering_.ctx_);
+      }
+      llvm::Value *offset = lowering_.builder_.CreateLoad(
+          i32, lowering_.builder_.CreateStructGEP(lowering_.bytesTy_, self.value, kOffset),
+          "offset");
+      lowering_.refCounts().dropOperand(self);
+      return lowering_.builder_.CreateZExt(offset, i64);
     }
-    llvm::Value *offset = lowering_.builder_.CreateLoad(
-        i32, lowering_.builder_.CreateStructGEP(lowering_.bytesTy_, self.value, kOffset), "offset");
-    lowering_.refCounts().dropOperand(self);
-    return lowering_.builder_.CreateZExt(offset, i64);
-  }
-  case Builtin::BytesBuffer: {
-    Lowering::Operand self = lowering_.refCounts().emitOperand(member->object, true);
-    llvm::Value *buffer =
-        lowering_.builder_.CreateCall(fn("tz_bytes_buffer", ptr, {ptr}), {self.value});
-    lowering_.refCounts().dropOperand(self);
-    return buffer;
-  }
-  case Builtin::BytesAt: {
-    Lowering::Operand self = receiver(0);
-    llvm::Value *at = lowering_.exprLowerer().emitExpr(call->args[0]);
-    llvm::Value *length = lowering_.bytesLowerer().bytesLength(self.value);
-    at = lowering_.builder_.CreateSelect(
-        lowering_.builder_.CreateICmpSLT(at, lowering_.builder_.getInt64(0)),
-        lowering_.builder_.CreateAdd(at, length), at);
-    const Type *bytesType = self.type;
-    auto read = [&] {
-      return lowering_.bytesLowerer().loadElement(lowering_.bytesLowerer().bytesData(self.value),
-                                                  bytesType, at);
-    };
-    llvm::Value *result = call->mayBeOutOfRange
-                              ? lowering_.arrayLowerer().emitCheckedRead(
-                                    lowering_.builder_.CreateICmpULT(at, length), type, read)
-                              : read();
-    lowering_.refCounts().dropOperand(self);
-    return result;
-  }
-  case Builtin::BytesIndexOf: {
-    Lowering::Operand self = receiver(1);
-    llvm::Value *value = lowering_.exprLowerer().emitExpr(call->args[1]);
-    std::vector<llvm::Value *> values;
-    llvm::Value *has = positions(2, 1, values);
-    llvm::Value *mode = lowering_.builder_.getInt32(uint32_t(constantOf(call->args[0])));
-    llvm::Value *found =
-        lowering_.builder_.CreateCall(fn("tz_bytes_index_of", i32, {ptr, f64, i64, i32, i32}),
-                                      {self.value, value, values[0], has, mode});
-    lowering_.refCounts().dropOperand(self);
-    return constantOf(call->args[0]) == 2
-               ? lowering_.builder_.CreateICmpNE(found, lowering_.builder_.getInt32(0))
-               : lowering_.builder_.CreateSExt(found, i64);
-  }
-  case Builtin::BytesJoin: {
-    Lowering::Operand self = receiver(0);
-    llvm::Value *text;
-    if (call->args.empty()) {
-      llvm::Value *none = llvm::ConstantPointerNull::get(lowering_.builder_.getPtrTy());
-      text = lowering_.stringLowerer().callReturningString(
-          fn("tz_bytes_join", voidTy, {ptr, ptr, ptr, i64, i32}),
-          {self.value, none, lowering_.builder_.getInt64(0), lowering_.builder_.getInt32(0)});
-    } else {
-      Lowering::Operand separator = lowering_.refCounts().emitOperand(call->args[0], true);
-      text = lowering_.stringLowerer().callReturningString(
-          fn("tz_bytes_join", voidTy, {ptr, ptr, ptr, i64, i32}),
-          {self.value, lowering_.stringLowerer().stringObj(separator.value),
-           lowering_.stringLowerer().stringMeta(separator.value), lowering_.builder_.getInt32(1)});
-      lowering_.refCounts().dropOperand(separator);
+    case Builtin::BytesBuffer: {
+      Lowering::Operand self = lowering_.refCounts().emitOperand(member->object, true);
+      llvm::Value *buffer =
+          lowering_.builder_.CreateCall(fn("tz_bytes_buffer", ptr, {ptr}), {self.value});
+      lowering_.refCounts().dropOperand(self);
+      return buffer;
     }
-    lowering_.refCounts().dropOperand(self);
-    return text;
-  }
-  case Builtin::BytesReverse:
-  case Builtin::BytesSort: {
-    Lowering::Operand self = receiver(0);
-    lowering_.builder_.CreateCall(
-        fn(call->builtin == Builtin::BytesSort ? "tz_bytes_sort" : "tz_bytes_reverse", voidTy,
-           {ptr}),
-        {self.value});
-    return returnSelf(self);
-  }
-  case Builtin::BytesFill: {
-    Lowering::Operand self = receiver(0);
-    llvm::Value *value = lowering_.exprLowerer().emitExpr(call->args[0]);
-    std::vector<llvm::Value *> values;
-    llvm::Value *has = positions(1, 2, values);
-    lowering_.builder_.CreateCall(fn("tz_bytes_fill", voidTy, {ptr, f64, i64, i64, i32}),
-                                  {self.value, value, values[0], values[1], has});
-    return returnSelf(self);
-  }
-  case Builtin::BytesSet: {
-    Lowering::Operand self = receiver(0);
-    Expr *source = call->args[0];
-    Lowering::Operand from = lowering_.refCounts().emitOperand(
-        source, call->args.size() < 2 || AssignLowerer::cannotAssign(call->args[1]));
-    llvm::Value *offset = call->args.size() > 1 ? lowering_.exprLowerer().emitExpr(call->args[1])
-                                                : lowering_.builder_.getInt64(0);
-    lowering_.builder_.CreateCall(
-        fn(source->type->isArray() ? "tz_bytes_set_array" : "tz_bytes_set_bytes", voidTy,
-           {ptr, ptr, i64}),
-        {self.value, from.value, offset});
-    lowering_.refCounts().dropOperand(from);
-    lowering_.refCounts().dropOperand(self);
-    return nullptr;
-  }
-  case Builtin::BytesSubarray:
-  case Builtin::BytesSlice:
-  case Builtin::ArrayBufferSlice: {
-    Lowering::Operand self = receiver(0);
-    std::vector<llvm::Value *> values;
-    llvm::Value *has = positions(0, 2, values);
-    llvm::StringRef name = call->builtin == Builtin::BytesSubarray ? "tz_bytes_subarray"
-                           : call->builtin == Builtin::BytesSlice  ? "tz_bytes_slice"
-                                                                   : "tz_abuf_slice";
-    llvm::Value *made = lowering_.builder_.CreateCall(fn(name, ptr, {ptr, i64, i64, i32}),
-                                                      {self.value, values[0], values[1], has});
-    lowering_.refCounts().dropOperand(self);
-    return made;
-  }
-  case Builtin::BytesCopyWithin: {
-    Lowering::Operand self = receiver(0);
-    std::vector<llvm::Value *> values;
-    for (size_t i = 0; i < 2; ++i) {
-      values.push_back(lowering_.exprLowerer().emitExpr(call->args[i]));
+    case Builtin::BytesAt: {
+      Lowering::Operand self = receiver(0);
+      llvm::Value *at = lowering_.exprLowerer().emitExpr(call->args[0]);
+      llvm::Value *length = lowering_.bytesLowerer().bytesLength(self.value);
+      at = lowering_.builder_.CreateSelect(
+          lowering_.builder_.CreateICmpSLT(at, lowering_.builder_.getInt64(0)),
+          lowering_.builder_.CreateAdd(at, length), at);
+      const Type *bytesType = self.type;
+      auto read = [&] {
+        return lowering_.bytesLowerer().loadElement(lowering_.bytesLowerer().bytesData(self.value),
+                                                    bytesType, at);
+      };
+      llvm::Value *result = call->mayBeOutOfRange
+                                ? lowering_.arrayLowerer().emitCheckedRead(
+                                      lowering_.builder_.CreateICmpULT(at, length), type, read)
+                                : read();
+      lowering_.refCounts().dropOperand(self);
+      return result;
     }
-    llvm::Value *end = call->args.size() > 2 ? lowering_.exprLowerer().emitExpr(call->args[2])
-                                             : lowering_.builder_.getInt64(0);
-    lowering_.builder_.CreateCall(fn("tz_bytes_copy_within", voidTy, {ptr, i64, i64, i64, i32}),
-                                  {self.value, values[0], values[1], end,
-                                   lowering_.builder_.getInt32(call->args.size() > 2)});
-    return returnSelf(self);
-  }
-  case Builtin::BytesToReversed:
-  case Builtin::BytesToSorted: {
-    Lowering::Operand self = receiver(0);
-    llvm::Value *made = lowering_.builder_.CreateCall(
-        fn(call->builtin == Builtin::BytesToSorted ? "tz_bytes_to_sorted" : "tz_bytes_to_reversed",
-           ptr, {ptr}),
-        {self.value});
-    lowering_.refCounts().dropOperand(self);
-    return made;
-  }
-  case Builtin::BytesWith: {
-    Lowering::Operand self = receiver(0);
-    llvm::Value *index = lowering_.exprLowerer().emitExpr(call->args[0]);
-    llvm::Value *value = lowering_.exprLowerer().emitExpr(call->args[1]);
-    llvm::Value *made = lowering_.builder_.CreateCall(fn("tz_bytes_with", ptr, {ptr, i64, f64}),
-                                                      {self.value, index, value});
-    lowering_.refCounts().dropOperand(self);
-    return made;
-  }
-  case Builtin::ArrayBufferIsView: {
-    lowering_.stmtLowerer().emitDiscarded(call->args[0]);
-    return lowering_.builder_.getInt1(call->args[0]->type->nonOptional()->isByteView());
-  }
-  default:
-    llvm_unreachable("not a call of TypedArrayCalls");
+    case Builtin::BytesIndexOf: {
+      Lowering::Operand self = receiver(1);
+      llvm::Value *value = lowering_.exprLowerer().emitExpr(call->args[1]);
+      std::vector<llvm::Value *> values;
+      llvm::Value *has = positions(2, 1, values);
+      llvm::Value *mode = lowering_.builder_.getInt32(uint32_t(constantOf(call->args[0])));
+      llvm::Value *found =
+          lowering_.builder_.CreateCall(fn("tz_bytes_index_of", i32, {ptr, f64, i64, i32, i32}),
+                                        {self.value, value, values[0], has, mode});
+      lowering_.refCounts().dropOperand(self);
+      return constantOf(call->args[0]) == 2
+                 ? lowering_.builder_.CreateICmpNE(found, lowering_.builder_.getInt32(0))
+                 : lowering_.builder_.CreateSExt(found, i64);
+    }
+    case Builtin::BytesJoin: {
+      Lowering::Operand self = receiver(0);
+      llvm::Value *text;
+      if (call->args.empty()) {
+        llvm::Value *none = llvm::ConstantPointerNull::get(lowering_.builder_.getPtrTy());
+        text = lowering_.stringLowerer().callReturningString(
+            fn("tz_bytes_join", voidTy, {ptr, ptr, ptr, i64, i32}),
+            {self.value, none, lowering_.builder_.getInt64(0), lowering_.builder_.getInt32(0)});
+      } else {
+        Lowering::Operand separator = lowering_.refCounts().emitOperand(call->args[0], true);
+        text = lowering_.stringLowerer().callReturningString(
+            fn("tz_bytes_join", voidTy, {ptr, ptr, ptr, i64, i32}),
+            {self.value, lowering_.stringLowerer().stringObj(separator.value),
+             lowering_.stringLowerer().stringMeta(separator.value),
+             lowering_.builder_.getInt32(1)});
+        lowering_.refCounts().dropOperand(separator);
+      }
+      lowering_.refCounts().dropOperand(self);
+      return text;
+    }
+    case Builtin::BytesReverse:
+    case Builtin::BytesSort: {
+      Lowering::Operand self = receiver(0);
+      lowering_.builder_.CreateCall(
+          fn(call->builtin() == Builtin::BytesSort ? "tz_bytes_sort" : "tz_bytes_reverse", voidTy,
+             {ptr}),
+          {self.value});
+      return returnSelf(self);
+    }
+    case Builtin::BytesFill: {
+      Lowering::Operand self = receiver(0);
+      llvm::Value *value = lowering_.exprLowerer().emitExpr(call->args[0]);
+      std::vector<llvm::Value *> values;
+      llvm::Value *has = positions(1, 2, values);
+      lowering_.builder_.CreateCall(fn("tz_bytes_fill", voidTy, {ptr, f64, i64, i64, i32}),
+                                    {self.value, value, values[0], values[1], has});
+      return returnSelf(self);
+    }
+    case Builtin::BytesSet: {
+      Lowering::Operand self = receiver(0);
+      Expr *source = call->args[0];
+      Lowering::Operand from = lowering_.refCounts().emitOperand(
+          source, call->args.size() < 2 || AssignLowerer::cannotAssign(call->args[1]));
+      llvm::Value *offset = call->args.size() > 1 ? lowering_.exprLowerer().emitExpr(call->args[1])
+                                                  : lowering_.builder_.getInt64(0);
+      lowering_.builder_.CreateCall(
+          fn(source->type->isArray() ? "tz_bytes_set_array" : "tz_bytes_set_bytes", voidTy,
+             {ptr, ptr, i64}),
+          {self.value, from.value, offset});
+      lowering_.refCounts().dropOperand(from);
+      lowering_.refCounts().dropOperand(self);
+      return nullptr;
+    }
+    case Builtin::BytesSubarray:
+    case Builtin::BytesSlice:
+    case Builtin::ArrayBufferSlice: {
+      Lowering::Operand self = receiver(0);
+      std::vector<llvm::Value *> values;
+      llvm::Value *has = positions(0, 2, values);
+      llvm::StringRef name = call->builtin() == Builtin::BytesSubarray ? "tz_bytes_subarray"
+                             : call->builtin() == Builtin::BytesSlice  ? "tz_bytes_slice"
+                                                                       : "tz_abuf_slice";
+      llvm::Value *made = lowering_.builder_.CreateCall(fn(name, ptr, {ptr, i64, i64, i32}),
+                                                        {self.value, values[0], values[1], has});
+      lowering_.refCounts().dropOperand(self);
+      return made;
+    }
+    case Builtin::BytesCopyWithin: {
+      Lowering::Operand self = receiver(0);
+      std::vector<llvm::Value *> values;
+      for (size_t i = 0; i < 2; ++i) {
+        values.push_back(lowering_.exprLowerer().emitExpr(call->args[i]));
+      }
+      llvm::Value *end = call->args.size() > 2 ? lowering_.exprLowerer().emitExpr(call->args[2])
+                                               : lowering_.builder_.getInt64(0);
+      lowering_.builder_.CreateCall(fn("tz_bytes_copy_within", voidTy, {ptr, i64, i64, i64, i32}),
+                                    {self.value, values[0], values[1], end,
+                                     lowering_.builder_.getInt32(call->args.size() > 2)});
+      return returnSelf(self);
+    }
+    case Builtin::BytesToReversed:
+    case Builtin::BytesToSorted: {
+      Lowering::Operand self = receiver(0);
+      llvm::Value *made = lowering_.builder_.CreateCall(fn(call->builtin() == Builtin::BytesToSorted
+                                                               ? "tz_bytes_to_sorted"
+                                                               : "tz_bytes_to_reversed",
+                                                           ptr, {ptr}),
+                                                        {self.value});
+      lowering_.refCounts().dropOperand(self);
+      return made;
+    }
+    case Builtin::BytesWith: {
+      Lowering::Operand self = receiver(0);
+      llvm::Value *index = lowering_.exprLowerer().emitExpr(call->args[0]);
+      llvm::Value *value = lowering_.exprLowerer().emitExpr(call->args[1]);
+      llvm::Value *made = lowering_.builder_.CreateCall(fn("tz_bytes_with", ptr, {ptr, i64, f64}),
+                                                        {self.value, index, value});
+      lowering_.refCounts().dropOperand(self);
+      return made;
+    }
+    case Builtin::ArrayBufferIsView: {
+      lowering_.stmtLowerer().emitDiscarded(call->args[0]);
+      return lowering_.builder_.getInt1(call->args[0]->type->nonOptional()->isByteView());
+    }
+    default:
+      llvm_unreachable("not a call of TypedArrayCalls");
   }
 }
 

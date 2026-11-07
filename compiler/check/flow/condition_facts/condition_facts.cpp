@@ -28,7 +28,7 @@ const VarSymbol *variableOf(const Expr *expr) {
   }
   auto *name = dyn_cast<NameExpr>(expr);
 
-  return name ? name->var : nullptr;
+  return name ? name->var() : nullptr;
 }
 
 const NameExpr *optionalVariable(const Expr *expr) {
@@ -37,7 +37,7 @@ const NameExpr *optionalVariable(const Expr *expr) {
   }
   auto *name = dyn_cast<NameExpr>(expr);
 
-  return name && name->var && name->var->type->isOptional() ? name : nullptr;
+  return name && name->var() && name->var()->type->isOptional() ? name : nullptr;
 }
 
 void addLess(Facts &facts, const Linear &x, const Linear &y, bool orEqual) {
@@ -76,11 +76,11 @@ bool ConditionFacts::chainDefined(const Expr *e, Checker::Flow &flow) const {
       return inner;
     }
     if (auto *name = dyn_cast<NameExpr>(x)) {
-      if (!name->var) {
+      if (!name->var()) {
         return std::nullopt;
       }
       Checker::FieldPath path;
-      path.var = name->var;
+      path.var = name->var();
       return path;
     }
     if (auto *member = dyn_cast<MemberExpr>(x)) {
@@ -106,12 +106,12 @@ void ConditionFacts::addConditionFacts(const Expr *cond, Checker::Flow &whenTrue
   checker_.jsonChecker().addJsonFacts(cond, whenTrue, whenFalse);
   checker_.unionNarrowing().addUnionFacts(cond, whenTrue, whenFalse);
   checker_.unknownChecker().addUnknownFacts(cond, whenTrue, whenFalse);
-  if (auto *call = dyn_cast<CallExpr>(cond); call && call->builtin == Builtin::None) {
+  if (auto *call = dyn_cast<CallExpr>(cond); call && call->builtin() == Builtin::None) {
     checker_.predicateChecker().applyPredicate(call, whenTrue, whenFalse);
     return;
   }
   if (const NameExpr *name = optionalVariable(cond)) {
-    whenTrue.defined.insert(name->var);
+    whenTrue.defined.insert(name->var());
     return;
   }
   auto optionalField = [&](const Expr *expr) -> std::optional<Checker::FieldPath> {
@@ -152,7 +152,7 @@ void ConditionFacts::addConditionFacts(const Expr *cond, Checker::Flow &whenTrue
 
   if (op == BinaryOp::InstanceOf) {
     if (const NameExpr *name = optionalVariable(bin->lhs)) {
-      whenTrue.defined.insert(name->var);
+      whenTrue.defined.insert(name->var());
     } else if (std::optional<Checker::FieldPath> path = optionalField(bin->lhs)) {
       FieldFacts::defineField(whenTrue, *path);
     }
@@ -176,8 +176,8 @@ void ConditionFacts::addConditionFacts(const Expr *cond, Checker::Flow &whenTrue
     if (isa<UndefinedExpr>(bin->lhs) || isa<UndefinedExpr>(bin->rhs)) {
       const Expr *side = isa<UndefinedExpr>(bin->rhs) ? bin->lhs : bin->rhs;
       if (const NameExpr *name = optionalVariable(side)) {
-        (op == BinaryOp::Ne ? whenTrue : whenFalse).defined.insert(name->var);
-        (op == BinaryOp::Ne ? whenFalse : whenTrue).undefinedVars.insert(name->var);
+        (op == BinaryOp::Ne ? whenTrue : whenFalse).defined.insert(name->var());
+        (op == BinaryOp::Ne ? whenFalse : whenTrue).undefinedVars.insert(name->var());
       } else if (std::optional<Checker::FieldPath> path = optionalField(side)) {
         FieldFacts::defineField(op == BinaryOp::Ne ? whenTrue : whenFalse, *path);
       }
@@ -188,7 +188,7 @@ void ConditionFacts::addConditionFacts(const Expr *cond, Checker::Flow &whenTrue
       const NameExpr *name = optionalVariable(side);
       if (name && conv && conv->isImplicit() && !conv->operand->type->isOptional() &&
           !conv->operand->type->isUndefined()) {
-        (op == BinaryOp::Eq ? whenTrue : whenFalse).defined.insert(name->var);
+        (op == BinaryOp::Eq ? whenTrue : whenFalse).defined.insert(name->var());
       }
     }
     for (auto [side, other] : {std::pair{bin->lhs, bin->rhs}, std::pair{bin->rhs, bin->lhs}}) {
@@ -260,10 +260,10 @@ void ConditionFacts::addConditionFacts(const Expr *cond, Checker::Flow &whenTrue
         continue;
       }
       if (text->value == u"undefined") {
-        (op == BinaryOp::Eq ? whenFalse : whenTrue).defined.insert(name->var);
-        (op == BinaryOp::Eq ? whenTrue : whenFalse).undefinedVars.insert(name->var);
+        (op == BinaryOp::Eq ? whenFalse : whenTrue).defined.insert(name->var());
+        (op == BinaryOp::Eq ? whenTrue : whenFalse).undefinedVars.insert(name->var());
       } else {
-        (op == BinaryOp::Eq ? whenTrue : whenFalse).defined.insert(name->var);
+        (op == BinaryOp::Eq ? whenTrue : whenFalse).defined.insert(name->var());
       }
     }
   }

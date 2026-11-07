@@ -103,7 +103,7 @@ Expr *AssignChecker::checkAssign(AssignExpr *assign) {
   if (compound && op == BinaryOp::Nullish) {
     if (auto *member = dyn_cast<MemberExpr>(assign->target); member && !member->optional) {
       auto *name = dyn_cast<NameExpr>(member->object);
-      VarSymbol *var = name ? checker_.topLevelChecker().lookupValue(name->name).var : nullptr;
+      VarSymbol *var = name ? checker_.topLevelChecker().lookupValue(name->name).var() : nullptr;
       if ((var && var->type && var->type->isRecord()) ||
           checker_.processChecker().isProcessMember(member->object, "env")) {
         Expr *key = checker_.dictChecker().keyLiteral(member->loc(), member->name);
@@ -154,7 +154,7 @@ Expr *AssignChecker::checkAssign(AssignExpr *assign) {
   }
 
   if (auto *target = dyn_cast<NameExpr>(assign->target); target && compound) {
-    const VarSymbol *var = checker_.scopes().lookup(target->name).var;
+    const VarSymbol *var = checker_.scopes().lookup(target->name).var();
     if (var && var->type && var->type->nonOptional()->isUnion() &&
         checker_.genericChecker().narrowedType(var)) {
       auto *read = checker_.ctx_.make<NameExpr>(target->loc(), target->name);
@@ -169,7 +169,7 @@ Expr *AssignChecker::checkAssign(AssignExpr *assign) {
   auto *index = dyn_cast<IndexExpr>(assign->target);
   auto *member = dyn_cast<MemberExpr>(assign->target);
   auto *name = dyn_cast<NameExpr>(assign->target);
-  const VarSymbol *var = name ? name->var : nullptr;
+  const VarSymbol *var = name ? name->var() : nullptr;
   bool reportedRange = false;
   if (index && compound && index->object->type->isArray() &&
       !checker_.indexProofs().provesInBounds(index->object, index->index, false)) {
@@ -317,7 +317,9 @@ Expr *AssignChecker::checkAssign(AssignExpr *assign) {
         (compound || !checker_.indexProofs().provesInBounds(index->object, index->index, true))) {
       checker_.diags_.error(index->loc(), kWriteOutOfRange);
     }
-    index->mayAppend = !inRange;
+    if (ElementIndex *element = index->form.as<ElementIndex>()) {
+      element->mayAppend = !inRange;
+    }
     if (!inRange) {
       checker_.flowChecker().arrayResized(index->object->type, true, false);
     }
@@ -443,10 +445,10 @@ Expr *AssignChecker::checkUpdate(UpdateExpr *update) {
   }
   update->type = type;
   if (auto *name = dyn_cast<NameExpr>(update->target)) {
-    if (name->var) {
-      checker_.flowChecker().incremented(name->var, update->increment ? 1 : -1);
+    if (name->var()) {
+      checker_.flowChecker().incremented(name->var(), update->increment ? 1 : -1);
     }
-  } else if (auto *index = dyn_cast<IndexExpr>(update->target); index && !index->keyed) {
+  } else if (auto *index = dyn_cast<IndexExpr>(update->target); index && !index->keyed()) {
     if (index->object->type->isTypedArray()) {
       checker_.bytesChecker().checkBytesStore(index, nullptr);
     } else if (!checker_.indexProofs().provesInBounds(index->object, index->index, false)) {

@@ -31,13 +31,13 @@ llvm::Constant *ErrSites::none() {
 
 std::string ErrSites::functionName() const {
   const FunctionDecl *fn = lowering_.currentFn_;
-  while (fn && fn->isExpression && fn->source.empty()) {
+  while (fn && fn->isExpression() && fn->source.empty()) {
     fn = fn->parent;
   }
   if (!fn) {
     return "";
   }
-  if (fn->cls() && !fn->cls()->literal) {
+  if (fn->cls() && !fn->cls()->literal()) {
     if (fn->isConstructor() || fn == fn->cls()->init) {
       return "new " + fn->cls()->name.str();
     }

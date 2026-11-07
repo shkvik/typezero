@@ -113,9 +113,9 @@ bool DecoratorChecker::decoratorParams(Expr *callee, std::vector<const Type *> &
                                        size_t &required) {
   const FuncSymbol *sym = nullptr;
   if (auto *name = dyn_cast<NameExpr>(callee)) {
-    Checker::ScopeEntry entry = checker_.scopes().lookup(name->name);
-    if (entry.var) {
-      const Type *type = entry.var->type;
+    ScopeEntry entry = checker_.scopes().lookup(name->name);
+    if (entry.var()) {
+      const Type *type = entry.var()->type;
       if (!type || !type->isFunction() || type->hasRest()) {
         return false;
       }
@@ -123,10 +123,10 @@ bool DecoratorChecker::decoratorParams(Expr *callee, std::vector<const Type *> &
       required = type->minArgs();
       return true;
     }
-    sym = entry.func;
+    sym = entry.func();
   } else if (auto *member = dyn_cast<MemberExpr>(callee)) {
     auto *object = dyn_cast<NameExpr>(member->object);
-    if (ClassDecl *cls = object ? checker_.scopes().lookup(object->name).cls : nullptr) {
+    if (ClassDecl *cls = object ? checker_.scopes().lookup(object->name).cls() : nullptr) {
       std::vector<FunctionDecl *> methods = ClassDeclarer::methodsNamed(cls, member->name, true);
       if (methods.size() == 1) {
         sym = methods[0]->sym;
@@ -322,7 +322,7 @@ void DecoratorChecker::decorate(ClassDecl *cls, ClassField *field, FunctionDecl 
     if (!name || !name->typeArgs.empty() || own != Place::Method || cls->isGeneric()) {
       return nullptr;
     }
-    const FuncSymbol *factory = checker_.scopes().lookup(name->name).func;
+    const FuncSymbol *factory = checker_.scopes().lookup(name->name).func();
     if (!factory || !factory->decl || factory->decl->typeParams.empty()) {
       return nullptr;
     }
@@ -432,7 +432,7 @@ void DecoratorChecker::decorate(ClassDecl *cls, ClassField *field, FunctionDecl 
     impl->type = descType->field("value")->type;
     impl->place = GlobalVar{.usedInFunction = true};
     impl->reassigned = true;
-    checker_.scopes().declare(impl->name, impl->loc, {impl});
+    checker_.scopes().declare(impl->name, impl->loc, {VarEntry{.var = impl}});
     method->member()->impl = impl;
     auto *lit = checker_.ctx_.make<ObjectLitExpr>(at);
     auto prop = [&](llvm::StringRef name, Expr *value) {
@@ -518,7 +518,7 @@ void DecoratorChecker::decorate(ClassDecl *cls, ClassField *field, FunctionDecl 
     const Type *result = applied->type;
     if (descVar && place == Place::Method && result == descType) {
       auto *target = checker_.ctx_.make<NameExpr>(loc, descVar->name);
-      target->var = descVar;
+      target->binding = NamedVar{.var = descVar};
       target->type = descType;
       auto *assign = checker_.ctx_.make<AssignExpr>(loc, std::nullopt, target, applied);
       assign->type = descType;

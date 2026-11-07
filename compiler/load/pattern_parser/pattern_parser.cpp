@@ -27,6 +27,15 @@ namespace tz {
 
 PatternParser::PatternParser(Parser &parser) : parser_(parser) {}
 
+BindingForm PatternParser::formOf(const Parser::Pattern &pattern) {
+  if (pattern.object) {
+    return ObjectPattern{};
+  }
+  bool rest = !pattern.elements.empty() && pattern.elements.back().rest;
+
+  return ArrayPattern{.length = pattern.elements.size(), .rest = rest};
+}
+
 std::unique_ptr<Parser::Pattern> PatternParser::parseBindingPattern() {
   if (parser_.tok_.is(Tok::LBrace)) {
     return parseObjectPattern();
@@ -151,9 +160,9 @@ std::unique_ptr<Parser::Pattern> PatternParser::patternFromLiteral(Expr *expr) {
       const ObjectLitExpr::Property &prop = object->props[i];
       Parser::Pattern::Element e;
       e.loc = prop.loc;
-      e.rest = prop.spread;
+      e.rest = prop.spread();
       e.key = prop.name;
-      e.keyExpr = prop.key;
+      e.keyExpr = prop.key();
       if (e.rest && i + 1 != object->props.size()) {
         parser_.cursor().report(e.loc, "a rest element must be the last one");
       }
@@ -210,10 +219,7 @@ void PatternParser::declarePattern(VarDeclStmt *decl, const Parser::Pattern &pat
                                    std::optional<TypeRef> typeAnn) {
   VarDeclarator hidden = hiddenDeclarator(pattern.loc, value);
   hidden.typeAnn = std::move(typeAnn);
-  hidden.destructured = true;
-  hidden.objectPattern = pattern.object;
-  hidden.patternLength = pattern.elements.size();
-  hidden.patternRest = !pattern.elements.empty() && pattern.elements.back().rest;
+  hidden.form = PatternParser::formOf(pattern);
   decl->decls.push_back(hidden);
   declareElements(decl, pattern, hidden.name);
 }
@@ -257,10 +263,7 @@ Stmt *PatternParser::assignPattern(llvm::SMLoc loc, const Parser::Pattern &patte
     }
   } else {
     VarDeclarator hidden = hiddenDeclarator(pattern.loc, value);
-    hidden.destructured = true;
-    hidden.objectPattern = pattern.object;
-    hidden.patternLength = pattern.elements.size();
-    hidden.patternRest = !pattern.elements.empty() && pattern.elements.back().rest;
+    hidden.form = PatternParser::formOf(pattern);
     decl->decls.push_back(hidden);
   }
   llvm::StringRef base = decl->decls.front().name;
@@ -307,13 +310,14 @@ Expr *PatternParser::elementOf(llvm::StringRef base, const Parser::Pattern &patt
     ObjectLitExpr::Property spread;
     spread.loc = e.loc;
     spread.value = source;
-    spread.spread = true;
+    SpreadProperty copied;
     for (const Parser::Pattern::Element &other : pattern.elements) {
       if (!other.rest && !other.keyExpr) {
-        spread.omit.push_back(other.key);
+        copied.omit.push_back(other.key);
       }
     }
-    spread.omitKeys = keyReads;
+    copied.omitKeys = keyReads;
+    spread.form = std::move(copied);
     copy->props.push_back(std::move(spread));
     return copy;
   } else if (e.keyExpr) {

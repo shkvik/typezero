@@ -62,7 +62,7 @@ std::vector<const ClassDecl *> UnknownCastLowerer::classesOfType(const Type *typ
     return classes;
   }
   for (const ClassDecl *cls : lowering_.emittedClasses_) {
-    if (cls->type && !cls->literal && cls->type->isSubtypeOf(type)) {
+    if (cls->type && !cls->literal() && cls->type->isSubtypeOf(type)) {
       classes.push_back(cls);
     }
   }

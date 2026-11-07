@@ -73,19 +73,19 @@ Expr *OsChecker::checkOsCall(CallExpr *call, llvm::StringRef fn, llvm::SMLoc loc
                                                 "type",    "release", "version",  "machine"};
   if (const auto *s = llvm::find(strings, fn); s != std::end(strings)) {
     which(int(s - std::begin(strings)));
-    call->builtin = Builtin::OsString;
+    call->target = BuiltinCall{.builtin = Builtin::OsString};
     call->type = Type::string();
     return call;
   }
   static const llvm::StringLiteral numbers[] = {"totalmem", "freemem", "uptime"};
   if (const auto *n = llvm::find(numbers, fn); n != std::end(numbers)) {
     which(int(n - std::begin(numbers)));
-    call->builtin = Builtin::OsNumber;
+    call->target = BuiltinCall{.builtin = Builtin::OsNumber};
     call->type = Type::doubleTy();
     return call;
   }
   if (fn == "platform") {
-    call->builtin = Builtin::ProcessPlatform;
+    call->target = BuiltinCall{.builtin = Builtin::ProcessPlatform};
     call->type = Type::string();
     return call;
   }
@@ -95,22 +95,22 @@ Expr *OsChecker::checkOsCall(CallExpr *call, llvm::StringRef fn, llvm::SMLoc loc
     return lit;
   }
   if (fn == "availableParallelism") {
-    call->builtin = Builtin::OsAvailableParallelism;
+    call->target = BuiltinCall{.builtin = Builtin::OsAvailableParallelism};
     call->type = Type::intTy();
     return call;
   }
   if (fn == "cpus") {
-    call->builtin = Builtin::OsCpus;
+    call->target = BuiltinCall{.builtin = Builtin::OsCpus};
     call->type = Type::array(cpuInfoType());
     return call;
   }
   if (fn == "loadavg") {
-    call->builtin = Builtin::OsLoadavg;
+    call->target = BuiltinCall{.builtin = Builtin::OsLoadavg};
     call->type = Type::array(Type::doubleTy());
     return call;
   }
   if (fn == "userInfo") {
-    call->builtin = Builtin::OsUserInfo;
+    call->target = BuiltinCall{.builtin = Builtin::OsUserInfo};
     call->type = userInfoType();
     return call;
   }

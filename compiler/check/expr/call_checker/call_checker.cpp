@@ -116,7 +116,7 @@ Expr *CallChecker::checkCall(CallExpr *call, const Type *expected) {
       member->typeArgs.clear();
     };
     if (auto *object = dyn_cast<NameExpr>(member->object);
-        !object || !checker_.scopes().lookup(object->name).cls) {
+        !object || !checker_.scopes().lookup(object->name).cls()) {
       static const llvm::StringLiteral globals[] = {"String", "Number", "Object", "Iterator",
                                                     "Array",  "Map",    "Symbol"};
       auto named = [&](llvm::StringRef g) { return isGlobalName(object, g); };
@@ -145,7 +145,7 @@ Expr *CallChecker::checkCall(CallExpr *call, const Type *expected) {
       return checker_.objectChecker().checkObjectCall(call, member, expected);
     }
     auto *object = dyn_cast<NameExpr>(member->object);
-    if (ClassDecl *cls = object ? checker_.scopes().lookup(object->name).cls : nullptr) {
+    if (ClassDecl *cls = object ? checker_.scopes().lookup(object->name).cls() : nullptr) {
       return checker_.staticChecker().checkClassStaticCall(call, member, cls, expected);
     }
     if (object && object->name == "this") {
@@ -268,7 +268,7 @@ Expr *CallChecker::checkCall(CallExpr *call, const Type *expected) {
     }
     if (receiver->isBool() && member->name == "toString" && call->args.empty()) {
       call->args.push_back(checker_.concatChecker().toStringOperand(member->object));
-      call->builtin = Builtin::StringOf;
+      call->target = BuiltinCall{.builtin = Builtin::StringOf};
       call->type = Type::string();
       return call;
     }
@@ -304,37 +304,38 @@ Expr *CallChecker::checkCall(CallExpr *call, const Type *expected) {
     if (Expr *builtin = checker_.globalFunctionChecker().checkGlobalCall(call, name)) {
       return builtin;
     }
-    Checker::ScopeEntry entry = checker_.topLevelChecker().lookupValue(name->name);
-    if (entry.func && !entry.var) {
+    ScopeEntry entry = checker_.topLevelChecker().lookupValue(name->name);
+    if (entry.func() && !entry.var()) {
       for (const Feature *feature : checker_.features_->all()) {
-        if (Expr *checked = feature->checkLibraryCall(checker_, call, name, entry.func)) {
+        if (Expr *checked = feature->checkLibraryCall(checker_, call, name, entry.func())) {
           return checked;
         }
       }
     }
-    if (entry.func && !entry.var) {
-      Expr *checked = checkDirectCall(call, entry.func, name->loc(), expected);
-      checker_.tzModulesChecker().noteHttpsCall(call, entry.func->decl);
+    if (entry.func() && !entry.var()) {
+      Expr *checked = checkDirectCall(call, entry.func(), name->loc(), expected);
+      checker_.tzModulesChecker().noteHttpsCall(call, entry.func()->decl);
       return checked;
     }
-    VarSymbol *var = entry.var;
+    VarSymbol *var = entry.var();
     FunctionDecl *known = var ? (var->function() ? var->function()
                                  : var->isConst  ? var->lambda()
                                                  : nullptr)
                               : nullptr;
     if (known && known->sym) {
-      name->var = var;
+      name->binding = NamedVar{.var = var};
       checker_.nestedFunctions().noteUse(var, name->loc());
       name->type = checker_.scopes().varType(var);
       return checkDirectCall(call, known->sym, name->loc());
     }
-    if (!entry.var && !entry.func && !entry.cls && name->name == "Array" && !call->hasSpread()) {
+    if (!entry.var() && !entry.func() && !entry.cls() && name->name == "Array" &&
+        !call->hasSpread()) {
       auto *made = checker_.ctx_.make<NewExpr>(call->loc(), name->name, name->typeArgs, call->args);
 
       return checker_.newChecker().checkNew(made, expected);
     }
-    if (!entry.var && !entry.func) {
-      if (const char *why = !entry.cls ? whyUnsupported(name->name) : nullptr) {
+    if (!entry.var() && !entry.func()) {
+      if (const char *why = !entry.cls() ? whyUnsupported(name->name) : nullptr) {
         checker_.diags_.error(name->loc(), "'" + name->name + "' is not supported: " + why);
       } else if (!checker_.nameChecker().checkName(name)->type->isError()) {
         checker_.diags_.error(name->loc(), "'" + name->name + "' is not a function");
@@ -352,8 +353,8 @@ Expr *CallChecker::checkCall(CallExpr *call, const Type *expected) {
   const Type *type = call->callee->type;
   if (type->isFunction()) {
     Expr *checked = checkValueCall(call, type);
-    if (calleeName && calleeName->var && !checker_.streamCallbacks_.empty()) {
-      checker_.chunkTypes().noteStreamCallback(call, calleeName->var);
+    if (calleeName && calleeName->var() && !checker_.streamCallbacks_.empty()) {
+      checker_.chunkTypes().noteStreamCallback(call, calleeName->var());
     }
     return checked;
   }
@@ -387,7 +388,7 @@ Expr *CallChecker::checkDirectCall(CallExpr *call, FuncSymbol *func, llvm::SMLoc
                                    "' is not a generic function; remove the type arguments");
   }
   checker_.returnInferrer().resolveParams(func);
-  call->func = func;
+  call->target = FunctionCall{.func = func};
   call->type = checker_.returnInferrer().returnType(func);
 
   return checker_.argumentChecker().checkArguments(call, func->params, func->minArgs, func->hasRest,
@@ -442,9 +443,9 @@ bool CallChecker::isGlobalName(const Expr *expr, llvm::StringRef name) const {
   if (checker_.builtinModuleChecker().nodeName(name)) {
     return false;
   }
-  Checker::ScopeEntry shadow = checker_.scopes().lookup(name);
+  ScopeEntry shadow = checker_.scopes().lookup(name);
 
-  return !shadow.var && !shadow.func && !shadow.cls;
+  return !shadow.var() && !shadow.func() && !shadow.cls();
 }
 
 }

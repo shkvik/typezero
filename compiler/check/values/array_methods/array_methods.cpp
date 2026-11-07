@@ -27,11 +27,11 @@ const VarSymbol *arrayVariable(const Expr *object) {
     object = conv->operand;
   }
   auto *name = dyn_cast<NameExpr>(object);
-  if (!name || !name->var || !name->var->type->nonOptional()->isArray()) {
+  if (!name || !name->var() || !name->var()->type->nonOptional()->isArray()) {
     return nullptr;
   }
 
-  return name->var;
+  return name->var();
 }
 
 }
@@ -99,7 +99,7 @@ Expr *ArrayMethods::checkArrayMethod(CallExpr *call, MemberExpr *member, const T
         elementArg(i);
       }
     }
-    call->builtin = name == "push" ? Builtin::ArrPush : Builtin::ArrUnshift;
+    call->target = BuiltinCall{.builtin = name == "push" ? Builtin::ArrPush : Builtin::ArrUnshift};
     call->type = Type::intTy();
     if (self && !spreads) {
       checker_.flow_.facts.shift(Term::lengthOf(self), static_cast<int64_t>(count));
@@ -112,7 +112,7 @@ Expr *ArrayMethods::checkArrayMethod(CallExpr *call, MemberExpr *member, const T
     if (!arity(0, 0)) {
       return call;
     }
-    call->builtin = name == "pop" ? Builtin::ArrPop : Builtin::ArrShift;
+    call->target = BuiltinCall{.builtin = name == "pop" ? Builtin::ArrPop : Builtin::ArrShift};
     bool notEmpty = checker_.indexProofs().provesNotEmpty(member->object);
     call->mayBeOutOfRange = !notEmpty;
     call->type = notEmpty ? element : Type::optional(element);
@@ -133,7 +133,7 @@ Expr *ArrayMethods::checkArrayMethod(CallExpr *call, MemberExpr *member, const T
       return call;
     }
     positionArgs(0);
-    call->builtin = Builtin::ArrAt;
+    call->target = BuiltinCall{.builtin = Builtin::ArrAt};
     call->mayBeOutOfRange = !checker_.indexProofs().provesAtInBounds(member->object, call->args[0]);
     call->type = call->mayBeOutOfRange ? Type::optional(element) : element;
     return call;
@@ -144,7 +144,7 @@ Expr *ArrayMethods::checkArrayMethod(CallExpr *call, MemberExpr *member, const T
       return call;
     }
     positionArgs(0);
-    call->builtin = Builtin::ArrSlice;
+    call->target = BuiltinCall{.builtin = Builtin::ArrSlice};
     call->type = arrayType;
     return call;
   }
@@ -156,7 +156,7 @@ Expr *ArrayMethods::checkArrayMethod(CallExpr *call, MemberExpr *member, const T
         call->args[i] = checker_.typeRelations().coerce(call->args[i], element);
       }
     }
-    call->builtin = Builtin::ArrConcat;
+    call->target = BuiltinCall{.builtin = Builtin::ArrConcat};
     call->type = arrayType;
     return call;
   }
@@ -179,9 +179,9 @@ Expr *ArrayMethods::checkArrayMethod(CallExpr *call, MemberExpr *member, const T
     }
     elementArg(0);
     positionArgs(1);
-    call->builtin = name == "indexOf"       ? Builtin::ArrIndexOf
-                    : name == "lastIndexOf" ? Builtin::ArrLastIndexOf
-                                            : Builtin::ArrIncludes;
+    call->target = BuiltinCall{.builtin = name == "indexOf"       ? Builtin::ArrIndexOf
+                                          : name == "lastIndexOf" ? Builtin::ArrLastIndexOf
+                                                                  : Builtin::ArrIncludes};
     call->type = name == "includes" ? Type::boolTy() : Type::intTy();
     return call;
   }
@@ -235,7 +235,7 @@ Expr *ArrayMethods::checkArrayMethod(CallExpr *call, MemberExpr *member, const T
       call->args[0] = checker_.typeRelations().coerce(
           checker_.exprChecker().checkExpr(call->args[0], Type::string()), Type::string());
     }
-    call->builtin = Builtin::ArrJoin;
+    call->target = BuiltinCall{.builtin = Builtin::ArrJoin};
     call->type = Type::string();
     return call;
   }
@@ -244,7 +244,8 @@ Expr *ArrayMethods::checkArrayMethod(CallExpr *call, MemberExpr *member, const T
     if (!arity(0, 0)) {
       return call;
     }
-    call->builtin = name == "reverse" ? Builtin::ArrReverse : Builtin::ArrToString;
+    call->target =
+        BuiltinCall{.builtin = name == "reverse" ? Builtin::ArrReverse : Builtin::ArrToString};
     call->type = name == "reverse" ? arrayType : Type::string();
     return call;
   }
@@ -255,7 +256,7 @@ Expr *ArrayMethods::checkArrayMethod(CallExpr *call, MemberExpr *member, const T
     }
     elementArg(0);
     positionArgs(1);
-    call->builtin = Builtin::ArrFill;
+    call->target = BuiltinCall{.builtin = Builtin::ArrFill};
     call->type = arrayType;
     return call;
   }
@@ -320,7 +321,7 @@ Expr *ArrayMethods::checkArrayMethod(CallExpr *call, MemberExpr *member, const T
                                 (element->isOptional() ? "(x ?? 0) - (y ?? 0)" : "x - y") + ")'");
       return call;
     }
-    call->builtin = Builtin::ArrSort;
+    call->target = BuiltinCall{.builtin = Builtin::ArrSort};
     call->type = arrayType;
     return call;
   }
@@ -336,7 +337,7 @@ Expr *ArrayMethods::checkArrayMethod(CallExpr *call, MemberExpr *member, const T
         elementArg(i);
       }
     }
-    call->builtin = Builtin::ArrSplice;
+    call->target = BuiltinCall{.builtin = Builtin::ArrSplice};
     call->type = arrayType;
     checker_.flowChecker().arrayResized(arrayType, true, true);
     return call;

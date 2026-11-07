@@ -408,10 +408,11 @@ Expr *ChildChecker::checkChildCall(CallExpr *call, llvm::StringRef fn, llvm::SML
   const Type *failure = checker_.childErrorTypes().errorOf(fn, textOutput, viaShell);
   auto output = [&](unsigned i) { return stdio[i] == ChildPipe ? text : Type::optional(text); };
   if (fn == "spawnSync") {
-    call->builtin = Builtin::ChildSpawnSync;
+    call->target = BuiltinCall{.builtin = Builtin::ChildSpawnSync};
     call->type = Type::result(checker_.childErrorTypes().spawnResult(textOutput), failure);
   } else {
-    call->builtin = exec ? Builtin::ChildExecSync : Builtin::ChildExecFileSync;
+    call->target =
+        BuiltinCall{.builtin = exec ? Builtin::ChildExecSync : Builtin::ChildExecFileSync};
     call->type = Type::result(output(1), failure);
   }
 

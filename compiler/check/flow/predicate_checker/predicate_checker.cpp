@@ -27,7 +27,7 @@ const VarSymbol *argumentVariable(const Expr *expr) {
   }
   auto *name = dyn_cast<NameExpr>(expr);
 
-  return name ? name->var : nullptr;
+  return name ? name->var() : nullptr;
 }
 
 std::optional<Linear> argumentTerm(const Expr *expr) {
@@ -45,8 +45,8 @@ std::optional<Linear> argumentTerm(const Expr *expr) {
   if (auto *lit = dyn_cast<IntLitExpr>(expr); lit && lit->value < (uint64_t(1) << 31)) {
     return Linear{Term::zero(), negated ? -int64_t(lit->value) : int64_t(lit->value)};
   }
-  if (auto *name = dyn_cast<NameExpr>(expr); name && name->var && !negated) {
-    return Linear{Term::of(name->var), 0};
+  if (auto *name = dyn_cast<NameExpr>(expr); name && name->var() && !negated) {
+    return Linear{Term::of(name->var()), 0};
   }
 
   return std::nullopt;
@@ -58,10 +58,10 @@ PredicateChecker::PredicateChecker(Checker &checker) : checker_(checker) {}
 
 const Type *PredicateChecker::resolveReturnType(FunctionDecl *fn, FuncSymbol *sym) {
   const TypeRef &ref = *fn->returnType;
-  if (ref.kind != TypeRef::Kind::Predicate) {
+  if (ref.kind() != TypeRefKind::PREDICATE_REF) {
     return checker_.typeResolver().resolveType(ref, true);
   }
-  if (ref.asserts) {
+  if (ref.asserts()) {
     if (sym) {
       const Type *type =
           ref.args.empty() ? nullptr : checker_.typeResolver().resolveType(ref.args[0], false);
@@ -100,9 +100,8 @@ const Type *PredicateChecker::resolveReturnType(FunctionDecl *fn, FuncSymbol *sy
   }
   const Type *type =
       ref.args.empty() ? nullptr : checker_.typeResolver().resolveType(ref.args[0], false);
-  if (sym && param != -2 && (!type || !type->isError())) {
-    sym->predicateParam = param;
-    sym->predicateType = type;
+  if (sym && param != -2 && type && !type->isError()) {
+    sym->predicate = TypePredicate{.param = param, .type = type};
   }
 
   return Type::boolTy();
@@ -172,25 +171,26 @@ void PredicateChecker::notePredicateExit(const Checker::Flow &whenTrue,
   const FuncSymbol *sym = build.fn;
   build.whenTrue = FlowChecker::join(build.whenTrue, whenTrue);
   build.whenFalse = FlowChecker::join(build.whenFalse, whenFalse);
-  if (sym->predicateParam == -2 || !sym->predicateType || whenTrue.unreachable) {
+  if (!sym->predicate || whenTrue.unreachable) {
     return;
   }
+  const TypePredicate &predicate = *sym->predicate;
   const FunctionDecl *decl = build.decl;
-  const VarSymbol *var = sym->predicateParam == -1 ? decl->thisVar()
-                         : size_t(sym->predicateParam) < decl->params.size()
-                             ? decl->params[size_t(sym->predicateParam)].sym
+  const VarSymbol *var = predicate.param == -1 ? decl->thisVar()
+                         : size_t(predicate.param) < decl->params.size()
+                             ? decl->params[size_t(predicate.param)].sym
                              : nullptr;
   if (!var) {
     return;
   }
   const Type *shown = checker_.literalTypes().typeIn(whenTrue, var);
   if (shown->isError() || shown->isNever() ||
-      TypeRelations::isImplicitlyConvertible(shown, sym->predicateType)) {
+      TypeRelations::isImplicitlyConvertible(shown, predicate.type)) {
     return;
   }
   checker_.diags_.error(
       loc, functionLabel(sym->name) + " says '" + var->name.str() + " is " +
-               sym->predicateType->name().str() + "', but this may give true while '" +
+               predicate.type->name().str() + "', but this may give true while '" +
                var->name.str() + "' is only known to be '" + shown->name().str() +
                "'; show it with what narrows types: a union's tag, 'typeof', "
                "'instanceof', '!= undefined', 'Array.isArray' or a function that tests "
@@ -267,9 +267,8 @@ const Checker::Predicate *PredicateChecker::predicateOf(const FuncSymbol *fn) co
     return &found->second;
   }
   FunctionDecl *decl = fn->decl;
-  if (!decl || decl->checked || !decl->body || decl->external || decl->isGenerator ||
-      decl->isInstance ||
-      (fn->ret && !fn->ret->isBool()) || !summarizing_.insert(fn).second) {
+  if (!decl || decl->checked || !decl->body || decl->external() || decl->isGenerator ||
+      decl->isInstance || (fn->ret && !fn->ret->isBool()) || !summarizing_.insert(fn).second) {
     return nullptr;
   }
   Checker::BodyState saved = checker_.returnInferrer().enterBody(decl);
@@ -285,14 +284,14 @@ const Checker::Predicate *PredicateChecker::predicateOf(const FuncSymbol *fn) co
 
 void PredicateChecker::applyPredicate(const CallExpr *call, Checker::Flow &whenTrue,
                                       Checker::Flow &whenFalse) const {
-  const FuncSymbol *fn = call->func ? call->func : call->method;
-  if (!fn || call->virtualCall || !call->unionMethods.empty()) {
+  const FuncSymbol *fn = call->func() ? call->func() : call->method();
+  if (!fn || call->virtualCall() || !call->unionMethods().empty()) {
     return;
   }
   auto *member = dyn_cast<MemberExpr>(call->callee);
   auto argument = [&](int i) -> const Expr * {
     if (i == -1) {
-      return call->method && member ? member->object : nullptr;
+      return call->method() && member ? member->object : nullptr;
     }
 
     return size_t(i) < call->args.size() ? call->args[size_t(i)] : nullptr;
@@ -393,9 +392,9 @@ void PredicateChecker::applyPredicate(const CallExpr *call, Checker::Flow &whenT
     apply(summary->whenTrue, whenTrue);
     apply(summary->whenFalse, whenFalse);
   }
-  if (fn->predicateParam != -2 && fn->predicateType) {
-    if (const VarSymbol *var = variable(fn->predicateParam)) {
-      narrowTo(whenTrue, var, fn->predicateType);
+  if (fn->predicate) {
+    if (const VarSymbol *var = variable(fn->predicate->param)) {
+      narrowTo(whenTrue, var, fn->predicate->type);
     }
   }
 }
@@ -405,16 +404,16 @@ const Type *PredicateChecker::filteredType(const Expr *callback, const Type *ele
   if (auto *fe = dyn_cast<FunctionExpr>(callback)) {
     fn = fe->fn->sym;
   } else if (auto *name = dyn_cast<NameExpr>(callback)) {
-    fn = name->func                           ? name->func
-         : name->var && name->var->function() ? name->var->function()->sym
-                                              : nullptr;
+    fn = name->func()                             ? name->func()
+         : name->var() && name->var()->function() ? name->var()->function()->sym
+                                                  : nullptr;
   }
   if (!fn) {
     return nullptr;
   }
   const Type *kept = nullptr;
-  if (fn->predicateParam == 0 && fn->predicateType) {
-    kept = fn->predicateType;
+  if (fn->predicate && fn->predicate->param == 0) {
+    kept = fn->predicate->type;
   }
   if (const Checker::Predicate *summary = predicateOf(fn); summary && !kept) {
     const Checker::PredicateSide &side = summary->whenTrue;

@@ -199,11 +199,11 @@ void FlowChecker::assigned(const VarSymbol *var, const Expr *value) {
       checker_.flow_.facts.add(Term::of(var), Term::zero(), saturatingAdd(*range.hi, 1));
     }
     if (auto *call = dyn_cast<CallExpr>(value);
-        call && (call->builtin == Builtin::MathMin || call->builtin == Builtin::MathMax) &&
+        call && (call->builtin() == Builtin::MathMin || call->builtin() == Builtin::MathMax) &&
         !call->hasSpread()) {
       for (const Expr *arg : call->args) {
         if (std::optional<Linear> bound = checker_.indexProofs().linear(arg)) {
-          if (call->builtin == Builtin::MathMin) {
+          if (call->builtin() == Builtin::MathMin) {
             addLess(checker_.flow_.facts, Linear{Term::of(var), 0}, *bound, true);
           } else {
             addLess(checker_.flow_.facts, *bound, Linear{Term::of(var), 0}, true);

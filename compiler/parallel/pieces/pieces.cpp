@@ -457,7 +457,7 @@ void Pieces::findJoins() {
     root.multi |= rec.interval || !parentFn || !once(root.callerFn, root.rec, *parentFn, 0) ||
                   (size_t(root.parent) < i && analysis_.roots[root.parent].multi);
     const FunctionDecl *callee = analysis_.byFunction[root.fn]->decl;
-    if (rec.kind == CallKind::Inline && rec.call && rec.call->builtin == Builtin::ArrMap &&
+    if (rec.kind == CallKind::Inline && rec.call && rec.call->builtin() == Builtin::ArrMap &&
         callee && callee->params.size() > 1 && callee->params[1].sym &&
         analysis_.ownIndex.contains(callee->params[1].sym) && !rec.inLoop && parentFn &&
         fnOnce(root.callerFn, *parentFn, 0)) {

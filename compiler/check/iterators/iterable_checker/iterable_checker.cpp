@@ -131,14 +131,14 @@ Expr *IterableChecker::iteratorOf(Expr *it) {
   llvm::SMLoc loc = it->loc();
   auto *callee = checker_.ctx_.make<NameExpr>(loc, iterate->name);
   auto *call = checker_.ctx_.make<CallExpr>(loc, callee, std::vector<Expr *>{it});
-  call->func = iterate;
+  call->target = FunctionCall{.func = iterate};
   if (!checker_.trial_) {
     if (FuncSymbol *instance = checker_.genericInstantiator().instantiate(
             iterate, {type->nonOptional(), value}, loc)) {
-      call->func = instance;
+      call->target = FunctionCall{.func = instance};
     }
   }
-  callee->func = call->func;
+  callee->binding = NamedFunction{.func = call->func()};
   call->type = Type::iterator(value);
   callee->type = Type::function({type->nonOptional()}, 1, false, call->type);
   if (type->isOptional()) {
@@ -260,7 +260,7 @@ const Type *IterableChecker::elementTypeOf(const Type *type) {
 }
 
 bool IterableChecker::isIterableRef(const TypeRef &ref) const {
-  return ref.kind == TypeRef::Kind::Generic && ref.name == "Iterable" &&
+  return ref.kind() == TypeRefKind::GENERIC_REF && ref.name == "Iterable" &&
          !checker_.typeDeclarer().lookupType("Iterable");
 }
 

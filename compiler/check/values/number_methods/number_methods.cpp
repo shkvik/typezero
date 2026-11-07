@@ -53,7 +53,8 @@ Expr *NumberMethods::checkStaticCall(CallExpr *call, MemberExpr *member) {
       arg = codeUnits ? checker_.binaryChecker().toInt32(arg)
                       : checker_.typeRelations().convert(arg, Type::doubleTy());
     }
-    call->builtin = codeUnits ? Builtin::FromCharCode : Builtin::FromCodePoint;
+    call->target =
+        BuiltinCall{.builtin = codeUnits ? Builtin::FromCharCode : Builtin::FromCodePoint};
     call->type = Type::string();
     return call;
   }
@@ -73,7 +74,7 @@ Expr *NumberMethods::checkStaticCall(CallExpr *call, MemberExpr *member) {
         return call;
       }
       call->args[0] = checker_.mathChecker().numericArg(call->args[0]);
-      call->builtin = builtin;
+      call->target = BuiltinCall{.builtin = builtin};
       call->type = Type::boolTy();
       return call;
     }
@@ -121,7 +122,7 @@ Expr *NumberMethods::checkConversion(CallExpr *call, MemberExpr *member) {
   }
   if (from->isFloat() && to->isInteger()) {
     auto *rounding = dyn_cast<CallExpr>(member->object);
-    if (!rounding || !isRoundingBuiltin(rounding->builtin)) {
+    if (!rounding || !isRoundingBuiltin(rounding->builtin())) {
       checker_.diags_.error(member->loc(),
                             "a double becomes an integer only after rounding, which says what "
                             "happens to the fraction: 'Math.trunc(" +
@@ -130,7 +131,7 @@ Expr *NumberMethods::checkConversion(CallExpr *call, MemberExpr *member) {
       return call;
     }
   }
-  call->builtin = Builtin::NumConvert;
+  call->target = BuiltinCall{.builtin = Builtin::NumConvert};
   call->type = to;
 
   return call;
@@ -144,7 +145,7 @@ Expr *NumberMethods::checkNumberMethod(CallExpr *call, MemberExpr *member) {
     member->object = checker_.typeRelations().convert(member->object, Type::doubleTy());
     call->args[0] = checker_.memberChecker().checkPosition(call->args[0]);
     checker_.indexProofs().requireBetween(call->args[0], 2, 36, "the radix of 'toString'");
-    call->builtin = Builtin::NumToRadix;
+    call->target = BuiltinCall{.builtin = Builtin::NumToRadix};
     call->type = Type::string();
     return call;
   }
@@ -153,7 +154,7 @@ Expr *NumberMethods::checkNumberMethod(CallExpr *call, MemberExpr *member) {
       return call;
     }
     call->args.push_back(checker_.concatChecker().toStringOperand(member->object));
-    call->builtin = Builtin::StringOf;
+    call->target = BuiltinCall{.builtin = Builtin::StringOf};
     call->type = Type::string();
     return call;
   }
@@ -167,7 +168,7 @@ Expr *NumberMethods::checkNumberMethod(CallExpr *call, MemberExpr *member) {
       checker_.indexProofs().requireBetween(call->args[0], 0, 100,
                                             "the number of digits of 'toFixed'");
     }
-    call->builtin = Builtin::NumToFixed;
+    call->target = BuiltinCall{.builtin = Builtin::NumToFixed};
     call->type = Type::string();
     return call;
   }

@@ -184,7 +184,7 @@ Expr *KeyPairChecker::checkGenerateKeyPair(CallExpr *call, llvm::SMLoc loc,
   }
   call->args = std::move(parts);
   call->spread.clear();
-  call->builtin = Builtin::CryptoKeyPair;
+  call->target = BuiltinCall{.builtin = Builtin::CryptoKeyPair};
   call->type = Type::result(
       Type::object({{"publicKey", fields[0], false}, {"privateKey", fields[1], false}}, "KeyPair"),
       checker_.cryptoErrorTypes().named("GenerateKeyPairError"));

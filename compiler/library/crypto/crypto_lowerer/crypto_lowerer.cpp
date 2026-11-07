@@ -235,10 +235,10 @@ void CryptoLowerer::useErrors(const Type *errorType) {
 }
 
 llvm::Value *CryptoLowerer::emitCryptoCall(CallExpr *call) {
-  if (call->builtin == Builtin::CryptoKeyPair) {
+  if (call->builtin() == Builtin::CryptoKeyPair) {
     return emitCryptoKeyPair(call);
   }
-  if (call->builtin == Builtin::CryptoKeyPairAsync) {
+  if (call->builtin() == Builtin::CryptoKeyPairAsync) {
     return emitCryptoKeyPairAsync(call);
   }
   llvm::Type *ptr = lowering_.builder_.getPtrTy(), *i32 = lowering_.builder_.getInt32Ty(),

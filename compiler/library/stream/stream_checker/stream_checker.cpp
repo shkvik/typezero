@@ -41,93 +41,96 @@ bool isByteChunk(const Type *type) { return type->isBuffer() || type->isString()
 StreamChecker::StreamChecker(Checker &checker) : checker_(checker) {}
 
 Expr *StreamChecker::checkStreamIntrinsic(CallExpr *call, NameExpr *name, const Type *typeArg) {
-  switch (call->builtin) {
-  case Builtin::LibChunk:
-  case Builtin::LibIsChunk:
-    call->args[0] = checker_.argumentChecker().checkArg(call->args[0], Type::unknown());
-    call->type = call->builtin == Builtin::LibChunk ? typeArg : Type::boolTy();
-    if (call->builtin == Builtin::LibIsChunk) {
-      Expr *witness = checker_.ctx_.make<UndefinedExpr>(call->loc());
-      witness->type = typeArg;
-      call->args.push_back(witness);
-    }
-    return call;
-  case Builtin::LibChunkKind: {
-    unsigned kind = typeArg->isBuffer() ? 0 : typeArg->isString() ? 1 : 2;
-    return checker_.exprChecker().checkExpr(
-        checker_.ctx_.make<IntLitExpr>(call->loc(), uint64_t(kind)), Type::intTy());
-  }
-  case Builtin::LibTypeName: {
-    llvm::SmallVector<llvm::UTF16, 32> units;
-    llvm::convertUTF8ToUTF16String(typeArg->name(), units);
-    return checker_.exprChecker().checkExpr(
-        checker_.ctx_.make<StringLitExpr>(call->loc(), std::u16string(units.begin(), units.end())),
-        Type::string());
-  }
-  case Builtin::LibOverrides: {
-    call->args[0] = checker_.exprChecker().checkExpr(call->args[0]);
-    call->type = Type::boolTy();
-    ClassDecl *cls = ClassDeclarer::classOf(call->args[0]->type);
-    auto *lit = dyn_cast<StringLitExpr>(call->args[1]);
-    if (!cls || !lit) {
-      checker_.diags_.error(name->loc(), "'overrides' takes an object of a class and the name of a "
-                                         "method, as a string literal");
+  switch (call->builtin()) {
+    case Builtin::LibChunk:
+    case Builtin::LibIsChunk:
+      call->args[0] = checker_.argumentChecker().checkArg(call->args[0], Type::unknown());
+      call->type = call->builtin() == Builtin::LibChunk ? typeArg : Type::boolTy();
+      if (call->builtin() == Builtin::LibIsChunk) {
+        Expr *witness = checker_.ctx_.make<UndefinedExpr>(call->loc());
+        witness->type = typeArg;
+        call->args.push_back(witness);
+      }
       return call;
+    case Builtin::LibChunkKind: {
+      unsigned kind = typeArg->isBuffer() ? 0 : typeArg->isString() ? 1 : 2;
+      return checker_.exprChecker().checkExpr(
+          checker_.ctx_.make<IntLitExpr>(call->loc(), uint64_t(kind)), Type::intTy());
     }
-    std::string method = utf8(lit->value);
-    std::vector<FunctionDecl *> methods = ClassDeclarer::methodsNamed(cls, method, false);
-    if (methods.empty() || !methods[0]->sym) {
-      checker_.diags_.error(lit->loc(), "class '" + cls->name + "' has no method '" + method + "'");
+    case Builtin::LibTypeName: {
+      llvm::SmallVector<llvm::UTF16, 32> units;
+      llvm::convertUTF8ToUTF16String(typeArg->name(), units);
+      return checker_.exprChecker().checkExpr(
+          checker_.ctx_.make<StringLitExpr>(call->loc(),
+                                            std::u16string(units.begin(), units.end())),
+          Type::string());
+    }
+    case Builtin::LibOverrides: {
+      call->args[0] = checker_.exprChecker().checkExpr(call->args[0]);
+      call->type = Type::boolTy();
+      ClassDecl *cls = ClassDeclarer::classOf(call->args[0]->type);
+      auto *lit = dyn_cast<StringLitExpr>(call->args[1]);
+      if (!cls || !lit) {
+        checker_.diags_.error(name->loc(),
+                              "'overrides' takes an object of a class and the name of a "
+                              "method, as a string literal");
+        return call;
+      }
+      std::string method = utf8(lit->value);
+      std::vector<FunctionDecl *> methods = ClassDeclarer::methodsNamed(cls, method, false);
+      if (methods.empty() || !methods[0]->sym) {
+        checker_.diags_.error(lit->loc(),
+                              "class '" + cls->name + "' has no method '" + method + "'");
 
+        return call;
+      }
+      call->args[1] = checker_.exprChecker().checkExpr(call->args[1]);
+      call->target = MethodCall{.method = methods[0]->sym};
       return call;
     }
-    call->args[1] = checker_.exprChecker().checkExpr(call->args[1]);
-    call->method = methods[0]->sym;
-    return call;
-  }
-  case Builtin::LibStdinFailed:
-    call->type = Type::boolTy();
-    return call;
-  case Builtin::LibFsOpen:
-  case Builtin::LibFsRead:
-  case Builtin::LibFsWrite:
-  case Builtin::LibFsClose:
-  case Builtin::LibStdinChunk:
-  case Builtin::LibStdWrite: {
-    const Type *buffer = Type::bytesType(Type::Bytes::Buffer);
-    std::vector<const Type *> params;
-    const Type *result = Type::promise(
-        Type::result(Type::intTy(), typeArg ? typeArg : checker_.fsChecker().nativeError()));
-    switch (call->builtin) {
+    case Builtin::LibStdinFailed:
+      call->type = Type::boolTy();
+      return call;
     case Builtin::LibFsOpen:
-      params = {Type::string(), Type::string(), Type::intTy()};
-      break;
     case Builtin::LibFsRead:
     case Builtin::LibFsWrite:
-      params = {Type::intTy(), buffer, Type::intTy(), Type::intTy(), Type::doubleTy()};
-      break;
     case Builtin::LibFsClose:
-      params = {Type::intTy(), Type::boolTy()};
-      break;
     case Builtin::LibStdinChunk:
-      params = {Type::intTy()};
-      result = Type::promise(Type::optional(buffer));
-      break;
+    case Builtin::LibStdWrite: {
+      const Type *buffer = Type::bytesType(Type::Bytes::Buffer);
+      std::vector<const Type *> params;
+      const Type *result = Type::promise(
+          Type::result(Type::intTy(), typeArg ? typeArg : checker_.fsChecker().nativeError()));
+      switch (call->builtin()) {
+        case Builtin::LibFsOpen:
+          params = {Type::string(), Type::string(), Type::intTy()};
+          break;
+        case Builtin::LibFsRead:
+        case Builtin::LibFsWrite:
+          params = {Type::intTy(), buffer, Type::intTy(), Type::intTy(), Type::doubleTy()};
+          break;
+        case Builtin::LibFsClose:
+          params = {Type::intTy(), Type::boolTy()};
+          break;
+        case Builtin::LibStdinChunk:
+          params = {Type::intTy()};
+          result = Type::promise(Type::optional(buffer));
+          break;
+        default:
+          params = {Type::intTy(), buffer};
+          result = Type::intTy();
+          break;
+      }
+      for (size_t i = 0; i < params.size(); ++i) {
+        call->args[i] = checker_.argumentChecker().checkArg(call->args[i], params[i]);
+      }
+      call->type = result;
+      checker_.file_->usesAsync = true;
+      checker_.flowChecker().calledFunction();
+      return call;
+    }
     default:
-      params = {Type::intTy(), buffer};
-      result = Type::intTy();
-      break;
-    }
-    for (size_t i = 0; i < params.size(); ++i) {
-      call->args[i] = checker_.argumentChecker().checkArg(call->args[i], params[i]);
-    }
-    call->type = result;
-    checker_.file_->usesAsync = true;
-    checker_.flowChecker().calledFunction();
-    return call;
-  }
-  default:
-    return call;
+      return call;
   }
 }
 
@@ -200,7 +203,7 @@ Expr *StreamChecker::checkStreamCall(CallExpr *call, MemberExpr *member, ClassDe
     return nullptr;
   }
   std::vector<FunctionDecl *> methods = ClassDeclarer::methodsNamed(cls, name, false);
-  if (!methods.empty() && !methods[0]->cls()->library) {
+  if (!methods.empty() && !methods[0]->cls()->library()) {
     return nullptr;
   }
   const Type *receiver = member->object->type;

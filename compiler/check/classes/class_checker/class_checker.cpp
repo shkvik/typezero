@@ -43,12 +43,12 @@ ClassChecker::ResultClassDeclared ClassChecker::checkClassStmt(ClassDecl *cls) {
     });
   }
 
-  if (cls->baseExpr && !cls->resolved) {
+  if (cls->baseExpr && cls->stage == ClassStage::UNRESOLVED) {
     this->checker.lateClasses().makeLateClass(cls);
   }
   this->checker.lateClasses().checkStaticFields(cls);
   ClassDecl *outer = std::exchange(this->checker.currentClass_, cls);
-  if (!cls->generic && this->hasDecorators(cls).isOk()) {
+  if (!cls->generic() && this->hasDecorators(cls).isOk()) {
     this->checker.decoratorChecker().decorateClass(cls);
   }
   this->checker.currentClass_ = outer;
@@ -246,7 +246,7 @@ ClassChecker::ResultInitThisFound ClassChecker::isInitThis(const Expr *expr) con
         .message = message,
     });
   }
-  if (!name || name->var != this->checker.initThis_) {
+  if (!name || name->var() != this->checker.initThis_) {
     std::string message = ErrorTextInitThis::notThis();
 
     return err(ClassCheckerIsInitThisError{
@@ -419,7 +419,7 @@ ClassChecker::ResultThisReference ClassChecker::checkThis(NameExpr *name) {
     });
   }
 
-  name->var = var;
+  name->binding = NamedVar{.var = var};
   this->checker.nestedFunctions().noteUse(var, name->loc());
   name->type = var->type;
   ResultThisReadiness ready = this->readyThis(var);

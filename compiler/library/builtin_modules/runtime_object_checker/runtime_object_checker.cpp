@@ -77,7 +77,7 @@ Expr *RuntimeObjectChecker::checkRuntimeMethod(CallExpr *call, MemberExpr *membe
       if (!checker_.argumentChecker().checkArity(call, member->loc(), 0, 0)) {
         return call;
       }
-      call->builtin = Builtin::RlClose;
+      call->target = BuiltinCall{.builtin = Builtin::RlClose};
       call->type = Type::voidTy();
       return call;
     }
@@ -88,7 +88,7 @@ Expr *RuntimeObjectChecker::checkRuntimeMethod(CallExpr *call, MemberExpr *membe
       Expr *query = checker_.argumentChecker().checkArg(call->args[0], Type::string());
       if (promises) {
         call->args = {query};
-        call->builtin = Builtin::RlQuestion;
+        call->target = BuiltinCall{.builtin = Builtin::RlQuestion};
         call->type = Type::promise(
             Type::result(Type::string(), checker_.prelude().builtinType("QuestionError")));
         return call;
@@ -120,7 +120,7 @@ Expr *RuntimeObjectChecker::checkRuntimeMethod(CallExpr *call, MemberExpr *membe
         fe->fn->nonEscaping = false;
       }
       call->args = {query, callback};
-      call->builtin = Builtin::RlQuestionCallback;
+      call->target = BuiltinCall{.builtin = Builtin::RlQuestionCallback};
       call->type = Type::voidTy();
       return call;
     }

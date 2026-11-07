@@ -301,10 +301,10 @@ Expr *UnionChecker::checkUnionMethodCall(CallExpr *call, MemberExpr *member) {
     return loosely();
   }
   const Type *fnType = nullptr;
-  std::vector<CallExpr::UnionMethod> methods;
+  std::vector<UnionMethod> methods;
   for (const Type *m : receiver->members()) {
     const Type *type = nullptr;
-    CallExpr::UnionMethod entry{m, nullptr, false};
+    UnionMethod entry{m, nullptr, false};
     if (ClassDecl *cls = ClassDeclarer::classOf(m)) {
       checker_.classDeclarer().completeClass(cls);
       const ClassDecl *owner = nullptr;
@@ -366,7 +366,7 @@ Expr *UnionChecker::checkUnionMethodCall(CallExpr *call, MemberExpr *member) {
     fnType = type;
     methods.push_back(entry);
   }
-  call->unionMethods = std::move(methods);
+  call->target = UnionMethodCall{.unionMethods = std::move(methods)};
   member->type = fnType;
   checker_.argumentChecker().checkArguments(call, fnType->params(), fnType->minArgs(),
                                             fnType->hasRest(), member->loc());

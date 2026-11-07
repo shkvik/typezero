@@ -161,7 +161,7 @@ void DecimalChecker::checkComparisonOperands(BinaryExpr *bin) {
     auto *owner = member ? dyn_cast<NameExpr>(member->object) : nullptr;
 
     return isLiteralTree(e) || isa<StringLitExpr>(e) || isa<BoolLitExpr>(e) ||
-           (owner && checker_.scopes().lookup(owner->name).enumDecl);
+           (owner && checker_.scopes().lookup(owner->name).enumDecl());
   };
   auto hint = [&](const Expr *other, const Expr *self) {
     const Type *type = other->type ? other->type->nonOptional() : nullptr;
@@ -379,7 +379,7 @@ Expr *DecimalChecker::checkDecimalCall(CallExpr *call, llvm::SMLoc loc) {
     if (!text->isString()) {
       arg = checker_.typeRelations().convert(arg, Type::string());
     }
-    call->builtin = Builtin::DecimalOf;
+    call->target = BuiltinCall{.builtin = Builtin::DecimalOf};
     call->type =
         texts ? Type::decimalTy()
               : Type::result(Type::decimalTy(), checker_.prelude().builtinType("DecimalError"));
@@ -393,7 +393,7 @@ Expr *DecimalChecker::checkDecimalCall(CallExpr *call, llvm::SMLoc loc) {
     checker_.diags_.error(arg->loc(), message);
     return call;
   }
-  call->builtin = Builtin::DecimalOf;
+  call->target = BuiltinCall{.builtin = Builtin::DecimalOf};
   call->type = Type::decimalTy();
 
   return call;
@@ -444,7 +444,7 @@ Expr *DecimalChecker::checkDecimalStatic(CallExpr *call, MemberExpr *member) {
     checker_.diags_.error(member->loc(), "decimal." + name + "() needs at least one value");
     return call;
   }
-  call->builtin = builtin;
+  call->target = BuiltinCall{.builtin = builtin};
   call->type = someValue || builtin == Builtin::DecSum ? decimal : Type::optional(decimal);
 
   return call;
@@ -593,7 +593,7 @@ Expr *DecimalChecker::checkDecimalMethod(CallExpr *call, MemberExpr *member) {
   if (method->builtin == Builtin::DecDiv) {
     checkDecimalDivisor(BinaryOp::Div, call->args[0]);
   }
-  call->builtin = method->builtin;
+  call->target = BuiltinCall{.builtin = method->builtin};
   call->type = method->ret;
 
   return call;

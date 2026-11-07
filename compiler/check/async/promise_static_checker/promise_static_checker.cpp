@@ -165,7 +165,7 @@ Expr *PromiseStaticChecker::checkPromiseStatic(CallExpr *call, MemberExpr *membe
     if (!checker_.argumentChecker().checkArity(call, member->loc(), 0, 1)) {
       return call;
     }
-    call->builtin = Builtin::PromiseResolve;
+    call->target = BuiltinCall{.builtin = Builtin::PromiseResolve};
     if (call->args.empty()) {
       call->type = Type::promise(Type::voidTy());
       return call;
@@ -212,7 +212,7 @@ Expr *PromiseStaticChecker::checkPromiseStatic(CallExpr *call, MemberExpr *membe
     if (!checker_.argumentChecker().checkArity(call, member->loc(), 0, 0)) {
       return call;
     }
-    call->builtin = Builtin::PromiseWithResolvers;
+    call->target = BuiltinCall{.builtin = Builtin::PromiseWithResolvers};
     const Type *value = nullptr;
     if (member->typeArgs.size() > 1) {
       checker_.diags_.error(member->loc(),
@@ -251,7 +251,7 @@ Expr *PromiseStaticChecker::checkPromiseStatic(CallExpr *call, MemberExpr *membe
     if (!checker_.argumentChecker().checkArity(call, member->loc(), 1, 1)) {
       return call;
     }
-    call->builtin = builtin;
+    call->target = BuiltinCall{.builtin = builtin};
     const Type *wantedElement = nullptr;
     if (wanted && builtin == Builtin::PromiseAll && wanted->isArray()) {
       wantedElement = wanted->inner();

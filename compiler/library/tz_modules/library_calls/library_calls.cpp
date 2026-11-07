@@ -35,7 +35,9 @@ void LibraryCalls::prepareLibraries(SourceFile &program) {
     for (Stmt *item : module->file.items) {
       if (auto *fn = dyn_cast<FunctionDecl>(item)) {
         if (intrinsics) {
-          fn->intrinsic = fn->external;
+          if (fn->external()) {
+            fn->bodySource = FunctionBodySource::INTRINSIC;
+          }
         } else {
           checker_.libFunctions_[fn->name] = fn;
         }
@@ -49,7 +51,7 @@ void LibraryCalls::prepareLibraries(SourceFile &program) {
       if (!cls) {
         continue;
       }
-      cls->library = true;
+      cls->origin = ClassOrigin::LIBRARY;
       checker_.libClasses_[cls->name] = cls;
     }
   }
@@ -64,9 +66,9 @@ bool LibraryCalls::inLibrary(llvm::SMLoc loc) const {
 }
 
 Expr *LibraryCalls::checkLibCall(CallExpr *call, NameExpr *name) {
-  Checker::ScopeEntry own = checker_.scopes().lookup(name->name);
-  const FunctionDecl *decl = own.func ? own.func->decl : nullptr;
-  if (!decl || !decl->intrinsic) {
+  ScopeEntry own = checker_.scopes().lookup(name->name);
+  const FunctionDecl *decl = own.func() ? own.func()->decl : nullptr;
+  if (!decl || !decl->intrinsic()) {
     return nullptr;
   }
   llvm::StringRef intrinsicName = decl->name;
@@ -116,7 +118,7 @@ Expr *LibraryCalls::checkLibCall(CallExpr *call, NameExpr *name) {
   }
   const Type *typeArg =
       intrinsic->typeArgs ? checker_.typeResolver().resolveType(name->typeArgs[0], false) : nullptr;
-  call->builtin = intrinsic->builtin;
+  call->target = BuiltinCall{.builtin = intrinsic->builtin};
   switch (intrinsic->builtin) {
   case Builtin::LibListener:
   case Builtin::LibBoundListener: {

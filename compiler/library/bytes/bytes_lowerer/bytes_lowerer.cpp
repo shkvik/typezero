@@ -179,7 +179,7 @@ llvm::Value *BytesLowerer::emitBytesIndex(IndexExpr *index) {
   llvm::Value *position = lowering_.exprLowerer().emitExpr(index->index);
   auto read = [&] { return loadElement(bytesData(bytes.value), type, position); };
   llvm::Value *result;
-  if (!index->mayBeOutOfRange) {
+  if (!index->mayBeOutOfRange()) {
     result = read();
   } else {
     result = lowering_.arrayLowerer().emitCheckedRead(

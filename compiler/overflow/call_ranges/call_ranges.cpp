@@ -268,33 +268,33 @@ void CallRanges::calledUserCode(State &st) {
 }
 
 Val CallRanges::evalCall(const CallExpr *call, State &st) {
-  if (call->builtin != Builtin::None) {
+  if (call->builtin() != Builtin::None) {
     return check_.builtinEvaluator().evalBuiltin(call, st);
   }
   auto *member = dyn_cast<MemberExpr>(call->callee);
   if (member) {
     check_.evaluator().eval(member->object, st);
-  } else if (!call->func) {
+  } else if (!call->func()) {
     check_.evaluator().eval(call->callee, st);
   }
   std::vector<Val> args;
   for (const Expr *arg : call->args) {
     args.push_back(check_.evaluator().eval(arg, st));
   }
-  const FunctionDecl *target = call->func     ? call->func->decl
-                               : call->method ? call->method->decl
-                                              : nullptr;
+  const FunctionDecl *target = call->func()     ? call->func()->decl
+                               : call->method() ? call->method()->decl
+                                                : nullptr;
   if (target) {
     passArgs(target, call, args);
     check_.loopRanges().noteCall(call, target, args);
   }
-  for (const CallExpr::UnionMethod &m : call->unionMethods) {
+  for (const UnionMethod &m : call->unionMethods()) {
     if (m.method && m.method->decl) {
       passArgs(m.method->decl, call, args);
     }
   }
   calledUserCode(st);
-  if (!target || call->virtualCall || !call->unionMethods.empty()) {
+  if (!target || call->virtualCall() || !call->unionMethods().empty()) {
     return check_.overflowWarnings().trusted(call->type);
   }
 
@@ -303,13 +303,13 @@ Val CallRanges::evalCall(const CallExpr *call, State &st) {
 
 Val CallRanges::evalNew(const NewExpr *ne, State &st) {
   std::vector<Val> args;
-  const auto &argExprs = ne->ctor ? ne->ctor->args : ne->args;
+  const auto &argExprs = ne->ctor() ? ne->ctor()->args : ne->args;
   for (const Expr *arg : argExprs) {
     args.push_back(check_.evaluator().eval(arg, st));
   }
-  if (ne->cls) {
-    if (ne->ctor && ne->ctor->func && ne->ctor->func->decl) {
-      passArgs(ne->ctor->func->decl, ne->ctor, args);
+  if (ne->cls()) {
+    if (ne->ctor() && ne->ctor()->func() && ne->ctor()->func()->decl) {
+      passArgs(ne->ctor()->func()->decl, ne->ctor(), args);
     }
     calledUserCode(st);
     return Val();
@@ -361,8 +361,8 @@ Val CallRanges::runCallback(const FunctionDecl *fn, llvm::ArrayRef<Val> args, si
 Val CallRanges::evalCallback(const CallExpr *call, State &st) {
   auto *member = dyn_cast<MemberExpr>(call->callee);
   const Expr *receiver = member ? member->object : nullptr;
-  size_t at = *callbackArg(call->builtin);
-  if (call->builtin == Builtin::ArrayFrom) {
+  size_t at = *callbackArg(call->builtin());
+  if (call->builtin() == Builtin::ArrayFrom) {
     receiver = call->args.empty() ? nullptr : call->args[0];
   }
   Val array = receiver ? check_.evaluator().eval(receiver, st) : Val();
@@ -370,11 +370,11 @@ Val CallRanges::evalCallback(const CallExpr *call, State &st) {
   Val init;
   bool hasInit = false;
   for (size_t i = 0; i < call->args.size(); ++i) {
-    if (i == at || (call->builtin == Builtin::ArrayFrom && i == 0)) {
+    if (i == at || (call->builtin() == Builtin::ArrayFrom && i == 0)) {
       continue;
     }
     Val v = check_.evaluator().eval(call->args[i], st);
-    if ((call->builtin == Builtin::ArrReduce || call->builtin == Builtin::ArrReduceRight) &&
+    if ((call->builtin() == Builtin::ArrReduce || call->builtin() == Builtin::ArrReduceRight) &&
         i == 1) {
       init = v;
       hasInit = true;
@@ -382,7 +382,7 @@ Val CallRanges::evalCallback(const CallExpr *call, State &st) {
   }
   Val element;
   Num passes;
-  if (call->builtin == Builtin::MapForEach) {
+  if (call->builtin() == Builtin::MapForEach) {
     const Type *value = arrayType && arrayType->isDict() ? arrayType->valueType() : nullptr;
     if (std::optional<Val> v = check_.summary(check_.cur_.dicts, arrayType)) {
       element = check_.overflowWarnings().fitVal(*v, value);
@@ -407,10 +407,10 @@ Val CallRanges::evalCallback(const CallExpr *call, State &st) {
   if (!fe || !check_.inlined_.contains(fe->fn)) {
     const FunctionDecl *named = nullptr;
     if (auto *name = dyn_cast_or_null<NameExpr>(arg)) {
-      if (name->func) {
-        named = name->func->decl;
-      } else if (name->var) {
-        named = name->var->function() ? name->var->function() : name->var->lambda();
+      if (name->func()) {
+        named = name->func()->decl;
+      } else if (name->var()) {
+        named = name->var()->function() ? name->var()->function() : name->var()->lambda();
       }
     }
     if (arg) {
@@ -421,7 +421,7 @@ Val CallRanges::evalCallback(const CallExpr *call, State &st) {
     }
     calledUserCode(st);
     Val result = named ? returned(named, named->sym ? named->sym->ret : nullptr) : Val();
-    if (call->builtin == Builtin::ArrMap || call->builtin == Builtin::ArrayFrom) {
+    if (call->builtin() == Builtin::ArrMap || call->builtin() == Builtin::ArrayFrom) {
       Val v;
       v.len = passes.empty() ? someLength() : passes;
       v.elem =
@@ -433,7 +433,7 @@ Val CallRanges::evalCallback(const CallExpr *call, State &st) {
     return check_.overflowWarnings().trusted(call->type);
   }
   const FunctionDecl *fn = fe->fn;
-  bool reduce = call->builtin == Builtin::ArrReduce || call->builtin == Builtin::ArrReduceRight;
+  bool reduce = call->builtin() == Builtin::ArrReduce || call->builtin() == Builtin::ArrReduceRight;
   const VarSymbol *acc = reduce && !fn->params.empty() ? fn->params[0].sym : nullptr;
   if (acc && tracked(acc->type)) {
     check_.slots().writeVar(acc, hasInit ? init : element, st);
@@ -447,9 +447,9 @@ Val CallRanges::evalCallback(const CallExpr *call, State &st) {
   spec.body = [&, fn, acc](State &in) {
     std::vector<Val> args;
     size_t first = 0;
-    if (call->builtin == Builtin::ArrSortWith) {
+    if (call->builtin() == Builtin::ArrSortWith) {
       args = {element, element};
-    } else if (call->builtin == Builtin::MapForEach) {
+    } else if (call->builtin() == Builtin::MapForEach) {
       args = {element,
               check_.overflowWarnings().trusted(
                   fn->params.size() > 1 && fn->params[1].sym ? fn->params[1].sym->type : nullptr),
@@ -467,49 +467,49 @@ Val CallRanges::evalCallback(const CallExpr *call, State &st) {
     result = r;
   };
   check_.loopRanges().runLoop(spec, st);
-  switch (call->builtin) {
-  case Builtin::ArrMap:
-  case Builtin::ArrayFrom: {
-    Val v;
-    v.len = passes.empty() ? someLength() : passes;
-    v.elem = share(result);
-    return v;
-  }
-  case Builtin::ArrFilter: {
-    Val v;
-    v.len = passes.empty() ? someLength() : make({0}, passes.high());
-    v.elem = share(element);
-    return v;
-  }
-  case Builtin::ArrFlatMap: {
-    Val v;
-    v.len = someLength();
-    v.elem = result.elem
-                 ? result.elem
-                 : share(check_.overflowWarnings().trusted(
-                       call->type && call->type->isArray() ? call->type->inner() : nullptr));
-    return v;
-  }
-  case Builtin::ArrReduce:
-  case Builtin::ArrReduceRight: {
-    Val v = acc ? check_.slots().readVar(acc, st) : check_.overflowWarnings().trusted(call->type);
-    if (acc) {
-      st.vars.erase(acc);
+  switch (call->builtin()) {
+    case Builtin::ArrMap:
+    case Builtin::ArrayFrom: {
+      Val v;
+      v.len = passes.empty() ? someLength() : passes;
+      v.elem = share(result);
+      return v;
     }
-    return check_.overflowWarnings().fitVal(v, call->type);
-  }
-  case Builtin::ArrFind:
-  case Builtin::ArrFindLast:
-    return check_.overflowWarnings().fitVal(element, call->type);
-  case Builtin::ArrFindIndex:
-  case Builtin::ArrFindLastIndex:
-    return numVal(passes.empty()
-                      ? make({-1}, {kLengthMax - 1, Origin::Trusted})
-                      : make({-1}, {std::max(passes.hi - 1, -1.0), passes.hiOrigin, passes.hiWhy}));
-  case Builtin::ArrSortWith:
-    return array;
-  default:
-    return Val();
+    case Builtin::ArrFilter: {
+      Val v;
+      v.len = passes.empty() ? someLength() : make({0}, passes.high());
+      v.elem = share(element);
+      return v;
+    }
+    case Builtin::ArrFlatMap: {
+      Val v;
+      v.len = someLength();
+      v.elem = result.elem
+                   ? result.elem
+                   : share(check_.overflowWarnings().trusted(
+                         call->type && call->type->isArray() ? call->type->inner() : nullptr));
+      return v;
+    }
+    case Builtin::ArrReduce:
+    case Builtin::ArrReduceRight: {
+      Val v = acc ? check_.slots().readVar(acc, st) : check_.overflowWarnings().trusted(call->type);
+      if (acc) {
+        st.vars.erase(acc);
+      }
+      return check_.overflowWarnings().fitVal(v, call->type);
+    }
+    case Builtin::ArrFind:
+    case Builtin::ArrFindLast:
+      return check_.overflowWarnings().fitVal(element, call->type);
+    case Builtin::ArrFindIndex:
+    case Builtin::ArrFindLastIndex:
+      return numVal(passes.empty() ? make({-1}, {kLengthMax - 1, Origin::Trusted})
+                                   : make({-1}, {std::max(passes.hi - 1, -1.0), passes.hiOrigin,
+                                                 passes.hiWhy}));
+    case Builtin::ArrSortWith:
+      return array;
+    default:
+      return Val();
   }
 }
 

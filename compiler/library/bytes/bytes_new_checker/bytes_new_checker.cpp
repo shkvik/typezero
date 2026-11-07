@@ -64,7 +64,7 @@ bool mayBeFatal(const Expr *options) {
   }
   bool fatal = false;
   for (const ObjectLitExpr::Property &prop : literal->props) {
-    if (prop.spread) {
+    if (prop.spread()) {
       fatal = fatal || mayBeFatal(prop.value);
       continue;
     }
@@ -96,11 +96,11 @@ Expr *BytesNewChecker::checkTextDecoderParse(CallExpr *call, MemberExpr *member)
   Expr *made = checkBytesNew(expr, Type::bytesType(Bytes::TextDecoder));
   parsing_ = false;
   auto *result = dyn_cast<CallExpr>(made);
-  if (!result || result->builtin != Builtin::TextDecoderNew) {
+  if (!result || result->builtin() != Builtin::TextDecoderNew) {
     return made;
   }
   result->callee = member;
-  result->builtin = Builtin::TextDecoderParse;
+  result->target = BuiltinCall{.builtin = Builtin::TextDecoderParse};
   result->type = Type::result(result->type, checker_.prelude().builtinType("EncodingError"));
 
   return result;
@@ -120,7 +120,7 @@ Expr *BytesNewChecker::checkBytesNew(NewExpr *expr, const Type *type) {
     checker_.diags_.error(loc, "'new " + type->name() + "' takes no type arguments");
   }
   auto made = [&](Builtin builtin, const Type *result) {
-    call->builtin = builtin;
+    call->target = BuiltinCall{.builtin = builtin};
     call->type = result;
 
     return call;
@@ -335,7 +335,7 @@ Expr *BytesNewChecker::checkBytesValues(CallExpr *call, ArrayLitExpr *lit, const
       values.push_back(value);
     }
     call->args = std::move(values);
-    call->builtin = Builtin::BytesOf;
+    call->target = BuiltinCall{.builtin = Builtin::BytesOf};
     call->type = type;
     return call;
   }
@@ -355,7 +355,7 @@ Expr *BytesNewChecker::checkBytesValues(CallExpr *call, ArrayLitExpr *lit, const
     return call;
   }
   call->args = {array};
-  call->builtin = Builtin::BytesFromArray;
+  call->target = BuiltinCall{.builtin = Builtin::BytesFromArray};
   call->type = type;
 
   return call;

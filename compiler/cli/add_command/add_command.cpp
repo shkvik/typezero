@@ -76,14 +76,14 @@ bool interpretAdd(const Manifest &project, llvm::StringRef arg, Dependency &out)
       report(error);
       return false;
     }
-    out.alias = source.scope == "tz" ? source.name : "@" + source.scope + "/" + source.name;
-    if (source.range.empty()) {
+    out.alias = source.scope() == "tz" ? source.name() : "@" + source.scope() + "/" + source.name();
+    if (source.range().empty()) {
       JsrVersions versions;
-      if (!jsrVersions(source.scope, source.name, versions, error)) {
+      if (!jsrVersions(source.scope(), source.name(), versions, error)) {
         if (!error.empty()) {
           report(error);
         } else if (bare) {
-          report("'" + source.name + "' has not been adapted for tz yet: there is no " +
+          report("'" + source.name() + "' has not been adapted for tz yet: there is no " +
                  source.id() +
                  " in the registry; give its source, e.g. 'tz add "
                  "github:user/repo@v1.0.0', or adapt it with 'tz port'");
@@ -121,15 +121,15 @@ bool interpretAdd(const Manifest &project, llvm::StringRef arg, Dependency &out)
     return false;
   }
   Manifest package;
-  if (source.kind == Source::Kind::Local) {
-    if (!readPackageDir(source.dir, package)) {
+  if (source.form.is<LocalSource>()) {
+    if (!readPackageDir(source.dir(), package)) {
       return false;
     }
-    out.spec = "file:" + relativePath(project.dir, source.dir);
+    out.spec = "file:" + relativePath(project.dir, source.dir());
   } else {
     std::string commit, dir;
-    if (!gitResolve(source.url, source.ref, true, commit, error) ||
-        !gitCheckout(source.url, commit, dir, error)) {
+    if (!gitResolve(source.url(), source.ref(), true, commit, error) ||
+        !gitCheckout(source.url(), commit, dir, error)) {
       report(error);
       return false;
     }

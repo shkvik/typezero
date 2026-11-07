@@ -74,7 +74,7 @@ llvm::Constant *ClassDescriptors::dropDescriptor(llvm::Function *drop) {
 }
 
 llvm::Function *ClassDescriptors::methodCode(const FunctionDecl *fn) {
-  if (fn->cls()->literal) {
+  if (fn->cls()->literal()) {
     return lowering_.closureLowerer().closureCode(const_cast<FunctionDecl *>(fn));
   }
 
@@ -82,9 +82,9 @@ llvm::Function *ClassDescriptors::methodCode(const FunctionDecl *fn) {
 }
 
 void ClassDescriptors::declareMethods(ClassDecl *cls) {
-  const ClassDecl *named = cls->generic ? cls->generic : cls;
+  const ClassDecl *named = cls->generic() ? cls->generic() : cls;
   std::string prefix = "tz." + lowering_.symbolPrefixes_.lookup(named) +
-                       (cls->generic ? cls->type->name().str() : cls->name.str()) + ".";
+                       (cls->generic() ? cls->type->name().str() : cls->name.str()) + ".";
   for (FunctionDecl *fn : instanceMethods(cls)) {
     std::string name = prefix + fn->name.str();
     if (fn->variant()) {
@@ -108,7 +108,7 @@ void ClassDescriptors::declareMethods(ClassDecl *cls) {
 }
 
 void ClassDescriptors::emitMethods(ClassDecl *cls) {
-  if (cls->builtin) {
+  if (cls->builtin()) {
     return;
   }
   for (FunctionDecl *fn : instanceMethods(cls)) {
@@ -161,12 +161,12 @@ llvm::Constant *ClassDescriptors::classDescriptor(const ClassDecl *cls) {
   };
   bool emitter = false;
   for (const ClassDecl *c = cls; c && !emitter; c = c->parent) {
-    emitter = c->library && c->name == "EventEmitterBase";
+    emitter = c->library() && c->name == "EventEmitterBase";
   }
-  bool library = emitter || cls->builtin ||
-                 (cls->library && (cls->name == "OnceWrapper" || cls->name == "AsyncListener" ||
-                                   cls->name == "ThisListener" || cls->name == "ListenerList" ||
-                                   cls->name == "CryptoKey"));
+  bool library = emitter || cls->builtin() ||
+                 (cls->library() && (cls->name == "OnceWrapper" || cls->name == "AsyncListener" ||
+                                     cls->name == "ThisListener" || cls->name == "ListenerList" ||
+                                     cls->name == "CryptoKey"));
   auto method = [&](llvm::StringRef name, const FunctionDecl *fn) {
     entries.push_back(llvm::ConstantStruct::get(
         lowering_.fieldDescTy_,
@@ -175,9 +175,9 @@ llvm::Constant *ClassDescriptors::classDescriptor(const ClassDecl *cls) {
          lowering_.builder_.getInt32(kMethodField),
          lowering_.typeDescriptors().typeDescriptor(ClosureLowerer::functionTypeOf(fn->sym))}));
   };
-  if (cls->literal) {
-    for (const ObjectLitExpr::Property &prop : cls->literal->props) {
-      if (prop.method) {
+  if (cls->literal()) {
+    for (const ObjectLitExpr::Property &prop : cls->literal()->props) {
+      if (prop.method()) {
         method(prop.name, cast<FunctionExpr>(prop.value)->fn);
       } else {
         field(prop.name);
@@ -216,7 +216,7 @@ llvm::Constant *ClassDescriptors::classDescriptor(const ClassDecl *cls) {
       field("shapeMode", "Symbol(shapeMode)");
       field("capture", "Symbol(kCapture)");
     }
-    if (cls->library) {
+    if (cls->library()) {
       lowering_.tzModulesLowerer().appendPrintHooks(chain, entries);
     }
   }
@@ -231,7 +231,7 @@ llvm::Constant *ClassDescriptors::classDescriptor(const ClassDecl *cls) {
     fields = global;
   }
   llvm::StringRef shown = cls->name;
-  for (const ClassDecl *c = cls; shown.empty() && c && c->expression; c = c->parent) {
+  for (const ClassDecl *c = cls; shown.empty() && c && c->expression(); c = c->parent) {
     shown = c->parent ? c->parent->name : llvm::StringRef();
   }
   llvm::Constant *className = shown.empty()

@@ -144,8 +144,8 @@ void collectNames(const Expr *expr, llvm::StringSet<> &names, bool inFunction) {
     break;
   case Expr::Kind::ObjectLit:
     for (const ObjectLitExpr::Property &p : cast<ObjectLitExpr>(expr)->props) {
-      if (p.key) {
-        sub(p.key);
+      if (p.key()) {
+        sub(p.key());
       }
       sub(p.value);
     }
@@ -185,7 +185,7 @@ void collectNames(const Expr *expr, llvm::StringSet<> &names, bool inFunction) {
     if (create->callee) {
       sub(create->callee);
     }
-    for (const Expr *arg : create->ctor ? create->ctor->args : create->args) {
+    for (const Expr *arg : create->ctor() ? create->ctor()->args : create->args) {
       sub(arg);
     }
     break;

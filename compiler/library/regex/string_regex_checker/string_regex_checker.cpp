@@ -118,7 +118,7 @@ Expr *StringRegexChecker::checkStringRegexMethod(CallExpr *call, MemberExpr *mem
                 "'s.matchAll(re)'");
         return call;
       }
-      call->builtin = global ? Builtin::StrMatchGlobal : Builtin::StrMatch;
+      call->target = BuiltinCall{.builtin = global ? Builtin::StrMatchGlobal : Builtin::StrMatch};
       call->type = Type::optional(global ? Type::array(Type::string())
                                          : checker_.regexChecker().matchType(regex));
       return call;
@@ -134,13 +134,13 @@ Expr *StringRegexChecker::checkStringRegexMethod(CallExpr *call, MemberExpr *mem
         return restLoosely();
       }
       if (name == "matchAll") {
-        call->builtin = Builtin::StrMatchAll;
+        call->target = BuiltinCall{.builtin = Builtin::StrMatchAll};
         call->type = Type::iterator(checker_.regexChecker().matchType(regex));
         return call;
       }
     }
     if (name == "search") {
-      call->builtin = Builtin::StrSearch;
+      call->target = BuiltinCall{.builtin = Builtin::StrSearch};
       call->type = Type::intTy();
       return call;
     }
@@ -152,7 +152,7 @@ Expr *StringRegexChecker::checkStringRegexMethod(CallExpr *call, MemberExpr *mem
       for (uint32_t k = 1; regex && k < tz_re_captures(regex->program.data()); ++k) {
         undefinedGroups |= !tz_re_mandatory(regex->program.data(), k);
       }
-      call->builtin = Builtin::StrSplitRegex;
+      call->target = BuiltinCall{.builtin = Builtin::StrSplitRegex};
       call->type = Type::array(undefinedGroups ? Type::optional(Type::string()) : Type::string());
       return call;
     }
@@ -168,7 +168,7 @@ Expr *StringRegexChecker::checkStringRegexMethod(CallExpr *call, MemberExpr *mem
       if (call->args.size() == 2) {
         call->args[1] = checker_.memberChecker().checkPosition(call->args[1]);
       }
-      call->builtin = Builtin::StrSplit;
+      call->target = BuiltinCall{.builtin = Builtin::StrSplit};
       call->type = Type::array(Type::string());
       return call;
     }
@@ -183,7 +183,7 @@ Expr *StringRegexChecker::checkStringRegexMethod(CallExpr *call, MemberExpr *mem
         return restLoosely();
       }
       replacement = checker_.argumentChecker().checkArg(replacement, Type::string());
-      call->builtin = Builtin::StrReplaceAll;
+      call->target = BuiltinCall{.builtin = Builtin::StrReplaceAll};
       call->type = Type::string();
       return call;
     }
@@ -226,13 +226,13 @@ Expr *StringRegexChecker::checkReplacement(CallExpr *call, MemberExpr *member,
   Expr *&replacement = call->args[1];
   bool function = isa<FunctionExpr>(replacement);
   if (auto *name = dyn_cast<NameExpr>(replacement)) {
-    Checker::ScopeEntry entry = checker_.scopes().lookup(name->name);
-    function = entry.func ||
-               (entry.var && entry.var->type && entry.var->type->nonOptional()->isFunction());
+    ScopeEntry entry = checker_.scopes().lookup(name->name);
+    function = entry.func() ||
+               (entry.var() && entry.var()->type && entry.var()->type->nonOptional()->isFunction());
   }
   if (!function) {
     replacement = checker_.argumentChecker().checkArg(replacement, Type::string());
-    call->builtin = Builtin::StrReplaceRegex;
+    call->target = BuiltinCall{.builtin = Builtin::StrReplaceRegex};
     call->type = Type::string();
     auto *text = dyn_cast<StringLitExpr>(replacement);
     if (!regex || !text) {
@@ -331,7 +331,7 @@ Expr *StringRegexChecker::checkReplacement(CallExpr *call, MemberExpr *member,
   if (!replacement->type->isFunction()) {
     return call;
   }
-  call->builtin = Builtin::StrReplaceRegexFn;
+  call->target = BuiltinCall{.builtin = Builtin::StrReplaceRegexFn};
   call->type = Type::string();
   checker_.flowChecker().calledFunction();
 

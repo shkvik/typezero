@@ -70,16 +70,16 @@ bool lockFits(const Manifest &root, const Lock &lock, std::map<std::string, Mani
       if (!parseSource(spec, node.baseDir, source, error)) {
         return false;
       }
-      if (source.kind == Source::Kind::Local && !node.allowLocal) {
+      if (source.form.is<LocalSource>() && !node.allowLocal) {
         return false;
       }
       std::string id = source.id();
-      if (source.kind == Source::Kind::Local) {
+      if (source.form.is<LocalSource>()) {
         if (!reached.insert(id).second) {
           continue;
         }
         Manifest local;
-        if (!readPackageDir(source.dir, local)) {
+        if (!readPackageDir(source.dir(), local)) {
           failed = true;
           return false;
         }
@@ -96,14 +96,14 @@ bool lockFits(const Manifest &root, const Lock &lock, std::map<std::string, Mani
         return false;
       }
       const Locked &locked = it->second;
-      if (source.kind == Source::Kind::Jsr) {
+      if (source.form.is<JsrSource>()) {
         Range range;
         Version version;
-        if (!Range::parse(source.range, range, error) || !Version::parse(locked.version, version) ||
-            !range.satisfies(version)) {
+        if (!Range::parse(source.range(), range, error) ||
+            !Version::parse(locked.version, version) || !range.satisfies(version)) {
           return false;
         }
-      } else if (source.ref != locked.ref) {
+      } else if (source.ref() != locked.ref) {
         return false;
       }
       if (reached.insert(id).second) {
@@ -130,7 +130,7 @@ bool ensureSources(const Locked &locked, std::string &dir, JsrVersion *jsrMeta) 
       return false;
     }
     JsrVersion meta;
-    if (!jsrVersion(source.scope, source.name, locked.version, meta, error)) {
+    if (!jsrVersion(source.scope(), source.name(), locked.version, meta, error)) {
       report(error);
       return false;
     }
@@ -140,7 +140,7 @@ bool ensureSources(const Locked &locked, std::string &dir, JsrVersion *jsrMeta) 
              ", package-lock.json has " + locked.hash);
       return false;
     }
-    if (!jsrDownload(source.scope, source.name, locked.version, meta, dir, error)) {
+    if (!jsrDownload(source.scope(), source.name(), locked.version, meta, dir, error)) {
       report(error);
       return false;
     }
@@ -269,7 +269,7 @@ bool preparePackages(const Manifest &manifest, const PrepareOptions &options, Gr
         Source target;
         if (parseSource(dep, "", target, error)) {
           if (lock.packages.count(target.id())) {
-            p.jsrDeps["@" + target.scope + "/" + target.name] = 0;
+            p.jsrDeps["@" + target.scope() + "/" + target.name()] = 0;
           }
         }
       }

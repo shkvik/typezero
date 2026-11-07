@@ -214,7 +214,7 @@ bool IntlOptionsChecker::checkIntlArgs(std::vector<Expr *> &args, size_t from, I
       return nullptr;
     }
     for (const ObjectLitExpr::Property &prop : literal->props) {
-      if (!prop.spread && prop.name == name) {
+      if (!prop.spread() && prop.name == name) {
         return prop.value;
       }
     }

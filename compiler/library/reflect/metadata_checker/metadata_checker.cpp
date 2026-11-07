@@ -37,8 +37,9 @@ ClassDecl *MetadataChecker::builtinConstructor(llvm::StringRef name) {
   ClassDecl *&cls = builtinConstructors_[name];
   if (!cls) {
     cls = checker_.ctx_.make<ClassDecl>(llvm::SMLoc(), *found);
-    cls->builtin = true;
-    cls->resolved = cls->declared = true;
+    cls->origin = ClassOrigin::BUILTIN;
+    cls->stage = ClassStage::RESOLVED;
+    cls->declared = true;
   }
 
   return cls;
@@ -49,17 +50,17 @@ const void *MetadataChecker::metadataKey(const Expr *key, std::string &label) {
   if (!name) {
     return nullptr;
   }
-  Checker::ScopeEntry entry = checker_.scopes().lookup(name->name);
+  ScopeEntry entry = checker_.scopes().lookup(name->name);
   label = name->name.str();
-  if (entry.var) {
-    return entry.var->isConst && entry.var->type && !entry.var->type->isString() ? entry.var
-                                                                                 : nullptr;
+  if (entry.var()) {
+    return entry.var()->isConst && entry.var()->type && !entry.var()->type->isString() ? entry.var()
+                                                                                       : nullptr;
   }
-  if (entry.func) {
-    return entry.func;
+  if (entry.func()) {
+    return entry.func();
   }
 
-  return entry.cls;
+  return entry.cls();
 }
 
 void MetadataChecker::findMetadataWriters(SourceFile &program) {
@@ -184,7 +185,7 @@ ClassDecl *MetadataChecker::designConstructor(const Type *type) {
     name = "Map";
   } else if (type->isSet()) {
     name = "Set";
-  } else if (ClassDecl *cls = ClassDeclarer::classOf(type); cls && !cls->literal) {
+  } else if (ClassDecl *cls = ClassDeclarer::classOf(type); cls && !cls->literal()) {
     return cls;
   }
 
@@ -214,7 +215,7 @@ void MetadataChecker::writeDesignRecord(ClassDecl *cls, const char16_t *key, Exp
                                        Type::anyObject()),
       checker_.typeRelations().convert(property, Type::optional(Type::string()))};
   auto *call = checker_.ctx_.make<CallExpr>(loc, callee, std::move(args));
-  call->builtin = Builtin::MetaDefine;
+  call->target = BuiltinCall{.builtin = Builtin::MetaDefine};
   call->designRecord = true;
   call->type = Type::voidTy();
   cls->decorations.push_back(checker_.ctx_.make<ExprStmt>(loc, call));

@@ -110,7 +110,7 @@ Expr *ResultChecker::checkOkErr(CallExpr *call, NameExpr *name, bool isOk, const
     }
   }
   const Type *other = wanted ? (isOk ? wanted->errType() : wanted->okType()) : Type::never();
-  call->builtin = isOk ? Builtin::ResultOk : Builtin::ResultErr;
+  call->target = BuiltinCall{.builtin = isOk ? Builtin::ResultOk : Builtin::ResultErr};
   call->type = isOk ? Type::result(half, other) : Type::result(other, half);
 
   return call;
@@ -156,7 +156,8 @@ Expr *ResultChecker::checkResultStatic(CallExpr *call, MemberExpr *member) {
     return call;
   }
   bool all = method == "combineWithAllErrors";
-  call->builtin = all ? Builtin::ResultCombineWithAllErrors : Builtin::ResultCombine;
+  call->target =
+      BuiltinCall{.builtin = all ? Builtin::ResultCombineWithAllErrors : Builtin::ResultCombine};
   std::string what = name->name.str() + "." + method.str();
   auto holds = [&](const Type *result, const Expr *at) {
     if (givesType(result->okType()) && !(all && result->errType()->isVoid())) {
@@ -317,12 +318,12 @@ void ResultChecker::checkDiscarded(const Expr *expr, bool callback, llvm::SMLoc 
     return;
   }
   auto *call = dyn_cast<CallExpr>(expr);
-  if (call && (call->builtin == Builtin::ArrPop || call->builtin == Builtin::ArrShift ||
-               call->builtin == Builtin::ArrSplice)) {
+  if (call && (call->builtin() == Builtin::ArrPop || call->builtin() == Builtin::ArrShift ||
+               call->builtin() == Builtin::ArrSplice)) {
     return;
   }
   if (!type->nonOptional()->isResult()) {
-    if (call && (call->builtin == Builtin::ArrMap || call->builtin == Builtin::ArrFlatMap)) {
+    if (call && (call->builtin() == Builtin::ArrMap || call->builtin() == Builtin::ArrFlatMap)) {
       checker_.diags_.error(expr->loc(),
                             "the Results are not used, so errors in them would go unchecked; "
                             "handle them, e.g. with 'Result.combine(...)', or keep them in a "
@@ -344,19 +345,21 @@ void ResultChecker::checkDiscarded(const Expr *expr, bool callback, llvm::SMLoc 
 void ResultChecker::addResultFacts(const Expr *cond, Checker::Flow &whenTrue,
                                    Checker::Flow &whenFalse) const {
   auto *call = dyn_cast<CallExpr>(cond);
-  if (!call || (call->builtin != Builtin::ResultIsOk && call->builtin != Builtin::ResultIsErr)) {
+  if (!call ||
+      (call->builtin() != Builtin::ResultIsOk && call->builtin() != Builtin::ResultIsErr)) {
     return;
   }
   auto *name = dyn_cast<NameExpr>(unconverted(cast<MemberExpr>(call->callee)->object));
-  if (!name || !name->var || !name->var->type || !name->var->type->nonOptional()->isResult()) {
+  if (!name || !name->var() || !name->var()->type ||
+      !name->var()->type->nonOptional()->isResult()) {
     return;
   }
-  bool isOk = call->builtin == Builtin::ResultIsOk;
+  bool isOk = call->builtin() == Builtin::ResultIsOk;
   Checker::Flow &ok = isOk ? whenTrue : whenFalse, &err = isOk ? whenFalse : whenTrue;
-  ok.okResults.insert(name->var);
-  ok.errResults.erase(name->var);
-  err.errResults.insert(name->var);
-  err.okResults.erase(name->var);
+  ok.okResults.insert(name->var());
+  ok.errResults.erase(name->var());
+  err.errResults.insert(name->var());
+  err.okResults.erase(name->var());
 }
 
 }

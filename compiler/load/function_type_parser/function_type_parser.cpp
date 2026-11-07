@@ -61,7 +61,8 @@ TypeRef FunctionTypeParser::parseFunctionType() {
 }
 
 bool FunctionTypeParser::parseSignatureParams(TypeRef &ref) {
-  ref.kind = TypeRef::Kind::Function;
+  ref.form = FunctionTypeRef{};
+  FunctionTypeRef *signature = ref.form.as<FunctionTypeRef>();
   ref.loc = parser_.tok_.loc();
   parser_.cursor().advance();
   while (!parser_.tok_.is(Tok::RParen) && !parser_.tok_.is(Tok::Eof)) {
@@ -81,13 +82,13 @@ bool FunctionTypeParser::parseSignatureParams(TypeRef &ref) {
                                        "' of the function type needs a type, e.g. '" + name +
                                        ": int'");
     }
-    if (ref.rest) {
+    if (signature->rest) {
       parser_.cursor().report(loc, "a rest parameter must be the last parameter");
     }
     ref.args.push_back(std::move(param));
-    ref.optional.push_back(optional);
-    ref.names.push_back(name);
-    ref.rest |= rest;
+    signature->optional.push_back(optional);
+    signature->names.push_back(name);
+    signature->rest |= rest;
     if (!parser_.cursor().accept(Tok::Comma)) {
       break;
     }

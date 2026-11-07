@@ -150,7 +150,7 @@ Expr *EventTargetChecker::callLibrarySymbol(CallExpr *call, FuncSymbol *sym,
     }
   }
   checker_.returnInferrer().resolveParams(callee);
-  call->func = callee;
+  call->target = FunctionCall{.func = callee};
   call->type = ret ? checker_.typeParams().substitute(ret, sym->typeParams, bound) : Type::error();
   std::vector<const Type *> params = callee->params;
   if (callee == sym) {
@@ -220,7 +220,7 @@ Expr *EventTargetChecker::checkEventsFunction(CallExpr *call, llvm::StringRef fn
   if (call->args.size() == 3) {
     if (auto *options = dyn_cast<ObjectLitExpr>(call->args[2])) {
       timed = llvm::any_of(options->props, [](const ObjectLitExpr::Property &p) {
-        return !p.spread && p.name == "timeout";
+        return !p.spread() && p.name == "timeout";
       });
     }
   }
@@ -269,9 +269,9 @@ Expr *EventTargetChecker::checkEventsFunction(CallExpr *call, llvm::StringRef fn
                        : events->field("error") ? events->field("error")->type
                                                 : nullptr;
   const ClassDecl *source = ClassDeclarer::classOf(type);
-  const ClassDecl *root = source && source->generic ? source->generic : source;
-  bool ends = root && root->library && root->name != "EventEmitter" &&
-              root->name != "EventEmitterBase";
+  const ClassDecl *root = source && source->generic() ? source->generic() : source;
+  bool ends =
+      root && root->library() && root->name != "EventEmitter" && root->name != "EventEmitterBase";
   bool runsOnce = (!checker_.currentDecl() && !checker_.awaitLoops_) ||
               checker_.emitterChecker().ownsEmitter(call->args[0]);
   if (!ends && !timed && !runsOnce) {

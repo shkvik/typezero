@@ -96,7 +96,7 @@ bool ReflectCallChecker::reflectAccepts(const Type *arg, const Type *param) {
   }
   case Type::Kind::Object: {
     const ClassDecl *cls = arg->classDecl();
-    if (!cls || cls->literal || cls->builtin || !arg->isClass()) {
+    if (!cls || cls->literal() || cls->builtin() || !arg->isClass()) {
       return param->isDate() && arg->isDate();
     }
     if (param->isAnyObject()) {
@@ -240,7 +240,7 @@ Expr *ReflectCallChecker::checkReflectCall(CallExpr *call, MemberExpr *member,
   call->args[at + 1] =
       checker_.argumentChecker().checkArg(call->args[at + 1], Type::optional(Type::string()));
 
-  call->builtin = function->builtin;
+  call->target = BuiltinCall{.builtin = function->builtin};
   switch (function->builtin) {
   case Builtin::MetaDefine:
     call->type = Type::voidTy();
@@ -295,12 +295,12 @@ FunctionDecl *ReflectCallChecker::knownReflectMethod(ClassDecl *cls, llvm::Strin
 const FunctionDecl *ReflectCallChecker::heldReflectMethod(const Expr *f) {
   f = stripImplicit(const_cast<Expr *>(f));
   if (auto *name = dyn_cast<NameExpr>(f)) {
-    return name->var ? name->var->reflectMethod() : nullptr;
+    return name->var() ? name->var()->reflectMethod() : nullptr;
   }
-  if (auto *got = dyn_cast<CallExpr>(f); got && got->builtin == Builtin::ReflectMethod &&
+  if (auto *got = dyn_cast<CallExpr>(f); got && got->builtin() == Builtin::ReflectMethod &&
                                          !checker_.severalVariants_.contains(got) &&
                                          isa<NameExpr>(stripImplicit(got->args[0]))) {
-    return got->method->decl;
+    return got->method()->decl;
   }
 
   return nullptr;
@@ -309,7 +309,7 @@ const FunctionDecl *ReflectCallChecker::heldReflectMethod(const Expr *f) {
 Expr *ReflectCallChecker::directReflectApply(CallExpr *call, const FunctionDecl *fn) {
   Expr *self = stripImplicit(call->args[1]);
   const ClassDecl *cls = self->type->isOptional() ? nullptr : self->type->classDecl();
-  if (!cls || cls->literal || !cls->derivesFrom(fn->cls())) {
+  if (!cls || cls->literal() || !cls->derivesFrom(fn->cls())) {
     return nullptr;
   }
   auto *list = dyn_cast<ArrayLitExpr>(call->args[2]);
@@ -338,7 +338,7 @@ Expr *ReflectCallChecker::directReflectApply(CallExpr *call, const FunctionDecl 
   auto *member = checker_.ctx_.make<MemberExpr>(call->loc(), self, fn->name);
   member->type = checker_.returnInferrer().functionType(sym);
   auto *direct = checker_.ctx_.make<CallExpr>(call->loc(), member, std::move(args));
-  direct->method = sym;
+  direct->target = MethodCall{.method = sym};
   direct->type = checker_.returnInferrer().returnType(sym);
   std::vector<bool> given(direct->args.size(), true);
   Expr *result = checker_.argumentChecker().checkArguments(direct, sym->params, sym->minArgs,

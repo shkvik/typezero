@@ -197,9 +197,9 @@ void DestinationScanner::scanDestinations(const Expr *expr, const Type *sink,
   }
   case Expr::Kind::ObjectLit:
     for (const ObjectLitExpr::Property &prop : cast<ObjectLitExpr>(expr)->props) {
-      sub(prop.key);
+      sub(prop.key());
       const Field *field =
-          object && object->isObject() && !prop.spread ? object->field(prop.name) : nullptr;
+          object && object->isObject() && !prop.spread() ? object->field(prop.name) : nullptr;
       sub(prop.value, field ? field->type : nullptr);
     }
     break;
@@ -289,7 +289,7 @@ void DestinationScanner::scanDestinations(const Expr *expr, const Type *sink,
     auto *create = cast<NewExpr>(expr);
     const FuncSymbol *ctor = nullptr;
     if (ClassDecl *cls =
-            scan.hidden(create->name) ? nullptr : checker_.scopes().lookup(create->name).cls) {
+            scan.hidden(create->name) ? nullptr : checker_.scopes().lookup(create->name).cls()) {
       if (cls->constructors.size() == 1 && cls->constructors[0]->sym &&
           !cls->constructors[0]->sym->pendingParams) {
         ctor = cls->constructors[0]->sym;
@@ -327,7 +327,7 @@ const Type *DestinationScanner::peekName(llvm::StringRef name,
       return found->second;
     }
   }
-  VarSymbol *var = checker_.scopes().lookup(name).var;
+  VarSymbol *var = checker_.scopes().lookup(name).var();
 
   return var ? var->type : nullptr;
 }
@@ -339,7 +339,7 @@ const Type *DestinationScanner::peekType(const Expr *expr,
   }
   if (auto *member = dyn_cast<MemberExpr>(expr)) {
     if (member->name == "subtle" && checker_.callChecker().isGlobalName(member->object, "crypto")) {
-      VarSymbol *subtle = checker_.scopes().lookup(kSubtleName).var;
+      VarSymbol *subtle = checker_.scopes().lookup(kSubtleName).var();
       return subtle ? subtle->type : nullptr;
     }
     const Type *object = peekType(member->object, scan);
@@ -400,16 +400,16 @@ std::vector<const Type *> DestinationScanner::calleeParams(const CallExpr *call,
       return type && type->isFunction() ? spread(type->params(), type->hasRest())
                                         : std::vector<const Type *>{};
     }
-    Checker::ScopeEntry entry = checker_.scopes().lookup(name->name);
-    FuncSymbol *func = entry.func;
-    if (entry.var && entry.var->function()) {
-      func = entry.var->function()->sym;
+    ScopeEntry entry = checker_.scopes().lookup(name->name);
+    FuncSymbol *func = entry.func();
+    if (entry.var() && entry.var()->function()) {
+      func = entry.var()->function()->sym;
     }
     if (func && !func->pendingParams) {
       return spread(func->params, func->hasRest);
     }
-    if (entry.var && entry.var->type && entry.var->type->isFunction()) {
-      return spread(entry.var->type->params(), entry.var->type->hasRest());
+    if (entry.var() && entry.var()->type && entry.var()->type->isFunction()) {
+      return spread(entry.var()->type->params(), entry.var()->type->hasRest());
     }
     return {};
   }
@@ -424,7 +424,7 @@ std::vector<const Type *> DestinationScanner::calleeParams(const CallExpr *call,
       return spread(methods[0]->sym->params, methods[0]->sym->hasRest);
     };
     if (auto *name = dyn_cast<NameExpr>(member->object); name && !scan.hidden(name->name)) {
-      if (ClassDecl *cls = checker_.scopes().lookup(name->name).cls) {
+      if (ClassDecl *cls = checker_.scopes().lookup(name->name).cls()) {
         return variant(cls, true);
       }
     }

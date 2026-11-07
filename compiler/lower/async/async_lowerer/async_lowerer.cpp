@@ -44,7 +44,7 @@ constexpr uint32_t kAsyncFrameAlign = 8;
 
 const Expr *resolvedValue(const Expr *expr) {
   auto *call = dyn_cast<CallExpr>(expr);
-  if (!call || call->builtin != Builtin::PromiseResolve || call->args.size() != 1 ||
+  if (!call || call->builtin() != Builtin::PromiseResolve || call->args.size() != 1 ||
       call->args[0]->type->isPromise()) {
     return nullptr;
   }
@@ -370,10 +370,11 @@ llvm::Value *AsyncLowerer::emitAwait(AwaitExpr *await) {
   Expr *operand = await->value;
   bool ahead = false;
   if (auto *call = dyn_cast<CallExpr>(operand);
-      call && (call->builtin == Builtin::LibAhead || call->builtin == Builtin::LibAheadMovable)) {
+      call &&
+      (call->builtin() == Builtin::LibAhead || call->builtin() == Builtin::LibAheadMovable)) {
     if (lowering_.parallel_) {
       lowering_.aheadStarts_.try_emplace(await, uint32_t(lowering_.aheadStarts_.size() + 1));
-      if (call->builtin == Builtin::LibAheadMovable) {
+      if (call->builtin() == Builtin::LibAheadMovable) {
         lowering_.movableAwaits_.insert(await);
       }
     }

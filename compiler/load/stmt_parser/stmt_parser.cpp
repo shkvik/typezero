@@ -367,8 +367,11 @@ Stmt *StmtParser::parseFor() {
       }
       forOf->binding.name = parser_.ctx_.hiddenName();
       forOf->binding.loc = pattern->loc;
-      forOf->binding.destructured = true;
-      forOf->binding.objectPattern = pattern->object;
+      if (pattern->object) {
+        forOf->binding.form = ObjectPattern{};
+      } else {
+        forOf->binding.form = ArrayPattern{};
+      }
       auto *elements = parser_.ctx_.make<VarDeclStmt>(pattern->loc, decl->isConst);
       parser_.patterns().declareElements(elements, *pattern, forOf->binding.name);
       auto *body = parser_.ctx_.make<BlockStmt>(forOf->body->loc());

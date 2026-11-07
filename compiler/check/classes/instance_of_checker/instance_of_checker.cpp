@@ -21,7 +21,7 @@ Expr *InstanceOfChecker::checkInstanceOf(BinaryExpr *bin) {
   bin->lhs = checker_.exprChecker().checkExpr(bin->lhs);
   bin->type = Type::boolTy();
   auto *name = dyn_cast<NameExpr>(bin->rhs);
-  ClassDecl *cls = name ? checker_.topLevelChecker().lookupValue(name->name).cls : nullptr;
+  ClassDecl *cls = name ? checker_.topLevelChecker().lookupValue(name->name).cls() : nullptr;
   for (llvm::StringRef builtin : {"Date", "Map", "Set"}) {
     if (cls || !checker_.callChecker().isGlobalName(bin->rhs, builtin)) {
       continue;
@@ -78,8 +78,8 @@ Expr *InstanceOfChecker::checkInstanceOf(BinaryExpr *bin) {
     }
     return bin;
   }
-  if (const Type *bytes = !cls && name && !checker_.scopes().lookup(name->name).var &&
-                                  !checker_.scopes().lookup(name->name).func
+  if (const Type *bytes = !cls && name && !checker_.scopes().lookup(name->name).var() &&
+                                  !checker_.scopes().lookup(name->name).func()
                               ? BytesChecker::bytesTypeNamed(name->name)
                               : nullptr) {
     return checkBytesInstanceOf(bin, bytes);
@@ -128,7 +128,7 @@ Expr *InstanceOfChecker::checkInstanceOf(BinaryExpr *bin) {
       if (related) {
         std::string generic = cls->name.str();
         std::string hint;
-        if (cls->library) {
+        if (cls->library()) {
           hint = "test for a class that extends it, e.g. 'x instanceof Bus' with 'class Bus "
                  "extends " +
                  generic + " {}'";

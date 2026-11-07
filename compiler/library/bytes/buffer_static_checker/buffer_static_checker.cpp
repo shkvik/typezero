@@ -90,7 +90,7 @@ Expr *BufferStaticChecker::checkBytesStatic(CallExpr *call, MemberExpr *member) 
     }
   };
   auto made = [&](Builtin builtin, const Type *result) {
-    call->builtin = builtin;
+    call->target = BuiltinCall{.builtin = builtin};
     call->type = result;
 
     return call;
@@ -201,10 +201,10 @@ Expr *BufferStaticChecker::checkBytesFromWith(CallExpr *call, const Type *type,
       checker_.ctx_.make<MemberExpr>(call->loc(),
                                      checker_.ctx_.make<NameExpr>(call->loc(), "Array"), "from"),
       std::vector<Expr *>{source, call->args[1]});
-  arrayFrom->builtin = Builtin::ArrayFrom;
+  arrayFrom->target = BuiltinCall{.builtin = Builtin::ArrayFrom};
   arrayFrom->type = Type::array(type->elementType());
   call->args = {arrayFrom};
-  call->builtin = Builtin::BytesFromArray;
+  call->target = BuiltinCall{.builtin = Builtin::BytesFromArray};
   call->type = type;
 
   return call;
@@ -215,7 +215,7 @@ Expr *BufferStaticChecker::checkBufferStatic(CallExpr *call, MemberExpr *member)
   const Type *uint8 = Type::bytesType(Bytes::Uint8);
   llvm::StringRef name = member->name;
   auto made = [&](Builtin builtin, const Type *result) {
-    call->builtin = builtin;
+    call->target = BuiltinCall{.builtin = builtin};
     call->type = result;
 
     return call;
@@ -447,7 +447,7 @@ Expr *BufferStaticChecker::checkEmbedBytes(CallExpr *call, NameExpr *name) {
   auto *file = checker_.ctx_.make<StringLitExpr>(loc, std::u16string(path.begin(), path.end()));
   file->type = Type::string();
   call->args = {lit, file};
-  call->builtin = Builtin::EmbedBytes;
+  call->target = BuiltinCall{.builtin = Builtin::EmbedBytes};
   call->type = Type::bytesType(Bytes::Uint8);
 
   return call;

@@ -61,19 +61,18 @@ void VarChecker::checkVarDecl(VarDeclStmt *decl) {
     const Type *declared =
         d.typeAnn ? checker_.typeResolver().resolveType(*d.typeAnn, false) : nullptr;
     if (auto *name = llvm::dyn_cast_or_null<NameExpr>(d.init);
-        name && decl->isConst && !declared && !d.destructured && name->typeArgs.empty()) {
+        name && decl->isConst && !declared && !d.destructured() && name->typeArgs.empty()) {
       if (FuncSymbol *generic = checker_.genericChecker().genericNamed(name)) {
-        checker_.scopes().declare(d.name, d.loc, {nullptr, generic});
+        checker_.scopes().declare(d.name, d.loc, {FunctionEntry{.func = generic}});
         d.alias = true;
         continue;
       }
     }
     if (auto *fe = llvm::dyn_cast_or_null<FunctionExpr>(d.init);
-        fe && !fe->fn->typeParams.empty() && decl->isConst && !declared && !d.destructured &&
+        fe && !fe->fn->typeParams.empty() && decl->isConst && !declared && !d.destructured() &&
         checker_.scopes_.size() == 1) {
       FunctionDecl *fn = fe->fn;
-      fn->isExpression = false;
-      fn->lifted = true;
+      fn->place = FunctionPlace::LIFTED;
       fn->name = d.name;
       if (checker_.module_) {
         checker_.declModules_[fn] = checker_.module_;
@@ -88,7 +87,7 @@ void VarChecker::checkVarDecl(VarDeclStmt *decl) {
       if (fe->fn->name.empty()) {
         fe->fn->name = d.name;
       }
-      if (decl->isConst && !d.destructured) {
+      if (decl->isConst && !d.destructured()) {
         VarSymbol *var = checker_.scopes().declareVar(d.name, d.loc, nullptr, true);
         var->holds = Lambda{.lambda = fe->fn};
         d.sym = var;
@@ -112,7 +111,7 @@ void VarChecker::checkVarDecl(VarDeclStmt *decl) {
     bool untyped = false;
     const Type *hint = declared;
     std::vector<std::pair<const Type *, llvm::SMLoc>> places;
-    if (!declared && d.init && !d.destructured && Destination::literalShaped(d.init)) {
+    if (!declared && d.init && !d.destructured() && Destination::literalShaped(d.init)) {
       checker_.following_ =
           block.empty() ? std::vector<const Stmt *>() : followingStatements(block, index);
       hint = checker_.destination().literalDestination(
@@ -122,7 +121,7 @@ void VarChecker::checkVarDecl(VarDeclStmt *decl) {
     }
     VarSymbol *early = nullptr;
     if (const Type *timer =
-            d.init && !d.destructured ? checker_.timerChecker().timerCallType(d.init) : nullptr) {
+            d.init && !d.destructured() ? checker_.timerChecker().timerCallType(d.init) : nullptr) {
       early =
           checker_.scopes().declareVar(d.name, d.loc, declared ? declared : timer, decl->isConst);
       if (LocalVarState *state = early->local()) {
@@ -133,11 +132,11 @@ void VarChecker::checkVarDecl(VarDeclStmt *decl) {
       if (!early) {
         checker_.initializing_.push_back(d.name);
       }
-      if (d.destructured && !d.objectPattern) {
+      if (d.destructured() && !d.objectPattern()) {
         checker_.iteratorMethods().markFused(d.init);
       }
       d.init = value = checker_.exprChecker().checkExpr(d.init, hint);
-      if (d.destructured && !d.objectPattern) {
+      if (d.destructured() && !d.objectPattern()) {
         d.init = value = checker_.dictChecker().iterableOf(d.init);
       }
       if (!early) {
@@ -151,7 +150,7 @@ void VarChecker::checkVarDecl(VarDeclStmt *decl) {
           checker_.diags_.error(d.init->loc(),
                                 "an expression of type 'void' cannot initialize a variable");
           type = Type::error();
-        } else if (type->isUndefined() && !decl->isConst && !d.destructured) {
+        } else if (type->isUndefined() && !decl->isConst && !d.destructured()) {
           untyped = true;
           type = Type::error();
         } else if (type->isUndefined()) {
@@ -172,17 +171,17 @@ void VarChecker::checkVarDecl(VarDeclStmt *decl) {
       type = Type::error();
     }
 
-    if (d.destructured && d.objectPattern) {
-    } else if (d.destructured && (type->isString() || type->isTypedArray()) && !declared) {
+    if (d.destructured() && d.objectPattern()) {
+    } else if (d.destructured() && (type->isString() || type->isTypedArray()) && !declared) {
       auto *chars = checker_.ctx_.make<ArrayLitExpr>(d.init->loc());
       chars->elements.push_back({d.init, true});
       chars->type = Type::array(type->isString() ? Type::string() : type->elementType());
       d.init = value = chars;
       type = chars->type;
-    } else if (d.destructured && type->isIterator() && !declared) {
+    } else if (d.destructured() && type->isIterator() && !declared) {
       d.init = value = checker_.generatorChecker().destructuredIterator(d.init, d);
       type = d.init->type;
-    } else if (d.destructured && !type->isArray() && !type->isTuple() && !type->isMatch() &&
+    } else if (d.destructured() && !type->isArray() && !type->isTuple() && !type->isMatch() &&
                !type->isError() && !type->nonOptional()->isJson()) {
       std::string message = "only arrays can be destructured, found '" + type->name().str() + "'";
       if (type->isOptional() && type->inner()->isArray()) {
@@ -201,14 +200,14 @@ void VarChecker::checkVarDecl(VarDeclStmt *decl) {
       d.sym = checker_.scopes().declareVar(d.name, d.loc, type, decl->isConst);
     }
     checker_.regexChecker().noteRegexVariable(d.sym, value, decl->isConst, block, index);
-    if (decl->isConst && !d.destructured) {
+    if (decl->isConst && !d.destructured()) {
       if (auto *got = llvm::dyn_cast_or_null<CallExpr>(value);
-          got && got->builtin == Builtin::ReflectMethod &&
+          got && got->builtin() == Builtin::ReflectMethod &&
           !checker_.severalVariants_.contains(got)) {
-        d.sym->holds = ReflectedMethod{.method = got->method->decl};
+        d.sym->holds = ReflectedMethod{.method = got->method()->decl};
       }
       if (auto *got = llvm::dyn_cast_or_null<CallExpr>(value);
-          got && got->builtin == Builtin::ReflectGet && got->args.size() == 2) {
+          got && got->builtin() == Builtin::ReflectGet && got->args.size() == 2) {
         const Expr *key = got->args[1];
         while (auto *conv = llvm::dyn_cast<CastExpr>(key)) {
           if (!conv->isImplicit()) {
@@ -245,9 +244,10 @@ void VarChecker::checkVarDecl(VarDeclStmt *decl) {
       auto *made = llvm::dyn_cast_or_null<CallExpr>(value);
       bool fresh =
           llvm::isa_and_nonnull<ArrayLitExpr>(value) ||
-          (made && (made->builtin == Builtin::ArrMap || made->builtin == Builtin::ArrFilter ||
-                    made->builtin == Builtin::ArrSlice || made->builtin == Builtin::ArrConcat ||
-                    made->builtin == Builtin::ArrFlatMap || made->builtin == Builtin::ArrayFrom));
+          (made &&
+           (made->builtin() == Builtin::ArrMap || made->builtin() == Builtin::ArrFilter ||
+            made->builtin() == Builtin::ArrSlice || made->builtin() == Builtin::ArrConcat ||
+            made->builtin() == Builtin::ArrFlatMap || made->builtin() == Builtin::ArrayFrom));
       if (LocalVarState *state = d.sym->local()) {
         state->unshared =
             fresh && type->isArray() && FlowChecker::staysLocal(d.sym->owner(), d.name);
@@ -259,17 +259,17 @@ void VarChecker::checkVarDecl(VarDeclStmt *decl) {
       checker_.constLiterals_[d.sym] = value;
       d.sym->literalConst = !declared && type->isString();
     }
-    if (auto *alias = dyn_cast_or_null<NameExpr>(value); decl->isConst && alias && alias->var &&
-                                                         alias->var->literalConst && !declared &&
+    if (auto *alias = dyn_cast_or_null<NameExpr>(value); decl->isConst && alias && alias->var() &&
+                                                         alias->var()->literalConst && !declared &&
                                                          type->isString()) {
-      checker_.constLiterals_[d.sym] = checker_.constLiterals_.lookup(alias->var);
+      checker_.constLiterals_[d.sym] = checker_.constLiterals_.lookup(alias->var());
       d.sym->literalConst = true;
     }
     if (!places.empty()) {
       checker_.destinations_[d.sym] = std::move(places);
     }
     if (const Type *held = type->nonOptional();
-        !d.destructured && !checker_.checkingInstance_ &&
+        !d.destructured() && !checker_.checkingInstance_ &&
         (held->isResult() || (held->isPromise() && held->promised()->isResult())) &&
         !exported(d.name)) {
       checker_.resultVars_.push_back(d.sym);
@@ -281,7 +281,7 @@ void VarChecker::checkVarDecl(VarDeclStmt *decl) {
       checker_.flowChecker().assigned(d.sym, value);
     }
     if (const Type *base = type->nonOptional();
-        decl->isConst && value && !d.destructured &&
+        decl->isConst && value && !d.destructured() &&
         (base->isByteView() || base->bytes() == Type::Bytes::ArrayBuffer)) {
       if (std::optional<Linear> length = checker_.indexProofs().knownLength(value);
           length && length->term.isZero()) {
@@ -312,8 +312,9 @@ bool VarChecker::exported(llvm::StringRef name) const {
   }
 
   return llvm::any_of(checker_.module_->file.exports, [&](const ExportDecl &decl) {
-    return decl.path.empty() &&
-           llvm::any_of(decl.names, [&](const ModuleName &n) { return n.name == name; });
+    const LocalExport *local = decl.form.as<LocalExport>();
+
+    return local && llvm::any_of(local->names, [&](const ModuleName &n) { return n.name == name; });
   });
 }
 
@@ -361,7 +362,7 @@ void VarChecker::assignedUntyped(const VarSymbol *var, const Type *type) {
 void VarChecker::reportUntyped() {
   llvm::erase_if(checker_.untyped_, [&](const Checker::Untyped &u) {
     auto found = checker_.scopes_.back().find(u.var->name);
-    if (found == checker_.scopes_.back().end() || found->second.var != u.var) {
+    if (found == checker_.scopes_.back().end() || found->second.var() != u.var) {
       return false;
     }
     const Type *type = u.initUndefined ? Type::undefinedTy() : nullptr;

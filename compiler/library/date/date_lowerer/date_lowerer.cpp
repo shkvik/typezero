@@ -211,217 +211,217 @@ llvm::Value *DateLowerer::emitDateCall(CallExpr *call) {
     return arg->type->isFloat() ? wholeTime(value) : value;
   };
 
-  switch (call->builtin) {
-  case Builtin::DateNew: {
-    return newDate(call->args.empty() ? now() : number(call->args[0]));
-  }
-  case Builtin::DateCopy: {
-    Lowering::Operand date = lowering_.refCounts().emitOperand(call->args[0], true);
-    llvm::Value *time = timeOf(date.value);
-    lowering_.refCounts().dropOperand(date);
-    return newDate(time);
-  }
-  case Builtin::DateFromString:
-  case Builtin::DateParse: {
-    Lowering::Operand text = lowering_.refCounts().emitOperand(call->args[0], true);
-    bool parse = call->builtin == Builtin::DateParse;
-    llvm::Value *time = lowering_.builder_.CreateCall(
-        lowering_.processLowerer().processFunction(parse ? "tz_date_parse" : "tz_date_from_text",
-                                                   parse ? f64 : i64, {ptr, i64}),
-        {lowering_.stringLowerer().stringObj(text.value),
-         lowering_.stringLowerer().stringMeta(text.value)});
-    llvm::Value *result = parse ? parseResult(time, text.value, call) : newDate(time);
-    lowering_.refCounts().dropOperand(text);
-    return result;
-  }
-  case Builtin::DateFromFields:
-  case Builtin::DateUTC: {
-    std::vector<llvm::Value *> values;
-    for (Expr *arg : call->args) {
-      values.push_back(number(arg));
+  switch (call->builtin()) {
+    case Builtin::DateNew: {
+      return newDate(call->args.empty() ? now() : number(call->args[0]));
     }
-    for (size_t i = values.size(); i < 7; ++i) {
-      values.push_back(lowering_.builder_.getInt64(i == 2 ? 1 : 0));
+    case Builtin::DateCopy: {
+      Lowering::Operand date = lowering_.refCounts().emitOperand(call->args[0], true);
+      llvm::Value *time = timeOf(date.value);
+      lowering_.refCounts().dropOperand(date);
+      return newDate(time);
     }
-    values.push_back(lowering_.builder_.getInt32(call->builtin == Builtin::DateFromFields));
-    llvm::Value *time = lowering_.builder_.CreateCall(
-        lowering_.processLowerer().processFunction("tz_date_from_fields", i64,
-                                                   {i64, i64, i64, i64, i64, i64, i64, i32}),
-        values);
-    return call->builtin == Builtin::DateUTC ? time : newDate(time);
-  }
-  case Builtin::DateText:
-    return stringOf("tz_date_local_string", {now(), lowering_.builder_.getInt32(TZ_DATE_TEXT_FULL)},
-                    {i64, i32});
-  case Builtin::DateGetTime:
-  case Builtin::DateGetUTC:
-  case Builtin::DateGetLocal: {
-    Lowering::Operand date = receiver(call->args.size());
-    llvm::Value *time = timeOf(date.value);
-    lowering_.refCounts().dropOperand(date);
-    if (call->builtin == Builtin::DateGetTime) {
+    case Builtin::DateFromString:
+    case Builtin::DateParse: {
+      Lowering::Operand text = lowering_.refCounts().emitOperand(call->args[0], true);
+      bool parse = call->builtin() == Builtin::DateParse;
+      llvm::Value *time = lowering_.builder_.CreateCall(
+          lowering_.processLowerer().processFunction(parse ? "tz_date_parse" : "tz_date_from_text",
+                                                     parse ? f64 : i64, {ptr, i64}),
+          {lowering_.stringLowerer().stringObj(text.value),
+           lowering_.stringLowerer().stringMeta(text.value)});
+      llvm::Value *result = parse ? parseResult(time, text.value, call) : newDate(time);
+      lowering_.refCounts().dropOperand(text);
+      return result;
+    }
+    case Builtin::DateFromFields:
+    case Builtin::DateUTC: {
+      std::vector<llvm::Value *> values;
+      for (Expr *arg : call->args) {
+        values.push_back(number(arg));
+      }
+      for (size_t i = values.size(); i < 7; ++i) {
+        values.push_back(lowering_.builder_.getInt64(i == 2 ? 1 : 0));
+      }
+      values.push_back(lowering_.builder_.getInt32(call->builtin() == Builtin::DateFromFields));
+      llvm::Value *time = lowering_.builder_.CreateCall(
+          lowering_.processLowerer().processFunction("tz_date_from_fields", i64,
+                                                     {i64, i64, i64, i64, i64, i64, i64, i32}),
+          values);
+      return call->builtin() == Builtin::DateUTC ? time : newDate(time);
+    }
+    case Builtin::DateText:
+      return stringOf("tz_date_local_string",
+                      {now(), lowering_.builder_.getInt32(TZ_DATE_TEXT_FULL)}, {i64, i32});
+    case Builtin::DateGetTime:
+    case Builtin::DateGetUTC:
+    case Builtin::DateGetLocal: {
+      Lowering::Operand date = receiver(call->args.size());
+      llvm::Value *time = timeOf(date.value);
+      lowering_.refCounts().dropOperand(date);
+      if (call->builtin() == Builtin::DateGetTime) {
+        return time;
+      }
+      bool utc = call->builtin() == Builtin::DateGetUTC;
+      return lowering_.builder_.CreateCall(
+          lowering_.processLowerer().processFunction(
+              utc ? "tz_date_utc_field" : "tz_date_local_field", i64, {i64, i32}),
+          {time, constant(0)});
+    }
+    case Builtin::DateSetTime:
+    case Builtin::DateSetUTC:
+    case Builtin::DateSetLocal: {
+      Lowering::Operand date = receiver(0);
+      bool setTime = call->builtin() == Builtin::DateSetTime;
+      std::vector<llvm::Value *> values;
+      for (size_t i = setTime ? 0 : 1; i < call->args.size(); ++i) {
+        values.push_back(number(call->args[i]));
+      }
+      llvm::Value *address = dateTimeAddress(date.value);
+      llvm::Value *time;
+      if (setTime) {
+        time = values[0];
+      } else {
+        llvm::Value *count = lowering_.builder_.getInt32(uint32_t(values.size()));
+        while (values.size() < 4) {
+          values.push_back(lowering_.builder_.getInt64(0));
+        }
+        time = lowering_.builder_.CreateCall(
+            lowering_.processLowerer().processFunction("tz_date_set", i64,
+                                                       {i64, i32, i32, i32, i64, i64, i64, i64}),
+            {lowering_.builder_.CreateLoad(i64, address, "time"), constant(0),
+             lowering_.builder_.getInt32(call->builtin() == Builtin::DateSetLocal), count,
+             values[0], values[1], values[2], values[3]});
+      }
+      lowering_.builder_.CreateStore(time, address);
+      lowering_.refCounts().dropOperand(date);
       return time;
     }
-    bool utc = call->builtin == Builtin::DateGetUTC;
-    return lowering_.builder_.CreateCall(
-        lowering_.processLowerer().processFunction(
-            utc ? "tz_date_utc_field" : "tz_date_local_field", i64, {i64, i32}),
-        {time, constant(0)});
-  }
-  case Builtin::DateSetTime:
-  case Builtin::DateSetUTC:
-  case Builtin::DateSetLocal: {
-    Lowering::Operand date = receiver(0);
-    bool setTime = call->builtin == Builtin::DateSetTime;
-    std::vector<llvm::Value *> values;
-    for (size_t i = setTime ? 0 : 1; i < call->args.size(); ++i) {
-      values.push_back(number(call->args[i]));
-    }
-    llvm::Value *address = dateTimeAddress(date.value);
-    llvm::Value *time;
-    if (setTime) {
-      time = values[0];
-    } else {
-      llvm::Value *count = lowering_.builder_.getInt32(uint32_t(values.size()));
-      while (values.size() < 4) {
-        values.push_back(lowering_.builder_.getInt64(0));
+    case Builtin::DateToISOString:
+    case Builtin::DateToUTCString:
+    case Builtin::DateToLocalString:
+    case Builtin::DateToJSON: {
+      Lowering::Operand date = receiver(0);
+      if (call->builtin() == Builtin::DateToJSON && !call->args.empty()) {
+        lowering_.stmtLowerer().emitDiscarded(call->args[0]);
       }
-      time = lowering_.builder_.CreateCall(
-          lowering_.processLowerer().processFunction("tz_date_set", i64,
-                                                     {i64, i32, i32, i32, i64, i64, i64, i64}),
-          {lowering_.builder_.CreateLoad(i64, address, "time"), constant(0),
-           lowering_.builder_.getInt32(call->builtin == Builtin::DateSetLocal), count, values[0],
-           values[1], values[2], values[3]});
-    }
-    lowering_.builder_.CreateStore(time, address);
-    lowering_.refCounts().dropOperand(date);
-    return time;
-  }
-  case Builtin::DateToISOString:
-  case Builtin::DateToUTCString:
-  case Builtin::DateToLocalString:
-  case Builtin::DateToJSON: {
-    Lowering::Operand date = receiver(0);
-    if (call->builtin == Builtin::DateToJSON && !call->args.empty()) {
-      lowering_.stmtLowerer().emitDiscarded(call->args[0]);
-    }
-    llvm::Value *time = timeOf(date.value);
-    lowering_.refCounts().dropOperand(date);
-    if (call->builtin == Builtin::DateToUTCString) {
-      return stringOf("tz_date_utc_string", {time}, {i64});
-    }
-    if (call->builtin == Builtin::DateToLocalString) {
-      return stringOf("tz_date_local_string", {time, constant(0)}, {i64, i32});
-    }
-    return stringOf("tz_date_iso", {time}, {i64});
-  }
-  case Builtin::DateToLocale: {
-    Lowering::Operand date = receiver(1);
-    std::vector<Lowering::Operand> held;
-    llvm::ArrayRef<Expr *> args = llvm::ArrayRef<Expr *>(call->args).drop_front();
-    llvm::Value *options = emitDateOptions(args, held);
-    llvm::Value *time = timeOf(date.value);
-    llvm::Value *text = stringOf("tz_date_locale", {time, constant(0), options}, {i64, i32, ptr});
-    for (const Lowering::Operand &operand : held) {
-      lowering_.refCounts().dropOperand(operand);
-    }
-    lowering_.refCounts().dropOperand(date);
-    return text;
-  }
-  case Builtin::DtfNew: {
-    std::vector<Lowering::Operand> held;
-    llvm::Value *options = emitDateOptions(call->args, held);
-    llvm::Value *format = lowering_.builder_.CreateCall(
-        lowering_.processLowerer().processFunction("tz_dtf_new", ptr, {ptr}), {options});
-    for (const Lowering::Operand &operand : held) {
-      lowering_.refCounts().dropOperand(operand);
-    }
-    return format;
-  }
-  case Builtin::DtfFormat:
-  case Builtin::DtfFormatToParts: {
-    Lowering::Operand format = receiver(0);
-    llvm::Value *time = nullptr;
-    if (call->args.empty()) {
-      time = now();
-    } else if (call->args[0]->type->isDate()) {
-      Lowering::Operand date = lowering_.refCounts().emitOperand(call->args[0], true);
-      time = timeOf(date.value);
+      llvm::Value *time = timeOf(date.value);
       lowering_.refCounts().dropOperand(date);
-    } else {
-      time = number(call->args[0]);
-    }
-    llvm::Value *result;
-    if (call->builtin == Builtin::DtfFormat) {
-      result = stringOf("tz_dtf_format", {format.value, time}, {ptr, i64});
-    } else {
-      const Type *part = call->type->inner();
-      const Lowering::ObjectLayout &layout = lowering_.objectLayouts().objectLayout(part);
-      const llvm::StructLayout *offsets =
-          lowering_.module_->getDataLayout().getStructLayout(layout.type);
-      auto offsetOf = [&](llvm::StringRef name) {
-        return lowering_.builder_.getInt32(uint32_t(
-            offsets->getElementOffset(layout.elements[ObjectLayouts::fieldIndex(part, name)])));
-      };
-      result = lowering_.builder_.CreateCall(
-          lowering_.processLowerer().processFunction("tz_dtf_format_to_parts", ptr,
-                                                     {ptr, i64, ptr, ptr, i64, i32, i32}),
-          {format.value, time, lowering_.typeDescriptors().typeDescriptor(part),
-           lowering_.objectLayouts().layoutDescriptor(part, {0, 1}),
-           lowering_.builder_.getInt64(
-               lowering_.module_->getDataLayout().getTypeAllocSize(layout.type)),
-           offsetOf("type"), offsetOf("value")},
-          "parts");
-    }
-    lowering_.refCounts().dropOperand(format);
-    return result;
-  }
-  case Builtin::DtfResolvedOptions: {
-    Lowering::Operand format = receiver(0);
-    const Type *type = call->type;
-    std::vector<unsigned> keys(type->fields().size());
-    std::iota(keys.begin(), keys.end(), 0u);
-    llvm::Value *object = lowering_.objectLayouts().allocObject(type, keys);
-    for (const Field &field : type->fields()) {
-      llvm::Value *address = lowering_.objectLayouts().fieldAddress(object, type, field.name);
-      llvm::Value *value;
-      if (field.name == "hour12") {
-        llvm::Value *v = lowering_.builder_.CreateCall(
-            lowering_.processLowerer().processFunction("tz_dtf_hour12", i32, {ptr}),
-            {format.value});
-        value = lowering_.optionalLowerer().makeOptional(
-            lowering_.builder_.CreateICmpEQ(v, lowering_.builder_.getInt32(1)),
-            lowering_.builder_.CreateICmpSGE(v, lowering_.builder_.getInt32(0)), field.type);
-      } else if (field.name == "fractionalSecondDigits") {
-        llvm::Value *v = lowering_.builder_.CreateCall(
-            lowering_.processLowerer().processFunction("tz_dtf_fractional", i32, {ptr}),
-            {format.value});
-        value = lowering_.optionalLowerer().makeOptional(
-            lowering_.builder_.CreateSExt(v, lowering_.builder_.getInt64Ty()),
-            lowering_.builder_.CreateICmpSGT(v, lowering_.builder_.getInt32(0)), field.type);
-      } else {
-        auto at = llvm::find(kOptionNames, field.name);
-        int which = at == std::end(kOptionNames) ? -1 : int(at - std::begin(kOptionNames));
-        llvm::AllocaInst *out =
-            lowering_.functionFrame().createStackSlot(lowering_.strTy_, "option.out");
-        llvm::Value *has = lowering_.builder_.CreateCall(
-            lowering_.processLowerer().processFunction("tz_dtf_option", i32, {ptr, ptr, i32}),
-            {out, format.value, lowering_.builder_.getInt32(uint32_t(which))});
-        llvm::Value *text = lowering_.builder_.CreateLoad(lowering_.strTy_, out);
-        value =
-            field.type->isOptional()
-                ? lowering_.optionalLowerer().makeOptional(
-                      text, lowering_.builder_.CreateICmpNE(has, lowering_.builder_.getInt32(0)),
-                      field.type)
-                : text;
+      if (call->builtin() == Builtin::DateToUTCString) {
+        return stringOf("tz_date_utc_string", {time}, {i64});
       }
-      lowering_.builder_.CreateStore(value, address);
+      if (call->builtin() == Builtin::DateToLocalString) {
+        return stringOf("tz_date_local_string", {time, constant(0)}, {i64, i32});
+      }
+      return stringOf("tz_date_iso", {time}, {i64});
     }
-    lowering_.refCounts().dropOperand(format);
-    return object;
-  }
-  default:
-    llvm_unreachable("not a built-in of Date");
+    case Builtin::DateToLocale: {
+      Lowering::Operand date = receiver(1);
+      std::vector<Lowering::Operand> held;
+      llvm::ArrayRef<Expr *> args = llvm::ArrayRef<Expr *>(call->args).drop_front();
+      llvm::Value *options = emitDateOptions(args, held);
+      llvm::Value *time = timeOf(date.value);
+      llvm::Value *text = stringOf("tz_date_locale", {time, constant(0), options}, {i64, i32, ptr});
+      for (const Lowering::Operand &operand : held) {
+        lowering_.refCounts().dropOperand(operand);
+      }
+      lowering_.refCounts().dropOperand(date);
+      return text;
+    }
+    case Builtin::DtfNew: {
+      std::vector<Lowering::Operand> held;
+      llvm::Value *options = emitDateOptions(call->args, held);
+      llvm::Value *format = lowering_.builder_.CreateCall(
+          lowering_.processLowerer().processFunction("tz_dtf_new", ptr, {ptr}), {options});
+      for (const Lowering::Operand &operand : held) {
+        lowering_.refCounts().dropOperand(operand);
+      }
+      return format;
+    }
+    case Builtin::DtfFormat:
+    case Builtin::DtfFormatToParts: {
+      Lowering::Operand format = receiver(0);
+      llvm::Value *time = nullptr;
+      if (call->args.empty()) {
+        time = now();
+      } else if (call->args[0]->type->isDate()) {
+        Lowering::Operand date = lowering_.refCounts().emitOperand(call->args[0], true);
+        time = timeOf(date.value);
+        lowering_.refCounts().dropOperand(date);
+      } else {
+        time = number(call->args[0]);
+      }
+      llvm::Value *result;
+      if (call->builtin() == Builtin::DtfFormat) {
+        result = stringOf("tz_dtf_format", {format.value, time}, {ptr, i64});
+      } else {
+        const Type *part = call->type->inner();
+        const Lowering::ObjectLayout &layout = lowering_.objectLayouts().objectLayout(part);
+        const llvm::StructLayout *offsets =
+            lowering_.module_->getDataLayout().getStructLayout(layout.type);
+        auto offsetOf = [&](llvm::StringRef name) {
+          return lowering_.builder_.getInt32(uint32_t(
+              offsets->getElementOffset(layout.elements[ObjectLayouts::fieldIndex(part, name)])));
+        };
+        result = lowering_.builder_.CreateCall(
+            lowering_.processLowerer().processFunction("tz_dtf_format_to_parts", ptr,
+                                                       {ptr, i64, ptr, ptr, i64, i32, i32}),
+            {format.value, time, lowering_.typeDescriptors().typeDescriptor(part),
+             lowering_.objectLayouts().layoutDescriptor(part, {0, 1}),
+             lowering_.builder_.getInt64(
+                 lowering_.module_->getDataLayout().getTypeAllocSize(layout.type)),
+             offsetOf("type"), offsetOf("value")},
+            "parts");
+      }
+      lowering_.refCounts().dropOperand(format);
+      return result;
+    }
+    case Builtin::DtfResolvedOptions: {
+      Lowering::Operand format = receiver(0);
+      const Type *type = call->type;
+      std::vector<unsigned> keys(type->fields().size());
+      std::iota(keys.begin(), keys.end(), 0u);
+      llvm::Value *object = lowering_.objectLayouts().allocObject(type, keys);
+      for (const Field &field : type->fields()) {
+        llvm::Value *address = lowering_.objectLayouts().fieldAddress(object, type, field.name);
+        llvm::Value *value;
+        if (field.name == "hour12") {
+          llvm::Value *v = lowering_.builder_.CreateCall(
+              lowering_.processLowerer().processFunction("tz_dtf_hour12", i32, {ptr}),
+              {format.value});
+          value = lowering_.optionalLowerer().makeOptional(
+              lowering_.builder_.CreateICmpEQ(v, lowering_.builder_.getInt32(1)),
+              lowering_.builder_.CreateICmpSGE(v, lowering_.builder_.getInt32(0)), field.type);
+        } else if (field.name == "fractionalSecondDigits") {
+          llvm::Value *v = lowering_.builder_.CreateCall(
+              lowering_.processLowerer().processFunction("tz_dtf_fractional", i32, {ptr}),
+              {format.value});
+          value = lowering_.optionalLowerer().makeOptional(
+              lowering_.builder_.CreateSExt(v, lowering_.builder_.getInt64Ty()),
+              lowering_.builder_.CreateICmpSGT(v, lowering_.builder_.getInt32(0)), field.type);
+        } else {
+          auto at = llvm::find(kOptionNames, field.name);
+          int which = at == std::end(kOptionNames) ? -1 : int(at - std::begin(kOptionNames));
+          llvm::AllocaInst *out =
+              lowering_.functionFrame().createStackSlot(lowering_.strTy_, "option.out");
+          llvm::Value *has = lowering_.builder_.CreateCall(
+              lowering_.processLowerer().processFunction("tz_dtf_option", i32, {ptr, ptr, i32}),
+              {out, format.value, lowering_.builder_.getInt32(uint32_t(which))});
+          llvm::Value *text = lowering_.builder_.CreateLoad(lowering_.strTy_, out);
+          value =
+              field.type->isOptional()
+                  ? lowering_.optionalLowerer().makeOptional(
+                        text, lowering_.builder_.CreateICmpNE(has, lowering_.builder_.getInt32(0)),
+                        field.type)
+                  : text;
+        }
+        lowering_.builder_.CreateStore(value, address);
+      }
+      lowering_.refCounts().dropOperand(format);
+      return object;
+    }
+    default:
+      llvm_unreachable("not a built-in of Date");
   }
 }
 

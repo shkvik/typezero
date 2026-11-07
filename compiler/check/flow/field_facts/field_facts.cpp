@@ -28,10 +28,10 @@ std::optional<Checker::FieldPath> FieldFacts::fieldPath(const Expr *expr) const 
   const Expr *object = unnarrowed(member->object);
   Checker::FieldPath path;
   if (auto *name = dyn_cast<NameExpr>(object)) {
-    if (!name->var) {
+    if (!name->var()) {
       return std::nullopt;
     }
-    path.var = name->var;
+    path.var = name->var();
   } else if (std::optional<Checker::FieldPath> outer = fieldPath(object)) {
     path = std::move(*outer);
   } else {

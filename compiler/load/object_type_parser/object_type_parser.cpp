@@ -41,9 +41,9 @@ bool ObjectTypeParser::mappedTypeAhead() {
 
 TypeRef ObjectTypeParser::parseMappedType(TypeRef &object, int readonlyChange) {
   TypeRef ref;
-  ref.kind = TypeRef::Kind::Mapped;
+  ref.form = MappedTypeRef{.mappedReadonly = readonlyChange};
+  MappedTypeRef *mapped = ref.form.as<MappedTypeRef>();
   ref.loc = object.loc;
-  ref.mappedReadonly = readonlyChange;
   parser_.cursor().advance();
   ref.name = parser_.tok_.text;
   parser_.cursor().advance();
@@ -59,11 +59,11 @@ TypeRef ObjectTypeParser::parseMappedType(TypeRef &object, int readonlyChange) {
   }
   if ((parser_.tok_.is(Tok::Minus) || parser_.tok_.is(Tok::Plus)) &&
       parser_.cursor().peek().is(Tok::Question)) {
-    ref.mappedOptional = parser_.tok_.is(Tok::Minus) ? -1 : 1;
+    mapped->mappedOptional = parser_.tok_.is(Tok::Minus) ? -1 : 1;
     parser_.cursor().advance();
     parser_.cursor().advance();
   } else if (parser_.cursor().accept(Tok::Question)) {
-    ref.mappedOptional = 1;
+    mapped->mappedOptional = 1;
   }
   if (!parser_.cursor().expect(Tok::Colon, "before the type of the values of the mapped type")) {
     parser_.cursor().skipToClosingBrace();
@@ -147,7 +147,8 @@ bool ObjectTypeParser::parseFieldName(llvm::StringRef &name) {
 
 TypeRef ObjectTypeParser::parseObjectType() {
   TypeRef ref;
-  ref.kind = TypeRef::Kind::Object;
+  ref.form = ObjectTypeRef{};
+  ObjectTypeRef *object = ref.form.as<ObjectTypeRef>();
   ref.loc = parser_.tok_.loc();
   parser_.cursor().advance();
   while (!parser_.tok_.is(Tok::RBrace) && !parser_.tok_.is(Tok::Eof)) {
@@ -201,7 +202,7 @@ TypeRef ObjectTypeParser::parseObjectType() {
       }
       parser_.cursor().advance();
       TypeRef record;
-      record.kind = TypeRef::Kind::Generic;
+      record.form = GenericTypeRef{};
       record.name = "Record";
       record.loc = ref.loc;
       record.args.push_back(std::move(key));
@@ -241,12 +242,12 @@ TypeRef ObjectTypeParser::parseObjectType() {
       }
       fn.args.push_back(parser_.types().parseType());
       ref.args.push_back(std::move(fn));
-      ref.names.push_back(name);
-      ref.locs.push_back(loc);
-      ref.optional.push_back(optional);
-      ref.readonly.push_back(true);
-      ref.methods.resize(ref.args.size() - 1);
-      ref.methods.push_back(true);
+      object->names.push_back(name);
+      object->locs.push_back(loc);
+      object->optional.push_back(optional);
+      object->readonly.push_back(true);
+      object->methods.resize(ref.args.size() - 1);
+      object->methods.push_back(true);
       if (parser_.cursor().accept(Tok::Semi) || parser_.cursor().accept(Tok::Comma)) {
         continue;
       }
@@ -267,10 +268,10 @@ TypeRef ObjectTypeParser::parseObjectType() {
     }
     parser_.cursor().advance();
     ref.args.push_back(parser_.types().parseType());
-    ref.names.push_back(name);
-    ref.locs.push_back(loc);
-    ref.optional.push_back(optional);
-    ref.readonly.push_back(readonly);
+    object->names.push_back(name);
+    object->locs.push_back(loc);
+    object->optional.push_back(optional);
+    object->readonly.push_back(readonly);
     if (parser_.cursor().accept(Tok::Semi) || parser_.cursor().accept(Tok::Comma)) {
       continue;
     }
@@ -289,7 +290,8 @@ TypeRef ObjectTypeParser::parseObjectType() {
 
 TypeRef ObjectTypeParser::parseTupleType() {
   TypeRef ref;
-  ref.kind = TypeRef::Kind::Tuple;
+  ref.form = TupleTypeRef{};
+  TupleTypeRef *tuple = ref.form.as<TupleTypeRef>();
   ref.loc = parser_.tok_.loc();
   parser_.cursor().advance();
   while (!parser_.tok_.is(Tok::RBracket) && !parser_.tok_.is(Tok::Eof)) {
@@ -299,8 +301,8 @@ TypeRef ObjectTypeParser::parseTupleType() {
       parser_.cursor().advance();
     }
     ref.args.push_back(parser_.types().parseType());
-    ref.readonly.push_back(false);
-    ref.spread.push_back(spread);
+    tuple->readonly.push_back(false);
+    tuple->spread.push_back(spread);
     if (parser_.tok_.is(Tok::Question)) {
       parser_.cursor().report(
           parser_.tok_.loc(),

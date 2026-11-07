@@ -84,7 +84,8 @@ const Type *EventMaps::eventMapOf(const Type *type) const {
   }
   const ClassDecl *streams = checker_.libraryClass("StreamEmitter");
   for (const ClassDecl *c = ClassDeclarer::classOf(type); c; c = c->parent) {
-    if (c->generic && (c->generic == emitter || c->generic == streams) && !c->typeArgs.empty()) {
+    if (c->generic() && (c->generic() == emitter || c->generic() == streams) &&
+        !c->typeArgs.empty()) {
       return c->typeArgs[0];
     }
   }
@@ -360,7 +361,7 @@ const Type *EventMaps::createdType(const NewExpr *create) {
       return nullptr;
     }
   }
-  if (args.empty() && cls->library && cls->name == "EventEmitter") {
+  if (args.empty() && cls->library() && cls->name == "EventEmitter") {
     if (const Type *events = checker_.eventMapInference().inferredEventMap(
             "new " + checker_.eventMapInference().placeOf(create->loc()))) {
       args.push_back(events);

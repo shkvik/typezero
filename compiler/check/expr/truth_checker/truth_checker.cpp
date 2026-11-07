@@ -455,7 +455,7 @@ bool TruthChecker::checkTruthy(const Expr *expr, Checker::TruthUse use, const Ex
       bare = cast<CastExpr>(bare)->operand;
     }
     auto *name = dyn_cast<NameExpr>(bare);
-    bool className = isClass && name && name->cls && !name->var;
+    bool className = isClass && name && name->cls() && !name->var();
     const char *what = isArray     ? "an array"
                        : isPromise ? "a Promise"
                        : isClass   ? "a class"

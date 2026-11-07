@@ -86,31 +86,32 @@ std::string EventMapInference::placeOf(llvm::SMLoc loc) const {
 
 EventInference::Portable EventMapInference::portable(const Type *type,
                                                      llvm::SmallPtrSetImpl<const Type *> &seen) {
-  using Kind = EventInference::Portable::Kind;
   EventInference::Portable p;
   llvm::SmallPtrSet<const Type *, 8> visited;
   if (sameInEveryRound(type, visited)) {
-    p.same = type;
+    p.form = PortableSame{.type = type};
     return p;
   }
   if (!seen.insert(type).second) {
-    p.kind = Kind::Bad;
+    p.form = PortableBad{};
     return p;
   }
   auto part = [&](const Type *t) { p.parts.push_back(portable(t, seen)); };
   if (type->isClass() || type->isClassRef()) {
     const ClassDecl *cls = type->isClass() ? type->classDecl() : type->classRef();
-    if (cls->literal || cls->name.empty()) {
-      p.kind = Kind::Bad;
+    if (cls->literal() || cls->name.empty()) {
+      p.form = PortableBad{};
       return p;
     }
-    p.kind = type->isClass() ? Kind::Class : Kind::ClassRef;
-    const ClassDecl *declared = cls->generic ? cls->generic : cls;
-    p.name = declared->name.str();
-    if (!declared->builtin) {
-      p.file = fileOfPlace(placeOf(declared->loc()));
+    const ClassDecl *declared = cls->generic() ? cls->generic() : cls;
+    std::string name = declared->name.str();
+    std::string file = declared->builtin() ? std::string() : fileOfPlace(placeOf(declared->loc()));
+    if (type->isClassRef()) {
+      p.form = PortableClassRef{.file = std::move(file), .name = std::move(name)};
+      return p;
     }
-    if (type->isClass() && cls->generic) {
+    p.form = PortableClass{.file = std::move(file), .name = std::move(name)};
+    if (cls->generic()) {
       for (const Type *arg : cls->typeArgs) {
         part(arg);
       }
@@ -118,86 +119,106 @@ EventInference::Portable EventMapInference::portable(const Type *type,
     return p;
   }
   switch (type->kind()) {
-  case Type::Kind::Optional:
-    p.kind = Kind::Optional;
-    part(type->inner());
-    break;
-  case Type::Kind::Array:
-    p.kind = Kind::Array;
-    part(type->inner());
-    break;
-  case Type::Kind::Promise:
-    p.kind = Kind::Promise;
-    part(type->inner());
-    break;
-  case Type::Kind::Function:
-    p.kind = Kind::Function;
-    for (const Type *t : type->params()) {
-      part(t);
-    }
-    part(type->ret());
-    p.min = type->minArgs();
-    p.rest = type->hasRest();
-    break;
-  case Type::Kind::Union:
-    p.kind = Kind::Union;
-    for (const Type *t : type->members()) {
-      part(t);
-    }
-    break;
-  case Type::Kind::Dict:
-    p.kind = Kind::Dict;
-    p.dict = int(type->dictKind());
-    part(type->keyType());
-    part(type->valueType());
-    break;
-  case Type::Kind::Iterator:
-    p.kind = Kind::Iterator;
-    part(type->yielded());
-    part(type->returned());
-    part(type->sent());
-    break;
-  case Type::Kind::Result:
-    p.kind = Kind::Result;
-    part(type->okType());
-    part(type->errType());
-    break;
-  case Type::Kind::Object:
-    if (type->isTuple()) {
-      p.kind = Kind::Tuple;
-      for (const Field &f : type->fields()) {
-        part(f.type);
+    case Type::Kind::Optional:
+      p.form = PortableOptional{};
+      part(type->inner());
+      break;
+    case Type::Kind::Array:
+      p.form = PortableArray{};
+      part(type->inner());
+      break;
+    case Type::Kind::Promise:
+      p.form = PortablePromise{};
+      part(type->inner());
+      break;
+    case Type::Kind::Function:
+      p.form = PortableFunction{.min = type->minArgs(), .rest = type->hasRest()};
+      for (const Type *t : type->params()) {
+        part(t);
       }
-      p.min = type->tupleMin();
-      p.rest = type->tupleRest() != nullptr;
-      if (p.rest) {
-        part(type->tupleRest());
+      part(type->ret());
+      break;
+    case Type::Kind::Union:
+      p.form = PortableUnion{};
+      for (const Type *t : type->members()) {
+        part(t);
       }
       break;
+    case Type::Kind::Dict:
+      p.form = PortableDict{.dict = int(type->dictKind())};
+      part(type->keyType());
+      part(type->valueType());
+      break;
+    case Type::Kind::Iterator:
+      p.form = PortableIterator{};
+      part(type->yielded());
+      part(type->returned());
+      part(type->sent());
+      break;
+    case Type::Kind::Result:
+      p.form = PortableResult{};
+      part(type->okType());
+      part(type->errType());
+      break;
+    case Type::Kind::Object: {
+      if (type->isTuple()) {
+        bool rest = type->tupleRest() != nullptr;
+        p.form = PortableTuple{.min = type->tupleMin(), .rest = rest};
+        for (const Field &f : type->fields()) {
+          part(f.type);
+        }
+        if (rest) {
+          part(type->tupleRest());
+        }
+        break;
+      }
+      PortableObject object;
+      for (const Field &f : type->fields()) {
+        object.names.push_back(f.name);
+        object.readonly.push_back(f.readonly);
+        part(f.type);
+      }
+      p.form = std::move(object);
+      break;
     }
-    p.kind = Kind::Object;
-    for (const Field &f : type->fields()) {
-      p.names.push_back(f.name);
-      p.readonly.push_back(f.readonly);
-      part(f.type);
-    }
-    break;
-  default:
-    p.kind = Kind::Bad;
-    break;
+    default:
+      p.form = PortableBad{};
+      break;
   }
   seen.erase(type);
   for (const EventInference::Portable &q : p.parts) {
-    if (q.kind == Kind::Bad) {
-      p.kind = Kind::Bad;
+    if (q.form.is<PortableBad>()) {
+      p.form = PortableBad{};
     }
   }
 
   return p;
 }
 
+ClassDecl *EventMapInference::portableClass(const std::string &file, const std::string &name) {
+  ClassDecl *cls = nullptr;
+  if (file.empty()) {
+    if (checker_.statsClass_ && name == checker_.statsClass_->name) {
+      cls = checker_.statsClass_;
+    }
+    if (!cls && checker_.direntClass_ && name == checker_.direntClass_->name) {
+      cls = checker_.direntClass_;
+    }
+  } else {
+    for (Module *module : checker_.file_->modules) {
+      for (Stmt *item : module->file.items) {
+        if (auto *c = dyn_cast<ClassDecl>(item);
+            c && !cls && c->name == name && fileOfPlace(placeOf(c->loc())) == file) {
+          cls = c;
+        }
+      }
+    }
+  }
+
+  return cls && cls->type ? cls : nullptr;
+}
+
 const Type *EventMapInference::fromPortable(const EventInference::Portable &p, llvm::SMLoc loc) {
-  using Kind = EventInference::Portable::Kind;
   std::vector<const Type *> parts;
   for (const EventInference::Portable &q : p.parts) {
     parts.push_back(fromPortable(q, loc));
@@ -205,80 +226,85 @@ const Type *EventMapInference::fromPortable(const EventInference::Portable &p, l
       return nullptr;
     }
   }
-  switch (p.kind) {
-  case Kind::Same:
-    return p.same;
-  case Kind::Bad:
-    return nullptr;
-  case Kind::Class:
-  case Kind::ClassRef: {
-    ClassDecl *cls = nullptr;
-    if (p.file.empty()) {
-      if (checker_.statsClass_ && p.name == checker_.statsClass_->name) {
-        cls = checker_.statsClass_;
+  const Type *type = nullptr;
+  switch (p.form.kind()) {
+    case PortableKind::SAME_TYPE:
+      type = p.form.as<PortableSame>()->type;
+      break;
+    case PortableKind::BAD_TYPE:
+      break;
+    case PortableKind::CLASS_TYPE: {
+      const PortableClass *named = p.form.as<PortableClass>();
+      ClassDecl *cls = portableClass(named->file, named->name);
+      if (!cls) {
+        break;
       }
-      if (!cls && checker_.direntClass_ && p.name == checker_.direntClass_->name) {
-        cls = checker_.direntClass_;
+      if (!cls->isGeneric()) {
+        type = cls->type;
+        break;
       }
-    } else {
-      for (Module *module : checker_.file_->modules) {
-        for (Stmt *item : module->file.items) {
-          if (auto *c = dyn_cast<ClassDecl>(item);
-              c && !cls && c->name == p.name && fileOfPlace(placeOf(c->loc())) == p.file) {
-            cls = c;
-          }
-        }
-      }
-    }
-    if (!cls || !cls->type) {
-      return nullptr;
-    }
-    if (p.kind == Kind::ClassRef) {
-      return Type::classRef(cls, cls->name);
-    }
-    if (cls->isGeneric()) {
       ClassDecl *inst = checker_.genericClassInstantiator().instantiateClass(cls, parts, loc);
-      return inst ? inst->type : nullptr;
+      type = inst ? inst->type : nullptr;
+      break;
     }
-    return cls->type;
-  }
-  case Kind::Optional:
-    return Type::optional(parts[0]);
-  case Kind::Array:
-    return Type::array(parts[0]);
-  case Kind::Promise:
-    return Type::promise(parts[0]);
-  case Kind::Function: {
-    const Type *ret = parts.back();
-    parts.pop_back();
-    return Type::function(parts, p.min, p.rest, ret);
-  }
-  case Kind::Union:
-    return Type::unionOf(parts);
-  case Kind::Dict:
-    return Type::dict(Type::DictKind(p.dict), parts[0], parts[1]);
-  case Kind::Iterator:
-    return Type::iterator(parts[0], parts[1], parts[2]);
-  case Kind::Result:
-    return Type::result(parts[0], parts[1]);
-  case Kind::Tuple: {
-    const Type *rest = nullptr;
-    if (p.rest) {
-      rest = parts.back();
+    case PortableKind::CLASS_REF_TYPE: {
+      const PortableClassRef *named = p.form.as<PortableClassRef>();
+      ClassDecl *cls = portableClass(named->file, named->name);
+      type = cls ? Type::classRef(cls, cls->name) : nullptr;
+      break;
+    }
+    case PortableKind::OPTIONAL_TYPE:
+      type = Type::optional(parts[0]);
+      break;
+    case PortableKind::ARRAY_TYPE:
+      type = Type::array(parts[0]);
+      break;
+    case PortableKind::PROMISE_TYPE:
+      type = Type::promise(parts[0]);
+      break;
+    case PortableKind::FUNCTION_TYPE: {
+      const PortableFunction *function = p.form.as<PortableFunction>();
+      const Type *ret = parts.back();
       parts.pop_back();
+      type = Type::function(parts, function->min, function->rest, ret);
+      break;
     }
-    return Type::argumentList(parts, p.min, rest);
-  }
-  case Kind::Object: {
-    std::vector<Field> fields;
-    for (size_t i = 0; i < parts.size(); ++i) {
-      fields.push_back({p.names[i], parts[i], p.readonly[i]});
+    case PortableKind::UNION_TYPE:
+      type = Type::unionOf(parts);
+      break;
+    case PortableKind::DICT_TYPE: {
+      Type::DictKind dictKind = Type::DictKind(p.form.as<PortableDict>()->dict);
+      type = Type::dict(dictKind, parts[0], parts[1]);
+      break;
     }
-    return Type::object(std::move(fields));
-  }
+    case PortableKind::ITERATOR_TYPE:
+      type = Type::iterator(parts[0], parts[1], parts[2]);
+      break;
+    case PortableKind::RESULT_TYPE:
+      type = Type::result(parts[0], parts[1]);
+      break;
+    case PortableKind::TUPLE_TYPE: {
+      const PortableTuple *tuple = p.form.as<PortableTuple>();
+      const Type *rest = nullptr;
+      if (tuple->rest) {
+        rest = parts.back();
+        parts.pop_back();
+      }
+      type = Type::argumentList(parts, tuple->min, rest);
+      break;
+    }
+    case PortableKind::OBJECT_TYPE: {
+      const PortableObject *object = p.form.as<PortableObject>();
+      std::vector<Field> fields;
+      for (size_t i = 0; i < parts.size(); ++i) {
+        fields.push_back({object->names[i], parts[i], object->readonly[i]});
+      }
+      type = Type::object(std::move(fields));
+      break;
+    }
   }
 
-  return nullptr;
+  return type;
 }
 
 const Type *EventMapInference::inferredEventMap(const std::string &site) {

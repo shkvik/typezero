@@ -59,7 +59,7 @@ const Type *DictChecker::resolveDictType(const TypeRef &ref) {
     return nullptr;
   }
   size_t wanted = set ? 1 : 2;
-  if (ref.kind != TypeRef::Kind::Generic || ref.args.size() != wanted) {
+  if (ref.kind() != TypeRefKind::GENERIC_REF || ref.args.size() != wanted) {
     checker_.diags_.error(
         ref.loc, set   ? "'" + name + "' needs the type of its elements, e.g. '" + name + "<int>'"
                  : map ? "'" + name + "' needs the types of its keys and values, e.g. '" + name +
@@ -140,7 +140,7 @@ Expr *DictChecker::dictCall(llvm::SMLoc loc, Expr *receiver, llvm::StringRef nam
   auto *member = checker_.ctx_.make<MemberExpr>(loc, receiver, name);
   member->type = type;
   auto *call = checker_.ctx_.make<CallExpr>(loc, member, std::move(args));
-  call->builtin = builtin;
+  call->target = BuiltinCall{.builtin = builtin};
   call->type = type;
 
   return call;

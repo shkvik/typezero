@@ -207,22 +207,22 @@ bool CycleScanner::thisEscapes(const Stmt *stmt, const VarSymbol *self) {
     if (auto *call = llvm::dyn_cast<CallExpr>(e)) {
       auto *member = llvm::dyn_cast<MemberExpr>(call->callee);
       auto *object = member ? llvm::dyn_cast<NameExpr>(member->object) : nullptr;
-      if ((call->superCall && member) ||
-          (object && object->var == self && (call->method || !call->unionMethods.empty()))) {
+      if ((call->superCall() && member) ||
+          (object && object->var() == self && (call->method() || !call->unionMethods().empty()))) {
         escapes = true;
         return;
       }
     }
     if (auto *member = llvm::dyn_cast<MemberExpr>(e)) {
       auto *object = llvm::dyn_cast<NameExpr>(member->object);
-      if (object && object->var == self && !member->method) {
+      if (object && object->var() == self && !member->method()) {
         return;
       }
       visit(member->object);
       return;
     }
     if (auto *name = llvm::dyn_cast<NameExpr>(e)) {
-      escapes = name->var == self;
+      escapes = name->var() == self;
       return;
     }
     if (auto *fe = llvm::dyn_cast<FunctionExpr>(e)) {

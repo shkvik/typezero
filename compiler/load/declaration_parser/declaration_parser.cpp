@@ -135,6 +135,7 @@ bool DeclarationParser::memberWordAhead() const {
 
 void DeclarationParser::parseMember(DeclaredClass &cls) {
   DeclaredMember member;
+  DeclaredField field;
   for (;;) {
     if (!parser_.tok_.is(Tok::Identifier) || !memberWordAhead()) {
       break;
@@ -148,10 +149,8 @@ void DeclarationParser::parseMember(DeclaredClass &cls) {
     } else if (word == "static") {
       member.isStatic = true;
     } else if (word == "readonly") {
-      member.readonly = true;
-    } else if (word == "async") {
-      member.isAsync = true;
-    } else if (word != "abstract" && word != "override") {
+      field.readonly = true;
+    } else if (word != "async" && word != "abstract" && word != "override") {
       break;
     }
     parser_.cursor().advance();
@@ -170,18 +169,23 @@ void DeclarationParser::parseMember(DeclaredClass &cls) {
     skipItem();
     return;
   }
-  member.constructor = member.name == "constructor";
+  bool constructor = member.name == "constructor";
   if (parser_.cursor().accept(Tok::Question)) {
-    member.optional = true;
+    field.optional = true;
   }
   if (parser_.tok_.is(Tok::LParen) || parser_.tok_.is(Tok::Less)) {
-    member.method = !member.constructor;
+    DeclaredSignature signature;
     if (parser_.tok_.is(Tok::Less)) {
-      member.typeParams = parser_.functions().parseTypeParams();
+      signature.typeParams = parser_.functions().parseTypeParams();
     }
     auto *fn = parser_.ctx_.make<FunctionDecl>(member.loc, member.name);
     parser_.functions().parseParams(fn);
-    member.params = fn->params;
+    signature.params = fn->params;
+    if (constructor) {
+      member.form = DeclaredConstructor{.signature = std::move(signature)};
+    } else {
+      member.form = DeclaredMethod{.signature = std::move(signature)};
+    }
     if (parser_.cursor().accept(Tok::Colon)) {
       member.type = parser_.types().parseReturnType();
     }
@@ -194,6 +198,11 @@ void DeclarationParser::parseMember(DeclaredClass &cls) {
     }
     cls.members.push_back(std::move(member));
     return;
+  }
+  if (constructor) {
+    member.form = DeclaredConstructor{};
+  } else {
+    member.form = field;
   }
   if (parser_.cursor().accept(Tok::Colon)) {
     member.type = parser_.types().parseType();

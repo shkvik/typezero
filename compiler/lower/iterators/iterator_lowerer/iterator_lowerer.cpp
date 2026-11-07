@@ -97,24 +97,24 @@ void IteratorLowerer::emitIteratorSpread(llvm::Value *array, Expr *source, const
 }
 
 llvm::Value *IteratorLowerer::emitIteratorBuiltin(CallExpr *call) {
-  switch (call->builtin) {
-  case Builtin::IterNext:
-    return emitNext(call);
-  case Builtin::ArrayFrom:
-  case Builtin::IterToArray:
-  case Builtin::IterForEach:
-  case Builtin::IterReduce:
-  case Builtin::IterSome:
-  case Builtin::IterEvery:
-  case Builtin::IterFind:
-    return emitIteratorSink(call);
-  default:
-    return emitIteratorObject(call);
+  switch (call->builtin()) {
+    case Builtin::IterNext:
+      return emitNext(call);
+    case Builtin::ArrayFrom:
+    case Builtin::IterToArray:
+    case Builtin::IterForEach:
+    case Builtin::IterReduce:
+    case Builtin::IterSome:
+    case Builtin::IterEvery:
+    case Builtin::IterFind:
+      return emitIteratorSink(call);
+    default:
+      return emitIteratorObject(call);
   }
 }
 
 llvm::Value *IteratorLowerer::emitIteratorSink(CallExpr *call) {
-  Builtin method = call->builtin;
+  Builtin method = call->builtin();
   bool from = method == Builtin::ArrayFrom;
   Expr *source = from ? call->args[0] : cast<MemberExpr>(call->callee)->object;
   const Type *element = iteratedType(source->type);
@@ -344,38 +344,38 @@ llvm::Value *IteratorLowerer::emitNext(CallExpr *call) {
 
 llvm::Value *IteratorLowerer::emitIteratorObject(CallExpr *call) {
   const Type *result = call->type;
-  switch (call->builtin) {
-  case Builtin::IterFrom: {
-    Expr *arg = call->args[0];
-    if (arg->type->isIterator()) {
-      return lowering_.exprLowerer().emitExpr(arg);
+  switch (call->builtin()) {
+    case Builtin::IterFrom: {
+      Expr *arg = call->args[0];
+      if (arg->type->isIterator()) {
+        return lowering_.exprLowerer().emitExpr(arg);
+      }
+      Builtin kind = arg->type->isString() ? Builtin::IterFrom : Builtin::ArrValues;
+      return lowering_.builder_.CreateCall(
+          lowering_.generatorLowerer().iteratorFunction(kind, arg->type, nullptr, result),
+          {lowering_.exprLowerer().emitExpr(arg)});
     }
-    Builtin kind = arg->type->isString() ? Builtin::IterFrom : Builtin::ArrValues;
-    return lowering_.builder_.CreateCall(
-        lowering_.generatorLowerer().iteratorFunction(kind, arg->type, nullptr, result),
-        {lowering_.exprLowerer().emitExpr(arg)});
-  }
-  case Builtin::ArrKeys:
-  case Builtin::ArrValues:
-  case Builtin::ArrEntries:
-  case Builtin::MapKeys:
-  case Builtin::MapValues:
-  case Builtin::MapEntries:
-  case Builtin::SetValues:
-  case Builtin::SetEntries: {
-    Expr *array = cast<MemberExpr>(call->callee)->object;
-    return lowering_.builder_.CreateCall(
-        lowering_.generatorLowerer().iteratorFunction(call->builtin, array->type, nullptr, result),
-        {lowering_.exprLowerer().emitExpr(array)});
-  }
-  default: {
-    Expr *receiver = cast<MemberExpr>(call->callee)->object;
-    Expr *arg = call->args[0];
-    llvm::Function *fn = lowering_.generatorLowerer().iteratorFunction(
-        call->builtin, receiver->type, arg->type, result);
-    llvm::Value *source = lowering_.exprLowerer().emitExpr(receiver);
-    return lowering_.builder_.CreateCall(fn, {source, lowering_.exprLowerer().emitExpr(arg)});
-  }
+    case Builtin::ArrKeys:
+    case Builtin::ArrValues:
+    case Builtin::ArrEntries:
+    case Builtin::MapKeys:
+    case Builtin::MapValues:
+    case Builtin::MapEntries:
+    case Builtin::SetValues:
+    case Builtin::SetEntries: {
+      Expr *array = cast<MemberExpr>(call->callee)->object;
+      return lowering_.builder_.CreateCall(lowering_.generatorLowerer().iteratorFunction(
+                                               call->builtin(), array->type, nullptr, result),
+                                           {lowering_.exprLowerer().emitExpr(array)});
+    }
+    default: {
+      Expr *receiver = cast<MemberExpr>(call->callee)->object;
+      Expr *arg = call->args[0];
+      llvm::Function *fn = lowering_.generatorLowerer().iteratorFunction(
+          call->builtin(), receiver->type, arg->type, result);
+      llvm::Value *source = lowering_.exprLowerer().emitExpr(receiver);
+      return lowering_.builder_.CreateCall(fn, {source, lowering_.exprLowerer().emitExpr(arg)});
+    }
   }
 }
 

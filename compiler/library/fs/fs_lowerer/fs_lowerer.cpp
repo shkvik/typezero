@@ -125,17 +125,17 @@ llvm::Function *FsLowerer::errorMaker(const Type *error) {
 }
 
 llvm::Value *FsLowerer::emitFsCall(CallExpr *call) {
-  if (isFspBuiltin(call->builtin)) {
+  if (isFspBuiltin(call->builtin())) {
     return lowering_.fsPromisesLowerer().emitFsPromise(call);
   }
-  if (call->builtin >= Builtin::RlCreate && call->builtin <= Builtin::RlClose) {
+  if (call->builtin() >= Builtin::RlCreate && call->builtin() <= Builtin::RlClose) {
     return lowering_.fsPromisesLowerer().emitReadlineBuiltin(call);
   }
   llvm::Type *voidTy = lowering_.builder_.getVoidTy(), *i32 = lowering_.builder_.getInt32Ty();
   llvm::Type *i64 = lowering_.builder_.getInt64Ty(), *f64 = lowering_.builder_.getDoubleTy(),
              *ptr = lowering_.builder_.getPtrTy();
 
-  if (call->builtin == Builtin::FsStatsDate) {
+  if (call->builtin() == Builtin::FsStatsDate) {
     auto *member = cast<MemberExpr>(call->callee);
     Lowering::Operand stats = lowering_.refCounts().emitOperand(member->object, true);
     llvm::Value *ms =
@@ -149,7 +149,7 @@ llvm::Value *FsLowerer::emitFsCall(CallExpr *call) {
     return lowering_.dateLowerer().newDate(lowering_.dateLowerer().wholeTime(rounded));
   }
 
-  if (call->builtin == Builtin::FsIsKind) {
+  if (call->builtin() == Builtin::FsIsKind) {
     auto *member = cast<MemberExpr>(call->callee);
     Lowering::Operand object = lowering_.refCounts().emitOperand(member->object, true);
     const Type *type = object.type;
@@ -201,101 +201,101 @@ llvm::Value *FsLowerer::emitFsCall(CallExpr *call) {
   };
 
   llvm::Value *result = nullptr;
-  switch (call->builtin) {
-  case Builtin::ReadLine: {
-    bool question = !values.empty();
-    llvm::AllocaInst *out = lowering_.functionFrame().createStackSlot(lowering_.strTy_, "line");
-    llvm::Value *found = lowering_.builder_.CreateCall(
-        fn("tz_io_read_line", i32, {ptr, ptr, i64, i32}),
-        {out, question ? obj(0) : llvm::ConstantPointerNull::get(lowering_.builder_.getPtrTy()),
-         question ? meta(0) : lowering_.builder_.getInt64(0),
-         lowering_.builder_.getInt32(question ? 1 : 0)});
-    release();
-    return optionalString(out, found);
-  }
-  case Builtin::FsReadFile:
-    if (valueType->isBytes()) {
-      if (call->args[0]->type->isInteger()) {
-        return fsCall("tz_fs_read_fd_bytes", ptr, {i64}, {values[0]});
+  switch (call->builtin()) {
+    case Builtin::ReadLine: {
+      bool question = !values.empty();
+      llvm::AllocaInst *out = lowering_.functionFrame().createStackSlot(lowering_.strTy_, "line");
+      llvm::Value *found = lowering_.builder_.CreateCall(
+          fn("tz_io_read_line", i32, {ptr, ptr, i64, i32}),
+          {out, question ? obj(0) : llvm::ConstantPointerNull::get(lowering_.builder_.getPtrTy()),
+           question ? meta(0) : lowering_.builder_.getInt64(0),
+           lowering_.builder_.getInt32(question ? 1 : 0)});
+      release();
+      return optionalString(out, found);
+    }
+    case Builtin::FsReadFile:
+      if (valueType->isBytes()) {
+        if (call->args[0]->type->isInteger()) {
+          return fsCall("tz_fs_read_fd_bytes", ptr, {i64}, {values[0]});
+        }
+        return fsCall("tz_fs_read_file_bytes", ptr, {ptr, i64, ptr, i64},
+                      {obj(0), meta(0), obj(1), meta(1)});
       }
-      return fsCall("tz_fs_read_file_bytes", ptr, {ptr, i64, ptr, i64},
-                    {obj(0), meta(0), obj(1), meta(1)});
-    }
-    if (call->args[0]->type->isInteger()) {
-      return fsString("tz_fs_read_fd", {i64, i64}, {values[0], values[2]});
-    }
-    return fsString("tz_fs_read_file", {ptr, i64, ptr, i64, i64},
-                    {obj(0), meta(0), obj(1), meta(1), values[2]});
-  case Builtin::FsWriteFile:
-    if (!call->args[1]->type->isString()) {
       if (call->args[0]->type->isInteger()) {
-        fsCall("tz_fs_write_fd_bytes", voidTy, {i64, ptr}, {values[0], values[1]});
+        return fsString("tz_fs_read_fd", {i64, i64}, {values[0], values[2]});
+      }
+      return fsString("tz_fs_read_file", {ptr, i64, ptr, i64, i64},
+                      {obj(0), meta(0), obj(1), meta(1), values[2]});
+    case Builtin::FsWriteFile:
+      if (!call->args[1]->type->isString()) {
+        if (call->args[0]->type->isInteger()) {
+          fsCall("tz_fs_write_fd_bytes", voidTy, {i64, ptr}, {values[0], values[1]});
+        } else {
+          fsCall("tz_fs_write_file_bytes", voidTy, {ptr, i64, ptr, ptr, i64, i64},
+                 {obj(0), meta(0), values[1], obj(2), meta(2), values[3]});
+        }
+      } else if (call->args[0]->type->isInteger()) {
+        fsCall("tz_fs_write_fd", voidTy, {i64, ptr, i64, i64},
+               {values[0], obj(1), meta(1), values[4]});
       } else {
-        fsCall("tz_fs_write_file_bytes", voidTy, {ptr, i64, ptr, ptr, i64, i64},
-               {obj(0), meta(0), values[1], obj(2), meta(2), values[3]});
+        fsCall("tz_fs_write_file", voidTy, {ptr, i64, ptr, i64, ptr, i64, i64, i64},
+               {obj(0), meta(0), obj(1), meta(1), obj(2), meta(2), values[3], values[4]});
       }
-    } else if (call->args[0]->type->isInteger()) {
-      fsCall("tz_fs_write_fd", voidTy, {i64, ptr, i64, i64},
-             {values[0], obj(1), meta(1), values[4]});
-    } else {
-      fsCall("tz_fs_write_file", voidTy, {ptr, i64, ptr, i64, ptr, i64, i64, i64},
-             {obj(0), meta(0), obj(1), meta(1), obj(2), meta(2), values[3], values[4]});
+      return nullptr;
+    case Builtin::FsExists:
+      result = lowering_.builder_.CreateICmpNE(
+          lowering_.builder_.CreateCall(fn("tz_fs_exists", i32, {ptr, i64}), {obj(0), meta(0)}),
+          lowering_.builder_.getInt32(0));
+      break;
+    case Builtin::FsAccess:
+    case Builtin::FsChmod:
+      fsCall(call->builtin() == Builtin::FsAccess ? "tz_fs_access" : "tz_fs_chmod", voidTy,
+             {ptr, i64, i64}, {obj(0), meta(0), values[1]});
+      return nullptr;
+    case Builtin::FsTruncate:
+      fsCall("tz_fs_truncate", voidTy, {ptr, i64, i64}, {obj(0), meta(0), values[1]});
+      return nullptr;
+    case Builtin::FsStat:
+      return fsCall("tz_fs_stat", ptr, {ptr, i64, i32, i32, ptr},
+                    {obj(0), meta(0), flag(1), flag(2), objectMaker(valueType->nonOptional())});
+    case Builtin::FsReaddir: {
+      const Type *element = valueType->inner();
+      llvm::Value *dirent = element->isClass()
+                                ? static_cast<llvm::Value *>(objectMaker(element))
+                                : llvm::ConstantPointerNull::get(lowering_.builder_.getPtrTy());
+      return fsCall(
+          "tz_fs_readdir", ptr, {ptr, i64, i32, ptr, ptr},
+          {obj(0), meta(0), flag(1), lowering_.typeDescriptors().typeDescriptor(element), dirent});
     }
-    return nullptr;
-  case Builtin::FsExists:
-    result = lowering_.builder_.CreateICmpNE(
-        lowering_.builder_.CreateCall(fn("tz_fs_exists", i32, {ptr, i64}), {obj(0), meta(0)}),
-        lowering_.builder_.getInt32(0));
-    break;
-  case Builtin::FsAccess:
-  case Builtin::FsChmod:
-    fsCall(call->builtin == Builtin::FsAccess ? "tz_fs_access" : "tz_fs_chmod", voidTy,
-           {ptr, i64, i64}, {obj(0), meta(0), values[1]});
-    return nullptr;
-  case Builtin::FsTruncate:
-    fsCall("tz_fs_truncate", voidTy, {ptr, i64, i64}, {obj(0), meta(0), values[1]});
-    return nullptr;
-  case Builtin::FsStat:
-    return fsCall("tz_fs_stat", ptr, {ptr, i64, i32, i32, ptr},
-                  {obj(0), meta(0), flag(1), flag(2), objectMaker(valueType->nonOptional())});
-  case Builtin::FsReaddir: {
-    const Type *element = valueType->inner();
-    llvm::Value *dirent = element->isClass()
-                              ? static_cast<llvm::Value *>(objectMaker(element))
-                              : llvm::ConstantPointerNull::get(lowering_.builder_.getPtrTy());
-    return fsCall(
-        "tz_fs_readdir", ptr, {ptr, i64, i32, ptr, ptr},
-        {obj(0), meta(0), flag(1), lowering_.typeDescriptors().typeDescriptor(element), dirent});
-  }
-  case Builtin::FsMkdir: {
-    llvm::AllocaInst *out =
-        lowering_.functionFrame().createStackSlot(lowering_.strTy_, "mkdir.first");
-    llvm::Value *made = fsCall("tz_fs_mkdir", i32, {ptr, ptr, i64, i32, i64},
-                               {out, obj(0), meta(0), flag(1), values[2]});
-    return optionalString(out, made);
-  }
-  case Builtin::FsMkdtemp:
-    return fsString("tz_fs_mkdtemp", {ptr, i64}, {obj(0), meta(0)});
-  case Builtin::FsRealpath:
-    return fsString("tz_fs_realpath", {ptr, i64}, {obj(0), meta(0)});
-  case Builtin::FsRmdir:
-  case Builtin::FsUnlink:
-    fsCall(call->builtin == Builtin::FsRmdir ? "tz_fs_rmdir" : "tz_fs_unlink", voidTy, {ptr, i64},
-           {obj(0), meta(0)});
-    return nullptr;
-  case Builtin::FsRm:
-    fsCall("tz_fs_rm", voidTy, {ptr, i64, i32, i32}, {obj(0), meta(0), flag(1), flag(2)});
-    return nullptr;
-  case Builtin::FsRename:
-  case Builtin::FsReplace:
-  case Builtin::FsCopyFile:
-    fsCall(call->builtin == Builtin::FsRename    ? "tz_fs_rename"
-           : call->builtin == Builtin::FsReplace ? "tz_fs_replace"
-                                                 : "tz_fs_copy_file",
-           voidTy, {ptr, i64, ptr, i64}, {obj(0), meta(0), obj(1), meta(1)});
-    return nullptr;
-  default:
-    llvm_unreachable("not a built-in of node:fs");
+    case Builtin::FsMkdir: {
+      llvm::AllocaInst *out =
+          lowering_.functionFrame().createStackSlot(lowering_.strTy_, "mkdir.first");
+      llvm::Value *made = fsCall("tz_fs_mkdir", i32, {ptr, ptr, i64, i32, i64},
+                                 {out, obj(0), meta(0), flag(1), values[2]});
+      return optionalString(out, made);
+    }
+    case Builtin::FsMkdtemp:
+      return fsString("tz_fs_mkdtemp", {ptr, i64}, {obj(0), meta(0)});
+    case Builtin::FsRealpath:
+      return fsString("tz_fs_realpath", {ptr, i64}, {obj(0), meta(0)});
+    case Builtin::FsRmdir:
+    case Builtin::FsUnlink:
+      fsCall(call->builtin() == Builtin::FsRmdir ? "tz_fs_rmdir" : "tz_fs_unlink", voidTy,
+             {ptr, i64}, {obj(0), meta(0)});
+      return nullptr;
+    case Builtin::FsRm:
+      fsCall("tz_fs_rm", voidTy, {ptr, i64, i32, i32}, {obj(0), meta(0), flag(1), flag(2)});
+      return nullptr;
+    case Builtin::FsRename:
+    case Builtin::FsReplace:
+    case Builtin::FsCopyFile:
+      fsCall(call->builtin() == Builtin::FsRename    ? "tz_fs_rename"
+             : call->builtin() == Builtin::FsReplace ? "tz_fs_replace"
+                                                     : "tz_fs_copy_file",
+             voidTy, {ptr, i64, ptr, i64}, {obj(0), meta(0), obj(1), meta(1)});
+      return nullptr;
+    default:
+      llvm_unreachable("not a built-in of node:fs");
   }
   release();
 

@@ -75,92 +75,94 @@ Lowering::Producer InlineGeneratorLowerer::prepare(Expr *source, llvm::Value *re
     return slot;
   };
   if (auto *call = dyn_cast<CallExpr>(source)) {
-    switch (call->builtin) {
-    case Builtin::IterFrom:
-      return prepare(call->args[0], returnSlot);
-    case Builtin::StrMatchAll: {
-      llvm::Value *text = hold(cast<MemberExpr>(call->callee)->object);
-      llvm::Value *regex = hold(call->args[0]);
-      if (!call->regex) {
-        lowering_.builder_.CreateCall(
-            lowering_.regexLowerer().regexFunction("tz_re_check_match_all",
-                                                   lowering_.builder_.getVoidTy(),
-                                                   {lowering_.builder_.getPtrTy()}),
-            {lowering_.builder_.CreateLoad(lowering_.builder_.getPtrTy(), regex, "regex")});
-      }
-      llvm::Value *lastSlot =
-          lowering_.functionFrame().createStackSlot(lowering_.builder_.getInt32Ty(), "lastIndex");
-      lowering_.builder_.CreateStore(
+    switch (call->builtin()) {
+      case Builtin::IterFrom:
+        return prepare(call->args[0], returnSlot);
+      case Builtin::StrMatchAll: {
+        llvm::Value *text = hold(cast<MemberExpr>(call->callee)->object);
+        llvm::Value *regex = hold(call->args[0]);
+        if (!call->regex) {
           lowering_.builder_.CreateCall(
-              lowering_.regexLowerer().regexFunction("tz_re_match_all_begin",
-                                                     lowering_.builder_.getInt32Ty(),
+              lowering_.regexLowerer().regexFunction("tz_re_check_match_all",
+                                                     lowering_.builder_.getVoidTy(),
                                                      {lowering_.builder_.getPtrTy()}),
-              {lowering_.builder_.CreateLoad(lowering_.builder_.getPtrTy(), regex, "regex")}),
-          lastSlot);
-      return lowering_.regexLowerer().matchAllProducer(
-          text, regex, lastSlot, lowering_.regexLowerer().matchShape(type->yielded(), call->regex));
-    }
-    case Builtin::ArrKeys:
-    case Builtin::ArrValues:
-    case Builtin::ArrEntries: {
-      Expr *array = cast<MemberExpr>(call->callee)->object;
-      return lowering_.lazyChainLowerer().arrayProducer(hold(array), array->type, call->builtin);
-    }
-    case Builtin::MapKeys:
-    case Builtin::MapValues:
-    case Builtin::MapEntries:
-    case Builtin::SetValues:
-    case Builtin::SetEntries: {
-      Expr *dict = cast<MemberExpr>(call->callee)->object;
-      llvm::Value *slot = hold(dict);
-      lowering_.dictLowerer().beginDictIteration(slot);
-      return lowering_.dictLowerer().dictProducer(slot, dict->type, call->builtin);
-    }
-    case Builtin::IterMap:
-    case Builtin::IterFilter:
-    case Builtin::IterTake:
-    case Builtin::IterDrop:
-    case Builtin::IterFlatMap: {
-      Expr *receiver = cast<MemberExpr>(call->callee)->object;
-      Lowering::Producer from = prepare(receiver);
-      llvm::Value *operand = hold(call->args[0]);
-      Builtin stage = call->builtin;
-      const Type *callback = call->args[0]->type->isFunction() ? call->args[0]->type : nullptr;
-      const Type *element = receiver->type->yielded(), *result = call->type->yielded();
-      Lowering::Producer producer;
-      producer.run = [this, from, stage, callback, element, result,
-                      operand](const Lowering::Consumer &down) {
-        from.run(lowering_.lazyChainLowerer().stageConsumer(stage, callback, element, result,
-                                                            operand, down));
-      };
-      return producer;
-    }
-    case Builtin::None:
-      if (call->func && isInlinable(call->func->decl)) {
-        FunctionDecl *decl = call->func->decl;
-        auto snapshot = std::make_shared<
-            std::tuple<decltype(lowering_.addresses_), decltype(lowering_.boxSlots_),
-                       decltype(lowering_.envBoxes_), decltype(lowering_.groupEnvs_)>>(
-            lowering_.addresses_, lowering_.boxSlots_, lowering_.envBoxes_, lowering_.groupEnvs_);
-        std::vector<llvm::Value *> args;
-        for (Expr *arg : call->args) {
-          args.push_back(lowering_.exprLowerer().emitExpr(arg));
+              {lowering_.builder_.CreateLoad(lowering_.builder_.getPtrTy(), regex, "regex")});
         }
-        for (size_t i = args.size(); i < call->func->params.size(); ++i) {
-          args.push_back(lowering_.optionalLowerer().undefinedValue(call->func->params[i]));
-        }
-        lowering_.functionBuilder().emitParams(decl, args);
+        llvm::Value *lastSlot =
+            lowering_.functionFrame().createStackSlot(lowering_.builder_.getInt32Ty(), "lastIndex");
+        lowering_.builder_.CreateStore(
+            lowering_.builder_.CreateCall(
+                lowering_.regexLowerer().regexFunction("tz_re_match_all_begin",
+                                                       lowering_.builder_.getInt32Ty(),
+                                                       {lowering_.builder_.getPtrTy()}),
+                {lowering_.builder_.CreateLoad(lowering_.builder_.getPtrTy(), regex, "regex")}),
+            lastSlot);
+        return lowering_.regexLowerer().matchAllProducer(
+            text, regex, lastSlot,
+            lowering_.regexLowerer().matchShape(type->yielded(), call->regex));
+      }
+      case Builtin::ArrKeys:
+      case Builtin::ArrValues:
+      case Builtin::ArrEntries: {
+        Expr *array = cast<MemberExpr>(call->callee)->object;
+        return lowering_.lazyChainLowerer().arrayProducer(hold(array), array->type,
+                                                          call->builtin());
+      }
+      case Builtin::MapKeys:
+      case Builtin::MapValues:
+      case Builtin::MapEntries:
+      case Builtin::SetValues:
+      case Builtin::SetEntries: {
+        Expr *dict = cast<MemberExpr>(call->callee)->object;
+        llvm::Value *slot = hold(dict);
+        lowering_.dictLowerer().beginDictIteration(slot);
+        return lowering_.dictLowerer().dictProducer(slot, dict->type, call->builtin());
+      }
+      case Builtin::IterMap:
+      case Builtin::IterFilter:
+      case Builtin::IterTake:
+      case Builtin::IterDrop:
+      case Builtin::IterFlatMap: {
+        Expr *receiver = cast<MemberExpr>(call->callee)->object;
+        Lowering::Producer from = prepare(receiver);
+        llvm::Value *operand = hold(call->args[0]);
+        Builtin stage = call->builtin();
+        const Type *callback = call->args[0]->type->isFunction() ? call->args[0]->type : nullptr;
+        const Type *element = receiver->type->yielded(), *result = call->type->yielded();
         Lowering::Producer producer;
-        producer.run = [this, decl, returnSlot, snapshot](const Lowering::Consumer &consumer) {
-          emitInlineGenerator(decl, consumer, returnSlot);
-          std::tie(lowering_.addresses_, lowering_.boxSlots_, lowering_.envBoxes_,
-                   lowering_.groupEnvs_) = *snapshot;
+        producer.run = [this, from, stage, callback, element, result,
+                        operand](const Lowering::Consumer &down) {
+          from.run(lowering_.lazyChainLowerer().stageConsumer(stage, callback, element, result,
+                                                              operand, down));
         };
         return producer;
       }
-      break;
-    default:
-      break;
+      case Builtin::None:
+        if (call->func() && isInlinable(call->func()->decl)) {
+          FunctionDecl *decl = call->func()->decl;
+          auto snapshot = std::make_shared<
+              std::tuple<decltype(lowering_.addresses_), decltype(lowering_.boxSlots_),
+                         decltype(lowering_.envBoxes_), decltype(lowering_.groupEnvs_)>>(
+              lowering_.addresses_, lowering_.boxSlots_, lowering_.envBoxes_, lowering_.groupEnvs_);
+          std::vector<llvm::Value *> args;
+          for (Expr *arg : call->args) {
+            args.push_back(lowering_.exprLowerer().emitExpr(arg));
+          }
+          for (size_t i = args.size(); i < call->func()->params.size(); ++i) {
+            args.push_back(lowering_.optionalLowerer().undefinedValue(call->func()->params[i]));
+          }
+          lowering_.functionBuilder().emitParams(decl, args);
+          Lowering::Producer producer;
+          producer.run = [this, decl, returnSlot, snapshot](const Lowering::Consumer &consumer) {
+            emitInlineGenerator(decl, consumer, returnSlot);
+            std::tie(lowering_.addresses_, lowering_.boxSlots_, lowering_.envBoxes_,
+                     lowering_.groupEnvs_) = *snapshot;
+          };
+          return producer;
+        }
+        break;
+      default:
+        break;
     }
   }
   assert((type->isArray() || type->isString() || type->isIterator() || type->isTypedArray()) &&

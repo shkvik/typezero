@@ -14,7 +14,7 @@ ConstructorCalls::ConstructorCalls(Checker &checker) : checker_(checker) {}
 
 void ConstructorCalls::checkConstructorCalls() {
   for (ClassDecl *cls : checker_.classes_) {
-    if (cls->literal || cls->children.empty() || cls->generic) {
+    if (cls->literal() || cls->children.empty() || cls->generic()) {
       continue;
     }
     std::vector<FunctionDecl *> fns = cls->constructors;
@@ -39,7 +39,7 @@ void ConstructorCalls::scanConstructorCalls(const FunctionDecl *fn, const ClassD
       fn->body,
       [&](const Expr *e) {
         auto *call = dyn_cast<CallExpr>(e);
-        if (!call || !call->method || (origin && reportedCalls_.contains(origin))) {
+        if (!call || !call->method() || (origin && reportedCalls_.contains(origin))) {
           return;
         }
         auto *member = dyn_cast<MemberExpr>(call->callee);
@@ -48,14 +48,14 @@ void ConstructorCalls::scanConstructorCalls(const FunctionDecl *fn, const ClassD
           object = conv->operand;
         }
         auto *name = llvm::dyn_cast_or_null<NameExpr>(object);
-        if (!name || name->var != self) {
+        if (!name || name->var() != self) {
           return;
         }
-        FunctionDecl *target = call->method->decl;
+        FunctionDecl *target = call->method()->decl;
         const CallExpr *site = origin ? origin : call;
-        if (call->virtualCall || !cls->derivesFrom(target->cls())) {
+        if (call->virtualCall() || !cls->derivesFrom(target->cls())) {
           const ClassDecl *by = target->cls();
-          if (call->virtualCall) {
+          if (call->virtualCall()) {
             std::function<const ClassDecl *(const ClassDecl *)> find =
                 [&](const ClassDecl *c) -> const ClassDecl * {
               for (const ClassDecl *child : c->children) {

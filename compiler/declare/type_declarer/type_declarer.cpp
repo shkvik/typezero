@@ -58,8 +58,8 @@ std::vector<Stmt *> TypeDeclarer::declareTypes(llvm::ArrayRef<Stmt *> stmts, boo
       if (Type::fromName(name) || name == "Array") {
         bool integer = Type::fromName(name)->isNumeric();
         bool forTsc =
-            integer && alias->type.kind == TypeRef::Kind::Name && alias->type.name == "number";
-        forTsc |= name == "Json" && alias->type.kind == TypeRef::Kind::Union;
+            integer && alias->type.kind() == TypeRefKind::NAME_REF && alias->type.name == "number";
+        forTsc |= name == "Json" && alias->type.kind() == TypeRefKind::UNION_REF;
         if (!forTsc) {
           checker_.diags_.error(
               alias->loc(),
@@ -71,7 +71,7 @@ std::vector<Stmt *> TypeDeclarer::declareTypes(llvm::ArrayRef<Stmt *> stmts, boo
       }
     } else if (auto *decl = dyn_cast<EnumDecl>(stmt)) {
       name = decl->name;
-      checker_.scopes().declare(name, decl->loc(), {nullptr, nullptr, decl});
+      checker_.scopes().declare(name, decl->loc(), {EnumEntry{.enumDecl = decl}});
     } else if (auto *cls = dyn_cast<ClassDecl>(stmt); cls && checker_.scopes_.size() == 1) {
       name = cls->name;
       checker_.classDeclarer().declareClass(cls);
@@ -95,7 +95,7 @@ std::vector<Stmt *> TypeDeclarer::declareTypes(llvm::ArrayRef<Stmt *> stmts, boo
 
 void TypeDeclarer::resolveTypes(llvm::ArrayRef<Stmt *> declared) {
   std::function<bool(const TypeRef &)> typeOf = [&](const TypeRef &ref) {
-    return ref.kind == TypeRef::Kind::TypeOf || llvm::any_of(ref.args, typeOf);
+    return ref.kind() == TypeRefKind::TYPE_OF_REF || llvm::any_of(ref.args, typeOf);
   };
   for (Stmt *stmt : declared) {
     if (auto *alias = dyn_cast<TypeAliasDecl>(stmt); alias && typeOf(alias->type)) {
@@ -161,7 +161,7 @@ const Type *TypeDeclarer::resolveAlias(TypeAliasDecl *alias) {
   bool builtinModule = checker_.builtinModuleTypes().alias(alias->name) == alias;
   builtinDepth_ += builtinModule ? 1 : 0;
   const Type *type;
-  if (alias->type.kind == TypeRef::Kind::Object) {
+  if (alias->type.kind() == TypeRefKind::OBJECT_REF) {
     alias->self = Type::declareObject(alias->name);
     std::vector<const Type *> bases;
     std::vector<Overload> overloads;
@@ -179,7 +179,7 @@ const Type *TypeDeclarer::resolveAlias(TypeAliasDecl *alias) {
         checker_.classBases().addBase(type, base);
       }
     }
-  } else if (alias->type.kind == TypeRef::Kind::Union) {
+  } else if (alias->type.kind() == TypeRefKind::UNION_REF) {
     alias->self = Type::declareUnion(alias->name);
     type = checker_.typeResolver().resolveTypeInner(alias->type);
     if (alias->recursive && !type->isError()) {
@@ -206,7 +206,7 @@ const Type *TypeDeclarer::resolveAlias(TypeAliasDecl *alias) {
   }
   bool builtin = checker_.builtinAliases_.lookup(alias->name) == alias ||
                  checker_.builtinModuleTypes().alias(alias->name) == alias;
-  if (builtin && alias->type.kind == TypeRef::Kind::Union) {
+  if (builtin && alias->type.kind() == TypeRefKind::UNION_REF) {
     Type::nameUnion(alias->resolved, alias->name);
   }
 
@@ -214,8 +214,8 @@ const Type *TypeDeclarer::resolveAlias(TypeAliasDecl *alias) {
 }
 
 void TypeDeclarer::resolveEnum(EnumDecl *decl) {
-  if (decl->resolved || decl->resolving) {
-    if (decl->resolving) {
+  if (decl->stage != EnumStage::UNRESOLVED) {
+    if (decl->stage == EnumStage::RESOLVING) {
       checker_.diags_.error(decl->loc(),
                             "the members of enum '" + decl->name + "' depend on themselves");
     }
@@ -229,7 +229,7 @@ void TypeDeclarer::resolveEnum(EnumDecl *decl) {
     checker_.moduleDeclarer().useModule(here);
     return;
   }
-  decl->resolving = true;
+  decl->stage = EnumStage::RESOLVING;
   double next = 0;
   bool counting = true;
   bool numbers = false, strings = false;
@@ -281,8 +281,7 @@ void TypeDeclarer::resolveEnum(EnumDecl *decl) {
     checker_.diags_.error(decl->loc(), "enum '" + decl->name + "' cannot mix numbers and strings");
   }
   decl->isString = strings && !numbers;
-  decl->resolving = false;
-  decl->resolved = true;
+  decl->stage = EnumStage::RESOLVED;
   if (decl->isString) {
     for (const EnumMember &m : decl->members) {
       checker_.assignedFields_.insert(toUtf8(m.text));
@@ -384,7 +383,7 @@ Expr *TypeDeclarer::checkEnumIndex(EnumDecl *decl, IndexExpr *index) {
     lit->type = Type::string();
     return lit;
   }
-  index->enumDecl = decl;
+  index->form = EnumNameIndex{.enumDecl = decl};
   index->type = Type::optional(Type::string());
 
   return index;

@@ -57,95 +57,95 @@ llvm::Value *ProcessLowerer::emitProcessBuiltin(CallExpr *call) {
             lowering_.builder_.CreateZExt(lowering_.builder_.CreateExtractValue(code, 1), i32)};
   };
 
-  switch (call->builtin) {
-  case Builtin::ProcessArgv:
-    return lowering_.builder_.CreateCall(
-        processFunction("tz_process_argv", ptr, {ptr}),
-        {lowering_.typeDescriptors().typeDescriptor(Type::string())});
-  case Builtin::ProcessEnv: {
-    Lowering::Operand name = lowering_.refCounts().emitOperand(call->args[0], true);
-    llvm::AllocaInst *value =
-        lowering_.functionFrame().createStackSlot(lowering_.strTy_, "env.value");
-    llvm::Value *found =
-        lowering_.builder_.CreateCall(processFunction("tz_process_env", i32, {ptr, ptr, i64}),
-                                      {value, lowering_.stringLowerer().stringObj(name.value),
-                                       lowering_.stringLowerer().stringMeta(name.value)});
-    lowering_.refCounts().dropOperand(name);
-    return lowering_.optionalLowerer().makeOptional(
-        lowering_.builder_.CreateLoad(lowering_.strTy_, value),
-        lowering_.builder_.CreateICmpNE(found, zero), call->type);
-  }
-  case Builtin::ProcessExit: {
-    auto [code, has] = exitCode();
-    llvm::FunctionCallee exit = processFunction("tz_process_exit", voidTy, {i64, i32});
-    cast<llvm::Function>(exit.getCallee())->addFnAttr(llvm::Attribute::NoReturn);
-    lowering_.builder_.CreateCall(exit, {code, has})->setDoesNotReturn();
-    lowering_.builder_.CreateUnreachable();
-    lowering_.functionFrame().startDeadBlock();
-    return nullptr;
-  }
-  case Builtin::ProcessExitCode: {
-    llvm::AllocaInst *has = lowering_.functionFrame().createStackSlot(i32, "exit.has");
-    llvm::Value *code = lowering_.builder_.CreateSExt(
-        lowering_.builder_.CreateCall(processFunction("tz_process_get_exit_code", i32, {ptr}),
-                                      {has}),
-        lowering_.builder_.getInt64Ty());
-    return lowering_.optionalLowerer().makeOptional(
-        code, lowering_.builder_.CreateICmpNE(lowering_.builder_.CreateLoad(i32, has), zero),
-        call->type);
-  }
-  case Builtin::ProcessSetExitCode: {
-    auto [code, has] = exitCode();
-    lowering_.builder_.CreateCall(processFunction("tz_process_set_exit_code", voidTy, {i64, i32}),
-                                  {code, has});
-    return nullptr;
-  }
-  case Builtin::ProcessCwd:
-    return stringResult("tz_process_cwd");
-  case Builtin::ProcessExecPath:
-    return stringResult("tz_process_exec_path");
-  case Builtin::ProcessPlatform:
-    return stringResult("tz_process_platform");
-  case Builtin::ProcessStdoutWrite:
-  case Builtin::ProcessStderrWrite: {
-    bool toStdout = call->builtin == Builtin::ProcessStdoutWrite;
-    if (const Type *type = call->args[0]->type; type->isBuffer() || type->isBytes()) {
-      Lowering::Operand bytes = lowering_.refCounts().emitOperand(call->args[0], true);
-      lowering_.builder_.CreateCall(
-          processFunction("tz_lib_std_write", lowering_.builder_.getVoidTy(),
-                          {lowering_.builder_.getInt64Ty(), lowering_.builder_.getPtrTy()}),
-          {lowering_.builder_.getInt64(toStdout ? 1 : 2), bytes.value});
-      lowering_.refCounts().dropOperand(bytes);
-      return lowering_.builder_.getTrue();
+  switch (call->builtin()) {
+    case Builtin::ProcessArgv:
+      return lowering_.builder_.CreateCall(
+          processFunction("tz_process_argv", ptr, {ptr}),
+          {lowering_.typeDescriptors().typeDescriptor(Type::string())});
+    case Builtin::ProcessEnv: {
+      Lowering::Operand name = lowering_.refCounts().emitOperand(call->args[0], true);
+      llvm::AllocaInst *value =
+          lowering_.functionFrame().createStackSlot(lowering_.strTy_, "env.value");
+      llvm::Value *found =
+          lowering_.builder_.CreateCall(processFunction("tz_process_env", i32, {ptr, ptr, i64}),
+                                        {value, lowering_.stringLowerer().stringObj(name.value),
+                                         lowering_.stringLowerer().stringMeta(name.value)});
+      lowering_.refCounts().dropOperand(name);
+      return lowering_.optionalLowerer().makeOptional(
+          lowering_.builder_.CreateLoad(lowering_.strTy_, value),
+          lowering_.builder_.CreateICmpNE(found, zero), call->type);
     }
-    Lowering::Operand text = lowering_.refCounts().emitOperand(call->args[0], true);
-    llvm::Value *written = lowering_.builder_.CreateCall(
-        processFunction(toStdout ? "tz_stdout_write" : "tz_stderr_write", i32, {ptr, i64}),
-        {lowering_.stringLowerer().stringObj(text.value),
-         lowering_.stringLowerer().stringMeta(text.value)});
-    lowering_.refCounts().dropOperand(text);
-    return lowering_.builder_.CreateICmpNE(written, zero);
-  }
-  case Builtin::ProcessIsTTY:
-    return lowering_.builder_.CreateICmpNE(
+    case Builtin::ProcessExit: {
+      auto [code, has] = exitCode();
+      llvm::FunctionCallee exit = processFunction("tz_process_exit", voidTy, {i64, i32});
+      cast<llvm::Function>(exit.getCallee())->addFnAttr(llvm::Attribute::NoReturn);
+      lowering_.builder_.CreateCall(exit, {code, has})->setDoesNotReturn();
+      lowering_.builder_.CreateUnreachable();
+      lowering_.functionFrame().startDeadBlock();
+      return nullptr;
+    }
+    case Builtin::ProcessExitCode: {
+      llvm::AllocaInst *has = lowering_.functionFrame().createStackSlot(i32, "exit.has");
+      llvm::Value *code = lowering_.builder_.CreateSExt(
+          lowering_.builder_.CreateCall(processFunction("tz_process_get_exit_code", i32, {ptr}),
+                                        {has}),
+          lowering_.builder_.getInt64Ty());
+      return lowering_.optionalLowerer().makeOptional(
+          code, lowering_.builder_.CreateICmpNE(lowering_.builder_.CreateLoad(i32, has), zero),
+          call->type);
+    }
+    case Builtin::ProcessSetExitCode: {
+      auto [code, has] = exitCode();
+      lowering_.builder_.CreateCall(processFunction("tz_process_set_exit_code", voidTy, {i64, i32}),
+                                    {code, has});
+      return nullptr;
+    }
+    case Builtin::ProcessCwd:
+      return stringResult("tz_process_cwd");
+    case Builtin::ProcessExecPath:
+      return stringResult("tz_process_exec_path");
+    case Builtin::ProcessPlatform:
+      return stringResult("tz_process_platform");
+    case Builtin::ProcessStdoutWrite:
+    case Builtin::ProcessStderrWrite: {
+      bool toStdout = call->builtin() == Builtin::ProcessStdoutWrite;
+      if (const Type *type = call->args[0]->type; type->isBuffer() || type->isBytes()) {
+        Lowering::Operand bytes = lowering_.refCounts().emitOperand(call->args[0], true);
         lowering_.builder_.CreateCall(
-            processFunction("tz_is_tty", i32, {lowering_.builder_.getInt64Ty()}),
-            {lowering_.exprLowerer().emitExpr(call->args[0])}),
-        zero);
-  case Builtin::DateNow:
-    return lowering_.builder_.CreateCall(
-        processFunction("tz_date_now", lowering_.builder_.getInt64Ty(), {}));
-  case Builtin::PerformanceNow:
-    return lowering_.builder_.CreateCall(processFunction("tz_performance_now", f64, {}));
-  case Builtin::ProcessPid:
-    return lowering_.builder_.CreateSExt(
-        lowering_.builder_.CreateCall(processFunction("tz_process_pid", i32, {})), i64);
-  case Builtin::ProcessUptime:
-    return lowering_.builder_.CreateFDiv(
-        lowering_.builder_.CreateCall(processFunction("tz_performance_now", f64, {})),
-        llvm::ConstantFP::get(f64, 1000.0), "uptime");
-  default:
-    llvm_unreachable("not a built-in of process");
+            processFunction("tz_lib_std_write", lowering_.builder_.getVoidTy(),
+                            {lowering_.builder_.getInt64Ty(), lowering_.builder_.getPtrTy()}),
+            {lowering_.builder_.getInt64(toStdout ? 1 : 2), bytes.value});
+        lowering_.refCounts().dropOperand(bytes);
+        return lowering_.builder_.getTrue();
+      }
+      Lowering::Operand text = lowering_.refCounts().emitOperand(call->args[0], true);
+      llvm::Value *written = lowering_.builder_.CreateCall(
+          processFunction(toStdout ? "tz_stdout_write" : "tz_stderr_write", i32, {ptr, i64}),
+          {lowering_.stringLowerer().stringObj(text.value),
+           lowering_.stringLowerer().stringMeta(text.value)});
+      lowering_.refCounts().dropOperand(text);
+      return lowering_.builder_.CreateICmpNE(written, zero);
+    }
+    case Builtin::ProcessIsTTY:
+      return lowering_.builder_.CreateICmpNE(
+          lowering_.builder_.CreateCall(
+              processFunction("tz_is_tty", i32, {lowering_.builder_.getInt64Ty()}),
+              {lowering_.exprLowerer().emitExpr(call->args[0])}),
+          zero);
+    case Builtin::DateNow:
+      return lowering_.builder_.CreateCall(
+          processFunction("tz_date_now", lowering_.builder_.getInt64Ty(), {}));
+    case Builtin::PerformanceNow:
+      return lowering_.builder_.CreateCall(processFunction("tz_performance_now", f64, {}));
+    case Builtin::ProcessPid:
+      return lowering_.builder_.CreateSExt(
+          lowering_.builder_.CreateCall(processFunction("tz_process_pid", i32, {})), i64);
+    case Builtin::ProcessUptime:
+      return lowering_.builder_.CreateFDiv(
+          lowering_.builder_.CreateCall(processFunction("tz_performance_now", f64, {})),
+          llvm::ConstantFP::get(f64, 1000.0), "uptime");
+    default:
+      llvm_unreachable("not a built-in of process");
   }
 }
 

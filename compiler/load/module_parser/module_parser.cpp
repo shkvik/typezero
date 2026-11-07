@@ -219,19 +219,21 @@ Stmt *ModuleParser::parseExport(bool topLevel) {
       llvm::SMLoc asLoc = parser_.tok_.loc();
       parser_.cursor().advance();
       parser_.cursor().expect(Tok::Identifier, "after 'export * as'");
-      if (!parser_.recovering_ && parseFromPath(decl.path, decl.pathLoc)) {
+      ExportSource source;
+      if (!parser_.recovering_ && parseFromPath(source.path, source.pathLoc)) {
         parser_.cursor().report(
             asLoc, "'export * as' is not supported; re-export the names, e.g. 'export { a, b } "
                    "from \"" +
-                       decl.path + "\"', or all of them with 'export * from \"" + decl.path +
+                       source.path + "\"', or all of them with 'export * from \"" + source.path +
                        "\"'");
         parser_.cursor().expectSemicolon();
       }
       return parser_.ctx_.make<EmptyStmt>(loc);
     }
-    decl.all = true;
-    if (parseFromPath(decl.path, decl.pathLoc)) {
+    ExportSource source;
+    if (parseFromPath(source.path, source.pathLoc)) {
       parser_.cursor().expectSemicolon();
+      decl.form = ExportAll{.source = std::move(source)};
       parser_.exports_.push_back(std::move(decl));
     }
     return parser_.ctx_.make<EmptyStmt>(loc);
@@ -249,12 +251,20 @@ Stmt *ModuleParser::parseExport(bool topLevel) {
                                tokSpelling(parser_.tok_.kind));
     return parser_.ctx_.make<EmptyStmt>(loc);
   }
-  parseModuleNames(decl.names, false);
-  if (!parser_.recovering_ && parser_.tok_.is(Tok::Identifier) && parser_.tok_.text == "from" &&
-      !parseFromPath(decl.path, decl.pathLoc)) {
+  std::vector<ModuleName> names;
+  parseModuleNames(names, false);
+  bool reExport =
+      !parser_.recovering_ && parser_.tok_.is(Tok::Identifier) && parser_.tok_.text == "from";
+  ExportSource source;
+  if (reExport && !parseFromPath(source.path, source.pathLoc)) {
     return parser_.ctx_.make<EmptyStmt>(loc);
   }
   parser_.cursor().expectSemicolon();
+  if (reExport) {
+    decl.form = ReExport{.names = std::move(names), .source = std::move(source)};
+  } else {
+    decl.form = LocalExport{.names = std::move(names)};
+  }
   if (!parser_.recovering_) {
     parser_.exports_.push_back(std::move(decl));
   }
@@ -398,10 +408,9 @@ bool ModuleParser::parseFromPath(std::string &path, llvm::SMLoc &loc, bool from)
 }
 
 void ModuleParser::exportDeclared(const Stmt *stmt) {
-  ExportDecl decl;
-  decl.loc = stmt->loc();
+  std::vector<ModuleName> names;
   auto add = [&](llvm::StringRef name, llvm::SMLoc loc) {
-    decl.names.push_back({name, loc, name, loc});
+    names.push_back({name, loc, name, loc});
   };
   if (auto *fn = dyn_cast<FunctionDecl>(stmt)) {
     add(fn->name, fn->loc());
@@ -418,9 +427,13 @@ void ModuleParser::exportDeclared(const Stmt *stmt) {
       }
     }
   }
-  if (!decl.names.empty()) {
-    parser_.exports_.push_back(std::move(decl));
+  if (names.empty()) {
+    return;
   }
+  ExportDecl decl;
+  decl.loc = stmt->loc();
+  decl.form = LocalExport{.names = std::move(names)};
+  parser_.exports_.push_back(std::move(decl));
 }
 
 }

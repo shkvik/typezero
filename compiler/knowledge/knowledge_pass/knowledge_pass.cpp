@@ -288,8 +288,8 @@ void KnowledgePass::declareClass(size_t module, const ClassDecl &cls, size_t par
 void KnowledgePass::declare(size_t module, const Module &source) {
   llvm::StringSet<> exported;
   for (const ExportDecl &decl : source.file.exports) {
-    if (decl.path.empty()) {
-      for (const ModuleName &name : decl.names) {
+    if (const LocalExport *local = decl.form.as<LocalExport>()) {
+      for (const ModuleName &name : local->names) {
         exported.insert(name.name);
       }
     }
@@ -309,7 +309,7 @@ void KnowledgePass::declare(size_t module, const Module &source) {
         declaredAt_[fn->loc().getPointer()] = symbol;
       }
     } else if (auto *cls = dyn_cast<ClassDecl>(item)) {
-      if (!cls->generic && !cls->name.empty()) {
+      if (!cls->generic() && !cls->name.empty()) {
         declareClass(module, *cls, Knowledge::kNone);
       }
     } else if (auto *vars = dyn_cast<VarDeclStmt>(item)) {
@@ -402,10 +402,11 @@ void KnowledgePass::bindImports(size_t module, const Module &source) {
     }
   }
   for (const ExportDecl &decl : source.file.exports) {
-    if (!decl.path.empty()) {
+    const LocalExport *local = decl.form.as<LocalExport>();
+    if (!local) {
       continue;
     }
-    for (const ModuleName &name : decl.names) {
+    for (const ModuleName &name : local->names) {
       auto found = scopes_[module].find(name.name);
       if (found != scopes_[module].end()) {
         reference(found->second, Knowledge::kNone, module, name.loc, false);
@@ -429,8 +430,8 @@ size_t KnowledgePass::functionSymbol(const FunctionDecl *fn) const {
   if (copied != declaredAt_.end()) {
     return copied->second;
   }
-  if (fn->cls() && fn->cls()->generic) {
-    const ClassDecl *original = fn->cls()->generic;
+  if (fn->cls() && fn->cls()->generic()) {
+    const ClassDecl *original = fn->cls()->generic();
     for (const auto &[own, theirs] :
          {std::pair(&fn->cls()->methods, &original->methods),
           std::pair(&fn->cls()->constructors, &original->constructors)}) {
@@ -446,7 +447,7 @@ size_t KnowledgePass::functionSymbol(const FunctionDecl *fn) const {
 }
 
 size_t KnowledgePass::classSymbol(const ClassDecl *cls) const {
-  for (const ClassDecl *at = cls; at; at = at->generic) {
+  for (const ClassDecl *at = cls; at; at = at->generic()) {
     auto found = classes_.find(at);
     if (found != classes_.end()) {
       return found->second;
@@ -465,8 +466,8 @@ size_t KnowledgePass::variableSymbol(const VarSymbol *var) const {
 size_t KnowledgePass::fieldSymbol(const ClassDecl *cls, llvm::StringRef name, bool isStatic) const {
   for (const ClassDecl *at = cls; at; at = at->parent) {
     const ClassDecl *original = at;
-    while (original->generic) {
-      original = original->generic;
+    while (original->generic()) {
+      original = original->generic();
     }
     auto found = fields_.find({original, name.str(), isStatic});
     if (found != fields_.end()) {
@@ -606,7 +607,7 @@ void KnowledgePass::walk() {
   }
   for (const ClassDecl *cls : originals) {
     size_t symbol = classes_.lookup(cls);
-    for (const ClassDecl *instance : cls->instances) {
+    for (const ClassDecl *instance : cls->instances()) {
       KnowledgeWalk(*this, out_.symbols[symbol].module, symbol).classDecl(instance);
     }
   }

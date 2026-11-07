@@ -15,7 +15,7 @@ namespace tz {
 
 Scopes::Scopes(Checker &checker) : checker_(checker) {}
 
-void Scopes::declare(llvm::StringRef name, llvm::SMLoc loc, Checker::ScopeEntry entry) {
+void Scopes::declare(llvm::StringRef name, llvm::SMLoc loc, ScopeEntry entry) {
   if (name == "undefined") {
     checker_.diags_.error(loc, "'undefined' cannot be used as a name");
     return;
@@ -24,20 +24,16 @@ void Scopes::declare(llvm::StringRef name, llvm::SMLoc loc, Checker::ScopeEntry 
   if (inserted) {
     return;
   }
-  const Checker::ScopeEntry &previous = it->second;
+  const ScopeEntry &previous = it->second;
   checker_.diags_.error(
       loc, "duplicate declaration of '" + name + "'" +
-               (entry.func && previous.func
+               (entry.func() && previous.func()
                     ? "; plain functions are not overloaded: give each variant its own name"
                     : ""));
-  checker_.diags_.note(previous.var        ? previous.var->loc
-                       : previous.func     ? previous.func->loc
-                       : previous.enumDecl ? previous.enumDecl->loc()
-                                           : previous.cls->loc(),
-                       "previously declared here");
+  checker_.diags_.note(previous.loc(), "previously declared here");
 }
 
-Checker::ScopeEntry Scopes::lookup(llvm::StringRef name) const {
+ScopeEntry Scopes::lookup(llvm::StringRef name) const {
   for (auto scope = checker_.scopes_.rbegin(); scope != checker_.scopes_.rend(); ++scope) {
     auto found = scope->find(name);
     if (found != scope->end()) {
@@ -61,7 +57,7 @@ VarSymbol *Scopes::declareVar(llvm::StringRef name, llvm::SMLoc loc, const Type 
     unsigned declSeq = ++checker_.seq_;
     var->place = VarSymbol::localPlace(checker_.currentDecl(), declSeq);
   }
-  declare(name, loc, {var, nullptr});
+  declare(name, loc, {VarEntry{.var = var}});
 
   return var;
 }

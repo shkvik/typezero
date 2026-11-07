@@ -66,7 +66,7 @@ std::optional<std::pair<int64_t, int64_t>> LoopBounds::syntacticIntRange(const E
     return std::pair{v, v};
   }
   if (auto *name = dyn_cast<NameExpr>(expr)) {
-    const VarSymbol *var = checker_.scopes().lookup(name->name).var;
+    const VarSymbol *var = checker_.scopes().lookup(name->name).var();
     if (var && var->type->isInt()) {
       return std::pair{kIntMin, kIntMax};
     }
@@ -74,7 +74,7 @@ std::optional<std::pair<int64_t, int64_t>> LoopBounds::syntacticIntRange(const E
   }
   if (auto *member = dyn_cast<MemberExpr>(expr)) {
     auto *name = dyn_cast<NameExpr>(member->object);
-    const VarSymbol *var = name ? checker_.scopes().lookup(name->name).var : nullptr;
+    const VarSymbol *var = name ? checker_.scopes().lookup(name->name).var() : nullptr;
     if (member->name == "byteLength" && var && var->type->isBytes()) {
       return std::pair{int64_t(0), kMaxLength};
     }
@@ -114,7 +114,7 @@ bool LoopBounds::boundedAbove(const Expr *expr, int64_t limit,
     }
   }
   auto *name = dyn_cast<NameExpr>(expr);
-  const VarSymbol *var = name ? checker_.scopes().lookup(name->name).var : nullptr;
+  const VarSymbol *var = name ? checker_.scopes().lookup(name->name).var() : nullptr;
 
   return var && var->type->isInt() && !scan.changes.count(name->name) &&
          checker_.flow_.facts.proves(Term::of(var), Term::zero(), saturatingAdd(limit, 1));
@@ -128,7 +128,7 @@ bool LoopBounds::boundedBelow(const Expr *expr, int64_t limit,
     }
   }
   auto *name = dyn_cast<NameExpr>(expr);
-  const VarSymbol *var = name ? checker_.scopes().lookup(name->name).var : nullptr;
+  const VarSymbol *var = name ? checker_.scopes().lookup(name->name).var() : nullptr;
 
   return var && var->type->isInt() && !scan.changes.count(name->name) &&
          checker_.flow_.facts.proves(Term::zero(), Term::of(var), saturatingSub(1, limit));
@@ -148,7 +148,7 @@ std::optional<int64_t> LoopBounds::condBoundsAbove(const Expr *cond, const VarSy
     return condBoundsAbove(bin->rhs, var, scan, step);
   }
   auto lookupVar = [&](llvm::StringRef name) -> const VarSymbol * {
-    return checker_.scopes().lookup(name).var;
+    return checker_.scopes().lookup(name).var();
   };
   const Expr *small = nullptr, *large = nullptr;
   bool strict = false;
@@ -194,7 +194,7 @@ bool LoopBounds::condBoundsBelow(const Expr *cond, const VarSymbol *var,
   auto isVar = [&](const Expr *e) {
     auto *name = dyn_cast<NameExpr>(e);
 
-    return name && checker_.scopes().lookup(name->name).var == var;
+    return name && checker_.scopes().lookup(name->name).var() == var;
   };
   switch (bin->op) {
   case BinaryOp::Gt:
@@ -217,7 +217,7 @@ Checker::Flow LoopBounds::loopHead(const Checker::LoopScan &scan, const Expr *co
   for (const auto &entry : scan.changes) {
     llvm::StringRef name = entry.first();
     const Checker::LoopScan::Change &change = entry.second;
-    const VarSymbol *var = checker_.scopes().lookup(name).var;
+    const VarSymbol *var = checker_.scopes().lookup(name).var();
 
     bool keepLower = false, keepUpper = false;
     std::optional<int64_t> invariant;

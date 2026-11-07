@@ -125,7 +125,7 @@ llvm::StringRef libraryClassName(const ClassDecl *cls) {
     return "";
   }
 
-  return cls->generic ? llvm::StringRef(cls->generic->name) : llvm::StringRef(cls->name);
+  return cls->generic() ? llvm::StringRef(cls->generic()->name) : llvm::StringRef(cls->name);
 }
 
 bool knownBuiltin(Builtin b) {

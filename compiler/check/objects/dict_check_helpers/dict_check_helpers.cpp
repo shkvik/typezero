@@ -19,7 +19,7 @@ std::string dictText(const Expr *expr, const Type *type) {
   if (auto *name = dyn_cast<NameExpr>(expr)) {
     return name->name.str();
   }
-  if (auto *call = dyn_cast<CallExpr>(expr); call && call->builtin == Builtin::EnvMap) {
+  if (auto *call = dyn_cast<CallExpr>(expr); call && call->builtin() == Builtin::EnvMap) {
     return "process.env";
   }
   if (auto *member = dyn_cast<MemberExpr>(expr)) {

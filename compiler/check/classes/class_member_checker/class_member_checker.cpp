@@ -129,7 +129,7 @@ Expr *ClassMemberChecker::checkClassMember(MemberExpr *member, const Type *expec
     return member;
   }
   checkAccess(methods[0]->cls(), methods[0]->access(), name, member->loc(), member->object);
-  if (methods[0]->cls()->library && checker_.eventMaps().isEmitterClass(cls) &&
+  if (methods[0]->cls()->library() && checker_.eventMaps().isEmitterClass(cls) &&
       !checker_.libraryCalls().inLibrary(member->loc()) && name != "eventNames") {
     checker_.emitterChecker().reportEmitterMethodValue(member);
 
@@ -156,9 +156,9 @@ Expr *ClassMemberChecker::checkClassMember(MemberExpr *member, const Type *expec
     return member;
   }
   if (FunctionDecl *impl = ClassLinks::soleImplementation(cls, sym->decl)) {
-    member->method = impl->sym;
+    member->form = MethodMember{.method = impl->sym};
   } else {
-    member->method = sym, member->virtualCall = true;
+    member->form = MethodMember{.method = sym, .virtualCall = true};
   }
   member->type = checker_.returnInferrer().functionType(sym);
 
@@ -184,10 +184,10 @@ const Type *ClassMemberChecker::checkFieldTarget(MemberExpr *member, bool compou
   if (!field || field->method()) {
     std::string setter = "set" + std::string(1, llvm::toUpper(name[0])) + name.drop_front().str();
     bool method = field || !ClassDeclarer::methodsNamed(cls, name, false).empty();
-    if (method && cls->library && !ClassDeclarer::methodsNamed(cls, setter, false).empty()) {
+    if (method && cls->library() && !ClassDeclarer::methodsNamed(cls, setter, false).empty()) {
       checker_.diags_.error(member->loc(), "'" + name + "' is a method of '" + type->name() +
                                                "'; change it with '" + setter + "(...)'");
-    } else if (method && cls->library) {
+    } else if (method && cls->library()) {
       checker_.diags_.error(member->loc(), "'" + name + "' is a method of '" + type->name() +
                                                "' and cannot be assigned: the object changes "
                                                "what it gives itself");

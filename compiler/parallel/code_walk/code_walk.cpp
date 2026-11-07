@@ -345,7 +345,7 @@ void CodeWalk::stmt(const Stmt *s) {
   }
   case Stmt::Kind::Class: {
     auto *cls = cast<ClassDecl>(s);
-    if (cls->builtin || cls->generic) {
+    if (cls->builtin() || cls->generic()) {
       return;
     }
     for (const ClassField &f : cls->fields) {
@@ -422,30 +422,30 @@ void CodeWalk::iterate(const Expr *iterable, const Node *site) {
     if (c && analysis_.libraryEffects.libraryTarget(c)) {
       const FunctionDecl *lib = analysis_.libraryEffects.libraryTarget(c);
       auto *m = dyn_cast<MemberExpr>(c->callee);
-      if (m && c->method) {
+      if (m && c->method()) {
         analysis_.libraryEffects.libraryState(libraryClassName(lib->cls()), lib->name,
                                               analysis_.aliasAnalysis.receiverRef(m->object), true,
                                               at);
       }
       return;
     }
-    if (c && (c->func || c->method)) {
+    if (c && (c->func() || c->method())) {
       auto *m = dyn_cast<MemberExpr>(c->callee);
-      if (c->method) {
+      if (c->method()) {
         for (const FunctionDecl *fn :
-             analysis_.callWalk.methodTargets(c->method->decl, c->virtualCall)) {
+             analysis_.callWalk.methodTargets(c->method()->decl, c->virtualCall())) {
           analysis_.callWalk.addCallee(
               rec, fn,
               m ? std::optional<Ref>(analysis_.aliasAnalysis.receiverRef(m->object))
                 : std::nullopt);
         }
       } else {
-        analysis_.callWalk.addCallee(rec, c->func->decl,
-                                     analysis_.callWalk.closureSelf(c->func->decl, *analysis_.fn));
+        analysis_.callWalk.addCallee(
+            rec, c->func()->decl, analysis_.callWalk.closureSelf(c->func()->decl, *analysis_.fn));
       }
       return;
     }
-    if (c && c->builtin != Builtin::None && makesNewObject(c->builtin)) {
+    if (c && c->builtin() != Builtin::None && makesNewObject(c->builtin())) {
       return;
     }
     rec.byType = type;

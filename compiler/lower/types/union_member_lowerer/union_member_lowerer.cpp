@@ -198,10 +198,10 @@ llvm::Value *UnionMemberLowerer::emitUnionMethodCall(CallExpr *call) {
   llvm::Value *id = lowering_.unionLowerer().objectClassId(self.value);
   llvm::BasicBlock *endBlock = lowering_.functionFrame().newBlock("union.call.end");
   std::vector<std::pair<llvm::Value *, llvm::BasicBlock *>> incoming;
-  for (size_t i = 0; i < call->unionMethods.size(); ++i) {
-    const CallExpr::UnionMethod &m = call->unionMethods[i];
+  for (size_t i = 0; i < call->unionMethods().size(); ++i) {
+    const UnionMethod &m = call->unionMethods()[i];
     llvm::BasicBlock *next = nullptr;
-    if (i + 1 < call->unionMethods.size()) {
+    if (i + 1 < call->unionMethods().size()) {
       llvm::BasicBlock *block = lowering_.functionFrame().newBlock("union.call");
       next = lowering_.functionFrame().newBlock("union.call.next");
       lowering_.builder_.CreateCondBr(lowering_.unionLowerer().emitIsOneOf(id, m.member), block,

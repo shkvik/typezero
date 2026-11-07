@@ -61,7 +61,7 @@ Expr *TupleChecker::checkTupleJoin(CallExpr *call, MemberExpr *member) {
 
     return call;
   }
-  call->builtin = Builtin::TupleJoin;
+  call->target = BuiltinCall{.builtin = Builtin::TupleJoin};
   call->type = Type::string();
 
   return call;

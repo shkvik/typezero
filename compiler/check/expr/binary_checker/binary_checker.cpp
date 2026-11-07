@@ -309,7 +309,7 @@ Expr *BinaryChecker::checkBits(BinaryExpr *bin) {
         "'" + std::string(lhsText.empty() ? "x" : lhsText.str()) + " " + op +
         " 0' changes nothing in tz: integers are exact, and nothing wraps around here";
     auto *rounded = dyn_cast<CallExpr>(bin->lhs);
-    if (l->isFloat() && rounded && isRoundingBuiltin(rounded->builtin)) {
+    if (l->isFloat() && rounded && isRoundingBuiltin(rounded->builtin())) {
       message += "; to make it an int, write '" + std::string(lhsText.str()) + ".toInt()'";
     } else if (l->isFloat()) {
       message +=

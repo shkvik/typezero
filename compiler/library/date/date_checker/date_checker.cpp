@@ -363,7 +363,7 @@ Expr *DateChecker::checkDateFunction(CallExpr *call, NameExpr *name) {
     }
     return call;
   }
-  call->builtin = Builtin::DateText;
+  call->target = BuiltinCall{.builtin = Builtin::DateText};
   call->type = Type::string();
 
   return call;
@@ -380,7 +380,7 @@ Expr *DateChecker::checkDateStatic(CallExpr *call, MemberExpr *member) {
       return call;
     }
     checkDateFields(call->args);
-    call->builtin = Builtin::DateUTC;
+    call->target = BuiltinCall{.builtin = Builtin::DateUTC};
     call->type = Type::intTy();
     return call;
   }
@@ -390,7 +390,7 @@ Expr *DateChecker::checkDateStatic(CallExpr *call, MemberExpr *member) {
     }
     checkDateLiteral(call->args[0]);
     call->args[0] = checker_.argumentChecker().checkArg(call->args[0], Type::string());
-    call->builtin = Builtin::DateParse;
+    call->target = BuiltinCall{.builtin = Builtin::DateParse};
     call->type = Type::result(Type::intTy(), checker_.prelude().builtinType("DateError"));
     return call;
   }
@@ -462,7 +462,7 @@ Expr *DateChecker::checkDateMethod(CallExpr *call, MemberExpr *member) {
 
     return lit;
   };
-  call->builtin = method->builtin;
+  call->target = BuiltinCall{.builtin = method->builtin};
   switch (method->builtin) {
   case Builtin::DateGetTime:
     call->type = Type::intTy();

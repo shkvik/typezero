@@ -59,7 +59,7 @@ Stmt *FunctionParser::parseDeclaredFunction() {
                                        "its code");
     return fn;
   }
-  fn->external = true;
+  fn->bodySource = FunctionBodySource::EXTERNAL;
   fn->body = parser_.ctx_.make<BlockStmt>(fn->loc());
 
   return fn;
@@ -82,11 +82,11 @@ FunctionDecl *FunctionParser::parseFunction(bool expression, bool isAsync) {
     parser_.cursor().error(parser_.tok_.loc(), "expected a function name");
   }
   auto *fn = parser_.ctx_.make<FunctionDecl>(nameLoc, name);
-  fn->isExpression = expression;
+  fn->place = expression ? FunctionPlace::EXPRESSION : FunctionPlace::DECLARED;
   fn->isGenerator = generator;
   fn->isAsync = isAsync;
   if (expression) {
-    fn->ownName = name;
+    fn->syntax = RegularFunction{.ownName = name};
   }
   if (parser_.tok_.is(Tok::Less)) {
     fn->typeParams = parseTypeParams();
@@ -118,7 +118,7 @@ FunctionDecl *FunctionParser::parseFunction(bool expression, bool isAsync) {
 
 void FunctionParser::parseParams(FunctionDecl *fn, Parser::ParamPatterns *patterns) {
   parser_.cursor().expect(Tok::LParen,
-                          fn->isArrow ? "to start the parameters" : "after the function name");
+                          fn->isArrow() ? "to start the parameters" : "after the function name");
   while (!parser_.tok_.is(Tok::RParen) && !parser_.tok_.is(Tok::Eof)) {
     Param param;
     param.decorators = parser_.classes().parseDecorators();
@@ -265,7 +265,7 @@ bool FunctionParser::arrowAhead() {
   bool muted = parser_.diags_.setMuted(true);
   parser_.recovering_ = false;
   FunctionDecl probe(parser_.tok_.loc(), "");
-  probe.isArrow = true;
+  probe.syntax = ArrowFunction{};
   parseParams(&probe);
   bool arrow = !parser_.recovering_;
   if (arrow && parser_.cursor().accept(Tok::Colon)) {
@@ -285,7 +285,8 @@ FunctionExpr *FunctionParser::parseArrow(std::vector<TypeParamDecl> typeParams, 
   }
   llvm::SMLoc loc = parser_.tok_.loc();
   auto *fn = parser_.ctx_.make<FunctionDecl>(loc, "");
-  fn->isExpression = fn->isArrow = true;
+  fn->place = FunctionPlace::EXPRESSION;
+  fn->syntax = ArrowFunction{};
   fn->typeParams = std::move(typeParams);
   llvm::SaveAndRestore<bool> inGenerator(parser_.inGenerator_, false);
   Parser::ParamPatterns patterns;
@@ -320,7 +321,7 @@ FunctionExpr *FunctionParser::parseArrow(std::vector<TypeParamDecl> typeParams, 
     Expr *value = parser_.exprs().parseExpr();
     fn->body = parser_.ctx_.make<BlockStmt>(valueLoc);
     fn->body->body.push_back(parser_.ctx_.make<ReturnStmt>(valueLoc, value));
-    fn->concise = true;
+    fn->syntax = ArrowFunction{.concise = true};
   }
   addPrologue(fn, patterns);
   fn->source = llvm::StringRef(start, static_cast<size_t>(parser_.prevEnd_ - start));

@@ -58,7 +58,7 @@ bool sameVariable(const Expr *a, const Expr *b) {
   auto *x = llvm::dyn_cast_or_null<NameExpr>(stripCasts(a));
   auto *y = llvm::dyn_cast_or_null<NameExpr>(stripCasts(b));
 
-  return x && y && x->var && x->var == y->var;
+  return x && y && x->var() && x->var() == y->var();
 }
 
 }
@@ -171,18 +171,20 @@ Val Evaluator::eval(const Expr *expr, State &st, bool wraps) {
     eval(cast<AwaitExpr>(expr)->value, st);
     check_.callRanges().calledUserCode(st);
     return check_.overflowWarnings().trusted(expr->type);
+  case Expr::Kind::Class:
+    break;
   }
 
   return Val();
 }
 
 Val Evaluator::evalName(const NameExpr *name, State &st) {
-  if (!name->var || !tracked(name->var->type)) {
+  if (!name->var() || !tracked(name->var()->type)) {
     return Val();
   }
 
-  return check_.overflowWarnings().fitVal(check_.slots().readVar(name->var, st),
-                                          name->type ? name->type : name->var->type);
+  return check_.overflowWarnings().fitVal(check_.slots().readVar(name->var(), st),
+                                          name->type ? name->type : name->var()->type);
 }
 
 Val Evaluator::evalMember(const MemberExpr *member, State &st) {
@@ -220,8 +222,8 @@ Val Evaluator::evalIndex(const IndexExpr *index, State &st) {
   if (objectType->isString()) {
     return lengthVal(range(0, 1));
   }
-  if (!index->field.empty() && objectType->isObject()) {
-    return check_.slots().readField(objectType, index->field, index->type);
+  if (!index->field().empty() && objectType->isObject()) {
+    return check_.slots().readField(objectType, index->field(), index->type);
   }
 
   return check_.overflowWarnings().trusted(index->type);
@@ -398,8 +400,8 @@ Val Evaluator::evalBinary(const BinaryExpr *bin, State &st, bool wraps) {
   }
   const VarSymbol *accum = check_.selfAssigned_.lookup(bin);
   if (auto *name = dyn_cast<NameExpr>(stripCasts(bin->lhs));
-      !accum && name && check_.accumulators_.contains(name->var)) {
-    accum = name->var;
+      !accum && name && check_.accumulators_.contains(name->var())) {
+    accum = name->var();
   }
 
   bool square = bin->op == BinaryOp::Mul && sameVariable(bin->lhs, bin->rhs);

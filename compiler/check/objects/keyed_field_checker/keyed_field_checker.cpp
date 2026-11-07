@@ -69,8 +69,8 @@ std::optional<std::string> KeyedFieldChecker::constantKey(const Expr *key) const
   if (auto *tmpl = dyn_cast<TemplateExpr>(key); tmpl && tmpl->exprs.empty()) {
     return toUtf8(tmpl->quasis[0]);
   }
-  if (auto *name = dyn_cast<NameExpr>(key); name && name->var) {
-    if (auto found = checker_.constKeys_.find(name->var); found != checker_.constKeys_.end()) {
+  if (auto *name = dyn_cast<NameExpr>(key); name && name->var()) {
+    if (auto found = checker_.constKeys_.find(name->var()); found != checker_.constKeys_.end()) {
       return found->second;
     }
   }
@@ -202,7 +202,7 @@ Expr *KeyedFieldChecker::checkKeyedField(IndexExpr *index, bool write) {
           checker_.fieldFacts().fieldsAssigned(checker_.ctx_.keepName(toUtf8(n->literalText())));
         }
       }
-      index->keyed = true;
+      index->form = KeyedFieldIndex{};
       index->type = field;
       return index;
     }
@@ -239,8 +239,9 @@ Expr *KeyedFieldChecker::checkKeyedField(IndexExpr *index, bool write) {
                                 "one, such as 'const key = \"name\"'");
     return index;
   }
-  index->field = checker_.ctx_.keepName(name);
-  auto *member = checker_.ctx_.make<MemberExpr>(index->loc(), index->object, index->field);
+  llvm::StringRef field = checker_.ctx_.keepName(name);
+  index->form = NamedFieldIndex{.field = field};
+  auto *member = checker_.ctx_.make<MemberExpr>(index->loc(), index->object, field);
   if (write) {
     return member;
   }

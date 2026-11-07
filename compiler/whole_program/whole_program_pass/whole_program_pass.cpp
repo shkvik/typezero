@@ -44,7 +44,7 @@ Errors WholeProgramPass::run(Program &program) const {
   file.nativeError = native->isError() ? nullptr : native;
   checker.classLinks().numberClasses();
   for (ClassDecl *cls : checker.classes_) {
-    if ((cls->generic || (cls->expression && cls->type)) && cls->isEmitted()) {
+    if ((cls->generic() || (cls->expression() && cls->type)) && cls->isEmitted()) {
       file.items.push_back(cls);
     }
   }

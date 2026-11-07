@@ -191,40 +191,40 @@ llvm::Value *PromiseLowerer::emitPromiseNew(CallExpr *call) {
 llvm::Value *PromiseLowerer::emitPromiseStatic(CallExpr *call) {
   const Type *type = call->type;
   llvm::Type *ptr = lowering_.builder_.getPtrTy();
-  switch (call->builtin) {
-  case Builtin::PromiseResolve: {
-    if (!call->args.empty() && call->args[0]->type->isPromise()) {
-      return lowering_.exprLowerer().emitExpr(call->args[0]);
+  switch (call->builtin()) {
+    case Builtin::PromiseResolve: {
+      if (!call->args.empty() && call->args[0]->type->isPromise()) {
+        return lowering_.exprLowerer().emitExpr(call->args[0]);
+      }
+      llvm::Value *value = nullptr;
+      if (!call->args.empty()) {
+        value = lowering_.exprLowerer().emitExpr(call->args[0]);
+      }
+      auto *fn = cast<llvm::Function>(
+          lowering_.asyncLowerer().asyncFunction("tz_promise_resolved", ptr, {ptr}).getCallee());
+      llvm::Value *promise =
+          lowering_.builder_.CreateCall(fn, {promiseLayout(type->promised())}, "promise");
+      if (value && promiseValueSize(type->promised())) {
+        lowering_.builder_.CreateStore(value, promiseValueAddress(promise));
+      }
+      return promise;
     }
-    llvm::Value *value = nullptr;
-    if (!call->args.empty()) {
-      value = lowering_.exprLowerer().emitExpr(call->args[0]);
+    case Builtin::PromiseWithResolvers: {
+      const Type *promiseType = type->field("promise")->type;
+      const Type *value = promiseType->promised();
+      llvm::Value *promise = newPromise(value);
+      llvm::Value *object = lowering_.objectLayouts().allocObject(type, {0, 1});
+      lowering_.builder_.CreateStore(
+          promise, lowering_.objectLayouts().fieldAddress(object, type, "promise"));
+      lowering_.builder_.CreateCall(lowering_.objRetainFn_, {promise});
+      lowering_.builder_.CreateStore(
+          lowering_.closureLowerer().makeFunctionValue(resolverInfo(value), promise),
+          lowering_.objectLayouts().fieldAddress(object, type, "resolve"));
+      lowering_.groupLowerer().adoptFields(object, type);
+      return object;
     }
-    auto *fn = cast<llvm::Function>(
-        lowering_.asyncLowerer().asyncFunction("tz_promise_resolved", ptr, {ptr}).getCallee());
-    llvm::Value *promise =
-        lowering_.builder_.CreateCall(fn, {promiseLayout(type->promised())}, "promise");
-    if (value && promiseValueSize(type->promised())) {
-      lowering_.builder_.CreateStore(value, promiseValueAddress(promise));
-    }
-    return promise;
-  }
-  case Builtin::PromiseWithResolvers: {
-    const Type *promiseType = type->field("promise")->type;
-    const Type *value = promiseType->promised();
-    llvm::Value *promise = newPromise(value);
-    llvm::Value *object = lowering_.objectLayouts().allocObject(type, {0, 1});
-    lowering_.builder_.CreateStore(promise,
-                                   lowering_.objectLayouts().fieldAddress(object, type, "promise"));
-    lowering_.builder_.CreateCall(lowering_.objRetainFn_, {promise});
-    lowering_.builder_.CreateStore(
-        lowering_.closureLowerer().makeFunctionValue(resolverInfo(value), promise),
-        lowering_.objectLayouts().fieldAddress(object, type, "resolve"));
-    lowering_.groupLowerer().adoptFields(object, type);
-    return object;
-  }
-  default:
-    return lowering_.promiseCombineLowerer().emitPromiseCombine(call);
+    default:
+      return lowering_.promiseCombineLowerer().emitPromiseCombine(call);
   }
 }
 

@@ -41,7 +41,7 @@ bool ProcessChecker::isProcessMember(const Expr *expr, llvm::StringRef name) con
 Expr *ProcessChecker::builtinCall(llvm::SMLoc loc, Expr *callee, Builtin builtin,
                                   std::vector<Expr *> args, const Type *type) {
   auto *call = checker_.ctx_.make<CallExpr>(loc, callee, std::move(args));
-  call->builtin = builtin;
+  call->target = BuiltinCall{.builtin = builtin};
   call->type = type;
 
   return call;
@@ -83,7 +83,7 @@ Expr *ProcessChecker::checkProcessCall(CallExpr *call, MemberExpr *member) {
         !checker_.argumentChecker().checkArity(call, member->loc(), 0, 0)) {
       return call;
     }
-    call->builtin = isDate ? Builtin::DateNow : Builtin::PerformanceNow;
+    call->target = BuiltinCall{.builtin = isDate ? Builtin::DateNow : Builtin::PerformanceNow};
     call->type = isDate ? Type::intTy() : Type::doubleTy();
     return call;
   }
@@ -115,7 +115,8 @@ Expr *ProcessChecker::checkProcessCall(CallExpr *call, MemberExpr *member) {
       chunk = checker_.typeRelations().coerce(chunk, Type::string());
     }
     call->args[0] = chunk;
-    call->builtin = isStdout ? Builtin::ProcessStdoutWrite : Builtin::ProcessStderrWrite;
+    call->target = BuiltinCall{.builtin = isStdout ? Builtin::ProcessStdoutWrite
+                                                   : Builtin::ProcessStderrWrite};
     call->type = Type::boolTy();
     return call;
   }
@@ -136,7 +137,7 @@ Expr *ProcessChecker::checkProcessCall(CallExpr *call, MemberExpr *member) {
     if (!call->args.empty()) {
       call->args[0] = checkExitCode(call->args[0]);
     }
-    call->builtin = Builtin::ProcessExit;
+    call->target = BuiltinCall{.builtin = Builtin::ProcessExit};
     call->type = Type::voidTy();
     return call;
   }
@@ -144,7 +145,7 @@ Expr *ProcessChecker::checkProcessCall(CallExpr *call, MemberExpr *member) {
     if (!checker_.argumentChecker().checkArity(call, member->loc(), 0, 0)) {
       return call;
     }
-    call->builtin = Builtin::ProcessCwd;
+    call->target = BuiltinCall{.builtin = Builtin::ProcessCwd};
     call->type = Type::string();
     return call;
   }
@@ -152,7 +153,7 @@ Expr *ProcessChecker::checkProcessCall(CallExpr *call, MemberExpr *member) {
     if (!checker_.argumentChecker().checkArity(call, member->loc(), 0, 0)) {
       return call;
     }
-    call->builtin = Builtin::ProcessUptime;
+    call->target = BuiltinCall{.builtin = Builtin::ProcessUptime};
     call->type = Type::doubleTy();
     return call;
   }

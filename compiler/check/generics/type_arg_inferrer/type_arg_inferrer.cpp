@@ -93,7 +93,7 @@ void TypeArgInferrer::precheckFields(ObjectLitExpr *lit, const Type *pattern,
   const Type *target = pattern->nonOptional();
   if (!target->isObject() || target->isClass() || target->isTuple() || lit->hasSpread() ||
       llvm::any_of(lit->props, [](const ObjectLitExpr::Property &p) {
-        return p.method || p.key || p.defaulted;
+        return p.method() || p.key() || p.defaulted();
       })) {
     return;
   }
@@ -189,7 +189,7 @@ Expr *TypeArgInferrer::checkGenericCall(CallExpr *call, FuncSymbol *generic, llv
   if (!bindGenericCall(call, generic, loc, expected, typeArgs, bound)) {
     return call;
   }
-  call->func = generic;
+  call->target = FunctionCall{.func = generic};
   const ClassDecl *cls = generic->decl ? generic->decl->cls() : nullptr;
   bool concrete = llvm::none_of(bound, [](const Type *t) { return mentionsParam(t); }) &&
                   (!cls || generic->decl->isStatic() || cls->isEmitted());
@@ -197,7 +197,7 @@ Expr *TypeArgInferrer::checkGenericCall(CallExpr *call, FuncSymbol *generic, llv
   if (concrete && !checker_.trial_ && !generic->inferring && (generic->ret || copiesReturn)) {
     if (FuncSymbol *instance = checker_.genericInstantiator().instantiate(
             generic, bound, loc, checker_.genericInstantiator().exactClassArgs(call, generic))) {
-      call->func = instance;
+      call->target = FunctionCall{.func = instance};
       if (copiesReturn) {
         call->type = instance->ret ? instance->ret : Type::error();
       }

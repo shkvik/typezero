@@ -20,10 +20,10 @@ const FunctionDecl *directFunction(const Expr *expr) {
     return fe->fn;
   }
   if (auto *name = dyn_cast<NameExpr>(expr)) {
-    if (name->func) {
-      return name->func->decl;
+    if (name->func()) {
+      return name->func()->decl;
     }
-    if (const VarSymbol *var = name->var) {
+    if (const VarSymbol *var = name->var()) {
       return var->function() ? var->function() : var->isConst ? var->lambda() : nullptr;
     }
   }
@@ -32,20 +32,20 @@ const FunctionDecl *directFunction(const Expr *expr) {
 }
 
 void calledFunctions(const CallExpr *call, llvm::SmallVectorImpl<const FunctionDecl *> &called) {
-  if (call->func && call->func->decl) {
-    called.push_back(call->func->decl);
-  } else if (call->method) {
-    called.push_back(call->method->decl);
+  if (call->func() && call->func()->decl) {
+    called.push_back(call->func()->decl);
+  } else if (call->method()) {
+    called.push_back(call->method()->decl);
   }
-  for (const CallExpr::UnionMethod &m : call->unionMethods) {
+  for (const UnionMethod &m : call->unionMethods()) {
     if (m.method) {
       called.push_back(m.method->decl);
     } else if (const FunctionDecl *fn = call->callee ? directFunction(call->callee) : nullptr) {
       called.push_back(fn);
     }
   }
-  if ((call->builtin >= Builtin::ArrForEach && call->builtin <= Builtin::ArrSortWith) ||
-      isResultCallback(call->builtin)) {
+  if ((call->builtin() >= Builtin::ArrForEach && call->builtin() <= Builtin::ArrSortWith) ||
+      isResultCallback(call->builtin())) {
     for (const Expr *arg : call->args) {
       if (const FunctionDecl *fn = directFunction(arg)) {
         called.push_back(fn);
@@ -57,17 +57,17 @@ void calledFunctions(const CallExpr *call, llvm::SmallVectorImpl<const FunctionD
 const CallExpr *constructorCall(const Expr *expr,
                                 llvm::SmallVectorImpl<const FunctionDecl *> &called) {
   auto *create = dyn_cast<NewExpr>(expr);
-  if (!create || !create->cls || !create->ctor) {
+  if (!create || !create->cls() || !create->ctor()) {
     return nullptr;
   }
-  if (create->cls->init) {
-    called.push_back(create->cls->init);
+  if (create->cls()->init) {
+    called.push_back(create->cls()->init);
   }
-  if (create->ctor->func) {
-    called.push_back(create->ctor->func->decl);
+  if (create->ctor()->func()) {
+    called.push_back(create->ctor()->func()->decl);
   }
 
-  return called.empty() ? nullptr : create->ctor;
+  return called.empty() ? nullptr : create->ctor();
 }
 
 std::string calleeName(const FunctionDecl *fn) {
@@ -130,14 +130,14 @@ void LoadOrder::checkLoadOrder(SourceFile &program) {
   for (Module *module : program.modules) {
     auto visit = [&](const Expr *e) {
       if (auto *name = dyn_cast<NameExpr>(e)) {
-        auto found = name->var ? setAt.find(name->var) : setAt.end();
+        auto found = name->var() ? setAt.find(name->var()) : setAt.end();
         if (found == setAt.end() || found->second <= time) {
           return;
         }
-        Module *home = homes.lookup(name->var);
+        Module *home = homes.lookup(name->var());
         std::string what = "'" + name->name.str() + "'";
-        if (name->name != name->var->name) {
-          what += " ('" + name->var->name.str() + "' of " + home->name + ")";
+        if (name->name != name->var()->name) {
+          what += " ('" + name->var()->name.str() + "' of " + home->name + ")";
         } else {
           what += " of " + home->name;
         }
@@ -145,7 +145,7 @@ void LoadOrder::checkLoadOrder(SourceFile &program) {
           checker_.diags_.error(name->loc(), "'" + name->name + "' is used before it is declared");
         } else {
           checker_.diags_.error(
-              name->loc(), TopLevelChecker::readBeforeLoad(module, what, home, name->var->name));
+              name->loc(), TopLevelChecker::readBeforeLoad(module, what, home, name->var()->name));
         }
         return;
       }
@@ -194,9 +194,9 @@ void LoadOrder::checkLoadOrder(SourceFile &program) {
     Effects own;
     auto visit = [&](const Expr *e) {
       if (auto *name = dyn_cast<NameExpr>(e)) {
-        auto found = name->var ? setAt.find(name->var) : setAt.end();
+        auto found = name->var() ? setAt.find(name->var()) : setAt.end();
         if (found != setAt.end() && found->second > own.latest.setAt) {
-          own.latest = {name->var, found->second, name->loc()};
+          own.latest = {name->var(), found->second, name->loc()};
         }
       } else if (auto *call = dyn_cast<CallExpr>(e)) {
         llvm::SmallVector<const FunctionDecl *, 2> called;

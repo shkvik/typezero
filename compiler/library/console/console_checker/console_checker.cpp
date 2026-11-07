@@ -17,7 +17,7 @@ namespace tz {
 ConsoleChecker::ConsoleChecker(Checker &checker) : checker_(checker) {}
 
 Expr *ConsoleChecker::checkConsoleLog(CallExpr *call) {
-  call->builtin = Builtin::ConsoleLog;
+  call->target = BuiltinCall{.builtin = Builtin::ConsoleLog};
   call->type = Type::voidTy();
   for (size_t i = 0; i < call->args.size(); ++i) {
     Expr *&arg = call->args[i];
@@ -44,7 +44,7 @@ Expr *ConsoleChecker::checkConsoleCall(CallExpr *call, MemberExpr *member) {
   if (toStderr || member->name == "log" || member->name == "info" || member->name == "debug") {
     checkConsoleLog(call);
     if (toStderr) {
-      call->builtin = Builtin::ConsoleError;
+      call->target = BuiltinCall{.builtin = Builtin::ConsoleError};
     }
     return call;
   }

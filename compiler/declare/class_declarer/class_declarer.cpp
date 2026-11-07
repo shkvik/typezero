@@ -68,14 +68,14 @@ void ClassDeclarer::declareClass(ClassDecl *cls) {
   cls->id = ++checker_.classCount_;
   cls->type = Type::classType(cls->name, cls);
   checker_.classes_.push_back(cls);
-  checker_.scopes().declare(cls->name, cls->loc(), {nullptr, nullptr, nullptr, cls});
+  checker_.scopes().declare(cls->name, cls->loc(), {ClassEntry{.cls = cls}});
 }
 
 void ClassDeclarer::resolveClass(ClassDecl *cls) {
-  if (cls->resolved) {
+  if (cls->stage != ClassStage::UNRESOLVED) {
     return;
   }
-  cls->resolved = true;
+  cls->stage = ClassStage::RESOLVED;
   checker_.genericClassChecker().declareClassTypeParams(cls);
   checker_.typeScopes_.emplace_back();
   checker_.genericClassChecker().bindClassTypeParams(cls);
@@ -145,7 +145,7 @@ void ClassDeclarer::resolveClass(ClassDecl *cls) {
     if (fe && fe->fn->name.empty()) {
       fe->fn->name = f.name;
     }
-    if (fe && fe->fn->isArrow && !f.isStatic() && !f.parameter() && !f.optional() &&
+    if (fe && fe->fn->isArrow() && !f.isStatic() && !f.parameter() && !f.optional() &&
         !f.redeclared && !checker_.assignedFields_.contains(f.name) &&
         (!type || type->isFunction())) {
       FunctionDecl *fn = fe->fn;
@@ -157,7 +157,7 @@ void ClassDeclarer::resolveClass(ClassDecl *cls) {
       } else {
         fn->role = ClassMember{.cls = cls, .access = f.access, .isOverride = f.isOverride};
       }
-      fn->isExpression = false;
+      fn->place = FunctionPlace::DECLARED;
       f.form = ArrowMethodField{.method = fn};
       f.resolved = nullptr;
     }
@@ -328,7 +328,7 @@ Expr *ClassDeclarer::literalValue(const Type *literal, llvm::SMLoc loc) {
 
 bool ClassDeclarer::startsEmpty(const ClassDecl *cls,
                                 llvm::SmallPtrSetImpl<const ClassDecl *> &visiting) {
-  if (cls->isAbstract || cls->builtin || cls->isGeneric() || cls->typeParams.size() ||
+  if (cls->isAbstract || cls->builtin() || cls->isGeneric() || cls->typeParams.size() ||
       !ClassLinks::constructorsOf(cls).empty() || !visiting.insert(cls).second) {
     return false;
   }
@@ -370,7 +370,7 @@ Expr *ClassDeclarer::defaultValue(const Type *type, const TypeRef *ref, llvm::SM
   if (type->isArray() && !type->isTuple()) {
     return ctx.make<ArrayLitExpr>(loc);
   }
-  if ((type->isMap() || type->isSet()) && ref && ref->kind == TypeRef::Kind::Generic) {
+  if ((type->isMap() || type->isSet()) && ref && ref->kind() == TypeRefKind::GENERIC_REF) {
     return ctx.make<NewExpr>(loc, type->isMap() ? "Map" : "Set", ref->args, std::vector<Expr *>());
   }
   if (type->isLiteral()) {
@@ -466,14 +466,14 @@ void ClassDeclarer::checkVariantPair(FunctionDecl *a, FunctionDecl *b) {
 
 void ClassDeclarer::completeClass(ClassDecl *cls) {
   auto *type = const_cast<Type *>(cls->type);
-  if (!type->isIncomplete() || cls->literal || !completing_.insert(cls).second) {
+  if (!type->isIncomplete() || cls->literal() || !completing_.insert(cls).second) {
     return;
   }
   if (cls->parent) {
     completeClass(cls->parent);
   }
   bool muted = false;
-  if (ClassDecl *generic = cls->generic) {
+  if (ClassDecl *generic = cls->generic()) {
     completeClass(generic);
     for (size_t i = 0; i < cls->fields.size() && i < generic->fields.size(); ++i) {
       if (!cls->fields[i].isStatic() && !cls->fields[i].method() && !cls->fields[i].resolved) {
@@ -553,7 +553,7 @@ void ClassDeclarer::completeClass(ClassDecl *cls) {
   }
   type->defineFields(std::move(fields));
   completing_.erase(cls);
-  if (cls->generic) {
+  if (cls->generic()) {
     checker_.diags_.setMuted(muted);
   }
 }

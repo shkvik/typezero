@@ -167,7 +167,7 @@ void ClassLinks::linkClasses() {
     }
   };
   for (ClassDecl *cls : checker_.classes_) {
-    if (!cls->parent && !cls->literal) {
+    if (!cls->parent && !cls->literal()) {
       visit(cls);
     }
   }
@@ -184,7 +184,7 @@ void ClassLinks::linkClasses() {
 
   llvm::SmallPtrSet<const FunctionDecl *, 4> sources;
   for (ClassDecl *cls : order) {
-    if (cls->generic) {
+    if (cls->generic()) {
       continue;
     }
     for (FunctionDecl *fn : ownMethods(cls)) {
@@ -252,7 +252,7 @@ void ClassLinks::numberClasses() {
     }
   };
   for (ClassDecl *cls : checker_.classes_) {
-    if (!cls->parent && !cls->literal) {
+    if (!cls->parent && !cls->literal()) {
       visit(cls);
     }
   }
@@ -267,7 +267,7 @@ void ClassLinks::numberClasses() {
     }
   }
   for (ClassDecl *cls : checker_.classes_) {
-    if (cls->literal) {
+    if (cls->literal()) {
       cls->id = cls->lastId = ++next;
     }
   }
@@ -294,7 +294,7 @@ void ClassLinks::buildVtable(ClassDecl *cls) {
 
 void ClassLinks::linkOverrides(ClassDecl *cls) {
   bool muted = checker_.diags_.setMuted(false);
-  checker_.diags_.setMuted(muted || cls->generic != nullptr);
+  checker_.diags_.setMuted(muted || cls->generic() != nullptr);
   for (FunctionDecl *fn : ownMethods(cls)) {
     if (!fn->sym) {
       continue;

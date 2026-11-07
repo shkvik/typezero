@@ -67,7 +67,7 @@ Expr *CryptoArgs::cryptoCall(CallExpr *call, CryptoFn fn, std::vector<Expr *> ar
   args.insert(args.begin(), index);
   call->args = std::move(args);
   call->spread.clear();
-  call->builtin = Builtin::Crypto;
+  call->target = BuiltinCall{.builtin = Builtin::Crypto};
   call->type = type;
 
   return call;
@@ -203,7 +203,7 @@ bool CryptoArgs::cryptoOptions(Expr *arg, llvm::StringRef fn,
     list += (i == 0 ? "" : i + 1 == allowed.size() ? " and " : ", ") + allowed[i].str();
   }
   for (const ObjectLitExpr::Property &prop : lit->props) {
-    if (prop.spread || prop.key || prop.method || prop.name.empty()) {
+    if (prop.spread() || prop.key() || prop.method() || prop.name.empty()) {
       checker_.diags_.error(prop.loc, "write each option of '" + fn + "' by its name, e.g. '{ " +
                                           allowed[0].str() + ": ... }'");
       return false;

@@ -206,7 +206,7 @@ Expr *DictNewChecker::checkDictNew(NewExpr *expr, const Type *expected) {
   }
   if (!expr->typeArgs.empty()) {
     TypeRef ref;
-    ref.kind = TypeRef::Kind::Generic;
+    ref.form = GenericTypeRef{};
     ref.name = expr->name;
     ref.loc = loc;
     ref.args = expr->typeArgs;
@@ -289,7 +289,7 @@ Expr *DictNewChecker::checkDictNew(NewExpr *expr, const Type *expected) {
   auto *call = checker_.ctx_.make<CallExpr>(loc, checker_.ctx_.make<NameExpr>(loc, expr->name),
                                             std::move(args));
   call->callee->type = type;
-  call->builtin = Builtin::DictNew;
+  call->target = BuiltinCall{.builtin = Builtin::DictNew};
   call->type = type;
 
   return call;

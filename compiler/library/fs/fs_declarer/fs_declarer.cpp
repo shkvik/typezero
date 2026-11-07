@@ -52,8 +52,9 @@ void FsDeclarer::declareFsClasses() {
                      llvm::ArrayRef<std::pair<llvm::StringRef, const Type *>> fields,
                      size_t privateFrom) {
     auto *cls = checker_.ctx_.make<ClassDecl>(llvm::SMLoc(), name);
-    cls->builtin = true;
-    cls->resolved = cls->declared = true;
+    cls->origin = ClassOrigin::BUILTIN;
+    cls->stage = ClassStage::RESOLVED;
+    cls->declared = true;
     checker_.classes_.push_back(cls);
     Type *type = Type::classType(name, cls);
     cls->type = type;
@@ -122,7 +123,7 @@ Expr *FsDeclarer::checkFsClassMethod(CallExpr *call, MemberExpr *member, ClassDe
   auto *lit = checker_.ctx_.make<IntLitExpr>(member->loc(), uint64_t(*kind));
   lit->type = Type::intTy();
   call->args = {lit};
-  call->builtin = Builtin::FsIsKind;
+  call->target = BuiltinCall{.builtin = Builtin::FsIsKind};
   call->type = Type::boolTy();
   member->type = Type::function({}, 0, false, Type::boolTy());
 

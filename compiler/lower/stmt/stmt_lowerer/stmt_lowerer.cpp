@@ -88,7 +88,7 @@ void StmtLowerer::emitStmt(Stmt *stmt) {
   case Stmt::Kind::Enum:
     break;
   case Stmt::Kind::Class:
-    if (!cast<ClassDecl>(stmt)->expression) {
+    if (!cast<ClassDecl>(stmt)->expression()) {
       lowering_.decoratorLowerer().emitClassDeclaration(cast<ClassDecl>(stmt));
     }
     break;

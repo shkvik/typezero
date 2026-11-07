@@ -20,6 +20,8 @@ public:
   VarDeclarator hiddenDeclarator(llvm::SMLoc loc, Expr *init);
 
 private:
+  static BindingForm formOf(const Parser::Pattern &pattern);
+
   Parser &parser_;
 };
 

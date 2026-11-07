@@ -19,7 +19,7 @@ if(WIN32)
 endif()
 
 if(MSVC)
-  target_compile_options(tz PRIVATE /W4 /w44062 /wd4702 /utf-8 /permissive- /Zc:__cplusplus /GR- /EHs-c-)
+  target_compile_options(tz PRIVATE /W4 /we4062 /wd4702 /utf-8 /permissive- /Zc:__cplusplus /GR- /EHs-c-)
   target_compile_definitions(tz PRIVATE _HAS_EXCEPTIONS=0)
 else()
   target_compile_options(tz PRIVATE -Wall -Wextra -fno-rtti -fno-exceptions)

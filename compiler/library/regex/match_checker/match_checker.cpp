@@ -101,7 +101,7 @@ Expr *MatchChecker::checkMatchIndex(IndexExpr *index) {
   std::optional<int64_t> k = checker_.constantFolder().intConstant(index->index);
   int groups = type->matchGroups();
   if (k && *k == 0) {
-    index->mayBeOutOfRange = false;
+    index->form = ElementIndex{.mayBeOutOfRange = false};
     index->type = item;
     return checker_.typeRelations().convert(index, Type::string());
   }
@@ -115,14 +115,14 @@ Expr *MatchChecker::checkMatchIndex(IndexExpr *index) {
               ", so there is no m[" + std::to_string(*k) + "]");
       return index;
     }
-    index->mayBeOutOfRange = false;
+    index->form = ElementIndex{.mayBeOutOfRange = false};
     index->type = item;
     if (type->captureMandatory(unsigned(*k))) {
       return checker_.typeRelations().convert(index, Type::string());
     }
     return index;
   }
-  index->mayBeOutOfRange = true;
+  index->form = ElementIndex{.mayBeOutOfRange = true};
   index->type = item;
 
   return index;

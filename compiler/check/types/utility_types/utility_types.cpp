@@ -134,7 +134,7 @@ Expr *UtilityTypes::checkGenericIndex(IndexExpr *index) {
   }
   if (!open) {
     auto *name = cast<NameExpr>(index->index);
-    VarSymbol *var = checker_.scopes().lookup(name->name).var;
+    VarSymbol *var = checker_.scopes().lookup(name->name).var();
     if (!var || !var->type || !genericKey(var->type)) {
       return nullptr;
     }

@@ -37,12 +37,17 @@ ClassDecl *ClassParser::parseClass(bool expression) {
       !(expression && (parser_.tok_.text == "extends" || parser_.tok_.text == "implements"));
   auto *cls = parser_.ctx_.make<ClassDecl>(named ? parser_.tok_.loc() : loc,
                                            named ? parser_.tok_.text : llvm::StringRef());
-  cls->expression = expression;
+  if (expression) {
+    cls->syntax = ExpressionClass{};
+  }
   if (named) {
     parser_.cursor().advance();
   }
   if (parser_.tok_.is(Tok::Less)) {
     cls->typeParams = parser_.functions().parseTypeParams();
+  }
+  if (!cls->typeParams.empty()) {
+    cls->generics = GenericTemplate{};
   }
   if (parser_.tok_.is(Tok::Identifier) && parser_.tok_.text == "extends") {
     parser_.cursor().advance();
@@ -55,7 +60,7 @@ ClassDecl *ClassParser::parseClass(bool expression) {
       llvm::SMLoc baseLoc = parser_.tok_.loc();
       llvm::StringRef baseName = parser_.tok_.text;
       cls->base = parser_.types().parsePrimaryType();
-      if (expression && cls->base->kind == TypeRef::Kind::Name) {
+      if (expression && cls->base->kind() == TypeRefKind::NAME_REF) {
         cls->baseExpr = parser_.ctx_.make<NameExpr>(baseLoc, baseName);
       }
     }

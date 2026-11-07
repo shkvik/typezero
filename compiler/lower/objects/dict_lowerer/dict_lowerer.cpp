@@ -377,10 +377,10 @@ llvm::Value *DictLowerer::emitRecordLiteral(ObjectLitExpr *lit) {
                                      lowering_.exprLowerer().emitConversion(v, from, value), value);
   };
   for (const ObjectLitExpr::Property &prop : lit->props) {
-    if (!prop.spread) {
+    if (!prop.spread()) {
       Lowering::Operand k{lowering_.stringLowerer().stringLiteral(utf16(prop.name)), false, string};
-      if (prop.key) {
-        k = lowering_.refCounts().emitOperand(prop.key, AssignLowerer::cannotAssign(prop.value));
+      if (prop.key()) {
+        k = lowering_.refCounts().emitOperand(prop.key(), AssignLowerer::cannotAssign(prop.value));
       }
       llvm::Value *v = lowering_.exprLowerer().emitExpr(prop.value);
       put(k.value, v, prop.value->type);
@@ -391,7 +391,7 @@ llvm::Value *DictLowerer::emitRecordLiteral(ObjectLitExpr *lit) {
     Lowering::Operand from = lowering_.refCounts().emitOperand(prop.value, true);
     auto omitted = [&](llvm::Value *k) -> llvm::Value * {
       llvm::Value *skip = lowering_.builder_.getFalse();
-      for (llvm::StringRef name : prop.omit) {
+      for (llvm::StringRef name : prop.omit()) {
         skip = lowering_.builder_.CreateOr(
             skip, lowering_.equalityLowerer().emitValuesEqual(
                       k, lowering_.stringLowerer().stringLiteral(utf16(name)), string));
@@ -418,7 +418,7 @@ llvm::Value *DictLowerer::emitRecordLiteral(ObjectLitExpr *lit) {
       });
     } else {
       for (const Field &f : source->fields()) {
-        if (llvm::is_contained(prop.omit, f.name)) {
+        if (llvm::is_contained(prop.omit(), f.name)) {
           continue;
         }
         llvm::Value *v = lowering_.builder_.CreateLoad(

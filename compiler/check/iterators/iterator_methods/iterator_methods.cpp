@@ -54,13 +54,13 @@ Expr *IteratorMethods::checkArrayIterator(CallExpr *call, MemberExpr *member) {
     return call;
   }
   if (name == "keys") {
-    call->builtin = Builtin::ArrKeys;
+    call->target = BuiltinCall{.builtin = Builtin::ArrKeys};
     call->type = Type::iterator(Type::intTy());
   } else if (name == "values") {
-    call->builtin = Builtin::ArrValues;
+    call->target = BuiltinCall{.builtin = Builtin::ArrValues};
     call->type = Type::iterator(element);
   } else {
-    call->builtin = Builtin::ArrEntries;
+    call->target = BuiltinCall{.builtin = Builtin::ArrEntries};
     call->type = Type::iterator(Type::tuple({Type::intTy(), element}));
   }
 
@@ -95,7 +95,7 @@ Expr *IteratorMethods::checkIteratorFrom(CallExpr *call, MemberExpr *member) {
     }
     return call;
   }
-  call->builtin = Builtin::IterFrom;
+  call->target = BuiltinCall{.builtin = Builtin::IterFrom};
   call->type = type->isIterator() ? type : Type::iterator(element);
 
   return call;
@@ -136,7 +136,7 @@ Expr *IteratorMethods::checkArrayFrom(CallExpr *call, MemberExpr *member) {
   if (type->isIterator()) {
     checker_.generatorChecker().checkSendsNothing(type, call->args[0]->loc(), "'Array.from'");
   }
-  call->builtin = Builtin::ArrayFrom;
+  call->target = BuiltinCall{.builtin = Builtin::ArrayFrom};
   call->type = Type::array(element);
   if (call->args.size() == 2) {
     Checker::Signature sig;
@@ -193,7 +193,7 @@ Expr *IteratorMethods::checkIteratorMethod(CallExpr *call, MemberExpr *member) {
       call->args[0] = sent->isVoid() ? checker_.exprChecker().checkExpr(call->args[0])
                                      : checker_.argumentChecker().checkArg(call->args[0], sent);
     }
-    call->builtin = Builtin::IterNext;
+    call->target = BuiltinCall{.builtin = Builtin::IterNext};
     call->type =
         Type::object({{"value", Type::optional(value), false}, {"done", Type::boolTy(), false}},
                      "IteratorResult<" + value->name().str() + ">");
@@ -256,7 +256,7 @@ Expr *IteratorMethods::checkIteratorMethod(CallExpr *call, MemberExpr *member) {
     call->args[0] = checker_.memberChecker().checkPosition(call->args[0]);
     checker_.indexProofs().requireBetween(call->args[0], 0, std::nullopt,
                                           "the count of '" + name.str() + "'");
-    call->builtin = builtin;
+    call->target = BuiltinCall{.builtin = builtin};
     call->type = Type::iterator(element);
     return call;
   }
@@ -264,7 +264,7 @@ Expr *IteratorMethods::checkIteratorMethod(CallExpr *call, MemberExpr *member) {
     if (!checker_.argumentChecker().checkArity(call, member->loc(), 0, 0)) {
       return call;
     }
-    call->builtin = builtin;
+    call->target = BuiltinCall{.builtin = builtin};
     call->type = Type::array(element);
     checker_.flowChecker().calledFunction();
     return call;
@@ -335,7 +335,7 @@ Expr *IteratorMethods::checkIteratorMethod(CallExpr *call, MemberExpr *member) {
       fe->fn->nonEscaping = call->fused;
     }
   }
-  call->builtin = builtin;
+  call->target = BuiltinCall{.builtin = builtin};
   if (isIteratorSink(builtin)) {
     checker_.flowChecker().calledFunction();
   }

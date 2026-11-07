@@ -128,7 +128,9 @@ Expr *BytesChecker::checkBytesIndex(IndexExpr *index) {
     return index;
   }
   bool inRange = checker_.indexProofs().provesInBounds(index->object, index->index, false);
-  index->mayBeOutOfRange = !inRange;
+  if (ElementIndex *element = index->form.as<ElementIndex>()) {
+    element->mayBeOutOfRange = !inRange;
+  }
   index->type = inRange ? type->elementType() : Type::optional(type->elementType());
 
   return index;
@@ -415,7 +417,7 @@ Expr *BytesChecker::checkBytesMethod(CallExpr *call, MemberExpr *member, const T
       for (Expr *&arg : call->args) {
         arg = checker_.memberChecker().checkPosition(arg);
       }
-      call->builtin = Builtin::ArrayBufferSlice;
+      call->target = BuiltinCall{.builtin = Builtin::ArrayBufferSlice};
       call->type = type;
       return call;
     }

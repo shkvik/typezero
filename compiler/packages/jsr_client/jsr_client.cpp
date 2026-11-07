@@ -99,13 +99,13 @@ bool readJsrVersion(llvm::StringRef text, const std::string &where, JsrVersion &
     return false;
   }
   out = JsrVersion();
-  for (size_t i = 0; i < manifest->keys.size(); ++i) {
-    llvm::StringRef file = manifest->keys[i];
+  for (size_t i = 0; i < manifest->keys().size(); ++i) {
+    llvm::StringRef file = manifest->keys()[i];
     file.consume_front("/");
-    std::string listed = manifest->items[i].getString("checksum");
+    std::string listed = manifest->items()[i].getString("checksum");
     llvm::StringRef checksum = listed;
     if (!safeRelativePath(file) || !checksum.consume_front("sha256-") || checksum.size() != 64) {
-      error = where + " lists the file '" + manifest->keys[i] + "' wrongly";
+      error = where + " lists the file '" + manifest->keys()[i] + "' wrongly";
       return false;
     }
     out.files.push_back({file.str(), checksum.lower()});
@@ -117,11 +117,11 @@ bool readJsrVersion(llvm::StringRef text, const std::string &where, JsrVersion &
   };
   if (const JsonValue *exports = meta.get("exports")) {
     if (exports->isString()) {
-      out.exports.push_back({".", packageFile(exports->string)});
+      out.exports.push_back({".", packageFile(exports->string())});
     }
-    for (size_t i = 0; i < exports->keys.size(); ++i) {
-      if (exports->items[i].isString()) {
-        out.exports.push_back({exports->keys[i], packageFile(exports->items[i].string)});
+    for (size_t i = 0; i < exports->keys().size(); ++i) {
+      if (exports->items()[i].isString()) {
+        out.exports.push_back({exports->keys()[i], packageFile(exports->items()[i].string())});
       }
     }
   }
@@ -158,13 +158,13 @@ bool jsrVersions(llvm::StringRef scope, llvm::StringRef name, JsrVersions &out,
     return false;
   }
   out.versions.clear();
-  for (size_t i = 0; i < versions->keys.size(); ++i) {
+  for (size_t i = 0; i < versions->keys().size(); ++i) {
     JsrVersions::Entry entry;
-    if (!Version::parse(versions->keys[i], entry.version)) {
+    if (!Version::parse(versions->keys()[i], entry.version)) {
       continue;
     }
-    const JsonValue *yanked = versions->items[i].get("yanked");
-    entry.yanked = yanked && yanked->kind == JsonValue::Kind::Bool && yanked->boolean;
+    const JsonValue *yanked = versions->items()[i].get("yanked");
+    entry.yanked = yanked && yanked->boolean();
     out.versions.push_back(std::move(entry));
   }
 

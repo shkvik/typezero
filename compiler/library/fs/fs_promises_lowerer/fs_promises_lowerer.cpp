@@ -41,69 +41,70 @@ llvm::Value *FsPromisesLowerer::emitFsPromise(CallExpr *call) {
     lowering_.builder_.CreateCall(lowering_.processLowerer().processFunction(name, voidTy, params),
                                   args);
   };
-  switch (call->builtin) {
-  case Builtin::FspReadFile:
-    run("tz_fsp_read_file", {ptr, i64, ptr, i64, i64},
-        {obj(0), meta(0), obj(1), meta(1),
-         value->isBytes() ? llvm::ConstantInt::getSigned(i64, -1) : values[2]});
-    break;
-  case Builtin::FspWriteFile:
-    if (!call->args[1]->type->isString()) {
-      run("tz_fsp_write_file_bytes", {ptr, i64, ptr, ptr, i64, i64},
-          {obj(0), meta(0), values[1], obj(2), meta(2), values[3]});
-    } else {
-      run("tz_fsp_write_file", {ptr, i64, ptr, i64, ptr, i64, i64, i64},
-          {obj(0), meta(0), obj(1), meta(1), obj(2), meta(2), values[3], values[4]});
+  switch (call->builtin()) {
+    case Builtin::FspReadFile:
+      run("tz_fsp_read_file", {ptr, i64, ptr, i64, i64},
+          {obj(0), meta(0), obj(1), meta(1),
+           value->isBytes() ? llvm::ConstantInt::getSigned(i64, -1) : values[2]});
+      break;
+    case Builtin::FspWriteFile:
+      if (!call->args[1]->type->isString()) {
+        run("tz_fsp_write_file_bytes", {ptr, i64, ptr, ptr, i64, i64},
+            {obj(0), meta(0), values[1], obj(2), meta(2), values[3]});
+      } else {
+        run("tz_fsp_write_file", {ptr, i64, ptr, i64, ptr, i64, i64, i64},
+            {obj(0), meta(0), obj(1), meta(1), obj(2), meta(2), values[3], values[4]});
+      }
+      break;
+    case Builtin::FspAccess:
+    case Builtin::FspChmod:
+      run(call->builtin() == Builtin::FspAccess ? "tz_fsp_access" : "tz_fsp_chmod", {ptr, i64, i64},
+          {obj(0), meta(0), values[1]});
+      break;
+    case Builtin::FspTruncate:
+      run("tz_fsp_truncate", {ptr, i64, i64}, {obj(0), meta(0), values[1]});
+      break;
+    case Builtin::FspStat:
+      run("tz_fsp_stat", {ptr, i64, i32, ptr},
+          {obj(0), meta(0), flag(1), lowering_.fsLowerer().objectMaker(value)});
+      break;
+    case Builtin::FspReaddir: {
+      const Type *element = value->inner();
+      llvm::Value *dirent =
+          element->isClass()
+              ? static_cast<llvm::Value *>(lowering_.fsLowerer().objectMaker(element))
+              : llvm::ConstantPointerNull::get(lowering_.builder_.getPtrTy());
+      run("tz_fsp_readdir", {ptr, i64, i32, ptr, ptr},
+          {obj(0), meta(0), flag(1), lowering_.typeDescriptors().typeDescriptor(element), dirent});
+      break;
     }
-    break;
-  case Builtin::FspAccess:
-  case Builtin::FspChmod:
-    run(call->builtin == Builtin::FspAccess ? "tz_fsp_access" : "tz_fsp_chmod", {ptr, i64, i64},
-        {obj(0), meta(0), values[1]});
-    break;
-  case Builtin::FspTruncate:
-    run("tz_fsp_truncate", {ptr, i64, i64}, {obj(0), meta(0), values[1]});
-    break;
-  case Builtin::FspStat:
-    run("tz_fsp_stat", {ptr, i64, i32, ptr},
-        {obj(0), meta(0), flag(1), lowering_.fsLowerer().objectMaker(value)});
-    break;
-  case Builtin::FspReaddir: {
-    const Type *element = value->inner();
-    llvm::Value *dirent =
-        element->isClass() ? static_cast<llvm::Value *>(lowering_.fsLowerer().objectMaker(element))
-                           : llvm::ConstantPointerNull::get(lowering_.builder_.getPtrTy());
-    run("tz_fsp_readdir", {ptr, i64, i32, ptr, ptr},
-        {obj(0), meta(0), flag(1), lowering_.typeDescriptors().typeDescriptor(element), dirent});
-    break;
-  }
-  case Builtin::FspMkdir:
-    run("tz_fsp_mkdir", {ptr, i64, i32, i64}, {obj(0), meta(0), flag(1), values[2]});
-    break;
-  case Builtin::FspMkdtemp:
-    run("tz_fsp_mkdtemp", {ptr, i64}, {obj(0), meta(0)});
-    break;
-  case Builtin::FspRmdir:
-  case Builtin::FspUnlink:
-    run("tz_fsp_remove", {ptr, i64, i32},
-        {obj(0), meta(0), lowering_.builder_.getInt32(call->builtin == Builtin::FspUnlink)});
-    break;
-  case Builtin::FspRm:
-    run("tz_fsp_rm", {ptr, i64, i32, i32}, {obj(0), meta(0), flag(1), flag(2)});
-    break;
-  case Builtin::FspRename:
-  case Builtin::FspReplace:
-  case Builtin::FspCopyFile:
-    run(call->builtin == Builtin::FspRename    ? "tz_fsp_rename"
-        : call->builtin == Builtin::FspReplace ? "tz_fsp_replace"
-                                               : "tz_fsp_copy_file",
-        {ptr, i64, ptr, i64}, {obj(0), meta(0), obj(1), meta(1)});
-    break;
-  case Builtin::FspRealpath:
-    run("tz_fsp_realpath", {ptr, i64}, {obj(0), meta(0)});
-    break;
-  default:
-    llvm_unreachable("not a function of node:fs/promises");
+    case Builtin::FspMkdir:
+      run("tz_fsp_mkdir", {ptr, i64, i32, i64}, {obj(0), meta(0), flag(1), values[2]});
+      break;
+    case Builtin::FspMkdtemp:
+      run("tz_fsp_mkdtemp", {ptr, i64}, {obj(0), meta(0)});
+      break;
+    case Builtin::FspRmdir:
+    case Builtin::FspUnlink:
+      run("tz_fsp_remove", {ptr, i64, i32},
+          {obj(0), meta(0), lowering_.builder_.getInt32(call->builtin() == Builtin::FspUnlink)});
+      break;
+    case Builtin::FspRm:
+      run("tz_fsp_rm", {ptr, i64, i32, i32}, {obj(0), meta(0), flag(1), flag(2)});
+      break;
+    case Builtin::FspRename:
+    case Builtin::FspReplace:
+    case Builtin::FspCopyFile:
+      run(call->builtin() == Builtin::FspRename    ? "tz_fsp_rename"
+          : call->builtin() == Builtin::FspReplace ? "tz_fsp_replace"
+                                                   : "tz_fsp_copy_file",
+          {ptr, i64, ptr, i64}, {obj(0), meta(0), obj(1), meta(1)});
+      break;
+    case Builtin::FspRealpath:
+      run("tz_fsp_realpath", {ptr, i64}, {obj(0), meta(0)});
+      break;
+    default:
+      llvm_unreachable("not a function of node:fs/promises");
   }
   for (size_t i = 0; i < values.size(); ++i) {
     lowering_.refCounts().releaseValue(values[i], call->args[i]->type);
@@ -115,7 +116,7 @@ llvm::Value *FsPromisesLowerer::emitFsPromise(CallExpr *call) {
 llvm::Value *FsPromisesLowerer::emitReadlineBuiltin(CallExpr *call) {
   llvm::Type *voidTy = lowering_.builder_.getVoidTy();
   llvm::Type *i64 = lowering_.builder_.getInt64Ty(), *ptr = lowering_.builder_.getPtrTy();
-  if (call->builtin == Builtin::RlCreate) {
+  if (call->builtin() == Builtin::RlCreate) {
     std::vector<llvm::Value *> values = lowering_.exprLowerer().emitExprs(call->args);
     return lowering_.builder_.CreateCall(
         lowering_.processLowerer().processFunction("tz_readline_new", ptr, {i64}), {values[0]},
@@ -124,46 +125,48 @@ llvm::Value *FsPromisesLowerer::emitReadlineBuiltin(CallExpr *call) {
   Lowering::Operand rl =
       lowering_.refCounts().emitOperand(cast<MemberExpr>(call->callee)->object, true);
   llvm::Value *result = nullptr;
-  switch (call->builtin) {
-  case Builtin::RlQuestion: {
-    std::vector<llvm::Value *> values = lowering_.exprLowerer().emitExprs(call->args);
-    result = lowering_.promiseLowerer().newPromise(call->type->promised());
-    lowering_.builder_.CreateCall(
-        lowering_.processLowerer().processFunction("tz_readline_question", voidTy,
-                                                   {ptr, ptr, ptr, i64, ptr}),
-        {rl.value, result, lowering_.stringLowerer().stringObj(values[0]),
-         lowering_.stringLowerer().stringMeta(values[0]),
-         lowering_.fsLowerer().objectMaker(call->type->promised()->errType())});
-    for (size_t i = 0; i < values.size(); ++i) {
-      lowering_.refCounts().releaseValue(values[i], call->args[i]->type);
+  switch (call->builtin()) {
+    case Builtin::RlQuestion: {
+      std::vector<llvm::Value *> values = lowering_.exprLowerer().emitExprs(call->args);
+      result = lowering_.promiseLowerer().newPromise(call->type->promised());
+      lowering_.builder_.CreateCall(
+          lowering_.processLowerer().processFunction("tz_readline_question", voidTy,
+                                                     {ptr, ptr, ptr, i64, ptr}),
+          {rl.value, result, lowering_.stringLowerer().stringObj(values[0]),
+           lowering_.stringLowerer().stringMeta(values[0]),
+           lowering_.fsLowerer().objectMaker(call->type->promised()->errType())});
+      for (size_t i = 0; i < values.size(); ++i) {
+        lowering_.refCounts().releaseValue(values[i], call->args[i]->type);
+      }
+      break;
     }
-    break;
-  }
-  case Builtin::RlQuestionCallback: {
-    std::vector<llvm::Value *> values = lowering_.exprLowerer().emitExprs(call->args);
-    llvm::Value *answer = lowering_.promiseLowerer().newPromise(Type::string());
-    lowering_.builder_.CreateCall(lowering_.processLowerer().processFunction(
-                                      "tz_readline_question", voidTy, {ptr, ptr, ptr, i64, ptr}),
-                                  {rl.value, answer, lowering_.stringLowerer().stringObj(values[0]),
-                                   lowering_.stringLowerer().stringMeta(values[0]),
-                                   llvm::ConstantPointerNull::get(lowering_.builder_.getPtrTy())});
-    llvm::Value *done = lowering_.promiseLowerer().newPromise(Type::voidTy());
-    const Type *callback = call->args[1]->type;
-    lowering_.reactionLowerer().attachReaction(
-        answer, done,
-        lowering_.reactionLowerer().reactionHandler(Type::string(), Type::voidTy(), callback),
-        values[1]);
-    lowering_.builder_.CreateCall(lowering_.instanceReleaseFn_, {done});
-    lowering_.builder_.CreateCall(lowering_.instanceReleaseFn_, {answer});
-    lowering_.refCounts().releaseValue(values[0], call->args[0]->type);
-    break;
-  }
-  case Builtin::RlClose:
-    lowering_.builder_.CreateCall(
-        lowering_.processLowerer().processFunction("tz_readline_close", voidTy, {ptr}), {rl.value});
-    break;
-  default:
-    llvm_unreachable("not a built-in of node:readline");
+    case Builtin::RlQuestionCallback: {
+      std::vector<llvm::Value *> values = lowering_.exprLowerer().emitExprs(call->args);
+      llvm::Value *answer = lowering_.promiseLowerer().newPromise(Type::string());
+      lowering_.builder_.CreateCall(
+          lowering_.processLowerer().processFunction("tz_readline_question", voidTy,
+                                                     {ptr, ptr, ptr, i64, ptr}),
+          {rl.value, answer, lowering_.stringLowerer().stringObj(values[0]),
+           lowering_.stringLowerer().stringMeta(values[0]),
+           llvm::ConstantPointerNull::get(lowering_.builder_.getPtrTy())});
+      llvm::Value *done = lowering_.promiseLowerer().newPromise(Type::voidTy());
+      const Type *callback = call->args[1]->type;
+      lowering_.reactionLowerer().attachReaction(
+          answer, done,
+          lowering_.reactionLowerer().reactionHandler(Type::string(), Type::voidTy(), callback),
+          values[1]);
+      lowering_.builder_.CreateCall(lowering_.instanceReleaseFn_, {done});
+      lowering_.builder_.CreateCall(lowering_.instanceReleaseFn_, {answer});
+      lowering_.refCounts().releaseValue(values[0], call->args[0]->type);
+      break;
+    }
+    case Builtin::RlClose:
+      lowering_.builder_.CreateCall(
+          lowering_.processLowerer().processFunction("tz_readline_close", voidTy, {ptr}),
+          {rl.value});
+      break;
+    default:
+      llvm_unreachable("not a built-in of node:readline");
   }
   lowering_.refCounts().dropOperand(rl);
 
@@ -173,44 +176,44 @@ llvm::Value *FsPromisesLowerer::emitReadlineBuiltin(CallExpr *call) {
 llvm::Value *FsPromisesLowerer::emitAsyncIoBuiltin(CallExpr *call) {
   llvm::Type *voidTy = lowering_.builder_.getVoidTy(), *i32 = lowering_.builder_.getInt32Ty();
   llvm::Type *f64 = lowering_.builder_.getDoubleTy(), *ptr = lowering_.builder_.getPtrTy();
-  switch (call->builtin) {
-  case Builtin::TimersSetTimeout:
-  case Builtin::TimersSetImmediate:
-  case Builtin::TimersSetInterval: {
-    std::vector<llvm::Value *> values = lowering_.exprLowerer().emitExprs(call->args);
-    bool immediate = call->builtin == Builtin::TimersSetImmediate;
-    llvm::Value *delay = immediate ? llvm::ConstantFP::get(f64, 0.0) : values[0];
-    size_t at = immediate ? 0 : 1;
-    const Type *value = call->builtin == Builtin::TimersSetInterval ? call->type->yielded()
-                                                                    : call->type->promised();
-    bool holds = call->args.size() - at == 2;
-    llvm::Value *given = holds ? values[at] : nullptr;
-    llvm::Value *ref = lowering_.builder_.CreateZExt(values.back(), i32);
-    llvm::Value *result;
-    if (call->builtin == Builtin::TimersSetInterval) {
-      llvm::Value *slot = given ? lowering_.functionFrame().spill(given, "interval.value")
-                                : llvm::ConstantPointerNull::get(lowering_.builder_.getPtrTy());
-      llvm::Value *type =
-          lowering_.promiseLowerer().promiseValueSize(value)
-              ? static_cast<llvm::Value *>(lowering_.typeDescriptors().typeDescriptor(value))
-              : llvm::ConstantPointerNull::get(lowering_.builder_.getPtrTy());
-      result = lowering_.builder_.CreateCall(lowering_.processLowerer().processFunction(
-                                                 "tz_timers_interval", ptr, {f64, ptr, ptr, i32}),
-                                             {delay, slot, type, ref}, "interval");
-    } else {
-      result = lowering_.promiseLowerer().newPromise(value);
-      if (given && lowering_.promiseLowerer().promiseValueSize(value)) {
-        lowering_.builder_.CreateStore(given,
-                                       lowering_.promiseLowerer().promiseValueAddress(result));
+  switch (call->builtin()) {
+    case Builtin::TimersSetTimeout:
+    case Builtin::TimersSetImmediate:
+    case Builtin::TimersSetInterval: {
+      std::vector<llvm::Value *> values = lowering_.exprLowerer().emitExprs(call->args);
+      bool immediate = call->builtin() == Builtin::TimersSetImmediate;
+      llvm::Value *delay = immediate ? llvm::ConstantFP::get(f64, 0.0) : values[0];
+      size_t at = immediate ? 0 : 1;
+      const Type *value = call->builtin() == Builtin::TimersSetInterval ? call->type->yielded()
+                                                                        : call->type->promised();
+      bool holds = call->args.size() - at == 2;
+      llvm::Value *given = holds ? values[at] : nullptr;
+      llvm::Value *ref = lowering_.builder_.CreateZExt(values.back(), i32);
+      llvm::Value *result;
+      if (call->builtin() == Builtin::TimersSetInterval) {
+        llvm::Value *slot = given ? lowering_.functionFrame().spill(given, "interval.value")
+                                  : llvm::ConstantPointerNull::get(lowering_.builder_.getPtrTy());
+        llvm::Value *type =
+            lowering_.promiseLowerer().promiseValueSize(value)
+                ? static_cast<llvm::Value *>(lowering_.typeDescriptors().typeDescriptor(value))
+                : llvm::ConstantPointerNull::get(lowering_.builder_.getPtrTy());
+        result = lowering_.builder_.CreateCall(lowering_.processLowerer().processFunction(
+                                                   "tz_timers_interval", ptr, {f64, ptr, ptr, i32}),
+                                               {delay, slot, type, ref}, "interval");
+      } else {
+        result = lowering_.promiseLowerer().newPromise(value);
+        if (given && lowering_.promiseLowerer().promiseValueSize(value)) {
+          lowering_.builder_.CreateStore(given,
+                                         lowering_.promiseLowerer().promiseValueAddress(result));
+        }
+        lowering_.builder_.CreateCall(lowering_.processLowerer().processFunction(
+                                          "tz_timers_wait", voidTy, {ptr, f64, i32, i32}),
+                                      {result, delay, lowering_.builder_.getInt32(immediate), ref});
       }
-      lowering_.builder_.CreateCall(lowering_.processLowerer().processFunction(
-                                        "tz_timers_wait", voidTy, {ptr, f64, i32, i32}),
-                                    {result, delay, lowering_.builder_.getInt32(immediate), ref});
+      return result;
     }
-    return result;
-  }
-  default:
-    llvm_unreachable("not a built-in of waiting for I/O");
+    default:
+      llvm_unreachable("not a built-in of waiting for I/O");
   }
 }
 

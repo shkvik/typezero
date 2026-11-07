@@ -108,7 +108,7 @@ const Type *AliasInstantiator::instantiateAlias(TypeAliasDecl *alias,
       type = Type::error();
       break;
     }
-    bool conditional = alias->type.kind == TypeRef::Kind::Conditional;
+    bool conditional = alias->type.kind() == TypeRefKind::CONDITIONAL_REF;
     if (aliasDepth_ >= kMaxAliasDepth || calls > kMaxTailCalls) {
       if (!conditional) {
         checker_.diags_.error(alias->loc(), "type alias '" + alias->name +
@@ -156,7 +156,7 @@ const Type *AliasInstantiator::instantiateAlias(TypeAliasDecl *alias,
     }
     checker_.typeScopes_.emplace_back();
     checker_.typeParams().bindTypeParams(alias->typeParams, args);
-    if (alias->type.kind == TypeRef::Kind::Object) {
+    if (alias->type.kind() == TypeRefKind::OBJECT_REF) {
       entry.self = Type::declareObject(display);
       std::vector<const Type *> bases;
       std::vector<Overload> overloads;

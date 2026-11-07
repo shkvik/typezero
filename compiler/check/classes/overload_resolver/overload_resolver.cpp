@@ -367,7 +367,13 @@ Expr *OverloadResolver::callGenericVariant(CallExpr *call, FuncSymbol *sym,
       callee = instance;
     }
   }
-  (method ? call->method : call->func) = callee;
+  if (call->superCall()) {
+    call->target = SuperCall{.method = callee};
+  } else if (method) {
+    call->target = MethodCall{.method = callee};
+  } else {
+    call->target = FunctionCall{.func = callee};
+  }
   if (auto *member = dyn_cast<MemberExpr>(call->callee); member && method) {
     member->type = checker_.returnInferrer().functionType(callee);
   }
@@ -473,8 +479,9 @@ Expr *OverloadResolver::checkOverloadCall(CallExpr *call, MemberExpr *member) {
     return call;
   }
   auto found = llvm::find(variants, sym->decl);
-  call->signature = int(found - variants.begin());
-  member->type = overload.signatures[size_t(call->signature)];
+  int signature = int(found - variants.begin());
+  call->target = OverloadCall{.signature = signature};
+  member->type = overload.signatures[size_t(signature)];
   call->type = sym->ret;
   checker_.flowChecker().calledFunction();
   std::vector<bool> given(checked ? call->args.size() : 0, true);
@@ -492,8 +499,9 @@ Expr *OverloadResolver::checkOverloadMember(MemberExpr *member, const Type *expe
   if (!sym) {
     return member;
   }
-  member->signature = int(llvm::find(variants, sym->decl) - variants.begin());
-  member->type = overload.signatures[size_t(member->signature)];
+  int signature = int(llvm::find(variants, sym->decl) - variants.begin());
+  member->form = OverloadMember{.signature = signature};
+  member->type = overload.signatures[size_t(signature)];
 
   return member;
 }

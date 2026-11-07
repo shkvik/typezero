@@ -48,7 +48,7 @@ ClassDecl *GenericClassInstantiator::instantiateClass(ClassDecl *generic,
                                    ", but got " + std::to_string(args.size()));
     return nullptr;
   }
-  bool emitter = generic->library && generic->name == "EventEmitter";
+  bool emitter = generic->library() && generic->name == "EventEmitter";
   for (size_t k = args.size(); k < params.size(); ++k) {
     if (emitter) {
       checker_.diags_.error(loc,
@@ -87,7 +87,7 @@ ClassDecl *GenericClassInstantiator::instantiateClass(ClassDecl *generic,
       for (const Type *t : params[k]->alternatives()) {
         constraint += (constraint.empty() ? "" : " | ") + t->name().str();
       }
-      if (decl.constraint && decl.constraint->kind == TypeRef::Kind::Name) {
+      if (decl.constraint && decl.constraint->kind() == TypeRefKind::NAME_REF) {
         constraint = decl.constraint->name.str();
       }
       checker_.diags_.error(loc, "type '" + args[k]->name() +
@@ -107,8 +107,9 @@ ClassDecl *GenericClassInstantiator::instantiateClass(ClassDecl *generic,
     }
     return found->second;
   }
-  if (llvm::count_if(checker_.filling_,
-                     [&](const ClassDecl *c) { return c->generic == generic; }) >= kMaxClassChain) {
+  if (llvm::count_if(checker_.filling_, [&](const ClassDecl *c) {
+        return c->generic() == generic;
+      }) >= kMaxClassChain) {
     if (endless_.insert(generic).second) {
       checker_.diags_.error(generic->loc(),
                             "generic class '" + name +
@@ -122,15 +123,15 @@ ClassDecl *GenericClassInstantiator::instantiateClass(ClassDecl *generic,
 
   bool muted = checker_.diags_.setMuted(true);
   Lexer lexer(generic->source, checker_.diags_);
-  Parser parser(lexer, checker_.ctx_, checker_.diags_, generic->library);
+  Parser parser(lexer, checker_.ctx_, checker_.diags_, generic->library());
   ClassDecl *inst = parser.parseClassCopy();
   checker_.diags_.setMuted(muted);
-  inst->generic = generic;
+  inst->generics = GenericInstance{.generic = generic};
   inst->typeArgs = args;
   inst->isAbstract = generic->isAbstract;
-  inst->library = generic->library;
+  inst->origin = generic->origin;
   inst->checkOnly = llvm::any_of(args, [](const Type *t) { return mentionsParam(t); });
-  inst->resolved = true;
+  inst->stage = ClassStage::RESOLVED;
   inst->declared = true;
   inst->id = ++checker_.classCount_;
   size_t shown = args.size();
@@ -145,7 +146,7 @@ ClassDecl *GenericClassInstantiator::instantiateClass(ClassDecl *generic,
   type->setTypeArgs(args);
   inst->type = type;
   checker_.classes_.push_back(inst);
-  generic->instances.push_back(inst);
+  generic->generics.as<GenericTemplate>()->instances.push_back(inst);
   checker_.classInstances_[key] = inst;
   if (Module *home = checker_.declModules_.lookup(generic)) {
     checker_.declModules_[inst] = home;
@@ -205,7 +206,7 @@ void GenericClassInstantiator::declareInstanceMember(ClassDecl *inst, FunctionDe
   auto sub = [&](const Type *t) { return checker_.genericClassChecker().instanceType(inst, t); };
   std::vector<const Type *> own = of->typeParams, mine = of->typeParams;
   for (const Type *&p : mine) {
-    if (p->iterated() && typeMentions(p->iterated(), inst->generic->typeArgs)) {
+    if (p->iterated() && typeMentions(p->iterated(), inst->generic()->typeArgs)) {
       Type *param = Type::param("Iterable<" + sub(p->iterated())->name().str() + ">");
       param->setIterated(sub(p->iterated()));
       p = param;
@@ -242,15 +243,17 @@ void GenericClassInstantiator::declareInstanceMember(ClassDecl *inst, FunctionDe
   sym->hasRest = of->hasRest;
   sym->ret = sub2(of->ret);
   sym->discardsResult = of->discardsResult;
-  sym->predicateParam = of->predicateParam;
-  sym->predicateType = sub2(of->predicateType);
+  if (of->predicate) {
+    const Type *type = sub2(of->predicate->type);
+    sym->predicate = TypePredicate{.param = of->predicate->param, .type = type};
+  }
   if (Module *home = checker_.declModules_.lookup(generic)) {
     checker_.declModules_[fn] = home;
   }
 }
 
 void GenericClassInstantiator::fillInstance(ClassDecl *inst) {
-  ClassDecl *generic = inst->generic;
+  ClassDecl *generic = inst->generic();
   auto sub = [&](const Type *t) { return checker_.genericClassChecker().instanceType(inst, t); };
   auto addInstanceBase = [&](const Type *base) {
     checker_.classBases().addBase(inst->type, base);
@@ -288,7 +291,7 @@ void GenericClassInstantiator::fillInstance(ClassDecl *inst) {
       fn->name = g.method()->name;
       fn->role = ClassMember{
           .cls = inst, .access = g.method()->access(), .isOverride = g.method()->isOverride()};
-      fn->isExpression = false;
+      fn->place = FunctionPlace::DECLARED;
       f.form = ArrowMethodField{.method = fn};
     }
   }
@@ -356,7 +359,7 @@ void GenericClassInstantiator::markOverridden(FunctionDecl *fn) {
   if (Overriding *overriding = generic->overriding()) {
     overriding->overridden = true;
   }
-  for (ClassDecl *inst : cls->instances) {
+  for (ClassDecl *inst : cls->instances()) {
     for (FunctionDecl *m : ClassLinks::ownMethods(inst)) {
       Overriding *overriding = m->overriding();
       if (m->generic == generic && overriding) {

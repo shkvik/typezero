@@ -70,17 +70,17 @@ private:
     } else if (c == '[') {
       ok = array(out, depth);
     } else if (c == '"') {
-      out.kind = JsonValue::Kind::String;
-      ok = string(out.string);
+      JsonString text;
+      ok = string(text.value);
+      out.form = std::move(text);
     } else if (c == '-' || llvm::isDigit(c)) {
       ok = number(out);
     } else if (text_.substr(at_).starts_with("true")) {
-      out.kind = JsonValue::Kind::Bool;
-      out.boolean = true;
+      out.form = JsonBool{.value = true};
       at_ += 4;
       ok = true;
     } else if (text_.substr(at_).starts_with("false")) {
-      out.kind = JsonValue::Kind::Bool;
+      out.form = JsonBool{.value = false};
       at_ += 5;
       ok = true;
     } else if (text_.substr(at_).starts_with("null")) {
@@ -95,7 +95,8 @@ private:
   }
 
   bool object(JsonValue &out, unsigned depth) {
-    out.kind = JsonValue::Kind::Object;
+    out.form = JsonObject{};
+    JsonObject *members = out.form.as<JsonObject>();
     ++at_;
     while (true) {
       if (!skip()) {
@@ -120,10 +121,10 @@ private:
       if (!skip()) {
         return false;
       }
-      out.keys.push_back(std::move(key));
-      out.keyOffsets.push_back(keyAt);
-      out.items.emplace_back();
-      if (!value(out.items.back(), depth + 1) || !skip()) {
+      members->keys.push_back(std::move(key));
+      members->keyOffsets.push_back(keyAt);
+      members->items.emplace_back();
+      if (!value(members->items.back(), depth + 1) || !skip()) {
         return false;
       }
       if (peek() == ',') {
@@ -139,7 +140,8 @@ private:
   }
 
   bool array(JsonValue &out, unsigned depth) {
-    out.kind = JsonValue::Kind::Array;
+    out.form = JsonArray{};
+    JsonArray *elements = out.form.as<JsonArray>();
     ++at_;
     while (true) {
       if (!skip()) {
@@ -149,8 +151,8 @@ private:
         ++at_;
         return true;
       }
-      out.items.emplace_back();
-      if (!value(out.items.back(), depth + 1) || !skip()) {
+      elements->items.emplace_back();
+      if (!value(elements->items.back(), depth + 1) || !skip()) {
         return false;
       }
       if (peek() == ',') {
@@ -166,7 +168,6 @@ private:
   }
 
   bool number(JsonValue &out) {
-    out.kind = JsonValue::Kind::Number;
     size_t start = at_;
     if (peek() == '-') {
       ++at_;
@@ -177,7 +178,8 @@ private:
     }
     std::string digits = text_.slice(start, at_).str();
     char *endp = nullptr;
-    out.number = std::strtod(digits.c_str(), &endp);
+    double parsed = std::strtod(digits.c_str(), &endp);
+    out.form = JsonNumber{.value = parsed};
     if (digits.empty() || endp != digits.c_str() + digits.size()) {
       at_ = start;
       return fail("malformed number");

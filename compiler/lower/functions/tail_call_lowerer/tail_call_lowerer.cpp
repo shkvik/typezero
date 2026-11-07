@@ -33,9 +33,10 @@ void TailCallLowerer::findTailGroups(llvm::ArrayRef<FunctionDecl *> functions) {
       continue;
     }
     for (CallExpr *call : tailCallsIn(fn)) {
-      auto target = llvm::find(functions, call->func->decl);
-      if (target == functions.end() || call->func->ret != fn->sym->ret ||
-          call->func->decl->isGenerator || call->func->decl->isAsync || call->func->decl->impl()) {
+      auto target = llvm::find(functions, call->func()->decl);
+      if (target == functions.end() || call->func()->ret != fn->sym->ret ||
+          call->func()->decl->isGenerator || call->func()->decl->isAsync ||
+          call->func()->decl->impl()) {
         continue;
       }
       size_t j = size_t(target - functions.begin());
@@ -84,8 +85,8 @@ void TailCallLowerer::findTailGroups(llvm::ArrayRef<FunctionDecl *> functions) {
     }
     for (FunctionDecl *member : group.members) {
       for (CallExpr *call : tailCallsIn(member)) {
-        if (llvm::is_contained(group.members, call->func->decl) &&
-            call->func->ret == member->sym->ret) {
+        if (llvm::is_contained(group.members, call->func()->decl) &&
+            call->func()->ret == member->sym->ret) {
           lowering_.tailJumps_.insert(call);
         }
       }
@@ -232,11 +233,11 @@ void TailCallLowerer::emitTailGroup(Lowering::TailGroup &group) {
 
 CallExpr *TailCallLowerer::tailCall(Expr *value) const {
   auto *call = dyn_cast<CallExpr>(value);
-  if (!call || !call->func || call->builtin != Builtin::None || !lowering_.tailGroup_) {
+  if (!call || !call->func() || call->builtin() != Builtin::None || !lowering_.tailGroup_) {
     return nullptr;
   }
-  if (!llvm::is_contained(lowering_.tailGroup_->members, call->func->decl) ||
-      call->func->ret != lowering_.returnType_) {
+  if (!llvm::is_contained(lowering_.tailGroup_->members, call->func()->decl) ||
+      call->func()->ret != lowering_.returnType_) {
     return nullptr;
   }
 
@@ -315,10 +316,10 @@ void TailCallLowerer::emitTailReturn(Expr *value) {
 }
 
 void TailCallLowerer::emitTailJump(CallExpr *call) {
-  size_t k = size_t(llvm::find(lowering_.tailGroup_->members, call->func->decl) -
+  size_t k = size_t(llvm::find(lowering_.tailGroup_->members, call->func()->decl) -
                     lowering_.tailGroup_->members.begin());
   std::vector<llvm::Value *> args = lowering_.exprLowerer().emitExprs(call->args);
-  const FuncSymbol *func = call->func;
+  const FuncSymbol *func = call->func();
   for (size_t i = args.size(); i < func->params.size(); ++i) {
     args.push_back(lowering_.optionalLowerer().undefinedValue(func->params[i]));
   }

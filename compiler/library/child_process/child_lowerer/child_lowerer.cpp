@@ -439,9 +439,9 @@ llvm::Value *ChildLowerer::emitChildBuiltin(CallExpr *call) {
   option(ChildGid, RqGid, HasGid);
   set(RqHas, has);
   set(RqStringType, lowering_.typeDescriptors().typeDescriptor(Type::string()));
-  set(RqMode, lowering_.builder_.getInt32(call->builtin == Builtin::ChildSpawnSync      ? 0
-                                          : call->builtin == Builtin::ChildExecFileSync ? 1
-                                                                                        : 2));
+  set(RqMode, lowering_.builder_.getInt32(call->builtin() == Builtin::ChildSpawnSync      ? 0
+                                          : call->builtin() == Builtin::ChildExecFileSync ? 1
+                                                                                          : 2));
   for (unsigned i = 0; i < 3; ++i) {
     lowering_.builder_.CreateStore(
         lowering_.builder_.getInt32(literal(ChildStdin + i)),
@@ -451,7 +451,7 @@ llvm::Value *ChildLowerer::emitChildBuiltin(CallExpr *call) {
   }
   set(RqEncoding, lowering_.builder_.getInt32(literal(ChildEncoding)));
 
-  bool spawn = call->builtin == Builtin::ChildSpawnSync;
+  bool spawn = call->builtin() == Builtin::ChildSpawnSync;
   const Type *value = call->type->okType();
   llvm::Value *resultMaker = llvm::ConstantPointerNull::get(lowering_.builder_.getPtrTy());
   if (spawn) {

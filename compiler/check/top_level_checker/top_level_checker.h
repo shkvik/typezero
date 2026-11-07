@@ -9,7 +9,7 @@ public:
   explicit TopLevelChecker(Checker &checker);
 
   void checkTopLevel(Module *module, llvm::StringRef until = {});
-  Checker::ScopeEntry lookupValue(llvm::StringRef name);
+  ScopeEntry lookupValue(llvm::StringRef name);
   Module *laterSource(llvm::StringRef name, llvm::StringRef &declared);
   bool loadEarly(Module *source, llvm::StringRef name);
   bool reportNotLoaded(const NameExpr *name);

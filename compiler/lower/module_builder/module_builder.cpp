@@ -102,14 +102,14 @@ std::unique_ptr<llvm::Module> ModuleBuilder::generate(SourceFile &file) {
   std::vector<ClassDecl *> classes;
   for (Stmt *item : file.items) {
     if (auto *fn = dyn_cast<FunctionDecl>(item);
-        fn && fn->typeParams.empty() && !fn->intrinsic && !file.unusedFunctions.contains(fn)) {
+        fn && fn->typeParams.empty() && !fn->intrinsic() && !file.unusedFunctions.contains(fn)) {
       functions.push_back(fn);
     }
     if (auto *cls = dyn_cast<ClassDecl>(item)) {
       if (cls->isEmitted()) {
         classes.push_back(cls);
       }
-      if (!cls->generic) {
+      if (!cls->generic()) {
         for (FunctionDecl *fn : cls->methods) {
           if (fn->isStatic() && fn->typeParams.empty()) {
             functions.push_back(fn);
@@ -197,6 +197,7 @@ llvm::Type *ModuleBuilder::lower(const Type *type) {
   case Type::Kind::ClassRef:
     return lowering_.builder_.getPtrTy();
   case Type::Kind::Error:
+  case Type::Kind::Param:
     break;
   }
   llvm_unreachable("an erroneous type reached code generation");

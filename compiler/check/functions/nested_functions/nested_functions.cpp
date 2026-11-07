@@ -31,8 +31,8 @@ void visitExprs(const Expr *expr, llvm::function_ref<void(const Expr *)> visit,
     break;
   case Expr::Kind::ObjectLit:
     for (const ObjectLitExpr::Property &p : cast<ObjectLitExpr>(expr)->props) {
-      if (p.key) {
-        sub(p.key);
+      if (p.key()) {
+        sub(p.key());
       }
       sub(p.value);
     }
@@ -69,7 +69,7 @@ void visitExprs(const Expr *expr, llvm::function_ref<void(const Expr *)> visit,
     if (create->callee) {
       sub(create->callee);
     }
-    for (const Expr *arg : create->ctor ? create->ctor->args : create->args) {
+    for (const Expr *arg : create->ctor() ? create->ctor()->args : create->args) {
       sub(arg);
     }
     break;
@@ -286,7 +286,7 @@ static void forEachReturnValue(Stmt *stmt, llvm::function_ref<void(Expr *)> visi
 
 void tailCallsOf(Expr *value, std::vector<CallExpr *> &calls) {
   if (auto *call = dyn_cast<CallExpr>(value)) {
-    if (call->func && call->builtin == Builtin::None) {
+    if (call->func() && call->builtin() == Builtin::None) {
       calls.push_back(call);
     }
   } else if (auto *cond = dyn_cast<ConditionalExpr>(value)) {
@@ -316,7 +316,7 @@ void tailStatementsOf(Stmt *stmt, bool tail, std::vector<Stmt *> &stmts) {
     }
   } else if (auto *expr = dyn_cast<ExprStmt>(stmt); expr && tail) {
     auto *call = dyn_cast<CallExpr>(expr->expr);
-    if (call && call->func && call->builtin == Builtin::None) {
+    if (call && call->func() && call->builtin() == Builtin::None) {
       stmts.push_back(stmt);
     }
   }
@@ -495,10 +495,10 @@ FunctionDecl *NestedFunctions::namedFunction(const Expr *expr) const {
   if (!name) {
     return nullptr;
   }
-  if (name->func) {
-    return name->func->decl;
+  if (name->func()) {
+    return name->func()->decl;
   }
-  if (VarSymbol *var = name->var) {
+  if (VarSymbol *var = name->var()) {
     return var->function() ? var->function() : var->isConst ? var->lambda() : nullptr;
   }
 

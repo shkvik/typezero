@@ -73,7 +73,7 @@ bool TimerChecker::rearms(const Expr *callback) const {
     callback = conv->operand;
   }
   if (auto *member = dyn_cast<MemberExpr>(callback)) {
-    return member->method == current->sym;
+    return member->method() == current->sym;
   }
   auto *fe = dyn_cast<FunctionExpr>(callback);
   if (!fe || !fe->fn->body || fe->fn->body->body.size() != 1) {
@@ -88,7 +88,7 @@ bool TimerChecker::rearms(const Expr *callback) const {
   }
   auto *call = dyn_cast_or_null<CallExpr>(value);
 
-  return call && call->method == current->sym;
+  return call && call->method() == current->sym;
 }
 
 Expr *TimerChecker::checkAsyncGlobal(CallExpr *call, NameExpr *name) {
@@ -118,7 +118,8 @@ Expr *TimerChecker::checkAsyncGlobal(CallExpr *call, NameExpr *name) {
     if (!checker_.argumentChecker().checkArity(call, name->loc(), 1, 2)) {
       return call;
     }
-    call->builtin = fn == "setTimeout" ? Builtin::SetTimeout : Builtin::SetInterval;
+    call->target =
+        BuiltinCall{.builtin = fn == "setTimeout" ? Builtin::SetTimeout : Builtin::SetInterval};
     call->args[0] = checkTaskCallback(call->args[0], fn);
     if (call->args.size() > 1) {
       call->args[1] = checker_.argumentChecker().checkAnyNumber(call->args[1]);
@@ -159,7 +160,8 @@ Expr *TimerChecker::checkAsyncGlobal(CallExpr *call, NameExpr *name) {
     if (!checker_.argumentChecker().checkArity(call, name->loc(), 1, 1)) {
       return call;
     }
-    call->builtin = fn == "setImmediate" ? Builtin::SetImmediate : Builtin::QueueMicrotask;
+    call->target = BuiltinCall{.builtin = fn == "setImmediate" ? Builtin::SetImmediate
+                                                               : Builtin::QueueMicrotask};
     call->args[0] = checkTaskCallback(call->args[0], fn);
     call->type = fn == "setImmediate" ? Type::immediate() : Type::voidTy();
     return call;
@@ -168,7 +170,8 @@ Expr *TimerChecker::checkAsyncGlobal(CallExpr *call, NameExpr *name) {
     return call;
   }
   bool immediate = fn == "clearImmediate";
-  call->builtin = immediate ? Builtin::ClearImmediate : Builtin::ClearTimeout;
+  call->target =
+      BuiltinCall{.builtin = immediate ? Builtin::ClearImmediate : Builtin::ClearTimeout};
   if (call->args.empty()) {
     auto *none = checker_.ctx_.make<UndefinedExpr>(call->loc());
     none->type = Type::undefinedTy();
@@ -213,7 +216,7 @@ Expr *TimerChecker::checkNextTick(CallExpr *call, MemberExpr *member) {
   if (!checker_.argumentChecker().checkArity(call, member->loc(), 1, 1)) {
     return call;
   }
-  call->builtin = Builtin::NextTick;
+  call->target = BuiltinCall{.builtin = Builtin::NextTick};
   call->args[0] = checkTaskCallback(call->args[0], "process.nextTick");
   call->type = Type::voidTy();
 
@@ -251,7 +254,7 @@ Expr *TimerChecker::checkTimerMethod(CallExpr *call, MemberExpr *member) {
       !checker_.argumentChecker().checkArity(call, member->loc(), 0, 0)) {
     return call;
   }
-  call->builtin = method->builtin;
+  call->target = BuiltinCall{.builtin = method->builtin};
   call->type = method->builtin == Builtin::TimerHasRef ? Type::boolTy() : type;
 
   return call;
@@ -337,11 +340,12 @@ Expr *TimerChecker::checkTimersPromisesCall(CallExpr *call, llvm::StringRef fn, 
   call->args = std::move(args);
   call->spread.clear();
   if (interval) {
-    call->builtin = Builtin::TimersSetInterval;
+    call->target = BuiltinCall{.builtin = Builtin::TimersSetInterval};
     call->type = Type::asyncIterator(value->isVoid() ? Type::undefinedTy() : value);
     return call;
   }
-  call->builtin = immediate ? Builtin::TimersSetImmediate : Builtin::TimersSetTimeout;
+  call->target =
+      BuiltinCall{.builtin = immediate ? Builtin::TimersSetImmediate : Builtin::TimersSetTimeout};
   call->type = Type::promise(value);
 
   return call;

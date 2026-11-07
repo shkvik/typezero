@@ -27,7 +27,7 @@ bool isBinding(const Stmt *decl) {
   auto *alias = llvm::dyn_cast_or_null<TypeAliasDecl>(decl);
 
   return alias && alias->resolved && alias->typeParams.empty() &&
-         alias->type.kind == TypeRef::Kind::Name && alias->type.name.empty();
+         alias->type.kind() == TypeRefKind::NAME_REF && alias->type.name.empty();
 }
 
 std::vector<const Type *> distributed(const Type *type) {
@@ -38,7 +38,7 @@ std::vector<const Type *> distributed(const Type *type) {
 }
 
 void collectNames(const TypeRef &ref, std::vector<llvm::StringRef> &names) {
-  if ((ref.kind == TypeRef::Kind::Name || ref.kind == TypeRef::Kind::Generic) &&
+  if ((ref.kind() == TypeRefKind::NAME_REF || ref.kind() == TypeRefKind::GENERIC_REF) &&
       !ref.name.empty() && !llvm::is_contained(names, ref.name)) {
     names.push_back(ref.name);
   }
@@ -49,10 +49,10 @@ void collectNames(const TypeRef &ref, std::vector<llvm::StringRef> &names) {
 
 void collectInfers(const TypeRef &ref, std::vector<const TypeRef *> &infers,
                    std::vector<bool> &lists, bool spread = false) {
-  if (ref.kind == TypeRef::Kind::Conditional) {
+  if (ref.kind() == TypeRefKind::CONDITIONAL_REF) {
     return;
   }
-  if (ref.kind == TypeRef::Kind::Infer) {
+  if (ref.kind() == TypeRefKind::INFER_REF) {
     auto found = llvm::find_if(infers, [&](const TypeRef *r) { return r->name == ref.name; });
     if (found == infers.end()) {
       infers.push_back(&ref);
@@ -63,8 +63,8 @@ void collectInfers(const TypeRef &ref, std::vector<const TypeRef *> &infers,
   }
   for (size_t i = 0; i < ref.args.size(); ++i) {
     bool spreadHere =
-        (ref.kind == TypeRef::Kind::Tuple && i < ref.spread.size() && ref.spread[i]) ||
-        (ref.kind == TypeRef::Kind::Function && ref.rest && i + 2 == ref.args.size());
+        (ref.kind() == TypeRefKind::TUPLE_REF && i < ref.spread().size() && ref.spread()[i]) ||
+        (ref.kind() == TypeRefKind::FUNCTION_REF && ref.rest() && i + 2 == ref.args.size());
     collectInfers(ref.args[i], infers, lists, spreadHere);
   }
 }
@@ -233,7 +233,7 @@ const Type *ConditionalTypes::resolveConditional(const TypeRef &ref) {
   if (mentionsParam(check) || mentionsParamBesides(pattern, infers)) {
     return deferConditional(ref);
   }
-  if (ref.args[0].kind == TypeRef::Kind::Name &&
+  if (ref.args[0].kind() == TypeRefKind::NAME_REF &&
       isBinding(checker_.typeDeclarer().lookupType(ref.args[0].name))) {
     std::vector<const Type *> members = distributed(check);
     if (members.size() != 1) {
@@ -263,10 +263,10 @@ const Type *ConditionalTypes::resolveConditional(const TypeRef &ref) {
   }
   const TypeRef &branch = ref.args[yes ? 2 : 3];
   const Type *result = nullptr;
-  if (tail && branch.kind == TypeRef::Kind::Conditional) {
+  if (tail && branch.kind() == TypeRefKind::CONDITIONAL_REF) {
     checker_.tailAllowed_ = true;
     result = checker_.typeResolver().resolveTypeInner(branch);
-  } else if (auto *alias = tail && branch.kind == TypeRef::Kind::Generic
+  } else if (auto *alias = tail && branch.kind() == TypeRefKind::GENERIC_REF
                                ? llvm::dyn_cast_or_null<TypeAliasDecl>(
                                      checker_.typeDeclarer().lookupType(branch.name))
                                : nullptr;
@@ -521,7 +521,7 @@ const Type *ConditionalTypes::resolveIntersection(const TypeRef &ref) {
 }
 
 const Type *ConditionalTypes::signatureForUtility(const TypeRef &ref) {
-  if (ref.kind != TypeRef::Kind::TypeOf || ref.names.empty()) {
+  if (ref.kind() != TypeRefKind::TYPE_OF_REF || ref.names().empty()) {
     return nullptr;
   }
   auto erased = [&](FuncSymbol *fn) {
@@ -541,30 +541,30 @@ const Type *ConditionalTypes::signatureForUtility(const TypeRef &ref) {
 
     return checker_.typeParams().substitute(type, fn->typeParams, args);
   };
-  if (ref.names.size() == 1) {
-    Checker::ScopeEntry entry = checker_.topLevelChecker().lookupValue(ref.names.front());
-    if (entry.func && entry.func->isGeneric()) {
-      return erased(entry.func);
+  if (ref.names().size() == 1) {
+    ScopeEntry entry = checker_.topLevelChecker().lookupValue(ref.names().front());
+    if (entry.func() && entry.func()->isGeneric()) {
+      return erased(entry.func());
     }
     return nullptr;
   }
-  if (ref.names.size() != 2) {
+  if (ref.names().size() != 2) {
     return nullptr;
   }
-  VarSymbol *var = checker_.topLevelChecker().lookupValue(ref.names.front()).var;
+  VarSymbol *var = checker_.topLevelChecker().lookupValue(ref.names().front()).var();
   if (!var || !var->type) {
     return nullptr;
   }
   const Type *object = var->type->nonOptional();
-  if (const Overload *overload = object->isObject() ? object->overload(ref.names[1]) : nullptr) {
+  if (const Overload *overload = object->isObject() ? object->overload(ref.names()[1]) : nullptr) {
     return overload->signatures.back();
   }
   ClassDecl *cls = ClassDeclarer::classOf(object);
-  if (!cls || object->field(ref.names[1])) {
+  if (!cls || object->field(ref.names()[1])) {
     return nullptr;
   }
   checker_.classDeclarer().completeClass(cls);
-  std::vector<FunctionDecl *> methods = ClassDeclarer::methodsNamed(cls, ref.names[1], false);
+  std::vector<FunctionDecl *> methods = ClassDeclarer::methodsNamed(cls, ref.names()[1], false);
   if (methods.empty() || !methods.back()->sym) {
     return nullptr;
   }

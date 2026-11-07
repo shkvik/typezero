@@ -45,7 +45,7 @@ std::optional<double> numberLiteral(const Expr *e) {
 
 const ObjectLitExpr::Property *property(const ObjectLitExpr *lit, llvm::StringRef name) {
   for (const ObjectLitExpr::Property &prop : lit->props) {
-    if (!prop.spread && !prop.key && prop.name == name) {
+    if (!prop.spread() && !prop.key() && prop.name == name) {
       return &prop;
     }
   }
@@ -67,7 +67,7 @@ Expr *SubtleCallChecker::checkSubtleCall(CallExpr *call, MemberExpr *member, con
   auto algorithm = [&](size_t i) -> const Expr * {
     Expr *e = arg(i);
     if (auto *name = dyn_cast_or_null<NameExpr>(e)) {
-      if (VarSymbol *var = checker_.scopes().lookup(name->name).var) {
+      if (VarSymbol *var = checker_.scopes().lookup(name->name).var()) {
         if (const Expr *lit = checker_.constLiterals_.lookup(var)) {
           return lit;
         }
@@ -202,7 +202,7 @@ Expr *SubtleCallChecker::checkSubtleCall(CallExpr *call, MemberExpr *member, con
   std::vector<bool> checkedArgs(args.size(), false);
   std::function<bool(const Expr *)> isJsonValue = [&](const Expr *e) -> bool {
     if (auto *name = dyn_cast_or_null<NameExpr>(e)) {
-      VarSymbol *var = checker_.scopes().lookup(name->name).var;
+      VarSymbol *var = checker_.scopes().lookup(name->name).var();
       return var && var->type && var->type->nonOptional()->isJson();
     }
     if (auto *m = dyn_cast_or_null<MemberExpr>(e)) {

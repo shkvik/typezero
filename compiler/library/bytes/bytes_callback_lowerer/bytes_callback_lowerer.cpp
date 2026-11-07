@@ -32,7 +32,7 @@ llvm::Value *BytesCallbackLowerer::emitBytesCallbackMethod(CallExpr *call) {
   const Type *element = arrayType->elementType();
   const Type *callbackType = call->args[0]->type;
   llvm::Type *i64 = lowering_.builder_.getInt64Ty(), *ptr = lowering_.builder_.getPtrTy();
-  Builtin method = call->builtin;
+  Builtin method = call->builtin();
   bool reduce = method == Builtin::ArrReduce || method == Builtin::ArrReduceRight;
   llvm::Value *array = lowering_.exprLowerer().emitExpr(member->object);
   llvm::Value *callback = lowering_.exprLowerer().emitExpr(call->args[0]);

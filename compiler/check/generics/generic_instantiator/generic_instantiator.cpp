@@ -61,7 +61,7 @@ const ClassDecl *literalClassIn(const Type *type, llvm::SmallPtrSetImpl<const Ty
       return nullptr;
     }
     if (const ClassDecl *cls = type->classDecl()) {
-      return cls->literal ? cls : nullptr;
+      return cls->literal() ? cls : nullptr;
     }
     for (const Field &f : type->fields()) {
       if (const ClassDecl *cls = literalClassIn(f.type, seen)) {
@@ -157,14 +157,14 @@ Expr *GenericInstantiator::checkGenericValue(NameExpr *name, FuncSymbol *generic
   for (const Type *p : generic->params) {
     params.push_back(checker_.typeParams().substituteValue(p, typeParams, bound));
   }
-  name->func = generic;
+  name->binding = NamedFunction{.func = generic};
   name->type =
       Type::function(params, generic->minArgs, generic->hasRest,
                      checker_.typeParams().substitute(ret, typeParams, bound), generic->hasThis);
   bool concrete = llvm::none_of(bound, [](const Type *t) { return mentionsParam(t); });
   if (concrete && !checker_.trial_ && !generic->inferring) {
     if (FuncSymbol *instance = instantiate(generic, bound, name->loc())) {
-      name->func = instance;
+      name->binding = NamedFunction{.func = instance};
     }
   }
 
@@ -178,7 +178,7 @@ bool GenericInstantiator::returnsOwnClass(const FuncSymbol *generic, const Type 
     return false;
   }
   if (ownClassReturns_.insert(generic).second) {
-    checker_.diags_.error(cls->literal->loc(),
+    checker_.diags_.error(cls->literal()->loc(),
                           "generic function '" + generic->name +
                               "' cannot return an object literal with methods yet: each copy of "
                               "it makes a class of its own; declare a class, or give the "
@@ -327,9 +327,9 @@ FunctionDecl *GenericInstantiator::instanceDecl(FuncSymbol *generic,
   sym->minArgs = generic->minArgs;
   sym->hasRest = generic->hasRest;
   sym->ret = generic->ret ? checker_.typeParams().substitute(generic->ret, params, args) : nullptr;
-  sym->predicateParam = generic->predicateParam;
-  if (generic->predicateType) {
-    sym->predicateType = checker_.typeParams().substitute(generic->predicateType, params, args);
+  if (generic->predicate) {
+    const Type *type = checker_.typeParams().substitute(generic->predicate->type, params, args);
+    sym->predicate = TypePredicate{.param = generic->predicate->param, .type = type};
   }
   for (size_t i = 0; i < copy->params.size() && i < original->params.size(); ++i) {
     copy->params[i].declaredType =

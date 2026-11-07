@@ -36,7 +36,7 @@ std::optional<double> numberLiteral(const Expr *e) {
 
 const ObjectLitExpr::Property *property(const ObjectLitExpr *lit, llvm::StringRef name) {
   for (const ObjectLitExpr::Property &prop : lit->props) {
-    if (!prop.spread && !prop.key && prop.name == name) {
+    if (!prop.spread() && !prop.key() && prop.name == name) {
       return &prop;
     }
   }

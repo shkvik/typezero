@@ -105,7 +105,7 @@ bool readOnlyStmt(const Stmt *s) {
   }
   if (auto *decl = dyn_cast<VarDeclStmt>(s)) {
     return decl->isConst && llvm::all_of(decl->decls, [](const VarDeclarator &d) {
-             return !d.destructured && readOnlyExpr(d.init);
+             return !d.destructured() && readOnlyExpr(d.init);
            });
   }
 
@@ -126,11 +126,11 @@ bool LibraryEffects::inLibrary(llvm::SMLoc loc) const {
 }
 
 const FunctionDecl *LibraryEffects::libraryTarget(const CallExpr *c) const {
-  if (c->func && analysis_.isLibrary(c->func->decl)) {
-    return c->func->decl;
+  if (c->func() && analysis_.isLibrary(c->func()->decl)) {
+    return c->func()->decl;
   }
-  if (c->method && analysis_.isLibrary(c->method->decl)) {
-    return c->method->decl;
+  if (c->method() && analysis_.isLibrary(c->method()->decl)) {
+    return c->method()->decl;
   }
 
   return nullptr;
@@ -138,13 +138,13 @@ const FunctionDecl *LibraryEffects::libraryTarget(const CallExpr *c) const {
 
 void LibraryEffects::libraryCall(const CallExpr *c, const FunctionDecl *decl, const Use &use) {
   auto *m = dyn_cast<MemberExpr>(c->callee);
-  bool superCtor = c->superCall && !m;
+  bool superCtor = c->superCall() && !m;
   std::optional<Ref> self;
   if (superCtor) {
     if (analysis_.fn->thisOwner) {
       self = Ref{RefKind::This, analysis_.fn->thisOwner};
     }
-  } else if (m && c->method) {
+  } else if (m && c->method()) {
     analysis_.exprWalk.expr(m->object);
     self = analysis_.aliasAnalysis.receiverRef(m->object);
   }
@@ -162,7 +162,7 @@ void LibraryEffects::libraryCall(const CallExpr *c, const FunctionDecl *decl, co
         analysis_.callWalk.addCallee(rec, k->init, self);
       }
     }
-  } else if (c->method && c->virtualCall) {
+  } else if (c->method() && c->virtualCall()) {
     for (const FunctionDecl *fn : analysis_.callWalk.methodTargets(decl, true)) {
       analysis_.callWalk.addCallee(rec, fn, self);
     }
@@ -179,8 +179,8 @@ void LibraryEffects::libraryCall(const CallExpr *c, const FunctionDecl *decl, co
 
 void LibraryEffects::libraryNew(const NewExpr *n) {
   llvm::SMLoc at = n->loc();
-  for (const Expr *arg : n->ctor ? n->ctor->args : n->args) {
-    libraryArg(n->ctor, libraryClassName(n->cls), "constructor", arg, at);
+  for (const Expr *arg : n->ctor() ? n->ctor()->args : n->args) {
+    libraryArg(n->ctor(), libraryClassName(n->cls()), "constructor", arg, at);
   }
 }
 
@@ -188,7 +188,7 @@ void LibraryEffects::libraryArg(const CallExpr *c, llvm::StringRef cls, llvm::St
                                 const Expr *arg, llvm::SMLoc at) {
   const Expr *f = strip(arg);
   if (auto *wrap = dyn_cast<CallExpr>(f);
-      wrap && wrap->builtin == Builtin::LibListener && !wrap->args.empty()) {
+      wrap && wrap->builtin() == Builtin::LibListener && !wrap->args.empty()) {
     f = strip(wrap->args[0]);
   }
   bool fn = f->type && f->type->nonOptional()->isFunction();
@@ -214,10 +214,10 @@ void LibraryEffects::libraryArg(const CallExpr *c, llvm::StringRef cls, llvm::St
   if (auto *lit = dyn_cast<ObjectLitExpr>(f)) {
     for (const ObjectLitExpr::Property &p : lit->props) {
       const Expr *v = strip(p.value);
-      if (p.spread && isPoolClass(cls)) {
+      if (p.spread() && isPoolClass(cls)) {
         analysis_.poolOpen = true;
       }
-      if (p.spread || !v || !v->type || !v->type->nonOptional()->isFunction()) {
+      if (p.spread() || !v || !v->type || !v->type->nonOptional()->isFunction()) {
         analysis_.exprWalk.expr(p.value);
         libraryReads(v, at);
         continue;
@@ -255,7 +255,7 @@ void LibraryEffects::libraryArg(const CallExpr *c, llvm::StringRef cls, llvm::St
 
 void LibraryEffects::libraryReads(const Expr *e, llvm::SMLoc at) {
   const Type *type = e && e->type ? e->type->nonOptional() : nullptr;
-  if (const ClassDecl *cls = type ? type->classDecl() : nullptr; cls && cls->library) {
+  if (const ClassDecl *cls = type ? type->classDecl() : nullptr; cls && cls->library()) {
     libraryState(libraryClassName(cls), "", analysis_.aliasAnalysis.refOf(e), false, at);
     return;
   }
@@ -295,10 +295,10 @@ void LibraryEffects::poolCreate(const Expr *f) {
   const FunctionDecl *decl = nullptr;
   if (auto *fe = dyn_cast<FunctionExpr>(f)) {
     decl = fe->fn;
-  } else if (auto *n = dyn_cast<NameExpr>(f); n && n->func) {
-    decl = n->func->decl;
-  } else if (n && n->var && (n->var->function() || n->var->lambda())) {
-    decl = n->var->function() ? n->var->function() : n->var->lambda();
+  } else if (auto *n = dyn_cast<NameExpr>(f); n && n->func()) {
+    decl = n->func()->decl;
+  } else if (n && n->var() && (n->var()->function() || n->var()->lambda())) {
+    decl = n->var()->function() ? n->var()->function() : n->var()->lambda();
   }
   if (!result || !result->isResult() || !result->okType() || !decl) {
     analysis_.poolOpen = true;
@@ -313,10 +313,10 @@ void LibraryEffects::listen(const Expr *f, Channel channel) {
   const FunctionDecl *decl = nullptr;
   if (auto *fe = dyn_cast<FunctionExpr>(f)) {
     decl = fe->fn;
-  } else if (auto *n = dyn_cast<NameExpr>(f); n && n->func) {
-    decl = n->func->decl;
-  } else if (n && n->var && (n->var->function() || n->var->lambda())) {
-    decl = n->var->function() ? n->var->function() : n->var->lambda();
+  } else if (auto *n = dyn_cast<NameExpr>(f); n && n->func()) {
+    decl = n->func()->decl;
+  } else if (n && n->var() && (n->var()->function() || n->var()->lambda())) {
+    decl = n->var()->function() ? n->var()->function() : n->var()->lambda();
   }
   if (decl && decl->body && !analysis_.isLibrary(decl)) {
     int fi = analysis_.codeWalk.discover(decl);

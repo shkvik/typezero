@@ -25,7 +25,7 @@ namespace tz {
 MemberLowerer::MemberLowerer(Lowering &lowering) : lowering_(lowering) {}
 
 llvm::Value *MemberLowerer::emitMember(MemberExpr *member) {
-  if (member->method) {
+  if (member->method()) {
     return lowering_.classLowerer().emitBoundMethod(member);
   }
   if (member->object->type->nonOptional()->isJson()) {

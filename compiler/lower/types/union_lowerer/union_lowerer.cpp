@@ -356,7 +356,7 @@ llvm::Value *UnionLowerer::emitIsOneOf(llvm::Value *id, llvm::ArrayRef<const Typ
     if (t->isClassRef() && !t->classRef()) {
       for (const ClassDecl *cls : lowering_.emittedClasses_) {
         const Type *ref = Type::classRef(cls, cls->name);
-        if (!cls->literal && ref->isSubtypeOf(t)) {
+        if (!cls->literal() && ref->isSubtypeOf(t)) {
           result = lowering_.builder_.CreateOr(
               result,
               lowering_.builder_.CreateICmpEQ(id, lowering_.builder_.getInt32(plainTypeId(ref))));

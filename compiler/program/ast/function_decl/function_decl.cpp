@@ -2,6 +2,38 @@
 
 namespace tz {
 
+bool FunctionDecl::isArrow() const {
+  return this->syntax.is<ArrowFunction>();
+}
+
+bool FunctionDecl::concise() const {
+  const ArrowFunction *arrow = this->syntax.as<ArrowFunction>();
+
+  return arrow && arrow->concise;
+}
+
+llvm::StringRef FunctionDecl::ownName() const {
+  const RegularFunction *regular = this->syntax.as<RegularFunction>();
+
+  return regular ? regular->ownName : llvm::StringRef();
+}
+
+bool FunctionDecl::isExpression() const {
+  return this->place == FunctionPlace::EXPRESSION;
+}
+
+bool FunctionDecl::lifted() const {
+  return this->place == FunctionPlace::LIFTED;
+}
+
+bool FunctionDecl::external() const {
+  return this->bodySource != FunctionBodySource::WRITTEN;
+}
+
+bool FunctionDecl::intrinsic() const {
+  return this->bodySource == FunctionBodySource::INTRINSIC;
+}
+
 ClassMember *FunctionDecl::member() {
   return this->role.as<ClassMember>();
 }
@@ -169,7 +201,7 @@ bool FunctionDecl::hasThisParam() const {
 
 const FunctionDecl *FunctionDecl::thisSource() const {
   const FunctionDecl *function = this;
-  while (function && function->isArrow && !function->takesThis()) {
+  while (function && function->isArrow() && !function->takesThis()) {
     function = function->parent;
   }
 

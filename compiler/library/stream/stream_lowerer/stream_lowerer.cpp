@@ -63,130 +63,132 @@ llvm::Value *StreamLowerer::emitChunkAs(llvm::Value *u, const Type *to, llvm::Ba
 
 llvm::Value *StreamLowerer::emitStreamBuiltin(CallExpr *call) {
   llvm::Type *ptr = lowering_.builder_.getPtrTy(), *i32 = lowering_.builder_.getInt32Ty();
-  switch (call->builtin) {
-  case Builtin::LibChunk: {
-    const Type *to = call->type;
-    Lowering::Operand u = lowering_.refCounts().emitOperand(call->args[0], true);
-    if (to->isUnknown()) {
-      lowering_.refCounts().retainValue(u.value, to);
-      llvm::Value *value = u.value;
+  switch (call->builtin()) {
+    case Builtin::LibChunk: {
+      const Type *to = call->type;
+      Lowering::Operand u = lowering_.refCounts().emitOperand(call->args[0], true);
+      if (to->isUnknown()) {
+        lowering_.refCounts().retainValue(u.value, to);
+        llvm::Value *value = u.value;
+        lowering_.refCounts().dropOperand(u);
+        return value;
+      }
+      llvm::BasicBlock *fail = lowering_.functionFrame().newBlock("chunk.bad");
+      llvm::Value *value = emitChunkAs(u.value, to, fail);
+      llvm::BasicBlock *here = lowering_.builder_.GetInsertBlock();
+      lowering_.functionFrame().switchTo(fail);
+      llvm::StringRef name = to->name();
+      lowering_.builder_.CreateCall(
+          lowering_.unknownLowerer().unknownFunction(
+              "tz_lib_bad_chunk", lowering_.builder_.getVoidTy(), {ptr, ptr, i32}),
+          {u.value, lowering_.stringLowerer().utf8Constant(name),
+           lowering_.builder_.getInt32(uint32_t(name.size()))});
+      lowering_.builder_.CreateUnreachable();
+      lowering_.builder_.SetInsertPoint(here);
       lowering_.refCounts().dropOperand(u);
       return value;
     }
-    llvm::BasicBlock *fail = lowering_.functionFrame().newBlock("chunk.bad");
-    llvm::Value *value = emitChunkAs(u.value, to, fail);
-    llvm::BasicBlock *here = lowering_.builder_.GetInsertBlock();
-    lowering_.functionFrame().switchTo(fail);
-    llvm::StringRef name = to->name();
-    lowering_.builder_.CreateCall(
-        lowering_.unknownLowerer().unknownFunction("tz_lib_bad_chunk",
-                                                   lowering_.builder_.getVoidTy(), {ptr, ptr, i32}),
-        {u.value, lowering_.stringLowerer().utf8Constant(name),
-         lowering_.builder_.getInt32(uint32_t(name.size()))});
-    lowering_.builder_.CreateUnreachable();
-    lowering_.builder_.SetInsertPoint(here);
-    lowering_.refCounts().dropOperand(u);
-    return value;
-  }
-  case Builtin::LibIsChunk: {
-    const Type *wanted = call->args[1]->type;
-    Lowering::Operand u = lowering_.refCounts().emitOperand(call->args[0], true);
-    if (wanted->isUnknown()) {
-      lowering_.refCounts().dropOperand(u);
-      return lowering_.builder_.getTrue();
-    }
-    llvm::BasicBlock *fail = lowering_.functionFrame().newBlock("chunk.not");
-    llvm::BasicBlock *end = lowering_.functionFrame().newBlock("chunk.end");
-    llvm::Value *value = emitChunkAs(u.value, wanted, fail);
-    lowering_.refCounts().releaseValue(value, wanted);
-    llvm::BasicBlock *fits = lowering_.builder_.GetInsertBlock();
-    lowering_.builder_.CreateBr(end);
-    lowering_.functionFrame().switchTo(fail);
-    lowering_.builder_.CreateBr(end);
-    lowering_.functionFrame().switchTo(end);
-    llvm::PHINode *phi =
-        lowering_.builder_.CreatePHI(lowering_.builder_.getInt1Ty(), 2, "is.chunk");
-    phi->addIncoming(lowering_.builder_.getTrue(), fits);
-    phi->addIncoming(lowering_.builder_.getFalse(), fail);
-    lowering_.refCounts().dropOperand(u);
-    return phi;
-  }
-  case Builtin::LibOverrides: {
-    const FunctionDecl *method = call->method ? call->method->decl : nullptr;
-    Lowering::Operand object = lowering_.refCounts().emitOperand(call->args[0], true);
-    llvm::Value *result = lowering_.builder_.getFalse();
-    if (method && method->slot() >= 0 && method->body) {
-      result = lowering_.builder_.CreateICmpNE(
-          lowering_.inheritLowerer().vtableEntry(object.value, method->slot(), false),
-          lowering_.classDescriptors().methodCode(method), "overrides");
-    }
-    lowering_.refCounts().dropOperand(object);
-    return result;
-  }
-  case Builtin::LibFsOpen:
-  case Builtin::LibFsRead:
-  case Builtin::LibFsWrite:
-  case Builtin::LibFsClose:
-  case Builtin::LibStdinChunk: {
-    llvm::Type *voidTy = lowering_.builder_.getVoidTy(), *i64 = lowering_.builder_.getInt64Ty();
-    llvm::Type *f64 = lowering_.builder_.getDoubleTy();
-    std::vector<llvm::Value *> values = lowering_.exprLowerer().emitExprs(call->args);
-    llvm::Value *promise = lowering_.promiseLowerer().newPromise(call->type->promised());
-    auto run = [&](llvm::StringRef name, std::vector<llvm::Type *> params,
-                   std::vector<llvm::Value *> args, bool maker) {
-      params.insert(params.begin(), ptr);
-      args.insert(args.begin(), promise);
-      if (maker) {
-        params.push_back(ptr);
-        args.push_back(lowering_.fsLowerer().errorMaker(call->type->promised()->errType()));
+    case Builtin::LibIsChunk: {
+      const Type *wanted = call->args[1]->type;
+      Lowering::Operand u = lowering_.refCounts().emitOperand(call->args[0], true);
+      if (wanted->isUnknown()) {
+        lowering_.refCounts().dropOperand(u);
+        return lowering_.builder_.getTrue();
       }
-      lowering_.builder_.CreateCall(
-          lowering_.processLowerer().processFunction(name, voidTy, params), args);
-    };
-    switch (call->builtin) {
+      llvm::BasicBlock *fail = lowering_.functionFrame().newBlock("chunk.not");
+      llvm::BasicBlock *end = lowering_.functionFrame().newBlock("chunk.end");
+      llvm::Value *value = emitChunkAs(u.value, wanted, fail);
+      lowering_.refCounts().releaseValue(value, wanted);
+      llvm::BasicBlock *fits = lowering_.builder_.GetInsertBlock();
+      lowering_.builder_.CreateBr(end);
+      lowering_.functionFrame().switchTo(fail);
+      lowering_.builder_.CreateBr(end);
+      lowering_.functionFrame().switchTo(end);
+      llvm::PHINode *phi =
+          lowering_.builder_.CreatePHI(lowering_.builder_.getInt1Ty(), 2, "is.chunk");
+      phi->addIncoming(lowering_.builder_.getTrue(), fits);
+      phi->addIncoming(lowering_.builder_.getFalse(), fail);
+      lowering_.refCounts().dropOperand(u);
+      return phi;
+    }
+    case Builtin::LibOverrides: {
+      const FunctionDecl *method = call->method() ? call->method()->decl : nullptr;
+      Lowering::Operand object = lowering_.refCounts().emitOperand(call->args[0], true);
+      llvm::Value *result = lowering_.builder_.getFalse();
+      if (method && method->slot() >= 0 && method->body) {
+        result = lowering_.builder_.CreateICmpNE(
+            lowering_.inheritLowerer().vtableEntry(object.value, method->slot(), false),
+            lowering_.classDescriptors().methodCode(method), "overrides");
+      }
+      lowering_.refCounts().dropOperand(object);
+      return result;
+    }
     case Builtin::LibFsOpen:
-      run("tz_fss_open", {ptr, i64, ptr, i64, i64},
-          {lowering_.stringLowerer().stringObj(values[0]),
-           lowering_.stringLowerer().stringMeta(values[0]),
-           lowering_.stringLowerer().stringObj(values[1]),
-           lowering_.stringLowerer().stringMeta(values[1]), values[2]},
-          true);
-      break;
     case Builtin::LibFsRead:
     case Builtin::LibFsWrite:
-      run(call->builtin == Builtin::LibFsRead ? "tz_fss_read" : "tz_fss_write",
-          {i64, ptr, i64, i64, f64}, {values[0], values[1], values[2], values[3], values[4]}, true);
-      break;
     case Builtin::LibFsClose:
-      run("tz_fss_close", {i64, i32}, {values[0], lowering_.builder_.CreateZExt(values[1], i32)},
-          true);
-      break;
+    case Builtin::LibStdinChunk: {
+      llvm::Type *voidTy = lowering_.builder_.getVoidTy(), *i64 = lowering_.builder_.getInt64Ty();
+      llvm::Type *f64 = lowering_.builder_.getDoubleTy();
+      std::vector<llvm::Value *> values = lowering_.exprLowerer().emitExprs(call->args);
+      llvm::Value *promise = lowering_.promiseLowerer().newPromise(call->type->promised());
+      auto run = [&](llvm::StringRef name, std::vector<llvm::Type *> params,
+                     std::vector<llvm::Value *> args, bool maker) {
+        params.insert(params.begin(), ptr);
+        args.insert(args.begin(), promise);
+        if (maker) {
+          params.push_back(ptr);
+          args.push_back(lowering_.fsLowerer().errorMaker(call->type->promised()->errType()));
+        }
+        lowering_.builder_.CreateCall(
+            lowering_.processLowerer().processFunction(name, voidTy, params), args);
+      };
+      switch (call->builtin()) {
+        case Builtin::LibFsOpen:
+          run("tz_fss_open", {ptr, i64, ptr, i64, i64},
+              {lowering_.stringLowerer().stringObj(values[0]),
+               lowering_.stringLowerer().stringMeta(values[0]),
+               lowering_.stringLowerer().stringObj(values[1]),
+               lowering_.stringLowerer().stringMeta(values[1]), values[2]},
+              true);
+          break;
+        case Builtin::LibFsRead:
+        case Builtin::LibFsWrite:
+          run(call->builtin() == Builtin::LibFsRead ? "tz_fss_read" : "tz_fss_write",
+              {i64, ptr, i64, i64, f64}, {values[0], values[1], values[2], values[3], values[4]},
+              true);
+          break;
+        case Builtin::LibFsClose:
+          run("tz_fss_close", {i64, i32},
+              {values[0], lowering_.builder_.CreateZExt(values[1], i32)}, true);
+          break;
+        default:
+          run("tz_stdin_chunk", {i64}, {values[0]}, false);
+          break;
+      }
+      for (size_t i = 0; i < values.size(); ++i) {
+        lowering_.refCounts().releaseValue(values[i], call->args[i]->type);
+      }
+      return promise;
+    }
+    case Builtin::LibStdWrite: {
+      std::vector<llvm::Value *> values = lowering_.exprLowerer().emitExprs(call->args);
+      llvm::Value *gone = lowering_.builder_.CreateCall(
+          lowering_.processLowerer().processFunction("tz_lib_std_write_checked",
+                                                     lowering_.builder_.getInt64Ty(),
+                                                     {lowering_.builder_.getInt64Ty(), ptr}),
+          {values[0], values[1]});
+      lowering_.refCounts().releaseValue(values[1], call->args[1]->type);
+      return gone;
+    }
+    case Builtin::LibStdinFailed: {
+      llvm::Value *failed =
+          lowering_.builder_.CreateCall(lowering_.processLowerer().processFunction(
+              "tz_stdin_failed", lowering_.builder_.getInt32Ty(), {}));
+      return lowering_.builder_.CreateICmpNE(failed, lowering_.builder_.getInt32(0));
+    }
     default:
-      run("tz_stdin_chunk", {i64}, {values[0]}, false);
-      break;
-    }
-    for (size_t i = 0; i < values.size(); ++i) {
-      lowering_.refCounts().releaseValue(values[i], call->args[i]->type);
-    }
-    return promise;
-  }
-  case Builtin::LibStdWrite: {
-    std::vector<llvm::Value *> values = lowering_.exprLowerer().emitExprs(call->args);
-    llvm::Value *gone = lowering_.builder_.CreateCall(
-        lowering_.processLowerer().processFunction("tz_lib_std_write_checked",
-                                                   lowering_.builder_.getInt64Ty(),
-                                                   {lowering_.builder_.getInt64Ty(), ptr}),
-        {values[0], values[1]});
-    lowering_.refCounts().releaseValue(values[1], call->args[1]->type);
-    return gone;
-  }
-  case Builtin::LibStdinFailed: {
-    llvm::Value *failed = lowering_.builder_.CreateCall(lowering_.processLowerer().processFunction(
-        "tz_stdin_failed", lowering_.builder_.getInt32Ty(), {}));
-    return lowering_.builder_.CreateICmpNE(failed, lowering_.builder_.getInt32(0));
-  }
-  default:
-    return nullptr;
+      return nullptr;
   }
 }
 

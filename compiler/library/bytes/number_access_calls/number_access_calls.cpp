@@ -36,153 +36,154 @@ constexpr double kFloatTop = 3.4028234663852886e38;
 }
 
 llvm::Value *NumberAccessCalls::emit() {
-  switch (call->builtin) {
-  case Builtin::DataViewGet:
-  case Builtin::DataViewSet:
-  case Builtin::BufferRead:
-  case Builtin::BufferWriteNumber: {
-    bool dataView = call->builtin == Builtin::DataViewGet || call->builtin == Builtin::DataViewSet;
-    bool write =
-        call->builtin == Builtin::DataViewSet || call->builtin == Builtin::BufferWriteNumber;
-    const Type *kindType = Type::bytesType(Bytes(constantOf(call->args[0])));
-    Bytes kind = kindType->bytes();
-    unsigned size = kindType->elementSize();
-    Lowering::Operand self = receiver(1);
-    llvm::Value *offset = nullptr, *value = nullptr, *little = nullptr;
-    if (dataView) {
-      offset = lowering_.exprLowerer().emitExpr(call->args[1]);
-      if (write) {
-        value = lowering_.exprLowerer().emitExpr(call->args[2]);
+  switch (call->builtin()) {
+    case Builtin::DataViewGet:
+    case Builtin::DataViewSet:
+    case Builtin::BufferRead:
+    case Builtin::BufferWriteNumber: {
+      bool dataView =
+          call->builtin() == Builtin::DataViewGet || call->builtin() == Builtin::DataViewSet;
+      bool write =
+          call->builtin() == Builtin::DataViewSet || call->builtin() == Builtin::BufferWriteNumber;
+      const Type *kindType = Type::bytesType(Bytes(constantOf(call->args[0])));
+      Bytes kind = kindType->bytes();
+      unsigned size = kindType->elementSize();
+      Lowering::Operand self = receiver(1);
+      llvm::Value *offset = nullptr, *value = nullptr, *little = nullptr;
+      if (dataView) {
+        offset = lowering_.exprLowerer().emitExpr(call->args[1]);
+        if (write) {
+          value = lowering_.exprLowerer().emitExpr(call->args[2]);
+        }
+        size_t at = write ? 3 : 2;
+        little = call->args.size() > at ? lowering_.exprLowerer().emitExpr(call->args[at])
+                                        : lowering_.builder_.getFalse();
+      } else {
+        little = lowering_.builder_.getInt1(!cast<BoolLitExpr>(call->args[1])->value);
+        size_t at = 2;
+        if (write) {
+          value = lowering_.exprLowerer().emitExpr(call->args[at++]);
+        }
+        offset = call->args.size() > at ? lowering_.exprLowerer().emitExpr(call->args[at])
+                                        : lowering_.builder_.getInt64(0);
       }
-      size_t at = write ? 3 : 2;
-      little = call->args.size() > at ? lowering_.exprLowerer().emitExpr(call->args[at])
-                                      : lowering_.builder_.getFalse();
-    } else {
-      little = lowering_.builder_.getInt1(!cast<BoolLitExpr>(call->args[1])->value);
-      size_t at = 2;
-      if (write) {
-        value = lowering_.exprLowerer().emitExpr(call->args[at++]);
+      if (call->mayBeOutOfRange) {
+        llvm::Value *length = lowering_.bytesLowerer().bytesLength(self.value);
+        llvm::Value *ok = lowering_.builder_.CreateAnd(
+            lowering_.builder_.CreateICmpULT(offset, length),
+            lowering_.builder_.CreateICmpULE(lowering_.builder_.getInt64(size),
+                                             lowering_.builder_.CreateSub(length, offset)));
+        llvm::BasicBlock *badBlock = lowering_.functionFrame().newBlock("bytes.out.of.range");
+        llvm::BasicBlock *okBlock = lowering_.functionFrame().newBlock("bytes.in.range");
+        lowering_.builder_.CreateCondBr(
+            ok, okBlock, badBlock, llvm::MDBuilder(lowering_.ctx_).createLikelyBranchWeights());
+        lowering_.functionFrame().switchTo(badBlock);
+        lowering_.builder_.CreateCall(fn("tz_bytes_out_of_range", voidTy, {i64, i64, i64}),
+                                      {offset, lowering_.builder_.getInt64(size), length});
+        lowering_.builder_.CreateUnreachable();
+        lowering_.functionFrame().switchTo(okBlock);
       }
-      offset = call->args.size() > at ? lowering_.exprLowerer().emitExpr(call->args[at])
-                                      : lowering_.builder_.getInt64(0);
-    }
-    if (call->mayBeOutOfRange) {
-      llvm::Value *length = lowering_.bytesLowerer().bytesLength(self.value);
-      llvm::Value *ok = lowering_.builder_.CreateAnd(
-          lowering_.builder_.CreateICmpULT(offset, length),
-          lowering_.builder_.CreateICmpULE(lowering_.builder_.getInt64(size),
-                                           lowering_.builder_.CreateSub(length, offset)));
-      llvm::BasicBlock *badBlock = lowering_.functionFrame().newBlock("bytes.out.of.range");
-      llvm::BasicBlock *okBlock = lowering_.functionFrame().newBlock("bytes.in.range");
-      lowering_.builder_.CreateCondBr(ok, okBlock, badBlock,
-                                      llvm::MDBuilder(lowering_.ctx_).createLikelyBranchWeights());
-      lowering_.functionFrame().switchTo(badBlock);
-      lowering_.builder_.CreateCall(fn("tz_bytes_out_of_range", voidTy, {i64, i64, i64}),
-                                    {offset, lowering_.builder_.getInt64(size), length});
-      lowering_.builder_.CreateUnreachable();
-      lowering_.functionFrame().switchTo(okBlock);
-    }
-    llvm::Value *address = lowering_.builder_.CreateInBoundsGEP(
-        lowering_.builder_.getInt8Ty(), lowering_.bytesLowerer().bytesData(self.value), offset);
-    llvm::Type *bits = lowering_.builder_.getIntNTy(size * 8);
-    auto swapped = [&](llvm::Value *raw) -> llvm::Value * {
-      if (size == 1) {
-        return raw;
-      }
-      llvm::Value *swap = lowering_.builder_.CreateUnaryIntrinsic(llvm::Intrinsic::bswap, raw);
-      if (auto *constant = dyn_cast<llvm::ConstantInt>(little)) {
-        return constant->isOne() ? raw : swap;
-      }
+      llvm::Value *address = lowering_.builder_.CreateInBoundsGEP(
+          lowering_.builder_.getInt8Ty(), lowering_.bytesLowerer().bytesData(self.value), offset);
+      llvm::Type *bits = lowering_.builder_.getIntNTy(size * 8);
+      auto swapped = [&](llvm::Value *raw) -> llvm::Value * {
+        if (size == 1) {
+          return raw;
+        }
+        llvm::Value *swap = lowering_.builder_.CreateUnaryIntrinsic(llvm::Intrinsic::bswap, raw);
+        if (auto *constant = dyn_cast<llvm::ConstantInt>(little)) {
+          return constant->isOne() ? raw : swap;
+        }
 
-      return lowering_.builder_.CreateSelect(little, raw, swap);
-    };
-    llvm::Value *result;
-    if (!write) {
-      llvm::LoadInst *raw = lowering_.builder_.CreateAlignedLoad(bits, address, llvm::Align(1));
-      raw->setMetadata(llvm::LLVMContext::MD_tbaa, lowering_.bytesLowerer().bytesTbaa(false));
-      llvm::Value *v = swapped(raw);
-      switch (kind) {
-      case Bytes::Float32:
-        result = lowering_.builder_.CreateFPExt(
-            lowering_.builder_.CreateBitCast(v, lowering_.builder_.getFloatTy()), f64);
-        break;
-      case Bytes::Float64:
-        result = lowering_.builder_.CreateBitCast(v, f64);
-        break;
-      case Bytes::Float16:
-        result = lowering_.builder_.CreateCall(fn("tz_f16_to_f64", f64, {i32}),
-                                               {lowering_.builder_.CreateZExt(v, i32)});
-        break;
-      default:
-        result = isSignedKind(kind) ? lowering_.builder_.CreateSExt(v, i64)
-                                    : lowering_.builder_.CreateZExt(v, i64);
-        break;
+        return lowering_.builder_.CreateSelect(little, raw, swap);
+      };
+      llvm::Value *result;
+      if (!write) {
+        llvm::LoadInst *raw = lowering_.builder_.CreateAlignedLoad(bits, address, llvm::Align(1));
+        raw->setMetadata(llvm::LLVMContext::MD_tbaa, lowering_.bytesLowerer().bytesTbaa(false));
+        llvm::Value *v = swapped(raw);
+        switch (kind) {
+          case Bytes::Float32:
+            result = lowering_.builder_.CreateFPExt(
+                lowering_.builder_.CreateBitCast(v, lowering_.builder_.getFloatTy()), f64);
+            break;
+          case Bytes::Float64:
+            result = lowering_.builder_.CreateBitCast(v, f64);
+            break;
+          case Bytes::Float16:
+            result = lowering_.builder_.CreateCall(fn("tz_f16_to_f64", f64, {i32}),
+                                                   {lowering_.builder_.CreateZExt(v, i32)});
+            break;
+          default:
+            result = isSignedKind(kind) ? lowering_.builder_.CreateSExt(v, i64)
+                                        : lowering_.builder_.CreateZExt(v, i64);
+            break;
+        }
+      } else {
+        llvm::Value *v;
+        switch (kind) {
+          case Bytes::Float32: {
+            llvm::Value *top = llvm::ConstantFP::get(f64, kFloatTop);
+            llvm::Value *within = lowering_.builder_.CreateBinaryIntrinsic(
+                llvm::Intrinsic::minnum,
+                lowering_.builder_.CreateBinaryIntrinsic(llvm::Intrinsic::maxnum, value,
+                                                         llvm::ConstantFP::get(f64, -kFloatTop)),
+                top);
+            v = lowering_.builder_.CreateBitCast(
+                lowering_.builder_.CreateFPTrunc(within, lowering_.builder_.getFloatTy()), bits);
+            break;
+          }
+          case Bytes::Float64:
+            v = lowering_.builder_.CreateBitCast(value, bits);
+            break;
+          case Bytes::Float16:
+            v = lowering_.builder_.CreateTrunc(
+                lowering_.builder_.CreateCall(fn("tz_f16_from_f64", i32, {f64}), {value}), bits);
+            break;
+          default:
+            v = value->getType() == bits ? value : lowering_.builder_.CreateTrunc(value, bits);
+            break;
+        }
+        llvm::StoreInst *store =
+            lowering_.builder_.CreateAlignedStore(swapped(v), address, llvm::Align(1));
+        store->setMetadata(llvm::LLVMContext::MD_tbaa, lowering_.bytesLowerer().bytesTbaa(false));
+        result = dataView ? nullptr
+                          : lowering_.builder_.CreateAdd(offset, lowering_.builder_.getInt64(size));
       }
-    } else {
-      llvm::Value *v;
-      switch (kind) {
-      case Bytes::Float32: {
-        llvm::Value *top = llvm::ConstantFP::get(f64, kFloatTop);
-        llvm::Value *within = lowering_.builder_.CreateBinaryIntrinsic(
-            llvm::Intrinsic::minnum,
-            lowering_.builder_.CreateBinaryIntrinsic(llvm::Intrinsic::maxnum, value,
-                                                     llvm::ConstantFP::get(f64, -kFloatTop)),
-            top);
-        v = lowering_.builder_.CreateBitCast(
-            lowering_.builder_.CreateFPTrunc(within, lowering_.builder_.getFloatTy()), bits);
-        break;
+      lowering_.refCounts().dropOperand(self);
+      if (!write && call->type->isResult()) {
+        llvm::Value *checked = lowering_.builder_.CreateCall(
+            fn("tz_finite_r", f64, {f64, lowering_.builder_.getPtrTy()}),
+            {result, lowering_.resultLowerer().failureMaker(call->type->errType())});
+        return lowering_.resultLowerer().catchFailure(checked, call->type, call->loc());
       }
-      case Bytes::Float64:
-        v = lowering_.builder_.CreateBitCast(value, bits);
-        break;
-      case Bytes::Float16:
-        v = lowering_.builder_.CreateTrunc(
-            lowering_.builder_.CreateCall(fn("tz_f16_from_f64", i32, {f64}), {value}), bits);
-        break;
-      default:
-        v = value->getType() == bits ? value : lowering_.builder_.CreateTrunc(value, bits);
-        break;
+      return result;
+    }
+    case Builtin::BufferReadVar:
+    case Builtin::BufferWriteVar: {
+      bool write = call->builtin() == Builtin::BufferWriteVar;
+      Lowering::Operand self = receiver(2);
+      std::vector<llvm::Value *> values;
+      for (size_t i = 2; i < call->args.size(); ++i) {
+        values.push_back(lowering_.exprLowerer().emitExpr(call->args[i]));
       }
-      llvm::StoreInst *store =
-          lowering_.builder_.CreateAlignedStore(swapped(v), address, llvm::Align(1));
-      store->setMetadata(llvm::LLVMContext::MD_tbaa, lowering_.bytesLowerer().bytesTbaa(false));
-      result = dataView ? nullptr
-                        : lowering_.builder_.CreateAdd(offset, lowering_.builder_.getInt64(size));
+      uint32_t flags = uint32_t(cast<BoolLitExpr>(call->args[0])->value) |
+                       uint32_t(cast<BoolLitExpr>(call->args[1])->value) << 1;
+      llvm::Value *result;
+      if (write) {
+        result = lowering_.builder_.CreateCall(
+            fn("tz_buffer_write_var", i64, {ptr, i64, i64, i64, i32}),
+            {self.value, values[0], values[1], values[2], lowering_.builder_.getInt32(flags)});
+      } else {
+        result = lowering_.builder_.CreateCall(
+            fn("tz_buffer_read_var", i64, {ptr, i64, i64, i32}),
+            {self.value, values[0], values[1], lowering_.builder_.getInt32(flags)});
+      }
+      lowering_.refCounts().dropOperand(self);
+      return result;
     }
-    lowering_.refCounts().dropOperand(self);
-    if (!write && call->type->isResult()) {
-      llvm::Value *checked = lowering_.builder_.CreateCall(
-          fn("tz_finite_r", f64, {f64, lowering_.builder_.getPtrTy()}),
-          {result, lowering_.resultLowerer().failureMaker(call->type->errType())});
-      return lowering_.resultLowerer().catchFailure(checked, call->type, call->loc());
-    }
-    return result;
-  }
-  case Builtin::BufferReadVar:
-  case Builtin::BufferWriteVar: {
-    bool write = call->builtin == Builtin::BufferWriteVar;
-    Lowering::Operand self = receiver(2);
-    std::vector<llvm::Value *> values;
-    for (size_t i = 2; i < call->args.size(); ++i) {
-      values.push_back(lowering_.exprLowerer().emitExpr(call->args[i]));
-    }
-    uint32_t flags = uint32_t(cast<BoolLitExpr>(call->args[0])->value) |
-                     uint32_t(cast<BoolLitExpr>(call->args[1])->value) << 1;
-    llvm::Value *result;
-    if (write) {
-      result = lowering_.builder_.CreateCall(
-          fn("tz_buffer_write_var", i64, {ptr, i64, i64, i64, i32}),
-          {self.value, values[0], values[1], values[2], lowering_.builder_.getInt32(flags)});
-    } else {
-      result = lowering_.builder_.CreateCall(
-          fn("tz_buffer_read_var", i64, {ptr, i64, i64, i32}),
-          {self.value, values[0], values[1], lowering_.builder_.getInt32(flags)});
-    }
-    lowering_.refCounts().dropOperand(self);
-    return result;
-  }
-  default:
-    llvm_unreachable("not a call of NumberAccessCalls");
+    default:
+      llvm_unreachable("not a call of NumberAccessCalls");
   }
 }
 

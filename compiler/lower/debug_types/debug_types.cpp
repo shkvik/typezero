@@ -233,7 +233,7 @@ llvm::DIType *DebugTypes::optional(const Type *type) {
 
 llvm::DIType *DebugTypes::object(const Type *type) {
   const ClassDecl *cls = type->classDecl();
-  std::string name = unique(cls && !cls->literal ? cls->name : llvm::StringRef("object"), type);
+  std::string name = unique(cls && !cls->literal() ? cls->name : llvm::StringRef("object"), type);
   auto *temporary = builder_.createReplaceableCompositeType(llvm::dwarf::DW_TAG_structure_type,
                                                             name, unit_, nullptr, 0);
   pending_.push_back({type, temporary});

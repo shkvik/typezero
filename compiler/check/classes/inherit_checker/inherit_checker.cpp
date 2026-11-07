@@ -63,7 +63,7 @@ void interfacesOf(const ClassDecl *cls, std::vector<const Type *> &out) {
 InheritChecker::InheritChecker(Checker &checker) : checker_(checker) {}
 
 void InheritChecker::checkAbstract(ClassDecl *cls) {
-  if (cls->literal) {
+  if (cls->literal()) {
     return;
   }
   for (FunctionDecl *fn : ClassLinks::ownMethods(cls)) {
@@ -207,7 +207,7 @@ void InheritChecker::checkImplements(ClassDecl *cls) {
 Expr *InheritChecker::checkSuperCall(CallExpr *call) {
   call->type = Type::voidTy();
   call->callee->type = Type::voidTy();
-  call->superCall = true;
+  call->target = SuperCall{};
   auto checkArgsLoosely = [&] {
     for (Expr *&arg : call->args) {
       arg = checker_.exprChecker().checkExpr(arg);
@@ -261,7 +261,7 @@ Expr *InheritChecker::checkSuperCall(CallExpr *call) {
       checker_.classMemberChecker().checkAccess(chosen->cls(), chosen->access(), "constructor",
                                                 call->loc());
       checker_.returnInferrer().resolveParams(sym);
-      call->method = sym;
+      call->target = SuperCall{.method = sym};
       std::vector<bool> given(checked ? call->args.size() : 0, true);
       checker_.argumentChecker().checkArguments(call, sym->params, sym->minArgs, sym->hasRest,
                                                 call->loc(), &given);
@@ -289,10 +289,10 @@ Expr *InheritChecker::checkSuperMethodCall(CallExpr *call, MemberExpr *member) {
   };
   FunctionDecl *method = nullptr;
   for (FunctionDecl *fn : llvm::reverse(checker_.functions_)) {
-    if (fn->isArrow) {
+    if (fn->isArrow()) {
       continue;
     }
-    if (fn->takesThis() && !fn->cls()->literal) {
+    if (fn->takesThis() && !fn->cls()->literal()) {
       method = fn;
     }
     break;
@@ -362,21 +362,20 @@ Expr *InheritChecker::checkSuperMethodCall(CallExpr *call, MemberExpr *member) {
     return call;
   }
   checker_.returnInferrer().resolveParams(sym);
-  call->superCall = true;
+  call->target = SuperCall{};
   if (sym->isGeneric() && checked) {
     return checker_.overloadResolver().callGenericVariant(call, sym, bound, member->loc(), true);
   }
   if (sym->isGeneric()) {
     checker_.typeArgInferrer().checkGenericCall(call, sym, member->loc(), nullptr,
                                                 member->typeArgs);
-    call->method = call->func;
-    call->func = nullptr;
-    if (call->method) {
-      member->type = checker_.returnInferrer().functionType(call->method);
+    call->target = SuperCall{.method = call->func()};
+    if (call->method()) {
+      member->type = checker_.returnInferrer().functionType(call->method());
     }
     return call;
   }
-  call->method = sym;
+  call->target = SuperCall{.method = sym};
   member->type = checker_.returnInferrer().functionType(sym);
   call->type = checker_.returnInferrer().returnType(sym);
   std::vector<bool> given(checked ? call->args.size() : 0, true);

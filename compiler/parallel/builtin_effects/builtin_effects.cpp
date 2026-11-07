@@ -35,7 +35,7 @@ BuiltinEffects::BuiltinEffects(Analysis &analysis) : analysis_(analysis) {}
 
 void BuiltinEffects::builtinEffects(const CallExpr *c, const Expr *recv) {
   llvm::SMLoc at = c->loc();
-  Builtin b = c->builtin;
+  Builtin b = c->builtin();
   auto arg = [&](size_t i) -> const Expr * { return i < c->args.size() ? c->args[i] : nullptr; };
   auto readArgs = [&] {
     for (const Expr *a : c->args) {
@@ -405,8 +405,8 @@ void BuiltinEffects::builtinEffects(const CallExpr *c, const Expr *recv) {
         self ? std::optional<Ref>(analysis_.aliasAnalysis.receiverRef(self)) : std::nullopt;
     rec.byObject = self ? self->type : nullptr;
     rec.noSelf = self && self->type && self->type->isUndefined();
-    if (auto *name = dyn_cast_or_null<NameExpr>(fn); name && name->var) {
-      rec.reflectNames = name->var->reflectNames();
+    if (auto *name = dyn_cast_or_null<NameExpr>(fn); name && name->var()) {
+      rec.reflectNames = name->var()->reflectNames();
     }
     return;
   }

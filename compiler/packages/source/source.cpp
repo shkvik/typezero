@@ -34,37 +34,86 @@ std::string repositoryName(llvm::StringRef url) {
   return name.str();
 }
 
+namespace {
+
+const std::string kNoText;
+
+}
+
+const std::string &Source::scope() const {
+  const JsrSource *jsr = this->form.as<JsrSource>();
+
+  return jsr ? jsr->scope : kNoText;
+}
+
+const std::string &Source::name() const {
+  const JsrSource *jsr = this->form.as<JsrSource>();
+
+  return jsr ? jsr->name : kNoText;
+}
+
+const std::string &Source::range() const {
+  const JsrSource *jsr = this->form.as<JsrSource>();
+
+  return jsr ? jsr->range : kNoText;
+}
+
+const std::string &Source::url() const {
+  const GitSource *git = this->form.as<GitSource>();
+
+  return git ? git->url : kNoText;
+}
+
+const std::string &Source::ref() const {
+  const GitSource *git = this->form.as<GitSource>();
+
+  return git ? git->ref : kNoText;
+}
+
+const std::string &Source::dir() const {
+  const LocalSource *local = this->form.as<LocalSource>();
+
+  return local ? local->dir : kNoText;
+}
+
 std::string Source::id() const {
-  switch (kind) {
-  case Kind::Jsr:
-    return "jsr:@" + scope + "/" + name;
-  case Kind::Git:
-    return "git:" + url;
-  case Kind::Local:
-    return "file:" + path::convert_to_slash(dir);
+  std::string text;
+  switch (this->form.kind()) {
+    case SourceKind::JSR_SOURCE:
+      text = "jsr:@" + this->scope() + "/" + this->name();
+      break;
+    case SourceKind::GIT_SOURCE:
+      text = "git:" + this->url();
+      break;
+    case SourceKind::LOCAL_SOURCE:
+      text = "file:" + path::convert_to_slash(this->dir());
+      break;
   }
 
-  return "";
+  return text;
 }
 
 std::string Source::shortName() const {
-  switch (kind) {
-  case Kind::Jsr:
-    return "@" + scope + "/" + name;
-  case Kind::Git:
-    return repositoryName(url);
-  case Kind::Local:
-    return path::filename(dir).str();
+  std::string text;
+  switch (this->form.kind()) {
+    case SourceKind::JSR_SOURCE:
+      text = "@" + this->scope() + "/" + this->name();
+      break;
+    case SourceKind::GIT_SOURCE:
+      text = repositoryName(this->url());
+      break;
+    case SourceKind::LOCAL_SOURCE:
+      text = path::filename(this->dir()).str();
+      break;
   }
 
-  return "";
+  return text;
 }
 
 bool parseSource(llvm::StringRef spec, llvm::StringRef baseDir, Source &out, std::string &error) {
   out = Source();
   llvm::StringRef rest = spec;
   if (rest.consume_front("jsr:")) {
-    out.kind = Source::Kind::Jsr;
     rest.consume_front("/");
     llvm::StringRef scope, name;
     if (rest.consume_front("@")) {
@@ -79,27 +128,26 @@ bool parseSource(llvm::StringRef spec, llvm::StringRef baseDir, Source &out, std
               "range of versions, e.g. 'jsr:@std/path@^1'";
       return false;
     }
-    out.scope = scope.str();
-    out.name = name.str();
-    out.range = rest.str();
+    JsrSource jsr{.scope = scope.str(), .name = name.str(), .range = rest.str()};
     Range range;
-    if (!Range::parse(out.range, range, error)) {
+    if (!Range::parse(jsr.range, range, error)) {
       error = "in '" + spec.str() + "': " + error;
       return false;
     }
+    out.form = std::move(jsr);
     return true;
   }
   if (rest.consume_front("github:") || rest.consume_front("git:")) {
-    out.kind = Source::Kind::Git;
+    GitSource git;
     bool github = spec.starts_with("github:");
     size_t slash = rest.find_last_of('/');
     size_t at = rest.find_last_of('@');
     llvm::StringRef where = rest;
     if (at != llvm::StringRef::npos && (slash == llvm::StringRef::npos || at > slash)) {
       where = rest.substr(0, at);
-      out.ref = rest.drop_front(at + 1).str();
+      git.ref = rest.drop_front(at + 1).str();
     }
-    if (where.starts_with("-") || llvm::StringRef(out.ref).starts_with("-")) {
+    if (where.starts_with("-") || llvm::StringRef(git.ref).starts_with("-")) {
       error = "'" + spec.str() + "': an address or a tag of git does not start with '-'";
       return false;
     }
@@ -112,26 +160,26 @@ bool parseSource(llvm::StringRef spec, llvm::StringRef baseDir, Source &out, std
         return false;
       }
       repo.consume_back(".git");
-      out.url = "https://github.com/" + user.str() + "/" + repo.str() + ".git";
+      git.url = "https://github.com/" + user.str() + "/" + repo.str() + ".git";
     } else if (where.starts_with("./") || where.starts_with("../")) {
       llvm::SmallString<256> full(baseDir);
       path::append(full, where);
       path::remove_dots(full, true);
-      out.url = path::convert_to_slash(full);
+      git.url = path::convert_to_slash(full);
     } else {
-      out.url = where.str();
+      git.url = where.str();
     }
-    if (out.url.empty()) {
+    if (git.url.empty()) {
       error = "'" + spec.str() +
               "' names no repository: write 'git:' and what 'git clone' takes, "
               "e.g. 'git:https://example.com/lib.git@v1.0.0'";
       return false;
     }
+    out.form = std::move(git);
     return true;
   }
   bool local = rest.consume_front("file:");
   if (local || rest.starts_with("./") || rest.starts_with("../") || rest == "." || rest == "..") {
-    out.kind = Source::Kind::Local;
     llvm::SmallString<256> full(rest);
     if (!path::is_absolute(full)) {
       full = baseDir;
@@ -142,7 +190,7 @@ bool parseSource(llvm::StringRef spec, llvm::StringRef baseDir, Source &out, std
               (baseDir.empty() ? std::string() : " in " + baseDir.str());
       return false;
     }
-    out.dir = canonical(full);
+    out.form = LocalSource{.dir = canonical(full)};
     return true;
   }
   if (rest.starts_with("npm:")) {

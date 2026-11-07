@@ -5,6 +5,12 @@
 
 namespace tz {
 
+enum class EnumStage {
+  UNRESOLVED,
+  RESOLVING,
+  RESOLVED,
+};
+
 struct EnumDecl : Stmt {
   EnumDecl(llvm::SMLoc loc, llvm::StringRef name) : Stmt(Kind::Enum, loc), name(name) {}
   static bool classof(const Stmt *s) { return s->kind() == Kind::Enum; }
@@ -22,8 +28,7 @@ struct EnumDecl : Stmt {
   llvm::StringRef name;
   std::vector<EnumMember> members;
   bool isString = false;
-  bool resolved = false;
-  bool resolving = false;
+  EnumStage stage = EnumStage::UNRESOLVED;
 };
 
 }

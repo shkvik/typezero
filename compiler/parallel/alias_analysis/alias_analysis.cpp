@@ -64,20 +64,22 @@ bool AliasAnalysis::isAllocation(const Expr *e) const {
     return true;
   }
   if (auto *n = dyn_cast<NewExpr>(e)) {
-    return n->cls || (n->type && n->type->isArray());
+    return n->cls() || (n->type && n->type->isArray());
   }
   if (auto *c = dyn_cast<CallExpr>(e)) {
-    if (makesNewObject(c->builtin)) {
+    if (makesNewObject(c->builtin())) {
       return true;
     }
-    if (c->builtin == Builtin::Crypto && !c->args.empty()) {
+    if (c->builtin() == Builtin::Crypto && !c->args.empty()) {
       if (auto *number = dyn_cast<IntLitExpr>(strip(c->args[0]));
           number && number->value < std::size(kCryptoFunctions)) {
         char result = kCryptoFunctions[size_t(number->value)].result;
         return result == 'o' || result == 'p';
       }
     }
-    const FunctionDecl *fn = c->func ? c->func->decl : c->method ? c->method->decl : nullptr;
+    const FunctionDecl *fn = c->func()     ? c->func()->decl
+                             : c->method() ? c->method()->decl
+                                           : nullptr;
     return fn && fn->isGenerator;
   }
 
@@ -89,8 +91,8 @@ Ref AliasAnalysis::refOf(const Expr *e) {
   if (!e || !e->type) {
     return Ref{RefKind::Type, nullptr};
   }
-  if (auto *n = dyn_cast<NameExpr>(e); n && n->var) {
-    const VarSymbol *v = n->var;
+  if (auto *n = dyn_cast<NameExpr>(e); n && n->var()) {
+    const VarSymbol *v = n->var();
     if (v->owner() && v->owner()->thisVar() == v) {
       if (analysis_.fn && analysis_.fn->decl != v->owner()) {
         if (std::optional<Ref> owned = analysis_.ownership.ownedRef(e)) {
@@ -138,7 +140,7 @@ bool AliasAnalysis::isLocal(const VarSymbol *v) {
     return false;
   }
   if (auto *n = dyn_cast<NewExpr>(it->second);
-      n && n->cls && analysis_.escapeScan.constructorLeaks(n->cls)) {
+      n && n->cls() && analysis_.escapeScan.constructorLeaks(n->cls())) {
     return false;
   }
 

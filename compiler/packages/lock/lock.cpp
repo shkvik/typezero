@@ -39,7 +39,7 @@ bool readLock(llvm::StringRef file, Lock &out) {
     return false;
   }
   const JsonValue *version = root.get("lockVersion");
-  if (!version || version->kind != JsonValue::Kind::Number || version->number != kLockVersion) {
+  if (!version || !version->form.is<JsonNumber>() || version->number() != kLockVersion) {
     reportAt(file, text, version ? version->begin : root.begin,
              "package-lock.json is not in the format of this tz (\"lockVersion\": 1)");
     return false;
@@ -48,18 +48,18 @@ bool readLock(llvm::StringRef file, Lock &out) {
   if (!packages) {
     return true;
   }
-  for (size_t i = 0; packages->isObject() && i < packages->keys.size(); ++i) {
-    const JsonValue &entry = packages->items[i];
+  for (size_t i = 0; packages->isObject() && i < packages->keys().size(); ++i) {
+    const JsonValue &entry = packages->items()[i];
     Locked locked;
-    locked.id = packages->keys[i];
+    locked.id = packages->keys()[i];
     locked.version = entry.getString("version");
     locked.ref = entry.getString("ref");
     locked.commit = entry.getString("commit");
     locked.hash = entry.getString("hash");
     if (const JsonValue *deps = entry.get("dependencies")) {
-      for (const JsonValue &dep : deps->items) {
+      for (const JsonValue &dep : deps->items()) {
         if (dep.isString()) {
-          locked.dependencies.push_back(dep.string);
+          locked.dependencies.push_back(dep.string());
         }
       }
     }
@@ -67,7 +67,7 @@ bool readLock(llvm::StringRef file, Lock &out) {
     bool git = llvm::StringRef(locked.id).starts_with("git:");
     if ((!jsr && !git) || (jsr && locked.version.empty()) || (git && locked.commit.empty()) ||
         locked.hash.empty()) {
-      reportAt(file, text, packages->keyOffsets[i],
+      reportAt(file, text, packages->keyOffsets()[i],
                "package-lock.json describes '" + locked.id +
                    "' wrongly; delete package-lock.json to make it anew");
       return false;

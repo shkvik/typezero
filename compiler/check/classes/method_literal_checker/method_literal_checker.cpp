@@ -34,18 +34,19 @@ Expr *MethodLiteralChecker::checkMethodLiteral(ObjectLitExpr *lit, const Type *t
     return lit;
   }
   auto *cls = checker_.ctx_.make<ClassDecl>(lit->loc(), "");
-  cls->literal = lit;
+  cls->syntax = LiteralClass{.literal = lit};
   cls->id = ++checker_.classCount_;
   lit->cls = cls;
   Type *type = Type::classType("", cls);
   cls->type = type;
-  cls->resolved = cls->declared = true;
+  cls->stage = ClassStage::RESOLVED;
+  cls->declared = true;
   checker_.classes_.push_back(cls);
 
   bool ok = true;
   std::vector<Field> fields;
   for (ObjectLitExpr::Property &prop : lit->props) {
-    if (prop.method) {
+    if (prop.method()) {
       FunctionDecl *fn = cast<FunctionExpr>(prop.value)->fn;
       fn->name = prop.name;
       if (ClassMember *member = fn->member()) {
@@ -160,7 +161,7 @@ bool MethodLiteralChecker::implementsLiteral(ObjectLitExpr *lit, const Type *tar
       return fail(prop.loc, "it has no field '" + prop.name.str() +
                                 "'; an object must have exactly the fields of its type");
     }
-    if (!prop.method) {
+    if (!prop.method()) {
       continue;
     }
     FunctionDecl *fn = cast<FunctionExpr>(prop.value)->fn;

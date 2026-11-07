@@ -20,8 +20,8 @@ bool PoolChecker::used() const { return usesModule("tz:sync"); }
 
 bool PoolChecker::poolClass(const ClassDecl *cls) {
   for (; cls; cls = cls->parent) {
-    const ClassDecl *base = cls->generic ? cls->generic : cls;
-    if ((base->library || cls->library) && base->name == "Pool") {
+    const ClassDecl *base = cls->generic() ? cls->generic() : cls;
+    if ((base->library() || cls->library()) && base->name == "Pool") {
       return true;
     }
   }
@@ -30,7 +30,7 @@ bool PoolChecker::poolClass(const ClassDecl *cls) {
 }
 
 bool PoolChecker::takesOver(const CallExpr *c) {
-  const FunctionDecl *decl = c->method ? c->method->decl : nullptr;
+  const FunctionDecl *decl = c->method() ? c->method()->decl : nullptr;
   if (!decl || decl->name != "use" || !poolClass(decl->cls()) || c->args.empty()) {
     return false;
   }
@@ -66,8 +66,8 @@ void PoolChecker::sawCall(const CallExpr *c) {
   if (storageMethod(c, "getStore") && current_ && poolStores_.contains(storageOf(c))) {
     readsStore_.insert(current_);
   }
-  if (c->builtin == Builtin::SetTimeout || c->builtin == Builtin::SetImmediate ||
-      c->builtin == Builtin::QueueMicrotask || c->builtin == Builtin::NextTick) {
+  if (c->builtin() == Builtin::SetTimeout || c->builtin() == Builtin::SetImmediate ||
+      c->builtin() == Builtin::QueueMicrotask || c->builtin() == Builtin::NextTick) {
     timers_.push_back({c, current_});
   }
   if (!storageMethod(c, "run") || c->args.empty()) {
@@ -75,7 +75,7 @@ void PoolChecker::sawCall(const CallExpr *c) {
   }
   const Expr *store = bare(c->args[0]);
   if (auto *n = dyn_cast<NewExpr>(store)) {
-    const std::vector<Expr *> &args = n->ctor ? n->ctor->args : n->args;
+    const std::vector<Expr *> &args = n->ctor() ? n->ctor()->args : n->args;
     if (llvm::none_of(args, [&](const Expr *a) { return isHeld(a); })) {
       return;
     }
@@ -90,7 +90,7 @@ void PoolChecker::sawCall(const CallExpr *c) {
   }
   auto *literal = dyn_cast<ObjectLitExpr>(store);
   if (!literal || llvm::none_of(literal->props, [&](const ObjectLitExpr::Property &p) {
-        return !p.spread && isHeld(p.value);
+        return !p.spread() && isHeld(p.value);
       })) {
     return;
   }
@@ -122,10 +122,10 @@ void PoolChecker::spreadKept(const Expr *value) {
 }
 
 void PoolChecker::sawNew(const NewExpr *n) {
-  if (!poolClass(n->cls)) {
+  if (!poolClass(n->cls())) {
     return;
   }
-  const std::vector<Expr *> &args = n->ctor ? n->ctor->args : n->args;
+  const std::vector<Expr *> &args = n->ctor() ? n->ctor()->args : n->args;
   if (args.empty()) {
     return;
   }
@@ -134,7 +134,7 @@ void PoolChecker::sawNew(const NewExpr *n) {
     return;
   }
   for (const ObjectLitExpr::Property &p : options->props) {
-    if (!p.spread && (p.name == "alive" || p.name == "reset")) {
+    if (!p.spread() && (p.name == "alive" || p.name == "reset")) {
       markParam(callbackOf(p.value), 0);
     }
   }
@@ -186,11 +186,12 @@ void PoolChecker::runRoots(const Expr *callback, unsigned depth,
   if (depth > 8 || !callback) {
     return;
   }
-  if (auto *name = dyn_cast<NameExpr>(callback);
-      name && name->var && name->var->owner() && !name->var->lambda() && !name->var->function()) {
-    const FunctionDecl *owner = name->var->owner();
+  if (auto *name = dyn_cast<NameExpr>(callback); name && name->var() && name->var()->owner() &&
+                                                 !name->var()->lambda() &&
+                                                 !name->var()->function()) {
+    const FunctionDecl *owner = name->var()->owner();
     for (unsigned i = 0; i < owner->params.size(); ++i) {
-      if (owner->params[i].sym != name->var) {
+      if (owner->params[i].sym != name->var()) {
         continue;
       }
       for (const FunctionDecl *key : {owner, static_cast<const FunctionDecl *>(owner->generic)}) {

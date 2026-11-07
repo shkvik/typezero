@@ -35,10 +35,10 @@ bool staysDuringCall(const Expr *expr) {
     expr = conv->operand;
   }
   auto *name = dyn_cast<NameExpr>(expr);
-  if (!name || !name->var) {
+  if (!name || !name->var()) {
     return false;
   }
-  const VarSymbol *var = name->var;
+  const VarSymbol *var = name->var();
 
   return var->isConst || (!var->boxed() && !(var->isGlobal() && var->usedInFunction()));
 }
@@ -73,13 +73,13 @@ llvm::Value *ClassLowerer::allocInstance(const ClassDecl *cls, bool member) {
 }
 
 llvm::Value *ClassLowerer::emitNew(NewExpr *expr) {
-  const ClassDecl *cls = expr->cls;
+  const ClassDecl *cls = expr->cls();
   if (expr->callee && !isa<NameExpr>(expr->callee)) {
     lowering_.stmtLowerer().emitDiscarded(expr->callee);
   }
-  const CallExpr *ctor = expr->ctor;
+  const CallExpr *ctor = expr->ctor();
   std::vector<llvm::Value *> args = lowering_.exprLowerer().emitExprs(ctor->args);
-  const FuncSymbol *sym = ctor->func;
+  const FuncSymbol *sym = ctor->func();
   if (sym) {
     for (size_t i = args.size(); i < sym->params.size(); ++i) {
       args.push_back(lowering_.optionalLowerer().undefinedValue(sym->params[i]));
@@ -114,12 +114,12 @@ void ClassLowerer::emitConstruct(llvm::Value *object, const ClassDecl *cls, cons
 llvm::Value *ClassLowerer::emitSuperCall(CallExpr *call) {
   const ClassDecl *cls = lowering_.currentFn_->cls();
   std::vector<llvm::Value *> args = lowering_.exprLowerer().emitExprs(call->args);
-  if (const FuncSymbol *sym = call->method) {
+  if (const FuncSymbol *sym = call->method()) {
     for (size_t i = args.size(); i < sym->params.size(); ++i) {
       args.push_back(lowering_.optionalLowerer().undefinedValue(sym->params[i]));
     }
   }
-  emitConstruct(lowering_.envParam_, cls->parent, call->method, args);
+  emitConstruct(lowering_.envParam_, cls->parent, call->method(), args);
   if (cls->init) {
     lowering_.builder_.CreateCall(lowering_.classDescriptors().methodCode(cls->init),
                                   {lowering_.envParam_});
@@ -130,7 +130,7 @@ llvm::Value *ClassLowerer::emitSuperCall(CallExpr *call) {
 
 llvm::Value *ClassLowerer::emitMethodCall(CallExpr *call) {
   auto *member = cast<MemberExpr>(call->callee);
-  const FuncSymbol *method = call->method;
+  const FuncSymbol *method = call->method();
   bool borrow =
       staysDuringCall(member->object) && llvm::all_of(call->args, AssignLowerer::cannotAssign);
   Lowering::Operand self = lowering_.refCounts().emitOperand(member->object, borrow);
@@ -140,11 +140,11 @@ llvm::Value *ClassLowerer::emitMethodCall(CallExpr *call) {
   for (size_t i = call->args.size(); i < method->params.size(); ++i) {
     args.push_back(lowering_.optionalLowerer().undefinedValue(method->params[i]));
   }
-  if (!call->virtualCall) {
+  if (!call->virtualCall()) {
     lowering_.markAwaitedCall(call, method->decl);
   }
   llvm::CallInst *result =
-      call->virtualCall
+      call->virtualCall()
           ? lowering_.builder_.CreateCall(
                 lowering_.closureLowerer().closureFnType(ClosureLowerer::functionTypeOf(method)),
                 lowering_.inheritLowerer().vtableEntry(self.value, method->decl->slot(), false),
@@ -159,9 +159,9 @@ llvm::Value *ClassLowerer::emitMethodCall(CallExpr *call) {
 llvm::Value *ClassLowerer::emitBoundMethod(MemberExpr *member) {
   llvm::Value *object = lowering_.exprLowerer().emitExpr(member->object);
   llvm::Value *info =
-      member->virtualCall
-          ? lowering_.inheritLowerer().vtableEntry(object, member->method->decl->slot(), true)
-          : lowering_.closureLowerer().functionInfo(member->method->decl);
+      member->virtualCall()
+          ? lowering_.inheritLowerer().vtableEntry(object, member->method()->decl->slot(), true)
+          : lowering_.closureLowerer().functionInfo(member->method()->decl);
 
   return lowering_.closureLowerer().makeFunctionValue(info, object);
 }
@@ -282,7 +282,7 @@ llvm::Value *ClassLowerer::emitMethodLiteral(ObjectLitExpr *lit) {
   lowering_.groupLowerer().noteUnstored(object, lit);
   std::vector<std::pair<llvm::Value *, const Type *>> fields;
   for (const ObjectLitExpr::Property &prop : lit->props) {
-    if (prop.method) {
+    if (prop.method()) {
       continue;
     }
     llvm::Value *value = lowering_.exprLowerer().emitExpr(prop.value);

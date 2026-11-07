@@ -143,7 +143,7 @@ Expr *JsonStaticChecker::checkJsonStatic(CallExpr *call, MemberExpr *member) {
     }
     call->args[0] = checker_.argumentChecker().checkArg(call->args[0], Type::string());
     checkConstantJson(call->args[0]);
-    call->builtin = Builtin::JsonParse;
+    call->target = BuiltinCall{.builtin = Builtin::JsonParse};
     call->type = Type::result(Type::json(), checker_.prelude().builtinType("JsonError"));
     return call;
   }
@@ -209,7 +209,7 @@ Expr *JsonStaticChecker::checkJsonStatic(CallExpr *call, MemberExpr *member) {
     return call;
   }
   call->args = std::move(args);
-  call->builtin = Builtin::JsonStringify;
+  call->target = BuiltinCall{.builtin = Builtin::JsonStringify};
   call->type =
       mayStringifyToUndefined(value->type) ? Type::optional(Type::string()) : Type::string();
   std::vector<const Type *> open;

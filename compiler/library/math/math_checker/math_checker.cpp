@@ -117,7 +117,7 @@ Expr *MathChecker::checkMathCall(CallExpr *call, MemberExpr *member, const Type 
     return checker_.binaryChecker().checkBinary(pow, expected, false);
   }
 
-  call->builtin = fn->builtin;
+  call->target = BuiltinCall{.builtin = fn->builtin};
   const Type *hint =
       expected && expected->nonOptional()->isNumeric() ? expected->nonOptional() : nullptr;
   if (call->hasSpread()) {
@@ -289,7 +289,7 @@ Expr *MathChecker::checkBitCall(CallExpr *call, MemberExpr *member) {
       }
       return call;
     }
-    call->builtin = Builtin::BitWrapFrom;
+    call->target = BuiltinCall{.builtin = Builtin::BitWrapFrom};
     call->type = Type::wrapping(bits);
     return call;
   }
@@ -334,7 +334,7 @@ Expr *MathChecker::checkBitCall(CallExpr *call, MemberExpr *member) {
   bool wide = fn->builtin == Builtin::BitMul64 || fn->builtin == Builtin::BitAdd64 ||
               fn->builtin == Builtin::BitSub64;
   const Type *u64 = Type::integer(64, true);
-  call->builtin = fn->builtin;
+  call->target = BuiltinCall{.builtin = fn->builtin};
   if (wide) {
     for (Expr *&arg : call->args) {
       arg = bitsArg(arg, 64, nullptr, what);
@@ -414,7 +414,7 @@ Expr *MathChecker::checkMinMaxSpread(CallExpr *call, const Type *hint) {
       if (common && common != type) {
         checker_.diags_.error(arg->loc(),
                               "the values of 'Math." +
-                                  std::string(call->builtin == Builtin::MathMin ? "min" : "max") +
+                                  std::string(call->builtin() == Builtin::MathMin ? "min" : "max") +
                                   "' must have one type; found '" + common->name().str() +
                                   "' and '" + type->name().str() + "'");
         return call;

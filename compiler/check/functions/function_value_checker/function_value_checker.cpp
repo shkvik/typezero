@@ -155,7 +155,8 @@ FunctionExpr *FunctionValueChecker::builtinFunctionValue(Expr *arg,
     count = primary;
   }
   auto *fn = checker_.ctx_.make<FunctionDecl>(arg->loc(), name);
-  fn->isExpression = fn->isArrow = fn->concise = true;
+  fn->place = FunctionPlace::EXPRESSION;
+  fn->syntax = ArrowFunction{.concise = true};
   std::vector<Expr *> args;
   for (size_t i = 0; i < count; ++i) {
     Param param;

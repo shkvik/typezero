@@ -37,7 +37,7 @@ const VarSymbol *readVariable(const Expr *expr) {
   }
   auto *name = dyn_cast<NameExpr>(expr);
 
-  return name ? name->var : nullptr;
+  return name ? name->var() : nullptr;
 }
 
 }
@@ -159,7 +159,7 @@ void UnionNarrowing::addUnionFacts(const Expr *cond, Checker::Flow &whenTrue,
     narrowTargetTo(flow, target, keepMembers(now, keep));
   };
 
-  if (auto *call = dyn_cast<CallExpr>(cond); call && call->builtin == Builtin::ArrayIsArray) {
+  if (auto *call = dyn_cast<CallExpr>(cond); call && call->builtin() == Builtin::ArrayIsArray) {
     if (std::optional<Checker::NarrowTarget> target = narrowTarget(call->args[0])) {
       narrow(whenTrue, *target, [](const Type *m) { return m->isArray(); });
       narrow(whenFalse, *target, [](const Type *m) { return !m->isArray(); });

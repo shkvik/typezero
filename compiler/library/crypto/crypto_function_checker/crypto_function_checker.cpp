@@ -90,12 +90,12 @@ Expr *CryptoFunctionChecker::asyncOf(Expr *checked) {
   if (!call || call->type->isError()) {
     return checked;
   }
-  if (call->builtin == Builtin::CryptoKeyPair) {
-    call->builtin = Builtin::CryptoKeyPairAsync;
+  if (call->builtin() == Builtin::CryptoKeyPair) {
+    call->target = BuiltinCall{.builtin = Builtin::CryptoKeyPairAsync};
     call->type = Type::promise(call->type);
     return call;
   }
-  if (call->builtin != Builtin::Crypto) {
+  if (call->builtin() != Builtin::Crypto) {
     return checked;
   }
   auto *index = cast<IntLitExpr>(call->args[0]);

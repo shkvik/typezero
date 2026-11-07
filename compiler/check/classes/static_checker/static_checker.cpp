@@ -48,7 +48,7 @@ Expr *StaticChecker::checkStaticMember(MemberExpr *member, ClassDecl *cls, const
     ClassField &f = *found;
     checker_.classMemberChecker().checkAccess(owner, f.access, name, member->loc());
     auto *read = checker_.ctx_.make<NameExpr>(member->loc(), f.var()->name);
-    read->var = f.var();
+    read->binding = NamedVar{.var = f.var()};
     if (member->object && member->object->loc() != member->loc()) {
       checker_.file_->namedUses[read] = {cls, member->object->loc(), ""};
     }
@@ -107,7 +107,7 @@ Expr *StaticChecker::checkStaticMember(MemberExpr *member, ClassDecl *cls, const
     return member;
   }
   auto *value = checker_.ctx_.make<NameExpr>(member->loc(), name);
-  value->func = sym;
+  value->binding = NamedFunction{.func = sym};
   value->type = checker_.returnInferrer().functionType(sym);
 
   return value;
@@ -121,7 +121,7 @@ const Type *StaticChecker::checkStaticTarget(Expr *&target, ClassDecl *cls) {
     ClassField &f = *found;
     checker_.classMemberChecker().checkAccess(owner, f.access, f.name, member->loc());
     auto *name = checker_.ctx_.make<NameExpr>(member->loc(), f.var()->name);
-    name->var = f.var();
+    name->binding = NamedVar{.var = f.var()};
     name->type = f.var()->type ? f.var()->type : Type::error();
     target = name;
     if (f.var()->isConst) {
@@ -155,7 +155,7 @@ Expr *StaticChecker::checkClassStaticCall(CallExpr *call, MemberExpr *member, Cl
   call->type = Type::error();
   static const llvm::StringLiteral eventsFunctions[] = {
       "once", "on", "listenerCount", "getEventListeners"};
-  if (cls->library && cls->name == "EventEmitter" &&
+  if (cls->library() && cls->name == "EventEmitter" &&
       llvm::is_contained(eventsFunctions, member->name)) {
     if (Expr *events =
             checker_.eventTargetChecker().checkEventsFunction(call, member->name, member->loc())) {
@@ -164,7 +164,7 @@ Expr *StaticChecker::checkClassStaticCall(CallExpr *call, MemberExpr *member, Cl
     return checker_.callChecker().checkDirectCall(
         call, checker_.libFunctions_.lookup(member->name)->sym, member->loc(), expected);
   }
-  if (cls->library && cls->name == "Readable" && member->name == "from") {
+  if (cls->library() && cls->name == "Readable" && member->name == "from") {
     return checker_.streamSources().checkStreamFrom(call, member);
   }
   std::vector<FunctionDecl *> methods = ClassDeclarer::methodsNamed(cls, member->name, true);
@@ -205,7 +205,7 @@ Expr *StaticChecker::checkClassStaticCall(CallExpr *call, MemberExpr *member, Cl
     return checker_.typeArgInferrer().checkGenericCall(call, sym, member->loc(), expected,
                                                        member->typeArgs);
   }
-  call->func = sym;
+  call->target = FunctionCall{.func = sym};
   call->type = checker_.returnInferrer().returnType(sym);
   std::vector<bool> given(checked ? call->args.size() : 0, true);
 

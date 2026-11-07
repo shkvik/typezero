@@ -176,7 +176,7 @@ void Inference::from(const Type *pattern, const Type *actual) {
       return;
     }
     if (const ClassDecl *cls = pattern->classDecl(); cls && !pattern->typeArgs().empty()) {
-      const ClassDecl *generic = cls->generic ? cls->generic : cls;
+      const ClassDecl *generic = cls->generic() ? cls->generic() : cls;
       if (const ClassDecl *found = genericInstanceOf(actual, generic)) {
         for (size_t k = 0; k < pattern->typeArgs().size() && k < found->typeArgs.size(); ++k) {
           from(pattern->typeArgs()[k], found->typeArgs[k]);
@@ -217,7 +217,7 @@ void Inference::from(const Type *pattern, const Type *actual) {
       for (const Type *m : open) {
         const ClassDecl *cls = m->classDecl();
         if (cls && !m->typeArgs().empty() &&
-            genericInstanceOf(value, cls->generic ? cls->generic : cls)) {
+            genericInstanceOf(value, cls->generic() ? cls->generic() : cls)) {
           from(m, value);
           return;
         }

@@ -169,7 +169,7 @@ void MemoryAnalysis::scanProgram(SourceFile &file, CycleScanner &scan) {
     }
     if (auto *cls = dyn_cast<ClassDecl>(item)) {
       for (const FunctionDecl *fn : cls->methods) {
-        if (fn->typeParams.empty() && (fn->isStatic() ? !cls->generic : cls->isEmitted())) {
+        if (fn->typeParams.empty() && (fn->isStatic() ? !cls->generic() : cls->isEmitted())) {
           scan.function(fn);
         }
       }
@@ -213,7 +213,7 @@ std::vector<OwnerScanner::BackRef> MemoryAnalysis::findBackRefs(SourceFile &file
     }
     if (auto *cls = dyn_cast<ClassDecl>(item)) {
       for (const FunctionDecl *fn : cls->methods) {
-        if (fn->typeParams.empty() && (fn->isStatic() ? !cls->generic : cls->isEmitted())) {
+        if (fn->typeParams.empty() && (fn->isStatic() ? !cls->generic() : cls->isEmitted())) {
           owners.function(fn);
         }
       }
@@ -265,7 +265,7 @@ void MemoryAnalysis::findUnstored(SourceFile &file) {
     switch (e->kind()) {
     case Expr::Kind::New: {
       auto *create = cast<NewExpr>(e);
-      return create->cls && plan_.isCyclic(create->cls->type);
+      return create->cls() && plan_.isCyclic(create->cls()->type);
     }
     case Expr::Kind::ObjectLit: {
       auto *lit = cast<ObjectLitExpr>(e);
@@ -275,17 +275,17 @@ void MemoryAnalysis::findUnstored(SourceFile &file) {
     case Expr::Kind::ArrayLit:
       return e->type && plan_.isCyclic(e->type);
     case Expr::Kind::Call:
-      switch (cast<CallExpr>(e)->builtin) {
-      case Builtin::ArrSlice:
-      case Builtin::ArrMap:
-      case Builtin::ArrFilter:
-      case Builtin::ArrFlatMap:
-      case Builtin::ArrConcat:
-      case Builtin::DictNew:
-        return e->type && plan_.isCyclic(e->type);
-      default:
+      switch (cast<CallExpr>(e)->builtin()) {
+        case Builtin::ArrSlice:
+        case Builtin::ArrMap:
+        case Builtin::ArrFilter:
+        case Builtin::ArrFlatMap:
+        case Builtin::ArrConcat:
+        case Builtin::DictNew:
+          return e->type && plan_.isCyclic(e->type);
+        default:
 
-        return false;
+          return false;
       }
     case Expr::Kind::Function: {
       const FunctionDecl *fn = cast<FunctionExpr>(e)->fn;
@@ -306,7 +306,7 @@ void MemoryAnalysis::findUnstored(SourceFile &file) {
     }
     if (auto *cls = dyn_cast<ClassDecl>(item)) {
       for (const FunctionDecl *fn : cls->methods) {
-        if (fn->typeParams.empty() && (fn->isStatic() ? !cls->generic : cls->isEmitted())) {
+        if (fn->typeParams.empty() && (fn->isStatic() ? !cls->generic() : cls->isEmitted())) {
           scan.function(fn);
         }
       }

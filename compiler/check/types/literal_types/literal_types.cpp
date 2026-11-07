@@ -86,7 +86,7 @@ LiteralTypes::LiteralTypes(Checker &checker) : checker_(checker) {}
 const Type *LiteralTypes::enumTag(const Expr *e) const {
   auto *member = dyn_cast<MemberExpr>(e);
   auto *owner = member ? dyn_cast<NameExpr>(member->object) : nullptr;
-  EnumDecl *decl = owner ? checker_.scopes().lookup(owner->name).enumDecl : nullptr;
+  EnumDecl *decl = owner ? checker_.scopes().lookup(owner->name).enumDecl() : nullptr;
   if (!decl) {
     return nullptr;
   }
@@ -102,10 +102,10 @@ const Type *LiteralTypes::enumTag(const Expr *e) const {
 
 const Type *LiteralTypes::constTextType(const Expr *checked, const Type *expected) {
   auto *name = dyn_cast<NameExpr>(checked);
-  if (!name || !name->var || !name->var->literalConst || !checked->type->isString()) {
+  if (!name || !name->var() || !name->var()->literalConst || !checked->type->isString()) {
     return nullptr;
   }
-  const Expr *written = checker_.constLiterals_.lookup(name->var);
+  const Expr *written = checker_.constLiterals_.lookup(name->var());
   std::vector<std::u16string> texts;
   if (!written || !choiceTexts(written, texts)) {
     return nullptr;
@@ -292,7 +292,7 @@ const Type *LiteralTypes::numberMemberOf(const Type *expected, bool fraction) {
 }
 
 const Type *LiteralTypes::literalMember(const ObjectLitExpr *lit, const Type *target) const {
-  if (llvm::any_of(lit->props, [](const ObjectLitExpr::Property &p) { return p.spread; })) {
+  if (llvm::any_of(lit->props, [](const ObjectLitExpr::Property &p) { return p.spread(); })) {
     return nullptr;
   }
   const Type *best = nullptr;
@@ -323,7 +323,7 @@ const Type *LiteralTypes::literalMember(const ObjectLitExpr *lit, const Type *ta
         tag = enumTag(p.value);
       }
       if (auto *named = !tag && f ? dyn_cast_or_null<NameExpr>(p.value) : nullptr) {
-        const VarSymbol *var = checker_.scopes().lookup(named->name).var;
+        const VarSymbol *var = checker_.scopes().lookup(named->name).var();
         const Type *known = var && var->type ? typeIn(checker_.flow_, var) : nullptr;
         if (known && isLiteralSet(known)) {
           tag = known;
@@ -399,7 +399,7 @@ std::optional<std::vector<std::string>> LiteralTypes::knownTexts(const Expr *arg
     e = conv->operand;
   }
   if (auto *name = dyn_cast<NameExpr>(e)) {
-    if (VarSymbol *var = checker_.scopes().lookup(name->name).var) {
+    if (VarSymbol *var = checker_.scopes().lookup(name->name).var()) {
       if (std::optional<std::vector<std::string>> texts = typeTexts(typeIn(checker_.flow_, var))) {
         return texts;
       }

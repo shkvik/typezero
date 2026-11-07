@@ -42,10 +42,10 @@ OverflowCheck::Place AssignEvaluator::place(const Expr *target, State &st) {
   OverflowCheck::Place p;
   p.type = target->type;
   if (auto *name = dyn_cast<NameExpr>(target)) {
-    if (name->var) {
+    if (name->var()) {
       p.kind = OverflowCheck::Place::Kind::Var;
-      p.var = name->var;
-      p.type = name->var->type;
+      p.var = name->var();
+      p.type = name->var()->type;
     }
     return p;
   }
@@ -55,7 +55,7 @@ OverflowCheck::Place AssignEvaluator::place(const Expr *target, State &st) {
     if (objectType && member->name == "length" && objectType->isArray()) {
       p.kind = OverflowCheck::Place::Kind::Length;
       if (auto *name = dyn_cast<NameExpr>(stripCasts(member->object))) {
-        p.var = name->var;
+        p.var = name->var();
       }
       return p;
     }
@@ -73,14 +73,14 @@ OverflowCheck::Place AssignEvaluator::place(const Expr *target, State &st) {
     if (objectType && objectType->isArray()) {
       p.kind = OverflowCheck::Place::Kind::Element;
       p.objectType = objectType;
-      p.append = index->mayAppend;
+      p.append = index->mayAppend();
       if (auto *name = dyn_cast<NameExpr>(stripCasts(index->object))) {
-        p.var = name->var;
+        p.var = name->var();
       }
-    } else if (objectType && objectType->isObject() && !index->field.empty()) {
+    } else if (objectType && objectType->isObject() && !index->field().empty()) {
       p.kind = OverflowCheck::Place::Kind::Field;
       p.objectType = objectType;
-      p.field = index->field.str();
+      p.field = index->field().str();
     }
     return p;
   }
@@ -212,21 +212,21 @@ Val AssignEvaluator::evalUpdate(const UpdateExpr *update, State &st) {
 Val AssignEvaluator::evalObjectLit(const ObjectLitExpr *lit, State &st) {
   const Type *type = lit->type ? lit->type->nonOptional() : nullptr;
   for (const ObjectLitExpr::Property &p : lit->props) {
-    if (p.key) {
-      check_.evaluator().eval(p.key, st);
+    if (p.key()) {
+      check_.evaluator().eval(p.key(), st);
     }
     Val v = check_.evaluator().eval(p.value, st);
-    if (!type || !type->isObject() || p.method) {
+    if (!type || !type->isObject() || p.method()) {
       continue;
     }
-    if (p.spread) {
+    if (p.spread()) {
       const Type *from = p.value->type ? p.value->type->nonOptional() : nullptr;
       if (!from || !from->isObject()) {
         continue;
       }
       for (const Field &f : from->fields()) {
         if (type->field(f.name) && tracked(f.type) &&
-            !llvm::is_contained(p.replacedFields, f.name)) {
+            !llvm::is_contained(p.replacedFields(), f.name)) {
           check_.slots().storeField(type, f.name, f.type,
                                     check_.slots().readField(from, f.name, f.type));
         }

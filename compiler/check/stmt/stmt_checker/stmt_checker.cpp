@@ -62,8 +62,8 @@ void StmtChecker::checkStmt(Stmt *stmt) {
     }
     s->expr = checker_.exprChecker().checkExpr(s->expr);
     checker_.resultChecker().checkDiscarded(s->expr, false, s->loc());
-    if (auto *made = dyn_cast<NewExpr>(s->expr); made && made->cls) {
-      checker_.droppedNews_.push_back({made->cls, made->loc()});
+    if (auto *made = dyn_cast<NewExpr>(s->expr); made && made->cls()) {
+      checker_.droppedNews_.push_back({made->cls(), made->loc()});
     }
     if (ReturnChecker::isExit(s)) {
       checker_.flow_.unreachable = true;

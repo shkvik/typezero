@@ -72,11 +72,11 @@ void CycleExprs::expr(const Expr *expr) {
       }
     }
     for (const ObjectLitExpr::Property &p : lit->props) {
-      this->expr(p.key);
-      if (!p.method) {
+      this->expr(p.key());
+      if (!p.method()) {
         this->expr(p.value);
       }
-      if (p.spread && p.value->type && p.value->type->isObject()) {
+      if (p.spread() && p.value->type && p.value->type->isObject()) {
         for (const Field &f : p.value->type->fields()) {
           if (f.type->isFunction()) {
             scanner_.boundOf[f.type].insert(p.value->type);
@@ -87,10 +87,10 @@ void CycleExprs::expr(const Expr *expr) {
     break;
   }
   case Expr::Kind::Name:
-    if (auto *name = llvm::cast<NameExpr>(expr); name->var) {
-      scanner_.addVar(name->var);
-    } else if (name->func && name->func->decl && name->func->decl->isInstance && name->type) {
-      const FuncSymbol *fn = name->func;
+    if (auto *name = llvm::cast<NameExpr>(expr); name->var()) {
+      scanner_.addVar(name->var());
+    } else if (name->func() && name->func()->decl && name->func()->decl->isInstance && name->type) {
+      const FuncSymbol *fn = name->func();
       const Type *rep =
           Type::function(fn->params, fn->minArgs, fn->hasRest,
                          fn->ret ? fn->ret : Type::voidTy(), fn->hasThis);
@@ -103,7 +103,7 @@ void CycleExprs::expr(const Expr *expr) {
     const Type *object = member->object->type ? member->object->type->nonOptional() : nullptr;
     if (member->type && member->type->nonOptional()->isFunction() && object &&
         !scanner_.callee_.contains(member) &&
-        (member->method || (object->isObject() && !object->isClass() && object->isBase()))) {
+        (member->method() || (object->isObject() && !object->isClass() && object->isBase()))) {
       scanner_.boundOf[member->type->nonOptional()].insert(member->object->type);
     }
     break;
@@ -140,7 +140,7 @@ void CycleExprs::expr(const Expr *expr) {
     auto *call = llvm::cast<CallExpr>(expr);
     scanner_.callee_.insert(call->callee);
     this->expr(call->callee);
-    if (const FuncSymbol *fn = call->func ? call->func : call->method;
+    if (const FuncSymbol *fn = call->func() ? call->func() : call->method();
         fn && fn->decl && fn->decl->isInstance) {
       if (fn->ret && call->type) {
         scanner_.instanceFlows.push_back({call->type, fn->ret, true});
@@ -151,7 +151,7 @@ void CycleExprs::expr(const Expr *expr) {
         }
       }
     }
-    bool drops = runsAndDrops(call->builtin);
+    bool drops = runsAndDrops(call->builtin());
     for (const Expr *arg : call->args) {
       if (const FunctionExpr *fn = drops ? closureLiteral(arg) : nullptr) {
         scanner_.addType(arg->type);
@@ -160,7 +160,7 @@ void CycleExprs::expr(const Expr *expr) {
         this->expr(arg);
       }
     }
-    if (isPromiseBuiltin(call->builtin)) {
+    if (isPromiseBuiltin(call->builtin())) {
       for (const Expr *arg : call->args) {
         if (drops && closureLiteral(arg)) {
           continue;
@@ -170,27 +170,28 @@ void CycleExprs::expr(const Expr *expr) {
         }
       }
     }
-    switch (call->builtin) {
-    case Builtin::ArrPush:
-    case Builtin::ArrUnshift:
-    case Builtin::ArrSplice:
-    case Builtin::ArrFill:
-    case Builtin::MapSet:
-    case Builtin::SetAdd:
-    case Builtin::RecordSet:
-    case Builtin::RecordNullishSet:
-      if (auto *member = llvm::dyn_cast<MemberExpr>(call->callee); member && member->object->type) {
-        scanner_.mutated.insert(member->object->type->nonOptional());
-      }
-      break;
-    default:
-      break;
+    switch (call->builtin()) {
+      case Builtin::ArrPush:
+      case Builtin::ArrUnshift:
+      case Builtin::ArrSplice:
+      case Builtin::ArrFill:
+      case Builtin::MapSet:
+      case Builtin::SetAdd:
+      case Builtin::RecordSet:
+      case Builtin::RecordNullishSet:
+        if (auto *member = llvm::dyn_cast<MemberExpr>(call->callee);
+            member && member->object->type) {
+          scanner_.mutated.insert(member->object->type->nonOptional());
+        }
+        break;
+      default:
+        break;
     }
     break;
   }
   case Expr::Kind::New: {
     auto *create = llvm::cast<NewExpr>(expr);
-    for (const Expr *arg : create->ctor ? create->ctor->args : create->args) {
+    for (const Expr *arg : create->ctor() ? create->ctor()->args : create->args) {
       this->expr(arg);
     }
     break;
@@ -257,10 +258,10 @@ void CycleExprs::assigned(const AssignExpr *assign) {
     }
     names.push_back(member->name.str());
   } else if (auto *index = llvm::dyn_cast<IndexExpr>(target)) {
-    if (!index->field.empty()) {
-      names.push_back(index->field.str());
+    if (!index->field().empty()) {
+      names.push_back(index->field().str());
     }
-    if (index->keyed && index->index->type) {
+    if (index->keyed() && index->index->type) {
       const Type *key = index->index->type;
       for (const Type *n : key->isUnion() ? key->members() : llvm::ArrayRef<const Type *>(key)) {
         if (n->isStringLiteral()) {

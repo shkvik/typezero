@@ -53,7 +53,7 @@ Expr *BufferChecker::checkBufferMethod(CallExpr *call, MemberExpr *member) {
   const Type *uint8 = Type::bytesType(Bytes::Uint8);
   llvm::StringRef name = member->name;
   auto made = [&](Builtin builtin, const Type *result) {
-    call->builtin = builtin;
+    call->target = BuiltinCall{.builtin = builtin};
     call->type = result;
 
     return call;
@@ -351,7 +351,7 @@ Expr *BufferChecker::checkTextMethod(CallExpr *call, MemberExpr *member) {
     if (!call->args.empty()) {
       call->args[0] = checker_.argumentChecker().checkArg(call->args[0], Type::string());
     }
-    call->builtin = Builtin::TextEncode;
+    call->target = BuiltinCall{.builtin = Builtin::TextEncode};
     call->type = Type::bytesType(Bytes::Uint8);
     return call;
   }
@@ -362,7 +362,7 @@ Expr *BufferChecker::checkTextMethod(CallExpr *call, MemberExpr *member) {
     call->args[0] = checker_.argumentChecker().checkArg(call->args[0], Type::string());
     call->args[1] =
         checker_.argumentChecker().checkArg(call->args[1], Type::bytesType(Bytes::Uint8));
-    call->builtin = Builtin::TextEncodeInto;
+    call->target = BuiltinCall{.builtin = Builtin::TextEncodeInto};
     call->type = Type::object({{"read", Type::intTy(), false}, {"written", Type::intTy(), false}});
     return call;
   }
@@ -388,7 +388,7 @@ Expr *BufferChecker::checkTextMethod(CallExpr *call, MemberExpr *member) {
       Expr *given = checker_.exprChecker().checkExpr(call->args[1], options);
       call->args[1] = checker_.typeRelations().coerce(given, options, "the options of 'decode'");
     }
-    call->builtin = Builtin::TextDecode;
+    call->target = BuiltinCall{.builtin = Builtin::TextDecode};
     call->type = type->bytes() == Bytes::FatalTextDecoder
                      ? Type::result(Type::string(), checker_.prelude().builtinType("DecodeError"))
                      : Type::string();

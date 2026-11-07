@@ -250,7 +250,7 @@ llvm::Value *ArrayLowerer::emitArrayIndex(IndexExpr *index) {
     return value;
   };
   llvm::Value *result;
-  if (!index->mayBeOutOfRange) {
+  if (!index->mayBeOutOfRange()) {
     result = read();
   } else {
     result = emitCheckedRead(lowering_.builder_.CreateICmpULT(position, arrayLength(array.value)),
@@ -300,7 +300,7 @@ llvm::Value *ArrayLowerer::emitElementAssign(AssignExpr *assign, bool needResult
     lowering_.storeField_.clear();
     lowering_.storeLoc_ = llvm::SMLoc();
   };
-  if (!index->mayAppend) {
+  if (!index->mayAppend()) {
     replace();
   } else {
     llvm::BasicBlock *replaceBlock = lowering_.functionFrame().newBlock("store.replace");

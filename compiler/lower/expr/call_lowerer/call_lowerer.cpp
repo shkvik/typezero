@@ -49,94 +49,94 @@ namespace tz {
 CallLowerer::CallLowerer(Lowering &lowering) : lowering_(lowering) {}
 
 llvm::Value *CallLowerer::emitCall(CallExpr *call) {
-  if (const Feature *feature = lowering_.features_->lowering(call->builtin)) {
+  if (const Feature *feature = lowering_.features_->lowering(call->builtin())) {
     return feature->lowerCall(lowering_, call);
   }
-  switch (call->builtin) {
-  case Builtin::StringOf:
-    return call->args.empty() ? lowering_.stringLowerer().stringLiteral(u"")
-                              : lowering_.exprLowerer().emitExpr(call->args[0]);
-  case Builtin::NumberOf:
-  case Builtin::ParseInt:
-  case Builtin::ParseFloat:
-  case Builtin::IsInteger:
-  case Builtin::IsSafeInteger:
-  case Builtin::FromCharCode:
-  case Builtin::FromCodePoint:
-  case Builtin::UriEncodeComponent:
-  case Builtin::UriEncode:
-  case Builtin::UriDecodeComponent:
-  case Builtin::UriDecode:
-  case Builtin::NumToFixed:
-  case Builtin::NumToRadix:
-  case Builtin::NumConvert:
-    return lowering_.numberLowerer().emitNumberBuiltin(call);
-  case Builtin::None:
-    break;
-  case Builtin::TupleJoin:
-    return lowering_.unknownLowerer().emitTupleJoin(call);
-  case Builtin::ArrForEach:
-  case Builtin::ArrMap:
-  case Builtin::ArrFilter:
-  case Builtin::ArrFlatMap:
-  case Builtin::ArrReduce:
-  case Builtin::ArrReduceRight:
-  case Builtin::ArrFind:
-  case Builtin::ArrFindIndex:
-  case Builtin::ArrFindLast:
-  case Builtin::ArrFindLastIndex:
-  case Builtin::ArrSome:
-  case Builtin::ArrEvery:
-  case Builtin::ArrSortWith:
-    return lowering_.callbackMethodLowerer().emitCallbackMethod(call);
-  case Builtin::ObjectKeys:
-  case Builtin::ObjectValues:
-  case Builtin::ObjectEntries:
-    return lowering_.objectLowerer().emitObjectCall(call);
-  case Builtin::ArrKeys:
-  case Builtin::ArrValues:
-  case Builtin::ArrEntries:
-  case Builtin::IterFrom:
-  case Builtin::ArrayFrom:
-  case Builtin::IterNext:
-  case Builtin::IterMap:
-  case Builtin::IterFilter:
-  case Builtin::IterTake:
-  case Builtin::IterDrop:
-  case Builtin::IterFlatMap:
-  case Builtin::IterToArray:
-  case Builtin::IterForEach:
-  case Builtin::IterReduce:
-  case Builtin::IterSome:
-  case Builtin::IterEvery:
-  case Builtin::IterFind:
-    return lowering_.iteratorLowerer().emitIteratorBuiltin(call);
-  default:
-    if (isAsyncBuiltin(call->builtin)) {
-      return lowering_.asyncBuiltinLowerer().emitAsyncBuiltin(call);
-    }
-    if (isDictBuiltin(call->builtin)) {
-      return lowering_.dictMethodLowerer().emitDictCall(call);
-    }
-    if (cast<MemberExpr>(call->callee)->object->type->isArray()) {
-      return lowering_.arrayMethodLowerer().emitArrayMethod(call);
-    }
-    return lowering_.stringMethodLowerer().emitStringMethod(call);
+  switch (call->builtin()) {
+    case Builtin::StringOf:
+      return call->args.empty() ? lowering_.stringLowerer().stringLiteral(u"")
+                                : lowering_.exprLowerer().emitExpr(call->args[0]);
+    case Builtin::NumberOf:
+    case Builtin::ParseInt:
+    case Builtin::ParseFloat:
+    case Builtin::IsInteger:
+    case Builtin::IsSafeInteger:
+    case Builtin::FromCharCode:
+    case Builtin::FromCodePoint:
+    case Builtin::UriEncodeComponent:
+    case Builtin::UriEncode:
+    case Builtin::UriDecodeComponent:
+    case Builtin::UriDecode:
+    case Builtin::NumToFixed:
+    case Builtin::NumToRadix:
+    case Builtin::NumConvert:
+      return lowering_.numberLowerer().emitNumberBuiltin(call);
+    case Builtin::None:
+      break;
+    case Builtin::TupleJoin:
+      return lowering_.unknownLowerer().emitTupleJoin(call);
+    case Builtin::ArrForEach:
+    case Builtin::ArrMap:
+    case Builtin::ArrFilter:
+    case Builtin::ArrFlatMap:
+    case Builtin::ArrReduce:
+    case Builtin::ArrReduceRight:
+    case Builtin::ArrFind:
+    case Builtin::ArrFindIndex:
+    case Builtin::ArrFindLast:
+    case Builtin::ArrFindLastIndex:
+    case Builtin::ArrSome:
+    case Builtin::ArrEvery:
+    case Builtin::ArrSortWith:
+      return lowering_.callbackMethodLowerer().emitCallbackMethod(call);
+    case Builtin::ObjectKeys:
+    case Builtin::ObjectValues:
+    case Builtin::ObjectEntries:
+      return lowering_.objectLowerer().emitObjectCall(call);
+    case Builtin::ArrKeys:
+    case Builtin::ArrValues:
+    case Builtin::ArrEntries:
+    case Builtin::IterFrom:
+    case Builtin::ArrayFrom:
+    case Builtin::IterNext:
+    case Builtin::IterMap:
+    case Builtin::IterFilter:
+    case Builtin::IterTake:
+    case Builtin::IterDrop:
+    case Builtin::IterFlatMap:
+    case Builtin::IterToArray:
+    case Builtin::IterForEach:
+    case Builtin::IterReduce:
+    case Builtin::IterSome:
+    case Builtin::IterEvery:
+    case Builtin::IterFind:
+      return lowering_.iteratorLowerer().emitIteratorBuiltin(call);
+    default:
+      if (isAsyncBuiltin(call->builtin())) {
+        return lowering_.asyncBuiltinLowerer().emitAsyncBuiltin(call);
+      }
+      if (isDictBuiltin(call->builtin())) {
+        return lowering_.dictMethodLowerer().emitDictCall(call);
+      }
+      if (cast<MemberExpr>(call->callee)->object->type->isArray()) {
+        return lowering_.arrayMethodLowerer().emitArrayMethod(call);
+      }
+      return lowering_.stringMethodLowerer().emitStringMethod(call);
   }
 
-  if (call->superCall && !isa<MemberExpr>(call->callee)) {
+  if (call->superCall() && !isa<MemberExpr>(call->callee)) {
     return lowering_.classLowerer().emitSuperCall(call);
   }
-  if (call->method) {
+  if (call->method()) {
     return lowering_.classLowerer().emitMethodCall(call);
   }
-  if (!call->unionMethods.empty()) {
+  if (!call->unionMethods().empty()) {
     return lowering_.unionMemberLowerer().emitUnionMethodCall(call);
   }
-  if (!call->func) {
+  if (!call->func()) {
     return lowering_.closureLowerer().emitValueCall(call);
   }
-  const FuncSymbol *func = call->func;
+  const FuncSymbol *func = call->func();
   std::vector<llvm::Value *> args = lowering_.exprLowerer().emitExprs(call->args);
   for (size_t i = args.size(); i < func->params.size(); ++i) {
     args.push_back(lowering_.optionalLowerer().undefinedValue(func->params[i]));

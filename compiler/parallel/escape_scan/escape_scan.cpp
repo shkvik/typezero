@@ -164,13 +164,13 @@ void EscapeScan::scanUses(const Expr *e, bool safe, Escapes &out, bool discarded
   }
   switch (e->kind()) {
   case Expr::Kind::Name:
-    if (!safe && cast<NameExpr>(e)->var) {
-      out.insert(cast<NameExpr>(e)->var);
+    if (!safe && cast<NameExpr>(e)->var()) {
+      out.insert(cast<NameExpr>(e)->var());
     }
     return;
   case Expr::Kind::Member: {
     auto *m = cast<MemberExpr>(e);
-    scanUses(m->object, !m->method, out);
+    scanUses(m->object, !m->method(), out);
     return;
   }
   case Expr::Kind::Index:
@@ -217,19 +217,19 @@ void EscapeScan::scanUses(const Expr *e, bool safe, Escapes &out, bool discarded
   case Expr::Kind::Call: {
     auto *c = cast<CallExpr>(e);
     auto *m = dyn_cast<MemberExpr>(c->callee);
-    if (c->builtin != Builtin::None) {
+    if (c->builtin() != Builtin::None) {
       if (m) {
-        scanUses(m->object, keepsReceiver(c->builtin, discarded), out);
+        scanUses(m->object, keepsReceiver(c->builtin(), discarded), out);
       }
-      bool reads = onlyReadsArgs(c->builtin);
+      bool reads = onlyReadsArgs(c->builtin());
       for (const Expr *arg : c->args) {
         scanUses(arg, reads, out);
       }
       return;
     }
-    if (m && c->method && analysis_.isLibrary(c->method->decl)) {
+    if (m && c->method() && analysis_.isLibrary(c->method()->decl)) {
       scanUses(m->object, true, out);
-    } else if (m && (c->method || !c->unionMethods.empty())) {
+    } else if (m && (c->method() || !c->unionMethods().empty())) {
       scanUses(m->object, false, out);
     } else {
       scanUses(c->callee, true, out);
@@ -241,7 +241,7 @@ void EscapeScan::scanUses(const Expr *e, bool safe, Escapes &out, bool discarded
   }
   case Expr::Kind::New: {
     auto *n = cast<NewExpr>(e);
-    for (const Expr *arg : n->ctor ? n->ctor->args : n->args) {
+    for (const Expr *arg : n->ctor() ? n->ctor()->args : n->args) {
       scanUses(arg, false, out);
     }
     return;
@@ -273,9 +273,9 @@ void EscapeScan::scanUses(const Expr *e, bool safe, Escapes &out, bool discarded
     return;
   case Expr::Kind::ObjectLit:
     for (const ObjectLitExpr::Property &p : cast<ObjectLitExpr>(e)->props) {
-      scanUses(p.key, true, out);
-      if (!p.method) {
-        scanUses(p.value, p.spread, out);
+      scanUses(p.key(), true, out);
+      if (!p.method()) {
+        scanUses(p.value, p.spread(), out);
       }
     }
     return;

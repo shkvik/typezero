@@ -79,7 +79,7 @@ void FunctionChecker::declareFunction(FunctionDecl *fn, VarSymbol *var, bool sco
   bool afterOptional = false;
   for (size_t i = 0; i < fn->params.size(); ++i) {
     Param &param = fn->params[i];
-    if (!param.decorators.empty() && (!fn->cls() || fn->cls()->literal) && !fn->isInstance) {
+    if (!param.decorators.empty() && (!fn->cls() || fn->cls()->literal()) && !fn->isInstance) {
       checker_.diags_.error(param.decorators[0].loc,
                             "a decorator of a parameter can decorate only a "
                             "parameter of a method or a constructor of a class");
@@ -112,7 +112,7 @@ void FunctionChecker::declareFunction(FunctionDecl *fn, VarSymbol *var, bool sco
     }
     param.declaredType = type;
     if (i == 0 && param.name == "this" && !param.rest() && param.type) {
-      if (fn->isArrow) {
+      if (fn->isArrow()) {
         checker_.diags_.error(param.loc,
                               "an arrow function cannot have a 'this' parameter: it sees the "
                               "'this' of the function around it; write a 'function'");
@@ -158,16 +158,16 @@ void FunctionChecker::declareFunction(FunctionDecl *fn, VarSymbol *var, bool sco
   checker_.argListChecker().expandArgumentList(fn, sym);
   fn->sym = sym;
   if (!fn->name.empty() && scoped) {
-    checker_.scopes().declare(fn->name, fn->loc(), {var, sym});
+    checker_.scopes().declare(fn->name, fn->loc(), {FunctionEntry{.func = sym, .var = var}});
   }
 }
 
 void FunctionChecker::checkFunctionBody(FunctionDecl *fn) {
-  if (fn->intrinsic) {
+  if (fn->intrinsic()) {
     fn->checked = true;
     return;
   }
-  if (fn->external) {
+  if (fn->external()) {
     checker_.tzModulesChecker().checkExternal(fn);
     return;
   }

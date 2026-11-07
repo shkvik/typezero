@@ -100,7 +100,7 @@ const Type *PromiseChecker::executorValueType(const Expr *executor) {
 Expr *PromiseChecker::checkPromiseNew(NewExpr *expr, const Type *expected) {
   checker_.file_->usesAsync = true;
   auto *call = checker_.ctx_.make<CallExpr>(expr->loc(), expr, expr->args);
-  call->builtin = Builtin::PromiseNew;
+  call->target = BuiltinCall{.builtin = Builtin::PromiseNew};
   call->type = Type::error();
   const Type *value = nullptr;
   if (expr->typeArgs.size() > 1) {
@@ -227,7 +227,7 @@ Expr *PromiseChecker::checkPromiseMethod(CallExpr *call, MemberExpr *member, con
     if (!checker_.argumentChecker().checkArity(call, member->loc(), 1, 1)) {
       return call;
     }
-    call->builtin = Builtin::PromiseThen;
+    call->target = BuiltinCall{.builtin = Builtin::PromiseThen};
     const Type *onFulfilled = callback(call->args[0], value);
     if (failed) {
       return call;

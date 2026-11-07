@@ -222,7 +222,7 @@ bool DateFormatChecker::checkLocaleArgs(std::vector<Expr *> &args, int kind) {
       return nullptr;
     }
     for (const ObjectLitExpr::Property &prop : literal->props) {
-      if (!prop.spread && prop.name == name && prop.value) {
+      if (!prop.spread() && prop.name == name && prop.value) {
         return prop.value;
       }
     }
@@ -398,7 +398,8 @@ Expr *DateFormatChecker::checkDateFormatMethod(CallExpr *call, MemberExpr *membe
         return call;
       }
     }
-    call->builtin = name == "format" ? Builtin::DtfFormat : Builtin::DtfFormatToParts;
+    call->target =
+        BuiltinCall{.builtin = name == "format" ? Builtin::DtfFormat : Builtin::DtfFormatToParts};
     call->type = name == "format" ? Type::string() : Type::array(dateFormatPartType());
     return call;
   }
@@ -406,7 +407,7 @@ Expr *DateFormatChecker::checkDateFormatMethod(CallExpr *call, MemberExpr *membe
     if (!checker_.argumentChecker().checkArity(call, member->loc(), 0, 0)) {
       return call;
     }
-    call->builtin = Builtin::DtfResolvedOptions;
+    call->target = BuiltinCall{.builtin = Builtin::DtfResolvedOptions};
     call->type = resolvedDateOptionsType();
     return call;
   }

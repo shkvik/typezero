@@ -40,7 +40,7 @@ TypeRef TypeParser::parseType() {
     return check;
   }
   TypeRef ref;
-  ref.kind = TypeRef::Kind::Conditional;
+  ref.form = ConditionalTypeRef{};
   ref.loc = check.loc;
   parser_.cursor().advance();
   ref.args.push_back(std::move(check));
@@ -70,7 +70,7 @@ TypeRef TypeParser::parseUnionType() {
     return first;
   }
   TypeRef ref;
-  ref.kind = TypeRef::Kind::Union;
+  ref.form = UnionTypeRef{};
   ref.loc = loc;
   ref.args.push_back(std::move(first));
   while (parser_.cursor().accept(Tok::Pipe)) {
@@ -88,7 +88,7 @@ TypeRef TypeParser::parseIntersectionType() {
     return first;
   }
   TypeRef ref;
-  ref.kind = TypeRef::Kind::Intersection;
+  ref.form = IntersectionTypeRef{};
   ref.loc = loc;
   ref.args.push_back(std::move(first));
   while (parser_.cursor().accept(Tok::Amp)) {
@@ -109,9 +109,8 @@ TypeRef TypeParser::parseReturnType() {
     return parseType();
   }
   TypeRef ref;
-  ref.kind = TypeRef::Kind::Predicate;
+  ref.form = PredicateTypeRef{.asserts = asserts};
   ref.loc = parser_.tok_.loc();
-  ref.asserts = asserts;
   if (asserts) {
     parser_.cursor().advance();
   }
@@ -131,7 +130,7 @@ TypeRef TypeParser::parseArrayType() {
       (parser_.cursor().peek().is(Tok::Identifier) || parser_.cursor().peek().is(Tok::LParen) ||
        parser_.cursor().peek().is(Tok::LBrace) || parser_.cursor().peek().is(Tok::KwTypeof))) {
     TypeRef ref;
-    ref.kind = TypeRef::Kind::KeyOf;
+    ref.form = KeyOfTypeRef{};
     ref.loc = parser_.tok_.loc();
     parser_.cursor().advance();
     ref.args.push_back(parseArrayType());
@@ -143,9 +142,9 @@ TypeRef TypeParser::parseArrayType() {
     llvm::SMLoc loc = parser_.tok_.loc();
     parser_.cursor().advance();
     TypeRef ref = parseArrayType();
-    if (ref.kind == TypeRef::Kind::Tuple) {
-      ref.readonly.assign(ref.args.size(), true);
-    } else if (ref.kind != TypeRef::Kind::Array) {
+    if (TupleTypeRef *tuple = ref.form.as<TupleTypeRef>()) {
+      tuple->readonly.assign(ref.args.size(), true);
+    } else if (ref.kind() != TypeRefKind::ARRAY_REF) {
       parser_.cursor().report(loc, "'readonly' applies only to array and tuple types");
     }
     return ref;
@@ -153,11 +152,11 @@ TypeRef TypeParser::parseArrayType() {
   TypeRef ref = parsePrimaryType();
   while (parser_.tok_.is(Tok::LBracket) && !parser_.tok_.newlineBefore) {
     TypeRef array;
-    array.kind = TypeRef::Kind::Array;
+    array.form = ArrayTypeRef{};
     array.loc = ref.loc;
     parser_.cursor().advance();
     if (!parser_.tok_.is(Tok::RBracket)) {
-      array.kind = TypeRef::Kind::Indexed;
+      array.form = IndexedTypeRef{};
       array.args.push_back(std::move(ref));
       array.args.push_back(parseType());
       parser_.cursor().expect(Tok::RBracket, "to close the indexed access type");
@@ -205,7 +204,7 @@ TypeRef TypeParser::parsePrimaryType() {
   }
   if (parser_.tok_.is(Tok::Identifier) && parser_.tok_.text == "infer" &&
       parser_.cursor().peek().is(Tok::Identifier)) {
-    ref.kind = TypeRef::Kind::Infer;
+    ref.form = InferTypeRef{};
     parser_.cursor().advance();
     ref.name = parser_.tok_.text;
     parser_.cursor().advance();
@@ -226,14 +225,13 @@ TypeRef TypeParser::parsePrimaryType() {
     std::u16string text;
     decodeTemplatePart(parser_.tok_, text, parser_.diags_);
     if (parser_.tok_.is(Tok::TemplateString)) {
-      ref.kind = TypeRef::Kind::Literal;
+      ref.form = LiteralTypeRef{.text = text};
       ref.name = "string";
-      ref.text = text;
       parser_.cursor().advance();
       return ref;
     }
-    ref.kind = TypeRef::Kind::Template;
-    ref.texts.push_back(text);
+    ref.form = TemplateTypeRef{.texts = {text}};
+    TemplateTypeRef *parts = ref.form.as<TemplateTypeRef>();
     parser_.cursor().advance();
     for (bool done = false; !done;) {
       ref.args.push_back(parseType());
@@ -243,23 +241,24 @@ TypeRef TypeParser::parsePrimaryType() {
         return TypeRef();
       }
       decodeTemplatePart(parser_.tok_, text, parser_.diags_);
-      ref.texts.push_back(text);
+      parts->texts.push_back(text);
       done = parser_.tok_.is(Tok::TemplateTail);
       parser_.cursor().advance();
     }
     return ref;
   }
   if (parser_.tok_.is(Tok::StringLiteral)) {
-    ref.kind = TypeRef::Kind::Literal;
+    LiteralTypeRef literal;
+    decodeStringLiteral(parser_.tok_, literal.text, parser_.diags_);
+    ref.form = std::move(literal);
     ref.name = "string";
-    decodeStringLiteral(parser_.tok_, ref.text, parser_.diags_);
     parser_.cursor().advance();
     return ref;
   }
   if (parser_.tok_.is(Tok::KwTrue) || parser_.tok_.is(Tok::KwFalse)) {
-    ref.kind = TypeRef::Kind::Literal;
+    double truth = parser_.tok_.is(Tok::KwTrue) ? 1 : 0;
+    ref.form = LiteralTypeRef{.number = truth};
     ref.name = "boolean";
-    ref.number = parser_.tok_.is(Tok::KwTrue) ? 1 : 0;
     parser_.cursor().advance();
     return ref;
   }
@@ -271,17 +270,18 @@ TypeRef TypeParser::parsePrimaryType() {
     }
     Expr *lit = parser_.tok_.is(Tok::IntLiteral) ? parser_.primaries().parseIntLiteral()
                                                  : parser_.primaries().parseFloatLiteral();
-    ref.kind = TypeRef::Kind::Literal;
-    ref.name = "number";
+    LiteralTypeRef literal;
     if (auto *whole = dyn_cast<IntLitExpr>(lit)) {
-      ref.number = double(whole->value);
-      ref.integer = true;
+      literal.number = double(whole->value);
+      literal.integer = true;
     } else {
-      ref.number = cast<FloatLitExpr>(lit)->value;
+      literal.number = cast<FloatLitExpr>(lit)->value;
     }
     if (negative) {
-      ref.number = -ref.number;
+      literal.number = -literal.number;
     }
+    ref.form = std::move(literal);
+    ref.name = "number";
     return ref;
   }
   if (parser_.cursor().accept(Tok::LParen)) {
@@ -290,7 +290,8 @@ TypeRef TypeParser::parsePrimaryType() {
     return ref;
   }
   if (parser_.tok_.is(Tok::KwTypeof)) {
-    ref.kind = TypeRef::Kind::TypeOf;
+    ref.form = TypeOfTypeRef{};
+    TypeOfTypeRef *path = ref.form.as<TypeOfTypeRef>();
     parser_.cursor().advance();
     if (!parser_.tok_.is(Tok::Identifier)) {
       parser_.cursor().error(parser_.tok_.loc(),
@@ -298,11 +299,11 @@ TypeRef TypeParser::parsePrimaryType() {
                                  tokSpelling(parser_.tok_.kind));
       return ref;
     }
-    ref.names.push_back(parser_.tok_.text);
+    path->names.push_back(parser_.tok_.text);
     parser_.cursor().advance();
     while (parser_.tok_.is(Tok::Dot) && parser_.cursor().peek().is(Tok::Identifier)) {
       parser_.cursor().advance();
-      ref.names.push_back(parser_.tok_.text);
+      path->names.push_back(parser_.tok_.text);
       parser_.cursor().advance();
     }
     return ref;
@@ -320,7 +321,7 @@ TypeRef TypeParser::parsePrimaryType() {
     parser_.cursor().advance();
   }
   if (parser_.tok_.is(Tok::Less)) {
-    ref.kind = TypeRef::Kind::Generic;
+    ref.form = GenericTypeRef{};
     ref.args = parseTypeArgs();
   }
 

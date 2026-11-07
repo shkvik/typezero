@@ -74,9 +74,9 @@ Module *TopLevelChecker::laterSource(llvm::StringRef name, llvm::StringRef &decl
   return nullptr;
 }
 
-Checker::ScopeEntry TopLevelChecker::lookupValue(llvm::StringRef name) {
-  Checker::ScopeEntry entry = checker_.scopes().lookup(name);
-  if (entry.var || entry.func || entry.enumDecl || entry.cls || !checker_.loading_) {
+ScopeEntry TopLevelChecker::lookupValue(llvm::StringRef name) {
+  ScopeEntry entry = checker_.scopes().lookup(name);
+  if (entry.found() || !checker_.loading_) {
     return entry;
   }
   llvm::StringRef declared;

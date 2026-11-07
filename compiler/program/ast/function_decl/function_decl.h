@@ -5,6 +5,7 @@
 #include "compiler/program/ast/builtin/builtin.h"
 #include "compiler/program/ast/decorator/decorator.h"
 #include "compiler/program/ast/function_decl/function_role.h"
+#include "compiler/program/ast/function_decl/function_syntax.h"
 #include "compiler/program/ast/param/param.h"
 #include "compiler/program/ast/stmt/stmt.h"
 #include "compiler/program/ast/type_param_decl/type_param_decl.h"
@@ -35,14 +36,12 @@ struct FunctionDecl : Stmt {
   std::optional<TypeRef> returnType;
   BlockStmt *body = nullptr;
   llvm::StringRef source;
-  bool isExpression = false;
-  bool isArrow = false;
+  FunctionSyntax syntax = RegularFunction{};
+  FunctionPlace place = FunctionPlace::DECLARED;
+  FunctionBodySource bodySource = FunctionBodySource::WRITTEN;
   bool isGenerator = false;
   bool isAsync = false;
   bool awaitsAhead = false;
-  bool lifted = false;
-  llvm::StringRef ownName;
-  bool concise = false;
   FuncSymbol *sym = nullptr;
   bool checked = false;
 
@@ -55,8 +54,16 @@ struct FunctionDecl : Stmt {
   bool nonEscaping = false;
   const VarSymbol *receiverEnv = nullptr;
   bool isClosure() const {
-    return parent || isExpression || group;
+    return parent || isExpression() || group;
   }
+
+  bool isArrow() const;
+  bool concise() const;
+  llvm::StringRef ownName() const;
+  bool isExpression() const;
+  bool lifted() const;
+  bool external() const;
+  bool intrinsic() const;
 
   Union<PlainFunction, ClassMember> role = PlainFunction{};
   ClassMember *member();
@@ -85,8 +92,6 @@ struct FunctionDecl : Stmt {
   llvm::StringRef listName;
   size_t listStart = 0;
   const Type *listType = nullptr;
-  bool external = false;
-  bool intrinsic = false;
 };
 
 }

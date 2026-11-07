@@ -25,7 +25,7 @@ llvm::Value *ResultCombineLowerer::emitCombine(CallExpr *call) {
   if (call->args[0]->type->isTuple()) {
     return emitCombineTuple(call);
   }
-  bool all = call->builtin == Builtin::ResultCombineWithAllErrors;
+  bool all = call->builtin() == Builtin::ResultCombineWithAllErrors;
   const Type *arrayType = call->args[0]->type, *element = arrayType->inner();
   const Type *valueType = element->okType(), *errorType = element->errType();
   const Type *resultType = call->type;
@@ -124,7 +124,7 @@ llvm::Value *ResultCombineLowerer::emitCombine(CallExpr *call) {
 }
 
 llvm::Value *ResultCombineLowerer::emitCombineTuple(CallExpr *call) {
-  bool all = call->builtin == Builtin::ResultCombineWithAllErrors;
+  bool all = call->builtin() == Builtin::ResultCombineWithAllErrors;
   auto *list = cast<ArrayLitExpr>(call->args[0]);
   const Type *resultType = call->type, *tupleType = resultType->okType();
   const Type *errorType = all && resultType->errType()->isArray() ? resultType->errType()->inner()

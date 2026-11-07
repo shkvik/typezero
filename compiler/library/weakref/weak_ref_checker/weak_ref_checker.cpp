@@ -17,7 +17,7 @@ namespace tz {
 WeakRefChecker::WeakRefChecker(Checker &checker) : checker_(checker) {}
 
 const Type *WeakRefChecker::resolveWeakRefType(const TypeRef &ref) {
-  if (ref.kind != TypeRef::Kind::Generic || ref.args.size() != 1) {
+  if (ref.kind() != TypeRefKind::GENERIC_REF || ref.args.size() != 1) {
     checker_.diags_.error(ref.loc, "'WeakRef' needs the type of its object, e.g. 'WeakRef<Node>'");
     return Type::error();
   }
@@ -113,7 +113,7 @@ Expr *WeakRefChecker::checkWeakRefMethod(CallExpr *call, MemberExpr *member) {
       !checker_.argumentChecker().checkArity(call, member->loc(), 0, 0)) {
     return call;
   }
-  call->builtin = Builtin::WeakRefDeref;
+  call->target = BuiltinCall{.builtin = Builtin::WeakRefDeref};
   call->type = Type::optional(type->weakTarget());
 
   return call;

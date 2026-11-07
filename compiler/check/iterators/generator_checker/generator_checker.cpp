@@ -33,7 +33,7 @@ const Type *GeneratorChecker::resolveIteratorType(const TypeRef &ref) {
     const Type *returned = Type::undefinedTy();
     if (ref.args.size() == 2) {
       const TypeRef &arg = ref.args[1];
-      if (!(arg.kind == TypeRef::Kind::Name &&
+      if (!(arg.kind() == TypeRefKind::NAME_REF &&
             (arg.name == "void" || arg.name == "undefined" || arg.name == "unknown"))) {
         returned = checker_.typeResolver().resolveType(arg, false);
       }
@@ -70,7 +70,7 @@ const Type *GeneratorChecker::resolveIteratorType(const TypeRef &ref) {
       return Type::voidTy();
     }
     const TypeRef &arg = ref.args[i];
-    if (arg.kind == TypeRef::Kind::Name &&
+    if (arg.kind() == TypeRefKind::NAME_REF &&
         (arg.name == "void" || arg.name == "undefined" || arg.name == "unknown")) {
       return Type::voidTy();
     }
@@ -388,12 +388,12 @@ Expr *GeneratorChecker::destructuredIterator(Expr *init, const VarDeclarator &d)
   const Type *iterator = init->type;
   checkSendsNothing(iterator, init->loc(), "destructuring");
   Expr *source = init;
-  if (!d.patternRest) {
+  if (!d.patternRest()) {
     auto *member = checker_.ctx_.make<MemberExpr>(init->loc(), init, "take");
-    auto *n = checker_.ctx_.make<IntLitExpr>(init->loc(), d.patternLength);
+    auto *n = checker_.ctx_.make<IntLitExpr>(init->loc(), d.patternLength());
     n->type = Type::intTy();
     auto *take = checker_.ctx_.make<CallExpr>(init->loc(), member, std::vector<Expr *>{n});
-    take->builtin = Builtin::IterTake;
+    take->target = BuiltinCall{.builtin = Builtin::IterTake};
     take->fused = true;
     take->type = Type::iterator(iterator->yielded());
     source = take;

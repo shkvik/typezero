@@ -283,8 +283,8 @@ const Checker::NodeName *BuiltinModuleChecker::nodeName(llvm::StringRef name) co
   if (found->second.module == NodeModule::Buffer && name == "Buffer") {
     return nullptr;
   }
-  Checker::ScopeEntry entry = checker_.scopes().lookup(name);
-  if (entry.var || entry.func || entry.enumDecl || entry.cls) {
+  ScopeEntry entry = checker_.scopes().lookup(name);
+  if (entry.found()) {
     return nullptr;
   }
 

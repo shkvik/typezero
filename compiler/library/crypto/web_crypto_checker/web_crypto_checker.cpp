@@ -119,11 +119,11 @@ Expr *WebCryptoChecker::checkSubtleIntrinsic(CallExpr *call, NameExpr *name,
 bool WebCryptoChecker::isSubtleClass(const Type *type, llvm::StringRef name) const {
   const ClassDecl *cls = type ? ClassDeclarer::classOf(type) : nullptr;
 
-  return cls && cls->library && cls->name == name && cls == checker_.libraryClass(name);
+  return cls && cls->library() && cls->name == name && cls == checker_.libraryClass(name);
 }
 
 Expr *WebCryptoChecker::subtleObject(MemberExpr *member) {
-  if (!checker_.scopes().lookup(kSubtleName).var) {
+  if (!checker_.scopes().lookup(kSubtleName).var()) {
     checker_.diags_.error(member->loc(), "'crypto.subtle' is not available here");
     member->type = Type::error();
     return member;

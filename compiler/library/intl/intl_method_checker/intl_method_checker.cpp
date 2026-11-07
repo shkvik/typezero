@@ -108,7 +108,7 @@ Expr *IntlMethodChecker::checkIntlMethod(CallExpr *call, MemberExpr *member) {
     return call;
   };
   auto done = [&](Builtin builtin, const Type *type) {
-    call->builtin = builtin;
+    call->target = BuiltinCall{.builtin = builtin};
     call->type = type;
 
     return call;
@@ -258,7 +258,7 @@ Expr *IntlMethodChecker::checkNumberLocale(CallExpr *call, MemberExpr *member) {
                                                    "toLocaleString")) {
     return call;
   }
-  call->builtin = Builtin::NumToLocale;
+  call->target = BuiltinCall{.builtin = Builtin::NumToLocale};
   call->type = Type::string();
 
   return call;
@@ -291,7 +291,7 @@ Expr *IntlMethodChecker::checkStringLocale(CallExpr *call, MemberExpr *member) {
         checker_.diags_.error(call->args[0]->loc(), problem);
       }
     }
-    call->builtin = Builtin::StrNormalize;
+    call->target = BuiltinCall{.builtin = Builtin::StrNormalize};
     call->type = Type::string();
     return call;
   }
@@ -304,7 +304,7 @@ Expr *IntlMethodChecker::checkStringLocale(CallExpr *call, MemberExpr *member) {
     return call;
   }
   std::copy(rest.begin(), rest.end(), call->args.begin() + 1);
-  call->builtin = Builtin::StrLocaleCompare;
+  call->target = BuiltinCall{.builtin = Builtin::StrLocaleCompare};
   call->type = Type::intTy();
 
   return call;

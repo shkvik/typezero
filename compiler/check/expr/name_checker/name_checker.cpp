@@ -38,20 +38,21 @@ Expr *NameChecker::checkName(NameExpr *name) {
     }
     return reference.value();
   }
-  if (name->cls && name->type) {
+  if (name->cls() && name->type) {
     return name;
   }
   if (Expr *node = checker_.builtinModuleChecker().checkNodeName(name)) {
     return node;
   }
-  Checker::ScopeEntry entry = checker_.topLevelChecker().lookupValue(name->name);
-  if (!name->typeArgs.empty() && (entry.var || entry.func)) {
+  ScopeEntry entry = checker_.topLevelChecker().lookupValue(name->name);
+  if (!name->typeArgs.empty() && (entry.var() || entry.func())) {
     checker_.diags_.error(
         name->loc(), "'" + name->name + "' is not a generic function; remove the type arguments");
   }
-  if (entry.var) {
-    if (checker_.staticInit_ && checker_.currentClass_ && checker_.currentClass_->expression &&
-        !entry.var->isGlobal() && llvm::is_contained(checker_.currentClass_->locals, name->name)) {
+  if (entry.var()) {
+    if (checker_.staticInit_ && checker_.currentClass_ && checker_.currentClass_->expression() &&
+        !entry.var()->isGlobal() &&
+        llvm::is_contained(checker_.currentClass_->locals, name->name)) {
       checker_.diags_.error(name->loc(),
                             "a class expression cannot use '" + name->name +
                                 "', a variable of the function around it: the class is made "
@@ -59,31 +60,31 @@ Expr *NameChecker::checkName(NameExpr *name) {
                                 "values the first time; pass the value to its constructor, "
                                 "or keep it in a global");
     }
-    name->var = entry.var;
-    entry.var->read = true;
-    checker_.nestedFunctions().noteUse(entry.var, name->loc());
-    name->type = checker_.scopes().varType(entry.var);
-    checker_.scopes().checkVisible(name, entry.var);
+    name->binding = NamedVar{.var = entry.var()};
+    entry.var()->read = true;
+    checker_.nestedFunctions().noteUse(entry.var(), name->loc());
+    name->type = checker_.scopes().varType(entry.var());
+    checker_.scopes().checkVisible(name, entry.var());
     if (!checker_.streamViews_.empty()) {
       Checker::FieldPath path;
-      path.var = entry.var;
+      path.var = entry.var();
       if (const Type *view = checker_.setEncodingChecker().streamViewOf(path, name->loc())) {
         return checker_.typeRelations().convert(name, view);
       }
     }
-    if (const Type *narrowed = checker_.genericChecker().narrowedType(entry.var)) {
-      if (narrowed->isOptional() && checker_.isDefined(entry.var)) {
+    if (const Type *narrowed = checker_.genericChecker().narrowedType(entry.var())) {
+      if (narrowed->isOptional() && checker_.isDefined(entry.var())) {
         narrowed = narrowed->inner();
       }
       return checker_.typeRelations().convert(name, narrowed);
     }
-    bool defined = name->type->isOptional() && checker_.isDefined(entry.var);
+    bool defined = name->type->isOptional() && checker_.isDefined(entry.var());
     const Type *type = defined ? name->type->inner() : name->type;
     if (type->isResult()) {
-      if (checker_.flow_.okResults.contains(entry.var) && !type->errType()->isNever()) {
+      if (checker_.flow_.okResults.contains(entry.var()) && !type->errType()->isNever()) {
         return checker_.typeRelations().convert(name, Type::result(type->okType(), Type::never()));
       }
-      if (checker_.flow_.errResults.contains(entry.var) && !type->okType()->isNever()) {
+      if (checker_.flow_.errResults.contains(entry.var()) && !type->okType()->isNever()) {
         return checker_.typeRelations().convert(name, Type::result(Type::never(), type->errType()));
       }
     }
@@ -92,18 +93,18 @@ Expr *NameChecker::checkName(NameExpr *name) {
     }
     return name;
   }
-  if (!entry.func && !entry.enumDecl) {
+  if (!entry.func() && !entry.enumDecl()) {
     if (Expr *constant = checker_.constantFolder().globalConstant("", name->name, name->loc())) {
       return constant;
     }
   }
-  if (entry.func) {
-    name->func = entry.func;
-    name->type = checker_.returnInferrer().functionType(entry.func);
-    checker_.tzModulesChecker().noteHttpsValue(entry.func->decl, name->loc());
+  if (entry.func()) {
+    name->binding = NamedFunction{.func = entry.func()};
+    name->type = checker_.returnInferrer().functionType(entry.func());
+    checker_.tzModulesChecker().noteHttpsValue(entry.func()->decl, name->loc());
     return name;
   }
-  if (!entry.var && !entry.func && !entry.enumDecl && !entry.cls) {
+  if (!entry.found()) {
     if (ClassDecl *cls = checker_.metadataChecker().builtinConstructor(name->name)) {
       return checker_.classValueChecker().checkClassValue(name, cls);
     }
@@ -121,7 +122,7 @@ Expr *NameChecker::checkName(NameExpr *name) {
       {"JSON", "JSON.parse(text)"}};
   auto object = llvm::find_if(objects, [&](const auto &o) { return o.first == name->name; });
   llvm::StringRef result =
-      entry.enumDecl ? llvm::StringRef() : checker_.resultTypes().resultName(name->name);
+      entry.enumDecl() ? llvm::StringRef() : checker_.resultTypes().resultName(name->name);
   if (result == "ok" || result == "err") {
     checker_.diags_.error(name->loc(), "'" + name->name +
                                            "' can be used as a value only where a function "
@@ -164,15 +165,15 @@ Expr *NameChecker::checkName(NameExpr *name) {
                           "write 'undefined' (null exists only in Json values)");
   } else if (const char *why = whyUnsupported(name->name)) {
     checker_.diags_.error(name->loc(), "'" + name->name + "' is not supported: " + why);
-  } else if (entry.enumDecl) {
+  } else if (entry.enumDecl()) {
     checker_.diags_.error(name->loc(), "enum '" + name->name + "' can only be used as '" +
                                            name->name + ".Member' or '" + name->name + "[value]'");
-  } else if (entry.cls) {
-    return checker_.classValueChecker().checkClassValue(name, entry.cls);
-  } else if (checker_.currentClass_ && checker_.currentClass_->expression &&
+  } else if (entry.cls()) {
+    return checker_.classValueChecker().checkClassValue(name, entry.cls());
+  } else if (checker_.currentClass_ && checker_.currentClass_->expression() &&
              !checker_.currentClass_->name.empty() && checker_.currentClass_->name == name->name) {
     return checker_.classValueChecker().checkClassValue(name, checker_.currentClass_);
-  } else if (checker_.currentClass_ && checker_.currentClass_->expression &&
+  } else if (checker_.currentClass_ && checker_.currentClass_->expression() &&
              llvm::is_contained(checker_.currentClass_->locals, name->name)) {
     checker_.diags_.error(name->loc(),
                           "a class expression cannot use '" + name->name +

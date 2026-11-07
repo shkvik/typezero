@@ -126,7 +126,7 @@ void ProgramScan::scanFunction(const FunctionDecl *fn) {
 }
 
 void ProgramScan::scanClass(const ClassDecl *cls) {
-  if (cls->builtin) {
+  if (cls->builtin()) {
     return;
   }
   for (const FunctionDecl *fn : cls->methods) {
@@ -193,7 +193,7 @@ void ProgramScan::scanStmt(const Stmt *stmt) {
       if (!d.init) {
         continue;
       }
-      scanExpr(d.init, d.destructured);
+      scanExpr(d.init, d.destructured());
       if (check_.declaring_) {
         check_.inits_[d.init] = {&d, decl->isConst};
         if (d.sym && decl->isConst && isConstantTree(d.init)) {
@@ -297,22 +297,22 @@ void ProgramScan::scanExpr(const Expr *expr, bool consumed) {
     break;
   case Expr::Kind::ObjectLit:
     for (const ObjectLitExpr::Property &p : cast<ObjectLitExpr>(expr)->props) {
-      scanExpr(p.key, true);
-      scanExpr(p.value, p.spread);
+      scanExpr(p.key(), true);
+      scanExpr(p.value, p.spread());
     }
     break;
   case Expr::Kind::Name: {
     auto *name = cast<NameExpr>(expr);
-    useVar(name->var, consumed, false);
+    useVar(name->var(), consumed, false);
     if (!check_.declaring_) {
-      if (name->func && name->func->decl) {
-        check_.unknownCallers_.insert(name->func->decl);
+      if (name->func() && name->func()->decl) {
+        check_.unknownCallers_.insert(name->func()->decl);
       }
-      if (name->var && name->var->function()) {
-        check_.unknownCallers_.insert(name->var->function());
+      if (name->var() && name->var()->function()) {
+        check_.unknownCallers_.insert(name->var()->function());
       }
-      if (name->var && name->var->lambda()) {
-        check_.unknownCallers_.insert(name->var->lambda());
+      if (name->var() && name->var()->lambda()) {
+        check_.unknownCallers_.insert(name->var()->lambda());
       }
     }
     break;
@@ -320,8 +320,8 @@ void ProgramScan::scanExpr(const Expr *expr, bool consumed) {
   case Expr::Kind::Member: {
     auto *member = cast<MemberExpr>(expr);
     scanExpr(member->object, true);
-    if (!check_.declaring_ && member->method && member->method->decl) {
-      check_.unknownCallers_.insert(member->method->decl);
+    if (!check_.declaring_ && member->method() && member->method()->decl) {
+      check_.unknownCallers_.insert(member->method()->decl);
     }
     break;
   }
@@ -344,11 +344,12 @@ void ProgramScan::scanExpr(const Expr *expr, bool consumed) {
   case Expr::Kind::Assign: {
     auto *assign = cast<AssignExpr>(expr);
     if (auto *name = dyn_cast<NameExpr>(assign->target)) {
-      useVar(name->var, true, true);
+      useVar(name->var(), true, true);
       if (check_.declaring_ && !assign->op) {
         if (auto *bin = dyn_cast<BinaryExpr>(assign->value)) {
-          if (auto *lhs = dyn_cast<NameExpr>(stripCasts(bin->lhs)); lhs && lhs->var == name->var) {
-            check_.selfAssigned_[bin] = name->var;
+          if (auto *lhs = dyn_cast<NameExpr>(stripCasts(bin->lhs));
+              lhs && lhs->var() == name->var()) {
+            check_.selfAssigned_[bin] = name->var();
           }
         }
       }
@@ -361,7 +362,7 @@ void ProgramScan::scanExpr(const Expr *expr, bool consumed) {
   case Expr::Kind::Update: {
     auto *update = cast<UpdateExpr>(expr);
     if (auto *name = dyn_cast<NameExpr>(update->target)) {
-      useVar(name->var, true, true);
+      useVar(name->var(), true, true);
     } else {
       scanExpr(update->target, true);
     }
@@ -372,13 +373,13 @@ void ProgramScan::scanExpr(const Expr *expr, bool consumed) {
     if (auto *member = dyn_cast<MemberExpr>(call->callee)) {
       scanExpr(member->object, true);
     } else if (auto *name = dyn_cast<NameExpr>(call->callee);
-               name && (call->func || call->builtin != Builtin::None)) {
-      useVar(name->var, true, false);
+               name && (call->func() || call->builtin() != Builtin::None)) {
+      useVar(name->var(), true, false);
     } else {
       scanExpr(call->callee, true);
     }
-    std::optional<size_t> callback = callbackArg(call->builtin);
-    bool reads = onlyReads(call->builtin);
+    std::optional<size_t> callback = callbackArg(call->builtin());
+    bool reads = onlyReads(call->builtin());
     for (size_t i = 0; i < call->args.size(); ++i) {
       const Expr *arg = call->args[i];
       if (callback && *callback == i) {
@@ -387,7 +388,8 @@ void ProgramScan::scanExpr(const Expr *expr, bool consumed) {
             check_.inlined_.insert(fe->fn);
           }
           if (check_.declaring_ && !fe->fn->params.empty() &&
-              (call->builtin == Builtin::ArrReduce || call->builtin == Builtin::ArrReduceRight)) {
+              (call->builtin() == Builtin::ArrReduce ||
+               call->builtin() == Builtin::ArrReduceRight)) {
             check_.accumulators_.insert(fe->fn->params[0].sym);
           }
           for (const Param &p : fe->fn->params) {
@@ -406,7 +408,7 @@ void ProgramScan::scanExpr(const Expr *expr, bool consumed) {
   }
   case Expr::Kind::New: {
     auto *ne = cast<NewExpr>(expr);
-    for (const Expr *arg : ne->ctor ? ne->ctor->args : ne->args) {
+    for (const Expr *arg : ne->ctor() ? ne->ctor()->args : ne->args) {
       scanExpr(arg, false);
     }
     break;
@@ -446,6 +448,8 @@ void ProgramScan::scanExpr(const Expr *expr, bool consumed) {
   case Expr::Kind::Await:
     scanExpr(cast<AwaitExpr>(expr)->value, false);
     break;
+  case Expr::Kind::Class:
+    break;
   }
 }
 
@@ -464,7 +468,7 @@ bool ProgramScan::isConstantTree(const Expr *expr) const {
     return isConstantTree(bin->lhs) && isConstantTree(bin->rhs);
   }
   if (auto *name = dyn_cast<NameExpr>(expr)) {
-    return name->var && check_.constants_.contains(name->var);
+    return name->var() && check_.constants_.contains(name->var());
   }
 
   return false;

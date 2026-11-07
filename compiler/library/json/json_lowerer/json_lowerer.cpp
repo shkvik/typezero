@@ -42,7 +42,7 @@ std::u16string utf16(llvm::StringRef text) {
 bool isNullLiteral(const Expr *expr) {
   auto *name = dyn_cast<NameExpr>(expr);
 
-  return name && !name->var && !name->func && name->type && name->type->isJson();
+  return name && !name->var() && !name->func() && name->type && name->type->isJson();
 }
 
 bool isJsonish(const Type *type) { return type->nonOptional()->isJson(); }
@@ -373,8 +373,8 @@ llvm::Value *JsonLowerer::emitJsonObjectLiteral(ObjectLitExpr *lit) {
   for (const ObjectLitExpr::Property &prop : lit->props) {
     Lowering::Operand key{lowering_.stringLowerer().stringLiteral(utf16(prop.name)), false,
                           Type::string()};
-    if (prop.key) {
-      key = lowering_.refCounts().emitOperand(prop.key, AssignLowerer::cannotAssign(prop.value));
+    if (prop.key()) {
+      key = lowering_.refCounts().emitOperand(prop.key(), AssignLowerer::cannotAssign(prop.value));
     }
     llvm::Value *value = lowering_.exprLowerer().emitExpr(prop.value);
     llvm::Value *args[] = {object, lowering_.stringLowerer().stringObj(key.value),
@@ -402,11 +402,11 @@ llvm::Value *JsonLowerer::emitJsonObjectCall(CallExpr *call) {
   Lowering::Operand object = lowering_.refCounts().emitOperand(call->args[0], true);
   const Type *element = call->type->inner();
   llvm::Value *result;
-  if (call->builtin == Builtin::ObjectKeys) {
+  if (call->builtin() == Builtin::ObjectKeys) {
     result = lowering_.builder_.CreateCall(
         jsonFunction(call->forIn ? "tz_json_for_in_keys" : "tz_json_keys", ptr, {ptr, ptr}),
         {object.value, lowering_.typeDescriptors().typeDescriptor(element)}, "keys");
-  } else if (call->builtin == Builtin::ObjectValues) {
+  } else if (call->builtin() == Builtin::ObjectValues) {
     result = lowering_.builder_.CreateCall(jsonFunction("tz_json_values", ptr, {ptr}),
                                            {object.value}, "values");
   } else {
@@ -436,112 +436,114 @@ llvm::Value *JsonLowerer::emitJsonCall(CallExpr *call) {
   llvm::Type *ptr = lowering_.builder_.getPtrTy(), *i32 = lowering_.builder_.getInt32Ty(),
              *i64 = lowering_.builder_.getInt64Ty();
   llvm::Value *noPath = llvm::ConstantPointerNull::get(lowering_.builder_.getPtrTy());
-  switch (call->builtin) {
-  case Builtin::JsonParse: {
-    useErrors(call->type->errType());
-    Lowering::Operand text = lowering_.refCounts().emitOperand(call->args[0], true);
-    llvm::Value *json =
-        lowering_.builder_.CreateCall(jsonFunction("tz_json_parse", ptr, {ptr, i64}),
-                                      {lowering_.stringLowerer().stringObj(text.value),
-                                       lowering_.stringLowerer().stringMeta(text.value)},
-                                      "json");
-    lowering_.refCounts().dropOperand(text);
-    return lowering_.resultLowerer().catchFailure(json, call->type, call->loc());
-  }
-  case Builtin::JsonStringify: {
-    bool fallible = call->type->isResult();
-    const Type *textType = fallible ? call->type->okType() : call->type;
-    if (!fallible && call->args.size() == 1 && textType->isString() &&
-        lowering_.jsonWriters().writable(call->args[0]->type)) {
-      Lowering::Operand operand = lowering_.refCounts().emitOperand(call->args[0], true);
-      llvm::Value *text = lowering_.jsonWriters().emitStringify(operand.value, call->args[0]->type);
-      lowering_.refCounts().dropOperand(operand);
-      return text;
-    }
-    if (fallible) {
+  switch (call->builtin()) {
+    case Builtin::JsonParse: {
       useErrors(call->type->errType());
-    } else {
-      lowering_.builder_.CreateCall(
-          jsonFunction("tz_json_errors", lowering_.builder_.getVoidTy(), {ptr}),
-          {llvm::ConstantPointerNull::get(lowering_.builder_.getPtrTy())});
+      Lowering::Operand text = lowering_.refCounts().emitOperand(call->args[0], true);
+      llvm::Value *json =
+          lowering_.builder_.CreateCall(jsonFunction("tz_json_parse", ptr, {ptr, i64}),
+                                        {lowering_.stringLowerer().stringObj(text.value),
+                                         lowering_.stringLowerer().stringMeta(text.value)},
+                                        "json");
+      lowering_.refCounts().dropOperand(text);
+      return lowering_.resultLowerer().catchFailure(json, call->type, call->loc());
     }
-    Expr *value = call->args[0];
-    bool hasSpace = call->args.size() == 2;
-    Lowering::Operand operand = lowering_.refCounts().emitOperand(
-        value, !hasSpace || AssignLowerer::cannotAssign(call->args[1]));
-    Lowering::Operand space{nullptr, false, Type::string()};
-    llvm::Value *spaceKind = lowering_.builder_.getInt32(0);
-    llvm::Value *spaceNumber = llvm::ConstantFP::get(lowering_.builder_.getDoubleTy(), 0.0);
-    llvm::Value *spaceObj = noPath, *spaceMeta = lowering_.builder_.getInt64(0);
-    if (hasSpace && call->args[1]->type->isString()) {
-      space = lowering_.refCounts().emitOperand(call->args[1], true);
-      spaceKind = lowering_.builder_.getInt32(2);
-      spaceObj = lowering_.stringLowerer().stringObj(space.value);
-      spaceMeta = lowering_.stringLowerer().stringMeta(space.value);
-    } else if (hasSpace) {
-      spaceKind = lowering_.builder_.getInt32(1);
-      spaceNumber = lowering_.exprLowerer().emitExpr(call->args[1]);
-    }
-    llvm::Value *out = lowering_.functionFrame().createStackSlot(lowering_.strTy_, "json.text");
-    llvm::Value *defined = lowering_.builder_.CreateCall(
-        jsonFunction("tz_json_stringify", i32,
-                     {ptr, ptr, ptr, i32, lowering_.builder_.getDoubleTy(), ptr, i64}),
-        {out, lowering_.typeDescriptors().typeDescriptor(value->type),
-         lowering_.functionFrame().spill(operand.value, "json.value"), spaceKind, spaceNumber,
-         spaceObj, spaceMeta});
-    lowering_.refCounts().dropOperand(space);
-    lowering_.refCounts().dropOperand(operand);
-    auto written = [&]() -> llvm::Value * {
-      llvm::Value *text = lowering_.builder_.CreateLoad(lowering_.strTy_, out);
-      if (!textType->isOptional()) {
+    case Builtin::JsonStringify: {
+      bool fallible = call->type->isResult();
+      const Type *textType = fallible ? call->type->okType() : call->type;
+      if (!fallible && call->args.size() == 1 && textType->isString() &&
+          lowering_.jsonWriters().writable(call->args[0]->type)) {
+        Lowering::Operand operand = lowering_.refCounts().emitOperand(call->args[0], true);
+        llvm::Value *text =
+            lowering_.jsonWriters().emitStringify(operand.value, call->args[0]->type);
+        lowering_.refCounts().dropOperand(operand);
         return text;
       }
-      return lowering_.optionalLowerer().makeOptional(
-          text, lowering_.builder_.CreateICmpNE(defined, lowering_.builder_.getInt32(0)), textType);
-    };
-    if (!fallible) {
-      return written();
+      if (fallible) {
+        useErrors(call->type->errType());
+      } else {
+        lowering_.builder_.CreateCall(
+            jsonFunction("tz_json_errors", lowering_.builder_.getVoidTy(), {ptr}),
+            {llvm::ConstantPointerNull::get(lowering_.builder_.getPtrTy())});
+      }
+      Expr *value = call->args[0];
+      bool hasSpace = call->args.size() == 2;
+      Lowering::Operand operand = lowering_.refCounts().emitOperand(
+          value, !hasSpace || AssignLowerer::cannotAssign(call->args[1]));
+      Lowering::Operand space{nullptr, false, Type::string()};
+      llvm::Value *spaceKind = lowering_.builder_.getInt32(0);
+      llvm::Value *spaceNumber = llvm::ConstantFP::get(lowering_.builder_.getDoubleTy(), 0.0);
+      llvm::Value *spaceObj = noPath, *spaceMeta = lowering_.builder_.getInt64(0);
+      if (hasSpace && call->args[1]->type->isString()) {
+        space = lowering_.refCounts().emitOperand(call->args[1], true);
+        spaceKind = lowering_.builder_.getInt32(2);
+        spaceObj = lowering_.stringLowerer().stringObj(space.value);
+        spaceMeta = lowering_.stringLowerer().stringMeta(space.value);
+      } else if (hasSpace) {
+        spaceKind = lowering_.builder_.getInt32(1);
+        spaceNumber = lowering_.exprLowerer().emitExpr(call->args[1]);
+      }
+      llvm::Value *out = lowering_.functionFrame().createStackSlot(lowering_.strTy_, "json.text");
+      llvm::Value *defined = lowering_.builder_.CreateCall(
+          jsonFunction("tz_json_stringify", i32,
+                       {ptr, ptr, ptr, i32, lowering_.builder_.getDoubleTy(), ptr, i64}),
+          {out, lowering_.typeDescriptors().typeDescriptor(value->type),
+           lowering_.functionFrame().spill(operand.value, "json.value"), spaceKind, spaceNumber,
+           spaceObj, spaceMeta});
+      lowering_.refCounts().dropOperand(space);
+      lowering_.refCounts().dropOperand(operand);
+      auto written = [&]() -> llvm::Value * {
+        llvm::Value *text = lowering_.builder_.CreateLoad(lowering_.strTy_, out);
+        if (!textType->isOptional()) {
+          return text;
+        }
+        return lowering_.optionalLowerer().makeOptional(
+            text, lowering_.builder_.CreateICmpNE(defined, lowering_.builder_.getInt32(0)),
+            textType);
+      };
+      if (!fallible) {
+        return written();
+      }
+      return lowering_.resultLowerer().catchFailure(call->type, call->loc(), written);
     }
-    return lowering_.resultLowerer().catchFailure(call->type, call->loc(), written);
-  }
-  case Builtin::JsonIsJson:
-    if (!call->args[0]->type->isUnknown()) {
-      lowering_.stmtLowerer().emitDiscarded(call->args[0]);
-      return lowering_.builder_.getInt1(call->args[0]->type->nonOptional()->isJson());
+    case Builtin::JsonIsJson:
+      if (!call->args[0]->type->isUnknown()) {
+        lowering_.stmtLowerer().emitDiscarded(call->args[0]);
+        return lowering_.builder_.getInt1(call->args[0]->type->nonOptional()->isJson());
+      }
+      return lowering_.unknownLowerer().emitUnknownIsJson(call->args[0]);
+    case Builtin::ArrayIsArray: {
+      Expr *arg = call->args[0];
+      const Type *type = arg->type;
+      if (type->isUnknown() || type->isAnyObject()) {
+        return lowering_.unknownLowerer().emitUnknownIsArray(arg);
+      }
+      if (isJsonish(type)) {
+        Lowering::Operand value = lowering_.refCounts().emitOperand(arg, true);
+        llvm::Value *kind =
+            lowering_.builder_.CreateCall(jsonFunction("tz_json_kind", i32, {ptr}), {value.value});
+        lowering_.refCounts().dropOperand(value);
+        return lowering_.builder_.CreateICmpEQ(kind, lowering_.builder_.getInt32(kJsonArray));
+      }
+      if (const Type *u = type->nonOptional(); u->isTagged()) {
+        Lowering::Operand value = lowering_.refCounts().emitOperand(arg, true);
+        llvm::Value *tag = lowering_.unionLayout().unionTag(value.value);
+        lowering_.refCounts().dropOperand(value);
+        return lowering_.builder_.CreateICmpEQ(
+            tag, lowering_.builder_.getInt32(unsigned(UnionSlot::Array)));
+      }
+      bool array = type->nonOptional()->isArray() || type->nonOptional()->isTuple();
+      if (array && type->isOptional()) {
+        Lowering::Operand value = lowering_.refCounts().emitOperand(arg, true);
+        llvm::Value *has = lowering_.optionalLowerer().optionalHas(value.value, type);
+        lowering_.refCounts().dropOperand(value);
+        return has;
+      }
+      lowering_.stmtLowerer().emitDiscarded(arg);
+      return lowering_.builder_.getInt1(array);
     }
-    return lowering_.unknownLowerer().emitUnknownIsJson(call->args[0]);
-  case Builtin::ArrayIsArray: {
-    Expr *arg = call->args[0];
-    const Type *type = arg->type;
-    if (type->isUnknown() || type->isAnyObject()) {
-      return lowering_.unknownLowerer().emitUnknownIsArray(arg);
-    }
-    if (isJsonish(type)) {
-      Lowering::Operand value = lowering_.refCounts().emitOperand(arg, true);
-      llvm::Value *kind =
-          lowering_.builder_.CreateCall(jsonFunction("tz_json_kind", i32, {ptr}), {value.value});
-      lowering_.refCounts().dropOperand(value);
-      return lowering_.builder_.CreateICmpEQ(kind, lowering_.builder_.getInt32(kJsonArray));
-    }
-    if (const Type *u = type->nonOptional(); u->isTagged()) {
-      Lowering::Operand value = lowering_.refCounts().emitOperand(arg, true);
-      llvm::Value *tag = lowering_.unionLayout().unionTag(value.value);
-      lowering_.refCounts().dropOperand(value);
-      return lowering_.builder_.CreateICmpEQ(
-          tag, lowering_.builder_.getInt32(unsigned(UnionSlot::Array)));
-    }
-    bool array = type->nonOptional()->isArray() || type->nonOptional()->isTuple();
-    if (array && type->isOptional()) {
-      Lowering::Operand value = lowering_.refCounts().emitOperand(arg, true);
-      llvm::Value *has = lowering_.optionalLowerer().optionalHas(value.value, type);
-      lowering_.refCounts().dropOperand(value);
-      return has;
-    }
-    lowering_.stmtLowerer().emitDiscarded(arg);
-    return lowering_.builder_.getInt1(array);
-  }
-  default:
-    llvm_unreachable("not a builtin of JSON");
+    default:
+      llvm_unreachable("not a builtin of JSON");
   }
 }
 

@@ -42,7 +42,7 @@ Expr *FsFeature::checkModuleCall(Checker &checker, CallExpr *call, NodeModule mo
   if (module == NodeModule::Fs || (module == NodeModule::TzFs && fn == "replaceSync")) {
     Expr *checked = checker.fsChecker().checkFsCall(call, fn, loc);
     if (auto *done = llvm::dyn_cast<CallExpr>(checked);
-        done && isFsBuiltin(done->builtin) && !done->type->isError()) {
+        done && isFsBuiltin(done->builtin()) && !done->type->isError()) {
       done->type = Type::result(done->type, checker.fsErrorTypes().ofCall(done));
     }
     return checked;

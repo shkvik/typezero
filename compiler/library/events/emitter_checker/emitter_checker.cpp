@@ -189,12 +189,12 @@ bool EmitterChecker::ownsEmitter(const Expr *emitter) const {
   }
   auto *name = dyn_cast<NameExpr>(emitter);
   const FunctionDecl *fn = checker_.currentDecl();
-  if (!name || !name->var || !fn || name->var->owner() != fn || name->var->isGlobal() ||
-      name->var == fn->thisVar()) {
+  if (!name || !name->var() || !fn || name->var()->owner() != fn || name->var()->isGlobal() ||
+      name->var() == fn->thisVar()) {
     return false;
   }
 
-  return llvm::none_of(fn->params, [&](const Param &p) { return p.sym == name->var; });
+  return llvm::none_of(fn->params, [&](const Param &p) { return p.sym == name->var(); });
 }
 
 bool EmitterChecker::classifyListener(Expr *arg, const Expr *emitter, int &bits, bool timer) {
@@ -235,12 +235,12 @@ bool EmitterChecker::classifyListener(Expr *arg, const Expr *emitter, int &bits,
     }
     captured.assign(fn->captures.begin(), fn->captures.end());
   } else if (auto *member = dyn_cast<MemberExpr>(e);
-             member && member->method && member->method->decl &&
-             !member->method->decl->isStatic() && canReceive(member->object->type)) {
+             member && member->method() && member->method()->decl &&
+             !member->method()->decl->isStatic() && canReceive(member->object->type)) {
     auto *self = dyn_cast<NameExpr>(member->object);
-    return receiver(member->object->type, self ? self->var : nullptr);
-  } else if (auto *name = dyn_cast<NameExpr>(e); name && name->func && name->func->decl) {
-    const FunctionDecl *fn = name->func->decl;
+    return receiver(member->object->type, self ? self->var() : nullptr);
+  } else if (auto *name = dyn_cast<NameExpr>(e); name && name->func() && name->func()->decl) {
+    const FunctionDecl *fn = name->func()->decl;
     const std::vector<VarSymbol *> &captures = fn->group ? fn->group->captures : fn->captures;
     if (captures.empty()) {
       bits |= topLevel ? 0 : kDedupeBit;
@@ -303,7 +303,7 @@ Checker::EmitterKey EmitterChecker::keyOf(const Expr *root) const {
   }
   Checker::EmitterKey key;
   if (auto *name = dyn_cast<NameExpr>(root)) {
-    const VarSymbol *var = name->var ? name->var : checker_.scopes().lookup(name->name).var;
+    const VarSymbol *var = name->var() ? name->var() : checker_.scopes().lookup(name->name).var();
     if (var) {
       key.path.var = var;
       return key;
@@ -406,7 +406,7 @@ Expr *EmitterChecker::checkEmitterNew(NewExpr *expr, ClassDecl *generic, const T
     }
   } else if (const Type *want = expected ? expected->nonOptional() : nullptr;
              want && ClassDeclarer::classOf(want) &&
-             ClassDeclarer::classOf(want)->generic == generic) {
+             ClassDeclarer::classOf(want)->generic() == generic) {
     events = ClassDeclarer::classOf(want)->typeArgs[0];
   } else {
     events = checker_.eventMapInference().inferredEventMap(
@@ -521,14 +521,14 @@ Expr *EmitterChecker::callLibraryMethod(CallExpr *call, MemberExpr *member, Clas
       }
     }
   }
-  call->superCall = super;
-  if (sym->isGeneric() || super) {
-    call->method = callee;
+  if (super) {
+    call->target = SuperCall{.method = callee};
+  } else if (sym->isGeneric()) {
+    call->target = MethodCall{.method = callee};
   } else if (FunctionDecl *impl = ClassLinks::soleImplementation(cls, sym->decl)) {
-    call->method = impl->sym;
+    call->target = MethodCall{.method = impl->sym};
   } else {
-    call->method = sym;
-    call->virtualCall = true;
+    call->target = MethodCall{.method = sym, .virtualCall = true};
   }
   member->type = checker_.returnInferrer().functionType(callee);
   call->type = ret ? ret : Type::error();
@@ -550,7 +550,7 @@ Expr *EmitterChecker::checkEmitterCall(CallExpr *call, MemberExpr *member, Class
     return nullptr;
   }
   std::vector<FunctionDecl *> methods = ClassDeclarer::methodsNamed(cls, member->name, false);
-  if (!methods.empty() && !methods[0]->cls()->library) {
+  if (!methods.empty() && !methods[0]->cls()->library()) {
     return nullptr;
   }
   const Type *receiver = member->object->type;

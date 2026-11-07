@@ -9,10 +9,68 @@
 #include "compiler/program/ast/stmt/stmt.h"
 #include "compiler/program/ast/type_param_decl/type_param_decl.h"
 #include "compiler/program/ast/type_ref/type_ref.h"
+#include "compiler/union/union/union.h"
+#include "llvm/ADT/ArrayRef.h"
 
 namespace tz {
 
 class Type;
+struct ClassDecl;
+
+enum class ClassStage {
+  UNRESOLVED,
+  RESOLVING_BASE,
+  RESOLVED,
+};
+
+enum class ClassOrigin {
+  PROGRAM,
+  LIBRARY,
+  BUILTIN,
+};
+
+enum class ClassSyntaxKind {
+  STATEMENT_CLASS,
+  EXPRESSION_CLASS,
+  LITERAL_CLASS,
+};
+
+struct StatementClass {
+  static constexpr ClassSyntaxKind kind = ClassSyntaxKind::STATEMENT_CLASS;
+};
+
+struct ExpressionClass {
+  static constexpr ClassSyntaxKind kind = ClassSyntaxKind::EXPRESSION_CLASS;
+};
+
+struct LiteralClass {
+  static constexpr ClassSyntaxKind kind = ClassSyntaxKind::LITERAL_CLASS;
+  ObjectLitExpr *literal = nullptr;
+};
+
+using ClassSyntax = Union<StatementClass, ExpressionClass, LiteralClass>;
+
+enum class ClassGenericsKind {
+  NOT_GENERIC,
+  GENERIC_TEMPLATE,
+  GENERIC_INSTANCE,
+};
+
+struct NotGeneric {
+  static constexpr ClassGenericsKind kind = ClassGenericsKind::NOT_GENERIC;
+};
+
+struct GenericTemplate {
+  static constexpr ClassGenericsKind kind = ClassGenericsKind::GENERIC_TEMPLATE;
+  std::vector<ClassDecl *> instances;
+};
+
+struct GenericInstance {
+  static constexpr ClassGenericsKind kind = ClassGenericsKind::GENERIC_INSTANCE;
+  ClassDecl *generic = nullptr;
+};
+
+using ClassGenerics = Union<NotGeneric, GenericTemplate, GenericInstance>;
 
 struct ClassDecl : Stmt {
   ClassDecl(llvm::SMLoc loc, llvm::StringRef name) : Stmt(Kind::Class, loc), name(name) {}
@@ -47,27 +105,23 @@ struct ClassDecl : Stmt {
   std::vector<const Type *> implemented;
   unsigned lastId = 0;
   std::vector<FunctionDecl *> vtable;
-  bool resolvingBase = false;
   std::vector<ClassField> fields;
   std::vector<FunctionDecl *> methods;
   std::vector<FunctionDecl *> constructors;
   const Type *type = nullptr;
   FunctionDecl *init = nullptr;
   unsigned id = 0;
-  bool resolved = false;
+  ClassStage stage = ClassStage::UNRESOLVED;
   bool declared = false;
-  ObjectLitExpr *literal = nullptr;
   NestedGroup *group = nullptr;
-  bool builtin = false;
-  bool library = false;
+  ClassOrigin origin = ClassOrigin::PROGRAM;
+  ClassSyntax syntax = StatementClass{};
   std::vector<Decorator> decorators;
   std::vector<Stmt *> decorations;
   bool usedAsValue = false;
-  bool expression = false;
   const FunctionDecl *outer = nullptr;
   std::vector<llvm::StringRef> locals;
   ClassDecl *replacement = nullptr;
-  bool replaced = false;
   bool reflectNew = false;
   bool reflectMethods = false;
   bool reflectFill = false;
@@ -75,14 +129,19 @@ struct ClassDecl : Stmt {
   std::vector<TypeParamDecl> typeParams;
   llvm::StringRef source;
   std::vector<const Type *> typeArgs;
-  ClassDecl *generic = nullptr;
-  std::vector<ClassDecl *> instances;
+  ClassGenerics generics = NotGeneric{};
   bool checkOnly = false;
   std::vector<FunctionDecl *> methodInstances;
-  bool isGeneric() const { return !typeParams.empty() && !generic; }
-  bool isEmitted() const { return !isGeneric() && !checkOnly; }
-  const ClassDecl *staticOwner() const { return generic ? generic : this; }
-  ClassDecl *staticOwner() { return generic ? generic : this; }
+  bool isGeneric() const;
+  bool isEmitted() const;
+  const ClassDecl *staticOwner() const;
+  ClassDecl *staticOwner();
+  ClassDecl *generic() const;
+  llvm::ArrayRef<ClassDecl *> instances() const;
+  bool library() const;
+  bool builtin() const;
+  bool expression() const;
+  ObjectLitExpr *literal() const;
 };
 
 }

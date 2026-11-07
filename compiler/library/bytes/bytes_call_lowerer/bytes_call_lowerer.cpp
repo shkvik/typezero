@@ -37,70 +37,70 @@ namespace tz {
 BytesCallLowerer::BytesCallLowerer(Lowering &lowering) : lowering_(lowering) {}
 
 llvm::Value *BytesCallLowerer::emitBytesCall(CallExpr *call) {
-  switch (call->builtin) {
-  case Builtin::BytesNew:
-  case Builtin::ArrayBufferNew:
-  case Builtin::BytesFromArray:
-  case Builtin::BytesFromBytes:
-  case Builtin::BytesOf:
-  case Builtin::BytesView:
-  case Builtin::DataViewNew:
-    return BytesMakeCalls(lowering_, call).emit();
-  case Builtin::BytesByteLength:
-  case Builtin::BytesByteOffset:
-  case Builtin::BytesBuffer:
-  case Builtin::BytesAt:
-  case Builtin::BytesIndexOf:
-  case Builtin::BytesJoin:
-  case Builtin::BytesReverse:
-  case Builtin::BytesSort:
-  case Builtin::BytesFill:
-  case Builtin::BytesSet:
-  case Builtin::BytesSubarray:
-  case Builtin::BytesSlice:
-  case Builtin::ArrayBufferSlice:
-  case Builtin::BytesCopyWithin:
-  case Builtin::BytesToReversed:
-  case Builtin::BytesToSorted:
-  case Builtin::BytesWith:
-  case Builtin::ArrayBufferIsView:
-    return TypedArrayCalls(lowering_, call).emit();
-  case Builtin::DataViewGet:
-  case Builtin::DataViewSet:
-  case Builtin::BufferRead:
-  case Builtin::BufferWriteNumber:
-  case Builtin::BufferReadVar:
-  case Builtin::BufferWriteVar:
-    return NumberAccessCalls(lowering_, call).emit();
-  case Builtin::BufferFromString:
-  case Builtin::BufferAllocFill:
-  case Builtin::BufferConcat:
-  case Builtin::BufferByteLength:
-  case Builtin::BufferCompare:
-  case Builtin::BufferEquals:
-  case Builtin::BufferCompareTo:
-  case Builtin::BufferIsBuffer:
-  case Builtin::BufferIsEncoding:
-  case Builtin::BufferToString:
-  case Builtin::BufferWrite:
-  case Builtin::BufferIndexOf:
-  case Builtin::BufferFill:
-  case Builtin::BufferCopy:
-  case Builtin::BufferSwap:
-  case Builtin::BufferToJSON:
-    return BufferCalls(lowering_, call).emit();
-  case Builtin::TextEncoderNew:
-  case Builtin::TextEncode:
-  case Builtin::TextEncodeInto:
-  case Builtin::TextDecoderNew:
-  case Builtin::TextDecoderParse:
-  case Builtin::TextDecode:
-  case Builtin::TextDecoderInfo:
-    return TextCodecCalls(lowering_, call).emit();
-  case Builtin::EmbedBytes:
-    return emitEmbedBytes(call);
-  default:
-    llvm_unreachable("not a built-in of binary data");
+  switch (call->builtin()) {
+    case Builtin::BytesNew:
+    case Builtin::ArrayBufferNew:
+    case Builtin::BytesFromArray:
+    case Builtin::BytesFromBytes:
+    case Builtin::BytesOf:
+    case Builtin::BytesView:
+    case Builtin::DataViewNew:
+      return BytesMakeCalls(lowering_, call).emit();
+    case Builtin::BytesByteLength:
+    case Builtin::BytesByteOffset:
+    case Builtin::BytesBuffer:
+    case Builtin::BytesAt:
+    case Builtin::BytesIndexOf:
+    case Builtin::BytesJoin:
+    case Builtin::BytesReverse:
+    case Builtin::BytesSort:
+    case Builtin::BytesFill:
+    case Builtin::BytesSet:
+    case Builtin::BytesSubarray:
+    case Builtin::BytesSlice:
+    case Builtin::ArrayBufferSlice:
+    case Builtin::BytesCopyWithin:
+    case Builtin::BytesToReversed:
+    case Builtin::BytesToSorted:
+    case Builtin::BytesWith:
+    case Builtin::ArrayBufferIsView:
+      return TypedArrayCalls(lowering_, call).emit();
+    case Builtin::DataViewGet:
+    case Builtin::DataViewSet:
+    case Builtin::BufferRead:
+    case Builtin::BufferWriteNumber:
+    case Builtin::BufferReadVar:
+    case Builtin::BufferWriteVar:
+      return NumberAccessCalls(lowering_, call).emit();
+    case Builtin::BufferFromString:
+    case Builtin::BufferAllocFill:
+    case Builtin::BufferConcat:
+    case Builtin::BufferByteLength:
+    case Builtin::BufferCompare:
+    case Builtin::BufferEquals:
+    case Builtin::BufferCompareTo:
+    case Builtin::BufferIsBuffer:
+    case Builtin::BufferIsEncoding:
+    case Builtin::BufferToString:
+    case Builtin::BufferWrite:
+    case Builtin::BufferIndexOf:
+    case Builtin::BufferFill:
+    case Builtin::BufferCopy:
+    case Builtin::BufferSwap:
+    case Builtin::BufferToJSON:
+      return BufferCalls(lowering_, call).emit();
+    case Builtin::TextEncoderNew:
+    case Builtin::TextEncode:
+    case Builtin::TextEncodeInto:
+    case Builtin::TextDecoderNew:
+    case Builtin::TextDecoderParse:
+    case Builtin::TextDecode:
+    case Builtin::TextDecoderInfo:
+      return TextCodecCalls(lowering_, call).emit();
+    case Builtin::EmbedBytes:
+      return emitEmbedBytes(call);
+    default:
+      llvm_unreachable("not a built-in of binary data");
   }
 }
 

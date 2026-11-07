@@ -186,8 +186,8 @@ const VarSymbol *FlowStmts::currentThis() const {
 }
 
 Refs FlowStmts::name(const NameExpr *n) {
-  if (n->var) {
-    return {{flows_.var(n->var), 0, 0}};
+  if (n->var()) {
+    return {{flows_.var(n->var()), 0, 0}};
   }
   if ((n->name == "this" || n->name == "super") && currentThis()) {
     return {{flows_.var(currentThis()), 0, 0}};
@@ -204,8 +204,8 @@ void FlowStmts::recordWrite(const Refs &target, bool element, llvm::StringRef fi
 
 void FlowStmts::assignTo(Expr *target, const Refs &value, const Expr *valueExpr, bool compound) {
   if (auto *n = llvm::dyn_cast<NameExpr>(target)) {
-    if (n->var) {
-      flows_.flow(value, flows_.var(n->var));
+    if (n->var()) {
+      flows_.flow(value, flows_.var(n->var()));
     }
     return;
   }
@@ -226,7 +226,7 @@ void FlowStmts::assignTo(Expr *target, const Refs &value, const Expr *valueExpr,
     } else if (objectType && objectType->isDict()) {
       flows_.flow(value, flows_.contents(objectType));
     } else {
-      std::string field = !index->field.empty() ? index->field.str() : "*";
+      std::string field = !index->field().empty() ? index->field().str() : "*";
       if (auto *key = llvm::dyn_cast<IntLitExpr>(index->index);
           key && objectType && objectType->isTuple()) {
         field = std::to_string(key->value);

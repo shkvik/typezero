@@ -201,180 +201,183 @@ llvm::Value *RegexLowerer::emitRegexCall(CallExpr *call) {
     return matchShape(result->nonOptional(), call->regex);
   };
 
-  switch (call->builtin) {
-  case Builtin::RegExpNew: {
-    Lowering::Operand pattern =
-        lowering_.refCounts().emitOperand(call->args[0], laterCannotAssign(0));
-    llvm::Value *regex;
-    if (call->args.size() > 1) {
-      Lowering::Operand flags = lowering_.refCounts().emitOperand(call->args[1], true);
-      regex = lowering_.builder_.CreateCall(
-          regexFunction("tz_re_from_string", ptr, {ptr, i64, ptr, i64, i32}),
+  switch (call->builtin()) {
+    case Builtin::RegExpNew: {
+      Lowering::Operand pattern =
+          lowering_.refCounts().emitOperand(call->args[0], laterCannotAssign(0));
+      llvm::Value *regex;
+      if (call->args.size() > 1) {
+        Lowering::Operand flags = lowering_.refCounts().emitOperand(call->args[1], true);
+        regex = lowering_.builder_.CreateCall(
+            regexFunction("tz_re_from_string", ptr, {ptr, i64, ptr, i64, i32}),
+            {lowering_.stringLowerer().stringObj(pattern.value),
+             lowering_.stringLowerer().stringMeta(pattern.value),
+             lowering_.stringLowerer().stringObj(flags.value),
+             lowering_.stringLowerer().stringMeta(flags.value), lowering_.builder_.getInt32(1)},
+            "regex");
+        lowering_.refCounts().dropOperand(flags);
+      } else {
+        regex = lowering_.builder_.CreateCall(
+            regexFunction("tz_re_from_string", ptr, {ptr, i64, ptr, i64, i32}),
+            {lowering_.stringLowerer().stringObj(pattern.value),
+             lowering_.stringLowerer().stringMeta(pattern.value),
+             llvm::ConstantPointerNull::get(lowering_.builder_.getPtrTy()),
+             lowering_.builder_.getInt64(0), lowering_.builder_.getInt32(0)},
+            "regex");
+      }
+      lowering_.refCounts().dropOperand(pattern);
+      return regex;
+    }
+    case Builtin::RegExpParse: {
+      Lowering::Operand pattern =
+          lowering_.refCounts().emitOperand(call->args[0], laterCannotAssign(0));
+      bool given = call->args.size() > 1;
+      Lowering::Operand flags{nullptr, false, nullptr};
+      if (given) {
+        flags = lowering_.refCounts().emitOperand(call->args[1], true);
+      }
+      llvm::Value *null = llvm::ConstantPointerNull::get(ptr);
+      llvm::Value *regex = lowering_.builder_.CreateCall(
+          regexFunction("tz_re_parse", ptr, {ptr, i64, ptr, i64, i32, ptr}),
           {lowering_.stringLowerer().stringObj(pattern.value),
            lowering_.stringLowerer().stringMeta(pattern.value),
-           lowering_.stringLowerer().stringObj(flags.value),
-           lowering_.stringLowerer().stringMeta(flags.value), lowering_.builder_.getInt32(1)},
+           given ? lowering_.stringLowerer().stringObj(flags.value) : null,
+           given ? lowering_.stringLowerer().stringMeta(flags.value)
+                 : lowering_.builder_.getInt64(0),
+           lowering_.builder_.getInt32(given ? 1 : 0),
+           lowering_.resultLowerer().failureMaker(call->type->errType())},
           "regex");
-      lowering_.refCounts().dropOperand(flags);
-    } else {
-      regex = lowering_.builder_.CreateCall(
-          regexFunction("tz_re_from_string", ptr, {ptr, i64, ptr, i64, i32}),
-          {lowering_.stringLowerer().stringObj(pattern.value),
-           lowering_.stringLowerer().stringMeta(pattern.value),
-           llvm::ConstantPointerNull::get(lowering_.builder_.getPtrTy()),
-           lowering_.builder_.getInt64(0), lowering_.builder_.getInt32(0)},
-          "regex");
+      if (given) {
+        lowering_.refCounts().dropOperand(flags);
+      }
+      lowering_.refCounts().dropOperand(pattern);
+      return lowering_.resultLowerer().catchFailure(regex, call->type, call->loc());
     }
-    lowering_.refCounts().dropOperand(pattern);
-    return regex;
-  }
-  case Builtin::RegExpParse: {
-    Lowering::Operand pattern =
-        lowering_.refCounts().emitOperand(call->args[0], laterCannotAssign(0));
-    bool given = call->args.size() > 1;
-    Lowering::Operand flags{nullptr, false, nullptr};
-    if (given) {
-      flags = lowering_.refCounts().emitOperand(call->args[1], true);
+    case Builtin::RegExpEscape: {
+      Lowering::Operand text = lowering_.refCounts().emitOperand(call->args[0], true);
+      llvm::Value *result = lowering_.stringLowerer().callReturningString(
+          regexFunction("tz_re_escape", voidTy, {ptr, ptr, i64}),
+          {lowering_.stringLowerer().stringObj(text.value),
+           lowering_.stringLowerer().stringMeta(text.value)});
+      lowering_.refCounts().dropOperand(text);
+      return result;
     }
-    llvm::Value *null = llvm::ConstantPointerNull::get(ptr);
-    llvm::Value *regex = lowering_.builder_.CreateCall(
-        regexFunction("tz_re_parse", ptr, {ptr, i64, ptr, i64, i32, ptr}),
-        {lowering_.stringLowerer().stringObj(pattern.value),
-         lowering_.stringLowerer().stringMeta(pattern.value),
-         given ? lowering_.stringLowerer().stringObj(flags.value) : null,
-         given ? lowering_.stringLowerer().stringMeta(flags.value) : lowering_.builder_.getInt64(0),
-         lowering_.builder_.getInt32(given ? 1 : 0),
-         lowering_.resultLowerer().failureMaker(call->type->errType())},
-        "regex");
-    if (given) {
-      lowering_.refCounts().dropOperand(flags);
+    case Builtin::RegExpToString:
+    case Builtin::RegExpSource:
+    case Builtin::RegExpFlags:
+    case Builtin::RegExpFlag: {
+      Expr *object = call->builtin() == Builtin::RegExpToString ? call->args[0] : member->object;
+      Lowering::Operand regex = lowering_.refCounts().emitOperand(object, true);
+      llvm::Value *result;
+      if (call->builtin() == Builtin::RegExpFlag) {
+        result = lowering_.builder_.CreateCall(
+            regexFunction("tz_re_flag", i32, {ptr, i64}),
+            {regex.value, lowering_.exprLowerer().emitExpr(call->args[0])});
+        result = lowering_.builder_.CreateICmpNE(result, lowering_.builder_.getInt32(0));
+      } else {
+        llvm::StringRef name = call->builtin() == Builtin::RegExpToString ? "tz_re_to_string"
+                               : call->builtin() == Builtin::RegExpSource ? "tz_re_source"
+                                                                          : "tz_re_flags_text";
+        result = lowering_.stringLowerer().callReturningString(
+            regexFunction(name, voidTy, {ptr, ptr}), {regex.value});
+      }
+      lowering_.refCounts().dropOperand(regex);
+      return result;
     }
-    lowering_.refCounts().dropOperand(pattern);
-    return lowering_.resultLowerer().catchFailure(regex, call->type, call->loc());
-  }
-  case Builtin::RegExpEscape: {
-    Lowering::Operand text = lowering_.refCounts().emitOperand(call->args[0], true);
-    llvm::Value *result = lowering_.stringLowerer().callReturningString(
-        regexFunction("tz_re_escape", voidTy, {ptr, ptr, i64}),
-        {lowering_.stringLowerer().stringObj(text.value),
-         lowering_.stringLowerer().stringMeta(text.value)});
-    lowering_.refCounts().dropOperand(text);
-    return result;
-  }
-  case Builtin::RegExpToString:
-  case Builtin::RegExpSource:
-  case Builtin::RegExpFlags:
-  case Builtin::RegExpFlag: {
-    Expr *object = call->builtin == Builtin::RegExpToString ? call->args[0] : member->object;
-    Lowering::Operand regex = lowering_.refCounts().emitOperand(object, true);
-    llvm::Value *result;
-    if (call->builtin == Builtin::RegExpFlag) {
-      result = lowering_.builder_.CreateCall(
-          regexFunction("tz_re_flag", i32, {ptr, i64}),
-          {regex.value, lowering_.exprLowerer().emitExpr(call->args[0])});
-      result = lowering_.builder_.CreateICmpNE(result, lowering_.builder_.getInt32(0));
-    } else {
-      llvm::StringRef name = call->builtin == Builtin::RegExpToString ? "tz_re_to_string"
-                             : call->builtin == Builtin::RegExpSource ? "tz_re_source"
-                                                                      : "tz_re_flags_text";
-      result = lowering_.stringLowerer().callReturningString(
-          regexFunction(name, voidTy, {ptr, ptr}), {regex.value});
+    case Builtin::RegExpTest:
+    case Builtin::RegExpExec: {
+      Lowering::Operand regex =
+          lowering_.refCounts().emitOperand(member->object, laterCannotAssign(-1));
+      Lowering::Operand text = lowering_.refCounts().emitOperand(call->args[0], true);
+      llvm::Value *result;
+      if (call->builtin() == Builtin::RegExpTest) {
+        result = lowering_.builder_.CreateCall(regexFunction("tz_re_test", i32, {ptr, ptr, i64}),
+                                               {regex.value,
+                                                lowering_.stringLowerer().stringObj(text.value),
+                                                lowering_.stringLowerer().stringMeta(text.value)});
+        result = lowering_.builder_.CreateICmpNE(result, lowering_.builder_.getInt32(0));
+      } else {
+        result = lowering_.builder_.CreateCall(
+            regexFunction("tz_re_exec", ptr, {ptr, ptr, i64, ptr}),
+            {regex.value, lowering_.stringLowerer().stringObj(text.value),
+             lowering_.stringLowerer().stringMeta(text.value), shapeFor(call->type)},
+            "match");
+      }
+      lowering_.refCounts().dropOperand(text);
+      lowering_.refCounts().dropOperand(regex);
+      return result;
     }
-    lowering_.refCounts().dropOperand(regex);
-    return result;
-  }
-  case Builtin::RegExpTest:
-  case Builtin::RegExpExec: {
-    Lowering::Operand regex =
-        lowering_.refCounts().emitOperand(member->object, laterCannotAssign(-1));
-    Lowering::Operand text = lowering_.refCounts().emitOperand(call->args[0], true);
-    llvm::Value *result;
-    if (call->builtin == Builtin::RegExpTest) {
-      result = lowering_.builder_.CreateCall(regexFunction("tz_re_test", i32, {ptr, ptr, i64}),
-                                             {regex.value,
-                                              lowering_.stringLowerer().stringObj(text.value),
-                                              lowering_.stringLowerer().stringMeta(text.value)});
-      result = lowering_.builder_.CreateICmpNE(result, lowering_.builder_.getInt32(0));
-    } else {
-      result = lowering_.builder_.CreateCall(
-          regexFunction("tz_re_exec", ptr, {ptr, ptr, i64, ptr}),
-          {regex.value, lowering_.stringLowerer().stringObj(text.value),
-           lowering_.stringLowerer().stringMeta(text.value), shapeFor(call->type)},
-          "match");
+    case Builtin::StrReplaceRegexFn:
+      return emitReplaceWith(call);
+    case Builtin::StrMatchAll: {
+      std::vector<llvm::Value *> operands =
+          lowering_.exprLowerer().emitExprs({member->object, call->args[0]});
+      llvm::Value *text = operands[0], *regex = operands[1];
+      if (!call->regex) {
+        lowering_.builder_.CreateCall(regexFunction("tz_re_check_match_all", voidTy, {ptr}),
+                                      {regex});
+      }
+      llvm::Function *fn = lowering_.generatorLowerer().iteratorFunction(
+          Builtin::StrMatchAll, Type::string(), call->args[0]->type, call->type);
+      return lowering_.builder_.CreateCall(fn, {text, regex, shapeFor(call->type->yielded())},
+                                           "matches");
     }
-    lowering_.refCounts().dropOperand(text);
-    lowering_.refCounts().dropOperand(regex);
-    return result;
-  }
-  case Builtin::StrReplaceRegexFn:
-    return emitReplaceWith(call);
-  case Builtin::StrMatchAll: {
-    std::vector<llvm::Value *> operands =
-        lowering_.exprLowerer().emitExprs({member->object, call->args[0]});
-    llvm::Value *text = operands[0], *regex = operands[1];
-    if (!call->regex) {
-      lowering_.builder_.CreateCall(regexFunction("tz_re_check_match_all", voidTy, {ptr}), {regex});
-    }
-    llvm::Function *fn = lowering_.generatorLowerer().iteratorFunction(
-        Builtin::StrMatchAll, Type::string(), call->args[0]->type, call->type);
-    return lowering_.builder_.CreateCall(fn, {text, regex, shapeFor(call->type->yielded())},
-                                         "matches");
-  }
-  default:
-    break;
+    default:
+      break;
   }
 
   Lowering::Operand text = lowering_.refCounts().emitOperand(member->object, laterCannotAssign(-1));
   Lowering::Operand regex = lowering_.refCounts().emitOperand(call->args[0], laterCannotAssign(0));
   Lowering::Operand replacement{nullptr, false, Type::string()};
   llvm::Value *limit = lowering_.builder_.getInt64(0), *hasLimit = lowering_.builder_.getInt32(0);
-  if (call->builtin == Builtin::StrReplaceRegex) {
+  if (call->builtin() == Builtin::StrReplaceRegex) {
     replacement = lowering_.refCounts().emitOperand(call->args[1], true);
-  } else if (call->builtin == Builtin::StrSplitRegex && call->args.size() > 1) {
+  } else if (call->builtin() == Builtin::StrSplitRegex && call->args.size() > 1) {
     limit = lowering_.builder_.CreateSExt(lowering_.exprLowerer().emitExpr(call->args[1]), i64);
     hasLimit = lowering_.builder_.getInt32(1);
   }
   llvm::Value *obj = lowering_.stringLowerer().stringObj(text.value),
               *meta = lowering_.stringLowerer().stringMeta(text.value);
   llvm::Value *result = nullptr;
-  switch (call->builtin) {
-  case Builtin::StrMatch:
-    result = lowering_.builder_.CreateCall(regexFunction("tz_re_exec", ptr, {ptr, ptr, i64, ptr}),
-                                           {regex.value, obj, meta, shapeFor(call->type)}, "match");
-    break;
-  case Builtin::StrMatchGlobal:
-    result = lowering_.builder_.CreateCall(
-        regexFunction("tz_re_match_global", ptr, {ptr, ptr, i64, ptr}),
-        {regex.value, obj, meta, lowering_.typeDescriptors().typeDescriptor(Type::string())},
-        "texts");
-    result = lowering_.optionalLowerer().makeOptional(
-        result, lowering_.builder_.CreateIsNotNull(result), call->type);
-    break;
-  case Builtin::StrSearch:
-    result = lowering_.builder_.CreateSExt(
-        lowering_.builder_.CreateCall(regexFunction("tz_re_search", i32, {ptr, ptr, i64}),
-                                      {regex.value, obj, meta}),
-        lowering_.builder_.getInt64Ty());
-    break;
-  case Builtin::StrReplaceRegex: {
-    result = lowering_.stringLowerer().callReturningString(
-        regexFunction("tz_re_replace", voidTy, {ptr, ptr, ptr, i64, ptr, i64, i32}),
-        {regex.value, obj, meta, lowering_.stringLowerer().stringObj(replacement.value),
-         lowering_.stringLowerer().stringMeta(replacement.value),
-         lowering_.builder_.getInt32(member->name == "replaceAll")});
-    lowering_.refCounts().dropOperand(replacement);
-    break;
-  }
-  case Builtin::StrSplitRegex: {
-    result = lowering_.builder_.CreateCall(
-        regexFunction("tz_re_split", ptr, {ptr, ptr, i64, i64, i32, ptr}),
-        {regex.value, obj, meta, limit, hasLimit,
-         lowering_.typeDescriptors().typeDescriptor(call->type->inner())},
-        "split");
-    break;
-  }
-  default:
-    llvm_unreachable("not a method that takes a regex");
+  switch (call->builtin()) {
+    case Builtin::StrMatch:
+      result =
+          lowering_.builder_.CreateCall(regexFunction("tz_re_exec", ptr, {ptr, ptr, i64, ptr}),
+                                        {regex.value, obj, meta, shapeFor(call->type)}, "match");
+      break;
+    case Builtin::StrMatchGlobal:
+      result = lowering_.builder_.CreateCall(
+          regexFunction("tz_re_match_global", ptr, {ptr, ptr, i64, ptr}),
+          {regex.value, obj, meta, lowering_.typeDescriptors().typeDescriptor(Type::string())},
+          "texts");
+      result = lowering_.optionalLowerer().makeOptional(
+          result, lowering_.builder_.CreateIsNotNull(result), call->type);
+      break;
+    case Builtin::StrSearch:
+      result = lowering_.builder_.CreateSExt(
+          lowering_.builder_.CreateCall(regexFunction("tz_re_search", i32, {ptr, ptr, i64}),
+                                        {regex.value, obj, meta}),
+          lowering_.builder_.getInt64Ty());
+      break;
+    case Builtin::StrReplaceRegex: {
+      result = lowering_.stringLowerer().callReturningString(
+          regexFunction("tz_re_replace", voidTy, {ptr, ptr, ptr, i64, ptr, i64, i32}),
+          {regex.value, obj, meta, lowering_.stringLowerer().stringObj(replacement.value),
+           lowering_.stringLowerer().stringMeta(replacement.value),
+           lowering_.builder_.getInt32(member->name == "replaceAll")});
+      lowering_.refCounts().dropOperand(replacement);
+      break;
+    }
+    case Builtin::StrSplitRegex: {
+      result = lowering_.builder_.CreateCall(
+          regexFunction("tz_re_split", ptr, {ptr, ptr, i64, i64, i32, ptr}),
+          {regex.value, obj, meta, limit, hasLimit,
+           lowering_.typeDescriptors().typeDescriptor(call->type->inner())},
+          "split");
+      break;
+    }
+    default:
+      llvm_unreachable("not a method that takes a regex");
   }
   lowering_.refCounts().dropOperand(regex);
   lowering_.refCounts().dropOperand(text);

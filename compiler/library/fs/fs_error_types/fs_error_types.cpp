@@ -330,54 +330,54 @@ const Type *FsErrorTypes::ofCall(const CallExpr *call) {
   auto arg = [&](size_t i) -> const Expr * {
     return i < call->args.size() ? call->args[i] : nullptr;
   };
-  switch (call->builtin) {
-  case Builtin::FsReadFile:
-    return named("ReadFileError");
-  case Builtin::FsWriteFile: {
-    std::string flag = textOf(arg(2));
-    bool append = flag.find('a') != std::string::npos;
-    bool fresh = flag.find('x') != std::string::npos;
-    if (append) {
-      return named(fresh ? "AppendNewFileError" : "AppendFileError");
+  switch (call->builtin()) {
+    case Builtin::FsReadFile:
+      return named("ReadFileError");
+    case Builtin::FsWriteFile: {
+      std::string flag = textOf(arg(2));
+      bool append = flag.find('a') != std::string::npos;
+      bool fresh = flag.find('x') != std::string::npos;
+      if (append) {
+        return named(fresh ? "AppendNewFileError" : "AppendFileError");
+      }
+      return named(fresh ? "WriteNewFileError" : "WriteFileError");
     }
-    return named(fresh ? "WriteNewFileError" : "WriteFileError");
-  }
-  case Builtin::FsAccess:
-    return named("AccessError");
-  case Builtin::FsChmod:
-    return named("ChangeModeError");
-  case Builtin::FsTruncate:
-    return named("TruncateError");
-  case Builtin::FsStat: {
-    bool follow = literalTrue(arg(1));
-    bool throwIfMissing = literalTrue(arg(2));
-    if (follow) {
-      return named(throwIfMissing ? "StatusError" : "StatusIfExistsError");
+    case Builtin::FsAccess:
+      return named("AccessError");
+    case Builtin::FsChmod:
+      return named("ChangeModeError");
+    case Builtin::FsTruncate:
+      return named("TruncateError");
+    case Builtin::FsStat: {
+      bool follow = literalTrue(arg(1));
+      bool throwIfMissing = literalTrue(arg(2));
+      if (follow) {
+        return named(throwIfMissing ? "StatusError" : "StatusIfExistsError");
+      }
+      return named(throwIfMissing ? "LinkStatusError" : "LinkStatusIfExistsError");
     }
-    return named(throwIfMissing ? "LinkStatusError" : "LinkStatusIfExistsError");
-  }
-  case Builtin::FsReaddir:
-    return named("ReadDirectoryError");
-  case Builtin::FsMkdir:
-    return named("MakeDirectoryError");
-  case Builtin::FsMkdtemp:
-    return named("MakeTemporaryDirectoryError");
-  case Builtin::FsRmdir:
-    return named("RemoveDirectoryError");
-  case Builtin::FsUnlink:
-    return named("UnlinkError");
-  case Builtin::FsRm:
-    return named(literalTrue(arg(2)) ? "ForceRemoveError" : "RemoveError");
-  case Builtin::FsRename:
-    return named("RenameError");
-  case Builtin::FsReplace:
-    return named("ReplaceError");
-  case Builtin::FsCopyFile:
-    return named("CopyFileError");
-  case Builtin::FsRealpath:
-    return named("RealPathError");
-  default:
-    return Type::error();
+    case Builtin::FsReaddir:
+      return named("ReadDirectoryError");
+    case Builtin::FsMkdir:
+      return named("MakeDirectoryError");
+    case Builtin::FsMkdtemp:
+      return named("MakeTemporaryDirectoryError");
+    case Builtin::FsRmdir:
+      return named("RemoveDirectoryError");
+    case Builtin::FsUnlink:
+      return named("UnlinkError");
+    case Builtin::FsRm:
+      return named(literalTrue(arg(2)) ? "ForceRemoveError" : "RemoveError");
+    case Builtin::FsRename:
+      return named("RenameError");
+    case Builtin::FsReplace:
+      return named("ReplaceError");
+    case Builtin::FsCopyFile:
+      return named("CopyFileError");
+    case Builtin::FsRealpath:
+      return named("RealPathError");
+    default:
+      return Type::error();
   }
 }
 

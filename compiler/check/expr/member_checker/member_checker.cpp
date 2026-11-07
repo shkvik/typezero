@@ -50,12 +50,12 @@ Expr *MemberChecker::checkMember(MemberExpr *member, const Type *expected) {
     return part;
   }
   if (auto *name = dyn_cast<NameExpr>(member->object)) {
-    Checker::ScopeEntry entry = checker_.scopes().lookup(name->name);
-    if (entry.enumDecl) {
-      return checker_.typeDeclarer().checkEnumMember(entry.enumDecl, member, expected);
+    ScopeEntry entry = checker_.scopes().lookup(name->name);
+    if (entry.enumDecl()) {
+      return checker_.typeDeclarer().checkEnumMember(entry.enumDecl(), member, expected);
     }
-    if (entry.cls) {
-      return checker_.staticChecker().checkStaticMember(member, entry.cls, expected);
+    if (entry.cls()) {
+      return checker_.staticChecker().checkStaticMember(member, entry.cls(), expected);
     }
   }
   if (Expr *node = checker_.builtinModuleChecker().checkNodeMember(member)) {
@@ -250,7 +250,7 @@ Expr *MemberChecker::checkIndex(IndexExpr *index) {
     return part;
   }
   if (auto *name = dyn_cast<NameExpr>(index->object)) {
-    if (EnumDecl *decl = checker_.scopes().lookup(name->name).enumDecl) {
+    if (EnumDecl *decl = checker_.scopes().lookup(name->name).enumDecl()) {
       return checker_.typeDeclarer().checkEnumIndex(decl, index);
     }
   }
@@ -322,7 +322,9 @@ Expr *MemberChecker::checkIndex(IndexExpr *index) {
     return index;
   }
   bool inRange = checker_.indexProofs().provesInBounds(index->object, index->index, false);
-  index->mayBeOutOfRange = !inRange;
+  if (ElementIndex *access = index->form.as<ElementIndex>()) {
+    access->mayBeOutOfRange = !inRange;
+  }
   index->type = inRange ? element : Type::optional(element);
 
   return index;

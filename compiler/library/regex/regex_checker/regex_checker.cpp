@@ -118,8 +118,8 @@ const RegexLitExpr *RegexChecker::knownRegex(const Expr *expr) {
   if (auto *lit = dyn_cast<RegexLitExpr>(expr)) {
     return lit->program.empty() ? nullptr : lit;
   }
-  if (auto *name = dyn_cast<NameExpr>(expr); name && name->var) {
-    return name->var->regex();
+  if (auto *name = dyn_cast<NameExpr>(expr); name && name->var()) {
+    return name->var()->regex();
   }
 
   return nullptr;
@@ -211,7 +211,8 @@ Expr *RegexChecker::checkRegexMethod(CallExpr *call, MemberExpr *member) {
           "(lastIndex), so the same call can give true and then false; remove 'g'");
       return call;
     }
-    call->builtin = name == "test" ? Builtin::RegExpTest : Builtin::RegExpExec;
+    call->target =
+        BuiltinCall{.builtin = name == "test" ? Builtin::RegExpTest : Builtin::RegExpExec};
     call->type = name == "test" ? Type::boolTy() : Type::optional(matchType(regex));
     return call;
   }
@@ -220,7 +221,7 @@ Expr *RegexChecker::checkRegexMethod(CallExpr *call, MemberExpr *member) {
       return call;
     }
     call->args.push_back(regexToString(member->object));
-    call->builtin = Builtin::StringOf;
+    call->target = BuiltinCall{.builtin = Builtin::StringOf};
     call->type = Type::string();
     return call;
   }
@@ -338,7 +339,7 @@ Expr *RegexChecker::checkRegExpStatic(CallExpr *call, MemberExpr *member) {
     for (Expr *&arg : call->args) {
       arg = checker_.argumentChecker().checkArg(arg, Type::string());
     }
-    call->builtin = Builtin::RegExpParse;
+    call->target = BuiltinCall{.builtin = Builtin::RegExpParse};
     call->type = Type::result(Type::regExp(), checker_.prelude().builtinType("RegexError"));
     return call;
   }
@@ -354,7 +355,7 @@ Expr *RegexChecker::checkRegExpStatic(CallExpr *call, MemberExpr *member) {
     return call;
   }
   call->args[0] = checker_.argumentChecker().checkArg(call->args[0], Type::string());
-  call->builtin = Builtin::RegExpEscape;
+  call->target = BuiltinCall{.builtin = Builtin::RegExpEscape};
   call->type = Type::string();
 
   return call;

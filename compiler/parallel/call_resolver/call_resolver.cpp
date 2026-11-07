@@ -71,12 +71,12 @@ void CallResolver::resolve() {
         if (rec.reflect != CallRec::Reflect::None) {
           std::vector<const ClassDecl *> classes = analysis_.programClasses;
           for (const ClassDecl *cls : analysis_.classes) {
-            if (!cls->library && !llvm::is_contained(classes, cls)) {
+            if (!cls->library() && !llvm::is_contained(classes, cls)) {
               classes.push_back(cls);
             }
           }
           for (const ClassDecl *cls : classes) {
-            if (cls->generic) {
+            if (cls->generic()) {
               continue;
             }
             if (rec.reflect == CallRec::Reflect::Apply) {
@@ -159,7 +159,7 @@ void CallResolver::resolve() {
           for (size_t k = 0; k < analysis_.classes.size(); ++k) {
             const ClassDecl *cls = analysis_.classes[k];
             if (!cls->type ||
-                !(cls->literal || analysis_.aliasAnalysis.typesMayAlias(cls->type, object))) {
+                !(cls->literal() || analysis_.aliasAnalysis.typesMayAlias(cls->type, object))) {
               continue;
             }
             for (const FunctionDecl *method : cls->methods) {
@@ -305,7 +305,7 @@ const Expr *CallResolver::argument(const CallRec &rec, size_t index) {
   if (!n) {
     return nullptr;
   }
-  const std::vector<Expr *> &args = n->ctor ? n->ctor->args : n->args;
+  const std::vector<Expr *> &args = n->ctor() ? n->ctor()->args : n->args;
 
   return index < args.size() ? args[index] : nullptr;
 }
@@ -316,11 +316,11 @@ const FunctionDecl *CallResolver::functionOf(const Expr *e) {
     return fe->fn;
   }
   auto *n = dyn_cast_or_null<NameExpr>(e);
-  if (n && n->func) {
-    return n->func->decl;
+  if (n && n->func()) {
+    return n->func()->decl;
   }
-  if (n && n->var && !n->var->reassigned && (n->var->lambda() || n->var->function())) {
-    return n->var->lambda() ? n->var->lambda() : n->var->function();
+  if (n && n->var() && !n->var()->reassigned && (n->var()->lambda() || n->var()->function())) {
+    return n->var()->lambda() ? n->var()->lambda() : n->var()->function();
   }
 
   return nullptr;
@@ -328,12 +328,12 @@ const FunctionDecl *CallResolver::functionOf(const Expr *e) {
 
 const VarSymbol *CallResolver::callableParam(const FunctionDecl *fn, const Expr *e) {
   auto *n = dyn_cast_or_null<NameExpr>(strip(e));
-  if (!fn || !n || !n->var || n->var->reassigned) {
+  if (!fn || !n || !n->var() || n->var()->reassigned) {
     return nullptr;
   }
-  bool param = llvm::any_of(fn->params, [&](const Param &p) { return p.sym == n->var; });
+  bool param = llvm::any_of(fn->params, [&](const Param &p) { return p.sym == n->var(); });
 
-  return param ? n->var : nullptr;
+  return param ? n->var() : nullptr;
 }
 
 std::optional<Ref> CallResolver::bind(const std::optional<Ref> &self,

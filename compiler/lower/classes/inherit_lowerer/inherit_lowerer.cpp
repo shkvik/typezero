@@ -382,7 +382,8 @@ std::pair<llvm::Function *, llvm::Constant *> InheritLowerer::fieldStub(const Ty
 llvm::Value *InheritLowerer::emitInterfaceCall(CallExpr *call) {
   auto *member = cast<MemberExpr>(call->callee);
   const Type *iface = member->object->type;
-  const Lowering::InterfaceMember *method = dispatchedMember(iface, member->name, call->signature);
+  const Lowering::InterfaceMember *method =
+      dispatchedMember(iface, member->name, call->signature());
   const Type *fnType = member->type;
   if (!method) {
     for (Expr *arg : call->args) {

@@ -65,12 +65,12 @@ std::string utf8(const std::u16string &units) {
 bool isLibraryClass(const Type *type, llvm::StringRef name) {
   const ClassDecl *cls = type ? type->nonOptional()->classDecl() : nullptr;
 
-  return cls && cls->library && cls->name == name;
+  return cls && cls->library() && cls->name == name;
 }
 
 const ObjectLitExpr::Property *property(const ObjectLitExpr *lit, llvm::StringRef name) {
   for (const ObjectLitExpr::Property &p : lit->props) {
-    if (!p.spread && !p.key && p.value && p.name == name) {
+    if (!p.spread() && !p.key() && p.value && p.name == name) {
       return &p;
     }
   }
@@ -130,7 +130,7 @@ void HttpChecker::checkHeadersInit(const Expr *init) {
   init = UrlChecker::unconverted(init);
   if (auto *lit = dyn_cast<ObjectLitExpr>(init)) {
     for (const ObjectLitExpr::Property &p : lit->props) {
-      if (p.spread || p.key || !p.value) {
+      if (p.spread() || p.key() || !p.value) {
         continue;
       }
       if (!isToken(p.name)) {
@@ -156,7 +156,7 @@ void HttpChecker::checkHeadersInit(const Expr *init) {
 }
 
 void HttpChecker::checkHeadersNew(NewExpr *expr) {
-  const std::vector<Expr *> &args = expr->ctor ? expr->ctor->args : expr->args;
+  const std::vector<Expr *> &args = expr->ctor() ? expr->ctor()->args : expr->args;
   if (inProgram(expr) && !args.empty()) {
     checkHeadersInit(args[0]);
   }
@@ -179,7 +179,7 @@ void HttpChecker::checkResponseNew(NewExpr *expr) {
   if (!inProgram(expr)) {
     return;
   }
-  const std::vector<Expr *> &args = expr->ctor ? expr->ctor->args : expr->args;
+  const std::vector<Expr *> &args = expr->ctor() ? expr->ctor()->args : expr->args;
   if (args.size() < 2) {
     return;
   }
@@ -188,7 +188,7 @@ void HttpChecker::checkResponseNew(NewExpr *expr) {
     return;
   }
   for (const ObjectLitExpr::Property &p : init->props) {
-    if (p.spread || p.key || !p.value) {
+    if (p.spread() || p.key() || !p.value) {
       continue;
     }
     const Expr *value = UrlChecker::unconverted(p.value);
@@ -220,7 +220,7 @@ void HttpChecker::checkRequestNew(NewExpr *expr) {
   if (!inProgram(expr)) {
     return;
   }
-  const std::vector<Expr *> &args = expr->ctor ? expr->ctor->args : expr->args;
+  const std::vector<Expr *> &args = expr->ctor() ? expr->ctor()->args : expr->args;
   if (args.empty() || llvm::any_of(args, [](const Expr *a) { return a->type->isError(); })) {
     return;
   }

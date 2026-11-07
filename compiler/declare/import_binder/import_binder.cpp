@@ -83,8 +83,7 @@ void ImportBinder::bindImports() {
       continue;
     }
     checker_.typeScopes_[0].try_emplace(entry.getKey(), cls);
-    checker_.scopes_[0].try_emplace(entry.getKey(),
-                                    Checker::ScopeEntry{nullptr, nullptr, nullptr, cls});
+    checker_.scopes_[0].try_emplace(entry.getKey(), ScopeEntry{ClassEntry{.cls = cls}});
   }
   for (const auto &entry : here.imports) {
     llvm::StringRef alias = entry.getKey();
@@ -98,7 +97,7 @@ void ImportBinder::bindImports() {
         checker_.typeScopes_[0][alias] = type;
       }
     }
-    const llvm::StringMap<Checker::ScopeEntry> &values =
+    const llvm::StringMap<ScopeEntry> &values =
         source == checker_.module_ ? checker_.scopes_[0] : checker_.state(source).values;
     if (checker_.scopes_[0].count(alias)) {
       continue;
@@ -107,13 +106,13 @@ void ImportBinder::bindImports() {
     if (found == values.end()) {
       continue;
     }
-    Checker::ScopeEntry value = found->second;
-    if (!value.var && !value.func && !value.enumDecl && !value.cls) {
+    ScopeEntry value = found->second;
+    if (!value.found()) {
       continue;
     }
     checker_.scopes_[0][alias] = value;
-    if (value.var && source != checker_.module_) {
-      here.importedVars.insert(value.var);
+    if (value.var() && source != checker_.module_) {
+      here.importedVars.insert(value.var());
     }
   }
 }
@@ -133,14 +132,14 @@ FunctionDecl *ImportBinder::cycleCallee(FunctionDecl *fn, llvm::StringRef name) 
   if (!home) {
     return nullptr;
   }
-  const llvm::StringMap<Checker::ScopeEntry> &values =
+  const llvm::StringMap<ScopeEntry> &values =
       home == checker_.module_ ? checker_.scopes_[0] : checker_.state(home).values;
   auto found = values.find(name);
-  if (found == values.end() || !found->second.func) {
+  if (found == values.end() || !found->second.func()) {
     return nullptr;
   }
 
-  return found->second.func->decl;
+  return found->second.func()->decl;
 }
 
 }

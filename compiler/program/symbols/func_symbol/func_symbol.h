@@ -20,6 +20,11 @@ namespace tz {
 struct FunctionDecl;
 class Type;
 
+struct TypePredicate {
+  int param = -1;
+  const Type *type = nullptr;
+};
+
 struct FuncSymbol {
   llvm::StringRef name;
   llvm::SMLoc loc;
@@ -36,8 +41,7 @@ struct FuncSymbol {
   std::vector<const Type *> typeParams;
   std::vector<const Type *> typeDefaults;
   bool isGeneric() const { return !typeParams.empty(); }
-  int predicateParam = -2;
-  const Type *predicateType = nullptr;
+  std::optional<TypePredicate> predicate;
 };
 
 }

@@ -175,7 +175,7 @@ void HeldValueChecker::walkProgram() {
     }
     if (auto *cls = dyn_cast<ClassDecl>(item)) {
       for (const FunctionDecl *fn : cls->methods) {
-        if (fn->typeParams.empty() && (fn->isStatic() ? !cls->generic : cls->isEmitted())) {
+        if (fn->typeParams.empty() && (fn->isStatic() ? !cls->generic() : cls->isEmitted())) {
           function(fn);
         }
       }
@@ -226,7 +226,7 @@ void HeldValueChecker::topLevel(const Stmt *s) {
   current_ = nullptr;
   if (auto *decl = dyn_cast<VarDeclStmt>(s); decl && decl->isConst) {
     for (const VarDeclarator &d : decl->decls) {
-      if (!d.destructured) {
+      if (!d.destructured()) {
         allowedNews_.insert(bare(d.init));
       }
     }
@@ -252,7 +252,7 @@ void HeldValueChecker::stmt(const Stmt *s) {
   case Stmt::Kind::VarDecl:
     for (const VarDeclarator &d : cast<VarDeclStmt>(s)->decls) {
       expr(d.init);
-      if (!d.sym || d.destructured || !isHeld(d.init)) {
+      if (!d.sym || d.destructured() || !isHeld(d.init)) {
         continue;
       }
       if (d.sym->isGlobal()) {
@@ -361,11 +361,11 @@ void HeldValueChecker::expr(const Expr *e) {
   }
   case Expr::Kind::ObjectLit:
     for (const ObjectLitExpr::Property &p : cast<ObjectLitExpr>(e)->props) {
-      expr(p.key);
+      expr(p.key());
       expr(p.value);
-      if (p.spread && isHeld(p.value)) {
+      if (p.spread() && isHeld(p.value)) {
         spreadKept(p.value);
-      } else if (!p.spread && isHeld(p.value) && !allowedStores_.contains(e)) {
+      } else if (!p.spread() && isHeld(p.value) && !allowedStores_.contains(e)) {
         keep(p.value, "in a new object");
       }
     }
@@ -409,7 +409,7 @@ void HeldValueChecker::call(const CallExpr *c) {
     }
   }
   if (auto *member = dyn_cast_or_null<MemberExpr>(c->callee);
-      member && target && c->method && isHeld(member->object)) {
+      member && target && c->method() && isHeld(member->object)) {
     markThis(target);
   }
   if (over) {
@@ -428,8 +428,8 @@ void HeldValueChecker::passed(const CallExpr *c, const FunctionDecl *target, llv
       markParam(target, i);
       continue;
     }
-    if (parallel::onlyReadsArgs(c->builtin) || c->builtin == Builtin::ResultOk ||
-        c->builtin == Builtin::ResultErr) {
+    if (parallel::onlyReadsArgs(c->builtin()) || c->builtin() == Builtin::ResultOk ||
+        c->builtin() == Builtin::ResultErr) {
       continue;
     }
     if (auto *fe = dyn_cast<FunctionExpr>(bare(arg)); fe && fe->fn->nonEscaping) {
@@ -444,12 +444,12 @@ void HeldValueChecker::passed(const CallExpr *c, const FunctionDecl *target, llv
 }
 
 void HeldValueChecker::create(const NewExpr *n) {
-  const std::vector<Expr *> &args = n->ctor ? n->ctor->args : n->args;
+  const std::vector<Expr *> &args = n->ctor() ? n->ctor()->args : n->args;
   for (const Expr *arg : args) {
     expr(arg);
   }
   sawNew(n);
-  const FunctionDecl *target = n->ctor ? programTarget(n->ctor) : nullptr;
+  const FunctionDecl *target = n->ctor() ? programTarget(n->ctor()) : nullptr;
   if (current_ && target) {
     callees_[current_].push_back(target);
   }
@@ -475,8 +475,8 @@ void HeldValueChecker::assign(const AssignExpr *a) {
     return;
   }
   const Expr *target = bare(a->target);
-  if (auto *name = dyn_cast<NameExpr>(target); name && name->var) {
-    const VarSymbol *var = name->var;
+  if (auto *name = dyn_cast<NameExpr>(target); name && name->var()) {
+    const VarSymbol *var = name->var();
     if (var->isGlobal()) {
       keep(a->value, "in a module variable");
     } else if (var->owner() && var->owner() != current_) {
@@ -504,14 +504,15 @@ bool HeldValueChecker::isHeld(const Expr *e) const {
     if (produces(c)) {
       return true;
     }
-    if ((c->builtin == Builtin::ResultOk || c->builtin == Builtin::ResultErr) && !c->args.empty()) {
+    if ((c->builtin() == Builtin::ResultOk || c->builtin() == Builtin::ResultErr) &&
+        !c->args.empty()) {
       return isHeld(c->args[0]);
     }
     const FunctionDecl *target = programTarget(c);
     return target && returnsHeld_.contains(target);
   }
   case Expr::Kind::Name: {
-    const VarSymbol *var = cast<NameExpr>(e)->var;
+    const VarSymbol *var = cast<NameExpr>(e)->var();
     return var && heldVars_.contains(var);
   }
   case Expr::Kind::Member: {
@@ -610,16 +611,16 @@ const FunctionDecl *HeldValueChecker::callbackOf(const Expr *e) {
     return fe->fn;
   }
   if (auto *name = dyn_cast_or_null<NameExpr>(e)) {
-    if (name->func) {
-      return name->func->decl;
+    if (name->func()) {
+      return name->func()->decl;
     }
-    if (name->var) {
-      return name->var->lambda() ? name->var->lambda() : name->var->function();
+    if (name->var()) {
+      return name->var()->lambda() ? name->var()->lambda() : name->var()->function();
     }
     return nullptr;
   }
-  if (auto *member = dyn_cast_or_null<MemberExpr>(e); member && member->method) {
-    return member->method->decl;
+  if (auto *member = dyn_cast_or_null<MemberExpr>(e); member && member->method()) {
+    return member->method()->decl;
   }
 
   return nullptr;
@@ -627,8 +628,8 @@ const FunctionDecl *HeldValueChecker::callbackOf(const Expr *e) {
 
 const ClassDecl *HeldValueChecker::storageClass(const ClassDecl *cls) {
   for (; cls; cls = cls->parent) {
-    const ClassDecl *base = cls->generic ? cls->generic : cls;
-    if ((base->library || cls->library) && base->name == "AsyncLocalStorage") {
+    const ClassDecl *base = cls->generic() ? cls->generic() : cls;
+    if ((base->library() || cls->library()) && base->name == "AsyncLocalStorage") {
       return base;
     }
   }
@@ -637,7 +638,7 @@ const ClassDecl *HeldValueChecker::storageClass(const ClassDecl *cls) {
 }
 
 bool HeldValueChecker::storageMethod(const CallExpr *c, llvm::StringRef name) {
-  const FunctionDecl *decl = c->method ? c->method->decl : nullptr;
+  const FunctionDecl *decl = c->method() ? c->method()->decl : nullptr;
 
   return decl && decl->name == name && storageClass(decl->cls());
 }
@@ -646,18 +647,20 @@ const VarSymbol *HeldValueChecker::storageOf(const CallExpr *c) {
   auto *member = dyn_cast_or_null<MemberExpr>(c->callee);
   auto *name = member ? dyn_cast_or_null<NameExpr>(bare(member->object)) : nullptr;
 
-  return name ? name->var : nullptr;
+  return name ? name->var() : nullptr;
 }
 
 const FunctionDecl *HeldValueChecker::programTarget(const CallExpr *c) const {
-  if (c->builtin != Builtin::None) {
+  if (c->builtin() != Builtin::None) {
     return nullptr;
   }
-  const FunctionDecl *decl = c->func ? c->func->decl : c->method ? c->method->decl : nullptr;
+  const FunctionDecl *decl = c->func()     ? c->func()->decl
+                             : c->method() ? c->method()->decl
+                                           : nullptr;
   if (!decl) {
     if (auto *name = dyn_cast_or_null<NameExpr>(c->callee);
-        name && name->var && !name->var->reassigned) {
-      decl = name->var->lambda() ? name->var->lambda() : name->var->function();
+        name && name->var() && !name->var()->reassigned) {
+      decl = name->var()->lambda() ? name->var()->lambda() : name->var()->function();
     }
   }
   if (!decl || !decl->body || inLibrary(decl->loc())) {

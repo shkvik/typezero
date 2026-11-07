@@ -35,7 +35,7 @@ std::u16string utf16(llvm::StringRef text) {
 }
 
 bool hasMethodFields(const ClassDecl *cls) {
-  if (cls->literal) {
+  if (cls->literal()) {
     return true;
   }
   for (const ClassDecl *c = cls; c; c = c->parent) {
@@ -123,7 +123,7 @@ Expr *ObjectChecker::checkObjectCall(CallExpr *call, MemberExpr *member, const T
   }
   Expr *&arg = call->args[0];
   if (auto *name = dyn_cast<NameExpr>(arg)) {
-    if (EnumDecl *decl = checker_.scopes().lookup(name->name).enumDecl) {
+    if (EnumDecl *decl = checker_.scopes().lookup(name->name).enumDecl()) {
       return enumMembers(call, decl, fn);
     }
   }
@@ -133,9 +133,9 @@ Expr *ObjectChecker::checkObjectCall(CallExpr *call, MemberExpr *member, const T
     return call;
   }
   if (type->nonOptional()->isJson()) {
-    call->builtin = fn == "keys"     ? Builtin::ObjectKeys
-                    : fn == "values" ? Builtin::ObjectValues
-                                     : Builtin::ObjectEntries;
+    call->target = BuiltinCall{.builtin = fn == "keys"     ? Builtin::ObjectKeys
+                                          : fn == "values" ? Builtin::ObjectValues
+                                                           : Builtin::ObjectEntries};
     const Type *json = Type::json();
     call->type = fn == "keys"     ? Type::array(Type::string())
                  : fn == "values" ? Type::array(json)
@@ -156,7 +156,7 @@ Expr *ObjectChecker::checkObjectCall(CallExpr *call, MemberExpr *member, const T
     return call;
   }
   if (fn == "keys") {
-    call->builtin = Builtin::ObjectKeys;
+    call->target = BuiltinCall{.builtin = Builtin::ObjectKeys};
     call->type = Type::array(Type::string());
     return call;
   }
@@ -213,10 +213,10 @@ Expr *ObjectChecker::checkObjectCall(CallExpr *call, MemberExpr *member, const T
     return call;
   }
   if (fn == "values") {
-    call->builtin = Builtin::ObjectValues;
+    call->target = BuiltinCall{.builtin = Builtin::ObjectValues};
     call->type = Type::array(element);
   } else {
-    call->builtin = Builtin::ObjectEntries;
+    call->target = BuiltinCall{.builtin = Builtin::ObjectEntries};
     call->type = Type::array(Type::tuple({Type::string(), element}));
   }
 
@@ -263,7 +263,7 @@ Expr *ObjectChecker::enumObject(NameExpr *name, const Type *expected) {
   if (!target || !target->isDict()) {
     return nullptr;
   }
-  EnumDecl *decl = checker_.scopes().lookup(name->name).enumDecl;
+  EnumDecl *decl = checker_.scopes().lookup(name->name).enumDecl();
   if (!decl) {
     return nullptr;
   }
@@ -349,7 +349,7 @@ void ObjectChecker::checkForIn(ForOfStmt *stmt) {
   auto *callee =
       checker_.ctx_.make<MemberExpr>(loc, checker_.ctx_.make<NameExpr>(loc, "Object"), "keys");
   auto *keys = checker_.ctx_.make<CallExpr>(loc, callee, std::vector<Expr *>{object});
-  keys->builtin = Builtin::ObjectKeys;
+  keys->target = BuiltinCall{.builtin = Builtin::ObjectKeys};
   keys->type = ok ? Type::array(Type::string()) : Type::error();
   keys->forIn = true;
   stmt->iterable = keys;

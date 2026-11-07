@@ -92,7 +92,7 @@ Expr *ResultMethodChecker::checkResultMethod(CallExpr *call, MemberExpr *member,
     return call;
   }
   Builtin builtin = method->builtin;
-  call->builtin = builtin;
+  call->target = BuiltinCall{.builtin = builtin};
 
   if (builtin == Builtin::ResultIsOk || builtin == Builtin::ResultIsErr) {
     call->type = Type::boolTy();

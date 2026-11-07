@@ -39,7 +39,7 @@ llvm::Value *CallbackMethodLowerer::emitCallbackMethod(CallExpr *call) {
   const Type *element = arrayType->inner();
   const Type *callbackType = call->args[0]->type;
   llvm::Type *i64 = lowering_.builder_.getInt64Ty();
-  Builtin method = call->builtin;
+  Builtin method = call->builtin();
 
   llvm::Value *array = lowering_.exprLowerer().emitExpr(member->object);
   llvm::Value *callback = lowering_.exprLowerer().emitExpr(call->args[0]);

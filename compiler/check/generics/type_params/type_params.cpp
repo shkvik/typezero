@@ -85,11 +85,11 @@ std::vector<const Type *> TypeParams::declareTypeParams(llvm::ArrayRef<TypeParam
       const Type *constraint = nullptr;
       std::vector<const Type *> alternatives;
       bool ok = true;
-      if (ref.kind == TypeRef::Kind::Array && ref.args[0].kind == TypeRef::Kind::Name &&
+      if (ref.kind() == TypeRefKind::ARRAY_REF && ref.args[0].kind() == TypeRefKind::NAME_REF &&
           ref.args[0].name == "unknown") {
         created[i]->setList();
-      } else if (ref.kind == TypeRef::Kind::Name && ref.name == "unknown") {
-      } else if (ref.kind == TypeRef::Kind::Union) {
+      } else if (ref.kind() == TypeRefKind::NAME_REF && ref.name == "unknown") {
+      } else if (ref.kind() == TypeRefKind::UNION_REF) {
         for (const TypeRef &member : ref.args) {
           const Type *type = checker_.typeResolver().resolveType(member, false);
           ok &= !type->isError();
@@ -229,7 +229,7 @@ const Type *TypeParams::substituteAt(const Type *type, llvm::ArrayRef<const Type
       for (const Type *a : type->typeArgs()) {
         newArgs.push_back(held(a));
       }
-      auto *generic = const_cast<ClassDecl *>(cls->generic ? cls->generic : cls);
+      auto *generic = const_cast<ClassDecl *>(cls->generic() ? cls->generic() : cls);
       ClassDecl *inst = checker_.genericClassInstantiator().instantiateClass(
           generic, std::move(newArgs), checker_.instanceLoc_);
       return inst ? inst->type : Type::error();

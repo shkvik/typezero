@@ -44,7 +44,7 @@ void ConsoleLowerer::emitConsoleLog(CallExpr *call) {
     }
   }
 
-  bool toStderr = call->builtin == Builtin::ConsoleError;
+  bool toStderr = call->builtin() == Builtin::ConsoleError;
   if (toStderr) {
     lowering_.builder_.CreateCall(lowering_.processLowerer().processFunction(
         "tz_err_begin", lowering_.builder_.getVoidTy(), {}));

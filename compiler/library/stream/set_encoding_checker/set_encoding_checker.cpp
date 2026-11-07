@@ -44,12 +44,12 @@ const Type *SetEncodingChecker::streamViewOf(const Checker::FieldPath &path,
 
 const Type *SetEncodingChecker::encodedStreamType(ClassDecl *cls, llvm::SMLoc loc) {
   for (ClassDecl *c = cls; c; c = c->parent) {
-    if (!c->library || !c->generic || c->typeArgs.empty()) {
+    if (!c->library() || !c->generic() || c->typeArgs.empty()) {
       continue;
     }
-    llvm::StringRef name = c->generic->name;
+    llvm::StringRef name = c->generic()->name;
     std::vector<const Type *> args;
-    ClassDecl *generic = c->generic;
+    ClassDecl *generic = c->generic();
     if (name == "Readable") {
       args = {Type::string()};
     } else if (name == "Duplex" || name == "Transform") {
@@ -107,7 +107,7 @@ Expr *SetEncodingChecker::checkSetEncoding(CallExpr *call, MemberExpr *member, C
     object = conv->operand;
   }
   bool stdinStream = false;
-  if (auto *c = dyn_cast<CallExpr>(object); c && c->func && c->func->name == "processStdin") {
+  if (auto *c = dyn_cast<CallExpr>(object); c && c->func() && c->func()->name == "processStdin") {
     if (!checker_.module_ || !checker_.module_->isEntry || !checker_.functions_.empty() ||
         checker_.scopes_.size() != 1) {
       checker_.diags_.error(
@@ -119,9 +119,9 @@ Expr *SetEncodingChecker::checkSetEncoding(CallExpr *call, MemberExpr *member, C
     stdinStream = true;
     path = Checker::FieldPath{};
     path->var = checker_.streamSources().processStdinVar();
-  } else if (auto *name = dyn_cast<NameExpr>(object); name && name->var) {
+  } else if (auto *name = dyn_cast<NameExpr>(object); name && name->var()) {
     path = Checker::FieldPath{};
-    path->var = name->var;
+    path->var = name->var();
   } else {
     path = checker_.fieldFacts().fieldPath(object);
   }
@@ -157,7 +157,7 @@ Expr *SetEncodingChecker::checkSetEncoding(CallExpr *call, MemberExpr *member, C
   size_t declared = stdinStream ? 0 : checker_.scopes_.size();
   for (size_t i = checker_.scopes_.size(); i-- > 0 && !stdinStream;) {
     auto found = checker_.scopes_[i].find(root->name);
-    if (found != checker_.scopes_[i].end() && found->second.var == root) {
+    if (found != checker_.scopes_[i].end() && found->second.var() == root) {
       declared = i;
       break;
     }
@@ -199,13 +199,13 @@ Expr *SetEncodingChecker::checkSetEncoding(CallExpr *call, MemberExpr *member, C
     }
     if (stdinStream) {
       if (auto *c = dyn_cast<CallExpr>(e)) {
-        return c->func && c->func->name == "processStdin";
+        return c->func() && c->func()->name == "processStdin";
       }
       return checker_.processChecker().isProcessMember(e, "stdin");
     }
     if (path->names.empty()) {
       auto *name = dyn_cast<NameExpr>(e);
-      return name && (name->var == root || (!name->var && name->name == root->name));
+      return name && (name->var() == root || (!name->var() && name->name == root->name));
     }
     std::optional<Checker::FieldPath> p = checker_.fieldFacts().fieldPath(e);
 

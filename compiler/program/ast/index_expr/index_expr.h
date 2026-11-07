@@ -1,10 +1,40 @@
 #pragma once
 
 #include "compiler/program/ast/expr/expr.h"
+#include "compiler/union/union/union.h"
 
 namespace tz {
 
 struct EnumDecl;
+
+enum class IndexKind {
+  ELEMENT_INDEX,
+  ENUM_NAME_INDEX,
+  KEYED_FIELD_INDEX,
+  NAMED_FIELD_INDEX,
+};
+
+struct ElementIndex {
+  static constexpr IndexKind kind = IndexKind::ELEMENT_INDEX;
+  bool mayBeOutOfRange = false;
+  bool mayAppend = false;
+};
+
+struct EnumNameIndex {
+  static constexpr IndexKind kind = IndexKind::ENUM_NAME_INDEX;
+  EnumDecl *enumDecl = nullptr;
+};
+
+struct KeyedFieldIndex {
+  static constexpr IndexKind kind = IndexKind::KEYED_FIELD_INDEX;
+};
+
+struct NamedFieldIndex {
+  static constexpr IndexKind kind = IndexKind::NAMED_FIELD_INDEX;
+  llvm::StringRef field;
+};
+
+using IndexForm = Union<ElementIndex, EnumNameIndex, KeyedFieldIndex, NamedFieldIndex>;
 
 class IndexExpr : public Expr {
 public:
@@ -15,11 +45,13 @@ public:
   Expr *object;
   Expr *index;
   bool optional = false;
-  bool mayBeOutOfRange = false;
-  bool mayAppend = false;
-  EnumDecl *enumDecl = nullptr;
-  llvm::StringRef field;
-  bool keyed = false;
+  IndexForm form = ElementIndex{};
+
+  bool mayBeOutOfRange() const;
+  bool mayAppend() const;
+  EnumDecl *enumDecl() const;
+  bool keyed() const;
+  llvm::StringRef field() const;
 };
 
 }

@@ -140,28 +140,26 @@ const llvm::StringMap<Checker::Export> &ModuleDeclarer::exportsOf(Module *module
   here.exportsBusy = true;
 
   for (const ExportDecl &decl : module->file.exports) {
-    if (decl.path == "neverthrow") {
-      checker_.diags_.error(decl.pathLoc, "Result, ok and err are built in: remove the export from "
-                                          "'neverthrow'");
+    const ExportSource *source = decl.source();
+    if (source && source->path == "neverthrow") {
+      checker_.diags_.error(source->pathLoc, "Result, ok and err are built in: remove the export "
+                                             "from 'neverthrow'");
       continue;
     }
-    if (isBuiltinModule(decl.path)) {
-      checker_.diags_.error(decl.pathLoc,
+    if (source && isBuiltinModule(source->path)) {
+      checker_.diags_.error(source->pathLoc,
                             "a built-in module is not re-exported: import what a file needs "
                             "from '" +
-                                decl.path + "' in that file");
+                                source->path + "' in that file");
       continue;
     }
-    if (decl.all) {
-      continue;
-    }
-    for (const ModuleName &name : decl.names) {
+    for (const ModuleName &name : decl.names()) {
       std::optional<Checker::Binding> target;
-      if (!decl.path.empty()) {
-        if (!decl.from) {
+      if (source) {
+        if (!source->from) {
           continue;
         }
-        target = findExport(decl.from, decl.path, name);
+        target = findExport(source->from, source->path, name);
         if (!target) {
           continue;
         }
@@ -201,24 +199,24 @@ const llvm::StringMap<Checker::Export> &ModuleDeclarer::exportsOf(Module *module
   }
 
   for (const ExportDecl &decl : module->file.exports) {
-    if (!decl.all || !decl.from || decl.from == module) {
+    const ExportAll *all = decl.form.as<ExportAll>();
+    if (!all || !all->source.from || all->source.from == module) {
       continue;
     }
-    for (const auto &entry : exportsOf(decl.from)) {
+    for (const auto &entry : exportsOf(all->source.from)) {
       llvm::StringRef name = entry.getKey();
       const Checker::Binding &target = entry.getValue().target;
-      auto [it, inserted] =
-          here.exports.try_emplace(name, Checker::Export{target, decl.loc, &decl});
+      auto [it, inserted] = here.exports.try_emplace(name, Checker::Export{target, decl.loc, all});
       const Checker::Export &ours = it->second;
       if (inserted || !ours.all || ours.target == target) {
         continue;
       }
       checker_.diags_.error(decl.loc,
-                            "'" + name + "' is exported both by '" + ours.all->path + "' and by '" +
-                                decl.path +
+                            "'" + name + "' is exported both by '" + ours.all->source.path +
+                                "' and by '" + all->source.path +
                                 "' through 'export *'; re-export the one you mean by name, e.g. "
                                 "'export { " +
-                                name + " } from \"" + ours.all->path + "\"'");
+                                name + " } from \"" + ours.all->source.path + "\"'");
     }
   }
   here.exportsBusy = false;

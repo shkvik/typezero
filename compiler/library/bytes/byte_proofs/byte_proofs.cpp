@@ -110,7 +110,7 @@ ValueRange ByteProofs::computedRange(const Expr *e) const {
     return r;
   }
   case Expr::Kind::Name: {
-    const VarSymbol *var = cast<NameExpr>(e)->var;
+    const VarSymbol *var = cast<NameExpr>(e)->var();
     if (!var || !var->type->isInteger() || var->type->isWrapping()) {
       return {};
     }
@@ -142,55 +142,55 @@ ValueRange ByteProofs::computedRange(const Expr *e) const {
   case Expr::Kind::Call: {
     auto *call = cast<CallExpr>(e);
     int64_t lo, hi;
-    switch (call->builtin) {
-    case Builtin::StrCharCodeAt:
-      return {0, 0xFFFF};
-    case Builtin::StrCodePointAt:
-      return {0, 0x10FFFF};
-    case Builtin::BytesAt:
-      if (cast<MemberExpr>(call->callee)->object->type->elementRange(lo, hi)) {
-        return {lo, hi};
-      }
-      return {};
-    case Builtin::NumConvert:
-      return valueRange(cast<MemberExpr>(call->callee)->object);
-    case Builtin::DataViewGet:
-    case Builtin::BufferRead:
-      if (Type::bytesType(Bytes(cast<IntLitExpr>(call->args[0])->value))->elementRange(lo, hi)) {
-        return {lo, hi};
-      }
-      return {};
-    case Builtin::MathMin:
-    case Builtin::MathMax: {
-      if (call->hasSpread() || call->args.empty()) {
-        return {};
-      }
-      bool min = call->builtin == Builtin::MathMin;
-      Range r = valueRange(call->args[0]);
-      for (size_t i = 1; i < call->args.size(); ++i) {
-        Range next = valueRange(call->args[i]);
-        Range both;
-        if (min) {
-          if (r.hi || next.hi) {
-            both.hi = r.hi && next.hi ? std::min(*r.hi, *next.hi) : r.hi ? *r.hi : *next.hi;
-          }
-          if (r.lo && next.lo) {
-            both.lo = std::min(*r.lo, *next.lo);
-          }
-        } else {
-          if (r.lo || next.lo) {
-            both.lo = r.lo && next.lo ? std::max(*r.lo, *next.lo) : r.lo ? *r.lo : *next.lo;
-          }
-          if (r.hi && next.hi) {
-            both.hi = std::max(*r.hi, *next.hi);
-          }
+    switch (call->builtin()) {
+      case Builtin::StrCharCodeAt:
+        return {0, 0xFFFF};
+      case Builtin::StrCodePointAt:
+        return {0, 0x10FFFF};
+      case Builtin::BytesAt:
+        if (cast<MemberExpr>(call->callee)->object->type->elementRange(lo, hi)) {
+          return {lo, hi};
         }
-        r = both;
+        return {};
+      case Builtin::NumConvert:
+        return valueRange(cast<MemberExpr>(call->callee)->object);
+      case Builtin::DataViewGet:
+      case Builtin::BufferRead:
+        if (Type::bytesType(Bytes(cast<IntLitExpr>(call->args[0])->value))->elementRange(lo, hi)) {
+          return {lo, hi};
+        }
+        return {};
+      case Builtin::MathMin:
+      case Builtin::MathMax: {
+        if (call->hasSpread() || call->args.empty()) {
+          return {};
+        }
+        bool min = call->builtin() == Builtin::MathMin;
+        Range r = valueRange(call->args[0]);
+        for (size_t i = 1; i < call->args.size(); ++i) {
+          Range next = valueRange(call->args[i]);
+          Range both;
+          if (min) {
+            if (r.hi || next.hi) {
+              both.hi = r.hi && next.hi ? std::min(*r.hi, *next.hi) : r.hi ? *r.hi : *next.hi;
+            }
+            if (r.lo && next.lo) {
+              both.lo = std::min(*r.lo, *next.lo);
+            }
+          } else {
+            if (r.lo || next.lo) {
+              both.lo = r.lo && next.lo ? std::max(*r.lo, *next.lo) : r.lo ? *r.lo : *next.lo;
+            }
+            if (r.hi && next.hi) {
+              both.hi = std::max(*r.hi, *next.hi);
+            }
+          }
+          r = both;
+        }
+        return r;
       }
-      return r;
-    }
-    default:
-      return {};
+      default:
+        return {};
     }
   }
   case Expr::Kind::Unary: {
@@ -263,8 +263,9 @@ void ByteProofs::checkFits(const Expr *value, const Type *target, llvm::StringRe
 static const VarSymbol *viewOwner(const Expr *expr, llvm::StringRef field,
                                   const Type **type = nullptr) {
   if (auto *call = dyn_cast<CallExpr>(expr);
-      call && (call->builtin == Builtin::BytesBuffer || call->builtin == Builtin::BytesByteOffset ||
-               call->builtin == Builtin::BytesByteLength)) {
+      call &&
+      (call->builtin() == Builtin::BytesBuffer || call->builtin() == Builtin::BytesByteOffset ||
+       call->builtin() == Builtin::BytesByteLength)) {
     expr = call->callee;
   }
   auto *member = dyn_cast<MemberExpr>(expr);
@@ -284,7 +285,7 @@ static const VarSymbol *viewOwner(const Expr *expr, llvm::StringRef field,
     *type = member->object->type;
   }
 
-  return name ? name->var : nullptr;
+  return name ? name->var() : nullptr;
 }
 
 static const Expr *withoutCasts(const Expr *expr) {

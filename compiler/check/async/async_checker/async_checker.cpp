@@ -156,7 +156,7 @@ Expr *AsyncChecker::checkAwait(AwaitExpr *await, const Type *expected) {
   FuncSymbol *fn = checker_.currentFunction_;
   if (fn && !(fn->decl && fn->decl->isAsync)) {
     FunctionDecl *decl = fn->decl;
-    std::string hint = decl && decl->isArrow         ? "'async (...) => ...'"
+    std::string hint = decl && decl->isArrow()       ? "'async (...) => ...'"
                        : decl && decl->cls()         ? "'async " + decl->name.str() + "() { ... }'"
                        : decl && !decl->name.empty() ? "'async function " + decl->name.str() + "'"
                                                      : "'async function'";
@@ -267,7 +267,7 @@ void AsyncChecker::checkForAwait(ForOfStmt *stmt) {
     checker_.diags_.error(stmt->binding.typeAnn->loc,
                           "a 'for await' variable cannot have a type annotation");
   }
-  if (stmt->binding.destructured && !stmt->binding.objectPattern && !element->isArray() &&
+  if (stmt->binding.destructured() && !stmt->binding.objectPattern() && !element->isArray() &&
       !element->isTuple() && !element->isMatch() && !element->isError()) {
     checker_.diags_.error(stmt->binding.loc, "only arrays can be destructured; the elements are '" +
                                                  element->name() + "'");
@@ -294,12 +294,12 @@ void AsyncChecker::checkDiscardedPromise(const Expr *expr, bool callback, llvm::
     return;
   }
   auto *call = dyn_cast<CallExpr>(expr);
-  if (call && (call->builtin == Builtin::ArrPop || call->builtin == Builtin::ArrShift ||
-               call->builtin == Builtin::ArrSplice)) {
+  if (call && (call->builtin() == Builtin::ArrPop || call->builtin() == Builtin::ArrShift ||
+               call->builtin() == Builtin::ArrSplice)) {
     return;
   }
   if (!type->nonOptional()->isPromise()) {
-    if (call && (call->builtin == Builtin::ArrMap || call->builtin == Builtin::ArrFlatMap)) {
+    if (call && (call->builtin() == Builtin::ArrMap || call->builtin() == Builtin::ArrFlatMap)) {
       checker_.diags_.error(expr->loc(),
                             "the Promises are not awaited, so nothing waits for them and an "
                             "error in one would end the program; wait for all of them with "

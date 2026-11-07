@@ -50,7 +50,7 @@ std::string bindings(llvm::ArrayRef<const Type *> params, llvm::ArrayRef<const T
 
 const ClassDecl *genericInstanceOf(const Type *type, const ClassDecl *generic) {
   for (const ClassDecl *c = type ? type->classDecl() : nullptr; c; c = c->parent) {
-    if (c == generic || c->generic == generic) {
+    if (c == generic || c->generic() == generic) {
       return c;
     }
   }
@@ -94,19 +94,19 @@ void GenericClassChecker::bindClassTypeParams(const ClassDecl *cls) {
 }
 
 const Type *GenericClassChecker::instanceType(const ClassDecl *inst, const Type *type) {
-  if (!type || !inst->generic) {
+  if (!type || !inst->generic()) {
     return type;
   }
 
-  return checker_.typeParams().substitute(type, inst->generic->typeArgs, inst->typeArgs);
+  return checker_.typeParams().substitute(type, inst->generic()->typeArgs, inst->typeArgs);
 }
 
 const Type *GenericClassChecker::instanceValueType(const ClassDecl *inst, const Type *type) {
-  if (!type || !inst->generic) {
+  if (!type || !inst->generic()) {
     return type;
   }
 
-  return checker_.typeParams().substituteValue(type, inst->generic->typeArgs, inst->typeArgs);
+  return checker_.typeParams().substituteValue(type, inst->generic()->typeArgs, inst->typeArgs);
 }
 
 void GenericClassChecker::checkClassInstance(Checker::Instance *instance) {
@@ -116,7 +116,7 @@ void GenericClassChecker::checkClassInstance(Checker::Instance *instance) {
   }
   instance->checking = true;
   std::vector<Diagnostics::Captured> errors;
-  if (!checker_.brokenClasses_.contains(inst->generic)) {
+  if (!checker_.brokenClasses_.contains(inst->generic())) {
     checker_.classDeclarer().completeClass(inst);
     std::vector<FunctionDecl *> bodies;
     if (inst->init) {
@@ -154,7 +154,7 @@ void GenericClassChecker::checkClassInstance(Checker::Instance *instance) {
 }
 
 void GenericClassChecker::reportClassInstance(Checker::Instance *instance, llvm::SMLoc use) {
-  llvm::SMLoc loc = use.isValid() ? use : instance->cls->generic->loc();
+  llvm::SMLoc loc = use.isValid() ? use : instance->cls->generic()->loc();
   if (checker_.diags_.capture()) {
     checker_.failedCalls_[loc.getPointer()] = instance;
     checker_.diags_.error(loc, instance->message);
@@ -162,7 +162,7 @@ void GenericClassChecker::reportClassInstance(Checker::Instance *instance, llvm:
   }
   const ClassDecl *inst = instance->cls;
   checker_.diags_.error(loc, "cannot use '" + inst->name + "' with " +
-                                 bindings(inst->generic->typeArgs, inst->typeArgs) + ": " +
+                                 bindings(inst->generic()->typeArgs, inst->typeArgs) + ": " +
                                  instance->message);
   const Checker::Instance *at = instance;
   llvm::SmallPtrSet<const char *, 8> shown;
@@ -189,12 +189,12 @@ Expr *GenericClassChecker::checkGenericNew(NewExpr *expr, ClassDecl *generic,
       }
     }
   };
-  if (generic->library && generic->name == "EventEmitter") {
+  if (generic->library() && generic->name == "EventEmitter") {
     if (Expr *emitter = checker_.emitterChecker().checkEmitterNew(expr, generic, expected)) {
       return emitter;
     }
   }
-  if (generic->library && checker_.chunkTypes().isStreamClass(generic)) {
+  if (generic->library() && checker_.chunkTypes().isStreamClass(generic)) {
     if (Expr *stream = checker_.streamNewChecker().checkStreamNew(expr, generic, expected)) {
       return stream;
     }
@@ -274,7 +274,7 @@ Expr *GenericClassChecker::checkGenericNew(NewExpr *expr, ClassDecl *generic,
     fn->ret = generic->type;
   }
   auto *call = checker_.ctx_.make<CallExpr>(expr->loc(), nullptr, std::move(expr->args));
-  expr->ctor = call;
+  expr->form = ClassNew{.ctor = call};
   std::vector<const Type *> bound;
   if (!checker_.typeArgInferrer().bindGenericCall(call, fn, expr->loc(), expected, {}, bound)) {
     return expr;
@@ -285,13 +285,13 @@ Expr *GenericClassChecker::checkGenericNew(NewExpr *expr, ClassDecl *generic,
     return expr;
   }
   checker_.classDeclarer().completeClass(inst);
-  expr->cls = inst;
+  expr->form = ClassNew{.cls = inst, .ctor = call};
   call->type = Type::voidTy();
   if (ctor) {
     std::vector<FunctionDecl *> mine = ClassLinks::constructorsOf(inst);
     auto at = llvm::find(ctors, ctor) - ctors.begin();
     if (size_t(at) < mine.size()) {
-      call->func = mine[size_t(at)]->sym;
+      call->target = FunctionCall{.func = mine[size_t(at)]->sym};
     }
     checker_.classMemberChecker().checkAccess(ctor->cls(), ctor->access(), "constructor",
                                               expr->loc());

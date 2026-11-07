@@ -291,9 +291,9 @@ llvm::Value *DecimalLowerer::emitRoundingMode(CallExpr *call, size_t index) {
 }
 
 llvm::Value *DecimalLowerer::emitDecimalFold(CallExpr *call) {
-  int32_t op = call->builtin == Builtin::DecSum   ? kFoldSum
-               : call->builtin == Builtin::DecMax ? kFoldMax
-                                                  : kFoldMin;
+  int32_t op = call->builtin() == Builtin::DecSum   ? kFoldSum
+               : call->builtin() == Builtin::DecMax ? kFoldMax
+                                                    : kFoldMin;
   std::vector<llvm::Value *> values = lowering_.exprLowerer().emitExprs(call->args);
   std::vector<Lowering::Operand> args;
   for (size_t i = 0; i < values.size(); ++i) {
@@ -337,39 +337,39 @@ llvm::Value *DecimalLowerer::emitDecimalCall(CallExpr *call) {
   llvm::Type *i32 = lowering_.builder_.getInt32Ty(), *i64 = lowering_.builder_.getInt64Ty(),
              *ptr = lowering_.builder_.getPtrTy();
   llvm::Type *voidTy = lowering_.builder_.getVoidTy();
-  switch (call->builtin) {
-  case Builtin::DecimalOf: {
-    Expr *arg = call->args[0];
-    if (arg->type->isDecimal()) {
-      return lowering_.exprLowerer().emitExpr(arg);
-    }
-    if (arg->type->isFloat()) {
-      llvm::Value *result =
-          callReturningDecimal("tz_dec_from_f64", {lowering_.exprLowerer().emitExpr(arg)});
+  switch (call->builtin()) {
+    case Builtin::DecimalOf: {
+      Expr *arg = call->args[0];
+      if (arg->type->isDecimal()) {
+        return lowering_.exprLowerer().emitExpr(arg);
+      }
+      if (arg->type->isFloat()) {
+        llvm::Value *result =
+            callReturningDecimal("tz_dec_from_f64", {lowering_.exprLowerer().emitExpr(arg)});
+        return result;
+      }
+      static const std::vector<MakerFields> orders = {{nullptr, {"code", "message", "text"}}};
+      bool checked = call->type->isResult();
+      llvm::Value *make = llvm::ConstantPointerNull::get(ptr);
+      if (checked) {
+        make = lowering_.objectMaker().maker(call->type->errType(), orders);
+      }
+      Lowering::Operand text = lowering_.refCounts().emitOperand(arg, true);
+      llvm::Value *result = callReturningDecimal(
+          "tz_dec_from_string", {lowering_.stringLowerer().stringObj(text.value),
+                                 lowering_.stringLowerer().stringMeta(text.value), make});
+      lowering_.refCounts().dropOperand(text);
+      if (checked) {
+        return lowering_.resultLowerer().catchFailure(result, call->type, call->loc());
+      }
       return result;
     }
-    static const std::vector<MakerFields> orders = {{nullptr, {"code", "message", "text"}}};
-    bool checked = call->type->isResult();
-    llvm::Value *make = llvm::ConstantPointerNull::get(ptr);
-    if (checked) {
-      make = lowering_.objectMaker().maker(call->type->errType(), orders);
-    }
-    Lowering::Operand text = lowering_.refCounts().emitOperand(arg, true);
-    llvm::Value *result = callReturningDecimal(
-        "tz_dec_from_string", {lowering_.stringLowerer().stringObj(text.value),
-                               lowering_.stringLowerer().stringMeta(text.value), make});
-    lowering_.refCounts().dropOperand(text);
-    if (checked) {
-      return lowering_.resultLowerer().catchFailure(result, call->type, call->loc());
-    }
-    return result;
-  }
-  case Builtin::DecMax:
-  case Builtin::DecMin:
-  case Builtin::DecSum:
-    return emitDecimalFold(call);
-  default:
-    break;
+    case Builtin::DecMax:
+    case Builtin::DecMin:
+    case Builtin::DecSum:
+      return emitDecimalFold(call);
+    default:
+      break;
   }
 
   auto *member = cast<MemberExpr>(call->callee);
@@ -393,86 +393,88 @@ llvm::Value *DecimalLowerer::emitDecimalCall(CallExpr *call) {
                                                          args);
   };
   llvm::Value *result = nullptr;
-  switch (call->builtin) {
-  case Builtin::DecDiv: {
-    bool later = std::all_of(call->args.begin() + 1, call->args.end(), AssignLowerer::cannotAssign);
-    Lowering::Operand divisor = lowering_.refCounts().emitOperand(call->args[0], later);
-    llvm::Value *dp = count(1, kDivisionPlaces).first;
-    llvm::Value *mode = emitRoundingMode(call, 2);
-    result = callReturningDecimal(
-        "tz_dec_div", {a, am, decimalCoef(divisor.value), decimalMeta(divisor.value), dp, mode});
-    lowering_.refCounts().dropOperand(divisor);
-    break;
-  }
-  case Builtin::DecRound: {
-    llvm::Value *dp = count(0, 0).first;
-    result = callReturningDecimal("tz_dec_round", {a, am, dp, emitRoundingMode(call, 1)});
-    break;
-  }
-  case Builtin::DecToFixed:
-  case Builtin::DecToFormat:
-  case Builtin::DecToExponential:
-  case Builtin::DecToPrecision: {
-    auto [n, given] = count(0, 0);
-    llvm::Value *mode = emitRoundingMode(call, 1);
-    llvm::StringRef name = call->builtin == Builtin::DecToFixed         ? "tz_dec_to_fixed"
-                           : call->builtin == Builtin::DecToFormat      ? "tz_dec_to_format"
-                           : call->builtin == Builtin::DecToExponential ? "tz_dec_to_exponential"
-                                                                        : "tz_dec_to_precision";
-    result = text(name, {a, am, n, given, mode});
-    break;
-  }
-  case Builtin::DecToString:
-    if (call->args.empty()) {
-      result = text("tz_dec_to_string", {a, am});
-    } else {
-      result =
-          text("tz_dec_to_string_base", {a, am, lowering_.exprLowerer().emitExpr(call->args[0])});
+  switch (call->builtin()) {
+    case Builtin::DecDiv: {
+      bool later =
+          std::all_of(call->args.begin() + 1, call->args.end(), AssignLowerer::cannotAssign);
+      Lowering::Operand divisor = lowering_.refCounts().emitOperand(call->args[0], later);
+      llvm::Value *dp = count(1, kDivisionPlaces).first;
+      llvm::Value *mode = emitRoundingMode(call, 2);
+      result = callReturningDecimal(
+          "tz_dec_div", {a, am, decimalCoef(divisor.value), decimalMeta(divisor.value), dp, mode});
+      lowering_.refCounts().dropOperand(divisor);
+      break;
     }
-    break;
-  case Builtin::DecSqrt:
-    result = callReturningDecimal("tz_dec_sqrt", {a, am});
-    break;
-  case Builtin::DecAbs:
-    result = callReturningDecimal("tz_dec_abs", {a, am});
-    break;
-  case Builtin::DecIsInteger:
-    result = lowering_.builder_.CreateICmpNE(
-        lowering_.builder_.CreateCall(decimalFunction("tz_dec_is_integer", i32, {i64, i64}),
-                                      {a, am}),
-        lowering_.builder_.getInt32(0));
-    break;
-  case Builtin::DecDecimalPlaces:
-    result = lowering_.builder_.CreateSExt(
-        lowering_.builder_.CreateCall(decimalFunction("tz_dec_decimal_places", i32, {i64, i64}),
-                                      {a, am}),
-        i64);
-    break;
-  case Builtin::DecShiftedBy:
-    result = callReturningDecimal("tz_dec_shifted_by",
-                                  {a, am, lowering_.exprLowerer().emitExpr(call->args[0])});
-    break;
-  case Builtin::DecToFraction: {
-    llvm::Value *maxCoef = lowering_.builder_.getInt64(0),
-                *maxMeta = lowering_.builder_.getInt64(0);
-    Lowering::Operand limit{nullptr, false, nullptr};
-    if (!call->args.empty()) {
-      limit = lowering_.refCounts().emitOperand(call->args[0], true);
-      maxCoef = decimalCoef(limit.value);
-      maxMeta = decimalMeta(limit.value);
+    case Builtin::DecRound: {
+      llvm::Value *dp = count(0, 0).first;
+      result = callReturningDecimal("tz_dec_round", {a, am, dp, emitRoundingMode(call, 1)});
+      break;
     }
-    result = lowering_.builder_.CreateCall(
-        decimalFunction("tz_dec_to_fraction", ptr, {ptr, i64, i64, i64, i64, i32}),
-        {lowering_.typeDescriptors().typeDescriptor(Type::decimalTy()), a, am, maxCoef, maxMeta,
-         lowering_.builder_.getInt32(!call->args.empty())},
-        "fraction");
-    if (limit.value) {
-      lowering_.refCounts().dropOperand(limit);
+    case Builtin::DecToFixed:
+    case Builtin::DecToFormat:
+    case Builtin::DecToExponential:
+    case Builtin::DecToPrecision: {
+      auto [n, given] = count(0, 0);
+      llvm::Value *mode = emitRoundingMode(call, 1);
+      llvm::StringRef name = call->builtin() == Builtin::DecToFixed    ? "tz_dec_to_fixed"
+                             : call->builtin() == Builtin::DecToFormat ? "tz_dec_to_format"
+                             : call->builtin() == Builtin::DecToExponential
+                                 ? "tz_dec_to_exponential"
+                                 : "tz_dec_to_precision";
+      result = text(name, {a, am, n, given, mode});
+      break;
     }
-    break;
-  }
-  default:
-    llvm_unreachable("not a method of decimals");
+    case Builtin::DecToString:
+      if (call->args.empty()) {
+        result = text("tz_dec_to_string", {a, am});
+      } else {
+        result =
+            text("tz_dec_to_string_base", {a, am, lowering_.exprLowerer().emitExpr(call->args[0])});
+      }
+      break;
+    case Builtin::DecSqrt:
+      result = callReturningDecimal("tz_dec_sqrt", {a, am});
+      break;
+    case Builtin::DecAbs:
+      result = callReturningDecimal("tz_dec_abs", {a, am});
+      break;
+    case Builtin::DecIsInteger:
+      result = lowering_.builder_.CreateICmpNE(
+          lowering_.builder_.CreateCall(decimalFunction("tz_dec_is_integer", i32, {i64, i64}),
+                                        {a, am}),
+          lowering_.builder_.getInt32(0));
+      break;
+    case Builtin::DecDecimalPlaces:
+      result = lowering_.builder_.CreateSExt(
+          lowering_.builder_.CreateCall(decimalFunction("tz_dec_decimal_places", i32, {i64, i64}),
+                                        {a, am}),
+          i64);
+      break;
+    case Builtin::DecShiftedBy:
+      result = callReturningDecimal("tz_dec_shifted_by",
+                                    {a, am, lowering_.exprLowerer().emitExpr(call->args[0])});
+      break;
+    case Builtin::DecToFraction: {
+      llvm::Value *maxCoef = lowering_.builder_.getInt64(0),
+                  *maxMeta = lowering_.builder_.getInt64(0);
+      Lowering::Operand limit{nullptr, false, nullptr};
+      if (!call->args.empty()) {
+        limit = lowering_.refCounts().emitOperand(call->args[0], true);
+        maxCoef = decimalCoef(limit.value);
+        maxMeta = decimalMeta(limit.value);
+      }
+      result = lowering_.builder_.CreateCall(
+          decimalFunction("tz_dec_to_fraction", ptr, {ptr, i64, i64, i64, i64, i32}),
+          {lowering_.typeDescriptors().typeDescriptor(Type::decimalTy()), a, am, maxCoef, maxMeta,
+           lowering_.builder_.getInt32(!call->args.empty())},
+          "fraction");
+      if (limit.value) {
+        lowering_.refCounts().dropOperand(limit);
+      }
+      break;
+    }
+    default:
+      llvm_unreachable("not a method of decimals");
   }
   lowering_.refCounts().dropOperand(self);
 

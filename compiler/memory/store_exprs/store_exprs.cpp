@@ -25,17 +25,17 @@ StoreScanner::Sources StoreExprs::expr(const Expr *e) {
   switch (e->kind()) {
   case Expr::Kind::Name: {
     auto *name = llvm::cast<NameExpr>(e);
-    if (name->var) {
-      out.push_back(scanner_.var(name->var));
-      if (name->var->function() && !scanner_.callee_.contains(e)) {
-        scanner_.escapes(name->var->function());
+    if (name->var()) {
+      out.push_back(scanner_.var(name->var()));
+      if (name->var()->function() && !scanner_.callee_.contains(e)) {
+        scanner_.escapes(name->var()->function());
       }
-      if (name->var->lambda() && !scanner_.callee_.contains(e)) {
-        scanner_.escapes(name->var->lambda());
+      if (name->var()->lambda() && !scanner_.callee_.contains(e)) {
+        scanner_.escapes(name->var()->lambda());
       }
     }
-    if (name->func && !scanner_.callee_.contains(e)) {
-      scanner_.escapes(name->func->decl);
+    if (name->func() && !scanner_.callee_.contains(e)) {
+      scanner_.escapes(name->func()->decl);
     }
     break;
   }
@@ -55,18 +55,18 @@ StoreScanner::Sources StoreExprs::expr(const Expr *e) {
   case Expr::Kind::ObjectLit: {
     auto *lit = llvm::cast<ObjectLitExpr>(e);
     for (const ObjectLitExpr::Property &p : lit->props) {
-      expr(p.key);
-      if (p.method) {
+      expr(p.key());
+      if (p.method()) {
         if (auto *fe = llvm::dyn_cast<FunctionExpr>(p.value)) {
           scanner_.function(fe->fn);
         }
         continue;
       }
       StoreScanner::Sources value = expr(p.value);
-      bool binds = p.spread && p.value->type && p.value->type->isObject() &&
+      bool binds = p.spread() && p.value->type && p.value->type->isObject() &&
                    llvm::any_of(p.value->type->fields(),
                                 [](const Field &f) { return f.type->isFunction(); });
-      if (!p.spread || binds) {
+      if (!p.spread() || binds) {
         scanner_.store(value);
       }
     }
@@ -88,9 +88,9 @@ StoreScanner::Sources StoreExprs::expr(const Expr *e) {
   case Expr::Kind::Member: {
     auto *member = llvm::cast<MemberExpr>(e);
     StoreScanner::Sources object = expr(member->object);
-    if (member->method && !scanner_.callee_.contains(e)) {
+    if (member->method() && !scanner_.callee_.contains(e)) {
       scanner_.store(object);
-      scanner_.escapes(member->method->decl);
+      scanner_.escapes(member->method()->decl);
     }
     if (member->type && member->type->nonOptional()->isFunction() &&
         !scanner_.callee_.contains(e)) {
@@ -125,9 +125,9 @@ StoreScanner::Sources StoreExprs::expr(const Expr *e) {
   case Expr::Kind::Assign: {
     auto *assign = llvm::cast<AssignExpr>(e);
     StoreScanner::Sources value = expr(assign->value);
-    if (auto *name = llvm::dyn_cast<NameExpr>(assign->target); name && name->var) {
-      scanner_.flowInto(scanner_.var(name->var), value);
-      out.push_back(scanner_.var(name->var));
+    if (auto *name = llvm::dyn_cast<NameExpr>(assign->target); name && name->var()) {
+      scanner_.flowInto(scanner_.var(name->var()), value);
+      out.push_back(scanner_.var(name->var()));
     } else {
       if (auto *member = llvm::dyn_cast<MemberExpr>(assign->target)) {
         expr(member->object);
@@ -151,12 +151,12 @@ StoreScanner::Sources StoreExprs::expr(const Expr *e) {
   case Expr::Kind::New: {
     auto *create = llvm::cast<NewExpr>(e);
     std::vector<StoreScanner::Sources> args;
-    for (const Expr *arg : create->ctor ? create->ctor->args : create->args) {
+    for (const Expr *arg : create->ctor() ? create->ctor()->args : create->args) {
       args.push_back(expr(arg));
     }
-    if (const ClassDecl *cls = create->cls) {
+    if (const ClassDecl *cls = create->cls()) {
       const FunctionDecl *ctor =
-          create->ctor && create->ctor->func ? create->ctor->func->decl : nullptr;
+          create->ctor() && create->ctor()->func() ? create->ctor()->func()->decl : nullptr;
       scanner_.storeStmts().bindArgs(ctor, args);
       for (const ClassDecl *c = cls; c; c = c->parent) {
         if (c->init && c->init->thisVar()) {

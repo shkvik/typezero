@@ -60,8 +60,8 @@ bool openEnded(const Expr *cond, const Stmt *body) {
   bool input = false;
   visitExprs(cond, [&](const Expr *e) {
     if (auto *call = dyn_cast<CallExpr>(e)) {
-      input |= call->builtin == Builtin::ReadLine || isFsBuiltin(call->builtin) ||
-               isChildBuiltin(call->builtin);
+      input |= call->builtin() == Builtin::ReadLine || isFsBuiltin(call->builtin()) ||
+               isChildBuiltin(call->builtin());
     }
   });
 
@@ -72,20 +72,20 @@ bool grows(const Stmt *body, const VarSymbol *var) {
   auto isVar = [&](const Expr *e) {
     auto *name = dyn_cast_or_null<NameExpr>(stripCasts(e));
 
-    return name && name->var == var;
+    return name && name->var() == var;
   };
   bool found = false;
   visitExprs(body, [&](const Expr *e) {
     if (auto *call = dyn_cast<CallExpr>(e)) {
       auto *member = dyn_cast<MemberExpr>(call->callee);
       if (member && isVar(member->object) &&
-          (call->builtin == Builtin::ArrPush || call->builtin == Builtin::ArrUnshift ||
-           call->builtin == Builtin::ArrSplice)) {
+          (call->builtin() == Builtin::ArrPush || call->builtin() == Builtin::ArrUnshift ||
+           call->builtin() == Builtin::ArrSplice)) {
         found = true;
       }
     } else if (auto *assign = dyn_cast<AssignExpr>(e)) {
       if (auto *index = dyn_cast<IndexExpr>(assign->target);
-          index && isVar(index->object) && index->mayAppend) {
+          index && isVar(index->object) && index->mayAppend()) {
         found = true;
       }
       if (auto *member = dyn_cast<MemberExpr>(assign->target);
@@ -176,8 +176,8 @@ bool readsInput(const Expr *cond) {
   if (cond) {
     visitExprs(cond, [&](const Expr *e) {
       if (auto *call = dyn_cast<CallExpr>(e)) {
-        input |= call->builtin == Builtin::ReadLine || isFsBuiltin(call->builtin) ||
-                 isChildBuiltin(call->builtin);
+        input |= call->builtin() == Builtin::ReadLine || isFsBuiltin(call->builtin()) ||
+                 isChildBuiltin(call->builtin());
       }
     });
   }
@@ -193,7 +193,7 @@ std::optional<double> counterStep(const Expr *arg, const VarSymbol *param) {
   auto isParam = [&](const Expr *e) {
     auto *name = dyn_cast<NameExpr>(stripCasts(e));
 
-    return name && name->var == param;
+    return name && name->var() == param;
   };
   auto literal = [](const Expr *e) -> std::optional<double> {
     if (auto *lit = dyn_cast<IntLitExpr>(stripCasts(e)); lit && lit->value > 0) {
@@ -285,7 +285,7 @@ void LoopRanges::execLoop(const Stmt *stmt, llvm::ArrayRef<llvm::StringRef> labe
   const Type *type = s->iterable->type ? s->iterable->type->nonOptional() : nullptr;
   const Type *bound = s->binding.sym ? s->binding.sym->type : nullptr;
   auto *name = dyn_cast<NameExpr>(stripCasts(s->iterable));
-  const VarSymbol *iterated = name && st.vars.count(name->var) ? name->var : nullptr;
+  const VarSymbol *iterated = name && st.vars.count(name->var()) ? name->var() : nullptr;
   Val element = check_.overflowWarnings().trusted(bound);
   if (type && type->isArray()) {
     element = check_.slots().elementsOf(s->iterable, iterable, type);
@@ -435,7 +435,7 @@ void LoopRanges::findRecursions() {
     }
     OverflowCheck::Recursion recursion;
     for (CallExpr *call : tailCallsIn(const_cast<FunctionDecl *>(fn))) {
-      if (call->func && call->func->decl == fn && call->func->ret == fn->sym->ret) {
+      if (call->func() && call->func()->decl == fn && call->func()->ret == fn->sym->ret) {
         recursion.self.push_back(call);
       }
     }
@@ -447,7 +447,7 @@ void LoopRanges::findRecursions() {
         fn->body,
         [&](const Expr *e) {
           auto *call = dyn_cast<CallExpr>(e);
-          other |= call && call->func && call->func->decl == fn &&
+          other |= call && call->func() && call->func()->decl == fn &&
                    !llvm::is_contained(recursion.self, call);
         },
         false);
@@ -480,7 +480,7 @@ void LoopRanges::findRecursions() {
 
 void LoopRanges::noteCall(const CallExpr *call, const FunctionDecl *target,
                           llvm::ArrayRef<Val> args) {
-  if (!check_.reporting_ || check_.quiet_ != 0 || check_.overBudget() || !call->func ||
+  if (!check_.reporting_ || check_.quiet_ != 0 || check_.overBudget() || !call->func() ||
       !check_.recursions_.count(target)) {
     return;
   }

@@ -152,7 +152,7 @@ std::vector<const FunctionDecl *> FlowCalls::overridersOf(const FunctionDecl *fn
 }
 
 Refs FlowCalls::call(CallExpr *c) {
-  if (c->builtin == Builtin::PromiseNew) {
+  if (c->builtin() == Builtin::PromiseNew) {
     for (const Expr *arg : c->args) {
       if (auto *f = llvm::dyn_cast<FunctionExpr>(FlowExprs::ownExpr(arg))) {
         for (size_t i = 0; i < f->fn->params.size(); ++i) {
@@ -176,7 +176,7 @@ Refs FlowCalls::call(CallExpr *c) {
     receiverType =
         flows_.flowStmts().currentThis() ? flows_.flowStmts().currentThis()->type : nullptr;
     superCtor = true;
-  } else if (!callee || !(callee->func || (callee->var && callee->var->lambda()))) {
+  } else if (!callee || !(callee->func() || (callee->var() && callee->var()->lambda()))) {
     flows_.flowExprs().expr(c->callee);
   }
   std::vector<Refs> args;
@@ -184,22 +184,22 @@ Refs FlowCalls::call(CallExpr *c) {
     args.push_back(flows_.flowExprs().expr(arg));
   }
 
-  if (c->builtin != Builtin::None) {
+  if (c->builtin() != Builtin::None) {
     return flows_.flowBuiltins().builtin(c, member, receiver, args);
   }
 
-  const FunctionDecl *target = c->func && c->func->decl       ? c->func->decl
-                               : c->method && c->method->decl ? c->method->decl
-                                                              : nullptr;
+  const FunctionDecl *target = c->func() && c->func()->decl       ? c->func()->decl
+                               : c->method() && c->method()->decl ? c->method()->decl
+                                                                  : nullptr;
   if (!target) {
-    if (callee && callee->var && callee->var->lambda()) {
-      target = callee->var->lambda();
+    if (callee && callee->var() && callee->var()->lambda()) {
+      target = callee->var()->lambda();
     }
   }
   if (!target) {
     int result = flows_.node(NodeKind::CallResult, c, "");
     flows_.valueCalls_.push_back({c, args, result});
-    if ((callee && callee->var && flows_.runtimeFunctions_.count(callee->var)) ||
+    if ((callee && callee->var() && flows_.runtimeFunctions_.count(callee->var())) ||
         (member && member->name == "resolve")) {
       for (size_t i = 0; i < args.size(); ++i) {
         flows_.escape(args[i]);
@@ -231,7 +231,7 @@ void FlowCalls::callback(const Expr *arg, const Refs &values) {
   if (auto *f = llvm::dyn_cast<FunctionExpr>(FlowExprs::ownExpr(arg))) {
     fn = f->fn;
   } else if (auto *n = llvm::dyn_cast<NameExpr>(FlowExprs::ownExpr(arg))) {
-    fn = n->func && n->func->decl ? n->func->decl : n->var ? n->var->lambda() : nullptr;
+    fn = n->func() && n->func()->decl ? n->func()->decl : n->var() ? n->var()->lambda() : nullptr;
   }
   if (!fn) {
     return;

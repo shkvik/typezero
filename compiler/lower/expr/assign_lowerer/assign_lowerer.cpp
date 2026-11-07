@@ -44,7 +44,7 @@ llvm::Value *AssignLowerer::emitAssign(AssignExpr *assign, bool needResult) {
       member && member->object->type->nonOptional()->isJson()) {
     return lowering_.jsonLowerer().emitJsonAssign(assign, needResult);
   }
-  if (auto *index = dyn_cast<IndexExpr>(assign->target); index && index->keyed) {
+  if (auto *index = dyn_cast<IndexExpr>(assign->target); index && index->keyed()) {
     return lowering_.objectLowerer().emitFieldAssign(assign, needResult);
   }
   if (auto *index = dyn_cast<IndexExpr>(assign->target);
@@ -60,7 +60,7 @@ llvm::Value *AssignLowerer::emitAssign(AssignExpr *assign, bool needResult) {
                : lowering_.arrayLowerer().emitLengthAssign(assign, needResult);
   }
 
-  const VarSymbol *var = cast<NameExpr>(assign->target)->var;
+  const VarSymbol *var = cast<NameExpr>(assign->target)->var();
   llvm::Value *address = lowering_.functionFrame().addressOf(var);
   const Type *type = assign->type;
   llvm::Value *value;
@@ -101,7 +101,7 @@ llvm::Value *AssignLowerer::emitAssign(AssignExpr *assign, bool needResult) {
 }
 
 llvm::Value *AssignLowerer::emitNullishAssign(AssignExpr *assign, bool needResult) {
-  const VarSymbol *var = cast<NameExpr>(assign->target)->var;
+  const VarSymbol *var = cast<NameExpr>(assign->target)->var();
   const Type *varType = var->type;
   llvm::Value *address = lowering_.functionFrame().addressOf(var);
   llvm::Value *old =
@@ -162,7 +162,7 @@ llvm::Value *AssignLowerer::emitUpdate(UpdateExpr *update) {
   }
   llvm::Value *address;
   Lowering::Operand holder{nullptr, false, nullptr};
-  if (auto *keyed = dyn_cast<IndexExpr>(update->target); keyed && keyed->keyed) {
+  if (auto *keyed = dyn_cast<IndexExpr>(update->target); keyed && keyed->keyed()) {
     holder = lowering_.refCounts().emitOperand(keyed->object, cannotAssign(keyed->index));
     address = lowering_.objectLowerer().keyedFieldAddress(
         holder.value, keyed->object->type, lowering_.exprLowerer().emitExpr(keyed->index),
@@ -177,7 +177,7 @@ llvm::Value *AssignLowerer::emitUpdate(UpdateExpr *update) {
     address =
         lowering_.objectLayouts().fieldAddress(holder.value, member->object->type, member->name);
   } else {
-    address = lowering_.functionFrame().addressOf(cast<NameExpr>(update->target)->var);
+    address = lowering_.functionFrame().addressOf(cast<NameExpr>(update->target)->var());
   }
   if (update->type->isDecimal()) {
     llvm::Value *result = lowering_.decimalLowerer().emitDecimalUpdate(update, address);
@@ -249,25 +249,25 @@ bool AssignLowerer::cannotAssign(const Expr *expr) {
   case Expr::Kind::OptionalChain:
     return cannotAssign(cast<OptionalChainExpr>(expr)->chain);
   case Expr::Kind::New:
-    return !cast<NewExpr>(expr)->cls && !cast<NewExpr>(expr)->reflect &&
+    return !cast<NewExpr>(expr)->cls() && !cast<NewExpr>(expr)->reflect() &&
            llvm::all_of(cast<NewExpr>(expr)->args, cannotAssign);
   case Expr::Kind::Call: {
     auto *call = cast<CallExpr>(expr);
-    if (call->builtin == Builtin::None ||
-        (call->builtin >= Builtin::ArrForEach && call->builtin <= Builtin::ArrSortWith) ||
-        isResultCallback(call->builtin) || call->builtin == Builtin::PromiseNew ||
-        call->builtin == Builtin::IterNext || call->builtin == Builtin::ArrayFrom ||
-        isIteratorSink(call->builtin) || call->builtin == Builtin::StrReplaceRegexFn ||
-        call->builtin == Builtin::MapForEach || call->builtin == Builtin::DictGroupBy ||
-        call->builtin == Builtin::DictNew ||
-        (call->builtin == Builtin::BytesFromArray && call->args[0]->type->isIterator())) {
+    if (call->builtin() == Builtin::None ||
+        (call->builtin() >= Builtin::ArrForEach && call->builtin() <= Builtin::ArrSortWith) ||
+        isResultCallback(call->builtin()) || call->builtin() == Builtin::PromiseNew ||
+        call->builtin() == Builtin::IterNext || call->builtin() == Builtin::ArrayFrom ||
+        isIteratorSink(call->builtin()) || call->builtin() == Builtin::StrReplaceRegexFn ||
+        call->builtin() == Builtin::MapForEach || call->builtin() == Builtin::DictGroupBy ||
+        call->builtin() == Builtin::DictNew ||
+        (call->builtin() == Builtin::BytesFromArray && call->args[0]->type->isIterator())) {
       return false;
     }
     if (!llvm::all_of(call->args, cannotAssign)) {
       return false;
     }
     auto *member = dyn_cast<MemberExpr>(call->callee);
-    return !member || call->builtin == Builtin::ConsoleLog || isMathBuiltin(call->builtin) ||
+    return !member || call->builtin() == Builtin::ConsoleLog || isMathBuiltin(call->builtin()) ||
            cannotAssign(member->object);
   }
   case Expr::Kind::Assign:

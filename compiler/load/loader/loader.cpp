@@ -200,8 +200,9 @@ void Loader::visit(Module *module) {
     requests.push_back({decl.pathLoc.getPointer(), decl.path, decl.pathLoc, &decl.from});
   }
   for (ExportDecl &decl : module->file.exports) {
-    if (!decl.path.empty()) {
-      requests.push_back({decl.pathLoc.getPointer(), decl.path, decl.pathLoc, &decl.from});
+    if (ExportSource *source = decl.source()) {
+      requests.push_back(
+          {source->pathLoc.getPointer(), source->path, source->pathLoc, &source->from});
     }
   }
   std::stable_sort(requests.begin(), requests.end(),

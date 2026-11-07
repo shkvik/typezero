@@ -28,7 +28,7 @@ const VarSymbol *variableOf(const Expr *expr) {
   }
   auto *name = dyn_cast<NameExpr>(expr);
 
-  return name ? name->var : nullptr;
+  return name ? name->var() : nullptr;
 }
 
 }
@@ -54,7 +54,7 @@ std::optional<Linear> IndexProofs::linear(const Expr *expr) const {
     return Linear{Term::zero(), -static_cast<int64_t>(lit->value)};
   }
   case Expr::Kind::Name: {
-    const VarSymbol *var = cast<NameExpr>(expr)->var;
+    const VarSymbol *var = cast<NameExpr>(expr)->var();
     if (var && var->type->isInt()) {
       return Linear{Term::of(var), 0};
     }
@@ -82,7 +82,7 @@ std::optional<Linear> IndexProofs::linear(const Expr *expr) const {
   case Expr::Kind::Call: {
     auto *call = cast<CallExpr>(expr);
     auto *member = dyn_cast<MemberExpr>(call->callee);
-    if (call->builtin == Builtin::BytesByteLength && member && member->object->type &&
+    if (call->builtin() == Builtin::BytesByteLength && member && member->object->type &&
         member->object->type->isTypedArray() && member->object->type->elementSize() == 1) {
       return lengthOf(member->object);
     }
@@ -149,17 +149,17 @@ std::optional<Linear> IndexProofs::lengthOf(const Expr *object) const {
   }
   if (auto *wait = dyn_cast<AwaitExpr>(object)) {
     if (auto *all = dyn_cast<CallExpr>(wait->value);
-        all && all->builtin == Builtin::PromiseAll && all->args.size() == 1) {
+        all && all->builtin() == Builtin::PromiseAll && all->args.size() == 1) {
       return lengthOf(all->args[0]);
     }
   }
-  if (auto *call = dyn_cast<CallExpr>(object); call && call->builtin == Builtin::DecToFraction) {
+  if (auto *call = dyn_cast<CallExpr>(object); call && call->builtin() == Builtin::DecToFraction) {
     return Linear{Term::zero(), 2};
   }
-  if (auto *call = dyn_cast<CallExpr>(object); call && call->builtin == Builtin::BytesOf) {
+  if (auto *call = dyn_cast<CallExpr>(object); call && call->builtin() == Builtin::BytesOf) {
     return Linear{Term::zero(), static_cast<int64_t>(call->args.size())};
   }
-  if (auto *call = dyn_cast<CallExpr>(object); call && call->builtin == Builtin::EmbedBytes) {
+  if (auto *call = dyn_cast<CallExpr>(object); call && call->builtin() == Builtin::EmbedBytes) {
     return Linear{Term::zero(),
                   static_cast<int64_t>(cast<StringLitExpr>(call->args[0])->value.size())};
   }
@@ -167,23 +167,23 @@ std::optional<Linear> IndexProofs::lengthOf(const Expr *object) const {
   if (!call) {
     return std::nullopt;
   }
-  switch (call->builtin) {
-  case Builtin::BytesNew:
-  case Builtin::ArrayBufferNew:
-  case Builtin::BufferAllocFill:
-    if (std::optional<Linear> n = linear(call->args[0]); n && n->term.isZero()) {
-      return n;
-    }
-    return std::nullopt;
-  case Builtin::BytesFromArray:
-  case Builtin::BytesFromBytes:
-    return lengthOf(call->args[0]);
-  case Builtin::BufferFromString:
-    return utf8Length(call);
-  case Builtin::BytesBuffer:
-    return freshBufferLength(call);
-  default:
-    return std::nullopt;
+  switch (call->builtin()) {
+    case Builtin::BytesNew:
+    case Builtin::ArrayBufferNew:
+    case Builtin::BufferAllocFill:
+      if (std::optional<Linear> n = linear(call->args[0]); n && n->term.isZero()) {
+        return n;
+      }
+      return std::nullopt;
+    case Builtin::BytesFromArray:
+    case Builtin::BytesFromBytes:
+      return lengthOf(call->args[0]);
+    case Builtin::BufferFromString:
+      return utf8Length(call);
+    case Builtin::BytesBuffer:
+      return freshBufferLength(call);
+    default:
+      return std::nullopt;
   }
 }
 
@@ -193,14 +193,14 @@ std::optional<Linear> IndexProofs::freshBufferLength(const CallExpr *call) const
   if (!made || !made->type || !made->type->isTypedArray() || made->type->isBuffer()) {
     return std::nullopt;
   }
-  switch (made->builtin) {
-  case Builtin::BytesNew:
-  case Builtin::BytesFromArray:
-  case Builtin::BytesFromBytes:
-  case Builtin::BytesOf:
-    break;
-  default:
-    return std::nullopt;
+  switch (made->builtin()) {
+    case Builtin::BytesNew:
+    case Builtin::BytesFromArray:
+    case Builtin::BytesFromBytes:
+    case Builtin::BytesOf:
+      break;
+    default:
+      return std::nullopt;
   }
   std::optional<Linear> count = lengthOf(made);
   if (!count || !count->term.isZero()) {
@@ -386,7 +386,7 @@ bool IndexProofs::requireLess(const Expr *a, const Expr *b, llvm::StringRef what
 bool IndexProofs::provesLinearUpTo(Linear value, const Expr *object, int64_t less) const {
   std::optional<Linear> length = lengthOf(object);
   const Expr *owner = object;
-  if (auto *call = dyn_cast<CallExpr>(object); call && call->builtin == Builtin::BytesBuffer) {
+  if (auto *call = dyn_cast<CallExpr>(object); call && call->builtin() == Builtin::BytesBuffer) {
     owner = call->callee;
   }
   if (auto *member = dyn_cast<MemberExpr>(owner); !length && member && member->name == "buffer" &&
@@ -495,7 +495,7 @@ std::optional<Linear> IndexProofs::lengthAtMost(const Expr *expr) const {
   }
   auto *call = dyn_cast<CallExpr>(expr);
   if (!call || call->args.size() != 2 ||
-      (call->builtin != Builtin::BytesSubarray && call->builtin != Builtin::BytesSlice)) {
+      (call->builtin() != Builtin::BytesSubarray && call->builtin() != Builtin::BytesSlice)) {
     return std::nullopt;
   }
   std::optional<int64_t> from = checker_.constantFolder().intConstant(call->args[0]);
@@ -565,19 +565,20 @@ ValueRange IndexProofs::lengthRange(const Expr *value) const {
   if (!call) {
     return {};
   }
-  switch (call->builtin) {
-  case Builtin::BytesNew:
-  case Builtin::ArrayBufferNew:
-  case Builtin::BufferAllocFill:
-    return call->args.empty() ? ValueRange{0, 0} : checker_.byteProofs().valueRange(call->args[0]);
-  case Builtin::DataViewNew:
-  case Builtin::BytesView:
-    if (call->args.size() == 1 && call->type && call->type->elementSize() == 1) {
-      return lengthRange(call->args[0]);
-    }
-    return {};
-  default:
-    return {};
+  switch (call->builtin()) {
+    case Builtin::BytesNew:
+    case Builtin::ArrayBufferNew:
+    case Builtin::BufferAllocFill:
+      return call->args.empty() ? ValueRange{0, 0}
+                                : checker_.byteProofs().valueRange(call->args[0]);
+    case Builtin::DataViewNew:
+    case Builtin::BytesView:
+      if (call->args.size() == 1 && call->type && call->type->elementSize() == 1) {
+        return lengthRange(call->args[0]);
+      }
+      return {};
+    default:
+      return {};
   }
 }
 
@@ -589,22 +590,22 @@ std::optional<Linear> IndexProofs::knownLength(const Expr *value) const {
     return Linear{Term::zero(), 0};
   }
   if (auto *call = dyn_cast<CallExpr>(value)) {
-    switch (call->builtin) {
-    case Builtin::BytesNew:
-    case Builtin::ArrayBufferNew:
-    case Builtin::BufferAllocFill:
-      return call->args.empty() ? Linear{Term::zero(), 0} : linear(call->args[0]);
-    case Builtin::BytesOf:
-    case Builtin::EmbedBytes:
-      return lengthOf(call);
-    case Builtin::BytesFromArray:
-    case Builtin::BytesFromBytes:
-      return lengthOf(call->args[0]);
-    case Builtin::DataViewNew:
-    case Builtin::BytesView:
-      return viewLength(call);
-    default:
-      break;
+    switch (call->builtin()) {
+      case Builtin::BytesNew:
+      case Builtin::ArrayBufferNew:
+      case Builtin::BufferAllocFill:
+        return call->args.empty() ? Linear{Term::zero(), 0} : linear(call->args[0]);
+      case Builtin::BytesOf:
+      case Builtin::EmbedBytes:
+        return lengthOf(call);
+      case Builtin::BytesFromArray:
+      case Builtin::BytesFromBytes:
+        return lengthOf(call->args[0]);
+      case Builtin::DataViewNew:
+      case Builtin::BytesView:
+        return viewLength(call);
+      default:
+        break;
     }
   }
 

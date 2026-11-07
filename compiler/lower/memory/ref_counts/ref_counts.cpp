@@ -114,7 +114,7 @@ void RefCounts::releaseValue(llvm::Value *value, const Type *type) {
     llvm::Function *release = type->isAnyObject() || lowering_.hasSubtypes(type) ||
                                       type->isTimer() || type->isRuntimeObject() ||
                                       type->isCrypto() ||
-                                      (type->classDecl() && type->classDecl()->builtin)
+                                      (type->classDecl() && type->classDecl()->builtin())
                                   ? lowering_.plainInstanceReleaseFn_
                                   : lowering_.objectLayouts().objectLayout(type).release;
     lowering_.builder_.CreateCall(lowering_.memory().refMayCarryMember(type)
@@ -185,8 +185,8 @@ Lowering::Operand RefCounts::emitOperand(Expr *expr, bool canBorrow) {
 }
 
 llvm::Value *RefCounts::emitBorrowed(Expr *expr) {
-  if (auto *name = dyn_cast<NameExpr>(expr); name && name->var) {
-    return lowering_.envLowerer().emitVarValue(name->var, true);
+  if (auto *name = dyn_cast<NameExpr>(expr); name && name->var()) {
+    return lowering_.envLowerer().emitVarValue(name->var(), true);
   }
   if (auto *conv = dyn_cast<CastExpr>(expr); conv && conv->isImplicit() && !conv->shortCircuit &&
                                              conv->operand->type->isOptional() &&
@@ -227,11 +227,11 @@ llvm::Value *RefCounts::emitBorrowed(Expr *expr) {
   }
   auto *member = dyn_cast<MemberExpr>(expr);
   if (!member || !member->object->type->isObject() || member->object->type->isBytes() ||
-      member->method) {
+      member->method()) {
     return nullptr;
   }
   if (const Lowering::InterfaceMember *method = lowering_.inheritLowerer().dispatchedMember(
-          member->object->type, member->name, member->signature);
+          member->object->type, member->name, member->signature());
       method && method->callable) {
     return nullptr;
   }

@@ -53,7 +53,7 @@ Expr *DictMethods::checkDictMethod(CallExpr *call, MemberExpr *member) {
   const Type *key = type->keyType(), *value = type->valueType();
   bool isMap = type->isMap();
   auto set = [&](Builtin builtin, const Type *result) {
-    call->builtin = builtin;
+    call->target = BuiltinCall{.builtin = builtin};
     call->type = result;
 
     return call;
@@ -230,7 +230,7 @@ Expr *DictMethods::checkFromEntries(CallExpr *call, MemberExpr *member, const Ty
     }
     type = Type::dict(Type::DictKind::Record, Type::string(), values);
   }
-  call->builtin = Builtin::DictNew;
+  call->target = BuiltinCall{.builtin = Builtin::DictNew};
   call->type = type;
 
   return call;
@@ -274,7 +274,7 @@ Expr *DictMethods::checkGroupBy(CallExpr *call, MemberExpr *member, bool map) {
   if (!checker_.dictChecker().checkKeyType(key, call->args[1]->loc())) {
     return call;
   }
-  call->builtin = Builtin::DictGroupBy;
+  call->target = BuiltinCall{.builtin = Builtin::DictGroupBy};
   call->type =
       Type::dict(map ? Type::DictKind::Map : Type::DictKind::Record, key, Type::array(element));
 
@@ -308,9 +308,9 @@ Expr *DictMethods::checkDictObjectCall(CallExpr *call, llvm::StringRef fn) {
     return call;
   }
   const Type *value = type->valueType();
-  call->builtin = fn == "keys"     ? Builtin::ObjectKeys
-                  : fn == "values" ? Builtin::ObjectValues
-                                   : Builtin::ObjectEntries;
+  call->target = BuiltinCall{.builtin = fn == "keys"     ? Builtin::ObjectKeys
+                                        : fn == "values" ? Builtin::ObjectValues
+                                                         : Builtin::ObjectEntries};
   call->type = fn == "keys"     ? Type::array(Type::string())
                : fn == "values" ? Type::array(value)
                                 : Type::array(Type::tuple({Type::string(), value}));

@@ -64,7 +64,7 @@ void CycleEscapes::orderedExpr(const Expr *e, const VarSymbol *self, bool &escap
   if (auto *assign = llvm::dyn_cast<AssignExpr>(e)) {
     auto *member = llvm::dyn_cast<MemberExpr>(assign->target);
     auto *object = member ? llvm::dyn_cast<NameExpr>(member->object) : nullptr;
-    if (object && object->var == self && !assign->op) {
+    if (object && object->var() == self && !assign->op) {
       orderedExpr(assign->value, self, escaped, afterSuper, safe);
       if (!escaped && !mentions(assign->value, self)) {
         safe.insert(assign);
@@ -73,7 +73,7 @@ void CycleEscapes::orderedExpr(const Expr *e, const VarSymbol *self, bool &escap
     }
   }
   if (auto *call = llvm::dyn_cast<CallExpr>(e);
-      call && call->superCall && !llvm::isa<MemberExpr>(call->callee)) {
+      call && call->superCall() && !llvm::isa<MemberExpr>(call->callee)) {
     for (const Expr *arg : call->args) {
       escaped = escaped || exprEscapes(arg, self);
     }
@@ -114,7 +114,7 @@ bool CycleEscapes::mentions(const Expr *expr, const VarSymbol *self) {
       return;
     }
     if (auto *name = llvm::dyn_cast<NameExpr>(e)) {
-      found = name->var == self;
+      found = name->var() == self;
       return;
     }
     if (auto *fe = llvm::dyn_cast<FunctionExpr>(e)) {
@@ -149,7 +149,7 @@ void CycleEscapes::forEachChild(const Expr *e, const std::function<void(const Ex
     break;
   case Expr::Kind::ObjectLit:
     for (const ObjectLitExpr::Property &p : llvm::cast<ObjectLitExpr>(e)->props) {
-      visit(p.key);
+      visit(p.key());
       visit(p.value);
     }
     break;
@@ -182,7 +182,7 @@ void CycleEscapes::forEachChild(const Expr *e, const std::function<void(const Ex
     break;
   case Expr::Kind::New: {
     auto *create = llvm::cast<NewExpr>(e);
-    for (const Expr *x : create->ctor ? create->ctor->args : create->args) {
+    for (const Expr *x : create->ctor() ? create->ctor()->args : create->args) {
       visit(x);
     }
     break;
@@ -274,7 +274,7 @@ void CycleEscapes::walkStmt(const Stmt *stmt, const std::function<void(const Exp
     auto *fn = llvm::cast<FunctionDecl>(stmt);
     for (const VarSymbol *var : fn->captures) {
       NameExpr fake(llvm::SMLoc(), var->name);
-      fake.var = const_cast<VarSymbol *>(var);
+      fake.binding = NamedVar{.var = const_cast<VarSymbol *>(var)};
       visit(&fake);
     }
     break;

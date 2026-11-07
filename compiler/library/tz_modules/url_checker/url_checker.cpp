@@ -12,7 +12,7 @@ namespace {
 bool isLibraryClass(const Type *type, llvm::StringRef name) {
   const ClassDecl *cls = type ? type->nonOptional()->classDecl() : nullptr;
 
-  return cls && cls->library && cls->name == name;
+  return cls && cls->library() && cls->name == name;
 }
 
 }
@@ -142,7 +142,7 @@ void UrlChecker::checkUrlNew(NewExpr *expr) {
   if (checker_.libraryCalls().inLibrary(expr->loc())) {
     return;
   }
-  const std::vector<Expr *> &args = expr->ctor ? expr->ctor->args : expr->args;
+  const std::vector<Expr *> &args = expr->ctor() ? expr->ctor()->args : expr->args;
   if (args.empty() || llvm::any_of(args, [](const Expr *a) { return a->type->isError(); })) {
     return;
   }

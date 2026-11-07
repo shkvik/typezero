@@ -185,7 +185,7 @@ Expr *ArrayLiteralChecker::checkArrayLit(ArrayLitExpr *lit, const Type *expected
         auto literalClass = [](const Type *t) {
           const ClassDecl *cls = t->nonOptional()->classDecl();
 
-          return cls && cls->literal;
+          return cls && cls->literal();
         };
         if (literalClass(element) && literalClass(types[i])) {
           message += "; each object literal with methods has a type of its own, so objects made "

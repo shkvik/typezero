@@ -224,7 +224,7 @@ llvm::Value *StringLowerer::emitStringIndex(IndexExpr *index) {
                                {stringObj(object.value), stringMeta(object.value), position});
   };
   llvm::Value *result;
-  if (!index->mayBeOutOfRange) {
+  if (!index->mayBeOutOfRange()) {
     result = read();
   } else {
     result = lowering_.arrayLowerer().emitCheckedRead(

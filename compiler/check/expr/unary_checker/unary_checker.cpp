@@ -206,8 +206,8 @@ Expr *UnaryChecker::checkUnary(UnaryExpr *unary, const Type *expected, bool wrap
                                             " == undefined) return ...', or give a "
                                             "default with '" +
                                             text + " ?? ...'");
-    if (auto *name = dyn_cast<NameExpr>(unary->operand); name && name->var) {
-      checker_.flowChecker().setDefined(name->var, true);
+    if (auto *name = dyn_cast<NameExpr>(unary->operand); name && name->var()) {
+      checker_.flowChecker().setDefined(name->var(), true);
     }
     return unary;
   }

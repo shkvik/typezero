@@ -129,7 +129,7 @@ bool containsLoop(const Stmt *stmt) {
       stmt,
       [&](const Expr *e) {
         if (auto *call = dyn_cast<CallExpr>(e)) {
-          if (std::optional<size_t> at = callbackArg(call->builtin);
+          if (std::optional<size_t> at = callbackArg(call->builtin());
               at && *at < call->args.size()) {
             found |= isa<FunctionExpr>(stripCasts(call->args[*at]));
           }

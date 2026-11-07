@@ -49,10 +49,11 @@ void DeclarationChecker::check(Module *module) {
   checker_.moduleDeclarer().useModule(module);
   exported_.clear();
   for (const ExportDecl &decl : module->file.exports) {
-    if (!decl.path.empty() || decl.all) {
+    const LocalExport *local = decl.form.as<LocalExport>();
+    if (!local) {
       continue;
     }
-    for (const ModuleName &name : decl.names) {
+    for (const ModuleName &name : local->names) {
       exported_[name.as.empty() ? name.name : name.as] = {name.name, name.loc};
     }
   }
@@ -186,13 +187,13 @@ bool DeclarationChecker::sameParams(const std::vector<Param> &declared, const Fu
 }
 
 void DeclarationChecker::checkFunction(FunctionDecl *declared, const Exported &exported) {
-  Checker::ScopeEntry entry = checker_.topLevelChecker().lookupValue(exported.local);
-  if (!entry.func || !entry.func->decl) {
+  ScopeEntry entry = checker_.topLevelChecker().lookupValue(exported.local);
+  if (!entry.func() || !entry.func()->decl) {
     checker_.diags_.error(declared->loc(),
                           "'" + declared->name + "' is not a function in '" + fileName() + "'");
     return;
   }
-  const FunctionDecl *fn = entry.func->decl;
+  const FunctionDecl *fn = entry.func()->decl;
   std::string what = "'" + declared->name.str() + "'";
   if (!declared->typeParams.empty() || !fn->typeParams.empty()) {
     if (declared->typeParams.size() != fn->typeParams.size()) {
@@ -202,7 +203,7 @@ void DeclarationChecker::checkFunction(FunctionDecl *declared, const Exported &e
     }
     return;
   }
-  checker_.returnInferrer().resolveParams(entry.func);
+  checker_.returnInferrer().resolveParams(entry.func());
   if (!sameParams(declared->params, fn, declared->loc(), what)) {
     return;
   }
@@ -213,7 +214,7 @@ void DeclarationChecker::checkFunction(FunctionDecl *declared, const Exported &e
     return;
   }
   const Type *here = resolve(declared->returnType, true);
-  const Type *there = checker_.returnInferrer().returnType(entry.func);
+  const Type *there = checker_.returnInferrer().returnType(entry.func());
   if (here && there && here != there && !here->isError() && !there->isError()) {
     mismatch(declared->loc(), "what " + what + " gives", here, there);
   }
@@ -243,16 +244,17 @@ bool DeclarationChecker::mentionsHidden(const FunctionDecl *fn) const {
 void DeclarationChecker::checkField(const DeclaredMember &member, const ClassField &field,
                                     const ClassDecl *cls) {
   std::string what = "'" + member.name.str() + "' of '" + cls->name.str() + "'";
-  if (member.method || member.constructor) {
+  const DeclaredField *declared = member.form.as<DeclaredField>();
+  if (!declared) {
     checker_.diags_.error(member.loc, what + " is a field in '" + fileName() + "'");
     return;
   }
-  if (member.readonly != field.readonly) {
+  if (declared->readonly != field.readonly) {
     checker_.diags_.error(member.loc, what +
                                           (field.readonly ? " is readonly" : " is not readonly") +
                                           " in '" + fileName() + "'");
   }
-  if (member.optional != field.optional()) {
+  if (declared->optional != field.optional()) {
     checker_.diags_.error(member.loc, what +
                                           (field.optional() ? " is optional" : " is not optional") +
                                           " in '" + fileName() + "'");
@@ -268,19 +270,31 @@ void DeclarationChecker::checkField(const DeclaredMember &member, const ClassFie
 void DeclarationChecker::checkMethod(const DeclaredMember &member, const FunctionDecl *fn,
                                      const ClassDecl *cls) {
   std::string what = "'" + member.name.str() + "' of '" + cls->name.str() + "'";
-  if (!member.method && !member.constructor) {
+  const DeclaredSignature *signature = nullptr;
+  switch (member.form.kind()) {
+    case DeclaredMemberKind::DECLARED_FIELD:
+      break;
+    case DeclaredMemberKind::DECLARED_METHOD:
+      signature = &member.form.as<DeclaredMethod>()->signature;
+      break;
+    case DeclaredMemberKind::DECLARED_CONSTRUCTOR:
+      signature = &member.form.as<DeclaredConstructor>()->signature;
+      break;
+  }
+  if (!signature) {
     checker_.diags_.error(member.loc, what + " is a method in '" + fileName() + "'");
     return;
   }
-  if (!member.typeParams.empty() || !fn->typeParams.empty()) {
-    if (member.typeParams.size() != fn->typeParams.size()) {
+  if (!signature->typeParams.empty() || !fn->typeParams.empty()) {
+    if (signature->typeParams.size() != fn->typeParams.size()) {
       checker_.diags_.error(member.loc, what + " takes another number of type parameters in '" +
                                             fileName() + "'");
     }
     return;
   }
   checker_.returnInferrer().resolveParams(fn->sym);
-  if (!sameParams(member.params, fn, member.loc, what) || member.constructor) {
+  bool constructor = member.form.is<DeclaredConstructor>();
+  if (!sameParams(signature->params, fn, member.loc, what) || constructor) {
     return;
   }
   if (!member.type) {
@@ -322,7 +336,7 @@ void DeclarationChecker::checkClass(const DeclaredClass &declared, const Exporte
       checker_.diags_.error(member.loc,
                             "write the access of " + what + ": public, protected or private");
     }
-    if (member.constructor) {
+    if (member.form.is<DeclaredConstructor>()) {
       const FunctionDecl *ctor = nullptr;
       for (const FunctionDecl *c : cls->constructors) {
         if (c->access() != Access::Private) {

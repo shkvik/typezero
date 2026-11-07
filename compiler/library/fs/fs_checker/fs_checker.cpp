@@ -63,7 +63,7 @@ bool FsChecker::nodeOptions(CallExpr *call, size_t index, llvm::StringRef fn,
     return false;
   }
   for (const ObjectLitExpr::Property &prop : lit->props) {
-    if (prop.spread || prop.key || prop.method || prop.name.empty()) {
+    if (prop.spread() || prop.key() || prop.method() || prop.name.empty()) {
       checker_.diags_.error(prop.loc, "write each option of '" + fn + "' by its name, e.g. '{ " +
                                           allowed[0].str() + ": ... }'");
       return false;
@@ -243,7 +243,7 @@ Expr *FsChecker::checkFsCall(CallExpr *call, llvm::StringRef fn, llvm::SMLoc loc
       return call;
     }
     call->args = {file, flag};
-    call->builtin = Builtin::FsReadFile;
+    call->target = BuiltinCall{.builtin = Builtin::FsReadFile};
     call->type = number ? string : Type::bytesType(Type::Bytes::Buffer);
     if (number) {
       call->args.push_back(number);
@@ -295,7 +295,7 @@ Expr *FsChecker::checkFsCall(CallExpr *call, llvm::StringRef fn, llvm::SMLoc loc
     if (!bytes) {
       call->args.push_back(number ? number : intLit(0));
     }
-    call->builtin = Builtin::FsWriteFile;
+    call->target = BuiltinCall{.builtin = Builtin::FsWriteFile};
     call->type = Type::voidTy();
     return call;
   }
@@ -314,10 +314,10 @@ Expr *FsChecker::checkFsCall(CallExpr *call, llvm::StringRef fn, llvm::SMLoc loc
       }
     }
     call->args = {file};
-    call->builtin = op == "existsSync"     ? Builtin::FsExists
-                    : op == "unlinkSync"   ? Builtin::FsUnlink
-                    : op == "realpathSync" ? Builtin::FsRealpath
-                                           : Builtin::FsMkdtemp;
+    call->target = BuiltinCall{.builtin = op == "existsSync"     ? Builtin::FsExists
+                                          : op == "unlinkSync"   ? Builtin::FsUnlink
+                                          : op == "realpathSync" ? Builtin::FsRealpath
+                                                                 : Builtin::FsMkdtemp};
     call->type = op == "existsSync" ? Type::boolTy() : op == "unlinkSync" ? Type::voidTy() : string;
     return call;
   }
@@ -352,9 +352,9 @@ Expr *FsChecker::checkFsCall(CallExpr *call, llvm::StringRef fn, llvm::SMLoc loc
                   : intLit(0);
     }
     call->args = {file, value};
-    call->builtin = op == "accessSync"  ? Builtin::FsAccess
-                    : op == "chmodSync" ? Builtin::FsChmod
-                                        : Builtin::FsTruncate;
+    call->target = BuiltinCall{.builtin = op == "accessSync"  ? Builtin::FsAccess
+                                          : op == "chmodSync" ? Builtin::FsChmod
+                                                              : Builtin::FsTruncate};
     call->type = Type::voidTy();
     return call;
   }
@@ -385,7 +385,7 @@ Expr *FsChecker::checkFsCall(CallExpr *call, llvm::StringRef fn, llvm::SMLoc loc
       return call;
     }
     call->args = {file, boolLit(op == "statSync"), boolLit(throwIfMissing)};
-    call->builtin = Builtin::FsStat;
+    call->target = BuiltinCall{.builtin = Builtin::FsStat};
     call->type =
         throwIfMissing ? checker_.statsClass_->type : Type::optional(checker_.statsClass_->type);
     return call;
@@ -411,7 +411,7 @@ Expr *FsChecker::checkFsCall(CallExpr *call, llvm::StringRef fn, llvm::SMLoc loc
     Expr *recursive = options.lookup("recursive");
     call->args = {dir, recursive ? checker_.argumentChecker().checkArg(recursive, Type::boolTy())
                                  : boolLit(false)};
-    call->builtin = Builtin::FsReaddir;
+    call->target = BuiltinCall{.builtin = Builtin::FsReaddir};
     call->type = Type::array(types ? checker_.direntClass_->type : string);
     return call;
   }
@@ -437,7 +437,7 @@ Expr *FsChecker::checkFsCall(CallExpr *call, llvm::StringRef fn, llvm::SMLoc loc
                   recursive ? checker_.argumentChecker().checkArg(recursive, Type::boolTy())
                             : boolLit(false),
                   mode ? mode : intLit(0777)};
-    call->builtin = Builtin::FsMkdir;
+    call->target = BuiltinCall{.builtin = Builtin::FsMkdir};
     call->type = Type::optional(string);
     return call;
   }
@@ -454,7 +454,7 @@ Expr *FsChecker::checkFsCall(CallExpr *call, llvm::StringRef fn, llvm::SMLoc loc
       return loosely();
     }
     call->args = {dir};
-    call->builtin = Builtin::FsRmdir;
+    call->target = BuiltinCall{.builtin = Builtin::FsRmdir};
     call->type = Type::voidTy();
     return call;
   }
@@ -477,7 +477,7 @@ Expr *FsChecker::checkFsCall(CallExpr *call, llvm::StringRef fn, llvm::SMLoc loc
         target,
         recursive ? checker_.argumentChecker().checkArg(recursive, Type::boolTy()) : boolLit(false),
         force ? checker_.argumentChecker().checkArg(force, Type::boolTy()) : boolLit(false)};
-    call->builtin = Builtin::FsRm;
+    call->target = BuiltinCall{.builtin = Builtin::FsRm};
     call->type = Type::voidTy();
     return call;
   }
@@ -497,9 +497,9 @@ Expr *FsChecker::checkFsCall(CallExpr *call, llvm::StringRef fn, llvm::SMLoc loc
     Expr *from = path(call->args[0], false);
     Expr *to = path(call->args[1], false);
     call->args = {from, to};
-    call->builtin = op == "renameSync"    ? Builtin::FsRename
-                    : op == "replaceSync" ? Builtin::FsReplace
-                                          : Builtin::FsCopyFile;
+    call->target = BuiltinCall{.builtin = op == "renameSync"    ? Builtin::FsRename
+                                          : op == "replaceSync" ? Builtin::FsReplace
+                                                                : Builtin::FsCopyFile};
     call->type = Type::voidTy();
     return call;
   }
@@ -516,7 +516,7 @@ Expr *FsChecker::checkTzIoCall(CallExpr *call, llvm::SMLoc loc) {
   if (!call->args.empty()) {
     call->args[0] = checker_.argumentChecker().checkArg(call->args[0], Type::string());
   }
-  call->builtin = Builtin::ReadLine;
+  call->target = BuiltinCall{.builtin = Builtin::ReadLine};
   call->type = Type::optional(Type::string());
 
   return call;

@@ -48,12 +48,12 @@ const VarSymbol *checkedVariable(const Expr *expr) {
     expr = conv->operand;
   }
   auto *name = dyn_cast<NameExpr>(expr);
-  if (!name || !name->var || !name->var->type) {
+  if (!name || !name->var() || !name->var()->type) {
     return nullptr;
   }
-  const Type *type = name->var->type;
+  const Type *type = name->var()->type;
 
-  return type->isUnknown() || type->nonOptional()->isAnyObject() ? name->var : nullptr;
+  return type->isUnknown() || type->nonOptional()->isAnyObject() ? name->var() : nullptr;
 }
 
 std::string hintName(const Expr *expr) {
@@ -93,7 +93,7 @@ std::string UnknownChecker::unknownHint(const Expr *expr, const Type *to) {
   const Type *target = to ? to->nonOptional() : nullptr;
   bool object = expr->type && expr->type->isAnyObject();
   std::string check;
-  if (target && target->isClass() && !target->classDecl()->literal) {
+  if (target && target->isClass() && !target->classDecl()->literal()) {
     check = x + " instanceof " + target->classDecl()->name.str();
   } else if (object) {
     check = x + " instanceof C";
@@ -193,13 +193,13 @@ void UnknownChecker::addUnknownFacts(const Expr *cond, Checker::Flow &whenTrue,
     llvm::erase_if(flow.narrowed, [&](const auto &narrowed) { return narrowed.first == var; });
     flow.narrowed.push_back({var, type});
   };
-  if (auto *call = dyn_cast<CallExpr>(cond); call && call->builtin == Builtin::ArrayIsArray) {
+  if (auto *call = dyn_cast<CallExpr>(cond); call && call->builtin() == Builtin::ArrayIsArray) {
     if (const VarSymbol *var = checkedVariable(call->args[0])) {
       narrow(whenTrue, var, Type::array(Type::unknown()));
     }
     return;
   }
-  if (auto *call = dyn_cast<CallExpr>(cond); call && call->builtin == Builtin::JsonIsJson) {
+  if (auto *call = dyn_cast<CallExpr>(cond); call && call->builtin() == Builtin::JsonIsJson) {
     if (const VarSymbol *var = checkedVariable(call->args[0])) {
       narrow(whenTrue, var, Type::json());
     }

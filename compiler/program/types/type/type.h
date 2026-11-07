@@ -5,6 +5,7 @@
 #include "compiler/program/types/overload/overload.h"
 #include "compiler/program/types/type_op/type_op.h"
 #include "compiler/program/types/union_slot/union_slot.h"
+#include "compiler/union/union/union.h"
 #include "llvm/ADT/ArrayRef.h"
 #include "llvm/ADT/StringRef.h"
 #include <cstdint>
@@ -44,73 +45,116 @@ public:
   };
   enum class DictKind { Record, Map, Set };
 
-  Kind kind() const { return kind_; }
-  bool isError() const { return kind_ == Kind::Error; }
-  bool isVoid() const { return kind_ == Kind::Void; }
-  bool isUndefined() const { return kind_ == Kind::Undefined; }
-  bool isBool() const { return kind_ == Kind::Bool; }
-  bool isInt() const { return kind_ == Kind::Int && bits_ == 64 && !unsigned_; }
-  bool isString() const { return kind_ == Kind::String; }
-  bool isInteger() const { return kind_ == Kind::Int; }
-  bool isUnsigned() const { return unsigned_; }
-  bool isWrapping() const { return wrapping_; }
-  int64_t intMin() const {
-    return unsigned_ ? 0 : bits_ == 64 ? INT64_MIN : -(int64_t(1) << (bits_ - 1));
+  Kind kind() const {
+    return data_.kind();
   }
-  uint64_t intMax() const {
-    return bits_ == 64 ? (unsigned_ ? UINT64_MAX : uint64_t(INT64_MAX))
-                       : (uint64_t(1) << (unsigned_ ? bits_ : bits_ - 1)) - 1;
+  bool isError() const {
+    return kind() == Kind::Error;
   }
+  bool isVoid() const {
+    return kind() == Kind::Void;
+  }
+  bool isUndefined() const {
+    return kind() == Kind::Undefined;
+  }
+  bool isBool() const {
+    return kind() == Kind::Bool;
+  }
+  bool isInt() const;
+  bool isString() const {
+    return kind() == Kind::String;
+  }
+  bool isInteger() const {
+    return kind() == Kind::Int;
+  }
+  bool isUnsigned() const;
+  bool isWrapping() const;
+  int64_t intMin() const;
+  uint64_t intMax() const;
   bool holds(const Type *other) const {
     return other->isInteger() && isInteger() && other->intMin() >= intMin() &&
            other->intMax() <= intMax();
   }
-  bool isFloat() const { return kind_ == Kind::Double; }
+  bool isFloat() const {
+    return kind() == Kind::Double;
+  }
   bool isNumeric() const { return isInteger() || isFloat(); }
-  bool isDecimal() const { return kind_ == Kind::Decimal; }
-  bool isOptional() const { return kind_ == Kind::Optional; }
-  bool isArray() const { return kind_ == Kind::Array; }
-  bool isFunction() const { return kind_ == Kind::Function; }
-  bool isObject() const { return kind_ == Kind::Object; }
-  bool isTuple() const { return tuple_; }
-  bool isParam() const { return kind_ == Kind::Param; }
-  bool isResult() const { return kind_ == Kind::Result; }
-  bool isNever() const { return kind_ == Kind::Never; }
-  bool isClass() const { return cls_ != nullptr; }
-  const ClassDecl *classDecl() const { return cls_; }
-  bool isIterator() const { return kind_ == Kind::Iterator; }
-  bool isJson() const { return kind_ == Kind::Json; }
-  bool isDict() const { return kind_ == Kind::Dict; }
-  bool isUnknown() const { return kind_ == Kind::Unknown; }
-  bool isClassRef() const { return kind_ == Kind::ClassRef; }
-  const ClassDecl *classRef() const { return isClassRef() ? refClass_ : nullptr; }
-  bool isConstructor() const { return isClassRef() && !refClass_; }
+  bool isDecimal() const {
+    return kind() == Kind::Decimal;
+  }
+  bool isOptional() const {
+    return kind() == Kind::Optional;
+  }
+  bool isArray() const {
+    return kind() == Kind::Array;
+  }
+  bool isFunction() const {
+    return kind() == Kind::Function;
+  }
+  bool isObject() const {
+    return kind() == Kind::Object;
+  }
+  bool isTuple() const;
+  bool isParam() const {
+    return kind() == Kind::Param;
+  }
+  bool isResult() const {
+    return kind() == Kind::Result;
+  }
+  bool isNever() const {
+    return kind() == Kind::Never;
+  }
+  bool isClass() const;
+  const ClassDecl *classDecl() const;
+  bool isIterator() const {
+    return kind() == Kind::Iterator;
+  }
+  bool isJson() const {
+    return kind() == Kind::Json;
+  }
+  bool isDict() const {
+    return kind() == Kind::Dict;
+  }
+  bool isUnknown() const {
+    return kind() == Kind::Unknown;
+  }
+  bool isClassRef() const {
+    return kind() == Kind::ClassRef;
+  }
+  const ClassDecl *classRef() const;
+  bool isConstructor() const;
   const Type *constructed() const { return isConstructor() ? inner_ : nullptr; }
-  bool isRecord() const { return isDict() && dictKind_ == DictKind::Record; }
-  bool isMap() const { return isDict() && dictKind_ == DictKind::Map; }
-  bool isSet() const { return isDict() && dictKind_ == DictKind::Set; }
-  DictKind dictKind() const { return dictKind_; }
+  bool isRecord() const;
+  bool isMap() const;
+  bool isSet() const;
+  DictKind dictKind() const;
   const Type *keyType() const { return isDict() ? params_[0] : nullptr; }
   const Type *valueType() const { return isDict() ? inner_ : nullptr; }
-  bool isLiteral() const { return kind_ == Kind::Literal; }
-  bool isUnion() const { return kind_ == Kind::Union; }
+  bool isLiteral() const {
+    return kind() == Kind::Literal;
+  }
+  bool isUnion() const {
+    return kind() == Kind::Union;
+  }
 
   const Type *literalBase() const { return isLiteral() ? inner_ : nullptr; }
-  const std::u16string &literalText() const { return text_; }
-  double literalNumber() const { return number_; }
+  const std::u16string &literalText() const;
+  double literalNumber() const;
   bool isStringLiteral() const { return isLiteral() && inner_->isString(); }
-  unsigned atom() const { return atom_; }
+  unsigned atom() const;
   llvm::ArrayRef<const Type *> members() const {
     return isUnion() ? llvm::ArrayRef<const Type *>(params_) : llvm::ArrayRef<const Type *>();
   }
-  llvm::ArrayRef<UnionSlot> slots() const { return slots_; }
-  bool isTagged() const { return isUnion() && slots_.size() > 1; }
+  llvm::ArrayRef<UnionSlot> slots() const;
+  bool isTagged() const;
   const Type *slotPart(UnionSlot slot) const;
   unsigned id() const { return id_; }
-  bool isPromise() const { return kind_ == Kind::Promise; }
+  bool isPromise() const {
+    return kind() == Kind::Promise;
+  }
   const Type *promised() const { return isPromise() ? inner_ : nullptr; }
-  bool isTimer() const { return timer_ != 0; }
-  bool isImmediate() const { return timer_ == 2; }
+  bool isTimer() const;
+  bool isImmediate() const;
   enum class Runtime : uint8_t {
     None,
     FileHandle,
@@ -118,36 +162,36 @@ public:
     ReadlinePromises,
     AsyncIterator,
   };
-  Runtime runtimeKind() const { return runtime_; }
-  bool isRuntimeObject() const { return runtime_ != Runtime::None; }
-  bool isAsyncIterator() const { return runtime_ == Runtime::AsyncIterator; }
+  Runtime runtimeKind() const;
+  bool isRuntimeObject() const;
+  bool isAsyncIterator() const;
   enum class Crypto { None, Hash, Hmac, Cipheriv, Decipheriv, KeyObject, Sign, Verify, Ecdh, X509 };
-  Crypto crypto() const { return crypto_; }
-  bool isCrypto() const { return crypto_ != Crypto::None; }
+  Crypto crypto() const;
+  bool isCrypto() const;
 
   const Type *inner() const { return inner_; }
   llvm::ArrayRef<const Type *> params() const { return params_; }
-  size_t minArgs() const { return minArgs_; }
-  bool hasRest() const { return hasRest_; }
-  bool hasThis() const { return hasThis_; }
+  size_t minArgs() const;
+  bool hasRest() const;
+  bool hasThis() const;
   const Type *ret() const { return inner_; }
   const Type *okType() const { return inner_; }
-  const Type *errType() const { return error_; }
+  const Type *errType() const;
   const Type *nonOptional() const { return isOptional() ? inner_ : this; }
-  llvm::ArrayRef<Field> fields() const { return fields_; }
+  llvm::ArrayRef<Field> fields() const;
   const Field *field(llvm::StringRef name) const;
-  llvm::ArrayRef<Overload> overloads() const { return overloads_; }
+  llvm::ArrayRef<Overload> overloads() const;
   const Overload *overload(llvm::StringRef name) const;
   bool isIncomplete() const { return incomplete_; }
-  bool isAnyObject() const { return anyObject_; }
-  bool isRegExp() const { return regExp_; }
-  bool isMatch() const { return match_; }
-  bool isDate() const { return date_; }
-  bool isDateFormat() const { return intl_ == IntlKind::DateTimeFormat; }
-  bool isIntl() const { return intl_ != IntlKind::None; }
-  IntlKind intlKind() const { return intl_; }
-  bool isWeakRef() const { return weakRef_; }
-  const Type *weakTarget() const { return weakRef_ ? inner_ : nullptr; }
+  bool isAnyObject() const;
+  bool isRegExp() const;
+  bool isMatch() const;
+  bool isDate() const;
+  bool isDateFormat() const;
+  bool isIntl() const;
+  IntlKind intlKind() const;
+  bool isWeakRef() const;
+  const Type *weakTarget() const;
   enum class Bytes {
     None,
     Uint8,
@@ -167,37 +211,35 @@ public:
     TextDecoder,
     FatalTextDecoder,
   };
-  Bytes bytes() const { return bytes_; }
-  bool isBytes() const { return bytes_ != Bytes::None; }
-  bool isTypedArray() const { return bytes_ >= Bytes::Uint8 && bytes_ <= Bytes::Buffer; }
-  bool isBuffer() const { return bytes_ == Bytes::Buffer; }
-  bool isByteView() const { return isTypedArray() || bytes_ == Bytes::DataView; }
+  Bytes bytes() const;
+  bool isBytes() const;
+  bool isTypedArray() const;
+  bool isBuffer() const;
+  bool isByteView() const;
   const Type *elementType() const;
   unsigned elementSize() const;
   const Type *accessType() const;
   bool elementRange(int64_t &lo, int64_t &hi) const;
-  int matchGroups() const { return matchGroups_; }
-  bool captureMandatory(unsigned k) const {
-    return k == 0 || (k < mandatory_.size() && mandatory_[k]);
-  }
+  int matchGroups() const;
+  bool captureMandatory(unsigned k) const;
   const Type *constraint() const { return isParam() ? inner_ : nullptr; }
   llvm::ArrayRef<const Type *> alternatives() const {
     return isParam() ? llvm::ArrayRef<const Type *>(params_) : llvm::ArrayRef<const Type *>();
   }
-  const Type *iterated() const { return isParam() ? iterated_ : nullptr; }
-  void setIterated(const Type *element) { iterated_ = element; }
-  bool isListParam() const { return isParam() && list_; }
-  void setList() { list_ = true; }
+  const Type *iterated() const;
+  void setIterated(const Type *element);
+  bool isListParam() const;
+  void setList();
   static const Type *typeOp(TypeOp op, llvm::ArrayRef<const Type *> operands);
   static const Type *indexedAccess(const Type *object, const Type *key) {
     return typeOp(TypeOp::Index, {object, key});
   }
   static const Type *mapped(const Type *key, const Type *keys, const Type *value, int optional,
                             int readonly, const Type *source, const Type *rename = nullptr);
-  TypeOp typeOp() const { return isParam() ? op_ : TypeOp::None; }
-  llvm::ArrayRef<const Type *> operands() const { return operands_; }
-  int mappedOptional() const { return mappedOptional_; }
-  int mappedReadonly() const { return mappedReadonly_; }
+  TypeOp typeOp() const;
+  llvm::ArrayRef<const Type *> operands() const;
+  int mappedOptional() const;
+  int mappedReadonly() const;
   const Type *yielded() const { return inner_; }
   const Type *returned() const { return isIterator() || isAsyncIterator() ? params_[0] : nullptr; }
   const Type *sent() const { return isIterator() || isAsyncIterator() ? params_[1] : nullptr; }
@@ -236,8 +278,8 @@ public:
   static const Type *tuple(llvm::ArrayRef<const Type *> elements, bool readonly = false);
   static const Type *argumentList(llvm::ArrayRef<const Type *> elements, size_t min,
                                   const Type *rest);
-  size_t tupleMin() const { return tupleMin_; }
-  const Type *tupleRest() const { return tupleRest_; }
+  size_t tupleMin() const;
+  const Type *tupleRest() const;
   static Type *param(llvm::StringRef name);
   void setConstraint(const Type *constraint, std::vector<const Type *> alternatives);
   static const Type *anyObject();
@@ -250,10 +292,7 @@ public:
   void rename(std::string name) { name_ = std::move(name); }
   static void nameUnion(const Type *type, llvm::StringRef name);
   static void swapClasses(Type *a, Type *b);
-  void forgetFields() {
-    fields_.clear();
-    incomplete_ = true;
-  }
+  void forgetFields();
   void replaceBase(const Type *from, const Type *to) {
     for (const Type *&base : bases_) {
       if (base == from) {
@@ -261,8 +300,8 @@ public:
       }
     }
   }
-  llvm::ArrayRef<const Type *> typeArgs() const { return typeArgs_; }
-  void setTypeArgs(std::vector<const Type *> args) { typeArgs_ = std::move(args); }
+  llvm::ArrayRef<const Type *> typeArgs() const;
+  void setTypeArgs(std::vector<const Type *> args);
   static const Type *iterator(const Type *yielded, const Type *returned = voidTy(),
                               const Type *sent = voidTy());
   static const Type *regExp();
@@ -284,11 +323,9 @@ public:
   static const Type *stringLiteral(const std::u16string &text);
   static const Type *stringPattern(std::vector<std::u16string> texts,
                                    std::vector<const Type *> holes);
-  bool isPattern() const { return pattern_; }
-  llvm::ArrayRef<std::u16string> patternTexts() const { return texts_; }
-  llvm::ArrayRef<const Type *> patternHoles() const {
-    return pattern_ ? llvm::ArrayRef<const Type *>(params_) : llvm::ArrayRef<const Type *>();
-  }
+  bool isPattern() const;
+  llvm::ArrayRef<std::u16string> patternTexts() const;
+  llvm::ArrayRef<const Type *> patternHoles() const;
   static const Type *numberLiteral(double value, const Type *base);
   static const Type *boolLiteral(bool value);
   static llvm::ArrayRef<const Type *> stringLiterals();
@@ -297,56 +334,222 @@ public:
   static const Type *fromName(llvm::StringRef name);
 
 private:
+  enum class ObjectKind {
+    ORDINARY_OBJECT,
+    ANY_OBJECT,
+    REG_EXP_OBJECT,
+    MATCH_OBJECT,
+    DATE_OBJECT,
+    INTL_OBJECT,
+    WEAK_REF_OBJECT,
+    TIMEOUT_OBJECT,
+    IMMEDIATE_OBJECT,
+    CRYPTO_OBJECT,
+    BYTES_OBJECT,
+    RUNTIME_OBJECT,
+  };
+
+  struct OrdinaryObject {
+    static constexpr ObjectKind kind = ObjectKind::ORDINARY_OBJECT;
+  };
+
+  struct AnyObject {
+    static constexpr ObjectKind kind = ObjectKind::ANY_OBJECT;
+  };
+
+  struct RegExpObject {
+    static constexpr ObjectKind kind = ObjectKind::REG_EXP_OBJECT;
+  };
+
+  struct MatchObject {
+    static constexpr ObjectKind kind = ObjectKind::MATCH_OBJECT;
+    int groups = -1;
+    std::vector<bool> mandatory;
+  };
+
+  struct DateObject {
+    static constexpr ObjectKind kind = ObjectKind::DATE_OBJECT;
+  };
+
+  struct IntlObject {
+    static constexpr ObjectKind kind = ObjectKind::INTL_OBJECT;
+    IntlKind intl = IntlKind::None;
+  };
+
+  struct WeakRefObject {
+    static constexpr ObjectKind kind = ObjectKind::WEAK_REF_OBJECT;
+  };
+
+  struct TimeoutObject {
+    static constexpr ObjectKind kind = ObjectKind::TIMEOUT_OBJECT;
+  };
+
+  struct ImmediateObject {
+    static constexpr ObjectKind kind = ObjectKind::IMMEDIATE_OBJECT;
+  };
+
+  struct CryptoObject {
+    static constexpr ObjectKind kind = ObjectKind::CRYPTO_OBJECT;
+    Crypto crypto = Crypto::None;
+  };
+
+  struct BytesObject {
+    static constexpr ObjectKind kind = ObjectKind::BYTES_OBJECT;
+    Bytes bytes = Bytes::None;
+  };
+
+  struct RuntimeObject {
+    static constexpr ObjectKind kind = ObjectKind::RUNTIME_OBJECT;
+    Runtime runtime = Runtime::None;
+  };
+
+  using ObjectForm = Union<OrdinaryObject, AnyObject, RegExpObject, MatchObject, DateObject,
+                           IntlObject, WeakRefObject, TimeoutObject, ImmediateObject, CryptoObject,
+                           BytesObject, RuntimeObject>;
+
+  struct ErrorData {
+    static constexpr Kind kind = Kind::Error;
+  };
+
+  struct VoidData {
+    static constexpr Kind kind = Kind::Void;
+  };
+
+  struct UndefinedData {
+    static constexpr Kind kind = Kind::Undefined;
+  };
+
+  struct BoolData {
+    static constexpr Kind kind = Kind::Bool;
+  };
+
+  struct IntData {
+    static constexpr Kind kind = Kind::Int;
+    unsigned bits = 0;
+    bool isUnsigned = false;
+    bool wrapping = false;
+  };
+
+  struct DoubleData {
+    static constexpr Kind kind = Kind::Double;
+  };
+
+  struct DecimalData {
+    static constexpr Kind kind = Kind::Decimal;
+  };
+
+  struct StringData {
+    static constexpr Kind kind = Kind::String;
+    bool pattern = false;
+    std::vector<std::u16string> texts;
+  };
+
+  struct OptionalData {
+    static constexpr Kind kind = Kind::Optional;
+  };
+
+  struct ArrayData {
+    static constexpr Kind kind = Kind::Array;
+  };
+
+  struct FunctionData {
+    static constexpr Kind kind = Kind::Function;
+    size_t minArgs = 0;
+    bool hasRest = false;
+    bool hasThis = false;
+  };
+
+  struct ObjectData {
+    static constexpr Kind kind = Kind::Object;
+    std::vector<Field> fields;
+    std::vector<Overload> overloads;
+    const ClassDecl *cls = nullptr;
+    bool tuple = false;
+    size_t tupleMin = 0;
+    const Type *tupleRest = nullptr;
+    std::vector<const Type *> typeArgs;
+    ObjectForm form = OrdinaryObject{};
+  };
+
+  struct ParamData {
+    static constexpr Kind kind = Kind::Param;
+    TypeOp op = TypeOp::None;
+    std::vector<const Type *> operands;
+    int mappedOptional = 0;
+    int mappedReadonly = 0;
+    const Type *iterated = nullptr;
+    bool list = false;
+  };
+
+  struct ResultData {
+    static constexpr Kind kind = Kind::Result;
+    const Type *error = nullptr;
+  };
+
+  struct NeverData {
+    static constexpr Kind kind = Kind::Never;
+  };
+
+  struct IteratorData {
+    static constexpr Kind kind = Kind::Iterator;
+  };
+
+  struct JsonData {
+    static constexpr Kind kind = Kind::Json;
+  };
+
+  struct DictData {
+    static constexpr Kind kind = Kind::Dict;
+    DictKind dictKind = DictKind::Record;
+  };
+
+  struct LiteralData {
+    static constexpr Kind kind = Kind::Literal;
+    std::u16string text;
+    double number = 0;
+    unsigned atom = 0;
+  };
+
+  struct UnionData {
+    static constexpr Kind kind = Kind::Union;
+    std::vector<UnionSlot> slots;
+  };
+
+  struct PromiseData {
+    static constexpr Kind kind = Kind::Promise;
+  };
+
+  struct UnknownData {
+    static constexpr Kind kind = Kind::Unknown;
+  };
+
+  struct ClassRefData {
+    static constexpr Kind kind = Kind::ClassRef;
+    const ClassDecl *refClass = nullptr;
+  };
+
+  using Data = Union<ErrorData, VoidData, UndefinedData, BoolData, IntData, DoubleData, DecimalData,
+                     StringData, OptionalData, ArrayData, FunctionData, ObjectData, ParamData,
+                     ResultData, NeverData, IteratorData, JsonData, DictData, LiteralData,
+                     UnionData, PromiseData, UnknownData, ClassRefData>;
+
+  static Data dataFor(Kind kind);
+  const ObjectForm *objectForm() const;
+
   Type(Kind kind, std::string name, const Type *inner = nullptr)
-      : kind_(kind), inner_(inner), name_(std::move(name)), id_(++count_) {}
+      : data_(dataFor(kind)),
+        inner_(inner),
+        name_(std::move(name)),
+        id_(++count_) {}
   static unsigned count_;
 
-  Kind kind_;
+  Data data_;
   const Type *inner_;
-  const Type *error_ = nullptr;
   std::string name_;
   std::vector<const Type *> params_;
-  size_t minArgs_ = 0;
-  bool hasRest_ = false;
-  bool hasThis_ = false;
-  const ClassDecl *refClass_ = nullptr;
-  std::vector<Field> fields_;
-  std::vector<Overload> overloads_;
   bool incomplete_ = false;
-  bool tuple_ = false;
-  bool anyObject_ = false;
-  const ClassDecl *cls_ = nullptr;
-  bool regExp_ = false;
-  bool match_ = false;
-  bool date_ = false;
-  IntlKind intl_ = IntlKind::None;
-  bool weakRef_ = false;
-  int timer_ = 0;
-  Crypto crypto_ = Crypto::None;
-  Bytes bytes_ = Bytes::None;
-  Runtime runtime_ = Runtime::None;
-  int matchGroups_ = -1;
-  std::vector<bool> mandatory_;
   std::vector<const Type *> bases_;
   bool isBase_ = false;
-  DictKind dictKind_ = DictKind::Record;
-  std::u16string text_;
-  bool pattern_ = false;
-  std::vector<std::u16string> texts_;
-  double number_ = 0;
-  unsigned atom_ = 0;
-  unsigned bits_ = 0;
-  bool unsigned_ = false;
-  bool wrapping_ = false;
-  std::vector<UnionSlot> slots_;
-  std::vector<const Type *> typeArgs_;
-  const Type *iterated_ = nullptr;
-  bool list_ = false;
-  TypeOp op_ = TypeOp::None;
-  std::vector<const Type *> operands_;
-  int mappedOptional_ = 0, mappedReadonly_ = 0;
-  size_t tupleMin_ = 0;
-  const Type *tupleRest_ = nullptr;
   unsigned id_;
 };
 

@@ -20,9 +20,9 @@ void Unused::findUnused(SourceFile &program) {
   auto reach = [&](const Expr *e) {
     const FuncSymbol *fn = nullptr;
     if (auto *call = dyn_cast<CallExpr>(e)) {
-      fn = call->func;
+      fn = call->func();
     } else if (auto *name = dyn_cast<NameExpr>(e)) {
-      fn = name->func;
+      fn = name->func();
     }
     if (fn && fn->decl && used.insert(fn->decl).second) {
       queue.push_back(fn->decl);

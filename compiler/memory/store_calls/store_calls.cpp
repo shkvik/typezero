@@ -20,7 +20,7 @@ StoreScanner::Sources StoreCalls::call(const CallExpr *c) {
   StoreScanner::Sources receiver;
   if (member) {
     receiver = scanner_.storeExprs().expr(member->object);
-  } else if (c->builtin == Builtin::None && !c->func) {
+  } else if (c->builtin() == Builtin::None && !c->func()) {
     scanner_.storeExprs().expr(c->callee);
   }
   std::vector<StoreScanner::Sources> args;
@@ -33,7 +33,7 @@ StoreScanner::Sources StoreCalls::call(const CallExpr *c) {
     }
   }
   StoreScanner::Sources out;
-  if (c->builtin != Builtin::None) {
+  if (c->builtin() != Builtin::None) {
     return builtin(c, receiver, args);
   }
   auto methodCall = [&](const FunctionDecl *fn, bool virtualCall) {
@@ -57,8 +57,8 @@ StoreScanner::Sources StoreCalls::call(const CallExpr *c) {
       one(fn);
     }
   };
-  if (c->superCall && !member) {
-    const FunctionDecl *ctor = c->method ? c->method->decl : nullptr;
+  if (c->superCall() && !member) {
+    const FunctionDecl *ctor = c->method() ? c->method()->decl : nullptr;
     scanner_.storeStmts().bindArgs(ctor, args);
     StoreScanner::Sources self =
         scanner_.current_ && scanner_.current_->thisVar()
@@ -83,12 +83,12 @@ StoreScanner::Sources StoreCalls::call(const CallExpr *c) {
     }
     return out;
   }
-  if (c->method) {
-    methodCall(c->method->decl, c->virtualCall);
+  if (c->method()) {
+    methodCall(c->method()->decl, c->virtualCall());
     return out;
   }
-  if (!c->unionMethods.empty()) {
-    for (const CallExpr::UnionMethod &m : c->unionMethods) {
+  if (!c->unionMethods().empty()) {
+    for (const UnionMethod &m : c->unionMethods()) {
       if (m.method) {
         methodCall(m.method->decl, m.virtualCall);
       } else {
@@ -97,9 +97,9 @@ StoreScanner::Sources StoreCalls::call(const CallExpr *c) {
     }
     return out;
   }
-  if (c->func) {
-    scanner_.storeStmts().bindArgs(c->func->decl, args);
-    out.push_back(scanner_.result(c->func->decl));
+  if (c->func()) {
+    scanner_.storeStmts().bindArgs(c->func()->decl, args);
+    out.push_back(scanner_.result(c->func()->decl));
     return out;
   }
   scanner_.store(receiver);
@@ -125,77 +125,77 @@ StoreScanner::Sources StoreCalls::builtin(const CallExpr *c, const StoreScanner:
       scanner_.flowInto(scanner_.var(fe->fn->params[2].sym), receiver);
     }
   }
-  switch (c->builtin) {
-  case Builtin::ArrReverse:
-  case Builtin::ArrSort:
-  case Builtin::ArrSortWith:
-    out.insert(out.end(), receiver.begin(), receiver.end());
-    break;
-  case Builtin::ConsoleLog:
-  case Builtin::ConsoleError:
-  case Builtin::StringOf:
-  case Builtin::ArrPop:
-  case Builtin::ArrShift:
-  case Builtin::ArrAt:
-  case Builtin::ArrSlice:
-  case Builtin::ArrIndexOf:
-  case Builtin::ArrLastIndexOf:
-  case Builtin::ArrIncludes:
-  case Builtin::ArrJoin:
-  case Builtin::ArrToString:
-  case Builtin::ArrForEach:
-  case Builtin::ArrFilter:
-  case Builtin::ArrFind:
-  case Builtin::ArrFindIndex:
-  case Builtin::ArrFindLast:
-  case Builtin::ArrFindLastIndex:
-  case Builtin::ArrSome:
-  case Builtin::ArrEvery:
-  case Builtin::ObjectKeys:
-  case Builtin::ObjectValues:
-  case Builtin::ObjectEntries:
-  case Builtin::MapGet:
-  case Builtin::MapHas:
-  case Builtin::MapDelete:
-  case Builtin::MapClear:
-  case Builtin::MapSize:
-  case Builtin::MapForEach:
-  case Builtin::JsonStringify:
-  case Builtin::ArrayIsArray:
-  case Builtin::JsonIsJson:
-  case Builtin::WeakRefNew:
-  case Builtin::WeakRefDeref:
-    break;
-  case Builtin::ArrPush:
-  case Builtin::ArrUnshift:
-  case Builtin::ArrSplice:
-  case Builtin::ArrFill:
-  case Builtin::ArrConcat:
-  case Builtin::MapSet:
-  case Builtin::SetAdd:
-  case Builtin::RecordSet:
-  case Builtin::RecordNullishSet:
-    for (const StoreScanner::Sources &a : args) {
-      scanner_.store(a);
-    }
-    if (c->builtin == Builtin::MapSet || c->builtin == Builtin::SetAdd) {
+  switch (c->builtin()) {
+    case Builtin::ArrReverse:
+    case Builtin::ArrSort:
+    case Builtin::ArrSortWith:
       out.insert(out.end(), receiver.begin(), receiver.end());
-    }
-    break;
-  case Builtin::ArrMap:
-  case Builtin::ArrFlatMap:
-    for (const Expr *arg : c->args) {
-      if (auto *fe = llvm::dyn_cast<FunctionExpr>(arg)) {
-        scanner_.edge(scanner_.stored(), scanner_.result(fe->fn));
+      break;
+    case Builtin::ConsoleLog:
+    case Builtin::ConsoleError:
+    case Builtin::StringOf:
+    case Builtin::ArrPop:
+    case Builtin::ArrShift:
+    case Builtin::ArrAt:
+    case Builtin::ArrSlice:
+    case Builtin::ArrIndexOf:
+    case Builtin::ArrLastIndexOf:
+    case Builtin::ArrIncludes:
+    case Builtin::ArrJoin:
+    case Builtin::ArrToString:
+    case Builtin::ArrForEach:
+    case Builtin::ArrFilter:
+    case Builtin::ArrFind:
+    case Builtin::ArrFindIndex:
+    case Builtin::ArrFindLast:
+    case Builtin::ArrFindLastIndex:
+    case Builtin::ArrSome:
+    case Builtin::ArrEvery:
+    case Builtin::ObjectKeys:
+    case Builtin::ObjectValues:
+    case Builtin::ObjectEntries:
+    case Builtin::MapGet:
+    case Builtin::MapHas:
+    case Builtin::MapDelete:
+    case Builtin::MapClear:
+    case Builtin::MapSize:
+    case Builtin::MapForEach:
+    case Builtin::JsonStringify:
+    case Builtin::ArrayIsArray:
+    case Builtin::JsonIsJson:
+    case Builtin::WeakRefNew:
+    case Builtin::WeakRefDeref:
+      break;
+    case Builtin::ArrPush:
+    case Builtin::ArrUnshift:
+    case Builtin::ArrSplice:
+    case Builtin::ArrFill:
+    case Builtin::ArrConcat:
+    case Builtin::MapSet:
+    case Builtin::SetAdd:
+    case Builtin::RecordSet:
+    case Builtin::RecordNullishSet:
+      for (const StoreScanner::Sources &a : args) {
+        scanner_.store(a);
       }
-    }
-    break;
-  default:
-    scanner_.store(receiver);
-    for (const StoreScanner::Sources &a : args) {
-      scanner_.store(a);
-    }
-    break;
+      if (c->builtin() == Builtin::MapSet || c->builtin() == Builtin::SetAdd) {
+        out.insert(out.end(), receiver.begin(), receiver.end());
+      }
+      break;
+    case Builtin::ArrMap:
+    case Builtin::ArrFlatMap:
+      for (const Expr *arg : c->args) {
+        if (auto *fe = llvm::dyn_cast<FunctionExpr>(arg)) {
+          scanner_.edge(scanner_.stored(), scanner_.result(fe->fn));
+        }
+      }
+      break;
+    default:
+      scanner_.store(receiver);
+      for (const StoreScanner::Sources &a : args) {
+        scanner_.store(a);
+      }
+      break;
   }
 
   return out;

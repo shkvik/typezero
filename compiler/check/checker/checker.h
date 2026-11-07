@@ -1,6 +1,8 @@
 #pragma once
 
+#include "compiler/check/checker/portable_type.h"
 #include "compiler/check/facts/facts.h"
+#include "compiler/check/scopes/scope_entry.h"
 #include "compiler/library/crypto/crypto_api/crypto_api.h"
 #include "compiler/library/decimal/decimal_literal/decimal_literal.h"
 #include "compiler/program/ast/ast.h"
@@ -50,31 +52,8 @@ struct ValueRange {
 
 struct EventInference {
   struct Portable {
-    enum class Kind {
-      Same,
-      Class,
-      ClassRef,
-      Optional,
-      Array,
-      Tuple,
-      Function,
-      Union,
-      Object,
-      Promise,
-      Dict,
-      Iterator,
-      Result,
-      Bad,
-    };
-    Kind kind = Kind::Same;
-    const Type *same = nullptr;
-    std::string file, name;
+    PortableForm form = PortableSame{};
     std::vector<Portable> parts;
-    std::vector<std::string> names;
-    std::vector<bool> readonly;
-    size_t min = 0;
-    bool rest = false;
-    int dict = 0;
   };
   struct Event {
     std::string name;
@@ -264,12 +243,6 @@ public:
   void setEventInference(EventInference *inference) { inference_ = inference; }
 
 private:
-  struct ScopeEntry {
-    VarSymbol *var = nullptr;
-    FuncSymbol *func = nullptr;
-    EnumDecl *enumDecl = nullptr;
-    ClassDecl *cls = nullptr;
-  };
   struct FieldPath {
     const VarSymbol *var = nullptr;
     llvm::SmallVector<llvm::StringRef, 2> names;
@@ -524,7 +497,7 @@ private:
   struct Export {
     Binding target;
     llvm::SMLoc loc;
-    const ExportDecl *all = nullptr;
+    const ExportAll *all = nullptr;
   };
   struct Import {
     Binding target;

@@ -112,7 +112,7 @@ llvm::Value *PromiseCombineLowerer::emitPromiseCombine(CallExpr *call) {
   }
 
   const Type *result = call->type->promised();
-  int32_t kind = call->builtin == Builtin::PromiseAll ? kAll : kRace;
+  int32_t kind = call->builtin() == Builtin::PromiseAll ? kAll : kRace;
   llvm::Constant *null = llvm::ConstantPointerNull::get(lowering_.builder_.getPtrTy());
   llvm::Constant *items = null, *tuple = null, *convert = null;
   uint32_t tupleSize = 0;

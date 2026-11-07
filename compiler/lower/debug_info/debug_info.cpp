@@ -109,7 +109,7 @@ void DebugInfo::beginFunction(llvm::Function *function, const FunctionDecl *fn) 
     return;
   }
   std::string name = fn->name.empty() ? "<anonymous>" : fn->name.str();
-  if (fn->cls() && !fn->cls()->literal) {
+  if (fn->cls() && !fn->cls()->literal()) {
     name = fn->isConstructor() || fn == fn->cls()->init ? "new " + fn->cls()->name.str()
                                                         : (fn->cls()->name + "." + name).str();
   }

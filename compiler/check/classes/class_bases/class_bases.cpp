@@ -49,15 +49,15 @@ void ClassBases::addBase(const Type *type, const Type *base) {
 }
 
 void ClassBases::resolveClassBases(ClassDecl *cls) {
-  cls->resolvingBase = true;
+  cls->stage = ClassStage::RESOLVING_BASE;
   if (cls->base) {
     const TypeRef &ref = *cls->base;
-    bool named = ref.kind == TypeRef::Kind::Name || ref.kind == TypeRef::Kind::Generic;
+    bool named = ref.kind() == TypeRefKind::NAME_REF || ref.kind() == TypeRefKind::GENERIC_REF;
     Stmt *found = named ? checker_.typeDeclarer().lookupType(ref.name) : nullptr;
     auto *parent = llvm::dyn_cast_or_null<ClassDecl>(found);
     bool instance = false;
-    if (parent && parent->library && parent->name == "EventEmitter" &&
-        ref.kind == TypeRef::Kind::Name) {
+    if (parent && parent->library() && parent->name == "EventEmitter" &&
+        ref.kind() == TypeRefKind::NAME_REF) {
       const Type *events = checker_.eventMapInference().inferredEventMap(
           "class " + checker_.eventMapInference().placeOf(cls->loc()) + " " + cls->name.str());
       parent = events
@@ -71,7 +71,7 @@ void ClassBases::resolveClassBases(ClassDecl *cls) {
       if (!parent) {
         found = nullptr;
       }
-    } else if (parent && (parent->isGeneric() || ref.kind == TypeRef::Kind::Generic)) {
+    } else if (parent && (parent->isGeneric() || ref.kind() == TypeRefKind::GENERIC_REF)) {
       const Type *type = checker_.typeResolver().resolveType(ref, false);
       parent = ClassDeclarer::classOf(type);
       instance = true;
@@ -82,14 +82,14 @@ void ClassBases::resolveClassBases(ClassDecl *cls) {
     if (!named) {
       checker_.diags_.error(ref.loc, "a class can extend only a class, by its name");
     } else if (instance && !parent) {
-    } else if (parent && (parent == cls || parent->resolvingBase)) {
+    } else if (parent && (parent == cls || parent->stage == ClassStage::RESOLVING_BASE)) {
       checker_.diags_.error(
           ref.loc, "class '" + cls->name + "' cannot extend itself" +
                        (parent == cls ? std::string() : " through '" + parent->name.str() + "'"));
     } else if (checker_.fsDeclarer().isRuntimeClass(parent)) {
       checker_.diags_.error(ref.loc, "class '" + cls->name + "' cannot extend '" + parent->name +
                                          "': only the functions of node:fs make its objects");
-    } else if (parent && parent->baseExpr && !parent->resolved) {
+    } else if (parent && parent->baseExpr && parent->stage == ClassStage::UNRESOLVED) {
       checker_.diags_.error(ref.loc,
                             "class '" + cls->name + "' cannot extend '" + parent->name +
                                 "', whose base is a value, made where its declaration runs; "
@@ -153,7 +153,7 @@ void ClassBases::resolveClassBases(ClassDecl *cls) {
       addBase(cls->type, type);
     }
   }
-  cls->resolvingBase = false;
+  cls->stage = ClassStage::RESOLVED;
 
   for (ClassField &f : cls->fields) {
     if (f.isStatic()) {
@@ -202,8 +202,8 @@ std::vector<Field> ClassBases::interfaceFields(TypeAliasDecl *alias,
   std::vector<Field> fields;
   std::vector<std::string> origins;
   for (const TypeRef &ref : alias->bases) {
-    Stmt *found =
-        ref.kind == TypeRef::Kind::Name ? checker_.typeDeclarer().lookupType(ref.name) : nullptr;
+    Stmt *found = ref.kind() == TypeRefKind::NAME_REF ? checker_.typeDeclarer().lookupType(ref.name)
+                                                      : nullptr;
     if (auto *other = llvm::dyn_cast_or_null<TypeAliasDecl>(found);
         other && (other == alias || other->resolving)) {
       checker_.diags_.error(
@@ -281,9 +281,9 @@ std::vector<Field> ClassBases::interfaceFields(TypeAliasDecl *alias,
       continue;
     }
     llvm::SMLoc loc = alias->loc();
-    for (size_t i = 0; i < own.names.size(); ++i) {
-      if (own.names[i] == f.name) {
-        loc = own.locs[i];
+    for (size_t i = 0; i < own.names().size(); ++i) {
+      if (own.names()[i] == f.name) {
+        loc = own.locs()[i];
       }
     }
     auto it = llvm::find_if(fields, [&](const Field &g) { return g.name == f.name; });

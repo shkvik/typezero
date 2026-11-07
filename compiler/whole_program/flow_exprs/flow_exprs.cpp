@@ -65,16 +65,16 @@ Refs FlowExprs::exprRefs(Expr *e) {
     auto *lit = llvm::cast<ObjectLitExpr>(e);
     Refs out;
     for (ObjectLitExpr::Property &p : lit->props) {
-      if (p.key) {
-        expr(p.key);
+      if (p.key()) {
+        expr(p.key());
       }
       Refs value = expr(p.value);
-      if (p.keyed) {
+      if (p.keyed()) {
         flows_.flow(value, flows_.unknown_);
-      } else if (!p.spread && !p.name.empty()) {
+      } else if (!p.spread() && !p.name.empty()) {
         flows_.flow(value, flows_.fieldNode(p.name));
       }
-      append(out, p.spread ? copied(value) : holding(value));
+      append(out, p.spread() ? copied(value) : holding(value));
     }
     if (lit->cls) {
       for (FunctionDecl *fn : lit->cls->methods) {
@@ -88,17 +88,17 @@ Refs FlowExprs::exprRefs(Expr *e) {
   }
   case Expr::Kind::Name: {
     auto *n = llvm::cast<NameExpr>(e);
-    if (n->func) {
-      flows_.flowCalls().functionValue(n->func->decl);
+    if (n->func()) {
+      flows_.flowCalls().functionValue(n->func()->decl);
     }
     return flows_.flowStmts().name(n);
   }
   case Expr::Kind::Member: {
     auto *member = llvm::cast<MemberExpr>(e);
     Refs object = expr(member->object);
-    if (member->method) {
-      flows_.flowCalls().passThis(object, member->method->decl);
-      flows_.flowCalls().functionValue(member->method->decl);
+    if (member->method()) {
+      flows_.flowCalls().passThis(object, member->method()->decl);
+      flows_.flowCalls().functionValue(member->method()->decl);
       return {};
     }
     Refs out = shifted(object, 1);
@@ -113,8 +113,8 @@ Refs FlowExprs::exprRefs(Expr *e) {
     const Type *objectType = index->object->type;
     if (int held = flows_.contents(objectType); held >= 0) {
       out.push_back({held, 0, 0});
-    } else if (!index->field.empty()) {
-      out.push_back({flows_.fieldNode(index->field), 0, 0});
+    } else if (!index->field().empty()) {
+      out.push_back({flows_.fieldNode(index->field()), 0, 0});
     } else if (objectType && objectType->nonOptional()->isTuple()) {
       if (auto *key = llvm::dyn_cast<IntLitExpr>(index->index)) {
         out.push_back({flows_.fieldNode(std::to_string(key->value)), 0, 0});
@@ -149,26 +149,26 @@ Refs FlowExprs::exprRefs(Expr *e) {
     return flows_.flowCalls().call(llvm::cast<CallExpr>(e));
   case Expr::Kind::New: {
     auto *n = llvm::cast<NewExpr>(e);
-    CallExpr *ctor = n->ctor;
+    CallExpr *ctor = n->ctor();
     Refs out;
     std::vector<Refs> args;
     for (Expr *arg : ctor ? ctor->args : n->args) {
       args.push_back(expr(arg));
       append(out, holding(args.back()));
     }
-    const FunctionDecl *target = !ctor                                ? nullptr
-                                 : ctor->method && ctor->method->decl ? ctor->method->decl
-                                 : ctor->func                         ? ctor->func->decl
-                                                                      : nullptr;
+    const FunctionDecl *target = !ctor                                    ? nullptr
+                                 : ctor->method() && ctor->method()->decl ? ctor->method()->decl
+                                 : ctor->func()                           ? ctor->func()->decl
+                                                                          : nullptr;
     if (!target) {
       return out;
     }
     flows_.flowCalls().passArguments(ctor, target, args);
     if (target->thisVar()) {
       out.push_back({flows_.var(target->thisVar()), 0, 0});
-      if (n->cls && target->cls() && target->cls() != n->cls) {
+      if (n->cls() && target->cls() && target->cls() != n->cls()) {
         flows_.flowCalls().passThis(
-            flows_.flowCalls().receiverConversion(n, n->cls->type, target, {}, target->thisVar(),
+            flows_.flowCalls().receiverConversion(n, n->cls()->type, target, {}, target->thisVar(),
                                                   "as 'this' of the constructor of '" +
                                                       target->cls()->name.str() + "'"),
             target);
@@ -227,6 +227,8 @@ Refs FlowExprs::exprRefs(Expr *e) {
     }
     return out;
   }
+  case Expr::Kind::Class:
+    break;
   }
 
   return {};

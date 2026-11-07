@@ -224,7 +224,7 @@ std::optional<Checker::Constant> ConstantFolder::evalConstant(const Expr *expr, 
   case Expr::Kind::Member: {
     auto *access = cast<MemberExpr>(expr);
     auto *object = dyn_cast<NameExpr>(access->object);
-    EnumDecl *decl = object ? checker_.scopes().lookup(object->name).enumDecl : nullptr;
+    EnumDecl *decl = object ? checker_.scopes().lookup(object->name).enumDecl() : nullptr;
     if (!decl) {
       return std::nullopt;
     }
@@ -261,7 +261,7 @@ std::optional<int64_t> ConstantFolder::intConstant(const Expr *expr) const {
     return static_cast<int64_t>(value);
   }
   case Expr::Kind::Name: {
-    auto found = checker_.constVars_.find(cast<NameExpr>(expr)->var);
+    auto found = checker_.constVars_.find(cast<NameExpr>(expr)->var());
     if (found == checker_.constVars_.end()) {
       return std::nullopt;
     }
@@ -297,7 +297,7 @@ std::optional<uint64_t> ConstantFolder::unsignedConstant(const Expr *expr) const
     return lit->value;
   }
   if (auto *name = dyn_cast<NameExpr>(expr)) {
-    if (auto found = bigUnsignedVars_.find(name->var); found != bigUnsignedVars_.end()) {
+    if (auto found = bigUnsignedVars_.find(name->var()); found != bigUnsignedVars_.end()) {
       return found->second;
     }
   }

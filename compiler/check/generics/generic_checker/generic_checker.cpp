@@ -64,9 +64,9 @@ Expr *GenericChecker::apparent(Expr *expr) {
 }
 
 FuncSymbol *GenericChecker::genericNamed(const NameExpr *name) const {
-  Checker::ScopeEntry entry = checker_.scopes().lookup(name->name);
+  ScopeEntry entry = checker_.scopes().lookup(name->name);
 
-  return entry.func && !entry.var && entry.func->isGeneric() ? entry.func : nullptr;
+  return entry.func() && !entry.var() && entry.func()->isGeneric() ? entry.func() : nullptr;
 }
 
 const Type *GenericChecker::numberParam(const Type *param, const Type *only) const {
@@ -137,7 +137,7 @@ std::optional<bool> GenericChecker::constantCondition(const Expr *cond) const {
     }
     return std::nullopt;
   }
-  if (auto *call = dyn_cast<CallExpr>(cond); call && call->builtin == Builtin::JsonIsJson) {
+  if (auto *call = dyn_cast<CallExpr>(cond); call && call->builtin() == Builtin::JsonIsJson) {
     const Type *type = call->args[0]->type;
     if (type->isUnknown() || type->nonOptional()->isParam()) {
       return std::nullopt;

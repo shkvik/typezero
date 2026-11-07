@@ -93,8 +93,8 @@ void LateClasses::makeLateClass(ClassDecl *cls) {
   }
   for (size_t i = 1; i < checker_.scopes_.size(); ++i) {
     for (const auto &entry : checker_.scopes_[i]) {
-      if (entry.second.var) {
-        cls->locals.push_back(entry.second.var->name);
+      if (entry.second.var()) {
+        cls->locals.push_back(entry.second.var()->name);
       }
     }
   }
@@ -285,7 +285,7 @@ void LateClasses::markLateOverrides(SourceFile &program) {
 }
 
 void LateClasses::markLateOverrides(ClassDecl *cls) {
-  if (lateMethodNames_.empty() || cls->literal) {
+  if (lateMethodNames_.empty() || cls->literal()) {
     return;
   }
   for (FunctionDecl *fn : ClassLinks::ownMethods(cls)) {
@@ -414,7 +414,6 @@ void LateClasses::replaceClass(ClassDecl *cls, ClassDecl *replacement, llvm::SML
     again(child);
   }
   cls->replacement = replacement;
-  cls->replaced = true;
   replacement->usedAsValue = true;
 }
 

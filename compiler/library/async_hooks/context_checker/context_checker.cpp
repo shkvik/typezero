@@ -27,8 +27,8 @@ bool ContextChecker::takesOver(const CallExpr *c) {
     runs_.push_back(c);
     return true;
   }
-  if (c->builtin == Builtin::SetInterval ||
-      (c->builtin == Builtin::SetTimeout && c->args.size() > 2)) {
+  if (c->builtin() == Builtin::SetInterval ||
+      (c->builtin() == Builtin::SetTimeout && c->args.size() > 2)) {
     intervals_.push_back(c);
   }
 
@@ -36,7 +36,7 @@ bool ContextChecker::takesOver(const CallExpr *c) {
 }
 
 void ContextChecker::sawNew(const NewExpr *n) {
-  if (storageClass(n->cls)) {
+  if (storageClass(n->cls())) {
     news_.push_back(n);
   }
 }
@@ -124,7 +124,7 @@ void ContextChecker::checkIntervals() {
     std::string how = reads == fn || reads->name.empty()
                           ? std::string("this function reads it with getStore()")
                           : "this function reads it through '" + reads->name.str() + "'";
-    if (c->builtin == Builtin::SetInterval) {
+    if (c->builtin() == Builtin::SetInterval) {
       program_.diags->error(c->args[0]->loc(),
                             "setInterval does not carry the store of an AsyncLocalStorage (an "
                             "interval outlives 'run'), but " +

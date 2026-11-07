@@ -264,7 +264,7 @@ bool ExtendsRelation::extendsObject(const Type *type, const Type *pattern,
   }
   if (pattern->isClass()) {
     const ClassDecl *want = pattern->classDecl();
-    want = want->generic ? want->generic : want;
+    want = want->generic() ? want->generic() : want;
     if (pattern->typeArgs().empty()) {
       return false;
     }
@@ -273,7 +273,7 @@ bool ExtendsRelation::extendsObject(const Type *type, const Type *pattern,
       const Type *t = todo.back();
       todo.pop_back();
       const ClassDecl *cls = t->classDecl();
-      if (cls && (cls->generic ? cls->generic : cls) == want &&
+      if (cls && (cls->generic() ? cls->generic() : cls) == want &&
           t->typeArgs().size() == pattern->typeArgs().size()) {
         bool all = true;
         for (size_t k = 0; all && k < t->typeArgs().size(); ++k) {

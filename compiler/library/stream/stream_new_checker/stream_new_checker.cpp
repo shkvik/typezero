@@ -26,7 +26,7 @@ struct StreamOptionFlags {
       return -1;
     }
     for (const ObjectLitExpr::Property &prop : lit->props) {
-      if (prop.spread || prop.name != name) {
+      if (prop.spread() || prop.name != name) {
         continue;
       }
       if (auto *b = dyn_cast<BoolLitExpr>(prop.value)) {
@@ -42,7 +42,7 @@ struct StreamOptionFlags {
       return false;
     }
     for (const ObjectLitExpr::Property &prop : lit->props) {
-      if (!prop.spread && prop.name == name && !isa<UndefinedExpr>(prop.value)) {
+      if (!prop.spread() && prop.name == name && !isa<UndefinedExpr>(prop.value)) {
         return true;
       }
     }
@@ -95,7 +95,7 @@ Expr *StreamNewChecker::checkStreamNew(NewExpr *expr, ClassDecl *generic, const 
     return nullptr;
   }
   if (const Type *want = expected ? expected->nonOptional() : nullptr;
-      want && ClassDeclarer::classOf(want) && ClassDeclarer::classOf(want)->generic == generic) {
+      want && ClassDeclarer::classOf(want) && ClassDeclarer::classOf(want)->generic() == generic) {
     return nullptr;
   }
   StreamOptionFlags options;

@@ -73,7 +73,7 @@ Expr *NewChecker::checkNew(NewExpr *expr, const Type *expected) {
     }
   };
   if (!expr->callee && !expr->name.empty() &&
-      checker_.topLevelChecker().lookupValue(expr->name).var) {
+      checker_.topLevelChecker().lookupValue(expr->name).var()) {
     expr->callee = checker_.ctx_.make<NameExpr>(expr->loc(), expr->name);
     if (!expr->member.empty()) {
       expr->callee = checker_.ctx_.make<MemberExpr>(expr->loc(), expr->callee, expr->member);
@@ -83,11 +83,12 @@ Expr *NewChecker::checkNew(NewExpr *expr, const Type *expected) {
     return checker_.classValueChecker().checkValueNew(expr, expected);
   }
   if (!expr->member.empty()) {
-    Checker::ScopeEntry intl = checker_.scopes().lookup("Intl");
-    if (expr->name == "Intl" && !intl.var && !intl.func && !intl.cls && expr->member == "Locale") {
+    ScopeEntry intl = checker_.scopes().lookup("Intl");
+    if (expr->name == "Intl" && !intl.var() && !intl.func() && !intl.cls() &&
+        expr->member == "Locale") {
       return checker_.intlChecker().checkLocaleNew(expr, expected);
     }
-    if (expr->name == "Intl" && !intl.var && !intl.func && !intl.cls) {
+    if (expr->name == "Intl" && !intl.var() && !intl.func() && !intl.cls()) {
       return expr->member == "DateTimeFormat"
                  ? checker_.dateFormatChecker().checkDateFormatNew(expr->loc(), expr->args)
                  : checker_.intlChecker().checkIntlNew(expr->loc(), expr->member, expr->args, true);
@@ -99,8 +100,8 @@ Expr *NewChecker::checkNew(NewExpr *expr, const Type *expected) {
     checkArgsLoosely();
     return expr;
   }
-  if (ClassDecl *cls = checker_.topLevelChecker().lookupValue(expr->name).cls) {
-    if (cls->library && !checker_.libraryCalls().inLibrary(expr->loc()) &&
+  if (ClassDecl *cls = checker_.topLevelChecker().lookupValue(expr->name).cls()) {
+    if (cls->library() && !checker_.libraryCalls().inLibrary(expr->loc()) &&
         (cls == checker_.libraryClass("CryptoKey") ||
          cls == checker_.libraryClass("SubtleCrypto"))) {
       checker_.diags_.error(expr->loc(),
@@ -114,10 +115,10 @@ Expr *NewChecker::checkNew(NewExpr *expr, const Type *expected) {
     }
     Expr *checked = checker_.methodCallChecker().checkClassNew(
         expr, ClassValueChecker::finalClass(cls), expected);
-    if (auto *made = dyn_cast<NewExpr>(checked); made && cls->library && cls->name == "URL") {
+    if (auto *made = dyn_cast<NewExpr>(checked); made && cls->library() && cls->name == "URL") {
       checker_.urlChecker().checkUrlNew(made);
     }
-    if (auto *made = dyn_cast<NewExpr>(checked); made && cls->library) {
+    if (auto *made = dyn_cast<NewExpr>(checked); made && cls->library()) {
       if (cls->name == "Server" || cls->name == "Socket") {
         checker_.tzModulesChecker().noteServer(made);
       }
@@ -140,15 +141,15 @@ Expr *NewChecker::checkNew(NewExpr *expr, const Type *expected) {
     checkArgsLoosely();
     return expr;
   }
-  if (expr->name == "RegExp" && !checker_.scopes().lookup("RegExp").var &&
-      !checker_.scopes().lookup("RegExp").func) {
+  if (expr->name == "RegExp" && !checker_.scopes().lookup("RegExp").var() &&
+      !checker_.scopes().lookup("RegExp").func()) {
     if (!expr->typeArgs.empty()) {
       checker_.diags_.error(expr->loc(), "'RegExp' takes no type arguments");
     }
     return checker_.regexChecker().checkRegExpConstructor(expr->loc(), expr->args);
   }
-  if (expr->name == "Date" && !checker_.scopes().lookup("Date").var &&
-      !checker_.scopes().lookup("Date").func) {
+  if (expr->name == "Date" && !checker_.scopes().lookup("Date").var() &&
+      !checker_.scopes().lookup("Date").func()) {
     if (!expr->typeArgs.empty()) {
       checker_.diags_.error(expr->loc(), "'Date' takes no type arguments");
     }
@@ -156,20 +157,20 @@ Expr *NewChecker::checkNew(NewExpr *expr, const Type *expected) {
   }
   if ((expr->name == "Map" || expr->name == "Set" || expr->name == "WeakMap" ||
        expr->name == "WeakSet") &&
-      !checker_.scopes().lookup(expr->name).var && !checker_.scopes().lookup(expr->name).func) {
+      !checker_.scopes().lookup(expr->name).var() && !checker_.scopes().lookup(expr->name).func()) {
     return checker_.dictNewChecker().checkDictNew(expr, expected);
   }
-  if (expr->name == "Promise" && !checker_.scopes().lookup("Promise").var &&
-      !checker_.scopes().lookup("Promise").func) {
+  if (expr->name == "Promise" && !checker_.scopes().lookup("Promise").var() &&
+      !checker_.scopes().lookup("Promise").func()) {
     return checker_.promiseChecker().checkPromiseNew(expr, expected);
   }
-  if (expr->name == "WeakRef" && !checker_.scopes().lookup("WeakRef").var &&
-      !checker_.scopes().lookup("WeakRef").func) {
+  if (expr->name == "WeakRef" && !checker_.scopes().lookup("WeakRef").var() &&
+      !checker_.scopes().lookup("WeakRef").func()) {
     return checker_.weakRefChecker().checkWeakRefNew(expr, expected);
   }
   if (const Type *bytes = BytesChecker::bytesTypeNamed(expr->name);
-      bytes && !checker_.scopes().lookup(expr->name).var &&
-      !checker_.scopes().lookup(expr->name).func) {
+      bytes && !checker_.scopes().lookup(expr->name).var() &&
+      !checker_.scopes().lookup(expr->name).func()) {
     return checker_.bytesNewChecker().checkBytesNew(expr, bytes);
   }
   if (expr->name == "BigInt64Array" || expr->name == "BigUint64Array") {

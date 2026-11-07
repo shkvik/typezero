@@ -148,7 +148,7 @@ Analysis::Analysis(const SourceFile &sourceFile, const llvm::SourceMgr &sourceMa
   }
   for (const Stmt *item : this->program.items) {
     if (auto *cls = dyn_cast<ClassDecl>(item);
-        cls && !cls->builtin && !this->libraryEffects.inLibrary(cls->loc())) {
+        cls && !cls->builtin() && !this->libraryEffects.inLibrary(cls->loc())) {
       this->programClasses.push_back(cls);
     }
   }

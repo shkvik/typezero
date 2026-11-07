@@ -136,9 +136,9 @@ void LoopChecker::checkForOf(ForOfStmt *stmt) {
     stmt->iterable = checker_.dictChecker().iterableOf(
         checker_.genericChecker().apparent(checker_.exprChecker().checkExpr(stmt->iterable)));
     auto *name = dyn_cast<NameExpr>(stmt->iterable);
-    bool list = name && name->var && name->type->isTuple() && !name->type->tupleRest() &&
+    bool list = name && name->var() && name->type->isTuple() && !name->type->tupleRest() &&
                 llvm::any_of(checker_.functions_, [&](const FunctionDecl *fn) {
-                  return fn->listName == name->name && name->var->owner() == fn;
+                  return fn->listName == name->name && name->var()->owner() == fn;
                 });
     if (list) {
       auto *elements = checker_.ctx_.make<ArrayLitExpr>(name->loc());
@@ -195,7 +195,7 @@ void LoopChecker::checkForOf(ForOfStmt *stmt) {
                               "' gives its values later: iterate it with 'for await "
                               "(const x of ...)'");
   } else if (const ClassDecl *cls = type->classDecl();
-             cls && cls->library && cls->generic && cls->generic->name == "ConcurrentMap") {
+             cls && cls->library() && cls->generic() && cls->generic()->name == "ConcurrentMap") {
     checker_.diags_.error(stmt->iterable->loc(),
                           "a ConcurrentMap is not iterated directly, as other tasks change it "
                           "during the loop; iterate a snapshot: 'for (const [key, value] of "
@@ -209,7 +209,7 @@ void LoopChecker::checkForOf(ForOfStmt *stmt) {
                           stmt->keys ? "a 'for...in' variable cannot have a type annotation"
                                      : "a 'for...of' variable cannot have a type annotation");
   }
-  if (stmt->binding.destructured && !stmt->binding.objectPattern && !element->isArray() &&
+  if (stmt->binding.destructured() && !stmt->binding.objectPattern() && !element->isArray() &&
       !element->isTuple() && !element->isMatch() && !element->isError()) {
     checker_.diags_.error(stmt->binding.loc, "only arrays can be destructured; the elements are '" +
                                                  element->name() + "'");
@@ -228,7 +228,7 @@ void LoopChecker::checkForOf(ForOfStmt *stmt) {
   stmt->binding.sym =
       checker_.scopes().declareVar(stmt->binding.name, stmt->binding.loc, element, stmt->isConst);
   if (auto *lit = dyn_cast<ArrayLitExpr>(stmt->iterable);
-      lit && element->isInt() && stmt->binding.sym && !stmt->binding.destructured &&
+      lit && element->isInt() && stmt->binding.sym && !stmt->binding.destructured() &&
       !lit->elements.empty()) {
     std::optional<int64_t> lo, hi;
     for (const ArrayLitExpr::Element &e : lit->elements) {

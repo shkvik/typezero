@@ -93,7 +93,7 @@ Expr *GlobalFunctionChecker::checkGlobalFunction(CallExpr *call, llvm::StringRef
     } else {
       call->args[0] = checker_.typeRelations().coerce(arg, Type::string());
     }
-    call->builtin = builtin;
+    call->target = BuiltinCall{.builtin = builtin};
     call->type = builtin == Builtin::UriDecodeComponent || builtin == Builtin::UriDecode
                      ? Type::result(Type::string(), checker_.prelude().builtinType("UriError"))
                      : Type::string();
@@ -128,7 +128,7 @@ Expr *GlobalFunctionChecker::checkGlobalFunction(CallExpr *call, llvm::StringRef
       for (Expr *&arg : call->args) {
         arg = checker_.concatChecker().toStringOperand(checker_.exprChecker().checkExpr(arg));
       }
-      call->builtin = Builtin::StringOf;
+      call->target = BuiltinCall{.builtin = Builtin::StringOf};
       call->type = Type::string();
       return call;
     }
@@ -157,7 +157,7 @@ Expr *GlobalFunctionChecker::checkGlobalFunction(CallExpr *call, llvm::StringRef
         return call;
       }
     }
-    call->builtin = Builtin::NumberOf;
+    call->target = BuiltinCall{.builtin = Builtin::NumberOf};
     call->type = !call->args.empty() && call->args[0]->type->isString()
                      ? Type::result(Type::doubleTy(), checker_.prelude().builtinType("NumberError"))
                      : Type::doubleTy();
@@ -174,7 +174,7 @@ Expr *GlobalFunctionChecker::checkGlobalFunction(CallExpr *call, llvm::StringRef
       call->args[1] =
           checker_.binaryChecker().toInt32(checker_.mathChecker().numericArg(call->args[1]));
     }
-    call->builtin = isInt ? Builtin::ParseInt : Builtin::ParseFloat;
+    call->target = BuiltinCall{.builtin = isInt ? Builtin::ParseInt : Builtin::ParseFloat};
     call->type = Type::result(isInt ? Type::intTy() : Type::doubleTy(),
                               checker_.prelude().builtinType("NumberError"));
     return call;

@@ -48,10 +48,10 @@ FunctionDecl *knownFunction(const Expr *expr) {
   if (!name) {
     return nullptr;
   }
-  if (name->func) {
-    return name->func->decl;
+  if (name->func()) {
+    return name->func()->decl;
   }
-  if (VarSymbol *var = name->var) {
+  if (VarSymbol *var = name->var()) {
     return var->function() ? var->function() : var->isConst ? var->lambda() : nullptr;
   }
 
@@ -165,7 +165,7 @@ llvm::Value *ClosureLowerer::emitFunctionExpr(FunctionExpr *fe) {
 }
 
 llvm::Value *ClosureLowerer::closureEnv(CallExpr *call) {
-  FunctionDecl *fn = call->func->decl;
+  FunctionDecl *fn = call->func()->decl;
   llvm::Value *null = llvm::ConstantPointerNull::get(lowering_.builder_.getPtrTy());
   if (lowering_.currentFn_ &&
       (lowering_.currentFn_ == fn || (fn->group && lowering_.currentFn_->group == fn->group))) {
@@ -175,7 +175,7 @@ llvm::Value *ClosureLowerer::closureEnv(CallExpr *call) {
     return lowering_.builder_.CreateLoad(lowering_.builder_.getPtrTy(),
                                          lowering_.groupEnvs_.lookup(fn->group));
   }
-  const VarSymbol *var = cast<NameExpr>(call->callee)->var;
+  const VarSymbol *var = cast<NameExpr>(call->callee)->var();
 
   return lowering_.builder_.CreateExtractValue(lowering_.envLowerer().emitVarValue(var, true), 1);
 }
@@ -199,8 +199,8 @@ llvm::Value *ClosureLowerer::callFunctionValue(llvm::Value *fn, const Type *fnTy
 llvm::Value *ClosureLowerer::emitValueCall(CallExpr *call) {
   if (auto *member = dyn_cast<MemberExpr>(call->callee)) {
     if (const Lowering::InterfaceMember *method = lowering_.inheritLowerer().dispatchedMember(
-            member->object->type, member->name, call->signature);
-        (method && method->callable) || call->signature >= 0) {
+            member->object->type, member->name, call->signature());
+        (method && method->callable) || call->signature() >= 0) {
       return lowering_.inheritLowerer().emitInterfaceCall(call);
     }
   }

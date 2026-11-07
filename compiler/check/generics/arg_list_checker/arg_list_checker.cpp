@@ -219,7 +219,7 @@ void ArgListChecker::expandListSpreads(std::vector<Expr *> &args, std::vector<bo
   for (size_t i = 0; i < args.size(); ++i) {
     bool spreads = i < spread.size() && spread[i];
     auto *name = dyn_cast<NameExpr>(args[i]);
-    VarSymbol *var = spreads && name ? checker_.scopes().lookup(name->name).var : nullptr;
+    VarSymbol *var = spreads && name ? checker_.scopes().lookup(name->name).var() : nullptr;
     auto found = var ? argumentLists_.find(var) : argumentLists_.end();
     if (found != argumentLists_.end()) {
       changed = true;
@@ -254,7 +254,7 @@ Expr *ArgListChecker::listPart(Expr *expr) {
   auto *member = dyn_cast<MemberExpr>(expr);
   auto *index = dyn_cast<IndexExpr>(expr);
   auto *name = dyn_cast<NameExpr>(member ? member->object : index ? index->object : expr);
-  VarSymbol *var = name && (member || index) ? checker_.scopes().lookup(name->name).var : nullptr;
+  VarSymbol *var = name && (member || index) ? checker_.scopes().lookup(name->name).var() : nullptr;
   auto found = var ? argumentLists_.find(var) : argumentLists_.end();
   if (found == argumentLists_.end()) {
     return nullptr;

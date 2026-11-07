@@ -185,7 +185,7 @@ Expr *PrimaryParser::parseObjectLiteral() {
       ObjectLitExpr::Property spread;
       spread.loc = loc;
       spread.value = parser_.exprs().parseExpr();
-      spread.spread = true;
+      spread.form = SpreadProperty{};
       lit->props.push_back(std::move(spread));
       if (!parser_.cursor().accept(Tok::Comma)) {
         break;
@@ -195,13 +195,14 @@ Expr *PrimaryParser::parseObjectLiteral() {
     if (!parser_.classes().symbolKeyAhead() && parser_.cursor().accept(Tok::LBracket)) {
       ObjectLitExpr::Property prop;
       prop.loc = loc;
-      prop.key = parser_.exprs().parseExpr();
+      Expr *key = parser_.exprs().parseExpr();
+      prop.form = ComputedProperty{.key = key};
       parser_.cursor().expect(Tok::RBracket, "to close the key");
-      if (auto *name = dyn_cast<NameExpr>(prop.key)) {
+      if (auto *name = dyn_cast<NameExpr>(prop.key())) {
         for (const std::string &text : parser_.stringConstants_.lookup(name->name)) {
           parser_.fieldNames_.insert(text);
         }
-      } else if (auto *text = dyn_cast<StringLitExpr>(prop.key)) {
+      } else if (auto *text = dyn_cast<StringLitExpr>(prop.key())) {
         parser_.fieldNames_.insert(toUtf8(text->value));
       }
       if (parser_.tok_.is(Tok::LParen) || parser_.tok_.is(Tok::Less)) {
@@ -250,10 +251,10 @@ Expr *PrimaryParser::parseObjectLiteral() {
       return lit;
     }
     Expr *value = nullptr;
-    bool defaulted = false, method = false;
+    PropertyForm form = ValueProperty{};
     if (parser_.tok_.is(Tok::LParen) || parser_.tok_.is(Tok::Less)) {
       auto *fn = parser_.ctx_.make<FunctionDecl>(loc, name);
-      fn->isExpression = true;
+      fn->place = FunctionPlace::EXPRESSION;
       fn->isGenerator = generator;
       fn->isAsync = isAsync;
       parser_.classes().parseMethodRest(fn, start);
@@ -266,7 +267,7 @@ Expr *PrimaryParser::parseObjectLiteral() {
         return lit;
       }
       value = parser_.ctx_.make<FunctionExpr>(loc, fn);
-      method = true;
+      form = MethodProperty{};
     } else if (generator || isAsync) {
       parser_.cursor().error(parser_.tok_.loc(),
                              generator ? "expected '(' after the name of the generator method"
@@ -284,7 +285,7 @@ Expr *PrimaryParser::parseObjectLiteral() {
       value = parser_.ctx_.make<AssignExpr>(assignLoc, std::nullopt,
                                             parser_.ctx_.make<NameExpr>(loc, name),
                                             parser_.exprs().parseExpr());
-      defaulted = true;
+      form = DefaultedProperty{};
     } else {
       parser_.cursor().error(parser_.tok_.loc(),
                              llvm::Twine("expected ':' after the field name, found ") +
@@ -296,8 +297,7 @@ Expr *PrimaryParser::parseObjectLiteral() {
     prop.name = name;
     prop.loc = loc;
     prop.value = value;
-    prop.defaulted = defaulted;
-    prop.method = method;
+    prop.form = std::move(form);
     lit->props.push_back(std::move(prop));
     if (!parser_.cursor().accept(Tok::Comma)) {
       break;

@@ -27,10 +27,10 @@ bool ChunkTypes::isStreamClass(const ClassDecl *cls) const {
 Checker::StreamChunks ChunkTypes::streamChunksOf(const ClassDecl *cls) const {
   Checker::StreamChunks chunks;
   for (const ClassDecl *c = cls; c; c = c->parent) {
-    if (!c->library || !c->generic || c->typeArgs.empty()) {
+    if (!c->library() || !c->generic() || c->typeArgs.empty()) {
       continue;
     }
-    llvm::StringRef name = c->generic->name;
+    llvm::StringRef name = c->generic()->name;
     if (name == "Readable" && !chunks.readable) {
       chunks.readable = c->typeArgs[0];
     } else if (name == "Writable" && !chunks.writable) {
@@ -44,9 +44,9 @@ Checker::StreamChunks ChunkTypes::streamChunksOf(const ClassDecl *cls) const {
 }
 
 void ChunkTypes::addStreamBases(ClassDecl *inst, llvm::SMLoc loc) {
-  ClassDecl *generic = inst->generic;
+  ClassDecl *generic = inst->generic();
   ClassDecl *writable = checker_.libraryClass("Writable");
-  if (!generic || !generic->library || generic->name != "Duplex" || !writable ||
+  if (!generic || !generic->library() || generic->name != "Duplex" || !writable ||
       inst->typeArgs.size() != 3) {
     return;
   }
@@ -64,13 +64,13 @@ std::optional<std::vector<const Type *>> ChunkTypes::streamHookParams(const Func
     return std::nullopt;
   }
   const ClassDecl *lib = fn->cls()->parent;
-  while (lib && !lib->library) {
+  while (lib && !lib->library()) {
     lib = lib->parent;
   }
-  if (!lib || !lib->generic) {
+  if (!lib || !lib->generic()) {
     return std::nullopt;
   }
-  llvm::StringRef kind = lib->generic->name;
+  llvm::StringRef kind = lib->generic()->name;
   bool transform = kind == "Transform" || kind == "PassThrough";
   const Type *readable = nullptr, *writable = nullptr;
   const Type *error = checker_.prelude().builtinType("StreamError");
@@ -134,7 +134,7 @@ bool ChunkTypes::isStreamHook(const FunctionDecl *fn, bool linked) const {
                                               "onFlush", "onFinal", "onDestroy", "onConstruct"};
   const ClassDecl *cls = fn->cls();
 
-  return cls && !fn->isStatic() && !cls->library && !cls->literal && cls->parent &&
+  return cls && !fn->isStatic() && !cls->library() && !cls->literal() && cls->parent &&
          llvm::is_contained(hooks, fn->name) && (!linked || isStreamClass(cls->parent));
 }
 
@@ -142,7 +142,7 @@ void ChunkTypes::reportStreamHook(const FunctionDecl *fn,
                                   llvm::ArrayRef<FunctionDecl *> inherited) {
   const FuncSymbol *hook = nullptr;
   for (const FunctionDecl *v : inherited) {
-    if (v->sym && v->cls() && v->cls()->library) {
+    if (v->sym && v->cls() && v->cls()->library()) {
       hook = v->sym;
     }
   }

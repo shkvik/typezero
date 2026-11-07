@@ -261,7 +261,8 @@ const Expr *awaitedOperand(const Expr *e) {
   }
   const Expr *operand = stripImplicit(await->value);
   if (auto *call = llvm::dyn_cast_or_null<CallExpr>(operand);
-      call && (call->builtin == Builtin::LibAhead || call->builtin == Builtin::LibAheadMovable) &&
+      call &&
+      (call->builtin() == Builtin::LibAhead || call->builtin() == Builtin::LibAheadMovable) &&
       !call->args.empty()) {
     operand = stripImplicit(call->args[0]);
   }
@@ -287,7 +288,7 @@ void Lowering::noteAwaitedNext(const Stmt *declared, const Stmt *next) {
   }
   const VarDeclarator &d = decl->decls[0];
   auto *call = llvm::dyn_cast_or_null<CallExpr>(stripImplicit(d.init));
-  if (!call || !d.sym || d.destructured || d.alias) {
+  if (!call || !d.sym || d.destructured() || d.alias) {
     return;
   }
   const Expr *first = nullptr;
@@ -299,7 +300,7 @@ void Lowering::noteAwaitedNext(const Stmt *declared, const Stmt *next) {
     first = r->value;
   }
   auto *name = llvm::dyn_cast_or_null<NameExpr>(awaitedOperand(first));
-  if (name && name->var == d.sym) {
+  if (name && name->var() == d.sym) {
     awaitedCalls_.insert(call);
   }
 }

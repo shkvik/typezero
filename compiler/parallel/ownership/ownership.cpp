@@ -30,7 +30,7 @@ std::optional<Ref> Ownership::ownedRef(const Expr *e) {
     return std::nullopt;
   }
   auto *name = dyn_cast<NameExpr>(strip(e));
-  bool whole = needs.empty() && name && name->var == root;
+  bool whole = needs.empty() && name && name->var() == root;
 
   return interned(root, e->type->nonOptional(), std::move(needs), whole);
 }
@@ -169,7 +169,7 @@ bool Ownership::freshAllocation(const Expr *e) const {
   }
   auto *n = dyn_cast<NewExpr>(e);
 
-  return !(n && n->cls && analysis_.escapeScan.constructorLeaks(n->cls));
+  return !(n && n->cls() && analysis_.escapeScan.constructorLeaks(n->cls()));
 }
 
 const CallExpr *Ownership::programCall(const Expr *e) const {
@@ -178,7 +178,7 @@ const CallExpr *Ownership::programCall(const Expr *e) const {
     e = strip(a->value);
   }
   auto *c = dyn_cast_or_null<CallExpr>(e);
-  if (!c || c->builtin != Builtin::None || analysis_.libraryEffects.libraryTarget(c)) {
+  if (!c || c->builtin() != Builtin::None || analysis_.libraryEffects.libraryTarget(c)) {
     return nullptr;
   }
 
@@ -187,7 +187,7 @@ const CallExpr *Ownership::programCall(const Expr *e) const {
 
 bool Ownership::libraryField(const Type *object, llvm::StringRef name) {
   for (const ClassDecl *k = object->classDecl(); k; k = k->parent) {
-    if (!k->library) {
+    if (!k->library()) {
       continue;
     }
     for (const ClassField &f : k->fields) {
@@ -213,7 +213,7 @@ bool Ownership::plainObject(const Type *type) {
 }
 
 bool Ownership::container(const Type *type) {
-  if (type && type->classDecl() && !type->classDecl()->library) {
+  if (type && type->classDecl() && !type->classDecl()->library()) {
     return true;
   }
   if (!containers_) {
@@ -321,7 +321,7 @@ void Ownership::libraryTypes(const Stmt *item, std::set<const Type *> &out) {
   } else if (auto *fn = dyn_cast<FunctionDecl>(item)) {
     signature(fn);
   } else if (auto *cls = dyn_cast<ClassDecl>(item)) {
-    if (cls->generic) {
+    if (cls->generic()) {
       return;
     }
     for (const ClassField &f : cls->fields) {
@@ -398,7 +398,7 @@ bool Ownership::derivable(const Type *type, unsigned depth) {
   case Type::Kind::Object: {
     const ClassDecl *cls = type->classDecl();
 
-    return (cls && cls->library) || type->isCrypto();
+    return (cls && cls->library()) || type->isCrypto();
   }
   default:
     return false;
@@ -418,7 +418,7 @@ bool Ownership::valueArgument(const Expr *e) {
   }
   if (auto *object = dyn_cast<ObjectLitExpr>(e)) {
     return llvm::all_of(object->props, [](const ObjectLitExpr::Property &p) {
-      return !p.spread && !p.method && valueArgument(p.value);
+      return !p.spread() && !p.method() && valueArgument(p.value);
     });
   }
   if (auto *array = dyn_cast<ArrayLitExpr>(e)) {
@@ -437,7 +437,7 @@ const VarSymbol *Ownership::rootOf(const FunctionDecl *fn, const Expr *e, Needs 
     return nullptr;
   }
   if (auto *n = dyn_cast<NameExpr>(e)) {
-    const VarSymbol *v = n->var;
+    const VarSymbol *v = n->var();
     if (const FunctionDecl *home = homeOf(fn, v)) {
       return rootOf(home, e, needs, depth + 1);
     }
@@ -458,7 +458,7 @@ const VarSymbol *Ownership::rootOf(const FunctionDecl *fn, const Expr *e, Needs 
     return rootOf(fn, found->second, needs, depth + 1);
   }
   if (auto *m = dyn_cast<MemberExpr>(e)) {
-    if (m->method || !m->object || !m->object->type || !m->type) {
+    if (m->method() || !m->object || !m->object->type || !m->type) {
       return nullptr;
     }
     const Type *object = m->object->type->nonOptional();
@@ -482,8 +482,8 @@ const VarSymbol *Ownership::rootOf(const FunctionDecl *fn, const Expr *e, Needs 
     }
     const FunctionDecl *lib = analysis_.libraryEffects.libraryTarget(c);
     auto *m = dyn_cast<MemberExpr>(c->callee);
-    if (!lib || !lib->cls() || lib->isStatic() || lib->isAsync || lib->isGenerator || !c->method ||
-        !m || c->hasSpread()) {
+    if (!lib || !lib->cls() || lib->isStatic() || lib->isAsync || lib->isGenerator ||
+        !c->method() || !m || c->hasSpread()) {
       return nullptr;
     }
     if (!llvm::all_of(c->args, valueArgument) || !derivable(c->type, 0)) {
@@ -497,7 +497,7 @@ const VarSymbol *Ownership::rootOf(const FunctionDecl *fn, const Expr *e, Needs 
 }
 
 const Expr *Ownership::cryptoSelf(const CallExpr *c) {
-  if (c->builtin != Builtin::Crypto || c->args.empty()) {
+  if (c->builtin() != Builtin::Crypto || c->args.empty()) {
     return nullptr;
   }
   auto *number = dyn_cast<IntLitExpr>(strip(c->args[0]));
@@ -522,7 +522,7 @@ void Ownership::carriers(const Expr *e, Roots &out, unsigned depth) {
   }
   switch (e->kind()) {
   case Expr::Kind::Name:
-    carriersOf(cast<NameExpr>(e)->var, out, depth);
+    carriersOf(cast<NameExpr>(e)->var(), out, depth);
     return;
   case Expr::Kind::Member:
     carriers(cast<MemberExpr>(e)->object, out, depth + 1);
@@ -572,38 +572,38 @@ void Ownership::carriersOther(const Expr *e, Roots &out, unsigned depth) {
   switch (e->kind()) {
   case Expr::Kind::Call: {
     auto *c = cast<CallExpr>(e);
-    switch (c->builtin) {
-    case Builtin::BufferConcat:
-    case Builtin::BytesFromArray:
-    case Builtin::BytesFromBytes:
-    case Builtin::BufferFromString:
-    case Builtin::TextEncode:
-      return;
-    case Builtin::Crypto: {
-      auto *number = c->args.empty() ? nullptr : dyn_cast<IntLitExpr>(strip(c->args[0]));
-      if (!number || number->value >= std::size(kCryptoFunctions)) {
-        break;
-      }
-      const CryptoFunction &fn = kCryptoFunctions[size_t(number->value)];
-      if (fn.result != 'S') {
+    switch (c->builtin()) {
+      case Builtin::BufferConcat:
+      case Builtin::BytesFromArray:
+      case Builtin::BytesFromBytes:
+      case Builtin::BufferFromString:
+      case Builtin::TextEncode:
+        return;
+      case Builtin::Crypto: {
+        auto *number = c->args.empty() ? nullptr : dyn_cast<IntLitExpr>(strip(c->args[0]));
+        if (!number || number->value >= std::size(kCryptoFunctions)) {
+          break;
+        }
+        const CryptoFunction &fn = kCryptoFunctions[size_t(number->value)];
+        if (fn.result != 'S') {
+          return;
+        }
+        llvm::StringRef kinds = fn.params;
+        for (size_t i = 1; i < c->args.size() && i - 1 < kinds.size(); ++i) {
+          if (kinds[i - 1] == 'o') {
+            carriers(c->args[i], out, depth + 1);
+          }
+        }
         return;
       }
-      llvm::StringRef kinds = fn.params;
-      for (size_t i = 1; i < c->args.size() && i - 1 < kinds.size(); ++i) {
-        if (kinds[i - 1] == 'o') {
-          carriers(c->args[i], out, depth + 1);
-        }
-      }
-      return;
-    }
-    default:
-      break;
+      default:
+        break;
     }
     if (analysis_.libraryEffects.libraryTarget(c) &&
         (plainValues(c->type, 0) || analysis_.aliasAnalysis.isAllocation(c))) {
       return;
     }
-    bool program = c->builtin == Builtin::None && !analysis_.libraryEffects.libraryTarget(c);
+    bool program = c->builtin() == Builtin::None && !analysis_.libraryEffects.libraryTarget(c);
     if (auto *m = dyn_cast<MemberExpr>(c->callee);
         m && (!program || !passesOwnedSelf(c) || returnsBack(c, kSelf))) {
       carriers(m->object, out, depth + 1);
@@ -617,7 +617,7 @@ void Ownership::carriersOther(const Expr *e, Roots &out, unsigned depth) {
   }
   case Expr::Kind::New: {
     auto *n = cast<NewExpr>(e);
-    for (const Expr *arg : n->ctor ? n->ctor->args : n->args) {
+    for (const Expr *arg : n->ctor() ? n->ctor()->args : n->args) {
       carriers(arg, out, depth + 1);
     }
     return;
@@ -631,7 +631,7 @@ void Ownership::carriersOther(const Expr *e, Roots &out, unsigned depth) {
     return;
   case Expr::Kind::ObjectLit:
     for (const ObjectLitExpr::Property &p : cast<ObjectLitExpr>(e)->props) {
-      if (!p.method) {
+      if (!p.method()) {
         carriers(p.value, out, depth + 1);
       }
     }
@@ -726,10 +726,10 @@ void Ownership::literal(const ObjectLitExpr *o) {
     return;
   }
   for (const ObjectLitExpr::Property &p : o->props) {
-    if (p.method) {
+    if (p.method()) {
       continue;
     }
-    if (p.spread || p.key) {
+    if (p.spread() || p.key()) {
       dirty_[analysis_.star].push_back(type);
       continue;
     }
@@ -881,8 +881,8 @@ void Ownership::visit(const Expr *e) {
     closure(cast<FunctionExpr>(e)->fn, false);
     return;
   case Expr::Kind::Name:
-    if (auto *n = cast<NameExpr>(e); n->func && n->func->decl && n->func->decl->parent) {
-      closure(n->func->decl, false);
+    if (auto *n = cast<NameExpr>(e); n->func() && n->func()->decl && n->func()->decl->parent) {
+      closure(n->func()->decl, false);
     }
     return;
   case Expr::Kind::Template:
@@ -903,8 +903,8 @@ void Ownership::visit(const Expr *e) {
       literal(o);
     }
     for (const ObjectLitExpr::Property &p : o->props) {
-      visit(p.key);
-      if (!p.method) {
+      visit(p.key());
+      if (!p.method()) {
         visit(p.value);
       }
     }
@@ -913,7 +913,7 @@ void Ownership::visit(const Expr *e) {
   case Expr::Kind::Member: {
     auto *m = cast<MemberExpr>(e);
     visit(m->object);
-    if (m->method) {
+    if (m->method()) {
       leak(m->object);
     }
     return;
@@ -944,8 +944,8 @@ void Ownership::visit(const Expr *e) {
     bool selfField = false;
     if (auto *m = dyn_cast<MemberExpr>(target)) {
       auto *self = dyn_cast<NameExpr>(strip(m->object));
-      selfField = assigned && !assigned->op && self && isSelf(fn_, self->var) && m->object->type &&
-                  m->object->type->nonOptional()->classDecl();
+      selfField = assigned && !assigned->op && self && isSelf(fn_, self->var()) &&
+                  m->object->type && m->object->type->nonOptional()->classDecl();
       if (collecting_ && selfField) {
         const ClassDecl *built = builds(fn_) ? fn_->cls() : nullptr;
         stores_[analysis_.intern(m->name)].push_back(
@@ -955,9 +955,9 @@ void Ownership::visit(const Expr *e) {
       }
       visit(m->object);
     } else if (auto *ix = dyn_cast<IndexExpr>(target)) {
-      if (collecting_ && !ix->field.empty()) {
-        dirty(ix->object, ix->field);
-      } else if (collecting_ && ix->keyed) {
+      if (collecting_ && !ix->field().empty()) {
+        dirty(ix->object, ix->field());
+      } else if (collecting_ && ix->keyed()) {
         dirty(ix->object, "*");
       }
       visit(ix->object);
@@ -986,7 +986,7 @@ void Ownership::visit(const Expr *e) {
     return;
   case Expr::Kind::New: {
     auto *n = cast<NewExpr>(e);
-    const std::vector<Expr *> &args = n->ctor ? n->ctor->args : n->args;
+    const std::vector<Expr *> &args = n->ctor() ? n->ctor()->args : n->args;
     for (size_t i = 0; i < args.size(); ++i) {
       visit(args[i]);
       if (!passesOwnedNew(n, i)) {
@@ -1025,8 +1025,8 @@ void Ownership::visit(const Expr *e) {
 
 void Ownership::visitCall(const CallExpr *c) {
   auto *m = dyn_cast<MemberExpr>(c->callee);
-  if (c->builtin != Builtin::None) {
-    if (collecting_ && !knownBuiltin(c->builtin)) {
+  if (c->builtin() != Builtin::None) {
+    if (collecting_ && !knownBuiltin(c->builtin())) {
       dirtyAll(m ? m->object : nullptr);
       for (const Expr *arg : c->args) {
         dirtyAll(arg);
@@ -1035,9 +1035,9 @@ void Ownership::visitCall(const CallExpr *c) {
     if (m) {
       visit(m->object);
     }
-    if (c->builtin == Builtin::ReflectApply || c->builtin == Builtin::ReflectConstruct ||
-        c->builtin == Builtin::ReflectFill) {
-      bool apply = c->builtin == Builtin::ReflectApply;
+    if (c->builtin() == Builtin::ReflectApply || c->builtin() == Builtin::ReflectConstruct ||
+        c->builtin() == Builtin::ReflectFill) {
+      bool apply = c->builtin() == Builtin::ReflectApply;
       bool keepsSelf = apply && reflectKeepsArgs(c, true);
       bool keepsArgs = reflectKeepsArgs(c, false);
       for (size_t i = 0; i < c->args.size(); ++i) {
@@ -1049,12 +1049,12 @@ void Ownership::visitCall(const CallExpr *c) {
       }
       return;
     }
-    bool reads = onlyReadsArgs(c->builtin) || c->builtin == Builtin::ResultOk ||
-                 c->builtin == Builtin::ResultErr || c->builtin == Builtin::Crypto;
+    bool reads = onlyReadsArgs(c->builtin()) || c->builtin() == Builtin::ResultOk ||
+                 c->builtin() == Builtin::ResultErr || c->builtin() == Builtin::Crypto;
     Needs held;
     const VarSymbol *holder = nullptr;
-    if (m && (c->builtin == Builtin::ArrPush || c->builtin == Builtin::ArrUnshift ||
-              c->builtin == Builtin::MapSet || c->builtin == Builtin::SetAdd)) {
+    if (m && (c->builtin() == Builtin::ArrPush || c->builtin() == Builtin::ArrUnshift ||
+              c->builtin() == Builtin::MapSet || c->builtin() == Builtin::SetAdd)) {
       holder = rootOf(fn_, m->object, held, 0);
     }
     if (holder) {
@@ -1083,7 +1083,7 @@ void Ownership::visitCall(const CallExpr *c) {
     return;
   }
   if (analysis_.libraryEffects.libraryTarget(c)) {
-    if (m && c->method) {
+    if (m && c->method()) {
       visit(m->object);
     }
     for (const Expr *arg : c->args) {
@@ -1096,12 +1096,12 @@ void Ownership::visitCall(const CallExpr *c) {
     }
     return;
   }
-  if (m && (c->method || !c->unionMethods.empty())) {
+  if (m && (c->method() || !c->unionMethods().empty())) {
     visit(m->object);
     if (!passesOwnedSelf(c)) {
       leak(m->object);
     }
-  } else if (!c->func) {
+  } else if (!c->func()) {
     visit(c->callee);
   }
   for (size_t i = 0; i < c->args.size(); ++i) {
@@ -1118,7 +1118,8 @@ void Ownership::visitCall(const CallExpr *c) {
 
 bool Ownership::thisFirst(const CallRec &rec) const {
   const CallExpr *c = rec.call;
-  if (!c || c->method || c->func || !c->unionMethods.empty() || !c->callee || !c->callee->type) {
+  if (!c || c->method() || c->func() || !c->unionMethods().empty() || !c->callee ||
+      !c->callee->type) {
     return false;
   }
   const Type *type = c->callee->type->nonOptional();
@@ -1149,7 +1150,7 @@ bool Ownership::tailAwaited(int fi) {
       continue;
     }
     bool direct = rec.kind == CallKind::Call && rec.reflect == CallRec::Reflect::None &&
-                  rec.channel < 0 && rec.call && rec.call->builtin == Builtin::None;
+                  rec.channel < 0 && rec.call && rec.call->builtin() == Builtin::None;
     bool waits =
         rec.await || (rec.returned && caller.async) || (rec.tail && tailAwaited(call.from));
     if (!direct || !waits) {
@@ -1175,11 +1176,11 @@ const std::vector<Expr *> *Ownership::argsOf(const CallRec &rec) {
     return rec.call->hasSpread() ? nullptr : &rec.call->args;
   }
   auto *n = dyn_cast_or_null<NewExpr>(static_cast<const Expr *>(rec.site));
-  if (!n || !n->cls || n->cls->library) {
+  if (!n || !n->cls() || n->cls()->library()) {
     return nullptr;
   }
-  if (n->ctor) {
-    return n->ctor->hasSpread() ? nullptr : &n->ctor->args;
+  if (n->ctor()) {
+    return n->ctor()->hasSpread() ? nullptr : &n->ctor()->args;
   }
 
   return &n->args;
@@ -1189,7 +1190,7 @@ int Ownership::argOf(int fi, const CallRec &rec, const CallEdge &callee, size_t 
                      bool strict) {
   const std::vector<Expr *> *args = argsOf(rec);
   if (rec.ownArgs > 0 || rec.kind != CallKind::Call || rec.reflect != CallRec::Reflect::None ||
-      rec.channel >= 0 || !args || (rec.call && rec.call->builtin != Builtin::None) ||
+      rec.channel >= 0 || !args || (rec.call && rec.call->builtin() != Builtin::None) ||
       !handsOver(fi, rec, callee.mode, strict)) {
     return -1;
   }
@@ -1213,7 +1214,7 @@ const CallRec *Ownership::recOf(const void *site) const {
 }
 
 bool Ownership::passesOwnedSelf(const CallExpr *c) {
-  const CallRec *rec = c->method && c->unionMethods.empty() ? recOf(c) : nullptr;
+  const CallRec *rec = c->method() && c->unionMethods().empty() ? recOf(c) : nullptr;
   if (!rec) {
     return false;
   }
@@ -1352,7 +1353,7 @@ bool Ownership::callersOwned(int fi, size_t index, bool strict) {
 
 const Expr *Ownership::receiverOf(const CallRec &rec) {
   const CallExpr *c = rec.call;
-  if (!c || !c->method || c->superCall || !c->unionMethods.empty() || rec.ownArgs > 0 ||
+  if (!c || !c->method() || c->superCall() || !c->unionMethods().empty() || rec.ownArgs > 0 ||
       rec.kind != CallKind::Call || rec.reflect != CallRec::Reflect::None || rec.channel >= 0) {
     return nullptr;
   }
@@ -1370,7 +1371,7 @@ bool Ownership::selfOwned(int fi, const CallRec &rec, const CallEdge &callee, bo
     return true;
   }
   const FunctionDecl *caller = analysis_.byFunction[fi]->decl;
-  if (rec.call && rec.call->superCall && builds(g) && caller && caller->thisVar()) {
+  if (rec.call && rec.call->superCall() && builds(g) && caller && caller->thisVar()) {
     return owned_.contains(caller->thisVar());
   }
   const Expr *receiver = receiverOf(rec);
@@ -1432,7 +1433,7 @@ bool Ownership::valueOwn(int fi, const Expr *e, bool params, unsigned depth) {
     return valueOwn(fi, b->lhs, params, depth + 1) && valueOwn(fi, b->rhs, params, depth + 1);
   }
   if (auto *c = dyn_cast<CallExpr>(e);
-      c && (c->builtin == Builtin::ResultOk || c->builtin == Builtin::ResultErr)) {
+      c && (c->builtin() == Builtin::ResultOk || c->builtin() == Builtin::ResultErr)) {
     return c->args.empty() || valueOwn(fi, c->args[0], params, depth + 1);
   }
   const FunctionDecl *fn = analysis_.byFunction[fi]->decl;
@@ -1539,7 +1540,7 @@ std::optional<Ref> Ownership::substituted(Ref r, const FnInfo &callee, int calle
       return fresh && needsOwn(owned->needs) ? std::nullopt : std::optional<Ref>(plain);
     }
     const FunctionDecl *from = analysis_.byFunction[caller]->decl;
-    if (rec.call && rec.call->superCall && builds(callee.decl) && from &&
+    if (rec.call && rec.call->superCall() && builds(callee.decl) && from &&
         candidate(from, from->thisVar())) {
       return interned(from->thisVar(), owned->type, owned->needs, owned->whole);
     }
@@ -1556,7 +1557,7 @@ std::optional<Ref> Ownership::substituted(Ref r, const FnInfo &callee, int calle
   Needs needs;
   if (const VarSymbol *root = rootOf(analysis_.byFunction[caller]->decl, value, needs, 0)) {
     auto *name = dyn_cast<NameExpr>(strip(value));
-    bool whole = owned->whole && needs.empty() && name && name->var == root;
+    bool whole = owned->whole && needs.empty() && name && name->var() == root;
     needs.insert(needs.end(), owned->needs.begin(), owned->needs.end());
     return interned(root, owned->type, std::move(needs), whole);
   }
@@ -1802,7 +1803,7 @@ void Ownership::decideOnce() {
   for (int fi : scanned) {
     const FnInfo &f = *analysis_.byFunction[fi];
     for (const CallRec &rec : f.calls) {
-      if (!rec.call || rec.call->builtin != Builtin::None) {
+      if (!rec.call || rec.call->builtin() != Builtin::None) {
         continue;
       }
       for (const Expr *arg : rec.call->args) {

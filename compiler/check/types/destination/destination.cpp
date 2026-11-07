@@ -138,20 +138,20 @@ bool Destination::literalFits(const Expr *expr, const Type *type) const {
     }
     std::vector<llvm::StringRef> names;
     for (const ObjectLitExpr::Property &prop : lit->props) {
-      if (prop.spread) {
+      if (prop.spread()) {
         auto *name = dyn_cast<NameExpr>(prop.value);
-        const VarSymbol *var = name ? checker_.scopes().lookup(name->name).var : nullptr;
+        const VarSymbol *var = name ? checker_.scopes().lookup(name->name).var() : nullptr;
         if (!var || !var->type || !var->type->isObject() || var->type->isTuple()) {
           return false;
         }
         for (const Field &f : var->type->fields()) {
-          if (!llvm::is_contained(prop.omit, f.name)) {
+          if (!llvm::is_contained(prop.omit(), f.name)) {
             names.push_back(f.name);
           }
         }
         continue;
       }
-      if (prop.key) {
+      if (prop.key()) {
         return false;
       }
       llvm::StringRef name = prop.name;

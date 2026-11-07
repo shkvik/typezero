@@ -147,7 +147,7 @@ std::optional<OverflowCheck::Narrowable> Narrowing::narrowable(const Expr *expr,
     return n;
   }
   if (auto *call = dyn_cast<CallExpr>(expr);
-      call && call->builtin == Builtin::MathAbs && call->args.size() == 1) {
+      call && call->builtin() == Builtin::MathAbs && call->args.size() == 1) {
     std::optional<OverflowCheck::Narrowable> inner = narrowable(call->args[0], st);
     if (!inner || inner->length || inner->square || inner->abs || inner->scale != 1 ||
         inner->offset != 0) {
@@ -163,8 +163,8 @@ std::optional<OverflowCheck::Narrowable> Narrowing::narrowable(const Expr *expr,
     if (!update->prefix) {
       n.offset = update->increment ? -1 : 1;
     }
-    if (name && name->var) {
-      n.integer = isIntegerType(name->var->type);
+    if (name && name->var()) {
+      n.integer = isIntegerType(name->var()->type);
     }
   } else if (auto *member = dyn_cast<MemberExpr>(expr);
              member && member->name == "length" && hasLength(member->object->type)) {
@@ -173,22 +173,22 @@ std::optional<OverflowCheck::Narrowable> Narrowing::narrowable(const Expr *expr,
     n.integer = true;
   } else {
     name = dyn_cast<NameExpr>(expr);
-    if (name && name->var) {
-      n.integer = isIntegerType(name->var->type);
+    if (name && name->var()) {
+      n.integer = isIntegerType(name->var()->type);
     }
   }
-  if (!name || !name->var || !st.vars.count(name->var)) {
+  if (!name || !name->var() || !st.vars.count(name->var())) {
     return std::nullopt;
   }
-  auto info = check_.vars_.find(name->var);
+  auto info = check_.vars_.find(name->var());
   if (info == check_.vars_.end() || info->second.owner != check_.owner_ ||
       info->second.writtenElsewhere) {
     return std::nullopt;
   }
-  if (!n.length && !isNumberType(name->var->type)) {
+  if (!n.length && !isNumberType(name->var()->type)) {
     return std::nullopt;
   }
-  n.var = name->var;
+  n.var = name->var();
 
   return n;
 }
@@ -359,7 +359,7 @@ void Narrowing::narrowComparison(const BinaryExpr *bin, const Val &l, const Val 
 }
 
 void Narrowing::applyPredicate(const CallExpr *call, State &whenTrue, State &whenFalse) {
-  const FunctionDecl *fn = call->func ? call->func->decl : nullptr;
+  const FunctionDecl *fn = call->func() ? call->func()->decl : nullptr;
   if (!fn) {
     return;
   }
@@ -454,7 +454,8 @@ void Narrowing::refine(const Expr *cond, State &st, State &whenTrue, State &when
       break;
     }
   }
-  if (auto *call = dyn_cast<CallExpr>(cond); call && call->func && call->builtin == Builtin::None) {
+  if (auto *call = dyn_cast<CallExpr>(cond);
+      call && call->func() && call->builtin() == Builtin::None) {
     check_.evaluator().eval(cond, st);
     whenTrue = whenFalse = st;
     applyPredicate(call, whenTrue, whenFalse);

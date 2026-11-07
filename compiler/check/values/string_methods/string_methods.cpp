@@ -90,7 +90,7 @@ Expr *StringMethods::checkStringMethod(CallExpr *call, MemberExpr *member) {
       break;
     }
   }
-  call->builtin = method->builtin;
+  call->target = BuiltinCall{.builtin = method->builtin};
   call->type = method->ret;
 
   if (method->builtin == Builtin::StrRepeat) {

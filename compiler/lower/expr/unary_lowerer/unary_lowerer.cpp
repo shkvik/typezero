@@ -143,7 +143,7 @@ llvm::Value *UnaryLowerer::emitEnumName(IndexExpr *index) {
   llvm::Value *value = lowering_.exprLowerer().emitExpr(index->index);
   const Type *type = index->type;
   llvm::Value *result = lowering_.optionalLowerer().undefinedValue(type);
-  for (const EnumMember &m : index->enumDecl->members) {
+  for (const EnumMember &m : index->enumDecl()->members) {
     llvm::SmallVector<llvm::UTF16, 16> units;
     llvm::convertUTF8ToUTF16String(m.name, units);
     llvm::Value *name = lowering_.optionalLowerer().makeOptional(

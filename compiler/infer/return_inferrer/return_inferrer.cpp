@@ -122,7 +122,7 @@ Checker::BodyState ReturnInferrer::enterBody(const FunctionDecl *fn) {
            checker_.blockNames_.back().functions > group->functionDepth) {
       checker_.blockNames_.pop_back();
     }
-  } else if (!fn || !fn->isExpression) {
+  } else if (!fn || !fn->isExpression()) {
     checker_.scopes_.resize(1);
     checker_.typeScopes_.resize(1);
     checker_.functions_.clear();
@@ -178,7 +178,8 @@ void ReturnInferrer::leaveBody(Checker::BodyState &saved) {
 }
 
 void ReturnInferrer::inferReturnType(FuncSymbol *fn) {
-  if (FunctionDecl *decl = fn->decl; decl && decl->generic && decl->cls() && decl->cls()->generic &&
+  if (FunctionDecl *decl = fn->decl; decl && decl->generic && decl->cls() &&
+                                     decl->cls()->generic() &&
                                      !checker_.lateClasses().hasClassExpr(decl->generic)) {
     const Type *ret = returnType(decl->generic->sym);
     fn->ret = ret ? checker_.typeParams().substitute(
@@ -398,7 +399,7 @@ void ReturnInferrer::resolveParams(FuncSymbol *fn) {
   }
   fn->pendingParams = false;
   FunctionDecl *decl = fn->decl;
-  if (FunctionDecl *generic = decl->generic; generic && decl->cls() && decl->cls()->generic) {
+  if (FunctionDecl *generic = decl->generic; generic && decl->cls() && decl->cls()->generic()) {
     resolveParams(generic->sym);
     auto sub = [&](const Type *t) {
       return t ? checker_.typeParams().substituteValue(
@@ -467,14 +468,13 @@ void ReturnInferrer::resolveParams(FuncSymbol *fn) {
 
 FunctionDecl *ReturnInferrer::freshCopy(const FunctionDecl *fn) {
   Lexer lexer(fn->source, checker_.diags_);
-  Parser parser(lexer, checker_.ctx_, checker_.diags_, fn->cls() && fn->cls()->library);
-  FunctionDecl *copy = fn->isArrow || ((fn->isExpression || fn->lifted) && !fn->cls())
+  Parser parser(lexer, checker_.ctx_, checker_.diags_, fn->cls() && fn->cls()->library());
+  FunctionDecl *copy = fn->isArrow() || ((fn->isExpression() || fn->lifted()) && !fn->cls())
                            ? parser.parseFunctionExprCopy()
                        : fn->cls() ? parser.parseMethodCopy()
                                    : parser.parseFunctionCopy();
-  copy->isExpression = fn->isExpression;
+  copy->place = fn->place;
   copy->isAsync = fn->isAsync;
-  copy->lifted = fn->lifted;
   if (const ClassMember *original = fn->member()) {
     ClassMember copied{.cls = original->cls, .access = original->access};
     if (fn->isStatic()) {

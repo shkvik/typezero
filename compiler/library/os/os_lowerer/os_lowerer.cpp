@@ -36,37 +36,38 @@ llvm::Value *OsLowerer::emitOsCall(CallExpr *call) {
   auto maker = [&](const Type *type) { return lowering_.objectMaker().maker(type, osObjects()); };
 
   llvm::Value *result = nullptr;
-  switch (call->builtin) {
-  case Builtin::OsString:
-    result = lowering_.stringLowerer().callReturningString(
-        fn("tz_os_string", voidTy, {ptr, lowering_.builder_.getInt64Ty()}), {values[0]});
-    break;
-  case Builtin::OsNumber:
-    result = lowering_.builder_.CreateCall(
-        fn("tz_os_number", f64, {lowering_.builder_.getInt64Ty()}), {values[0]});
-    break;
-  case Builtin::OsAvailableParallelism:
-    result = lowering_.builder_.CreateSExt(
-        lowering_.builder_.CreateCall(fn("tz_os_available_parallelism", i32, {})),
-        lowering_.builder_.getInt64Ty());
-    break;
-  case Builtin::OsCpus: {
-    const Type *element = call->type->inner();
-    result = lowering_.builder_.CreateCall(
-        fn("tz_os_cpus", ptr, {ptr, ptr}),
-        {lowering_.typeDescriptors().typeDescriptor(element), maker(element)});
-    break;
-  }
-  case Builtin::OsLoadavg:
-    result = lowering_.builder_.CreateCall(
-        fn("tz_os_loadavg", ptr, {ptr}),
-        {lowering_.typeDescriptors().typeDescriptor(Type::doubleTy())});
-    break;
-  case Builtin::OsUserInfo:
-    result = lowering_.builder_.CreateCall(fn("tz_os_user_info", ptr, {ptr}), {maker(call->type)});
-    break;
-  default:
-    llvm_unreachable("not a built-in of node:os");
+  switch (call->builtin()) {
+    case Builtin::OsString:
+      result = lowering_.stringLowerer().callReturningString(
+          fn("tz_os_string", voidTy, {ptr, lowering_.builder_.getInt64Ty()}), {values[0]});
+      break;
+    case Builtin::OsNumber:
+      result = lowering_.builder_.CreateCall(
+          fn("tz_os_number", f64, {lowering_.builder_.getInt64Ty()}), {values[0]});
+      break;
+    case Builtin::OsAvailableParallelism:
+      result = lowering_.builder_.CreateSExt(
+          lowering_.builder_.CreateCall(fn("tz_os_available_parallelism", i32, {})),
+          lowering_.builder_.getInt64Ty());
+      break;
+    case Builtin::OsCpus: {
+      const Type *element = call->type->inner();
+      result = lowering_.builder_.CreateCall(
+          fn("tz_os_cpus", ptr, {ptr, ptr}),
+          {lowering_.typeDescriptors().typeDescriptor(element), maker(element)});
+      break;
+    }
+    case Builtin::OsLoadavg:
+      result = lowering_.builder_.CreateCall(
+          fn("tz_os_loadavg", ptr, {ptr}),
+          {lowering_.typeDescriptors().typeDescriptor(Type::doubleTy())});
+      break;
+    case Builtin::OsUserInfo:
+      result =
+          lowering_.builder_.CreateCall(fn("tz_os_user_info", ptr, {ptr}), {maker(call->type)});
+      break;
+    default:
+      llvm_unreachable("not a built-in of node:os");
   }
   for (size_t i = 0; i < values.size(); ++i) {
     lowering_.refCounts().releaseValue(values[i], call->args[i]->type);

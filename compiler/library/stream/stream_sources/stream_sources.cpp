@@ -57,11 +57,11 @@ Expr *StreamSources::checkFsStreamFunction(CallExpr *call, FunctionDecl *decl, l
     if (isa<ObjectLitExpr>(arg)) {
       auto *lit = cast<ObjectLitExpr>(arg);
       for (const ObjectLitExpr::Property &prop : lit->props) {
-        if (!prop.spread && prop.name == "encoding" && !isa<UndefinedExpr>(prop.value)) {
+        if (!prop.spread() && prop.name == "encoding" && !isa<UndefinedExpr>(prop.value)) {
           text = true;
         }
         auto *flags =
-            prop.spread || prop.name != "flags" ? nullptr : dyn_cast<StringLitExpr>(prop.value);
+            prop.spread() || prop.name != "flags" ? nullptr : dyn_cast<StringLitExpr>(prop.value);
         if (flags && flags->value.find(u'x') != std::u16string::npos) {
           fresh = true;
         }

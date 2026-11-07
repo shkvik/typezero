@@ -188,7 +188,7 @@ bool TypeRelations::isIntLiteralTree(const Expr *expr) {
     return true;
   }
   if (auto *name = dyn_cast<NameExpr>(expr)) {
-    return name->var && name->var->literalConst;
+    return name->var() && name->var()->literalConst;
   }
   if (auto *unary = dyn_cast<UnaryExpr>(expr)) {
     return (unary->op == UnaryOp::Neg || unary->op == UnaryOp::Plus) &&
@@ -545,7 +545,7 @@ Expr *TypeRelations::coerce(Expr *expr, const Type *to, llvm::StringRef what) {
   }
   auto stream = [](const Type *t) -> const ClassDecl * {
     const ClassDecl *cls = t->classDecl();
-    return cls && cls->library && cls->generic && cls->generic->name == "ReadableStream" &&
+    return cls && cls->library() && cls->generic() && cls->generic()->name == "ReadableStream" &&
                    cls->typeArgs.size() == 2
                ? cls
                : nullptr;
@@ -554,7 +554,7 @@ Expr *TypeRelations::coerce(Expr *expr, const Type *to, llvm::StringRef what) {
       toObject->isUnion() ? toObject->members() : llvm::ArrayRef<const Type *>(toObject);
   auto body = [](const Type *m) {
     const ClassDecl *cls = m->classDecl();
-    return cls && cls->library && cls->name == "FormData";
+    return cls && cls->library() && cls->name == "FormData";
   };
   if (stream(fromObject) && llvm::any_of(wanted, body) &&
       llvm::none_of(wanted, [&](const Type *m) { return stream(m) != nullptr; })) {
@@ -574,8 +574,8 @@ Expr *TypeRelations::coerce(Expr *expr, const Type *to, llvm::StringRef what) {
   }
   const std::vector<std::pair<const Type *, llvm::SMLoc>> *places = nullptr;
   const Type *otherPlace = nullptr;
-  if (auto *name = dyn_cast<NameExpr>(expr); name && name->var) {
-    if (auto found = checker_.destinations_.find(name->var);
+  if (auto *name = dyn_cast<NameExpr>(expr); name && name->var()) {
+    if (auto found = checker_.destinations_.find(name->var());
         found != checker_.destinations_.end()) {
       places = &found->second;
       for (auto [type, loc] : *places) {
@@ -589,18 +589,19 @@ Expr *TypeRelations::coerce(Expr *expr, const Type *to, llvm::StringRef what) {
   if (from->classRef() && from->classRef()->isGeneric() && toObject->isConstructor()) {
     const ClassDecl *generic = from->classRef();
     std::string name = generic->name.str();
-    std::string example = generic->library ? "class Bus extends " + name + " {}"
-                                           : "class Int" + name + " extends " + name + "<int> {}";
+    std::string example = generic->library() ? "class Bus extends " + name + " {}"
+                                             : "class Int" + name + " extends " + name + "<int> {}";
     message += "; each list of type arguments of '" + name +
                "' makes a class of its own, and 'new' of this value could make none of them: "
                "give a class that extends it, e.g. '" +
                example + "', or take the class as an 'object'";
   } else if (from->isUnknown() || from->isAnyObject()) {
     message += checker_.unknownChecker().unknownHint(expr, to);
-  } else if (fromObject->isObject() && toObject->isClass() && (!fromClass || fromClass->literal)) {
+  } else if (fromObject->isObject() && toObject->isClass() &&
+             (!fromClass || fromClass->literal())) {
     message += "; an object literal is never an instance of a class: create one with 'new " +
                toObject->name().str() + "(...)'";
-  } else if (fromClass && fromClass->literal && toObject->isObject()) {
+  } else if (fromClass && fromClass->literal() && toObject->isObject()) {
     message += "; an object literal with methods has a type of its own; to give it this type, "
                "write its functions as fields, 'f: () => ...'";
   } else if (std::string why = GenericWidening::whyNot(fromObject, toObject); !why.empty()) {

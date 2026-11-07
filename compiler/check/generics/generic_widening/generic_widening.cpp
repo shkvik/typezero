@@ -9,7 +9,7 @@ namespace tz {
 namespace {
 
 bool mentions(const TypeRef &ref, llvm::StringRef name) {
-  if (ref.kind == TypeRef::Kind::Name && ref.name == name) {
+  if (ref.kind() == TypeRefKind::NAME_REF && ref.name == name) {
     return true;
   }
   for (const TypeRef &arg : ref.args) {
@@ -87,7 +87,7 @@ bool passedOnSafely(const ClassDecl *generic, llvm::StringRef name) {
     return true;
   }
   const ClassDecl *parent = generic->parent;
-  const ClassDecl *baseGeneric = parent && parent->generic ? parent->generic : parent;
+  const ClassDecl *baseGeneric = parent && parent->generic() ? parent->generic() : parent;
   if (!baseGeneric) {
     return false;
   }
@@ -96,7 +96,7 @@ bool passedOnSafely(const ClassDecl *generic, llvm::StringRef name) {
     if (!mentions(args[i], name)) {
       continue;
     }
-    bool direct = args[i].kind == TypeRef::Kind::Name && args[i].name == name;
+    bool direct = args[i].kind() == TypeRefKind::NAME_REF && args[i].name == name;
     if (!direct || !GenericWidening::covariant(baseGeneric, i)) {
       return false;
     }
@@ -142,7 +142,7 @@ bool GenericWidening::covariant(const ClassDecl *generic, size_t index) {
 
 const ClassDecl *GenericWidening::instanceOf(const ClassDecl *cls, const ClassDecl *generic) {
   for (const ClassDecl *c = cls; c; c = c->parent) {
-    if (c->generic == generic) {
+    if (c->generic() == generic) {
       return c;
     }
   }
@@ -156,10 +156,10 @@ bool GenericWidening::widens(const Type *from, const Type *to) {
   }
   const ClassDecl *target = to->classDecl();
   const ClassDecl *source = from->classDecl();
-  if (!target || !source || !target->generic) {
+  if (!target || !source || !target->generic()) {
     return false;
   }
-  const ClassDecl *instance = instanceOf(source, target->generic);
+  const ClassDecl *instance = instanceOf(source, target->generic());
   if (!instance || instance == target || instance->typeArgs.size() != target->typeArgs.size()) {
     return false;
   }
@@ -168,7 +168,7 @@ bool GenericWidening::widens(const Type *from, const Type *to) {
     if (own == wide) {
       continue;
     }
-    if (!covariant(target->generic, i) || !referenceFits(own, wide)) {
+    if (!covariant(target->generic(), i) || !referenceFits(own, wide)) {
       return false;
     }
   }
@@ -178,11 +178,11 @@ bool GenericWidening::widens(const Type *from, const Type *to) {
 
 std::string GenericWidening::whyNot(const Type *from, const Type *to) {
   if (!from->isClass() || !to->isClass() || !from->classDecl() || !to->classDecl() ||
-      !to->classDecl()->generic) {
+      !to->classDecl()->generic()) {
     return "";
   }
   const ClassDecl *target = to->classDecl();
-  const ClassDecl *instance = instanceOf(from->classDecl(), target->generic);
+  const ClassDecl *instance = instanceOf(from->classDecl(), target->generic());
   if (!instance || instance->typeArgs.size() != target->typeArgs.size()) {
     return "";
   }
@@ -191,7 +191,7 @@ std::string GenericWidening::whyNot(const Type *from, const Type *to) {
     if (own == wide) {
       continue;
     }
-    if (covariant(target->generic, i)) {
+    if (covariant(target->generic(), i)) {
       if (referenceFits(own, wide)) {
         continue;
       }
@@ -204,13 +204,13 @@ std::string GenericWidening::whyNot(const Type *from, const Type *to) {
              "'interface " +
              example + " extends " + wideName + " { ... }'";
     }
-    llvm::StringRef name = target->generic->typeParams[i].name;
-    std::string writer = writerOf(target->generic, name);
+    llvm::StringRef name = target->generic()->typeParams[i].name;
+    std::string writer = writerOf(target->generic(), name);
     if (writer.empty()) {
       writer = "its base class takes " + name.str() + " in";
     }
 
-    return "; '" + target->generic->name.str() + "' with a wider " + name.str() +
+    return "; '" + target->generic()->name.str() + "' with a wider " + name.str() +
            " would let a value of another type into it: " + writer;
   }
 
@@ -228,10 +228,10 @@ Expr *GenericWidening::joined(Expr *expr) {
     return expr;
   }
   for (const ClassDecl *candidate = first; candidate; candidate = candidate->parent) {
-    if (!candidate->generic) {
+    if (!candidate->generic()) {
       continue;
     }
-    ClassDecl *generic = candidate->generic;
+    ClassDecl *generic = candidate->generic();
     std::vector<const ClassDecl *> instances;
     for (const Type *member : members) {
       const ClassDecl *cls = member->isClass() ? member->classDecl() : nullptr;

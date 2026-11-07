@@ -14,6 +14,8 @@ public:
   const Type *fromPortable(const EventInference::Portable &p, llvm::SMLoc loc);
 
 private:
+  ClassDecl *portableClass(const std::string &file, const std::string &name);
+
   Checker &checker_;
   std::map<std::string, const Type *> siteMaps_;
 };

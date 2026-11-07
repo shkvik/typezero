@@ -44,7 +44,7 @@ Expr *TypedArrayChecker::checkTypedArrayMethod(CallExpr *call, MemberExpr *membe
   std::string what = "an element of '" + type->name().str() + "'";
   const Type *copy = type->isBuffer() ? Type::bytesType(Bytes::Uint8) : type;
   auto made = [&](Builtin builtin, const Type *result) {
-    call->builtin = builtin;
+    call->target = BuiltinCall{.builtin = builtin};
     call->type = result;
 
     return call;
@@ -223,7 +223,7 @@ Expr *TypedArrayChecker::checkTypedArrayMethod(CallExpr *call, MemberExpr *membe
     auto *from = checker_.ctx_.make<CallExpr>(
         member->loc(), checker_.ctx_.make<MemberExpr>(member->loc(), arrayName, "from"),
         std::vector<Expr *>{member->object});
-    from->builtin = Builtin::ArrayFrom;
+    from->target = BuiltinCall{.builtin = Builtin::ArrayFrom};
     from->type = Type::array(element);
     auto *iterated = checker_.ctx_.make<MemberExpr>(member->loc(), from, name);
     auto *iterator = checker_.ctx_.make<CallExpr>(call->loc(), iterated, std::vector<Expr *>{});
@@ -284,7 +284,7 @@ Expr *TypedArrayChecker::checkDataViewMethod(CallExpr *call, MemberExpr *member)
       !checker_.indexProofs().requireUpTo(args[1], member->object, kindType->elementSize(),
                                           "the offset of '" + member->name.str() + "'");
   call->args = std::move(args);
-  call->builtin = m.write ? Builtin::DataViewSet : Builtin::DataViewGet;
+  call->target = BuiltinCall{.builtin = m.write ? Builtin::DataViewSet : Builtin::DataViewGet};
   call->type = m.write ? Type::voidTy()
                : element->isFloat()
                    ? Type::result(Type::doubleTy(), checker_.prelude().builtinType("NumberError"))

@@ -5,6 +5,7 @@
 #include "compiler/program/ast/stmt/stmt.h"
 #include "compiler/program/ast/type_param_decl/type_param_decl.h"
 #include "compiler/program/ast/type_ref/type_ref.h"
+#include "compiler/union/union/union.h"
 #include "llvm/ADT/StringRef.h"
 #include "llvm/Support/SMLoc.h"
 #include <optional>
@@ -13,19 +14,40 @@
 
 namespace tz {
 
+enum class DeclaredMemberKind {
+  DECLARED_FIELD,
+  DECLARED_METHOD,
+  DECLARED_CONSTRUCTOR,
+};
+
+struct DeclaredSignature {
+  std::vector<TypeParamDecl> typeParams;
+  std::vector<Param> params;
+};
+
+struct DeclaredField {
+  static constexpr DeclaredMemberKind kind = DeclaredMemberKind::DECLARED_FIELD;
+  bool readonly = false;
+  bool optional = false;
+};
+
+struct DeclaredMethod {
+  static constexpr DeclaredMemberKind kind = DeclaredMemberKind::DECLARED_METHOD;
+  DeclaredSignature signature;
+};
+
+struct DeclaredConstructor {
+  static constexpr DeclaredMemberKind kind = DeclaredMemberKind::DECLARED_CONSTRUCTOR;
+  DeclaredSignature signature;
+};
+
 struct DeclaredMember {
   llvm::StringRef name;
   llvm::SMLoc loc;
   Access access = Access::Public;
   bool accessWritten = false;
   bool isStatic = false;
-  bool readonly = false;
-  bool optional = false;
-  bool method = false;
-  bool constructor = false;
-  bool isAsync = false;
-  std::vector<TypeParamDecl> typeParams;
-  std::vector<Param> params;
+  Union<DeclaredField, DeclaredMethod, DeclaredConstructor> form = DeclaredField{};
   std::optional<TypeRef> type;
 };
 

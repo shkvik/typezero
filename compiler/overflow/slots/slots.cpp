@@ -109,10 +109,10 @@ bool Slots::isPrivateArray(const Expr *expr) const {
     return false;
   }
   if (auto *name = dyn_cast<NameExpr>(expr)) {
-    if (!name->var) {
+    if (!name->var()) {
       return false;
     }
-    auto info = check_.vars_.find(name->var);
+    auto info = check_.vars_.find(name->var());
     return info != check_.vars_.end() && info->second.declared && !info->second.aliased &&
            !info->second.writtenElsewhere && info->second.owner == check_.owner_;
   }
@@ -120,18 +120,18 @@ bool Slots::isPrivateArray(const Expr *expr) const {
     return true;
   }
   if (auto *call = dyn_cast<CallExpr>(expr)) {
-    switch (call->builtin) {
-    case Builtin::ArrMap:
-    case Builtin::ArrFilter:
-    case Builtin::ArrFlatMap:
-    case Builtin::ArrSlice:
-    case Builtin::ArrConcat:
-    case Builtin::ArrayFrom:
-    case Builtin::StrSplit:
-    case Builtin::StrSplitRegex:
-      return true;
-    default:
-      return false;
+    switch (call->builtin()) {
+      case Builtin::ArrMap:
+      case Builtin::ArrFilter:
+      case Builtin::ArrFlatMap:
+      case Builtin::ArrSlice:
+      case Builtin::ArrConcat:
+      case Builtin::ArrayFrom:
+      case Builtin::StrSplit:
+      case Builtin::StrSplitRegex:
+        return true;
+      default:
+        return false;
     }
   }
 
@@ -167,8 +167,8 @@ void Slots::storeElements(const Expr *arrayExpr, const Type *arrayType, const Va
   const Type *element = arrayType->nonOptional()->inner();
   check_.contribute(check_.next_.elements[element], v);
   auto *name = dyn_cast_or_null<NameExpr>(stripCasts(arrayExpr));
-  if (name && name->var) {
-    auto found = st.vars.find(name->var);
+  if (name && name->var()) {
+    auto found = st.vars.find(name->var());
     if (found != st.vars.end()) {
       Val &array = found->second;
       array.elem = array.elem ? share(join(*array.elem, v)) : nullptr;
