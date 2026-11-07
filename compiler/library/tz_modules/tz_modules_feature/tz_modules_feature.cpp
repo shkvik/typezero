@@ -15,7 +15,9 @@ Expr *TzModulesFeature::checkFunctionCall(CheckState &state, CallExpr *call, Nam
   return LibraryCalls(state).checkLibCall(call, name);
 }
 
-bool TzModulesFeature::lowers(Builtin builtin) const { return isLibBuiltin(builtin); }
+bool TzModulesFeature::lowers(Builtin builtin) const {
+  return BuiltinGroups::isLibBuiltin(builtin);
+}
 
 llvm::Value *TzModulesFeature::lowerCall(Lowering &lowering, CallExpr *call) const {
   return lowering.libraryCallLowerer().emitLibBuiltin(call);

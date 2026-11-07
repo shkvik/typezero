@@ -401,7 +401,11 @@ void ReturnChecker::checkReturn(ReturnStmt *ret) {
       this->state.getDiagnostics().error(ret->value->loc(), empty.error().message);
       ClassLinks(this->state).noteInheritedReturn(fn->decl);
     } else if (fn->discardsResult) {
-      ResultChecker(this->state).checkDiscarded(ret->value, true);
+      ResultChecker::ResultValueGetsUsed used =
+          ResultChecker(this->state).usedValue(ret->value, true);
+      if (used.isErr()) {
+        this->state.getDiagnostics().error(ret->value->loc(), used.error().message);
+      }
     }
     return;
   }

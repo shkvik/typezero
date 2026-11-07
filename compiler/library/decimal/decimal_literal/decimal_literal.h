@@ -8,6 +8,11 @@
 namespace tz {
 
 struct DecimalLiteral {
+  static std::optional<DecimalLiteral> read(llvm::StringRef text);
+  static DecimalLiteral of(uint64_t value);
+  static int roundingMode(const std::u16string &name);
+  static DecimalLiteral normalized(std::string digits, int64_t exponent);
+
   std::string digits;
   int64_t exponent = 0;
 
@@ -18,11 +23,6 @@ struct DecimalLiteral {
 constexpr int64_t kDecimalMaxExp = 10000000;
 constexpr int64_t kDecimalMinExp = -10000000;
 
-std::optional<DecimalLiteral> readDecimalLiteral(llvm::StringRef text);
-
-DecimalLiteral decimalOf(uint64_t value);
-
-int decimalRoundingMode(const std::u16string &name);
 constexpr int kRoundHalfUp = 4;
 extern const char kRoundingModes[];
 

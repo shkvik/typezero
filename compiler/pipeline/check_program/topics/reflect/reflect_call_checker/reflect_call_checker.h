@@ -1,6 +1,8 @@
 #pragma once
 
 #include "compiler/pipeline/check_program/check_state/check_state.h"
+#include "compiler/pipeline/check_program/topics/reflect/reflect_call_checker/reflect_call_checker_errors.h"
+#include "compiler/result/result/result.h"
 
 namespace tz {
 
@@ -16,6 +18,13 @@ public:
   static bool reflectAccepts(const Type *arg, const Type *param);
 
 private:
+  using ResultKeyOfRecords = Result<const Type *, ReflectCallCheckerKeyOfRecordsError>;
+  using ResultTargetObject = Result<const Type *, ReflectCallCheckerTargetObjectError>;
+  using ResultArgumentList = Result<const Type *, ReflectCallCheckerArgumentListError>;
+
+  static ResultKeyOfRecords keyOfRecords(const Type *type);
+  static ResultTargetObject targetObject(const Type *type);
+  static ResultArgumentList argumentList(const Type *type);
   static const Type *designType(const Expr *key);
   static bool isDesignKey(const Expr *key);
   static Expr *stripImplicit(Expr *expr);

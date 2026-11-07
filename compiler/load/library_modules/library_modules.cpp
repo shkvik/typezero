@@ -105,7 +105,12 @@ const ModuleParts kModuleParts[] = {
     {"fetch.tz", {"fetch_proxy.tz"}},
 };
 
-void appendPart(SourceFile &file, SourceFile &part) {
+}
+
+LibraryModules::LibraryModules(Loader &loader)
+    : loader_(loader) {}
+
+void LibraryModules::appendPart(SourceFile &file, SourceFile &part) {
   llvm::append_range(file.items, part.items);
   llvm::append_range(file.imports, part.imports);
   llvm::append_range(file.exports, part.exports);
@@ -116,10 +121,6 @@ void appendPart(SourceFile &file, SourceFile &part) {
     llvm::append_range(file.stringConstants[entry.getKey()], entry.getValue());
   }
 }
-
-}
-
-LibraryModules::LibraryModules(Loader &loader) : loader_(loader) {}
 
 std::optional<SourceFile> LibraryModules::parseLibraryFile(llvm::StringRef file,
                                                            llvm::StringRef name, llvm::SMLoc loc,
@@ -177,7 +178,7 @@ Module *LibraryModules::libraryModule(llvm::StringRef file, llvm::StringRef name
       if (!rest) {
         return nullptr;
       }
-      appendPart(*parsed, *rest);
+      LibraryModules::appendPart(*parsed, *rest);
     }
   }
   Module *module = loader_.ctx_.newModule();

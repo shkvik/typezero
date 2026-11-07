@@ -8,6 +8,8 @@
 
 namespace tz::pkg {
 
+struct JsonValue;
+
 struct Manifest {
   std::string path;
   std::string dir;
@@ -24,11 +26,19 @@ struct Manifest {
   std::string indent = "  ";
 };
 
-std::string findManifest(llvm::StringRef dir);
-bool readManifest(llvm::StringRef file, Manifest &out);
-bool readManifestText(llvm::StringRef file, std::string text, Manifest &out);
-bool readPackageDir(llvm::StringRef dir, Manifest &out);
-bool namesTzFiles(llvm::StringRef packageJson);
-std::string withDependencies(const Manifest &manifest, std::vector<Dependency> deps);
+class ManifestFile {
+public:
+  static std::string findManifest(llvm::StringRef dir);
+  static bool namesTzFiles(llvm::StringRef packageJson);
+  static bool readManifest(llvm::StringRef file, Manifest &out);
+  static bool readPackageDir(llvm::StringRef dir, Manifest &out);
+  static bool readManifestText(llvm::StringRef file, std::string text, Manifest &out);
+  static std::string withDependencies(const Manifest &manifest, std::vector<Dependency> deps);
+
+private:
+  static bool readExports(const Manifest &out, const JsonValue &value,
+                          std::vector<std::pair<std::string, std::string>> &exports);
+  static bool parseManifest(Manifest &out);
+};
 
 }

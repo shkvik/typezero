@@ -11,28 +11,41 @@ const llvm::StringLiteral kChildExports[] = {"ChildProcess", "_forkChild",   "ex
 
 }
 
-std::string childExportProblem(llvm::StringRef name, llvm::StringRef path) {
-  std::string quoted = "'" + path.str() + "'";
-  std::string what = "'" + name.str() + "' of " + quoted;
+ChildExports::ResultExportFound ChildExports::childExport(llvm::StringRef name,
+                                                          llvm::StringRef path) {
   if (name == "spawnSync" || name == "execFileSync" || name == "execSync") {
-    return "";
+    return ok(name);
   }
   if (name == "spawn" || name == "exec" || name == "execFile") {
-    return what +
-           " is not supported yet: it comes with EventEmitter and the streams of Node "
-           "(docs/process.md, step 2); use '" +
-           name.str() + "Sync', which waits for the program and gives what it printed";
+    std::string message = ErrorTextChildExport::async(name, path);
+
+    return err(FeatureExportFoundError{
+        .code = FeatureExportFoundErrorCode::NOT_YET,
+        .message = message,
+    });
   }
   if (name == "fork") {
-    return what + " is not possible: it starts another Node with a channel to it, and tz has "
-                  "no Node (docs/process.md, section 4); for parallel work use async functions "
-                  "(docs/async.md), and to run a program 'spawnSync(process.execPath, [...])'";
+    std::string message = ErrorTextChildExport::fork(name, path);
+
+    return err(FeatureExportFoundError{
+        .code = FeatureExportFoundErrorCode::NOT_POSSIBLE,
+        .message = message,
+    });
   }
   if (llvm::is_contained(kChildExports, name)) {
-    return what + " is not supported yet; tz has spawnSync, execFileSync and execSync";
-  }
+    std::string message = ErrorTextChildExport::notYet(name, path);
 
-  return quoted + " has no export named '" + name.str() + "'";
+    return err(FeatureExportFoundError{
+        .code = FeatureExportFoundErrorCode::NOT_YET,
+        .message = message,
+    });
+  }
+  std::string message = ErrorTextModuleExport::none(path, name);
+
+  return err(FeatureExportFoundError{
+      .code = FeatureExportFoundErrorCode::NO_EXPORT,
+      .message = message,
+  });
 }
 
 }

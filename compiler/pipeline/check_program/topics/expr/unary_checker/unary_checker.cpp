@@ -165,7 +165,7 @@ UnaryChecker::ResultNonNullAssertion UnaryChecker::nonNullOperand(const Type *ty
 }
 
 Expr *UnaryChecker::checkUnary(UnaryExpr *unary, const Type *expected, bool wraps) {
-  const char *op = opSpelling(unary->op);
+  const char *op = Operators::opSpelling(unary->op);
   switch (unary->op) {
   case UnaryOp::Neg:
   case UnaryOp::Plus: {

@@ -34,20 +34,18 @@ namespace tz::pkg {
 namespace fs = llvm::sys::fs;
 namespace path = llvm::sys::path;
 
-namespace {
-
-bool writeText(llvm::StringRef file, llvm::StringRef text) {
+bool PackageGraph::writeText(llvm::StringRef file, llvm::StringRef text) {
   std::string error;
-  if (writeFileAtomically(file, text, error)) {
+  if (PackageCache::writeFileAtomically(file, text, error)) {
     return true;
   }
-  report(error);
+  Report::report(error);
 
   return false;
 }
 
-bool lockFits(const Manifest &root, const Lock &lock, std::map<std::string, Manifest> &locals,
-              bool &failed) {
+bool PackageGraph::lockFits(const Manifest &root, const Lock &lock,
+                            std::map<std::string, Manifest> &locals, bool &failed) {
   failed = false;
   std::set<std::string> reached;
   struct Node {
@@ -67,7 +65,7 @@ bool lockFits(const Manifest &root, const Lock &lock, std::map<std::string, Mani
     for (const std::string &spec : node.specs) {
       Source source;
       std::string error;
-      if (!parseSource(spec, node.baseDir, source, error)) {
+      if (!SourceParser::parseSource(spec, node.baseDir, source, error)) {
         return false;
       }
       if (source.form.is<LocalSource>() && !node.allowLocal) {
@@ -79,7 +77,7 @@ bool lockFits(const Manifest &root, const Lock &lock, std::map<std::string, Mani
           continue;
         }
         Manifest local;
-        if (!readPackageDir(source.dir(), local)) {
+        if (!ManifestFile::readPackageDir(source.dir(), local)) {
           failed = true;
           return false;
         }
@@ -120,28 +118,28 @@ bool lockFits(const Manifest &root, const Lock &lock, std::map<std::string, Mani
   return true;
 }
 
-bool ensureSources(const Locked &locked, std::string &dir, JsrVersion *jsrMeta) {
+bool PackageGraph::ensureSources(const Locked &locked, std::string &dir, JsrVersion *jsrMeta) {
   Source source;
   std::string error;
   llvm::StringRef id = locked.id;
   if (id.starts_with("jsr:")) {
-    if (!parseSource(locked.id, "", source, error)) {
-      report("package-lock.json: " + error);
+    if (!SourceParser::parseSource(locked.id, "", source, error)) {
+      Report::report("package-lock.json: " + error);
       return false;
     }
     JsrVersion meta;
-    if (!jsrVersion(source.scope(), source.name(), locked.version, meta, error)) {
-      report(error);
+    if (!JsrClient::jsrVersion(source.scope(), source.name(), locked.version, meta, error)) {
+      Report::report(error);
       return false;
     }
     if (meta.hash != locked.hash) {
-      report("the files of " + locked.describe() +
-             " are not those package-lock.json names: their hash is " + meta.hash +
-             ", package-lock.json has " + locked.hash);
+      Report::report("the files of " + locked.describe() +
+                     " are not those package-lock.json names: their hash is " + meta.hash +
+                     ", package-lock.json has " + locked.hash);
       return false;
     }
-    if (!jsrDownload(source.scope(), source.name(), locked.version, meta, dir, error)) {
-      report(error);
+    if (!JsrClient::jsrDownload(source.scope(), source.name(), locked.version, meta, dir, error)) {
+      Report::report(error);
       return false;
     }
     if (jsrMeta) {
@@ -150,33 +148,31 @@ bool ensureSources(const Locked &locked, std::string &dir, JsrVersion *jsrMeta) 
     return true;
   }
   std::string url = id.drop_front(4).str();
-  if (!gitCheckout(url, locked.commit, dir, error)) {
-    report(error);
+  if (!GitClient::gitCheckout(url, locked.commit, dir, error)) {
+    Report::report(error);
     return false;
   }
   std::string hash;
-  if (!hashDirectory(dir, hash, error)) {
-    report(error);
+  if (!PackageCache::hashDirectory(dir, hash, error)) {
+    Report::report(error);
     return false;
   }
   if (hash != locked.hash) {
-    report("the files of " + locked.describe() +
-           " are not those package-lock.json names: their hash is " + hash +
-           ", package-lock.json has " + locked.hash);
+    Report::report("the files of " + locked.describe() +
+                   " are not those package-lock.json names: their hash is " + hash +
+                   ", package-lock.json has " + locked.hash);
     return false;
   }
 
   return true;
 }
 
-}
-
-bool preparePackages(const Manifest &manifest, const PrepareOptions &options, Graph &graph,
-                     Lock *before, Lock *after) {
+bool PackageGraph::preparePackages(const Manifest &manifest, const PrepareOptions &options,
+                                   Graph &graph, Lock *before, Lock *after) {
   llvm::SmallString<256> lockPath(manifest.dir);
   path::append(lockPath, "package-lock.json");
   Lock old;
-  if (!readLock(lockPath, old)) {
+  if (!LockFile::readLock(lockPath, old)) {
     return false;
   }
   if (before) {
@@ -186,7 +182,7 @@ bool preparePackages(const Manifest &manifest, const PrepareOptions &options, Gr
   Lock lock;
   std::map<std::string, Manifest> locals;
   bool failed = false;
-  if (!options.update && lockFits(manifest, old, locals, failed)) {
+  if (!options.update && PackageGraph::lockFits(manifest, old, locals, failed)) {
     lock = old;
   } else if (failed) {
     return false;
@@ -197,14 +193,14 @@ bool preparePackages(const Manifest &manifest, const PrepareOptions &options, Gr
     }
     locals = std::move(resolver.locals);
   }
-  std::string text = lockText(lock);
+  std::string text = LockFile::lockText(lock);
   bool exists = fs::exists(lockPath);
   if (exists || !lock.packages.empty()) {
     std::string current;
     if (auto buffer = llvm::MemoryBuffer::getFile(lockPath, true)) {
       current = (*buffer)->getBuffer().str();
     }
-    if (current != text && !writeText(lockPath, text)) {
+    if (current != text && !PackageGraph::writeText(lockPath, text)) {
       return false;
     }
   }
@@ -252,12 +248,12 @@ bool preparePackages(const Manifest &manifest, const PrepareOptions &options, Gr
     std::string dir;
     JsrVersion meta;
     bool jsr = llvm::StringRef(id).starts_with("jsr:");
-    if (!ensureSources(locked, dir, jsr ? &meta : nullptr)) {
+    if (!PackageGraph::ensureSources(locked, dir, jsr ? &meta : nullptr)) {
       return false;
     }
     Package p;
     p.id = id;
-    p.dir = canonical(dir);
+    p.dir = Paths::canonical(dir);
     p.external = true;
     p.jsr = jsr;
     p.version = jsr ? locked.version : locked.ref;
@@ -267,7 +263,7 @@ bool preparePackages(const Manifest &manifest, const PrepareOptions &options, Gr
       p.exports = meta.exports;
       for (const std::string &dep : locked.dependencies) {
         Source target;
-        if (parseSource(dep, "", target, error)) {
+        if (SourceParser::parseSource(dep, "", target, error)) {
           if (lock.packages.count(target.id())) {
             p.jsrDeps["@" + target.scope() + "/" + target.name()] = 0;
           }
@@ -276,11 +272,11 @@ bool preparePackages(const Manifest &manifest, const PrepareOptions &options, Gr
       manifests.push_back(nullptr);
     } else {
       fetched.emplace_back();
-      if (!readPackageDir(dir, fetched.back())) {
+      if (!ManifestFile::readPackageDir(dir, fetched.back())) {
         return false;
       }
       const Manifest &m = fetched.back();
-      p.name = uniqueName(m.name.empty() ? repositoryName(id.substr(4)) : m.name);
+      p.name = uniqueName(m.name.empty() ? SourceParser::repositoryName(id.substr(4)) : m.name);
       p.manifestPath = m.path;
       p.main = m.main;
       p.exports = m.exports;
@@ -295,7 +291,7 @@ bool preparePackages(const Manifest &manifest, const PrepareOptions &options, Gr
       for (const Dependency &dep : m->dependencies) {
         Source target;
         std::string error;
-        if (parseSource(dep.spec, m->dir, target, error)) {
+        if (SourceParser::parseSource(dep.spec, m->dir, target, error)) {
           if (auto it = index.find(target.id()); it != index.end()) {
             p.aliases[dep.alias] = it->second;
           }

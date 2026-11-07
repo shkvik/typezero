@@ -57,17 +57,19 @@ struct Conversion {
   llvm::StringRef name;
 };
 
-Refs shifted(const Refs &refs, int levels);
+struct ValueCall {
+  const CallExpr *call;
+  std::vector<Refs> args;
+  int result;
+};
 
-Refs copied(const Refs &refs);
-
-Refs holding(const Refs &refs);
-
-void append(Refs &to, const Refs &from);
-
-bool holdsReferences(const Type *type);
-
-const Type *ownType(const Expr *expr);
+struct FlowGraph {
+  std::vector<std::vector<Edge>> edges;
+  std::vector<Write> writes;
+  std::vector<Conversion> conversions;
+  std::vector<const Type *> types;
+  int unknownNode = 0;
+};
 
 class FlowStmts;
 class FlowCalls;
@@ -76,59 +78,75 @@ class FlowExprs;
 
 class Flows {
 public:
-  Flows(const WideningStore &widenings,
-        llvm::function_ref<std::vector<Narrowing>(const Type *, const Type *)> narrowings,
-        llvm::function_ref<bool(const Type *, const Type *)> convertible);
-  void walkProgram(SourceFile &file);
-  std::vector<std::vector<Edge>> edges;
-  std::vector<Write> writes;
-  std::vector<Conversion> conversions;
-  int unknown_ = 0;
-  std::vector<const Type *> types;
+  using NarrowingsOf = llvm::function_ref<std::vector<Narrowing>(const Type *, const Type *)>;
+  using ConvertibleTo = llvm::function_ref<bool(const Type *, const Type *)>;
 
-private:
-  int node(NodeKind kind, const void *key, llvm::StringRef name);
-  int var(const VarSymbol *v);
-  int fieldNode(llvm::StringRef name);
-  int contents(const Type *type);
-  int returned(const FunctionDecl *fn);
-  int holder(int id, const Type *type);
-  void flow(const Refs &refs, int to);
-  void escape(const Refs &refs);
-  const WideningStore &widenings_;
-  llvm::function_ref<std::vector<Narrowing>(const Type *, const Type *)> narrowings_;
-  llvm::function_ref<bool(const Type *, const Type *)> convertible_;
-  std::map<std::tuple<int, const void *, std::string>, int> ids_;
-  std::set<const FunctionDecl *> walked_;
-  std::vector<const FunctionDecl *> functions_;
-  struct ValueCall {
-    const CallExpr *call;
-    std::vector<Refs> args;
-    int result;
-  };
-  std::vector<const FunctionDecl *> functionValues_;
-  std::set<const FunctionDecl *> functionSet_;
-  std::vector<ValueCall> valueCalls_;
-  std::set<const VarSymbol *> runtimeFunctions_;
-  std::vector<bool> plain_;
-
-public:
+  Flows(const WideningStore &wideningStore, NarrowingsOf narrowingsOf, ConvertibleTo convertibleTo);
   ~Flows();
 
-  FlowStmts &flowStmts() const { return *flowStmtsPart_; }
-  FlowCalls &flowCalls() const { return *flowCallsPart_; }
-  FlowBuiltins &flowBuiltins() const { return *flowBuiltinsPart_; }
-  FlowExprs &flowExprs() const { return *flowExprsPart_; }
+  void walkProgram(SourceFile &file);
+  const FlowGraph &getFlowGraph() const;
+
+  FlowStmts &getFlowStmts() const;
+  FlowCalls &getFlowCalls() const;
+  FlowExprs &getFlowExprs() const;
+  FlowBuiltins &getFlowBuiltins() const;
+
+  int getUnknownNode() const;
+  int fieldNode(llvm::StringRef name);
+  int varNode(const VarSymbol *var);
+  int returnNode(const FunctionDecl *fn);
+  int contentsNode(const Type *type);
+  int findNode(NodeKind kind, const void *key, llvm::StringRef name);
+
+  void escape(const Refs &refs);
+  void addFlow(const Refs &refs, int to);
+  void addWrite(const Write &write);
+  void addConversion(const Conversion &conversion);
+
+  bool isConvertible(const Type *from, const Type *to) const;
+  bool isWideningCast(const CastExpr *cast) const;
+  std::vector<Narrowing> findNarrowings(const Type *from, const Type *to) const;
+
+  void leaveFunction();
+  bool isInsideFunction() const;
+  void markWalked(const FunctionDecl *fn);
+  void enterFunction(const FunctionDecl *fn);
+  bool isWalked(const FunctionDecl *fn) const;
+  const VarSymbol *findCurrentThis() const;
+  const FunctionDecl *getCurrentFunction() const;
+
+  void rememberValueCall(const ValueCall &call);
+  void markRuntimeFunction(const VarSymbol *var);
+  bool isRuntimeFunction(const VarSymbol *var) const;
+  void rememberFunctionValue(const FunctionDecl *fn);
+
+  static Refs copied(const Refs &refs);
+  static Refs holding(const Refs &refs);
+  static void append(Refs &to, const Refs &from);
+  static Refs shifted(const Refs &refs, int levels);
+  static const Type *ownType(const Expr *expr);
+  static bool holdsReferences(const Type *type);
 
 private:
-  friend class FlowStmts;
-  friend class FlowCalls;
-  friend class FlowBuiltins;
-  friend class FlowExprs;
-  std::unique_ptr<FlowStmts> flowStmtsPart_;
-  std::unique_ptr<FlowCalls> flowCallsPart_;
-  std::unique_ptr<FlowBuiltins> flowBuiltinsPart_;
-  std::unique_ptr<FlowExprs> flowExprsPart_;
+  int markHolder(int id, const Type *type);
+
+  FlowGraph graph;
+  NarrowingsOf narrowings;
+  ConvertibleTo convertible;
+  std::vector<bool> plainNodes;
+  std::vector<ValueCall> valueCalls;
+  const WideningStore &widenings;
+  std::set<const FunctionDecl *> walked;
+  std::unique_ptr<FlowStmts> flowStmts;
+  std::unique_ptr<FlowCalls> flowCalls;
+  std::unique_ptr<FlowExprs> flowExprs;
+  std::set<const FunctionDecl *> functionSet;
+  std::unique_ptr<FlowBuiltins> flowBuiltins;
+  std::set<const VarSymbol *> runtimeFunctions;
+  std::vector<const FunctionDecl *> functions;
+  std::vector<const FunctionDecl *> functionValues;
+  std::map<std::tuple<int, const void *, std::string>, int> ids;
 };
 
 }

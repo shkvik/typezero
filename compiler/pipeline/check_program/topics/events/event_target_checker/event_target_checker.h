@@ -1,6 +1,8 @@
 #pragma once
 
 #include "compiler/pipeline/check_program/check_state/check_state.h"
+#include "compiler/pipeline/check_program/topics/events/event_target_checker/event_target_checker_errors.h"
+#include "compiler/result/result/result.h"
 
 namespace tz {
 
@@ -19,6 +21,13 @@ public:
                           llvm::SMLoc loc);
 
 private:
+  using ResultListenerEvent = Result<const Type *, EventTargetCheckerListenerEventError>;
+  using ResultEmitterEvents = Result<const Type *, EventTargetCheckerEmitterEventsError>;
+  using ResultOneErrorValue = Result<const Type *, EventTargetCheckerOneErrorValueError>;
+
+  static ResultOneErrorValue oneErrorValue(const Type *errors, llvm::StringRef fn);
+  ResultEmitterEvents emitterEvents(const Type *type, llvm::StringRef fn, bool target);
+  static ResultListenerEvent listenerEvent(const Type *type, const ClassDecl *eventClass);
   Expr *callLibrarySymbol(CallExpr *call, FuncSymbol *sym, llvm::ArrayRef<const Type *> bound,
                           const std::vector<bool> &given, llvm::SMLoc loc);
   CheckState &state;

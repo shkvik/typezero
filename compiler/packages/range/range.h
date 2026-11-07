@@ -7,6 +7,8 @@
 
 namespace tz::pkg {
 
+struct Partial;
+
 class Range {
 public:
   static bool parse(llvm::StringRef text, Range &out, std::string &error);
@@ -14,6 +16,8 @@ public:
   const std::string &text() const { return text_; }
 
 private:
+  static Version floorOf(uint64_t major, uint64_t minor, uint64_t patch);
+  static Version after(const Partial &p);
   struct Comparator {
     enum Op { Less, LessEq, Greater, GreaterEq, Equal } op;
     Version version;

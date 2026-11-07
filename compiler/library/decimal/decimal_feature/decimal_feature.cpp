@@ -32,7 +32,9 @@ Expr *DecimalFeature::checkValueMethodCall(CheckState &state, CallExpr *call, Me
   return DecimalChecker(state).checkDecimalMethod(call, member);
 }
 
-bool DecimalFeature::lowers(Builtin builtin) const { return isDecimalBuiltin(builtin); }
+bool DecimalFeature::lowers(Builtin builtin) const {
+  return BuiltinGroups::isDecimalBuiltin(builtin);
+}
 
 llvm::Value *DecimalFeature::lowerCall(Lowering &lowering, CallExpr *call) const {
   return lowering.decimalLowerer().emitDecimalCall(call);

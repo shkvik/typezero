@@ -239,7 +239,7 @@ Expr *GenericInstantiator::checkGenericValue(NameExpr *name, FuncSymbol *generic
   name->type =
       Type::function(params, generic->minArgs, generic->hasRest,
                      TypeParams(this->state).substitute(ret, typeParams, bound), generic->hasThis);
-  bool concrete = llvm::none_of(bound, [](const Type *t) { return mentionsParam(t); });
+  bool concrete = llvm::none_of(bound, [](const Type *t) { return TypeQueries::mentionsParam(t); });
   if (concrete && !this->state.getFunctionStack().isInsideTrial() && !generic->inferring) {
     if (FuncSymbol *instance = this->instantiate(generic, bound, name->loc())) {
       name->binding = NamedFunction{.func = instance};
@@ -272,7 +272,8 @@ std::vector<const Type *> GenericInstantiator::exactClassArgs(CallExpr *call,
   }
   for (size_t i = 0; i < generic->params.size() && i < call->args.size(); ++i) {
     const Type *param = generic->params[i];
-    if (!param || !param->isConstructor() || !mentionsAnyOf(param, generic->typeParams)) {
+    if (!param || !param->isConstructor() ||
+        !GenericCheckHelpers::mentionsAnyOf(param, generic->typeParams)) {
       continue;
     }
     Expr *arg = call->args[i];

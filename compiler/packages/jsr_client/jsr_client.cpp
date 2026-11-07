@@ -21,9 +21,7 @@ namespace tz::pkg {
 namespace fs = llvm::sys::fs;
 namespace path = llvm::sys::path;
 
-namespace {
-
-bool writeFile(llvm::StringRef file, llvm::StringRef data, std::string &error) {
+bool JsrClient::writeFile(llvm::StringRef file, llvm::StringRef data, std::string &error) {
   if (std::error_code ec = fs::create_directories(path::parent_path(file))) {
     error = "cannot create '" + path::parent_path(file).str() + "': " + ec.message();
     return false;
@@ -46,7 +44,7 @@ bool writeFile(llvm::StringRef file, llvm::StringRef data, std::string &error) {
   return true;
 }
 
-bool safeRelativePath(llvm::StringRef file) {
+bool JsrClient::safeRelativePath(llvm::StringRef file) {
   if (file.empty() || file.contains('\\') || file.contains(':') || file.starts_with("/")) {
     return false;
   }
@@ -61,19 +59,20 @@ bool safeRelativePath(llvm::StringRef file) {
   return true;
 }
 
-bool fetchJson(const std::string &url, std::string &text, JsonValue &out, std::string &error) {
-  switch (fetchUrl(url, text, error)) {
-  case FetchResult::NotFound:
-    error.clear();
-    return false;
-  case FetchResult::Failed:
-    error = "cannot download " + url + ": " + error;
-    return false;
-  case FetchResult::Ok:
-    break;
+bool JsrClient::fetchJson(const std::string &url, std::string &text, JsonValue &out,
+                          std::string &error) {
+  switch (HttpClient::fetchUrl(url, text, error)) {
+    case FetchResult::NotFound:
+      error.clear();
+      return false;
+    case FetchResult::Failed:
+      error = "cannot download " + url + ": " + error;
+      return false;
+    case FetchResult::Ok:
+      break;
   }
   size_t at;
-  if (!parseJson(text, out, at, error)) {
+  if (!JsonParser::parseJson(text, out, at, error)) {
     error = url + " is not valid JSON: " + error;
     return false;
   }
@@ -81,15 +80,15 @@ bool fetchJson(const std::string &url, std::string &text, JsonValue &out, std::s
   return true;
 }
 
-std::string jsrPackageUrl(llvm::StringRef scope, llvm::StringRef name) {
-  return jsrBaseUrl() + "/@" + scope.str() + "/" + name.str();
+std::string JsrClient::jsrPackageUrl(llvm::StringRef scope, llvm::StringRef name) {
+  return JsrClient::jsrBaseUrl() + "/@" + scope.str() + "/" + name.str();
 }
 
-bool readJsrVersion(llvm::StringRef text, const std::string &where, JsrVersion &out,
-                    std::string &error) {
+bool JsrClient::readJsrVersion(llvm::StringRef text, const std::string &where, JsrVersion &out,
+                               std::string &error) {
   JsonValue meta;
   size_t at;
-  if (!parseJson(text, meta, at, error)) {
+  if (!JsonParser::parseJson(text, meta, at, error)) {
     error = where + " is not valid JSON: " + error;
     return false;
   }
@@ -104,7 +103,8 @@ bool readJsrVersion(llvm::StringRef text, const std::string &where, JsrVersion &
     file.consume_front("/");
     std::string listed = manifest->items()[i].getString("checksum");
     llvm::StringRef checksum = listed;
-    if (!safeRelativePath(file) || !checksum.consume_front("sha256-") || checksum.size() != 64) {
+    if (!JsrClient::safeRelativePath(file) || !checksum.consume_front("sha256-") ||
+        checksum.size() != 64) {
       error = where + " lists the file '" + manifest->keys()[i] + "' wrongly";
       return false;
     }
@@ -125,14 +125,12 @@ bool readJsrVersion(llvm::StringRef text, const std::string &where, JsrVersion &
       }
     }
   }
-  out.hash = treeHash(out.files);
+  out.hash = PackageCache::treeHash(out.files);
 
   return true;
 }
 
-}
-
-std::string jsrBaseUrl() {
+std::string JsrClient::jsrBaseUrl() {
   std::string base = "https://jsr.io";
   std::optional<std::string> url = llvm::sys::Process::GetEnv("TZ_JSR_URL");
   if (url && !url->empty()) {
@@ -145,11 +143,11 @@ std::string jsrBaseUrl() {
   return base;
 }
 
-bool jsrVersions(llvm::StringRef scope, llvm::StringRef name, JsrVersions &out,
-                 std::string &error) {
-  std::string url = jsrPackageUrl(scope, name) + "/meta.json", text;
+bool JsrClient::jsrVersions(llvm::StringRef scope, llvm::StringRef name, JsrVersions &out,
+                            std::string &error) {
+  std::string url = JsrClient::jsrPackageUrl(scope, name) + "/meta.json", text;
   JsonValue meta;
-  if (!fetchJson(url, text, meta, error)) {
+  if (!JsrClient::fetchJson(url, text, meta, error)) {
     return false;
   }
   const JsonValue *versions = meta.get("versions");
@@ -171,58 +169,60 @@ bool jsrVersions(llvm::StringRef scope, llvm::StringRef name, JsrVersions &out,
   return true;
 }
 
-bool jsrVersion(llvm::StringRef scope, llvm::StringRef name, llvm::StringRef version,
-                JsrVersion &out, std::string &error) {
-  std::string cached = cachePath({"jsr", "@" + scope.str(), name, version.str() + "_meta.json"});
+bool JsrClient::jsrVersion(llvm::StringRef scope, llvm::StringRef name, llvm::StringRef version,
+                           JsrVersion &out, std::string &error) {
+  std::string cached =
+      PackageCache::cachePath({"jsr", "@" + scope.str(), name, version.str() + "_meta.json"});
   if (auto buffer = llvm::MemoryBuffer::getFile(cached)) {
-    return readJsrVersion((*buffer)->getBuffer(), cached, out, error);
+    return JsrClient::readJsrVersion((*buffer)->getBuffer(), cached, out, error);
   }
 
-  std::string url = jsrPackageUrl(scope, name) + "/" + version.str() + "_meta.json", text;
-  switch (fetchUrl(url, text, error)) {
-  case FetchResult::NotFound:
-    error = "the registry has no version " + version.str() + " of jsr:@" + scope.str() + "/" +
-            name.str() + " (" + url + ")";
-    return false;
-  case FetchResult::Failed:
-    error = "cannot download " + url + ": " + error;
-    return false;
-  case FetchResult::Ok:
-    break;
+  std::string url = JsrClient::jsrPackageUrl(scope, name) + "/" + version.str() + "_meta.json",
+              text;
+  switch (HttpClient::fetchUrl(url, text, error)) {
+    case FetchResult::NotFound:
+      error = "the registry has no version " + version.str() + " of jsr:@" + scope.str() + "/" +
+              name.str() + " (" + url + ")";
+      return false;
+    case FetchResult::Failed:
+      error = "cannot download " + url + ": " + error;
+      return false;
+    case FetchResult::Ok:
+      break;
   }
-  if (!readJsrVersion(text, url, out, error)) {
+  if (!JsrClient::readJsrVersion(text, url, out, error)) {
     return false;
   }
 
-  return writeFileAtomically(cached, text, error);
+  return PackageCache::writeFileAtomically(cached, text, error);
 }
 
-bool jsrDownload(llvm::StringRef scope, llvm::StringRef name, llvm::StringRef version,
-                 const JsrVersion &meta, std::string &dir, std::string &error) {
-  dir = cachePath({"jsr", "@" + scope.str(), name, version});
+bool JsrClient::jsrDownload(llvm::StringRef scope, llvm::StringRef name, llvm::StringRef version,
+                            const JsrVersion &meta, std::string &dir, std::string &error) {
+  dir = PackageCache::cachePath({"jsr", "@" + scope.str(), name, version});
   if (fs::is_directory(dir)) {
     return true;
   }
-  progress("downloading jsr:@" + scope + "/" + name + "@" + version);
+  Report::progress("downloading jsr:@" + scope + "/" + name + "@" + version);
   StagedDir staged;
   if (!staged.create(dir, error)) {
     return false;
   }
-  std::string base = jsrPackageUrl(scope, name) + "/" + version.str() + "/";
+  std::string base = JsrClient::jsrPackageUrl(scope, name) + "/" + version.str() + "/";
   for (const auto &[file, checksum] : meta.files) {
     std::string url = base + file, body;
-    if (fetchUrl(url, body, error) != FetchResult::Ok) {
+    if (HttpClient::fetchUrl(url, body, error) != FetchResult::Ok) {
       error =
           "cannot download " + url + (error.empty() ? std::string(": not found") : ": " + error);
       return false;
     }
-    if (sha256Hex(body) != checksum) {
+    if (PackageCache::sha256Hex(body) != checksum) {
       error = url + " is not the file the registry lists: its SHA-256 differs";
       return false;
     }
     llvm::SmallString<256> target(staged.path());
     path::append(target, file);
-    if (!writeFile(target, body, error)) {
+    if (!JsrClient::writeFile(target, body, error)) {
       return false;
     }
   }

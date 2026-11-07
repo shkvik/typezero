@@ -4,18 +4,14 @@
 
 namespace tz::parallel {
 
-const Expr *strip(const Expr *e);
-
-bool holdsReferences(const Type *type);
-
-bool makesNewObject(Builtin builtin);
-
-bool knownBuiltin(Builtin builtin);
-
-llvm::StringRef libraryClassName(const ClassDecl *cls);
-
-bool knownBuiltin(Builtin b);
-
-bool onlyReadsArgs(Builtin b);
+class ParallelHelpers {
+public:
+  static bool onlyReadsArgs(Builtin b);
+  static const Expr *strip(const Expr *e);
+  static bool knownBuiltin(Builtin builtin);
+  static bool makesNewObject(Builtin builtin);
+  static bool holdsReferences(const Type *type);
+  static llvm::StringRef libraryClassName(const ClassDecl *cls);
+};
 
 }

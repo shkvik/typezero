@@ -1,6 +1,7 @@
 #pragma once
 
 #include "compiler/pipeline/check_program/check_state/check_state.h"
+#include "compiler/pipeline/check_program/topics/regex/string_regex_checker/string_regex_checker_errors.h"
 
 namespace tz {
 
@@ -12,7 +13,6 @@ public:
   Expr *checkReplacement(CallExpr *call, MemberExpr *member, const RegexLitExpr *regex);
 
 private:
-  static std::string utf8(const std::u16string &text);
   static std::u16string units(const uint32_t *program, uint32_t start, uint32_t length);
   static std::string escapedLiteral(const std::u16string &text);
   static std::string argumentText(const Expr *arg);

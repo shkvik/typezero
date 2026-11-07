@@ -10,7 +10,7 @@ namespace tz::pkg {
 
 namespace path = llvm::sys::path;
 
-std::string capitalize(llvm::StringRef s) {
+std::string PortNames::capitalize(llvm::StringRef s) {
   std::string out = s.str();
   if (!out.empty()) {
     out[0] = llvm::toUpper(out[0]);
@@ -19,8 +19,8 @@ std::string capitalize(llvm::StringRef s) {
   return out;
 }
 
-std::string derivedName(llvm::StringRef file, llvm::StringRef packageDir,
-                        llvm::StringRef packageName) {
+std::string PortNames::derivedName(llvm::StringRef file, llvm::StringRef packageDir,
+                                   llvm::StringRef packageName) {
   std::string stem = path::stem(file).str();
   llvm::StringRef dir = path::parent_path(file);
   if (stem == "index" || stem == "mod" || stem == "main") {

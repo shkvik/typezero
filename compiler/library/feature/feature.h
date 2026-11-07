@@ -1,6 +1,8 @@
 #pragma once
 
+#include "compiler/library/feature/feature_errors.h"
 #include "compiler/program/ast/ast.h"
+#include "compiler/result/result/result.h"
 #include "llvm/ADT/ArrayRef.h"
 #include "llvm/ADT/StringRef.h"
 #include "llvm/Support/SMLoc.h"
@@ -22,6 +24,8 @@ enum class NodeModule;
 
 class Feature {
 public:
+  using ResultExportFound = Result<llvm::StringRef, FeatureExportFoundError>;
+
   virtual ~Feature() = default;
 
   virtual llvm::StringRef name() const = 0;
@@ -55,9 +59,11 @@ public:
     return nullptr;
   }
 
-  virtual std::optional<std::string> exportProblem(NodeModule, llvm::StringRef,
-                                                   llvm::StringRef) const {
-    return std::nullopt;
+  virtual ResultExportFound exportFound(NodeModule, llvm::StringRef, llvm::StringRef) const {
+    return err(FeatureExportFoundError{
+        .code = FeatureExportFoundErrorCode::NOT_MINE,
+        .message = "",
+    });
   }
   virtual Expr *checkModuleCall(CheckState &, CallExpr *, NodeModule, llvm::StringRef, llvm::SMLoc,
                                 const Type *) const {

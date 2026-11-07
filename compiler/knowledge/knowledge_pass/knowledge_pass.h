@@ -45,6 +45,8 @@ public:
   const SourcePlaces &places() const { return places_; }
 
 private:
+  static const char *lineStart(const char *at, const char *begin);
+  static const char *endOf(llvm::StringRef text);
   void addModules();
   void declare(size_t module, const Module &source);
   size_t add(size_t module, std::string kind, llvm::StringRef name, llvm::SMLoc loc,

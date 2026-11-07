@@ -28,11 +28,23 @@ const char kTarget[] = "What to look at: 'name', 'Class.member', 'file.tz:line' 
 
 const char kBudget[] = "Roughly how many tokens the answer may take.";
 
-llvm::json::Object property(llvm::StringRef type, llvm::StringRef description) {
+}
+
+McpServer::McpServer(std::string self)
+    : self_(std::move(self)) {
+  llvm::SmallString<256> here;
+  fs::current_path(here);
+  here_ = std::string(here);
+  llvm::sys::ChangeStdinToBinary();
+  llvm::sys::ChangeStdoutToBinary();
+}
+
+llvm::json::Object McpServer::property(llvm::StringRef type, llvm::StringRef description) {
   return llvm::json::Object{{"type", type}, {"description", description}};
 }
 
-llvm::json::Object schema(llvm::json::Object properties, std::vector<std::string> required) {
+llvm::json::Object McpServer::schema(llvm::json::Object properties,
+                                     std::vector<std::string> required) {
   llvm::json::Array names;
   for (const std::string &name : required) {
     names.push_back(name);
@@ -42,35 +54,25 @@ llvm::json::Object schema(llvm::json::Object properties, std::vector<std::string
       {"type", "object"}, {"properties", std::move(properties)}, {"required", std::move(names)}};
 }
 
-llvm::json::Object tool(llvm::StringRef name, llvm::StringRef description,
-                        llvm::json::Object input) {
+llvm::json::Object McpServer::tool(llvm::StringRef name, llvm::StringRef description,
+                                   llvm::json::Object input) {
   return llvm::json::Object{
       {"name", name}, {"description", description}, {"inputSchema", std::move(input)}};
 }
 
-std::string readAll(llvm::StringRef file) {
+std::string McpServer::readAll(llvm::StringRef file) {
   auto buffer = llvm::MemoryBuffer::getFile(file);
 
   return buffer ? (*buffer)->getBuffer().str() : std::string();
 }
 
-std::string temporary(llvm::StringRef prefix, llvm::StringRef suffix) {
+std::string McpServer::temporary(llvm::StringRef prefix, llvm::StringRef suffix) {
   llvm::SmallString<256> file;
   if (fs::createTemporaryFile(prefix, suffix, file)) {
     return "";
   }
 
   return std::string(file);
-}
-
-}
-
-McpServer::McpServer(std::string self) : self_(std::move(self)) {
-  llvm::SmallString<256> here;
-  fs::current_path(here);
-  here_ = std::string(here);
-  llvm::sys::ChangeStdinToBinary();
-  llvm::sys::ChangeStdoutToBinary();
 }
 
 std::optional<std::string> McpServer::readLine() {
@@ -172,59 +174,64 @@ std::optional<llvm::json::Value> McpServer::handle(const llvm::json::Object &mes
 
 llvm::json::Value McpServer::tools() const {
   llvm::json::Array all;
-  all.push_back(tool(
+  all.push_back(McpServer::tool(
       "map",
       "Overview of a tz program: its modules, what each declares with full types (inferred "
       "ones too), what each imports and how often each symbol is used; within the budget the "
       "exported and most used come first. Start here to learn a codebase.",
-      schema(llvm::json::Object{{"entry", property("string", kEntry)},
-                                {"budget", property("integer", kBudget)},
-                                {"library", property("boolean", "Show the built-in modules too.")}},
-             {})));
-  all.push_back(tool(
+      McpServer::schema(
+          llvm::json::Object{
+              {"entry", McpServer::property("string", kEntry)},
+              {"budget", McpServer::property("integer", kBudget)},
+              {"library", McpServer::property("boolean", "Show the built-in modules too.")}},
+          {})));
+  all.push_back(McpServer::tool(
       "context",
       "Everything about one symbol or place: its signature and source, the compiler's errors in "
       "it, what it uses (with signatures), who uses it (with the line of each use), the members "
       "of a class, docs sections and tests that mention it.",
-      schema(llvm::json::Object{{"target", property("string", kTarget)},
-                                {"entry", property("string", kEntry)},
-                                {"budget", property("integer", kBudget)}},
-             {"target"})));
-  llvm::json::Object kind = property("string", "What to find.");
+      McpServer::schema(llvm::json::Object{{"target", McpServer::property("string", kTarget)},
+                                           {"entry", McpServer::property("string", kEntry)},
+                                           {"budget", McpServer::property("integer", kBudget)}},
+                        {"target"})));
+  llvm::json::Object kind = McpServer::property("string", "What to find.");
   kind["enum"] = llvm::json::Array{"definition", "references", "callers", "type"};
-  all.push_back(
-      tool("query",
-           "Exact answers from the compiler: the definition, all references, the callers or the "
-           "type of a symbol, or the type of the name at file.tz:line:column (locals too).",
-           schema(llvm::json::Object{{"kind", std::move(kind)},
-                                     {"target", property("string", kTarget)},
-                                     {"entry", property("string", kEntry)}},
-                  {"kind", "target"})));
-  all.push_back(
-      tool("impact",
-           "What a change to a symbol can affect: who uses it, who uses those, level by level, the "
-           "modules and the exported symbols among them.",
-           schema(llvm::json::Object{{"target", property("string", kTarget)},
-                                     {"entry", property("string", kEntry)},
-                                     {"budget", property("integer", kBudget)}},
-                  {"target"})));
-  all.push_back(tool(
+  all.push_back(McpServer::tool(
+      "query",
+      "Exact answers from the compiler: the definition, all references, the callers or the "
+      "type of a symbol, or the type of the name at file.tz:line:column (locals too).",
+      McpServer::schema(llvm::json::Object{{"kind", std::move(kind)},
+                                           {"target", McpServer::property("string", kTarget)},
+                                           {"entry", McpServer::property("string", kEntry)}},
+                        {"kind", "target"})));
+  all.push_back(McpServer::tool(
+      "impact",
+      "What a change to a symbol can affect: who uses it, who uses those, level by level, the "
+      "modules and the exported symbols among them.",
+      McpServer::schema(llvm::json::Object{{"target", McpServer::property("string", kTarget)},
+                                           {"entry", McpServer::property("string", kEntry)},
+                                           {"budget", McpServer::property("integer", kBudget)}},
+                        {"target"})));
+  all.push_back(McpServer::tool(
       "check_edit",
       "Check an edit without writing it: give the file and either its whole new text or an "
       "exact old -> new replacement (old must occur once). The compiler checks the program with "
       "that text in memory and returns its errors as file:line:column: message, or says that "
       "it checks. Nothing is written to the disk.",
-      schema(llvm::json::Object{{"file", property("string", "The .tz file the edit changes.")},
-                                {"text", property("string", "The whole new text of the file.")},
-                                {"old", property("string", "Text of the file to replace.")},
-                                {"new", property("string", "What replaces 'old'.")},
-                                {"entry", property("string", kEntry)}},
-             {"file"})));
-  all.push_back(tool("language_card",
-                     "How tz differs from TypeScript: what is missing, numbers, comparisons, "
-                     "errors as Result values, async, the library's style. Read it before "
-                     "writing tz code.",
-                     schema(llvm::json::Object{}, {})));
+      McpServer::schema(
+          llvm::json::Object{
+              {"file", McpServer::property("string", "The .tz file the edit changes.")},
+              {"text", McpServer::property("string", "The whole new text of the file.")},
+              {"old", McpServer::property("string", "Text of the file to replace.")},
+              {"new", McpServer::property("string", "What replaces 'old'.")},
+              {"entry", McpServer::property("string", kEntry)}},
+          {"file"})));
+  all.push_back(
+      McpServer::tool("language_card",
+                      "How tz differs from TypeScript: what is missing, numbers, comparisons, "
+                      "errors as Result values, async, the library's style. Read it before "
+                      "writing tz code.",
+                      McpServer::schema(llvm::json::Object{}, {})));
 
   return all;
 }
@@ -359,8 +366,8 @@ const Knowledge *McpServer::knowledgeFor(const std::string &entry, bool &failed,
 }
 
 std::string McpServer::runTz(const std::vector<std::string> &args, bool &failed) {
-  std::string out = temporary("tz-mcp-out", "txt");
-  std::string err = temporary("tz-mcp-err", "txt");
+  std::string out = McpServer::temporary("tz-mcp-out", "txt");
+  std::string err = McpServer::temporary("tz-mcp-err", "txt");
   std::vector<llvm::StringRef> argv = {self_};
   for (const std::string &arg : args) {
     argv.push_back(arg);
@@ -369,8 +376,8 @@ std::string McpServer::runTz(const std::vector<std::string> &args, bool &failed)
                                                 llvm::StringRef(err)};
   std::string message;
   int code = llvm::sys::ExecuteAndWait(self_, argv, std::nullopt, redirects, 0, 0, &message);
-  std::string output = readAll(out);
-  std::string errors = readAll(err);
+  std::string output = McpServer::readAll(out);
+  std::string errors = McpServer::readAll(err);
   fs::remove(out);
   fs::remove(err);
   if (code != 0) {
@@ -425,8 +432,8 @@ std::string McpServer::checkEdit(const llvm::json::Object &args, bool &failed) {
   std::optional<llvm::StringRef> named = args.getString("entry");
   std::string entry = named ? SourcePlaces::absolute(*named) : ProgramEntry::forFile(file);
 
-  std::string request = temporary("tz-mcp-request", "json");
-  std::string response = temporary("tz-mcp-response", "json");
+  std::string request = McpServer::temporary("tz-mcp-request", "json");
+  std::string response = McpServer::temporary("tz-mcp-response", "json");
   llvm::json::Object report;
   for (int attempt = 0; attempt < 2; ++attempt) {
     {
@@ -443,7 +450,7 @@ std::string McpServer::checkEdit(const llvm::json::Object &args, bool &failed) {
       fs::remove(response);
       return output;
     }
-    llvm::Expected<llvm::json::Value> parsed = llvm::json::parse(readAll(response));
+    llvm::Expected<llvm::json::Value> parsed = llvm::json::parse(McpServer::readAll(response));
     if (!parsed || !parsed->getAsObject()) {
       if (!parsed) {
         llvm::consumeError(parsed.takeError());
@@ -515,7 +522,7 @@ std::string McpServer::languageCard(bool &failed) const {
     path::append(card, "..", "..", "docs");
     path::append(card, "ai.md");
   }
-  std::string text = readAll(card);
+  std::string text = McpServer::readAll(card);
   if (text.empty()) {
     failed = true;
     return "the language card (ai.md) is not next to tz";

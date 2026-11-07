@@ -18,6 +18,7 @@ public:
   llvm::Value *emitIsOneOf(llvm::Value *id, llvm::ArrayRef<const Type *> types);
 
 private:
+  static UnionSlot targetSlot(UnionSlot slot, const Type *to);
   Lowering &lowering;
   static constexpr uint32_t kPlainIdBase = 0x40000000;
   static constexpr uint32_t kBytesIdBase = 0x3FFFFF00;

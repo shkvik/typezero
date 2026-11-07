@@ -11,6 +11,7 @@
 #include "compiler/pipeline/check_program/topics/classes/decorator_checker/decorator_checker.h"
 #include "compiler/pipeline/check_program/topics/crypto/crypto_checker/crypto_checker.h"
 #include "compiler/pipeline/check_program/topics/decimal/decimal_checker/decimal_checker.h"
+#include "compiler/pipeline/check_program/topics/decimal/decimal_checker/decimal_checker_errors.h"
 #include "compiler/pipeline/check_program/topics/intl/intl_checker/intl_checker.h"
 #include "compiler/pipeline/check_program/topics/iterators/generator_checker/generator_checker.h"
 #include "compiler/pipeline/check_program/topics/objects/dict_checker/dict_checker.h"
@@ -237,7 +238,7 @@ TypeResolver::ResultUnionIsSupported TypeResolver::unionAllowed(const Type *type
         .message = message,
     });
   }
-  std::string problem = unionProblem(type);
+  std::string problem = UnionSlots::unionProblem(type);
   if (!problem.empty()) {
     std::string message = ErrorTextTypeShape::noUnion(type->name(), problem);
 
@@ -292,7 +293,7 @@ TypeResolver::ResultTupleElementType TypeResolver::tupleElement(const Type *elem
 TypeResolver::ResultTupleSpreadJoins
 TypeResolver::spreadJoined(llvm::ArrayRef<const Type *> elements, const std::vector<bool> &spread) {
   std::string why;
-  const Type *list = spreadTuple(elements, spread, why);
+  const Type *list = ArgumentLists::spreadTuple(elements, spread, why);
   if (!list) {
     return err(TypeResolverSpreadJoinedError{
         .code = TypeResolverSpreadJoinedErrorCode::NOT_JOINED,
@@ -554,12 +555,14 @@ std::string TypeResolver::missingText(llvm::StringRef name) const {
 const Type *TypeResolver::missingType(const TypeRef &ref) {
   if (ref.name == "bigint") {
     std::string what = ErrorTextTypeName::bigintType();
-    DecimalChecker(this->state).reportBigInt(ref.loc, what);
+    std::string bigint = ErrorTextBigInt::none(what);
+    this->state.getDiagnostics().error(ref.loc, bigint);
     return Type::error();
   }
   if (ref.name == "BigInt64Array" || ref.name == "BigUint64Array") {
     std::string what = ErrorTextTypeName::bigintName(ref.name);
-    DecimalChecker(this->state).reportBigInt(ref.loc, what);
+    std::string bigint = ErrorTextBigInt::none(what);
+    this->state.getDiagnostics().error(ref.loc, bigint);
     return Type::error();
   }
   std::string message = this->missingText(ref.name);

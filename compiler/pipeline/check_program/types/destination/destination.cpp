@@ -15,7 +15,10 @@ using llvm::isa;
 
 namespace tz {
 
-static void forEachReturn(const Stmt *stmt, llvm::function_ref<void(const Expr *)> each) {
+Destination::Destination(CheckState &owner)
+    : state(owner) {}
+
+void Destination::forEachReturn(const Stmt *stmt, llvm::function_ref<void(const Expr *)> each) {
   if (!stmt) {
     return;
   }
@@ -27,48 +30,41 @@ static void forEachReturn(const Stmt *stmt, llvm::function_ref<void(const Expr *
     break;
   case Stmt::Kind::Block:
     for (const Stmt *s : cast<BlockStmt>(stmt)->body) {
-      forEachReturn(s, each);
+      Destination::forEachReturn(s, each);
     }
     break;
   case Stmt::Kind::If:
-    forEachReturn(cast<IfStmt>(stmt)->thenStmt, each);
-    forEachReturn(cast<IfStmt>(stmt)->elseStmt, each);
+    Destination::forEachReturn(cast<IfStmt>(stmt)->thenStmt, each);
+    Destination::forEachReturn(cast<IfStmt>(stmt)->elseStmt, each);
     break;
   case Stmt::Kind::While:
-    forEachReturn(cast<WhileStmt>(stmt)->body, each);
+    Destination::forEachReturn(cast<WhileStmt>(stmt)->body, each);
     break;
   case Stmt::Kind::DoWhile:
-    forEachReturn(cast<DoWhileStmt>(stmt)->body, each);
+    Destination::forEachReturn(cast<DoWhileStmt>(stmt)->body, each);
     break;
   case Stmt::Kind::For:
-    forEachReturn(cast<ForStmt>(stmt)->body, each);
+    Destination::forEachReturn(cast<ForStmt>(stmt)->body, each);
     break;
   case Stmt::Kind::ForOf:
-    forEachReturn(cast<ForOfStmt>(stmt)->body, each);
+    Destination::forEachReturn(cast<ForOfStmt>(stmt)->body, each);
     break;
   case Stmt::Kind::Switch:
     for (const SwitchCase &c : cast<SwitchStmt>(stmt)->cases) {
       for (const Stmt *s : c.body) {
-        forEachReturn(s, each);
+        Destination::forEachReturn(s, each);
       }
     }
     break;
   case Stmt::Kind::Labeled:
-    forEachReturn(cast<LabeledStmt>(stmt)->body, each);
+    Destination::forEachReturn(cast<LabeledStmt>(stmt)->body, each);
     break;
   default:
     break;
   }
 }
 
-static bool isResultLiteral(const CallExpr *call) {
-  auto *name = dyn_cast<NameExpr>(call->callee);
-
-  return name && (name->name == "ok" || name->name == "err") && call->args.size() <= 1 &&
-         !call->hasSpread() && !call->optional;
-}
-
-static const Type *writable(const Type *type) {
+const Type *Destination::writable(const Type *type) {
   const Type *object = type->nonOptional();
   if (!object->isObject() ||
       !llvm::any_of(object->fields(), [](const Field &f) { return f.readonly; })) {
@@ -89,9 +85,6 @@ static const Type *writable(const Type *type) {
   return Type::object(std::move(fields));
 }
 
-Destination::Destination(CheckState &owner)
-    : state(owner) {}
-
 bool Destination::literalShaped(const Expr *expr) {
   if (isa<ObjectLitExpr>(expr) || isa<ArrayLitExpr>(expr)) {
     return true;
@@ -100,7 +93,7 @@ bool Destination::literalShaped(const Expr *expr) {
     return Destination::literalShaped(cond->thenExpr) || Destination::literalShaped(cond->elseExpr);
   }
   if (auto *call = dyn_cast<CallExpr>(expr)) {
-    if (isResultLiteral(call)) {
+    if (DestinationScanner::isResultLiteral(call)) {
       return true;
     }
     auto *member = dyn_cast<MemberExpr>(call->callee);
@@ -110,7 +103,7 @@ bool Destination::literalShaped(const Expr *expr) {
     auto *fe = dyn_cast<FunctionExpr>(call->args[0]);
     bool returnsLiteral = false;
     if (fe) {
-      forEachReturn(fe->fn->body, [&](const Expr *value) {
+      Destination::forEachReturn(fe->fn->body, [&](const Expr *value) {
         returnsLiteral |= Destination::literalShaped(value);
       });
     }
@@ -200,7 +193,7 @@ bool Destination::literalFits(const Expr *expr, const Type *type) const {
            (!Destination::literalShaped(cond->elseExpr) || this->literalFits(cond->elseExpr, type));
   }
   if (auto *call = dyn_cast<CallExpr>(expr)) {
-    if (isResultLiteral(call)) {
+    if (DestinationScanner::isResultLiteral(call)) {
       if (!type->isResult()) {
         return false;
       }
@@ -215,7 +208,7 @@ bool Destination::literalFits(const Expr *expr, const Type *type) const {
     auto *fe = cast<FunctionExpr>(call->args[0]);
     const Type *element = cast<MemberExpr>(call->callee)->name == "map" ? type->inner() : type;
     bool fits = true;
-    forEachReturn(fe->fn->body, [&](const Expr *value) {
+    Destination::forEachReturn(fe->fn->body, [&](const Expr *value) {
       fits &= !Destination::literalShaped(value) || this->literalFits(value, element);
     });
     return fits;
@@ -265,14 +258,14 @@ const Type *Destination::literalDestination(const VarDeclarator &d,
 
   std::vector<std::pair<const Type *, llvm::SMLoc>> places;
   for (auto [type, loc] : scan.found) {
-    if (!type->isError() && !type->isVoid() && !mentionsParam(type) &&
+    if (!type->isError() && !type->isVoid() && !TypeQueries::mentionsParam(type) &&
         this->literalFits(d.init, type)) {
       places.push_back({type, loc});
     }
   }
   const Type *chosen = nullptr;
   for (auto [type, loc] : places) {
-    const Type *candidate = writable(type);
+    const Type *candidate = Destination::writable(type);
     if (llvm::all_of(places, [&](const std::pair<const Type *, llvm::SMLoc> &other) {
           return TypeRelations::isImplicitlyConvertible(candidate, other.first);
         })) {

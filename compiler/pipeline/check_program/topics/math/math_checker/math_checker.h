@@ -1,6 +1,8 @@
 #pragma once
 
 #include "compiler/pipeline/check_program/check_state/check_state.h"
+#include "compiler/pipeline/check_program/topics/math/math_checker/math_checker_errors.h"
+#include "compiler/result/result/result.h"
 
 namespace tz {
 
@@ -17,6 +19,12 @@ public:
   Expr *numericArg(Expr *arg, const Type *hint = nullptr);
 
 private:
+  using ResultWrapBitsWidth = Result<unsigned, MathCheckerWrapBitsWidthError>;
+  using ResultRoundedDouble = Result<const Type *, MathCheckerRoundedDoubleError>;
+
+  static ResultWrapBitsWidth wrapBitsWidth(llvm::StringRef name);
+  static ResultRoundedDouble roundedDouble(llvm::StringRef name, const Type *type);
+
   CheckState &state;
 };
 

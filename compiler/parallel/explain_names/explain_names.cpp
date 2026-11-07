@@ -86,7 +86,7 @@ std::string ExplainNames::typeText(const Type *t) const {
 }
 
 std::string ExplainNames::calleeText(const Expr *e) const {
-  e = strip(e);
+  e = ParallelHelpers::strip(e);
   if (auto *n = dyn_cast_or_null<NameExpr>(e)) {
     return n->name.str();
   }

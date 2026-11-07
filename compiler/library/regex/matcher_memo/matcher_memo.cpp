@@ -13,14 +13,6 @@ using llvm::Value;
 
 namespace tz {
 
-namespace {
-
-uint64_t counterRange(const CountedLoop &loop) {
-  return loop.max == RE_INFINITY ? uint64_t(loop.min) + 1 : uint64_t(loop.max) + 1;
-}
-
-}
-
 MatcherMemo::MatcherMemo(MatcherBuilder &builder) : builder_(builder) {}
 
 Value *MatcherMemo::memoContext(uint32_t pc, Value *pos) {
@@ -29,7 +21,7 @@ Value *MatcherMemo::memoContext(uint32_t pc, Value *pos) {
     if (!builder_.matcherAnalysis().inLoop(loop, pc)) {
       continue;
     }
-    uint32_t range = uint32_t(counterRange(loop));
+    uint32_t range = uint32_t(MatcherBuilder::counterRange(loop));
     Value *n = builder_.b_.CreateBinaryIntrinsic(
         llvm::Intrinsic::umin, builder_.loadSlot(2 * builder_.captures_ + loop.counter),
         builder_.i32(range - 1));

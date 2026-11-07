@@ -8,17 +8,22 @@
 
 namespace tz::pkg {
 
-std::vector<Token> tokenize(llvm::StringRef text);
-
-std::string stringValue(const Token &tok);
-
-std::vector<ImportRef> importSpecifiers(const std::vector<Token> &tokens, llvm::StringRef text);
-
 enum class Sources { Tz, TypeScript };
 
-std::string resolveRelative(llvm::StringRef fromFile, llvm::StringRef specifier, Sources sources);
+class Scanner {
+public:
+  static std::string stringValue(const Token &tok);
+  static std::vector<Token> tokenize(llvm::StringRef text);
+  static void reachableFiles(const std::vector<std::string> &entries,
+                             std::vector<std::string> &files, std::vector<std::string> &external,
+                             Sources sources);
+  static std::vector<ImportRef> importSpecifiers(const std::vector<Token> &tokens,
+                                                 llvm::StringRef text);
+  static std::string resolveRelative(llvm::StringRef fromFile, llvm::StringRef specifier,
+                                     Sources sources);
 
-void reachableFiles(const std::vector<std::string> &entries, std::vector<std::string> &files,
-                    std::vector<std::string> &external, Sources sources);
+private:
+  static bool regexMayFollow(const Token *prev);
+};
 
 }

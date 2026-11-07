@@ -1,5 +1,6 @@
 #include "compiler/pipeline/check_program/topics/fs/fs_checker/fs_checker.h"
 #include "compiler/library/fs/fs_exports/fs_exports.h"
+#include "compiler/load/to_utf8/to_utf8.h"
 #include "compiler/pipeline/check_program/declare/prelude/prelude.h"
 #include "compiler/pipeline/check_program/declare/type_declarer/type_declarer.h"
 #include "compiler/pipeline/check_program/topics/builtin_modules/builtin_module_checker/builtin_module_checker.h"
@@ -26,17 +27,22 @@ std::u16string FsChecker::utf16(llvm::StringRef text) {
   return std::u16string(units.begin(), units.end());
 }
 
-std::string FsChecker::utf8(const std::u16string &text) {
-  std::string out;
-  llvm::convertUTF16ToUTF8String(
-      llvm::ArrayRef<llvm::UTF16>(reinterpret_cast<const llvm::UTF16 *>(text.data()), text.size()),
-      out);
-
-  return out;
-}
-
 FsChecker::FsChecker(CheckState &owner)
     : state(owner) {}
+
+FsChecker::ResultOctalMode FsChecker::octalMode(llvm::StringRef text) {
+  unsigned mode = 0;
+  if (text.empty() || text.getAsInteger(8, mode)) {
+    std::string message = ErrorTextFsCall::chmod();
+
+    return err(FsCheckerOctalModeError{
+        .code = FsCheckerOctalModeErrorCode::NOT_OCTAL,
+        .message = message,
+    });
+  }
+
+  return ok(mode);
+}
 
 bool FsChecker::nodeOptions(CallExpr *call, size_t index, llvm::StringRef fn,
                             llvm::ArrayRef<llvm::StringRef> allowed,
@@ -44,30 +50,23 @@ bool FsChecker::nodeOptions(CallExpr *call, size_t index, llvm::StringRef fn,
   if (index >= call->args.size() || isa<UndefinedExpr>(call->args[index])) {
     return true;
   }
-  std::string list;
-  for (size_t i = 0; i < allowed.size(); ++i) {
-    list += (i == 0 ? "" : i + 1 == allowed.size() ? " and " : ", ") + allowed[i].str();
-  }
   Expr *arg = call->args[index];
   auto *lit = dyn_cast<ObjectLitExpr>(arg);
   if (!lit) {
-    this->state.getDiagnostics().error(
-        arg->loc(),
-        "the options of '" + fn + "' are written in the call, as an object literal, e.g. '{ " +
-            allowed[0].str() + ": ... }': the type of what it gives may depend on them");
+    std::string message = ErrorTextFsOptions::literal(fn, allowed[0]);
+    this->state.getDiagnostics().error(arg->loc(), message);
     call->args[index] = ExprChecker(this->state).checkExpr(arg);
     return false;
   }
   for (const ObjectLitExpr::Property &prop : lit->props) {
     if (prop.spread() || prop.key() || prop.method() || prop.name.empty()) {
-      this->state.getDiagnostics().error(prop.loc, "write each option of '" + fn +
-                                                       "' by its name, e.g. '{ " +
-                                                       allowed[0].str() + ": ... }'");
+      std::string message = ErrorTextFsOptions::byName(fn, allowed[0]);
+      this->state.getDiagnostics().error(prop.loc, message);
       return false;
     }
     if (!llvm::is_contained(allowed, prop.name)) {
-      this->state.getDiagnostics().error(prop.loc, "'" + fn + "' has no option '" + prop.name +
-                                                       "'; it takes " + list);
+      std::string message = ErrorTextFsOptions::unknown(fn, prop.name, allowed);
+      this->state.getDiagnostics().error(prop.loc, message);
       return false;
     }
     options[prop.name] = prop.value;
@@ -85,8 +84,8 @@ const Type *FsChecker::nativeError() const {
 Expr *FsChecker::checkEncoding(Expr *encoding, llvm::StringRef fn, bool any) {
   auto *lit = dyn_cast<StringLitExpr>(encoding);
   if (!lit) {
-    this->state.getDiagnostics().error(encoding->loc(), "the encoding of '" + fn +
-                                                            "' is written as a literal, 'utf8'");
+    std::string message = ErrorTextFsEncoding::literal(fn);
+    this->state.getDiagnostics().error(encoding->loc(), message);
     ExprChecker(this->state).checkExpr(encoding);
     return nullptr;
   }
@@ -96,9 +95,9 @@ Expr *FsChecker::checkEncoding(Expr *encoding, llvm::StringRef fn, bool any) {
     return nullptr;
   }
   if (!any && cast<IntLitExpr>(number)->value != 0) {
-    this->state.getDiagnostics().error(
-        encoding->loc(), "'" + fn + "' gives names in utf8 only; drop the encoding '" +
-                             FsChecker::utf8(lit->value) + "'");
+    std::string written = ToUtf8::toUtf8(lit->value);
+    std::string message = ErrorTextFsEncoding::utf8Only(fn, written);
+    this->state.getDiagnostics().error(encoding->loc(), message);
 
     return nullptr;
   }
@@ -119,7 +118,8 @@ Expr *FsChecker::checkFsCall(CallExpr *call, llvm::StringRef fn, llvm::SMLoc loc
     return call;
   };
   if (op == "constants" || op == "Stats" || op == "Dirent") {
-    this->state.getDiagnostics().error(loc, "'" + fn + "' of 'node:fs' is not a function");
+    std::string message = ErrorTextFsCall::notFunc(fn);
+    this->state.getDiagnostics().error(loc, message);
     return loosely();
   }
   if (CallChecker(this->state).rejectSpread(call)) {
@@ -148,9 +148,8 @@ Expr *FsChecker::checkFsCall(CallExpr *call, llvm::StringRef fn, llvm::SMLoc loc
     arg = ExprChecker(this->state).checkExpr(arg, string);
     if (auto *lit = dyn_cast<StringLitExpr>(arg);
         lit && lit->value.find(u'\0') != std::u16string::npos) {
-      this->state.getDiagnostics().error(arg->loc(),
-                                         "the path has a zero character in it, which no file "
-                                         "name can have");
+      std::string message = ErrorTextFsCall::zeroPath();
+      this->state.getDiagnostics().error(arg->loc(), message);
     }
     if (fd && !this->state.getFileSystemStore().isInsidePromiseCall() && arg->type->isInt()) {
       return arg;
@@ -164,10 +163,8 @@ Expr *FsChecker::checkFsCall(CallExpr *call, llvm::StringRef fn, llvm::SMLoc loc
       out = lit->value;
       return true;
     }
-    this->state.getDiagnostics().error(
-        value->loc(), "the option '" + option + "' of '" + fn +
-                          "' is written as a literal, true or false: the type of what "
-                          "it gives depends on it");
+    std::string message = ErrorTextFsOptions::flag(fn, option);
+    this->state.getDiagnostics().error(value->loc(), message);
     ExprChecker(this->state).checkExpr(value);
 
     return false;
@@ -180,17 +177,14 @@ Expr *FsChecker::checkFsCall(CallExpr *call, llvm::StringRef fn, llvm::SMLoc loc
         "r",   "rs", "sr", "r+", "rs+", "sr+", "w",  "wx",  "xw",  "w+",  "wx+",
         "xw+", "a",  "ax", "xa", "as",  "sa",  "a+", "ax+", "xa+", "as+", "sa+"};
     auto *lit = dyn_cast<StringLitExpr>(flag);
-    if (lit && llvm::is_contained(flags, llvm::StringRef(FsChecker::utf8(lit->value)))) {
+    if (lit && llvm::is_contained(flags, llvm::StringRef(ToUtf8::toUtf8(lit->value)))) {
       lit->type = string;
       return lit;
     }
     ExprChecker(this->state).checkExpr(flag);
-    std::string known = "'r', 'r+', 'w', 'wx', 'w+', 'wx+', 'a', 'ax', 'a+', 'ax+', and with 's' "
-                        "for synchronous writes 'rs', 'rs+', 'as', 'as+'";
-    this->state.getDiagnostics().error(
-        flag->loc(), lit ? "'" + FsChecker::utf8(lit->value) + "' is not a flag of '" + fn +
-                               "'; the flags are " + known
-                         : "the flag of '" + fn + "' is written as a literal: " + known);
+    std::string written = lit ? ToUtf8::toUtf8(lit->value) : std::string();
+    std::string message = ErrorTextFsCall::flag(fn, written, lit != nullptr);
+    this->state.getDiagnostics().error(flag->loc(), message);
 
     return nullptr;
   };
@@ -209,15 +203,11 @@ Expr *FsChecker::checkFsCall(CallExpr *call, llvm::StringRef fn, llvm::SMLoc loc
     }
     arg = ExprChecker(this->state).checkExpr(arg);
     if (arg->type->isString()) {
-      this->state.getDiagnostics().error(
-          arg->loc(), "the encoding of '" + fn +
-                          "' is written as a literal, 'utf8': the type of what it gives "
-                          "depends on it");
+      std::string message = ErrorTextFsEncoding::dependsOn(fn);
+      this->state.getDiagnostics().error(arg->loc(), message);
     } else if (!arg->type->isError()) {
-      this->state.getDiagnostics().error(
-          arg->loc(),
-          "the options of '" + fn + "' are written in the call, as an object literal, e.g. '{ " +
-              allowed[0].str() + ": ... }': the type of what it gives may depend on them");
+      std::string message = ErrorTextFsOptions::literal(fn, allowed[0]);
+      this->state.getDiagnostics().error(arg->loc(), message);
     }
 
     return false;
@@ -263,15 +253,8 @@ Expr *FsChecker::checkFsCall(CallExpr *call, llvm::StringRef fn, llvm::SMLoc loc
     bool bytes =
         view(data->type) || (data->type->isUnion() && llvm::all_of(data->type->members(), view));
     if (!data->type->isString() && !bytes && !data->type->isError()) {
-      std::string hint =
-          data->type->isNumeric() || data->type->isBool() ? "; convert it first, e.g. 'String(x)'"
-          : data->type->isBytes() ? "; write a view of it, e.g. 'new Uint8Array(buffer)'"
-                                  : "";
-      this->state.getDiagnostics().error(data->loc(),
-                                         "'" + fn +
-                                             "' writes a string or bytes (a Uint8Array or a "
-                                             "Buffer); found '" +
-                                             data->type->name() + "'" + hint);
+      std::string message = ErrorTextFsCall::data(fn, data->type);
+      this->state.getDiagnostics().error(data->loc(), message);
       return loosely();
     }
     if (!encodingOrOptions(2, {"encoding", "flag", "mode"})) {
@@ -280,9 +263,8 @@ Expr *FsChecker::checkFsCall(CallExpr *call, llvm::StringRef fn, llvm::SMLoc loc
     Expr *number = nullptr;
     if (Expr *encoding = options.lookup("encoding"); encoding && !isa<UndefinedExpr>(encoding)) {
       if (bytes) {
-        this->state.getDiagnostics().error(encoding->loc(),
-                                           "an encoding is for text; '" + fn +
-                                               "' writes the bytes as they are: drop the encoding");
+        std::string message = ErrorTextFsEncoding::forText(fn);
+        this->state.getDiagnostics().error(encoding->loc(), message);
         return call;
       }
       if (!(number = this->checkEncoding(encoding, fn, true))) {
@@ -347,15 +329,13 @@ Expr *FsChecker::checkFsCall(CallExpr *call, llvm::StringRef fn, llvm::SMLoc loc
         value = zero;
       }
     } else if (op == "chmodSync" && isa<StringLitExpr>(call->args[1])) {
-      std::string text = FsChecker::utf8(cast<StringLitExpr>(call->args[1])->value);
-      unsigned mode = 0;
-      if (text.empty() || llvm::StringRef(text).getAsInteger(8, mode)) {
-        this->state.getDiagnostics().error(call->args[1]->loc(),
-                                           "the mode of 'chmodSync' is a number, e.g. 0o644, or "
-                                           "octal digits in a string, e.g. \"644\"");
+      std::string text = ToUtf8::toUtf8(cast<StringLitExpr>(call->args[1])->value);
+      ResultOctalMode mode = FsChecker::octalMode(text);
+      if (mode.isErr()) {
+        this->state.getDiagnostics().error(call->args[1]->loc(), mode.error().message);
         return call;
       }
-      value = intLit(mode);
+      value = intLit(mode.value());
     } else {
       value = call->args.size() > 1
                   ? ArgumentChecker(this->state).checkArg(call->args[1], Type::intTy())
@@ -392,9 +372,8 @@ Expr *FsChecker::checkFsCall(CallExpr *call, llvm::StringRef fn, llvm::SMLoc loc
       return call;
     }
     if (big) {
-      this->state.getDiagnostics().error(options.lookup("bigint")->loc(),
-                                         "'bigint' is not supported: tz has no bigint; "
-                                         "the numbers of Stats are doubles");
+      std::string message = ErrorTextFsCall::bigint();
+      this->state.getDiagnostics().error(options.lookup("bigint")->loc(), message);
       return call;
     }
     call->args = {file, boolLit(op == "statSync"), boolLit(throwIfMissing)};
@@ -467,10 +446,8 @@ Expr *FsChecker::checkFsCall(CallExpr *call, llvm::StringRef fn, llvm::SMLoc loc
     }
     Expr *dir = path(call->args[0], false);
     if (call->args.size() > 1 && !isa<UndefinedExpr>(call->args[1])) {
-      this->state.getDiagnostics().error(call->args[1]->loc(),
-                                         "the options of 'rmdirSync' are deprecated in Node; to "
-                                         "delete a directory with what is in it, use 'rmSync(path, "
-                                         "{ recursive: true })'");
+      std::string message = ErrorTextFsCall::rmdir();
+      this->state.getDiagnostics().error(call->args[1]->loc(), message);
       return loosely();
     }
     call->args = {dir};
@@ -507,12 +484,8 @@ Expr *FsChecker::checkFsCall(CallExpr *call, llvm::StringRef fn, llvm::SMLoc loc
   }
   if (op == "renameSync" || op == "copyFileSync" || op == "replaceSync") {
     if (op == "copyFileSync" && call->args.size() == 3) {
-      this->state.getDiagnostics().error(
-          call->args[2]->loc(), "'" + fn +
-                                    "' never replaces a file that is already there, so it takes no "
-                                    "mode: drop it; to replace a file on purpose, copy it to a "
-                                    "temporary name and move that over the file with 'replaceSync' "
-                                    "from \"tz:fs\"");
+      std::string message = ErrorTextFsCall::copyMode(fn);
+      this->state.getDiagnostics().error(call->args[2]->loc(), message);
       return loosely();
     }
     ArgumentChecker::ResultArityMatches arity = ArgumentChecker(this->state).checkArity(call, 2, 2);
@@ -529,7 +502,9 @@ Expr *FsChecker::checkFsCall(CallExpr *call, llvm::StringRef fn, llvm::SMLoc loc
     call->type = Type::voidTy();
     return call;
   }
-  this->state.getDiagnostics().error(loc, fsExportProblem(fn, "node:fs"));
+  FsExports::ResultExportFound found = FsExports::fsExport(fn, "node:fs");
+  std::string message = found.isErr() ? found.error().message : std::string();
+  this->state.getDiagnostics().error(loc, message);
 
   return loosely();
 }
@@ -557,8 +532,8 @@ Expr *FsChecker::checkFsValue(llvm::StringRef name, Expr *expr) {
   if (name != "constants") {
     return nullptr;
   }
-  this->state.getDiagnostics().error(
-      expr->loc(), "'constants' of 'node:fs' is used as 'constants.F_OK' and the like");
+  std::string message = ErrorTextFsConstant::value();
+  this->state.getDiagnostics().error(expr->loc(), message);
 
   return expr;
 }
@@ -595,10 +570,8 @@ Expr *FsChecker::checkFsConstant(MemberExpr *member) {
       return lit;
     }
   }
-  this->state.getDiagnostics().error(member->loc(),
-                                     "'constants." + member->name +
-                                         "' of 'node:fs' is not supported yet; tz has F_OK, "
-                                         "R_OK, W_OK, X_OK and the COPYFILE_ ones");
+  std::string message = ErrorTextFsConstant::notYet(member->name);
+  this->state.getDiagnostics().error(member->loc(), message);
   member->type = Type::error();
 
   return member;

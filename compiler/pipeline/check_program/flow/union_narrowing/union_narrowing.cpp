@@ -1,4 +1,5 @@
 #include "compiler/pipeline/check_program/flow/union_narrowing/union_narrowing.h"
+#include "compiler/load/to_utf8/to_utf8.h"
 #include "compiler/pipeline/check_program/flow/field_facts/field_facts.h"
 #include "compiler/pipeline/check_program/types/literal_types/literal_types.h"
 #include "compiler/pipeline/check_program/types/type_relations/type_relations.h"
@@ -10,22 +11,14 @@ using llvm::dyn_cast;
 
 namespace tz {
 
-namespace {
+UnionNarrowing::UnionNarrowing(CheckState &owner)
+    : state(owner) {}
 
-std::string toUtf8(const std::u16string &text) {
-  std::string utf8;
-  llvm::convertUTF16ToUTF8String(
-      llvm::ArrayRef<llvm::UTF16>(reinterpret_cast<const llvm::UTF16 *>(text.data()), text.size()),
-      utf8);
-
-  return utf8;
-}
-
-llvm::ArrayRef<const Type *> membersOf(const Type *&type) {
+llvm::ArrayRef<const Type *> UnionNarrowing::membersOf(const Type *&type) {
   return type->isUnion() ? type->members() : llvm::ArrayRef<const Type *>(type);
 }
 
-const VarSymbol *readVariable(const Expr *expr) {
+const VarSymbol *UnionNarrowing::readVariable(const Expr *expr) {
   while (auto *conv = dyn_cast<CastExpr>(expr)) {
     if (!conv->isImplicit() || conv->shortCircuit) {
       return nullptr;
@@ -37,13 +30,12 @@ const VarSymbol *readVariable(const Expr *expr) {
   return name ? name->var() : nullptr;
 }
 
-}
-
-static const Type *keepMembers(const Type *type, llvm::function_ref<bool(const Type *)> keep) {
+const Type *UnionNarrowing::keepMembers(const Type *type,
+                                        llvm::function_ref<bool(const Type *)> keep) {
   bool undefined = type->isOptional();
   const Type *value = type->nonOptional();
   std::vector<const Type *> kept;
-  for (const Type *m : membersOf(value)) {
+  for (const Type *m : UnionNarrowing::membersOf(value)) {
     if (keep(m)) {
       kept.push_back(m);
     }
@@ -56,9 +48,6 @@ static const Type *keepMembers(const Type *type, llvm::function_ref<bool(const T
 
   return keepsUndefined ? Type::optional(result) : result;
 }
-
-UnionNarrowing::UnionNarrowing(CheckState &owner)
-    : state(owner) {}
 
 void UnionNarrowing::narrowVariable(Flow &flow, const VarSymbol *var, const Type *type) {
   llvm::erase_if(flow.narrowed, [&](const auto &narrowed) { return narrowed.first == var; });
@@ -82,7 +71,7 @@ void UnionNarrowing::narrowVariable(Flow &flow, const VarSymbol *var, const Type
 std::optional<NarrowTarget> UnionNarrowing::narrowTarget(const Expr *expr) const {
   const Type *declared = nullptr;
   NarrowTarget target;
-  if (const VarSymbol *var = readVariable(expr); var && var->type) {
+  if (const VarSymbol *var = UnionNarrowing::readVariable(expr); var && var->type) {
     target.var = var;
     declared = var->type;
   } else {
@@ -152,7 +141,7 @@ void UnionNarrowing::addUnionFacts(const Expr *cond, Flow &whenTrue, Flow &whenF
     if (now->isNever()) {
       return;
     }
-    this->narrowTargetTo(flow, target, keepMembers(now, keep));
+    this->narrowTargetTo(flow, target, UnionNarrowing::keepMembers(now, keep));
   };
 
   if (auto *call = dyn_cast<CallExpr>(cond); call && call->builtin() == Builtin::ArrayIsArray) {
@@ -186,7 +175,7 @@ void UnionNarrowing::addUnionFacts(const Expr *cond, Flow &whenTrue, Flow &whenF
 
       return f ? f->type : nullptr;
     };
-    if (llvm::any_of(membersOf(now), [&](const Type *m) { return !tag(m); })) {
+    if (llvm::any_of(UnionNarrowing::membersOf(now), [&](const Type *m) { return !tag(m); })) {
       return false;
     }
     narrow(flow, *target,
@@ -227,7 +216,7 @@ void UnionNarrowing::addUnionFacts(const Expr *cond, Flow &whenTrue, Flow &whenF
     if (cls->isBuffer()) {
       const Type *now = this->targetType(whenTrue, *target)->nonOptional();
       std::vector<const Type *> kept;
-      for (const Type *m : membersOf(now)) {
+      for (const Type *m : UnionNarrowing::membersOf(now)) {
         if (m->isBuffer() || m->bytes() == Type::Bytes::Uint8) {
           kept.push_back(cls);
         }
@@ -238,14 +227,14 @@ void UnionNarrowing::addUnionFacts(const Expr *cond, Flow &whenTrue, Flow &whenF
     }
     if (!cls->isClass()) {
       const Type *those = cls;
-      llvm::ArrayRef<const Type *> matching = membersOf(those);
+      llvm::ArrayRef<const Type *> matching = UnionNarrowing::membersOf(those);
       narrow(whenTrue, *target, [&](const Type *m) { return llvm::is_contained(matching, m); });
       narrow(whenFalse, *target, [&](const Type *m) { return !llvm::is_contained(matching, m); });
       return;
     }
     const Type *now = this->targetType(whenTrue, *target)->nonOptional();
     std::vector<const Type *> kept;
-    for (const Type *m : membersOf(now)) {
+    for (const Type *m : UnionNarrowing::membersOf(now)) {
       if (m->isObject() && m->isSubtypeOf(cls)) {
         kept.push_back(m);
       } else if (m->isObject() && cls->isSubtypeOf(m)) {
@@ -264,7 +253,7 @@ void UnionNarrowing::addUnionFacts(const Expr *cond, Flow &whenTrue, Flow &whenF
     if (!target || !key) {
       return;
     }
-    std::string name = toUtf8(key->value);
+    std::string name = ToUtf8::toUtf8(key->value);
     auto has = [&](const Type *m) { return m->isObject() && m->field(name); };
     narrow(whenTrue, *target, has);
     narrow(whenFalse, *target, [&](const Type *m) { return !has(m) && !m->isUndefined(); });
@@ -284,13 +273,15 @@ void UnionNarrowing::addUnionFacts(const Expr *cond, Flow &whenTrue, Flow &whenF
       if (!target || !target->declared->nonOptional()->isUnion()) {
         continue;
       }
-      std::string kind = toUtf8(text->value);
-      auto gives = [&](const Type *m) { return llvm::StringRef(typeOfName(m)) == kind; };
+      std::string kind = ToUtf8::toUtf8(text->value);
+      auto gives = [&](const Type *m) {
+        return llvm::StringRef(TypeSpelling::typeOfName(m)) == kind;
+      };
       narrow(equal, *target, gives);
       narrow(different, *target, [&](const Type *m) { return !gives(m); });
       continue;
     }
-    const Type *literal = writtenLiteral(other);
+    const Type *literal = UnionCheckHelpers::writtenLiteral(other);
     if (!literal) {
       if (const Type *type = other->type; type && type->isLiteral()) {
         literal = type;
@@ -313,14 +304,14 @@ void UnionNarrowing::addUnionFacts(const Expr *cond, Flow &whenTrue, Flow &whenF
     }
     if (std::optional<NarrowTarget> target = this->narrowTarget(side)) {
       const Type *now = this->targetType(equal, *target)->nonOptional();
-      if (llvm::is_contained(membersOf(now), literal)) {
+      if (llvm::is_contained(UnionNarrowing::membersOf(now), literal)) {
         this->narrowTargetTo(equal, *target, literal);
         narrow(different, *target, [&](const Type *m) { return m != literal; });
       } else if (now->isBool() && literal->literalBase()->isBool()) {
         this->narrowTargetTo(equal, *target, literal);
         this->narrowTargetTo(different, *target, Type::boolLiteral(literal->literalNumber() == 0));
       }
-    } else if (const VarSymbol *var = readVariable(side);
+    } else if (const VarSymbol *var = UnionNarrowing::readVariable(side);
                var && var->type && literal->literalBase() == var->type->nonOptional() &&
                (literal->isStringLiteral() || literal->literalBase()->isInt()) &&
                LiteralTypes(this->state).typeIn(equal, var) == var->type) {

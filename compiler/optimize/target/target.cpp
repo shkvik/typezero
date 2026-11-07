@@ -8,9 +8,11 @@
 
 namespace tz {
 
-namespace {
+Target::Target(llvm::Triple triple, std::unique_ptr<llvm::TargetMachine> machine)
+    : triple_(std::move(triple)),
+      machine_(std::move(machine)) {}
 
-void initializeTargets() {
+void Target::initializeTargets() {
   LLVMInitializeX86TargetInfo();
   LLVMInitializeX86Target();
   LLVMInitializeX86TargetMC();
@@ -21,13 +23,8 @@ void initializeTargets() {
   LLVMInitializeAArch64AsmPrinter();
 }
 
-}
-
-Target::Target(llvm::Triple triple, std::unique_ptr<llvm::TargetMachine> machine)
-    : triple_(std::move(triple)), machine_(std::move(machine)) {}
-
 Result<Target, Errors> Target::host(bool optimize) {
-  static bool initialized = (initializeTargets(), true);
+  static bool initialized = (Target::initializeTargets(), true);
   (void)initialized;
   llvm::Triple triple(llvm::sys::getDefaultTargetTriple());
   std::string error;

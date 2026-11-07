@@ -8,14 +8,17 @@ class PathFeature : public Feature {
 public:
   llvm::StringRef name() const override { return "path"; }
 
-  std::optional<std::string> exportProblem(NodeModule module, llvm::StringRef exportName,
-                                           llvm::StringRef path) const override;
+  ResultExportFound exportFound(NodeModule module, llvm::StringRef exportName,
+                                llvm::StringRef path) const override;
   Expr *checkModuleCall(CheckState &state, CallExpr *call, NodeModule module, llvm::StringRef fn,
                         llvm::SMLoc loc, const Type *expected) const override;
   Expr *checkModuleValue(CheckState &state, NodeModule module, llvm::StringRef exportName,
                          Expr *expr) const override;
   bool lowers(Builtin builtin) const override;
   llvm::Value *lowerCall(Lowering &lowering, CallExpr *call) const override;
+
+private:
+  static bool isPathModule(NodeModule module);
 };
 
 }

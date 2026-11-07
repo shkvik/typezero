@@ -228,7 +228,10 @@ Expr *ExprChecker::checkExprKind(Expr *expr, const Type *expected, bool wraps) {
 Expr *ExprChecker::checkSequence(SequenceExpr *seq, const Type *expected, bool wraps) {
   for (size_t i = 0; i + 1 < seq->exprs.size(); ++i) {
     seq->exprs[i] = this->checkExpr(seq->exprs[i]);
-    ResultChecker(this->state).checkDiscarded(seq->exprs[i]);
+    ResultChecker::ResultValueGetsUsed used = ResultChecker(this->state).usedValue(seq->exprs[i]);
+    if (used.isErr()) {
+      this->state.getDiagnostics().error(seq->exprs[i]->loc(), used.error().message);
+    }
   }
   Expr *&last = seq->exprs.back();
   last = this->checkExpr(last, expected, wraps);

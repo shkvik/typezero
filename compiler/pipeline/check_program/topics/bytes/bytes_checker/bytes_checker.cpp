@@ -1,5 +1,6 @@
 #include "compiler/pipeline/check_program/topics/bytes/bytes_checker/bytes_checker.h"
 #include "compiler/library/bytes/bytes_check_helpers/bytes_check_helpers.h"
+#include "compiler/load/to_utf8/to_utf8.h"
 #include "compiler/pipeline/check_program/declare/constant_folder/constant_folder.h"
 #include "compiler/pipeline/check_program/flow/index_proofs/index_proofs.h"
 #include "compiler/pipeline/check_program/topics/bytes/buffer_checker/buffer_checker.h"
@@ -52,15 +53,6 @@ const llvm::StringLiteral kTypedMethods[] = {
 
 }
 
-std::string BytesChecker::utf8(const std::u16string &text) {
-  std::string out;
-  llvm::convertUTF16ToUTF8String(
-      llvm::ArrayRef<llvm::UTF16>(reinterpret_cast<const llvm::UTF16 *>(text.data()), text.size()),
-      out);
-
-  return out;
-}
-
 std::optional<std::u16string> BytesChecker::literalText(const Expr *e) {
   if (auto *conv = dyn_cast<CastExpr>(e); conv && conv->isImplicit()) {
     e = conv->operand;
@@ -75,29 +67,31 @@ std::optional<std::u16string> BytesChecker::literalText(const Expr *e) {
   return std::nullopt;
 }
 
-std::string BytesChecker::rangeText(int64_t lo, int64_t hi) {
-  return std::to_string(lo) + " to " + std::to_string(hi);
-}
+BytesChecker::ResultKnownEncoding BytesChecker::knownEncoding(llvm::StringRef name) {
+  std::optional<int> encoding = BytesCheckHelpers::encodingNamed(name);
+  if (!encoding) {
+    std::string message = ErrorTextBufferEncoding::unknown(name);
 
-Range BytesChecker::exact(int64_t v) {
-  return {v, v};
-}
-
-bool BytesChecker::known(const Range &r) {
-  return r.lo && r.hi;
-}
-
-int64_t BytesChecker::allOnes(int64_t v) {
-  int64_t m = 0;
-  while (m < v) {
-    m = m * 2 + 1;
+    return err(BytesCheckerKnownEncodingError{
+        .code = BytesCheckerKnownEncodingErrorCode::UNKNOWN_ENCODING,
+        .message = message,
+    });
   }
 
-  return m;
+  return ok(*encoding);
 }
 
-int64_t BytesChecker::floorShift(int64_t v, int64_t n) {
-  return v >= 0 ? v >> n : -((-v + (int64_t(1) << n) - 1) >> n);
+BytesChecker::ResultBytesIndexing BytesChecker::bytesIndexing(const Type *type) {
+  if (!type->isTypedArray()) {
+    std::string message = ErrorTextBytesIndex::notIndexed(type);
+
+    return err(BytesCheckerBytesIndexingError{
+        .code = BytesCheckerBytesIndexingErrorCode::NOT_INDEXED,
+        .message = message,
+    });
+  }
+
+  return ok(type);
 }
 
 BytesChecker::BytesChecker(CheckState &owner)
@@ -116,14 +110,9 @@ const Type *BytesChecker::bytesTypeNamed(llvm::StringRef name) {
 Expr *BytesChecker::checkBytesIndex(IndexExpr *index) {
   const Type *type = index->object->type;
   index->index = MemberChecker(this->state).checkPosition(index->index);
-  if (!type->isTypedArray()) {
-    this->state.getDiagnostics().error(
-        index->loc(),
-        "type '" + type->name() + "' cannot be indexed; " +
-            (type->bytes() == Bytes::DataView      ? "read its bytes with getUint8(i) and the like"
-             : type->bytes() == Bytes::ArrayBuffer ? "read its bytes through a view, e.g. 'new "
-                                                     "Uint8Array(buffer)[i]'"
-                                                   : "it holds no elements"));
+  ResultBytesIndexing indexing = BytesChecker::bytesIndexing(type);
+  if (indexing.isErr()) {
+    this->state.getDiagnostics().error(index->loc(), indexing.error().message);
     return index;
   }
   if (index->index->type->isError()) {
@@ -143,17 +132,12 @@ void BytesChecker::checkBytesStore(IndexExpr *index, const Expr *value) {
   if (index->index->type->isError() || (value && value->type->isError())) {
     return;
   }
-  std::string object = valueText(index->object);
-  std::string position = valueText(index->index);
+  std::string object = BytesCheckHelpers::valueText(index->object);
+  std::string position = BytesCheckHelpers::valueText(index->index);
   if (!IndexProofs(this->state).provesInBounds(index->object, index->index, false)) {
     std::optional<int64_t> at = ConstantFolder(this->state).intConstant(index->index);
-    std::string check = at ? object + ".length > " + std::to_string(*at)
-                           : position + " >= 0 && " + position + " < " + object + ".length";
-    this->state.getDiagnostics().error(
-        index->loc(), "cannot prove that the index is within the " + target->name() +
-                          " (0 <= index < length): it never grows, and JavaScript would "
-                          "drop the write; check the index first, e.g. 'if (" +
-                          check + ")'");
+    std::string message = ErrorTextBytesIndex::store(target->name(), object, position, at);
+    this->state.getDiagnostics().error(index->loc(), message);
     return;
   }
 }
@@ -246,23 +230,19 @@ Expr *BytesChecker::checkBytesMember(MemberExpr *member) {
       return constant(intLit(type->elementSize()));
     }
     if (type->isBuffer() && (name == "parent" || name == "offset")) {
-      this->state.getDiagnostics().error(member->loc(),
-                                         "'" + name +
-                                             "' of a Buffer is deprecated in node and not "
-                                             "supported; use '" +
-                                             (name == "parent" ? "buffer" : "byteOffset") + "'");
+      std::string message = ErrorTextBytesMember::deprecated(name);
+      this->state.getDiagnostics().error(member->loc(), message);
       return member;
     }
     if (llvm::is_contained(kTypedMethods, name)) {
-      this->state.getDiagnostics().error(member->loc(),
-                                         "property '" + name + "' does not exist on type '" +
-                                             type->name() + "'; methods must be called");
+      std::string message = ErrorTextBytesMember::notCalled(name, type->name());
+      this->state.getDiagnostics().error(member->loc(), message);
       return member;
     }
     break;
   }
-  this->state.getDiagnostics().error(
-      member->loc(), "property '" + name + "' does not exist on type '" + type->name() + "'");
+  std::string message = ErrorTextBytesMember::noMember(name, type->name());
+  this->state.getDiagnostics().error(member->loc(), message);
 
   return member;
 }
@@ -284,19 +264,16 @@ Expr *BytesChecker::checkBytesUnionMember(MemberExpr *member) {
                                                "detached",          "encoding",      "fatal",
                                                "ignoreBOM"};
   if (llvm::is_contained(others, name)) {
-    this->state.getDiagnostics().error(member->loc(),
-                                       "property '" + name + "' of '" + type->name() +
-                                           "' is not supported yet; narrow it first");
+    std::string message = ErrorTextBytesMember::narrow(name, type->name());
+    this->state.getDiagnostics().error(member->loc(), message);
     return member;
   }
   llvm::ArrayRef<const Type *> members = type->members();
   if (const Type *const *lacking = llvm::find_if_not(members, has); lacking != members.end()) {
-    std::string message = "property '" + name.str() + "' does not exist on '" +
-                          (*lacking)->name().str() + "', which '" + type->name().str() +
-                          "' may be; narrow it first";
-    if (const Type *const *with = llvm::find_if(members, has); with != members.end()) {
-      message += ", e.g. 'if (x instanceof " + (*with)->name().str() + ")'";
-    }
+    const Type *const *with = llvm::find_if(members, has);
+    llvm::StringRef withName = with != members.end() ? (*with)->name() : llvm::StringRef();
+    std::string message =
+        ErrorTextBytesMember::lacking(name, (*lacking)->name(), type->name(), withName);
     this->state.getDiagnostics().error(member->loc(), message);
     return member;
   }
@@ -336,10 +313,8 @@ Expr *BytesChecker::checkBytesStaticMember(MemberExpr *member) {
     lit->type = Type::intTy();
     return lit;
   }
-  this->state.getDiagnostics().error(member->loc(), "'" + object->name + "." + member->name +
-                                                        "' can be used only in a call, e.g. '" +
-                                                        object->name + "." + member->name +
-                                                        "(...)'");
+  std::string message = ErrorTextBytesMember::callOnly(object->name, member->name);
+  this->state.getDiagnostics().error(member->loc(), message);
 
   return member;
 }
@@ -357,29 +332,23 @@ Expr *BytesChecker::bytesToString(Expr *expr) {
     return ProcessChecker(this->state)
         .builtinCall(expr->loc(), callee, Builtin::BytesJoin, {}, Type::string());
   }
-  this->state.getDiagnostics().error(
-      expr->loc(), "a value of type '" + type->name() +
-                       "' cannot be converted to a string: JavaScript would give '[object " +
-                       type->name() + "]'; print it with console.log" +
-                       (type->bytes() == Bytes::ArrayBuffer
-                            ? ", or the text of its bytes with 'new TextDecoder().decode(buffer)'"
-                            : ""));
+  std::string message =
+      ErrorTextBytesString::noText(type->name(), type->bytes() == Bytes::ArrayBuffer);
+  this->state.getDiagnostics().error(expr->loc(), message);
 
   return expr;
 }
 
 Expr *BytesChecker::checkBufferEncoding(Expr *arg) {
   if (std::optional<std::u16string> text = BytesChecker::literalText(arg)) {
-    std::optional<int> encoding = encodingNamed(BytesChecker::utf8(*text));
-    if (!encoding) {
-      this->state.getDiagnostics().error(
-          arg->loc(), "unknown encoding '" + BytesChecker::utf8(*text) +
-                          "' (node throws a TypeError); Buffer knows utf8, utf16le, "
-                          "latin1, ascii, base64, base64url and hex");
+    std::string written = ToUtf8::toUtf8(*text);
+    ResultKnownEncoding encoding = BytesChecker::knownEncoding(written);
+    if (encoding.isErr()) {
+      this->state.getDiagnostics().error(arg->loc(), encoding.error().message);
       arg->type = Type::error();
       return arg;
     }
-    auto *lit = this->state.getAst().make<IntLitExpr>(arg->loc(), uint64_t(*encoding));
+    auto *lit = this->state.getAst().make<IntLitExpr>(arg->loc(), uint64_t(encoding.value()));
     lit->type = Type::intTy();
     return lit;
   }
@@ -389,19 +358,14 @@ Expr *BytesChecker::checkBufferEncoding(Expr *arg) {
   }
   std::optional<std::vector<std::string>> names = LiteralTypes(this->state).knownTexts(arg);
   if (!names) {
-    this->state.getDiagnostics().error(
-        arg->loc(), "an encoding known only when the program runs may be one Buffer does "
-                    "not know, which node would throw a TypeError for; check it first, "
-                    "e.g. 'if (enc == \"hex\" || enc == \"base64\")', or give it the type "
-                    "'BufferEncoding'");
+    std::string message = ErrorTextBufferEncoding::notKnown();
+    this->state.getDiagnostics().error(arg->loc(), message);
     return arg;
   }
   for (const std::string &name : *names) {
-    if (!encodingNamed(name)) {
-      this->state.getDiagnostics().error(
-          arg->loc(), "unknown encoding '" + name +
-                          "' (node throws a TypeError); Buffer knows utf8, utf16le, "
-                          "latin1, ascii, base64, base64url and hex");
+    ResultKnownEncoding encoding = BytesChecker::knownEncoding(name);
+    if (encoding.isErr()) {
+      this->state.getDiagnostics().error(arg->loc(), encoding.error().message);
       break;
     }
   }
@@ -435,15 +399,10 @@ Expr *BytesChecker::checkBytesMethod(CallExpr *call, MemberExpr *member, const T
     for (Expr *&arg : call->args) {
       arg = ExprChecker(this->state).checkExpr(arg);
     }
-    if (name == "resize" || name == "transfer" || name == "transferToFixedLength") {
-      this->state.getDiagnostics().error(member->loc(),
-                                         "'" + name +
-                                             "' is not supported yet: an ArrayBuffer keeps its "
-                                             "size and its memory (docs/bytes.md, section 7)");
-    } else {
-      this->state.getDiagnostics().error(
-          member->loc(), "property '" + name + "' does not exist on type 'ArrayBuffer'");
-    }
+    std::string message = name == "resize" || name == "transfer" || name == "transferToFixedLength"
+                              ? ErrorTextArrayBuffer::notYet(name)
+                              : ErrorTextArrayBuffer::noMember(name);
+    this->state.getDiagnostics().error(member->loc(), message);
     return call;
   }
   case Bytes::DataView:

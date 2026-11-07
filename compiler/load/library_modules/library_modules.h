@@ -20,6 +20,7 @@ public:
   void importProcessSignals(Module *module, llvm::StringRef text);
 
 private:
+  static void appendPart(SourceFile &file, SourceFile &part);
   std::optional<SourceFile> parseLibraryFile(llvm::StringRef file, llvm::StringRef name,
                                              llvm::SMLoc loc, std::string &fullPath,
                                              std::vector<unsigned> &buffers);

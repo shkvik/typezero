@@ -19,13 +19,9 @@ constexpr uint64_t kMaxConstant = uint64_t(1) << 40;
 
 }
 
-bool LoopBounds::isArrayLength(const Term &t) {
-  return t.length && t.var->type->nonOptional()->isArray();
-}
-
-static std::optional<int64_t>
-varPlus(const Expr *expr, const VarSymbol *var,
-        llvm::function_ref<const VarSymbol *(llvm::StringRef)> lookupVar) {
+std::optional<int64_t>
+LoopBounds::varPlus(const Expr *expr, const VarSymbol *var,
+                    llvm::function_ref<const VarSymbol *(llvm::StringRef)> lookupVar) {
   if (auto *name = dyn_cast<NameExpr>(expr)) {
     return lookupVar(name->name) == var ? std::optional<int64_t>(0) : std::nullopt;
   }
@@ -45,6 +41,10 @@ varPlus(const Expr *expr, const VarSymbol *var,
   }
 
   return static_cast<int64_t>(lit->value);
+}
+
+bool LoopBounds::isArrayLength(const Term &t) {
+  return t.length && t.var->type->nonOptional()->isArray();
 }
 
 LoopBounds::LoopBounds(CheckState &owner)
@@ -118,7 +118,7 @@ bool LoopBounds::boundedAbove(const Expr *expr, int64_t limit, const LoopScan &s
 
   return var && var->type->isInt() && !scan.changes.count(name->name) &&
          this->state.getFlowState().getFacts().proves(Term::of(var), Term::zero(),
-                                                      saturatingAdd(limit, 1));
+                                                      Facts::saturatingAdd(limit, 1));
 }
 
 bool LoopBounds::boundedBelow(const Expr *expr, int64_t limit, const LoopScan &scan) const {
@@ -132,7 +132,7 @@ bool LoopBounds::boundedBelow(const Expr *expr, int64_t limit, const LoopScan &s
 
   return var && var->type->isInt() && !scan.changes.count(name->name) &&
          this->state.getFlowState().getFacts().proves(Term::zero(), Term::of(var),
-                                                      saturatingSub(1, limit));
+                                                      Facts::saturatingSub(1, limit));
 }
 
 std::optional<int64_t> LoopBounds::condBoundsAbove(const Expr *cond, const VarSymbol *var,
@@ -175,7 +175,7 @@ std::optional<int64_t> LoopBounds::condBoundsAbove(const Expr *cond, const VarSy
   default:
     return std::nullopt;
   }
-  std::optional<int64_t> k = varPlus(small, var, lookupVar);
+  std::optional<int64_t> k = LoopBounds::varPlus(small, var, lookupVar);
   if (k && this->boundedAbove(large, strict ? kIntMax - (step - 1) : kIntMax - step, scan)) {
     return k;
   }
@@ -228,8 +228,8 @@ Flow LoopBounds::loopHead(const LoopScan &scan, const Expr *cond, bool induction
         if (std::optional<int64_t> k = this->condBoundsAbove(cond, var, scan, change.delta)) {
           if (*k == 0) {
             keepLower = true;
-          } else if (this->state.getFlowState().getFacts().proves(Term::of(var), Term::zero(),
-                                                                  saturatingAdd(kIntMax - *k, 1))) {
+          } else if (this->state.getFlowState().getFacts().proves(
+                         Term::of(var), Term::zero(), Facts::saturatingAdd(kIntMax - *k, 1))) {
             keepLower = true;
             invariant = *k;
           }
@@ -256,7 +256,7 @@ Flow LoopBounds::loopHead(const LoopScan &scan, const Expr *cond, bool induction
       return true;
     });
     if (invariant) {
-      head.facts.add(Term::of(var), Term::zero(), saturatingAdd(kIntMax - *invariant, 1));
+      head.facts.add(Term::of(var), Term::zero(), Facts::saturatingAdd(kIntMax - *invariant, 1));
     }
     for (const VarSymbol *defined : llvm::to_vector(head.defined)) {
       if (defined->name == name) {

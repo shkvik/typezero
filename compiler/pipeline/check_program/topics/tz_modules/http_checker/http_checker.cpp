@@ -1,4 +1,5 @@
 #include "compiler/pipeline/check_program/topics/tz_modules/http_checker/http_checker.h"
+#include "compiler/load/to_utf8/to_utf8.h"
 #include "compiler/pipeline/check_program/declare/constant_folder/constant_folder.h"
 #include "compiler/pipeline/check_program/topics/tz_modules/library_calls/library_calls.h"
 #include "compiler/pipeline/check_program/topics/tz_modules/url_checker/url_checker.h"
@@ -54,16 +55,6 @@ const std::u16string *HttpChecker::stringLiteral(const Expr *expr) {
   return nullptr;
 }
 
-std::string HttpChecker::utf8(const std::u16string &units) {
-  std::string text;
-  llvm::convertUTF16ToUTF8String(
-      llvm::ArrayRef<llvm::UTF16>(reinterpret_cast<const llvm::UTF16 *>(units.data()),
-                                  units.size()),
-      text);
-
-  return text;
-}
-
 bool HttpChecker::isLibraryClass(const Type *type, llvm::StringRef name) {
   const ClassDecl *cls = type ? type->nonOptional()->classDecl() : nullptr;
 
@@ -102,6 +93,75 @@ bool HttpChecker::hasCredentials(llvm::StringRef url) {
 HttpChecker::HttpChecker(CheckState &owner)
     : state(owner) {}
 
+HttpChecker::ResultHeaderName HttpChecker::headerName(llvm::StringRef name) {
+  if (!HttpChecker::isToken(name)) {
+    std::string message = ErrorTextHeader::name(name);
+
+    return err(HttpCheckerHeaderNameError{
+        .code = HttpCheckerHeaderNameErrorCode::NOT_A_TOKEN,
+        .message = message,
+    });
+  }
+
+  return ok(name);
+}
+
+HttpChecker::ResultHeaderText HttpChecker::headerText(const std::u16string &text) {
+  if (!HttpChecker::validValue(text)) {
+    std::string message = ErrorTextHeader::value();
+
+    return err(HttpCheckerHeaderTextError{
+        .code = HttpCheckerHeaderTextErrorCode::LINE_BREAK,
+        .message = message,
+    });
+  }
+
+  return ok(&text);
+}
+
+HttpChecker::ResultRequestUrl HttpChecker::requestUrl(llvm::StringRef text) {
+  if (!UrlChecker::validUrlText(text.str(), false)) {
+    std::string message = ErrorTextHttpRequest::badUrl(text);
+
+    return err(HttpCheckerRequestUrlError{
+        .code = HttpCheckerRequestUrlErrorCode::INVALID_URL,
+        .message = message,
+    });
+  }
+  if (HttpChecker::hasCredentials(text)) {
+    std::string message = ErrorTextHttpRequest::userInUrl();
+
+    return err(HttpCheckerRequestUrlError{
+        .code = HttpCheckerRequestUrlErrorCode::CREDENTIALS,
+        .message = message,
+    });
+  }
+
+  return ok(text);
+}
+
+HttpChecker::ResultMethodName HttpChecker::methodName(llvm::StringRef method) {
+  std::string upper = method.upper();
+  if (!HttpChecker::isToken(method)) {
+    std::string message = ErrorTextHttpRequest::badMethod(method);
+
+    return err(HttpCheckerMethodNameError{
+        .code = HttpCheckerMethodNameErrorCode::NOT_A_TOKEN,
+        .message = message,
+    });
+  }
+  if (upper == "CONNECT" || upper == "TRACE" || upper == "TRACK") {
+    std::string message = ErrorTextHttpRequest::forbidden(method);
+
+    return err(HttpCheckerMethodNameError{
+        .code = HttpCheckerMethodNameErrorCode::FORBIDDEN,
+        .message = message,
+    });
+  }
+
+  return ok(method);
+}
+
 bool HttpChecker::validReason(const std::u16string &text) {
   return llvm::all_of(text, [](char16_t c) {
     return c == 0x09 || (c >= 0x20 && c <= 0x7E) || (c >= 0x80 && c <= 0xFF);
@@ -114,19 +174,24 @@ bool HttpChecker::inProgram(const Expr *expr) const {
 
 void HttpChecker::checkHeaderName(const Expr *name) {
   const std::u16string *text = HttpChecker::stringLiteral(name);
-  if (text && !HttpChecker::isToken(HttpChecker::utf8(*text))) {
-    this->state.getDiagnostics().error(name->loc(),
-                                       "'" + HttpChecker::utf8(*text) +
-                                           "' is not a name of a header: a name is letters, "
-                                           "digits and !#$%&'*+-.^_`|~, without spaces");
+  if (!text) {
+    return;
+  }
+  std::string written = ToUtf8::toUtf8(*text);
+  ResultHeaderName header = HttpChecker::headerName(written);
+  if (header.isErr()) {
+    this->state.getDiagnostics().error(name->loc(), header.error().message);
   }
 }
 
 void HttpChecker::checkHeaderValue(const Expr *value) {
   const std::u16string *text = HttpChecker::stringLiteral(value);
-  if (text && !HttpChecker::validValue(*text)) {
-    this->state.getDiagnostics().error(value->loc(),
-                                       "the value of a header cannot hold a line break or NUL");
+  if (!text) {
+    return;
+  }
+  ResultHeaderText header = HttpChecker::headerText(*text);
+  if (header.isErr()) {
+    this->state.getDiagnostics().error(value->loc(), header.error().message);
   }
 }
 
@@ -137,11 +202,9 @@ void HttpChecker::checkHeadersInit(const Expr *init) {
       if (p.spread() || p.key() || !p.value) {
         continue;
       }
-      if (!HttpChecker::isToken(p.name)) {
-        this->state.getDiagnostics().error(p.loc,
-                                           "'" + p.name.str() +
-                                               "' is not a name of a header: a name is letters, "
-                                               "digits and !#$%&'*+-.^_`|~, without spaces");
+      ResultHeaderName header = HttpChecker::headerName(p.name);
+      if (header.isErr()) {
+        this->state.getDiagnostics().error(p.loc, header.error().message);
       }
       this->checkHeaderValue(p.value);
     }
@@ -205,19 +268,14 @@ void HttpChecker::checkResponseNew(NewExpr *expr) {
               : ConstantFolder(this->state).intConstant(value);
       if (status && (*status == 204 || *status == 205 || *status == 304) &&
           HttpChecker::hasBody(args[0])) {
-        std::string code = std::to_string(*status);
-        this->state.getDiagnostics().error(args[0]->loc(),
-                                           "a response with status " + code +
-                                               " has no body; write 'new Response(undefined, "
-                                               "{ status: " +
-                                               code + " })'");
+        std::string message = ErrorTextHttpResponse::noBody(*status);
+        this->state.getDiagnostics().error(args[0]->loc(), message);
       }
     } else if (p.name == "statusText") {
       if (const std::u16string *text = HttpChecker::stringLiteral(value);
           text && !HttpChecker::validReason(*text)) {
-        this->state.getDiagnostics().error(
-            value->loc(), "a statusText holds only tabs, spaces and visible characters up "
-                          "to U+00FF: no line breaks, no other control characters");
+        std::string message = ErrorTextHttpResponse::statusText();
+        this->state.getDiagnostics().error(value->loc(), message);
       }
     } else if (p.name == "headers") {
       this->checkHeadersInit(value);
@@ -237,19 +295,13 @@ void HttpChecker::checkRequestNew(NewExpr *expr) {
   if (!HttpChecker::isLibraryClass(input->type, "Request") &&
       !HttpChecker::isLibraryClass(input->type, "URL")) {
     if (std::optional<std::string> text = UrlChecker::literalText(input)) {
-      if (!UrlChecker::validUrlText(*text, false)) {
-        this->state.getDiagnostics().error(input->loc(), "'" + *text + "' is not a valid URL");
-      } else if (HttpChecker::hasCredentials(*text)) {
-        this->state.getDiagnostics().error(input->loc(),
-                                           "a request cannot go to a URL with a user name or "
-                                           "a password in it, as in node: send them in a "
-                                           "header, e.g. 'authorization'");
+      ResultRequestUrl url = HttpChecker::requestUrl(*text);
+      if (url.isErr()) {
+        this->state.getDiagnostics().error(input->loc(), url.error().message);
       }
     } else if (!UrlChecker(this->state).knownAbsolute(input)) {
-      this->state.getDiagnostics().error(
-          input->loc(), "'new Request' of a text known only when the program runs may fail, "
-                        "and 'new' gives no Result; parse the text with 'URL.parse(text)' "
-                        "and pass the URL, or give the text to fetch, which gives a Result");
+      std::string message = ErrorTextHttpRequest::unknown();
+      this->state.getDiagnostics().error(input->loc(), message);
     }
   }
   if (args.size() < 2) {
@@ -264,15 +316,12 @@ void HttpChecker::checkRequestNew(NewExpr *expr) {
   if (const ObjectLitExpr::Property *p = HttpChecker::property(init, "method")) {
     knownMethod = false;
     if (const std::u16string *text = HttpChecker::stringLiteral(p->value)) {
-      method = HttpChecker::utf8(*text);
+      method = ToUtf8::toUtf8(*text);
       std::string upper = llvm::StringRef(method).upper();
       knownMethod = true;
-      if (!HttpChecker::isToken(method)) {
-        this->state.getDiagnostics().error(p->value->loc(),
-                                           "'" + method + "' is not a valid HTTP method");
-      } else if (upper == "CONNECT" || upper == "TRACE" || upper == "TRACK") {
-        this->state.getDiagnostics().error(
-            p->value->loc(), "fetch does not make requests with method '" + method + "'");
+      ResultMethodName made = HttpChecker::methodName(method);
+      if (made.isErr()) {
+        this->state.getDiagnostics().error(p->value->loc(), made.error().message);
       }
       method = upper;
     }
@@ -280,12 +329,9 @@ void HttpChecker::checkRequestNew(NewExpr *expr) {
   const ObjectLitExpr::Property *body = HttpChecker::property(init, "body");
   if (body && knownMethod && (method == "GET" || method == "HEAD") &&
       HttpChecker::hasBody(body->value)) {
-    this->state.getDiagnostics().error(body->value->loc(),
-                                       "a " + method + " request has no body" +
-                                           (HttpChecker::property(init, "method")
-                                                ? ""
-                                                : " (a request without 'method' is a GET)") +
-                                           "; give the method, e.g. 'method: \"POST\"'");
+    bool given = HttpChecker::property(init, "method") != nullptr;
+    std::string message = ErrorTextHttpRequest::getBody(method, given);
+    this->state.getDiagnostics().error(body->value->loc(), message);
   }
   if (const ObjectLitExpr::Property *headers = HttpChecker::property(init, "headers")) {
     this->checkHeadersInit(headers->value);

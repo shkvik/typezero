@@ -10,6 +10,33 @@ using llvm::dyn_cast_or_null;
 
 namespace tz {
 
+const Expr *TzModulesChecker::uncast(const Expr *expr) {
+  while (auto *cast = dyn_cast<CastExpr>(expr)) {
+    expr = cast->operand;
+  }
+
+  return expr;
+}
+
+bool TzModulesChecker::plainTransport(const Expr *transport) {
+  auto *lit = dyn_cast<ObjectLitExpr>(TzModulesChecker::uncast(transport));
+  if (!lit) {
+    return false;
+  }
+  for (const ObjectLitExpr::Property &p : lit->props) {
+    if (p.spread()) {
+      return false;
+    }
+    if (p.name == "secure") {
+      auto *secure =
+          dyn_cast_or_null<BoolLitExpr>(p.value ? TzModulesChecker::uncast(p.value) : nullptr);
+      return secure && !secure->value;
+    }
+  }
+
+  return false;
+}
+
 bool TzModulesChecker::isExternalReference(const Type *type) {
   return type->isObject() || type->isArray() || type->isIterator() || type->isJson() ||
          type->isDict() || type->isPromise() || type->isUnknown();
@@ -37,23 +64,68 @@ bool TzModulesChecker::isExternalValue(const Type *type) {
 TzModulesChecker::TzModulesChecker(CheckState &owner)
     : state(owner) {}
 
+TzModulesChecker::ResultPlainSignature TzModulesChecker::plainSignature(const FunctionDecl *fn) {
+  if (!fn->typeParams.empty() || fn->sym->hasRest) {
+    std::string message = ErrorTextIntrinsic::plain();
+
+    return err(TzModulesCheckerPlainSignatureError{
+        .code = TzModulesCheckerPlainSignatureErrorCode::TYPE_PARAMS_OR_REST,
+        .message = message,
+    });
+  }
+
+  return ok(fn);
+}
+
+TzModulesChecker::ResultExternalParams TzModulesChecker::externalParam(const Param &param,
+                                                                       const Type *type) {
+  if (param.defaultValue() || param.optional()) {
+    std::string message = ErrorTextIntrinsic::optional();
+
+    return err(TzModulesCheckerExternalParamError{
+        .code = TzModulesCheckerExternalParamErrorCode::OPTIONAL_PARAM,
+        .message = message,
+    });
+  }
+  if (!type->isError() && !TzModulesChecker::isExternalValue(type)) {
+    std::string message = ErrorTextIntrinsic::takes(type->name());
+
+    return err(TzModulesCheckerExternalParamError{
+        .code = TzModulesCheckerExternalParamErrorCode::PARAM_TYPE,
+        .message = message,
+    });
+  }
+
+  return ok(type);
+}
+
+TzModulesChecker::ResultExternalReturn TzModulesChecker::externalReturn(const Type *ret,
+                                                                        const Type *declared) {
+  if (!ret->isVoid() && !ret->isError() && !TzModulesChecker::isExternalValue(ret)) {
+    std::string message = ErrorTextIntrinsic::gives(declared->name());
+
+    return err(TzModulesCheckerExternalReturnError{
+        .code = TzModulesCheckerExternalReturnErrorCode::RETURN_TYPE,
+        .message = message,
+    });
+  }
+
+  return ok(ret);
+}
+
 void TzModulesChecker::checkExternal(FunctionDecl *fn) {
   FuncSymbol *sym = fn->sym;
   ReturnInferrer(this->state).resolveParams(sym);
   fn->checked = true;
-  if (!fn->typeParams.empty() || sym->hasRest) {
-    this->state.getDiagnostics().error(
-        fn->loc(), "an intrinsic takes plain parameters: no type parameters, no rest");
+  ResultPlainSignature plain = TzModulesChecker::plainSignature(fn);
+  if (plain.isErr()) {
+    this->state.getDiagnostics().error(fn->loc(), plain.error().message);
     return;
   }
   for (size_t i = 0; i < fn->params.size(); ++i) {
-    const Type *type = sym->params[i];
-    if (fn->params[i].defaultValue() || fn->params[i].optional()) {
-      this->state.getDiagnostics().error(fn->params[i].loc,
-                                         "an intrinsic has no optional parameters");
-    } else if (!type->isError() && !TzModulesChecker::isExternalValue(type)) {
-      this->state.getDiagnostics().error(
-          fn->params[i].loc, "an intrinsic cannot take a value of type '" + type->name() + "'");
+    ResultExternalParams param = TzModulesChecker::externalParam(fn->params[i], sym->params[i]);
+    if (param.isErr()) {
+      this->state.getDiagnostics().error(fn->params[i].loc, param.error().message);
     }
   }
   const Type *ret = sym->ret;
@@ -67,9 +139,9 @@ void TzModulesChecker::checkExternal(FunctionDecl *fn) {
   if (ret->isResult()) {
     ret = ret->okType();
   }
-  if (!ret->isVoid() && !ret->isError() && !TzModulesChecker::isExternalValue(ret)) {
-    this->state.getDiagnostics().error(fn->loc(), "an intrinsic cannot give a value of type '" +
-                                                      sym->ret->name() + "'");
+  ResultExternalReturn given = TzModulesChecker::externalReturn(ret, sym->ret);
+  if (given.isErr()) {
+    this->state.getDiagnostics().error(fn->loc(), given.error().message);
   }
 }
 
@@ -171,37 +243,11 @@ void TzModulesChecker::noteServer(const NewExpr *made) {
   this->noteServeOptions(args[0]);
 }
 
-static const Expr *uncast(const Expr *expr) {
-  while (auto *cast = dyn_cast<CastExpr>(expr)) {
-    expr = cast->operand;
-  }
-
-  return expr;
-}
-
-static bool plainTransport(const Expr *transport) {
-  auto *lit = dyn_cast<ObjectLitExpr>(uncast(transport));
-  if (!lit) {
-    return false;
-  }
-  for (const ObjectLitExpr::Property &p : lit->props) {
-    if (p.spread()) {
-      return false;
-    }
-    if (p.name == "secure") {
-      auto *secure = dyn_cast_or_null<BoolLitExpr>(p.value ? uncast(p.value) : nullptr);
-      return secure && !secure->value;
-    }
-  }
-
-  return false;
-}
-
 void TzModulesChecker::noteServeOptions(const Expr *options) {
-  options = uncast(options);
+  options = TzModulesChecker::uncast(options);
   if (auto *lit = dyn_cast<ObjectLitExpr>(options)) {
     auto secured = [](const ObjectLitExpr::Property &p) {
-      return p.spread() || (p.name == "transport" && !plainTransport(p.value));
+      return p.spread() || (p.name == "transport" && !TzModulesChecker::plainTransport(p.value));
     };
     if (llvm::any_of(lit->props, secured)) {
       this->state.getProgramUse().markUsesTls();

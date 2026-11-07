@@ -7,25 +7,22 @@
 
 namespace tz {
 
-namespace {
+SourcePlaces::SourcePlaces(const llvm::SourceMgr &sourceMgr)
+    : sourceMgr_(sourceMgr) {}
 
-bool isWordByte(char c) {
+bool SourcePlaces::isWordByte(char c) {
   unsigned char byte = static_cast<unsigned char>(c);
 
   return byte >= 0x80 || (byte >= 'a' && byte <= 'z') || (byte >= 'A' && byte <= 'Z') ||
          (byte >= '0' && byte <= '9') || byte == '_' || byte == '$';
 }
 
-}
-
-SourcePlaces::SourcePlaces(const llvm::SourceMgr &sourceMgr) : sourceMgr_(sourceMgr) {}
-
 const char *SourcePlaces::tokenEnd(const char *at, const char *end) {
   if (at == end) {
     return at;
   }
-  if (isWordByte(*at)) {
-    while (at < end && isWordByte(*at)) {
+  if (SourcePlaces::isWordByte(*at)) {
+    while (at < end && SourcePlaces::isWordByte(*at)) {
       ++at;
     }
     return at;

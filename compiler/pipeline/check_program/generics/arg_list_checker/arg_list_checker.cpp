@@ -1,4 +1,5 @@
 #include "compiler/pipeline/check_program/generics/arg_list_checker/arg_list_checker.h"
+#include "compiler/load/to_utf8/to_utf8.h"
 #include "compiler/pipeline/check_program/ast_walker/ast_walker.h"
 #include "compiler/pipeline/check_program/declare/class_declarer/class_declarer.h"
 #include "compiler/pipeline/check_program/flow/flow_checker/flow_checker.h"
@@ -14,15 +15,6 @@ using llvm::dyn_cast;
 using llvm::isa;
 
 namespace tz {
-
-std::string ArgListChecker::utf8(const std::u16string &text) {
-  std::string out;
-  llvm::convertUTF16ToUTF8String(
-      llvm::ArrayRef<llvm::UTF16>(reinterpret_cast<const llvm::UTF16 *>(text.data()), text.size()),
-      out);
-
-  return out;
-}
 
 bool ArgListChecker::usedAsValue(const Stmt *body, llvm::StringRef name, bool known) {
   llvm::SmallPtrSet<const Expr *, 4> spreads;
@@ -106,7 +98,7 @@ const Type *ArgListChecker::memberType(const Type *object, const Type *key) {
       if (!name->isStringLiteral()) {
         return nullptr;
       }
-      const Field *field = object->field(ArgListChecker::utf8(name->literalText()));
+      const Field *field = object->field(ToUtf8::toUtf8(name->literalText()));
       if (!field) {
         return nullptr;
       }
@@ -129,7 +121,7 @@ void ArgListChecker::expandArgumentList(FunctionDecl *fn, FuncSymbol *sym) {
   std::vector<const Type *> flat;
   size_t minArgs = sym->minArgs;
   bool hasRest = sym->hasRest;
-  if (!flattenArguments(sym->params, minArgs, hasRest, flat)) {
+  if (!ArgumentLists::flattenArguments(sym->params, minArgs, hasRest, flat)) {
     return;
   }
   Param rest = fn->params.back();

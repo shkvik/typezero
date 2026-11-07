@@ -12,41 +12,101 @@ namespace tz {
 WeakRefChecker::WeakRefChecker(CheckState &owner)
     : state(owner) {}
 
-const Type *WeakRefChecker::resolveWeakRefType(const TypeRef &ref) {
+WeakRefChecker::ResultTargetIsWritten WeakRefChecker::targetWritten(const TypeRef &ref) {
   if (ref.kind() != TypeRefKind::GENERIC_REF || ref.args.size() != 1) {
-    this->state.getDiagnostics().error(
-        ref.loc, "'WeakRef' needs the type of its object, e.g. 'WeakRef<Node>'");
+    std::string message = ErrorTextWeakRef::noTarget();
+
+    return err(WeakRefCheckerTargetWrittenError{
+        .code = WeakRefCheckerTargetWrittenErrorCode::NO_TARGET_TYPE,
+        .message = message,
+    });
+  }
+
+  return ok(&ref.args[0]);
+}
+
+WeakRefChecker::ResultWeakTargetValid WeakRefChecker::weakTarget(const Type *target) {
+  bool unsupported = target->isRegExp() || target->isMatch() || target->isDate() ||
+                     target->isDateFormat() || target->isBytes() || target->isTimer();
+  if (unsupported) {
+    std::string message = ErrorTextWeakTarget::notYet(target->name());
+
+    return err(WeakRefCheckerWeakTargetError{
+        .code = WeakRefCheckerWeakTargetErrorCode::NOT_SUPPORTED_YET,
+        .message = message,
+    });
+  }
+  bool object = target->isObject() && !target->isAnyObject() && !target->isWeakRef();
+  if (!object) {
+    std::string message = ErrorTextWeakTarget::notObject(target->name(), target->isOptional());
+
+    return err(WeakRefCheckerWeakTargetError{
+        .code = WeakRefCheckerWeakTargetErrorCode::NOT_AN_OBJECT,
+        .message = message,
+    });
+  }
+
+  return ok(target);
+}
+
+WeakRefChecker::ResultNewTakesOneArgs WeakRefChecker::newArgs(const NewExpr *expr) {
+  if (expr->args.size() != 1) {
+    std::string message = ErrorTextWeakRef::oneObject();
+
+    return err(WeakRefCheckerNewArgsError{
+        .code = WeakRefCheckerNewArgsErrorCode::NOT_ONE_OBJECT,
+        .message = message,
+    });
+  }
+
+  return ok(expr);
+}
+
+WeakRefChecker::ResultNewTypeArgsFits WeakRefChecker::newTypeArgs(const NewExpr *expr) {
+  if (expr->typeArgs.size() > 1) {
+    std::string message = ErrorTextWeakRef::typeArgs();
+
+    return err(WeakRefCheckerNewTypeArgsError{
+        .code = WeakRefCheckerNewTypeArgsErrorCode::SEVERAL_TYPE_ARGUMENTS,
+        .message = message,
+    });
+  }
+
+  return ok(expr);
+}
+
+WeakRefChecker::ResultMethodIsDerefed WeakRefChecker::methodName(const MemberExpr *member,
+                                                                 const Type *type) {
+  if (member->name != "deref") {
+    std::string message = ErrorTextWeakRef::noMethod(member->name, type->name());
+
+    return err(WeakRefCheckerMethodNameError{
+        .code = WeakRefCheckerMethodNameErrorCode::NO_SUCH_METHOD,
+        .message = message,
+    });
+  }
+
+  return ok(member);
+}
+
+const Type *WeakRefChecker::resolveWeakRefType(const TypeRef &ref) {
+  ResultTargetIsWritten written = WeakRefChecker::targetWritten(ref);
+  if (written.isErr()) {
+    this->state.getDiagnostics().error(ref.loc, written.error().message);
     return Type::error();
   }
-  const Type *target = TypeResolver(this->state).resolveType(ref.args[0], false);
+  const TypeRef &targetRef = *written.value();
+  const Type *target = TypeResolver(this->state).resolveType(targetRef, false);
   if (target->isError()) {
     return target;
   }
-
-  return this->checkWeakTarget(target, ref.args[0].loc) ? Type::weakRef(target) : Type::error();
-}
-
-bool WeakRefChecker::checkWeakTarget(const Type *target, llvm::SMLoc loc) {
-  if (target->isRegExp() || target->isMatch() || target->isDate() || target->isDateFormat() ||
-      target->isBytes() || target->isTimer()) {
-    this->state.getDiagnostics().error(
-        loc, "a WeakRef of '" + target->name().str() +
-                 "' is not supported yet; it refers to objects of the program's types");
-    return false;
+  ResultWeakTargetValid object = WeakRefChecker::weakTarget(target);
+  if (object.isErr()) {
+    this->state.getDiagnostics().error(targetRef.loc, object.error().message);
+    return Type::error();
   }
-  if (target->isObject() && !target->isAnyObject() && !target->isWeakRef()) {
-    return true;
-  }
-  std::string message =
-      "a WeakRef refers to an object, not to a value of type '" + target->name().str() + "'";
-  if (target->isOptional()) {
-    message += "; make it of the object and check for undefined before";
-  } else {
-    message += "; hold the value itself";
-  }
-  this->state.getDiagnostics().error(loc, message);
 
-  return false;
+  return Type::weakRef(target);
 }
 
 Expr *WeakRefChecker::checkWeakRefNew(NewExpr *expr, const Type *expected) {
@@ -61,32 +121,34 @@ Expr *WeakRefChecker::checkWeakRefNew(NewExpr *expr, const Type *expected) {
 
     return error;
   };
-  if (expr->args.size() != 1) {
-    this->state.getDiagnostics().error(
-        loc, "'new WeakRef' takes the object it refers to, e.g. 'new WeakRef(node)'");
+  ResultNewTakesOneArgs args = WeakRefChecker::newArgs(expr);
+  if (args.isErr()) {
+    this->state.getDiagnostics().error(loc, args.error().message);
     return failed();
   }
   const Type *target = nullptr;
-  if (expr->typeArgs.size() == 1) {
+  ResultNewTypeArgsFits typeArgs = WeakRefChecker::newTypeArgs(expr);
+  if (typeArgs.isErr()) {
+    this->state.getDiagnostics().error(loc, typeArgs.error().message);
+  } else if (expr->typeArgs.size() == 1) {
     target = TypeResolver(this->state).resolveType(expr->typeArgs[0], false);
-  } else if (!expr->typeArgs.empty()) {
-    this->state.getDiagnostics().error(loc,
-                                       "'WeakRef' takes one type argument, the type of its object");
   } else if (expected && expected->nonOptional()->isWeakRef()) {
     target = expected->nonOptional()->weakTarget();
   }
   if (target && target->isError()) {
     return failed();
   }
-  Expr *arg = GenericChecker(this->state)
-                  .apparent(ExprChecker(this->state).checkExpr(expr->args[0], target));
+  Expr *checked = ExprChecker(this->state).checkExpr(expr->args[0], target);
+  Expr *arg = GenericChecker(this->state).apparent(checked);
   if (arg->type->isError()) {
     return arg;
   }
   if (!target) {
     target = arg->type;
   }
-  if (!this->checkWeakTarget(target, arg->loc())) {
+  ResultWeakTargetValid object = WeakRefChecker::weakTarget(target);
+  if (object.isErr()) {
+    this->state.getDiagnostics().error(arg->loc(), object.error().message);
     return arg;
   }
   arg = TypeRelations(this->state).coerce(arg, target);
@@ -98,10 +160,9 @@ Expr *WeakRefChecker::checkWeakRefNew(NewExpr *expr, const Type *expected) {
 Expr *WeakRefChecker::checkWeakRefMethod(CallExpr *call, MemberExpr *member) {
   const Type *type = member->object->type;
   call->type = Type::error();
-  if (member->name != "deref") {
-    this->state.getDiagnostics().error(member->loc(), "property '" + member->name +
-                                                          "' does not exist on type '" +
-                                                          type->name() + "'; it has 'deref()'");
+  ResultMethodIsDerefed deref = WeakRefChecker::methodName(member, type);
+  if (deref.isErr()) {
+    this->state.getDiagnostics().error(member->loc(), deref.error().message);
     for (Expr *&arg : call->args) {
       arg = ExprChecker(this->state).checkExpr(arg);
     }

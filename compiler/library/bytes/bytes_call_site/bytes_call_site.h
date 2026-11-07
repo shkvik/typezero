@@ -8,16 +8,13 @@ namespace tz {
 
 enum BytesField : unsigned { kRefCount, kLayout, kData, kLength, kOffset, kBuffer };
 
-int64_t constantOf(const Expr *e);
-bool isConstant(const Expr *e);
-llvm::StructType *bytesStruct(llvm::LLVMContext &ctx);
-bool isSignedKind(Bytes kind);
-
 class BytesCallSite {
 public:
   BytesCallSite(Lowering &lowering, CallExpr *call);
 
 protected:
+  static int64_t constantOf(const Expr *e);
+
   llvm::FunctionCallee fn(llvm::StringRef name, llvm::Type *ret,
                           llvm::ArrayRef<llvm::Type *> params);
   llvm::ConstantInt *kindOf(const Type *t);

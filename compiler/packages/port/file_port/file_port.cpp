@@ -20,9 +20,7 @@ namespace tz::pkg {
 namespace fs = llvm::sys::fs;
 namespace path = llvm::sys::path;
 
-namespace {
-
-bool isOperandEnd(const Token &t) {
+bool FilePort::isOperandEnd(const Token &t) {
   switch (t.kind) {
   case Tok::Identifier:
   case Tok::IntLiteral:
@@ -42,7 +40,7 @@ bool isOperandEnd(const Token &t) {
   }
 }
 
-std::string templateText(llvm::StringRef literal) {
+std::string FilePort::templateText(llvm::StringRef literal) {
   llvm::StringRef raw = literal.drop_front().drop_back();
   std::string out;
   for (size_t i = 0; i < raw.size(); ++i) {
@@ -62,10 +60,8 @@ std::string templateText(llvm::StringRef literal) {
   return out;
 }
 
-}
-
 void FilePort::retokenize() {
-  toks_ = tokenize(text_);
+  toks_ = Scanner::tokenize(text_);
   close_.assign(toks_.size(), std::string::npos);
   std::vector<size_t> open;
   for (size_t i = 0; i < toks_.size(); ++i) {
@@ -240,7 +236,7 @@ void FilePort::modules() {
         !(isName(i - 1, "from") || (isName(i - 1, "import") && !afterDot(i - 1)))) {
       continue;
     }
-    std::string spec = stringValue(toks_[i]);
+    std::string spec = Scanner::stringValue(toks_[i]);
     llvm::StringRef ref(spec);
     llvm::StringRef ext = path::extension(ref, path::Style::posix);
     if (!(ref.starts_with("./") || ref.starts_with("../")) || ref.ends_with(".d.ts") ||
@@ -304,8 +300,8 @@ void FilePort::exportList(size_t open, size_t close) {
   }
   std::string target;
   if (isName(close + 1, "from") && is(close + 2, Tok::StringLiteral)) {
-    std::string spec = stringValue(toks_[close + 2]);
-    std::string file = resolveRelative(file_, spec, Sources::TypeScript);
+    std::string spec = Scanner::stringValue(toks_[close + 2]);
+    std::string file = Scanner::resolveRelative(file_, spec, Sources::TypeScript);
     llvm::SmallString<256> real;
     if (!file.empty() && !fs::real_path(file, real)) {
       if (auto it = ctx_.defaultNames.find(std::string(real)); it != ctx_.defaultNames.end()) {
@@ -355,7 +351,7 @@ bool FilePort::members(const std::string &name, size_t skipBegin, size_t skipEnd
       return false;
     }
     std::string member = toks_[j + 2].text.str();
-    std::string local = own.contains(member) ? name + capitalize(member) : member;
+    std::string local = own.contains(member) ? name + PortNames::capitalize(member) : member;
     uses.push_back({at(j), endOf(j + 2), local, nullptr, ""});
     if (seen.insert(member).second) {
       items.push_back(local == member ? member : member + " as " + local);
@@ -396,11 +392,11 @@ void FilePort::importDecl(size_t i) {
     ++c;
   }
   size_t clauseBegin = c;
-  std::string spec = stringValue(toks_[from + 1]);
+  std::string spec = Scanner::stringValue(toks_[from + 1]);
   llvm::StringRef specRef(spec);
 
   std::string package, source, sub;
-  if (splitJsrImport(specRef, package, source, sub)) {
+  if (Specifier::splitJsrImport(specRef, package, source, sub)) {
     char quote = toks_[from + 1].text.front();
     add(at(from + 1), endOf(from + 1), std::string(1, quote) + package + sub + quote,
         "'jsr:' imports became package names in package.json");
@@ -449,7 +445,7 @@ void FilePort::importDecl(size_t i) {
   if (!defaultName.empty()) {
     std::string exported;
     if (relative) {
-      std::string target = resolveRelative(file_, spec, Sources::TypeScript);
+      std::string target = Scanner::resolveRelative(file_, spec, Sources::TypeScript);
       llvm::SmallString<256> real;
       if (!target.empty() && !fs::real_path(target, real)) {
         if (auto it = ctx_.defaultNames.find(std::string(real)); it != ctx_.defaultNames.end()) {
@@ -778,7 +774,7 @@ void FilePort::concatenations() {
     for (size_t k = first; k < parts.size(); ++k) {
       auto [from, to] = parts[k];
       if (is(from, Tok::StringLiteral) && to == from + 1) {
-        out += templateText(toks_[from].text);
+        out += FilePort::templateText(toks_[from].text);
       } else if (literal(parts[k])) {
         out += llvm::StringRef(source(from, to)).drop_front().drop_back().str();
       } else {
@@ -816,7 +812,7 @@ void FilePort::manual() {
       continue;
     }
 
-    if (t.is(Tok::KwAs) && !inList && i > 0 && isOperandEnd(toks_[i - 1])) {
+    if (t.is(Tok::KwAs) && !inList && i > 0 && FilePort::isOperandEnd(toks_[i - 1])) {
       if (is(i + 1, Tok::KwConst)) {
         note(i, "'as const' is not supported: declare the type of the value instead, e.g. a "
                 "union of literal types");
@@ -855,7 +851,7 @@ void FilePort::manual() {
       continue;
     }
     llvm::StringRef name = t.text;
-    if (name == "satisfies" && i > 0 && isOperandEnd(toks_[i - 1])) {
+    if (name == "satisfies" && i > 0 && FilePort::isOperandEnd(toks_[i - 1])) {
       note(i, "'satisfies' is not supported: declare the type of the variable instead, or "
               "remove it");
     } else if (name == "asserts" && i > 0 && is(i - 1, Tok::Colon) && is(i + 1, Tok::Identifier) &&
@@ -918,14 +914,15 @@ void FilePort::manual() {
     } else if (name == "export" && is(i + 1, Tok::Star) && is(i + 2, Tok::KwAs)) {
       note(i, "'export * as' is not supported: export the names, or 'export *'");
     } else if (name == "from" && is(i + 1, Tok::StringLiteral)) {
-      std::string spec = stringValue(toks_[i + 1]);
+      std::string spec = Scanner::stringValue(toks_[i + 1]);
       llvm::StringRef s = spec;
       std::string package, sub;
       if (s.starts_with("npm:")) {
         note(i + 1, "npm packages are not supported (docs/packages.md): take the package from "
                     "JSR or git, adapted for tz, or do without it");
-      } else if (!s.starts_with(".") && !s.contains(':') && !isBuiltinModule(s) &&
-                 s != "neverthrow" && splitPackageSpecifier(s, package, sub) &&
+      } else if (!s.starts_with(".") && !s.contains(':') &&
+                 !BuiltinModulePaths::isBuiltinModule(s) && s != "neverthrow" &&
+                 Specifier::splitPackageSpecifier(s, package, sub) &&
                  !ctx_.jsrDependencies.count(package) && notedPackages_.insert(package).second) {
         note(i + 1, "'" + package +
                         "' is another package: add it to package.json once it is adapted for tz "

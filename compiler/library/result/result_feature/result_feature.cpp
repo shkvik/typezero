@@ -33,7 +33,9 @@ Expr *ResultFeature::checkFunctionCall(CheckState &state, CallExpr *call, NameEx
   return ResultChecker(state).checkResultCall(call, name, expected);
 }
 
-bool ResultFeature::lowers(Builtin builtin) const { return isResultBuiltin(builtin); }
+bool ResultFeature::lowers(Builtin builtin) const {
+  return BuiltinGroups::isResultBuiltin(builtin);
+}
 
 llvm::Value *ResultFeature::lowerCall(Lowering &lowering, CallExpr *call) const {
   return lowering.resultLowerer().emitResultCall(call);

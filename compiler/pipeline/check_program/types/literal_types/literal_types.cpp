@@ -169,7 +169,7 @@ const Type *LiteralTypes::unionUnify(const Type *a, const Type *b) {
     return nullptr;
   }
   const Type *joined = Type::unionOf({a, b});
-  if (joined->isError() || !unionProblem(joined).empty()) {
+  if (joined->isError() || !UnionSlots::unionProblem(joined).empty()) {
     return nullptr;
   }
 
@@ -317,7 +317,7 @@ const Type *LiteralTypes::literalMember(const ObjectLitExpr *lit, const Type *ta
     bool mismatch = false;
     for (const ObjectLitExpr::Property &p : lit->props) {
       const Field *f = m->field(p.name);
-      const Type *tag = f && p.value ? writtenLiteral(p.value) : nullptr;
+      const Type *tag = f && p.value ? UnionCheckHelpers::writtenLiteral(p.value) : nullptr;
       if (!tag && f && p.value) {
         tag = this->enumTag(p.value);
       }

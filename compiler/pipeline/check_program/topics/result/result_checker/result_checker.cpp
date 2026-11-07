@@ -44,15 +44,6 @@ const Expr *ResultChecker::unconverted(const Expr *expr) {
   return expr;
 }
 
-static std::string noUnion(const Type *a, const Type *b) {
-  if (a->isVoid() || b->isVoid()) {
-    return ": one of them is nothing, 'ok()'";
-  }
-  std::string problem = unionProblem(Type::unionOf({a, b}));
-
-  return problem.empty() ? "" : ": " + problem;
-}
-
 ResultChecker::ResultChecker(CheckState &owner)
     : state(owner) {}
 
@@ -63,6 +54,19 @@ Expr *ResultChecker::checkResultCall(CallExpr *call, NameExpr *name, const Type 
   }
 
   return this->checkOkErr(call, name, which == "ok", expected);
+}
+
+ResultChecker::ResultOkErrTypeArgs ResultChecker::okErrTypeArgs(const NameExpr *name) {
+  if (!name->typeArgs.empty()) {
+    std::string message = ErrorTextOkErr::typeArgs(name->name);
+
+    return err(ResultCheckerOkErrTypeArgsError{
+        .code = ResultCheckerOkErrTypeArgsErrorCode::NOT_TWO_TYPE_ARGUMENTS,
+        .message = message,
+    });
+  }
+
+  return ok(name);
 }
 
 Expr *ResultChecker::checkOkErr(CallExpr *call, NameExpr *name, bool isOk, const Type *expected) {
@@ -89,10 +93,12 @@ Expr *ResultChecker::checkOkErr(CallExpr *call, NameExpr *name, bool isOk, const
       return call;
     }
     wanted = Type::result(value, error);
-  } else if (!name->typeArgs.empty()) {
-    return this->reject(call, name->loc(),
-                        "'" + name->name.str() + "' takes two type arguments: '" +
-                            name->name.str() + "<T, E>(...)'");
+  } else {
+    ResultOkErrTypeArgs typeArgs = ResultChecker::okErrTypeArgs(name);
+    if (typeArgs.isErr()) {
+      this->state.getDiagnostics().error(name->loc(), typeArgs.error().message);
+      return this->markCallFailed(call);
+    }
   }
   const Type *wantedHalf = wanted ? (isOk ? wanted->okType() : wanted->errType()) : nullptr;
   const Type *half = Type::voidTy();
@@ -102,9 +108,8 @@ Expr *ResultChecker::checkOkErr(CallExpr *call, NameExpr *name, bool isOk, const
     arg = ExprChecker(this->state).checkExpr(arg, hinted ? wantedHalf : nullptr);
     half = arg->type;
     if (half->isVoid()) {
-      this->state.getDiagnostics().error(
-          arg->loc(),
-          "an expression of type 'void' has no value to keep; write '" + name->name + "()'");
+      std::string message = ErrorTextOkErr::voidValue(name->name);
+      this->state.getDiagnostics().error(arg->loc(), message);
       half = Type::error();
     } else if (hinted && TypeRelations::isImplicitlyConvertible(half, wantedHalf)) {
       arg = TypeRelations(this->state).convert(arg, wantedHalf);
@@ -135,12 +140,25 @@ void ResultChecker::checkArgsLoosely(CallExpr *call) {
   }
 }
 
-Expr *ResultChecker::reject(CallExpr *call, llvm::SMLoc loc, const std::string &why) {
-  this->state.getDiagnostics().error(loc, why);
+Expr *ResultChecker::markCallFailed(CallExpr *call) {
   this->checkArgsLoosely(call);
   call->type = Type::error();
 
   return call;
+}
+
+ResultChecker::ResultStaticIsKnown ResultChecker::staticMethod(const NameExpr *name,
+                                                               llvm::StringRef method) {
+  if (method != "combine" && method != "combineWithAllErrors") {
+    std::string message = ErrorTextCombine::noStatic(name->name, method);
+
+    return err(ResultCheckerStaticMethodError{
+        .code = ResultCheckerStaticMethodErrorCode::NO_SUCH_STATIC_METHOD,
+        .message = message,
+    });
+  }
+
+  return ok(method);
 }
 
 Expr *ResultChecker::checkResultStatic(CallExpr *call, MemberExpr *member) {
@@ -150,11 +168,10 @@ Expr *ResultChecker::checkResultStatic(CallExpr *call, MemberExpr *member) {
     return nullptr;
   }
   llvm::StringRef method = member->name;
-  if (method != "combine" && method != "combineWithAllErrors") {
-    return this->reject(call, member->loc(),
-                        "'" + name->name.str() + "." + method.str() +
-                            "' does not exist; Result has 'combine' and "
-                            "'combineWithAllErrors'");
+  ResultStaticIsKnown staticMethod = ResultChecker::staticMethod(name, method);
+  if (staticMethod.isErr()) {
+    this->state.getDiagnostics().error(member->loc(), staticMethod.error().message);
+    return this->markCallFailed(call);
   }
   bool rejected = CallChecker(this->state).rejectSpread(call);
   ArgumentChecker::ResultArityMatches arity =
@@ -173,11 +190,9 @@ Expr *ResultChecker::checkResultStatic(CallExpr *call, MemberExpr *member) {
     if (ResultChecker::givesType(result->okType()) && !(all && result->errType()->isVoid())) {
       return true;
     }
-    this->state.getDiagnostics().error(
-        at->loc(), "'" + what + "' needs Results that hold " +
-                       (ResultChecker::givesType(result->okType()) ? "errors" : "values") +
-                       ", found '" + result->name() +
-                       "'; check them one by one, e.g. with 'every(r => r.isOk())'");
+    bool values = ResultChecker::givesType(result->okType());
+    std::string message = ErrorTextCombine::holds(what, values, result->name());
+    this->state.getDiagnostics().error(at->loc(), message);
 
     return false;
   };
@@ -200,9 +215,9 @@ Expr *ResultChecker::checkResultStatic(CallExpr *call, MemberExpr *member) {
     }
     auto other = llvm::find_if(results, [](const Type *t) { return !t->isResult(); });
     if (other != results.end()) {
+      std::string message = ErrorTextCombine::notResult(what, (*other)->name());
       this->state.getDiagnostics().error(lit->elements[other - results.begin()].expr->loc(),
-                                         "'" + what + "' takes Results, found '" +
-                                             (*other)->name() + "'");
+                                         message);
       return call;
     }
     auto sameValues = [](const Type *a, const Type *b) -> const Type * {
@@ -240,10 +255,8 @@ Expr *ResultChecker::checkResultStatic(CallExpr *call, MemberExpr *member) {
       values.push_back(results[i]->okType());
       const Type *before = error;
       if (!(error = ResultTypes::unifyHalf(error, results[i]->errType()))) {
-        this->state.getDiagnostics().error(
-            lit->elements[i].expr->loc(),
-            "the Results given to '" + what + "' have errors that no union holds" +
-                noUnion(before, results[i]->errType()) + "; convert them with 'mapErr'");
+        std::string message = ErrorTextCombine::noUnion(what, before, results[i]->errType());
+        this->state.getDiagnostics().error(lit->elements[i].expr->loc(), message);
 
         return call;
       }
@@ -259,8 +272,8 @@ Expr *ResultChecker::checkResultStatic(CallExpr *call, MemberExpr *member) {
     return call;
   }
   if (!type->isArray() || !type->inner()->isResult()) {
-    this->state.getDiagnostics().error(
-        arg->loc(), "'" + what + "' takes an array of Results, found '" + type->name() + "'");
+    std::string message = ErrorTextCombine::notArray(what, type->name());
+    this->state.getDiagnostics().error(arg->loc(), message);
     return call;
   }
   const Type *element = type->inner();
@@ -293,70 +306,80 @@ Expr *ResultChecker::checkResultMember(MemberExpr *member) {
       member->type = ResultChecker::halfParam(type->okType());
       return defined(member);
     }
-    this->state.getDiagnostics().error(
-        member->loc(), "'value' is there only when the Result is an Ok: check it first, 'if (" + r +
-                           ".isOk())', or use 'match' or 'unwrapOr'");
+    std::string message = ErrorTextResultMember::value(r);
+    this->state.getDiagnostics().error(member->loc(), message);
   } else if (name == "error") {
     if (type->okType()->isNever()) {
       member->type = ResultChecker::halfParam(type->errType());
       return defined(member);
     }
-    this->state.getDiagnostics().error(
-        member->loc(), "'error' is there only when the Result is an Err: check it first, 'if (" +
-                           r + ".isErr())', or use 'match'");
+    std::string message = ErrorTextResultMember::error(r);
+    this->state.getDiagnostics().error(member->loc(), message);
   } else {
     static const char *const methods[] = {"isOk",    "isErr",  "map",       "mapErr",
                                           "andThen", "orElse", "match",     "unwrapOr",
                                           "andTee",  "orTee",  "andThrough"};
-    if (llvm::is_contained(methods, name)) {
-      this->state.getDiagnostics().error(member->loc(), "'" + name +
-                                                            "' is a method of Result; call it: '" +
-                                                            r + "." + name + "(...)'");
-    } else {
-      this->state.getDiagnostics().error(
-          member->loc(), "property '" + name + "' does not exist on type '" + type->name() + "'");
-    }
+    std::string message = llvm::is_contained(methods, name)
+                              ? ErrorTextResultMember::method(name, r)
+                              : ErrorTextResultMember::noMember(name, type->name());
+    this->state.getDiagnostics().error(member->loc(), message);
   }
 
   return member;
 }
 
-void ResultChecker::checkDiscarded(const Expr *expr, bool callback, llvm::SMLoc at) {
+ResultChecker::ResultValueGetsUsed ResultChecker::usedValue(const Expr *expr, bool callback,
+                                                            llvm::SMLoc at) {
   const Type *type = expr->type;
   if (type && type->holdsPromises()) {
     AsyncChecker::ResultPromiseHandled handled =
         AsyncChecker(this->state).checkDiscardedPromise(expr, callback, at);
     if (handled.isErr()) {
-      this->state.getDiagnostics().error(expr->loc(), handled.error().message);
+      return err(ResultCheckerUsedValueError{
+          .code = ResultCheckerUsedValueErrorCode::PROMISE_DROPPED,
+          .message = handled.error().message,
+      });
     }
-    return;
+    return ok(expr);
   }
   if (!type || !type->holdsResults() || isa<AssignExpr>(expr)) {
-    return;
+    return ok(expr);
   }
   auto *call = dyn_cast<CallExpr>(expr);
-  if (call && (call->builtin() == Builtin::ArrPop || call->builtin() == Builtin::ArrShift ||
-               call->builtin() == Builtin::ArrSplice)) {
-    return;
+  bool taken =
+      call && (call->builtin() == Builtin::ArrPop || call->builtin() == Builtin::ArrShift ||
+               call->builtin() == Builtin::ArrSplice);
+  if (taken) {
+    return ok(expr);
   }
   if (!type->nonOptional()->isResult()) {
-    if (call && (call->builtin() == Builtin::ArrMap || call->builtin() == Builtin::ArrFlatMap)) {
-      this->state.getDiagnostics().error(
-          expr->loc(), "the Results are not used, so errors in them would go unchecked; "
-                       "handle them, e.g. with 'Result.combine(...)', or keep them in a "
-                       "variable");
+    bool mapped =
+        call && (call->builtin() == Builtin::ArrMap || call->builtin() == Builtin::ArrFlatMap);
+    if (mapped) {
+      std::string message = ErrorTextUnusedResult::results();
+
+      return err(ResultCheckerUsedValueError{
+          .code = ResultCheckerUsedValueErrorCode::RESULTS_UNUSED,
+          .message = message,
+      });
     }
-    return;
+    return ok(expr);
   }
   if (callback) {
-    this->state.getDiagnostics().error(
-        expr->loc(), "the function returns a Result that its caller drops, so an error in it "
-                     "would go unchecked; handle it here, e.g. with '.match(...)'");
-  } else {
-    this->state.getDiagnostics().error(
-        expr->loc(), "the Result is not used, so an error in it would go unchecked; handle "
-                     "it, e.g. with '.match(...)', or keep it in a variable and check it");
+    std::string message = ErrorTextUnusedResult::callback();
+
+    return err(ResultCheckerUsedValueError{
+        .code = ResultCheckerUsedValueErrorCode::CALLBACK_RESULT_DROPPED,
+        .message = message,
+    });
   }
+
+  std::string message = ErrorTextUnusedResult::result();
+
+  return err(ResultCheckerUsedValueError{
+      .code = ResultCheckerUsedValueErrorCode::RESULT_UNUSED,
+      .message = message,
+  });
 }
 
 void ResultChecker::addResultFacts(const Expr *cond, Flow &whenTrue, Flow &whenFalse) const {

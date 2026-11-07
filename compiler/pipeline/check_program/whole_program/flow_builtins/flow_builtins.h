@@ -6,13 +6,13 @@ namespace tz {
 
 class FlowBuiltins {
 public:
-  explicit FlowBuiltins(Flows &flows);
+  explicit FlowBuiltins(Flows &owner);
 
   Refs builtin(CallExpr *c, MemberExpr *member, const Refs &receiver,
                const std::vector<Refs> &args);
 
 private:
-  Flows &flows_;
+  Flows &flows;
 };
 
 }

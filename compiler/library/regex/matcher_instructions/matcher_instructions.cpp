@@ -54,7 +54,7 @@ bool MatcherInstructions::literalUnit(uint32_t pc, uint32_t &unit, uint32_t &fol
 uint32_t MatcherInstructions::literalRun(uint32_t pc) const {
   uint32_t run = 0, unit, fold;
   for (uint32_t at = pc; at < builder_.codeSize_ && literalUnit(at, unit, fold);
-       at += instructionSize(builder_.code_, at)) {
+       at += MatcherBuilder::instructionSize(builder_.code_, at)) {
     if (at != pc && builder_.leader_[at]) {
       break;
     }
@@ -70,7 +70,7 @@ uint32_t MatcherInstructions::emitLiteralRun(uint32_t pc, uint32_t run) {
     uint32_t unit, fold;
     literalUnit(pc, unit, fold);
     units.push_back({unit, fold});
-    pc += instructionSize(builder_.code_, pc);
+    pc += MatcherBuilder::instructionSize(builder_.code_, pc);
   }
   llvm::Type *i64 = builder_.b_.getInt64Ty();
   Value *pos = builder_.load(builder_.pos_);
@@ -107,7 +107,7 @@ uint32_t MatcherInstructions::emitLiteralRun(uint32_t pc, uint32_t run) {
 void MatcherInstructions::emitInstruction(uint32_t pc) {
   const uint32_t *op = builder_.code_ + pc;
   uint32_t slotBase = 2 * builder_.captures_;
-  builder_.reserve(pushesOf(builder_.code_, pc));
+  builder_.reserve(MatcherBuilder::pushesOf(builder_.code_, pc));
   switch (op[0]) {
   case RE_MATCH: {
     auto it = builder_.lookOfMatch_.find(pc);

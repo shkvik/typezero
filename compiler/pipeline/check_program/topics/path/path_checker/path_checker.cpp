@@ -34,18 +34,52 @@ const Type *PathChecker::formatInputType() {
 PathChecker::PathChecker(CheckState &owner)
     : state(owner) {}
 
+PathChecker::ResultPathProperty PathChecker::pathValue(llvm::StringRef name, NodeModule module) {
+  if (name == "posix" || name == "win32") {
+    std::string message = ErrorTextPath::throughFns(name, NodeCheckHelpers::moduleLabel(module));
+
+    return err(PathCheckerPathValueError{
+        .code = PathCheckerPathValueErrorCode::MODULE_AS_VALUE,
+        .message = message,
+    });
+  }
+
+  return ok(name);
+}
+
+PathChecker::ResultPathFunction PathChecker::pathFunction(llvm::StringRef fn) {
+  if (fn == "sep" || fn == "delimiter") {
+    std::string message = ErrorTextPath::notCalled(fn);
+
+    return err(PathCheckerPathFunctionError{
+        .code = PathCheckerPathFunctionErrorCode::STRING_CALLED,
+        .message = message,
+    });
+  }
+  if (fn == "posix" || fn == "win32") {
+    std::string message = ErrorTextPath::module(fn);
+
+    return err(PathCheckerPathFunctionError{
+        .code = PathCheckerPathFunctionErrorCode::MODULE_CALLED,
+        .message = message,
+    });
+  }
+
+  return ok(fn);
+}
+
 Expr *PathChecker::checkPathValue(NodeModule module, llvm::StringRef name, Expr *expr) {
-  bool win32 = module == NodeModule::PathWin32 || (module == NodeModule::Path && targetIsWindows());
+  bool win32 = module == NodeModule::PathWin32 ||
+               (module == NodeModule::Path && NodeCheckHelpers::targetIsWindows());
   if (name == "sep") {
-    return stringLiteral(this->state.getAst(), expr->loc(), win32 ? "\\" : "/");
+    return NodeCheckHelpers::stringLiteral(this->state.getAst(), expr->loc(), win32 ? "\\" : "/");
   }
   if (name == "delimiter") {
-    return stringLiteral(this->state.getAst(), expr->loc(), win32 ? ";" : ":");
+    return NodeCheckHelpers::stringLiteral(this->state.getAst(), expr->loc(), win32 ? ";" : ":");
   }
-  if (name == "posix" || name == "win32") {
-    this->state.getDiagnostics().error(expr->loc(), "'" + name + "' of '" + moduleLabel(module) +
-                                                        "' is used through its functions, e.g. '" +
-                                                        name + ".join(a, b)'");
+  ResultPathProperty value = PathChecker::pathValue(name, module);
+  if (value.isErr()) {
+    this->state.getDiagnostics().error(expr->loc(), value.error().message);
     return expr;
   }
 
@@ -62,16 +96,13 @@ Expr *PathChecker::checkPathCall(CallExpr *call, NodeModule module, llvm::String
 
     return call;
   };
-  if (fn == "sep" || fn == "delimiter") {
-    this->state.getDiagnostics().error(loc, "'" + fn + "' is a string, not a function");
+  ResultPathFunction function = PathChecker::pathFunction(fn);
+  if (function.isErr()) {
+    this->state.getDiagnostics().error(loc, function.error().message);
     return loosely();
   }
-  if (fn == "posix" || fn == "win32") {
-    this->state.getDiagnostics().error(
-        loc, "'" + fn + "' is not a function: call its functions, e.g. '" + fn + ".join(a, b)'");
-    return loosely();
-  }
-  bool win32 = module == NodeModule::PathWin32 || (module == NodeModule::Path && targetIsWindows());
+  bool win32 = module == NodeModule::PathWin32 ||
+               (module == NodeModule::Path && NodeCheckHelpers::targetIsWindows());
   auto *style = this->state.getAst().make<IntLitExpr>(loc, win32 ? 1 : 0);
   style->type = Type::intTy();
   const Type *string = Type::string();
@@ -110,8 +141,8 @@ Expr *PathChecker::checkPathCall(CallExpr *call, NodeModule module, llvm::String
   };
   const Shape *shape = llvm::find_if(shapes, [&](const Shape &s) { return s.name == fn; });
   if (shape == std::end(shapes)) {
-    this->state.getDiagnostics().error(loc, "'" + fn + "' of '" + moduleLabel(module) +
-                                                "' is not supported yet");
+    std::string message = ErrorTextPath::notYet(fn, NodeCheckHelpers::moduleLabel(module));
+    this->state.getDiagnostics().error(loc, message);
     return loosely();
   }
   ArgumentChecker::ResultArityMatches arity =

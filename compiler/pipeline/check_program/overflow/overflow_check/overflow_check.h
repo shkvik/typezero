@@ -75,7 +75,7 @@ private:
   };
   void contribute(Slot &slot, const Val &v) {
     if (!quiet_) {
-      slot.val = join(slot.val, v);
+      slot.val = ValueRange::join(slot.val, v);
     }
   }
   struct SummaryKey {
@@ -143,7 +143,7 @@ private:
     bool loop = false;
     bool block = false;
     llvm::SmallVector<llvm::StringRef, 1> labels;
-    State breaks = deadState(), conts = deadState();
+    State breaks = ValueRange::deadState(), conts = ValueRange::deadState();
     unsigned quiet = 0;
   };
   struct LoopSpec {

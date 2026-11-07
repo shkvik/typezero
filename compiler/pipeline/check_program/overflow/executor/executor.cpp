@@ -75,7 +75,7 @@ void Executor::exec(const Stmt *stmt, State &st) {
     check_.narrowing().refine(s->cond, st, t, f);
     exec(s->thenStmt, t);
     exec(s->elseStmt, f);
-    st = join(t, f);
+    st = ValueRange::join(t, f);
     break;
   }
   case Stmt::Kind::While:
@@ -134,7 +134,7 @@ void Executor::execLabeled(const LabeledStmt *stmt, State &st) {
   exec(body, st);
   State breaks = check_.targets_.back().breaks;
   check_.targets_.pop_back();
-  st = join(st, breaks);
+  st = ValueRange::join(st, breaks);
 }
 
 void Executor::jump(const Stmt *, llvm::StringRef label, bool isBreak, State &st) {
@@ -150,9 +150,9 @@ void Executor::jump(const Stmt *, llvm::StringRef label, bool isBreak, State &st
       break;
     }
     if (isBreak) {
-      t.breaks = join(t.breaks, st);
+      t.breaks = ValueRange::join(t.breaks, st);
     } else {
-      t.conts = join(t.conts, st);
+      t.conts = ValueRange::join(t.conts, st);
     }
     break;
   }
@@ -169,13 +169,13 @@ void Executor::execSwitch(const SwitchStmt *stmt, State &st) {
   OverflowCheck::Target target;
   target.quiet = check_.quiet_;
   check_.targets_.push_back(std::move(target));
-  State fall = deadState();
+  State fall = ValueRange::deadState();
   bool hasDefault = false;
   for (const SwitchCase &c : stmt->cases) {
     if (!c.test) {
       hasDefault = true;
     }
-    State in = join(fall, st);
+    State in = ValueRange::join(fall, st);
     for (const Stmt *s : c.body) {
       if (in.dead) {
         break;
@@ -186,9 +186,9 @@ void Executor::execSwitch(const SwitchStmt *stmt, State &st) {
   }
   State breaks = check_.targets_.back().breaks;
   check_.targets_.pop_back();
-  State out = join(fall, breaks);
+  State out = ValueRange::join(fall, breaks);
   if (!hasDefault && !stmt->exhaustive) {
-    out = join(out, st);
+    out = ValueRange::join(out, st);
   }
   st = out;
 }
@@ -210,12 +210,12 @@ void Executor::execReturn(const ReturnStmt *ret, State &st) {
   OverflowCheck::Frame &frame = check_.frames_[at];
   if (frame.callback) {
     if (frame.quiet == check_.quiet_) {
-      frame.result = join(frame.result, v);
-      frame.returned = join(frame.returned, st);
+      frame.result = ValueRange::join(frame.result, v);
+      frame.returned = ValueRange::join(frame.returned, st);
     }
   } else if (frame.fn && ret->value && !check_.quiet_) {
     const Type *retType = frame.fn->sym ? frame.fn->sym->ret : nullptr;
-    if (tracked(retType)) {
+    if (ValueRange::tracked(retType)) {
       check_.contribute(check_.next_.rets[frame.fn], check_.overflowWarnings().fitVal(v, retType));
     }
   }

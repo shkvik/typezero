@@ -1,6 +1,8 @@
 #pragma once
 
 #include "compiler/pipeline/check_program/check_state/check_state.h"
+#include "compiler/pipeline/check_program/topics/bytes/bytes_checker/bytes_checker_errors.h"
+#include "compiler/result/result/result.h"
 
 namespace tz {
 
@@ -19,13 +21,12 @@ public:
   Expr *bytesToString(Expr *expr);
 
 private:
-  static std::string utf8(const std::u16string &text);
+  using ResultKnownEncoding = Result<int, BytesCheckerKnownEncodingError>;
+  using ResultBytesIndexing = Result<const Type *, BytesCheckerBytesIndexingError>;
+
+  static ResultBytesIndexing bytesIndexing(const Type *type);
+  static ResultKnownEncoding knownEncoding(llvm::StringRef name);
   static std::optional<std::u16string> literalText(const Expr *e);
-  static std::string rangeText(int64_t lo, int64_t hi);
-  static ValueRange exact(int64_t v);
-  static bool known(const ValueRange &r);
-  static int64_t allOnes(int64_t v);
-  static int64_t floorShift(int64_t v, int64_t n);
 
   CheckState &state;
 };

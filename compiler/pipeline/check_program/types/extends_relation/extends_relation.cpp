@@ -1,5 +1,6 @@
 #include "compiler/pipeline/check_program/types/extends_relation/extends_relation.h"
 #include "compiler/pipeline/check_program/declare/class_declarer/class_declarer.h"
+#include "compiler/pipeline/check_program/generics/generic_check_helpers/generic_check_helpers.h"
 #include "compiler/pipeline/check_program/generics/inference/inference.h"
 #include "compiler/pipeline/check_program/infer/return_inferrer/return_inferrer.h"
 #include "compiler/pipeline/check_program/types/conditional_check_helpers/conditional_check_helpers.h"
@@ -15,7 +16,7 @@ namespace tz {
 
 std::vector<const Type *> ExtendsRelation::distributed(const Type *type) {
   std::vector<const Type *> out;
-  distribute(type, out);
+  ConditionalCheckHelpers::distribute(type, out);
 
   return out;
 }
@@ -73,7 +74,8 @@ bool ExtendsRelation::extendsType(const Type *type, const Type *pattern, InferMa
                .matchTemplate(type->literalText(), pattern->operands(), inference);
   }
   if (pattern->isPattern()) {
-    return type->isStringLiteral() && matchesPattern(type->literalText(), pattern);
+    return type->isStringLiteral() &&
+           TemplatePatterns::matchesPattern(type->literalText(), pattern);
   }
   if (type->isPattern()) {
     return pattern == Type::string();
@@ -215,7 +217,7 @@ bool ExtendsRelation::extendsFunction(const Type *type, const Type *pattern,
     return type->hasRest() && mine.back()->isArray() ? mine.back()->inner() : nullptr;
   };
   auto fits = [&](const Type *my, const Type *their) {
-    if (inference && mentionsAnyOf(their, inference->params)) {
+    if (inference && GenericCheckHelpers::mentionsAnyOf(their, inference->params)) {
       return this->extendsType(my, their, inference);
     }
 

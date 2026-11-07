@@ -129,8 +129,8 @@ void DeclarationParser::parseClass(DeclarationFile &file, bool isAbstract) {
 bool DeclarationParser::memberWordAhead() const {
   const Token &next = parser_.cursor().peek();
 
-  return next.is(Tok::Identifier) || isKeyword(next.kind) || next.is(Tok::StringLiteral) ||
-         next.is(Tok::LBracket);
+  return next.is(Tok::Identifier) || TokenKinds::isKeyword(next.kind) ||
+         next.is(Tok::StringLiteral) || next.is(Tok::LBracket);
 }
 
 void DeclarationParser::parseMember(DeclaredClass &cls) {
@@ -161,7 +161,7 @@ void DeclarationParser::parseMember(DeclaredClass &cls) {
       skipItem();
       return;
     }
-  } else if (parser_.tok_.is(Tok::Identifier) || isKeyword(parser_.tok_.kind)) {
+  } else if (parser_.tok_.is(Tok::Identifier) || TokenKinds::isKeyword(parser_.tok_.kind)) {
     member.name = parser_.tok_.text;
     parser_.cursor().advance();
   } else {

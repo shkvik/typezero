@@ -511,7 +511,7 @@ llvm::Value *AsyncLowerer::awaitUnion(llvm::Value *value, const Type *type, cons
     this->lowering.functionFrame().switchTo(promiseBlock);
     finish(promise(value, promiseType));
     this->lowering.functionFrame().switchTo(otherBlock);
-    finish(plain(value, unionWithout(type, promiseType)));
+    finish(plain(value, UnionSlots::unionWithout(type, promiseType)));
   }
   this->lowering.functionFrame().switchTo(endBlock);
   if (!resultType) {

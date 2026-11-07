@@ -45,7 +45,7 @@ llvm::Value *NumberAccessCalls::emit() {
           call->builtin() == Builtin::DataViewGet || call->builtin() == Builtin::DataViewSet;
       bool write =
           call->builtin() == Builtin::DataViewSet || call->builtin() == Builtin::BufferWriteNumber;
-      const Type *kindType = Type::bytesType(Bytes(constantOf(call->args[0])));
+      const Type *kindType = Type::bytesType(Bytes(BytesCallSite::constantOf(call->args[0])));
       Bytes kind = kindType->bytes();
       unsigned size = kindType->elementSize();
       Lowering::Operand self = this->receiver(1);
@@ -124,8 +124,8 @@ llvm::Value *NumberAccessCalls::emit() {
                                                    {this->lowering.builder_.CreateZExt(v, i32)});
             break;
           default:
-            result = isSignedKind(kind) ? this->lowering.builder_.CreateSExt(v, i64)
-                                        : this->lowering.builder_.CreateZExt(v, i64);
+            result = BytesLowerer::isSignedKind(kind) ? this->lowering.builder_.CreateSExt(v, i64)
+                                                      : this->lowering.builder_.CreateZExt(v, i64);
             break;
         }
       } else {

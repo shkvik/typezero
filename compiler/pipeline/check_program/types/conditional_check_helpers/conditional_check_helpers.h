@@ -7,6 +7,9 @@
 
 namespace tz {
 
-void distribute(const Type *type, std::vector<const Type *> &out);
+class ConditionalCheckHelpers {
+public:
+  static void distribute(const Type *type, std::vector<const Type *> &out);
+};
 
 }

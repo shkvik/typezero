@@ -15,34 +15,32 @@
 
 namespace tz {
 
-namespace {
-
-bool isBinding(const Stmt *decl) {
+bool ConditionalTypes::isBinding(const Stmt *decl) {
   auto *alias = llvm::dyn_cast_or_null<TypeAliasDecl>(decl);
 
   return alias && alias->resolved && alias->typeParams.empty() &&
          alias->type.kind() == TypeRefKind::NAME_REF && alias->type.name.empty();
 }
 
-std::vector<const Type *> distributed(const Type *type) {
+std::vector<const Type *> ConditionalTypes::distributed(const Type *type) {
   std::vector<const Type *> out;
-  distribute(type, out);
+  ConditionalCheckHelpers::distribute(type, out);
 
   return out;
 }
 
-void collectNames(const TypeRef &ref, std::vector<llvm::StringRef> &names) {
+void ConditionalTypes::collectNames(const TypeRef &ref, std::vector<llvm::StringRef> &names) {
   if ((ref.kind() == TypeRefKind::NAME_REF || ref.kind() == TypeRefKind::GENERIC_REF) &&
       !ref.name.empty() && !llvm::is_contained(names, ref.name)) {
     names.push_back(ref.name);
   }
   for (const TypeRef &arg : ref.args) {
-    collectNames(arg, names);
+    ConditionalTypes::collectNames(arg, names);
   }
 }
 
-void collectInfers(const TypeRef &ref, std::vector<const TypeRef *> &infers,
-                   std::vector<bool> &lists, bool spread = false) {
+void ConditionalTypes::collectInfers(const TypeRef &ref, std::vector<const TypeRef *> &infers,
+                                     std::vector<bool> &lists, bool spread) {
   if (ref.kind() == TypeRefKind::CONDITIONAL_REF) {
     return;
   }
@@ -59,16 +57,18 @@ void collectInfers(const TypeRef &ref, std::vector<const TypeRef *> &infers,
     bool spreadHere =
         (ref.kind() == TypeRefKind::TUPLE_REF && i < ref.spread().size() && ref.spread()[i]) ||
         (ref.kind() == TypeRefKind::FUNCTION_REF && ref.rest() && i + 2 == ref.args.size());
-    collectInfers(ref.args[i], infers, lists, spreadHere);
+    ConditionalTypes::collectInfers(ref.args[i], infers, lists, spreadHere);
   }
 }
 
-bool mentionsOtherParams(const Type *type, llvm::ArrayRef<const Type *> allowed,
-                         llvm::SmallPtrSetImpl<const Type *> &seen) {
-  if (!mentionsParam(type)) {
+bool ConditionalTypes::mentionsOtherParams(const Type *type, llvm::ArrayRef<const Type *> allowed,
+                                           llvm::SmallPtrSetImpl<const Type *> &seen) {
+  if (!TypeQueries::mentionsParam(type)) {
     return false;
   }
-  auto other = [&](const Type *t) { return t && mentionsOtherParams(t, allowed, seen); };
+  auto other = [&](const Type *t) {
+    return t && ConditionalTypes::mentionsOtherParams(t, allowed, seen);
+  };
   switch (type->kind()) {
   case Type::Kind::Param:
     if (type->typeOp() == TypeOp::Conditional) {
@@ -111,14 +111,14 @@ bool mentionsOtherParams(const Type *type, llvm::ArrayRef<const Type *> allowed,
   }
 }
 
-void collectParams(const Type *type, std::vector<const Type *> &params,
-                   llvm::SmallPtrSetImpl<const Type *> &seen) {
-  if (!mentionsParam(type) || !seen.insert(type).second) {
+void ConditionalTypes::collectParams(const Type *type, std::vector<const Type *> &params,
+                                     llvm::SmallPtrSetImpl<const Type *> &seen) {
+  if (!TypeQueries::mentionsParam(type) || !seen.insert(type).second) {
     return;
   }
   auto add = [&](const Type *t) {
     if (t) {
-      collectParams(t, params, seen);
+      ConditionalTypes::collectParams(t, params, seen);
     }
   };
   switch (type->kind()) {
@@ -164,12 +164,11 @@ void collectParams(const Type *type, std::vector<const Type *> &params,
   }
 }
 
-}
-
-bool mentionsParamBesides(const Type *type, llvm::ArrayRef<const Type *> allowed) {
+bool ConditionalTypes::mentionsParamBesides(const Type *type,
+                                            llvm::ArrayRef<const Type *> allowed) {
   llvm::SmallPtrSet<const Type *, 4> seen;
 
-  return mentionsOtherParams(type, allowed, seen);
+  return ConditionalTypes::mentionsOtherParams(type, allowed, seen);
 }
 
 ConditionalTypes::ConditionalTypes(CheckState &owner)
@@ -197,7 +196,7 @@ const Type *ConditionalTypes::resolveConditional(const TypeRef &ref) {
   }
   std::vector<const TypeRef *> inferRefs;
   std::vector<bool> lists;
-  collectInfers(ref.args[1], inferRefs, lists);
+  ConditionalTypes::collectInfers(ref.args[1], inferRefs, lists);
   std::vector<const Type *> infers;
   this->state.getScopeStack().openTypeScope();
   for (size_t i = 0; i < inferRefs.size(); ++i) {
@@ -226,12 +225,13 @@ const Type *ConditionalTypes::resolveConditional(const TypeRef &ref) {
   if (pattern->isError()) {
     return pattern;
   }
-  if (mentionsParam(check) || mentionsParamBesides(pattern, infers)) {
+  if (TypeQueries::mentionsParam(check) ||
+      ConditionalTypes::mentionsParamBesides(pattern, infers)) {
     return this->deferConditional(ref);
   }
   if (ref.args[0].kind() == TypeRefKind::NAME_REF &&
-      isBinding(TypeDeclarer(this->state).lookupType(ref.args[0].name))) {
-    std::vector<const Type *> members = distributed(check);
+      ConditionalTypes::isBinding(TypeDeclarer(this->state).lookupType(ref.args[0].name))) {
+    std::vector<const Type *> members = ConditionalTypes::distributed(check);
     if (members.size() != 1) {
       std::vector<const Type *> results;
       for (const Type *m : members) {
@@ -305,13 +305,13 @@ const Type *ConditionalTypes::deferConditional(const TypeRef &ref) {
     }
     info.tag = Type::param(spelling.empty() ? "conditional type" : spelling);
     std::vector<llvm::StringRef> names;
-    collectNames(ref, names);
+    ConditionalTypes::collectNames(ref, names);
     for (llvm::StringRef name : names) {
       Stmt *decl = TypeDeclarer(this->state).lookupType(name);
       if (!decl) {
         continue;
       }
-      if (isBinding(decl)) {
+      if (ConditionalTypes::isBinding(decl)) {
         info.bound.push_back(name);
       } else {
         info.decls.push_back({name, decl});
@@ -377,7 +377,7 @@ std::vector<const Type *> ConditionalTypes::conditionalBranches(const Type *cond
   }
   std::vector<const TypeRef *> inferRefs;
   std::vector<bool> lists;
-  collectInfers(info->ref->args[1], inferRefs, lists);
+  ConditionalTypes::collectInfers(info->ref->args[1], inferRefs, lists);
   for (size_t i = 0; i < inferRefs.size(); ++i) {
     Type *param = Type::param(inferRefs[i]->name);
     if (lists[i]) {
@@ -414,7 +414,7 @@ bool ConditionalTypes::fitsConditional(const Type *from, const Type *to, unsigne
     }
     std::vector<const Type *> params;
     llvm::SmallPtrSet<const Type *, 8> seen;
-    collectParams(branch, params, seen);
+    ConditionalTypes::collectParams(branch, params, seen);
     InferMatch match{params, std::vector<const Type *>(params.size(), nullptr)};
     if (!params.empty() && ExtendsRelation(this->state).extendsType(from, branch, &match)) {
       return true;

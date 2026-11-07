@@ -6,12 +6,12 @@ namespace tz {
 
 constexpr unsigned kMaxRounds = 30;
 
-const Expr *stripCasts(const Expr *expr);
-
-std::optional<size_t> callbackArg(Builtin builtin);
-
-Val widenVal(const Val &old, const Val &grown, const Type *type);
-
-bool containsLoop(const Stmt *stmt);
+class OverflowHelpers {
+public:
+  static bool containsLoop(const Stmt *stmt);
+  static const Expr *stripCasts(const Expr *expr);
+  static std::optional<size_t> callbackArg(Builtin builtin);
+  static Val widenVal(const Val &old, const Val &grown, const Type *type);
+};
 
 }

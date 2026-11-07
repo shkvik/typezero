@@ -29,6 +29,34 @@ bool StreamPipeline::inModule(const std::string &place, llvm::StringRef module) 
   return at.consume_front(module) && at.consume_front(":");
 }
 
+StreamPipeline::ResultWritableEnd StreamPipeline::writableEnd(const StreamChunks &chunks,
+                                                              const Type *type) {
+  if (!chunks.writable) {
+    std::string message = ErrorTextPipeline::notWritten(type->name());
+
+    return err(StreamPipelineWritableEndError{
+        .code = StreamPipelineWritableEndErrorCode::NOT_WRITABLE,
+        .message = message,
+    });
+  }
+
+  return ok(chunks.writable);
+}
+
+StreamPipeline::ResultReadableEnd StreamPipeline::readableEnd(const StreamChunks &chunks,
+                                                              const Type *type) {
+  if (!chunks.readable) {
+    std::string message = ErrorTextPipeline::notRead(type->name());
+
+    return err(StreamPipelineReadableEndError{
+        .code = StreamPipelineReadableEndErrorCode::NOT_READABLE,
+        .message = message,
+    });
+  }
+
+  return ok(chunks.readable);
+}
+
 StreamPipeline::StreamPipeline(CheckState &owner)
     : state(owner) {}
 
@@ -69,26 +97,24 @@ Expr *StreamPipeline::streamStage(Expr *&arg, const Type *&chunk, bool first, bo
     stream = true;
     StreamChunks chunks = ChunkTypes(this->state).streamChunksOf(cls);
     if (!first) {
-      if (!chunks.writable) {
-        this->state.getDiagnostics().error(
-            loc, "pipeline() writes the chunks before it to each stream after the first, "
-                 "but '" +
-                     type->name() + "' is not writable");
+      ResultWritableEnd writable = StreamPipeline::writableEnd(chunks, type);
+      if (writable.isErr()) {
+        this->state.getDiagnostics().error(loc, writable.error().message);
         return arg;
       }
       if (chunk && ChunkTypes(this->state).recordStreamChunk(chunks.writable, chunk, loc)) {
       } else if (chunk && !this->state.getEventStore().isOpenMap(chunk) &&
                  !this->streamTakes(chunks.writable, chunk)) {
-        this->state.getDiagnostics().error(
-            loc, "pipeline() writes chunks of " + chunk->name().str() + " to '" +
-                     type->name().str() + "', which takes " + chunks.writable->name().str());
+        std::string message = ErrorTextPipeline::chunkKind("pipeline", chunk->name(), type->name(),
+                                                           chunks.writable->name());
+        this->state.getDiagnostics().error(loc, message);
         return arg;
       }
     }
     if (!last) {
-      if (!chunks.readable) {
-        this->state.getDiagnostics().error(loc, "pipeline() reads each stream but the last, and '" +
-                                                    type->name() + "' is not readable");
+      ResultReadableEnd readable = StreamPipeline::readableEnd(chunks, type);
+      if (readable.isErr()) {
+        this->state.getDiagnostics().error(loc, readable.error().message);
         return arg;
       }
       chunk = chunks.readable;
@@ -102,9 +128,8 @@ Expr *StreamPipeline::streamStage(Expr *&arg, const Type *&chunk, bool first, bo
     const Type *ret = type->ret();
     if (first) {
       if (!ret->isAsyncIterator()) {
-        this->state.getDiagnostics().error(
-            loc, "the first function of pipeline() is the source of the chunks: an async "
-                 "generator, e.g. 'async function* () { yield \"a\" }'");
+        std::string message = ErrorTextPipeline::source();
+        this->state.getDiagnostics().error(loc, message);
         return arg;
       }
       chunk = ret->yielded();
@@ -151,13 +176,8 @@ Expr *StreamPipeline::streamStage(Expr *&arg, const Type *&chunk, bool first, bo
                                                           ->type,
                                                       stageType}));
     }
-    this->state.getDiagnostics().error(
-        loc, last ? "the last function of pipeline() is an async generator over the "
-                    "chunks before it, or an async function that takes them and gives a "
-                    "Promise"
-                  : "a function in pipeline() is an async generator over the chunks "
-                    "before it, e.g. 'async function* (source) { for await (const chunk "
-                    "of source) yield chunk }'");
+    std::string message = ErrorTextPipeline::function(last);
+    this->state.getDiagnostics().error(loc, message);
     return arg;
   }
   if (first) {
@@ -184,10 +204,8 @@ Expr *StreamPipeline::streamStage(Expr *&arg, const Type *&chunk, bool first, bo
                                                       stageType}));
     }
   }
-  this->state.getDiagnostics().error(
-      loc, "pipeline() takes streams, async generator functions over the chunks and, "
-           "first, an iterable; this is '" +
-               type->name() + "'");
+  std::string message = ErrorTextPipeline::stage(type->name());
+  this->state.getDiagnostics().error(loc, message);
   arg->type = Type::error();
 
   return arg;
@@ -284,8 +302,8 @@ Expr *StreamPipeline::checkStreamFunction(CallExpr *call, FunctionDecl *decl, ll
   }
   if (fn == "compose") {
     if (call->args.empty()) {
-      this->state.getDiagnostics().error(
-          loc, "compose() takes the streams to make one Duplex of, e.g. 'compose(a, b)'");
+      std::string message = ErrorTextCompose::streams();
+      this->state.getDiagnostics().error(loc, message);
       return call;
     }
     std::vector<Expr *> streams;
@@ -298,9 +316,8 @@ Expr *StreamPipeline::checkStreamFunction(CallExpr *call, FunctionDecl *decl, ll
         return call;
       }
       if (!cls || !ChunkTypes(this->state).isStreamClass(cls) || arg->type->isOptional()) {
-        this->state.getDiagnostics().error(
-            arg->loc(), "compose() takes streams, and this is '" + arg->type->name() +
-                            "'; to put a function between them, use pipeline()");
+        std::string message = ErrorTextCompose::notStream(arg->type->name());
+        this->state.getDiagnostics().error(arg->loc(), message);
         checkArgsLoosely(i + 1);
         return call;
       }
@@ -312,10 +329,9 @@ Expr *StreamPipeline::checkStreamFunction(CallExpr *call, FunctionDecl *decl, ll
         tail = chunks;
       }
       if (i > 0 && chunk && chunks.writable && !this->streamTakes(chunks.writable, chunk)) {
-        this->state.getDiagnostics().error(arg->loc(),
-                                           "compose() writes chunks of " + chunk->name().str() +
-                                               " to '" + arg->type->name().str() +
-                                               "', which takes " + chunks.writable->name().str());
+        std::string message = ErrorTextPipeline::chunkKind(
+            "compose", chunk->name(), arg->type->name(), chunks.writable->name());
+        this->state.getDiagnostics().error(arg->loc(), message);
         return call;
       }
       chunk = chunks.readable;
@@ -338,9 +354,8 @@ Expr *StreamPipeline::checkStreamFunction(CallExpr *call, FunctionDecl *decl, ll
   Expr *optionsArg = nullptr;
   if (!promises) {
     if (count < 3) {
-      this->state.getDiagnostics().error(
-          loc, "pipeline() takes two streams or more and a callback, e.g. "
-               "'pipeline(source, destination, (err) => ...)'");
+      std::string message = ErrorTextPipeline::callback();
+      this->state.getDiagnostics().error(loc, message);
       checkArgsLoosely(0);
       return call;
     }
@@ -351,8 +366,8 @@ Expr *StreamPipeline::checkStreamFunction(CallExpr *call, FunctionDecl *decl, ll
     --count;
   }
   if (count < 2) {
-    this->state.getDiagnostics().error(
-        loc, "pipeline() takes two streams or more, e.g. 'pipeline(source, destination)'");
+    std::string message = ErrorTextPipeline::streams();
+    this->state.getDiagnostics().error(loc, message);
     checkArgsLoosely(0);
     return call;
   }

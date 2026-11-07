@@ -16,14 +16,14 @@
 
 namespace tz {
 
-void forEachOverride(const FunctionDecl *fn, llvm::function_ref<void(const FunctionDecl *)> visit);
-
 class StoreStmts;
 class StoreExprs;
 class StoreCalls;
 
 class StoreScanner {
 public:
+  static void forEachOverride(const FunctionDecl *fn,
+                              llvm::function_ref<void(const FunctionDecl *)> visit);
   explicit StoreScanner(std::function<bool(const Expr *)> site);
   void function(const FunctionDecl *fn);
   void topLevel(const Stmt *s);

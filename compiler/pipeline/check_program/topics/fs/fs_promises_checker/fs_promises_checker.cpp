@@ -10,21 +10,33 @@ namespace tz {
 FsPromisesChecker::FsPromisesChecker(CheckState &owner)
     : state(owner) {}
 
+FsPromisesChecker::ResultPromiseFunction FsPromisesChecker::promiseFunction(llvm::StringRef fn) {
+  if (fn == "constants") {
+    std::string message = ErrorTextFsPromises::constants();
+
+    return err(FsPromisesCheckerPromiseFunctionError{
+        .code = FsPromisesCheckerPromiseFunctionErrorCode::NOT_A_FUNCTION,
+        .message = message,
+    });
+  }
+  if (fn == "open") {
+    std::string message = ErrorTextFsPromises::open();
+
+    return err(FsPromisesCheckerPromiseFunctionError{
+        .code = FsPromisesCheckerPromiseFunctionErrorCode::NO_FILE_HANDLE,
+        .message = message,
+    });
+  }
+
+  return ok(fn);
+}
+
 Expr *FsPromisesChecker::checkFsPromisesCall(CallExpr *call, llvm::StringRef fn, llvm::SMLoc loc) {
   this->state.getProgramUse().markUsesAsync();
   call->type = Type::error();
-  if (fn == "constants") {
-    this->state.getDiagnostics().error(loc, "'constants' of 'node:fs/promises' is not a function");
-    for (Expr *&arg : call->args) {
-      arg = ExprChecker(this->state).checkExpr(arg);
-    }
-    return call;
-  }
-  if (fn == "open") {
-    this->state.getDiagnostics().error(
-        loc, "'open' of 'node:fs/promises' is not supported yet: there is no FileHandle; "
-             "use 'readFile', 'writeFile' or 'appendFile', which read and write "
-             "Buffers too");
+  ResultPromiseFunction function = FsPromisesChecker::promiseFunction(fn);
+  if (function.isErr()) {
+    this->state.getDiagnostics().error(loc, function.error().message);
     for (Expr *&arg : call->args) {
       arg = ExprChecker(this->state).checkExpr(arg);
     }
@@ -54,8 +66,8 @@ Expr *FsPromisesChecker::checkFsPromisesCall(CallExpr *call, llvm::StringRef fn,
       return call;
     }
   }
-  this->state.getDiagnostics().error(loc,
-                                     "'" + fn + "' of 'node:fs/promises' is not supported yet");
+  std::string message = ErrorTextFsPromises::notYet(fn);
+  this->state.getDiagnostics().error(loc, message);
   call->type = Type::error();
 
   return call;

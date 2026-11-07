@@ -5,10 +5,12 @@
 
 namespace tz::pkg {
 
-void report(const llvm::Twine &message) { llvm::errs() << "tz: " << message << "\n"; }
+void Report::report(const llvm::Twine &message) {
+  llvm::errs() << "tz: " << message << "\n";
+}
 
-void reportAt(llvm::StringRef file, llvm::StringRef text, size_t offset,
-              const llvm::Twine &message) {
+void Report::reportAt(llvm::StringRef file, llvm::StringRef text, size_t offset,
+                      const llvm::Twine &message) {
   llvm::SourceMgr sourceMgr;
   unsigned id =
       sourceMgr.AddNewSourceBuffer(llvm::MemoryBuffer::getMemBufferCopy(text, file), llvm::SMLoc());
@@ -17,6 +19,8 @@ void reportAt(llvm::StringRef file, llvm::StringRef text, size_t offset,
   sourceMgr.PrintMessage(llvm::errs(), loc, llvm::SourceMgr::DK_Error, message);
 }
 
-void progress(const llvm::Twine &message) { llvm::errs() << "tz: " << message << "\n"; }
+void Report::progress(const llvm::Twine &message) {
+  llvm::errs() << "tz: " << message << "\n";
+}
 
 }

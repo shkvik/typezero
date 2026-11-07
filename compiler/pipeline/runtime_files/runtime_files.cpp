@@ -6,14 +6,11 @@
 
 namespace tz {
 
-namespace {
-
-void anchor() {}
-
-}
+void RuntimeFiles::anchor() {}
 
 RuntimeFiles::RuntimeFiles(const char *argv0) {
-  std::string self = llvm::sys::fs::getMainExecutable(argv0, (void *)(intptr_t)&anchor);
+  std::string self =
+      llvm::sys::fs::getMainExecutable(argv0, (void *)(intptr_t)&RuntimeFiles::anchor);
   dir_ = llvm::sys::path::parent_path(self).str();
 }
 

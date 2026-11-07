@@ -9,9 +9,9 @@ LLD_HAS_DRIVER(coff)
 
 namespace tz {
 
-bool linkExecutable(const llvm::Triple &triple, llvm::ArrayRef<std::string> inputs,
-                    llvm::StringRef output, bool debug, llvm::StringRef natvis,
-                    std::string &errors) {
+bool Linker::linkExecutable(const llvm::Triple &triple, llvm::ArrayRef<std::string> inputs,
+                            llvm::StringRef output, bool debug, llvm::StringRef natvis,
+                            std::string &errors) {
   if (!triple.isOSWindows()) {
     errors = "tz: linking for " + triple.str() + " is not supported yet\n";
     return false;

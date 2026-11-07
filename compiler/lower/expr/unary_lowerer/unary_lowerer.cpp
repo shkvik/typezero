@@ -19,12 +19,12 @@ using llvm::isa;
 
 namespace tz {
 
-static std::u16string ascii16(llvm::StringRef text) {
-  return std::u16string(text.begin(), text.end());
-}
-
 UnaryLowerer::UnaryLowerer(Lowering &owner)
     : lowering(owner) {}
+
+std::u16string UnaryLowerer::ascii16(llvm::StringRef text) {
+  return std::u16string(text.begin(), text.end());
+}
 
 llvm::Value *UnaryLowerer::emitUnary(UnaryExpr *unary) {
   if (unary->op == UnaryOp::TypeOf) {
@@ -102,15 +102,18 @@ llvm::Value *UnaryLowerer::emitTypeOf(Expr *operand) {
     llvm::Value *has = this->lowering.optionalLowerer().optionalHas(value.value, type);
     this->lowering.refCounts().dropOperand(value);
     return this->lowering.builder_.CreateSelect(
-        has, this->lowering.stringLowerer().stringLiteral(ascii16(typeOfName(type->inner()))),
+        has,
+        this->lowering.stringLowerer().stringLiteral(
+            UnaryLowerer::ascii16(TypeSpelling::typeOfName(type->inner()))),
         this->lowering.stringLowerer().stringLiteral(u"undefined"));
   }
   const Type *plain = type->nonOptional();
-  bool classes = plain->isUnion() && llvm::StringRef(typeOfName(plain)).empty() &&
-                 llvm::any_of(plain->members(), [](const Type *m) { return m->isClassRef(); }) &&
-                 llvm::all_of(plain->members(), [](const Type *m) {
-                   return m->isClassRef() || llvm::StringRef(typeOfName(m)) == "object";
-                 });
+  bool classes =
+      plain->isUnion() && llvm::StringRef(TypeSpelling::typeOfName(plain)).empty() &&
+      llvm::any_of(plain->members(), [](const Type *m) { return m->isClassRef(); }) &&
+      llvm::all_of(plain->members(), [](const Type *m) {
+        return m->isClassRef() || llvm::StringRef(TypeSpelling::typeOfName(m)) == "object";
+      });
   if (classes) {
     constexpr uint32_t kLayoutClass = 2097152;
     Lowering::Operand value = this->lowering.refCounts().emitOperand(operand, true);
@@ -134,7 +137,8 @@ llvm::Value *UnaryLowerer::emitTypeOf(Expr *operand) {
     this->lowering.stmtLowerer().emitDiscarded(operand);
   }
 
-  return this->lowering.stringLowerer().stringLiteral(ascii16(typeOfName(type)));
+  return this->lowering.stringLowerer().stringLiteral(
+      UnaryLowerer::ascii16(TypeSpelling::typeOfName(type)));
 }
 
 llvm::Value *UnaryLowerer::emitEnumName(IndexExpr *index) {

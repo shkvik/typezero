@@ -45,7 +45,7 @@ Expr *PrimaryParser::parsePrimary() {
     return parseFloatLiteral();
   case Tok::StringLiteral: {
     std::u16string value;
-    decodeStringLiteral(parser_.tok_, value, parser_.diags_);
+    LiteralText::decodeStringLiteral(parser_.tok_, value, parser_.diags_);
     parser_.cursor().advance();
     return parser_.ctx_.make<StringLitExpr>(loc, std::move(value));
   }
@@ -60,7 +60,7 @@ Expr *PrimaryParser::parsePrimary() {
     }
     parser_.tok_ = parser_.lexer_.regex(parser_.tok_.text.data(), parser_.tok_.newlineBefore);
     std::u16string pattern, flags;
-    decodeRegex(parser_.tok_, pattern, flags);
+    LiteralText::decodeRegex(parser_.tok_, pattern, flags);
     auto *lit = parser_.ctx_.make<RegexLitExpr>(loc, std::move(pattern), std::move(flags));
     lit->written = parser_.tok_.text.size();
     parser_.cursor().advance();
@@ -145,7 +145,7 @@ Expr *PrimaryParser::parsePrimary() {
   }
   default:
     parser_.cursor().error(loc, llvm::Twine("expected an expression, found ") +
-                                    tokSpelling(parser_.tok_.kind));
+                                    TokenKinds::tokSpelling(parser_.tok_.kind));
     return parser_.ctx_.make<IntLitExpr>(loc, 0);
   }
 }
@@ -203,7 +203,7 @@ Expr *PrimaryParser::parseObjectLiteral() {
           parser_.fieldNames_.insert(text);
         }
       } else if (auto *text = dyn_cast<StringLitExpr>(prop.key())) {
-        parser_.fieldNames_.insert(toUtf8(text->value));
+        parser_.fieldNames_.insert(ToUtf8::toUtf8(text->value));
       }
       if (parser_.tok_.is(Tok::LParen) || parser_.tok_.is(Tok::Less)) {
         parser_.cursor().error(
@@ -222,11 +222,11 @@ Expr *PrimaryParser::parseObjectLiteral() {
       }
       continue;
     }
-    bool accessor =
-        parser_.tok_.is(Tok::Identifier) &&
-        (parser_.tok_.text == "get" || parser_.tok_.text == "set") &&
-        (parser_.cursor().peek().is(Tok::Identifier) || isKeyword(parser_.cursor().peek().kind) ||
-         parser_.cursor().peek().is(Tok::StringLiteral));
+    bool accessor = parser_.tok_.is(Tok::Identifier) &&
+                    (parser_.tok_.text == "get" || parser_.tok_.text == "set") &&
+                    (parser_.cursor().peek().is(Tok::Identifier) ||
+                     TokenKinds::isKeyword(parser_.cursor().peek().kind) ||
+                     parser_.cursor().peek().is(Tok::StringLiteral));
     if (accessor) {
       parser_.cursor().error(
           loc, "getters and setters are not supported: reading or writing a field never runs code; "
@@ -289,7 +289,7 @@ Expr *PrimaryParser::parseObjectLiteral() {
     } else {
       parser_.cursor().error(parser_.tok_.loc(),
                              llvm::Twine("expected ':' after the field name, found ") +
-                                 tokSpelling(parser_.tok_.kind));
+                                 TokenKinds::tokSpelling(parser_.tok_.kind));
       parser_.cursor().skipToClosingBrace();
       return lit;
     }

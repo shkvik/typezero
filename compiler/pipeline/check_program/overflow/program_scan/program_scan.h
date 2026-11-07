@@ -19,6 +19,7 @@ public:
   bool isConstantTree(const Expr *expr) const;
 
 private:
+  static bool onlyReads(Builtin builtin);
   OverflowCheck &check_;
 };
 

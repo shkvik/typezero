@@ -20,7 +20,6 @@ public:
 
 private:
   static bool isInherited(llvm::StringRef name);
-  static std::string toUtf8(const std::u16string &text);
 
   CheckState &state;
 };

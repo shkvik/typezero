@@ -2,11 +2,15 @@
 #include "compiler/library/bytes/bytes_check_helpers/bytes_check_helpers.h"
 #include "compiler/library/crypto/crypto_api/crypto_api.h"
 #include "compiler/library/crypto/crypto_check_helpers/crypto_check_helpers.h"
+#include "compiler/library/crypto/crypto_exports/crypto_exports.h"
 #include "compiler/library/crypto/crypto_names/crypto_names.h"
+#include "compiler/load/to_utf8/to_utf8.h"
 #include "compiler/pipeline/check_program/declare/constant_folder/constant_folder.h"
 #include "compiler/pipeline/check_program/flow/index_proofs/index_proofs.h"
 #include "compiler/pipeline/check_program/topics/bytes/bytes_checker/bytes_checker.h"
 #include "compiler/pipeline/check_program/topics/crypto/crypto_args/crypto_args.h"
+#include "compiler/pipeline/check_program/topics/crypto/crypto_args/crypto_args_errors.h"
+#include "compiler/pipeline/check_program/topics/crypto/crypto_checker/crypto_checker_errors.h"
 #include "compiler/pipeline/check_program/topics/crypto/key_pair_checker/key_pair_checker.h"
 #include "compiler/pipeline/check_program/topics/expr/argument_checker/argument_checker.h"
 #include "compiler/pipeline/check_program/topics/expr/call_checker/call_checker.h"
@@ -22,24 +26,15 @@ using llvm::isa;
 
 namespace tz {
 
-std::string CryptoFunctionChecker::utf8Of(const std::u16string &text) {
-  std::string out;
-  llvm::convertUTF16ToUTF8String(
-      llvm::ArrayRef<llvm::UTF16>(reinterpret_cast<const llvm::UTF16 *>(text.data()), text.size()),
-      out);
-
-  return out;
-}
-
 std::optional<std::string> CryptoFunctionChecker::literalOf(const Expr *e) {
   if (auto *conv = dyn_cast<CastExpr>(e); conv && conv->isImplicit()) {
     e = conv->operand;
   }
   if (auto *lit = dyn_cast<StringLitExpr>(e)) {
-    return CryptoFunctionChecker::utf8Of(lit->value);
+    return ToUtf8::toUtf8(lit->value);
   }
   if (auto *tmpl = dyn_cast<TemplateExpr>(e); tmpl && tmpl->exprs.empty()) {
-    return CryptoFunctionChecker::utf8Of(tmpl->quasis[0]);
+    return ToUtf8::toUtf8(tmpl->quasis[0]);
   }
 
   return std::nullopt;
@@ -64,13 +59,8 @@ Expr *CryptoFunctionChecker::checkCryptoCall(CallExpr *call, llvm::StringRef fn,
     }
   }
   if (async && !call->args.empty() && isa<FunctionExpr>(call->args.back())) {
-    this->state.getDiagnostics().error(
-        call->args.back()->loc(),
-        "'" + fn +
-            "' with a callback is not supported: tz has no callbacks "
-            "(docs/crypto.md, section 5); without one it returns a Promise: "
-            "'const result = await " +
-            fn + "(...)'");
+    std::string message = ErrorTextCryptoFunction::callback(fn);
+    this->state.getDiagnostics().error(call->args.back()->loc(), message);
     for (Expr *&arg : call->args) {
       arg = ExprChecker(this->state).checkExpr(arg);
     }
@@ -80,6 +70,48 @@ Expr *CryptoFunctionChecker::checkCryptoCall(CallExpr *call, llvm::StringRef fn,
   Expr *checked = this->checkSyncCall(call, sync, fn, loc);
 
   return async ? this->asyncOf(checked) : checked;
+}
+
+CryptoFunctionChecker::ResultFilledTarget
+CryptoFunctionChecker::filledTarget(const Type *type, llvm::StringRef fn, llvm::StringRef shown) {
+  if (fn == "getRandomValues") {
+    static const Type::Bytes floats[] = {Type::Bytes::Float16, Type::Bytes::Float32,
+                                         Type::Bytes::Float64};
+    if (!type->isTypedArray() || llvm::is_contained(floats, type->bytes())) {
+      std::string message = ErrorTextCryptoFunction::randomVals(type->name());
+
+      return err(CryptoFunctionCheckerFilledTargetError{
+          .code = CryptoFunctionCheckerFilledTargetErrorCode::NOT_INTEGERS,
+          .message = message,
+      });
+    }
+
+    return ok(type);
+  }
+  if (!type->isByteView() && type->bytes() != Type::Bytes::ArrayBuffer) {
+    std::string message = ErrorTextCryptoFunction::fillsBytes(shown, type->name());
+
+    return err(CryptoFunctionCheckerFilledTargetError{
+        .code = CryptoFunctionCheckerFilledTargetErrorCode::NOT_BYTES,
+        .message = message,
+    });
+  }
+
+  return ok(type);
+}
+
+CryptoFunctionChecker::ResultCurveIsKnown
+CryptoFunctionChecker::curveIsKnown(llvm::StringRef curve) {
+  if (!llvm::is_contained(kCurveNames, curve)) {
+    std::string message = ErrorTextCryptoFunction::curve(curve);
+
+    return err(CryptoFunctionCheckerCurveIsKnownError{
+        .code = CryptoFunctionCheckerCurveIsKnownErrorCode::UNKNOWN_CURVE,
+        .message = message,
+    });
+  }
+
+  return ok(curve);
 }
 
 Expr *CryptoFunctionChecker::asyncOf(Expr *checked) {
@@ -118,15 +150,13 @@ Expr *CryptoFunctionChecker::checkSyncCall(CallExpr *call, llvm::StringRef fn,
     return call;
   };
   if (llvm::is_contained(kClasses, fn)) {
-    this->state.getDiagnostics().error(
-        loc, "'" + fn + "' of 'node:crypto' is a class, not a function" +
-                 (fn == "X509Certificate" ? "; make one with 'X509Certificate.parse(pem)'" : ""));
+    std::string message = ErrorTextCryptoFunction::isClass(fn);
+    this->state.getDiagnostics().error(loc, message);
     return loosely();
   }
   if (fn == "constants") {
-    this->state.getDiagnostics().error(
-        loc, "'constants' of 'node:crypto' is used as 'constants.RSA_PKCS1_PSS_PADDING' "
-             "and the like");
+    std::string message = ErrorTextCryptoValue::constants();
+    this->state.getDiagnostics().error(loc, message);
     return loosely();
   }
   if (CallChecker(this->state).rejectSpread(call)) {
@@ -247,8 +277,8 @@ Expr *CryptoFunctionChecker::checkSyncCall(CallExpr *call, llvm::StringRef fn,
       return call;
     }
     if (args.size() == 3) {
-      this->state.getDiagnostics().error(args[2]->loc(),
-                                         "'randomInt' takes a minimum and a maximum");
+      std::string message = ErrorTextCryptoFunction::randomArgs();
+      this->state.getDiagnostics().error(args[2]->loc(), message);
       return loosely();
     }
     Expr *min = args.size() == 2 ? ExprChecker(this->state).checkExpr(args[0], Type::intTy())
@@ -259,17 +289,13 @@ Expr *CryptoFunctionChecker::checkSyncCall(CallExpr *call, llvm::StringRef fn,
     }
     for (Expr *bound : {min, max}) {
       if (!bound->type->isInt()) {
-        this->state.getDiagnostics().error(bound->loc(),
-                                           "'randomInt' takes whole numbers ('int'), found '" +
-                                               bound->type->name() + "'");
+        std::string message = ErrorTextCryptoFunction::randomInt(bound->type->name());
+        this->state.getDiagnostics().error(bound->loc(), message);
         return call;
       }
     }
-    IndexProofs::ResultLessWasProven less =
-        IndexProofs(this->state)
-            .requireLess(min, max,
-                         args.size() == 2 ? "the maximum is greater than the minimum"
-                                          : "the maximum is greater than 0");
+    std::string greater = ErrorTextCryptoFunction::greater(args.size() == 2);
+    IndexProofs::ResultLessWasProven less = IndexProofs(this->state).requireLess(min, max, greater);
     if (less.isErr()) {
       this->state.getDiagnostics().error(max->loc(), less.error().message);
       return call;
@@ -289,25 +315,13 @@ Expr *CryptoFunctionChecker::checkSyncCall(CallExpr *call, llvm::StringRef fn,
     if (type->isError()) {
       return call;
     }
-    if (fn == "getRandomValues") {
-      static const Type::Bytes floats[] = {Type::Bytes::Float16, Type::Bytes::Float32,
-                                           Type::Bytes::Float64};
-      if (!type->isTypedArray() || llvm::is_contained(floats, type->bytes())) {
-        this->state.getDiagnostics().error(
-            target->loc(), "'getRandomValues' fills an array of integers (a Uint8Array, "
-                           "an Int32Array, a Buffer...); found '" +
-                               type->name() + "'");
-        return call;
-      }
-      return CryptoArgs(this->state).cryptoCall(call, CryptoFn::GetRandomValues, {target}, type);
-    }
-    if (!type->isByteView() && type->bytes() != Type::Bytes::ArrayBuffer) {
-      this->state.getDiagnostics().error(target->loc(),
-                                         "'" + shown +
-                                             "' fills bytes (a Buffer, a typed array, a "
-                                             "DataView or an ArrayBuffer); found '" +
-                                             type->name() + "'");
+    ResultFilledTarget filled = CryptoFunctionChecker::filledTarget(type, fn, shown);
+    if (filled.isErr()) {
+      this->state.getDiagnostics().error(target->loc(), filled.error().message);
       return call;
+    }
+    if (fn == "getRandomValues") {
+      return CryptoArgs(this->state).cryptoCall(call, CryptoFn::GetRandomValues, {target}, type);
     }
     int has = (present(1) ? 1 : 0) | (present(2) ? 2 : 0);
     Expr *offset = CryptoArgs(this->state).cryptoDouble(loc, 0);
@@ -319,8 +333,9 @@ Expr *CryptoFunctionChecker::checkSyncCall(CallExpr *call, llvm::StringRef fn,
         return call;
       }
       if (!library) {
+        std::string offsetWhat = ErrorTextCryptoFnLabel::offset();
         IndexProofs::ResultBetweenProven between =
-            IndexProofs(this->state).requireBetween(at, 0, {}, "the offset");
+            IndexProofs(this->state).requireBetween(at, 0, {}, offsetWhat);
         if (between.isErr() && between.error().code != IndexProofsRequireBetweenErrorCode::EXEMPT) {
           this->state.getDiagnostics().error(at->loc(), between.error().message);
         }
@@ -328,7 +343,7 @@ Expr *CryptoFunctionChecker::checkSyncCall(CallExpr *call, llvm::StringRef fn,
           return call;
         }
         IndexProofs::ResultUpToWasProven upTo =
-            IndexProofs(this->state).requireUpTo(at, target, 0, "the offset");
+            IndexProofs(this->state).requireUpTo(at, target, 0, offsetWhat);
         if (upTo.isErr() && upTo.error().code != IndexProofsRequireUpToErrorCode::EXEMPT) {
           this->state.getDiagnostics().error(at->loc(), upTo.error().message);
         }
@@ -343,8 +358,9 @@ Expr *CryptoFunctionChecker::checkSyncCall(CallExpr *call, llvm::StringRef fn,
           return call;
         }
         if (!library) {
+          std::string sizeWhat = ErrorTextCryptoFnLabel::size();
           IndexProofs::ResultBetweenProven sizeBetween =
-              IndexProofs(this->state).requireBetween(count, 0, {}, "the size");
+              IndexProofs(this->state).requireBetween(count, 0, {}, sizeWhat);
           if (sizeBetween.isErr() &&
               sizeBetween.error().code != IndexProofsRequireBetweenErrorCode::EXEMPT) {
             this->state.getDiagnostics().error(count->loc(), sizeBetween.error().message);
@@ -357,11 +373,9 @@ Expr *CryptoFunctionChecker::checkSyncCall(CallExpr *call, llvm::StringRef fn,
                  .provesSumUpTo(IndexProofs(this->state).linear(at),
                                 IndexProofs(this->state).linear(count), target) &&
             !IndexProofs(this->state).exempt(count->loc())) {
-          this->state.getDiagnostics().error(
-              count->loc(), "cannot prove that the offset and the size fit in the bytes, "
-                            "and JavaScript would throw a RangeError; check it first, e.g. "
-                            "'if (" +
-                                valueText(count) + " <= buf.length - " + valueText(at) + ")'");
+          std::string message = ErrorTextCryptoFunction::fillFits(
+              BytesCheckHelpers::valueText(count), BytesCheckHelpers::valueText(at));
+          this->state.getDiagnostics().error(count->loc(), message);
           return call;
         }
         size = count->type->isFloat() ? count
@@ -379,8 +393,10 @@ Expr *CryptoFunctionChecker::checkSyncCall(CallExpr *call, llvm::StringRef fn,
       this->state.getDiagnostics().error(loc, arity.error().message);
       return call;
     }
-    Expr *a = CryptoArgs(this->state).cryptoData(args[0], "first argument", false, false, true);
-    Expr *b = CryptoArgs(this->state).cryptoData(args[1], "second argument", false, false, true);
+    std::string firstWhat = ErrorTextCryptoFnLabel::first();
+    std::string secondWhat = ErrorTextCryptoFnLabel::second();
+    Expr *a = CryptoArgs(this->state).cryptoData(args[0], firstWhat, false, false, true);
+    Expr *b = CryptoArgs(this->state).cryptoData(args[1], secondWhat, false, false, true);
     if (a->type->isError() || b->type->isError()) {
       return call;
     }
@@ -444,9 +460,8 @@ Expr *CryptoFunctionChecker::checkSyncCall(CallExpr *call, llvm::StringRef fn,
       Expr *a = options.lookup(pairs[i].first);
       Expr *b = options.lookup(pairs[i].second);
       if (a && b) {
-        this->state.getDiagnostics().error(
-            b->loc(), "option '" + pairs[i].first + "' cannot be used together with '" +
-                          pairs[i].second + "': they are one option");
+        std::string message = ErrorTextCryptoFunction::together(pairs[i].first, pairs[i].second);
+        this->state.getDiagnostics().error(b->loc(), message);
         return call;
       }
       values[i] = a || b ? CryptoArgs(this->state).cryptoNumber(a ? a : b)
@@ -455,9 +470,9 @@ Expr *CryptoFunctionChecker::checkSyncCall(CallExpr *call, llvm::StringRef fn,
     if (std::optional<double> cost = CryptoArgs(this->state).knownNumber(values[0])) {
       int64_t n = int64_t(*cost);
       if (*cost != 0 && (double(n) != *cost || n < 2 || (n & (n - 1)) != 0)) {
-        this->state.getDiagnostics().error(values[0]->loc(),
-                                           "N must be a power of two greater than 1, not " +
-                                               CryptoArgs::numberText(*cost));
+        std::string costShown = CryptoArgs::numberText(*cost);
+        std::string message = ErrorTextCryptoFunction::costN(costShown);
+        this->state.getDiagnostics().error(values[0]->loc(), message);
         return call;
       }
     }
@@ -480,9 +495,9 @@ Expr *CryptoFunctionChecker::checkSyncCall(CallExpr *call, llvm::StringRef fn,
     }
     Expr *type, *name;
     if (CryptoFunctionChecker::literalOf(args[0])) {
+      std::string argon = ErrorTextCryptoFnLabel::argon();
       int which =
-          CryptoArgs(this->state)
-              .cryptoChoice(args[0], "algorithm of Argon2", {"argon2d", "argon2i", "argon2id"});
+          CryptoArgs(this->state).cryptoChoice(args[0], argon, {"argon2d", "argon2i", "argon2id"});
       if (which < 0) {
         return call;
       }
@@ -502,8 +517,8 @@ Expr *CryptoFunctionChecker::checkSyncCall(CallExpr *call, llvm::StringRef fn,
     for (llvm::StringRef required :
          {"message", "nonce", "parallelism", "tagLength", "memory", "passes"}) {
       if (!options.lookup(required)) {
-        this->state.getDiagnostics().error(args[1]->loc(), "the parameters of '" + shown +
-                                                               "' need '" + required + "'");
+        std::string message = ErrorTextCryptoFunction::needs(shown, required);
+        this->state.getDiagnostics().error(args[1]->loc(), message);
         return call;
       }
     }
@@ -550,9 +565,8 @@ Expr *CryptoFunctionChecker::checkSyncCall(CallExpr *call, llvm::StringRef fn,
     }
     Expr *tag = options.lookup("authTagLength");
     if (!tag && name && llvm::StringRef(*name).lower().find("ccm") != std::string::npos) {
-      this->state.getDiagnostics().error(args[0]->loc(), "'" + *name +
-                                                             "' needs the length of its tag: '{ "
-                                                             "authTagLength: 16 }'");
+      std::string message = ErrorTextCryptoFunction::tagLength(*name);
+      this->state.getDiagnostics().error(args[0]->loc(), message);
       return call;
     }
     bool decrypt = fn == "createDecipheriv";
@@ -613,22 +627,24 @@ Expr *CryptoFunctionChecker::checkSyncCall(CallExpr *call, llvm::StringRef fn,
         return call;
       }
       if (Expr *f = options.lookup("format")) {
-        if ((format = CryptoArgs(this->state)
-                          .cryptoChoice(f, "format of the key", {"pem", "der", "jwk"})) < 0) {
+        std::string keyFormat = ErrorTextCryptoFnLabel::keyFormat();
+        format = CryptoArgs(this->state).cryptoChoice(f, keyFormat, {"pem", "der", "jwk"});
+        if (format < 0) {
           return call;
         }
       }
       if (!options.lookup("key")) {
-        this->state.getDiagnostics().error(args[0]->loc(),
-                                           "the options of '" + fn + "' need 'key'");
+        std::string message = ErrorTextCryptoOptions::needsKey(fn);
+        this->state.getDiagnostics().error(args[0]->loc(), message);
         return call;
       }
       key = format == 2
                 ? ArgumentChecker(this->state).checkArg(options["key"], Type::json())
                 : CryptoArgs(this->state).cryptoData(options["key"], "key", true, !priv, true);
       if (Expr *t = options.lookup("type")) {
-        int which = CryptoArgs(this->state)
-                        .cryptoChoice(t, "type of the key", {"pkcs1", "spki", "pkcs8", "sec1"});
+        std::string keyType = ErrorTextCryptoFnLabel::keyType();
+        int which =
+            CryptoArgs(this->state).cryptoChoice(t, keyType, {"pkcs1", "spki", "pkcs8", "sec1"});
         if (which < 0) {
           return call;
         }
@@ -645,8 +661,8 @@ Expr *CryptoFunctionChecker::checkSyncCall(CallExpr *call, llvm::StringRef fn,
                            ? BytesChecker(this->state).checkBufferEncoding(e)
                            : nullptr;
         if (!number || !isa<IntLitExpr>(number)) {
-          this->state.getDiagnostics().error(
-              e->loc(), "the encoding of the key is written as a literal, e.g. 'hex'");
+          std::string message = ErrorTextCryptoFunction::keyCoding();
+          this->state.getDiagnostics().error(e->loc(), message);
           return call;
         }
         encoding = number;
@@ -673,15 +689,14 @@ Expr *CryptoFunctionChecker::checkSyncCall(CallExpr *call, llvm::StringRef fn,
       this->state.getDiagnostics().error(loc, arity.error().message);
       return call;
     }
-    int which = CryptoArgs(this->state).cryptoChoice(args[0], "type of the key", {"hmac", "aes"});
+    std::string keyType = ErrorTextCryptoFnLabel::keyType();
+    int which = CryptoArgs(this->state).cryptoChoice(args[0], keyType, {"hmac", "aes"});
     if (which < 0 || !CryptoArgs(this->state).cryptoOptions(args[1], shown, {"length"}, options)) {
       return call;
     }
     if (!options.lookup("length")) {
-      this->state.getDiagnostics().error(args[1]->loc(),
-                                         "'" + shown +
-                                             "' needs the length of the key in bits: '{ "
-                                             "length: 256 }'");
+      std::string message = ErrorTextCryptoFunction::keyLength(shown);
+      this->state.getDiagnostics().error(args[1]->loc(), message);
       return call;
     }
     Expr *bits = ExprChecker(this->state).checkExpr(options["length"], Type::intTy());
@@ -691,14 +706,14 @@ Expr *CryptoFunctionChecker::checkSyncCall(CallExpr *call, llvm::StringRef fn,
     if (which == 1) {
       std::optional<int64_t> known = ConstantFolder(this->state).intConstant(bits);
       if (!known || (*known != 128 && *known != 192 && *known != 256)) {
-        this->state.getDiagnostics().error(bits->loc(),
-                                           "the length of an AES key is 128, 192 or 256, written "
-                                           "as a number; JavaScript throws a TypeError otherwise");
+        std::string message = ErrorTextCryptoFunction::aesLength();
+        this->state.getDiagnostics().error(bits->loc(), message);
         return call;
       }
     } else {
+      std::string keyBits = ErrorTextCryptoFnLabel::keyBits();
       IndexProofs::ResultBetweenProven between =
-          IndexProofs(this->state).requireBetween(bits, 8, {}, "the length of the key");
+          IndexProofs(this->state).requireBetween(bits, 8, {}, keyBits);
       if (between.isErr() && between.error().code != IndexProofsRequireBetweenErrorCode::EXEMPT) {
         this->state.getDiagnostics().error(bits->loc(), between.error().message);
       }
@@ -775,11 +790,10 @@ Expr *CryptoFunctionChecker::checkSyncCall(CallExpr *call, llvm::StringRef fn,
       return call;
     }
     std::optional<std::string> curve = CryptoFunctionChecker::literalOf(args[0]);
-    if (curve && !llvm::is_contained(kCurveNames, *curve)) {
-      this->state.getDiagnostics().error(args[0]->loc(),
-                                         "unknown curve '" + *curve +
-                                             "'; node has those getCurves() lists, e.g. "
-                                             "'prime256v1', 'secp384r1', 'secp256k1'");
+    ResultCurveIsKnown known =
+        curve ? CryptoFunctionChecker::curveIsKnown(*curve) : ok(llvm::StringRef());
+    if (known.isErr()) {
+      this->state.getDiagnostics().error(args[0]->loc(), known.error().message);
       return loosely();
     }
     Expr *name = ArgumentChecker(this->state).checkArg(args[0], Type::string());
@@ -796,12 +810,14 @@ Expr *CryptoFunctionChecker::checkSyncCall(CallExpr *call, llvm::StringRef fn,
       return call;
     }
     if (!options.lookup("privateKey") || !options.lookup("publicKey")) {
-      this->state.getDiagnostics().error(args[0]->loc(),
-                                         "'diffieHellman' needs '{ privateKey, publicKey }'");
+      std::string message = ErrorTextCryptoFunction::dhKeys();
+      this->state.getDiagnostics().error(args[0]->loc(), message);
       return call;
     }
-    Expr *priv = CryptoArgs(this->state).cryptoKeyObject(options["privateKey"], "private key");
-    Expr *pub = CryptoArgs(this->state).cryptoKeyObject(options["publicKey"], "public key");
+    std::string privateWhat = ErrorTextCryptoFnLabel::privateKey();
+    std::string publicWhat = ErrorTextCryptoFnLabel::publicKey();
+    Expr *priv = CryptoArgs(this->state).cryptoKeyObject(options["privateKey"], privateWhat);
+    Expr *pub = CryptoArgs(this->state).cryptoKeyObject(options["publicKey"], publicWhat);
     if (priv->type->isError() || pub->type->isError()) {
       return call;
     }
@@ -816,9 +832,8 @@ Expr *CryptoFunctionChecker::checkSyncCall(CallExpr *call, llvm::StringRef fn,
       return call;
     }
     if (Expr *big = options.lookup("bigint")) {
-      this->state.getDiagnostics().error(big->loc(),
-                                         "'bigint' is not supported: tz has no bigint "
-                                         "(docs/numbers.md); the prime comes as an ArrayBuffer");
+      std::string message = ErrorTextCryptoFunction::bigint();
+      this->state.getDiagnostics().error(big->loc(), message);
       return call;
     }
     Expr *size = CryptoArgs(this->state).cryptoNumber(args[0]);
@@ -858,7 +873,9 @@ Expr *CryptoFunctionChecker::checkSyncCall(CallExpr *call, llvm::StringRef fn,
     return CryptoArgs(this->state)
         .cryptoResult(call, CryptoFn::CheckPrime, {candidate, checks}, Type::boolTy());
   }
-  this->state.getDiagnostics().error(loc, cryptoExportProblem(shown, "node:crypto"));
+  CryptoExports::ResultExportFound found = CryptoExports::cryptoExport(shown, "node:crypto");
+  std::string message = found.isErr() ? found.error().message : std::string();
+  this->state.getDiagnostics().error(loc, message);
 
   return loosely();
 }

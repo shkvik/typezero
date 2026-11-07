@@ -29,7 +29,7 @@ std::optional<Ref> Ownership::ownedRef(const Expr *e) {
   if (!root || !e->type) {
     return std::nullopt;
   }
-  auto *name = dyn_cast<NameExpr>(strip(e));
+  auto *name = dyn_cast<NameExpr>(ParallelHelpers::strip(e));
   bool whole = needs.empty() && name && name->var() == root;
 
   return interned(root, e->type->nonOptional(), std::move(needs), whole);
@@ -84,7 +84,7 @@ bool Ownership::candidate(const FunctionDecl *fn, const VarSymbol *v) const {
     if (p.sym == v) {
       bool callable = v->type && v->type->nonOptional()->isFunction();
       return !p.rest() && !p.defaultValue() && !p.property && !v->reassigned &&
-             (holdsReferences(v->type) || callable);
+             (ParallelHelpers::holdsReferences(v->type) || callable);
     }
   }
 
@@ -113,7 +113,7 @@ const std::vector<VarSymbol *> &Ownership::capturesOf(const FunctionDecl *fn) {
 }
 
 const FunctionDecl *Ownership::closureOf(const Expr *e) {
-  auto *fe = dyn_cast_or_null<FunctionExpr>(strip(e));
+  auto *fe = dyn_cast_or_null<FunctionExpr>(ParallelHelpers::strip(e));
 
   return fe ? fe->fn : nullptr;
 }
@@ -151,7 +151,7 @@ bool Ownership::confinedVar(const VarSymbol *v) const {
 
 bool Ownership::freshCandidate(const FunctionDecl *fn, const VarSymbol *v) const {
   if (!fn || fn->isGenerator || analysis_.isLibrary(fn) || !tracked(fn, v) ||
-      !holdsReferences(v->type)) {
+      !ParallelHelpers::holdsReferences(v->type)) {
     return false;
   }
   auto init = analysis_.declInit.find(v);
@@ -163,7 +163,7 @@ bool Ownership::freshCandidate(const FunctionDecl *fn, const VarSymbol *v) const
 }
 
 bool Ownership::freshAllocation(const Expr *e) const {
-  e = strip(e);
+  e = ParallelHelpers::strip(e);
   if (!e || !analysis_.aliasAnalysis.isAllocation(e)) {
     return false;
   }
@@ -173,9 +173,9 @@ bool Ownership::freshAllocation(const Expr *e) const {
 }
 
 const CallExpr *Ownership::programCall(const Expr *e) const {
-  e = strip(e);
+  e = ParallelHelpers::strip(e);
   if (auto *a = dyn_cast_or_null<AwaitExpr>(e)) {
-    e = strip(a->value);
+    e = ParallelHelpers::strip(a->value);
   }
   auto *c = dyn_cast_or_null<CallExpr>(e);
   if (!c || c->builtin() != Builtin::None || analysis_.libraryEffects.libraryTarget(c)) {
@@ -347,7 +347,7 @@ bool Ownership::plainValues(const Type *type, unsigned depth) {
     return false;
   }
   type = type->nonOptional();
-  if (!holdsReferences(type)) {
+  if (!ParallelHelpers::holdsReferences(type)) {
     return true;
   }
   if (depth > 8) {
@@ -406,14 +406,14 @@ bool Ownership::derivable(const Type *type, unsigned depth) {
 }
 
 bool Ownership::valueArgument(const Expr *e) {
-  e = strip(e);
+  e = ParallelHelpers::strip(e);
   if (!e || !e->type) {
     return false;
   }
   if (e->type->nonOptional()->isFunction()) {
     return false;
   }
-  if (!holdsReferences(e->type)) {
+  if (!ParallelHelpers::holdsReferences(e->type)) {
     return true;
   }
   if (auto *object = dyn_cast<ObjectLitExpr>(e)) {
@@ -432,7 +432,7 @@ bool Ownership::valueArgument(const Expr *e) {
 
 const VarSymbol *Ownership::rootOf(const FunctionDecl *fn, const Expr *e, Needs &needs,
                                    unsigned depth) {
-  e = strip(e);
+  e = ParallelHelpers::strip(e);
   if (!fn || !e || depth > 32) {
     return nullptr;
   }
@@ -500,7 +500,7 @@ const Expr *Ownership::cryptoSelf(const CallExpr *c) {
   if (c->builtin() != Builtin::Crypto || c->args.empty()) {
     return nullptr;
   }
-  auto *number = dyn_cast<IntLitExpr>(strip(c->args[0]));
+  auto *number = dyn_cast<IntLitExpr>(ParallelHelpers::strip(c->args[0]));
   if (!number || number->value >= std::size(kCryptoFunctions) ||
       kCryptoFunctions[size_t(number->value)].result != 'S') {
     return nullptr;
@@ -516,8 +516,8 @@ const Expr *Ownership::cryptoSelf(const CallExpr *c) {
 }
 
 void Ownership::carriers(const Expr *e, Roots &out, unsigned depth) {
-  e = strip(e);
-  if (!e || depth > 64 || !holdsReferences(e->type)) {
+  e = ParallelHelpers::strip(e);
+  if (!e || depth > 64 || !ParallelHelpers::holdsReferences(e->type)) {
     return;
   }
   switch (e->kind()) {
@@ -580,7 +580,8 @@ void Ownership::carriersOther(const Expr *e, Roots &out, unsigned depth) {
       case Builtin::TextEncode:
         return;
       case Builtin::Crypto: {
-        auto *number = c->args.empty() ? nullptr : dyn_cast<IntLitExpr>(strip(c->args[0]));
+        auto *number =
+            c->args.empty() ? nullptr : dyn_cast<IntLitExpr>(ParallelHelpers::strip(c->args[0]));
         if (!number || number->value >= std::size(kCryptoFunctions)) {
           break;
         }
@@ -754,7 +755,7 @@ void Ownership::dirty(const Expr *object, llvm::StringRef field) {
 }
 
 void Ownership::dirtyAll(const Expr *e) {
-  if (!e || !e->type || !holdsReferences(e->type)) {
+  if (!e || !e->type || !ParallelHelpers::holdsReferences(e->type)) {
     return;
   }
   const Type *type = e->type->nonOptional();
@@ -780,7 +781,7 @@ void Ownership::visitStmt(const Stmt *s) {
       if (d.alias || !d.init) {
         continue;
       }
-      heldLiteral_ = strip(d.init);
+      heldLiteral_ = ParallelHelpers::strip(d.init);
       holder_ = d.sym;
       visit(d.init);
       heldLiteral_ = nullptr;
@@ -925,7 +926,7 @@ void Ownership::visit(const Expr *e) {
   case Expr::Kind::Unary: {
     auto *u = cast<UnaryExpr>(e);
     if (collecting_ && u->op == UnaryOp::Delete) {
-      if (auto *m = dyn_cast<MemberExpr>(strip(u->operand))) {
+      if (auto *m = dyn_cast<MemberExpr>(ParallelHelpers::strip(u->operand))) {
         dirty(m->object, m->name);
       }
     }
@@ -943,7 +944,7 @@ void Ownership::visit(const Expr *e) {
     auto *assigned = dyn_cast<AssignExpr>(e);
     bool selfField = false;
     if (auto *m = dyn_cast<MemberExpr>(target)) {
-      auto *self = dyn_cast<NameExpr>(strip(m->object));
+      auto *self = dyn_cast<NameExpr>(ParallelHelpers::strip(m->object));
       selfField = assigned && !assigned->op && self && isSelf(fn_, self->var()) &&
                   m->object->type && m->object->type->nonOptional()->classDecl();
       if (collecting_ && selfField) {
@@ -1026,7 +1027,7 @@ void Ownership::visit(const Expr *e) {
 void Ownership::visitCall(const CallExpr *c) {
   auto *m = dyn_cast<MemberExpr>(c->callee);
   if (c->builtin() != Builtin::None) {
-    if (collecting_ && !knownBuiltin(c->builtin())) {
+    if (collecting_ && !ParallelHelpers::knownBuiltin(c->builtin())) {
       dirtyAll(m ? m->object : nullptr);
       for (const Expr *arg : c->args) {
         dirtyAll(arg);
@@ -1049,8 +1050,9 @@ void Ownership::visitCall(const CallExpr *c) {
       }
       return;
     }
-    bool reads = onlyReadsArgs(c->builtin()) || c->builtin() == Builtin::ResultOk ||
-                 c->builtin() == Builtin::ResultErr || c->builtin() == Builtin::Crypto;
+    bool reads = ParallelHelpers::onlyReadsArgs(c->builtin()) ||
+                 c->builtin() == Builtin::ResultOk || c->builtin() == Builtin::ResultErr ||
+                 c->builtin() == Builtin::Crypto;
     Needs held;
     const VarSymbol *holder = nullptr;
     if (m && (c->builtin() == Builtin::ArrPush || c->builtin() == Builtin::ArrUnshift ||
@@ -1314,7 +1316,7 @@ bool Ownership::reflectKeepsArgs(const CallExpr *c, bool self) {
     }
     for (const Param &p : g->params) {
       const Type *type = p.sym ? p.sym->type : nullptr;
-      if (type && !holdsReferences(type) && !type->nonOptional()->isFunction()) {
+      if (type && !ParallelHelpers::holdsReferences(type) && !type->nonOptional()->isFunction()) {
         continue;
       }
       if (!candidate(g, p.sym) || leaking_.contains(p.sym)) {
@@ -1414,11 +1416,11 @@ bool Ownership::callFresh(int fi, const CallExpr *c) const {
 }
 
 bool Ownership::valueOwn(int fi, const Expr *e, bool params, unsigned depth) {
-  e = strip(e);
+  e = ParallelHelpers::strip(e);
   if (!e || !e->type || depth > 16) {
     return false;
   }
-  if (!holdsReferences(e->type)) {
+  if (!ParallelHelpers::holdsReferences(e->type)) {
     return true;
   }
   if (e->type->nonOptional()->isFunction()) {
@@ -1556,7 +1558,7 @@ std::optional<Ref> Ownership::substituted(Ref r, const FnInfo &callee, int calle
   }
   Needs needs;
   if (const VarSymbol *root = rootOf(analysis_.byFunction[caller]->decl, value, needs, 0)) {
-    auto *name = dyn_cast<NameExpr>(strip(value));
+    auto *name = dyn_cast<NameExpr>(ParallelHelpers::strip(value));
     bool whole = owned->whole && needs.empty() && name && name->var() == root;
     needs.insert(needs.end(), owned->needs.begin(), owned->needs.end());
     return interned(root, owned->type, std::move(needs), whole);
@@ -1617,7 +1619,8 @@ void Ownership::rewrite() {
           continue;
         }
         bool inner = a.loc.kind == LocKind::Contents &&
-                     llvm::any_of(analysis_.aliasAnalysis.inside(owned->type), holdsReferences);
+                     llvm::any_of(analysis_.aliasAnalysis.inside(owned->type),
+                                  ParallelHelpers::holdsReferences);
         if (inner) {
           b.loc.ref = Ref{RefKind::Type, owned->type};
           b.loc.key = analysis_.inner;

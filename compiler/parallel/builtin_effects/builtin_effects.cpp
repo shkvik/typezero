@@ -43,7 +43,7 @@ void BuiltinEffects::builtinEffects(const CallExpr *c, const Expr *recv) {
     }
   };
   auto field = [&](const Expr *object, llvm::StringRef name, bool write) {
-    if (object && holdsReferences(object->type)) {
+    if (object && ParallelHelpers::holdsReferences(object->type)) {
       analysis_.codeWalk.touch(LocKind::Field, analysis_.aliasAnalysis.refOf(object),
                                analysis_.intern(name), write, at);
     }
@@ -94,7 +94,7 @@ void BuiltinEffects::builtinEffects(const CallExpr *c, const Expr *recv) {
   case Builtin::ArrUnshift:
   case Builtin::ArrSplice:
     analysis_.exprWalk.elements(recv, true, at);
-    if (recv && holdsReferences(recv->type)) {
+    if (recv && ParallelHelpers::holdsReferences(recv->type)) {
       analysis_.codeWalk.touch(LocKind::Field, analysis_.aliasAnalysis.refOf(recv),
                                analysis_.length, true, at);
     }
@@ -349,7 +349,7 @@ void BuiltinEffects::builtinEffects(const CallExpr *c, const Expr *recv) {
     analysis_.resource(Res::Process, false, at);
     return;
   case Builtin::Crypto: {
-    auto *number = dyn_cast_or_null<IntLitExpr>(strip(arg(0)));
+    auto *number = dyn_cast_or_null<IntLitExpr>(ParallelHelpers::strip(arg(0)));
     if (!number || number->value >= std::size(kCryptoFunctions)) {
       readArgs();
       return;
@@ -361,7 +361,7 @@ void BuiltinEffects::builtinEffects(const CallExpr *c, const Expr *recv) {
     for (size_t i = 1; i < c->args.size(); ++i) {
       const Expr *a = c->args[i];
       char kind = i - 1 < kinds.size() ? kinds[i - 1] : 'd';
-      if (!a || !holdsReferences(a->type)) {
+      if (!a || !ParallelHelpers::holdsReferences(a->type)) {
         continue;
       }
       bool bytes = a->type->nonOptional()->isBytes();
@@ -383,7 +383,7 @@ void BuiltinEffects::builtinEffects(const CallExpr *c, const Expr *recv) {
     readArgs();
     return;
   case Builtin::ReflectGet:
-    if (const Expr *a = arg(0); a && holdsReferences(a->type)) {
+    if (const Expr *a = arg(0); a && ParallelHelpers::holdsReferences(a->type)) {
       analysis_.codeWalk.touch(LocKind::Field, analysis_.aliasAnalysis.refOf(a), analysis_.star,
                                false, at);
     }
@@ -394,13 +394,13 @@ void BuiltinEffects::builtinEffects(const CallExpr *c, const Expr *recv) {
     }
     CallRec &rec = analysis_.codeWalk.record(c, CallKind::Call, {}, at);
     rec.call = c;
-    const Expr *fn = strip(arg(0));
+    const Expr *fn = ParallelHelpers::strip(arg(0));
     if (fn && fn->type && fn->type->nonOptional()->isFunction()) {
       rec.byType = fn->type;
       return;
     }
     rec.reflect = CallRec::Reflect::Apply;
-    const Expr *self = strip(arg(1));
+    const Expr *self = ParallelHelpers::strip(arg(1));
     rec.bySelf =
         self ? std::optional<Ref>(analysis_.aliasAnalysis.receiverRef(self)) : std::nullopt;
     rec.byObject = self ? self->type : nullptr;
@@ -429,7 +429,7 @@ void BuiltinEffects::builtinEffects(const CallExpr *c, const Expr *recv) {
   default:
     break;
   }
-  if (knownBuiltin(b)) {
+  if (ParallelHelpers::knownBuiltin(b)) {
     return;
   }
   analysis_.exprWalk.contents(recv, true, at);

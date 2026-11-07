@@ -25,6 +25,8 @@ public:
   }
 
 private:
+  static bool isIdentStart(char c);
+  static bool isIdentChar(char c);
   bool skipTrivia();
   char peek(size_t offset = 0) const { return cur_ + offset < end_ ? cur_[offset] : '\0'; }
   bool match(char c);

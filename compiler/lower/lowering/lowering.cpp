@@ -214,6 +214,33 @@ Lowering::Lowering(llvm::LLVMContext &ctx, llvm::StringRef moduleName,
   promiseObjTy_ = llvm::StructType::create(ctx, {i64, ptr, ptr, ptr, i32, i32}, "tz.Promise");
 }
 
+const Expr *Lowering::stripImplicit(const Expr *e) {
+  while (auto *c = llvm::dyn_cast_or_null<CastExpr>(e)) {
+    if (!c->isImplicit()) {
+      break;
+    }
+    e = c->operand;
+  }
+
+  return e;
+}
+
+const Expr *Lowering::awaitedOperand(const Expr *e) {
+  auto *await = llvm::dyn_cast_or_null<AwaitExpr>(Lowering::stripImplicit(e));
+  if (!await) {
+    return nullptr;
+  }
+  const Expr *operand = Lowering::stripImplicit(await->value);
+  if (auto *call = llvm::dyn_cast_or_null<CallExpr>(operand);
+      call &&
+      (call->builtin() == Builtin::LibAhead || call->builtin() == Builtin::LibAheadMovable) &&
+      !call->args.empty()) {
+    operand = Lowering::stripImplicit(call->args[0]);
+  }
+
+  return operand;
+}
+
 void Lowering::setParallelPlan(const ParallelPlan *plan) {
   plan_ = plan;
   parallel_ =
@@ -241,42 +268,11 @@ void Lowering::setParallelPlan(const ParallelPlan *plan) {
   }
 }
 
-namespace {
-
-const Expr *stripImplicit(const Expr *e) {
-  while (auto *c = llvm::dyn_cast_or_null<CastExpr>(e)) {
-    if (!c->isImplicit()) {
-      break;
-    }
-    e = c->operand;
-  }
-
-  return e;
-}
-
-const Expr *awaitedOperand(const Expr *e) {
-  auto *await = llvm::dyn_cast_or_null<AwaitExpr>(stripImplicit(e));
-  if (!await) {
-    return nullptr;
-  }
-  const Expr *operand = stripImplicit(await->value);
-  if (auto *call = llvm::dyn_cast_or_null<CallExpr>(operand);
-      call &&
-      (call->builtin() == Builtin::LibAhead || call->builtin() == Builtin::LibAheadMovable) &&
-      !call->args.empty()) {
-    operand = stripImplicit(call->args[0]);
-  }
-
-  return operand;
-}
-
-}
-
 void Lowering::noteAwaited(const Expr *operand) {
   if (!parallel_) {
     return;
   }
-  if (auto *call = llvm::dyn_cast_or_null<CallExpr>(stripImplicit(operand))) {
+  if (auto *call = llvm::dyn_cast_or_null<CallExpr>(Lowering::stripImplicit(operand))) {
     awaitedCalls_.insert(call);
   }
 }
@@ -287,7 +283,7 @@ void Lowering::noteAwaitedNext(const Stmt *declared, const Stmt *next) {
     return;
   }
   const VarDeclarator &d = decl->decls[0];
-  auto *call = llvm::dyn_cast_or_null<CallExpr>(stripImplicit(d.init));
+  auto *call = llvm::dyn_cast_or_null<CallExpr>(Lowering::stripImplicit(d.init));
   if (!call || !d.sym || d.destructured() || d.alias) {
     return;
   }
@@ -299,7 +295,7 @@ void Lowering::noteAwaitedNext(const Stmt *declared, const Stmt *next) {
   } else if (auto *r = llvm::dyn_cast<ReturnStmt>(next)) {
     first = r->value;
   }
-  auto *name = llvm::dyn_cast_or_null<NameExpr>(awaitedOperand(first));
+  auto *name = llvm::dyn_cast_or_null<NameExpr>(Lowering::awaitedOperand(first));
   if (name && name->var() == d.sym) {
     awaitedCalls_.insert(call);
   }

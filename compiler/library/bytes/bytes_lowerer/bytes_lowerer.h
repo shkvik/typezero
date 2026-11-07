@@ -7,6 +7,9 @@ namespace tz {
 
 class BytesLowerer {
 public:
+  static bool isSignedKind(Bytes kind);
+  static llvm::StructType *bytesStruct(llvm::LLVMContext &ctx);
+
   explicit BytesLowerer(Lowering &owner);
 
   llvm::Value *emitBytesIndex(IndexExpr *index);
@@ -22,9 +25,7 @@ public:
   llvm::Constant *encodingTable(llvm::StringRef name);
 
 private:
-  static llvm::StructType *bytesStruct(llvm::LLVMContext &ctx);
   static llvm::Type *storageType(llvm::IRBuilder<> &b, Bytes kind);
-  static bool isSignedKind(Bytes kind);
   static llvm::Value *toStorage(Lowering &, llvm::IRBuilder<> &b, Bytes kind, llvm::Value *value,
                                 llvm::FunctionCallee f16);
 

@@ -14,6 +14,33 @@ namespace tz {
 ReadlineChecker::ReadlineChecker(CheckState &owner)
     : state(owner) {}
 
+ReadlineChecker::ResultReadlineUsed ReadlineChecker::readlineFunction(llvm::StringRef fn,
+                                                                      NodeModule module) {
+  if (fn != "createInterface") {
+    std::string message = ErrorTextReadline::typeOnly(fn, module != NodeModule::Readline);
+
+    return err(ReadlineCheckerReadlineFunctionError{
+        .code = ReadlineCheckerReadlineFunctionErrorCode::TYPE_ONLY,
+        .message = message,
+    });
+  }
+
+  return ok(fn);
+}
+
+ReadlineChecker::ResultInputIsStdin ReadlineChecker::stdinInput(const Expr *input) {
+  if (!ProcessChecker(this->state).isProcessMember(input, "stdin")) {
+    std::string message = ErrorTextReadline::notStdin();
+
+    return err(ReadlineCheckerStdinInputError{
+        .code = ReadlineCheckerStdinInputErrorCode::NOT_STDIN,
+        .message = message,
+    });
+  }
+
+  return ok(input);
+}
+
 Expr *ReadlineChecker::checkReadlineCall(CallExpr *call, NodeModule module, llvm::StringRef fn,
                                          llvm::SMLoc loc) {
   this->state.getProgramUse().markUsesAsync();
@@ -29,10 +56,9 @@ Expr *ReadlineChecker::checkReadlineCall(CallExpr *call, NodeModule module, llvm
 
     return call;
   };
-  if (fn != "createInterface") {
-    const char *name = module == NodeModule::Readline ? "node:readline" : "node:readline/promises";
-    this->state.getDiagnostics().error(
-        loc, "'" + fn + "' of '" + name + "' can only be used as a type; call 'createInterface'");
+  ResultReadlineUsed function = ReadlineChecker::readlineFunction(fn, module);
+  if (function.isErr()) {
+    this->state.getDiagnostics().error(loc, function.error().message);
     return loosely();
   }
   bool rejected = CallChecker(this->state).rejectSpread(call);
@@ -66,26 +92,23 @@ Expr *ReadlineChecker::checkReadlineCall(CallExpr *call, NodeModule module, llvm
     }
     for (llvm::StringRef unsupported : {"prompt", "completer", "history"}) {
       if (Expr *value = options.lookup(unsupported)) {
-        this->state.getDiagnostics().error(value->loc(),
-                                           "the option '" + unsupported.str() +
-                                               "' of 'createInterface' is not supported yet");
+        std::string message = ErrorTextReadline::option(unsupported);
+        this->state.getDiagnostics().error(value->loc(), message);
         return call;
       }
     }
     if (!input) {
-      this->state.getDiagnostics().error(call->args[0]->loc(),
-                                         "'createInterface' needs the input: '{ input: "
-                                         "process.stdin }'");
+      std::string message = ErrorTextReadline::noInput();
+      this->state.getDiagnostics().error(call->args[0]->loc(), message);
       return call;
     }
   } else {
     input = call->args[0];
     output = call->args.size() > 1 ? call->args[1] : nullptr;
   }
-  if (!ProcessChecker(this->state).isProcessMember(input, "stdin")) {
-    this->state.getDiagnostics().error(
-        input->loc(), "readline reads only stdin yet: the input is 'process.stdin'; for "
-                      "the lines of a file, 'readFile' it and split them");
+  ResultInputIsStdin stdinInput = this->stdinInput(input);
+  if (stdinInput.isErr()) {
+    this->state.getDiagnostics().error(input->loc(), stdinInput.error().message);
     return call;
   }
   int written = 0;
@@ -95,9 +118,8 @@ Expr *ReadlineChecker::checkReadlineCall(CallExpr *call, NodeModule module, llvm
     } else if (ProcessChecker(this->state).isProcessMember(output, "stderr")) {
       written = 2;
     } else {
-      this->state.getDiagnostics().error(output->loc(),
-                                         "the output of readline is 'process.stdout' or "
-                                         "'process.stderr'");
+      std::string message = ErrorTextReadline::output();
+      this->state.getDiagnostics().error(output->loc(), message);
       return call;
     }
   }

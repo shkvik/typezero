@@ -57,7 +57,7 @@ llvm::Value *TypedArrayCalls::emit() {
     case Builtin::BytesByteOffset: {
       Lowering::Operand self = this->lowering.refCounts().emitOperand(member->object, true);
       if (!this->lowering.bytesTy_) {
-        this->lowering.bytesTy_ = bytesStruct(this->lowering.ctx_);
+        this->lowering.bytesTy_ = BytesLowerer::bytesStruct(this->lowering.ctx_);
       }
       llvm::Value *offset = this->lowering.builder_.CreateLoad(
           i32,
@@ -97,12 +97,13 @@ llvm::Value *TypedArrayCalls::emit() {
       llvm::Value *value = this->lowering.exprLowerer().emitExpr(call->args[1]);
       std::vector<llvm::Value *> values;
       llvm::Value *has = this->positions(2, 1, values);
-      llvm::Value *mode = this->lowering.builder_.getInt32(uint32_t(constantOf(call->args[0])));
+      llvm::Value *mode =
+          this->lowering.builder_.getInt32(uint32_t(BytesCallSite::constantOf(call->args[0])));
       llvm::Value *found = this->lowering.builder_.CreateCall(
           this->fn("tz_bytes_index_of", i32, {ptr, f64, i64, i32, i32}),
           {self.value, value, values[0], has, mode});
       this->lowering.refCounts().dropOperand(self);
-      return constantOf(call->args[0]) == 2
+      return BytesCallSite::constantOf(call->args[0]) == 2
                  ? this->lowering.builder_.CreateICmpNE(found, this->lowering.builder_.getInt32(0))
                  : this->lowering.builder_.CreateSExt(found, i64);
     }

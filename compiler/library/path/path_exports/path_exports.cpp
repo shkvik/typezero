@@ -14,17 +14,25 @@ const llvm::StringLiteral kPathExports[] = {"sep",   "delimiter",   "posix",
 
 }
 
-std::string pathExportProblem(llvm::StringRef name, llvm::StringRef path) {
-  std::string quoted = "'" + path.str() + "'";
+PathExports::ResultExportFound PathExports::pathExport(llvm::StringRef name, llvm::StringRef path) {
   if (llvm::is_contained(kPathFunctions, name) || name == "sep" || name == "delimiter" ||
       name == "posix" || name == "win32") {
-    return "";
+    return ok(name);
   }
   if (llvm::is_contained(kPathExports, name)) {
-    return "'" + name.str() + "' of " + quoted + " is not supported yet";
-  }
+    std::string message = ErrorTextModuleExport::notYet(name, path);
 
-  return quoted + " has no export named '" + name.str() + "'";
+    return err(FeatureExportFoundError{
+        .code = FeatureExportFoundErrorCode::NOT_YET,
+        .message = message,
+    });
+  }
+  std::string message = ErrorTextModuleExport::none(path, name);
+
+  return err(FeatureExportFoundError{
+      .code = FeatureExportFoundErrorCode::NO_EXPORT,
+      .message = message,
+  });
 }
 
 }

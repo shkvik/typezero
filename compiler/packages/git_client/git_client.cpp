@@ -17,9 +17,7 @@ namespace tz::pkg {
 namespace fs = llvm::sys::fs;
 namespace path = llvm::sys::path;
 
-namespace {
-
-bool git(llvm::ArrayRef<std::string> args, std::string *output, std::string &error) {
+bool GitClient::git(llvm::ArrayRef<std::string> args, std::string *output, std::string &error) {
   static llvm::ErrorOr<std::string> program = llvm::sys::findProgramByName("git");
   if (!program) {
     error = "git packages need the git program, and it is not installed (or not on PATH)";
@@ -31,7 +29,7 @@ bool git(llvm::ArrayRef<std::string> args, std::string *output, std::string &err
       "-c", "protocol.ext.allow=never"};
   all.insert(all.end(), args.begin(), args.end());
   std::string out, err;
-  int code = runProgram(*program, all, out, err, error);
+  int code = ProgramRunner::runProgram(*program, all, out, err, error);
   if (code == 0) {
     if (output) {
       *output = llvm::StringRef(out).trim().str();
@@ -48,7 +46,7 @@ bool git(llvm::ArrayRef<std::string> args, std::string *output, std::string &err
   return false;
 }
 
-std::string repositoryKey(llvm::StringRef url) {
+std::string GitClient::repositoryKey(llvm::StringRef url) {
   llvm::StringRef name = url.rtrim("/\\");
   size_t slash = name.find_last_of("/:\\");
   if (slash != llvm::StringRef::npos) {
@@ -61,25 +59,23 @@ std::string repositoryKey(llvm::StringRef url) {
     key += llvm::isAlnum(lower) || lower == '.' || lower == '-' ? lower : '_';
   }
 
-  return key + "-" + sha256Hex(url).substr(0, 8);
+  return key + "-" + PackageCache::sha256Hex(url).substr(0, 8);
 }
 
-}
-
-bool gitResolve(const std::string &url, const std::string &ref, bool refresh, std::string &commit,
-                std::string &error) {
-  std::string key = repositoryKey(url);
-  std::string mirror = cachePath({"git", key + ".git"});
+bool GitClient::gitResolve(const std::string &url, const std::string &ref, bool refresh,
+                           std::string &commit, std::string &error) {
+  std::string key = GitClient::repositoryKey(url);
+  std::string mirror = PackageCache::cachePath({"git", key + ".git"});
   static llvm::StringSet<> current;
   bool fresh = current.contains(url);
   if (!fs::is_directory(mirror)) {
-    progress("cloning " + url);
+    Report::progress("cloning " + url);
     StagedDir staged;
     if (!staged.create(mirror, error)) {
       return false;
     }
-    if (!git({"clone", "--mirror", "--quiet", "--", url, std::string(staged.path())}, nullptr,
-             error)) {
+    if (!GitClient::git({"clone", "--mirror", "--quiet", "--", url, std::string(staged.path())},
+                        nullptr, error)) {
       error = "cannot clone " + url + ": " + error;
       return false;
     }
@@ -93,13 +89,15 @@ bool gitResolve(const std::string &url, const std::string &ref, bool refresh, st
   auto lookup = [&] {
     std::string ignored;
 
-    return git({"--git-dir", mirror, "rev-parse", "--verify", "--quiet", name}, &commit, ignored);
+    return GitClient::git({"--git-dir", mirror, "rev-parse", "--verify", "--quiet", name}, &commit,
+                          ignored);
   };
   bool known = !refresh && lookup();
   if (!known && !fresh) {
-    progress("fetching " + url);
-    if (!git({"--git-dir", mirror, "fetch", "--quiet", "--prune", "--tags", "--force", "origin"},
-             nullptr, error)) {
+    Report::progress("fetching " + url);
+    if (!GitClient::git(
+            {"--git-dir", mirror, "fetch", "--quiet", "--prune", "--tags", "--force", "origin"},
+            nullptr, error)) {
       error = "cannot fetch " + url + ": " + error;
       return false;
     }
@@ -114,19 +112,20 @@ bool gitResolve(const std::string &url, const std::string &ref, bool refresh, st
   return false;
 }
 
-bool gitCheckout(const std::string &url, const std::string &commit, std::string &dir,
-                 std::string &error) {
-  std::string key = repositoryKey(url);
-  dir = cachePath({"git", key, llvm::StringRef(commit).take_front(16)});
+bool GitClient::gitCheckout(const std::string &url, const std::string &commit, std::string &dir,
+                            std::string &error) {
+  std::string key = GitClient::repositoryKey(url);
+  dir = PackageCache::cachePath({"git", key, llvm::StringRef(commit).take_front(16)});
   if (fs::is_directory(dir)) {
     return true;
   }
-  std::string mirror = cachePath({"git", key + ".git"});
+  std::string mirror = PackageCache::cachePath({"git", key + ".git"});
   std::string ignored;
   if (!fs::is_directory(mirror) ||
-      !git({"--git-dir", mirror, "cat-file", "-e", commit + "^{commit}"}, nullptr, ignored)) {
+      !GitClient::git({"--git-dir", mirror, "cat-file", "-e", commit + "^{commit}"}, nullptr,
+                      ignored)) {
     std::string found;
-    if (!gitResolve(url, commit, false, found, error)) {
+    if (!GitClient::gitResolve(url, commit, false, found, error)) {
       return false;
     }
   }
@@ -137,10 +136,11 @@ bool gitCheckout(const std::string &url, const std::string &commit, std::string 
   std::string work(staged.path());
   llvm::SmallString<256> dotGit(work);
   path::append(dotGit, ".git");
-  if (!git({"clone", "--quiet", "--shared", "--no-checkout", "--", mirror, work}, nullptr, error) ||
-      !git({"--git-dir", std::string(dotGit), "--work-tree", work, "-c",
-            "advice.detachedHead=false", "checkout", "--quiet", commit},
-           nullptr, error)) {
+  if (!GitClient::git({"clone", "--quiet", "--shared", "--no-checkout", "--", mirror, work},
+                      nullptr, error) ||
+      !GitClient::git({"--git-dir", std::string(dotGit), "--work-tree", work, "-c",
+                       "advice.detachedHead=false", "checkout", "--quiet", commit},
+                      nullptr, error)) {
     error = "cannot check out " + commit + " of " + url + ": " + error;
     return false;
   }

@@ -18,37 +18,38 @@ using llvm::isa;
 
 namespace tz {
 
-FlowBuiltins::FlowBuiltins(Flows &flows) : flows_(flows) {}
+FlowBuiltins::FlowBuiltins(Flows &owner)
+    : flows(owner) {}
 
 Refs FlowBuiltins::builtin(CallExpr *c, MemberExpr *member, const Refs &receiver,
                            const std::vector<Refs> &args) {
   const Type *receiverType = member ? member->object->type : nullptr;
-  int held = flows_.contents(receiverType);
-  Refs parts = shifted(receiver, 1);
+  int held = this->flows.contentsNode(receiverType);
+  Refs parts = Flows::shifted(receiver, 1);
   if (held >= 0) {
     parts.push_back({held, 0, 0});
   }
   auto insert = [&](size_t from) {
     for (size_t i = from; i < args.size(); ++i) {
-      Refs value = c->spreads(i) ? shifted(args[i], 1) : args[i];
-      flows_.flowStmts().recordWrite(receiver, true, "", c->spreads(i) ? nullptr : c->args[i],
-                                     receiverType ? receiverType->nonOptional() : nullptr,
-                                     c->loc());
+      Refs value = c->spreads(i) ? Flows::shifted(args[i], 1) : args[i];
+      this->flows.getFlowStmts().recordWrite(
+          receiver, true, "", c->spreads(i) ? nullptr : c->args[i],
+          receiverType ? receiverType->nonOptional() : nullptr, c->loc());
       if (held >= 0) {
-        flows_.flow(value, held);
+        this->flows.addFlow(value, held);
       }
     }
   };
   Refs given = parts;
-  append(given, receiver);
+  Flows::append(given, receiver);
   for (const Refs &a : args) {
-    append(given, a);
+    Flows::append(given, a);
   }
   Refs results;
   for (const Expr *arg : c->args) {
-    flows_.flowCalls().callback(arg, given);
+    this->flows.getFlowCalls().callback(arg, given);
     if (auto *f = llvm::dyn_cast<FunctionExpr>(FlowExprs::ownExpr(arg))) {
-      results.push_back({flows_.returned(f->fn), 0, 0});
+      results.push_back({this->flows.returnNode(f->fn), 0, 0});
     }
   }
   switch (c->builtin()) {
@@ -59,7 +60,7 @@ Refs FlowBuiltins::builtin(CallExpr *c, MemberExpr *member, const Refs &receiver
     case Builtin::LibBoundListener: {
       Refs both = args.empty() ? Refs() : args[0];
       if (args.size() > 1) {
-        append(both, args[1]);
+        Flows::append(both, args[1]);
       }
       return both;
     }
@@ -83,8 +84,8 @@ Refs FlowBuiltins::builtin(CallExpr *c, MemberExpr *member, const Refs &receiver
       break;
   }
   if (c->builtin() == Builtin::DictNew && args.size() == 1) {
-    if (int into = flows_.contents(c->type); into >= 0) {
-      flows_.flow(shifted(args[0], c->type->nonOptional()->isSet() ? 1 : 2), into);
+    if (int into = this->flows.contentsNode(c->type); into >= 0) {
+      this->flows.addFlow(Flows::shifted(args[0], c->type->nonOptional()->isSet() ? 1 : 2), into);
       return {};
     }
   }
@@ -115,14 +116,14 @@ Refs FlowBuiltins::builtin(CallExpr *c, MemberExpr *member, const Refs &receiver
     case Builtin::ResultErr: {
       Refs out;
       for (const Refs &a : args) {
-        append(out, holding(a));
+        Flows::append(out, Flows::holding(a));
       }
       return out;
     }
     case Builtin::ResultUnwrapOr: {
       Refs out = parts;
       for (const Refs &a : args) {
-        append(out, a);
+        Flows::append(out, a);
       }
       return out;
     }
@@ -135,7 +136,7 @@ Refs FlowBuiltins::builtin(CallExpr *c, MemberExpr *member, const Refs &receiver
       return receiver;
     case Builtin::ArrSplice:
       insert(2);
-      return copied(receiver);
+      return Flows::copied(receiver);
     case Builtin::ArrReverse:
     case Builtin::ArrSort:
     case Builtin::ArrSortWith:
@@ -158,27 +159,27 @@ Refs FlowBuiltins::builtin(CallExpr *c, MemberExpr *member, const Refs &receiver
     case Builtin::SetEntries:
     case Builtin::ArrValues:
     case Builtin::ArrEntries:
-      return copied(receiver);
+      return Flows::copied(receiver);
     case Builtin::ArrConcat: {
-      Refs out = copied(receiver);
+      Refs out = Flows::copied(receiver);
       for (size_t i = 0; i < args.size(); ++i) {
         bool array = c->args[i]->type && c->args[i]->type->nonOptional()->isArray();
-        append(out, array ? copied(args[i]) : holding(args[i]));
+        Flows::append(out, array ? Flows::copied(args[i]) : Flows::holding(args[i]));
       }
       return out;
     }
     case Builtin::ArrMap:
     case Builtin::ArrFlatMap: {
-      Refs out = copied(receiver);
-      append(out, holding(results));
+      Refs out = Flows::copied(receiver);
+      Flows::append(out, Flows::holding(results));
       return out;
     }
     case Builtin::ArrReduce:
     case Builtin::ArrReduceRight: {
       Refs out = parts;
-      append(out, results);
+      Flows::append(out, results);
       for (const Refs &a : args) {
-        append(out, a);
+        Flows::append(out, a);
       }
       return out;
     }
@@ -188,25 +189,25 @@ Refs FlowBuiltins::builtin(CallExpr *c, MemberExpr *member, const Refs &receiver
     case Builtin::RecordNullishSet:
       if (held >= 0) {
         for (const Refs &a : args) {
-          flows_.flow(a, held);
+          this->flows.addFlow(a, held);
         }
       } else {
         for (const Refs &a : args) {
-          flows_.escape(a);
+          this->flows.escape(a);
         }
       }
       return receiver;
     default: {
       Refs out = receiver;
-      append(out, parts);
+      Flows::append(out, parts);
       for (const Refs &a : args) {
-        append(out, a);
-        append(out, shifted(a, 1));
+        Flows::append(out, a);
+        Flows::append(out, Flows::shifted(a, 1));
       }
-      append(out, results);
+      Flows::append(out, results);
       for (size_t i = 0; i < args.size(); ++i) {
-        if (holdsReferences(c->args[i]->type)) {
-          flows_.escape(args[i]);
+        if (Flows::holdsReferences(c->args[i]->type)) {
+          this->flows.escape(args[i]);
         }
       }
       return out;

@@ -138,9 +138,10 @@ DebugTypes::structure(llvm::StringRef name, llvm::StructType *layout,
                                                      0, offsets->getElementOffsetInBits(i),
                                                      llvm::DINode::FlagPublic, fields[i].second));
   }
+  uint32_t alignment = uint32_t(offsets->getAlignment().value() * 8);
   llvm::DICompositeType *made = this->builder.createStructType(
-      this->unit, name, nullptr, 0, offsets->getSizeInBits(), offsets->getAlignment().value() * 8,
-      llvm::DINode::FlagZero, nullptr, this->builder.getOrCreateArray(members));
+      this->unit, name, nullptr, 0, offsets->getSizeInBits(), alignment, llvm::DINode::FlagZero,
+      nullptr, this->builder.getOrCreateArray(members));
 
   return this->builder.replaceTemporary(llvm::TempDICompositeType(temporary), made);
 }

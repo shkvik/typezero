@@ -13,6 +13,8 @@
 
 namespace tz::pkg {
 
+struct JsrVersion;
+
 class Resolver {
 public:
   Resolver(const Manifest &root, const Lock &old, const PrepareOptions &options)
@@ -22,6 +24,7 @@ public:
   std::map<std::string, Manifest> locals;
 
 private:
+  static std::vector<std::string> jsrDependencies(const std::string &dir, const JsrVersion &meta);
   bool collect(std::map<std::string, std::vector<Requirement>> &reqs);
   bool updating(const std::string &id) const {
     return options_.update &&

@@ -126,13 +126,14 @@ bool WideWrites::breaks(const Write &write, const Narrowing &narrowing, int dept
 
 bool WideWrites::mayBe(const Write &write, const Narrowing &narrowing) {
   const Type *through = write.through ? write.through->nonOptional() : nullptr;
-  bool open = !through || !narrowing.owner || mentionsParam(through) || through->isUnknown() ||
-              through->isAnyObject();
+  bool open = !through || !narrowing.owner || TypeQueries::mentionsParam(through) ||
+              through->isUnknown() || through->isAnyObject();
   if (open) {
     return true;
   }
   if (narrowing.element) {
-    return !through->isArray() || !narrowing.narrow || mentionsParam(through->inner()) ||
+    return !through->isArray() || !narrowing.narrow ||
+           TypeQueries::mentionsParam(through->inner()) ||
            TypeRelations::isImplicitlyConvertible(narrowing.narrow, through->inner());
   }
 
@@ -144,14 +145,15 @@ bool WideWrites::mayHold(const Type *type, const Type *value, int depth) {
     return true;
   }
   type = type->nonOptional();
-  bool open = type->isUnknown() || type->isAnyObject() || type->isError() || mentionsParam(type);
+  bool open = type->isUnknown() || type->isAnyObject() || type->isError() ||
+              TypeQueries::mentionsParam(type);
   if (open) {
     return true;
   }
   if (depth == 0) {
     return TypeRelations::isImplicitlyConvertible(value, type);
   }
-  if (!holdsReferences(type)) {
+  if (!Flows::holdsReferences(type)) {
     return false;
   }
   if (type->isArray()) {
@@ -184,12 +186,12 @@ bool WideWrites::mayBePart(const Type *type, const Type *whole, int depth) {
   if (depth == 0) {
     return WideWrites::mayHold(type, whole, 0) || WideWrites::mayHold(whole, type, 0);
   }
-  bool open =
-      whole->isUnknown() || whole->isAnyObject() || whole->isError() || mentionsParam(whole);
+  bool open = whole->isUnknown() || whole->isAnyObject() || whole->isError() ||
+              TypeQueries::mentionsParam(whole);
   if (open) {
     return true;
   }
-  if (!holdsReferences(whole)) {
+  if (!Flows::holdsReferences(whole)) {
     return false;
   }
   if (whole->isArray()) {
@@ -215,10 +217,10 @@ bool WideWrites::mayBePart(const Type *type, const Type *whole, int depth) {
   return true;
 }
 
-WideWrites::WritesAt WideWrites::writesByNode(const Flows &flows) {
-  WritesAt writesAt(flows.edges.size());
-  for (size_t w = 0; w < flows.writes.size(); ++w) {
-    const Refs &targets = flows.writes[w].target;
+WideWrites::WritesAt WideWrites::writesByNode(const FlowGraph &graph) {
+  WritesAt writesAt(graph.edges.size());
+  for (size_t w = 0; w < graph.writes.size(); ++w) {
+    const Refs &targets = graph.writes[w].target;
     for (size_t r = 0; r < targets.size(); ++r) {
       writesAt[size_t(targets[r].node)].push_back(WriteAt{.write = w, .target = r});
     }
@@ -227,8 +229,8 @@ WideWrites::WritesAt WideWrites::writesByNode(const Flows &flows) {
   return writesAt;
 }
 
-bool WideWrites::nodeMayHold(const Flows &flows, const Conversion &conv, int node, int off) {
-  const Type *type = size_t(node) < flows.types.size() ? flows.types[size_t(node)] : nullptr;
+bool WideWrites::nodeMayHold(const FlowGraph &graph, const Conversion &conv, int node, int off) {
+  const Type *type = size_t(node) < graph.types.size() ? graph.types[size_t(node)] : nullptr;
   if (!type) {
     return true;
   }
@@ -252,10 +254,10 @@ WideWrites::WriteBreak WideWrites::breakingNarrowing(const Write &write, const C
   return WriteBreak{};
 }
 
-WideWrites::WriteBreak WideWrites::breakingAt(const Flows &flows, const WritesAt &writesAt,
+WideWrites::WriteBreak WideWrites::breakingAt(const FlowGraph &graph, const WritesAt &writesAt,
                                               const Conversion &conv, int node, int off, int md) {
   for (const WriteAt &at : writesAt[size_t(node)]) {
-    const Write &write = flows.writes[at.write];
+    const Write &write = graph.writes[at.write];
     const Ref &target = write.target[at.target];
     if (target.md != 0 || target.off < md) {
       continue;
@@ -273,9 +275,9 @@ WideWrites::WriteBreak WideWrites::breakingAt(const Flows &flows, const WritesAt
   return WriteBreak{};
 }
 
-WideWrites::WriteBreak WideWrites::breakingAnywhere(const Flows &flows,
+WideWrites::WriteBreak WideWrites::breakingAnywhere(const FlowGraph &graph,
                                                     const Conversion &conv) const {
-  for (const Write &write : flows.writes) {
+  for (const Write &write : graph.writes) {
     if (LibraryCalls(this->state).inLibrary(write.loc)) {
       continue;
     }
@@ -288,7 +290,7 @@ WideWrites::WriteBreak WideWrites::breakingAnywhere(const Flows &flows,
   return WriteBreak{};
 }
 
-WideWrites::WriteBreak WideWrites::breakingWrite(const Flows &flows, const WritesAt &writesAt,
+WideWrites::WriteBreak WideWrites::breakingWrite(const FlowGraph &graph, const WritesAt &writesAt,
                                                  const Conversion &conv) const {
   std::set<std::tuple<int, int, int>> seen;
   std::vector<std::tuple<int, int, int>> todo{{conv.node, 0, 0}};
@@ -302,21 +304,21 @@ WideWrites::WriteBreak WideWrites::breakingWrite(const Flows &flows, const Write
       continue;
     }
     bool firstVisit = seen.insert({node, off, md}).second;
-    if (!firstVisit || !WideWrites::nodeMayHold(flows, conv, node, off)) {
+    if (!firstVisit || !WideWrites::nodeMayHold(graph, conv, node, off)) {
       continue;
     }
-    if (node == flows.unknown_) {
+    if (node == graph.unknownNode) {
       unknown = true;
       continue;
     }
-    found = WideWrites::breakingAt(flows, writesAt, conv, node, off, md);
-    for (const Edge &edge : flows.edges[size_t(node)]) {
+    found = WideWrites::breakingAt(graph, writesAt, conv, node, off, md);
+    for (const Edge &edge : graph.edges[size_t(node)]) {
       int nextMd = std::max({edge.md, md - edge.off, 0});
       todo.push_back({edge.to, off + edge.off, nextMd});
     }
   }
   if (!found.write && unknown) {
-    found = this->breakingAnywhere(flows, conv);
+    found = this->breakingAnywhere(graph, conv);
   }
 
   return found;
@@ -396,10 +398,11 @@ void WideWrites::checkWidenings(SourceFile &file) {
   };
   Flows flows(widenings, narrowings, convertible);
   flows.walkProgram(file);
+  const FlowGraph &graph = flows.getFlowGraph();
 
-  WritesAt writesAt = WideWrites::writesByNode(flows);
+  WritesAt writesAt = WideWrites::writesByNode(graph);
   std::set<const char *> reported;
-  for (const Conversion &conv : flows.conversions) {
+  for (const Conversion &conv : graph.conversions) {
     if (conv.narrowings.empty()) {
       continue;
     }
@@ -407,7 +410,7 @@ void WideWrites::checkWidenings(SourceFile &file) {
     if (!firstReport) {
       continue;
     }
-    WriteBreak breaking = this->breakingWrite(flows, writesAt, conv);
+    WriteBreak breaking = this->breakingWrite(graph, writesAt, conv);
     ResultWideningSafe safe = this->widening(conv, breaking);
     if (safe.isErr()) {
       const Type *through = breaking.write->through ? breaking.write->through : conv.to;

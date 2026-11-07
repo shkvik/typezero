@@ -15,6 +15,10 @@ public:
 
   static llvm::json::Object range(const SourcePlace &place);
   static void readRange(const llvm::json::Object *range, SourcePlace &place);
+
+private:
+  static llvm::json::Value keyOf(const Knowledge &knowledge, size_t symbol);
+  static std::string text(const llvm::json::Object &object, llvm::StringRef key);
 };
 
 }

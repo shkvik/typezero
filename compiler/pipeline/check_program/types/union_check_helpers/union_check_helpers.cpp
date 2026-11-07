@@ -9,7 +9,7 @@ using llvm::isa;
 
 namespace tz {
 
-const Type *writtenLiteral(const Expr *expr) {
+const Type *UnionCheckHelpers::writtenLiteral(const Expr *expr) {
   while (auto *conv = dyn_cast<CastExpr>(expr)) {
     if (!conv->isImplicit()) {
       return nullptr;

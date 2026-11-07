@@ -24,8 +24,6 @@ using llvm::isa;
 
 namespace tz {
 
-const Type *literalType(const Expr *value);
-
 const Type *AsyncChecker::awaited(const Type *type) {
   return type->isPromise() ? type->promised() : type;
 }

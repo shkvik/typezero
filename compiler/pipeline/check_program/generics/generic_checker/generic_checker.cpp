@@ -14,8 +14,6 @@ using llvm::isa;
 
 namespace tz {
 
-const Type *literalType(const Expr *value);
-
 GenericChecker::GenericChecker(CheckState &owner)
     : state(owner) {}
 
@@ -180,7 +178,7 @@ std::optional<bool> GenericChecker::constantCondition(const Expr *cond) const {
       return std::nullopt;
     }
     const Type *type = typeOf->operand->type;
-    llvm::StringRef name = typeOfName(type->nonOptional());
+    llvm::StringRef name = TypeSpelling::typeOfName(type->nonOptional());
     if (name.empty()) {
       return std::nullopt;
     }
@@ -201,7 +199,7 @@ std::optional<bool> GenericChecker::constantCondition(const Expr *cond) const {
 }
 
 const Type *GenericChecker::literalShape(const Expr *expr) {
-  if (const Type *type = literalType(expr)) {
+  if (const Type *type = SharedHelpers::literalType(expr)) {
     return isa<TemplateExpr>(expr) ? nullptr : type;
   }
   if (isa<UndefinedExpr>(expr)) {

@@ -21,6 +21,9 @@ public:
   void releaseObjectIn(llvm::Value *owner, llvm::Value *object);
 
 private:
+  enum class RefShape { None, Pointer, Function, Optional, Other };
+
+  static RefShape refShape(const Type *type);
   static llvm::BasicBlock *blockHere(llvm::IRBuilder<> &b, const char *name);
   static llvm::Value *spillHere(llvm::IRBuilder<> &b, llvm::Value *value, const char *name);
 

@@ -9,9 +9,12 @@ using llvm::dyn_cast;
 
 namespace tz {
 
-namespace {
+KnowledgeWalk::KnowledgeWalk(KnowledgePass &pass, size_t module, size_t from)
+    : pass_(pass),
+      module_(module),
+      from_(from) {}
 
-bool builtinClassName(llvm::StringRef name) {
+bool KnowledgeWalk::builtinClassName(llvm::StringRef name) {
   static const llvm::StringRef names[] = {
       "Map",          "Set",          "WeakMap",        "WeakSet",
       "WeakRef",      "Promise",      "Date",           "Error",
@@ -26,11 +29,6 @@ bool builtinClassName(llvm::StringRef name) {
 
   return llvm::is_contained(names, name);
 }
-
-}
-
-KnowledgeWalk::KnowledgeWalk(KnowledgePass &pass, size_t module, size_t from)
-    : pass_(pass), module_(module), from_(from) {}
 
 void KnowledgeWalk::param(const Param &param) {
   if (param.type) {
@@ -171,7 +169,7 @@ bool KnowledgeWalk::use(const Expr *e, bool call) {
       size_t named = pass_.typeSymbol(module_, name->name);
       if (named != Knowledge::kNone && pass_.symbolKind(named) == "class") {
         symbol = named;
-      } else if (named == Knowledge::kNone && builtinClassName(name->name)) {
+      } else if (named == Knowledge::kNone && KnowledgeWalk::builtinClassName(name->name)) {
         pass_.builtinClass(module_, name->loc(), name->name);
       }
     }

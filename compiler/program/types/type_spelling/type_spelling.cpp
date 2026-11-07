@@ -19,7 +19,19 @@
 
 namespace tz {
 
-std::string objectTypeSpelling(llvm::ArrayRef<Field> fields) {
+const char *TypeSpelling::integerName(const Type *type) {
+  uint64_t max = type->intMax();
+  if (type->isUnsigned()) {
+    return max == 255           ? "uint8"
+           : max == 65535       ? "uint16"
+           : max == 4294967295u ? "uint32"
+                                : "uint64";
+  }
+
+  return max == 127 ? "int8" : max == 32767 ? "int16" : max == 2147483647 ? "int32" : "int";
+}
+
+std::string TypeSpelling::objectTypeSpelling(llvm::ArrayRef<Field> fields) {
   if (fields.empty()) {
     return "{}";
   }
@@ -43,22 +55,11 @@ std::string objectTypeSpelling(llvm::ArrayRef<Field> fields) {
   return text + " }";
 }
 
-namespace {
-
-const char *integerName(const Type *type) {
-  uint64_t max = type->intMax();
-  if (type->isUnsigned()) {
-    return max == 255 ? "uint8" : max == 65535 ? "uint16" : max == 4294967295u ? "uint32" : "uint64";
-  }
-
-  return max == 127 ? "int8" : max == 32767 ? "int16" : max == 2147483647 ? "int32" : "int";
+bool TypeSpelling::isTypeOfName(llvm::StringRef name) {
+  return llvm::is_contained(kTypeOfNames, name);
 }
 
-}
-
-bool isTypeOfName(llvm::StringRef name) { return llvm::is_contained(kTypeOfNames, name); }
-
-std::vector<llvm::StringRef> typeOfNames(const Type *type) {
+std::vector<llvm::StringRef> TypeSpelling::typeOfNames(const Type *type) {
   std::vector<llvm::StringRef> names;
   auto add = [&](llvm::StringRef name) {
     if (!name.empty() && !llvm::is_contained(names, name)) {
@@ -66,7 +67,7 @@ std::vector<llvm::StringRef> typeOfNames(const Type *type) {
     }
   };
   if (type->isOptional()) {
-    for (llvm::StringRef name : typeOfNames(type->inner())) {
+    for (llvm::StringRef name : TypeSpelling::typeOfNames(type->inner())) {
       add(name);
     }
     add("undefined");
@@ -93,21 +94,21 @@ std::vector<llvm::StringRef> typeOfNames(const Type *type) {
   }
   if (type->isUnion()) {
     for (const Type *m : type->members()) {
-      for (llvm::StringRef name : typeOfNames(m)) {
+      for (llvm::StringRef name : TypeSpelling::typeOfNames(m)) {
         add(name);
       }
     }
     return names;
   }
-  add(typeOfName(type));
+  add(TypeSpelling::typeOfName(type));
 
   return names;
 }
 
-const char *typeOfName(const Type *type) {
+const char *TypeSpelling::typeOfName(const Type *type) {
   switch (type->kind()) {
   case Type::Kind::Int:
-    return integerName(type);
+    return TypeSpelling::integerName(type);
   case Type::Kind::Double:
     return "double";
   case Type::Kind::Decimal:
@@ -131,17 +132,17 @@ const char *typeOfName(const Type *type) {
   case Type::Kind::Function:
     return "function";
   case Type::Kind::Optional:
-    return typeOfName(type->inner());
+    return TypeSpelling::typeOfName(type->inner());
   case Type::Kind::Param:
     return "";
   case Type::Kind::Json:
     return "";
   case Type::Kind::Literal:
-    return typeOfName(type->literalBase());
+    return TypeSpelling::typeOfName(type->literalBase());
   case Type::Kind::Union: {
-    const char *name = typeOfName(type->members().front());
+    const char *name = TypeSpelling::typeOfName(type->members().front());
     for (const Type *m : type->members()) {
-      if (llvm::StringRef(typeOfName(m)) != name) {
+      if (llvm::StringRef(TypeSpelling::typeOfName(m)) != name) {
         return "";
       }
     }
@@ -156,7 +157,7 @@ const char *typeOfName(const Type *type) {
   }
 }
 
-std::string jsonTagField(llvm::ArrayRef<const Type *> objects) {
+std::string TypeSpelling::jsonTagField(llvm::ArrayRef<const Type *> objects) {
   if (objects.empty() || !objects.front()->isObject()) {
     return "";
   }

@@ -32,6 +32,10 @@ public:
   static llvm::json::Object legend();
 
 private:
+  static bool isWordChar(char c);
+  static size_t offsetIn(llvm::StringRef text, unsigned line, unsigned character);
+  static int symbolKind(llvm::StringRef kind);
+  static std::string code(llvm::StringRef text);
   llvm::json::Object location(const SourcePlace &place) const;
   std::string uriOfPlace(const SourcePlace &place) const;
   std::vector<SourcePlace> occurrences(unsigned line, unsigned character, bool declaration,

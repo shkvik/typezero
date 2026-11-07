@@ -5,9 +5,7 @@
 
 namespace tz {
 
-namespace {
-
-DecimalLiteral normalized(std::string digits, int64_t exponent) {
+DecimalLiteral DecimalLiteral::normalized(std::string digits, int64_t exponent) {
   size_t first = digits.find_first_not_of('0');
   if (first == std::string::npos) {
     return {};
@@ -18,9 +16,7 @@ DecimalLiteral normalized(std::string digits, int64_t exponent) {
   return {digits.substr(first, last + 1 - first), exponent};
 }
 
-}
-
-std::optional<DecimalLiteral> readDecimalLiteral(llvm::StringRef text) {
+std::optional<DecimalLiteral> DecimalLiteral::read(llvm::StringRef text) {
   std::string clean;
   for (char c : text) {
     if (c != '_') {
@@ -41,7 +37,7 @@ std::optional<DecimalLiteral> readDecimalLiteral(llvm::StringRef text) {
     unsigned bits = static_cast<unsigned>(body.size()) * 4 + 1;
     llvm::SmallString<64> digits;
     llvm::APInt(bits, body, static_cast<uint8_t>(radix)).toStringUnsigned(digits, 10);
-    return normalized(std::string(digits), 0);
+    return DecimalLiteral::normalized(std::string(digits), 0);
   }
 
   std::string digits;
@@ -85,15 +81,17 @@ std::optional<DecimalLiteral> readDecimalLiteral(llvm::StringRef text) {
     exponent += negative ? -power : power;
   }
 
-  return normalized(std::move(digits), exponent);
+  return DecimalLiteral::normalized(std::move(digits), exponent);
 }
 
-DecimalLiteral decimalOf(uint64_t value) { return normalized(std::to_string(value), 0); }
+DecimalLiteral DecimalLiteral::of(uint64_t value) {
+  return DecimalLiteral::normalized(std::to_string(value), 0);
+}
 
 const char kRoundingModes[] = "'up', 'down', 'ceil', 'floor', 'half-up', 'half-down', 'half-even', "
                               "'half-ceil' and 'half-floor'";
 
-int decimalRoundingMode(const std::u16string &name) {
+int DecimalLiteral::roundingMode(const std::u16string &name) {
   static const char16_t *const modes[] = {u"up",        u"down",      u"ceil",
                                           u"floor",     u"half-up",   u"half-down",
                                           u"half-even", u"half-ceil", u"half-floor"};

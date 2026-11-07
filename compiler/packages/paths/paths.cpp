@@ -11,7 +11,7 @@ namespace tz::pkg {
 namespace fs = llvm::sys::fs;
 namespace path = llvm::sys::path;
 
-std::string canonical(llvm::StringRef dir) {
+std::string Paths::canonical(llvm::StringRef dir) {
   llvm::SmallString<256> real;
   if (fs::real_path(dir, real)) {
     real = dir;
@@ -22,7 +22,7 @@ std::string canonical(llvm::StringRef dir) {
   return std::string(real);
 }
 
-std::string findAbove(llvm::StringRef dir, llvm::StringRef name) {
+std::string Paths::findAbove(llvm::StringRef dir, llvm::StringRef name) {
   llvm::SmallString<256> current(dir);
   if (current.empty()) {
     fs::current_path(current);

@@ -1,5 +1,6 @@
 #include "compiler/library/crypto/subtle_algorithms/subtle_algorithms.h"
 #include "compiler/library/crypto/crypto_api/crypto_api.h"
+#include "compiler/load/to_utf8/to_utf8.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/StringExtras.h"
 #include "llvm/Support/ConvertUTF.h"
@@ -12,41 +13,7 @@ using llvm::isa;
 
 namespace tz {
 
-namespace {
-
-std::string utf8(const std::u16string &text) {
-  std::string out;
-  llvm::convertUTF16ToUTF8String(
-      llvm::ArrayRef<llvm::UTF16>(reinterpret_cast<const llvm::UTF16 *>(text.data()), text.size()),
-      out);
-
-  return out;
-}
-
-std::optional<double> numberLiteral(const Expr *e) {
-  if (auto *lit = dyn_cast_or_null<IntLitExpr>(e)) {
-    return double(lit->value);
-  }
-  if (auto *lit = dyn_cast_or_null<FloatLitExpr>(e)) {
-    return lit->value;
-  }
-
-  return std::nullopt;
-}
-
-const ObjectLitExpr::Property *property(const ObjectLitExpr *lit, llvm::StringRef name) {
-  for (const ObjectLitExpr::Property &prop : lit->props) {
-    if (!prop.spread() && !prop.key() && prop.name == name) {
-      return &prop;
-    }
-  }
-
-  return nullptr;
-}
-
-}
-
-std::optional<std::string> stringLiteral(const Expr *e) {
+std::optional<std::string> SubtleAlgorithms::stringLiteral(const Expr *e) {
   while (auto *conv = dyn_cast_or_null<CastExpr>(e)) {
     if (!conv->isImplicit()) {
       break;
@@ -54,16 +21,16 @@ std::optional<std::string> stringLiteral(const Expr *e) {
     e = conv->operand;
   }
   if (auto *lit = dyn_cast_or_null<StringLitExpr>(e)) {
-    return utf8(lit->value);
+    return ToUtf8::toUtf8(lit->value);
   }
   if (auto *tmpl = dyn_cast_or_null<TemplateExpr>(e); tmpl && tmpl->exprs.empty()) {
-    return utf8(tmpl->quasis[0]);
+    return ToUtf8::toUtf8(tmpl->quasis[0]);
   }
 
   return std::nullopt;
 }
 
-const std::vector<llvm::StringLiteral> &algorithmsOf(llvm::StringRef op) {
+const std::vector<llvm::StringLiteral> &SubtleAlgorithms::algorithmsOf(llvm::StringRef op) {
   static const std::vector<llvm::StringLiteral> digest = {"SHA-1", "SHA-256", "SHA-384", "SHA-512"};
   static const std::vector<llvm::StringLiteral> generate = {
       "AES-CBC",  "AES-CTR", "AES-GCM",           "AES-KW", "ECDH", "ECDSA", "Ed25519", "HMAC",
@@ -109,7 +76,7 @@ const std::vector<llvm::StringLiteral> &algorithmsOf(llvm::StringRef op) {
   return none;
 }
 
-bool experimentalAlgorithm(llvm::StringRef upper) {
+bool SubtleAlgorithms::experimentalAlgorithm(llvm::StringRef upper) {
   static const llvm::StringLiteral names[] = {
       "SHA3-256",  "SHA3-384",  "SHA3-512",   "CSHAKE128",         "CSHAKE256",
       "ED448",     "X448",      "AES-OCB",    "CHACHA20-POLY1305", "KMAC128",
@@ -119,7 +86,8 @@ bool experimentalAlgorithm(llvm::StringRef upper) {
   return llvm::is_contained(names, upper);
 }
 
-std::string quotedList(llvm::ArrayRef<llvm::StringLiteral> names, llvm::StringRef last) {
+std::string SubtleAlgorithms::quotedList(llvm::ArrayRef<llvm::StringLiteral> names,
+                                         llvm::StringRef last) {
   std::string out;
   for (size_t i = 0; i < names.size(); ++i) {
     out += (i == 0                  ? "'"
@@ -131,7 +99,7 @@ std::string quotedList(llvm::ArrayRef<llvm::StringLiteral> names, llvm::StringRe
   return out + "'";
 }
 
-llvm::StringRef familyOf(llvm::StringRef name) {
+llvm::StringRef SubtleAlgorithms::familyOf(llvm::StringRef name) {
   if (name == "HMAC") {
     return "Hmac";
   }
@@ -151,7 +119,7 @@ llvm::StringRef familyOf(llvm::StringRef name) {
   return "Okp";
 }
 
-std::vector<llvm::StringLiteral> usagesOf(llvm::StringRef name, bool isPublic) {
+std::vector<llvm::StringLiteral> SubtleAlgorithms::usagesOf(llvm::StringRef name, bool isPublic) {
   if (name == "HMAC") {
     return {"sign", "verify"};
   }
@@ -177,7 +145,7 @@ std::vector<llvm::StringLiteral> usagesOf(llvm::StringRef name, bool isPublic) {
                   : std::vector<llvm::StringLiteral>{"sign"};
 }
 
-std::vector<llvm::StringLiteral> formatsOf(llvm::StringRef family) {
+std::vector<llvm::StringLiteral> SubtleAlgorithms::formatsOf(llvm::StringRef family) {
   if (family == "Hmac" || family == "Aes") {
     return {"raw", "jwk"};
   }
@@ -191,7 +159,7 @@ std::vector<llvm::StringLiteral> formatsOf(llvm::StringRef family) {
   return {"spki", "pkcs8", "jwk", "raw"};
 }
 
-Dictionary dictionaryOf(llvm::StringRef op, llvm::StringRef name) {
+Dictionary SubtleAlgorithms::dictionaryOf(llvm::StringRef op, llvm::StringRef name) {
   bool aes = name.starts_with("AES-"), rsa = name.starts_with("RSA");
   bool ec = name == "ECDSA" || name == "ECDH";
   if (op == "generateKey") {
@@ -255,7 +223,7 @@ Dictionary dictionaryOf(llvm::StringRef op, llvm::StringRef name) {
   return {"", {}};
 }
 
-std::string verbOf(llvm::StringRef op) {
+std::string SubtleAlgorithms::verbOf(llvm::StringRef op) {
   if (op == "digest") {
     return "hashes";
   }
@@ -290,7 +258,7 @@ std::string verbOf(llvm::StringRef op) {
   return "derives keys";
 }
 
-std::string exampleOf(llvm::StringRef member) {
+std::string SubtleAlgorithms::exampleOf(llvm::StringRef member) {
   if (member == "hash") {
     return "\"SHA-256\"";
   }
@@ -323,145 +291,6 @@ std::string exampleOf(llvm::StringRef member) {
   }
 
   return "new Uint8Array(16)";
-}
-
-std::string literalAlgorithm(Diagnostics &diags, const Expr *arg, llvm::StringRef op,
-                             llvm::StringRef fallback, bool &bad) {
-  const ObjectLitExpr *lit = dyn_cast_or_null<ObjectLitExpr>(arg);
-  const Expr *nameExpr = arg;
-  if (lit) {
-    if (lit->hasSpread()) {
-      return "";
-    }
-    const ObjectLitExpr::Property *name = property(lit, "name");
-    if (!name) {
-      return "";
-    }
-    nameExpr = name->value;
-  }
-  std::optional<std::string> written = stringLiteral(nameExpr);
-  if (!written) {
-    return "";
-  }
-  std::string upper = llvm::StringRef(*written).upper();
-  auto find = [&](llvm::StringRef in) -> std::string {
-    for (llvm::StringRef known : algorithmsOf(in)) {
-      if (known.upper() == upper) {
-        return known.str();
-      }
-    }
-
-    return "";
-  };
-  std::string name = find(op);
-  if (name.empty() && !fallback.empty()) {
-    name = find(fallback);
-  }
-  llvm::SMLoc loc = nameExpr->loc();
-  if (name.empty()) {
-    bad = true;
-    std::string list = quotedList(algorithmsOf(op), "or");
-    if (experimentalAlgorithm(upper)) {
-      diags.error(loc, "'" + *written +
-                           "' is an algorithm node 24 has as an experiment, which tz has not "
-                           "yet; Web Crypto " +
-                           verbOf(op) + " with " + list);
-      return "";
-    }
-    bool known = false;
-    for (llvm::StringRef other :
-         {"digest", "generateKey", "importKey", "encrypt", "sign", "deriveBits", "wrapKey"}) {
-      for (llvm::StringRef a : algorithmsOf(other)) {
-        known |= a.upper() == upper;
-      }
-    }
-    if (known) {
-      diags.error(loc, "'" + *written + "' is no algorithm of " + op.str() + "; it " + verbOf(op) +
-                           " with " + list);
-    } else {
-      diags.error(loc, "unknown algorithm '" + *written + "' of " + op.str() + "; Web Crypto " +
-                           verbOf(op) + " with " + list);
-    }
-    return "";
-  }
-  Dictionary dict = dictionaryOf(op, name);
-  if (!lit) {
-    if (!dict.required.empty()) {
-      bad = true;
-      diags.error(loc, "'" + name + "' of " + op.str() + " takes its parameters (" +
-                           dict.name.str() + "): write an object, e.g. { name: \"" + name + "\", " +
-                           dict.required[0].str() + ": " + exampleOf(dict.required[0]) + " }");
-    }
-    return bad ? "" : name;
-  }
-  for (llvm::StringRef member : dict.required) {
-    if (!property(lit, member)) {
-      bad = true;
-      diags.error(lit->loc(), "the algorithm '" + name + "' of " + op.str() + " needs '" +
-                                  member.str() + "' (" + dict.name.str() + "); add it, e.g. '" +
-                                  member.str() + ": " + exampleOf(member) + "'");
-      return "";
-    }
-  }
-  if (const ObjectLitExpr::Property *hash = property(lit, "hash")) {
-    const Expr *value = hash->value;
-    if (auto *inner = dyn_cast<ObjectLitExpr>(value)) {
-      if (const ObjectLitExpr::Property *n = property(inner, "name")) {
-        value = n->value;
-      }
-    }
-    if (std::optional<std::string> h = stringLiteral(value)) {
-      llvm::StringRef hn(*h);
-      bool sha = llvm::StringRef(hn.lower()).starts_with("sha");
-      bool knownHash = false;
-      for (llvm::StringRef a : algorithmsOf("digest")) {
-        knownHash |= a.upper() == hn.upper();
-      }
-      if (!sha || !knownHash) {
-        bad = true;
-        diags.error(value->loc(),
-                    sha || experimentalAlgorithm(hn.upper())
-                        ? "unknown hash '" + *h + "' of " + dict.name.str() +
-                              "; Web Crypto hashes with " + quotedList(algorithmsOf("digest"), "or")
-                        : "'" + *h + "' is no SHA hash, which " + dict.name.str() +
-                              " takes; use 'SHA-256', 'SHA-384', 'SHA-512' or 'SHA-1'");
-        return "";
-      }
-    }
-  }
-  if (const ObjectLitExpr::Property *curve = property(lit, "namedCurve")) {
-    if (std::optional<std::string> c = stringLiteral(curve->value);
-        c && *c != "P-256" && *c != "P-384" && *c != "P-521") {
-      bad = true;
-      diags.error(curve->value->loc(),
-                  "unknown namedCurve '" + *c + "'; Web Crypto has 'P-256', 'P-384' and 'P-521'");
-      return "";
-    }
-  }
-  if (name.rfind("AES-", 0) == 0 && (op == "generateKey" || op == "get key length")) {
-    if (const ObjectLitExpr::Property *length = property(lit, "length")) {
-      if (std::optional<double> n = numberLiteral(length->value);
-          n && *n != 128 && *n != 192 && *n != 256) {
-        bad = true;
-        diags.error(length->value->loc(), "an AES key is 128, 192 or 256 bits long");
-        return "";
-      }
-    }
-  }
-  if (name == "AES-GCM") {
-    if (const ObjectLitExpr::Property *tag = property(lit, "tagLength")) {
-      if (std::optional<double> n = numberLiteral(tag->value); n && *n != 32 && *n != 64 &&
-                                                               *n != 96 && *n != 104 && *n != 112 &&
-                                                               *n != 120 && *n != 128) {
-        bad = true;
-        diags.error(tag->value->loc(), "the tag of AES-GCM is 32, 64, 96, 104, 112, 120 or 128 "
-                                       "bits long");
-        return "";
-      }
-    }
-  }
-
-  return name;
 }
 
 }

@@ -23,17 +23,22 @@ Expr *BytesFeature::checkMethodCall(CheckState &state, CallExpr *call, MemberExp
   return BytesChecker(state).checkBytesMethod(call, member, expected);
 }
 
-std::optional<std::string> BytesFeature::exportProblem(NodeModule module,
-                                                       llvm::StringRef exportName,
-                                                       llvm::StringRef path) const {
-  if (module != NodeModule::Buffer) {
-    return std::nullopt;
+BytesFeature::ResultExportFound BytesFeature::exportFound(NodeModule module,
+                                                          llvm::StringRef exportName,
+                                                          llvm::StringRef path) const {
+  if (module == NodeModule::Buffer) {
+    return BufferExports::bufferExport(exportName, path);
   }
 
-  return bufferExportProblem(exportName, path);
+  return err(FeatureExportFoundError{
+      .code = FeatureExportFoundErrorCode::NOT_MINE,
+      .message = "",
+  });
 }
 
-bool BytesFeature::lowers(Builtin builtin) const { return isBytesBuiltin(builtin); }
+bool BytesFeature::lowers(Builtin builtin) const {
+  return BuiltinGroups::isBytesBuiltin(builtin);
+}
 
 llvm::Value *BytesFeature::lowerCall(Lowering &lowering, CallExpr *call) const {
   return lowering.bytesCallLowerer().emitBytesCall(call);

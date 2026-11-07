@@ -52,7 +52,9 @@ Expr *IntlFeature::checkValueMethodCall(CheckState &state, CallExpr *call, Membe
   return nullptr;
 }
 
-bool IntlFeature::lowers(Builtin builtin) const { return isIntlBuiltin(builtin); }
+bool IntlFeature::lowers(Builtin builtin) const {
+  return BuiltinGroups::isIntlBuiltin(builtin);
+}
 
 llvm::Value *IntlFeature::lowerCall(Lowering &lowering, CallExpr *call) const {
   return lowering.intlCallLowerer().emitIntlCall(call);

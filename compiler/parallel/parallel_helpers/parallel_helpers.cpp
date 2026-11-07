@@ -24,7 +24,7 @@ using llvm::isa;
 
 namespace tz::parallel {
 
-const Expr *strip(const Expr *e) {
+const Expr *ParallelHelpers::strip(const Expr *e) {
   while (e) {
     if (auto *c = dyn_cast<CastExpr>(e); c && c->isImplicit()) {
       e = c->operand;
@@ -36,7 +36,7 @@ const Expr *strip(const Expr *e) {
   return e;
 }
 
-bool holdsReferences(const Type *type) {
+bool ParallelHelpers::holdsReferences(const Type *type) {
   if (!type) {
     return false;
   }
@@ -51,17 +51,18 @@ bool holdsReferences(const Type *type) {
   case Type::Kind::Param:
     return true;
   case Type::Kind::Union:
-    return llvm::any_of(type->members(), holdsReferences);
+    return llvm::any_of(type->members(), ParallelHelpers::holdsReferences);
   case Type::Kind::Result:
-    return holdsReferences(type->okType()) || holdsReferences(type->errType());
+    return ParallelHelpers::holdsReferences(type->okType()) ||
+           ParallelHelpers::holdsReferences(type->errType());
   case Type::Kind::Promise:
-    return holdsReferences(type->promised());
+    return ParallelHelpers::holdsReferences(type->promised());
   default:
     return false;
   }
 }
 
-bool makesNewObject(Builtin builtin) {
+bool ParallelHelpers::makesNewObject(Builtin builtin) {
   switch (builtin) {
   case Builtin::DictNew:
   case Builtin::DictGroupBy:
@@ -116,11 +117,11 @@ bool makesNewObject(Builtin builtin) {
   case Builtin::IterFrom:
     return true;
   default:
-    return isIteratorStage(builtin);
+    return BuiltinGroups::isIteratorStage(builtin);
   }
 }
 
-llvm::StringRef libraryClassName(const ClassDecl *cls) {
+llvm::StringRef ParallelHelpers::libraryClassName(const ClassDecl *cls) {
   if (!cls) {
     return "";
   }
@@ -128,10 +129,12 @@ llvm::StringRef libraryClassName(const ClassDecl *cls) {
   return cls->generic() ? llvm::StringRef(cls->generic()->name) : llvm::StringRef(cls->name);
 }
 
-bool knownBuiltin(Builtin b) {
-  if (b == Builtin::None || isMathBuiltin(b) || isDecimalBuiltin(b) || isIntlBuiltin(b) ||
-      isResultBuiltin(b) || isDateBuiltin(b) || isRegexBuiltin(b) || isJsonBuiltin(b) ||
-      isDictBuiltin(b) || isBytesBuiltin(b) || isMetaBuiltin(b)) {
+bool ParallelHelpers::knownBuiltin(Builtin b) {
+  if (b == Builtin::None || BuiltinGroups::isMathBuiltin(b) || BuiltinGroups::isDecimalBuiltin(b) ||
+      BuiltinGroups::isIntlBuiltin(b) || BuiltinGroups::isResultBuiltin(b) ||
+      BuiltinGroups::isDateBuiltin(b) || BuiltinGroups::isRegexBuiltin(b) ||
+      BuiltinGroups::isJsonBuiltin(b) || BuiltinGroups::isDictBuiltin(b) ||
+      BuiltinGroups::isBytesBuiltin(b) || BuiltinGroups::isMetaBuiltin(b)) {
     return true;
   }
   if (b >= Builtin::ConsoleLog && b <= Builtin::IterFind) {
@@ -247,7 +250,7 @@ bool knownBuiltin(Builtin b) {
   }
 }
 
-bool onlyReadsArgs(Builtin b) {
+bool ParallelHelpers::onlyReadsArgs(Builtin b) {
   switch (b) {
   case Builtin::ConsoleLog:
   case Builtin::ConsoleError:

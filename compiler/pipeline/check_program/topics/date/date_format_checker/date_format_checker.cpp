@@ -1,5 +1,6 @@
 #include "compiler/pipeline/check_program/topics/date/date_format_checker/date_format_checker.h"
 #include "compiler/library/bytes/bytes_check_helpers/bytes_check_helpers.h"
+#include "compiler/load/to_utf8/to_utf8.h"
 #include "compiler/pipeline/check_program/declare/constant_folder/constant_folder.h"
 #include "compiler/pipeline/check_program/flow/index_proofs/index_proofs.h"
 #include "compiler/pipeline/check_program/generics/generic_checker/generic_checker.h"
@@ -51,15 +52,6 @@ const DateOption kOptions[TZ_DTO_COUNT] = {
 
 }
 
-std::string DateFormatChecker::utf8(const std::u16string &text) {
-  std::string out;
-  llvm::convertUTF16ToUTF8String(
-      llvm::ArrayRef<llvm::UTF16>(reinterpret_cast<const llvm::UTF16 *>(text.data()), text.size()),
-      out);
-
-  return out;
-}
-
 std::optional<std::u16string> DateFormatChecker::literalText(const Expr *e) {
   if (auto *lit = dyn_cast<StringLitExpr>(e)) {
     return lit->value;
@@ -79,7 +71,7 @@ std::optional<std::vector<std::string>> DateFormatChecker::textsOf(const Type *t
     if (!m->isStringLiteral()) {
       return std::nullopt;
     }
-    texts.push_back(DateFormatChecker::utf8(m->literalText()));
+    texts.push_back(ToUtf8::toUtf8(m->literalText()));
   }
 
   return texts;
@@ -129,6 +121,22 @@ bool DateFormatChecker::isLanguageTag(const std::string &tag) {
   return length && llvm::all_of(language, alpha);
 }
 
+DateFormatChecker::ResultOptionsObject DateFormatChecker::optionsObject(const Type *type,
+                                                                        int kind) {
+  if (!type->isObject() || type->isTuple() || type->isClass() || type->isRegExp() ||
+      type->isMatch() || type->isDate() || type->isIntl() || type->isCrypto() || type->isBytes()) {
+    std::string message =
+        ErrorTextDateOptions::notObject(DateFormatChecker::methodName(kind), type->name());
+
+    return err(DateFormatCheckerOptionsObjectError{
+        .code = DateFormatCheckerOptionsObjectErrorCode::NOT_AN_OBJECT,
+        .message = message,
+    });
+  }
+
+  return ok(type);
+}
+
 DateFormatChecker::DateFormatChecker(CheckState &owner)
     : state(owner) {}
 
@@ -150,13 +158,9 @@ bool DateFormatChecker::checkLocaleArgs(std::vector<Expr *> &args, int kind) {
   if (type->isUndefined()) {
     return ok;
   }
-  if (!type->isObject() || type->isTuple() || type->isClass() || type->isRegExp() ||
-      type->isMatch() || type->isDate() || type->isIntl() || type->isCrypto() || type->isBytes()) {
-    this->state.getDiagnostics().error(
-        options->loc(), std::string(DateFormatChecker::methodName(kind)) +
-                            " takes its options as an object, e.g. '{ month: \"long\" "
-                            "}', found '" +
-                            type->name().str() + "'");
+  ResultOptionsObject object = DateFormatChecker::optionsObject(type, kind);
+  if (object.isErr()) {
+    this->state.getDiagnostics().error(options->loc(), object.error().message);
     return false;
   }
   auto *literal = dyn_cast<ObjectLitExpr>(options);
@@ -173,24 +177,16 @@ bool DateFormatChecker::checkLocaleArgs(std::vector<Expr *> &args, int kind) {
     } else if (found != std::end(kOptions) && DateFormatChecker::textsOf(value)) {
       wanted = value;
     } else if (found == std::end(kOptions)) {
-      this->state.getDiagnostics().error(
-          options->loc(), "'" + field.name + "' is not an option of " +
-                              DateFormatChecker::methodName(kind) +
-                              "; the options are weekday, era, year, month, day, "
-                              "dayPeriod, hour, minute, second, fractionalSecondDigits, "
-                              "timeZoneName, timeZone, hour12, hourCycle, dateStyle, "
-                              "timeStyle, calendar, numberingSystem, localeMatcher and "
-                              "formatMatcher");
+      std::string message =
+          ErrorTextDateOptions::unknown(field.name, DateFormatChecker::methodName(kind));
+      this->state.getDiagnostics().error(options->loc(), message);
       ok = false;
       continue;
     }
     if (value != wanted) {
-      this->state.getDiagnostics().error(options->loc(), "the option '" + field.name + "' is " +
-                                                             (wanted == Type::boolTy() ? "a boolean"
-                                                              : wanted->isNumeric() ? "a number"
-                                                                                    : "a string") +
-                                                             ", found '" +
-                                                             field.type->name().str() + "'");
+      std::string message = ErrorTextDateOptions::kind(field.name, wanted == Type::boolTy(),
+                                                       wanted->isNumeric(), field.type->name());
+      this->state.getDiagnostics().error(options->loc(), message);
       ok = false;
       continue;
     }
@@ -199,11 +195,9 @@ bool DateFormatChecker::checkLocaleArgs(std::vector<Expr *> &args, int kind) {
       hasStyle |= present;
       if (present && ((kind == TZ_DATE_LOCALE_DATE && field.name == "timeStyle") ||
                       (kind == TZ_DATE_LOCALE_TIME && field.name == "dateStyle"))) {
-        this->state.getDiagnostics().error(options->loc(), "'" + field.name +
-                                                               "' is not an option of " +
-                                                               DateFormatChecker::methodName(kind) +
-                                                               ", which JavaScript would throw a "
-                                                               "TypeError for; use toLocaleString");
+        std::string message =
+            ErrorTextDateOptions::styleOnly(field.name, DateFormatChecker::methodName(kind));
+        this->state.getDiagnostics().error(options->loc(), message);
         ok = false;
       }
     } else if (field.name != "hour12" && field.name != "hourCycle" && field.name != "timeZone" &&
@@ -213,10 +207,8 @@ bool DateFormatChecker::checkLocaleArgs(std::vector<Expr *> &args, int kind) {
     }
   }
   if (hasStyle && hasComponent) {
-    this->state.getDiagnostics().error(
-        options->loc(), "dateStyle and timeStyle cannot go with weekday, year, month, day, "
-                        "hour and the other parts, which JavaScript would throw a "
-                        "TypeError for; use either the styles or the parts");
+    std::string message = ErrorTextDateOptions::styleParts();
+    this->state.getDiagnostics().error(options->loc(), message);
     ok = false;
   }
   auto propOf = [&](llvm::StringRef name) -> const Expr * {
@@ -236,8 +228,9 @@ bool DateFormatChecker::checkLocaleArgs(std::vector<Expr *> &args, int kind) {
     llvm::SMLoc at = given ? given->loc() : options->loc();
     if (field.name == "fractionalSecondDigits") {
       if (given) {
+        std::string digits = ErrorTextDateOptions::digitsName();
         IndexProofs::ResultBetweenProven between =
-            IndexProofs(this->state).requireBetween(given, 1, 3, "fractionalSecondDigits");
+            IndexProofs(this->state).requireBetween(given, 1, 3, digits);
         if (between.isErr() && between.error().code != IndexProofsRequireBetweenErrorCode::EXEMPT) {
           this->state.getDiagnostics().error(given->loc(), between.error().message);
         }
@@ -247,10 +240,8 @@ bool DateFormatChecker::checkLocaleArgs(std::vector<Expr *> &args, int kind) {
       std::optional<std::vector<double>> digits =
           DateFormatChecker::numbersOf(field.type->nonOptional());
       if (!exempt && (!digits || llvm::any_of(*digits, [](double d) { return d < 1 || d > 3; }))) {
-        this->state.getDiagnostics().error(
-            at, "fractionalSecondDigits known only when the program runs may "
-                "be out of 1 to 3, which JavaScript would throw a RangeError "
-                "for; give it the type '1 | 2 | 3'");
+        std::string message = ErrorTextDateOptions::digits();
+        this->state.getDiagnostics().error(at, message);
         ok = false;
       }
       continue;
@@ -266,14 +257,10 @@ bool DateFormatChecker::checkLocaleArgs(std::vector<Expr *> &args, int kind) {
       texts = DateFormatChecker::textsOf(field.type->nonOptional());
     }
     if (!texts) {
-      std::string name = given ? valueText(given) : "value";
-      this->state.getDiagnostics().error(
-          at, "the option '" + field.name +
-                  "' known only when the program runs may be no value of it, "
-                  "which JavaScript would throw a RangeError for; check it "
-                  "first, e.g. 'if (" +
-                  name + " == \"" + found->values[0].str() + "\" || " + name + " == \"" +
-                  found->values[1].str() + "\")'");
+      std::string written = given ? BytesCheckHelpers::valueText(given) : std::string();
+      std::string message =
+          ErrorTextDateOptions::unknownVal(field.name, written, found->values[0], found->values[1]);
+      this->state.getDiagnostics().error(at, message);
       ok = false;
       continue;
     }
@@ -281,18 +268,8 @@ bool DateFormatChecker::checkLocaleArgs(std::vector<Expr *> &args, int kind) {
       if (llvm::is_contained(found->values, text)) {
         continue;
       }
-      std::string values;
-      for (size_t i = 0; i < found->values.size(); ++i) {
-        values += (i == 0                          ? "'"
-                   : i + 1 == found->values.size() ? " or '"
-                                                   : ", '") +
-                  found->values[i].str() + "'";
-      }
-      this->state.getDiagnostics().error(at, "'" + text + "' is not a value of the option '" +
-                                                 field.name +
-                                                 "', and JavaScript would throw a "
-                                                 "RangeError; it is " +
-                                                 values);
+      std::string message = ErrorTextDateOptions::badValue(text, field.name, found->values);
+      this->state.getDiagnostics().error(at, message);
       ok = false;
       break;
     }
@@ -358,8 +335,8 @@ const Type *DateFormatChecker::resolvedDateOptionsType() {
 Expr *DateFormatChecker::checkDateFormatNew(llvm::SMLoc loc, std::vector<Expr *> &args) {
   auto *callee = this->state.getAst().make<NameExpr>(loc, "Intl");
   if (args.size() > 2) {
-    this->state.getDiagnostics().error(loc, "expected " + ErrorTextArity::wanted(0, 2) +
-                                                ", but got " + std::to_string(args.size()));
+    std::string message = ErrorTextDateFormat::arity(args.size());
+    this->state.getDiagnostics().error(loc, message);
     for (Expr *&arg : args) {
       arg = ExprChecker(this->state).checkExpr(arg);
     }
@@ -406,9 +383,8 @@ Expr *DateFormatChecker::checkDateFormatMethod(CallExpr *call, MemberExpr *membe
       if (arg->type->isNumeric()) {
         arg = TypeRelations(this->state).convert(arg, Type::doubleTy());
       } else if (!arg->type->isDate() && !arg->type->isError()) {
-        this->state.getDiagnostics().error(
-            arg->loc(), "'" + name + "' takes a date or a time in milliseconds, found '" +
-                            arg->type->name() + "'");
+        std::string message = ErrorTextDateFormat::formatArg(name, arg->type->name());
+        this->state.getDiagnostics().error(arg->loc(), message);
         return call;
       }
     }
@@ -428,14 +404,10 @@ Expr *DateFormatChecker::checkDateFormatMethod(CallExpr *call, MemberExpr *membe
     call->type = DateFormatChecker::resolvedDateOptionsType();
     return call;
   }
-  if (name == "formatRange" || name == "formatRangeToParts") {
-    this->state.getDiagnostics().error(member->loc(),
-                                       "'" + name + "' is not supported yet; format both dates");
-  } else {
-    this->state.getDiagnostics().error(member->loc(), "property '" + name +
-                                                          "' does not exist on type "
-                                                          "'Intl.DateTimeFormat'");
-  }
+  std::string message = name == "formatRange" || name == "formatRangeToParts"
+                            ? ErrorTextDateFormat::range(name)
+                            : ErrorTextDateFormat::noMember(name);
+  this->state.getDiagnostics().error(member->loc(), message);
   for (Expr *&arg : call->args) {
     arg = ExprChecker(this->state).checkExpr(arg);
   }

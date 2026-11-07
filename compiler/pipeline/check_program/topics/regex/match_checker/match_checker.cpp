@@ -10,14 +10,6 @@
 
 namespace tz {
 
-namespace {
-
-const char kUnknownRegex[] =
-    "the regex is known only when the program runs (it is not a literal, nor a variable that "
-    "holds one all along)";
-
-}
-
 MatchChecker::MatchChecker(CheckState &owner)
     : state(owner) {}
 
@@ -65,15 +57,8 @@ Expr *MatchChecker::checkMatchMember(MemberExpr *member) {
       }
       return field.value();
     }
-    if (type->matchGroups() < 0) {
-      this->state.getDiagnostics().error(
-          member->loc(), std::string("the named groups of a match are not supported "
-                                     "yet when ") +
-                             kUnknownRegex + "; read the groups by number: 'm[1]'");
-    } else {
-      this->state.getDiagnostics().error(
-          member->loc(), "the regex has no named groups; name one with '(?<name>...)'");
-    }
+    std::string message = ErrorTextMatch::groups(type->matchGroups() >= 0);
+    this->state.getDiagnostics().error(member->loc(), message);
     return member;
   }
   if (name == "indices") {
@@ -85,18 +70,27 @@ Expr *MatchChecker::checkMatchMember(MemberExpr *member) {
       }
       return field.value();
     }
-    this->state.getDiagnostics().error(
-        member->loc(),
-        type->matchGroups() < 0
-            ? std::string("'indices' of a match needs the d flag, and ") + kUnknownRegex
-            : "a match has 'indices' only with the d flag: add 'd' to "
-              "the flags of the regex");
+    std::string message = ErrorTextMatch::indices(type->matchGroups() >= 0);
+    this->state.getDiagnostics().error(member->loc(), message);
     return member;
   }
-  this->state.getDiagnostics().error(
-      member->loc(), "property '" + name + "' does not exist on type '" + type->name() + "'");
+  std::string message = ErrorTextMatch::noMember(name, type->name());
+  this->state.getDiagnostics().error(member->loc(), message);
 
   return member;
+}
+
+MatchChecker::ResultGroupIndex MatchChecker::groupIndex(int64_t index, int groups) {
+  if (index < 0 || index > groups) {
+    std::string message = ErrorTextMatch::noGroup(groups, index);
+
+    return err(MatchCheckerGroupIndexError{
+        .code = MatchCheckerGroupIndexErrorCode::NO_SUCH_GROUP,
+        .message = message,
+    });
+  }
+
+  return ok(index);
 }
 
 Expr *MatchChecker::checkMatchIndex(IndexExpr *index) {
@@ -116,13 +110,9 @@ Expr *MatchChecker::checkMatchIndex(IndexExpr *index) {
     return TypeRelations(this->state).convert(index, Type::string());
   }
   if (k && groups >= 0) {
-    if (*k < 0 || *k > groups) {
-      this->state.getDiagnostics().error(
-          index->index->loc(),
-          "the regex has " + std::to_string(groups) + " group" + (groups == 1 ? "" : "s") +
-              (groups ? " (m[1] to m[" + std::to_string(groups) + "]; m[0] is the match)"
-                      : " (m[0] is the match)") +
-              ", so there is no m[" + std::to_string(*k) + "]");
+    ResultGroupIndex group = MatchChecker::groupIndex(*k, groups);
+    if (group.isErr()) {
+      this->state.getDiagnostics().error(index->index->loc(), group.error().message);
       return index;
     }
     index->form = ElementIndex{.mayBeOutOfRange = false};

@@ -7,6 +7,9 @@
 
 namespace tz {
 
-std::vector<const Type *> distributedMembers(const Type *type);
+class TypeopsCheckHelpers {
+public:
+  static std::vector<const Type *> distributedMembers(const Type *type);
+};
 
 }

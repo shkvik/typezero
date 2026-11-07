@@ -9,10 +9,10 @@
 
 namespace tz::pkg {
 
-bool readText(llvm::StringRef file, std::string &text) {
+bool TextFile::readText(llvm::StringRef file, std::string &text) {
   auto buffer = llvm::MemoryBuffer::getFile(file, true);
   if (!buffer) {
-    report("cannot read '" + file + "': " + buffer.getError().message());
+    Report::report("cannot read '" + file + "': " + buffer.getError().message());
     return false;
   }
   text = (*buffer)->getBuffer().str();

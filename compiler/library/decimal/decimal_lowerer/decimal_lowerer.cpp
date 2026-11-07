@@ -119,10 +119,10 @@ llvm::Constant *DecimalLowerer::emitDecimalLiteral(const Expr *expr) {
   }
   DecimalLiteral value;
   if (auto *lit = dyn_cast<IntLitExpr>(expr)) {
-    value =
-        lit->text.empty() ? decimalOf(lit->value) : readDecimalLiteral(lit->text).value_or(value);
+    value = lit->text.empty() ? DecimalLiteral::of(lit->value)
+                              : DecimalLiteral::read(lit->text).value_or(value);
   } else {
-    value = readDecimalLiteral(cast<FloatLitExpr>(expr)->text).value_or(value);
+    value = DecimalLiteral::read(cast<FloatLitExpr>(expr)->text).value_or(value);
   }
   llvm::Type *i64 = this->lowering.builder_.getInt64Ty();
   auto shortValue = [&](uint64_t magnitude, int64_t scale) {
@@ -285,7 +285,8 @@ llvm::Value *DecimalLowerer::emitRoundingMode(CallExpr *call, size_t index) {
   }
   Expr *arg = call->args[index];
   if (auto *lit = dyn_cast<StringLitExpr>(arg)) {
-    return this->lowering.builder_.getInt32(static_cast<uint32_t>(decimalRoundingMode(lit->value)));
+    return this->lowering.builder_.getInt32(
+        static_cast<uint32_t>(DecimalLiteral::roundingMode(lit->value)));
   }
   Lowering::Operand mode = this->lowering.refCounts().emitOperand(arg, true);
   llvm::Value *result = this->lowering.builder_.CreateCall(

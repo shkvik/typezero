@@ -26,6 +26,8 @@ public:
   static Num decimalLiteral(const Expr *expr);
 
 private:
+  static Num blamed(Num n);
+  static bool sameVariable(const Expr *a, const Expr *b);
   OverflowCheck &check_;
 };
 

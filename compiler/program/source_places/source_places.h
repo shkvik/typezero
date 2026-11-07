@@ -38,6 +38,7 @@ public:
   static const char *tokenEnd(const char *at, const char *end);
 
 private:
+  static bool isWordByte(char c);
   unsigned bufferOf(const char *at) const;
   void position(unsigned id, const char *at, unsigned &line, unsigned &character) const;
   std::string pathOf(unsigned id, bool &file) const;

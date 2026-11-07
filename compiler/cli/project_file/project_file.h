@@ -9,11 +9,12 @@
 
 namespace tz::pkg {
 
-bool writeText(llvm::StringRef file, llvm::StringRef text);
-
-bool currentProject(Manifest &out);
-
-bool applyDependencies(const Manifest &project, const std::vector<Dependency> &deps,
-                       const PrepareOptions &options, Lock *before, Lock *after);
+class ProjectFile {
+public:
+  static bool currentProject(Manifest &out);
+  static bool writeText(llvm::StringRef file, llvm::StringRef text);
+  static bool applyDependencies(const Manifest &project, const std::vector<Dependency> &deps,
+                                const PrepareOptions &options, Lock *before, Lock *after);
+};
 
 }

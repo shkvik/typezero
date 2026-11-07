@@ -23,7 +23,7 @@ using llvm::isa;
 
 namespace tz::parallel {
 
-void merge(Active &into, llvm::ArrayRef<unsigned> from) {
+void ParallelModel::merge(Active &into, llvm::ArrayRef<unsigned> from) {
   for (unsigned s : from) {
     auto it = std::lower_bound(into.begin(), into.end(), s);
     if (it == into.end() || *it != s) {

@@ -54,7 +54,7 @@ OverflowCheck::Place AssignEvaluator::place(const Expr *target, State &st) {
     const Type *objectType = member->object->type ? member->object->type->nonOptional() : nullptr;
     if (objectType && member->name == "length" && objectType->isArray()) {
       p.kind = OverflowCheck::Place::Kind::Length;
-      if (auto *name = dyn_cast<NameExpr>(stripCasts(member->object))) {
+      if (auto *name = dyn_cast<NameExpr>(OverflowHelpers::stripCasts(member->object))) {
         p.var = name->var();
       }
       return p;
@@ -74,7 +74,7 @@ OverflowCheck::Place AssignEvaluator::place(const Expr *target, State &st) {
       p.kind = OverflowCheck::Place::Kind::Element;
       p.objectType = objectType;
       p.append = index->mayAppend();
-      if (auto *name = dyn_cast<NameExpr>(stripCasts(index->object))) {
+      if (auto *name = dyn_cast<NameExpr>(OverflowHelpers::stripCasts(index->object))) {
         p.var = name->var();
       }
     } else if (objectType && objectType->isObject() && !index->field().empty()) {
@@ -104,9 +104,9 @@ Val AssignEvaluator::read(const OverflowCheck::Place &p, State &st, const Expr *
   }
   case OverflowCheck::Place::Kind::Length: {
     if (!p.var) {
-      return numVal(someLength());
+      return ValueRange::numVal(ValueRange::someLength());
     }
-    return numVal(check_.slots().readVar(p.var, st).len);
+    return ValueRange::numVal(check_.slots().readVar(p.var, st).len);
   }
   case OverflowCheck::Place::Kind::None:
     return check_.overflowWarnings().trusted(p.type);
@@ -131,10 +131,13 @@ void AssignEvaluator::write(const OverflowCheck::Place &p, const Val &v, State &
       if (found != st.vars.end()) {
         Val &array = found->second;
         if (array.elem) {
-          array.elem = share(join(*array.elem, check_.overflowWarnings().fitVal(v, element)));
+          array.elem = ValueRange::share(
+              ValueRange::join(*array.elem, check_.overflowWarnings().fitVal(v, element)));
         }
         if (p.append && !array.len.empty()) {
-          array.len = narrowTo(join(array.len, add(array.len, exactly(1))), 0, kLengthMax);
+          array.len = ValueRange::narrowTo(
+              ValueRange::join(array.len, ValueRange::add(array.len, ValueRange::exactly(1))), 0,
+              kLengthMax);
         }
       }
     }
@@ -144,7 +147,7 @@ void AssignEvaluator::write(const OverflowCheck::Place &p, const Val &v, State &
     if (p.var) {
       auto found = st.vars.find(p.var);
       if (found != st.vars.end() && !v.num.empty()) {
-        found->second.len = narrowTo(v.num, 0, kLengthMax);
+        found->second.len = ValueRange::narrowTo(v.num, 0, kLengthMax);
       }
     }
     return;
@@ -166,8 +169,8 @@ Val AssignEvaluator::evalAssign(const AssignExpr *assign, State &st) {
   if (op == BinaryOp::LogAnd || op == BinaryOp::LogOr || op == BinaryOp::Nullish) {
     State other = st;
     Val v = check_.evaluator().eval(assign->value, other);
-    st = join(st, other);
-    Val result = join(old, v);
+    st = ValueRange::join(st, other);
+    Val result = ValueRange::join(old, v);
     write(p, result, st);
     return result;
   }
@@ -177,16 +180,17 @@ Val AssignEvaluator::evalAssign(const AssignExpr *assign, State &st) {
   const Type *type = assign->target->type;
   Val result;
   if (type && type->nonOptional()->isString()) {
-    result =
-        lengthVal(old.len.empty() || v.len.empty() ? someLength()
-                                                   : narrowTo(add(old.len, v.len), 0, kLengthMax));
-  } else if (isNumberType(type)) {
+    result = ValueRange::lengthVal(
+        old.len.empty() || v.len.empty()
+            ? ValueRange::someLength()
+            : ValueRange::narrowTo(ValueRange::add(old.len, v.len), 0, kLengthMax));
+  } else if (ValueRange::isNumberType(type)) {
     if (bits) {
-      result = numVal(check_.evaluator().bitwise(op, old.num, v.num, type));
+      result = ValueRange::numVal(check_.evaluator().bitwise(op, old.num, v.num, type));
     } else {
       const VarSymbol *accum = p.kind == OverflowCheck::Place::Kind::Var ? p.var : nullptr;
-      result = numVal(check_.evaluator().arithmetic(assign, op, old.num, v.num, type, false,
-                                                    assign->target, assign->value, accum));
+      result = ValueRange::numVal(check_.evaluator().arithmetic(
+          assign, op, old.num, v.num, type, false, assign->target, assign->value, accum));
     }
   }
   write(p, result, st);
@@ -198,15 +202,16 @@ Val AssignEvaluator::evalUpdate(const UpdateExpr *update, State &st) {
   OverflowCheck::Place p = place(update->target, st);
   Val old = read(p, st, update->target);
   const Type *type = update->target->type;
-  if (!isNumberType(type)) {
+  if (!ValueRange::isNumberType(type)) {
     return Val();
   }
   Num result = check_.evaluator().arithmetic(
-      update, update->increment ? BinaryOp::Add : BinaryOp::Sub, old.num, exactly(1), type, false,
-      update->target, nullptr, p.kind == OverflowCheck::Place::Kind::Var ? p.var : nullptr);
-  write(p, numVal(result), st);
+      update, update->increment ? BinaryOp::Add : BinaryOp::Sub, old.num, ValueRange::exactly(1),
+      type, false, update->target, nullptr,
+      p.kind == OverflowCheck::Place::Kind::Var ? p.var : nullptr);
+  write(p, ValueRange::numVal(result), st);
 
-  return update->prefix ? numVal(result) : old;
+  return update->prefix ? ValueRange::numVal(result) : old;
 }
 
 Val AssignEvaluator::evalObjectLit(const ObjectLitExpr *lit, State &st) {
@@ -225,7 +230,7 @@ Val AssignEvaluator::evalObjectLit(const ObjectLitExpr *lit, State &st) {
         continue;
       }
       for (const Field &f : from->fields()) {
-        if (type->field(f.name) && tracked(f.type) &&
+        if (type->field(f.name) && ValueRange::tracked(f.type) &&
             !llvm::is_contained(p.replacedFields(), f.name)) {
           check_.slots().storeField(type, f.name, f.type,
                                     check_.slots().readField(from, f.name, f.type));

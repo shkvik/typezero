@@ -201,10 +201,10 @@ void ConditionFacts::addConditionFacts(const Expr *cond, Flow &whenTrue, Flow &w
                             : alternatives.empty() || llvm::any_of(alternatives, test);
         };
         const Type *narrowed = nullptr;
-        std::string wanted = toUtf8(text->value);
+        std::string wanted = ToUtf8::toUtf8(text->value);
         auto numberNamed = [&](llvm::StringRef name) -> const Type * {
           for (const Type *t : param->alternatives()) {
-            if (t->isNumeric() && name == typeOfName(t)) {
+            if (t->isNumeric() && name == TypeSpelling::typeOfName(t)) {
               return GenericChecker(this->state).numberParam(param, t);
             }
           }
@@ -230,14 +230,15 @@ void ConditionFacts::addConditionFacts(const Expr *cond, Flow &whenTrue, Flow &w
         }
         llvm::SmallVector<const Type *, 4> others;
         for (const Type *t : param->alternatives()) {
-          llvm::StringRef name = typeOfName(t);
+          llvm::StringRef name = TypeSpelling::typeOfName(t);
           if (std::u16string(name.begin(), name.end()) != text->value) {
             others.push_back(t);
           }
         }
         if (!others.empty() && !var->type->isOptional()) {
-          llvm::StringRef kind = typeOfName(others.front());
-          bool same = llvm::all_of(others, [&](const Type *t) { return typeOfName(t) == kind; });
+          llvm::StringRef kind = TypeSpelling::typeOfName(others.front());
+          bool same = llvm::all_of(
+              others, [&](const Type *t) { return TypeSpelling::typeOfName(t) == kind; });
           const Type *rest = !same               ? nullptr
                              : kind == "string"  ? Type::string()
                              : kind == "boolean" ? Type::boolTy()

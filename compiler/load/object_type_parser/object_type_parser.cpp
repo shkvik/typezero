@@ -116,7 +116,7 @@ bool ObjectTypeParser::parseFieldName(llvm::StringRef &name) {
     name = "[Symbol.iterator]";
     return true;
   }
-  if (parser_.tok_.is(Tok::Identifier) || isKeyword(parser_.tok_.kind)) {
+  if (parser_.tok_.is(Tok::Identifier) || TokenKinds::isKeyword(parser_.tok_.kind)) {
     name = parser_.tok_.text;
     parser_.fieldNames_.insert(name);
     parser_.cursor().advance();
@@ -124,8 +124,8 @@ bool ObjectTypeParser::parseFieldName(llvm::StringRef &name) {
   }
   if (parser_.tok_.is(Tok::StringLiteral)) {
     std::u16string text;
-    decodeStringLiteral(parser_.tok_, text, parser_.diags_);
-    name = parser_.ctx_.keepName(toUtf8(text));
+    LiteralText::decodeStringLiteral(parser_.tok_, text, parser_.diags_);
+    name = parser_.ctx_.keepName(ToUtf8::toUtf8(text));
     parser_.fieldNames_.insert(name);
     parser_.cursor().advance();
     return true;
@@ -139,7 +139,7 @@ bool ObjectTypeParser::parseFieldName(llvm::StringRef &name) {
         "a number cannot name a field; an object with numbered entries is an array");
   } else {
     parser_.cursor().error(parser_.tok_.loc(), llvm::Twine("expected a field name, found ") +
-                                                   tokSpelling(parser_.tok_.kind));
+                                                   TokenKinds::tokSpelling(parser_.tok_.kind));
   }
 
   return false;
@@ -254,7 +254,7 @@ TypeRef ObjectTypeParser::parseObjectType() {
       if (!parser_.tok_.is(Tok::RBrace) && !parser_.tok_.newlineBefore) {
         parser_.cursor().error(parser_.tok_.loc(),
                                llvm::Twine("expected ';' after the method, found ") +
-                                   tokSpelling(parser_.tok_.kind));
+                                   TokenKinds::tokSpelling(parser_.tok_.kind));
         parser_.cursor().skipToClosingBrace();
         return ref;
       }
@@ -278,7 +278,7 @@ TypeRef ObjectTypeParser::parseObjectType() {
     if (!parser_.tok_.is(Tok::RBrace) && !parser_.tok_.newlineBefore) {
       parser_.cursor().error(parser_.tok_.loc(),
                              llvm::Twine("expected ';' after the field, found ") +
-                                 tokSpelling(parser_.tok_.kind));
+                                 TokenKinds::tokSpelling(parser_.tok_.kind));
       parser_.cursor().skipToClosingBrace();
       return ref;
     }

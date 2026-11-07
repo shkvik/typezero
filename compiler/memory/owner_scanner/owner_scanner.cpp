@@ -1,4 +1,5 @@
 #include "compiler/memory/owner_scanner/owner_scanner.h"
+#include "compiler/load/to_utf8/to_utf8.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/Support/ConvertUTF.h"
 #include <functional>
@@ -11,16 +12,7 @@ using llvm::isa;
 
 namespace tz {
 
-std::string utf8Of(const std::u16string &text) {
-  std::string out;
-  llvm::convertUTF16ToUTF8String(
-      llvm::ArrayRef<llvm::UTF16>(reinterpret_cast<const llvm::UTF16 *>(text.data()), text.size()),
-      out);
-
-  return out;
-}
-
-const Expr *bare(const Expr *e) {
+const Expr *OwnerScanner::bare(const Expr *e) {
   for (;;) {
     if (auto *conv = dyn_cast<CastExpr>(e); conv && conv->isImplicit()) {
       e = conv->operand;
@@ -209,7 +201,7 @@ void OwnerScanner::expr(const Expr *e, Use use) {
       const Type *key = index->index->type;
       for (const Type *n : key->isUnion() ? key->members() : llvm::ArrayRef<const Type *>(key)) {
         if (n->isStringLiteral()) {
-          readAll(utf8Of(n->literalText()));
+          readAll(ToUtf8::toUtf8(n->literalText()));
         }
       }
     }
@@ -219,7 +211,7 @@ void OwnerScanner::expr(const Expr *e, Use use) {
   }
   case Expr::Kind::Call: {
     auto *call = llvm::cast<CallExpr>(e);
-    auto *member = llvm::dyn_cast<MemberExpr>(bare(call->callee));
+    auto *member = llvm::dyn_cast<MemberExpr>(OwnerScanner::bare(call->callee));
     if (member && (call->method() || call->builtin() != Builtin::None || call->superCall() ||
                    !call->unionMethods().empty())) {
       expr(member->object, Use::Receiver);
@@ -323,11 +315,11 @@ void OwnerScanner::readFields(const Type *type) {
 
 void OwnerScanner::wrote(const MemberExpr *target, const AssignExpr *assign) {
   const FunctionDecl *fn = current_;
-  auto *object = llvm::dyn_cast<NameExpr>(bare(target->object));
+  auto *object = llvm::dyn_cast<NameExpr>(OwnerScanner::bare(target->object));
   bool self = fn && fn->thisVar() && object && object->var() == fn->thisVar();
   bool construction = self && fn->cls() && (fn->isConstructor() || fn == fn->cls()->init);
   const ClassDecl *made = nullptr;
-  if (auto *create = llvm::dyn_cast<NewExpr>(bare(assign->value));
+  if (auto *create = llvm::dyn_cast<NewExpr>(OwnerScanner::bare(assign->value));
       create && create->cls() && construction) {
     bool holdsSelf = false;
     for (const Expr *arg : create->ctor() ? create->ctor()->args : create->args) {
@@ -341,13 +333,13 @@ void OwnerScanner::wrote(const MemberExpr *target, const AssignExpr *assign) {
     made = nullptr;
   }
   writes_[target->name].push_back({construction ? fn->cls() : nullptr, made});
-  auto *owned = llvm::dyn_cast<MemberExpr>(bare(target->object));
-  auto *fe = llvm::dyn_cast<FunctionExpr>(bare(assign->value));
+  auto *owned = llvm::dyn_cast<MemberExpr>(OwnerScanner::bare(target->object));
+  auto *fe = llvm::dyn_cast<FunctionExpr>(OwnerScanner::bare(assign->value));
   if (!owned || !fe || fe->fn->nonEscaping || fe->fn->isAsync || fe->fn->isGenerator || !fn ||
       !fn->thisVar() || !fn->cls()) {
     return;
   }
-  auto *holder = llvm::dyn_cast<NameExpr>(bare(owned->object));
+  auto *holder = llvm::dyn_cast<NameExpr>(OwnerScanner::bare(owned->object));
   if (holder && holder->var() == fn->thisVar() &&
       llvm::is_contained(fe->fn->captures, fn->thisVar())) {
     candidates_.push_back({fn->cls(), owned->name, target->name, fe->fn, fn->thisVar()});

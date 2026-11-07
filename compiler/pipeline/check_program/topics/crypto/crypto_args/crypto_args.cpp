@@ -2,6 +2,7 @@
 #include "compiler/library/crypto/crypto_api/crypto_api.h"
 #include "compiler/library/crypto/crypto_check_helpers/crypto_check_helpers.h"
 #include "compiler/library/crypto/crypto_names/crypto_names.h"
+#include "compiler/load/to_utf8/to_utf8.h"
 #include "compiler/pipeline/check_program/declare/constant_folder/constant_folder.h"
 #include "compiler/pipeline/check_program/declare/prelude/prelude.h"
 #include "compiler/pipeline/check_program/flow/index_proofs/index_proofs.h"
@@ -23,15 +24,6 @@ using llvm::isa;
 
 namespace tz {
 
-std::string CryptoArgs::utf8Of(const std::u16string &text) {
-  std::string out;
-  llvm::convertUTF16ToUTF8String(
-      llvm::ArrayRef<llvm::UTF16>(reinterpret_cast<const llvm::UTF16 *>(text.data()), text.size()),
-      out);
-
-  return out;
-}
-
 std::u16string CryptoArgs::utf16Of(llvm::StringRef text) {
   llvm::SmallVector<llvm::UTF16, 32> units;
   llvm::convertUTF8ToUTF16String(text, units);
@@ -44,10 +36,10 @@ std::optional<std::string> CryptoArgs::literalOf(const Expr *e) {
     e = conv->operand;
   }
   if (auto *lit = dyn_cast<StringLitExpr>(e)) {
-    return CryptoArgs::utf8Of(lit->value);
+    return ToUtf8::toUtf8(lit->value);
   }
   if (auto *tmpl = dyn_cast<TemplateExpr>(e); tmpl && tmpl->exprs.empty()) {
-    return CryptoArgs::utf8Of(tmpl->quasis[0]);
+    return ToUtf8::toUtf8(tmpl->quasis[0]);
   }
 
   return std::nullopt;
@@ -125,13 +117,8 @@ Expr *CryptoArgs::cryptoData(Expr *arg, llvm::StringRef what, bool strings, bool
   }
   bool ok = fits(type) || (type->isUnion() && llvm::all_of(type->members(), fits));
   if (!ok) {
-    std::string kinds = strings ? "a string or bytes" : "bytes";
-    this->state.getDiagnostics().error(
-        arg->loc(), "the " + what.str() + " is " + kinds +
-                        " (a Buffer, a typed array or a DataView" +
-                        (buffers ? ", an ArrayBuffer" : "") + (keys ? ", a KeyObject" : "") +
-                        "); found '" + type->name().str() + "'" +
-                        (type->isNumeric() ? "; make text of it with 'String(x)'" : ""));
+    std::string message = ErrorTextCryptoData::notData(what, strings, buffers, keys, type);
+    this->state.getDiagnostics().error(arg->loc(), message);
     arg->type = Type::error();
   }
   if (type->isStringLiteral()) {
@@ -149,9 +136,8 @@ Expr *CryptoArgs::cryptoEncoding(CallExpr *call, size_t index, llvm::StringRef f
   std::optional<std::string> text = CryptoArgs::literalOf(arg);
   if (!text) {
     ExprChecker(this->state).checkExpr(arg);
-    this->state.getDiagnostics().error(arg->loc(), "the encoding of '" + fn +
-                                                       "' is written as a literal, e.g. 'hex': "
-                                                       "the type of what it gives depends on it");
+    std::string message = ErrorTextCryptoData::encoding(fn);
+    this->state.getDiagnostics().error(arg->loc(), message);
     return nullptr;
   }
   if (*text == "buffer") {
@@ -188,26 +174,19 @@ bool CryptoArgs::cryptoOptions(Expr *arg, llvm::StringRef fn,
   auto *lit = dyn_cast<ObjectLitExpr>(arg);
   if (!lit) {
     ExprChecker(this->state).checkExpr(arg);
-    this->state.getDiagnostics().error(
-        arg->loc(), "the options of '" + fn +
-                        "' are written in the call, as an object literal, e.g. '{ " +
-                        allowed[0].str() + ": ... }'");
+    std::string message = ErrorTextCryptoOptions::literal(fn, allowed[0]);
+    this->state.getDiagnostics().error(arg->loc(), message);
     return false;
-  }
-  std::string list;
-  for (size_t i = 0; i < allowed.size(); ++i) {
-    list += (i == 0 ? "" : i + 1 == allowed.size() ? " and " : ", ") + allowed[i].str();
   }
   for (const ObjectLitExpr::Property &prop : lit->props) {
     if (prop.spread() || prop.key() || prop.method() || prop.name.empty()) {
-      this->state.getDiagnostics().error(prop.loc, "write each option of '" + fn +
-                                                       "' by its name, e.g. '{ " +
-                                                       allowed[0].str() + ": ... }'");
+      std::string message = ErrorTextCryptoOptions::byName(fn, allowed[0]);
+      this->state.getDiagnostics().error(prop.loc, message);
       return false;
     }
     if (!llvm::is_contained(allowed, prop.name)) {
-      this->state.getDiagnostics().error(prop.loc, "'" + fn + "' has no option '" + prop.name +
-                                                       "'; it takes " + list);
+      std::string message = ErrorTextCryptoOptions::unknown(fn, prop.name, allowed);
+      this->state.getDiagnostics().error(prop.loc, message);
       return false;
     }
     options[prop.name] = prop.value;
@@ -219,15 +198,10 @@ bool CryptoArgs::cryptoOptions(Expr *arg, llvm::StringRef fn,
 int CryptoArgs::cryptoChoice(Expr *arg, llvm::StringRef what,
                              llvm::ArrayRef<llvm::StringRef> values) {
   std::optional<std::string> text = CryptoArgs::literalOf(arg);
-  std::string list;
-  for (size_t i = 0; i < values.size(); ++i) {
-    list += (i == 0 ? "'" : i + 1 == values.size() ? "' or '" : "', '") + values[i].str();
-  }
-  list += "'";
   if (!text) {
     ExprChecker(this->state).checkExpr(arg);
-    this->state.getDiagnostics().error(arg->loc(),
-                                       "the " + what + " is written as a literal: " + list);
+    std::string message = ErrorTextCryptoChoice::literal(what, values);
+    this->state.getDiagnostics().error(arg->loc(), message);
     return -1;
   }
   for (size_t i = 0; i < values.size(); ++i) {
@@ -235,8 +209,8 @@ int CryptoArgs::cryptoChoice(Expr *arg, llvm::StringRef what,
       return int(i);
     }
   }
-  this->state.getDiagnostics().error(arg->loc(),
-                                     "unknown " + what + " '" + *text + "'; it is " + list);
+  std::string message = ErrorTextCryptoChoice::unknown(what, *text, values);
+  this->state.getDiagnostics().error(arg->loc(), message);
 
   return -1;
 }
@@ -247,15 +221,13 @@ Expr *CryptoArgs::cryptoMd(Expr *arg, bool hmac) {
     return ArgumentChecker(this->state).checkArg(arg, Type::string());
   }
   std::string name = llvm::StringRef(*text).lower();
-  for (const HashNames &h : hashNames()) {
+  for (const HashNames &h : CryptoNames::hashNames()) {
     if (h.name != name && !llvm::is_contained(h.aliases, name)) {
       continue;
     }
     if (hmac && (h.name == "shake128" || h.name == "shake256")) {
-      this->state.getDiagnostics().error(arg->loc(),
-                                         "'" + *text +
-                                             "' gives output of any length, which HMAC and the "
-                                             "KDFs cannot use; use a hash such as 'sha256'");
+      std::string message = ErrorTextCryptoHash::anyLength(*text);
+      this->state.getDiagnostics().error(arg->loc(), message);
       return nullptr;
     }
     for (size_t i = 0; i < std::size(kDirectMds); ++i) {
@@ -264,16 +236,13 @@ Expr *CryptoArgs::cryptoMd(Expr *arg, bool hmac) {
       }
     }
   }
-  if (turnedOffHash(name)) {
-    this->state.getDiagnostics().error(arg->loc(),
-                                       "'" + *text +
-                                           "' is turned off in node 24 (it throws "
-                                           "ERR_OSSL_EVP_UNSUPPORTED) and in tz; use 'sha256'");
+  if (CryptoNames::turnedOffHash(name)) {
+    std::string message = ErrorTextCryptoHash::turnedOff(*text);
+    this->state.getDiagnostics().error(arg->loc(), message);
     return nullptr;
   }
-  this->state.getDiagnostics().error(arg->loc(), "unknown hash '" + *text +
-                                                     "'; node has those getHashes() lists, e.g. "
-                                                     "'sha256', 'sha512', 'sha3-256', 'md5'");
+  std::string message = ErrorTextCryptoHash::unknown(*text);
+  this->state.getDiagnostics().error(arg->loc(), message);
 
   return nullptr;
 }
@@ -299,17 +268,13 @@ Expr *CryptoArgs::cryptoCipher(Expr *arg) {
   if (llvm::is_contained(kCipherNames, name)) {
     return this->cryptoString(arg->loc(), name);
   }
-  if (turnedOffCipher(name)) {
-    this->state.getDiagnostics().error(arg->loc(), "'" + *text +
-                                                       "' is turned off in node 24 (it throws "
-                                                       "ERR_OSSL_EVP_UNSUPPORTED) and in tz; use "
-                                                       "'aes-256-gcm'");
+  if (CryptoNames::turnedOffCipher(name)) {
+    std::string message = ErrorTextCryptoCipher::turnedOff(*text);
+    this->state.getDiagnostics().error(arg->loc(), message);
     return nullptr;
   }
-  this->state.getDiagnostics().error(arg->loc(), "unknown cipher '" + *text +
-                                                     "'; node has those getCiphers() lists, "
-                                                     "e.g. 'aes-256-gcm', 'aes-256-cbc', "
-                                                     "'chacha20-poly1305'");
+  std::string message = ErrorTextCryptoCipher::unknown(*text);
+  this->state.getDiagnostics().error(arg->loc(), message);
 
   return nullptr;
 }
@@ -363,9 +328,10 @@ bool CryptoArgs::checkWhole(const Expr *arg, llvm::StringRef name, double least)
   if (!value || (*value == std::floor(*value) && *value >= least)) {
     return true;
   }
-  this->state.getDiagnostics().error(
-      arg->loc(), name + " must be a whole number of " + CryptoArgs::numberText(least) +
-                      " or more, not " + CryptoArgs::numberText(*value));
+  std::string leastShown = CryptoArgs::numberText(least);
+  std::string valueShown = CryptoArgs::numberText(*value);
+  std::string message = ErrorTextCryptoNumber::whole(name, leastShown, valueShown);
+  this->state.getDiagnostics().error(arg->loc(), message);
 
   return false;
 }
@@ -389,20 +355,18 @@ bool CryptoArgs::checkCipherLengths(const Expr *cipher, const Expr *key, const E
   };
   bool ok = true;
   if (std::optional<int64_t> have = bytesOf(key); have && *have != keyBytes) {
-    this->state.getDiagnostics().error(key->loc(), name + " needs a " + std::to_string(keyBytes) +
-                                                       "-byte key, but this one has " +
-                                                       std::to_string(*have) + " bytes");
+    std::string message = ErrorTextCryptoCipher::keyBytes(name, keyBytes, *have);
+    this->state.getDiagnostics().error(key->loc(), message);
     ok = false;
   }
   std::optional<int64_t> ivHave = bytesOf(iv);
   if (ivHave && anyIv && *ivHave == 0) {
-    this->state.getDiagnostics().error(iv->loc(),
-                                       name + " needs an IV of 1 byte or more, but it is empty");
+    std::string message = ErrorTextCryptoCipher::emptyIv(name);
+    this->state.getDiagnostics().error(iv->loc(), message);
     ok = false;
   } else if (ivHave && !anyIv && *ivHave != ivBytes) {
-    this->state.getDiagnostics().error(iv->loc(), name + " needs a " + std::to_string(ivBytes) +
-                                                      "-byte IV, but this one has " +
-                                                      std::to_string(*ivHave) + " bytes");
+    std::string message = ErrorTextCryptoCipher::ivBytes(name, ivBytes, *ivHave);
+    this->state.getDiagnostics().error(iv->loc(), message);
     ok = false;
   }
 
@@ -413,11 +377,24 @@ Expr *CryptoArgs::cryptoKey(Expr *arg, llvm::StringRef what) {
   return this->cryptoData(arg, what, true, true, true);
 }
 
+CryptoArgs::ResultKeyObjectType CryptoArgs::keyObjectType(const Type *type, llvm::StringRef what) {
+  if (!type->isError() && type->crypto() != Crypto::KeyObject) {
+    std::string message = ErrorTextCryptoKey::keyObject(what, type->name());
+
+    return err(CryptoArgsKeyObjectTypeError{
+        .code = CryptoArgsKeyObjectTypeErrorCode::NOT_A_KEY_OBJECT,
+        .message = message,
+    });
+  }
+
+  return ok(type);
+}
+
 Expr *CryptoArgs::cryptoKeyObject(Expr *arg, llvm::StringRef what) {
   arg = ExprChecker(this->state).checkExpr(arg);
-  if (!arg->type->isError() && arg->type->crypto() != Crypto::KeyObject) {
-    this->state.getDiagnostics().error(arg->loc(), "the " + what + " is a KeyObject; found '" +
-                                                       arg->type->name() + "'");
+  ResultKeyObjectType key = CryptoArgs::keyObjectType(arg->type, what);
+  if (key.isErr()) {
+    this->state.getDiagnostics().error(arg->loc(), key.error().message);
     arg->type = Type::error();
   }
 
@@ -433,13 +410,8 @@ bool CryptoArgs::rejectCryptoCallback(CallExpr *call, size_t index, llvm::String
   if (!arg->type->nonOptional()->isFunction()) {
     return false;
   }
-  this->state.getDiagnostics().error(
-      arg->loc(), "'" + fn +
-                      "' with a callback is not supported: tz has no callback forms "
-                      "of node:crypto (docs/crypto.md, section 5); call it without one "
-                      "and use what it returns: " +
-                      hint + ", or run it on the thread pool with '" + fn +
-                      "Async' of \"tz:crypto\": 'await " + fn + "Async(...)'");
+  std::string message = ErrorTextCryptoKey::callback(fn, hint);
+  this->state.getDiagnostics().error(arg->loc(), message);
   for (Expr *&a : call->args) {
     if (a != call->args[index]) {
       a = ExprChecker(this->state).checkExpr(a);
@@ -464,10 +436,12 @@ bool CryptoArgs::cryptoSignKey(Expr *arg, llvm::StringRef fn, bool priv,
       return false;
     }
     if (!options.lookup("key")) {
-      this->state.getDiagnostics().error(arg->loc(), "the options of '" + fn + "' need 'key'");
+      std::string message = ErrorTextCryptoOptions::needsKey(fn);
+      this->state.getDiagnostics().error(arg->loc(), message);
       return false;
     }
-    key = this->cryptoKey(options["key"], "key");
+    std::string keyWhat = ErrorTextCryptoLabel::key();
+    key = this->cryptoKey(options["key"], keyWhat);
     if (Expr *p = options.lookup("padding")) {
       padding = ArgumentChecker(this->state).checkArg(p, Type::intTy());
       has |= 1;
@@ -477,7 +451,8 @@ bool CryptoArgs::cryptoSignKey(Expr *arg, llvm::StringRef fn, bool priv,
       has |= 2;
     }
     if (Expr *d = options.lookup("dsaEncoding")) {
-      int which = this->cryptoChoice(d, "encoding of the signature", {"der", "ieee-p1363"});
+      std::string signature = ErrorTextCryptoLabel::signature();
+      int which = this->cryptoChoice(d, signature, {"der", "ieee-p1363"});
       if (which < 0) {
         return false;
       }

@@ -538,7 +538,8 @@ Expr *InheritChecker::checkSuperMethodCall(CallExpr *call, MemberExpr *member) {
   call->type = Type::error();
   member->type = Type::error();
   FunctionDecl *method = nullptr;
-  for (FunctionDecl *fn : llvm::reverse(this->state.getFunctionStack().getFunctions())) {
+  std::vector<FunctionDecl *> functions = this->state.getFunctionStack().getFunctions();
+  for (FunctionDecl *fn : llvm::reverse(functions)) {
     if (fn->isArrow()) {
       continue;
     }

@@ -26,6 +26,8 @@ public:
   void countTagged(llvm::Value *value, const Type *type, bool retain);
 
 private:
+  static llvm::Value *toWord(llvm::IRBuilder<> &b, llvm::Value *v);
+  static llvm::Value *fromWord(llvm::IRBuilder<> &b, llvm::Value *word, llvm::Type *type);
   static unsigned slotWords(UnionSlot slot);
   static bool isReferenceLike(const Type *type);
 

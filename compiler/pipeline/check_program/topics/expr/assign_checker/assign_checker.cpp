@@ -148,8 +148,9 @@ AssignChecker::ResultStringAssignable AssignChecker::stringAssign(BinaryOp op,
   bool joins = valueType->nonOptional()->isNumeric() || valueType->nonOptional()->isBool();
   if (op == BinaryOp::Add && joins) {
     auto [target, value] = AssignChecker::operandTexts(assign->source, assign->loc(), 2);
-    std::string hint = target.empty() ? ErrorTextCompound::convertTo()
-                                      : ErrorTextCompound::writeAs(target, withoutParens(value));
+    std::string hint =
+        target.empty() ? ErrorTextCompound::convertTo()
+                       : ErrorTextCompound::writeAs(target, SharedHelpers::withoutParens(value));
     std::string message = ErrorTextCompound::joinsText(valueType->name(), hint);
 
     return err(AssignCheckerStringAssignError{
@@ -238,7 +239,7 @@ AssignChecker::ResultLengthIsInBounds AssignChecker::lengthProven(const MemberEx
   bool proven = IndexProofs(this->state).provesInBounds(member->object, value, true) ||
                 IndexProofs(this->state).exempt(value->loc(), member->object);
   if (!proven) {
-    std::string array = valueText(member->object);
+    std::string array = BytesCheckHelpers::valueText(member->object);
     std::string message =
         ErrorTextAssign::lengthRange(member->object->type->inner()->name(), array);
 
@@ -395,7 +396,7 @@ Expr *AssignChecker::checkAssign(AssignExpr *assign) {
       VarChecker(this->state).assignedUntyped(var, value->type);
     }
   } else {
-    std::string spelling = std::string(opSpelling(op)) + "=";
+    std::string spelling = std::string(Operators::opSpelling(op)) + "=";
     if (type->isString()) {
       assign->value = ExprChecker(this->state).checkExpr(assign->value);
       ResultStringAssignable text = AssignChecker::stringAssign(op, spelling, type, assign);

@@ -7,6 +7,9 @@
 
 namespace tz {
 
-const Expr *unnarrowed(const Expr *expr);
+class ObjectCheckHelpers {
+public:
+  static const Expr *unnarrowed(const Expr *expr);
+};
 
 }

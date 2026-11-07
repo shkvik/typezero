@@ -29,19 +29,17 @@ namespace tz::pkg {
 
 namespace path = llvm::sys::path;
 
-namespace {
-
-std::vector<std::string> jsrDependencies(const std::string &dir, const JsrVersion &meta) {
+std::vector<std::string> Resolver::jsrDependencies(const std::string &dir, const JsrVersion &meta) {
   std::vector<std::string> entries, files, external, deps;
   for (const auto &[name, file] : meta.exports) {
     llvm::SmallString<256> full(dir);
     path::append(full, file);
     entries.push_back(std::string(full));
   }
-  reachableFiles(entries, files, external, Sources::Tz);
+  Scanner::reachableFiles(entries, files, external, Sources::Tz);
   for (llvm::StringRef spec : external) {
     std::string package, dep, subpath;
-    if (splitJsrImport(spec, package, dep, subpath) &&
+    if (Specifier::splitJsrImport(spec, package, dep, subpath) &&
         std::find(deps.begin(), deps.end(), dep) == deps.end()) {
       deps.push_back(dep);
     }
@@ -49,8 +47,6 @@ std::vector<std::string> jsrDependencies(const std::string &dir, const JsrVersio
   std::sort(deps.begin(), deps.end());
 
   return deps;
-}
-
 }
 
 void Resolver::reportSpec(const std::string &by, const Dependency *dep,
@@ -65,9 +61,9 @@ void Resolver::reportSpec(const std::string &by, const Dependency *dep,
     }
   }
   if (manifest && dep) {
-    reportAt(manifest->path, manifest->text, dep->offset, message);
+    Report::reportAt(manifest->path, manifest->text, dep->offset, message);
   } else {
-    report(by + ": " + message);
+    Report::report(by + ": " + message);
   }
 }
 
@@ -91,7 +87,7 @@ bool Resolver::collect(std::map<std::string, std::vector<Requirement>> &reqs) {
       const std::string &spec = dep ? dep->spec : (*node.specs)[i];
       Source source;
       std::string error;
-      if (!parseSource(spec, node.baseDir, source, error)) {
+      if (!SourceParser::parseSource(spec, node.baseDir, source, error)) {
         reportSpec(node.by, dep, error);
         return false;
       }
@@ -110,7 +106,7 @@ bool Resolver::collect(std::map<std::string, std::vector<Requirement>> &reqs) {
         auto it = locals.find(id);
         if (it == locals.end()) {
           Manifest local;
-          if (!readPackageDir(source.dir(), local)) {
+          if (!ManifestFile::readPackageDir(source.dir(), local)) {
             return false;
           }
           it = locals.emplace(id, std::move(local)).first;
@@ -163,11 +159,11 @@ bool Resolver::chooseJsr(const std::string &id, const std::vector<Requirement> &
   if (it == versions_.end()) {
     JsrVersions versions;
     std::string error;
-    if (!jsrVersions(source.scope(), source.name(), versions, error)) {
+    if (!JsrClient::jsrVersions(source.scope(), source.name(), versions, error)) {
       if (error.empty()) {
-        error = "there is no package " + id + " in the registry (" + jsrBaseUrl() + ")";
+        error = "there is no package " + id + " in the registry (" + JsrClient::jsrBaseUrl() + ")";
       }
-      report(error);
+      Report::report(error);
       return false;
     }
     it = versions_.emplace(id, std::move(versions)).first;
@@ -218,9 +214,9 @@ bool Resolver::chooseJsr(const std::string &id, const std::vector<Requirement> &
       for (size_t i = available.size() > 8 ? available.size() - 8 : 0; i < available.size(); ++i) {
         listed += (listed.empty() ? "" : ", ") + available[i].str();
       }
-      report(reqs.front().by + " needs " + id + "@" + reqs.front().source.range() +
-             ", and the registry has no such version" +
-             (listed.empty() ? std::string(" (it has none)") : "; it has " + listed));
+      Report::report(reqs.front().by + " needs " + id + "@" + reqs.front().source.range() +
+                     ", and the registry has no such version" +
+                     (listed.empty() ? std::string(" (it has none)") : "; it has " + listed));
       return false;
     }
     std::string message = "no one version of " + id + " fits every package that needs it:";
@@ -233,20 +229,20 @@ bool Resolver::chooseJsr(const std::string &id, const std::vector<Requirement> &
     }
     message += "\na program has each package in one version (docs/packages.md); change the range "
                "in package.json, or update the package that wants the older one";
-    report(message);
+    Report::report(message);
     return false;
   }
 
   out.version = version->str();
   JsrVersion meta;
   std::string error, dir;
-  if (!jsrVersion(source.scope(), source.name(), out.version, meta, error) ||
-      !jsrDownload(source.scope(), source.name(), out.version, meta, dir, error)) {
-    report(error);
+  if (!JsrClient::jsrVersion(source.scope(), source.name(), out.version, meta, error) ||
+      !JsrClient::jsrDownload(source.scope(), source.name(), out.version, meta, dir, error)) {
+    Report::report(error);
     return false;
   }
   out.hash = meta.hash;
-  out.dependencies = jsrDependencies(dir, meta);
+  out.dependencies = Resolver::jsrDependencies(dir, meta);
 
   return true;
 }
@@ -265,18 +261,19 @@ bool Resolver::chooseGit(const std::string &id, const std::vector<Requirement> &
     }
     message += "\na program has each package in one version (docs/packages.md); name the same "
                "tag everywhere";
-    report(message);
+    Report::report(message);
     return false;
   }
   std::string error, dir;
   out.ref = source.ref();
-  if (!gitResolve(source.url(), source.ref(), updating(id), out.commit, error) ||
-      !gitCheckout(source.url(), out.commit, dir, error) || !hashDirectory(dir, out.hash, error)) {
-    report(error);
+  if (!GitClient::gitResolve(source.url(), source.ref(), updating(id), out.commit, error) ||
+      !GitClient::gitCheckout(source.url(), out.commit, dir, error) ||
+      !PackageCache::hashDirectory(dir, out.hash, error)) {
+    Report::report(error);
     return false;
   }
   Manifest manifest;
-  if (!readPackageDir(dir, manifest)) {
+  if (!ManifestFile::readPackageDir(dir, manifest)) {
     return false;
   }
   for (const Dependency &dep : manifest.dependencies) {
@@ -324,8 +321,9 @@ bool Resolver::run(Lock &out) {
       return true;
     }
   }
-  report("the versions of the packages do not settle: each choice makes another package need a "
-         "different version; pin the versions in package.json");
+  Report::report(
+      "the versions of the packages do not settle: each choice makes another package need a "
+      "different version; pin the versions in package.json");
 
   return false;
 }

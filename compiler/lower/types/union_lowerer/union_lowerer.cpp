@@ -25,7 +25,10 @@ constexpr unsigned kDescriptorClass = 6;
 
 }
 
-static UnionSlot targetSlot(UnionSlot slot, const Type *to) {
+UnionLowerer::UnionLowerer(Lowering &owner)
+    : lowering(owner) {}
+
+UnionSlot UnionLowerer::targetSlot(UnionSlot slot, const Type *to) {
   auto has = [&](UnionSlot s) { return llvm::is_contained(to->slots(), s); };
   if (has(slot)) {
     return slot;
@@ -44,9 +47,6 @@ static UnionSlot targetSlot(UnionSlot slot, const Type *to) {
 
   return UnionSlot::None;
 }
-
-UnionLowerer::UnionLowerer(Lowering &owner)
-    : lowering(owner) {}
 
 llvm::Value *UnionLowerer::emitUnionConversion(llvm::Value *value, const Type *from,
                                                const Type *to) {
@@ -141,7 +141,7 @@ llvm::Value *UnionLowerer::emitUnionConversion(llvm::Value *value, const Type *f
       std::vector<UnionSlot> possible;
       bool same = true;
       for (UnionSlot slot : from->slots()) {
-        UnionSlot target = targetSlot(slot, to);
+        UnionSlot target = UnionLowerer::targetSlot(slot, to);
         if (target == UnionSlot::None) {
           continue;
         }
@@ -164,7 +164,7 @@ llvm::Value *UnionLowerer::emitUnionConversion(llvm::Value *value, const Type *f
       return this->lowering.unionLayout().forEachSlot(
           value, possible,
           [&](UnionSlot slot) {
-            UnionSlot target = targetSlot(slot, to);
+            UnionSlot target = UnionLowerer::targetSlot(slot, to);
             llvm::Value *part = this->lowering.exprLowerer().emitConversion(
                 this->lowering.unionLayout().taggedPart(value, from, slot), from->slotPart(slot),
                 to->slotPart(target));
@@ -174,13 +174,13 @@ llvm::Value *UnionLowerer::emitUnionConversion(llvm::Value *value, const Type *f
           this->lowering.moduleBuilder().lower(to),
           llvm::Constant::getNullValue(this->lowering.moduleBuilder().lower(to)));
     }
-    UnionSlot slot = targetSlot(unionSlot(from), to);
+    UnionSlot slot = UnionLowerer::targetSlot(UnionSlots::unionSlot(from), to);
     assert(slot != UnionSlot::None && "Checker converts a member into its union");
     return this->lowering.unionLayout().makeTagged(
         to, slot, this->lowering.exprLowerer().emitConversion(value, from, to->slotPart(slot)));
   }
   if (from->isTagged()) {
-    UnionSlot slot = unionSlot(to);
+    UnionSlot slot = UnionSlots::unionSlot(to);
     return this->lowering.exprLowerer().emitConversion(
         this->lowering.unionLayout().taggedPart(value, from, slot), from->slotPart(slot), to);
   }
@@ -262,7 +262,7 @@ llvm::Value *UnionLowerer::emitUnionTypeOf(llvm::Value *value, const Type *type)
       result = phi;
       continue;
     }
-    llvm::StringRef name = typeOfName(type->slotPart(slot));
+    llvm::StringRef name = TypeSpelling::typeOfName(type->slotPart(slot));
     result = this->lowering.builder_.CreateSelect(
         this->lowering.builder_.CreateICmpEQ(tag, this->lowering.builder_.getInt32(unsigned(slot))),
         this->lowering.stringLowerer().stringLiteral(std::u16string(name.begin(), name.end())),

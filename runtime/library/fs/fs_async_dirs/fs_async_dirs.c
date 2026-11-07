@@ -44,7 +44,7 @@ static int list_raw(const uint16_t *path, size_t n, uint32_t dir, ListedList *ou
   if (attributes == INVALID_FILE_ATTRIBUTES || !(attributes & FILE_ATTRIBUTE_DIRECTORY)) {
     *failure = attributes == INVALID_FILE_ATTRIBUTES
                    ? tz_fs_win32_failure(GetLastError())
-                   : (Failure){E_ENOTDIR, tz_fs_errors[E_ENOTDIR].windows};
+                   : (Failure){E_ENOTDIR, tz_fs_errors[E_ENOTDIR].windows, 0};
     tz_fs_raw_free(&pattern);
     return 0;
   }

@@ -12,7 +12,7 @@ namespace tz {
 struct Write;
 struct Narrowing;
 struct Conversion;
-class Flows;
+struct FlowGraph;
 
 class WideWrites {
 public:
@@ -40,23 +40,23 @@ private:
 
   static constexpr int maxDepth = 6;
 
-  static WritesAt writesByNode(const Flows &flows);
+  static WritesAt writesByNode(const FlowGraph &graph);
   static bool mayBe(const Write &write, const Narrowing &narrowing);
   static bool mayHold(const Type *type, const Type *value, int depth);
   static bool mayBePart(const Type *type, const Type *whole, int depth);
   static std::vector<Narrowing> narrowingsOf(const Type *from, const Type *to);
   static bool breaks(const Write &write, const Narrowing &narrowing, int depth);
-  static bool nodeMayHold(const Flows &flows, const Conversion &conv, int node, int off);
+  static bool nodeMayHold(const FlowGraph &graph, const Conversion &conv, int node, int off);
   static WriteBreak breakingNarrowing(const Write &write, const Conversion &conv, int depth);
   static void collectNarrowings(const Type *from, const Type *to, int depth,
                                 std::vector<Narrowing> &out, TypePairs &seen);
-  static WriteBreak breakingAt(const Flows &flows, const WritesAt &writesAt, const Conversion &conv,
-                               int node, int off, int md);
+  static WriteBreak breakingAt(const FlowGraph &graph, const WritesAt &writesAt,
+                               const Conversion &conv, int node, int off, int md);
 
   std::string writeLine(llvm::SMLoc write, llvm::SMLoc at) const;
-  WriteBreak breakingAnywhere(const Flows &flows, const Conversion &conv) const;
+  WriteBreak breakingAnywhere(const FlowGraph &graph, const Conversion &conv) const;
   ResultWideningSafe widening(const Conversion &conv, const WriteBreak &breaking) const;
-  WriteBreak breakingWrite(const Flows &flows, const WritesAt &writesAt,
+  WriteBreak breakingWrite(const FlowGraph &graph, const WritesAt &writesAt,
                            const Conversion &conv) const;
 
   CheckState &state;

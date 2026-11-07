@@ -3,9 +3,7 @@
 
 namespace tz::pkg {
 
-namespace {
-
-bool parseNumber(llvm::StringRef text, uint64_t &out) {
+bool PartialParser::parseNumber(llvm::StringRef text, uint64_t &out) {
   if (text.empty() || text.size() > 15 || !llvm::all_of(text, llvm::isDigit)) {
     return false;
   }
@@ -13,7 +11,7 @@ bool parseNumber(llvm::StringRef text, uint64_t &out) {
   return !text.getAsInteger(10, out);
 }
 
-bool parsePre(llvm::StringRef text, std::vector<std::string> &out) {
+bool PartialParser::parsePre(llvm::StringRef text, std::vector<std::string> &out) {
   llvm::SmallVector<llvm::StringRef, 4> ids;
   text.split(ids, '.');
   for (llvm::StringRef id : ids) {
@@ -26,14 +24,12 @@ bool parsePre(llvm::StringRef text, std::vector<std::string> &out) {
   return true;
 }
 
-}
-
-bool parsePartial(llvm::StringRef text, Partial &out) {
+bool PartialParser::parsePartial(llvm::StringRef text, Partial &out) {
   text.consume_front("=");
   text.consume_front("v");
   text = text.split('+').first;
   auto [core, pre] = text.split('-');
-  if (core.size() != text.size() && !parsePre(pre, out.pre)) {
+  if (core.size() != text.size() && !PartialParser::parsePre(pre, out.pre)) {
     return false;
   }
   llvm::SmallVector<llvm::StringRef, 3> parts;
@@ -47,7 +43,7 @@ bool parsePartial(llvm::StringRef text, Partial &out) {
       wild = true;
       continue;
     }
-    if (wild || !parseNumber(part, out.parts[out.count])) {
+    if (wild || !PartialParser::parseNumber(part, out.parts[out.count])) {
       return false;
     }
     ++out.count;

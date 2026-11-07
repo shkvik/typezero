@@ -5,6 +5,9 @@
 
 namespace tz::pkg {
 
-bool readText(llvm::StringRef file, std::string &text);
+class TextFile {
+public:
+  static bool readText(llvm::StringRef file, std::string &text);
+};
 
 }

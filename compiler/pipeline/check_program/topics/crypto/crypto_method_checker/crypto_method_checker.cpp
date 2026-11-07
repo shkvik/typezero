@@ -3,6 +3,7 @@
 #include "compiler/library/crypto/crypto_check_helpers/crypto_check_helpers.h"
 #include "compiler/library/crypto/crypto_names/crypto_names.h"
 #include "compiler/pipeline/check_program/topics/crypto/crypto_args/crypto_args.h"
+#include "compiler/pipeline/check_program/topics/crypto/crypto_function_checker/crypto_function_checker_errors.h"
 #include "compiler/pipeline/check_program/topics/expr/argument_checker/argument_checker.h"
 #include "compiler/pipeline/check_program/topics/expr/call_checker/call_checker.h"
 #include "compiler/pipeline/check_program/topics/expr/expr_checker/expr_checker.h"
@@ -16,6 +17,19 @@ namespace tz {
 
 CryptoMethodChecker::CryptoMethodChecker(CheckState &owner)
     : state(owner) {}
+
+CryptoMethodChecker::ResultIssuerChecked CryptoMethodChecker::issuer(const Expr *other) {
+  if (!other->type->isError() && other->type->crypto() != Crypto::X509) {
+    std::string message = ErrorTextCryptoMethod::issuer(other->type->name());
+
+    return err(CryptoMethodCheckerIssuerError{
+        .code = CryptoMethodCheckerIssuerErrorCode::NOT_A_CERTIFICATE,
+        .message = message,
+    });
+  }
+
+  return ok(other);
+}
 
 Expr *CryptoMethodChecker::checkCryptoMethod(CallExpr *call, MemberExpr *member) {
   const Type *type = member->object->type;
@@ -244,9 +258,9 @@ Expr *CryptoMethodChecker::checkCryptoMethod(CallExpr *call, MemberExpr *member)
     }
     int format = 3;
     if (Expr *f = options.lookup("format")) {
-      if ((format = CryptoArgs(this->state)
-                        .cryptoChoice(f, "format of the key", {"pem", "der", "jwk", "buffer"})) <
-          0) {
+      std::string keyFormat = ErrorTextCryptoFnLabel::keyFormat();
+      format = CryptoArgs(this->state).cryptoChoice(f, keyFormat, {"pem", "der", "jwk", "buffer"});
+      if (format < 0) {
         return call;
       }
     }
@@ -262,8 +276,9 @@ Expr *CryptoMethodChecker::checkCryptoMethod(CallExpr *call, MemberExpr *member)
          *cipherName = CryptoArgs(this->state).cryptoString(loc, "");
     Expr *passphrase = CryptoArgs(this->state).cryptoUndefined(loc);
     if (Expr *t = options.lookup("type")) {
-      int which = CryptoArgs(this->state)
-                      .cryptoChoice(t, "type of the key", {"pkcs1", "spki", "pkcs8", "sec1"});
+      std::string typeWhat = ErrorTextCryptoFnLabel::keyType();
+      int which =
+          CryptoArgs(this->state).cryptoChoice(t, typeWhat, {"pkcs1", "spki", "pkcs8", "sec1"});
       if (which < 0) {
         return call;
       }
@@ -306,9 +321,9 @@ Expr *CryptoMethodChecker::checkCryptoMethod(CallExpr *call, MemberExpr *member)
       if (!present(index)) {
         return CryptoArgs(this->state).cryptoInt(loc, 0);
       }
+      std::string point = ErrorTextCryptoPoint::format();
       int which = CryptoArgs(this->state)
-                      .cryptoChoice(args[index], "format of the point",
-                                    {"uncompressed", "compressed", "hybrid"});
+                      .cryptoChoice(args[index], point, {"uncompressed", "compressed", "hybrid"});
 
       return which < 0 ? nullptr : CryptoArgs(this->state).cryptoInt(loc, which);
     };
@@ -442,11 +457,10 @@ Expr *CryptoMethodChecker::checkCryptoMethod(CallExpr *call, MemberExpr *member)
       }
       Expr *other = name == "checkIssued" ? ExprChecker(this->state).checkExpr(args[0])
                                           : CryptoArgs(this->state).cryptoKeyObject(args[0], "key");
-      if (name == "checkIssued" && !other->type->isError() &&
-          other->type->crypto() != Crypto::X509) {
-        this->state.getDiagnostics().error(other->loc(),
-                                           "'checkIssued' takes an X509Certificate; found '" +
-                                               other->type->name() + "'");
+      ResultIssuerChecked issued =
+          name == "checkIssued" ? CryptoMethodChecker::issuer(other) : ok(other);
+      if (issued.isErr()) {
+        this->state.getDiagnostics().error(other->loc(), issued.error().message);
         return call;
       }
       if (other->type->isError()) {
@@ -468,19 +482,13 @@ Expr *CryptoMethodChecker::checkCryptoMethod(CallExpr *call, MemberExpr *member)
       "once",    "off",         "emit", "pause",  "resume",         "setEncoding",
       "destroy", "addListener", "cork", "uncork", "removeListener", "setDefaultEncoding"};
   if ((hash || cipher) && llvm::is_contained(streamMethods, name)) {
-    const char *instead = kind == Crypto::Sign     ? "'update(data)' and 'sign(key)'"
-                          : kind == Crypto::Verify ? "'update(data)' and 'verify(key, signature)'"
-                          : cipher                 ? "'update(data)' and 'final()'"
-                                                   : "'update(data)' and 'digest()'";
-    this->state.getDiagnostics().error(
-        loc, "'" + name + "' of " + type->name() +
-                 " is not supported yet: in node it is a stream too, and tz has no "
-                 "streams yet (docs/streams.md); use " +
-                 instead);
+    std::string message = ErrorTextCryptoMethod::stream(name, type->name(), kind, cipher);
+    this->state.getDiagnostics().error(loc, message);
     return loosely();
   }
-  this->state.getDiagnostics().error(loc, "property '" + name + "' does not exist on type '" +
-                                              type->name() + "'; it " + "has " + methodsOf(kind));
+  std::string message =
+      ErrorTextCryptoMethod::noMethod(name, type->name(), CryptoNames::methodsOf(kind));
+  this->state.getDiagnostics().error(loc, message);
 
   return loosely();
 }

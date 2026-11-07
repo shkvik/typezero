@@ -12,7 +12,7 @@ bool isNumeric(llvm::StringRef id) { return !id.empty() && llvm::all_of(id, llvm
 
 bool Version::parse(llvm::StringRef text, Version &out) {
   Partial p;
-  if (!parsePartial(text.trim(), p) || p.count != 3) {
+  if (!PartialParser::parsePartial(text.trim(), p) || p.count != 3) {
     return false;
   }
   out = p.version();

@@ -6,6 +6,7 @@
 #include "compiler/pipeline/check_program/topics/expr/argument_checker/argument_checker.h"
 #include "compiler/pipeline/check_program/topics/expr/call_checker/call_checker.h"
 #include "compiler/pipeline/check_program/topics/expr/expr_checker/expr_checker.h"
+#include "compiler/pipeline/check_program/topics/process/process_checker/process_checker_errors.h"
 #include "compiler/pipeline/check_program/topics/result/result_checker/result_checker.h"
 #include "compiler/pipeline/check_program/topics/stream/stream_sources/stream_sources.h"
 #include "compiler/pipeline/check_program/types/type_relations/type_relations.h"
@@ -68,9 +69,8 @@ Expr *ProcessChecker::checkProcessCall(CallExpr *call, MemberExpr *member) {
   if (isDate || CallChecker(this->state).isGlobalName(member->object, "performance")) {
     llvm::StringRef object = isDate ? "Date" : "performance";
     if (name != "now") {
-      this->state.getDiagnostics().error(member->loc(), "'" + object + "." + name +
-                                                            "' is not supported yet; only '" +
-                                                            object + ".now()' is");
+      std::string message = ErrorTextProcessCall::onlyNow(object, name);
+      this->state.getDiagnostics().error(member->loc(), message);
       checkArgsLoosely();
       return call;
     }
@@ -90,20 +90,15 @@ Expr *ProcessChecker::checkProcessCall(CallExpr *call, MemberExpr *member) {
 
   bool isStdout = this->isProcessMember(member->object, "stdout");
   if (isStdout || this->isProcessMember(member->object, "stderr")) {
-    std::string stream = isStdout ? "process.stdout" : "process.stderr";
+    std::string stream = ErrorTextProcessStream::name(isStdout);
     if (name != "isTTY" &&
         this->state.getLibraryDeclarations().findLibraryFunction("processStdout")) {
       return nullptr;
     }
     if (name != "write") {
-      if (name == "isTTY") {
-        this->state.getDiagnostics().error(member->loc(),
-                                           "'" + stream + ".isTTY' is a boolean, not a function");
-      } else {
-        this->state.getDiagnostics().error(
-            member->loc(), "'" + stream + "." + name +
-                               "' is not supported yet; only 'write(text)' and 'isTTY' are");
-      }
+      std::string message = name == "isTTY" ? ErrorTextProcessCall::ttyValue(stream)
+                                            : ErrorTextProcessCall::streamCall(stream, name);
+      this->state.getDiagnostics().error(member->loc(), message);
       checkArgsLoosely();
       return call;
     }
@@ -188,25 +183,37 @@ Expr *ProcessChecker::checkProcessCall(CallExpr *call, MemberExpr *member) {
   auto *event = call->args.empty() ? nullptr : dyn_cast<StringLitExpr>(call->args[0]);
   if (event && (event->value == u"uncaughtException" || event->value == u"unhandledRejection") &&
       (name == "on" || name == "once" || name == "addListener" || name == "prependListener")) {
-    return ResultChecker(this->state)
-        .reject(
-            call, call->args[0]->loc(),
-            "there is nothing to catch: nothing is thrown or rejected in tz, an error is a Result "
-            "that the code which gets it handles (docs/errors.md, section 4)");
+    std::string message = ErrorTextProcessEvent::noThrown();
+    this->state.getDiagnostics().error(call->args[0]->loc(), message);
+
+    return ResultChecker(this->state).markCallFailed(call);
   }
   if ((name == "on" || name == "once" || name == "off") &&
       this->state.getLibraryDeclarations().findLibraryFunction("processOn")) {
     return this->checkSignalCall(call, member);
   }
-  if (llvm::is_contained(properties, name)) {
-    this->state.getDiagnostics().error(member->loc(), "'process." + name + "' is not a function");
-  } else {
-    this->state.getDiagnostics().error(member->loc(),
-                                       "'process." + name + "' is not supported yet");
-  }
+  std::string message = llvm::is_contained(properties, name) ? ErrorTextProcessCall::notFunc(name)
+                                                             : ErrorTextProcessCall::notYet(name);
+  this->state.getDiagnostics().error(member->loc(), message);
   checkArgsLoosely();
 
   return call;
+}
+
+ProcessChecker::ResultListenedSignal ProcessChecker::listenedSignal(llvm::StringRef name,
+                                                                    const std::u16string &event) {
+  static const char16_t *const signals[] = {u"SIGINT", u"SIGTERM", u"SIGHUP", u"SIGBREAK"};
+  if (llvm::none_of(signals, [&](const char16_t *s) { return event == s; })) {
+    std::string written = ToUtf8::toUtf8(event);
+    std::string message = ErrorTextProcessCall::signal(name, written);
+
+    return err(ProcessCheckerListenedSignalError{
+        .code = ProcessCheckerListenedSignalErrorCode::NOT_A_SIGNAL,
+        .message = message,
+    });
+  }
+
+  return ok(name);
 }
 
 Expr *ProcessChecker::checkSignalCall(CallExpr *call, MemberExpr *member) {
@@ -217,14 +224,11 @@ Expr *ProcessChecker::checkSignalCall(CallExpr *call, MemberExpr *member) {
     this->state.getDiagnostics().error(member->loc(), arity.error().message);
     return call;
   }
-  static const char16_t *const signals[] = {u"SIGINT", u"SIGTERM", u"SIGHUP", u"SIGBREAK"};
   auto *event = dyn_cast<StringLitExpr>(call->args[0]);
-  if (event && llvm::none_of(signals, [&](const char16_t *s) { return event->value == s; })) {
-    this->state.getDiagnostics().error(event->loc(),
-                                       "'process." + name +
-                                           "' listens only to the signals 'SIGINT', 'SIGTERM', "
-                                           "'SIGHUP' and 'SIGBREAK', not to '" +
-                                           toUtf8(event->value) + "'");
+  ResultListenedSignal listened =
+      event ? ProcessChecker::listenedSignal(name, event->value) : ok(name);
+  if (listened.isErr()) {
+    this->state.getDiagnostics().error(event->loc(), listened.error().message);
     call->args[1] = ExprChecker(this->state).checkExpr(call->args[1]);
     return call;
   }
@@ -259,7 +263,7 @@ Expr *ProcessChecker::checkProcessMember(MemberExpr *member) {
 
   bool isStdout = this->isProcessMember(member->object, "stdout");
   if (isStdout || this->isProcessMember(member->object, "stderr")) {
-    std::string stream = isStdout ? "process.stdout" : "process.stderr";
+    std::string stream = ErrorTextProcessStream::name(isStdout);
     if (name != "isTTY" && name != "columns" && name != "rows" &&
         this->state.getLibraryDeclarations().findLibraryFunction("processStdout")) {
       return nullptr;
@@ -269,15 +273,9 @@ Expr *ProcessChecker::checkProcessMember(MemberExpr *member) {
       fd->type = Type::intTy();
       return this->builtinCall(member->loc(), member, Builtin::ProcessIsTTY, {fd}, Type::boolTy());
     }
-    if (name == "write") {
-      this->state.getDiagnostics().error(
-          member->loc(), "'" + stream + ".write' can only be called: '" + stream + ".write(text)'");
-    } else {
-      this->state.getDiagnostics().error(
-          member->loc(), "'" + stream + "." + name + "' is not supported yet; only " +
-                             "'isTTY', 'write()' and the rest of a Writable of " +
-                             "node:stream are");
-    }
+    std::string message = name == "write" ? ErrorTextProcessMember::writeCall(stream)
+                                          : ErrorTextProcessMember::streamPart(stream, name);
+    this->state.getDiagnostics().error(member->loc(), message);
     member->type = Type::error();
     return member;
   }
@@ -286,14 +284,9 @@ Expr *ProcessChecker::checkProcessMember(MemberExpr *member) {
     return DateChecker(this->state).checkDateStaticMember(member);
   }
   if (CallChecker(this->state).isGlobalName(member->object, "performance")) {
-    if (name == "now") {
-      this->state.getDiagnostics().error(
-          member->loc(), "'performance.now' can only be called: 'performance.now()'");
-    } else {
-      this->state.getDiagnostics().error(member->loc(),
-                                         "'performance." + name +
-                                             "' is not supported yet; only 'performance.now()' is");
-    }
+    std::string message =
+        name == "now" ? ErrorTextProcessMember::perfNow() : ErrorTextProcessMember::perfOther(name);
+    this->state.getDiagnostics().error(member->loc(), message);
     member->type = Type::error();
     return member;
   }
@@ -328,18 +321,11 @@ Expr *ProcessChecker::checkProcessMember(MemberExpr *member) {
                              Type::dict(Type::DictKind::Record, Type::string(), Type::string()));
   }
   member->type = Type::error();
-  if (name == "exit" || name == "cwd" || name == "uptime") {
-    this->state.getDiagnostics().error(member->loc(), "'process." + name +
-                                                          "' can only be called: 'process." + name +
-                                                          (name == "exit" ? "(code)'" : "()'"));
-  } else if (name == "stdout" || name == "stderr") {
-    this->state.getDiagnostics().error(member->loc(),
-                                       "'process." + name + "' can only be used as 'process." +
-                                           name + ".write(text)' or 'process." + name + ".isTTY'");
-  } else {
-    this->state.getDiagnostics().error(member->loc(),
-                                       "'process." + name + "' is not supported yet");
-  }
+  std::string message =
+      name == "exit" || name == "cwd" || name == "uptime" ? ErrorTextProcessMember::onlyCalled(name)
+      : name == "stdout" || name == "stderr"              ? ErrorTextProcessMember::streamUse(name)
+                                                          : ErrorTextProcessCall::notYet(name);
+  this->state.getDiagnostics().error(member->loc(), message);
 
   return member;
 }
@@ -383,14 +369,13 @@ Expr *ProcessChecker::checkProcessAssign(AssignExpr *assign) {
     return nullptr;
   }
   if (isProcess && name == "exitCode") {
-    this->state.getDiagnostics().error(assign->loc(), "only '=' can set 'process.exitCode'");
-  } else if (isProcess) {
-    this->state.getDiagnostics().error(assign->target->loc(),
-                                       "'process." + name + "' cannot be assigned to");
+    std::string message = ErrorTextProcessAssign::exitCode();
+    this->state.getDiagnostics().error(assign->loc(), message);
   } else {
-    this->state.getDiagnostics().error(assign->target->loc(), "'process." +
-                                                                  cast<MemberExpr>(object)->name +
-                                                                  "' cannot be changed");
+    std::string message = isProcess
+                              ? ErrorTextProcessAssign::assigned(name)
+                              : ErrorTextProcessAssign::changed(cast<MemberExpr>(object)->name);
+    this->state.getDiagnostics().error(assign->target->loc(), message);
   }
   assign->value = ExprChecker(this->state).checkExpr(assign->value);
   assign->type = Type::error();

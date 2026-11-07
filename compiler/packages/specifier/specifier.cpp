@@ -2,7 +2,8 @@
 
 namespace tz::pkg {
 
-bool splitPackageSpecifier(llvm::StringRef specifier, std::string &name, std::string &subpath) {
+bool Specifier::splitPackageSpecifier(llvm::StringRef specifier, std::string &name,
+                                      std::string &subpath) {
   llvm::StringRef rest = specifier;
   size_t end = rest.find('/');
   if (rest.starts_with("@")) {
@@ -17,8 +18,8 @@ bool splitPackageSpecifier(llvm::StringRef specifier, std::string &name, std::st
   return !name.empty();
 }
 
-bool splitJsrImport(llvm::StringRef specifier, std::string &package, std::string &source,
-                    std::string &subpath) {
+bool Specifier::splitJsrImport(llvm::StringRef specifier, std::string &package, std::string &source,
+                               std::string &subpath) {
   llvm::StringRef rest = specifier;
   if (!rest.consume_front("jsr:")) {
     return false;

@@ -224,7 +224,8 @@ llvm::Value *BufferCalls::emit() {
         this->lowering.refCounts().dropOperand(value);
         return this->returnSelf(self);
       }
-      llvm::Value *mode = this->lowering.builder_.getInt32(uint32_t(constantOf(call->args[0])));
+      llvm::Value *mode =
+          this->lowering.builder_.getInt32(uint32_t(BytesCallSite::constantOf(call->args[0])));
       if (valueExpr->type->isString()) {
         result = this->lowering.builder_.CreateCall(
             this->fn("tz_buffer_index_of_string", i32, {ptr, ptr, i64, i64, i32, i32, i32}),
@@ -242,7 +243,7 @@ llvm::Value *BufferCalls::emit() {
       }
       this->lowering.refCounts().dropOperand(value);
       this->lowering.refCounts().dropOperand(self);
-      return constantOf(call->args[0]) == 2
+      return BytesCallSite::constantOf(call->args[0]) == 2
                  ? this->lowering.builder_.CreateICmpNE(result, this->lowering.builder_.getInt32(0))
                  : this->lowering.builder_.CreateSExt(result, i64);
     }
@@ -264,7 +265,8 @@ llvm::Value *BufferCalls::emit() {
       Lowering::Operand self = this->receiver(0);
       this->lowering.builder_.CreateCall(
           this->fn("tz_buffer_swap", voidTy, {ptr, i32}),
-          {self.value, this->lowering.builder_.getInt32(uint32_t(constantOf(call->args[0])))});
+          {self.value,
+           this->lowering.builder_.getInt32(uint32_t(BytesCallSite::constantOf(call->args[0])))});
       return this->returnSelf(self);
     }
     case Builtin::BufferToJSON: {

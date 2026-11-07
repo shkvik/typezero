@@ -9,7 +9,7 @@ using llvm::isa;
 
 namespace tz {
 
-std::string dictText(const Expr *expr, const Type *type) {
+std::string DictCheckHelpers::dictText(const Expr *expr, const Type *type) {
   while (auto *conv = dyn_cast<CastExpr>(expr)) {
     if (!conv->isImplicit()) {
       break;

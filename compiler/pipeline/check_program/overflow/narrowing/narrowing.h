@@ -18,6 +18,7 @@ public:
                  const Bound &upper);
 
 private:
+  static std::optional<double> literalValue(const Expr *expr);
   OverflowCheck &check_;
 };
 

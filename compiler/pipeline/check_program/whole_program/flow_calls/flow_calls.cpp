@@ -18,7 +18,8 @@ using llvm::isa;
 
 namespace tz {
 
-FlowCalls::FlowCalls(Flows &flows) : flows_(flows) {}
+FlowCalls::FlowCalls(Flows &owner)
+    : flows(owner) {}
 
 bool FlowCalls::mayCall(const Type *type, const FunctionDecl *fn) const {
   type = type ? type->nonOptional() : nullptr;
@@ -29,25 +30,19 @@ bool FlowCalls::mayCall(const Type *type, const FunctionDecl *fn) const {
   const std::vector<const Type *> &takes = fn->sym->params;
   for (size_t i = 0; i < given.size() && i < takes.size(); ++i) {
     const Type *q = given[i], *p = takes[i];
-    if (!q || !p || mentionsParam(q) || mentionsParam(p) || q->isUnknown() || p->isUnknown() ||
-        q->isError() || p->isError()) {
+    if (!q || !p || TypeQueries::mentionsParam(q) || TypeQueries::mentionsParam(p) ||
+        q->isUnknown() || p->isUnknown() || q->isError() || p->isError()) {
       continue;
     }
     if ((type->hasRest() && i + 1 == given.size()) || (fn->sym->hasRest && i + 1 == takes.size())) {
       continue;
     }
-    if (!flows_.convertible_(q, p)) {
+    if (!this->flows.isConvertible(q, p)) {
       return false;
     }
   }
 
   return true;
-}
-
-void FlowCalls::functionValue(const FunctionDecl *fn) {
-  if (fn && flows_.functionSet_.insert(fn).second) {
-    flows_.functionValues_.push_back(fn);
-  }
 }
 
 Refs FlowCalls::receiverConversion(const Expr *at, const Type *from, const FunctionDecl *method,
@@ -61,14 +56,14 @@ Refs FlowCalls::receiverConversion(const Expr *at, const Type *from, const Funct
   if (from == to || !from->isObject()) {
     return refs;
   }
-  std::vector<Narrowing> found = flows_.narrowings_(from, to);
+  std::vector<Narrowing> found = this->flows.findNarrowings(from, to);
   if (found.empty()) {
     return refs;
   }
-  int conv = flows_.node(NodeKind::Conversion, at, method->name);
-  flows_.conversions.push_back({conv, from, to, at->loc(), std::move(found),
-                                initializes ? flows_.var(initializes) : -1, std::move(role),
-                                llvm::StringRef()});
+  int conv = this->flows.findNode(NodeKind::Conversion, at, method->name);
+  this->flows.addConversion({conv, from, to, at->loc(), std::move(found),
+                             initializes ? this->flows.varNode(initializes) : -1, std::move(role),
+                             llvm::StringRef()});
   Refs out = refs;
   out.push_back({conv, 0, 0});
 
@@ -79,7 +74,7 @@ void FlowCalls::passArguments(const CallExpr *call, const FunctionDecl *target,
                               const std::vector<Refs> &args) {
   if (!target) {
     for (const Refs &a : args) {
-      flows_.escape(a);
+      this->flows.escape(a);
     }
     return;
   }
@@ -88,7 +83,7 @@ void FlowCalls::passArguments(const CallExpr *call, const FunctionDecl *target,
   for (size_t i = 0; i < args.size(); ++i) {
     bool spread = call->spreads(i);
     if (count == 0) {
-      flows_.escape(args[i]);
+      this->flows.escape(args[i]);
       continue;
     }
     size_t k = std::min(i, count - 1);
@@ -97,15 +92,16 @@ void FlowCalls::passArguments(const CallExpr *call, const FunctionDecl *target,
       continue;
     }
     if (rest && k == count - 1) {
-      flows_.flow(spread ? copied(args[i]) : holding(args[i]), flows_.var(param));
+      this->flows.addFlow(spread ? Flows::copied(args[i]) : Flows::holding(args[i]),
+                          this->flows.varNode(param));
     } else if (spread) {
       for (size_t j = k; j < count; ++j) {
         if (const VarSymbol *p = target->params[j].sym) {
-          flows_.flow(shifted(args[i], 1), flows_.var(p));
+          this->flows.addFlow(Flows::shifted(args[i], 1), this->flows.varNode(p));
         }
       }
     } else if (i < count) {
-      flows_.flow(args[i], flows_.var(param));
+      this->flows.addFlow(args[i], this->flows.varNode(param));
     }
   }
 }
@@ -123,9 +119,9 @@ void FlowCalls::passThis(const Refs &receiver, const FunctionDecl *method) {
       continue;
     }
     if (fn->thisVar()) {
-      flows_.flow(receiver, flows_.var(fn->thisVar()));
+      this->flows.addFlow(receiver, this->flows.varNode(fn->thisVar()));
     }
-    for (const FunctionDecl *o : overridersOf(fn)) {
+    for (const FunctionDecl *o : this->overridersOf(fn)) {
       todo.push_back(o);
     }
   }
@@ -157,7 +153,7 @@ Refs FlowCalls::call(CallExpr *c) {
       if (auto *f = llvm::dyn_cast<FunctionExpr>(FlowExprs::ownExpr(arg))) {
         for (size_t i = 0; i < f->fn->params.size(); ++i) {
           if (const VarSymbol *p = f->fn->params[i].sym) {
-            flows_.runtimeFunctions_.insert(p);
+            this->flows.markRuntimeFunction(p);
           }
         }
       }
@@ -169,23 +165,22 @@ Refs FlowCalls::call(CallExpr *c) {
   bool superCtor = false;
   auto *callee = llvm::dyn_cast_or_null<NameExpr>(c->callee);
   if (member) {
-    receiver = flows_.flowExprs().expr(member->object);
+    receiver = this->flows.getFlowExprs().expr(member->object);
     receiverType = member->object->type;
   } else if (callee && callee->name == "super") {
-    receiver = flows_.flowStmts().name(callee);
-    receiverType =
-        flows_.flowStmts().currentThis() ? flows_.flowStmts().currentThis()->type : nullptr;
+    receiver = this->flows.getFlowStmts().name(callee);
+    receiverType = this->flows.findCurrentThis() ? this->flows.findCurrentThis()->type : nullptr;
     superCtor = true;
   } else if (!callee || !(callee->func() || (callee->var() && callee->var()->lambda()))) {
-    flows_.flowExprs().expr(c->callee);
+    this->flows.getFlowExprs().expr(c->callee);
   }
   std::vector<Refs> args;
   for (Expr *arg : c->args) {
-    args.push_back(flows_.flowExprs().expr(arg));
+    args.push_back(this->flows.getFlowExprs().expr(arg));
   }
 
   if (c->builtin() != Builtin::None) {
-    return flows_.flowBuiltins().builtin(c, member, receiver, args);
+    return this->flows.getFlowBuiltins().builtin(c, member, receiver, args);
   }
 
   const FunctionDecl *target = c->func() && c->func()->decl       ? c->func()->decl
@@ -197,20 +192,20 @@ Refs FlowCalls::call(CallExpr *c) {
     }
   }
   if (!target) {
-    int result = flows_.node(NodeKind::CallResult, c, "");
-    flows_.valueCalls_.push_back({c, args, result});
-    if ((callee && callee->var() && flows_.runtimeFunctions_.count(callee->var())) ||
+    int result = this->flows.findNode(NodeKind::CallResult, c, "");
+    this->flows.rememberValueCall({c, args, result});
+    if ((callee && callee->var() && this->flows.isRuntimeFunction(callee->var())) ||
         (member && member->name == "resolve")) {
       for (size_t i = 0; i < args.size(); ++i) {
-        flows_.escape(args[i]);
+        this->flows.escape(args[i]);
         if (const Type *value = c->args[i]->type; value && !value->isVoid()) {
-          flows_.flow(args[i], flows_.contents(Type::promise(value)));
+          this->flows.addFlow(args[i], this->flows.contentsNode(Type::promise(value)));
         }
       }
     }
     return {{result, 0, 0}};
   }
-  passArguments(c, target, args);
+  this->passArguments(c, target, args);
   if (target->takesThis() && (member || superCtor)) {
     const VarSymbol *initializes = nullptr;
     std::string role =
@@ -219,11 +214,11 @@ Refs FlowCalls::call(CallExpr *c) {
     if (superCtor && target->isConstructor()) {
       initializes = target->thisVar();
     }
-    Refs self = receiverConversion(c, receiverType, target, receiver, initializes, role);
-    passThis(self, target);
+    Refs self = this->receiverConversion(c, receiverType, target, receiver, initializes, role);
+    this->passThis(self, target);
   }
 
-  return {{flows_.returned(target), 0, 0}};
+  return {{this->flows.returnNode(target), 0, 0}};
 }
 
 void FlowCalls::callback(const Expr *arg, const Refs &values) {
@@ -238,7 +233,7 @@ void FlowCalls::callback(const Expr *arg, const Refs &values) {
   }
   for (const Param &p : fn->params) {
     if (p.sym) {
-      flows_.flow(values, flows_.var(p.sym));
+      this->flows.addFlow(values, this->flows.varNode(p.sym));
     }
   }
 }

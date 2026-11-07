@@ -41,7 +41,9 @@ Expr *RegexFeature::methodReceiver(CheckState &state, Expr *object) const {
   return MatchChecker(state).matchItems(object);
 }
 
-bool RegexFeature::lowers(Builtin builtin) const { return isRegexBuiltin(builtin); }
+bool RegexFeature::lowers(Builtin builtin) const {
+  return BuiltinGroups::isRegexBuiltin(builtin);
+}
 
 llvm::Value *RegexFeature::lowerCall(Lowering &lowering, CallExpr *call) const {
   return lowering.regexLowerer().emitRegexCall(call);

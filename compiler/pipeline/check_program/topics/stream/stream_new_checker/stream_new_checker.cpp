@@ -53,6 +53,20 @@ struct StreamOptionFlags {
 StreamNewChecker::StreamNewChecker(CheckState &owner)
     : state(owner) {}
 
+StreamNewChecker::ResultConcreteStream
+StreamNewChecker::concreteStream(llvm::StringRef name, bool readable, bool writable) {
+  if (name != "PassThrough") {
+    std::string message = ErrorTextStreamNew::abstract(name, readable, writable);
+
+    return err(StreamNewCheckerConcreteStreamError{
+        .code = StreamNewCheckerConcreteStreamErrorCode::ABSTRACT_STREAM,
+        .message = message,
+    });
+  }
+
+  return ok(name);
+}
+
 Expr *StreamNewChecker::checkStreamNew(NewExpr *expr, ClassDecl *generic, const Type *expected) {
   llvm::StringRef name = generic->name;
   bool readable = name == "Readable";
@@ -64,24 +78,9 @@ Expr *StreamNewChecker::checkStreamNew(NewExpr *expr, ClassDecl *generic, const 
   if (LibraryCalls(this->state).inLibrary(expr->loc())) {
     return nullptr;
   }
-  if (name != "PassThrough") {
-    llvm::StringRef hook = readable           ? "onRead"
-                           : writable         ? "onWrite"
-                           : name == "Duplex" ? "onRead' and 'onWrite"
-                                              : "onTransform";
-    std::string example = readable   ? "class Lines extends Readable<string> { protected onRead() "
-                                       "{ ... } }"
-                          : writable ? "class Sink extends Writable<string> { protected "
-                                       "onWrite(chunk, encoding, callback) { ... } }"
-                                     : "class Upper extends " + name.str() + "<string> { ... }";
-    this->state.getDiagnostics().error(
-        expr->loc(), "'" + name.str() +
-                         "' is abstract: write a class that extends it and "
-                         "puts its work in '" +
-                         hook.str() + "', e.g. '" + example + "'" +
-                         (readable ? "; for a stream of values you already have, use "
-                                     "'Readable.from(values)'"
-                                   : ""));
+  ResultConcreteStream concrete = StreamNewChecker::concreteStream(name, readable, writable);
+  if (concrete.isErr()) {
+    this->state.getDiagnostics().error(expr->loc(), concrete.error().message);
     expr->type = Type::error();
     for (Expr *&arg : expr->args) {
       arg = ExprChecker(this->state).checkExpr(arg);
@@ -114,11 +113,8 @@ Expr *StreamNewChecker::checkStreamNew(NewExpr *expr, ClassDecl *generic, const 
     if (fallback) {
       return fallback;
     }
-    this->state.getDiagnostics().error(
-        expr->loc(),
-        "cannot infer the type of the " + what.str() + " of this object-mode " + name.str() +
-            ": no code of the program " + (key == "R" ? "pushes into it" : "writes to it") +
-            "; give the type, e.g. 'new " + name.str() + "<User>({ " + "objectMode: true, ... })'");
+    std::string message = ErrorTextStreamNew::untyped(what, name, key == "R");
+    this->state.getDiagnostics().error(expr->loc(), message);
 
     return nullptr;
   };
@@ -133,13 +129,14 @@ Expr *StreamNewChecker::checkStreamNew(NewExpr *expr, ClassDecl *generic, const 
   };
   bool writableObjects = objectMode || options.flag("writableObjectMode") == 1;
   bool readableObjects = objectMode || options.flag("readableObjectMode") == 1;
-  const Type *w =
-      side(writableObjects, options.flag("decodeStrings") == 0, "W", nullptr, "written chunks");
+  std::string written = ErrorTextStreamSide::written();
+  const Type *w = side(writableObjects, options.flag("decodeStrings") == 0, "W", nullptr, written);
   if (!w) {
     return failed();
   }
-  const Type *r = side(readableObjects, options.has("encoding"), "R", writableObjects ? w : nullptr,
-                       "chunks it gives");
+  std::string given = ErrorTextStreamSide::given();
+  const Type *r =
+      side(readableObjects, options.has("encoding"), "R", writableObjects ? w : nullptr, given);
   if (!r) {
     return failed();
   }

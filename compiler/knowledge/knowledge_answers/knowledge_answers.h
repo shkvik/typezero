@@ -27,6 +27,8 @@ public:
   llvm::json::Value impactJson(const std::vector<size_t> &symbols) const;
 
 private:
+  static std::string joined(const std::vector<std::string> &parts);
+  static std::string uses(size_t count);
   std::string title(size_t symbol) const;
   std::string fromText(size_t from, size_t module) const;
   llvm::json::Object symbolJson(size_t symbol) const;

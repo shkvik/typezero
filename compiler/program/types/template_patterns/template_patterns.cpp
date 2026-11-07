@@ -19,7 +19,7 @@
 
 namespace tz {
 
-static std::string utf8Text(const std::u16string &text) {
+std::string TemplatePatterns::utf8Text(const std::u16string &text) {
   std::string utf8;
   llvm::convertUTF16ToUTF8String(
       llvm::ArrayRef<llvm::UTF16>(reinterpret_cast<const llvm::UTF16 *>(text.data()), text.size()),
@@ -28,8 +28,9 @@ static std::string utf8Text(const std::u16string &text) {
   return utf8;
 }
 
-bool splitByTemplate(const std::u16string &text, llvm::ArrayRef<std::u16string> texts,
-                     std::vector<std::u16string> &parts) {
+bool TemplatePatterns::splitByTemplate(const std::u16string &text,
+                                       llvm::ArrayRef<std::u16string> texts,
+                                       std::vector<std::u16string> &parts) {
   const std::u16string &start = texts.front(), &end = texts.back();
   if (text.size() < start.size() + end.size() || text.compare(0, start.size(), start) != 0 ||
       text.compare(text.size() - end.size(), end.size(), end) != 0) {
@@ -59,7 +60,7 @@ bool splitByTemplate(const std::u16string &text, llvm::ArrayRef<std::u16string> 
   return true;
 }
 
-bool numberString(const std::u16string &text, double &value) {
+bool TemplatePatterns::numberString(const std::u16string &text, double &value) {
   auto space = [](char16_t c) {
     return c == ' ' || (c >= '\t' && c <= '\r') || c == 0xa0 || c == 0x1680 ||
            (c >= 0x2000 && c <= 0x200a) || c == 0x2028 || c == 0x2029 || c == 0x202f ||
@@ -140,32 +141,34 @@ bool numberString(const std::u16string &text, double &value) {
   return std::isfinite(value);
 }
 
-bool holeAccepts(const Type *hole, const std::u16string &part) {
+bool TemplatePatterns::holeAccepts(const Type *hole, const std::u16string &part) {
   double value = 0;
   switch (hole->kind()) {
   case Type::Kind::String:
-    return !hole->isPattern() || matchesPattern(part, hole);
+    return !hole->isPattern() || TemplatePatterns::matchesPattern(part, hole);
   case Type::Kind::Double:
-    return numberString(part, value);
+    return TemplatePatterns::numberString(part, value);
   case Type::Kind::Int:
-    return numberString(part, value) && value == std::trunc(value) &&
+    return TemplatePatterns::numberString(part, value) && value == std::trunc(value) &&
            value >= double(hole->intMin()) && value <= double(hole->intMax());
   case Type::Kind::Literal:
-    return hole->isStringLiteral() ? part == hole->literalText() : utf8Text(part) == hole->name();
+    return hole->isStringLiteral() ? part == hole->literalText()
+                                   : TemplatePatterns::utf8Text(part) == hole->name();
   case Type::Kind::Union:
-    return llvm::any_of(hole->members(), [&](const Type *m) { return holeAccepts(m, part); });
+    return llvm::any_of(hole->members(),
+                        [&](const Type *m) { return TemplatePatterns::holeAccepts(m, part); });
   default:
     return false;
   }
 }
 
-bool matchesPattern(const std::u16string &text, const Type *pattern) {
+bool TemplatePatterns::matchesPattern(const std::u16string &text, const Type *pattern) {
   std::vector<std::u16string> parts;
-  if (!splitByTemplate(text, pattern->patternTexts(), parts)) {
+  if (!TemplatePatterns::splitByTemplate(text, pattern->patternTexts(), parts)) {
     return false;
   }
   for (size_t i = 0; i < parts.size(); ++i) {
-    if (!holeAccepts(pattern->patternHoles()[i], parts[i])) {
+    if (!TemplatePatterns::holeAccepts(pattern->patternHoles()[i], parts[i])) {
       return false;
     }
   }

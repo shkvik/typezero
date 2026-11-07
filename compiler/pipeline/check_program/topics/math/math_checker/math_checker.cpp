@@ -19,6 +19,34 @@ using llvm::isa;
 
 namespace tz {
 
+MathChecker::ResultWrapBitsWidth MathChecker::wrapBitsWidth(llvm::StringRef name) {
+  unsigned bits = name == "Wrap32" ? 32 : name == "Wrap64" ? 64 : 0;
+  if (!bits) {
+    std::string message = ErrorTextBit::noMember(name);
+
+    return err(MathCheckerWrapBitsWidthError{
+        .code = MathCheckerWrapBitsWidthErrorCode::NO_MEMBER,
+        .message = message,
+    });
+  }
+
+  return ok(bits);
+}
+
+MathChecker::ResultRoundedDouble MathChecker::roundedDouble(llvm::StringRef name,
+                                                            const Type *type) {
+  if (type->isInteger()) {
+    std::string message = ErrorTextMath::rounding(name, type->name());
+
+    return err(MathCheckerRoundedDoubleError{
+        .code = MathCheckerRoundedDoubleErrorCode::NO_FRACTION,
+        .message = message,
+    });
+  }
+
+  return ok(type);
+}
+
 MathChecker::MathChecker(CheckState &owner)
     : state(owner) {}
 
@@ -26,14 +54,7 @@ Expr *MathChecker::numericArg(Expr *arg, const Type *hint) {
   arg = GenericChecker(this->state).apparent(ExprChecker(this->state).checkExpr(arg, hint));
   const Type *type = arg->type;
   if (!type->isNumeric() && !type->isError()) {
-    std::string message = "argument of type '" + type->name().str() +
-                          "' is not assignable to parameter of type 'double'";
-    if (type->isOptional() && type->inner()->isNumeric()) {
-      message += "; the value may be undefined: check it first or give a default with '??'";
-    } else if (type->isDecimal()) {
-      message += "; convert it with 'Number(x)', or use what decimals have: 'x.abs()', 'x.sqrt()', "
-                 "'x.round()', 'decimal.max(a, b)'...";
-    }
+    std::string message = ErrorTextMathArg::notDouble(type);
     this->state.getDiagnostics().error(arg->loc(), message);
   }
 
@@ -84,13 +105,11 @@ Expr *MathChecker::checkMathCall(CallExpr *call, MemberExpr *member, const Type 
     }
   }
   if (!fn) {
-    if (ConstantFolder(this->state).globalConstant("Math", member->name, member->loc())) {
-      this->state.getDiagnostics().error(member->loc(),
-                                         "'Math." + member->name + "' is a number, not a function");
-    } else {
-      this->state.getDiagnostics().error(member->loc(), "property '" + member->name +
-                                                            "' does not exist on 'Math'");
-    }
+    std::string message =
+        ConstantFolder(this->state).globalConstant("Math", member->name, member->loc())
+            ? ErrorTextMath::constant(member->name)
+            : ErrorTextMath::noMember(member->name);
+    this->state.getDiagnostics().error(member->loc(), message);
     for (Expr *&arg : call->args) {
       arg = ExprChecker(this->state).checkExpr(arg);
     }
@@ -106,10 +125,8 @@ Expr *MathChecker::checkMathCall(CallExpr *call, MemberExpr *member, const Type 
     return call;
   }
   if (fn->kind == MinMax && call->args.empty()) {
-    this->state.getDiagnostics().error(
-        call->loc(), "'Math." + member->name + "()' without values gives " +
-                         (member->name == "max" ? "-" : "") +
-                         "Infinity; pass the values, e.g. 'Math." + member->name + "(...xs)'");
+    std::string message = ErrorTextMath::noValues(member->name);
+    this->state.getDiagnostics().error(call->loc(), message);
     return call;
   }
 
@@ -141,11 +158,9 @@ Expr *MathChecker::checkMathCall(CallExpr *call, MemberExpr *member, const Type 
 
   switch (fn->kind) {
   case Rounding:
-    if (call->args[0]->type->isInteger()) {
-      this->state.getDiagnostics().error(
-          call->args[0]->loc(), "'Math." + member->name + "' rounds a double, and this is '" +
-                                    call->args[0]->type->name() +
-                                    "', which has no fraction: '/' of integers already drops it");
+    if (ResultRoundedDouble rounded = MathChecker::roundedDouble(member->name, call->args[0]->type);
+        rounded.isErr()) {
+      this->state.getDiagnostics().error(call->args[0]->loc(), rounded.error().message);
       return call;
     }
     call->type = Type::doubleTy();
@@ -213,11 +228,9 @@ const Type *MathChecker::sharedType(std::vector<Expr *> &args, const std::vector
       args[i] = TypeRelations(this->state).adaptLiteral(args[i], common);
       continue;
     }
-    this->state.getDiagnostics().error(
-        args[i]->loc(), "the values of 'Math.min', 'Math.max' and 'Math.clamp' must have one "
-                        "type; found '" +
-                            common->name().str() + "' and '" + args[i]->type->name().str() + "'" +
-                            TypeRelations::conversionHint(args[i], common));
+    std::string hint = TypeRelations::conversionHint(args[i], common);
+    std::string message = ErrorTextMath::oneType(common->name(), args[i]->type->name(), hint);
+    this->state.getDiagnostics().error(args[i]->loc(), message);
     return nullptr;
   }
 
@@ -246,15 +259,12 @@ Expr *MathChecker::bitsArg(Expr *arg, unsigned bits, const Type *literal, const 
   if (literal && TypeRelations(this->state).literalAdapts(arg, Type::integer(bits, true))) {
     return TypeRelations(this->state).adaptLiteral(arg, Type::integer(bits, true));
   }
-  std::string names = bits == 32 ? "int32, uint32 or Bit.Wrap32" : "int, uint64 or Bit.Wrap64";
-  std::string message = "'" + what + "' takes a " + std::to_string(bits) + "-bit integer (" +
-                        names + "), found '" + type->name().str() + "'";
-  if (type->isInteger()) {
-    message += TypeRelations::conversionHint(arg, Type::integer(bits, true));
-  } else if (type->isFloat()) {
-    message += "; drop the fraction first, e.g. 'Math.trunc(x)." +
-               TypeRelations::conversionMethod(Type::integer(bits, true)) + "()'";
-  }
+  std::string method = TypeRelations::conversionMethod(Type::integer(bits, true));
+  std::string hint = type->isInteger()
+                         ? TypeRelations::conversionHint(arg, Type::integer(bits, true))
+                     : type->isFloat() ? ErrorTextMathArg::trunc(method)
+                                       : std::string();
+  std::string message = ErrorTextMathArg::bits(what, bits, type->name(), hint);
   this->state.getDiagnostics().error(arg->loc(), message);
   arg->type = Type::error();
 
@@ -271,16 +281,15 @@ Expr *MathChecker::checkBitCall(CallExpr *call, MemberExpr *member) {
     return call;
   };
   if (auto *inner = dyn_cast<MemberExpr>(member->object)) {
-    unsigned bits = inner->name == "Wrap32" ? 32 : inner->name == "Wrap64" ? 64 : 0;
-    if (!bits) {
-      this->state.getDiagnostics().error(inner->loc(),
-                                         "property '" + inner->name + "' does not exist on 'Bit'");
+    ResultWrapBitsWidth width = MathChecker::wrapBitsWidth(inner->name);
+    if (width.isErr()) {
+      this->state.getDiagnostics().error(inner->loc(), width.error().message);
       return loosely();
     }
+    unsigned bits = width.value();
     if (member->name != "from") {
-      this->state.getDiagnostics().error(member->loc(), "'Bit." + inner->name +
-                                                            "' has only 'from': 'Bit." +
-                                                            inner->name + ".from(x)'");
+      std::string message = ErrorTextBit::onlyFrom(inner->name);
+      this->state.getDiagnostics().error(member->loc(), message);
       return loosely();
     }
     ArgumentChecker::ResultArityMatches arity = ArgumentChecker(this->state).checkArity(call, 1, 1);
@@ -292,9 +301,8 @@ Expr *MathChecker::checkBitCall(CallExpr *call, MemberExpr *member) {
     arg = ExprChecker(this->state).checkExpr(arg);
     if (!arg->type->isInteger()) {
       if (!arg->type->isError()) {
-        this->state.getDiagnostics().error(arg->loc(), "'Bit." + inner->name +
-                                                           ".from' takes an integer, found '" +
-                                                           arg->type->name() + "'");
+        std::string message = ErrorTextBit::fromInt(inner->name, arg->type->name());
+        this->state.getDiagnostics().error(arg->loc(), message);
       }
       return call;
     }
@@ -332,8 +340,8 @@ Expr *MathChecker::checkBitCall(CallExpr *call, MemberExpr *member) {
     }
   }
   if (!fn) {
-    this->state.getDiagnostics().error(member->loc(),
-                                       "property '" + member->name + "' does not exist on 'Bit'");
+    std::string message = ErrorTextBit::noMember(member->name);
+    this->state.getDiagnostics().error(member->loc(), message);
     return loosely();
   }
   bool rejected = CallChecker(this->state).rejectSpread(call);
@@ -345,7 +353,7 @@ Expr *MathChecker::checkBitCall(CallExpr *call, MemberExpr *member) {
   if (rejected || arity.isErr()) {
     return call;
   }
-  std::string what = "Bit." + member->name.str();
+  std::string what = ErrorTextBit::label(member->name);
   bool wide = fn->builtin == Builtin::BitMul64 || fn->builtin == Builtin::BitAdd64 ||
               fn->builtin == Builtin::BitSub64;
   const Type *u64 = Type::integer(64, true);
@@ -357,9 +365,9 @@ Expr *MathChecker::checkBitCall(CallExpr *call, MemberExpr *member) {
         return call;
       }
       if (arg->type != u64 && !arg->type->isWrapping()) {
-        this->state.getDiagnostics().error(arg->loc(), "'" + what + "' takes a 'uint64', found '" +
-                                                           arg->type->name() + "'" +
-                                                           TypeRelations::conversionHint(arg, u64));
+        std::string hint = TypeRelations::conversionHint(arg, u64);
+        std::string message = ErrorTextBit::uint64(what, arg->type->name(), hint);
+        this->state.getDiagnostics().error(arg->loc(), message);
         return call;
       }
       arg = TypeRelations(this->state).convert(arg, u64);
@@ -381,9 +389,8 @@ Expr *MathChecker::checkBitCall(CallExpr *call, MemberExpr *member) {
     call->args[1] = ExprChecker(this->state).checkExpr(call->args[1]);
     if (!call->args[1]->type->isInteger()) {
       if (!call->args[1]->type->isError()) {
-        this->state.getDiagnostics().error(call->args[1]->loc(),
-                                           "the count of '" + what + "' is an integer, found '" +
-                                               call->args[1]->type->name() + "'");
+        std::string message = ErrorTextBit::count(what, call->args[1]->type->name());
+        this->state.getDiagnostics().error(call->args[1]->loc(), message);
       }
       return call;
     }
@@ -421,9 +428,8 @@ Expr *MathChecker::checkMinMaxSpread(CallExpr *call, const Type *hint) {
       }
       type = arg->type->isArray() ? arg->type->inner() : arg->type;
       if (!arg->type->isError() && (!arg->type->isArray() || !type->isNumeric())) {
-        this->state.getDiagnostics().error(arg->loc(),
-                                           "only an array of numbers can be spread here, found '" +
-                                               arg->type->name() + "'");
+        std::string message = ErrorTextMath::spread(arg->type->name());
+        this->state.getDiagnostics().error(arg->loc(), message);
         ok = false;
       }
       someValue |= IndexProofs(this->state).provesNotEmpty(arg);
@@ -435,11 +441,9 @@ Expr *MathChecker::checkMinMaxSpread(CallExpr *call, const Type *hint) {
     ok &= type->isNumeric();
     if (ok && call->spreads(i)) {
       if (common && common != type) {
-        this->state.getDiagnostics().error(
-            arg->loc(), "the values of 'Math." +
-                            std::string(call->builtin() == Builtin::MathMin ? "min" : "max") +
-                            "' must have one type; found '" + common->name().str() + "' and '" +
-                            type->name().str() + "'");
+        std::string message = ErrorTextMath::spreadType(call->builtin() == Builtin::MathMin,
+                                                        common->name(), type->name());
+        this->state.getDiagnostics().error(arg->loc(), message);
         return call;
       }
       common = type;

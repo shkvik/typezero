@@ -15,7 +15,8 @@ using llvm::dyn_cast;
 
 using llvm::isa;
 
-void forEachOverride(const FunctionDecl *fn, llvm::function_ref<void(const FunctionDecl *)> visit) {
+void StoreScanner::forEachOverride(const FunctionDecl *fn,
+                                   llvm::function_ref<void(const FunctionDecl *)> visit) {
   if (!fn->isAbstract()) {
     visit(fn);
   }

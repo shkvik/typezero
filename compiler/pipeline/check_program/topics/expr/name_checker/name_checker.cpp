@@ -8,6 +8,7 @@
 #include "compiler/pipeline/check_program/topics/classes/class_checker/class_checker.h"
 #include "compiler/pipeline/check_program/topics/classes/class_value_checker/class_value_checker.h"
 #include "compiler/pipeline/check_program/topics/decimal/decimal_checker/decimal_checker.h"
+#include "compiler/pipeline/check_program/topics/decimal/decimal_checker/decimal_checker_errors.h"
 #include "compiler/pipeline/check_program/topics/expr/call_checker/call_checker_errors.h"
 #include "compiler/pipeline/check_program/topics/expr/new_checker/new_checker_errors.h"
 #include "compiler/pipeline/check_program/topics/functions/nested_functions/nested_functions.h"
@@ -133,7 +134,9 @@ NameChecker::ResultResolvedNameUse NameChecker::unknownName(NameExpr *name,
     });
   }
   if (name->name == "BigInt") {
-    DecimalChecker(this->state).reportBigInt(name->loc(), "'BigInt'");
+    std::string quoted = ErrorTextBigInt::quoted("BigInt");
+    std::string bigint = ErrorTextBigInt::none(quoted);
+    this->state.getDiagnostics().error(name->loc(), bigint);
 
     return err(NameCheckerUnknownNameError{
         .code = NameCheckerUnknownNameErrorCode::ALREADY_REPORTED,

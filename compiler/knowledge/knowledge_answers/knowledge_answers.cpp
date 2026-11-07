@@ -32,7 +32,13 @@ private:
   size_t left_;
 };
 
-std::string joined(const std::vector<std::string> &parts) {
+}
+
+KnowledgeAnswers::KnowledgeAnswers(const Knowledge &knowledge, ProjectText &text)
+    : knowledge_(knowledge),
+      text_(text) {}
+
+std::string KnowledgeAnswers::joined(const std::vector<std::string> &parts) {
   std::string out;
   for (const std::string &part : parts) {
     out += (out.empty() ? "" : ", ") + part;
@@ -41,12 +47,9 @@ std::string joined(const std::vector<std::string> &parts) {
   return out;
 }
 
-std::string uses(size_t count) { return count == 1 ? "1 use" : std::to_string(count) + " uses"; }
-
+std::string KnowledgeAnswers::uses(size_t count) {
+  return count == 1 ? "1 use" : std::to_string(count) + " uses";
 }
-
-KnowledgeAnswers::KnowledgeAnswers(const Knowledge &knowledge, ProjectText &text)
-    : knowledge_(knowledge), text_(text) {}
 
 std::string KnowledgeAnswers::title(size_t symbol) const {
   return knowledge_.symbols[symbol].kind + " " + knowledge_.qualified(symbol);
@@ -128,7 +131,7 @@ std::string KnowledgeAnswers::map(size_t tokens, bool library) const {
   }
   budget.take(out, header);
   if (!builtins.empty() && !library) {
-    budget.take(out, "built-in modules: " + joined(builtins));
+    budget.take(out, "built-in modules: " + KnowledgeAnswers::joined(builtins));
   }
 
   std::vector<size_t> problems(knowledge_.modules.size(), 0);
@@ -160,7 +163,7 @@ std::string KnowledgeAnswers::map(size_t tokens, bool library) const {
       std::vector<std::string> some(module.specifiers.begin(),
                                     module.specifiers.begin() +
                                         std::min<size_t>(module.specifiers.size(), 6));
-      text += "; imports " + joined(some);
+      text += "; imports " + KnowledgeAnswers::joined(some);
       if (module.specifiers.size() > some.size()) {
         text += " and " + std::to_string(module.specifiers.size() - some.size()) + " more";
       }
@@ -171,7 +174,7 @@ std::string KnowledgeAnswers::map(size_t tokens, bool library) const {
       for (size_t importer : llvm::ArrayRef(importers).take_front(6)) {
         some.push_back(knowledge_.modules[importer].name);
       }
-      text += "; imported by " + joined(some);
+      text += "; imported by " + KnowledgeAnswers::joined(some);
       if (importers.size() > some.size()) {
         text += " and " + std::to_string(importers.size() - some.size()) + " more";
       }
@@ -204,7 +207,7 @@ std::string KnowledgeAnswers::map(size_t tokens, bool library) const {
     }
     text += known.signature.empty() ? title(symbol) : known.signature;
 
-    return text + "  - " + uses(knowledge_.useCount(symbol)) + ", line " +
+    return text + "  - " + KnowledgeAnswers::uses(knowledge_.useCount(symbol)) + ", line " +
            std::to_string(known.place.line + 1);
   };
   std::vector<std::pair<double, size_t>> candidates;
@@ -265,7 +268,8 @@ std::string KnowledgeAnswers::map(size_t tokens, bool library) const {
       rest.push_back(knowledge_.modules[m].name);
     }
     out += "\n... " + std::to_string(shown.size() - listed.size()) + " more modules (" +
-           joined(rest) + (shown.size() - listed.size() > rest.size() ? ", ..." : "") +
+           KnowledgeAnswers::joined(rest) +
+           (shown.size() - listed.size() > rest.size() ? ", ..." : "") +
            "); raise --budget, or ask for one with context\n";
   }
 
@@ -384,8 +388,9 @@ std::string KnowledgeAnswers::context(const std::vector<size_t> &symbols, size_t
       budget.take(out, "members:");
       for (size_t member : members) {
         const KnownSymbol &part = knowledge_.symbols[member];
-        if (!budget.take(out, "  " + part.signature + "  - " + uses(knowledge_.useCount(member)) +
-                                  ", line " + std::to_string(part.place.line + 1))) {
+        if (!budget.take(out, "  " + part.signature + "  - " +
+                                  KnowledgeAnswers::uses(knowledge_.useCount(member)) + ", line " +
+                                  std::to_string(part.place.line + 1))) {
           break;
         }
       }
@@ -416,9 +421,10 @@ std::string KnowledgeAnswers::context(const std::vector<size_t> &symbols, size_t
       budget.take(out, "used by (" + std::to_string(references.size()) + "):");
       size_t listed = 0;
       for (size_t reference : references) {
-        const KnownReference &known = knowledge_.references[reference];
-        if (!budget.take(out, "  " + knowledge_.where(known.place) + " in " +
-                                  fromText(known.from, known.module) + " - " + known.line)) {
+        const KnownReference &referrer = knowledge_.references[reference];
+        if (!budget.take(out, "  " + knowledge_.where(referrer.place) + " in " +
+                                  fromText(referrer.from, referrer.module) + " - " +
+                                  referrer.line)) {
           break;
         }
         ++listed;
@@ -448,7 +454,8 @@ std::string KnowledgeAnswers::context(const std::vector<size_t> &symbols, size_t
         rest.consume_front(text_.root());
         names.push_back(llvm::sys::path::convert_to_slash(rest.ltrim("/\\")));
       }
-      budget.take(out, "tests that mention '" + known.name + "' (by text): " + joined(names));
+      budget.take(out, "tests that mention '" + known.name +
+                           "' (by text): " + KnowledgeAnswers::joined(names));
     }
   }
 
@@ -667,8 +674,9 @@ std::string KnowledgeAnswers::impact(const std::vector<size_t> &symbols, size_t 
   for (const std::vector<size_t> &level : levels) {
     total += level.size();
   }
-  budget.take(out, "changing " + joined(targets) + " can affect " + std::to_string(total) +
-                       " symbols in " + std::to_string(modules.size()) + " modules");
+  budget.take(out, "changing " + KnowledgeAnswers::joined(targets) + " can affect " +
+                       std::to_string(total) + " symbols in " + std::to_string(modules.size()) +
+                       " modules");
   std::vector<std::string> exported;
   for (size_t i = 0; i < levels.size(); ++i) {
     budget.take(out, "level " + std::to_string(i + 1) +
@@ -692,9 +700,9 @@ std::string KnowledgeAnswers::impact(const std::vector<size_t> &symbols, size_t 
   for (size_t m : modules) {
     names.push_back(knowledge_.modules[m].name);
   }
-  budget.take(out, "modules: " + joined(names));
+  budget.take(out, "modules: " + KnowledgeAnswers::joined(names));
   if (!exported.empty()) {
-    budget.take(out, "exported among them: " + joined(exported));
+    budget.take(out, "exported among them: " + KnowledgeAnswers::joined(exported));
   }
 
   return out;

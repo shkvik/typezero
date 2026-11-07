@@ -5,11 +5,11 @@
 
 namespace tz {
 
-namespace {
+std::string SymbolText::typeName(const Type *type) {
+  return type ? type->name().str() : "?";
+}
 
-std::string typeName(const Type *type) { return type ? type->name().str() : "?"; }
-
-std::string modifiers(Access access, bool isStatic) {
+std::string SymbolText::modifiers(Access access, bool isStatic) {
   std::string text;
   if (access == Access::Private) {
     text += "private ";
@@ -23,31 +23,36 @@ std::string modifiers(Access access, bool isStatic) {
   return text;
 }
 
-bool opens(char c) { return c == '(' || c == '[' || c == '{'; }
+bool SymbolText::opens(char c) {
+  return c == '(' || c == '[' || c == '{';
+}
 
-bool closes(char c) { return c == ')' || c == ']' || c == '}'; }
+bool SymbolText::closes(char c) {
+  return c == ')' || c == ']' || c == '}';
+}
 
-bool continues(char c) {
+bool SymbolText::continues(char c) {
   return c == '|' || c == '&' || c == '.' || c == '=' || c == '?' || c == ':' || c == ',' ||
          c == '+' || c == '-' || c == '*' || c == '/' || c == '>';
 }
 
-bool word(char c) { return std::isalnum(static_cast<unsigned char>(c)) || c == '_' || c == '$'; }
+bool SymbolText::word(char c) {
+  return std::isalnum(static_cast<unsigned char>(c)) || c == '_' || c == '$';
+}
 
-bool endsMember(const std::string &out) {
+bool SymbolText::endsMember(const std::string &out) {
   char last = out.back();
   if (last == '>') {
     return out.size() < 2 || out[out.size() - 2] != '=';
   }
 
-  return word(last) || last == ')' || last == ']' || last == '"' || last == '\'' || last == '`';
+  return SymbolText::word(last) || last == ')' || last == ']' || last == '"' || last == '\'' ||
+         last == '`';
 }
 
-bool startsMember(char c) {
+bool SymbolText::startsMember(char c) {
   return std::isalpha(static_cast<unsigned char>(c)) || c == '_' || c == '$' || c == '"' ||
          c == '\'';
-}
-
 }
 
 std::string SymbolText::collapse(llvm::StringRef text, size_t limit) {
@@ -61,7 +66,7 @@ std::string SymbolText::collapse(llvm::StringRef text, size_t limit) {
       continue;
     }
     if (space) {
-      if (broke && endsMember(out) && startsMember(c)) {
+      if (broke && SymbolText::endsMember(out) && SymbolText::startsMember(c)) {
         out.push_back(';');
       }
       out.push_back(' ');
@@ -104,9 +109,9 @@ const char *SymbolText::statementEnd(const char *at, const char *end) {
       }
       continue;
     }
-    if (opens(c)) {
+    if (SymbolText::opens(c)) {
       ++depth;
-    } else if (closes(c)) {
+    } else if (SymbolText::closes(c)) {
       --depth;
       if (depth < 0) {
         return at;
@@ -127,8 +132,8 @@ const char *SymbolText::statementEnd(const char *at, const char *end) {
       while (next < end && (*next == ' ' || *next == '\t' || *next == '\r' || *next == '\n')) {
         ++next;
       }
-      bool more = next < end && continues(*next);
-      if (!more && !continues(last)) {
+      bool more = next < end && SymbolText::continues(*next);
+      if (!more && !SymbolText::continues(last)) {
         return at;
       }
     }
@@ -144,7 +149,7 @@ const char *SymbolText::statementEnd(const char *at, const char *end) {
 std::string SymbolText::function(const FunctionDecl &fn) {
   std::string text;
   if (fn.cls()) {
-    text += modifiers(fn.access(), fn.isStatic());
+    text += SymbolText::modifiers(fn.access(), fn.isStatic());
   }
   if (fn.isAsync) {
     text += "async ";
@@ -179,18 +184,18 @@ std::string SymbolText::function(const FunctionDecl &fn) {
     text += param.rest() ? "..." : "";
     text += param.label().str();
     text += param.optional() || param.defaultValue() ? "?" : "";
-    text += ": " + typeName(type);
+    text += ": " + SymbolText::typeName(type);
   }
   text += ")";
   if (!fn.isConstructor() && sym && sym->ret) {
-    text += ": " + typeName(sym->ret);
+    text += ": " + SymbolText::typeName(sym->ret);
   }
 
   return text;
 }
 
 std::string SymbolText::field(const ClassField &field) {
-  std::string text = modifiers(field.access, field.isStatic());
+  std::string text = SymbolText::modifiers(field.access, field.isStatic());
   if (field.readonly) {
     text += "readonly ";
   }
@@ -198,13 +203,13 @@ std::string SymbolText::field(const ClassField &field) {
   text += field.optional() ? "?" : "";
   const Type *type = field.resolved ? field.resolved : field.var() ? field.var()->type : nullptr;
 
-  return text + ": " + typeName(type);
+  return text + ": " + SymbolText::typeName(type);
 }
 
 std::string SymbolText::variable(const VarDeclarator &declarator, bool isConst) {
   const Type *type = declarator.sym ? declarator.sym->type : nullptr;
 
-  return (isConst ? "const " : "let ") + declarator.name.str() + ": " + typeName(type);
+  return (isConst ? "const " : "let ") + declarator.name.str() + ": " + SymbolText::typeName(type);
 }
 
 std::string SymbolText::header(const ClassDecl &cls) {

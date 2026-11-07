@@ -1,4 +1,5 @@
 #include "compiler/pipeline/check_program/topics/intl/intl_method_checker/intl_method_checker.h"
+#include "compiler/load/to_utf8/to_utf8.h"
 #include "compiler/pipeline/check_program/generics/generic_checker/generic_checker.h"
 #include "compiler/pipeline/check_program/topics/date/date_format_checker/date_format_checker.h"
 #include "compiler/pipeline/check_program/topics/expr/argument_checker/argument_checker.h"
@@ -19,15 +20,6 @@ using llvm::dyn_cast;
 
 namespace tz {
 
-std::string IntlMethodChecker::utf8(const std::u16string &text) {
-  std::string out;
-  llvm::convertUTF16ToUTF8String(
-      llvm::ArrayRef<llvm::UTF16>(reinterpret_cast<const llvm::UTF16 *>(text.data()), text.size()),
-      out);
-
-  return out;
-}
-
 std::optional<std::u16string> IntlMethodChecker::literalText(const Expr *e) {
   if (auto *lit = dyn_cast<StringLitExpr>(e)) {
     return lit->value;
@@ -46,25 +38,46 @@ const Type *IntlMethodChecker::relativePartType() {
                       "Intl.RelativeTimeFormatPart");
 }
 
-std::string IntlMethodChecker::closedArgProblem(
-    const Expr *arg, const std::optional<std::vector<std::string>> &texts,
-    llvm::ArrayRef<llvm::StringLiteral> allowed, llvm::StringRef what) {
+IntlMethodChecker::ResultIntlNumber IntlMethodChecker::intlNumber(const Type *type,
+                                                                  llvm::StringRef method) {
+  if (!type->isNumeric() && !type->isDecimal() && !type->isError()) {
+    std::string message = ErrorTextIntlNumber::notNumber(method, type);
+
+    return err(IntlMethodCheckerIntlNumberError{
+        .code = IntlMethodCheckerIntlNumberErrorCode::NOT_A_NUMBER,
+        .message = message,
+    });
+  }
+
+  return ok(type);
+}
+
+IntlMethodChecker::ResultClosedText
+IntlMethodChecker::closedArg(const Expr *arg, const std::optional<std::vector<std::string>> &texts,
+                             llvm::ArrayRef<llvm::StringLiteral> allowed, llvm::StringRef what) {
   if (!arg->type || arg->type->isError()) {
-    return "";
+    return ok(arg);
   }
   if (!texts) {
-    return "a string known only when the program runs may be no " + what.str() +
-           ", which JavaScript would throw a RangeError for; compare it with them first, "
-           "e.g. 'if (x == \"" +
-           allowed[0].str() + "\" || x == \"" + allowed[1].str() + "\")'";
+    std::string message = ErrorTextClosedArg::unknown(what, allowed[0], allowed[1]);
+
+    return err(IntlMethodCheckerClosedArgError{
+        .code = IntlMethodCheckerClosedArgErrorCode::UNKNOWN_TEXT,
+        .message = message,
+    });
   }
   for (const std::string &text : *texts) {
     if (!llvm::is_contained(allowed, text)) {
-      return "'" + text + "' is no " + what.str() + ", and JavaScript would throw a RangeError";
+      std::string message = ErrorTextClosedArg::notAllowed(text, what);
+
+      return err(IntlMethodCheckerClosedArgError{
+          .code = IntlMethodCheckerClosedArgErrorCode::NOT_ALLOWED,
+          .message = message,
+      });
     }
   }
 
-  return "";
+  return ok(arg);
 }
 
 IntlMethodChecker::IntlMethodChecker(CheckState &owner)
@@ -72,18 +85,10 @@ IntlMethodChecker::IntlMethodChecker(CheckState &owner)
 
 Expr *IntlMethodChecker::checkIntlNumber(Expr *arg, llvm::StringRef method) {
   arg = GenericChecker(this->state).apparent(ExprChecker(this->state).checkExpr(arg));
-  const Type *type = arg->type;
-  if (type->isNumeric() || type->isDecimal() || type->isError()) {
-    return arg;
+  ResultIntlNumber number = IntlMethodChecker::intlNumber(arg->type, method);
+  if (number.isErr()) {
+    this->state.getDiagnostics().error(arg->loc(), number.error().message);
   }
-  std::string message =
-      "'" + method.str() + "' takes a number or a decimal, found '" + type->name().str() + "'";
-  if (type->isOptional() && (type->inner()->isNumeric() || type->inner()->isDecimal())) {
-    message += "; the value may be undefined: check it first";
-  } else if (type->isString()) {
-    message += "; read the number first, e.g. 'decimal(s)', which keeps every digit";
-  }
-  this->state.getDiagnostics().error(arg->loc(), message);
 
   return arg;
 }
@@ -132,8 +137,8 @@ Expr *IntlMethodChecker::checkIntlMethod(CallExpr *call, MemberExpr *member) {
                                      Type::array(DateFormatChecker::dateFormatPartType()));
     }
     if (name == "formatRange" || name == "formatRangeToParts") {
-      this->state.getDiagnostics().error(
-          member->loc(), "'" + name + "' is not supported yet; format both numbers");
+      std::string message = ErrorTextIntlMethod::range(name);
+      this->state.getDiagnostics().error(member->loc(), message);
       return loosely();
     }
     break;
@@ -163,8 +168,8 @@ Expr *IntlMethodChecker::checkIntlMethod(CallExpr *call, MemberExpr *member) {
       return done(Builtin::PrSelect, Type::string());
     }
     if (name == "selectRange") {
-      this->state.getDiagnostics().error(member->loc(),
-                                         "'selectRange' is not supported yet; select each number");
+      std::string message = ErrorTextIntlMethod::selectSpan();
+      this->state.getDiagnostics().error(member->loc(), message);
       return loosely();
     }
     break;
@@ -185,20 +190,17 @@ Expr *IntlMethodChecker::checkIntlMethod(CallExpr *call, MemberExpr *member) {
       static const llvm::StringLiteral units[] = {
           "year", "years", "quarter", "quarters", "month",  "months",  "week",   "weeks",
           "day",  "days",  "hour",    "hours",    "minute", "minutes", "second", "seconds"};
-      if (unit && !llvm::is_contained(units, IntlMethodChecker::utf8(*unit))) {
-        this->state.getDiagnostics().error(
-            call->args[1]->loc(),
-            "'" + IntlMethodChecker::utf8(*unit) +
-                "' is not a unit of Intl.RelativeTimeFormat, and JavaScript would throw "
-                "a RangeError; the units are year, quarter, month, week, day, hour, "
-                "minute and second, also in the plural");
-      } else if (std::string problem =
-                     unit ? ""
-                          : IntlMethodChecker::closedArgProblem(
-                                call->args[1], LiteralTypes(this->state).knownTexts(call->args[1]),
-                                units, "unit of time");
-                 !problem.empty()) {
-        this->state.getDiagnostics().error(call->args[1]->loc(), problem);
+      if (unit && !llvm::is_contained(units, ToUtf8::toUtf8(*unit))) {
+        std::string message = ErrorTextIntlMethod::badUnit(ToUtf8::toUtf8(*unit));
+        this->state.getDiagnostics().error(call->args[1]->loc(), message);
+      } else if (!unit) {
+        std::optional<std::vector<std::string>> texts =
+            LiteralTypes(this->state).knownTexts(call->args[1]);
+        std::string what = ErrorTextClosedArg::unit();
+        ResultClosedText closed = IntlMethodChecker::closedArg(call->args[1], texts, units, what);
+        if (closed.isErr()) {
+          this->state.getDiagnostics().error(call->args[1]->loc(), closed.error().message);
+        }
       }
       return name == "format" ? done(Builtin::RtfFormat, Type::string())
                               : done(Builtin::RtfFormatToParts,
@@ -264,8 +266,8 @@ Expr *IntlMethodChecker::checkIntlMethod(CallExpr *call, MemberExpr *member) {
   default:
     break;
   }
-  this->state.getDiagnostics().error(
-      member->loc(), "property '" + name + "' does not exist on type '" + service + "'");
+  std::string message = ErrorTextIntlMethod::noMember(name, service);
+  this->state.getDiagnostics().error(member->loc(), message);
 
   return loosely();
 }
@@ -306,18 +308,17 @@ Expr *IntlMethodChecker::checkStringLocale(CallExpr *call, MemberExpr *member) {
       std::optional<std::u16string> form = IntlMethodChecker::literalText(call->args[0]);
       static const llvm::StringLiteral forms[] = {"NFC", "NFD", "NFKC", "NFKD"};
       call->args[0] = ArgumentChecker(this->state).checkArg(call->args[0], Type::string());
-      if (form && !llvm::is_contained(forms, IntlMethodChecker::utf8(*form))) {
-        this->state.getDiagnostics().error(
-            call->args[0]->loc(), "'" + IntlMethodChecker::utf8(*form) +
-                                      "' is not a normalization form, and JavaScript would throw a "
-                                      "RangeError; it is 'NFC', 'NFD', 'NFKC' or 'NFKD'");
-      } else if (std::string problem =
-                     form ? ""
-                          : IntlMethodChecker::closedArgProblem(
-                                call->args[0], LiteralTypes(this->state).knownTexts(call->args[0]),
-                                forms, "normalization form");
-                 !problem.empty()) {
-        this->state.getDiagnostics().error(call->args[0]->loc(), problem);
+      if (form && !llvm::is_contained(forms, ToUtf8::toUtf8(*form))) {
+        std::string message = ErrorTextIntlMethod::badForm(ToUtf8::toUtf8(*form));
+        this->state.getDiagnostics().error(call->args[0]->loc(), message);
+      } else if (!form) {
+        std::optional<std::vector<std::string>> texts =
+            LiteralTypes(this->state).knownTexts(call->args[0]);
+        std::string what = ErrorTextClosedArg::form();
+        ResultClosedText closed = IntlMethodChecker::closedArg(call->args[0], texts, forms, what);
+        if (closed.isErr()) {
+          this->state.getDiagnostics().error(call->args[0]->loc(), closed.error().message);
+        }
       }
     }
     call->target = BuiltinCall{.builtin = Builtin::StrNormalize};

@@ -105,14 +105,15 @@ void ImportBinder::importName(ModuleState &here, const ImportDecl &decl, const M
 void ImportBinder::resolveImports(Module *module) {
   ModuleState &here = this->state.getModuleStates().getModuleState(module);
   for (const ImportDecl &decl : module->file.imports) {
-    if (decl.path == "neverthrow") {
-      ResultTypes(this->state).rejectNeverthrowImport(decl);
+    ResultTypes::ResultImportSource source = ResultTypes::importSource(decl);
+    if (source.isErr()) {
+      this->state.getDiagnostics().error(decl.pathLoc, source.error().message);
       for (const ModuleName &name : decl.names) {
         here.badImports.insert(name.as);
       }
       continue;
     }
-    if (isBuiltinModule(decl.path) && !decl.from) {
+    if (BuiltinModulePaths::isBuiltinModule(decl.path) && !decl.from) {
       BuiltinModuleChecker(this->state).importBuiltinModule(module, decl);
       continue;
     }

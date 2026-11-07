@@ -8,12 +8,12 @@
 namespace tz {
 
 std::string ProgramEntry::forDirectory(llvm::StringRef dir) {
-  std::string manifestPath = pkg::findManifest(dir);
+  std::string manifestPath = pkg::ManifestFile::findManifest(dir);
   if (manifestPath.empty()) {
     return "";
   }
   pkg::Manifest manifest;
-  if (!pkg::readManifest(manifestPath, manifest) || manifest.main.empty()) {
+  if (!pkg::ManifestFile::readManifest(manifestPath, manifest) || manifest.main.empty()) {
     return "";
   }
   llvm::SmallString<256> main(manifest.dir);
@@ -28,7 +28,7 @@ std::string ProgramEntry::forDirectory(llvm::StringRef dir) {
 std::string ProgramEntry::rootOf(llvm::StringRef entry) {
   llvm::SmallString<256> dir(SourcePlaces::absolute(entry));
   llvm::sys::path::remove_filename(dir);
-  std::string manifest = pkg::findManifest(dir);
+  std::string manifest = pkg::ManifestFile::findManifest(dir);
   if (!manifest.empty()) {
     return llvm::sys::path::parent_path(manifest).str();
   }

@@ -1,6 +1,8 @@
 #pragma once
 
 #include "compiler/pipeline/check_program/check_state/check_state.h"
+#include "compiler/pipeline/check_program/topics/json/json_checker/json_checker_errors.h"
+#include "compiler/result/result/result.h"
 
 namespace tz {
 
@@ -27,6 +29,14 @@ public:
   void checkRedundantTests(const BinaryExpr *bin);
 
 private:
+  using ResultTypeOfAgrees = Result<const Expr *, JsonCheckerTypeOfAgreesError>;
+  using ResultNullPossible = Result<const Type *, JsonCheckerNullPossibleError>;
+  using ResultTestsUnknown = Result<const Type *, JsonCheckerTestsUnknownError>;
+
+  static ResultTypeOfAgrees typeOfAgrees(const Expr *tested, llvm::StringRef name, bool nullTest,
+                                         bool isAnd);
+  ResultTestsUnknown testsUnknown(const Type *type);
+  static ResultNullPossible nullPossible(const Type *type, llvm::StringRef op);
   static const VarSymbol *jsonVariable(const Expr *expr);
   static bool nullName(const Expr *expr);
   static bool isNothing(const Expr *expr);

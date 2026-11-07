@@ -12,7 +12,7 @@ using llvm::isa;
 
 namespace tz {
 
-llvm::StringRef withoutParens(llvm::StringRef text) {
+llvm::StringRef SharedHelpers::withoutParens(llvm::StringRef text) {
   while (text.size() >= 2 && text.front() == '(' && text.back() == ')' &&
          text.find_first_of("\"'`") == llvm::StringRef::npos) {
     int depth = 0;
@@ -32,7 +32,7 @@ llvm::StringRef withoutParens(llvm::StringRef text) {
   return text;
 }
 
-const Type *literalType(const Expr *value) {
+const Type *SharedHelpers::literalType(const Expr *value) {
   if (auto *unary = dyn_cast<UnaryExpr>(value); unary && unary->op == UnaryOp::Neg) {
     value = unary->operand;
   }

@@ -15,10 +15,6 @@
 
 namespace tz {
 
-std::string utf8Of(const std::u16string &text);
-
-const Expr *bare(const Expr *e);
-
 class OwnerScanner {
 public:
   struct BackRef {
@@ -38,6 +34,7 @@ public:
   const ClassDecl *madeBy(llvm::StringRef field) const;
 
 private:
+  static const Expr *bare(const Expr *e);
   enum class Use { Value, Receiver, Callee };
   struct Write {
     const ClassDecl *cls;

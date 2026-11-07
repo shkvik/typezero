@@ -32,9 +32,9 @@ TemplateExpr *TemplateParser::parseTemplate(bool raw) {
   std::u16string text;
   auto decode = [&] {
     if (raw) {
-      decodeTemplateRaw(parser_.tok_, text);
+      LiteralText::decodeTemplateRaw(parser_.tok_, text);
     } else {
-      decodeTemplatePart(parser_.tok_, text, parser_.diags_);
+      LiteralText::decodeTemplatePart(parser_.tok_, text, parser_.diags_);
     }
   };
   decode();

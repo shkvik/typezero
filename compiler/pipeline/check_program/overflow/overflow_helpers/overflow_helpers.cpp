@@ -29,7 +29,7 @@ using llvm::isa;
 
 namespace tz {
 
-const Expr *stripCasts(const Expr *expr) {
+const Expr *OverflowHelpers::stripCasts(const Expr *expr) {
   while (auto *conv = dyn_cast_or_null<CastExpr>(expr)) {
     if (!conv->isImplicit()) {
       break;
@@ -40,7 +40,7 @@ const Expr *stripCasts(const Expr *expr) {
   return expr;
 }
 
-std::optional<size_t> callbackArg(Builtin builtin) {
+std::optional<size_t> OverflowHelpers::callbackArg(Builtin builtin) {
   switch (builtin) {
   case Builtin::ArrForEach:
   case Builtin::ArrMap:
@@ -64,7 +64,7 @@ std::optional<size_t> callbackArg(Builtin builtin) {
   }
 }
 
-Val widenVal(const Val &old, const Val &grown, const Type *type) {
+Val OverflowHelpers::widenVal(const Val &old, const Val &grown, const Type *type) {
   Val r = grown;
   auto widen = [](const Num &o, Num n, Limits l) {
     if (o.empty() || n.empty()) {
@@ -72,31 +72,31 @@ Val widenVal(const Val &old, const Val &grown, const Type *type) {
     }
     if (n.lo < o.lo) {
       n.lo = l.lo;
-      if (!dangerous(n.loOrigin)) {
+      if (!ValueRange::dangerous(n.loOrigin)) {
         n.loOrigin = Origin::Trusted, n.loWhy = nullptr;
       }
     }
     if (n.hi > o.hi) {
       n.hi = l.hi;
-      if (!dangerous(n.hiOrigin)) {
+      if (!ValueRange::dangerous(n.hiOrigin)) {
         n.hiOrigin = Origin::Trusted, n.hiWhy = nullptr;
       }
     }
 
     return n;
   };
-  r.num = widen(old.num, grown.num, limitsOf(type));
+  r.num = widen(old.num, grown.num, ValueRange::limitsOf(type));
   r.len = widen(old.len, grown.len, {0, kLengthMax});
   if (old.elem && grown.elem) {
     const Type *element =
         type && type->nonOptional()->isArray() ? type->nonOptional()->inner() : nullptr;
-    r.elem = share(widenVal(*old.elem, *grown.elem, element));
+    r.elem = ValueRange::share(OverflowHelpers::widenVal(*old.elem, *grown.elem, element));
   }
 
   return r;
 }
 
-bool containsLoop(const Stmt *stmt) {
+bool OverflowHelpers::containsLoop(const Stmt *stmt) {
   if (!stmt) {
     return false;
   }
@@ -109,12 +109,13 @@ bool containsLoop(const Stmt *stmt) {
   case Stmt::Kind::Block:
     return llvm::any_of(cast<BlockStmt>(stmt)->body, containsLoop);
   case Stmt::Kind::If:
-    if (containsLoop(cast<IfStmt>(stmt)->thenStmt) || containsLoop(cast<IfStmt>(stmt)->elseStmt)) {
+    if (OverflowHelpers::containsLoop(cast<IfStmt>(stmt)->thenStmt) ||
+        OverflowHelpers::containsLoop(cast<IfStmt>(stmt)->elseStmt)) {
       return true;
     }
     break;
   case Stmt::Kind::Labeled:
-    return containsLoop(cast<LabeledStmt>(stmt)->body);
+    return OverflowHelpers::containsLoop(cast<LabeledStmt>(stmt)->body);
   case Stmt::Kind::Switch:
     for (const SwitchCase &c : cast<SwitchStmt>(stmt)->cases) {
       if (llvm::any_of(c.body, containsLoop)) {
@@ -130,9 +131,9 @@ bool containsLoop(const Stmt *stmt) {
       stmt,
       [&](const Expr *e) {
         if (auto *call = dyn_cast<CallExpr>(e)) {
-          if (std::optional<size_t> at = callbackArg(call->builtin());
+          if (std::optional<size_t> at = OverflowHelpers::callbackArg(call->builtin());
               at && *at < call->args.size()) {
-            found |= isa<FunctionExpr>(stripCasts(call->args[*at]));
+            found |= isa<FunctionExpr>(OverflowHelpers::stripCasts(call->args[*at]));
           }
         }
       },

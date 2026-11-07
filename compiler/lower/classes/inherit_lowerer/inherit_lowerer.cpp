@@ -1,5 +1,6 @@
 #include "compiler/lower/classes/inherit_lowerer/inherit_lowerer.h"
 #include "compiler/lower/classes/class_descriptors/class_descriptors.h"
+#include "compiler/lower/classes/class_lowerer/class_lowerer.h"
 #include "compiler/lower/expr/assign_lowerer/assign_lowerer.h"
 #include "compiler/lower/expr/expr_lowerer/expr_lowerer.h"
 #include "compiler/lower/function_builder/function_builder.h"
@@ -70,7 +71,7 @@ void InheritLowerer::prepareDispatch(SourceFile &file) {
     return true;
   };
   for (const Type *type : file.subtypes) {
-    if (mentionsParam(type)) {
+    if (TypeQueries::mentionsParam(type)) {
       continue;
     }
     std::vector<const Type *> queue(type->bases().begin(), type->bases().end());
@@ -87,7 +88,7 @@ void InheritLowerer::prepareDispatch(SourceFile &file) {
   for (bool changed = true; changed;) {
     changed = false;
     for (auto [from, to] : file.views) {
-      if (mentionsParam(from) || mentionsParam(to)) {
+      if (TypeQueries::mentionsParam(from) || TypeQueries::mentionsParam(to)) {
         continue;
       }
       changed |= implement(from, to);
@@ -401,8 +402,8 @@ llvm::Value *InheritLowerer::emitInterfaceCall(CallExpr *call) {
                ? nullptr
                : llvm::PoisonValue::get(this->lowering.moduleBuilder().lower(fnType->ret()));
   }
-  bool borrow =
-      staysDuringCall(member->object) && llvm::all_of(call->args, AssignLowerer::cannotAssign);
+  bool borrow = ClassLowerer::staysDuringCall(member->object) &&
+                llvm::all_of(call->args, AssignLowerer::cannotAssign);
   Lowering::Operand self = this->lowering.refCounts().emitOperand(member->object, borrow);
   std::vector<llvm::Value *> values = this->lowering.exprLowerer().emitExprs(call->args);
   std::vector<llvm::Value *> args{self.value};

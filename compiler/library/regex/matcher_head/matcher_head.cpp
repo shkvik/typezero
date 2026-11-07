@@ -78,7 +78,7 @@ void MatcherHead::emitWidth(bool wide) {
                                          builder_.fail_);
       }
     } else if (!builder_.open()) {
-      pc += instructionSize(builder_.code_, pc);
+      pc += MatcherBuilder::instructionSize(builder_.code_, pc);
       continue;
     }
     if (uint32_t run = builder_.matcherInstructions().literalRun(pc); run >= 2) {
@@ -86,7 +86,7 @@ void MatcherHead::emitWidth(bool wide) {
       continue;
     }
     builder_.matcherInstructions().emitInstruction(pc);
-    pc += instructionSize(builder_.code_, pc);
+    pc += MatcherBuilder::instructionSize(builder_.code_, pc);
   }
   if (builder_.open()) {
     builder_.b_.CreateUnreachable();
@@ -249,7 +249,7 @@ Value *MatcherHead::vectorIn(Value *v, const OffsetSet &units) {
   if (builder_.wide_ && units.wide) {
     in = builder_.b_.CreateICmpUGE(v, llvm::ConstantInt::get(vecTy, 256));
   }
-  for (const ByteTest &t : byteTests(units.bytes)) {
+  for (const ByteTest &t : MatcherBuilder::byteTests(units.bytes)) {
     Value *x = v;
     if (t.fold) {
       if (!folded) {

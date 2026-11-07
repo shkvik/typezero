@@ -12,7 +12,7 @@ using llvm::isa;
 
 namespace tz {
 
-std::vector<IntlOption> numberOptions() {
+std::vector<IntlOption> IntlCheckHelpers::numberOptions() {
   std::vector<IntlOption> options = {
       kMatcher,
       kNumbering,
@@ -32,14 +32,15 @@ std::vector<IntlOption> numberOptions() {
   return options;
 }
 
-const std::vector<IntlService> &services() {
+const std::vector<IntlService> &IntlCheckHelpers::services() {
   static const std::vector<IntlService> table = [] {
     std::vector<IntlOption> plural = {kMatcher, {"type", 's', {"cardinal", "ordinal"}}};
     plural.insert(plural.end(), std::begin(kDigits), std::end(kDigits));
     const std::vector<llvm::StringLiteral> widths = {"long", "short", "narrow"};
 
     return std::vector<IntlService>{
-        {IntlKind::NumberFormat, "NumberFormat", TZ_INTL_NUMBER_FORMAT, numberOptions(), true},
+        {IntlKind::NumberFormat, "NumberFormat", TZ_INTL_NUMBER_FORMAT,
+         IntlCheckHelpers::numberOptions(), true},
         {IntlKind::Collator,
          "Collator",
          TZ_INTL_COLLATOR,

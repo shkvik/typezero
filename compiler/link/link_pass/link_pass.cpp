@@ -10,9 +10,11 @@
 
 namespace tz {
 
-namespace {
+LinkPass::LinkPass(const Target &target, const BuildOptions &options)
+    : target_(target),
+      options_(options) {}
 
-bool inUse(llvm::StringRef path) {
+bool LinkPass::inUse(llvm::StringRef path) {
   namespace fs = llvm::sys::fs;
   if (!fs::is_regular_file(path) || fs::access(path, fs::AccessMode::Write)) {
     return false;
@@ -26,11 +28,6 @@ bool inUse(llvm::StringRef path) {
 
   return ec == std::errc::permission_denied;
 }
-
-}
-
-LinkPass::LinkPass(const Target &target, const BuildOptions &options)
-    : target_(target), options_(options) {}
 
 Errors LinkPass::run(const ObjectFile &object, const CryptoUse &crypto, bool parallel) const {
   Errors errors;
@@ -74,9 +71,9 @@ Errors LinkPass::run(const ObjectFile &object, const CryptoUse &crypto, bool par
       return errors;
     }
   }
-  if (!linkExecutable(triple, inputs, options_.output, options_.debug != DebugLevel::None, natvis,
-                      messages)) {
-    if (inUse(options_.output)) {
+  if (!Linker::linkExecutable(triple, inputs, options_.output, options_.debug != DebugLevel::None,
+                              natvis, messages)) {
+    if (LinkPass::inUse(options_.output)) {
       errors.tool("cannot write '" + options_.output +
                   "': it is in use, probably still running; stop it and build again");
     } else {

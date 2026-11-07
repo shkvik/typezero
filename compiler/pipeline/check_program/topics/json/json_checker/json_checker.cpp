@@ -5,6 +5,7 @@
 #include "compiler/pipeline/check_program/topics/expr/binary_checker/binary_checker.h"
 #include "compiler/pipeline/check_program/topics/expr/call_checker/call_checker.h"
 #include "compiler/pipeline/check_program/topics/expr/expr_checker/expr_checker.h"
+#include "compiler/pipeline/check_program/topics/expr/truth_checker/truth_checker_errors.h"
 #include "compiler/pipeline/check_program/topics/values/array_literal_checker/array_literal_checker.h"
 #include "compiler/pipeline/check_program/types/type_relations/type_relations.h"
 #include "llvm/ADT/SmallString.h"
@@ -124,23 +125,62 @@ void JsonChecker::checkRedundantTests(const BinaryExpr *bin) {
         !JsonChecker::sameRef(typeOf->operand, tested)) {
       continue;
     }
-    std::string name = toUtf8(text->value);
-    std::string x = JsonChecker::refText(tested);
-    if (nullTest && name != "null" && name != "undefined") {
-      this->state.getDiagnostics().error(
-          rhs->loc(), "after 'typeof " + x + (isAnd ? " ==" : " !=") + " \"" + name + "\"' " + x +
-                          " is never null here: the typeof of null is "
-                          "\"null\"; drop this check");
-      return;
-    }
-    if (!nullTest && name != "array") {
-      this->state.getDiagnostics().error(
-          rhs->loc(), "after 'typeof " + x + (isAnd ? " ==" : " !=") + " \"" + name + "\"' " + x +
-                          " is never an array here: the typeof of an array is "
-                          "\"array\"; drop this check");
+    std::string name = ToUtf8::toUtf8(text->value);
+    ResultTypeOfAgrees agrees = JsonChecker::typeOfAgrees(tested, name, nullTest, isAnd);
+    if (agrees.isErr()) {
+      this->state.getDiagnostics().error(rhs->loc(), agrees.error().message);
       return;
     }
   }
+}
+
+JsonChecker::ResultTypeOfAgrees JsonChecker::typeOfAgrees(const Expr *tested, llvm::StringRef name,
+                                                          bool nullTest, bool isAnd) {
+  if (nullTest && name != "null" && name != "undefined") {
+    std::string message = ErrorTextJsonTest::neverNull(JsonChecker::refText(tested), isAnd, name);
+
+    return err(JsonCheckerTypeOfAgreesError{
+        .code = JsonCheckerTypeOfAgreesErrorCode::NEVER_NULL,
+        .message = message,
+    });
+  }
+  if (!nullTest && name != "array") {
+    std::string message = ErrorTextJsonTest::neverArray(JsonChecker::refText(tested), isAnd, name);
+
+    return err(JsonCheckerTypeOfAgreesError{
+        .code = JsonCheckerTypeOfAgreesErrorCode::NEVER_ARRAY,
+        .message = message,
+    });
+  }
+
+  return ok(tested);
+}
+
+JsonChecker::ResultNullPossible JsonChecker::nullPossible(const Type *type, llvm::StringRef op) {
+  if (!type->isError() && !type->nonOptional()->isJson()) {
+    std::string message = ErrorTextJsonNull::never(type->name(), op);
+
+    return err(JsonCheckerNullPossibleError{
+        .code = JsonCheckerNullPossibleErrorCode::NEVER_NULL,
+        .message = message,
+    });
+  }
+
+  return ok(type);
+}
+
+JsonChecker::ResultTestsUnknown JsonChecker::testsUnknown(const Type *type) {
+  if (!type->isUnknown() && !type->nonOptional()->isParam() &&
+      !this->state.getGenericStore().isCheckingInstance()) {
+    std::string message = ErrorTextJsonIsJson::known(type->name(), type->nonOptional()->isJson());
+
+    return err(JsonCheckerTestsUnknownError{
+        .code = JsonCheckerTestsUnknownErrorCode::KNOWN_TYPE,
+        .message = message,
+    });
+  }
+
+  return ok(type);
 }
 
 JsonChecker::JsonChecker(CheckState &owner)
@@ -191,8 +231,8 @@ Expr *JsonChecker::checkJsonIndex(IndexExpr *index) {
     index->index = TypeRelations(this->state).convert(index->index, Type::doubleTy());
     return index;
   }
-  this->state.getDiagnostics().error(
-      index->index->loc(), "a key of a Json is a string or a number, found '" + key->name() + "'");
+  std::string message = ErrorTextJsonKey::index(key->name());
+  this->state.getDiagnostics().error(index->index->loc(), message);
   index->type = Type::error();
 
   return index;
@@ -215,18 +255,11 @@ Expr *JsonChecker::reportJsonMethod(CallExpr *call, MemberExpr *member) {
   if (auto *conv = dyn_cast<CastExpr>(object); conv && conv->isImplicit()) {
     object = conv->operand;
   }
-  std::string message =
-      "a Json has no method '" + member->name.str() + "' until a check shows what it holds";
-  std::string call_ = "." + member->name.str() + "(...)";
+  llvm::StringRef variable;
   if (auto *name = dyn_cast<NameExpr>(object); name && name->var()) {
-    std::string x = name->name.str();
-    message += ", e.g. 'if (Array.isArray(" + x + ")) " + x + call_ + "' or 'if (typeof " + x +
-               " == \"string\") " + x + call_ + "'";
-  } else {
-    message += "; put it in a variable and check that, e.g. 'const items = j.items; if "
-               "(Array.isArray(items)) items" +
-               call_ + "'";
+    variable = name->name;
   }
+  std::string message = ErrorTextJsonMethod::none(member->name, variable);
   this->state.getDiagnostics().error(member->loc(), message);
   for (Expr *&arg : call->args) {
     arg = ExprChecker(this->state).checkExpr(arg);
@@ -239,17 +272,15 @@ Expr *JsonChecker::checkJsonObjectLit(ObjectLitExpr *lit) {
   const Type *json = Type::json();
   for (ObjectLitExpr::Property &prop : lit->props) {
     if (prop.spread() || prop.method()) {
-      this->state.getDiagnostics().error(
-          prop.loc, prop.spread() ? "a spread is not supported in a Json literal; write the "
-                                    "keys one by one"
-                                  : "a Json holds no functions");
+      std::string message =
+          prop.spread() ? ErrorTextJsonLiteral::spread() : ErrorTextJsonLiteral::function();
+      this->state.getDiagnostics().error(prop.loc, message);
       prop.value = ExprChecker(this->state).checkExpr(prop.value);
       continue;
     }
     if (prop.defaulted()) {
-      this->state.getDiagnostics().error(
-          prop.loc, "'" + prop.name + " = ...' belongs to a destructuring pattern; write '" +
-                        prop.name + ": ...'");
+      std::string message = ErrorTextJsonLiteral::defaulted(prop.name);
+      this->state.getDiagnostics().error(prop.loc, message);
       prop.value = ExprChecker(this->state).checkExpr(cast<AssignExpr>(prop.value)->value);
       prop.form = ValueProperty{};
       continue;
@@ -257,17 +288,17 @@ Expr *JsonChecker::checkJsonObjectLit(ObjectLitExpr *lit) {
     if (ComputedProperty *computed = prop.form.as<ComputedProperty>()) {
       computed->key = ExprChecker(this->state).checkExpr(computed->key);
       if (!prop.key()->type->isString() && !prop.key()->type->isError()) {
-        this->state.getDiagnostics().error(prop.key()->loc(),
-                                           "a key of a Json is a string, found '" +
-                                               prop.key()->type->name() + "'");
+        std::string message = ErrorTextJsonKey::literal(prop.key()->type->name());
+        this->state.getDiagnostics().error(prop.key()->loc(), message);
       }
     }
     Expr *value = ExprChecker(this->state).checkExpr(prop.value, json);
     const Type *type = value->type;
+    std::string label = ErrorTextJsonKey::label(prop.name);
     prop.value =
         TypeRelations(this->state)
             .coerce(value, type->isOptional() || type->isUndefined() ? Type::optional(json) : json,
-                    "key '" + prop.name.str() + "'");
+                    label);
   }
   lit->type = json;
 
@@ -298,13 +329,11 @@ Expr *JsonChecker::checkNullEquality(BinaryExpr *bin) {
     type = other->type;
   }
   null->type = Type::json();
-  if (type->isError() || type->nonOptional()->isJson()) {
+  ResultNullPossible possible = JsonChecker::nullPossible(type, Operators::opSpelling(bin->op));
+  if (possible.isOk()) {
     return bin;
   }
-  this->state.getDiagnostics().error(
-      null->loc(), "'null' exists only in Json values, and a value of type '" + type->name() +
-                       "' is never null; the one value for nothing is 'undefined': '" +
-                       opSpelling(bin->op) + " undefined'");
+  this->state.getDiagnostics().error(null->loc(), possible.error().message);
   null->type = Type::error();
 
   return bin;
@@ -336,8 +365,8 @@ Expr *JsonChecker::checkJsonEquality(BinaryExpr *bin) {
     bin->rhs = TypeRelations(this->state).convert(bin->rhs, json);
     return bin;
   }
-  std::string mismatch = BinaryChecker::operandTypesText(opSpelling(bin->op), l, r);
-  this->state.getDiagnostics().error(bin->loc(), mismatch);
+  std::string message = BinaryChecker::operandTypesText(Operators::opSpelling(bin->op), l, r);
+  this->state.getDiagnostics().error(bin->loc(), message);
 
   return bin;
 }
@@ -443,14 +472,9 @@ Expr *JsonChecker::checkJsonIsJson(CallExpr *call, MemberExpr *member) {
   if (type->isError()) {
     return call;
   }
-  if (!type->isUnknown() && !type->nonOptional()->isParam() &&
-      !this->state.getGenericStore().isCheckingInstance()) {
-    this->state.getDiagnostics().error(
-        call->args[0]->loc(),
-        "Json.isJson tells whether an 'unknown' value holds a Json; a value of "
-        "type '" +
-            type->name() + "' is known when the program is built" +
-            (type->nonOptional()->isJson() ? ", and it is a Json already" : ""));
+  ResultTestsUnknown tests = this->testsUnknown(type);
+  if (tests.isErr()) {
+    this->state.getDiagnostics().error(call->args[0]->loc(), tests.error().message);
     return call;
   }
   call->target = BuiltinCall{.builtin = Builtin::JsonIsJson};
@@ -472,8 +496,8 @@ Expr *JsonChecker::checkArrayIsArray(CallExpr *call, MemberExpr *member) {
   }
   call->args[0] = ExprChecker(this->state).checkExpr(call->args[0]);
   if (call->args[0]->type->isVoid()) {
-    this->state.getDiagnostics().error(call->args[0]->loc(),
-                                       "an expression of type 'void' has no value to test");
+    std::string message = ErrorTextTruthy::voidValue();
+    this->state.getDiagnostics().error(call->args[0]->loc(), message);
     return call;
   }
   call->target = BuiltinCall{.builtin = Builtin::ArrayIsArray};

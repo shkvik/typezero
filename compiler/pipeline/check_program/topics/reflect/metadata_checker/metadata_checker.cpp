@@ -112,32 +112,33 @@ void MetadataChecker::checkBodyEarly(FunctionDecl *fn) {
   ReturnInferrer(this->state).leaveBody(saved);
 }
 
-const Type *MetadataChecker::metadataType(const void *key, llvm::StringRef label, llvm::SMLoc loc,
-                                          const Type *expected) {
+MetadataChecker::ResultMetadataTyped MetadataChecker::metadataType(const void *key,
+                                                                   llvm::StringRef label,
+                                                                   llvm::SMLoc loc,
+                                                                   const Type *expected) {
   ReflectStore &reflect = this->state.getReflectStore();
   if (const MetadataType *known = reflect.findMetadataType(key)) {
-    return known->type;
+    return ok(known->type);
   }
   for (FunctionDecl *fn : reflect.getMetadataWriters(label)) {
     this->checkBodyEarly(fn);
     if (const MetadataType *known = reflect.findMetadataType(key)) {
-      return known->type;
+      return ok(known->type);
     }
   }
-  if (expected && !expected->nonOptional()->isUnknown() && !mentionsParam(expected)) {
-    reflect.rememberMetadataType(key, expected->nonOptional(), loc);
-    return expected->nonOptional();
-  }
-  this->state.getDiagnostics().error(
-      loc, "the records of '" + label +
-               "' have the type of the first one written, "
-               "'Reflect.defineMetadata(" +
-               label +
-               ", value, target)', and none is written "
-               "before this; write one first, give the type where this one goes (e.g. "
-               "'const x: string[] = ...'), or use a string key, whose records are 'unknown'");
+  bool written =
+      expected && !expected->nonOptional()->isUnknown() && !TypeQueries::mentionsParam(expected);
+  if (!written) {
+    std::string message = ErrorTextMetadataType::unknown(label);
 
-  return Type::error();
+    return err(MetadataCheckerMetadataTypeError{
+        .code = MetadataCheckerMetadataTypeErrorCode::NO_RECORD_TYPE,
+        .message = message,
+    });
+  }
+  reflect.rememberMetadataType(key, expected->nonOptional(), loc);
+
+  return ok(expected->nonOptional());
 }
 
 Expr *MetadataChecker::designClass(const Type *type, llvm::SMLoc loc) {

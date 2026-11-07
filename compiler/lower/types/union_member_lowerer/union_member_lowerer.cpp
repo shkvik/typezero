@@ -1,5 +1,6 @@
 #include "compiler/lower/types/union_member_lowerer/union_member_lowerer.h"
 #include "compiler/lower/classes/class_descriptors/class_descriptors.h"
+#include "compiler/lower/classes/class_lowerer/class_lowerer.h"
 #include "compiler/lower/classes/inherit_lowerer/inherit_lowerer.h"
 #include "compiler/lower/expr/assign_lowerer/assign_lowerer.h"
 #include "compiler/lower/expr/expr_lowerer/expr_lowerer.h"
@@ -189,8 +190,8 @@ llvm::Value *UnionMemberLowerer::emitObjectIn(BinaryExpr *bin) {
 llvm::Value *UnionMemberLowerer::emitUnionMethodCall(CallExpr *call) {
   auto *member = cast<MemberExpr>(call->callee);
   const Type *fnType = member->type;
-  bool borrow =
-      staysDuringCall(member->object) && llvm::all_of(call->args, AssignLowerer::cannotAssign);
+  bool borrow = ClassLowerer::staysDuringCall(member->object) &&
+                llvm::all_of(call->args, AssignLowerer::cannotAssign);
   Lowering::Operand self = this->lowering.refCounts().emitOperand(member->object, borrow);
   std::vector<llvm::Value *> values = this->lowering.exprLowerer().emitExprs(call->args);
   for (size_t i = call->args.size(); i < fnType->params().size(); ++i) {

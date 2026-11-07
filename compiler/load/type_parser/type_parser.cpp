@@ -223,7 +223,7 @@ TypeRef TypeParser::parsePrimaryType() {
   }
   if (parser_.tok_.is(Tok::TemplateString) || parser_.tok_.is(Tok::TemplateHead)) {
     std::u16string text;
-    decodeTemplatePart(parser_.tok_, text, parser_.diags_);
+    LiteralText::decodeTemplatePart(parser_.tok_, text, parser_.diags_);
     if (parser_.tok_.is(Tok::TemplateString)) {
       ref.form = LiteralTypeRef{.text = text};
       ref.name = "string";
@@ -240,7 +240,7 @@ TypeRef TypeParser::parsePrimaryType() {
                                "expected '}' to close the type in the template literal type");
         return TypeRef();
       }
-      decodeTemplatePart(parser_.tok_, text, parser_.diags_);
+      LiteralText::decodeTemplatePart(parser_.tok_, text, parser_.diags_);
       parts->texts.push_back(text);
       done = parser_.tok_.is(Tok::TemplateTail);
       parser_.cursor().advance();
@@ -249,7 +249,7 @@ TypeRef TypeParser::parsePrimaryType() {
   }
   if (parser_.tok_.is(Tok::StringLiteral)) {
     LiteralTypeRef literal;
-    decodeStringLiteral(parser_.tok_, literal.text, parser_.diags_);
+    LiteralText::decodeStringLiteral(parser_.tok_, literal.text, parser_.diags_);
     ref.form = std::move(literal);
     ref.name = "string";
     parser_.cursor().advance();
@@ -296,7 +296,7 @@ TypeRef TypeParser::parsePrimaryType() {
     if (!parser_.tok_.is(Tok::Identifier)) {
       parser_.cursor().error(parser_.tok_.loc(),
                              llvm::Twine("expected the name of a value after 'typeof', found ") +
-                                 tokSpelling(parser_.tok_.kind));
+                                 TokenKinds::tokSpelling(parser_.tok_.kind));
       return ref;
     }
     path->names.push_back(parser_.tok_.text);
@@ -309,8 +309,8 @@ TypeRef TypeParser::parsePrimaryType() {
     return ref;
   }
   if (!parser_.tok_.is(Tok::Identifier) && !parser_.tok_.is(Tok::KwVoid)) {
-    parser_.cursor().error(parser_.tok_.loc(),
-                           llvm::Twine("expected a type, found ") + tokSpelling(parser_.tok_.kind));
+    parser_.cursor().error(parser_.tok_.loc(), llvm::Twine("expected a type, found ") +
+                                                   TokenKinds::tokSpelling(parser_.tok_.kind));
     return ref;
   }
   ref.name = parser_.tok_.text;
@@ -355,7 +355,7 @@ std::vector<TypeRef> TypeParser::parseTypeArgs() {
   default:
     parser_.cursor().error(parser_.tok_.loc(),
                            llvm::Twine("expected '>' to close the type arguments, found ") +
-                               tokSpelling(parser_.tok_.kind));
+                               TokenKinds::tokSpelling(parser_.tok_.kind));
     break;
   }
 

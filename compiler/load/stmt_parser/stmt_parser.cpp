@@ -90,7 +90,8 @@ Stmt *StmtParser::parseStatement(bool topLevel) {
     }
     if ((parser_.tok_.text == "namespace" || parser_.tok_.text == "module" ||
          parser_.tok_.text == "declare") &&
-        (parser_.cursor().peek().is(Tok::Identifier) || isKeyword(parser_.cursor().peek().kind) ||
+        (parser_.cursor().peek().is(Tok::Identifier) ||
+         TokenKinds::isKeyword(parser_.cursor().peek().kind) ||
          parser_.cursor().peek().is(Tok::StringLiteral)) &&
         !parser_.cursor().peek().newlineBefore) {
       if (parser_.tok_.text != "declare") {
@@ -239,7 +240,7 @@ Stmt *StmtParser::parseSwitch() {
     } else {
       parser_.cursor().error(parser_.tok_.loc(),
                              llvm::Twine("expected 'case' or 'default', found ") +
-                                 tokSpelling(parser_.tok_.kind));
+                                 TokenKinds::tokSpelling(parser_.tok_.kind));
       break;
     }
     parser_.cursor().expect(Tok::Colon, c.test ? "after the value of 'case'" : "after 'default'");

@@ -61,7 +61,7 @@ std::unique_ptr<Parser::Pattern> PatternParser::parseBindingPattern() {
       parser_.cursor().error(
           parser_.tok_.loc(),
           llvm::Twine("expected a variable name in the destructuring pattern, found ") +
-              tokSpelling(parser_.tok_.kind));
+              TokenKinds::tokSpelling(parser_.tok_.kind));
       return pattern;
     }
     if (parser_.tok_.is(Tok::Assign)) {
@@ -121,7 +121,7 @@ std::unique_ptr<Parser::Pattern> PatternParser::parseObjectPattern() {
           parser_.cursor().error(
               parser_.tok_.loc(),
               llvm::Twine("expected a variable name in the destructuring pattern, found ") +
-                  tokSpelling(parser_.tok_.kind));
+                  TokenKinds::tokSpelling(parser_.tok_.kind));
           return pattern;
         }
       } else if (identifier && !e.keyExpr) {

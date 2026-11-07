@@ -1,5 +1,6 @@
 #include "compiler/pipeline/check_program/topics/child_process/child_checker/child_checker.h"
 #include "compiler/library/builtin_modules/node_check_helpers/node_check_helpers.h"
+#include "compiler/load/to_utf8/to_utf8.h"
 #include "compiler/pipeline/check_program/topics/bytes/bytes_checker/bytes_checker.h"
 #include "compiler/pipeline/check_program/topics/child_process/child_error_types/child_error_types.h"
 #include "compiler/pipeline/check_program/topics/expr/argument_checker/argument_checker.h"
@@ -17,15 +18,6 @@ using llvm::isa;
 
 namespace tz {
 
-std::string ChildChecker::utf8(const std::u16string &text) {
-  std::string out;
-  llvm::convertUTF16ToUTF8String(
-      llvm::ArrayRef<llvm::UTF16>(reinterpret_cast<const llvm::UTF16 *>(text.data()), text.size()),
-      out);
-
-  return out;
-}
-
 const Type *ChildChecker::bufferType() {
   return Type::bytesType(Type::Bytes::Buffer);
 }
@@ -40,7 +32,7 @@ bool ChildChecker::knownSignal(llvm::StringRef name) {
       "SIGALRM",  "SIGTERM", "SIGCHLD", "SIGSTKFLT", "SIGCONT", "SIGSTOP",   "SIGTSTP",
       "SIGTTIN",  "SIGTTOU", "SIGURG",  "SIGXCPU",   "SIGXFSZ", "SIGVTALRM", "SIGPROF",
       "SIGWINCH", "SIGIO",   "SIGPOLL", "SIGPWR",    "SIGSYS"};
-  if (targetIsWindows()) {
+  if (NodeCheckHelpers::targetIsWindows()) {
     return llvm::is_contained(windows, name);
   }
 
@@ -92,15 +84,13 @@ Expr *ChildChecker::checkChildCall(CallExpr *call, llvm::StringRef fn, llvm::SML
   args[ChildFile] = call->args[0] = ArgumentChecker(this->state).checkArg(call->args[0], string);
   bool failed = false;
   if (ChildChecker::hasZero(call->args[0])) {
-    this->state.getDiagnostics().error(call->args[0]->loc(),
-                                       "could not run it: the " +
-                                           std::string(exec ? "command" : "program name") +
-                                           " has a zero character in it");
+    std::string message = ErrorTextChildRun::zeroFile(exec);
+    this->state.getDiagnostics().error(call->args[0]->loc(), message);
     failed = true;
   } else if (auto *lit = dyn_cast<StringLitExpr>(call->args[0]);
              lit && lit->value.empty() && !exec) {
-    this->state.getDiagnostics().error(call->args[0]->loc(),
-                                       "could not run a program: its name is empty");
+    std::string message = ErrorTextChildRun::emptyName();
+    this->state.getDiagnostics().error(call->args[0]->loc(), message);
     failed = true;
   }
   size_t optionsAt = 1;
@@ -109,9 +99,8 @@ Expr *ChildChecker::checkChildCall(CallExpr *call, llvm::StringRef fn, llvm::SML
       if (auto *list = dyn_cast<ArrayLitExpr>(call->args[1])) {
         for (size_t i = 0; i < list->elements.size(); ++i) {
           if (!list->elements[i].spread && ChildChecker::hasZero(list->elements[i].expr)) {
-            this->state.getDiagnostics().error(list->elements[i].expr->loc(),
-                                               "could not run it: args[" + std::to_string(i) +
-                                                   "] has a zero character in it");
+            std::string message = ErrorTextChildRun::zeroArg(i);
+            this->state.getDiagnostics().error(list->elements[i].expr->loc(), message);
             failed = true;
           }
         }
@@ -121,9 +110,8 @@ Expr *ChildChecker::checkChildCall(CallExpr *call, llvm::StringRef fn, llvm::SML
     }
     optionsAt = 2;
   } else if (!exec && call->args.size() > 2) {
-    this->state.getDiagnostics().error(
-        call->args[2]->loc(), "the options of '" + fn + "' come after its arguments, e.g. '" + fn +
-                                  "(file, [\"--version\"], { cwd })'");
+    std::string message = ErrorTextChildRun::optionsAt(fn);
+    this->state.getDiagnostics().error(call->args[2]->loc(), message);
     return call;
   }
   if (!args[ChildArgs]) {
@@ -156,10 +144,8 @@ Expr *ChildChecker::checkChildCall(CallExpr *call, llvm::StringRef fn, llvm::SML
   if (Expr *value = options.lookup("encoding"); value && !isa<UndefinedExpr>(value)) {
     auto *lit = dyn_cast<StringLitExpr>(value);
     if (!lit) {
-      this->state.getDiagnostics().error(
-          value->loc(), "the option 'encoding' of '" + fn +
-                            "' is written as a literal, e.g. 'utf8': it decides whether "
-                            "the output is a string or a Buffer");
+      std::string message = ErrorTextChildOption::encoding(fn);
+      this->state.getDiagnostics().error(value->loc(), message);
       ExprChecker(this->state).checkExpr(value);
       failed = true;
     } else if (lit->value != u"buffer") {
@@ -183,22 +169,21 @@ Expr *ChildChecker::checkChildCall(CallExpr *call, llvm::StringRef fn, llvm::SML
       if (auto *n = dyn_cast<IntLitExpr>(e)) {
         n->type = Type::intTy();
         if (n->value > 0x7fffffff) {
-          this->state.getDiagnostics().error(e->loc(), "there is no file descriptor " +
-                                                           std::to_string(n->value));
+          std::string message = ErrorTextChildStdio::noFd(n->value);
+          this->state.getDiagnostics().error(e->loc(), message);
           return std::nullopt;
         }
         return ChildInherit + unsigned(n->value);
       }
       auto *lit = dyn_cast<StringLitExpr>(e);
       if (!lit) {
-        this->state.getDiagnostics().error(
-            e->loc(), "each stream of 'stdio' is written as a literal: \"pipe\", "
-                      "\"inherit\", \"ignore\" or a file descriptor such as 2");
+        std::string message = ErrorTextChildStdio::literal();
+        this->state.getDiagnostics().error(e->loc(), message);
         ExprChecker(this->state).checkExpr(e);
         return std::nullopt;
       }
       lit->type = string;
-      std::string text = ChildChecker::utf8(lit->value);
+      std::string text = ToUtf8::toUtf8(lit->value);
       if (text == "pipe" || text == "overlapped") {
         return ChildPipe;
       }
@@ -208,33 +193,24 @@ Expr *ChildChecker::checkChildCall(CallExpr *call, llvm::StringRef fn, llvm::SML
       if (text == "ignore") {
         return ChildIgnore;
       }
-      if (text == "ipc") {
-        this->state.getDiagnostics().error(
-            e->loc(), "'ipc' is the channel to another Node that fork starts, which tz "
-                      "does not have (docs/process.md, section 4)");
-      } else {
-        this->state.getDiagnostics().error(
-            e->loc(), "unknown stdio '" + text +
-                          "'; a stream is \"pipe\", \"inherit\", \"ignore\" or a file "
-                          "descriptor such as 2");
-      }
+      std::string message =
+          text == "ipc" ? ErrorTextChildStdio::ipc() : ErrorTextChildStdio::unknown(text);
+      this->state.getDiagnostics().error(e->loc(), message);
 
       return std::nullopt;
     };
     if (auto *list = dyn_cast<ArrayLitExpr>(value)) {
       if (list->elements.size() > 3) {
-        this->state.getDiagnostics().error(
-            list->elements[3].expr->loc(),
-            "only stdin, stdout and stderr are supported in 'stdio'; more streams come "
-            "with the async functions (docs/process.md, step 2)");
+        std::string message = ErrorTextChildStdio::three();
+        this->state.getDiagnostics().error(list->elements[3].expr->loc(), message);
         failed = true;
       }
       for (size_t i = 0; i < list->elements.size() && i < 3; ++i) {
         const ArrayLitExpr::Element &element = list->elements[i];
         std::optional<unsigned> k = element.spread ? std::nullopt : kind(element.expr, unsigned(i));
         if (element.spread) {
-          this->state.getDiagnostics().error(element.expr->loc(),
-                                             "write each stream of 'stdio' in the literal");
+          std::string message = ErrorTextChildStdio::spread();
+          this->state.getDiagnostics().error(element.expr->loc(), message);
         }
         if (!k) {
           failed = true;
@@ -252,11 +228,8 @@ Expr *ChildChecker::checkChildCall(CallExpr *call, llvm::StringRef fn, llvm::SML
         stdio[i] = *k;
       }
     } else {
-      this->state.getDiagnostics().error(
-          value->loc(), "the option 'stdio' of '" + fn +
-                            "' is written as a literal, e.g. \"inherit\" or [\"pipe\", "
-                            "\"inherit\", \"pipe\"]: whether there is output depends "
-                            "on it");
+      std::string message = ErrorTextChildOption::stdio(fn);
+      this->state.getDiagnostics().error(value->loc(), message);
       ExprChecker(this->state).checkExpr(value);
       failed = true;
     }
@@ -269,8 +242,8 @@ Expr *ChildChecker::checkChildCall(CallExpr *call, llvm::StringRef fn, llvm::SML
                  : absent(type);
   };
   if (ChildChecker::hasZero(options.lookup("cwd"))) {
-    this->state.getDiagnostics().error(options.lookup("cwd")->loc(),
-                                       "could not run it: cwd has a zero character in it");
+    std::string message = ErrorTextChildRun::zeroCwd();
+    this->state.getDiagnostics().error(options.lookup("cwd")->loc(), message);
     failed = true;
   }
   for (llvm::StringRef limit : {"timeout", "maxBuffer"}) {
@@ -278,27 +251,25 @@ Expr *ChildChecker::checkChildCall(CallExpr *call, llvm::StringRef fn, llvm::SML
     auto *unary = value ? dyn_cast<UnaryExpr>(value) : nullptr;
     if (unary && unary->op == UnaryOp::Neg &&
         (isa<IntLitExpr>(unary->operand) || isa<FloatLitExpr>(unary->operand))) {
-      this->state.getDiagnostics().error(value->loc(),
-                                         "could not run it: " + limit.str() + " must be 0 or more");
+      std::string message = ErrorTextChildRun::negative(limit);
+      this->state.getDiagnostics().error(value->loc(), message);
       failed = true;
     }
   }
-  if (targetIsWindows()) {
+  if (NodeCheckHelpers::targetIsWindows()) {
     for (llvm::StringRef id : {"uid", "gid"}) {
       if (Expr *value = options.lookup(id); value && !isa<UndefinedExpr>(value)) {
-        this->state.getDiagnostics().error(value->loc(),
-                                           "'" + id.str() +
-                                               "' works only on Linux and macOS: Windows has "
-                                               "no user and group numbers");
+        std::string message = ErrorTextChildRun::unixId(id);
+        this->state.getDiagnostics().error(value->loc(), message);
         failed = true;
       }
     }
   }
   if (auto *lit = dyn_cast_or_null<StringLitExpr>(options.lookup("killSignal"));
-      lit && !ChildChecker::knownSignal(ChildChecker::utf8(lit->value))) {
-    this->state.getDiagnostics().error(lit->loc(), "could not run it: there is no signal " +
-                                                       ChildChecker::utf8(lit->value) +
-                                                       " (killSignal)");
+      lit && !ChildChecker::knownSignal(ToUtf8::toUtf8(lit->value))) {
+    std::string written = ToUtf8::toUtf8(lit->value);
+    std::string message = ErrorTextChildRun::noSignal(written);
+    this->state.getDiagnostics().error(lit->loc(), message);
     failed = true;
   }
   args[ChildCwd] = option("cwd", string);
@@ -323,18 +294,13 @@ Expr *ChildChecker::checkChildCall(CallExpr *call, llvm::StringRef fn, llvm::SML
       args[ChildInput] = TypeRelations(this->state).coerce(input, Type::optional(t));
       if (t->isString() && encoding == ChildBytes && options.lookup("encoding") &&
           !isa<UndefinedExpr>(options.lookup("encoding"))) {
-        this->state.getDiagnostics().error(
-            input->loc(), "text input with the encoding 'buffer' is a TypeError in Node "
-                          "(Unknown encoding: buffer); pass its bytes, "
-                          "'Buffer.from(text)', or drop the encoding");
+        std::string message = ErrorTextChildOption::bufferText();
+        this->state.getDiagnostics().error(input->loc(), message);
         failed = true;
       }
     } else if (!t->isError()) {
-      this->state.getDiagnostics().error(
-          input->loc(), "'input' of '" + fn +
-                            "' is the text or the bytes the program reads (a string, a "
-                            "Buffer or a Uint8Array); found '" +
-                            input->type->name() + "'");
+      std::string message = ErrorTextChildOption::input(fn, input->type->name());
+      this->state.getDiagnostics().error(input->loc(), message);
       failed = true;
     } else {
       failed = true;
@@ -352,10 +318,8 @@ Expr *ChildChecker::checkChildCall(CallExpr *call, llvm::StringRef fn, llvm::SML
           TypeRelations(this->state).coerce(signal, Type::optional(Type::intTy()));
     } else {
       if (!t->isError()) {
-        this->state.getDiagnostics().error(
-            signal->loc(), "'killSignal' is the name of a signal, e.g. \"SIGKILL\", or "
-                           "its number; found '" +
-                               signal->type->name() + "'");
+        std::string message = ErrorTextChildOption::killSignal(signal->type->name());
+        this->state.getDiagnostics().error(signal->loc(), message);
       }
       failed = true;
     }
@@ -377,25 +341,20 @@ Expr *ChildChecker::checkChildCall(CallExpr *call, llvm::StringRef fn, llvm::SML
       if (auto *lit = dyn_cast<BoolLitExpr>(shell); lit && lit->value) {
         args[ChildShell] = absent(string);
       } else {
-        this->state.getDiagnostics().error(
-            shell->loc(), "'execSync' always runs the command through a shell; "
-                          "'shell' may name another one, e.g. shell: \"powershell.exe\", "
-                          "and to run a program without one, use 'execFileSync'");
+        std::string message = ErrorTextChildOption::execShell();
+        this->state.getDiagnostics().error(shell->loc(), message);
         failed = true;
       }
     } else if (isBool && !isa<BoolLitExpr>(value)) {
-      this->state.getDiagnostics().error(
-          shell->loc(), "the option 'shell' of '" + fn +
-                            "' is written as a literal, true or false: what can go wrong, "
-                            "and so the type of the error, depends on it");
+      std::string message = ErrorTextChildOption::shellFlag(fn);
+      this->state.getDiagnostics().error(shell->loc(), message);
       failed = true;
     } else if (isBool) {
       args[ChildShell] = TypeRelations(this->state).coerce(shell, Type::optional(Type::boolTy()));
     } else {
       if (!t->isError()) {
-        this->state.getDiagnostics().error(
-            shell->loc(),
-            "'shell' is true, false or the path of a shell; found '" + shell->type->name() + "'");
+        std::string message = ErrorTextChildOption::shell(shell->type->name());
+        this->state.getDiagnostics().error(shell->loc(), message);
       }
       failed = true;
     }

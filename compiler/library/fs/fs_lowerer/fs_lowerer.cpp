@@ -126,7 +126,7 @@ llvm::Function *FsLowerer::errorMaker(const Type *error) {
 }
 
 llvm::Value *FsLowerer::emitFsCall(CallExpr *call) {
-  if (isFspBuiltin(call->builtin())) {
+  if (BuiltinGroups::isFspBuiltin(call->builtin())) {
     return this->lowering.fsPromisesLowerer().emitFsPromise(call);
   }
   if (call->builtin() >= Builtin::RlCreate && call->builtin() <= Builtin::RlClose) {

@@ -12,6 +12,8 @@ public:
   std::string path(llvm::StringRef name) const;
 
 private:
+  static void anchor();
+
   std::string dir_;
 };
 

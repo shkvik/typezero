@@ -15,9 +15,7 @@ namespace tz::pkg {
 namespace fs = llvm::sys::fs;
 namespace path = llvm::sys::path;
 
-namespace {
-
-bool regexMayFollow(const Token *prev) {
+bool Scanner::regexMayFollow(const Token *prev) {
   if (!prev) {
     return true;
   }
@@ -43,9 +41,7 @@ bool regexMayFollow(const Token *prev) {
   }
 }
 
-}
-
-std::vector<Token> tokenize(llvm::StringRef text) {
+std::vector<Token> Scanner::tokenize(llvm::StringRef text) {
   llvm::SourceMgr sourceMgr;
   Diagnostics diags(sourceMgr);
   diags.setMuted(true);
@@ -54,7 +50,7 @@ std::vector<Token> tokenize(llvm::StringRef text) {
   while (true) {
     Token tok = lexer.next();
     if ((tok.is(Tok::Slash) || tok.is(Tok::SlashAssign)) &&
-        regexMayFollow(tokens.empty() ? nullptr : &tokens.back())) {
+        Scanner::regexMayFollow(tokens.empty() ? nullptr : &tokens.back())) {
       tok = lexer.regex(tok.text.data(), tok.newlineBefore);
     }
     if (tok.is(Tok::Eof)) {
@@ -66,7 +62,7 @@ std::vector<Token> tokenize(llvm::StringRef text) {
   return tokens;
 }
 
-std::string stringValue(const Token &tok) {
+std::string Scanner::stringValue(const Token &tok) {
   llvm::StringRef raw = tok.text;
   if (raw.size() < 2) {
     return "";
@@ -86,10 +82,11 @@ std::string stringValue(const Token &tok) {
   return out;
 }
 
-std::vector<ImportRef> importSpecifiers(const std::vector<Token> &tokens, llvm::StringRef text) {
+std::vector<ImportRef> Scanner::importSpecifiers(const std::vector<Token> &tokens,
+                                                 llvm::StringRef text) {
   std::vector<ImportRef> refs;
   auto add = [&](const Token &tok) {
-    refs.push_back({stringValue(tok), static_cast<size_t>(tok.text.data() - text.data())});
+    refs.push_back({Scanner::stringValue(tok), static_cast<size_t>(tok.text.data() - text.data())});
   };
   for (size_t i = 0; i < tokens.size(); ++i) {
     const Token &tok = tokens[i];
@@ -135,7 +132,8 @@ std::vector<ImportRef> importSpecifiers(const std::vector<Token> &tokens, llvm::
   return refs;
 }
 
-std::string resolveRelative(llvm::StringRef fromFile, llvm::StringRef spec, Sources sources) {
+std::string Scanner::resolveRelative(llvm::StringRef fromFile, llvm::StringRef spec,
+                                     Sources sources) {
   std::vector<std::string> candidates;
   llvm::StringRef last = path::filename(spec, path::Style::posix);
   llvm::StringRef ext = path::extension(spec, path::Style::posix);
@@ -164,8 +162,9 @@ std::string resolveRelative(llvm::StringRef fromFile, llvm::StringRef spec, Sour
   return "";
 }
 
-void reachableFiles(const std::vector<std::string> &entries, std::vector<std::string> &files,
-                    std::vector<std::string> &external, Sources sources) {
+void Scanner::reachableFiles(const std::vector<std::string> &entries,
+                             std::vector<std::string> &files, std::vector<std::string> &external,
+                             Sources sources) {
   llvm::StringSet<> seen, seenExternal;
   std::vector<std::string> work(entries.rbegin(), entries.rend());
   while (!work.empty()) {
@@ -184,11 +183,11 @@ void reachableFiles(const std::vector<std::string> &entries, std::vector<std::st
     }
     files.push_back(file);
     llvm::StringRef text = (*buffer)->getBuffer();
-    std::vector<ImportRef> refs = importSpecifiers(tokenize(text), text);
+    std::vector<ImportRef> refs = Scanner::importSpecifiers(Scanner::tokenize(text), text);
     for (auto it = refs.rbegin(); it != refs.rend(); ++it) {
       llvm::StringRef spec = it->specifier;
       if (spec.starts_with("./") || spec.starts_with("../") || spec == "." || spec == "..") {
-        std::string target = resolveRelative(file, spec, sources);
+        std::string target = Scanner::resolveRelative(file, spec, sources);
         if (!target.empty()) {
           work.push_back(target);
         }

@@ -33,8 +33,6 @@ inline const IntlOption kDigits[] = {
     {"trailingZeroDisplay", 's', {"auto", "stripIfInteger"}},
 };
 
-std::vector<IntlOption> numberOptions();
-
 struct IntlService {
   IntlKind kind;
   llvm::StringLiteral name;
@@ -43,6 +41,10 @@ struct IntlService {
   bool callable;
 };
 
-const std::vector<IntlService> &services();
+class IntlCheckHelpers {
+public:
+  static std::vector<IntlOption> numberOptions();
+  static const std::vector<IntlService> &services();
+};
 
 }

@@ -12,6 +12,7 @@ public:
   void emitJumpTo(size_t target, bool isBreak);
 
 private:
+  static const Type *returnedType(const FunctionDecl *fn, const Type *returnType);
   Lowering &lowering;
 };
 

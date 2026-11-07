@@ -6,6 +6,9 @@
 
 namespace tz {
 
-std::string dictText(const Expr *expr, const Type *type);
+class DictCheckHelpers {
+public:
+  static std::string dictText(const Expr *expr, const Type *type);
+};
 
 }

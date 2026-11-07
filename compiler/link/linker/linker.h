@@ -7,8 +7,11 @@
 
 namespace tz {
 
-bool linkExecutable(const llvm::Triple &triple, llvm::ArrayRef<std::string> inputs,
-                    llvm::StringRef output, bool debug, llvm::StringRef natvis,
-                    std::string &errors);
+class Linker {
+public:
+  static bool linkExecutable(const llvm::Triple &triple, llvm::ArrayRef<std::string> inputs,
+                             llvm::StringRef output, bool debug, llvm::StringRef natvis,
+                             std::string &errors);
+};
 
 }

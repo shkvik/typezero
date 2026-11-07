@@ -19,17 +19,15 @@ using llvm::isa;
 
 namespace tz {
 
-const Type *literalType(const Expr *value);
+DestinationScanner::DestinationScanner(CheckState &owner)
+    : state(owner) {}
 
-static bool isResultLiteral(const CallExpr *call) {
+bool DestinationScanner::isResultLiteral(const CallExpr *call) {
   auto *name = dyn_cast<NameExpr>(call->callee);
 
   return name && (name->name == "ok" || name->name == "err") && call->args.size() <= 1 &&
          !call->hasSpread() && !call->optional;
 }
-
-DestinationScanner::DestinationScanner(CheckState &owner)
-    : state(owner) {}
 
 bool DestinationScanner::scanDestinations(llvm::ArrayRef<Stmt *> stmts, DestinationScan &scan) {
   for (const Stmt *stmt : stmts) {
@@ -361,12 +359,12 @@ const Type *DestinationScanner::peekType(const Expr *expr, const DestinationScan
     const Type *common = a && b ? TypeRelations::unify(a, b) : nullptr;
     return common && !common->isError() ? common : nullptr;
   }
-  if (auto *call = dyn_cast<CallExpr>(expr); call && isResultLiteral(call)) {
+  if (auto *call = dyn_cast<CallExpr>(expr); call && DestinationScanner::isResultLiteral(call)) {
     const Type *half = Type::voidTy();
     if (!call->args.empty()) {
       half = this->peekType(call->args[0], scan);
       if (!half) {
-        half = literalType(call->args[0]);
+        half = SharedHelpers::literalType(call->args[0]);
       }
     }
     if (!half) {

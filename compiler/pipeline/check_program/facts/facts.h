@@ -10,26 +10,6 @@ namespace tz {
 
 constexpr int64_t kMaxLength = (int64_t(1) << 30) - 1;
 
-inline int64_t saturatingAdd(int64_t a, int64_t b) {
-  if (b > 0 && a > INT64_MAX - b) {
-    return INT64_MAX;
-  }
-  if (b < 0 && a < INT64_MIN - b) {
-    return INT64_MIN;
-  }
-  return a + b;
-}
-
-inline int64_t saturatingSub(int64_t a, int64_t b) {
-  if (b < 0 && a > INT64_MAX + b) {
-    return INT64_MAX;
-  }
-  if (b > 0 && a < INT64_MIN + b) {
-    return INT64_MIN;
-  }
-  return a - b;
-}
-
 struct Term {
   const VarSymbol *var = nullptr;
   bool length = false;
@@ -55,7 +35,7 @@ struct Term {
   bool operator!=(const Term &other) const { return !(*this == other); }
 };
 
-struct ValueRange {
+struct IntegerRange {
   std::optional<int64_t> lo, hi;
 };
 
@@ -81,10 +61,15 @@ public:
   void shift(Term term, int64_t delta);
 
   static Facts meet(const Facts &a, const Facts &b);
+  static int64_t saturatingAdd(int64_t a, int64_t b);
+  static int64_t saturatingSub(int64_t a, int64_t b);
 
   const std::vector<Fact> &all() const { return facts_; }
 
 private:
+  static std::optional<int64_t> lower(Term t);
+  static std::optional<int64_t> plus(std::optional<int64_t> a, std::optional<int64_t> b);
+  static std::optional<int64_t> upper(Term t);
   std::vector<Fact> facts_;
 
   std::optional<int64_t> bound(Term lhs, Term rhs, bool sums) const;

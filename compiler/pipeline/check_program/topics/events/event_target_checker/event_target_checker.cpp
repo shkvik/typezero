@@ -27,6 +27,50 @@ namespace tz {
 EventTargetChecker::EventTargetChecker(CheckState &owner)
     : state(owner) {}
 
+EventTargetChecker::ResultListenerEvent
+EventTargetChecker::listenerEvent(const Type *type, const ClassDecl *eventClass) {
+  const ClassDecl *declared = ClassDeclarer::classOf(type);
+  if (!declared || !declared->derivesFrom(eventClass) || type->isOptional()) {
+    std::string message = ErrorTextEventTarget::listener(type->name());
+
+    return err(EventTargetCheckerListenerEventError{
+        .code = EventTargetCheckerListenerEventErrorCode::NOT_AN_EVENT,
+        .message = message,
+    });
+  }
+
+  return ok(type);
+}
+
+EventTargetChecker::ResultOneErrorValue EventTargetChecker::oneErrorValue(const Type *errors,
+                                                                          llvm::StringRef fn) {
+  if (!errors->isTuple() || errors->fields().size() != 1) {
+    std::string message = ErrorTextEventsFunction::errorValue(fn, errors->name());
+
+    return err(EventTargetCheckerOneErrorValueError{
+        .code = EventTargetCheckerOneErrorValueErrorCode::SEVERAL_VALUES,
+        .message = message,
+    });
+  }
+
+  return ok(errors->fields().front().type);
+}
+
+EventTargetChecker::ResultEmitterEvents
+EventTargetChecker::emitterEvents(const Type *type, llvm::StringRef fn, bool target) {
+  const Type *events = EventMaps(this->state).eventMapOf(type);
+  if (!events) {
+    std::string message = ErrorTextEventsFunction::notEmitter(fn, target, type->name());
+
+    return err(EventTargetCheckerEmitterEventsError{
+        .code = EventTargetCheckerEmitterEventsErrorCode::NOT_AN_EMITTER,
+        .message = message,
+    });
+  }
+
+  return ok(events);
+}
+
 Expr *EventTargetChecker::checkEventTargetCall(CallExpr *call, MemberExpr *member, ClassDecl *cls) {
   bool add = member->name == "addEventListener";
   if (!add && member->name != "removeEventListener") {
@@ -56,16 +100,13 @@ Expr *EventTargetChecker::checkEventTargetCall(CallExpr *call, MemberExpr *membe
     if (type->isError()) {
       return nullptr;
     }
-    if (ClassDecl *c = ClassDeclarer::classOf(type);
-        c && c->derivesFrom(eventClass) && !type->isOptional()) {
-      return type;
+    ResultListenerEvent listened = EventTargetChecker::listenerEvent(type, eventClass);
+    if (listened.isErr()) {
+      this->state.getDiagnostics().error(loc, listened.error().message);
+      return nullptr;
     }
-    this->state.getDiagnostics().error(
-        loc, "a listener of an EventTarget takes an Event, or a kind of it such as "
-             "'CustomEvent<int>', but this one takes '" +
-                 type->name() + "'");
 
-    return nullptr;
+    return type;
   };
   Expr *&listener = call->args[1];
   const Type *kind = nullptr;
@@ -149,7 +190,7 @@ Expr *EventTargetChecker::callLibrarySymbol(CallExpr *call, FuncSymbol *sym,
   const Type *ret = ReturnInferrer(this->state).returnType(sym);
   FuncSymbol *callee = sym;
   if (sym->isGeneric() && !this->state.getFunctionStack().isInsideTrial() &&
-      llvm::none_of(bound, [](const Type *t) { return mentionsParam(t); })) {
+      llvm::none_of(bound, [](const Type *t) { return TypeQueries::mentionsParam(t); })) {
     if (FuncSymbol *instance = GenericInstantiator(this->state).instantiate(sym, bound, loc)) {
       callee = instance;
     }
@@ -203,15 +244,13 @@ Expr *EventTargetChecker::checkEventsFunction(CallExpr *call, llvm::StringRef fn
                              {}, &given, false);
       return method;
     }
-    if (!object->type->isError() && !EventMaps(this->state).eventMapOf(object->type)) {
-      this->state.getDiagnostics().error(
-          object->loc(), "'" + fn.str() + "' takes an emitter of node:events" +
-                             (fn == "getEventListeners" ? " or an EventTarget" : "") +
-                             ", but this is '" + object->type->name().str() + "'");
+    if (object->type->isError()) {
       checkArgsLoosely(1);
       return call;
     }
-    if (object->type->isError()) {
+    ResultEmitterEvents emitter = this->emitterEvents(object->type, fn, fn == "getEventListeners");
+    if (emitter.isErr()) {
+      this->state.getDiagnostics().error(object->loc(), emitter.error().message);
       checkArgsLoosely(1);
       return call;
     }
@@ -257,11 +296,8 @@ Expr *EventTargetChecker::checkEventsFunction(CallExpr *call, llvm::StringRef fn
   if (ClassDecl *target = this->state.getLibraryDeclarations().findLibraryClass("EventTarget");
       target && ClassDeclarer::classOf(type) && ClassDeclarer::classOf(type)->derivesFrom(target)) {
     if (fn == "on") {
-      this->state.getDiagnostics().error(call->args[0]->loc(),
-                                         "'on' of node:events takes an emitter of node:events; "
-                                         "the events of an EventTarget are not supported yet: "
-                                         "listen with 'addEventListener', or wait for one with "
-                                         "'await once(target, name)'");
+      std::string message = ErrorTextEventsFunction::targetOn();
+      this->state.getDiagnostics().error(call->args[0]->loc(), message);
       checkArgsLoosely(1);
       return call;
     }
@@ -269,15 +305,13 @@ Expr *EventTargetChecker::checkEventsFunction(CallExpr *call, llvm::StringRef fn
 
     return this->callLibraryFunction(call, "onceTarget", {}, given, loc);
   }
-  const Type *events = EventMaps(this->state).eventMapOf(type);
-  if (!events) {
-    this->state.getDiagnostics().error(call->args[0]->loc(),
-                                       "'" + fn.str() + "' takes an emitter of node:events" +
-                                           (fn == "once" ? " or an EventTarget" : "") +
-                                           ", but this is '" + type->name().str() + "'");
+  ResultEmitterEvents emitter = this->emitterEvents(type, fn, fn == "once");
+  if (emitter.isErr()) {
+    this->state.getDiagnostics().error(call->args[0]->loc(), emitter.error().message);
     checkArgsLoosely(1);
     return call;
   }
+  const Type *events = emitter.value();
   const Type *args = EventMaps(this->state).eventArgs(events, call->args[1], fn);
   if (!args) {
     checkArgsLoosely(2);
@@ -294,23 +328,16 @@ Expr *EventTargetChecker::checkEventsFunction(CallExpr *call, llvm::StringRef fn
                    !this->state.getFunctionStack().isInsideAwaitLoop()) ||
                   EmitterChecker(this->state).ownsEmitter(call->args[0]);
   if (!ends && !timed && !runsOnce) {
-    std::string name = isa<NameExpr>(call->args[0])
-                           ? "'" + cast<NameExpr>(call->args[0])->name.str() + "'"
-                           : "this emitter";
-    this->state.getDiagnostics().error(
-        call->args[0]->loc(), name +
-                                  " may never emit this event, so the wait may never end; give "
-                                  "it a time limit, e.g. '" +
-                                  fn.str() +
-                                  "(emitter, \"done\", { timeout: 5000 })' (docs/events.md, "
-                                  "section 6)");
+    llvm::StringRef name =
+        isa<NameExpr>(call->args[0]) ? cast<NameExpr>(call->args[0])->name : llvm::StringRef();
+    std::string message = ErrorTextEventsFunction::endless(name, fn);
+    this->state.getDiagnostics().error(call->args[0]->loc(), message);
     checkArgsLoosely(2);
     return call;
   }
   if (fn == "once" && call->args.size() == 3 && !timed) {
-    this->state.getDiagnostics().error(
-        call->args[2]->loc(),
-        "the options of 'once' have only 'timeout', e.g. '{ timeout: 5000 }'");
+    std::string message = ErrorTextEventsFunction::options();
+    this->state.getDiagnostics().error(call->args[2]->loc(), message);
     checkArgsLoosely(2);
     return call;
   }
@@ -318,15 +345,12 @@ Expr *EventTargetChecker::checkEventsFunction(CallExpr *call, llvm::StringRef fn
     const Type *failure = Type::never();
     if (errors) {
       this->state.getEventStore().markErrorListened(events);
-      if (!errors->isTuple() || errors->fields().size() != 1) {
-        this->state.getDiagnostics().error(
-            call->args[1]->loc(), "'" + fn.str() +
-                                      "' gives the error of the emitter as the Err, so its 'error' "
-                                      "event carries one value; this one carries '" +
-                                      errors->name().str() + "'");
+      ResultOneErrorValue value = EventTargetChecker::oneErrorValue(errors, fn);
+      if (value.isErr()) {
+        this->state.getDiagnostics().error(call->args[1]->loc(), value.error().message);
         return call;
       }
-      failure = errors->fields().front().type;
+      failure = value.value();
     }
     call->args.push_back(
         ExprChecker(this->state)
@@ -350,18 +374,14 @@ Expr *EventTargetChecker::checkEventsFunction(CallExpr *call, llvm::StringRef fn
     return this->callLibraryFunction(call, fn, {args, Type::tuple({})}, given, loc);
   }
   this->state.getEventStore().markErrorListened(events);
-  if (!errors->isTuple() || errors->fields().size() != 1) {
-    this->state.getDiagnostics().error(
-        call->args[1]->loc(), "'" + fn.str() +
-                                  "' gives the error of the emitter as the Err, so its 'error' "
-                                  "event carries one value; this one carries '" +
-                                  errors->name().str() + "'");
+  ResultOneErrorValue value = EventTargetChecker::oneErrorValue(errors, fn);
+  if (value.isErr()) {
+    this->state.getDiagnostics().error(call->args[1]->loc(), value.error().message);
     return call;
   }
   std::string variant = fn.str() + "Result";
 
-  return this->callLibraryFunction(call, variant, {args, errors->fields().front().type}, given,
-                                   loc);
+  return this->callLibraryFunction(call, variant, {args, value.value()}, given, loc);
 }
 
 Expr *EventTargetChecker::checkLibraryCall(CallExpr *call, NameExpr *name, FuncSymbol *func) {

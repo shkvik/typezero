@@ -14,6 +14,8 @@ public:
   bool constructionWrite(const AssignExpr *assign);
 
 private:
+  static bool runsAndDrops(Builtin builtin);
+  static const FunctionExpr *closureLiteral(const Expr *arg);
   void closure(const FunctionExpr *expr, bool held);
 
   CycleScanner &scanner_;

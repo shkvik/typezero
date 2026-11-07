@@ -18,12 +18,14 @@ struct CryptoUse {
   bool full = false;
   bool tls = false;
 };
-CryptoUse cryptoUse(const llvm::Module &module);
-bool usesEncodingIndexes(const llvm::Module &module);
-bool usesHttp2(const llvm::Module &module);
 
-void addLicenseManifest(llvm::Module &module, const Embedded &embedded);
-
-int printLicenses(llvm::StringRef exe, llvm::StringRef licensesDir);
+class Licenses {
+public:
+  static CryptoUse cryptoUse(const llvm::Module &module);
+  static bool usesEncodingIndexes(const llvm::Module &module);
+  static bool usesHttp2(const llvm::Module &module);
+  static void addLicenseManifest(llvm::Module &module, const Embedded &embedded);
+  static int printLicenses(llvm::StringRef exe, llvm::StringRef licensesDir);
+};
 
 }

@@ -7,13 +7,16 @@
 
 namespace tz {
 
-std::optional<std::string> OsFeature::exportProblem(NodeModule module, llvm::StringRef exportName,
+OsFeature::ResultExportFound OsFeature::exportFound(NodeModule module, llvm::StringRef exportName,
                                                     llvm::StringRef path) const {
-  if (module != NodeModule::Os) {
-    return std::nullopt;
+  if (module == NodeModule::Os) {
+    return OsExports::osExport(exportName, path);
   }
 
-  return osExportProblem(exportName, path);
+  return err(FeatureExportFoundError{
+      .code = FeatureExportFoundErrorCode::NOT_MINE,
+      .message = "",
+  });
 }
 
 Expr *OsFeature::checkModuleCall(CheckState &state, CallExpr *call, NodeModule module,
@@ -34,7 +37,9 @@ Expr *OsFeature::checkModuleValue(CheckState &state, NodeModule module, llvm::St
   return OsChecker(state).checkOsValue(exportName, expr);
 }
 
-bool OsFeature::lowers(Builtin builtin) const { return isOsBuiltin(builtin); }
+bool OsFeature::lowers(Builtin builtin) const {
+  return BuiltinGroups::isOsBuiltin(builtin);
+}
 
 llvm::Value *OsFeature::lowerCall(Lowering &lowering, CallExpr *call) const {
   return lowering.osLowerer().emitOsCall(call);

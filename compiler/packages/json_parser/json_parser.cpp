@@ -290,7 +290,8 @@ private:
 
 }
 
-bool parseJson(llvm::StringRef text, JsonValue &out, size_t &errorOffset, std::string &error) {
+bool JsonParser::parseJson(llvm::StringRef text, JsonValue &out, size_t &errorOffset,
+                           std::string &error) {
   out = JsonValue();
 
   return Parser(text).parse(out, errorOffset, error);

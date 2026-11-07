@@ -1,13 +1,16 @@
 #include "compiler/pipeline/check_program/topics/bytes/bytes_new_checker/bytes_new_checker.h"
 #include "compiler/library/bytes/bytes_check_helpers/bytes_check_helpers.h"
+#include "compiler/load/to_utf8/to_utf8.h"
 #include "compiler/pipeline/check_program/declare/prelude/prelude.h"
 #include "compiler/pipeline/check_program/flow/index_proofs/index_proofs.h"
 #include "compiler/pipeline/check_program/topics/bytes/byte_proofs/byte_proofs.h"
+#include "compiler/pipeline/check_program/topics/bytes/byte_proofs/byte_proofs_errors.h"
 #include "compiler/pipeline/check_program/topics/expr/argument_checker/argument_checker.h"
 #include "compiler/pipeline/check_program/topics/expr/expr_checker/expr_checker.h"
 #include "compiler/pipeline/check_program/topics/expr/member_checker/member_checker.h"
 #include "compiler/pipeline/check_program/topics/iterators/generator_checker/generator_checker.h"
 #include "compiler/pipeline/check_program/topics/iterators/iterator_methods/iterator_methods.h"
+#include "compiler/pipeline/check_program/topics/values/array_literal_checker/array_literal_checker_errors.h"
 #include "compiler/pipeline/check_program/types/literal_types/literal_types.h"
 #include "compiler/pipeline/check_program/types/type_relations/type_relations.h"
 #include "runtime/library/bytes/encodings/encodings.h"
@@ -21,15 +24,6 @@ using llvm::isa;
 
 namespace tz {
 
-std::string BytesNewChecker::utf8(const std::u16string &text) {
-  std::string out;
-  llvm::convertUTF16ToUTF8String(
-      llvm::ArrayRef<llvm::UTF16>(reinterpret_cast<const llvm::UTF16 *>(text.data()), text.size()),
-      out);
-
-  return out;
-}
-
 std::optional<std::u16string> BytesNewChecker::literalText(const Expr *e) {
   if (auto *conv = dyn_cast<CastExpr>(e); conv && conv->isImplicit()) {
     e = conv->operand;
@@ -42,10 +36,6 @@ std::optional<std::u16string> BytesNewChecker::literalText(const Expr *e) {
   }
 
   return std::nullopt;
-}
-
-std::string BytesNewChecker::rangeText(int64_t lo, int64_t hi) {
-  return std::to_string(lo) + " to " + std::to_string(hi);
 }
 
 bool BytesNewChecker::mayBeFatal(const Expr *options) {
@@ -80,6 +70,34 @@ bool BytesNewChecker::mayBeFatal(const Expr *options) {
   return fatal;
 }
 
+BytesNewChecker::ResultDecoderLabel BytesNewChecker::decoderLabel(llvm::StringRef label) {
+  std::string lower = label.trim(" \t\n\f\r").lower();
+  const char *found = tz_encoding_name(lower.c_str());
+  if (!found) {
+    std::string message = ErrorTextTextDecoder::unknown(label);
+
+    return err(BytesNewCheckerDecoderLabelError{
+        .code = BytesNewCheckerDecoderLabelErrorCode::UNKNOWN_LABEL,
+        .message = message,
+    });
+  }
+
+  return ok(found);
+}
+
+BytesNewChecker::ResultViewedBuffer BytesNewChecker::viewedBuffer(const Type *buffer) {
+  if (buffer->bytes() != Bytes::ArrayBuffer && !buffer->isError()) {
+    std::string message = ErrorTextBytesNew::viewOver(buffer->name(), buffer->isTypedArray());
+
+    return err(BytesNewCheckerViewedBufferError{
+        .code = BytesNewCheckerViewedBufferErrorCode::NOT_A_BUFFER,
+        .message = message,
+    });
+  }
+
+  return ok(buffer);
+}
+
 BytesNewChecker::BytesNewChecker(CheckState &owner)
     : state(owner) {}
 
@@ -112,7 +130,8 @@ Expr *BytesNewChecker::checkBytesNew(NewExpr *expr, const Type *type) {
   auto *callee = this->state.getAst().make<NameExpr>(loc, type->name());
   auto *call = this->state.getAst().make<CallExpr>(loc, callee, args);
   if (!expr->typeArgs.empty()) {
-    this->state.getDiagnostics().error(loc, "'new " + type->name() + "' takes no type arguments");
+    std::string message = ErrorTextBytesNew::typeArgs(type->name());
+    this->state.getDiagnostics().error(loc, message);
   }
   auto made = [&](Builtin builtin, const Type *result) {
     call->target = BuiltinCall{.builtin = builtin};
@@ -122,17 +141,16 @@ Expr *BytesNewChecker::checkBytesNew(NewExpr *expr, const Type *type) {
   };
   call->type = Type::error();
   switch (type->bytes()) {
-  case Bytes::Buffer:
-    this->state.getDiagnostics().error(
-        loc, "'new Buffer(...)' is not supported, as in node, where it is deprecated: "
-             "make one with 'Buffer.from(values)' or 'Buffer.alloc(size)'");
-    checkArgsLoosely();
-    return expr;
+    case Bytes::Buffer: {
+      std::string message = ErrorTextBytesNew::buffer();
+      this->state.getDiagnostics().error(loc, message);
+      checkArgsLoosely();
+      return expr;
+    }
   case Bytes::ArrayBuffer: {
     if (args.size() == 2) {
-      this->state.getDiagnostics().error(
-          args[1]->loc(), "an ArrayBuffer that can change its size is not supported yet "
-                          "(docs/bytes.md, section 7); make a new one of the size wanted");
+      std::string message = ErrorTextBytesNew::resizable();
+      this->state.getDiagnostics().error(args[1]->loc(), message);
       checkArgsLoosely();
       return expr;
     }
@@ -142,9 +160,9 @@ Expr *BytesNewChecker::checkBytesNew(NewExpr *expr, const Type *type) {
       return call;
     }
     call->args[0] = MemberChecker(this->state).checkPosition(call->args[0]);
+    std::string what = ErrorTextBytesNew::bufferLen();
     IndexProofs::ResultBetweenProven between =
-        IndexProofs(this->state)
-            .requireBetween(call->args[0], 0, std::nullopt, "the length of an ArrayBuffer");
+        IndexProofs(this->state).requireBetween(call->args[0], 0, std::nullopt, what);
     if (between.isErr() && between.error().code != IndexProofsRequireBetweenErrorCode::EXEMPT) {
       this->state.getDiagnostics().error(call->args[0]->loc(), between.error().message);
     }
@@ -157,22 +175,18 @@ Expr *BytesNewChecker::checkBytesNew(NewExpr *expr, const Type *type) {
       return call;
     }
     call->args[0] = ExprChecker(this->state).checkExpr(call->args[0]);
-    const Type *buffer = call->args[0]->type;
-    if (buffer->bytes() != Bytes::ArrayBuffer && !buffer->isError()) {
-      this->state.getDiagnostics().error(
-          call->args[0]->loc(),
-          "a DataView is made over an ArrayBuffer, found '" + buffer->name() + "'" +
-              (buffer->isTypedArray() ? "; give its buffer: 'new DataView(u.buffer, "
-                                        "u.byteOffset, u.byteLength)'"
-                                      : ""));
+    ResultViewedBuffer viewed = BytesNewChecker::viewedBuffer(call->args[0]->type);
+    if (viewed.isErr()) {
+      this->state.getDiagnostics().error(call->args[0]->loc(), viewed.error().message);
       return call;
     }
     for (size_t i = 1; i < call->args.size(); ++i) {
       call->args[i] = MemberChecker(this->state).checkPosition(call->args[i]);
     }
+    std::string what = ErrorTextBytesNew::dataView();
     ByteProofs(this->state)
         .checkView(call->args[0], call->args.size() > 1 ? call->args[1] : nullptr,
-                   call->args.size() > 2 ? call->args[2] : nullptr, 1, "the DataView");
+                   call->args.size() > 2 ? call->args[2] : nullptr, 1, what);
     return made(Builtin::DataViewNew, type);
   }
   case Bytes::TextEncoder: {
@@ -196,16 +210,13 @@ Expr *BytesNewChecker::checkBytesNew(NewExpr *expr, const Type *type) {
     if (!call->args.empty() && !isa<UndefinedExpr>(call->args[0])) {
       Expr *label = call->args[0];
       if (std::optional<std::u16string> text = BytesNewChecker::literalText(label)) {
-        std::string lower = llvm::StringRef(BytesNewChecker::utf8(*text)).trim(" \t\n\f\r").lower();
-        const char *found = tz_encoding_name(lower.c_str());
-        if (!found) {
-          this->state.getDiagnostics().error(
-              label->loc(), "'" + BytesNewChecker::utf8(*text) +
-                                "' is not an encoding TextDecoder knows (JavaScript "
-                                "throws a RangeError); e.g. 'utf-8', 'utf-16le', "
-                                "'windows-1251', 'latin1'");
+        std::string written = ToUtf8::toUtf8(*text);
+        ResultDecoderLabel decoded = BytesNewChecker::decoderLabel(written);
+        if (decoded.isErr()) {
+          this->state.getDiagnostics().error(label->loc(), decoded.error().message);
           return call;
         }
+        const char *found = decoded.value();
         name = std::u16string(found, found + strlen(found));
       } else {
         call->args[0] = ArgumentChecker(this->state).checkArg(label, Type::string());
@@ -216,22 +227,14 @@ Expr *BytesNewChecker::checkBytesNew(NewExpr *expr, const Type *type) {
           std::optional<std::vector<std::string>> labels =
               LiteralTypes(this->state).knownTexts(call->args[0]);
           if (!labels) {
-            this->state.getDiagnostics().error(
-                label->loc(), "a label known only when the program runs may name no "
-                              "encoding, which JavaScript would throw a RangeError for; "
-                              "parse it with 'TextDecoder.parse(label)', which gives a "
-                              "Result, or check it first, e.g. 'if (label == \"utf-8\" || "
-                              "label == \"windows-1251\")'");
+            std::string message = ErrorTextTextDecoder::notKnown();
+            this->state.getDiagnostics().error(label->loc(), message);
             return call;
           }
           for (const std::string &each : *labels) {
-            std::string lower = llvm::StringRef(each).trim(" \t\n\f\r").lower();
-            if (!tz_encoding_name(lower.c_str())) {
-              this->state.getDiagnostics().error(
-                  label->loc(), "'" + each +
-                                    "' is not an encoding TextDecoder knows (JavaScript "
-                                    "throws a RangeError); e.g. 'utf-8', 'utf-16le', "
-                                    "'windows-1251', 'latin1'");
+            ResultDecoderLabel decoded = BytesNewChecker::decoderLabel(each);
+            if (decoded.isErr()) {
+              this->state.getDiagnostics().error(label->loc(), decoded.error().message);
               return call;
             }
           }
@@ -251,18 +254,18 @@ Expr *BytesNewChecker::checkBytesNew(NewExpr *expr, const Type *type) {
                                           {"ignoreBOM", Type::optional(Type::boolTy()), false}});
       Expr *given = ExprChecker(this->state).checkExpr(call->args[1], options);
       fatal = BytesNewChecker::mayBeFatal(given);
-      checked.push_back(
-          TypeRelations(this->state).coerce(given, options, "the options of TextDecoder"));
+      std::string what = ErrorTextTextDecoder::options();
+      checked.push_back(TypeRelations(this->state).coerce(given, options, what));
     }
     call->args = checked;
     return made(Builtin::TextDecoderNew, fatal ? Type::bytesType(Bytes::FatalTextDecoder) : type);
   }
-  case Bytes::FatalTextDecoder:
-    this->state.getDiagnostics().error(
-        loc, "a FatalTextDecoder is made by 'new TextDecoder(label, { fatal: "
-             "true })'");
+  case Bytes::FatalTextDecoder: {
+    std::string message = ErrorTextBytesNew::fatal();
+    this->state.getDiagnostics().error(loc, message);
     checkArgsLoosely();
     return expr;
+  }
   default:
     break;
   }
@@ -294,25 +297,22 @@ Expr *BytesNewChecker::checkBytesNew(NewExpr *expr, const Type *type) {
     for (size_t i = 1; i < call->args.size(); ++i) {
       call->args[i] = MemberChecker(this->state).checkPosition(call->args[i]);
     }
+    std::string what = ErrorTextBytesNew::the(type->name());
     ByteProofs(this->state)
         .checkView(source, call->args.size() > 1 ? call->args[1] : nullptr,
-                   call->args.size() > 2 ? call->args[2] : nullptr, type->elementSize(),
-                   "the " + type->name().str());
+                   call->args.size() > 2 ? call->args[2] : nullptr, type->elementSize(), what);
     return made(Builtin::BytesView, type);
   }
   if (call->args.size() > 1) {
-    this->state.getDiagnostics().error(call->args[1]->loc(),
-                                       "'new " + type->name() +
-                                           "' takes an offset and a length only with an "
-                                           "ArrayBuffer, found '" +
-                                           from->name() + "'");
+    std::string message = ErrorTextBytesNew::offsetOnly(type->name(), from->name());
+    this->state.getDiagnostics().error(call->args[1]->loc(), message);
     return call;
   }
   if (from->isInteger()) {
     source = TypeRelations(this->state).convert(source, Type::intTy());
+    std::string what = ErrorTextBytesNew::lengthOf(type->name());
     IndexProofs::ResultBetweenProven between =
-        IndexProofs(this->state)
-            .requireBetween(source, 0, std::nullopt, "the length of a " + type->name().str());
+        IndexProofs(this->state).requireBetween(source, 0, std::nullopt, what);
     if (between.isErr() && between.error().code != IndexProofsRequireBetweenErrorCode::EXEMPT) {
       this->state.getDiagnostics().error(source->loc(), between.error().message);
     }
@@ -322,9 +322,8 @@ Expr *BytesNewChecker::checkBytesNew(NewExpr *expr, const Type *type) {
     return made(Builtin::BytesNew, type);
   }
   if (from->isFloat()) {
-    this->state.getDiagnostics().error(
-        source->loc(), "the length of a typed array must be an integer, found 'double'; "
-                       "round it with Math.floor(x) or drop the fraction with 'x | 0'");
+    std::string message = ErrorTextBytesNew::floatLen();
+    this->state.getDiagnostics().error(source->loc(), message);
     return call;
   }
   if (!this->checkBytesSource(source, type)) {
@@ -337,7 +336,7 @@ Expr *BytesNewChecker::checkBytesNew(NewExpr *expr, const Type *type) {
 Expr *BytesNewChecker::checkBytesValues(CallExpr *call, ArrayLitExpr *lit, const Type *type) {
   const Type *element =
       type->bytes() == Type::Bytes::Uint8Clamped ? Type::intTy() : type->elementType();
-  std::string what = "an element of '" + type->name().str() + "'";
+  std::string what = ErrorTextByteView::element(type->name());
   call->type = Type::error();
   bool spreads =
       llvm::any_of(lit->elements, [](const ArrayLitExpr::Element &e) { return e.spread; });
@@ -345,12 +344,16 @@ Expr *BytesNewChecker::checkBytesValues(CallExpr *call, ArrayLitExpr *lit, const
     std::vector<Expr *> values;
     for (ArrayLitExpr::Element &e : lit->elements) {
       if (e.hole) {
-        this->state.getDiagnostics().error(
-            e.expr->loc(), "arrays cannot have holes; write the element explicitly");
+        std::string message = ErrorTextArrayHole::hole();
+        this->state.getDiagnostics().error(e.expr->loc(), message);
         return call;
       }
       Expr *value = ArgumentChecker(this->state).checkArg(e.expr, element);
-      ByteProofs(this->state).checkFits(value, type, what);
+      ByteProofs::ResultValueFitsType fitting =
+          ByteProofs(this->state).valueFits(value, type, what);
+      if (fitting.isErr()) {
+        this->state.getDiagnostics().error(value->loc(), fitting.error().message);
+      }
       values.push_back(value);
     }
     call->args = std::move(values);
@@ -365,7 +368,11 @@ Expr *BytesNewChecker::checkBytesValues(CallExpr *call, ArrayLitExpr *lit, const
   bool ok = true;
   for (const ArrayLitExpr::Element &e : lit->elements) {
     if (!e.spread) {
-      ByteProofs(this->state).checkFits(e.expr, type, what);
+      ByteProofs::ResultValueFitsType fitting =
+          ByteProofs(this->state).valueFits(e.expr, type, what);
+      if (fitting.isErr()) {
+        this->state.getDiagnostics().error(e.expr->loc(), fitting.error().message);
+      }
     } else {
       ok &= this->checkBytesSource(e.expr, type);
     }
@@ -390,28 +397,22 @@ bool BytesNewChecker::checkBytesSource(Expr *source, const Type *target) {
                         : from->isIterator() ? from->yielded()
                                              : nullptr;
   if (!element) {
-    this->state.getDiagnostics().error(
-        source->loc(), "a " + target->name() +
-                           " is made from a length, an array or an iterator of numbers, "
-                           "another typed array or an ArrayBuffer, found '" +
-                           from->name() + "'" +
-                           (from->isString() ? "; for the bytes of a string, use 'new "
-                                               "TextEncoder().encode(s)' or "
-                                               "'Buffer.from(s)'"
-                                             : ""));
+    std::string message =
+        ErrorTextBytesSource::notSource(target->name(), from->name(), from->isString());
+    this->state.getDiagnostics().error(source->loc(), message);
     return false;
   }
   if (from->isIterator()) {
+    std::string what = ErrorTextBytesSource::quoted(target->name());
     GeneratorChecker::ResultNextNeedsNoValue nothing =
-        GeneratorChecker(this->state).checkSendsNothing(from, "'" + target->name().str() + "'");
+        GeneratorChecker(this->state).checkSendsNothing(from, what);
     if (nothing.isErr()) {
       this->state.getDiagnostics().error(source->loc(), nothing.error().message);
     }
   }
   if (!element->isNumeric()) {
-    this->state.getDiagnostics().error(source->loc(), "the elements of '" + from->name() +
-                                                          "' are not numbers, which a " +
-                                                          target->name() + " holds");
+    std::string message = ErrorTextBytesSource::notNumbers(from->name(), target->name());
+    this->state.getDiagnostics().error(source->loc(), message);
     return false;
   }
   int64_t lo, hi;
@@ -419,17 +420,12 @@ bool BytesNewChecker::checkBytesSource(Expr *source, const Type *target) {
     return true;
   }
   Bytes kind = target->bytes();
-  std::string text = valueText(source);
-  std::string hint = target->name().str() + ".from(" + text + ", x => " + wrapHint(kind, "x") + ")";
+  std::string text = BytesCheckHelpers::valueText(source);
+  std::string wrap = BytesCheckHelpers::wrapHint(kind, "x");
+  std::string hint = ErrorTextBytesSource::hint(target->name(), text, wrap);
   if (element->isFloat()) {
-    this->state.getDiagnostics().error(
-        source->loc(), "the elements of '" + from->name() +
-                           "' are doubles, which an "
-                           "element of '" +
-                           target->name() +
-                           "' cannot hold without an explicit conversion; convert them, "
-                           "e.g. '" +
-                           target->name() + ".from(" + text + ", x => Math.round(x) & 0xff)'");
+    std::string message = ErrorTextBytesSource::doubles(from->name(), target->name(), text);
+    this->state.getDiagnostics().error(source->loc(), message);
     return false;
   }
   if (kind == Bytes::Uint8Clamped) {
@@ -440,23 +436,16 @@ bool BytesNewChecker::checkBytesSource(Expr *source, const Type *target) {
     if (slo >= lo && shi <= hi) {
       return true;
     }
-    this->state.getDiagnostics().error(
-        source->loc(), "the elements of '" + from->name() + "' (" +
-                           BytesNewChecker::rangeText(slo, shi) +
-                           ") may not fit in an element of '" + target->name() + "' (" +
-                           BytesNewChecker::rangeText(lo, hi) +
-                           "), and JavaScript would cut them without a word; convert "
-                           "them explicitly, e.g. '" +
-                           hint + "'");
+    std::string fromRange = ErrorTextBytes::range(slo, shi);
+    std::string range = ErrorTextBytes::range(lo, hi);
+    std::string message =
+        ErrorTextBytesSource::mayNotFit(from->name(), fromRange, target->name(), range, hint);
+    this->state.getDiagnostics().error(source->loc(), message);
     return false;
   }
-  this->state.getDiagnostics().error(
-      source->loc(), "cannot prove that the elements of '" + from->name() + "' fit in " +
-                         "an element of '" + target->name() + "' (" +
-                         BytesNewChecker::rangeText(lo, hi) +
-                         "), and JavaScript would cut them without a word; write the "
-                         "values in the literal, or convert them explicitly, e.g. '" +
-                         hint + "'");
+  std::string range = ErrorTextBytes::range(lo, hi);
+  std::string message = ErrorTextBytesSource::unproven(from->name(), target->name(), range, hint);
+  this->state.getDiagnostics().error(source->loc(), message);
 
   return false;
 }

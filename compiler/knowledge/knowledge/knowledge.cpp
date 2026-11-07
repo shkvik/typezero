@@ -7,9 +7,7 @@
 
 namespace tz {
 
-namespace {
-
-bool covers(const SourcePlace &place, unsigned line, unsigned character) {
+bool Knowledge::covers(const SourcePlace &place, unsigned line, unsigned character) {
   if (line < place.line || line > place.endLine) {
     return false;
   }
@@ -20,10 +18,8 @@ bool covers(const SourcePlace &place, unsigned line, unsigned character) {
   return !(line == place.endLine && character > place.endCharacter);
 }
 
-unsigned size(const SourcePlace &place) {
+unsigned Knowledge::size(const SourcePlace &place) {
   return (place.endLine - place.line) * 1000 + place.endCharacter;
-}
-
 }
 
 std::string Knowledge::qualified(size_t symbol) const {
@@ -207,7 +203,7 @@ std::optional<size_t> Knowledge::moduleAt(llvm::StringRef path) const {
 size_t Knowledge::symbolAt(size_t module, unsigned line, unsigned character,
                            const SourcePlace **place) const {
   for (size_t i = 0; i < symbols.size(); ++i) {
-    if (symbols[i].module == module && covers(symbols[i].place, line, character)) {
+    if (symbols[i].module == module && Knowledge::covers(symbols[i].place, line, character)) {
       if (place) {
         *place = &symbols[i].place;
       }
@@ -215,7 +211,7 @@ size_t Knowledge::symbolAt(size_t module, unsigned line, unsigned character,
     }
   }
   for (const KnownReference &reference : references) {
-    if (reference.module == module && covers(reference.place, line, character)) {
+    if (reference.module == module && Knowledge::covers(reference.place, line, character)) {
       if (place) {
         *place = &reference.place;
       }
@@ -233,14 +229,14 @@ size_t Knowledge::localAt(size_t module, unsigned line, unsigned character,
     if (local.module != module) {
       continue;
     }
-    if (covers(local.place, line, character)) {
+    if (Knowledge::covers(local.place, line, character)) {
       if (place) {
         *place = &local.place;
       }
       return i;
     }
     for (const SourcePlace &use : local.uses) {
-      if (covers(use, line, character)) {
+      if (Knowledge::covers(use, line, character)) {
         if (place) {
           *place = &use;
         }
@@ -254,7 +250,7 @@ size_t Knowledge::localAt(size_t module, unsigned line, unsigned character,
 
 const KnownType *Knowledge::typeAt(size_t module, unsigned line, unsigned character) const {
   for (const KnownType &type : types) {
-    if (type.module == module && covers(type.place, line, character)) {
+    if (type.module == module && Knowledge::covers(type.place, line, character)) {
       return &type;
     }
   }
@@ -279,7 +275,7 @@ std::vector<size_t> Knowledge::at(size_t module, unsigned line,
     if (symbols[i].module != module || line < extent.line || line > extent.endLine) {
       continue;
     }
-    if (best == kNone || size(extent) < size(symbols[best].extent)) {
+    if (best == kNone || Knowledge::size(extent) < Knowledge::size(symbols[best].extent)) {
       best = i;
     }
   }

@@ -35,9 +35,10 @@ using llvm::dyn_cast;
 
 using llvm::isa;
 
-namespace {
+EscapeScan::EscapeScan(Analysis &analysis)
+    : analysis_(analysis) {}
 
-bool keepsReceiver(Builtin b, bool discarded) {
+bool EscapeScan::keepsReceiver(Builtin b, bool discarded) {
   switch (b) {
   case Builtin::ArrReverse:
   case Builtin::ArrFill:
@@ -65,13 +66,9 @@ bool keepsReceiver(Builtin b, bool discarded) {
   case Builtin::BytesView:
     return false;
   default:
-    return knownBuiltin(b);
+    return ParallelHelpers::knownBuiltin(b);
   }
 }
-
-}
-
-EscapeScan::EscapeScan(Analysis &analysis) : analysis_(analysis) {}
 
 const Escapes &EscapeScan::escapes(const FunctionDecl *owner) {
   auto found = analysis_.escapes.find(owner);
@@ -219,9 +216,9 @@ void EscapeScan::scanUses(const Expr *e, bool safe, Escapes &out, bool discarded
     auto *m = dyn_cast<MemberExpr>(c->callee);
     if (c->builtin() != Builtin::None) {
       if (m) {
-        scanUses(m->object, keepsReceiver(c->builtin(), discarded), out);
+        scanUses(m->object, EscapeScan::keepsReceiver(c->builtin(), discarded), out);
       }
-      bool reads = onlyReadsArgs(c->builtin());
+      bool reads = ParallelHelpers::onlyReadsArgs(c->builtin());
       for (const Expr *arg : c->args) {
         scanUses(arg, reads, out);
       }

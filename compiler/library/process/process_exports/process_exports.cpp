@@ -11,14 +11,17 @@ const llvm::StringLiteral kProcessNames[] = {"argv",     "env",      "exit",   "
 
 }
 
-std::string processExportProblem(llvm::StringRef name, llvm::StringRef path) {
+ProcessExports::ResultExportFound ProcessExports::processExport(llvm::StringRef name,
+                                                                llvm::StringRef path) {
   if (llvm::is_contained(kProcessNames, name)) {
-    return "";
+    return ok(name);
   }
+  std::string message = ErrorTextProcessExport::notYet(name, path);
 
-  return "'" + name.str() + "' of '" + path.str() +
-         "' is not supported yet; tz has: argv, env, exit, exitCode, cwd, platform, "
-         "execPath, stdin, stdout, stderr, uptime and pid";
+  return err(FeatureExportFoundError{
+      .code = FeatureExportFoundErrorCode::NOT_YET,
+      .message = message,
+  });
 }
 
 }

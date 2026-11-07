@@ -36,10 +36,11 @@ using llvm::isa;
 
 namespace tz {
 
-namespace {
+Narrowing::Narrowing(OverflowCheck &check)
+    : check_(check) {}
 
-std::optional<double> literalValue(const Expr *expr) {
-  expr = stripCasts(expr);
+std::optional<double> Narrowing::literalValue(const Expr *expr) {
+  expr = OverflowHelpers::stripCasts(expr);
   if (auto *lit = dyn_cast_or_null<IntLitExpr>(expr)) {
     return double(lit->value);
   }
@@ -47,17 +48,13 @@ std::optional<double> literalValue(const Expr *expr) {
     return lit->value;
   }
   if (auto *unary = dyn_cast_or_null<UnaryExpr>(expr); unary && unary->op == UnaryOp::Neg) {
-    if (std::optional<double> v = literalValue(unary->operand)) {
+    if (std::optional<double> v = Narrowing::literalValue(unary->operand)) {
       return -*v;
     }
   }
 
   return std::nullopt;
 }
-
-}
-
-Narrowing::Narrowing(OverflowCheck &check) : check_(check) {}
 
 void Narrowing::notePredicate(const FunctionDecl *fn, const State &whenTrue,
                               const State &whenFalse) {
@@ -69,7 +66,7 @@ void Narrowing::notePredicate(const FunctionDecl *fn, const State &whenTrue,
   pred.whenFalse.resize(fn->params.size());
   for (size_t i = 0; i < fn->params.size(); ++i) {
     const VarSymbol *p = fn->params[i].sym;
-    if (!p || !isNumberType(p->type) || p->reassigned) {
+    if (!p || !ValueRange::isNumberType(p->type) || p->reassigned) {
       continue;
     }
     auto value = [&](const State &s) {
@@ -80,8 +77,8 @@ void Narrowing::notePredicate(const FunctionDecl *fn, const State &whenTrue,
 
       return found == s.vars.end() ? Num() : found->second.num;
     };
-    pred.whenTrue[i] = join(pred.whenTrue[i], value(whenTrue));
-    pred.whenFalse[i] = join(pred.whenFalse[i], value(whenFalse));
+    pred.whenTrue[i] = ValueRange::join(pred.whenTrue[i], value(whenTrue));
+    pred.whenFalse[i] = ValueRange::join(pred.whenFalse[i], value(whenFalse));
   }
 }
 
@@ -108,15 +105,15 @@ std::optional<OverflowCheck::Narrowable> Narrowing::narrowable(const Expr *expr,
         return a;
       }
     }
-    std::optional<double> c = literalValue(bin->rhs);
+    std::optional<double> c = Narrowing::literalValue(bin->rhs);
     const Expr *other = bin->lhs;
     bool constantFirst = false;
     if (!c && bin->op != BinaryOp::Sub) {
-      c = literalValue(bin->lhs);
+      c = Narrowing::literalValue(bin->lhs);
       other = bin->rhs;
       constantFirst = true;
     } else if (!c && bin->op == BinaryOp::Sub) {
-      c = literalValue(bin->lhs);
+      c = Narrowing::literalValue(bin->lhs);
       other = bin->rhs;
       constantFirst = true;
     }
@@ -164,17 +161,17 @@ std::optional<OverflowCheck::Narrowable> Narrowing::narrowable(const Expr *expr,
       n.offset = update->increment ? -1 : 1;
     }
     if (name && name->var()) {
-      n.integer = isIntegerType(name->var()->type);
+      n.integer = ValueRange::isIntegerType(name->var()->type);
     }
   } else if (auto *member = dyn_cast<MemberExpr>(expr);
-             member && member->name == "length" && hasLength(member->object->type)) {
-    name = dyn_cast<NameExpr>(stripCasts(member->object));
+             member && member->name == "length" && ValueRange::hasLength(member->object->type)) {
+    name = dyn_cast<NameExpr>(OverflowHelpers::stripCasts(member->object));
     n.length = true;
     n.integer = true;
   } else {
     name = dyn_cast<NameExpr>(expr);
     if (name && name->var()) {
-      n.integer = isIntegerType(name->var()->type);
+      n.integer = ValueRange::isIntegerType(name->var()->type);
     }
   }
   if (!name || !name->var() || !st.vars.count(name->var())) {
@@ -185,7 +182,7 @@ std::optional<OverflowCheck::Narrowable> Narrowing::narrowable(const Expr *expr,
       info->second.writtenElsewhere) {
     return std::nullopt;
   }
-  if (!n.length && !isNumberType(name->var()->type)) {
+  if (!n.length && !ValueRange::isNumberType(name->var()->type)) {
     return std::nullopt;
   }
   n.var = name->var();
@@ -215,14 +212,15 @@ void Narrowing::constrain(State &s, const OverflowCheck::Narrowable &target, con
     }
     if (upper.v != kInf) {
       double r = down(upper.v);
-      n = narrowTo(n, Bound{-r, upper.origin, upper.why}, Bound{r, upper.origin, upper.why});
+      n = ValueRange::narrowTo(n, Bound{-r, upper.origin, upper.why},
+                               Bound{r, upper.origin, upper.why});
     }
     double gap = up(lower.v);
     if (gap > 0 && !n.empty()) {
       if (n.lo >= 0) {
-        n = narrowTo(n, Bound{gap, lower.origin, lower.why}, n.high());
+        n = ValueRange::narrowTo(n, Bound{gap, lower.origin, lower.why}, n.high());
       } else if (n.hi <= 0) {
-        n = narrowTo(n, n.low(), Bound{-gap, lower.origin, lower.why});
+        n = ValueRange::narrowTo(n, n.low(), Bound{-gap, lower.origin, lower.why});
       } else {
         n.away = std::max(n.away, gap);
         if (-gap < n.lo && n.lo < gap) {
@@ -241,7 +239,8 @@ void Narrowing::constrain(State &s, const OverflowCheck::Narrowable &target, con
       return;
     }
     double r = down(std::sqrt(upper.v));
-    n = narrowTo(n, Bound{-r, upper.origin, upper.why}, Bound{r, upper.origin, upper.why});
+    n = ValueRange::narrowTo(n, Bound{-r, upper.origin, upper.why},
+                             Bound{r, upper.origin, upper.why});
   } else {
     Bound lo = lower, hi = upper;
     lo.v = (lower.v - target.offset) / target.scale;
@@ -257,7 +256,7 @@ void Narrowing::constrain(State &s, const OverflowCheck::Narrowable &target, con
     }
     lo.v = up(lo.v);
     hi.v = down(hi.v);
-    n = narrowTo(n, lo, hi);
+    n = ValueRange::narrowTo(n, lo, hi);
   }
   if (n.empty()) {
     s.dead = true;
@@ -385,7 +384,7 @@ void Narrowing::applyPredicate(const CallExpr *call, State &whenTrue, State &whe
       if (var == s.vars.end() || var->second.num.empty()) {
         return;
       }
-      var->second.num = narrowTo(var->second.num, facts[i].lo, facts[i].hi);
+      var->second.num = ValueRange::narrowTo(var->second.num, facts[i].lo, facts[i].hi);
       if (var->second.num.empty()) {
         s.dead = true;
       }
@@ -423,17 +422,17 @@ void Narrowing::refine(const Expr *cond, State &st, State &whenTrue, State &when
       refine(bin->lhs, st, t1, f1);
       refine(bin->rhs, t1, t2, f2);
       whenTrue = t2;
-      whenFalse = join(f1, f2);
-      st = join(whenTrue, whenFalse);
+      whenFalse = ValueRange::join(f1, f2);
+      st = ValueRange::join(whenTrue, whenFalse);
       return;
     }
     case BinaryOp::LogOr: {
       State t1, f1, t2, f2;
       refine(bin->lhs, st, t1, f1);
       refine(bin->rhs, f1, t2, f2);
-      whenTrue = join(t1, t2);
+      whenTrue = ValueRange::join(t1, t2);
       whenFalse = f2;
-      st = join(whenTrue, whenFalse);
+      st = ValueRange::join(whenTrue, whenFalse);
       return;
     }
     case BinaryOp::Lt:
@@ -444,8 +443,9 @@ void Narrowing::refine(const Expr *cond, State &st, State &whenTrue, State &when
     case BinaryOp::Ne: {
       Val l = check_.evaluator().eval(bin->lhs, st), r = check_.evaluator().eval(bin->rhs, st);
       whenTrue = whenFalse = st;
-      if (isNumberType(bin->lhs->type) || isNumberType(bin->rhs->type) ||
-          isa<MemberExpr>(stripCasts(bin->lhs)) || isa<MemberExpr>(stripCasts(bin->rhs))) {
+      if (ValueRange::isNumberType(bin->lhs->type) || ValueRange::isNumberType(bin->rhs->type) ||
+          isa<MemberExpr>(OverflowHelpers::stripCasts(bin->lhs)) ||
+          isa<MemberExpr>(OverflowHelpers::stripCasts(bin->rhs))) {
         narrowComparison(bin, l, r, whenTrue, whenFalse);
       }
       return;

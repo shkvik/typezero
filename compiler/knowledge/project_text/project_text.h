@@ -23,6 +23,11 @@ public:
   const std::string &root() const { return root_; }
 
 private:
+  static bool isWord(char c);
+  static bool hasWord(llvm::StringRef text, llvm::StringRef word);
+  static bool inCode(llvm::StringRef line, llvm::StringRef word);
+  static void collect(llvm::StringRef dir, llvm::StringRef extension,
+                      std::vector<std::string> &out);
   const std::vector<std::string> &lines(const std::string &file);
   void list();
 

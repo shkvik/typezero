@@ -451,7 +451,7 @@ void TypeDeclarer::resolveEnum(EnumDecl *decl) {
   decl->stage = EnumStage::RESOLVED;
   if (decl->isString) {
     for (const EnumMember &m : decl->members) {
-      this->state.getFlowState().markFieldAssigned(toUtf8(m.text));
+      this->state.getFlowState().markFieldAssigned(ToUtf8::toUtf8(m.text));
     }
   }
 }

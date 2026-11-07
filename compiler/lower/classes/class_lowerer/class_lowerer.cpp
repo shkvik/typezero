@@ -24,7 +24,7 @@ using llvm::isa;
 
 namespace tz {
 
-bool staysDuringCall(const Expr *expr) {
+bool ClassLowerer::staysDuringCall(const Expr *expr) {
   while (auto *conv = dyn_cast<CastExpr>(expr)) {
     if (!conv->isImplicit() || conv->shortCircuit || !conv->operand->type->isOptional()) {
       return false;
@@ -136,8 +136,8 @@ llvm::Value *ClassLowerer::emitSuperCall(CallExpr *call) {
 llvm::Value *ClassLowerer::emitMethodCall(CallExpr *call) {
   auto *member = cast<MemberExpr>(call->callee);
   const FuncSymbol *method = call->method();
-  bool borrow =
-      staysDuringCall(member->object) && llvm::all_of(call->args, AssignLowerer::cannotAssign);
+  bool borrow = ClassLowerer::staysDuringCall(member->object) &&
+                llvm::all_of(call->args, AssignLowerer::cannotAssign);
   Lowering::Operand self = this->lowering.refCounts().emitOperand(member->object, borrow);
   std::vector<llvm::Value *> values = this->lowering.exprLowerer().emitExprs(call->args);
   std::vector<llvm::Value *> args{self.value};

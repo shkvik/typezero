@@ -1,4 +1,5 @@
 #include "compiler/pipeline/check_program/topics/date/date_checker/date_checker.h"
+#include "compiler/load/to_utf8/to_utf8.h"
 #include "compiler/pipeline/check_program/declare/constant_folder/constant_folder.h"
 #include "compiler/pipeline/check_program/declare/prelude/prelude.h"
 #include "compiler/pipeline/check_program/generics/generic_checker/generic_checker.h"
@@ -75,19 +76,6 @@ const DateMethod kMethods[] = {
     {"toLocaleTimeString", Builtin::DateToLocale, TZ_DATE_LOCALE_TIME, 0, 2},
 };
 
-const char *const kMonthNames[] = {"January",   "February", "March",    "April",
-                                   "May",       "June",     "July",     "August",
-                                   "September", "October",  "November", "December"};
-
-}
-
-std::string DateChecker::utf8(const std::u16string &text) {
-  std::string out;
-  llvm::convertUTF16ToUTF8String(
-      llvm::ArrayRef<llvm::UTF16>(reinterpret_cast<const llvm::UTF16 *>(text.data()), text.size()),
-      out);
-
-  return out;
 }
 
 std::optional<std::u16string> DateChecker::literalText(const Expr *e) {
@@ -111,16 +99,8 @@ int DateChecker::daysInMonth(int64_t year, int64_t month) {
   return month == 1 && DateChecker::isLeap(year) ? 29 : days[month];
 }
 
-std::string DateChecker::missingDay(std::optional<int64_t> year, int64_t month, int64_t day) {
-  std::string text = kMonthNames[month];
-  if (year) {
-    text += " " + std::to_string(*year);
-  }
-  text += " has no day " + std::to_string(day) + ", and JavaScript would ";
-  if (!year) {
-    return text + "move on to " + kMonthNames[(month + 1) % 12];
-  }
-  int64_t y = *year;
+std::pair<int64_t, int64_t> DateChecker::carriedDay(int64_t year, int64_t month, int64_t day) {
+  int64_t y = year;
   int64_t m = month;
   int64_t d = day;
   while (d > DateChecker::daysInMonth(y, m)) {
@@ -131,7 +111,66 @@ std::string DateChecker::missingDay(std::optional<int64_t> year, int64_t month, 
     }
   }
 
-  return text + "make it " + kMonthNames[m] + " " + std::to_string(d);
+  return {m, d};
+}
+
+std::string DateChecker::missingDay(std::optional<int64_t> year, int64_t month, int64_t day) {
+  std::pair<int64_t, int64_t> carried =
+      year ? DateChecker::carriedDay(*year, month, day) : std::pair<int64_t, int64_t>(month, day);
+
+  return ErrorTextDateDay::missing(year, month, day, carried.first, carried.second);
+}
+
+DateChecker::ResultLiteralDate DateChecker::literalDate(const std::u16string &text) {
+  std::vector<uint16_t> units(text.begin(), text.end());
+  TzDateFields fields;
+  std::string shown = ToUtf8::toUtf8(text);
+  if (!tz_date_parse_fields(units.data(), units.size(), &fields)) {
+    std::string message = ErrorTextDateLiteral::unreadable(shown);
+
+    return err(DateCheckerLiteralDateError{
+        .code = DateCheckerLiteralDateErrorCode::UNREADABLE,
+        .message = message,
+    });
+  }
+  if (fields.date_only) {
+    std::string message = ErrorTextDateLiteral::dateOnly(shown);
+
+    return err(DateCheckerLiteralDateError{
+        .code = DateCheckerLiteralDateErrorCode::DATE_ONLY,
+        .message = message,
+    });
+  }
+  int64_t month = int64_t(fields.month);
+  int64_t dayOfMonth = int64_t(fields.day);
+  if (dayOfMonth > DateChecker::daysInMonth(int64_t(fields.year), month)) {
+    std::string missing = DateChecker::missingDay(int64_t(fields.year), month, dayOfMonth);
+    std::string message = ErrorTextDateLiteral::noDay(shown, missing);
+
+    return err(DateCheckerLiteralDateError{
+        .code = DateCheckerLiteralDateErrorCode::NO_SUCH_DAY,
+        .message = message,
+    });
+  }
+  double day = tz_date_make_day(fields.year, fields.month, fields.day);
+  double time = tz_date_make_time(fields.hour, fields.minute, fields.second, fields.ms);
+  double value = tz_date_make_date(day, time);
+  double limit = TZ_DATE_MAX_TIME;
+  if (std::isnan(fields.offset)) {
+    limit = TZ_DATE_MAX_LOCAL_TIME;
+  } else {
+    value -= fields.offset * 1000;
+  }
+  if (!(value >= -limit && value <= limit)) {
+    std::string message = ErrorTextDateLiteral::outside(shown);
+
+    return err(DateCheckerLiteralDateError{
+        .code = DateCheckerLiteralDateErrorCode::OUT_OF_RANGE,
+        .message = message,
+    });
+  }
+
+  return ok(value);
 }
 
 DateChecker::DateChecker(CheckState &owner)
@@ -158,47 +197,9 @@ void DateChecker::checkDateLiteral(const Expr *arg) {
   if (!text) {
     return;
   }
-  std::vector<uint16_t> units(text->begin(), text->end());
-  TzDateFields fields;
-  std::string shown = DateChecker::utf8(*text);
-  if (!tz_date_parse_fields(units.data(), units.size(), &fields)) {
-    this->state.getDiagnostics().error(
-        arg->loc(), "'" + shown +
-                        "' is not a date JavaScript can read, and would be an Invalid "
-                        "Date; write it as 'YYYY-MM-DDTHH:mm' (local time) or "
-                        "'YYYY-MM-DDTHH:mmZ' (UTC), e.g. '2026-10-23T10:00'");
-    return;
-  }
-  if (fields.date_only) {
-    this->state.getDiagnostics().error(
-        arg->loc(), "a date without a time is read as midnight UTC, while the same date "
-                    "with a time is local; write '" +
-                        shown + "T00:00' for local midnight or '" + shown + "T00:00Z' for UTC");
-    return;
-  }
-  int64_t month = int64_t(fields.month);
-  int64_t dayOfMonth = int64_t(fields.day);
-  if (dayOfMonth > DateChecker::daysInMonth(int64_t(fields.year), month)) {
-    this->state.getDiagnostics().error(
-        arg->loc(), "'" + shown +
-                        "': " + DateChecker::missingDay(int64_t(fields.year), month, dayOfMonth) +
-                        "; write the date that is meant");
-    return;
-  }
-  double day = tz_date_make_day(fields.year, fields.month, fields.day);
-  double time = tz_date_make_time(fields.hour, fields.minute, fields.second, fields.ms);
-  double value = tz_date_make_date(day, time);
-  double limit = TZ_DATE_MAX_TIME;
-  if (std::isnan(fields.offset)) {
-    limit = TZ_DATE_MAX_LOCAL_TIME;
-  } else {
-    value -= fields.offset * 1000;
-  }
-  if (!(value >= -limit && value <= limit)) {
-    this->state.getDiagnostics().error(
-        arg->loc(), "'" + shown +
-                        "' is outside the dates JavaScript has (100 million days around "
-                        "1970), and would be an Invalid Date");
+  ResultLiteralDate date = DateChecker::literalDate(*text);
+  if (date.isErr()) {
+    this->state.getDiagnostics().error(arg->loc(), date.error().message);
   }
 }
 
@@ -216,26 +217,20 @@ void DateChecker::checkDateFields(std::vector<Expr *> &args, size_t first, llvm:
   };
   bool shortYears = setter.empty();
   if (std::optional<int64_t> year = constant[0]; shortYears && year && *year >= 0 && *year <= 99) {
-    report(0, "the year " + std::to_string(*year) + " is " + std::to_string(1900 + *year) +
-                  " in JavaScript, which reads the years 0 to 99 as 1900 to 1999; write the year "
-                  "in full, or set a year before 100 with 'setFullYear'");
+    std::string message = ErrorTextDateFields::shortYear(*year);
+    report(0, message);
   }
   std::optional<int64_t> month = constant[1];
   if (month && (*month < 0 || *month > 11)) {
-    if (*month == 12) {
-      report(1, "month 12 is January of the next year in JavaScript: months are counted from 0, "
-                "so December is 11");
-    } else {
-      report(1, "month " + std::to_string(*month) +
-                    " is outside the year: months are counted from 0 (January) to 11 (December)");
-    }
+    std::string message =
+        *month == 12 ? ErrorTextDateFields::month12() : ErrorTextDateFields::month(*month);
+    report(1, message);
     month.reset();
   }
   if (std::optional<int64_t> day = constant[2]) {
     if (*day < 0) {
-      report(2, "day " + std::to_string(*day) +
-                    " is outside the month: days are counted from 1, and 0 is the last day of the "
-                    "month before");
+      std::string message = ErrorTextDateFields::dayBelow(*day);
+      report(2, message);
     } else if (month) {
       std::optional<int64_t> year = constant[0];
       int64_t fullYear =
@@ -243,28 +238,21 @@ void DateChecker::checkDateFields(std::vector<Expr *> &args, size_t first, llvm:
       int last = year          ? DateChecker::daysInMonth(fullYear, *month)
                  : *month == 1 ? 29
                                : DateChecker::daysInMonth(2001, *month);
-      if (*day > last && !setter.empty()) {
-        std::string missing = DateChecker::missingDay(
-            year ? std::optional<int64_t>(fullYear) : std::nullopt, *month, *day);
-        if (*month == 1) {
-          std::string yearPart = year ? std::to_string(fullYear) + ", " : "";
-          report(2, missing + "; the last day of February is day 0 of March: '" + setter.str() +
-                        "(" + yearPart + "2, 0)'");
-        } else {
-          report(2,
-                 missing + "; " + kMonthNames[*month] + " has " + std::to_string(last) + " days");
-        }
-      } else if (*day > last) {
-        std::string next = std::to_string(*month == 11 ? 0 : *month + 1);
-        std::string nextYear = year ? std::to_string(*month == 11 ? fullYear + 1 : fullYear) : "y";
-        report(2, DateChecker::missingDay(year ? std::optional<int64_t>(fullYear) : std::nullopt,
-                                          *month, *day) +
-                      "; the last day of " + kMonthNames[*month] +
-                      " is day 0 of the month after: 'new Date(" + nextYear + ", " + next +
-                      ", 0)'");
+      std::optional<int64_t> known = year ? std::optional<int64_t>(fullYear) : std::nullopt;
+      if (*day > last) {
+        std::string missing = DateChecker::missingDay(known, *month, *day);
+        std::optional<int64_t> nextYear =
+            year ? std::optional<int64_t>(*month == 11 ? fullYear + 1 : fullYear) : std::nullopt;
+        int64_t next = *month == 11 ? 0 : *month + 1;
+        std::string message = setter.empty()
+                                  ? ErrorTextDateFields::lastDay(missing, *month, nextYear, next)
+                              : *month == 1 ? ErrorTextDateFields::february(missing, setter, known)
+                                            : ErrorTextDateFields::monthDays(missing, *month, last);
+        report(2, message);
       }
     } else if (*day > 31) {
-      report(2, "no month has day " + std::to_string(*day) + ": days are counted from 1 to 31");
+      std::string message = ErrorTextDateFields::dayAbove(*day);
+      report(2, message);
     }
   }
   static const struct {
@@ -274,9 +262,9 @@ void DateChecker::checkDateFields(std::vector<Expr *> &args, size_t first, llvm:
   for (size_t i = std::max<size_t>(first, 3); i < end; ++i) {
     std::optional<int64_t> value = constant[i];
     if (value && (*value < 0 || *value > limits[i - 3].max)) {
-      report(i, std::to_string(*value) + " " + limits[i - 3].what +
-                    " are out of range: " + limits[i - 3].what + " are from 0 to " +
-                    std::to_string(limits[i - 3].max) + " (JavaScript would carry the rest over)");
+      std::string message =
+          ErrorTextDateFields::range(*value, limits[i - 3].what, limits[i - 3].max);
+      report(i, message);
     }
   }
 }
@@ -302,8 +290,8 @@ Expr *DateChecker::checkDateNew(llvm::SMLoc loc, std::vector<Expr *> &args) {
     return error;
   };
   if (args.size() > 7) {
-    this->state.getDiagnostics().error(loc, "expected " + ErrorTextArity::wanted(0, 7) +
-                                                ", but got " + std::to_string(args.size()));
+    std::string message = ErrorTextDateNew::arity(args.size());
+    this->state.getDiagnostics().error(loc, message);
     for (Expr *&arg : args) {
       arg = ExprChecker(this->state).checkExpr(arg);
     }
@@ -325,10 +313,8 @@ Expr *DateChecker::checkDateNew(llvm::SMLoc loc, std::vector<Expr *> &args) {
     }
     if (type->isString()) {
       if (!DateChecker::literalText(args[0])) {
-        this->state.getDiagnostics().error(
-            arg->loc(), "'new Date' of a text known only when the program runs may fail, "
-                        "and 'new' gives no Result; write 'Date.parse(text)', which gives "
-                        "a Result with the milliseconds, and 'new Date(ms)'");
+        std::string message = ErrorTextDateNew::unknown();
+        this->state.getDiagnostics().error(arg->loc(), message);
         return failed();
       }
       return ProcessChecker(this->state)
@@ -338,13 +324,7 @@ Expr *DateChecker::checkDateNew(llvm::SMLoc loc, std::vector<Expr *> &args) {
       return ProcessChecker(this->state)
           .builtinCall(loc, callee, Builtin::DateNew, {this->timeArg(arg)}, Type::date());
     }
-    std::string message = "'new Date' takes a time in milliseconds, a string or a date, found '" +
-                          type->name().str() + "'";
-    if (type->isOptional()) {
-      message += "; the value may be undefined: check it first";
-    } else if (type->isDecimal()) {
-      message += "; convert it with 'Number(x)'";
-    }
+    std::string message = ErrorTextDateValue::takes(type);
     this->state.getDiagnostics().error(arg->loc(), message);
     return failed();
   }
@@ -360,9 +340,8 @@ Expr *DateChecker::checkDateFunction(CallExpr *call, NameExpr *name) {
     return call;
   }
   if (!call->args.empty()) {
-    this->state.getDiagnostics().error(
-        name->loc(), "'Date()' without 'new' gives the text of the current time and "
-                     "ignores its arguments; write 'new Date(...)'");
+    std::string message = ErrorTextDateNew::call();
+    this->state.getDiagnostics().error(name->loc(), message);
     for (Expr *&arg : call->args) {
       arg = ExprChecker(this->state).checkExpr(arg);
     }
@@ -414,16 +393,10 @@ Expr *DateChecker::checkDateStatic(CallExpr *call, MemberExpr *member) {
 Expr *DateChecker::checkDateStaticMember(MemberExpr *member) {
   member->type = Type::error();
   llvm::StringRef name = member->name;
-  if (name == "now" || name == "UTC" || name == "parse") {
-    this->state.getDiagnostics().error(member->loc(), "'Date." + name +
-                                                          "' can only be called: 'Date." + name +
-                                                          (name == "now"   ? "()'"
-                                                           : name == "UTC" ? "(y, m, d)'"
-                                                                           : "(s)'"));
-  } else {
-    this->state.getDiagnostics().error(member->loc(),
-                                       "property '" + name + "' does not exist on 'Date'");
-  }
+  std::string message = name == "now" || name == "UTC" || name == "parse"
+                            ? ErrorTextDateStatic::onlyCalled(name)
+                            : ErrorTextDateStatic::noMember(name);
+  this->state.getDiagnostics().error(member->loc(), message);
 
   return member;
 }
@@ -448,22 +421,11 @@ Expr *DateChecker::checkDateMethod(CallExpr *call, MemberExpr *member) {
     }
   }
   if (!method) {
-    if (name == "getYear") {
-      this->state.getDiagnostics().error(member->loc(),
-                                         "'getYear' gives the year minus 1900 (126 for 2026); use "
-                                         "'getFullYear()'");
-    } else if (name == "setYear") {
-      this->state.getDiagnostics().error(
-          member->loc(), "'setYear' takes the year minus 1900, and reads 0 to 99 as "
-                         "1900 to 1999; use 'setFullYear(year)'");
-    } else if (name == "toGMTString") {
-      this->state.getDiagnostics().error(member->loc(),
-                                         "'toGMTString' is the old name of 'toUTCString'; use "
-                                         "'toUTCString()'");
-    } else {
-      this->state.getDiagnostics().error(member->loc(),
-                                         "property '" + name + "' does not exist on type 'Date'");
-    }
+    std::string message = name == "getYear"       ? ErrorTextDateMethod::getYear()
+                          : name == "setYear"     ? ErrorTextDateMethod::setYear()
+                          : name == "toGMTString" ? ErrorTextDateMethod::gmt()
+                                                  : ErrorTextDateMethod::noMember(name);
+    this->state.getDiagnostics().error(member->loc(), message);
     return loosely();
   }
   ArgumentChecker::ResultArityMatches arity =
@@ -531,16 +493,11 @@ Expr *DateChecker::checkDateMethod(CallExpr *call, MemberExpr *member) {
 Expr *DateChecker::checkDateMember(MemberExpr *member) {
   member->type = Type::error();
   llvm::StringRef name = member->name;
-  if (llvm::any_of(kMethods, [&](const DateMethod &m) { return m.name == name; })) {
-    this->state.getDiagnostics().error(
-        member->loc(), "'" + name + "' of a date can only be called, e.g. 'd." + name + "()'");
-  } else if (name == "getYear") {
-    this->state.getDiagnostics().error(member->loc(),
-                                       "'getYear' gives the year minus 1900; use 'getFullYear()'");
-  } else {
-    this->state.getDiagnostics().error(member->loc(),
-                                       "property '" + name + "' does not exist on type 'Date'");
-  }
+  bool method = llvm::any_of(kMethods, [&](const DateMethod &m) { return m.name == name; });
+  std::string message = method              ? ErrorTextDateMethod::onlyCalled(name)
+                        : name == "getYear" ? ErrorTextDateMethod::getYearVal()
+                                            : ErrorTextDateMethod::noMember(name);
+  this->state.getDiagnostics().error(member->loc(), message);
 
   return member;
 }
@@ -560,27 +517,12 @@ Expr *DateChecker::checkDateOperands(BinaryExpr *bin) {
     bin->type = compare ? Type::boolTy() : Type::intTy();
     return bin;
   }
-  const char *op = opSpelling(bin->op);
-  if (bin->op == BinaryOp::Add) {
-    this->state.getDiagnostics().error(
-        bin->loc(), "'+' with a date joins texts in JavaScript (the date as toString() "
-                    "writes it); to move a date by milliseconds write 'new "
-                    "Date(d.getTime() + ms)'");
-  } else if (bin->op == BinaryOp::Sub) {
-    this->state.getDiagnostics().error(
-        bin->loc(), "a date minus a number is a number of milliseconds in JavaScript, "
-                    "not a date; write 'd.getTime() - ms', or 'new Date(d.getTime() - "
-                    "ms)' for a date");
-  } else if (compare) {
-    this->state.getDiagnostics().error(bin->loc(),
-                                       llvm::Twine("a date is compared with '") + op +
-                                           "' only with another date; compare the times: "
-                                           "'d.getTime() " +
-                                           op + " ms'");
-  } else {
-    std::string mismatch = BinaryChecker::operandTypesText(op, l, r);
-    this->state.getDiagnostics().error(bin->loc(), mismatch);
-  }
+  const char *op = Operators::opSpelling(bin->op);
+  std::string message = bin->op == BinaryOp::Add   ? ErrorTextDateOperator::plus()
+                        : bin->op == BinaryOp::Sub ? ErrorTextDateOperator::minus()
+                        : compare                  ? ErrorTextDateOperator::compare(op)
+                                                   : BinaryChecker::operandTypesText(op, l, r);
+  this->state.getDiagnostics().error(bin->loc(), message);
 
   return bin;
 }

@@ -270,12 +270,15 @@ pipeline/                          конвейер проходов
       unknown_checker/             UnknownChecker: unknown — что с ним можно
       utility_types/               UtilityTypes: Partial, ReturnType, Parameters…
     whole_program/                 проход WholeProgramPass: по всей программе сразу
+      context_checker/             ContextChecker: правила AsyncLocalStorage по всей программе (docs/async.md, раздел 10)
       flow_builtins/               FlowBuiltins: потоки значений через встроенные вызовы
       flow_calls/                  FlowCalls: потоки значений через вызовы
       flow_exprs/                  FlowExprs: потоки значений в выражениях
       flow_stmts/                  FlowStmts: потоки значений в инструкциях
       flows/                       Flows: граф, куда идут значения (для записи через широкий тип)
+      held_value_checker/          HeldValueChecker: значения, которые живут только внутри вызова (хранилище run, объект Pool.use)
       load_order/                  LoadOrder: чтение до загрузки модуля
+      pool_checker/                PoolChecker: объект Pool живёт только внутри use (docs/async.md, раздел 11)
       unused/                      Unused: неиспользуемые функции
       whole_program_pass/          WholeProgramPass
       wide_writes/                 WideWrites: запись чужого значения через более широкий тип
@@ -565,8 +568,6 @@ link/             проход LinkPass: exe
 
 ```
 library/                       C++-часть тем библиотеки: IR и помощники; у темы — <тема>_feature/; проверка — в pipeline/check_program/topics/
-  async_hooks/                 node:async_hooks: AsyncLocalStorage
-    context_checker/           ContextChecker: правила AsyncLocalStorage по всей программе (docs/async.md, раздел 10)
   builtin_modules/             встроенные модули node:* и tz:io — имена и импорты
     builtin_modules_feature/   BuiltinModulesFeature: тема
     node_check_helpers/        общие помощники модулей node:*
@@ -595,6 +596,7 @@ library/                       C++-часть тем библиотеки: IR и
   crypto/                      node:crypto и crypto.subtle
     crypto_api/                таблица функций и алгоритмов crypto
     crypto_check_helpers/      общие помощники проверки crypto
+    crypto_exports/            CryptoExports: что экспортируют node:crypto и tz:crypto
     crypto_feature/            CryptoFeature: тема
     crypto_lowerer/            CryptoLowerer: IR вызовов crypto
     crypto_names/              имена хешей и шифров
@@ -616,8 +618,6 @@ library/                       C++-часть тем библиотеки: IR и
     fs_feature/                FsFeature: тема
     fs_lowerer/                FsLowerer: IR вызовов fs, объекты ошибок
     fs_promises_lowerer/       FsPromisesLowerer: IR fs/promises и readline
-  held_values/                 значения, которые живут только внутри вызова (хранилище run, объект Pool.use)
-    held_value_checker/        HeldValueChecker: обход всей программы — куда уходит значение
   intl/                        Intl
     intl_call_lowerer/         IntlCallLowerer: IR вызовов Intl
     intl_check_helpers/        опции и службы Intl
@@ -668,8 +668,6 @@ library/                       C++-часть тем библиотеки: IR и
   stream/                      node:stream
     stream_feature/            StreamFeature: тема
     stream_lowerer/            StreamLowerer: IR вызовов потоков
-  sync/                        tz:sync: Pool
-    pool_checker/              PoolChecker: объект Pool живёт только внутри use (docs/async.md, раздел 11)
   tz_modules/                  модули на tz: tz:http, fetch, URL, мосты declare function
     library_call_lowerer/      LibraryCallLowerer: IR вызовов библиотеки
     tz_modules_feature/        TzModulesFeature: тема

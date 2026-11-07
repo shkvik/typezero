@@ -1,6 +1,7 @@
 #include "compiler/pipeline/check_program/topics/crypto/subtle_call_checker/subtle_call_checker.h"
 #include "compiler/library/crypto/crypto_api/crypto_api.h"
 #include "compiler/library/crypto/subtle_algorithms/subtle_algorithms.h"
+#include "compiler/load/to_utf8/to_utf8.h"
 #include "compiler/pipeline/check_program/declare/class_declarer/class_declarer.h"
 #include "compiler/pipeline/check_program/infer/return_inferrer/return_inferrer.h"
 #include "compiler/pipeline/check_program/scopes/scopes.h"
@@ -20,13 +21,18 @@ using llvm::isa;
 
 namespace tz {
 
-std::string SubtleCallChecker::utf8(const std::u16string &text) {
-  std::string out;
-  llvm::convertUTF16ToUTF8String(
-      llvm::ArrayRef<llvm::UTF16>(reinterpret_cast<const llvm::UTF16 *>(text.data()), text.size()),
-      out);
+SubtleCallChecker::ResultKeyFormatKnown SubtleCallChecker::knownFormat(llvm::StringRef format) {
+  static const llvm::StringLiteral formats[] = {"raw", "pkcs8", "spki", "jwk"};
+  if (!llvm::is_contained(formats, format)) {
+    std::string message = ErrorTextKeyFormat::unknown(format);
 
-  return out;
+    return err(SubtleCallCheckerKnownFormatError{
+        .code = SubtleCallCheckerKnownFormatErrorCode::UNKNOWN_FORMAT,
+        .message = message,
+    });
+  }
+
+  return ok(format);
 }
 
 std::optional<double> SubtleCallChecker::numberLiteral(const Expr *e) {
@@ -49,6 +55,256 @@ const ObjectLitExpr::Property *SubtleCallChecker::property(const ObjectLitExpr *
   }
 
   return nullptr;
+}
+
+std::string SubtleCallChecker::algorithmIn(llvm::StringRef op, llvm::StringRef upper) {
+  for (llvm::StringRef known : SubtleAlgorithms::algorithmsOf(op)) {
+    if (known.upper() == upper) {
+      return known.str();
+    }
+  }
+
+  return "";
+}
+
+SubtleCallChecker::ResultAlgorithmKnown
+SubtleCallChecker::knownAlgorithm(llvm::StringRef written, llvm::StringRef op,
+                                  llvm::StringRef fallback) {
+  std::string upper = written.upper();
+  std::string name = SubtleCallChecker::algorithmIn(op, upper);
+  if (name.empty() && !fallback.empty()) {
+    name = SubtleCallChecker::algorithmIn(fallback, upper);
+  }
+  if (!name.empty()) {
+    return ok(name);
+  }
+  std::string list = SubtleAlgorithms::quotedList(SubtleAlgorithms::algorithmsOf(op), "or");
+  std::string verb = SubtleAlgorithms::verbOf(op);
+  if (SubtleAlgorithms::experimentalAlgorithm(upper)) {
+    std::string message = ErrorTextAlgorithm::experiment(written, verb, list);
+
+    return err(SubtleCallCheckerKnownAlgorithmError{
+        .code = SubtleCallCheckerKnownAlgorithmErrorCode::EXPERIMENTAL,
+        .message = message,
+    });
+  }
+  bool known = false;
+  for (llvm::StringRef other :
+       {"digest", "generateKey", "importKey", "encrypt", "sign", "deriveBits", "wrapKey"}) {
+    for (llvm::StringRef a : SubtleAlgorithms::algorithmsOf(other)) {
+      known |= a.upper() == upper;
+    }
+  }
+  if (known) {
+    std::string message = ErrorTextAlgorithm::otherOp(written, op, verb, list);
+
+    return err(SubtleCallCheckerKnownAlgorithmError{
+        .code = SubtleCallCheckerKnownAlgorithmErrorCode::OTHER_OPERATION,
+        .message = message,
+    });
+  }
+  std::string message = ErrorTextAlgorithm::unknown(written, op, verb, list);
+
+  return err(SubtleCallCheckerKnownAlgorithmError{
+      .code = SubtleCallCheckerKnownAlgorithmErrorCode::UNKNOWN_ALGORITHM,
+      .message = message,
+  });
+}
+
+SubtleCallChecker::ResultParamsAsObject
+SubtleCallChecker::paramsAsObject(llvm::StringRef name, llvm::StringRef op,
+                                  const Dictionary &dictionary) {
+  if (!dictionary.required.empty()) {
+    llvm::StringRef member = dictionary.required[0];
+    std::string example = SubtleAlgorithms::exampleOf(member);
+    std::string message = ErrorTextAlgorithm::object(name, op, dictionary.name, member, example);
+
+    return err(SubtleCallCheckerParamsAsObjectError{
+        .code = SubtleCallCheckerParamsAsObjectErrorCode::NEEDS_OBJECT,
+        .message = message,
+    });
+  }
+
+  return ok(name);
+}
+
+SubtleCallChecker::ResultMembersPresent
+SubtleCallChecker::membersPresent(llvm::StringRef name, llvm::StringRef op,
+                                  const Dictionary &dictionary, const ObjectLitExpr *lit) {
+  for (llvm::StringRef member : dictionary.required) {
+    if (!SubtleCallChecker::property(lit, member)) {
+      std::string example = SubtleAlgorithms::exampleOf(member);
+      std::string message = ErrorTextAlgorithm::needs(name, op, member, dictionary.name, example);
+
+      return err(SubtleCallCheckerMembersPresentError{
+          .code = SubtleCallCheckerMembersPresentErrorCode::MISSING_MEMBER,
+          .message = message,
+      });
+    }
+  }
+
+  return ok(lit);
+}
+
+SubtleCallChecker::ResultShaHashIsKnown
+SubtleCallChecker::knownShaHash(llvm::StringRef hash, llvm::StringRef dictionary) {
+  bool sha = llvm::StringRef(hash.lower()).starts_with("sha");
+  bool knownHash = false;
+  for (llvm::StringRef a : SubtleAlgorithms::algorithmsOf("digest")) {
+    knownHash |= a.upper() == hash.upper();
+  }
+  if (sha && knownHash) {
+    return ok(hash);
+  }
+  if (sha || SubtleAlgorithms::experimentalAlgorithm(hash.upper())) {
+    std::string list = SubtleAlgorithms::quotedList(SubtleAlgorithms::algorithmsOf("digest"), "or");
+    std::string message = ErrorTextAlgorithm::hash(hash, dictionary, list);
+
+    return err(SubtleCallCheckerKnownShaHashError{
+        .code = SubtleCallCheckerKnownShaHashErrorCode::UNKNOWN_HASH,
+        .message = message,
+    });
+  }
+  std::string message = ErrorTextAlgorithm::notSha(hash, dictionary);
+
+  return err(SubtleCallCheckerKnownShaHashError{
+      .code = SubtleCallCheckerKnownShaHashErrorCode::NOT_SHA,
+      .message = message,
+  });
+}
+
+SubtleCallChecker::ResultCurveNameKnown SubtleCallChecker::knownCurve(llvm::StringRef curve) {
+  if (curve != "P-256" && curve != "P-384" && curve != "P-521") {
+    std::string message = ErrorTextAlgorithm::curve(curve);
+
+    return err(SubtleCallCheckerKnownCurveError{
+        .code = SubtleCallCheckerKnownCurveErrorCode::UNKNOWN_CURVE,
+        .message = message,
+    });
+  }
+
+  return ok(curve);
+}
+
+SubtleCallChecker::ResultAesLengthValid SubtleCallChecker::aesLength(double bits) {
+  if (bits != 128 && bits != 192 && bits != 256) {
+    std::string message = ErrorTextAlgorithm::aesLength();
+
+    return err(SubtleCallCheckerAesLengthError{
+        .code = SubtleCallCheckerAesLengthErrorCode::BAD_LENGTH,
+        .message = message,
+    });
+  }
+
+  return ok(bits);
+}
+
+SubtleCallChecker::ResultGcmTagLengthOk SubtleCallChecker::gcmTagLength(double bits) {
+  if (bits != 32 && bits != 64 && bits != 96 && bits != 104 && bits != 112 && bits != 120 &&
+      bits != 128) {
+    std::string message = ErrorTextAlgorithm::gcmTag();
+
+    return err(SubtleCallCheckerGcmTagLengthError{
+        .code = SubtleCallCheckerGcmTagLengthErrorCode::BAD_TAG,
+        .message = message,
+    });
+  }
+
+  return ok(bits);
+}
+
+std::string SubtleCallChecker::literalAlgorithm(const Expr *arg, llvm::StringRef op,
+                                                llvm::StringRef fallback, bool &bad) {
+  const ObjectLitExpr *lit = dyn_cast_or_null<ObjectLitExpr>(arg);
+  const Expr *nameExpr = arg;
+  if (lit) {
+    if (lit->hasSpread()) {
+      return "";
+    }
+    const ObjectLitExpr::Property *name = SubtleCallChecker::property(lit, "name");
+    if (!name) {
+      return "";
+    }
+    nameExpr = name->value;
+  }
+  std::optional<std::string> written = SubtleAlgorithms::stringLiteral(nameExpr);
+  if (!written) {
+    return "";
+  }
+  ResultAlgorithmKnown known = SubtleCallChecker::knownAlgorithm(*written, op, fallback);
+  if (known.isErr()) {
+    bad = true;
+    this->state.getDiagnostics().error(nameExpr->loc(), known.error().message);
+    return "";
+  }
+  std::string name = known.value();
+  Dictionary dictionary = SubtleAlgorithms::dictionaryOf(op, name);
+  if (!lit) {
+    ResultParamsAsObject object = SubtleCallChecker::paramsAsObject(name, op, dictionary);
+    if (object.isErr()) {
+      bad = true;
+      this->state.getDiagnostics().error(nameExpr->loc(), object.error().message);
+    }
+    return bad ? "" : name;
+  }
+  ResultMembersPresent present = SubtleCallChecker::membersPresent(name, op, dictionary, lit);
+  if (present.isErr()) {
+    bad = true;
+    this->state.getDiagnostics().error(lit->loc(), present.error().message);
+    return "";
+  }
+  if (const ObjectLitExpr::Property *hash = SubtleCallChecker::property(lit, "hash")) {
+    const Expr *value = hash->value;
+    if (auto *inner = dyn_cast<ObjectLitExpr>(value)) {
+      if (const ObjectLitExpr::Property *n = SubtleCallChecker::property(inner, "name")) {
+        value = n->value;
+      }
+    }
+    if (std::optional<std::string> h = SubtleAlgorithms::stringLiteral(value)) {
+      ResultShaHashIsKnown sha = SubtleCallChecker::knownShaHash(*h, dictionary.name);
+      if (sha.isErr()) {
+        bad = true;
+        this->state.getDiagnostics().error(value->loc(), sha.error().message);
+        return "";
+      }
+    }
+  }
+  if (const ObjectLitExpr::Property *curve = SubtleCallChecker::property(lit, "namedCurve")) {
+    if (std::optional<std::string> c = SubtleAlgorithms::stringLiteral(curve->value)) {
+      ResultCurveNameKnown named = SubtleCallChecker::knownCurve(*c);
+      if (named.isErr()) {
+        bad = true;
+        this->state.getDiagnostics().error(curve->value->loc(), named.error().message);
+        return "";
+      }
+    }
+  }
+  if (name.rfind("AES-", 0) == 0 && (op == "generateKey" || op == "get key length")) {
+    if (const ObjectLitExpr::Property *length = SubtleCallChecker::property(lit, "length")) {
+      if (std::optional<double> n = SubtleCallChecker::numberLiteral(length->value)) {
+        ResultAesLengthValid bits = SubtleCallChecker::aesLength(*n);
+        if (bits.isErr()) {
+          bad = true;
+          this->state.getDiagnostics().error(length->value->loc(), bits.error().message);
+          return "";
+        }
+      }
+    }
+  }
+  if (name == "AES-GCM") {
+    if (const ObjectLitExpr::Property *tag = SubtleCallChecker::property(lit, "tagLength")) {
+      if (std::optional<double> n = SubtleCallChecker::numberLiteral(tag->value)) {
+        ResultGcmTagLengthOk bits = SubtleCallChecker::gcmTagLength(*n);
+        if (bits.isErr()) {
+          bad = true;
+          this->state.getDiagnostics().error(tag->value->loc(), bits.error().message);
+          return "";
+        }
+      }
+    }
+  }
+
+  return name;
 }
 
 SubtleCallChecker::SubtleCallChecker(CheckState &owner)
@@ -76,15 +332,14 @@ Expr *SubtleCallChecker::checkSubtleCall(CallExpr *call, MemberExpr *member, con
   bool bad = false;
 
   auto format = [&](size_t i) -> std::string {
-    std::optional<std::string> f = stringLiteral(arg(i));
+    std::optional<std::string> f = SubtleAlgorithms::stringLiteral(arg(i));
     if (!f) {
       return "";
     }
-    static const llvm::StringLiteral formats[] = {"raw", "pkcs8", "spki", "jwk"};
-    if (!llvm::is_contained(formats, *f)) {
+    ResultKeyFormatKnown known = SubtleCallChecker::knownFormat(*f);
+    if (known.isErr()) {
       bad = true;
-      this->state.getDiagnostics().error(
-          arg(i)->loc(), "unknown key format '" + *f + "'; it is 'raw', 'pkcs8', 'spki' or 'jwk'");
+      this->state.getDiagnostics().error(arg(i)->loc(), known.error().message);
       return "";
     }
 
@@ -99,10 +354,10 @@ Expr *SubtleCallChecker::checkSubtleCall(CallExpr *call, MemberExpr *member, con
     std::vector<llvm::StringLiteral> allowed;
     if (!name.empty()) {
       if (isPublic != 0) {
-        allowed = usagesOf(name, true);
+        allowed = SubtleAlgorithms::usagesOf(name, true);
       }
       if (isPublic != 1) {
-        for (llvm::StringLiteral u : usagesOf(name, false)) {
+        for (llvm::StringLiteral u : SubtleAlgorithms::usagesOf(name, false)) {
           if (!llvm::is_contained(allowed, u)) {
             allowed.push_back(u);
           }
@@ -110,55 +365,40 @@ Expr *SubtleCallChecker::checkSubtleCall(CallExpr *call, MemberExpr *member, con
       }
     }
     for (const ArrayLitExpr::Element &e : lit->elements) {
-      std::optional<std::string> u = e.spread ? std::nullopt : stringLiteral(e.expr);
+      std::optional<std::string> u =
+          e.spread ? std::nullopt : SubtleAlgorithms::stringLiteral(e.expr);
       if (!u) {
         return;
       }
       if (!llvm::is_contained(kUsages, *u)) {
         bad = true;
-        this->state.getDiagnostics().error(e.expr->loc(), "usage '" + *u +
-                                                              "' does not exist; the usages are " +
-                                                              quotedList(kUsages, "and"));
+        std::string message = ErrorTextSubtleUsage::unknown(*u);
+        this->state.getDiagnostics().error(e.expr->loc(), message);
         return;
       }
       if (!name.empty() && !llvm::is_contained(allowed, *u)) {
         bad = true;
-        std::string an = llvm::StringRef("EHRAX").contains(name.front()) ? "an " : "a ";
-        std::string what =
-            isPublic == 1 ? "a public " + name.str() + " key"
-            : isPublic == 0 && name != "HMAC" && familyOf(name) != "Aes" && familyOf(name) != "Kdf"
-                ? "a private " + name.str() + " key"
-                : an + name.str() + " key";
-        this->state.getDiagnostics().error(
-            e.expr->loc(), "'" + *u + "' is no usage of " + what + "; " +
-                               (allowed.empty() ? std::string("it takes none: pass []")
-                                                : "it takes " + quotedList(allowed, "and")));
+        std::string message = ErrorTextSubtleUsage::notOf(*u, name, isPublic, allowed);
+        this->state.getDiagnostics().error(e.expr->loc(), message);
         return;
       }
     }
     if (!creates || name.empty() || isPublic == 1) {
       return;
     }
-    std::vector<llvm::StringLiteral> own = usagesOf(name, false);
+    std::vector<llvm::StringLiteral> own = SubtleAlgorithms::usagesOf(name, false);
     bool any = false;
     for (const ArrayLitExpr::Element &e : lit->elements) {
-      any |= llvm::is_contained(own, *stringLiteral(e.expr));
+      any |= llvm::is_contained(own, *SubtleAlgorithms::stringLiteral(e.expr));
     }
     if (any) {
       return;
     }
     bad = true;
-    if (lit->elements.empty() || isPublic == 0) {
-      this->state.getDiagnostics().error(lit->loc(),
-                                         "a key without usages can do nothing, and node rejects it "
-                                         "('Usages cannot be empty'); give its usages, e.g. " +
-                                             quotedList(own, "and"));
-    } else {
-      this->state.getDiagnostics().error(
-          lit->loc(), "the private key of the pair would have no usages, which node "
-                      "rejects ('Usages cannot be empty'); add " +
-                          quotedList(own, "or"));
-    }
+    std::string message = lit->elements.empty() || isPublic == 0
+                              ? ErrorTextSubtleUsage::empty(own)
+                              : ErrorTextSubtleUsage::pairEmpty(own);
+    this->state.getDiagnostics().error(lit->loc(), message);
   };
 
   std::string keyFormat;
@@ -183,14 +423,13 @@ Expr *SubtleCallChecker::checkSubtleCall(CallExpr *call, MemberExpr *member, con
     bool jwk = !type->isBytes() && type->isObject() && !ClassDeclarer::classOf(type) &&
                !type->isArray() && !type->isTuple();
     if (keyFormat == "jwk" && bytes) {
-      this->state.getDiagnostics().error(
-          data->loc(), "the key data of 'jwk' is a JsonWebKey; found '" + type->name().str() + "'");
+      std::string message = ErrorTextSubtleKeyData::jwk(type->name());
+      this->state.getDiagnostics().error(data->loc(), message);
       return false;
     }
     if (keyFormat != "jwk" && jwk) {
-      this->state.getDiagnostics().error(data->loc(), "the key data of '" + keyFormat +
-                                                          "' is bytes (a BufferSource); found '" +
-                                                          type->name().str() + "'");
+      std::string message = ErrorTextSubtleKeyData::bytes(keyFormat, type->name());
+      this->state.getDiagnostics().error(data->loc(), message);
       return false;
     }
 
@@ -220,37 +459,35 @@ Expr *SubtleCallChecker::checkSubtleCall(CallExpr *call, MemberExpr *member, con
     return false;
   };
   if (method == "digest") {
-    literalAlgorithm(this->state.getDiagnostics(), algorithm(0), "digest", "", bad);
+    this->literalAlgorithm(algorithm(0), "digest", "", bad);
   } else if (method == "generateKey") {
-    std::string name =
-        literalAlgorithm(this->state.getDiagnostics(), algorithm(0), "generateKey", "", bad);
-    llvm::StringRef family = familyOf(name);
+    std::string name = this->literalAlgorithm(algorithm(0), "generateKey", "", bad);
+    llvm::StringRef family = SubtleAlgorithms::familyOf(name);
     usages(2, name, family == "Hmac" || family == "Aes" ? 0 : -1, true);
     if (!name.empty()) {
-      target = "subtleGenerate" + familyOf(name).str();
+      target = "subtleGenerate" + SubtleAlgorithms::familyOf(name).str();
     }
   } else if (method == "importKey") {
     std::string f = format(0);
-    std::string name =
-        literalAlgorithm(this->state.getDiagnostics(), algorithm(2), "importKey", "", bad);
+    std::string name = this->literalAlgorithm(algorithm(2), "importKey", "", bad);
     if (!f.empty() && !name.empty()) {
-      std::vector<llvm::StringLiteral> formats = formatsOf(familyOf(name));
+      std::vector<llvm::StringLiteral> formats =
+          SubtleAlgorithms::formatsOf(SubtleAlgorithms::familyOf(name));
       if (!llvm::is_contained(formats, f)) {
         bad = true;
-        this->state.getDiagnostics().error(
-            arg(0)->loc(), "'" + name + "' keys are not imported as '" + f +
-                               "' (node: 'Unable to import " + name + " using " + f +
-                               " format'); it takes " + quotedList(formats, "or"));
+        std::string message = ErrorTextSubtleImport::format(name, f, formats);
+        this->state.getDiagnostics().error(arg(0)->loc(), message);
       }
     }
     int isPublic = f == "spki" || f == "raw" ? 1 : f == "pkcs8" ? 0 : -1;
-    if (familyOf(name) == "Hmac" || familyOf(name) == "Aes" || familyOf(name) == "Kdf") {
+    if (SubtleAlgorithms::familyOf(name) == "Hmac" || SubtleAlgorithms::familyOf(name) == "Aes" ||
+        SubtleAlgorithms::familyOf(name) == "Kdf") {
       isPublic = 0;
     }
     usages(4, name, isPublic, isPublic == 0);
     keyFormat = f;
     if (!name.empty()) {
-      target = "subtleImport" + familyOf(name).str();
+      target = "subtleImport" + SubtleAlgorithms::familyOf(name).str();
     }
     if ((f.empty() || f == "jwk") && isJsonValue(arg(1)) && isa<NameExpr>(member->object) &&
         this->state.getLibraryDeclarations().findLibraryFunction("subtleJwkOf")) {
@@ -272,50 +509,47 @@ Expr *SubtleCallChecker::checkSubtleCall(CallExpr *call, MemberExpr *member, con
     }
   } else if (method == "sign" || method == "verify" || method == "encrypt" || method == "decrypt" ||
              method == "deriveBits") {
-    literalAlgorithm(this->state.getDiagnostics(), algorithm(0), method, "", bad);
+    this->literalAlgorithm(algorithm(0), method, "", bad);
   } else if (method == "deriveKey") {
-    literalAlgorithm(this->state.getDiagnostics(), algorithm(0), "deriveBits", "", bad);
-    std::string name =
-        literalAlgorithm(this->state.getDiagnostics(), algorithm(2), "importKey", "", bad);
+    this->literalAlgorithm(algorithm(0), "deriveBits", "", bad);
+    std::string name = this->literalAlgorithm(algorithm(2), "importKey", "", bad);
     if (!name.empty()) {
-      llvm::StringRef family = familyOf(name);
+      llvm::StringRef family = SubtleAlgorithms::familyOf(name);
       if (family != "Hmac" && family != "Aes" && family != "Kdf") {
         bad = true;
-        this->state.getDiagnostics().error(
-            arg(2)->loc(), "deriveKey makes secret keys: AES, HMAC, HKDF or PBKDF2, "
-                           "not '" +
-                               name + "'");
+        std::string message = ErrorTextSubtleImport::derived(name);
+        this->state.getDiagnostics().error(arg(2)->loc(), message);
       } else {
         if (family != "Kdf") {
-          literalAlgorithm(this->state.getDiagnostics(), algorithm(2), "get key length", "", bad);
+          this->literalAlgorithm(algorithm(2), "get key length", "", bad);
         }
         usages(4, name, 0, true);
       }
     }
   } else if (method == "wrapKey") {
     format(0);
-    literalAlgorithm(this->state.getDiagnostics(), algorithm(3), "wrapKey", "encrypt", bad);
+    this->literalAlgorithm(algorithm(3), "wrapKey", "encrypt", bad);
   } else if (method == "unwrapKey") {
     std::string f = format(0);
-    literalAlgorithm(this->state.getDiagnostics(), algorithm(3), "unwrapKey", "decrypt", bad);
-    std::string name =
-        literalAlgorithm(this->state.getDiagnostics(), algorithm(4), "importKey", "", bad);
+    this->literalAlgorithm(algorithm(3), "unwrapKey", "decrypt", bad);
+    std::string name = this->literalAlgorithm(algorithm(4), "importKey", "", bad);
     if (!f.empty() && !name.empty()) {
-      std::vector<llvm::StringLiteral> formats = formatsOf(familyOf(name));
+      std::vector<llvm::StringLiteral> formats =
+          SubtleAlgorithms::formatsOf(SubtleAlgorithms::familyOf(name));
       if (!llvm::is_contained(formats, f)) {
         bad = true;
-        this->state.getDiagnostics().error(arg(0)->loc(),
-                                           "'" + name + "' keys are not imported as '" + f +
-                                               "'; it takes " + quotedList(formats, "or"));
+        std::string message = ErrorTextSubtleImport::unwrap(name, f, formats);
+        this->state.getDiagnostics().error(arg(0)->loc(), message);
       }
     }
     int isPublic = f == "spki" || f == "raw" ? 1 : f == "pkcs8" ? 0 : -1;
-    if (familyOf(name) == "Hmac" || familyOf(name) == "Aes" || familyOf(name) == "Kdf") {
+    if (SubtleAlgorithms::familyOf(name) == "Hmac" || SubtleAlgorithms::familyOf(name) == "Aes" ||
+        SubtleAlgorithms::familyOf(name) == "Kdf") {
       isPublic = 0;
     }
     usages(6, name, isPublic, isPublic == 0);
     if (!name.empty()) {
-      target = "subtleUnwrap" + familyOf(name).str();
+      target = "subtleUnwrap" + SubtleAlgorithms::familyOf(name).str();
     }
   } else {
     return nullptr;

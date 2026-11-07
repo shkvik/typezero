@@ -280,6 +280,9 @@ inline constexpr DirectAlgorithm kDirectCiphers[] = {
     {"chacha20-poly1305", "tz_crypto_cipher_chacha20_poly1305"},
 };
 
-inline bool isFullCryptoFunction(llvm::StringRef name) { return name.starts_with("tz_openssl_"); }
+class CryptoApi {
+public:
+  static bool isFullCryptoFunction(llvm::StringRef name);
+};
 
 }

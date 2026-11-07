@@ -36,7 +36,7 @@ public:
   std::optional<Linear> utf8Length(const CallExpr *call) const;
   void addIndexCallbackFacts(const FunctionDecl *fn);
   std::optional<Linear> freshBufferLength(const CallExpr *call) const;
-  ValueRange lengthRange(const Expr *value) const;
+  IntegerRange lengthRange(const Expr *value) const;
   std::optional<Linear> lengthAtMost(const Expr *expr) const;
   Linear settled(Linear value) const;
   bool provesSumUpTo(std::optional<Linear> a, std::optional<Linear> b, const Expr *object) const;

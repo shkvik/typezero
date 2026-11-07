@@ -1,5 +1,6 @@
 #include "compiler/pipeline/check_program/topics/classes/overload_resolver/overload_resolver.h"
 #include "compiler/pipeline/check_program/flow/flow_checker/flow_checker.h"
+#include "compiler/pipeline/check_program/generics/generic_check_helpers/generic_check_helpers.h"
 #include "compiler/pipeline/check_program/generics/generic_instantiator/generic_instantiator.h"
 #include "compiler/pipeline/check_program/generics/inference/inference.h"
 #include "compiler/pipeline/check_program/generics/type_arg_inferrer/type_arg_inferrer.h"
@@ -83,7 +84,7 @@ int OverloadResolver::conversionRank(const Type *from, const Type *to) {
                : -1;
   }
   if (from->isObject() && to->isObject()) {
-    int distance = subtypeDistance(from, to);
+    int distance = TypeQueries::subtypeDistance(from, to);
     if (distance > 0) {
       return distance;
     }
@@ -212,7 +213,7 @@ OverloadResolver::chooseVariant(llvm::ArrayRef<FunctionDecl *> variants, std::ve
     const Type *expected = OverloadResolver::parameterAt(fit[0]->sym, i);
     for (FunctionDecl *v : fit) {
       if (OverloadResolver::parameterAt(v->sym, i) != expected ||
-          (expected && mentionsAnyOf(expected, v->sym->typeParams))) {
+          (expected && GenericCheckHelpers::mentionsAnyOf(expected, v->sym->typeParams))) {
         expected = nullptr;
       }
     }

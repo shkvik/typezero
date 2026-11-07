@@ -16,6 +16,7 @@ public:
   llvm::TargetMachine &machine() const { return *machine_; }
 
 private:
+  static void initializeTargets();
   Target(llvm::Triple triple, std::unique_ptr<llvm::TargetMachine> machine);
 
   llvm::Triple triple_;

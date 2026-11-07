@@ -393,7 +393,7 @@ static void access_work(TzWork *w) {
     tz_fs_fsp_fail_system(r, GetLastError(), "access", 1);
   } else if ((r->mode & 2) && (attributes & FILE_ATTRIBUTE_READONLY) &&
              !(attributes & FILE_ATTRIBUTE_DIRECTORY)) {
-    tz_fs_fsp_fail(r, (Failure){E_EPERM, tz_fs_errors[E_EPERM].windows}, "access", 1);
+    tz_fs_fsp_fail(r, (Failure){E_EPERM, tz_fs_errors[E_EPERM].windows, 0}, "access", 1);
   }
 #else
   if (access(tz_fs_native(&r->path), r->mode) != 0) {

@@ -40,13 +40,13 @@ using llvm::isa;
 AliasAnalysis::AliasAnalysis(Analysis &analysis) : analysis_(analysis) {}
 
 bool AliasAnalysis::isAllocation(const Expr *e) const {
-  e = strip(e);
+  e = ParallelHelpers::strip(e);
   if (!e) {
     return false;
   }
   const Expr *made = e;
   if (auto *a = dyn_cast<AwaitExpr>(e)) {
-    made = strip(a->value);
+    made = ParallelHelpers::strip(a->value);
   }
   if (auto *c = dyn_cast_or_null<CallExpr>(made)) {
     if (const FunctionDecl *lib = analysis_.libraryEffects.libraryTarget(c)) {
@@ -67,11 +67,11 @@ bool AliasAnalysis::isAllocation(const Expr *e) const {
     return n->cls() || (n->type && n->type->isArray());
   }
   if (auto *c = dyn_cast<CallExpr>(e)) {
-    if (makesNewObject(c->builtin())) {
+    if (ParallelHelpers::makesNewObject(c->builtin())) {
       return true;
     }
     if (c->builtin() == Builtin::Crypto && !c->args.empty()) {
-      if (auto *number = dyn_cast<IntLitExpr>(strip(c->args[0]));
+      if (auto *number = dyn_cast<IntLitExpr>(ParallelHelpers::strip(c->args[0]));
           number && number->value < std::size(kCryptoFunctions)) {
         char result = kCryptoFunctions[size_t(number->value)].result;
         return result == 'o' || result == 'p';
@@ -87,7 +87,7 @@ bool AliasAnalysis::isAllocation(const Expr *e) const {
 }
 
 Ref AliasAnalysis::refOf(const Expr *e) {
-  e = strip(e);
+  e = ParallelHelpers::strip(e);
   if (!e || !e->type) {
     return Ref{RefKind::Type, nullptr};
   }
@@ -123,7 +123,7 @@ Ref AliasAnalysis::refOf(const Expr *e) {
 }
 
 Ref AliasAnalysis::receiverRef(const Expr *e) {
-  const Expr *object = strip(e);
+  const Expr *object = ParallelHelpers::strip(e);
   if (object && isAllocation(object)) {
     return Ref{RefKind::Site, object};
   }
@@ -132,7 +132,8 @@ Ref AliasAnalysis::receiverRef(const Expr *e) {
 }
 
 bool AliasAnalysis::isLocal(const VarSymbol *v) {
-  if (v->isGlobal() || v->captured() || v->reassigned || !holdsReferences(v->type)) {
+  if (v->isGlobal() || v->captured() || v->reassigned ||
+      !ParallelHelpers::holdsReferences(v->type)) {
     return false;
   }
   auto it = analysis_.declInit.find(v);
@@ -194,7 +195,7 @@ bool AliasAnalysis::typesMayAlias(const Type *a, const Type *b) {
   bool result = false;
   auto any = [](const Type *t) { return t->isUnknown() || t->isAnyObject() || t->isParam(); };
   if (any(a) || any(b)) {
-    result = holdsReferences(a) && holdsReferences(b);
+    result = ParallelHelpers::holdsReferences(a) && ParallelHelpers::holdsReferences(b);
   } else if (a->isUnion() || b->isUnion()) {
     const Type *u = a->isUnion() ? a : b, *other = a->isUnion() ? b : a;
     analysis_.alias[key] = false;
@@ -329,7 +330,7 @@ bool AliasAnalysis::mayReach(Ref from, Ref to, bool innerOnly) {
     return true;
   }
   for (const Type *t : inside(source)) {
-    if (holdsReferences(t) && typesMayAlias(t, target)) {
+    if (ParallelHelpers::holdsReferences(t) && typesMayAlias(t, target)) {
       return true;
     }
   }

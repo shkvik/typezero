@@ -89,7 +89,7 @@ std::string UnionChecker::lackingHint(const MemberExpr *member, const Type *type
 UnionChecker::ResultUnionMemberTyped UnionChecker::checkUnionMember(MemberExpr *member) {
   const Type *type = member->object->type;
   if (type->isTagged()) {
-    const char *typeOf = typeOfName(type->members().front());
+    const char *typeOf = TypeSpelling::typeOfName(type->members().front());
     std::string message = ErrorTextUnionMember::narrow(member->name, type->name(), typeOf);
 
     return err(UnionCheckerCheckUnionMemberError{
@@ -157,7 +157,7 @@ UnionChecker::ResultUnionMemberTyped UnionChecker::checkUnionMember(MemberExpr *
     });
   }
   const Type *result = Type::unionOf(fieldTypes);
-  std::string problem = unionProblem(result);
+  std::string problem = UnionSlots::unionProblem(result);
   if (!problem.empty()) {
     std::string message = ErrorTextUnionMember::clash(type->name(), member->name, problem);
 
@@ -283,7 +283,7 @@ UnionChecker::unhandledCases(const SwitchStmt *stmt) const {
     if (!c.test) {
       return std::nullopt;
     }
-    if (const Type *literal = writtenLiteral(c.test)) {
+    if (const Type *literal = UnionCheckHelpers::writtenLiteral(c.test)) {
       llvm::erase(left, literal);
     } else if (c.test->type && c.test->type->isLiteral()) {
       llvm::erase(left, c.test->type);
@@ -304,7 +304,7 @@ UnionChecker::ResultUnionMethodTyped UnionChecker::checkUnionMethodCall(CallExpr
                      });
   if (notNarrowed) {
     ArgumentChecker(this->state).checkArgsLoosely(call);
-    const char *typeOf = typeOfName(receiver->members().front());
+    const char *typeOf = TypeSpelling::typeOfName(receiver->members().front());
     std::string message = ErrorTextUnionMember::narrow(name, receiver->name(), typeOf);
 
     return err(UnionCheckerCheckUnionMethodCallError{

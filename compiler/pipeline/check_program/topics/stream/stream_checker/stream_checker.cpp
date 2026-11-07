@@ -1,4 +1,5 @@
 #include "compiler/pipeline/check_program/topics/stream/stream_checker/stream_checker.h"
+#include "compiler/load/to_utf8/to_utf8.h"
 #include "compiler/pipeline/check_program/declare/class_declarer/class_declarer.h"
 #include "compiler/pipeline/check_program/declare/prelude/prelude.h"
 #include "compiler/pipeline/check_program/flow/flow_checker/flow_checker.h"
@@ -20,15 +21,6 @@ using llvm::dyn_cast;
 using llvm::isa;
 
 namespace tz {
-
-std::string StreamChecker::utf8(const std::u16string &text) {
-  std::string out;
-  llvm::convertUTF16ToUTF8String(
-      llvm::ArrayRef<llvm::UTF16>(reinterpret_cast<const llvm::UTF16 *>(text.data()), text.size()),
-      out);
-
-  return out;
-}
 
 bool StreamChecker::isByteChunk(const Type *type) {
   return type->isBuffer() || type->isString();
@@ -68,22 +60,20 @@ Expr *StreamChecker::checkStreamIntrinsic(CallExpr *call, NameExpr *name, const 
       call->type = Type::boolTy();
       ClassDecl *cls = ClassDeclarer::classOf(call->args[0]->type);
       auto *lit = dyn_cast<StringLitExpr>(call->args[1]);
-      if (!cls || !lit) {
-        this->state.getDiagnostics().error(
-            name->loc(), "'overrides' takes an object of a class and the name of a "
-                         "method, as a string literal");
+      ResultOverrideArgs args = StreamChecker::overridesArgs(cls, lit);
+      if (args.isErr()) {
+        this->state.getDiagnostics().error(name->loc(), args.error().message);
         return call;
       }
-      std::string method = StreamChecker::utf8(lit->value);
+      std::string method = ToUtf8::toUtf8(lit->value);
       std::vector<FunctionDecl *> methods = ClassDeclarer::methodsNamed(cls, method, false);
-      if (methods.empty() || !methods[0]->sym) {
-        this->state.getDiagnostics().error(lit->loc(), "class '" + cls->name + "' has no method '" +
-                                                           method + "'");
-
+      ResultMethodExists there = StreamChecker::overriddenMethod(cls, methods, method);
+      if (there.isErr()) {
+        this->state.getDiagnostics().error(lit->loc(), there.error().message);
         return call;
       }
       call->args[1] = ExprChecker(this->state).checkExpr(call->args[1]);
-      call->target = MethodCall{.method = methods[0]->sym};
+      call->target = BuiltinCall{.builtin = Builtin::LibOverrides, .method = methods[0]->sym};
       return call;
     }
     case Builtin::LibStdinFailed:
@@ -132,6 +122,71 @@ Expr *StreamChecker::checkStreamIntrinsic(CallExpr *call, NameExpr *name, const 
   }
 }
 
+StreamChecker::ResultOverrideArgs StreamChecker::overridesArgs(const ClassDecl *cls,
+                                                               const StringLitExpr *lit) {
+  if (!cls || !lit) {
+    std::string message = ErrorTextStreamCall::overrides();
+
+    return err(StreamCheckerOverridesArgsError{
+        .code = StreamCheckerOverridesArgsErrorCode::NOT_CLASS_AND_LITERAL,
+        .message = message,
+    });
+  }
+
+  return ok(cls);
+}
+
+StreamChecker::ResultMethodExists
+StreamChecker::overriddenMethod(const ClassDecl *cls, llvm::ArrayRef<FunctionDecl *> methods,
+                                llvm::StringRef method) {
+  if (methods.empty() || !methods[0]->sym) {
+    std::string message = ErrorTextStreamCall::noMethod(cls->name, method);
+
+    return err(StreamCheckerOverriddenMethodError{
+        .code = StreamCheckerOverriddenMethodErrorCode::NO_SUCH_METHOD,
+        .message = message,
+    });
+  }
+
+  return ok(methods[0]);
+}
+
+StreamChecker::ResultChunkIsGiven StreamChecker::chunkNotUndefined(const Expr *arg, bool eof,
+                                                                   llvm::StringRef method) {
+  if (eof && isa<UndefinedExpr>(arg)) {
+    std::string message = ErrorTextStreamCall::undefined(method);
+
+    return err(StreamCheckerChunkNotUndefinedError{
+        .code = StreamCheckerChunkNotUndefinedErrorCode::UNDEFINED_CHUNK,
+        .message = message,
+    });
+  }
+
+  return ok(arg);
+}
+
+StreamChecker::ResultStreamSideOk StreamChecker::streamSide(const Type *chunk, const Type *receiver,
+                                                            llvm::StringRef name, bool reading) {
+  if (!chunk && reading) {
+    std::string message = ErrorTextStreamCall::noSide(receiver->name(), name, reading);
+
+    return err(StreamCheckerStreamSideError{
+        .code = StreamCheckerStreamSideErrorCode::NOT_READABLE,
+        .message = message,
+    });
+  }
+  if (!chunk) {
+    std::string message = ErrorTextStreamCall::noSide(receiver->name(), name, reading);
+
+    return err(StreamCheckerStreamSideError{
+        .code = StreamCheckerStreamSideErrorCode::NOT_WRITABLE,
+        .message = message,
+    });
+  }
+
+  return ok(chunk);
+}
+
 const Type *StreamChecker::streamCallbackType() {
   return Type::function({Type::optional(Prelude(this->state).builtinType("StreamError"))}, 0, false,
                         Type::voidTy());
@@ -139,11 +194,9 @@ const Type *StreamChecker::streamCallbackType() {
 
 Expr *StreamChecker::streamChunkArg(Expr *arg, const Type *chunk, bool eof, bool writing,
                                     llvm::StringRef method, bool checked) {
-  if (eof && isa<UndefinedExpr>(arg)) {
-    this->state.getDiagnostics().error(arg->loc(),
-                                       "'" + method.str() +
-                                           "(undefined)' does not end a stream: a chunk is "
-                                           "never undefined; end the stream with 'pushEnd()'");
+  ResultChunkIsGiven given = StreamChecker::chunkNotUndefined(arg, eof, method);
+  if (given.isErr()) {
+    this->state.getDiagnostics().error(arg->loc(), given.error().message);
     arg->type = Type::error();
 
     return arg;
@@ -175,17 +228,9 @@ Expr *StreamChecker::streamChunkArg(Expr *arg, const Type *chunk, bool eof, bool
   const Type *value = type;
   bool ok = value->isUnion() ? llvm::all_of(value->members(), fits) : fits(value);
   if (!ok) {
-    std::string takes = onlyStrings ? "a string" : "a string, a Buffer or a Uint8Array";
-    this->state.getDiagnostics().error(
-        arg->loc(), "'" + method.str() + "' of a stream of " + chunk->name().str() + " takes " +
-                        takes + ", but this is '" + type->name().str() + "'" +
-                        (onlyStrings ? "; a Writable<string> gives its onWrite() the "
-                                       "strings written; make it a Writable<Buffer> to "
-                                       "write bytes"
-                                     : "; to write objects, make the stream an "
-                                       "object-mode one of their type, e.g. 'class "
-                                       "Users extends Readable<User>' with "
-                                       "'super({ objectMode: true })'"));
+    std::string message =
+        ErrorTextStreamCall::chunk(method, chunk->name(), onlyStrings, type->name());
+    this->state.getDiagnostics().error(arg->loc(), message);
     return arg;
   }
 
@@ -220,20 +265,17 @@ Expr *StreamChecker::checkStreamCall(CallExpr *call, MemberExpr *member, ClassDe
     return SetEncodingChecker(this->state).checkSetEncoding(call, member, cls);
   }
   if (name == "pipe") {
-    return ResultChecker(this->state)
-        .reject(
-            call, member->loc(),
-            "'pipe' is not supported: it does not pass an error on, so the source stops and the "
-            "destination stays open; join the streams with 'await pipeline(source, destination)', "
-            "which gives a Result");
+    std::string message = ErrorTextStreamCall::pipe();
+    this->state.getDiagnostics().error(member->loc(), message);
+
+    return ResultChecker(this->state).markCallFailed(call);
   }
   StreamChunks chunks = ChunkTypes(this->state).streamChunksOf(cls);
   bool reading = name == "push" || name == "unshift";
   const Type *chunk = reading ? chunks.readable : chunks.writable;
-  if (!chunk) {
-    this->state.getDiagnostics().error(
-        member->loc(), "'" + receiver->name() + "' has no " + name.str() +
-                           "(): " + (reading ? "it is not readable" : "it is not writable"));
+  ResultStreamSideOk side = StreamChecker::streamSide(chunk, receiver, name, reading);
+  if (side.isErr()) {
+    this->state.getDiagnostics().error(member->loc(), side.error().message);
     checkArgsLoosely(0);
     return call;
   }
@@ -335,10 +377,10 @@ Expr *StreamChecker::checkStreamCall(CallExpr *call, MemberExpr *member, ClassDe
     size_t count = call->args.size();
     for (size_t i = 0; i < count; ++i) {
       if (isCallback(call->args[i])) {
-        return ResultChecker(this->state)
-            .reject(call, call->args[i]->loc(),
-                    "end() takes no callback: it gives a Promise of a Result, which says when the "
-                    "stream finished and whether it failed; 'const r = await w.end()'");
+        std::string message = ErrorTextStreamCall::endWithFn();
+        this->state.getDiagnostics().error(call->args[i]->loc(), message);
+
+        return ResultChecker(this->state).markCallFailed(call);
       }
     }
     if (count >= 1) {
@@ -347,8 +389,8 @@ Expr *StreamChecker::checkStreamCall(CallExpr *call, MemberExpr *member, ClassDe
         encoding = call->args[1];
       }
       if (count == 3) {
-        this->state.getDiagnostics().error(call->args[2]->loc(),
-                                           "end() takes a chunk and its encoding");
+        std::string message = ErrorTextStreamCall::endArgs();
+        this->state.getDiagnostics().error(call->args[2]->loc(), message);
         checkArgsLoosely(2);
         return call;
       }

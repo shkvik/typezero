@@ -13,8 +13,6 @@ struct HashNames {
   std::vector<llvm::StringLiteral> aliases;
 };
 
-const std::vector<HashNames> &hashNames();
-
 inline const llvm::StringLiteral kCipherNames[] = {"aes-128-cbc",
                                                    "aes-128-cbc-hmac-sha1",
                                                    "aes-128-cbc-hmac-sha256",
@@ -227,16 +225,6 @@ inline const llvm::StringLiteral kExports[] = {"Certificate",
                                                "setEngine",
                                                "setFips"};
 
-bool turnedOffHash(llvm::StringRef name);
-
-bool turnedOffCipher(llvm::StringRef name);
-
-llvm::StringRef methodsOf(Crypto kind);
-
-std::string cryptoExportProblem(llvm::StringRef name, llvm::StringRef path);
-
-std::string tzCryptoExportProblem(llvm::StringRef name, llvm::StringRef path);
-
 inline constexpr llvm::StringLiteral kCurveNames[] = {
     "Oakley-EC2N-3", "Oakley-EC2N-4", "SM2", "brainpoolP160r1", "brainpoolP160t1",
     "brainpoolP192r1", "brainpoolP192t1", "brainpoolP224r1", "brainpoolP224t1", "brainpoolP256r1",
@@ -254,6 +242,14 @@ inline constexpr llvm::StringLiteral kCurveNames[] = {
     "wap-wsg-idm-ecid-wtls3", "wap-wsg-idm-ecid-wtls4", "wap-wsg-idm-ecid-wtls5",
     "wap-wsg-idm-ecid-wtls6", "wap-wsg-idm-ecid-wtls7", "wap-wsg-idm-ecid-wtls8",
     "wap-wsg-idm-ecid-wtls9", "P-192", "P-224", "P-256", "P-384", "P-521",
+};
+
+class CryptoNames {
+public:
+  static const std::vector<HashNames> &hashNames();
+  static bool turnedOffHash(llvm::StringRef name);
+  static bool turnedOffCipher(llvm::StringRef name);
+  static llvm::StringRef methodsOf(Crypto kind);
 };
 
 }

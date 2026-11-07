@@ -3,8 +3,10 @@
 #include "compiler/pipeline/check_program/declare/prelude/prelude.h"
 #include "compiler/pipeline/check_program/flow/index_proofs/index_proofs.h"
 #include "compiler/pipeline/check_program/topics/bytes/byte_proofs/byte_proofs.h"
+#include "compiler/pipeline/check_program/topics/bytes/byte_proofs/byte_proofs_errors.h"
 #include "compiler/pipeline/check_program/topics/bytes/bytes_new_checker/bytes_new_checker.h"
 #include "compiler/pipeline/check_program/topics/decimal/decimal_checker/decimal_checker.h"
+#include "compiler/pipeline/check_program/topics/decimal/decimal_checker/decimal_checker_errors.h"
 #include "compiler/pipeline/check_program/topics/expr/argument_checker/argument_checker.h"
 #include "compiler/pipeline/check_program/topics/expr/expr_checker/expr_checker.h"
 #include "compiler/pipeline/check_program/topics/expr/member_checker/member_checker.h"
@@ -22,19 +24,28 @@ using llvm::isa;
 
 namespace tz {
 
-std::string TypedArrayChecker::rangeText(int64_t lo, int64_t hi) {
-  return std::to_string(lo) + " to " + std::to_string(hi);
-}
-
 TypedArrayChecker::TypedArrayChecker(CheckState &owner)
     : state(owner) {}
+
+TypedArrayChecker::ResultSetSourceOk TypedArrayChecker::setSource(const Expr *source) {
+  if (source->type->isIterator()) {
+    std::string message = ErrorTextTypedArray::iterator();
+
+    return err(TypedArrayCheckerSetSourceError{
+        .code = TypedArrayCheckerSetSourceErrorCode::ITERATOR_SOURCE,
+        .message = message,
+    });
+  }
+
+  return ok(source);
+}
 
 Expr *TypedArrayChecker::checkTypedArrayMethod(CallExpr *call, MemberExpr *member,
                                                const Type *expected) {
   const Type *type = member->object->type;
   const Type *element = type->elementType();
   llvm::StringRef name = member->name;
-  std::string what = "an element of '" + type->name().str() + "'";
+  std::string what = ErrorTextByteView::element(type->name());
   const Type *copy = type->isBuffer() ? Type::bytesType(Bytes::Uint8) : type;
   auto made = [&](Builtin builtin, const Type *result) {
     call->target = BuiltinCall{.builtin = builtin};
@@ -64,13 +75,10 @@ Expr *TypedArrayChecker::checkTypedArrayMethod(CallExpr *call, MemberExpr *membe
     int64_t lo, hi;
     if (name == "map" && !call->args.empty() && !arrow && call->args[0]->type->isFunction() &&
         type->elementRange(lo, hi) && type->bytes() != Bytes::Uint8Clamped) {
-      this->state.getDiagnostics().error(
-          call->args[0]->loc(),
-          "cannot prove that what the function returns fits in " + what + " (" +
-              TypedArrayChecker::rangeText(lo, hi) +
-              "), and JavaScript would cut it without a word; pass an arrow that cuts it "
-              "explicitly, e.g. 'x => " +
-              wrapHint(type->bytes(), "f(x)") + "'");
+      std::string range = ErrorTextBytes::range(lo, hi);
+      std::string hint = BytesCheckHelpers::wrapHint(type->bytes(), "f(x)");
+      std::string message = ErrorTextTypedArray::mapFits(what, range, hint);
+      this->state.getDiagnostics().error(call->args[0]->loc(), message);
     }
     if (name == "toSorted" && !call->type->isError()) {
       call->type = copy;
@@ -78,9 +86,8 @@ Expr *TypedArrayChecker::checkTypedArrayMethod(CallExpr *call, MemberExpr *membe
     return result;
   }
   if (name == "flatMap") {
-    this->state.getDiagnostics().error(
-        member->loc(), "typed arrays have no 'flatMap'; spread the elements into an "
-                       "array first, e.g. '[...u].flatMap(f)'");
+    std::string message = ErrorTextTypedArray::flatMap();
+    this->state.getDiagnostics().error(member->loc(), message);
     for (Expr *&arg : call->args) {
       arg = ExprChecker(this->state).checkExpr(arg);
     }
@@ -150,7 +157,11 @@ Expr *TypedArrayChecker::checkTypedArrayMethod(CallExpr *call, MemberExpr *membe
       return call;
     }
     call->args[0] = ArgumentChecker(this->state).checkArg(call->args[0], element);
-    ByteProofs(this->state).checkFits(call->args[0], type, what);
+    ByteProofs::ResultValueFitsType fitting =
+        ByteProofs(this->state).valueFits(call->args[0], type, what);
+    if (fitting.isErr()) {
+      this->state.getDiagnostics().error(call->args[0]->loc(), fitting.error().message);
+    }
     call->args[0] = TypeRelations(this->state).convert(call->args[0], Type::doubleTy());
     positions(1);
     return made(Builtin::BytesFill, type);
@@ -169,17 +180,20 @@ Expr *TypedArrayChecker::checkTypedArrayMethod(CallExpr *call, MemberExpr *membe
       }
       for (const ArrayLitExpr::Element &e : lit->elements) {
         if (!e.spread) {
-          ByteProofs(this->state).checkFits(e.expr, type, what);
+          ByteProofs::ResultValueFitsType fitting =
+              ByteProofs(this->state).valueFits(e.expr, type, what);
+          if (fitting.isErr()) {
+            this->state.getDiagnostics().error(e.expr->loc(), fitting.error().message);
+          }
         } else if (!BytesNewChecker(this->state).checkBytesSource(e.expr, type)) {
           return call;
         }
       }
     } else {
       source = ExprChecker(this->state).checkExpr(source);
-      if (source->type->isIterator()) {
-        this->state.getDiagnostics().error(
-            source->loc(), "'set' takes an array or a typed array; collect the values "
-                           "of the iterator first, e.g. '[...it]'");
+      ResultSetSourceOk set = TypedArrayChecker::setSource(source);
+      if (set.isErr()) {
+        this->state.getDiagnostics().error(source->loc(), set.error().message);
         return call;
       }
       if (!BytesNewChecker(this->state).checkBytesSource(source, type)) {
@@ -218,14 +232,16 @@ Expr *TypedArrayChecker::checkTypedArrayMethod(CallExpr *call, MemberExpr *membe
     if (!call->args[0]->type->isError() &&
         !IndexProofs(this->state).provesAtInBounds(member->object, call->args[0]) &&
         !IndexProofs(this->state).exempt(call->args[0]->loc(), member->object)) {
-      this->state.getDiagnostics().error(
-          call->args[0]->loc(),
-          "cannot prove that the index is within the array, and JavaScript "
-          "would throw a RangeError; check it first, e.g. 'if (i >= 0 && i < " +
-              valueText(member->object) + ".length)'");
+      std::string message =
+          ErrorTextTypedArray::index(BytesCheckHelpers::valueText(member->object));
+      this->state.getDiagnostics().error(call->args[0]->loc(), message);
     }
     call->args[1] = ArgumentChecker(this->state).checkArg(call->args[1], element);
-    ByteProofs(this->state).checkFits(call->args[1], type, what);
+    ByteProofs::ResultValueFitsType fitting =
+        ByteProofs(this->state).valueFits(call->args[1], type, what);
+    if (fitting.isErr()) {
+      this->state.getDiagnostics().error(call->args[1]->loc(), fitting.error().message);
+    }
     call->args[1] = TypeRelations(this->state).convert(call->args[1], Type::doubleTy());
     return made(Builtin::BytesWith, copy);
   }
@@ -255,14 +271,10 @@ Expr *TypedArrayChecker::checkTypedArrayMethod(CallExpr *call, MemberExpr *membe
   for (Expr *&arg : call->args) {
     arg = ExprChecker(this->state).checkExpr(arg);
   }
-  if (name == "toLocaleString") {
-    this->state.getDiagnostics().error(
-        member->loc(), "'toLocaleString' of a typed array is not supported; join the "
-                       "elements with 'join()', or format each with toLocaleString");
-  } else {
-    this->state.getDiagnostics().error(
-        member->loc(), "property '" + name + "' does not exist on type '" + type->name() + "'");
-  }
+  std::string message = name == "toLocaleString"
+                            ? ErrorTextTypedArray::locale()
+                            : ErrorTextTypedArray::noMember(name, type->name());
+  this->state.getDiagnostics().error(member->loc(), message);
 
   return call;
 }
@@ -270,16 +282,18 @@ Expr *TypedArrayChecker::checkTypedArrayMethod(CallExpr *call, MemberExpr *membe
 Expr *TypedArrayChecker::checkDataViewMethod(CallExpr *call, MemberExpr *member) {
   llvm::StringRef name = member->name;
   NumberMethod m;
-  if (!numberMethod(name, true, m)) {
+  if (!BytesCheckHelpers::numberMethod(name, true, m)) {
     for (Expr *&arg : call->args) {
       arg = ExprChecker(this->state).checkExpr(arg);
     }
-    this->state.getDiagnostics().error(member->loc(),
-                                       "property '" + name + "' does not exist on type 'DataView'");
+    std::string message = ErrorTextTypedArray::noMember(name, "DataView");
+    this->state.getDiagnostics().error(member->loc(), message);
     return call;
   }
   if (m.bigint) {
-    DecimalChecker(this->state).reportBigInt(member->loc(), "'" + name.str() + "'");
+    std::string quoted = ErrorTextBigInt::quoted(name);
+    std::string bigint = ErrorTextBigInt::none(quoted);
+    this->state.getDiagnostics().error(member->loc(), bigint);
     for (Expr *&arg : call->args) {
       arg = ExprChecker(this->state).checkExpr(arg);
     }
@@ -301,16 +315,20 @@ Expr *TypedArrayChecker::checkDataViewMethod(CallExpr *call, MemberExpr *member)
   std::vector<Expr *> args{kind, MemberChecker(this->state).checkPosition(call->args[0])};
   if (m.write) {
     Expr *value = ArgumentChecker(this->state).checkArg(call->args[1], element);
-    ByteProofs(this->state).checkFits(value, kindType, numberWhat(m.kind));
+    ByteProofs::ResultValueFitsType fitting =
+        ByteProofs(this->state).valueFits(value, kindType, BytesCheckHelpers::numberWhat(m.kind));
+    if (fitting.isErr()) {
+      this->state.getDiagnostics().error(value->loc(), fitting.error().message);
+    }
     args.push_back(value);
   }
   if (call->args.size() > min) {
     args.push_back(ArgumentChecker(this->state).checkArg(call->args[min], Type::boolTy()));
   }
+  std::string offsetWhat = ErrorTextTypedArray::offsetOf(member->name);
   IndexProofs::ResultUpToWasProven upTo =
       IndexProofs(this->state)
-          .requireUpTo(args[1], member->object, kindType->elementSize(),
-                       "the offset of '" + member->name.str() + "'");
+          .requireUpTo(args[1], member->object, kindType->elementSize(), offsetWhat);
   if (upTo.isErr() && upTo.error().code != IndexProofsRequireUpToErrorCode::EXEMPT) {
     this->state.getDiagnostics().error(args[1]->loc(), upTo.error().message);
   }
@@ -329,8 +347,9 @@ void TypedArrayChecker::checkSetRange(const Expr *target, const Expr *source, co
   IndexProofs proofs(this->state);
   bool offsetUnproven = false;
   if (offset) {
+    std::string offsetWhat = ErrorTextTypedArray::setOffset();
     IndexProofs::ResultBetweenProven between =
-        proofs.requireBetween(offset, 0, std::nullopt, "the offset of 'set'");
+        proofs.requireBetween(offset, 0, std::nullopt, offsetWhat);
     if (between.isErr() && between.error().code != IndexProofsRequireBetweenErrorCode::EXEMPT) {
       this->state.getDiagnostics().error(offset->loc(), between.error().message);
     }
@@ -341,12 +360,10 @@ void TypedArrayChecker::checkSetRange(const Expr *target, const Expr *source, co
   }
   std::optional<Linear> at = offset ? proofs.linear(offset) : Linear{Term::zero(), 0};
   if (!proofs.provesSumUpTo(at, proofs.lengthAtMost(source), target)) {
-    std::string end =
-        (offset ? valueText(offset) + " + " : std::string()) + valueText(source) + ".length";
-    this->state.getDiagnostics().error(
-        source->loc(), "cannot prove that the values fit, '" + end + " <= " + valueText(target) +
-                           ".length', and JavaScript would throw a RangeError; "
-                           "check it first, with the offset written as a number");
+    std::string offsetText = offset ? BytesCheckHelpers::valueText(offset) : std::string();
+    std::string message = ErrorTextTypedArray::setFits(
+        offsetText, BytesCheckHelpers::valueText(source), BytesCheckHelpers::valueText(target));
+    this->state.getDiagnostics().error(source->loc(), message);
   }
 }
 

@@ -107,7 +107,8 @@ UtilityTypes::ResultUtilityApplied UtilityTypes::resolveUtilityType(const TypeRe
       return ok(operands.back());
     }
   }
-  if (function && !mentionsParam(operands[0]) && !operands[0]->nonOptional()->isFunction()) {
+  if (function && !TypeQueries::mentionsParam(operands[0]) &&
+      !operands[0]->nonOptional()->isFunction()) {
     std::string message = ErrorTextUtility::noFunction(ref.name, operands[0]->name());
 
     return err(UtilityTypesResolveUtilityTypeError{
@@ -115,8 +116,8 @@ UtilityTypes::ResultUtilityApplied UtilityTypes::resolveUtilityType(const TypeRe
         .message = message,
     });
   }
-  if (text && !mentionsParam(operands[0])) {
-    for (const Type *m : distributedMembers(operands[0])) {
+  if (text && !TypeQueries::mentionsParam(operands[0])) {
+    for (const Type *m : TypeopsCheckHelpers::distributedMembers(operands[0])) {
       if (!m->isString() && !m->isStringLiteral()) {
         std::string message = ErrorTextUtility::notString(ref.name, m->name());
 

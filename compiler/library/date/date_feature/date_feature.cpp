@@ -26,7 +26,9 @@ Expr *DateFeature::checkMethodCall(CheckState &state, CallExpr *call, MemberExpr
   return nullptr;
 }
 
-bool DateFeature::lowers(Builtin builtin) const { return isDateBuiltin(builtin); }
+bool DateFeature::lowers(Builtin builtin) const {
+  return BuiltinGroups::isDateBuiltin(builtin);
+}
 
 llvm::Value *DateFeature::lowerCall(Lowering &lowering, CallExpr *call) const {
   return lowering.dateLowerer().emitDateCall(call);

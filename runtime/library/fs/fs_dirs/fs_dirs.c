@@ -372,15 +372,15 @@ int tz_fs_mkdir_raw(const uint16_t *path, size_t n, int32_t recursive, int32_t m
       }
     } else {
       if (f.index == E_ENOENT) {
-        f = (Failure){E_EEXIST, tz_fs_errors[E_EEXIST].windows};
+        f = (Failure){E_EEXIST, tz_fs_errors[E_EEXIST].windows, 0};
       }
       TzStatsParts st;
       DWORD stat_error = tz_fs_stat_of((const wchar_t *)units, 1, &st);
       if (stat_error == 0 && ((uint32_t)st.mode & S_KIND) != S_DIR) {
         failed = 1;
         *failure = f.index == E_EEXIST && depth > 0
-                       ? (Failure){E_ENOTDIR, tz_fs_errors[E_ENOTDIR].windows}
-                       : (Failure){E_EEXIST, tz_fs_errors[E_EEXIST].windows};
+                       ? (Failure){E_ENOTDIR, tz_fs_errors[E_ENOTDIR].windows, 0}
+                       : (Failure){E_EEXIST, tz_fs_errors[E_EEXIST].windows, 0};
       } else if (stat_error) {
         failed = 1;
         *failure = tz_fs_win32_failure(stat_error);
@@ -553,7 +553,7 @@ void tz_fs_mkdtemp(TzStr *out, void *prefix_obj, uint64_t prefix_meta, TzMaker m
 #else
     int error = mkdir(tz_fs_native(&dir), 0700) == 0 ? 0 : errno;
     int exists = error == EEXIST;
-    Failure f = error ? tz_fs_errno_failure(error) : (Failure){0, 0};
+    Failure f = error ? tz_fs_errno_failure(error) : (Failure){0, 0, 0};
 #endif
     tz_fs_path_free(&dir);
     if (!error) {
@@ -741,7 +741,7 @@ int tz_fs_rm_raw(const Path *p, int32_t recursive, int32_t force, Failure *failu
   Failure missing = tz_fs_win32_failure(error);
 #else
   int error = tz_fs_stat_of(tz_fs_native(p), 0, &st);
-  Failure missing = error ? tz_fs_errno_failure(error) : (Failure){0, 0};
+  Failure missing = error ? tz_fs_errno_failure(error) : (Failure){0, 0, 0};
 #endif
   if (error) {
     if (force && (missing.index == E_ENOENT || missing.index == E_ENOTDIR)) {

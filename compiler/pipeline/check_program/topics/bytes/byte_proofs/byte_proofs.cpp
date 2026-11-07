@@ -12,8 +12,62 @@ using llvm::dyn_cast;
 
 namespace tz {
 
-std::string ByteProofs::rangeText(int64_t lo, int64_t hi) {
-  return std::to_string(lo) + " to " + std::to_string(hi);
+const VarSymbol *ByteProofs::viewOwner(const Expr *expr, llvm::StringRef field, const Type **type) {
+  if (auto *call = dyn_cast<CallExpr>(expr);
+      call &&
+      (call->builtin() == Builtin::BytesBuffer || call->builtin() == Builtin::BytesByteOffset ||
+       call->builtin() == Builtin::BytesByteLength)) {
+    expr = call->callee;
+  }
+  auto *member = dyn_cast<MemberExpr>(expr);
+  if (!member || member->name != field || !member->object->type ||
+      !member->object->type->isByteView()) {
+    return nullptr;
+  }
+  const Expr *object = member->object;
+  while (auto *conv = dyn_cast<CastExpr>(object)) {
+    if (!conv->isImplicit()) {
+      return nullptr;
+    }
+    object = conv->operand;
+  }
+  auto *name = dyn_cast<NameExpr>(object);
+  if (type) {
+    *type = member->object->type;
+  }
+
+  return name ? name->var() : nullptr;
+}
+
+const Expr *ByteProofs::withoutCasts(const Expr *expr) {
+  while (auto *conv = dyn_cast<CastExpr>(expr)) {
+    if (!conv->isImplicit()) {
+      break;
+    }
+    expr = conv->operand;
+  }
+
+  return expr;
+}
+
+bool ByteProofs::sameView(const Expr *buffer, const Expr *offset, const Expr *length,
+                          int64_t size) {
+  const Type *ownerType = nullptr;
+  const VarSymbol *owner = ByteProofs::viewOwner(buffer, "buffer", &ownerType);
+  if (!owner || !offset ||
+      ByteProofs::viewOwner(ByteProofs::withoutCasts(offset), "byteOffset") != owner) {
+    return false;
+  }
+  if (!length) {
+    return size == 1;
+  }
+  length = ByteProofs::withoutCasts(length);
+  if (ByteProofs::viewOwner(length, "byteLength") == owner) {
+    return size == 1;
+  }
+
+  return ByteProofs::viewOwner(length, "length") == owner &&
+         ownerType->elementSize() == uint64_t(size);
 }
 
 int64_t ByteProofs::wrapped(Bytes kind, int64_t v) {
@@ -69,7 +123,7 @@ int64_t ByteProofs::floorShift(int64_t v, int64_t n) {
 ByteProofs::ByteProofs(CheckState &owner)
     : state(owner) {}
 
-ValueRange ByteProofs::valueRange(const Expr *e) const {
+IntegerRange ByteProofs::valueRange(const Expr *e) const {
   Range r = this->computedRange(e);
   if (!e->type || !e->type->nonOptional()->isInteger()) {
     return r;
@@ -85,7 +139,7 @@ ValueRange ByteProofs::valueRange(const Expr *e) const {
   return r;
 }
 
-ValueRange ByteProofs::computedRange(const Expr *e) const {
+IntegerRange ByteProofs::computedRange(const Expr *e) const {
   if (!e->type || !e->type->nonOptional()->isInteger()) {
     return {};
   }
@@ -203,7 +257,7 @@ ValueRange ByteProofs::computedRange(const Expr *e) const {
       return {};
     }
     if (unary->op == UnaryOp::Neg) {
-      return operate(BinaryOp::Sub, ByteProofs::exact(0), r, false);
+      return BytesCheckHelpers::operate(BinaryOp::Sub, ByteProofs::exact(0), r, false);
     }
     if (unary->op == UnaryOp::BitNot) {
       return {-*r.hi - 1, -*r.lo - 1};
@@ -215,7 +269,8 @@ ValueRange ByteProofs::computedRange(const Expr *e) const {
     if (bin->op == BinaryOp::Nullish) {
       return ByteProofs::unite(this->valueRange(bin->lhs), this->valueRange(bin->rhs));
     }
-    return operate(bin->op, this->valueRange(bin->lhs), this->valueRange(bin->rhs), false);
+    return BytesCheckHelpers::operate(bin->op, this->valueRange(bin->lhs),
+                                      this->valueRange(bin->rhs), false);
   }
   case Expr::Kind::Conditional: {
     auto *cond = cast<ConditionalExpr>(e);
@@ -232,100 +287,77 @@ bool ByteProofs::provesFits(const Expr *expr, int64_t lo, int64_t hi) const {
   return IndexProofs(this->state).provesBetween(expr, lo, hi);
 }
 
-void ByteProofs::checkFits(const Expr *value, const Type *target, llvm::StringRef what) {
+ByteProofs::ResultValueFitsType ByteProofs::valueFits(const Expr *value, const Type *target,
+                                                      llvm::StringRef what) {
   int64_t lo, hi;
   if (!value->type->isInteger() || !target->elementRange(lo, hi)) {
-    return;
+    return ok(value);
   }
   Bytes kind = target->bytes();
-  if (kind == Bytes::Uint8Clamped || this->provesFits(value, lo, hi) ||
-      (lo >= value->type->intMin() && uint64_t(hi) >= value->type->intMax())) {
-    return;
+  bool fits = kind == Bytes::Uint8Clamped || this->provesFits(value, lo, hi) ||
+              (lo >= value->type->intMin() && uint64_t(hi) >= value->type->intMax());
+  if (fits) {
+    return ok(value);
   }
-  std::string text = valueText(value);
+  std::string range = ErrorTextBytes::range(lo, hi);
   if (std::optional<int64_t> c = ConstantFolder(this->state).intConstant(value)) {
-    this->state.getDiagnostics().error(
-        value->loc(), std::to_string(*c) + " does not fit in " + what.str() + " (" +
-                          ByteProofs::rangeText(lo, hi) + "): JavaScript would store " +
-                          std::to_string(ByteProofs::wrapped(kind, *c)) +
-                          "; write a value that fits, or cut it explicitly: '" +
-                          wrapHint(kind, std::to_string(*c)) + "'");
-    return;
+    std::string hint = BytesCheckHelpers::wrapHint(kind, std::to_string(*c));
+    int64_t stored = ByteProofs::wrapped(kind, *c);
+    std::string message = ErrorTextByteFit::constant(*c, what, range, stored, hint);
+
+    return err(ByteProofsValueFitsError{
+        .code = ByteProofsValueFitsErrorCode::CONSTANT_DOES_NOT_FIT,
+        .message = message,
+    });
   }
-  this->state.getDiagnostics().error(
-      value->loc(),
-      "cannot prove that the value fits in " + what.str() + " (" + ByteProofs::rangeText(lo, hi) +
-          "), and JavaScript would cut it without a word; check it first, e.g. 'if (" + text +
-          " >= " + std::to_string(lo) + " && " + text + " <= " + std::to_string(hi) +
-          ")', or cut it explicitly: '" + wrapHint(kind, text) + "'");
+  std::string text = BytesCheckHelpers::valueText(value);
+  std::string hint = BytesCheckHelpers::wrapHint(kind, text);
+  std::string message = ErrorTextByteFit::unproven(what, range, text, lo, hi, hint);
+
+  return err(ByteProofsValueFitsError{
+      .code = ByteProofsValueFitsErrorCode::FIT_NOT_PROVEN,
+      .message = message,
+  });
 }
 
-static const VarSymbol *viewOwner(const Expr *expr, llvm::StringRef field,
-                                  const Type **type = nullptr) {
-  if (auto *call = dyn_cast<CallExpr>(expr);
-      call &&
-      (call->builtin() == Builtin::BytesBuffer || call->builtin() == Builtin::BytesByteOffset ||
-       call->builtin() == Builtin::BytesByteLength)) {
-    expr = call->callee;
-  }
-  auto *member = dyn_cast<MemberExpr>(expr);
-  if (!member || member->name != field || !member->object->type ||
-      !member->object->type->isByteView()) {
-    return nullptr;
-  }
-  const Expr *object = member->object;
-  while (auto *conv = dyn_cast<CastExpr>(object)) {
-    if (!conv->isImplicit()) {
-      return nullptr;
-    }
-    object = conv->operand;
-  }
-  auto *name = dyn_cast<NameExpr>(object);
-  if (type) {
-    *type = member->object->type;
+ByteProofs::ResultOffsetAligned ByteProofs::offsetAligned(std::optional<int64_t> start,
+                                                          int64_t size, llvm::StringRef what) {
+  if (size > 1 && (!start || *start % size != 0)) {
+    std::string message = ErrorTextByteView::offset(what, size);
+
+    return err(ByteProofsOffsetAlignedError{
+        .code = ByteProofsOffsetAlignedErrorCode::MISALIGNED_OFFSET,
+        .message = message,
+    });
   }
 
-  return name ? name->var() : nullptr;
+  return ok(start.value_or(0));
 }
 
-static const Expr *withoutCasts(const Expr *expr) {
-  while (auto *conv = dyn_cast<CastExpr>(expr)) {
-    if (!conv->isImplicit()) {
-      break;
-    }
-    expr = conv->operand;
+ByteProofs::ResultBufferAligned ByteProofs::bufferAligned(std::optional<int64_t> whole,
+                                                          int64_t size, llvm::StringRef what) {
+  if (size > 1 && (!whole || *whole % size != 0)) {
+    std::string message = ErrorTextByteView::size(what, size);
+
+    return err(ByteProofsBufferAlignedError{
+        .code = ByteProofsBufferAlignedErrorCode::SIZE_NOT_PROVEN,
+        .message = message,
+    });
   }
 
-  return expr;
-}
-
-static bool sameView(const Expr *buffer, const Expr *offset, const Expr *length, int64_t size) {
-  const Type *ownerType = nullptr;
-  const VarSymbol *owner = viewOwner(buffer, "buffer", &ownerType);
-  if (!owner || !offset || viewOwner(withoutCasts(offset), "byteOffset") != owner) {
-    return false;
-  }
-  if (!length) {
-    return size == 1;
-  }
-  length = withoutCasts(length);
-  if (viewOwner(length, "byteLength") == owner) {
-    return size == 1;
-  }
-
-  return viewOwner(length, "length") == owner && ownerType->elementSize() == uint64_t(size);
+  return ok(whole.value_or(0));
 }
 
 void ByteProofs::checkView(const Expr *buffer, const Expr *offset, const Expr *length, int64_t size,
                            llvm::StringRef what) {
-  if (sameView(buffer, offset, length, size) ||
+  if (ByteProofs::sameView(buffer, offset, length, size) ||
       IndexProofs(this->state).exempt(buffer->loc(), buffer)) {
     return;
   }
   IndexProofs proofs(this->state);
   if (offset) {
-    IndexProofs::ResultUpToWasProven upTo =
-        proofs.requireUpTo(offset, buffer, 0, "the offset of " + what.str());
+    std::string offsetWhat = ErrorTextByteView::offsetOf(what);
+    IndexProofs::ResultUpToWasProven upTo = proofs.requireUpTo(offset, buffer, 0, offsetWhat);
     if (upTo.isErr() && upTo.error().code != IndexProofsRequireUpToErrorCode::EXEMPT) {
       this->state.getDiagnostics().error(offset->loc(), upTo.error().message);
     }
@@ -335,27 +367,22 @@ void ByteProofs::checkView(const Expr *buffer, const Expr *offset, const Expr *l
   }
   std::optional<int64_t> start =
       offset ? ConstantFolder(this->state).intConstant(offset) : std::optional<int64_t>(0);
-  if (size > 1 && (!start || *start % size != 0)) {
-    this->state.getDiagnostics().error(offset->loc(),
-                                       "the offset of " + what.str() + " must be a multiple of " +
-                                           std::to_string(size) +
-                                           ", written as a number; JavaScript throws a "
-                                           "RangeError otherwise");
+  ResultOffsetAligned aligned = ByteProofs::offsetAligned(start, size, what);
+  if (aligned.isErr()) {
+    this->state.getDiagnostics().error(offset->loc(), aligned.error().message);
     return;
   }
   if (!length) {
     std::optional<int64_t> whole = proofs.exactLength(buffer);
-    if (size > 1 && (!whole || *whole % size != 0)) {
-      this->state.getDiagnostics().error(
-          buffer->loc(), "cannot prove that the size of the buffer is a multiple of " +
-                             std::to_string(size) + " for " + what.str() +
-                             ", and JavaScript would throw a RangeError; give the length: "
-                             "'new X(buffer, offset, length)'");
+    ResultBufferAligned sized = ByteProofs::bufferAligned(whole, size, what);
+    if (sized.isErr()) {
+      this->state.getDiagnostics().error(buffer->loc(), sized.error().message);
     }
     return;
   }
+  std::string lengthWhat = ErrorTextByteView::lengthOf(what);
   IndexProofs::ResultBetweenProven between =
-      proofs.requireBetween(length, 0, std::nullopt, "the length of " + what.str());
+      proofs.requireBetween(length, 0, std::nullopt, lengthWhat);
   if (between.isErr() && between.error().code != IndexProofsRequireBetweenErrorCode::EXEMPT) {
     this->state.getDiagnostics().error(length->loc(), between.error().message);
   }
@@ -370,13 +397,12 @@ void ByteProofs::checkView(const Expr *buffer, const Expr *offset, const Expr *l
                                 : std::nullopt;
   }
   if (!proofs.provesSumUpTo(from, count, buffer)) {
-    std::string end = (offset ? valueText(offset) + " + " : std::string()) + valueText(length) +
-                      (size > 1 ? " * " + std::to_string(size) : "");
-    this->state.getDiagnostics().error(
-        length->loc(), "cannot prove that " + what.str() + " fits in the buffer, '" + end +
-                           " <= " + valueText(buffer) +
-                           ".byteLength', and JavaScript would throw a RangeError; check it "
-                           "first, with the offset or the length written as a number");
+    std::string offsetText = offset ? BytesCheckHelpers::valueText(offset) : std::string();
+    std::string end =
+        ErrorTextByteView::end(offsetText, BytesCheckHelpers::valueText(length), size);
+    std::string message =
+        ErrorTextByteView::notFits(what, end, BytesCheckHelpers::valueText(buffer));
+    this->state.getDiagnostics().error(length->loc(), message);
   }
 }
 
@@ -403,8 +429,10 @@ void ByteProofs::addByteCallbackFacts(const FunctionDecl *fn) {
   if (!var || !var->type->isInt() || (info.lo <= kIntMin && info.hi >= kIntMax)) {
     return;
   }
-  this->state.getFlowState().getFacts().add(Term::zero(), Term::of(var), saturatingSub(1, info.lo));
-  this->state.getFlowState().getFacts().add(Term::of(var), Term::zero(), saturatingAdd(info.hi, 1));
+  this->state.getFlowState().getFacts().add(Term::zero(), Term::of(var),
+                                            Facts::saturatingSub(1, info.lo));
+  this->state.getFlowState().getFacts().add(Term::of(var), Term::zero(),
+                                            Facts::saturatingAdd(info.hi, 1));
 }
 
 void ByteProofs::checkByteCallbackResult(const FunctionDecl *fn, const Expr *value) {
@@ -412,7 +440,11 @@ void ByteProofs::checkByteCallbackResult(const FunctionDecl *fn, const Expr *val
   if (!found || !found->target) {
     return;
   }
-  this->checkFits(value, found->target, "an element of '" + found->target->name().str() + "'");
+  std::string what = ErrorTextByteView::element(found->target->name());
+  ByteProofs::ResultValueFitsType fitting = this->valueFits(value, found->target, what);
+  if (fitting.isErr()) {
+    this->state.getDiagnostics().error(value->loc(), fitting.error().message);
+  }
 }
 
 }

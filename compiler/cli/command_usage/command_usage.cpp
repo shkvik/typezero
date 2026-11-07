@@ -4,7 +4,7 @@
 
 namespace tz::pkg {
 
-int usage(const llvm::Twine &message, llvm::StringRef synopsis) {
+int CommandUsage::usage(const llvm::Twine &message, llvm::StringRef synopsis) {
   llvm::errs() << "tz: " << message << "\n\nusage: " << synopsis << "\n";
 
   return kExitUsage;

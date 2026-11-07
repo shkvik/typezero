@@ -33,6 +33,13 @@ public:
   bool readsOnly(const FunctionDecl *decl);
 
 private:
+  static bool isEmitterClass(llvm::StringRef cls);
+  static bool isTargetClass(llvm::StringRef cls);
+  static bool isPoolClass(llvm::StringRef cls);
+  static bool isLockedClass(llvm::StringRef cls);
+  static bool isContextClass(llvm::StringRef cls);
+  static bool readOnlyExpr(const Expr *e);
+  static bool readOnlyStmt(const Stmt *s);
   Analysis &analysis_;
   llvm::DenseMap<const FunctionDecl *, bool> readsOnly_;
 };

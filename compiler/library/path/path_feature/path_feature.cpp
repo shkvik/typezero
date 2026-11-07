@@ -7,27 +7,27 @@
 
 namespace tz {
 
-namespace {
-
-bool isPathModule(NodeModule module) {
+bool PathFeature::isPathModule(NodeModule module) {
   return module == NodeModule::Path || module == NodeModule::PathPosix ||
          module == NodeModule::PathWin32;
 }
 
-}
-
-std::optional<std::string> PathFeature::exportProblem(NodeModule module, llvm::StringRef exportName,
-                                                      llvm::StringRef path) const {
-  if (!isPathModule(module)) {
-    return std::nullopt;
+PathFeature::ResultExportFound PathFeature::exportFound(NodeModule module,
+                                                        llvm::StringRef exportName,
+                                                        llvm::StringRef path) const {
+  if (PathFeature::isPathModule(module)) {
+    return PathExports::pathExport(exportName, path);
   }
 
-  return pathExportProblem(exportName, path);
+  return err(FeatureExportFoundError{
+      .code = FeatureExportFoundErrorCode::NOT_MINE,
+      .message = "",
+  });
 }
 
 Expr *PathFeature::checkModuleCall(CheckState &state, CallExpr *call, NodeModule module,
                                    llvm::StringRef fn, llvm::SMLoc loc, const Type *) const {
-  if (!isPathModule(module)) {
+  if (!PathFeature::isPathModule(module)) {
     return nullptr;
   }
 
@@ -36,14 +36,16 @@ Expr *PathFeature::checkModuleCall(CheckState &state, CallExpr *call, NodeModule
 
 Expr *PathFeature::checkModuleValue(CheckState &state, NodeModule module,
                                     llvm::StringRef exportName, Expr *expr) const {
-  if (!isPathModule(module)) {
+  if (!PathFeature::isPathModule(module)) {
     return nullptr;
   }
 
   return PathChecker(state).checkPathValue(module, exportName, expr);
 }
 
-bool PathFeature::lowers(Builtin builtin) const { return isPathBuiltin(builtin); }
+bool PathFeature::lowers(Builtin builtin) const {
+  return BuiltinGroups::isPathBuiltin(builtin);
+}
 
 llvm::Value *PathFeature::lowerCall(Lowering &lowering, CallExpr *call) const {
   return lowering.pathLowerer().emitPathCall(call);

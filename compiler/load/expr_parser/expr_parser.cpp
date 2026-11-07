@@ -27,7 +27,12 @@ constexpr int kRelationalPrec = 7;
 
 constexpr int kPowPrec = 11;
 
-int binaryPrec(Tok kind) {
+}
+
+ExprParser::ExprParser(Parser &parser)
+    : parser_(parser) {}
+
+int ExprParser::binaryPrec(Tok kind) {
   switch (kind) {
   case Tok::PipePipe:
   case Tok::QuestionQuestion:
@@ -69,7 +74,7 @@ int binaryPrec(Tok kind) {
   }
 }
 
-BinaryOp binaryOpFor(Tok kind) {
+BinaryOp ExprParser::binaryOpFor(Tok kind) {
   switch (kind) {
   case Tok::PipePipe:
     return BinaryOp::LogOr;
@@ -120,7 +125,7 @@ BinaryOp binaryOpFor(Tok kind) {
   }
 }
 
-bool assignmentOp(Tok kind, std::optional<BinaryOp> &op) {
+bool ExprParser::assignmentOp(Tok kind, std::optional<BinaryOp> &op) {
   switch (kind) {
   case Tok::Assign:
     op.reset();
@@ -175,10 +180,6 @@ bool assignmentOp(Tok kind, std::optional<BinaryOp> &op) {
   }
 }
 
-}
-
-ExprParser::ExprParser(Parser &parser) : parser_(parser) {}
-
 Expr *ExprParser::parseYield() {
   llvm::SMLoc loc = parser_.tok_.loc();
   parser_.cursor().advance();
@@ -200,7 +201,7 @@ Expr *ExprParser::parseYield() {
     case Tok::TemplateTail:
       break;
     default:
-      if (binaryPrec(parser_.tok_.kind) < 0 || parser_.tok_.is(Tok::Plus) ||
+      if (ExprParser::binaryPrec(parser_.tok_.kind) < 0 || parser_.tok_.is(Tok::Plus) ||
           parser_.tok_.is(Tok::Minus) || parser_.tok_.is(Tok::Less)) {
         value = parseExpr();
       }
@@ -235,7 +236,7 @@ Expr *ExprParser::parseExpr() {
   }
   Expr *lhs = parseConditional();
   std::optional<BinaryOp> op;
-  if (!assignmentOp(parser_.tok_.kind, op)) {
+  if (!ExprParser::assignmentOp(parser_.tok_.kind, op)) {
     return lhs;
   }
   llvm::SMLoc loc = parser_.tok_.loc();
@@ -310,11 +311,11 @@ Expr *ExprParser::parseBinary(int minPrec) {
       lhs = bin;
       continue;
     }
-    int prec = binaryPrec(parser_.tok_.kind);
+    int prec = ExprParser::binaryPrec(parser_.tok_.kind);
     if (prec < 0 || prec < minPrec) {
       return lhs;
     }
-    BinaryOp op = binaryOpFor(parser_.tok_.kind);
+    BinaryOp op = ExprParser::binaryOpFor(parser_.tok_.kind);
     llvm::SMLoc loc = parser_.tok_.loc();
     if (parser_.tok_.is(Tok::EqEqEq)) {
       parser_.cursor().report(loc,

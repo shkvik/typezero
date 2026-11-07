@@ -9,10 +9,10 @@ namespace {
 
 namespace path = llvm::sys::path;
 
-bool isDrive(llvm::StringRef text) {
-  return text.size() >= 2 && llvm::isAlpha(text[0]) && text[1] == ':';
 }
 
+bool FileUri::isDrive(llvm::StringRef text) {
+  return text.size() >= 2 && llvm::isAlpha(text[0]) && text[1] == ':';
 }
 
 std::string FileUri::toPath(llvm::StringRef uri) {
@@ -34,7 +34,7 @@ std::string FileUri::toPath(llvm::StringRef uri) {
   std::string result;
   if (!rest.starts_with("/")) {
     result = "//" + rest.str();
-  } else if (isDrive(rest.drop_front())) {
+  } else if (FileUri::isDrive(rest.drop_front())) {
     result = rest.drop_front().str();
   } else {
     result = rest.str();
@@ -48,7 +48,7 @@ std::string FileUri::toPath(llvm::StringRef uri) {
 std::string FileUri::fromPath(llvm::StringRef file) {
   std::string text = path::convert_to_slash(file);
   std::string uri = "file://";
-  if (isDrive(text)) {
+  if (FileUri::isDrive(text)) {
     uri += "/";
     uri.push_back(static_cast<char>(llvm::toLower(text[0])));
     uri += "%3A";

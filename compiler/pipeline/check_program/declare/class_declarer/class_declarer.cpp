@@ -15,8 +15,6 @@
 
 namespace tz {
 
-const Type *literalType(const Expr *value);
-
 ClassDeclarer::ClassDeclarer(CheckState &owner)
     : state(owner) {}
 
@@ -186,7 +184,7 @@ const Type *ClassDeclarer::declaredFieldType(const ClassDecl *cls, ClassField &f
       return TypeResolver(this->state).resolveType(*param->type, false);
     }
     if (param->defaultValue()) {
-      return literalType(param->defaultValue());
+      return SharedHelpers::literalType(param->defaultValue());
     }
     return nullptr;
   }
@@ -194,7 +192,7 @@ const Type *ClassDeclarer::declaredFieldType(const ClassDecl *cls, ClassField &f
     return TypeResolver(this->state).resolveType(*f.type, false);
   }
 
-  return literalType(f.init);
+  return SharedHelpers::literalType(f.init);
 }
 
 void ClassDeclarer::arrowMethod(ClassDecl *cls, ClassField &f, const Type *type) {
@@ -226,7 +224,7 @@ void ClassDeclarer::arrowMethod(ClassDecl *cls, ClassField &f, const Type *type)
 
 ClassDeclarer::ResultStaticTypeFixed
 ClassDeclarer::staticTypeParams(const ClassDecl *cls, const ClassField &f, const Type *type) {
-  if (f.isStatic() && type && !cls->typeArgs.empty() && mentionsParam(type)) {
+  if (f.isStatic() && type && !cls->typeArgs.empty() && TypeQueries::mentionsParam(type)) {
     std::string message = ErrorTextStaticParams::shared(f.name, cls->name);
 
     return err(ClassDeclarerStaticTypeParamsError{

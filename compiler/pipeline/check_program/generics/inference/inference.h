@@ -1,19 +1,12 @@
 #pragma once
 
 #include "compiler/pipeline/check_program/check_state/check_state.h"
-#include "compiler/pipeline/check_program/generics/generic_check_helpers/generic_check_helpers.h"
 #include "compiler/pipeline/check_program/whole_program/flows/flows.h"
 #include "llvm/ADT/STLExtras.h"
 #include <functional>
 #include <set>
 
 namespace tz {
-
-bool mentionsAnyOf(const Type *type, llvm::ArrayRef<const Type *> params);
-
-const Type *paramsAsList(const Type *fn, size_t from);
-
-const Type *listSlice(const Type *list, size_t begin, size_t end, bool last);
 
 struct Inference {
   Inference(llvm::ArrayRef<const Type *> params, const AliasStore &aliases,
@@ -37,6 +30,10 @@ struct Inference {
   std::function<const Type *(const Type *)> elementOf;
   std::function<const Type *(const Type *)> asyncOf;
   std::vector<std::pair<const Type *, const Type *>> deferred;
+
+private:
+  static const Type *paramsAsList(const Type *fn, size_t from);
+  static const Type *listSlice(const Type *list, size_t begin, size_t end, bool last);
 };
 
 }

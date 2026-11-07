@@ -1,6 +1,7 @@
 #include "compiler/pipeline/check_program/types/type_operators/type_operators.h"
 #include "compiler/load/lexer/lexer.h"
 #include "compiler/load/parser/parser.h"
+#include "compiler/load/to_utf8/to_utf8.h"
 #include "compiler/pipeline/check_program/check/top_level_checker/top_level_checker.h"
 #include "compiler/pipeline/check_program/declare/class_declarer/class_declarer.h"
 #include "compiler/pipeline/check_program/generics/arg_list_checker/arg_list_checker.h"
@@ -30,15 +31,6 @@ std::u16string TypeOperators::utf16(llvm::StringRef text) {
   llvm::convertUTF8ToUTF16String(text, units);
 
   return std::u16string(units.begin(), units.end());
-}
-
-std::string TypeOperators::utf8(const std::u16string &text) {
-  std::string out;
-  llvm::convertUTF16ToUTF8String(
-      llvm::ArrayRef<llvm::UTF16>(reinterpret_cast<const llvm::UTF16 *>(text.data()), text.size()),
-      out);
-
-  return out;
 }
 
 llvm::ArrayRef<const Type *> TypeOperators::membersOf(const Type *&type) {
@@ -105,9 +97,10 @@ const Type *TypeOperators::evalTypeOp(const Type *op, llvm::ArrayRef<const Type 
     const Type *value = operands[2];
     const Type *source = operands[3];
     const Type *rename = operands.size() > 4 ? operands[4] : nullptr;
-    bool open = mentionsParam(keys) || (source && mentionsParam(source)) ||
-                mentionsParamBesides(value, {key}) ||
-                (rename && mentionsParamBesides(rename, {key}));
+    bool open = TypeQueries::mentionsParam(keys) ||
+                (source && TypeQueries::mentionsParam(source)) ||
+                ConditionalTypes::mentionsParamBesides(value, {key}) ||
+                (rename && ConditionalTypes::mentionsParamBesides(rename, {key}));
     if (open) {
       return Type::mapped(key, keys, value, op->mappedOptional(), op->mappedReadonly(), source,
                           rename);
@@ -120,7 +113,7 @@ const Type *TypeOperators::evalTypeOp(const Type *op, llvm::ArrayRef<const Type 
       if (!name->isStringLiteral()) {
         return Type::error();
       }
-      std::string text = TypeOperators::utf8(name->literalText());
+      std::string text = ToUtf8::toUtf8(name->literalText());
       const Type *type = TypeParams(this->state).substitute(value, {key}, {name});
       if (type->isError()) {
         return type;
@@ -140,11 +133,11 @@ const Type *TypeOperators::evalTypeOp(const Type *op, llvm::ArrayRef<const Type 
           return renamed;
         }
         names.clear();
-        for (const Type *n : distributedMembers(renamed)) {
+        for (const Type *n : TypeopsCheckHelpers::distributedMembers(renamed)) {
           if (!n->isStringLiteral()) {
             return Type::error();
           }
-          names.push_back(TypeOperators::utf8(n->literalText()));
+          names.push_back(ToUtf8::toUtf8(n->literalText()));
         }
       }
       for (const std::string &field : names) {
@@ -158,7 +151,7 @@ const Type *TypeOperators::evalTypeOp(const Type *op, llvm::ArrayRef<const Type 
     }
     return Type::object(std::move(fields));
   }
-  if (llvm::any_of(operands, [](const Type *t) { return t && mentionsParam(t); })) {
+  if (llvm::any_of(operands, [](const Type *t) { return t && TypeQueries::mentionsParam(t); })) {
     return Type::typeOp(kind, operands);
   }
   for (const Type *t : operands) {
@@ -188,7 +181,7 @@ const Type *TypeOperators::evalTypeOp(const Type *op, llvm::ArrayRef<const Type 
   case TypeOp::Exclude:
   case TypeOp::Extract: {
     std::vector<const Type *> kept;
-    for (const Type *m : distributedMembers(operands[0])) {
+    for (const Type *m : TypeopsCheckHelpers::distributedMembers(operands[0])) {
       if (ExtendsRelation(this->state).extendsType(m, operands[1]) == (kind == TypeOp::Extract)) {
         kept.push_back(m);
       }
@@ -205,7 +198,7 @@ const Type *TypeOperators::evalTypeOp(const Type *op, llvm::ArrayRef<const Type 
       elements.push_back(operands[i + 1]);
     }
     std::string why;
-    const Type *tuple = spreadTuple(elements, spread, why);
+    const Type *tuple = ArgumentLists::spreadTuple(elements, spread, why);
     return tuple ? tuple : Type::error();
   }
   case TypeOp::Uppercase:
@@ -403,8 +396,8 @@ TypeOperators::ResultTypeOpResolved TypeOperators::resolveTypeOp(const TypeRef &
       if (rename && rename->isError()) {
         return ok(rename);
       }
-      if (rename && !mentionsParam(rename)) {
-        for (const Type *n : distributedMembers(rename)) {
+      if (rename && !TypeQueries::mentionsParam(rename)) {
+        for (const Type *n : TypeopsCheckHelpers::distributedMembers(rename)) {
           if (!n->isStringLiteral()) {
             std::string message = ErrorTextTypeOp::rename(n->name());
 
@@ -415,8 +408,8 @@ TypeOperators::ResultTypeOpResolved TypeOperators::resolveTypeOp(const TypeRef &
           }
         }
       }
-      for (const Type *k :
-           mentionsParam(keys) ? llvm::ArrayRef<const Type *>() : TypeOperators::membersOf(keys)) {
+      for (const Type *k : TypeQueries::mentionsParam(keys) ? llvm::ArrayRef<const Type *>()
+                                                            : TypeOperators::membersOf(keys)) {
         if (!k->isStringLiteral() && !k->isNever()) {
           std::string message = ErrorTextTypeOp::keys(k->name());
 

@@ -2,7 +2,7 @@
 
 namespace tz {
 
-const char *tokSpelling(Tok kind) {
+const char *TokenKinds::tokSpelling(Tok kind) {
   switch (kind) {
   case Tok::Eof:
     return "end of file";
@@ -191,6 +191,10 @@ const char *tokSpelling(Tok kind) {
   }
 
   return "token";
+}
+
+bool TokenKinds::isKeyword(Tok kind) {
+  return kind >= Tok::KwAs && kind <= Tok::KwWhile;
 }
 
 }

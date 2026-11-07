@@ -33,20 +33,36 @@ OsChecker::OsChecker(CheckState &owner)
 
 Expr *OsChecker::checkOsValue(llvm::StringRef name, Expr *expr) {
   if (name == "EOL") {
-    return stringLiteral(this->state.getAst(), expr->loc(), targetIsWindows() ? "\r\n" : "\n");
+    return NodeCheckHelpers::stringLiteral(this->state.getAst(), expr->loc(),
+                                           NodeCheckHelpers::targetIsWindows() ? "\r\n" : "\n");
   }
   if (name == "devNull") {
-    return stringLiteral(this->state.getAst(), expr->loc(),
-                         targetIsWindows() ? "\\\\.\\nul" : "/dev/null");
+    return NodeCheckHelpers::stringLiteral(this->state.getAst(), expr->loc(),
+                                           NodeCheckHelpers::targetIsWindows() ? "\\\\.\\nul"
+                                                                               : "/dev/null");
   }
 
   return nullptr;
 }
 
+OsChecker::ResultOsFunction OsChecker::osFunction(llvm::StringRef fn) {
+  if (fn == "EOL" || fn == "devNull") {
+    std::string message = ErrorTextOs::notCalled(fn);
+
+    return err(OsCheckerOsFunctionError{
+        .code = OsCheckerOsFunctionErrorCode::STRING_CALLED,
+        .message = message,
+    });
+  }
+
+  return ok(fn);
+}
+
 Expr *OsChecker::checkOsCall(CallExpr *call, llvm::StringRef fn, llvm::SMLoc loc) {
   call->type = Type::error();
-  if (fn == "EOL" || fn == "devNull") {
-    this->state.getDiagnostics().error(loc, "'" + fn + "' is a string, not a function");
+  ResultOsFunction function = OsChecker::osFunction(fn);
+  if (function.isErr()) {
+    this->state.getDiagnostics().error(loc, function.error().message);
     for (Expr *&arg : call->args) {
       arg = ExprChecker(this->state).checkExpr(arg);
     }
@@ -111,7 +127,8 @@ Expr *OsChecker::checkOsCall(CallExpr *call, llvm::StringRef fn, llvm::SMLoc loc
     call->type = OsChecker::userInfoType();
     return call;
   }
-  this->state.getDiagnostics().error(loc, "'" + fn + "' of 'node:os' is not supported yet");
+  std::string message = ErrorTextOs::notYet(fn);
+  this->state.getDiagnostics().error(loc, message);
 
   return call;
 }

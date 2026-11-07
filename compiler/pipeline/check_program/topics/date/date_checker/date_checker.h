@@ -1,6 +1,8 @@
 #pragma once
 
 #include "compiler/pipeline/check_program/check_state/check_state.h"
+#include "compiler/pipeline/check_program/topics/date/date_checker/date_checker_errors.h"
+#include "compiler/result/result/result.h"
 
 namespace tz {
 
@@ -22,11 +24,14 @@ public:
   void checkDateFields(std::vector<Expr *> &args, size_t first = 0, llvm::StringRef setter = "");
 
 private:
-  static std::string utf8(const std::u16string &text);
+  using ResultLiteralDate = Result<double, DateCheckerLiteralDateError>;
+
+  static ResultLiteralDate literalDate(const std::u16string &text);
   static std::optional<std::u16string> literalText(const Expr *e);
   static bool isLeap(int64_t year);
   static int daysInMonth(int64_t year, int64_t month);
   static std::string missingDay(std::optional<int64_t> year, int64_t month, int64_t day);
+  static std::pair<int64_t, int64_t> carriedDay(int64_t year, int64_t month, int64_t day);
 
   CheckState &state;
 };

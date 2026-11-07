@@ -9,8 +9,10 @@
 
 namespace tz {
 
-llvm::StringRef withoutParens(llvm::StringRef text);
-
-const Type *literalType(const Expr *value);
+class SharedHelpers {
+public:
+  static llvm::StringRef withoutParens(llvm::StringRef text);
+  static const Type *literalType(const Expr *value);
+};
 
 }

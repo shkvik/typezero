@@ -311,7 +311,7 @@ const Expr *CallResolver::argument(const CallRec &rec, size_t index) {
 }
 
 const FunctionDecl *CallResolver::functionOf(const Expr *e) {
-  e = strip(e);
+  e = ParallelHelpers::strip(e);
   if (auto *fe = dyn_cast_or_null<FunctionExpr>(e)) {
     return fe->fn;
   }
@@ -327,7 +327,7 @@ const FunctionDecl *CallResolver::functionOf(const Expr *e) {
 }
 
 const VarSymbol *CallResolver::callableParam(const FunctionDecl *fn, const Expr *e) {
-  auto *n = dyn_cast_or_null<NameExpr>(strip(e));
+  auto *n = dyn_cast_or_null<NameExpr>(ParallelHelpers::strip(e));
   if (!fn || !n || !n->var() || n->var()->reassigned) {
     return nullptr;
   }

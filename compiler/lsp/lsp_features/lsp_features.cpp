@@ -14,11 +14,21 @@ const char *const kKeywords[] = {
     "private", "protected",  "public", "readonly",  "return",    "static", "super",    "switch",
     "this",    "true",       "type",   "undefined", "while",     "yield"};
 
-bool isWordChar(char c) {
+}
+
+LspFeatures::LspFeatures(const Knowledge &knowledge, size_t module, llvm::StringRef text,
+                         UriOf uriOf, TextOf textOf)
+    : knowledge_(knowledge),
+      module_(module),
+      text_(text),
+      uriOf_(uriOf),
+      textOf_(textOf) {}
+
+bool LspFeatures::isWordChar(char c) {
   return llvm::isAlnum(c) || c == '_' || c == '$' || static_cast<unsigned char>(c) >= 0x80;
 }
 
-size_t offsetIn(llvm::StringRef text, unsigned line, unsigned character) {
+size_t LspFeatures::offsetIn(llvm::StringRef text, unsigned line, unsigned character) {
   size_t at = 0;
   for (unsigned i = 0; i < line; ++i) {
     size_t next = text.find('\n', at);
@@ -38,7 +48,7 @@ size_t offsetIn(llvm::StringRef text, unsigned line, unsigned character) {
   return std::min(at, text.size());
 }
 
-int symbolKind(llvm::StringRef kind) {
+int LspFeatures::symbolKind(llvm::StringRef kind) {
   if (kind == "method") {
     return 2;
   }
@@ -67,20 +77,16 @@ int symbolKind(llvm::StringRef kind) {
   return 6;
 }
 
-std::string code(llvm::StringRef text) { return "```ts\n" + text.str() + "\n```"; }
-
+std::string LspFeatures::code(llvm::StringRef text) {
+  return "```ts\n" + text.str() + "\n```";
 }
-
-LspFeatures::LspFeatures(const Knowledge &knowledge, size_t module, llvm::StringRef text,
-                         UriOf uriOf, TextOf textOf)
-    : knowledge_(knowledge), module_(module), text_(text), uriOf_(uriOf), textOf_(textOf) {}
 
 bool LspFeatures::isName(llvm::StringRef name) {
   if (name.empty() || llvm::isDigit(name.front())) {
     return false;
   }
 
-  return llvm::all_of(name, [](char c) { return isWordChar(c); });
+  return llvm::all_of(name, [](char c) { return LspFeatures::isWordChar(c); });
 }
 
 llvm::json::Object LspFeatures::range(const SourcePlace &place) {
@@ -107,7 +113,7 @@ llvm::json::Object LspFeatures::location(const SourcePlace &place) const {
 }
 
 size_t LspFeatures::offset(unsigned line, unsigned character) const {
-  return offsetIn(text_, line, character);
+  return LspFeatures::offsetIn(text_, line, character);
 }
 
 llvm::json::Value LspFeatures::hover(unsigned line, unsigned character) const {
@@ -117,15 +123,16 @@ llvm::json::Value LspFeatures::hover(unsigned line, unsigned character) const {
   if (symbol != Knowledge::kNone) {
     const KnownSymbol &known = knowledge_.symbols[symbol];
     std::string title = known.kind + " " + knowledge_.qualified(symbol);
-    value = code(known.signature.empty() ? title : known.signature) + "\n\n" + title + " - " +
-            knowledge_.modules[known.module].name;
+    value = LspFeatures::code(known.signature.empty() ? title : known.signature) + "\n\n" + title +
+            " - " + knowledge_.modules[known.module].name;
   } else if (size_t local = knowledge_.localAt(module_, line, character, &at);
              local != Knowledge::kNone) {
     const KnownLocal &known = knowledge_.locals[local];
-    value = code(known.name + ": " + known.type);
+    value = LspFeatures::code(known.name + ": " + known.type);
   } else if (const KnownType *type = knowledge_.typeAt(module_, line, character)) {
     at = &type->place;
-    value = code(type->kind == "class" ? "class " + type->name : type->name + ": " + type->type);
+    value = LspFeatures::code(type->kind == "class" ? "class " + type->name
+                                                    : type->name + ": " + type->type);
   } else {
     return nullptr;
   }
@@ -234,9 +241,9 @@ llvm::json::Value LspFeatures::rename(unsigned line, unsigned character, llvm::S
       found = texts.try_emplace(place.path, textOf_(place.path)).first;
     }
     llvm::StringRef text = found->second;
-    size_t start = offsetIn(text, place.line, place.character);
+    size_t start = LspFeatures::offsetIn(text, place.line, place.character);
     if (!text.substr(start).starts_with(old) ||
-        (start + old.size() < text.size() && isWordChar(text[start + old.size()]))) {
+        (start + old.size() < text.size() && LspFeatures::isWordChar(text[start + old.size()]))) {
       continue;
     }
     SourcePlace exact = place;
@@ -301,8 +308,9 @@ llvm::json::Value LspFeatures::semanticTokens() const {
     end = end == llvm::StringRef::npos ? text_.size() : end + 1;
     llvm::StringRef line = text_.slice(start, end);
     llvm::StringRef code = line.ltrim();
-    bool names = code.starts_with("import") && code.size() > 6 && !isWordChar(code[6]);
-    if (!names && code.starts_with("export") && code.size() > 6 && !isWordChar(code[6])) {
+    bool names = code.starts_with("import") && code.size() > 6 && !LspFeatures::isWordChar(code[6]);
+    if (!names && code.starts_with("export") && code.size() > 6 &&
+        !LspFeatures::isWordChar(code[6])) {
       llvm::StringRef after = code.drop_front(6).ltrim();
       names = after.starts_with("{") || after.starts_with("*") || after.starts_with("type {");
     }
@@ -335,7 +343,8 @@ llvm::json::Value LspFeatures::semanticTokens() const {
       return;
     }
     llvm::StringRef rest = text_.substr(at);
-    if (!rest.starts_with(name) || (rest.size() > name.size() && isWordChar(rest[name.size()]))) {
+    if (!rest.starts_with(name) ||
+        (rest.size() > name.size() && LspFeatures::isWordChar(rest[name.size()]))) {
       return;
     }
     auto [slot, added] = found.try_emplace(
@@ -407,7 +416,7 @@ llvm::json::Value LspFeatures::semanticTokens() const {
 llvm::json::Value LspFeatures::completion(unsigned line, unsigned character) const {
   size_t at = offset(line, character);
   size_t start = at;
-  while (start > 0 && isWordChar(text_[start - 1])) {
+  while (start > 0 && LspFeatures::isWordChar(text_[start - 1])) {
     --start;
   }
   llvm::json::Array items;
@@ -424,7 +433,7 @@ llvm::json::Value LspFeatures::completion(unsigned line, unsigned character) con
       --end;
     }
     size_t from = end;
-    while (from > 0 && isWordChar(text_[from - 1])) {
+    while (from > 0 && LspFeatures::isWordChar(text_[from - 1])) {
       --from;
     }
     std::string object = text_.slice(from, end).str();
@@ -467,7 +476,7 @@ llvm::json::Value LspFeatures::completion(unsigned line, unsigned character) con
       }
     }
     for (const KnownMember &member : members) {
-      add(member.name, symbolKind(member.kind), member.detail);
+      add(member.name, LspFeatures::symbolKind(member.kind), member.detail);
     }
     return llvm::json::Object{{"isIncomplete", false}, {"items", std::move(items)}};
   }
@@ -482,13 +491,13 @@ llvm::json::Value LspFeatures::completion(unsigned line, unsigned character) con
   for (size_t symbol : knowledge_.symbolsOf(module_)) {
     const KnownSymbol &known = knowledge_.symbols[symbol];
     if (known.parent == Knowledge::kNone) {
-      add(known.name, symbolKind(known.kind), known.signature);
+      add(known.name, LspFeatures::symbolKind(known.kind), known.signature);
     }
   }
   for (const KnownReference &reference : knowledge_.references) {
     const KnownSymbol &known = knowledge_.symbols[reference.symbol];
     if (reference.module == module_ && known.parent == Knowledge::kNone) {
-      add(known.name, symbolKind(known.kind), known.signature);
+      add(known.name, LspFeatures::symbolKind(known.kind), known.signature);
     }
   }
   for (const char *keyword : kKeywords) {

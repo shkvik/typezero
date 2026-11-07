@@ -20,17 +20,17 @@
 
 namespace tz {
 
-bool hasParamMember(const Type *type) {
+bool UnionSlots::hasParamMember(const Type *type) {
   return type->isUnion() &&
          llvm::any_of(type->members(), [](const Type *m) { return m->isParam(); });
 }
 
-UnionSlot unionSlot(const Type *type) {
+UnionSlot UnionSlots::unionSlot(const Type *type) {
   switch (type->kind()) {
   case Type::Kind::String:
     return UnionSlot::String;
   case Type::Kind::Int: {
-    llvm::StringRef name = typeOfName(type);
+    llvm::StringRef name = TypeSpelling::typeOfName(type);
     return name == "int8"     ? UnionSlot::Int8
            : name == "int16"  ? UnionSlot::Int16
            : name == "int32"  ? UnionSlot::Int32
@@ -66,7 +66,7 @@ UnionSlot unionSlot(const Type *type) {
     return UnionSlot::Param;
   case Type::Kind::Literal: {
     const Type *base = type->literalBase();
-    return base->isString() ? UnionSlot::Atom : unionSlot(base);
+    return base->isString() ? UnionSlot::Atom : UnionSlots::unionSlot(base);
   }
   case Type::Kind::Union:
     return type->isTagged() ? UnionSlot::None : type->slots().front();
@@ -75,7 +75,7 @@ UnionSlot unionSlot(const Type *type) {
   }
 }
 
-std::string unionProblem(const Type *type) {
+std::string UnionSlots::unionProblem(const Type *type) {
   type = type->nonOptional();
   if (!type->isUnion()) {
     return "";
@@ -95,7 +95,7 @@ std::string unionProblem(const Type *type) {
     }
     if (json && m != json && !m->isUndefined()) {
       for (const char *name : {"null", "boolean", "double", "string", "array", "object"}) {
-        if (llvm::is_contained(typeOfNames(m), llvm::StringRef(name))) {
+        if (llvm::is_contained(TypeSpelling::typeOfNames(m), llvm::StringRef(name))) {
           return "'Json' and '" + m->name().str() +
                  "' cannot be told apart when the program runs: typeof gives \"" + name +
                  "\" for both; use 'Json', which holds that value too";
@@ -116,9 +116,9 @@ std::string unionProblem(const Type *type) {
              "' cannot be told apart when the program runs: " + why + "; " + fix;
     };
     std::string problem;
-    UnionSlot slot = unionSlot(m);
+    UnionSlot slot = UnionSlots::unionSlot(m);
     if (const Type *base = m->isLiteral() ? m->literalBase() : m; base->isNumeric()) {
-      std::string name = typeOfName(base);
+      std::string name = TypeSpelling::typeOfName(base);
       const Type *&number = numbers[name];
       const Type *seen = number && number->isLiteral() ? number->literalBase() : number;
       if (!number || seen != base) {
@@ -158,7 +158,7 @@ std::string unionProblem(const Type *type) {
   return "";
 }
 
-const Type *unionWithout(const Type *type, const Type *without) {
+const Type *UnionSlots::unionWithout(const Type *type, const Type *without) {
   llvm::ArrayRef<const Type *> removed =
       without->isUnion() ? without->members() : llvm::ArrayRef<const Type *>(without);
   llvm::ArrayRef<const Type *> members =

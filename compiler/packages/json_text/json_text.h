@@ -12,10 +12,11 @@ struct JsonProblem {
   size_t offset = 0;
 };
 
-JsonProblem checkJsonText(llvm::StringRef s);
-
-std::string jsonQuote(llvm::StringRef s);
-
-std::pair<unsigned, unsigned> lineAndColumn(llvm::StringRef text, size_t offset);
+class JsonText {
+public:
+  static std::string jsonQuote(llvm::StringRef s);
+  static JsonProblem checkJsonText(llvm::StringRef s);
+  static std::pair<unsigned, unsigned> lineAndColumn(llvm::StringRef text, size_t offset);
+};
 
 }

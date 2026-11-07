@@ -6,6 +6,10 @@
 
 namespace tz::pkg {
 
-bool parseJson(llvm::StringRef text, JsonValue &out, size_t &errorOffset, std::string &error);
+class JsonParser {
+public:
+  static bool parseJson(llvm::StringRef text, JsonValue &out, size_t &errorOffset,
+                        std::string &error);
+};
 
 }

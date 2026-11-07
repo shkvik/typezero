@@ -104,13 +104,13 @@ bool TypeRelations::isImplicitlyConvertible(const Type *from, const Type *to) {
     return LiteralTypes::unionMemberFor(from, to) != nullptr;
   }
   if (from->isUnion()) {
-    return !from->isTagged() && !hasParamMember(from) &&
+    return !from->isTagged() && !UnionSlots::hasParamMember(from) &&
            llvm::all_of(from->members(), [&](const Type *m) {
              return TypeRelations::isImplicitlyConvertible(m, to);
            });
   }
   if (to->isPattern()) {
-    return from->isStringLiteral() && matchesPattern(from->literalText(), to);
+    return from->isStringLiteral() && TemplatePatterns::matchesPattern(from->literalText(), to);
   }
   if (from->isPattern()) {
     return to == Type::string();
@@ -414,7 +414,7 @@ Expr *TypeRelations::convert(Expr *expr, const Type *to) {
   bool reflects = reflected->isConstructor() || reflected->isAnyObject() ||
                   reflected->isUnknown() ||
                   (reflected->isArray() && reflected->inner()->isUnknown());
-  if (expr->type->isParam() && !mentionsParam(to)) {
+  if (expr->type->isParam() && !TypeQueries::mentionsParam(to)) {
     GenericChecker(this->state).noteForced(expr, to);
   }
   if ((to->isNumeric() || to->isDecimal()) && expr->type->isInteger()) {
@@ -850,7 +850,7 @@ const Type *TypeRelations::comparisonType(const Type *a, const Type *b) {
   if (base && (base->isNumeric() || base->isDecimal() || base->isBool() || base->isString() ||
                base->isArray() || base->isFunction() || base->isObject() || base->isIterator() ||
                base->isJson() || base->isDict() || base->isUnknown() || base->isClassRef() ||
-               base->isLiteral() || (base->isUnion() && !hasParamMember(base)))) {
+               base->isLiteral() || (base->isUnion() && !UnionSlots::hasParamMember(base)))) {
     return common;
   }
 

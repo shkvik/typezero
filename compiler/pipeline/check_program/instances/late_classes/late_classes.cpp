@@ -144,7 +144,8 @@ void LateClasses::makeLateClass(ClassDecl *cls) {
     this->state.getModuleStates().rememberDeclModule(
         cls, this->state.getModuleStates().getCurrentModule());
   }
-  for (FunctionDecl *fn : llvm::reverse(this->state.getFunctionStack().getFunctions())) {
+  std::vector<FunctionDecl *> functions = this->state.getFunctionStack().getFunctions();
+  for (FunctionDecl *fn : llvm::reverse(functions)) {
     if (fn->isInstance && !fn->typeArgs.empty()) {
       cls->outer = fn;
       break;

@@ -1,14 +1,22 @@
 #pragma once
 
+#include "compiler/library/feature/feature_errors.h"
+#include "compiler/library/fs/fs_exports/fs_exports_errors.h"
+#include "compiler/result/result/result.h"
 #include "llvm/ADT/StringRef.h"
-#include <string>
 
 namespace tz {
 
-std::string fsExportProblem(llvm::StringRef name, llvm::StringRef path);
-std::string fsPromisesExportProblem(llvm::StringRef name, llvm::StringRef path);
-std::string readlineExportProblem(llvm::StringRef name, llvm::StringRef path, bool hasPromises);
-std::string tzFsExportProblem(llvm::StringRef name, llvm::StringRef path);
-std::string tzIoExportProblem(llvm::StringRef name, llvm::StringRef path);
+class FsExports {
+public:
+  using ResultExportFound = Result<llvm::StringRef, FeatureExportFoundError>;
+
+  static ResultExportFound fsExport(llvm::StringRef name, llvm::StringRef path);
+  static ResultExportFound tzIoExport(llvm::StringRef name, llvm::StringRef path);
+  static ResultExportFound tzFsExport(llvm::StringRef name, llvm::StringRef path);
+  static ResultExportFound promisesExport(llvm::StringRef name, llvm::StringRef path);
+  static ResultExportFound readlineExport(llvm::StringRef name, llvm::StringRef path,
+                                          bool hasPromises);
+};
 
 }

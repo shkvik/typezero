@@ -25,20 +25,8 @@ using llvm::isa;
 
 namespace tz {
 
-int64_t constantOf(const Expr *e) { return int64_t(cast<IntLitExpr>(e)->value); }
-
-bool isConstant(const Expr *e) { return isa<IntLitExpr>(e) || isa<BoolLitExpr>(e); }
-
-llvm::StructType *bytesStruct(llvm::LLVMContext &ctx) {
-  llvm::Type *ptr = llvm::PointerType::getUnqual(ctx);
-  llvm::Type *i32 = llvm::Type::getInt32Ty(ctx);
-  llvm::Type *i64 = llvm::Type::getInt64Ty(ctx);
-
-  return llvm::StructType::get(ctx, {i64, ptr, ptr, i32, i32, ptr});
-}
-
-bool isSignedKind(Bytes kind) {
-  return kind == Bytes::Int8 || kind == Bytes::Int16 || kind == Bytes::Int32;
+int64_t BytesCallSite::constantOf(const Expr *e) {
+  return int64_t(cast<IntLitExpr>(e)->value);
 }
 
 BytesCallSite::BytesCallSite(Lowering &lowering, CallExpr *call)

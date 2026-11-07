@@ -31,29 +31,30 @@ namespace tz::parallel {
 
 using llvm::dyn_cast;
 
-namespace {
+LibraryEffects::LibraryEffects(Analysis &analysis)
+    : analysis_(analysis) {}
 
-bool isEmitterClass(llvm::StringRef cls) {
+bool LibraryEffects::isEmitterClass(llvm::StringRef cls) {
   return cls == "EventEmitter" || cls == "EventEmitterBase";
 }
 
-bool isTargetClass(llvm::StringRef cls) {
+bool LibraryEffects::isTargetClass(llvm::StringRef cls) {
   return cls == "EventTarget";
 }
 
-bool isPoolClass(llvm::StringRef cls) {
+bool LibraryEffects::isPoolClass(llvm::StringRef cls) {
   return cls == "Pool";
 }
 
-bool isLockedClass(llvm::StringRef cls) {
-  return cls == "ConcurrentMap" || isPoolClass(cls);
+bool LibraryEffects::isLockedClass(llvm::StringRef cls) {
+  return cls == "ConcurrentMap" || LibraryEffects::isPoolClass(cls);
 }
 
-bool isContextClass(llvm::StringRef cls) {
+bool LibraryEffects::isContextClass(llvm::StringRef cls) {
   return cls == "AsyncLocalStorage";
 }
 
-bool readOnlyExpr(const Expr *e) {
+bool LibraryEffects::readOnlyExpr(const Expr *e) {
   if (!e) {
     return true;
   }
@@ -66,30 +67,31 @@ bool readOnlyExpr(const Expr *e) {
   case Expr::Kind::Name:
     return true;
   case Expr::Kind::Member:
-    return readOnlyExpr(llvm::cast<MemberExpr>(e)->object);
+    return LibraryEffects::readOnlyExpr(llvm::cast<MemberExpr>(e)->object);
   case Expr::Kind::Unary: {
     auto *unary = llvm::cast<UnaryExpr>(e);
-    return unary->op != UnaryOp::Delete && readOnlyExpr(unary->operand);
+    return unary->op != UnaryOp::Delete && LibraryEffects::readOnlyExpr(unary->operand);
   }
   case Expr::Kind::Binary: {
     auto *binary = llvm::cast<BinaryExpr>(e);
-    return readOnlyExpr(binary->lhs) && readOnlyExpr(binary->rhs);
+    return LibraryEffects::readOnlyExpr(binary->lhs) && LibraryEffects::readOnlyExpr(binary->rhs);
   }
   case Expr::Kind::Conditional: {
     auto *conditional = llvm::cast<ConditionalExpr>(e);
-    return readOnlyExpr(conditional->cond) && readOnlyExpr(conditional->thenExpr) &&
-           readOnlyExpr(conditional->elseExpr);
+    return LibraryEffects::readOnlyExpr(conditional->cond) &&
+           LibraryEffects::readOnlyExpr(conditional->thenExpr) &&
+           LibraryEffects::readOnlyExpr(conditional->elseExpr);
   }
   case Expr::Kind::Cast:
-    return readOnlyExpr(llvm::cast<CastExpr>(e)->operand);
+    return LibraryEffects::readOnlyExpr(llvm::cast<CastExpr>(e)->operand);
   case Expr::Kind::OptionalChain:
-    return readOnlyExpr(llvm::cast<OptionalChainExpr>(e)->chain);
+    return LibraryEffects::readOnlyExpr(llvm::cast<OptionalChainExpr>(e)->chain);
   default:
     return false;
   }
 }
 
-bool readOnlyStmt(const Stmt *s) {
+bool LibraryEffects::readOnlyStmt(const Stmt *s) {
   if (!s) {
     return true;
   }
@@ -97,25 +99,21 @@ bool readOnlyStmt(const Stmt *s) {
     return llvm::all_of(block->body, readOnlyStmt);
   }
   if (auto *ret = dyn_cast<ReturnStmt>(s)) {
-    return readOnlyExpr(ret->value);
+    return LibraryEffects::readOnlyExpr(ret->value);
   }
   if (auto *branch = dyn_cast<IfStmt>(s)) {
-    return readOnlyExpr(branch->cond) && readOnlyStmt(branch->thenStmt) &&
-           readOnlyStmt(branch->elseStmt);
+    return LibraryEffects::readOnlyExpr(branch->cond) &&
+           LibraryEffects::readOnlyStmt(branch->thenStmt) &&
+           LibraryEffects::readOnlyStmt(branch->elseStmt);
   }
   if (auto *decl = dyn_cast<VarDeclStmt>(s)) {
     return decl->isConst && llvm::all_of(decl->decls, [](const VarDeclarator &d) {
-             return !d.destructured() && readOnlyExpr(d.init);
+             return !d.destructured() && LibraryEffects::readOnlyExpr(d.init);
            });
   }
 
   return false;
 }
-
-}
-
-LibraryEffects::LibraryEffects(Analysis &analysis)
-    : analysis_(analysis) {}
 
 bool LibraryEffects::inLibrary(llvm::SMLoc loc) const {
   const char *at = loc.getPointer();
@@ -148,7 +146,7 @@ void LibraryEffects::libraryCall(const CallExpr *c, const FunctionDecl *decl, co
     analysis_.exprWalk.expr(m->object);
     self = analysis_.aliasAnalysis.receiverRef(m->object);
   }
-  llvm::StringRef cls = libraryClassName(decl->cls());
+  llvm::StringRef cls = ParallelHelpers::libraryClassName(decl->cls());
   llvm::StringRef name = decl->name;
   llvm::SMLoc at = c->loc();
   for (const Expr *arg : c->args) {
@@ -167,12 +165,13 @@ void LibraryEffects::libraryCall(const CallExpr *c, const FunctionDecl *decl, co
       analysis_.callWalk.addCallee(rec, fn, self);
     }
   }
-  if (self && !superCtor && !isLockedClass(cls) && !isContextClass(cls)) {
+  if (self && !superCtor && !LibraryEffects::isLockedClass(cls) &&
+      !LibraryEffects::isContextClass(cls)) {
     libraryState(cls, name, self, !readsOnly(decl), at);
   }
-  if (isEmitterClass(cls) && name == "emit") {
+  if (LibraryEffects::isEmitterClass(cls) && name == "emit") {
     dispatch(c, CallKind::Inline, EmitterListeners, use);
-  } else if (isTargetClass(cls) && name == "dispatchEvent") {
+  } else if (LibraryEffects::isTargetClass(cls) && name == "dispatchEvent") {
     dispatch(c, CallKind::Inline, TargetListeners, use);
   }
 }
@@ -180,30 +179,31 @@ void LibraryEffects::libraryCall(const CallExpr *c, const FunctionDecl *decl, co
 void LibraryEffects::libraryNew(const NewExpr *n) {
   llvm::SMLoc at = n->loc();
   for (const Expr *arg : n->ctor() ? n->ctor()->args : n->args) {
-    libraryArg(n->ctor(), libraryClassName(n->cls()), "constructor", arg, at);
+    libraryArg(n->ctor(), ParallelHelpers::libraryClassName(n->cls()), "constructor", arg, at);
   }
 }
 
 void LibraryEffects::libraryArg(const CallExpr *c, llvm::StringRef cls, llvm::StringRef name,
                                 const Expr *arg, llvm::SMLoc at) {
-  const Expr *f = strip(arg);
+  const Expr *f = ParallelHelpers::strip(arg);
   if (auto *wrap = dyn_cast<CallExpr>(f);
       wrap && wrap->builtin() == Builtin::LibListener && !wrap->args.empty()) {
-    f = strip(wrap->args[0]);
+    f = ParallelHelpers::strip(wrap->args[0]);
   }
   bool fn = f->type && f->type->nonOptional()->isFunction();
   if (fn) {
-    if (isEmitterClass(cls) && (name == "on" || name == "addListener" || name == "once" ||
-                                name == "prependListener" || name == "prependOnceListener")) {
+    if (LibraryEffects::isEmitterClass(cls) &&
+        (name == "on" || name == "addListener" || name == "once" || name == "prependListener" ||
+         name == "prependOnceListener")) {
       listen(f, EmitterListeners);
-    } else if (isTargetClass(cls) &&
+    } else if (LibraryEffects::isTargetClass(cls) &&
                (name == "addEventListener" || name == "addFunctionListener")) {
       listen(f, TargetListeners);
     } else if ((cls == "Server" || cls == "Http2Server") && name == "constructor") {
       libraryCallback(c, f, CallKind::Later, true, true, 2);
-    } else if (isPoolClass(cls) && name == "use") {
+    } else if (LibraryEffects::isPoolClass(cls) && name == "use") {
       libraryCallback(c, f, CallKind::Later, false, true, 1, poolItemOf(f->type));
-    } else if (isLockedClass(cls) || isContextClass(cls)) {
+    } else if (LibraryEffects::isLockedClass(cls) || LibraryEffects::isContextClass(cls)) {
       libraryCallback(c, f, CallKind::Inline);
     } else {
       libraryCallback(c, f, CallKind::Inline);
@@ -213,8 +213,8 @@ void LibraryEffects::libraryArg(const CallExpr *c, llvm::StringRef cls, llvm::St
   }
   if (auto *lit = dyn_cast<ObjectLitExpr>(f)) {
     for (const ObjectLitExpr::Property &p : lit->props) {
-      const Expr *v = strip(p.value);
-      if (p.spread() && isPoolClass(cls)) {
+      const Expr *v = ParallelHelpers::strip(p.value);
+      if (p.spread() && LibraryEffects::isPoolClass(cls)) {
         analysis_.poolOpen = true;
       }
       if (p.spread() || !v || !v->type || !v->type->nonOptional()->isFunction()) {
@@ -228,11 +228,11 @@ void LibraryEffects::libraryArg(const CallExpr *c, llvm::StringRef cls, llvm::St
         libraryCallback(c, v, CallKind::Later, true);
       } else if (cls == "ReadableStream" && p.name == "cancel") {
         libraryCallback(c, v, CallKind::Later);
-      } else if (isTargetClass(cls) &&
+      } else if (LibraryEffects::isTargetClass(cls) &&
                  (name == "addEventListener" || name == "addObjectListener") &&
                  p.name == "handleEvent") {
         listen(v, TargetListeners);
-      } else if (isPoolClass(cls) && name == "constructor") {
+      } else if (LibraryEffects::isPoolClass(cls) && name == "constructor") {
         bool create = p.name == "create";
         libraryCallback(c, v, CallKind::Later, true, true, create ? 0 : 1,
                         create ? nullptr : poolItemOf(v->type));
@@ -246,7 +246,7 @@ void LibraryEffects::libraryArg(const CallExpr *c, llvm::StringRef cls, llvm::St
     }
     return;
   }
-  if (isPoolClass(cls) && name == "constructor") {
+  if (LibraryEffects::isPoolClass(cls) && name == "constructor") {
     analysis_.poolOpen = true;
   }
   analysis_.exprWalk.expr(arg);
@@ -256,7 +256,8 @@ void LibraryEffects::libraryArg(const CallExpr *c, llvm::StringRef cls, llvm::St
 void LibraryEffects::libraryReads(const Expr *e, llvm::SMLoc at) {
   const Type *type = e && e->type ? e->type->nonOptional() : nullptr;
   if (const ClassDecl *cls = type ? type->classDecl() : nullptr; cls && cls->library()) {
-    libraryState(libraryClassName(cls), "", analysis_.aliasAnalysis.refOf(e), false, at);
+    libraryState(ParallelHelpers::libraryClassName(cls), "", analysis_.aliasAnalysis.refOf(e),
+                 false, at);
     return;
   }
   analysis_.exprWalk.contents(e, false, at);
@@ -308,7 +309,7 @@ void LibraryEffects::poolCreate(const Expr *f) {
 }
 
 void LibraryEffects::listen(const Expr *f, Channel channel) {
-  f = strip(f);
+  f = ParallelHelpers::strip(f);
   analysis_.exprWalk.expr(f);
   const FunctionDecl *decl = nullptr;
   if (auto *fe = dyn_cast<FunctionExpr>(f)) {
@@ -344,7 +345,7 @@ bool LibraryEffects::readsOnly(const FunctionDecl *decl) {
     return found->second;
   }
   bool reads = decl->body && decl->params.empty() && !decl->isAsync && !decl->isGenerator &&
-               readOnlyStmt(decl->body);
+               LibraryEffects::readOnlyStmt(decl->body);
   readsOnly_[decl] = reads;
 
   return reads;
@@ -355,7 +356,7 @@ void LibraryEffects::libraryState(llvm::StringRef cls, llvm::StringRef name,
   if (!self) {
     return;
   }
-  if (isEmitterClass(cls) || isTargetClass(cls)) {
+  if (LibraryEffects::isEmitterClass(cls) || LibraryEffects::isTargetClass(cls)) {
     bool reads = name == "emit" || name == "dispatchEvent" || name == "listenerCount" ||
                  name == "listeners" || name == "rawListeners" || name == "eventNames";
     analysis_.codeWalk.touch(LocKind::Field, *self, analysis_.listenersKey, write && !reads, at);

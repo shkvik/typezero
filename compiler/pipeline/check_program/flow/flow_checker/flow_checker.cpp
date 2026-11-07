@@ -84,7 +84,7 @@ Flow FlowChecker::join(const Flow &a, const Flow &b) {
       continue;
     }
     const Type *either = Type::unionOf({type, other->second});
-    if (either->isError() || !unionProblem(either).empty() || either == var->type) {
+    if (either->isError() || !UnionSlots::unionProblem(either).empty() || either == var->type) {
       continue;
     }
     if (var->type->isOptional() && either == var->type->inner()) {
@@ -101,7 +101,7 @@ Flow FlowChecker::join(const Flow &a, const Flow &b) {
         continue;
       }
       const Type *either = Type::unionOf({narrowed->second, Type::undefinedTy()});
-      if (either->isError() || !unionProblem(either).empty() || either == var->type) {
+      if (either->isError() || !UnionSlots::unionProblem(either).empty() || either == var->type) {
         continue;
       }
       result.narrowed.push_back({var, either});
@@ -189,18 +189,18 @@ void FlowChecker::assigned(const VarSymbol *var, const Expr *value) {
       this->incremented(var, v->offset);
       return;
     }
-    ValueRange range = v ? ValueRange{} : ByteProofs(this->state).valueRange(value);
+    IntegerRange range = v ? IntegerRange{} : ByteProofs(this->state).valueRange(value);
     this->state.getFlowState().getFacts().forget(var);
     if (v) {
       this->state.getFlowState().getFacts().addEqual(Term::of(var), v->term, v->offset);
     }
     if (range.lo) {
       this->state.getFlowState().getFacts().add(Term::zero(), Term::of(var),
-                                                saturatingSub(1, *range.lo));
+                                                Facts::saturatingSub(1, *range.lo));
     }
     if (range.hi) {
       this->state.getFlowState().getFacts().add(Term::of(var), Term::zero(),
-                                                saturatingAdd(*range.hi, 1));
+                                                Facts::saturatingAdd(*range.hi, 1));
     }
     if (auto *call = dyn_cast<CallExpr>(value);
         call && (call->builtin() == Builtin::MathMin || call->builtin() == Builtin::MathMax) &&
@@ -236,14 +236,14 @@ void FlowChecker::assigned(const VarSymbol *var, const Expr *value) {
     }
     return;
   }
-  ValueRange range = IndexProofs(this->state).lengthRange(value);
+  IntegerRange range = IndexProofs(this->state).lengthRange(value);
   if (range.lo) {
     this->state.getFlowState().getFacts().add(Term::zero(), Term::lengthOf(var),
-                                              saturatingSub(1, *range.lo));
+                                              Facts::saturatingSub(1, *range.lo));
   }
   if (range.hi) {
     this->state.getFlowState().getFacts().add(Term::lengthOf(var), Term::zero(),
-                                              saturatingAdd(*range.hi, 1));
+                                              Facts::saturatingAdd(*range.hi, 1));
   }
 }
 
@@ -252,10 +252,11 @@ void FlowChecker::incremented(const VarSymbol *var, int64_t delta) {
     return;
   }
   Term t = Term::of(var);
-  bool safe = delta == 0 || (delta > 0 ? this->state.getFlowState().getFacts().proves(
-                                             t, Term::zero(), kIntMax - (delta - 1))
-                                       : this->state.getFlowState().getFacts().proves(
-                                             Term::zero(), t, saturatingSub(delta + 1, kIntMin)));
+  bool safe =
+      delta == 0 || (delta > 0 ? this->state.getFlowState().getFacts().proves(t, Term::zero(),
+                                                                              kIntMax - (delta - 1))
+                               : this->state.getFlowState().getFacts().proves(
+                                     Term::zero(), t, Facts::saturatingSub(delta + 1, kIntMin)));
   if (safe) {
     this->state.getFlowState().getFacts().shift(t, delta);
   } else {

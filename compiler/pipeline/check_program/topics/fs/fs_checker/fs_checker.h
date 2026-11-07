@@ -1,6 +1,8 @@
 #pragma once
 
 #include "compiler/pipeline/check_program/check_state/check_state.h"
+#include "compiler/pipeline/check_program/topics/fs/fs_checker/fs_checker_errors.h"
+#include "compiler/result/result/result.h"
 
 namespace tz {
 
@@ -18,8 +20,10 @@ public:
   const Type *nativeError() const;
 
 private:
+  using ResultOctalMode = Result<unsigned, FsCheckerOctalModeError>;
+
+  static ResultOctalMode octalMode(llvm::StringRef text);
   static std::u16string utf16(llvm::StringRef text);
-  static std::string utf8(const std::u16string &text);
 
   CheckState &state;
 };

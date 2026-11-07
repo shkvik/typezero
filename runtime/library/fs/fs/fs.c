@@ -287,7 +287,7 @@ void tz_fs_fail_win32(TzMaker make, DWORD error, const char *syscall, const Path
 }
 
 void tz_fs_fail_index(TzMaker make, int index, const char *syscall, const Path *path) {
-  tz_fs_throw_failure(make, (Failure){index, tz_fs_errors[index].windows}, syscall,
+  tz_fs_throw_failure(make, (Failure){index, tz_fs_errors[index].windows, 0}, syscall,
                       path ? &path->shown : NULL, NULL);
 }
 #else
@@ -369,7 +369,7 @@ File tz_fs_open_raw(const Path *p, OpenFlags f, int32_t mode, Failure *failure) 
   if (h == INVALID_HANDLE_VALUE) {
     DWORD error = GetLastError();
     if (error == ERROR_FILE_EXISTS && f.create && !f.exclusive) {
-      *failure = (Failure){E_EISDIR, tz_fs_errors[E_EISDIR].windows};
+      *failure = (Failure){E_EISDIR, tz_fs_errors[E_EISDIR].windows, 0};
     } else {
       *failure = tz_fs_win32_failure(error);
     }

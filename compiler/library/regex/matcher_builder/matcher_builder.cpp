@@ -22,13 +22,28 @@ using llvm::BasicBlock;
 
 using llvm::Value;
 
-namespace {
-
-bool hasByte(const ByteSet &s, uint32_t c) { return (s[c / 32] >> (c % 32)) & 1; }
-
+bool MatcherBuilder::hasByte(const ByteSet &s, uint32_t c) {
+  return (s[c / 32] >> (c % 32)) & 1;
 }
 
-uint32_t instructionSize(const uint32_t *code, uint32_t pc) {
+void MatcherBuilder::addByte(ByteSet &s, uint32_t c) {
+  s[c / 32] |= 1u << (c % 32);
+}
+
+bool MatcherBuilder::isBack(uint32_t op) {
+  return op == RE_CHAR_BACK || op == RE_ANY_BACK || op == RE_ALL_BACK || op == RE_SET_BACK;
+}
+
+bool MatcherBuilder::isCharInstruction(uint32_t op) {
+  return op == RE_CHAR || op == RE_ANY || op == RE_ALL || op == RE_SET ||
+         MatcherBuilder::isBack(op);
+}
+
+uint64_t MatcherBuilder::counterRange(const CountedLoop &loop) {
+  return loop.max == RE_INFINITY ? uint64_t(loop.min) + 1 : uint64_t(loop.max) + 1;
+}
+
+uint32_t MatcherBuilder::instructionSize(const uint32_t *code, uint32_t pc) {
   const uint32_t *op = code + pc;
   switch (op[0]) {
   case RE_CHAR:
@@ -60,7 +75,7 @@ uint32_t instructionSize(const uint32_t *code, uint32_t pc) {
   }
 }
 
-double byteFrequency(uint32_t c) {
+double MatcherBuilder::byteFrequency(uint32_t c) {
   static const char order[] = "etaoinsrhldcumfpgwybvkxjqz";
   static const double lower[] = {100, 75, 70, 65, 63, 60, 56, 54, 45, 35, 33, 25, 24,
                                  21,  19, 17, 17, 16, 15, 13, 9,  6,  2,  1,  1,  1};
@@ -86,15 +101,16 @@ double byteFrequency(uint32_t c) {
   return 0.5;
 }
 
-std::vector<ByteTest> byteTests(ByteSet s) {
+std::vector<ByteTest> MatcherBuilder::byteTests(ByteSet s) {
   std::vector<ByteTest> tests;
   for (uint32_t c = 'a'; c <= 'z';) {
-    if (!hasByte(s, c) || !hasByte(s, c - 0x20)) {
+    if (!MatcherBuilder::hasByte(s, c) || !MatcherBuilder::hasByte(s, c - 0x20)) {
       ++c;
       continue;
     }
     uint32_t end = c;
-    while (end + 1 <= 'z' && hasByte(s, end + 1) && hasByte(s, end + 1 - 0x20)) {
+    while (end + 1 <= 'z' && MatcherBuilder::hasByte(s, end + 1) &&
+           MatcherBuilder::hasByte(s, end + 1 - 0x20)) {
       ++end;
     }
     tests.push_back({c, end, true});
@@ -105,12 +121,12 @@ std::vector<ByteTest> byteTests(ByteSet s) {
     c = end + 1;
   }
   for (uint32_t c = 0; c < 256;) {
-    if (!hasByte(s, c)) {
+    if (!MatcherBuilder::hasByte(s, c)) {
       ++c;
       continue;
     }
     uint32_t end = c;
-    while (end + 1 < 256 && hasByte(s, end + 1)) {
+    while (end + 1 < 256 && MatcherBuilder::hasByte(s, end + 1)) {
       ++end;
     }
     if (end - c >= 2) {
@@ -299,7 +315,7 @@ llvm::Function *MatcherBuilder::build() {
   found_ = var(i32Ty, "found");
   uint32_t slots = 2 * captures_ + registers_;
   slots_ = b_.CreateAlloca(llvm::ArrayType::get(i32Ty, slots), nullptr, "slots");
-  for (uint32_t pc = 0; pc < codeSize_; pc += instructionSize(code_, pc)) {
+  for (uint32_t pc = 0; pc < codeSize_; pc += MatcherBuilder::instructionSize(code_, pc)) {
     if (code_[pc] == RE_LOOK) {
       lookVars_[pc] = {var(i32Ty, "look.mark"), var(i32Ty, "look.pos"), var(i32Ty, "look.log")};
     }
@@ -329,7 +345,7 @@ llvm::Function *MatcherBuilder::build() {
   return fn_;
 }
 
-uint32_t pushesOf(const uint32_t *code, uint32_t pc) {
+uint32_t MatcherBuilder::pushesOf(const uint32_t *code, uint32_t pc) {
   const uint32_t *op = code + pc;
   switch (op[0]) {
   case RE_SPLIT_NEXT:
@@ -351,7 +367,7 @@ uint32_t pushesOf(const uint32_t *code, uint32_t pc) {
   }
 }
 
-int64_t followingChar(const uint32_t *code, uint32_t pc, bool unicode) {
+int64_t MatcherBuilder::followingChar(const uint32_t *code, uint32_t pc, bool unicode) {
   for (;;) {
     const uint32_t *op = code + pc;
     switch (op[0]) {

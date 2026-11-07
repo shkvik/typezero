@@ -1,6 +1,7 @@
 #include "compiler/pipeline/check_program/topics/crypto/key_pair_checker/key_pair_checker.h"
 #include "compiler/library/crypto/crypto_api/crypto_api.h"
 #include "compiler/library/crypto/crypto_check_helpers/crypto_check_helpers.h"
+#include "compiler/load/to_utf8/to_utf8.h"
 #include "compiler/pipeline/check_program/topics/crypto/crypto_args/crypto_args.h"
 #include "compiler/pipeline/check_program/topics/crypto/crypto_error_types/crypto_error_types.h"
 #include "compiler/pipeline/check_program/topics/expr/argument_checker/argument_checker.h"
@@ -12,24 +13,15 @@ using llvm::dyn_cast;
 
 namespace tz {
 
-std::string KeyPairChecker::utf8Of(const std::u16string &text) {
-  std::string out;
-  llvm::convertUTF16ToUTF8String(
-      llvm::ArrayRef<llvm::UTF16>(reinterpret_cast<const llvm::UTF16 *>(text.data()), text.size()),
-      out);
-
-  return out;
-}
-
 std::optional<std::string> KeyPairChecker::literalOf(const Expr *e) {
   if (auto *conv = dyn_cast<CastExpr>(e); conv && conv->isImplicit()) {
     e = conv->operand;
   }
   if (auto *lit = dyn_cast<StringLitExpr>(e)) {
-    return KeyPairChecker::utf8Of(lit->value);
+    return ToUtf8::toUtf8(lit->value);
   }
   if (auto *tmpl = dyn_cast<TemplateExpr>(e); tmpl && tmpl->exprs.empty()) {
-    return KeyPairChecker::utf8Of(tmpl->quasis[0]);
+    return ToUtf8::toUtf8(tmpl->quasis[0]);
   }
 
   return std::nullopt;
@@ -37,6 +29,29 @@ std::optional<std::string> KeyPairChecker::literalOf(const Expr *e) {
 
 KeyPairChecker::KeyPairChecker(CheckState &owner)
     : state(owner) {}
+
+KeyPairChecker::ResultKeyOptionsGiven
+KeyPairChecker::keyOptions(int which, llvm::StringRef type,
+                           const llvm::StringMap<Expr *> &options) {
+  if (which >= 0 && which <= 2 && !options.lookup("modulusLength")) {
+    std::string message = ErrorTextKeyPair::modulus(type);
+
+    return err(KeyPairCheckerKeyOptionsError{
+        .code = KeyPairCheckerKeyOptionsErrorCode::NO_MODULUS_LENGTH,
+        .message = message,
+    });
+  }
+  if (which == 3 && !options.lookup("namedCurve")) {
+    std::string message = ErrorTextKeyPair::curve();
+
+    return err(KeyPairCheckerKeyOptionsError{
+        .code = KeyPairCheckerKeyOptionsErrorCode::NO_NAMED_CURVE,
+        .message = message,
+    });
+  }
+
+  return ok(which);
+}
 
 Expr *KeyPairChecker::checkGenerateKeyPair(CallExpr *call, llvm::SMLoc loc,
                                            llvm::StringRef shown) {
@@ -51,8 +66,9 @@ Expr *KeyPairChecker::checkGenerateKeyPair(CallExpr *call, llvm::SMLoc loc,
   int which = -1;
   Expr *name = CryptoArgs(this->state).cryptoString(loc, "");
   if (KeyPairChecker::literalOf(args[0])) {
-    if ((which = CryptoArgs(this->state).cryptoChoice(args[0], "type of the key pair", types)) <
-        0) {
+    std::string label = ErrorTextKeyPairLabel::pairType();
+    which = CryptoArgs(this->state).cryptoChoice(args[0], label, types);
+    if (which < 0) {
       return call;
     }
   } else {
@@ -70,19 +86,15 @@ Expr *KeyPairChecker::checkGenerateKeyPair(CallExpr *call, llvm::SMLoc loc,
   }
   for (llvm::StringRef unsupported : {"hashAlgorithm", "mgf1HashAlgorithm", "saltLength"}) {
     if (Expr *e = options.lookup(unsupported)) {
-      this->state.getDiagnostics().error(e->loc(), "the option '" + unsupported +
-                                                       "' of 'rsa-pss' keys is not "
-                                                       "supported yet");
+      std::string message = ErrorTextKeyPair::option(unsupported);
+      this->state.getDiagnostics().error(e->loc(), message);
       return call;
     }
   }
-  if (which >= 0 && which <= 2 && !options.lookup("modulusLength")) {
-    this->state.getDiagnostics().error(loc, "'" + types[which] +
-                                                "' keys need '{ modulusLength: 2048 }'");
-    return call;
-  }
-  if (which == 3 && !options.lookup("namedCurve")) {
-    this->state.getDiagnostics().error(loc, "'ec' keys need '{ namedCurve: \"P-256\" }'");
+  llvm::StringRef typeName = which >= 0 ? types[which] : llvm::StringRef();
+  ResultKeyOptionsGiven given = KeyPairChecker::keyOptions(which, typeName, options);
+  if (given.isErr()) {
+    this->state.getDiagnostics().error(loc, given.error().message);
     return call;
   }
   int has = 0;
@@ -93,9 +105,8 @@ Expr *KeyPairChecker::checkGenerateKeyPair(CallExpr *call, llvm::SMLoc loc,
     modulus = CryptoArgs(this->state).cryptoNumber(m);
     std::optional<double> bits = CryptoArgs(this->state).knownNumber(modulus);
     if ((which == 0 || which == 1) && bits && *bits < 512) {
-      this->state.getDiagnostics().error(
-          m->loc(), "an RSA key needs a modulusLength of 512 bits or more, not " +
-                        CryptoArgs::numberText(*bits));
+      std::string message = ErrorTextKeyPair::small(CryptoArgs::numberText(*bits));
+      this->state.getDiagnostics().error(m->loc(), message);
       return call;
     }
   }
@@ -136,18 +147,20 @@ Expr *KeyPairChecker::checkGenerateKeyPair(CallExpr *call, llvm::SMLoc loc,
         return call;
       }
       if (!e.lookup("format")) {
-        this->state.getDiagnostics().error(
-            encoding->loc(), "'" + option + "' needs 'format': 'pem', 'der' or 'jwk'");
+        std::string message = ErrorTextKeyPair::noFormat(option);
+        this->state.getDiagnostics().error(encoding->loc(), message);
         return call;
       }
-      if ((format = CryptoArgs(this->state)
-                        .cryptoChoice(e["format"], "format of the key", {"pem", "der", "jwk"})) <
-          0) {
+      std::string formatLabel = ErrorTextKeyPairLabel::format();
+      format =
+          CryptoArgs(this->state).cryptoChoice(e["format"], formatLabel, {"pem", "der", "jwk"});
+      if (format < 0) {
         return call;
       }
       if (Expr *t = e.lookup("type")) {
-        int typeIndex = CryptoArgs(this->state)
-                            .cryptoChoice(t, "type of the key", {"pkcs1", "spki", "pkcs8", "sec1"});
+        std::string typeLabel = ErrorTextKeyPairLabel::keyType();
+        int typeIndex =
+            CryptoArgs(this->state).cryptoChoice(t, typeLabel, {"pkcs1", "spki", "pkcs8", "sec1"});
         if (typeIndex < 0) {
           return call;
         }
@@ -155,16 +168,16 @@ Expr *KeyPairChecker::checkGenerateKeyPair(CallExpr *call, llvm::SMLoc loc,
         type = CryptoArgs(this->state).cryptoString(t->loc(), names[typeIndex]);
         flags |= 1;
       } else if (format != 2) {
-        this->state.getDiagnostics().error(
-            encoding->loc(), "'" + option + "' needs 'type': " +
-                                 (k == 0 ? "'spki' or 'pkcs1'" : "'pkcs8', 'pkcs1' or 'sec1'"));
+        std::string message = ErrorTextKeyPair::noType(option, k == 0);
+        this->state.getDiagnostics().error(encoding->loc(), message);
         return call;
       }
       if (Expr *c = e.lookup("cipher")) {
         cipher = ArgumentChecker(this->state).checkArg(c, Type::string());
         flags |= 2;
         if (!e.lookup("passphrase")) {
-          this->state.getDiagnostics().error(encoding->loc(), "a cipher needs a 'passphrase'");
+          std::string message = ErrorTextKeyPair::passphrase();
+          this->state.getDiagnostics().error(encoding->loc(), message);
           return call;
         }
       }

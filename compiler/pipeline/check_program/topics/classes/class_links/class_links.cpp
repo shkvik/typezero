@@ -439,7 +439,12 @@ void ClassLinks::linkOverrides(ClassDecl *cls) {
         this->state.getDiagnostics().error(fn->loc(), target.error().message);
       }
       if (!inherited.empty() && ChunkTypes(this->state).isStreamHook(fn, true)) {
-        ChunkTypes(this->state).reportStreamHook(fn, inherited);
+        ChunkTypes::ResultHookParamsMatch params =
+            ChunkTypes(this->state).hookParams(fn, inherited);
+        if (params.isErr() &&
+            params.error().code == ChunkTypesHookParamsErrorCode::OTHER_PARAMETERS) {
+          this->state.getDiagnostics().error(fn->loc(), params.error().message);
+        }
         continue;
       }
       for (FunctionDecl *v : inherited) {

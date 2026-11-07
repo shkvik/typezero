@@ -25,9 +25,11 @@ namespace path = llvm::sys::path;
 
 namespace tz {
 
-namespace {
+ModuleResolver::ModuleResolver(Loader &loader)
+    : loader_(loader) {}
 
-std::string foreignFile(llvm::StringRef dir, llvm::StringRef file, llvm::StringRef spec) {
+std::string ModuleResolver::foreignFile(llvm::StringRef dir, llvm::StringRef file,
+                                        llvm::StringRef spec) {
   static const llvm::StringLiteral kForeign[] = {".ts",  ".js",  ".tsx", ".jsx",
                                                  ".mts", ".cts", ".mjs", ".cjs"};
   llvm::StringRef ext = path::extension(file, path::Style::posix);
@@ -48,10 +50,6 @@ std::string foreignFile(llvm::StringRef dir, llvm::StringRef file, llvm::StringR
 
   return message;
 }
-
-}
-
-ModuleResolver::ModuleResolver(Loader &loader) : loader_(loader) {}
 
 Module *ModuleResolver::resolve(Module *from, llvm::StringRef spec, llvm::SMLoc loc) {
   if (spec == "neverthrow") {
@@ -100,9 +98,10 @@ Module *ModuleResolver::resolve(Module *from, llvm::StringRef spec, llvm::SMLoc 
   if (spec == "node:string_decoder" || spec == "string_decoder") {
     return loader_.library().libraryModule("string_decoder.tz", "node:string_decoder", loc);
   }
-  if (isBuiltinModule(spec)) {
-    if (std::string problem = BuiltinModuleChecker::moduleProblem(spec); !problem.empty()) {
-      loader_.diags_.error(loc, problem);
+  if (BuiltinModulePaths::isBuiltinModule(spec)) {
+    BuiltinModuleChecker::ResultKnownModule known = BuiltinModuleChecker::knownModule(spec);
+    if (known.isErr()) {
+      loader_.diags_.error(loc, known.error().message);
     }
     return nullptr;
   }
@@ -133,7 +132,8 @@ Module *ModuleResolver::resolve(Module *from, llvm::StringRef spec, llvm::SMLoc 
     candidates.push_back((spec.rtrim('/') + "/index.tz").str());
   } else if (ext == ".tz" || ext == ".json") {
     candidates.push_back(spec.str());
-  } else if (std::string problem = foreignFile(baseDir, spec, spec); !problem.empty()) {
+  } else if (std::string problem = ModuleResolver::foreignFile(baseDir, spec, spec);
+             !problem.empty()) {
     loader_.diags_.error(loc, problem);
     return nullptr;
   } else {
@@ -169,7 +169,7 @@ Module *ModuleResolver::resolvePackage(Module *from, llvm::StringRef spec, llvm:
   const unsigned *target = nullptr;
   if (spec.starts_with("jsr:")) {
     std::string source, inside;
-    if (!pkg::splitJsrImport(spec, name, source, inside)) {
+    if (!pkg::Specifier::splitJsrImport(spec, name, source, inside)) {
       loader_.diags_.error(loc, "'" + spec + "' does not name a JSR package: 'jsr:@scope/name@^1'");
       return nullptr;
     }
@@ -186,7 +186,7 @@ Module *ModuleResolver::resolvePackage(Module *from, llvm::StringRef spec, llvm:
       target = &it->second;
     }
   } else {
-    if (!pkg::splitPackageSpecifier(spec, name, subpath)) {
+    if (!pkg::Specifier::splitPackageSpecifier(spec, name, subpath)) {
       loader_.diags_.error(loc, "'" + spec +
                                     "' does not name a package: a scoped name is '@scope/name'");
       return nullptr;
@@ -239,7 +239,8 @@ Module *ModuleResolver::resolvePackage(Module *from, llvm::StringRef spec, llvm:
     llvm::StringRef file = llvm::StringRef(subpath).drop_front(2);
     if (file.ends_with(".tz")) {
       candidates.push_back(file.str());
-    } else if (std::string problem = foreignFile(package.dir, file, spec); !problem.empty()) {
+    } else if (std::string problem = ModuleResolver::foreignFile(package.dir, file, spec);
+               !problem.empty()) {
       loader_.diags_.error(loc, problem);
       return nullptr;
     } else {

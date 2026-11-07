@@ -28,12 +28,15 @@ using llvm::dyn_cast;
 
 namespace tz {
 
-static bool continuesTo(const Stmt *stmt, llvm::ArrayRef<llvm::StringRef> labels,
-                        unsigned loops = 0) {
+LoopChecker::LoopChecker(CheckState &owner)
+    : state(owner) {}
+
+bool LoopChecker::continuesTo(const Stmt *stmt, llvm::ArrayRef<llvm::StringRef> labels,
+                              unsigned loops) {
   if (!stmt) {
     return false;
   }
-  auto inside = [&](const Stmt *s) { return continuesTo(s, labels, loops); };
+  auto inside = [&](const Stmt *s) { return LoopChecker::continuesTo(s, labels, loops); };
   switch (stmt->kind()) {
   case Stmt::Kind::Continue: {
     llvm::StringRef label = cast<ContinueStmt>(stmt)->label;
@@ -44,13 +47,13 @@ static bool continuesTo(const Stmt *stmt, llvm::ArrayRef<llvm::StringRef> labels
   case Stmt::Kind::If:
     return inside(cast<IfStmt>(stmt)->thenStmt) || inside(cast<IfStmt>(stmt)->elseStmt);
   case Stmt::Kind::While:
-    return continuesTo(cast<WhileStmt>(stmt)->body, labels, loops + 1);
+    return LoopChecker::continuesTo(cast<WhileStmt>(stmt)->body, labels, loops + 1);
   case Stmt::Kind::DoWhile:
-    return continuesTo(cast<DoWhileStmt>(stmt)->body, labels, loops + 1);
+    return LoopChecker::continuesTo(cast<DoWhileStmt>(stmt)->body, labels, loops + 1);
   case Stmt::Kind::For:
-    return continuesTo(cast<ForStmt>(stmt)->body, labels, loops + 1);
+    return LoopChecker::continuesTo(cast<ForStmt>(stmt)->body, labels, loops + 1);
   case Stmt::Kind::ForOf:
-    return continuesTo(cast<ForOfStmt>(stmt)->body, labels, loops + 1);
+    return LoopChecker::continuesTo(cast<ForOfStmt>(stmt)->body, labels, loops + 1);
   case Stmt::Kind::Switch:
     return llvm::any_of(cast<SwitchStmt>(stmt)->cases,
                         [&](const SwitchCase &c) { return llvm::any_of(c.body, inside); });
@@ -60,9 +63,6 @@ static bool continuesTo(const Stmt *stmt, llvm::ArrayRef<llvm::StringRef> labels
     return false;
   }
 }
-
-LoopChecker::LoopChecker(CheckState &owner)
-    : state(owner) {}
 
 void LoopChecker::checkWhile(WhileStmt *stmt) {
   LoopScan scan = LoopScanner(this->state).scanLoop({stmt->body}, {stmt->cond});
@@ -108,7 +108,7 @@ void LoopChecker::checkFor(ForStmt *stmt) {
   this->state.getFlowState().replaceFlow(whenTrue);
   this->checkLoopBody(stmt->body, scan.awaits);
   if (stmt->step) {
-    if (continuesTo(stmt->body, labels)) {
+    if (LoopChecker::continuesTo(stmt->body, labels)) {
       this->state.getFlowState().replaceFlow(head);
     } else if (this->state.getFlowState().isUnreachable()) {
       this->state.getFlowState().replaceFlow(whenTrue);
@@ -117,7 +117,10 @@ void LoopChecker::checkFor(ForStmt *stmt) {
       yield->discarded = true;
     }
     stmt->step = ExprChecker(this->state).checkExpr(stmt->step);
-    ResultChecker(this->state).checkDiscarded(stmt->step);
+    ResultChecker::ResultValueGetsUsed used = ResultChecker(this->state).usedValue(stmt->step);
+    if (used.isErr()) {
+      this->state.getDiagnostics().error(stmt->step->loc(), used.error().message);
+    }
   }
   this->state.getFlowState().replaceFlow(scan.breaks ? FlowChecker::join(whenFalse, head)
                                                      : whenFalse);
@@ -161,8 +164,9 @@ void LoopChecker::checkForOf(ForOfStmt *stmt) {
       if (!elements->elements.empty()) {
         stmt->iterable =
             ExprChecker(this->state)
-                .checkExpr(elements, element && unionProblem(element).empty() ? Type::array(element)
-                                                                              : nullptr);
+                .checkExpr(elements, element && UnionSlots::unionProblem(element).empty()
+                                         ? Type::array(element)
+                                         : nullptr);
       }
     }
   }
@@ -230,9 +234,9 @@ void LoopChecker::checkForOf(ForOfStmt *stmt) {
     }
     if (lo) {
       this->state.getFlowState().getFacts().add(Term::zero(), Term::of(stmt->binding.sym),
-                                                saturatingSub(1, *lo));
+                                                Facts::saturatingSub(1, *lo));
       this->state.getFlowState().getFacts().add(Term::of(stmt->binding.sym), Term::zero(),
-                                                saturatingAdd(*hi, 1));
+                                                Facts::saturatingAdd(*hi, 1));
     }
   }
   this->checkLoopBody(stmt->body, scan.awaits);

@@ -125,7 +125,7 @@ CallRec &CodeWalk::record(const void *key, CallKind kind, const Use &use, llvm::
   CallRec &rec = analysis_.fn->calls[it->second];
   rec.repeated |= analysis_.loops > 0;
   rec.inLoop |= analysis_.loops > 0;
-  merge(rec.segs, analysis_.cur);
+  ParallelModel::merge(rec.segs, analysis_.cur);
 
   return rec;
 }
@@ -157,7 +157,7 @@ void CodeWalk::var(const VarSymbol *v, bool write, llvm::SMLoc at) {
 
 void CodeWalk::joinPoint() {
   for (OpenJoin &j : analysis_.openJoins) {
-    merge(j.active, analysis_.cur);
+    ParallelModel::merge(j.active, analysis_.cur);
   }
 }
 
@@ -181,23 +181,23 @@ void CodeWalk::loop(llvm::StringRef label, llvm::function_ref<void()> head,
     analysis_.cur = entry;
     if (headFirst) {
       head();
-      merge(exits, analysis_.cur);
+      ParallelModel::merge(exits, analysis_.cur);
     }
     analysis_.targets.push_back({label, true, false, {}, {}});
     body();
     Target target = std::move(analysis_.targets.back());
     analysis_.targets.pop_back();
-    merge(analysis_.cur, target.continues);
+    ParallelModel::merge(analysis_.cur, target.continues);
     if (step) {
       step();
     }
     if (!headFirst) {
       head();
-      merge(exits, analysis_.cur);
+      ParallelModel::merge(exits, analysis_.cur);
     }
-    merge(exits, target.breaks);
+    ParallelModel::merge(exits, target.breaks);
     Active next = entry;
-    merge(next, analysis_.cur);
+    ParallelModel::merge(next, analysis_.cur);
     if (next == entry) {
       break;
     }
@@ -244,7 +244,7 @@ void CodeWalk::stmt(const Stmt *s) {
     Active then = std::move(analysis_.cur);
     analysis_.cur = std::move(before);
     stmt(i->elseStmt);
-    merge(analysis_.cur, then);
+    ParallelModel::merge(analysis_.cur, then);
     return;
   }
   case Stmt::Kind::While: {
@@ -282,7 +282,7 @@ void CodeWalk::stmt(const Stmt *s) {
     analysis_.targets.push_back({label, false, false, {}, {}});
     for (const SwitchCase &c : sw->cases) {
       analysis_.cur = disc;
-      merge(analysis_.cur, fall);
+      ParallelModel::merge(analysis_.cur, fall);
       if (c.test) {
         analysis_.exprWalk.expr(c.test);
       } else {
@@ -296,9 +296,9 @@ void CodeWalk::stmt(const Stmt *s) {
     Target target = std::move(analysis_.targets.back());
     analysis_.targets.pop_back();
     analysis_.cur = std::move(fall);
-    merge(analysis_.cur, target.breaks);
+    ParallelModel::merge(analysis_.cur, target.breaks);
     if (!hasDefault && !sw->exhaustive) {
-      merge(analysis_.cur, disc);
+      ParallelModel::merge(analysis_.cur, disc);
     }
     return;
   }
@@ -313,7 +313,7 @@ void CodeWalk::stmt(const Stmt *s) {
     stmt(l->body);
     Target target = std::move(analysis_.targets.back());
     analysis_.targets.pop_back();
-    merge(analysis_.cur, target.breaks);
+    ParallelModel::merge(analysis_.cur, target.breaks);
     return;
   }
   case Stmt::Kind::Return: {
@@ -337,7 +337,7 @@ void CodeWalk::stmt(const Stmt *s) {
       if (!matches) {
         continue;
       }
-      merge(isBreak ? it->breaks : it->continues, analysis_.cur);
+      ParallelModel::merge(isBreak ? it->breaks : it->continues, analysis_.cur);
       break;
     }
     analysis_.cur.clear();
@@ -380,7 +380,7 @@ void CodeWalk::declarator(const VarDeclarator &d) {
   if (!d.sym) {
     return;
   }
-  const Expr *init = strip(d.init);
+  const Expr *init = ParallelHelpers::strip(d.init);
   analysis_.declInit[d.sym] = init;
   if (!d.sym->reassigned && analysis_.aliasAnalysis.isAllocation(init)) {
     analysis_.siteName.try_emplace(init, d.name);
@@ -409,7 +409,7 @@ void CodeWalk::iterate(const Expr *iterable, const Node *site) {
   }
   const Type *type = iterable->type->nonOptional();
   llvm::SMLoc at = iterable->loc();
-  const Expr *source = strip(iterable);
+  const Expr *source = ParallelHelpers::strip(iterable);
   if (type->runtimeKind() == Type::Runtime::Readline ||
       type->runtimeKind() == Type::Runtime::ReadlinePromises) {
     analysis_.resource(Res::Stdin, true, at);
@@ -423,9 +423,9 @@ void CodeWalk::iterate(const Expr *iterable, const Node *site) {
       const FunctionDecl *lib = analysis_.libraryEffects.libraryTarget(c);
       auto *m = dyn_cast<MemberExpr>(c->callee);
       if (m && c->method()) {
-        analysis_.libraryEffects.libraryState(libraryClassName(lib->cls()), lib->name,
-                                              analysis_.aliasAnalysis.receiverRef(m->object), true,
-                                              at);
+        analysis_.libraryEffects.libraryState(
+            ParallelHelpers::libraryClassName(lib->cls()), lib->name,
+            analysis_.aliasAnalysis.receiverRef(m->object), true, at);
       }
       return;
     }
@@ -445,7 +445,7 @@ void CodeWalk::iterate(const Expr *iterable, const Node *site) {
       }
       return;
     }
-    if (c && c->builtin() != Builtin::None && makesNewObject(c->builtin())) {
+    if (c && c->builtin() != Builtin::None && ParallelHelpers::makesNewObject(c->builtin())) {
       return;
     }
     rec.byType = type;

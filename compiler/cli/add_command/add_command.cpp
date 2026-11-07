@@ -24,9 +24,7 @@ namespace tz::pkg {
 
 namespace path = llvm::sys::path;
 
-namespace {
-
-std::string relativePath(llvm::StringRef from, llvm::StringRef to) {
+std::string AddCommand::relativePath(llvm::StringRef from, llvm::StringRef to) {
   std::vector<llvm::StringRef> base(path::begin(from), path::end(from));
   std::vector<llvm::StringRef> target(path::begin(to), path::end(to));
   size_t common = 0;
@@ -52,18 +50,18 @@ std::string relativePath(llvm::StringRef from, llvm::StringRef to) {
   return result.starts_with("../") ? result : "./" + result;
 }
 
-bool isAbsolutePath(llvm::StringRef text) {
+bool AddCommand::isAbsolutePath(llvm::StringRef text) {
   return text.starts_with("/") || text.starts_with("\\") ||
          (text.size() > 2 && llvm::isAlpha(text[0]) && text[1] == ':' &&
           (text[2] == '/' || text[2] == '\\'));
 }
 
-bool interpretAdd(const Manifest &project, llvm::StringRef arg, Dependency &out) {
+bool AddCommand::interpretAdd(const Manifest &project, llvm::StringRef arg, Dependency &out) {
   std::string error;
   Source source;
   llvm::StringRef text = arg;
   bool bare = !text.starts_with("jsr:") && !text.starts_with("@") && !text.contains(':') &&
-              !text.starts_with(".") && !isAbsolutePath(text);
+              !text.starts_with(".") && !AddCommand::isAbsolutePath(text);
   if (bare || text.starts_with("@") || text.starts_with("jsr:")) {
     std::string spec;
     if (bare) {
@@ -72,23 +70,24 @@ bool interpretAdd(const Manifest &project, llvm::StringRef arg, Dependency &out)
     } else {
       spec = text.starts_with("jsr:") ? text.str() : "jsr:" + text.str();
     }
-    if (!parseSource(spec, project.dir, source, error)) {
-      report(error);
+    if (!SourceParser::parseSource(spec, project.dir, source, error)) {
+      Report::report(error);
       return false;
     }
     out.alias = source.scope() == "tz" ? source.name() : "@" + source.scope() + "/" + source.name();
     if (source.range().empty()) {
       JsrVersions versions;
-      if (!jsrVersions(source.scope(), source.name(), versions, error)) {
+      if (!JsrClient::jsrVersions(source.scope(), source.name(), versions, error)) {
         if (!error.empty()) {
-          report(error);
+          Report::report(error);
         } else if (bare) {
-          report("'" + source.name() + "' has not been adapted for tz yet: there is no " +
-                 source.id() +
-                 " in the registry; give its source, e.g. 'tz add "
-                 "github:user/repo@v1.0.0', or adapt it with 'tz port'");
+          Report::report("'" + source.name() + "' has not been adapted for tz yet: there is no " +
+                         source.id() +
+                         " in the registry; give its source, e.g. 'tz add "
+                         "github:user/repo@v1.0.0', or adapt it with 'tz port'");
         } else {
-          report("there is no package " + source.id() + " in the registry (" + jsrBaseUrl() + ")");
+          Report::report("there is no package " + source.id() + " in the registry (" +
+                         JsrClient::jsrBaseUrl() + ")");
         }
         return false;
       }
@@ -106,47 +105,46 @@ bool interpretAdd(const Manifest &project, llvm::StringRef arg, Dependency &out)
         newest = newestPre;
       }
       if (!newest) {
-        report(source.id() + " has no versions");
+        Report::report(source.id() + " has no versions");
         return false;
       }
       spec += "@^" + newest->str();
     }
     out.spec = spec;
-    return checkAlias(out.alias, error) || (report(error), false);
+    return DependencyAlias::checkAlias(out.alias, error) || (Report::report(error), false);
   }
 
-  std::string spec = isAbsolutePath(text) ? "file:" + text.str() : text.str();
-  if (!parseSource(spec, project.dir, source, error)) {
-    report(error);
+  std::string spec = AddCommand::isAbsolutePath(text) ? "file:" + text.str() : text.str();
+  if (!SourceParser::parseSource(spec, project.dir, source, error)) {
+    Report::report(error);
     return false;
   }
   Manifest package;
   if (source.form.is<LocalSource>()) {
-    if (!readPackageDir(source.dir(), package)) {
+    if (!ManifestFile::readPackageDir(source.dir(), package)) {
       return false;
     }
-    out.spec = "file:" + relativePath(project.dir, source.dir());
+    out.spec = "file:" + AddCommand::relativePath(project.dir, source.dir());
   } else {
     std::string commit, dir;
-    if (!gitResolve(source.url(), source.ref(), true, commit, error) ||
-        !gitCheckout(source.url(), commit, dir, error)) {
-      report(error);
+    if (!GitClient::gitResolve(source.url(), source.ref(), true, commit, error) ||
+        !GitClient::gitCheckout(source.url(), commit, dir, error)) {
+      Report::report(error);
       return false;
     }
-    if (!readPackageDir(dir, package)) {
+    if (!ManifestFile::readPackageDir(dir, package)) {
       return false;
     }
     out.spec = text.str();
   }
   out.alias = package.name.empty() ? source.shortName() : package.name;
-  if (!checkAlias(out.alias, error)) {
-    report(error + "; add the package to package.json by hand, under the name its imports use");
+  if (!DependencyAlias::checkAlias(out.alias, error)) {
+    Report::report(error +
+                   "; add the package to package.json by hand, under the name its imports use");
     return false;
   }
 
   return true;
-}
-
 }
 
 int AddCommand::run(llvm::ArrayRef<const char *> args) const {
@@ -157,15 +155,15 @@ int AddCommand::run(llvm::ArrayRef<const char *> args) const {
                          "  tz add git:<address>@v1.0      any git repository\n"
                          "  tz add ../lib                  a directory";
   if (args.empty()) {
-    return usage("'tz add' needs a package", synopsis);
+    return CommandUsage::usage("'tz add' needs a package", synopsis);
   }
   for (llvm::StringRef arg : args) {
     if (arg.starts_with("-")) {
-      return usage("unknown option '" + arg + "'", synopsis);
+      return CommandUsage::usage("unknown option '" + arg + "'", synopsis);
     }
   }
   Manifest project;
-  if (!currentProject(project)) {
+  if (!ProjectFile::currentProject(project)) {
     return kExitError;
   }
   std::vector<Dependency> deps = project.dependencies;
@@ -174,7 +172,7 @@ int AddCommand::run(llvm::ArrayRef<const char *> args) const {
   std::vector<Dependency> added;
   for (llvm::StringRef arg : args) {
     Dependency dep;
-    if (!interpretAdd(project, arg, dep)) {
+    if (!AddCommand::interpretAdd(project, arg, dep)) {
       return kExitError;
     }
     auto it = std::find_if(deps.begin(), deps.end(),
@@ -186,20 +184,20 @@ int AddCommand::run(llvm::ArrayRef<const char *> args) const {
     }
     Source source;
     std::string error;
-    if (parseSource(dep.spec, project.dir, source, error)) {
+    if (SourceParser::parseSource(dep.spec, project.dir, source, error)) {
       options.only.push_back(source.id());
     }
     added.push_back(dep);
   }
   Lock before, after;
-  if (!applyDependencies(project, deps, options, &before, &after)) {
+  if (!ProjectFile::applyDependencies(project, deps, options, &before, &after)) {
     return kExitError;
   }
   for (const Dependency &dep : added) {
     llvm::outs() << "added " << dep.alias << ": " << dep.spec;
     Source source;
     std::string error;
-    if (parseSource(dep.spec, project.dir, source, error)) {
+    if (SourceParser::parseSource(dep.spec, project.dir, source, error)) {
       if (auto it = after.packages.find(source.id()); it != after.packages.end()) {
         llvm::outs() << " ("
                      << (it->second.version.empty() ? it->second.commit.substr(0, 12)

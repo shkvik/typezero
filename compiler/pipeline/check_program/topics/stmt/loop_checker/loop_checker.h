@@ -17,6 +17,8 @@ public:
   void checkLoopBody(Stmt *body, bool awaits);
 
 private:
+  static bool continuesTo(const Stmt *stmt, llvm::ArrayRef<llvm::StringRef> labels,
+                          unsigned loops = 0);
   using ResultIterableType = Result<const Type *, LoopCheckerIterableTypeError>;
   using ResultBindingTyped = Result<const VarDeclarator *, LoopCheckerBindingTypeError>;
   using ResultBindingShape = Result<const Type *, LoopCheckerBindingShapeError>;

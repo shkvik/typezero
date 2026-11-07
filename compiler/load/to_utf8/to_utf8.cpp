@@ -13,7 +13,7 @@ using llvm::isa;
 
 namespace tz {
 
-std::string toUtf8(const std::u16string &text) {
+std::string ToUtf8::toUtf8(const std::u16string &text) {
   std::string utf8;
   llvm::convertUTF16ToUTF8String(
       llvm::ArrayRef<llvm::UTF16>(reinterpret_cast<const llvm::UTF16 *>(text.data()), text.size()),

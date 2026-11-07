@@ -15,16 +15,6 @@ using llvm::Value;
 
 namespace tz {
 
-namespace {
-
-bool isBack(uint32_t op) {
-  return op == RE_CHAR_BACK || op == RE_ANY_BACK || op == RE_ALL_BACK || op == RE_SET_BACK;
-}
-
-void addByte(ByteSet &s, uint32_t c) { s[c / 32] |= 1u << (c % 32); }
-
-}
-
 MatcherRepeats::MatcherRepeats(MatcherBuilder &builder) : builder_(builder) {}
 
 FirstUnits MatcherRepeats::unitsFirst(uint32_t pc) const {
@@ -42,7 +32,7 @@ FirstUnits MatcherRepeats::unitsFirst(uint32_t pc) const {
     switch (a[0]) {
     case RE_CHAR:
       if (a[1] < 256) {
-        addByte(units.bytes, a[1]);
+        MatcherBuilder::addByte(units.bytes, a[1]);
       } else {
         units.wide = true;
       }
@@ -59,7 +49,7 @@ FirstUnits MatcherRepeats::unitsFirst(uint32_t pc) const {
     case RE_ALL:
       for (uint32_t c = 0; c < 256; ++c) {
         if (a[0] == RE_ALL || (c != '\n' && c != '\r')) {
-          addByte(units.bytes, c);
+          MatcherBuilder::addByte(units.bytes, c);
         }
       }
       units.wide = true;
@@ -106,7 +96,7 @@ Value *MatcherRepeats::unitMatches(uint32_t atom, Value *u) {
 void MatcherRepeats::emitRepeatGreedy(uint32_t pc, bool memo) {
   const uint32_t *op = builder_.code_ + pc;
   uint32_t min = op[1], max = op[2], atom = pc + 5, after = pc + 5 + op[4];
-  bool back = isBack(builder_.code_[atom]);
+  bool back = MatcherBuilder::isBack(builder_.code_[atom]);
   llvm::Type *i64 = builder_.b_.getInt64Ty();
   Value *start = builder_.load(builder_.pos_);
   llvm::AllocaInst *at = builder_.entryVar("repeat.at"), *count = builder_.entryVar("repeat.count");
@@ -213,7 +203,8 @@ void MatcherRepeats::emitRepeatGreedy(uint32_t pc, bool memo) {
 
   builder_.matcherMemo().countWork(start, builder_.load(at));
 
-  int64_t hint = back ? -1 : followingChar(builder_.code_, after, builder_.unicode_);
+  int64_t hint =
+      back ? -1 : MatcherBuilder::followingChar(builder_.code_, after, builder_.unicode_);
   if (hint >= 0) {
     if (!builder_.wide_ && hint > 255) {
       builder_.b_.CreateBr(builder_.fail_);
@@ -258,7 +249,7 @@ uint32_t MatcherRepeats::greedyLabel(uint32_t pc) {
   }
   const uint32_t *op = builder_.code_ + pc;
   uint32_t atom = pc + 5, after = pc + 5 + op[4];
-  bool back = isBack(builder_.code_[atom]);
+  bool back = MatcherBuilder::isBack(builder_.code_[atom]);
   llvm::IRBuilderBase::InsertPointGuard guard(builder_.b_);
   BasicBlock *block = builder_.newBlock("repeat.less");
   uint32_t label = builder_.newLabel(block);
@@ -279,7 +270,7 @@ uint32_t MatcherRepeats::greedyLabel(uint32_t pc) {
           });
       q = builder_.b_.CreateSelect(pair, builder_.b_.CreateSub(p, builder_.i32(2)), q);
     }
-    int64_t hint = followingChar(builder_.code_, after, builder_.unicode_);
+    int64_t hint = MatcherBuilder::followingChar(builder_.code_, after, builder_.unicode_);
     if (hint >= 0) {
       if (!builder_.wide_ && hint > 255) {
         builder_.b_.CreateBr(drop);

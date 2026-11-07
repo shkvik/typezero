@@ -19,8 +19,8 @@
 
 namespace tz {
 
-const Type *spreadTuple(llvm::ArrayRef<const Type *> parts, const std::vector<bool> &spread,
-                        std::string &why) {
+const Type *ArgumentLists::spreadTuple(llvm::ArrayRef<const Type *> parts,
+                                       const std::vector<bool> &spread, std::string &why) {
   std::vector<const Type *> elements;
   size_t min = 0;
   const Type *rest = nullptr;
@@ -77,8 +77,8 @@ const Type *spreadTuple(llvm::ArrayRef<const Type *> parts, const std::vector<bo
   return Type::argumentList(elements, min, rest);
 }
 
-bool flattenArguments(llvm::ArrayRef<const Type *> params, size_t &minArgs, bool &hasRest,
-                      std::vector<const Type *> &flat) {
+bool ArgumentLists::flattenArguments(llvm::ArrayRef<const Type *> params, size_t &minArgs,
+                                     bool &hasRest, std::vector<const Type *> &flat) {
   if (!hasRest || params.empty()) {
     return false;
   }

@@ -108,10 +108,10 @@ llvm::Value *CallLowerer::emitCall(CallExpr *call) {
     case Builtin::IterFind:
       return this->lowering.iteratorLowerer().emitIteratorBuiltin(call);
     default:
-      if (isAsyncBuiltin(call->builtin())) {
+      if (BuiltinGroups::isAsyncBuiltin(call->builtin())) {
         return this->lowering.asyncBuiltinLowerer().emitAsyncBuiltin(call);
       }
-      if (isDictBuiltin(call->builtin())) {
+      if (BuiltinGroups::isDictBuiltin(call->builtin())) {
         return this->lowering.dictMethodLowerer().emitDictCall(call);
       }
       if (cast<MemberExpr>(call->callee)->object->type->isArray()) {

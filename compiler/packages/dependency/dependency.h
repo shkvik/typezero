@@ -12,6 +12,9 @@ struct Dependency {
   size_t offset = 0;
 };
 
-bool checkAlias(llvm::StringRef alias, std::string &error);
+class DependencyAlias {
+public:
+  static bool checkAlias(llvm::StringRef alias, std::string &error);
+};
 
 }

@@ -157,14 +157,14 @@ Expr *ClassParser::parseDecoratorExpr() {
   if (!parser_.tok_.is(Tok::Identifier)) {
     parser_.cursor().error(parser_.tok_.loc(),
                            llvm::Twine("expected the name of a decorator after '@', found ") +
-                               tokSpelling(parser_.tok_.kind));
+                               TokenKinds::tokSpelling(parser_.tok_.kind));
     return nullptr;
   }
   Expr *expr = parser_.ctx_.make<NameExpr>(parser_.tok_.loc(), parser_.tok_.text);
   parser_.cursor().advance();
   while (parser_.tok_.is(Tok::Dot)) {
     parser_.cursor().advance();
-    if (!parser_.tok_.is(Tok::Identifier) && !isKeyword(parser_.tok_.kind)) {
+    if (!parser_.tok_.is(Tok::Identifier) && !TokenKinds::isKeyword(parser_.tok_.kind)) {
       parser_.cursor().error(parser_.tok_.loc(), "expected a property name after '.'");
       return expr;
     }
@@ -271,12 +271,12 @@ void ClassParser::parseClassMember(ClassDecl *cls) {
       isAsync = true;
     }
   }
-  bool accessorAhead =
-      parser_.tok_.is(Tok::Identifier) &&
-      (parser_.tok_.text == "get" || parser_.tok_.text == "set") &&
-      !parser_.cursor().peek().newlineBefore &&
-      (parser_.cursor().peek().is(Tok::Identifier) || isKeyword(parser_.cursor().peek().kind) ||
-       parser_.cursor().peek().is(Tok::StringLiteral));
+  bool accessorAhead = parser_.tok_.is(Tok::Identifier) &&
+                       (parser_.tok_.text == "get" || parser_.tok_.text == "set") &&
+                       !parser_.cursor().peek().newlineBefore &&
+                       (parser_.cursor().peek().is(Tok::Identifier) ||
+                        TokenKinds::isKeyword(parser_.cursor().peek().kind) ||
+                        parser_.cursor().peek().is(Tok::StringLiteral));
   if (accessorAhead) {
     bool getter = parser_.tok_.text == "get";
     parser_.cursor().advance();
@@ -476,7 +476,7 @@ void ClassParser::parseClassMember(ClassDecl *cls) {
   if (!parser_.cursor().accept(Tok::Semi) && !parser_.cursor().accept(Tok::Comma) &&
       !parser_.tok_.is(Tok::RBrace) && !parser_.tok_.newlineBefore) {
     parser_.cursor().error(parser_.tok_.loc(), llvm::Twine("expected ';' after the field, found ") +
-                                                   tokSpelling(parser_.tok_.kind));
+                                                   TokenKinds::tokSpelling(parser_.tok_.kind));
     return;
   }
   cls->fields.push_back(std::move(field));

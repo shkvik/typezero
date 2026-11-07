@@ -67,7 +67,7 @@ Val Slots::readVar(const VarSymbol *var, const State &st) {
 }
 
 void Slots::writeVar(const VarSymbol *var, Val v, State &st) {
-  if (!var || !tracked(var->type)) {
+  if (!var || !ValueRange::tracked(var->type)) {
     return;
   }
   v = check_.overflowWarnings().fitVal(std::move(v), var->type);
@@ -82,7 +82,7 @@ void Slots::writeVar(const VarSymbol *var, Val v, State &st) {
 }
 
 Val Slots::readField(const Type *objectType, llvm::StringRef field, const Type *type) {
-  if (!tracked(type)) {
+  if (!ValueRange::tracked(type)) {
     return Val();
   }
   if (std::optional<Val> v =
@@ -95,7 +95,7 @@ Val Slots::readField(const Type *objectType, llvm::StringRef field, const Type *
 
 void Slots::storeField(const Type *objectType, llvm::StringRef field, const Type *type,
                        const Val &v) {
-  if (check_.quiet_ || !objectType || !tracked(type)) {
+  if (check_.quiet_ || !objectType || !ValueRange::tracked(type)) {
     return;
   }
   OverflowCheck::Slot &slot = check_.next_.fields[{objectType, field.str()}];
@@ -104,7 +104,7 @@ void Slots::storeField(const Type *objectType, llvm::StringRef field, const Type
 }
 
 bool Slots::isPrivateArray(const Expr *expr) const {
-  expr = stripCasts(expr);
+  expr = OverflowHelpers::stripCasts(expr);
   if (!expr) {
     return false;
   }
@@ -151,7 +151,7 @@ Val Slots::elementsOf(const Expr *arrayExpr, const Val &array, const Type *array
   Val v = *array.elem;
   if (!isPrivateArray(arrayExpr)) {
     if (std::optional<Val> stored = check_.summary(check_.cur_.elements, element)) {
-      v = join(v, *stored);
+      v = ValueRange::join(v, *stored);
     } else if (check_.round_ == 0) {
       return check_.overflowWarnings().trusted(element);
     }
@@ -166,12 +166,12 @@ void Slots::storeElements(const Expr *arrayExpr, const Type *arrayType, const Va
   }
   const Type *element = arrayType->nonOptional()->inner();
   check_.contribute(check_.next_.elements[element], v);
-  auto *name = dyn_cast_or_null<NameExpr>(stripCasts(arrayExpr));
+  auto *name = dyn_cast_or_null<NameExpr>(OverflowHelpers::stripCasts(arrayExpr));
   if (name && name->var()) {
     auto found = st.vars.find(name->var());
     if (found != st.vars.end()) {
       Val &array = found->second;
-      array.elem = array.elem ? share(join(*array.elem, v)) : nullptr;
+      array.elem = array.elem ? ValueRange::share(ValueRange::join(*array.elem, v)) : nullptr;
     }
   }
 }
@@ -204,24 +204,24 @@ bool Slots::mergeSlot(OverflowCheck::Slot &into, const OverflowCheck::Slot *from
     Val v = into.val;
     Val n = from->val;
     if (!v.num.empty() && !n.num.empty()) {
-      v.num = meet(v.num, n.num);
+      v.num = ValueRange::meet(v.num, n.num);
     }
     if (!v.len.empty() && !n.len.empty()) {
-      v.len = meet(v.len, n.len);
+      v.len = ValueRange::meet(v.len, n.len);
     }
-    bool changed = !sameVal(v, into.val);
+    bool changed = !ValueRange::sameVal(v, into.val);
     into.val = v;
     return changed;
   }
   if (!from) {
     return false;
   }
-  Val joined = join(into.val, from->val);
-  if (sameVal(joined, into.val)) {
+  Val joined = ValueRange::join(into.val, from->val);
+  if (ValueRange::sameVal(joined, into.val)) {
     return false;
   }
   if (++into.growths > kGrowthsBeforeWidening || check_.round_ >= kMaxRounds) {
-    joined = widenVal(into.val, joined, type);
+    joined = OverflowHelpers::widenVal(into.val, joined, type);
   }
   into.val = joined;
 

@@ -36,9 +36,10 @@ using llvm::isa;
 
 namespace tz {
 
-namespace {
+ProgramScan::ProgramScan(OverflowCheck &check)
+    : check_(check) {}
 
-bool onlyReads(Builtin builtin) {
+bool ProgramScan::onlyReads(Builtin builtin) {
   switch (builtin) {
   case Builtin::ConsoleLog:
   case Builtin::ConsoleError:
@@ -55,10 +56,6 @@ bool onlyReads(Builtin builtin) {
     return false;
   }
 }
-
-}
-
-ProgramScan::ProgramScan(OverflowCheck &check) : check_(check) {}
 
 void ProgramScan::addFunction(const FunctionDecl *fn) {
   if (!fn || !fn->body || check_.program_.unusedFunctions.contains(fn)) {
@@ -347,7 +344,7 @@ void ProgramScan::scanExpr(const Expr *expr, bool consumed) {
       useVar(name->var(), true, true);
       if (check_.declaring_ && !assign->op) {
         if (auto *bin = dyn_cast<BinaryExpr>(assign->value)) {
-          if (auto *lhs = dyn_cast<NameExpr>(stripCasts(bin->lhs));
+          if (auto *lhs = dyn_cast<NameExpr>(OverflowHelpers::stripCasts(bin->lhs));
               lhs && lhs->var() == name->var()) {
             check_.selfAssigned_[bin] = name->var();
           }
@@ -378,12 +375,12 @@ void ProgramScan::scanExpr(const Expr *expr, bool consumed) {
     } else {
       scanExpr(call->callee, true);
     }
-    std::optional<size_t> callback = callbackArg(call->builtin());
-    bool reads = onlyReads(call->builtin());
+    std::optional<size_t> callback = OverflowHelpers::callbackArg(call->builtin());
+    bool reads = ProgramScan::onlyReads(call->builtin());
     for (size_t i = 0; i < call->args.size(); ++i) {
       const Expr *arg = call->args[i];
       if (callback && *callback == i) {
-        if (auto *fe = dyn_cast<FunctionExpr>(stripCasts(arg))) {
+        if (auto *fe = dyn_cast<FunctionExpr>(OverflowHelpers::stripCasts(arg))) {
           if (check_.declaring_) {
             check_.inlined_.insert(fe->fn);
           }
@@ -454,7 +451,7 @@ void ProgramScan::scanExpr(const Expr *expr, bool consumed) {
 }
 
 bool ProgramScan::isConstantTree(const Expr *expr) const {
-  expr = stripCasts(expr);
+  expr = OverflowHelpers::stripCasts(expr);
   if (!expr) {
     return false;
   }

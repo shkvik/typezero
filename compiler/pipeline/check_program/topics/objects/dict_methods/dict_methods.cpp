@@ -19,7 +19,7 @@ DictMethods::ResultDictMethodCalled DictMethods::checkDictMethod(CallExpr *call,
                                                                  MemberExpr *member) {
   const Type *type = member->object->type;
   llvm::StringRef name = member->name;
-  std::string text = dictText(member->object, type);
+  std::string text = DictCheckHelpers::dictText(member->object, type);
   call->type = Type::error();
   if (type->isRecord()) {
     std::string key = text + "." + name.str();
@@ -377,7 +377,7 @@ DictMethods::ResultDictObjectCalled DictMethods::checkDictObjectCall(CallExpr *c
   Expr *arg = call->args[0];
   const Type *type = arg->type;
   if (!type->isRecord()) {
-    std::string text = dictText(arg, type);
+    std::string text = DictCheckHelpers::dictText(arg, type);
     llvm::StringRef kind = type->isMap() ? "Map" : "Set";
     llvm::StringRef method = fn == "entries" && type->isSet() ? llvm::StringRef("values") : fn;
     std::string message = ErrorTextDictObject::empty(fn, kind, text, method);

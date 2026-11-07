@@ -74,9 +74,9 @@ void VarParser::parseDeclarators(VarDeclStmt *decl) {
 void VarParser::recordConstant(llvm::StringRef name, const Expr *init) {
   std::vector<std::string> values;
   if (auto *lit = dyn_cast<StringLitExpr>(init)) {
-    values.push_back(toUtf8(lit->value));
+    values.push_back(ToUtf8::toUtf8(lit->value));
   } else if (auto *tmpl = dyn_cast<TemplateExpr>(init); tmpl && tmpl->exprs.empty()) {
-    values.push_back(toUtf8(tmpl->quasis[0]));
+    values.push_back(ToUtf8::toUtf8(tmpl->quasis[0]));
   } else if (auto *other = dyn_cast<NameExpr>(init)) {
     values = parser_.stringConstants_.lookup(other->name);
   }

@@ -198,9 +198,9 @@ void GeneratorLowerer::emitPendingIterators() {
     this->lowering.functionBuilder().beginFunction(job.function, nullptr);
     Lowering::Coroutine coroutine{};
     this->lowering.coro_ = &coroutine;
-    bool stage = isIteratorStage(job.builtin);
+    bool stage = BuiltinGroups::isIteratorStage(job.builtin);
     bool matches = job.builtin == Builtin::StrMatchAll;
-    bool dict = isDictIterator(job.builtin);
+    bool dict = BuiltinGroups::isDictIterator(job.builtin);
     llvm::StructType *dictPromise = nullptr;
     unsigned flags = 0;
     if (dict) {

@@ -5,7 +5,10 @@
 
 namespace tz::pkg {
 
-std::string canonical(llvm::StringRef dir);
-std::string findAbove(llvm::StringRef dir, llvm::StringRef name);
+class Paths {
+public:
+  static std::string canonical(llvm::StringRef dir);
+  static std::string findAbove(llvm::StringRef dir, llvm::StringRef name);
+};
 
 }

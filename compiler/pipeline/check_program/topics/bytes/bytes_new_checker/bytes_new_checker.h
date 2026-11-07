@@ -1,6 +1,8 @@
 #pragma once
 
 #include "compiler/pipeline/check_program/check_state/check_state.h"
+#include "compiler/pipeline/check_program/topics/bytes/bytes_new_checker/bytes_new_checker_errors.h"
+#include "compiler/result/result/result.h"
 
 namespace tz {
 
@@ -14,9 +16,12 @@ public:
   bool checkBytesSource(Expr *source, const Type *target);
 
 private:
-  static std::string utf8(const std::u16string &text);
+  using ResultDecoderLabel = Result<const char *, BytesNewCheckerDecoderLabelError>;
+  using ResultViewedBuffer = Result<const Type *, BytesNewCheckerViewedBufferError>;
+
+  static ResultViewedBuffer viewedBuffer(const Type *buffer);
+  static ResultDecoderLabel decoderLabel(llvm::StringRef label);
   static std::optional<std::u16string> literalText(const Expr *e);
-  static std::string rangeText(int64_t lo, int64_t hi);
   static bool mayBeFatal(const Expr *options);
 
   CheckState &state;

@@ -13,16 +13,7 @@ using llvm::isa;
 
 namespace tz {
 
-bool mentionsAnyOf(const Type *type, llvm::ArrayRef<const Type *> params) {
-  if (params.empty() || !mentionsParam(type)) {
-    return false;
-  }
-  llvm::SmallPtrSet<const Type *, 4> seen;
-
-  return mentionsAnyOf(type, params, seen);
-}
-
-const Type *paramsAsList(const Type *fn, size_t from) {
+const Type *Inference::paramsAsList(const Type *fn, size_t from) {
   llvm::ArrayRef<const Type *> params = fn->params();
   size_t fixed = params.size() - (fn->hasRest() ? 1 : 0);
   std::vector<const Type *> elements;
@@ -35,7 +26,7 @@ const Type *paramsAsList(const Type *fn, size_t from) {
                             fn->hasRest() ? params.back() : nullptr);
 }
 
-const Type *listSlice(const Type *list, size_t begin, size_t end, bool last) {
+const Type *Inference::listSlice(const Type *list, size_t begin, size_t end, bool last) {
   std::vector<const Type *> elements;
   for (size_t i = begin; i < end && i < list->fields().size(); ++i) {
     elements.push_back(list->fields()[i].type);
@@ -76,7 +67,7 @@ void Inference::from(const Type *pattern, const Type *actual) {
     }
     const Type *element = pattern->iterated();
     const Type *candidate = actual;
-    if (element && weak && actual->isArray() && !mentionsParam(element)) {
+    if (element && weak && actual->isArray() && !TypeQueries::mentionsParam(element)) {
       candidate = Type::array(element);
     }
     (intLiteral ? literalCandidates : weak ? weakCandidates : candidates)[k].push_back(candidate);
@@ -87,7 +78,7 @@ void Inference::from(const Type *pattern, const Type *actual) {
     }
     return;
   }
-  if (!mentionsAnyOf(pattern, params)) {
+  if (!GenericCheckHelpers::mentionsAnyOf(pattern, params)) {
     return;
   }
   switch (pattern->kind()) {
@@ -119,7 +110,7 @@ void Inference::from(const Type *pattern, const Type *actual) {
       from(ps[i], actual->params()[i]);
     }
     if (list && actual->params().size() - (actual->hasRest() ? 1 : 0) >= fixed) {
-      from(ps.back(), paramsAsList(actual, fixed));
+      from(ps.back(), Inference::paramsAsList(actual, fixed));
     }
     if (auto at = llvm::find(params, pattern->ret());
         at != params.end() && actual->ret()->isVoid()) {
@@ -216,7 +207,7 @@ void Inference::from(const Type *pattern, const Type *actual) {
   case Type::Kind::Union: {
     std::vector<const Type *> open, fixed;
     for (const Type *m : pattern->members()) {
-      (mentionsAnyOf(m, params) ? open : fixed).push_back(m);
+      (GenericCheckHelpers::mentionsAnyOf(m, params) ? open : fixed).push_back(m);
     }
     if (open.size() > 1) {
       const Type *value = actual->nonOptional();
@@ -299,7 +290,7 @@ void Inference::matchList(const Type *pattern, const Type *actual,
   for (size_t i = 0; i < parts.size(); ++i) {
     size_t length = size_t(lengths[i]);
     if (parts[i].type->isListParam()) {
-      from(parts[i].type, listSlice(actual, at, at + length, i + 1 == parts.size()));
+      from(parts[i].type, Inference::listSlice(actual, at, at + length, i + 1 == parts.size()));
     } else if (at < count) {
       from(parts[i].type, actual->fields()[at].type);
     }

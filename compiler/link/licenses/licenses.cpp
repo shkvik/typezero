@@ -37,7 +37,7 @@ const Project kProjects[] = {
 
 }
 
-CryptoUse cryptoUse(const llvm::Module &module) {
+CryptoUse Licenses::cryptoUse(const llvm::Module &module) {
   CryptoUse use;
   auto note = [&](llvm::StringRef name) {
     if (name.starts_with("tz_tls_")) {
@@ -48,7 +48,7 @@ CryptoUse cryptoUse(const llvm::Module &module) {
       return;
     }
     use.any = true;
-    use.full |= isFullCryptoFunction(name);
+    use.full |= CryptoApi::isFullCryptoFunction(name);
   };
   for (const llvm::Function &fn : module) {
     if (fn.isDeclaration() && !fn.use_empty()) {
@@ -64,7 +64,7 @@ CryptoUse cryptoUse(const llvm::Module &module) {
   return use;
 }
 
-bool usesEncodingIndexes(const llvm::Module &module) {
+bool Licenses::usesEncodingIndexes(const llvm::Module &module) {
   for (const llvm::GlobalVariable &var : module.globals()) {
     if (var.getName().starts_with("tz_cjk_encoding_")) {
       return true;
@@ -74,7 +74,7 @@ bool usesEncodingIndexes(const llvm::Module &module) {
   return false;
 }
 
-bool usesHttp2(const llvm::Module &module) {
+bool Licenses::usesHttp2(const llvm::Module &module) {
   for (llvm::StringRef name : {"tz_http_stream", "tz_http_start_client"}) {
     const llvm::Function *function = module.getFunction(name);
     if (function && !function->use_empty()) {
@@ -85,7 +85,7 @@ bool usesHttp2(const llvm::Module &module) {
   return false;
 }
 
-void addLicenseManifest(llvm::Module &module, const Embedded &embedded) {
+void Licenses::addLicenseManifest(llvm::Module &module, const Embedded &embedded) {
   std::string text = kHeader.str();
   if (embedded.openssl) {
     text += "openssl\n";
@@ -104,7 +104,7 @@ void addLicenseManifest(llvm::Module &module, const Embedded &embedded) {
   manifest->setAlignment(llvm::Align(1));
 }
 
-int printLicenses(llvm::StringRef exe, llvm::StringRef licensesDir) {
+int Licenses::printLicenses(llvm::StringRef exe, llvm::StringRef licensesDir) {
   llvm::Expected<llvm::object::OwningBinary<llvm::object::Binary>> binary =
       llvm::object::createBinary(exe);
   if (!binary) {

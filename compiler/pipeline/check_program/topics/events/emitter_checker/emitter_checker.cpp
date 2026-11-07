@@ -29,44 +29,6 @@ namespace tz {
 
 namespace {
 
-enum class EmitterMethod {
-  None,
-  Listen,
-  Remove,
-  Emit,
-  Listeners,
-  RawListeners,
-  Count,
-  RemoveAll
-};
-
-EmitterMethod emitterMethod(llvm::StringRef name) {
-  if (name == "on" || name == "addListener" || name == "prependListener" || name == "once" ||
-      name == "prependOnceListener") {
-    return EmitterMethod::Listen;
-  }
-  if (name == "off" || name == "removeListener") {
-    return EmitterMethod::Remove;
-  }
-  if (name == "emit") {
-    return EmitterMethod::Emit;
-  }
-  if (name == "listeners") {
-    return EmitterMethod::Listeners;
-  }
-  if (name == "rawListeners") {
-    return EmitterMethod::RawListeners;
-  }
-  if (name == "listenerCount") {
-    return EmitterMethod::Count;
-  }
-  if (name == "removeAllListeners") {
-    return EmitterMethod::RemoveAll;
-  }
-
-  return EmitterMethod::None;
-}
-
 constexpr int kReceiverBit = 16;
 
 constexpr int kDedupeBit = 32;
@@ -108,19 +70,37 @@ std::string EmitterChecker::fileOfPlace(const std::string &place) {
   return line == std::string::npos ? place : place.substr(0, line);
 }
 
-std::string EmitterChecker::quotedList(const std::vector<const VarSymbol *> &vars) {
-  std::string out;
-  for (size_t i = 0; i < vars.size(); ++i) {
-    out += (i == 0 ? "" : i + 1 == vars.size() ? " and " : ", ") + ("'" + vars[i]->name.str() + "'");
-  }
-
-  return out;
-}
-
 std::string EmitterChecker::shortPlace(const std::string &place) {
   std::string file = EmitterChecker::fileOfPlace(place);
 
   return llvm::sys::path::filename(file).str() + place.substr(file.size());
+}
+
+EmitterChecker::EmitterMethod EmitterChecker::emitterMethod(llvm::StringRef name) {
+  if (name == "on" || name == "addListener" || name == "prependListener" || name == "once" ||
+      name == "prependOnceListener") {
+    return EmitterMethod::Listen;
+  }
+  if (name == "off" || name == "removeListener") {
+    return EmitterMethod::Remove;
+  }
+  if (name == "emit") {
+    return EmitterMethod::Emit;
+  }
+  if (name == "listeners") {
+    return EmitterMethod::Listeners;
+  }
+  if (name == "rawListeners") {
+    return EmitterMethod::RawListeners;
+  }
+  if (name == "listenerCount") {
+    return EmitterMethod::Count;
+  }
+  if (name == "removeAllListeners") {
+    return EmitterMethod::RemoveAll;
+  }
+
+  return EmitterMethod::None;
 }
 
 EmitterChecker::EmitterChecker(CheckState &owner)
@@ -143,7 +123,7 @@ void EmitterChecker::noteListener(MemberExpr *member, const Type *events, llvm::
     }
     auto *inner = dyn_cast<CallExpr>(root);
     auto *chained = inner ? dyn_cast<MemberExpr>(inner->callee) : nullptr;
-    if (!chained || emitterMethod(chained->name) != EmitterMethod::Listen) {
+    if (!chained || EmitterChecker::emitterMethod(chained->name) != EmitterMethod::Listen) {
       break;
     }
     root = chained->object;
@@ -171,7 +151,7 @@ bool EmitterChecker::ownsEmitter(const Expr *emitter) const {
     }
     auto *call = dyn_cast<CallExpr>(emitter);
     auto *chained = call ? dyn_cast<MemberExpr>(call->callee) : nullptr;
-    if (chained && emitterMethod(chained->name) == EmitterMethod::Listen) {
+    if (chained && EmitterChecker::emitterMethod(chained->name) == EmitterMethod::Listen) {
       emitter = chained->object;
       continue;
     }
@@ -201,9 +181,6 @@ bool EmitterChecker::classifyListener(Expr *arg, const Expr *emitter, int &bits,
   bool topLevel = (!this->state.getFunctionStack().getCurrentDecl() &&
                    !this->state.getFunctionStack().isInsideAwaitLoop()) ||
                   (emitter && this->ownsEmitter(emitter));
-  std::string what = timer ? "interval" : "listener";
-  std::string ends = timer ? "it should stop" : "its subscription ends";
-  std::string section = timer ? "(docs/events.md, section 7)" : "(docs/events.md, section 6)";
   auto receiver = [&](const Type *type, const VarSymbol *var) {
     bits |= kReceiverBit | (topLevel ? 0 : kDedupeBit);
     this->state.getProgramUse().addListenerReceiver(type);
@@ -249,25 +226,16 @@ bool EmitterChecker::classifyListener(Expr *arg, const Expr *emitter, int &bits,
     return true;
   }
   if (!known) {
-    this->state.getDiagnostics().error(
-        arg->loc(), "can't tell what this " + what + " captures, so not when " + ends +
-                        "; pass a method here, e.g. 'this.onData', or an "
-                        "arrow that uses one object, e.g. '(chunk) => "
-                        "this.add(chunk)' " +
-                        section);
+    std::string message = ErrorTextListenerLife::unknown(timer);
+    this->state.getDiagnostics().error(arg->loc(), message);
     return false;
   }
   auto bad = llvm::find_if(captured, [](const VarSymbol *var) {
     return var->boxed() || !EmitterChecker::canReceive(var->type);
   });
   if (bad != captured.end()) {
-    std::string example =
-        timer ? "pass its method, e.g. 'setInterval(counter.tick, 1000)'"
-              : "subscribe its method, e.g. 'bus.on(\"data\", counter.add)'";
-    this->state.getDiagnostics().error(
-        arg->loc(), "the " + what + " keeps '" + (*bad)->name.str() +
-                        "', which nothing else holds, so nothing tells when " + ends +
-                        "; keep the state in an object and " + example + " " + section);
+    std::string message = ErrorTextListenerLife::keeps(timer, (*bad)->name);
+    this->state.getDiagnostics().error(arg->loc(), message);
     return false;
   }
   const VarSymbol *kept = captured[0];
@@ -282,12 +250,8 @@ bool EmitterChecker::classifyListener(Expr *arg, const Expr *emitter, int &bits,
       others.push_back(var);
     }
   }
-  this->state.getDiagnostics().error(
-      arg->loc(), "the " + what + " captures " + EmitterChecker::quotedList(captured) +
-                      ", but it may depend on one object only, the one whose "
-                      "life it follows; store what it needs from " +
-                      EmitterChecker::quotedList(others) + " in a field of '" + kept->name.str() +
-                      "' " + section);
+  std::string message = ErrorTextListenerLife::captures(timer, captured, others, kept->name);
+  this->state.getDiagnostics().error(arg->loc(), message);
 
   return false;
 }
@@ -328,19 +292,19 @@ void EmitterChecker::noteErrorsHandled(const Expr *emitter) {
   this->state.getFlowState().listenForErrors(key);
 }
 
-std::string EmitterChecker::emitterName(const EmitterKey &key) const {
+std::string EmitterChecker::emitterPath(const EmitterKey &key) const {
   if (!key.text.empty()) {
-    return "'" + key.text + "'";
+    return key.text;
   }
   if (!key.path.var) {
-    return "this emitter";
+    return "";
   }
   std::string name = key.path.var->name.str();
   for (llvm::StringRef part : key.path.names) {
     name += "." + part.str();
   }
 
-  return "'" + name + "'";
+  return name;
 }
 
 void EmitterChecker::reportUnlistenedErrors() {
@@ -350,14 +314,9 @@ void EmitterChecker::reportUnlistenedErrors() {
       continue;
     }
     store.markErrorSubscriptionReported(loc);
-    std::string name = this->emitterName(key);
-    std::string shown = key.path.var || !key.text.empty() ? name.substr(1, name.size() - 2) : "s";
-    this->state.getDiagnostics().error(
-        loc, name +
-                 " may emit 'error', and nothing listens for it on every path "
-                 "here, so the error would be lost (node would end the "
-                 "program); listen in this function: '" +
-                 shown + ".on(\"error\", (e) => ...)'");
+    std::string path = this->emitterPath(key);
+    std::string message = ErrorTextUnlistened::mayEmit(path);
+    this->state.getDiagnostics().error(loc, message);
   }
 }
 
@@ -368,12 +327,8 @@ void EmitterChecker::checkDroppedListeners() {
     llvm::SMLoc loc = dropped.loc;
     for (const ClassDecl *c = cls; c; c = c->parent) {
       if (store.isSelfListener(c)) {
-        this->state.getDiagnostics().error(
-            loc, "the new " + cls->name.str() +
-                     " is held by nothing, so the listeners its constructor "
-                     "adds would stop at once; store it, e.g. 'const " +
-                     llvm::StringRef(cls->name).lower() + " = new " + cls->name.str() +
-                     "(...)' (docs/events.md, section 6)");
+        std::string message = ErrorTextEmitterNew::dropped(cls->name);
+        this->state.getDiagnostics().error(loc, message);
         break;
       }
     }
@@ -384,11 +339,8 @@ void EmitterChecker::checkErrorListeners() {
   EventStore &store = this->state.getEventStore();
   for (const ErrorEmit &emit : store.getErrorEmits()) {
     if (!store.isErrorListened(emit.events)) {
-      this->state.getDiagnostics().error(
-          emit.loc, "'error' is emitted here, but nothing in the program listens for "
-                    "'error' on this emitter, so the error would be lost (node "
-                    "would end the program); listen for it, e.g. "
-                    "'bus.on(\"error\", (e) => ...)'");
+      std::string message = ErrorTextUnlistened::unheard();
+      this->state.getDiagnostics().error(emit.loc, message);
     }
   }
 }
@@ -414,9 +366,8 @@ Expr *EmitterChecker::checkEmitterNew(NewExpr *expr, ClassDecl *generic, const T
     events = EventMapInference(this->state)
                  .inferredEventMap("new " + EventMapInference(this->state).placeOf(expr->loc()));
     if (!events) {
-      this->state.getDiagnostics().error(expr->loc(),
-                                         "'new EventEmitter()' needs its event map here, e.g. 'new "
-                                         "EventEmitter<{ data: [chunk: string]; end: [] }>()'");
+      std::string message = ErrorTextEmitterNew::needsMap();
+      this->state.getDiagnostics().error(expr->loc(), message);
       return checkArgsLoosely();
     }
   }
@@ -450,10 +401,8 @@ Expr *EmitterChecker::collectEmitterCall(CallExpr *call, MemberExpr *member,
   member->type = Type::error();
   llvm::SMLoc loc = call->args.empty() ? member->loc() : call->args[0]->loc();
   if (call->args.size() > 2) {
-    this->state.getDiagnostics().error(
-        call->args[2]->loc(),
-        "an event carries one value: pass an object, e.g. 'emit(\"message\", { "
-        "from, text })' (docs/events.md, section 2)");
+    std::string message = ErrorTextEmitted::oneValue("message");
+    this->state.getDiagnostics().error(call->args[2]->loc(), message);
     for (Expr *&arg : call->args) {
       arg = ExprChecker(this->state).checkExpr(arg);
     }
@@ -465,7 +414,7 @@ Expr *EmitterChecker::collectEmitterCall(CallExpr *call, MemberExpr *member,
     call->args[i] = i == 0 ? ArgumentChecker(this->state).checkArg(call->args[i], Type::string())
                            : ExprChecker(this->state).checkExpr(call->args[i]);
     const Type *type = call->args[i]->type;
-    if (type->isError() || type->isVoid() || mentionsParam(type)) {
+    if (type->isError() || type->isVoid() || TypeQueries::mentionsParam(type)) {
       known = false;
     }
     if (i > 0) {
@@ -525,7 +474,7 @@ Expr *EmitterChecker::callLibraryMethod(CallExpr *call, MemberExpr *member, Clas
     ret = ret ? TypeParams(this->state).substitute(ret, sym->typeParams, bound) : Type::error();
     this->state.getGenericStore().leaveInstanceLoc();
     if (!this->state.getFunctionStack().isInsideTrial() &&
-        llvm::none_of(bound, [](const Type *t) { return mentionsParam(t); })) {
+        llvm::none_of(bound, [](const Type *t) { return TypeQueries::mentionsParam(t); })) {
       if (FuncSymbol *instance = GenericInstantiator(this->state).instantiate(sym, bound, loc)) {
         callee = instance;
       }
@@ -554,7 +503,7 @@ Expr *EmitterChecker::callLibraryMethod(CallExpr *call, MemberExpr *member, Clas
 
 Expr *EmitterChecker::checkEmitterCall(CallExpr *call, MemberExpr *member, ClassDecl *cls,
                                        bool super) {
-  EmitterMethod kind = emitterMethod(member->name);
+  EmitterMethod kind = EmitterChecker::emitterMethod(member->name);
   bool library = LibraryCalls(this->state).inLibrary(call->loc());
   if (kind == EmitterMethod::None || (library && kind != EmitterMethod::Emit)) {
     return nullptr;
@@ -565,16 +514,14 @@ Expr *EmitterChecker::checkEmitterCall(CallExpr *call, MemberExpr *member, Class
   }
   const Type *receiver = member->object->type;
   const Type *events = EventMaps(this->state).eventMapOf(receiver);
-  if (!events || (library && mentionsParam(events))) {
+  if (!events || (library && TypeQueries::mentionsParam(events))) {
     return nullptr;
   }
   call->type = Type::error();
   member->type = Type::error();
   if (!member->typeArgs.empty()) {
-    this->state.getDiagnostics().error(member->loc(),
-                                       "'" + member->name +
-                                           "' takes no type arguments: the event map of "
-                                           "the emitter gives the types");
+    std::string message = ErrorTextEmitted::typeArgs(member->name);
+    this->state.getDiagnostics().error(member->loc(), message);
     member->typeArgs.clear();
   }
   if (CallChecker(this->state).rejectSpread(call)) {
@@ -594,8 +541,8 @@ Expr *EmitterChecker::checkEmitterCall(CallExpr *call, MemberExpr *member, Class
   switch (kind) {
   case EmitterMethod::Emit: {
     if (call->args.empty()) {
-      this->state.getDiagnostics().error(
-          member->loc(), "'emit' needs the name of the event, e.g. 'emit(\"data\", ...)'");
+      std::string message = ErrorTextEmitted::noName();
+      this->state.getDiagnostics().error(member->loc(), message);
       return call;
     }
     if (std::optional<std::string> site = this->state.getEventStore().findOpenMapSite(events)) {
@@ -608,9 +555,8 @@ Expr *EmitterChecker::checkEmitterCall(CallExpr *call, MemberExpr *member, Class
     }
     size_t count = call->args.size() - 1;
     if (count > 1) {
-      this->state.getDiagnostics().error(
-          call->args[2]->loc(), "an event carries one value: pass an object, e.g. 'emit(\"" +
-                                    event + "\", { from, text })' (docs/events.md, section 2)");
+      std::string message = ErrorTextEmitted::oneValue(event);
+      this->state.getDiagnostics().error(call->args[2]->loc(), message);
       checkArgsLoosely(1);
       return call;
     }
@@ -625,17 +571,10 @@ Expr *EmitterChecker::checkEmitterCall(CallExpr *call, MemberExpr *member, Class
       }
     }
     if (count < min || count > max) {
-      if (!first.empty()) {
-        this->state.getDiagnostics().error(
-            member->loc(), "'" + event + "' is emitted with " + args->name().str() + " at " +
-                               first + ", but with " + std::to_string(count) + " argument" +
-                               (count == 1 ? "" : "s") + " here");
-      } else {
-        this->state.getDiagnostics().error(
-            member->loc(), "the listeners of '" + event + "' get '" + args->name().str() +
-                               "': " + ErrorTextArity::wanted(unsigned(min), unsigned(max)) +
-                               ", but got " + std::to_string(count));
-      }
+      std::string message = !first.empty()
+                                ? ErrorTextEmitted::countAt(event, args->name(), first, count)
+                                : ErrorTextEmitted::arity(event, args->name(), min, max, count);
+      this->state.getDiagnostics().error(member->loc(), message);
       checkArgsLoosely(1);
       return call;
     }
@@ -650,10 +589,8 @@ Expr *EmitterChecker::checkEmitterCall(CallExpr *call, MemberExpr *member, Class
         call->args[i] = ExprChecker(this->state).checkExpr(call->args[i], wanted);
         const Type *type = call->args[i]->type;
         if (!type->isError() && !TypeRelations::isImplicitlyConvertible(type, wanted)) {
-          this->state.getDiagnostics().error(
-              call->args[i]->loc(), "'" + event + "' is emitted with " + args->name().str() +
-                                        " at " + first + ", but with '" + type->name().str() +
-                                        "' here; an event has one type of arguments");
+          std::string message = ErrorTextEmitted::typeAt(event, args->name(), first, type->name());
+          this->state.getDiagnostics().error(call->args[i]->loc(), message);
           checkArgsLoosely(i + 1);
           return call;
         }
@@ -761,33 +698,9 @@ Expr *EmitterChecker::checkEmitterCall(CallExpr *call, MemberExpr *member, Class
   return nullptr;
 }
 
-std::string EmitterChecker::libraryExportHint(llvm::StringRef name) {
-  if (name == "errorMonitor" || name == "captureRejectionSymbol") {
-    return ": in node it is a symbol, and tz has no symbols of its own; the names of events are "
-           "strings (docs/events.md, section 4)";
-  }
-  if (name == "addAbortListener") {
-    return " yet; listen to the signal: 'signal.addEventListener(\"abort\", listener, { once: "
-           "true })'";
-  }
-  if (name == "EventEmitterAsyncResource" || name == "usingDomains") {
-    return ": tz has neither async resources nor domains; a store that follows a request is "
-           "AsyncLocalStorage of \"node:async_hooks\"";
-  }
-  if (name == "EventTarget" || name == "Event" || name == "CustomEvent") {
-    return "; '" + name.str() + "' is global, as in node: use it without an import";
-  }
-
-  return "";
-}
-
 void EmitterChecker::reportEmitterMethodValue(MemberExpr *member) {
-  this->state.getDiagnostics().error(
-      member->loc(), "'" + member->name +
-                         "' of an emitter can only be called: the event "
-                         "map checks each call by the name of its event; wrap it in an "
-                         "arrow, e.g. '(listener) => bus." +
-                         member->name + "(\"data\", listener)'");
+  std::string message = ErrorTextEmitted::methodVal(member->name);
+  this->state.getDiagnostics().error(member->loc(), message);
 }
 
 }

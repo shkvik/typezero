@@ -24,6 +24,9 @@ public:
   int run();
 
 private:
+  static std::string temporaryFile(llvm::StringRef prefix, llvm::StringRef suffix);
+  static std::string textOf(const llvm::json::Value &value);
+  static llvm::json::Object startRange();
   using Clock = std::chrono::steady_clock;
 
   struct Entry {

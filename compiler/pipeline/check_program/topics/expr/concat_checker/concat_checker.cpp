@@ -69,7 +69,7 @@ std::string ConcatChecker::concatTemplate(const Parts &parts, llvm::StringRef &o
     } else if (isa<TemplateExpr>(expr) && quoted && text.front() == '`') {
       result += text.drop_front().drop_back();
     } else {
-      only = withoutParens(text);
+      only = SharedHelpers::withoutParens(text);
       ++values;
       result += ("${" + only + "}").str();
     }

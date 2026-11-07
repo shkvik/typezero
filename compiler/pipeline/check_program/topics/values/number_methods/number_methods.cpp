@@ -160,7 +160,7 @@ NumberMethods::ResultConversionMade NumberMethods::checkConversion(CallExpr *cal
     });
   }
   auto *rounding = dyn_cast<CallExpr>(member->object);
-  bool rounded = rounding && isRoundingBuiltin(rounding->builtin());
+  bool rounded = rounding && BuiltinGroups::isRoundingBuiltin(rounding->builtin());
   if (from->isFloat() && to->isInteger() && !rounded) {
     std::string message = ErrorTextConversion::toInteger(text, member->name);
 

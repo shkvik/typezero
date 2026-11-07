@@ -2,6 +2,8 @@
 
 #include "compiler/library/crypto/crypto_api/crypto_api.h"
 #include "compiler/pipeline/check_program/check_state/check_state.h"
+#include "compiler/pipeline/check_program/topics/crypto/crypto_args/crypto_args_errors.h"
+#include "compiler/result/result/result.h"
 
 namespace tz {
 
@@ -35,7 +37,9 @@ public:
   bool rejectCryptoCallback(CallExpr *call, size_t index, llvm::StringRef fn, llvm::StringRef hint);
 
 private:
-  static std::string utf8Of(const std::u16string &text);
+  using ResultKeyObjectType = Result<const Type *, CryptoArgsKeyObjectTypeError>;
+
+  static ResultKeyObjectType keyObjectType(const Type *type, llvm::StringRef what);
   static std::u16string utf16Of(llvm::StringRef text);
   static std::optional<std::string> literalOf(const Expr *e);
 

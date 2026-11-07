@@ -20,6 +20,19 @@ public:
   void noteCall(const CallExpr *call, const FunctionDecl *target, llvm::ArrayRef<Val> args);
 
 private:
+  static bool yields(const Stmt *stmt);
+  static bool openEnded(const Expr *cond, const Stmt *body);
+  static bool grows(const Stmt *body, const VarSymbol *var);
+  static bool identicalNum(const Num &a, const Num &b);
+  static bool identicalVal(const Val &a, const Val &b);
+  static bool identicalState(const State &a, const State &b);
+  static bool awaitsIn(const Stmt *stmt);
+  static bool waitsOrYields(const Stmt *stmt);
+  static bool readsInput(const Expr *cond);
+  static std::optional<double> counterStep(const Expr *arg, const VarSymbol *param);
+  static bool limitedTowards(const Num &n, double step);
+  static bool freshBase(const Val &v, uint64_t before);
+  static std::optional<std::pair<double, double>> stepOf(const Num &end, uint64_t base);
   struct RememberedLoop {
     std::vector<uint64_t> context;
     State entry;

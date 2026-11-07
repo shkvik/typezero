@@ -1,6 +1,8 @@
 #pragma once
 
 #include "compiler/pipeline/check_program/check_state/check_state.h"
+#include "compiler/pipeline/check_program/topics/intl/intl_method_checker/intl_method_checker_errors.h"
+#include "compiler/result/result/result.h"
 
 namespace tz {
 
@@ -14,13 +16,16 @@ public:
   Expr *checkIntlNumber(Expr *arg, llvm::StringRef method);
 
 private:
-  static std::string utf8(const std::u16string &text);
   static std::optional<std::u16string> literalText(const Expr *e);
   static const Type *relativePartType();
-  static std::string closedArgProblem(const Expr *arg,
-                                      const std::optional<std::vector<std::string>> &texts,
-                                      llvm::ArrayRef<llvm::StringLiteral> allowed,
-                                      llvm::StringRef what);
+  using ResultClosedText = Result<const Expr *, IntlMethodCheckerClosedArgError>;
+  using ResultIntlNumber = Result<const Type *, IntlMethodCheckerIntlNumberError>;
+
+  static ResultIntlNumber intlNumber(const Type *type, llvm::StringRef method);
+  static ResultClosedText closedArg(const Expr *arg,
+                                    const std::optional<std::vector<std::string>> &texts,
+                                    llvm::ArrayRef<llvm::StringLiteral> allowed,
+                                    llvm::StringRef what);
 
   CheckState &state;
 };

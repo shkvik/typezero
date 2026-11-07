@@ -20,6 +20,9 @@ class KnowledgeQuestion {
 public:
   static bool answer(const Knowledge &knowledge, const KnowledgeRequest &request, std::string &out,
                      std::string &error);
+
+private:
+  static std::string printed(const llvm::json::Value &value, bool pretty);
 };
 
 }

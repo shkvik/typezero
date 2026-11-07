@@ -6,14 +6,14 @@ namespace tz {
 
 class FlowExprs {
 public:
-  explicit FlowExprs(Flows &flows);
+  explicit FlowExprs(Flows &owner);
 
   static const Expr *ownExpr(const Expr *e);
   Refs expr(Expr *e);
   Refs exprRefs(Expr *e);
 
 private:
-  Flows &flows_;
+  Flows &flows;
 };
 
 }

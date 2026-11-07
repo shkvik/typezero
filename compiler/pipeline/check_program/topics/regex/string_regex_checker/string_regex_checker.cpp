@@ -1,4 +1,5 @@
 #include "compiler/pipeline/check_program/topics/regex/string_regex_checker/string_regex_checker.h"
+#include "compiler/load/to_utf8/to_utf8.h"
 #include "compiler/pipeline/check_program/flow/flow_checker/flow_checker.h"
 #include "compiler/pipeline/check_program/scopes/scopes.h"
 #include "compiler/pipeline/check_program/topics/expr/argument_checker/argument_checker.h"
@@ -15,23 +16,6 @@ using llvm::dyn_cast;
 using llvm::isa;
 
 namespace tz {
-
-namespace {
-
-const char kUnknownRegex[] =
-    "the regex is known only when the program runs (it is not a literal, nor a variable that "
-    "holds one all along)";
-
-}
-
-std::string StringRegexChecker::utf8(const std::u16string &text) {
-  std::string out;
-  llvm::convertUTF16ToUTF8String(
-      llvm::ArrayRef<llvm::UTF16>(reinterpret_cast<const llvm::UTF16 *>(text.data()), text.size()),
-      out);
-
-  return out;
-}
 
 std::u16string StringRegexChecker::units(const uint32_t *program, uint32_t start, uint32_t length) {
   std::u16string text;
@@ -51,12 +35,12 @@ std::string StringRegexChecker::escapedLiteral(const std::u16string &text) {
     escaped += c;
   }
 
-  return "/" + StringRegexChecker::utf8(escaped) + "/";
+  return "/" + ToUtf8::toUtf8(escaped) + "/";
 }
 
 std::string StringRegexChecker::argumentText(const Expr *arg) {
   if (auto *lit = dyn_cast<StringLitExpr>(arg)) {
-    std::string text = StringRegexChecker::utf8(lit->value);
+    std::string text = ToUtf8::toUtf8(lit->value);
     if (llvm::all_of(text, [](char c) { return c >= 0x20 && c != '"' && c != '\\'; })) {
       return "\"" + text + "\"";
     }
@@ -112,13 +96,8 @@ Expr *StringRegexChecker::checkStringRegexMethod(CallExpr *call, MemberExpr *mem
     bool global = flags && (*flags & TZ_RE_GLOBAL);
     if (name == "match") {
       if (!flags) {
-        this->state.getDiagnostics().error(
-            member->loc(),
-            std::string("what 'match' gives depends on the g flag (all the texts that "
-                        "match, or one match with its groups), and ") +
-                kUnknownRegex +
-                "; for one match write 're.exec(s)', for all of them "
-                "'s.matchAll(re)'");
+        std::string message = ErrorTextStringRegex::matchFlag();
+        this->state.getDiagnostics().error(member->loc(), message);
         return call;
       }
       call->target = BuiltinCall{.builtin = global ? Builtin::StrMatchGlobal : Builtin::StrMatch};
@@ -128,13 +107,10 @@ Expr *StringRegexChecker::checkStringRegexMethod(CallExpr *call, MemberExpr *mem
     }
     if (name == "matchAll" || name == "replaceAll") {
       if (flags && !global) {
-        std::string source = "/" + StringRegexChecker::utf8(regex->pattern) + "/" +
-                             StringRegexChecker::utf8(regex->flags) + "g";
-        this->state.getDiagnostics().error(
-            pattern->loc(), "'" + name +
-                                "' needs a regex with the g flag (JavaScript throws a "
-                                "TypeError without it), e.g. '" +
-                                source + "'");
+        std::string source = ToUtf8::toUtf8(regex->pattern);
+        std::string flagsText = ToUtf8::toUtf8(regex->flags);
+        std::string message = ErrorTextStringRegex::needsG(name, source, flagsText);
+        this->state.getDiagnostics().error(pattern->loc(), message);
         return restLoosely();
       }
       if (name == "matchAll") {
@@ -166,8 +142,8 @@ Expr *StringRegexChecker::checkStringRegexMethod(CallExpr *call, MemberExpr *mem
   if (type->isString()) {
     std::string text = StringRegexChecker::argumentText(pattern);
     auto *lit = dyn_cast<StringLitExpr>(pattern);
-    std::string regexText = lit ? StringRegexChecker::escapedLiteral(lit->value)
-                                : "new RegExp(RegExp.escape(" + text + "))";
+    std::string escaped = lit ? StringRegexChecker::escapedLiteral(lit->value) : std::string();
+    std::string regexText = lit ? escaped : ErrorTextStringRegex::escapedRe(text);
     if (name == "split") {
       if (call->args.size() == 2) {
         call->args[1] = MemberChecker(this->state).checkPosition(call->args[1]);
@@ -179,11 +155,8 @@ Expr *StringRegexChecker::checkStringRegexMethod(CallExpr *call, MemberExpr *mem
     if (name == "replaceAll") {
       Expr *&replacement = call->args[1];
       if (isa<FunctionExpr>(replacement)) {
-        this->state.getDiagnostics().error(
-            replacement->loc(), "a function as the replacement needs a regex: 'replaceAll(" +
-                                    (lit ? StringRegexChecker::escapedLiteral(lit->value) + "g"
-                                         : "new RegExp(RegExp.escape(" + text + "), \"g\")") +
-                                    ", ...)'");
+        std::string message = ErrorTextStringRegex::functionRe(escaped, text);
+        this->state.getDiagnostics().error(replacement->loc(), message);
         return restLoosely();
       }
       replacement = ArgumentChecker(this->state).checkArg(replacement, Type::string());
@@ -191,36 +164,17 @@ Expr *StringRegexChecker::checkStringRegexMethod(CallExpr *call, MemberExpr *mem
       call->type = Type::string();
       return call;
     }
-    if (name == "replace") {
-      this->state.getDiagnostics().error(
-          member->loc(),
-          "'replace' with a string replaces only the first occurrence (\"a-b-c\".replace(\"-\", "
-          "\"+\") is \"a+b-c\" in JavaScript); to replace all of them write 'replaceAll(" +
-              text + ", ...)', for only the first one a regex: 'replace(" + regexText + ", ...)'");
-    } else if (name == "search") {
-      this->state.getDiagnostics().error(
-          member->loc(), "'search' takes a regex, and JavaScript makes one of a string, "
-                         "where '.' matches any character; to find the text write "
-                         "'indexOf(" +
-                             text + ")', for a regex '" +
-                             (lit ? regexText : "search(" + regexText + ")") + "'");
-    } else {
-      this->state.getDiagnostics().error(
-          member->loc(),
-          "'" + name +
-              "' takes a regex, and JavaScript makes one of a string, where "
-              "'.' matches any character; to check for the text write "
-              "'includes(" +
-              text + ")', for a regex '" +
-              (lit ? regexText + (name == "matchAll" ? "g" : "") : name + "(" + regexText + ")") +
-              "'");
-    }
+    std::string message =
+        name == "replace" ? ErrorTextStringRegex::replaceStr(text, regexText)
+        : name == "search"
+            ? ErrorTextStringRegex::searchStr(text, regexText, lit != nullptr)
+            : ErrorTextStringRegex::includeStr(name, text, regexText, lit != nullptr);
+    this->state.getDiagnostics().error(member->loc(), message);
     return restLoosely();
   }
-  this->state.getDiagnostics().error(
-      pattern->loc(), "'" + name + "' takes a regex" +
-                          (name == "split" || name == "replaceAll" ? " or a string" : "") +
-                          ", found '" + type->name() + "'");
+  std::string message =
+      ErrorTextStringRegex::notRegex(name, name == "split" || name == "replaceAll", type->name());
+  this->state.getDiagnostics().error(pattern->loc(), message);
 
   return restLoosely();
 }
@@ -264,31 +218,24 @@ Expr *StringRegexChecker::checkReplacement(CallExpr *call, MemberExpr *member,
         if ((two && two <= groups) || one <= groups) {
           continue;
         }
-        this->state.getDiagnostics().error(
-            text->loc(), "the regex has " + std::to_string(groups) + " group" +
-                             (groups == 1 ? "" : "s") + ", so there is no group " +
-                             std::to_string(one) + " for '$" + std::to_string(one) +
-                             "' (JavaScript would insert it as it is); write '$$' for '$'");
+        std::string message = ErrorTextStringRegex::noGroup(groups, one);
+        this->state.getDiagnostics().error(text->loc(), message);
         return call;
       } else if (c == u'<') {
         size_t close = value.find(u'>', i + 2);
-        std::string groupName = close == std::u16string::npos
-                                    ? ""
-                                    : StringRegexChecker::utf8(value.substr(i + 2, close - i - 2));
+        std::string groupName =
+            close == std::u16string::npos ? "" : ToUtf8::toUtf8(value.substr(i + 2, close - i - 2));
         bool found = false;
         for (uint32_t k = 1; k <= groups && !found; ++k) {
           uint32_t start, length = tz_re_name(program, k, &start);
-          found = length && StringRegexChecker::utf8(
-                                StringRegexChecker::units(program, start, length)) == groupName;
+          found = length &&
+                  ToUtf8::toUtf8(StringRegexChecker::units(program, start, length)) == groupName;
         }
         if (found) {
           continue;
         }
-        this->state.getDiagnostics().error(
-            text->loc(),
-            named ? "the regex has no group named '" + groupName + "' for '$<" + groupName + ">'"
-                  : "the regex has no named groups, so JavaScript would insert '$<" + groupName +
-                        ">' as it is; name a group with '(?<" + groupName + ">...)'");
+        std::string message = ErrorTextStringRegex::noNamed(named, groupName);
+        this->state.getDiagnostics().error(text->loc(), message);
         return call;
       }
     }
@@ -314,16 +261,12 @@ Expr *StringRegexChecker::checkReplacement(CallExpr *call, MemberExpr *member,
   if (auto *fe = dyn_cast<FunctionExpr>(replacement);
       fe && fe->fn->params.size() > sig.params.size()) {
     if (!regex) {
-      this->state.getDiagnostics().error(
-          fe->fn->params[1].loc, std::string("the function gets only the match: ") + kUnknownRegex +
-                                     ", so its groups are not known when compiling");
+      std::string message = ErrorTextStringRegex::onlyMatch();
+      this->state.getDiagnostics().error(fe->fn->params[1].loc, message);
     } else {
-      this->state.getDiagnostics().error(
-          fe->fn->params[sig.params.size()].loc,
-          "'" + member->name + "' passes " + std::to_string(sig.params.size()) +
-              " arguments: the match, " + std::to_string(match->matchGroups()) + " group" +
-              (match->matchGroups() == 1 ? "" : "s") + ", the offset and the string" +
-              (sig.params.back()->isObject() ? ", and the named groups" : ""));
+      std::string message = ErrorTextStringRegex::passes(
+          member->name, sig.params.size(), match->matchGroups(), sig.params.back()->isObject());
+      this->state.getDiagnostics().error(fe->fn->params[sig.params.size()].loc, message);
     }
     while (sig.params.size() < fe->fn->params.size()) {
       sig.params.push_back(Type::string());

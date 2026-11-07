@@ -117,11 +117,11 @@ void OverflowCheck::joinInto(Summaries &into, const Summaries &from) {
       target.resize(slots.size());
     }
     for (size_t i = 0; i < slots.size(); ++i) {
-      target[i].val = join(target[i].val, slots[i].val);
+      target[i].val = ValueRange::join(target[i].val, slots[i].val);
     }
   }
   auto joinSlot = [](Slot &target, const Slot &slot) {
-    target.val = join(target.val, slot.val);
+    target.val = ValueRange::join(target.val, slot.val);
     if (!target.type) {
       target.type = slot.type;
     }
@@ -146,7 +146,7 @@ void OverflowCheck::joinInto(Summaries &into, const Summaries &from) {
       facts.resize(more.size());
     }
     for (size_t i = 0; i < more.size(); ++i) {
-      facts[i] = join(facts[i], more[i]);
+      facts[i] = ValueRange::join(facts[i], more[i]);
     }
   };
   for (const auto &[fn, pred] : from.preds) {

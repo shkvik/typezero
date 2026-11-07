@@ -28,6 +28,8 @@ public:
   Ref classRef(const FunctionDecl *owner) const;
 
 private:
+  static std::optional<CallKind> callbackKind(Builtin builtin);
+  static bool callsOnce(Builtin builtin);
   Analysis &analysis_;
 };
 

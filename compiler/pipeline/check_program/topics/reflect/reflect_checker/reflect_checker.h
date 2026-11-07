@@ -1,6 +1,8 @@
 #pragma once
 
 #include "compiler/pipeline/check_program/check_state/check_state.h"
+#include "compiler/pipeline/check_program/topics/reflect/reflect_checker/reflect_checker_errors.h"
+#include "compiler/result/result/result.h"
 
 namespace tz {
 
@@ -15,6 +17,10 @@ public:
   bool onlyChecked() const;
 
 private:
+  using ResultConstructible = Result<ClassDecl *, ReflectCheckerConstructibleError>;
+  using ResultFillableClass = Result<ClassDecl *, ReflectCheckerFillableClassError>;
+
+  static ResultFillableClass fillableClass(ClassDecl *made);
   static void classesIn(const Type *type, llvm::SmallPtrSetImpl<ClassDecl *> &out);
   static void constructorsIn(const Type *type, llvm::SmallVectorImpl<const Type *> &out,
                              llvm::SmallPtrSetImpl<const Type *> &seen);
@@ -23,7 +29,7 @@ private:
 
   Expr *okOf(Expr *value);
   const Type *reflectError();
-  std::string constructProblem(ClassDecl *cls, llvm::ArrayRef<const Type *> args);
+  ResultConstructible constructible(ClassDecl *cls, llvm::ArrayRef<const Type *> args);
   void checkReflectNews();
 
   CheckState &state;

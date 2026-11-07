@@ -21,16 +21,25 @@ const llvm::StringLiteral kBufferExports[] = {"Blob",
 
 }
 
-std::string bufferExportProblem(llvm::StringRef name, llvm::StringRef path) {
-  std::string quoted = "'" + path.str() + "'";
+BufferExports::ResultExportFound BufferExports::bufferExport(llvm::StringRef name,
+                                                             llvm::StringRef path) {
   if (name == "Buffer") {
-    return "";
+    return ok(name);
   }
   if (llvm::is_contained(kBufferExports, name)) {
-    return "'" + name.str() + "' of " + quoted + " is not supported yet; tz has Buffer";
-  }
+    std::string message = ErrorTextBufferExport::notYet(name, path);
 
-  return quoted + " has no export named '" + name.str() + "'";
+    return err(FeatureExportFoundError{
+        .code = FeatureExportFoundErrorCode::NOT_YET,
+        .message = message,
+    });
+  }
+  std::string message = ErrorTextModuleExport::none(path, name);
+
+  return err(FeatureExportFoundError{
+      .code = FeatureExportFoundErrorCode::NO_EXPORT,
+      .message = message,
+  });
 }
 
 }

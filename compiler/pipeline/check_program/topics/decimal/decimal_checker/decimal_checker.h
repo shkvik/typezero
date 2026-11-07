@@ -2,6 +2,8 @@
 
 #include "compiler/library/decimal/decimal_literal/decimal_literal.h"
 #include "compiler/pipeline/check_program/check_state/check_state.h"
+#include "compiler/pipeline/check_program/topics/decimal/decimal_checker/decimal_checker_errors.h"
+#include "compiler/result/result/result.h"
 
 namespace tz {
 
@@ -25,12 +27,14 @@ public:
   Expr *checkDecimalStatic(CallExpr *call, MemberExpr *member);
   Expr *checkDecimalMethod(CallExpr *call, MemberExpr *member);
   Expr *checkRoundingMode(Expr *arg);
-  Expr *checkDecimalCount(Expr *arg, const char *what, int64_t lo, int64_t hi);
-  void reportBigInt(llvm::SMLoc loc, llvm::StringRef what);
+  Expr *checkDecimalCount(Expr *arg, llvm::StringRef what, int64_t lo, int64_t hi);
 
 private:
-  static std::string exponentMessage(const Type *found);
-  static std::string utf8(const std::u16string &text);
+  using ResultRoundingMode = Result<int, DecimalCheckerRoundingModeError>;
+  using ResultLiteralRange = Result<DecimalLiteral, DecimalCheckerLiteralRangeError>;
+
+  static ResultLiteralRange literalRange(const Expr *lit);
+  static ResultRoundingMode roundingMode(const std::u16string &text);
 
   CheckState &state;
 };

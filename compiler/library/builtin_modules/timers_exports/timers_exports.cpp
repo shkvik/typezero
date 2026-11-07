@@ -2,14 +2,18 @@
 
 namespace tz {
 
-std::string timersExportProblem(llvm::StringRef name, llvm::StringRef path) {
+TimersExports::ResultExportFound TimersExports::timersExport(llvm::StringRef name,
+                                                             llvm::StringRef path) {
   if (name == "setTimeout" || name == "setImmediate" || name == "setInterval" ||
       name == "scheduler") {
-    return "";
+    return ok(name);
   }
+  std::string message = ErrorTextTimersExport::none(path, name);
 
-  return "'" + path.str() + "' has no export named '" + name.str() +
-         "'; it has setTimeout, setImmediate, setInterval and scheduler";
+  return err(FeatureExportFoundError{
+      .code = FeatureExportFoundErrorCode::NO_EXPORT,
+      .message = message,
+  });
 }
 
 }

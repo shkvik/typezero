@@ -52,7 +52,7 @@ void LoadOrder::calledFunctions(const CallExpr *call,
   }
   bool arrayCallback =
       call->builtin() >= Builtin::ArrForEach && call->builtin() <= Builtin::ArrSortWith;
-  if (arrayCallback || isResultCallback(call->builtin())) {
+  if (arrayCallback || BuiltinGroups::isResultCallback(call->builtin())) {
     for (const Expr *arg : call->args) {
       const FunctionDecl *fn = LoadOrder::directFunction(arg);
       if (fn) {

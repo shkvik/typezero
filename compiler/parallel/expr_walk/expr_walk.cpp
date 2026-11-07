@@ -115,7 +115,7 @@ void ExprWalk::expr(const Expr *e, const Use &use) {
       expr(b->lhs, use);
       Active before = analysis_.cur;
       expr(b->rhs, use);
-      merge(analysis_.cur, before);
+      ParallelModel::merge(analysis_.cur, before);
       return;
     }
     expr(b->lhs);
@@ -142,7 +142,7 @@ void ExprWalk::expr(const Expr *e, const Use &use) {
     Active then = std::move(analysis_.cur);
     analysis_.cur = std::move(before);
     expr(c->elseExpr, use);
-    merge(analysis_.cur, then);
+    ParallelModel::merge(analysis_.cur, then);
     return;
   }
   case Expr::Kind::Cast: {
@@ -157,7 +157,7 @@ void ExprWalk::expr(const Expr *e, const Use &use) {
       analysis_.callWalk.unknownRef(c->operand);
     }
     expr(c->operand, c->isImplicit() ? use : Use());
-    if (c->type && c->type->isString() && holdsReferences(c->operand->type)) {
+    if (c->type && c->type->isString() && ParallelHelpers::holdsReferences(c->operand->type)) {
       contents(c->operand, false, c->loc());
     }
     return;
@@ -172,7 +172,7 @@ void ExprWalk::expr(const Expr *e, const Use &use) {
   case Expr::Kind::OptionalChain: {
     Active before = analysis_.cur;
     expr(cast<OptionalChainExpr>(e)->chain, use);
-    merge(analysis_.cur, before);
+    ParallelModel::merge(analysis_.cur, before);
     return;
   }
   case Expr::Kind::Function: {
@@ -249,7 +249,7 @@ void ExprWalk::fieldAccess(const Expr *object, llvm::StringRef name, bool write,
   for (const ClassDecl *k = type->classDecl(); k; k = k->parent) {
     if (k->library() &&
         llvm::any_of(k->fields, [&](const ClassField &f) { return f.name == name; })) {
-      analysis_.libraryEffects.libraryState(libraryClassName(k), name,
+      analysis_.libraryEffects.libraryState(ParallelHelpers::libraryClassName(k), name,
                                             analysis_.aliasAnalysis.receiverRef(object), write, at);
       return;
     }
@@ -279,7 +279,7 @@ void ExprWalk::indexAccess(const IndexExpr *ix, bool write) {
     return;
   }
   if (type->isArray()) {
-    auto *index = dyn_cast<NameExpr>(strip(ix->index));
+    auto *index = dyn_cast<NameExpr>(ParallelHelpers::strip(ix->index));
     if (index && index->var() && analysis_.ownIndex.contains(index->var()) &&
         !index->var()->reassigned && !ix->mayAppend()) {
       analysis_.codeWalk.touch(LocKind::OwnCell, analysis_.aliasAnalysis.refOf(ix->object),
@@ -296,17 +296,17 @@ void ExprWalk::indexAccess(const IndexExpr *ix, bool write) {
 }
 
 void ExprWalk::elements(const Expr *e, bool write, llvm::SMLoc at) {
-  if (e && holdsReferences(e->type)) {
+  if (e && ParallelHelpers::holdsReferences(e->type)) {
     analysis_.codeWalk.touch(LocKind::Elements, analysis_.aliasAnalysis.refOf(e), nullptr, write,
                              at);
   }
 }
 
 void ExprWalk::contents(const Expr *e, bool write, llvm::SMLoc at) {
-  if (!e || !holdsReferences(e->type)) {
+  if (!e || !ParallelHelpers::holdsReferences(e->type)) {
     return;
   }
-  const Expr *made = strip(e);
+  const Expr *made = ParallelHelpers::strip(e);
   if (auto *lit = dyn_cast<ArrayLitExpr>(made)) {
     for (const ArrayLitExpr::Element &el : lit->elements) {
       if (!el.hole) {
@@ -329,7 +329,7 @@ void ExprWalk::contents(const Expr *e, bool write, llvm::SMLoc at) {
     return;
   }
   const Type *type = e->type->nonOptional();
-  if (llvm::any_of(analysis_.aliasAnalysis.inside(type), holdsReferences)) {
+  if (llvm::any_of(analysis_.aliasAnalysis.inside(type), ParallelHelpers::holdsReferences)) {
     analysis_.codeWalk.touch(LocKind::Contents, Ref{RefKind::Type, type}, analysis_.inner, write,
                              at);
   }
@@ -363,7 +363,7 @@ void ExprWalk::assign(const AssignExpr *a) {
     }
     Active before = analysis_.cur;
     expr(a->value);
-    merge(analysis_.cur, before);
+    ParallelModel::merge(analysis_.cur, before);
   };
   const Expr *target = a->target;
   if (auto *n = dyn_cast<NameExpr>(target)) {
@@ -416,7 +416,7 @@ void ExprWalk::update(const Expr *target) {
 }
 
 void ExprWalk::awaitExpr(const AwaitExpr *a) {
-  auto *c = dyn_cast<CallExpr>(strip(a->value));
+  auto *c = dyn_cast<CallExpr>(ParallelHelpers::strip(a->value));
   bool join = c && c->builtin() == Builtin::PromiseAll;
   if (join) {
     analysis_.openJoins.push_back({a, analysis_.cur});
@@ -428,10 +428,10 @@ void ExprWalk::awaitExpr(const AwaitExpr *a) {
   if (join) {
     OpenJoin open = std::move(analysis_.openJoins.back());
     analysis_.openJoins.pop_back();
-    merge(open.active, analysis_.cur);
+    ParallelModel::merge(open.active, analysis_.cur);
     JoinInfo &info = analysis_.joins[a];
     info.fn = analysis_.fi;
-    merge(info.segs, open.active);
+    ParallelModel::merge(info.segs, open.active);
   }
   analysis_.codeWalk.moveTo(analysis_.codeWalk.segment(a, SegKind::Await, a->loc()));
 }

@@ -6,6 +6,7 @@ namespace tz {
 
 class ClassLowerer {
 public:
+  static bool staysDuringCall(const Expr *expr);
   explicit ClassLowerer(Lowering &owner);
 
   llvm::Value *allocInstance(const ClassDecl *cls);

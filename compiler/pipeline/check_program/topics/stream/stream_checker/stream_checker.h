@@ -1,6 +1,8 @@
 #pragma once
 
 #include "compiler/pipeline/check_program/check_state/check_state.h"
+#include "compiler/pipeline/check_program/topics/stream/stream_checker/stream_checker_errors.h"
+#include "compiler/result/result/result.h"
 
 namespace tz {
 
@@ -15,7 +17,19 @@ public:
   Expr *checkStreamCall(CallExpr *call, MemberExpr *member, ClassDecl *cls);
 
 private:
-  static std::string utf8(const std::u16string &text);
+  using ResultStreamSideOk = Result<const Type *, StreamCheckerStreamSideError>;
+  using ResultChunkIsGiven = Result<const Expr *, StreamCheckerChunkNotUndefinedError>;
+  using ResultOverrideArgs = Result<const ClassDecl *, StreamCheckerOverridesArgsError>;
+  using ResultMethodExists = Result<const FunctionDecl *, StreamCheckerOverriddenMethodError>;
+
+  static ResultOverrideArgs overridesArgs(const ClassDecl *cls, const StringLitExpr *lit);
+  static ResultMethodExists overriddenMethod(const ClassDecl *cls,
+                                             llvm::ArrayRef<FunctionDecl *> methods,
+                                             llvm::StringRef method);
+  static ResultChunkIsGiven chunkNotUndefined(const Expr *arg, bool eof, llvm::StringRef method);
+  static ResultStreamSideOk streamSide(const Type *chunk, const Type *receiver,
+                                       llvm::StringRef name, bool reading);
+
   static bool isByteChunk(const Type *type);
 
   CheckState &state;

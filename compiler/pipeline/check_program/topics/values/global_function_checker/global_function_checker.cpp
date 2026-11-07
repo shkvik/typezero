@@ -3,6 +3,7 @@
 #include "compiler/pipeline/check_program/flow/flow_checker/flow_checker.h"
 #include "compiler/pipeline/check_program/topics/date/date_checker/date_checker.h"
 #include "compiler/pipeline/check_program/topics/decimal/decimal_checker/decimal_checker.h"
+#include "compiler/pipeline/check_program/topics/decimal/decimal_checker/decimal_checker_errors.h"
 #include "compiler/pipeline/check_program/topics/expr/argument_checker/argument_checker.h"
 #include "compiler/pipeline/check_program/topics/expr/binary_checker/binary_checker.h"
 #include "compiler/pipeline/check_program/topics/expr/call_checker/call_checker.h"
@@ -163,7 +164,9 @@ GlobalFunctionChecker::checkGlobalFunction(CallExpr *call, llvm::StringRef fn, l
     return ok(call);
   }
   if (fn == "BigInt") {
-    DecimalChecker(this->state).reportBigInt(loc, "'BigInt'");
+    std::string quoted = ErrorTextBigInt::quoted("BigInt");
+    std::string bigint = ErrorTextBigInt::none(quoted);
+    this->state.getDiagnostics().error(loc, bigint);
     ArgumentChecker(this->state).checkArgsLoosely(call);
     return err(GlobalFunctionCheckerCheckGlobalFunctionError{
         .code = GlobalFunctionCheckerCheckGlobalFunctionErrorCode::ALREADY_REPORTED,

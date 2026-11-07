@@ -17,9 +17,15 @@ using llvm::dyn_cast;
 
 namespace tz {
 
-namespace {
+KnowledgePass::KnowledgePass(const Program &program, llvm::StringRef entry, llvm::StringRef root)
+    : program_(program),
+      places_(program.sourceMgr) {
+  places_.nameFiles(program.file.modules);
+  out_.entry = SourcePlaces::absolute(entry);
+  out_.root = SourcePlaces::absolute(root);
+}
 
-const char *lineStart(const char *at, const char *begin) {
+const char *KnowledgePass::lineStart(const char *at, const char *begin) {
   while (at > begin && at[-1] != '\n') {
     --at;
   }
@@ -30,15 +36,8 @@ const char *lineStart(const char *at, const char *begin) {
   return at;
 }
 
-const char *endOf(llvm::StringRef text) { return text.data() + text.size(); }
-
-}
-
-KnowledgePass::KnowledgePass(const Program &program, llvm::StringRef entry, llvm::StringRef root)
-    : program_(program), places_(program.sourceMgr) {
-  places_.nameFiles(program.file.modules);
-  out_.entry = SourcePlaces::absolute(entry);
-  out_.root = SourcePlaces::absolute(root);
+const char *KnowledgePass::endOf(llvm::StringRef text) {
+  return text.data() + text.size();
 }
 
 Knowledge KnowledgePass::run() {
@@ -250,7 +249,8 @@ size_t KnowledgePass::add(size_t module, std::string kind, llvm::StringRef name,
 
 void KnowledgePass::declareClass(size_t module, const ClassDecl &cls, size_t parent) {
   const char *begin = cls.source.empty() ? nullptr : cls.source.data();
-  size_t own = add(module, "class", cls.name, cls.loc(), begin, endOf(cls.source), parent);
+  size_t own =
+      add(module, "class", cls.name, cls.loc(), begin, KnowledgePass::endOf(cls.source), parent);
   if (own == Knowledge::kNone) {
     return;
   }
@@ -258,8 +258,10 @@ void KnowledgePass::declareClass(size_t module, const ClassDecl &cls, size_t par
   classes_[&cls] = own;
   for (const ClassField &field : cls.fields) {
     llvm::StringRef line = places_.lineText(field.loc);
-    const char *start = line.empty() ? nullptr : lineStart(field.loc.getPointer(), line.data());
-    size_t member = add(module, "field", field.name, field.loc, start, endOf(line), own);
+    const char *start =
+        line.empty() ? nullptr : KnowledgePass::lineStart(field.loc.getPointer(), line.data());
+    size_t member =
+        add(module, "field", field.name, field.loc, start, KnowledgePass::endOf(line), own);
     if (member == Knowledge::kNone) {
       continue;
     }
@@ -274,7 +276,7 @@ void KnowledgePass::declareClass(size_t module, const ClassDecl &cls, size_t par
       const char *start = method->source.empty() ? nullptr : method->source.data();
       size_t member = add(module, method->isConstructor() ? "constructor" : "method",
                           method->isConstructor() ? llvm::StringRef("constructor") : method->name,
-                          method->loc(), start, endOf(method->source), own);
+                          method->loc(), start, KnowledgePass::endOf(method->source), own);
       if (member == Knowledge::kNone) {
         continue;
       }
@@ -301,8 +303,8 @@ void KnowledgePass::declare(size_t module, const Module &source) {
         continue;
       }
       const char *start = fn->source.empty() ? nullptr : fn->source.data();
-      size_t symbol =
-          add(module, "function", fn->name, fn->loc(), start, endOf(fn->source), Knowledge::kNone);
+      size_t symbol = add(module, "function", fn->name, fn->loc(), start,
+                          KnowledgePass::endOf(fn->source), Knowledge::kNone);
       if (symbol != Knowledge::kNone) {
         out_.symbols[symbol].signature = SymbolText::function(*fn);
         functions_[fn] = symbol;
@@ -319,7 +321,8 @@ void KnowledgePass::declare(size_t module, const Module &source) {
         }
         llvm::StringRef line = places_.lineText(declarator.loc);
         const char *start =
-            line.empty() ? nullptr : lineStart(declarator.loc.getPointer(), line.data());
+            line.empty() ? nullptr
+                         : KnowledgePass::lineStart(declarator.loc.getPointer(), line.data());
         unsigned id = program_.sourceMgr.FindBufferContainingLoc(declarator.loc);
         const char *end = start && id != 0
                               ? SymbolText::statementEnd(
@@ -340,7 +343,7 @@ void KnowledgePass::declare(size_t module, const Module &source) {
       if (id == 0 || line.empty()) {
         continue;
       }
-      const char *start = lineStart(alias->loc().getPointer(), line.data());
+      const char *start = KnowledgePass::lineStart(alias->loc().getPointer(), line.data());
       const char *end =
           SymbolText::statementEnd(start, program_.sourceMgr.getMemoryBuffer(id)->getBufferEnd());
       size_t symbol = add(module, "type", alias->name, alias->loc(), start, end, Knowledge::kNone);
@@ -354,7 +357,7 @@ void KnowledgePass::declare(size_t module, const Module &source) {
       if (id == 0 || line.empty()) {
         continue;
       }
-      const char *start = lineStart(e->loc().getPointer(), line.data());
+      const char *start = KnowledgePass::lineStart(e->loc().getPointer(), line.data());
       const char *end =
           SymbolText::statementEnd(start, program_.sourceMgr.getMemoryBuffer(id)->getBufferEnd());
       size_t symbol = add(module, "enum", e->name, e->loc(), start, end, Knowledge::kNone);
@@ -364,10 +367,11 @@ void KnowledgePass::declare(size_t module, const Module &source) {
         enums_[e] = symbol;
         for (const EnumMember &member : e->members) {
           llvm::StringRef text = places_.lineText(member.loc);
-          const char *from =
-              text.empty() ? nullptr : lineStart(member.loc.getPointer(), text.data());
-          size_t own =
-              add(module, "enumMember", member.name, member.loc, from, endOf(text), symbol);
+          const char *from = text.empty()
+                                 ? nullptr
+                                 : KnowledgePass::lineStart(member.loc.getPointer(), text.data());
+          size_t own = add(module, "enumMember", member.name, member.loc, from,
+                           KnowledgePass::endOf(text), symbol);
           if (own == Knowledge::kNone) {
             continue;
           }

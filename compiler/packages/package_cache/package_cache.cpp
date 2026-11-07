@@ -14,7 +14,7 @@ namespace tz::pkg {
 namespace fs = llvm::sys::fs;
 namespace path = llvm::sys::path;
 
-std::string cacheDir() {
+std::string PackageCache::cacheDir() {
   if (std::optional<std::string> dir = llvm::sys::Process::GetEnv("TZ_CACHE");
       dir && !dir->empty()) {
     return *dir;
@@ -32,8 +32,8 @@ std::string cacheDir() {
   return std::string(dir);
 }
 
-std::string cachePath(std::initializer_list<llvm::StringRef> parts) {
-  llvm::SmallString<256> result(cacheDir());
+std::string PackageCache::cachePath(std::initializer_list<llvm::StringRef> parts) {
+  llvm::SmallString<256> result(PackageCache::cacheDir());
   for (llvm::StringRef part : parts) {
     path::append(result, part);
   }
@@ -41,7 +41,7 @@ std::string cachePath(std::initializer_list<llvm::StringRef> parts) {
   return std::string(result);
 }
 
-std::string sha256Hex(llvm::StringRef data) {
+std::string PackageCache::sha256Hex(llvm::StringRef data) {
   llvm::SHA256 hasher;
   hasher.update(data);
   std::array<uint8_t, 32> digest = hasher.final();
@@ -49,17 +49,17 @@ std::string sha256Hex(llvm::StringRef data) {
   return llvm::toHex(digest, true);
 }
 
-std::string treeHash(std::vector<std::pair<std::string, std::string>> files) {
+std::string PackageCache::treeHash(std::vector<std::pair<std::string, std::string>> files) {
   std::sort(files.begin(), files.end());
   std::string list;
   for (const auto &[file, hex] : files) {
     list += file + " sha256-" + hex + "\n";
   }
 
-  return "sha256-" + sha256Hex(list);
+  return "sha256-" + PackageCache::sha256Hex(list);
 }
 
-bool hashDirectory(llvm::StringRef dir, std::string &hash, std::string &error) {
+bool PackageCache::hashDirectory(llvm::StringRef dir, std::string &hash, std::string &error) {
   std::vector<std::pair<std::string, std::string>> files;
   std::error_code ec;
   for (fs::recursive_directory_iterator it(dir, ec), end; it != end && !ec; it.increment(ec)) {
@@ -73,18 +73,20 @@ bool hashDirectory(llvm::StringRef dir, std::string &hash, std::string &error) {
     }
     llvm::StringRef relative = llvm::StringRef(it->path()).drop_front(dir.size());
     relative = relative.ltrim("/\\");
-    files.push_back({path::convert_to_slash(relative), sha256Hex((*buffer)->getBuffer())});
+    files.push_back(
+        {path::convert_to_slash(relative), PackageCache::sha256Hex((*buffer)->getBuffer())});
   }
   if (ec) {
     error = "cannot read '" + dir.str() + "': " + ec.message();
     return false;
   }
-  hash = treeHash(std::move(files));
+  hash = PackageCache::treeHash(std::move(files));
 
   return true;
 }
 
-bool writeFileAtomically(llvm::StringRef file, llvm::StringRef data, std::string &error) {
+bool PackageCache::writeFileAtomically(llvm::StringRef file, llvm::StringRef data,
+                                       std::string &error) {
   if (std::error_code ec = fs::create_directories(path::parent_path(file))) {
     error = "cannot create '" + path::parent_path(file).str() + "': " + ec.message();
     return false;

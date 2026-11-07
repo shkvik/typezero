@@ -59,7 +59,11 @@ void StmtChecker::checkStmt(Stmt *stmt) {
       yield->discarded = true;
     }
     s->expr = ExprChecker(this->state).checkExpr(s->expr);
-    ResultChecker(this->state).checkDiscarded(s->expr, false, s->loc());
+    ResultChecker::ResultValueGetsUsed used =
+        ResultChecker(this->state).usedValue(s->expr, false, s->loc());
+    if (used.isErr()) {
+      this->state.getDiagnostics().error(s->expr->loc(), used.error().message);
+    }
     if (auto *made = dyn_cast<NewExpr>(s->expr); made && made->cls()) {
       this->state.getEventStore().addDroppedNew(made->cls(), made->loc());
     }

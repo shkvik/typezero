@@ -16,6 +16,7 @@ public:
   void findUnstored(SourceFile &file);
 
 private:
+  static bool letsThisGo(const ClassDecl *cls);
   void scanProgram(SourceFile &file, CycleScanner &scan);
   std::vector<OwnerScanner::BackRef> findBackRefs(SourceFile &file, OwnerScanner &owners);
   void findEternals(SourceFile &file);

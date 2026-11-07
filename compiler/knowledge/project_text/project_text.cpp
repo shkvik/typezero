@@ -14,50 +14,6 @@ namespace fs = llvm::sys::fs;
 
 namespace path = llvm::sys::path;
 
-bool isWord(char c) { return llvm::isAlnum(c) || c == '_' || c == '$'; }
-
-bool hasWord(llvm::StringRef text, llvm::StringRef word) {
-  if (word.empty()) {
-    return false;
-  }
-  for (size_t at = text.find(word); at != llvm::StringRef::npos; at = text.find(word, at + 1)) {
-    bool before = at == 0 || !isWord(text[at - 1]);
-    size_t end = at + word.size();
-    bool after = end >= text.size() || !isWord(text[end]);
-    if (before && after) {
-      return true;
-    }
-  }
-
-  return false;
-}
-
-bool inCode(llvm::StringRef line, llvm::StringRef word) {
-  size_t open = line.find('`');
-  while (open != llvm::StringRef::npos) {
-    size_t close = line.find('`', open + 1);
-    if (close == llvm::StringRef::npos) {
-      return false;
-    }
-    if (hasWord(line.slice(open + 1, close), word)) {
-      return true;
-    }
-    open = line.find('`', close + 1);
-  }
-
-  return false;
-}
-
-void collect(llvm::StringRef dir, llvm::StringRef extension, std::vector<std::string> &out) {
-  std::error_code ec;
-  for (fs::recursive_directory_iterator it(dir, ec), end; it != end && !ec; it.increment(ec)) {
-    if (path::extension(it->path()) == extension) {
-      out.push_back(it->path());
-    }
-  }
-  std::sort(out.begin(), out.end());
-}
-
 }
 
 ProjectText::ProjectText(llvm::StringRef start) {
@@ -79,16 +35,63 @@ ProjectText::ProjectText(llvm::StringRef start) {
   }
 }
 
+bool ProjectText::isWord(char c) {
+  return llvm::isAlnum(c) || c == '_' || c == '$';
+}
+
+bool ProjectText::hasWord(llvm::StringRef text, llvm::StringRef word) {
+  if (word.empty()) {
+    return false;
+  }
+  for (size_t at = text.find(word); at != llvm::StringRef::npos; at = text.find(word, at + 1)) {
+    bool before = at == 0 || !ProjectText::isWord(text[at - 1]);
+    size_t end = at + word.size();
+    bool after = end >= text.size() || !ProjectText::isWord(text[end]);
+    if (before && after) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+bool ProjectText::inCode(llvm::StringRef line, llvm::StringRef word) {
+  size_t open = line.find('`');
+  while (open != llvm::StringRef::npos) {
+    size_t close = line.find('`', open + 1);
+    if (close == llvm::StringRef::npos) {
+      return false;
+    }
+    if (ProjectText::hasWord(line.slice(open + 1, close), word)) {
+      return true;
+    }
+    open = line.find('`', close + 1);
+  }
+
+  return false;
+}
+
+void ProjectText::collect(llvm::StringRef dir, llvm::StringRef extension,
+                          std::vector<std::string> &out) {
+  std::error_code ec;
+  for (fs::recursive_directory_iterator it(dir, ec), end; it != end && !ec; it.increment(ec)) {
+    if (path::extension(it->path()) == extension) {
+      out.push_back(it->path());
+    }
+  }
+  std::sort(out.begin(), out.end());
+}
+
 void ProjectText::list() {
   if (listed_) {
     return;
   }
   llvm::SmallString<256> docs(root_);
   path::append(docs, "docs");
-  collect(docs, ".md", docFiles_);
+  ProjectText::collect(docs, ".md", docFiles_);
   llvm::SmallString<256> tests(root_);
   path::append(tests, "tests");
-  collect(tests, ".tz", testFiles_);
+  ProjectText::collect(tests, ".tz", testFiles_);
   listed_ = true;
 }
 
@@ -131,7 +134,7 @@ std::vector<TextMention> ProjectText::docs(llvm::StringRef name, llvm::StringRef
           heading = line.ltrim("# ").str();
           continue;
         }
-        if (!inCode(line, word)) {
+        if (!ProjectText::inCode(line, word)) {
           continue;
         }
         bool known = llvm::any_of(found, [&](const TextMention &mention) {
@@ -161,7 +164,7 @@ std::vector<std::string> ProjectText::tests(llvm::StringRef name, size_t limit) 
       break;
     }
     auto buffer = llvm::MemoryBuffer::getFile(file);
-    if (buffer && hasWord((*buffer)->getBuffer(), name)) {
+    if (buffer && ProjectText::hasWord((*buffer)->getBuffer(), name)) {
       found.push_back(file);
     }
   }

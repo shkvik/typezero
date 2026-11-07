@@ -19,16 +19,13 @@ CryptoChecker::CryptoChecker(CheckState &owner)
 
 Expr *CryptoChecker::checkCryptoValue(llvm::StringRef name, Expr *expr) {
   if (name == "constants") {
-    this->state.getDiagnostics().error(expr->loc(),
-                                       "'constants' of 'node:crypto' is used as "
-                                       "'constants.RSA_PKCS1_PSS_PADDING' and the like");
+    std::string message = ErrorTextCryptoValue::constants();
+    this->state.getDiagnostics().error(expr->loc(), message);
     return expr;
   }
   if (this->cryptoTypeNamed(name)) {
-    this->state.getDiagnostics().error(expr->loc(),
-                                       "'" + name +
-                                           "' of 'node:crypto' is a type: its objects come from "
-                                           "the functions of 'node:crypto'");
+    std::string message = ErrorTextCryptoValue::isType(name);
+    this->state.getDiagnostics().error(expr->loc(), message);
     return expr;
   }
 
@@ -85,10 +82,8 @@ Expr *CryptoChecker::cryptoConstant(MemberExpr *member) {
       return ExprChecker(this->state).checkExpr(negated);
     }
   }
-  this->state.getDiagnostics().error(
-      member->loc(), "'constants." + member->name +
-                         "' of 'node:crypto' is not supported yet; tz has the RSA_ and "
-                         "POINT_CONVERSION_ ones");
+  std::string message = ErrorTextCryptoValue::constant(member->name);
+  this->state.getDiagnostics().error(member->loc(), message);
   member->type = Type::error();
 
   return member;
@@ -115,9 +110,8 @@ Expr *CryptoChecker::checkCryptoMember(MemberExpr *member) {
       return read(CryptoFn::KeySymmetricSize, Type::optional(Type::intTy()));
     }
     if (name == "asymmetricKeyDetails") {
-      this->state.getDiagnostics().error(
-          loc, "'asymmetricKeyDetails' is not supported yet: node gives the exponent of "
-               "RSA as a bigint, which tz has not");
+      std::string message = ErrorTextCryptoMember::keyDetails();
+      this->state.getDiagnostics().error(loc, message);
       member->type = Type::error();
       return member;
     }
@@ -165,14 +159,15 @@ Expr *CryptoChecker::checkCryptoMember(MemberExpr *member) {
       return read(p.fn, result);
     }
     if (name == "issuerCertificate") {
-      this->state.getDiagnostics().error(loc,
-                                         "'issuerCertificate' comes only with TLS (docs/net.md)");
+      std::string message = ErrorTextCryptoMember::issuerCert();
+      this->state.getDiagnostics().error(loc, message);
       member->type = Type::error();
       return member;
     }
   }
-  this->state.getDiagnostics().error(loc, "property '" + name + "' of " + type->name() +
-                                              " can only be called; it has " + methodsOf(kind));
+  std::string message =
+      ErrorTextCryptoMember::onlyCalled(name, type->name(), CryptoNames::methodsOf(kind));
+  this->state.getDiagnostics().error(loc, message);
   member->type = Type::error();
 
   return member;
@@ -181,25 +176,15 @@ Expr *CryptoChecker::checkCryptoMember(MemberExpr *member) {
 Expr *CryptoChecker::checkCryptoNew(NewExpr *expr, llvm::StringRef cls) {
   expr->type = Type::error();
   if (cls != "X509Certificate") {
-    this->state.getDiagnostics().error(
-        expr->loc(),
-        "'new " + cls + "' is not how node makes one: " +
-            (cls == "KeyObject"                 ? "use 'createSecretKey', 'createPublicKey' "
-                                                  "or 'createPrivateKey'"
-             : cls == "ECDH"                    ? "use 'createECDH(curve)'"
-             : cls == "Sign" || cls == "Verify" ? "use 'create" + cls.str() + "(algorithm)'"
-             : cls == "Hash" || cls == "Hmac"
-                 ? "use 'create" + cls.str() + "(algorithm)'"
-                 : "use 'create" + cls.str() + "(algorithm, key, iv)'"));
+    std::string message = ErrorTextCryptoMake::notNode(cls);
+    this->state.getDiagnostics().error(expr->loc(), message);
     for (Expr *&arg : expr->args) {
       arg = ExprChecker(this->state).checkExpr(arg);
     }
     return expr;
   }
-  this->state.getDiagnostics().error(
-      expr->loc(), "'new X509Certificate' may fail on the data it reads, and 'new' gives no "
-                   "Result; write 'X509Certificate.parse(pem)', which gives a "
-                   "Result<X509Certificate, ParseCertificateError>");
+  std::string message = ErrorTextCryptoMake::x509();
+  this->state.getDiagnostics().error(expr->loc(), message);
   for (Expr *&arg : expr->args) {
     arg = ExprChecker(this->state).checkExpr(arg);
   }
@@ -210,24 +195,23 @@ Expr *CryptoChecker::checkCryptoNew(NewExpr *expr, llvm::StringRef cls) {
 Expr *CryptoChecker::checkX509Parse(CallExpr *call, MemberExpr *member) {
   call->type = Type::error();
   if (member->name != "parse") {
-    this->state.getDiagnostics().error(member->loc(),
-                                       "'X509Certificate." + member->name +
-                                           "' does not exist; read a certificate with "
-                                           "'X509Certificate.parse(pem)'");
+    std::string message = ErrorTextX509::noStatic(member->name);
+    this->state.getDiagnostics().error(member->loc(), message);
     for (Expr *&arg : call->args) {
       arg = ExprChecker(this->state).checkExpr(arg);
     }
     return call;
   }
   if (call->args.size() != 1) {
-    this->state.getDiagnostics().error(call->loc(),
-                                       "'X509Certificate.parse' takes the certificate, PEM or DER");
+    std::string message = ErrorTextX509::parseArgs();
+    this->state.getDiagnostics().error(call->loc(), message);
     for (Expr *&arg : call->args) {
       arg = ExprChecker(this->state).checkExpr(arg);
     }
     return call;
   }
-  Expr *data = CryptoArgs(this->state).cryptoData(call->args[0], "certificate", true, false, true);
+  std::string what = ErrorTextX509::data();
+  Expr *data = CryptoArgs(this->state).cryptoData(call->args[0], what, true, false, true);
   if (data->type->isError()) {
     return call;
   }
@@ -252,15 +236,9 @@ Expr *CryptoChecker::checkWebCryptoCall(CallExpr *call, MemberExpr *member) {
   for (Expr *&arg : call->args) {
     arg = ExprChecker(this->state).checkExpr(arg);
   }
-  if (name == "subtle") {
-    this->state.getDiagnostics().error(member->loc(),
-                                       "'crypto.subtle' is an object, not a function");
-  } else {
-    this->state.getDiagnostics().error(member->loc(), "'crypto." + name +
-                                                          "' does not exist; the global crypto has "
-                                                          "'randomUUID', 'getRandomValues' and "
-                                                          "'subtle'");
-  }
+  std::string message = name == "subtle" ? ErrorTextGlobalCrypto::subtleCall()
+                                         : ErrorTextGlobalCrypto::noMember(name);
+  this->state.getDiagnostics().error(member->loc(), message);
 
   return call;
 }
@@ -270,15 +248,10 @@ Expr *CryptoChecker::checkWebCryptoMember(MemberExpr *member) {
   if (member->name == "subtle") {
     return WebCryptoChecker(this->state).subtleObject(member);
   }
-  if (member->name == "randomUUID" || member->name == "getRandomValues") {
-    this->state.getDiagnostics().error(member->loc(),
-                                       "'crypto." + member->name + "' can only be called");
-  } else {
-    this->state.getDiagnostics().error(member->loc(), "'crypto." + member->name +
-                                                          "' does not exist; the global crypto "
-                                                          "has 'randomUUID', 'getRandomValues' "
-                                                          "and 'subtle'");
-  }
+  std::string message = member->name == "randomUUID" || member->name == "getRandomValues"
+                            ? ErrorTextGlobalCrypto::onlyCalled(member->name)
+                            : ErrorTextGlobalCrypto::noMember(member->name);
+  this->state.getDiagnostics().error(member->loc(), message);
 
   return member;
 }

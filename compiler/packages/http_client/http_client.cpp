@@ -16,7 +16,7 @@
 
 namespace tz::pkg {
 
-std::string fileUrlPath(llvm::StringRef url) {
+std::string HttpClient::fileUrlPath(llvm::StringRef url) {
   if (!url.consume_front("file://")) {
     return "";
   }
@@ -209,10 +209,10 @@ FetchResult httpGet(const std::string &url, std::string &body, std::string &erro
 
 }
 
-FetchResult fetchUrl(const std::string &url, std::string &body, std::string &error) {
+FetchResult HttpClient::fetchUrl(const std::string &url, std::string &body, std::string &error) {
   llvm::StringRef ref(url);
   if (ref.starts_with("file://")) {
-    return readFile(fileUrlPath(ref), body, error);
+    return readFile(HttpClient::fileUrlPath(ref), body, error);
   }
   if (ref.starts_with("https://") || ref.starts_with("http://")) {
     return httpGet(url, body, error);

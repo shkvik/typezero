@@ -137,8 +137,6 @@ using Effects = std::set<Access>;
 
 using Active = llvm::SmallVector<unsigned, 4>;
 
-void merge(Active &into, llvm::ArrayRef<unsigned> from);
-
 enum class SegKind : uint8_t {
   Start,
   Await,
@@ -292,6 +290,11 @@ struct Touch {
   bool read = false, write = false;
   std::vector<std::pair<llvm::SMLoc, const FunctionDecl *>> ats, readAts, writeAts;
   std::vector<WaitPlace> places;
+};
+
+class ParallelModel {
+public:
+  static void merge(Active &into, llvm::ArrayRef<unsigned> from);
 };
 
 }

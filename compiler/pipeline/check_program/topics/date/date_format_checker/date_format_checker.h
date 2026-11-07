@@ -1,6 +1,8 @@
 #pragma once
 
 #include "compiler/pipeline/check_program/check_state/check_state.h"
+#include "compiler/pipeline/check_program/topics/date/date_format_checker/date_format_checker_errors.h"
+#include "compiler/result/result/result.h"
 
 namespace tz {
 
@@ -18,7 +20,9 @@ public:
   static const Type *dateOptionsType();
 
 private:
-  static std::string utf8(const std::u16string &text);
+  using ResultOptionsObject = Result<const Type *, DateFormatCheckerOptionsObjectError>;
+
+  static ResultOptionsObject optionsObject(const Type *type, int kind);
   static std::optional<std::u16string> literalText(const Expr *e);
   static std::optional<std::vector<std::string>> textsOf(const Type *type);
   static std::optional<std::vector<double>> numbersOf(const Type *type);

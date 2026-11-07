@@ -104,10 +104,6 @@ enum class Tok {
   PipePipeAssign,
 };
 
-const char *tokSpelling(Tok kind);
-
-inline bool isKeyword(Tok kind) { return kind >= Tok::KwAs && kind <= Tok::KwWhile; }
-
 struct Token {
   Tok kind = Tok::Eof;
   llvm::StringRef text;
@@ -116,6 +112,12 @@ struct Token {
 
   bool is(Tok k) const { return kind == k; }
   llvm::SMLoc loc() const { return llvm::SMLoc::getFromPointer(text.data()); }
+};
+
+class TokenKinds {
+public:
+  static bool isKeyword(Tok kind);
+  static const char *tokSpelling(Tok kind);
 };
 
 }

@@ -136,7 +136,7 @@ llvm::Value *BytesCallLowerer::emitEmbedBytes(CallExpr *call) {
                                            this->lowering.builder_.getInt32(1)}),
         "tz.embedded.buffer");
     if (!this->lowering.bytesTy_) {
-      this->lowering.bytesTy_ = bytesStruct(this->lowering.ctx_);
+      this->lowering.bytesTy_ = BytesLowerer::bytesStruct(this->lowering.ctx_);
     }
     global = new llvm::GlobalVariable(
         *this->lowering.module_, this->lowering.bytesTy_, false, llvm::GlobalValue::PrivateLinkage,

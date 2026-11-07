@@ -38,6 +38,11 @@ public:
   void checkDate(const Num &time, double limit, llvm::ArrayRef<DatePart> parts);
 
 private:
+  static std::string exprText(const Expr *expr);
+  static std::string subject(const Expr *expr);
+  static std::string numberText(double v);
+  static std::string roughNumber(double v);
+  static std::string replaced(std::string text, llvm::StringRef from, llvm::StringRef to);
   OverflowCheck &check_;
 };
 

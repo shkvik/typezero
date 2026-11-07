@@ -6,6 +6,7 @@
 #include "compiler/pipeline/check_program/topics/classes/instance_of_checker/instance_of_checker.h"
 #include "compiler/pipeline/check_program/topics/date/date_checker/date_checker.h"
 #include "compiler/pipeline/check_program/topics/decimal/decimal_checker/decimal_checker.h"
+#include "compiler/pipeline/check_program/topics/decimal/decimal_checker/decimal_checker_errors.h"
 #include "compiler/pipeline/check_program/topics/expr/concat_checker/concat_checker.h"
 #include "compiler/pipeline/check_program/topics/expr/expr_checker/expr_checker.h"
 #include "compiler/pipeline/check_program/topics/expr/truth_checker/truth_checker.h"
@@ -77,7 +78,7 @@ BinaryChecker::ResultExponentIsValid BinaryChecker::powerExponent(const Expr *rh
 }
 
 Expr *BinaryChecker::checkBinary(BinaryExpr *bin, const Type *expected, bool wraps) {
-  const char *op = opSpelling(bin->op);
+  const char *op = Operators::opSpelling(bin->op);
   if (expected) {
     expected = expected->nonOptional();
   }
@@ -400,7 +401,7 @@ BinaryChecker::ResultWrappingChecked BinaryChecker::checkWrapping(BinaryExpr *bi
 }
 
 BinaryChecker::ResultBitwiseResolved BinaryChecker::checkBits(BinaryExpr *bin) {
-  const char *op = opSpelling(bin->op);
+  const char *op = Operators::opSpelling(bin->op);
   bool shift = bin->op == BinaryOp::Shl || bin->op == BinaryOp::Shr || bin->op == BinaryOp::UShr;
   this->adaptLiterals(bin);
   const Type *l = bin->lhs->type;
@@ -421,7 +422,8 @@ BinaryChecker::ResultBitwiseResolved BinaryChecker::checkBits(BinaryExpr *bin) {
   if (orZero) {
     std::string lhsName = lhsText.empty() ? "x" : lhsText.str();
     auto *rounded = dyn_cast<CallExpr>(bin->lhs);
-    bool roundedFloat = l->isFloat() && rounded && isRoundingBuiltin(rounded->builtin());
+    bool roundedFloat =
+        l->isFloat() && rounded && BuiltinGroups::isRoundingBuiltin(rounded->builtin());
     std::string hint = roundedFloat   ? ErrorTextNoOpBits::toInt(lhsText)
                        : l->isFloat() ? ErrorTextNoOpBits::trunc(lhsText)
                                       : ErrorTextNoOpBits::wrap(text, bin->op == BinaryOp::UShr);
@@ -521,7 +523,7 @@ void BinaryChecker::adaptLiterals(BinaryExpr *bin) {
 std::string BinaryChecker::mixedNumbersText(const BinaryExpr *bin) {
   const Type *l = bin->lhs->type;
   const Type *r = bin->rhs->type;
-  const char *op = opSpelling(bin->op);
+  const char *op = Operators::opSpelling(bin->op);
   const Type *target = nullptr;
   bool convertLeft = false;
   if (l->isFloat() || r->isFloat()) {
@@ -563,23 +565,24 @@ std::string BinaryChecker::quotedNames(llvm::ArrayRef<llvm::StringRef> names) {
 
 BinaryChecker::ResultTypeOfNameKnown BinaryChecker::checkTypeOfName(const Expr *operand,
                                                                     const StringLitExpr *text) {
-  std::string name = toUtf8(text->value);
+  std::string name = ToUtf8::toUtf8(text->value);
   if (name == "bigint") {
     std::string what = ErrorTextTypeOfName::bigint();
-    DecimalChecker(this->state).reportBigInt(text->loc(), what);
+    std::string bigint = ErrorTextBigInt::none(what);
+    this->state.getDiagnostics().error(text->loc(), bigint);
 
     return err(BinaryCheckerCheckTypeOfNameError{
         .code = BinaryCheckerCheckTypeOfNameErrorCode::ALREADY_REPORTED,
         .message = "",
     });
   }
-  if (!isTypeOfName(name)) {
+  if (!TypeSpelling::isTypeOfName(name)) {
     std::vector<llvm::StringRef> all(std::begin(kTypeOfNames), std::end(kTypeOfNames));
     std::string list = BinaryChecker::quotedNames(all);
     if (name == "number") {
       std::vector<llvm::StringRef> numbers;
       if (operand->type && !operand->type->isError()) {
-        for (llvm::StringRef possible : typeOfNames(operand->type)) {
+        for (llvm::StringRef possible : TypeSpelling::typeOfNames(operand->type)) {
           if (possible.starts_with("int") || possible.starts_with("uint") ||
               possible == "double" || possible == "decimal") {
             numbers.push_back(possible);
@@ -618,7 +621,7 @@ BinaryChecker::ResultTypeOfNameKnown BinaryChecker::checkTypeOfName(const Expr *
   if (unchecked) {
     return ok(text);
   }
-  std::vector<llvm::StringRef> names = typeOfNames(type);
+  std::vector<llvm::StringRef> names = TypeSpelling::typeOfNames(type);
   bool matches = names.empty() || llvm::is_contained(names, llvm::StringRef(name));
   if (!matches) {
     std::string quoted = BinaryChecker::quotedNames(names);
@@ -637,7 +640,7 @@ BinaryChecker::ResultNoResultOperand BinaryChecker::noResults(const BinaryExpr *
   const Type *l = bin->lhs->type;
   const Type *r = bin->rhs->type;
   if (l->nonOptional()->isResult() || r->nonOptional()->isResult()) {
-    std::string message = ErrorTextResultEquality::compared(opSpelling(bin->op));
+    std::string message = ErrorTextResultEquality::compared(Operators::opSpelling(bin->op));
 
     return err(BinaryCheckerNoResultsError{
         .code = BinaryCheckerNoResultsErrorCode::RESULTS_COMPARED,
@@ -671,7 +674,7 @@ Expr *BinaryChecker::checkEquality(BinaryExpr *bin) {
     return bin;
   }
   if (l->isVoid() || r->isVoid()) {
-    std::string message = BinaryChecker::operandTypesText(opSpelling(bin->op), l, r);
+    std::string message = BinaryChecker::operandTypesText(Operators::opSpelling(bin->op), l, r);
     this->state.getDiagnostics().error(bin->loc(), message);
     return bin;
   }
@@ -705,7 +708,7 @@ Expr *BinaryChecker::checkEquality(BinaryExpr *bin) {
       std::string message = BinaryChecker::mixedNumbersText(bin);
       this->state.getDiagnostics().error(bin->loc(), message);
     } else {
-      std::string message = BinaryChecker::operandTypesText(opSpelling(bin->op), l, r);
+      std::string message = BinaryChecker::operandTypesText(Operators::opSpelling(bin->op), l, r);
       this->state.getDiagnostics().error(bin->loc(), message);
     }
     return bin;

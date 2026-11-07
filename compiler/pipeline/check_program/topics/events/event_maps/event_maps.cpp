@@ -1,4 +1,5 @@
 #include "compiler/pipeline/check_program/topics/events/event_maps/event_maps.h"
+#include "compiler/load/to_utf8/to_utf8.h"
 #include "compiler/pipeline/check_program/declare/class_declarer/class_declarer.h"
 #include "compiler/pipeline/check_program/declare/type_declarer/type_declarer.h"
 #include "compiler/pipeline/check_program/generics/generic_class_instantiator/generic_class_instantiator.h"
@@ -19,15 +20,6 @@ using llvm::dyn_cast;
 
 namespace tz {
 
-std::string EventMaps::utf8(const std::u16string &text) {
-  std::string out;
-  llvm::convertUTF16ToUTF8String(
-      llvm::ArrayRef<llvm::UTF16>(reinterpret_cast<const llvm::UTF16 *>(text.data()), text.size()),
-      out);
-
-  return out;
-}
-
 bool EventMaps::isServiceEvent(llvm::StringRef name) {
   return name == "newListener" || name == "removeListener";
 }
@@ -37,14 +29,21 @@ const Type *EventMaps::serviceEventArgs() {
       {Type::object({{"event", Type::string(), false}, {"listener", Type::unknown(), false}})});
 }
 
-std::string EventMaps::eventList(const Type *events) {
-  std::string out;
-  llvm::ArrayRef<Field> fields = events->fields();
-  for (size_t i = 0; i < fields.size(); ++i) {
-    out += (i == 0 ? "" : i + 1 == fields.size() ? " and " : ", ") + ("'" + fields[i].name + "'");
+bool EventMaps::carriesOne(const Type *args) {
+  return args->fields().size() <= 1 && !args->tupleRest();
+}
+
+EventMaps::ResultListenerThis EventMaps::listenerThis(const Type *self, const Type *receiver) {
+  if (!self->isUnknown() && !receiver->isSubtypeOf(self)) {
+    std::string message = ErrorTextListener::thisType(self->name(), receiver->name());
+
+    return err(EventMapsListenerThisError{
+        .code = EventMapsListenerThisErrorCode::OTHER_RECEIVER,
+        .message = message,
+    });
   }
 
-  return out;
+  return ok(self);
 }
 
 std::string EventMaps::nearestEvent(const Type *events, llvm::StringRef name) {
@@ -86,70 +85,90 @@ const Type *EventMaps::eventMapOf(const Type *type) const {
   return nullptr;
 }
 
-bool EventMaps::checkEventMap(const Type *events, llvm::SMLoc loc) {
-  if (events->isError() || mentionsParam(events)) {
-    return true;
+EventMaps::ResultEventMapFits EventMaps::eventMapFits(const Type *events) {
+  if (events->isError() || TypeQueries::mentionsParam(events)) {
+    return ok(events);
   }
-  auto bad = [&](const std::string &why) {
-    this->state.getDiagnostics().error(
-        loc, "the type argument of 'EventEmitter' is its event map: each event with the "
-             "arguments its listeners get, as a tuple, e.g. 'EventEmitter<{ data: "
-             "[chunk: string]; end: [] }>'; " +
-                 why);
-
-    return false;
-  };
-  auto oneValue = [&](const std::string &event, const Type *args) {
-    if (args->fields().size() <= 1 && !args->tupleRest()) {
-      return true;
-    }
-    this->state.getDiagnostics().error(
-        loc, event + " carries '" + args->name().str() +
-                 "', but an event carries one value: give it an object, e.g. "
-                 "'message: [message: { from: User; text: string }]' "
-                 "(docs/events.md, section 2)");
-    return false;
-  };
   if (events->isRecord()) {
-    if (!events->valueType()->isTuple()) {
-      return bad("the arguments of each event are '" + events->valueType()->name().str() +
-                 "' here, which is not a tuple");
+    const Type *args = events->valueType();
+    if (!args->isTuple()) {
+      std::string why = ErrorTextEventMap::notTuple(args->name());
+      std::string message = ErrorTextEventMap::notMap(why);
+
+      return err(EventMapsEventMapFitsError{
+          .code = EventMapsEventMapFitsErrorCode::NOT_A_MAP,
+          .message = message,
+      });
     }
-    return oneValue("each event", events->valueType());
+    if (!EventMaps::carriesOne(args)) {
+      std::string event = ErrorTextEventMap::eachEvent();
+      std::string message = ErrorTextEventMap::several(event, args->name());
+
+      return err(EventMapsEventMapFitsError{
+          .code = EventMapsEventMapFitsErrorCode::SEVERAL_VALUES,
+          .message = message,
+      });
+    }
+
+    return ok(events);
   }
   if (!events->isObject() || events->isClass() || events->isTuple() || events->isAnyObject() ||
       events->isBytes() || events->isDate() || events->isRegExp() || events->isMatch()) {
-    return bad("'" + events->name().str() + "' is not one");
+    std::string why = ErrorTextEventMap::notOne(events->name());
+    std::string message = ErrorTextEventMap::notMap(why);
+
+    return err(EventMapsEventMapFitsError{
+        .code = EventMapsEventMapFitsErrorCode::NOT_A_MAP,
+        .message = message,
+    });
   }
   for (const Field &f : events->fields()) {
+    bool service = EventMaps::isServiceEvent(f.name);
     if (f.type->isOptional()) {
-      return bad("event '" + f.name + "' is optional, but an event is in the map or not");
+      std::string why = ErrorTextEventMap::optional(f.name);
+      std::string message = ErrorTextEventMap::notMap(why);
+
+      return err(EventMapsEventMapFitsError{
+          .code = EventMapsEventMapFitsErrorCode::NOT_A_MAP,
+          .message = message,
+      });
     }
     if (!f.type->isTuple()) {
-      return bad("event '" + f.name + "' has '" + f.type->name().str() + "', which is not a tuple");
+      std::string why = ErrorTextEventMap::fieldTuple(f.name, f.type->name());
+      std::string message = ErrorTextEventMap::notMap(why);
+
+      return err(EventMapsEventMapFitsError{
+          .code = EventMapsEventMapFitsErrorCode::NOT_A_MAP,
+          .message = message,
+      });
     }
-    if (!EventMaps::isServiceEvent(f.name) && !oneValue("event '" + f.name + "'", f.type)) {
-      return false;
+    if (!service && !EventMaps::carriesOne(f.type)) {
+      std::string event = ErrorTextEventMap::event(f.name);
+      std::string message = ErrorTextEventMap::several(event, f.type->name());
+
+      return err(EventMapsEventMapFitsError{
+          .code = EventMapsEventMapFitsErrorCode::SEVERAL_VALUES,
+          .message = message,
+      });
     }
-    if (EventMaps::isServiceEvent(f.name) && f.type != EventMaps::serviceEventArgs()) {
-      this->state.getDiagnostics().error(
-          loc, "every emitter has the event '" + f.name +
-                   "', whose listeners get the name of the event and the listener, "
-                   "'[change: { event: string; listener: unknown }]', but the event map gives "
-                   "it '" +
-                   f.type->name() + "'; leave it out of the map");
-      return false;
+    if (service && f.type != EventMaps::serviceEventArgs()) {
+      std::string message = ErrorTextEventMap::service(f.name, f.type->name());
+
+      return err(EventMapsEventMapFitsError{
+          .code = EventMapsEventMapFitsErrorCode::SERVICE_EVENT,
+          .message = message,
+      });
     }
   }
 
-  return true;
+  return ok(events);
 }
 
 const Type *EventMaps::eventArgs(const Type *events, Expr *&name, llvm::StringRef method,
                                  std::string *label) {
   if (events->isRecord()) {
     if (auto *lit = dyn_cast<StringLitExpr>(name); lit && label) {
-      *label = EventMaps::utf8(lit->value);
+      *label = ToUtf8::toUtf8(lit->value);
     }
     name = ArgumentChecker(this->state).checkArg(name, Type::string());
     return name->type->isError() ? nullptr : events->valueType();
@@ -158,14 +177,8 @@ const Type *EventMaps::eventArgs(const Type *events, Expr *&name, llvm::StringRe
   std::optional<std::string> key = KeyedFieldChecker(this->state).constantKey(name);
   if (!key) {
     if (!name->type->isError()) {
-      this->state.getDiagnostics().error(
-          name->loc(), "the name of the event must be known when compiling, as a "
-                       "string literal, e.g. '" +
-                           method.str() +
-                           "(\"data\", ...)'; to "
-                           "name events known only when the program runs, give the "
-                           "emitter a map that takes any name, e.g. 'new EventEmitter<{ "
-                           "[name: string]: [msg: string] }>()'");
+      std::string message = ErrorTextEventName::unknown(method);
+      this->state.getDiagnostics().error(name->loc(), message);
     }
     return nullptr;
   }
@@ -187,27 +200,10 @@ const Type *EventMaps::eventArgs(const Type *events, Expr *&name, llvm::StringRe
   if (const Field *f = events->field(*key)) {
     return f->type;
   }
-  std::string message;
-  if (this->state.getEventStore().isInferredMap(events)) {
-    message = "no code of the program emits '" + *key + "' on this emitter";
-    if (events->fields().empty()) {
-      message += ", nor any other event: an emitter without an event map has the events that "
-                 "emit() calls give it, e.g. 'bus.emit(\"" +
-                 *key + "\", ...)'";
-    } else {
-      message += "; it emits " + EventMaps::eventList(events);
-    }
-  } else {
-    message = "the emitter has no event '" + *key + "'";
-    if (events->fields().empty()) {
-      message += ": its event map has none";
-    } else {
-      message += ": its event map has " + EventMaps::eventList(events);
-    }
-  }
-  if (std::string near = EventMaps::nearestEvent(events, *key); !near.empty()) {
-    message += "; did you mean '" + near + "'?";
-  }
+  std::string nearest = EventMaps::nearestEvent(events, *key);
+  std::string message = this->state.getEventStore().isInferredMap(events)
+                            ? ErrorTextEventName::notEmitted(*key, events, nearest)
+                            : ErrorTextEventName::noEvent(*key, events, nearest);
   this->state.getDiagnostics().error(loc, message);
 
   return nullptr;
@@ -235,14 +231,13 @@ Expr *EventMaps::checkListener(Expr *arg, const Type *args, llvm::StringRef even
     if (self->isError()) {
       return false;
     }
-    if (self->isUnknown() || receiver->isSubtypeOf(self)) {
-      return true;
+    ResultListenerThis taken = EventMaps::listenerThis(self, receiver);
+    if (taken.isErr()) {
+      this->state.getDiagnostics().error(loc, taken.error().message);
+      return false;
     }
-    this->state.getDiagnostics().error(loc, "the listener takes 'this' of type '" + self->name() +
-                                                "', but it gets the emitter, of type '" +
-                                                receiver->name() + "'");
 
-    return false;
+    return true;
   };
   auto withThis = [&](const Type *self) {
     std::vector<const Type *> params{self};
@@ -259,8 +254,8 @@ Expr *EventMaps::checkListener(Expr *arg, const Type *args, llvm::StringRef even
         return arg;
       }
       if (fn->isAsync) {
-        this->state.getDiagnostics().error(
-            fe->loc(), "an async listener cannot take 'this'; use the emitter by name");
+        std::string message = ErrorTextListener::asyncThis();
+        this->state.getDiagnostics().error(fe->loc(), message);
         arg = ExprChecker(this->state).checkExpr(arg);
         return arg;
       }
@@ -294,8 +289,8 @@ Expr *EventMaps::checkListener(Expr *arg, const Type *args, llvm::StringRef even
     return arg;
   }
   if (!type->isFunction()) {
-    this->state.getDiagnostics().error(arg->loc(), "a listener is a function, but this is '" +
-                                                       type->name() + "'");
+    std::string message = ErrorTextListener::notFunc(type->name());
+    this->state.getDiagnostics().error(arg->loc(), message);
     return arg;
   }
   if (type->hasThis()) {
@@ -306,9 +301,8 @@ Expr *EventMaps::checkListener(Expr *arg, const Type *args, llvm::StringRef even
     if (type == withThis(type->params()[0])) {
       return TypeRelations(this->state).convert(arg, Type::unknown());
     }
-    this->state.getDiagnostics().error(
-        arg->loc(), "the listeners of '" + event.str() + "' get '" + args->name().str() +
-                        "', but this function is '" + type->name().str() + "'");
+    std::string message = ErrorTextListener::gets(event, args->name(), type->name());
+    this->state.getDiagnostics().error(arg->loc(), message);
     return arg;
   }
   bool isAsync = type->ret()->isPromise();
@@ -320,20 +314,15 @@ Expr *EventMaps::checkListener(Expr *arg, const Type *args, llvm::StringRef even
     return TypeRelations(this->state).convert(arg, Type::unknown());
   }
   if (isAsync && type->ret() != async->ret()) {
-    this->state.getDiagnostics().error(
-        arg->loc(), "an async listener returns 'Promise<void>', but this one returns '" +
-                        type->ret()->name() +
-                        "', which the emitter would drop; wrap it, "
-                        "e.g. 'async (...) => { await f(...) }'");
+    std::string message = ErrorTextListener::asyncRet(type->ret()->name());
+    this->state.getDiagnostics().error(arg->loc(), message);
     return arg;
   }
   if (Expr *adapted = FunctionValueChecker(this->state).adaptFunction(arg, wanted)) {
     return TypeRelations(this->state).convert(adapted, Type::unknown());
   }
-  this->state.getDiagnostics().error(
-      arg->loc(), "the listeners of '" + event.str() + "' get '" + args->name().str() +
-                      "', but this function is '" + type->name().str() +
-                      "'; pass an arrow that calls it with what it needs");
+  std::string message = ErrorTextListener::getsArrow(event, args->name(), type->name());
+  this->state.getDiagnostics().error(arg->loc(), message);
 
   return arg;
 }

@@ -16,39 +16,40 @@
 
 namespace tz::pkg {
 
-bool writeText(llvm::StringRef file, llvm::StringRef text) {
+bool ProjectFile::writeText(llvm::StringRef file, llvm::StringRef text) {
   std::string error;
-  if (writeFileAtomically(file, text, error)) {
+  if (PackageCache::writeFileAtomically(file, text, error)) {
     return true;
   }
-  report(error);
+  Report::report(error);
 
   return false;
 }
 
-bool currentProject(Manifest &out) {
-  std::string file = findManifest("");
+bool ProjectFile::currentProject(Manifest &out) {
+  std::string file = ManifestFile::findManifest("");
   if (file.empty()) {
-    report("there is no package.json in this directory or above it; make one with 'tz init'");
+    Report::report(
+        "there is no package.json in this directory or above it; make one with 'tz init'");
     return false;
   }
 
-  return readManifest(file, out);
+  return ManifestFile::readManifest(file, out);
 }
 
-bool applyDependencies(const Manifest &project, const std::vector<Dependency> &deps,
-                       const PrepareOptions &options, Lock *before, Lock *after) {
-  std::string text = withDependencies(project, deps);
+bool ProjectFile::applyDependencies(const Manifest &project, const std::vector<Dependency> &deps,
+                                    const PrepareOptions &options, Lock *before, Lock *after) {
+  std::string text = ManifestFile::withDependencies(project, deps);
   Manifest edited;
-  if (!readManifestText(project.path, text, edited)) {
+  if (!ManifestFile::readManifestText(project.path, text, edited)) {
     return false;
   }
   Graph graph;
-  if (!preparePackages(edited, options, graph, before, after)) {
+  if (!PackageGraph::preparePackages(edited, options, graph, before, after)) {
     return false;
   }
 
-  return text == project.text || writeText(project.path, text);
+  return text == project.text || ProjectFile::writeText(project.path, text);
 }
 
 }

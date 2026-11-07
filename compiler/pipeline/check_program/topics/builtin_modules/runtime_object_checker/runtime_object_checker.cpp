@@ -18,24 +18,10 @@ RuntimeObjectChecker::RuntimeObjectChecker(CheckState &owner)
 Expr *RuntimeObjectChecker::checkRuntimeMember(MemberExpr *member) {
   const Type *type = member->object->type;
   llvm::StringRef name = member->name;
-  this->state.getDiagnostics().error(
-      member->loc(), "property '" + name + "' does not exist on type '" + type->name() + "'" +
-                         RuntimeObjectChecker::runtimeMembers(type));
+  std::string message = ErrorTextRuntimeObject::noMember(name, type->name(), type->runtimeKind());
+  this->state.getDiagnostics().error(member->loc(), message);
 
   return member;
-}
-
-std::string RuntimeObjectChecker::runtimeMembers(const Type *type) {
-  switch (type->runtimeKind()) {
-  case Type::Runtime::Readline:
-  case Type::Runtime::ReadlinePromises:
-    return "; it has 'question()' and 'close()', and 'for await (const line of rl)' gives the "
-           "lines";
-  case Type::Runtime::AsyncIterator:
-    return "; iterate it with 'for await'";
-  default:
-    return "";
-  }
 }
 
 Expr *RuntimeObjectChecker::checkRuntimeMethod(CallExpr *call, MemberExpr *member,
@@ -99,16 +85,13 @@ Expr *RuntimeObjectChecker::checkRuntimeMethod(CallExpr *call, MemberExpr *membe
         return call;
       }
       if (call->args.size() < 2) {
-        this->state.getDiagnostics().error(
-            member->loc(), "'question' of node:readline takes a callback for the answer, "
-                           "'rl.question(query, answer => ...)'; for a Promise, import "
-                           "'createInterface' from \"node:readline/promises\"");
+        std::string message = ErrorTextReadlineMethod::callback();
+        this->state.getDiagnostics().error(member->loc(), message);
         return call;
       }
       if (call->args.size() == 3) {
-        this->state.getDiagnostics().error(call->args[1]->loc(),
-                                           "the options of 'question' with a callback are not "
-                                           "supported yet");
+        std::string message = ErrorTextReadlineMethod::options();
+        this->state.getDiagnostics().error(call->args[1]->loc(), message);
         return loosely();
       }
       Signature sig;
@@ -130,36 +113,30 @@ Expr *RuntimeObjectChecker::checkRuntimeMethod(CallExpr *call, MemberExpr *membe
       return call;
     }
     if (llvm::is_contained(events, name)) {
-      this->state.getDiagnostics().error(
-          member->loc(), "'" + name +
-                             "' of readline is not supported yet: its Interface is no "
-                             "EventEmitter yet (docs/events.md); read the lines with "
-                             "'for await (const line of rl)' or ask with 'question()'");
+      std::string message = ErrorTextReadlineMethod::events(name);
+      this->state.getDiagnostics().error(member->loc(), message);
       return loosely();
     }
     break;
   }
-  case Type::Runtime::AsyncIterator:
+  case Type::Runtime::AsyncIterator: {
     if (name == "throw") {
-      this->state.getDiagnostics().error(member->loc(),
-                                         "an iterator has no 'throw()' in tz: an error is a "
-                                         "value, not something thrown into a generator");
+      std::string message = ErrorTextAsyncIterator::noThrow();
+      this->state.getDiagnostics().error(member->loc(), message);
       return loosely();
     }
     if (name == "next" || name == "return") {
-      this->state.getDiagnostics().error(member->loc(),
-                                         "'" + name +
-                                             "()' of an async iterator is not supported yet; "
-                                             "iterate it with 'for await'");
+      std::string message = ErrorTextAsyncIterator::notYet(name);
+      this->state.getDiagnostics().error(member->loc(), message);
       return loosely();
     }
     break;
+  }
   default:
     break;
   }
-  this->state.getDiagnostics().error(
-      member->loc(), "property '" + name + "' does not exist on type '" + type->name() + "'" +
-                         RuntimeObjectChecker::runtimeMembers(type));
+  std::string message = ErrorTextRuntimeObject::noMember(name, type->name(), type->runtimeKind());
+  this->state.getDiagnostics().error(member->loc(), message);
 
   return loosely();
 }
@@ -167,9 +144,9 @@ Expr *RuntimeObjectChecker::checkRuntimeMethod(CallExpr *call, MemberExpr *membe
 const Type *RuntimeObjectChecker::checkRuntimeTarget(MemberExpr *member, bool compound) {
   (void)compound;
   const Type *type = member->object->type;
-  this->state.getDiagnostics().error(member->loc(), "property '" + member->name + "' of type '" +
-                                                        type->name() + "' cannot be assigned to" +
-                                                        RuntimeObjectChecker::runtimeMembers(type));
+  std::string message =
+      ErrorTextRuntimeObject::assigned(member->name, type->name(), type->runtimeKind());
+  this->state.getDiagnostics().error(member->loc(), message);
 
   return Type::error();
 }

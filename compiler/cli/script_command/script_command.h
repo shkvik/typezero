@@ -13,6 +13,9 @@ public:
   int run(const Args &args) const;
 
 private:
+  static std::string shellWord(llvm::StringRef arg);
+  static void addToPath(llvm::StringRef dir);
+  static int spawn(const std::string &command);
   const char *argv0_;
 };
 

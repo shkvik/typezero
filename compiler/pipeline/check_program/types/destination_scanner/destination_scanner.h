@@ -8,6 +8,7 @@ struct DestinationScan;
 
 class DestinationScanner {
 public:
+  static bool isResultLiteral(const CallExpr *call);
   explicit DestinationScanner(CheckState &owner);
 
   void scanDestinations(const Stmt *stmt, DestinationScan &scan);

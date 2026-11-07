@@ -1,11 +1,16 @@
 #include "compiler/pipeline/check_program/topics/bytes/buffer_static_checker/buffer_static_checker.h"
 #include "compiler/library/bytes/bytes_check_helpers/bytes_check_helpers.h"
+#include "compiler/load/to_utf8/to_utf8.h"
 #include "compiler/pipeline/check_program/flow/flow_checker/flow_checker.h"
 #include "compiler/pipeline/check_program/flow/index_proofs/index_proofs.h"
+#include "compiler/pipeline/check_program/topics/bytes/buffer_checker/buffer_checker_errors.h"
 #include "compiler/pipeline/check_program/topics/bytes/byte_proofs/byte_proofs.h"
+#include "compiler/pipeline/check_program/topics/bytes/byte_proofs/byte_proofs_errors.h"
 #include "compiler/pipeline/check_program/topics/bytes/bytes_checker/bytes_checker.h"
 #include "compiler/pipeline/check_program/topics/bytes/bytes_new_checker/bytes_new_checker.h"
+#include "compiler/pipeline/check_program/topics/bytes/typed_array_checker/typed_array_checker_errors.h"
 #include "compiler/pipeline/check_program/topics/decimal/decimal_checker/decimal_checker.h"
+#include "compiler/pipeline/check_program/topics/decimal/decimal_checker/decimal_checker_errors.h"
 #include "compiler/pipeline/check_program/topics/expr/argument_checker/argument_checker.h"
 #include "compiler/pipeline/check_program/topics/expr/call_checker/call_checker.h"
 #include "compiler/pipeline/check_program/topics/expr/expr_checker/expr_checker.h"
@@ -26,15 +31,6 @@ using llvm::isa;
 
 namespace tz {
 
-std::string BufferStaticChecker::utf8(const std::u16string &text) {
-  std::string out;
-  llvm::convertUTF16ToUTF8String(
-      llvm::ArrayRef<llvm::UTF16>(reinterpret_cast<const llvm::UTF16 *>(text.data()), text.size()),
-      out);
-
-  return out;
-}
-
 std::optional<std::u16string> BufferStaticChecker::literalText(const Expr *e) {
   if (auto *conv = dyn_cast<CastExpr>(e); conv && conv->isImplicit()) {
     e = conv->operand;
@@ -49,8 +45,34 @@ std::optional<std::u16string> BufferStaticChecker::literalText(const Expr *e) {
   return std::nullopt;
 }
 
-std::string BufferStaticChecker::rangeText(int64_t lo, int64_t hi) {
-  return std::to_string(lo) + " to " + std::to_string(hi);
+BufferStaticChecker::ResultSourceElement BufferStaticChecker::sourceElement(const Type *from,
+                                                                            llvm::StringRef what) {
+  const Type *element = GeneratorChecker::iteratedType(from);
+  if (!element || from->isString()) {
+    std::string message = ErrorTextBytesStatic::source(what, from->name());
+
+    return err(BufferStaticCheckerSourceElementError{
+        .code = BufferStaticCheckerSourceElementErrorCode::NOT_ITERABLE,
+        .message = message,
+    });
+  }
+
+  return ok(element);
+}
+
+BufferStaticChecker::ResultConcatSources BufferStaticChecker::concatSources(const Type *list,
+                                                                            const Type *buffer) {
+  const Type *uint8 = Type::bytesType(Bytes::Uint8);
+  if (!list->isArray() || (list->inner() != uint8 && list->inner() != buffer)) {
+    std::string message = ErrorTextBufferStatic::concat(list->name());
+
+    return err(BufferStaticCheckerConcatSourcesError{
+        .code = BufferStaticCheckerConcatSourcesErrorCode::NOT_BYTES_LIST,
+        .message = message,
+    });
+  }
+
+  return ok(list);
 }
 
 BufferStaticChecker::BufferStaticChecker(CheckState &owner)
@@ -62,7 +84,9 @@ Expr *BufferStaticChecker::checkBytesStatic(CallExpr *call, MemberExpr *member) 
     return nullptr;
   }
   if (object->name == "BigInt64Array" || object->name == "BigUint64Array") {
-    DecimalChecker(this->state).reportBigInt(object->loc(), "'" + object->name.str() + "'");
+    std::string quoted = ErrorTextBigInt::quoted(object->name);
+    std::string bigint = ErrorTextBigInt::none(quoted);
+    this->state.getDiagnostics().error(object->loc(), bigint);
     for (Expr *&arg : call->args) {
       arg = ExprChecker(this->state).checkExpr(arg);
     }
@@ -106,8 +130,8 @@ Expr *BufferStaticChecker::checkBytesStatic(CallExpr *call, MemberExpr *member) 
   }
   if (!type->isTypedArray()) {
     checkArgsLoosely();
-    this->state.getDiagnostics().error(member->loc(),
-                                       "'" + object->name + "." + name + "' does not exist");
+    std::string message = ErrorTextBytesStatic::missing(object->name, name);
+    this->state.getDiagnostics().error(member->loc(), message);
     return call;
   }
   if (name == "of") {
@@ -119,9 +143,8 @@ Expr *BufferStaticChecker::checkBytesStatic(CallExpr *call, MemberExpr *member) 
   }
   if (name != "from") {
     checkArgsLoosely();
-    this->state.getDiagnostics().error(member->loc(), "'" + object->name + "." + name +
-                                                          "' is not supported; of " + object->name +
-                                                          " there are 'from' and 'of'");
+    std::string message = ErrorTextBytesStatic::notYet(object->name, name);
+    this->state.getDiagnostics().error(member->loc(), message);
     return call;
   }
   ArgumentChecker::ResultArityMatches arity = ArgumentChecker(this->state).checkArity(call, 1, 2);
@@ -143,7 +166,9 @@ Expr *BufferStaticChecker::checkBytesStatic(CallExpr *call, MemberExpr *member) 
                 type);
   }
 
-  return this->checkBytesFromWith(call, type, "'" + object->name.str() + ".from'");
+  std::string what = ErrorTextBytesStatic::from(object->name);
+
+  return this->checkBytesFromWith(call, type, what);
 }
 
 Expr *BufferStaticChecker::checkBytesFromWith(CallExpr *call, const Type *type,
@@ -155,13 +180,12 @@ Expr *BufferStaticChecker::checkBytesFromWith(CallExpr *call, const Type *type,
   if (from->isError()) {
     return call;
   }
-  const Type *element = GeneratorChecker::iteratedType(from);
-  if (!element || from->isString()) {
-    this->state.getDiagnostics().error(
-        source->loc(),
-        what + " takes an array, a typed array or an iterator, found '" + from->name() + "'");
+  ResultSourceElement iterated = BufferStaticChecker::sourceElement(from, what);
+  if (iterated.isErr()) {
+    this->state.getDiagnostics().error(source->loc(), iterated.error().message);
     return call;
   }
+  const Type *element = iterated.value();
   if (from->isIterator()) {
     GeneratorChecker::ResultNextNeedsNoValue nothing =
         GeneratorChecker(this->state).checkSendsNothing(from, what);
@@ -189,13 +213,11 @@ Expr *BufferStaticChecker::checkBytesFromWith(CallExpr *call, const Type *type,
   }
   int64_t lo, hi;
   if (!arrow && type->elementRange(lo, hi) && type->bytes() != Bytes::Uint8Clamped) {
-    this->state.getDiagnostics().error(
-        call->args[1]->loc(),
-        "cannot prove that what the function returns fits in an element of '" + type->name() +
-            "' (" + BufferStaticChecker::rangeText(lo, hi) +
-            "), and JavaScript would cut it without a word; pass an arrow that cuts it "
-            "explicitly, e.g. 'x => " +
-            wrapHint(type->bytes(), "f(x)") + "'");
+    std::string elementWhat = ErrorTextByteView::element(type->name());
+    std::string range = ErrorTextBytes::range(lo, hi);
+    std::string hint = BytesCheckHelpers::wrapHint(type->bytes(), "f(x)");
+    std::string message = ErrorTextTypedArray::mapFits(elementWhat, range, hint);
+    this->state.getDiagnostics().error(call->args[1]->loc(), message);
     return call;
   }
   FlowChecker(this->state).calledFunction();
@@ -269,16 +291,15 @@ Expr *BufferStaticChecker::checkBufferStatic(CallExpr *call, MemberExpr *member)
       for (size_t i = 1; i < call->args.size(); ++i) {
         call->args[i] = MemberChecker(this->state).checkPosition(call->args[i]);
       }
+      std::string what = ErrorTextBufferStatic::buffer();
       ByteProofs(this->state)
           .checkView(call->args[0], call->args.size() > 1 ? call->args[1] : nullptr,
-                     call->args.size() > 2 ? call->args[2] : nullptr, 1, "the Buffer");
+                     call->args.size() > 2 ? call->args[2] : nullptr, 1, what);
       return made(Builtin::BytesView, buffer);
     }
     if (call->args.size() > 1) {
-      this->state.getDiagnostics().error(call->args[1]->loc(),
-                                         "'Buffer.from' takes an offset and a length only with "
-                                         "an ArrayBuffer, found '" +
-                                             from->name() + "'");
+      std::string message = ErrorTextBufferStatic::offsetOnly(from->name());
+      this->state.getDiagnostics().error(call->args[1]->loc(), message);
       return call;
     }
     if (!BytesNewChecker(this->state).checkBytesSource(source, buffer)) {
@@ -293,9 +314,9 @@ Expr *BufferStaticChecker::checkBufferStatic(CallExpr *call, MemberExpr *member)
       return call;
     }
     call->args[0] = MemberChecker(this->state).checkPosition(call->args[0]);
+    std::string size = ErrorTextBufferStatic::size();
     IndexProofs::ResultBetweenProven between =
-        IndexProofs(this->state)
-            .requireBetween(call->args[0], 0, std::nullopt, "the size of a Buffer");
+        IndexProofs(this->state).requireBetween(call->args[0], 0, std::nullopt, size);
     if (between.isErr() && between.error().code != IndexProofsRequireBetweenErrorCode::EXEMPT) {
       this->state.getDiagnostics().error(call->args[0]->loc(), between.error().message);
     }
@@ -310,22 +331,25 @@ Expr *BufferStaticChecker::checkBufferStatic(CallExpr *call, MemberExpr *member)
     }
     if (t->isInteger()) {
       fill = TypeRelations(this->state).convert(fill, Type::intTy() == t ? t : Type::intTy());
-      ByteProofs(this->state).checkFits(fill, buffer, "a byte");
+      std::string byte = ErrorTextBufferLabel::byte();
+      ByteProofs::ResultValueFitsType fitting =
+          ByteProofs(this->state).valueFits(fill, buffer, byte);
+      if (fitting.isErr()) {
+        this->state.getDiagnostics().error(fill->loc(), fitting.error().message);
+      }
     } else if (t->isTypedArray() && TypeRelations::isImplicitlyConvertible(t, uint8)) {
       fill = TypeRelations(this->state).convert(fill, uint8);
     } else if (!t->isString()) {
-      this->state.getDiagnostics().error(
-          fill->loc(), "'Buffer.alloc' fills with a number, a string or a Uint8Array, "
-                       "found '" +
-                           t->name() + "'");
+      std::string message = ErrorTextBufferStatic::allocFill(t->name());
+      this->state.getDiagnostics().error(fill->loc(), message);
       return call;
     }
     Expr *encoding = utf8Lit();
     if (call->args.size() == 3) {
       encoding = BytesChecker(this->state).checkBufferEncoding(call->args[2]);
       if (!t->isString()) {
-        this->state.getDiagnostics().error(encoding->loc(),
-                                           "an encoding goes only with a string to fill with");
+        std::string message = ErrorTextBufferStatic::fillCoding();
+        this->state.getDiagnostics().error(encoding->loc(), message);
       }
     }
     call->args = {call->args[0], fill, encoding};
@@ -338,9 +362,9 @@ Expr *BufferStaticChecker::checkBufferStatic(CallExpr *call, MemberExpr *member)
       return call;
     }
     call->args[0] = MemberChecker(this->state).checkPosition(call->args[0]);
+    std::string size = ErrorTextBufferStatic::size();
     IndexProofs::ResultBetweenProven between =
-        IndexProofs(this->state)
-            .requireBetween(call->args[0], 0, std::nullopt, "the size of a Buffer");
+        IndexProofs(this->state).requireBetween(call->args[0], 0, std::nullopt, size);
     if (between.isErr() && between.error().code != IndexProofsRequireBetweenErrorCode::EXEMPT) {
       this->state.getDiagnostics().error(call->args[0]->loc(), between.error().message);
     }
@@ -355,22 +379,19 @@ Expr *BufferStaticChecker::checkBufferStatic(CallExpr *call, MemberExpr *member)
     }
     Expr *&list = call->args[0];
     list = ExprChecker(this->state).checkExpr(list, Type::array(uint8));
-    const Type *t = list->type;
-    if (t->isError()) {
+    if (list->type->isError()) {
       return call;
     }
-    if (!t->isArray() || (t->inner() != uint8 && t->inner() != buffer)) {
-      this->state.getDiagnostics().error(
-          list->loc(), "'Buffer.concat' takes an array of Uint8Arrays or Buffers, "
-                       "found '" +
-                           t->name() + "'");
+    ResultConcatSources sources = BufferStaticChecker::concatSources(list->type, buffer);
+    if (sources.isErr()) {
+      this->state.getDiagnostics().error(list->loc(), sources.error().message);
       return call;
     }
     if (call->args.size() == 2) {
       call->args[1] = MemberChecker(this->state).checkPosition(call->args[1]);
+      std::string total = ErrorTextBufferStatic::total();
       IndexProofs::ResultBetweenProven between =
-          IndexProofs(this->state)
-              .requireBetween(call->args[1], 0, std::nullopt, "the total length");
+          IndexProofs(this->state).requireBetween(call->args[1], 0, std::nullopt, total);
       if (between.isErr() && between.error().code != IndexProofsRequireBetweenErrorCode::EXEMPT) {
         this->state.getDiagnostics().error(call->args[1]->loc(), between.error().message);
       }
@@ -393,10 +414,8 @@ Expr *BufferStaticChecker::checkBufferStatic(CallExpr *call, MemberExpr *member)
       call->args[1] =
           call->args[1] ? BytesChecker(this->state).checkBufferEncoding(call->args[1]) : utf8Lit();
     } else if (!t->isByteView() && t->bytes() != Bytes::ArrayBuffer) {
-      this->state.getDiagnostics().error(call->args[0]->loc(),
-                                         "'Buffer.byteLength' takes a string, a typed array, a "
-                                         "DataView or an ArrayBuffer, found '" +
-                                             t->name() + "'");
+      std::string message = ErrorTextBufferStatic::byteLength(t->name());
+      this->state.getDiagnostics().error(call->args[0]->loc(), message);
       return call;
     }
     return made(Builtin::BufferByteLength, Type::intTy());
@@ -443,7 +462,7 @@ Expr *BufferStaticChecker::checkBufferStatic(CallExpr *call, MemberExpr *member)
       return call;
     }
     if (std::optional<std::u16string> text = BufferStaticChecker::literalText(call->args[0])) {
-      return boolLit(encodingNamed(BufferStaticChecker::utf8(*text)).has_value());
+      return boolLit(BytesCheckHelpers::encodingNamed(ToUtf8::toUtf8(*text)).has_value());
     }
     call->args[0] = ArgumentChecker(this->state).checkArg(call->args[0], Type::string());
     return made(Builtin::BufferIsEncoding, Type::boolTy());
@@ -451,11 +470,8 @@ Expr *BufferStaticChecker::checkBufferStatic(CallExpr *call, MemberExpr *member)
   for (Expr *&arg : call->args) {
     arg = ExprChecker(this->state).checkExpr(arg);
   }
-  this->state.getDiagnostics().error(
-      member->loc(), "'Buffer." + name +
-                         "' is not supported; Buffer has from, alloc, "
-                         "allocUnsafe, concat, byteLength, compare, isBuffer, isEncoding "
-                         "and of");
+  std::string message = ErrorTextBufferStatic::unknown(name);
+  this->state.getDiagnostics().error(member->loc(), message);
 
   return call;
 }
@@ -472,10 +488,8 @@ Expr *BufferStaticChecker::checkEmbedBytes(CallExpr *call, NameExpr *name) {
     return call;
   }
   if (int64_t(bytes.size()) > kMaxLength) {
-    this->state.getDiagnostics().error(call->args[0]->loc(),
-                                       "'" + shown +
-                                           "' is larger than the 1 GiB a Uint8Array "
-                                           "may have");
+    std::string message = ErrorTextBufferStatic::embedSize(shown);
+    this->state.getDiagnostics().error(call->args[0]->loc(), message);
     return call;
   }
   llvm::SMLoc loc = call->args[0]->loc();

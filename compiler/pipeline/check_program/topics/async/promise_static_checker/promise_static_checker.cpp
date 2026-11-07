@@ -319,8 +319,9 @@ Expr *PromiseStaticChecker::checkPromiseStatic(CallExpr *call, MemberExpr *membe
     std::string message = name == "reject"       ? ErrorTextNoReject::rejected()
                           : name == "allSettled" ? ErrorTextNoReject::settled()
                                                  : ErrorTextNoReject::any();
+    this->state.getDiagnostics().error(member->loc(), message);
 
-    return ResultChecker(this->state).reject(call, member->loc(), message);
+    return ResultChecker(this->state).markCallFailed(call);
   }
   if (name == "withResolvers") {
     ArgumentChecker::ResultArityMatches arity = ArgumentChecker(this->state).checkArity(call, 0, 0);

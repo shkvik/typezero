@@ -15,6 +15,7 @@ public:
   bool constructorLeaks(const ClassDecl *cls);
 
 private:
+  static bool keepsReceiver(Builtin b, bool discarded);
   Analysis &analysis_;
 };
 

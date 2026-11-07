@@ -60,7 +60,8 @@ AliasInstantiator::ResultArgumentMatch
 AliasInstantiator::argumentMatch(const TypeAliasDecl *alias, llvm::ArrayRef<const Type *> params,
                                  llvm::ArrayRef<const Type *> args, size_t k) {
   if (!TypeParams(this->state).satisfies(args[k], params[k], params, args)) {
-    std::string constraint = constraintSpelling(params[k], &alias->typeParams[k]);
+    std::string constraint =
+        GenericCheckHelpers::constraintSpelling(params[k], &alias->typeParams[k]);
     std::string message = ErrorTextAliasMatch::unsatisfied(args[k]->name(), constraint,
                                                            params[k]->name(), alias->name);
 

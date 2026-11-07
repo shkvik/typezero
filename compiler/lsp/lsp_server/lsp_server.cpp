@@ -28,7 +28,23 @@ constexpr milliseconds kOpenDelay(50);
 constexpr milliseconds kTypingDelay(300);
 constexpr milliseconds kPollDelay(10);
 
-std::string temporaryFile(llvm::StringRef prefix, llvm::StringRef suffix) {
+}
+
+LspServer::LspServer(LspChannel &channel, std::string self)
+    : channel_(channel),
+      self_(std::move(self)) {
+  request_ = LspServer::temporaryFile("tz-lsp-request", "json");
+  response_ = LspServer::temporaryFile("tz-lsp-response", "json");
+  log_ = LspServer::temporaryFile("tz-lsp-check", "log");
+}
+
+LspServer::~LspServer() {
+  fs::remove(request_);
+  fs::remove(response_);
+  fs::remove(log_);
+}
+
+std::string LspServer::temporaryFile(llvm::StringRef prefix, llvm::StringRef suffix) {
   llvm::SmallString<256> file;
   if (fs::createTemporaryFile(prefix, suffix, file)) {
     return "";
@@ -37,7 +53,7 @@ std::string temporaryFile(llvm::StringRef prefix, llvm::StringRef suffix) {
   return std::string(file);
 }
 
-std::string textOf(const llvm::json::Value &value) {
+std::string LspServer::textOf(const llvm::json::Value &value) {
   std::string text;
   llvm::raw_string_ostream stream(text);
   stream << value;
@@ -45,26 +61,11 @@ std::string textOf(const llvm::json::Value &value) {
   return text;
 }
 
-llvm::json::Object startRange() {
+llvm::json::Object LspServer::startRange() {
   llvm::json::Object start{{"line", 0}, {"character", 0}};
   llvm::json::Object end{{"line", 0}, {"character", 0}};
 
   return llvm::json::Object{{"start", std::move(start)}, {"end", std::move(end)}};
-}
-
-}
-
-LspServer::LspServer(LspChannel &channel, std::string self)
-    : channel_(channel), self_(std::move(self)) {
-  request_ = temporaryFile("tz-lsp-request", "json");
-  response_ = temporaryFile("tz-lsp-response", "json");
-  log_ = temporaryFile("tz-lsp-check", "log");
-}
-
-LspServer::~LspServer() {
-  fs::remove(request_);
-  fs::remove(response_);
-  fs::remove(log_);
 }
 
 int LspServer::run() {
@@ -538,7 +539,8 @@ llvm::json::Value LspServer::diagnostic(const llvm::json::Object &found) const {
       }
       std::string uri = uriFor(fields->getString("path").value_or(""));
       const llvm::json::Value *range = fields->get("range");
-      llvm::json::Object location{{"uri", uri}, {"range", range ? *range : startRange()}};
+      llvm::json::Object location{{"uri", uri},
+                                  {"range", range ? *range : LspServer::startRange()}};
       related.push_back(
           llvm::json::Object{{"location", std::move(location)},
                              {"message", fields->getString("message").value_or("").str()}});
@@ -546,7 +548,7 @@ llvm::json::Value LspServer::diagnostic(const llvm::json::Object &found) const {
   }
   const llvm::json::Value *range = found.get("range");
 
-  return llvm::json::Object{{"range", range ? *range : startRange()},
+  return llvm::json::Object{{"range", range ? *range : LspServer::startRange()},
                             {"severity", found.getInteger("severity").value_or(1)},
                             {"source", "tz"},
                             {"message", found.getString("message").value_or("").str()},
@@ -581,8 +583,10 @@ void LspServer::finish(int code) {
   if (!report) {
     std::string message = "tz stopped while checking this program (exit code " +
                           std::to_string(code) + "): this is a bug in tz";
-    next[uriFor(entry.path)].push_back(llvm::json::Object{
-        {"range", startRange()}, {"severity", 1}, {"source", "tz"}, {"message", message}});
+    next[uriFor(entry.path)].push_back(llvm::json::Object{{"range", LspServer::startRange()},
+                                                          {"severity", 1},
+                                                          {"source", "tz"},
+                                                          {"message", message}});
     log("tz: " + entry.path + ": " + message);
     publish(entry, std::move(next));
     return;
@@ -626,7 +630,7 @@ void LspServer::finish(int code) {
     for (const auto &[uri, list] : next) {
       std::set<std::string> &seen = entry.quick[uri];
       for (const llvm::json::Value &item : list) {
-        seen.insert(textOf(item));
+        seen.insert(LspServer::textOf(item));
       }
     }
     for (const auto &[uri, list] : entry.later) {
@@ -644,7 +648,7 @@ void LspServer::finish(int code) {
     for (const auto &[uri, list] : next) {
       const std::set<std::string> &seen = entry.quick[uri];
       for (const llvm::json::Value &item : list) {
-        if (seen.count(textOf(item)) == 0) {
+        if (seen.count(LspServer::textOf(item)) == 0) {
           entry.later[uri].push_back(item);
         }
       }

@@ -21,9 +21,10 @@
 
 namespace tz {
 
-namespace {
+ScriptCommand::ScriptCommand(const char *argv0)
+    : argv0_(argv0) {}
 
-std::string shellWord(llvm::StringRef arg) {
+std::string ScriptCommand::shellWord(llvm::StringRef arg) {
 #ifdef _WIN32
   if (!arg.empty() && arg.find_first_of(" \t\"&|<>^%()") == llvm::StringRef::npos) {
     return arg.str();
@@ -48,7 +49,7 @@ std::string shellWord(llvm::StringRef arg) {
 #endif
 }
 
-void addToPath(llvm::StringRef dir) {
+void ScriptCommand::addToPath(llvm::StringRef dir) {
   const char *old = std::getenv("PATH");
 #ifdef _WIN32
   std::string value = dir.str() + ";" + (old ? old : "");
@@ -59,7 +60,7 @@ void addToPath(llvm::StringRef dir) {
 #endif
 }
 
-int spawn(const std::string &command) {
+int ScriptCommand::spawn(const std::string &command) {
 #ifdef _WIN32
   std::string line = "cmd.exe /d /s /c \"" + command + "\"";
   llvm::SmallVector<llvm::UTF16, 256> wide;
@@ -104,20 +105,16 @@ int spawn(const std::string &command) {
 #endif
 }
 
-}
-
-ScriptCommand::ScriptCommand(const char *argv0) : argv0_(argv0) {}
-
 int ScriptCommand::run(const Args &args) const {
   if (args.programArgs.empty() || args.literalArgs) {
     return -1;
   }
-  std::string manifestPath = pkg::findManifest("");
+  std::string manifestPath = pkg::ManifestFile::findManifest("");
   if (manifestPath.empty()) {
     return -1;
   }
   pkg::Manifest manifest;
-  if (!pkg::readManifest(manifestPath, manifest)) {
+  if (!pkg::ManifestFile::readManifest(manifestPath, manifest)) {
     return kExitError;
   }
   const std::string &name = args.programArgs.front();
@@ -132,19 +129,19 @@ int ScriptCommand::run(const Args &args) const {
   }
   std::string command = *script;
   for (size_t i = 1; i < args.programArgs.size(); ++i) {
-    command += " " + shellWord(args.programArgs[i]);
+    command += " " + ScriptCommand::shellWord(args.programArgs[i]);
   }
   llvm::errs() << "$ " << command << "\n";
   llvm::errs().flush();
   std::string self = llvm::sys::fs::getMainExecutable(argv0_, (void *)(intptr_t)&Args::printUsage);
   if (!self.empty()) {
-    addToPath(llvm::sys::path::parent_path(self));
+    ScriptCommand::addToPath(llvm::sys::path::parent_path(self));
   }
   if (std::error_code ec = llvm::sys::fs::set_current_path(manifest.dir)) {
     llvm::errs() << "tz: cannot go to " << manifest.dir << ": " << ec.message() << "\n";
     return kExitError;
   }
-  int code = spawn(command);
+  int code = ScriptCommand::spawn(command);
 
   return code < 0 ? kExitError : code;
 }

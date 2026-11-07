@@ -73,7 +73,7 @@ void *tz_unknown_of(const TzType *type, const void *value) {
       return NULL;
     }
     if (j->kind == TZ_JSON_NULL) {
-      tz_value_release(type, value);
+      tz_value_release(type, (void *)value);
       return NULL;
     }
   }

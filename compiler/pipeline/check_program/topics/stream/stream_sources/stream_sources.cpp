@@ -157,6 +157,20 @@ const Type *StreamSources::streamFromOptionsType() {
   return alias ? TypeDeclarer(this->state).resolveAlias(alias) : nullptr;
 }
 
+StreamSources::ResultValuesIterator StreamSources::valuesIterator(Expr *source) {
+  Expr *iterator = StreamPipeline(this->state).valuesIteratorOf(source);
+  if (!iterator) {
+    std::string message = ErrorTextStreamFrom::source(source->type->name());
+
+    return err(StreamSourcesValuesIteratorError{
+        .code = StreamSourcesValuesIteratorErrorCode::NOT_ITERABLE,
+        .message = message,
+    });
+  }
+
+  return ok(iterator);
+}
+
 Expr *StreamSources::checkStreamFrom(CallExpr *call, MemberExpr *member) {
   call->type = Type::error();
   bool rejected = CallChecker(this->state).rejectSpread(call);
@@ -206,14 +220,12 @@ Expr *StreamSources::checkStreamFrom(CallExpr *call, MemberExpr *member) {
     return EventTargetChecker(this->state)
         .callLibraryFunction(call, "streamFromAsyncIterator", {async->type->yielded()}, given, loc);
   }
-  Expr *iterator = StreamPipeline(this->state).valuesIteratorOf(source);
-  if (!iterator) {
-    this->state.getDiagnostics().error(
-        source->loc(), "'Readable.from' takes an iterable, an async iterable, a string "
-                       "or a Buffer, but this is '" +
-                           type->name() + "'");
+  ResultValuesIterator values = this->valuesIterator(source);
+  if (values.isErr()) {
+    this->state.getDiagnostics().error(source->loc(), values.error().message);
     return call;
   }
+  Expr *iterator = values.value();
   call->args = {iterator, options};
 
   return EventTargetChecker(this->state)

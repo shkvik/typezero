@@ -88,7 +88,7 @@ Expr *MethodLiteralChecker::checkMethodLiteral(ObjectLitExpr *lit, const Type *t
     return lit;
   }
   type->defineFields(fields);
-  std::string name = objectTypeSpelling(fields);
+  std::string name = TypeSpelling::objectTypeSpelling(fields);
   std::string methods;
   for (FunctionDecl *fn : cls->methods) {
     methods += (methods.empty() ? "" : "; ") + fn->name.str() + "()";

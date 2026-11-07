@@ -3,8 +3,9 @@
 namespace tz {
 
 CryptoUse LicensesPass::run(llvm::Module &module) const {
-  CryptoUse crypto = cryptoUse(module);
-  addLicenseManifest(module, {crypto.any, usesEncodingIndexes(module), usesHttp2(module)});
+  CryptoUse crypto = Licenses::cryptoUse(module);
+  Licenses::addLicenseManifest(
+      module, {crypto.any, Licenses::usesEncodingIndexes(module), Licenses::usesHttp2(module)});
 
   return crypto;
 }

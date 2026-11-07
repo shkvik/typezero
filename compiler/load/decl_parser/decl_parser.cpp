@@ -65,7 +65,7 @@ Stmt *DeclParser::parseInterface() {
     parser_.cursor().error(
         parser_.tok_.loc(),
         llvm::Twine("expected '{' to start the fields of the interface, found ") +
-            tokSpelling(parser_.tok_.kind));
+            TokenKinds::tokSpelling(parser_.tok_.kind));
     return parser_.ctx_.make<EmptyStmt>(loc);
   }
   auto *decl = parser_.ctx_.make<TypeAliasDecl>(loc, name, parser_.objectTypes().parseObjectType());
@@ -92,7 +92,7 @@ Stmt *DeclParser::parseEnum() {
     if (!parser_.tok_.is(Tok::Identifier)) {
       parser_.cursor().error(parser_.tok_.loc(),
                              llvm::Twine("expected the name of an enum member, found ") +
-                                 tokSpelling(parser_.tok_.kind));
+                                 TokenKinds::tokSpelling(parser_.tok_.kind));
       break;
     }
     member.name = parser_.tok_.text;

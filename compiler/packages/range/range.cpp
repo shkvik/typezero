@@ -5,9 +5,7 @@
 
 namespace tz::pkg {
 
-namespace {
-
-Version floorOf(uint64_t major, uint64_t minor, uint64_t patch) {
+Version Range::floorOf(uint64_t major, uint64_t minor, uint64_t patch) {
   Version v;
   v.major = major;
   v.minor = minor;
@@ -17,17 +15,15 @@ Version floorOf(uint64_t major, uint64_t minor, uint64_t patch) {
   return v;
 }
 
-Version after(const Partial &p) {
+Version Range::after(const Partial &p) {
   if (p.count == 1) {
-    return floorOf(p.parts[0] + 1, 0, 0);
+    return Range::floorOf(p.parts[0] + 1, 0, 0);
   }
   if (p.count == 2) {
-    return floorOf(p.parts[0], p.parts[1] + 1, 0);
+    return Range::floorOf(p.parts[0], p.parts[1] + 1, 0);
   }
 
-  return floorOf(p.parts[0], p.parts[1], p.parts[2] + 1);
-}
-
+  return Range::floorOf(p.parts[0], p.parts[1], p.parts[2] + 1);
 }
 
 bool Range::parse(llvm::StringRef text, Range &out, std::string &error) {
@@ -77,17 +73,17 @@ bool Range::parseSet(llvm::StringRef text, Set &out, std::string &error) {
   }
   if (words.size() == 3 && words[1] == "-") {
     Partial low, high;
-    if (!parsePartial(words[0], low)) {
+    if (!PartialParser::parsePartial(words[0], low)) {
       return bad(words[0]);
     }
-    if (!parsePartial(words[2], high)) {
+    if (!PartialParser::parsePartial(words[2], high)) {
       return bad(words[2]);
     }
     add(Op::GreaterEq, low.version());
     if (high.count == 3) {
       add(Op::LessEq, high.version());
     } else if (high.count > 0) {
-      add(Op::Less, after(high), true);
+      add(Op::Less, Range::after(high), true);
     }
     return true;
   }
@@ -109,7 +105,7 @@ bool Range::parseSet(llvm::StringRef text, Set &out, std::string &error) {
       kind = '~';
     }
     Partial p;
-    if (!parsePartial(word, p)) {
+    if (!PartialParser::parsePartial(word, p)) {
       return bad(word);
     }
     Version v = p.version();
@@ -121,11 +117,11 @@ bool Range::parseSet(llvm::StringRef text, Set &out, std::string &error) {
       }
       add(Op::GreaterEq, v);
       if (p.count == 1 || major > 0) {
-        add(Op::Less, floorOf(major + 1, 0, 0), true);
+        add(Op::Less, Range::floorOf(major + 1, 0, 0), true);
       } else if (p.count == 2 || minor > 0) {
-        add(Op::Less, floorOf(0, minor + 1, 0), true);
+        add(Op::Less, Range::floorOf(0, minor + 1, 0), true);
       } else {
-        add(Op::Less, floorOf(0, 0, p.parts[2] + 1), true);
+        add(Op::Less, Range::floorOf(0, 0, p.parts[2] + 1), true);
       }
       continue;
     }
@@ -134,7 +130,9 @@ bool Range::parseSet(llvm::StringRef text, Set &out, std::string &error) {
         continue;
       }
       add(Op::GreaterEq, v);
-      add(Op::Less, p.count == 1 ? floorOf(major + 1, 0, 0) : floorOf(major, minor + 1, 0), true);
+      add(Op::Less,
+          p.count == 1 ? Range::floorOf(major + 1, 0, 0) : Range::floorOf(major, minor + 1, 0),
+          true);
       continue;
     }
     switch (op) {
@@ -143,16 +141,16 @@ bool Range::parseSet(llvm::StringRef text, Set &out, std::string &error) {
         add(Op::Equal, v);
       } else if (p.count > 0) {
         add(Op::GreaterEq, v);
-        add(Op::Less, after(p), true);
+        add(Op::Less, Range::after(p), true);
       }
       break;
     case Op::Greater:
       if (p.count == 3) {
         add(Op::Greater, v);
       } else if (p.count == 0) {
-        add(Op::Less, floorOf(0, 0, 0), true);
+        add(Op::Less, Range::floorOf(0, 0, 0), true);
       } else {
-        Version next = after(p);
+        Version next = Range::after(p);
         next.pre.clear();
         add(Op::GreaterEq, next);
       }
@@ -166,14 +164,14 @@ bool Range::parseSet(llvm::StringRef text, Set &out, std::string &error) {
       if (p.count == 3) {
         add(Op::Less, v);
       } else {
-        add(Op::Less, floorOf(p.parts[0], p.parts[1], 0), true);
+        add(Op::Less, Range::floorOf(p.parts[0], p.parts[1], 0), true);
       }
       break;
     case Op::LessEq:
       if (p.count == 3) {
         add(Op::LessEq, v);
       } else if (p.count > 0) {
-        add(Op::Less, after(p), true);
+        add(Op::Less, Range::after(p), true);
       }
       break;
     }

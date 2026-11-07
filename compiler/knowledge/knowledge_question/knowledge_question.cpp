@@ -8,9 +8,7 @@
 
 namespace tz {
 
-namespace {
-
-std::string printed(const llvm::json::Value &value, bool pretty) {
+std::string KnowledgeQuestion::printed(const llvm::json::Value &value, bool pretty) {
   std::string text;
   llvm::raw_string_ostream stream(text);
   if (pretty) {
@@ -22,14 +20,12 @@ std::string printed(const llvm::json::Value &value, bool pretty) {
   return text + "\n";
 }
 
-}
-
 bool KnowledgeQuestion::answer(const Knowledge &knowledge, const KnowledgeRequest &request,
                                std::string &out, std::string &error) {
   if (request.kind == "records") {
     std::set<std::string> none;
-    out = printed(KnowledgeJson::write(knowledge, true, request.brief ? &none : nullptr),
-                  !request.json);
+    out = KnowledgeQuestion::printed(
+        KnowledgeJson::write(knowledge, true, request.brief ? &none : nullptr), !request.json);
     return true;
   }
   ProjectText text(knowledge.root);
@@ -57,16 +53,16 @@ bool KnowledgeQuestion::answer(const Knowledge &knowledge, const KnowledgeReques
       command != "query") {
     out = answers.local(local, "references");
   } else if (command == "map") {
-    out = request.json ? printed(answers.mapJson(request.library), true)
+    out = request.json ? KnowledgeQuestion::printed(answers.mapJson(request.library), true)
                        : answers.map(request.budget, request.library);
   } else if (command == "context") {
-    out = request.json ? printed(answers.contextJson(symbols), true)
+    out = request.json ? KnowledgeQuestion::printed(answers.contextJson(symbols), true)
                        : answers.context(symbols, request.budget);
   } else if (command == "impact") {
-    out = request.json ? printed(answers.impactJson(symbols), true)
+    out = request.json ? KnowledgeQuestion::printed(answers.impactJson(symbols), true)
                        : answers.impact(symbols, request.budget);
   } else if (request.json) {
-    out = printed(answers.queryJson(request.kind, *target, symbols), true);
+    out = KnowledgeQuestion::printed(answers.queryJson(request.kind, *target, symbols), true);
   } else {
     out = answers.query(request.kind, *target, symbols);
   }

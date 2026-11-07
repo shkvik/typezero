@@ -117,6 +117,8 @@ public:
   const std::vector<size_t> &symbolsOf(size_t module) const;
 
 private:
+  static bool covers(const SourcePlace &place, unsigned line, unsigned character);
+  static unsigned size(const SourcePlace &place);
   void index() const;
 
   mutable size_t indexed_ = 0;

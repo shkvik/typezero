@@ -61,7 +61,7 @@ llvm::Value *DictMethodLowerer::emitDictCall(CallExpr *call) {
     default:
       break;
   }
-  if (isDictIterator(call->builtin())) {
+  if (BuiltinGroups::isDictIterator(call->builtin())) {
     return this->lowering.iteratorLowerer().emitIteratorBuiltin(call);
   }
   Expr *receiver = cast<MemberExpr>(call->callee)->object;

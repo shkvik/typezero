@@ -38,7 +38,9 @@ Expr *JsonFeature::checkFunctionCall(CheckState &state, CallExpr *call, NameExpr
   return JsonStaticChecker(state).checkJsonGlobal(call, name);
 }
 
-bool JsonFeature::lowers(Builtin builtin) const { return isJsonBuiltin(builtin); }
+bool JsonFeature::lowers(Builtin builtin) const {
+  return BuiltinGroups::isJsonBuiltin(builtin);
+}
 
 llvm::Value *JsonFeature::lowerCall(Lowering &lowering, CallExpr *call) const {
   return lowering.jsonLowerer().emitJsonCall(call);

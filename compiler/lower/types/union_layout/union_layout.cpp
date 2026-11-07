@@ -11,24 +11,7 @@ using llvm::dyn_cast;
 
 namespace tz {
 
-unsigned UnionLayout::slotWords(UnionSlot slot) {
-  switch (slot) {
-  case UnionSlot::String:
-  case UnionSlot::Decimal:
-  case UnionSlot::Function:
-    return 2;
-  default:
-    return 1;
-  }
-}
-
-bool UnionLayout::isReferenceLike(const Type *type) {
-  return type->isObject() || type->isIterator() || type->isJson() || type->isDict() ||
-         type->isPromise() || type->isUnknown() || type->isClassRef() ||
-         (type->isUnion() && !type->isTagged() && type->slots().front() == UnionSlot::Object);
-}
-
-static llvm::Value *toWord(llvm::IRBuilder<> &b, llvm::Value *v) {
+llvm::Value *UnionLayout::toWord(llvm::IRBuilder<> &b, llvm::Value *v) {
   llvm::Type *type = v->getType();
   if (type->isPointerTy()) {
     return b.CreatePtrToInt(v, b.getInt64Ty());
@@ -43,7 +26,7 @@ static llvm::Value *toWord(llvm::IRBuilder<> &b, llvm::Value *v) {
   return b.CreateZExt(v, b.getInt64Ty());
 }
 
-static llvm::Value *fromWord(llvm::IRBuilder<> &b, llvm::Value *word, llvm::Type *type) {
+llvm::Value *UnionLayout::fromWord(llvm::IRBuilder<> &b, llvm::Value *word, llvm::Type *type) {
   if (type->isPointerTy()) {
     return b.CreateIntToPtr(word, type);
   }
@@ -55,6 +38,23 @@ static llvm::Value *fromWord(llvm::IRBuilder<> &b, llvm::Value *word, llvm::Type
   }
 
   return b.CreateTrunc(word, type);
+}
+
+unsigned UnionLayout::slotWords(UnionSlot slot) {
+  switch (slot) {
+    case UnionSlot::String:
+    case UnionSlot::Decimal:
+    case UnionSlot::Function:
+      return 2;
+    default:
+      return 1;
+  }
+}
+
+bool UnionLayout::isReferenceLike(const Type *type) {
+  return type->isObject() || type->isIterator() || type->isJson() || type->isDict() ||
+         type->isPromise() || type->isUnknown() || type->isClassRef() ||
+         (type->isUnion() && !type->isTagged() && type->slots().front() == UnionSlot::Object);
 }
 
 UnionLayout::UnionLayout(Lowering &owner)
@@ -231,11 +231,11 @@ llvm::Value *UnionLayout::makeTagged(const Type *unionType, UnionSlot slot, llvm
   auto *structType = dyn_cast<llvm::StructType>(part->getType());
   if (structType) {
     for (unsigned i = 0; i < structType->getNumElements(); ++i) {
-      words.push_back(
-          toWord(this->lowering.builder_, this->lowering.builder_.CreateExtractValue(part, i)));
+      words.push_back(UnionLayout::toWord(this->lowering.builder_,
+                                          this->lowering.builder_.CreateExtractValue(part, i)));
     }
   } else {
-    words.push_back(toWord(this->lowering.builder_, part));
+    words.push_back(UnionLayout::toWord(this->lowering.builder_, part));
   }
   for (unsigned i = 0; i < words.size(); ++i) {
     result = this->lowering.builder_.CreateInsertValue(result, words[i], i + 1);
@@ -252,16 +252,16 @@ llvm::Value *UnionLayout::taggedPart(llvm::Value *value, const Type *unionType, 
     for (unsigned i = 0; i < structType->getNumElements(); ++i) {
       part = this->lowering.builder_.CreateInsertValue(
           part,
-          fromWord(this->lowering.builder_,
-                   this->lowering.builder_.CreateExtractValue(value, i + 1),
-                   structType->getElementType(i)),
+          UnionLayout::fromWord(this->lowering.builder_,
+                                this->lowering.builder_.CreateExtractValue(value, i + 1),
+                                structType->getElementType(i)),
           i);
     }
     return part;
   }
 
-  return fromWord(this->lowering.builder_, this->lowering.builder_.CreateExtractValue(value, 1),
-                  type);
+  return UnionLayout::fromWord(this->lowering.builder_,
+                               this->lowering.builder_.CreateExtractValue(value, 1), type);
 }
 
 llvm::Value *UnionLayout::forEachSlot(llvm::Value *value, llvm::ArrayRef<UnionSlot> slots,

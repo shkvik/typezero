@@ -20,26 +20,7 @@ using llvm::isa;
 
 namespace tz {
 
-namespace {
-
-enum class RefShape { None, Pointer, Function, Optional, Other };
-
-}
-
-llvm::BasicBlock *StoreLowerer::blockHere(llvm::IRBuilder<> &b, const char *name) {
-  return llvm::BasicBlock::Create(b.getContext(), name, b.GetInsertBlock()->getParent());
-}
-
-llvm::Value *StoreLowerer::spillHere(llvm::IRBuilder<> &b, llvm::Value *value, const char *name) {
-  llvm::BasicBlock &entry = b.GetInsertBlock()->getParent()->getEntryBlock();
-  llvm::IRBuilder<> at(&entry, entry.begin());
-  llvm::AllocaInst *slot = at.CreateAlloca(value->getType(), nullptr, name);
-  b.CreateStore(value, slot);
-
-  return slot;
-}
-
-static RefShape refShape(const Type *type) {
+StoreLowerer::RefShape StoreLowerer::refShape(const Type *type) {
   switch (type->kind()) {
   case Type::Kind::Object:
   case Type::Kind::Array:
@@ -60,6 +41,19 @@ static RefShape refShape(const Type *type) {
   }
 }
 
+llvm::BasicBlock *StoreLowerer::blockHere(llvm::IRBuilder<> &b, const char *name) {
+  return llvm::BasicBlock::Create(b.getContext(), name, b.GetInsertBlock()->getParent());
+}
+
+llvm::Value *StoreLowerer::spillHere(llvm::IRBuilder<> &b, llvm::Value *value, const char *name) {
+  llvm::BasicBlock &entry = b.GetInsertBlock()->getParent()->getEntryBlock();
+  llvm::IRBuilder<> at(&entry, entry.begin());
+  llvm::AllocaInst *slot = at.CreateAlloca(value->getType(), nullptr, name);
+  b.CreateStore(value, slot);
+
+  return slot;
+}
+
 StoreLowerer::StoreLowerer(Lowering &owner)
     : lowering(owner) {}
 
@@ -78,32 +72,32 @@ void StoreLowerer::groupStore(llvm::Value *owner, llvm::Value *value, const Type
             ? static_cast<llvm::Value *>(this->lowering.builder_.CreateThreadLocalAddress(site))
             : site);
   }
-  switch (refShape(type)) {
-  case RefShape::Pointer:
-    this->lowering.builder_.CreateCall(
-        this->lowering.groupLowerer().groupFunction(
-            "tz_group_store", this->lowering.builder_.getVoidTy(), {ptr, ptr}),
-        {owner, value});
-    return;
-  case RefShape::Function:
-    this->lowering.builder_.CreateCall(
-        this->lowering.groupLowerer().groupFunction(
-            "tz_group_store", this->lowering.builder_.getVoidTy(), {ptr, ptr}),
-        {owner, this->lowering.builder_.CreateExtractValue(value, 1)});
-    return;
-  case RefShape::Optional:
-    this->groupStore(owner, this->lowering.optionalLowerer().optionalValue(value, type),
-                     type->inner());
-    return;
-  case RefShape::Other:
-    this->lowering.builder_.CreateCall(
-        this->lowering.groupLowerer().groupFunction(
-            "tz_group_store_value", this->lowering.builder_.getVoidTy(), {ptr, ptr, ptr}),
-        {owner, this->lowering.typeDescriptors().typeDescriptor(type),
-         StoreLowerer::spillHere(this->lowering.builder_, value, "stored")});
-    return;
-  case RefShape::None:
-    return;
+  switch (StoreLowerer::refShape(type)) {
+    case RefShape::Pointer:
+      this->lowering.builder_.CreateCall(
+          this->lowering.groupLowerer().groupFunction(
+              "tz_group_store", this->lowering.builder_.getVoidTy(), {ptr, ptr}),
+          {owner, value});
+      return;
+    case RefShape::Function:
+      this->lowering.builder_.CreateCall(
+          this->lowering.groupLowerer().groupFunction(
+              "tz_group_store", this->lowering.builder_.getVoidTy(), {ptr, ptr}),
+          {owner, this->lowering.builder_.CreateExtractValue(value, 1)});
+      return;
+    case RefShape::Optional:
+      this->groupStore(owner, this->lowering.optionalLowerer().optionalValue(value, type),
+                       type->inner());
+      return;
+    case RefShape::Other:
+      this->lowering.builder_.CreateCall(
+          this->lowering.groupLowerer().groupFunction(
+              "tz_group_store_value", this->lowering.builder_.getVoidTy(), {ptr, ptr, ptr}),
+          {owner, this->lowering.typeDescriptors().typeDescriptor(type),
+           StoreLowerer::spillHere(this->lowering.builder_, value, "stored")});
+      return;
+    case RefShape::None:
+      return;
   }
 }
 
@@ -138,28 +132,28 @@ void StoreLowerer::releaseIn(llvm::Value *owner, llvm::Value *value, const Type 
     this->lowering.builder_.CreateBr(doneBlock);
     this->lowering.builder_.SetInsertPoint(doneBlock);
   };
-  switch (refShape(type)) {
-  case RefShape::Pointer:
-    viaGroup(value, [&] { this->lowering.refCounts().releaseValue(value, type); });
-    return;
-  case RefShape::Function:
-    viaGroup(this->lowering.builder_.CreateExtractValue(value, 1),
-             [&] { this->lowering.refCounts().releaseValue(value, type); });
-    return;
-  case RefShape::Optional:
-    this->releaseIn(owner, this->lowering.optionalLowerer().optionalValue(value, type),
-                    type->inner());
-    return;
-  case RefShape::Other:
-    this->lowering.builder_.CreateCall(
-        this->lowering.groupLowerer().groupFunction(
-            "tz_value_release_in", this->lowering.builder_.getVoidTy(), {ptr, ptr, ptr}),
-        {owner, this->lowering.typeDescriptors().typeDescriptor(type),
-         StoreLowerer::spillHere(this->lowering.builder_, value, "released")});
-    return;
-  case RefShape::None:
-    this->lowering.refCounts().releaseValue(value, type);
-    return;
+  switch (StoreLowerer::refShape(type)) {
+    case RefShape::Pointer:
+      viaGroup(value, [&] { this->lowering.refCounts().releaseValue(value, type); });
+      return;
+    case RefShape::Function:
+      viaGroup(this->lowering.builder_.CreateExtractValue(value, 1),
+               [&] { this->lowering.refCounts().releaseValue(value, type); });
+      return;
+    case RefShape::Optional:
+      this->releaseIn(owner, this->lowering.optionalLowerer().optionalValue(value, type),
+                      type->inner());
+      return;
+    case RefShape::Other:
+      this->lowering.builder_.CreateCall(
+          this->lowering.groupLowerer().groupFunction(
+              "tz_value_release_in", this->lowering.builder_.getVoidTy(), {ptr, ptr, ptr}),
+          {owner, this->lowering.typeDescriptors().typeDescriptor(type),
+           StoreLowerer::spillHere(this->lowering.builder_, value, "released")});
+      return;
+    case RefShape::None:
+      this->lowering.refCounts().releaseValue(value, type);
+      return;
   }
 }
 
@@ -189,26 +183,26 @@ void StoreLowerer::takeFrom(llvm::Value *owner, llvm::Value *value, const Type *
     this->lowering.builder_.CreateBr(doneBlock);
     this->lowering.builder_.SetInsertPoint(doneBlock);
   };
-  switch (refShape(type)) {
-  case RefShape::Pointer:
-    take(value);
-    return;
-  case RefShape::Function:
-    take(this->lowering.builder_.CreateExtractValue(value, 1));
-    return;
-  case RefShape::Optional:
-    this->takeFrom(owner, this->lowering.optionalLowerer().optionalValue(value, type),
-                   type->inner());
-    return;
-  case RefShape::Other:
-    this->lowering.builder_.CreateCall(
-        this->lowering.groupLowerer().groupFunction(
-            "tz_group_take_value", this->lowering.builder_.getVoidTy(), {ptr, ptr, ptr}),
-        {owner, this->lowering.typeDescriptors().typeDescriptor(type),
-         StoreLowerer::spillHere(this->lowering.builder_, value, "taken")});
-    return;
-  case RefShape::None:
-    return;
+  switch (StoreLowerer::refShape(type)) {
+    case RefShape::Pointer:
+      take(value);
+      return;
+    case RefShape::Function:
+      take(this->lowering.builder_.CreateExtractValue(value, 1));
+      return;
+    case RefShape::Optional:
+      this->takeFrom(owner, this->lowering.optionalLowerer().optionalValue(value, type),
+                     type->inner());
+      return;
+    case RefShape::Other:
+      this->lowering.builder_.CreateCall(
+          this->lowering.groupLowerer().groupFunction(
+              "tz_group_take_value", this->lowering.builder_.getVoidTy(), {ptr, ptr, ptr}),
+          {owner, this->lowering.typeDescriptors().typeDescriptor(type),
+           StoreLowerer::spillHere(this->lowering.builder_, value, "taken")});
+      return;
+    case RefShape::None:
+      return;
   }
 }
 
@@ -225,7 +219,8 @@ void StoreLowerer::storeBarrier(llvm::Value *owner, llvm::Value *value, const Ty
       this->lowering.builder_.CreateICmpSLT(count, this->lowering.builder_.getInt64(0)),
       barrierBlock, doneBlock, llvm::MDBuilder(this->lowering.ctx_).createUnlikelyBranchWeights());
   this->lowering.functionFrame().switchTo(barrierBlock);
-  RefShape shape = type->isString() || type->isArray() ? RefShape::Other : refShape(type);
+  RefShape shape =
+      type->isString() || type->isArray() ? RefShape::Other : StoreLowerer::refShape(type);
   if (shape == RefShape::Pointer || shape == RefShape::Function) {
     llvm::Value *object =
         shape == RefShape::Function ? this->lowering.builder_.CreateExtractValue(value, 1) : value;

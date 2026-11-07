@@ -25,8 +25,6 @@
 
 namespace tz {
 
-bool staysDuringCall(const Expr *expr);
-
 class ModuleBuilder;
 class FunctionBuilder;
 class RuntimeFunctions;
@@ -138,6 +136,8 @@ public:
   void orderAt(llvm::SMLoc loc);
 
 private:
+  static const Expr *stripImplicit(const Expr *e);
+  static const Expr *awaitedOperand(const Expr *e);
   struct JumpTarget;
   struct TailGroup;
   struct Scope {

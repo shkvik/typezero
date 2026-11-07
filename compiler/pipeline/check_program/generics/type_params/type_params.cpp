@@ -18,7 +18,7 @@ bool TypeParams::mentionsInObject(const Type *type, llvm::ArrayRef<const Type *>
                                   llvm::SmallPtrSetImpl<const Type *> &seen) {
   switch (type->kind()) {
   case Type::Kind::Param:
-    return type->typeOp() != TypeOp::None && mentionsAnyOf(type, params);
+    return type->typeOp() != TypeOp::None && GenericCheckHelpers::mentionsAnyOf(type, params);
   case Type::Kind::Optional:
   case Type::Kind::Array:
     return TypeParams::mentionsInObject(type->inner(), params, seen);
@@ -41,7 +41,7 @@ bool TypeParams::mentionsInObject(const Type *type, llvm::ArrayRef<const Type *>
       return TypeParams::mentionsInObject(m, params, seen);
     });
   case Type::Kind::Object:
-    return !seen.contains(type) && mentionsAnyOf(type, params);
+    return !seen.contains(type) && GenericCheckHelpers::mentionsAnyOf(type, params);
   default:
     return false;
   }
@@ -94,7 +94,7 @@ TypeParams::ResultConstraintKept TypeParams::constraintAlone(const Type *type,
 TypeParams::ResultDefaultSatisfy TypeParams::defaultFits(const Type *fallback, const Type *param,
                                                          const TypeParamDecl &decl) {
   if (!fallback->isError() && !this->satisfies(fallback, param)) {
-    std::string constraint = constraintSpelling(param, &decl);
+    std::string constraint = GenericCheckHelpers::constraintSpelling(param, &decl);
     std::string message =
         ErrorTextDefaultFits::unsatisfied(fallback->name(), decl.name, constraint);
 
@@ -229,7 +229,7 @@ const Type *TypeParams::substituteValue(const Type *type, llvm::ArrayRef<const T
 
 const Type *TypeParams::substituteAt(const Type *type, llvm::ArrayRef<const Type *> params,
                                      llvm::ArrayRef<const Type *> args, bool voidOk) {
-  if (!mentionsAnyOf(type, params)) {
+  if (!GenericCheckHelpers::mentionsAnyOf(type, params)) {
     return type;
   }
   auto sub = [&](const Type *t) { return this->substituteAt(t, params, args, false); };
@@ -326,7 +326,7 @@ const Type *TypeParams::substituteAt(const Type *type, llvm::ArrayRef<const Type
       }
       if (llvm::is_contained(spread, true)) {
         std::string why;
-        const Type *list = spreadTuple(elements, spread, why);
+        const Type *list = ArgumentLists::spreadTuple(elements, spread, why);
         return list ? list : Type::error();
       }
       if (type->tupleMin() < elements.size() || type->tupleRest()) {
@@ -384,7 +384,7 @@ bool TypeParams::satisfies(const Type *arg, const Type *param, llvm::ArrayRef<co
     return true;
   }
   const Type *own = param->constraint();
-  if (own && !params.empty() && mentionsAnyOf(own, params)) {
+  if (own && !params.empty() && GenericCheckHelpers::mentionsAnyOf(own, params)) {
     own = this->substitute(own, params, args);
   }
   if (own && own->isError()) {
@@ -474,11 +474,12 @@ bool TypeParams::exactTypeParam(FuncSymbol *generic, size_t k) {
                  llvm::any_of(params[i]->alternatives(), objectLike);
       exact[i] = exact[i] || params[i]->iterated() || params[i]->isListParam();
       for (const Type *p : params) {
-        exact[i] = exact[i] || (p->iterated() && mentionsAnyOf(p->iterated(), params[i]));
+        exact[i] = exact[i] ||
+                   (p->iterated() && GenericCheckHelpers::mentionsAnyOf(p->iterated(), params[i]));
       }
       for (const Type *p : params) {
-        exact[i] = exact[i] ||
-                   (p != params[i] && p->constraint() && mentionsAnyOf(p->constraint(), params[i]));
+        exact[i] = exact[i] || (p != params[i] && p->constraint() &&
+                                GenericCheckHelpers::mentionsAnyOf(p->constraint(), params[i]));
       }
       llvm::SmallPtrSet<const Type *, 4> seen;
       for (const Type *p : generic->params) {

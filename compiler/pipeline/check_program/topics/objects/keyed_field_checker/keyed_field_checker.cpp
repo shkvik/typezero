@@ -1,4 +1,5 @@
 #include "compiler/pipeline/check_program/topics/objects/keyed_field_checker/keyed_field_checker.h"
+#include "compiler/load/to_utf8/to_utf8.h"
 #include "compiler/pipeline/check_program/declare/class_declarer/class_declarer.h"
 #include "compiler/pipeline/check_program/declare/constant_folder/constant_folder.h"
 #include "compiler/pipeline/check_program/flow/field_facts/field_facts.h"
@@ -22,15 +23,6 @@ bool KeyedFieldChecker::isInherited(llvm::StringRef name) {
                                       "constructor",   "__proto__"};
 
   return llvm::is_contained(names, name);
-}
-
-std::string KeyedFieldChecker::toUtf8(const std::u16string &text) {
-  std::string utf8;
-  llvm::convertUTF16ToUTF8String(
-      llvm::ArrayRef<llvm::UTF16>(reinterpret_cast<const llvm::UTF16 *>(text.data()), text.size()),
-      utf8);
-
-  return utf8;
 }
 
 bool KeyedFieldChecker::wrongKey(KeyedFieldCheckerCheckKeyedFieldErrorCode code) {
@@ -66,10 +58,10 @@ std::optional<std::string> KeyedFieldChecker::constantKey(const Expr *key) const
     key = conv->operand;
   }
   if (auto *lit = dyn_cast<StringLitExpr>(key)) {
-    return toUtf8(lit->value);
+    return ToUtf8::toUtf8(lit->value);
   }
   if (auto *tmpl = dyn_cast<TemplateExpr>(key); tmpl && tmpl->exprs.empty()) {
-    return toUtf8(tmpl->quasis[0]);
+    return ToUtf8::toUtf8(tmpl->quasis[0]);
   }
   if (auto *name = dyn_cast<NameExpr>(key); name && name->var()) {
     if (std::optional<std::string> known =
@@ -84,9 +76,9 @@ std::optional<std::string> KeyedFieldChecker::constantKey(const Expr *key) const
 void KeyedFieldChecker::keyNames(const Expr *key,
                                  llvm::function_ref<void(llvm::StringRef)> each) const {
   if (auto *lit = dyn_cast<StringLitExpr>(key)) {
-    each(toUtf8(lit->value));
+    each(ToUtf8::toUtf8(lit->value));
   } else if (auto *tmpl = dyn_cast<TemplateExpr>(key); tmpl && tmpl->exprs.empty()) {
-    each(toUtf8(tmpl->quasis[0]));
+    each(ToUtf8::toUtf8(tmpl->quasis[0]));
   } else if (auto *number = dyn_cast<IntLitExpr>(key)) {
     each(std::to_string(number->value));
   } else if (auto *name = dyn_cast<NameExpr>(key)) {
@@ -118,7 +110,7 @@ const Type *KeyedFieldChecker::keyedFieldType(const Type *type, const Type *keyT
     if (!n->isStringLiteral()) {
       return nullptr;
     }
-    std::string text = KeyedFieldChecker::toUtf8(n->literalText());
+    std::string text = ToUtf8::toUtf8(n->literalText());
     const Field *f = type->field(text);
     if (cls) {
       const ClassField *field = ClassBases::findField(cls, text, nullptr);
@@ -197,11 +189,10 @@ KeyedFieldChecker::ResultKeyedFieldRead KeyedFieldChecker::checkKeyedField(Index
           keyType->isUnion() ? keyType->members() : llvm::ArrayRef<const Type *>(keyType);
       if (write) {
         auto assigned = [&](const Type *n) {
-          return this->state.getFlowState().isFieldAssigned(
-              KeyedFieldChecker::toUtf8(n->literalText()));
+          return this->state.getFlowState().isFieldAssigned(ToUtf8::toUtf8(n->literalText()));
         };
         auto readonly = [&](const Type *n) {
-          return type->field(KeyedFieldChecker::toUtf8(n->literalText()))->readonly;
+          return type->field(ToUtf8::toUtf8(n->literalText()))->readonly;
         };
         bool known = llvm::all_of(names, assigned);
         if (llvm::any_of(names, readonly)) {
@@ -222,8 +213,7 @@ KeyedFieldChecker::ResultKeyedFieldRead KeyedFieldChecker::checkKeyedField(Index
         }
         for (const Type *n : names) {
           FieldFacts(this->state)
-              .fieldsAssigned(
-                  this->state.getAst().keepName(KeyedFieldChecker::toUtf8(n->literalText())));
+              .fieldsAssigned(this->state.getAst().keepName(ToUtf8::toUtf8(n->literalText())));
         }
       }
       index->form = KeyedFieldIndex{};

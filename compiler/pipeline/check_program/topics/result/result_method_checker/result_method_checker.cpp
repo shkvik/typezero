@@ -23,15 +23,6 @@ bool ResultMethodChecker::givesType(const Type *half) {
   return !half->isNever() && !half->isVoid();
 }
 
-static std::string noUnion(const Type *a, const Type *b) {
-  if (a->isVoid() || b->isVoid()) {
-    return ": one of them is nothing, 'ok()'";
-  }
-  std::string problem = unionProblem(Type::unionOf({a, b}));
-
-  return problem.empty() ? "" : ": " + problem;
-}
-
 ResultMethodChecker::ResultMethodChecker(CheckState &owner)
     : state(owner) {}
 
@@ -83,8 +74,8 @@ Expr *ResultMethodChecker::checkResultMethod(CallExpr *call, MemberExpr *member,
     }
   }
   if (!method) {
-    this->state.getDiagnostics().error(
-        member->loc(), "property '" + name + "' does not exist on type '" + type->name() + "'");
+    std::string message = ErrorTextResultMethod::noMember(name, type->name());
+    this->state.getDiagnostics().error(member->loc(), message);
     checkArgsLoosely();
     return call;
   }
@@ -112,9 +103,8 @@ Expr *ResultMethodChecker::checkResultMethod(CallExpr *call, MemberExpr *member,
     }
     const Type *result = other->isVoid() ? nullptr : LiteralTypes::unionUnify(value, other);
     if (!result || result->isError()) {
-      this->state.getDiagnostics().error(
-          arg->loc(), "'unwrapOr' gives '" + value->name() + "' for an Ok and '" + other->name() +
-                          "' otherwise, and no type holds both; say what each gives with 'match'");
+      std::string message = ErrorTextResultMethod::unwrapOr(value->name(), other->name());
+      this->state.getDiagnostics().error(arg->loc(), message);
       return call;
     }
     arg = TypeRelations(this->state).convert(arg, result);
@@ -135,8 +125,8 @@ Expr *ResultMethodChecker::checkResultMethod(CallExpr *call, MemberExpr *member,
         return arg->type->ret();
       }
       if (!arg->type->isError()) {
-        this->state.getDiagnostics().error(arg->loc(), "'" + name + "' needs a function, found '" +
-                                                           arg->type->name() + "'");
+        std::string message = ErrorTextResultMethod::function(name, arg->type->name());
+        this->state.getDiagnostics().error(arg->loc(), message);
       }
       return nullptr;
     }
@@ -180,9 +170,8 @@ Expr *ResultMethodChecker::checkResultMethod(CallExpr *call, MemberExpr *member,
     }
     const Type *result = a->isVoid() || b->isVoid() ? nullptr : LiteralTypes::unionUnify(a, b);
     if (!result || result->isError()) {
-      this->state.getDiagnostics().error(member->loc(), "the functions given to 'match' return '" +
-                                                            a->name() + "' and '" + b->name() +
-                                                            "', and no type holds both");
+      std::string message = ErrorTextResultMethod::match(a->name(), b->name());
+      this->state.getDiagnostics().error(member->loc(), message);
       return call;
     }
     call->type = result;
@@ -201,22 +190,17 @@ Expr *ResultMethodChecker::checkResultMethod(CallExpr *call, MemberExpr *member,
     if (ret->isResult()) {
       return true;
     }
-    this->state.getDiagnostics().error(
-        call->args[0]->loc(),
-        "the function given to '" + name +
-            "' must return a Result, 'ok(...)' or 'err(...)', found '" + ret->name() + "'" +
-            (builtin == Builtin::ResultAndThen ? "; to change the value, use 'map'" : ""));
+    bool andThen = builtin == Builtin::ResultAndThen;
+    std::string message = ErrorTextResultMethod::result(name, ret->name(), andThen);
+    this->state.getDiagnostics().error(call->args[0]->loc(), message);
 
     return false;
   };
   auto oneError = [&](const Type *a, const Type *b) {
     const Type *common = ResultTypes::unifyHalf(a, b);
     if (!common) {
-      this->state.getDiagnostics().error(
-          call->args[0]->loc(),
-          "the Result has errors of '" + a->name() + "' and the function given to '" + name +
-              "' returns errors of '" + b->name() + "', which no union holds" + noUnion(a, b) +
-              "; convert one with 'mapErr'");
+      std::string message = ErrorTextResultMethod::errors(a, name, b);
+      this->state.getDiagnostics().error(call->args[0]->loc(), message);
     }
 
     return common;
@@ -250,11 +234,8 @@ Expr *ResultMethodChecker::checkResultMethod(CallExpr *call, MemberExpr *member,
     }
     const Type *common = ResultTypes::unifyHalf(value, ret->okType());
     if (!common) {
-      this->state.getDiagnostics().error(
-          call->args[0]->loc(), "the Result has values of '" + value->name() +
-                                    "' and the function given to 'orElse' returns values of '" +
-                                    ret->okType()->name() + "', which no union holds" +
-                                    noUnion(value, ret->okType()));
+      std::string message = ErrorTextResultMethod::values(value, ret->okType());
+      this->state.getDiagnostics().error(call->args[0]->loc(), message);
       return call;
     }
     call->type = Type::result(common, ret->errType());

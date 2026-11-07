@@ -22,26 +22,26 @@ constexpr int kLockVersion = 1;
 
 }
 
-bool readLock(llvm::StringRef file, Lock &out) {
+bool LockFile::readLock(llvm::StringRef file, Lock &out) {
   out = Lock();
   if (!fs::exists(file)) {
     return true;
   }
   std::string text;
-  if (!readText(file, text)) {
+  if (!TextFile::readText(file, text)) {
     return false;
   }
   JsonValue root;
   size_t at;
   std::string error;
-  if (!parseJson(text, root, at, error)) {
-    reportAt(file, text, at, error + "; delete package-lock.json to make it anew");
+  if (!JsonParser::parseJson(text, root, at, error)) {
+    Report::reportAt(file, text, at, error + "; delete package-lock.json to make it anew");
     return false;
   }
   const JsonValue *version = root.get("lockVersion");
   if (!version || !version->form.is<JsonNumber>() || version->number() != kLockVersion) {
-    reportAt(file, text, version ? version->begin : root.begin,
-             "package-lock.json is not in the format of this tz (\"lockVersion\": 1)");
+    Report::reportAt(file, text, version ? version->begin : root.begin,
+                     "package-lock.json is not in the format of this tz (\"lockVersion\": 1)");
     return false;
   }
   const JsonValue *packages = root.get("packages");
@@ -67,9 +67,9 @@ bool readLock(llvm::StringRef file, Lock &out) {
     bool git = llvm::StringRef(locked.id).starts_with("git:");
     if ((!jsr && !git) || (jsr && locked.version.empty()) || (git && locked.commit.empty()) ||
         locked.hash.empty()) {
-      reportAt(file, text, packages->keyOffsets()[i],
-               "package-lock.json describes '" + locked.id +
-                   "' wrongly; delete package-lock.json to make it anew");
+      Report::reportAt(file, text, packages->keyOffsets()[i],
+                       "package-lock.json describes '" + locked.id +
+                           "' wrongly; delete package-lock.json to make it anew");
       return false;
     }
     out.packages[locked.id] = std::move(locked);
@@ -78,28 +78,28 @@ bool readLock(llvm::StringRef file, Lock &out) {
   return true;
 }
 
-std::string lockText(const Lock &lock) {
+std::string LockFile::lockText(const Lock &lock) {
   std::string text = "{\n  \"lockVersion\": " + std::to_string(kLockVersion) + ",\n";
   text += "  \"packages\": {";
   size_t n = 0;
   for (const auto &[id, p] : lock.packages) {
     text += n++ ? ",\n" : "\n";
-    text += "    " + jsonQuote(id) + ": {\n";
+    text += "    " + JsonText::jsonQuote(id) + ": {\n";
     std::vector<std::string> fields;
     if (!p.version.empty()) {
-      fields.push_back("\"version\": " + jsonQuote(p.version));
+      fields.push_back("\"version\": " + JsonText::jsonQuote(p.version));
     }
     if (!p.ref.empty()) {
-      fields.push_back("\"ref\": " + jsonQuote(p.ref));
+      fields.push_back("\"ref\": " + JsonText::jsonQuote(p.ref));
     }
     if (!p.commit.empty()) {
-      fields.push_back("\"commit\": " + jsonQuote(p.commit));
+      fields.push_back("\"commit\": " + JsonText::jsonQuote(p.commit));
     }
-    fields.push_back("\"hash\": " + jsonQuote(p.hash));
+    fields.push_back("\"hash\": " + JsonText::jsonQuote(p.hash));
     if (!p.dependencies.empty()) {
       std::string deps = "\"dependencies\": [";
       for (size_t i = 0; i < p.dependencies.size(); ++i) {
-        deps += (i ? ", " : "") + jsonQuote(p.dependencies[i]);
+        deps += (i ? ", " : "") + JsonText::jsonQuote(p.dependencies[i]);
       }
       fields.push_back(deps + "]");
     }

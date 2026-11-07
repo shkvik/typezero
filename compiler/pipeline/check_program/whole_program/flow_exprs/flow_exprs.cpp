@@ -17,7 +17,8 @@ using llvm::isa;
 
 namespace tz {
 
-FlowExprs::FlowExprs(Flows &flows) : flows_(flows) {}
+FlowExprs::FlowExprs(Flows &owner)
+    : flows(owner) {}
 
 const Expr *FlowExprs::ownExpr(const Expr *e) {
   while (auto *conv = llvm::dyn_cast<CastExpr>(e)) {
@@ -28,8 +29,8 @@ const Expr *FlowExprs::ownExpr(const Expr *e) {
 }
 
 Refs FlowExprs::expr(Expr *e) {
-  Refs refs = exprRefs(e);
-  if (e && e->type && !holdsReferences(e->type)) {
+  Refs refs = this->exprRefs(e);
+  if (e && e->type && !Flows::holdsReferences(e->type)) {
     return {};
   }
 
@@ -50,14 +51,14 @@ Refs FlowExprs::exprRefs(Expr *e) {
     return {};
   case Expr::Kind::Template:
     for (Expr *part : llvm::cast<TemplateExpr>(e)->exprs) {
-      expr(part);
+      this->expr(part);
     }
     return {};
   case Expr::Kind::ArrayLit: {
     Refs out;
     for (ArrayLitExpr::Element &el : llvm::cast<ArrayLitExpr>(e)->elements) {
-      Refs value = expr(el.expr);
-      append(out, el.spread ? copied(value) : holding(value));
+      Refs value = this->expr(el.expr);
+      Flows::append(out, el.spread ? Flows::copied(value) : Flows::holding(value));
     }
     return out;
   }
@@ -66,21 +67,21 @@ Refs FlowExprs::exprRefs(Expr *e) {
     Refs out;
     for (ObjectLitExpr::Property &p : lit->props) {
       if (p.key()) {
-        expr(p.key());
+        this->expr(p.key());
       }
-      Refs value = expr(p.value);
+      Refs value = this->expr(p.value);
       if (p.keyed()) {
-        flows_.flow(value, flows_.unknown_);
+        this->flows.addFlow(value, this->flows.getUnknownNode());
       } else if (!p.spread() && !p.name.empty()) {
-        flows_.flow(value, flows_.fieldNode(p.name));
+        this->flows.addFlow(value, this->flows.fieldNode(p.name));
       }
-      append(out, p.spread() ? copied(value) : holding(value));
+      Flows::append(out, p.spread() ? Flows::copied(value) : Flows::holding(value));
     }
     if (lit->cls) {
       for (FunctionDecl *fn : lit->cls->methods) {
-        flows_.flowStmts().function(fn);
+        this->flows.getFlowStmts().function(fn);
         if (fn->thisVar()) {
-          flows_.flow(out, flows_.var(fn->thisVar()));
+          this->flows.addFlow(out, this->flows.varNode(fn->thisVar()));
         }
       }
     }
@@ -89,72 +90,72 @@ Refs FlowExprs::exprRefs(Expr *e) {
   case Expr::Kind::Name: {
     auto *n = llvm::cast<NameExpr>(e);
     if (n->func()) {
-      flows_.flowCalls().functionValue(n->func()->decl);
+      this->flows.rememberFunctionValue(n->func()->decl);
     }
-    return flows_.flowStmts().name(n);
+    return this->flows.getFlowStmts().name(n);
   }
   case Expr::Kind::Member: {
     auto *member = llvm::cast<MemberExpr>(e);
-    Refs object = expr(member->object);
+    Refs object = this->expr(member->object);
     if (member->method()) {
-      flows_.flowCalls().passThis(object, member->method()->decl);
-      flows_.flowCalls().functionValue(member->method()->decl);
+      this->flows.getFlowCalls().passThis(object, member->method()->decl);
+      this->flows.rememberFunctionValue(member->method()->decl);
       return {};
     }
-    Refs out = shifted(object, 1);
-    out.push_back({flows_.fieldNode(member->name), 0, 0});
+    Refs out = Flows::shifted(object, 1);
+    out.push_back({this->flows.fieldNode(member->name), 0, 0});
     return out;
   }
   case Expr::Kind::Index: {
     auto *index = llvm::cast<IndexExpr>(e);
-    Refs object = expr(index->object);
-    expr(index->index);
-    Refs out = shifted(object, 1);
+    Refs object = this->expr(index->object);
+    this->expr(index->index);
+    Refs out = Flows::shifted(object, 1);
     const Type *objectType = index->object->type;
-    if (int held = flows_.contents(objectType); held >= 0) {
+    if (int held = this->flows.contentsNode(objectType); held >= 0) {
       out.push_back({held, 0, 0});
     } else if (!index->field().empty()) {
-      out.push_back({flows_.fieldNode(index->field()), 0, 0});
+      out.push_back({this->flows.fieldNode(index->field()), 0, 0});
     } else if (objectType && objectType->nonOptional()->isTuple()) {
       if (auto *key = llvm::dyn_cast<IntLitExpr>(index->index)) {
-        out.push_back({flows_.fieldNode(std::to_string(key->value)), 0, 0});
+        out.push_back({this->flows.fieldNode(std::to_string(key->value)), 0, 0});
       }
     }
     return out;
   }
   case Expr::Kind::Unary: {
     auto *u = llvm::cast<UnaryExpr>(e);
-    expr(u->operand);
+    this->expr(u->operand);
     return Refs();
   }
   case Expr::Kind::Binary: {
     auto *b = llvm::cast<BinaryExpr>(e);
-    Refs l = expr(b->lhs), r = expr(b->rhs);
+    Refs l = this->expr(b->lhs), r = this->expr(b->rhs);
     if (b->op != BinaryOp::LogAnd && b->op != BinaryOp::LogOr && b->op != BinaryOp::Nullish) {
       return {};
     }
-    append(l, r);
+    Flows::append(l, r);
     return l;
   }
   case Expr::Kind::Assign: {
     auto *a = llvm::cast<AssignExpr>(e);
-    Refs value = expr(a->value);
-    flows_.flowStmts().assignTo(a->target, value, a->value, a->op.has_value());
+    Refs value = this->expr(a->value);
+    this->flows.getFlowStmts().assignTo(a->target, value, a->value, a->op.has_value());
     return value;
   }
   case Expr::Kind::Update:
-    flows_.flowStmts().assignTo(llvm::cast<UpdateExpr>(e)->target, {}, nullptr, true);
+    this->flows.getFlowStmts().assignTo(llvm::cast<UpdateExpr>(e)->target, {}, nullptr, true);
     return {};
   case Expr::Kind::Call:
-    return flows_.flowCalls().call(llvm::cast<CallExpr>(e));
+    return this->flows.getFlowCalls().call(llvm::cast<CallExpr>(e));
   case Expr::Kind::New: {
     auto *n = llvm::cast<NewExpr>(e);
     CallExpr *ctor = n->ctor();
     Refs out;
     std::vector<Refs> args;
     for (Expr *arg : ctor ? ctor->args : n->args) {
-      args.push_back(expr(arg));
-      append(out, holding(args.back()));
+      args.push_back(this->expr(arg));
+      Flows::append(out, Flows::holding(args.back()));
     }
     const FunctionDecl *target = !ctor                                    ? nullptr
                                  : ctor->method() && ctor->method()->decl ? ctor->method()->decl
@@ -163,14 +164,14 @@ Refs FlowExprs::exprRefs(Expr *e) {
     if (!target) {
       return out;
     }
-    flows_.flowCalls().passArguments(ctor, target, args);
+    this->flows.getFlowCalls().passArguments(ctor, target, args);
     if (target->thisVar()) {
-      out.push_back({flows_.var(target->thisVar()), 0, 0});
+      out.push_back({this->flows.varNode(target->thisVar()), 0, 0});
       if (n->cls() && target->cls() && target->cls() != n->cls()) {
-        flows_.flowCalls().passThis(
-            flows_.flowCalls().receiverConversion(n, n->cls()->type, target, {}, target->thisVar(),
-                                                  "as 'this' of the constructor of '" +
-                                                      target->cls()->name.str() + "'"),
+        this->flows.getFlowCalls().passThis(
+            this->flows.getFlowCalls().receiverConversion(
+                n, n->cls()->type, target, {}, target->thisVar(),
+                "as 'this' of the constructor of '" + target->cls()->name.str() + "'"),
             target);
       }
     }
@@ -178,20 +179,20 @@ Refs FlowExprs::exprRefs(Expr *e) {
   }
   case Expr::Kind::Conditional: {
     auto *c = llvm::cast<ConditionalExpr>(e);
-    expr(c->cond);
-    Refs out = expr(c->thenExpr);
-    append(out, expr(c->elseExpr));
+    this->expr(c->cond);
+    Refs out = this->expr(c->thenExpr);
+    Flows::append(out, this->expr(c->elseExpr));
     return out;
   }
   case Expr::Kind::Cast: {
     auto *conv = llvm::cast<CastExpr>(e);
-    Refs out = expr(conv->operand);
-    if (flows_.widenings_.isWideningCast(conv)) {
-      int at = flows_.node(NodeKind::Conversion, conv, "");
-      auto *n = llvm::dyn_cast<NameExpr>(ownExpr(conv->operand));
-      flows_.conversions.push_back({at, conv->operand->type, conv->type, conv->loc(),
-                                    flows_.narrowings_(conv->operand->type, conv->type), -1, "",
-                                    n ? n->name : llvm::StringRef()});
+    Refs out = this->expr(conv->operand);
+    if (this->flows.isWideningCast(conv)) {
+      int at = this->flows.findNode(NodeKind::Conversion, conv, "");
+      auto *n = llvm::dyn_cast<NameExpr>(FlowExprs::ownExpr(conv->operand));
+      this->flows.addConversion({at, conv->operand->type, conv->type, conv->loc(),
+                                 this->flows.findNarrowings(conv->operand->type, conv->type), -1,
+                                 "", n ? n->name : llvm::StringRef()});
       out.push_back({at, 0, 0});
     }
     return out;
@@ -199,30 +200,31 @@ Refs FlowExprs::exprRefs(Expr *e) {
   case Expr::Kind::Sequence: {
     Refs last;
     for (Expr *part : llvm::cast<SequenceExpr>(e)->exprs) {
-      last = expr(part);
+      last = this->expr(part);
     }
     return last;
   }
   case Expr::Kind::OptionalChain:
-    return expr(llvm::cast<OptionalChainExpr>(e)->chain);
+    return this->expr(llvm::cast<OptionalChainExpr>(e)->chain);
   case Expr::Kind::Function:
-    flows_.flowStmts().function(llvm::cast<FunctionExpr>(e)->fn);
-    flows_.flowCalls().functionValue(llvm::cast<FunctionExpr>(e)->fn);
+    this->flows.getFlowStmts().function(llvm::cast<FunctionExpr>(e)->fn);
+    this->flows.rememberFunctionValue(llvm::cast<FunctionExpr>(e)->fn);
     return {};
   case Expr::Kind::Yield: {
     auto *y = llvm::cast<YieldExpr>(e);
-    Refs value = expr(y->value);
-    if (flows_.functions_.empty()) {
-      flows_.escape(value);
+    Refs value = this->expr(y->value);
+    if (!this->flows.isInsideFunction()) {
+      this->flows.escape(value);
     } else {
-      flows_.flow(y->delegate ? value : holding(value), flows_.returned(flows_.functions_.back()));
+      this->flows.addFlow(y->delegate ? value : Flows::holding(value),
+                          this->flows.returnNode(this->flows.getCurrentFunction()));
     }
     return {};
   }
   case Expr::Kind::Await: {
     Expr *value = llvm::cast<AwaitExpr>(e)->value;
-    Refs out = expr(value);
-    if (int held = flows_.contents(value->type); held >= 0) {
+    Refs out = this->expr(value);
+    if (int held = this->flows.contentsNode(value->type); held >= 0) {
       out.push_back({held, 0, 0});
     }
     return out;

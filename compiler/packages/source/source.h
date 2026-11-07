@@ -45,8 +45,14 @@ struct Source {
   std::string shortName() const;
 };
 
-bool parseSource(llvm::StringRef spec, llvm::StringRef baseDir, Source &out, std::string &error);
+class SourceParser {
+public:
+  static std::string repositoryName(llvm::StringRef url);
+  static bool parseSource(llvm::StringRef spec, llvm::StringRef baseDir, Source &out,
+                          std::string &error);
 
-std::string repositoryName(llvm::StringRef url);
+private:
+  static bool isJsrNamePart(llvm::StringRef part);
+};
 
 }

@@ -26,6 +26,13 @@ struct Partial {
   }
 };
 
-bool parsePartial(llvm::StringRef text, Partial &out);
+class PartialParser {
+public:
+  static bool parsePartial(llvm::StringRef text, Partial &out);
+
+private:
+  static bool parseNumber(llvm::StringRef text, uint64_t &out);
+  static bool parsePre(llvm::StringRef text, std::vector<std::string> &out);
+};
 
 }

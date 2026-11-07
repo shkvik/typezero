@@ -137,11 +137,11 @@ Analysis::Analysis(const SourceFile &sourceFile, const llvm::SourceMgr &sourceMa
       explainNames(*this),
       explainTitles(*this),
       ownership(*this) {
-  for (const Module *module : this->program.modules) {
-    if (!module->builtin) {
+  for (const Module *loaded : this->program.modules) {
+    if (!loaded->builtin) {
       continue;
     }
-    for (unsigned id : module->buffers) {
+    for (unsigned id : loaded->buffers) {
       const llvm::MemoryBuffer *buffer = this->sources.getMemoryBuffer(id);
       this->libRanges.push_back({buffer->getBufferStart(), buffer->getBufferEnd()});
     }

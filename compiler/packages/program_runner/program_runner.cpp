@@ -14,8 +14,8 @@ namespace tz::pkg {
 
 namespace fs = llvm::sys::fs;
 
-int runProgram(llvm::StringRef program, llvm::ArrayRef<std::string> args, std::string &out,
-               std::string &err, std::string &error) {
+int ProgramRunner::runProgram(llvm::StringRef program, llvm::ArrayRef<std::string> args,
+                              std::string &out, std::string &err, std::string &error) {
   llvm::SmallString<128> outFile, errFile;
   if (fs::createTemporaryFile("tz-out", "txt", outFile) ||
       fs::createTemporaryFile("tz-err", "txt", errFile)) {

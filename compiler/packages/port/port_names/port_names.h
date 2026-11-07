@@ -5,9 +5,11 @@
 
 namespace tz::pkg {
 
-std::string capitalize(llvm::StringRef s);
-
-std::string derivedName(llvm::StringRef file, llvm::StringRef packageDir,
-                        llvm::StringRef packageName);
+class PortNames {
+public:
+  static std::string capitalize(llvm::StringRef s);
+  static std::string derivedName(llvm::StringRef file, llvm::StringRef packageDir,
+                                 llvm::StringRef packageName);
+};
 
 }

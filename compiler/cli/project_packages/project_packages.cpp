@@ -13,13 +13,13 @@ bool ProjectPackages::prepare(llvm::StringRef input) {
   llvm::SmallString<256> dir(input);
   llvm::sys::fs::make_absolute(dir);
   llvm::sys::path::remove_filename(dir);
-  std::string manifestPath = pkg::findManifest(dir);
+  std::string manifestPath = pkg::ManifestFile::findManifest(dir);
   if (manifestPath.empty()) {
     return true;
   }
   pkg::Manifest manifest;
-  if (!pkg::readManifest(manifestPath, manifest) ||
-      !pkg::preparePackages(manifest, pkg::PrepareOptions(), storage_)) {
+  if (!pkg::ManifestFile::readManifest(manifestPath, manifest) ||
+      !pkg::PackageGraph::preparePackages(manifest, pkg::PrepareOptions(), storage_)) {
     return false;
   }
   graph_ = &storage_;

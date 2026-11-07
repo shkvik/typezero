@@ -15,16 +15,24 @@ const llvm::StringLiteral kOsExports[] = {"EOL",         "devNull",           "g
 
 }
 
-std::string osExportProblem(llvm::StringRef name, llvm::StringRef path) {
-  std::string quoted = "'" + path.str() + "'";
+OsExports::ResultExportFound OsExports::osExport(llvm::StringRef name, llvm::StringRef path) {
   if (llvm::is_contained(kOsFunctions, name) || name == "EOL" || name == "devNull") {
-    return "";
+    return ok(name);
   }
   if (llvm::is_contained(kOsExports, name)) {
-    return "'" + name.str() + "' of " + quoted + " is not supported yet";
-  }
+    std::string message = ErrorTextModuleExport::notYet(name, path);
 
-  return quoted + " has no export named '" + name.str() + "'";
+    return err(FeatureExportFoundError{
+        .code = FeatureExportFoundErrorCode::NOT_YET,
+        .message = message,
+    });
+  }
+  std::string message = ErrorTextModuleExport::none(path, name);
+
+  return err(FeatureExportFoundError{
+      .code = FeatureExportFoundErrorCode::NO_EXPORT,
+      .message = message,
+  });
 }
 
 }

@@ -115,8 +115,8 @@ std::optional<Linear> IndexProofs::linear(const Expr *expr) const {
       const Facts &facts = this->state.getFlowState().getFacts();
       if ((result.offset > 0 &&
            !facts.proves(result.term, Term::zero(), kIntMax - (result.offset - 1))) ||
-          (result.offset < 0 &&
-           !facts.proves(Term::zero(), result.term, saturatingSub(result.offset + 1, kIntMin)))) {
+          (result.offset < 0 && !facts.proves(Term::zero(), result.term,
+                                              Facts::saturatingSub(result.offset + 1, kIntMin)))) {
         return std::nullopt;
       }
     }
@@ -247,7 +247,7 @@ bool IndexProofs::provesInBounds(const Expr *object, const Expr *index, bool all
           at->term, length->term, length->offset - at->offset + (allowEnd ? 1 : 0))) {
     return true;
   }
-  ValueRange range = ByteProofs(this->state).valueRange(index);
+  IntegerRange range = ByteProofs(this->state).valueRange(index);
 
   return range.lo && range.hi && *range.lo >= 0 &&
          this->state.getFlowState().getFacts().proves(
@@ -308,7 +308,7 @@ bool IndexProofs::provesBetween(const Expr *expr, int64_t lo, std::optional<int6
       upper |= hi && facts.proves(l->term, Term::zero(), *hi - l->offset + 1);
     }
   }
-  ValueRange range = ByteProofs(this->state).valueRange(expr);
+  IntegerRange range = ByteProofs(this->state).valueRange(expr);
   lower |= range.lo && *range.lo >= lo;
   upper |= hi && range.hi && *range.hi <= *hi;
 
@@ -370,7 +370,7 @@ IndexProofs::ResultBetweenProven IndexProofs::requireBetween(const Expr *expr, i
     });
   }
 
-  std::string text = valueText(expr);
+  std::string text = BytesCheckHelpers::valueText(expr);
   std::string test = ErrorTextBetween::test(text, lo, hi);
   std::string message = ErrorTextBetween::unproven(what, range, test);
 
@@ -400,8 +400,8 @@ IndexProofs::ResultLessWasProven IndexProofs::requireLess(const Expr *a, const E
     return ok(b);
   }
 
-  std::string left = valueText(a);
-  std::string right = valueText(b);
+  std::string left = BytesCheckHelpers::valueText(a);
+  std::string right = BytesCheckHelpers::valueText(b);
   std::string message = ErrorTextLess::unproven(what, left, right);
 
   return err(IndexProofsRequireLessError{
@@ -449,7 +449,7 @@ bool IndexProofs::provesUpTo(const Expr *value, const Expr *object, int64_t less
       at && this->provesLinearUpTo(*at, object, less)) {
     return true;
   }
-  ValueRange range = ByteProofs(this->state).valueRange(value);
+  IntegerRange range = ByteProofs(this->state).valueRange(value);
 
   return range.hi && this->provesLinearUpTo(Linear{Term::zero(), *range.hi}, object, less);
 }
@@ -468,10 +468,10 @@ IndexProofs::ResultUpToWasProven IndexProofs::requireUpTo(const Expr *value, con
   }
 
   std::optional<std::string> text =
-      value ? std::optional<std::string>(valueText(value)) : std::nullopt;
+      value ? std::optional<std::string>(BytesCheckHelpers::valueText(value)) : std::nullopt;
   bool bytes = object->type && (object->type->bytes() == Type::Bytes::ArrayBuffer ||
                                 object->type->bytes() == Type::Bytes::DataView);
-  std::string limit = ErrorTextUpTo::limit(valueText(object), bytes, less);
+  std::string limit = ErrorTextUpTo::limit(BytesCheckHelpers::valueText(object), bytes, less);
   std::string message = ErrorTextUpTo::unproven(what, text, limit);
 
   return err(IndexProofsRequireUpToError{
@@ -578,9 +578,9 @@ void IndexProofs::addIndexCallbackFacts(const FunctionDecl *fn) {
     const VarSymbol *value = param < fn->params.size() ? fn->params[param].sym : nullptr;
     if (value && value->type->isInt()) {
       this->state.getFlowState().getFacts().add(Term::zero(), Term::of(value),
-                                                saturatingSub(1, lo));
+                                                Facts::saturatingSub(1, lo));
       this->state.getFlowState().getFacts().add(Term::of(value), Term::zero(),
-                                                saturatingAdd(hi, 1));
+                                                Facts::saturatingAdd(hi, 1));
     }
   }
   std::optional<unsigned> index = callbacks.findIndexParam(fn);
@@ -594,7 +594,7 @@ void IndexProofs::addIndexCallbackFacts(const FunctionDecl *fn) {
   }
 }
 
-ValueRange IndexProofs::lengthRange(const Expr *value) const {
+IntegerRange IndexProofs::lengthRange(const Expr *value) const {
   auto *call = dyn_cast<CallExpr>(value);
   if (!call) {
     return {};
@@ -603,7 +603,7 @@ ValueRange IndexProofs::lengthRange(const Expr *value) const {
     case Builtin::BytesNew:
     case Builtin::ArrayBufferNew:
     case Builtin::BufferAllocFill:
-      return call->args.empty() ? ValueRange{0, 0}
+      return call->args.empty() ? IntegerRange{0, 0}
                                 : ByteProofs(this->state).valueRange(call->args[0]);
     case Builtin::DataViewNew:
     case Builtin::BytesView:

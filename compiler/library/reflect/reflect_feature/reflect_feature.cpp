@@ -38,7 +38,7 @@ bool ReflectFeature::lowers(Builtin builtin) const {
 }
 
 llvm::Value *ReflectFeature::lowerCall(Lowering &lowering, CallExpr *call) const {
-  if (isMetaBuiltin(call->builtin())) {
+  if (BuiltinGroups::isMetaBuiltin(call->builtin())) {
     return lowering.decoratorLowerer().emitMetaCall(call);
   }
 

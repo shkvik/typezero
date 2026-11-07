@@ -133,6 +133,45 @@ bool UrlChecker::knownAbsolute(const Expr *expr) const {
   return false;
 }
 
+UrlChecker::ResultKnownBaseUrl UrlChecker::knownBase(const Expr *base) const {
+  if (!this->knownAbsolute(base)) {
+    std::string message = ErrorTextUrlNew::base();
+
+    return err(UrlCheckerKnownBaseError{
+        .code = UrlCheckerKnownBaseErrorCode::UNKNOWN_BASE,
+        .message = message,
+    });
+  }
+
+  return ok(base);
+}
+
+UrlChecker::ResultUrlTextValid UrlChecker::urlText(llvm::StringRef text, bool based) {
+  if (!UrlChecker::validUrlText(text, based)) {
+    std::string message = ErrorTextUrlNew::invalid(text, based);
+
+    return err(UrlCheckerUrlTextError{
+        .code = UrlCheckerUrlTextErrorCode::INVALID_URL,
+        .message = message,
+    });
+  }
+
+  return ok(text);
+}
+
+UrlChecker::ResultInputIsKnown UrlChecker::knownInput(const Expr *input, bool based) const {
+  if (!this->knownAbsolute(input)) {
+    std::string message = ErrorTextUrlNew::input(based);
+
+    return err(UrlCheckerKnownInputError{
+        .code = UrlCheckerKnownInputErrorCode::UNKNOWN_INPUT,
+        .message = message,
+    });
+  }
+
+  return ok(input);
+}
+
 void UrlChecker::checkUrlNew(NewExpr *expr) {
   if (LibraryCalls(this->state).inLibrary(expr->loc())) {
     return;
@@ -142,28 +181,25 @@ void UrlChecker::checkUrlNew(NewExpr *expr) {
     return;
   }
   const Expr *input = UrlChecker::unconverted(args[0]);
-  if (args.size() > 1 && !this->knownAbsolute(args[1])) {
-    this->state.getDiagnostics().error(
-        args[1]->loc(), "'new URL' with a base known only when the program runs may fail, and "
-                        "'new' gives no Result; write 'URL.parse(input, base)', which gives a "
-                        "Result<URL, UrlError>");
-    return;
+  bool based = args.size() > 1;
+  if (based) {
+    ResultKnownBaseUrl base = this->knownBase(args[1]);
+    if (base.isErr()) {
+      this->state.getDiagnostics().error(args[1]->loc(), base.error().message);
+      return;
+    }
   }
   std::optional<std::string> text = UrlChecker::literalText(input);
   if (text) {
-    if (!UrlChecker::validUrlText(*text, args.size() > 1)) {
-      this->state.getDiagnostics().error(input->loc(),
-                                         "'" + *text + "' is not a valid URL" +
-                                             (args.size() > 1 ? "" : " without a base"));
+    ResultUrlTextValid valid = UrlChecker::urlText(*text, based);
+    if (valid.isErr()) {
+      this->state.getDiagnostics().error(input->loc(), valid.error().message);
     }
     return;
   }
-  if (!this->knownAbsolute(input)) {
-    this->state.getDiagnostics().error(
-        input->loc(), "'new URL' of a text known only when the program runs may fail, and "
-                      "'new' gives no Result; write 'URL.parse(text" +
-                          std::string(args.size() > 1 ? ", base" : "") +
-                          ")', which gives a Result<URL, UrlError>");
+  ResultInputIsKnown known = this->knownInput(input, based);
+  if (known.isErr()) {
+    this->state.getDiagnostics().error(input->loc(), known.error().message);
   }
 }
 
@@ -181,30 +217,53 @@ bool UrlChecker::checkUrlSetter(MemberExpr *member, const CallExpr *call) {
   if (!text) {
     return false;
   }
-  llvm::StringRef value = *text;
-  std::string problem;
-  if (name == "setHref") {
-    if (!UrlChecker::validUrlText(value, false)) {
-      problem = "'" + *text + "' is not a valid URL";
-    }
-  } else if (name == "setProtocol") {
+  ResultSettableText value = UrlChecker::setterValue(name, *text);
+  if (value.isErr()) {
+    this->state.getDiagnostics().error(input->loc(), value.error().message);
+    return false;
+  }
+
+  return true;
+}
+
+UrlChecker::ResultSettableText UrlChecker::setterValue(llvm::StringRef name,
+                                                       llvm::StringRef value) {
+  if (name == "setHref" && !UrlChecker::validUrlText(value, false)) {
+    std::string message = ErrorTextUrlSetter::href(value);
+
+    return err(UrlCheckerSetterValueError{
+        .code = UrlCheckerSetterValueErrorCode::NOT_A_URL,
+        .message = message,
+    });
+  }
+  if (name == "setProtocol") {
     llvm::StringRef scheme = value;
     scheme.consume_back(":");
-    bool good = !scheme.empty() && llvm::isAlpha(scheme[0]) && llvm::all_of(scheme, [](char c) {
-      return llvm::isAlnum(c) || c == '+' || c == '-' || c == '.';
-    });
+    auto schemeChar = [](char c) { return llvm::isAlnum(c) || c == '+' || c == '-' || c == '.'; };
+    bool good = !scheme.empty() && llvm::isAlpha(scheme[0]) && llvm::all_of(scheme, schemeChar);
     if (!good) {
-      problem = "'" + *text +
-                "' is not a protocol: a protocol is a letter, then letters, digits "
-                "and +-., e.g. 'https:'";
+      std::string message = ErrorTextUrlSetter::protocol(value);
+
+      return err(UrlCheckerSetterValueError{
+          .code = UrlCheckerSetterValueErrorCode::NOT_A_PROTOCOL,
+          .message = message,
+      });
     }
-  } else if (name == "setPort") {
+  }
+  if (name == "setPort") {
     unsigned long long number = 0;
-    if (!value.empty() &&
-        (!llvm::all_of(value, llvm::isDigit) || value.getAsInteger(10, number) || number > 65535)) {
-      problem = "'" + *text + "' is not a port: a port is digits from 0 to 65535, or '' for none";
+    bool wrong = !value.empty() && (!llvm::all_of(value, llvm::isDigit) ||
+                                    value.getAsInteger(10, number) || number > 65535);
+    if (wrong) {
+      std::string message = ErrorTextUrlSetter::port(value);
+
+      return err(UrlCheckerSetterValueError{
+          .code = UrlCheckerSetterValueErrorCode::NOT_A_PORT,
+          .message = message,
+      });
     }
-  } else {
+  }
+  if (name == "setHost" || name == "setHostname") {
     llvm::StringRef host = value;
     llvm::StringRef port;
     if (name == "setHost" && !value.starts_with("[")) {
@@ -216,18 +275,19 @@ bool UrlChecker::checkUrlSetter(MemberExpr *member, const CallExpr *call) {
       port.consume_front(":");
     }
     unsigned long long number = 0;
-    if (!UrlChecker::validHost(host) || !llvm::all_of(port, llvm::isDigit) ||
-        (!port.empty() && (port.getAsInteger(10, number) || number > 65535))) {
-      problem = "'" + *text + "' is not a host" +
-                std::string(name == "setHost" ? ", with an optional port" : "");
+    bool wrong = !UrlChecker::validHost(host) || !llvm::all_of(port, llvm::isDigit) ||
+                 (!port.empty() && (port.getAsInteger(10, number) || number > 65535));
+    if (wrong) {
+      std::string message = ErrorTextUrlSetter::host(value, name == "setHost");
+
+      return err(UrlCheckerSetterValueError{
+          .code = UrlCheckerSetterValueErrorCode::NOT_A_HOST,
+          .message = message,
+      });
     }
   }
-  if (!problem.empty()) {
-    this->state.getDiagnostics().error(input->loc(), problem);
-    return false;
-  }
 
-  return true;
+  return ok(value);
 }
 
 }

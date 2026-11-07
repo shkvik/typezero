@@ -5,7 +5,7 @@
 
 namespace tz::pkg {
 
-bool checkAlias(llvm::StringRef alias, std::string &error) {
+bool DependencyAlias::checkAlias(llvm::StringRef alias, std::string &error) {
   auto validPart = [](llvm::StringRef part) {
     return !part.empty() && !part.starts_with(".") && llvm::all_of(part, [](char c) {
       return llvm::isAlnum(c) || c == '-' || c == '_' || c == '.';
@@ -24,7 +24,7 @@ bool checkAlias(llvm::StringRef alias, std::string &error) {
             "'zod' or '@std/path'";
     return false;
   }
-  if (isBuiltinModule(alias) || alias == "neverthrow") {
+  if (BuiltinModulePaths::isBuiltinModule(alias) || alias == "neverthrow") {
     error = "'" + alias.str() +
             "' is the name of a module built into tz; give the package "
             "another name";

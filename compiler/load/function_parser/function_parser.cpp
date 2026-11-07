@@ -346,7 +346,7 @@ std::vector<TypeParamDecl> FunctionParser::parseTypeParams() {
     if (!parser_.tok_.is(Tok::Identifier)) {
       parser_.cursor().error(parser_.tok_.loc(),
                              llvm::Twine("expected a type parameter name, found ") +
-                                 tokSpelling(parser_.tok_.kind));
+                                 TokenKinds::tokSpelling(parser_.tok_.kind));
       return params;
     }
     param.name = parser_.tok_.text;

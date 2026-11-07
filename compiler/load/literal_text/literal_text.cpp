@@ -4,9 +4,7 @@
 
 namespace tz {
 
-namespace {
-
-static void appendUtf16(std::u16string &out, uint32_t cp) {
+void LiteralText::appendUtf16(std::u16string &out, uint32_t cp) {
   if (cp < 0x10000) {
     out += static_cast<char16_t>(cp);
   } else {
@@ -16,7 +14,7 @@ static void appendUtf16(std::u16string &out, uint32_t cp) {
   }
 }
 
-static uint32_t decodeUtf8(llvm::StringRef s, size_t &i) {
+uint32_t LiteralText::decodeUtf8(llvm::StringRef s, size_t &i) {
   unsigned char lead = static_cast<unsigned char>(s[i]);
   if (lead < 0x80) {
     ++i;
@@ -45,7 +43,7 @@ static uint32_t decodeUtf8(llvm::StringRef s, size_t &i) {
   return cp;
 }
 
-static bool parseHex(llvm::StringRef s, size_t &i, size_t count, uint32_t &value) {
+bool LiteralText::parseHex(llvm::StringRef s, size_t &i, size_t count, uint32_t &value) {
   value = 0;
   for (size_t n = 0; n < count; ++n, ++i) {
     if (i >= s.size() || !llvm::isHexDigit(s[i])) {
@@ -57,7 +55,7 @@ static bool parseHex(llvm::StringRef s, size_t &i, size_t count, uint32_t &value
   return true;
 }
 
-static bool parseUnicodeEscape(llvm::StringRef s, size_t &i, uint32_t &cp) {
+bool LiteralText::parseUnicodeEscape(llvm::StringRef s, size_t &i, uint32_t &cp) {
   if (i < s.size() && s[i] == '{') {
     ++i;
     cp = 0;
@@ -75,11 +73,11 @@ static bool parseUnicodeEscape(llvm::StringRef s, size_t &i, uint32_t &cp) {
     return true;
   }
 
-  return parseHex(s, i, 4, cp);
+  return LiteralText::parseHex(s, i, 4, cp);
 }
 
-static bool decodeText(llvm::StringRef raw, bool isTemplate, std::u16string &out,
-                       Diagnostics &diags) {
+bool LiteralText::decodeText(llvm::StringRef raw, bool isTemplate, std::u16string &out,
+                             Diagnostics &diags) {
   out.clear();
   for (size_t i = 0; i < raw.size();) {
     char c = raw[i];
@@ -89,7 +87,7 @@ static bool decodeText(llvm::StringRef raw, bool isTemplate, std::u16string &out
       continue;
     }
     if (c != '\\') {
-      appendUtf16(out, decodeUtf8(raw, i));
+      LiteralText::appendUtf16(out, LiteralText::decodeUtf8(raw, i));
       continue;
     }
 
@@ -130,7 +128,7 @@ static bool decodeText(llvm::StringRef raw, bool isTemplate, std::u16string &out
       break;
     case 'x': {
       uint32_t value;
-      if (!parseHex(raw, i, 2, value)) {
+      if (!LiteralText::parseHex(raw, i, 2, value)) {
         diags.error(escapeLoc, "invalid '\\x' escape: expected two hex digits");
         return false;
       }
@@ -139,16 +137,16 @@ static bool decodeText(llvm::StringRef raw, bool isTemplate, std::u16string &out
     }
     case 'u': {
       uint32_t cp;
-      if (!parseUnicodeEscape(raw, i, cp)) {
+      if (!LiteralText::parseUnicodeEscape(raw, i, cp)) {
         diags.error(escapeLoc, "invalid '\\u' escape");
         return false;
       }
-      appendUtf16(out, cp);
+      LiteralText::appendUtf16(out, cp);
       break;
     }
     default:
       --i;
-      appendUtf16(out, decodeUtf8(raw, i));
+      LiteralText::appendUtf16(out, LiteralText::decodeUtf8(raw, i));
       break;
     }
   }
@@ -156,7 +154,7 @@ static bool decodeText(llvm::StringRef raw, bool isTemplate, std::u16string &out
   return true;
 }
 
-static llvm::StringRef templateText(const Token &tok) {
+llvm::StringRef LiteralText::templateText(const Token &tok) {
   llvm::StringRef raw = tok.text.drop_front();
   if (raw.ends_with("${")) {
     return raw.drop_back(2);
@@ -168,22 +166,20 @@ static llvm::StringRef templateText(const Token &tok) {
   return raw;
 }
 
-}
-
-bool decodeStringLiteral(const Token &tok, std::u16string &out, Diagnostics &diags) {
+bool LiteralText::decodeStringLiteral(const Token &tok, std::u16string &out, Diagnostics &diags) {
   llvm::StringRef raw = tok.text.drop_front();
   if (!raw.empty() && raw.back() == tok.text.front()) {
     raw = raw.drop_back();
   }
 
-  return decodeText(raw, false, out, diags);
+  return LiteralText::decodeText(raw, false, out, diags);
 }
 
-bool decodeTemplatePart(const Token &tok, std::u16string &out, Diagnostics &diags) {
-  return decodeText(templateText(tok), true, out, diags);
+bool LiteralText::decodeTemplatePart(const Token &tok, std::u16string &out, Diagnostics &diags) {
+  return LiteralText::decodeText(LiteralText::templateText(tok), true, out, diags);
 }
 
-void decodeRegex(const Token &tok, std::u16string &pattern, std::u16string &flags) {
+void LiteralText::decodeRegex(const Token &tok, std::u16string &pattern, std::u16string &flags) {
   llvm::StringRef text = tok.text.drop_front();
   size_t slash = text.rfind('/');
   if (slash == llvm::StringRef::npos) {
@@ -193,16 +189,16 @@ void decodeRegex(const Token &tok, std::u16string &pattern, std::u16string &flag
   llvm::StringRef suffix = text.drop_front(std::min(slash + 1, text.size()));
   pattern.clear();
   for (size_t i = 0; i < body.size();) {
-    appendUtf16(pattern, decodeUtf8(body, i));
+    LiteralText::appendUtf16(pattern, LiteralText::decodeUtf8(body, i));
   }
   flags.clear();
   for (size_t i = 0; i < suffix.size();) {
-    appendUtf16(flags, decodeUtf8(suffix, i));
+    LiteralText::appendUtf16(flags, LiteralText::decodeUtf8(suffix, i));
   }
 }
 
-void decodeTemplateRaw(const Token &tok, std::u16string &out) {
-  llvm::StringRef raw = templateText(tok);
+void LiteralText::decodeTemplateRaw(const Token &tok, std::u16string &out) {
+  llvm::StringRef raw = LiteralText::templateText(tok);
   out.clear();
   for (size_t i = 0; i < raw.size();) {
     if (raw[i] == '\r') {
@@ -210,7 +206,7 @@ void decodeTemplateRaw(const Token &tok, std::u16string &out) {
       i += raw.substr(i).starts_with("\r\n") ? 2 : 1;
       continue;
     }
-    appendUtf16(out, decodeUtf8(raw, i));
+    LiteralText::appendUtf16(out, LiteralText::decodeUtf8(raw, i));
   }
 }
 

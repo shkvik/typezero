@@ -66,6 +66,44 @@ const Type *SetEncodingChecker::encodedStreamType(ClassDecl *cls, llvm::SMLoc lo
   return nullptr;
 }
 
+SetEncodingChecker::ResultDecodedChunks SetEncodingChecker::decodedChunks(const Type *readable,
+                                                                          const Type *receiver) {
+  if (!readable) {
+    std::string message = ErrorTextSetEncoding::unreadable(receiver->name());
+
+    return err(SetEncodingCheckerDecodedChunksError{
+        .code = SetEncodingCheckerDecodedChunksErrorCode::NOT_READABLE,
+        .message = message,
+    });
+  }
+  if (!readable->isString() && !readable->isBuffer()) {
+    std::string message = ErrorTextSetEncoding::objectMode(readable->name());
+
+    return err(SetEncodingCheckerDecodedChunksError{
+        .code = SetEncodingCheckerDecodedChunksErrorCode::OBJECT_MODE,
+        .message = message,
+    });
+  }
+
+  return ok(readable);
+}
+
+SetEncodingChecker::ResultStdinIsPlaced SetEncodingChecker::stdinPlace() const {
+  const Module *module = this->state.getModuleStates().getCurrentModule();
+  bool topLevel = module && module->isEntry && !this->state.getFunctionStack().isInsideFunction() &&
+                  this->state.getScopeStack().isTopLevel();
+  if (!topLevel) {
+    std::string message = ErrorTextSetEncoding::stdinPlace();
+
+    return err(SetEncodingCheckerStdinPlaceError{
+        .code = SetEncodingCheckerStdinPlaceErrorCode::NOT_TOP_LEVEL,
+        .message = message,
+    });
+  }
+
+  return ok(module);
+}
+
 Expr *SetEncodingChecker::checkSetEncoding(CallExpr *call, MemberExpr *member, ClassDecl *cls) {
   const Type *receiver = member->object->type;
   StreamChunks chunks = ChunkTypes(this->state).streamChunksOf(cls);
@@ -79,20 +117,13 @@ Expr *SetEncodingChecker::checkSetEncoding(CallExpr *call, MemberExpr *member, C
 
     return call;
   };
-  if (!chunks.readable) {
-    this->state.getDiagnostics().error(loc, "'" + receiver->name() +
-                                                "' has no setEncoding(): it is not readable");
+  ResultDecodedChunks decoded = SetEncodingChecker::decodedChunks(chunks.readable, receiver);
+  if (decoded.isErr()) {
+    this->state.getDiagnostics().error(loc, decoded.error().message);
     return call;
   }
   if (chunks.readable->isString()) {
     return plainCall();
-  }
-  if (!chunks.readable->isBuffer()) {
-    this->state.getDiagnostics().error(
-        loc, "setEncoding() decodes the Buffers of a stream of bytes, and this is an "
-             "object-mode stream of " +
-                 chunks.readable->name().str() + "; push strings into it instead");
-    return call;
   }
   std::optional<FieldPath> path;
   const Expr *object = member->object;
@@ -104,14 +135,9 @@ Expr *SetEncodingChecker::checkSetEncoding(CallExpr *call, MemberExpr *member, C
   }
   bool stdinStream = false;
   if (auto *c = dyn_cast<CallExpr>(object); c && c->func() && c->func()->name == "processStdin") {
-    if (!this->state.getModuleStates().getCurrentModule() ||
-        !this->state.getModuleStates().getCurrentModule()->isEntry ||
-        this->state.getFunctionStack().isInsideFunction() ||
-        !this->state.getScopeStack().isTopLevel()) {
-      this->state.getDiagnostics().error(
-          loc, "'process.stdin.setEncoding()' changes the type of the chunks of stdin for "
-               "the code after it, so it goes in the top-level code of the program's "
-               "main file, before any other use of process.stdin");
+    ResultStdinIsPlaced placed = this->stdinPlace();
+    if (placed.isErr()) {
+      this->state.getDiagnostics().error(loc, placed.error().message);
       return call;
     }
     stdinStream = true;
@@ -124,30 +150,24 @@ Expr *SetEncodingChecker::checkSetEncoding(CallExpr *call, MemberExpr *member, C
     path = FieldFacts(this->state).fieldPath(object);
   }
   auto reject = [&](const std::string &why) {
-    this->state.getDiagnostics().error(
-        loc, "setEncoding() makes the chunks of the stream strings from here on, so its "
-             "type changes here; " +
-                 why +
-                 ": give the stream its encoding where it is "
-                 "created, e.g. 'createReadStream(path, \"utf8\")' or 'new Readable({ "
-                 "encoding: \"utf8\", ... })'");
+    std::string message = ErrorTextSetEncoding::changes(why);
+    this->state.getDiagnostics().error(loc, message);
 
     return call;
   };
   if (!path || !path->var) {
-    return reject("but this stream is not known by a constant");
+    return reject(ErrorTextEncodingWhy::noConstant());
   }
   const VarSymbol *root = path->var;
   if (!root->isConst) {
-    return reject("but '" + root->name.str() +
-                  "' may hold another stream later; declare it with 'const'");
+    return reject(ErrorTextEncodingWhy::notConst(root->name));
   }
   {
     const Type *at = root->type;
     for (llvm::StringRef field : path->names) {
       const Field *f = at ? at->nonOptional()->field(field) : nullptr;
       if (!f || !f->readonly) {
-        return reject("but '" + field.str() + "' is a field that code may set to another stream");
+        return reject(ErrorTextEncodingWhy::fieldSet(field));
       }
       at = f->type;
     }
@@ -161,11 +181,7 @@ Expr *SetEncodingChecker::checkSetEncoding(CallExpr *call, MemberExpr *member, C
   }
   bool branched = stdinStream ? scopes.isInsideBranch() : scopes.isBranchedSince(declared);
   if (declared + 1 != this->state.getScopeStack().getScopeDepth() || branched) {
-    return reject("but this setEncoding() is in a block of its own (an if, a loop, a function) "
-                  "and '" +
-                  root->name.str() +
-                  "' is declared outside it, so the type would "
-                  "depend on whether it runs");
+    return reject(ErrorTextEncodingWhy::ownBlock(root->name));
   }
   std::vector<StreamEscape> escapes;
   const Expr *base = member->object;
@@ -227,7 +243,7 @@ Expr *SetEncodingChecker::checkSetEncoding(CallExpr *call, MemberExpr *member, C
       auto *m = dyn_cast<MemberExpr>(c->callee);
       if (m && isPath(m->object)) {
         if (llvm::is_contained(listening, m->name)) {
-          escapes.push_back({m->loc(), "it got listeners (" + m->name.str() + "())"});
+          escapes.push_back({m->loc(), ErrorTextEncodingUse::listeners(m->name)});
         } else {
           safe.insert(unwrap(m->object));
         }
@@ -259,9 +275,9 @@ Expr *SetEncodingChecker::checkSetEncoding(CallExpr *call, MemberExpr *member, C
         return;
       }
       if (!direct.contains(e)) {
-        escapes.push_back({e->loc(), "a function written before uses it"});
+        escapes.push_back({e->loc(), ErrorTextEncodingUse::function()});
       } else if (!safe.contains(e)) {
-        escapes.push_back({e->loc(), "it went elsewhere (passed, stored or returned)"});
+        escapes.push_back({e->loc(), ErrorTextEncodingUse::elsewhere()});
       }
     });
   }
@@ -272,13 +288,10 @@ Expr *SetEncodingChecker::checkSetEncoding(CallExpr *call, MemberExpr *member, C
         first = &e;
       }
     }
-    this->state.getDiagnostics().error(
-        loc, "setEncoding() on a stream that is used elsewhere already, which sees its "
-             "chunks as Buffers, but strings would come: " +
-                 first->how +
-                 " before this; give the stream its encoding where it is created, e.g. "
-                 "'createReadStream(path, \"utf8\")', or call setEncoding() first");
-    this->state.getDiagnostics().note(first->loc, "the stream is used here");
+    std::string message = ErrorTextSetEncoding::usedBefore(first->how);
+    std::string usedHere = ErrorTextSetEncoding::usedHere();
+    this->state.getDiagnostics().error(loc, message);
+    this->state.getDiagnostics().note(first->loc, usedHere);
     return call;
   }
   const Type *view = this->encodedStreamType(cls, loc);

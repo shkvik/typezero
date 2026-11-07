@@ -9,20 +9,18 @@
 
 namespace tz {
 
-namespace {
-
-int takeOutputDir(Args &args) {
+int EntryFile::takeOutputDir(Args &args) {
   if (args.command != Args::Command::Build || !args.output.empty()) {
     return -1;
   }
   llvm::SmallString<256> dir(args.input);
   llvm::sys::path::remove_filename(dir);
-  std::string configPath = pkg::findTzConfig(dir);
+  std::string configPath = pkg::TzConfigFile::findTzConfig(dir);
   if (configPath.empty()) {
     return -1;
   }
   pkg::TzConfig config;
-  if (!pkg::readTzConfig(configPath, config)) {
+  if (!pkg::TzConfigFile::readTzConfig(configPath, config)) {
     return kExitError;
   }
   args.outputDir = config.outDir;
@@ -30,13 +28,11 @@ int takeOutputDir(Args &args) {
   return -1;
 }
 
-}
-
 int EntryFile::find(Args &args) const {
   if (!args.input.empty()) {
-    return takeOutputDir(args);
+    return EntryFile::takeOutputDir(args);
   }
-  std::string manifestPath = pkg::findManifest("");
+  std::string manifestPath = pkg::ManifestFile::findManifest("");
   if (manifestPath.empty()) {
     return Args::usageError(args.programArgs.empty()
                                 ? "no source file given, and there is no package.json here or "
@@ -47,7 +43,7 @@ int EntryFile::find(Args &args) const {
                                       "would run");
   }
   pkg::Manifest manifest;
-  if (!pkg::readManifest(manifestPath, manifest)) {
+  if (!pkg::ManifestFile::readManifest(manifestPath, manifest)) {
     return kExitError;
   }
   if (manifest.main.empty()) {
@@ -64,7 +60,7 @@ int EntryFile::find(Args &args) const {
     args.outputStem = name.str();
   }
 
-  return takeOutputDir(args);
+  return EntryFile::takeOutputDir(args);
 }
 
 }

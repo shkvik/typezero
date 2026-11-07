@@ -19,6 +19,8 @@ public:
   std::vector<Note> &notes() { return notes_; }
 
 private:
+  static bool isOperandEnd(const Token &t);
+  static std::string templateText(llvm::StringRef literal);
   void retokenize();
   size_t at(size_t i) const { return static_cast<size_t>(toks_[i].text.data() - text_.data()); }
   size_t endOf(size_t i) const { return at(i) + toks_[i].text.size(); }

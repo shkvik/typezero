@@ -4,9 +4,7 @@
 
 namespace tz {
 
-namespace {
-
-llvm::json::Value keyOf(const Knowledge &knowledge, size_t symbol) {
+llvm::json::Value KnowledgeJson::keyOf(const Knowledge &knowledge, size_t symbol) {
   if (symbol == Knowledge::kNone) {
     return nullptr;
   }
@@ -14,10 +12,8 @@ llvm::json::Value keyOf(const Knowledge &knowledge, size_t symbol) {
   return knowledge.symbols[symbol].key;
 }
 
-std::string text(const llvm::json::Object &object, llvm::StringRef key) {
+std::string KnowledgeJson::text(const llvm::json::Object &object, llvm::StringRef key) {
   return object.getString(key).value_or("").str();
-}
-
 }
 
 llvm::json::Object KnowledgeJson::range(const SourcePlace &place) {
@@ -58,15 +54,16 @@ llvm::json::Value KnowledgeJson::write(const Knowledge &knowledge, bool libraryB
   }
   for (size_t i = 0; i < knowledge.symbols.size(); ++i) {
     const KnownSymbol &symbol = knowledge.symbols[i];
-    symbols[symbol.module].push_back(llvm::json::Object{{"key", symbol.key},
-                                                        {"kind", symbol.kind},
-                                                        {"name", symbol.name},
-                                                        {"container", symbol.container},
-                                                        {"parent", keyOf(knowledge, symbol.parent)},
-                                                        {"signature", symbol.signature},
-                                                        {"exported", symbol.exported},
-                                                        {"range", range(symbol.place)},
-                                                        {"extent", range(symbol.extent)}});
+    symbols[symbol.module].push_back(
+        llvm::json::Object{{"key", symbol.key},
+                           {"kind", symbol.kind},
+                           {"name", symbol.name},
+                           {"container", symbol.container},
+                           {"parent", KnowledgeJson::keyOf(knowledge, symbol.parent)},
+                           {"signature", symbol.signature},
+                           {"exported", symbol.exported},
+                           {"range", range(symbol.place)},
+                           {"extent", range(symbol.extent)}});
   }
   auto body = [&](size_t module) { return libraryBodies || !knowledge.modules[module].library; };
   std::vector<bool> details(knowledge.modules.size(), true);
@@ -80,7 +77,7 @@ llvm::json::Value KnowledgeJson::write(const Knowledge &knowledge, bool libraryB
     if (body(reference.module)) {
       references[reference.module].push_back(
           llvm::json::Object{{"to", knowledge.symbols[reference.symbol].key},
-                             {"from", keyOf(knowledge, reference.from)},
+                             {"from", KnowledgeJson::keyOf(knowledge, reference.from)},
                              {"call", reference.call},
                              {"range", range(reference.place)}});
     }
@@ -102,12 +99,13 @@ llvm::json::Value KnowledgeJson::write(const Knowledge &knowledge, bool libraryB
     for (const SourcePlace &use : local.uses) {
       uses.push_back(range(use));
     }
-    locals[local.module].push_back(llvm::json::Object{{"name", local.name},
-                                                      {"type", local.type},
-                                                      {"kind", local.kind},
-                                                      {"owner", keyOf(knowledge, local.owner)},
-                                                      {"range", range(local.place)},
-                                                      {"uses", std::move(uses)}});
+    locals[local.module].push_back(
+        llvm::json::Object{{"name", local.name},
+                           {"type", local.type},
+                           {"kind", local.kind},
+                           {"owner", KnowledgeJson::keyOf(knowledge, local.owner)},
+                           {"range", range(local.place)},
+                           {"uses", std::move(uses)}});
   }
   llvm::json::Array modules;
   for (size_t m = 0; m < knowledge.modules.size(); ++m) {
@@ -159,8 +157,8 @@ bool KnowledgeJson::read(const llvm::json::Value &value, Knowledge &out) {
     return false;
   }
   out = Knowledge();
-  out.entry = text(*all, "entry");
-  out.root = text(*all, "root");
+  out.entry = KnowledgeJson::text(*all, "entry");
+  out.root = KnowledgeJson::text(*all, "root");
   llvm::StringMap<size_t> keys;
   llvm::StringMap<size_t> names;
   std::vector<const llvm::json::Object *> items;
@@ -170,10 +168,10 @@ bool KnowledgeJson::read(const llvm::json::Value &value, Knowledge &out) {
       continue;
     }
     KnownModule module;
-    module.path = text(*fields, "path");
-    module.file = text(*fields, "file");
-    module.name = text(*fields, "name");
-    module.hash = text(*fields, "hash");
+    module.path = KnowledgeJson::text(*fields, "path");
+    module.file = KnowledgeJson::text(*fields, "file");
+    module.name = KnowledgeJson::text(*fields, "name");
+    module.hash = KnowledgeJson::text(*fields, "hash");
     module.library = fields->getBoolean("library").value_or(false);
     module.entry = fields->getBoolean("entry").value_or(false);
     module.lines = static_cast<unsigned>(fields->getInteger("lines").value_or(0));
@@ -203,11 +201,11 @@ bool KnowledgeJson::read(const llvm::json::Value &value, Knowledge &out) {
           continue;
         }
         KnownSymbol symbol;
-        symbol.key = text(*fields, "key");
-        symbol.kind = text(*fields, "kind");
-        symbol.name = text(*fields, "name");
-        symbol.container = text(*fields, "container");
-        symbol.signature = text(*fields, "signature");
+        symbol.key = KnowledgeJson::text(*fields, "key");
+        symbol.kind = KnowledgeJson::text(*fields, "kind");
+        symbol.name = KnowledgeJson::text(*fields, "name");
+        symbol.container = KnowledgeJson::text(*fields, "container");
+        symbol.signature = KnowledgeJson::text(*fields, "signature");
         symbol.exported = fields->getBoolean("exported").value_or(false);
         symbol.module = m;
         symbol.place.path = out.modules[m].path;
@@ -217,7 +215,7 @@ bool KnowledgeJson::read(const llvm::json::Value &value, Knowledge &out) {
         symbol.extent.file = symbol.place.file;
         readRange(fields->getObject("extent"), symbol.extent);
         keys[symbol.key] = out.symbols.size();
-        parents.push_back({out.symbols.size(), text(*fields, "parent")});
+        parents.push_back({out.symbols.size(), KnowledgeJson::text(*fields, "parent")});
         out.symbols.push_back(std::move(symbol));
       }
     }
@@ -257,10 +255,10 @@ bool KnowledgeJson::read(const llvm::json::Value &value, Knowledge &out) {
       for (const llvm::json::Value &item : *types) {
         if (const llvm::json::Object *fields = item.getAsObject()) {
           KnownType type;
-          type.name = text(*fields, "name");
-          type.type = text(*fields, "type");
-          type.base = text(*fields, "base");
-          type.kind = text(*fields, "kind");
+          type.name = KnowledgeJson::text(*fields, "name");
+          type.type = KnowledgeJson::text(*fields, "type");
+          type.base = KnowledgeJson::text(*fields, "base");
+          type.kind = KnowledgeJson::text(*fields, "kind");
           type.module = m;
           type.place.path = module.path;
           readRange(fields->getObject("range"), type.place);
@@ -273,7 +271,7 @@ bool KnowledgeJson::read(const llvm::json::Value &value, Knowledge &out) {
         if (const llvm::json::Object *fields = item.getAsObject()) {
           KnownProblem problem;
           problem.severity = static_cast<int>(fields->getInteger("severity").value_or(1));
-          problem.message = text(*fields, "message");
+          problem.message = KnowledgeJson::text(*fields, "message");
           problem.module = m;
           problem.place.path = module.path;
           readRange(fields->getObject("range"), problem.place);
@@ -288,9 +286,9 @@ bool KnowledgeJson::read(const llvm::json::Value &value, Knowledge &out) {
           continue;
         }
         KnownLocal local;
-        local.name = text(*fields, "name");
-        local.type = text(*fields, "type");
-        local.kind = text(*fields, "kind");
+        local.name = KnowledgeJson::text(*fields, "name");
+        local.type = KnowledgeJson::text(*fields, "type");
+        local.kind = KnowledgeJson::text(*fields, "kind");
         local.module = m;
         local.owner = symbolOf(*fields, "owner");
         local.place.path = module.path;
@@ -309,14 +307,16 @@ bool KnowledgeJson::read(const llvm::json::Value &value, Knowledge &out) {
   }
   if (const llvm::json::Object *members = all->getObject("members")) {
     for (const auto &[type, list] : *members) {
-      const llvm::json::Array *items = list.getAsArray();
-      if (!items) {
+      const llvm::json::Array *entries = list.getAsArray();
+      if (!entries) {
         continue;
       }
       std::vector<KnownMember> &found = out.typeMembers[type.str()];
-      for (const llvm::json::Value &item : *items) {
+      for (const llvm::json::Value &item : *entries) {
         if (const llvm::json::Object *fields = item.getAsObject()) {
-          found.push_back({text(*fields, "name"), text(*fields, "kind"), text(*fields, "detail")});
+          found.push_back({KnowledgeJson::text(*fields, "name"),
+                           KnowledgeJson::text(*fields, "kind"),
+                           KnowledgeJson::text(*fields, "detail")});
         }
       }
     }

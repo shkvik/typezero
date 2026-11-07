@@ -1,4 +1,5 @@
 #include "compiler/pipeline/check_program/types/template_types/template_types.h"
+#include "compiler/load/to_utf8/to_utf8.h"
 #include "compiler/pipeline/check_program/types/conditional_check_helpers/conditional_check_helpers.h"
 #include "compiler/pipeline/check_program/types/extends_relation/extends_relation.h"
 #include "compiler/pipeline/check_program/types/type_operators/type_operators.h"
@@ -7,22 +8,12 @@
 #include "llvm/Support/ConvertUTF.h"
 #include <cmath>
 
-
 namespace tz {
 
 namespace {
 
 constexpr size_t kMaxTemplateStrings = 100000;
 
-}
-
-std::string TemplateTypes::utf8(const std::u16string &text) {
-  std::string out;
-  llvm::convertUTF16ToUTF8String(
-      llvm::ArrayRef<llvm::UTF16>(reinterpret_cast<const llvm::UTF16 *>(text.data()), text.size()),
-      out);
-
-  return out;
 }
 
 std::u16string TemplateTypes::utf16(llvm::StringRef text) {
@@ -34,7 +25,7 @@ std::u16string TemplateTypes::utf16(llvm::StringRef text) {
 
 std::vector<const Type *> TemplateTypes::distributed(const Type *type) {
   std::vector<const Type *> out;
-  distribute(type, out);
+  ConditionalCheckHelpers::distribute(type, out);
 
   return out;
 }
@@ -198,13 +189,13 @@ bool TemplateTypes::matchTemplate(const std::u16string &text, llvm::ArrayRef<con
     }
   }
   std::vector<std::u16string> pieces;
-  if (!splitByTemplate(text, texts, pieces)) {
+  if (!TemplatePatterns::splitByTemplate(text, texts, pieces)) {
     return false;
   }
   for (size_t k = 0; k < holes.size(); ++k) {
     const Type *hole = holes[k];
-    if (!mentionsParam(hole)) {
-      if (!holeAccepts(hole, pieces[k])) {
+    if (!TypeQueries::mentionsParam(hole)) {
+      if (!TemplatePatterns::holeAccepts(hole, pieces[k])) {
         return false;
       }
       continue;
@@ -214,13 +205,12 @@ bool TemplateTypes::matchTemplate(const std::u16string &text, llvm::ArrayRef<con
       if (const Type *constraint = hole->constraint();
           constraint && constraint->nonOptional()->isNumeric()) {
         double value = 0;
-        if (!numberString(pieces[k], value)) {
+        if (!TemplatePatterns::numberString(pieces[k], value)) {
           return false;
         }
         bool whole = value == std::trunc(value) && std::fabs(value) <= 9007199254740992.0;
         const Type *number = Type::numberLiteral(value, whole ? Type::intTy() : Type::doubleTy());
-        piece =
-            number->name() == TemplateTypes::utf8(pieces[k]) ? number : constraint->nonOptional();
+        piece = number->name() == ToUtf8::toUtf8(pieces[k]) ? number : constraint->nonOptional();
       }
     }
     if (!ExtendsRelation(this->state).extendsType(piece, hole, inference)) {

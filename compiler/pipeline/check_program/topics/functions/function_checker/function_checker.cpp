@@ -177,7 +177,7 @@ void FunctionChecker::declareFunction(FunctionDecl *fn, VarSymbol *var, bool sco
       }
     } else if (hook && i < hook->size() && !param.rest()) {
       type = (*hook)[i];
-    } else if (param.defaultValue() && (type = literalType(param.defaultValue()))) {
+    } else if (param.defaultValue() && (type = SharedHelpers::literalType(param.defaultValue()))) {
     } else if (param.defaultValue() && !param.rest() && !fn->source.empty()) {
       param.declaredType = nullptr;
       sym->params.push_back(nullptr);

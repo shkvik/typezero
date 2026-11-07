@@ -20,7 +20,7 @@ namespace path = llvm::sys::path;
 
 int InitCommand::run(llvm::ArrayRef<const char *> args) const {
   if (args.size() > 1) {
-    return usage("'tz init' takes one directory", "tz init [directory]");
+    return CommandUsage::usage("'tz init' takes one directory", "tz init [directory]");
   }
   llvm::SmallString<256> dir;
   if (args.empty()) {
@@ -29,7 +29,7 @@ int InitCommand::run(llvm::ArrayRef<const char *> args) const {
     dir = args[0];
     fs::make_absolute(dir);
     if (std::error_code ec = fs::create_directories(dir)) {
-      report("cannot create '" + dir + "': " + ec.message());
+      Report::report("cannot create '" + dir + "': " + ec.message());
       return kExitError;
     }
   }
@@ -41,36 +41,38 @@ int InitCommand::run(llvm::ArrayRef<const char *> args) const {
     return std::string(result);
   };
   if (fs::exists(file("package.json"))) {
-    report("there is a package.json already in " + dir);
+    Report::report("there is a package.json already in " + dir);
     return kExitError;
   }
   std::string name = path::filename(dir).str();
   std::string error;
-  if (!checkAlias(name, error)) {
+  if (!DependencyAlias::checkAlias(name, error)) {
     name = "app";
   }
   std::vector<std::string> created{"package.json"};
-  if (!writeText(file("package.json"),
-                 "{\n  \"name\": " + jsonQuote(name) +
-                     ",\n  \"main\": \"main.tz\",\n  \"scripts\": {\n    \"start\": \"tz run\",\n"
-                     "    \"build\": \"tz build\"\n  },\n  \"dependencies\": {}\n}\n")) {
+  if (!ProjectFile::writeText(
+          file("package.json"),
+          "{\n  \"name\": " + JsonText::jsonQuote(name) +
+              ",\n  \"main\": \"main.tz\",\n  \"scripts\": {\n    \"start\": \"tz run\",\n"
+              "    \"build\": \"tz build\"\n  },\n  \"dependencies\": {}\n}\n")) {
     return kExitError;
   }
   if (!fs::exists(file("tzconfig.json"))) {
-    if (!writeText(file("tzconfig.json"),
-                   "{\n  \"compilerOptions\": {\n    \"outDir\": \"dist\"\n  }\n}\n")) {
+    if (!ProjectFile::writeText(
+            file("tzconfig.json"),
+            "{\n  \"compilerOptions\": {\n    \"outDir\": \"dist\"\n  }\n}\n")) {
       return kExitError;
     }
     created.push_back("tzconfig.json");
   }
   if (!fs::exists(file("main.tz"))) {
-    if (!writeText(file("main.tz"), "console.log(\"Hello, world!\")\n")) {
+    if (!ProjectFile::writeText(file("main.tz"), "console.log(\"Hello, world!\")\n")) {
       return kExitError;
     }
     created.push_back("main.tz");
   }
   if (!fs::exists(file(".gitignore"))) {
-    if (!writeText(file(".gitignore"), "/dist/\n*.exe\n*.pdb\n*.ll\n")) {
+    if (!ProjectFile::writeText(file(".gitignore"), "/dist/\n*.exe\n*.pdb\n*.ll\n")) {
       return kExitError;
     }
     created.push_back(".gitignore");

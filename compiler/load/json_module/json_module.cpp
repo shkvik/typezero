@@ -9,21 +9,9 @@
 
 namespace tz {
 
-namespace {
-
 using pkg::JsonValue;
 
-struct Shape {
-  enum class Kind { Unknown, Json, Bool, Int, Double, String, Array, Object };
-  Kind kind = Kind::Unknown;
-  std::vector<Shape> items;
-  std::vector<std::string> keys;
-  std::vector<bool> optional;
-};
-
-using Fields = std::vector<std::pair<std::string, const JsonValue *>>;
-
-Fields fieldsOf(const JsonValue &object) {
+JsonModule::Fields JsonModule::fieldsOf(const JsonValue &object) {
   Fields fields;
   for (size_t i = 0; i < object.keys().size(); ++i) {
     auto known = std::find_if(fields.begin(), fields.end(),
@@ -38,7 +26,7 @@ Fields fieldsOf(const JsonValue &object) {
   return fields;
 }
 
-bool integral(llvm::StringRef raw) {
+bool JsonModule::integral(llvm::StringRef raw) {
   if (raw.find_first_of(".eE") != llvm::StringRef::npos) {
     return false;
   }
@@ -47,7 +35,7 @@ bool integral(llvm::StringRef raw) {
   return !raw.getAsInteger(10, value) && value != INT64_MIN;
 }
 
-Shape join(const Shape &a, const Shape &b) {
+JsonModule::Shape JsonModule::join(const Shape &a, const Shape &b) {
   using Kind = Shape::Kind;
   if (a.kind == Kind::Unknown) {
     return b;
@@ -63,7 +51,7 @@ Shape join(const Shape &a, const Shape &b) {
     return Shape{Kind::Json, {}, {}, {}};
   }
   if (a.kind == Kind::Array) {
-    Shape element = join(a.items[0], b.items[0]);
+    Shape element = JsonModule::join(a.items[0], b.items[0]);
     return Shape{Kind::Array, {std::move(element)}, {}, {}};
   }
   if (a.kind != Kind::Object) {
@@ -78,7 +66,7 @@ Shape join(const Shape &a, const Shape &b) {
       merged.optional.push_back(true);
     } else {
       size_t k = size_t(there - b.keys.begin());
-      merged.items.push_back(join(a.items[i], b.items[k]));
+      merged.items.push_back(JsonModule::join(a.items[i], b.items[k]));
       merged.optional.push_back(a.optional[i] || b.optional[k]);
     }
   }
@@ -93,7 +81,7 @@ Shape join(const Shape &a, const Shape &b) {
   return merged;
 }
 
-Shape shapeOf(const JsonValue &value, llvm::StringRef text) {
+JsonModule::Shape JsonModule::shapeOf(const JsonValue &value, llvm::StringRef text) {
   using Kind = Shape::Kind;
   switch (value.form.kind()) {
     case pkg::JsonKind::JSON_NULL:
@@ -101,22 +89,25 @@ Shape shapeOf(const JsonValue &value, llvm::StringRef text) {
     case pkg::JsonKind::JSON_BOOL:
       return Shape{Kind::Bool, {}, {}, {}};
     case pkg::JsonKind::JSON_NUMBER:
-      return Shape{
-          integral(text.slice(value.begin, value.end)) ? Kind::Int : Kind::Double, {}, {}, {}};
+      return Shape{JsonModule::integral(text.slice(value.begin, value.end)) ? Kind::Int
+                                                                            : Kind::Double,
+                   {},
+                   {},
+                   {}};
     case pkg::JsonKind::JSON_STRING:
       return Shape{Kind::String, {}, {}, {}};
     case pkg::JsonKind::JSON_ARRAY: {
       Shape element;
       for (const JsonValue &item : value.items()) {
-        element = join(element, shapeOf(item, text));
+        element = JsonModule::join(element, JsonModule::shapeOf(item, text));
       }
       return Shape{Kind::Array, {std::move(element)}, {}, {}};
     }
     case pkg::JsonKind::JSON_OBJECT: {
       Shape object{Kind::Object, {}, {}, {}};
-      for (const auto &[key, field] : fieldsOf(value)) {
+      for (const auto &[key, field] : JsonModule::fieldsOf(value)) {
         object.keys.push_back(key);
-        object.items.push_back(shapeOf(*field, text));
+        object.items.push_back(JsonModule::shapeOf(*field, text));
         object.optional.push_back(false);
       }
       return object;
@@ -126,7 +117,7 @@ Shape shapeOf(const JsonValue &value, llvm::StringRef text) {
   return Shape{Kind::Json, {}, {}, {}};
 }
 
-std::string typeText(const Shape &shape) {
+std::string JsonModule::typeText(const Shape &shape) {
   using Kind = Shape::Kind;
   switch (shape.kind) {
   case Kind::Unknown:
@@ -141,12 +132,12 @@ std::string typeText(const Shape &shape) {
   case Kind::String:
     return "string";
   case Kind::Array:
-    return typeText(shape.items[0]) + "[]";
+    return JsonModule::typeText(shape.items[0]) + "[]";
   case Kind::Object: {
     std::string out = "{";
     for (size_t i = 0; i < shape.keys.size(); ++i) {
-      out += (i ? "; " : " ") + pkg::jsonQuote(shape.keys[i]) + (shape.optional[i] ? "?: " : ": ") +
-             typeText(shape.items[i]);
+      out += (i ? "; " : " ") + pkg::JsonText::jsonQuote(shape.keys[i]) +
+             (shape.optional[i] ? "?: " : ": ") + JsonModule::typeText(shape.items[i]);
     }
     return out + (shape.keys.empty() ? "}" : " }");
   }
@@ -155,7 +146,7 @@ std::string typeText(const Shape &shape) {
   return "Json";
 }
 
-std::string jsonText(const JsonValue &value, llvm::StringRef text) {
+std::string JsonModule::jsonText(const JsonValue &value, llvm::StringRef text) {
   switch (value.form.kind()) {
     case pkg::JsonKind::JSON_NULL:
       return "null";
@@ -163,23 +154,25 @@ std::string jsonText(const JsonValue &value, llvm::StringRef text) {
       return value.boolean() ? "true" : "false";
     case pkg::JsonKind::JSON_NUMBER: {
       llvm::StringRef raw = text.slice(value.begin, value.end);
-      return raw.find_first_of(".eE") == llvm::StringRef::npos && !integral(raw) ? raw.str() + ".0"
-                                                                                 : raw.str();
+      return raw.find_first_of(".eE") == llvm::StringRef::npos && !JsonModule::integral(raw)
+                 ? raw.str() + ".0"
+                 : raw.str();
     }
     case pkg::JsonKind::JSON_STRING:
-      return pkg::jsonQuote(value.string());
+      return pkg::JsonText::jsonQuote(value.string());
     case pkg::JsonKind::JSON_ARRAY: {
       std::string out = "[";
       for (size_t i = 0; i < value.items().size(); ++i) {
-        out += (i ? ", " : "") + jsonText(value.items()[i], text);
+        out += (i ? ", " : "") + JsonModule::jsonText(value.items()[i], text);
       }
       return out + "]";
     }
     case pkg::JsonKind::JSON_OBJECT: {
       std::string out = "{";
       bool first = true;
-      for (const auto &[key, field] : fieldsOf(value)) {
-        out += (first ? " " : ", ") + pkg::jsonQuote(key) + ": " + jsonText(*field, text);
+      for (const auto &[key, field] : JsonModule::fieldsOf(value)) {
+        out += (first ? " " : ", ") + pkg::JsonText::jsonQuote(key) + ": " +
+               JsonModule::jsonText(*field, text);
         first = false;
       }
       return out + (first ? "}" : " }");
@@ -189,12 +182,13 @@ std::string jsonText(const JsonValue &value, llvm::StringRef text) {
   return "null";
 }
 
-std::string valueText(const JsonValue &value, const Shape &shape, llvm::StringRef text) {
+std::string JsonModule::valueText(const JsonValue &value, const Shape &shape,
+                                  llvm::StringRef text) {
   using Kind = Shape::Kind;
   switch (shape.kind) {
   case Kind::Unknown:
   case Kind::Json:
-    return jsonText(value, text);
+    return JsonModule::jsonText(value, text);
   case Kind::Double: {
     std::string raw = text.slice(value.begin, value.end).str();
     return raw.find_first_of(".eE") == std::string::npos ? raw + ".0" : raw;
@@ -202,43 +196,41 @@ std::string valueText(const JsonValue &value, const Shape &shape, llvm::StringRe
   case Kind::Array: {
     std::string out = "[";
     for (size_t i = 0; i < value.items().size(); ++i) {
-      out += (i ? ", " : "") + valueText(value.items()[i], shape.items[0], text);
+      out += (i ? ", " : "") + JsonModule::valueText(value.items()[i], shape.items[0], text);
     }
     return out + "]";
   }
   case Kind::Object: {
     std::string out = "{";
     bool first = true;
-    for (const auto &[key, field] : fieldsOf(value)) {
+    for (const auto &[key, field] : JsonModule::fieldsOf(value)) {
       size_t k = size_t(std::find(shape.keys.begin(), shape.keys.end(), key) - shape.keys.begin());
-      out += (first ? " " : ", ") + pkg::jsonQuote(key) + ": " +
-             valueText(*field, shape.items[k], text);
+      out += (first ? " " : ", ") + pkg::JsonText::jsonQuote(key) + ": " +
+             JsonModule::valueText(*field, shape.items[k], text);
       first = false;
     }
     return out + (first ? "}" : " }");
   }
   default:
-    return jsonText(value, text);
+    return JsonModule::jsonText(value, text);
   }
 }
 
-}
-
-bool jsonModuleText(llvm::StringRef json, llvm::StringRef exported, std::string &out,
-                    size_t &errorOffset, std::string &error) {
-  pkg::JsonProblem problem = pkg::checkJsonText(json);
+bool JsonModule::jsonModuleText(llvm::StringRef json, llvm::StringRef exported, std::string &out,
+                                size_t &errorOffset, std::string &error) {
+  pkg::JsonProblem problem = pkg::JsonText::checkJsonText(json);
   if (!problem.message.empty()) {
     errorOffset = problem.offset;
     error = problem.message;
     return false;
   }
   JsonValue value;
-  if (!pkg::parseJson(json, value, errorOffset, error)) {
+  if (!pkg::JsonParser::parseJson(json, value, errorOffset, error)) {
     return false;
   }
-  Shape shape = shapeOf(value, json);
-  out = "export const " + exported.str() + ": " + typeText(shape) + " = " +
-        valueText(value, shape, json) + "\n";
+  Shape shape = JsonModule::shapeOf(value, json);
+  out = "export const " + exported.str() + ": " + JsonModule::typeText(shape) + " = " +
+        JsonModule::valueText(value, shape, json) + "\n";
 
   return true;
 }

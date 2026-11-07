@@ -39,10 +39,12 @@ const char kSynopsis[] =
     "  package's name); --in-place changes a directory itself. --entry names the\n"
     "  files the package exports when it does not say.";
 
-bool readFile(llvm::StringRef file, std::string &text) {
+}
+
+bool PortCommand::readFile(llvm::StringRef file, std::string &text) {
   auto buffer = llvm::MemoryBuffer::getFile(file, false, false);
   if (!buffer) {
-    report("cannot read '" + file + "': " + buffer.getError().message());
+    Report::report("cannot read '" + file + "': " + buffer.getError().message());
     return false;
   }
   text = (*buffer)->getBuffer().str();
@@ -50,9 +52,9 @@ bool readFile(llvm::StringRef file, std::string &text) {
   return true;
 }
 
-bool writeFile(llvm::StringRef file, llvm::StringRef text) {
+bool PortCommand::writeFile(llvm::StringRef file, llvm::StringRef text) {
   if (std::error_code ec = fs::create_directories(path::parent_path(file))) {
-    report("cannot create '" + path::parent_path(file) + "': " + ec.message());
+    Report::report("cannot create '" + path::parent_path(file) + "': " + ec.message());
     return false;
   }
   std::error_code ec;
@@ -66,15 +68,15 @@ bool writeFile(llvm::StringRef file, llvm::StringRef text) {
     }
   }
   if (ec) {
-    report("cannot write '" + file + "': " + ec.message());
+    Report::report("cannot write '" + file + "': " + ec.message());
     return false;
   }
 
   return true;
 }
 
-void findDefaultNames(const std::vector<std::string> &files, llvm::StringRef packageDir,
-                      PortContext &ctx) {
+void PortCommand::findDefaultNames(const std::vector<std::string> &files,
+                                   llvm::StringRef packageDir, PortContext &ctx) {
   for (int round = 0; round < 4; ++round) {
     for (const std::string &file : files) {
       llvm::SmallString<256> real;
@@ -87,7 +89,7 @@ void findDefaultNames(const std::vector<std::string> &files, llvm::StringRef pac
         continue;
       }
       text = (*buffer)->getBuffer().str();
-      std::vector<Token> toks = tokenize(text);
+      std::vector<Token> toks = Scanner::tokenize(text);
       std::string name;
       for (size_t i = 0; i + 1 < toks.size() && name.empty(); ++i) {
         if (toks[i].kind != Tok::Identifier || toks[i].text != "export") {
@@ -111,15 +113,16 @@ void findDefaultNames(const std::vector<std::string> &files, llvm::StringRef pac
                 toks[k + 1].text != "extends" && toks[k + 1].text != "implements") {
               name = toks[k + 1].text.str();
             } else {
-              name = isClass ? capitalize(derivedName(file, packageDir, ctx.packageName))
-                             : derivedName(file, packageDir, ctx.packageName);
+              name = isClass ? PortNames::capitalize(
+                                   PortNames::derivedName(file, packageDir, ctx.packageName))
+                             : PortNames::derivedName(file, packageDir, ctx.packageName);
             }
           } else if (k < toks.size() && toks[k].is(Tok::Identifier) &&
                      (k + 1 == toks.size() || toks[k + 1].is(Tok::Semi) ||
                       toks[k + 1].newlineBefore)) {
             name = toks[k].text.str();
           } else {
-            name = derivedName(file, packageDir, ctx.packageName);
+            name = PortNames::derivedName(file, packageDir, ctx.packageName);
           }
         } else if (toks[i + 1].is(Tok::LBrace)) {
           size_t j = i + 2;
@@ -137,8 +140,8 @@ void findDefaultNames(const std::vector<std::string> &files, llvm::StringRef pac
             }
           }
           if (reexportsDefault && j + 2 < toks.size() && toks[j + 1].text == "from") {
-            std::string target =
-                resolveRelative(file, stringValue(toks[j + 2]), Sources::TypeScript);
+            std::string target = Scanner::resolveRelative(file, Scanner::stringValue(toks[j + 2]),
+                                                          Sources::TypeScript);
             llvm::SmallString<256> targetReal;
             if (!target.empty() && !fs::real_path(target, targetReal)) {
               if (auto it = ctx.defaultNames.find(std::string(targetReal));
@@ -156,10 +159,9 @@ void findDefaultNames(const std::vector<std::string> &files, llvm::StringRef pac
   }
 }
 
-std::vector<std::pair<std::string, std::string>> packageEntries(const std::string &dir,
-                                                                const Manifest &manifest,
-                                                                std::string &name,
-                                                                std::string &version) {
+std::vector<std::pair<std::string, std::string>>
+PortCommand::packageEntries(const std::string &dir, const Manifest &manifest, std::string &name,
+                            std::string &version) {
   std::vector<std::pair<std::string, std::string>> entries = manifest.exports;
   if (entries.empty() && !manifest.main.empty()) {
     entries.push_back({".", manifest.main});
@@ -176,7 +178,7 @@ std::vector<std::pair<std::string, std::string>> packageEntries(const std::strin
     JsonValue root;
     size_t at;
     std::string error;
-    if (parseJson((*buffer)->getBuffer(), root, at, error)) {
+    if (JsonParser::parseJson((*buffer)->getBuffer(), root, at, error)) {
       if (name.empty()) {
         name = root.getString("name");
       }
@@ -206,14 +208,16 @@ std::vector<std::pair<std::string, std::string>> packageEntries(const std::strin
   return entries;
 }
 
-bool fetchSource(llvm::StringRef arg, std::string &dir, std::string &name, std::string &version,
-                 std::vector<std::pair<std::string, std::string>> &exports, bool &local) {
+bool PortCommand::fetchSource(llvm::StringRef arg, std::string &dir, std::string &name,
+                              std::string &version,
+                              std::vector<std::pair<std::string, std::string>> &exports,
+                              bool &local) {
   std::string error;
   local = false;
   if (fs::is_directory(arg)) {
     llvm::SmallString<256> real;
     if (fs::real_path(arg, real)) {
-      report("cannot read '" + arg + "'");
+      Report::report("cannot read '" + arg + "'");
       return false;
     }
     dir = std::string(real);
@@ -222,16 +226,16 @@ bool fetchSource(llvm::StringRef arg, std::string &dir, std::string &name, std::
   }
   std::string spec = arg.starts_with("@") ? "jsr:" + arg.str() : arg.str();
   Source source;
-  if (!parseSource(spec, "", source, error)) {
-    report(error);
+  if (!SourceParser::parseSource(spec, "", source, error)) {
+    Report::report(error);
     return false;
   }
   if (source.form.is<JsrSource>()) {
     JsrVersions versions;
-    if (!jsrVersions(source.scope(), source.name(), versions, error)) {
-      report(error.empty()
-                 ? "there is no package " + source.id() + " in the registry (" + jsrBaseUrl() + ")"
-                 : error);
+    if (!JsrClient::jsrVersions(source.scope(), source.name(), versions, error)) {
+      Report::report(error.empty() ? "there is no package " + source.id() + " in the registry (" +
+                                         JsrClient::jsrBaseUrl() + ")"
+                                   : error);
       return false;
     }
     Range range;
@@ -246,15 +250,15 @@ bool fetchSource(llvm::StringRef arg, std::string &dir, std::string &name, std::
       }
     }
     if (!best) {
-      report("the registry has no version of " + source.id() + " that fits '" + source.range() +
-             "'");
+      Report::report("the registry has no version of " + source.id() + " that fits '" +
+                     source.range() + "'");
       return false;
     }
     JsrVersion meta;
     version = best->str();
-    if (!jsrVersion(source.scope(), source.name(), version, meta, error) ||
-        !jsrDownload(source.scope(), source.name(), version, meta, dir, error)) {
-      report(error);
+    if (!JsrClient::jsrVersion(source.scope(), source.name(), version, meta, error) ||
+        !JsrClient::jsrDownload(source.scope(), source.name(), version, meta, dir, error)) {
+      Report::report(error);
       return false;
     }
     name = source.shortName();
@@ -263,9 +267,9 @@ bool fetchSource(llvm::StringRef arg, std::string &dir, std::string &name, std::
   }
   if (source.form.is<GitSource>()) {
     std::string commit;
-    if (!gitResolve(source.url(), source.ref(), true, commit, error) ||
-        !gitCheckout(source.url(), commit, dir, error)) {
-      report(error);
+    if (!GitClient::gitResolve(source.url(), source.ref(), true, commit, error) ||
+        !GitClient::gitCheckout(source.url(), commit, dir, error)) {
+      Report::report(error);
       return false;
     }
     version = llvm::StringRef(source.ref()).ltrim("v").str();
@@ -277,17 +281,15 @@ bool fetchSource(llvm::StringRef arg, std::string &dir, std::string &name, std::
   return true;
 }
 
-std::string copyName(llvm::StringRef file) {
+std::string PortCommand::copyName(llvm::StringRef file) {
   return file.ends_with(".ts") ? (file.drop_back(3) + ".tz").str() : file.str();
 }
 
-std::string displayPath(llvm::StringRef base, llvm::StringRef relative) {
+std::string PortCommand::displayPath(llvm::StringRef base, llvm::StringRef relative) {
   llvm::SmallString<256> shown(base);
   path::append(shown, relative);
 
   return path::convert_to_slash(shown);
-}
-
 }
 
 int PortCommand::run(llvm::ArrayRef<const char *> args) const {
@@ -319,7 +321,7 @@ int PortCommand::run(llvm::ArrayRef<const char *> args) const {
   std::string dir, name, version;
   std::vector<std::pair<std::string, std::string>> exports;
   bool local;
-  if (!fetchSource(sourceArg, dir, name, version, exports, local)) {
+  if (!PortCommand::fetchSource(sourceArg, dir, name, version, exports, local)) {
     return kExitError;
   }
   llvm::SmallString<256> realDir;
@@ -327,17 +329,18 @@ int PortCommand::run(llvm::ArrayRef<const char *> args) const {
     dir = std::string(realDir);
   }
   if (inPlace && !local) {
-    report("--in-place changes a directory of this machine; '" + sourceArg + "' is not one");
+    Report::report("--in-place changes a directory of this machine; '" + sourceArg +
+                   "' is not one");
     return kExitError;
   }
   Manifest manifest;
-  if (!readPackageDir(dir, manifest)) {
+  if (!ManifestFile::readPackageDir(dir, manifest)) {
     return kExitError;
   }
   if (exports.empty()) {
-    exports = packageEntries(dir, manifest, name, version);
+    exports = PortCommand::packageEntries(dir, manifest, name, version);
   } else {
-    packageEntries(dir, manifest, name, version);
+    PortCommand::packageEntries(dir, manifest, name, version);
   }
   if (!entryArgs.empty()) {
     exports.clear();
@@ -351,9 +354,10 @@ int PortCommand::run(llvm::ArrayRef<const char *> args) const {
     name = path::filename(dir).str();
   }
   if (exports.empty()) {
-    report("cannot tell which files " + name +
-           " exports: it has no package.json or jsr.json that names its .ts or .tz files, and no "
-           "mod.ts, index.ts or src/index.ts; name them with --entry <file>");
+    Report::report(
+        "cannot tell which files " + name +
+        " exports: it has no package.json or jsr.json that names its .ts or .tz files, and no "
+        "mod.ts, index.ts or src/index.ts; name them with --entry <file>");
     return kExitError;
   }
 
@@ -365,7 +369,7 @@ int PortCommand::run(llvm::ArrayRef<const char *> args) const {
     std::error_code ec;
     fs::directory_iterator it(outDir, ec);
     if (!ec && it != fs::directory_iterator()) {
-      report("'" + out + "' is not empty; choose another directory with -o");
+      Report::report("'" + out + "' is not empty; choose another directory with -o");
       return kExitError;
     }
   }
@@ -375,18 +379,18 @@ int PortCommand::run(llvm::ArrayRef<const char *> args) const {
     llvm::SmallString<256> full(dir);
     path::append(full, file);
     if (!fs::is_regular_file(full)) {
-      report("cannot find '" + file + "', which " + name + " exports as '" + key + "'");
+      Report::report("cannot find '" + file + "', which " + name + " exports as '" + key + "'");
       return kExitError;
     }
     entries.push_back(std::string(full));
   }
-  reachableFiles(entries, files, external, Sources::TypeScript);
+  Scanner::reachableFiles(entries, files, external, Sources::TypeScript);
   PortContext ctx;
-  ctx.packageName = derivedName(shortName + ".ts", "", "");
-  findDefaultNames(files, dir, ctx);
+  ctx.packageName = PortNames::derivedName(shortName + ".ts", "", "");
+  PortCommand::findDefaultNames(files, dir, ctx);
   for (llvm::StringRef spec : external) {
     std::string package, source, subpath;
-    if (splitJsrImport(spec, package, source, subpath)) {
+    if (Specifier::splitJsrImport(spec, package, source, subpath)) {
       ctx.jsrDependencies[package] = source;
     }
   }
@@ -407,24 +411,25 @@ int PortCommand::run(llvm::ArrayRef<const char *> args) const {
     llvm::StringRef relative = real;
     if (!relative.consume_front(dir) ||
         !(relative.starts_with("/") || relative.starts_with("\\"))) {
-      report("'" + file + "' is outside " + dir + ", and is not copied");
+      Report::report("'" + file + "' is outside " + dir + ", and is not copied");
       continue;
     }
     std::string text;
-    if (!readFile(file, text)) {
+    if (!PortCommand::readFile(file, text)) {
       return kExitError;
     }
     FilePort port(file, std::move(text), ctx, counts);
     port.run();
-    ported.push_back({copyName(path::convert_to_slash(relative.drop_front())), port.text(),
-                      std::move(port.notes()), path::convert_to_slash(relative.drop_front())});
+    ported.push_back({PortCommand::copyName(path::convert_to_slash(relative.drop_front())),
+                      port.text(), std::move(port.notes()),
+                      path::convert_to_slash(relative.drop_front())});
   }
   std::sort(ported.begin(), ported.end(),
             [](const Ported &a, const Ported &b) { return a.relative < b.relative; });
   for (const Ported &p : ported) {
     llvm::SmallString<256> target(outDir);
     path::append(target, p.relative);
-    if (!writeFile(target, p.text)) {
+    if (!PortCommand::writeFile(target, p.text)) {
       return kExitError;
     }
     if (inPlace && p.source != p.relative) {
@@ -445,35 +450,36 @@ int PortCommand::run(llvm::ArrayRef<const char *> args) const {
       std::string text;
       llvm::SmallString<256> target(outDir);
       path::append(target, path::filename(it->path()));
-      if (!readFile(it->path(), text) || !writeFile(target, text)) {
+      if (!PortCommand::readFile(it->path(), text) || !PortCommand::writeFile(target, text)) {
         return kExitError;
       }
     }
   }
   llvm::SmallString<256> packageJson(outDir);
   path::append(packageJson, "package.json");
-  if (!inPlace || !fs::exists(packageJson) || !namesTzFiles(packageJson)) {
-    std::string json = "{\n  \"name\": " + jsonQuote(name);
+  if (!inPlace || !fs::exists(packageJson) || !ManifestFile::namesTzFiles(packageJson)) {
+    std::string json = "{\n  \"name\": " + JsonText::jsonQuote(name);
     if (!version.empty()) {
-      json += ",\n  \"version\": " + jsonQuote(version);
+      json += ",\n  \"version\": " + JsonText::jsonQuote(version);
     }
     if (exports.size() == 1 && exports[0].first == ".") {
-      json += ",\n  \"main\": " + jsonQuote(copyName(exports[0].second));
+      json += ",\n  \"main\": " + JsonText::jsonQuote(PortCommand::copyName(exports[0].second));
     } else {
       json += ",\n  \"exports\": {";
       for (size_t i = 0; i < exports.size(); ++i) {
-        json += (i ? ",\n    " : "\n    ") + jsonQuote(exports[i].first) + ": " +
-                jsonQuote("./" + copyName(exports[i].second));
+        json += (i ? ",\n    " : "\n    ") + JsonText::jsonQuote(exports[i].first) + ": " +
+                JsonText::jsonQuote("./" + PortCommand::copyName(exports[i].second));
       }
       json += "\n  }";
     }
     json += ",\n  \"dependencies\": {";
     size_t i = 0;
     for (const auto &[alias, spec] : ctx.jsrDependencies) {
-      json += (i++ ? ",\n    " : "\n    ") + jsonQuote(alias) + ": " + jsonQuote(spec);
+      json += (i++ ? ",\n    " : "\n    ") + JsonText::jsonQuote(alias) + ": " +
+              JsonText::jsonQuote(spec);
     }
     json += i ? "\n  }\n}\n" : "}\n}\n";
-    if (!writeFile(packageJson, json)) {
+    if (!PortCommand::writeFile(packageJson, json)) {
       return kExitError;
     }
   }
@@ -496,12 +502,13 @@ int PortCommand::run(llvm::ArrayRef<const char *> args) const {
   }
   for (const Ported &p : ported) {
     for (const Note &n : p.notes) {
-      auto [line, column] = lineAndColumn(p.text, n.offset);
-      llvm::outs() << "  " << displayPath(out, p.relative) << ":" << line << ":" << column << ": "
-                   << n.message << "\n";
+      auto [line, column] = JsonText::lineAndColumn(p.text, n.offset);
+      llvm::outs() << "  " << PortCommand::displayPath(out, p.relative) << ":" << line << ":"
+                   << column << ": " << n.message << "\n";
     }
   }
-  llvm::outs() << "then 'tz build " << displayPath(out, copyName(exports[0].second))
+  llvm::outs() << "then 'tz build "
+               << PortCommand::displayPath(out, PortCommand::copyName(exports[0].second))
                << "' reports what else tz does not accept\n";
 
   return 0;

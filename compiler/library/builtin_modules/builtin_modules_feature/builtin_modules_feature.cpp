@@ -22,14 +22,17 @@ Expr *BuiltinModulesFeature::checkMethodCall(CheckState &state, CallExpr *call, 
   return RuntimeObjectChecker(state).checkRuntimeMethod(call, member, expected);
 }
 
-std::optional<std::string> BuiltinModulesFeature::exportProblem(NodeModule module,
-                                                                llvm::StringRef exportName,
-                                                                llvm::StringRef path) const {
-  if (module != NodeModule::TimersPromises) {
-    return std::nullopt;
+BuiltinModulesFeature::ResultExportFound
+BuiltinModulesFeature::exportFound(NodeModule module, llvm::StringRef exportName,
+                                   llvm::StringRef path) const {
+  if (module == NodeModule::TimersPromises) {
+    return TimersExports::timersExport(exportName, path);
   }
 
-  return timersExportProblem(exportName, path);
+  return err(FeatureExportFoundError{
+      .code = FeatureExportFoundErrorCode::NOT_MINE,
+      .message = "",
+  });
 }
 
 Expr *BuiltinModulesFeature::checkModuleCall(CheckState &state, CallExpr *call, NodeModule module,

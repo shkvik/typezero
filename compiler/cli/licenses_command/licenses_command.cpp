@@ -7,7 +7,7 @@ namespace tz {
 LicensesCommand::LicensesCommand(const RuntimeFiles &runtime) : runtime_(runtime) {}
 
 int LicensesCommand::run(const Args &args) const {
-  return printLicenses(args.input, runtime_.path("licenses"));
+  return Licenses::printLicenses(args.input, runtime_.path("licenses"));
 }
 
 }

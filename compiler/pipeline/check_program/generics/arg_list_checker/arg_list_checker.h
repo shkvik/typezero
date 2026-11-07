@@ -30,7 +30,6 @@ private:
                                          size_t k, const Expr *arg, bool spreads);
   static ResultListIsFilled listFilled(const Type *list, llvm::ArrayRef<const Type *> parts,
                                        size_t k);
-  static std::string utf8(const std::u16string &text);
   static bool usedAsValue(const Stmt *body, llvm::StringRef name, bool known);
 
   CheckState &state;

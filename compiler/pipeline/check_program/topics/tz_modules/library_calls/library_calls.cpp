@@ -4,6 +4,7 @@
 #include "compiler/pipeline/check_program/topics/expr/argument_checker/argument_checker.h"
 #include "compiler/pipeline/check_program/topics/expr/expr_checker/expr_checker.h"
 #include "compiler/pipeline/check_program/topics/stream/stream_checker/stream_checker.h"
+#include "compiler/pipeline/check_program/topics/tz_modules/tz_modules_checker/tz_modules_checker_errors.h"
 #include "compiler/pipeline/check_program/types/type_resolver/type_resolver.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/Support/Path.h"
@@ -58,6 +59,25 @@ bool LibraryCalls::inLibrary(llvm::SMLoc loc) const {
   return this->state.getLibraryDeclarations().isInsideLibrary(loc);
 }
 
+LibraryCalls::ResultIntrinsicShape LibraryCalls::intrinsicShape(const CallExpr *call,
+                                                                const NameExpr *name,
+                                                                llvm::StringRef intrinsicName,
+                                                                bool known, unsigned args,
+                                                                unsigned typeArgs) {
+  bool wrong =
+      !known || call->args.size() != args || name->typeArgs.size() != typeArgs || call->hasSpread();
+  if (wrong) {
+    std::string message = ErrorTextIntrinsicCall::wrong(intrinsicName);
+
+    return err(LibraryCallsIntrinsicShapeError{
+        .code = LibraryCallsIntrinsicShapeErrorCode::NOT_AN_INTRINSIC,
+        .message = message,
+    });
+  }
+
+  return ok(call);
+}
+
 Expr *LibraryCalls::checkLibCall(CallExpr *call, NameExpr *name) {
   ScopeEntry own = Scopes(this->state).lookup(name->name);
   const FunctionDecl *decl = own.func() ? own.func()->decl : nullptr;
@@ -100,12 +120,14 @@ Expr *LibraryCalls::checkLibCall(CallExpr *call, NameExpr *name) {
                                          {"defer", Builtin::LibDefer, 1, 0},
                                          {"withContext", Builtin::LibWithContext, 2, 0},
                                          {"aheadMovable", Builtin::LibAheadMovable, 1, 0}};
-  const Intrinsic *intrinsic =
-      llvm::find_if(intrinsics, [&](const Intrinsic &i) { return i.name == intrinsicName; });
-  if (intrinsic == std::end(intrinsics) || call->args.size() != intrinsic->args ||
-      name->typeArgs.size() != intrinsic->typeArgs || call->hasSpread()) {
-    this->state.getDiagnostics().error(
-        name->loc(), "'" + intrinsicName + "' is no intrinsic of tz, or is called wrongly");
+  auto named = [&](const Intrinsic &i) { return i.name == intrinsicName; };
+  const Intrinsic *intrinsic = llvm::find_if(intrinsics, named);
+  bool known = intrinsic != std::end(intrinsics);
+  ResultIntrinsicShape shape =
+      LibraryCalls::intrinsicShape(call, name, intrinsicName, known, known ? intrinsic->args : 0,
+                                   known ? intrinsic->typeArgs : 0);
+  if (shape.isErr()) {
+    this->state.getDiagnostics().error(name->loc(), shape.error().message);
     checkArgsLoosely();
     return call;
   }
@@ -120,7 +142,7 @@ Expr *LibraryCalls::checkLibCall(CallExpr *call, NameExpr *name) {
     std::vector<const Type *> flat;
     size_t minArgs = 0;
     bool hasRest = false;
-    if (fn->isFunction() && flattenArguments(fn->params(), minArgs, hasRest, flat)) {
+    if (fn->isFunction() && ArgumentLists::flattenArguments(fn->params(), minArgs, hasRest, flat)) {
       fn = Type::function(flat, minArgs, hasRest, fn->ret(), fn->hasThis());
     }
     call->args[0] = ArgumentChecker(this->state).checkArg(call->args[0], Type::unknown());
@@ -129,34 +151,37 @@ Expr *LibraryCalls::checkLibCall(CallExpr *call, NameExpr *name) {
     }
     call->type = fn;
     if (!fn->isFunction() && !fn->isParam() && !fn->isError()) {
-      this->state.getDiagnostics().error(name->loc(), "'asListener' gives a function");
+      std::string message = ErrorTextLibraryCall::listener();
+      this->state.getDiagnostics().error(name->loc(), message);
     }
     break;
   }
-  case Builtin::LibAs:
+  case Builtin::LibAs: {
     call->args[0] = ExprChecker(this->state).checkExpr(call->args[0]);
     if (!typeArg->isClass() && !typeArg->isParam() && !typeArg->isError()) {
-      this->state.getDiagnostics().error(name->loc(), "'asClass' takes a class");
+      std::string message = ErrorTextLibraryCall::asClass();
+      this->state.getDiagnostics().error(name->loc(), message);
     }
     call->type = Type::optional(typeArg);
     break;
+  }
   case Builtin::LibAhead:
-  case Builtin::LibAheadMovable:
+  case Builtin::LibAheadMovable: {
     call->args[0] = ExprChecker(this->state).checkExpr(call->args[0]);
     call->type = call->args[0]->type;
-    if (!call->type->isError() && !call->type->isPromise() &&
-        !(call->type->isUnion() &&
-          llvm::any_of(call->type->members(), [](const Type *m) { return m->isPromise(); }))) {
-      this->state.getDiagnostics().error(name->loc(),
-                                         "'" + intrinsicName +
-                                             "' takes what an await waits for: a promise, or a "
-                                             "value or a promise");
+    auto promised = [](const Type *m) { return m->isPromise(); };
+    bool awaitable = call->type->isError() || call->type->isPromise() ||
+                     (call->type->isUnion() && llvm::any_of(call->type->members(), promised));
+    if (!awaitable) {
+      std::string message = ErrorTextLibraryCall::ahead(intrinsicName);
+      this->state.getDiagnostics().error(name->loc(), message);
     }
     if (this->state.getFunctionStack().getCurrentFunction() &&
         this->state.getFunctionStack().getCurrentFunction()->decl) {
       this->state.getFunctionStack().getCurrentFunction()->decl->awaitsAhead = true;
     }
     break;
+  }
   case Builtin::LibOrder:
     call->type = Type::voidTy();
     break;
@@ -170,17 +195,18 @@ Expr *LibraryCalls::checkLibCall(CallExpr *call, NameExpr *name) {
             .checkArg(call->args[0], Type::function({}, 0, false, Type::voidTy(), false));
     call->type = Type::anyObject();
     break;
-  case Builtin::LibWithContext:
+  case Builtin::LibWithContext: {
     call->args[0] = ArgumentChecker(this->state).checkArg(call->args[0], Type::anyObject());
     call->args[1] = ExprChecker(this->state).checkExpr(call->args[1]);
     call->type = call->args[1]->type->isFunction() && call->args[1]->type->params().empty()
                      ? call->args[1]->type->ret()
                      : Type::error();
     if (call->type->isError() && !call->args[1]->type->isError()) {
-      this->state.getDiagnostics().error(name->loc(),
-                                         "'withContext' takes a function without parameters");
+      std::string message = ErrorTextLibraryCall::context();
+      this->state.getDiagnostics().error(name->loc(), message);
     }
     break;
+  }
   case Builtin::LibChunk:
   case Builtin::LibIsChunk:
   case Builtin::LibChunkKind:

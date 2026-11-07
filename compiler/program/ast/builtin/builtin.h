@@ -474,47 +474,6 @@ enum class Builtin {
   ReflectFill,
 };
 
-inline bool isLibBuiltin(Builtin builtin) {
-  return builtin >= Builtin::LibListener && builtin <= Builtin::LibWithContext;
-}
-
-inline bool isCryptoBuiltin(Builtin builtin) {
-  return builtin == Builtin::Crypto || builtin == Builtin::CryptoKeyPair ||
-         builtin == Builtin::CryptoKeyPairAsync;
-}
-
-inline bool isMetaBuiltin(Builtin builtin) {
-  return builtin >= Builtin::MetaDefine && builtin <= Builtin::MetaDelete;
-}
-
-inline bool isDictBuiltin(Builtin builtin) {
-  return builtin >= Builtin::MapGet && builtin <= Builtin::EnvMap;
-}
-
-inline bool isDictIterator(Builtin builtin) {
-  return builtin >= Builtin::MapKeys && builtin <= Builtin::SetEntries;
-}
-
-inline bool isPathBuiltin(Builtin builtin) {
-  return builtin >= Builtin::PathJoin && builtin <= Builtin::PathToNamespacedPath;
-}
-
-inline bool isOsBuiltin(Builtin builtin) {
-  return builtin >= Builtin::OsString && builtin <= Builtin::OsUserInfo;
-}
-
-inline bool isFsModuleBuiltin(Builtin builtin) {
-  return builtin >= Builtin::ReadLine && builtin <= Builtin::RlClose;
-}
-
-inline bool isFspBuiltin(Builtin builtin) {
-  return builtin >= Builtin::FspReadFile && builtin <= Builtin::FhSync;
-}
-
-inline bool isChildBuiltin(Builtin builtin) {
-  return builtin >= Builtin::ChildSpawnSync && builtin <= Builtin::ChildExecSync;
-}
-
 enum ChildArg : unsigned {
   ChildFile,
   ChildArgs,
@@ -541,70 +500,34 @@ enum ChildArg : unsigned {
 
 inline constexpr unsigned ChildPipe = 0, ChildIgnore = 1, ChildInherit = 2, ChildBytes = 0;
 
-inline bool isFsBuiltin(Builtin builtin) {
-  return builtin >= Builtin::FsReadFile && builtin <= Builtin::FsRealpath &&
-         builtin != Builtin::FsExists;
-}
-
-inline bool isPromiseBuiltin(Builtin builtin) {
-  return builtin >= Builtin::PromiseNew && builtin <= Builtin::PromiseWithResolvers;
-}
-
-inline bool isAsyncBuiltin(Builtin builtin) {
-  return builtin >= Builtin::PromiseNew && builtin <= Builtin::TimersSetInterval;
-}
-
-inline bool isJsonBuiltin(Builtin builtin) {
-  return builtin >= Builtin::JsonParse && builtin <= Builtin::JsonIsJson;
-}
-
-inline bool isDateBuiltin(Builtin builtin) {
-  return builtin >= Builtin::DateNew && builtin <= Builtin::DtfResolvedOptions;
-}
-
-inline bool isBytesBuiltin(Builtin builtin) {
-  return builtin >= Builtin::BytesNew && builtin <= Builtin::EmbedBytes;
-}
-
-inline bool isIntlBuiltin(Builtin builtin) {
-  return builtin >= Builtin::IntlNew && builtin <= Builtin::SegmentsContaining;
-}
-
-inline bool isMathBuiltin(Builtin builtin) {
-  return builtin >= Builtin::MathFloor && builtin <= Builtin::MathRandom;
-}
-
-inline bool isDecimalBuiltin(Builtin builtin) {
-  return builtin >= Builtin::DecimalOf && builtin <= Builtin::DecToFraction;
-}
-
-inline bool isResultBuiltin(Builtin builtin) {
-  return builtin >= Builtin::ResultOk && builtin <= Builtin::ResultAndThrough;
-}
-
-inline bool isResultCallback(Builtin builtin) {
-  return builtin >= Builtin::ResultMap && builtin <= Builtin::ResultAndThrough &&
-         builtin != Builtin::ResultUnwrapOr;
-}
-
-inline bool isRegexBuiltin(Builtin builtin) {
-  return builtin >= Builtin::RegExpNew && builtin <= Builtin::StrSplitRegex;
-}
-
-inline bool isProcessBuiltin(Builtin builtin) {
-  return builtin >= Builtin::ProcessArgv && builtin <= Builtin::PerformanceNow;
-}
-
-inline bool isRoundingBuiltin(Builtin builtin) {
-  return builtin >= Builtin::MathFloor && builtin <= Builtin::MathTrunc;
-}
-
-inline bool isIteratorStage(Builtin builtin) {
-  return builtin >= Builtin::IterMap && builtin <= Builtin::IterFlatMap;
-}
-
-inline bool isIteratorSink(Builtin builtin) {
-  return builtin >= Builtin::IterToArray && builtin <= Builtin::IterFind;
-}
+class BuiltinGroups {
+public:
+  static bool isOsBuiltin(Builtin builtin);
+  static bool isFsBuiltin(Builtin builtin);
+  static bool isLibBuiltin(Builtin builtin);
+  static bool isFspBuiltin(Builtin builtin);
+  static bool isMetaBuiltin(Builtin builtin);
+  static bool isDictBuiltin(Builtin builtin);
+  static bool isPathBuiltin(Builtin builtin);
+  static bool isJsonBuiltin(Builtin builtin);
+  static bool isDateBuiltin(Builtin builtin);
+  static bool isIntlBuiltin(Builtin builtin);
+  static bool isMathBuiltin(Builtin builtin);
+  static bool isDictIterator(Builtin builtin);
+  static bool isChildBuiltin(Builtin builtin);
+  static bool isAsyncBuiltin(Builtin builtin);
+  static bool isBytesBuiltin(Builtin builtin);
+  static bool isRegexBuiltin(Builtin builtin);
+  static bool isIteratorSink(Builtin builtin);
+  static bool isCryptoBuiltin(Builtin builtin);
+  static bool isResultBuiltin(Builtin builtin);
+  static bool isIteratorStage(Builtin builtin);
+  static bool isPromiseBuiltin(Builtin builtin);
+  static bool isDecimalBuiltin(Builtin builtin);
+  static bool isResultCallback(Builtin builtin);
+  static bool isProcessBuiltin(Builtin builtin);
+  static bool isFsModuleBuiltin(Builtin builtin);
+  static bool isRoundingBuiltin(Builtin builtin);
+};
 
 }

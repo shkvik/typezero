@@ -229,7 +229,7 @@ IteratorMethods::ResultNextValueOneType IteratorMethods::nextValue(const Type *i
   const Type *element = iterator->yielded();
   const Type *returned = iterator->returned();
   const Type *value = returned->isVoid() ? element : Type::unionOf({element, returned});
-  std::string problem = unionProblem(value);
+  std::string problem = UnionSlots::unionProblem(value);
   if (!problem.empty()) {
     std::string message =
         ErrorTextNextValue::noUnion(iterator->name(), element->name(), returned->name(), problem);
@@ -479,13 +479,13 @@ Expr *IteratorMethods::checkIteratorMethod(CallExpr *call, MemberExpr *member) {
     this->state.getCallbackFacts().rememberIndexCallback(fe->fn, reduce ? 2 : 1);
   }
   call->args[0] = CallbackChecker(this->state).checkFunctionArg(call->args[0], sig, primary, name);
-  if (isIteratorStage(builtin)) {
+  if (BuiltinGroups::isIteratorStage(builtin)) {
     if (auto *fe = dyn_cast<FunctionExpr>(call->args[0])) {
       fe->fn->nonEscaping = call->fused;
     }
   }
   call->target = BuiltinCall{.builtin = builtin};
-  if (isIteratorSink(builtin)) {
+  if (BuiltinGroups::isIteratorSink(builtin)) {
     FlowChecker(this->state).calledFunction();
   }
   const Type *callback = call->args[0]->type;

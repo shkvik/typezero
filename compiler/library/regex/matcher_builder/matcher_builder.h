@@ -8,18 +8,12 @@
 
 namespace tz {
 
-uint32_t instructionSize(const uint32_t *code, uint32_t pc);
-
 using ByteSet = std::array<uint32_t, 8>;
-
-double byteFrequency(uint32_t c);
 
 struct ByteTest {
   uint32_t lo, hi;
   bool fold;
 };
-
-std::vector<ByteTest> byteTests(ByteSet s);
 
 struct FirstUnits {
   bool known = false;
@@ -55,6 +49,17 @@ class MatcherRepeats;
 
 class MatcherBuilder {
 public:
+  static bool isBack(uint32_t op);
+  static bool isCharInstruction(uint32_t op);
+  static void addByte(ByteSet &s, uint32_t c);
+  static bool hasByte(const ByteSet &s, uint32_t c);
+  static uint64_t counterRange(const CountedLoop &loop);
+  static uint32_t instructionSize(const uint32_t *code, uint32_t pc);
+  static double byteFrequency(uint32_t c);
+  static std::vector<ByteTest> byteTests(ByteSet s);
+  static uint32_t pushesOf(const uint32_t *code, uint32_t pc);
+  static int64_t followingChar(const uint32_t *code, uint32_t pc, bool unicode);
+
   MatcherBuilder(llvm::Module &module, const uint32_t *program, bool threadLocal);
   llvm::Function *build();
 
@@ -150,9 +155,5 @@ private:
 };
 
 enum { kMemoPages, kMemoRows, kMemoLength, kMemoLog, kMemoLogLength, kMemoLogCapacity };
-
-uint32_t pushesOf(const uint32_t *code, uint32_t pc);
-
-int64_t followingChar(const uint32_t *code, uint32_t pc, bool unicode);
 
 }

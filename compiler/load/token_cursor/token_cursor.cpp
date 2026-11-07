@@ -24,9 +24,10 @@ using llvm::isa;
 
 namespace tz {
 
-namespace {
+TokenCursor::TokenCursor(Parser &parser)
+    : parser_(parser) {}
 
-bool startsStatement(Tok kind) {
+bool TokenCursor::startsStatement(Tok kind) {
   switch (kind) {
   case Tok::KwLet:
   case Tok::KwConst:
@@ -49,10 +50,6 @@ bool startsStatement(Tok kind) {
     return false;
   }
 }
-
-}
-
-TokenCursor::TokenCursor(Parser &parser) : parser_(parser) {}
 
 void TokenCursor::advance() {
   parser_.prevEnd_ = parser_.tok_.text.end();
@@ -87,11 +84,11 @@ bool TokenCursor::expect(Tok kind, llvm::StringRef context) {
   if (accept(kind)) {
     return true;
   }
-  std::string message = std::string("expected ") + tokSpelling(kind);
+  std::string message = std::string("expected ") + TokenKinds::tokSpelling(kind);
   if (!context.empty()) {
     message += " " + context.str();
   }
-  error(parser_.tok_.loc(), message + ", found " + tokSpelling(parser_.tok_.kind));
+  error(parser_.tok_.loc(), message + ", found " + TokenKinds::tokSpelling(parser_.tok_.kind));
 
   return false;
 }
@@ -103,7 +100,8 @@ void TokenCursor::expectSemicolon() {
   if (parser_.tok_.is(Tok::RBrace) || parser_.tok_.is(Tok::Eof) || parser_.tok_.newlineBefore) {
     return;
   }
-  error(parser_.tok_.loc(), llvm::Twine("expected ';', found ") + tokSpelling(parser_.tok_.kind));
+  error(parser_.tok_.loc(),
+        llvm::Twine("expected ';', found ") + TokenKinds::tokSpelling(parser_.tok_.kind));
 }
 
 void TokenCursor::error(llvm::SMLoc loc, const llvm::Twine &message) {
@@ -153,7 +151,8 @@ void TokenCursor::synchronize() {
     declaration |= parser_.tok_.is(Tok::Identifier) &&
                    (parser_.tok_.text == "import" || parser_.tok_.text == "export" ||
                     parser_.tok_.text == "throw" || parser_.tok_.text == "try");
-    if (parser_.tok_.newlineBefore && (startsStatement(parser_.tok_.kind) || declaration)) {
+    if (parser_.tok_.newlineBefore &&
+        (TokenCursor::startsStatement(parser_.tok_.kind) || declaration)) {
       return;
     }
     advance();

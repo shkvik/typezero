@@ -6,7 +6,10 @@
 
 namespace tz {
 
-static const Type *returnedType(const FunctionDecl *fn, const Type *returnType) {
+ExitLowerer::ExitLowerer(Lowering &owner)
+    : lowering(owner) {}
+
+const Type *ExitLowerer::returnedType(const FunctionDecl *fn, const Type *returnType) {
   if (fn && fn->isGenerator && fn->sym && fn->sym->ret && fn->sym->ret->isIterator()) {
     return fn->sym->ret->returned();
   }
@@ -16,9 +19,6 @@ static const Type *returnedType(const FunctionDecl *fn, const Type *returnType) 
 
   return returnType;
 }
-
-ExitLowerer::ExitLowerer(Lowering &owner)
-    : lowering(owner) {}
 
 void ExitLowerer::emitJumpTo(size_t target, bool isBreak) {
   const Lowering::JumpTarget &jt = this->lowering.targets_[target];
@@ -30,7 +30,8 @@ void ExitLowerer::emitJumpTo(size_t target, bool isBreak) {
 
 void ExitLowerer::emitReturnOf(llvm::Value *value) {
   if (this->lowering.coro_ && this->lowering.currentFn_ && this->lowering.currentFn_->isGenerator) {
-    const Type *type = returnedType(this->lowering.currentFn_, this->lowering.returnType_);
+    const Type *type =
+        ExitLowerer::returnedType(this->lowering.currentFn_, this->lowering.returnType_);
     this->lowering.coroutineLowerer().emitCoroutineReturn(value, value ? type : nullptr);
     return;
   }

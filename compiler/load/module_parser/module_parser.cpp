@@ -80,7 +80,7 @@ Stmt *ModuleParser::parseImport(bool topLevel) {
     }
     if (parser_.cursor().accept(Tok::Comma) && !parser_.tok_.is(Tok::LBrace)) {
       parser_.cursor().error(parser_.tok_.loc(), llvm::Twine("expected '{' after ',', found ") +
-                                                     tokSpelling(parser_.tok_.kind));
+                                                     TokenKinds::tokSpelling(parser_.tok_.kind));
     }
   }
   if (parser_.tok_.is(Tok::LBrace)) {
@@ -88,7 +88,7 @@ Stmt *ModuleParser::parseImport(bool topLevel) {
   } else if (form == Form::Named) {
     parser_.cursor().error(parser_.tok_.loc(),
                            llvm::Twine("expected '{' and the names to import, found ") +
-                               tokSpelling(parser_.tok_.kind));
+                               TokenKinds::tokSpelling(parser_.tok_.kind));
   }
   if (parser_.recovering_ || !parseFromPath(decl.path, decl.pathLoc)) {
     return parser_.ctx_.make<EmptyStmt>(loc);
@@ -119,7 +119,8 @@ Stmt *ModuleParser::parseImport(bool topLevel) {
     parser_.imports_.push_back(std::move(decl));
     return parser_.ctx_.make<EmptyStmt>(loc);
   }
-  if (form != Form::Named && isBuiltinModule(decl.path) && !defaultName.empty()) {
+  if (form != Form::Named && BuiltinModulePaths::isBuiltinModule(decl.path) &&
+      !defaultName.empty()) {
     decl.whole = defaultName;
     decl.wholeLoc = formLoc;
     decl.wholeIsDefault = form == Form::Default;
@@ -248,7 +249,7 @@ Stmt *ModuleParser::parseExport(bool topLevel) {
   if (!parser_.tok_.is(Tok::LBrace)) {
     parser_.cursor().error(parser_.tok_.loc(),
                            llvm::Twine("expected a declaration or '{' after 'export', found ") +
-                               tokSpelling(parser_.tok_.kind));
+                               TokenKinds::tokSpelling(parser_.tok_.kind));
     return parser_.ctx_.make<EmptyStmt>(loc);
   }
   std::vector<ModuleName> names;
@@ -293,7 +294,8 @@ void ModuleParser::parseModuleNames(std::vector<ModuleName> &names, bool import)
     }
     if (!parser_.tok_.is(Tok::Identifier)) {
       parser_.cursor().error(parser_.tok_.loc(), llvm::Twine("expected a name to ") + keyword +
-                                                     ", found " + tokSpelling(parser_.tok_.kind));
+                                                     ", found " +
+                                                     TokenKinds::tokSpelling(parser_.tok_.kind));
       return;
     }
     name.name = parser_.tok_.text;
@@ -311,7 +313,7 @@ void ModuleParser::parseModuleNames(std::vector<ModuleName> &names, bool import)
       if (!parser_.tok_.is(Tok::Identifier)) {
         parser_.cursor().error(parser_.tok_.loc(),
                                llvm::Twine("expected a name after 'as', found ") +
-                                   tokSpelling(parser_.tok_.kind));
+                                   TokenKinds::tokSpelling(parser_.tok_.kind));
         return;
       }
       name.as = parser_.tok_.text;
@@ -383,7 +385,7 @@ bool ModuleParser::parseFromPath(std::string &path, llvm::SMLoc &loc, bool from)
     parser_.cursor().error(parser_.tok_.loc(),
                            llvm::Twine("expected 'from' and the path of the file, e.g. 'from "
                                        "\"./math\"', found ") +
-                               tokSpelling(parser_.tok_.kind));
+                               TokenKinds::tokSpelling(parser_.tok_.kind));
     return false;
   }
   if (from) {
@@ -394,11 +396,11 @@ bool ModuleParser::parseFromPath(std::string &path, llvm::SMLoc &loc, bool from)
     parser_.cursor().error(
         parser_.tok_.loc(),
         llvm::Twine("expected the path of the file as a string, e.g. '\"./math\"', found ") +
-            tokSpelling(parser_.tok_.kind));
+            TokenKinds::tokSpelling(parser_.tok_.kind));
     return false;
   }
   std::u16string text;
-  decodeStringLiteral(parser_.tok_, text, parser_.diags_);
+  LiteralText::decodeStringLiteral(parser_.tok_, text, parser_.diags_);
   llvm::convertUTF16ToUTF8String(
       llvm::ArrayRef<llvm::UTF16>(reinterpret_cast<const llvm::UTF16 *>(text.data()), text.size()),
       path);

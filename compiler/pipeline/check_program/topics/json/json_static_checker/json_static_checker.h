@@ -1,6 +1,8 @@
 #pragma once
 
 #include "compiler/pipeline/check_program/check_state/check_state.h"
+#include "compiler/pipeline/check_program/topics/json/json_static_checker/json_static_checker_errors.h"
+#include "compiler/result/result/result.h"
 
 namespace tz {
 
@@ -14,7 +16,11 @@ public:
                     std::string &full);
 
 private:
-  static std::string toUtf8(const std::u16string &text);
+  using ResultEmbeddedPath = Result<llvm::StringRef, JsonStaticCheckerEmbeddedPathError>;
+  using ResultConstantJson = Result<llvm::StringRef, JsonStaticCheckerConstantJsonError>;
+
+  static ResultConstantJson constantJson(llvm::StringRef text);
+  static ResultEmbeddedPath embeddedPath(llvm::StringRef fn, llvm::StringRef shown);
   static bool mayHoldItself(const Type *type, std::vector<const Type *> &open);
   static const ClassDecl *classWithToJson(const Type *type,
                                           llvm::SmallPtrSetImpl<const Type *> &seen);

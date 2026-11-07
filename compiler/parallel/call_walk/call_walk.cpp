@@ -36,9 +36,10 @@ using llvm::isa;
 
 namespace tz::parallel {
 
-namespace {
+CallWalk::CallWalk(Analysis &analysis)
+    : analysis_(analysis) {}
 
-std::optional<CallKind> callbackKind(Builtin builtin) {
+std::optional<CallKind> CallWalk::callbackKind(Builtin builtin) {
   switch (builtin) {
   case Builtin::PromiseThen:
   case Builtin::SetTimeout:
@@ -51,7 +52,8 @@ std::optional<CallKind> callbackKind(Builtin builtin) {
   default:
     break;
   }
-  if (isResultCallback(builtin) || isIteratorStage(builtin) || isIteratorSink(builtin)) {
+  if (BuiltinGroups::isResultCallback(builtin) || BuiltinGroups::isIteratorStage(builtin) ||
+      BuiltinGroups::isIteratorSink(builtin)) {
     return CallKind::Inline;
   }
   switch (builtin) {
@@ -79,19 +81,14 @@ std::optional<CallKind> callbackKind(Builtin builtin) {
   }
 }
 
-bool callsOnce(Builtin builtin) {
+bool CallWalk::callsOnce(Builtin builtin) {
   switch (builtin) {
   case Builtin::PromiseNew:
     return true;
   default:
-    return isResultCallback(builtin);
+    return BuiltinGroups::isResultCallback(builtin);
   }
 }
-
-}
-
-CallWalk::CallWalk(Analysis &analysis)
-    : analysis_(analysis) {}
 
 void CallWalk::addCallee(CallRec &rec, const FunctionDecl *decl, std::optional<Ref> self,
                          bool byType) {
@@ -210,7 +207,7 @@ void CallWalk::registerValue(const FunctionDecl *fn, const Type *type) {
 }
 
 void CallWalk::unknownRef(const Expr *e) {
-  e = strip(e);
+  e = ParallelHelpers::strip(e);
   std::vector<const FunctionDecl *> fns;
   if (auto *fe = dyn_cast_or_null<FunctionExpr>(e)) {
     fns.push_back(fe->fn);
@@ -233,7 +230,7 @@ void CallWalk::unknownRef(const Expr *e) {
 }
 
 bool CallWalk::functionRef(const Expr *e, const Use &use, const Type *type) {
-  e = strip(e);
+  e = ParallelHelpers::strip(e);
   if (auto *fe = dyn_cast_or_null<FunctionExpr>(e)) {
     if (!use.lambda) {
       registerValue(fe->fn, type);
@@ -323,7 +320,7 @@ void CallWalk::call(const CallExpr *c, const Use &use) {
     addCallee(rec, c->func()->decl, closureSelf(c->func()->decl, *analysis_.fn));
     return;
   }
-  auto *callee = dyn_cast<NameExpr>(strip(c->callee));
+  auto *callee = dyn_cast<NameExpr>(ParallelHelpers::strip(c->callee));
   if (callee && callee->var() && analysis_.resolvers.contains(callee->var())) {
     return;
   }
@@ -356,8 +353,8 @@ void CallWalk::builtinCall(const CallExpr *c, const Use &use) {
   if (b == Builtin::PromiseAll) {
     inner.join = use.awaited;
   }
-  std::optional<CallKind> kind = callbackKind(b);
-  bool unknown = !knownBuiltin(b);
+  std::optional<CallKind> kind = CallWalk::callbackKind(b);
+  bool unknown = !ParallelHelpers::knownBuiltin(b);
   for (size_t i = 0; i < c->args.size(); ++i) {
     const Expr *arg = c->args[i];
     bool fn = arg->type && arg->type->nonOptional()->isFunction();
@@ -371,7 +368,7 @@ void CallWalk::builtinCall(const CallExpr *c, const Use &use) {
       continue;
     }
     if (b == Builtin::ReflectApply && i == 0) {
-      analysis_.exprWalk.expr(strip(arg));
+      analysis_.exprWalk.expr(ParallelHelpers::strip(arg));
       continue;
     }
     analysis_.exprWalk.expr(arg, i == 0 ? inner : Use());
@@ -380,7 +377,7 @@ void CallWalk::builtinCall(const CallExpr *c, const Use &use) {
 }
 
 void CallWalk::functionArg(const CallExpr *c, const Expr *arg, CallKind kind, const Use &use) {
-  const Expr *f = strip(arg);
+  const Expr *f = ParallelHelpers::strip(arg);
   Builtin b = c->builtin();
   auto *fe = dyn_cast<FunctionExpr>(f);
   if (fe && b == Builtin::PromiseNew) {
@@ -411,7 +408,7 @@ void CallWalk::functionArg(const CallExpr *c, const Expr *arg, CallKind kind, co
     rec.interval |= b == Builtin::SetInterval;
     rec.handled |= b == Builtin::PromiseThen || b == Builtin::RlQuestionCallback;
   }
-  if (kind == CallKind::Inline && !callsOnce(b)) {
+  if (kind == CallKind::Inline && !CallWalk::callsOnce(b)) {
     rec.repeated = true;
   }
   addFunctionCallees(f, arg, kind);

@@ -4,12 +4,12 @@
 
 namespace tz {
 
-UnionSlot unionSlot(const Type *type);
-
-std::string unionProblem(const Type *type);
-
-bool hasParamMember(const Type *type);
-
-const Type *unionWithout(const Type *type, const Type *without);
+class UnionSlots {
+public:
+  static bool hasParamMember(const Type *type);
+  static UnionSlot unionSlot(const Type *type);
+  static std::string unionProblem(const Type *type);
+  static const Type *unionWithout(const Type *type, const Type *without);
+};
 
 }

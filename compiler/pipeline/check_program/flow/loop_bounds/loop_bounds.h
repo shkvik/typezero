@@ -18,6 +18,9 @@ public:
   std::optional<std::pair<int64_t, int64_t>> syntacticIntRange(const Expr *expr) const;
 
 private:
+  static std::optional<int64_t>
+  varPlus(const Expr *expr, const VarSymbol *var,
+          llvm::function_ref<const VarSymbol *(llvm::StringRef)> lookupVar);
   static bool isArrayLength(const Term &t);
 
   CheckState &state;

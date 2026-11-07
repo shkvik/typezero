@@ -209,27 +209,50 @@ Expr *ReflectChecker::okOf(Expr *value) {
   return call;
 }
 
-std::string ReflectChecker::constructProblem(ClassDecl *cls, llvm::ArrayRef<const Type *> args) {
+ReflectChecker::ResultConstructible
+ReflectChecker::constructible(ClassDecl *cls, llvm::ArrayRef<const Type *> args) {
+  if (cls->builtin()) {
+    std::string message = ErrorTextConstructible::builtin();
+
+    return err(ReflectCheckerConstructibleError{
+        .code = ReflectCheckerConstructibleErrorCode::BUILTIN_CLASS,
+        .message = message,
+    });
+  }
   if (cls->isAbstract) {
-    return "it is abstract";
+    std::string message = ErrorTextConstructible::abstract();
+
+    return err(ReflectCheckerConstructibleError{
+        .code = ReflectCheckerConstructibleErrorCode::ABSTRACT,
+        .message = message,
+    });
   }
   std::vector<FunctionDecl *> ctors = ClassLinks::constructorsOf(cls);
+  if (ctors.empty() && !args.empty()) {
+    std::string message = ErrorTextConstructible::noArgs();
+
+    return err(ReflectCheckerConstructibleError{
+        .code = ReflectCheckerConstructibleErrorCode::NO_ARGUMENTS,
+        .message = message,
+    });
+  }
   if (ctors.empty()) {
-    return args.empty() ? "" : "its constructor takes no arguments";
+    return ok(cls);
   }
   size_t fitting = 0;
-  std::string takes;
+  std::vector<const FuncSymbol *> symbols;
   for (FunctionDecl *ctor : ctors) {
     FuncSymbol *sym = ctor->sym;
     if (!sym) {
-      return "its constructor is unknown";
+      std::string message = ErrorTextConstructible::unknown();
+
+      return err(ReflectCheckerConstructibleError{
+          .code = ReflectCheckerConstructibleErrorCode::UNKNOWN_CONSTRUCTOR,
+          .message = message,
+      });
     }
     ReturnInferrer(this->state).resolveParams(sym);
-    std::string shown;
-    for (const Type *param : sym->params) {
-      shown += (shown.empty() ? "" : ", ") + (param ? param->name().str() : "?");
-    }
-    takes += (takes.empty() ? "(" : " or (") + shown + ")";
+    symbols.push_back(sym);
     size_t fixed = sym->hasRest ? sym->params.size() - 1 : sym->params.size();
     bool fits = args.size() >= sym->minArgs && (sym->hasRest || args.size() <= fixed);
     for (size_t i = 0; i < args.size() && fits; ++i) {
@@ -238,12 +261,56 @@ std::string ReflectChecker::constructProblem(ClassDecl *cls, llvm::ArrayRef<cons
     }
     fitting += fits;
   }
-  if (fitting == 1) {
-    return "";
+  if (fitting == 0) {
+    std::string message = ErrorTextConstructible::takes(symbols);
+
+    return err(ReflectCheckerConstructibleError{
+        .code = ReflectCheckerConstructibleErrorCode::NO_FIT,
+        .message = message,
+    });
+  }
+  if (fitting > 1) {
+    std::string message = ErrorTextConstructible::several();
+
+    return err(ReflectCheckerConstructibleError{
+        .code = ReflectCheckerConstructibleErrorCode::SEVERAL_FIT,
+        .message = message,
+    });
   }
 
-  return fitting == 0 ? "its constructor takes " + takes
-                      : "the arguments may fit several of its constructors";
+  return ok(cls);
+}
+
+ReflectChecker::ResultFillableClass ReflectChecker::fillableClass(ClassDecl *made) {
+  if (!made->type || made->builtin()) {
+    std::string why = ErrorTextReflectFill::javascript();
+    std::string message = ErrorTextReflectFill::cannot(made->name, why);
+
+    return err(ReflectCheckerFillableClassError{
+        .code = ReflectCheckerFillableClassErrorCode::JAVASCRIPT_CLASS,
+        .message = message,
+    });
+  }
+  if (made->isAbstract) {
+    std::string why = ErrorTextReflectFill::abstract();
+    std::string message = ErrorTextReflectFill::cannot(made->name, why);
+
+    return err(ReflectCheckerFillableClassError{
+        .code = ReflectCheckerFillableClassErrorCode::ABSTRACT,
+        .message = message,
+    });
+  }
+  if (!ClassLinks::constructorsOf(made).empty()) {
+    std::string why = ErrorTextReflectFill::ownCtor(made->name);
+    std::string message = ErrorTextReflectFill::cannot(made->name, why);
+
+    return err(ReflectCheckerFillableClassError{
+        .code = ReflectCheckerFillableClassErrorCode::HAS_CONSTRUCTOR,
+        .message = message,
+    });
+  }
+
+  return ok(made);
 }
 
 void ReflectChecker::checkReflectNews() {
@@ -288,14 +355,11 @@ void ReflectChecker::checkReflectNews() {
       if (!cls->type || !reachable(entry).contains(made) || !checked.insert(cls).second) {
         continue;
       }
-      std::string problem = cls->builtin() ? "it is a class of JavaScript, which only "
-                                             "Reflect.construct tries to make"
-                                           : this->constructProblem(cls, args);
-      if (!problem.empty()) {
-        this->state.getDiagnostics().error(
-            expr->loc(), "'new' of a class known only when the program runs may fail: '" +
-                             cls->type->name().str() + "' can be here, and " + problem +
-                             "; write 'Reflect.construct(cls, [...])', which gives a Result");
+      ResultConstructible constructed = this->constructible(cls, args);
+      if (constructed.isErr()) {
+        std::string message =
+            ErrorTextReflectNew::mayFail(cls->type->name(), constructed.error().message);
+        this->state.getDiagnostics().error(expr->loc(), message);
         break;
       }
     }
@@ -330,15 +394,14 @@ Expr *ReflectChecker::checkReflection(CallExpr *call, MemberExpr *member, const 
     }
     const Type *base = GenericChecker::apparentType(type->nonOptional());
     if (base->isJson()) {
-      this->state.getDiagnostics().error(
-          target->loc(), "Reflect.get takes an object of the language; read a key of a "
-                         "Json as JavaScript does, 'j[key]'");
+      std::string message = ErrorTextReflectGet::json();
+      this->state.getDiagnostics().error(target->loc(), message);
       checkArgsLoosely();
       return call;
     }
     if (!type->isUnknown() && !UnknownChecker::isObjectReference(base) && !base->isAnyObject()) {
-      this->state.getDiagnostics().error(
-          target->loc(), "Reflect.get takes an object, and this is a '" + type->name() + "'");
+      std::string message = ErrorTextReflectGet::notObject(type->name());
+      this->state.getDiagnostics().error(target->loc(), message);
       call->args[1] = ExprChecker(this->state).checkExpr(call->args[1]);
       return call;
     }
@@ -423,24 +486,15 @@ Expr *ReflectChecker::checkReflection(CallExpr *call, MemberExpr *member, const 
       return call;
     }
     if (!type->isClassRef()) {
-      this->state.getDiagnostics().error(
-          cls->loc(),
-          "Reflect.fill makes an object of a class, and this is a '" + type->name() + "'");
+      std::string message = ErrorTextReflectFill::notClass(type->name());
+      this->state.getDiagnostics().error(cls->loc(), message);
       return call;
     }
     const Type *fails = Prelude(this->state).builtinType("ReflectFillError");
     if (ClassDecl *made = const_cast<ClassDecl *>(type->classRef())) {
-      std::string why = !made->type || made->builtin() ? "it is a class of JavaScript"
-                        : made->isAbstract ? "it is abstract; fill a class that extends it"
-                        : !ClassLinks::constructorsOf(made).empty()
-                            ? "it sets its fields in a constructor; make it with 'new " +
-                                  made->name.str() + "(...)'"
-                            : "";
-      if (!why.empty()) {
-        this->state.getDiagnostics().error(cls->loc(),
-                                           "Reflect.fill cannot fill '" + made->name + "': " + why +
-                                               " (Reflect.fill gives the fields of a class without "
-                                               "a constructor their values)");
+      ResultFillableClass fillable = ReflectChecker::fillableClass(made);
+      if (fillable.isErr()) {
+        this->state.getDiagnostics().error(cls->loc(), fillable.error().message);
         return call;
       }
       made->reflectFill = true;
@@ -467,16 +521,16 @@ Expr *ReflectChecker::checkReflection(CallExpr *call, MemberExpr *member, const 
                             ? f->type->ret()
                             : Type::unknown();
     if (!f->type->isError() && !f->type->isUnknown() && !f->type->isFunction()) {
-      this->state.getDiagnostics().error(
-          f->loc(), "Reflect.apply calls a function, and this is a '" + f->type->name() + "'");
+      std::string message = ErrorTextReflectApply::notFunc(f->type->name());
+      this->state.getDiagnostics().error(f->loc(), message);
     } else {
       f = TypeRelations(this->state).convert(f, Type::unknown());
     }
     Expr *&self = call->args[1];
     self = ExprChecker(this->state).checkExpr(self);
     if (self->type->isVoid()) {
-      this->state.getDiagnostics().error(
-          self->loc(), "an expression of type 'void' has no value to pass as 'this'");
+      std::string message = ErrorTextReflectApply::voidThis();
+      this->state.getDiagnostics().error(self->loc(), message);
     } else {
       self = TypeRelations(this->state).convert(self, Type::unknown());
     }
@@ -497,10 +551,8 @@ Expr *ReflectChecker::checkReflection(CallExpr *call, MemberExpr *member, const 
     return call;
   }
   if (call->args.size() == 3) {
-    this->state.getDiagnostics().error(call->args[2]->loc(),
-                                       "the third argument of Reflect.construct, the class whose "
-                                       "prototype the object gets, is not supported: there are no "
-                                       "prototypes in tz; make an object of that class");
+    std::string message = ErrorTextReflectNew::third();
+    this->state.getDiagnostics().error(call->args[2]->loc(), message);
     checkArgsLoosely();
     return call;
   }
@@ -519,9 +571,8 @@ Expr *ReflectChecker::checkReflection(CallExpr *call, MemberExpr *member, const 
     return call;
   }
   if (!type->isClassRef()) {
-    this->state.getDiagnostics().error(
-        cls->loc(),
-        "Reflect.construct makes an object of a class, and this is a '" + type->name() + "'");
+    std::string message = ErrorTextReflectNew::notClass(type->name());
+    this->state.getDiagnostics().error(cls->loc(), message);
     call->args[1] = ReflectCallChecker(this->state).checkReflectArgs(call->args[1]);
     return call;
   }
@@ -542,9 +593,8 @@ Expr *ReflectChecker::checkReflection(CallExpr *call, MemberExpr *member, const 
   bool known = false;
   if (const ClassDecl *made = type->classRef()) {
     if (!made->type) {
-      this->state.getDiagnostics().error(cls->loc(), "'" + made->name +
-                                                         "' of JavaScript cannot be made through "
-                                                         "reflection");
+      std::string message = ErrorTextReflectNew::javascript(made->name);
+      this->state.getDiagnostics().error(cls->loc(), message);
       call->args[1] = ReflectCallChecker(this->state).checkReflectArgs(call->args[1]);
       return call;
     }

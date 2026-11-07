@@ -13,9 +13,10 @@ using llvm::isa;
 
 namespace tz {
 
-namespace {
+MemoryAnalysis::MemoryAnalysis(MemoryPlan &plan)
+    : plan_(plan) {}
 
-bool letsThisGo(const ClassDecl *cls) {
+bool MemoryAnalysis::letsThisGo(const ClassDecl *cls) {
   for (const FunctionDecl *fn : cls->constructors) {
     if (fn->thisVar() && CycleScanner::thisEscapes(fn->body, fn->thisVar())) {
       return true;
@@ -40,10 +41,6 @@ bool letsThisGo(const ClassDecl *cls) {
 
   return false;
 }
-
-}
-
-MemoryAnalysis::MemoryAnalysis(MemoryPlan &plan) : plan_(plan) {}
 
 void MemoryAnalysis::analyzeCycles(SourceFile &file) {
   CycleScanner scan;

@@ -1,10 +1,16 @@
 #pragma once
 
+#include "compiler/library/feature/feature_errors.h"
+#include "compiler/result/result/result.h"
 #include "llvm/ADT/StringRef.h"
-#include <string>
 
 namespace tz {
 
-std::string pathExportProblem(llvm::StringRef name, llvm::StringRef path);
+class PathExports {
+public:
+  using ResultExportFound = Result<llvm::StringRef, FeatureExportFoundError>;
+
+  static ResultExportFound pathExport(llvm::StringRef name, llvm::StringRef path);
+};
 
 }

@@ -16,25 +16,28 @@ void FsFeature::declare(CheckState &state) const {
   FsErrorTypes(state).declare();
 }
 
-std::optional<std::string> FsFeature::exportProblem(NodeModule module, llvm::StringRef exportName,
+FsFeature::ResultExportFound FsFeature::exportFound(NodeModule module, llvm::StringRef exportName,
                                                     llvm::StringRef path) const {
   if (module == NodeModule::Fs) {
-    return fsExportProblem(exportName, path);
+    return FsExports::fsExport(exportName, path);
   }
   if (module == NodeModule::FsPromises) {
-    return fsPromisesExportProblem(exportName, path);
+    return FsExports::promisesExport(exportName, path);
   }
   if (module == NodeModule::Readline || module == NodeModule::ReadlinePromises) {
-    return readlineExportProblem(exportName, path, module == NodeModule::Readline);
+    return FsExports::readlineExport(exportName, path, module == NodeModule::Readline);
   }
   if (module == NodeModule::TzIo) {
-    return tzIoExportProblem(exportName, path);
+    return FsExports::tzIoExport(exportName, path);
   }
   if (module == NodeModule::TzFs) {
-    return tzFsExportProblem(exportName, path);
+    return FsExports::tzFsExport(exportName, path);
   }
 
-  return std::nullopt;
+  return err(FeatureExportFoundError{
+      .code = FeatureExportFoundErrorCode::NOT_MINE,
+      .message = "",
+  });
 }
 
 Expr *FsFeature::checkModuleCall(CheckState &state, CallExpr *call, NodeModule module,
@@ -42,7 +45,7 @@ Expr *FsFeature::checkModuleCall(CheckState &state, CallExpr *call, NodeModule m
   if (module == NodeModule::Fs || (module == NodeModule::TzFs && fn == "replaceSync")) {
     Expr *checked = FsChecker(state).checkFsCall(call, fn, loc);
     if (auto *done = llvm::dyn_cast<CallExpr>(checked);
-        done && isFsBuiltin(done->builtin()) && !done->type->isError()) {
+        done && BuiltinGroups::isFsBuiltin(done->builtin()) && !done->type->isError()) {
       done->type = Type::result(done->type, FsErrorTypes(state).ofCall(done));
     }
     return checked;
@@ -73,7 +76,9 @@ Expr *FsFeature::checkModuleMember(CheckState &state, MemberExpr *member) const 
   return FsChecker(state).checkFsConstant(member);
 }
 
-bool FsFeature::lowers(Builtin builtin) const { return isFsModuleBuiltin(builtin); }
+bool FsFeature::lowers(Builtin builtin) const {
+  return BuiltinGroups::isFsModuleBuiltin(builtin);
+}
 
 llvm::Value *FsFeature::lowerCall(Lowering &lowering, CallExpr *call) const {
   return lowering.fsLowerer().emitFsResult(call);

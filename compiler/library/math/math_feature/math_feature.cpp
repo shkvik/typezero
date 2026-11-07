@@ -27,7 +27,9 @@ llvm::ArrayRef<llvm::StringLiteral> MathFeature::typeArgFreeGlobals() const {
   return globals;
 }
 
-bool MathFeature::lowers(Builtin builtin) const { return isMathBuiltin(builtin); }
+bool MathFeature::lowers(Builtin builtin) const {
+  return BuiltinGroups::isMathBuiltin(builtin);
+}
 
 llvm::Value *MathFeature::lowerCall(Lowering &lowering, CallExpr *call) const {
   return lowering.mathLowerer().emitMathCall(call);

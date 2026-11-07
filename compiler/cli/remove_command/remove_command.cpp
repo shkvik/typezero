@@ -17,10 +17,10 @@ namespace tz::pkg {
 
 int RemoveCommand::run(llvm::ArrayRef<const char *> args) const {
   if (args.empty()) {
-    return usage("'tz remove' needs the name of a package", "tz remove <name>...");
+    return CommandUsage::usage("'tz remove' needs the name of a package", "tz remove <name>...");
   }
   Manifest project;
-  if (!currentProject(project)) {
+  if (!ProjectFile::currentProject(project)) {
     return kExitError;
   }
   std::vector<Dependency> deps = project.dependencies;
@@ -28,12 +28,12 @@ int RemoveCommand::run(llvm::ArrayRef<const char *> args) const {
     auto it = std::find_if(deps.begin(), deps.end(),
                            [&](const Dependency &d) { return d.alias == name; });
     if (it == deps.end()) {
-      report("'" + name + "' is not a dependency in " + project.path);
+      Report::report("'" + name + "' is not a dependency in " + project.path);
       return kExitError;
     }
     deps.erase(it);
   }
-  if (!applyDependencies(project, deps, PrepareOptions(), nullptr, nullptr)) {
+  if (!ProjectFile::applyDependencies(project, deps, PrepareOptions(), nullptr, nullptr)) {
     return kExitError;
   }
   for (llvm::StringRef name : args) {

@@ -12,6 +12,7 @@
 #include "compiler/pipeline/check_program/topics/date/date_checker/date_checker.h"
 #include "compiler/pipeline/check_program/topics/date/date_format_checker/date_format_checker.h"
 #include "compiler/pipeline/check_program/topics/decimal/decimal_checker/decimal_checker.h"
+#include "compiler/pipeline/check_program/topics/decimal/decimal_checker/decimal_checker_errors.h"
 #include "compiler/pipeline/check_program/topics/expr/expr_checker/expr_checker.h"
 #include "compiler/pipeline/check_program/topics/expr/member_checker/member_checker.h"
 #include "compiler/pipeline/check_program/topics/functions/function_checker/function_checker_errors.h"
@@ -274,7 +275,8 @@ Expr *NewChecker::checkNew(NewExpr *expr, const Type *expected) {
   }
   if (expr->name == "BigInt64Array" || expr->name == "BigUint64Array") {
     std::string what = ErrorTextFunctionName::quoted(expr->name);
-    DecimalChecker(this->state).reportBigInt(expr->loc(), what);
+    std::string bigint = ErrorTextBigInt::none(what);
+    this->state.getDiagnostics().error(expr->loc(), bigint);
     checkArgsLoosely();
     return expr;
   }

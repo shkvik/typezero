@@ -10,11 +10,13 @@
 #include "llvm/ADT/StringRef.h"
 #include <cstdint>
 #include <string>
+#include <tuple>
 #include <vector>
 
 namespace tz {
 
 struct ClassDecl;
+struct Interned;
 
 class Type {
 public:
@@ -339,6 +341,13 @@ public:
   static const Type *fromName(llvm::StringRef name);
 
 private:
+  using ObjectKey = std::vector<std::tuple<std::string, const Type *, int>>;
+
+  static Interned &interned();
+  static ObjectKey objectKey(llvm::ArrayRef<Field> fields, llvm::ArrayRef<Overload> overloads);
+  static std::string quotedText(const std::u16string &text);
+  static std::string numberText(double value);
+  static std::string utf8Text(const std::u16string &text);
   enum class ObjectKind {
     ORDINARY_OBJECT,
     ANY_OBJECT,

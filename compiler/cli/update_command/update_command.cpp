@@ -18,9 +18,7 @@
 
 namespace tz::pkg {
 
-namespace {
-
-void printChanges(const Lock &before, const Lock &after) {
+void UpdateCommand::printChanges(const Lock &before, const Lock &after) {
   bool any = false;
   for (const auto &[id, now] : after.packages) {
     auto old = before.packages.find(id);
@@ -46,11 +44,9 @@ void printChanges(const Lock &before, const Lock &after) {
   }
 }
 
-}
-
 int UpdateCommand::run(llvm::ArrayRef<const char *> args) const {
   Manifest project;
-  if (!currentProject(project)) {
+  if (!ProjectFile::currentProject(project)) {
     return kExitError;
   }
   PrepareOptions options;
@@ -59,23 +55,23 @@ int UpdateCommand::run(llvm::ArrayRef<const char *> args) const {
     auto it = std::find_if(project.dependencies.begin(), project.dependencies.end(),
                            [&](const Dependency &d) { return d.alias == name; });
     if (it == project.dependencies.end()) {
-      report("'" + name + "' is not a dependency in " + project.path);
+      Report::report("'" + name + "' is not a dependency in " + project.path);
       return kExitError;
     }
     Source source;
     std::string error;
-    if (!parseSource(it->spec, project.dir, source, error)) {
-      reportAt(project.path, project.text, it->offset, error);
+    if (!SourceParser::parseSource(it->spec, project.dir, source, error)) {
+      Report::reportAt(project.path, project.text, it->offset, error);
       return kExitError;
     }
     options.only.push_back(source.id());
   }
   Graph graph;
   Lock before, after;
-  if (!preparePackages(project, options, graph, &before, &after)) {
+  if (!PackageGraph::preparePackages(project, options, graph, &before, &after)) {
     return kExitError;
   }
-  printChanges(before, after);
+  UpdateCommand::printChanges(before, after);
 
   return 0;
 }

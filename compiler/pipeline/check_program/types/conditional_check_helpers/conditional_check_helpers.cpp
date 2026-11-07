@@ -10,13 +10,13 @@ using llvm::isa;
 
 namespace tz {
 
-void distribute(const Type *type, std::vector<const Type *> &out) {
+void ConditionalCheckHelpers::distribute(const Type *type, std::vector<const Type *> &out) {
   if (type->isOptional()) {
-    distribute(type->inner(), out);
+    ConditionalCheckHelpers::distribute(type->inner(), out);
     out.push_back(Type::undefinedTy());
   } else if (type->isUnion()) {
     for (const Type *m : type->members()) {
-      distribute(m, out);
+      ConditionalCheckHelpers::distribute(m, out);
     }
   } else if (type->isBool()) {
     out.push_back(Type::boolLiteral(false));

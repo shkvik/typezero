@@ -10,7 +10,7 @@ using llvm::isa;
 
 namespace tz {
 
-const Expr *unnarrowed(const Expr *expr) {
+const Expr *ObjectCheckHelpers::unnarrowed(const Expr *expr) {
   auto *conv = dyn_cast<CastExpr>(expr);
   if (!conv || !conv->isImplicit() || conv->shortCircuit) {
     return expr;

@@ -47,7 +47,9 @@ enum { kTextUtf8, kTextUtf16le, kTextUtf16be, kTextSingleByte, kTextCjk };
 const char *const kCjkEncodings[] = {"gbk",         "gb18030",   "big5",  "euc-jp",
                                      "iso-2022-jp", "shift_jis", "euc-kr"};
 
-llvm::Constant *cjkEncodingOf(llvm::Module &module, llvm::StringRef name) {
+}
+
+llvm::Constant *TextCodecCalls::cjkEncodingOf(llvm::Module &module, llvm::StringRef name) {
   std::string symbol = "tz_cjk_encoding_" + name.str();
   for (char &c : symbol) {
     if (c == '-') {
@@ -56,8 +58,6 @@ llvm::Constant *cjkEncodingOf(llvm::Module &module, llvm::StringRef name) {
   }
 
   return module.getOrInsertGlobal(symbol, llvm::Type::getInt8Ty(module.getContext()));
-}
-
 }
 
 llvm::Value *TextCodecCalls::emit() {
@@ -114,7 +114,7 @@ llvm::Value *TextCodecCalls::emit() {
     case Builtin::TextDecoderNew:
     case Builtin::TextDecoderParse: {
       bool parsing = call->builtin() == Builtin::TextDecoderParse;
-      bool resolved = constantOf(call->args[0]) != 0;
+      bool resolved = BytesCallSite::constantOf(call->args[0]) != 0;
       Lowering::Operand label{nullptr, false, nullptr};
       if (!resolved) {
         label = this->lowering.refCounts().emitOperand(
@@ -155,7 +155,7 @@ llvm::Value *TextCodecCalls::emit() {
         if (which == kTextSingleByte) {
           table = this->lowering.bytesLowerer().encodingTable(name);
         } else if (which == kTextCjk) {
-          table = cjkEncodingOf(*this->lowering.module_, name);
+          table = TextCodecCalls::cjkEncodingOf(*this->lowering.module_, name);
         }
         llvm::Value *made = this->lowering.builder_.CreateCall(
             this->fn("tz_text_decoder_make", ptr, {i32, ptr, i32, i32}),
@@ -168,7 +168,7 @@ llvm::Value *TextCodecCalls::emit() {
         tables.push_back(this->lowering.bytesLowerer().encodingTable(t.name));
       }
       for (const char *name : kCjkEncodings) {
-        cjk.push_back(cjkEncodingOf(*this->lowering.module_, name));
+        cjk.push_back(TextCodecCalls::cjkEncodingOf(*this->lowering.module_, name));
       }
       auto list = [&](std::vector<llvm::Constant *> &items, const char *name) {
         auto *type = llvm::ArrayType::get(this->lowering.builder_.getPtrTy(), items.size());
@@ -238,7 +238,7 @@ llvm::Value *TextCodecCalls::emit() {
     }
     case Builtin::TextDecoderInfo: {
       Lowering::Operand self = this->receiver(0);
-      int64_t which = constantOf(call->args[0]);
+      int64_t which = BytesCallSite::constantOf(call->args[0]);
       llvm::Value *result;
       if (which == 0) {
         result = this->lowering.stringLowerer().callReturningString(

@@ -131,91 +131,134 @@ const llvm::StringLiteral kFspExports[] = {
 
 }
 
-std::string fsExportProblem(llvm::StringRef name, llvm::StringRef path) {
-  std::string quoted = "'" + path.str() + "'";
-  std::string what = "'" + name.str() + "' of " + quoted;
+FsExports::ResultExportFound FsExports::fsExport(llvm::StringRef name, llvm::StringRef path) {
   if (llvm::is_contained(kFsFunctions, name) || name == "constants" || name == "Stats" ||
-      name == "Dirent") {
-    return "";
+      name == "Dirent" || name == "promises") {
+    return ok(name);
   }
   if (name == "replaceSync" || name == "ReplaceError") {
-    return quoted + " has no export named '" + name.str() + "'; it is in \"tz:fs\"";
+    std::string message = ErrorTextFsExport::inTzFs(path, name);
+
+    return err(FeatureExportFoundError{
+        .code = FeatureExportFoundErrorCode::ELSEWHERE,
+        .message = message,
+    });
   }
   std::string sync = (name + "Sync").str();
-  if (llvm::is_contained(kFsFunctions, sync)) {
-    if (llvm::is_contained(kFspFunctions, name)) {
-      return what + " takes a callback, which tz does not have; import '" + name.str() +
-             "' from \"node:fs/promises\", which gives a Promise, or '" + sync +
-             "', which gives what it reads" +
-             (name == "readFile" ? ", e.g. 'const text = await readFile(path, \"utf8\")'" : "");
-    }
-    return what + " takes a callback, which tz does not have; import '" + sync +
-           "' and use what it returns";
+  if (llvm::is_contained(kFsFunctions, sync) && llvm::is_contained(kFspFunctions, name)) {
+    std::string message = ErrorTextFsExport::callback(name, path, sync);
+
+    return err(FeatureExportFoundError{
+        .code = FeatureExportFoundErrorCode::CALLBACK_FORM,
+        .message = message,
+    });
   }
-  if (name == "promises") {
-    return "";
+  if (llvm::is_contained(kFsFunctions, sync)) {
+    std::string message = ErrorTextFsExport::syncOnly(name, path, sync);
+
+    return err(FeatureExportFoundError{
+        .code = FeatureExportFoundErrorCode::CALLBACK_FORM,
+        .message = message,
+    });
   }
   if (llvm::is_contained(kFsExports, name)) {
-    return what + " is not supported yet";
-  }
+    std::string message = ErrorTextModuleExport::notYet(name, path);
 
-  return quoted + " has no export named '" + name.str() + "'";
+    return err(FeatureExportFoundError{
+        .code = FeatureExportFoundErrorCode::NOT_YET,
+        .message = message,
+    });
+  }
+  std::string message = ErrorTextModuleExport::none(path, name);
+
+  return err(FeatureExportFoundError{
+      .code = FeatureExportFoundErrorCode::NO_EXPORT,
+      .message = message,
+  });
 }
 
-std::string fsPromisesExportProblem(llvm::StringRef name, llvm::StringRef path) {
-  std::string quoted = "'" + path.str() + "'";
-  std::string what = "'" + name.str() + "' of " + quoted;
+FsExports::ResultExportFound FsExports::promisesExport(llvm::StringRef name, llvm::StringRef path) {
   if (llvm::is_contained(kFspFunctions, name) || name == "constants") {
-    return "";
+    return ok(name);
   }
   if (name == "replace" || name == "ReplaceError") {
-    return quoted + " has no export named '" + name.str() + "'; it is in \"tz:fs\"";
+    std::string message = ErrorTextFsExport::inTzFs(path, name);
+
+    return err(FeatureExportFoundError{
+        .code = FeatureExportFoundErrorCode::ELSEWHERE,
+        .message = message,
+    });
   }
   if (llvm::is_contained(kFspExports, name)) {
-    return what + " is not supported yet";
+    std::string message = ErrorTextModuleExport::notYet(name, path);
+
+    return err(FeatureExportFoundError{
+        .code = FeatureExportFoundErrorCode::NOT_YET,
+        .message = message,
+    });
   }
   if (llvm::is_contained(kFsFunctions, name)) {
-    return quoted + " has no export named '" + name.str() + "'; the function that waits is '" +
-           name.drop_back(4).str() + "', or import '" + name.str() + "' from \"node:fs\"";
-  }
+    std::string message = ErrorTextFsExport::waiting(path, name);
 
-  return quoted + " has no export named '" + name.str() + "'";
+    return err(FeatureExportFoundError{
+        .code = FeatureExportFoundErrorCode::ELSEWHERE,
+        .message = message,
+    });
+  }
+  std::string message = ErrorTextModuleExport::none(path, name);
+
+  return err(FeatureExportFoundError{
+      .code = FeatureExportFoundErrorCode::NO_EXPORT,
+      .message = message,
+  });
 }
 
-std::string readlineExportProblem(llvm::StringRef name, llvm::StringRef path, bool hasPromises) {
-  std::string quoted = "'" + path.str() + "'";
-  std::string what = "'" + name.str() + "' of " + quoted;
+FsExports::ResultExportFound FsExports::readlineExport(llvm::StringRef name, llvm::StringRef path,
+                                                       bool hasPromises) {
   if (name == "createInterface" || name == "Interface") {
-    return "";
+    return ok(name);
   }
   if (name == "clearLine" || name == "clearScreenDown" || name == "cursorTo" ||
       name == "emitKeypressEvents" || name == "moveCursor" || name == "Readline" ||
       (hasPromises && name == "promises")) {
-    return what + " is not supported yet; tz has createInterface";
-  }
+    std::string message = ErrorTextFsExport::readline(name, path);
 
-  return quoted + " has no export named '" + name.str() + "'";
+    return err(FeatureExportFoundError{
+        .code = FeatureExportFoundErrorCode::NOT_YET,
+        .message = message,
+    });
+  }
+  std::string message = ErrorTextModuleExport::none(path, name);
+
+  return err(FeatureExportFoundError{
+      .code = FeatureExportFoundErrorCode::NO_EXPORT,
+      .message = message,
+  });
 }
 
-std::string tzFsExportProblem(llvm::StringRef name, llvm::StringRef path) {
+FsExports::ResultExportFound FsExports::tzFsExport(llvm::StringRef name, llvm::StringRef path) {
   if (name == "replaceSync" || name == "replace") {
-    return "";
+    return ok(name);
   }
-  std::string message = "'" + path.str() + "' has no export named '" + name.str() +
-                        "'; it has replaceSync, replace and ReplaceError";
-  if (llvm::is_contained(kFsFunctions, name) || llvm::is_contained(kFspFunctions, name)) {
-    message += "; '" + name.str() + "' is in \"node:fs\"";
-  }
+  bool inNodeFs = llvm::is_contained(kFsFunctions, name) || llvm::is_contained(kFspFunctions, name);
+  std::string message = ErrorTextFsExport::tzFs(path, name, inNodeFs);
 
-  return message;
+  return err(FeatureExportFoundError{
+      .code = FeatureExportFoundErrorCode::NO_EXPORT,
+      .message = message,
+  });
 }
 
-std::string tzIoExportProblem(llvm::StringRef name, llvm::StringRef path) {
+FsExports::ResultExportFound FsExports::tzIoExport(llvm::StringRef name, llvm::StringRef path) {
   if (name == "readLine") {
-    return "";
+    return ok(name);
   }
+  std::string message = ErrorTextFsExport::tzIo(path, name);
 
-  return "'" + path.str() + "' has no export named '" + name.str() + "'; it has readLine";
+  return err(FeatureExportFoundError{
+      .code = FeatureExportFoundErrorCode::NO_EXPORT,
+      .message = message,
+  });
 }
 
 }

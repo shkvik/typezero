@@ -12,21 +12,22 @@ namespace {
 
 constexpr unsigned kRuntimeCopyLimit = 100;
 
-unsigned copySize(llvm::Function &fn, llvm::SmallPtrSetImpl<llvm::Function *> &seen) {
+}
+
+unsigned RuntimeLinker::copySize(llvm::Function &fn,
+                                 llvm::SmallPtrSetImpl<llvm::Function *> &seen) {
   unsigned size = fn.getInstructionCount();
   for (llvm::Instruction &inst : llvm::instructions(fn)) {
     for (llvm::Value *operand : inst.operands()) {
       auto *callee = llvm::dyn_cast<llvm::Function>(operand);
       if (callee && callee->hasLocalLinkage() && !callee->isDeclaration() &&
           seen.insert(callee).second) {
-        size += copySize(*callee, seen);
+        size += RuntimeLinker::copySize(*callee, seen);
       }
     }
   }
 
   return size;
-}
-
 }
 
 Errors RuntimeLinker::run(llvm::Module &module, const std::string &path) const {
@@ -87,7 +88,8 @@ Errors RuntimeLinker::run(llvm::Module &module, const std::string &path) const {
     }
     fn.setComdat(nullptr);
     llvm::SmallPtrSet<llvm::Function *, 8> helpers;
-    if (!fn.hasFnAttribute(llvm::Attribute::Hot) || copySize(fn, helpers) > kRuntimeCopyLimit) {
+    if (!fn.hasFnAttribute(llvm::Attribute::Hot) ||
+        RuntimeLinker::copySize(fn, helpers) > kRuntimeCopyLimit) {
       fn.deleteBody();
     } else {
       fn.setLinkage(llvm::GlobalValue::AvailableExternallyLinkage);

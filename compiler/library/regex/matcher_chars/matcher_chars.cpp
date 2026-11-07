@@ -12,16 +12,6 @@ using llvm::Value;
 
 namespace tz {
 
-namespace {
-
-bool isBack(uint32_t op) {
-  return op == RE_CHAR_BACK || op == RE_ANY_BACK || op == RE_ALL_BACK || op == RE_SET_BACK;
-}
-
-bool hasByte(const ByteSet &s, uint32_t c) { return (s[c / 32] >> (c % 32)) & 1; }
-
-}
-
 MatcherChars::MatcherChars(MatcherBuilder &builder) : builder_(builder) {}
 
 Value *MatcherChars::test(Value *cond, const std::function<Value *()> &value) {
@@ -86,7 +76,7 @@ llvm::Constant *MatcherChars::byteTable(const ByteSet &bits) {
   }
   std::vector<uint8_t> bytes(256);
   for (uint32_t c = 0; c < 256; ++c) {
-    bytes[c] = hasByte(bits, c);
+    bytes[c] = MatcherBuilder::hasByte(bits, c);
   }
   auto *data = llvm::ConstantDataArray::get(builder_.ctx_, bytes);
   auto *global =
@@ -101,12 +91,12 @@ llvm::Constant *MatcherChars::byteTable(const ByteSet &bits) {
 Value *MatcherChars::inByteSet(Value *c, const ByteSet &bits) {
   std::vector<std::pair<uint32_t, uint32_t>> runs;
   for (uint32_t x = 0; x < 256;) {
-    if (!hasByte(bits, x)) {
+    if (!MatcherBuilder::hasByte(bits, x)) {
       ++x;
       continue;
     }
     uint32_t end = x;
-    while (end + 1 < 256 && hasByte(bits, end + 1)) {
+    while (end + 1 < 256 && MatcherBuilder::hasByte(bits, end + 1)) {
       ++end;
     }
     runs.push_back({x, end});
@@ -227,7 +217,7 @@ std::pair<Value *, Value *> MatcherChars::readChar(Value *pos, bool back, BasicB
 
 Value *MatcherChars::charStep(uint32_t atom, Value *pos, BasicBlock *fail) {
   const uint32_t *op = builder_.code_ + atom;
-  bool back = isBack(op[0]);
+  bool back = MatcherBuilder::isBack(op[0]);
   if (op[0] == RE_CHAR || op[0] == RE_CHAR_BACK) {
     uint32_t c = op[1];
     if (!builder_.wide_ && c > 255) {

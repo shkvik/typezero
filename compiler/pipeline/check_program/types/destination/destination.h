@@ -14,6 +14,8 @@ public:
   const Type *declaredFunctionType(const FunctionDecl *fn);
 
 private:
+  static void forEachReturn(const Stmt *stmt, llvm::function_ref<void(const Expr *)> each);
+  static const Type *writable(const Type *type);
   CheckState &state;
 };
 

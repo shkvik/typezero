@@ -17,6 +17,52 @@ using llvm::isa;
 
 namespace tz {
 
+ReflectCallChecker::ResultKeyOfRecords ReflectCallChecker::keyOfRecords(const Type *type) {
+  if (!type->isString() && !type->isError()) {
+    std::string message = ErrorTextMetadataKey::type(type->name());
+
+    return err(ReflectCallCheckerKeyOfRecordsError{
+        .code = ReflectCallCheckerKeyOfRecordsErrorCode::NOT_A_KEY,
+        .message = message,
+    });
+  }
+
+  return ok(type);
+}
+
+ReflectCallChecker::ResultTargetObject ReflectCallChecker::targetObject(const Type *type) {
+  if (!type->isError() && !UnknownChecker::isObjectReference(type) && !type->isAnyObject()) {
+    std::string message = ErrorTextMetadataTarget::notObject(type->name());
+
+    return err(ReflectCallCheckerTargetObjectError{
+        .code = ReflectCallCheckerTargetObjectErrorCode::NOT_AN_OBJECT,
+        .message = message,
+    });
+  }
+
+  return ok(type);
+}
+
+ReflectCallChecker::ResultArgumentList ReflectCallChecker::argumentList(const Type *type) {
+  if (type->isError() || type->isArray()) {
+    return ok(type);
+  }
+  if (type->isTuple()) {
+    std::string message = ErrorTextReflectArgs::tuple();
+
+    return err(ReflectCallCheckerArgumentListError{
+        .code = ReflectCallCheckerArgumentListErrorCode::TUPLE,
+        .message = message,
+    });
+  }
+  std::string message = ErrorTextReflectArgs::notArray(type->name());
+
+  return err(ReflectCallCheckerArgumentListError{
+      .code = ReflectCallCheckerArgumentListErrorCode::NOT_AN_ARRAY,
+      .message = message,
+  });
+}
+
 const Type *ReflectCallChecker::designType(const Expr *key) {
   auto *lit = dyn_cast<StringLitExpr>(key);
   if (!lit) {
@@ -131,23 +177,11 @@ Expr *ReflectCallChecker::checkReflectCall(CallExpr *call, MemberExpr *member,
   const Function *function =
       llvm::find_if(functions, [&](const Function &f) { return f.name == fn; });
   if (function == std::end(functions)) {
-    if (fn == "metadata") {
-      this->state.getDiagnostics().error(
-          member->loc(), "'Reflect.metadata(key, value)' makes a decorator; write it as "
-                         "one, before a class or a member: '@Reflect.metadata(key, value)'");
-    } else if (fn == "getMetadataKeys" || fn == "getOwnMetadataKeys") {
-      this->state.getDiagnostics().error(
-          member->loc(), "'Reflect." + fn +
-                             "' is not supported: the keys of records are "
-                             "decorators, classes and strings, which no one type holds; ask "
-                             "for each key with 'Reflect.hasMetadata(key, target)'");
-    } else {
-      this->state.getDiagnostics().error(
-          member->loc(), "'Reflect." + fn +
-                             "' is not supported; Reflect has get, apply, "
-                             "construct, fill, defineMetadata, getMetadata, getOwnMetadata, "
-                             "hasMetadata, hasOwnMetadata and deleteMetadata");
-    }
+    std::string message = fn == "metadata" ? ErrorTextReflectCall::decorator()
+                          : fn == "getMetadataKeys" || fn == "getOwnMetadataKeys"
+                              ? ErrorTextReflectCall::keys(fn)
+                              : ErrorTextReflectCall::unknown(fn);
+    this->state.getDiagnostics().error(member->loc(), message);
     checkArgsLoosely();
     return call;
   }
@@ -174,19 +208,15 @@ Expr *ReflectCallChecker::checkReflectCall(CallExpr *call, MemberExpr *member,
     keyArg->type = Type::string();
   } else {
     keyArg = ExprChecker(this->state).checkExpr(keyArg);
-    if (!keyArg->type->isString() && !keyArg->type->isError()) {
-      this->state.getDiagnostics().error(
-          keyLoc, "a key of metadata is a decorator, a class or a constant, whose records "
-                  "have the type of what is written, or a string, whose records are "
-                  "'unknown'; found '" +
-                      keyArg->type->name() + "'");
+    ResultKeyOfRecords records = ReflectCallChecker::keyOfRecords(keyArg->type);
+    if (records.isErr()) {
+      this->state.getDiagnostics().error(keyLoc, records.error().message);
       checkArgsLoosely();
       return call;
     }
     if (define && ReflectCallChecker::isDesignKey(keyArg)) {
-      this->state.getDiagnostics().error(
-          keyLoc, "the records 'design:*' are what the compiler writes for decorated "
-                  "members; write a key of your own");
+      std::string message = ErrorTextMetadataKey::design();
+      this->state.getDiagnostics().error(keyLoc, message);
     }
   }
 
@@ -196,22 +226,20 @@ Expr *ReflectCallChecker::checkReflectCall(CallExpr *call, MemberExpr *member,
     value = ExprChecker(this->state).checkExpr(value, known ? known->type : nullptr);
     const Type *type = value->type;
     if (type->isVoid()) {
-      this->state.getDiagnostics().error(value->loc(),
-                                         "an expression of type 'void' has no value to record");
+      std::string message = ErrorTextMetadataValue::voidValue();
+      this->state.getDiagnostics().error(value->loc(), message);
     } else if (known && !type->isError()) {
       unsigned before = this->state.getDiagnostics().errorCount();
-      value =
-          TypeRelations(this->state).coerce(value, known->type, "the records of '" + label + "'");
+      std::string records = ErrorTextMetadataValue::label(label);
+      value = TypeRelations(this->state).coerce(value, known->type, records);
       if (this->state.getDiagnostics().errorCount() > before) {
-        this->state.getDiagnostics().note(known->loc, "the records of '" + label + "' are '" +
-                                                          known->type->name() +
-                                                          "' since the first one, here");
+        std::string message = ErrorTextMetadataValue::since(label, known->type->name());
+        this->state.getDiagnostics().note(known->loc, message);
       }
-    } else if (key && !type->isError() && !mentionsParam(type)) {
+    } else if (key && !type->isError() && !TypeQueries::mentionsParam(type)) {
       if (type->isUndefined()) {
-        this->state.getDiagnostics().error(
-            value->loc(), "cannot tell the type of the records of '" + label +
-                              "' from 'undefined'; write a value of the type first");
+        std::string message = ErrorTextMetadataValue::undefined(label);
+        this->state.getDiagnostics().error(value->loc(), message);
       } else {
         this->state.getReflectStore().rememberMetadataType(key, type, value->loc());
       }
@@ -225,11 +253,9 @@ Expr *ReflectCallChecker::checkReflectCall(CallExpr *call, MemberExpr *member,
   Expr *&target = call->args[at];
   target = ExprChecker(this->state).checkExpr(target);
   const Type *targetType = target->type;
-  if (!targetType->isError() && !UnknownChecker::isObjectReference(targetType) &&
-      !targetType->isAnyObject()) {
-    this->state.getDiagnostics().error(
-        target->loc(),
-        "the target of metadata is an object, such as a class, found '" + targetType->name() + "'");
+  ResultTargetObject object = ReflectCallChecker::targetObject(targetType);
+  if (object.isErr()) {
+    this->state.getDiagnostics().error(target->loc(), object.error().message);
   } else {
     target = TypeRelations(this->state).convert(target, Type::anyObject());
   }
@@ -245,12 +271,20 @@ Expr *ReflectCallChecker::checkReflectCall(CallExpr *call, MemberExpr *member,
     call->type = Type::voidTy();
     break;
   case Builtin::MetaGet:
-  case Builtin::MetaGetOwn:
-    call->type = key      ? Type::optional(
-                                MetadataChecker(this->state).metadataType(key, label, keyLoc, expected))
-                 : design ? design
-                          : Type::unknown();
+  case Builtin::MetaGetOwn: {
+    if (!key) {
+      call->type = design ? design : Type::unknown();
+      break;
+    }
+    MetadataChecker::ResultMetadataTyped typed =
+        MetadataChecker(this->state).metadataType(key, label, keyLoc, expected);
+    if (typed.isErr()) {
+      this->state.getDiagnostics().error(keyLoc, typed.error().message);
+    }
+    const Type *records = typed.isOk() ? typed.value() : Type::error();
+    call->type = Type::optional(records);
     break;
+  }
   default:
     call->type = Type::boolTy();
     break;
@@ -364,18 +398,11 @@ Expr *ReflectCallChecker::checkReflectArgs(Expr *args) {
     return ExprChecker(this->state).checkExpr(args, Type::array(Type::unknown()));
   }
   args = ExprChecker(this->state).checkExpr(args);
-  const Type *type = args->type;
-  if (type->isError() || type->isArray()) {
+  ResultArgumentList list = ReflectCallChecker::argumentList(args->type);
+  if (list.isOk()) {
     return args;
   }
-  if (type->isTuple()) {
-    this->state.getDiagnostics().error(
-        args->loc(), "the arguments are an array, and this is a tuple; copy it into one, "
-                     "'[...t]'");
-  } else {
-    this->state.getDiagnostics().error(
-        args->loc(), "the arguments are an array, e.g. '[a, b]', found '" + type->name() + "'");
-  }
+  this->state.getDiagnostics().error(args->loc(), list.error().message);
   args->type = Type::error();
 
   return args;

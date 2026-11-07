@@ -17,6 +17,13 @@ public:
   int run();
 
 private:
+  static llvm::json::Object property(llvm::StringRef type, llvm::StringRef description);
+  static llvm::json::Object schema(llvm::json::Object properties,
+                                   std::vector<std::string> required);
+  static llvm::json::Object tool(llvm::StringRef name, llvm::StringRef description,
+                                 llvm::json::Object input);
+  static std::string readAll(llvm::StringRef file);
+  static std::string temporary(llvm::StringRef prefix, llvm::StringRef suffix);
   std::optional<std::string> readLine();
   void send(const llvm::json::Value &message);
   std::optional<llvm::json::Value> handle(const llvm::json::Object &message);

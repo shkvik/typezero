@@ -4,7 +4,7 @@
 
 namespace tz::pkg {
 
-std::string jsonQuote(llvm::StringRef s) {
+std::string JsonText::jsonQuote(llvm::StringRef s) {
   std::string out = "\"";
   for (unsigned char c : s) {
     switch (c) {
@@ -38,7 +38,7 @@ std::string jsonQuote(llvm::StringRef s) {
   return out + "\"";
 }
 
-std::pair<unsigned, unsigned> lineAndColumn(llvm::StringRef text, size_t offset) {
+std::pair<unsigned, unsigned> JsonText::lineAndColumn(llvm::StringRef text, size_t offset) {
   unsigned line = 1, column = 1;
   for (size_t i = 0; i < offset && i < text.size(); ++i) {
     if (text[i] == '\n') {
@@ -52,7 +52,7 @@ std::pair<unsigned, unsigned> lineAndColumn(llvm::StringRef text, size_t offset)
   return {line, column};
 }
 
-JsonProblem checkJsonText(llvm::StringRef s) {
+JsonProblem JsonText::checkJsonText(llvm::StringRef s) {
   size_t i = 0, n = s.size();
   auto whitespace = [&] {
     while (i < n && (s[i] == ' ' || s[i] == '\t' || s[i] == '\n' || s[i] == '\r')) {

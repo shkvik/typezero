@@ -12,7 +12,7 @@ using llvm::isa;
 
 namespace tz {
 
-const std::vector<HashNames> &hashNames() {
+const std::vector<HashNames> &CryptoNames::hashNames() {
   static const std::vector<HashNames> table = {
       {"md5", {"ssl3-md5", "1.2.840.113549.2.5", "rsa-md5", "md5withrsaencryption"}},
       {"sha1",
@@ -52,7 +52,7 @@ const std::vector<HashNames> &hashNames() {
   return table;
 }
 
-bool turnedOffHash(llvm::StringRef name) {
+bool CryptoNames::turnedOffHash(llvm::StringRef name) {
   static const llvm::StringLiteral names[] = {"md4",      "md2",
                                               "mdc2",     "whirlpool",
                                               "rsa-md4",  "md4withrsaencryption",
@@ -62,7 +62,7 @@ bool turnedOffHash(llvm::StringRef name) {
   return llvm::is_contained(names, name);
 }
 
-bool turnedOffCipher(llvm::StringRef name) {
+bool CryptoNames::turnedOffCipher(llvm::StringRef name) {
   for (llvm::StringRef prefix : {"bf", "blowfish", "cast", "rc2", "rc4", "rc5", "idea", "seed"}) {
     if (name.starts_with(prefix)) {
       return true;
@@ -73,7 +73,7 @@ bool turnedOffCipher(llvm::StringRef name) {
          (name.starts_with("des-") && !name.starts_with("des-ede"));
 }
 
-llvm::StringRef methodsOf(Crypto kind) {
+llvm::StringRef CryptoNames::methodsOf(Crypto kind) {
   switch (kind) {
   case Crypto::Hash:
     return "'update', 'digest' and 'copy'";
@@ -104,36 +104,6 @@ llvm::StringRef methodsOf(Crypto kind) {
   }
 
   return "";
-}
-
-std::string cryptoExportProblem(llvm::StringRef name, llvm::StringRef path) {
-  std::string what = "'" + name.str() + "' of '" + path.str() + "'";
-  if (llvm::is_contained(kFunctions, name) || llvm::is_contained(kClasses, name) ||
-      name == "constants") {
-    return "";
-  }
-  if (name == "webcrypto") {
-    return what + " is the global crypto of Web Crypto, which needs no import: use "
-                  "'crypto.subtle', 'crypto.getRandomValues' and 'crypto.randomUUID'";
-  }
-  if (name == "subtle") {
-    return what + " is the global crypto.subtle, which needs no import: use 'crypto.subtle'";
-  }
-  if (llvm::is_contained(kExports, name)) {
-    return what + " is not supported yet";
-  }
-
-  return "'" + path.str() + "' has no export named '" + name.str() + "'";
-}
-
-std::string tzCryptoExportProblem(llvm::StringRef name, llvm::StringRef path) {
-  for (const auto &form : kTzCryptoAsyncForms) {
-    if (name == form.first) {
-      return "";
-    }
-  }
-
-  return "'" + path.str() + "' has no export named '" + name.str() + "'";
 }
 
 }

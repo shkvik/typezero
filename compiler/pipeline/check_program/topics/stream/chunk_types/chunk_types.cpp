@@ -147,8 +147,8 @@ bool ChunkTypes::isStreamHook(const FunctionDecl *fn, bool linked) const {
          llvm::is_contained(hooks, fn->name) && (!linked || this->isStreamClass(cls->parent));
 }
 
-void ChunkTypes::reportStreamHook(const FunctionDecl *fn,
-                                  llvm::ArrayRef<FunctionDecl *> inherited) {
+ChunkTypes::ResultHookParamsMatch
+ChunkTypes::hookParams(const FunctionDecl *fn, llvm::ArrayRef<FunctionDecl *> inherited) const {
   const FuncSymbol *hook = nullptr;
   for (const FunctionDecl *v : inherited) {
     if (v->sym && v->cls() && v->cls()->library()) {
@@ -156,33 +156,26 @@ void ChunkTypes::reportStreamHook(const FunctionDecl *fn,
     }
   }
   if (!hook) {
-    return;
+    return err(ChunkTypesHookParamsError{
+        .code = ChunkTypesHookParamsErrorCode::NO_LIBRARY_HOOK,
+        .message = "",
+    });
   }
-  for (const Type *t : fn->sym->params) {
-    if (!t || t->isError()) {
-      return;
-    }
+  auto untyped = [](const Type *t) { return !t || t->isError(); };
+  if (llvm::any_of(fn->sym->params, untyped)) {
+    return err(ChunkTypesHookParamsError{
+        .code = ChunkTypesHookParamsErrorCode::PARAMS_NOT_TYPED,
+        .message = "",
+    });
   }
-  std::string params;
-  for (size_t i = 0; i < hook->params.size(); ++i) {
-    if (i) {
-      params += ", ";
-    }
-    llvm::StringRef name = hook->decl && i < hook->decl->params.size() ? hook->decl->params[i].name
-                                                                       : llvm::StringRef("arg");
-    params += name.str() + ": " + hook->params[i]->name().str();
-  }
-  std::string chunks;
-  if (fn->name == "onWrite" || fn->name == "onWritev" || fn->name == "onTransform") {
-    chunks = "; for chunks of another type, give the class it extends type arguments, e.g. "
-             "'extends Writable<string>'";
-  }
-  this->state.getDiagnostics().error(
-      fn->loc(), "'" + fn->name + "' is what node:stream calls, as '" + fn->name + "(" + params +
-                     ")', and a method with other parameters is another "
-                     "variant of the name, which it never calls; take those parameters, "
-                     "or leave out their types" +
-                     chunks);
+  bool chunks = fn->name == "onWrite" || fn->name == "onWritev" || fn->name == "onTransform";
+  std::string params = ErrorTextStreamHook::params(hook);
+  std::string message = ErrorTextStreamHook::other(fn->name, params, chunks);
+
+  return err(ChunkTypesHookParamsError{
+      .code = ChunkTypesHookParamsErrorCode::OTHER_PARAMETERS,
+      .message = message,
+  });
 }
 
 const Type *ChunkTypes::inferredChunkType(const std::string &site, llvm::SMLoc loc) {
@@ -208,7 +201,8 @@ bool ChunkTypes::recordStreamChunk(const Type *chunk, const Type *value, llvm::S
   if (!site) {
     return false;
   }
-  if (value->isError() || value->isVoid() || value->isUndefined() || mentionsParam(value)) {
+  if (value->isError() || value->isVoid() || value->isUndefined() ||
+      TypeQueries::mentionsParam(value)) {
     return true;
   }
   if (value->isLiteral()) {

@@ -164,7 +164,7 @@ Module *Loader::parseJson(const std::string &filePath, const std::string &realPa
   std::string source;
   size_t at = 0;
   std::string problem;
-  if (!jsonModuleText(json.drop_front(skipped), kJsonExport, source, at, problem)) {
+  if (!JsonModule::jsonModuleText(json.drop_front(skipped), kJsonExport, source, at, problem)) {
     diags_.error(llvm::SMLoc::getFromPointer(json.data() + skipped + at),
                  "'" + name + "' is not JSON: " + problem);
     return nullptr;

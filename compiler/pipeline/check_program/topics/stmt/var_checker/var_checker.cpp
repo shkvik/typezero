@@ -246,7 +246,7 @@ void VarChecker::checkVarDecl(VarDeclStmt *decl) {
         }
         std::vector<llvm::StringRef> kept;
         for (const std::u16string &name : names) {
-          kept.push_back(this->state.getAst().keepName(toUtf8(name)));
+          kept.push_back(this->state.getAst().keepName(ToUtf8::toUtf8(name)));
         }
         if (!kept.empty()) {
           d.sym->holds = ReflectedNames{.names = std::move(kept)};

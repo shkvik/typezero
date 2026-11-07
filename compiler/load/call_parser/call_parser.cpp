@@ -47,7 +47,7 @@ Expr *CallParser::parseCallOrMember() {
     if (parser_.tok_.is(Tok::QuestionDot)) {
       optional = chain = true;
       parser_.cursor().advance();
-      if (parser_.tok_.is(Tok::Identifier) || isKeyword(parser_.tok_.kind)) {
+      if (parser_.tok_.is(Tok::Identifier) || TokenKinds::isKeyword(parser_.tok_.kind)) {
         auto *member = parser_.ctx_.make<MemberExpr>(parser_.tok_.loc(), expr, parser_.tok_.text);
         member->optional = true;
         expr = member;
@@ -85,7 +85,7 @@ Expr *CallParser::parseCallOrMember() {
     } else if (parser_.tok_.is(Tok::Dot)) {
       parser_.cursor().advance();
       llvm::SMLoc loc = parser_.tok_.loc();
-      if (!parser_.tok_.is(Tok::Identifier) && !isKeyword(parser_.tok_.kind)) {
+      if (!parser_.tok_.is(Tok::Identifier) && !TokenKinds::isKeyword(parser_.tok_.kind)) {
         parser_.cursor().error(parser_.tok_.loc(), "expected a property name after '.'");
         return finish();
       }
@@ -180,7 +180,7 @@ Expr *CallParser::parseNew() {
     }
     while (parser_.tok_.is(Tok::Dot) || parser_.tok_.is(Tok::LBracket)) {
       if (parser_.cursor().accept(Tok::Dot)) {
-        if (!parser_.tok_.is(Tok::Identifier) && !isKeyword(parser_.tok_.kind)) {
+        if (!parser_.tok_.is(Tok::Identifier) && !TokenKinds::isKeyword(parser_.tok_.kind)) {
           parser_.cursor().error(parser_.tok_.loc(), "expected a property name after '.'");
           break;
         }

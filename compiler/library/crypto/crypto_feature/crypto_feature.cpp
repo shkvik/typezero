@@ -1,4 +1,5 @@
 #include "compiler/library/crypto/crypto_feature/crypto_feature.h"
+#include "compiler/library/crypto/crypto_exports/crypto_exports.h"
 #include "compiler/library/crypto/crypto_lowerer/crypto_lowerer.h"
 #include "compiler/library/crypto/crypto_names/crypto_names.h"
 #include "compiler/lower/lowering/lowering.h"
@@ -52,17 +53,20 @@ Expr *CryptoFeature::checkClassMethodCall(CheckState &state, CallExpr *call, Mem
   return SubtleCallChecker(state).checkSubtleCall(call, member, expected);
 }
 
-std::optional<std::string> CryptoFeature::exportProblem(NodeModule module,
-                                                        llvm::StringRef exportName,
-                                                        llvm::StringRef path) const {
+CryptoFeature::ResultExportFound CryptoFeature::exportFound(NodeModule module,
+                                                            llvm::StringRef exportName,
+                                                            llvm::StringRef path) const {
   if (module == NodeModule::TzCrypto) {
-    return tzCryptoExportProblem(exportName, path);
+    return CryptoExports::tzCryptoExport(exportName, path);
   }
-  if (module != NodeModule::Crypto) {
-    return std::nullopt;
+  if (module == NodeModule::Crypto) {
+    return CryptoExports::cryptoExport(exportName, path);
   }
 
-  return cryptoExportProblem(exportName, path);
+  return err(FeatureExportFoundError{
+      .code = FeatureExportFoundErrorCode::NOT_MINE,
+      .message = "",
+  });
 }
 
 Expr *CryptoFeature::checkModuleCall(CheckState &state, CallExpr *call, NodeModule module,
@@ -87,7 +91,9 @@ Expr *CryptoFeature::checkModuleMember(CheckState &state, MemberExpr *member) co
   return CryptoChecker(state).checkCryptoModuleMember(member);
 }
 
-bool CryptoFeature::lowers(Builtin builtin) const { return isCryptoBuiltin(builtin); }
+bool CryptoFeature::lowers(Builtin builtin) const {
+  return BuiltinGroups::isCryptoBuiltin(builtin);
+}
 
 llvm::Value *CryptoFeature::lowerCall(Lowering &lowering, CallExpr *call) const {
   return lowering.cryptoLowerer().emitCryptoCall(call);

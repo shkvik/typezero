@@ -18,17 +18,22 @@ llvm::ArrayRef<llvm::StringLiteral> ProcessFeature::typeArgFreeGlobals() const {
   return globals;
 }
 
-std::optional<std::string> ProcessFeature::exportProblem(NodeModule module,
-                                                         llvm::StringRef exportName,
-                                                         llvm::StringRef path) const {
-  if (module != NodeModule::Process) {
-    return std::nullopt;
+ProcessFeature::ResultExportFound ProcessFeature::exportFound(NodeModule module,
+                                                              llvm::StringRef exportName,
+                                                              llvm::StringRef path) const {
+  if (module == NodeModule::Process) {
+    return ProcessExports::processExport(exportName, path);
   }
 
-  return processExportProblem(exportName, path);
+  return err(FeatureExportFoundError{
+      .code = FeatureExportFoundErrorCode::NOT_MINE,
+      .message = "",
+  });
 }
 
-bool ProcessFeature::lowers(Builtin builtin) const { return isProcessBuiltin(builtin); }
+bool ProcessFeature::lowers(Builtin builtin) const {
+  return BuiltinGroups::isProcessBuiltin(builtin);
+}
 
 llvm::Value *ProcessFeature::lowerCall(Lowering &lowering, CallExpr *call) const {
   return lowering.processLowerer().emitProcessBuiltin(call);

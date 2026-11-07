@@ -47,16 +47,36 @@ llvm::StringRef ResultTypes::resultTypeName(llvm::StringRef name) const {
   return ResultTypes::findName(kResultTypes, name);
 }
 
-void ResultTypes::rejectNeverthrowImport(const ImportDecl &decl) {
-  this->state.getDiagnostics().error(
-      decl.pathLoc, "Result, ok and err are built in: remove the import from 'neverthrow'");
+ResultTypes::ResultImportSource ResultTypes::importSource(const ImportDecl &decl) {
+  if (decl.path == "neverthrow") {
+    std::string message = ErrorTextResultType::neverthrow();
+
+    return err(ResultTypesImportSourceError{
+        .code = ResultTypesImportSourceErrorCode::NEVERTHROW_IMPORT,
+        .message = message,
+    });
+  }
+
+  return ok(&decl);
+}
+
+ResultTypes::ResultTypeArgsPair ResultTypes::resultTypeArgs(const TypeRef &ref) {
+  if (ref.args.size() != 2) {
+    std::string message = ErrorTextResultType::typeArgs(ref.name);
+
+    return err(ResultTypesResultTypeArgsError{
+        .code = ResultTypesResultTypeArgsErrorCode::NOT_TWO_TYPE_ARGUMENTS,
+        .message = message,
+    });
+  }
+
+  return ok(&ref);
 }
 
 const Type *ResultTypes::resolveResultType(const TypeRef &ref, llvm::StringRef name) {
-  if (ref.args.size() != 2) {
-    this->state.getDiagnostics().error(
-        ref.loc, "'" + ref.name + "' takes two type arguments, the value and the error, e.g. '" +
-                     ref.name + "<int, string>'");
+  ResultTypeArgsPair args = ResultTypes::resultTypeArgs(ref);
+  if (args.isErr()) {
+    this->state.getDiagnostics().error(ref.loc, args.error().message);
     return Type::error();
   }
   auto half = [&](const TypeRef &arg) -> const Type * {

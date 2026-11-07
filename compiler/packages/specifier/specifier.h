@@ -5,9 +5,12 @@
 
 namespace tz::pkg {
 
-bool splitPackageSpecifier(llvm::StringRef specifier, std::string &name, std::string &subpath);
-
-bool splitJsrImport(llvm::StringRef specifier, std::string &package, std::string &source,
-                    std::string &subpath);
+class Specifier {
+public:
+  static bool splitJsrImport(llvm::StringRef specifier, std::string &package, std::string &source,
+                             std::string &subpath);
+  static bool splitPackageSpecifier(llvm::StringRef specifier, std::string &name,
+                                    std::string &subpath);
+};
 
 }

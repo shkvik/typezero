@@ -5,6 +5,9 @@
 
 namespace tz::pkg {
 
-int usage(const llvm::Twine &message, llvm::StringRef synopsis);
+class CommandUsage {
+public:
+  static int usage(const llvm::Twine &message, llvm::StringRef synopsis);
+};
 
 }

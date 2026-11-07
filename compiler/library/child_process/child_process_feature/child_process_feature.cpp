@@ -12,14 +12,17 @@ void ChildProcessFeature::declare(CheckState &state) const {
   ChildErrorTypes(state).declare();
 }
 
-std::optional<std::string> ChildProcessFeature::exportProblem(NodeModule module,
-                                                              llvm::StringRef exportName,
-                                                              llvm::StringRef path) const {
-  if (module != NodeModule::ChildProcess) {
-    return std::nullopt;
+ChildProcessFeature::ResultExportFound
+ChildProcessFeature::exportFound(NodeModule module, llvm::StringRef exportName,
+                                 llvm::StringRef path) const {
+  if (module == NodeModule::ChildProcess) {
+    return ChildExports::childExport(exportName, path);
   }
 
-  return childExportProblem(exportName, path);
+  return err(FeatureExportFoundError{
+      .code = FeatureExportFoundErrorCode::NOT_MINE,
+      .message = "",
+  });
 }
 
 Expr *ChildProcessFeature::checkModuleCall(CheckState &state, CallExpr *call, NodeModule module,
@@ -32,7 +35,9 @@ Expr *ChildProcessFeature::checkModuleCall(CheckState &state, CallExpr *call, No
   return ChildChecker(state).checkChildCall(call, fn, loc);
 }
 
-bool ChildProcessFeature::lowers(Builtin builtin) const { return isChildBuiltin(builtin); }
+bool ChildProcessFeature::lowers(Builtin builtin) const {
+  return BuiltinGroups::isChildBuiltin(builtin);
+}
 
 llvm::Value *ChildProcessFeature::lowerCall(Lowering &lowering, CallExpr *call) const {
   return lowering.childLowerer().emitChildBuiltin(call);

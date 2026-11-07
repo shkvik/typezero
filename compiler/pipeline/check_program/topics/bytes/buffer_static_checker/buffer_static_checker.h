@@ -1,6 +1,8 @@
 #pragma once
 
 #include "compiler/pipeline/check_program/check_state/check_state.h"
+#include "compiler/pipeline/check_program/topics/bytes/buffer_static_checker/buffer_static_checker_errors.h"
+#include "compiler/result/result/result.h"
 
 namespace tz {
 
@@ -14,9 +16,12 @@ public:
   Expr *checkEmbedBytes(CallExpr *call, NameExpr *name);
 
 private:
-  static std::string utf8(const std::u16string &text);
+  using ResultSourceElement = Result<const Type *, BufferStaticCheckerSourceElementError>;
+  using ResultConcatSources = Result<const Type *, BufferStaticCheckerConcatSourcesError>;
+
+  static ResultConcatSources concatSources(const Type *list, const Type *buffer);
+  static ResultSourceElement sourceElement(const Type *from, llvm::StringRef what);
   static std::optional<std::u16string> literalText(const Expr *e);
-  static std::string rangeText(int64_t lo, int64_t hi);
 
   CheckState &state;
 };

@@ -5,6 +5,9 @@
 
 namespace tz {
 
-const Type *writtenLiteral(const Expr *expr);
+class UnionCheckHelpers {
+public:
+  static const Type *writtenLiteral(const Expr *expr);
+};
 
 }

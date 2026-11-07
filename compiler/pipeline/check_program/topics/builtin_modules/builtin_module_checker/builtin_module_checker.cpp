@@ -67,47 +67,6 @@ std::optional<NodeModule> BuiltinModuleChecker::moduleOf(llvm::StringRef path) {
   return std::nullopt;
 }
 
-std::string BuiltinModuleChecker::missingModule(llvm::StringRef path) {
-  std::string quoted = "'" + path.str() + "'";
-  if (path.starts_with("tz:")) {
-    if (path == "tz:string") {
-      return "built-in module " + quoted + " is not supported yet";
-    }
-    return "there is no built-in module " + quoted +
-           "; tz has 'tz:io', 'tz:fs', 'tz:crypto', 'tz:http', 'tz:http2' and 'tz:sync'";
-  }
-  llvm::StringRef bare = path;
-  bare.consume_front("node:");
-  if (!isBuiltinModule(bare) && !path.starts_with("node:sea") && path != "node:sqlite" &&
-      !path.starts_with("node:test")) {
-    return "there is no built-in module " + quoted;
-  }
-  std::string message = "built-in module " + quoted + " is not supported yet";
-  if (bare == "timers") {
-    return message + "; setTimeout and the other timers are global, as in Node: drop the import";
-  }
-  if (bare == "http" || bare == "https") {
-    return message + " (docs/net.md, section 7); serve requests with 'Server' from \"tz:http\", "
-                     "and make them with the global 'fetch'";
-  }
-  if (bare == "http2") {
-    return message + " (docs/net.md, section 7); HTTP/2 streams are in \"tz:http2\": "
-                     "'Http2Server' and 'Http2Client'";
-  }
-  static const llvm::StringLiteral network[] = {"tls", "dns", "dns/promises"};
-  if (llvm::is_contained(network, bare)) {
-    return message + " (docs/net.md, section 7)";
-  }
-  if (bare == "events") {
-    return message + " (docs/events.md)";
-  }
-  if (bare.starts_with("stream")) {
-    return message + " (docs/streams.md)";
-  }
-
-  return message;
-}
-
 llvm::StringRef BuiltinModuleChecker::typicalName(NodeModule module) {
   switch (module) {
   case NodeModule::Fs:
@@ -149,12 +108,30 @@ bool BuiltinModuleChecker::isPathModule(NodeModule module) {
          module == NodeModule::PathWin32;
 }
 
-std::string BuiltinModuleChecker::moduleProblem(llvm::StringRef path) {
-  if (BuiltinModuleChecker::moduleOf(path)) {
-    return "";
+BuiltinModuleChecker::ResultKnownModule BuiltinModuleChecker::knownModule(llvm::StringRef path) {
+  if (std::optional<NodeModule> which = BuiltinModuleChecker::moduleOf(path)) {
+    return ok(*which);
   }
+  llvm::StringRef bare = path;
+  bare.consume_front("node:");
+  bool known = path.starts_with("tz:")
+                   ? path == "tz:string"
+                   : BuiltinModulePaths::isBuiltinModule(bare) || path.starts_with("node:sea") ||
+                         path == "node:sqlite" || path.starts_with("node:test");
+  if (!known) {
+    std::string message = ErrorTextBuiltinModule::none(path);
 
-  return BuiltinModuleChecker::missingModule(path);
+    return err(BuiltinModuleCheckerKnownModuleError{
+        .code = BuiltinModuleCheckerKnownModuleErrorCode::NO_MODULE,
+        .message = message,
+    });
+  }
+  std::string message = ErrorTextBuiltinModule::notYet(path);
+
+  return err(BuiltinModuleCheckerKnownModuleError{
+      .code = BuiltinModuleCheckerKnownModuleErrorCode::NOT_YET,
+      .message = message,
+  });
 }
 
 MemberExpr *BuiltinModuleChecker::processMember(AstContext &ctx, llvm::SMLoc loc,
@@ -167,18 +144,28 @@ MemberExpr *BuiltinModuleChecker::processMember(AstContext &ctx, llvm::SMLoc loc
 BuiltinModuleChecker::BuiltinModuleChecker(CheckState &owner)
     : state(owner) {}
 
-std::string BuiltinModuleChecker::exportProblem(NodeModule module, llvm::StringRef name,
-                                                llvm::StringRef path) const {
+BuiltinModuleChecker::ResultExportFound
+BuiltinModuleChecker::exportFound(NodeModule module, llvm::StringRef name,
+                                  llvm::StringRef path) const {
   if (BuiltinModuleTypes(this->state).exported(module, name)) {
-    return "";
+    return ok(module);
   }
   for (const Feature *feature : this->state.getFeatures().all()) {
-    if (std::optional<std::string> problem = feature->exportProblem(module, name, path)) {
-      return *problem;
+    Feature::ResultExportFound found = feature->exportFound(module, name, path);
+    if (found.isOk()) {
+      return ok(module);
+    }
+    if (found.error().code != FeatureExportFoundErrorCode::NOT_MINE) {
+      std::string message = found.error().message;
+
+      return err(BuiltinModuleCheckerExportFoundError{
+          .code = BuiltinModuleCheckerExportFoundErrorCode::NOT_EXPORTED,
+          .message = message,
+      });
     }
   }
 
-  return "";
+  return ok(module);
 }
 
 void BuiltinModuleChecker::importBuiltinModule(Module *module, const ImportDecl &decl) {
@@ -195,15 +182,15 @@ void BuiltinModuleChecker::importBuiltinModule(Module *module, const ImportDecl 
   }
   auto bind = [&](llvm::StringRef alias, llvm::SMLoc loc, NodeName n, llvm::StringRef name) {
     if (auto own = here.declared.find(alias); own != here.declared.end()) {
-      this->state.getDiagnostics().error(
-          loc, "import '" + alias + "' conflicts with the declaration of '" + alias +
-                   "' in this file; import it under another name, e.g. 'import { " + name + " as " +
-                   name + "2 } from \"" + decl.path + "\"'");
-      this->state.getDiagnostics().note(own->second, "'" + alias + "' is declared here");
+      std::string message = ErrorTextNodeImport::conflict(alias, name, decl.path);
+      this->state.getDiagnostics().error(loc, message);
+      std::string declared = ErrorTextNodeImport::declared(alias);
+      this->state.getDiagnostics().note(own->second, declared);
       return;
     }
     if (here.imports.count(alias) || !here.nodeNames.try_emplace(alias, n).second) {
-      this->state.getDiagnostics().error(loc, "duplicate import of '" + alias + "'");
+      std::string message = ErrorTextNodeImport::duplicate(alias);
+      this->state.getDiagnostics().error(loc, message);
       return;
     }
   };
@@ -219,41 +206,24 @@ void BuiltinModuleChecker::importBuiltinModule(Module *module, const ImportDecl 
         }
       });
     }
-    std::string names;
-    for (llvm::StringRef name : used) {
-      names += (names.empty() ? "" : ", ") + name.str();
-    }
-    std::string form = decl.wholeIsDefault
-                           ? "default imports are not supported: there is no 'export default'"
-                           : "'import * as' is not supported";
-    if (*which == NodeModule::Process && decl.whole == "process") {
-      this->state.getDiagnostics().error(
-          decl.wholeLoc, form + "; 'process' is global, as in Node, so the import is "
-                                "not needed: drop it");
-    } else if (*which == NodeModule::Buffer) {
-      this->state.getDiagnostics().error(decl.wholeLoc,
-                                         form +
-                                             "; 'Buffer' is global, as in Node: import it as "
-                                             "'import { Buffer } from \"" +
-                                             decl.path + "\"', or drop the import");
-    } else if (!names.empty()) {
-      this->state.getDiagnostics().error(decl.wholeLoc,
-                                         form + "; import the names this file uses: 'import { " +
-                                             names + " } from \"" + decl.path + "\"'");
-    } else {
-      this->state.getDiagnostics().error(decl.wholeLoc,
-                                         form + "; import the names you need, e.g. 'import { " +
-                                             BuiltinModuleChecker::typicalName(*which).str() +
-                                             " } from \"" + decl.path + "\"'");
-    }
+    std::string names = ErrorTextNodeImport::list(used);
+    std::string form = ErrorTextNodeImport::form(decl.wholeIsDefault);
+    llvm::StringRef typical = BuiltinModuleChecker::typicalName(*which);
+    std::string message = *which == NodeModule::Process && decl.whole == "process"
+                              ? ErrorTextNodeImport::process(form)
+                          : *which == NodeModule::Buffer
+                              ? ErrorTextNodeImport::buffer(form, decl.path)
+                          : !names.empty() ? ErrorTextNodeImport::uses(form, names, decl.path)
+                                           : ErrorTextNodeImport::typical(form, typical, decl.path);
+    this->state.getDiagnostics().error(decl.wholeLoc, message);
     bind(decl.whole, decl.wholeLoc, NodeName{*which, {}},
          BuiltinModuleChecker::typicalName(*which));
   }
 
   for (const ModuleName &name : decl.names) {
-    std::string problem = this->exportProblem(*which, name.name, decl.path);
-    if (!problem.empty()) {
-      this->state.getDiagnostics().error(name.loc, problem);
+    ResultExportFound found = this->exportFound(*which, name.name, decl.path);
+    if (found.isErr()) {
+      this->state.getDiagnostics().error(name.loc, found.error().message);
       here.badImports.insert(name.as);
       continue;
     }
@@ -309,14 +279,12 @@ Expr *BuiltinModuleChecker::processAlias(Expr *expr) {
 
 Expr *BuiltinModuleChecker::nodeValue(const NodeName &n, Expr *expr) {
   expr->type = Type::error();
-  std::string label = moduleLabel(n.module);
+  std::string label = NodeCheckHelpers::moduleLabel(n.module);
   if (n.name.empty()) {
-    this->state.getDiagnostics().error(
-        expr->loc(), "this is not a value: the functions of '" + label +
-                         "' are used by their names, e.g. '" +
-                         (BuiltinModuleChecker::isPathModule(n.module)
-                              ? "posix.join(a, b)'"
-                              : BuiltinModuleChecker::typicalName(n.module).str() + "(...)'"));
+    std::string message =
+        ErrorTextNodeValue::notValue(label, BuiltinModuleChecker::isPathModule(n.module),
+                                     BuiltinModuleChecker::typicalName(n.module));
+    this->state.getDiagnostics().error(expr->loc(), message);
     return expr;
   }
   for (const Feature *feature : this->state.getFeatures().all()) {
@@ -324,11 +292,8 @@ Expr *BuiltinModuleChecker::nodeValue(const NodeName &n, Expr *expr) {
       return value;
     }
   }
-  this->state.getDiagnostics().error(
-      expr->loc(), "'" + n.name + "' of '" + label +
-                       "' can only be called; where a function is expected, pass an "
-                       "arrow that calls it, e.g. 'x => " +
-                       n.name + "(x)'");
+  std::string message = ErrorTextNodeValue::onlyCalled(n.name, label);
+  this->state.getDiagnostics().error(expr->loc(), message);
 
   return expr;
 }
@@ -363,9 +328,10 @@ Expr *BuiltinModuleChecker::checkNodeMember(MemberExpr *member) {
   if (!n->name.empty()) {
     return nullptr;
   }
-  std::string problem = this->exportProblem(n->module, member->name, moduleLabel(n->module));
-  if (!problem.empty()) {
-    this->state.getDiagnostics().error(member->loc(), problem);
+  ResultExportFound found =
+      this->exportFound(n->module, member->name, NodeCheckHelpers::moduleLabel(n->module));
+  if (found.isErr()) {
+    this->state.getDiagnostics().error(member->loc(), found.error().message);
     member->type = Type::error();
     return member;
   }
@@ -397,9 +363,9 @@ Expr *BuiltinModuleChecker::checkNodeCall(CallExpr *call, const Type *expected) 
       return nullptr;
     }
     if (n->name.empty()) {
-      this->state.getDiagnostics().error(
-          name->loc(), "'" + name->name + "' is not a function: call the functions of '" +
-                           moduleLabel(n->module) + "' by their names");
+      std::string message =
+          ErrorTextNodeValue::notFunc(name->name, NodeCheckHelpers::moduleLabel(n->module));
+      this->state.getDiagnostics().error(name->loc(), message);
       for (Expr *&arg : call->args) {
         arg = ExprChecker(this->state).checkExpr(arg);
       }
@@ -432,9 +398,10 @@ Expr *BuiltinModuleChecker::checkNodeCall(CallExpr *call, const Type *expected) 
     if (!n->name.empty()) {
       return nullptr;
     }
-    std::string problem = this->exportProblem(n->module, member->name, moduleLabel(n->module));
-    if (!problem.empty()) {
-      this->state.getDiagnostics().error(member->loc(), problem);
+    ResultExportFound found =
+        this->exportFound(n->module, member->name, NodeCheckHelpers::moduleLabel(n->module));
+    if (found.isErr()) {
+      this->state.getDiagnostics().error(member->loc(), found.error().message);
       for (Expr *&arg : call->args) {
         arg = ExprChecker(this->state).checkExpr(arg);
       }

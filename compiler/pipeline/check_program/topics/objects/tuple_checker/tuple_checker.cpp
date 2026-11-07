@@ -113,7 +113,7 @@ TupleChecker::ResultTupleMethod TupleChecker::checkTupleMethod(CallExpr *call, M
   const Type *type = member->object->type;
   llvm::StringRef name = member->name;
   std::string text = "t";
-  if (auto *object = dyn_cast<NameExpr>(unnarrowed(member->object))) {
+  if (auto *object = dyn_cast<NameExpr>(ObjectCheckHelpers::unnarrowed(member->object))) {
     text = object->name.str();
   }
   static const char *const resizing[] = {"push", "pop", "shift", "unshift", "splice"};

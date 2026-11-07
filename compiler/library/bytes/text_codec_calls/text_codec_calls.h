@@ -9,6 +9,9 @@ public:
   using BytesCallSite::BytesCallSite;
 
   llvm::Value *emit();
+
+private:
+  static llvm::Constant *cjkEncodingOf(llvm::Module &module, llvm::StringRef name);
 };
 
 }

@@ -4,12 +4,6 @@
 
 namespace tz {
 
-static bool isIdentStart(char c) {
-  return llvm::isAlpha(c) || c == '_' || c == '$' || static_cast<unsigned char>(c) >= 0x80;
-}
-
-static bool isIdentChar(char c) { return isIdentStart(c) || llvm::isDigit(c); }
-
 Lexer::Lexer(llvm::StringRef source, Diagnostics &diags)
     : cur_(source.begin()), end_(source.end()), diags_(diags) {
   if (source.starts_with("\xEF\xBB\xBF")) {
@@ -20,6 +14,14 @@ Lexer::Lexer(llvm::StringRef source, Diagnostics &diags)
       ++cur_;
     }
   }
+}
+
+bool Lexer::isIdentStart(char c) {
+  return llvm::isAlpha(c) || c == '_' || c == '$' || static_cast<unsigned char>(c) >= 0x80;
+}
+
+bool Lexer::isIdentChar(char c) {
+  return Lexer::isIdentStart(c) || llvm::isDigit(c);
 }
 
 bool Lexer::match(char c) {
@@ -231,7 +233,7 @@ Token Lexer::next() {
   case '@':
     return make(Tok::At, start, nl);
   case '#':
-    if (isIdentStart(peek())) {
+    if (Lexer::isIdentStart(peek())) {
       Token tok = lexIdentifier(start + 1, nl);
       tok.kind = Tok::Identifier;
       tok.hash = true;
@@ -246,7 +248,7 @@ Token Lexer::next() {
   if (llvm::isDigit(c)) {
     return lexNumber(start, nl);
   }
-  if (isIdentStart(c)) {
+  if (Lexer::isIdentStart(c)) {
     return lexIdentifier(start, nl);
   }
 
@@ -275,10 +277,11 @@ Token Lexer::lexNumber(const char *start, bool newlineBefore) {
     while (llvm::isDigit(peek()) || peek() == '_') {
       ++cur_;
     }
-    if (!isFloat && peek() == '.' && isIdentStart(peek(1)) && peek(1) != 'e' && peek(1) != 'E') {
+    if (!isFloat && peek() == '.' && Lexer::isIdentStart(peek(1)) && peek(1) != 'e' &&
+        peek(1) != 'E') {
       llvm::StringRef number(start, static_cast<size_t>(cur_ - start));
       const char *name = cur_ + 1, *nameEnd = name;
-      while (nameEnd < end_ && isIdentChar(*nameEnd)) {
+      while (nameEnd < end_ && Lexer::isIdentChar(*nameEnd)) {
         ++nameEnd;
       }
       llvm::StringRef property(name, static_cast<size_t>(nameEnd - name));
@@ -307,7 +310,7 @@ Token Lexer::lexNumber(const char *start, bool newlineBefore) {
     }
   }
 
-  if (peek() == 'n' && !isIdentChar(peek(1))) {
+  if (peek() == 'n' && !Lexer::isIdentChar(peek(1))) {
     Token tok = make(isFloat ? Tok::FloatLiteral : Tok::IntLiteral, start, newlineBefore);
     diags_.error(llvm::SMLoc::getFromPointer(start),
                  "'" + tok.text +
@@ -317,10 +320,10 @@ Token Lexer::lexNumber(const char *start, bool newlineBefore) {
     ++cur_;
     return tok;
   }
-  if (isIdentStart(peek())) {
+  if (Lexer::isIdentStart(peek())) {
     diags_.error(llvm::SMLoc::getFromPointer(cur_),
                  "an identifier cannot directly follow a number");
-    while (isIdentChar(peek())) {
+    while (Lexer::isIdentChar(peek())) {
       ++cur_;
     }
   }
@@ -393,7 +396,7 @@ Token Lexer::regex(const char *start, bool newlineBefore) {
       break;
     }
   }
-  while (cur_ < end_ && isIdentChar(*cur_)) {
+  while (cur_ < end_ && Lexer::isIdentChar(*cur_)) {
     ++cur_;
   }
 
@@ -401,7 +404,7 @@ Token Lexer::regex(const char *start, bool newlineBefore) {
 }
 
 Token Lexer::lexIdentifier(const char *start, bool newlineBefore) {
-  while (isIdentChar(peek())) {
+  while (Lexer::isIdentChar(peek())) {
     ++cur_;
   }
   llvm::StringRef text(start, cur_ - start);

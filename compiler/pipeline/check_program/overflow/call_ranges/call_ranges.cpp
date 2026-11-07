@@ -59,12 +59,12 @@ bool CallRanges::mergeSummaries(bool narrowing) {
       note(check_.slots().mergeSlot(entry.second[i], slot, type, narrowing), &check_.cur_.params,
            fn, "");
       Num &num = entry.second[i].val.num;
-      if (dangerous(num.worst())) {
+      if (ValueRange::dangerous(num.worst())) {
         if (const Reason *why = check_.slots().paramReason(fn, i)) {
-          if (dangerous(num.loOrigin)) {
+          if (ValueRange::dangerous(num.loOrigin)) {
             num.loWhy = why;
           }
-          if (dangerous(num.hiOrigin)) {
+          if (ValueRange::dangerous(num.hiOrigin)) {
             num.hiWhy = why;
           }
         }
@@ -118,8 +118,8 @@ bool CallRanges::mergeSummaries(bool narrowing) {
           a.resize(b.size());
         }
         for (size_t i = 0; i < b.size(); ++i) {
-          Num joined = join(a[i], b[i]);
-          if (!sameNum(joined, a[i])) {
+          Num joined = ValueRange::join(a[i], b[i]);
+          if (!ValueRange::sameNum(joined, a[i])) {
             a[i] = joined;
             grew = true;
           }
@@ -186,7 +186,7 @@ Val CallRanges::paramValue(const FunctionDecl *fn, size_t index) {
     known = true;
   }
   if (!known || check_.unknownCallers_.contains(fn)) {
-    v = join(v, check_.overflowWarnings().trusted(type));
+    v = ValueRange::join(v, check_.overflowWarnings().trusted(type));
   }
 
   return check_.overflowWarnings().fitVal(v, type);
@@ -201,12 +201,12 @@ void CallRanges::analyzeFunction(const FunctionDecl *fn) {
   State st;
   for (size_t i = 0; i < fn->params.size(); ++i) {
     const Param &p = fn->params[i];
-    if (!p.sym || !tracked(p.sym->type)) {
+    if (!p.sym || !ValueRange::tracked(p.sym->type)) {
       continue;
     }
     Val v = paramValue(fn, i);
     if (p.defaultValue()) {
-      v = join(v, check_.evaluator().eval(p.defaultValue(), st));
+      v = ValueRange::join(v, check_.evaluator().eval(p.defaultValue(), st));
     }
     check_.slots().writeVar(p.sym, v, st);
   }
@@ -231,10 +231,12 @@ void CallRanges::passArgs(const FunctionDecl *fn, const CallExpr *call, llvm::Ar
     if (p.rest()) {
       Val element;
       for (size_t k = i; k < args.size(); ++k) {
-        element = join(element, call && call->spreads(k) && args[k].elem ? *args[k].elem : args[k]);
+        element = ValueRange::join(element, call && call->spreads(k) && args[k].elem ? *args[k].elem
+                                                                                     : args[k]);
       }
-      v.len = spread ? someLength() : exactly(double(args.size() > i ? args.size() - i : 0));
-      v.elem = share(element);
+      v.len = spread ? ValueRange::someLength()
+                     : ValueRange::exactly(double(args.size() > i ? args.size() - i : 0));
+      v.elem = ValueRange::share(element);
     } else if (i < args.size() && !spread) {
       v = args[i];
     } else if (spread) {
@@ -242,10 +244,10 @@ void CallRanges::passArgs(const FunctionDecl *fn, const CallExpr *call, llvm::Ar
     } else {
       continue;
     }
-    slots[i].val = join(slots[i].val, v);
-    if (dangerous(v.num.worst()) && call) {
+    slots[i].val = ValueRange::join(slots[i].val, v);
+    if (ValueRange::dangerous(v.num.worst()) && call) {
       check_.next_.dangerousCalls[{fn, i}].push_back(
-          {call->loc(), dangerous(v.num.hiOrigin) ? v.num.hiWhy : v.num.loWhy});
+          {call->loc(), ValueRange::dangerous(v.num.hiOrigin) ? v.num.hiWhy : v.num.loWhy});
     }
   }
 }
@@ -262,7 +264,7 @@ void CallRanges::calledUserCode(State &st) {
   for (auto &entry : st.vars) {
     auto info = check_.vars_.find(entry.first);
     if (info != check_.vars_.end() && info->second.aliased && !entry.second.len.empty()) {
-      entry.second.len = someLength();
+      entry.second.len = ValueRange::someLength();
     }
   }
 }
@@ -317,14 +319,16 @@ Val CallRanges::evalNew(const NewExpr *ne, State &st) {
   const Type *type = ne->type ? ne->type->nonOptional() : nullptr;
   if (type && type->isArray()) {
     Val v;
-    v.len = args.empty() || args[0].num.empty() ? exactly(0) : narrowTo(args[0].num, 0, kLengthMax);
+    v.len = args.empty() || args[0].num.empty() ? ValueRange::exactly(0)
+                                                : ValueRange::narrowTo(args[0].num, 0, kLengthMax);
     const Type *element = type->inner();
-    v.elem = share(isNumberType(element) ? numVal(exactly(0))
-                   : hasLength(element)  ? lengthVal(exactly(0))
-                                         : Val());
+    v.elem = ValueRange::share(
+        ValueRange::isNumberType(element) ? ValueRange::numVal(ValueRange::exactly(0))
+        : ValueRange::hasLength(element)  ? ValueRange::lengthVal(ValueRange::exactly(0))
+                                          : Val());
     return v;
   }
-  if (type && type->isDict() && !args.empty() && isNumberType(type->valueType())) {
+  if (type && type->isDict() && !args.empty() && ValueRange::isNumberType(type->valueType())) {
     check_.contribute(check_.next_.dicts[type],
                       check_.overflowWarnings().trusted(type->valueType()));
   }
@@ -337,13 +341,13 @@ Val CallRanges::runCallback(const FunctionDecl *fn, llvm::ArrayRef<Val> args, si
   OverflowCheck::Frame frame;
   frame.fn = fn;
   frame.callback = true;
-  frame.returned = deadState();
+  frame.returned = ValueRange::deadState();
   frame.targets = check_.targets_.size();
   frame.quiet = check_.quiet_;
   check_.frames_.push_back(std::move(frame));
   for (size_t i = first; i < fn->params.size(); ++i) {
     const VarSymbol *p = fn->params[i].sym;
-    if (!p || !tracked(p->type)) {
+    if (!p || !ValueRange::tracked(p->type)) {
       continue;
     }
     check_.slots().writeVar(
@@ -353,7 +357,7 @@ Val CallRanges::runCallback(const FunctionDecl *fn, llvm::ArrayRef<Val> args, si
   check_.executor().exec(fn->body, st);
   OverflowCheck::Frame done = std::move(check_.frames_.back());
   check_.frames_.pop_back();
-  st = join(st, done.returned);
+  st = ValueRange::join(st, done.returned);
 
   return done.result;
 }
@@ -361,7 +365,7 @@ Val CallRanges::runCallback(const FunctionDecl *fn, llvm::ArrayRef<Val> args, si
 Val CallRanges::evalCallback(const CallExpr *call, State &st) {
   auto *member = dyn_cast<MemberExpr>(call->callee);
   const Expr *receiver = member ? member->object : nullptr;
-  size_t at = *callbackArg(call->builtin());
+  size_t at = *OverflowHelpers::callbackArg(call->builtin());
   if (call->builtin() == Builtin::ArrayFrom) {
     receiver = call->args.empty() ? nullptr : call->args[0];
   }
@@ -389,20 +393,21 @@ Val CallRanges::evalCallback(const CallExpr *call, State &st) {
     } else {
       element = check_.overflowWarnings().trusted(value);
     }
-    passes = someLength();
+    passes = ValueRange::someLength();
   } else if (arrayType && arrayType->isArray()) {
     element = check_.slots().elementsOf(receiver, array, arrayType);
-    passes = array.len.empty() ? someLength() : array.len;
+    passes = array.len.empty() ? ValueRange::someLength() : array.len;
   } else if (arrayType && arrayType->isString()) {
-    element = lengthVal(range(1, 2));
+    element = ValueRange::lengthVal(ValueRange::range(1, 2));
     passes = array.len;
   } else {
     element = check_.overflowWarnings().trusted(nullptr);
   }
-  Val indexVal = numVal(
-      passes.empty() ? make({0}, {kLengthMax - 1, Origin::Trusted})
-                     : make({0}, {std::max(passes.hi - 1, 0.0), passes.hiOrigin, passes.hiWhy}));
-  const Expr *arg = at < call->args.size() ? stripCasts(call->args[at]) : nullptr;
+  Val indexVal = ValueRange::numVal(
+      passes.empty()
+          ? ValueRange::make({0}, {kLengthMax - 1, Origin::Trusted})
+          : ValueRange::make({0}, {std::max(passes.hi - 1, 0.0), passes.hiOrigin, passes.hiWhy}));
+  const Expr *arg = at < call->args.size() ? OverflowHelpers::stripCasts(call->args[at]) : nullptr;
   auto *fe = dyn_cast_or_null<FunctionExpr>(arg);
   if (!fe || !check_.inlined_.contains(fe->fn)) {
     const FunctionDecl *named = nullptr;
@@ -423,11 +428,11 @@ Val CallRanges::evalCallback(const CallExpr *call, State &st) {
     Val result = named ? returned(named, named->sym ? named->sym->ret : nullptr) : Val();
     if (call->builtin() == Builtin::ArrMap || call->builtin() == Builtin::ArrayFrom) {
       Val v;
-      v.len = passes.empty() ? someLength() : passes;
-      v.elem =
-          share(named ? result
-                      : check_.overflowWarnings().trusted(
-                            call->type && call->type->isArray() ? call->type->inner() : nullptr));
+      v.len = passes.empty() ? ValueRange::someLength() : passes;
+      v.elem = ValueRange::share(
+          named ? result
+                : check_.overflowWarnings().trusted(
+                      call->type && call->type->isArray() ? call->type->inner() : nullptr));
       return v;
     }
     return check_.overflowWarnings().trusted(call->type);
@@ -435,15 +440,15 @@ Val CallRanges::evalCallback(const CallExpr *call, State &st) {
   const FunctionDecl *fn = fe->fn;
   bool reduce = call->builtin() == Builtin::ArrReduce || call->builtin() == Builtin::ArrReduceRight;
   const VarSymbol *acc = reduce && !fn->params.empty() ? fn->params[0].sym : nullptr;
-  if (acc && tracked(acc->type)) {
+  if (acc && ValueRange::tracked(acc->type)) {
     check_.slots().writeVar(acc, hasInit ? init : element, st);
   }
   Val result;
   OverflowCheck::LoopSpec spec;
   spec.loc = call->loc();
   spec.exitAtHead = true;
-  spec.passes = passes.empty() ? passes : add(passes, exactly(1));
-  spec.simple = !containsLoop(fn->body);
+  spec.passes = passes.empty() ? passes : ValueRange::add(passes, ValueRange::exactly(1));
+  spec.simple = !OverflowHelpers::containsLoop(fn->body);
   spec.body = [&, fn, acc](State &in) {
     std::vector<Val> args;
     size_t first = 0;
@@ -461,7 +466,7 @@ Val CallRanges::evalCallback(const CallExpr *call, State &st) {
       first = 1;
     }
     Val r = runCallback(fn, args, first, in);
-    if (acc && tracked(acc->type)) {
+    if (acc && ValueRange::tracked(acc->type)) {
       check_.slots().writeVar(acc, r, in);
     }
     result = r;
@@ -471,22 +476,22 @@ Val CallRanges::evalCallback(const CallExpr *call, State &st) {
     case Builtin::ArrMap:
     case Builtin::ArrayFrom: {
       Val v;
-      v.len = passes.empty() ? someLength() : passes;
-      v.elem = share(result);
+      v.len = passes.empty() ? ValueRange::someLength() : passes;
+      v.elem = ValueRange::share(result);
       return v;
     }
     case Builtin::ArrFilter: {
       Val v;
-      v.len = passes.empty() ? someLength() : make({0}, passes.high());
-      v.elem = share(element);
+      v.len = passes.empty() ? ValueRange::someLength() : ValueRange::make({0}, passes.high());
+      v.elem = ValueRange::share(element);
       return v;
     }
     case Builtin::ArrFlatMap: {
       Val v;
-      v.len = someLength();
+      v.len = ValueRange::someLength();
       v.elem = result.elem
                    ? result.elem
-                   : share(check_.overflowWarnings().trusted(
+                   : ValueRange::share(check_.overflowWarnings().trusted(
                          call->type && call->type->isArray() ? call->type->inner() : nullptr));
       return v;
     }
@@ -503,9 +508,10 @@ Val CallRanges::evalCallback(const CallExpr *call, State &st) {
       return check_.overflowWarnings().fitVal(element, call->type);
     case Builtin::ArrFindIndex:
     case Builtin::ArrFindLastIndex:
-      return numVal(passes.empty() ? make({-1}, {kLengthMax - 1, Origin::Trusted})
-                                   : make({-1}, {std::max(passes.hi - 1, -1.0), passes.hiOrigin,
-                                                 passes.hiWhy}));
+      return ValueRange::numVal(passes.empty()
+                                    ? ValueRange::make({-1}, {kLengthMax - 1, Origin::Trusted})
+                                    : ValueRange::make({-1}, {std::max(passes.hi - 1, -1.0),
+                                                              passes.hiOrigin, passes.hiWhy}));
     case Builtin::ArrSortWith:
       return array;
     default:

@@ -22,8 +22,6 @@ using llvm::isa;
 
 namespace tz {
 
-const Type *literalType(const Expr *value);
-
 ClosureChecker::ClosureChecker(CheckState &owner)
     : state(owner) {}
 
@@ -205,7 +203,7 @@ Expr *ClosureChecker::checkFunctionExpr(FunctionExpr *fe, const Signature *sig) 
       if (matters.isErr()) {
         this->state.getDiagnostics().error(param.defaultValue()->loc(), matters.error().message);
       }
-    } else if (param.defaultValue() && (type = literalType(param.defaultValue()))) {
+    } else if (param.defaultValue() && (type = SharedHelpers::literalType(param.defaultValue()))) {
       passed = Type::optional(type);
     } else {
       ResultParamTypeKnown known = ClosureChecker::paramTypeKnown(param);

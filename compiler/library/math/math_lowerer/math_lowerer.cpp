@@ -49,7 +49,7 @@ llvm::Value *MathLowerer::emitMathCall(CallExpr *call) {
   llvm::Type *f64 = this->lowering.builder_.getDoubleTy();
   llvm::Value *x = args.empty() ? nullptr : args[0];
 
-  if (isRoundingBuiltin(call->builtin())) {
+  if (BuiltinGroups::isRoundingBuiltin(call->builtin())) {
     const Type *from = call->args[0]->type;
     if (from->isFloat()) {
       switch (call->builtin()) {

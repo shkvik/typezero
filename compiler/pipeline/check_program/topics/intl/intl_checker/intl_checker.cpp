@@ -1,10 +1,12 @@
 #include "compiler/pipeline/check_program/topics/intl/intl_checker/intl_checker.h"
 #include "compiler/library/intl/intl_check_helpers/intl_check_helpers.h"
 #include "compiler/load/library_modules/library_modules.h"
+#include "compiler/load/to_utf8/to_utf8.h"
 #include "compiler/pipeline/check_program/check/top_level_checker/top_level_checker.h"
 #include "compiler/pipeline/check_program/declare/class_declarer/class_declarer.h"
 #include "compiler/pipeline/check_program/scopes/scopes.h"
 #include "compiler/pipeline/check_program/topics/date/date_format_checker/date_format_checker.h"
+#include "compiler/pipeline/check_program/topics/date/date_format_checker/date_format_checker_errors.h"
 #include "compiler/pipeline/check_program/topics/expr/argument_checker/argument_checker.h"
 #include "compiler/pipeline/check_program/topics/expr/call_checker/call_checker.h"
 #include "compiler/pipeline/check_program/topics/expr/expr_checker/expr_checker.h"
@@ -26,13 +28,11 @@ using llvm::isa;
 
 namespace tz {
 
-std::string IntlChecker::utf8(const std::u16string &text) {
-  std::string out;
-  llvm::convertUTF16ToUTF8String(
-      llvm::ArrayRef<llvm::UTF16>(reinterpret_cast<const llvm::UTF16 *>(text.data()), text.size()),
-      out);
+Expr *IntlChecker::kindArg(AstContext &ctx, llvm::SMLoc loc, int kind) {
+  auto *lit = ctx.make<IntLitExpr>(loc, uint64_t(kind));
+  lit->type = Type::intTy();
 
-  return out;
+  return lit;
 }
 
 std::optional<std::u16string> IntlChecker::literalText(const Expr *e) {
@@ -47,7 +47,7 @@ std::optional<std::u16string> IntlChecker::literalText(const Expr *e) {
 }
 
 const IntlService *IntlChecker::serviceNamed(llvm::StringRef name) {
-  for (const IntlService &s : services()) {
+  for (const IntlService &s : IntlCheckHelpers::services()) {
     if (s.name == name) {
       return &s;
     }
@@ -108,13 +108,6 @@ const Type *IntlChecker::numberOptionType(llvm::StringRef name) {
   }
 
   return type;
-}
-
-static Expr *kindArg(AstContext &ctx, llvm::SMLoc loc, int kind) {
-  auto *lit = ctx.make<IntLitExpr>(loc, uint64_t(kind));
-  lit->type = Type::intTy();
-
-  return lit;
 }
 
 IntlChecker::IntlChecker(CheckState &owner)
@@ -234,7 +227,7 @@ const Type *IntlChecker::intlTypeNamed(llvm::StringRef name) {
       name == "UnicodeBCP47LocaleIdentifier" || name == "BCP47LanguageTag") {
     return Type::string();
   }
-  for (const IntlService &service : services()) {
+  for (const IntlService &service : IntlCheckHelpers::services()) {
     if (name == "Resolved" + service.name.str() + "Options") {
       return IntlChecker::resolvedIntlOptionsType(service.kind);
     }
@@ -281,38 +274,32 @@ Expr *IntlChecker::checkIntlNew(llvm::SMLoc loc, llvm::StringRef name, std::vect
   };
   const IntlService *service = IntlChecker::serviceNamed(name);
   if (!service) {
-    this->state.getDiagnostics().error(
-        loc, "'Intl." + name +
-                 "' is not supported yet; Intl has DateTimeFormat, NumberFormat, "
-                 "Collator, PluralRules, RelativeTimeFormat, ListFormat, "
-                 "DisplayNames, Segmenter and Locale");
+    std::string message = ErrorTextIntlNew::unknown(name);
+    this->state.getDiagnostics().error(loc, message);
     return failed();
   }
   if (!withNew && !service->callable) {
-    this->state.getDiagnostics().error(
-        loc, "'Intl." + name + "' is made with 'new': 'new Intl." + name +
-                 "(...)', and JavaScript would throw a TypeError without it");
+    std::string message = ErrorTextIntlNew::withNew(name);
+    this->state.getDiagnostics().error(loc, message);
     return failed();
   }
   if (args.size() > 2) {
-    this->state.getDiagnostics().error(loc, "expected " + ErrorTextArity::wanted(0, 2) +
-                                                ", but got " + std::to_string(args.size()));
+    std::string message = ErrorTextDateFormat::arity(args.size());
+    this->state.getDiagnostics().error(loc, message);
     return failed();
   }
   if (service->kind == IntlKind::DisplayNames && args.size() < 2) {
-    this->state.getDiagnostics().error(
-        loc, "Intl.DisplayNames needs the option 'type', e.g. 'new "
-             "Intl.DisplayNames(\"ru\", { type: \"region\" })', which JavaScript "
-             "would throw a TypeError without");
+    std::string message = ErrorTextIntlNew::noType();
+    this->state.getDiagnostics().error(loc, message);
     return failed();
   }
-  if (!IntlOptionsChecker(this->state)
-           .checkIntlArgs(args, 0, service->kind, "Intl." + name.str())) {
+  std::string what = ErrorTextIntlNew::label(name);
+  if (!IntlOptionsChecker(this->state).checkIntlArgs(args, 0, service->kind, what)) {
     auto *error = this->state.getAst().make<UndefinedExpr>(loc);
     error->type = Type::error();
     return error;
   }
-  std::vector<Expr *> all{kindArg(this->state.getAst(), loc, service->runtimeKind)};
+  std::vector<Expr *> all{IntlChecker::kindArg(this->state.getAst(), loc, service->runtimeKind)};
   all.insert(all.end(), args.begin(), args.end());
 
   return ProcessChecker(this->state)
@@ -320,32 +307,29 @@ Expr *IntlChecker::checkIntlNew(llvm::SMLoc loc, llvm::StringRef name, std::vect
                    std::move(all), Type::intl(service->kind));
 }
 
-bool IntlChecker::checkTags(const Expr *arg, llvm::StringRef what, bool constructor) {
+IntlChecker::ResultLanguageTags IntlChecker::languageTags(const Expr *arg, llvm::StringRef what,
+                                                          bool constructor) {
   std::optional<std::vector<std::string>> tags = LiteralTypes(this->state).knownTexts(arg);
   if (!tags) {
-    this->state.getDiagnostics().error(
-        arg->loc(),
-        constructor
-            ? std::string("a language known only when the program runs may be no language "
-                          "tag, which JavaScript would throw a RangeError for; parse it with "
-                          "'Intl.Locale.parse(tag)', which gives a Result")
-            : "a language known only when the program runs may be no language tag, which "
-              "JavaScript would throw a RangeError for; parse it first: "
-              "'Intl.Locale.parse(tag)' gives a Result with an Intl.Locale, which " +
-                  what.str() + " takes");
-    return false;
+    std::string message = ErrorTextLanguageTag::unknown(constructor, what);
+
+    return err(IntlCheckerLanguageTagsError{
+        .code = IntlCheckerLanguageTagsErrorCode::UNKNOWN_TAGS,
+        .message = message,
+    });
   }
   for (const std::string &tag : *tags) {
     if (!DateFormatChecker::isLanguageTag(tag)) {
-      this->state.getDiagnostics().error(
-          arg->loc(), "'" + tag +
-                          "' is not a language tag, and JavaScript would throw a "
-                          "RangeError; write it as BCP 47 does, e.g. 'en-US' or 'ru'");
-      return false;
+      std::string message = ErrorTextLanguageTag::notTag(tag);
+
+      return err(IntlCheckerLanguageTagsError{
+          .code = IntlCheckerLanguageTagsErrorCode::NOT_A_TAG,
+          .message = message,
+      });
     }
   }
 
-  return true;
+  return ok(*tags);
 }
 
 bool IntlChecker::checkLocaleArg(Expr *&arg, llvm::StringRef what) {
@@ -364,17 +348,13 @@ bool IntlChecker::checkLocaleArg(Expr *&arg, llvm::StringRef what) {
     return true;
   }
   if (!IntlChecker::isStringLike(type->nonOptional())) {
-    std::string message = what.str() +
-                          " takes the language as a string, e.g. \"ru-RU\", or an Intl.Locale, "
-                          "found '" +
-                          type->name().str() + "'";
-    if (type->isArray()) {
-      message += "; pass one language";
-    }
+    std::string message = ErrorTextLanguageTag::takes(what, type->name(), type->isArray());
     this->state.getDiagnostics().error(arg->loc(), message);
     return false;
   }
-  if (!this->checkTags(arg, what, false)) {
+  ResultLanguageTags tags = this->languageTags(arg, what, false);
+  if (tags.isErr()) {
+    this->state.getDiagnostics().error(arg->loc(), tags.error().message);
     return false;
   }
   if (!type->nonOptional()->isString()) {
@@ -397,27 +377,25 @@ Expr *IntlChecker::checkLocaleList(Expr *arg, llvm::StringRef what) {
     return arg;
   }
   if (type != Type::array(Type::string())) {
-    this->state.getDiagnostics().error(
-        arg->loc(),
-        what.str() + " takes a language or an array of them, found '" + type->name().str() + "'");
+    std::string message = ErrorTextLanguageTag::list(what, type->name());
+    this->state.getDiagnostics().error(arg->loc(), message);
     return arg;
   }
   auto *list = dyn_cast<ArrayLitExpr>(IntlChecker::unconverted(arg));
   if (!list) {
-    this->state.getDiagnostics().error(
-        arg->loc(), "languages known only when the program runs may be no language tags, "
-                    "which JavaScript would throw a RangeError for; parse each with "
-                    "'Intl.Locale.parse(tag)', which gives a Result, and pass them to " +
-                        what.str() + " one by one");
+    std::string message = ErrorTextLanguageTag::listOpen(what);
+    this->state.getDiagnostics().error(arg->loc(), message);
     return arg;
   }
   for (const ArrayLitExpr::Element &e : list->elements) {
     if (e.spread) {
-      this->state.getDiagnostics().error(
-          e.expr->loc(), what.str() + " takes the languages written in the array, not spread");
+      std::string message = ErrorTextLanguageTag::spread(what);
+      this->state.getDiagnostics().error(e.expr->loc(), message);
       return arg;
     }
-    if (!this->checkTags(e.expr, what, false)) {
+    ResultLanguageTags tags = this->languageTags(e.expr, what, false);
+    if (tags.isErr()) {
+      this->state.getDiagnostics().error(e.expr->loc(), tags.error().message);
       return arg;
     }
   }
@@ -427,16 +405,16 @@ Expr *IntlChecker::checkLocaleList(Expr *arg, llvm::StringRef what) {
 
 Expr *IntlChecker::checkLocaleNew(NewExpr *expr, const Type *expected) {
   if (!TopLevelChecker(this->state).lookupValue(kIntlLocaleName).cls()) {
-    this->state.getDiagnostics().error(expr->loc(), "'Intl.Locale' is not available here");
+    std::string message = ErrorTextIntlLocale::missing();
+    this->state.getDiagnostics().error(expr->loc(), message);
     for (Expr *&arg : expr->args) {
       arg = ExprChecker(this->state).checkExpr(arg);
     }
     return expr;
   }
   if (expr->args.size() == 2) {
-    this->state.getDiagnostics().error(
-        expr->args[1]->loc(), "the options of Intl.Locale are not supported; write them into the "
-                              "tag, e.g. 'new Intl.Locale(\"th-TH-u-ca-buddhist\")'");
+    std::string message = ErrorTextIntlLocale::options();
+    this->state.getDiagnostics().error(expr->args[1]->loc(), message);
     for (Expr *&arg : expr->args) {
       arg = ExprChecker(this->state).checkExpr(arg);
     }
@@ -448,7 +426,11 @@ Expr *IntlChecker::checkLocaleNew(NewExpr *expr, const Type *expected) {
   auto *made = dyn_cast<NewExpr>(checked);
   std::vector<Expr *> *args = made ? (made->ctor() ? &made->ctor()->args : &made->args) : nullptr;
   if (args && args->size() == 1 && args->front()->type && !args->front()->type->isError()) {
-    this->checkTags(args->front(), "Intl.Locale", true);
+    std::string what = ErrorTextIntlLocale::label();
+    ResultLanguageTags tags = this->languageTags(args->front(), what, true);
+    if (tags.isErr()) {
+      this->state.getDiagnostics().error(args->front()->loc(), tags.error().message);
+    }
   }
 
   return checked;
@@ -456,7 +438,8 @@ Expr *IntlChecker::checkLocaleNew(NewExpr *expr, const Type *expected) {
 
 Expr *IntlChecker::checkLocaleStatic(CallExpr *call, MemberExpr *member, const Type *expected) {
   if (!TopLevelChecker(this->state).lookupValue(kIntlLocaleName).cls()) {
-    this->state.getDiagnostics().error(member->loc(), "'Intl.Locale' is not available here");
+    std::string message = ErrorTextIntlLocale::missing();
+    this->state.getDiagnostics().error(member->loc(), message);
     call->type = Type::error();
     for (Expr *&arg : call->args) {
       arg = ExprChecker(this->state).checkExpr(arg);
@@ -480,25 +463,24 @@ Expr *IntlChecker::checkIntlFunction(CallExpr *call, MemberExpr *member) {
       return call;
     }
     if (!call->args.empty()) {
-      call->args[0] = this->checkLocaleList(call->args[0], "Intl.getCanonicalLocales");
+      std::string what = ErrorTextIntlFunction::canonical();
+      call->args[0] = this->checkLocaleList(call->args[0], what);
     }
     call->target = BuiltinCall{.builtin = Builtin::IntlCanonicalLocales};
     call->type = Type::array(Type::string());
     return call;
   }
   if (member->name == "supportedValuesOf") {
-    this->state.getDiagnostics().error(member->loc(),
-                                       "'Intl.supportedValuesOf' is not supported yet");
+    std::string message = ErrorTextIntlFunction::values();
+    this->state.getDiagnostics().error(member->loc(), message);
     for (Expr *&arg : call->args) {
       arg = ExprChecker(this->state).checkExpr(arg);
     }
     return call;
   }
   if (member->name == "Locale") {
-    this->state.getDiagnostics().error(member->loc(),
-                                       "'Intl.Locale' is made with 'new': 'new Intl.Locale(tag)' "
-                                       "or 'Intl.Locale.parse(tag)', and JavaScript would throw "
-                                       "a TypeError without it");
+    std::string message = ErrorTextIntlLocale::withNew();
+    this->state.getDiagnostics().error(member->loc(), message);
     for (Expr *&arg : call->args) {
       arg = ExprChecker(this->state).checkExpr(arg);
     }
@@ -514,13 +496,11 @@ Expr *IntlChecker::checkIntlStatic(CallExpr *call, MemberExpr *member) {
   if (CallChecker(this->state).rejectSpread(call)) {
     return call;
   }
-  std::string what = "Intl." + service->name.str() + "." + member->name.str();
+  std::string what = ErrorTextIntlFunction::staticOf(service->name, member->name);
   if ((service->name != "DateTimeFormat" && !IntlChecker::serviceNamed(service->name)) ||
       member->name != "supportedLocalesOf") {
-    this->state.getDiagnostics().error(member->loc(),
-                                       "'" + what +
-                                           "' is not supported; of the classes of Intl, only "
-                                           "'supportedLocalesOf' is");
+    std::string message = ErrorTextIntlFunction::onlyLocale(what);
+    this->state.getDiagnostics().error(member->loc(), message);
     for (Expr *&arg : call->args) {
       arg = ExprChecker(this->state).checkExpr(arg);
     }
@@ -585,19 +565,10 @@ Expr *IntlChecker::checkIntlMember(MemberExpr *member, const Type *expected) {
     fnType = Type::function({Type::string(), Type::string()}, 2, false, ret);
   }
   if (!fnType) {
-    if (kind == IntlKind::DateTimeFormat) {
-      this->state.getDiagnostics().error(
-          member->loc(), "property '" + name +
-                             "' of Intl.DateTimeFormat can only be called: 'format(d)', "
-                             "'formatToParts(d)' or 'resolvedOptions()'");
-    } else {
-      this->state.getDiagnostics().error(
-          member->loc(), "property '" + name + "' of " + member->object->type->name().str() +
-                             " can only be called, '" + name +
-                             "(...)'; as values there are only 'format' of "
-                             "Intl.NumberFormat and Intl.DateTimeFormat and 'compare' "
-                             "of Intl.Collator");
-    }
+    std::string message = kind == IntlKind::DateTimeFormat
+                              ? ErrorTextIntlMember::dateFormat(name)
+                              : ErrorTextIntlMember::onlyCalled(name, member->object->type->name());
+    this->state.getDiagnostics().error(member->loc(), message);
     return member;
   }
   member->type = fnType;

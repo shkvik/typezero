@@ -17,6 +17,9 @@ public:
   Expr *parsePostfix();
 
 private:
+  static int binaryPrec(Tok kind);
+  static BinaryOp binaryOpFor(Tok kind);
+  static bool assignmentOp(Tok kind, std::optional<BinaryOp> &op);
   Parser &parser_;
 };
 

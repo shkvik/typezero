@@ -25,6 +25,101 @@ namespace tz {
 
 unsigned Type::count_ = 0;
 
+struct Interned {
+  llvm::DenseMap<const Type *, std::unique_ptr<Type>> optionals, arrays;
+  using FunctionKey = std::tuple<std::vector<const Type *>, size_t, bool, const Type *, bool>;
+  std::map<FunctionKey, std::unique_ptr<Type>> functions;
+  using ObjectKey = std::vector<std::tuple<std::string, const Type *, int>>;
+  std::map<ObjectKey, const Type *> objectsByKey;
+  std::vector<std::unique_ptr<Type>> objects;
+  std::map<std::pair<std::vector<const Type *>, bool>, const Type *> tuples;
+  std::map<std::tuple<std::vector<const Type *>, size_t, const Type *>, const Type *> lists;
+  std::map<std::tuple<int, std::vector<const Type *>, int, int>, const Type *> ops;
+  std::map<std::pair<const Type *, const Type *>, std::unique_ptr<Type>> results;
+  std::map<std::tuple<const Type *, const Type *, const Type *>, std::unique_ptr<Type>> iterators;
+  std::map<std::tuple<const Type *, const Type *, const Type *>, const Type *> asyncIterators;
+  llvm::DenseMap<const Type *, std::unique_ptr<Type>> promises;
+  using MatchKey = std::tuple<int, std::vector<bool>, const Type *, bool>;
+  std::map<MatchKey, const Type *> matches;
+  std::map<std::tuple<int, const Type *, const Type *>, std::unique_ptr<Type>> dicts;
+  std::map<std::u16string, std::unique_ptr<Type>> strings;
+  std::map<std::pair<std::vector<std::u16string>, std::vector<const Type *>>, std::unique_ptr<Type>>
+      patterns;
+  std::vector<const Type *> atoms{nullptr};
+  std::map<std::pair<double, const Type *>, std::unique_ptr<Type>> numbers;
+  std::map<std::vector<const Type *>, std::unique_ptr<Type>> unions;
+  std::map<const ClassDecl *, std::unique_ptr<Type>> classRefs;
+  llvm::DenseMap<const Type *, std::unique_ptr<Type>> constructors;
+};
+
+Interned &Type::interned() {
+  static Interned instance;
+
+  return instance;
+}
+
+Type::ObjectKey Type::objectKey(llvm::ArrayRef<Field> fields, llvm::ArrayRef<Overload> overloads) {
+  Interned::ObjectKey key;
+  for (const Field &f : fields) {
+    key.emplace_back(f.name, f.type, f.readonly ? 1 : 0);
+  }
+  for (const Overload &o : overloads) {
+    for (const Type *signature : o.signatures) {
+      key.emplace_back(o.name, signature, 2);
+    }
+  }
+  llvm::sort(key);
+
+  return key;
+}
+
+std::string Type::quotedText(const std::u16string &text) {
+  std::string utf8;
+  llvm::convertUTF16ToUTF8String(
+      llvm::ArrayRef<llvm::UTF16>(reinterpret_cast<const llvm::UTF16 *>(text.data()), text.size()),
+      utf8);
+  std::string quoted = "\"";
+  for (char c : utf8) {
+    if (c == '\n') {
+      quoted += "\\n";
+    } else if (c == '\t') {
+      quoted += "\\t";
+    } else if (c == '"' || c == '\\') {
+      quoted += std::string("\\") + c;
+    } else {
+      quoted += c;
+    }
+  }
+
+  return quoted + "\"";
+}
+
+std::string Type::numberText(double value) {
+  if (value == std::trunc(value) && std::fabs(value) < 1e21) {
+    char buffer[32];
+    std::snprintf(buffer, sizeof buffer, "%.0f", value);
+    return buffer;
+  }
+  for (int precision = 1; precision <= 17; ++precision) {
+    char buffer[40];
+    std::snprintf(buffer, sizeof buffer, "%.*g", precision, value);
+    if (std::strtod(buffer, nullptr) == value) {
+      return buffer;
+    }
+  }
+
+  return std::to_string(value);
+}
+
+std::string Type::utf8Text(const std::u16string &text) {
+  std::string utf8;
+  llvm::convertUTF16ToUTF8String(
+      llvm::ArrayRef<llvm::UTF16>(reinterpret_cast<const llvm::UTF16 *>(text.data()), text.size()),
+      utf8);
+
+  return utf8;
+}
+
 bool Type::isManaged() const {
   switch (this->kind()) {
     case Kind::Decimal:
@@ -173,44 +268,11 @@ const Type *Type::unknown() {
   return &t;
 }
 
-struct Interned {
-  llvm::DenseMap<const Type *, std::unique_ptr<Type>> optionals, arrays;
-  using FunctionKey = std::tuple<std::vector<const Type *>, size_t, bool, const Type *, bool>;
-  std::map<FunctionKey, std::unique_ptr<Type>> functions;
-  using ObjectKey = std::vector<std::tuple<std::string, const Type *, int>>;
-  std::map<ObjectKey, const Type *> objectsByKey;
-  std::vector<std::unique_ptr<Type>> objects;
-  std::map<std::pair<std::vector<const Type *>, bool>, const Type *> tuples;
-  std::map<std::tuple<std::vector<const Type *>, size_t, const Type *>, const Type *> lists;
-  std::map<std::tuple<int, std::vector<const Type *>, int, int>, const Type *> ops;
-  std::map<std::pair<const Type *, const Type *>, std::unique_ptr<Type>> results;
-  std::map<std::tuple<const Type *, const Type *, const Type *>, std::unique_ptr<Type>> iterators;
-  std::map<std::tuple<const Type *, const Type *, const Type *>, const Type *> asyncIterators;
-  llvm::DenseMap<const Type *, std::unique_ptr<Type>> promises;
-  using MatchKey = std::tuple<int, std::vector<bool>, const Type *, bool>;
-  std::map<MatchKey, const Type *> matches;
-  std::map<std::tuple<int, const Type *, const Type *>, std::unique_ptr<Type>> dicts;
-  std::map<std::u16string, std::unique_ptr<Type>> strings;
-  std::map<std::pair<std::vector<std::u16string>, std::vector<const Type *>>, std::unique_ptr<Type>>
-      patterns;
-  std::vector<const Type *> atoms{nullptr};
-  std::map<std::pair<double, const Type *>, std::unique_ptr<Type>> numbers;
-  std::map<std::vector<const Type *>, std::unique_ptr<Type>> unions;
-  std::map<const ClassDecl *, std::unique_ptr<Type>> classRefs;
-  llvm::DenseMap<const Type *, std::unique_ptr<Type>> constructors;
-};
-
-Interned &interned() {
-  static Interned instance;
-
-  return instance;
-}
-
 const Type *Type::optional(const Type *type) {
   if (type->isError() || type->isUndefined() || type->isOptional() || type->isUnknown()) {
     return type;
   }
-  std::unique_ptr<Type> &slot = interned().optionals[type];
+  std::unique_ptr<Type> &slot = Type::interned().optionals[type];
   if (!slot) {
     std::string name = type->isFunction() ? "(" + type->name().str() + ")" : type->name().str();
     slot.reset(new Type(Kind::Optional, name + " | undefined", type));
@@ -223,7 +285,7 @@ const Type *Type::array(const Type *element) {
   if (element->isError()) {
     return element;
   }
-  std::unique_ptr<Type> &slot = interned().arrays[element];
+  std::unique_ptr<Type> &slot = Type::interned().arrays[element];
   if (!slot) {
     std::string name = element->isOptional() || element->isFunction() || element->isUnion()
                            ? "(" + element->name().str() + ")[]"
@@ -245,12 +307,12 @@ const Type *Type::function(llvm::ArrayRef<const Type *> params, size_t minArgs, 
     return ret;
   }
   std::vector<const Type *> flat;
-  if (flattenArguments(params, minArgs, hasRest, flat)) {
+  if (ArgumentLists::flattenArguments(params, minArgs, hasRest, flat)) {
     return function(flat, minArgs, hasRest, ret, hasThis);
   }
   Interned::FunctionKey key{std::vector<const Type *>(params.begin(), params.end()), minArgs,
                             hasRest, ret, hasThis};
-  std::unique_ptr<Type> &slot = interned().functions[key];
+  std::unique_ptr<Type> &slot = Type::interned().functions[key];
   if (!slot) {
     std::string name = "(";
     for (size_t i = 0; i < params.size(); ++i) {
@@ -286,22 +348,6 @@ const Field *Type::field(llvm::StringRef name) const {
   return nullptr;
 }
 
-static Interned::ObjectKey objectKey(llvm::ArrayRef<Field> fields,
-                                     llvm::ArrayRef<Overload> overloads) {
-  Interned::ObjectKey key;
-  for (const Field &f : fields) {
-    key.emplace_back(f.name, f.type, f.readonly ? 1 : 0);
-  }
-  for (const Overload &o : overloads) {
-    for (const Type *signature : o.signatures) {
-      key.emplace_back(o.name, signature, 2);
-    }
-  }
-  llvm::sort(key);
-
-  return key;
-}
-
 const Overload *Type::overload(llvm::StringRef name) const {
   for (const Overload &o : this->overloads()) {
     if (o.name == name) {
@@ -319,10 +365,10 @@ const Type *Type::object(std::vector<Field> fields, llvm::StringRef name,
       return f.type;
     }
   }
-  const Type *&slot = interned().objectsByKey[objectKey(fields, overloads)];
+  const Type *&slot = Type::interned().objectsByKey[Type::objectKey(fields, overloads)];
   if (!slot) {
-    std::string spelling = name.empty() ? objectTypeSpelling(fields) : name.str();
-    auto &type = interned().objects.emplace_back(new Type(Kind::Object, std::move(spelling)));
+    std::string spelling = name.empty() ? TypeSpelling::objectTypeSpelling(fields) : name.str();
+    auto &type = Type::interned().objects.emplace_back(new Type(Kind::Object, std::move(spelling)));
     ObjectData *shape = type->data_.as<ObjectData>();
     shape->fields = std::move(fields);
     shape->overloads = std::move(overloads);
@@ -339,7 +385,8 @@ const Type *Type::tuple(llvm::ArrayRef<const Type *> elements, bool readonly) {
     }
   }
   const Type *&slot =
-      interned().tuples[{std::vector<const Type *>(elements.begin(), elements.end()), readonly}];
+      Type::interned()
+          .tuples[{std::vector<const Type *>(elements.begin(), elements.end()), readonly}];
   if (!slot) {
     std::string name = readonly ? "readonly [" : "[";
     std::vector<Field> fields;
@@ -350,7 +397,7 @@ const Type *Type::tuple(llvm::ArrayRef<const Type *> elements, bool readonly) {
       name += (elements[i]->isListParam() ? "..." : "") + elements[i]->name().str();
       fields.push_back({std::to_string(i), elements[i], readonly});
     }
-    auto &type = interned().objects.emplace_back(new Type(Kind::Object, name + "]"));
+    auto &type = Type::interned().objects.emplace_back(new Type(Kind::Object, name + "]"));
     ObjectData *shape = type->data_.as<ObjectData>();
     shape->fields = std::move(fields);
     shape->tuple = true;
@@ -375,7 +422,8 @@ const Type *Type::argumentList(llvm::ArrayRef<const Type *> elements, size_t min
     return rest;
   }
   const Type *&slot =
-      interned().lists[{std::vector<const Type *>(elements.begin(), elements.end()), min, rest}];
+      Type::interned()
+          .lists[{std::vector<const Type *>(elements.begin(), elements.end()), min, rest}];
   if (!slot) {
     std::string name = "[";
     std::vector<Field> fields;
@@ -390,7 +438,7 @@ const Type *Type::argumentList(llvm::ArrayRef<const Type *> elements, size_t min
     if (rest) {
       name += (elements.empty() ? "..." : ", ...") + rest->name().str();
     }
-    auto &type = interned().objects.emplace_back(new Type(Kind::Object, name + "]"));
+    auto &type = Type::interned().objects.emplace_back(new Type(Kind::Object, name + "]"));
     ObjectData *shape = type->data_.as<ObjectData>();
     shape->fields = std::move(fields);
     shape->tuple = true;
@@ -415,7 +463,7 @@ const Type *Type::result(const Type *ok, const Type *err) {
   if (err->isUndefined()) {
     err = voidTy();
   }
-  std::unique_ptr<Type> &slot = interned().results[{ok, err}];
+  std::unique_ptr<Type> &slot = Type::interned().results[{ok, err}];
   if (!slot) {
     std::string name = "Result<" + ok->name().str() + ", " + err->name().str() + ">";
     slot.reset(new Type(Kind::Result, std::move(name), ok));
@@ -431,7 +479,7 @@ const Type *Type::iterator(const Type *yielded, const Type *returned, const Type
       return t;
     }
   }
-  std::unique_ptr<Type> &slot = interned().iterators[{yielded, returned, sent}];
+  std::unique_ptr<Type> &slot = Type::interned().iterators[{yielded, returned, sent}];
   if (!slot) {
     std::string name = "Generator<" + yielded->name().str();
     if (!returned->isVoid() || !sent->isVoid()) {
@@ -454,7 +502,7 @@ const Type *Type::dict(DictKind kind, const Type *key, const Type *value) {
   if (value->isError()) {
     return value;
   }
-  std::unique_ptr<Type> &slot = interned().dicts[{int(kind), key, value}];
+  std::unique_ptr<Type> &slot = Type::interned().dicts[{int(kind), key, value}];
   if (!slot) {
     std::string name = kind == DictKind::Record ? "Record<"
                        : kind == DictKind::Map  ? "Map<"
@@ -471,63 +519,16 @@ const Type *Type::dict(DictKind kind, const Type *key, const Type *value) {
   return slot.get();
 }
 
-static std::string quotedText(const std::u16string &text) {
-  std::string utf8;
-  llvm::convertUTF16ToUTF8String(
-      llvm::ArrayRef<llvm::UTF16>(reinterpret_cast<const llvm::UTF16 *>(text.data()), text.size()),
-      utf8);
-  std::string quoted = "\"";
-  for (char c : utf8) {
-    if (c == '\n') {
-      quoted += "\\n";
-    } else if (c == '\t') {
-      quoted += "\\t";
-    } else if (c == '"' || c == '\\') {
-      quoted += std::string("\\") + c;
-    } else {
-      quoted += c;
-    }
-  }
-
-  return quoted + "\"";
-}
-
-static std::string numberText(double value) {
-  if (value == std::trunc(value) && std::fabs(value) < 1e21) {
-    char buffer[32];
-    std::snprintf(buffer, sizeof buffer, "%.0f", value);
-    return buffer;
-  }
-  for (int precision = 1; precision <= 17; ++precision) {
-    char buffer[40];
-    std::snprintf(buffer, sizeof buffer, "%.*g", precision, value);
-    if (std::strtod(buffer, nullptr) == value) {
-      return buffer;
-    }
-  }
-
-  return std::to_string(value);
-}
-
-static std::string utf8Text(const std::u16string &text) {
-  std::string utf8;
-  llvm::convertUTF16ToUTF8String(
-      llvm::ArrayRef<llvm::UTF16>(reinterpret_cast<const llvm::UTF16 *>(text.data()), text.size()),
-      utf8);
-
-  return utf8;
-}
-
 const Type *Type::stringPattern(std::vector<std::u16string> texts,
                                 std::vector<const Type *> holes) {
   if (holes.size() == 1 && holes[0]->isString() && texts[0].empty() && texts[1].empty()) {
     return holes[0];
   }
-  std::unique_ptr<Type> &slot = interned().patterns[{texts, holes}];
+  std::unique_ptr<Type> &slot = Type::interned().patterns[{texts, holes}];
   if (!slot) {
     std::string name = "`";
     for (size_t i = 0; i < texts.size(); ++i) {
-      name += utf8Text(texts[i]);
+      name += Type::utf8Text(texts[i]);
       if (i < holes.size()) {
         name += "${" + (holes[i]->isFloat() ? std::string("number") : holes[i]->name().str()) + "}";
       }
@@ -541,21 +542,21 @@ const Type *Type::stringPattern(std::vector<std::u16string> texts,
 }
 
 const Type *Type::stringLiteral(const std::u16string &text) {
-  std::unique_ptr<Type> &slot = interned().strings[text];
+  std::unique_ptr<Type> &slot = Type::interned().strings[text];
   if (!slot) {
-    slot.reset(new Type(Kind::Literal, quotedText(text), string()));
-    unsigned index = unsigned(interned().atoms.size());
+    slot.reset(new Type(Kind::Literal, Type::quotedText(text), string()));
+    unsigned index = unsigned(Type::interned().atoms.size());
     slot->data_ = LiteralData{.text = text, .atom = index};
-    interned().atoms.push_back(slot.get());
+    Type::interned().atoms.push_back(slot.get());
   }
 
   return slot.get();
 }
 
 const Type *Type::numberLiteral(double value, const Type *base) {
-  std::unique_ptr<Type> &slot = interned().numbers[{value, base}];
+  std::unique_ptr<Type> &slot = Type::interned().numbers[{value, base}];
   if (!slot) {
-    slot.reset(new Type(Kind::Literal, numberText(value), base));
+    slot.reset(new Type(Kind::Literal, Type::numberText(value), base));
     slot->data_ = LiteralData{.number = value};
   }
 
@@ -567,7 +568,7 @@ const Type *Type::boolLiteral(bool value) {
   const Type *&slot = literals[value ? 1 : 0];
   if (!slot) {
     auto *literal = new Type(Kind::Literal, value ? "true" : "false", boolTy());
-    Type *type = interned().objects.emplace_back(literal).get();
+    Type *type = Type::interned().objects.emplace_back(literal).get();
     type->data_ = LiteralData{.number = value ? 1.0 : 0.0};
     slot = type;
   }
@@ -576,16 +577,16 @@ const Type *Type::boolLiteral(bool value) {
 }
 
 llvm::ArrayRef<const Type *> Type::stringLiterals() {
-  return llvm::ArrayRef<const Type *>(interned().atoms).drop_front();
+  return llvm::ArrayRef<const Type *>(Type::interned().atoms).drop_front();
 }
 
 const Type *Type::slotPart(UnionSlot slot) const {
   if (!isUnion()) {
-    return unionSlot(this) == slot ? this : nullptr;
+    return UnionSlots::unionSlot(this) == slot ? this : nullptr;
   }
   std::vector<const Type *> part;
   for (const Type *m : params_) {
-    if (unionSlot(m) == slot) {
+    if (UnionSlots::unionSlot(m) == slot) {
       part.push_back(m);
     }
   }
@@ -655,7 +656,7 @@ const Type *Type::unionOf(llvm::ArrayRef<const Type *> types) {
   }
   llvm::erase_if(members, [&](const Type *m) {
     return m->isStringLiteral() && llvm::any_of(members, [&](const Type *p) {
-             return p->isPattern() && matchesPattern(m->literalText(), p);
+             return p->isPattern() && TemplatePatterns::matchesPattern(m->literalText(), p);
            });
   });
   bool fractions = llvm::any_of(
@@ -695,7 +696,7 @@ const Type *Type::unionOf(llvm::ArrayRef<const Type *> types) {
   } else {
     std::vector<const Type *> key = members;
     llvm::sort(key, [](const Type *a, const Type *b) { return a->id() < b->id(); });
-    std::unique_ptr<Type> &slot = interned().unions[key];
+    std::unique_ptr<Type> &slot = Type::interned().unions[key];
     if (!slot) {
       std::string name;
       for (const Type *m : members) {
@@ -706,7 +707,7 @@ const Type *Type::unionOf(llvm::ArrayRef<const Type *> types) {
       slot->params_ = members;
       UnionData *joined = slot->data_.as<UnionData>();
       for (const Type *m : members) {
-        UnionSlot s = unionSlot(m);
+        UnionSlot s = UnionSlots::unionSlot(m);
         if (!llvm::is_contained(joined->slots, s)) {
           joined->slots.push_back(s);
         }
@@ -726,7 +727,7 @@ const Type *Type::promise(const Type *value) {
   if (value->isUndefined()) {
     value = voidTy();
   }
-  std::unique_ptr<Type> &slot = interned().promises[value];
+  std::unique_ptr<Type> &slot = Type::interned().promises[value];
   if (!slot) {
     slot.reset(new Type(Kind::Promise, "Promise<" + value->name().str() + ">", value));
   }
@@ -735,14 +736,14 @@ const Type *Type::promise(const Type *value) {
 }
 
 Type *Type::declareObject(llvm::StringRef name) {
-  auto &type = interned().objects.emplace_back(new Type(Kind::Object, name.str()));
+  auto &type = Type::interned().objects.emplace_back(new Type(Kind::Object, name.str()));
   type->incomplete_ = true;
 
   return type.get();
 }
 
 Type *Type::classType(llvm::StringRef name, const ClassDecl *decl) {
-  auto &type = interned().objects.emplace_back(new Type(Kind::Object, name.str()));
+  auto &type = Type::interned().objects.emplace_back(new Type(Kind::Object, name.str()));
   type->incomplete_ = true;
   type->data_.as<ObjectData>()->cls = decl;
 
@@ -750,7 +751,7 @@ Type *Type::classType(llvm::StringRef name, const ClassDecl *decl) {
 }
 
 Type *Type::declareUnion(llvm::StringRef name) {
-  auto &type = interned().objects.emplace_back(new Type(Kind::Union, name.str()));
+  auto &type = Type::interned().objects.emplace_back(new Type(Kind::Union, name.str()));
   type->incomplete_ = true;
 
   return type.get();
@@ -813,12 +814,13 @@ bool Type::isSubtypeOf(const Type *base) const {
 }
 
 Type *Type::param(llvm::StringRef name) {
-  return interned().objects.emplace_back(new Type(Kind::Param, name.str())).get();
+  return Type::interned().objects.emplace_back(new Type(Kind::Param, name.str())).get();
 }
 
 const Type *Type::typeOp(TypeOp op, llvm::ArrayRef<const Type *> operands) {
   const Type *&slot =
-      interned().ops[{int(op), std::vector<const Type *>(operands.begin(), operands.end()), 0, 0}];
+      Type::interned()
+          .ops[{int(op), std::vector<const Type *>(operands.begin(), operands.end()), 0, 0}];
   if (!slot) {
     std::string name;
     auto of = [&](size_t i) {
@@ -852,7 +854,7 @@ const Type *Type::typeOp(TypeOp op, llvm::ArrayRef<const Type *> operands) {
     case TypeOp::Template:
       name = "`";
       for (size_t i = 0; i < operands.size(); ++i) {
-        name += i % 2 == 0 ? utf8Text(operands[i]->literalText()) : "${" + of(i) + "}";
+        name += i % 2 == 0 ? Type::utf8Text(operands[i]->literalText()) : "${" + of(i) + "}";
       }
       name += "`";
       break;
@@ -893,7 +895,8 @@ const Type *Type::typeOp(TypeOp op, llvm::ArrayRef<const Type *> operands) {
 const Type *Type::mapped(const Type *key, const Type *keys, const Type *value, int optional,
                          int readonly, const Type *source, const Type *rename) {
   const Type *&slot =
-      interned().ops[{int(TypeOp::Mapped), {key, keys, value, source, rename}, optional, readonly}];
+      Type::interned()
+          .ops[{int(TypeOp::Mapped), {key, keys, value, source, rename}, optional, readonly}];
   if (!slot) {
     std::string name = std::string(readonly > 0   ? "{ readonly ["
                                    : readonly < 0 ? "{ -readonly ["
@@ -923,7 +926,7 @@ void Type::setConstraint(const Type *constraint, std::vector<const Type *> alter
 
 const Type *Type::anyObject() {
   static Type *type = [] {
-    Type *t = interned().objects.emplace_back(new Type(Kind::Object, "object")).get();
+    Type *t = Type::interned().objects.emplace_back(new Type(Kind::Object, "object")).get();
     t->data_.as<ObjectData>()->form = AnyObject{};
 
     return t;
@@ -933,7 +936,7 @@ const Type *Type::anyObject() {
 }
 
 const Type *Type::classRef(const ClassDecl *cls, llvm::StringRef name) {
-  std::unique_ptr<Type> &slot = interned().classRefs[cls];
+  std::unique_ptr<Type> &slot = Type::interned().classRefs[cls];
   if (!slot) {
     slot.reset(new Type(Kind::ClassRef, "typeof " + name.str()));
     slot->data_ = ClassRefData{.refClass = cls};
@@ -946,7 +949,7 @@ const Type *Type::constructorOf(const Type *instance) {
   if (instance->isError()) {
     return instance;
   }
-  std::unique_ptr<Type> &slot = interned().constructors[instance];
+  std::unique_ptr<Type> &slot = Type::interned().constructors[instance];
   if (!slot) {
     slot.reset(new Type(Kind::ClassRef,
                         instance->isAnyObject() ? std::string("Constructor")
@@ -959,7 +962,7 @@ const Type *Type::constructorOf(const Type *instance) {
 
 const Type *Type::regExp() {
   static Type *type = [] {
-    Type *t = interned().objects.emplace_back(new Type(Kind::Object, "RegExp")).get();
+    Type *t = Type::interned().objects.emplace_back(new Type(Kind::Object, "RegExp")).get();
     ObjectData *shape = t->data_.as<ObjectData>();
     shape->fields.push_back({"lastIndex", intTy(), false});
     shape->form = RegExpObject{};
@@ -972,7 +975,7 @@ const Type *Type::regExp() {
 
 const Type *Type::date() {
   static Type *type = [] {
-    Type *t = interned().objects.emplace_back(new Type(Kind::Object, "Date")).get();
+    Type *t = Type::interned().objects.emplace_back(new Type(Kind::Object, "Date")).get();
     ObjectData *shape = t->data_.as<ObjectData>();
     shape->fields.push_back({"%time", intTy(), false});
     shape->form = DateObject{};
@@ -988,7 +991,7 @@ const Type *Type::weakRef(const Type *target) {
   Type *&type = types[target];
   if (!type) {
     type =
-        interned()
+        Type::interned()
             .objects
             .emplace_back(new Type(Kind::Object, "WeakRef<" + target->name().str() + ">", target))
             .get();
@@ -1016,7 +1019,7 @@ const Type *Type::intl(IntlKind kind) {
   static Type *types[sizeof names / sizeof names[0]] = {};
   Type *&type = types[size_t(kind)];
   if (!type) {
-    type = interned().objects.emplace_back(new Type(Kind::Object, names[size_t(kind)])).get();
+    type = Type::interned().objects.emplace_back(new Type(Kind::Object, names[size_t(kind)])).get();
     type->data_.as<ObjectData>()->form = IntlObject{.intl = kind};
   }
 
@@ -1025,7 +1028,7 @@ const Type *Type::intl(IntlKind kind) {
 
 const Type *Type::timeout() {
   static Type *type = [] {
-    Type *t = interned().objects.emplace_back(new Type(Kind::Object, "Timeout")).get();
+    Type *t = Type::interned().objects.emplace_back(new Type(Kind::Object, "Timeout")).get();
     t->data_.as<ObjectData>()->form = TimeoutObject{};
 
     return t;
@@ -1036,7 +1039,7 @@ const Type *Type::timeout() {
 
 const Type *Type::immediate() {
   static Type *type = [] {
-    Type *t = interned().objects.emplace_back(new Type(Kind::Object, "Immediate")).get();
+    Type *t = Type::interned().objects.emplace_back(new Type(Kind::Object, "Immediate")).get();
     t->data_.as<ObjectData>()->form = ImmediateObject{};
 
     return t;
@@ -1051,7 +1054,7 @@ const Type *Type::cryptoType(Crypto kind) {
   static Type *types[std::size(names)] = {};
   Type *&type = types[size_t(kind)];
   if (!type) {
-    type = interned().objects.emplace_back(new Type(Kind::Object, names[size_t(kind)])).get();
+    type = Type::interned().objects.emplace_back(new Type(Kind::Object, names[size_t(kind)])).get();
     type->data_.as<ObjectData>()->form = CryptoObject{.crypto = kind};
   }
 
@@ -1079,7 +1082,7 @@ const Type *Type::bytesType(Bytes kind) {
   static Type *types[std::size(names)] = {};
   Type *&type = types[size_t(kind)];
   if (!type) {
-    type = interned().objects.emplace_back(new Type(Kind::Object, names[size_t(kind)])).get();
+    type = Type::interned().objects.emplace_back(new Type(Kind::Object, names[size_t(kind)])).get();
     type->data_.as<ObjectData>()->form = BytesObject{.bytes = kind};
   }
 
@@ -1091,7 +1094,7 @@ const Type *Type::runtimeObject(Runtime kind) {
   static const char *const names[] = {"", "FileHandle", "Interface", "Interface"};
   Type *&type = types[size_t(kind)];
   if (!type) {
-    type = interned().objects.emplace_back(new Type(Kind::Object, names[size_t(kind)])).get();
+    type = Type::interned().objects.emplace_back(new Type(Kind::Object, names[size_t(kind)])).get();
     type->data_.as<ObjectData>()->form = RuntimeObject{.runtime = kind};
   }
 
@@ -1171,7 +1174,7 @@ const Type *Type::asyncIterator(const Type *yielded, const Type *returned, const
       return t;
     }
   }
-  const Type *&slot = interned().asyncIterators[{yielded, returned, sent}];
+  const Type *&slot = Type::interned().asyncIterators[{yielded, returned, sent}];
   if (!slot) {
     std::string name = "AsyncGenerator<" + yielded->name().str();
     if (!returned->isVoid() || !sent->isVoid()) {
@@ -1180,7 +1183,8 @@ const Type *Type::asyncIterator(const Type *yielded, const Type *returned, const
     if (!sent->isVoid()) {
       name += ", " + sent->name().str();
     }
-    Type *type = interned().objects.emplace_back(new Type(Kind::Object, name + ">", yielded)).get();
+    Type *type =
+        Type::interned().objects.emplace_back(new Type(Kind::Object, name + ">", yielded)).get();
     type->params_ = {returned, sent};
     type->data_.as<ObjectData>()->form = RuntimeObject{.runtime = Runtime::AsyncIterator};
     slot = type;
@@ -1195,7 +1199,7 @@ const Type *Type::match(int groups, std::vector<bool> mandatory, const Type *nam
   } else {
     mandatory.resize(size_t(groups) + 1, false);
   }
-  const Type *&slot = interned().matches[{groups, mandatory, named, indices}];
+  const Type *&slot = Type::interned().matches[{groups, mandatory, named, indices}];
   if (slot) {
     return slot;
   }
@@ -1210,7 +1214,7 @@ const Type *Type::match(int groups, std::vector<bool> mandatory, const Type *nam
       name += " with groups " + named->name().str();
     }
   }
-  Type *type = interned().objects.emplace_back(new Type(Kind::Object, name)).get();
+  Type *type = Type::interned().objects.emplace_back(new Type(Kind::Object, name)).get();
   ObjectData *shape = type->data_.as<ObjectData>();
   shape->fields.push_back({"%items", array(optional(string())), true});
   shape->fields.push_back({"index", intTy(), false});

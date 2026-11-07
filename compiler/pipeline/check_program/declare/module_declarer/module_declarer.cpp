@@ -6,6 +6,7 @@
 #include "compiler/pipeline/check_program/instances/late_classes/late_classes.h"
 #include "compiler/pipeline/check_program/topics/classes/class_links/class_links.h"
 #include "compiler/pipeline/check_program/topics/events/emitter_checker/emitter_checker.h"
+#include "compiler/pipeline/check_program/topics/events/emitter_checker/emitter_checker_errors.h"
 #include "compiler/pipeline/check_program/topics/functions/function_checker/function_checker.h"
 #include "llvm/ADT/STLExtras.h"
 #include <cassert>
@@ -142,7 +143,7 @@ ModuleDeclarer::ResultSourceUsable ModuleDeclarer::exportSource(const ExportSour
         .message = message,
     });
   }
-  if (source && isBuiltinModule(source->path)) {
+  if (source && BuiltinModulePaths::isBuiltinModule(source->path)) {
     std::string message = ErrorTextExportSource::builtin(source->path);
 
     return err(ModuleDeclarerExportSourceError{
@@ -158,7 +159,8 @@ ModuleDeclarer::ResultLocalIsKnown ModuleDeclarer::localExport(const Module *mod
                                                                const ModuleName &name, bool found) {
   auto sameAlias = [&](const ModuleName &n) { return n.as == name.name; };
   auto fromBuiltin = [&](const ImportDecl &i) {
-    return isBuiltinModule(i.path) && (i.whole == name.name || llvm::any_of(i.names, sameAlias));
+    return BuiltinModulePaths::isBuiltinModule(i.path) &&
+           (i.whole == name.name || llvm::any_of(i.names, sameAlias));
   };
   auto importsName = [&](const ImportDecl &i) { return llvm::any_of(i.names, sameAlias); };
   bool builtin = llvm::any_of(module->file.imports, fromBuiltin);
@@ -305,7 +307,7 @@ ModuleDeclarer::ResultExportTarget ModuleDeclarer::findExport(Module *from, llvm
   auto found = theirs.find(name.name);
   bool missing = found == theirs.end();
   if (missing && from->builtin) {
-    std::string hint = EmitterChecker::libraryExportHint(name.name);
+    std::string hint = ErrorTextEventsExport::hint(name.name);
     std::string message = ErrorTextFindExport::library(path, name.name, hint);
 
     return err(ModuleDeclarerFindExportError{

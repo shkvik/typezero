@@ -1,5 +1,6 @@
 #pragma once
 
+#include "llvm/ADT/StringRef.h"
 #include "llvm/Support/SMLoc.h"
 #include <cstddef>
 
@@ -26,6 +27,7 @@ public:
   void declarator(const VarDeclarator &declarator);
 
 private:
+  static bool builtinClassName(llvm::StringRef name);
   bool use(const Expr *expr, bool call);
   void param(const Param &param);
 

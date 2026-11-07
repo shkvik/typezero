@@ -18,7 +18,6 @@ public:
 
 private:
   static std::u16string utf16(llvm::StringRef text);
-  static std::string utf8(const std::u16string &text);
   static llvm::ArrayRef<const Type *> membersOf(const Type *&type);
 
   CheckState &state;

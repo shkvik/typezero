@@ -13,17 +13,13 @@ namespace tz::pkg {
 namespace fs = llvm::sys::fs;
 namespace path = llvm::sys::path;
 
-namespace {
-
-bool isJsrNamePart(llvm::StringRef part) {
+bool SourceParser::isJsrNamePart(llvm::StringRef part) {
   return !part.empty() && llvm::all_of(part, [](char c) {
     return llvm::isLower(c) || llvm::isDigit(c) || c == '-';
   });
 }
 
-}
-
-std::string repositoryName(llvm::StringRef url) {
+std::string SourceParser::repositoryName(llvm::StringRef url) {
   llvm::StringRef name = url.rtrim("/");
   size_t slash = name.find_last_of("/:\\");
   if (slash != llvm::StringRef::npos) {
@@ -100,7 +96,7 @@ std::string Source::shortName() const {
       text = "@" + this->scope() + "/" + this->name();
       break;
     case SourceKind::GIT_SOURCE:
-      text = repositoryName(this->url());
+      text = SourceParser::repositoryName(this->url());
       break;
     case SourceKind::LOCAL_SOURCE:
       text = path::filename(this->dir()).str();
@@ -110,7 +106,8 @@ std::string Source::shortName() const {
   return text;
 }
 
-bool parseSource(llvm::StringRef spec, llvm::StringRef baseDir, Source &out, std::string &error) {
+bool SourceParser::parseSource(llvm::StringRef spec, llvm::StringRef baseDir, Source &out,
+                               std::string &error) {
   out = Source();
   llvm::StringRef rest = spec;
   if (rest.consume_front("jsr:")) {
@@ -122,7 +119,7 @@ bool parseSource(llvm::StringRef spec, llvm::StringRef baseDir, Source &out, std
       name = rest.substr(0, at);
       rest = at == llvm::StringRef::npos ? llvm::StringRef() : rest.drop_front(at + 1);
     }
-    if (!isJsrNamePart(scope) || !isJsrNamePart(name)) {
+    if (!SourceParser::isJsrNamePart(scope) || !SourceParser::isJsrNamePart(name)) {
       error = "'" + spec.str() +
               "' does not name a JSR package: write 'jsr:@scope/name' and a "
               "range of versions, e.g. 'jsr:@std/path@^1'";
@@ -190,7 +187,7 @@ bool parseSource(llvm::StringRef spec, llvm::StringRef baseDir, Source &out, std
               (baseDir.empty() ? std::string() : " in " + baseDir.str());
       return false;
     }
-    out.form = LocalSource{.dir = canonical(full)};
+    out.form = LocalSource{.dir = Paths::canonical(full)};
     return true;
   }
   if (rest.starts_with("npm:")) {

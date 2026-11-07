@@ -13,102 +13,11 @@ using llvm::isa;
 
 namespace tz {
 
-namespace {
-
-bool known(const Range &r) { return r.lo && r.hi; }
-
-int64_t allOnes(int64_t v) {
-  int64_t m = 0;
-  while (m < v) {
-    m = m * 2 + 1;
-  }
-
-  return m;
-}
-
-int64_t floorShift(int64_t v, int64_t n) {
-  return v >= 0 ? v >> n : -((-v + (int64_t(1) << n) - 1) >> n);
-}
-
-}
-
-std::optional<int> encodingNamed(llvm::StringRef name) {
-  static const std::pair<llvm::StringLiteral, Encoding> names[] = {
-      {"utf8", Utf8},    {"utf-8", Utf8},    {"utf16le", Utf16le},     {"utf-16le", Utf16le},
-      {"ucs2", Utf16le}, {"ucs-2", Utf16le}, {"latin1", Latin1},       {"binary", Latin1},
-      {"ascii", Ascii},  {"base64", Base64}, {"base64url", Base64url}, {"hex", Hex},
-  };
-  std::string lower = name.lower();
-  for (const auto &[n, e] : names) {
-    if (n == lower) {
-      return int(e);
-    }
-  }
-
-  return std::nullopt;
-}
-
-std::string valueText(const Expr *e) {
-  while (auto *conv = dyn_cast<CastExpr>(e)) {
-    if (!conv->isImplicit()) {
-      break;
-    }
-    e = conv->operand;
-  }
-  if (auto *name = dyn_cast<NameExpr>(e)) {
-    return name->name.str();
-  }
-  if (auto *lit = dyn_cast<IntLitExpr>(e)) {
-    return std::to_string(lit->value);
-  }
-  if (auto *bin = dyn_cast<BinaryExpr>(e); bin && !bin->source.empty()) {
-    return "(" + bin->source.str() + ")";
-  }
-  if (auto *index = dyn_cast<IndexExpr>(e)) {
-    std::string object = valueText(index->object), position = valueText(index->index);
-    if (object != "x" && position != "x") {
-      return object + "[" + position + "]";
-    }
-  }
-
-  return "x";
-}
-
-std::string wrapHint(Bytes kind, const std::string &value) {
-  switch (kind) {
-  case Bytes::Int8:
-    return "((" + value + " & 0xff) ^ 0x80) - 0x80";
-  case Bytes::Int16:
-    return "((" + value + " & 0xffff) ^ 0x8000) - 0x8000";
-  case Bytes::Uint16:
-    return value + " & 0xffff";
-  case Bytes::Uint32:
-    return value + " & 0xffffffff";
-  case Bytes::Int32:
-    return "((" + value + " & 0xffffffff) ^ 0x80000000) - 0x80000000";
-  default:
-    return value + " & 0xff";
-  }
-}
-
-Range operateWide(BinaryOp op, const Range &a, const Range &b, bool isInt);
-
-Range operate(BinaryOp op, const Range &a, const Range &b, bool isInt) {
-  Range r = operateWide(op, a, b, isInt);
-  bool bitwise = op == BinaryOp::BitAnd || op == BinaryOp::BitOr || op == BinaryOp::BitXor ||
-                 op == BinaryOp::Shl || op == BinaryOp::Shr;
-  if (isInt && bitwise && !known(r)) {
-    return {kInt32Min, kInt32Max};
-  }
-
-  return r;
-}
-
-Range operateWide(BinaryOp op, const Range &a, const Range &b, bool isInt) {
+Range BytesCheckHelpers::operateWide(BinaryOp op, const Range &a, const Range &b, bool isInt) {
   int64_t min = isInt ? kInt32Min : kIntMin;
   int64_t max = isInt ? kInt32Max : kIntMax;
   auto within = [&](Range r) -> Range {
-    if (!known(r) || *r.lo < min || *r.hi > max) {
+    if (!BytesCheckHelpers::known(r) || *r.lo < min || *r.hi > max) {
       return {};
     }
 
@@ -133,13 +42,14 @@ Range operateWide(BinaryOp op, const Range &a, const Range &b, bool isInt) {
   }
   case BinaryOp::BitOr:
   case BinaryOp::BitXor:
-    if (known(a) && known(b) && *a.lo >= 0 && *b.lo >= 0) {
-      return {op == BinaryOp::BitOr ? std::max(*a.lo, *b.lo) : 0, allOnes(std::max(*a.hi, *b.hi))};
+    if (BytesCheckHelpers::known(a) && BytesCheckHelpers::known(b) && *a.lo >= 0 && *b.lo >= 0) {
+      return {op == BinaryOp::BitOr ? std::max(*a.lo, *b.lo) : 0,
+              BytesCheckHelpers::allOnes(std::max(*a.hi, *b.hi))};
     }
     return {};
   case BinaryOp::Shl:
-    if (count && known(a) && *count >= 0 && *count < (isInt ? 32 : 64) && *count < 40 &&
-        *a.lo > -(int64_t(1) << 40) && *a.hi < (int64_t(1) << 40)) {
+    if (count && BytesCheckHelpers::known(a) && *count >= 0 && *count < (isInt ? 32 : 64) &&
+        *count < 40 && *a.lo > -(int64_t(1) << 40) && *a.hi < (int64_t(1) << 40)) {
       return within({*a.lo * (int64_t(1) << *count), *a.hi * (int64_t(1) << *count)});
     }
     return {};
@@ -148,11 +58,12 @@ Range operateWide(BinaryOp op, const Range &a, const Range &b, bool isInt) {
       return {};
     }
     int64_t n = *count & (isInt ? 31 : 63);
-    if (known(a)) {
-      return {floorShift(*a.lo, n), floorShift(*a.hi, n)};
+    if (BytesCheckHelpers::known(a)) {
+      return {BytesCheckHelpers::floorShift(*a.lo, n), BytesCheckHelpers::floorShift(*a.hi, n)};
     }
     if (isInt) {
-      return {floorShift(kInt32Min, n), floorShift(kInt32Max, n)};
+      return {BytesCheckHelpers::floorShift(kInt32Min, n),
+              BytesCheckHelpers::floorShift(kInt32Max, n)};
     }
     return {};
   }
@@ -186,14 +97,14 @@ Range operateWide(BinaryOp op, const Range &a, const Range &b, bool isInt) {
     return {-m, m};
   }
   case BinaryOp::Div:
-    if (count && *count > 0 && known(a)) {
+    if (count && *count > 0 && BytesCheckHelpers::known(a)) {
       return {*a.lo / *count, *a.hi / *count};
     }
     return {};
   case BinaryOp::Add:
   case BinaryOp::Sub:
   case BinaryOp::Mul: {
-    if (op != BinaryOp::Mul && (!known(a) || !known(b))) {
+    if (op != BinaryOp::Mul && (!BytesCheckHelpers::known(a) || !BytesCheckHelpers::known(b))) {
       bool add = op == BinaryOp::Add;
       const std::optional<int64_t> &low = add ? b.lo : b.hi, &high = add ? b.hi : b.lo;
       Range r;
@@ -208,7 +119,7 @@ Range operateWide(BinaryOp op, const Range &a, const Range &b, bool isInt) {
       }
       return r;
     }
-    if (!known(a) || !known(b)) {
+    if (!BytesCheckHelpers::known(a) || !BytesCheckHelpers::known(b)) {
       return {};
     }
     int64_t xs[2] = {*a.lo, *a.hi}, ys[2] = {*b.lo, *b.hi};
@@ -233,7 +144,95 @@ Range operateWide(BinaryOp op, const Range &a, const Range &b, bool isInt) {
   }
 }
 
-bool numberMethod(llvm::StringRef name, bool dataView, NumberMethod &m) {
+bool BytesCheckHelpers::known(const Range &r) {
+  return r.lo && r.hi;
+}
+
+int64_t BytesCheckHelpers::allOnes(int64_t v) {
+  int64_t m = 0;
+  while (m < v) {
+    m = m * 2 + 1;
+  }
+
+  return m;
+}
+
+int64_t BytesCheckHelpers::floorShift(int64_t v, int64_t n) {
+  return v >= 0 ? v >> n : -((-v + (int64_t(1) << n) - 1) >> n);
+}
+
+std::optional<int> BytesCheckHelpers::encodingNamed(llvm::StringRef name) {
+  static const std::pair<llvm::StringLiteral, Encoding> names[] = {
+      {"utf8", Utf8},    {"utf-8", Utf8},    {"utf16le", Utf16le},     {"utf-16le", Utf16le},
+      {"ucs2", Utf16le}, {"ucs-2", Utf16le}, {"latin1", Latin1},       {"binary", Latin1},
+      {"ascii", Ascii},  {"base64", Base64}, {"base64url", Base64url}, {"hex", Hex},
+  };
+  std::string lower = name.lower();
+  for (const auto &[n, e] : names) {
+    if (n == lower) {
+      return int(e);
+    }
+  }
+
+  return std::nullopt;
+}
+
+std::string BytesCheckHelpers::valueText(const Expr *e) {
+  while (auto *conv = dyn_cast<CastExpr>(e)) {
+    if (!conv->isImplicit()) {
+      break;
+    }
+    e = conv->operand;
+  }
+  if (auto *name = dyn_cast<NameExpr>(e)) {
+    return name->name.str();
+  }
+  if (auto *lit = dyn_cast<IntLitExpr>(e)) {
+    return std::to_string(lit->value);
+  }
+  if (auto *bin = dyn_cast<BinaryExpr>(e); bin && !bin->source.empty()) {
+    return "(" + bin->source.str() + ")";
+  }
+  if (auto *index = dyn_cast<IndexExpr>(e)) {
+    std::string object = BytesCheckHelpers::valueText(index->object),
+                position = BytesCheckHelpers::valueText(index->index);
+    if (object != "x" && position != "x") {
+      return object + "[" + position + "]";
+    }
+  }
+
+  return "x";
+}
+
+std::string BytesCheckHelpers::wrapHint(Bytes kind, const std::string &value) {
+  switch (kind) {
+    case Bytes::Int8:
+      return "((" + value + " & 0xff) ^ 0x80) - 0x80";
+    case Bytes::Int16:
+      return "((" + value + " & 0xffff) ^ 0x8000) - 0x8000";
+    case Bytes::Uint16:
+      return value + " & 0xffff";
+    case Bytes::Uint32:
+      return value + " & 0xffffffff";
+    case Bytes::Int32:
+      return "((" + value + " & 0xffffffff) ^ 0x80000000) - 0x80000000";
+    default:
+      return value + " & 0xff";
+  }
+}
+
+Range BytesCheckHelpers::operate(BinaryOp op, const Range &a, const Range &b, bool isInt) {
+  Range r = BytesCheckHelpers::operateWide(op, a, b, isInt);
+  bool bitwise = op == BinaryOp::BitAnd || op == BinaryOp::BitOr || op == BinaryOp::BitXor ||
+                 op == BinaryOp::Shl || op == BinaryOp::Shr;
+  if (isInt && bitwise && !BytesCheckHelpers::known(r)) {
+    return {kInt32Min, kInt32Max};
+  }
+
+  return r;
+}
+
+bool BytesCheckHelpers::numberMethod(llvm::StringRef name, bool dataView, NumberMethod &m) {
   llvm::StringRef rest = name;
   if (dataView) {
     if (!rest.consume_front("get") && !(m.write = rest.consume_front("set"))) {
@@ -283,7 +282,7 @@ bool numberMethod(llvm::StringRef name, bool dataView, NumberMethod &m) {
   return false;
 }
 
-std::string numberWhat(Bytes kind) {
+std::string BytesCheckHelpers::numberWhat(Bytes kind) {
   switch (kind) {
   case Bytes::Int8:
     return "an Int8";

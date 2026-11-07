@@ -9,6 +9,9 @@ class FileUri {
 public:
   static std::string toPath(llvm::StringRef uri);
   static std::string fromPath(llvm::StringRef path);
+
+private:
+  static bool isDrive(llvm::StringRef text);
 };
 
 }

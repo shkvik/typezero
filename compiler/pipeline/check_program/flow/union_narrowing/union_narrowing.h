@@ -15,6 +15,9 @@ public:
   void addUnionFacts(const Expr *cond, Flow &whenTrue, Flow &whenFalse) const;
 
 private:
+  static llvm::ArrayRef<const Type *> membersOf(const Type *&type);
+  static const VarSymbol *readVariable(const Expr *expr);
+  static const Type *keepMembers(const Type *type, llvm::function_ref<bool(const Type *)> keep);
   CheckState &state;
 };
 

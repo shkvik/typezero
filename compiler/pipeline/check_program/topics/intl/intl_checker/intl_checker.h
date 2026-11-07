@@ -2,6 +2,8 @@
 
 #include "compiler/library/intl/intl_check_helpers/intl_check_helpers.h"
 #include "compiler/pipeline/check_program/check_state/check_state.h"
+#include "compiler/pipeline/check_program/topics/intl/intl_checker/intl_checker_errors.h"
+#include "compiler/result/result/result.h"
 
 namespace tz {
 
@@ -24,7 +26,9 @@ public:
   static const Type *intlTypeNamed(llvm::StringRef name);
 
 private:
-  static std::string utf8(const std::u16string &text);
+  static Expr *kindArg(AstContext &ctx, llvm::SMLoc loc, int kind);
+  using ResultLanguageTags = Result<std::vector<std::string>, IntlCheckerLanguageTagsError>;
+
   static std::optional<std::u16string> literalText(const Expr *e);
   static const IntlService *serviceNamed(llvm::StringRef name);
   static std::u16string utf16(llvm::StringRef text);
@@ -33,7 +37,7 @@ private:
   static bool isStringLike(const Type *type);
   static const Type *numberOptionType(llvm::StringRef name);
 
-  bool checkTags(const Expr *arg, llvm::StringRef what, bool constructor);
+  ResultLanguageTags languageTags(const Expr *arg, llvm::StringRef what, bool constructor);
 
   CheckState &state;
 };

@@ -22,6 +22,7 @@ public:
   llvm::StringRef textFrom(const char *start) const;
 
 private:
+  static bool startsStatement(Tok kind);
   Parser &parser_;
 };
 

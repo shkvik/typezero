@@ -258,11 +258,11 @@ bool AssignLowerer::cannotAssign(const Expr *expr) {
     auto *call = cast<CallExpr>(expr);
     if (call->builtin() == Builtin::None ||
         (call->builtin() >= Builtin::ArrForEach && call->builtin() <= Builtin::ArrSortWith) ||
-        isResultCallback(call->builtin()) || call->builtin() == Builtin::PromiseNew ||
-        call->builtin() == Builtin::IterNext || call->builtin() == Builtin::ArrayFrom ||
-        isIteratorSink(call->builtin()) || call->builtin() == Builtin::StrReplaceRegexFn ||
-        call->builtin() == Builtin::MapForEach || call->builtin() == Builtin::DictGroupBy ||
-        call->builtin() == Builtin::DictNew ||
+        BuiltinGroups::isResultCallback(call->builtin()) ||
+        call->builtin() == Builtin::PromiseNew || call->builtin() == Builtin::IterNext ||
+        call->builtin() == Builtin::ArrayFrom || BuiltinGroups::isIteratorSink(call->builtin()) ||
+        call->builtin() == Builtin::StrReplaceRegexFn || call->builtin() == Builtin::MapForEach ||
+        call->builtin() == Builtin::DictGroupBy || call->builtin() == Builtin::DictNew ||
         (call->builtin() == Builtin::BytesFromArray && call->args[0]->type->isIterator())) {
       return false;
     }
@@ -270,7 +270,8 @@ bool AssignLowerer::cannotAssign(const Expr *expr) {
       return false;
     }
     auto *member = dyn_cast<MemberExpr>(call->callee);
-    return !member || call->builtin() == Builtin::ConsoleLog || isMathBuiltin(call->builtin()) ||
+    return !member || call->builtin() == Builtin::ConsoleLog ||
+           BuiltinGroups::isMathBuiltin(call->builtin()) ||
            AssignLowerer::cannotAssign(member->object);
   }
   case Expr::Kind::Assign:

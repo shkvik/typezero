@@ -54,8 +54,10 @@ enum class BinaryOp {
   InstanceOf,
 };
 
-const char *opSpelling(UnaryOp op);
-
-const char *opSpelling(BinaryOp op);
+class Operators {
+public:
+  static const char *opSpelling(UnaryOp op);
+  static const char *opSpelling(BinaryOp op);
+};
 
 }

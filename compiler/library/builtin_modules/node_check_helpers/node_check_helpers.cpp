@@ -5,7 +5,7 @@
 
 namespace tz {
 
-std::string moduleLabel(NodeModule module) {
+std::string NodeCheckHelpers::moduleLabel(NodeModule module) {
   switch (module) {
   case NodeModule::Fs:
     return "node:fs";
@@ -44,9 +44,11 @@ std::string moduleLabel(NodeModule module) {
   return "";
 }
 
-bool targetIsWindows() { return llvm::Triple(llvm::sys::getDefaultTargetTriple()).isOSWindows(); }
+bool NodeCheckHelpers::targetIsWindows() {
+  return llvm::Triple(llvm::sys::getDefaultTargetTriple()).isOSWindows();
+}
 
-Expr *stringLiteral(AstContext &ctx, llvm::SMLoc loc, llvm::StringRef text) {
+Expr *NodeCheckHelpers::stringLiteral(AstContext &ctx, llvm::SMLoc loc, llvm::StringRef text) {
   llvm::SmallVector<llvm::UTF16, 32> units;
   llvm::convertUTF8ToUTF16String(text, units);
   auto *lit = ctx.make<StringLitExpr>(loc, std::u16string(units.begin(), units.end()));

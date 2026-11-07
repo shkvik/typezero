@@ -13,7 +13,7 @@ FieldFacts::FieldFacts(CheckState &owner)
     : state(owner) {}
 
 std::optional<FieldPath> FieldFacts::fieldPath(const Expr *expr) const {
-  auto *member = dyn_cast<MemberExpr>(unnarrowed(expr));
+  auto *member = dyn_cast<MemberExpr>(ObjectCheckHelpers::unnarrowed(expr));
   if (!member || member->optional || !member->object->type) {
     return std::nullopt;
   }
@@ -22,7 +22,7 @@ std::optional<FieldPath> FieldFacts::fieldPath(const Expr *expr) const {
   if (!(holder->isObject() || holder->isUnion() || holder->nonOptional()->isJson() || half)) {
     return std::nullopt;
   }
-  const Expr *object = unnarrowed(member->object);
+  const Expr *object = ObjectCheckHelpers::unnarrowed(member->object);
   FieldPath path;
   if (auto *name = dyn_cast<NameExpr>(object)) {
     if (!name->var()) {

@@ -24,7 +24,7 @@ using llvm::isa;
 namespace tz {
 
 std::string ObjectChecker::chainText(const Expr *expr) {
-  expr = unnarrowed(expr);
+  expr = ObjectCheckHelpers::unnarrowed(expr);
   if (auto *name = dyn_cast<NameExpr>(expr)) {
     return name->name.str();
   }
@@ -266,7 +266,7 @@ ObjectChecker::checkObjectCall(CallExpr *call, MemberExpr *member, const Type *e
     const Field &f = *field;
     const Type *t = f.type->nonOptional();
     const Type *both = element ? Type::unionOf({element, t}) : t;
-    std::string problem = unionProblem(both);
+    std::string problem = UnionSlots::unionProblem(both);
     if (!problem.empty()) {
       std::string message = ErrorTextObjectCall::noUnion(fn, t0->name(), problem);
 
@@ -438,7 +438,7 @@ void ObjectChecker::checkForIn(ForOfStmt *stmt) {
     block->body.insert(block->body.begin(), skip);
   }
   std::string text = type->isString() ? "s" : "a";
-  if (auto *name = dyn_cast<NameExpr>(unnarrowed(object))) {
+  if (auto *name = dyn_cast<NameExpr>(ObjectCheckHelpers::unnarrowed(object))) {
     text = name->name.str();
   }
   ResultForInKeysAllowed allowed = ObjectChecker::walkable(type, text);

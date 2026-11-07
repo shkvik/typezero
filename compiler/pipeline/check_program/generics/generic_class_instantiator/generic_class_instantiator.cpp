@@ -2,6 +2,7 @@
 #include "compiler/load/lexer/lexer.h"
 #include "compiler/load/parser/parser.h"
 #include "compiler/pipeline/check_program/declare/class_declarer/class_declarer.h"
+#include "compiler/pipeline/check_program/generics/generic_check_helpers/generic_check_helpers.h"
 #include "compiler/pipeline/check_program/generics/generic_class_checker/generic_class_checker.h"
 #include "compiler/pipeline/check_program/generics/inference/inference.h"
 #include "compiler/pipeline/check_program/generics/type_params/type_params.h"
@@ -104,11 +105,16 @@ GenericClassInstantiator::instantiateClass(ClassDecl *generic, std::vector<const
       });
     }
   }
-  if (emitter && !EventMaps(this->state).checkEventMap(args[0], loc)) {
-    return err(GenericClassInstantiatorInstantiateClassError{
-        .code = GenericClassInstantiatorInstantiateClassErrorCode::ALREADY_REPORTED,
-        .message = "",
-    });
+  if (emitter) {
+    EventMaps::ResultEventMapFits fits = EventMaps::eventMapFits(args[0]);
+    if (fits.isErr()) {
+      this->state.getDiagnostics().error(loc, fits.error().message);
+
+      return err(GenericClassInstantiatorInstantiateClassError{
+          .code = GenericClassInstantiatorInstantiateClassErrorCode::ALREADY_REPORTED,
+          .message = "",
+      });
+    }
   }
   GenericStore &generics = this->state.getGenericStore();
   if (ClassDecl *known = generics.findClassInstance(generic, args)) {
@@ -145,7 +151,7 @@ GenericClassInstantiator::instantiateClass(ClassDecl *generic, std::vector<const
   inst->typeArgs = args;
   inst->isAbstract = generic->isAbstract;
   inst->origin = generic->origin;
-  inst->checkOnly = llvm::any_of(args, [](const Type *t) { return mentionsParam(t); });
+  inst->checkOnly = llvm::any_of(args, [](const Type *t) { return TypeQueries::mentionsParam(t); });
   inst->stage = ClassStage::RESOLVED;
   inst->declared = true;
   inst->id = this->state.getClassStore().takeClassId();
@@ -225,7 +231,8 @@ void GenericClassInstantiator::declareInstanceMember(ClassDecl *inst, FunctionDe
   std::vector<const Type *> own = of->typeParams;
   std::vector<const Type *> mine = of->typeParams;
   for (const Type *&p : mine) {
-    if (p->iterated() && mentionsAnyOf(p->iterated(), inst->generic()->typeArgs)) {
+    if (p->iterated() &&
+        GenericCheckHelpers::mentionsAnyOf(p->iterated(), inst->generic()->typeArgs)) {
       Type *param = Type::param("Iterable<" + sub(p->iterated())->name().str() + ">");
       param->setIterated(sub(p->iterated()));
       p = param;

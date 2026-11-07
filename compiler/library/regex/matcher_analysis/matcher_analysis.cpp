@@ -12,26 +12,6 @@ using llvm::Value;
 
 namespace tz {
 
-namespace {
-
-bool isBack(uint32_t op) {
-  return op == RE_CHAR_BACK || op == RE_ANY_BACK || op == RE_ALL_BACK || op == RE_SET_BACK;
-}
-
-bool isCharInstruction(uint32_t op) {
-  return op == RE_CHAR || op == RE_ANY || op == RE_ALL || op == RE_SET || isBack(op);
-}
-
-bool hasByte(const ByteSet &s, uint32_t c) { return (s[c / 32] >> (c % 32)) & 1; }
-
-void addByte(ByteSet &s, uint32_t c) { s[c / 32] |= 1u << (c % 32); }
-
-uint64_t counterRange(const CountedLoop &loop) {
-  return loop.max == RE_INFINITY ? uint64_t(loop.min) + 1 : uint64_t(loop.max) + 1;
-}
-
-}
-
 MatcherAnalysis::MatcherAnalysis(MatcherBuilder &builder) : builder_(builder) {}
 
 void MatcherAnalysis::analyze() {
@@ -39,7 +19,8 @@ void MatcherAnalysis::analyze() {
   builder_.scope_.assign(builder_.codeSize_ + 1, -1);
   builder_.leader_[0] = 1;
   std::vector<uint32_t> looks;
-  for (uint32_t pc = 0; pc < builder_.codeSize_; pc += instructionSize(builder_.code_, pc)) {
+  for (uint32_t pc = 0; pc < builder_.codeSize_;
+       pc += MatcherBuilder::instructionSize(builder_.code_, pc)) {
     const uint32_t *op = builder_.code_ + pc;
     switch (op[0]) {
     case RE_GOTO:
@@ -68,7 +49,7 @@ void MatcherAnalysis::analyze() {
       builder_.targets_.insert(op[4]);
       break;
     case RE_REPEAT:
-      builder_.leader_[pc + instructionSize(builder_.code_, pc)] = 1;
+      builder_.leader_[pc + MatcherBuilder::instructionSize(builder_.code_, pc)] = 1;
       if (op[2] > 1) {
         builder_.hasLoops_ = true;
       }
@@ -105,7 +86,8 @@ void MatcherAnalysis::analyze() {
   }
   if (pc < builder_.codeSize_ && builder_.code_[pc] == RE_REPEAT && builder_.code_[pc + 3] &&
       builder_.code_[pc + 2] == RE_INFINITY && !builder_.hasBackref_ &&
-      !isBack(builder_.code_[pc + 5]) && (pc == 0 || !builder_.targets_.count(pc))) {
+      !MatcherBuilder::isBack(builder_.code_[pc + 5]) &&
+      (pc == 0 || !builder_.targets_.count(pc))) {
     builder_.skipRepeat_ = pc;
   }
 }
@@ -124,7 +106,7 @@ uint64_t MatcherAnalysis::contextSize(uint32_t pc) const {
     if (!inLoop(loop, pc)) {
       continue;
     }
-    size *= counterRange(loop) * (flagged(loop, pc) ? 2 : 1);
+    size *= MatcherBuilder::counterRange(loop) * (flagged(loop, pc) ? 2 : 1);
     if (size > kMaxMemoRows) {
       return size;
     }
@@ -139,7 +121,8 @@ void MatcherAnalysis::planMemo() {
     return;
   }
   uint64_t rows = 0;
-  for (uint32_t pc = 0; pc < builder_.codeSize_; pc += instructionSize(builder_.code_, pc)) {
+  for (uint32_t pc = 0; pc < builder_.codeSize_;
+       pc += MatcherBuilder::instructionSize(builder_.code_, pc)) {
     if (builder_.leader_[pc]) {
       builder_.blockRow_[pc] = uint32_t(rows);
       rows += contextSize(pc);
@@ -169,7 +152,7 @@ void MatcherAnalysis::closure(std::set<uint32_t> &states, bool &match, bool &unk
     uint32_t pc = work.back();
     work.pop_back();
     const uint32_t *op = builder_.code_ + pc;
-    uint32_t next = pc + instructionSize(builder_.code_, pc);
+    uint32_t next = pc + MatcherBuilder::instructionSize(builder_.code_, pc);
     switch (op[0]) {
     case RE_MATCH:
       match = true;
@@ -204,7 +187,7 @@ void MatcherAnalysis::closure(std::set<uint32_t> &states, bool &match, bool &unk
       unknown = true;
       break;
     default:
-      if (isCharInstruction(op[0])) {
+      if (MatcherBuilder::isCharInstruction(op[0])) {
         states.insert(pc);
       } else {
         add(next);
@@ -228,7 +211,7 @@ std::vector<OffsetSet> MatcherAnalysis::offsetSets(unsigned limit) const {
     std::set<uint32_t> next;
     for (uint32_t pc : states) {
       const uint32_t *op = builder_.code_ + pc;
-      uint32_t atom = pc, after = pc + instructionSize(builder_.code_, pc);
+      uint32_t atom = pc, after = pc + MatcherBuilder::instructionSize(builder_.code_, pc);
       if (op[0] == RE_REPEAT) {
         atom = pc + 5;
         if (op[2] > 1) {
@@ -239,7 +222,7 @@ std::vector<OffsetSet> MatcherAnalysis::offsetSets(unsigned limit) const {
       switch (a[0]) {
       case RE_CHAR:
         if (a[1] < 256) {
-          addByte(bytes, a[1]);
+          MatcherBuilder::addByte(bytes, a[1]);
         } else {
           units.wide = true;
         }
@@ -247,7 +230,7 @@ std::vector<OffsetSet> MatcherAnalysis::offsetSets(unsigned limit) const {
       case RE_ANY:
         for (uint32_t c = 0; c < 256; ++c) {
           if (c != '\n' && c != '\r') {
-            addByte(bytes, c);
+            MatcherBuilder::addByte(bytes, c);
           }
         }
         units.wide = true;
@@ -288,15 +271,15 @@ void MatcherAnalysis::planScan() {
     double share = 0;
     bool any = false;
     for (uint32_t c = 0; c < 256; ++c) {
-      if (hasByte(sets[k].bytes, c)) {
-        share += byteFrequency(c);
+      if (MatcherBuilder::hasByte(sets[k].bytes, c)) {
+        share += MatcherBuilder::byteFrequency(c);
         any = true;
       }
     }
     if (!any) {
       builder_.scanEmpty_ = true;
     }
-    if (any && !byteTests(sets[k].bytes).empty()) {
+    if (any && !MatcherBuilder::byteTests(sets[k].bytes).empty()) {
       usable.push_back({k, share / 1000});
     }
   }

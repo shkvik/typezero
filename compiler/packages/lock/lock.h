@@ -11,7 +11,10 @@ struct Lock {
   std::map<std::string, Locked> packages;
 };
 
-bool readLock(llvm::StringRef file, Lock &out);
-std::string lockText(const Lock &lock);
+class LockFile {
+public:
+  static std::string lockText(const Lock &lock);
+  static bool readLock(llvm::StringRef file, Lock &out);
+};
 
 }

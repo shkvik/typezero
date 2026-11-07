@@ -13,6 +13,7 @@ public:
   llvm::Value *emitEnumName(IndexExpr *index);
 
 private:
+  static std::u16string ascii16(llvm::StringRef text);
   Lowering &lowering;
 };
 

@@ -1,6 +1,7 @@
 #pragma once
 
 #include "compiler/pipeline/check_program/check_state/check_state.h"
+#include "compiler/pipeline/check_program/topics/events/emitter_checker/emitter_checker_errors.h"
 
 namespace tz {
 
@@ -13,7 +14,6 @@ public:
                           llvm::ArrayRef<const Type *> bound, const std::vector<bool> *given,
                           bool super);
   void reportEmitterMethodValue(MemberExpr *member);
-  static std::string libraryExportHint(llvm::StringRef name);
   Expr *checkEmitterNew(NewExpr *expr, ClassDecl *generic, const Type *expected);
   Expr *collectEmitterCall(CallExpr *call, MemberExpr *member, const std::string &site);
   void reportUnlistenedErrors();
@@ -25,15 +25,26 @@ public:
   static bool canReceive(const Type *type);
 
 private:
+  enum class EmitterMethod {
+    None,
+    Listen,
+    Remove,
+    Emit,
+    Listeners,
+    RawListeners,
+    Count,
+    RemoveAll
+  };
+
+  static EmitterMethod emitterMethod(llvm::StringRef name);
   static std::string chainText(const Expr *expr);
   static bool isServiceEvent(llvm::StringRef name);
   static std::string fileOfPlace(const std::string &place);
-  static std::string quotedList(const std::vector<const VarSymbol *> &vars);
   static std::string shortPlace(const std::string &place);
 
   void noteListener(MemberExpr *member, const Type *events, llvm::StringRef event);
   EmitterKey keyOf(const Expr *root) const;
-  std::string emitterName(const EmitterKey &key) const;
+  std::string emitterPath(const EmitterKey &key) const;
 
   CheckState &state;
 };

@@ -4,9 +4,10 @@
 
 namespace tz {
 
-namespace {
+CycleExprs::CycleExprs(CycleScanner &scanner)
+    : scanner_(scanner) {}
 
-bool runsAndDrops(Builtin builtin) {
+bool CycleExprs::runsAndDrops(Builtin builtin) {
   switch (builtin) {
   case Builtin::PromiseNew:
   case Builtin::PromiseThen:
@@ -21,15 +22,11 @@ bool runsAndDrops(Builtin builtin) {
   }
 }
 
-const FunctionExpr *closureLiteral(const Expr *arg) {
+const FunctionExpr *CycleExprs::closureLiteral(const Expr *arg) {
   auto *fn = llvm::dyn_cast<FunctionExpr>(arg);
 
   return fn && !fn->fn->group ? fn : nullptr;
 }
-
-}
-
-CycleExprs::CycleExprs(CycleScanner &scanner) : scanner_(scanner) {}
 
 void CycleExprs::closure(const FunctionExpr *expr, bool held) {
   const FunctionDecl *fn = expr->fn;
@@ -151,18 +148,18 @@ void CycleExprs::expr(const Expr *expr) {
         }
       }
     }
-    bool drops = runsAndDrops(call->builtin());
+    bool drops = CycleExprs::runsAndDrops(call->builtin());
     for (const Expr *arg : call->args) {
-      if (const FunctionExpr *fn = drops ? closureLiteral(arg) : nullptr) {
+      if (const FunctionExpr *fn = drops ? CycleExprs::closureLiteral(arg) : nullptr) {
         scanner_.addType(arg->type);
         closure(fn, false);
       } else {
         this->expr(arg);
       }
     }
-    if (isPromiseBuiltin(call->builtin())) {
+    if (BuiltinGroups::isPromiseBuiltin(call->builtin())) {
       for (const Expr *arg : call->args) {
-        if (drops && closureLiteral(arg)) {
+        if (drops && CycleExprs::closureLiteral(arg)) {
           continue;
         }
         if (arg->type && arg->type->nonOptional()->isFunction()) {

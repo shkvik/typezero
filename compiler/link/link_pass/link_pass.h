@@ -16,6 +16,7 @@ public:
   Errors run(const ObjectFile &object, const CryptoUse &crypto, bool parallel) const;
 
 private:
+  static bool inUse(llvm::StringRef path);
   const Target &target_;
   const BuildOptions &options_;
 };

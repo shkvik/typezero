@@ -6,10 +6,9 @@ namespace tz {
 
 class FlowCalls {
 public:
-  explicit FlowCalls(Flows &flows);
+  explicit FlowCalls(Flows &owner);
 
   bool mayCall(const Type *type, const FunctionDecl *fn) const;
-  void functionValue(const FunctionDecl *fn);
   Refs receiverConversion(const Expr *at, const Type *from, const FunctionDecl *method,
                           const Refs &refs, const VarSymbol *initializes, std::string role);
   void passArguments(const CallExpr *call, const FunctionDecl *target,
@@ -20,7 +19,7 @@ public:
   void callback(const Expr *arg, const Refs &values);
 
 private:
-  Flows &flows_;
+  Flows &flows;
 };
 
 }

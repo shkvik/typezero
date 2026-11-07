@@ -52,7 +52,7 @@ StoreScanner::Sources StoreCalls::call(const CallExpr *c) {
       return;
     }
     if (virtualCall) {
-      forEachOverride(fn, one);
+      StoreScanner::forEachOverride(fn, one);
     } else {
       one(fn);
     }

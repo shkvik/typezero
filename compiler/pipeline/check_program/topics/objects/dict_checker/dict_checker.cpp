@@ -254,7 +254,7 @@ DictChecker::ResultDictMemberAccess DictChecker::checkDictMember(MemberExpr *mem
 
     return ok(size);
   }
-  std::string text = dictText(member->object, type);
+  std::string text = DictCheckHelpers::dictText(member->object, type);
   bool method = type->isMap() ? llvm::is_contained(kMapMethods, member->name)
                               : llvm::is_contained(kSetMethods, member->name);
   member->type = Type::error();
@@ -284,7 +284,7 @@ DictChecker::ResultDictIndexedValue DictChecker::checkDictIndex(IndexExpr *index
     return ok(read);
   }
   index->index = ExprChecker(this->state).checkExpr(index->index);
-  std::string text = dictText(index->object, type);
+  std::string text = DictCheckHelpers::dictText(index->object, type);
   index->type = Type::error();
   if (type->isMap()) {
     std::string message = ErrorTextDictIndex::mapIndex(text);
@@ -308,7 +308,7 @@ DictChecker::ResultRecordTargetType DictChecker::checkDictTarget(Expr *target, b
   Expr *object = index ? index->object : member->object;
   const Type *type = object->type;
   target->type = Type::error();
-  std::string text = dictText(object, type);
+  std::string text = DictCheckHelpers::dictText(object, type);
   if (!type->isRecord() && index) {
     index->index = ExprChecker(this->state).checkExpr(index->index);
   }
@@ -399,7 +399,7 @@ DictChecker::checkDictDelete(UnaryExpr *unary, Expr *object, Expr *keyExpr, llvm
   const Type *type = object->type;
   unary->type = Type::boolTy();
   if (!type->isRecord()) {
-    std::string text = dictText(object, type);
+    std::string text = DictCheckHelpers::dictText(object, type);
     if (keyExpr) {
       keyExpr = ExprChecker(this->state).checkExpr(keyExpr);
     }
@@ -435,7 +435,7 @@ DictChecker::ResultRecordKeyChecked DictChecker::checkDictIn(BinaryExpr *bin) {
     });
   }
   if (!type->isRecord()) {
-    std::string text = dictText(bin->rhs, type);
+    std::string text = DictCheckHelpers::dictText(bin->rhs, type);
     const char *kind = type->isMap() ? "Map" : "Set";
     const char *what = type->isMap() ? "key" : "value";
     std::string message = ErrorTextDictIn::property(kind, text, what);

@@ -4,10 +4,11 @@
 
 namespace tz {
 
-std::string moduleLabel(NodeModule module);
-
-bool targetIsWindows();
-
-Expr *stringLiteral(AstContext &ctx, llvm::SMLoc loc, llvm::StringRef text);
+class NodeCheckHelpers {
+public:
+  static std::string moduleLabel(NodeModule module);
+  static bool targetIsWindows();
+  static Expr *stringLiteral(AstContext &ctx, llvm::SMLoc loc, llvm::StringRef text);
+};
 
 }

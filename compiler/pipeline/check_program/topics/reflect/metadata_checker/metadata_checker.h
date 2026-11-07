@@ -1,16 +1,20 @@
 #pragma once
 
 #include "compiler/pipeline/check_program/check_state/check_state.h"
+#include "compiler/pipeline/check_program/topics/reflect/metadata_checker/metadata_checker_errors.h"
+#include "compiler/result/result/result.h"
 
 namespace tz {
 
 class MetadataChecker {
 public:
+  using ResultMetadataTyped = Result<const Type *, MetadataCheckerMetadataTypeError>;
+
   explicit MetadataChecker(CheckState &owner);
 
   const void *metadataKey(const Expr *key, std::string &label);
-  const Type *metadataType(const void *key, llvm::StringRef label, llvm::SMLoc loc,
-                           const Type *expected);
+  ResultMetadataTyped metadataType(const void *key, llvm::StringRef label, llvm::SMLoc loc,
+                                   const Type *expected);
   void findMetadataWriters(SourceFile &program);
   void checkBodyEarly(FunctionDecl *fn);
   Expr *designClass(const Type *type, llvm::SMLoc loc);
