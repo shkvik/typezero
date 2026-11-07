@@ -154,9 +154,17 @@ Expr *BufferChecker::checkBufferMethod(CallExpr *call, MemberExpr *member) {
     for (size_t i = 1; i < call->args.size(); ++i) {
       std::string what = std::string("'") + names[i] + "'";
       if (i == 2 || i == 4) {
-        proofs.requireUpTo(call->args[i], i == 2 ? call->args[0] : member->object, 0, what);
+        IndexProofs::ResultUpToWasProven upTo =
+            proofs.requireUpTo(call->args[i], i == 2 ? call->args[0] : member->object, 0, what);
+        if (upTo.isErr() && upTo.error().code != IndexProofsRequireUpToErrorCode::EXEMPT) {
+          checker_.diags_.error(call->args[i]->loc(), upTo.error().message);
+        }
       } else {
-        proofs.requireBetween(call->args[i], 0, std::nullopt, what);
+        IndexProofs::ResultBetweenProven between =
+            proofs.requireBetween(call->args[i], 0, std::nullopt, what);
+        if (between.isErr() && between.error().code != IndexProofsRequireBetweenErrorCode::EXEMPT) {
+          checker_.diags_.error(call->args[i]->loc(), between.error().message);
+        }
       }
     }
     return made(Builtin::BufferCompareTo, Type::intTy());
@@ -176,9 +184,17 @@ Expr *BufferChecker::checkBufferMethod(CallExpr *call, MemberExpr *member) {
     for (size_t i = 1; i < call->args.size(); ++i) {
       std::string what = std::string("'") + names[i] + "'";
       if (i == 2) {
-        proofs.requireUpTo(call->args[i], member->object, 0, what);
+        IndexProofs::ResultUpToWasProven upTo =
+            proofs.requireUpTo(call->args[i], member->object, 0, what);
+        if (upTo.isErr() && upTo.error().code != IndexProofsRequireUpToErrorCode::EXEMPT) {
+          checker_.diags_.error(call->args[i]->loc(), upTo.error().message);
+        }
       } else {
-        proofs.requireBetween(call->args[i], 0, std::nullopt, what);
+        IndexProofs::ResultBetweenProven between =
+            proofs.requireBetween(call->args[i], 0, std::nullopt, what);
+        if (between.isErr() && between.error().code != IndexProofsRequireBetweenErrorCode::EXEMPT) {
+          checker_.diags_.error(call->args[i]->loc(), between.error().message);
+        }
       }
     }
     return made(Builtin::BufferCopy, Type::intTy());
@@ -208,10 +224,15 @@ Expr *BufferChecker::checkBufferMethod(CallExpr *call, MemberExpr *member) {
       }
       positions.push_back(checker_.memberChecker().checkPosition(arg));
     }
-    if (!positions.empty() &&
-        checker_.indexProofs().requireUpTo(positions[0], member->object, 0, "the offset") &&
-        positions.size() > 1) {
-      checkWriteLength(member->object, positions[0], positions[1]);
+    if (!positions.empty()) {
+      IndexProofs::ResultUpToWasProven upTo =
+          checker_.indexProofs().requireUpTo(positions[0], member->object, 0, "the offset");
+      if (upTo.isErr() && upTo.error().code != IndexProofsRequireUpToErrorCode::EXEMPT) {
+        checker_.diags_.error(positions[0]->loc(), upTo.error().message);
+      }
+      if (upTo.isOk() && positions.size() > 1) {
+        checkWriteLength(member->object, positions[0], positions[1]);
+      }
     }
     std::vector<Expr *> args{text, encoding ? encoding : utf8Lit()};
     args.insert(args.end(), positions.begin(), positions.end());
@@ -252,8 +273,11 @@ Expr *BufferChecker::checkBufferMethod(CallExpr *call, MemberExpr *member) {
     }
     if (fill) {
       for (size_t i = 0; i < positions.size(); ++i) {
-        checker_.indexProofs().requireUpTo(positions[i], member->object, 0,
-                                           i == 0 ? "the offset" : "the end");
+        IndexProofs::ResultUpToWasProven upTo = checker_.indexProofs().requireUpTo(
+            positions[i], member->object, 0, i == 0 ? "the offset" : "the end");
+        if (upTo.isErr() && upTo.error().code != IndexProofsRequireUpToErrorCode::EXEMPT) {
+          checker_.diags_.error(positions[i]->loc(), upTo.error().message);
+        }
       }
     }
     std::vector<Expr *> args;
@@ -312,8 +336,12 @@ Expr *BufferChecker::checkBufferMethod(CallExpr *call, MemberExpr *member) {
                                               "' must be written as a number from 1 to 6");
       return call;
     }
-    call->mayBeOutOfRange = !checker_.indexProofs().requireUpTo(
+    IndexProofs::ResultUpToWasProven upTo = checker_.indexProofs().requireUpTo(
         offset, member->object, *n, "the offset of '" + name.str() + "'");
+    if (upTo.isErr() && upTo.error().code != IndexProofsRequireUpToErrorCode::EXEMPT) {
+      checker_.diags_.error(offset->loc(), upTo.error().message);
+    }
+    call->mayBeOutOfRange = upTo.isErr();
     if (m.write) {
       int64_t bits = *n * 8;
       int64_t lo = m.isSigned ? -(int64_t(1) << (bits - 1)) : 0;
@@ -349,8 +377,12 @@ Expr *BufferChecker::checkBufferMethod(CallExpr *call, MemberExpr *member) {
   if (offset) {
     args.push_back(offset);
   }
-  call->mayBeOutOfRange = !checker_.indexProofs().requireUpTo(offset, member->object, size,
-                                                              "the offset of '" + name.str() + "'");
+  IndexProofs::ResultUpToWasProven upTo = checker_.indexProofs().requireUpTo(
+      offset, member->object, size, "the offset of '" + name.str() + "'");
+  if (upTo.isErr() && upTo.error().code != IndexProofsRequireUpToErrorCode::EXEMPT) {
+    checker_.diags_.error(offset ? offset->loc() : member->object->loc(), upTo.error().message);
+  }
+  call->mayBeOutOfRange = upTo.isErr();
   call->args = std::move(args);
 
   const Type *read =
@@ -432,8 +464,12 @@ Expr *BufferChecker::checkTextMethod(CallExpr *call, MemberExpr *member) {
 
 void BufferChecker::checkWriteLength(const Expr *object, const Expr *offset, const Expr *length) {
   IndexProofs &proofs = checker_.indexProofs();
-  if (!proofs.requireBetween(length, 0, std::nullopt, "the length") ||
-      checker_.indexProofs().exempt(length->loc(), object)) {
+  IndexProofs::ResultBetweenProven between =
+      proofs.requireBetween(length, 0, std::nullopt, "the length");
+  if (between.isErr() && between.error().code != IndexProofsRequireBetweenErrorCode::EXEMPT) {
+    checker_.diags_.error(length->loc(), between.error().message);
+  }
+  if (between.isErr() || checker_.indexProofs().exempt(length->loc(), object)) {
     return;
   }
   if (!proofs.provesSumUpTo(proofs.linear(offset), proofs.linear(length), object)) {

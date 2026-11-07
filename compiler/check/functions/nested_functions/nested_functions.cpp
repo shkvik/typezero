@@ -420,36 +420,50 @@ void NestedFunctions::finishGroup(NestedGroup *group) {
     this->checker.functionChecker().checkFunctionBody(fn);
     this->checker.returnInferrer().leaveBody(saved);
   }
-
-  auto declaredAfter = [&](const NestedGroup::Use &use) -> VarSymbol * {
-    std::vector<FunctionDecl *> reached{use.fn};
-    for (size_t i = 0; i < reached.size(); ++i) {
-      for (FunctionDecl *sibling : reached[i]->siblings) {
-        if (!llvm::is_contained(reached, sibling)) {
-          reached.push_back(sibling);
-        }
-      }
-    }
-    for (FunctionDecl *fn : reached) {
-      for (VarSymbol *var : fn->captures) {
-        if (var->owner() == group->owner && var->declSeq() > use.seq) {
-          return var;
-        }
-      }
-    }
-
-    return nullptr;
-  };
   for (const NestedGroup::Use &use : group->uses) {
-    if (VarSymbol *var = declaredAfter(use)) {
-      this->checker.diags_.error(
-          use.loc, "'" + use.fn->name + "' uses '" + var->name +
-                       "' before it is declared: JavaScript would throw a ReferenceError when it "
-                       "runs here; move the declaration of '" +
-                       var->name + "' up");
-      this->checker.diags_.note(var->loc, "'" + var->name + "' is declared here");
+    ResultUseInOrder ordered = NestedFunctions::useOrder(group, use);
+    if (ordered.isErr()) {
+      VarSymbol *later = NestedFunctions::capturedLater(group, use);
+      std::string declared = ErrorTextUseOrder::declared(later->name);
+      this->checker.diags_.error(use.loc, ordered.error().message);
+      this->checker.diags_.note(later->loc, declared);
     }
   }
+}
+
+VarSymbol *NestedFunctions::capturedLater(const NestedGroup *group, const NestedGroup::Use &use) {
+  std::vector<FunctionDecl *> reached{use.fn};
+  for (size_t i = 0; i < reached.size(); ++i) {
+    for (FunctionDecl *sibling : reached[i]->siblings) {
+      if (!llvm::is_contained(reached, sibling)) {
+        reached.push_back(sibling);
+      }
+    }
+  }
+  for (FunctionDecl *fn : reached) {
+    for (VarSymbol *var : fn->captures) {
+      if (var->owner() == group->owner && var->declSeq() > use.seq) {
+        return var;
+      }
+    }
+  }
+
+  return nullptr;
+}
+
+NestedFunctions::ResultUseInOrder NestedFunctions::useOrder(const NestedGroup *group,
+                                                            const NestedGroup::Use &use) {
+  VarSymbol *later = NestedFunctions::capturedLater(group, use);
+  if (later) {
+    std::string message = ErrorTextUseOrder::early(use.fn->name, later->name);
+
+    return err(NestedFunctionsUseOrderError{
+        .code = NestedFunctionsUseOrderErrorCode::USED_BEFORE_DECLARED,
+        .message = message,
+    });
+  }
+
+  return ok(&use);
 }
 
 void NestedFunctions::noteUse(VarSymbol *var, llvm::SMLoc loc) {

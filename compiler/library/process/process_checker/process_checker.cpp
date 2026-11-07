@@ -138,7 +138,20 @@ Expr *ProcessChecker::checkProcessCall(CallExpr *call, MemberExpr *member) {
     return call;
   }
   if (name == "nextTick") {
-    return checker_.timerChecker().checkNextTick(call, member);
+    TimerChecker::ResultNextTickQueued queued = checker_.timerChecker().checkNextTick(call, member);
+    if (queued.isOk()) {
+      return queued.value();
+    }
+    llvm::SMLoc at = member->loc();
+    switch (queued.error().code) {
+      case TimerCheckerCheckNextTickErrorCode::CALLBACK_ARGUMENTS:
+        at = call->args[1]->loc();
+        break;
+      case TimerCheckerCheckNextTickErrorCode::WRONG_ARITY:
+        break;
+    }
+    checker_.diags_.error(at, queued.error().message);
+    return call;
   }
   if (name == "exit") {
     ArgumentChecker::ResultArityMatches arity = checker_.argumentChecker().checkArity(call, 0, 1);

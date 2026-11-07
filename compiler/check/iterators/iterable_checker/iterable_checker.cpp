@@ -36,27 +36,28 @@ constexpr llvm::StringLiteral kIterateSource = R"(function* iterate<I, V>(it: I)
 
 }
 
-IterableChecker::IterableChecker(Checker &checker) : checker_(checker) {}
+IterableChecker::IterableChecker(Checker &owner)
+    : checker(owner) {}
 
 FuncSymbol *IterableChecker::iterateFunction() {
-  if (iterate_) {
-    return iterate_;
+  if (this->iterateSymbol) {
+    return this->iterateSymbol;
   }
   std::unique_ptr<llvm::MemoryBuffer> buffer =
       llvm::MemoryBuffer::getMemBuffer(kIterateSource, "<tz>");
   llvm::StringRef text = buffer->getBuffer();
-  checker_.diags_.sourceMgr().AddNewSourceBuffer(std::move(buffer), llvm::SMLoc());
-  Lexer lexer(text, checker_.diags_);
-  Parser parser(lexer, checker_.ctx_, checker_.diags_);
+  this->checker.diags_.sourceMgr().AddNewSourceBuffer(std::move(buffer), llvm::SMLoc());
+  Lexer lexer(text, this->checker.diags_);
+  Parser parser(lexer, this->checker.ctx_, this->checker.diags_);
   FunctionDecl *fn = parser.parseFunctionCopy();
-  std::vector<llvm::StringMap<Stmt *>> outer = checker_.typeScopes_;
-  checker_.typeScopes_.resize(1);
-  checker_.functionChecker().declareFunction(fn, nullptr, false);
-  checker_.typeScopes_ = std::move(outer);
-  iterate_ = fn->sym;
-  checker_.exactParams_[iterate_] = {true, true};
+  std::vector<llvm::StringMap<Stmt *>> outer = this->checker.typeScopes_;
+  this->checker.typeScopes_.resize(1);
+  this->checker.functionChecker().declareFunction(fn, nullptr, false);
+  this->checker.typeScopes_ = std::move(outer);
+  this->iterateSymbol = fn->sym;
+  this->checker.exactParams_[this->iterateSymbol] = {true, true};
 
-  return iterate_;
+  return this->iterateSymbol;
 }
 
 const Type *IterableChecker::iteratorResultType(const Type *value, const Type *returned) {
@@ -76,10 +77,10 @@ const Type *IterableChecker::nextValueType(const Type *type) {
   }
   const Type *next = nullptr;
   if (ClassDecl *cls = ClassDeclarer::classOf(type)) {
-    checker_.classDeclarer().completeClass(cls);
+    this->checker.classDeclarer().completeClass(cls);
     for (FunctionDecl *fn : ClassDeclarer::methodsNamed(cls, "next", false)) {
       if (fn->sym && fn->sym->minArgs == 0 && fn->typeParams.empty()) {
-        next = checker_.returnInferrer().functionType(fn->sym);
+        next = this->checker.returnInferrer().functionType(fn->sym);
       }
     }
   }
@@ -119,17 +120,17 @@ Expr *IterableChecker::iteratorOf(Expr *it) {
   if (type->isIterator() || type->isError()) {
     return it;
   }
-  const Type *value = nextValueType(type);
+  const Type *value = this->nextValueType(type);
   if (!value) {
     return nullptr;
   }
-  FuncSymbol *iterate = iterateFunction();
+  FuncSymbol *iterate = this->iterateFunction();
   llvm::SMLoc loc = it->loc();
-  auto *callee = checker_.ctx_.make<NameExpr>(loc, iterate->name);
-  auto *call = checker_.ctx_.make<CallExpr>(loc, callee, std::vector<Expr *>{it});
+  auto *callee = this->checker.ctx_.make<NameExpr>(loc, iterate->name);
+  auto *call = this->checker.ctx_.make<CallExpr>(loc, callee, std::vector<Expr *>{it});
   call->target = FunctionCall{.func = iterate};
-  if (!checker_.trial_) {
-    if (FuncSymbol *instance = checker_.genericInstantiator().instantiate(
+  if (!this->checker.trial_) {
+    if (FuncSymbol *instance = this->checker.genericInstantiator().instantiate(
             iterate, {type->nonOptional(), value}, loc)) {
       call->target = FunctionCall{.func = instance};
     }
@@ -138,9 +139,9 @@ Expr *IterableChecker::iteratorOf(Expr *it) {
   call->type = Type::iterator(value);
   callee->type = Type::function({type->nonOptional()}, 1, false, call->type);
   if (type->isOptional()) {
-    call->args[0] = checker_.typeRelations().convert(it, type->nonOptional());
+    call->args[0] = this->checker.typeRelations().convert(it, type->nonOptional());
   }
-  checker_.flowChecker().calledFunction();
+  this->checker.flowChecker().calledFunction();
 
   return call;
 }
@@ -151,26 +152,24 @@ Expr *IterableChecker::userIterator(Expr *expr) {
   if (!cls) {
     return nullptr;
   }
-  checker_.classDeclarer().completeClass(cls);
+  this->checker.classDeclarer().completeClass(cls);
   if (ClassDeclarer::methodsNamed(cls, kIteratorMethod, false).empty() &&
       !ClassBases::findField(cls, kIteratorMethod)) {
     return nullptr;
   }
-  auto *member = checker_.ctx_.make<MemberExpr>(expr->loc(), expr, kIteratorMethod);
-  auto *call = checker_.ctx_.make<CallExpr>(expr->loc(), member, std::vector<Expr *>{});
-  Expr *result = checker_.methodCallChecker().checkMethodCall(call, member);
+  auto *member = this->checker.ctx_.make<MemberExpr>(expr->loc(), expr, kIteratorMethod);
+  auto *call = this->checker.ctx_.make<CallExpr>(expr->loc(), member, std::vector<Expr *>{});
+  Expr *result = this->checker.methodCallChecker().checkMethodCall(call, member);
   if (result->type->isError() || result->type->isIterator()) {
     return result;
   }
-  if (Expr *it = iteratorOf(result)) {
+  if (Expr *it = this->iteratorOf(result)) {
     return it;
   }
-  checker_.diags_.error(expr->loc(),
-                        "'[Symbol.iterator]()' of '" + type->name() + "' gives '" +
-                            result->type->name() +
-                            "', which is not an iterator: it needs a method 'next()' that gives "
-                            "'{ done, value }' (IteratorResult<T>); or make it a generator, "
-                            "'*[Symbol.iterator]() { yield ... }'");
+  ResultIteratorGiven given = IterableChecker::iteratorGiven(type, result);
+  if (given.isErr()) {
+    this->checker.diags_.error(expr->loc(), given.error().message);
+  }
   result->type = Type::error();
 
   return result;
@@ -181,13 +180,13 @@ const Type *IterableChecker::asyncIterableType(const Type *type) {
   if (!cls) {
     return nullptr;
   }
-  checker_.classDeclarer().completeClass(cls);
+  this->checker.classDeclarer().completeClass(cls);
   std::vector<FunctionDecl *> methods =
       ClassDeclarer::methodsNamed(cls, kAsyncIteratorMethod, false);
   if (methods.size() != 1 || !methods[0]->sym) {
     return nullptr;
   }
-  const Type *result = checker_.returnInferrer().returnType(methods[0]->sym);
+  const Type *result = this->checker.returnInferrer().returnType(methods[0]->sym);
 
   return result && result->isAsyncIterator() ? result : nullptr;
 }
@@ -198,22 +197,21 @@ Expr *IterableChecker::asyncUserIterator(Expr *expr) {
   if (!cls) {
     return nullptr;
   }
-  checker_.classDeclarer().completeClass(cls);
+  this->checker.classDeclarer().completeClass(cls);
   if (ClassDeclarer::methodsNamed(cls, kAsyncIteratorMethod, false).empty() &&
       !ClassBases::findField(cls, kAsyncIteratorMethod)) {
     return nullptr;
   }
-  auto *member = checker_.ctx_.make<MemberExpr>(expr->loc(), expr, kAsyncIteratorMethod);
-  auto *call = checker_.ctx_.make<CallExpr>(expr->loc(), member, std::vector<Expr *>{});
-  Expr *result = checker_.methodCallChecker().checkMethodCall(call, member);
+  auto *member = this->checker.ctx_.make<MemberExpr>(expr->loc(), expr, kAsyncIteratorMethod);
+  auto *call = this->checker.ctx_.make<CallExpr>(expr->loc(), member, std::vector<Expr *>{});
+  Expr *result = this->checker.methodCallChecker().checkMethodCall(call, member);
   if (result->type->isError() || result->type->isAsyncIterator()) {
     return result;
   }
-  checker_.diags_.error(expr->loc(),
-                        "'[Symbol.asyncIterator]()' of '" + type->name() + "' gives '" +
-                            result->type->name() +
-                            "', which is not an async iterator; make it an async generator, "
-                            "'async *[Symbol.asyncIterator]() { yield ... }'");
+  ResultAsyncIterator given = IterableChecker::asyncIteratorGiven(type, result);
+  if (given.isErr()) {
+    this->checker.diags_.error(expr->loc(), given.error().message);
+  }
   result->type = Type::error();
 
   return result;
@@ -242,70 +240,103 @@ const Type *IterableChecker::elementTypeOf(const Type *type) {
   if (!cls) {
     return nullptr;
   }
-  checker_.classDeclarer().completeClass(cls);
+  this->checker.classDeclarer().completeClass(cls);
   std::vector<FunctionDecl *> methods = ClassDeclarer::methodsNamed(cls, kIteratorMethod, false);
   if (methods.size() != 1 || !methods[0]->sym) {
     return nullptr;
   }
-  const Type *result = checker_.returnInferrer().returnType(methods[0]->sym);
+  const Type *result = this->checker.returnInferrer().returnType(methods[0]->sym);
   if (!result || result->isError()) {
     return nullptr;
   }
 
-  return result->isIterator() ? result->yielded() : nextValueType(result);
+  return result->isIterator() ? result->yielded() : this->nextValueType(result);
 }
 
 bool IterableChecker::isIterableRef(const TypeRef &ref) const {
   return ref.kind() == TypeRefKind::GENERIC_REF && ref.name == "Iterable" &&
-         !checker_.typeDeclarer().lookupType("Iterable");
+         !this->checker.typeDeclarer().lookupType("Iterable");
 }
 
-const Type *IterableChecker::iterableParam(FunctionDecl *fn, FuncSymbol *sym, const TypeRef &ref) {
-  if (!isIterableRef(ref)) {
-    return nullptr;
+IterableChecker::ResultIteratorGiven IterableChecker::iteratorGiven(const Type *type,
+                                                                    const Expr *result) {
+  if (!result->type->isError() && !result->type->isIterator()) {
+    std::string message = ErrorTextIteratorGiven::notIterator(type->name(), result->type->name());
+
+    return err(IterableCheckerIteratorGivenError{
+        .code = IterableCheckerIteratorGivenErrorCode::NOT_AN_ITERATOR,
+        .message = message,
+    });
+  }
+
+  return ok(result);
+}
+
+IterableChecker::ResultAsyncIterator IterableChecker::asyncIteratorGiven(const Type *type,
+                                                                         const Expr *result) {
+  if (!result->type->isError() && !result->type->isAsyncIterator()) {
+    std::string message = ErrorTextAsyncGiven::notAsync(type->name(), result->type->name());
+
+    return err(IterableCheckerAsyncIteratorGivenError{
+        .code = IterableCheckerAsyncIteratorGivenErrorCode::NOT_AN_ASYNC_ITERATOR,
+        .message = message,
+    });
+  }
+
+  return ok(result);
+}
+
+IterableChecker::ResultIterableParam
+IterableChecker::iterableParam(FunctionDecl *fn, FuncSymbol *sym, const TypeRef &ref) {
+  if (!this->isIterableRef(ref)) {
+    return err(IterableCheckerIterableParamError{
+        .code = IterableCheckerIterableParamErrorCode::NOT_ITERABLE,
+        .message = "",
+    });
   }
   if (ref.args.size() != 1) {
-    checker_.diags_.error(
-        ref.loc,
-        "'Iterable' takes one type argument, the type of its values, e.g. 'Iterable<int>'");
-    return Type::error();
+    std::string message = ErrorTextIterableParam::typeArgs();
+
+    return err(IterableCheckerIterableParamError{
+        .code = IterableCheckerIterableParamErrorCode::WRONG_ARGUMENT_COUNT,
+        .message = message,
+    });
   }
-  const Type *element = checker_.typeResolver().resolveType(ref.args[0], false);
+  const Type *element = this->checker.typeResolver().resolveType(ref.args[0], false);
   if (element->isError()) {
-    return element;
+    return ok(element);
   }
   if (fn->isConstructor()) {
-    checker_.diags_.error(ref.loc,
-                          "a constructor cannot take an 'Iterable<" + element->name() +
-                              ">' yet: it would make a copy of the constructor for each kind of "
-                              "iterable; take an array, e.g. '" +
-                              element->name() +
-                              "[]', and pass "
-                              "'[...xs]'");
-    return Type::error();
+    std::string message = ErrorTextIterableParam::inCtor(element->name());
+
+    return err(IterableCheckerIterableParamError{
+        .code = IterableCheckerIterableParamErrorCode::CONSTRUCTOR_ITERABLE,
+        .message = message,
+    });
   }
   if (fn->var && !fn->typeParams.empty()) {
-    return Type::error();
+    return ok(Type::error());
   }
   if (fn->isClosure() || fn->var) {
-    checker_.diags_.error(ref.loc,
-                          "a parameter 'Iterable<" + element->name() +
-                              ">' makes the function generic, and a generic function can be "
-                              "declared only at the top level for now; take an array, e.g. '" +
-                              element->name() + "[]'");
-    return Type::error();
+    std::string message = ErrorTextIterableParam::notTop(element->name());
+
+    return err(IterableCheckerIterableParamError{
+        .code = IterableCheckerIterableParamErrorCode::CLOSURE_ITERABLE,
+        .message = message,
+    });
   }
+
   Type *param = Type::param("Iterable<" + element->name().str() + ">");
   param->setIterated(element);
   TypeParamDecl decl;
-  decl.name = checker_.ctx_.hiddenName();
+  decl.name = this->checker.ctx_.hiddenName();
   decl.loc = ref.loc;
   fn->typeParams.push_back(decl);
   fn->typeArgs.push_back(param);
   sym->typeParams.push_back(param);
   sym->typeDefaults.push_back(nullptr);
 
-  return param;
+  return ok(param);
 }
 
 }

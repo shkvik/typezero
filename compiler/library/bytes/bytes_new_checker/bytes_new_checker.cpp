@@ -147,8 +147,11 @@ Expr *BytesNewChecker::checkBytesNew(NewExpr *expr, const Type *type) {
       return call;
     }
     call->args[0] = checker_.memberChecker().checkPosition(call->args[0]);
-    checker_.indexProofs().requireBetween(call->args[0], 0, std::nullopt,
-                                          "the length of an ArrayBuffer");
+    IndexProofs::ResultBetweenProven between = checker_.indexProofs().requireBetween(
+        call->args[0], 0, std::nullopt, "the length of an ArrayBuffer");
+    if (between.isErr() && between.error().code != IndexProofsRequireBetweenErrorCode::EXEMPT) {
+      checker_.diags_.error(call->args[0]->loc(), between.error().message);
+    }
     return made(Builtin::ArrayBufferNew, type);
   }
   case Bytes::DataView: {
@@ -308,8 +311,11 @@ Expr *BytesNewChecker::checkBytesNew(NewExpr *expr, const Type *type) {
   }
   if (from->isInteger()) {
     source = checker_.typeRelations().convert(source, Type::intTy());
-    checker_.indexProofs().requireBetween(source, 0, std::nullopt,
-                                          "the length of a " + type->name().str());
+    IndexProofs::ResultBetweenProven between = checker_.indexProofs().requireBetween(
+        source, 0, std::nullopt, "the length of a " + type->name().str());
+    if (between.isErr() && between.error().code != IndexProofsRequireBetweenErrorCode::EXEMPT) {
+      checker_.diags_.error(source->loc(), between.error().message);
+    }
     auto *zeroed = checker_.ctx_.make<BoolLitExpr>(loc, true);
     zeroed->type = Type::boolTy();
     call->args.push_back(zeroed);

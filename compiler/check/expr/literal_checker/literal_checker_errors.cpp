@@ -3,7 +3,7 @@
 
 namespace tz {
 
-std::string ErrorTextIntFits::tooBig(llvm::StringRef type) {
+std::string ErrorTextIntLit::tooBig(llvm::StringRef type) {
   return (llvm::Twine("integer literal does not fit in type '") + type + "'").str();
 }
 

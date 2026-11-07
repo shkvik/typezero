@@ -8,16 +8,15 @@ namespace tz {
 
 class LiteralChecker {
 public:
+  using ResultIntLiteralTyped = Result<Expr *, LiteralCheckerCheckIntLitError>;
+
   explicit LiteralChecker(Checker &owner);
 
-  Expr *checkIntLit(IntLitExpr *lit, const Type *expected, bool negated);
   Expr *checkTemplate(TemplateExpr *tmpl, const Type *expected = nullptr);
+  ResultIntLiteralTyped checkIntLit(IntLitExpr *lit, const Type *expected, bool negated);
 
 private:
-  using ResultIntLiteralFits = Result<const Type *, LiteralCheckerIntFitsError>;
-
   static bool fitsIn(const IntLitExpr *lit, const Type *type, bool negated);
-  static ResultIntLiteralFits intFits(const IntLitExpr *lit, const Type *type, bool negated);
 
   Checker &checker;
 };

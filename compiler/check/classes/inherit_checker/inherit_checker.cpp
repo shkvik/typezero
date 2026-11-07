@@ -249,8 +249,14 @@ Expr *InheritChecker::checkSuperCall(CallExpr *call) {
     checkArgsLoosely();
   } else {
     bool checked = false;
-    if (FuncSymbol *sym = this->checker.overloadResolver().chooseVariant(
-            ctors, call->args, call->spread, call->loc(), checked)) {
+    OverloadResolver::ResultVariantChosen picked =
+        this->checker.overloadResolver().chooseVariant(ctors, call->args, call->spread, checked);
+    if (picked.isErr() &&
+        picked.error().code != OverloadResolverChooseVariantErrorCode::ALREADY_REPORTED) {
+      this->checker.diags_.error(call->loc(), picked.error().message);
+    }
+    if (picked.isOk()) {
+      FuncSymbol *sym = picked.value();
       const FunctionDecl *chosen = sym->decl ? sym->decl : ctors[0];
       this->checker.classMemberChecker().checkAccess(chosen->cls(), chosen->access(), "constructor",
                                                      call->loc());
@@ -346,11 +352,16 @@ Expr *InheritChecker::checkSuperMethodCall(CallExpr *call, MemberExpr *member) {
   }
   bool checked = false;
   std::vector<const Type *> bound;
-  FuncSymbol *sym = this->checker.overloadResolver().chooseVariant(
-      methods, call->args, call->spread, member->loc(), checked, &bound);
-  if (!sym) {
+  OverloadResolver::ResultVariantChosen picked = this->checker.overloadResolver().chooseVariant(
+      methods, call->args, call->spread, checked, &bound);
+  if (picked.isErr() &&
+      picked.error().code != OverloadResolverChooseVariantErrorCode::ALREADY_REPORTED) {
+    this->checker.diags_.error(member->loc(), picked.error().message);
+  }
+  if (picked.isErr()) {
     return call;
   }
+  FuncSymbol *sym = picked.value();
   if (sym->decl->isAbstract()) {
     this->checker.diags_.error(member->loc(), "'" + member->name + "' is abstract in '" +
                                                   sym->decl->cls()->name +

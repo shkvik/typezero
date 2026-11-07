@@ -165,10 +165,10 @@ bool OverloadResolver::hasFloatLiteral(const Expr *expr) {
 OverloadResolver::OverloadResolver(Checker &owner)
     : checker(owner) {}
 
-FuncSymbol *OverloadResolver::chooseVariant(llvm::ArrayRef<FunctionDecl *> variants,
-                                            std::vector<Expr *> &args,
-                                            const std::vector<bool> &spread, llvm::SMLoc loc,
-                                            bool &checked, std::vector<const Type *> *bound) {
+OverloadResolver::ResultVariantChosen
+OverloadResolver::chooseVariant(llvm::ArrayRef<FunctionDecl *> variants, std::vector<Expr *> &args,
+                                const std::vector<bool> &spread, bool &checked,
+                                std::vector<const Type *> *bound) {
   checked = false;
   auto checkLoosely = [&] {
     for (Expr *&arg : args) {
@@ -178,20 +178,22 @@ FuncSymbol *OverloadResolver::chooseVariant(llvm::ArrayRef<FunctionDecl *> varia
     }
   };
   if (variants.size() == 1) {
-    return variants[0]->sym;
+    return ok(variants[0]->sym);
   }
   const FunctionDecl *first = variants[0];
-  std::string what = first->isConstructor()
-                         ? "the constructor of '" + first->cls()->name.str() + "'"
-                         : "'" + first->name.str() + "'";
+  std::string what = first->isConstructor() ? ErrorTextVariant::ctorOf(first->cls()->name)
+                                            : ErrorTextVariant::quoted(first->name);
   for (FunctionDecl *v : variants) {
     this->checker.returnInferrer().resolveParams(v->sym);
   }
   if (llvm::is_contained(spread, true)) {
-    this->checker.diags_.error(loc, "a spread argument cannot choose among the variants of " +
-                                        what + "; pass the arguments one by one");
     checkLoosely();
-    return nullptr;
+    std::string message = ErrorTextVariant::spread(what);
+
+    return err(OverloadResolverChooseVariantError{
+        .code = OverloadResolverChooseVariantErrorCode::SPREAD_ARGUMENT,
+        .message = message,
+    });
   }
   size_t count = args.size();
   std::vector<FunctionDecl *> fit;
@@ -202,14 +204,17 @@ FuncSymbol *OverloadResolver::chooseVariant(llvm::ArrayRef<FunctionDecl *> varia
     }
   }
   if (fit.empty()) {
-    this->checker.diags_.error(loc, "no variant of " + what + " takes " + std::to_string(count) +
-                                        " argument" + (count == 1 ? "" : "s") + ": there are " +
-                                        variantList(variants));
+    std::string list = variantList(variants);
     checkLoosely();
-    return nullptr;
+    std::string message = ErrorTextVariant::count(what, count, list);
+
+    return err(OverloadResolverChooseVariantError{
+        .code = OverloadResolverChooseVariantErrorCode::NO_VARIANT_FOR_COUNT,
+        .message = message,
+    });
   }
   if (fit.size() == 1) {
-    return fit[0]->sym;
+    return ok(fit[0]->sym);
   }
 
   for (size_t i = 0; i < count; ++i) {
@@ -252,8 +257,12 @@ FuncSymbol *OverloadResolver::chooseVariant(llvm::ArrayRef<FunctionDecl *> varia
         args[i], expected && !expected->isError() ? expected : nullptr);
   }
   checked = true;
-  if (llvm::any_of(args, [](const Expr *arg) { return arg->type->isError(); })) {
-    return nullptr;
+  auto failed = [](const Expr *arg) { return arg->type->isError(); };
+  if (llvm::any_of(args, failed)) {
+    return err(OverloadResolverChooseVariantError{
+        .code = OverloadResolverChooseVariantErrorCode::ALREADY_REPORTED,
+        .message = "",
+    });
   }
 
   struct Candidate {
@@ -269,7 +278,7 @@ FuncSymbol *OverloadResolver::chooseVariant(llvm::ArrayRef<FunctionDecl *> varia
     Candidate c{v, {}, v->sym->hasRest || count < v->sym->params.size(), {}};
     if (v->sym->isGeneric() &&
         !this->checker.typeArgInferrer().inferFromArguments(v->sym, args, c.typeArgs)) {
-      why += "; " + variantText(v) + " cannot take these arguments for its type parameters";
+      why += ErrorTextVariant::typeParams(variantText(v));
       continue;
     }
     std::string mismatch;
@@ -284,8 +293,8 @@ FuncSymbol *OverloadResolver::chooseVariant(llvm::ArrayRef<FunctionDecl *> varia
         c.adapted = true;
       }
       if (rank < 0) {
-        mismatch = variantText(v) + " takes '" + param->name().str() + "' as argument " +
-                   std::to_string(i + 1) + ", which is '" + args[i]->type->name().str() + "'";
+        mismatch =
+            ErrorTextVariant::mismatch(variantText(v), param->name(), i + 1, args[i]->type->name());
         if (numberHint.empty()) {
           numberHint = TypeRelations::conversionHint(args[i], param);
         }
@@ -299,9 +308,12 @@ FuncSymbol *OverloadResolver::chooseVariant(llvm::ArrayRef<FunctionDecl *> varia
     }
   }
   if (applicable.empty()) {
-    this->checker.diags_.error(loc, "no variant of " + what + " fits these arguments" + why +
-                                        numberHint);
-    return nullptr;
+    std::string message = ErrorTextVariant::noFit(what, why, numberHint);
+
+    return err(OverloadResolverChooseVariantError{
+        .code = OverloadResolverChooseVariantErrorCode::NO_VARIANT_FITS,
+        .message = message,
+    });
   }
   auto better = [&](const Candidate &a, const Candidate &b) {
     bool strictly = false;
@@ -321,30 +333,31 @@ FuncSymbol *OverloadResolver::chooseVariant(llvm::ArrayRef<FunctionDecl *> varia
                      [&](const Candidate &other) { return &other == &c || better(c, other); })) {
       if (c.fn->sym->isGeneric()) {
         if (!bound) {
-          this->checker.diags_.error(loc, "the call chooses " + variantText(c.fn) +
-                                              ", a generic variant, which " +
-                                              "cannot be chosen here");
-          return nullptr;
+          std::string message = ErrorTextVariant::generic(variantText(c.fn));
+
+          return err(OverloadResolverChooseVariantError{
+              .code = OverloadResolverChooseVariantErrorCode::GENERIC_VARIANT,
+              .message = message,
+          });
         }
         *bound = c.typeArgs;
       }
-      return c.fn->sym;
+      return ok(c.fn->sym);
     }
   }
   std::vector<FunctionDecl *> tied;
   for (const Candidate &c : applicable) {
     tied.push_back(c.fn);
   }
-  bool literals = llvm::all_of(applicable, [](const Candidate &c) { return c.adapted; });
-  this->checker.diags_.error(
-      loc, "the call fits several variants of " + what + " equally well: " + variantList(tied) +
-               (literals ? "; a number literal fits each of them: write it so "
-                           "that it has the type of one, e.g. '2.0' for a "
-                           "double, or give it a type through a constant, "
-                           "'const k: int32 = 2'"
-                         : "; convert an argument to choose one"));
+  auto adapted = [](const Candidate &c) { return c.adapted; };
+  bool literals = llvm::all_of(applicable, adapted);
+  std::string list = variantList(tied);
+  std::string message = ErrorTextVariant::tie(what, list, literals);
 
-  return nullptr;
+  return err(OverloadResolverChooseVariantError{
+      .code = OverloadResolverChooseVariantErrorCode::SEVERAL_VARIANTS_FIT,
+      .message = message,
+  });
 }
 
 Expr *OverloadResolver::callGenericVariant(CallExpr *call, FuncSymbol *sym,
@@ -383,10 +396,11 @@ Expr *OverloadResolver::callGenericVariant(CallExpr *call, FuncSymbol *sym,
                                                         loc, &given);
 }
 
-FuncSymbol *OverloadResolver::variantForType(llvm::ArrayRef<FunctionDecl *> variants,
-                                             const Type *expected, const MemberExpr *member) {
+OverloadResolver::ResultVariantOfType
+OverloadResolver::variantForType(llvm::ArrayRef<FunctionDecl *> variants, const Type *expected,
+                                 const MemberExpr *member) {
   if (variants.size() == 1) {
-    return variants[0]->sym;
+    return ok(variants[0]->sym);
   }
   std::vector<FunctionDecl *> matching;
   const Type *wanted = expected ? expected->nonOptional() : nullptr;
@@ -412,7 +426,7 @@ FuncSymbol *OverloadResolver::variantForType(llvm::ArrayRef<FunctionDecl *> vari
     }
   }
   if (matching.size() == 1) {
-    return matching[0]->sym;
+    return ok(matching[0]->sym);
   }
   const FunctionDecl *last = variants.back();
   std::string type = "(";
@@ -425,18 +439,18 @@ FuncSymbol *OverloadResolver::variantForType(llvm::ArrayRef<FunctionDecl *> vari
   if (auto *name = dyn_cast<NameExpr>(member->object)) {
     object = name->name.str();
   }
-  this->checker.diags_.error(
-      member->loc(), "'" + member->name + "' has several variants, " + variantList(variants) +
-                         ": say which one with the type of the place it goes, e.g. "
-                         "'const f: " +
-                         type + " = " + object + "." + member->name + "'");
+  std::string list = variantList(variants);
+  std::string message = ErrorTextVariantType::several(member->name, list, type, object);
 
-  return nullptr;
+  return err(OverloadResolverVariantForTypeError{
+      .code = OverloadResolverVariantForTypeErrorCode::SEVERAL_VARIANTS,
+      .message = message,
+  });
 }
 
 std::vector<FunctionDecl *> OverloadResolver::signatureVariants(const Type *iface,
                                                                 const Overload &overload) {
-  std::vector<FunctionDecl *> &variants = signatureVariants_[{iface, overload.name}];
+  std::vector<FunctionDecl *> &variants = this->variantsOfSignature[{iface, overload.name}];
   if (!variants.empty()) {
     return variants;
   }
@@ -475,10 +489,15 @@ Expr *OverloadResolver::checkOverloadCall(CallExpr *call, MemberExpr *member) {
   call->type = member->type = Type::error();
   std::vector<FunctionDecl *> variants = this->signatureVariants(iface, overload);
   bool checked = false;
-  FuncSymbol *sym = this->chooseVariant(variants, call->args, call->spread, member->loc(), checked);
-  if (!sym) {
+  ResultVariantChosen chosen = this->chooseVariant(variants, call->args, call->spread, checked);
+  if (chosen.isErr() &&
+      chosen.error().code != OverloadResolverChooseVariantErrorCode::ALREADY_REPORTED) {
+    this->checker.diags_.error(member->loc(), chosen.error().message);
+  }
+  if (chosen.isErr()) {
     return call;
   }
+  FuncSymbol *sym = chosen.value();
   auto found = llvm::find(variants, sym->decl);
   int signature = int(found - variants.begin());
   call->target = OverloadCall{.signature = signature};
@@ -496,10 +515,12 @@ Expr *OverloadResolver::checkOverloadMember(MemberExpr *member, const Type *expe
   const Overload &overload = *iface->overload(member->name);
   member->type = Type::error();
   std::vector<FunctionDecl *> variants = this->signatureVariants(iface, overload);
-  FuncSymbol *sym = this->variantForType(variants, expected, member);
-  if (!sym) {
+  ResultVariantOfType variant = this->variantForType(variants, expected, member);
+  if (variant.isErr()) {
+    this->checker.diags_.error(member->loc(), variant.error().message);
     return member;
   }
+  FuncSymbol *sym = variant.value();
   int signature = int(llvm::find(variants, sym->decl) - variants.begin());
   member->form = OverloadMember{.signature = signature};
   member->type = overload.signatures[size_t(signature)];

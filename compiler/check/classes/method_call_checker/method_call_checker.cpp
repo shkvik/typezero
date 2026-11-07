@@ -103,11 +103,16 @@ Expr *MethodCallChecker::checkMethodCall(CallExpr *call, MemberExpr *member, con
   }
   bool checked = false;
   std::vector<const Type *> bound;
-  FuncSymbol *sym = this->checker.overloadResolver().chooseVariant(
-      methods, call->args, call->spread, member->loc(), checked, &bound);
-  if (!sym) {
+  OverloadResolver::ResultVariantChosen picked = this->checker.overloadResolver().chooseVariant(
+      methods, call->args, call->spread, checked, &bound);
+  if (picked.isErr() &&
+      picked.error().code != OverloadResolverChooseVariantErrorCode::ALREADY_REPORTED) {
+    this->checker.diags_.error(member->loc(), picked.error().message);
+  }
+  if (picked.isErr()) {
     return call;
   }
+  FuncSymbol *sym = picked.value();
   if (methods.size() > 1 && sym->decl) {
     this->checker.classMemberChecker().checkAccess(sym->decl->cls(), sym->decl->access(), name,
                                                    member->loc(), member->object);
@@ -190,11 +195,16 @@ Expr *MethodCallChecker::checkClassNew(NewExpr *expr, ClassDecl *cls, const Type
     }
   } else {
     bool checked = false;
-    FuncSymbol *sym =
-        this->checker.overloadResolver().chooseVariant(ctors, call->args, {}, expr->loc(), checked);
-    if (!sym) {
+    OverloadResolver::ResultVariantChosen picked =
+        this->checker.overloadResolver().chooseVariant(ctors, call->args, {}, checked);
+    if (picked.isErr() &&
+        picked.error().code != OverloadResolverChooseVariantErrorCode::ALREADY_REPORTED) {
+      this->checker.diags_.error(expr->loc(), picked.error().message);
+    }
+    if (picked.isErr()) {
       return expr;
     }
+    FuncSymbol *sym = picked.value();
     const FunctionDecl *chosen = sym->decl ? sym->decl : ctors[0];
     this->checker.classMemberChecker().checkAccess(chosen->cls(), chosen->access(), "constructor",
                                                    expr->loc());

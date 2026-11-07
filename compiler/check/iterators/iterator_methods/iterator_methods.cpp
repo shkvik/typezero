@@ -271,8 +271,11 @@ Expr *IteratorMethods::checkIteratorMethod(CallExpr *call, MemberExpr *member) {
       return call;
     }
     call->args[0] = this->checker.memberChecker().checkPosition(call->args[0]);
-    this->checker.indexProofs().requireBetween(call->args[0], 0, std::nullopt,
-                                               "the count of '" + name.str() + "'");
+    IndexProofs::ResultBetweenProven between = this->checker.indexProofs().requireBetween(
+        call->args[0], 0, std::nullopt, "the count of '" + name.str() + "'");
+    if (between.isErr() && between.error().code != IndexProofsRequireBetweenErrorCode::EXEMPT) {
+      this->checker.diags_.error(call->args[0]->loc(), between.error().message);
+    }
     call->target = BuiltinCall{.builtin = builtin};
     call->type = Type::iterator(element);
     return call;

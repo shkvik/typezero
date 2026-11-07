@@ -137,63 +137,75 @@ std::string TopLevelChecker::loadChain(const Module *reader, const Module *sourc
   return chain;
 }
 
-std::string TopLevelChecker::readBeforeLoad(const Module *reader, const std::string &what,
-                                            const Module *source, llvm::StringRef declared) {
-  return reader->name + " reads " + what + " while it loads, but " + source->name +
-         " is not loaded yet: " + TopLevelChecker::loadChain(reader, source) +
-         "; compute the value inside a function, or move '" + declared.str() +
-         "' to a file outside the cycle";
+std::string TopLevelChecker::loadLabel(llvm::StringRef name, llvm::StringRef declared,
+                                       const Module *source) const {
+  if (declared != name) {
+    return ErrorTextNotLoaded::label(name, declared, source->name);
+  }
+  if (source != this->checker.loading_) {
+    return ErrorTextNotLoaded::labelOf(name, source->name);
+  }
+
+  return ErrorTextNotLoaded::quoted(name);
 }
 
-bool TopLevelChecker::reportNotLoaded(const NameExpr *name) {
+TopLevelChecker::ResultSourceIsLoaded TopLevelChecker::checkLoaded(const NameExpr *name) {
   if (this->checker.state(this->checker.module_).badImports.contains(name->name)) {
-    return true;
+    return err(TopLevelCheckerCheckLoadedError{
+        .code = TopLevelCheckerCheckLoadedErrorCode::ALREADY_REPORTED,
+        .message = "",
+    });
   }
+
   llvm::StringRef declared;
   Module *source = this->laterSource(name->name, declared);
-  if (!source) {
-    return false;
-  }
-  std::string what = "'" + name->name.str() + "'";
-  if (declared != name->name) {
-    what += " ('" + declared.str() + "' of " + source->name + ")";
-  } else if (source != this->checker.loading_) {
-    what += " of " + source->name;
-  }
   Module *reader = this->checker.loading_ ? this->checker.loading_ : this->checker.module_;
-  if (this->checker.functions_.empty() && this->checker.module_ == this->checker.loading_) {
-    this->checker.diags_.error(name->loc(),
-                               TopLevelChecker::readBeforeLoad(reader, what, source, declared));
-    return true;
+  std::string what = source ? this->loadLabel(name->name, declared, source) : "";
+  bool topLevel =
+      this->checker.functions_.empty() && this->checker.module_ == this->checker.loading_;
+  if (source && topLevel) {
+    std::string chain = TopLevelChecker::loadChain(reader, source);
+    std::string message =
+        ErrorTextNotLoaded::whileLoads(reader->name, what, source->name, chain, declared);
+
+    return err(TopLevelCheckerCheckLoadedError{
+        .code = TopLevelCheckerCheckLoadedErrorCode::READ_WHILE_LOADING,
+        .message = message,
+    });
   }
-  if (this->checker.early_) {
-    this->checker.diags_.error(
-        name->loc(), what + " has no type yet when " + reader->name + " first calls '" +
-                         this->checker.early_->name + "', which needs to know what '" +
-                         this->checker.early_->name +
-                         "' returns: the files import each other; declare the return type of '" +
-                         this->checker.early_->name + "'");
-  } else {
-    this->checker.diags_.error(
-        name->loc(), what + " has no type yet where " + reader->name +
-                         " creates this function: the files import each other; declare the "
-                         "function with 'function' at the top level of the file, which is "
-                         "checked after every file");
+  if (source && this->checker.early_) {
+    std::string message =
+        ErrorTextNotLoaded::beforeCall(what, reader->name, this->checker.early_->name);
+
+    return err(TopLevelCheckerCheckLoadedError{
+        .code = TopLevelCheckerCheckLoadedErrorCode::NO_TYPE_BEFORE_CALL,
+        .message = message,
+    });
+  }
+  if (source) {
+    std::string message = ErrorTextNotLoaded::inFunction(what, reader->name);
+
+    return err(TopLevelCheckerCheckLoadedError{
+        .code = TopLevelCheckerCheckLoadedErrorCode::NO_TYPE_IN_FUNCTION,
+        .message = message,
+    });
   }
 
-  return true;
+  return ok(name);
 }
 
-bool TopLevelChecker::reportImportAssign(const NameExpr *name, const VarSymbol *var) {
-  if (!this->checker.state(this->checker.module_).importedVars.contains(var)) {
-    return false;
-  }
-  this->checker.diags_.error(name->loc(), "cannot assign to '" + name->name +
-                                              "' because it is imported; change it in "
-                                              "the file that declares it, e.g. with a "
-                                              "function that file exports");
+TopLevelChecker::ResultVarNotImported
+TopLevelChecker::checkImportAssign(const NameExpr *name, const VarSymbol *var) const {
+  if (this->checker.state(this->checker.module_).importedVars.contains(var)) {
+    std::string message = ErrorTextImportAssign::imported(name->name);
 
-  return true;
+    return err(TopLevelCheckerCheckImportAssignError{
+        .code = TopLevelCheckerCheckImportAssignErrorCode::IMPORTED_VARIABLE,
+        .message = message,
+    });
+  }
+
+  return ok(var);
 }
 
 }

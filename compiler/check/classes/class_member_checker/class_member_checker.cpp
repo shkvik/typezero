@@ -137,10 +137,13 @@ Expr *ClassMemberChecker::checkClassMember(MemberExpr *member, const Type *expec
                            this->checker.classChecker().firstUnset(this->checker.flow_).value() +
                            "' is not set yet");
   }
-  FuncSymbol *sym = this->checker.overloadResolver().variantForType(methods, expected, member);
-  if (!sym) {
+  OverloadResolver::ResultVariantOfType variant =
+      this->checker.overloadResolver().variantForType(methods, expected, member);
+  if (variant.isErr()) {
+    this->checker.diags_.error(member->loc(), variant.error().message);
     return member;
   }
+  FuncSymbol *sym = variant.value();
   if (sym->isGeneric()) {
     this->checker.diags_.error(
         member->loc(), "'" + name +

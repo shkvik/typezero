@@ -57,7 +57,16 @@ void VarChecker::checkVarDecl(VarDeclStmt *decl) {
     if (auto *name = llvm::dyn_cast_or_null<NameExpr>(d.init);
         name && decl->isConst && !declared && !d.destructured() && name->typeArgs.empty()) {
       if (FuncSymbol *generic = this->checker.genericChecker().genericNamed(name)) {
-        this->checker.scopes().declare(d.name, d.loc, {FunctionEntry{.func = generic}});
+        Scopes::ResultEntryDeclared added =
+            this->checker.scopes().declare(d.name, d.loc, {FunctionEntry{.func = generic}});
+        if (added.isErr()) {
+          this->checker.diags_.error(d.loc, added.error().message);
+        }
+        if (added.isErr() && added.error().code != ScopesDeclareErrorCode::UNDEFINED_AS_NAME) {
+          ScopeEntry previousEntry = this->checker.scopes().lookup(d.name);
+          std::string declaredHere = ErrorTextDeclare::previous();
+          this->checker.diags_.note(previousEntry.loc(), declaredHere);
+        }
         d.alias = true;
         continue;
       }
@@ -141,23 +150,20 @@ void VarChecker::checkVarDecl(VarDeclStmt *decl) {
         d.init = this->checker.typeRelations().coerce(d.init, declared);
       } else {
         type = d.init->type;
-        if (type->isVoid()) {
-          this->checker.diags_.error(d.init->loc(),
-                                     "an expression of type 'void' cannot initialize a variable");
-          type = Type::error();
-        } else if (type->isUndefined() && !decl->isConst && !d.destructured()) {
-          untyped = true;
+        ResultInitHasType typed = VarChecker::initHasType(decl, d, type);
+        if (typed.isErr()) {
+          this->checker.diags_.error(d.init->loc(), typed.error().message);
           type = Type::error();
         } else if (type->isUndefined()) {
-          this->checker.diags_.error(
-              d.init->loc(), llvm::Twine("cannot infer a type from 'undefined'; add one, e.g. '") +
-                                 (decl->isConst ? "const " : "let ") + d.name +
-                                 ": int | undefined = undefined'");
+          untyped = true;
           type = Type::error();
         }
       }
     } else if (decl->isConst) {
-      this->checker.diags_.error(d.loc, "'const' declarations must be initialized");
+      ResultConstValued valued = VarChecker::constValue(decl, d);
+      if (valued.isErr()) {
+        this->checker.diags_.error(d.loc, valued.error().message);
+      }
       if (!type) {
         type = Type::error();
       }
@@ -176,14 +182,12 @@ void VarChecker::checkVarDecl(VarDeclStmt *decl) {
     } else if (d.destructured() && type->isIterator() && !declared) {
       d.init = value = this->checker.generatorChecker().destructuredIterator(d.init, d);
       type = d.init->type;
-    } else if (d.destructured() && !type->isArray() && !type->isTuple() && !type->isMatch() &&
-               !type->isError() && !type->nonOptional()->isJson()) {
-      std::string message = "only arrays can be destructured, found '" + type->name().str() + "'";
-      if (type->isOptional() && type->inner()->isArray()) {
-        message += "; the array may be undefined: check it first";
+    } else {
+      ResultDestructure shaped = VarChecker::destructurable(d, type);
+      if (shaped.isErr()) {
+        this->checker.diags_.error(d.init ? d.init->loc() : d.loc, shaped.error().message);
+        type = Type::error();
       }
-      this->checker.diags_.error(d.init ? d.init->loc() : d.loc, message);
-      type = Type::error();
     }
 
     if (early) {
@@ -302,6 +306,111 @@ void VarChecker::checkVarDecl(VarDeclStmt *decl) {
   }
 }
 
+VarChecker::ResultInitHasType VarChecker::initHasType(const VarDeclStmt *decl,
+                                                      const VarDeclarator &d, const Type *type) {
+  if (type->isVoid()) {
+    std::string message = ErrorTextVarInit::isVoid();
+
+    return err(VarCheckerInitHasTypeError{
+        .code = VarCheckerInitHasTypeErrorCode::VOID_INITIALIZER,
+        .message = message,
+    });
+  }
+  if (type->isUndefined() && (decl->isConst || d.destructured())) {
+    std::string message = ErrorTextVarInit::undefined(decl->isConst, d.name);
+
+    return err(VarCheckerInitHasTypeError{
+        .code = VarCheckerInitHasTypeErrorCode::UNDEFINED_INITIALIZER,
+        .message = message,
+    });
+  }
+
+  return ok(type);
+}
+
+VarChecker::ResultConstValued VarChecker::constValue(const VarDeclStmt *decl,
+                                                     const VarDeclarator &d) {
+  if (decl->isConst && !d.init) {
+    std::string message = ErrorTextConstValue::missing();
+
+    return err(VarCheckerConstValueError{
+        .code = VarCheckerConstValueErrorCode::CONST_WITHOUT_VALUE,
+        .message = message,
+    });
+  }
+
+  return ok(&d);
+}
+
+VarChecker::ResultDestructure VarChecker::destructurable(const VarDeclarator &d, const Type *type) {
+  bool fits = !d.destructured() || type->isArray() || type->isTuple() || type->isMatch() ||
+              type->isError() || type->nonOptional()->isJson();
+  if (!fits && type->isOptional() && type->inner()->isArray()) {
+    std::string message = ErrorTextVarShape::mayBeUndef(type->name());
+
+    return err(VarCheckerDestructurableError{
+        .code = VarCheckerDestructurableErrorCode::ARRAY_MAY_BE_UNDEFINED,
+        .message = message,
+    });
+  }
+  if (!fits) {
+    std::string message = ErrorTextVarShape::notArray(type->name());
+
+    return err(VarCheckerDestructurableError{
+        .code = VarCheckerDestructurableErrorCode::NOT_AN_ARRAY,
+        .message = message,
+    });
+  }
+
+  return ok(type);
+}
+
+VarChecker::ResultResultCheck VarChecker::resultChecked(const VarSymbol *var) {
+  const Type *held = var->type->nonOptional();
+  if (held->isPromise()) {
+    std::string message = ErrorTextResultUse::promise(var->name);
+
+    return err(VarCheckerResultCheckedError{
+        .code = VarCheckerResultCheckedErrorCode::PROMISE_NEVER_AWAITED,
+        .message = message,
+    });
+  }
+
+  std::string message = ErrorTextResultUse::unchecked(var->name);
+
+  return err(VarCheckerResultCheckedError{
+      .code = VarCheckerResultCheckedErrorCode::RESULT_NEVER_CHECKED,
+      .message = message,
+  });
+}
+
+VarChecker::ResultVarHasTypes VarChecker::varTyped(const Checker::Untyped &u, const Type *type) {
+  llvm::StringRef name = u.var->name;
+  std::string hint;
+  if (type && !type->isError() && !type->isUndefined()) {
+    hint = ErrorTextVarTyped::writeType(name, type->name());
+  } else if (u.initUndefined) {
+    hint = ErrorTextVarTyped::addOne(name);
+  } else {
+    hint = ErrorTextVarTyped::example(name);
+  }
+  if (u.initUndefined) {
+    std::string message = ErrorTextVarTyped::undefined(hint);
+
+    return err(VarCheckerVarTypedError{
+        .code = VarCheckerVarTypedErrorCode::UNDEFINED_ONLY,
+        .message = message,
+    });
+  }
+
+  std::string message = ErrorTextVarTyped::needsType(name, hint);
+
+  return err(VarCheckerVarTypedError{
+      .code = VarCheckerVarTypedErrorCode::NEEDS_TYPE,
+      .message = message,
+  });
+}
+
 bool VarChecker::exported(llvm::StringRef name) const {
   if (this->checker.scopes_.size() != 1 || !this->checker.module_) {
     return false;
@@ -325,21 +434,10 @@ void VarChecker::reportUncheckedResults() {
       continue;
     }
     done = true;
-    std::string name = var->name.str();
-    const Type *held = var->type->nonOptional();
-    if (held->isPromise()) {
-      this->checker.diags_.error(var->loc,
-                                 "'" + name +
-                                     "' holds a Promise of a Result that is never awaited, "
-                                     "so an error in it would go unchecked; await it and "
-                                     "check it, e.g. 'const r = await " +
-                                     name + "; if (r.isErr()) ...'");
-      continue;
+    ResultResultCheck checked = VarChecker::resultChecked(var);
+    if (checked.isErr()) {
+      this->checker.diags_.error(var->loc, checked.error().message);
     }
-    this->checker.diags_.error(var->loc, "the Result in '" + name +
-                                             "' is never checked, so an error in it would go "
-                                             "unchecked; check it, e.g. 'if (" +
-                                             name + ".isErr()) ...'");
   }
   this->checker.resultVars_.clear();
 }
@@ -370,20 +468,9 @@ void VarChecker::reportUntyped() {
       }
       type = common ? common : Type::error();
     }
-    std::string name = u.var->name.str();
-    std::string hint;
-    if (type && !type->isError() && !type->isUndefined()) {
-      hint = "write the type: 'let " + name + ": " + type->name().str() + "'";
-    } else if (u.initUndefined) {
-      hint = "add one, e.g. 'let " + name + ": int | undefined'";
-    } else {
-      hint = "e.g. 'let " + name + ": int' or 'let " + name + " = 0'";
-    }
-    if (u.initUndefined) {
-      this->checker.diags_.error(u.var->loc, "cannot infer a type from 'undefined'; " + hint);
-    } else {
-      this->checker.diags_.error(
-          u.var->loc, "variable '" + name + "' needs a type annotation or an initializer; " + hint);
+    ResultVarHasTypes typed = VarChecker::varTyped(u, type);
+    if (typed.isErr()) {
+      this->checker.diags_.error(u.var->loc, typed.error().message);
     }
 
     return true;

@@ -107,7 +107,16 @@ std::vector<Stmt *> TypeDeclarer::declareTypes(llvm::ArrayRef<Stmt *> stmts, boo
       }
     } else if (decl) {
       name = decl->name;
-      this->checker.scopes().declare(name, decl->loc(), {EnumEntry{.enumDecl = decl}});
+      Scopes::ResultEntryDeclared added =
+          this->checker.scopes().declare(name, decl->loc(), {EnumEntry{.enumDecl = decl}});
+      if (added.isErr()) {
+        this->checker.diags_.error(decl->loc(), added.error().message);
+      }
+      if (added.isErr() && added.error().code != ScopesDeclareErrorCode::UNDEFINED_AS_NAME) {
+        ScopeEntry previousEntry = this->checker.scopes().lookup(name);
+        std::string declaredHere = ErrorTextDeclare::previous();
+        this->checker.diags_.note(previousEntry.loc(), declaredHere);
+      }
     } else if (cls && this->checker.scopes_.size() == 1) {
       name = cls->name;
       this->checker.classDeclarer().declareClass(cls);

@@ -58,7 +58,10 @@ Expr *NameChecker::checkName(NameExpr *name) {
     entry.var()->read = true;
     this->checker.nestedFunctions().noteUse(entry.var(), name->loc());
     name->type = this->checker.scopes().varType(entry.var());
-    this->checker.scopes().checkVisible(name, entry.var());
+    Scopes::ResultNameIsVisible visible = this->checker.scopes().checkVisible(name, entry.var());
+    if (visible.isErr()) {
+      this->checker.diags_.error(name->loc(), visible.error().message);
+    }
     if (!this->checker.streamViews_.empty()) {
       Checker::FieldPath path;
       path.var = entry.var();
@@ -180,7 +183,12 @@ Expr *NameChecker::checkName(NameExpr *name) {
                                    "', a variable of the function around it: the class is made "
                                    "once, not at each call, and its code runs later; pass the "
                                    "value to its constructor, or keep it in a global");
-  } else if (this->checker.topLevelChecker().reportNotLoaded(name)) {
+  } else if (TopLevelChecker::ResultSourceIsLoaded loaded =
+                 this->checker.topLevelChecker().checkLoaded(name);
+             loaded.isErr()) {
+    if (loaded.error().code != TopLevelCheckerCheckLoadedErrorCode::ALREADY_REPORTED) {
+      this->checker.diags_.error(name->loc(), loaded.error().message);
+    }
   } else if (this->checker.early_ &&
              (this->checker.state(this->checker.module_).topLevelNames.contains(name->name) ||
               this->checker.declaredLater(name->name))) {

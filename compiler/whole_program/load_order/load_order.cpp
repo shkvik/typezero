@@ -131,7 +131,9 @@ LoadOrder::ResultReadAfterSet LoadOrder::earlyRead(const NameExpr *name, const M
   }
   if (early) {
     std::string what = ErrorTextEarlyRead::label(name->name, var->name, home->name);
-    std::string message = TopLevelChecker::readBeforeLoad(module, what, home, var->name);
+    std::string chain = TopLevelChecker::loadChain(module, home);
+    std::string message =
+        ErrorTextNotLoaded::whileLoads(module->name, what, home->name, chain, var->name);
 
     return err(LoadOrderEarlyReadError{
         .code = LoadOrderEarlyReadErrorCode::READ_BEFORE_LOADED,

@@ -146,13 +146,21 @@ Expr *StreamNewChecker::checkStreamNew(NewExpr *expr, ClassDecl *generic, const 
     return failed();
   }
   std::vector<const Type *> args = {w, r};
-  ClassDecl *inst =
+  GenericClassInstantiator::ResultClassMade made =
       checker_.genericClassInstantiator().instantiateClass(generic, std::move(args), expr->loc());
-  if (!inst) {
+  if (made.isErr() &&
+      made.error().code != GenericClassInstantiatorInstantiateClassErrorCode::ALREADY_REPORTED) {
+    llvm::SMLoc at =
+        made.error().code == GenericClassInstantiatorInstantiateClassErrorCode::ENDLESS_INSTANCES
+            ? generic->loc()
+            : expr->loc();
+    checker_.diags_.error(at, made.error().message);
+  }
+  if (made.isErr()) {
     return nullptr;
   }
 
-  return checker_.methodCallChecker().checkClassNew(expr, inst, expected);
+  return checker_.methodCallChecker().checkClassNew(expr, made.value(), expected);
 }
 
 }

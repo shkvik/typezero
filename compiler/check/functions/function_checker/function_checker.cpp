@@ -82,7 +82,14 @@ void FunctionChecker::declareFunction(FunctionDecl *fn, VarSymbol *var, bool sco
     }
     const Type *type = nullptr;
     if (param.type) {
-      type = this->checker.iterableChecker().iterableParam(fn, sym, *param.type);
+      IterableChecker::ResultIterableParam iterable =
+          this->checker.iterableChecker().iterableParam(fn, sym, *param.type);
+      if (iterable.isOk()) {
+        type = iterable.value();
+      } else if (iterable.error().code != IterableCheckerIterableParamErrorCode::NOT_ITERABLE) {
+        this->checker.diags_.error(param.type->loc, iterable.error().message);
+        type = Type::error();
+      }
       bool outerList = std::exchange(this->checker.listContext_, param.rest());
       if (!type) {
         type = this->checker.typeResolver().resolveType(*param.type, false);
@@ -155,7 +162,16 @@ void FunctionChecker::declareFunction(FunctionDecl *fn, VarSymbol *var, bool sco
   this->checker.argListChecker().expandArgumentList(fn, sym);
   fn->sym = sym;
   if (!fn->name.empty() && scoped) {
-    this->checker.scopes().declare(fn->name, fn->loc(), {FunctionEntry{.func = sym, .var = var}});
+    Scopes::ResultEntryDeclared added = this->checker.scopes().declare(
+        fn->name, fn->loc(), {FunctionEntry{.func = sym, .var = var}});
+    if (added.isErr()) {
+      this->checker.diags_.error(fn->loc(), added.error().message);
+    }
+    if (added.isErr() && added.error().code != ScopesDeclareErrorCode::UNDEFINED_AS_NAME) {
+      ScopeEntry previousEntry = this->checker.scopes().lookup(fn->name);
+      std::string declaredHere = ErrorTextDeclare::previous();
+      this->checker.diags_.note(previousEntry.loc(), declaredHere);
+    }
   }
 }
 

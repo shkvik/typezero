@@ -157,6 +157,32 @@ std::u16string TemplateTypes::changeCase(TypeOp op, const std::u16string &text) 
   return out;
 }
 
+TemplateTypes::ResultHoleAccepted TemplateTypes::holeType(const Type *member) {
+  if (!TemplateTypes::templateHole(member)) {
+    std::string message = ErrorTextHoleType::notHole(member->name());
+
+    return err(TemplateTypesHoleTypeError{
+        .code = TemplateTypesHoleTypeErrorCode::NOT_A_HOLE,
+        .message = message,
+    });
+  }
+
+  return ok(member);
+}
+
+TemplateTypes::ResultCountAllowed TemplateTypes::stringCount(size_t count) {
+  if (count > kMaxTemplateStrings) {
+    std::string message = ErrorTextStringCount::tooMany(kMaxTemplateStrings);
+
+    return err(TemplateTypesStringCountError{
+        .code = TemplateTypesStringCountErrorCode::TOO_MANY_STRINGS,
+        .message = message,
+    });
+  }
+
+  return ok(count);
+}
+
 TemplateTypes::TemplateTypes(Checker &owner)
     : checker(owner) {}
 
@@ -217,11 +243,9 @@ const Type *TemplateTypes::resolveTemplate(const TypeRef &ref) {
       return hole;
     }
     for (const Type *m : TemplateTypes::distributed(hole)) {
-      if (!TemplateTypes::templateHole(m)) {
-        this->checker.diags_.error(ref.args[i].loc,
-                                   "a template literal type holds strings, numbers, booleans and "
-                                   "undefined, not '" +
-                                       m->name() + "'");
+      ResultHoleAccepted accepted = TemplateTypes::holeType(m);
+      if (accepted.isErr()) {
+        this->checker.diags_.error(ref.args[i].loc, accepted.error().message);
         return Type::error();
       }
     }
@@ -268,14 +292,12 @@ const Type *TemplateTypes::evalTemplate(llvm::ArrayRef<const Type *> operands) {
         }
         made.texts.back() += after;
         next.push_back(std::move(made));
-        if (next.size() > kMaxTemplateStrings) {
+        ResultCountAllowed count = TemplateTypes::stringCount(next.size());
+        if (count.isErr()) {
           llvm::SMLoc loc =
               this->templateLoc.isValid() ? this->templateLoc : this->checker.instanceLoc_;
           if (loc.isValid()) {
-            this->checker.diags_.error(loc,
-                                       "this template literal type makes more than " +
-                                           std::to_string(kMaxTemplateStrings) +
-                                           " strings, the most TypeScript allows; use 'string'");
+            this->checker.diags_.error(loc, count.error().message);
           }
           return Type::error();
         }

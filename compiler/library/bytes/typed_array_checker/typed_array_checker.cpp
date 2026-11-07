@@ -303,9 +303,13 @@ Expr *TypedArrayChecker::checkDataViewMethod(CallExpr *call, MemberExpr *member)
   if (call->args.size() > min) {
     args.push_back(checker_.argumentChecker().checkArg(call->args[min], Type::boolTy()));
   }
-  call->mayBeOutOfRange =
-      !checker_.indexProofs().requireUpTo(args[1], member->object, kindType->elementSize(),
-                                          "the offset of '" + member->name.str() + "'");
+  IndexProofs::ResultUpToWasProven upTo =
+      checker_.indexProofs().requireUpTo(args[1], member->object, kindType->elementSize(),
+                                         "the offset of '" + member->name.str() + "'");
+  if (upTo.isErr() && upTo.error().code != IndexProofsRequireUpToErrorCode::EXEMPT) {
+    checker_.diags_.error(args[1]->loc(), upTo.error().message);
+  }
+  call->mayBeOutOfRange = upTo.isErr();
   call->args = std::move(args);
   call->target = BuiltinCall{.builtin = m.write ? Builtin::DataViewSet : Builtin::DataViewGet};
   call->type = m.write ? Type::voidTy()
@@ -318,8 +322,16 @@ Expr *TypedArrayChecker::checkDataViewMethod(CallExpr *call, MemberExpr *member)
 
 void TypedArrayChecker::checkSetRange(const Expr *target, const Expr *source, const Expr *offset) {
   IndexProofs &proofs = checker_.indexProofs();
-  if ((offset && !proofs.requireBetween(offset, 0, std::nullopt, "the offset of 'set'")) ||
-      checker_.indexProofs().exempt(source->loc(), target)) {
+  bool offsetUnproven = false;
+  if (offset) {
+    IndexProofs::ResultBetweenProven between =
+        proofs.requireBetween(offset, 0, std::nullopt, "the offset of 'set'");
+    if (between.isErr() && between.error().code != IndexProofsRequireBetweenErrorCode::EXEMPT) {
+      checker_.diags_.error(offset->loc(), between.error().message);
+    }
+    offsetUnproven = between.isErr();
+  }
+  if (offsetUnproven || checker_.indexProofs().exempt(source->loc(), target)) {
     return;
   }
   std::optional<Linear> at = offset ? proofs.linear(offset) : Linear{Term::zero(), 0};

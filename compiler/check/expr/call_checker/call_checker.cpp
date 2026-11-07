@@ -135,7 +135,14 @@ Expr *CallChecker::checkCall(CallExpr *call, const Type *expected) {
       if (this->rejectSpread(call)) {
         return call;
       }
-      return this->checker.numberMethods().checkStaticCall(call, member);
+      NumberMethods::ResultStaticCallMade made =
+          this->checker.numberMethods().checkStaticCall(call, member);
+      bool reported = made.isErr() &&
+                      made.error().code == NumberMethodsCheckStaticCallErrorCode::ALREADY_REPORTED;
+      if (made.isErr() && !reported) {
+        this->checker.diags_.error(member->loc(), made.error().message);
+      }
+      return made.isOk() ? made.value() : call;
     }
     if (this->isGlobalName(member->object, "Object")) {
       return this->checker.objectChecker().checkObjectCall(call, member, expected);
@@ -176,20 +183,74 @@ Expr *CallChecker::checkCall(CallExpr *call, const Type *expected) {
         return checked;
       }
     }
-    if (Expr *checked = this->checker.unknownChecker().checkUnknownMethod(call, member)) {
-      return checked;
+    UnknownChecker::ResultMethodChecked unknown =
+        this->checker.unknownChecker().checkUnknownMethod(call, member);
+    if (unknown.isOk()) {
+      return unknown.value();
+    }
+    switch (unknown.error().code) {
+      case UnknownCheckerCheckUnknownMethodErrorCode::NOT_UNKNOWN:
+        break;
+      case UnknownCheckerCheckUnknownMethodErrorCode::NOT_NARROWED:
+        this->checker.diags_.error(member->object->loc(), unknown.error().message);
+        return call;
+      case UnknownCheckerCheckUnknownMethodErrorCode::RUNTIME_CLASS:
+      case UnknownCheckerCheckUnknownMethodErrorCode::CLASS_VALUE:
+        this->checker.diags_.error(member->loc(), unknown.error().message);
+        return call;
     }
     if (receiver->isFunction() && receiver->hasThis()) {
-      return this->checker.functionMethodChecker().checkThisCall(call, member);
+      FunctionMethodChecker::ResultThisCallMade made =
+          this->checker.functionMethodChecker().checkThisCall(call, member);
+      if (made.isErr()) {
+        this->checker.diags_.error(member->loc(), made.error().message);
+        return call;
+      }
+      return made.value();
     }
     if (receiver->isListParam()) {
-      return this->checker.functionMethodChecker().checkListMethod(call, member);
+      FunctionMethodChecker::ResultParamsJoined joined =
+          this->checker.functionMethodChecker().checkListMethod(call, member);
+      bool reported =
+          joined.isErr() &&
+          joined.error().code == FunctionMethodCheckerCheckListMethodErrorCode::ALREADY_REPORTED;
+      if (joined.isErr() && !reported) {
+        this->checker.diags_.error(member->loc(), joined.error().message);
+      }
+      return joined.isOk() ? joined.value() : call;
     }
     if (receiver->isPromise()) {
-      return this->checker.promiseChecker().checkPromiseMethod(call, member, expected);
+      PromiseChecker::ResultPromiseChained chained =
+          this->checker.promiseChecker().checkPromiseMethod(call, member, expected);
+      if (chained.isOk()) {
+        return chained.value();
+      }
+      llvm::SMLoc at = member->loc();
+      switch (chained.error().code) {
+        case PromiseCheckerCheckPromiseMethodErrorCode::ALREADY_REPORTED:
+          return call;
+        case PromiseCheckerCheckPromiseMethodErrorCode::THEN_TWO_FUNCTIONS:
+          at = call->args[1]->loc();
+          break;
+        case PromiseCheckerCheckPromiseMethodErrorCode::RESULT_METHOD:
+        case PromiseCheckerCheckPromiseMethodErrorCode::NO_CATCH:
+        case PromiseCheckerCheckPromiseMethodErrorCode::NO_FINALLY:
+        case PromiseCheckerCheckPromiseMethodErrorCode::WRONG_ARITY:
+        case PromiseCheckerCheckPromiseMethodErrorCode::NO_SUCH_METHOD:
+          break;
+      }
+      this->checker.diags_.error(at, chained.error().message);
+      return call;
     }
     if (receiver->isTimer()) {
-      return this->checker.timerChecker().checkTimerMethod(call, member);
+      TimerChecker::ResultTimerMethodRun ran =
+          this->checker.timerChecker().checkTimerMethod(call, member);
+      bool reported = ran.isErr() &&
+                      ran.error().code == TimerCheckerCheckTimerMethodErrorCode::ALREADY_REPORTED;
+      if (ran.isErr() && !reported) {
+        this->checker.diags_.error(member->loc(), ran.error().message);
+      }
+      return ran.isOk() ? ran.value() : call;
     }
     for (const Feature *feature : this->checker.features_->all()) {
       if (Expr *values = feature->methodReceiver(this->checker, member->object)) {
@@ -231,7 +292,15 @@ Expr *CallChecker::checkCall(CallExpr *call, const Type *expected) {
                        ? nullptr
                        : this->checker.tupleChecker().arrayCopy(member->object);
       if (!copy) {
-        return this->checker.tupleChecker().checkTupleMethod(call, member);
+        TupleChecker::ResultTupleMethod method =
+            this->checker.tupleChecker().checkTupleMethod(call, member);
+        bool reported =
+            method.isErr() &&
+            method.error().code == TupleCheckerCheckTupleMethodErrorCode::ALREADY_REPORTED;
+        if (method.isErr() && !reported) {
+          this->checker.diags_.error(member->loc(), method.error().message);
+        }
+        return method.isOk() ? method.value() : call;
       }
       member->object = copy;
       receiver = copy->type;
@@ -260,7 +329,13 @@ Expr *CallChecker::checkCall(CallExpr *call, const Type *expected) {
       return this->checker.arrayMethods().checkArrayMethod(call, member, expected);
     }
     if (receiver->isNumeric()) {
-      return this->checker.numberMethods().checkNumberMethod(call, member);
+      NumberMethods::ResultMethodCallMade made =
+          this->checker.numberMethods().checkNumberMethod(call, member);
+      if (made.isErr()) {
+        this->checker.diags_.error(member->loc(), made.error().message);
+        return call;
+      }
+      return made.value();
     }
     if (receiver->isBool() && member->name == "toString" && call->args.empty()) {
       call->args.push_back(this->checker.concatChecker().toStringOperand(member->object));
@@ -294,11 +369,42 @@ Expr *CallChecker::checkCall(CallExpr *call, const Type *expected) {
         return checked;
       }
     }
-    if (Expr *task = this->checker.timerChecker().checkAsyncGlobal(call, name)) {
-      return task;
+    TimerChecker::ResultTimerScheduled task =
+        this->checker.timerChecker().checkAsyncGlobal(call, name);
+    if (task.isOk()) {
+      return task.value();
     }
-    if (Expr *builtin = this->checker.globalFunctionChecker().checkGlobalCall(call, name)) {
-      return builtin;
+    switch (task.error().code) {
+      case TimerCheckerCheckAsyncGlobalErrorCode::NOT_A_TIMER:
+        break;
+      case TimerCheckerCheckAsyncGlobalErrorCode::ALREADY_REPORTED:
+        return call;
+      case TimerCheckerCheckAsyncGlobalErrorCode::TIMEOUT_CALLBACK_ARGUMENTS:
+        this->checker.diags_.error(call->args[2]->loc(), task.error().message);
+        return call;
+      case TimerCheckerCheckAsyncGlobalErrorCode::IMMEDIATE_CALLBACK_ARGUMENTS:
+        this->checker.diags_.error(call->args[1]->loc(), task.error().message);
+        return call;
+      case TimerCheckerCheckAsyncGlobalErrorCode::WRONG_ARITY:
+        this->checker.diags_.error(name->loc(), task.error().message);
+        return call;
+    }
+    GlobalFunctionChecker::ResultGlobalCallMade global =
+        this->checker.globalFunctionChecker().checkGlobalCall(call, name);
+    if (global.isOk()) {
+      return global.value();
+    }
+    switch (global.error().code) {
+      case GlobalFunctionCheckerCheckGlobalCallErrorCode::NOT_A_GLOBAL:
+        break;
+      case GlobalFunctionCheckerCheckGlobalCallErrorCode::ALREADY_REPORTED:
+        return call;
+      case GlobalFunctionCheckerCheckGlobalCallErrorCode::CALL_FAILED:
+        this->checker.diags_.error(name->loc(), global.error().message);
+        return call;
+      case GlobalFunctionCheckerCheckGlobalCallErrorCode::ARGUMENT_FAILED:
+        this->checker.diags_.error(call->args[0]->loc(), global.error().message);
+        return call;
     }
     ScopeEntry entry = this->checker.topLevelChecker().lookupValue(name->name);
     if (entry.func() && !entry.var()) {

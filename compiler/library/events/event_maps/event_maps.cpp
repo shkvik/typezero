@@ -370,10 +370,18 @@ const Type *EventMaps::createdType(const NewExpr *create) {
   if (args.empty()) {
     return nullptr;
   }
-  ClassDecl *inst =
+  GenericClassInstantiator::ResultClassMade made =
       checker_.genericClassInstantiator().instantiateClass(cls, std::move(args), create->loc());
+  if (made.isErr() &&
+      made.error().code != GenericClassInstantiatorInstantiateClassErrorCode::ALREADY_REPORTED) {
+    llvm::SMLoc at =
+        made.error().code == GenericClassInstantiatorInstantiateClassErrorCode::ENDLESS_INSTANCES
+            ? cls->loc()
+            : create->loc();
+    checker_.diags_.error(at, made.error().message);
+  }
 
-  return inst ? inst->type : nullptr;
+  return made.isOk() ? made.value()->type : nullptr;
 }
 
 }

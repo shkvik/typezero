@@ -73,8 +73,12 @@ Expr *UnaryChecker::checkUnary(UnaryExpr *unary, const Type *expected, bool wrap
       if (const Type *literal =
               this->checker.literalTypes().numberLiteralFor(expected, -double(lit->value), false);
           literal && lit->value != 0) {
-        unary->operand =
+        LiteralChecker::ResultIntLiteralTyped typed =
             this->checker.literalChecker().checkIntLit(lit, literal->literalBase(), true);
+        if (typed.isErr()) {
+          this->checker.diags_.error(lit->loc(), typed.error().message);
+        }
+        unary->operand = typed.isOk() ? typed.value() : lit;
         unary->type = literal;
         return unary;
       }
@@ -94,8 +98,12 @@ Expr *UnaryChecker::checkUnary(UnaryExpr *unary, const Type *expected, bool wrap
     }
     const Type *hint = wanted && (wanted->isNumeric() || wanted->isDecimal()) ? wanted : nullptr;
     if (auto *lit = dyn_cast<IntLitExpr>(unary->operand)) {
-      unary->operand =
+      LiteralChecker::ResultIntLiteralTyped typed =
           this->checker.literalChecker().checkIntLit(lit, hint, unary->op == UnaryOp::Neg);
+      if (typed.isErr()) {
+        this->checker.diags_.error(lit->loc(), typed.error().message);
+      }
+      unary->operand = typed.isOk() ? typed.value() : lit;
     } else {
       unary->operand = this->checker.genericChecker().apparent(
           this->checker.exprChecker().checkExpr(unary->operand, hint, wraps));

@@ -95,31 +95,65 @@ const Type *PromiseChecker::executorValueType(const Expr *executor) {
   return unknown ? nullptr : found;
 }
 
+PromiseChecker::ResultValueTypeKnown PromiseChecker::valueType(NewExpr *expr, const CallExpr *call,
+                                                               const Type *expected) {
+  if (expr->typeArgs.size() > 1) {
+    std::string message = ErrorTextPromiseValue::typeArgs();
+
+    return err(PromiseCheckerValueTypeError{
+        .code = PromiseCheckerValueTypeErrorCode::TOO_MANY_TYPE_ARGUMENTS,
+        .message = message,
+    });
+  }
+  if (expr->typeArgs.size() == 1) {
+    const Type *written = this->checker.typeResolver().resolveType(expr->typeArgs[0], true);
+    return ok(PromiseChecker::awaited(written));
+  }
+  if (expected && expected->nonOptional()->isPromise() &&
+      !expected->nonOptional()->promised()->isNever()) {
+    return ok(expected->nonOptional()->promised());
+  }
+  if (call->args.size() != 1) {
+    return ok(nullptr);
+  }
+
+  const Type *inferred = this->executorValueType(call->args[0]);
+  if (!inferred) {
+    std::string message = ErrorTextPromiseValue::notInferred();
+
+    return err(PromiseCheckerValueTypeError{
+        .code = PromiseCheckerValueTypeErrorCode::VALUE_NOT_INFERRED,
+        .message = message,
+    });
+  }
+
+  return ok(inferred);
+}
+
+PromiseChecker::ResultExecutorShaped PromiseChecker::executorShape(const Expr *executor) {
+  auto *function = dyn_cast<FunctionExpr>(executor);
+  if (function && function->fn->params.size() > 1) {
+    std::string message = ErrorTextExecutor::rejects();
+
+    return err(PromiseCheckerExecutorShapeError{
+        .code = PromiseCheckerExecutorShapeErrorCode::REJECT_PARAMETER,
+        .message = message,
+    });
+  }
+
+  return ok(executor);
+}
+
 Expr *PromiseChecker::checkPromiseNew(NewExpr *expr, const Type *expected) {
   this->checker.file_->usesAsync = true;
   auto *call = this->checker.ctx_.make<CallExpr>(expr->loc(), expr, expr->args);
   call->target = BuiltinCall{.builtin = Builtin::PromiseNew};
   call->type = Type::error();
-  const Type *value = nullptr;
-  if (expr->typeArgs.size() > 1) {
-    this->checker.diags_.error(expr->loc(),
-                               "'Promise' takes one type argument, the type of its value");
-    value = Type::error();
-  } else if (expr->typeArgs.size() == 1) {
-    value =
-        PromiseChecker::awaited(this->checker.typeResolver().resolveType(expr->typeArgs[0], true));
-  } else if (expected && expected->nonOptional()->isPromise() &&
-             !expected->nonOptional()->promised()->isNever()) {
-    value = expected->nonOptional()->promised();
-  } else if (call->args.size() == 1) {
-    value = this->executorValueType(call->args[0]);
-    if (!value) {
-      this->checker.diags_.error(expr->loc(),
-                                 "cannot tell the type of the Promise's value from what is given "
-                                 "to 'resolve'; write it, e.g. 'new Promise<int>(...)'");
-      value = Type::error();
-    }
+  ResultValueTypeKnown known = this->valueType(expr, call, expected);
+  if (known.isErr()) {
+    this->checker.diags_.error(expr->loc(), known.error().message);
   }
+  const Type *value = known.isOk() ? known.value() : Type::error();
   ArgumentChecker::ResultArityMatches arity =
       this->checker.argumentChecker().checkArity(call, 1, 1);
   if (arity.isErr()) {
@@ -138,13 +172,10 @@ Expr *PromiseChecker::checkPromiseNew(NewExpr *expr, const Type *expected) {
   }
   Checker::Signature sig;
   sig.params = {PromiseChecker::resolverType(value)};
-  if (auto *executor = dyn_cast<FunctionExpr>(call->args[0]);
-      executor && executor->fn->params.size() > 1) {
-    this->checker.diags_.error(
-        executor->fn->params[1].loc,
-        "a Promise is not rejected in tz, so its function gets only "
-        "'resolve'; an operation that may fail gives a Promise<Result<T, E>>: "
-        "'resolve(err(e))'");
+  ResultExecutorShaped shaped = PromiseChecker::executorShape(call->args[0]);
+  if (shaped.isErr()) {
+    llvm::SMLoc rejectLoc = cast<FunctionExpr>(call->args[0])->fn->params[1].loc;
+    this->checker.diags_.error(rejectLoc, shaped.error().message);
     sig.params.push_back(Type::error());
   }
   sig.minArgs = sig.params.size();
@@ -159,32 +190,82 @@ Expr *PromiseChecker::checkPromiseNew(NewExpr *expr, const Type *expected) {
   return call;
 }
 
-Expr *PromiseChecker::checkPromiseMethod(CallExpr *call, MemberExpr *member, const Type *expected) {
+PromiseChecker::ResultPromiseChained
+PromiseChecker::checkPromiseMethod(CallExpr *call, MemberExpr *member, const Type *expected) {
   const Type *type = member->object->type;
   const Type *value = type->promised();
   llvm::StringRef name = member->name;
   static const llvm::StringLiteral resultMethods[] = {"isOk",    "isErr",  "map",       "mapErr",
                                                       "andThen", "orElse", "match",     "unwrapOr",
                                                       "andTee",  "orTee",  "andThrough"};
-  auto checkArgsLoosely = [&] {
-    for (Expr *&arg : call->args) {
-      arg = this->checker.exprChecker().checkExpr(arg);
-    }
-  };
   if (value->isResult() && llvm::is_contained(resultMethods, name)) {
     auto *object = dyn_cast<NameExpr>(member->object);
     std::string promise = object ? object->name.str() : "p";
-    return this->checker.resultChecker().reject(
-        call, member->loc(),
-        "'" + name.str() +
-            "' is a method of Result, not of Promise; await the Promise first: "
-            "'(await " +
-            promise + ")." + name.str() + "(...)'");
+    this->checker.argumentChecker().checkArgsLoosely(call);
+    call->type = Type::error();
+    std::string message = ErrorTextPromiseMethod::onResult(name, promise);
+
+    return err(PromiseCheckerCheckPromiseMethodError{
+        .code = PromiseCheckerCheckPromiseMethodErrorCode::RESULT_METHOD,
+        .message = message,
+    });
   }
   if (this->checker.callChecker().rejectSpread(call)) {
-    return call;
+    return err(PromiseCheckerCheckPromiseMethodError{
+        .code = PromiseCheckerCheckPromiseMethodErrorCode::ALREADY_REPORTED,
+        .message = "",
+    });
   }
   this->checker.file_->usesAsync = true;
+  if (name == "catch") {
+    this->checker.argumentChecker().checkArgsLoosely(call);
+    call->type = Type::error();
+    std::string message = ErrorTextPromiseMethod::noCatch();
+
+    return err(PromiseCheckerCheckPromiseMethodError{
+        .code = PromiseCheckerCheckPromiseMethodErrorCode::NO_CATCH,
+        .message = message,
+    });
+  }
+  if (name == "finally") {
+    this->checker.argumentChecker().checkArgsLoosely(call);
+    call->type = Type::error();
+    std::string message = ErrorTextPromiseMethod::noFinally();
+
+    return err(PromiseCheckerCheckPromiseMethodError{
+        .code = PromiseCheckerCheckPromiseMethodErrorCode::NO_FINALLY,
+        .message = message,
+    });
+  }
+  if (name == "then" && call->args.size() == 2) {
+    this->checker.argumentChecker().checkArgsLoosely(call);
+    call->type = Type::error();
+    std::string message = ErrorTextPromiseMethod::thenTwo();
+
+    return err(PromiseCheckerCheckPromiseMethodError{
+        .code = PromiseCheckerCheckPromiseMethodErrorCode::THEN_TWO_FUNCTIONS,
+        .message = message,
+    });
+  }
+  if (name != "then") {
+    this->checker.argumentChecker().checkArgsLoosely(call);
+    std::string message = ErrorTextPromiseMethod::noMethod(name, type->name());
+
+    return err(PromiseCheckerCheckPromiseMethodError{
+        .code = PromiseCheckerCheckPromiseMethodErrorCode::NO_SUCH_METHOD,
+        .message = message,
+    });
+  }
+
+  ArgumentChecker::ResultArityMatches arity =
+      this->checker.argumentChecker().checkArity(call, 1, 1);
+  if (arity.isErr()) {
+    return err(PromiseCheckerCheckPromiseMethodError{
+        .code = PromiseCheckerCheckPromiseMethodErrorCode::WRONG_ARITY,
+        .message = arity.error().message,
+    });
+  }
+
   const Type *wanted = expected && expected->nonOptional()->isPromise()
                            ? expected->nonOptional()->promised()
                            : nullptr;
@@ -214,49 +295,21 @@ Expr *PromiseChecker::checkPromiseMethod(CallExpr *call, MemberExpr *member, con
 
     return PromiseChecker::awaited(arg->type->ret());
   };
-  const Type *result = nullptr;
-  if (name == "catch" || name == "finally" || (name == "then" && call->args.size() == 2)) {
-    return this->checker.resultChecker().reject(
-        call, name == "then" ? call->args[1]->loc() : member->loc(),
-        name == "catch"
-            ? std::string("a Promise is not rejected in tz, so it has no 'catch': an operation "
-                          "that may fail gives a Promise<Result<T, E>>; read it after 'await': "
-                          "'const r = await p; if (r.isErr()) ...'")
-        : name == "finally"
-            ? std::string("a Promise is not rejected in tz, so it has no 'finally': 'then' runs "
-                          "every time; write the code after 'await p'")
-            : std::string("'then' takes one function: a Promise is not rejected in tz"));
-  }
-  if (name == "then") {
-    ArgumentChecker::ResultArityMatches arity =
-        this->checker.argumentChecker().checkArity(call, 1, 1);
-    if (arity.isErr()) {
-      this->checker.diags_.error(member->loc(), arity.error().message);
-      return call;
-    }
-    call->target = BuiltinCall{.builtin = Builtin::PromiseThen};
-    const Type *onFulfilled = callback(call->args[0], value);
-    if (failed) {
-      return call;
-    }
-    result = onFulfilled ? onFulfilled : value;
-  } else {
-    this->checker.diags_.error(member->loc(), "property '" + name + "' does not exist on type '" +
-                                                  type->name() +
-                                                  "'; a Promise has 'then', and its value is "
-                                                  "read with 'await'");
-    checkArgsLoosely();
-    return call;
-  }
-  if (result->isError()) {
-    return call;
+  call->target = BuiltinCall{.builtin = Builtin::PromiseThen};
+  const Type *onFulfilled = callback(call->args[0], value);
+  const Type *result = onFulfilled ? onFulfilled : value;
+  if (failed || result->isError()) {
+    return err(PromiseCheckerCheckPromiseMethodError{
+        .code = PromiseCheckerCheckPromiseMethodErrorCode::ALREADY_REPORTED,
+        .message = "",
+    });
   }
   if (result->isNever()) {
     result = value;
   }
   call->type = Type::promise(result);
 
-  return call;
+  return ok(call);
 }
 
 }

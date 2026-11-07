@@ -1,6 +1,8 @@
 #pragma once
 
 #include "compiler/check/checker/checker.h"
+#include "compiler/check/stmt/loop_checker/loop_checker_errors.h"
+#include "compiler/result/result/result.h"
 
 namespace tz {
 
@@ -15,6 +17,14 @@ public:
   void checkLoopBody(Stmt *body, bool awaits);
 
 private:
+  using ResultIterableType = Result<const Type *, LoopCheckerIterableTypeError>;
+  using ResultBindingTyped = Result<const VarDeclarator *, LoopCheckerBindingTypeError>;
+  using ResultBindingShape = Result<const Type *, LoopCheckerBindingShapeError>;
+
+  ResultIterableType iterableType(const Type *type) const;
+  static ResultBindingTyped bindingType(const ForOfStmt *stmt);
+  static ResultBindingShape bindingShape(const ForOfStmt *stmt, const Type *element);
+
   Checker &checker;
 };
 

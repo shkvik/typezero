@@ -418,12 +418,13 @@ bool ConditionalTypes::fitsConditional(const Type *from, const Type *to, unsigne
   return false;
 }
 
-const Type *ConditionalTypes::resolveIntersection(const TypeRef &ref) {
+ConditionalTypes::ResultIntersectionJoined
+ConditionalTypes::resolveIntersection(const TypeRef &ref) {
   std::vector<const Type *> parts;
   for (const TypeRef &arg : ref.args) {
     parts.push_back(this->checker.typeResolver().resolveTypeInner(arg));
     if (parts.back()->isError()) {
-      return parts.back();
+      return ok(parts.back());
     }
   }
   auto primitive = [](const Type *t) {
@@ -437,12 +438,14 @@ const Type *ConditionalTypes::resolveIntersection(const TypeRef &ref) {
     for (size_t i : {0, 1}) {
       const Type *other = parts[1 - i];
       if (primitive(parts[i])) {
-        return this->checker.typeOperators().evalTypeOp(
+        const Type *extracted = this->checker.typeOperators().evalTypeOp(
             Type::typeOp(TypeOp::Extract, {other, parts[i]}), {other, parts[i]});
+        return ok(extracted);
       }
       if (emptyObject(parts[i])) {
-        return this->checker.typeOperators().evalTypeOp(Type::typeOp(TypeOp::NonNullable, {other}),
-                                                        {other});
+        const Type *defined = this->checker.typeOperators().evalTypeOp(
+            Type::typeOp(TypeOp::NonNullable, {other}), {other});
+        return ok(defined);
       }
     }
   }
@@ -487,12 +490,13 @@ const Type *ConditionalTypes::resolveIntersection(const TypeRef &ref) {
               both = y;
             }
             if (!both) {
-              this->checker.diags_.error(ref.loc,
-                                         "field '" + field.name + "' has type '" + x->name() +
-                                             "' in one part of the intersection "
-                                             "and '" +
-                                             y->name() + "' in another; a field has one type");
-              return Type::error();
+              std::string message =
+                  ErrorTextIntersection::fieldTypes(field.name, x->name(), y->name());
+
+              return err(ConditionalTypesResolveIntersectionError{
+                  .code = ConditionalTypesResolveIntersectionErrorCode::FIELD_TYPES_DIFFER,
+                  .message = message,
+              });
             }
             same->type = a->isOptional() && b->isOptional() ? Type::optional(both) : both;
             same->readonly |= field.readonly;
@@ -502,7 +506,7 @@ const Type *ConditionalTypes::resolveIntersection(const TypeRef &ref) {
       }
       merged = std::move(next);
     }
-    return Type::unionOf(merged);
+    return ok(Type::unionOf(merged));
   }
   const Type *other = nullptr;
   for (const std::vector<const Type *> &choice : choices) {
@@ -512,12 +516,12 @@ const Type *ConditionalTypes::resolveIntersection(const TypeRef &ref) {
       }
     }
   }
-  this->checker.diags_.error(
-      ref.loc, "'&' joins object types into one with the fields of all, and '" + other->name() +
-                   "' is not an object type; of TypeScript's other idioms with '&', 'K & string' "
-                   "(what of K is a string) and 'T & {}' (T without undefined) work");
+  std::string message = ErrorTextIntersection::notObject(other->name());
 
-  return Type::error();
+  return err(ConditionalTypesResolveIntersectionError{
+      .code = ConditionalTypesResolveIntersectionErrorCode::NOT_AN_OBJECT,
+      .message = message,
+  });
 }
 
 const Type *ConditionalTypes::signatureForUtility(const TypeRef &ref) {

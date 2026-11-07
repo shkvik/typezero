@@ -35,7 +35,15 @@ const Type *TargetChecker::checkAssignTarget(Expr *&target, bool compound) {
     index->object = this->checker.exprChecker().checkExpr(index->object);
     const Type *type = index->object->type;
     index->type = Type::error();
-    if (this->checker.utilityTypes().checkGenericIndex(index)) {
+    UtilityTypes::ResultGenericIndexed generic =
+        this->checker.utilityTypes().checkGenericIndex(index);
+    bool genericIndex =
+        generic.isOk() ||
+        generic.error().code != UtilityTypesCheckGenericIndexErrorCode::NOT_A_GENERIC_INDEX;
+    if (generic.isErr() && genericIndex) {
+      this->checker.diags_.error(index->index->loc(), generic.error().message);
+    }
+    if (genericIndex) {
       return index->type;
     }
     if (type->nonOptional()->isJson()) {
@@ -61,7 +69,14 @@ const Type *TargetChecker::checkAssignTarget(Expr *&target, bool compound) {
       return Type::error();
     }
     if (type->isObject()) {
-      Expr *checked = this->checker.keyedFieldChecker().checkKeyedField(index, true);
+      KeyedFieldChecker::ResultKeyedFieldRead written =
+          this->checker.keyedFieldChecker().checkKeyedField(index, true);
+      if (written.isErr() &&
+          written.error().code != KeyedFieldCheckerCheckKeyedFieldErrorCode::ALREADY_REPORTED) {
+        llvm::SMLoc at = KeyedFieldChecker::keyedPlace(index, written.error().code);
+        this->checker.diags_.error(at, written.error().message);
+      }
+      Expr *checked = written.isOk() ? written.value() : index;
       if (index->keyed()) {
         return index->type;
       }
@@ -195,13 +210,20 @@ VarSymbol *TargetChecker::checkVarTarget(NameExpr *name) {
   }
   name->binding = NamedVar{.var = entry.var()};
   name->type = this->checker.scopes().varType(entry.var());
-  this->checker.scopes().checkVisible(name, entry.var());
+  Scopes::ResultNameIsVisible visible = this->checker.scopes().checkVisible(name, entry.var());
+  if (visible.isErr()) {
+    this->checker.diags_.error(name->loc(), visible.error().message);
+  }
   if (entry.var()->isConst) {
     this->checker.diags_.error(name->loc(),
                                "cannot assign to '" + name->name + "' because it is a " +
                                    (entry.var()->function() ? "function" : "constant"));
   } else {
-    this->checker.topLevelChecker().reportImportAssign(name, entry.var());
+    TopLevelChecker::ResultVarNotImported writable =
+        this->checker.topLevelChecker().checkImportAssign(name, entry.var());
+    if (writable.isErr()) {
+      this->checker.diags_.error(name->loc(), writable.error().message);
+    }
   }
   entry.var()->reassigned = true;
   this->checker.nestedFunctions().noteUse(entry.var(), name->loc());

@@ -243,8 +243,18 @@ const Type *EventMapInference::fromPortable(const EventInference::Portable &p, l
         type = cls->type;
         break;
       }
-      ClassDecl *inst = checker_.genericClassInstantiator().instantiateClass(cls, parts, loc);
-      type = inst ? inst->type : nullptr;
+      GenericClassInstantiator::ResultClassMade made =
+          checker_.genericClassInstantiator().instantiateClass(cls, parts, loc);
+      if (made.isErr() && made.error().code !=
+                              GenericClassInstantiatorInstantiateClassErrorCode::ALREADY_REPORTED) {
+        llvm::SMLoc at =
+            made.error().code ==
+                    GenericClassInstantiatorInstantiateClassErrorCode::ENDLESS_INSTANCES
+                ? cls->loc()
+                : (loc.isValid() ? loc : cls->loc());
+        checker_.diags_.error(at, made.error().message);
+      }
+      type = made.isOk() ? made.value()->type : nullptr;
       break;
     }
     case PortableKind::CLASS_REF_TYPE: {

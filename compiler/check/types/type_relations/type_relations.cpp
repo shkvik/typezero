@@ -508,53 +508,122 @@ Expr *TypeRelations::coerce(Expr *expr, const Type *to, llvm::StringRef what) {
     return this->convert(expr, to);
   }
 
-  std::string message =
-      ("type '" + from->name() + "' is not assignable to type '" + to->name() + "'").str();
-  if (!what.empty()) {
-    message += (" of " + what).str();
-  }
-  if (!intervals.empty() &&
-      (from->isInt() || (from->isLiteral() && from->literalBase()->isInt()))) {
-    std::string holds;
-    for (const std::pair<int64_t, int64_t> &interval : intervals) {
-      holds += holds.empty() ? "" : " or ";
-      holds += std::to_string(interval.first);
-      if (interval.second != interval.first) {
-        holds += " to " + std::to_string(interval.second);
-      }
-    }
-    message += ", which holds " + holds;
-    if (from->isInt()) {
-      std::pair<int64_t, int64_t> widest =
-          *llvm::max_element(intervals, [](const std::pair<int64_t, int64_t> &a,
-                                           const std::pair<int64_t, int64_t> &b) {
-            return a.second - a.first < b.second - b.first;
-          });
-      std::string lo = std::to_string(widest.first);
-      std::string hi = std::to_string(widest.second);
-      std::string text = "x";
-      if (auto *name = dyn_cast<NameExpr>(expr)) {
-        text = name->name.str();
-      }
-      message +=
-          "; the value may be outside: check it first, e.g. 'if (" +
-          (target->name() == "HttpStatus" ? "isHttpStatus(" + text + ")"
-                                          : text + " >= " + lo + " && " + text + " <= " + hi) +
-          ")'";
-    }
-    this->checker.diags_.error(expr->loc(), message);
+  ResultRangeWasProven proven = TypeRelations::rangeProven(expr, to, what, intervals);
+  if (proven.isErr()) {
+    this->checker.diags_.error(expr->loc(), proven.error().message);
     return expr;
   }
-  const Type *fromObject = from->nonOptional();
-  const Type *toObject = to->nonOptional();
-  while (fromObject->isArray() && toObject->isArray()) {
-    fromObject = fromObject->inner()->nonOptional();
-    toObject = toObject->inner()->nonOptional();
+
+  ResultTypeAssignable assigned = this->assignable(expr, to, what);
+  const Type *other = this->otherPlace(expr, to);
+  if (assigned.isErr()) {
+    this->checker.diags_.error(expr->loc(), assigned.error().message);
   }
-  if (from->isFunction() && function->isFunction()) {
-    message += "; the types of functions must match exactly: wrap it in an arrow that converts "
-               "what it needs";
+  if (assigned.isErr() && other) {
+    llvm::SMLoc otherLoc = this->placeLoc(expr, other);
+    std::string alsoHere = ErrorTextAssignable::alsoHere(other->name());
+    this->checker.diags_.note(otherLoc, alsoHere);
   }
+
+  return expr;
+}
+
+TypeRelations::ResultRangeWasProven
+TypeRelations::rangeProven(const Expr *expr, const Type *to, llvm::StringRef what,
+                           llvm::ArrayRef<std::pair<int64_t, int64_t>> intervals) {
+  const Type *from = expr->type;
+  bool integer = from->isInt() || (from->isLiteral() && from->literalBase()->isInt());
+  bool outside = !intervals.empty() && integer;
+  std::string prefix = ErrorTextAssignable::notTo(from->name(), to->name(), what);
+  std::string holds = ErrorTextRange::holds(intervals);
+  if (outside && !from->isInt()) {
+    std::string message = prefix + holds;
+
+    return err(TypeRelationsRangeProvenError{
+        .code = TypeRelationsRangeProvenErrorCode::LITERAL_OUT_OF_RANGE,
+        .message = message,
+    });
+  }
+  if (outside) {
+    std::string check = TypeRelations::rangeCheck(expr, to->nonOptional(), intervals);
+    std::string message = prefix + holds + ErrorTextRange::outside(check);
+
+    return err(TypeRelationsRangeProvenError{
+        .code = TypeRelationsRangeProvenErrorCode::MAY_BE_OUT_OF_RANGE,
+        .message = message,
+    });
+  }
+
+  return ok(expr);
+}
+
+std::string TypeRelations::rangeCheck(const Expr *expr, const Type *target,
+                                      llvm::ArrayRef<std::pair<int64_t, int64_t>> intervals) {
+  auto narrower = [](const std::pair<int64_t, int64_t> &a, const std::pair<int64_t, int64_t> &b) {
+    return a.second - a.first < b.second - b.first;
+  };
+  std::pair<int64_t, int64_t> widest = *llvm::max_element(intervals, narrower);
+  std::string lo = std::to_string(widest.first);
+  std::string hi = std::to_string(widest.second);
+  std::string text = "x";
+  if (auto *name = dyn_cast<NameExpr>(expr)) {
+    text = name->name.str();
+  }
+  if (target->name() == "HttpStatus") {
+    return ErrorTextRange::status(text);
+  }
+
+  return ErrorTextRange::between(text, lo, hi);
+}
+
+const Type *TypeRelations::innerObject(const Type *type, const Type *other) {
+  const Type *inner = type->nonOptional();
+  const Type *otherInner = other->nonOptional();
+  while (inner->isArray() && otherInner->isArray()) {
+    inner = inner->inner()->nonOptional();
+    otherInner = otherInner->inner()->nonOptional();
+  }
+
+  return inner;
+}
+
+const Type *TypeRelations::otherPlace(const Expr *expr, const Type *to) const {
+  const Type *toObject = TypeRelations::innerObject(to, expr->type);
+  auto *name = dyn_cast<NameExpr>(expr);
+  if (!name || !name->var()) {
+    return nullptr;
+  }
+  auto found = this->checker.destinations_.find(name->var());
+  if (found == this->checker.destinations_.end()) {
+    return nullptr;
+  }
+  for (auto [type, loc] : found->second) {
+    if (type->nonOptional() != toObject) {
+      return type->nonOptional();
+    }
+  }
+
+  return nullptr;
+}
+
+llvm::SMLoc TypeRelations::placeLoc(const Expr *expr, const Type *place) const {
+  auto *name = dyn_cast<NameExpr>(expr);
+  auto found = this->checker.destinations_.find(name->var());
+  for (auto [type, loc] : found->second) {
+    if (type->nonOptional() == place) {
+      return loc;
+    }
+  }
+
+  return llvm::SMLoc();
+}
+
+TypeRelations::ResultTypeAssignable TypeRelations::assignable(const Expr *expr, const Type *to,
+                                                              llvm::StringRef what) const {
+  const Type *from = expr->type;
+  const Type *fromObject = TypeRelations::innerObject(from, to);
+  const Type *toObject = TypeRelations::innerObject(to, from);
+  const Type *function = to->isOptional() && to->inner()->isFunction() ? to->inner() : to;
   auto stream = [](const Type *t) -> const ClassDecl * {
     const ClassDecl *cls = t->classDecl();
     return cls && cls->library() && cls->generic() && cls->generic()->name == "ReadableStream" &&
@@ -562,135 +631,221 @@ Expr *TypeRelations::coerce(Expr *expr, const Type *to, llvm::StringRef what) {
                ? cls
                : nullptr;
   };
-  llvm::ArrayRef<const Type *> wanted =
-      toObject->isUnion() ? toObject->members() : llvm::ArrayRef<const Type *>(toObject);
   auto body = [](const Type *m) {
     const ClassDecl *cls = m->classDecl();
     return cls && cls->library() && cls->name == "FormData";
   };
-  if (stream(fromObject) && llvm::any_of(wanted, body) &&
-      llvm::none_of(wanted, [&](const Type *m) { return stream(m) != nullptr; })) {
-    message += "; 'new Response' and 'new Request' take no streams: a stream is sent with "
-               "'Response.stream(stream, init)', 'Request.stream(input, stream, options)' or "
-               "'fetch(url, { body: stream })'";
+  auto isStream = [&](const Type *m) { return stream(m) != nullptr; };
+  llvm::ArrayRef<const Type *> wanted =
+      toObject->isUnion() ? toObject->members() : llvm::ArrayRef<const Type *>(toObject);
+  bool streamBody =
+      stream(fromObject) && llvm::any_of(wanted, body) && llvm::none_of(wanted, isStream);
+  bool requestInit = llvm::StringRef(fromObject->name()).starts_with("RequestInit") &&
+                     toObject->name() == "RequestOptions";
+
+  std::string prefix = ErrorTextAssignable::notTo(from->name(), to->name(), what);
+  if (from->isFunction() && function->isFunction()) {
+    prefix += ErrorTextAssignable::functions();
   }
-  if (llvm::StringRef(fromObject->name()).starts_with("RequestInit") &&
-      toObject->name() == "RequestOptions") {
-    message += "; 'new Request' takes 'RequestOptions', whose body is never a stream; a "
-               "'RequestInit' goes to 'fetch(url, init)'";
+  if (streamBody) {
+    prefix += ErrorTextAssignable::stream();
+  }
+  if (requestInit) {
+    prefix += ErrorTextAssignable::request();
   }
   if (to->isNever()) {
-    message += "; nothing fits 'never': if it comes from a type argument left out, write it, "
-               "e.g. 'new ReadableStream<int, MyError>(...)' for a stream that fails with "
-               "MyError";
+    prefix += ErrorTextAssignable::never();
   }
-  const std::vector<std::pair<const Type *, llvm::SMLoc>> *places = nullptr;
-  const Type *otherPlace = nullptr;
-  if (auto *name = dyn_cast<NameExpr>(expr); name && name->var()) {
-    if (auto found = this->checker.destinations_.find(name->var());
-        found != this->checker.destinations_.end()) {
-      places = &found->second;
-      for (auto [type, loc] : *places) {
-        if (type->nonOptional() != toObject && !otherPlace) {
-          otherPlace = type->nonOptional();
-        }
-      }
-    }
-  }
+
+  const Type *other = this->otherPlace(expr, to);
   const ClassDecl *fromClass = fromObject->classDecl();
   if (from->classRef() && from->classRef()->isGeneric() && toObject->isConstructor()) {
     const ClassDecl *generic = from->classRef();
     std::string name = generic->name.str();
-    std::string example = generic->library() ? "class Bus extends " + name + " {}"
-                                             : "class Int" + name + " extends " + name + "<int> {}";
-    message += "; each list of type arguments of '" + name +
-               "' makes a class of its own, and 'new' of this value could make none of them: "
-               "give a class that extends it, e.g. '" +
-               example + "', or take the class as an 'object'";
-  } else if (from->isUnknown() || from->isAnyObject()) {
-    message += this->checker.unknownChecker().unknownHint(expr, to);
-  } else if (fromObject->isObject() && toObject->isClass() &&
-             (!fromClass || fromClass->literal())) {
-    message += "; an object literal is never an instance of a class: create one with 'new " +
-               toObject->name().str() + "(...)'";
-  } else if (fromClass && fromClass->literal() && toObject->isObject()) {
-    message += "; an object literal with methods has a type of its own; to give it this type, "
-               "write its functions as fields, 'f: () => ...'";
-  } else if (std::string why = GenericWidening::whyNot(fromObject, toObject); !why.empty()) {
-    message += why;
-  } else if (fromObject->isClass() && toObject->isObject() && fromObject != toObject) {
-    message += toObject->isClass()
-                   ? "; classes are told apart by their names, whatever their fields, and '" +
-                         fromObject->name().str() + "' does not extend '" + toObject->name().str() +
-                         "'"
-                   : "; an instance of a class is only of its class's type and of those it "
-                     "extends or implements: write 'implements " +
-                         toObject->name().str() + "' in the class";
-  } else if (fromObject->isObject() && !fromObject->isClass() && toObject->isUnion() &&
-             llvm::any_of(toObject->members(), [](const Type *m) { return m->isObject(); })) {
-    message += "; an object literal goes into a union as one of its members: it needs the "
-               "fields of one of them";
-    const Type *front = toObject->members().front();
-    for (const Field &f : front->isObject() ? front->fields() : llvm::ArrayRef<Field>()) {
-      if (llvm::all_of(toObject->members(), [&](const Type *m) {
-            return m->isObject() && m->field(f.name) && m->field(f.name)->type->isLiteral();
-          })) {
-        message += ", with its value of '" + f.name + "'";
-        break;
-      }
-    }
-  } else if (fromObject->isTuple() && toObject->isArray()) {
-    message +=
-        "; a tuple is not an array, though it is written like one: copy it into an array with "
-        "'[...t]'";
-  } else if (fromObject->isObject() && toObject->isObject() &&
-             !TypeRelations::isImplicitlyConvertible(fromObject, toObject)) {
-    message +=
-        this->checker.objectChecker().objectMismatch(fromObject, toObject, otherPlace != nullptr) +
-        (otherPlace ? "; the same object also goes where '" + otherPlace->name().str() +
-                          "' is expected, and one object cannot be both"
-                    : "");
-  } else if (from->isOptional() && TypeRelations::isImplicitlyConvertible(from->inner(), to)) {
-    message += "; the value may be undefined: check it first (e.g. 'x != undefined') or give a "
-               "default with '??'";
-  } else if (from->nonOptional()->isJson()) {
-    message += "; a Json may hold any JSON value: check what it holds first (e.g. 'typeof x == "
-               "\"string\"' or 'Array.isArray(x)')";
-  } else if (to->nonOptional()->isAnyObject()) {
-    message += "; only objects of the language are 'object's (instances of classes, object "
-               "literals, dates, dictionaries...); for any value at all there is 'unknown'";
-  } else if (to->nonOptional()->isJson() &&
-             (fromObject->isObject() || from->nonOptional()->isArray())) {
-    message += "; an array or an object becomes a Json only as a literal written where a Json is "
-               "expected ('[...]', '{ ... }'), or as a 'Json[]', which stays the same array";
-  } else if (to->nonOptional()->isJson() && from->nonOptional()->isRecord() &&
-             TypeRelations::holdsWideInteger(from->nonOptional()->valueType())) {
-    message += "; a number in a Json is a double, which holds every integer only within "
-               "±9007199254740992 (2^53), and nothing proves the values of this dictionary are "
-               "there: build a 'Record<string, Json>' and check each value as it goes in, or "
-               "keep them in a narrower type such as 'int32'";
-  } else if (to->nonOptional()->isJson() && from->nonOptional()->isDecimal()) {
-    message += "; JSON has no decimals: write it as text with 'String(x)', as JSON.stringify does";
-  } else if (from->isFloat() && to->isDecimal()) {
-    message += "; a double is inexact already, so it becomes a decimal only explicitly: "
-               "'decimal(x)'";
-  } else if (from->isDecimal() && (to->isNumeric() || to->nonOptional()->isNumeric())) {
-    message += "; a decimal becomes a number only explicitly: 'Number(x)' gives the nearest double";
-  } else {
-    message += TypeRelations::conversionHint(expr, to);
+    std::string example = generic->library() ? ErrorTextAssignable::extendsBus(name)
+                                             : ErrorTextAssignable::extendsInt(name);
+    std::string message = prefix + ErrorTextAssignable::generic(name, example);
+
+    return err(TypeRelationsAssignableError{
+        .code = TypeRelationsAssignableErrorCode::GENERIC_CLASS_VALUE,
+        .message = message,
+    });
   }
-  this->checker.diags_.error(expr->loc(), message);
-  if (otherPlace) {
-    for (auto [type, loc] : *places) {
-      if (type->nonOptional() == otherPlace) {
-        this->checker.diags_.note(loc,
-                                  "the object also goes here, as '" + otherPlace->name() + "'");
-        break;
-      }
-    }
+  if (from->isUnknown() || from->isAnyObject()) {
+    std::string hint = this->checker.unknownChecker().unknownHint(expr, to);
+    std::string message = prefix + hint;
+
+    return err(TypeRelationsAssignableError{
+        .code = TypeRelationsAssignableErrorCode::UNKNOWN_VALUE,
+        .message = message,
+    });
+  }
+  if (fromObject->isObject() && toObject->isClass() && (!fromClass || fromClass->literal())) {
+    std::string message = prefix + ErrorTextAssignable::literal(toObject->name());
+
+    return err(TypeRelationsAssignableError{
+        .code = TypeRelationsAssignableErrorCode::LITERAL_NOT_INSTANCE,
+        .message = message,
+    });
+  }
+  if (fromClass && fromClass->literal() && toObject->isObject()) {
+    std::string message = prefix + ErrorTextAssignable::methods();
+
+    return err(TypeRelationsAssignableError{
+        .code = TypeRelationsAssignableErrorCode::LITERAL_WITH_METHODS,
+        .message = message,
+    });
   }
 
-  return expr;
+  std::string why = GenericWidening::whyNot(fromObject, toObject);
+  if (!why.empty()) {
+    std::string message = prefix + why;
+
+    return err(TypeRelationsAssignableError{
+        .code = TypeRelationsAssignableErrorCode::GENERIC_WIDENING,
+        .message = message,
+    });
+  }
+
+  bool classValue = fromObject->isClass() && toObject->isObject() && fromObject != toObject;
+  if (classValue && toObject->isClass()) {
+    std::string message =
+        prefix + ErrorTextAssignable::classes(fromObject->name(), toObject->name());
+
+    return err(TypeRelationsAssignableError{
+        .code = TypeRelationsAssignableErrorCode::CLASS_NOT_EXTENDED,
+        .message = message,
+    });
+  }
+  if (classValue) {
+    std::string message = prefix + ErrorTextAssignable::implements(toObject->name());
+
+    return err(TypeRelationsAssignableError{
+        .code = TypeRelationsAssignableErrorCode::CLASS_NOT_IMPLEMENTED,
+        .message = message,
+    });
+  }
+
+  auto isObject = [](const Type *m) { return m->isObject(); };
+  bool objectIntoUnion = fromObject->isObject() && !fromObject->isClass() && toObject->isUnion() &&
+                         llvm::any_of(toObject->members(), isObject);
+  if (objectIntoUnion) {
+    std::string message = prefix + ErrorTextAssignable::inUnion();
+    const Type *front = toObject->members().front();
+    for (const Field &f : front->isObject() ? front->fields() : llvm::ArrayRef<Field>()) {
+      auto literalField = [&](const Type *m) {
+        return m->isObject() && m->field(f.name) && m->field(f.name)->type->isLiteral();
+      };
+      if (llvm::all_of(toObject->members(), literalField)) {
+        message += ErrorTextAssignable::withValue(f.name);
+        break;
+      }
+    }
+
+    return err(TypeRelationsAssignableError{
+        .code = TypeRelationsAssignableErrorCode::OBJECT_INTO_UNION,
+        .message = message,
+    });
+  }
+  if (fromObject->isTuple() && toObject->isArray()) {
+    std::string message = prefix + ErrorTextAssignable::tuple();
+
+    return err(TypeRelationsAssignableError{
+        .code = TypeRelationsAssignableErrorCode::TUPLE_NOT_ARRAY,
+        .message = message,
+    });
+  }
+
+  bool objectsDiffer = fromObject->isObject() && toObject->isObject() &&
+                       !TypeRelations::isImplicitlyConvertible(fromObject, toObject);
+  if (objectsDiffer) {
+    std::string mismatch =
+        this->checker.objectChecker().objectMismatch(fromObject, toObject, other != nullptr);
+    std::string message = prefix + mismatch;
+    if (other) {
+      message += ErrorTextAssignable::both(other->name());
+    }
+
+    return err(TypeRelationsAssignableError{
+        .code = TypeRelationsAssignableErrorCode::OBJECT_MISMATCH,
+        .message = message,
+    });
+  }
+  if (from->isOptional() && TypeRelations::isImplicitlyConvertible(from->inner(), to)) {
+    std::string message = prefix + ErrorTextAssignable::undefined();
+
+    return err(TypeRelationsAssignableError{
+        .code = TypeRelationsAssignableErrorCode::MAY_BE_UNDEFINED,
+        .message = message,
+    });
+  }
+  if (from->nonOptional()->isJson()) {
+    std::string message = prefix + ErrorTextAssignable::json();
+
+    return err(TypeRelationsAssignableError{
+        .code = TypeRelationsAssignableErrorCode::JSON_UNCHECKED,
+        .message = message,
+    });
+  }
+  if (to->nonOptional()->isAnyObject()) {
+    std::string message = prefix + ErrorTextAssignable::object();
+
+    return err(TypeRelationsAssignableError{
+        .code = TypeRelationsAssignableErrorCode::NOT_AN_OBJECT,
+        .message = message,
+    });
+  }
+
+  bool intoJson = to->nonOptional()->isJson();
+  if (intoJson && (fromObject->isObject() || from->nonOptional()->isArray())) {
+    std::string message = prefix + ErrorTextAssignable::jsonObject();
+
+    return err(TypeRelationsAssignableError{
+        .code = TypeRelationsAssignableErrorCode::OBJECT_INTO_JSON,
+        .message = message,
+    });
+  }
+  if (intoJson && from->nonOptional()->isRecord() &&
+      TypeRelations::holdsWideInteger(from->nonOptional()->valueType())) {
+    std::string message = prefix + ErrorTextAssignable::wideJson();
+
+    return err(TypeRelationsAssignableError{
+        .code = TypeRelationsAssignableErrorCode::WIDE_INTEGERS_INTO_JSON,
+        .message = message,
+    });
+  }
+  if (intoJson && from->nonOptional()->isDecimal()) {
+    std::string message = prefix + ErrorTextAssignable::noDecimal();
+
+    return err(TypeRelationsAssignableError{
+        .code = TypeRelationsAssignableErrorCode::DECIMAL_INTO_JSON,
+        .message = message,
+    });
+  }
+  if (from->isFloat() && to->isDecimal()) {
+    std::string message = prefix + ErrorTextAssignable::toDecimal();
+
+    return err(TypeRelationsAssignableError{
+        .code = TypeRelationsAssignableErrorCode::DOUBLE_INTO_DECIMAL,
+        .message = message,
+    });
+  }
+  if (from->isDecimal() && (to->isNumeric() || to->nonOptional()->isNumeric())) {
+    std::string message = prefix + ErrorTextAssignable::toNumber();
+
+    return err(TypeRelationsAssignableError{
+        .code = TypeRelationsAssignableErrorCode::DECIMAL_INTO_NUMBER,
+        .message = message,
+    });
+  }
+
+  std::string hint = TypeRelations::conversionHint(expr, to);
+  std::string message = prefix + hint;
+
+  return err(TypeRelationsAssignableError{
+      .code = TypeRelationsAssignableErrorCode::NOT_ASSIGNABLE,
+      .message = message,
+  });
 }
 
 const Type *TypeRelations::comparisonType(const Type *a, const Type *b) {

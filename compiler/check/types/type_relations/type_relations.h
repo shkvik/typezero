@@ -1,6 +1,8 @@
 #pragma once
 
 #include "compiler/check/checker/checker.h"
+#include "compiler/check/types/type_relations/type_relations_errors.h"
+#include "compiler/result/result/result.h"
 
 namespace tz {
 
@@ -25,6 +27,18 @@ public:
   static std::string conversionMethod(const Type *to);
 
 private:
+  using ResultRangeWasProven = Result<const Expr *, TypeRelationsRangeProvenError>;
+  using ResultTypeAssignable = Result<const Expr *, TypeRelationsAssignableError>;
+
+  static ResultRangeWasProven rangeProven(const Expr *expr, const Type *to, llvm::StringRef what,
+                                          llvm::ArrayRef<std::pair<int64_t, int64_t>> intervals);
+  static std::string rangeCheck(const Expr *expr, const Type *target,
+                                llvm::ArrayRef<std::pair<int64_t, int64_t>> intervals);
+  static const Type *innerObject(const Type *type, const Type *other);
+  ResultTypeAssignable assignable(const Expr *expr, const Type *to, llvm::StringRef what) const;
+  const Type *otherPlace(const Expr *expr, const Type *to) const;
+  llvm::SMLoc placeLoc(const Expr *expr, const Type *place) const;
+
   Checker &checker;
 };
 

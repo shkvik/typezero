@@ -11,76 +11,92 @@ namespace tz {
 FunctionMethodChecker::FunctionMethodChecker(Checker &owner)
     : checker(owner) {}
 
-Expr *FunctionMethodChecker::checkThisCall(CallExpr *call, MemberExpr *member) {
+FunctionMethodChecker::ResultThisCallMade FunctionMethodChecker::checkThisCall(CallExpr *call,
+                                                                               MemberExpr *member) {
   const Type *type = member->object->type;
   call->type = Type::error();
-  auto checkArgsLoosely = [&] {
-    for (Expr *&arg : call->args) {
-      arg = this->checker.exprChecker().checkExpr(arg);
-    }
-  };
   llvm::StringRef name = member->name;
+  if (name == "bind") {
+    this->checker.argumentChecker().checkArgsLoosely(call);
+    std::string message = ErrorTextThisCall::noBind();
+
+    return err(FunctionMethodCheckerCheckThisCallError{
+        .code = FunctionMethodCheckerCheckThisCallErrorCode::NO_BIND,
+        .message = message,
+    });
+  }
   if (name != "call" && name != "apply") {
-    this->checker.diags_.error(
-        member->loc(), name == "bind"
-                           ? "'bind' is not supported: pass the 'this' with every call, "
-                             "'f.call(obj, ...)'"
-                           : "a function has no property '" + name.str() +
-                                 "'; call it with '.call(obj, ...)' or '.apply(obj, args)'");
-    checkArgsLoosely();
-    return call;
+    this->checker.argumentChecker().checkArgsLoosely(call);
+    std::string message = ErrorTextThisCall::noProperty(name);
+
+    return err(FunctionMethodCheckerCheckThisCallError{
+        .code = FunctionMethodCheckerCheckThisCallErrorCode::NO_SUCH_PROPERTY,
+        .message = message,
+    });
   }
   if (call->args.empty()) {
-    this->checker.diags_.error(member->loc(),
-                               "'" + name + "' takes the 'this' of the call first, e.g. 'f." +
-                                   name + "(this" + (name == "apply" ? ", args)'" : ", ...)'"));
-    return call;
+    std::string message = ErrorTextThisCall::thisFirst(name);
+
+    return err(FunctionMethodCheckerCheckThisCallError{
+        .code = FunctionMethodCheckerCheckThisCallErrorCode::NO_THIS_ARGUMENT,
+        .message = message,
+    });
   }
+  if (name == "apply" && (call->args.size() != 2 || call->hasSpread())) {
+    this->checker.argumentChecker().checkArgsLoosely(call);
+    std::string message = ErrorTextThisCall::applyArgs();
+
+    return err(FunctionMethodCheckerCheckThisCallError{
+        .code = FunctionMethodCheckerCheckThisCallErrorCode::APPLY_ARGUMENTS,
+        .message = message,
+    });
+  }
+
   if (name == "apply") {
-    if (call->args.size() != 2 || call->hasSpread()) {
-      this->checker.diags_.error(member->loc(),
-                                 "'apply' takes two arguments: the 'this' of the call and the list "
-                                 "of the arguments, e.g. 'f.apply(this, args)'");
-      checkArgsLoosely();
-      return call;
-    }
     call->spread = {false, true};
     this->checker.argListChecker().expandListSpreads(call->args, call->spread);
   }
   call->callee = member->object;
   call->type = type->ret();
+  Expr *checked = this->checker.argumentChecker().checkArguments(
+      call, type->params(), type->minArgs(), type->hasRest(), member->loc());
 
-  return this->checker.argumentChecker().checkArguments(call, type->params(), type->minArgs(),
-                                                        type->hasRest(), member->loc());
+  return ok(checked);
 }
 
-Expr *FunctionMethodChecker::checkListMethod(CallExpr *call, MemberExpr *member) {
+FunctionMethodChecker::ResultParamsJoined
+FunctionMethodChecker::checkListMethod(CallExpr *call, MemberExpr *member) {
   call->type = Type::error();
   if (member->name != "join") {
-    this->checker.diags_.error(member->loc(),
-                               "a list of parameters has no method '" + member->name +
-                                   "' here; it has 'length' and 'join', and goes on with "
-                                   "'...args'");
-    for (Expr *&arg : call->args) {
-      arg = this->checker.exprChecker().checkExpr(arg);
-    }
-    return call;
+    this->checker.argumentChecker().checkArgsLoosely(call);
+    std::string message = ErrorTextListMethod::noMethod(member->name);
+
+    return err(FunctionMethodCheckerCheckListMethodError{
+        .code = FunctionMethodCheckerCheckListMethodErrorCode::NO_SUCH_METHOD,
+        .message = message,
+    });
   }
-  bool rejected = this->checker.callChecker().rejectSpread(call);
+  if (this->checker.callChecker().rejectSpread(call)) {
+    return err(FunctionMethodCheckerCheckListMethodError{
+        .code = FunctionMethodCheckerCheckListMethodErrorCode::ALREADY_REPORTED,
+        .message = "",
+    });
+  }
   ArgumentChecker::ResultArityMatches arity =
-      rejected ? ok(call) : this->checker.argumentChecker().checkArity(call, 0, 1);
+      this->checker.argumentChecker().checkArity(call, 0, 1);
   if (arity.isErr()) {
-    this->checker.diags_.error(member->loc(), arity.error().message);
+    return err(FunctionMethodCheckerCheckListMethodError{
+        .code = FunctionMethodCheckerCheckListMethodErrorCode::WRONG_ARITY,
+        .message = arity.error().message,
+    });
   }
-  if (rejected || arity.isErr()) {
-    return call;
-  }
+
   if (!call->args.empty()) {
     call->args[0] = this->checker.argumentChecker().checkArg(call->args[0], Type::string());
   }
   call->type = Type::string();
 
-  return call;
+  return ok(call);
 }
 
 }

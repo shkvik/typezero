@@ -335,7 +335,11 @@ Expr *AssignChecker::checkAssign(AssignExpr *assign) {
   if (member && member->object->type->isArray() && !assign->value->type->isError()) {
     const Type *element = member->object->type->inner();
     if (element->hasZeroValue()) {
-      this->checker.indexProofs().requireBetween(assign->value, 0, std::nullopt, "an array length");
+      IndexProofs::ResultBetweenProven between = this->checker.indexProofs().requireBetween(
+          assign->value, 0, std::nullopt, "an array length");
+      if (between.isErr() && between.error().code != IndexProofsRequireBetweenErrorCode::EXEMPT) {
+        this->checker.diags_.error(assign->value->loc(), between.error().message);
+      }
     } else if (!this->checker.indexProofs().provesInBounds(member->object, assign->value, true) &&
                !this->checker.indexProofs().exempt(assign->value->loc(), member->object)) {
       this->checker.diags_.error(

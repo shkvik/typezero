@@ -1,6 +1,8 @@
 #pragma once
 
 #include "compiler/check/checker/checker.h"
+#include "compiler/check/generics/generic_instantiator/generic_instantiator_errors.h"
+#include "compiler/result/result/result.h"
 
 namespace tz {
 
@@ -21,6 +23,20 @@ public:
   void checkInstances();
 
 private:
+  using ResultTypeArgsCount = Result<size_t, GenericInstantiatorTypeArgCountError>;
+  using ResultTypeArgsGiven = Result<const NameExpr *, GenericInstantiatorTypeArgsGivenError>;
+  using ResultNoClassReturn = Result<const FuncSymbol *, GenericInstantiatorOwnClassReturnError>;
+  using ResultChainIsFinite = Result<unsigned, GenericInstantiatorChainBoundedError>;
+  using ResultParamsMeaning = Result<const FuncSymbol *, GenericInstantiatorParamsMeaningfulError>;
+
+  static ResultTypeArgsCount typeArgCount(const FuncSymbol *generic, const NameExpr *name);
+  static ResultTypeArgsGiven typeArgsGiven(const FuncSymbol *generic, const NameExpr *name,
+                                           const Checker::Signature *expected);
+  static ResultNoClassReturn ownClassReturn(const FuncSymbol *generic, const ClassDecl *cls);
+  ResultChainIsFinite chainBounded(const FuncSymbol *generic,
+                                   llvm::ArrayRef<const Type *> args) const;
+  ResultParamsMeaning paramsMeaningful(const FuncSymbol *generic, llvm::ArrayRef<const Type *> reps,
+                                       llvm::ArrayRef<const Type *> args);
   static const ClassDecl *literalClassIn(const Type *type,
                                          llvm::SmallPtrSetImpl<const Type *> &seen);
   static std::string typeList(llvm::ArrayRef<const Type *> types);

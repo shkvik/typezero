@@ -1,14 +1,19 @@
 #pragma once
 
 #include "compiler/check/checker/checker.h"
+#include "compiler/check/generics/generic_class_instantiator/generic_class_instantiator_errors.h"
+#include "compiler/result/result/result.h"
 
 namespace tz {
 
 class GenericClassInstantiator {
 public:
+  using ResultClassMade = Result<ClassDecl *, GenericClassInstantiatorInstantiateClassError>;
+
   explicit GenericClassInstantiator(Checker &owner);
 
-  ClassDecl *instantiateClass(ClassDecl *generic, std::vector<const Type *> args, llvm::SMLoc loc);
+  ResultClassMade instantiateClass(ClassDecl *generic, std::vector<const Type *> args,
+                                   llvm::SMLoc use);
   void fillInstance(ClassDecl *inst);
   void linkInstance(ClassDecl *inst);
   void declareInstanceMember(ClassDecl *inst, FunctionDecl *fn, FunctionDecl *generic);

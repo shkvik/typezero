@@ -74,8 +74,16 @@ Expr *ExprChecker::checkExprKind(Expr *expr, const Type *expected, bool wraps) {
     }
   }
   switch (expr->kind()) {
-  case Expr::Kind::IntLit:
-    return this->checker.literalChecker().checkIntLit(cast<IntLitExpr>(expr), expected, false);
+    case Expr::Kind::IntLit: {
+      auto *lit = cast<IntLitExpr>(expr);
+      LiteralChecker::ResultIntLiteralTyped typed =
+          this->checker.literalChecker().checkIntLit(lit, expected, false);
+      if (typed.isErr()) {
+        this->checker.diags_.error(lit->loc(), typed.error().message);
+        return lit;
+      }
+      return typed.value();
+    }
   case Expr::Kind::FloatLit: {
     if (const Type *literal = this->checker.literalTypes().numberLiteralFor(
             expected, cast<FloatLitExpr>(expr)->value, true)) {
@@ -142,10 +150,24 @@ Expr *ExprChecker::checkExprKind(Expr *expr, const Type *expected, bool wraps) {
     return this->checker.newChecker().checkNew(cast<NewExpr>(expr), expected);
   case Expr::Kind::Class:
     return this->checker.lateClasses().checkClassExpr(cast<ClassExpr>(expr), expected);
-  case Expr::Kind::Conditional:
-    return this->checkConditional(cast<ConditionalExpr>(expr), expected);
-  case Expr::Kind::Cast:
-    return this->checkCast(cast<CastExpr>(expr));
+  case Expr::Kind::Conditional: {
+    auto *conditional = cast<ConditionalExpr>(expr);
+    ResultBranchesMatch matched = this->checkConditional(conditional, expected);
+    if (matched.isErr()) {
+      this->checker.diags_.error(conditional->loc(), matched.error().message);
+      return conditional;
+    }
+    return matched.value();
+  }
+  case Expr::Kind::Cast: {
+    auto *castExpr = cast<CastExpr>(expr);
+    ResultCastSupported supported = this->checkCast(castExpr);
+    if (supported.isErr()) {
+      this->checker.diags_.error(castExpr->loc(), supported.error().message);
+      return castExpr;
+    }
+    return supported.value();
+  }
   case Expr::Kind::Sequence:
     return this->checkSequence(cast<SequenceExpr>(expr), expected, wraps);
   case Expr::Kind::OptionalChain:
@@ -217,7 +239,8 @@ Expr *ExprChecker::chainLink(Expr *object) {
   return link;
 }
 
-Expr *ExprChecker::checkConditional(ConditionalExpr *cond, const Type *expected) {
+ExprChecker::ResultBranchesMatch ExprChecker::checkConditional(ConditionalExpr *cond,
+                                                               const Type *expected) {
   Checker::Flow whenTrue, whenFalse;
   cond->cond = this->checker.truthChecker().checkCondition(cond->cond, whenTrue, whenFalse);
   if (std::optional<bool> constant =
@@ -225,7 +248,8 @@ Expr *ExprChecker::checkConditional(ConditionalExpr *cond, const Type *expected)
               ? this->checker.genericChecker().constantCondition(cond->cond)
               : std::nullopt) {
     this->checker.flow_ = *constant ? whenTrue : whenFalse;
-    return this->checkExpr(*constant ? cond->thenExpr : cond->elseExpr, expected);
+    Expr *chosen = this->checkExpr(*constant ? cond->thenExpr : cond->elseExpr, expected);
+    return ok(chosen);
   }
   auto waits = [&](const Expr *branch) {
     return Destination::literalShaped(branch) || DecimalChecker::isLiteralTree(branch);
@@ -268,11 +292,11 @@ Expr *ExprChecker::checkConditional(ConditionalExpr *cond, const Type *expected)
     if (this->checker.trial_ && a->isError() != b->isError()) {
       cond->type = a->isError() ? b : a;
     }
-    return cond;
+    return ok(cond);
   }
   if (a->isVoid() && b->isVoid()) {
     cond->type = a;
-    return cond;
+    return ok(cond);
   }
   if (a != b && this->checker.typeRelations().literalAdapts(cond->thenExpr, b)) {
     cond->thenExpr = this->checker.typeRelations().adaptLiteral(cond->thenExpr, b);
@@ -283,49 +307,99 @@ Expr *ExprChecker::checkConditional(ConditionalExpr *cond, const Type *expected)
   }
   const Type *common = LiteralTypes::unionUnify(a, b);
   if (!common) {
-    this->checker.diags_.error(cond->loc(), "the branches of '?:' have incompatible types '" +
-                                                a->name() + "' and '" + b->name() + "'");
-    return cond;
+    std::string message = ErrorTextConditional::mismatch(a->name(), b->name());
+
+    return err(ExprCheckerCheckConditionalError{
+        .code = ExprCheckerCheckConditionalErrorCode::INCOMPATIBLE_BRANCHES,
+        .message = message,
+    });
   }
   cond->thenExpr = this->checker.typeRelations().convert(cond->thenExpr, common);
   cond->elseExpr = this->checker.typeRelations().convert(cond->elseExpr, common);
   cond->type = common;
 
-  return cond;
+  return ok(cond);
 }
 
-Expr *ExprChecker::checkCast(CastExpr *cast) {
+ExprChecker::ResultCastSupported ExprChecker::checkCast(CastExpr *cast) {
   const Type *to = this->checker.typeResolver().resolveType(*cast->target, false);
   bool arrayLiteral = isa<ArrayLitExpr>(cast->operand);
   cast->operand = this->checkExpr(cast->operand, arrayLiteral && !to->isError() ? to : nullptr);
   const Type *from = cast->operand->type;
   cast->type = to;
-  std::string message = "'as' is not supported";
-  if (from->isError() || to->isError())
-    ;
-  else if (arrayLiteral) {
-    message +=
-        "; declare the type of the variable instead, e.g. 'let x: " + to->name().str() + " = ...'";
-  } else if (from == to || TypeRelations::isImplicitlyConvertible(from, to)) {
-    message += "; the value converts to '" + to->name().str() + "' by itself, so remove 'as'";
-  } else if (from->isOptional() && TypeRelations::isImplicitlyConvertible(from->inner(), to)) {
-    message += "; the value may be undefined: check it first (e.g. 'x != undefined') or give a "
-               "default with '??'";
-  } else if (std::string hint = TypeRelations::conversionHint(cast->operand, to); !hint.empty()) {
-    message += hint;
-  } else if (from->isFloat() && to->isDecimal()) {
-    message += "; convert the double with 'decimal(x)'";
-  } else if (from->isDecimal() && to->isNumeric()) {
-    message += "; 'Number(x)' gives the nearest double";
-  } else if (from->nonOptional()->isJson()) {
-    message += "; check what a Json holds first, e.g. 'typeof x == \"number\"', and the check "
-               "narrows it";
-  } else {
-    message += ", and type '" + from->name().str() + "' cannot become '" + to->name().str() + "'";
-  }
-  this->checker.diags_.error(cast->loc(), message);
+  if (from->isError() || to->isError()) {
+    std::string message = ErrorTextCast::plain();
 
-  return cast;
+    return err(ExprCheckerCheckCastError{
+        .code = ExprCheckerCheckCastErrorCode::NOT_SUPPORTED,
+        .message = message,
+    });
+  }
+  if (arrayLiteral) {
+    std::string message = ErrorTextCast::declare(to->name());
+
+    return err(ExprCheckerCheckCastError{
+        .code = ExprCheckerCheckCastErrorCode::ARRAY_LITERAL,
+        .message = message,
+    });
+  }
+  if (from == to || TypeRelations::isImplicitlyConvertible(from, to)) {
+    std::string message = ErrorTextCast::itself(to->name());
+
+    return err(ExprCheckerCheckCastError{
+        .code = ExprCheckerCheckCastErrorCode::CONVERTS_BY_ITSELF,
+        .message = message,
+    });
+  }
+  if (from->isOptional() && TypeRelations::isImplicitlyConvertible(from->inner(), to)) {
+    std::string message = ErrorTextCast::undefined();
+
+    return err(ExprCheckerCheckCastError{
+        .code = ExprCheckerCheckCastErrorCode::MAY_BE_UNDEFINED,
+        .message = message,
+    });
+  }
+
+  std::string hint = TypeRelations::conversionHint(cast->operand, to);
+  if (!hint.empty()) {
+    std::string message = ErrorTextCast::hinted(hint);
+
+    return err(ExprCheckerCheckCastError{
+        .code = ExprCheckerCheckCastErrorCode::NEEDS_CONVERSION,
+        .message = message,
+    });
+  }
+  if (from->isFloat() && to->isDecimal()) {
+    std::string message = ErrorTextCast::toDecimal();
+
+    return err(ExprCheckerCheckCastError{
+        .code = ExprCheckerCheckCastErrorCode::DOUBLE_TO_DECIMAL,
+        .message = message,
+    });
+  }
+  if (from->isDecimal() && to->isNumeric()) {
+    std::string message = ErrorTextCast::toNumber();
+
+    return err(ExprCheckerCheckCastError{
+        .code = ExprCheckerCheckCastErrorCode::DECIMAL_TO_NUMBER,
+        .message = message,
+    });
+  }
+  if (from->nonOptional()->isJson()) {
+    std::string message = ErrorTextCast::json();
+
+    return err(ExprCheckerCheckCastError{
+        .code = ExprCheckerCheckCastErrorCode::JSON_VALUE,
+        .message = message,
+    });
+  }
+
+  std::string message = ErrorTextCast::cannot(from->name(), to->name());
+
+  return err(ExprCheckerCheckCastError{
+      .code = ExprCheckerCheckCastErrorCode::CANNOT_BECOME,
+      .message = message,
+  });
 }
 
 }

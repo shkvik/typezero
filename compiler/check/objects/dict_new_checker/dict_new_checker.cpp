@@ -58,6 +58,152 @@ void DictNewChecker::markPairs(Expr *arg) {
   }
 }
 
+DictNewChecker::ResultPartsJoined DictNewChecker::partsJoin(bool keys, const Type *common,
+                                                            const Type *type) {
+  const Type *next = common ? TypeRelations::unify(common, type) : type;
+  if (!next && keys) {
+    std::string message = ErrorTextPairParts::differ(true, common->name(), type->name());
+
+    return err(DictNewCheckerPartsJoinError{
+        .code = DictNewCheckerPartsJoinErrorCode::KEYS_DIFFER,
+        .message = message,
+    });
+  }
+  if (!next) {
+    std::string message = ErrorTextPairParts::differ(false, common->name(), type->name());
+
+    return err(DictNewCheckerPartsJoinError{
+        .code = DictNewCheckerPartsJoinErrorCode::VALUES_DIFFER,
+        .message = message,
+    });
+  }
+
+  return ok(next);
+}
+
+DictNewChecker::ResultPairTypesOk DictNewChecker::pairsKnown(const Type *key, const Type *value) {
+  if (key->isUndefined() || value->isUndefined() || key->isVoid() || value->isVoid()) {
+    std::string message = ErrorTextPairsKnown::undefined();
+
+    return err(DictNewCheckerPairsKnownError{
+        .code = DictNewCheckerPairsKnownErrorCode::TYPES_UNDEFINED,
+        .message = message,
+    });
+  }
+
+  return ok(key);
+}
+
+DictNewChecker::ResultSourceShape DictNewChecker::sourceShape(const Type *type, const Type *given,
+                                                              const Type *wanted, bool pairs,
+                                                              llvm::StringRef what) {
+  if (!given) {
+    std::string message = ErrorTextDictSource::notIter(what, type->name(), type->isRecord());
+
+    return err(DictNewCheckerSourceShapeError{
+        .code = DictNewCheckerSourceShapeErrorCode::NOT_ITERABLE,
+        .message = message,
+    });
+  }
+  bool pair = given->isTuple() && given->fields().size() == 2;
+  bool pairFits =
+      pair &&
+      (!wanted ||
+       (TypeRelations::isImplicitlyConvertible(given->fields()[0].type, wanted->fields()[0].type) &&
+        TypeRelations::isImplicitlyConvertible(given->fields()[1].type, wanted->fields()[1].type)));
+  if (pairs && !pairFits) {
+    llvm::StringRef wantedName = wanted ? wanted->name() : llvm::StringRef();
+    std::string message =
+        ErrorTextDictSource::notPairs(what, wantedName, given->name(), given->isArray());
+
+    return err(DictNewCheckerSourceShapeError{
+        .code = DictNewCheckerSourceShapeErrorCode::NOT_PAIRS,
+        .message = message,
+    });
+  }
+  if (!pairs && wanted && !TypeRelations::isImplicitlyConvertible(given, wanted)) {
+    std::string message = ErrorTextDictSource::values(what, wanted->name(), given->name());
+
+    return err(DictNewCheckerSourceShapeError{
+        .code = DictNewCheckerSourceShapeErrorCode::WRONG_VALUES,
+        .message = message,
+    });
+  }
+
+  return ok(given);
+}
+
+DictNewChecker::ResultOneArgument DictNewChecker::argumentCount(const NewExpr *expr, bool isMap) {
+  if (expr->args.size() > 1) {
+    std::string message = ErrorTextDictArgs::oneArg(expr->name, isMap);
+
+    return err(DictNewCheckerArgumentCountError{
+        .code = DictNewCheckerArgumentCountErrorCode::TOO_MANY_ARGUMENTS,
+        .message = message,
+    });
+  }
+
+  return ok(expr);
+}
+
+DictNewChecker::ResultTypesStated DictNewChecker::typesGiven(const NewExpr *expr, const Type *type,
+                                                             bool isMap, bool undefinedArg) {
+  if (!type && undefinedArg) {
+    std::string message = ErrorTextDictTypes::undefinedArg(expr->name, isMap);
+
+    return err(DictNewCheckerTypesGivenError{
+        .code = DictNewCheckerTypesGivenErrorCode::UNDEFINED_NEEDS_TYPES,
+        .message = message,
+    });
+  }
+  if (!type && isMap) {
+    std::string message = ErrorTextDictTypes::needsMap();
+
+    return err(DictNewCheckerTypesGivenError{
+        .code = DictNewCheckerTypesGivenErrorCode::MAP_NEEDS_TYPES,
+        .message = message,
+    });
+  }
+  if (!type) {
+    std::string message = ErrorTextDictTypes::needsSet();
+
+    return err(DictNewCheckerTypesGivenError{
+        .code = DictNewCheckerTypesGivenErrorCode::SET_NEEDS_TYPES,
+        .message = message,
+    });
+  }
+
+  return ok(type);
+}
+
+DictNewChecker::ResultPairsShaped DictNewChecker::pairShape(const Type *element) {
+  if (!element->isTuple() || element->fields().size() != 2) {
+    std::string message = ErrorTextDictPairs::pairs(element->name());
+
+    return err(DictNewCheckerPairShapeError{
+        .code = DictNewCheckerPairShapeErrorCode::NOT_PAIRS,
+        .message = message,
+    });
+  }
+
+  return ok(element);
+}
+
+DictNewChecker::ResultDefinedType DictNewChecker::elementsKnown(const NewExpr *expr,
+                                                                const Type *key,
+                                                                const Type *element, bool isMap) {
+  if (key->isUndefined() || (isMap && element->fields()[1].type->isUndefined())) {
+    std::string message = ErrorTextDictElements::undefined(expr->name);
+
+    return err(DictNewCheckerElementsKnownError{
+        .code = DictNewCheckerElementsKnownErrorCode::TYPES_UNDEFINED,
+        .message = message,
+    });
+  }
+
+  return ok(element);
+}
+
 bool DictNewChecker::inferPairs(Expr *arg, const Type *&key, const Type *&value) {
   this->markPairs(arg);
   auto *lit = dyn_cast<ArrayLitExpr>(arg);
@@ -72,7 +218,7 @@ bool DictNewChecker::inferPairs(Expr *arg, const Type *&key, const Type *&value)
     }
   }
   key = value = nullptr;
-  bool ok = true;
+  bool typed = true;
   for (const ArrayLitExpr::Element &e : lit->elements) {
     auto *pair = cast<ArrayLitExpr>(e.expr);
     for (size_t i = 0; i < 2; ++i) {
@@ -82,28 +228,25 @@ bool DictNewChecker::inferPairs(Expr *arg, const Type *&key, const Type *&value)
           part, common && DecimalChecker::isLiteralTree(part) ? common : nullptr);
       const Type *t = part->type;
       if (t->isError()) {
-        ok = false;
+        typed = false;
         continue;
       }
-      const Type *next = common ? TypeRelations::unify(common, t) : t;
-      if (!next) {
-        this->checker.diags_.error(part->loc(), std::string("the ") + (i == 0 ? "keys" : "values") +
-                                                    " of a Map have one type; found '" +
-                                                    common->name() + "' and '" + t->name() + "'");
-        ok = false;
+      ResultPartsJoined joined = DictNewChecker::partsJoin(i == 0, common, t);
+      if (joined.isErr()) {
+        this->checker.diags_.error(part->loc(), joined.error().message);
+        typed = false;
         continue;
       }
-      common = next;
+      common = joined.value();
     }
   }
-  if (!ok || !key || !value) {
+  if (!typed || !key || !value) {
     key = value = Type::error();
     return true;
   }
-  if (key->isUndefined() || value->isUndefined() || key->isVoid() || value->isVoid()) {
-    this->checker.diags_.error(
-        arg->loc(), "cannot infer the types of the Map from 'undefined'; give them, e.g. "
-                    "'new Map<string, int | undefined>(...)'");
+  ResultPairTypesOk known = DictNewChecker::pairsKnown(key, value);
+  if (known.isErr()) {
+    this->checker.diags_.error(arg->loc(), known.error().message);
     key = value = Type::error();
     return true;
   }
@@ -131,38 +274,13 @@ Expr *DictNewChecker::checkDictSource(Expr *arg, bool pairs, const Type *&elemen
     return arg;
   }
   const Type *given = GeneratorChecker::iteratedType(type);
-  if (!given) {
-    this->checker.diags_.error(
-        arg->loc(), what + " needs an array, a string, an iterator, a Map or a Set, found '" +
-                        type->name() + "'" +
-                        (type->isRecord() ? "; for the entries of a Record, pass "
-                                            "'Object.entries(r)'"
-                                          : ""));
-    return arg;
-  }
-  if (type->isIterator()) {
+  if (given && type->isIterator()) {
     this->checker.generatorChecker().checkSendsNothing(type, arg->loc(), what);
     this->checker.flowChecker().calledFunction();
   }
-  if (pairs) {
-    bool pair = given->isTuple() && given->fields().size() == 2;
-    if (!pair || (wanted && (!TypeRelations::isImplicitlyConvertible(given->fields()[0].type,
-                                                                     wanted->fields()[0].type) ||
-                             !TypeRelations::isImplicitlyConvertible(given->fields()[1].type,
-                                                                     wanted->fields()[1].type)))) {
-      this->checker.diags_.error(
-          arg->loc(), what + " takes [key, value] pairs" +
-                          (wanted ? " of '" + wanted->name().str() + "'" : std::string()) +
-                          ", found '" + given->name() + "'" +
-                          (given->isArray() ? "; an array literal is a pair only where one "
-                                              "is expected: give the callback its type, "
-                                              "e.g. '(x): [string, int] => [x.name, x.n]'"
-                                            : ""));
-      return arg;
-    }
-  } else if (wanted && !TypeRelations::isImplicitlyConvertible(given, wanted)) {
-    this->checker.diags_.error(arg->loc(), what + " takes values of type '" + wanted->name() +
-                                               "', found '" + given->name() + "'");
+  ResultSourceShape shaped = DictNewChecker::sourceShape(type, given, wanted, pairs, what);
+  if (shaped.isErr()) {
+    this->checker.diags_.error(arg->loc(), shaped.error().message);
     return arg;
   }
   element = given;
@@ -218,30 +336,20 @@ Expr *DictNewChecker::checkDictNew(NewExpr *expr, const Type *expected) {
              wanted && wanted->isDict() && wanted->isMap() == isMap && !wanted->isRecord()) {
     type = wanted;
   }
-  if (expr->args.size() > 1) {
-    this->checker.diags_.error(expr->args[1]->loc(),
-                               "'new " + expr->name + "' takes one argument, the " +
-                                   (isMap ? "entries" : "values") + " to start with");
+  ResultOneArgument single = DictNewChecker::argumentCount(expr, isMap);
+  if (single.isErr()) {
+    this->checker.diags_.error(expr->args[1]->loc(), single.error().message);
     return fail();
   }
   std::vector<Expr *> args;
-  if (expr->args.empty()) {
-    if (!type) {
-      this->checker.diags_.error(
-          loc, isMap ? "'new Map()' needs the types of its keys and values, e.g. 'new "
-                       "Map<string, int>()'"
-                     : "'new Set()' needs the type of its elements, e.g. 'new "
-                       "Set<int>()'");
-      return fail();
-    }
-  } else if (Expr *arg = expr->args[0]; isa<UndefinedExpr>(arg)) {
-    if (!type) {
-      this->checker.diags_.error(
-          loc, "'new " + expr->name + "(undefined)' needs the types of the " +
-                   (isMap ? "Map, e.g. 'new Map<string, int>()'" : "Set, e.g. 'new Set<int>()'"));
+  if (expr->args.empty() || isa<UndefinedExpr>(expr->args[0])) {
+    ResultTypesStated stated = DictNewChecker::typesGiven(expr, type, isMap, !expr->args.empty());
+    if (stated.isErr()) {
+      this->checker.diags_.error(loc, stated.error().message);
       return fail();
     }
   } else {
+    Expr *arg = expr->args[0];
     const Type *key = nullptr;
     const Type *value = nullptr;
     if (!type && isMap && this->inferPairs(arg, key, value)) {
@@ -261,9 +369,9 @@ Expr *DictNewChecker::checkDictNew(NewExpr *expr, const Type *expected) {
         return expr;
       }
       if (!type) {
-        if (isMap && (!element->isTuple() || element->fields().size() != 2)) {
-          this->checker.diags_.error(arg->loc(), "'new Map' takes [key, value] pairs, found '" +
-                                                     element->name() + "'");
+        ResultPairsShaped shaped = DictNewChecker::pairShape(element);
+        if (isMap && shaped.isErr()) {
+          this->checker.diags_.error(arg->loc(), shaped.error().message);
           expr->type = Type::error();
           return expr;
         }
@@ -272,10 +380,9 @@ Expr *DictNewChecker::checkDictNew(NewExpr *expr, const Type *expected) {
           expr->type = Type::error();
           return expr;
         }
-        if (k->isUndefined() || (isMap && element->fields()[1].type->isUndefined())) {
-          this->checker.diags_.error(arg->loc(), "cannot infer the types of the " +
-                                                     expr->name.str() +
-                                                     " from 'undefined'; give them");
+        ResultDefinedType defined = DictNewChecker::elementsKnown(expr, k, element, isMap);
+        if (defined.isErr()) {
+          this->checker.diags_.error(arg->loc(), defined.error().message);
           expr->type = Type::error();
           return expr;
         }

@@ -235,33 +235,40 @@ const Type *TypeOperators::evalTypeOp(const Type *op, llvm::ArrayRef<const Type 
   }
 }
 
-const Type *TypeOperators::resolveTypeOp(const TypeRef &ref) {
+TypeOperators::ResultTypeOpResolved TypeOperators::resolveTypeOp(const TypeRef &ref) {
   switch (ref.kind()) {
     case TypeRefKind::KEY_OF_REF: {
       const Type *type = this->checker.typeResolver().resolveType(ref.args[0], false);
       if (type->isError()) {
-        return type;
+        return ok(type);
       }
       const Type *keys = this->evalTypeOp(Type::typeOp(TypeOp::KeyOf, {type}), {type});
       if (keys->isError()) {
-        this->checker.diags_.error(ref.loc,
-                                   "'keyof' takes an object type, whose fields it names, not '" +
-                                       type->name() + "'");
+        std::string message = ErrorTextTypeOp::keyOf(type->name());
+
+        return err(TypeOperatorsResolveTypeOpError{
+            .code = TypeOperatorsResolveTypeOpErrorCode::NOT_AN_OBJECT_TYPE,
+            .message = message,
+        });
       }
-      return keys;
+      return ok(keys);
     }
     case TypeRefKind::INDEXED_REF: {
       const Type *object = this->checker.typeResolver().resolveType(ref.args[0], false);
       const Type *key = this->checker.typeResolver().resolveType(ref.args[1], false);
       if (object->isError() || key->isError()) {
-        return Type::error();
+        return ok(Type::error());
       }
       const Type *member = this->evalTypeOp(Type::indexedAccess(object, key), {object, key});
       if (member->isError()) {
-        this->checker.diags_.error(ref.loc,
-                                   "'" + object->name() + "' has no member '" + key->name() + "'");
+        std::string message = ErrorTextTypeOp::noMember(object->name(), key->name());
+
+        return err(TypeOperatorsResolveTypeOpError{
+            .code = TypeOperatorsResolveTypeOpErrorCode::NO_SUCH_MEMBER,
+            .message = message,
+        });
       }
-      return member;
+      return ok(member);
     }
     case TypeRefKind::TYPE_OF_REF: {
       llvm::StringRef name = ref.names().front();
@@ -328,11 +335,12 @@ const Type *TypeOperators::resolveTypeOp(const TypeRef &ref) {
         }
       }
       if (!type) {
-        this->checker.diags_.error(ref.loc,
-                                   "'typeof " + name + "' needs the type of '" + name +
-                                       "', which is not known here; declare it, e.g. 'const " +
-                                       name + ": T = ...'");
-        return Type::error();
+        std::string message = ErrorTextTypeOp::typeOf(name);
+
+        return err(TypeOperatorsResolveTypeOpError{
+            .code = TypeOperatorsResolveTypeOpErrorCode::TYPE_OF_UNKNOWN,
+            .message = message,
+        });
       }
       for (size_t i = 1; i < ref.names().size(); ++i) {
         const Field *field = type->isObject() ? type->field(ref.names()[i]) : nullptr;
@@ -346,18 +354,21 @@ const Type *TypeOperators::resolveTypeOp(const TypeRef &ref) {
           }
         }
         if (!field) {
-          this->checker.diags_.error(ref.loc, "'" + type->name() + "' has no field '" +
-                                                  ref.names()[i] + "'");
-          return Type::error();
+          std::string message = ErrorTextTypeOp::noField(type->name(), ref.names()[i]);
+
+          return err(TypeOperatorsResolveTypeOpError{
+              .code = TypeOperatorsResolveTypeOpErrorCode::NO_SUCH_FIELD,
+              .message = message,
+          });
         }
         type = field->type;
       }
-      return type;
+      return ok(type);
     }
     case TypeRefKind::MAPPED_REF: {
       const Type *keys = this->checker.typeResolver().resolveType(ref.args[0], false);
       if (keys->isError()) {
-        return keys;
+        return ok(keys);
       }
       const Type *source = nullptr;
       if (ref.args[0].kind() == TypeRefKind::KEY_OF_REF) {
@@ -386,40 +397,41 @@ const Type *TypeOperators::resolveTypeOp(const TypeRef &ref) {
                                : nullptr;
       this->checker.typeScopes_.pop_back();
       if (value->isError()) {
-        return value;
+        return ok(value);
       }
       if (rename && rename->isError()) {
-        return rename;
+        return ok(rename);
       }
       if (rename && !mentionsParam(rename)) {
         for (const Type *n : distributedMembers(rename)) {
           if (!n->isStringLiteral()) {
-            this->checker.diags_.error(
-                ref.args[2].loc,
-                "a mapped type renames its keys to names of fields, string literal "
-                "types such as `get${Capitalize<K>}`, not '" +
-                    n->name() + "'");
-            return Type::error();
+            std::string message = ErrorTextTypeOp::rename(n->name());
+
+            return err(TypeOperatorsResolveTypeOpError{
+                .code = TypeOperatorsResolveTypeOpErrorCode::RENAME_NOT_STRING,
+                .message = message,
+            });
           }
         }
       }
       for (const Type *k :
            mentionsParam(keys) ? llvm::ArrayRef<const Type *>() : TypeOperators::membersOf(keys)) {
         if (!k->isStringLiteral() && !k->isNever()) {
-          this->checker.diags_.error(
-              ref.args[0].loc,
-              "the keys of a mapped type are names of fields, string literal types "
-              "such as '\"id\" | \"name\"' or 'keyof T', not '" +
-                  k->name() + "'");
-          return Type::error();
+          std::string message = ErrorTextTypeOp::keys(k->name());
+
+          return err(TypeOperatorsResolveTypeOpError{
+              .code = TypeOperatorsResolveTypeOpErrorCode::KEYS_NOT_STRINGS,
+              .message = message,
+          });
         }
       }
       const Type *mapped = Type::mapped(key, keys, value, ref.mappedOptional(),
                                         ref.mappedReadonly(), source, rename);
-      return this->evalTypeOp(mapped, mapped->operands());
+      const Type *evaluated = this->evalTypeOp(mapped, mapped->operands());
+      return ok(evaluated);
     }
     default:
-      return nullptr;
+      return ok(nullptr);
   }
 }
 

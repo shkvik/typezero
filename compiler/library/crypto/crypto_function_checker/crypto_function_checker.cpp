@@ -196,8 +196,15 @@ Expr *CryptoFunctionChecker::checkSyncCall(CallExpr *call, llvm::StringRef fn,
   auto proven = [&](Expr *arg, int64_t lo, std::optional<int64_t> hi,
                     llvm::StringRef what) -> Expr * {
     Expr *e = checker_.exprChecker().checkExpr(arg, Type::intTy());
-    if (e->type->isError() || !(checker_.indexProofs().requireBetween(e, lo, hi, what) ||
-                                checker_.indexProofs().exempt(e->loc()))) {
+    if (e->type->isError()) {
+      return nullptr;
+    }
+    IndexProofs::ResultBetweenProven between =
+        checker_.indexProofs().requireBetween(e, lo, hi, what);
+    if (between.isErr() && between.error().code != IndexProofsRequireBetweenErrorCode::EXEMPT) {
+      checker_.diags_.error(e->loc(), between.error().message);
+    }
+    if (between.isErr() && !checker_.indexProofs().exempt(e->loc())) {
       return nullptr;
     }
     return e->type->isFloat() ? e : checker_.typeRelations().convert(e, Type::doubleTy());
@@ -258,10 +265,12 @@ Expr *CryptoFunctionChecker::checkSyncCall(CallExpr *call, llvm::StringRef fn,
         return call;
       }
     }
-    if (!checker_.indexProofs().requireLess(min, max,
-                                            args.size() == 2
-                                                ? "the maximum is greater than the minimum"
-                                                : "the maximum is greater than 0")) {
+    IndexProofs::ResultLessWasProven less = checker_.indexProofs().requireLess(
+        min, max,
+        args.size() == 2 ? "the maximum is greater than the minimum"
+                         : "the maximum is greater than 0");
+    if (less.isErr()) {
+      checker_.diags_.error(max->loc(), less.error().message);
       return call;
     }
     return checker_.cryptoArgs().cryptoCall(call, CryptoFn::RandomInt32, {min, max}, Type::intTy());
@@ -304,17 +313,43 @@ Expr *CryptoFunctionChecker::checkSyncCall(CallExpr *call, llvm::StringRef fn,
     if (present(1)) {
       Expr *at = checker_.exprChecker().checkExpr(args[1], Type::intTy());
       bool library = checker_.indexProofs().exempt(at->loc());
-      if (at->type->isError() ||
-          !(library || (checker_.indexProofs().requireBetween(at, 0, {}, "the offset") &&
-                        checker_.indexProofs().requireUpTo(at, target, 0, "the offset")))) {
+      if (at->type->isError()) {
         return call;
+      }
+      if (!library) {
+        IndexProofs::ResultBetweenProven between =
+            checker_.indexProofs().requireBetween(at, 0, {}, "the offset");
+        if (between.isErr() && between.error().code != IndexProofsRequireBetweenErrorCode::EXEMPT) {
+          checker_.diags_.error(at->loc(), between.error().message);
+        }
+        if (between.isErr()) {
+          return call;
+        }
+        IndexProofs::ResultUpToWasProven upTo =
+            checker_.indexProofs().requireUpTo(at, target, 0, "the offset");
+        if (upTo.isErr() && upTo.error().code != IndexProofsRequireUpToErrorCode::EXEMPT) {
+          checker_.diags_.error(at->loc(), upTo.error().message);
+        }
+        if (upTo.isErr()) {
+          return call;
+        }
       }
       Expr *count = nullptr;
       if (present(2)) {
         count = checker_.exprChecker().checkExpr(args[2], Type::intTy());
-        if (count->type->isError() ||
-            !(library || checker_.indexProofs().requireBetween(count, 0, {}, "the size"))) {
+        if (count->type->isError()) {
           return call;
+        }
+        if (!library) {
+          IndexProofs::ResultBetweenProven sizeBetween =
+              checker_.indexProofs().requireBetween(count, 0, {}, "the size");
+          if (sizeBetween.isErr() &&
+              sizeBetween.error().code != IndexProofsRequireBetweenErrorCode::EXEMPT) {
+            checker_.diags_.error(count->loc(), sizeBetween.error().message);
+          }
+          if (sizeBetween.isErr()) {
+            return call;
+          }
         }
         if (!checker_.indexProofs().provesSumUpTo(checker_.indexProofs().linear(at),
                                                   checker_.indexProofs().linear(count), target) &&
@@ -642,9 +677,15 @@ Expr *CryptoFunctionChecker::checkSyncCall(CallExpr *call, llvm::StringRef fn,
                                            "as a number; JavaScript throws a TypeError otherwise");
         return call;
       }
-    } else if (!checker_.indexProofs().requireBetween(bits, 8, {}, "the length of the key") &&
-               !checker_.indexProofs().exempt(bits->loc())) {
-      return call;
+    } else {
+      IndexProofs::ResultBetweenProven between =
+          checker_.indexProofs().requireBetween(bits, 8, {}, "the length of the key");
+      if (between.isErr() && between.error().code != IndexProofsRequireBetweenErrorCode::EXEMPT) {
+        checker_.diags_.error(bits->loc(), between.error().message);
+      }
+      if (between.isErr() && !checker_.indexProofs().exempt(bits->loc())) {
+        return call;
+      }
     }
     return checker_.cryptoArgs().cryptoCall(
         call, CryptoFn::GenerateSecretKey,

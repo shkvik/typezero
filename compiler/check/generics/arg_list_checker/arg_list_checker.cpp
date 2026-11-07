@@ -178,11 +178,9 @@ void ArgListChecker::declareArgumentList(FunctionDecl *fn) {
     this->argumentLists[var] = std::move(parts);
     return;
   }
-  if (fn->listType->tupleRest()) {
-    this->checker.diags_.error(loc,
-                               "'" + fn->listName + "' of the parameters '" + fn->listType->name() +
-                                   "', which end with a rest parameter, can only be spread, '..." +
-                                   fn->listName + "'");
+  ResultListIsSpread spreadOnly = ArgListChecker::restListValue(fn);
+  if (spreadOnly.isErr()) {
+    this->checker.diags_.error(loc, spreadOnly.error().message);
     this->checker.scopes().declareVar(fn->listName, loc, Type::error(), true);
     return;
   }
@@ -273,6 +271,67 @@ Expr *ArgListChecker::listPart(Expr *expr) {
       this->checker.ctx_.make<NameExpr>(index->loc(), parts[size_t(k->value)]));
 }
 
+ArgListChecker::ResultListIsSpread ArgListChecker::restListValue(const FunctionDecl *fn) {
+  if (fn->listType->tupleRest()) {
+    std::string message = ErrorTextRestList::spreadOnly(fn->listName, fn->listType->name());
+
+    return err(ArgListCheckerRestListValueError{
+        .code = ArgListCheckerRestListValueErrorCode::REST_LIST_AS_VALUE,
+        .message = message,
+    });
+  }
+
+  return ok(fn);
+}
+
+ArgListChecker::ResultArgumentFits ArgListChecker::listArgument(const Type *list,
+                                                                llvm::ArrayRef<const Type *> parts,
+                                                                size_t k, const Expr *arg,
+                                                                bool spreads) {
+  if (k >= parts.size()) {
+    std::string message = ErrorTextListArgument::tooMany(list->name());
+
+    return err(ArgListCheckerListArgumentError{
+        .code = ArgListCheckerListArgumentErrorCode::TOO_MANY_ARGUMENTS,
+        .message = message,
+    });
+  }
+  if (spreads && arg->type != parts[k]) {
+    std::string message = ErrorTextListArgument::spreadWrong(
+        arg->type->name(), list->name(), parts[k]->name(), parts[k]->isListParam());
+
+    return err(ArgListCheckerListArgumentError{
+        .code = ArgListCheckerListArgumentErrorCode::SPREAD_MISMATCH,
+        .message = message,
+    });
+  }
+  if (!spreads && parts[k]->isListParam()) {
+    std::string message = ErrorTextListArgument::notSpread(parts[k]->name());
+
+    return err(ArgListCheckerListArgumentError{
+        .code = ArgListCheckerListArgumentErrorCode::LIST_NOT_SPREAD,
+        .message = message,
+    });
+  }
+
+  return ok(arg);
+}
+
+ArgListChecker::ResultListIsFilled
+ArgListChecker::listFilled(const Type *list, llvm::ArrayRef<const Type *> parts, size_t k) {
+  if (k < parts.size()) {
+    std::string message =
+        ErrorTextListFilled::missing(list->name(), parts[k]->name(), parts[k]->isListParam());
+
+    return err(ArgListCheckerListFilledError{
+        .code = ArgListCheckerListFilledErrorCode::MISSING_ARGUMENTS,
+        .message = message,
+    });
+  }
+
+  return ok(list);
+}
+
 bool ArgListChecker::checkListArguments(CallExpr *call, size_t fixed, const Type *list,
                                         llvm::SMLoc loc, const std::vector<bool> *checked) {
   std::vector<const Type *> parts;
@@ -284,7 +343,7 @@ bool ArgListChecker::checkListArguments(CallExpr *call, size_t fixed, const Type
     }
   }
   size_t k = 0;
-  bool ok = true;
+  bool typed = true;
   for (size_t i = fixed; i < call->args.size(); ++i) {
     Expr *&arg = call->args[i];
     if (!checked || i >= checked->size() || !(*checked)[i]) {
@@ -293,45 +352,27 @@ bool ArgListChecker::checkListArguments(CallExpr *call, size_t fixed, const Type
           !call->spreads(i) && k < parts.size() && !parts[k]->isListParam() ? parts[k] : nullptr);
     }
     if (arg->type->isError()) {
-      ok = false;
+      typed = false;
       continue;
     }
-    if (k >= parts.size()) {
-      this->checker.diags_.error(arg->loc(),
-                                 "too many arguments for the parameters '" + list->name() + "'");
+    ResultArgumentFits fits = ArgListChecker::listArgument(list, parts, k, arg, call->spreads(i));
+    if (fits.isErr()) {
+      this->checker.diags_.error(arg->loc(), fits.error().message);
       return false;
     }
-    if (call->spreads(i)) {
-      if (arg->type != parts[k]) {
-        this->checker.diags_.error(
-            arg->loc(), "'..." + arg->type->name() + "' is spread where the parameters '" +
-                            list->name() + "' take " + (parts[k]->isListParam() ? "'..." : "'") +
-                            parts[k]->name() + "'");
-        return false;
-      }
-      ++k;
-      continue;
+    if (!call->spreads(i)) {
+      arg = this->checker.typeRelations().coerce(arg, parts[k]);
     }
-    if (parts[k]->isListParam()) {
-      this->checker.diags_.error(arg->loc(),
-                                 "the arguments for the parameters '" + parts[k]->name() +
-                                     "' of some function are spread from a list of them, e.g. "
-                                     "'...args'");
-
-      return false;
-    }
-    arg = this->checker.typeRelations().coerce(arg, parts[k]);
     ++k;
   }
-  if (ok && k < parts.size()) {
-    this->checker.diags_.error(loc, "the parameters '" + list->name() + "' take " +
-                                        (parts[k]->isListParam() ? "'..." : "'") +
-                                        parts[k]->name() + "' too, after these arguments");
+  ResultListIsFilled filled = ArgListChecker::listFilled(list, parts, k);
+  if (typed && filled.isErr()) {
+    this->checker.diags_.error(loc, filled.error().message);
     return false;
   }
   this->checker.flowChecker().calledFunction();
 
-  return ok;
+  return typed;
 }
 
 }

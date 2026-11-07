@@ -75,9 +75,19 @@ const Type *TypeResolver::resolveTypeInner(const TypeRef &ref) {
         }
         if (auto *cls = dyn_cast<ClassDecl>(decl)) {
           if (cls->isGeneric()) {
-            ClassDecl *inst =
+            GenericClassInstantiator::ResultClassMade made =
                 this->checker.genericClassInstantiator().instantiateClass(cls, {}, ref.loc);
-            return inst ? inst->type : Type::error();
+            if (made.isErr() &&
+                made.error().code !=
+                    GenericClassInstantiatorInstantiateClassErrorCode::ALREADY_REPORTED) {
+              llvm::SMLoc at =
+                  made.error().code ==
+                          GenericClassInstantiatorInstantiateClassErrorCode::ENDLESS_INSTANCES
+                      ? cls->loc()
+                      : ref.loc;
+              this->checker.diags_.error(at, made.error().message);
+            }
+            return made.isOk() ? made.value()->type : Type::error();
           }
           return ClassValueChecker::finalClass(cls)->type;
         }
@@ -184,7 +194,7 @@ const Type *TypeResolver::resolveTypeInner(const TypeRef &ref) {
       }
       return Type::error();
     }
-    case TypeRefKind::GENERIC_REF:
+    case TypeRefKind::GENERIC_REF: {
       if (const Type *bytes = BytesChecker::bytesTypeNamed(ref.name);
           bytes && bytes->isTypedArray() && !this->checker.typeDeclarer().lookupType(ref.name)) {
         if (ref.args.size() != 1 || ref.args[0].kind() != TypeRefKind::NAME_REF ||
@@ -224,9 +234,20 @@ const Type *TypeResolver::resolveTypeInner(const TypeRef &ref) {
                                                   "' is not generic; remove the type arguments");
           return Type::error();
         }
-        ClassDecl *inst = this->checker.genericClassInstantiator().instantiateClass(
-            cls, std::move(args), ref.loc);
-        return inst ? inst->type : Type::error();
+        GenericClassInstantiator::ResultClassMade made =
+            this->checker.genericClassInstantiator().instantiateClass(cls, std::move(args),
+                                                                      ref.loc);
+        if (made.isErr() &&
+            made.error().code !=
+                GenericClassInstantiatorInstantiateClassErrorCode::ALREADY_REPORTED) {
+          llvm::SMLoc at =
+              made.error().code ==
+                      GenericClassInstantiatorInstantiateClassErrorCode::ENDLESS_INSTANCES
+                  ? cls->loc()
+                  : ref.loc;
+          this->checker.diags_.error(at, made.error().message);
+        }
+        return made.isOk() ? made.value()->type : Type::error();
       }
       if (auto *alias = llvm::dyn_cast_or_null<TypeAliasDecl>(
               this->checker.typeDeclarer().lookupType(ref.name))) {
@@ -275,8 +296,16 @@ const Type *TypeResolver::resolveTypeInner(const TypeRef &ref) {
         }
         return this->checker.decoratorChecker().methodDescriptorType(args, ret);
       }
-      if (const Type *utility = this->checker.utilityTypes().resolveUtilityType(ref)) {
-        return utility;
+      UtilityTypes::ResultUtilityApplied utility =
+          this->checker.utilityTypes().resolveUtilityType(ref);
+      bool isUtility = utility.isOk() || utility.error().code !=
+                                             UtilityTypesResolveUtilityTypeErrorCode::NOT_A_UTILITY;
+      if (utility.isErr() && isUtility) {
+        this->checker.diags_.error(ref.loc, utility.error().message);
+        return Type::error();
+      }
+      if (isUtility) {
+        return utility.value();
       }
       if (ref.name == "Constructor") {
         return this->checker.classValueChecker().resolveConstructorType(ref);
@@ -298,6 +327,7 @@ const Type *TypeResolver::resolveTypeInner(const TypeRef &ref) {
       }
       this->checker.diags_.error(ref.loc, "generic type '" + ref.name + "' is not supported");
       return Type::error();
+    }
     case TypeRefKind::ARRAY_REF: {
       const Type *element = this->resolveTypeInner(ref.args[0]);
       if (element->isVoid() || element->isUndefined()) {
@@ -358,14 +388,42 @@ const Type *TypeResolver::resolveTypeInner(const TypeRef &ref) {
     case TypeRefKind::KEY_OF_REF:
     case TypeRefKind::INDEXED_REF:
     case TypeRefKind::TYPE_OF_REF:
-    case TypeRefKind::MAPPED_REF:
-      return this->checker.typeOperators().resolveTypeOp(ref);
+    case TypeRefKind::MAPPED_REF: {
+      TypeOperators::ResultTypeOpResolved resolved =
+          this->checker.typeOperators().resolveTypeOp(ref);
+      if (resolved.isOk()) {
+        return resolved.value();
+      }
+      llvm::SMLoc at = ref.loc;
+      switch (resolved.error().code) {
+        case TypeOperatorsResolveTypeOpErrorCode::RENAME_NOT_STRING:
+          at = ref.args[2].loc;
+          break;
+        case TypeOperatorsResolveTypeOpErrorCode::KEYS_NOT_STRINGS:
+          at = ref.args[0].loc;
+          break;
+        case TypeOperatorsResolveTypeOpErrorCode::NOT_AN_OBJECT_TYPE:
+        case TypeOperatorsResolveTypeOpErrorCode::NO_SUCH_MEMBER:
+        case TypeOperatorsResolveTypeOpErrorCode::TYPE_OF_UNKNOWN:
+        case TypeOperatorsResolveTypeOpErrorCode::NO_SUCH_FIELD:
+          break;
+      }
+      this->checker.diags_.error(at, resolved.error().message);
+      return Type::error();
+    }
     case TypeRefKind::CONDITIONAL_REF:
       return this->checker.conditionalTypes().resolveConditional(ref);
     case TypeRefKind::TEMPLATE_REF:
       return this->checker.templateTypes().resolveTemplate(ref);
-    case TypeRefKind::INTERSECTION_REF:
-      return this->checker.conditionalTypes().resolveIntersection(ref);
+    case TypeRefKind::INTERSECTION_REF: {
+      ConditionalTypes::ResultIntersectionJoined joined =
+          this->checker.conditionalTypes().resolveIntersection(ref);
+      if (joined.isErr()) {
+        this->checker.diags_.error(ref.loc, joined.error().message);
+        return Type::error();
+      }
+      return joined.value();
+    }
     case TypeRefKind::INFER_REF: {
       auto *binding =
           llvm::dyn_cast_or_null<TypeAliasDecl>(this->checker.typeDeclarer().lookupType(ref.name));
@@ -418,7 +476,8 @@ const Type *TypeResolver::resolveTypeInner(const TypeRef &ref) {
         const Type *type =
             returned.args.empty() ? nullptr : this->resolveType(returned.args[0], false);
         std::string shown = returned.name.str() + (type ? " is " + type->name().str() : "");
-        this->checker.diags_.error(returned.loc, PredicateChecker::assertsError(shown, type, ""));
+        std::string message = ErrorTextAsserts::notAllowed(shown, type != nullptr, "");
+        this->checker.diags_.error(returned.loc, message);
         ret = Type::error();
       }
       if (!ok || ret->isError()) {

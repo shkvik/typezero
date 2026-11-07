@@ -1,6 +1,8 @@
 #pragma once
 
 #include "compiler/check/checker/checker.h"
+#include "compiler/check/generics/arg_list_checker/arg_list_checker_errors.h"
+#include "compiler/result/result/result.h"
 
 namespace tz {
 
@@ -18,6 +20,15 @@ public:
   const Type *memberType(const Type *object, const Type *key);
 
 private:
+  using ResultListIsSpread = Result<const FunctionDecl *, ArgListCheckerRestListValueError>;
+  using ResultArgumentFits = Result<const Expr *, ArgListCheckerListArgumentError>;
+  using ResultListIsFilled = Result<const Type *, ArgListCheckerListFilledError>;
+
+  static ResultListIsSpread restListValue(const FunctionDecl *fn);
+  static ResultArgumentFits listArgument(const Type *list, llvm::ArrayRef<const Type *> parts,
+                                         size_t k, const Expr *arg, bool spreads);
+  static ResultListIsFilled listFilled(const Type *list, llvm::ArrayRef<const Type *> parts,
+                                       size_t k);
   static std::string utf8(const std::u16string &text);
   static bool usedAsValue(const Stmt *body, llvm::StringRef name, bool known);
 

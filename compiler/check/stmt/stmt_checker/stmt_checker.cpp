@@ -45,13 +45,13 @@ void StmtChecker::checkStmt(Stmt *stmt) {
     }
     break;
   }
-  case Stmt::Kind::Function:
-    if (!cast<FunctionDecl>(stmt)->group) {
-      this->checker.diags_.error(stmt->loc(),
-                                 "a function can be declared only directly in a block; in a "
-                                 "'switch', declare it before the 'switch'");
+  case Stmt::Kind::Function: {
+    ResultFunctionInBlock placed = this->checkFunctionStmt(cast<FunctionDecl>(stmt));
+    if (placed.isErr()) {
+      this->checker.diags_.error(stmt->loc(), placed.error().message);
     }
     break;
+  }
   case Stmt::Kind::Expr: {
     auto *s = cast<ExprStmt>(stmt);
     if (auto *yield = dyn_cast<YieldExpr>(s->expr)) {
@@ -105,10 +105,14 @@ void StmtChecker::checkStmt(Stmt *stmt) {
     this->checker.flow_.unreachable = true;
     break;
   case Stmt::Kind::Break:
-  case Stmt::Kind::Continue:
-    this->checker.jumpChecker().checkJump(stmt);
+  case Stmt::Kind::Continue: {
+    JumpChecker::ResultJumpTargeted jumped = this->checker.jumpChecker().checkJump(stmt);
+    if (jumped.isErr()) {
+      this->checker.diags_.error(stmt->loc(), jumped.error().message);
+    }
     this->checker.flow_.unreachable = true;
     break;
+  }
   case Stmt::Kind::Empty:
   case Stmt::Kind::Debugger:
     break;
@@ -127,35 +131,67 @@ void StmtChecker::checkIf(IfStmt *stmt) {
     stmt->cond = lit;
     if (*constant) {
       this->checker.flow_ = whenTrue;
-      this->checkBody(stmt->thenStmt);
+      ResultBodyIsStatement thenBody = this->checkBody(stmt->thenStmt);
+      if (thenBody.isErr()) {
+        this->checker.diags_.error(stmt->thenStmt->loc(), thenBody.error().message);
+      }
       stmt->elseStmt = nullptr;
     } else {
       stmt->thenStmt = this->checker.ctx_.make<EmptyStmt>(stmt->thenStmt->loc());
       this->checker.flow_ = whenFalse;
       if (stmt->elseStmt) {
-        this->checkBody(stmt->elseStmt);
+        ResultBodyIsStatement elseBody = this->checkBody(stmt->elseStmt);
+        if (elseBody.isErr()) {
+          this->checker.diags_.error(stmt->elseStmt->loc(), elseBody.error().message);
+        }
       }
     }
     return;
   }
   this->checker.flow_ = whenTrue;
-  this->checkBody(stmt->thenStmt);
+  ResultBodyIsStatement thenBody = this->checkBody(stmt->thenStmt);
+  if (thenBody.isErr()) {
+    this->checker.diags_.error(stmt->thenStmt->loc(), thenBody.error().message);
+  }
   Checker::Flow afterThen = this->checker.flow_;
   this->checker.flow_ = whenFalse;
   if (stmt->elseStmt) {
-    this->checkBody(stmt->elseStmt);
+    ResultBodyIsStatement elseBody = this->checkBody(stmt->elseStmt);
+    if (elseBody.isErr()) {
+      this->checker.diags_.error(stmt->elseStmt->loc(), elseBody.error().message);
+    }
   }
   this->checker.flow_ = FlowChecker::join(afterThen, this->checker.flow_);
 }
 
-void StmtChecker::checkBody(Stmt *body) {
-  if (isa<VarDeclStmt>(body) || isa<TypeAliasDecl>(body) || isa<EnumDecl>(body) ||
-      isa<FunctionDecl>(body)) {
-    this->checker.diags_.error(body->loc(),
-                               "a declaration cannot be the whole body here; wrap it in '{ }'");
-    return;
+StmtChecker::ResultFunctionInBlock StmtChecker::checkFunctionStmt(FunctionDecl *fn) const {
+  if (!fn->group) {
+    std::string message = ErrorTextFunctionStmt::nested();
+
+    return err(StmtCheckerCheckFunctionStmtError{
+        .code = StmtCheckerCheckFunctionStmtErrorCode::NOT_IN_BLOCK,
+        .message = message,
+    });
   }
+
+  return ok(fn);
+}
+
+StmtChecker::ResultBodyIsStatement StmtChecker::checkBody(Stmt *body) {
+  bool declaration = isa<VarDeclStmt>(body) || isa<TypeAliasDecl>(body) || isa<EnumDecl>(body) ||
+                     isa<FunctionDecl>(body);
+  if (declaration) {
+    std::string message = ErrorTextBody::declared();
+
+    return err(StmtCheckerCheckBodyError{
+        .code = StmtCheckerCheckBodyErrorCode::DECLARATION_AS_BODY,
+        .message = message,
+    });
+  }
+
   this->checkStmt(body);
+
+  return ok(body);
 }
 
 }

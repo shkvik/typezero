@@ -19,12 +19,11 @@ using llvm::dyn_cast;
 
 namespace tz {
 
-namespace {}
-
 GlobalFunctionChecker::GlobalFunctionChecker(Checker &owner)
     : checker(owner) {}
 
-Expr *GlobalFunctionChecker::checkGlobalCall(CallExpr *call, NameExpr *name) {
+GlobalFunctionChecker::ResultGlobalCallMade GlobalFunctionChecker::checkGlobalCall(CallExpr *call,
+                                                                                   NameExpr *name) {
   static const llvm::StringLiteral names[] = {"String",    "Number",
                                               "parseInt",  "parseFloat",
                                               "Boolean",   "decimal",
@@ -33,33 +32,96 @@ Expr *GlobalFunctionChecker::checkGlobalCall(CallExpr *call, NameExpr *name) {
                                               "decodeURI", "escape",
                                               "unescape"};
   if (this->checker.callChecker().isGlobalName(name, "RegExp")) {
-    return this->checker.callChecker().rejectSpread(call)
-               ? call
-               : this->checker.regexChecker().checkRegExpConstructor(name->loc(), call->args);
+    Expr *regex =
+        this->checker.callChecker().rejectSpread(call)
+            ? call
+            : this->checker.regexChecker().checkRegExpConstructor(name->loc(), call->args);
+    return ok(regex);
   }
   if (this->checker.callChecker().isGlobalName(name, "Date")) {
-    return this->checker.dateChecker().checkDateFunction(call, name);
+    Expr *date = this->checker.dateChecker().checkDateFunction(call, name);
+    return ok(date);
   }
-  if (!llvm::any_of(names, [&](llvm::StringRef n) {
-        return this->checker.callChecker().isGlobalName(name, n);
-      })) {
-    return nullptr;
+  auto isGlobal = [&](llvm::StringRef n) {
+    return this->checker.callChecker().isGlobalName(name, n);
+  };
+  if (!llvm::any_of(names, isGlobal)) {
+    return err(GlobalFunctionCheckerCheckGlobalCallError{
+        .code = GlobalFunctionCheckerCheckGlobalCallErrorCode::NOT_A_GLOBAL,
+        .message = "",
+    });
   }
 
-  return this->checkGlobalFunction(call, name->name, name->loc());
+  ResultFunctionCalled called = this->checkGlobalFunction(call, name->name, name->loc());
+  if (called.isOk()) {
+    return ok(called.value());
+  }
+  GlobalFunctionCheckerCheckGlobalCallErrorCode code =
+      GlobalFunctionCheckerCheckGlobalCallErrorCode::CALL_FAILED;
+  switch (called.error().code) {
+    case GlobalFunctionCheckerCheckGlobalFunctionErrorCode::ALREADY_REPORTED:
+      code = GlobalFunctionCheckerCheckGlobalCallErrorCode::ALREADY_REPORTED;
+      break;
+    case GlobalFunctionCheckerCheckGlobalFunctionErrorCode::NUMBER_OF_UNDEFINED:
+    case GlobalFunctionCheckerCheckGlobalFunctionErrorCode::NUMBER_OF_WRONG_TYPE:
+      code = GlobalFunctionCheckerCheckGlobalCallErrorCode::ARGUMENT_FAILED;
+      break;
+    case GlobalFunctionCheckerCheckGlobalFunctionErrorCode::UNESCAPE_OF_ENCODE:
+    case GlobalFunctionCheckerCheckGlobalFunctionErrorCode::LEGACY_ESCAPE:
+    case GlobalFunctionCheckerCheckGlobalFunctionErrorCode::LEGACY_UNESCAPE:
+    case GlobalFunctionCheckerCheckGlobalFunctionErrorCode::DECODE_OF_ESCAPE:
+    case GlobalFunctionCheckerCheckGlobalFunctionErrorCode::WRONG_ARITY:
+      break;
+  }
+
+  return err(GlobalFunctionCheckerCheckGlobalCallError{
+      .code = code,
+      .message = called.error().message,
+  });
 }
 
-Expr *GlobalFunctionChecker::checkGlobalFunction(CallExpr *call, llvm::StringRef fn,
-                                                 llvm::SMLoc loc) {
+GlobalFunctionChecker::ResultFunctionCalled
+GlobalFunctionChecker::checkGlobalFunction(CallExpr *call, llvm::StringRef fn, llvm::SMLoc loc) {
   call->type = Type::error();
   if (this->checker.callChecker().rejectSpread(call)) {
-    return call;
+    return err(GlobalFunctionCheckerCheckGlobalFunctionError{
+        .code = GlobalFunctionCheckerCheckGlobalFunctionErrorCode::ALREADY_REPORTED,
+        .message = "",
+    });
   }
   if (fn == "decimal") {
-    return this->checker.decimalChecker().checkDecimalCall(call, loc);
+    Expr *made = this->checker.decimalChecker().checkDecimalCall(call, loc);
+    return ok(made);
   }
-  if (fn == "escape" || fn == "unescape") {
-    return this->reportLegacyEscape(call, fn, loc);
+  auto *encoded = call->args.size() == 1 ? dyn_cast<CallExpr>(call->args[0]) : nullptr;
+  bool encodedInner =
+      encoded && this->checker.callChecker().isGlobalName(encoded->callee, "encodeURIComponent");
+  if (fn == "unescape" && encodedInner) {
+    this->checker.argumentChecker().checkArgsLoosely(call);
+    std::string message = ErrorTextGlobalFunction::toBytes();
+
+    return err(GlobalFunctionCheckerCheckGlobalFunctionError{
+        .code = GlobalFunctionCheckerCheckGlobalFunctionErrorCode::UNESCAPE_OF_ENCODE,
+        .message = message,
+    });
+  }
+  if (fn == "escape") {
+    this->checker.argumentChecker().checkArgsLoosely(call);
+    std::string message = ErrorTextGlobalFunction::escape();
+
+    return err(GlobalFunctionCheckerCheckGlobalFunctionError{
+        .code = GlobalFunctionCheckerCheckGlobalFunctionErrorCode::LEGACY_ESCAPE,
+        .message = message,
+    });
+  }
+  if (fn == "unescape") {
+    this->checker.argumentChecker().checkArgsLoosely(call);
+    std::string message = ErrorTextGlobalFunction::unescape();
+
+    return err(GlobalFunctionCheckerCheckGlobalFunctionError{
+        .code = GlobalFunctionCheckerCheckGlobalFunctionErrorCode::LEGACY_UNESCAPE,
+        .message = message,
+    });
   }
   static const std::pair<llvm::StringLiteral, Builtin> uris[] = {
       {"encodeURIComponent", Builtin::UriEncodeComponent},
@@ -70,24 +132,27 @@ Expr *GlobalFunctionChecker::checkGlobalFunction(CallExpr *call, llvm::StringRef
     if (fn != name) {
       continue;
     }
-    if (auto *inner = call->args.size() == 1 ? dyn_cast<CallExpr>(call->args[0]) : nullptr;
-        inner && fn == "decodeURIComponent" &&
-        this->checker.callChecker().isGlobalName(inner->callee, "escape")) {
-      this->checker.diags_.error(
-          loc, "'decodeURIComponent(escape(s))' reads the UTF-8 bytes that s holds as "
-               "characters, a legacy trick; keep the bytes in a Uint8Array and decode "
-               "them with 'new TextDecoder().decode(bytes)'");
-      for (Expr *&arg : inner->args) {
+    auto *escaped = call->args.size() == 1 ? dyn_cast<CallExpr>(call->args[0]) : nullptr;
+    if (escaped && fn == "decodeURIComponent" &&
+        this->checker.callChecker().isGlobalName(escaped->callee, "escape")) {
+      for (Expr *&arg : escaped->args) {
         arg = this->checker.exprChecker().checkExpr(arg);
       }
-      inner->type = Type::error();
-      return call;
+      escaped->type = Type::error();
+      std::string message = ErrorTextGlobalFunction::fromBytes();
+
+      return err(GlobalFunctionCheckerCheckGlobalFunctionError{
+          .code = GlobalFunctionCheckerCheckGlobalFunctionErrorCode::DECODE_OF_ESCAPE,
+          .message = message,
+      });
     }
     ArgumentChecker::ResultArityMatches arity =
         this->checker.argumentChecker().checkArity(call, 1, 1);
     if (arity.isErr()) {
-      this->checker.diags_.error(loc, arity.error().message);
-      return call;
+      return err(GlobalFunctionCheckerCheckGlobalFunctionError{
+          .code = GlobalFunctionCheckerCheckGlobalFunctionErrorCode::WRONG_ARITY,
+          .message = arity.error().message,
+      });
     }
     Expr *arg = this->checker.exprChecker().checkExpr(call->args[0], Type::string());
     if (fn == "encodeURIComponent" && (arg->type->isNumeric() || arg->type->isBool())) {
@@ -99,38 +164,43 @@ Expr *GlobalFunctionChecker::checkGlobalFunction(CallExpr *call, llvm::StringRef
     call->type = builtin == Builtin::UriDecodeComponent || builtin == Builtin::UriDecode
                      ? Type::result(Type::string(), this->checker.prelude().builtinType("UriError"))
                      : Type::string();
-    return call;
+    return ok(call);
   }
   if (fn == "BigInt") {
     this->checker.decimalChecker().reportBigInt(loc, "'BigInt'");
-    for (Expr *&arg : call->args) {
-      arg = this->checker.exprChecker().checkExpr(arg);
-    }
-    return call;
+    this->checker.argumentChecker().checkArgsLoosely(call);
+    return err(GlobalFunctionCheckerCheckGlobalFunctionError{
+        .code = GlobalFunctionCheckerCheckGlobalFunctionErrorCode::ALREADY_REPORTED,
+        .message = "",
+    });
   }
   if (fn == "Boolean") {
     ArgumentChecker::ResultArityMatches arity =
         this->checker.argumentChecker().checkArity(call, 0, 1);
     if (arity.isErr()) {
-      this->checker.diags_.error(loc, arity.error().message);
-      return call;
+      return err(GlobalFunctionCheckerCheckGlobalFunctionError{
+          .code = GlobalFunctionCheckerCheckGlobalFunctionErrorCode::WRONG_ARITY,
+          .message = arity.error().message,
+      });
     }
     if (call->args.empty()) {
       auto *no = this->checker.ctx_.make<BoolLitExpr>(call->loc(), false);
       no->type = Type::boolTy();
-      return no;
+      return ok(no);
     }
     Checker::Flow whenTrue, whenFalse;
     Expr *truth = this->checker.truthChecker().checkBooleanCall(call, whenTrue, whenFalse);
     this->checker.flow_ = FlowChecker::join(whenTrue, whenFalse);
-    return truth;
+    return ok(truth);
   }
   if (fn == "String" || fn == "Number") {
     ArgumentChecker::ResultArityMatches arity =
         this->checker.argumentChecker().checkArity(call, 0, 1);
     if (arity.isErr()) {
-      this->checker.diags_.error(loc, arity.error().message);
-      return call;
+      return err(GlobalFunctionCheckerCheckGlobalFunctionError{
+          .code = GlobalFunctionCheckerCheckGlobalFunctionErrorCode::WRONG_ARITY,
+          .message = arity.error().message,
+      });
     }
     if (fn == "String") {
       for (Expr *&arg : call->args) {
@@ -139,33 +209,39 @@ Expr *GlobalFunctionChecker::checkGlobalFunction(CallExpr *call, llvm::StringRef
       }
       call->target = BuiltinCall{.builtin = Builtin::StringOf};
       call->type = Type::string();
-      return call;
+      return ok(call);
     }
     for (Expr *&arg : call->args) {
       arg = this->checker.exprChecker().checkExpr(arg);
       const Type *type = arg->type;
       const Type *base = type->nonOptional();
       if (type->isError()) {
-        return call;
+        return err(GlobalFunctionCheckerCheckGlobalFunctionError{
+            .code = GlobalFunctionCheckerCheckGlobalFunctionErrorCode::ALREADY_REPORTED,
+            .message = "",
+        });
       }
       if (type->isDate()) {
-        return this->checker.dateChecker().dateTime(arg);
+        Expr *time = this->checker.dateChecker().dateTime(arg);
+        return ok(time);
       }
       if (type->isOptional() || type->isUndefined()) {
-        this->checker.diags_.error(arg->loc(),
-                                   "Number() of a value that may be undefined would be NaN, "
-                                   "and tz has no NaN; check it first or give a default "
-                                   "with '??'");
-        return call;
+        std::string message = ErrorTextGlobalFunction::undefined();
+
+        return err(GlobalFunctionCheckerCheckGlobalFunctionError{
+            .code = GlobalFunctionCheckerCheckGlobalFunctionErrorCode::NUMBER_OF_UNDEFINED,
+            .message = message,
+        });
       }
       if (base->isNumeric()) {
         arg = this->checker.typeRelations().convert(arg, Type::doubleTy());
       } else if (!base->isBool() && !base->isString() && !base->isDecimal()) {
-        this->checker.diags_.error(arg->loc(),
-                                   "Number() takes a number, a boolean, a string or a decimal, "
-                                   "found '" +
-                                       type->name() + "'");
-        return call;
+        std::string message = ErrorTextGlobalFunction::wrongType(type->name());
+
+        return err(GlobalFunctionCheckerCheckGlobalFunctionError{
+            .code = GlobalFunctionCheckerCheckGlobalFunctionErrorCode::NUMBER_OF_WRONG_TYPE,
+            .message = message,
+        });
       }
     }
     call->target = BuiltinCall{.builtin = Builtin::NumberOf};
@@ -173,7 +249,7 @@ Expr *GlobalFunctionChecker::checkGlobalFunction(CallExpr *call, llvm::StringRef
         !call->args.empty() && call->args[0]->type->isString()
             ? Type::result(Type::doubleTy(), this->checker.prelude().builtinType("NumberError"))
             : Type::doubleTy();
-    return call;
+    return ok(call);
   }
 
   if (fn == "parseInt" || fn == "parseFloat") {
@@ -181,8 +257,10 @@ Expr *GlobalFunctionChecker::checkGlobalFunction(CallExpr *call, llvm::StringRef
     ArgumentChecker::ResultArityMatches arity =
         this->checker.argumentChecker().checkArity(call, 1, isInt ? 2 : 1);
     if (arity.isErr()) {
-      this->checker.diags_.error(loc, arity.error().message);
-      return call;
+      return err(GlobalFunctionCheckerCheckGlobalFunctionError{
+          .code = GlobalFunctionCheckerCheckGlobalFunctionErrorCode::WRONG_ARITY,
+          .message = arity.error().message,
+      });
     }
     call->args[0] = this->checker.argumentChecker().checkArg(call->args[0], Type::string());
     if (call->args.size() == 2) {
@@ -192,35 +270,10 @@ Expr *GlobalFunctionChecker::checkGlobalFunction(CallExpr *call, llvm::StringRef
     call->target = BuiltinCall{.builtin = isInt ? Builtin::ParseInt : Builtin::ParseFloat};
     call->type = Type::result(isInt ? Type::intTy() : Type::doubleTy(),
                               this->checker.prelude().builtinType("NumberError"));
-    return call;
+    return ok(call);
   }
 
-  return call;
-}
-
-Expr *GlobalFunctionChecker::reportLegacyEscape(CallExpr *call, llvm::StringRef fn,
-                                                llvm::SMLoc loc) {
-  auto *inner = call->args.size() == 1 ? dyn_cast<CallExpr>(call->args[0]) : nullptr;
-  if (fn == "unescape" && inner &&
-      this->checker.callChecker().isGlobalName(inner->callee, "encodeURIComponent")) {
-    this->checker.diags_.error(
-        loc, "'unescape(encodeURIComponent(s))' makes a string of the UTF-8 bytes of s, "
-             "a legacy trick; get the bytes themselves with 'new "
-             "TextEncoder().encode(s)'");
-  } else if (fn == "escape") {
-    this->checker.diags_.error(
-        loc, "'escape' is a legacy function whose '%uXXXX' escapes nothing decodes but "
-             "'unescape'; encode with 'encodeURIComponent(s)'");
-  } else {
-    this->checker.diags_.error(
-        loc, "'unescape' is a legacy function that decodes the '%uXXXX' escapes of "
-             "'escape'; decode with 'decodeURIComponent(s)'");
-  }
-  for (Expr *&arg : call->args) {
-    arg = this->checker.exprChecker().checkExpr(arg);
-  }
-
-  return call;
+  return ok(call);
 }
 
 }

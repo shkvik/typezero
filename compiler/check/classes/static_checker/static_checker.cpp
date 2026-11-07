@@ -97,10 +97,13 @@ Expr *StaticChecker::checkStaticMember(MemberExpr *member, ClassDecl *cls, const
   }
   this->checker.classMemberChecker().checkAccess(methods[0]->cls(), methods[0]->access(), name,
                                                  member->loc());
-  FuncSymbol *sym = this->checker.overloadResolver().variantForType(methods, expected, member);
-  if (!sym) {
+  OverloadResolver::ResultVariantOfType variant =
+      this->checker.overloadResolver().variantForType(methods, expected, member);
+  if (variant.isErr()) {
+    this->checker.diags_.error(member->loc(), variant.error().message);
     return member;
   }
+  FuncSymbol *sym = variant.value();
   auto *value = this->checker.ctx_.make<NameExpr>(member->loc(), name);
   value->binding = NamedFunction{.func = sym};
   value->type = this->checker.returnInferrer().functionType(sym);
@@ -183,11 +186,16 @@ Expr *StaticChecker::checkClassStaticCall(CallExpr *call, MemberExpr *member, Cl
                                                  member->name, member->loc());
   bool checked = false;
   std::vector<const Type *> bound;
-  FuncSymbol *sym = this->checker.overloadResolver().chooseVariant(
-      methods, call->args, call->spread, member->loc(), checked, &bound);
-  if (!sym) {
+  OverloadResolver::ResultVariantChosen picked = this->checker.overloadResolver().chooseVariant(
+      methods, call->args, call->spread, checked, &bound);
+  if (picked.isErr() &&
+      picked.error().code != OverloadResolverChooseVariantErrorCode::ALREADY_REPORTED) {
+    this->checker.diags_.error(member->loc(), picked.error().message);
+  }
+  if (picked.isErr()) {
     return call;
   }
+  FuncSymbol *sym = picked.value();
   this->checker.returnInferrer().resolveParams(sym);
   if (!sym->isGeneric() && !member->typeArgs.empty()) {
     this->checker.diags_.error(

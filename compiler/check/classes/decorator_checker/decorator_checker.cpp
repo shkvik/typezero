@@ -434,7 +434,16 @@ void DecoratorChecker::decorate(ClassDecl *cls, ClassField *field, FunctionDecl 
     impl->type = descType->field("value")->type;
     impl->place = GlobalVar{.usedInFunction = true};
     impl->reassigned = true;
-    this->checker.scopes().declare(impl->name, impl->loc, {VarEntry{.var = impl}});
+    Scopes::ResultEntryDeclared added =
+        this->checker.scopes().declare(impl->name, impl->loc, {VarEntry{.var = impl}});
+    if (added.isErr()) {
+      this->checker.diags_.error(impl->loc, added.error().message);
+    }
+    if (added.isErr() && added.error().code != ScopesDeclareErrorCode::UNDEFINED_AS_NAME) {
+      ScopeEntry previousEntry = this->checker.scopes().lookup(impl->name);
+      std::string declaredHere = ErrorTextDeclare::previous();
+      this->checker.diags_.note(previousEntry.loc(), declaredHere);
+    }
     method->member()->impl = impl;
     auto *lit = this->checker.ctx_.make<ObjectLitExpr>(at);
     auto prop = [&](llvm::StringRef name, Expr *value) {

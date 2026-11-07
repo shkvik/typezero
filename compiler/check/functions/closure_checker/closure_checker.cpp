@@ -38,6 +38,116 @@ Checker::Signature ClosureChecker::signatureOf(const Type *fnType) {
   return sig;
 }
 
+ClosureChecker::ResultExprNotGeneric ClosureChecker::notGeneric(const FunctionDecl *fn) {
+  if (!fn->typeParams.empty()) {
+    std::string message = ErrorTextNotGeneric::generic();
+
+    return err(ClosureCheckerNotGenericError{
+        .code = ClosureCheckerNotGenericErrorCode::GENERIC_FUNCTION_EXPRESSION,
+        .message = message,
+    });
+  }
+
+  return ok(fn);
+}
+
+ClosureChecker::ResultParamTypeAgree
+ClosureChecker::paramAgrees(const Param &param, const Type *passed, const Type *given) {
+  if (given && passed != given && !passed->isError() && !given->isError() && !param.rest()) {
+    std::string message =
+        ErrorTextParamAgrees::declared(param.label(), passed->name(), given->name());
+
+    return err(ClosureCheckerParamAgreesError{
+        .code = ClosureCheckerParamAgreesErrorCode::DECLARED_DIFFERENTLY,
+        .message = message,
+    });
+  }
+
+  return ok(passed);
+}
+
+ClosureChecker::ResultDefaultMatters ClosureChecker::defaultMatters(const Param &param,
+                                                                    const Type *given) {
+  if (param.defaultValue() && !given->isOptional()) {
+    std::string message = ErrorTextDefaultMatters::unused(param.label());
+
+    return err(ClosureCheckerDefaultMattersError{
+        .code = ClosureCheckerDefaultMattersErrorCode::DEFAULT_NEVER_USED,
+        .message = message,
+    });
+  }
+
+  return ok(&param);
+}
+
+ClosureChecker::ResultParamTypeKnown ClosureChecker::paramTypeKnown(const Param &param) {
+  if (!param.type) {
+    std::string message = ErrorTextParamTypeKnown::needsType(param.label());
+
+    return err(ClosureCheckerParamTypeKnownError{
+        .code = ClosureCheckerParamTypeKnownErrorCode::NEEDS_TYPE,
+        .message = message,
+    });
+  }
+
+  return ok(&param);
+}
+
+ClosureChecker::ResultThisParamValid ClosureChecker::thisParam(const FunctionDecl *fn,
+                                                               const Param &param) {
+  if (fn->isArrow()) {
+    std::string message = ErrorTextThisParam::arrowThis();
+
+    return err(ClosureCheckerThisParamError{
+        .code = ClosureCheckerThisParamErrorCode::ARROW_THIS_PARAMETER,
+        .message = message,
+    });
+  }
+
+  return ok(&param);
+}
+
+ClosureChecker::ResultRestParamArray ClosureChecker::restParam(const Param &param,
+                                                               const Type *type) {
+  if (!type->isArray() && !type->isListParam() && !type->isTuple() && !type->isError()) {
+    std::string message = ErrorTextRestParam::notArray(param.name);
+
+    return err(ClosureCheckerRestParamError{
+        .code = ClosureCheckerRestParamErrorCode::REST_NOT_ARRAY,
+        .message = message,
+    });
+  }
+
+  return ok(type);
+}
+
+ClosureChecker::ResultParamOrderGood ClosureChecker::paramOrder(const Param &param,
+                                                                bool afterOptional) {
+  if (afterOptional) {
+    std::string message = ErrorTextParamOrder::order();
+
+    return err(ClosureCheckerParamOrderError{
+        .code = ClosureCheckerParamOrderErrorCode::REQUIRED_AFTER_OPTIONAL,
+        .message = message,
+    });
+  }
+
+  return ok(&param);
+}
+
+ClosureChecker::ResultPromiseAwaited ClosureChecker::promiseAwaited(const Checker::Signature *sig) {
+  if (!sig->asyncVoid) {
+    std::string message = ErrorTextPromiseAwaited::dropped();
+
+    return err(ClosureCheckerPromiseAwaitedError{
+        .code = ClosureCheckerPromiseAwaitedErrorCode::PROMISE_DROPPED,
+        .message = message,
+    });
+  }
+
+  return ok(sig);
+}
+
 Expr *ClosureChecker::checkFunctionExpr(FunctionExpr *fe, const Checker::Signature *sig) {
   FunctionDecl *fn = fe->fn;
   FuncSymbol *sym = this->checker.ctx_.newFunc();
@@ -47,13 +157,10 @@ Expr *ClosureChecker::checkFunctionExpr(FunctionExpr *fe, const Checker::Signatu
   fn->sym = sym;
   fn->parent = this->checker.currentDecl();
   fn->creationSeq = ++this->checker.seq_;
-  bool generic = !fn->typeParams.empty();
+  ResultExprNotGeneric plain = ClosureChecker::notGeneric(fn);
+  bool generic = plain.isErr();
   if (generic) {
-    this->checker.diags_.error(
-        fe->loc(),
-        "a generic arrow or function expression can only be the value of a top-level "
-        "constant for now, e.g. 'const f = <T>(x: T) => x'; or declare a generic function "
-        "at the top level: 'function f<T>(x: T) { ... }'");
+    this->checker.diags_.error(fe->loc(), plain.error().message);
     fn->typeArgs.assign(fn->typeParams.size(), Type::error());
     this->checker.typeScopes_.emplace_back();
     this->checker.typeParams().bindTypeParams(fn->typeParams, fn->typeArgs);
@@ -85,50 +192,49 @@ Expr *ClosureChecker::checkFunctionExpr(FunctionExpr *fe, const Checker::Signatu
         type = Type::optional(type);
       }
       passed = mayOmit ? Type::optional(type) : type;
-      if (given && passed != given && !passed->isError() && !given->isError() && !param.rest()) {
-        this->checker.diags_.error(param.loc, "parameter '" + param.label() + "' is declared as '" +
-                                                  passed->name() + "', but the function gets '" +
-                                                  given->name() + "' here");
+      ResultParamTypeAgree agrees = ClosureChecker::paramAgrees(param, passed, given);
+      if (agrees.isErr()) {
+        this->checker.diags_.error(param.loc, agrees.error().message);
         passed = given;
         type = param.defaultValue() ? given->nonOptional() : given;
       }
     } else if (given) {
       passed = given;
       type = param.defaultValue() ? given->nonOptional() : given;
-      if (param.defaultValue() && !given->isOptional()) {
-        this->checker.diags_.error(param.defaultValue()->loc(),
-                                   "the default value of '" + param.label() +
-                                       "' is never used: the function always gets a value here");
+      ResultDefaultMatters matters = ClosureChecker::defaultMatters(param, given);
+      if (matters.isErr()) {
+        this->checker.diags_.error(param.defaultValue()->loc(), matters.error().message);
       }
     } else if (param.defaultValue() && (type = literalType(param.defaultValue()))) {
       passed = Type::optional(type);
     } else {
-      this->checker.diags_.error(
-          param.loc, "parameter '" + param.label() +
-                         "' needs a type: nothing here says what the function is called with");
+      ResultParamTypeKnown known = ClosureChecker::paramTypeKnown(param);
+      if (known.isErr()) {
+        this->checker.diags_.error(param.loc, known.error().message);
+      }
       type = passed = Type::error();
     }
     if (i == 0 && thisFromContext) {
       sym->hasThis = true;
     } else if (i == 0 && param.name == "this" && param.type && !param.rest()) {
-      if (fn->isArrow()) {
-        this->checker.diags_.error(param.loc,
-                                   "an arrow function cannot have a 'this' parameter: it sees the "
-                                   "'this' of the function around it; write a 'function'");
+      ResultThisParamValid valid = ClosureChecker::thisParam(fn, param);
+      if (valid.isErr()) {
+        this->checker.diags_.error(param.loc, valid.error().message);
       } else {
         sym->hasThis = !mayOmit;
       }
     }
     if (param.rest()) {
-      if (!type->isArray() && !type->isListParam() && !type->isTuple() && !type->isError()) {
-        this->checker.diags_.error(param.loc, "a rest parameter must be an array, e.g. '..." +
-                                                  param.name + ": int[]'");
+      ResultRestParamArray array = ClosureChecker::restParam(param, type);
+      if (array.isErr()) {
+        this->checker.diags_.error(param.loc, array.error().message);
       }
       sym->hasRest = true;
       passed = type;
     } else if (!mayOmit) {
-      if (afterOptional) {
-        this->checker.diags_.error(param.loc, "a required parameter cannot follow an optional one");
+      ResultParamOrderGood order = ClosureChecker::paramOrder(param, afterOptional);
+      if (order.isErr()) {
+        this->checker.diags_.error(param.loc, order.error().message);
       }
       sym->minArgs = i + 1;
     }
@@ -160,12 +266,9 @@ Expr *ClosureChecker::checkFunctionExpr(FunctionExpr *fe, const Checker::Signatu
     }
   } else if (fn->isAsync) {
     if (sig && sig->voidResult) {
-      if (!sig->asyncVoid) {
-        this->checker.diags_.error(fe->loc(),
-                                   "the Promise of this async function is dropped here, so nothing "
-                                   "waits for it to finish; loop with 'for (const x of xs) await "
-                                   "f(x)', or wait for all with 'await Promise.all(xs.map(async x "
-                                   "=> ...))'");
+      ResultPromiseAwaited awaited = ClosureChecker::promiseAwaited(sig);
+      if (awaited.isErr()) {
+        this->checker.diags_.error(fe->loc(), awaited.error().message);
       }
       sym->ret = Type::voidTy();
       sym->discardsResult = true;
@@ -235,7 +338,16 @@ void ClosureChecker::declareOwnName(FunctionDecl *fn) {
   self->holds = Lambda{.lambda = fn};
   unsigned declSeq = ++this->checker.seq_;
   self->place = FunctionLocalVar{.owner = fn, .state = {.declSeq = declSeq}};
-  this->checker.scopes().declare(fn->ownName(), fn->loc(), {VarEntry{.var = self}});
+  Scopes::ResultEntryDeclared added =
+      this->checker.scopes().declare(fn->ownName(), fn->loc(), {VarEntry{.var = self}});
+  if (added.isErr()) {
+    this->checker.diags_.error(fn->loc(), added.error().message);
+  }
+  if (added.isErr() && added.error().code != ScopesDeclareErrorCode::UNDEFINED_AS_NAME) {
+    ScopeEntry previousEntry = this->checker.scopes().lookup(fn->ownName());
+    std::string declaredHere = ErrorTextDeclare::previous();
+    this->checker.diags_.note(previousEntry.loc(), declaredHere);
+  }
 }
 
 void ClosureChecker::checkClosureBody(FunctionDecl *fn) {

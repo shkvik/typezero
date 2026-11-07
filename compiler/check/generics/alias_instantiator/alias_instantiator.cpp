@@ -29,6 +29,97 @@ std::string AliasInstantiator::typeList(llvm::ArrayRef<const Type *> types) {
 AliasInstantiator::AliasInstantiator(Checker &owner)
     : checker(owner) {}
 
+AliasInstantiator::ResultArgumentCount AliasInstantiator::argumentCount(const TypeAliasDecl *alias,
+                                                                        size_t count, size_t got) {
+  if (got > count) {
+    std::string message = ErrorTextAliasCount::tooMany(alias->name, count, got);
+
+    return err(AliasInstantiatorArgumentCountError{
+        .code = AliasInstantiatorArgumentCountErrorCode::TOO_MANY_TYPE_ARGUMENTS,
+        .message = message,
+    });
+  }
+
+  return ok(got);
+}
+
+AliasInstantiator::ResultDefaultExists
+AliasInstantiator::defaultExists(const TypeAliasDecl *alias, size_t count, const Type *fallback) {
+  if (!fallback) {
+    std::string message = ErrorTextAliasDefault::needs(alias->name, count);
+
+    return err(AliasInstantiatorDefaultExistsError{
+        .code = AliasInstantiatorDefaultExistsErrorCode::TYPE_ARGUMENTS_MISSING,
+        .message = message,
+    });
+  }
+
+  return ok(fallback);
+}
+
+AliasInstantiator::ResultArgumentMatch
+AliasInstantiator::argumentMatch(const TypeAliasDecl *alias, llvm::ArrayRef<const Type *> params,
+                                 llvm::ArrayRef<const Type *> args, size_t k) {
+  if (!this->checker.typeParams().satisfies(args[k], params[k], params, args)) {
+    std::string constraint = constraintSpelling(params[k], &alias->typeParams[k]);
+    std::string message = ErrorTextAliasMatch::unsatisfied(args[k]->name(), constraint,
+                                                           params[k]->name(), alias->name);
+
+    return err(AliasInstantiatorArgumentMatchError{
+        .code = AliasInstantiatorArgumentMatchErrorCode::CONSTRAINT_UNSATISFIED,
+        .message = message,
+    });
+  }
+
+  return ok(args[k]);
+}
+
+AliasInstantiator::ResultAliasDistinct
+AliasInstantiator::notResolving(const TypeAliasDecl *alias, const Checker::AliasInstance &entry) {
+  if (entry.resolving && !entry.self) {
+    std::string message = ErrorTextAliasSelf::itself(alias->name);
+
+    return err(AliasInstantiatorNotResolvingError{
+        .code = AliasInstantiatorNotResolvingErrorCode::REFERS_TO_ITSELF,
+        .message = message,
+    });
+  }
+
+  return ok(alias);
+}
+
+AliasInstantiator::ResultDepthInBounds AliasInstantiator::depthInBounds(const TypeAliasDecl *alias,
+                                                                        unsigned calls,
+                                                                        bool conditional) const {
+  bool deep = this->aliasDepth >= kMaxAliasDepth || calls > kMaxTailCalls;
+  if (deep && !conditional) {
+    std::string message = ErrorTextAliasDepth::endless(alias->name);
+
+    return err(AliasInstantiatorDepthInBoundsError{
+        .code = AliasInstantiatorDepthInBoundsErrorCode::ENDLESS_ALIAS,
+        .message = message,
+    });
+  }
+  if (deep && calls > kMaxTailCalls) {
+    std::string message = ErrorTextAliasDepth::tailCalls(alias->name, kMaxTailCalls);
+
+    return err(AliasInstantiatorDepthInBoundsError{
+        .code = AliasInstantiatorDepthInBoundsErrorCode::TOO_MANY_TAIL_CALLS,
+        .message = message,
+    });
+  }
+  if (deep) {
+    std::string message = ErrorTextAliasDepth::nests(alias->name, kMaxAliasDepth, kMaxTailCalls);
+
+    return err(AliasInstantiatorDepthInBoundsError{
+        .code = AliasInstantiatorDepthInBoundsErrorCode::TOO_DEEP,
+        .message = message,
+    });
+  }
+
+  return ok(calls);
+}
+
 std::vector<const Type *> AliasInstantiator::aliasTypeParams(TypeAliasDecl *alias) {
   auto found = this->aliasParams.find(alias);
   if (found == this->aliasParams.end()) {
@@ -54,18 +145,18 @@ const Type *AliasInstantiator::instantiateAlias(TypeAliasDecl *alias,
     this->aliasTypeParams(alias);
     std::vector<const Type *> params = this->aliasParams[alias].first,
                               defaults = this->aliasParams[alias].second;
-    if (args.size() > params.size()) {
-      this->checker.diags_.error(
-          loc, "'" + alias->name + "' takes " + std::to_string(params.size()) + " type argument" +
-                   (params.size() == 1 ? "" : "s") + ", but got " + std::to_string(args.size()));
+    ResultArgumentCount counted =
+        AliasInstantiator::argumentCount(alias, params.size(), args.size());
+    if (counted.isErr()) {
+      this->checker.diags_.error(loc, counted.error().message);
       type = Type::error();
       break;
     }
     for (size_t k = args.size(); k < params.size() && !type; ++k) {
-      if (!defaults[k]) {
-        this->checker.diags_.error(
-            loc, "'" + alias->name + "' needs " + std::to_string(params.size()) + " type argument" +
-                     (params.size() == 1 ? "" : "s") + ", e.g. '" + alias->name + "<int>'");
+      ResultDefaultExists exists =
+          AliasInstantiator::defaultExists(alias, params.size(), defaults[k]);
+      if (exists.isErr()) {
+        this->checker.diags_.error(loc, exists.error().message);
         type = Type::error();
         break;
       }
@@ -76,11 +167,9 @@ const Type *AliasInstantiator::instantiateAlias(TypeAliasDecl *alias,
         type = args[k];
         break;
       }
-      if (!this->checker.typeParams().satisfies(args[k], params[k], params, args)) {
-        this->checker.diags_.error(
-            loc, "type '" + args[k]->name() + "' does not satisfy the constraint '" +
-                     constraintSpelling(params[k], &alias->typeParams[k]) + "' of '" +
-                     params[k]->name() + "' in '" + alias->name + "'");
+      ResultArgumentMatch matched = this->argumentMatch(alias, params, args, k);
+      if (matched.isErr()) {
+        this->checker.diags_.error(loc, matched.error().message);
         type = Type::error();
       }
     }
@@ -93,40 +182,24 @@ const Type *AliasInstantiator::instantiateAlias(TypeAliasDecl *alias,
       type = entry.type;
       break;
     }
-    if (entry.resolving) {
-      if (entry.self) {
-        entry.recursive = true;
-        type = entry.self;
-        break;
-      }
-      this->checker.diags_.error(alias->loc(), "type alias '" + alias->name + "' refers to itself");
+    if (entry.resolving && entry.self) {
+      entry.recursive = true;
+      type = entry.self;
+      break;
+    }
+    ResultAliasDistinct distinct = AliasInstantiator::notResolving(alias, entry);
+    if (distinct.isErr()) {
+      this->checker.diags_.error(alias->loc(), distinct.error().message);
       type = Type::error();
       break;
     }
     bool conditional = alias->type.kind() == TypeRefKind::CONDITIONAL_REF;
-    if (this->aliasDepth >= kMaxAliasDepth || calls > kMaxTailCalls) {
-      if (!conditional) {
-        this->checker.diags_.error(alias->loc(),
-                                   "type alias '" + alias->name +
-                                       "' refers to itself with other type arguments, "
-                                       "so it never ends");
-      } else if (calls > kMaxTailCalls) {
-        this->checker.diags_.error(alias->loc(), "type alias '" + alias->name +
-                                                     "' calls itself more than " +
-                                                     std::to_string(kMaxTailCalls) +
-                                                     " times, so it may never end; "
-                                                     "TypeScript stops there too");
-      } else {
-        this->checker.diags_.error(
-            alias->loc(),
-            "type alias '" + alias->name + "' nests more than " + std::to_string(kMaxAliasDepth) +
-                " instances of itself, so it may never "
-                "end; TypeScript stops there too, and a branch that is the alias "
-                "itself, '... ? " +
-                alias->name + "<...> : ...', may go " + std::to_string(kMaxTailCalls) + " deep");
-      }
+    ResultDepthInBounds bounded = this->depthInBounds(alias, calls, conditional);
+    if (bounded.isErr()) {
+      std::string neededHere = ErrorTextAliasDepth::neededHere();
+      this->checker.diags_.error(alias->loc(), bounded.error().message);
       if (conditional && this->aliasUse.isValid() && this->aliasUse != alias->loc()) {
-        this->checker.diags_.note(this->aliasUse, "the instance needed here");
+        this->checker.diags_.note(this->aliasUse, neededHere);
       }
       type = Type::error();
       break;

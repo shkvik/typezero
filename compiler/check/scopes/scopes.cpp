@@ -9,22 +9,37 @@ namespace tz {
 Scopes::Scopes(Checker &owner)
     : checker(owner) {}
 
-void Scopes::declare(llvm::StringRef name, llvm::SMLoc loc, ScopeEntry entry) {
+Scopes::ResultEntryDeclared Scopes::declare(llvm::StringRef name, llvm::SMLoc loc,
+                                            ScopeEntry entry) {
   if (name == "undefined") {
-    this->checker.diags_.error(loc, "'undefined' cannot be used as a name");
-    return;
+    std::string message = ErrorTextDeclare::undefined();
+
+    return err(ScopesDeclareError{
+        .code = ScopesDeclareErrorCode::UNDEFINED_AS_NAME,
+        .message = message,
+    });
   }
+
   auto [it, inserted] = this->checker.scopes_.back().try_emplace(name, entry);
-  if (inserted) {
-    return;
-  }
   const ScopeEntry &previous = it->second;
-  this->checker.diags_.error(
-      loc, "duplicate declaration of '" + name + "'" +
-               (entry.func() && previous.func()
-                    ? "; plain functions are not overloaded: give each variant its own name"
-                    : ""));
-  this->checker.diags_.note(previous.loc(), "previously declared here");
+  if (!inserted && entry.func() && previous.func()) {
+    std::string message = ErrorTextDeclare::function(name);
+
+    return err(ScopesDeclareError{
+        .code = ScopesDeclareErrorCode::DUPLICATE_FUNCTION,
+        .message = message,
+    });
+  }
+  if (!inserted) {
+    std::string message = ErrorTextDeclare::duplicate(name);
+
+    return err(ScopesDeclareError{
+        .code = ScopesDeclareErrorCode::DUPLICATE_DECLARATION,
+        .message = message,
+    });
+  }
+
+  return ok(entry);
 }
 
 ScopeEntry Scopes::lookup(llvm::StringRef name) const {
@@ -52,7 +67,15 @@ VarSymbol *Scopes::declareVar(llvm::StringRef name, llvm::SMLoc loc, const Type 
     unsigned declSeq = ++this->checker.seq_;
     var->place = VarSymbol::localPlace(this->checker.currentDecl(), declSeq);
   }
-  this->declare(name, loc, {VarEntry{.var = var}});
+  ResultEntryDeclared added = this->declare(name, loc, {VarEntry{.var = var}});
+  if (added.isErr()) {
+    this->checker.diags_.error(loc, added.error().message);
+  }
+  if (added.isErr() && added.error().code != ScopesDeclareErrorCode::UNDEFINED_AS_NAME) {
+    ScopeEntry previousEntry = this->lookup(name);
+    std::string declaredHere = ErrorTextDeclare::previous();
+    this->checker.diags_.note(previousEntry.loc(), declaredHere);
+  }
 
   return var;
 }
@@ -73,13 +96,17 @@ const Type *Scopes::varType(VarSymbol *var) {
   return type;
 }
 
-void Scopes::checkVisible(NameExpr *name, const VarSymbol *var) {
+Scopes::ResultNameIsVisible Scopes::checkVisible(NameExpr *name, const VarSymbol *var) const {
   if (this->checker.otherCaseVars_.contains(var)) {
-    this->checker.diags_.error(name->loc(),
-                               "'" + name->name +
-                                   "' is declared in an earlier case of the 'switch'; declare it "
-                                   "before the 'switch' to use it in several cases");
+    std::string message = ErrorTextVisible::otherCase(name->name);
+
+    return err(ScopesCheckVisibleError{
+        .code = ScopesCheckVisibleErrorCode::DECLARED_IN_OTHER_CASE,
+        .message = message,
+    });
   }
+
+  return ok(var);
 }
 
 }

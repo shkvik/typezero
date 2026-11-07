@@ -154,14 +154,22 @@ Expr *ReturnChecker::checkReturnValue(ReturnStmt *ret, const Type *hint, bool te
       Checker::Flow whenTrue = this->checker.flow_;
       Checker::Flow whenFalse = this->checker.flow_;
       this->checker.conditionFacts().addConditionFacts(value, whenTrue, whenFalse);
-      this->checker.predicateChecker().notePredicateExit(whenTrue, whenFalse, ret->value->loc());
+      PredicateChecker::ResultExitNarrowed narrowed =
+          this->checker.predicateChecker().notePredicateExit(whenTrue, whenFalse);
+      if (narrowed.isErr()) {
+        this->checker.diags_.error(ret->value->loc(), narrowed.error().message);
+      }
     }
     return value;
   }
   Checker::Flow whenTrue, whenFalse;
   Expr *value = this->checker.truthChecker().checkBranching(ret->value, whenTrue, whenFalse);
   this->checker.flow_ = FlowChecker::join(whenTrue, whenFalse);
-  this->checker.predicateChecker().notePredicateExit(whenTrue, whenFalse, ret->value->loc());
+  PredicateChecker::ResultExitNarrowed narrowed =
+      this->checker.predicateChecker().notePredicateExit(whenTrue, whenFalse);
+  if (narrowed.isErr()) {
+    this->checker.diags_.error(ret->value->loc(), narrowed.error().message);
+  }
 
   return value;
 }

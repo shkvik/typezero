@@ -94,6 +94,89 @@ std::string GenericInstantiator::bindingList(llvm::ArrayRef<const Type *> params
 GenericInstantiator::GenericInstantiator(Checker &owner)
     : checker(owner) {}
 
+GenericInstantiator::ResultTypeArgsCount
+GenericInstantiator::typeArgCount(const FuncSymbol *generic, const NameExpr *name) {
+  if (name->typeArgs.size() > generic->typeParams.size()) {
+    std::string message = ErrorTextGenericCount::tooMany(generic->name, generic->typeParams.size(),
+                                                         name->typeArgs.size());
+
+    return err(GenericInstantiatorTypeArgCountError{
+        .code = GenericInstantiatorTypeArgCountErrorCode::TOO_MANY_TYPE_ARGUMENTS,
+        .message = message,
+    });
+  }
+
+  return ok(name->typeArgs.size());
+}
+
+GenericInstantiator::ResultTypeArgsGiven
+GenericInstantiator::typeArgsGiven(const FuncSymbol *generic, const NameExpr *name,
+                                   const Checker::Signature *expected) {
+  if (name->typeArgs.empty() && !expected) {
+    std::string message = ErrorTextGenericValue::needsArgs(generic->name);
+
+    return err(GenericInstantiatorTypeArgsGivenError{
+        .code = GenericInstantiatorTypeArgsGivenErrorCode::NEEDS_TYPE_ARGUMENTS,
+        .message = message,
+    });
+  }
+
+  return ok(name);
+}
+
+GenericInstantiator::ResultNoClassReturn
+GenericInstantiator::ownClassReturn(const FuncSymbol *generic, const ClassDecl *cls) {
+  if (cls) {
+    std::string message = ErrorTextOwnClass::literal(generic->name);
+
+    return err(GenericInstantiatorOwnClassReturnError{
+        .code = GenericInstantiatorOwnClassReturnErrorCode::RETURNS_LITERAL_CLASS,
+        .message = message,
+    });
+  }
+
+  return ok(generic);
+}
+
+GenericInstantiator::ResultChainIsFinite
+GenericInstantiator::chainBounded(const FuncSymbol *generic,
+                                  llvm::ArrayRef<const Type *> args) const {
+  unsigned chain = 0;
+  for (const Checker::Instance *i = this->checker.checkingInstance_; i; i = i->requester) {
+    chain += i->generic == generic;
+  }
+  if (chain >= kMaxInstanceChain) {
+    std::string types = GenericInstantiator::typeList(args);
+    std::string message = ErrorTextInstanceChain::endless(generic->name, types);
+
+    return err(GenericInstantiatorChainBoundedError{
+        .code = GenericInstantiatorChainBoundedErrorCode::ENDLESS_CHAIN,
+        .message = message,
+    });
+  }
+
+  return ok(chain);
+}
+
+GenericInstantiator::ResultParamsMeaning
+GenericInstantiator::paramsMeaningful(const FuncSymbol *generic, llvm::ArrayRef<const Type *> reps,
+                                      llvm::ArrayRef<const Type *> args) {
+  for (const Type *t : generic->params) {
+    if (t && this->checker.typeParams().substitute(t, generic->typeParams, reps)->isError()) {
+      std::string bindings = GenericInstantiator::bindingList(generic->typeParams, args);
+      std::string message =
+          ErrorTextInstanceParams::meaningless(generic->name, bindings, t->name());
+
+      return err(GenericInstantiatorParamsMeaningfulError{
+          .code = GenericInstantiatorParamsMeaningfulErrorCode::PARAMS_MEANINGLESS,
+          .message = message,
+      });
+    }
+  }
+
+  return ok(generic);
+}
+
 Expr *GenericInstantiator::checkGenericValue(NameExpr *name, FuncSymbol *generic,
                                              const Checker::Signature *expected) {
   name->type = Type::error();
@@ -104,12 +187,15 @@ Expr *GenericInstantiator::checkGenericValue(NameExpr *name, FuncSymbol *generic
   }
   llvm::ArrayRef<const Type *> typeParams = generic->typeParams;
   std::vector<const Type *> bound(typeParams.size(), nullptr);
+  ResultTypeArgsGiven given = GenericInstantiator::typeArgsGiven(generic, name, expected);
+  if (given.isErr()) {
+    this->checker.diags_.error(name->loc(), given.error().message);
+    return name;
+  }
   if (!name->typeArgs.empty()) {
-    if (name->typeArgs.size() > typeParams.size()) {
-      this->checker.diags_.error(
-          name->loc(), "'" + generic->name + "' takes " + std::to_string(typeParams.size()) +
-                           " type argument" + (typeParams.size() == 1 ? "" : "s") + ", but got " +
-                           std::to_string(name->typeArgs.size()));
+    ResultTypeArgsCount counted = GenericInstantiator::typeArgCount(generic, name);
+    if (counted.isErr()) {
+      this->checker.diags_.error(name->loc(), counted.error().message);
       return name;
     }
     for (size_t k = 0; k < name->typeArgs.size(); ++k) {
@@ -140,13 +226,6 @@ Expr *GenericInstantiator::checkGenericValue(NameExpr *name, FuncSymbol *generic
         }
       }
     }
-  } else {
-    this->checker.diags_.error(name->loc(),
-                               "'" + generic->name +
-                                   "' is generic, so a value of it needs its type arguments, "
-                                   "e.g. '" +
-                                   generic->name + "<int>', or a function type where it goes");
-    return name;
   }
   if (!this->checker.typeArgInferrer().finishTypeArgs(generic, bound, name->loc(), false) || !ret) {
     return name;
@@ -172,16 +251,12 @@ Expr *GenericInstantiator::checkGenericValue(NameExpr *name, FuncSymbol *generic
 bool GenericInstantiator::returnsOwnClass(const FuncSymbol *generic, const Type *ret) {
   llvm::SmallPtrSet<const Type *, 4> seen;
   const ClassDecl *cls = ret ? GenericInstantiator::literalClassIn(ret, seen) : nullptr;
-  if (!cls) {
+  ResultNoClassReturn plain = GenericInstantiator::ownClassReturn(generic, cls);
+  if (plain.isOk()) {
     return false;
   }
   if (this->ownClassReturns.insert(generic).second) {
-    this->checker.diags_.error(
-        cls->literal()->loc(),
-        "generic function '" + generic->name +
-            "' cannot return an object literal with methods yet: each copy of "
-            "it makes a class of its own; declare a class, or give the "
-            "object function fields, 'f: () => ...'");
+    this->checker.diags_.error(cls->literal()->loc(), plain.error().message);
   }
 
   return true;
@@ -249,32 +324,17 @@ FuncSymbol *GenericInstantiator::instantiate(FuncSymbol *generic, llvm::ArrayRef
     }
     return instance->decl->sym;
   }
-  unsigned chain = 0;
-  for (const Checker::Instance *i = this->checker.checkingInstance_; i; i = i->requester) {
-    chain += i->generic == generic;
-  }
-  if (chain >= kMaxInstanceChain) {
-    this->checker.diags_.error(
-        loc, "calling '" + generic->name +
-                 "' here needs another copy of it for each copy of the "
-                 "functions that lead here, without end: its type arguments keep growing ('" +
-                 GenericInstantiator::typeList(args) +
-                 "' by now); generic functions that call each other must pass "
-                 "their type parameters on unchanged");
+  ResultChainIsFinite bounded = this->chainBounded(generic, args);
+  if (bounded.isErr()) {
+    this->checker.diags_.error(loc, bounded.error().message);
     return nullptr;
   }
-
-  for (const Type *t : generic->params) {
-    if (t && this->checker.typeParams().substitute(t, generic->typeParams, reps)->isError()) {
-      if (!this->checker.checkingInstance_) {
-        this->checker.diags_.error(loc,
-                                   "cannot call '" + generic->name + "' with " +
-                                       GenericInstantiator::bindingList(generic->typeParams, args) +
-                                       ": the types of its parameters, '" + t->name() +
-                                       "', mean nothing for these types");
-      }
-      return nullptr;
-    }
+  ResultParamsMeaning meaningful = this->paramsMeaningful(generic, reps, args);
+  if (meaningful.isErr() && !this->checker.checkingInstance_) {
+    this->checker.diags_.error(loc, meaningful.error().message);
+  }
+  if (meaningful.isErr()) {
+    return nullptr;
   }
   Checker::Instance &instance = this->checker.instanceStore_.emplace_back();
   instance.generic = generic;
@@ -395,22 +455,19 @@ void GenericInstantiator::reportInstance(Checker::Instance *instance, llvm::SMLo
     return;
   }
   const FuncSymbol *generic = instance->generic;
-  this->checker.diags_.error(callLoc,
-                             "cannot call '" + generic->name + "' with " +
-                                 GenericInstantiator::bindingList(generic->typeParams, concrete) +
-                                 ": " + instance->message);
+  std::string bindings = GenericInstantiator::bindingList(generic->typeParams, concrete);
+  std::string message =
+      ErrorTextInstanceCall::cannotCall(generic->name, bindings, instance->message);
+  this->checker.diags_.error(callLoc, message);
   auto nameOf = [](const Checker::Instance *i) { return i->cls ? i->cls->name : i->generic->name; };
   const Checker::Instance *at = instance;
   llvm::SmallPtrSet<const char *, 8> shown;
   while (at && at->errorLoc.isValid() && shown.insert(at->errorLoc.getPointer()).second) {
     const Checker::Instance *next = this->checker.failedCalls_.lookup(at->errorLoc.getPointer());
-    if (next) {
-      this->checker.diags_.note(at->errorLoc, "in '" + nameOf(at) + "', which " +
-                                                  (next->cls ? "uses '" : "calls '") +
-                                                  nameOf(next) + "' here");
-    } else {
-      this->checker.diags_.note(at->errorLoc, "in '" + nameOf(at) + "', here");
-    }
+    std::string where =
+        next ? ErrorTextInstanceCall::inWhich(nameOf(at), next->cls != nullptr, nameOf(next))
+             : ErrorTextInstanceCall::here(nameOf(at));
+    this->checker.diags_.note(at->errorLoc, where);
     at = next;
   }
 }

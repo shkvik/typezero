@@ -1,11 +1,15 @@
 #pragma once
 
 #include "compiler/check/checker/checker.h"
+#include "compiler/check/types/conditional_types/conditional_types_errors.h"
+#include "compiler/result/result/result.h"
 
 namespace tz {
 
 class ConditionalTypes {
 public:
+  using ResultIntersectionJoined = Result<const Type *, ConditionalTypesResolveIntersectionError>;
+
   explicit ConditionalTypes(Checker &owner);
 
   const Type *resolveConditional(const TypeRef &ref);
@@ -14,7 +18,7 @@ public:
   std::vector<const Type *> conditionalBranches(const Type *conditional);
   bool fitsConditional(const Type *from, const Type *to, unsigned depth = 0);
   void bindType(llvm::StringRef name, const Type *type, llvm::SMLoc loc);
-  const Type *resolveIntersection(const TypeRef &ref);
+  ResultIntersectionJoined resolveIntersection(const TypeRef &ref);
   const Type *resolveTypeArgument(const TypeRef &ref);
   const Type *signatureForUtility(const TypeRef &ref);
 

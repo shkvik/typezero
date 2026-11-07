@@ -417,7 +417,15 @@ Expr *BuiltinModuleChecker::checkNodeCall(CallExpr *call, const Type *expected) 
       return nullptr;
     }
     if (n->module == NodeModule::TimersPromises && n->name == "scheduler") {
-      return checker_.timerChecker().checkSchedulerCall(call, member);
+      TimerChecker::ResultSchedulerAwait awaited =
+          checker_.timerChecker().checkSchedulerCall(call, member);
+      bool reported =
+          awaited.isErr() &&
+          awaited.error().code == TimerCheckerCheckSchedulerCallErrorCode::ALREADY_REPORTED;
+      if (awaited.isErr() && !reported) {
+        checker_.diags_.error(member->loc(), awaited.error().message);
+      }
+      return awaited.isOk() ? awaited.value() : call;
     }
     if (!n->name.empty()) {
       return nullptr;
@@ -445,6 +453,29 @@ Expr *BuiltinModuleChecker::checkNodeCall(CallExpr *call, const Type *expected) 
   }
 
   return nullptr;
+}
+
+Expr *BuiltinModuleChecker::checkTimersPromises(CallExpr *call, llvm::StringRef fn, llvm::SMLoc loc,
+                                                const Type *expected) {
+  TimerChecker::ResultPromiseOfTimer promised =
+      checker_.timerChecker().checkTimersPromisesCall(call, fn, loc, expected);
+  if (promised.isOk()) {
+    return promised.value();
+  }
+  switch (promised.error().code) {
+    case TimerCheckerCheckTimersPromisesCallErrorCode::ALREADY_REPORTED:
+      break;
+    case TimerCheckerCheckTimersPromisesCallErrorCode::VOID_VALUE:
+      checker_.diags_.error(call->args[fn == "setImmediate" ? 0 : 1]->loc(),
+                            promised.error().message);
+      break;
+    case TimerCheckerCheckTimersPromisesCallErrorCode::SCHEDULER_ITSELF:
+    case TimerCheckerCheckTimersPromisesCallErrorCode::WRONG_ARITY:
+      checker_.diags_.error(loc, promised.error().message);
+      break;
+  }
+
+  return call;
 }
 
 }

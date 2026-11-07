@@ -63,6 +63,137 @@ const char *whyUnsupported(llvm::StringRef name) {
 NewChecker::NewChecker(Checker &owner)
     : checker(owner) {}
 
+NewChecker::ResultNamespaceNew NewChecker::namespaceNew(const NewExpr *expr) {
+  if (!expr->member.empty()) {
+    std::string message = ErrorTextNamespaceNew::namespaced(expr->name, expr->member);
+
+    return err(NewCheckerNamespaceNewError{
+        .code = NewCheckerNamespaceNewErrorCode::NAMESPACE_CLASS,
+        .message = message,
+    });
+  }
+
+  return ok(expr);
+}
+
+NewChecker::ResultCryptoMadeOk NewChecker::cryptoNew(const NewExpr *expr,
+                                                     const ClassDecl *cls) const {
+  bool hidden = cls->library() && !this->checker.libraryCalls().inLibrary(expr->loc()) &&
+                (cls == this->checker.libraryClass("CryptoKey") ||
+                 cls == this->checker.libraryClass("SubtleCrypto"));
+  if (hidden && cls->name == "CryptoKey") {
+    std::string message = ErrorTextCryptoNew::cryptoKey();
+
+    return err(NewCheckerCryptoNewError{
+        .code = NewCheckerCryptoNewErrorCode::CRYPTO_KEY,
+        .message = message,
+    });
+  }
+  if (hidden) {
+    std::string message = ErrorTextCryptoNew::subtle();
+
+    return err(NewCheckerCryptoNewError{
+        .code = NewCheckerCryptoNewErrorCode::SUBTLE_CRYPTO,
+        .message = message,
+    });
+  }
+
+  return ok(cls);
+}
+
+NewChecker::ResultSupportedNew NewChecker::supportedNew(const NewExpr *expr) {
+  const char *why = whyUnsupported(expr->name);
+  if (why) {
+    std::string message = ErrorTextSupportedNew::unsupported(expr->name, why);
+
+    return err(NewCheckerSupportedNewError{
+        .code = NewCheckerSupportedNewErrorCode::UNSUPPORTED,
+        .message = message,
+    });
+  }
+
+  return ok(expr);
+}
+
+NewChecker::ResultNoTypeArgsOk NewChecker::noTypeArgs(const NewExpr *expr) {
+  if (!expr->typeArgs.empty()) {
+    std::string message = ErrorTextNoTypeArgs::given(expr->name);
+
+    return err(NewCheckerNoTypeArgsError{
+        .code = NewCheckerNoTypeArgsErrorCode::TYPE_ARGUMENTS_GIVEN,
+        .message = message,
+    });
+  }
+
+  return ok(expr);
+}
+
+NewChecker::ResultClassIsFound NewChecker::classFound(const NewExpr *expr) {
+  if (expr->name != "Array") {
+    std::string message = ErrorTextClassFound::notFound(expr->name);
+
+    return err(NewCheckerClassFoundError{
+        .code = NewCheckerClassFoundErrorCode::CLASS_NOT_FOUND,
+        .message = message,
+    });
+  }
+
+  return ok(expr);
+}
+
+NewChecker::ResultArrayElement NewChecker::arrayElement(const NewExpr *expr, const Type *expected) {
+  bool fromExpected = expr->typeArgs.empty() && expected && expected->nonOptional()->isArray();
+  if (expr->typeArgs.size() > 1) {
+    std::string message = ErrorTextNewArray::oneArg();
+
+    return err(NewCheckerArrayElementError{
+        .code = NewCheckerArrayElementErrorCode::TOO_MANY_TYPE_ARGUMENTS,
+        .message = message,
+    });
+  }
+  if (expr->typeArgs.empty() && !fromExpected) {
+    std::string message = ErrorTextNewArray::needs();
+
+    return err(NewCheckerArrayElementError{
+        .code = NewCheckerArrayElementErrorCode::NEEDS_ELEMENT_TYPE,
+        .message = message,
+    });
+  }
+  if (fromExpected) {
+    return ok(expected->nonOptional()->inner());
+  }
+
+  const Type *element = this->checker.typeResolver().resolveType(expr->typeArgs[0], false);
+
+  return ok(element);
+}
+
+NewChecker::ResultArrayArgsFit NewChecker::arrayArgs(const NewExpr *expr) {
+  if (expr->args.size() > 1) {
+    std::string message = ErrorTextArrayArgs::literal();
+
+    return err(NewCheckerArrayArgsError{
+        .code = NewCheckerArrayArgsErrorCode::VALUES_NEED_LITERAL,
+        .message = message,
+    });
+  }
+
+  return ok(expr);
+}
+
+NewChecker::ResultHasZeroValue NewChecker::zeroValue(const Type *element) {
+  if (!element->isError() && !element->hasZeroValue()) {
+    std::string message = ErrorTextZeroValue::none(element->name());
+
+    return err(NewCheckerZeroValueError{
+        .code = NewCheckerZeroValueErrorCode::NO_ZERO_VALUE,
+        .message = message,
+    });
+  }
+
+  return ok(element);
+}
+
 Expr *NewChecker::checkNew(NewExpr *expr, const Type *expected) {
   expr->type = Type::error();
   auto checkArgsLoosely = [&] {
@@ -92,23 +223,17 @@ Expr *NewChecker::checkNew(NewExpr *expr, const Type *expected) {
                  : this->checker.intlChecker().checkIntlNew(expr->loc(), expr->member, expr->args,
                                                             true);
     }
-    this->checker.diags_.error(expr->loc(),
-                               "'" + expr->name + "." + expr->member +
-                                   "' is not supported; of namespaces, only the classes of 'Intl' "
-                                   "can be made with 'new'");
+    ResultNamespaceNew plain = NewChecker::namespaceNew(expr);
+    if (plain.isErr()) {
+      this->checker.diags_.error(expr->loc(), plain.error().message);
+    }
     checkArgsLoosely();
     return expr;
   }
   if (ClassDecl *cls = this->checker.topLevelChecker().lookupValue(expr->name).cls()) {
-    if (cls->library() && !this->checker.libraryCalls().inLibrary(expr->loc()) &&
-        (cls == this->checker.libraryClass("CryptoKey") ||
-         cls == this->checker.libraryClass("SubtleCrypto"))) {
-      this->checker.diags_.error(expr->loc(),
-                                 cls->name == "CryptoKey"
-                                     ? std::string("a CryptoKey is made by crypto.subtle: "
-                                                   "importKey, generateKey, deriveKey or "
-                                                   "unwrapKey")
-                                     : std::string("there is one SubtleCrypto: crypto.subtle"));
+    ResultCryptoMadeOk crypto = this->cryptoNew(expr, cls);
+    if (crypto.isErr()) {
+      this->checker.diags_.error(expr->loc(), crypto.error().message);
       checkArgsLoosely();
       return expr;
     }
@@ -135,22 +260,25 @@ Expr *NewChecker::checkNew(NewExpr *expr, const Type *expected) {
       n && n->module == NodeModule::Crypto) {
     return this->checker.cryptoChecker().checkCryptoNew(expr, n->name);
   }
-  if (const char *why = whyUnsupported(expr->name)) {
-    this->checker.diags_.error(expr->loc(), "'new " + expr->name + "' is not supported: " + why);
+  ResultSupportedNew supported = NewChecker::supportedNew(expr);
+  if (supported.isErr()) {
+    this->checker.diags_.error(expr->loc(), supported.error().message);
     checkArgsLoosely();
     return expr;
   }
   if (expr->name == "RegExp" && !this->checker.scopes().lookup("RegExp").var() &&
       !this->checker.scopes().lookup("RegExp").func()) {
-    if (!expr->typeArgs.empty()) {
-      this->checker.diags_.error(expr->loc(), "'RegExp' takes no type arguments");
+    ResultNoTypeArgsOk plainNew = NewChecker::noTypeArgs(expr);
+    if (plainNew.isErr()) {
+      this->checker.diags_.error(expr->loc(), plainNew.error().message);
     }
     return this->checker.regexChecker().checkRegExpConstructor(expr->loc(), expr->args);
   }
   if (expr->name == "Date" && !this->checker.scopes().lookup("Date").var() &&
       !this->checker.scopes().lookup("Date").func()) {
-    if (!expr->typeArgs.empty()) {
-      this->checker.diags_.error(expr->loc(), "'Date' takes no type arguments");
+    ResultNoTypeArgsOk plainNew = NewChecker::noTypeArgs(expr);
+    if (plainNew.isErr()) {
+      this->checker.diags_.error(expr->loc(), plainNew.error().message);
     }
     return this->checker.dateChecker().checkDateNew(expr->loc(), expr->args);
   }
@@ -178,40 +306,36 @@ Expr *NewChecker::checkNew(NewExpr *expr, const Type *expected) {
     checkArgsLoosely();
     return expr;
   }
-  if (expr->name != "Array") {
-    this->checker.diags_.error(expr->loc(), "cannot find class '" + expr->name + "'");
+  ResultClassIsFound found = NewChecker::classFound(expr);
+  if (found.isErr()) {
+    this->checker.diags_.error(expr->loc(), found.error().message);
     checkArgsLoosely();
     return expr;
   }
 
-  const Type *element = nullptr;
-  if (expr->typeArgs.size() == 1) {
-    element = this->checker.typeResolver().resolveType(expr->typeArgs[0], false);
-  } else if (expr->typeArgs.size() > 1) {
-    this->checker.diags_.error(expr->loc(), "'Array' takes one type argument");
-    element = Type::error();
-  } else if (expected && expected->nonOptional()->isArray()) {
-    element = expected->nonOptional()->inner();
-  } else {
-    this->checker.diags_.error(expr->loc(),
-                               "'new Array' needs an element type, e.g. 'new Array<int>(n)'");
-    element = Type::error();
+  ResultArrayElement given = this->arrayElement(expr, expected);
+  if (given.isErr()) {
+    this->checker.diags_.error(expr->loc(), given.error().message);
   }
+  const Type *element = given.isOk() ? given.value() : Type::error();
 
-  if (expr->args.size() > 1) {
-    this->checker.diags_.error(expr->loc(),
-                               "to create an array from values, use a literal: [a, b, c]");
+  ResultArrayArgsFit fits = NewChecker::arrayArgs(expr);
+  if (fits.isErr()) {
+    this->checker.diags_.error(expr->loc(), fits.error().message);
     checkArgsLoosely();
     return expr;
   }
   if (expr->args.size() == 1) {
     expr->args[0] = this->checker.memberChecker().checkPosition(expr->args[0]);
-    if (!element->isError() && !element->hasZeroValue()) {
-      this->checker.diags_.error(
-          expr->loc(), "'new Array<T>(n)' fills the array with a default value, and '" +
-                           element->name() + "' has none; start from '[]' and use push()");
+    ResultHasZeroValue zero = NewChecker::zeroValue(element);
+    if (zero.isErr()) {
+      this->checker.diags_.error(expr->loc(), zero.error().message);
     }
-    this->checker.indexProofs().requireBetween(expr->args[0], 0, std::nullopt, "an array length");
+    IndexProofs::ResultBetweenProven between = this->checker.indexProofs().requireBetween(
+        expr->args[0], 0, std::nullopt, "an array length");
+    if (between.isErr() && between.error().code != IndexProofsRequireBetweenErrorCode::EXEMPT) {
+      this->checker.diags_.error(expr->args[0]->loc(), between.error().message);
+    }
   }
   if (!element->isError()) {
     expr->type = Type::array(element);

@@ -50,9 +50,19 @@ void ChunkTypes::addStreamBases(ClassDecl *inst, llvm::SMLoc loc) {
       inst->typeArgs.size() != 3) {
     return;
   }
-  if (ClassDecl *side = checker_.genericClassInstantiator().instantiateClass(
-          writable, {inst->typeArgs[0], inst->typeArgs[2]}, loc)) {
-    checker_.classBases().addBase(inst->type, side->type);
+  GenericClassInstantiator::ResultClassMade side =
+      checker_.genericClassInstantiator().instantiateClass(
+          writable, {inst->typeArgs[0], inst->typeArgs[2]}, loc);
+  if (side.isErr() &&
+      side.error().code != GenericClassInstantiatorInstantiateClassErrorCode::ALREADY_REPORTED) {
+    llvm::SMLoc at =
+        side.error().code == GenericClassInstantiatorInstantiateClassErrorCode::ENDLESS_INSTANCES
+            ? writable->loc()
+            : (loc.isValid() ? loc : writable->loc());
+    checker_.diags_.error(at, side.error().message);
+  }
+  if (side.isOk()) {
+    checker_.classBases().addBase(inst->type, side.value()->type);
     if (inst->isEmitted() && !llvm::is_contained(checker_.file_->subtypes, inst->type)) {
       checker_.file_->subtypes.push_back(inst->type);
     }

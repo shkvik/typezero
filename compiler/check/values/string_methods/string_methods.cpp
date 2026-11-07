@@ -99,8 +99,11 @@ Expr *StringMethods::checkStringMethod(CallExpr *call, MemberExpr *member) {
   call->type = method->ret;
 
   if (method->builtin == Builtin::StrRepeat) {
-    this->checker.indexProofs().requireBetween(call->args[0], 0, std::nullopt,
-                                               "the count of 'repeat'");
+    IndexProofs::ResultBetweenProven between = this->checker.indexProofs().requireBetween(
+        call->args[0], 0, std::nullopt, "the count of 'repeat'");
+    if (between.isErr() && between.error().code != IndexProofsRequireBetweenErrorCode::EXEMPT) {
+      this->checker.diags_.error(call->args[0]->loc(), between.error().message);
+    }
   } else if (method->builtin == Builtin::StrCharCodeAt) {
     call->mayBeOutOfRange =
         !this->checker.indexProofs().provesInBounds(member->object, call->args[0], false);

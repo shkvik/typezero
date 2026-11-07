@@ -59,12 +59,20 @@ const Type *SetEncodingChecker::encodedStreamType(ClassDecl *cls, llvm::SMLoc lo
     } else {
       continue;
     }
-    if (ClassDecl *inst =
-            generic ? checker_.genericClassInstantiator().instantiateClass(generic, args, loc)
-                    : nullptr) {
-      return inst->type;
+    if (!generic) {
+      return nullptr;
     }
-    return nullptr;
+    GenericClassInstantiator::ResultClassMade made =
+        checker_.genericClassInstantiator().instantiateClass(generic, args, loc);
+    if (made.isErr() &&
+        made.error().code != GenericClassInstantiatorInstantiateClassErrorCode::ALREADY_REPORTED) {
+      llvm::SMLoc at =
+          made.error().code == GenericClassInstantiatorInstantiateClassErrorCode::ENDLESS_INSTANCES
+              ? generic->loc()
+              : (loc.isValid() ? loc : generic->loc());
+      checker_.diags_.error(at, made.error().message);
+    }
+    return made.isOk() ? made.value()->type : nullptr;
   }
 
   return nullptr;

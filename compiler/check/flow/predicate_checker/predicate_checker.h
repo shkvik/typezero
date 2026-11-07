@@ -1,19 +1,22 @@
 #pragma once
 
 #include "compiler/check/checker/checker.h"
+#include "compiler/check/flow/predicate_checker/predicate_checker_errors.h"
+#include "compiler/result/result/result.h"
 
 namespace tz {
 
 class PredicateChecker {
 public:
+  using ResultExitNarrowed = Result<const Checker::Flow *, PredicateCheckerNotePredicateExitError>;
+
   explicit PredicateChecker(Checker &owner);
 
   const Type *resolveReturnType(FunctionDecl *fn, FuncSymbol *sym);
-  static std::string assertsError(const std::string &shown, bool typed, const std::string &call);
   static bool looksBoolean(const Expr *expr);
   void beginPredicate(FunctionDecl *fn);
-  void notePredicateExit(const Checker::Flow &whenTrue, const Checker::Flow &whenFalse,
-                         llvm::SMLoc loc);
+  ResultExitNarrowed notePredicateExit(const Checker::Flow &whenTrue,
+                                       const Checker::Flow &whenFalse);
   void endPredicate(FunctionDecl *fn);
   const Checker::Predicate *predicateOf(const FuncSymbol *fn) const;
   void applyPredicate(const CallExpr *call, Checker::Flow &whenTrue,
@@ -21,6 +24,11 @@ public:
   const Type *filteredType(const Expr *callback, const Type *element) const;
 
 private:
+  using ResultNotAsserting = Result<const TypeRef *, PredicateCheckerNotAssertingError>;
+  using ResultPredicateArg = Result<int, PredicateCheckerPredicateArgError>;
+
+  static ResultPredicateArg predicateArg(const FunctionDecl *fn, const TypeRef &ref);
+  ResultNotAsserting notAsserting(const FunctionDecl *fn, const TypeRef &ref);
   static const VarSymbol *argumentVariable(const Expr *expr);
   static std::optional<Linear> argumentTerm(const Expr *expr);
 

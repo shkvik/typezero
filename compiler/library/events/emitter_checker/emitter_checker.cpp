@@ -423,8 +423,17 @@ Expr *EmitterChecker::checkEmitterNew(NewExpr *expr, ClassDecl *generic, const T
   if (events->isError()) {
     return checkArgsLoosely();
   }
-  ClassDecl *inst =
+  GenericClassInstantiator::ResultClassMade made =
       checker_.genericClassInstantiator().instantiateClass(generic, {events}, expr->loc());
+  if (made.isErr() &&
+      made.error().code != GenericClassInstantiatorInstantiateClassErrorCode::ALREADY_REPORTED) {
+    llvm::SMLoc at =
+        made.error().code == GenericClassInstantiatorInstantiateClassErrorCode::ENDLESS_INSTANCES
+            ? generic->loc()
+            : expr->loc();
+    checker_.diags_.error(at, made.error().message);
+  }
+  ClassDecl *inst = made.isOk() ? made.value() : nullptr;
   if (!inst) {
     return checkArgsLoosely();
   }

@@ -51,49 +51,85 @@ std::optional<Linear> PredicateChecker::argumentTerm(const Expr *expr) {
 PredicateChecker::PredicateChecker(Checker &owner)
     : checker(owner) {}
 
+PredicateChecker::ResultNotAsserting PredicateChecker::notAsserting(const FunctionDecl *fn,
+                                                                    const TypeRef &ref) {
+  if (ref.asserts()) {
+    const Type *type =
+        ref.args.empty() ? nullptr : this->checker.typeResolver().resolveType(ref.args[0], false);
+    std::string args;
+    for (const Param &p : fn->params) {
+      args += (args.empty() ? "" : ", ") + p.name.str();
+    }
+    std::string call = fn->name.str() + "(" + args + ")";
+    if (fn->takesThis()) {
+      std::string object = fn->cls()->name.str();
+      object[0] = llvm::toLower(object[0]);
+      call = object + "." + call;
+    }
+    std::string shown = ref.name.str() + (type ? " is " + type->name().str() : "");
+    std::string message = ErrorTextAsserts::notAllowed(shown, type != nullptr, call);
+
+    return err(PredicateCheckerNotAssertingError{
+        .code = PredicateCheckerNotAssertingErrorCode::ASSERTS_PREDICATE,
+        .message = message,
+    });
+  }
+
+  return ok(&ref);
+}
+
+PredicateChecker::ResultPredicateArg PredicateChecker::predicateArg(const FunctionDecl *fn,
+                                                                    const TypeRef &ref) {
+  bool method = fn->cls() && !fn->isStatic() && !fn->isConstructor();
+  if (ref.name == "this" && !method) {
+    std::string message = ErrorTextPredicateArg::thisOutside();
+
+    return err(PredicateCheckerPredicateArgError{
+        .code = PredicateCheckerPredicateArgErrorCode::THIS_OUTSIDE_METHOD,
+        .message = message,
+    });
+  }
+  if (ref.name == "this") {
+    return ok(-1);
+  }
+
+  int param = -2;
+  for (size_t i = 0; i < fn->params.size(); ++i) {
+    if (fn->params[i].name == ref.name) {
+      param = int(i);
+    }
+  }
+  if (param == -2) {
+    std::string message = ErrorTextPredicateArg::notParam(ref.name);
+
+    return err(PredicateCheckerPredicateArgError{
+        .code = PredicateCheckerPredicateArgErrorCode::NOT_A_PARAMETER,
+        .message = message,
+    });
+  }
+
+  return ok(param);
+}
+
 const Type *PredicateChecker::resolveReturnType(FunctionDecl *fn, FuncSymbol *sym) {
   const TypeRef &ref = *fn->returnType;
   if (ref.kind() != TypeRefKind::PREDICATE_REF) {
     return this->checker.typeResolver().resolveType(ref, true);
   }
-  if (ref.asserts()) {
-    if (sym) {
-      const Type *type =
-          ref.args.empty() ? nullptr : this->checker.typeResolver().resolveType(ref.args[0], false);
-      std::string args;
-      for (const Param &p : fn->params) {
-        args += (args.empty() ? "" : ", ") + p.name.str();
-      }
-      std::string call = fn->name.str() + "(" + args + ")";
-      if (fn->takesThis()) {
-        std::string object = fn->cls()->name.str();
-        object[0] = llvm::toLower(object[0]);
-        call = object + "." + call;
-      }
-      std::string shown = ref.name.str() + (type ? " is " + type->name().str() : "");
-      this->checker.diags_.error(ref.loc, PredicateChecker::assertsError(shown, type, call));
+  if (sym) {
+    ResultNotAsserting plain = this->notAsserting(fn, ref);
+    if (plain.isErr()) {
+      this->checker.diags_.error(ref.loc, plain.error().message);
     }
+  }
+  if (ref.asserts()) {
     return Type::voidTy();
   }
-  int param = -2;
-  if (ref.name == "this") {
-    if (fn->cls() && !fn->isStatic() && !fn->isConstructor()) {
-      param = -1;
-    } else if (sym) {
-      this->checker.diags_.error(ref.loc, "'this is T' can only be the return type of a method");
-    }
-  } else {
-    for (size_t i = 0; i < fn->params.size(); ++i) {
-      if (fn->params[i].name == ref.name) {
-        param = int(i);
-      }
-    }
-    if (param == -2 && sym) {
-      this->checker.diags_.error(ref.loc,
-                                 "a type predicate names a parameter of the function, and '" +
-                                     ref.name + "' is none");
-    }
+  ResultPredicateArg named = PredicateChecker::predicateArg(fn, ref);
+  if (named.isErr() && sym) {
+    this->checker.diags_.error(ref.loc, named.error().message);
   }
+  int param = named.isOk() ? named.value() : -2;
   const Type *type =
       ref.args.empty() ? nullptr : this->checker.typeResolver().resolveType(ref.args[0], false);
   if (sym && param != -2 && type && !type->isError()) {
@@ -101,19 +137,6 @@ const Type *PredicateChecker::resolveReturnType(FunctionDecl *fn, FuncSymbol *sy
   }
 
   return Type::boolTy();
-}
-
-std::string PredicateChecker::assertsError(const std::string &shown, bool typed,
-                                           const std::string &call) {
-  std::string message = "'asserts " + shown +
-                        "' is not supported (docs/narrowing.md): there are no exceptions, so a "
-                        "function cannot stop its caller; write '" +
-                        (typed ? shown : std::string("boolean")) + "' and return whether it holds";
-  if (!call.empty()) {
-    message += ", then check it at the call: 'if (!" + call + ") return err(...)'";
-  }
-
-  return message;
 }
 
 bool PredicateChecker::looksBoolean(const Expr *expr) {
@@ -158,17 +181,17 @@ void PredicateChecker::beginPredicate(FunctionDecl *fn) {
   this->checker.predicateBuilds_.push_back(std::move(build));
 }
 
-void PredicateChecker::notePredicateExit(const Checker::Flow &whenTrue,
-                                         const Checker::Flow &whenFalse, llvm::SMLoc loc) {
+PredicateChecker::ResultExitNarrowed
+PredicateChecker::notePredicateExit(const Checker::Flow &whenTrue, const Checker::Flow &whenFalse) {
   if (this->checker.predicateBuilds_.empty() || !this->checker.predicateBuilds_.back().fn) {
-    return;
+    return ok(&whenTrue);
   }
   Checker::PredicateBuild &build = this->checker.predicateBuilds_.back();
   const FuncSymbol *sym = build.fn;
   build.whenTrue = FlowChecker::join(build.whenTrue, whenTrue);
   build.whenFalse = FlowChecker::join(build.whenFalse, whenFalse);
   if (!sym->predicate || whenTrue.unreachable) {
-    return;
+    return ok(&whenTrue);
   }
   const TypePredicate &predicate = *sym->predicate;
   const FunctionDecl *decl = build.decl;
@@ -177,20 +200,23 @@ void PredicateChecker::notePredicateExit(const Checker::Flow &whenTrue,
                              ? decl->params[size_t(predicate.param)].sym
                              : nullptr;
   if (!var) {
-    return;
+    return ok(&whenTrue);
   }
   const Type *shown = this->checker.literalTypes().typeIn(whenTrue, var);
-  if (shown->isError() || shown->isNever() ||
-      TypeRelations::isImplicitlyConvertible(shown, predicate.type)) {
-    return;
+  bool narrowed = shown->isError() || shown->isNever() ||
+                  TypeRelations::isImplicitlyConvertible(shown, predicate.type);
+  if (!narrowed) {
+    std::string function = functionLabel(sym->name);
+    std::string message =
+        ErrorTextPredicateExit::mayLie(function, var->name, predicate.type->name(), shown->name());
+
+    return err(PredicateCheckerNotePredicateExitError{
+        .code = PredicateCheckerNotePredicateExitErrorCode::NOT_NARROWED,
+        .message = message,
+    });
   }
-  this->checker.diags_.error(
-      loc, functionLabel(sym->name) + " says '" + var->name.str() + " is " +
-               predicate.type->name().str() + "', but this may give true while '" +
-               var->name.str() + "' is only known to be '" + shown->name().str() +
-               "'; show it with what narrows types: a union's tag, 'typeof', "
-               "'instanceof', '!= undefined', 'Array.isArray' or a function that tests "
-               "it (checks of fields alone do not make an object of a type)");
+
+  return ok(&whenTrue);
 }
 
 void PredicateChecker::endPredicate(FunctionDecl *fn) {

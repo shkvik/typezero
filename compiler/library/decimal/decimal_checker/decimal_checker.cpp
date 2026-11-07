@@ -500,7 +500,11 @@ Expr *DecimalChecker::checkDecimalCount(Expr *arg, const char *what, int64_t lo,
     checker_.diags_.error(arg->loc(), message);
     return arg;
   }
-  checker_.indexProofs().requireBetween(arg, lo, hi, what);
+  IndexProofs::ResultBetweenProven between =
+      checker_.indexProofs().requireBetween(arg, lo, hi, what);
+  if (between.isErr() && between.error().code != IndexProofsRequireBetweenErrorCode::EXEMPT) {
+    checker_.diags_.error(arg->loc(), between.error().message);
+  }
 
   return checker_.typeRelations().convert(arg, Type::intTy());
 }

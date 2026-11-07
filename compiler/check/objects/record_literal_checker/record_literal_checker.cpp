@@ -14,37 +14,73 @@ namespace tz {
 RecordLiteralChecker::RecordLiteralChecker(Checker &owner)
     : checker(owner) {}
 
+RecordLiteralChecker::ResultPlainProperty
+RecordLiteralChecker::plainProperty(const ObjectLitExpr::Property &prop) {
+  if (prop.defaulted()) {
+    std::string message = ErrorTextRecordProperty::defaulted(prop.name);
+
+    return err(RecordLiteralCheckerPlainPropertyError{
+        .code = RecordLiteralCheckerPlainPropertyErrorCode::DEFAULT_IN_LITERAL,
+        .message = message,
+    });
+  }
+  if (prop.method()) {
+    std::string message = ErrorTextRecordProperty::method(prop.name);
+
+    return err(RecordLiteralCheckerPlainPropertyError{
+        .code = RecordLiteralCheckerPlainPropertyErrorCode::METHOD_IN_RECORD,
+        .message = message,
+    });
+  }
+
+  return ok(&prop);
+}
+
+void RecordLiteralChecker::reportSpread(const ObjectLitExpr::Property &prop,
+                                        const ResultSpreadIntoMap &spread) {
+  llvm::SMLoc at = prop.value->loc();
+  switch (spread.error().code) {
+    case RecordLiteralCheckerCheckRecordSpreadErrorCode::KEYED_REST:
+      at = prop.loc;
+      break;
+    case RecordLiteralCheckerCheckRecordSpreadErrorCode::MAY_BE_UNDEFINED:
+    case RecordLiteralCheckerCheckRecordSpreadErrorCode::OTHER_VALUES:
+    case RecordLiteralCheckerCheckRecordSpreadErrorCode::FIELD_TYPE_DIFFERS:
+    case RecordLiteralCheckerCheckRecordSpreadErrorCode::HAS_METHODS:
+    case RecordLiteralCheckerCheckRecordSpreadErrorCode::NOT_SPREADABLE:
+      break;
+  }
+  this->checker.diags_.error(at, spread.error().message);
+}
+
 Expr *RecordLiteralChecker::checkRecordLit(ObjectLitExpr *lit, const Type *record) {
   const Type *value = record->valueType();
-  bool ok = true;
+  bool typed = true;
   for (ObjectLitExpr::Property &prop : lit->props) {
+    ResultPlainProperty plain = RecordLiteralChecker::plainProperty(prop);
+    if (plain.isErr()) {
+      this->checker.diags_.error(prop.loc, plain.error().message);
+      typed = false;
+    }
     if (prop.defaulted()) {
-      this->checker.diags_.error(prop.loc, "'" + prop.name +
-                                               " = ...' gives a default value, which only a "
-                                               "destructuring pattern has; in an object literal "
-                                               "write '" +
-                                               prop.name + ": ...'");
       prop.value = cast<AssignExpr>(prop.value)->value;
       prop.form = ValueProperty{};
-      ok = false;
     }
     if (prop.method()) {
-      this->checker.diags_.error(prop.loc,
-                                 "a Record holds values, not methods; store a function, '" +
-                                     prop.name + ": (...) => ...'");
       prop.value = this->checker.exprChecker().checkExpr(prop.value);
-      ok = false;
       continue;
     }
     if (prop.spread()) {
       prop.value = this->checker.exprChecker().checkExpr(prop.value, record);
       const Type *type = prop.value->type;
       if (type->isError()) {
-        ok = false;
+        typed = false;
         continue;
       }
-      if (!this->checkRecordSpread(prop, value)) {
-        ok = false;
+      ResultSpreadIntoMap spread = this->checkRecordSpread(prop, value);
+      if (spread.isErr()) {
+        this->reportSpread(prop, spread);
+        typed = false;
       }
       continue;
     }
@@ -54,96 +90,135 @@ Expr *RecordLiteralChecker::checkRecordLit(ObjectLitExpr *lit, const Type *recor
     if (auto *fe = dyn_cast<FunctionExpr>(prop.value); fe && fe->fn->name.empty()) {
       fe->fn->name = prop.name;
     }
+    std::string what = prop.key() ? ErrorTextRecordProperty::valueLabel()
+                                  : ErrorTextRecordProperty::keyLabel(prop.name);
     prop.value = this->checker.typeRelations().coerce(
-        this->checker.exprChecker().checkExpr(prop.value, value), value,
-        prop.key() ? "the value" : ("key '" + prop.name + "'").str());
+        this->checker.exprChecker().checkExpr(prop.value, value), value, what);
   }
-  lit->type = ok ? record : Type::error();
+  lit->type = typed ? record : Type::error();
 
   return lit;
 }
 
-bool RecordLiteralChecker::checkRecordSpread(ObjectLitExpr::Property &prop, const Type *value) {
+RecordLiteralChecker::ResultSpreadIntoMap
+RecordLiteralChecker::checkRecordSpread(ObjectLitExpr::Property &prop, const Type *value) {
   const Type *type = prop.value->type;
   if (type->isOptional() && (type->inner()->isRecord() || type->inner()->isObject())) {
-    this->checker.diags_.error(prop.value->loc(),
-                               "the object may be undefined; check it before spreading it");
-    return false;
+    std::string message = ErrorTextRecordSpread::undefined();
+
+    return err(RecordLiteralCheckerCheckRecordSpreadError{
+        .code = RecordLiteralCheckerCheckRecordSpreadErrorCode::MAY_BE_UNDEFINED,
+        .message = message,
+    });
   }
   if (!prop.omitKeys().empty()) {
-    this->checker.diags_.error(
-        prop.loc, "the rest of a pattern that reads a key in brackets is not supported "
-                  "for a Record; name the keys it leaves out");
-    return false;
+    std::string message = ErrorTextRecordSpread::keyedRest();
+
+    return err(RecordLiteralCheckerCheckRecordSpreadError{
+        .code = RecordLiteralCheckerCheckRecordSpreadErrorCode::KEYED_REST,
+        .message = message,
+    });
+  }
+  if (type->isRecord() && !TypeRelations::isImplicitlyConvertible(type->valueType(), value)) {
+    std::string message = ErrorTextRecordSpread::values(type->name(), value->name());
+
+    return err(RecordLiteralCheckerCheckRecordSpreadError{
+        .code = RecordLiteralCheckerCheckRecordSpreadErrorCode::OTHER_VALUES,
+        .message = message,
+    });
   }
   if (type->isRecord()) {
-    if (!TypeRelations::isImplicitlyConvertible(type->valueType(), value)) {
-      this->checker.diags_.error(prop.value->loc(), "the values of '" + type->name() +
-                                                        "' are not '" + value->name() + "'");
-      return false;
-    }
-    return true;
+    return ok(type);
   }
-  if (type->isObject() && !type->isTuple() && !type->isRegExp() && !type->isMatch() &&
-      !type->isAnyObject()) {
-    if (ClassDecl *cls = ClassDeclarer::classOf(type)) {
-      this->checker.classDeclarer().completeClass(cls);
-    }
-    for (const Field &f : type->fields()) {
-      if (llvm::is_contained(prop.omit(), f.name)) {
-        continue;
-      }
-      const Type *t = f.type->isOptional() && !value->isOptional() ? f.type->inner() : f.type;
-      if (!TypeRelations::isImplicitlyConvertible(t, value)) {
-        this->checker.diags_.error(prop.value->loc(), "field '" + f.name + "' of '" + type->name() +
-                                                          "' is '" + f.type->name() +
-                                                          "', and the values here are '" +
-                                                          value->name() + "'");
-        return false;
-      }
-    }
-    bool methods = false;
-    for (const ClassDecl *c = ClassDeclarer::classOf(type); c; c = c->parent) {
-      methods |=
-          c->literal() || llvm::any_of(c->fields, [](const ClassField &f) { return f.method(); });
-    }
-    if (methods) {
-      this->checker.diags_.error(prop.value->loc(),
-                                 "an object with methods cannot be spread into a Record; copy "
-                                 "its fields by name");
-      return false;
-    }
-    return true;
-  }
-  std::string message =
-      "only objects and Records can be spread into a Record, found '" + type->name().str() + "'";
-  if (type->isMap() || type->isSet()) {
-    message += "; in JavaScript a Map or a Set has no own properties, so this would add nothing";
-  }
-  this->checker.diags_.error(prop.value->loc(), message);
+  bool object = type->isObject() && !type->isTuple() && !type->isRegExp() && !type->isMatch() &&
+                !type->isAnyObject();
+  if (!object) {
+    bool collection = type->isMap() || type->isSet();
+    std::string message = ErrorTextRecordSpread::notObject(type->name(), collection);
 
-  return false;
+    return err(RecordLiteralCheckerCheckRecordSpreadError{
+        .code = RecordLiteralCheckerCheckRecordSpreadErrorCode::NOT_SPREADABLE,
+        .message = message,
+    });
+  }
+  if (ClassDecl *cls = ClassDeclarer::classOf(type)) {
+    this->checker.classDeclarer().completeClass(cls);
+  }
+  for (const Field &f : type->fields()) {
+    if (llvm::is_contained(prop.omit(), f.name)) {
+      continue;
+    }
+    const Type *t = f.type->isOptional() && !value->isOptional() ? f.type->inner() : f.type;
+    if (!TypeRelations::isImplicitlyConvertible(t, value)) {
+      std::string message =
+          ErrorTextRecordSpread::field(f.name, type->name(), f.type->name(), value->name());
+
+      return err(RecordLiteralCheckerCheckRecordSpreadError{
+          .code = RecordLiteralCheckerCheckRecordSpreadErrorCode::FIELD_TYPE_DIFFERS,
+          .message = message,
+      });
+    }
+  }
+  bool methods = false;
+  auto isMethod = [](const ClassField &f) { return f.method(); };
+  for (const ClassDecl *c = ClassDeclarer::classOf(type); c; c = c->parent) {
+    methods |= c->literal() || llvm::any_of(c->fields, isMethod);
+  }
+  if (methods) {
+    std::string message = ErrorTextRecordSpread::methods();
+
+    return err(RecordLiteralCheckerCheckRecordSpreadError{
+        .code = RecordLiteralCheckerCheckRecordSpreadErrorCode::HAS_METHODS,
+        .message = message,
+    });
+  }
+
+  return ok(type);
+}
+
+RecordLiteralChecker::ResultValueTypeJoin RecordLiteralChecker::valuesJoin(const Type *value,
+                                                                           const Type *type) {
+  const Type *next = value ? TypeRelations::unify(value, type) : type;
+  if (!next || next->isError()) {
+    std::string message = ErrorTextRecordValues::differ(value->name(), type->name());
+
+    return err(RecordLiteralCheckerValuesJoinError{
+        .code = RecordLiteralCheckerValuesJoinErrorCode::VALUE_TYPES_DIFFER,
+        .message = message,
+    });
+  }
+
+  return ok(next);
+}
+
+RecordLiteralChecker::ResultValueTypeKnow RecordLiteralChecker::valueKnown(const Type *value) {
+  if (value->isUndefined() || value->isVoid()) {
+    std::string message = ErrorTextRecordValue::undefined();
+
+    return err(RecordLiteralCheckerValueKnownError{
+        .code = RecordLiteralCheckerValueKnownErrorCode::ONLY_UNDEFINED,
+        .message = message,
+    });
+  }
+
+  return ok(value);
 }
 
 Expr *RecordLiteralChecker::recordFromSpreads(ObjectLitExpr *lit) {
   const Type *value = nullptr;
-  bool ok = true;
+  bool typed = true;
   auto meet = [&](const Type *t, llvm::SMLoc loc) {
     if (!t || t->isError()) {
-      ok = false;
+      typed = false;
       return;
     }
-    const Type *next = value ? TypeRelations::unify(value, t) : t;
-    if (!next || next->isError()) {
-      this->checker.diags_.error(
-          loc, "spreading a Record makes a Record, whose values have one type; found '" +
-                   value->name() + "' and '" + t->name() +
-                   "'; declare its type, e.g. 'const r: Record<string, " + value->name() +
-                   "> = { ... }'");
-      ok = false;
+    ResultValueTypeJoin joined = RecordLiteralChecker::valuesJoin(value, t);
+    if (joined.isErr()) {
+      this->checker.diags_.error(loc, joined.error().message);
+      typed = false;
       return;
     }
-    value = next;
+    value = joined.value();
   };
   for (const ObjectLitExpr::Property &prop : lit->props) {
     const Type *type = prop.value->type;
@@ -161,14 +236,13 @@ Expr *RecordLiteralChecker::recordFromSpreads(ObjectLitExpr *lit) {
       }
     }
   }
-  if (!ok || !value) {
+  if (!typed || !value) {
     lit->type = Type::error();
     return lit;
   }
-  if (value->isUndefined() || value->isVoid()) {
-    this->checker.diags_.error(lit->loc(),
-                               "cannot infer the type of the values from 'undefined'; declare it, "
-                               "e.g. 'const r: Record<string, int | undefined> = { ... }'");
+  ResultValueTypeKnow known = RecordLiteralChecker::valueKnown(value);
+  if (known.isErr()) {
+    this->checker.diags_.error(lit->loc(), known.error().message);
     lit->type = Type::error();
     return lit;
   }
@@ -178,11 +252,13 @@ Expr *RecordLiteralChecker::recordFromSpreads(ObjectLitExpr *lit) {
       prop.value = this->checker.typeRelations().convert(prop.value, value);
       continue;
     }
-    if (!this->checkRecordSpread(prop, value)) {
-      ok = false;
+    ResultSpreadIntoMap spread = this->checkRecordSpread(prop, value);
+    if (spread.isErr()) {
+      this->reportSpread(prop, spread);
+      typed = false;
     }
   }
-  lit->type = ok ? record : Type::error();
+  lit->type = typed ? record : Type::error();
 
   return lit;
 }

@@ -10,7 +10,7 @@ using llvm::isa;
 
 namespace tz {
 
-static bool isLoop(const Stmt *stmt) {
+bool JumpChecker::isLoop(const Stmt *stmt) {
   return isa<WhileStmt>(stmt) || isa<DoWhileStmt>(stmt) || isa<ForStmt>(stmt) ||
          isa<ForOfStmt>(stmt);
 }
@@ -25,7 +25,7 @@ void JumpChecker::pushTarget(Checker::JumpTarget::Kind kind) {
   this->checker.targets_.push_back(std::move(target));
 }
 
-void JumpChecker::checkJump(Stmt *stmt) {
+JumpChecker::ResultJumpTargeted JumpChecker::checkJump(Stmt *stmt) {
   bool isBreak = isa<BreakStmt>(stmt);
   llvm::StringRef label = isBreak ? cast<BreakStmt>(stmt)->label : cast<ContinueStmt>(stmt)->label;
   const char *keyword = isBreak ? "break" : "continue";
@@ -39,50 +39,98 @@ void JumpChecker::checkJump(Stmt *stmt) {
       break;
     }
   }
+  if (!target && !label.empty()) {
+    std::string message = ErrorTextJump::noLabel(label);
+
+    return err(JumpCheckerCheckJumpError{
+        .code = JumpCheckerCheckJumpErrorCode::LABEL_NOT_FOUND,
+        .message = message,
+    });
+  }
+  if (!target && isBreak) {
+    std::string message = ErrorTextJump::breakOut();
+
+    return err(JumpCheckerCheckJumpError{
+        .code = JumpCheckerCheckJumpErrorCode::BREAK_OUTSIDE,
+        .message = message,
+    });
+  }
   if (!target) {
-    if (!label.empty()) {
-      this->checker.diags_.error(stmt->loc(), "cannot find label '" + label + "'");
-    } else if (isBreak) {
-      this->checker.diags_.error(stmt->loc(),
-                                 "'break' can only be used inside a loop or a 'switch'");
-    } else {
-      this->checker.diags_.error(stmt->loc(), "'continue' can only be used inside a loop");
-    }
-    return;
+    std::string message = ErrorTextJump::continueOut();
+
+    return err(JumpCheckerCheckJumpError{
+        .code = JumpCheckerCheckJumpErrorCode::CONTINUE_OUTSIDE,
+        .message = message,
+    });
   }
   if (!isBreak && target->kind != Checker::JumpTarget::Kind::Loop) {
-    this->checker.diags_.error(stmt->loc(), llvm::Twine("'") + keyword + " " + label +
-                                                "' needs a loop, and '" + label +
-                                                "' does not label one");
-    return;
+    std::string message = ErrorTextJump::notLoop(keyword, label);
+
+    return err(JumpCheckerCheckJumpError{
+        .code = JumpCheckerCheckJumpErrorCode::CONTINUE_NOT_LOOP,
+        .message = message,
+    });
   }
+
   if (isBreak && target->kind != Checker::JumpTarget::Kind::Loop) {
     target->breaks = FlowChecker::join(target->breaks, this->checker.flow_);
   }
+
+  return ok(stmt);
+}
+
+JumpChecker::ResultLabelIsFresh JumpChecker::labelFresh(llvm::ArrayRef<llvm::StringRef> labels,
+                                                        const LabeledStmt *labeled) const {
+  auto hasLabel = [&](const Checker::JumpTarget &t) {
+    return llvm::is_contained(t.labels, labeled->label);
+  };
+  bool duplicate =
+      llvm::is_contained(labels, labeled->label) || llvm::any_of(this->checker.targets_, hasLabel);
+  if (duplicate) {
+    std::string message = ErrorTextLabel::duplicate(labeled->label);
+
+    return err(JumpCheckerLabelFreshError{
+        .code = JumpCheckerLabelFreshErrorCode::DUPLICATE_LABEL,
+        .message = message,
+    });
+  }
+
+  return ok(labeled);
+}
+
+JumpChecker::ResultBodyCanLabel JumpChecker::labelBody(const Stmt *body) {
+  if (isa<VarDeclStmt>(body) || isa<FunctionDecl>(body) || isa<TypeAliasDecl>(body) ||
+      isa<EnumDecl>(body)) {
+    std::string message = ErrorTextLabelBody::declared();
+
+    return err(JumpCheckerLabelBodyError{
+        .code = JumpCheckerLabelBodyErrorCode::DECLARATION_LABELED,
+        .message = message,
+    });
+  }
+
+  return ok(body);
 }
 
 void JumpChecker::checkLabeled(LabeledStmt *stmt) {
   llvm::SmallVector<llvm::StringRef, 1> labels;
   Stmt *body = stmt;
   while (auto *labeled = dyn_cast<LabeledStmt>(body)) {
-    bool duplicate = llvm::is_contained(labels, labeled->label) ||
-                     llvm::any_of(this->checker.targets_, [&](const Checker::JumpTarget &t) {
-                       return llvm::is_contained(t.labels, labeled->label);
-                     });
-    if (duplicate) {
-      this->checker.diags_.error(labeled->loc(), "duplicate label '" + labeled->label + "'");
+    ResultLabelIsFresh fresh = this->labelFresh(labels, labeled);
+    if (fresh.isErr()) {
+      this->checker.diags_.error(labeled->loc(), fresh.error().message);
     }
     labels.push_back(labeled->label);
     body = labeled->body;
   }
-  if (isLoop(body) || isa<SwitchStmt>(body)) {
+  if (JumpChecker::isLoop(body) || isa<SwitchStmt>(body)) {
     this->checker.pendingLabels_ = labels;
     this->checker.stmtChecker().checkStmt(body);
     return;
   }
-  if (isa<VarDeclStmt>(body) || isa<FunctionDecl>(body) || isa<TypeAliasDecl>(body) ||
-      isa<EnumDecl>(body)) {
-    this->checker.diags_.error(body->loc(), "a declaration cannot have a label");
+  ResultBodyCanLabel labelable = JumpChecker::labelBody(body);
+  if (labelable.isErr()) {
+    this->checker.diags_.error(body->loc(), labelable.error().message);
     return;
   }
   this->checker.pendingLabels_ = labels;

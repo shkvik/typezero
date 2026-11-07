@@ -67,7 +67,16 @@ void ClassDeclarer::declareClass(ClassDecl *cls) {
   cls->id = ++this->checker.classCount_;
   cls->type = Type::classType(cls->name, cls);
   this->checker.classes_.push_back(cls);
-  this->checker.scopes().declare(cls->name, cls->loc(), {ClassEntry{.cls = cls}});
+  Scopes::ResultEntryDeclared added =
+      this->checker.scopes().declare(cls->name, cls->loc(), {ClassEntry{.cls = cls}});
+  if (added.isErr()) {
+    this->checker.diags_.error(cls->loc(), added.error().message);
+  }
+  if (added.isErr() && added.error().code != ScopesDeclareErrorCode::UNDEFINED_AS_NAME) {
+    ScopeEntry previousEntry = this->checker.scopes().lookup(cls->name);
+    std::string declaredHere = ErrorTextDeclare::previous();
+    this->checker.diags_.note(previousEntry.loc(), declaredHere);
+  }
 }
 
 const ClassField *ClassDeclarer::earlierField(const ClassDecl *cls, size_t index) {

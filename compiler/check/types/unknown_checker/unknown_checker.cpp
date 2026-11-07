@@ -1,6 +1,7 @@
 #include "compiler/check/types/unknown_checker/unknown_checker.h"
 #include "compiler/check/classes/class_value_checker/class_value_checker.h"
 #include "compiler/check/classes/static_checker/static_checker.h"
+#include "compiler/check/expr/argument_checker/argument_checker.h"
 #include "compiler/check/expr/expr_checker/expr_checker.h"
 #include "llvm/ADT/STLExtras.h"
 
@@ -89,98 +90,119 @@ std::string UnknownChecker::unknownHint(const Expr *expr, const Type *to) {
   bool object = expr->type && expr->type->isAnyObject();
   std::string check;
   if (target && target->isClass() && !target->classDecl()->literal()) {
-    check = x + " instanceof " + target->classDecl()->name.str();
+    check = ErrorTextUnknownHint::instanceOf(x, target->classDecl()->name);
   } else if (object) {
-    check = x + " instanceof C";
+    check = ErrorTextUnknownHint::instanceOf(x, "C");
   } else if (target && target->isString()) {
-    check = "typeof " + x + " == \"string\"";
+    check = ErrorTextUnknownHint::typeOf(x, "string");
   } else if (target && target->isNumeric()) {
-    check = "typeof " + x + " == \"number\"";
+    check = ErrorTextUnknownHint::typeOf(x, "number");
   } else if (target && target->isBool()) {
-    check = "typeof " + x + " == \"boolean\"";
+    check = ErrorTextUnknownHint::typeOf(x, "boolean");
   } else if (target && target->isArray()) {
-    check = "Array.isArray(" + x + ")";
+    check = ErrorTextUnknownHint::isArray(x);
   } else if (target && target->isAnyObject()) {
-    check = "typeof " + x + " == \"object\"";
+    check = ErrorTextUnknownHint::typeOf(x, "object");
   } else {
-    check = "typeof " + x + " == \"string\"";
+    check = ErrorTextUnknownHint::typeOf(x, "string");
   }
   if (object) {
-    return "; an object may be of any class: check which first, e.g. 'if (" + check + ") ...'";
+    return ErrorTextUnknownHint::anyClass(check);
   }
 
-  return "; an unknown value may hold anything: check what it holds first, e.g. 'if (" + check +
-         ") ...'";
+  return ErrorTextUnknownHint::anything(check);
 }
 
-void UnknownChecker::reportUnknownUse(const Expr *object, const std::string &what) {
-  const Type *type = object->type;
+UnknownChecker::ResultValueNarrowed UnknownChecker::unknownUse(const Expr *object,
+                                                               llvm::StringRef what) {
   std::string x = UnknownChecker::hintName(object);
-  if (type->isAnyObject()) {
-    this->checker.diags_.error(
-        object->loc(), "an object " + (what.empty() ? "cannot be indexed" : "has no " + what) +
-                           " until 'instanceof' shows its class, e.g. 'if (" + x +
-                           " instanceof C) ...'");
-    return;
+  if (object->type->isAnyObject()) {
+    std::string message = ErrorTextUnknownUse::object(x, what);
+
+    return err(UnknownCheckerUnknownUseError{
+        .code = UnknownCheckerUnknownUseErrorCode::OBJECT_NOT_NARROWED,
+        .message = message,
+    });
   }
-  std::string example = what.empty() ? "Array.isArray(" + x + ")" : x + " instanceof C";
-  this->checker.diags_.error(
-      object->loc(), "an unknown value " + (what.empty() ? "cannot be indexed" : "has no " + what) +
-                         " until a check shows what it holds, e.g. 'if (" + example +
-                         ") ...' or 'typeof " + x + " == \"string\"'");
+
+  std::string message = ErrorTextUnknownUse::unknown(x, what);
+
+  return err(UnknownCheckerUnknownUseError{
+      .code = UnknownCheckerUnknownUseErrorCode::VALUE_NOT_NARROWED,
+      .message = message,
+  });
 }
 
-Expr *UnknownChecker::checkUnknownMember(MemberExpr *member) {
+UnknownChecker::ResultMemberChecked UnknownChecker::checkUnknownMember(MemberExpr *member) {
   member->type = Type::error();
   if (member->object->type->isClassRef()) {
-    return this->checker.classValueChecker().checkClassRefMember(member);
+    Expr *classMember = this->checker.classValueChecker().checkClassRefMember(member);
+    return ok(classMember);
   }
   if (member->name == "constructor") {
-    this->checker.diags_.error(member->loc(),
-                               "'constructor' is not supported: an object has no prototype in tz; "
-                               "a decorator gets the class itself, use it as it is");
-    return member;
-  }
-  this->reportUnknownUse(member->object, "property '" + member->name.str() + "'");
+    std::string message = ErrorTextUnknownMember::noCtor();
 
-  return member;
+    return err(UnknownCheckerCheckUnknownMemberError{
+        .code = UnknownCheckerCheckUnknownMemberErrorCode::NO_CONSTRUCTOR,
+        .message = message,
+    });
+  }
+
+  std::string what = ErrorTextUnknownUse::property(member->name);
+  ResultValueNarrowed narrowed = UnknownChecker::unknownUse(member->object, what);
+
+  return err(UnknownCheckerCheckUnknownMemberError{
+      .code = UnknownCheckerCheckUnknownMemberErrorCode::NOT_NARROWED,
+      .message = narrowed.error().message,
+  });
 }
 
-Expr *UnknownChecker::checkUnknownMethod(CallExpr *call, MemberExpr *member) {
+UnknownChecker::ResultMethodChecked UnknownChecker::checkUnknownMethod(CallExpr *call,
+                                                                       MemberExpr *member) {
   const Type *receiver = member->object->type;
   if (!receiver->isUnknown() && !receiver->isAnyObject() && !receiver->isClassRef()) {
-    return nullptr;
+    return err(UnknownCheckerCheckUnknownMethodError{
+        .code = UnknownCheckerCheckUnknownMethodErrorCode::NOT_UNKNOWN,
+        .message = "",
+    });
   }
   call->type = Type::error();
   if (ClassDecl *cls = const_cast<ClassDecl *>(receiver->classRef()); cls && cls->type) {
     Expr *object = member->object;
     Expr *result = this->checker.staticChecker().checkClassStaticCall(call, member, cls);
     if (isa<NameExpr>(object)) {
-      return result;
+      return ok(result);
     }
     auto *seq =
         this->checker.ctx_.make<SequenceExpr>(call->loc(), std::vector<Expr *>{object, result});
     seq->type = result->type;
-    return seq;
+    return ok(seq);
   }
+  this->checker.argumentChecker().checkArgsLoosely(call);
   if (receiver->isConstructor()) {
-    this->checker.diags_.error(member->loc(),
-                               "'" + receiver->name() +
-                                   "' is some class known only when the "
-                                   "program runs, whose static members are not known; call its "
-                                   "methods through reflection (docs/decorators.md, section 6)");
-  } else if (receiver->isClassRef()) {
-    this->checker.diags_.error(member->loc(), "'" + receiver->classRef()->name +
-                                                  "' as a value has no methods "
-                                                  "in tz");
-  } else {
-    this->reportUnknownUse(member->object, "method '" + member->name.str() + "'");
+    std::string message = ErrorTextUnknownMethod::runtime(receiver->name());
+
+    return err(UnknownCheckerCheckUnknownMethodError{
+        .code = UnknownCheckerCheckUnknownMethodErrorCode::RUNTIME_CLASS,
+        .message = message,
+    });
   }
-  for (Expr *&arg : call->args) {
-    arg = this->checker.exprChecker().checkExpr(arg);
+  if (receiver->isClassRef()) {
+    std::string message = ErrorTextUnknownMethod::classValue(receiver->classRef()->name);
+
+    return err(UnknownCheckerCheckUnknownMethodError{
+        .code = UnknownCheckerCheckUnknownMethodErrorCode::CLASS_VALUE,
+        .message = message,
+    });
   }
 
-  return call;
+  std::string what = ErrorTextUnknownUse::method(member->name);
+  ResultValueNarrowed narrowed = UnknownChecker::unknownUse(member->object, what);
+
+  return err(UnknownCheckerCheckUnknownMethodError{
+      .code = UnknownCheckerCheckUnknownMethodErrorCode::NOT_NARROWED,
+      .message = narrowed.error().message,
+  });
 }
 
 void UnknownChecker::addUnknownFacts(const Expr *cond, Checker::Flow &whenTrue,

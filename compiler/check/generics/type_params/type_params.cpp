@@ -51,20 +51,90 @@ bool TypeParams::mentionsInObject(const Type *type, llvm::ArrayRef<const Type *>
 TypeParams::TypeParams(Checker &owner)
     : checker(owner) {}
 
+TypeParams::ResultParamNameIsNew TypeParams::uniqueName(const TypeParamDecl &earlier,
+                                                        const TypeParamDecl &decl) {
+  if (earlier.name == decl.name) {
+    std::string message = ErrorTextUniqueParam::duplicate(decl.name);
+
+    return err(TypeParamsUniqueNameError{
+        .code = TypeParamsUniqueNameErrorCode::DUPLICATE_TYPE_PARAMETER,
+        .message = message,
+    });
+  }
+
+  return ok(&decl);
+}
+
+TypeParams::ResultNotBuiltInName TypeParams::ownName(const TypeParamDecl &decl) {
+  if (Type::fromName(decl.name)) {
+    std::string message = ErrorTextOwnName::builtin(decl.name);
+
+    return err(TypeParamsOwnNameError{
+        .code = TypeParamsOwnNameErrorCode::BUILTIN_NAME,
+        .message = message,
+    });
+  }
+
+  return ok(&decl);
+}
+
+TypeParams::ResultConstraintKept TypeParams::constraintAlone(const Type *type,
+                                                             const TypeParamDecl &decl) {
+  if (type->isUndefined()) {
+    std::string message = ErrorTextConstraint::undefined(decl.name);
+
+    return err(TypeParamsConstraintAloneError{
+        .code = TypeParamsConstraintAloneErrorCode::UNDEFINED_CONSTRAINT,
+        .message = message,
+    });
+  }
+
+  return ok(type);
+}
+
+TypeParams::ResultDefaultSatisfy TypeParams::defaultFits(const Type *fallback, const Type *param,
+                                                         const TypeParamDecl &decl) {
+  if (!fallback->isError() && !this->satisfies(fallback, param)) {
+    std::string constraint = constraintSpelling(param, &decl);
+    std::string message =
+        ErrorTextDefaultFits::unsatisfied(fallback->name(), decl.name, constraint);
+
+    return err(TypeParamsDefaultFitsError{
+        .code = TypeParamsDefaultFitsErrorCode::DEFAULT_UNSATISFIED,
+        .message = message,
+    });
+  }
+
+  return ok(fallback);
+}
+
+TypeParams::ResultDefaultPresent TypeParams::defaultGiven(const TypeParamDecl &decl,
+                                                          bool afterDefault) {
+  if (!decl.defaultType && afterDefault) {
+    std::string message = ErrorTextDefaultGiven::missing(decl.name);
+
+    return err(TypeParamsDefaultGivenError{
+        .code = TypeParamsDefaultGivenErrorCode::MISSING_DEFAULT,
+        .message = message,
+    });
+  }
+
+  return ok(&decl);
+}
+
 std::vector<const Type *> TypeParams::declareTypeParams(llvm::ArrayRef<TypeParamDecl> decls,
                                                         std::vector<const Type *> *defaults) {
   std::vector<Type *> created;
   for (size_t i = 0; i < decls.size(); ++i) {
     for (size_t j = 0; j < i; ++j) {
-      if (decls[j].name == decls[i].name) {
-        this->checker.diags_.error(decls[i].loc,
-                                   "duplicate type parameter '" + decls[i].name + "'");
+      ResultParamNameIsNew unique = TypeParams::uniqueName(decls[j], decls[i]);
+      if (unique.isErr()) {
+        this->checker.diags_.error(decls[i].loc, unique.error().message);
       }
     }
-    if (Type::fromName(decls[i].name)) {
-      this->checker.diags_.error(decls[i].loc, "'" + decls[i].name +
-                                                   "' is a built-in type and cannot name a type "
-                                                   "parameter");
+    ResultNotBuiltInName own = TypeParams::ownName(decls[i]);
+    if (own.isErr()) {
+      this->checker.diags_.error(decls[i].loc, own.error().message);
     }
     created.push_back(Type::param(decls[i].name));
   }
@@ -78,7 +148,7 @@ std::vector<const Type *> TypeParams::declareTypeParams(llvm::ArrayRef<TypeParam
       const TypeRef &ref = *decl.constraint;
       const Type *constraint = nullptr;
       std::vector<const Type *> alternatives;
-      bool ok = true;
+      bool resolved = true;
       if (ref.kind() == TypeRefKind::ARRAY_REF && ref.args[0].kind() == TypeRefKind::NAME_REF &&
           ref.args[0].name == "unknown") {
         created[i]->setList();
@@ -86,32 +156,32 @@ std::vector<const Type *> TypeParams::declareTypeParams(llvm::ArrayRef<TypeParam
       } else if (ref.kind() == TypeRefKind::UNION_REF) {
         for (const TypeRef &member : ref.args) {
           const Type *type = this->checker.typeResolver().resolveType(member, false);
-          ok &= !type->isError();
+          resolved &= !type->isError();
           if (!llvm::is_contained(alternatives, type)) {
             alternatives.push_back(type);
           }
         }
         auto isUndefined = [](const Type *t) { return t->isUndefined(); };
-        if (ok && alternatives.size() == 2 && llvm::any_of(alternatives, isUndefined)) {
+        if (resolved && alternatives.size() == 2 && llvm::any_of(alternatives, isUndefined)) {
           constraint = Type::optional(alternatives[alternatives[0]->isUndefined() ? 1 : 0]);
         }
       } else {
         constraint = this->checker.typeResolver().resolveType(ref, false);
-        ok &= !constraint->isError();
+        resolved &= !constraint->isError();
       }
       llvm::ArrayRef<const Type *> all = constraint ? llvm::ArrayRef<const Type *>(constraint)
                                                     : llvm::ArrayRef<const Type *>(alternatives);
       for (const Type *type : all) {
-        if (!ok) {
+        if (!resolved) {
           break;
         }
-        if (type->isUndefined()) {
-          this->checker.diags_.error(ref.loc, "the constraint of '" + decl.name +
-                                                  "' cannot be 'undefined' alone");
-          ok = false;
+        ResultConstraintKept kept = TypeParams::constraintAlone(type, decl);
+        if (kept.isErr()) {
+          this->checker.diags_.error(ref.loc, kept.error().message);
+          resolved = false;
         }
       }
-      if (ok) {
+      if (resolved) {
         created[i]->setConstraint(constraint,
                                   constraint ? std::vector<const Type *>() : alternatives);
       }
@@ -119,17 +189,16 @@ std::vector<const Type *> TypeParams::declareTypeParams(llvm::ArrayRef<TypeParam
     const Type *fallback = nullptr;
     if (decl.defaultType) {
       fallback = this->checker.typeResolver().resolveType(*decl.defaultType, false);
-      if (!fallback->isError() && !this->satisfies(fallback, params[i])) {
-        this->checker.diags_.error(decl.defaultType->loc,
-                                   "the default '" + fallback->name() + "' of '" + decl.name +
-                                       "' does not satisfy its constraint '" +
-                                       constraintSpelling(params[i], &decl) + "'");
+      ResultDefaultSatisfy satisfied = this->defaultFits(fallback, params[i], decl);
+      if (satisfied.isErr()) {
+        this->checker.diags_.error(decl.defaultType->loc, satisfied.error().message);
         fallback = Type::error();
       }
       afterDefault = true;
-    } else if (afterDefault) {
-      this->checker.diags_.error(decl.loc, "type parameter '" + decl.name +
-                                               "' needs a default: it follows one that has one");
+    }
+    ResultDefaultPresent present = TypeParams::defaultGiven(decl, afterDefault);
+    if (present.isErr()) {
+      this->checker.diags_.error(decl.loc, present.error().message);
     }
     if (defaults) {
       defaults->push_back(fallback);
@@ -224,9 +293,20 @@ const Type *TypeParams::substituteAt(const Type *type, llvm::ArrayRef<const Type
         newArgs.push_back(held(a));
       }
       auto *generic = const_cast<ClassDecl *>(cls->generic() ? cls->generic() : cls);
-      ClassDecl *inst = this->checker.genericClassInstantiator().instantiateClass(
-          generic, std::move(newArgs), this->checker.instanceLoc_);
-      return inst ? inst->type : Type::error();
+      GenericClassInstantiator::ResultClassMade made =
+          this->checker.genericClassInstantiator().instantiateClass(generic, std::move(newArgs),
+                                                                    this->checker.instanceLoc_);
+      if (made.isErr() && made.error().code !=
+                              GenericClassInstantiatorInstantiateClassErrorCode::ALREADY_REPORTED) {
+        llvm::SMLoc at =
+            made.error().code ==
+                    GenericClassInstantiatorInstantiateClassErrorCode::ENDLESS_INSTANCES
+                ? generic->loc()
+                : (this->checker.instanceLoc_.isValid() ? this->checker.instanceLoc_
+                                                        : generic->loc());
+        this->checker.diags_.error(at, made.error().message);
+      }
+      return made.isOk() ? made.value()->type : Type::error();
     }
     if (auto origin = this->checker.aliasOrigins_.find(type);
         origin != this->checker.aliasOrigins_.end()) {

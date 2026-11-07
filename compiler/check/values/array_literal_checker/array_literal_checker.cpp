@@ -22,6 +22,133 @@ namespace tz {
 ArrayLiteralChecker::ArrayLiteralChecker(Checker &owner)
     : checker(owner) {}
 
+ArrayLiteralChecker::ResultElementGiven
+ArrayLiteralChecker::elementGiven(const ArrayLitExpr::Element &e) {
+  if (e.hole) {
+    std::string message = ErrorTextArrayHole::hole();
+
+    return err(ArrayLiteralCheckerElementGivenError{
+        .code = ArrayLiteralCheckerElementGivenErrorCode::HOLE_IN_ARRAY,
+        .message = message,
+    });
+  }
+
+  return ok(e.expr);
+}
+
+ArrayLiteralChecker::ResultTupleElement ArrayLiteralChecker::tupleSpread(const Type *type) {
+  const Type *element = TupleChecker::tupleElement(type);
+  if (!element) {
+    std::string message = ErrorTextTupleSpread::differ(type->name());
+
+    return err(ArrayLiteralCheckerTupleSpreadError{
+        .code = ArrayLiteralCheckerTupleSpreadErrorCode::ELEMENTS_DIFFER,
+        .message = message,
+    });
+  }
+
+  return ok(element);
+}
+
+ArrayLiteralChecker::ResultSpreadSource ArrayLiteralChecker::spreadable(const Type *type) {
+  if (!type->isArray() && !type->isError()) {
+    std::string message = ErrorTextSpreadable::notSpread(type->name(), type->isRecord());
+
+    return err(ArrayLiteralCheckerSpreadableError{
+        .code = ArrayLiteralCheckerSpreadableErrorCode::NOT_SPREADABLE,
+        .message = message,
+    });
+  }
+
+  return ok(type);
+}
+
+ArrayLiteralChecker::ResultArrayHasItem ArrayLiteralChecker::notEmpty(const ArrayLitExpr *lit) {
+  if (lit->elements.empty()) {
+    std::string message = ErrorTextArrayEmpty::empty();
+
+    return err(ArrayLiteralCheckerNotEmptyError{
+        .code = ArrayLiteralCheckerNotEmptyErrorCode::EMPTY_ARRAY,
+        .message = message,
+    });
+  }
+
+  return ok(lit);
+}
+
+ArrayLiteralChecker::ResultElementsJoin
+ArrayLiteralChecker::typesJoin(const ArrayLitExpr *lit, llvm::ArrayRef<const Type *> types,
+                               const Type *element, const Type *type) {
+  const Type *next = element ? LiteralTypes::unionUnify(element, type) : type;
+  if (!next) {
+    std::string message = ErrorTextArrayTypes::differ(element->name(), type->name());
+    auto spread = [](const ArrayLitExpr::Element &e) { return e.spread; };
+    auto literalClass = [](const Type *t) {
+      const ClassDecl *cls = t->nonOptional()->classDecl();
+
+      return cls && cls->literal();
+    };
+    auto failed = [](const Type *t) { return t->isError(); };
+    bool spreads = llvm::any_of(lit->elements, spread);
+    if (literalClass(element) && literalClass(type)) {
+      message += ErrorTextArrayTypes::literals();
+    } else if (!spreads && llvm::none_of(types, failed)) {
+      std::string tuple;
+      for (const Type *t : types) {
+        tuple += (tuple.empty() ? "" : ", ") + t->name().str();
+      }
+      message += ErrorTextArrayTypes::tuple(tuple);
+    }
+
+    return err(ArrayLiteralCheckerTypesJoinError{
+        .code = ArrayLiteralCheckerTypesJoinErrorCode::ELEMENT_TYPES_DIFFER,
+        .message = message,
+    });
+  }
+
+  return ok(next);
+}
+
+ArrayLiteralChecker::ResultElementKnown ArrayLiteralChecker::elementKnown(const Type *element) {
+  if (element->isUndefined() || element->isVoid()) {
+    std::string message = ErrorTextArrayElement::alone(element->name());
+
+    return err(ArrayLiteralCheckerElementKnownError{
+        .code = ArrayLiteralCheckerElementKnownErrorCode::ONLY_UNDEFINED,
+        .message = message,
+    });
+  }
+
+  return ok(element);
+}
+
+ArrayLiteralChecker::ResultSpreadFitsIn
+ArrayLiteralChecker::spreadFits(const Type *type, const Type *element, const Type *arrayType) {
+  auto convertible = [&](const Field &f) {
+    return TypeRelations::isImplicitlyConvertible(f.type, element);
+  };
+  bool fits =
+      type == arrayType || type->isError() || (type->isString() && element->isString()) ||
+      (type->isArray() && UnknownChecker::isObjectReference(type->inner()->nonOptional()) &&
+       element->nonOptional()->isObject() &&
+       (type->inner()->isOptional() == element->isOptional() || element->isOptional()) &&
+       TypeRelations::isImplicitlyConvertible(type->inner(), element)) ||
+      (type->isIterator() && TypeRelations::isImplicitlyConvertible(type->yielded(), element)) ||
+      (type->isTypedArray() &&
+       TypeRelations::isImplicitlyConvertible(type->elementType(), element)) ||
+      (type->isTuple() && llvm::all_of(type->fields(), convertible));
+  if (!fits) {
+    std::string message = ErrorTextSpreadFits::into(type->name(), arrayType->name());
+
+    return err(ArrayLiteralCheckerSpreadFitsError{
+        .code = ArrayLiteralCheckerSpreadFitsErrorCode::SPREAD_MISMATCH,
+        .message = message,
+    });
+  }
+
+  return ok(type);
+}
+
 Expr *ArrayLiteralChecker::checkArrayLit(ArrayLitExpr *lit, const Type *expected) {
   if (this->checker.pairLiterals_.erase(lit) && !expected) {
     std::vector<const Type *> parts;
@@ -51,19 +178,34 @@ Expr *ArrayLiteralChecker::checkArrayLit(ArrayLitExpr *lit, const Type *expected
     expectedElement = expected->nonOptional()->inner();
   }
 
-  if (auto hole =
-          llvm::find_if(lit->elements, [](const ArrayLitExpr::Element &e) { return e.hole; });
-      hole != lit->elements.end()) {
-    this->checker.diags_.error(hole->expr->loc(),
-                               "arrays cannot have holes; write the element explicitly");
-    for (ArrayLitExpr::Element &e : lit->elements) {
-      e.expr = this->checker.exprChecker().checkExpr(e.expr);
+  for (const ArrayLitExpr::Element &hole : lit->elements) {
+    ResultElementGiven given = ArrayLiteralChecker::elementGiven(hole);
+    if (given.isErr()) {
+      this->checker.diags_.error(hole.expr->loc(), given.error().message);
+      for (ArrayLitExpr::Element &e : lit->elements) {
+        e.expr = this->checker.exprChecker().checkExpr(e.expr);
+      }
+      lit->type = Type::error();
+      return lit;
     }
-    lit->type = Type::error();
-    return lit;
   }
   if (expected && expected->nonOptional()->isTuple()) {
-    return this->checker.tupleChecker().checkTupleLit(lit, expected->nonOptional());
+    TupleChecker::ResultTupleFilled tuple =
+        this->checker.tupleChecker().checkTupleLit(lit, expected->nonOptional());
+    if (tuple.isOk()) {
+      return tuple.value();
+    }
+    llvm::SMLoc at = lit->loc();
+    auto spreads = [](const ArrayLitExpr::Element &e) { return e.spread; };
+    switch (tuple.error().code) {
+      case TupleCheckerCheckTupleLitErrorCode::SPREAD_IN_TUPLE:
+        at = llvm::find_if(lit->elements, spreads)->expr->loc();
+        break;
+      case TupleCheckerCheckTupleLitErrorCode::WRONG_LENGTH:
+        break;
+    }
+    this->checker.diags_.error(at, tuple.error().message);
+    return lit;
   }
 
   std::vector<const Type *> types(lit->elements.size());
@@ -109,27 +251,20 @@ Expr *ArrayLiteralChecker::checkArrayLit(ArrayLitExpr *lit, const Type *expected
       continue;
     }
     if (type->isTuple()) {
-      const Type *element = TupleChecker::tupleElement(type);
-      if (!element) {
-        this->checker.diags_.error(
-            e.expr->loc(), "the elements of '" + type->name() +
-                               "' have different types, and an array holds elements of one type");
+      ResultTupleElement element = ArrayLiteralChecker::tupleSpread(type);
+      if (element.isErr()) {
+        this->checker.diags_.error(e.expr->loc(), element.error().message);
       }
-      types[i] = element ? element : Type::error();
+      types[i] = element.isOk() ? element.value() : Type::error();
       continue;
     }
     if (type->isTypedArray()) {
       types[i] = type->elementType();
       continue;
     }
-    if (!type->isArray() && !type->isError()) {
-      this->checker.diags_.error(e.expr->loc(),
-                                 "only arrays, strings, iterators, Maps and Sets can be spread "
-                                 "here, found '" +
-                                     type->name() + "'" +
-                                     (type->isRecord() ? "; for the entries of a Record, spread "
-                                                         "'Object.entries(r)'"
-                                                       : ""));
+    ResultSpreadSource spreadableTo = ArrayLiteralChecker::spreadable(type);
+    if (spreadableTo.isErr()) {
+      this->checker.diags_.error(e.expr->loc(), spreadableTo.error().message);
       type = Type::error();
     }
     types[i] = type->isError() ? type : type->inner();
@@ -163,49 +298,26 @@ Expr *ArrayLiteralChecker::checkArrayLit(ArrayLitExpr *lit, const Type *expected
   lit->type = Type::error();
   const Type *element = expectedElement;
   if (!element) {
-    if (lit->elements.empty()) {
-      this->checker.diags_.error(lit->loc(),
-                                 "cannot infer the element type of an empty array; add a type, "
-                                 "e.g. 'let a: int[] = []'");
+    ResultArrayHasItem filled = ArrayLiteralChecker::notEmpty(lit);
+    if (filled.isErr()) {
+      this->checker.diags_.error(lit->loc(), filled.error().message);
       return lit;
     }
     for (size_t i = 0; i < types.size(); ++i) {
       if (types[i]->isError()) {
         return lit;
       }
-      const Type *next = element ? LiteralTypes::unionUnify(element, types[i]) : types[i];
-      if (!next) {
-        std::string message = "array elements must have one type; found '" + element->name().str() +
-                              "' and '" + types[i]->name().str() + "'";
-        bool spreads =
-            llvm::any_of(lit->elements, [](const ArrayLitExpr::Element &e) { return e.spread; });
-        auto literalClass = [](const Type *t) {
-          const ClassDecl *cls = t->nonOptional()->classDecl();
-
-          return cls && cls->literal();
-        };
-        if (literalClass(element) && literalClass(types[i])) {
-          message += "; each object literal with methods has a type of its own, so objects made "
-                     "by different literals differ; an interface with their fields and methods "
-                     "joins them: 'const xs: Counter[] = [...]'";
-        } else if (!spreads && llvm::none_of(types, [](const Type *t) { return t->isError(); })) {
-          std::string tuple;
-          for (const Type *t : types) {
-            tuple += (tuple.empty() ? "" : ", ") + t->name().str();
-          }
-          message += "; for a value of each type in its own place, declare a tuple, e.g. "
-                     "'const t: [" +
-                     tuple + "] = ...'";
-        }
-        this->checker.diags_.error(lit->elements[i].expr->loc(), message);
+      ResultElementsJoin joined = ArrayLiteralChecker::typesJoin(lit, types, element, types[i]);
+      if (joined.isErr()) {
+        this->checker.diags_.error(lit->elements[i].expr->loc(), joined.error().message);
         return lit;
       }
+      const Type *next = joined.value();
       element = next;
     }
-    if (element->isUndefined() || element->isVoid()) {
-      this->checker.diags_.error(
-          lit->loc(), "cannot infer the element type from '" + element->name() +
-                          "' alone; add a type, e.g. 'let a: (int | undefined)[] = ...'");
+    ResultElementKnown known = ArrayLiteralChecker::elementKnown(element);
+    if (known.isErr()) {
+      this->checker.diags_.error(lit->loc(), known.error().message);
       return lit;
     }
   }
@@ -217,24 +329,11 @@ Expr *ArrayLiteralChecker::checkArrayLit(ArrayLitExpr *lit, const Type *expected
   for (ArrayLitExpr::Element &e : lit->elements) {
     if (!e.spread) {
       e.expr = this->checker.typeRelations().coerce(e.expr, element);
-    } else if (e.expr->type != arrayType && !e.expr->type->isError() &&
-               !(e.expr->type->isString() && element->isString()) &&
-               !(e.expr->type->isArray() &&
-                 UnknownChecker::isObjectReference(e.expr->type->inner()->nonOptional()) &&
-                 element->nonOptional()->isObject() &&
-                 (e.expr->type->inner()->isOptional() == element->isOptional() ||
-                  element->isOptional()) &&
-                 TypeRelations::isImplicitlyConvertible(e.expr->type->inner(), element)) &&
-               !(e.expr->type->isIterator() &&
-                 TypeRelations::isImplicitlyConvertible(e.expr->type->yielded(), element)) &&
-               !(e.expr->type->isTypedArray() &&
-                 TypeRelations::isImplicitlyConvertible(e.expr->type->elementType(), element)) &&
-               !(e.expr->type->isTuple() &&
-                 llvm::all_of(e.expr->type->fields(), [&](const Field &f) {
-                   return TypeRelations::isImplicitlyConvertible(f.type, element);
-                 }))) {
-      this->checker.diags_.error(e.expr->loc(), "cannot spread '" + e.expr->type->name() +
-                                                    "' into '" + arrayType->name() + "'");
+      continue;
+    }
+    ResultSpreadFitsIn goes = ArrayLiteralChecker::spreadFits(e.expr->type, element, arrayType);
+    if (goes.isErr()) {
+      this->checker.diags_.error(e.expr->loc(), goes.error().message);
     }
   }
   lit->type = arrayType;

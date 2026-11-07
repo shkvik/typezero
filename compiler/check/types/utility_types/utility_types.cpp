@@ -60,97 +60,119 @@ const Type *UtilityTypes::importedValueType(Module *from, llvm::StringRef name) 
   return nullptr;
 }
 
-const Type *UtilityTypes::resolveUtilityType(const TypeRef &ref) {
-  static const struct {
-    llvm::StringLiteral name;
-    TypeOp op;
-    size_t count;
-  } utilities[] = {
+const UtilityTypes::Utility *UtilityTypes::utilityNamed(llvm::StringRef name) {
+  static const Utility utilities[] = {
       {"Exclude", TypeOp::Exclude, 2},           {"Extract", TypeOp::Extract, 2},
       {"NonNullable", TypeOp::NonNullable, 1},   {"ReturnType", TypeOp::ReturnType, 1},
       {"Parameters", TypeOp::Parameters, 1},     {"Uppercase", TypeOp::Uppercase, 1},
       {"Lowercase", TypeOp::Lowercase, 1},       {"Capitalize", TypeOp::Capitalize, 1},
       {"Uncapitalize", TypeOp::Uncapitalize, 1},
   };
-  for (const auto &u : utilities) {
-    if (ref.name != u.name || this->checker.typeDeclarer().lookupType(ref.name)) {
-      continue;
+  for (const Utility &utility : utilities) {
+    if (utility.name == name) {
+      return &utility;
     }
-    if (ref.args.size() != u.count) {
-      this->checker.diags_.error(ref.loc, "'" + ref.name + "' takes " + std::to_string(u.count) +
-                                              " type argument" + (u.count == 1 ? "" : "s"));
-      return Type::error();
-    }
-    bool function = u.op == TypeOp::ReturnType || u.op == TypeOp::Parameters;
-    bool text = u.op == TypeOp::Uppercase || u.op == TypeOp::Lowercase ||
-                u.op == TypeOp::Capitalize || u.op == TypeOp::Uncapitalize;
-    std::vector<const Type *> operands;
-    for (const TypeRef &arg : ref.args) {
-      const Type *signature =
-          function ? this->checker.conditionalTypes().signatureForUtility(arg) : nullptr;
-      operands.push_back(signature ? signature
-                                   : this->checker.conditionalTypes().resolveTypeArgument(arg));
-      if (operands.back()->isError()) {
-        return operands.back();
-      }
-    }
-    if (function && !mentionsParam(operands[0]) && !operands[0]->nonOptional()->isFunction()) {
-      this->checker.diags_.error(ref.loc, "'" + ref.name + "' takes a function type, not '" +
-                                              operands[0]->name() + "'");
-
-      return Type::error();
-    }
-    if (text && !mentionsParam(operands[0])) {
-      for (const Type *m : distributedMembers(operands[0])) {
-        if (!m->isString() && !m->isStringLiteral()) {
-          this->checker.diags_.error(ref.loc,
-                                     "'" + ref.name +
-                                         "' takes a string type, such as a string literal type, "
-                                         "not '" +
-                                         m->name() + "'");
-          return Type::error();
-        }
-      }
-    }
-    return this->checker.typeOperators().evalTypeOp(Type::typeOp(u.op, operands), operands);
   }
 
   return nullptr;
 }
 
-Expr *UtilityTypes::checkGenericIndex(IndexExpr *index) {
+UtilityTypes::ResultUtilityApplied UtilityTypes::resolveUtilityType(const TypeRef &ref) {
+  const Utility *utility = UtilityTypes::utilityNamed(ref.name);
+  if (!utility || this->checker.typeDeclarer().lookupType(ref.name)) {
+    return err(UtilityTypesResolveUtilityTypeError{
+        .code = UtilityTypesResolveUtilityTypeErrorCode::NOT_A_UTILITY,
+        .message = "",
+    });
+  }
+  if (int(ref.args.size()) != utility->count) {
+    std::string message = ErrorTextUtility::count(ref.name, utility->count);
+
+    return err(UtilityTypesResolveUtilityTypeError{
+        .code = UtilityTypesResolveUtilityTypeErrorCode::WRONG_ARGUMENT_COUNT,
+        .message = message,
+    });
+  }
+
+  bool function = utility->op == TypeOp::ReturnType || utility->op == TypeOp::Parameters;
+  bool text = utility->op == TypeOp::Uppercase || utility->op == TypeOp::Lowercase ||
+              utility->op == TypeOp::Capitalize || utility->op == TypeOp::Uncapitalize;
+  std::vector<const Type *> operands;
+  for (const TypeRef &arg : ref.args) {
+    const Type *signature =
+        function ? this->checker.conditionalTypes().signatureForUtility(arg) : nullptr;
+    operands.push_back(signature ? signature
+                                 : this->checker.conditionalTypes().resolveTypeArgument(arg));
+    if (operands.back()->isError()) {
+      return ok(operands.back());
+    }
+  }
+  if (function && !mentionsParam(operands[0]) && !operands[0]->nonOptional()->isFunction()) {
+    std::string message = ErrorTextUtility::noFunction(ref.name, operands[0]->name());
+
+    return err(UtilityTypesResolveUtilityTypeError{
+        .code = UtilityTypesResolveUtilityTypeErrorCode::NOT_A_FUNCTION_TYPE,
+        .message = message,
+    });
+  }
+  if (text && !mentionsParam(operands[0])) {
+    for (const Type *m : distributedMembers(operands[0])) {
+      if (!m->isString() && !m->isStringLiteral()) {
+        std::string message = ErrorTextUtility::notString(ref.name, m->name());
+
+        return err(UtilityTypesResolveUtilityTypeError{
+            .code = UtilityTypesResolveUtilityTypeErrorCode::NOT_A_STRING_TYPE,
+            .message = message,
+        });
+      }
+    }
+  }
+
+  const Type *evaluated =
+      this->checker.typeOperators().evalTypeOp(Type::typeOp(utility->op, operands), operands);
+
+  return ok(evaluated);
+}
+
+UtilityTypes::ResultGenericIndexed UtilityTypes::checkGenericIndex(IndexExpr *index) {
   const Type *object = index->object->type;
   auto genericKey = [&](const Type *key) {
     return key->isParam() && !key->isListParam() && this->wantsLiteral(key);
   };
   bool open = object->isParam() && !object->isListParam() && !object->iterated();
   if (!open && !(object->isObject() && isa<NameExpr>(index->index))) {
-    return nullptr;
+    return err(UtilityTypesCheckGenericIndexError{
+        .code = UtilityTypesCheckGenericIndexErrorCode::NOT_A_GENERIC_INDEX,
+        .message = "",
+    });
   }
   if (!open) {
     auto *name = cast<NameExpr>(index->index);
     VarSymbol *var = this->checker.scopes().lookup(name->name).var();
     if (!var || !var->type || !genericKey(var->type)) {
-      return nullptr;
+      return err(UtilityTypesCheckGenericIndexError{
+          .code = UtilityTypesCheckGenericIndexErrorCode::NOT_A_GENERIC_INDEX,
+          .message = "",
+      });
     }
   }
   index->index = this->checker.exprChecker().checkExpr(index->index);
   const Type *key = index->index->type;
   if (key->isError()) {
-    return index;
+    return ok(index);
   }
   if (!key->isStringLiteral() && !genericKey(key)) {
-    this->checker.diags_.error(index->index->loc(),
-                               "'" + object->name() +
-                                   "' is indexed by its keys, such as 'k: K' with 'K "
-                                   "extends keyof " +
-                                   object->name() + "', not by '" + key->name() + "'");
-    return index;
+    std::string message = ErrorTextGenericIndex::notByKey(object->name(), key->name());
+
+    return err(UtilityTypesCheckGenericIndexError{
+        .code = UtilityTypesCheckGenericIndexErrorCode::NOT_INDEXED_BY_KEY,
+        .message = message,
+    });
   }
   index->type =
       this->checker.typeOperators().evalTypeOp(Type::indexedAccess(object, key), {object, key});
 
-  return index;
+  return ok(index);
 }
 
 bool UtilityTypes::wantsLiteral(const Type *param) const {

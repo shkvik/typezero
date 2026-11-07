@@ -15,6 +15,8 @@ public:
   Expr *checkNodeMember(MemberExpr *member);
   Expr *processAlias(Expr *expr);
   Expr *nodeValue(const Checker::NodeName &n, Expr *expr);
+  Expr *checkTimersPromises(CallExpr *call, llvm::StringRef fn, llvm::SMLoc loc,
+                            const Type *expected);
 
 private:
   std::string exportProblem(NodeModule module, llvm::StringRef name, llvm::StringRef path) const;

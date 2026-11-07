@@ -32,38 +32,39 @@ std::string GenericClassInstantiator::typeNames(llvm::ArrayRef<const Type *> typ
 GenericClassInstantiator::GenericClassInstantiator(Checker &owner)
     : checker(owner) {}
 
-ClassDecl *GenericClassInstantiator::instantiateClass(ClassDecl *generic,
-                                                      std::vector<const Type *> args,
-                                                      llvm::SMLoc use) {
+GenericClassInstantiator::ResultClassMade
+GenericClassInstantiator::instantiateClass(ClassDecl *generic, std::vector<const Type *> args,
+                                           llvm::SMLoc use) {
   this->checker.genericClassChecker().declareClassTypeParams(generic);
   llvm::SMLoc loc = use.isValid() ? use : generic->loc();
   std::vector<const Type *> params = generic->typeArgs;
   std::vector<const Type *> defaults = this->checker.classDefaults_.lookup(generic);
   std::string name = generic->name.str();
   if (args.size() > params.size()) {
-    this->checker.diags_.error(loc, "'" + name + "' takes " + std::to_string(params.size()) +
-                                        " type argument" + (params.size() == 1 ? "" : "s") +
-                                        ", but got " + std::to_string(args.size()));
-    return nullptr;
+    std::string message = ErrorTextClassInstance::tooMany(name, params.size(), args.size());
+
+    return err(GenericClassInstantiatorInstantiateClassError{
+        .code = GenericClassInstantiatorInstantiateClassErrorCode::TOO_MANY_TYPE_ARGUMENTS,
+        .message = message,
+    });
   }
   bool emitter = generic->library() && generic->name == "EventEmitter";
   for (size_t k = args.size(); k < params.size(); ++k) {
     if (emitter) {
-      this->checker.diags_.error(
-          loc, "'EventEmitter' needs its event map here, e.g. 'EventEmitter<{ data: "
-               "[chunk: string]; end: [] }>', or the type of an emitter, e.g. 'typeof "
-               "bus'");
-      return nullptr;
+      std::string message = ErrorTextClassInstance::eventMap();
+
+      return err(GenericClassInstantiatorInstantiateClassError{
+          .code = GenericClassInstantiatorInstantiateClassErrorCode::EVENT_MAP_MISSING,
+          .message = message,
+      });
     }
     if (k >= defaults.size() || !defaults[k]) {
-      std::string ints;
-      for (size_t i = 0; i < params.size(); ++i) {
-        ints += i == 0 ? "int" : ", int";
-      }
-      this->checker.diags_.error(loc, "'" + name + "' needs " + std::to_string(params.size()) +
-                                          " type argument" + (params.size() == 1 ? "" : "s") +
-                                          ", e.g. '" + name + "<" + ints + ">'");
-      return nullptr;
+      std::string message = ErrorTextClassInstance::needs(name, params.size());
+
+      return err(GenericClassInstantiatorInstantiateClassError{
+          .code = GenericClassInstantiatorInstantiateClassErrorCode::TYPE_ARGUMENTS_MISSING,
+          .message = message,
+      });
     }
     std::vector<const Type *> known = args;
     known.resize(params.size(), nullptr);
@@ -71,13 +72,18 @@ ClassDecl *GenericClassInstantiator::instantiateClass(ClassDecl *generic,
   }
   for (size_t k = 0; k < params.size(); ++k) {
     if (args[k]->isError()) {
-      return nullptr;
+      return err(GenericClassInstantiatorInstantiateClassError{
+          .code = GenericClassInstantiatorInstantiateClassErrorCode::ALREADY_REPORTED,
+          .message = "",
+      });
     }
     if (args[k]->isUndefined()) {
-      this->checker.diags_.error(loc, "'" + args[k]->name() + "' cannot be a type argument of '" +
-                                          name + "'");
+      std::string message = ErrorTextClassInstance::undefinedArg(args[k]->name(), name);
 
-      return nullptr;
+      return err(GenericClassInstantiatorInstantiateClassError{
+          .code = GenericClassInstantiatorInstantiateClassErrorCode::UNDEFINED_TYPE_ARGUMENT,
+          .message = message,
+      });
     }
     if (!this->checker.typeParams().satisfies(args[k], params[k], params, args)) {
       const TypeParamDecl &decl = generic->typeParams[k];
@@ -88,14 +94,20 @@ ClassDecl *GenericClassInstantiator::instantiateClass(ClassDecl *generic,
       if (decl.constraint && decl.constraint->kind() == TypeRefKind::NAME_REF) {
         constraint = decl.constraint->name.str();
       }
-      this->checker.diags_.error(loc, "type '" + args[k]->name() +
-                                          "' does not satisfy the constraint '" + constraint +
-                                          "' of '" + params[k]->name() + "' in '" + name + "'");
-      return nullptr;
+      std::string message =
+          ErrorTextClassInstance::unsatisfied(args[k]->name(), constraint, params[k]->name(), name);
+
+      return err(GenericClassInstantiatorInstantiateClassError{
+          .code = GenericClassInstantiatorInstantiateClassErrorCode::CONSTRAINT_UNSATISFIED,
+          .message = message,
+      });
     }
   }
   if (emitter && !this->checker.eventMaps().checkEventMap(args[0], loc)) {
-    return nullptr;
+    return err(GenericClassInstantiatorInstantiateClassError{
+        .code = GenericClassInstantiatorInstantiateClassErrorCode::ALREADY_REPORTED,
+        .message = "",
+    });
   }
   auto key = std::make_pair(static_cast<const ClassDecl *>(generic), args);
   if (auto found = this->checker.classInstances_.find(key);
@@ -104,20 +116,25 @@ ClassDecl *GenericClassInstantiator::instantiateClass(ClassDecl *generic,
         check && !check->callLoc.isValid()) {
       check->callLoc = use;
     }
-    return found->second;
+    return ok(found->second);
   }
   if (llvm::count_if(this->checker.filling_, [&](const ClassDecl *c) {
         return c->generic() == generic;
       }) >= kMaxClassChain) {
-    if (this->endless.insert(generic).second) {
-      this->checker.diags_.error(
-          generic->loc(), "generic class '" + name +
-                              "' uses itself with type arguments that keep "
-                              "growing, so each instance of it needs another, without end; a "
-                              "generic class can use itself only with its own type parameters");
+    bool first = this->endless.insert(generic).second;
+    if (first) {
+      std::string message = ErrorTextClassInstance::endless(name);
+
+      return err(GenericClassInstantiatorInstantiateClassError{
+          .code = GenericClassInstantiatorInstantiateClassErrorCode::ENDLESS_INSTANCES,
+          .message = message,
+      });
     }
 
-    return nullptr;
+    return err(GenericClassInstantiatorInstantiateClassError{
+        .code = GenericClassInstantiatorInstantiateClassErrorCode::ALREADY_REPORTED,
+        .message = "",
+    });
   }
 
   bool muted = this->checker.diags_.setMuted(true);
@@ -183,7 +200,7 @@ ClassDecl *GenericClassInstantiator::instantiateClass(ClassDecl *generic,
     }
   }
 
-  return inst;
+  return ok(inst);
 }
 
 void GenericClassInstantiator::declareInstanceMember(ClassDecl *inst, FunctionDecl *fn,

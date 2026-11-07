@@ -1,6 +1,8 @@
 #pragma once
 
 #include "compiler/check/checker/checker.h"
+#include "compiler/check/expr/expr_checker/expr_checker_errors.h"
+#include "compiler/result/result/result.h"
 
 namespace tz {
 
@@ -13,10 +15,14 @@ public:
   Expr *checkSequence(SequenceExpr *seq, const Type *expected, bool wraps);
   Expr *checkOptionalChain(OptionalChainExpr *chain);
   Expr *chainLink(Expr *object);
-  Expr *checkConditional(ConditionalExpr *cond, const Type *expected);
-  Expr *checkCast(CastExpr *cast);
 
 private:
+  using ResultBranchesMatch = Result<Expr *, ExprCheckerCheckConditionalError>;
+  using ResultCastSupported = Result<Expr *, ExprCheckerCheckCastError>;
+
+  ResultCastSupported checkCast(CastExpr *cast);
+  ResultBranchesMatch checkConditional(ConditionalExpr *cond, const Type *expected);
+
   Checker &checker;
 };
 

@@ -156,23 +156,82 @@ void GenericClassChecker::reportClassInstance(Checker::Instance *instance, llvm:
     return;
   }
   const ClassDecl *inst = instance->cls;
-  this->checker.diags_.error(
-      loc, "cannot use '" + inst->name + "' with " +
-               GenericClassChecker::bindings(inst->generic()->typeArgs, inst->typeArgs) + ": " +
-               instance->message);
+  std::string bindings = GenericClassChecker::bindings(inst->generic()->typeArgs, inst->typeArgs);
+  std::string message = ErrorTextInstanceUse::cannotUse(inst->name, bindings, instance->message);
+  this->checker.diags_.error(loc, message);
   const Checker::Instance *at = instance;
   llvm::SmallPtrSet<const char *, 8> shown;
   auto nameOf = [](const Checker::Instance *i) { return i->cls ? i->cls->name : i->generic->name; };
   while (at && at->errorLoc.isValid() && shown.insert(at->errorLoc.getPointer()).second) {
     const Checker::Instance *next = this->checker.failedCalls_.lookup(at->errorLoc.getPointer());
-    if (next) {
-      this->checker.diags_.note(at->errorLoc,
-                                "in '" + nameOf(at) + "', which uses '" + nameOf(next) + "' here");
-    } else {
-      this->checker.diags_.note(at->errorLoc, "in '" + nameOf(at) + "', here");
-    }
+    std::string where = next ? ErrorTextInstanceUse::usesHere(nameOf(at), nameOf(next))
+                             : ErrorTextInstanceUse::here(nameOf(at));
+    this->checker.diags_.note(at->errorLoc, where);
     at = next;
   }
+}
+
+GenericClassChecker::ResultClassDeclared
+GenericClassChecker::declaredFirst(const ClassDecl *generic) const {
+  bool early = !generic->declared && this->checker.loading_ && this->checker.functions_.empty() &&
+               this->checker.declModules_.lookup(generic) == this->checker.loading_;
+  if (early) {
+    std::string message = ErrorTextDeclaredFirst::before(generic->name);
+
+    return err(GenericClassCheckerDeclaredFirstError{
+        .code = GenericClassCheckerDeclaredFirstErrorCode::USED_BEFORE_DECLARATION,
+        .message = message,
+    });
+  }
+
+  return ok(generic);
+}
+
+GenericClassChecker::ResultClassConcrete GenericClassChecker::concrete(const ClassDecl *generic) {
+  if (generic->isAbstract) {
+    std::string message = ErrorTextConcrete::abstract(generic->name);
+
+    return err(GenericClassCheckerConcreteError{
+        .code = GenericClassCheckerConcreteErrorCode::ABSTRACT_CLASS,
+        .message = message,
+    });
+  }
+
+  return ok(generic);
+}
+
+GenericClassChecker::ResultCtorWasPicked
+GenericClassChecker::constructorFit(const NewExpr *expr, const ClassDecl *generic,
+                                    llvm::ArrayRef<FunctionDecl *> ctors) {
+  std::vector<FunctionDecl *> fit;
+  for (FunctionDecl *c : ctors) {
+    this->checker.returnInferrer().resolveParams(c->sym);
+    const FuncSymbol *sym = c->sym;
+    if (expr->args.size() >= sym->minArgs &&
+        (sym->hasRest || expr->args.size() <= sym->params.size())) {
+      fit.push_back(c);
+    }
+  }
+  if (fit.empty()) {
+    std::string message =
+        ErrorTextConstructorFit::inferArgs(generic->name, true, expr->args.size());
+
+    return err(GenericClassCheckerConstructorFitError{
+        .code = GenericClassCheckerConstructorFitErrorCode::NO_CONSTRUCTOR_FITS,
+        .message = message,
+    });
+  }
+  if (fit.size() > 1) {
+    std::string message =
+        ErrorTextConstructorFit::inferArgs(generic->name, false, expr->args.size());
+
+    return err(GenericClassCheckerConstructorFitError{
+        .code = GenericClassCheckerConstructorFitErrorCode::SEVERAL_CONSTRUCTORS_FIT,
+        .message = message,
+    });
+  }
+
+  return ok(fit[0]);
 }
 
 Expr *GenericClassChecker::checkGenericNew(NewExpr *expr, ClassDecl *generic,
@@ -205,8 +264,18 @@ Expr *GenericClassChecker::checkGenericNew(NewExpr *expr, ClassDecl *generic,
         return expr;
       }
     }
-    ClassDecl *inst = this->checker.genericClassInstantiator().instantiateClass(
-        generic, std::move(args), expr->loc());
+    GenericClassInstantiator::ResultClassMade made =
+        this->checker.genericClassInstantiator().instantiateClass(generic, std::move(args),
+                                                                  expr->loc());
+    if (made.isErr() &&
+        made.error().code != GenericClassInstantiatorInstantiateClassErrorCode::ALREADY_REPORTED) {
+      llvm::SMLoc at =
+          made.error().code == GenericClassInstantiatorInstantiateClassErrorCode::ENDLESS_INSTANCES
+              ? generic->loc()
+              : expr->loc();
+      this->checker.diags_.error(at, made.error().message);
+    }
+    ClassDecl *inst = made.isOk() ? made.value() : nullptr;
     if (!inst) {
       checkArgsLoosely(expr->args);
       return expr;
@@ -214,41 +283,24 @@ Expr *GenericClassChecker::checkGenericNew(NewExpr *expr, ClassDecl *generic,
     expr->typeArgs.clear();
     return this->checker.methodCallChecker().checkClassNew(expr, inst, expected);
   }
-  if (!generic->declared && this->checker.loading_ && this->checker.functions_.empty() &&
-      this->checker.declModules_.lookup(generic) == this->checker.loading_) {
-    this->checker.diags_.error(expr->loc(),
-                               "class '" + generic->name +
-                                   "' is used before its declaration, which JavaScript has not run "
-                                   "yet here (a ReferenceError); move the class up");
+  ResultClassDeclared declared = this->declaredFirst(generic);
+  if (declared.isErr()) {
+    this->checker.diags_.error(expr->loc(), declared.error().message);
   }
-  if (generic->isAbstract) {
-    this->checker.diags_.error(expr->loc(), "class '" + generic->name +
-                                                "' is abstract and cannot be created: create "
-                                                "an object of a class that extends it");
+  ResultClassConcrete concreteClass = GenericClassChecker::concrete(generic);
+  if (concreteClass.isErr()) {
+    this->checker.diags_.error(expr->loc(), concreteClass.error().message);
   }
   std::vector<FunctionDecl *> ctors = ClassLinks::constructorsOf(generic);
   FunctionDecl *ctor = ctors.size() == 1 ? ctors[0] : nullptr;
   if (ctors.size() > 1) {
-    std::vector<FunctionDecl *> fit;
-    for (FunctionDecl *c : ctors) {
-      this->checker.returnInferrer().resolveParams(c->sym);
-      const FuncSymbol *sym = c->sym;
-      if (expr->args.size() >= sym->minArgs &&
-          (sym->hasRest || expr->args.size() <= sym->params.size())) {
-        fit.push_back(c);
-      }
-    }
-    if (fit.size() != 1) {
-      this->checker.diags_.error(
-          expr->loc(), "cannot infer the type arguments of '" + generic->name + "': " +
-                           (fit.empty() ? "no constructor takes " : "several constructors take ") +
-                           std::to_string(expr->args.size()) + " argument" +
-                           (expr->args.size() == 1 ? "" : "s") + "; give them, e.g. 'new " +
-                           generic->name + "<int>(...)'");
+    ResultCtorWasPicked picked = this->constructorFit(expr, generic, ctors);
+    if (picked.isErr()) {
+      this->checker.diags_.error(expr->loc(), picked.error().message);
       checkArgsLoosely(expr->args);
       return expr;
     }
-    ctor = fit[0];
+    ctor = picked.value();
   }
   FuncSymbol *&fn = this->constructorFunctions[{generic, ctor}];
   if (!fn) {
@@ -276,8 +328,17 @@ Expr *GenericClassChecker::checkGenericNew(NewExpr *expr, ClassDecl *generic,
                                                        bound)) {
     return expr;
   }
-  ClassDecl *inst =
+  GenericClassInstantiator::ResultClassMade made =
       this->checker.genericClassInstantiator().instantiateClass(generic, bound, expr->loc());
+  if (made.isErr() &&
+      made.error().code != GenericClassInstantiatorInstantiateClassErrorCode::ALREADY_REPORTED) {
+    llvm::SMLoc at =
+        made.error().code == GenericClassInstantiatorInstantiateClassErrorCode::ENDLESS_INSTANCES
+            ? generic->loc()
+            : expr->loc();
+    this->checker.diags_.error(at, made.error().message);
+  }
+  ClassDecl *inst = made.isOk() ? made.value() : nullptr;
   if (!inst) {
     return expr;
   }

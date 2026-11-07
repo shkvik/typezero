@@ -323,8 +323,15 @@ void ByteProofs::checkView(const Expr *buffer, const Expr *offset, const Expr *l
     return;
   }
   IndexProofs &proofs = checker_.indexProofs();
-  if (offset && !proofs.requireUpTo(offset, buffer, 0, "the offset of " + what.str())) {
-    return;
+  if (offset) {
+    IndexProofs::ResultUpToWasProven upTo =
+        proofs.requireUpTo(offset, buffer, 0, "the offset of " + what.str());
+    if (upTo.isErr() && upTo.error().code != IndexProofsRequireUpToErrorCode::EXEMPT) {
+      checker_.diags_.error(offset->loc(), upTo.error().message);
+    }
+    if (upTo.isErr()) {
+      return;
+    }
   }
   std::optional<int64_t> start =
       offset ? checker_.constantFolder().intConstant(offset) : std::optional<int64_t>(0);
@@ -346,7 +353,12 @@ void ByteProofs::checkView(const Expr *buffer, const Expr *offset, const Expr *l
     }
     return;
   }
-  if (!proofs.requireBetween(length, 0, std::nullopt, "the length of " + what.str())) {
+  IndexProofs::ResultBetweenProven between =
+      proofs.requireBetween(length, 0, std::nullopt, "the length of " + what.str());
+  if (between.isErr() && between.error().code != IndexProofsRequireBetweenErrorCode::EXEMPT) {
+    checker_.diags_.error(length->loc(), between.error().message);
+  }
+  if (between.isErr()) {
     return;
   }
   std::optional<Linear> count = proofs.linear(length);

@@ -42,24 +42,39 @@ Expr *TimerChecker::checkTaskCallback(Expr *arg, llvm::StringRef fn) {
   if (type->isError()) {
     return arg;
   }
-  if (!type->isFunction()) {
-    this->checker.diags_.error(arg->loc(),
-                               "'" + fn + "' needs a function, found '" + type->name() + "'");
+  bool adaptable = type->isFunction() && type != task && type->minArgs() == 0 && !type->hasRest();
+  Expr *adapted =
+      adaptable ? this->checker.functionValueChecker().adaptFunction(arg, task) : nullptr;
+  ResultTaskCallbackOk fits = TimerChecker::taskCallback(type, task, adapted, fn);
+  if (fits.isErr()) {
+    this->checker.diags_.error(arg->loc(), fits.error().message);
     return arg;
   }
-  if (type == task) {
-    return arg;
-  }
-  if (type->minArgs() == 0 && !type->hasRest()) {
-    if (Expr *adapted = this->checker.functionValueChecker().adaptFunction(arg, task)) {
-      return adapted;
-    }
-  }
-  this->checker.diags_.error(
-      arg->loc(), "'" + fn + "' calls its callback with nothing, but this function is '" +
-                      type->name() + "'; pass an arrow that calls it, e.g. '() => f()'");
 
-  return arg;
+  return adapted ? adapted : arg;
+}
+
+TimerChecker::ResultTaskCallbackOk TimerChecker::taskCallback(const Type *type, const Type *task,
+                                                              const Expr *adapted,
+                                                              llvm::StringRef fn) {
+  if (!type->isFunction()) {
+    std::string message = ErrorTextTaskCallback::notFunction(fn, type->name());
+
+    return err(TimerCheckerTaskCallbackError{
+        .code = TimerCheckerTaskCallbackErrorCode::NOT_A_FUNCTION,
+        .message = message,
+    });
+  }
+  if (type != task && !adapted) {
+    std::string message = ErrorTextTaskCallback::nothing(fn, type->name());
+
+    return err(TimerCheckerTaskCallbackError{
+        .code = TimerCheckerTaskCallbackErrorCode::CALLED_WITH_NOTHING,
+        .message = message,
+    });
+  }
+
+  return ok(type);
 }
 
 bool TimerChecker::rearms(const Expr *callback) const {
@@ -92,37 +107,47 @@ bool TimerChecker::rearms(const Expr *callback) const {
   return call && call->method() == current->sym;
 }
 
-Expr *TimerChecker::checkAsyncGlobal(CallExpr *call, NameExpr *name) {
+TimerChecker::ResultTimerScheduled TimerChecker::checkAsyncGlobal(CallExpr *call, NameExpr *name) {
   static const llvm::StringLiteral names[] = {"setTimeout",    "setInterval",   "setImmediate",
                                               "clearTimeout",  "clearInterval", "clearImmediate",
                                               "queueMicrotask"};
-  if (!llvm::any_of(names, [&](llvm::StringRef n) {
-        return this->checker.callChecker().isGlobalName(name, n);
-      })) {
-    return nullptr;
+  auto isTimer = [&](llvm::StringRef n) {
+    return this->checker.callChecker().isGlobalName(name, n);
+  };
+  if (!llvm::any_of(names, isTimer)) {
+    return err(TimerCheckerCheckAsyncGlobalError{
+        .code = TimerCheckerCheckAsyncGlobalErrorCode::NOT_A_TIMER,
+        .message = "",
+    });
   }
   this->checker.file_->usesAsync = true;
   call->type = Type::error();
   llvm::StringRef fn = name->name;
   if (this->checker.callChecker().rejectSpread(call)) {
-    return call;
+    return err(TimerCheckerCheckAsyncGlobalError{
+        .code = TimerCheckerCheckAsyncGlobalErrorCode::ALREADY_REPORTED,
+        .message = "",
+    });
   }
   if (fn == "setTimeout" || fn == "setInterval") {
     if (call->args.size() > 2) {
-      this->checker.diags_.error(call->args[2]->loc(),
-                                 "arguments for the callback are not supported; pass an "
-                                 "arrow that calls it with them");
-      for (Expr *&arg : call->args) {
-        arg = this->checker.exprChecker().checkExpr(arg);
-      }
-      return call;
+      this->checker.argumentChecker().checkArgsLoosely(call);
+      std::string message = ErrorTextAsyncGlobal::callbackArg();
+
+      return err(TimerCheckerCheckAsyncGlobalError{
+          .code = TimerCheckerCheckAsyncGlobalErrorCode::TIMEOUT_CALLBACK_ARGUMENTS,
+          .message = message,
+      });
     }
     ArgumentChecker::ResultArityMatches arity =
         this->checker.argumentChecker().checkArity(call, 1, 2);
     if (arity.isErr()) {
-      this->checker.diags_.error(name->loc(), arity.error().message);
-      return call;
+      return err(TimerCheckerCheckAsyncGlobalError{
+          .code = TimerCheckerCheckAsyncGlobalErrorCode::WRONG_ARITY,
+          .message = arity.error().message,
+      });
     }
+
     call->target =
         BuiltinCall{.builtin = fn == "setTimeout" ? Builtin::SetTimeout : Builtin::SetInterval};
     call->args[0] = this->checkTaskCallback(call->args[0], fn);
@@ -131,12 +156,12 @@ Expr *TimerChecker::checkAsyncGlobal(CallExpr *call, NameExpr *name) {
     }
     call->type = Type::timeout();
     if (call->args[0]->type->isError()) {
-      return call;
+      return ok(call);
     }
     int bits = 0;
     if (fn == "setInterval") {
       if (!this->checker.emitterChecker().classifyListener(call->args[0], nullptr, bits, true)) {
-        return call;
+        return ok(call);
       }
     } else if (this->rearms(call->args[0])) {
       this->checker.emitterChecker().classifyListener(call->args[0], nullptr, bits, true);
@@ -150,36 +175,42 @@ Expr *TimerChecker::checkAsyncGlobal(CallExpr *call, NameExpr *name) {
       call->args.push_back(this->checker.exprChecker().checkExpr(
           this->checker.ctx_.make<IntLitExpr>(call->loc(), uint64_t(bits)), Type::intTy()));
     }
-    return call;
+    return ok(call);
   }
   if (fn == "setImmediate" || fn == "queueMicrotask") {
     if (call->args.size() > 1 && fn == "setImmediate") {
-      this->checker.diags_.error(call->args[1]->loc(),
-                                 "arguments for the callback are not supported; pass an "
-                                 "arrow that calls it with them");
-      for (Expr *&arg : call->args) {
-        arg = this->checker.exprChecker().checkExpr(arg);
-      }
-      return call;
+      this->checker.argumentChecker().checkArgsLoosely(call);
+      std::string message = ErrorTextAsyncGlobal::callbackArg();
+
+      return err(TimerCheckerCheckAsyncGlobalError{
+          .code = TimerCheckerCheckAsyncGlobalErrorCode::IMMEDIATE_CALLBACK_ARGUMENTS,
+          .message = message,
+      });
     }
     ArgumentChecker::ResultArityMatches arity =
         this->checker.argumentChecker().checkArity(call, 1, 1);
     if (arity.isErr()) {
-      this->checker.diags_.error(name->loc(), arity.error().message);
-      return call;
+      return err(TimerCheckerCheckAsyncGlobalError{
+          .code = TimerCheckerCheckAsyncGlobalErrorCode::WRONG_ARITY,
+          .message = arity.error().message,
+      });
     }
+
     call->target = BuiltinCall{.builtin = fn == "setImmediate" ? Builtin::SetImmediate
                                                                : Builtin::QueueMicrotask};
     call->args[0] = this->checkTaskCallback(call->args[0], fn);
     call->type = fn == "setImmediate" ? Type::immediate() : Type::voidTy();
-    return call;
+    return ok(call);
   }
   ArgumentChecker::ResultArityMatches arity =
       this->checker.argumentChecker().checkArity(call, 0, 1);
   if (arity.isErr()) {
-    this->checker.diags_.error(name->loc(), arity.error().message);
-    return call;
+    return err(TimerCheckerCheckAsyncGlobalError{
+        .code = TimerCheckerCheckAsyncGlobalErrorCode::WRONG_ARITY,
+        .message = arity.error().message,
+    });
   }
+
   bool immediate = fn == "clearImmediate";
   call->target =
       BuiltinCall{.builtin = immediate ? Builtin::ClearImmediate : Builtin::ClearTimeout};
@@ -192,7 +223,7 @@ Expr *TimerChecker::checkAsyncGlobal(CallExpr *call, NameExpr *name) {
       call->args[0], Type::optional(immediate ? Type::immediate() : Type::timeout()));
   call->type = Type::voidTy();
 
-  return call;
+  return ok(call);
 }
 
 const Type *TimerChecker::timerCallType(const Expr *init) const {
@@ -212,32 +243,35 @@ const Type *TimerChecker::timerCallType(const Expr *init) const {
   return nullptr;
 }
 
-Expr *TimerChecker::checkNextTick(CallExpr *call, MemberExpr *member) {
+TimerChecker::ResultNextTickQueued TimerChecker::checkNextTick(CallExpr *call, MemberExpr *member) {
   this->checker.file_->usesAsync = true;
   call->type = Type::error();
   if (call->args.size() > 1) {
-    this->checker.diags_.error(call->args[1]->loc(),
-                               "arguments for the callback are not supported; pass an "
-                               "arrow that calls it with them");
-    for (Expr *&arg : call->args) {
-      arg = this->checker.exprChecker().checkExpr(arg);
-    }
-    return call;
+    this->checker.argumentChecker().checkArgsLoosely(call);
+    std::string message = ErrorTextAsyncGlobal::callbackArg();
+
+    return err(TimerCheckerCheckNextTickError{
+        .code = TimerCheckerCheckNextTickErrorCode::CALLBACK_ARGUMENTS,
+        .message = message,
+    });
   }
   ArgumentChecker::ResultArityMatches arity =
       this->checker.argumentChecker().checkArity(call, 1, 1);
   if (arity.isErr()) {
-    this->checker.diags_.error(member->loc(), arity.error().message);
-    return call;
+    return err(TimerCheckerCheckNextTickError{
+        .code = TimerCheckerCheckNextTickErrorCode::WRONG_ARITY,
+        .message = arity.error().message,
+    });
   }
   call->target = BuiltinCall{.builtin = Builtin::NextTick};
   call->args[0] = this->checkTaskCallback(call->args[0], "process.nextTick");
   call->type = Type::voidTy();
 
-  return call;
+  return ok(call);
 }
 
-Expr *TimerChecker::checkTimerMethod(CallExpr *call, MemberExpr *member) {
+TimerChecker::ResultTimerMethodRun TimerChecker::checkTimerMethod(CallExpr *call,
+                                                                  MemberExpr *member) {
   const Type *type = member->object->type;
   llvm::StringRef name = member->name;
   call->type = Type::error();
@@ -256,49 +290,54 @@ Expr *TimerChecker::checkTimerMethod(CallExpr *call, MemberExpr *member) {
     }
   }
   if (!method) {
-    this->checker.diags_.error(member->loc(), "property '" + name + "' does not exist on type '" +
-                                                  type->name() +
-                                                  "'; it has 'ref', 'unref', 'hasRef'" +
-                                                  (type->isImmediate() ? "" : " and 'refresh'"));
-    for (Expr *&arg : call->args) {
-      arg = this->checker.exprChecker().checkExpr(arg);
-    }
-    return call;
+    this->checker.argumentChecker().checkArgsLoosely(call);
+    std::string message = ErrorTextTimerMethod::noMethod(name, type->name(), type->isImmediate());
+
+    return err(TimerCheckerCheckTimerMethodError{
+        .code = TimerCheckerCheckTimerMethodErrorCode::NO_SUCH_METHOD,
+        .message = message,
+    });
   }
-  bool rejected = this->checker.callChecker().rejectSpread(call);
+  if (this->checker.callChecker().rejectSpread(call)) {
+    return err(TimerCheckerCheckTimerMethodError{
+        .code = TimerCheckerCheckTimerMethodErrorCode::ALREADY_REPORTED,
+        .message = "",
+    });
+  }
   ArgumentChecker::ResultArityMatches arity =
-      rejected ? ok(call) : this->checker.argumentChecker().checkArity(call, 0, 0);
+      this->checker.argumentChecker().checkArity(call, 0, 0);
   if (arity.isErr()) {
-    this->checker.diags_.error(member->loc(), arity.error().message);
-  }
-  if (rejected || arity.isErr()) {
-    return call;
+    return err(TimerCheckerCheckTimerMethodError{
+        .code = TimerCheckerCheckTimerMethodErrorCode::WRONG_ARITY,
+        .message = arity.error().message,
+    });
   }
   call->target = BuiltinCall{.builtin = method->builtin};
   call->type = method->builtin == Builtin::TimerHasRef ? Type::boolTy() : type;
 
-  return call;
+  return ok(call);
 }
 
-Expr *TimerChecker::checkTimersPromisesCall(CallExpr *call, llvm::StringRef fn, llvm::SMLoc loc,
-                                            const Type *expected) {
+TimerChecker::ResultPromiseOfTimer TimerChecker::checkTimersPromisesCall(CallExpr *call,
+                                                                         llvm::StringRef fn,
+                                                                         llvm::SMLoc loc,
+                                                                         const Type *expected) {
   this->checker.file_->usesAsync = true;
   call->type = Type::error();
-  auto loosely = [&] {
-    for (Expr *&arg : call->args) {
-      arg = this->checker.exprChecker().checkExpr(arg);
-    }
-
-    return call;
-  };
   if (fn == "scheduler") {
-    this->checker.diags_.error(loc,
-                               "'scheduler' is used through its functions: 'scheduler.wait(ms)' or "
-                               "'scheduler.yield()'");
-    return loosely();
+    this->checker.argumentChecker().checkArgsLoosely(call);
+    std::string message = ErrorTextTimersPromises::scheduler();
+
+    return err(TimerCheckerCheckTimersPromisesCallError{
+        .code = TimerCheckerCheckTimersPromisesCallErrorCode::SCHEDULER_ITSELF,
+        .message = message,
+    });
   }
   if (this->checker.callChecker().rejectSpread(call)) {
-    return call;
+    return err(TimerCheckerCheckTimersPromisesCallError{
+        .code = TimerCheckerCheckTimersPromisesCallErrorCode::ALREADY_REPORTED,
+        .message = "",
+    });
   }
   bool immediate = fn == "setImmediate";
   bool interval = fn == "setInterval";
@@ -306,9 +345,12 @@ Expr *TimerChecker::checkTimersPromisesCall(CallExpr *call, llvm::StringRef fn, 
   ArgumentChecker::ResultArityMatches arity =
       this->checker.argumentChecker().checkArity(call, 0, unsigned(valueAt + 2));
   if (arity.isErr()) {
-    this->checker.diags_.error(loc, arity.error().message);
-    return call;
+    return err(TimerCheckerCheckTimersPromisesCallError{
+        .code = TimerCheckerCheckTimersPromisesCallErrorCode::WRONG_ARITY,
+        .message = arity.error().message,
+    });
   }
+
   std::vector<Expr *> args;
   if (!immediate) {
     if (call->args.empty() || isa<UndefinedExpr>(call->args[0])) {
@@ -332,12 +374,18 @@ Expr *TimerChecker::checkTimersPromisesCall(CallExpr *call, llvm::StringRef fn, 
     given = this->checker.exprChecker().checkExpr(given, wanted);
     value = given->type;
     if (value->isError()) {
-      return call;
+      return err(TimerCheckerCheckTimersPromisesCallError{
+          .code = TimerCheckerCheckTimersPromisesCallErrorCode::ALREADY_REPORTED,
+          .message = "",
+      });
     }
     if (value->isVoid()) {
-      this->checker.diags_.error(given->loc(),
-                                 "a value of type 'void' cannot be given to '" + fn + "'");
-      return call;
+      std::string message = ErrorTextTimersPromises::voidValue(fn);
+
+      return err(TimerCheckerCheckTimersPromisesCallError{
+          .code = TimerCheckerCheckTimersPromisesCallErrorCode::VOID_VALUE,
+          .message = message,
+      });
     }
     if (value->isUndefined()) {
       value = Type::voidTy();
@@ -353,7 +401,10 @@ Expr *TimerChecker::checkTimersPromisesCall(CallExpr *call, llvm::StringRef fn, 
   }
   llvm::StringMap<Expr *> options;
   if (!this->checker.fsChecker().nodeOptions(call, valueAt + 1, fn, {"ref"}, options)) {
-    return call;
+    return err(TimerCheckerCheckTimersPromisesCallError{
+        .code = TimerCheckerCheckTimersPromisesCallErrorCode::ALREADY_REPORTED,
+        .message = "",
+    });
   }
   if (Expr *ref = options.lookup("ref")) {
     args.push_back(this->checker.argumentChecker().checkArg(ref, Type::boolTy()));
@@ -367,56 +418,72 @@ Expr *TimerChecker::checkTimersPromisesCall(CallExpr *call, llvm::StringRef fn, 
   if (interval) {
     call->target = BuiltinCall{.builtin = Builtin::TimersSetInterval};
     call->type = Type::asyncIterator(value->isVoid() ? Type::undefinedTy() : value);
-    return call;
+    return ok(call);
   }
   call->target =
       BuiltinCall{.builtin = immediate ? Builtin::TimersSetImmediate : Builtin::TimersSetTimeout};
   call->type = Type::promise(value);
 
-  return call;
+  return ok(call);
 }
 
-Expr *TimerChecker::checkSchedulerCall(CallExpr *call, MemberExpr *member) {
+TimerChecker::ResultSchedulerAwait TimerChecker::checkSchedulerCall(CallExpr *call,
+                                                                    MemberExpr *member) {
   this->checker.file_->usesAsync = true;
   call->type = Type::error();
-  if (member->name == "wait") {
-    bool rejected = this->checker.callChecker().rejectSpread(call);
-    ArgumentChecker::ResultArityMatches arity =
-        rejected ? ok(call) : this->checker.argumentChecker().checkArity(call, 1, 2);
-    if (arity.isErr()) {
-      this->checker.diags_.error(member->loc(), arity.error().message);
-    }
-    if (rejected || arity.isErr()) {
-      return call;
-    }
+  bool known = member->name == "wait" || member->name == "yield";
+  if (!known) {
+    this->checker.argumentChecker().checkArgsLoosely(call);
+    std::string message = ErrorTextScheduler::noFunction(member->name);
+
+    return err(TimerCheckerCheckSchedulerCallError{
+        .code = TimerCheckerCheckSchedulerCallErrorCode::NO_SUCH_FUNCTION,
+        .message = message,
+    });
+  }
+  if (this->checker.callChecker().rejectSpread(call)) {
+    return err(TimerCheckerCheckSchedulerCallError{
+        .code = TimerCheckerCheckSchedulerCallErrorCode::ALREADY_REPORTED,
+        .message = "",
+    });
+  }
+  bool wait = member->name == "wait";
+  ArgumentChecker::ResultArityMatches arity =
+      this->checker.argumentChecker().checkArity(call, wait ? 1 : 0, wait ? 2 : 0);
+  if (arity.isErr()) {
+    return err(TimerCheckerCheckSchedulerCallError{
+        .code = TimerCheckerCheckSchedulerCallErrorCode::WRONG_ARITY,
+        .message = arity.error().message,
+    });
+  }
+  if (wait) {
     Expr *options = call->args.size() > 1 ? call->args[1] : nullptr;
     auto *none = this->checker.ctx_.make<UndefinedExpr>(member->loc());
     call->args = {call->args[0], none};
     if (options) {
       call->args.push_back(options);
     }
-    return this->checkTimersPromisesCall(call, "setTimeout", member->loc(), nullptr);
-  }
-  if (member->name == "yield") {
-    bool rejected = this->checker.callChecker().rejectSpread(call);
-    ArgumentChecker::ResultArityMatches arity =
-        rejected ? ok(call) : this->checker.argumentChecker().checkArity(call, 0, 0);
-    if (arity.isErr()) {
-      this->checker.diags_.error(member->loc(), arity.error().message);
-    }
-    if (rejected || arity.isErr()) {
-      return call;
-    }
-    return this->checkTimersPromisesCall(call, "setImmediate", member->loc(), nullptr);
-  }
-  this->checker.diags_.error(member->loc(),
-                             "'scheduler." + member->name +
-                                 "' does not exist; scheduler has 'wait' and 'yield'");
-  for (Expr *&arg : call->args) {
-    arg = this->checker.exprChecker().checkExpr(arg);
   }
 
-  return call;
+  ResultPromiseOfTimer promised = this->checkTimersPromisesCall(
+      call, wait ? "setTimeout" : "setImmediate", member->loc(), nullptr);
+  bool reported =
+      promised.isErr() &&
+      promised.error().code == TimerCheckerCheckTimersPromisesCallErrorCode::ALREADY_REPORTED;
+  if (reported) {
+    return err(TimerCheckerCheckSchedulerCallError{
+        .code = TimerCheckerCheckSchedulerCallErrorCode::ALREADY_REPORTED,
+        .message = "",
+    });
+  }
+  if (promised.isErr()) {
+    return err(TimerCheckerCheckSchedulerCallError{
+        .code = TimerCheckerCheckSchedulerCallErrorCode::TIMER_FAILED,
+        .message = promised.error().message,
+    });
+  }
+
+  return ok(promised.value());
 }
 
 }

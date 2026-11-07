@@ -1,6 +1,8 @@
 #pragma once
 
 #include "compiler/check/checker/checker.h"
+#include "compiler/check/types/template_types/template_types_errors.h"
+#include "compiler/result/result/result.h"
 
 namespace tz {
 
@@ -15,6 +17,11 @@ public:
                      Checker::InferMatch *inference);
 
 private:
+  using ResultHoleAccepted = Result<const Type *, TemplateTypesHoleTypeError>;
+  using ResultCountAllowed = Result<size_t, TemplateTypesStringCountError>;
+
+  static ResultHoleAccepted holeType(const Type *member);
+  static ResultCountAllowed stringCount(size_t count);
   static std::string utf8(const std::u16string &text);
   static std::u16string utf16(llvm::StringRef text);
   static std::vector<const Type *> distributed(const Type *type);

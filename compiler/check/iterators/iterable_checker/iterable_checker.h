@@ -1,12 +1,16 @@
 #pragma once
 
 #include "compiler/check/checker/checker.h"
+#include "compiler/check/iterators/iterable_checker/iterable_checker_errors.h"
+#include "compiler/result/result/result.h"
 
 namespace tz {
 
 class IterableChecker {
 public:
-  explicit IterableChecker(Checker &checker);
+  using ResultIterableParam = Result<const Type *, IterableCheckerIterableParamError>;
+
+  explicit IterableChecker(Checker &owner);
 
   Expr *userIterator(Expr *expr);
   Expr *asyncUserIterator(Expr *expr);
@@ -16,12 +20,18 @@ public:
   const Type *elementTypeOf(const Type *type);
   FuncSymbol *iterateFunction();
   static const Type *iteratorResultType(const Type *value, const Type *returned);
-  const Type *iterableParam(FunctionDecl *fn, FuncSymbol *sym, const TypeRef &ref);
+  ResultIterableParam iterableParam(FunctionDecl *fn, FuncSymbol *sym, const TypeRef &ref);
   bool isIterableRef(const TypeRef &ref) const;
 
 private:
-  Checker &checker_;
-  FuncSymbol *iterate_ = nullptr;
+  using ResultIteratorGiven = Result<const Expr *, IterableCheckerIteratorGivenError>;
+  using ResultAsyncIterator = Result<const Expr *, IterableCheckerAsyncIteratorGivenError>;
+
+  static ResultIteratorGiven iteratorGiven(const Type *type, const Expr *result);
+  static ResultAsyncIterator asyncIteratorGiven(const Type *type, const Expr *result);
+
+  Checker &checker;
+  FuncSymbol *iterateSymbol = nullptr;
 };
 
 }

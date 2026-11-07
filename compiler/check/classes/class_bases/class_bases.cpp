@@ -54,9 +54,23 @@ void ClassBases::resolveClassBases(ClassDecl *cls) {
         ref.kind() == TypeRefKind::NAME_REF) {
       const Type *events = this->checker.eventMapInference().inferredEventMap(
           "class " + this->checker.eventMapInference().placeOf(cls->loc()) + " " + cls->name.str());
-      parent = events ? this->checker.genericClassInstantiator().instantiateClass(parent, {events},
-                                                                                  ref.loc)
-                      : nullptr;
+      ClassDecl *emitter = parent;
+      parent = nullptr;
+      if (events) {
+        GenericClassInstantiator::ResultClassMade made =
+            this->checker.genericClassInstantiator().instantiateClass(emitter, {events}, ref.loc);
+        if (made.isErr() &&
+            made.error().code !=
+                GenericClassInstantiatorInstantiateClassErrorCode::ALREADY_REPORTED) {
+          llvm::SMLoc at =
+              made.error().code ==
+                      GenericClassInstantiatorInstantiateClassErrorCode::ENDLESS_INSTANCES
+                  ? emitter->loc()
+                  : ref.loc;
+          this->checker.diags_.error(at, made.error().message);
+        }
+        parent = made.isOk() ? made.value() : nullptr;
+      }
       instance = true;
       if (!events) {
         this->checker.diags_.error(ref.loc,

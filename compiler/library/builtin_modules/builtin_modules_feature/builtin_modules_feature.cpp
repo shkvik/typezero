@@ -39,7 +39,7 @@ Expr *BuiltinModulesFeature::checkModuleCall(Checker &checker, CallExpr *call, N
     return nullptr;
   }
 
-  return checker.timerChecker().checkTimersPromisesCall(call, fn, loc, expected);
+  return checker.builtinModuleChecker().checkTimersPromises(call, fn, loc, expected);
 }
 
 }

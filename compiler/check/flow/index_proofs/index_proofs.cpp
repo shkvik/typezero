@@ -329,39 +329,54 @@ bool IndexProofs::exempt(llvm::SMLoc loc, const Expr *object) const {
   return this->checker.flow_.unreachable || this->checker.libraryCalls().inLibrary(loc);
 }
 
-bool IndexProofs::requireBetween(const Expr *expr, int64_t lo, std::optional<int64_t> hi,
-                                 llvm::StringRef what) {
+IndexProofs::ResultBetweenProven IndexProofs::requireBetween(const Expr *expr, int64_t lo,
+                                                             std::optional<int64_t> hi,
+                                                             llvm::StringRef what) {
   if (!expr->type || expr->type->isError() || this->provesBetween(expr, lo, hi)) {
-    return true;
+    return ok(expr);
   }
   if (this->exempt(expr->loc())) {
-    return false;
+    return err(IndexProofsRequireBetweenError{
+        .code = IndexProofsRequireBetweenErrorCode::EXEMPT,
+        .message = "",
+    });
   }
-  std::string range = hi        ? "from " + std::to_string(lo) + " to " + std::to_string(*hi)
-                      : lo == 0 ? std::string("not negative")
-                                : "at least " + std::to_string(lo);
-  if (std::optional<int64_t> c = this->checker.constantFolder().intConstant(expr)) {
-    this->checker.diags_.error(expr->loc(), (!hi && lo == 0 ? what.str() + " cannot be negative"
-                                                            : what.str() + " must be " + range) +
-                                                ", found " + std::to_string(*c));
-    return false;
+
+  std::string range = ErrorTextBetween::range(lo, hi);
+  std::optional<int64_t> constant = this->checker.constantFolder().intConstant(expr);
+  if (constant && !hi && lo == 0) {
+    std::string message = ErrorTextBetween::negative(what, *constant);
+
+    return err(IndexProofsRequireBetweenError{
+        .code = IndexProofsRequireBetweenErrorCode::CONSTANT_NEGATIVE,
+        .message = message,
+    });
+  }
+  if (constant) {
+    std::string message = ErrorTextBetween::outside(what, range, *constant);
+
+    return err(IndexProofsRequireBetweenError{
+        .code = IndexProofsRequireBetweenErrorCode::CONSTANT_OUT_OF_RANGE,
+        .message = message,
+    });
   }
   if (!expr->type->isInteger()) {
-    this->checker.diags_.error(expr->loc(), what.str() + " must be a whole number " + range +
-                                                ", found '" + expr->type->name().str() + "'");
-    return false;
-  }
-  std::string text = valueText(expr);
-  std::string test = text + " >= " + std::to_string(lo);
-  if (hi) {
-    test += " && " + text + " <= " + std::to_string(*hi);
-  }
-  this->checker.diags_.error(expr->loc(), "cannot prove that " + what.str() + " is " + range +
-                                              ", and JavaScript would throw a RangeError; check it "
-                                              "first, e.g. 'if (" +
-                                              test + ")'");
+    std::string message = ErrorTextBetween::notWhole(what, range, expr->type->name());
 
-  return false;
+    return err(IndexProofsRequireBetweenError{
+        .code = IndexProofsRequireBetweenErrorCode::NOT_WHOLE_NUMBER,
+        .message = message,
+    });
+  }
+
+  std::string text = valueText(expr);
+  std::string test = ErrorTextBetween::test(text, lo, hi);
+  std::string message = ErrorTextBetween::unproven(what, range, test);
+
+  return err(IndexProofsRequireBetweenError{
+      .code = IndexProofsRequireBetweenErrorCode::NOT_PROVEN,
+      .message = message,
+  });
 }
 
 bool IndexProofs::provesLess(const Expr *a, const Expr *b) const {
@@ -377,19 +392,21 @@ bool IndexProofs::provesLess(const Expr *a, const Expr *b) const {
   return this->checker.flow_.facts.proves(la->term, lb->term, lb->offset - la->offset);
 }
 
-bool IndexProofs::requireLess(const Expr *a, const Expr *b, llvm::StringRef what) {
+IndexProofs::ResultLessWasProven IndexProofs::requireLess(const Expr *a, const Expr *b,
+                                                          llvm::StringRef what) {
   if (!a->type || !b->type || a->type->isError() || b->type->isError() || this->provesLess(a, b) ||
       this->exempt(b->loc())) {
-    return true;
+    return ok(b);
   }
+
   std::string left = valueText(a);
   std::string right = valueText(b);
-  this->checker.diags_.error(b->loc(), "cannot prove that " + what.str() +
-                                           ", and JavaScript would throw a RangeError; check it "
-                                           "first, e.g. 'if (" +
-                                           left + " < " + right + ")'");
+  std::string message = ErrorTextLess::unproven(what, left, right);
 
-  return false;
+  return err(IndexProofsRequireLessError{
+      .code = IndexProofsRequireLessErrorCode::NOT_PROVEN,
+      .message = message,
+  });
 }
 
 bool IndexProofs::provesLinearUpTo(Linear value, const Expr *object, int64_t less) const {
@@ -436,29 +453,30 @@ bool IndexProofs::provesUpTo(const Expr *value, const Expr *object, int64_t less
   return range.hi && this->provesLinearUpTo(Linear{Term::zero(), *range.hi}, object, less);
 }
 
-bool IndexProofs::requireUpTo(const Expr *value, const Expr *object, int64_t less,
-                              llvm::StringRef what) {
+IndexProofs::ResultUpToWasProven IndexProofs::requireUpTo(const Expr *value, const Expr *object,
+                                                          int64_t less, llvm::StringRef what) {
   if ((value && (!value->type || value->type->isError())) ||
       this->provesUpTo(value, object, less)) {
-    return true;
+    return ok(object);
   }
   if (this->exempt(object->loc(), object)) {
-    return false;
+    return err(IndexProofsRequireUpToError{
+        .code = IndexProofsRequireUpToErrorCode::EXEMPT,
+        .message = "",
+    });
   }
-  std::string text = value ? valueText(value) : "0";
+
+  std::optional<std::string> text =
+      value ? std::optional<std::string>(valueText(value)) : std::nullopt;
   bool bytes = object->type && (object->type->bytes() == Type::Bytes::ArrayBuffer ||
                                 object->type->bytes() == Type::Bytes::DataView);
-  std::string limit = valueText(object) + (bytes ? ".byteLength" : ".length") +
-                      (less ? " - " + std::to_string(less) : "");
-  std::string place = value ? "'" + text + "'" : "0";
-  this->checker.diags_.error(value ? value->loc() : object->loc(),
-                             "cannot prove that " + what.str() + " " + place + " is from 0 to " +
-                                 limit +
-                                 ", and JavaScript would throw a RangeError; check it first, e.g. "
-                                 "'if (" +
-                                 (value ? text + " >= 0 && " + text : "0") + " <= " + limit + ")'");
+  std::string limit = ErrorTextUpTo::limit(valueText(object), bytes, less);
+  std::string message = ErrorTextUpTo::unproven(what, text, limit);
 
-  return false;
+  return err(IndexProofsRequireUpToError{
+      .code = IndexProofsRequireUpToErrorCode::NOT_PROVEN,
+      .message = message,
+  });
 }
 
 std::optional<int64_t> IndexProofs::exactLength(const Expr *object) const {

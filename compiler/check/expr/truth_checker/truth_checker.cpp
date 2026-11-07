@@ -13,11 +13,9 @@ using llvm::isa;
 
 namespace tz {
 
-namespace {
-
-std::string sourceText(const Expr *expr) {
+std::string TruthChecker::sourceText(const Expr *expr) {
   if (auto *conv = dyn_cast<CastExpr>(expr); conv && conv->isImplicit()) {
-    return sourceText(conv->operand);
+    return TruthChecker::sourceText(conv->operand);
   }
   switch (expr->kind()) {
   case Expr::Kind::Name: {
@@ -43,16 +41,16 @@ std::string sourceText(const Expr *expr) {
   case Expr::Kind::ArrayLit:
     return cast<ArrayLitExpr>(expr)->elements.empty() ? "[]" : "";
   case Expr::Kind::OptionalChain:
-    return sourceText(cast<OptionalChainExpr>(expr)->chain);
+    return TruthChecker::sourceText(cast<OptionalChainExpr>(expr)->chain);
   case Expr::Kind::Member: {
     auto *member = cast<MemberExpr>(expr);
-    std::string object = sourceText(member->object);
+    std::string object = TruthChecker::sourceText(member->object);
     return object.empty() ? "" : object + (member->optional ? "?." : ".") + member->name.str();
   }
   case Expr::Kind::Index: {
     auto *index = cast<IndexExpr>(expr);
-    std::string object = sourceText(index->object);
-    std::string position = sourceText(index->index);
+    std::string object = TruthChecker::sourceText(index->object);
+    std::string position = TruthChecker::sourceText(index->index);
     if (object.empty() || position.empty()) {
       return "";
     }
@@ -60,13 +58,13 @@ std::string sourceText(const Expr *expr) {
   }
   case Expr::Kind::Call: {
     auto *call = cast<CallExpr>(expr);
-    std::string text = sourceText(call->callee);
+    std::string text = TruthChecker::sourceText(call->callee);
     if (text.empty() || call->hasSpread()) {
       return "";
     }
     text += call->optional ? "?.(" : "(";
     for (size_t i = 0; i < call->args.size(); ++i) {
-      std::string arg = sourceText(call->args[i]);
+      std::string arg = TruthChecker::sourceText(call->args[i]);
       if (arg.empty()) {
         return "";
       }
@@ -79,13 +77,13 @@ std::string sourceText(const Expr *expr) {
   }
 }
 
-std::string hintText(const Expr *expr, const char *placeholder = "x") {
-  std::string text = expr ? sourceText(expr) : "";
+std::string TruthChecker::hintText(const Expr *expr, const char *placeholder) {
+  std::string text = expr ? TruthChecker::sourceText(expr) : "";
 
   return text.empty() ? placeholder : text;
 }
 
-const NameExpr *narrowedVariable(const Expr *expr) {
+const NameExpr *TruthChecker::narrowedVariable(const Expr *expr) {
   auto *conv = dyn_cast<CastExpr>(expr);
   if (!conv || !conv->isImplicit() || conv->shortCircuit || !conv->operand->type->isOptional() ||
       conv->type != conv->operand->type->inner()) {
@@ -95,7 +93,7 @@ const NameExpr *narrowedVariable(const Expr *expr) {
   return dyn_cast<NameExpr>(conv->operand);
 }
 
-bool isLength(const Expr *expr) {
+bool TruthChecker::isLength(const Expr *expr) {
   for (;;) {
     if (auto *conv = dyn_cast<CastExpr>(expr)) {
       expr = conv->operand;
@@ -110,7 +108,7 @@ bool isLength(const Expr *expr) {
   return member && member->name == "length";
 }
 
-bool isLiteral(const Expr *expr) {
+bool TruthChecker::isLiteral(const Expr *expr) {
   while (auto *conv = dyn_cast<CastExpr>(expr)) {
     expr = conv->operand;
   }
@@ -122,15 +120,13 @@ bool isLiteral(const Expr *expr) {
          isa<BoolLitExpr>(expr) || isa<UndefinedExpr>(expr);
 }
 
-const Type *falsyType(const Type *type) {
+const Type *TruthChecker::falsyType(const Type *type) {
   const Type *base = type->nonOptional();
 
   return base->isArray() || base->isFunction() || base->isObject() || base->isIterator() ||
                  base->isDict() || base->isClassRef()
              ? Type::undefinedTy()
              : type;
-}
-
 }
 
 TruthChecker::TruthChecker(Checker &owner)
@@ -183,7 +179,10 @@ Expr *TruthChecker::checkBranching(Expr *expr, Checker::Flow &whenTrue, Checker:
     expr = this->checker.exprChecker().checkExpr(assign);
     whenTrue = this->checker.flow_;
     whenFalse = this->checker.flow_;
-    this->reportAssignmentCondition(assign, use);
+    ResultConditionForm form = TruthChecker::assignmentCondition(assign, use);
+    if (form.isErr()) {
+      this->checker.diags_.error(assign->loc(), form.error().message);
+    }
     return this->checker.typeRelations().convert(expr, Type::boolTy());
   }
 
@@ -196,7 +195,10 @@ Expr *TruthChecker::checkBranching(Expr *expr, Checker::Flow &whenTrue, Checker:
     this->checker.conditionFacts().addConditionFacts(expr, whenTrue, whenFalse);
   }
   if (!expr->type->isBool()) {
-    this->checkTruthy(expr, use);
+    ResultTruthIsTested truthy = this->checkTruthy(expr, use);
+    if (truthy.isErr()) {
+      this->checker.diags_.error(expr->loc(), truthy.error().message);
+    }
   }
 
   return this->checker.typeRelations().convert(expr, Type::boolTy());
@@ -236,14 +238,22 @@ Expr *TruthChecker::checkLogical(BinaryExpr *bin, const Type *expected, Checker:
   Checker::Flow lhsTrue, lhsFalse, rhsTrue, rhsFalse;
   bin->lhs = this->checker.genericChecker().apparent(
       this->checkTestedValue(bin->lhs, expected, lhsTrue, lhsFalse, use));
-  bool ok = this->checkTruthy(bin->lhs, use, other);
+  ResultTruthIsTested leftTruthy = this->checkTruthy(bin->lhs, use, other);
+  if (leftTruthy.isErr()) {
+    this->checker.diags_.error(bin->lhs->loc(), leftTruthy.error().message);
+  }
+  bool truthy = leftTruthy.isOk();
   const Type *l = bin->lhs->type;
   this->checker.flow_ = isAnd ? lhsTrue : lhsFalse;
   const Type *hint = isAnd || l->isError() || l->isUndefined() ? expected : l->nonOptional();
   if (tested) {
     bin->rhs =
         this->checkTestedValue(bin->rhs, hint, rhsTrue, rhsFalse, Checker::TruthUse::Condition);
-    ok &= this->checkTruthy(bin->rhs, Checker::TruthUse::Condition);
+    ResultTruthIsTested rightTruthy = this->checkTruthy(bin->rhs, Checker::TruthUse::Condition);
+    if (rightTruthy.isErr()) {
+      this->checker.diags_.error(bin->rhs->loc(), rightTruthy.error().message);
+    }
+    truthy &= rightTruthy.isOk();
   } else {
     bin->rhs = this->checker.exprChecker().checkExpr(bin->rhs, hint);
     rhsTrue = this->checker.flow_;
@@ -258,10 +268,10 @@ Expr *TruthChecker::checkLogical(BinaryExpr *bin, const Type *expected, Checker:
 
   const Type *r = bin->rhs->type;
   bin->type = Type::error();
-  if (!ok) {
+  if (!truthy) {
     return bin;
   }
-  const Type *kept = l->isError() ? l : isAnd ? falsyType(l) : l->nonOptional();
+  const Type *kept = l->isError() ? l : isAnd ? TruthChecker::falsyType(l) : l->nonOptional();
   if (l->isError() || r->isError()) {
     if (this->checker.trial_ && l->isError() != r->isError()) {
       bin->type = l->isError() ? r : kept;
@@ -272,46 +282,213 @@ Expr *TruthChecker::checkLogical(BinaryExpr *bin, const Type *expected, Checker:
     bin->type = l;
     return bin;
   }
-  if (r->isVoid()) {
-    std::string test = hintText(bin->lhs);
-    this->checker.diags_.error(
-        bin->loc(),
-        llvm::Twine("the right side of '") + op +
-            "' returns nothing, so there is no value to give; call it with 'if': 'if (" +
-            (isAnd ? "" : "!") + test + ") " + hintText(bin->rhs, "...") + "'");
+  ResultLogicalJoined joined = TruthChecker::logicalValue(bin, op, isAnd, kept);
+  if (joined.isErr()) {
+    this->checker.diags_.error(bin->loc(), joined.error().message);
     return bin;
   }
-  const Type *result = TypeRelations::unify(kept, r);
-  if (!result) {
-    this->checker.diags_.error(
-        bin->loc(), llvm::Twine("'") + op + "' gives '" + kept->name() +
-                        "' when its left side is " + (isAnd ? "falsy" : "truthy") + " and '" +
-                        r->name() +
-                        "' otherwise, and no type holds both; say what each case gives with '?:'");
-    return bin;
-  }
+  const Type *result = joined.value();
   bin->rhs = this->checker.typeRelations().convert(bin->rhs, result);
   bin->type = result;
 
   return bin;
 }
 
-bool TruthChecker::checkTruthy(const Expr *expr, Checker::TruthUse use, const Expr *other) {
+llvm::StringRef TruthChecker::useOperator(Checker::TruthUse use) {
+  switch (use) {
+    case Checker::TruthUse::Condition:
+      return "";
+    case Checker::TruthUse::Not:
+      return "!";
+    case Checker::TruthUse::Or:
+      return "||";
+    case Checker::TruthUse::And:
+      return "&&";
+    case Checker::TruthUse::OrAssign:
+      return "||=";
+    case Checker::TruthUse::AndAssign:
+      return "&&=";
+  }
+
+  return "";
+}
+
+std::string TruthChecker::paramMessage(const Type *type, const Type *base, Checker::TruthUse use,
+                                       llvm::StringRef x, llvm::StringRef y) {
+  bool negated = use == Checker::TruthUse::Not;
+  std::string what = ErrorTextTruthy::typeValue(type->name());
+  std::string head = ErrorTextTruthy::cannotTest(TruthChecker::useOperator(use), what) +
+                     ErrorTextTruthy::mayBeNum(base->name());
+  if (use == Checker::TruthUse::Or) {
+    return head + ErrorTextTruthy::orDefault(x, y);
+  }
+  if (use == Checker::TruthUse::OrAssign) {
+    return head + ErrorTextTruthy::orAssign(x, y);
+  }
+  if (use == Checker::TruthUse::AndAssign) {
+    return head + ErrorTextTruthy::andAssign(x, y);
+  }
+
+  return head + ErrorTextTruthy::undefTest(x, negated);
+}
+
+std::string TruthChecker::jsonMessage(Checker::TruthUse use, llvm::StringRef x, llvm::StringRef y) {
+  bool negated = use == Checker::TruthUse::Not;
+  std::string head =
+      ErrorTextTruthy::jsonHead(TruthChecker::useOperator(use)) + ErrorTextTruthy::jsonMay();
+  if (use == Checker::TruthUse::Or) {
+    return head + ErrorTextTruthy::jsonOr(x, y);
+  }
+  if (use == Checker::TruthUse::OrAssign) {
+    return head + ErrorTextTruthy::orAssign(x, y);
+  }
+
+  return head + ErrorTextTruthy::jsonTest(x, negated);
+}
+
+std::string TruthChecker::unknownMessage(Checker::TruthUse use, llvm::StringRef x,
+                                         llvm::StringRef y) {
+  bool negated = use == Checker::TruthUse::Not;
+  std::string head =
+      ErrorTextTruthy::unknownHd(TruthChecker::useOperator(use)) + ErrorTextTruthy::unknownMay();
+  if (use == Checker::TruthUse::Or) {
+    return head + ErrorTextTruthy::orDefault(x, y);
+  }
+  if (use == Checker::TruthUse::OrAssign) {
+    return head + ErrorTextTruthy::orAssign(x, y);
+  }
+
+  return head + ErrorTextTruthy::unknownTst(x, negated);
+}
+
+std::string TruthChecker::numberMessage(const Expr *expr, const Type *type, const Type *base,
+                                        Checker::TruthUse use, llvm::StringRef x,
+                                        llvm::StringRef y) {
+  bool negated = use == Checker::TruthUse::Not;
+  bool length = TruthChecker::isLength(expr);
+  std::string what = ErrorTextTruthy::number(base->isDecimal(), type->isOptional());
+  std::string head =
+      ErrorTextTruthy::cannotTest(TruthChecker::useOperator(use), what) + ErrorTextTruthy::zero();
+  if (type->isOptional()) {
+    head += ErrorTextTruthy::too();
+    bool lengthUse = length && (use == Checker::TruthUse::Condition ||
+                                use == Checker::TruthUse::Not || use == Checker::TruthUse::And);
+    if (lengthUse) {
+      return head + ErrorTextTruthy::lengthTest(x, negated);
+    }
+    if (use == Checker::TruthUse::Or) {
+      return head + ErrorTextTruthy::orDefault(x, y);
+    }
+    if (use == Checker::TruthUse::OrAssign) {
+      return head + ErrorTextTruthy::orAssign(x, y);
+    }
+    return head + ErrorTextTruthy::undefTest(x, negated);
+  }
+  if (base->isFloat()) {
+    return head + ErrorTextTruthy::floatTest(x, negated);
+  }
+
+  std::string test = ErrorTextTruthy::zeroTest(x, negated, length);
+  if (use == Checker::TruthUse::Or) {
+    return head + ErrorTextTruthy::orCompare(test, x, y);
+  }
+  if (use == Checker::TruthUse::OrAssign) {
+    return head + ErrorTextTruthy::orAssignIf(x, y);
+  }
+  if (use == Checker::TruthUse::AndAssign) {
+    return head + ErrorTextTruthy::andIf(test, x, y);
+  }
+
+  return head + ErrorTextTruthy::compare(test);
+}
+
+std::string TruthChecker::objectMessage(const Expr *expr, const Type *base, Checker::TruthUse use,
+                                        llvm::StringRef x, llvm::StringRef y) {
+  bool negated = use == Checker::TruthUse::Not;
+  const NameExpr *narrowed = TruthChecker::narrowedVariable(expr);
+  bool isArray = base->isArray();
+  bool isPromise = base->isPromise();
+  bool isClass = base->isClassRef();
+  bool isObject = base->isObject() || base->isIterator() || base->isDict() || isClass || isPromise;
+  const Expr *bare = expr;
+  while (isa<CastExpr>(bare) && cast<CastExpr>(bare)->isImplicit()) {
+    bare = cast<CastExpr>(bare)->operand;
+  }
+  auto *name = dyn_cast<NameExpr>(bare);
+  bool className = isClass && name && name->cls() && !name->var();
+  std::string what = ErrorTextTruthy::kind(isArray, isPromise, isClass, isObject);
+  std::string message;
+  if (narrowed) {
+    message = ErrorTextTruthy::holds(narrowed->name, what);
+  } else if (isArray) {
+    message = ErrorTextTruthy::arrayTrue();
+  } else {
+    message = ErrorTextTruthy::alwaysTrue(what);
+  }
+  switch (use) {
+    case Checker::TruthUse::Condition:
+      message += ErrorTextTruthy::soAlways();
+      break;
+    case Checker::TruthUse::Not:
+      message += ErrorTextTruthy::soNot();
+      break;
+    case Checker::TruthUse::Or:
+      message += ErrorTextTruthy::soOr();
+      break;
+    case Checker::TruthUse::And:
+      message += ErrorTextTruthy::soAnd();
+      break;
+    case Checker::TruthUse::OrAssign:
+      message += ErrorTextTruthy::soOrSet();
+      break;
+    case Checker::TruthUse::AndAssign:
+      message += ErrorTextTruthy::soAndSet();
+      break;
+  }
+  std::string length = ErrorTextTruthy::lengthCmp(x, negated);
+  std::string call = isObject ? "" : ErrorTextTruthy::callOf(x, negated, base->minArgs() == 0);
+  if (use == Checker::TruthUse::AndAssign) {
+    return message + ErrorTextTruthy::useAssign();
+  }
+  if (use == Checker::TruthUse::Or) {
+    return message + ErrorTextTruthy::dropOr(y);
+  }
+  if (use == Checker::TruthUse::OrAssign) {
+    return message + (isArray ? ErrorTextTruthy::arrayLen(x, y) : ErrorTextTruthy::dropAssign());
+  }
+  if ((narrowed || isObject) && use == Checker::TruthUse::And) {
+    return message + ErrorTextTruthy::dropAnd(x);
+  }
+  if (narrowed || className) {
+    return message + (isArray ? ErrorTextTruthy::dropOrLen(length) : ErrorTextTruthy::dropCheck());
+  }
+  if (isArray) {
+    return message + ErrorTextTruthy::checkLen(length);
+  }
+  if (isObject) {
+    return message + ErrorTextTruthy::allowUndef(base->name());
+  }
+
+  return message + ErrorTextTruthy::callIt(call);
+}
+
+TruthChecker::ResultTruthIsTested TruthChecker::checkTruthy(const Expr *expr, Checker::TruthUse use,
+                                                            const Expr *other) {
   const Type *type = expr->type;
   const Type *base = GenericChecker::apparentType(type->nonOptional());
   if (type->isUndefined() || base->isNever()) {
-    return true;
+    return ok(expr);
   }
   if (type->isError() || base->isBool() || base->isString() ||
       (type->isOptional() &&
        (base->isArray() || base->isFunction() || base->isObject() || base->isResult() ||
         base->isIterator() || base->isDict() || base->isPromise() || base->isClassRef()))) {
-    return true;
+    return ok(expr);
   }
+  auto boolOrString = [](const Type *t) { return t->isBool() || t->isString(); };
   if (base->isParam() && !base->alternatives().empty() &&
-      llvm::all_of(base->alternatives(),
-                   [](const Type *t) { return t->isBool() || t->isString(); })) {
-    return true;
+      llvm::all_of(base->alternatives(), boolOrString)) {
+    return ok(expr);
   }
   if (base->isUnion() || base->isLiteral()) {
     llvm::ArrayRef<const Type *> members =
@@ -329,216 +506,147 @@ bool TruthChecker::checkTruthy(const Expr *expr, Checker::TruthUse use, const Ex
       }
     }
     if (!number && falsy) {
-      return true;
+      return ok(expr);
     }
     if (!number) {
-      this->checker.diags_.error(expr->loc(),
-                                 "a value of type '" + type->name().str() +
-                                     "' is always truthy, so the condition is always true");
-      return false;
+      std::string message = ErrorTextTruthy::unionTrue(type->name());
+
+      return err(TruthCheckerCheckTruthyError{
+          .code = TruthCheckerCheckTruthyErrorCode::UNION_ALWAYS_TRUTHY,
+          .message = message,
+      });
     }
-    this->checker.diags_.error(expr->loc(),
-                               "a value of type '" + type->name().str() +
-                                   "' cannot be a condition: '" + number->name().str() +
-                                   "' is a number, and 0 would count as false; check what it "
-                                   "holds, e.g. 'typeof " +
-                                   hintText(expr) + " == \"string\"'");
-    return false;
+    std::string value = TruthChecker::hintText(expr);
+    std::string message = ErrorTextTruthy::unionNum(type->name(), number->name(), value);
+
+    return err(TruthCheckerCheckTruthyError{
+        .code = TruthCheckerCheckTruthyErrorCode::UNION_WITH_NUMBER,
+        .message = message,
+    });
   }
 
-  const char *op = nullptr;
-  switch (use) {
-  case Checker::TruthUse::Condition:
-    break;
-  case Checker::TruthUse::Not:
-    op = "!";
-    break;
-  case Checker::TruthUse::Or:
-    op = "||";
-    break;
-  case Checker::TruthUse::And:
-    op = "&&";
-    break;
-  case Checker::TruthUse::OrAssign:
-    op = "||=";
-    break;
-  case Checker::TruthUse::AndAssign:
-    op = "&&=";
-    break;
-  }
   bool negated = use == Checker::TruthUse::Not;
-  std::string x = hintText(expr);
-  std::string y = hintText(other, "...");
-  std::string message;
+  std::string x = TruthChecker::hintText(expr);
+  std::string y = TruthChecker::hintText(other, "...");
+  if (type->isVoid()) {
+    std::string message = ErrorTextTruthy::voidValue();
 
-  if (type->isVoid() || type->isUndefined()) {
-    message = type->isVoid() ? "an expression of type 'void' has no value to test"
-                             : "the value is always undefined, which is always falsy";
-  } else if (base->isParam()) {
-    std::string what = "a value of type '" + type->name().str() + "'";
-    message =
-        op ? "'" + std::string(op) + "' cannot test " + what : what + " cannot be a condition";
-    message += ": '" + base->name().str() + "' may be a number, and 0 would count as false; ";
-    if (use == Checker::TruthUse::Or) {
-      message += "give a default with '??': '" + x + " ?? " + y + "'";
-    } else if (use == Checker::TruthUse::OrAssign) {
-      message += "give a default with '??=': '" + x + " ??= " + y + "'";
-    } else if (use == Checker::TruthUse::AndAssign) {
-      message += "check for undefined: 'if (" + x + " != undefined) " + x + " = " + y + "'";
-    } else {
-      message += "check for undefined: '" + x + (negated ? " == " : " != ") + "undefined'";
-    }
-  } else if (base->isJson()) {
-    message = op ? "'" + std::string(op) + "' cannot test a Json" : "a Json cannot be a condition";
-    message += ": it may hold 0, \"\", false or null, which would count as false; ";
-    if (use == Checker::TruthUse::Or) {
-      message +=
-          "give a default with '??', which replaces null and undefined: '" + x + " ?? " + y + "'";
-    } else if (use == Checker::TruthUse::OrAssign) {
-      message += "give a default with '??=': '" + x + " ??= " + y + "'";
-    } else {
-      message += "compare it as you mean, e.g. '" + x + (negated ? " == null'" : " != null'") +
-                 ", '" + x + (negated ? " != true'" : " == true'") + " or 'typeof " + x +
-                 " == \"string\"'";
-    }
-  } else if (base->isUnknown()) {
-    message = op ? "'" + std::string(op) + "' cannot test an unknown value"
-                 : "an unknown value cannot be a condition";
-    message += ": it may hold 0, \"\" or false, which would count as false; ";
-    if (use == Checker::TruthUse::Or) {
-      message += "give a default with '??': '" + x + " ?? " + y + "'";
-    } else if (use == Checker::TruthUse::OrAssign) {
-      message += "give a default with '??=': '" + x + " ??= " + y + "'";
-    } else {
-      message += "check what it holds, e.g. '" + x +
-                 (negated ? " == undefined'" : " != undefined'") + " or 'typeof " + x +
-                 " == \"string\"'";
-    }
-  } else if (base->isResult()) {
-    message = "a Result is always truthy, an Err too, as both are objects in JavaScript; test "
-              "it: '" +
-              x + (negated ? ".isErr()'" : ".isOk()'");
-  } else if (base->isNumeric() || base->isDecimal()) {
-    std::string noun = base->isDecimal() ? "a decimal" : "a number";
-    std::string what = type->isOptional() ? noun + " that may be undefined" : noun;
-    message =
-        op ? "'" + std::string(op) + "' cannot test " + what : what + " cannot be a condition";
-    message += ": 0 would count as false";
-    if (type->isOptional()) {
-      message += " too; ";
-      if (isLength(expr) && (use == Checker::TruthUse::Condition || use == Checker::TruthUse::Not ||
-                             use == Checker::TruthUse::And)) {
-        message += "compare it: '(" + x + " ?? 0) " + (negated ? "== 0'" : "> 0'");
-      } else if (use == Checker::TruthUse::Or) {
-        message += "give a default with '??': '" + x + " ?? " + y + "'";
-      } else if (use == Checker::TruthUse::OrAssign) {
-        message += "give a default with '??=': '" + x + " ??= " + y + "'";
-      } else {
-        message += "check for undefined: '" + x + (negated ? " == " : " != ") + "undefined'";
-      }
-    } else if (base->isFloat()) {
-      message += "; compare it as you mean: '" + x + (negated ? " == 0' or '" : " != 0' or '") + x +
-                 (negated ? " <= 0'" : " > 0'");
-    } else {
-      std::string test = negated ? x + " == 0" : isLength(expr) ? x + " > 0" : x + " != 0";
-      if (use == Checker::TruthUse::Or) {
-        message += "; compare it: '" + test + " ? " + x + " : " + y + "'";
-      } else if (use == Checker::TruthUse::OrAssign) {
-        message += "; compare it: 'if (" + x + " == 0) " + x + " = " + y + "'";
-      } else if (use == Checker::TruthUse::AndAssign) {
-        message += "; compare it: 'if (" + test + ") " + x + " = " + y + "'";
-      } else {
-        message += "; compare it: '" + test + "'";
-      }
-    }
-  } else {
-    const NameExpr *narrowed = narrowedVariable(expr);
-    bool isArray = base->isArray(), isPromise = base->isPromise(), isClass = base->isClassRef(),
-         isObject =
-             base->isObject() || base->isIterator() || base->isDict() || isClass || isPromise;
-    const Expr *bare = expr;
-    while (isa<CastExpr>(bare) && cast<CastExpr>(bare)->isImplicit()) {
-      bare = cast<CastExpr>(bare)->operand;
-    }
-    auto *name = dyn_cast<NameExpr>(bare);
-    bool className = isClass && name && name->cls() && !name->var();
-    const char *what = isArray     ? "an array"
-                       : isPromise ? "a Promise"
-                       : isClass   ? "a class"
-                       : isObject  ? "an object"
-                                   : "a function";
-    if (narrowed) {
-      message = "'" + narrowed->name.str() + "' always holds " + what + " at this point";
-    } else {
-      message = isArray ? "an array is always truthy, even when empty"
-                        : std::string(what) + " is always truthy";
-    }
-    switch (use) {
-    case Checker::TruthUse::Condition:
-      message += ", so the condition is always true";
-      break;
-    case Checker::TruthUse::Not:
-      message += ", so '!' always gives false";
-      break;
-    case Checker::TruthUse::Or:
-      message += ", so '||' never gives its right side";
-      break;
-    case Checker::TruthUse::And:
-      message += ", so '&&' always gives its right side";
-      break;
-    case Checker::TruthUse::OrAssign:
-      message += ", so '||=' never assigns";
-      break;
-    case Checker::TruthUse::AndAssign:
-      message += ", so '&&=' always assigns";
-      break;
-    }
-    std::string length = x + (negated ? ".length == 0" : ".length > 0");
-    std::string call =
-        isObject ? "" : (negated ? "!" : "") + x + (base->minArgs() == 0 ? "()" : "(...)");
-    if (use == Checker::TruthUse::AndAssign) {
-      message += "; use '='";
-    } else if (use == Checker::TruthUse::Or) {
-      message += "; drop '|| " + y + "'";
-    } else if (use == Checker::TruthUse::OrAssign) {
-      message += isArray ? "; check its length: 'if (" + x + ".length == 0) " + x + " = " + y + "'"
-                         : "; drop the assignment";
-    } else if ((narrowed || isObject) && use == Checker::TruthUse::And) {
-      message += "; drop '" + x + " &&'";
-    } else if (narrowed || className) {
-      message +=
-          isArray ? "; drop the check, or check the length: '" + length + "'" : "; drop the check";
-    } else if (isArray) {
-      message += "; check its length: '" + length + "'";
-    } else if (isObject) {
-      message += "; drop the check, or give it a type that allows undefined: '" +
-                 base->name().str() + " | undefined'";
-    } else {
-      message += "; call it: '" + call + "'";
-    }
+    return err(TruthCheckerCheckTruthyError{
+        .code = TruthCheckerCheckTruthyErrorCode::VOID_VALUE,
+        .message = message,
+    });
   }
-  this->checker.diags_.error(expr->loc(), message);
+  if (type->isUndefined()) {
+    std::string message = ErrorTextTruthy::undefined();
 
-  return false;
+    return err(TruthCheckerCheckTruthyError{
+        .code = TruthCheckerCheckTruthyErrorCode::ALWAYS_UNDEFINED,
+        .message = message,
+    });
+  }
+  if (base->isParam()) {
+    std::string message = TruthChecker::paramMessage(type, base, use, x, y);
+
+    return err(TruthCheckerCheckTruthyError{
+        .code = TruthCheckerCheckTruthyErrorCode::PARAM_MAY_BE_NUMBER,
+        .message = message,
+    });
+  }
+  if (base->isJson()) {
+    std::string message = TruthChecker::jsonMessage(use, x, y);
+
+    return err(TruthCheckerCheckTruthyError{
+        .code = TruthCheckerCheckTruthyErrorCode::JSON_VALUE,
+        .message = message,
+    });
+  }
+  if (base->isUnknown()) {
+    std::string message = TruthChecker::unknownMessage(use, x, y);
+
+    return err(TruthCheckerCheckTruthyError{
+        .code = TruthCheckerCheckTruthyErrorCode::UNKNOWN_VALUE,
+        .message = message,
+    });
+  }
+  if (base->isResult()) {
+    std::string message = ErrorTextTruthy::result(x, negated);
+
+    return err(TruthCheckerCheckTruthyError{
+        .code = TruthCheckerCheckTruthyErrorCode::RESULT_VALUE,
+        .message = message,
+    });
+  }
+  if (base->isNumeric() || base->isDecimal()) {
+    std::string message = TruthChecker::numberMessage(expr, type, base, use, x, y);
+
+    return err(TruthCheckerCheckTruthyError{
+        .code = TruthCheckerCheckTruthyErrorCode::NUMBER_VALUE,
+        .message = message,
+    });
+  }
+
+  std::string message = TruthChecker::objectMessage(expr, base, use, x, y);
+
+  return err(TruthCheckerCheckTruthyError{
+      .code = TruthCheckerCheckTruthyErrorCode::ALWAYS_TRUTHY,
+      .message = message,
+  });
 }
 
-void TruthChecker::reportAssignmentCondition(const AssignExpr *assign, Checker::TruthUse use) {
+TruthChecker::ResultConditionForm TruthChecker::assignmentCondition(const AssignExpr *assign,
+                                                                    Checker::TruthUse use) {
   bool negated = use == Checker::TruthUse::Not;
-  std::string target = hintText(assign->target);
-  std::string value = hintText(assign->value, "...");
+  std::string target = TruthChecker::hintText(assign->target);
+  std::string value = TruthChecker::hintText(assign->value, "...");
   const Type *type = assign->type;
-  std::string message = "an assignment cannot be a condition; ";
-  if (isLiteral(assign->value) || type->isError() ||
-      !(type->isOptional() || type->isNumeric() || type->isDecimal() || type->isString())) {
-    const char *eq = negated ? "!=" : "==";
-    message +=
-        "to compare, use '" + std::string(eq) + "': '" + target + " " + eq + " " + value + "'";
-  } else {
-    const char *empty = type->isOptional() ? "undefined" : type->isString() ? "\"\"" : "0";
-    message += "to test the assigned value, compare it: '(" + target + " = " + value + ") " +
-               (negated ? "== " : "!= ") + empty + "'";
+  bool compareInstead =
+      TruthChecker::isLiteral(assign->value) || type->isError() ||
+      !(type->isOptional() || type->isNumeric() || type->isDecimal() || type->isString());
+  if (compareInstead) {
+    std::string eq = negated ? "!=" : "==";
+    std::string message = ErrorTextAssignTest::compare(eq, target, value);
+
+    return err(TruthCheckerAssignmentConditionError{
+        .code = TruthCheckerAssignmentConditionErrorCode::COMPARE_INSTEAD,
+        .message = message,
+    });
   }
-  this->checker.diags_.error(assign->loc(), message);
+
+  std::string message =
+      ErrorTextAssignTest::testValue(target, value, negated, type->isOptional(), type->isString());
+
+  return err(TruthCheckerAssignmentConditionError{
+      .code = TruthCheckerAssignmentConditionErrorCode::TEST_ASSIGNED,
+      .message = message,
+  });
+}
+
+TruthChecker::ResultLogicalJoined TruthChecker::logicalValue(const BinaryExpr *bin,
+                                                             llvm::StringRef op, bool isAnd,
+                                                             const Type *kept) {
+  const Type *r = bin->rhs->type;
+  if (r->isVoid()) {
+    std::string test = TruthChecker::hintText(bin->lhs);
+    std::string rhs = TruthChecker::hintText(bin->rhs, "...");
+    std::string message = ErrorTextLogical::rightVoid(op, isAnd, test, rhs);
+
+    return err(TruthCheckerLogicalValueError{
+        .code = TruthCheckerLogicalValueErrorCode::RIGHT_SIDE_VOID,
+        .message = message,
+    });
+  }
+
+  const Type *result = TypeRelations::unify(kept, r);
+  if (!result) {
+    std::string message = ErrorTextLogical::noCommon(op, kept->name(), isAnd, r->name());
+
+    return err(TruthCheckerLogicalValueError{
+        .code = TruthCheckerLogicalValueErrorCode::NO_COMMON_TYPE,
+        .message = message,
+    });
+  }
+
+  return ok(result);
 }
 
 bool TruthChecker::isBooleanCall(const Expr *expr) const {

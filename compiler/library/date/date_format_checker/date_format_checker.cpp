@@ -234,7 +234,12 @@ bool DateFormatChecker::checkLocaleArgs(std::vector<Expr *> &args, int kind) {
     llvm::SMLoc at = given ? given->loc() : options->loc();
     if (field.name == "fractionalSecondDigits") {
       if (given) {
-        ok &= checker_.indexProofs().requireBetween(given, 1, 3, "fractionalSecondDigits");
+        IndexProofs::ResultBetweenProven between =
+            checker_.indexProofs().requireBetween(given, 1, 3, "fractionalSecondDigits");
+        if (between.isErr() && between.error().code != IndexProofsRequireBetweenErrorCode::EXEMPT) {
+          checker_.diags_.error(given->loc(), between.error().message);
+        }
+        ok &= between.isOk();
         continue;
       }
       std::optional<std::vector<double>> digits = numbersOf(field.type->nonOptional());

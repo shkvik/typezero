@@ -1,6 +1,8 @@
 #pragma once
 
 #include "compiler/check/checker/checker.h"
+#include "compiler/check/classes/class_links/class_links_errors.h"
+#include "compiler/result/result/result.h"
 
 namespace tz {
 
@@ -21,6 +23,24 @@ public:
   static const Type *commonClass(const Type *a, const Type *b);
 
 private:
+  using ResultMethodNotField = Result<const FunctionDecl *, ClassLinksNotAFieldError>;
+  using ResultOverrideTarget = Result<const FunctionDecl *, ClassLinksOverrideTargetError>;
+  using ResultBaseIsNotArrow = Result<const FunctionDecl *, ClassLinksArrowOverrideError>;
+  using ResultBaseNotPrivate = Result<const FunctionDecl *, ClassLinksBaseVisibleError>;
+  using ResultAccessNotLower = Result<const FunctionDecl *, ClassLinksAccessKeptError>;
+  using ResultBodyIsRetained = Result<const FunctionDecl *, ClassLinksBodyKeptError>;
+  using ResultSameTypeParams = Result<const FunctionDecl *, ClassLinksSameTypeArgsError>;
+
+  static ResultMethodNotField notAField(const ClassDecl *cls, const FunctionDecl *fn);
+  static ResultOverrideTarget overrideTarget(const ClassDecl *cls, const FunctionDecl *fn,
+                                             llvm::ArrayRef<FunctionDecl *> inherited);
+  static ResultBaseIsNotArrow arrowOverride(const FunctionDecl *fn, const FunctionDecl *base);
+  static ResultBaseNotPrivate baseVisible(const FunctionDecl *fn, const FunctionDecl *base);
+  static ResultAccessNotLower accessKept(const FunctionDecl *fn, const FunctionDecl *base);
+  static ResultBodyIsRetained bodyKept(const ClassDecl *cls, const FunctionDecl *fn,
+                                       const FunctionDecl *base);
+  ResultSameTypeParams sameTypeArgs(const ClassDecl *cls, const FunctionDecl *fn,
+                                    const FunctionDecl *base) const;
   static bool sameParams(const FuncSymbol *a, const FuncSymbol *b);
   static bool takesParams(const Type *fnType, const FuncSymbol *sym);
   static const char *accessName(Access access);

@@ -294,7 +294,11 @@ Expr *BufferStaticChecker::checkBufferStatic(CallExpr *call, MemberExpr *member)
       return call;
     }
     call->args[0] = checker_.memberChecker().checkPosition(call->args[0]);
-    checker_.indexProofs().requireBetween(call->args[0], 0, std::nullopt, "the size of a Buffer");
+    IndexProofs::ResultBetweenProven between = checker_.indexProofs().requireBetween(
+        call->args[0], 0, std::nullopt, "the size of a Buffer");
+    if (between.isErr() && between.error().code != IndexProofsRequireBetweenErrorCode::EXEMPT) {
+      checker_.diags_.error(call->args[0]->loc(), between.error().message);
+    }
     if (call->args.size() == 1) {
       call->args.push_back(boolLit(true));
       return made(Builtin::BytesNew, buffer);
@@ -333,7 +337,11 @@ Expr *BufferStaticChecker::checkBufferStatic(CallExpr *call, MemberExpr *member)
       return call;
     }
     call->args[0] = checker_.memberChecker().checkPosition(call->args[0]);
-    checker_.indexProofs().requireBetween(call->args[0], 0, std::nullopt, "the size of a Buffer");
+    IndexProofs::ResultBetweenProven between = checker_.indexProofs().requireBetween(
+        call->args[0], 0, std::nullopt, "the size of a Buffer");
+    if (between.isErr() && between.error().code != IndexProofsRequireBetweenErrorCode::EXEMPT) {
+      checker_.diags_.error(call->args[0]->loc(), between.error().message);
+    }
     call->args.push_back(boolLit(false));
     return made(Builtin::BytesNew, buffer);
   }
@@ -358,7 +366,11 @@ Expr *BufferStaticChecker::checkBufferStatic(CallExpr *call, MemberExpr *member)
     }
     if (call->args.size() == 2) {
       call->args[1] = checker_.memberChecker().checkPosition(call->args[1]);
-      checker_.indexProofs().requireBetween(call->args[1], 0, std::nullopt, "the total length");
+      IndexProofs::ResultBetweenProven between =
+          checker_.indexProofs().requireBetween(call->args[1], 0, std::nullopt, "the total length");
+      if (between.isErr() && between.error().code != IndexProofsRequireBetweenErrorCode::EXEMPT) {
+        checker_.diags_.error(call->args[1]->loc(), between.error().message);
+      }
     }
     return made(Builtin::BufferConcat, buffer);
   }

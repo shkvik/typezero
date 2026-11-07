@@ -172,48 +172,22 @@ void LoopChecker::checkForOf(ForOfStmt *stmt) {
   } else if (type->isIterator()) {
     element = type->yielded();
     this->checker.generatorChecker().checkSendsNothing(type, stmt->iterable->loc(), "'for...of'");
-  } else if (type->isOptional() && GeneratorChecker::iteratedType(type->inner())) {
-    this->checker.diags_.error(stmt->iterable->loc(),
-                               "'" + type->name() +
-                                   "' may be undefined; check it before iterating");
   } else if (Expr *copy = this->checker.tupleChecker().arrayCopy(stmt->iterable)) {
     stmt->iterable = copy;
     element = copy->type->inner();
-  } else if (type->isTuple()) {
-    this->checker.diags_.error(
-        stmt->iterable->loc(),
-        "cannot iterate over a tuple, whose elements have types of their own; "
-        "destructure it, or copy it into an array: '[...t]'");
-  } else if (type->isRecord()) {
-    this->checker.diags_.error(
-        stmt->iterable->loc(),
-        "a Record is not iterable, as an object is not in JavaScript; walk its keys "
-        "with 'for...in', or its entries with 'for (const [k, v] of Object.entries(r))'");
-  } else if (type->isRuntimeObject() && this->checker.generatorChecker().asyncIteratedType(type)) {
-    this->checker.diags_.error(stmt->iterable->loc(),
-                               "'" + type->name() +
-                                   "' gives its values later: iterate it with 'for await "
-                                   "(const x of ...)'");
-  } else if (const ClassDecl *cls = type->classDecl();
-             cls && cls->library() && cls->generic() && cls->generic()->name == "ConcurrentMap") {
-    this->checker.diags_.error(stmt->iterable->loc(),
-                               "a ConcurrentMap is not iterated directly, as other tasks change it "
-                               "during the loop; iterate a snapshot: 'for (const [key, value] of "
-                               "map.entries())'");
-  } else if (!type->isError()) {
-    this->checker.diags_.error(stmt->iterable->loc(),
-                               "cannot iterate over a value of type '" + type->name() + "'");
+  } else {
+    ResultIterableType iterable = this->iterableType(type);
+    if (iterable.isErr()) {
+      this->checker.diags_.error(stmt->iterable->loc(), iterable.error().message);
+    }
   }
-  if (stmt->binding.typeAnn) {
-    this->checker.diags_.error(stmt->binding.typeAnn->loc,
-                               stmt->keys ? "a 'for...in' variable cannot have a type annotation"
-                                          : "a 'for...of' variable cannot have a type annotation");
+  ResultBindingTyped typed = LoopChecker::bindingType(stmt);
+  if (typed.isErr()) {
+    this->checker.diags_.error(stmt->binding.typeAnn->loc, typed.error().message);
   }
-  if (stmt->binding.destructured() && !stmt->binding.objectPattern() && !element->isArray() &&
-      !element->isTuple() && !element->isMatch() && !element->isError()) {
-    this->checker.diags_.error(stmt->binding.loc,
-                               "only arrays can be destructured; the elements are '" +
-                                   element->name() + "'");
+  ResultBindingShape shape = LoopChecker::bindingShape(stmt, element);
+  if (shape.isErr()) {
+    this->checker.diags_.error(stmt->binding.loc, shape.error().message);
     element = Type::error();
   }
 
@@ -254,10 +228,104 @@ void LoopChecker::checkForOf(ForOfStmt *stmt) {
   this->checker.flow_ = head;
 }
 
+LoopChecker::ResultIterableType LoopChecker::iterableType(const Type *type) const {
+  if (type->isOptional() && GeneratorChecker::iteratedType(type->inner())) {
+    std::string message = ErrorTextForOf::mayBeUndef(type->name());
+
+    return err(LoopCheckerIterableTypeError{
+        .code = LoopCheckerIterableTypeErrorCode::MAY_BE_UNDEFINED,
+        .message = message,
+    });
+  }
+  if (type->isTuple()) {
+    std::string message = ErrorTextForOf::tuple();
+
+    return err(LoopCheckerIterableTypeError{
+        .code = LoopCheckerIterableTypeErrorCode::TUPLE_NOT_ITERABLE,
+        .message = message,
+    });
+  }
+  if (type->isRecord()) {
+    std::string message = ErrorTextForOf::record();
+
+    return err(LoopCheckerIterableTypeError{
+        .code = LoopCheckerIterableTypeErrorCode::RECORD_NOT_ITERABLE,
+        .message = message,
+    });
+  }
+  if (type->isRuntimeObject() && this->checker.generatorChecker().asyncIteratedType(type)) {
+    std::string message = ErrorTextForOf::later(type->name());
+
+    return err(LoopCheckerIterableTypeError{
+        .code = LoopCheckerIterableTypeErrorCode::ASYNC_ONLY,
+        .message = message,
+    });
+  }
+  const ClassDecl *cls = type->classDecl();
+  if (cls && cls->library() && cls->generic() && cls->generic()->name == "ConcurrentMap") {
+    std::string message = ErrorTextForOf::concurrent();
+
+    return err(LoopCheckerIterableTypeError{
+        .code = LoopCheckerIterableTypeErrorCode::CONCURRENT_MAP,
+        .message = message,
+    });
+  }
+  if (!type->isError()) {
+    std::string message = ErrorTextForOf::cannot(type->name());
+
+    return err(LoopCheckerIterableTypeError{
+        .code = LoopCheckerIterableTypeErrorCode::NOT_ITERABLE,
+        .message = message,
+    });
+  }
+
+  return ok(type);
+}
+
+LoopChecker::ResultBindingTyped LoopChecker::bindingType(const ForOfStmt *stmt) {
+  if (stmt->binding.typeAnn && stmt->keys) {
+    std::string message = ErrorTextLoopBinding::forIn();
+
+    return err(LoopCheckerBindingTypeError{
+        .code = LoopCheckerBindingTypeErrorCode::FOR_IN_ANNOTATED,
+        .message = message,
+    });
+  }
+  if (stmt->binding.typeAnn) {
+    std::string message = ErrorTextLoopBinding::forOf();
+
+    return err(LoopCheckerBindingTypeError{
+        .code = LoopCheckerBindingTypeErrorCode::FOR_OF_ANNOTATED,
+        .message = message,
+    });
+  }
+
+  return ok(&stmt->binding);
+}
+
+LoopChecker::ResultBindingShape LoopChecker::bindingShape(const ForOfStmt *stmt,
+                                                          const Type *element) {
+  bool fits = !stmt->binding.destructured() || stmt->binding.objectPattern() ||
+              element->isArray() || element->isTuple() || element->isMatch() || element->isError();
+  if (!fits) {
+    std::string message = ErrorTextLoopShape::notArray(element->name());
+
+    return err(LoopCheckerBindingShapeError{
+        .code = LoopCheckerBindingShapeErrorCode::NOT_AN_ARRAY,
+        .message = message,
+    });
+  }
+
+  return ok(element);
+}
+
 void LoopChecker::checkLoopBody(Stmt *body, bool awaits) {
   this->checker.jumpChecker().pushTarget(Checker::JumpTarget::Kind::Loop);
   this->checker.awaitLoops_ += awaits;
-  this->checker.stmtChecker().checkBody(body);
+  StmtChecker::ResultBodyIsStatement checked = this->checker.stmtChecker().checkBody(body);
+  if (checked.isErr()) {
+    this->checker.diags_.error(body->loc(), checked.error().message);
+  }
   this->checker.awaitLoops_ -= awaits;
   this->checker.targets_.pop_back();
 }

@@ -108,10 +108,142 @@ void TypeArgInferrer::precheckFields(ObjectLitExpr *lit, const Type *pattern,
   }
 }
 
+TypeArgInferrer::ResultParamInferred
+TypeArgInferrer::paramInferred(const FuncSymbol *generic, const Type *bound, size_t k, bool call) {
+  llvm::ArrayRef<const Type *> params = generic->typeParams;
+  if (!bound) {
+    std::string ints;
+    for (size_t i = 0; i < params.size(); ++i) {
+      ints += (i == 0 ? "" : ", ") + std::string(params[i]->isListParam() ? "[int]" : "int");
+    }
+    std::string message =
+        ErrorTextParamInferred::cannot(params[k]->name(), generic->name, call, ints);
+
+    return err(TypeArgInferrerParamInferredError{
+        .code = TypeArgInferrerParamInferredErrorCode::CANNOT_INFER,
+        .message = message,
+    });
+  }
+
+  return ok(bound);
+}
+
+TypeArgInferrer::ResultIterableMatch TypeArgInferrer::iterableFits(const FuncSymbol *generic,
+                                                                   const Type *bound,
+                                                                   const Type *given,
+                                                                   const Type *wanted) {
+  bool fits = given == wanted || wanted->isError() || bound->isError();
+  if (!fits && given) {
+    std::string message = ErrorTextIterableFits::elements(bound->name(), given->name(),
+                                                          wanted->name(), generic->name);
+
+    return err(TypeArgInferrerIterableFitsError{
+        .code = TypeArgInferrerIterableFitsErrorCode::WRONG_ELEMENTS,
+        .message = message,
+    });
+  }
+  if (!fits) {
+    std::string message =
+        ErrorTextIterableFits::notIter(bound->name(), wanted->name(), generic->name);
+
+    return err(TypeArgInferrerIterableFitsError{
+        .code = TypeArgInferrerIterableFitsErrorCode::NOT_ITERABLE,
+        .message = message,
+    });
+  }
+
+  return ok(bound);
+}
+
+TypeArgInferrer::ResultConstraintMet
+TypeArgInferrer::constraintMet(const FuncSymbol *generic, std::vector<const Type *> &bound,
+                               size_t k) {
+  llvm::ArrayRef<const Type *> params = generic->typeParams;
+  if (!this->checker.typeParams().satisfies(bound[k], params[k], params, bound)) {
+    llvm::ArrayRef<TypeParamDecl> decls = generic->decl->typeParams;
+    std::string constraint = constraintSpelling(params[k], k < decls.size() ? &decls[k] : nullptr);
+    std::string message = ErrorTextConstraintMet::unsatisfied(bound[k]->name(), constraint,
+                                                              params[k]->name(), generic->name);
+
+    return err(TypeArgInferrerConstraintMetError{
+        .code = TypeArgInferrerConstraintMetErrorCode::CONSTRAINT_UNSATISFIED,
+        .message = message,
+    });
+  }
+
+  return ok(bound[k]);
+}
+
+TypeArgInferrer::ResultTypeArgsCount
+TypeArgInferrer::typeArgCount(const FuncSymbol *generic, llvm::ArrayRef<TypeRef> typeArgs) {
+  if (typeArgs.size() > generic->typeParams.size()) {
+    std::string message =
+        ErrorTextTypeArgCount::tooMany(generic->name, generic->typeParams.size(), typeArgs.size());
+
+    return err(TypeArgInferrerTypeArgCountError{
+        .code = TypeArgInferrerTypeArgCountErrorCode::TOO_MANY_TYPE_ARGUMENTS,
+        .message = message,
+    });
+  }
+
+  return ok(typeArgs.size());
+}
+
+TypeArgInferrer::ResultCandidateJoin TypeArgInferrer::candidatesJoin(const FuncSymbol *generic,
+                                                                     const Type *param,
+                                                                     const Type *type,
+                                                                     const Type *candidate) {
+  const Type *next = type ? TypeRelations::unify(type, candidate) : candidate;
+  if (!next) {
+    std::string message = ErrorTextCandidates::conflict(param->name(), generic->name, type->name(),
+                                                        candidate->name());
+
+    return err(TypeArgInferrerCandidatesJoinError{
+        .code = TypeArgInferrerCandidatesJoinErrorCode::CONFLICTING_CANDIDATES,
+        .message = message,
+    });
+  }
+
+  return ok(next);
+}
+
+TypeArgInferrer::ResultCallbackParam
+TypeArgInferrer::callbackParam(const FuncSymbol *generic, const Type *param, const Type *bound,
+                               bool mentioned, const FunctionExpr *fe, size_t p) {
+  if (!bound && mentioned) {
+    std::string what = fe && p < fe->fn->params.size()
+                           ? ErrorTextCallbackParam::param(fe->fn->params[p].name)
+                           : ErrorTextCallbackParam::params();
+    std::string message =
+        ErrorTextCallbackParam::uninferred(param->name(), generic->name, what, fe != nullptr);
+
+    return err(TypeArgInferrerCallbackParamError{
+        .code = TypeArgInferrerCallbackParamErrorCode::CALLBACK_PARAM_UNINFERRED,
+        .message = message,
+    });
+  }
+
+  return ok(param);
+}
+
+TypeArgInferrer::ResultArgNotGrowing
+TypeArgInferrer::notGrowing(const FuncSymbol *generic, const Type *bound, const Type *param) {
+  if (TypeArgInferrer::grows(bound, generic->typeParams, false)) {
+    std::string message = ErrorTextNotGrowing::grows(generic->name, bound->name(), param->name());
+
+    return err(TypeArgInferrerNotGrowingError{
+        .code = TypeArgInferrerNotGrowingErrorCode::GROWING_TYPE_ARGUMENT,
+        .message = message,
+    });
+  }
+
+  return ok(bound);
+}
+
 bool TypeArgInferrer::finishTypeArgs(FuncSymbol *generic, std::vector<const Type *> &bound,
                                      llvm::SMLoc loc, bool call, bool quiet) {
   llvm::ArrayRef<const Type *> params = generic->typeParams;
-  bool ok = true;
+  bool inferred = true;
   for (size_t k = 0; k < params.size(); ++k) {
     if (!bound[k] && k < generic->typeDefaults.size() && generic->typeDefaults[k]) {
       const Type *fallback =
@@ -125,60 +257,42 @@ bool TypeArgInferrer::finishTypeArgs(FuncSymbol *generic, std::vector<const Type
       }
     }
     if (bound[k] && bound[k]->isError()) {
-      ok = false;
+      inferred = false;
       continue;
     }
     if (!bound[k] && quiet) {
       bound[k] = Type::error();
-      ok = false;
+      inferred = false;
       continue;
     }
-    if (!bound[k]) {
-      std::string ints;
-      for (size_t i = 0; i < params.size(); ++i) {
-        ints += (i == 0 ? "" : ", ") + std::string(params[i]->isListParam() ? "[int]" : "int");
-      }
-      this->checker.diags_.error(loc, "cannot infer type parameter '" + params[k]->name() +
-                                          "' of '" + generic->name + "': nothing " +
-                                          (call ? "in the call" : "here") +
-                                          " says what it is; give it, e.g. '" + generic->name +
-                                          "<" + ints + ">" + (call ? "(...)" : "") + "'");
+    ResultParamInferred paramKnown = TypeArgInferrer::paramInferred(generic, bound[k], k, call);
+    if (paramKnown.isErr()) {
+      this->checker.diags_.error(loc, paramKnown.error().message);
       bound[k] = Type::error();
-      ok = false;
+      inferred = false;
       continue;
     }
     if (const Type *element = params[k]->iterated()) {
       const Type *wanted = this->checker.typeParams().substitute(element, params, bound);
-      const Type *given = this->checker.iterableChecker().elementTypeOf(bound[k]);
-      if (given == wanted || wanted->isError() || bound[k]->isError()) {
-        continue;
+      const Type *elements = this->checker.iterableChecker().elementTypeOf(bound[k]);
+      ResultIterableMatch matched =
+          TypeArgInferrer::iterableFits(generic, bound[k], elements, wanted);
+      if (matched.isErr()) {
+        this->checker.diags_.error(loc, matched.error().message);
+        bound[k] = Type::error();
+        inferred = false;
       }
-      this->checker.diags_.error(
-          loc, given ? "'" + bound[k]->name() + "' gives values of type '" + given->name() +
-                           "', and the parameter 'Iterable<" + wanted->name() + ">' of '" +
-                           generic->name + "' takes values of type '" + wanted->name() + "'"
-                     : "'" + bound[k]->name() +
-                           "' cannot be iterated, and the parameter "
-                           "'Iterable<" +
-                           wanted->name() + ">' of '" + generic->name +
-                           "' takes something that can: an array, a string, a Map, a Set, an "
-                           "iterator, or an object with '[Symbol.iterator]()'");
-      bound[k] = Type::error();
-      ok = false;
       continue;
     }
-    if (!this->checker.typeParams().satisfies(bound[k], params[k], params, bound)) {
-      llvm::ArrayRef<TypeParamDecl> decls = generic->decl->typeParams;
-      this->checker.diags_.error(
-          loc, "type '" + bound[k]->name() + "' does not satisfy the constraint '" +
-                   constraintSpelling(params[k], k < decls.size() ? &decls[k] : nullptr) +
-                   "' of '" + params[k]->name() + "' in '" + generic->name + "'");
+    ResultConstraintMet met = this->constraintMet(generic, bound, k);
+    if (met.isErr()) {
+      this->checker.diags_.error(loc, met.error().message);
       bound[k] = Type::error();
-      ok = false;
+      inferred = false;
     }
   }
 
-  return ok;
+  return inferred;
 }
 
 Expr *TypeArgInferrer::checkGenericCall(CallExpr *call, FuncSymbol *generic, llvm::SMLoc loc,
@@ -247,14 +361,12 @@ bool TypeArgInferrer::bindGenericCall(CallExpr *call, FuncSymbol *generic, llvm:
   bound.assign(typeParams.size(), nullptr);
   std::vector<bool> checked(call->args.size(), false);
   std::vector<size_t> literals;
-  bool ok = true;
+  bool inferred = true;
   if (!typeArgs.empty()) {
-    if (typeArgs.size() > typeParams.size()) {
-      this->checker.diags_.error(loc, "'" + generic->name + "' takes " +
-                                          std::to_string(typeParams.size()) + " type argument" +
-                                          (typeParams.size() == 1 ? "" : "s") + ", but got " +
-                                          std::to_string(typeArgs.size()));
-      ok = false;
+    ResultTypeArgsCount counted = TypeArgInferrer::typeArgCount(generic, typeArgs);
+    if (counted.isErr()) {
+      this->checker.diags_.error(loc, counted.error().message);
+      inferred = false;
     }
     for (size_t k = 0; k < typeArgs.size() && k < typeParams.size(); ++k) {
       bound[k] = this->checker.typeResolver().resolveType(typeArgs[k], true);
@@ -280,21 +392,18 @@ bool TypeArgInferrer::bindGenericCall(CallExpr *call, FuncSymbol *generic, llvm:
               (type->isNumeric() || type->isDecimal())) {
             continue;
           }
-          const Type *next = type ? TypeRelations::unify(type, c) : c;
-          if (!next && strong && list == &inference.weakCandidates[k]) {
+          ResultCandidateJoin joined =
+              TypeArgInferrer::candidatesJoin(generic, typeParams[k], type, c);
+          if (joined.isErr() && strong && list == &inference.weakCandidates[k]) {
             continue;
           }
-          if (!next) {
-            this->checker.diags_.error(loc, "type parameter '" + typeParams[k]->name() + "' of '" +
-                                                generic->name + "' gets '" + type->name() +
-                                                "' from one argument and '" + c->name() +
-                                                "' from another; give it, e.g. '" + generic->name +
-                                                "<" + type->name() + ">(...)'");
+          if (joined.isErr()) {
+            this->checker.diags_.error(loc, joined.error().message);
             bound[k] = Type::error();
-            ok = false;
+            inferred = false;
             return;
           }
-          type = next;
+          type = joined.value();
         }
       }
       const Type *constraint = typeParams[k]->constraint();
@@ -320,7 +429,7 @@ bool TypeArgInferrer::bindGenericCall(CallExpr *call, FuncSymbol *generic, llvm:
       llvm::StringRef which =
           name ? this->checker.resultTypes().resultName(name->name) : llvm::StringRef();
 
-      return which == "ok" || which == "err";
+      return which == "inferred" || which == "err";
     };
     for (size_t i = 0; i < call->args.size(); ++i) {
       Expr *&arg = call->args[i];
@@ -429,21 +538,14 @@ bool TypeArgInferrer::bindGenericCall(CallExpr *call, FuncSymbol *generic, llvm:
             continue;
           }
           for (size_t k = 0; k < typeParams.size(); ++k) {
-            if (bound[k] || !mentionsAnyOf(fn->params()[p], typeParams[k])) {
-              continue;
+            bool mentioned = mentionsAnyOf(fn->params()[p], typeParams[k]);
+            ResultCallbackParam known =
+                TypeArgInferrer::callbackParam(generic, typeParams[k], bound[k], mentioned, fe, p);
+            if (known.isErr()) {
+              this->checker.diags_.error(arg->loc(), known.error().message);
+              bound[k] = Type::error();
+              inferred = false;
             }
-            std::string what =
-                fe && p < fe->fn->params.size()
-                    ? "parameter '" + fe->fn->params[p].name.str() + "' of this function"
-                    : "the parameters of this function";
-            this->checker.diags_.error(
-                arg->loc(), "cannot infer type parameter '" + typeParams[k]->name() + "' of '" +
-                                generic->name + "' for " + what +
-                                ": nothing else in the call says what it is; give it, e.g. '" +
-                                generic->name + "<int>(...)'" +
-                                (fe ? ", or the type of the parameter" : ""));
-            bound[k] = Type::error();
-            ok = false;
           }
         }
         if (fe) {
@@ -495,20 +597,15 @@ bool TypeArgInferrer::bindGenericCall(CallExpr *call, FuncSymbol *generic, llvm:
     argErrors |= checked[i] && call->args[i]->type->isError();
   }
   argErrors &= this->checker.diags_.errorsSeen() > errorsBefore;
-  ok = this->finishTypeArgs(generic, bound, loc, true, argErrors) && ok;
-  for (size_t k = 0; k < typeParams.size() && ok; ++k) {
-    if (!TypeArgInferrer::grows(bound[k], typeParams, false)) {
-      continue;
+  inferred = this->finishTypeArgs(generic, bound, loc, true, argErrors) && inferred;
+  for (size_t k = 0; k < typeParams.size() && inferred; ++k) {
+    ResultArgNotGrowing growing = TypeArgInferrer::notGrowing(generic, bound[k], typeParams[k]);
+    if (growing.isErr()) {
+      this->checker.diags_.error(loc, growing.error().message);
+      inferred = false;
     }
-    this->checker.diags_.error(
-        loc, "'" + generic->name + "' calls itself with '" + bound[k]->name() + "' for '" +
-                 typeParams[k]->name() +
-                 "', so each copy of it for some type needs another for a "
-                 "bigger one, without end; a generic function can call itself only with its own "
-                 "type parameters");
-    ok = false;
   }
-  if (!ok) {
+  if (!inferred) {
     for (size_t i = 0; i < call->args.size(); ++i) {
       if (!checked[i]) {
         call->args[i] = this->checker.exprChecker().checkExpr(call->args[i]);

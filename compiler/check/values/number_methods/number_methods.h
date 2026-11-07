@@ -1,18 +1,26 @@
 #pragma once
 
 #include "compiler/check/checker/checker.h"
+#include "compiler/check/values/number_methods/number_methods_errors.h"
+#include "compiler/result/result/result.h"
 
 namespace tz {
 
 class NumberMethods {
 public:
+  using ResultStaticCallMade = Result<Expr *, NumberMethodsCheckStaticCallError>;
+  using ResultMethodCallMade = Result<Expr *, NumberMethodsCheckNumberMethodError>;
+
   explicit NumberMethods(Checker &owner);
 
-  Expr *checkStaticCall(CallExpr *call, MemberExpr *member);
-  Expr *checkNumberMethod(CallExpr *call, MemberExpr *member);
-  Expr *checkConversion(CallExpr *call, MemberExpr *member);
+  ResultStaticCallMade checkStaticCall(CallExpr *call, MemberExpr *member);
+  ResultMethodCallMade checkNumberMethod(CallExpr *call, MemberExpr *member);
 
 private:
+  using ResultConversionMade = Result<Expr *, NumberMethodsCheckConversionError>;
+
+  ResultConversionMade checkConversion(CallExpr *call, MemberExpr *member);
+
   Checker &checker;
 };
 

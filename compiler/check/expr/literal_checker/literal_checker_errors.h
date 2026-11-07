@@ -5,16 +5,16 @@
 
 namespace tz {
 
-enum class LiteralCheckerIntFitsErrorCode {
+enum class LiteralCheckerCheckIntLitErrorCode {
   DOES_NOT_FIT,
 };
 
-struct LiteralCheckerIntFitsError {
-  LiteralCheckerIntFitsErrorCode code;
+struct LiteralCheckerCheckIntLitError {
+  LiteralCheckerCheckIntLitErrorCode code;
   std::string message;
 };
 
-class ErrorTextIntFits {
+class ErrorTextIntLit {
 public:
   static std::string tooBig(llvm::StringRef type);
 };

@@ -267,13 +267,22 @@ Expr *GenericWidening::joined(Expr *expr) {
     if (!joinable) {
       return expr;
     }
-    ClassDecl *made =
+    GenericClassInstantiator::ResultClassMade widened =
         this->checker.genericClassInstantiator().instantiateClass(generic, args, expr->loc());
-    if (!made || !TypeRelations::isImplicitlyConvertible(type, made->type)) {
+    if (widened.isErr() &&
+        widened.error().code !=
+            GenericClassInstantiatorInstantiateClassErrorCode::ALREADY_REPORTED) {
+      llvm::SMLoc at = widened.error().code ==
+                               GenericClassInstantiatorInstantiateClassErrorCode::ENDLESS_INSTANCES
+                           ? generic->loc()
+                           : expr->loc();
+      this->checker.diags_.error(at, widened.error().message);
+    }
+    if (widened.isErr() || !TypeRelations::isImplicitlyConvertible(type, widened.value()->type)) {
       return expr;
     }
 
-    return this->checker.typeRelations().convert(expr, made->type);
+    return this->checker.typeRelations().convert(expr, widened.value()->type);
   }
 
   return expr;

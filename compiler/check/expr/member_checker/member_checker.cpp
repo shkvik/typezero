@@ -148,7 +148,21 @@ Expr *MemberChecker::checkMember(MemberExpr *member, const Type *expected) {
     return this->checker.jsonChecker().checkJsonMember(member);
   }
   if (type->isUnknown() || type->isAnyObject() || type->isClassRef()) {
-    return this->checker.unknownChecker().checkUnknownMember(member);
+    UnknownChecker::ResultMemberChecked checked =
+        this->checker.unknownChecker().checkUnknownMember(member);
+    if (checked.isOk()) {
+      return checked.value();
+    }
+    llvm::SMLoc at = member->loc();
+    switch (checked.error().code) {
+      case UnknownCheckerCheckUnknownMemberErrorCode::NO_CONSTRUCTOR:
+        break;
+      case UnknownCheckerCheckUnknownMemberErrorCode::NOT_NARROWED:
+        at = member->object->loc();
+        break;
+    }
+    this->checker.diags_.error(at, checked.error().message);
+    return member;
   }
   if (type->isUnion()) {
     const Type *common = this->checker.unionChecker().commonBaseWith(type, member->name);
@@ -162,7 +176,13 @@ Expr *MemberChecker::checkMember(MemberExpr *member, const Type *expected) {
     return this->checker.resultChecker().checkResultMember(member);
   }
   if (type->isTuple()) {
-    return this->checker.tupleChecker().checkTupleMember(member);
+    TupleChecker::ResultTupleMember tupleMember =
+        this->checker.tupleChecker().checkTupleMember(member);
+    if (tupleMember.isErr()) {
+      this->checker.diags_.error(member->loc(), tupleMember.error().message);
+      return member;
+    }
+    return tupleMember.value();
   }
   if (type->isClass()) {
     return this->checker.classMemberChecker().checkClassMember(member, expected);
@@ -290,8 +310,17 @@ Expr *MemberChecker::checkIndex(IndexExpr *index) {
     index->object = this->checker.exprChecker().chainLink(index->object);
   }
   index->type = Type::error();
-  if (Expr *generic = this->checker.utilityTypes().checkGenericIndex(index)) {
-    return generic;
+  UtilityTypes::ResultGenericIndexed generic =
+      this->checker.utilityTypes().checkGenericIndex(index);
+  bool genericIndex =
+      generic.isOk() ||
+      generic.error().code != UtilityTypesCheckGenericIndexErrorCode::NOT_A_GENERIC_INDEX;
+  if (generic.isErr() && genericIndex) {
+    this->checker.diags_.error(index->index->loc(), generic.error().message);
+    return index;
+  }
+  if (genericIndex) {
+    return generic.value();
   }
   if (index->object->type->isMatch()) {
     return this->checker.matchChecker().checkMatchIndex(index);
@@ -304,11 +333,21 @@ Expr *MemberChecker::checkIndex(IndexExpr *index) {
   }
   if (const Type *type = index->object->type; type->isUnknown() || type->isAnyObject()) {
     index->index = this->checker.exprChecker().checkExpr(index->index);
-    this->checker.unknownChecker().reportUnknownUse(index->object, "");
+    UnknownChecker::ResultValueNarrowed narrowed = UnknownChecker::unknownUse(index->object, "");
+    if (narrowed.isErr()) {
+      this->checker.diags_.error(index->object->loc(), narrowed.error().message);
+    }
     return index;
   }
   if (index->object->type->isObject()) {
-    return this->checker.keyedFieldChecker().checkKeyedField(index, false);
+    KeyedFieldChecker::ResultKeyedFieldRead read =
+        this->checker.keyedFieldChecker().checkKeyedField(index, false);
+    if (read.isErr() &&
+        read.error().code != KeyedFieldCheckerCheckKeyedFieldErrorCode::ALREADY_REPORTED) {
+      llvm::SMLoc at = KeyedFieldChecker::keyedPlace(index, read.error().code);
+      this->checker.diags_.error(at, read.error().message);
+    }
+    return read.isOk() ? read.value() : index;
   }
   if (index->object->type->isDict()) {
     return this->checker.dictChecker().checkDictIndex(index);

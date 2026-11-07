@@ -24,39 +24,24 @@ bool LiteralChecker::fitsIn(const IntLitExpr *lit, const Type *type, bool negate
   return lit->value <= type->intMax();
 }
 
-LiteralChecker::ResultIntLiteralFits LiteralChecker::intFits(const IntLitExpr *lit,
-                                                             const Type *type, bool negated) {
-  if (type->isInteger() && !LiteralChecker::fitsIn(lit, type, negated)) {
-    std::string message = ErrorTextIntFits::tooBig(type->name());
-
-    return err(LiteralCheckerIntFitsError{
-        .code = LiteralCheckerIntFitsErrorCode::DOES_NOT_FIT,
-        .message = message,
-    });
-  }
-
-  return ok(type);
-}
-
-Expr *LiteralChecker::checkIntLit(IntLitExpr *lit, const Type *expected, bool negated) {
+LiteralChecker::ResultIntLiteralTyped
+LiteralChecker::checkIntLit(IntLitExpr *lit, const Type *expected, bool negated) {
   if (expected) {
     double value = negated ? -double(lit->value) : double(lit->value);
     if (const Type *literal = this->checker.literalTypes().numberLiteralFor(expected, value, false);
         literal && (!negated || value != 0)) {
       lit->type = literal;
-      return lit;
+      return ok(lit);
     }
     if (const Type *member = LiteralTypes::numberMemberOf(expected, false)) {
       expected = member;
     }
     expected = expected->nonOptional();
   }
-  if (expected && (expected->isNumeric() || expected->isDecimal())) {
+  bool exact = expected && (expected->isNumeric() || expected->isDecimal());
+  bool tooBig = exact && expected->isInteger() && !LiteralChecker::fitsIn(lit, expected, negated);
+  if (exact) {
     lit->type = expected;
-    ResultIntLiteralFits fits = LiteralChecker::intFits(lit, expected, negated);
-    if (fits.isErr()) {
-      this->checker.diags_.error(lit->loc(), fits.error().message);
-    }
   } else if (LiteralChecker::fitsIn(lit, Type::intTy(), negated)) {
     lit->type = Type::intTy();
   } else {
@@ -72,8 +57,16 @@ Expr *LiteralChecker::checkIntLit(IntLitExpr *lit, const Type *expected, bool ne
       lit->type = type;
     }
   }
+  if (tooBig) {
+    std::string message = ErrorTextIntLit::tooBig(expected->name());
 
-  return lit;
+    return err(LiteralCheckerCheckIntLitError{
+        .code = LiteralCheckerCheckIntLitErrorCode::DOES_NOT_FIT,
+        .message = message,
+    });
+  }
+
+  return ok(lit);
 }
 
 Expr *LiteralChecker::checkTemplate(TemplateExpr *tmpl, const Type *expected) {
